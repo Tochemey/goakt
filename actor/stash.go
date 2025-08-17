@@ -24,12 +24,16 @@
 
 package actor
 
-import "errors"
+import (
+	"errors"
+
+	gerrors "github.com/tochemey/goakt/v3/errors"
+)
 
 // stash adds the current message to the stash buffer
 func (pid *PID) stash(ctx *ReceiveContext) error {
 	if pid.stashBox == nil {
-		return ErrStashBufferNotSet
+		return gerrors.ErrStashBufferNotSet
 	}
 	return pid.stashBox.Enqueue(ctx)
 }
@@ -37,7 +41,7 @@ func (pid *PID) stash(ctx *ReceiveContext) error {
 // unstash unstashes the oldest message in the stash and prepends to the mailbox
 func (pid *PID) unstash() error {
 	if pid.stashBox == nil {
-		return ErrStashBufferNotSet
+		return gerrors.ErrStashBufferNotSet
 	}
 
 	received := pid.stashBox.Dequeue()
@@ -52,7 +56,7 @@ func (pid *PID) unstash() error {
 // (it keeps the messages in the same order as received, unstashing older messages before newer).
 func (pid *PID) unstashAll() error {
 	if pid.stashBox == nil {
-		return ErrStashBufferNotSet
+		return gerrors.ErrStashBufferNotSet
 	}
 
 	pid.stashLocker.Lock()

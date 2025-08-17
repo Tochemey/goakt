@@ -31,12 +31,14 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
+	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/collection"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v3/remote"
 )
 
 type remotePeer struct {
@@ -62,14 +64,14 @@ type topicActor struct {
 
 	cluster     cluster.Interface
 	actorSystem ActorSystem
-	remoting    *Remoting
+	remoting    remote.Remoting
 }
 
 // ensure topic actor implements the Actor interface
 var _ Actor = (*topicActor)(nil)
 
 // newTopicActor creates a new cluster pubsub mediator.
-func newTopicActor(remoting *Remoting) Actor {
+func newTopicActor(remoting remote.Remoting) Actor {
 	return &topicActor{
 		topics:    collection.NewMap[string, *collection.Map[string, *PID]](),
 		processed: collection.NewMap[key, registry.Unit](),
@@ -157,7 +159,7 @@ func (x *topicActor) handlePublish(ctx *ReceiveContext) {
 		if x.actorSystem.InCluster() {
 			peers, err := x.cluster.Peers(cctx)
 			if err != nil {
-				ctx.Err(NewInternalError(err))
+				ctx.Err(errors.NewInternalError(err))
 				return
 			}
 

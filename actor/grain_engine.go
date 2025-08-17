@@ -38,6 +38,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
 
+	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 )
@@ -63,7 +64,7 @@ import (
 //   - Use this to obtain a reference to a Grain for message passing or further operations.
 func (x *actorSystem) GrainIdentity(ctx context.Context, name string, factory GrainFactory, opts ...GrainOption) (*GrainIdentity, error) {
 	if !x.started.Load() || x.isShuttingDown() {
-		return nil, ErrActorSystemNotStarted
+		return nil, gerrors.ErrActorSystemNotStarted
 	}
 
 	logger := x.logger
@@ -81,7 +82,7 @@ func (x *actorSystem) GrainIdentity(ctx context.Context, name string, factory Gr
 
 	// make sure we don't interfere with system actors.
 	if isReservedName(identity.Name()) {
-		return nil, NewErrReservedName(identity.String())
+		return nil, gerrors.NewErrReservedName(identity.String())
 	}
 
 	config := newGrainConfig(opts...)
@@ -98,7 +99,7 @@ func (x *actorSystem) GrainIdentity(ctx context.Context, name string, factory Gr
 		}
 
 		if grainInfo != nil && !proto.Equal(grainInfo, new(internalpb.Grain)) {
-			remoteClient := x.remoting.remotingServiceClient(grainInfo.GetHost(), int(grainInfo.GetPort()))
+			remoteClient := x.remoting.RemotingServiceClient(grainInfo.GetHost(), int(grainInfo.GetPort()))
 			request := connect.NewRequest(&internalpb.RemoteActivateGrainRequest{
 				Grain: grainInfo,
 			})
@@ -143,12 +144,12 @@ func (x *actorSystem) GrainIdentity(ctx context.Context, name string, factory Gr
 //   - error: An error if the message could not be delivered or the system is not started.
 func (x *actorSystem) TellGrain(ctx context.Context, identity *GrainIdentity, message proto.Message) error {
 	if !x.started.Load() || x.isShuttingDown() {
-		return ErrActorSystemNotStarted
+		return gerrors.ErrActorSystemNotStarted
 	}
 
 	// validate the identity
 	if err := identity.Validate(); err != nil {
-		return NewErrInvalidGrainIdentity(err)
+		return gerrors.NewErrInvalidGrainIdentity(err)
 	}
 
 	if x.InCluster() {
@@ -175,12 +176,12 @@ func (x *actorSystem) TellGrain(ctx context.Context, identity *GrainIdentity, me
 //   - error: An error if the request fails, times out, or the system is not started.
 func (x *actorSystem) AskGrain(ctx context.Context, identity *GrainIdentity, message proto.Message, timeout time.Duration) (response proto.Message, err error) {
 	if !x.started.Load() || x.isShuttingDown() {
-		return nil, ErrActorSystemNotStarted
+		return nil, gerrors.ErrActorSystemNotStarted
 	}
 
 	// validate the identity
 	if err := identity.Validate(); err != nil {
-		return nil, NewErrInvalidGrainIdentity(err)
+		return nil, gerrors.NewErrInvalidGrainIdentity(err)
 	}
 
 	if x.InCluster() {
@@ -254,7 +255,7 @@ func (x *actorSystem) RemoteAskGrain(ctx context.Context, request *connect.Reque
 
 	// Remoting must be enabled
 	if !x.remotingEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
+		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrRemotingDisabled)
 	}
 
 	// Validate host and port
@@ -269,14 +270,14 @@ func (x *actorSystem) RemoteAskGrain(ctx context.Context, request *connect.Reque
 
 	identity, err := toIdentity(msg.GetGrain().GetGrainId().GetValue())
 	if err != nil {
-		if errors.Is(err, ErrInvalidGrainIdentity) {
+		if errors.Is(err, gerrors.ErrInvalidGrainIdentity) {
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.Join(err, ErrInvalidGrainIdentity))
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.Join(err, gerrors.ErrInvalidGrainIdentity))
 	}
 
 	if isReservedName(identity.Name()) {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, NewErrReservedName(identity.String()))
+		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.NewErrReservedName(identity.String()))
 	}
 
 	reply, err := x.localSend(ctx, identity, message, timeout.AsDuration(), true)
@@ -308,7 +309,7 @@ func (x *actorSystem) RemoteTellGrain(ctx context.Context, request *connect.Requ
 
 	// Remoting must be enabled
 	if !x.remotingEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
+		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrRemotingDisabled)
 	}
 
 	// Validate host and port
@@ -322,14 +323,14 @@ func (x *actorSystem) RemoteTellGrain(ctx context.Context, request *connect.Requ
 
 	identity, err := toIdentity(msg.GetGrain().GetGrainId().GetValue())
 	if err != nil {
-		if errors.Is(err, ErrInvalidGrainIdentity) {
+		if errors.Is(err, gerrors.ErrInvalidGrainIdentity) {
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.Join(err, ErrInvalidGrainIdentity))
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.Join(err, gerrors.ErrInvalidGrainIdentity))
 	}
 
 	if isReservedName(identity.Name()) {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, NewErrReservedName(identity.String()))
+		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.NewErrReservedName(identity.String()))
 	}
 
 	_, err = x.localSend(ctx, identity, message, DefaultGrainRequestTimeout, false)
@@ -347,7 +348,7 @@ func (x *actorSystem) RemoteActivateGrain(ctx context.Context, request *connect.
 
 	// Remoting must be enabled
 	if !x.remotingEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, ErrRemotingDisabled)
+		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrRemotingDisabled)
 	}
 
 	grain := msg.GetGrain()
@@ -372,7 +373,7 @@ func (x *actorSystem) RemoteActivateGrain(ctx context.Context, request *connect.
 func (x *actorSystem) validateRemoteHost(host string, port int32) error {
 	addr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
 	if addr != net.JoinHostPort(host, strconv.Itoa(int(port))) {
-		return connect.NewError(connect.CodeInvalidArgument, ErrInvalidHost)
+		return connect.NewError(connect.CodeInvalidArgument, gerrors.ErrInvalidHost)
 	}
 	return nil
 }
@@ -403,7 +404,7 @@ func (x *actorSystem) remoteTellGrain(ctx context.Context, id *GrainIdentity, me
 
 	// just send the message without activating the grain
 	serialized, _ := anypb.New(message)
-	remoteClient := x.remoting.remotingServiceClient(grain.GetHost(), int(grain.GetPort()))
+	remoteClient := x.remoting.RemotingServiceClient(grain.GetHost(), int(grain.GetPort()))
 	request := connect.NewRequest(&internalpb.RemoteTellGrainRequest{
 		Grain:   grain,
 		Message: serialized,
@@ -438,7 +439,7 @@ func (x *actorSystem) remoteAskGrain(ctx context.Context, id *GrainIdentity, mes
 	}
 
 	msg, _ := anypb.New(message)
-	remoteClient := x.remoting.remotingServiceClient(gw.GetHost(), int(gw.GetPort()))
+	remoteClient := x.remoting.RemotingServiceClient(gw.GetHost(), int(gw.GetPort()))
 	request := connect.NewRequest(&internalpb.RemoteAskGrainRequest{
 		Grain:          gw,
 		RequestTimeout: durationpb.New(timeout),
@@ -496,10 +497,10 @@ func (x *actorSystem) localSend(ctx context.Context, id *GrainIdentity, message 
 			return nil, err
 		case <-ctx.Done():
 			timers.Put(timer)
-			return nil, errors.Join(ctx.Err(), ErrRequestTimeout)
+			return nil, errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
 		case <-timer.C:
 			timers.Put(timer)
-			return nil, ErrRequestTimeout
+			return nil, gerrors.ErrRequestTimeout
 		}
 	}
 
@@ -508,9 +509,9 @@ func (x *actorSystem) localSend(ctx context.Context, id *GrainIdentity, message 
 	case err := <-grainContext.getError():
 		return nil, err
 	case <-timer.C:
-		return nil, ErrRequestTimeout
+		return nil, gerrors.ErrRequestTimeout
 	case <-ctx.Done():
-		return nil, errors.Join(ctx.Err(), ErrRequestTimeout)
+		return nil, errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
 	}
 }
 
@@ -520,7 +521,7 @@ func (x *actorSystem) ensureGrainProcess(id *GrainIdentity) (*grainPID, error) {
 	if ok {
 		if !x.reflection.registry.Exists(process.getGrain()) {
 			x.grains.Delete(id.String())
-			return nil, ErrGrainNotRegistered
+			return nil, gerrors.ErrGrainNotRegistered
 		}
 
 		return process, nil
@@ -539,7 +540,7 @@ func (x *actorSystem) recreateGrain(ctx context.Context, serializedGrain *intern
 
 	// make sure the grain is not a system grain
 	if isReservedName(serializedGrain.GrainId.GetValue()) {
-		return NewErrReservedName(serializedGrain.GetGrainId().GetValue())
+		return gerrors.NewErrReservedName(serializedGrain.GetGrainId().GetValue())
 	}
 
 	// Parse grain identity

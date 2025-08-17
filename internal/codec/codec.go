@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025 Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package actor
+package codec
 
 import (
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -33,7 +33,28 @@ import (
 	"github.com/tochemey/goakt/v3/passivation"
 )
 
-func marshalPassivationStrategy(strategy passivation.Strategy) *internalpb.PassivationStrategy {
+// EncodeDependencies transforms a list of dependencies into their serialized protobuf representations.
+// Returns a slice of internalpb.Dependency or an error if serialization fails.
+func EncodeDependencies(dependencies ...extension.Dependency) ([]*internalpb.Dependency, error) {
+	var output []*internalpb.Dependency
+	for _, dependency := range dependencies {
+		bytea, err := dependency.MarshalBinary()
+		if err != nil {
+			return nil, err
+		}
+
+		output = append(output, &internalpb.Dependency{
+			Id:       dependency.ID(),
+			TypeName: registry.Name(dependency),
+			Bytea:    bytea,
+		})
+	}
+	return output, nil
+}
+
+// EncodePassivationStrategy encodes a passivation strategy into its protobuf representation.
+// Returns a pointer to internalpb.PassivationStrategy or nil if the strategy is not recognized.
+func EncodePassivationStrategy(strategy passivation.Strategy) *internalpb.PassivationStrategy {
 	switch s := strategy.(type) {
 	case *passivation.TimeBasedStrategy:
 		return &internalpb.PassivationStrategy{
@@ -62,7 +83,9 @@ func marshalPassivationStrategy(strategy passivation.Strategy) *internalpb.Passi
 	}
 }
 
-func unmarshalPassivationStrategy(proto *internalpb.PassivationStrategy) passivation.Strategy {
+// DecodePassivationStrategy decodes a protobuf representation of a passivation strategy into its corresponding passivation.Strategy.
+// Returns a passivation.Strategy or nil if the strategy is not recognized.
+func DecodePassivationStrategy(proto *internalpb.PassivationStrategy) passivation.Strategy {
 	if proto == nil {
 		return nil
 	}
@@ -77,23 +100,4 @@ func unmarshalPassivationStrategy(proto *internalpb.PassivationStrategy) passiva
 	default:
 		return nil
 	}
-}
-
-// marshalDependencies transforms a list of dependencies into their serialized protobuf representations.
-// Returns a slice of internalpb.Dependency or an error if serialization fails.
-func marshalDependencies(dependencies ...extension.Dependency) ([]*internalpb.Dependency, error) {
-	var output []*internalpb.Dependency
-	for _, dependency := range dependencies {
-		bytea, err := dependency.MarshalBinary()
-		if err != nil {
-			return nil, err
-		}
-
-		output = append(output, &internalpb.Dependency{
-			Id:       dependency.ID(),
-			TypeName: registry.Name(dependency),
-			Bytea:    bytea,
-		})
-	}
-	return output, nil
 }

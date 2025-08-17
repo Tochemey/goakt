@@ -31,6 +31,8 @@ import (
 	"time"
 
 	"google.golang.org/protobuf/proto"
+
+	"github.com/tochemey/goakt/v3/errors"
 )
 
 // pool holds a pool of ReceiveContext
@@ -207,7 +209,7 @@ func (gctx *GrainContext) Response(resp proto.Message) {
 //	}
 func (gctx *GrainContext) Unhandled() {
 	msg := gctx.Message()
-	gctx.err <- NewErrUnhandledMessage(fmt.Errorf("unhandled message type %s", msg.ProtoReflect().Descriptor().FullName()))
+	gctx.err <- errors.NewErrUnhandledMessage(fmt.Errorf("unhandled message type %s", msg.ProtoReflect().Descriptor().FullName()))
 	close(gctx.err)
 }
 

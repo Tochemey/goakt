@@ -38,6 +38,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kapetan-io/tackle/autotls"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
@@ -45,6 +46,8 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v3/address"
+	gerrors "github.com/tochemey/goakt/v3/errors"
+	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
@@ -53,6 +56,7 @@ import (
 	"github.com/tochemey/goakt/v3/passivation"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
+	tls2 "github.com/tochemey/goakt/v3/tls"
 )
 
 // nolint
@@ -72,13 +76,13 @@ func TestActorSystem(t *testing.T) {
 		sys, err := NewActorSystem("")
 		assert.Error(t, err)
 		assert.Nil(t, sys)
-		require.ErrorIs(t, err, ErrNameRequired)
+		require.ErrorIs(t, err, gerrors.ErrNameRequired)
 	})
 	t.Run("With invalid actor system Name", func(t *testing.T) {
 		sys, err := NewActorSystem("$omeN@me")
 		assert.Error(t, err)
 		assert.Nil(t, sys)
-		require.ErrorIs(t, err, ErrInvalidActorSystemName)
+		require.ErrorIs(t, err, gerrors.ErrInvalidActorSystemName)
 	})
 	t.Run("With Spawn an actor when not System started", func(t *testing.T) {
 		ctx := context.TODO()
@@ -86,7 +90,7 @@ func TestActorSystem(t *testing.T) {
 		actor := NewMockActor()
 		actorRef, err := sys.Spawn(ctx, "Test", actor)
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrActorSystemNotStarted)
+		assert.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
 		assert.Nil(t, sys.Metric(ctx))
 		assert.Nil(t, actorRef)
 		assert.Zero(t, sys.Uptime())
@@ -241,7 +245,7 @@ func TestActorSystem(t *testing.T) {
 		require.NotNil(t, remoteAddr)
 		require.True(t, proto.Equal(remoteAddr, addr))
 
-		remoting := NewRemoting()
+		remoting := remote.NewRemoting()
 		from := address.NoSender()
 		reply, err := remoting.RemoteAsk(ctx, from, addr, new(testpb.TestReply), 20*time.Second)
 		require.NoError(t, err)
@@ -255,13 +259,13 @@ func TestActorSystem(t *testing.T) {
 
 		addr, pid, err := newActorSystem.ActorOf(ctx, actorName)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrActorNotFound)
+		require.ErrorIs(t, err, gerrors.ErrActorNotFound)
 		require.Nil(t, addr)
 		require.Nil(t, pid)
 
 		remoteAddr, err = newActorSystem.RemoteActor(ctx, actorName)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrActorNotFound)
+		require.ErrorIs(t, err, gerrors.ErrActorNotFound)
 		require.Nil(t, remoteAddr)
 
 		// stop the actor after some time
@@ -298,7 +302,7 @@ func TestActorSystem(t *testing.T) {
 
 		addr, pid, err := newActorSystem.ActorOf(ctx, actorName)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrMethodCallNotAllowed)
+		require.ErrorIs(t, err, gerrors.ErrMethodCallNotAllowed)
 		require.Nil(t, addr)
 		require.Nil(t, pid)
 
@@ -354,7 +358,7 @@ func TestActorSystem(t *testing.T) {
 
 		addr, pid, err := sys.ActorOf(ctx, actorName)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrActorNotFound)
+		require.ErrorIs(t, err, gerrors.ErrActorNotFound)
 		require.Nil(t, pid)
 		require.Nil(t, addr)
 
@@ -387,7 +391,7 @@ func TestActorSystem(t *testing.T) {
 
 		addr, pid, err := newActorSystem.ActorOf(ctx, actorName)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrActorSystemNotStarted)
+		require.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
 		require.Nil(t, addr)
 		require.Nil(t, pid)
 	})
@@ -531,7 +535,7 @@ func TestActorSystem(t *testing.T) {
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 		_, err := sys.ReSpawn(ctx, "some-actor")
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrActorSystemNotStarted)
+		assert.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
 	})
 	t.Run("ReSpawn with remoting enabled", func(t *testing.T) {
 		ctx := context.TODO()
@@ -627,7 +631,7 @@ func TestActorSystem(t *testing.T) {
 
 		pause.For(time.Second)
 
-		remoting := NewRemoting()
+		remoting := remote.NewRemoting()
 		actorName := "some-actor"
 		addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
 		require.NoError(t, err)
@@ -675,7 +679,7 @@ func TestActorSystem(t *testing.T) {
 		actorName := "some-actor"
 		remoteAddr, err := newActorSystem.RemoteActor(ctx, actorName)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrActorSystemNotStarted)
+		require.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
 		require.Nil(t, remoteAddr)
 	})
 	t.Run("With RemoteActor failure when system not started", func(t *testing.T) {
@@ -694,7 +698,7 @@ func TestActorSystem(t *testing.T) {
 
 		err = newActorSystem.Stop(ctx)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrActorSystemNotStarted)
+		require.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
 	})
 	t.Run("With RemoteActor failure when cluster is not enabled", func(t *testing.T) {
 		ctx := context.TODO()
@@ -718,7 +722,7 @@ func TestActorSystem(t *testing.T) {
 		actorName := "some-actor"
 		remoteAddr, err := newActorSystem.RemoteActor(ctx, actorName)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrClusterDisabled)
+		require.ErrorIs(t, err, gerrors.ErrClusterDisabled)
 		require.Nil(t, remoteAddr)
 
 		// stop the actor after some time
@@ -770,7 +774,7 @@ func TestActorSystem(t *testing.T) {
 		ref, err := sys.LocalActor("some-name")
 		require.Error(t, err)
 		require.Nil(t, ref)
-		require.ErrorIs(t, err, ErrActorNotFound)
+		require.ErrorIs(t, err, gerrors.ErrActorNotFound)
 
 		// stop the actor after some time
 		pause.For(time.Second)
@@ -791,7 +795,7 @@ func TestActorSystem(t *testing.T) {
 		// locate the actor
 		local, err := sys.LocalActor(actorName)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrActorSystemNotStarted)
+		require.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
 		require.Nil(t, local)
 	})
 	t.Run("With Kill an actor when not System started", func(t *testing.T) {
@@ -799,7 +803,7 @@ func TestActorSystem(t *testing.T) {
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 		err := sys.Kill(ctx, "Test")
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrActorSystemNotStarted)
+		assert.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
 	})
 	t.Run("With Kill an actor when actor not found", func(t *testing.T) {
 		ctx := context.TODO()
@@ -810,7 +814,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, err)
 		err = sys.Kill(ctx, "Test")
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrActorNotFound)
+		assert.ErrorIs(t, err, gerrors.ErrActorNotFound)
 		t.Cleanup(
 			func() {
 				err = sys.Stop(ctx)
@@ -847,7 +851,7 @@ func TestActorSystem(t *testing.T) {
 		ref, err := sys.LocalActor(actorName)
 		require.Error(t, err)
 		require.Nil(t, ref)
-		require.ErrorIs(t, err, ErrActorNotFound)
+		require.ErrorIs(t, err, gerrors.ErrActorNotFound)
 
 		// stop the actor after some time
 		pause.For(time.Second)
@@ -1109,14 +1113,14 @@ func TestActorSystem(t *testing.T) {
 		// get the actor
 		addr, pid, err := newActorSystem.ActorOf(ctx, actorName)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrActorNotFound)
+		require.ErrorIs(t, err, gerrors.ErrActorNotFound)
 		require.Nil(t, addr)
 		require.Nil(t, pid)
 
 		// use RemoteActor method and compare the results
 		remoteAddr, err := newActorSystem.RemoteActor(ctx, actorName)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrActorNotFound)
+		require.ErrorIs(t, err, gerrors.ErrActorNotFound)
 		require.Nil(t, remoteAddr)
 
 		// stop the actor after some time
@@ -1437,7 +1441,7 @@ func TestActorSystem(t *testing.T) {
 
 		actorRef, err := sys.SpawnFromFunc(ctx, receiveFn, WithPreStart(preStart))
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrActorSystemNotStarted)
+		assert.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
 		assert.Nil(t, actorRef)
 	})
 	t.Run("With happy path Register", func(t *testing.T) {
@@ -1478,7 +1482,7 @@ func TestActorSystem(t *testing.T) {
 		// register the actor
 		err = sys.Register(ctx, &exchanger{})
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrActorSystemNotStarted)
+		assert.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
 
 		err = sys.Stop(ctx)
 		require.Error(t, err)
@@ -1527,7 +1531,7 @@ func TestActorSystem(t *testing.T) {
 
 		err = sys.Deregister(ctx, &exchanger{})
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrActorSystemNotStarted)
+		assert.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
 
 		t.Cleanup(
 			func() {
@@ -1583,7 +1587,7 @@ func TestActorSystem(t *testing.T) {
 		// wait for the cluster to start
 		pause.For(time.Second)
 
-		remoting := NewRemoting()
+		remoting := remote.NewRemoting()
 		// create an actor
 		actorName := "actorID"
 		// fetching the address of the that actor should return nil address
@@ -1692,7 +1696,7 @@ func TestActorSystem(t *testing.T) {
 
 		_, err = node2.Spawn(ctx, actorName, actor)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrActorAlreadyExists)
+		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
 
 		// free resource
 		require.NoError(t, node2.Stop(ctx))
@@ -2029,7 +2033,7 @@ func TestActorSystem(t *testing.T) {
 
 		_, err = node2.Spawn(ctx, actorName, actor)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrActorAlreadyExists)
+		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
 
 		actors := node3.ActorRefs(ctx, time.Second)
 		require.Len(t, actors, 1)
@@ -2071,7 +2075,7 @@ func TestActorSystem(t *testing.T) {
 		// let us send a message to the actor
 		err = Tell(ctx, pid, new(testpb.TestSend))
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrDead)
+		assert.ErrorIs(t, err, gerrors.ErrDead)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With Spawn with long lived", func(t *testing.T) {
@@ -2149,13 +2153,13 @@ func TestActorSystem(t *testing.T) {
 			"test",
 			WithLogger(logger),
 			WithRemote(remote.NewConfig(host, 2222)),
-			WithTLS(&TLSInfo{
-				ClientTLS: &tls.Config{InsecureSkipVerify: true}, // nolint
-				ServerTLS: nil,
+			WithTLS(&tls2.Info{
+				ClientConfig: &tls.Config{InsecureSkipVerify: true}, // nolint
+				ServerConfig: nil,
 			}),
 		)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrInvalidTLSConfiguration)
+		require.ErrorIs(t, err, gerrors.ErrInvalidTLSConfiguration)
 		require.Nil(t, newActorSystem)
 	})
 	t.Run("With Metric", func(t *testing.T) {
@@ -2230,7 +2234,7 @@ func TestActorSystem(t *testing.T) {
 
 		remoteConfig := remote.NewConfig(host, remotingPort)
 		// mock the discovery provider
-		provider := new(testkit.Provider)
+		provider := testkit.NewProvider(t)
 		newActorSystem, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
@@ -2295,7 +2299,7 @@ func TestActorSystem(t *testing.T) {
 		// register the actor
 		err = sys.Inject(extmocks.NewDependency(t))
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrActorSystemNotStarted)
+		assert.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
 
 		err = sys.Stop(ctx)
 		require.Error(t, err)
@@ -2344,7 +2348,7 @@ func TestActorSystem(t *testing.T) {
 		name := "GoAktXYZ"
 		addr, pid, err := sys.ActorOf(ctx, name)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrActorNotFound)
+		require.ErrorIs(t, err, gerrors.ErrActorNotFound)
 		require.Nil(t, addr)
 		require.Nil(t, pid)
 
@@ -2372,7 +2376,7 @@ func TestActorSystem(t *testing.T) {
 		name := "GoAktXYZ"
 		err = sys.Kill(ctx, name)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrActorNotFound)
+		require.ErrorIs(t, err, gerrors.ErrActorNotFound)
 
 		err = sys.Stop(ctx)
 		require.NoError(t, err)
@@ -2398,7 +2402,7 @@ func TestActorSystem(t *testing.T) {
 		name := "GoAktXYZ"
 		pid, err := sys.ReSpawn(ctx, name)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrActorNotFound)
+		require.ErrorIs(t, err, gerrors.ErrActorNotFound)
 		require.Nil(t, pid)
 
 		err = sys.Stop(ctx)
@@ -2425,7 +2429,7 @@ func TestActorSystem(t *testing.T) {
 		name := "GoAktXYZ"
 		pid, err := sys.LocalActor(name)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrActorNotFound)
+		require.ErrorIs(t, err, gerrors.ErrActorNotFound)
 		require.Nil(t, pid)
 
 		err = sys.Stop(ctx)
@@ -2452,7 +2456,7 @@ func TestActorSystem(t *testing.T) {
 		name := "GoAktXYZ"
 		addr, err := sys.RemoteActor(ctx, name)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrActorNotFound)
+		require.ErrorIs(t, err, gerrors.ErrActorNotFound)
 		require.Nil(t, addr)
 
 		err = sys.Stop(ctx)
@@ -2495,7 +2499,7 @@ func TestActorSystem(t *testing.T) {
 		// either we can locate the actor or try to recreate it
 		_, err = node2.Spawn(ctx, actorName, actor)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrActorAlreadyExists)
+		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
 
 		// free resources
 		require.NoError(t, node2.Stop(ctx))
@@ -2521,7 +2525,7 @@ func TestActorSystem(t *testing.T) {
 		actorName := "actorID"
 		err := actorSystem.SpawnOn(ctx, actorName, actor)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrActorSystemNotStarted)
+		require.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
 	})
 	t.Run("SpawnOn when actor name is invalid", func(t *testing.T) {
 		ctx := context.TODO()
@@ -2587,7 +2591,7 @@ func TestActorSystem(t *testing.T) {
 		// either we can locate the actor or try to recreate it
 		_, err = node2.Spawn(ctx, actorName, actor)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrActorAlreadyExists)
+		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
 
 		// free resources
 		require.NoError(t, node2.Stop(ctx))
@@ -2638,7 +2642,7 @@ func TestActorSystem(t *testing.T) {
 		// either we can locate the actor or try to recreate it
 		_, err = node2.Spawn(ctx, actorName, actor)
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrActorAlreadyExists)
+		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
 
 		// free resources
 		require.NoError(t, node2.Stop(ctx))
@@ -2845,7 +2849,2267 @@ func TestActorSystem(t *testing.T) {
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 		exists, err := sys.ActorExists(ctx, "")
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrActorSystemNotStarted)
+		require.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
 		require.False(t, exists)
+	})
+}
+
+func TestRemoteTell(t *testing.T) {
+	t.Run("With happy path", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		remoting := remote.NewRemoting()
+		// get the address of the actor
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+		// create a message to send to the test actor
+		message := new(testpb.TestSend)
+		from := address.NoSender()
+		// send the message to the actor
+		for i := 0; i < 10; i++ {
+			err = remoting.RemoteTell(ctx, from, addr, message)
+			// perform some assertions
+			require.NoError(t, err)
+		}
+
+		// stop the actor after some time
+		pause.For(time.Second)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("With invalid message", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		remoting := remote.NewRemoting()
+		// get the address of the actor
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+		from := address.NoSender()
+		err = remoting.RemoteTell(ctx, from, addr, nil)
+		// perform some assertions
+		require.Error(t, err)
+
+		// stop the actor after some time
+		pause.For(time.Second)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("With remote service failure", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		// create a wrong address
+		addr := &goaktpb.Address{
+			Host: host,
+			Port: 2222,
+			Name: "",
+			Id:   "",
+		}
+
+		remoting := remote.NewRemoting()
+		// create a message to send to the test actor
+		message := new(testpb.TestSend)
+		// send the message to the actor
+		from := address.NoSender()
+		err = remoting.RemoteTell(ctx, from, address.From(addr), message)
+		// perform some assertions
+		require.Error(t, err)
+
+		// stop the actor after some time
+		pause.For(time.Second)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("With remoting disabled", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		remoting := remote.NewRemoting()
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+
+		// let us disable remoting
+		actorsSystem := sys.(*actorSystem)
+		actorsSystem.remotingEnabled.Store(false)
+
+		// create a message to send to the test actor
+		message := new(testpb.TestSend)
+		// send the message to the actor
+		from := address.NoSender()
+		err = remoting.RemoteTell(ctx, from, addr, message)
+		// perform some assertions
+		require.Error(t, err)
+
+		// stop the actor after some time
+		pause.For(time.Second)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("With Batch request", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		remoting := remote.NewRemoting()
+
+		// get the address of the actor
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+		// create a message to send to the test actor
+		messages := make([]proto.Message, 10)
+		// send the message to the actor
+		for i := 0; i < 10; i++ {
+			messages[i] = new(testpb.TestSend)
+		}
+
+		from := address.NoSender()
+		err = remoting.RemoteBatchTell(ctx, from, addr, messages)
+		require.NoError(t, err)
+
+		// wait for processing to complete on the actor side
+		pause.For(500 * time.Millisecond)
+		require.EqualValues(t, 10, actorRef.ProcessedCount()-1)
+
+		// stop the actor after some time
+		pause.For(time.Second)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("With Batch service failure", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		// create a wrong address
+		addr := &goaktpb.Address{
+			Host: host,
+			Port: 2222,
+			Name: "",
+			Id:   "",
+		}
+
+		remoting := remote.NewRemoting()
+		from := address.NoSender()
+		// create a message to send to the test actor
+		message := new(testpb.TestSend)
+		// send the message to the actor
+		err = remoting.RemoteBatchTell(ctx, from, address.From(addr), []proto.Message{message})
+		// perform some assertions
+		require.Error(t, err)
+
+		// stop the actor after some time
+		pause.For(time.Second)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("With Batch when remoting is disabled", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		remoting := remote.NewRemoting()
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+		from := address.NoSender()
+		// let us disable remoting
+		actorsSystem := sys.(*actorSystem)
+		actorsSystem.remotingEnabled.Store(false)
+
+		// create a message to send to the test actor
+		message := new(testpb.TestSend)
+		// send the message to the actor
+		err = remoting.RemoteBatchTell(ctx, from, addr, []proto.Message{message})
+		// perform some assertions
+		require.Error(t, err)
+
+		// stop the actor after some time
+		pause.For(time.Second)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("With actor not found", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		remoting := remote.NewRemoting()
+		// get the address of the actor
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+
+		// stop the actor when wait for cleanup to take place
+		require.NoError(t, actorRef.Shutdown(ctx))
+		pause.For(time.Second)
+
+		from := address.NoSender()
+		// create a message to send to the test actor
+		message := new(testpb.TestSend)
+		// send the message to the actor
+		err = remoting.RemoteTell(ctx, from, addr, message)
+		// perform some assertions
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "not found")
+
+		// stop the actor after some time
+		pause.For(time.Second)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("With Batch actor not found", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		remoting := remote.NewRemoting()
+		// get the address of the actor
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+
+		// stop the actor when wait for cleanup to take place
+		require.NoError(t, actorRef.Shutdown(ctx))
+		pause.For(time.Second)
+
+		from := address.NoSender()
+		// create a message to send to the test actor
+		message := new(testpb.TestSend)
+		// send the message to the actor
+		err = remoting.RemoteBatchTell(ctx, from, addr, []proto.Message{message})
+		// perform some assertions
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "not found")
+
+		// stop the actor after some time
+		pause.For(time.Second)
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("With TLS enabled", func(t *testing.T) {
+		t.Skip("Flaky test")
+		// create the context
+		ctx := context.TODO()
+		// AutoGenerate TLS certs
+		conf := autotls.Config{
+			AutoTLS:            true,
+			ClientAuth:         tls.RequireAndVerifyClientCert,
+			InsecureSkipVerify: false,
+		}
+		require.NoError(t, autotls.Setup(&conf))
+
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "127.0.0.1"
+
+		remoteConfig := remote.NewConfig(host, remotingPort)
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remoteConfig),
+			WithTLS(&tls2.Info{
+				ClientConfig: conf.ClientTLS,
+				ServerConfig: conf.ServerTLS,
+			}),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		remoting := remote.NewRemoting(remote.WithRemotingTLS(conf.ClientTLS))
+		// get the address of the actor
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+		// create a message to send to the test actor
+		message := new(testpb.TestSend)
+		from := address.NoSender()
+		// send the message to the actor
+		for i := 0; i < 10; i++ {
+			err = remoting.RemoteTell(ctx, from, addr, message)
+			// perform some assertions
+			require.NoError(t, err)
+		}
+
+		// stop the actor after some time
+		pause.For(time.Second)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+}
+
+func TestRemoteAsk(t *testing.T) {
+	t.Run("With happy path", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		remoting := remote.NewRemoting()
+		from := address.NoSender()
+		// get the address of the actor
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+
+		// create a message to send to the test actor
+		message := new(testpb.TestReply)
+		// send the message to the actor
+		reply, err := remoting.RemoteAsk(ctx, from, addr, message, time.Minute)
+		// perform some assertions
+		require.NoError(t, err)
+		require.NotNil(t, reply)
+		require.True(t, reply.MessageIs(new(testpb.Reply)))
+
+		actual := new(testpb.Reply)
+		err = reply.UnmarshalTo(actual)
+		require.NoError(t, err)
+
+		expected := &testpb.Reply{Content: "received message"}
+		assert.True(t, proto.Equal(expected, actual))
+
+		// stop the actor after some time
+		pause.For(time.Second)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("With invalid message", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		remoting := remote.NewRemoting()
+		// get the address of the actor
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+
+		from := address.NoSender()
+		// send the message to the actor
+		reply, err := remoting.RemoteAsk(ctx, from, addr, nil, time.Minute)
+		// perform some assertions
+		require.Error(t, err)
+		require.Nil(t, reply)
+
+		// stop the actor after some time
+		pause.For(time.Second)
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("With remote service failure", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		// get the address of the actor
+		addr := &goaktpb.Address{
+			Host: host,
+			Port: 2222,
+			Name: "",
+			Id:   "",
+		}
+
+		remoting := remote.NewRemoting()
+		from := address.NoSender()
+		// create a message to send to the test actor
+		message := new(testpb.TestReply)
+		// send the message to the actor
+		reply, err := remoting.RemoteAsk(ctx, from, address.From(addr), message, time.Minute)
+		// perform some assertions
+		require.Error(t, err)
+		require.Nil(t, reply)
+
+		// stop the actor after some time
+		pause.For(time.Second)
+		remoting.Close()
+		t.Cleanup(
+			func() {
+				assert.NoError(t, sys.Stop(ctx))
+			},
+		)
+	})
+	t.Run("With remoting disabled", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		remoting := remote.NewRemoting()
+		// get the address of the actor
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+
+		// let us disable remoting
+		actorsSystem := sys.(*actorSystem)
+		actorsSystem.remotingEnabled.Store(false)
+
+		from := address.NoSender()
+		// create a message to send to the test actor
+		message := new(testpb.TestReply)
+		// send the message to the actor
+		reply, err := remoting.RemoteAsk(ctx, from, addr, message, time.Minute)
+		// perform some assertions
+		require.Error(t, err)
+		require.Nil(t, reply)
+
+		// stop the actor after some time
+		pause.For(time.Second)
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("With Batch request", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		remoting := remote.NewRemoting()
+		// get the address of the actor
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+
+		from := address.NoSender()
+		// create a message to send to the test actor
+		message := new(testpb.TestReply)
+		// send the message to the actor
+		replies, err := remoting.RemoteBatchAsk(ctx, from, addr, []proto.Message{message}, time.Minute)
+		// perform some assertions
+		require.NoError(t, err)
+		require.Len(t, replies, 1)
+		require.NotNil(t, replies[0])
+		require.True(t, replies[0].MessageIs(new(testpb.Reply)))
+
+		actual := new(testpb.Reply)
+		err = replies[0].UnmarshalTo(actual)
+		require.NoError(t, err)
+
+		expected := &testpb.Reply{Content: "received message"}
+		assert.True(t, proto.Equal(expected, actual))
+
+		// stop the actor after some time
+		pause.For(time.Second)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("With Batch service failure", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		// get the address of the actor
+		addr := &goaktpb.Address{
+			Host: host,
+			Port: 2222,
+			Name: "",
+			Id:   "",
+		}
+
+		remoting := remote.NewRemoting()
+		from := address.NoSender()
+		// create a message to send to the test actor
+		message := new(testpb.TestReply)
+		// send the message to the actor
+		reply, err := remoting.RemoteBatchAsk(ctx, from, address.From(addr), []proto.Message{message}, time.Minute)
+		// perform some assertions
+		require.Error(t, err)
+		require.Nil(t, reply)
+
+		remoting.Close()
+		// stop the actor after some time
+		pause.For(time.Second)
+		t.Cleanup(
+			func() {
+				assert.NoError(t, sys.Stop(ctx))
+			},
+		)
+	})
+	t.Run("With Batch when remoting is disabled", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		remoting := remote.NewRemoting()
+
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+
+		// let us disable remoting
+		actorsSystem := sys.(*actorSystem)
+		actorsSystem.remotingEnabled.Store(false)
+
+		from := address.NoSender()
+		// create a message to send to the test actor
+		message := new(testpb.TestReply)
+		// send the message to the actor
+		reply, err := remoting.RemoteBatchAsk(ctx, from, addr, []proto.Message{message}, time.Minute)
+		// perform some assertions
+		require.Error(t, err)
+		require.Nil(t, reply)
+
+		// stop the actor after some time
+		pause.For(time.Second)
+		remoting.Close()
+		t.Cleanup(
+			func() {
+				assert.NoError(t, sys.Stop(ctx))
+			},
+		)
+	})
+	t.Run("With actor not found", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		remoting := remote.NewRemoting()
+		from := address.NoSender()
+		// get the address of the actor
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+
+		// stop the actor when wait for cleanup to take place
+		require.NoError(t, actorRef.Shutdown(ctx))
+		pause.For(time.Second)
+
+		// create a message to send to the test actor
+		message := new(testpb.TestReply)
+		// send the message to the actor
+		reply, err := remoting.RemoteAsk(ctx, from, addr, message, time.Minute)
+		// perform some assertions
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "not found")
+		require.Nil(t, reply)
+
+		// stop the actor after some time
+		pause.For(time.Second)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("With Batch actor not found", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		remoting := remote.NewRemoting()
+		// get the address of the actor
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+
+		// stop the actor when wait for cleanup to take place
+		require.NoError(t, actorRef.Shutdown(ctx))
+		pause.For(time.Second)
+
+		from := address.NoSender()
+		// create a message to send to the test actor
+		message := new(testpb.TestReply)
+		// send the message to the actor
+		reply, err := remoting.RemoteBatchAsk(ctx, from, addr, []proto.Message{message}, time.Minute)
+		// perform some assertions
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "not found")
+		require.Nil(t, reply)
+
+		// stop the actor after some time
+		pause.For(time.Second)
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("With TLS enabled", func(t *testing.T) {
+		t.Skip("Flaky test")
+		// create the context
+		ctx := context.TODO()
+		// AutoGenerate TLS certs
+		conf := autotls.Config{
+			AutoTLS:            true,
+			ClientAuth:         tls.RequireAndVerifyClientCert,
+			InsecureSkipVerify: false,
+		}
+		require.NoError(t, autotls.Setup(&conf))
+
+		serverConfig := conf.ServerTLS
+		clientConfig := conf.ClientTLS
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "127.0.0.1"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithTLS(&tls2.Info{
+				ClientConfig: clientConfig,
+				ServerConfig: serverConfig,
+			}),
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		remoting := remote.NewRemoting(remote.WithRemotingTLS(clientConfig))
+		from := address.NoSender()
+		// get the address of the actor
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+
+		// create a message to send to the test actor
+		message := new(testpb.TestReply)
+		// send the message to the actor
+		reply, err := remoting.RemoteAsk(ctx, from, addr, message, time.Minute)
+		// perform some assertions
+		require.NoError(t, err)
+		require.NotNil(t, reply)
+		require.True(t, reply.MessageIs(new(testpb.Reply)))
+
+		actual := new(testpb.Reply)
+		err = reply.UnmarshalTo(actual)
+		require.NoError(t, err)
+
+		expected := &testpb.Reply{Content: "received message"}
+		assert.True(t, proto.Equal(expected, actual))
+
+		// stop the actor after some time
+		pause.For(time.Second)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+}
+
+func TestRemotingLookup(t *testing.T) {
+	t.Run("When remoting is not enabled", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// let us disable remoting
+		actorsSystem := sys.(*actorSystem)
+		actorsSystem.remotingEnabled.Store(false)
+		remoting := remote.NewRemoting()
+		// create a test actor
+		actorName := "test"
+		// get the address of the actor
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.Error(t, err)
+		require.Nil(t, addr)
+
+		t.Cleanup(
+			func() {
+				assert.NoError(t, sys.Stop(ctx))
+			},
+		)
+	})
+	t.Run("When TLS enabled", func(t *testing.T) {
+		t.Skip("Flaky test")
+		// create the context
+		ctx := context.TODO()
+		// AutoGenerate TLS certs
+		conf := autotls.Config{
+			AutoTLS:            true,
+			ClientAuth:         tls.RequireAndVerifyClientCert,
+			InsecureSkipVerify: false,
+		}
+		require.NoError(t, autotls.Setup(&conf))
+
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "127.0.0.1"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+			WithTLS(&tls2.Info{
+				ClientConfig: conf.ClientTLS,
+				ServerConfig: conf.ServerTLS,
+			}),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// let us disable remoting
+		actorsSystem := sys.(*actorSystem)
+		actorsSystem.remotingEnabled.Store(false)
+		remoting := remote.NewRemoting(remote.WithRemotingTLS(conf.ClientTLS))
+		// create a test actor
+		actorName := "test"
+		// get the address of the actor
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.Error(t, err)
+		require.Nil(t, addr)
+
+		t.Cleanup(
+			func() {
+				assert.NoError(t, sys.Stop(ctx))
+			},
+		)
+	})
+}
+
+func TestRemotingReSpawn(t *testing.T) {
+	t.Run("When remoting is not enabled", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// let us disable remoting
+		actorsSystem := sys.(*actorSystem)
+		actorsSystem.remotingEnabled.Store(false)
+		remoting := remote.NewRemoting()
+		// create a test actor
+		actorName := "test"
+		// get the address of the actor
+		err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.Error(t, err)
+
+		remoting.Close()
+		t.Cleanup(
+			func() {
+				assert.NoError(t, sys.Stop(ctx))
+			},
+		)
+	})
+	t.Run("When remoting is enabled", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		// assert the actor restart count
+		pid := actorRef
+		assert.Zero(t, pid.restartCount.Load())
+		remoting := remote.NewRemoting()
+		// get the address of the actor
+		err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+
+		assert.EqualValues(t, 1, pid.restartCount.Load())
+
+		// stop the actor after some time
+		pause.For(time.Second)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("When TLS enabled", func(t *testing.T) {
+		t.Skip("Flaky test")
+		// create the context
+		ctx := context.TODO()
+		// AutoGenerate TLS certs
+		conf := autotls.Config{
+			AutoTLS:            true,
+			ClientAuth:         tls.RequireAndVerifyClientCert,
+			InsecureSkipVerify: false,
+		}
+		require.NoError(t, autotls.Setup(&conf))
+
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "127.0.0.1"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+			WithTLS(&tls2.Info{
+				ClientConfig: conf.ClientTLS,
+				ServerConfig: conf.ServerTLS,
+			}),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// let us disable remoting
+		actorsSystem := sys.(*actorSystem)
+		actorsSystem.remotingEnabled.Store(false)
+		remoting := remote.NewRemoting(remote.WithRemotingTLS(conf.ClientTLS))
+		// create a test actor
+		actorName := "test"
+		// get the address of the actor
+		err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.Error(t, err)
+
+		remoting.Close()
+		t.Cleanup(
+			func() {
+				assert.NoError(t, sys.Stop(ctx))
+			},
+		)
+	})
+	t.Run("When actor name is reserved", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "GoAktXYZ"
+		remoting := remote.NewRemoting()
+		// get the address of the actor
+		err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.Error(t, err)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+}
+
+func TestRemotingStop(t *testing.T) {
+	t.Run("When remoting is not enabled", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// let us disable remoting
+		actorsSystem := sys.(*actorSystem)
+		actorsSystem.remotingEnabled.Store(false)
+
+		remoting := remote.NewRemoting()
+		// create a test actor
+		actorName := "test"
+		// get the address of the actor
+		err = remoting.RemoteStop(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.Error(t, err)
+
+		remoting.Close()
+		t.Cleanup(
+			func() {
+				assert.NoError(t, sys.Stop(ctx))
+			},
+		)
+	})
+	t.Run("When remoting is enabled", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		// assert the actor restart count
+		pid := actorRef
+		assert.Zero(t, pid.restartCount.Load())
+
+		remoting := remote.NewRemoting()
+
+		// get the address of the actor
+		err = remoting.RemoteStop(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+
+		pause.For(time.Second)
+
+		assert.Empty(t, sys.Actors())
+
+		// stop the actor after some time
+		pause.For(time.Second)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("When TLS enabled", func(t *testing.T) {
+		t.Skip("Flaky test")
+		// create the context
+		ctx := context.TODO()
+
+		// AutoGenerate TLS certs
+		conf := autotls.Config{
+			AutoTLS:            true,
+			ClientAuth:         tls.RequireAndVerifyClientCert,
+			InsecureSkipVerify: false,
+		}
+		require.NoError(t, autotls.Setup(&conf))
+
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "127.0.0.1"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+			WithTLS(&tls2.Info{
+				ClientConfig: conf.ClientTLS,
+				ServerConfig: conf.ServerTLS,
+			}),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// let us disable remoting
+		actorsSystem := sys.(*actorSystem)
+		actorsSystem.remotingEnabled.Store(false)
+
+		remoting := remote.NewRemoting(remote.WithRemotingTLS(conf.ClientTLS))
+		// create a test actor
+		actorName := "test"
+		// get the address of the actor
+		err = remoting.RemoteStop(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.Error(t, err)
+
+		remoting.Close()
+		t.Cleanup(
+			func() {
+				assert.NoError(t, sys.Stop(ctx))
+			},
+		)
+	})
+	t.Run("When actor name is reserved", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "GoAktXYZ"
+		remoting := remote.NewRemoting()
+
+		// get the address of the actor
+		err = remoting.RemoteStop(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.Error(t, err)
+
+		pause.For(time.Second)
+		remoting.Close()
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+}
+
+func TestRemotingSpawn(t *testing.T) {
+	t.Run("When remoting is enabled", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		ports := dynaport.Get(1)
+		remotingPort := ports[0]
+		host := "127.0.0.1"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		// register dependencies
+		dependency := NewMockDependency("test", "test", "test")
+		err = sys.Inject(dependency)
+		require.NoError(t, err)
+
+		// create an actor implementation and register it
+		actor := &exchanger{}
+		actorName := uuid.NewString()
+
+		remoting := remote.NewRemoting()
+		// fetching the address of the that actor should return nil address
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+		require.True(t, addr.Equals(address.NoSender()))
+
+		// register the actor
+		err = sys.Register(ctx, actor)
+		require.NoError(t, err)
+
+		// spawn the remote actor
+		request := &remote.SpawnRequest{
+			Name:           actorName,
+			Kind:           "actor.exchanger",
+			Singleton:      false,
+			Relocatable:    false,
+			EnableStashing: false,
+			Dependencies:   []extension.Dependency{dependency},
+		}
+		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
+		require.NoError(t, err)
+
+		// re-fetching the address of the actor should return not nil address after start
+		addr, err = remoting.RemoteLookup(ctx, host, remotingPort, actorName)
+		require.NoError(t, err)
+		require.NotNil(t, addr)
+
+		from := address.NoSender()
+		// send the message to exchanger actor one using remote messaging
+		reply, err := remoting.RemoteAsk(ctx, from, addr, new(testpb.TestReply), time.Minute)
+
+		require.NoError(t, err)
+		require.NotNil(t, reply)
+		require.True(t, reply.MessageIs(new(testpb.Reply)))
+
+		actual := new(testpb.Reply)
+		err = reply.UnmarshalTo(actual)
+		require.NoError(t, err)
+
+		expected := new(testpb.Reply)
+		assert.True(t, proto.Equal(expected, actual))
+
+		remoting.Close()
+		t.Cleanup(
+			func() {
+				err = sys.Stop(ctx)
+				assert.NoError(t, err)
+			},
+		)
+	})
+	t.Run("With invalid dependency", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		ports := dynaport.Get(1)
+		remotingPort := ports[0]
+		host := "127.0.0.1"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		// register dependencies
+		dependency := NewMockDependency("test", "test", "test")
+		err = sys.Inject(dependency)
+		require.NoError(t, err)
+
+		// create an actor implementation and register it
+		actor := &exchanger{}
+		actorName := uuid.NewString()
+
+		remoting := remote.NewRemoting()
+		// fetching the address of the that actor should return nil address
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+		require.True(t, addr.Equals(address.NoSender()))
+
+		// register the actor
+		err = sys.Register(ctx, actor)
+		require.NoError(t, err)
+
+		// spawn the remote actor
+		request := &remote.SpawnRequest{
+			Name:           actorName,
+			Kind:           "actor.exchanger",
+			Singleton:      false,
+			Relocatable:    false,
+			EnableStashing: false,
+			Dependencies:   []extension.Dependency{new(MockDependency)},
+		}
+		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
+		require.Error(t, err)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		require.NoError(t, err)
+	})
+	t.Run("With dependency marshaling failure", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		ports := dynaport.Get(1)
+		remotingPort := ports[0]
+		host := "127.0.0.1"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		// register dependencies
+		dependency := extmocks.NewDependency(t)
+		dependency.EXPECT().ID().Return("id")
+		dependency.EXPECT().MarshalBinary().Return(nil, assert.AnError)
+
+		err = sys.Inject(dependency)
+		require.NoError(t, err)
+
+		// create an actor implementation and register it
+		actor := &exchanger{}
+		actorName := uuid.NewString()
+
+		remoting := remote.NewRemoting()
+		// fetching the address of the that actor should return nil address
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+		require.True(t, addr.Equals(address.NoSender()))
+
+		// register the actor
+		err = sys.Register(ctx, actor)
+		require.NoError(t, err)
+
+		// spawn the remote actor
+		request := &remote.SpawnRequest{
+			Name:           actorName,
+			Kind:           "actor.exchanger",
+			Singleton:      false,
+			Relocatable:    false,
+			EnableStashing: false,
+			Dependencies:   []extension.Dependency{dependency},
+		}
+		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
+		require.Error(t, err)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		require.NoError(t, err)
+		dependency.AssertExpectations(t)
+	})
+	t.Run("When actor not registered", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		ports := dynaport.Get(1)
+		remotingPort := ports[0]
+		host := "127.0.0.1"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		// create an actor implementation and register it
+		actorName := uuid.NewString()
+
+		remoting := remote.NewRemoting()
+		// fetching the address of the that actor should return nil address
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+		require.True(t, addr.Equals(address.NoSender()))
+
+		// spawn the remote actor
+		request := &remote.SpawnRequest{
+			Name:        actorName,
+			Kind:        "actor.exchanger",
+			Singleton:   false,
+			Relocatable: false,
+		}
+		err = remoting.RemoteSpawn(ctx, sys.Host(), int(sys.Port()), request)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, gerrors.ErrTypeNotRegistered)
+
+		t.Cleanup(
+			func() {
+				err = sys.Stop(ctx)
+				assert.NoError(t, err)
+			},
+		)
+	})
+	t.Run("When remoting is not enabled", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		ports := dynaport.Get(1)
+		remotingPort := ports[0]
+		host := "127.0.0.1"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		// create an actor implementation and register it
+		actorName := uuid.NewString()
+		remoting := remote.NewRemoting()
+		// spawn the remote actor
+		request := &remote.SpawnRequest{
+			Name:        actorName,
+			Kind:        "actor.exchanger",
+			Singleton:   false,
+			Relocatable: false,
+		}
+		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
+		require.Error(t, err)
+
+		t.Cleanup(
+			func() {
+				err = sys.Stop(ctx)
+				assert.NoError(t, err)
+			},
+		)
+	})
+	t.Run("When TLS enabled", func(t *testing.T) {
+		t.Skip("Flaky test")
+		// create the context
+		ctx := context.TODO()
+
+		// AutoGenerate TLS certs
+		conf := autotls.Config{
+			AutoTLS:            true,
+			ClientAuth:         tls.RequireAndVerifyClientCert,
+			InsecureSkipVerify: false,
+		}
+		require.NoError(t, autotls.Setup(&conf))
+
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		ports := dynaport.Get(1)
+		remotingPort := ports[0]
+		host := "127.0.0.1"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+			WithTLS(&tls2.Info{
+				ClientConfig: conf.ClientTLS,
+				ServerConfig: conf.ServerTLS,
+			}),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		// create an actor implementation and register it
+		actor := &exchanger{}
+		actorName := uuid.NewString()
+
+		remoting := remote.NewRemoting(remote.WithRemotingTLS(conf.ClientTLS))
+		// fetching the address of the that actor should return nil address
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+		require.Nil(t, addr)
+
+		// register the actor
+		err = sys.Register(ctx, actor)
+		require.NoError(t, err)
+
+		// spawn the remote actor
+		request := &remote.SpawnRequest{
+			Name:        actorName,
+			Kind:        "actor.exchanger",
+			Singleton:   false,
+			Relocatable: false,
+		}
+		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
+		require.NoError(t, err)
+
+		// re-fetching the address of the actor should return not nil address after start
+		addr, err = remoting.RemoteLookup(ctx, host, remotingPort, actorName)
+		require.NoError(t, err)
+		require.NotNil(t, addr)
+
+		from := address.NoSender()
+		// send the message to exchanger actor one using remote messaging
+		reply, err := remoting.RemoteAsk(ctx, from, addr, new(testpb.TestReply), time.Minute)
+
+		require.NoError(t, err)
+		require.NotNil(t, reply)
+		require.True(t, reply.MessageIs(new(testpb.Reply)))
+
+		actual := new(testpb.Reply)
+		err = reply.UnmarshalTo(actual)
+		require.NoError(t, err)
+
+		expected := new(testpb.Reply)
+		assert.True(t, proto.Equal(expected, actual))
+
+		remoting.Close()
+		t.Cleanup(
+			func() {
+				err = sys.Stop(ctx)
+				assert.NoError(t, err)
+			},
+		)
+	})
+	t.Run("When request is invalid", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		ports := dynaport.Get(1)
+		remotingPort := ports[0]
+		host := "127.0.0.1"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		// create an actor implementation and register it
+		actor := &exchanger{}
+		actorName := uuid.NewString()
+
+		remoting := remote.NewRemoting()
+		// fetching the address of the that actor should return nil address
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+		require.True(t, addr.Equals(address.NoSender()))
+
+		// register the actor
+		err = sys.Register(ctx, actor)
+		require.NoError(t, err)
+
+		// spawn the remote actor
+		request := &remote.SpawnRequest{
+			Name:        "",
+			Kind:        "actor.exchanger",
+			Singleton:   false,
+			Relocatable: false,
+		}
+		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
+		require.Error(t, err)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("When actor name is reserved", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		ports := dynaport.Get(1)
+		remotingPort := ports[0]
+		host := "127.0.0.1"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		// register dependencies
+		dependency := NewMockDependency("test", "test", "test")
+		err = sys.Inject(dependency)
+		require.NoError(t, err)
+
+		actorName := "GoAktXYZ"
+
+		remoting := remote.NewRemoting()
+		// spawn the remote actor
+		request := &remote.SpawnRequest{
+			Name:           actorName,
+			Kind:           "actor.exchanger",
+			Singleton:      false,
+			Relocatable:    false,
+			EnableStashing: false,
+			Dependencies:   []extension.Dependency{dependency},
+		}
+		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
+		require.Error(t, err)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		require.NoError(t, err)
+	})
+}
+
+func TestRemotingReinstate(t *testing.T) {
+	t.Run("When remoting is not enabled", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// let us disable remoting
+		actorsSystem := sys.(*actorSystem)
+		actorsSystem.remotingEnabled.Store(false)
+
+		remoting := remote.NewRemoting()
+		// create a test actor
+		actorName := "test"
+
+		err = remoting.RemoteReinstate(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.Error(t, err)
+
+		remoting.Close()
+		require.NoError(t, sys.Stop(ctx))
+	})
+	t.Run("When remoting is enabled", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		require.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		pid, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		pause.For(time.Second)
+
+		// suspend the actor
+		pid.suspend("test")
+
+		require.False(t, pid.IsRunning())
+		require.True(t, pid.IsSuspended())
+
+		remoting := remote.NewRemoting()
+
+		err = remoting.RemoteReinstate(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+
+		pause.For(time.Second)
+
+		require.True(t, pid.IsRunning())
+		require.False(t, pid.IsSuspended())
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		require.NoError(t, err)
+	})
+	t.Run("When actor name is reserved", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		require.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "GoAktXYZ"
+		remoting := remote.NewRemoting()
+
+		err = remoting.RemoteReinstate(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.Error(t, err)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		require.NoError(t, err)
 	})
 }

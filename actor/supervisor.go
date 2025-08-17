@@ -33,6 +33,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/internal/collection"
 )
 
@@ -172,7 +173,7 @@ func WithRetry(maxRetries uint32, timeout time.Duration) SupervisorOption {
 func WithAnyErrorDirective(directive Directive) SupervisorOption {
 	return func(s *Supervisor) {
 		s.Lock()
-		s.directives.Set(errorType(new(anyError)), directive)
+		s.directives.Set(errorType(new(errors.AnyError)), directive)
 		s.Unlock()
 	}
 }
@@ -221,7 +222,7 @@ func NewSupervisor(opts ...SupervisorOption) *Supervisor {
 	}
 
 	// set the default directives
-	s.directives.Set(errorType(&PanicError{}), StopDirective)
+	s.directives.Set(errorType(&errors.PanicError{}), StopDirective)
 	s.directives.Set(errorType(&runtime.PanicNilError{}), RestartDirective)
 
 	for _, opt := range opts {
@@ -229,9 +230,9 @@ func NewSupervisor(opts ...SupervisorOption) *Supervisor {
 	}
 
 	// any error overrides all error types
-	if directive, ok := s.directives.Get(errorType(new(anyError))); ok {
+	if directive, ok := s.directives.Get(errorType(new(errors.AnyError))); ok {
 		s.directives.Reset()
-		s.directives.Set(errorType(new(anyError)), directive)
+		s.directives.Set(errorType(new(errors.AnyError)), directive)
 	}
 
 	return s

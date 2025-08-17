@@ -32,6 +32,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v3/address"
+	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 )
 
@@ -39,7 +40,7 @@ import (
 // This block until a response is received or timed out.
 func Ask(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error) {
 	if !to.IsRunning() {
-		return nil, ErrDead
+		return nil, gerrors.ErrDead
 	}
 
 	receiveContext, err := toReceiveContext(ctx, to, message, false)
@@ -57,12 +58,12 @@ func Ask(ctx context.Context, to *PID, message proto.Message, timeout time.Durat
 		timers.Put(timer)
 		return
 	case <-ctx.Done():
-		err = errors.Join(ctx.Err(), ErrRequestTimeout)
+		err = errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
 		to.toDeadletters(receiveContext, err)
 		timers.Put(timer)
 		return nil, err
 	case <-timer.C:
-		err = ErrRequestTimeout
+		err = gerrors.ErrRequestTimeout
 		to.toDeadletters(receiveContext, err)
 		timers.Put(timer)
 		return
@@ -72,7 +73,7 @@ func Ask(ctx context.Context, to *PID, message proto.Message, timeout time.Durat
 // Tell sends an asynchronous message to an actor
 func Tell(ctx context.Context, to *PID, message proto.Message) error {
 	if !to.IsRunning() {
-		return ErrDead
+		return gerrors.ErrDead
 	}
 
 	receiveContext, err := toReceiveContext(ctx, to, message, true)
@@ -119,7 +120,7 @@ func toReceiveContext(ctx context.Context, to *PID, message proto.Message, async
 	case *internalpb.RemoteMessage:
 		actual, err := msg.GetMessage().UnmarshalNew()
 		if err != nil {
-			return nil, NewErrInvalidRemoteMessage(err)
+			return nil, gerrors.NewErrInvalidRemoteMessage(err)
 		}
 		receiveContext := getContext()
 		receiveContext.build(ctx, NoSender, to, actual, async)

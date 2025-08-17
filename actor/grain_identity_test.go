@@ -31,6 +31,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/internal/registry"
 )
 
@@ -78,7 +79,7 @@ func TestIdentity(t *testing.T) {
 	t.Run("With no identity separator", func(t *testing.T) {
 		actual, err := toIdentity("invalid-identity-string")
 		require.Error(t, err)
-		require.ErrorIs(t, err, ErrInvalidGrainIdentity)
+		require.ErrorIs(t, err, errors.ErrInvalidGrainIdentity)
 		require.Nil(t, actual)
 	})
 	t.Run("With invalid", func(t *testing.T) {

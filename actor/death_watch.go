@@ -28,6 +28,7 @@ import (
 	"context"
 
 	"github.com/tochemey/goakt/v3/address"
+	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/log"
@@ -101,7 +102,7 @@ func (x *deathWatch) handleTerminated(ctx *ReceiveContext) error {
 		if removeFromCluster {
 			if err := x.cluster.RemoveActor(context.WithoutCancel(ctx.Context()), node.value().Name()); err != nil {
 				x.logger.Errorf("%s failed to remove [actor=%s] from cluster: %v", x.pid.Name(), actorID, err)
-				return NewInternalError(err)
+				return errors.NewInternalError(err)
 			}
 		}
 

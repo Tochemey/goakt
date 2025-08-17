@@ -33,11 +33,12 @@ import (
 	"go.akshayshah.org/connectproto"
 	"google.golang.org/protobuf/proto"
 
-	actors "github.com/tochemey/goakt/v3/actor"
 	"github.com/tochemey/goakt/v3/address"
+	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/internal/chain"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
+	"github.com/tochemey/goakt/v3/internal/locker"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/internal/ticker"
 	"github.com/tochemey/goakt/v3/internal/validation"
@@ -59,6 +60,7 @@ import (
 //
 // Thread safety: Client is safe for concurrent use by multiple goroutines.
 type Client struct {
+	_               locker.NoCopy
 	nodes           []*Node
 	locker          *sync.Mutex
 	strategy        BalancerStrategy
@@ -132,7 +134,7 @@ func (x *Client) Close() {
 
 // Kinds returns the list of all actor kinds currently registered in the cluster.
 //
-// Actor kinds represent the different types or categories of actors that
+// Actor kinds represent the different types or categories of gerrors that
 // are available for spawning or interaction within the cluster.
 //
 // Parameters:
@@ -297,7 +299,7 @@ func (x *Client) Tell(ctx context.Context, actor *Actor, message proto.Message) 
 	}
 
 	if to.Equals(address.NoSender()) {
-		return actors.NewErrActorNotFound(actor.Name())
+		return gerrors.NewErrActorNotFound(actor.Name())
 	}
 
 	from := address.NoSender()
@@ -337,7 +339,7 @@ func (x *Client) Ask(ctx context.Context, actor *Actor, message proto.Message, t
 	}
 
 	if to.Equals(address.NoSender()) {
-		return nil, actors.NewErrActorNotFound(actor.Name())
+		return nil, gerrors.NewErrActorNotFound(actor.Name())
 	}
 
 	from := address.NoSender()
@@ -410,7 +412,7 @@ func (x *Client) Whereis(ctx context.Context, actor *Actor) (*address.Address, e
 	}
 
 	if addr.Equals(address.NoSender()) {
-		return nil, actors.NewErrActorNotFound(actor.Name())
+		return nil, gerrors.NewErrActorNotFound(actor.Name())
 	}
 
 	return addr, nil

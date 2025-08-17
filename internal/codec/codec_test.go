@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025 Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,9 +22,10 @@
  * SOFTWARE.
  */
 
-package actor
+package codec
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -32,11 +33,14 @@ import (
 	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/types/known/durationpb"
 
+	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
+	"github.com/tochemey/goakt/v3/internal/registry"
+	mocks "github.com/tochemey/goakt/v3/mocks/extension"
 	"github.com/tochemey/goakt/v3/passivation"
 )
 
-func TestMarshalAndUnmarshalPassivationStrategy(t *testing.T) {
+func TestEncodeDecodePassivationStrategy(t *testing.T) {
 	t.Run("TimeBasedStrategy", func(t *testing.T) {
 		duration := time.Second
 		strategy := passivation.NewTimeBasedStrategy(duration)
@@ -47,10 +51,10 @@ func TestMarshalAndUnmarshalPassivationStrategy(t *testing.T) {
 				},
 			},
 		}
-		result := marshalPassivationStrategy(strategy)
+		result := EncodePassivationStrategy(strategy)
 		require.Equal(t, prototext.Format(expected), prototext.Format(result))
 
-		unmarshalled := unmarshalPassivationStrategy(result)
+		unmarshalled := DecodePassivationStrategy(result)
 		require.NotNil(t, unmarshalled)
 		require.Equal(t, strategy.String(), unmarshalled.String())
 	})
@@ -64,9 +68,9 @@ func TestMarshalAndUnmarshalPassivationStrategy(t *testing.T) {
 				},
 			},
 		}
-		result := marshalPassivationStrategy(strategy)
+		result := EncodePassivationStrategy(strategy)
 		require.Equal(t, prototext.Format(expected), prototext.Format(result))
-		unmarshalled := unmarshalPassivationStrategy(result)
+		unmarshalled := DecodePassivationStrategy(result)
 		require.NotNil(t, unmarshalled)
 		require.Equal(t, strategy.String(), unmarshalled.String())
 	})
@@ -77,10 +81,36 @@ func TestMarshalAndUnmarshalPassivationStrategy(t *testing.T) {
 				LongLived: new(internalpb.LongLivedPassivation),
 			},
 		}
-		result := marshalPassivationStrategy(strategy)
+		result := EncodePassivationStrategy(strategy)
 		require.Equal(t, prototext.Format(expected), prototext.Format(result))
-		unmarshalled := unmarshalPassivationStrategy(result)
+		unmarshalled := DecodePassivationStrategy(result)
 		require.NotNil(t, unmarshalled)
 		require.Equal(t, strategy.String(), unmarshalled.String())
+	})
+}
+
+func TestEncodeDependencies(t *testing.T) {
+	t.Run("EncodeDependencies Happy Path", func(t *testing.T) {
+		mockDependency := mocks.NewDependency(t)
+		mockDependency.On("ID").Return("dep1")
+		mockDependency.On("MarshalBinary").Return([]byte("mock data"), nil)
+
+		dependencies := []extension.Dependency{mockDependency}
+		expected := []*internalpb.Dependency{
+			{Id: "dep1", TypeName: registry.Name(mockDependency), Bytea: []byte("mock data")},
+		}
+		result, err := EncodeDependencies(dependencies...)
+		require.NoError(t, err)
+		require.Equal(t, expected, result)
+	})
+	t.Run("EncodeDependencies Error", func(t *testing.T) {
+		mockDependency := mocks.NewDependency(t)
+		errMock := errors.New("mock error")
+		mockDependency.On("MarshalBinary").Return(nil, errMock)
+
+		dependencies := []extension.Dependency{mockDependency}
+		result, err := EncodeDependencies(dependencies...)
+		require.Error(t, err)
+		require.Nil(t, result)
 	})
 }
