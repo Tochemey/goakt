@@ -75,13 +75,8 @@ func (config *Config) Sanitize() {
 		}
 	}
 
-	if config.HealthCheck != nil {
-		if config.HealthCheck.Interval == 0 {
-			config.HealthCheck.Interval = 10 * time.Second
-		}
-		if config.HealthCheck.Timeout == 0 {
-			config.HealthCheck.Timeout = 3 * time.Second
-		}
+	if config.HealthCheck == nil {
+		config.HealthCheck = defaultHealthCheck()
 	}
 }
 
@@ -106,9 +101,13 @@ type QueryOptions struct {
 
 // HealthCheck defines health check configuration
 type HealthCheck struct {
-	HTTP     string        // HTTP endpoint for health checks
-	TCP      string        // TCP address for health checks
 	Interval time.Duration // Health check interval (default: 10s)
 	Timeout  time.Duration // Health check timeout (default: 3s)
-	TTL      time.Duration // TTL for TTL health checks
+}
+
+func defaultHealthCheck() *HealthCheck {
+	return &HealthCheck{
+		Interval: 10 * time.Second,
+		Timeout:  3 * time.Second,
+	}
 }

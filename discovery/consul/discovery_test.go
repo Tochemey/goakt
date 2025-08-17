@@ -26,6 +26,8 @@ package consul
 
 import (
 	"context"
+	"net"
+	"strconv"
 	"testing"
 	"time"
 
@@ -131,7 +133,6 @@ func TestDiscovery(t *testing.T) {
 			HealthCheck: &HealthCheck{
 				Interval: 10,
 				Timeout:  5,
-				HTTP:     endpoint,
 			},
 		}
 
@@ -230,7 +231,6 @@ func TestDiscovery(t *testing.T) {
 			HealthCheck: &HealthCheck{
 				Interval: 10,
 				Timeout:  5,
-				HTTP:     endpoint,
 			},
 			QueryOptions: &QueryOptions{
 				OnlyPassing: true,
@@ -303,7 +303,8 @@ func TestDiscovery(t *testing.T) {
 			ActorSystemName: actorSystemName,
 			Host:            host,
 			PeersPort:       peersPort,
-			Context:         ctx,
+
+			Context: ctx,
 		}
 
 		// create the instance of provider
@@ -473,27 +474,57 @@ func TestDiscovery(t *testing.T) {
 	})
 }
 
-func newPeer(t *testing.T, serverAddr string) *Discovery {
+func newPeer(t *testing.T, agentEndpoint string) *Discovery {
+	t.Helper()
 	// generate the ports for the single node
 	nodePorts := dynaport.Get(1)
 	peersPort := nodePorts[0]
 
 	// create a Cluster node
 	host := "127.0.0.1"
+
+	listener, err := net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(peersPort)))
+	require.NoError(t, err)
+
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return // server closed
+			}
+			// For a mock, we can just close immediately
+			_ = conn.Close()
+		}
+	}()
+
+	t.Cleanup(func() {
+		err := listener.Close()
+		require.NoError(t, err)
+	})
+
 	// create the config
 	config := &Config{
-		Address:         serverAddr,
+		Address:         agentEndpoint,
 		Timeout:         10,
 		ActorSystemName: "test-system",
 		Host:            host,
 		PeersPort:       peersPort,
 		Context:         t.Context(),
+		HealthCheck: &HealthCheck{
+			Interval: 10 * time.Second,
+			Timeout:  5 * time.Second,
+		},
+		QueryOptions: &QueryOptions{
+			OnlyPassing: false,
+			AllowStale:  false,
+			WaitTime:    5 * time.Second,
+		},
 	}
+
 	// create the instance of provider
 	provider := NewDiscovery(config)
 
-	// initialize
-	err := provider.Initialize()
+	err = provider.Initialize()
 	require.NoError(t, err)
 	// return the provider
 	return provider

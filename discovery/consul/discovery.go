@@ -141,14 +141,7 @@ func (x *Discovery) Register() error {
 		check := &api.AgentServiceCheck{
 			Interval: x.config.HealthCheck.Interval.String(),
 			Timeout:  x.config.HealthCheck.Timeout.String(),
-		}
-
-		if x.config.HealthCheck.HTTP != "" {
-			check.HTTP = x.config.HealthCheck.HTTP
-		} else if x.config.HealthCheck.TCP != "" {
-			check.TCP = x.config.HealthCheck.TCP
-		} else if x.config.HealthCheck.TTL > 0 {
-			check.TTL = x.config.HealthCheck.TTL.String()
+			TCP:      net.JoinHostPort(x.config.Host, strconv.Itoa(x.config.PeersPort)),
 		}
 
 		service.Check = check

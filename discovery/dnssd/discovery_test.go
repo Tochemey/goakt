@@ -47,7 +47,7 @@ func TestDiscovery(t *testing.T) {
 		// this is a cheap test
 		// assert the type of svc
 		assert.IsType(t, &Discovery{}, provider)
-		var p interface{} = provider
+		var p any = provider
 		_, ok := p.(discovery.Provider)
 		assert.True(t, ok)
 	})
@@ -56,7 +56,7 @@ func TestDiscovery(t *testing.T) {
 		// create the instance of provider
 		provider := NewDiscovery(nil)
 		require.NotNil(t, provider)
-		assert.Equal(t, "dns-sd", provider.ID())
+		assert.Equal(t, "dns", provider.ID())
 	})
 	t.Run("With Initialize", func(t *testing.T) {
 		// create the config
