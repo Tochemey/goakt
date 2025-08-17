@@ -55,12 +55,12 @@ jobs:
         shell: bash
         run: |
           go test -mod=vendor -p 1 -timeout 0 -race -v -coverprofile=coverage.out -covermode=atomic -coverpkg=./... $(go list -mod=vendor ./... | grep -v -E "(goaktpb|mocks|internal/internalpb)")
-      - uses: codecov/codecov-action@v5
+      - name: Upload coverage to Codecov
+        if: matrix.os == 'linux'
+        uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.out
-          flags: ${{ matrix.os }}
-          name: coverage-${{ matrix.os }}
           fail_ci_if_error: false
           verbose: true
   lint:
