@@ -51,37 +51,21 @@ jobs:
       - name: Install dependencies
         run: |
           go mod download
-      - name: Run tests
-        shell: bash
-        run: |
-          go test -mod=vendor -p 1 -timeout 0 -race -v -coverprofile=coverage.out -covermode=atomic -coverpkg=./... $(go list -mod=vendor ./... | grep -v -E "(goaktpb|mocks|internal/internalpb)")
-      - uses: codecov/codecov-action@v5
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage.out
-          flags: ${{ matrix.os }}
-          name: coverage-${{ matrix.os }}
-          fail_ci_if_error: false
-          verbose: true
-  lint:
-    name: Linter on ${{ matrix.os }}
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: true
-      matrix:
-        include:
-          - os: linux
-            runner: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.24.5"
-          check-latest: true
-          cache-dependency-path: "**/*.sum"
-      - name: golangci-lint
+      - name: Run Linter
+        if: matrix.os == 'linux'
         uses: golangci/golangci-lint-action@v8
         with:
           version: v2.1.0
           args: --timeout 10m --config .golangci.yml
+      - name: Run tests
+        shell: bash
+        run: |
+          go test -mod=vendor -p 1 -timeout 0 -race -v -coverprofile=coverage.out -covermode=atomic -coverpkg=./... $(go list -mod=vendor ./... | grep -v -E "(goaktpb|mocks|internal/internalpb)")
+      - name: Upload coverage to Codecov
+        if: matrix.os == 'linux'
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.out
+          fail_ci_if_error: false
+          verbose: true

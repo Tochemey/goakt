@@ -23,8 +23,8 @@ RUN go install connectrpc.com/connect/cmd/protoc-gen-connect-go@latest
 
 # install linter
 # binary will be $(go env GOPATH)/bin/golangci-lint
-RUN curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.3.0
-RUN ls -la $(which golangci-lint)
+RUN curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.4.0
+RUN golangci-lint --version
 
 # install vektra/mockery
 RUN go install github.com/vektra/mockery/v2@v2.53.2

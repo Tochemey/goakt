@@ -34,11 +34,6 @@ import (
 	"github.com/tochemey/goakt/v3/internal/validation"
 )
 
-// defaultKinds defines the default system kinds
-var defaultKinds = []Actor{
-	new(FuncActor),
-}
-
 // ClusterConfig defines the cluster mode settings
 type ClusterConfig struct {
 	discovery                discovery.Provider
