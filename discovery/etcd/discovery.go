@@ -161,8 +161,9 @@ func (d *Discovery) Register() error {
 
 	// Start goroutine to consume keep-alive responses
 	go func() {
-		for range ch {
+		for ka := range ch {
 			// Consume keep-alive responses to prevent channel from blocking
+			_ = ka
 		}
 	}()
 
@@ -235,11 +236,9 @@ func (d *Discovery) Deregister() error {
 		ctx, cancel := context.WithTimeout(d.client.Ctx(), d.config.Timeout)
 		defer cancel()
 
-		_, err := d.client.Revoke(ctx, d.leaseID)
-		if err != nil {
-			// Log error but don't fail deregistration
-			// The lease will expire naturally if revoke fails
-		}
+		// An error shouldn't fail deregistration
+		// The lease will expire naturally if revoke fails
+		_, _ = d.client.Revoke(ctx, d.leaseID)
 		d.leaseID = 0
 	}
 	d.registered.Store(false)
