@@ -37,4 +37,6 @@ const (
 	ProviderStatic = "static"
 	// ProviderDNS represents the DNS discovery provider
 	ProviderDNS = "dns"
+	// ProviderEtcd represents the Etcd discovery provider
+	ProviderEtcd = "etcd"
 )
