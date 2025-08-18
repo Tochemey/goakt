@@ -42,17 +42,17 @@ func TestGrainContext(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start a system cluster
-		node1, sd1 := testCluster(t, srv.Addr().String())
+		node1, sd1 := testNATs(t, srv.Addr().String())
 		require.NotNil(t, node1)
 		require.NotNil(t, sd1)
 
 		// create and start a system cluster
-		node2, sd2 := testCluster(t, srv.Addr().String())
+		node2, sd2 := testNATs(t, srv.Addr().String())
 		require.NotNil(t, node2)
 		require.NotNil(t, sd2)
 
 		// create and start a system cluster
-		node3, sd3 := testCluster(t, srv.Addr().String())
+		node3, sd3 := testNATs(t, srv.Addr().String())
 		require.NotNil(t, node3)
 		require.NotNil(t, sd3)
 
@@ -112,17 +112,17 @@ func TestGrainContext(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start a system cluster
-		node1, sd1 := testCluster(t, srv.Addr().String())
+		node1, sd1 := testNATs(t, srv.Addr().String())
 		require.NotNil(t, node1)
 		require.NotNil(t, sd1)
 
 		// create and start a system cluster
-		node2, sd2 := testCluster(t, srv.Addr().String())
+		node2, sd2 := testNATs(t, srv.Addr().String())
 		require.NotNil(t, node2)
 		require.NotNil(t, sd2)
 
 		// create and start a system cluster
-		node3, sd3 := testCluster(t, srv.Addr().String())
+		node3, sd3 := testNATs(t, srv.Addr().String())
 		require.NotNil(t, node3)
 		require.NotNil(t, sd3)
 

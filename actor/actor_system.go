@@ -44,6 +44,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"connectrpc.com/grpchealth"
 	goset "github.com/deckarep/golang-set/v2"
 	"github.com/flowchartsman/retry"
 	"github.com/google/uuid"
@@ -2475,6 +2476,8 @@ func (x *actorSystem) enableRemoting(ctx context.Context) error {
 	}
 
 	x.logger.Info("enabling remoting...")
+	compress1KB := connect.WithCompressMinBytes(1024)
+
 	opts := []connect.HandlerOption{
 		connectproto.WithBinary(
 			proto.MarshalOptions{},
@@ -2485,6 +2488,10 @@ func (x *actorSystem) enableRemoting(ctx context.Context) error {
 	clusterServicePath, clusterServiceHandler := internalpbconnect.NewClusterServiceHandler(x, opts...)
 
 	mux := stdhttp.NewServeMux()
+	mux.Handle(grpchealth.NewHandler(
+		grpchealth.NewStaticChecker(internalpbconnect.RemotingServiceName),
+		compress1KB,
+	))
 	mux.Handle(remotingServicePath, remotingServiceHandler)
 	mux.Handle(clusterServicePath, clusterServiceHandler)
 

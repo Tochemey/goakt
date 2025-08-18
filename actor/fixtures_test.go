@@ -37,10 +37,12 @@ import (
 	"github.com/kapetan-io/tackle/autotls"
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/stretchr/testify/require"
+	testcontainer "github.com/testcontainers/testcontainers-go/modules/consul"
 	"github.com/travisjeffery/go-dynaport"
 	"go.uber.org/atomic"
 
 	"github.com/tochemey/goakt/v3/discovery"
+	"github.com/tochemey/goakt/v3/discovery/consul"
 	"github.com/tochemey/goakt/v3/discovery/nats"
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/extension"
@@ -441,160 +443,6 @@ func (d *MockUnhandled) Receive(ctx *ReceiveContext) {
 
 func (d *MockUnhandled) PostStop(*Context) error {
 	return nil
-}
-
-func startNatsServer(t *testing.T) *natsserver.Server {
-	t.Helper()
-	serv, err := natsserver.NewServer(&natsserver.Options{
-		Host: "127.0.0.1",
-		Port: -1,
-	})
-
-	require.NoError(t, err)
-
-	ready := make(chan bool)
-	go func() {
-		ready <- true
-		serv.Start()
-	}()
-	<-ready
-
-	if !serv.ReadyForConnections(2 * time.Second) {
-		t.Fatalf("nats-io server failed to start")
-	}
-
-	return serv
-}
-
-type testClusterConfig struct {
-	tlsEnabled        bool
-	conf              autotls.Config
-	pubsubEnabled     bool
-	relocationEnabled bool
-	extension         extension.Extension
-	dependency        extension.Dependency
-}
-
-type testClusterOption func(*testClusterConfig)
-
-func withTestTSL(conf autotls.Config) testClusterOption {
-	return func(tc *testClusterConfig) {
-		tc.tlsEnabled = true
-		tc.conf = conf
-	}
-}
-
-func withTestPubSub() testClusterOption {
-	return func(tc *testClusterConfig) {
-		tc.pubsubEnabled = true
-	}
-}
-
-func withoutTestRelocation() testClusterOption {
-	return func(tc *testClusterConfig) {
-		tc.relocationEnabled = false
-	}
-}
-
-func withMockExtension(ext extension.Extension) testClusterOption {
-	return func(tcc *testClusterConfig) {
-		tcc.extension = ext
-	}
-}
-
-func testCluster(t *testing.T, serverAddr string, opts ...testClusterOption) (ActorSystem, discovery.Provider) {
-	ctx := context.TODO()
-	logger := log.DiscardLogger
-
-	// generate the ports for the single startNode
-	nodePorts := dynaport.Get(3)
-	discoveryPort := nodePorts[0]
-	clusterPort := nodePorts[1]
-	remotingPort := nodePorts[2]
-
-	// create a Cluster startNode
-	host := "127.0.0.1"
-	// create the various config option
-	actorSystemName := "accountsSystem"
-	natsSubject := "some-subject"
-	// create the config
-	config := nats.Config{
-		NatsServer:    fmt.Sprintf("nats://%s", serverAddr),
-		NatsSubject:   natsSubject,
-		Host:          host,
-		DiscoveryPort: discoveryPort,
-	}
-
-	// create the instance of provider
-	provider := nats.NewDiscovery(&config, nats.WithLogger(log.DiscardLogger))
-
-	// create the actor system options
-	options := []Option{
-		WithLogger(logger),
-		WithRemote(remote.NewConfig(host, remotingPort)),
-		WithCluster(
-			NewClusterConfig().
-				WithKinds(
-					new(MockActor),
-					new(MockEntity),
-					new(MockGrainActor),
-				).
-				WithGrains(new(MockGrain)).
-				WithPartitionCount(7).
-				WithReplicaCount(1).
-				WithPeersPort(clusterPort).
-				WithMinimumPeersQuorum(1).
-				WithDiscoveryPort(discoveryPort).
-				WithBootstrapTimeout(time.Second).
-				WithClusterStateSyncInterval(300 * time.Millisecond).
-				WithPeersStateSyncInterval(500 * time.Millisecond).
-				WithDiscovery(provider)),
-	}
-
-	cfg := &testClusterConfig{
-		tlsEnabled:        false,
-		pubsubEnabled:     false,
-		relocationEnabled: true,
-	}
-	for _, opt := range opts {
-		opt(cfg)
-	}
-
-	if cfg.pubsubEnabled {
-		options = append(options, WithPubSub())
-	}
-
-	if cfg.tlsEnabled {
-		options = append(options, WithTLS(&tls.Info{
-			ClientConfig: cfg.conf.ClientTLS,
-			ServerConfig: cfg.conf.ServerTLS,
-		}))
-	}
-
-	if !cfg.relocationEnabled {
-		options = append(options, WithoutRelocation())
-	}
-
-	if cfg.extension != nil {
-		options = append(options, WithExtensions(cfg.extension))
-	}
-
-	// create the actor system
-	system, err := NewActorSystem(actorSystemName, options...)
-
-	require.NotNil(t, system)
-	require.NoError(t, err)
-
-	if cfg.dependency != nil {
-		require.NoError(t, system.Inject(cfg.dependency))
-	}
-
-	// start the node
-	require.NoError(t, system.Start(ctx))
-	pause.For(2 * time.Second)
-
-	// return the cluster startNode
-	return system, provider
 }
 
 type MockRouter struct {
@@ -1350,4 +1198,193 @@ func (m *MockErrorMailbox) IsEmpty() bool {
 // Len implements Mailbox.
 func (m *MockErrorMailbox) Len() int64 {
 	return 0
+}
+
+// //////////////////////////////////////// CLUSTER PROVIDERS MOCKS //////////////////////////////////////
+type providerFactory func(t *testing.T, host string, discoveryPort int) discovery.Provider
+
+func startNatsServer(t *testing.T) *natsserver.Server {
+	t.Helper()
+	serv, err := natsserver.NewServer(&natsserver.Options{
+		Host: "127.0.0.1",
+		Port: -1,
+	})
+
+	require.NoError(t, err)
+
+	ready := make(chan bool)
+	go func() {
+		ready <- true
+		serv.Start()
+	}()
+	<-ready
+
+	if !serv.ReadyForConnections(2 * time.Second) {
+		t.Fatalf("nats-io server failed to start")
+	}
+
+	return serv
+}
+
+func startConsulAgent(t *testing.T) *testcontainer.ConsulContainer {
+	t.Helper()
+	container, err := testcontainer.Run(t.Context(), "hashicorp/consul:1.15")
+	require.NoError(t, err)
+	pause.For(1 * time.Second)
+	t.Cleanup(func() {
+		err := container.Terminate(context.Background())
+		require.NoError(t, err)
+	})
+	return container
+}
+
+type testClusterConfig struct {
+	tlsEnabled        bool
+	conf              autotls.Config
+	pubsubEnabled     bool
+	relocationEnabled bool
+	extension         extension.Extension
+	dependency        extension.Dependency
+}
+
+type testClusterOption func(*testClusterConfig)
+
+func withTestTLS(conf autotls.Config) testClusterOption {
+	return func(tc *testClusterConfig) {
+		tc.tlsEnabled = true
+		tc.conf = conf
+	}
+}
+
+func withTestPubSub() testClusterOption {
+	return func(tc *testClusterConfig) {
+		tc.pubsubEnabled = true
+	}
+}
+
+func withoutTestRelocation() testClusterOption {
+	return func(tc *testClusterConfig) {
+		tc.relocationEnabled = false
+	}
+}
+
+func withMockExtension(ext extension.Extension) testClusterOption {
+	return func(tcc *testClusterConfig) {
+		tcc.extension = ext
+	}
+}
+
+func createNATsProvider(serverAddr string) providerFactory {
+	return func(_ *testing.T, host string, discoveryPort int) discovery.Provider {
+		natsSubject := "some-subject"
+		config := nats.Config{
+			NatsServer:    fmt.Sprintf("nats://%s", serverAddr),
+			NatsSubject:   natsSubject,
+			Host:          host,
+			DiscoveryPort: discoveryPort,
+		}
+		return nats.NewDiscovery(&config, nats.WithLogger(log.DiscardLogger))
+	}
+}
+
+func createConsulProvider(agentEndpoint string) providerFactory {
+	return func(t *testing.T, host string, discoveryPort int) discovery.Provider {
+		config := &consul.Config{
+			Address:         agentEndpoint,
+			Timeout:         10 * time.Second,
+			ActorSystemName: "accountsSystem",
+			Host:            host,
+			DiscoveryPort:   discoveryPort,
+			Context:         t.Context(),
+			HealthCheck: &consul.HealthCheck{
+				Interval: 10 * time.Second,
+				Timeout:  5 * time.Second,
+			},
+			QueryOptions: &consul.QueryOptions{
+				OnlyPassing: false,
+				AllowStale:  false,
+				WaitTime:    5 * time.Second,
+			},
+		}
+		return consul.NewDiscovery(config)
+	}
+}
+
+func testSystem(t *testing.T, providerFactory providerFactory, opts ...testClusterOption) (ActorSystem, discovery.Provider) {
+	ctx := context.TODO()
+	logger := log.DiscardLogger
+
+	// dynamic ports
+	nodePorts := dynaport.Get(3)
+	discoveryPort, peersPort, remotingPort := nodePorts[0], nodePorts[1], nodePorts[2]
+
+	host := "127.0.0.1"
+	actorSystemName := "accountsSystem"
+
+	// provider
+	provider := providerFactory(t, host, discoveryPort)
+
+	// base options
+	options := []Option{
+		WithLogger(logger),
+		WithRemote(remote.NewConfig(host, remotingPort)),
+		WithCluster(
+			NewClusterConfig().
+				WithKinds(new(MockActor), new(MockEntity), new(MockGrainActor)).
+				WithGrains(new(MockGrain)).
+				WithPartitionCount(7).
+				WithReplicaCount(1).
+				WithPeersPort(peersPort).
+				WithMinimumPeersQuorum(1).
+				WithDiscoveryPort(discoveryPort).
+				WithBootstrapTimeout(time.Second).
+				WithClusterStateSyncInterval(300 * time.Millisecond).
+				WithPeersStateSyncInterval(500 * time.Millisecond).
+				WithDiscovery(provider)),
+	}
+
+	cfg := &testClusterConfig{relocationEnabled: true}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
+	if cfg.pubsubEnabled {
+		options = append(options, WithPubSub())
+	}
+
+	if cfg.tlsEnabled {
+		options = append(options, WithTLS(&tls.Info{
+			ClientConfig: cfg.conf.ClientTLS,
+			ServerConfig: cfg.conf.ServerTLS,
+		}))
+	}
+
+	if !cfg.relocationEnabled {
+		options = append(options, WithoutRelocation())
+	}
+
+	if cfg.extension != nil {
+		options = append(options, WithExtensions(cfg.extension))
+	}
+
+	system, err := NewActorSystem(actorSystemName, options...)
+	require.NotNil(t, system)
+	require.NoError(t, err)
+
+	if cfg.dependency != nil {
+		require.NoError(t, system.Inject(cfg.dependency))
+	}
+
+	require.NoError(t, system.Start(ctx))
+	pause.For(2 * time.Second)
+
+	return system, provider
+}
+
+func testNATs(t *testing.T, serverAddr string, opts ...testClusterOption) (ActorSystem, discovery.Provider) {
+	return testSystem(t, createNATsProvider(serverAddr), opts...)
+}
+
+func testConsul(t *testing.T, agentEndpoint string, opts ...testClusterOption) (ActorSystem, discovery.Provider) {
+	return testSystem(t, createConsulProvider(agentEndpoint), opts...)
 }

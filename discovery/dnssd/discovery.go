@@ -67,7 +67,7 @@ func NewDiscovery(config *Config) *Discovery {
 
 // ID returns the discovery provider id
 func (d *Discovery) ID() string {
-	return "dns-sd"
+	return discovery.ProviderDNS
 }
 
 // Initialize initializes the plugin: registers some internal data structures, clients etc.

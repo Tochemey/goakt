@@ -74,7 +74,7 @@ func NewDiscovery(config *Config) *Discovery {
 
 // ID returns the discovery provider id
 func (d *Discovery) ID() string {
-	return "kubernetes"
+	return discovery.ProviderKubernetes
 }
 
 // Initialize initializes the plugin: registers some internal data structures, clients etc.

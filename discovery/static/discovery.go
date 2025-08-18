@@ -47,7 +47,7 @@ func NewDiscovery(config *Config) *Discovery {
 
 // ID returns the discovery provider identifier
 func (d *Discovery) ID() string {
-	return "static"
+	return discovery.ProviderStatic
 }
 
 // Initialize the discovery provider
