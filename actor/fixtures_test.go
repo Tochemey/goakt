@@ -1201,7 +1201,7 @@ func (m *MockErrorMailbox) Len() int64 {
 }
 
 // //////////////////////////////////////// CLUSTER PROVIDERS MOCKS //////////////////////////////////////
-type providerFactory func(host string, clusterPort, discoveryPort int, t *testing.T) discovery.Provider
+type providerFactory func(t *testing.T, host string, discoveryPort int) discovery.Provider
 
 func startNatsServer(t *testing.T) *natsserver.Server {
 	t.Helper()
@@ -1274,8 +1274,8 @@ func withMockExtension(ext extension.Extension) testClusterOption {
 	}
 }
 
-func natsProvider(serverAddr string) providerFactory {
-	return func(host string, clusterPort, discoveryPort int, t *testing.T) discovery.Provider {
+func createNATsProvider(serverAddr string) providerFactory {
+	return func(_ *testing.T, host string, discoveryPort int) discovery.Provider {
 		natsSubject := "some-subject"
 		config := nats.Config{
 			NatsServer:    fmt.Sprintf("nats://%s", serverAddr),
@@ -1287,8 +1287,8 @@ func natsProvider(serverAddr string) providerFactory {
 	}
 }
 
-func consulProvider(agentEndpoint string) providerFactory {
-	return func(host string, clusterPort, discoveryPort int, t *testing.T) discovery.Provider {
+func createConsulProvider(agentEndpoint string) providerFactory {
+	return func(t *testing.T, host string, discoveryPort int) discovery.Provider {
 		config := &consul.Config{
 			Address:         agentEndpoint,
 			Timeout:         10 * time.Second,
@@ -1310,7 +1310,7 @@ func consulProvider(agentEndpoint string) providerFactory {
 	}
 }
 
-func newPeer(t *testing.T, providerFactory providerFactory, opts ...testClusterOption) (ActorSystem, discovery.Provider) {
+func testSystem(t *testing.T, providerFactory providerFactory, opts ...testClusterOption) (ActorSystem, discovery.Provider) {
 	ctx := context.TODO()
 	logger := log.DiscardLogger
 
@@ -1322,7 +1322,7 @@ func newPeer(t *testing.T, providerFactory providerFactory, opts ...testClusterO
 	actorSystemName := "accountsSystem"
 
 	// provider
-	provider := providerFactory(host, peersPort, discoveryPort, t)
+	provider := providerFactory(t, host, discoveryPort)
 
 	// base options
 	options := []Option{
@@ -1381,10 +1381,10 @@ func newPeer(t *testing.T, providerFactory providerFactory, opts ...testClusterO
 	return system, provider
 }
 
-func natsPeer(t *testing.T, serverAddr string, opts ...testClusterOption) (ActorSystem, discovery.Provider) {
-	return newPeer(t, natsProvider(serverAddr), opts...)
+func testNATs(t *testing.T, serverAddr string, opts ...testClusterOption) (ActorSystem, discovery.Provider) {
+	return testSystem(t, createNATsProvider(serverAddr), opts...)
 }
 
-func consulPeer(t *testing.T, agentEndpoint string, opts ...testClusterOption) (ActorSystem, discovery.Provider) {
-	return newPeer(t, consulProvider(agentEndpoint), opts...)
+func testConsul(t *testing.T, agentEndpoint string, opts ...testClusterOption) (ActorSystem, discovery.Provider) {
+	return testSystem(t, createConsulProvider(agentEndpoint), opts...)
 }

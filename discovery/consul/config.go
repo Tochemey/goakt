@@ -31,25 +31,56 @@ import (
 	"github.com/tochemey/goakt/v3/internal/validation"
 )
 
-// Config holds the configuration for the Consul provider
+// Config defines the configuration options for the Consul provider.
+//
+// It controls how the provider connects to Consul, registers the service,
+// and configures discovery and health-check behavior.
 type Config struct {
-	// Optional context for operations; nil means background context will be used
+	// Context specifies the execution context for Consul operations.
+	// If nil, context.Background() will be used.
 	Context context.Context
 
-	// Consul client configuration
-	Address    string        // Consul agent address (default: "127.0.0.1:8500")
-	Datacenter string        // Consul datacenter
-	Token      string        // Consul ACL token
-	Timeout    time.Duration // Request timeout (default: 10s)
+	// --- Consul client configuration ---
 
-	ActorSystemName string // Actor system name (used for service discovery)
-	Host            string // Host is the actor system host. It is used to register the service in Consul
-	DiscoveryPort   int    // DiscoveryPort is the port on which the actor system is listening for discovery requests
+	// Address is the address of the Consul agent to connect to.
+	// Default: "127.0.0.1:8500"
+	Address string
 
-	// Discovery configuration
-	QueryOptions *QueryOptions // Advanced query options
+	// Datacenter specifies the Consul datacenter to use.
+	// If empty, the agent's default datacenter is used.
+	Datacenter string
 
-	// Health check configuration
+	// Token is the Consul ACL token used for authenticated requests.
+	Token string
+
+	// Timeout specifies the maximum duration for Consul requests.
+	// Default: 10s
+	Timeout time.Duration
+
+	// --- Actor system configuration ---
+
+	// ActorSystemName is the name of the actor system.
+	// It is used as the service identifier when registering with Consul.
+	ActorSystemName string
+
+	// Host is the hostname or IP address of the actor system.
+	// It is used to register the service in Consul.
+	Host string
+
+	// DiscoveryPort is the TCP port on which the actor system listens
+	// for service discovery requests.
+	DiscoveryPort int
+
+	// --- Discovery configuration ---
+
+	// QueryOptions specifies advanced options for Consul queries.
+	// May be nil for default behavior.
+	QueryOptions *QueryOptions
+
+	// --- Health check configuration ---
+
+	// HealthCheck configures the Consul health check for the registered service.
+	// May be nil to disable health checks.
 	HealthCheck *HealthCheck
 }
 
@@ -90,19 +121,47 @@ func (config *Config) Validate() error {
 		Validate()
 }
 
-// QueryOptions defines options for service discovery queries
+// QueryOptions defines advanced options for Consul service discovery queries.
+//
+// These options control how results are filtered, sorted, and fetched
+// from Consul's catalog.
 type QueryOptions struct {
-	OnlyPassing bool          // Only return healthy services
-	Near        string        // Sort by distance to this node
-	WaitTime    time.Duration // Maximum time to wait for changes
-	Datacenter  string        // Datacenter to query
-	AllowStale  bool          // Allow stale reads
+	// OnlyPassing specifies whether to return only services with a passing health check.
+	// If false, all services (healthy or not) may be returned.
+	OnlyPassing bool
+
+	// Near specifies a node name to sort results by network distance to that node.
+	// If empty, no distance-based sorting is applied.
+	Near string
+
+	// WaitTime is the maximum duration to wait for changes when using Consul blocking queries.
+	// If zero, the default agent wait time is used.
+	WaitTime time.Duration
+
+	// Datacenter specifies the Consul datacenter to query.
+	// If empty, the agent's default datacenter is used.
+	Datacenter string
+
+	// AllowStale indicates whether stale results are acceptable.
+	// When true, results may be served from follower nodes, improving availability
+	// at the cost of potentially outdated data.
+	AllowStale bool
 }
 
-// HealthCheck defines health check configuration
+// HealthCheck defines the configuration of a Consul health check
+// associated with a registered service.
+//
+// Health checks allow Consul to automatically mark services as unhealthy
+// if they fail within the configured thresholds.
 type HealthCheck struct {
-	Interval time.Duration // Health check interval (default: 10s)
-	Timeout  time.Duration // Health check timeout (default: 3s)
+	// Interval is the frequency at which Consul performs the health check.
+	// Default: 10s
+	Interval time.Duration
+
+	// Timeout is the maximum duration Consul waits for a health check response.
+	// If the timeout is exceeded, the check is considered failed.
+	// Default: 3s
+	Timeout time.Duration
 }
 
 func defaultHealthCheck() *HealthCheck {

@@ -890,17 +890,17 @@ func TestActorSystem(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start a system cluster
-		node1, sd1 := natsPeer(t, srv.Addr().String())
+		node1, sd1 := testNATs(t, srv.Addr().String())
 		require.NotNil(t, node1)
 		require.NotNil(t, sd1)
 
 		// create and start a system cluster
-		node2, sd2 := natsPeer(t, srv.Addr().String())
+		node2, sd2 := testNATs(t, srv.Addr().String())
 		require.NotNil(t, node2)
 		require.NotNil(t, sd2)
 
 		// create and start a system cluster
-		node3, sd3 := natsPeer(t, srv.Addr().String())
+		node3, sd3 := testNATs(t, srv.Addr().String())
 		require.NotNil(t, node3)
 		require.NotNil(t, sd3)
 
@@ -1136,7 +1136,7 @@ func TestActorSystem(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		cl1, sd1 := natsPeer(t, srv.Addr().String())
+		cl1, sd1 := testNATs(t, srv.Addr().String())
 		peerAddress1 := cl1.PeerAddress()
 		require.NotEmpty(t, peerAddress1)
 
@@ -1146,7 +1146,7 @@ func TestActorSystem(t *testing.T) {
 		require.NotNil(t, subscriber1)
 
 		// create and start system cluster
-		cl2, sd2 := natsPeer(t, srv.Addr().String())
+		cl2, sd2 := testNATs(t, srv.Addr().String())
 		peerAddress2 := cl2.PeerAddress()
 		require.NotEmpty(t, peerAddress2)
 
@@ -1675,12 +1675,12 @@ func TestActorSystem(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		node1, sd1 := natsPeer(t, srv.Addr().String())
+		node1, sd1 := testNATs(t, srv.Addr().String())
 		peerAddress1 := node1.PeerAddress()
 		require.NotEmpty(t, peerAddress1)
 
 		// create and start system cluster
-		node2, sd2 := natsPeer(t, srv.Addr().String())
+		node2, sd2 := testNATs(t, srv.Addr().String())
 		peerAddress2 := node2.PeerAddress()
 		require.NotEmpty(t, peerAddress2)
 
@@ -2007,17 +2007,17 @@ func TestActorSystem(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		node1, sd1 := natsPeer(t, srv.Addr().String())
+		node1, sd1 := testNATs(t, srv.Addr().String())
 		peerAddress1 := node1.PeerAddress()
 		require.NotEmpty(t, peerAddress1)
 
 		// create and start system cluster
-		node2, sd2 := natsPeer(t, srv.Addr().String())
+		node2, sd2 := testNATs(t, srv.Addr().String())
 		peerAddress2 := node2.PeerAddress()
 		require.NotEmpty(t, peerAddress2)
 
 		// create and start system cluster
-		node3, sd3 := natsPeer(t, srv.Addr().String())
+		node3, sd3 := testNATs(t, srv.Addr().String())
 		require.NotNil(t, node3)
 		require.NotNil(t, sd3)
 
@@ -2469,19 +2469,19 @@ func TestActorSystem(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		node1, sd1 := natsPeer(t, srv.Addr().String())
+		node1, sd1 := testNATs(t, srv.Addr().String())
 		peerAddress1 := node1.PeerAddress()
 		require.NotEmpty(t, peerAddress1)
 		require.NotNil(t, sd1)
 
 		// create and start system cluster
-		node2, sd2 := natsPeer(t, srv.Addr().String())
+		node2, sd2 := testNATs(t, srv.Addr().String())
 		peerAddress2 := node2.PeerAddress()
 		require.NotEmpty(t, peerAddress2)
 		require.NotNil(t, sd2)
 
 		// create and start system cluster
-		node3, sd3 := natsPeer(t, srv.Addr().String())
+		node3, sd3 := testNATs(t, srv.Addr().String())
 		peerAddress3 := node3.PeerAddress()
 		require.NotEmpty(t, peerAddress3)
 		require.NotNil(t, sd3)
@@ -2561,19 +2561,19 @@ func TestActorSystem(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		node1, sd1 := natsPeer(t, srv.Addr().String())
+		node1, sd1 := testNATs(t, srv.Addr().String())
 		peerAddress1 := node1.PeerAddress()
 		require.NotEmpty(t, peerAddress1)
 		require.NotNil(t, sd1)
 
 		// create and start system cluster
-		node2, sd2 := natsPeer(t, srv.Addr().String())
+		node2, sd2 := testNATs(t, srv.Addr().String())
 		peerAddress2 := node2.PeerAddress()
 		require.NotEmpty(t, peerAddress2)
 		require.NotNil(t, sd2)
 
 		// create and start system cluster
-		node3, sd3 := natsPeer(t, srv.Addr().String())
+		node3, sd3 := testNATs(t, srv.Addr().String())
 		peerAddress3 := node3.PeerAddress()
 		require.NotEmpty(t, peerAddress3)
 		require.NotNil(t, sd3)
@@ -2612,19 +2612,19 @@ func TestActorSystem(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		node1, sd1 := natsPeer(t, srv.Addr().String())
+		node1, sd1 := testNATs(t, srv.Addr().String())
 		peerAddress1 := node1.PeerAddress()
 		require.NotEmpty(t, peerAddress1)
 		require.NotNil(t, sd1)
 
 		// create and start system cluster
-		node2, sd2 := natsPeer(t, srv.Addr().String())
+		node2, sd2 := testNATs(t, srv.Addr().String())
 		peerAddress2 := node2.PeerAddress()
 		require.NotEmpty(t, peerAddress2)
 		require.NotNil(t, sd2)
 
 		// create and start system cluster
-		node3, sd3 := natsPeer(t, srv.Addr().String())
+		node3, sd3 := testNATs(t, srv.Addr().String())
 		peerAddress3 := node3.PeerAddress()
 		require.NotEmpty(t, peerAddress3)
 		require.NotNil(t, sd3)
@@ -2663,7 +2663,7 @@ func TestActorSystem(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		node, sd := natsPeer(t, srv.Addr().String())
+		node, sd := testNATs(t, srv.Addr().String())
 		peerAddress1 := node.PeerAddress()
 		require.NotEmpty(t, peerAddress1)
 		require.NotNil(t, sd)
