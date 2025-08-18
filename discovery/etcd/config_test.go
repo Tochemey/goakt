@@ -22,21 +22,33 @@
  * SOFTWARE.
  */
 
-package discovery
+package etcd
 
-const (
-	// ProviderConsul represents the Consul discovery provider
-	ProviderConsul = "consul"
-	// ProviderMDNS represents the mDNS discovery provider
-	ProviderMDNS = "mdns"
-	// ProviderKubernetes represents the Kubernetes discovery provider
-	ProviderKubernetes = "kubernetes"
-	// ProviderNATS represents the NATS discovery provider
-	ProviderNATS = "nats"
-	// ProviderStatic represents the Static discovery provider
-	ProviderStatic = "static"
-	// ProviderDNS represents the DNS discovery provider
-	ProviderDNS = "dns"
-	// ProviderEtcd represents the Etcd discovery provider
-	ProviderEtcd = "etcd"
+import (
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
 )
+
+func TestConfig(t *testing.T) {
+	t.Run("With valid configuration", func(t *testing.T) {
+		config := &Config{
+			Endpoints:       []string{"http://0.0.0.0:2379"},
+			ActorSystemName: "test-system",
+			Host:            "localhost",
+			DiscoveryPort:   1234,
+			TTL:             60,
+			Timeout:         5 * time.Second,
+			DialTimeout:     2 * time.Second,
+			Username:        "user",
+			Password:        "pass",
+		}
+
+		assert.NoError(t, config.Validate())
+	})
+	t.Run("With invalid configuration", func(t *testing.T) {
+		config := &Config{}
+		assert.Error(t, config.Validate())
+	})
+}

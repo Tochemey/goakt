@@ -22,24 +22,23 @@
  * SOFTWARE.
  */
 
-package consul
+package etcd
 
 import (
-	"context"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go/modules/consul"
+	"github.com/testcontainers/testcontainers-go"
+	testcontainer "github.com/testcontainers/testcontainers-go/modules/etcd"
 	"github.com/travisjeffery/go-dynaport"
-	"go.uber.org/atomic"
 
 	"github.com/tochemey/goakt/v3/discovery"
 )
 
 func TestDiscovery(t *testing.T) {
-	agent := startConsulAgent(t)
+	cluster := startEtcdCluster(t)
 	t.Run("With a new instance", func(t *testing.T) {
 		ctx := t.Context()
 
@@ -51,17 +50,18 @@ func TestDiscovery(t *testing.T) {
 		host := "127.0.0.1"
 		actorSystemName := "AccountsSystem"
 
-		endpoint, err := agent.ApiEndpoint(ctx)
+		endpoints, err := cluster.ClientEndpoints(ctx)
 		require.NoError(t, err)
-		require.NotEmpty(t, endpoint)
 
 		config := &Config{
-			Address:         endpoint,
+			Endpoints:       endpoints,
 			Timeout:         10 * time.Second,
 			ActorSystemName: actorSystemName,
 			Host:            host,
 			DiscoveryPort:   port,
 			Context:         ctx,
+			TTL:             60,
+			DialTimeout:     5 * time.Second,
 		}
 
 		// create the instance of provider
@@ -86,24 +86,25 @@ func TestDiscovery(t *testing.T) {
 		host := "127.0.0.1"
 		actorSystemName := "AccountsSystem"
 
-		endpoint, err := agent.ApiEndpoint(ctx)
+		endpoints, err := cluster.ClientEndpoints(ctx)
 		require.NoError(t, err)
-		require.NotEmpty(t, endpoint)
 
-		// create the config
 		config := &Config{
-			Address:         endpoint,
+			Endpoints:       endpoints,
 			Timeout:         10 * time.Second,
 			ActorSystemName: actorSystemName,
 			Host:            host,
 			DiscoveryPort:   port,
 			Context:         ctx,
+			TTL:             60,
+			DialTimeout:     5 * time.Second,
 		}
+
 		// create the instance of provider
 		provider := NewDiscovery(config)
 		require.NotNil(t, provider)
 		require.NotNil(t, provider)
-		assert.Equal(t, "consul", provider.ID())
+		require.Equal(t, "etcd", provider.ID())
 	})
 	t.Run("With Initialize", func(t *testing.T) {
 		ctx := t.Context()
@@ -116,29 +117,22 @@ func TestDiscovery(t *testing.T) {
 		host := "127.0.0.1"
 		actorSystemName := "AccountsSystem"
 
-		endpoint, err := agent.ApiEndpoint(ctx)
+		endpoints, err := cluster.ClientEndpoints(ctx)
 		require.NoError(t, err)
-		require.NotEmpty(t, endpoint)
 
-		// create the config
 		config := &Config{
-			Address:         endpoint,
+			Endpoints:       endpoints,
 			Timeout:         10 * time.Second,
 			ActorSystemName: actorSystemName,
 			Host:            host,
 			DiscoveryPort:   port,
 			Context:         ctx,
-			HealthCheck: &HealthCheck{
-				Interval: 10,
-				Timeout:  5,
-			},
+			TTL:             60,
+			DialTimeout:     5 * time.Second,
 		}
 
 		// create the instance of provider
 		provider := NewDiscovery(config)
-		require.NotNil(t, provider)
-
-		// initialize
 		err = provider.Initialize()
 		assert.NoError(t, err)
 	})
@@ -152,30 +146,29 @@ func TestDiscovery(t *testing.T) {
 		// create a Cluster node
 		host := "127.0.0.1"
 
-		endpoint, err := agent.ApiEndpoint(ctx)
+		endpoints, err := cluster.ClientEndpoints(ctx)
 		require.NoError(t, err)
-		require.NotEmpty(t, endpoint)
 
-		// create the config without the actor system name
 		config := &Config{
-			Address:       endpoint,
+			Endpoints:     endpoints,
 			Timeout:       10 * time.Second,
 			Host:          host,
 			DiscoveryPort: port,
 			Context:       ctx,
+			TTL:           60,
+			DialTimeout:   5 * time.Second,
 		}
 
 		// create the instance of provider
 		provider := NewDiscovery(config)
-		require.NotNil(t, provider)
-
 		// initialize
 		err = provider.Initialize()
 		require.Error(t, err)
 	})
-
 	t.Run("With Initialize: already initialized", func(t *testing.T) {
 		ctx := t.Context()
+
+		// generate the ports for the single node
 		nodePorts := dynaport.Get(1)
 		port := nodePorts[0]
 
@@ -183,25 +176,28 @@ func TestDiscovery(t *testing.T) {
 		host := "127.0.0.1"
 		actorSystemName := "AccountsSystem"
 
-		endpoint, err := agent.ApiEndpoint(ctx)
+		endpoints, err := cluster.ClientEndpoints(ctx)
 		require.NoError(t, err)
-		require.NotEmpty(t, endpoint)
 
-		// create the config
 		config := &Config{
-			Address:         endpoint,
+			Endpoints:       endpoints,
 			Timeout:         10 * time.Second,
 			ActorSystemName: actorSystemName,
 			Host:            host,
 			DiscoveryPort:   port,
 			Context:         ctx,
+			TTL:             60,
+			DialTimeout:     5 * time.Second,
 		}
 
 		// create the instance of provider
 		provider := NewDiscovery(config)
-		require.NotNil(t, provider)
-		provider.initialized = atomic.NewBool(true)
-		assert.Error(t, provider.Initialize())
+		err = provider.Initialize()
+		require.NoError(t, err)
+		// initialize again
+		err = provider.Initialize()
+		require.Error(t, err)
+		require.ErrorIs(t, err, discovery.ErrAlreadyInitialized)
 	})
 	t.Run("With Register: already registered", func(t *testing.T) {
 		ctx := t.Context()
@@ -214,35 +210,26 @@ func TestDiscovery(t *testing.T) {
 		host := "127.0.0.1"
 		actorSystemName := "AccountsSystem"
 
-		endpoint, err := agent.ApiEndpoint(ctx)
+		endpoints, err := cluster.ClientEndpoints(ctx)
 		require.NoError(t, err)
-		require.NotEmpty(t, endpoint)
 
-		// create the config
 		config := &Config{
-			Address:         endpoint,
+			Endpoints:       endpoints,
 			Timeout:         10 * time.Second,
 			ActorSystemName: actorSystemName,
 			Host:            host,
 			DiscoveryPort:   port,
 			Context:         ctx,
-			HealthCheck: &HealthCheck{
-				Interval: 10,
-				Timeout:  5,
-			},
-			QueryOptions: &QueryOptions{
-				OnlyPassing: true,
-				AllowStale:  false,           // Allow stale reads
-				WaitTime:    5 * time.Second, // Maximum time to wait for changes
-			},
+			TTL:             60,
+			DialTimeout:     5 * time.Second,
 		}
 
 		// create the instance of provider
 		provider := NewDiscovery(config)
-		require.NotNil(t, provider)
 		err = provider.Initialize()
 		require.NoError(t, err)
-		provider.registered = atomic.NewBool(true)
+		err = provider.Register()
+		require.NoError(t, err)
 		err = provider.Register()
 		require.Error(t, err)
 		require.ErrorIs(t, err, discovery.ErrAlreadyRegistered)
@@ -258,18 +245,18 @@ func TestDiscovery(t *testing.T) {
 		host := "127.0.0.1"
 		actorSystemName := "AccountsSystem"
 
-		endpoint, err := agent.ApiEndpoint(ctx)
+		endpoints, err := cluster.ClientEndpoints(ctx)
 		require.NoError(t, err)
-		require.NotEmpty(t, endpoint)
 
-		// create the config
 		config := &Config{
-			Address:         endpoint,
+			Endpoints:       endpoints,
 			Timeout:         10 * time.Second,
 			ActorSystemName: actorSystemName,
 			Host:            host,
 			DiscoveryPort:   port,
 			Context:         ctx,
+			TTL:             60,
+			DialTimeout:     5 * time.Second,
 		}
 
 		// create the instance of provider
@@ -290,19 +277,18 @@ func TestDiscovery(t *testing.T) {
 		host := "127.0.0.1"
 		actorSystemName := "AccountsSystem"
 
-		endpoint, err := agent.ApiEndpoint(ctx)
+		endpoints, err := cluster.ClientEndpoints(ctx)
 		require.NoError(t, err)
-		require.NotEmpty(t, endpoint)
 
-		// create the config
 		config := &Config{
-			Address:         endpoint,
+			Endpoints:       endpoints,
 			Timeout:         10 * time.Second,
 			ActorSystemName: actorSystemName,
 			Host:            host,
 			DiscoveryPort:   port,
-
-			Context: ctx,
+			Context:         ctx,
+			TTL:             60,
+			DialTimeout:     5 * time.Second,
 		}
 
 		// create the instance of provider
@@ -323,18 +309,18 @@ func TestDiscovery(t *testing.T) {
 		host := "127.0.0.1"
 		actorSystemName := "AccountsSystem"
 
-		endpoint, err := agent.ApiEndpoint(ctx)
+		endpoints, err := cluster.ClientEndpoints(ctx)
 		require.NoError(t, err)
-		require.NotEmpty(t, endpoint)
 
-		// create the config
 		config := &Config{
-			Address:         endpoint,
+			Endpoints:       endpoints,
 			Timeout:         10 * time.Second,
 			ActorSystemName: actorSystemName,
 			Host:            host,
 			DiscoveryPort:   port,
 			Context:         ctx,
+			TTL:             60,
+			DialTimeout:     5 * time.Second,
 		}
 
 		// create the instance of provider
@@ -346,15 +332,84 @@ func TestDiscovery(t *testing.T) {
 		assert.Error(t, err)
 		require.ErrorIs(t, err, discovery.ErrNotRegistered)
 	})
-	t.Run("With DiscoverPeers", func(t *testing.T) {
+	t.Run("With DiscoverPeers: not initialized", func(t *testing.T) {
 		ctx := t.Context()
-		endpoint, err := agent.ApiEndpoint(ctx)
+
+		// generate the ports for the single node
+		nodePorts := dynaport.Get(1)
+		port := nodePorts[0]
+
+		// create a Cluster node
+		host := "127.0.0.1"
+		actorSystemName := "AccountsSystem"
+
+		endpoints, err := cluster.ClientEndpoints(ctx)
 		require.NoError(t, err)
-		require.NotEmpty(t, endpoint)
+
+		config := &Config{
+			Endpoints:       endpoints,
+			Timeout:         10 * time.Second,
+			ActorSystemName: actorSystemName,
+			Host:            host,
+			DiscoveryPort:   port,
+			Context:         ctx,
+			TTL:             60,
+			DialTimeout:     5 * time.Second,
+		}
+
+		// create the instance of provider
+		provider := NewDiscovery(config)
+		peers, err := provider.DiscoverPeers()
+		require.Error(t, err)
+		require.Empty(t, peers)
+		require.ErrorIs(t, err, discovery.ErrNotInitialized)
+	})
+	t.Run("With DiscoverPeers: not registered", func(t *testing.T) {
+		ctx := t.Context()
+
+		// generate the ports for the single node
+		nodePorts := dynaport.Get(1)
+		port := nodePorts[0]
+
+		// create a Cluster node
+		host := "127.0.0.1"
+		actorSystemName := "AccountsSystem"
+
+		endpoints, err := cluster.ClientEndpoints(ctx)
+		require.NoError(t, err)
+
+		config := &Config{
+			Endpoints:       endpoints,
+			Timeout:         10 * time.Second,
+			ActorSystemName: actorSystemName,
+			Host:            host,
+			DiscoveryPort:   port,
+			Context:         ctx,
+			TTL:             60,
+			DialTimeout:     5 * time.Second,
+		}
+
+		// create the instance of provider
+		provider := NewDiscovery(config)
+		require.NoError(t, provider.Initialize())
+		peers, err := provider.DiscoverPeers()
+		require.Error(t, err)
+		require.Empty(t, peers)
+		require.ErrorIs(t, err, discovery.ErrNotRegistered)
+	})
+}
+
+func TestDiscoverPeers(t *testing.T) {
+	t.Run("With DiscoverPeers", func(t *testing.T) {
+		cluster := startEtcdCluster(t)
+		ctx := t.Context()
+		actorSystemName := "AccountsSystem"
+		endpoints, err := cluster.ClientEndpoints(ctx)
+		require.NoError(t, err)
 
 		// create two peers
-		client1 := newPeer(t, endpoint)
-		client2 := newPeer(t, endpoint)
+		client1 := newPeer(t, actorSystemName, endpoints)
+		client2 := newPeer(t, actorSystemName, endpoints)
 
 		// no discovery is allowed unless registered
 		peers, err := client1.DiscoverPeers()
@@ -379,7 +434,7 @@ func TestDiscovery(t *testing.T) {
 		require.NoError(t, err)
 		require.NotEmpty(t, peers)
 		require.Len(t, peers, 1)
-		discoveredNodeAddr := client2.serviceID
+		discoveredNodeAddr := client2.key
 		require.Equal(t, peers[0], discoveredNodeAddr)
 
 		// discover more peers from client 2
@@ -387,7 +442,7 @@ func TestDiscovery(t *testing.T) {
 		require.NoError(t, err)
 		require.NotEmpty(t, peers)
 		require.Len(t, peers, 1)
-		discoveredNodeAddr = client1.serviceID
+		discoveredNodeAddr = client1.key
 		require.Equal(t, peers[0], discoveredNodeAddr)
 
 		// de-register client 2
@@ -405,74 +460,24 @@ func TestDiscovery(t *testing.T) {
 		require.NoError(t, client1.Close())
 		require.NoError(t, client2.Close())
 	})
-	t.Run("With DiscoverPeers: not initialized", func(t *testing.T) {
-		ctx := t.Context()
-
-		// generate the ports for the single node
-		nodePorts := dynaport.Get(1)
-		peersPort := nodePorts[0]
-
-		// create a Cluster node
-		host := "127.0.0.1"
-		actorSystemName := "AccountsSystem"
-
-		endpoint, err := agent.ApiEndpoint(ctx)
-		require.NoError(t, err)
-		require.NotEmpty(t, endpoint)
-
-		// create the config
-		config := &Config{
-			Address:         endpoint,
-			Timeout:         10 * time.Second,
-			ActorSystemName: actorSystemName,
-			Host:            host,
-			DiscoveryPort:   peersPort,
-			Context:         ctx,
-		}
-
-		// create the instance of provider
-		provider := NewDiscovery(config)
-		peers, err := provider.DiscoverPeers()
-		require.Error(t, err)
-		require.Empty(t, peers)
-		require.ErrorIs(t, err, discovery.ErrNotInitialized)
-	})
-	t.Run("With DiscoverPeers: not registered", func(t *testing.T) {
-		ctx := t.Context()
-
-		// generate the ports for the single node
-		nodePorts := dynaport.Get(1)
-		peersPort := nodePorts[0]
-
-		// create a Cluster node
-		host := "127.0.0.1"
-		actorSystemName := "AccountsSystem"
-
-		endpoint, err := agent.ApiEndpoint(ctx)
-		require.NoError(t, err)
-		require.NotEmpty(t, endpoint)
-
-		// create the config
-		config := &Config{
-			Address:         endpoint,
-			Timeout:         10,
-			ActorSystemName: actorSystemName,
-			Host:            host,
-			DiscoveryPort:   peersPort,
-			Context:         ctx,
-		}
-
-		// create the instance of provider
-		provider := NewDiscovery(config)
-		require.NoError(t, provider.Initialize())
-		peers, err := provider.DiscoverPeers()
-		require.Error(t, err)
-		require.Empty(t, peers)
-		require.ErrorIs(t, err, discovery.ErrNotRegistered)
-	})
 }
 
-func newPeer(t *testing.T, agentEndpoint string) *Discovery {
+func startEtcdCluster(t *testing.T) *testcontainer.EtcdContainer {
+	t.Helper()
+	etcdContainer, err := testcontainer.Run(
+		t.Context(),
+		"gcr.io/etcd-development/etcd:v3.5.14",
+		testcontainer.WithNodes("etcd-1", "etcd-2", "etcd-3"),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := testcontainers.TerminateContainer(etcdContainer)
+		require.NoError(t, err)
+	})
+	return etcdContainer
+}
+
+func newPeer(t *testing.T, actorSystemName string, endpoints []string) *Discovery {
 	t.Helper()
 	// generate the ports for the single node
 	nodePorts := dynaport.Get(1)
@@ -483,21 +488,14 @@ func newPeer(t *testing.T, agentEndpoint string) *Discovery {
 
 	// create the config
 	config := &Config{
-		Address:         agentEndpoint,
+		Endpoints:       endpoints,
 		Timeout:         10 * time.Second,
-		ActorSystemName: "test-system",
+		ActorSystemName: actorSystemName,
 		Host:            host,
 		DiscoveryPort:   port,
 		Context:         t.Context(),
-		HealthCheck: &HealthCheck{
-			Interval: 10 * time.Second,
-			Timeout:  5 * time.Second,
-		},
-		QueryOptions: &QueryOptions{
-			OnlyPassing: false,
-			AllowStale:  false,
-			WaitTime:    5 * time.Second,
-		},
+		TTL:             60,
+		DialTimeout:     5 * time.Second,
 	}
 
 	// create the instance of provider
@@ -507,15 +505,4 @@ func newPeer(t *testing.T, agentEndpoint string) *Discovery {
 	require.NoError(t, err)
 	// return the provider
 	return provider
-}
-
-func startConsulAgent(t *testing.T) *consul.ConsulContainer {
-	t.Helper()
-	consulContainer, err := consul.Run(t.Context(), "hashicorp/consul:1.15")
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		err := consulContainer.Terminate(context.Background())
-		require.NoError(t, err)
-	})
-	return consulContainer
 }
