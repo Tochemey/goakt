@@ -368,6 +368,8 @@ github.com/testcontainers/testcontainers-go v0.38.0 h1:d7uEapLcv2P8AvH8ahLqDMMxd
 github.com/testcontainers/testcontainers-go v0.38.0/go.mod h1:C52c9MoHpWO+C4aqmgSU+hxlR5jlEayWtgYrb8Pzz1w=
 github.com/testcontainers/testcontainers-go/modules/consul v0.38.0 h1:qwjHJKEpJpMBeznlq7XXcoVxjx4wtIf0kCWTJ5pMJWY=
 github.com/testcontainers/testcontainers-go/modules/consul v0.38.0/go.mod h1:9YdO3FjXct4goF/Edgsh38FlUXYB70Z63ntzvhNfK1s=
+github.com/testcontainers/testcontainers-go/modules/etcd v0.38.0 h1:0jY8NQkqYzKStU1DYQA0IfaJvk9hK9fjzHBDcfOWpPg=
+github.com/testcontainers/testcontainers-go/modules/etcd v0.38.0/go.mod h1:1lJAaNo6c1acfdR7WjKlztMxg58OHNvN379kbpCQkyk=
 github.com/tidwall/btree v1.1.0/go.mod h1:TzIRzen6yHbibdSfK6t8QimqbUnoxUSrZfeW7Uob0q4=
 github.com/tidwall/btree v1.8.1 h1:27ehoXvm5AG/g+1VxLS1SD3vRhp/H7LuEfwNvddEdmA=
 github.com/tidwall/btree v1.8.1/go.mod h1:jBbTdUWhSZClZWoDg54VnvV7/54modSOzDN7VXftj1A=

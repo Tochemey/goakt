@@ -54,59 +54,64 @@ type Discovery struct {
 	client          *clientv3.Client
 	key             string
 	cancelKeepAlive context.CancelFunc
+	prefix          string
+	namespaceKV     clientv3.KV
+	namespaceLE     clientv3.Lease
 }
 
 var _ discovery.Provider = (*Discovery)(nil)
 
-func New(config *Config) *Discovery {
+// NewDiscovery creates a new instance of Discovery with the provided configuration.
+func NewDiscovery(config *Config) *Discovery {
 	return &Discovery{
 		config:      config,
 		initialized: atomic.NewBool(false),
 		registered:  atomic.NewBool(false),
 		mu:          &sync.RWMutex{},
 		key:         net.JoinHostPort(config.Host, strconv.Itoa(config.DiscoveryPort)),
+		prefix:      fmt.Sprintf("%s/", config.ActorSystemName),
 	}
 }
 
 // ID implements discovery.Provider.
-func (d *Discovery) ID() string {
+func (x *Discovery) ID() string {
 	return discovery.ProviderEtcd
 }
 
 // Initialize implements discovery.Provider.
-func (d *Discovery) Initialize() error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+func (x *Discovery) Initialize() error {
+	x.mu.Lock()
+	defer x.mu.Unlock()
 
-	if d.initialized.Load() {
+	if x.initialized.Load() {
 		return discovery.ErrAlreadyInitialized
 	}
 
-	if d.config.Context == nil {
-		d.config.Context = context.Background()
+	if x.config.Context == nil {
+		x.config.Context = context.Background()
 	}
 
-	if err := d.config.Validate(); err != nil {
+	if err := x.config.Validate(); err != nil {
 		return err
 	}
 
 	client, err := clientv3.New(clientv3.Config{
-		Endpoints:   d.config.Endpoints,
-		DialTimeout: d.config.DialTimeout,
-		TLS:         d.config.TLS,
-		Username:    d.config.Username,
-		Password:    d.config.Password,
-		Context:     d.config.Context,
+		Endpoints:   x.config.Endpoints,
+		DialTimeout: x.config.DialTimeout,
+		TLS:         x.config.TLS,
+		Username:    x.config.Username,
+		Password:    x.config.Password,
+		Context:     x.config.Context,
 	})
 	if err != nil {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(d.config.Context, d.config.DialTimeout)
+	ctx, cancel := context.WithTimeout(x.config.Context, x.config.DialTimeout)
 	defer cancel()
 
 	// TODO: maybe assert more the response from etcd
-	_, err = client.Status(ctx, d.config.Endpoints[0])
+	_, err = client.Status(ctx, x.config.Endpoints[0])
 	if err != nil {
 		if cerr := client.Close(); cerr != nil {
 			return errors.Join(err, fmt.Errorf("failed to close etcd client: %w", cerr))
@@ -114,46 +119,45 @@ func (d *Discovery) Initialize() error {
 		return fmt.Errorf("failed to connect to etcd: %w", err)
 	}
 
-	d.client = client
-	prefix := fmt.Sprintf("/%s/", d.config.ActorSystemName)
-	d.client.KV = namespace.NewKV(d.client.KV, prefix)
-	d.client.Lease = namespace.NewLease(d.client.Lease, prefix)
-	d.initialized.Store(true)
+	x.client = client
+	x.namespaceKV = namespace.NewKV(x.client.KV, x.prefix)
+	x.namespaceLE = namespace.NewLease(x.client.Lease, x.prefix)
+	x.initialized.Store(true)
 	return nil
 }
 
 // Register implements discovery.Provider.
-func (d *Discovery) Register() error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+func (x *Discovery) Register() error {
+	x.mu.Lock()
+	defer x.mu.Unlock()
 
-	if !d.initialized.Load() {
+	if !x.initialized.Load() {
 		return discovery.ErrNotInitialized
 	}
 
-	if d.registered.Load() {
+	if x.registered.Load() {
 		return discovery.ErrAlreadyRegistered
 	}
 
-	ctx, cancel := context.WithTimeout(d.config.Context, d.config.Timeout)
+	ctx, cancel := context.WithTimeout(x.config.Context, x.config.Timeout)
 	defer cancel()
 
-	lease, err := d.client.Grant(ctx, d.config.TTL)
+	lease, err := x.namespaceLE.Grant(ctx, x.config.TTL)
 	if err != nil {
 		return fmt.Errorf("failed to create lease: %w", err)
 	}
 
-	d.leaseID = lease.ID
-	_, err = d.client.Put(ctx, d.key, d.key, clientv3.WithLease(lease.ID))
+	x.leaseID = lease.ID
+	_, err = x.namespaceKV.Put(ctx, x.key, x.key, clientv3.WithLease(lease.ID))
 	if err != nil {
 		return fmt.Errorf("failed to register service: %w", err)
 	}
 
 	// Start lease keep-alive
-	keepAliveCtx, keepAliveCancel := context.WithCancel(d.config.Context)
-	d.cancelKeepAlive = keepAliveCancel
+	keepAliveCtx, keepAliveCancel := context.WithCancel(x.config.Context)
+	x.cancelKeepAlive = keepAliveCancel
 
-	ch, kaerr := d.client.KeepAlive(keepAliveCtx, d.leaseID)
+	ch, kaerr := x.client.KeepAlive(keepAliveCtx, x.leaseID)
 	if kaerr != nil {
 		keepAliveCancel()
 		return fmt.Errorf("failed to start keep-alive: %w", kaerr)
@@ -167,30 +171,28 @@ func (d *Discovery) Register() error {
 		}
 	}()
 
-	d.registered.Store(true)
+	x.registered.Store(true)
 	return nil
 }
 
 // DiscoverPeers implements discovery.Provider.
-func (d *Discovery) DiscoverPeers() ([]string, error) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
+func (x *Discovery) DiscoverPeers() ([]string, error) {
+	x.mu.RLock()
+	defer x.mu.RUnlock()
 
-	if !d.initialized.Load() {
+	if !x.initialized.Load() {
 		return nil, discovery.ErrNotInitialized
 	}
 
-	if !d.registered.Load() {
+	if !x.registered.Load() {
 		return nil, discovery.ErrNotRegistered
 	}
 
-	ctx, cancel := context.WithTimeout(d.client.Ctx(), d.config.Timeout)
+	ctx, cancel := context.WithTimeout(x.client.Ctx(), x.config.Timeout)
 	defer cancel()
 
 	peers := goset.NewSet[string]()
-	// Get all nodes under the actor system prefix
-	prefix := fmt.Sprintf("/%s/", d.config.ActorSystemName)
-	resp, err := d.client.Get(ctx, prefix, clientv3.WithPrefix())
+	resp, err := x.namespaceKV.Get(ctx, "", clientv3.WithPrefix())
 	if err != nil {
 		return nil, fmt.Errorf("failed to discover peers: %w", err)
 	}
@@ -200,65 +202,70 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 		address := string(kv.Value)
 
 		// Skip our own registration
-		if key == d.key {
+		if key == x.key {
 			continue
 		}
 
-		// Validate that the key follows expected format
-		if strings.HasPrefix(key, prefix) && address != "" {
-			peers.Add(address)
-		}
+		peers.Add(address)
 	}
 
 	return peers.ToSlice(), nil
 }
 
 // Deregister implements discovery.Provider.
-func (d *Discovery) Deregister() error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+func (x *Discovery) Deregister() error {
+	x.mu.Lock()
+	defer x.mu.Unlock()
 
-	if !d.initialized.Load() {
+	if !x.initialized.Load() {
 		return discovery.ErrNotInitialized
 	}
 
-	if !d.registered.Load() {
+	if !x.registered.Load() {
 		return discovery.ErrNotRegistered
 	}
 
 	// Cancel keep-alive
-	if d.cancelKeepAlive != nil {
-		d.cancelKeepAlive()
-		d.cancelKeepAlive = nil
+	if x.cancelKeepAlive != nil {
+		x.cancelKeepAlive()
+		x.cancelKeepAlive = nil
 	}
 
-	if d.leaseID != 0 {
-		ctx, cancel := context.WithTimeout(d.client.Ctx(), d.config.Timeout)
+	if x.leaseID != 0 {
+		ctx, cancel := context.WithTimeout(x.client.Ctx(), x.config.Timeout)
 		defer cancel()
 
 		// An error shouldn't fail deregistration
 		// The lease will expire naturally if revoke fails
-		_, _ = d.client.Revoke(ctx, d.leaseID)
-		d.leaseID = 0
+		_, _ = x.namespaceLE.Revoke(ctx, x.leaseID)
+		x.leaseID = 0
 	}
-	d.registered.Store(false)
+	x.registered.Store(false)
 	return nil
 }
 
 // Close implements discovery.Provider.
-func (d *Discovery) Close() error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+func (x *Discovery) Close() error {
+	x.mu.Lock()
+	defer x.mu.Unlock()
 
 	// Close etcd client
-	if d.client != nil {
-		if err := d.client.Close(); err != nil {
+	if x.client != nil {
+		if err := x.client.Close(); err != nil {
 			return fmt.Errorf("failed to close etcd client: %w", err)
 		}
-		d.client = nil
+		x.client = nil
 	}
 
-	d.initialized.Store(false)
-	d.registered.Store(false)
+	x.initialized.Store(false)
+	x.registered.Store(false)
 	return nil
+}
+
+// extractNodeID extracts node ID from etcd key
+func (x *Discovery) extractNodeID(key string) string {
+	if !strings.HasPrefix(key, x.prefix) {
+		return ""
+	}
+	return strings.TrimPrefix(key, x.prefix)
 }

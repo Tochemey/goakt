@@ -21,7 +21,9 @@ require (
 	github.com/redis/go-redis/v9 v9.12.1
 	github.com/reugn/go-quartz v0.15.1
 	github.com/stretchr/testify v1.10.0
+	github.com/testcontainers/testcontainers-go v0.38.0
 	github.com/testcontainers/testcontainers-go/modules/consul v0.38.0
+	github.com/testcontainers/testcontainers-go/modules/etcd v0.38.0
 	github.com/tochemey/olric v0.3.0
 	github.com/travisjeffery/go-dynaport v1.0.0
 	github.com/zeebo/xxh3 v1.0.2
@@ -132,7 +134,6 @@ require (
 	github.com/shirou/gopsutil/v4 v4.25.7 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
-	github.com/testcontainers/testcontainers-go v0.38.0 // indirect
 	github.com/tidwall/btree v1.8.1 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/redcon v1.6.2 // indirect
