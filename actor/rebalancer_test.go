@@ -47,17 +47,17 @@ func TestRebalancing(t *testing.T) {
 	srv := startNatsServer(t)
 
 	// create and start a system cluster
-	node1, sd1 := testCluster(t, srv.Addr().String())
+	node1, sd1 := natsPeer(t, srv.Addr().String())
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start a system cluster
-	node2, sd2 := testCluster(t, srv.Addr().String())
+	node2, sd2 := natsPeer(t, srv.Addr().String())
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
 	// create and start a system cluster
-	node3, sd3 := testCluster(t, srv.Addr().String())
+	node3, sd3 := natsPeer(t, srv.Addr().String())
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 
@@ -128,17 +128,17 @@ func TestRebalancingWithTLSEnabled(t *testing.T) {
 	require.NoError(t, autotls.Setup(&conf))
 
 	// create and start system cluster
-	node1, sd1 := testCluster(t, srv.Addr().String(), withTestTSL(conf))
+	node1, sd1 := natsPeer(t, srv.Addr().String(), withTestTLS(conf))
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start system cluster
-	node2, sd2 := testCluster(t, srv.Addr().String(), withTestTSL(conf))
+	node2, sd2 := natsPeer(t, srv.Addr().String(), withTestTLS(conf))
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
 	// create and start system cluster
-	node3, sd3 := testCluster(t, srv.Addr().String(), withTestTSL(conf))
+	node3, sd3 := natsPeer(t, srv.Addr().String(), withTestTLS(conf))
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 
@@ -200,17 +200,17 @@ func TestRebalancingWithSingletonActor(t *testing.T) {
 	srv := startNatsServer(t)
 
 	// create and start system cluster
-	node1, sd1 := testCluster(t, srv.Addr().String())
+	node1, sd1 := natsPeer(t, srv.Addr().String())
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start system cluster
-	node2, sd2 := testCluster(t, srv.Addr().String())
+	node2, sd2 := natsPeer(t, srv.Addr().String())
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
 	// create and start system cluster
-	node3, sd3 := testCluster(t, srv.Addr().String())
+	node3, sd3 := natsPeer(t, srv.Addr().String())
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 
@@ -243,17 +243,17 @@ func TestRebalancingWithActorRelocationDisabled(t *testing.T) {
 	srv := startNatsServer(t)
 
 	// create and start system cluster
-	node1, sd1 := testCluster(t, srv.Addr().String())
+	node1, sd1 := natsPeer(t, srv.Addr().String())
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start system cluster
-	node2, sd2 := testCluster(t, srv.Addr().String())
+	node2, sd2 := natsPeer(t, srv.Addr().String())
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
 	// create and start system cluster
-	node3, sd3 := testCluster(t, srv.Addr().String())
+	node3, sd3 := natsPeer(t, srv.Addr().String())
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 
@@ -315,17 +315,17 @@ func TestRebalancingWithSystemRelocationDisabled(t *testing.T) {
 	srv := startNatsServer(t)
 
 	// create and start a system cluster
-	node1, sd1 := testCluster(t, srv.Addr().String(), withoutTestRelocation())
+	node1, sd1 := natsPeer(t, srv.Addr().String(), withoutTestRelocation())
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start a system cluster
-	node2, sd2 := testCluster(t, srv.Addr().String(), withoutTestRelocation())
+	node2, sd2 := natsPeer(t, srv.Addr().String(), withoutTestRelocation())
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
 	// create and start a system cluster
-	node3, sd3 := testCluster(t, srv.Addr().String(), withoutTestRelocation())
+	node3, sd3 := natsPeer(t, srv.Addr().String(), withoutTestRelocation())
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 
@@ -392,17 +392,17 @@ func TestRebalancingWithExtension(t *testing.T) {
 	stateStoreExtension := NewMockExtension()
 
 	// create and start a system cluster
-	node1, sd1 := testCluster(t, srv.Addr().String(), withMockExtension(stateStoreExtension))
+	node1, sd1 := natsPeer(t, srv.Addr().String(), withMockExtension(stateStoreExtension))
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start a system cluster
-	node2, sd2 := testCluster(t, srv.Addr().String(), withMockExtension(stateStoreExtension))
+	node2, sd2 := natsPeer(t, srv.Addr().String(), withMockExtension(stateStoreExtension))
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
 	// create and start a system cluster
-	node3, sd3 := testCluster(t, srv.Addr().String(), withMockExtension(stateStoreExtension))
+	node3, sd3 := natsPeer(t, srv.Addr().String(), withMockExtension(stateStoreExtension))
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 
@@ -487,12 +487,12 @@ func TestRebalancingWithDependency(t *testing.T) {
 	srv := startNatsServer(t)
 
 	// create and start a system cluster
-	node1, sd1 := testCluster(t, srv.Addr().String())
+	node1, sd1 := natsPeer(t, srv.Addr().String())
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start a system cluster
-	node2, sd2 := testCluster(t, srv.Addr().String())
+	node2, sd2 := natsPeer(t, srv.Addr().String())
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
@@ -561,17 +561,17 @@ func TestIssue781(t *testing.T) {
 	srv := startNatsServer(t)
 
 	// create and start a system cluster
-	node1, sd1 := testCluster(t, srv.Addr().String())
+	node1, sd1 := natsPeer(t, srv.Addr().String())
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start a system cluster
-	node2, sd2 := testCluster(t, srv.Addr().String())
+	node2, sd2 := natsPeer(t, srv.Addr().String())
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
 	// create and start a system cluster
-	node3, sd3 := testCluster(t, srv.Addr().String())
+	node3, sd3 := natsPeer(t, srv.Addr().String())
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 
@@ -640,17 +640,17 @@ func TestGrainsRebalancing(t *testing.T) {
 	srv := startNatsServer(t)
 
 	// create and start a system cluster
-	node1, sd1 := testCluster(t, srv.Addr().String())
+	node1, sd1 := natsPeer(t, srv.Addr().String())
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start a system cluster
-	node2, sd2 := testCluster(t, srv.Addr().String())
+	node2, sd2 := natsPeer(t, srv.Addr().String())
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
 	// create and start a system cluster
-	node3, sd3 := testCluster(t, srv.Addr().String())
+	node3, sd3 := natsPeer(t, srv.Addr().String())
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 
@@ -764,17 +764,17 @@ func TestPersistenceGrainsRebalancing(t *testing.T) {
 	stateStoreExtension := NewMockExtension()
 
 	// create and start a system cluster
-	node1, sd1 := testCluster(t, srv.Addr().String(), withMockExtension(stateStoreExtension))
+	node1, sd1 := natsPeer(t, srv.Addr().String(), withMockExtension(stateStoreExtension))
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start a system cluster
-	node2, sd2 := testCluster(t, srv.Addr().String(), withMockExtension(stateStoreExtension))
+	node2, sd2 := natsPeer(t, srv.Addr().String(), withMockExtension(stateStoreExtension))
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
 	// create and start a system cluster
-	node3, sd3 := testCluster(t, srv.Addr().String(), withMockExtension(stateStoreExtension))
+	node3, sd3 := natsPeer(t, srv.Addr().String(), withMockExtension(stateStoreExtension))
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 
@@ -907,17 +907,17 @@ func TestGrainsRebalancingWithDependencies(t *testing.T) {
 	srv := startNatsServer(t)
 
 	// create and start a system cluster
-	node1, sd1 := testCluster(t, srv.Addr().String())
+	node1, sd1 := natsPeer(t, srv.Addr().String())
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start a system cluster
-	node2, sd2 := testCluster(t, srv.Addr().String())
+	node2, sd2 := natsPeer(t, srv.Addr().String())
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
 	// create and start a system cluster
-	node3, sd3 := testCluster(t, srv.Addr().String())
+	node3, sd3 := natsPeer(t, srv.Addr().String())
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 
@@ -1029,4 +1029,81 @@ func TestGrainsRebalancingWithDependencies(t *testing.T) {
 	assert.NoError(t, sd1.Close())
 	assert.NoError(t, sd3.Close())
 	srv.Shutdown()
+}
+
+func TestRebalancing_WithConsulProvider(t *testing.T) {
+	// create a context
+	ctx := t.Context()
+	agent := startConsulAgent(t)
+
+	endpoint, err := agent.ApiEndpoint(ctx)
+	require.NoError(t, err)
+	require.NotEmpty(t, endpoint)
+
+	// wait for the agent to be ready
+	pause.For(time.Second)
+
+	// create and start a system cluster
+	node1, sd1 := consulPeer(t, endpoint)
+	require.NotNil(t, node1)
+	require.NotNil(t, sd1)
+
+	// create and start a system cluster
+	node2, sd2 := consulPeer(t, endpoint)
+	require.NotNil(t, node2)
+	require.NotNil(t, sd2)
+
+	// create and start a system cluster
+	node3, sd3 := consulPeer(t, endpoint)
+	require.NotNil(t, node3)
+	require.NotNil(t, sd3)
+
+	// let us create 4 actors on each node
+	for j := 1; j <= 4; j++ {
+		actorName := fmt.Sprintf("Actor1%d", j)
+		pid, err := node1.Spawn(ctx, actorName, NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+	}
+
+	pause.For(time.Second)
+
+	for j := 1; j <= 4; j++ {
+		actorName := fmt.Sprintf("Actor2%d", j)
+		pid, err := node2.Spawn(ctx, actorName, NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+	}
+
+	pause.For(time.Second)
+
+	for j := 1; j <= 4; j++ {
+		actorName := fmt.Sprintf("Actor3%d", j)
+		pid, err := node3.Spawn(ctx, actorName, NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+	}
+
+	pause.For(time.Second)
+
+	// take down node2
+	require.NoError(t, node2.Stop(ctx))
+	require.NoError(t, sd2.Close())
+
+	// Wait for cluster rebalancing
+	pause.For(time.Minute)
+
+	sender, err := node1.LocalActor("Actor11")
+	require.NoError(t, err)
+	require.NotNil(t, sender)
+
+	// let us access some of the node2 actors from node 1 and  node 3
+	actorName := "Actor21"
+	err = sender.SendAsync(ctx, actorName, new(testpb.TestSend))
+	require.NoError(t, err)
+
+	require.NoError(t, node1.Stop(ctx))
+	require.NoError(t, node3.Stop(ctx))
+	require.NoError(t, sd1.Close())
+	require.NoError(t, sd3.Close())
 }

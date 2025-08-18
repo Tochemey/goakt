@@ -36,8 +36,7 @@ func TestConfig(t *testing.T) {
 			Address:         "127.0.0.1:8500",
 			ActorSystemName: "test-system",
 			Host:            "localhost",
-			PeersPort:       1234,
-			Timeout:         10,
+			DiscoveryPort:   1234,
 		}
 
 		config.Sanitize()

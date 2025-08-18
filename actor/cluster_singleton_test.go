@@ -46,15 +46,15 @@ func TestSingletonActor(t *testing.T) {
 		// start the NATS server
 		srv := startNatsServer(t)
 
-		cl1, sd1 := testCluster(t, srv.Addr().String())
+		cl1, sd1 := natsPeer(t, srv.Addr().String())
 		require.NotNil(t, cl1)
 		require.NotNil(t, sd1)
 
-		cl2, sd2 := testCluster(t, srv.Addr().String())
+		cl2, sd2 := natsPeer(t, srv.Addr().String())
 		require.NotNil(t, cl2)
 		require.NotNil(t, sd2)
 
-		cl3, sd3 := testCluster(t, srv.Addr().String())
+		cl3, sd3 := natsPeer(t, srv.Addr().String())
 		require.NotNil(t, cl3)
 		require.NotNil(t, sd3)
 
@@ -119,7 +119,7 @@ func TestSingletonActor(t *testing.T) {
 		// start the NATS server
 		srv := startNatsServer(t)
 
-		cl1, sd1 := testCluster(t, srv.Addr().String())
+		cl1, sd1 := natsPeer(t, srv.Addr().String())
 		require.NotNil(t, cl1)
 		require.NotNil(t, sd1)
 

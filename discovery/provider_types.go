@@ -35,6 +35,6 @@ const (
 	ProviderNATS = "nats"
 	// ProviderStatic represents the Static discovery provider
 	ProviderStatic = "static"
-	// KIndDNS represents the DNS discovery provider
+	// ProviderDNS represents the DNS discovery provider
 	ProviderDNS = "dns"
 )

@@ -67,7 +67,7 @@ func NewDiscovery(config *Config) *Discovery {
 		registered:  atomic.NewBool(false),
 		mu:          &sync.RWMutex{},
 		ctx:         config.Context,
-		serviceID:   net.JoinHostPort(config.Host, strconv.Itoa(config.PeersPort)),
+		serviceID:   net.JoinHostPort(config.Host, strconv.Itoa(config.DiscoveryPort)),
 	}
 }
 
@@ -132,7 +132,7 @@ func (x *Discovery) Register() error {
 	service := &api.AgentServiceRegistration{
 		ID:      x.serviceID,
 		Name:    x.config.ActorSystemName,
-		Port:    x.config.PeersPort,
+		Port:    x.config.DiscoveryPort,
 		Address: x.config.Host,
 		Tags:    []string{x.config.ActorSystemName},
 	}
@@ -141,7 +141,7 @@ func (x *Discovery) Register() error {
 		check := &api.AgentServiceCheck{
 			Interval: x.config.HealthCheck.Interval.String(),
 			Timeout:  x.config.HealthCheck.Timeout.String(),
-			TCP:      net.JoinHostPort(x.config.Host, strconv.Itoa(x.config.PeersPort)),
+			TCP:      net.JoinHostPort(x.config.Host, strconv.Itoa(x.config.DiscoveryPort)),
 		}
 
 		service.Check = check

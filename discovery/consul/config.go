@@ -44,7 +44,7 @@ type Config struct {
 
 	ActorSystemName string // Actor system name (used for service discovery)
 	Host            string // Host is the actor system host. It is used to register the service in Consul
-	PeersPort       int    // PeersPort is the port on which the Actor System peers communicate in the cluster
+	DiscoveryPort   int    // DiscoveryPort is the port on which the actor system is listening for discovery requests
 
 	// Discovery configuration
 	QueryOptions *QueryOptions // Advanced query options
@@ -86,7 +86,7 @@ func (config *Config) Validate() error {
 		AddValidator(validation.NewEmptyStringValidator("ActorSystemName", config.ActorSystemName)).
 		AddValidator(validation.NewEmptyStringValidator("Address", config.Address)).
 		AddValidator(validation.NewEmptyStringValidator("Host", config.Host)).
-		AddAssertion(config.PeersPort > 0, "PeersPort is invalid").
+		AddAssertion(config.DiscoveryPort > 0, "DiscoveryPort is invalid").
 		Validate()
 }
 

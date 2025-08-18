@@ -2693,12 +2693,12 @@ func TestReceiveContext(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		actorSystem, provider1 := testCluster(t, srv.Addr().String())
+		actorSystem, provider1 := natsPeer(t, srv.Addr().String())
 		require.NotNil(t, actorSystem)
 		require.NotNil(t, provider1)
 
 		// create and start system cluster
-		actorSystem2, provider2 := testCluster(t, srv.Addr().String())
+		actorSystem2, provider2 := natsPeer(t, srv.Addr().String())
 		require.NotNil(t, actorSystem2)
 		require.NotNil(t, provider2)
 
@@ -2753,12 +2753,12 @@ func TestReceiveContext(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		actorSystem, provider1 := testCluster(t, srv.Addr().String())
+		actorSystem, provider1 := natsPeer(t, srv.Addr().String())
 		require.NotNil(t, actorSystem)
 		require.NotNil(t, provider1)
 
 		// create and start system cluster
-		actorSystem2, provider2 := testCluster(t, srv.Addr().String())
+		actorSystem2, provider2 := natsPeer(t, srv.Addr().String())
 		require.NotNil(t, actorSystem2)
 		require.NotNil(t, provider2)
 
@@ -3001,12 +3001,12 @@ func TestReceiveContext(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		actorSystem, provider1 := testCluster(t, srv.Addr().String())
+		actorSystem, provider1 := natsPeer(t, srv.Addr().String())
 		require.NotNil(t, actorSystem)
 		require.NotNil(t, provider1)
 
 		// create and start system cluster
-		actorSystem2, provider2 := testCluster(t, srv.Addr().String())
+		actorSystem2, provider2 := natsPeer(t, srv.Addr().String())
 		require.NotNil(t, actorSystem2)
 		require.NotNil(t, provider2)
 

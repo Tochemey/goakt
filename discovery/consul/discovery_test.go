@@ -45,7 +45,7 @@ func TestDiscovery(t *testing.T) {
 
 		// generate the ports for the single node
 		nodePorts := dynaport.Get(1)
-		peersPort := nodePorts[0]
+		port := nodePorts[0]
 
 		// create a Cluster node
 		host := "127.0.0.1"
@@ -60,7 +60,7 @@ func TestDiscovery(t *testing.T) {
 			Timeout:         10,
 			ActorSystemName: actorSystemName,
 			Host:            host,
-			PeersPort:       peersPort,
+			DiscoveryPort:   port,
 			Context:         ctx,
 		}
 
@@ -80,7 +80,7 @@ func TestDiscovery(t *testing.T) {
 
 		// generate the ports for the single node
 		nodePorts := dynaport.Get(1)
-		peersPort := nodePorts[0]
+		port := nodePorts[0]
 
 		// create a Cluster node
 		host := "127.0.0.1"
@@ -93,10 +93,10 @@ func TestDiscovery(t *testing.T) {
 		// create the config
 		config := &Config{
 			Address:         endpoint,
-			Timeout:         10,
+			Timeout:         10 * time.Second,
 			ActorSystemName: actorSystemName,
 			Host:            host,
-			PeersPort:       peersPort,
+			DiscoveryPort:   port,
 			Context:         ctx,
 		}
 		// create the instance of provider
@@ -110,7 +110,7 @@ func TestDiscovery(t *testing.T) {
 
 		// generate the ports for the single node
 		nodePorts := dynaport.Get(1)
-		peersPort := nodePorts[0]
+		port := nodePorts[0]
 
 		// create a Cluster node
 		host := "127.0.0.1"
@@ -123,10 +123,10 @@ func TestDiscovery(t *testing.T) {
 		// create the config
 		config := &Config{
 			Address:         endpoint,
-			Timeout:         10,
+			Timeout:         10 * time.Second,
 			ActorSystemName: actorSystemName,
 			Host:            host,
-			PeersPort:       peersPort,
+			DiscoveryPort:   port,
 			Context:         ctx,
 			HealthCheck: &HealthCheck{
 				Interval: 10,
@@ -147,7 +147,7 @@ func TestDiscovery(t *testing.T) {
 
 		// generate the ports for the single node
 		nodePorts := dynaport.Get(1)
-		peersPort := nodePorts[0]
+		port := nodePorts[0]
 
 		// create a Cluster node
 		host := "127.0.0.1"
@@ -158,11 +158,11 @@ func TestDiscovery(t *testing.T) {
 
 		// create the config without the actor system name
 		config := &Config{
-			Address:   endpoint,
-			Timeout:   10,
-			Host:      host,
-			PeersPort: peersPort,
-			Context:   ctx,
+			Address:       endpoint,
+			Timeout:       10 * time.Second,
+			Host:          host,
+			DiscoveryPort: port,
+			Context:       ctx,
 		}
 
 		// create the instance of provider
@@ -177,7 +177,7 @@ func TestDiscovery(t *testing.T) {
 	t.Run("With Initialize: already initialized", func(t *testing.T) {
 		ctx := t.Context()
 		nodePorts := dynaport.Get(1)
-		peersPort := nodePorts[0]
+		port := nodePorts[0]
 
 		// create a Cluster node
 		host := "127.0.0.1"
@@ -190,10 +190,10 @@ func TestDiscovery(t *testing.T) {
 		// create the config
 		config := &Config{
 			Address:         endpoint,
-			Timeout:         10,
+			Timeout:         10 * time.Second,
 			ActorSystemName: actorSystemName,
 			Host:            host,
-			PeersPort:       peersPort,
+			DiscoveryPort:   port,
 			Context:         ctx,
 		}
 
@@ -208,7 +208,7 @@ func TestDiscovery(t *testing.T) {
 
 		// generate the ports for the single node
 		nodePorts := dynaport.Get(1)
-		peersPort := nodePorts[0]
+		port := nodePorts[0]
 
 		// create a Cluster node
 		host := "127.0.0.1"
@@ -221,10 +221,10 @@ func TestDiscovery(t *testing.T) {
 		// create the config
 		config := &Config{
 			Address:         endpoint,
-			Timeout:         10,
+			Timeout:         10 * time.Second,
 			ActorSystemName: actorSystemName,
 			Host:            host,
-			PeersPort:       peersPort,
+			DiscoveryPort:   port,
 			Context:         ctx,
 			HealthCheck: &HealthCheck{
 				Interval: 10,
@@ -252,7 +252,7 @@ func TestDiscovery(t *testing.T) {
 
 		// generate the ports for the single node
 		nodePorts := dynaport.Get(1)
-		peersPort := nodePorts[0]
+		port := nodePorts[0]
 
 		// create a Cluster node
 		host := "127.0.0.1"
@@ -265,10 +265,10 @@ func TestDiscovery(t *testing.T) {
 		// create the config
 		config := &Config{
 			Address:         endpoint,
-			Timeout:         10,
+			Timeout:         10 * time.Second,
 			ActorSystemName: actorSystemName,
 			Host:            host,
-			PeersPort:       peersPort,
+			DiscoveryPort:   port,
 			Context:         ctx,
 		}
 
@@ -284,7 +284,7 @@ func TestDiscovery(t *testing.T) {
 
 		// generate the ports for the single node
 		nodePorts := dynaport.Get(1)
-		peersPort := nodePorts[0]
+		port := nodePorts[0]
 
 		// create a Cluster node
 		host := "127.0.0.1"
@@ -297,10 +297,10 @@ func TestDiscovery(t *testing.T) {
 		// create the config
 		config := &Config{
 			Address:         endpoint,
-			Timeout:         10,
+			Timeout:         10 * time.Second,
 			ActorSystemName: actorSystemName,
 			Host:            host,
-			PeersPort:       peersPort,
+			DiscoveryPort:   port,
 
 			Context: ctx,
 		}
@@ -317,7 +317,7 @@ func TestDiscovery(t *testing.T) {
 
 		// generate the ports for the single node
 		nodePorts := dynaport.Get(1)
-		peersPort := nodePorts[0]
+		port := nodePorts[0]
 
 		// create a Cluster node
 		host := "127.0.0.1"
@@ -330,10 +330,10 @@ func TestDiscovery(t *testing.T) {
 		// create the config
 		config := &Config{
 			Address:         endpoint,
-			Timeout:         10,
+			Timeout:         10 * time.Second,
 			ActorSystemName: actorSystemName,
 			Host:            host,
-			PeersPort:       peersPort,
+			DiscoveryPort:   port,
 			Context:         ctx,
 		}
 
@@ -423,10 +423,10 @@ func TestDiscovery(t *testing.T) {
 		// create the config
 		config := &Config{
 			Address:         endpoint,
-			Timeout:         10,
+			Timeout:         10 * time.Second,
 			ActorSystemName: actorSystemName,
 			Host:            host,
-			PeersPort:       peersPort,
+			DiscoveryPort:   peersPort,
 			Context:         ctx,
 		}
 
@@ -458,7 +458,7 @@ func TestDiscovery(t *testing.T) {
 			Timeout:         10,
 			ActorSystemName: actorSystemName,
 			Host:            host,
-			PeersPort:       peersPort,
+			DiscoveryPort:   peersPort,
 			Context:         ctx,
 		}
 
@@ -476,7 +476,7 @@ func newPeer(t *testing.T, agentEndpoint string) *Discovery {
 	t.Helper()
 	// generate the ports for the single node
 	nodePorts := dynaport.Get(1)
-	peersPort := nodePorts[0]
+	port := nodePorts[0]
 
 	// create a Cluster node
 	host := "127.0.0.1"
@@ -484,10 +484,10 @@ func newPeer(t *testing.T, agentEndpoint string) *Discovery {
 	// create the config
 	config := &Config{
 		Address:         agentEndpoint,
-		Timeout:         10,
+		Timeout:         10 * time.Second,
 		ActorSystemName: "test-system",
 		Host:            host,
-		PeersPort:       peersPort,
+		DiscoveryPort:   port,
 		Context:         t.Context(),
 		HealthCheck: &HealthCheck{
 			Interval: 10 * time.Second,
