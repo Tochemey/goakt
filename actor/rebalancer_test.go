@@ -1107,3 +1107,79 @@ func TestRebalancing_WithConsulProvider(t *testing.T) {
 	require.NoError(t, sd1.Close())
 	require.NoError(t, sd3.Close())
 }
+
+func TestRebalancing_WithEtcdProvider(t *testing.T) {
+	// create a context
+	ctx := t.Context()
+	cluster := startEtcdCluster(t)
+
+	endpoints, err := cluster.ClientEndpoints(ctx)
+	require.NoError(t, err)
+
+	// wait for the agent to be ready
+	pause.For(time.Second)
+
+	// create and start a system cluster
+	node1, sd1 := testEtcd(t, endpoints[0])
+	require.NotNil(t, node1)
+	require.NotNil(t, sd1)
+
+	// create and start a system cluster
+	node2, sd2 := testEtcd(t, endpoints[0])
+	require.NotNil(t, node2)
+	require.NotNil(t, sd2)
+
+	// create and start a system cluster
+	node3, sd3 := testEtcd(t, endpoints[0])
+	require.NotNil(t, node3)
+	require.NotNil(t, sd3)
+
+	// let us create 4 actors on each node
+	for j := 1; j <= 4; j++ {
+		actorName := fmt.Sprintf("Actor1%d", j)
+		pid, err := node1.Spawn(ctx, actorName, NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+	}
+
+	pause.For(time.Second)
+
+	for j := 1; j <= 4; j++ {
+		actorName := fmt.Sprintf("Actor2%d", j)
+		pid, err := node2.Spawn(ctx, actorName, NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+	}
+
+	pause.For(time.Second)
+
+	for j := 1; j <= 4; j++ {
+		actorName := fmt.Sprintf("Actor3%d", j)
+		pid, err := node3.Spawn(ctx, actorName, NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+	}
+
+	pause.For(time.Second)
+
+	// take down node2
+	require.NoError(t, node2.Stop(ctx))
+	require.NoError(t, sd2.Close())
+
+	// Wait for cluster rebalancing
+	pause.For(time.Minute)
+
+	sender, err := node1.LocalActor("Actor11")
+	require.NoError(t, err)
+	require.NotNil(t, sender)
+
+	// let us access some of the node2 actors from node 1 and  node 3
+	actorName := "Actor21"
+	err = sender.SendAsync(ctx, actorName, new(testpb.TestSend))
+	require.NoError(t, err)
+
+	require.NoError(t, node1.Stop(ctx))
+	require.NoError(t, node3.Stop(ctx))
+	require.NoError(t, sd1.Close())
+	require.NoError(t, sd3.Close())
+}
