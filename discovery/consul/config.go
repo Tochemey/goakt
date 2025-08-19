@@ -39,46 +39,29 @@ type Config struct {
 	// Context specifies the execution context for Consul operations.
 	// If nil, context.Background() will be used.
 	Context context.Context
-
-	// --- Consul client configuration ---
-
 	// Address is the address of the Consul agent to connect to.
 	// Default: "127.0.0.1:8500"
 	Address string
-
 	// Datacenter specifies the Consul datacenter to use.
 	// If empty, the agent's default datacenter is used.
 	Datacenter string
-
 	// Token is the Consul ACL token used for authenticated requests.
 	Token string
-
 	// Timeout specifies the maximum duration for Consul requests.
 	// Default: 10s
 	Timeout time.Duration
-
-	// --- Actor system configuration ---
-
 	// ActorSystemName is the name of the actor system.
 	// It is used as the service identifier when registering with Consul.
 	ActorSystemName string
-
 	// Host is the hostname or IP address of the actor system.
 	// It is used to register the service in Consul.
 	Host string
-
 	// DiscoveryPort is the TCP port on which the actor system listens
 	// for service discovery requests.
 	DiscoveryPort int
-
-	// --- Discovery configuration ---
-
 	// QueryOptions specifies advanced options for Consul queries.
 	// May be nil for default behavior.
 	QueryOptions *QueryOptions
-
-	// --- Health check configuration ---
-
 	// HealthCheck configures the Consul health check for the registered service.
 	// May be nil to disable health checks.
 	HealthCheck *HealthCheck
