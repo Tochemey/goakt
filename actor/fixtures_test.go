@@ -37,12 +37,15 @@ import (
 	"github.com/kapetan-io/tackle/autotls"
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/stretchr/testify/require"
-	testcontainer "github.com/testcontainers/testcontainers-go/modules/consul"
+	"github.com/testcontainers/testcontainers-go"
+	consulcontainer "github.com/testcontainers/testcontainers-go/modules/consul"
+	etcdContainer "github.com/testcontainers/testcontainers-go/modules/etcd"
 	"github.com/travisjeffery/go-dynaport"
 	"go.uber.org/atomic"
 
 	"github.com/tochemey/goakt/v3/discovery"
 	"github.com/tochemey/goakt/v3/discovery/consul"
+	"github.com/tochemey/goakt/v3/discovery/etcd"
 	"github.com/tochemey/goakt/v3/discovery/nats"
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/extension"
@@ -1226,9 +1229,9 @@ func startNatsServer(t *testing.T) *natsserver.Server {
 	return serv
 }
 
-func startConsulAgent(t *testing.T) *testcontainer.ConsulContainer {
+func startConsulAgent(t *testing.T) *consulcontainer.ConsulContainer {
 	t.Helper()
-	container, err := testcontainer.Run(t.Context(), "hashicorp/consul:1.15")
+	container, err := consulcontainer.Run(t.Context(), "hashicorp/consul:1.15")
 	require.NoError(t, err)
 	pause.For(1 * time.Second)
 	t.Cleanup(func() {
@@ -1236,6 +1239,21 @@ func startConsulAgent(t *testing.T) *testcontainer.ConsulContainer {
 		require.NoError(t, err)
 	})
 	return container
+}
+
+func startEtcdCluster(t *testing.T) *etcdContainer.EtcdContainer {
+	t.Helper()
+	etcdContainer, err := etcdContainer.Run(
+		t.Context(),
+		"gcr.io/etcd-development/etcd:v3.5.14",
+		etcdContainer.WithNodes("etcd-1", "etcd-2", "etcd-3"),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := testcontainers.TerminateContainer(etcdContainer)
+		require.NoError(t, err)
+	})
+	return etcdContainer
 }
 
 type testClusterConfig struct {
@@ -1307,6 +1325,22 @@ func createConsulProvider(agentEndpoint string) providerFactory {
 			},
 		}
 		return consul.NewDiscovery(config)
+	}
+}
+
+func createEtcdProvider(serverAddr string) providerFactory {
+	return func(t *testing.T, host string, discoveryPort int) discovery.Provider {
+		config := &etcd.Config{
+			Endpoints:       []string{serverAddr},
+			Timeout:         10 * time.Second,
+			ActorSystemName: "accountsSystem",
+			Host:            host,
+			DiscoveryPort:   discoveryPort,
+			Context:         t.Context(),
+			TTL:             60,
+			DialTimeout:     5 * time.Second,
+		}
+		return etcd.NewDiscovery(config)
 	}
 }
 
@@ -1387,4 +1421,8 @@ func testNATs(t *testing.T, serverAddr string, opts ...testClusterOption) (Actor
 
 func testConsul(t *testing.T, agentEndpoint string, opts ...testClusterOption) (ActorSystem, discovery.Provider) {
 	return testSystem(t, createConsulProvider(agentEndpoint), opts...)
+}
+
+func testEtcd(t *testing.T, serverAddr string, opts ...testClusterOption) (ActorSystem, discovery.Provider) {
+	return testSystem(t, createEtcdProvider(serverAddr), opts...)
 }
