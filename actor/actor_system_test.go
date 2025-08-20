@@ -40,6 +40,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/kapetan-io/tackle/autotls"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
 	"go.uber.org/atomic"
@@ -49,14 +50,16 @@ import (
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
+	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
-	testkit "github.com/tochemey/goakt/v3/mocks/discovery"
+	clustermock "github.com/tochemey/goakt/v3/mocks/cluster"
+	mocks "github.com/tochemey/goakt/v3/mocks/discovery"
 	extmocks "github.com/tochemey/goakt/v3/mocks/extension"
 	"github.com/tochemey/goakt/v3/passivation"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
-	tls2 "github.com/tochemey/goakt/v3/tls"
+	gtls "github.com/tochemey/goakt/v3/tls"
 )
 
 // nolint
@@ -187,7 +190,7 @@ func TestActorSystem(t *testing.T) {
 		}
 
 		// mock the discovery provider
-		provider := new(testkit.Provider)
+		provider := new(mocks.Provider)
 		newActorSystem, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
@@ -1065,7 +1068,7 @@ func TestActorSystem(t *testing.T) {
 		}
 
 		// mock the discovery provider
-		provider := new(testkit.Provider)
+		provider := new(mocks.Provider)
 		newActorSystem, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
@@ -1310,7 +1313,7 @@ func TestActorSystem(t *testing.T) {
 		}
 
 		// mock the discovery provider
-		provider := new(testkit.Provider)
+		provider := new(mocks.Provider)
 		newActorSystem, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
@@ -1556,7 +1559,7 @@ func TestActorSystem(t *testing.T) {
 		}
 
 		// mock the discovery provider
-		provider := new(testkit.Provider)
+		provider := new(mocks.Provider)
 		newActorSystem, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
@@ -2127,7 +2130,7 @@ func TestActorSystem(t *testing.T) {
 		host := "127.0.0.1"
 
 		// mock the discovery provider
-		provider := new(testkit.Provider)
+		provider := new(mocks.Provider)
 		newActorSystem, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
@@ -2153,7 +2156,7 @@ func TestActorSystem(t *testing.T) {
 			"test",
 			WithLogger(logger),
 			WithRemote(remote.NewConfig(host, 2222)),
-			WithTLS(&tls2.Info{
+			WithTLS(&gtls.Info{
 				ClientConfig: &tls.Config{InsecureSkipVerify: true}, // nolint
 				ServerConfig: nil,
 			}),
@@ -2234,7 +2237,7 @@ func TestActorSystem(t *testing.T) {
 
 		remoteConfig := remote.NewConfig(host, remotingPort)
 		// mock the discovery provider
-		provider := testkit.NewProvider(t)
+		provider := mocks.NewProvider(t)
 		newActorSystem, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
@@ -3375,7 +3378,7 @@ func TestRemoteTell(t *testing.T) {
 			"test",
 			WithLogger(logger),
 			WithRemote(remoteConfig),
-			WithTLS(&tls2.Info{
+			WithTLS(&gtls.Info{
 				ClientConfig: conf.ClientTLS,
 				ServerConfig: conf.ServerTLS,
 			}),
@@ -3965,7 +3968,7 @@ func TestRemoteAsk(t *testing.T) {
 		// create the actor system
 		sys, err := NewActorSystem(
 			"test",
-			WithTLS(&tls2.Info{
+			WithTLS(&gtls.Info{
 				ClientConfig: clientConfig,
 				ServerConfig: serverConfig,
 			}),
@@ -4086,7 +4089,7 @@ func TestRemotingLookup(t *testing.T) {
 			"test",
 			WithLogger(logger),
 			WithRemote(remote.NewConfig(host, remotingPort)),
-			WithTLS(&tls2.Info{
+			WithTLS(&gtls.Info{
 				ClientConfig: conf.ClientTLS,
 				ServerConfig: conf.ServerTLS,
 			}),
@@ -4235,7 +4238,7 @@ func TestRemotingReSpawn(t *testing.T) {
 			"test",
 			WithLogger(logger),
 			WithRemote(remote.NewConfig(host, remotingPort)),
-			WithTLS(&tls2.Info{
+			WithTLS(&gtls.Info{
 				ClientConfig: conf.ClientTLS,
 				ServerConfig: conf.ServerTLS,
 			}),
@@ -4426,7 +4429,7 @@ func TestRemotingStop(t *testing.T) {
 			"test",
 			WithLogger(logger),
 			WithRemote(remote.NewConfig(host, remotingPort)),
-			WithTLS(&tls2.Info{
+			WithTLS(&gtls.Info{
 				ClientConfig: conf.ClientTLS,
 				ServerConfig: conf.ServerTLS,
 			}),
@@ -4818,7 +4821,7 @@ func TestRemotingSpawn(t *testing.T) {
 			"test",
 			WithLogger(logger),
 			WithRemote(remote.NewConfig(host, remotingPort)),
-			WithTLS(&tls2.Info{
+			WithTLS(&gtls.Info{
 				ClientConfig: conf.ClientTLS,
 				ServerConfig: conf.ServerTLS,
 			}),
@@ -4979,6 +4982,44 @@ func TestRemotingSpawn(t *testing.T) {
 		remoting.Close()
 		err = sys.Stop(ctx)
 		require.NoError(t, err)
+	})
+	t.Run("When trySyncPeersState failed due to get peers failure", func(t *testing.T) {
+		ctx := context.TODO()
+		clmock := clustermock.NewInterface(t)
+		clmock.EXPECT().Peers(ctx).Return(nil, errors.New("some error")).Once()
+
+		sys := &actorSystem{
+			cluster: clmock,
+		}
+
+		// start the actor system
+		err := sys.trySyncPeersState(ctx)
+		require.Error(t, err)
+	})
+
+	t.Run("When trySyncPeersState failed due to get peer state failure", func(t *testing.T) {
+		ctx := context.TODO()
+		peer := &cluster.Peer{
+			Host:         "host",
+			PeersPort:    0,
+			Coordinator:  false,
+			RemotingPort: 0,
+		}
+		peers := []*cluster.Peer{peer}
+
+		clmock := clustermock.NewInterface(t)
+		clmock.EXPECT().Peers(ctx).Return(peers, nil).Once()
+		clmock.EXPECT().GetState(mock.Anything, peer.PeerAddress()).Return(nil, errors.New("some error")).Once()
+
+		sys := &actorSystem{
+			cluster:       clmock,
+			clusterConfig: NewClusterConfig(),
+			logger:        log.DiscardLogger,
+		}
+
+		// start the actor system
+		err := sys.trySyncPeersState(ctx)
+		require.Error(t, err)
 	})
 }
 
