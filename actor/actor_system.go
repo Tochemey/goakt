@@ -2429,15 +2429,6 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 		return err
 	}
 
-	bootstrapChan := make(chan struct{}, 1)
-	timer := time.AfterFunc(
-		time.Second, func() {
-			bootstrapChan <- struct{}{}
-		},
-	)
-	<-bootstrapChan
-	timer.Stop()
-
 	x.logger.Info("cluster engine successfully started...")
 
 	x.cluster = clusterEngine
@@ -2461,7 +2452,13 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 
 	// start the various relocation loops when relocation is enabled
 	if x.relocationEnabled.Load() {
-		go x.peersStateLoop()
+		// attempt to sync the peers state for the first time
+		if err := x.trySyncPeersState(ctx); err != nil {
+			x.logger.Error(fmt.Errorf("failed to sync peers state: %w", err))
+			return err
+		}
+
+		go x.syncPeersState()
 		go x.rebalancingLoop()
 	}
 
@@ -2851,8 +2848,8 @@ func (x *actorSystem) resyncAfterClusterEvent(eventType, nodeAddress string) {
 	}
 }
 
-// peersStateLoop fetches the cluster peers' PeerState and update the node Store
-func (x *actorSystem) peersStateLoop() {
+// syncPeersState fetches the cluster peers' PeerState and update the node Store
+func (x *actorSystem) syncPeersState() {
 	x.logger.Debugf("(%s) peers state synchronization has started...", x.name)
 	intervals := x.clusterConfig.PeersStateSyncInterval()
 	ticker := ticker.New(intervals)
@@ -2900,6 +2897,27 @@ func (x *actorSystem) peersStateLoop() {
 	<-tickerStopSig
 	ticker.Stop()
 	x.logger.Debugf("(%s) peers state synchronization has stopped...", x.name)
+}
+
+func (x *actorSystem) trySyncPeersState(ctx context.Context) error {
+	peers, err := x.cluster.Peers(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to fetch synchronize peers on boot: %w", err)
+	}
+
+	tctx, cancel := context.WithTimeout(ctx, x.clusterConfig.BootstrapTimeout())
+	defer cancel()
+	eg, tctx := errgroup.WithContext(tctx)
+	eg.SetLimit(len(peers))
+
+	for _, peer := range peers {
+		peer := peer // capture range variable
+		eg.Go(func() error {
+			return x.processPeerState(tctx, peer)
+		})
+	}
+
+	return eg.Wait()
 }
 
 // rebalancingLoop helps perform cluster rebalancing

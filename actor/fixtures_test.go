@@ -1410,8 +1410,6 @@ func testSystem(t *testing.T, providerFactory providerFactory, opts ...testClust
 	}
 
 	require.NoError(t, system.Start(ctx))
-	pause.For(2 * time.Second)
-
 	return system, provider
 }
 
