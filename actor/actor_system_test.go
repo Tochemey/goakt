@@ -75,6 +75,43 @@ func TestActorSystem(t *testing.T) {
 		assert.Empty(t, actorSystem.Actors())
 		assert.NotNil(t, actorSystem.Logger())
 	})
+	t.Run("New instance with Defaults and TLS", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// AutoGenerate TLS certs
+		conf := autotls.Config{
+			AutoTLS:            true,
+			ClientAuth:         tls.RequireAndVerifyClientCert,
+			InsecureSkipVerify: false,
+		}
+		require.NoError(t, autotls.Setup(&conf))
+
+		serverConfig := conf.ServerTLS
+		clientConfig := conf.ClientTLS
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "127.0.0.1"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithTLS(&gtls.Info{
+				ClientConfig: clientConfig,
+				ServerConfig: serverConfig,
+			}),
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+		require.NotNil(t, sys)
+		require.NoError(t, sys.Start(ctx))
+		pause.For(time.Second)
+		require.NoError(t, sys.Stop(ctx))
+	})
 	t.Run("New instance with Missing Name", func(t *testing.T) {
 		sys, err := NewActorSystem("")
 		assert.Error(t, err)
