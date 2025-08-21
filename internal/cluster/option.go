@@ -25,11 +25,11 @@
 package cluster
 
 import (
-	"crypto/tls"
 	"time"
 
 	"github.com/tochemey/goakt/v3/hash"
 	"github.com/tochemey/goakt/v3/log"
+	gtls "github.com/tochemey/goakt/v3/tls"
 )
 
 // Option is the interface that applies a configuration option.
@@ -123,10 +123,9 @@ func WithReadQuorum(count uint32) Option {
 // WithTLS sets the various TLS for both Server and Client
 // configuration. Bear in mind that both Client and Server must have the same
 // root CA for successful handshake and authentication
-func WithTLS(serverConfig, clientConfig *tls.Config) Option {
+func WithTLS(info *gtls.Info) Option {
 	return OptionFunc(func(eng *Engine) {
-		eng.clientTLS = clientConfig
-		eng.serverTLS = serverConfig
+		eng.tlsInfo = info
 	})
 }
 

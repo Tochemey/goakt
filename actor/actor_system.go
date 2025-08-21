@@ -79,6 +79,7 @@ import (
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/memory"
 	"github.com/tochemey/goakt/v3/remote"
+	gtls "github.com/tochemey/goakt/v3/tls"
 )
 
 // ActorSystem defines the contract of an actor system
@@ -665,8 +666,7 @@ type actorSystem struct {
 	actorsCounter      *atomic.Uint64
 	deadlettersCounter *atomic.Uint64
 
-	clientTLS         *tls.Config
-	serverTLS         *tls.Config
+	tlsInfo           *gtls.Info
 	pubsubEnabled     atomic.Bool
 	workerPool        *workerpool.WorkerPool
 	relocationEnabled atomic.Bool
@@ -782,27 +782,8 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		workerpool.WithLogger(system.logger),
 	)
 
-	// validate extensions when defined
-	if system.extensions.Len() > 0 {
-		if err := system.validateExtensions(); err != nil {
-			return nil, err
-		}
-	}
-
-	if err := system.remoteConfig.Sanitize(); err != nil {
+	if err := system.validate(); err != nil {
 		return nil, err
-	}
-
-	// we need to make sure the cluster kinds are defined
-	if system.clusterEnabled.Load() {
-		if err := system.clusterConfig.Validate(); err != nil {
-			return nil, err
-		}
-	}
-
-	// perform some quick validations on the TLS configurations
-	if (system.serverTLS == nil) != (system.clientTLS == nil) {
-		return nil, gerrors.ErrInvalidTLSConfiguration
 	}
 
 	// append the right protocols to the TLS settings
@@ -884,8 +865,8 @@ func (x *actorSystem) Start(ctx context.Context) error {
 	if err := chain.
 		New(chain.WithFailFast(), chain.WithContext(ctx)).
 		AddRunner(x.workerPool.Start).
-		AddContextRunner(x.enableRemoting).
-		AddContextRunner(x.enableClustering).
+		AddContextRunner(x.startRemoting).
+		AddContextRunner(x.startClustering).
 		AddContextRunner(x.spawnRootGuardian).
 		AddContextRunner(x.spawnSystemGuardian).
 		AddContextRunner(x.spawnNoSender).
@@ -2169,6 +2150,37 @@ func (x *actorSystem) Inject(dependencies ...extension.Dependency) error {
 	return nil
 }
 
+// validate checks the actor system configuration and ensures that all required settings are properly defined.
+func (x *actorSystem) validate() error {
+	// validate extensions when defined
+	if x.extensions.Len() > 0 {
+		if err := x.validateExtensions(); err != nil {
+			return err
+		}
+	}
+
+	if err := x.remoteConfig.Sanitize(); err != nil {
+		return err
+	}
+
+	// we need to make sure the cluster kinds are defined
+	if x.clusterEnabled.Load() {
+		if err := x.clusterConfig.Validate(); err != nil {
+			return err
+		}
+	}
+
+	if x.tlsInfo != nil {
+		// we need both server and client TLS configurations
+		// to be defined when TLS is enabled
+		if x.tlsInfo.ServerConfig == nil || x.tlsInfo.ClientConfig == nil {
+			return gerrors.ErrInvalidTLSConfiguration
+		}
+	}
+
+	return nil
+}
+
 // handleRemoteAsk handles a synchronous message to another actor and expect a response.
 // This block until a response is received or timed out.
 func (x *actorSystem) handleRemoteAsk(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error) {
@@ -2365,9 +2377,9 @@ func (x *actorSystem) putGrainOnCluster(pid *grainPID) error {
 	return nil
 }
 
-// enableClustering enables clustering. When clustering is enabled remoting is also enabled to facilitate remote
+// startClustering enables clustering. When clustering is enabled remoting is also enabled to facilitate remote
 // communication
-func (x *actorSystem) enableClustering(ctx context.Context) error {
+func (x *actorSystem) startClustering(ctx context.Context) error {
 	if !x.clusterEnabled.Load() {
 		return nil
 	}
@@ -2409,7 +2421,7 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 		cluster.WithWriteQuorum(x.clusterConfig.WriteQuorum()),
 		cluster.WithReadQuorum(x.clusterConfig.ReadQuorum()),
 		cluster.WithReplicaCount(x.clusterConfig.ReplicaCount()),
-		cluster.WithTLS(x.serverTLS, x.clientTLS),
+		cluster.WithTLS(x.tlsInfo),
 		cluster.WithWriteTimeout(x.clusterConfig.WriteTimeout()),
 		cluster.WithReadTimeout(x.clusterConfig.ReadTimeout()),
 		cluster.WithShutdownTimeout(x.clusterConfig.ShutdownTimeout()),
@@ -2465,8 +2477,8 @@ func (x *actorSystem) enableClustering(ctx context.Context) error {
 	return nil
 }
 
-// enableRemoting enables the remoting service to handle remote messaging
-func (x *actorSystem) enableRemoting(ctx context.Context) error {
+// startRemoting enables the remoting service to handle remote messaging
+func (x *actorSystem) startRemoting(ctx context.Context) error {
 	if !x.remotingEnabled.Load() {
 		return nil
 	}
@@ -2508,9 +2520,9 @@ func (x *actorSystem) enableRemoting(ctx context.Context) error {
 
 // setRemoting sets the remoting service
 func (x *actorSystem) setRemoting() {
-	if x.clientTLS != nil {
+	if x.tlsInfo != nil {
 		x.remoting = remote.NewRemoting(
-			remote.WithRemotingTLS(x.clientTLS),
+			remote.WithRemotingTLS(x.tlsInfo.ClientConfig),
 			remote.WithRemotingMaxReadFameSize(int(x.remoteConfig.MaxFrameSize())), // nolint
 		)
 		return
@@ -2536,19 +2548,19 @@ func (x *actorSystem) startEviction() {
 }
 
 func (x *actorSystem) ensureTLSProtos() {
-	if x.serverTLS != nil && x.clientTLS != nil {
+	if x.tlsInfo != nil {
 		// ensure that the required protocols are set for the TLS
 		toAdd := []string{"h2", "http/1.1"}
 
 		// server application protocols setting
-		protos := goset.NewSet(x.serverTLS.NextProtos...)
+		protos := goset.NewSet(x.tlsInfo.ServerConfig.NextProtos...)
 		protos.Append(toAdd...)
-		x.serverTLS.NextProtos = protos.ToSlice()
+		x.tlsInfo.ServerConfig.NextProtos = protos.ToSlice()
 
 		// client application protocols setting
-		protos = goset.NewSet(x.clientTLS.NextProtos...)
+		protos = goset.NewSet(x.tlsInfo.ClientConfig.NextProtos...)
 		protos.Append(toAdd...)
-		x.clientTLS.NextProtos = protos.ToSlice()
+		x.tlsInfo.ClientConfig.NextProtos = protos.ToSlice()
 	}
 }
 
@@ -3101,11 +3113,11 @@ func (x *actorSystem) configureServer(ctx context.Context, mux *stdhttp.ServeMux
 	}
 
 	// set the http TLS server
-	if x.serverTLS != nil {
+	if x.tlsInfo != nil {
 		x.server = httpServer
-		x.server.TLSConfig = x.serverTLS
+		x.server.TLSConfig = x.tlsInfo.ServerConfig
 		x.server.Handler = mux
-		x.listener = tls.NewListener(listener, x.serverTLS)
+		x.listener = tls.NewListener(listener, x.tlsInfo.ServerConfig)
 		return http2.ConfigureServer(x.server, http2Server)
 	}
 

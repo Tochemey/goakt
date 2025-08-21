@@ -47,6 +47,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
 	testkit "github.com/tochemey/goakt/v3/mocks/discovery"
+	gtls "github.com/tochemey/goakt/v3/tls"
 )
 
 func TestSingleNode(t *testing.T) {
@@ -1268,7 +1269,10 @@ func startEngineWithTLS(t *testing.T, serverAddr string, conf autotls.Config) (*
 
 	// create the node
 	engine, err := NewEngine(actorSystemName, provider, &hostNode,
-		WithTLS(conf.ServerTLS, conf.ClientTLS),
+		WithTLS(&gtls.Info{
+			ClientConfig: conf.ClientTLS,
+			ServerConfig: conf.ServerTLS,
+		}),
 		WithLogger(log.DiscardLogger))
 	require.NoError(t, err)
 	require.NotNil(t, engine)

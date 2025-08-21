@@ -34,6 +34,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/size"
 	"github.com/tochemey/goakt/v3/log"
 	testkit "github.com/tochemey/goakt/v3/mocks/hash"
+	gtls "github.com/tochemey/goakt/v3/tls"
 )
 
 func TestOptions(t *testing.T) {
@@ -41,6 +42,10 @@ func TestOptions(t *testing.T) {
 	// nolint
 	tlsConfig := &tls.Config{}
 	size := uint64(1 * size.MB)
+	tlsInfo := &gtls.Info{
+		ClientConfig: tlsConfig,
+		ServerConfig: tlsConfig,
+	}
 
 	testCases := []struct {
 		name   string
@@ -119,10 +124,9 @@ func TestOptions(t *testing.T) {
 		},
 		{
 			name:   "WithTLS",
-			option: WithTLS(tlsConfig, tlsConfig),
+			option: WithTLS(tlsInfo),
 			check: func(t *testing.T, e *Engine) {
-				assert.Equal(t, tlsConfig, e.serverTLS)
-				assert.Equal(t, tlsConfig, e.clientTLS)
+				assert.Equal(t, tlsInfo, e.tlsInfo)
 			},
 		},
 		{

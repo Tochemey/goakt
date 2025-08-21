@@ -26,7 +26,6 @@ package cluster
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -56,6 +55,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/memberlist"
 	"github.com/tochemey/goakt/v3/internal/size"
 	"github.com/tochemey/goakt/v3/log"
+	gtls "github.com/tochemey/goakt/v3/tls"
 )
 
 type EventType int
@@ -195,8 +195,7 @@ type Engine struct {
 	nodeJoinedEventsFilter goset.Set[string]
 	nodeLeftEventsFilter   goset.Set[string]
 
-	clientTLS *tls.Config
-	serverTLS *tls.Config
+	tlsInfo *gtls.Info
 
 	running *atomic.Bool
 }
@@ -237,9 +236,12 @@ func NewEngine(name string, disco discovery.Provider, host *discovery.Node, opts
 		opt.Apply(engine)
 	}
 
-	// perform some quick validations
-	if (engine.serverTLS == nil) != (engine.clientTLS == nil) {
-		return nil, ErrInvalidTLSConfiguration
+	if engine.tlsInfo != nil {
+		// we need both server and client TLS configurations
+		// to be defined when TLS is enabled
+		if engine.tlsInfo.ServerConfig == nil || engine.tlsInfo.ClientConfig == nil {
+			return nil, ErrInvalidTLSConfiguration
+		}
 	}
 
 	// set the node startNode
@@ -1081,16 +1083,16 @@ func (x *Engine) buildConfig() (*config.Config, error) {
 	}
 
 	// Set TLS configuration accordingly
-	if x.serverTLS != nil && x.clientTLS != nil {
+	if x.tlsInfo != nil {
 		// set the server TLS info
 		cfg.TLS = &config.TLS{
-			Client: x.clientTLS,
-			Server: x.serverTLS,
+			Client: x.tlsInfo.ClientConfig,
+			Server: x.tlsInfo.ServerConfig,
 		}
 
 		// create a client configuration that will be used by the
 		// embedded client calls
-		client := &config.Client{TLS: x.clientTLS}
+		client := &config.Client{TLS: x.tlsInfo.ClientConfig}
 		// sanitize client configuration
 		if err := client.Sanitize(); err != nil {
 			return nil, fmt.Errorf("failed to sanitize client config: %v", err)
@@ -1126,7 +1128,7 @@ func (x *Engine) setupMemberlistConfig(cfg *config.Config) error {
 	// the message will be rejected if it lacks the expected label identifying it as part of the correct ring.
 	mconfig.Label = fmt.Sprintf("prefix-%s", strings.ToLower(x.name))
 
-	if x.serverTLS != nil {
+	if x.tlsInfo != nil {
 		transport, err := memberlist.NewTransport(memberlist.TransportConfig{
 			BindAddrs:          []string{x.node.Host},
 			BindPort:           x.node.DiscoveryPort,
@@ -1135,7 +1137,7 @@ func (x *Engine) setupMemberlistConfig(cfg *config.Config) error {
 			Logger:             x.logger,
 			DebugEnabled:       false,
 			TLSEnabled:         true,
-			TLS:                x.serverTLS,
+			TLS:                x.tlsInfo.ServerConfig,
 		})
 		if err != nil {
 			x.logger.Errorf("Failed to create memberlist TCP transport: %v", err)

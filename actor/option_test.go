@@ -35,7 +35,7 @@ import (
 	"github.com/tochemey/goakt/v3/hash"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/remote"
-	tls2 "github.com/tochemey/goakt/v3/tls"
+	gtls "github.com/tochemey/goakt/v3/tls"
 )
 
 func TestOption(t *testing.T) {
@@ -43,7 +43,7 @@ func TestOption(t *testing.T) {
 	hasher := hash.DefaultHasher()
 	// nolint
 	tlsConfig := &tls.Config{}
-	tlsInfo := &tls2.Info{
+	tlsInfo := &gtls.Info{
 		ClientConfig: tlsConfig,
 		ServerConfig: tlsConfig,
 	}
@@ -101,8 +101,8 @@ func TestOption(t *testing.T) {
 			name:   "WithTLS",
 			option: WithTLS(tlsInfo),
 			check: func(t *testing.T, sys *actorSystem) {
-				assert.Equal(t, tlsConfig, sys.serverTLS)
-				assert.Equal(t, tlsConfig, sys.clientTLS)
+				assert.Equal(t, tlsConfig, sys.tlsInfo.ServerConfig)
+				assert.Equal(t, tlsConfig, sys.tlsInfo.ClientConfig)
 			},
 		},
 		{
