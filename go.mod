@@ -4,7 +4,6 @@ go 1.24.0
 
 require (
 	connectrpc.com/connect v1.18.1
-	connectrpc.com/grpchealth v1.4.0
 	github.com/Workiva/go-datastructures v1.1.5
 	github.com/deckarep/golang-set/v2 v2.8.0
 	github.com/dgraph-io/badger/v4 v4.8.0

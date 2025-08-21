@@ -1349,8 +1349,10 @@ func testSystem(t *testing.T, providerFactory providerFactory, opts ...testClust
 	logger := log.DiscardLogger
 
 	// dynamic ports
-	nodePorts := dynaport.Get(3)
-	discoveryPort, peersPort, remotingPort := nodePorts[0], nodePorts[1], nodePorts[2]
+	ports := dynaport.Get(3)
+	discoveryPort := ports[0]
+	remotingPort := ports[1]
+	peersPort := ports[2]
 
 	host := "127.0.0.1"
 	actorSystemName := "accountsSystem"

@@ -2855,6 +2855,43 @@ func TestActorSystem(t *testing.T) {
 		require.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
 		require.False(t, exists)
 	})
+	t.Run("When trySyncPeersState failed due to get peers failure", func(t *testing.T) {
+		ctx := context.TODO()
+		clmock := clustermock.NewInterface(t)
+		clmock.EXPECT().Peers(ctx).Return(nil, errors.New("some error")).Once()
+
+		sys := &actorSystem{
+			cluster: clmock,
+		}
+
+		// start the actor system
+		err := sys.trySyncPeersState(ctx)
+		require.Error(t, err)
+	})
+	t.Run("When trySyncPeersState failed due to get peer state failure", func(t *testing.T) {
+		ctx := context.TODO()
+		peer := &cluster.Peer{
+			Host:         "host",
+			PeersPort:    0,
+			Coordinator:  false,
+			RemotingPort: 0,
+		}
+		peers := []*cluster.Peer{peer}
+
+		clmock := clustermock.NewInterface(t)
+		clmock.EXPECT().Peers(ctx).Return(peers, nil).Once()
+		clmock.EXPECT().GetState(mock.Anything, peer.PeerAddress()).Return(nil, errors.New("some error")).Once()
+
+		sys := &actorSystem{
+			cluster:       clmock,
+			clusterConfig: NewClusterConfig(),
+			logger:        log.DiscardLogger,
+		}
+
+		// start the actor system
+		err := sys.trySyncPeersState(ctx)
+		require.Error(t, err)
+	})
 }
 
 func TestRemoteTell(t *testing.T) {
@@ -4982,44 +5019,6 @@ func TestRemotingSpawn(t *testing.T) {
 		remoting.Close()
 		err = sys.Stop(ctx)
 		require.NoError(t, err)
-	})
-	t.Run("When trySyncPeersState failed due to get peers failure", func(t *testing.T) {
-		ctx := context.TODO()
-		clmock := clustermock.NewInterface(t)
-		clmock.EXPECT().Peers(ctx).Return(nil, errors.New("some error")).Once()
-
-		sys := &actorSystem{
-			cluster: clmock,
-		}
-
-		// start the actor system
-		err := sys.trySyncPeersState(ctx)
-		require.Error(t, err)
-	})
-
-	t.Run("When trySyncPeersState failed due to get peer state failure", func(t *testing.T) {
-		ctx := context.TODO()
-		peer := &cluster.Peer{
-			Host:         "host",
-			PeersPort:    0,
-			Coordinator:  false,
-			RemotingPort: 0,
-		}
-		peers := []*cluster.Peer{peer}
-
-		clmock := clustermock.NewInterface(t)
-		clmock.EXPECT().Peers(ctx).Return(peers, nil).Once()
-		clmock.EXPECT().GetState(mock.Anything, peer.PeerAddress()).Return(nil, errors.New("some error")).Once()
-
-		sys := &actorSystem{
-			cluster:       clmock,
-			clusterConfig: NewClusterConfig(),
-			logger:        log.DiscardLogger,
-		}
-
-		// start the actor system
-		err := sys.trySyncPeersState(ctx)
-		require.Error(t, err)
 	})
 }
 

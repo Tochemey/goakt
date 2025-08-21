@@ -63,7 +63,7 @@ func TestRebalancing(t *testing.T) {
 
 	// let us create 4 actors on each node
 	for j := 1; j <= 4; j++ {
-		actorName := fmt.Sprintf("Node1-Actor-%d", j)
+		actorName := fmt.Sprintf("Actor1-%d", j)
 		pid, err := node1.Spawn(ctx, actorName, NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -72,7 +72,7 @@ func TestRebalancing(t *testing.T) {
 	pause.For(time.Second)
 
 	for j := 1; j <= 4; j++ {
-		actorName := fmt.Sprintf("Node2-Actor-%d", j)
+		actorName := fmt.Sprintf("Actor2-%d", j)
 		pid, err := node2.Spawn(ctx, actorName, NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -81,7 +81,7 @@ func TestRebalancing(t *testing.T) {
 	pause.For(time.Second)
 
 	for j := 1; j <= 4; j++ {
-		actorName := fmt.Sprintf("Node3-Actor-%d", j)
+		actorName := fmt.Sprintf("Actor3-%d", j)
 		pid, err := node3.Spawn(ctx, actorName, NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -96,12 +96,12 @@ func TestRebalancing(t *testing.T) {
 	// Wait for cluster rebalancing
 	pause.For(time.Minute)
 
-	sender, err := node1.LocalActor("Node1-Actor-1")
+	sender, err := node1.LocalActor("Actor1-1")
 	require.NoError(t, err)
 	require.NotNil(t, sender)
 
 	// let us access some of the node2 actors from node 1 and  node 3
-	actorName := "Node2-Actor-1"
+	actorName := "Actor2-1"
 	err = sender.SendAsync(ctx, actorName, new(testpb.TestSend))
 	require.NoError(t, err)
 
