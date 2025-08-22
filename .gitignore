@@ -14,3 +14,4 @@ gen/
 /.fleet/settings.json
 bench/*.txt
 playground
+.trunk/
