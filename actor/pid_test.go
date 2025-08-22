@@ -87,7 +87,7 @@ func TestReceive(t *testing.T) {
 			receiveContext := &ReceiveContext{
 				ctx:     ctx,
 				message: new(testpb.TestSend),
-				sender:  NoSender,
+				sender:  actorSystem.NoSender(),
 				self:    pid,
 			}
 
@@ -3304,34 +3304,30 @@ func TestRemoteStop(t *testing.T) {
 	})
 }
 func TestEquals(t *testing.T) {
-	t.Run("case 1", func(t *testing.T) {
-		ctx := context.TODO()
-		logger := log.DiscardLogger
-		sys, err := NewActorSystem("test",
-			WithLogger(logger))
+	ctx := context.TODO()
+	logger := log.DiscardLogger
+	sys, err := NewActorSystem("test",
+		WithLogger(logger))
 
-		require.NoError(t, err)
-		err = sys.Start(ctx)
-		assert.NoError(t, err)
+	require.NoError(t, err)
+	err = sys.Start(ctx)
+	assert.NoError(t, err)
 
-		pid1, err := sys.Spawn(ctx, "test", NewMockActor())
-		require.NoError(t, err)
-		assert.NotNil(t, pid1)
+	pid1, err := sys.Spawn(ctx, "test", NewMockActor())
+	require.NoError(t, err)
+	assert.NotNil(t, pid1)
 
-		pid2, err := sys.Spawn(ctx, "exchange", &exchanger{})
-		require.NoError(t, err)
-		assert.NotNil(t, pid2)
+	pid2, err := sys.Spawn(ctx, "exchange", &exchanger{})
+	require.NoError(t, err)
+	assert.NotNil(t, pid2)
 
-		assert.False(t, pid1.Equals(NoSender))
-		assert.False(t, pid2.Equals(NoSender))
-		assert.False(t, pid1.Equals(pid2))
+	noSender := sys.NoSender()
+	assert.False(t, pid1.Equals(noSender))
+	assert.False(t, pid2.Equals(noSender))
+	assert.False(t, pid1.Equals(pid2))
 
-		err = sys.Stop(ctx)
-		assert.NoError(t, err)
-	})
-	t.Run("case 2", func(t *testing.T) {
-		assert.True(t, NoSender.Equals(NoSender))
-	})
+	err = sys.Stop(ctx)
+	assert.NoError(t, err)
 }
 func TestRemoteSpawn(t *testing.T) {
 	t.Run("When remoting is enabled", func(t *testing.T) {
@@ -4394,8 +4390,8 @@ func TestReinstate(t *testing.T) {
 		require.True(t, pid.IsRunning())
 
 		pause.For(time.Second)
-
-		err = pid.Reinstate(NoSender)
+		noSender := actorSystem.NoSender()
+		err = pid.Reinstate(noSender)
 		require.Error(t, err)
 		require.ErrorIs(t, err, errors.ErrUndefinedActor)
 

@@ -155,11 +155,12 @@ func (x *scheduler) ScheduleOnce(message proto.Message, pid *PID, delay time.Dur
 
 	senderConfig := newScheduleConfig(opts...)
 	sender := senderConfig.Sender()
+	noSender := pid.ActorSystem().NoSender()
 
 	job := job.NewFunctionJob(
 		func(ctx context.Context) (bool, error) {
 			var err error
-			if !sender.Equals(NoSender) {
+			if sender != nil && !sender.Equals(noSender) {
 				err = sender.Tell(ctx, pid, message)
 			} else {
 				err = Tell(ctx, pid, message)
@@ -204,11 +205,12 @@ func (x *scheduler) Schedule(message proto.Message, pid *PID, interval time.Dura
 
 	senderConfig := newScheduleConfig(opts...)
 	sender := senderConfig.Sender()
+	noSender := pid.ActorSystem().NoSender()
 
 	job := job.NewFunctionJob(
 		func(ctx context.Context) (bool, error) {
 			var err error
-			if !sender.Equals(NoSender) {
+			if sender != nil && !sender.Equals(noSender) {
 				err = sender.Tell(ctx, pid, message)
 			} else {
 				err = Tell(ctx, pid, message)
@@ -252,11 +254,12 @@ func (x *scheduler) ScheduleWithCron(message proto.Message, pid *PID, cronExpres
 
 	senderConfig := newScheduleConfig(opts...)
 	sender := senderConfig.Sender()
+	noSender := pid.ActorSystem().NoSender()
 
 	job := job.NewFunctionJob(
 		func(ctx context.Context) (bool, error) {
 			var err error
-			if !sender.Equals(NoSender) {
+			if sender != nil && !sender.Equals(noSender) {
 				err = sender.Tell(ctx, pid, message)
 			} else {
 				err = Tell(ctx, pid, message)

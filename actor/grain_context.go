@@ -227,7 +227,7 @@ func (gctx *GrainContext) Unhandled() {
 //	}
 func (gctx *GrainContext) AskActor(actorName string, message proto.Message, timeout time.Duration) (proto.Message, error) {
 	ctx := context.WithoutCancel(gctx.Context())
-	return NoSender.SendSync(ctx, actorName, message, timeout)
+	return gctx.actorSystem.NoSender().SendSync(ctx, actorName, message, timeout)
 }
 
 // TellActor sends a message to another actor by name without waiting for a response.
@@ -243,7 +243,7 @@ func (gctx *GrainContext) AskActor(actorName string, message proto.Message, time
 //	}
 func (gctx *GrainContext) TellActor(actorName string, message proto.Message) error {
 	ctx := context.WithoutCancel(gctx.Context())
-	return NoSender.SendAsync(ctx, actorName, message)
+	return gctx.actorSystem.NoSender().SendAsync(ctx, actorName, message)
 }
 
 // AskGrain sends a message to another Grain and waits for a response.

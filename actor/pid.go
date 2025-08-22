@@ -367,7 +367,7 @@ func (pid *PID) Stop(ctx context.Context, cid *PID) error {
 		return gerrors.ErrDead
 	}
 
-	if cid == nil || cid == NoSender {
+	if cid == nil || cid == pid.ActorSystem().NoSender() {
 		return gerrors.ErrUndefinedActor
 	}
 
@@ -476,7 +476,7 @@ func (pid *PID) Restart(ctx context.Context) error {
 	// from the system and need to be restarted. Only direct children that are alive
 	children := pid.Children()
 	// get the parent node of the actor
-	parent := NoSender
+	parent := pid.ActorSystem().NoSender()
 	if ppid, ok := tree.parent(pid); ok {
 		parent = ppid
 	}
@@ -509,7 +509,7 @@ func (pid *PID) Restart(ctx context.Context) error {
 		// re-add the actor back to the actor tree and cluster
 		if err := chain.New(chain.WithFailFast()).
 			AddRunner(func() error {
-				if !parent.Equals(NoSender) {
+				if !parent.Equals(pid.ActorSystem().NoSender()) {
 					return tree.addNode(parent, pid)
 				}
 				return nil
@@ -729,7 +729,7 @@ func (pid *PID) Reinstate(cid *PID) error {
 		return gerrors.ErrDead
 	}
 
-	if cid.Equals(NoSender) {
+	if cid.Equals(pid.ActorSystem().NoSender()) {
 		return gerrors.ErrUndefinedActor
 	}
 
@@ -789,7 +789,7 @@ func (pid *PID) ReinstateNamed(ctx context.Context, actorName string) error {
 		return err
 	}
 
-	if cid != nil && !cid.Equals(NoSender) {
+	if cid != nil && !cid.Equals(pid.ActorSystem().NoSender()) {
 		if !cid.IsSuspended() || cid.IsRunning() {
 			return nil
 		}
@@ -1798,7 +1798,7 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 		msg.Strategy = internalpb.Strategy_STRATEGY_ONE_FOR_ONE
 	}
 
-	if parent := pid.Parent(); parent != nil && !parent.Equals(NoSender) {
+	if parent := pid.Parent(); parent != nil && !parent.Equals(pid.ActorSystem().NoSender()) {
 		pid.logger.Warnf("%s's child actor=(%s) is failing: Err=%s", pid.Name(), parent.Name(), msg.GetErrorMessage())
 		pid.logger.Infof("%s activates [strategy=%s, directive=%s] for failing child actor=(%s)",
 			parent.Name(),
@@ -1826,7 +1826,7 @@ func (pid *PID) toDeadletters(receiveCtx *ReceiveContext, err error) {
 	}
 
 	sender := &address.Address{}
-	if receiveCtx.Sender() != nil || receiveCtx.Sender() != NoSender {
+	if receiveCtx.Sender() != nil || receiveCtx.Sender() != pid.ActorSystem().NoSender() {
 		sender = receiveCtx.Sender().Address()
 	}
 
@@ -1859,7 +1859,7 @@ func (pid *PID) handleCompletion(ctx context.Context, completion *taskCompletion
 	// defensive programming
 	if completion == nil ||
 		completion.Receiver == nil ||
-		completion.Receiver == NoSender ||
+		completion.Receiver == pid.ActorSystem().NoSender() ||
 		completion.Task == nil {
 		pid.logger.Error(gerrors.ErrUndefinedTask)
 		return
@@ -2044,7 +2044,8 @@ func (pid *PID) getDeadlettersCount(ctx context.Context) int64 {
 // fireSystemMessage sends a system-level message to the specified PID by creating a receive context and invoking the message handling logic.
 func (pid *PID) fireSystemMessage(ctx context.Context, message proto.Message) {
 	receiveContext := getContext()
-	receiveContext.build(ctx, NoSender, pid, message, true)
+	noSender := pid.ActorSystem().NoSender()
+	receiveContext.build(ctx, noSender, pid, message, true)
 	pid.doReceive(receiveContext)
 }
 
@@ -2102,11 +2103,12 @@ func (pid *PID) checkBootstrap(ctx context.Context) error {
 	message := new(internalpb.ReadinessProbe)
 	timeout := pid.initTimeout.Load()
 	numretries := pid.initMaxRetries.Load()
+	noSender := pid.ActorSystem().NoSender()
 
 	logger.Infof("%s bootstrapping...", pid.Name())
 	retrier := retry.NewRetrier(int(numretries), timeout, timeout)
 	err := retrier.RunContext(ctx, func(ctx context.Context) error {
-		_, err := NoSender.Ask(ctx, pid, message, DefaultAskTimeout)
+		_, err := noSender.Ask(ctx, pid, message, DefaultAskTimeout)
 		return err
 	})
 

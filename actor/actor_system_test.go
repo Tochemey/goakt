@@ -948,31 +948,31 @@ func TestActorSystem(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 		pause.For(time.Second)
+		part1 := node1.GetPartition("actor11")
 
 		pid, err = node2.Spawn(ctx, "actor21", NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 		pause.For(time.Second)
+		part2 := node2.GetPartition("actor21")
 
 		pid, err = node3.Spawn(ctx, "actor31", NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 		pause.For(time.Second)
+		part3 := node3.GetPartition("actor31")
 
 		// get the partition of the actor actor11
 		partition := node2.GetPartition("actor11")
-		require.NotZero(t, partition)
-		require.Positive(t, partition)
+		require.Exactly(t, part1, partition)
 
 		// get the partition of the actor21
 		partition = node3.GetPartition("actor21")
-		require.NotZero(t, partition)
-		require.Positive(t, partition)
+		require.Exactly(t, part2, partition)
 
 		// get the partition of the actor31
 		partition = node1.GetPartition("actor31")
-		require.NotZero(t, partition)
-		require.Positive(t, partition)
+		require.Exactly(t, part3, partition)
 
 		assert.NoError(t, node1.Stop(ctx))
 		assert.NoError(t, node3.Stop(ctx))

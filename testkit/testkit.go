@@ -91,7 +91,7 @@ func (x *TestKit) Spawn(ctx context.Context, name string, actor goakt.Actor) {
 	pid, err := x.actorSystem.Spawn(ctx, name, actor)
 	require.NoError(x.testingT, err)
 	require.NotNil(x.testingT, pid)
-	require.False(x.testingT, pid.Equals(goakt.NoSender))
+	require.False(x.testingT, pid.Equals(x.actorSystem.NoSender()))
 }
 
 // SpawnChild creates a child actor for an existing actor that is the parent
@@ -123,7 +123,7 @@ func (x *TestKit) Kill(ctx context.Context, name string) {
 	pid, err := x.actorSystem.LocalActor(name)
 	require.NoError(x.testingT, err)
 	require.NotNil(x.testingT, pid)
-	require.False(x.testingT, pid.Equals(goakt.NoSender), "cannot kill actor with no address")
+	require.False(x.testingT, pid.Equals(x.actorSystem.NoSender()), "cannot kill actor with no address")
 	require.NoError(x.testingT, pid.Shutdown(ctx))
 }
 
