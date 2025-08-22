@@ -68,7 +68,7 @@ func (x TestNode) Spawn(ctx context.Context, name string, actor goakt.Actor, opt
 	pid, err := x.actorSystem.Spawn(ctx, name, actor, opts...)
 	require.NoError(x.testingT, err)
 	require.NotNil(x.testingT, pid)
-	require.False(x.testingT, pid.Equals(goakt.NoSender))
+	require.False(x.testingT, pid.Equals(x.actorSystem.NoSender()))
 }
 
 // SpawnSingleton creates a singleton actor in the system.
@@ -123,6 +123,6 @@ func (x TestNode) Kill(ctx context.Context, name string) {
 	pid, err := x.actorSystem.LocalActor(name)
 	require.NoError(x.testingT, err)
 	require.NotNil(x.testingT, pid)
-	require.False(x.testingT, pid.Equals(goakt.NoSender), "cannot kill actor with no address")
+	require.False(x.testingT, pid.Equals(x.actorSystem.NoSender()), "cannot kill actor with no address")
 	require.NoError(x.testingT, pid.Shutdown(ctx))
 }

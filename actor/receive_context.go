@@ -368,8 +368,9 @@ func (rctx *ReceiveContext) RemoteForward(to *address.Address) {
 	sender := rctx.Sender()
 	remoteSender := rctx.RemoteSender()
 	remoting := rctx.Self().remoting
+	noSender := rctx.Self().ActorSystem().NoSender()
 
-	if !sender.Equals(NoSender) {
+	if !sender.Equals(noSender) {
 		message := rctx.Message()
 		ctx := context.WithoutCancel(rctx.ctx)
 		if err := sender.RemoteTell(ctx, to, message); err != nil {

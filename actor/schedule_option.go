@@ -40,7 +40,6 @@ type scheduleConfig struct {
 // Options are applied sequentially to configure the instance.
 func newScheduleConfig(opts ...ScheduleOption) *scheduleConfig {
 	config := &scheduleConfig{
-		sender:     NoSender,
 		senderAddr: address.NoSender(),
 		reference:  uuid.NewString(),
 	}

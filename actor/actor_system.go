@@ -547,6 +547,20 @@ type ActorSystem interface {
 	//   - This method abstracts away the details of Grain lifecycle management.
 	//   - Use this to obtain references to all active Grains for monitoring, diagnostics, or administrative purposes.
 	Grains(ctx context.Context, timeout time.Duration) []*GrainIdentity
+	// NoSender returns a special PID that represents an anonymous / absent sender.
+	//
+	// Use this PID when sending or scheduling messages for which no sender is expected. The PID
+	// is meaningful only for local messaging and is not routable across the network.
+	//
+	// In remote scenarios use address.NoSender(), which encodes the appropriate
+	// network address semantics for a no-sender value.
+	//
+	// Notes:
+	//  - The returned PID should be used as the Sender in envelopes, not as a target
+	//    destination for Send operations.
+	//  - The value is stable for local use and intended to explicitly indicate the
+	//    absence of a sender (as opposed to nil).
+	NoSender() *PID
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
 	handleRemoteAsk(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error)
@@ -657,6 +671,7 @@ type actorSystem struct {
 	deadletter       *PID
 	singletonManager *PID
 	topicActor       *PID
+	noSender         *PID
 
 	startedAt       *atomic.Int64
 	rebalancing     *atomic.Bool
@@ -2089,9 +2104,9 @@ func (x *actorSystem) GetKinds(_ context.Context, request *connect.Request[inter
 // Returns the actor reference for the topic actor.
 func (x *actorSystem) TopicActor() *PID {
 	x.locker.RLock()
-	mediator := x.topicActor
+	topicActor := x.topicActor
 	x.locker.RUnlock()
-	return mediator
+	return topicActor
 }
 
 // Extensions returns a slice of all registered extensions in the ActorSystem.
@@ -2640,7 +2655,7 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 		AddContextRunnerIf(x.getDeadletter() != nil, x.getDeadletter().Shutdown).
 		AddContextRunnerIf(x.getDeathWatch() != nil, x.getDeathWatch().Shutdown).
 		AddContextRunnerIf(x.TopicActor() != nil, x.TopicActor().Shutdown).
-		AddContextRunnerIf(NoSender != nil, NoSender.Shutdown).
+		AddContextRunnerIf(x.NoSender() != nil, x.NoSender().Shutdown).
 		AddContextRunnerIf(x.getSystemGuardian() != nil, x.getSystemGuardian().Shutdown).
 		AddContextRunnerIf(x.getRootGuardian() != nil, x.getRootGuardian().Shutdown).
 		Run(); err != nil {

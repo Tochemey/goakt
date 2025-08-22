@@ -116,18 +116,19 @@ func BatchAsk(ctx context.Context, to *PID, timeout time.Duration, messages ...p
 
 // toReceiveContext creates a ReceiveContext provided a message and a receiver
 func toReceiveContext(ctx context.Context, to *PID, message proto.Message, async bool) (*ReceiveContext, error) {
+	receiveContext := getContext()
+	noSender := to.ActorSystem().NoSender()
+
 	switch msg := message.(type) {
 	case *internalpb.RemoteMessage:
 		actual, err := msg.GetMessage().UnmarshalNew()
 		if err != nil {
 			return nil, gerrors.NewErrInvalidRemoteMessage(err)
 		}
-		receiveContext := getContext()
-		receiveContext.build(ctx, NoSender, to, actual, async)
+		receiveContext.build(ctx, noSender, to, actual, async)
 		return receiveContext.withRemoteSender(address.From(msg.GetSender())), nil
 	default:
-		receiveContext := getContext()
-		receiveContext.build(ctx, NoSender, to, message, async)
+		receiveContext.build(ctx, noSender, to, message, async)
 		return receiveContext.withRemoteSender(address.NoSender()), nil
 	}
 }

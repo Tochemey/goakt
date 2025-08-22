@@ -131,7 +131,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  actorSystem.NoSender(),
 			self:    pid1,
 		}
 
@@ -170,7 +170,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  actorSystem.NoSender(),
 			self:    pid1,
 		}
 
@@ -211,7 +211,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  actorSystem.NoSender(),
 			self:    pid1,
 		}
 
@@ -251,7 +251,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  actorSystem.NoSender(),
 			self:    pid1,
 		}
 
@@ -310,7 +310,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  sys.NoSender(),
 			self:    pid1,
 		}
 
@@ -368,7 +368,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  sys.NoSender(),
 			self:    pid1,
 		}
 
@@ -438,7 +438,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  sys.NoSender(),
 			self:    pid1,
 		}
 
@@ -500,7 +500,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  sys.NoSender(),
 			self:    pid1,
 		}
 
@@ -567,7 +567,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  sys.NoSender(),
 			self:    pid1,
 		}
 
@@ -629,7 +629,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  sys.NoSender(),
 			self:    pid1,
 		}
 		context.RemoteLookup(host, remotingPort, actorName2)
@@ -667,7 +667,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  actorSystem.NoSender(),
 			self:    pid1,
 		}
 
@@ -698,7 +698,7 @@ func TestReceiveContext(t *testing.T) {
 		receiveCtx := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  actorSystem.NoSender(),
 			self:    parent,
 		}
 
@@ -746,7 +746,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  actorSystem.NoSender(),
 			self:    parent,
 		}
 
@@ -780,7 +780,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  actorSystem.NoSender(),
 			self:    parent,
 		}
 
@@ -824,7 +824,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  actorSystem.NoSender(),
 			self:    parent,
 		}
 
@@ -866,7 +866,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  actorSystem.NoSender(),
 			self:    parent,
 		}
 
@@ -909,7 +909,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  actorSystem.NoSender(),
 			self:    parent,
 		}
 
@@ -956,13 +956,13 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  actorSystem.NoSender(),
 			self:    parent,
 		}
 
 		pause.For(time.Second)
 		// stop the child actor
-		context.Stop(NoSender)
+		context.Stop(actorSystem.NoSender())
 		require.Error(t, context.getError())
 		t.Cleanup(
 			func() {
@@ -992,7 +992,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  actorSystem.NoSender(),
 			self:    parent,
 		}
 
@@ -1034,7 +1034,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  actorSystem.NoSender(),
 			self:    parent,
 		}
 
@@ -1083,7 +1083,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  actorSystem.NoSender(),
 			self:    parent,
 		}
 
@@ -1129,7 +1129,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  actorSystem.NoSender(),
 			self:    pid1,
 		}
 
@@ -1215,7 +1215,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: send,
-			sender:  NoSender,
+			sender:  actorSystem.NoSender(),
 			self:    pid1,
 		}
 
@@ -1235,6 +1235,7 @@ func TestReceiveContext(t *testing.T) {
 			}
 		}
 
+		noSender := actorSystem.NoSender()
 		require.Len(t, items, 1)
 		deadletter := items[0]
 		msg := deadletter.GetMessage()
@@ -1243,7 +1244,7 @@ func TestReceiveContext(t *testing.T) {
 		require.True(t, proto.Equal(send, actual))
 		require.Equal(t, deadletter.GetReason(), errors.ErrUnhandled.Error())
 		addr := deadletter.GetSender()
-		require.True(t, NoSender.Address().Equals(address.From(addr)))
+		require.True(t, noSender.Address().Equals(address.From(addr)))
 
 		assert.EqualValues(t, 1, len(consumer.Topics()))
 
@@ -1353,7 +1354,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(goaktpb.PostStart),
-			sender:  NoSender,
+			sender:  actorSystem.NoSender(),
 			self:    pid1,
 		}
 
@@ -1409,7 +1410,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  actorSystem.NoSender(),
 			self:    pid1,
 		}
 
@@ -1451,7 +1452,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  actorSystem.NoSender(),
 			self:    pid1,
 		}
 
@@ -1492,7 +1493,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  actorSystem.NoSender(),
 			self:    pid1,
 		}
 
@@ -1536,7 +1537,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  actorSystem.NoSender(),
 			self:    pid1,
 		}
 
@@ -1583,7 +1584,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  actorSystem.NoSender(),
 			self:    pid1,
 		}
 
@@ -1637,7 +1638,7 @@ func TestReceiveContext(t *testing.T) {
 		// create an instance of receive context
 		context := &ReceiveContext{
 			ctx:    ctx,
-			sender: NoSender,
+			sender: sys.NoSender(),
 			self:   testerRef,
 		}
 
@@ -1693,7 +1694,7 @@ func TestReceiveContext(t *testing.T) {
 		// create an instance of receive context
 		context := &ReceiveContext{
 			ctx:    ctx,
-			sender: NoSender,
+			sender: sys.NoSender(),
 			self:   testerRef,
 		}
 
@@ -1746,7 +1747,7 @@ func TestReceiveContext(t *testing.T) {
 		// create an instance of receive context
 		context := &ReceiveContext{
 			ctx:    ctx,
-			sender: NoSender,
+			sender: sys.NoSender(),
 			self:   testerRef,
 		}
 
@@ -1805,7 +1806,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  sys.NoSender(),
 			self:    pid1,
 		}
 
@@ -1861,7 +1862,7 @@ func TestReceiveContext(t *testing.T) {
 		// create an instance of receive context
 		context := &ReceiveContext{
 			ctx:    ctx,
-			sender: NoSender,
+			sender: sys.NoSender(),
 			self:   testerRef,
 		}
 
@@ -1922,7 +1923,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  sys.NoSender(),
 			self:    pid1,
 		}
 
@@ -1982,7 +1983,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  sys.NoSender(),
 			self:    pid1,
 		}
 
@@ -2032,7 +2033,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  sys.NoSender(),
 			self:    pid1,
 		}
 
@@ -2084,7 +2085,7 @@ func TestReceiveContext(t *testing.T) {
 		messageContext := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TaskComplete),
-			sender:  NoSender,
+			sender:  actorSystem.NoSender(),
 			self:    pid1,
 		}
 
@@ -2154,7 +2155,7 @@ func TestReceiveContext(t *testing.T) {
 		messageContext := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TaskComplete),
-			sender:  NoSender,
+			sender:  actorSystem.NoSender(),
 			self:    pid1,
 		}
 
@@ -2212,7 +2213,7 @@ func TestReceiveContext(t *testing.T) {
 		messageContext := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TaskComplete),
-			sender:  NoSender,
+			sender:  actorSystem.NoSender(),
 			self:    pid1,
 		}
 
@@ -2256,7 +2257,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  actorSystem.NoSender(),
 			self:    pid1,
 		}
 
@@ -2295,7 +2296,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  actorSystem.NoSender(),
 			self:    pid1,
 		}
 
@@ -2337,7 +2338,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  actorSystem.NoSender(),
 			self:    pid1,
 		}
 
@@ -2373,7 +2374,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  actorSystem.NoSender(),
 			self:    pid1,
 		}
 
@@ -2422,7 +2423,7 @@ func TestReceiveContext(t *testing.T) {
 		receiveContext := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  actorSystem.NoSender(),
 			self:    pid,
 		}
 
@@ -2461,7 +2462,7 @@ func TestReceiveContext(t *testing.T) {
 		receiveContext := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  actorSystem.NoSender(),
 			self:    pid,
 		}
 
@@ -2500,7 +2501,7 @@ func TestReceiveContext(t *testing.T) {
 		receiveContext := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  actorSystem.NoSender(),
 			self:    pid,
 		}
 
@@ -2827,7 +2828,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  actorSystem.NoSender(),
 			self:    pid1,
 		}
 
@@ -2892,7 +2893,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  actorSystem.NoSender(),
 			self:    pid1,
 		}
 
@@ -2927,7 +2928,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  actorSystem.NoSender(),
 			self:    pid1,
 		}
 
@@ -2971,7 +2972,7 @@ func TestReceiveContext(t *testing.T) {
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  NoSender,
+			sender:  actorSystem.NoSender(),
 			self:    pid1,
 		}
 

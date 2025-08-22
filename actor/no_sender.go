@@ -29,8 +29,25 @@ import (
 	"fmt"
 )
 
-// NoSender means that there is no sender
-var NoSender *PID
+// NoSender returns a special PID that represents an anonymous / absent sender.
+//
+// Use this PID when sending or scheduling messages for which no sender is expected. The PID
+// is meaningful only for local messaging and is not routable across the network.
+//
+// In remote scenarios use address.NoSender(), which encodes the appropriate
+// network address semantics for a no-sender value.
+//
+// Notes:
+//   - The returned PID should be used as the Sender in envelopes, not as a target
+//     destination for Send operations.
+//   - The value is stable for local use and intended to explicitly indicate the
+//     absence of a sender (as opposed to nil).
+func (x *actorSystem) NoSender() *PID {
+	x.locker.RLock()
+	noSender := x.noSender
+	x.locker.RUnlock()
+	return noSender
+}
 
 // noSender is a special actor that does not have a sender
 // and is used to send messages without a sender. It does not respond to messages
@@ -64,7 +81,7 @@ func (x *actorSystem) spawnNoSender(ctx context.Context) error {
 		WithAnyErrorDirective(ResumeDirective),
 	)
 
-	NoSender, err = x.configPID(ctx,
+	x.noSender, err = x.configPID(ctx,
 		actorName,
 		newNoSender(),
 		asSystem(),
@@ -75,5 +92,5 @@ func (x *actorSystem) spawnNoSender(ctx context.Context) error {
 		return fmt.Errorf("actor=%s failed to start the noSender: %w", actorName, err)
 	}
 
-	return x.actors.addNode(x.systemGuardian, NoSender)
+	return x.actors.addNode(x.systemGuardian, x.noSender)
 }

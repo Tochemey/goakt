@@ -85,7 +85,8 @@ func (x *tree) addRootNode(pid *PID) error {
 		return errors.New("pid is nil")
 	}
 
-	if pid.Equals(NoSender) {
+	noSender := pid.ActorSystem().NoSender()
+	if pid.Equals(noSender) {
 		return errors.New("pid cannot be NoSender")
 	}
 
@@ -113,7 +114,8 @@ func (x *tree) addNode(parent, pid *PID) error {
 		return errors.New("parent pid is nil")
 	}
 
-	if parent.Equals(NoSender) {
+	noSender := pid.ActorSystem().NoSender()
+	if parent.Equals(noSender) {
 		return errors.New("parent pid cannot be NoSender")
 	}
 
@@ -157,7 +159,8 @@ func (x *tree) addWatcher(pid, watcher *PID) {
 		return
 	}
 
-	if pid.Equals(NoSender) || watcher.Equals(NoSender) {
+	noSender := pid.ActorSystem().NoSender()
+	if pid.Equals(noSender) || watcher.Equals(noSender) {
 		return
 	}
 
@@ -181,7 +184,12 @@ func (x *tree) deleteNode(pid *PID) {
 	x.Lock()
 	defer x.Unlock()
 
-	if pid == nil || pid.Equals(NoSender) {
+	if pid == nil {
+		return
+	}
+
+	noSender := pid.ActorSystem().NoSender()
+	if pid.Equals(noSender) {
 		return
 	}
 
@@ -275,7 +283,12 @@ func (x *tree) siblings(pid *PID) []*PID {
 	x.RLock()
 	defer x.RUnlock()
 
-	if pid == nil || pid.Equals(NoSender) {
+	if pid == nil {
+		return nil
+	}
+
+	noSender := pid.ActorSystem().NoSender()
+	if pid.Equals(noSender) {
 		return nil
 	}
 
@@ -305,7 +318,12 @@ func (x *tree) children(pid *PID) []*PID {
 	x.RLock()
 	defer x.RUnlock()
 
-	if pid == nil || pid.Equals(NoSender) {
+	if pid == nil {
+		return nil
+	}
+
+	noSender := pid.ActorSystem().NoSender()
+	if pid.Equals(noSender) {
 		return nil
 	}
 
@@ -331,7 +349,12 @@ func (x *tree) descendants(pid *PID) []*PID {
 	x.RLock()
 	defer x.RUnlock()
 
-	if pid == nil || pid.Equals(NoSender) {
+	if pid == nil {
+		return nil
+	}
+
+	noSender := pid.ActorSystem().NoSender()
+	if pid.Equals(noSender) {
 		return nil
 	}
 
@@ -399,7 +422,12 @@ func (x *tree) parent(pid *PID) (*PID, bool) {
 	x.RLock()
 	defer x.RUnlock()
 
-	if pid == nil || pid.Equals(NoSender) {
+	if pid == nil {
+		return nil, false
+	}
+
+	noSender := pid.ActorSystem().NoSender()
+	if pid.Equals(noSender) {
 		return nil, false
 	}
 
@@ -417,7 +445,12 @@ func (x *tree) watchers(pid *PID) []*PID {
 	x.RLock()
 	defer x.RUnlock()
 
-	if pid == nil || pid.Equals(NoSender) {
+	if pid == nil {
+		return nil
+	}
+
+	noSender := pid.ActorSystem().NoSender()
+	if pid.Equals(noSender) {
 		return nil
 	}
 
@@ -440,7 +473,12 @@ func (x *tree) watchees(pid *PID) []*PID {
 	x.RLock()
 	defer x.RUnlock()
 
-	if pid == nil || pid.Equals(NoSender) {
+	if pid == nil {
+		return nil
+	}
+
+	noSender := pid.ActorSystem().NoSender()
+	if pid.Equals(noSender) {
 		return nil
 	}
 
