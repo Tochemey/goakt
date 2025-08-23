@@ -49,6 +49,7 @@ import (
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
+// nolint
 func TestSpawn(t *testing.T) {
 	t.Run("With Spawn an actor when not System started", func(t *testing.T) {
 		ctx := context.TODO()
