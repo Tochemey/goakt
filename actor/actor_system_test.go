@@ -2057,32 +2057,6 @@ func TestActorSystem(t *testing.T) {
 		err = sys.Stop(ctx)
 		require.NoError(t, err)
 	})
-
-	t.Run("SpawnOn with single node cluster", func(t *testing.T) {
-		// create a context
-		ctx := context.TODO()
-		// start the NATS server
-		srv := startNatsServer(t)
-
-		// create and start system cluster
-		node, sd := testNATs(t, srv.Addr().String())
-		peerAddress1 := node.PeerAddress()
-		require.NotEmpty(t, peerAddress1)
-		require.NotNil(t, sd)
-
-		// create an actor on node1
-		actor := NewMockActor()
-		actorName := "actorID"
-		err := node.SpawnOn(ctx, actorName, actor)
-		require.NoError(t, err)
-
-		// free resources
-		require.NoError(t, node.Stop(ctx))
-		require.NoError(t, sd.Close())
-
-		// shutdown the nats server gracefully
-		srv.Shutdown()
-	})
 	t.Run("With LRU eviction policy with threshold kept rather than percentage", func(t *testing.T) {
 		ctx := context.TODO()
 		strategy, _ := NewEvictionStrategy(7, LRU, 10)

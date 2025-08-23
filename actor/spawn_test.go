@@ -500,7 +500,31 @@ func TestSpawn(t *testing.T) {
 		assert.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
 		assert.Nil(t, actorRef)
 	})
+	t.Run("SpawnOn with single node cluster", func(t *testing.T) {
+		// create a context
+		ctx := context.TODO()
+		// start the NATS server
+		srv := startNatsServer(t)
 
+		// create and start system cluster
+		node, sd := testNATs(t, srv.Addr().String())
+		peerAddress1 := node.PeerAddress()
+		require.NotEmpty(t, peerAddress1)
+		require.NotNil(t, sd)
+
+		// create an actor on node1
+		actor := NewMockActor()
+		actorName := "actorID"
+		err := node.SpawnOn(ctx, actorName, actor)
+		require.NoError(t, err)
+
+		// free resources
+		require.NoError(t, node.Stop(ctx))
+		require.NoError(t, sd.Close())
+
+		// shutdown the nats server gracefully
+		srv.Shutdown()
+	})
 	t.Run("SpawnOn happy path", func(t *testing.T) {
 		// create a context
 		ctx := context.TODO()
