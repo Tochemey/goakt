@@ -55,6 +55,13 @@ const (
 	// regardless of the cluster configuration.
 	// Useful when locality is important (e.g., accessing local resources).
 	Local
+
+	// LeastLoad selects the node with the least current load to spawn the actor.
+	// This strategy aims to optimize resource utilization by placing actors
+	// on nodes that are less busy, potentially improving performance and responsiveness.
+	// Note: This strategy may require additional overhead when placing actors,
+	// as it needs to get nodes load metrics depending on the cluster size.
+	LeastLoad
 )
 
 // spawnConfig defines the configuration options applied when creating an actor.
