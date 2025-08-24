@@ -29,21 +29,31 @@ import (
 	"time"
 )
 
+// bucket holds counts of successes and failures within a specific time frame.
 type bucket struct {
-	succ uint64
-	fail uint64
-	// start time of bucket (unix nano). When stale, bucket is reset.
-	start int64
+	succ  uint64
+	fail  uint64
+	start int64 // start time of bucket (unix nano)
 }
 
-type bucketWindow struct {
-	bucketDur time.Duration
-	num       int
-	clock     func() time.Time
+// reset clears the bucket data
+func (b *bucket) reset(startTime int64) {
+	b.succ = 0
+	b.fail = 0
+	b.start = startTime
+}
 
-	mu     sync.Mutex
-	buf    []bucket
-	cursor int // points to current bucket index
+// bucketWindow manages a series of buckets to track successes and failures over a rolling time window.
+type bucketWindow struct {
+	bucketDur   time.Duration
+	num         int
+	clock       func() time.Time
+	windowNanos int64 // cached window duration in nanoseconds
+
+	mu         sync.RWMutex
+	buf        []bucket
+	cursor     int   // points to current bucket index
+	lastUpdate int64 // last time we advanced buckets
 }
 
 func newBuckets(window time.Duration, n int, clock func() time.Time) *bucketWindow {
@@ -54,46 +64,58 @@ func newBuckets(window time.Duration, n int, clock func() time.Time) *bucketWind
 	if bucketDur <= 0 {
 		bucketDur = time.Nanosecond
 	}
-	bw := &bucketWindow{
-		bucketDur: bucketDur,
-		num:       n,
-		clock:     clock,
-		buf:       make([]bucket, n),
-		cursor:    0,
-	}
+
 	now := clock().UnixNano()
+	bw := &bucketWindow{
+		bucketDur:   bucketDur,
+		num:         n,
+		clock:       clock,
+		windowNanos: window.Nanoseconds(),
+		buf:         make([]bucket, n),
+		cursor:      0,
+		lastUpdate:  now,
+	}
+
+	// Initialize all buckets with current time
 	for i := range bw.buf {
-		bw.buf[i].start = now
+		bw.buf[i].reset(now)
 	}
 	return bw
 }
 
 func (bw *bucketWindow) advanceLocked(now int64) {
-	cur := &bw.buf[bw.cursor]
-	if now < cur.start+bw.bucketDur.Nanoseconds() {
+	// Quick check if we need to advance at all
+	if now < bw.lastUpdate+bw.bucketDur.Nanoseconds() {
 		return // still within current bucket
 	}
-	// If we've moved past the entire window, do a hard reset.
-	windowNanos := bw.bucketDur.Nanoseconds() * int64(bw.num)
-	if now-cur.start >= windowNanos {
-		for i := range bw.buf {
-			bw.buf[i].succ, bw.buf[i].fail = 0, 0
-			bw.buf[i].start = now
-		}
-		bw.cursor = 0
+
+	elapsed := now - bw.lastUpdate
+
+	// If we've moved past the entire window, do a hard reset
+	if elapsed >= bw.windowNanos {
+		bw.hardResetLocked(now)
 		return
 	}
-	// determine how many buckets to advance (at most num-1)
-	steps := int((now - cur.start) / bw.bucketDur.Nanoseconds())
-	if steps > bw.num-1 {
-		steps = bw.num - 1
-	}
-	for i := 0; i < steps; i++ {
+
+	// Calculate how many buckets to advance
+	steps := min(int(elapsed/bw.bucketDur.Nanoseconds()), bw.num-1)
+
+	// Advance buckets efficiently
+	for i := range steps {
 		bw.cursor = (bw.cursor + 1) % bw.num
-		b := &bw.buf[bw.cursor]
-		b.succ, b.fail = 0, 0
-		b.start = cur.start + int64(i+1)*bw.bucketDur.Nanoseconds()
+		bucketStartTime := bw.lastUpdate + int64(i+1)*bw.bucketDur.Nanoseconds()
+		bw.buf[bw.cursor].reset(bucketStartTime)
 	}
+
+	bw.lastUpdate = now
+}
+
+func (bw *bucketWindow) hardResetLocked(now int64) {
+	for i := range bw.buf {
+		bw.buf[i].reset(now)
+	}
+	bw.cursor = 0
+	bw.lastUpdate = now
 }
 
 func (bw *bucketWindow) addSuccess(n uint64) {

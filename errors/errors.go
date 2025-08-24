@@ -162,6 +162,9 @@ var (
 
 	// ErrInvalidEvictionPolicy is returned when an invalid eviction policy is specified.
 	ErrInvalidEvictionPolicy = errors.New("invalid eviction policy")
+
+	// ErrOnlyOneOptionAllowed is returned when more than one Option
+	ErrOnlyOneOptionAllowed = errors.New("only one option can be set")
 )
 
 // NewErrInvalidPassivationStrategy formats an error with ErrInvalidPassivationStrategy

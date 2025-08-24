@@ -813,7 +813,7 @@ func (pid *PID) StashSize() uint64 {
 // The successful result of the task will be put onto the provided actor mailbox.
 // This is useful when interacting with external services.
 // It’s common that you would like to use the value of the response in the actor when the long-started task is completed
-func (pid *PID) PipeTo(ctx context.Context, to *PID, task func() (proto.Message, error)) error {
+func (pid *PID) PipeTo(ctx context.Context, to *PID, task func() (proto.Message, error), opts ...PipeToOption) error {
 	if task == nil {
 		return gerrors.ErrUndefinedTask
 	}
@@ -822,8 +822,15 @@ func (pid *PID) PipeTo(ctx context.Context, to *PID, task func() (proto.Message,
 		return gerrors.ErrDead
 	}
 
+	ppt, err := newPipeTo(opts...)
+	if err != nil {
+		return err
+	}
+
 	go pid.handleCompletion(
-		ctx, &taskCompletion{
+		ctx,
+		ppt,
+		&taskCompletion{
 			Receiver: to,
 			Task:     task,
 		},
@@ -1855,7 +1862,7 @@ func (pid *PID) sendToDeadletter(ctx context.Context, from, to *address.Address,
 
 // handleCompletion processes a long-started task and pipe the result to
 // the completion receiver
-func (pid *PID) handleCompletion(ctx context.Context, completion *taskCompletion) {
+func (pid *PID) handleCompletion(ctx context.Context, pipe *pipeTo, completion *taskCompletion) {
 	// defensive programming
 	if completion == nil ||
 		completion.Receiver == nil ||
@@ -1865,14 +1872,45 @@ func (pid *PID) handleCompletion(ctx context.Context, completion *taskCompletion
 		return
 	}
 
+	// helper to send to deadletters on error
+	toDeadletter := func(err error) {
+		pid.logger.Error(err)
+		pid.sendToDeadletter(context.Background(), pid.Address(), pid.Address(), new(goaktpb.NoMessage), err)
+	}
+
+	var (
+		result proto.Message
+		err    error
+	)
 	// wrap the provided completion task into a future that can help run the task
 	fut := future.New(completion.Task)
-	result, err := fut.Await(ctx)
+
+	switch {
+	case pipe.timeout != nil:
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, *pipe.timeout)
+		defer cancel()
+		result, err = fut.Await(ctx)
+
+	case pipe.circuitBreaker != nil:
+		outcome, oerr := pipe.circuitBreaker.Execute(ctx, func(ctx context.Context) (any, error) {
+			return fut.Await(ctx)
+		})
+
+		err = oerr
+		if oerr == nil {
+			result = outcome.(proto.Message)
+		}
+
+	default:
+		// No special pipe: just await the future
+		result, err = fut.Await(ctx)
+	}
+
 	// logger the error when the task returns an error
 	// and send the message to the deadletter actor
 	if err != nil {
-		pid.logger.Error(err)
-		pid.sendToDeadletter(context.Background(), pid.Address(), pid.Address(), new(goaktpb.NoMessage), err)
+		toDeadletter(err)
 		return
 	}
 

@@ -37,8 +37,48 @@ import (
 	"github.com/tochemey/goakt/v3/internal/pause"
 )
 
+// nolint
+func TestNewBreaker_WithInvalidOptions(t *testing.T) {
+	t.Run("With valid options", func(t *testing.T) {
+		b, err := NewCircuitBreakerWithValidation(
+			WithFailureRate(0.5),
+			WithMinRequests(2),
+			WithOpenTimeout(50*time.Millisecond),
+			WithWindow(100*time.Millisecond, 2),
+			WithHalfOpenMaxCalls(0), // Invalid
+		)
+		require.Error(t, err)
+		require.Nil(t, b)
+	})
+	t.Run("With invalid options", func(t *testing.T) {
+		b, err := NewCircuitBreakerWithValidation(
+			WithFailureRate(0.5),
+			WithMinRequests(2),
+			WithOpenTimeout(50*time.Millisecond),
+			WithWindow(100*time.Millisecond, 2),
+			WithHalfOpenMaxCalls(1),
+		)
+		require.NoError(t, err)
+		require.NotNil(t, b)
+	})
+}
+
+// nolint
+func TestNewBreaker_WithSanitization(t *testing.T) {
+	b := NewCircuitBreaker(
+		WithFailureRate(0.5),
+		WithMinRequests(2),
+		WithOpenTimeout(50*time.Millisecond),
+		WithWindow(100*time.Millisecond, 2),
+		WithHalfOpenMaxCalls(0), // Invalid
+	)
+
+	require.NotNil(t, b)
+}
+
+// nolint
 func TestBreaker_AllowsAndBlocks(t *testing.T) {
-	b := New(
+	b := NewCircuitBreaker(
 		WithFailureRate(0.5),
 		WithMinRequests(2),
 		WithOpenTimeout(50*time.Millisecond),
@@ -69,11 +109,12 @@ func TestBreaker_AllowsAndBlocks(t *testing.T) {
 	require.Equal(t, Closed, b.State())
 }
 
+// nolint
 func TestBreaker_ExecuteSuccess(t *testing.T) {
-	b := New()
+	b := NewCircuitBreaker()
 	ctx := context.Background()
 
-	res, err := b.Execute(ctx, func(ctx context.Context) (any, error) {
+	res, err := b.Execute(ctx, func(_ context.Context) (any, error) {
 		return "ok", nil
 	})
 	require.NoError(t, err)
@@ -81,33 +122,35 @@ func TestBreaker_ExecuteSuccess(t *testing.T) {
 	require.Equal(t, Closed, b.State())
 }
 
+// nolint
 func TestBreaker_ExecuteFailureAndFallback(t *testing.T) {
-	b := New(WithMinRequests(1), WithFailureRate(0.5))
+	b := NewCircuitBreaker(WithMinRequests(1), WithFailureRate(0.5))
 	ctx := context.Background()
 
 	// First call fails
-	_, err := b.Execute(ctx, func(ctx context.Context) (any, error) {
+	_, err := b.Execute(ctx, func(_ context.Context) (any, error) {
 		return "", errors.New("boom")
 	})
 	require.Error(t, err)
 	require.Equal(t, Open, b.State())
 
 	// Should reject and trigger fallback
-	val, err := b.Execute(ctx, func(ctx context.Context) (any, error) {
+	val, err := b.Execute(ctx, func(_ context.Context) (any, error) {
 		panic("should not run")
-	}, func(ctx context.Context, cause error) (any, error) {
+	}, func(_ context.Context, cause error) (any, error) {
 		return "fallback", nil
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "fallback", val)
 }
 
+// nolint
 func TestBreaker_ContextCancellation(t *testing.T) {
-	b := New()
+	b := NewCircuitBreaker()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
 
-	res, err := b.Execute(ctx, func(ctx context.Context) (any, error) {
+	res, err := b.Execute(ctx, func(_ context.Context) (any, error) {
 		pause.For(30 * time.Millisecond)
 		return "late", nil
 	})
@@ -115,8 +158,9 @@ func TestBreaker_ContextCancellation(t *testing.T) {
 	require.Nil(t, res)
 }
 
+// nolint
 func TestMetricsSnapshot(t *testing.T) {
-	b := New()
+	b := NewCircuitBreaker()
 	b.OnSuccess()
 	b.OnFailure()
 	metrics := b.MetricsSnapshot()
@@ -126,8 +170,9 @@ func TestMetricsSnapshot(t *testing.T) {
 	require.InDelta(t, 0.5, metrics.FailureRate, 0.0001)
 }
 
+// nolint
 func TestStateTransitions(t *testing.T) {
-	b := New(WithFailureRate(0.5), WithMinRequests(2))
+	b := NewCircuitBreaker(WithFailureRate(0.5), WithMinRequests(2))
 
 	b.OnFailure()
 	require.Equal(t, Closed, b.State())
@@ -144,8 +189,9 @@ func TestStateTransitions(t *testing.T) {
 	require.Equal(t, Closed, b.State())
 }
 
+// nolint
 func TestSemaphoreHalfOpen(t *testing.T) {
-	b := New(WithHalfOpenMaxCalls(2))
+	b := NewCircuitBreaker(WithHalfOpenMaxCalls(2))
 	b.toHalfOpen()
 	require.Equal(t, HalfOpen, b.State())
 
@@ -165,8 +211,9 @@ func TestSemaphoreHalfOpen(t *testing.T) {
 	require.True(t, allowedAgain)
 }
 
+// nolint
 func TestOpenTimeoutMovesToHalfOpen(t *testing.T) {
-	b := New(WithFailureRate(0.5), WithMinRequests(2), WithOpenTimeout(20*time.Millisecond))
+	b := NewCircuitBreaker(WithFailureRate(0.5), WithMinRequests(2), WithOpenTimeout(20*time.Millisecond))
 
 	b.OnFailure()
 	b.OnFailure()
@@ -177,8 +224,9 @@ func TestOpenTimeoutMovesToHalfOpen(t *testing.T) {
 	require.Equal(t, HalfOpen, b.State())
 }
 
+// nolint
 func TestHardResetAfterIdle(t *testing.T) {
-	b := New(WithWindow(50*time.Millisecond, 5))
+	b := NewCircuitBreaker(WithWindow(50*time.Millisecond, 5))
 	b.OnFailure()
 	before := b.MetricsSnapshot()
 	require.Equal(t, uint64(1), before.Failures)
@@ -192,25 +240,28 @@ func TestHardResetAfterIdle(t *testing.T) {
 	require.Equal(t, uint64(1), after.Successes)
 }
 
+// nolint
 func TestBreaker_ExecuteOpenWithoutFallback(t *testing.T) {
-	b := New(WithMinRequests(1), WithFailureRate(0.0))
+	b := NewCircuitBreaker(WithMinRequests(1), WithFailureRate(0.0))
 	b.OnFailure() // forces Open
-	_, err := b.Execute(context.Background(), func(ctx context.Context) (any, error) {
+	_, err := b.Execute(context.Background(), func(_ context.Context) (any, error) {
 		return "ok", nil
 	})
 	require.ErrorIs(t, err, ErrOpen)
 }
 
+// nolint
 func TestBreaker_HalfOpenRejectsExtraProbes(t *testing.T) {
-	b := New(WithHalfOpenMaxCalls(1))
+	b := NewCircuitBreaker(WithHalfOpenMaxCalls(1))
 	b.toHalfOpen()
 	require.True(t, b.TryAllow())
 	require.False(t, b.TryAllow(), "should reject second probe in HalfOpen")
 }
 
+// nolint
 func TestBreaker_PanicHandledAsFailure(t *testing.T) {
 	t.Run("With normal panic", func(t *testing.T) {
-		b := New(WithMinRequests(1))
+		b := NewCircuitBreaker(WithMinRequests(1))
 		_, err := b.Execute(context.Background(), func(ctx context.Context) (any, error) {
 			panic("boom")
 		})
@@ -218,7 +269,7 @@ func TestBreaker_PanicHandledAsFailure(t *testing.T) {
 		require.Equal(t, Open, b.State())
 	})
 	t.Run("With general error panic", func(t *testing.T) {
-		b := New(WithMinRequests(1))
+		b := NewCircuitBreaker(WithMinRequests(1))
 		_, err := b.Execute(context.Background(), func(ctx context.Context) (any, error) {
 			panic(errors.New("boom"))
 		})
@@ -226,7 +277,7 @@ func TestBreaker_PanicHandledAsFailure(t *testing.T) {
 		require.Equal(t, Open, b.State())
 	})
 	t.Run("With goakt panicError", func(t *testing.T) {
-		b := New(WithMinRequests(1))
+		b := NewCircuitBreaker(WithMinRequests(1))
 		_, err := b.Execute(context.Background(), func(ctx context.Context) (any, error) {
 			panic(gerrors.NewPanicError(errors.New("boom")))
 		})
@@ -235,15 +286,17 @@ func TestBreaker_PanicHandledAsFailure(t *testing.T) {
 	})
 }
 
+// nolint
 func TestBreaker_EmptyMetricsSnapshot(t *testing.T) {
-	b := New()
+	b := NewCircuitBreaker()
 	m := b.MetricsSnapshot()
 	assert.Equal(t, uint64(0), m.Total)
 	assert.Equal(t, 0.0, m.FailureRate)
 }
 
+// nolint
 func TestBreaker_ContextCancelledBeforeExecute(t *testing.T) {
-	b := New()
+	b := NewCircuitBreaker()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err := b.Execute(ctx, func(ctx context.Context) (any, error) {
@@ -252,8 +305,9 @@ func TestBreaker_ContextCancelledBeforeExecute(t *testing.T) {
 	assert.ErrorIs(t, err, ErrTimeout)
 }
 
+// nolint
 func TestBreaker_FallbackErrorPropagates(t *testing.T) {
-	b := New(WithMinRequests(1))
+	b := NewCircuitBreaker(WithMinRequests(1))
 	b.OnFailure()
 	_, err := b.Execute(context.Background(),
 		func(ctx context.Context) (any, error) { return "ok", nil },
@@ -262,7 +316,8 @@ func TestBreaker_FallbackErrorPropagates(t *testing.T) {
 	assert.EqualError(t, err, "fallback failed")
 }
 
+// nolint
 func TestBreaker_TryAllowClosedAlwaysTrue(t *testing.T) {
-	b := New()
+	b := NewCircuitBreaker()
 	assert.True(t, b.TryAllow())
 }

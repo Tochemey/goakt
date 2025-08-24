@@ -40,6 +40,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v3/address"
+	"github.com/tochemey/goakt/v3/breaker"
 	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/collection"
@@ -3789,6 +3790,224 @@ func TestPipeTo(t *testing.T) {
 
 		// no message piped to the actor
 		require.Zero(t, pid2.ProcessedCount()-1)
+
+		var items []*goaktpb.Deadletter
+		for message := range consumer.Iterator() {
+			payload := message.Payload()
+			// only listening to deadletter
+			deadletter, ok := payload.(*goaktpb.Deadletter)
+			if ok {
+				items = append(items, deadletter)
+			}
+		}
+
+		require.Len(t, items, 1)
+
+		pause.For(time.Second)
+		assert.NoError(t, pid1.Shutdown(ctx))
+		assert.NoError(t, pid2.Shutdown(ctx))
+		pause.For(time.Second)
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
+
+	t.Run("With explicit timeout", func(t *testing.T) {
+		ctx := context.TODO()
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemote(remote.NewConfig(host, ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+		pause.For(time.Second)
+
+		// create a deadletter subscriber
+		consumer, err := actorSystem.Subscribe()
+		require.NoError(t, err)
+		require.NotNil(t, consumer)
+
+		// create actor1
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &exchanger{})
+		require.NoError(t, err)
+		require.NotNil(t, pid1)
+
+		// create actor2
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", &exchanger{})
+		require.NoError(t, err)
+		require.NotNil(t, pid2)
+
+		pause.For(500 * time.Millisecond)
+		// zero message received by both actors
+		require.Zero(t, pid1.ProcessedCount()-1)
+		require.Zero(t, pid2.ProcessedCount()-1)
+
+		task := func() (proto.Message, error) {
+			// simulate a long-running task
+			pause.For(time.Second)
+			return new(testpb.TaskComplete), nil
+		}
+
+		err = pid1.PipeTo(ctx, pid2, task, WithPipeToTimeout(500*time.Millisecond))
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		// no message piped to the actor
+		require.Zero(t, pid2.ProcessedCount()-1)
+
+		var items []*goaktpb.Deadletter
+		for message := range consumer.Iterator() {
+			payload := message.Payload()
+			// only listening to deadletter
+			deadletter, ok := payload.(*goaktpb.Deadletter)
+			if ok {
+				items = append(items, deadletter)
+			}
+		}
+
+		require.Len(t, items, 1)
+
+		pause.For(time.Second)
+		assert.NoError(t, pid1.Shutdown(ctx))
+		assert.NoError(t, pid2.Shutdown(ctx))
+		pause.For(time.Second)
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
+
+	t.Run("With successful circuit breaker", func(t *testing.T) {
+		ctx := context.TODO()
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemote(remote.NewConfig(host, ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+		pause.For(time.Second)
+
+		// create a deadletter subscriber
+		consumer, err := actorSystem.Subscribe()
+		require.NoError(t, err)
+		require.NotNil(t, consumer)
+
+		// create actor1
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &exchanger{})
+		require.NoError(t, err)
+		require.NotNil(t, pid1)
+
+		// create actor2
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", &exchanger{})
+		require.NoError(t, err)
+		require.NotNil(t, pid2)
+
+		pause.For(500 * time.Millisecond)
+		// zero message received by both actors
+		require.Zero(t, pid1.ProcessedCount()-1)
+		require.Zero(t, pid2.ProcessedCount()-1)
+
+		task := func() (proto.Message, error) {
+			// simulate a long-running task
+			pause.For(time.Second)
+			return new(testpb.TaskComplete), nil
+		}
+
+		cb := breaker.NewCircuitBreaker(
+			breaker.WithFailureRate(0.5),
+			breaker.WithMinRequests(2),
+			breaker.WithOpenTimeout(50*time.Millisecond),
+			breaker.WithWindow(100*time.Millisecond, 2),
+			breaker.WithHalfOpenMaxCalls(1),
+		)
+
+		err = pid1.PipeTo(ctx, pid2, task, WithPipeToCircuitBreaker(cb))
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			// Wait for some time and during that period send some messages to the actor
+			// send three messages while waiting for the future to completed
+			_, _ = Ask(ctx, pid1, new(testpb.TestReply), time.Minute)
+			_, _ = Ask(ctx, pid1, new(testpb.TestReply), time.Minute)
+			_, _ = Ask(ctx, pid1, new(testpb.TestReply), time.Minute)
+			pause.For(time.Second)
+			wg.Done()
+		}()
+		wg.Wait()
+
+		pause.For(time.Second)
+
+		require.EqualValues(t, 3, pid1.ProcessedCount()-1)
+		require.EqualValues(t, 1, pid2.ProcessedCount()-1)
+
+		pause.For(time.Second)
+		assert.NoError(t, pid1.Shutdown(ctx))
+		assert.NoError(t, pid2.Shutdown(ctx))
+		pause.For(time.Second)
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("With circuit breaker on failed task", func(t *testing.T) {
+		ctx := context.TODO()
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemote(remote.NewConfig(host, ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+		pause.For(time.Second)
+
+		// create a deadletter subscriber
+		consumer, err := actorSystem.Subscribe()
+		require.NoError(t, err)
+		require.NotNil(t, consumer)
+
+		// create actor1
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &exchanger{})
+		require.NoError(t, err)
+		require.NotNil(t, pid1)
+
+		// create actor2
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", &exchanger{})
+		require.NoError(t, err)
+		require.NotNil(t, pid2)
+
+		pause.For(500 * time.Millisecond)
+		// zero message received by both actors
+		require.Zero(t, pid1.ProcessedCount()-1)
+		require.Zero(t, pid2.ProcessedCount()-1)
+
+		task := func() (proto.Message, error) {
+			// simulate a long-running task
+			pause.For(time.Second)
+			return nil, assert.AnError
+		}
+
+		cb := breaker.NewCircuitBreaker(
+			breaker.WithFailureRate(0.5),
+			breaker.WithMinRequests(1),
+		)
+
+		err = pid1.PipeTo(ctx, pid2, task, WithPipeToCircuitBreaker(cb))
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		// no message piped to the actor
+		require.Zero(t, pid2.ProcessedCount()-1)
+
+		pause.For(time.Second)
 
 		var items []*goaktpb.Deadletter
 		for message := range consumer.Iterator() {
