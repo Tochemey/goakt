@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025 Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,34 +22,44 @@
  * SOFTWARE.
  */
 
-package bufferpool
+package breaker
 
-import (
-	"bytes"
-	"sync"
-)
+import "testing"
 
-var Pool = New()
-
-type BufferPool struct {
-	pool sync.Pool
-}
-
-func New() *BufferPool {
-	return &BufferPool{
-		pool: sync.Pool{
-			New: func() any {
-				return new(bytes.Buffer)
-			},
+func TestStateString(t *testing.T) {
+	tests := []struct {
+		name     string
+		state    State
+		expected string
+	}{
+		{
+			name:     "Closed state",
+			state:    Closed,
+			expected: "closed",
+		},
+		{
+			name:     "Open state",
+			state:    Open,
+			expected: "open",
+		},
+		{
+			name:     "HalfOpen state",
+			state:    HalfOpen,
+			expected: "half-open",
+		},
+		{
+			name:     "Unknown state",
+			state:    State(999),
+			expected: "unknown",
 		},
 	}
-}
 
-func (p *BufferPool) Get() *bytes.Buffer {
-	return p.pool.Get().(*bytes.Buffer)
-}
-
-func (p *BufferPool) Put(buf *bytes.Buffer) {
-	buf.Reset()
-	p.pool.Put(buf)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.state.String()
+			if got != tt.expected {
+				t.Errorf("State(%v).String() = %q; want %q", tt.state, got, tt.expected)
+			}
+		})
+	}
 }
