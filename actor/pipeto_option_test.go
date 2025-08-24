@@ -62,6 +62,13 @@ func TestPipeToMutualExclusivity(t *testing.T) {
 	)
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, gerrors.ErrOnlyOneOptionAllowed)
+
+	_, err = newPipeTo(
+		WithPipeToCircuitBreaker(cb),
+		WithPipeToTimeout(timeout),
+	)
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, gerrors.ErrOnlyOneOptionAllowed)
 }
 
 func TestPipeToNoOptions(t *testing.T) {
