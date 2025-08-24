@@ -165,7 +165,7 @@ func TestMetricsSnapshot(t *testing.T) {
 	b := NewCircuitBreaker()
 	b.onSuccess()
 	b.onFailure()
-	metrics := b.MetricsSnapshot()
+	metrics := b.Metrics()
 	require.Equal(t, uint64(1), metrics.Successes)
 	require.Equal(t, uint64(1), metrics.Failures)
 	require.Equal(t, uint64(2), metrics.Total)
@@ -230,13 +230,13 @@ func TestOpenTimeoutMovesToHalfOpen(t *testing.T) {
 func TestHardResetAfterIdle(t *testing.T) {
 	b := NewCircuitBreaker(WithWindow(50*time.Millisecond, 5))
 	b.onFailure()
-	before := b.MetricsSnapshot()
+	before := b.Metrics()
 	require.Equal(t, uint64(1), before.Failures)
 
 	// Wait beyond full window
 	pause.For(120 * time.Millisecond)
 	b.onSuccess()
-	after := b.MetricsSnapshot()
+	after := b.Metrics()
 	// Old failures should have been cleared
 	require.Equal(t, uint64(0), after.Failures)
 	require.Equal(t, uint64(1), after.Successes)
@@ -291,7 +291,7 @@ func TestBreakerPanicHandledAsFailure(t *testing.T) {
 // nolint
 func TestBreakerEmptyMetricsSnapshot(t *testing.T) {
 	b := NewCircuitBreaker()
-	m := b.MetricsSnapshot()
+	m := b.Metrics()
 	assert.Equal(t, uint64(0), m.Total)
 	assert.Equal(t, 0.0, m.FailureRate)
 }

@@ -178,7 +178,7 @@ func (b *CircuitBreaker) onFailure() {
 
 // evaluate checks in Closed state for Open transition.
 func (b *CircuitBreaker) evaluate() {
-	m := b.snapshot()
+	m := b.Metrics()
 	if m.Total < uint64(b.opts.minRequests) {
 		return
 	}
@@ -189,7 +189,7 @@ func (b *CircuitBreaker) evaluate() {
 
 // evaluateHalfOpen handles stricter recovery rules.
 func (b *CircuitBreaker) evaluateHalfOpen() {
-	m := b.snapshot()
+	m := b.Metrics()
 	if m.Total < uint64(b.opts.minRequests) {
 		// stay in HalfOpen until enough samples collected
 		return
@@ -292,8 +292,8 @@ func (b *CircuitBreaker) acquireRelease() func() {
 	}
 }
 
-// snapshot builds a Metrics snapshot.
-func (b *CircuitBreaker) snapshot() Metrics {
+// Metrics builds Metrics.
+func (b *CircuitBreaker) Metrics() Metrics {
 	wins, wine := b.buckets.windowBounds()
 	succ, fail := b.buckets.totals()
 	m := Metrics{
@@ -317,9 +317,6 @@ func (b *CircuitBreaker) snapshot() Metrics {
 	}
 	return m
 }
-
-// MetricsSnapshot returns a copy of current metrics.
-func (b *CircuitBreaker) MetricsSnapshot() Metrics { return b.snapshot() }
 
 // ensureSem initializes the half-open semaphore lazily.
 func (b *CircuitBreaker) ensureSem() {
