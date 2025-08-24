@@ -418,6 +418,82 @@ func TestSpawn(t *testing.T) {
 			},
 		)
 	})
+
+	t.Run("With SpawnNamedFromFunc (cluster/remote enabled) already exists", func(t *testing.T) {
+		ctx := context.TODO()
+		nodePorts := dynaport.Get(3)
+		gossipPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		logger := log.DiscardLogger
+		host := "127.0.0.1"
+
+		// define discovered addresses
+		addrs := []string{
+			net.JoinHostPort(host, strconv.Itoa(gossipPort)),
+		}
+
+		// mock the discovery provider
+		provider := new(mocks.Provider)
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+			WithCluster(
+				NewClusterConfig().
+					WithKinds(new(MockActor)).
+					WithPartitionCount(9).
+					WithReplicaCount(1).
+					WithPeersPort(clusterPort).
+					WithMinimumPeersQuorum(1).
+					WithDiscoveryPort(gossipPort).
+					WithDiscovery(provider)),
+		)
+		require.NoError(t, err)
+
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		// start the actor system
+		err = newActorSystem.Start(ctx)
+		require.NoError(t, err)
+
+		receiveFn := func(_ context.Context, message proto.Message) error {
+			expected := &testpb.Reply{Content: "test spawn from func"}
+			assert.True(t, proto.Equal(expected, message))
+			return nil
+		}
+
+		actorName := "name"
+		actorRef, err := newActorSystem.SpawnNamedFromFunc(ctx, actorName, receiveFn)
+		require.NoError(t, err)
+		require.NotNil(t, actorRef)
+
+		// stop the actor after some time
+		pause.For(time.Second)
+
+		// send a message to the actor
+		require.NoError(t, Tell(ctx, actorRef, &testpb.Reply{Content: "test spawn from func"}))
+
+		actorRef, err = newActorSystem.SpawnNamedFromFunc(ctx, actorName, receiveFn)
+		require.Error(t, err)
+		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
+		require.Nil(t, actorRef)
+
+		t.Cleanup(
+			func() {
+				err = newActorSystem.Stop(ctx)
+				assert.NoError(t, err)
+				provider.AssertExpectations(t)
+			},
+		)
+	})
+
 	t.Run("With SpawnFromFunc with PreStart error", func(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
@@ -561,6 +637,10 @@ func TestSpawn(t *testing.T) {
 
 		// either we can locate the actor or try to recreate it
 		_, err = node2.Spawn(ctx, actorName, actor)
+		require.Error(t, err)
+		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
+
+		err = node1.SpawnOn(ctx, actorName, actor)
 		require.Error(t, err)
 		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
 
