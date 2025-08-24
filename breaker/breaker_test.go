@@ -38,7 +38,7 @@ import (
 )
 
 // nolint
-func TestNewBreaker_WithInvalidOptions(t *testing.T) {
+func TestNewBreakerWithInvalidOptions(t *testing.T) {
 	t.Run("With valid options", func(t *testing.T) {
 		b, err := NewCircuitBreakerWithValidation(
 			WithFailureRate(0.5),
@@ -77,7 +77,7 @@ func TestNewBreaker_WithSanitization(t *testing.T) {
 }
 
 // nolint
-func TestBreaker_AllowsAndBlocks(t *testing.T) {
+func TestBreakerAllowsAndBlocks(t *testing.T) {
 	b := NewCircuitBreaker(
 		WithFailureRate(0.5),
 		WithMinRequests(2),
@@ -110,7 +110,7 @@ func TestBreaker_AllowsAndBlocks(t *testing.T) {
 }
 
 // nolint
-func TestBreaker_ExecuteSuccess(t *testing.T) {
+func TestBreakerExecuteSuccess(t *testing.T) {
 	b := NewCircuitBreaker(WithClock(func() time.Time {
 		return time.Now()
 	}))
@@ -125,7 +125,7 @@ func TestBreaker_ExecuteSuccess(t *testing.T) {
 }
 
 // nolint
-func TestBreaker_ExecuteFailureAndFallback(t *testing.T) {
+func TestBreakerExecuteFailureAndFallback(t *testing.T) {
 	b := NewCircuitBreaker(WithMinRequests(1), WithFailureRate(0.5))
 	ctx := context.Background()
 
@@ -147,7 +147,7 @@ func TestBreaker_ExecuteFailureAndFallback(t *testing.T) {
 }
 
 // nolint
-func TestBreaker_ContextCancellation(t *testing.T) {
+func TestBreakerContextCancellation(t *testing.T) {
 	b := NewCircuitBreaker()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
@@ -243,7 +243,7 @@ func TestHardResetAfterIdle(t *testing.T) {
 }
 
 // nolint
-func TestBreaker_ExecuteOpenWithoutFallback(t *testing.T) {
+func TestBreakerExecuteOpenWithoutFallback(t *testing.T) {
 	b := NewCircuitBreaker(WithMinRequests(1), WithFailureRate(0.0))
 	b.OnFailure() // forces Open
 	_, err := b.Execute(context.Background(), func(_ context.Context) (any, error) {
@@ -253,7 +253,7 @@ func TestBreaker_ExecuteOpenWithoutFallback(t *testing.T) {
 }
 
 // nolint
-func TestBreaker_HalfOpenRejectsExtraProbes(t *testing.T) {
+func TestBreakerHalfOpenRejectsExtraProbes(t *testing.T) {
 	b := NewCircuitBreaker(WithHalfOpenMaxCalls(1))
 	b.toHalfOpen()
 	require.True(t, b.TryAllow())
@@ -261,7 +261,7 @@ func TestBreaker_HalfOpenRejectsExtraProbes(t *testing.T) {
 }
 
 // nolint
-func TestBreaker_PanicHandledAsFailure(t *testing.T) {
+func TestBreakerPanicHandledAsFailure(t *testing.T) {
 	t.Run("With normal panic", func(t *testing.T) {
 		b := NewCircuitBreaker(WithMinRequests(1))
 		_, err := b.Execute(context.Background(), func(ctx context.Context) (any, error) {
@@ -289,7 +289,7 @@ func TestBreaker_PanicHandledAsFailure(t *testing.T) {
 }
 
 // nolint
-func TestBreaker_EmptyMetricsSnapshot(t *testing.T) {
+func TestBreakerEmptyMetricsSnapshot(t *testing.T) {
 	b := NewCircuitBreaker()
 	m := b.MetricsSnapshot()
 	assert.Equal(t, uint64(0), m.Total)
@@ -297,7 +297,7 @@ func TestBreaker_EmptyMetricsSnapshot(t *testing.T) {
 }
 
 // nolint
-func TestBreaker_ContextCancelledBeforeExecute(t *testing.T) {
+func TestBreakerContextCancelledBeforeExecute(t *testing.T) {
 	b := NewCircuitBreaker()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -308,7 +308,7 @@ func TestBreaker_ContextCancelledBeforeExecute(t *testing.T) {
 }
 
 // nolint
-func TestBreaker_FallbackErrorPropagates(t *testing.T) {
+func TestBreakerFallbackErrorPropagates(t *testing.T) {
 	b := NewCircuitBreaker(WithMinRequests(1))
 	b.OnFailure()
 	_, err := b.Execute(context.Background(),
@@ -319,7 +319,7 @@ func TestBreaker_FallbackErrorPropagates(t *testing.T) {
 }
 
 // nolint
-func TestBreaker_TryAllowClosedAlwaysTrue(t *testing.T) {
+func TestBreakerTryAllowClosedAlwaysTrue(t *testing.T) {
 	b := NewCircuitBreaker()
 	assert.True(t, b.TryAllow())
 }
