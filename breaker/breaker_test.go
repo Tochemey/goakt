@@ -87,25 +87,25 @@ func TestBreakerAllowsAndBlocks(t *testing.T) {
 	)
 
 	// Initially closed: should allow
-	require.True(t, b.TryAllow())
+	require.True(t, b.tryAllow())
 
 	// Record 2 failures -> exceeds failure rate
-	b.OnFailure()
-	b.OnFailure()
+	b.onFailure()
+	b.onFailure()
 	require.Equal(t, Open, b.State())
-	require.False(t, b.TryAllow())
+	require.False(t, b.tryAllow())
 
 	// Wait for open timeout to expire
 	pause.For(60 * time.Millisecond)
-	require.True(t, b.TryAllow())
+	require.True(t, b.tryAllow())
 	require.Equal(t, HalfOpen, b.State())
 
 	// Success alone is not enough (minRequests=2)
-	b.OnSuccess()
+	b.onSuccess()
 	require.Equal(t, HalfOpen, b.State())
 
 	// Add another success to meet MinRequests
-	b.OnSuccess()
+	b.onSuccess()
 	require.Equal(t, Closed, b.State())
 }
 
@@ -163,8 +163,8 @@ func TestBreakerContextCancellation(t *testing.T) {
 // nolint
 func TestMetricsSnapshot(t *testing.T) {
 	b := NewCircuitBreaker()
-	b.OnSuccess()
-	b.OnFailure()
+	b.onSuccess()
+	b.onFailure()
 	metrics := b.MetricsSnapshot()
 	require.Equal(t, uint64(1), metrics.Successes)
 	require.Equal(t, uint64(1), metrics.Failures)
@@ -176,18 +176,18 @@ func TestMetricsSnapshot(t *testing.T) {
 func TestStateTransitions(t *testing.T) {
 	b := NewCircuitBreaker(WithFailureRate(0.5), WithMinRequests(2))
 
-	b.OnFailure()
+	b.onFailure()
 	require.Equal(t, Closed, b.State())
-	b.OnFailure()
+	b.onFailure()
 	require.Equal(t, Open, b.State())
 
 	// Manually force half-open
 	b.toHalfOpen()
 	require.Equal(t, HalfOpen, b.State())
 
-	b.OnSuccess()
+	b.onSuccess()
 	require.Equal(t, HalfOpen, b.State())
-	b.OnSuccess()
+	b.onSuccess()
 	require.Equal(t, Closed, b.State())
 }
 
@@ -197,9 +197,9 @@ func TestSemaphoreHalfOpen(t *testing.T) {
 	b.toHalfOpen()
 	require.Equal(t, HalfOpen, b.State())
 
-	allowed1 := b.TryAllow()
-	allowed2 := b.TryAllow()
-	allowed3 := b.TryAllow()
+	allowed1 := b.tryAllow()
+	allowed2 := b.tryAllow()
+	allowed3 := b.tryAllow()
 
 	require.True(t, allowed1)
 	require.True(t, allowed2)
@@ -209,7 +209,7 @@ func TestSemaphoreHalfOpen(t *testing.T) {
 	release := b.acquireRelease()
 	release()
 
-	allowedAgain := b.TryAllow()
+	allowedAgain := b.tryAllow()
 	require.True(t, allowedAgain)
 }
 
@@ -217,25 +217,25 @@ func TestSemaphoreHalfOpen(t *testing.T) {
 func TestOpenTimeoutMovesToHalfOpen(t *testing.T) {
 	b := NewCircuitBreaker(WithFailureRate(0.5), WithMinRequests(2), WithOpenTimeout(20*time.Millisecond))
 
-	b.OnFailure()
-	b.OnFailure()
+	b.onFailure()
+	b.onFailure()
 	require.Equal(t, Open, b.State())
 	pause.For(25 * time.Millisecond)
 	// Now TryAllow should move breaker to half-open
-	require.True(t, b.TryAllow())
+	require.True(t, b.tryAllow())
 	require.Equal(t, HalfOpen, b.State())
 }
 
 // nolint
 func TestHardResetAfterIdle(t *testing.T) {
 	b := NewCircuitBreaker(WithWindow(50*time.Millisecond, 5))
-	b.OnFailure()
+	b.onFailure()
 	before := b.MetricsSnapshot()
 	require.Equal(t, uint64(1), before.Failures)
 
 	// Wait beyond full window
 	pause.For(120 * time.Millisecond)
-	b.OnSuccess()
+	b.onSuccess()
 	after := b.MetricsSnapshot()
 	// Old failures should have been cleared
 	require.Equal(t, uint64(0), after.Failures)
@@ -245,7 +245,7 @@ func TestHardResetAfterIdle(t *testing.T) {
 // nolint
 func TestBreakerExecuteOpenWithoutFallback(t *testing.T) {
 	b := NewCircuitBreaker(WithMinRequests(1), WithFailureRate(0.0))
-	b.OnFailure() // forces Open
+	b.onFailure() // forces Open
 	_, err := b.Execute(context.Background(), func(_ context.Context) (any, error) {
 		return "ok", nil
 	})
@@ -256,8 +256,8 @@ func TestBreakerExecuteOpenWithoutFallback(t *testing.T) {
 func TestBreakerHalfOpenRejectsExtraProbes(t *testing.T) {
 	b := NewCircuitBreaker(WithHalfOpenMaxCalls(1))
 	b.toHalfOpen()
-	require.True(t, b.TryAllow())
-	require.False(t, b.TryAllow(), "should reject second probe in HalfOpen")
+	require.True(t, b.tryAllow())
+	require.False(t, b.tryAllow(), "should reject second probe in HalfOpen")
 }
 
 // nolint
@@ -310,7 +310,7 @@ func TestBreakerContextCancelledBeforeExecute(t *testing.T) {
 // nolint
 func TestBreakerFallbackErrorPropagates(t *testing.T) {
 	b := NewCircuitBreaker(WithMinRequests(1))
-	b.OnFailure()
+	b.onFailure()
 	_, err := b.Execute(context.Background(),
 		func(ctx context.Context) (any, error) { return "ok", nil },
 		func(ctx context.Context, cause error) (any, error) { return "", errors.New("fallback failed") },
@@ -321,5 +321,5 @@ func TestBreakerFallbackErrorPropagates(t *testing.T) {
 // nolint
 func TestBreakerTryAllowClosedAlwaysTrue(t *testing.T) {
 	b := NewCircuitBreaker()
-	assert.True(t, b.TryAllow())
+	assert.True(t, b.tryAllow())
 }

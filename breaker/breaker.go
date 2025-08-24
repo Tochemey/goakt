@@ -37,6 +37,12 @@ import (
 	"github.com/tochemey/goakt/v3/internal/locker"
 )
 
+// executionResult holds the result of a function execution
+type executionResult struct {
+	value any
+	err   error
+}
+
 // CircuitBreaker is a thread-safe circuit breaker implementation.
 type CircuitBreaker struct {
 	_         locker.NoCopy
@@ -107,9 +113,22 @@ func NewCircuitBreakerWithValidation(opts ...Option) (*CircuitBreaker, error) {
 // State returns the current breaker state.
 func (b *CircuitBreaker) State() State { return State(atomic.LoadInt32(&b.state)) }
 
-// TryAllow returns whether a call is permitted at this moment.
+// Execute runs fn if allowed. If the breaker is open, it optionally calls fallback.
+// It propagates ctx cancellation.
+func (b *CircuitBreaker) Execute(ctx context.Context, fn func(context.Context) (any, error), fallback ...func(context.Context, error) (any, error)) (any, error) {
+	if !b.tryAllow() {
+		return b.handleRejection(ctx, ErrOpen, fallback...)
+	}
+
+	release := b.acquireRelease()
+	defer release()
+
+	return b.executeWithTimeout(ctx, fn, fallback...)
+}
+
+// tryAllow returns whether a call is permitted at this moment.
 // If it returns false, callers should not proceed.
-func (b *CircuitBreaker) TryAllow() bool {
+func (b *CircuitBreaker) tryAllow() bool {
 	now := b.opts.clock()
 	s := b.State()
 	if s == Closed {
@@ -134,8 +153,8 @@ func (b *CircuitBreaker) TryAllow() bool {
 	}
 }
 
-// OnSuccess records a successful call.
-func (b *CircuitBreaker) OnSuccess() {
+// onSuccess records a successful call.
+func (b *CircuitBreaker) onSuccess() {
 	b.buckets.addSuccess(1)
 	b.lastSuccess.Store(uint64(b.opts.clock().UnixNano()))
 	if b.State() == HalfOpen {
@@ -146,8 +165,8 @@ func (b *CircuitBreaker) OnSuccess() {
 	}
 }
 
-// OnFailure records a failed call.
-func (b *CircuitBreaker) OnFailure() {
+// onFailure records a failed call.
+func (b *CircuitBreaker) onFailure() {
 	b.buckets.addFailure(1)
 	b.lastFailure.Store(uint64(b.opts.clock().UnixNano()))
 	if b.State() == HalfOpen {
@@ -183,25 +202,6 @@ func (b *CircuitBreaker) evaluateHalfOpen() {
 	b.toClosed()
 }
 
-// executionResult holds the result of a function execution
-type executionResult struct {
-	value any
-	err   error
-}
-
-// Execute runs fn if allowed. If the breaker is open, it optionally calls fallback.
-// It propagates ctx cancellation.
-func (b *CircuitBreaker) Execute(ctx context.Context, fn func(context.Context) (any, error), fallback ...func(context.Context, error) (any, error)) (any, error) {
-	if !b.TryAllow() {
-		return b.handleRejection(ctx, ErrOpen, fallback...)
-	}
-
-	release := b.acquireRelease()
-	defer release()
-
-	return b.executeWithTimeout(ctx, fn, fallback...)
-}
-
 // handleRejection handles the case when the breaker rejects a call
 func (b *CircuitBreaker) handleRejection(ctx context.Context, err error, fallback ...func(context.Context, error) (any, error)) (any, error) {
 	if len(fallback) > 0 {
@@ -228,14 +228,14 @@ func (b *CircuitBreaker) executeWithTimeout(ctx context.Context, fn func(context
 
 	select {
 	case <-ctx.Done():
-		b.OnFailure()
+		b.onFailure()
 		return b.handleRejection(ctx, ErrTimeout, fallback...)
 	case result := <-resultCh:
 		if result.err != nil {
-			b.OnFailure()
+			b.onFailure()
 			return b.handleRejection(ctx, result.err, fallback...)
 		}
-		b.OnSuccess()
+		b.onSuccess()
 		return result.value, nil
 	}
 }
