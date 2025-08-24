@@ -111,7 +111,9 @@ func TestBreaker_AllowsAndBlocks(t *testing.T) {
 
 // nolint
 func TestBreaker_ExecuteSuccess(t *testing.T) {
-	b := NewCircuitBreaker()
+	b := NewCircuitBreaker(WithClock(func() time.Time {
+		return time.Now()
+	}))
 	ctx := context.Background()
 
 	res, err := b.Execute(ctx, func(_ context.Context) (any, error) {

@@ -138,3 +138,9 @@ func TestOptionsValidate(t *testing.T) {
 		})
 	}
 }
+
+func TestOptionsSanitize(t *testing.T) {
+	opts := &options{}
+	opts.Sanitize()
+	require.NoError(t, opts.Validate())
+}

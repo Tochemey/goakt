@@ -25,7 +25,6 @@
 package breaker
 
 import (
-	"fmt"
 	"time"
 )
 
@@ -41,10 +40,4 @@ type Metrics struct {
 	WindowEnd   time.Time
 	LastFailure time.Time
 	LastSuccess time.Time
-}
-
-// String returns human-readable metrics for debugging.
-func (m Metrics) String() string {
-	return fmt.Sprintf("state=%s total=%d success=%d fail=%d failRate=%.2f window=%s",
-		m.State, m.Total, m.Successes, m.Failures, m.FailureRate, m.Window)
 }
