@@ -809,10 +809,37 @@ func (pid *PID) StashSize() uint64 {
 	return uint64(pid.stashBox.Len())
 }
 
-// PipeTo processes a long-started task and pipes the result to the provided actor.
-// The successful result of the task will be put onto the provided actor mailbox.
-// This is useful when interacting with external services.
-// It’s common that you would like to use the value of the response in the actor when the long-started task is completed
+// PipeTo executes a long-running task asynchronously and delivers its result
+// to the mailbox of the specified actor.
+//
+// While the task is executing, the calling actor is not blocked and can continue
+// processing other messages. This enables efficient interaction with external
+// services or computations without stalling the actor’s message loop.
+//
+// Once the task completes successfully, its result is sent as a message to the
+// target actor’s mailbox. If the task fails, the failure is sent to the dead letter queue.
+//
+// This pattern is useful when:
+//   - Calling external services (e.g., databases, APIs) from an actor.
+//   - Performing background computations whose results are needed later.
+//   - Offloading long tasks while keeping the actor responsive.
+//
+// Parameters:
+//   - ctx: context for cancellation and timeouts.
+//   - to: the target actor PID that will receive the result.
+//   - task: a function that performs the work and returns a proto.Message
+//     or an error.
+//   - opts: optional PipeOptions. Check PipeOption to see the available options.
+//
+// Example:
+//
+//	pid.PipeTo(ctx, targetPID, func() (proto.Message, error) {
+//	    resp, err := callExternalAPI()
+//	    if err != nil {
+//	        return nil, err
+//	    }
+//	    return &ApiResponse{Data: resp}, nil
+//	})
 func (pid *PID) PipeTo(ctx context.Context, to *PID, task func() (proto.Message, error), opts ...PipeOption) error {
 	if task == nil {
 		return gerrors.ErrUndefinedTask
@@ -831,6 +858,99 @@ func (pid *PID) PipeTo(ctx context.Context, to *PID, task func() (proto.Message,
 			Task:     task,
 		},
 	)
+
+	return nil
+}
+
+// PipeToName executes a long-running task asynchronously and delivers its result
+// to the mailbox of the actor identified by its name.
+//
+// While the task is executing, the calling actor remains free to continue
+// processing other messages without being blocked.
+//
+// Once the task completes successfully, its result is sent as a message
+// to the target actor’s mailbox. If the task fails, the failure is sent to the dead letter queue.
+//
+// Compared to PipeTo, PipeToName provides location transparency: the destination
+// actor is resolved by name, allowing messages to be delivered regardless of
+// where the actor is running (e.g., local or remote).
+//
+// Parameters:
+//   - ctx: context for cancellation and timeouts.
+//   - actorName: the logical name of the target actor.
+//   - task: a function that performs the work and returns a proto.Message
+//     or an error.
+//   - opts: optional PipeOptions. Check PipeOption to see the available options.
+//
+// Example:
+//
+//	pid.PipeToName(ctx, "worker-1", func() (proto.Message, error) {
+//	    result, err := doWork()
+//	    if err != nil {
+//	        return nil, err
+//	    }
+//	    return &MyResult{Value: result}, nil
+//	})
+func (pid *PID) PipeToName(ctx context.Context, actorName string, task func() (proto.Message, error), opts ...PipeOption) error {
+	if task == nil {
+		return gerrors.ErrUndefinedTask
+	}
+
+	ok, err := pid.ActorSystem().ActorExists(ctx, actorName)
+	if err != nil {
+		return err
+	}
+
+	if !ok {
+		return gerrors.NewErrActorNotFound(actorName)
+	}
+
+	go func() {
+		config := newPipeConfig(opts...)
+
+		// apply timeout if provided
+		var cancel context.CancelFunc
+		if config != nil && config.timeout != nil {
+			ctx, cancel = context.WithTimeout(ctx, *config.timeout)
+			defer cancel()
+		}
+
+		// wrap the provided completion task into a future
+		fut := future.New(task)
+
+		// execute the task, optionally via circuit breaker
+		runTask := func() (proto.Message, error) {
+			if config != nil && config.circuitBreaker != nil {
+				outcome, oerr := config.circuitBreaker.Execute(ctx, func(ctx context.Context) (any, error) {
+					return fut.Await(ctx)
+				})
+
+				if oerr != nil {
+					return nil, oerr
+				}
+
+				// no need to check the type since the future.Await returns proto.Message
+				// if there is no error
+				return outcome.(proto.Message), nil
+			}
+			return fut.Await(ctx)
+		}
+
+		result, err := runTask()
+		if err != nil {
+			pid.logger.Error(err)
+			pid.sendDeadletter(ctx, pid.Address(), pid.Address(), new(goaktpb.NoMessage), err)
+			return
+		}
+
+		// send the result to the actor identified by its name
+		actorSystem := pid.ActorSystem()
+		if err := actorSystem.NoSender().SendAsync(ctx, actorName, result); err != nil {
+			pid.logger.Error(err)
+			pid.sendDeadletter(ctx, pid.Address(), pid.Address(), result, err)
+			return
+		}
+	}()
 
 	return nil
 }
@@ -1907,6 +2027,7 @@ func (pid *PID) handleCompletion(ctx context.Context, config *pipeConfig, comple
 	to := completion.Receiver
 	if !to.IsRunning() {
 		pid.logger.Errorf("unable to pipe message to actor=(%s): not started", to.Name())
+		pid.sendDeadletter(ctx, pid.Address(), pid.Address(), result, gerrors.ErrDead)
 		return
 	}
 

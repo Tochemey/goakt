@@ -403,14 +403,76 @@ func (rctx *ReceiveContext) RemoteReSpawn(host string, port int, name string) {
 	}
 }
 
-// PipeTo processes a long-running task and pipes the result to the provided actor.
-// The successful result of the task will be put onto the provided actor mailbox.
-// This is useful when interacting with external services.
-// It’s common that you would like to use the value of the response in the actor when the long-running task is completed
+// PipeTo executes a long-running task asynchronously and delivers its result
+// to the mailbox of the specified actor.
+//
+// The calling actor is not blocked while the task is running and can continue
+// processing other messages. Once the task completes successfully, the result
+// is sent as a message to the target actor’s mailbox. If the task fails, the
+// error is handled according to the provided PipeOptions.
+//
+// This pattern is particularly useful when:
+//   - Interacting with external services (e.g., databases, APIs).
+//   - Offloading computationally expensive work while keeping the actor responsive.
+//   - Returning values back into the actor once the task is completed.
+//
+// Parameters:
+//   - to: the target actor PID that will receive the result.
+//   - task: a function that performs the work and returns a proto.Message or an error.
+//   - opts: optional PipeOption for configuring error handling, retries, etc.
+//
+// Example:
+//
+//	rctx.PipeTo(targetPID, func() (proto.Message, error) {
+//	    data, err := fetchFromDB()
+//	    if err != nil {
+//	        return nil, err
+//	    }
+//	    return &DbResult{Rows: data}, nil
+//	})
 func (rctx *ReceiveContext) PipeTo(to *PID, task func() (proto.Message, error), opts ...PipeOption) {
 	recipient := rctx.self
 	ctx := context.WithoutCancel(rctx.ctx)
 	if err := recipient.PipeTo(ctx, to, task, opts...); err != nil {
+		rctx.Err(err)
+	}
+}
+
+// PipeToName executes a long-running task asynchronously and delivers its result
+// to the mailbox of the actor identified by its name.
+//
+// The calling actor is not blocked while the task is running and can continue
+// processing other messages. Once the task completes successfully, the result
+// is sent as a message to the target actor’s mailbox. If the task fails, the
+// error is handled according to the provided PipeOptions.
+//
+// Compared to PipeTo, PipeToName is location transparent: the target actor is
+// resolved by its logical name rather than by a direct PID. This allows the
+// message to be delivered regardless of whether the actor is local or remote.
+//
+// This pattern is particularly useful when:
+//   - Sending results to named actors in a cluster or distributed system.
+//   - Decoupling tasks from specific actor instances.
+//   - Offloading expensive or external work while keeping the actor responsive.
+//
+// Parameters:
+//   - actorName: the logical name of the target actor.
+//   - task: a function that performs the work and returns a proto.Message or an error.
+//   - opts: optional PipeOption for configuring error handling, retries, etc.
+//
+// Example:
+//
+//	rctx.PipeToName("worker-1", func() (proto.Message, error) {
+//	    result, err := fetchFromAPI()
+//	    if err != nil {
+//	        return nil, err
+//	    }
+//	    return &ApiResponse{Payload: result}, nil
+//	})
+func (rctx *ReceiveContext) PipeToName(actorName string, task func() (proto.Message, error), opts ...PipeOption) {
+	recipient := rctx.self
+	ctx := context.WithoutCancel(rctx.ctx)
+	if err := recipient.PipeToName(ctx, actorName, task, opts...); err != nil {
 		rctx.Err(err)
 	}
 }
