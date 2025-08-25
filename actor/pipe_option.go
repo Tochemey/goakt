@@ -28,10 +28,9 @@ import (
 	"time"
 
 	"github.com/tochemey/goakt/v3/breaker"
-	gerrors "github.com/tochemey/goakt/v3/errors"
 )
 
-// pipeTo defines how the outcome of a long-running task should be delivered
+// pipeConfig defines how the outcome of a long-running task should be delivered
 // ("piped") as a message to a target actor.
 //
 // It allows controlling the delivery semantics with exactly one of:
@@ -43,7 +42,7 @@ import (
 //
 // Only one of these options may be configured at a time. Attempting to set
 // multiple options will return an error.
-type pipeTo struct {
+type pipeConfig struct {
 	// timeout is the maximum duration to wait for the task outcome before
 	// giving up. Only one option (timeout or circuitBreaker) can be set.
 	timeout *time.Duration
@@ -54,52 +53,38 @@ type pipeTo struct {
 	circuitBreaker *breaker.CircuitBreaker
 }
 
-// newPipeTo constructs a new pipeTo configuration using the provided options.
+// newPipeConfig constructs a new pipeConfig configuration using the provided options.
 //
 // It enforces that only one option (timeout or circuitBreaker) may be set.
-// If multiple options are applied, newPipeTo returns ErrOnlyOneOptionAllowed.
-func newPipeTo(opts ...PipeToOption) (*pipeTo, error) {
-	ppt := new(pipeTo)
+// If multiple options are applied, newPipeConfig returns ErrOnlyOneOptionAllowed.
+func newPipeConfig(opts ...PipeOption) *pipeConfig {
+	config := new(pipeConfig)
 	for _, opt := range opts {
-		if err := opt(ppt); err != nil {
-			return nil, err
-		}
+		opt(config)
 	}
-	return ppt, nil
+	return config
 }
 
-// PipeToOption configures a pipeTo instance.
+// PipeOption configures a pipeConfig instance.
 //
 // Options are mutually exclusive; attempting to set more than one will
 // return ErrOnlyOneOptionAllowed.
-type PipeToOption func(to *pipeTo) error
+type PipeOption func(config *pipeConfig)
 
-// WithPipeToTimeout configures pipeTo with a maximum duration for waiting on the
+// WithTimeout configures PipeTo with a maximum duration for waiting on the
 // task outcome. If the result is not available within this duration, the
 // message will not be delivered.
-//
-// WithPipeToTimeout is mutually exclusive with WithPipeToCircuitBreaker.
-func WithPipeToTimeout(timeout time.Duration) PipeToOption {
-	return func(p *pipeTo) error {
-		if p.timeout != nil || p.circuitBreaker != nil {
-			return gerrors.ErrOnlyOneOptionAllowed
-		}
-		p.timeout = &timeout
-		return nil
+func WithTimeout(timeout time.Duration) PipeOption {
+	return func(config *pipeConfig) {
+		config.timeout = &timeout
 	}
 }
 
-// WithPipeToCircuitBreaker configures pipeTo with a circuit breaker that controls
+// WithCircuitBreaker configures PipeTo with a circuit breaker that controls
 // whether task outcomes are delivered. If the breaker is open due to repeated
 // failures, outcomes will be dropped instead of being sent.
-//
-// WithPipeToCircuitBreaker is mutually exclusive with WithPipeToTimeout.
-func WithPipeToCircuitBreaker(cb *breaker.CircuitBreaker) PipeToOption {
-	return func(p *pipeTo) error {
-		if p.timeout != nil || p.circuitBreaker != nil {
-			return gerrors.ErrOnlyOneOptionAllowed
-		}
-		p.circuitBreaker = cb
-		return nil
+func WithCircuitBreaker(cb *breaker.CircuitBreaker) PipeOption {
+	return func(config *pipeConfig) {
+		config.circuitBreaker = cb
 	}
 }
