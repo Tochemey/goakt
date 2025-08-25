@@ -407,7 +407,7 @@ func (rctx *ReceiveContext) RemoteReSpawn(host string, port int, name string) {
 // The successful result of the task will be put onto the provided actor mailbox.
 // This is useful when interacting with external services.
 // It’s common that you would like to use the value of the response in the actor when the long-running task is completed
-func (rctx *ReceiveContext) PipeTo(to *PID, task func() (proto.Message, error), opts ...PipeToOption) {
+func (rctx *ReceiveContext) PipeTo(to *PID, task func() (proto.Message, error), opts ...PipeOption) {
 	recipient := rctx.self
 	ctx := context.WithoutCancel(rctx.ctx)
 	if err := recipient.PipeTo(ctx, to, task, opts...); err != nil {

@@ -3851,7 +3851,7 @@ func TestPipeTo(t *testing.T) {
 			return new(testpb.TaskComplete), nil
 		}
 
-		err = pid1.PipeTo(ctx, pid2, task, WithPipeToTimeout(500*time.Millisecond))
+		err = pid1.PipeTo(ctx, pid2, task, WithTimeout(500*time.Millisecond))
 		require.NoError(t, err)
 		pause.For(time.Second)
 
@@ -3926,7 +3926,7 @@ func TestPipeTo(t *testing.T) {
 			breaker.WithHalfOpenMaxCalls(1),
 		)
 
-		err = pid1.PipeTo(ctx, pid2, task, WithPipeToCircuitBreaker(cb))
+		err = pid1.PipeTo(ctx, pid2, task, WithCircuitBreaker(cb))
 		require.NoError(t, err)
 		pause.For(time.Second)
 
@@ -4000,7 +4000,7 @@ func TestPipeTo(t *testing.T) {
 			breaker.WithMinRequests(1),
 		)
 
-		err = pid1.PipeTo(ctx, pid2, task, WithPipeToCircuitBreaker(cb))
+		err = pid1.PipeTo(ctx, pid2, task, WithCircuitBreaker(cb))
 		require.NoError(t, err)
 		pause.For(time.Second)
 

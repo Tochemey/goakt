@@ -28,53 +28,32 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/tochemey/goakt/v3/breaker"
-	gerrors "github.com/tochemey/goakt/v3/errors"
 )
 
 func TestPipeToWithTimeout(t *testing.T) {
 	timeout := 5 * time.Second
-	pt, err := newPipeTo(WithPipeToTimeout(timeout))
-	require.NoError(t, err)
-	require.NotNil(t, pt.timeout)
-	require.Equal(t, timeout, *pt.timeout)
-	require.Nil(t, pt.circuitBreaker)
+	config := newPipeConfig(WithTimeout(timeout))
+	require.NotNil(t, config)
+	require.NotNil(t, config.timeout)
+	require.Equal(t, timeout, *config.timeout)
+	require.Nil(t, config.circuitBreaker)
 }
 
 func TestPipeToWithCircuitBreaker(t *testing.T) {
 	cb := breaker.NewCircuitBreaker()
-	pt, err := newPipeTo(WithPipeToCircuitBreaker(cb))
-	require.NoError(t, err)
-	require.Equal(t, cb, pt.circuitBreaker)
-	require.Nil(t, pt.timeout)
-}
-
-func TestPipeToMutualExclusivity(t *testing.T) {
-	timeout := 5 * time.Second
-	cb := breaker.NewCircuitBreaker()
-
-	_, err := newPipeTo(
-		WithPipeToTimeout(timeout),
-		WithPipeToCircuitBreaker(cb),
-	)
-	assert.Error(t, err)
-	assert.ErrorIs(t, err, gerrors.ErrOnlyOneOptionAllowed)
-
-	_, err = newPipeTo(
-		WithPipeToCircuitBreaker(cb),
-		WithPipeToTimeout(timeout),
-	)
-	assert.Error(t, err)
-	assert.ErrorIs(t, err, gerrors.ErrOnlyOneOptionAllowed)
+	config := newPipeConfig(WithCircuitBreaker(cb))
+	require.NotNil(t, config)
+	require.NotNil(t, config.circuitBreaker)
+	require.Equal(t, cb, config.circuitBreaker)
+	require.Nil(t, config.timeout)
 }
 
 func TestPipeToNoOptions(t *testing.T) {
-	pt, err := newPipeTo()
-	require.NoError(t, err)
-	require.NotNil(t, pt)
-	require.Nil(t, pt.timeout)
-	require.Nil(t, pt.circuitBreaker)
+	config := newPipeConfig()
+	require.NotNil(t, config)
+	require.Nil(t, config.timeout)
+	require.Nil(t, config.circuitBreaker)
 }
