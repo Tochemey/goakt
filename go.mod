@@ -19,7 +19,7 @@ require (
 	github.com/panjf2000/ants/v2 v2.11.3
 	github.com/redis/go-redis/v9 v9.12.1
 	github.com/reugn/go-quartz v0.15.1
-	github.com/stretchr/testify v1.10.0
+	github.com/stretchr/testify v1.11.0
 	github.com/testcontainers/testcontainers-go v0.38.0
 	github.com/testcontainers/testcontainers-go/modules/consul v0.38.0
 	github.com/testcontainers/testcontainers-go/modules/etcd v0.38.0
