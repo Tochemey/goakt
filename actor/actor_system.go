@@ -795,7 +795,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	}
 
 	// append the right protocols to the TLS settings
-	system.ensureTLSProtos()
+	// system.ensureTLSProtos()
 
 	return system, nil
 }
@@ -2279,22 +2279,22 @@ func (x *actorSystem) startEviction() {
 	}
 }
 
-func (x *actorSystem) ensureTLSProtos() {
-	if x.tlsInfo != nil {
-		// ensure that the required protocols are set for the TLS
-		toAdd := []string{"h2", "http/1.1"}
+// func (x *actorSystem) ensureTLSProtos() {
+// 	if x.tlsInfo != nil {
+// 		// ensure that the required protocols are set for the TLS
+// 		toAdd := []string{"h2", "http/1.1"}
 
-		// server application protocols setting
-		protos := goset.NewSet(x.tlsInfo.ServerConfig.NextProtos...)
-		protos.Append(toAdd...)
-		x.tlsInfo.ServerConfig.NextProtos = protos.ToSlice()
+// 		// server application protocols setting
+// 		protos := goset.NewSet(x.tlsInfo.ServerConfig.NextProtos...)
+// 		protos.Append(toAdd...)
+// 		x.tlsInfo.ServerConfig.NextProtos = protos.ToSlice()
 
-		// client application protocols setting
-		protos = goset.NewSet(x.tlsInfo.ClientConfig.NextProtos...)
-		protos.Append(toAdd...)
-		x.tlsInfo.ClientConfig.NextProtos = protos.ToSlice()
-	}
-}
+// 		// client application protocols setting
+// 		protos = goset.NewSet(x.tlsInfo.ClientConfig.NextProtos...)
+// 		protos.Append(toAdd...)
+// 		x.tlsInfo.ClientConfig.NextProtos = protos.ToSlice()
+// 	}
+// }
 
 // validateExtensions validates extensions
 func (x *actorSystem) validateExtensions() error {
