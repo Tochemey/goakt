@@ -8,9 +8,9 @@ import (
 
 	context "context"
 
-	http "net/http"
+	grpc "google.golang.org/grpc"
 
-	internalpbconnect "github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
+	internalpb "github.com/tochemey/goakt/v3/internal/internalpb"
 
 	mock "github.com/stretchr/testify/mock"
 
@@ -32,85 +32,6 @@ type Remoting_Expecter struct {
 
 func (_m *Remoting) EXPECT() *Remoting_Expecter {
 	return &Remoting_Expecter{mock: &_m.Mock}
-}
-
-// Close provides a mock function with no fields
-func (_m *Remoting) Close() {
-	_m.Called()
-}
-
-// Remoting_Close_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Close'
-type Remoting_Close_Call struct {
-	*mock.Call
-}
-
-// Close is a helper method to define mock.On call
-func (_e *Remoting_Expecter) Close() *Remoting_Close_Call {
-	return &Remoting_Close_Call{Call: _e.mock.On("Close")}
-}
-
-func (_c *Remoting_Close_Call) Run(run func()) *Remoting_Close_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *Remoting_Close_Call) Return() *Remoting_Close_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *Remoting_Close_Call) RunAndReturn(run func()) *Remoting_Close_Call {
-	_c.Run(run)
-	return _c
-}
-
-// HTTPClient provides a mock function with no fields
-func (_m *Remoting) HTTPClient() *http.Client {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for HTTPClient")
-	}
-
-	var r0 *http.Client
-	if rf, ok := ret.Get(0).(func() *http.Client); ok {
-		r0 = rf()
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*http.Client)
-		}
-	}
-
-	return r0
-}
-
-// Remoting_HTTPClient_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HTTPClient'
-type Remoting_HTTPClient_Call struct {
-	*mock.Call
-}
-
-// HTTPClient is a helper method to define mock.On call
-func (_e *Remoting_Expecter) HTTPClient() *Remoting_HTTPClient_Call {
-	return &Remoting_HTTPClient_Call{Call: _e.mock.On("HTTPClient")}
-}
-
-func (_c *Remoting_HTTPClient_Call) Run(run func()) *Remoting_HTTPClient_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *Remoting_HTTPClient_Call) Return(_a0 *http.Client) *Remoting_HTTPClient_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *Remoting_HTTPClient_Call) RunAndReturn(run func() *http.Client) *Remoting_HTTPClient_Call {
-	_c.Call.Return(run)
-	return _c
 }
 
 // MaxReadFrameSize provides a mock function with no fields
@@ -638,23 +559,35 @@ func (_c *Remoting_RemoteTell_Call) RunAndReturn(run func(context.Context, *addr
 }
 
 // RemotingServiceClient provides a mock function with given fields: host, port
-func (_m *Remoting) RemotingServiceClient(host string, port int) internalpbconnect.RemotingServiceClient {
+func (_m *Remoting) RemotingServiceClient(host string, port int) (internalpb.RemotingServiceClient, *grpc.ClientConn) {
 	ret := _m.Called(host, port)
 
 	if len(ret) == 0 {
 		panic("no return value specified for RemotingServiceClient")
 	}
 
-	var r0 internalpbconnect.RemotingServiceClient
-	if rf, ok := ret.Get(0).(func(string, int) internalpbconnect.RemotingServiceClient); ok {
+	var r0 internalpb.RemotingServiceClient
+	var r1 *grpc.ClientConn
+	if rf, ok := ret.Get(0).(func(string, int) (internalpb.RemotingServiceClient, *grpc.ClientConn)); ok {
+		return rf(host, port)
+	}
+	if rf, ok := ret.Get(0).(func(string, int) internalpb.RemotingServiceClient); ok {
 		r0 = rf(host, port)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(internalpbconnect.RemotingServiceClient)
+			r0 = ret.Get(0).(internalpb.RemotingServiceClient)
 		}
 	}
 
-	return r0
+	if rf, ok := ret.Get(1).(func(string, int) *grpc.ClientConn); ok {
+		r1 = rf(host, port)
+	} else {
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).(*grpc.ClientConn)
+		}
+	}
+
+	return r0, r1
 }
 
 // Remoting_RemotingServiceClient_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemotingServiceClient'
@@ -676,12 +609,12 @@ func (_c *Remoting_RemotingServiceClient_Call) Run(run func(host string, port in
 	return _c
 }
 
-func (_c *Remoting_RemotingServiceClient_Call) Return(_a0 internalpbconnect.RemotingServiceClient) *Remoting_RemotingServiceClient_Call {
-	_c.Call.Return(_a0)
+func (_c *Remoting_RemotingServiceClient_Call) Return(_a0 internalpb.RemotingServiceClient, _a1 *grpc.ClientConn) *Remoting_RemotingServiceClient_Call {
+	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *Remoting_RemotingServiceClient_Call) RunAndReturn(run func(string, int) internalpbconnect.RemotingServiceClient) *Remoting_RemotingServiceClient_Call {
+func (_c *Remoting_RemotingServiceClient_Call) RunAndReturn(run func(string, int) (internalpb.RemotingServiceClient, *grpc.ClientConn)) *Remoting_RemotingServiceClient_Call {
 	_c.Call.Return(run)
 	return _c
 }

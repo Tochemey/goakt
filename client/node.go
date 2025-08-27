@@ -27,11 +27,9 @@ package client
 import (
 	"crypto/tls"
 	"net"
-	nethttp "net/http"
 	"strconv"
 	"sync"
 
-	"github.com/tochemey/goakt/v3/internal/http"
 	"github.com/tochemey/goakt/v3/internal/locker"
 	"github.com/tochemey/goakt/v3/internal/size"
 	"github.com/tochemey/goakt/v3/internal/validation"
@@ -68,7 +66,6 @@ type Node struct {
 	weight  float64
 	mutex   *sync.RWMutex
 
-	client    *nethttp.Client
 	remoting  remote.Remoting
 	tlsConfig *tls.Config
 }
@@ -80,7 +77,6 @@ func NewNode(address string, opts ...NodeOption) *Node {
 	node := &Node{
 		address:  address,
 		mutex:    &sync.RWMutex{},
-		client:   remoting.HTTPClient(),
 		remoting: remoting,
 		weight:   0,
 	}
@@ -95,9 +91,6 @@ func NewNode(address string, opts ...NodeOption) *Node {
 			remote.WithRemotingMaxReadFameSize(16*size.MB),
 			remote.WithRemotingTLS(node.tlsConfig),
 		)
-
-		// reset the client
-		node.client = remoting.HTTPClient()
 	}
 
 	return node
@@ -134,38 +127,12 @@ func (n *Node) Validate() error {
 	return validation.NewTCPAddressValidator(address).Validate()
 }
 
-// HTTPClient returns the underlying http client for the given node
-func (n *Node) HTTPClient() *nethttp.Client {
-	n.mutex.RLock()
-	client := n.client
-	n.mutex.RUnlock()
-	return client
-}
-
 // Remoting returns the remoting instance
 func (n *Node) Remoting() remote.Remoting {
 	n.mutex.RLock()
 	remoting := n.remoting
 	n.mutex.RUnlock()
 	return remoting
-}
-
-// HTTPEndPoint returns the node remote endpoint
-func (n *Node) HTTPEndPoint() string {
-	n.mutex.RLock()
-	host, p, _ := net.SplitHostPort(n.address)
-	port, _ := strconv.Atoi(p)
-	n.mutex.RUnlock()
-	if n.tlsConfig != nil {
-		return http.URLs(host, port)
-	}
-	return http.URL(host, port)
-}
-
-// Free closes the underlying http client connection of the given node
-func (n *Node) Free() {
-	n.HTTPClient().CloseIdleConnections()
-	n.Remoting().Close()
 }
 
 // HostAndPort returns the node host and port
@@ -175,4 +142,12 @@ func (n *Node) HostAndPort() (string, int) {
 	port, _ := strconv.Atoi(p)
 	n.mutex.RUnlock()
 	return host, port
+}
+
+// TLS returns the node TLS configuration
+func (n *Node) TLS() *tls.Config {
+	n.mutex.RLock()
+	tlsConf := n.tlsConfig
+	n.mutex.RUnlock()
+	return tlsConf
 }

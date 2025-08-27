@@ -29,15 +29,16 @@ import (
 	"sync"
 	"time"
 
-	"connectrpc.com/connect"
-	"go.akshayshah.org/connectproto"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v3/address"
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/internal/chain"
+	"github.com/tochemey/goakt/v3/internal/grpcc"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v3/internal/locker"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/internal/ticker"
@@ -122,9 +123,6 @@ func New(ctx context.Context, nodes []*Node, opts ...Option) (*Client, error) {
 // Close closes the Client connection
 func (x *Client) Close() {
 	x.locker.Lock()
-	for _, node := range x.nodes {
-		node.Free()
-	}
 	x.nodes = make([]*Node, 0)
 	if x.refreshInterval > 0 {
 		close(x.closeSignal)
@@ -148,19 +146,19 @@ func (x *Client) Kinds(ctx context.Context) ([]string, error) {
 	defer x.locker.Unlock()
 
 	node := nextNode(x.balancer)
-	service := clusterClient(node)
+	service, conn := clusterClient(node)
+	defer conn.Close()
 
 	response, err := service.GetKinds(
-		ctx, connect.NewRequest(
-			&internalpb.GetKindsRequest{
-				NodeAddress: node.Address(),
-			},
-		),
+		ctx,
+		&internalpb.GetKindsRequest{
+			NodeAddress: node.Address(),
+		},
 	)
 	if err != nil {
 		return nil, err
 	}
-	return response.Msg.GetKinds(), nil
+	return response.GetKinds(), nil
 }
 
 // Spawn creates and starts an actor using the default balancing strategy.
@@ -503,17 +501,19 @@ func (x *Client) refreshNodesLoop() {
 }
 
 // clusterClient returns the cluster service client
-func clusterClient(node *Node) internalpbconnect.ClusterServiceClient {
-	return internalpbconnect.NewClusterServiceClient(
-		node.HTTPClient(),
-		node.HTTPEndPoint(),
-		connect.WithSendMaxBytes(node.Remoting().MaxReadFrameSize()),
-		connect.WithReadMaxBytes(node.Remoting().MaxReadFrameSize()),
-		connectproto.WithBinary(
-			proto.MarshalOptions{},
-			proto.UnmarshalOptions{DiscardUnknown: true},
-		),
-	)
+func clusterClient(node *Node) (internalpb.ClusterServiceClient, *grpc.ClientConn) {
+	remoting := node.Remoting()
+	endpoint := node.Address()
+	opts := []grpcc.ConnOption{
+		grpcc.WithConnMaxRecvMsgSize(remoting.MaxReadFrameSize()),
+		grpcc.WithConnMaxSendMsgSize(remoting.MaxReadFrameSize()),
+		grpcc.WithConnTLS(node.TLS()),
+	}
+
+	conn := grpcc.NewConn(endpoint, opts...)
+	grpcConn, _ := conn.Dial()
+	client := internalpb.NewClusterServiceClient(grpcConn)
+	return client, grpcConn
 }
 
 // getBalancer returns the balancer based upon the strategy
@@ -532,21 +532,22 @@ func getBalancer(strategy BalancerStrategy) Balancer {
 
 // getNodeMetric pings a given node and get the node metric info and
 func getNodeMetric(ctx context.Context, node *Node) (int, bool, error) {
-	service := clusterClient(node)
+	service, conn := clusterClient(node)
+	defer conn.Close()
 
-	response, err := service.GetNodeMetric(ctx, connect.NewRequest(&internalpb.GetNodeMetricRequest{NodeAddress: node.Address()}))
+	response, err := service.GetNodeMetric(ctx, &internalpb.GetNodeMetricRequest{NodeAddress: node.Address()})
 	if err != nil {
-		code := connect.CodeOf(err)
+		code := status.Code(err)
 		// here node may not be available
-		if code == connect.CodeUnavailable ||
-			code == connect.CodeCanceled ||
-			code == connect.CodeDeadlineExceeded {
+		if code == codes.Unavailable ||
+			code == codes.Canceled ||
+			code == codes.DeadlineExceeded {
 			return 0, false, nil
 		}
 
 		return 0, false, err
 	}
-	return int(response.Msg.GetActorsCount()), true, nil
+	return int(response.GetActorsCount()), true, nil
 }
 
 // validateNodes validate the incoming nodes

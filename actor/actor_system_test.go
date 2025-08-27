@@ -223,7 +223,6 @@ func TestActorSystem(t *testing.T) {
 		// stop the actor after some time
 		pause.For(time.Second)
 
-		remoting.Close()
 		err = newActorSystem.Stop(ctx)
 		assert.NoError(t, err)
 		provider.AssertExpectations(t)
@@ -606,7 +605,6 @@ func TestActorSystem(t *testing.T) {
 		// stop the actor after some time
 		pause.For(time.Second)
 
-		remoting.Close()
 		t.Cleanup(
 			func() {
 				err = newActorSystem.Stop(ctx)
@@ -2317,7 +2315,6 @@ func TestRemoteTell(t *testing.T) {
 		// stop the actor after some time
 		pause.For(time.Second)
 
-		remoting.Close()
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
@@ -2365,7 +2362,6 @@ func TestRemoteTell(t *testing.T) {
 		// stop the actor after some time
 		pause.For(time.Second)
 
-		remoting.Close()
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
@@ -2421,7 +2417,6 @@ func TestRemoteTell(t *testing.T) {
 		// stop the actor after some time
 		pause.For(time.Second)
 
-		remoting.Close()
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
@@ -2476,7 +2471,6 @@ func TestRemoteTell(t *testing.T) {
 		// stop the actor after some time
 		pause.For(time.Second)
 
-		remoting.Close()
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
@@ -2535,7 +2529,6 @@ func TestRemoteTell(t *testing.T) {
 		// stop the actor after some time
 		pause.For(time.Second)
 
-		remoting.Close()
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
@@ -2591,7 +2584,6 @@ func TestRemoteTell(t *testing.T) {
 		// stop the actor after some time
 		pause.For(time.Second)
 
-		remoting.Close()
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
@@ -2645,7 +2637,6 @@ func TestRemoteTell(t *testing.T) {
 		// stop the actor after some time
 		pause.For(time.Second)
 
-		remoting.Close()
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
@@ -2702,7 +2693,6 @@ func TestRemoteTell(t *testing.T) {
 		// stop the actor after some time
 		pause.For(time.Second)
 
-		remoting.Close()
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
@@ -2826,7 +2816,6 @@ func TestRemoteTell(t *testing.T) {
 		// stop the actor after some time
 		pause.For(time.Second)
 
-		remoting.Close()
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
@@ -2890,7 +2879,6 @@ func TestRemoteAsk(t *testing.T) {
 		// stop the actor after some time
 		pause.For(time.Second)
 
-		remoting.Close()
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
@@ -2996,7 +2984,7 @@ func TestRemoteAsk(t *testing.T) {
 
 		// stop the actor after some time
 		pause.For(time.Second)
-		remoting.Close()
+
 		t.Cleanup(
 			func() {
 				assert.NoError(t, sys.Stop(ctx))
@@ -3117,7 +3105,6 @@ func TestRemoteAsk(t *testing.T) {
 		// stop the actor after some time
 		pause.For(time.Second)
 
-		remoting.Close()
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
@@ -3171,7 +3158,6 @@ func TestRemoteAsk(t *testing.T) {
 		require.Error(t, err)
 		require.Nil(t, reply)
 
-		remoting.Close()
 		// stop the actor after some time
 		pause.For(time.Second)
 		t.Cleanup(
@@ -3232,7 +3218,7 @@ func TestRemoteAsk(t *testing.T) {
 
 		// stop the actor after some time
 		pause.For(time.Second)
-		remoting.Close()
+
 		t.Cleanup(
 			func() {
 				assert.NoError(t, sys.Stop(ctx))
@@ -3293,7 +3279,6 @@ func TestRemoteAsk(t *testing.T) {
 		// stop the actor after some time
 		pause.For(time.Second)
 
-		remoting.Close()
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
@@ -3426,7 +3411,6 @@ func TestRemoteAsk(t *testing.T) {
 		// stop the actor after some time
 		pause.For(time.Second)
 
-		remoting.Close()
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
@@ -3568,7 +3552,6 @@ func TestRemotingReSpawn(t *testing.T) {
 		err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.Error(t, err)
 
-		remoting.Close()
 		t.Cleanup(
 			func() {
 				assert.NoError(t, sys.Stop(ctx))
@@ -3620,7 +3603,6 @@ func TestRemotingReSpawn(t *testing.T) {
 		// stop the actor after some time
 		pause.For(time.Second)
 
-		remoting.Close()
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
@@ -3672,7 +3654,6 @@ func TestRemotingReSpawn(t *testing.T) {
 		err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.Error(t, err)
 
-		remoting.Close()
 		t.Cleanup(
 			func() {
 				assert.NoError(t, sys.Stop(ctx))
@@ -3711,7 +3692,6 @@ func TestRemotingReSpawn(t *testing.T) {
 		err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.Error(t, err)
 
-		remoting.Close()
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
@@ -3754,7 +3734,6 @@ func TestRemotingStop(t *testing.T) {
 		err = remoting.RemoteStop(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.Error(t, err)
 
-		remoting.Close()
 		t.Cleanup(
 			func() {
 				assert.NoError(t, sys.Stop(ctx))
@@ -3810,7 +3789,6 @@ func TestRemotingStop(t *testing.T) {
 		// stop the actor after some time
 		pause.For(time.Second)
 
-		remoting.Close()
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
@@ -3864,7 +3842,6 @@ func TestRemotingStop(t *testing.T) {
 		err = remoting.RemoteStop(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.Error(t, err)
 
-		remoting.Close()
 		t.Cleanup(
 			func() {
 				assert.NoError(t, sys.Stop(ctx))
@@ -3905,7 +3882,7 @@ func TestRemotingStop(t *testing.T) {
 		require.Error(t, err)
 
 		pause.For(time.Second)
-		remoting.Close()
+
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
@@ -3986,7 +3963,6 @@ func TestRemotingSpawn(t *testing.T) {
 		expected := new(testpb.Reply)
 		assert.True(t, proto.Equal(expected, actual))
 
-		remoting.Close()
 		t.Cleanup(
 			func() {
 				err = sys.Stop(ctx)
@@ -4048,7 +4024,6 @@ func TestRemotingSpawn(t *testing.T) {
 		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
 		require.Error(t, err)
 
-		remoting.Close()
 		err = sys.Stop(ctx)
 		require.NoError(t, err)
 	})
@@ -4109,7 +4084,6 @@ func TestRemotingSpawn(t *testing.T) {
 		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
 		require.Error(t, err)
 
-		remoting.Close()
 		err = sys.Stop(ctx)
 		require.NoError(t, err)
 		dependency.AssertExpectations(t)
@@ -4287,7 +4261,6 @@ func TestRemotingSpawn(t *testing.T) {
 		expected := new(testpb.Reply)
 		assert.True(t, proto.Equal(expected, actual))
 
-		remoting.Close()
 		t.Cleanup(
 			func() {
 				err = sys.Stop(ctx)
@@ -4342,7 +4315,6 @@ func TestRemotingSpawn(t *testing.T) {
 		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
 		require.Error(t, err)
 
-		remoting.Close()
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
@@ -4389,7 +4361,6 @@ func TestRemotingSpawn(t *testing.T) {
 		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
 		require.Error(t, err)
 
-		remoting.Close()
 		err = sys.Stop(ctx)
 		require.NoError(t, err)
 	})
@@ -4432,7 +4403,6 @@ func TestRemotingReinstate(t *testing.T) {
 		err = remoting.RemoteReinstate(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.Error(t, err)
 
-		remoting.Close()
 		require.NoError(t, sys.Stop(ctx))
 	})
 	t.Run("When remoting is enabled", func(t *testing.T) {
@@ -4485,7 +4455,6 @@ func TestRemotingReinstate(t *testing.T) {
 		require.True(t, pid.IsRunning())
 		require.False(t, pid.IsSuspended())
 
-		remoting.Close()
 		err = sys.Stop(ctx)
 		require.NoError(t, err)
 	})
@@ -4521,7 +4490,6 @@ func TestRemotingReinstate(t *testing.T) {
 		err = remoting.RemoteReinstate(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.Error(t, err)
 
-		remoting.Close()
 		err = sys.Stop(ctx)
 		require.NoError(t, err)
 	})

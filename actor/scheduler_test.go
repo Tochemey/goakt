@@ -291,7 +291,6 @@ func TestScheduler(t *testing.T) {
 		assert.Empty(t, keys)
 		assert.EqualValues(t, 1, actorRef.ProcessedCount()-1)
 
-		remoting.Close()
 		// stop the actor
 		err = newActorSystem.Stop(ctx)
 		assert.NoError(t, err)
@@ -367,7 +366,6 @@ func TestScheduler(t *testing.T) {
 		assert.Empty(t, keys)
 		assert.EqualValues(t, 1, actorRef.ProcessedCount()-1)
 
-		remoting.Close()
 		// stop the actor
 		err = newActorSystem.Stop(ctx)
 		assert.NoError(t, err)

@@ -9,6 +9,8 @@ plugins:
   - local: protoc-gen-go
     out: gen
     opt: paths=source_relative
-  - local: protoc-gen-connect-go
+  - local: protoc-gen-go-grpc
     out: gen
-    opt: paths=source_relative
+    opt:
+      - paths=source_relative
+      - require_unimplemented_servers=false

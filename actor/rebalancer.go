@@ -29,7 +29,6 @@ import (
 	"net"
 	"strconv"
 
-	"connectrpc.com/connect"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/tochemey/goakt/v3/errors"
@@ -231,7 +230,8 @@ func (r *rebalancer) activateRemoteGrain(ctx context.Context, grain *internalpb.
 	remoteHost := peer.Host
 	remotingPort := peer.RemotingPort
 	remoting := r.pid.ActorSystem().getRemoting()
-	remoteClient := remoting.RemotingServiceClient(remoteHost, remotingPort)
+	remoteClient, conn := remoting.RemotingServiceClient(remoteHost, remotingPort)
+	defer conn.Close()
 
 	exist, err := r.pid.ActorSystem().getCluster().GrainExists(ctx, grain.GetGrainId().GetName())
 	if err != nil {
@@ -245,9 +245,9 @@ func (r *rebalancer) activateRemoteGrain(ctx context.Context, grain *internalpb.
 
 	grain.Host = remoteHost
 	grain.Port = int32(remotingPort)
-	request := connect.NewRequest(&internalpb.RemoteActivateGrainRequest{
+	request := &internalpb.RemoteActivateGrainRequest{
 		Grain: grain,
-	})
+	}
 
 	if _, err := remoteClient.RemoteActivateGrain(ctx, request); err != nil {
 		r.logger.Error(err)
@@ -258,7 +258,6 @@ func (r *rebalancer) activateRemoteGrain(ctx context.Context, grain *internalpb.
 
 // PostStop is executed when the actor is shutting down.
 func (r *rebalancer) PostStop(*Context) error {
-	r.remoting.Close()
 	r.logger.Infof("%s stopped successfully", r.pid.Name())
 	return nil
 }

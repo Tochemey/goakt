@@ -26,11 +26,9 @@ package actor
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
-	stdhttp "net/http"
 	"os"
 	"os/signal"
 	"regexp"
@@ -42,15 +40,13 @@ import (
 	"syscall"
 	"time"
 
-	"connectrpc.com/connect"
 	goset "github.com/deckarep/golang-set/v2"
 	"github.com/flowchartsman/retry"
-	"go.akshayshah.org/connectproto"
 	"go.uber.org/atomic"
 	"go.uber.org/multierr"
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -66,10 +62,9 @@ import (
 	"github.com/tochemey/goakt/v3/internal/codec"
 	"github.com/tochemey/goakt/v3/internal/collection"
 	"github.com/tochemey/goakt/v3/internal/eventstream"
+	"github.com/tochemey/goakt/v3/internal/grpcc"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v3/internal/locker"
-	"github.com/tochemey/goakt/v3/internal/network"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/internal/ticker"
 	"github.com/tochemey/goakt/v3/internal/validation"
@@ -629,8 +624,7 @@ type actorSystem struct {
 	remotingEnabled atomic.Bool
 	remoting        remote.Remoting
 	// Specifies the remoting server
-	server       *stdhttp.Server
-	listener     net.Listener
+	server       grpcc.Server
 	remoteConfig *remote.Config
 
 	// cluster settings
@@ -698,9 +692,9 @@ type actorSystem struct {
 var (
 	// enforce compilation error when all methods of the ActorSystem interface are not implemented
 	// by the struct actorSystem
-	_ ActorSystem                              = (*actorSystem)(nil)
-	_ internalpbconnect.RemotingServiceHandler = (*actorSystem)(nil)
-	_ internalpbconnect.ClusterServiceHandler  = (*actorSystem)(nil)
+	_ ActorSystem                      = (*actorSystem)(nil)
+	_ internalpb.RemotingServiceServer = (*actorSystem)(nil)
+	_ internalpb.ClusterServiceServer  = (*actorSystem)(nil)
 )
 
 // NewActorSystem creates and configures a new ActorSystem instance.
@@ -806,6 +800,11 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	return system, nil
 }
 
+func (x *actorSystem) RegisterService(server *grpc.Server) {
+	internalpb.RegisterRemotingServiceServer(server, x)
+	internalpb.RegisterClusterServiceServer(server, x)
+}
+
 // Run starts the actor system, blocks on the signals channel, and then
 // gracefully shuts the application down and terminate the running processing.
 // It's designed to make typical applications simple to run.
@@ -879,7 +878,7 @@ func (x *actorSystem) Start(ctx context.Context) error {
 	if err := chain.
 		New(chain.WithFailFast(), chain.WithContext(ctx)).
 		AddRunner(x.workerPool.Start).
-		AddContextRunner(x.startRemoting).
+		AddRunner(x.startRemoting).
 		AddContextRunner(x.startClustering).
 		AddContextRunner(x.spawnRootGuardian).
 		AddContextRunner(x.spawnSystemGuardian).
@@ -1480,17 +1479,17 @@ func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *
 }
 
 // RemoteLookup for an actor on a remote host.
-func (x *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request[internalpb.RemoteLookupRequest]) (*connect.Response[internalpb.RemoteLookupResponse], error) {
+func (x *actorSystem) RemoteLookup(ctx context.Context, request *internalpb.RemoteLookupRequest) (*internalpb.RemoteLookupResponse, error) {
 	logger := x.logger
-	msg := request.Msg
+	msg := request
 
 	if !x.remotingEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrRemotingDisabled)
+		return nil, grpcc.NewError(codes.FailedPrecondition, gerrors.ErrRemotingDisabled)
 	}
 
 	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
 	if remoteAddr != net.JoinHostPort(msg.GetHost(), strconv.Itoa(int(msg.GetPort()))) {
-		return nil, connect.NewError(connect.CodeInvalidArgument, gerrors.ErrInvalidHost)
+		return nil, grpcc.NewError(codes.InvalidArgument, gerrors.ErrInvalidHost)
 	}
 
 	actorName := msg.GetName()
@@ -1503,9 +1502,9 @@ func (x *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request
 				return nil, err
 			}
 
-			return nil, connect.NewError(connect.CodeInternal, err)
+			return nil, grpcc.NewError(codes.Internal, err)
 		}
-		return connect.NewResponse(&internalpb.RemoteLookupResponse{Address: actor.GetAddress()}), nil
+		return &internalpb.RemoteLookupResponse{Address: actor.GetAddress()}, nil
 	}
 
 	addr := address.New(actorName, x.Name(), msg.GetHost(), int(msg.GetPort()))
@@ -1517,20 +1516,20 @@ func (x *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request
 	}
 
 	pid := pidNode.value()
-	return connect.NewResponse(&internalpb.RemoteLookupResponse{Address: pid.Address().Address}), nil
+	return &internalpb.RemoteLookupResponse{Address: pid.Address().Address}, nil
 }
 
 // RemoteAsk is used to send a message to an actor remotely and expect a response
 // immediately. With this type of message the receiver cannot communicate back to Sender
 // except reply the message with a response. This one-way communication
-func (x *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[internalpb.RemoteAskRequest]) (*connect.Response[internalpb.RemoteAskResponse], error) {
+func (x *actorSystem) RemoteAsk(ctx context.Context, request *internalpb.RemoteAskRequest) (*internalpb.RemoteAskResponse, error) {
 	logger := x.logger
 
 	if !x.remotingEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrRemotingDisabled)
+		return nil, grpcc.NewError(codes.FailedPrecondition, gerrors.ErrRemotingDisabled)
 	}
 
-	req := request.Msg
+	req := request
 	timeout := x.askTimeout
 	if req.GetTimeout() != nil {
 		timeout = req.GetTimeout().AsDuration()
@@ -1542,7 +1541,7 @@ func (x *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[in
 
 		remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
 		if remoteAddr != net.JoinHostPort(receiver.GetHost(), strconv.Itoa(int(receiver.GetPort()))) {
-			return nil, connect.NewError(connect.CodeInvalidArgument, gerrors.ErrInvalidHost)
+			return nil, grpcc.NewError(codes.InvalidArgument, gerrors.ErrInvalidHost)
 		}
 
 		addr := address.From(receiver)
@@ -1565,18 +1564,18 @@ func (x *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[in
 		responses = append(responses, marshaled)
 	}
 
-	return connect.NewResponse(&internalpb.RemoteAskResponse{Messages: responses}), nil
+	return &internalpb.RemoteAskResponse{Messages: responses}, nil
 }
 
 // RemoteTell is used to send a message to an actor remotely by another actor
-func (x *actorSystem) RemoteTell(ctx context.Context, request *connect.Request[internalpb.RemoteTellRequest]) (*connect.Response[internalpb.RemoteTellResponse], error) {
+func (x *actorSystem) RemoteTell(ctx context.Context, request *internalpb.RemoteTellRequest) (*internalpb.RemoteTellResponse, error) {
 	logger := x.logger
 
 	if !x.remotingEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrRemotingDisabled)
+		return nil, grpcc.NewError(codes.FailedPrecondition, gerrors.ErrRemotingDisabled)
 	}
 
-	req := request.Msg
+	req := request
 	for _, message := range req.GetRemoteMessages() {
 		receiver := message.GetReceiver()
 		addr := address.From(receiver)
@@ -1595,27 +1594,27 @@ func (x *actorSystem) RemoteTell(ctx context.Context, request *connect.Request[i
 		}
 	}
 
-	return connect.NewResponse(new(internalpb.RemoteTellResponse)), nil
+	return new(internalpb.RemoteTellResponse), nil
 }
 
 // RemoteReSpawn is used the handle the re-creation of an actor from a remote host or from an api call
-func (x *actorSystem) RemoteReSpawn(ctx context.Context, request *connect.Request[internalpb.RemoteReSpawnRequest]) (*connect.Response[internalpb.RemoteReSpawnResponse], error) {
+func (x *actorSystem) RemoteReSpawn(ctx context.Context, request *internalpb.RemoteReSpawnRequest) (*internalpb.RemoteReSpawnResponse, error) {
 	logger := x.logger
 
-	msg := request.Msg
+	msg := request
 
 	if !x.remotingEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrRemotingDisabled)
+		return nil, grpcc.NewError(codes.FailedPrecondition, gerrors.ErrRemotingDisabled)
 	}
 
 	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
 	if remoteAddr != net.JoinHostPort(msg.GetHost(), strconv.Itoa(int(msg.GetPort()))) {
-		return nil, connect.NewError(connect.CodeInvalidArgument, gerrors.ErrInvalidHost)
+		return nil, grpcc.NewError(codes.InvalidArgument, gerrors.ErrInvalidHost)
 	}
 
 	// make sure we don't interfere with system actors.
 	if isReservedName(msg.GetName()) {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.NewErrActorNotFound(msg.GetName()))
+		return nil, grpcc.NewError(codes.FailedPrecondition, gerrors.NewErrActorNotFound(msg.GetName()))
 	}
 
 	actorAddress := address.New(msg.GetName(), x.Name(), msg.GetHost(), int(msg.GetPort()))
@@ -1631,27 +1630,27 @@ func (x *actorSystem) RemoteReSpawn(ctx context.Context, request *connect.Reques
 		return nil, fmt.Errorf("failed to restart actor=%s: %w", actorAddress.String(), err)
 	}
 
-	return connect.NewResponse(new(internalpb.RemoteReSpawnResponse)), nil
+	return new(internalpb.RemoteReSpawnResponse), nil
 }
 
 // RemoteStop stops an actor on a remote machine
-func (x *actorSystem) RemoteStop(ctx context.Context, request *connect.Request[internalpb.RemoteStopRequest]) (*connect.Response[internalpb.RemoteStopResponse], error) {
+func (x *actorSystem) RemoteStop(ctx context.Context, request *internalpb.RemoteStopRequest) (*internalpb.RemoteStopResponse, error) {
 	logger := x.logger
 
-	msg := request.Msg
+	msg := request
 
 	if !x.remotingEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrRemotingDisabled)
+		return nil, grpcc.NewError(codes.FailedPrecondition, gerrors.ErrRemotingDisabled)
 	}
 
 	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
 	if remoteAddr != net.JoinHostPort(msg.GetHost(), strconv.Itoa(int(msg.GetPort()))) {
-		return nil, connect.NewError(connect.CodeInvalidArgument, gerrors.ErrInvalidHost)
+		return nil, grpcc.NewError(codes.InvalidArgument, gerrors.ErrInvalidHost)
 	}
 
 	// make sure we don't interfere with system actors.
 	if isReservedName(msg.GetName()) {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.NewErrActorNotFound(msg.GetName()))
+		return nil, grpcc.NewError(codes.FailedPrecondition, gerrors.NewErrActorNotFound(msg.GetName()))
 	}
 
 	actorAddress := address.New(msg.GetName(), x.Name(), msg.GetHost(), int(msg.GetPort()))
@@ -1667,26 +1666,26 @@ func (x *actorSystem) RemoteStop(ctx context.Context, request *connect.Request[i
 		return nil, fmt.Errorf("failed to stop actor=%s: %w", actorAddress.String(), err)
 	}
 
-	return connect.NewResponse(new(internalpb.RemoteStopResponse)), nil
+	return new(internalpb.RemoteStopResponse), nil
 }
 
 // RemoteSpawn handles the remoteSpawn call
-func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[internalpb.RemoteSpawnRequest]) (*connect.Response[internalpb.RemoteSpawnResponse], error) {
+func (x *actorSystem) RemoteSpawn(ctx context.Context, request *internalpb.RemoteSpawnRequest) (*internalpb.RemoteSpawnResponse, error) {
 	logger := x.logger
 
-	msg := request.Msg
+	msg := request
 	if !x.remotingEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrRemotingDisabled)
+		return nil, grpcc.NewError(codes.FailedPrecondition, gerrors.ErrRemotingDisabled)
 	}
 
 	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
 	if remoteAddr != net.JoinHostPort(msg.GetHost(), strconv.Itoa(int(msg.GetPort()))) {
-		return nil, connect.NewError(connect.CodeInvalidArgument, gerrors.ErrInvalidHost)
+		return nil, grpcc.NewError(codes.InvalidArgument, gerrors.ErrInvalidHost)
 	}
 
 	// make sure we don't interfere with system actors.
 	if isReservedName(msg.GetActorName()) {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.NewErrActorNotFound(msg.GetActorName()))
+		return nil, grpcc.NewError(codes.FailedPrecondition, gerrors.NewErrActorNotFound(msg.GetActorName()))
 	}
 
 	actor, err := x.reflection.NewActor(msg.GetActorType())
@@ -1697,16 +1696,16 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 		)
 
 		if errors.Is(err, gerrors.ErrTypeNotRegistered) {
-			return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrTypeNotRegistered)
+			return nil, grpcc.NewError(codes.FailedPrecondition, gerrors.ErrTypeNotRegistered)
 		}
 
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, grpcc.NewError(codes.Internal, err)
 	}
 
 	if msg.GetIsSingleton() {
 		if err := x.SpawnSingleton(ctx, msg.GetActorName(), actor); err != nil {
 			logger.Errorf("failed to create actor=(%s) on [host=%s, port=%d]: reason: (%v)", msg.GetActorName(), msg.GetHost(), msg.GetPort(), err)
-			return nil, connect.NewError(connect.CodeInternal, err)
+			return nil, grpcc.NewError(codes.Internal, err)
 		}
 	}
 
@@ -1727,38 +1726,38 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 		dependencies, err := x.reflection.NewDependencies(msg.GetDependencies()...)
 		if err != nil {
 			logger.Errorf("failed to create actor=(%s) on [host=%s, port=%d]: reason: (%v)", msg.GetActorName(), msg.GetHost(), msg.GetPort(), err)
-			return nil, connect.NewError(connect.CodeInternal, err)
+			return nil, grpcc.NewError(codes.Internal, err)
 		}
 		opts = append(opts, WithDependencies(dependencies...))
 	}
 
 	if _, err = x.Spawn(ctx, msg.GetActorName(), actor, opts...); err != nil {
 		logger.Errorf("failed to create actor=(%s) on [host=%s, port=%d]: reason: (%v)", msg.GetActorName(), msg.GetHost(), msg.GetPort(), err)
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, grpcc.NewError(codes.Internal, err)
 	}
 
 	logger.Infof("actor=(%s) successfully created on [host=%s, port=%d]", msg.GetActorName(), msg.GetHost(), msg.GetPort())
-	return connect.NewResponse(new(internalpb.RemoteSpawnResponse)), nil
+	return new(internalpb.RemoteSpawnResponse), nil
 }
 
 // RemoteReinstate handles the remoteReinstate call
-func (x *actorSystem) RemoteReinstate(_ context.Context, request *connect.Request[internalpb.RemoteReinstateRequest]) (*connect.Response[internalpb.RemoteReinstateResponse], error) {
+func (x *actorSystem) RemoteReinstate(_ context.Context, request *internalpb.RemoteReinstateRequest) (*internalpb.RemoteReinstateResponse, error) {
 	logger := x.logger
 
-	msg := request.Msg
+	msg := request
 
 	if !x.remotingEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrRemotingDisabled)
+		return nil, grpcc.NewError(codes.FailedPrecondition, gerrors.ErrRemotingDisabled)
 	}
 
 	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
 	if remoteAddr != net.JoinHostPort(msg.GetHost(), strconv.Itoa(int(msg.GetPort()))) {
-		return nil, connect.NewError(connect.CodeInvalidArgument, gerrors.ErrInvalidHost)
+		return nil, grpcc.NewError(codes.InvalidArgument, gerrors.ErrInvalidHost)
 	}
 
 	// make sure we don't interfere with system actors.
 	if isReservedName(msg.GetName()) {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.NewErrActorNotFound(msg.GetName()))
+		return nil, grpcc.NewError(codes.FailedPrecondition, gerrors.NewErrActorNotFound(msg.GetName()))
 	}
 
 	actorAddress := address.New(msg.GetName(), x.Name(), msg.GetHost(), int(msg.GetPort()))
@@ -1772,43 +1771,41 @@ func (x *actorSystem) RemoteReinstate(_ context.Context, request *connect.Reques
 	pid := node.value()
 	pid.doReinstate()
 
-	return connect.NewResponse(new(internalpb.RemoteReinstateResponse)), nil
+	return new(internalpb.RemoteReinstateResponse), nil
 }
 
 // GetNodeMetric handles the GetNodeMetric request send the given node
-func (x *actorSystem) GetNodeMetric(_ context.Context, request *connect.Request[internalpb.GetNodeMetricRequest]) (*connect.Response[internalpb.GetNodeMetricResponse], error) {
+func (x *actorSystem) GetNodeMetric(_ context.Context, request *internalpb.GetNodeMetricRequest) (*internalpb.GetNodeMetricResponse, error) {
 	if !x.clusterEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrClusterDisabled)
+		return nil, grpcc.NewError(codes.FailedPrecondition, gerrors.ErrClusterDisabled)
 	}
 
-	req := request.Msg
+	req := request
 
 	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
 	if remoteAddr != req.GetNodeAddress() {
-		return nil, connect.NewError(connect.CodeInvalidArgument, gerrors.ErrInvalidHost)
+		return nil, grpcc.NewError(codes.InvalidArgument, gerrors.ErrInvalidHost)
 	}
 
 	actorCount := x.actorsCounter.Load()
-	return connect.NewResponse(
-		&internalpb.GetNodeMetricResponse{
-			NodeRemoteAddress: remoteAddr,
-			ActorsCount:       uint64(actorCount),
-		},
-	), nil
+	return &internalpb.GetNodeMetricResponse{
+		NodeRemoteAddress: remoteAddr,
+		ActorsCount:       uint64(actorCount),
+	}, nil
 }
 
 // GetKinds returns the cluster kinds
-func (x *actorSystem) GetKinds(_ context.Context, request *connect.Request[internalpb.GetKindsRequest]) (*connect.Response[internalpb.GetKindsResponse], error) {
+func (x *actorSystem) GetKinds(_ context.Context, request *internalpb.GetKindsRequest) (*internalpb.GetKindsResponse, error) {
 	if !x.clusterEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrClusterDisabled)
+		return nil, grpcc.NewError(codes.FailedPrecondition, gerrors.ErrClusterDisabled)
 	}
 
-	req := request.Msg
+	req := request
 	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
 
 	// routine check
 	if remoteAddr != req.GetNodeAddress() {
-		return nil, connect.NewError(connect.CodeInvalidArgument, gerrors.ErrInvalidHost)
+		return nil, grpcc.NewError(codes.InvalidArgument, gerrors.ErrInvalidHost)
 	}
 
 	kinds := make([]string, len(x.clusterConfig.Kinds()))
@@ -1816,7 +1813,7 @@ func (x *actorSystem) GetKinds(_ context.Context, request *connect.Request[inter
 		kinds[i] = registry.Name(kind)
 	}
 
-	return connect.NewResponse(&internalpb.GetKindsResponse{Kinds: kinds}), nil
+	return &internalpb.GetKindsResponse{Kinds: kinds}, nil
 }
 
 // TopicActor returns the topic actor, a system-managed actor responsible for handling
@@ -2229,39 +2226,23 @@ func (x *actorSystem) startClustering(ctx context.Context) error {
 }
 
 // startRemoting enables the remoting service to handle remote messaging
-func (x *actorSystem) startRemoting(ctx context.Context) error {
+func (x *actorSystem) startRemoting() error {
 	if !x.remotingEnabled.Load() {
 		return nil
 	}
 
 	x.logger.Info("enabling remoting...")
 
-	opts := []connect.HandlerOption{
-		connectproto.WithBinary(
-			proto.MarshalOptions{},
-			proto.UnmarshalOptions{DiscardUnknown: true},
-		),
-	}
-	remotingServicePath, remotingServiceHandler := internalpbconnect.NewRemotingServiceHandler(x, opts...)
-	clusterServicePath, clusterServiceHandler := internalpbconnect.NewClusterServiceHandler(x, opts...)
-
-	mux := stdhttp.NewServeMux()
-	mux.Handle(remotingServicePath, remotingServiceHandler)
-	mux.Handle(clusterServicePath, clusterServiceHandler)
-
 	// configure the appropriate server
-	if err := x.configureServer(ctx, mux); err != nil {
+	if err := x.configureServer(); err != nil {
 		x.logger.Error(fmt.Errorf("failed enable remoting: %w", err))
 		return err
 	}
 
-	go func() {
-		if err := x.startHTTPServer(); err != nil {
-			if !errors.Is(err, stdhttp.ErrServerClosed) {
-				x.logger.Panic(fmt.Errorf("failed to start remoting service: %w", err))
-			}
-		}
-	}()
+	if err := x.startRemotingServer(); err != nil {
+		x.logger.Error(fmt.Errorf("failed to start remoting service: %w", err))
+		return err
+	}
 
 	// configure remoting
 	x.setRemoting()
@@ -2375,7 +2356,7 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 		return chain.
 			New(chain.WithFailFast()).
 			AddRunner(func() error { return x.shutdownCluster(ctx, actorRefs) }).
-			AddRunner(func() error { return x.shutdownRemoting(ctx) }).
+			AddRunner(x.shutdownRemoting).
 			Run()
 	}
 
@@ -2835,47 +2816,34 @@ func (x *actorSystem) actorAddress(name string) *address.Address {
 	return address.New(name, x.name, x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
 }
 
-// startHTTPServer starts the appropriate http server
-func (x *actorSystem) startHTTPServer() error {
-	return x.server.Serve(x.listener)
+// startRemotingServer starts the appropriate grpc server
+func (x *actorSystem) startRemotingServer() error {
+	return x.server.Start()
 }
 
-// shutdownHTTPServer stops the appropriate http server
-func (x *actorSystem) shutdownHTTPServer(ctx context.Context) error {
-	return x.server.Shutdown(ctx)
+// stopRemotingServer stops the appropriate grpc server
+func (x *actorSystem) stopRemotingServer() error {
+	return x.server.Stop()
 }
 
-// configureServer configure the various http server and listeners based upon the various settings
-func (x *actorSystem) configureServer(ctx context.Context, mux *stdhttp.ServeMux) error {
+// configureServer configure the grpc server
+func (x *actorSystem) configureServer() error {
 	hostPort := net.JoinHostPort(x.remoteConfig.BindAddr(), strconv.Itoa(x.remoteConfig.BindPort()))
-	httpServer := getServer(ctx, hostPort)
-	listener, err := network.NewKeepAliveListener(httpServer.Addr)
-	if err != nil {
-		return err
+
+	// TODO(arsene): fine tune the grpc server options
+	opts := []grpcc.ServerOption{
+		grpcc.WithLogger(x.logger),
+		grpcc.WithMaxRecvMsgSize(int(x.remoteConfig.MaxFrameSize())),
+		grpcc.WithMaxSendMsgSize(int(x.remoteConfig.MaxFrameSize())),
+		grpcc.WithServices(x),
 	}
 
-	// Configure HTTP/2 with performance tuning
-	http2Server := &http2.Server{
-		MaxConcurrentStreams: 1000, // Allow up to 1000 concurrent streams
-		MaxReadFrameSize:     x.remoteConfig.MaxFrameSize(),
-		IdleTimeout:          x.remoteConfig.IdleTimeout(),
-		WriteByteTimeout:     x.remoteConfig.WriteTimeout(),
-		ReadIdleTimeout:      x.remoteConfig.ReadIdleTimeout(),
-	}
-
-	// set the http TLS server
 	if x.tlsInfo != nil {
-		x.server = httpServer
-		x.server.TLSConfig = x.tlsInfo.ServerConfig
-		x.server.Handler = mux
-		x.listener = tls.NewListener(listener, x.tlsInfo.ServerConfig)
-		return http2.ConfigureServer(x.server, http2Server)
+		opts = append(opts, grpcc.WithServerTLS(x.tlsInfo.ServerConfig))
 	}
 
-	// http/2 server with h2c (HTTP/2 Cleartext).
-	x.server = httpServer
-	x.server.Handler = h2c.NewHandler(mux, http2Server)
-	x.listener = listener
+	// no need to handle the error because address and services are set
+	x.server, _ = grpcc.NewServer(hostPort, opts...)
 	return nil
 }
 
@@ -3156,20 +3124,15 @@ func (x *actorSystem) shutdownCluster(ctx context.Context, actorRefs []ActorRef)
 	return nil
 }
 
-func (x *actorSystem) shutdownRemoting(ctx context.Context) error {
+func (x *actorSystem) shutdownRemoting() error {
 	if x.remotingEnabled.Load() {
-		if x.remoting != nil {
-			x.remoting.Close()
-		}
-
 		if x.server != nil {
-			if err := x.shutdownHTTPServer(ctx); err != nil {
+			if err := x.stopRemotingServer(); err != nil {
 				x.logger.Errorf("%s failed to shutdown: %w", x.name, err)
 				return err
 			}
 			x.remotingEnabled.Store(false)
 			x.server = nil
-			x.listener = nil
 		}
 	}
 	return nil
@@ -3406,21 +3369,6 @@ func runWithRetry(ctx context.Context, hook ShutdownHook, sys *actorSystem, reco
 
 func isReservedName(name string) bool {
 	return strings.HasPrefix(name, reservedNamesPrefix)
-}
-
-// getServer creates an instance of http server
-func getServer(ctx context.Context, address string) *stdhttp.Server {
-	return &stdhttp.Server{
-		Addr:              address,
-		ReadTimeout:       5 * time.Minute,
-		ReadHeaderTimeout: time.Second,
-		WriteTimeout:      5 * time.Minute,
-		IdleTimeout:       1200 * time.Second,
-		MaxHeaderBytes:    8 * 1024, // 8KiB
-		BaseContext: func(_ net.Listener) context.Context {
-			return ctx
-		},
-	}
 }
 
 // maxInt returns the maximum of two integers. Helper for calculation.

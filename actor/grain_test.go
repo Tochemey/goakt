@@ -26,13 +26,11 @@ package actor
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"connectrpc.com/connect"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
@@ -549,27 +547,23 @@ func TestGrain(t *testing.T) {
 		}
 
 		serialized, _ := anypb.New(grain)
-		remoteClient := testSystem.getRemoting().RemotingServiceClient(grain.GetHost(), int(grain.GetPort()))
+		remoteClient, conn := testSystem.getRemoting().RemotingServiceClient(grain.GetHost(), int(grain.GetPort()))
+		defer conn.Close()
 
-		_, err = remoteClient.RemoteTellGrain(ctx, connect.NewRequest(&internalpb.RemoteTellGrainRequest{
+		_, err = remoteClient.RemoteTellGrain(ctx, &internalpb.RemoteTellGrainRequest{
 			Grain:   grain,
 			Message: serialized,
-		}))
+		})
 		require.Error(t, err)
-		var connectErr *connect.Error
-		require.True(t, errors.As(err, &connectErr))
-		e := connectErr.Unwrap()
-		require.ErrorContains(t, e, gerrors.ErrRemotingDisabled.Error())
+		require.ErrorContains(t, err, gerrors.ErrRemotingDisabled.Error())
 
-		_, err = remoteClient.RemoteAskGrain(ctx, connect.NewRequest(&internalpb.RemoteAskGrainRequest{
+		_, err = remoteClient.RemoteAskGrain(ctx, &internalpb.RemoteAskGrainRequest{
 			Grain:          grain,
 			RequestTimeout: durationpb.New(timeout),
 			Message:        serialized,
-		}))
+		})
 		require.Error(t, err)
-		require.True(t, errors.As(err, &connectErr))
-		e = connectErr.Unwrap()
-		require.ErrorContains(t, e, gerrors.ErrRemotingDisabled.Error())
+		require.ErrorContains(t, err, gerrors.ErrRemotingDisabled.Error())
 
 		require.NoError(t, testSystem.Stop(ctx))
 	})
@@ -602,27 +596,23 @@ func TestGrain(t *testing.T) {
 		}
 
 		serialized, _ := anypb.New(grain)
-		remoteClient := testSystem.getRemoting().RemotingServiceClient(grain.GetHost(), int(grain.GetPort()))
+		remoteClient, conn := testSystem.getRemoting().RemotingServiceClient(grain.GetHost(), int(grain.GetPort()))
+		defer conn.Close()
 
-		_, err = remoteClient.RemoteTellGrain(ctx, connect.NewRequest(&internalpb.RemoteTellGrainRequest{
+		_, err = remoteClient.RemoteTellGrain(ctx, &internalpb.RemoteTellGrainRequest{
 			Grain:   grain,
 			Message: serialized,
-		}))
+		})
 		require.Error(t, err)
-		var connectErr *connect.Error
-		require.True(t, errors.As(err, &connectErr))
-		e := connectErr.Unwrap()
-		require.ErrorContains(t, e, gerrors.ErrInvalidGrainIdentity.Error())
+		require.ErrorContains(t, err, gerrors.ErrInvalidGrainIdentity.Error())
 
-		_, err = remoteClient.RemoteAskGrain(ctx, connect.NewRequest(&internalpb.RemoteAskGrainRequest{
+		_, err = remoteClient.RemoteAskGrain(ctx, &internalpb.RemoteAskGrainRequest{
 			Grain:          grain,
 			RequestTimeout: durationpb.New(timeout),
 			Message:        serialized,
-		}))
+		})
 		require.Error(t, err)
-		require.True(t, errors.As(err, &connectErr))
-		e = connectErr.Unwrap()
-		require.ErrorContains(t, e, gerrors.ErrInvalidGrainIdentity.Error())
+		require.ErrorContains(t, err, gerrors.ErrInvalidGrainIdentity.Error())
 
 		require.NoError(t, testSystem.Stop(ctx))
 	})
@@ -659,27 +649,23 @@ func TestGrain(t *testing.T) {
 		}
 
 		serialized, _ := anypb.New(grain)
-		remoteClient := testSystem.getRemoting().RemotingServiceClient(grain.GetHost(), int(grain.GetPort()))
+		remoteClient, conn := testSystem.getRemoting().RemotingServiceClient(grain.GetHost(), int(grain.GetPort()))
+		defer conn.Close()
 
-		_, err = remoteClient.RemoteTellGrain(ctx, connect.NewRequest(&internalpb.RemoteTellGrainRequest{
+		_, err = remoteClient.RemoteTellGrain(ctx, &internalpb.RemoteTellGrainRequest{
 			Grain:   grain,
 			Message: serialized,
-		}))
+		})
 		require.Error(t, err)
-		var connectErr *connect.Error
-		require.True(t, errors.As(err, &connectErr))
-		e := connectErr.Unwrap()
-		require.ErrorContains(t, e, gerrors.ErrReservedName.Error())
+		require.ErrorContains(t, err, gerrors.ErrReservedName.Error())
 
-		_, err = remoteClient.RemoteAskGrain(ctx, connect.NewRequest(&internalpb.RemoteAskGrainRequest{
+		_, err = remoteClient.RemoteAskGrain(ctx, &internalpb.RemoteAskGrainRequest{
 			Grain:          grain,
 			RequestTimeout: durationpb.New(timeout),
 			Message:        serialized,
-		}))
+		})
 		require.Error(t, err)
-		require.True(t, errors.As(err, &connectErr))
-		e = connectErr.Unwrap()
-		require.ErrorContains(t, e, gerrors.ErrReservedName.Error())
+		require.ErrorContains(t, err, gerrors.ErrReservedName.Error())
 
 		require.NoError(t, testSystem.Stop(ctx))
 	})
@@ -721,27 +707,23 @@ func TestGrain(t *testing.T) {
 		}
 
 		serialized, _ := anypb.New(grain)
-		remoteClient := testSystem.getRemoting().RemotingServiceClient(grain.GetHost(), int(grain.GetPort()))
+		remoteClient, conn := testSystem.getRemoting().RemotingServiceClient(grain.GetHost(), int(grain.GetPort()))
+		defer conn.Close()
 
-		_, err = remoteClient.RemoteTellGrain(ctx, connect.NewRequest(&internalpb.RemoteTellGrainRequest{
+		_, err = remoteClient.RemoteTellGrain(ctx, &internalpb.RemoteTellGrainRequest{
 			Grain:   grain,
 			Message: serialized,
-		}))
+		})
 		require.Error(t, err)
-		var connectErr *connect.Error
-		require.True(t, errors.As(err, &connectErr))
-		e := connectErr.Unwrap()
-		require.ErrorContains(t, e, gerrors.ErrInvalidHost.Error())
+		require.ErrorContains(t, err, gerrors.ErrInvalidHost.Error())
 
-		_, err = remoteClient.RemoteAskGrain(ctx, connect.NewRequest(&internalpb.RemoteAskGrainRequest{
+		_, err = remoteClient.RemoteAskGrain(ctx, &internalpb.RemoteAskGrainRequest{
 			Grain:          grain,
 			RequestTimeout: durationpb.New(timeout),
 			Message:        serialized,
-		}))
+		})
 		require.Error(t, err)
-		require.True(t, errors.As(err, &connectErr))
-		e = connectErr.Unwrap()
-		require.ErrorContains(t, e, gerrors.ErrInvalidHost.Error())
+		require.ErrorContains(t, err, gerrors.ErrInvalidHost.Error())
 
 		require.NoError(t, testSystem.Stop(ctx))
 	})

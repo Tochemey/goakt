@@ -34,10 +34,11 @@ import (
 	"sync"
 	"time"
 
-	"connectrpc.com/connect"
 	"github.com/flowchartsman/retry"
 	"go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -1081,25 +1082,24 @@ func (pid *PID) RemoteLookup(ctx context.Context, host string, port int, name st
 		return nil, gerrors.ErrRemotingDisabled
 	}
 
-	remoteClient := pid.remoting.RemotingServiceClient(host, port)
-	request := connect.NewRequest(
-		&internalpb.RemoteLookupRequest{
-			Host: host,
-			Port: int32(port),
-			Name: name,
-		},
-	)
+	client, conn := pid.remoting.RemotingServiceClient(host, port)
+	defer conn.Close()
+	request := &internalpb.RemoteLookupRequest{
+		Host: host,
+		Port: int32(port),
+		Name: name,
+	}
 
-	response, err := remoteClient.RemoteLookup(ctx, request)
+	response, err := client.RemoteLookup(ctx, request)
 	if err != nil {
-		code := connect.CodeOf(err)
-		if code == connect.CodeNotFound {
+		code := status.Code(err)
+		if code == codes.NotFound {
 			return nil, nil
 		}
 		return nil, err
 	}
 
-	return response.Msg.GetAddress(), nil
+	return response.GetAddress(), nil
 }
 
 // RemoteTell sends a message to an actor remotely without expecting any reply
@@ -1113,8 +1113,9 @@ func (pid *PID) RemoteTell(ctx context.Context, to *address.Address, message pro
 		return err
 	}
 
-	remoteService := pid.remoting.RemotingServiceClient(to.GetHost(), int(to.GetPort()))
-	request := connect.NewRequest(&internalpb.RemoteTellRequest{
+	remoteService, conn := pid.remoting.RemotingServiceClient(to.GetHost(), int(to.GetPort()))
+	defer conn.Close()
+	request := &internalpb.RemoteTellRequest{
 		RemoteMessages: []*internalpb.RemoteMessage{
 			{
 				Sender:   pid.Address().Address,
@@ -1122,7 +1123,7 @@ func (pid *PID) RemoteTell(ctx context.Context, to *address.Address, message pro
 				Message:  marshaled,
 			},
 		},
-	})
+	}
 
 	pid.logger.Debugf("sending a message to remote=(%s:%d)", to.GetHost(), to.GetPort())
 	_, err = remoteService.RemoteTell(ctx, request)
@@ -1151,8 +1152,9 @@ func (pid *PID) RemoteAsk(ctx context.Context, to *address.Address, message prot
 		return nil, err
 	}
 
-	remoteService := pid.remoting.RemotingServiceClient(to.GetHost(), int(to.GetPort()))
-	request := connect.NewRequest(&internalpb.RemoteAskRequest{
+	remoteService, conn := pid.remoting.RemotingServiceClient(to.GetHost(), int(to.GetPort()))
+	defer conn.Close()
+	request := &internalpb.RemoteAskRequest{
 		RemoteMessages: []*internalpb.RemoteMessage{
 			{
 				Sender:   pid.Address().Address,
@@ -1161,7 +1163,7 @@ func (pid *PID) RemoteAsk(ctx context.Context, to *address.Address, message prot
 			},
 		},
 		Timeout: durationpb.New(timeout),
-	})
+	}
 
 	resp, err := remoteService.RemoteAsk(ctx, request)
 	if err != nil {
@@ -1169,7 +1171,7 @@ func (pid *PID) RemoteAsk(ctx context.Context, to *address.Address, message prot
 	}
 
 	if resp != nil {
-		for _, msg := range resp.Msg.GetMessages() {
+		for _, msg := range resp.GetMessages() {
 			response = msg
 			break
 		}
@@ -1199,10 +1201,11 @@ func (pid *PID) RemoteBatchTell(ctx context.Context, to *address.Address, messag
 		})
 	}
 
-	remoteService := pid.remoting.RemotingServiceClient(to.GetHost(), int(to.GetPort()))
-	_, err := remoteService.RemoteTell(ctx, connect.NewRequest(&internalpb.RemoteTellRequest{
+	remoteService, conn := pid.remoting.RemotingServiceClient(to.GetHost(), int(to.GetPort()))
+	defer conn.Close()
+	_, err := remoteService.RemoteTell(ctx, &internalpb.RemoteTellRequest{
 		RemoteMessages: remoteMessages,
-	}))
+	})
 	return err
 }
 
@@ -1229,18 +1232,19 @@ func (pid *PID) RemoteBatchAsk(ctx context.Context, to *address.Address, message
 			})
 	}
 
-	remoteService := pid.remoting.RemotingServiceClient(to.GetHost(), int(to.GetPort()))
-	resp, err := remoteService.RemoteAsk(ctx, connect.NewRequest(&internalpb.RemoteAskRequest{
+	remoteService, conn := pid.remoting.RemotingServiceClient(to.GetHost(), int(to.GetPort()))
+	defer conn.Close()
+	resp, err := remoteService.RemoteAsk(ctx, &internalpb.RemoteAskRequest{
 		RemoteMessages: remoteMessages,
 		Timeout:        durationpb.New(timeout),
-	}))
+	})
 
 	if err != nil {
 		return nil, err
 	}
 
 	if resp != nil {
-		responses = append(responses, resp.Msg.GetMessages()...)
+		responses = append(responses, resp.GetMessages()...)
 	}
 
 	return
@@ -1252,18 +1256,17 @@ func (pid *PID) RemoteStop(ctx context.Context, host string, port int, name stri
 		return gerrors.ErrRemotingDisabled
 	}
 
-	remoteService := pid.remoting.RemotingServiceClient(host, port)
-	request := connect.NewRequest(
-		&internalpb.RemoteStopRequest{
-			Host: host,
-			Port: int32(port),
-			Name: name,
-		},
-	)
+	remoteService, conn := pid.remoting.RemotingServiceClient(host, port)
+	defer conn.Close()
+	request := &internalpb.RemoteStopRequest{
+		Host: host,
+		Port: int32(port),
+		Name: name,
+	}
 
 	if _, err := remoteService.RemoteStop(ctx, request); err != nil {
-		code := connect.CodeOf(err)
-		if code == connect.CodeNotFound {
+		code := status.Code(err)
+		if code == codes.NotFound {
 			return nil
 		}
 		return err
@@ -1277,23 +1280,19 @@ func (pid *PID) RemoteSpawn(ctx context.Context, host string, port int, name, ac
 		return gerrors.ErrRemotingDisabled
 	}
 
-	remoteService := pid.remoting.RemotingServiceClient(host, port)
-	request := connect.NewRequest(
-		&internalpb.RemoteSpawnRequest{
-			Host:      host,
-			Port:      int32(port),
-			ActorName: name,
-			ActorType: actorType,
-		},
-	)
+	remoteService, conn := pid.remoting.RemotingServiceClient(host, port)
+	defer conn.Close()
+	request := &internalpb.RemoteSpawnRequest{
+		Host:      host,
+		Port:      int32(port),
+		ActorName: name,
+		ActorType: actorType,
+	}
 
 	if _, err := remoteService.RemoteSpawn(ctx, request); err != nil {
-		code := connect.CodeOf(err)
-		if code == connect.CodeFailedPrecondition {
-			connectErr := err.(*connect.Error)
-			e := connectErr.Unwrap()
-			// TODO: find a better way to use errors.Is with connect.Error
-			if strings.Contains(e.Error(), gerrors.ErrTypeNotRegistered.Error()) {
+		status := status.Convert(err)
+		if status.Code() == codes.FailedPrecondition {
+			if strings.Contains(status.Message(), gerrors.ErrTypeNotRegistered.Error()) {
 				return gerrors.ErrTypeNotRegistered
 			}
 		}
@@ -1308,18 +1307,17 @@ func (pid *PID) RemoteReSpawn(ctx context.Context, host string, port int, name s
 		return gerrors.ErrRemotingDisabled
 	}
 
-	remoteService := pid.remoting.RemotingServiceClient(host, port)
-	request := connect.NewRequest(
-		&internalpb.RemoteReSpawnRequest{
-			Host: host,
-			Port: int32(port),
-			Name: name,
-		},
-	)
+	remoteService, conn := pid.remoting.RemotingServiceClient(host, port)
+	defer conn.Close()
+	request := &internalpb.RemoteReSpawnRequest{
+		Host: host,
+		Port: int32(port),
+		Name: name,
+	}
 
 	if _, err := remoteService.RemoteReSpawn(ctx, request); err != nil {
-		code := connect.CodeOf(err)
-		if code == connect.CodeNotFound {
+		code := status.Code(err)
+		if code == codes.NotFound {
 			return nil
 		}
 		return err
@@ -1813,10 +1811,6 @@ func (pid *PID) doStop(ctx context.Context) error {
 
 	// stop supervisor loop
 	pid.supervisionStopSignal <- registry.Unit{}
-
-	if pid.remoting != nil {
-		pid.remoting.Close()
-	}
 
 	if err := chain.
 		New(chain.WithFailFast()).

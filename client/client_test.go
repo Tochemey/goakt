@@ -27,7 +27,6 @@ package client
 import (
 	"context"
 	"fmt"
-	nethttp "net/http"
 	"sync"
 	"testing"
 	"time"
@@ -783,13 +782,11 @@ func TestClient(t *testing.T) {
 		ctx := context.TODO()
 		actor := NewActor("client.testactor").WithName("actorName")
 
-		httpClient := nethttp.DefaultClient
 		mockRemoting := mocks.NewRemoting(t)
 		node := &Node{
 			remoting: mockRemoting,
 			address:  "127.0.1:12345",
 			mutex:    &sync.RWMutex{},
-			client:   httpClient,
 		}
 
 		remoteHost, remotePort := node.HostAndPort()
@@ -1077,13 +1074,11 @@ func TestClient(t *testing.T) {
 		ctx := context.TODO()
 		actor := NewActor("client.testactor").WithName("actorName")
 
-		httpClient := nethttp.DefaultClient
 		mockRemoting := mocks.NewRemoting(t)
 		node := &Node{
 			remoting: mockRemoting,
 			address:  "127.0.1:12345",
 			mutex:    &sync.RWMutex{},
-			client:   httpClient,
 		}
 
 		remoteHost, remotePort := node.HostAndPort()

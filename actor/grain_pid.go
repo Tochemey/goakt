@@ -144,9 +144,6 @@ func (pid *grainPID) deactivate(ctx context.Context) error {
 	pid.haltPassivationLnr <- registry.Unit{}
 
 	logger.Infof("Deactivating Grain %s ...", pid.identity.String())
-	if pid.remoting != nil {
-		pid.remoting.Close()
-	}
 
 	if err := pid.grain.OnDeactivate(ctx, newGrainProps(pid.identity, pid.actorSystem, pid.dependencies.Values())); err != nil {
 		pid.logger.Errorf("Grain %s deactivation failed.", pid.identity.String())

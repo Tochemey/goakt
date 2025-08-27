@@ -32,17 +32,14 @@ import (
 	"runtime"
 	"strconv"
 
-	"connectrpc.com/connect"
 	"github.com/google/uuid"
-	"go.akshayshah.org/connectproto"
 	"golang.org/x/sync/errgroup"
-	"google.golang.org/protobuf/proto"
+	"google.golang.org/grpc"
 
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/internal/cluster"
-	"github.com/tochemey/goakt/v3/internal/http"
+	"github.com/tochemey/goakt/v3/internal/grpcc"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/remote"
 )
@@ -217,13 +214,14 @@ func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opt
 			for index, peer := range peers {
 				index, peer := index, peer
 				eg.Go(func() error {
-					client := x.clusterClient(peer)
+					client, conn := x.clusterClient(peer)
+					defer conn.Close()
 					addr := net.JoinHostPort(peer.Host, strconv.Itoa(peer.RemotingPort))
-					resp, err := client.GetNodeMetric(egCtx, connect.NewRequest(&internalpb.GetNodeMetricRequest{NodeAddress: addr}))
+					resp, err := client.GetNodeMetric(egCtx, &internalpb.GetNodeMetricRequest{NodeAddress: addr})
 					if err != nil {
 						return fmt.Errorf("failed to fetch node metric from %s: %w", addr, err)
 					}
-					metrics[index] = nodeMetric{Peer: peer, Load: resp.Msg.GetActorsCount()}
+					metrics[index] = nodeMetric{Peer: peer, Load: resp.GetActorsCount()}
 					return nil
 				})
 			}
@@ -358,23 +356,21 @@ func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Act
 	return x.putActorOnCluster(pid)
 }
 
-func (x *actorSystem) clusterClient(peer *cluster.Peer) internalpbconnect.ClusterServiceClient {
+func (x *actorSystem) clusterClient(peer *cluster.Peer) (internalpb.ClusterServiceClient, *grpc.ClientConn) {
 	remoting := x.remoting
-	var endpoint string
-	if x.tlsInfo != nil {
-		endpoint = http.URLs(peer.Host, peer.RemotingPort)
-	} else {
-		endpoint = http.URL(peer.Host, peer.RemotingPort)
+	endpoint := fmt.Sprintf("%s:%d", peer.Host, peer.RemotingPort)
+	opts := []grpcc.ConnOption{
+		grpcc.WithConnMaxRecvMsgSize(remoting.MaxReadFrameSize()),
+		grpcc.WithConnMaxSendMsgSize(remoting.MaxReadFrameSize()),
 	}
 
-	return internalpbconnect.NewClusterServiceClient(
-		remoting.HTTPClient(),
-		endpoint,
-		connect.WithSendMaxBytes(remoting.MaxReadFrameSize()),
-		connect.WithReadMaxBytes(remoting.MaxReadFrameSize()),
-		connectproto.WithBinary(
-			proto.MarshalOptions{},
-			proto.UnmarshalOptions{DiscardUnknown: true},
-		),
-	)
+	if x.tlsInfo != nil {
+		opts = append(opts, grpcc.WithConnTLS(x.tlsInfo.ClientConfig))
+	}
+
+	conn := grpcc.NewConn(endpoint, opts...)
+
+	grpcConn, _ := conn.Dial()
+	client := internalpb.NewClusterServiceClient(grpcConn)
+	return client, grpcConn
 }

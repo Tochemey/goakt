@@ -32,14 +32,15 @@ import (
 	"strconv"
 	"time"
 
-	"connectrpc.com/connect"
 	goset "github.com/deckarep/golang-set/v2"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/internal/cluster"
+	"github.com/tochemey/goakt/v3/internal/grpcc"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 )
 
@@ -99,10 +100,12 @@ func (x *actorSystem) GrainIdentity(ctx context.Context, name string, factory Gr
 		}
 
 		if grainInfo != nil && !proto.Equal(grainInfo, new(internalpb.Grain)) {
-			remoteClient := x.remoting.RemotingServiceClient(grainInfo.GetHost(), int(grainInfo.GetPort()))
-			request := connect.NewRequest(&internalpb.RemoteActivateGrainRequest{
+			remoteClient, conn := x.remoting.RemotingServiceClient(grainInfo.GetHost(), int(grainInfo.GetPort()))
+			defer conn.Close()
+
+			request := &internalpb.RemoteActivateGrainRequest{
 				Grain: grainInfo,
-			})
+			}
 
 			if _, err := remoteClient.RemoteActivateGrain(ctx, request); err != nil {
 				return nil, err
@@ -249,13 +252,13 @@ func (x *actorSystem) Grains(ctx context.Context, timeout time.Duration) []*Grai
 // Returns:
 //   - *internalpb.RemoteMessageGrainResponse: response containing the Grain's reply.
 //   - error: error if the request fails or is invalid.
-func (x *actorSystem) RemoteAskGrain(ctx context.Context, request *connect.Request[internalpb.RemoteAskGrainRequest]) (*connect.Response[internalpb.RemoteAskGrainResponse], error) {
+func (x *actorSystem) RemoteAskGrain(ctx context.Context, request *internalpb.RemoteAskGrainRequest) (*internalpb.RemoteAskGrainResponse, error) {
 	logger := x.logger
-	msg := request.Msg
+	msg := request
 
 	// Remoting must be enabled
 	if !x.remotingEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrRemotingDisabled)
+		return nil, grpcc.NewError(codes.FailedPrecondition, gerrors.ErrRemotingDisabled)
 	}
 
 	// Validate host and port
@@ -271,23 +274,23 @@ func (x *actorSystem) RemoteAskGrain(ctx context.Context, request *connect.Reque
 	identity, err := toIdentity(msg.GetGrain().GetGrainId().GetValue())
 	if err != nil {
 		if errors.Is(err, gerrors.ErrInvalidGrainIdentity) {
-			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+			return nil, grpcc.NewError(codes.InvalidArgument, err)
 		}
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.Join(err, gerrors.ErrInvalidGrainIdentity))
+		return nil, grpcc.NewError(codes.InvalidArgument, errors.Join(err, gerrors.ErrInvalidGrainIdentity))
 	}
 
 	if isReservedName(identity.Name()) {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.NewErrReservedName(identity.String()))
+		return nil, grpcc.NewError(codes.FailedPrecondition, gerrors.NewErrReservedName(identity.String()))
 	}
 
 	reply, err := x.localSend(ctx, identity, message, timeout.AsDuration(), true)
 	if err != nil {
 		logger.Errorf("failed to create grain (%s) on [host=%s, port=%d]: reason: (%v)", identity.String(), msg.GetGrain().GetHost(), msg.GetGrain().GetPort(), err)
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, grpcc.NewError(codes.Internal, err)
 	}
 
 	response, _ := anypb.New(reply)
-	return connect.NewResponse(&internalpb.RemoteAskGrainResponse{Message: response}), nil
+	return &internalpb.RemoteAskGrainResponse{Message: response}, nil
 }
 
 // RemoteTellGrain handles remote fire-and-forget messages to a Grain from another node.
@@ -303,13 +306,13 @@ func (x *actorSystem) RemoteAskGrain(ctx context.Context, request *connect.Reque
 // Returns:
 //   - *internalpb.RemoteTellGrainResponse: an empty response indicating delivery.
 //   - error: error if the request is invalid or delivery fails.
-func (x *actorSystem) RemoteTellGrain(ctx context.Context, request *connect.Request[internalpb.RemoteTellGrainRequest]) (*connect.Response[internalpb.RemoteTellGrainResponse], error) {
+func (x *actorSystem) RemoteTellGrain(ctx context.Context, request *internalpb.RemoteTellGrainRequest) (*internalpb.RemoteTellGrainResponse, error) {
 	logger := x.logger
-	msg := request.Msg
+	msg := request
 
 	// Remoting must be enabled
 	if !x.remotingEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrRemotingDisabled)
+		return nil, grpcc.NewError(codes.FailedPrecondition, gerrors.ErrRemotingDisabled)
 	}
 
 	// Validate host and port
@@ -324,31 +327,31 @@ func (x *actorSystem) RemoteTellGrain(ctx context.Context, request *connect.Requ
 	identity, err := toIdentity(msg.GetGrain().GetGrainId().GetValue())
 	if err != nil {
 		if errors.Is(err, gerrors.ErrInvalidGrainIdentity) {
-			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+			return nil, grpcc.NewError(codes.InvalidArgument, err)
 		}
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.Join(err, gerrors.ErrInvalidGrainIdentity))
+		return nil, grpcc.NewError(codes.InvalidArgument, errors.Join(err, gerrors.ErrInvalidGrainIdentity))
 	}
 
 	if isReservedName(identity.Name()) {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.NewErrReservedName(identity.String()))
+		return nil, grpcc.NewError(codes.FailedPrecondition, gerrors.NewErrReservedName(identity.String()))
 	}
 
 	_, err = x.localSend(ctx, identity, message, DefaultGrainRequestTimeout, false)
 	if err != nil {
 		logger.Errorf("failed to create grain (%s) on [host=%s, port=%d]: reason: (%v)", identity.String(), msg.GetGrain().GetHost(), msg.GetGrain().GetPort(), err)
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, grpcc.NewError(codes.Internal, err)
 	}
 
-	return connect.NewResponse(&internalpb.RemoteTellGrainResponse{}), nil
+	return &internalpb.RemoteTellGrainResponse{}, nil
 }
 
-func (x *actorSystem) RemoteActivateGrain(ctx context.Context, request *connect.Request[internalpb.RemoteActivateGrainRequest]) (*connect.Response[internalpb.RemoteActivateGrainResponse], error) {
+func (x *actorSystem) RemoteActivateGrain(ctx context.Context, request *internalpb.RemoteActivateGrainRequest) (*internalpb.RemoteActivateGrainResponse, error) {
 	logger := x.logger
-	msg := request.Msg
+	msg := request
 
 	// Remoting must be enabled
 	if !x.remotingEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrRemotingDisabled)
+		return nil, grpcc.NewError(codes.FailedPrecondition, gerrors.ErrRemotingDisabled)
 	}
 
 	grain := msg.GetGrain()
@@ -362,18 +365,18 @@ func (x *actorSystem) RemoteActivateGrain(ctx context.Context, request *connect.
 
 	if err := x.recreateGrain(ctx, grain); err != nil {
 		logger.Errorf("failed to recreate grain (%s) on [host=%s, port=%d]: reason: (%v)", grain.GetGrainId().GetValue(), host, port, err)
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, grpcc.NewError(codes.Internal, err)
 	}
 
 	logger.Infof("recreated grain (%s) on [host=%s, port=%d]", grain.GetGrainId().GetValue(), host, port)
-	return connect.NewResponse(&internalpb.RemoteActivateGrainResponse{}), nil
+	return &internalpb.RemoteActivateGrainResponse{}, nil
 }
 
 // validateRemoteHost checks if the incoming request is for the correct host/port.
 func (x *actorSystem) validateRemoteHost(host string, port int32) error {
 	addr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
 	if addr != net.JoinHostPort(host, strconv.Itoa(int(port))) {
-		return connect.NewError(connect.CodeInvalidArgument, gerrors.ErrInvalidHost)
+		return grpcc.NewError(codes.InvalidArgument, gerrors.ErrInvalidHost)
 	}
 	return nil
 }
@@ -404,11 +407,12 @@ func (x *actorSystem) remoteTellGrain(ctx context.Context, id *GrainIdentity, me
 
 	// just send the message without activating the grain
 	serialized, _ := anypb.New(message)
-	remoteClient := x.remoting.RemotingServiceClient(grain.GetHost(), int(grain.GetPort()))
-	request := connect.NewRequest(&internalpb.RemoteTellGrainRequest{
+	remoteClient, conn := x.remoting.RemotingServiceClient(grain.GetHost(), int(grain.GetPort()))
+	defer conn.Close()
+	request := &internalpb.RemoteTellGrainRequest{
 		Grain:   grain,
 		Message: serialized,
-	})
+	}
 
 	_, err = remoteClient.RemoteTellGrain(ctx, request)
 	return err
@@ -439,18 +443,19 @@ func (x *actorSystem) remoteAskGrain(ctx context.Context, id *GrainIdentity, mes
 	}
 
 	msg, _ := anypb.New(message)
-	remoteClient := x.remoting.RemotingServiceClient(gw.GetHost(), int(gw.GetPort()))
-	request := connect.NewRequest(&internalpb.RemoteAskGrainRequest{
+	remoteClient, conn := x.remoting.RemotingServiceClient(gw.GetHost(), int(gw.GetPort()))
+	defer conn.Close()
+	request := &internalpb.RemoteAskGrainRequest{
 		Grain:          gw,
 		RequestTimeout: durationpb.New(timeout),
 		Message:        msg,
-	})
+	}
 
 	res, err := remoteClient.RemoteAskGrain(ctx, request)
 	if err != nil {
 		return nil, err
 	}
-	return res.Msg.GetMessage().UnmarshalNew()
+	return res.GetMessage().UnmarshalNew()
 }
 
 // localSend sends a message to a local Grain.
