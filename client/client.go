@@ -35,6 +35,7 @@ import (
 
 	"github.com/tochemey/goakt/v3/address"
 	gerrors "github.com/tochemey/goakt/v3/errors"
+	"github.com/tochemey/goakt/v3/internal/brotli"
 	"github.com/tochemey/goakt/v3/internal/chain"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
@@ -507,6 +508,8 @@ func clusterClient(node *Node) internalpbconnect.ClusterServiceClient {
 	return internalpbconnect.NewClusterServiceClient(
 		node.HTTPClient(),
 		node.HTTPEndPoint(),
+		brotli.WithCompression(),
+		connect.WithSendCompression(brotli.Name),
 		connect.WithSendMaxBytes(node.Remoting().MaxReadFrameSize()),
 		connect.WithReadMaxBytes(node.Remoting().MaxReadFrameSize()),
 		connectproto.WithBinary(
