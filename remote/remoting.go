@@ -41,6 +41,7 @@ import (
 
 	"github.com/tochemey/goakt/v3/address"
 	gerrors "github.com/tochemey/goakt/v3/errors"
+	"github.com/tochemey/goakt/v3/internal/brotli"
 	"github.com/tochemey/goakt/v3/internal/codec"
 	"github.com/tochemey/goakt/v3/internal/http"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
@@ -117,9 +118,9 @@ func NewRemoting(opts ...RemotingOption) Remoting {
 	}
 
 	if r.tlsConfig != nil {
-		r.client = http.NewSafeClient(r.tlsConfig, uint32(r.maxReadFrameSize)) // nolint
+		r.client = http.NewHTTPSClient(r.tlsConfig, uint32(r.maxReadFrameSize)) // nolint
 	} else {
-		r.client = http.NewClient(uint32(r.maxReadFrameSize))
+		r.client = http.NewHTTPClient(uint32(r.maxReadFrameSize))
 	}
 	return r
 }
@@ -400,6 +401,8 @@ func (r *remoting) RemotingServiceClient(host string, port int) internalpbconnec
 	return internalpbconnect.NewRemotingServiceClient(
 		r.client,
 		endpoint,
+		brotli.WithCompression(),
+		connect.WithSendCompression(brotli.Name),
 		connect.WithSendMaxBytes(r.maxReadFrameSize),
 		connect.WithReadMaxBytes(r.maxReadFrameSize),
 		connectproto.WithBinary(
