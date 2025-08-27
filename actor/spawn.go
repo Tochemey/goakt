@@ -39,6 +39,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	gerrors "github.com/tochemey/goakt/v3/errors"
+	"github.com/tochemey/goakt/v3/internal/brotli"
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/http"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
@@ -370,6 +371,8 @@ func (x *actorSystem) clusterClient(peer *cluster.Peer) internalpbconnect.Cluste
 	return internalpbconnect.NewClusterServiceClient(
 		remoting.HTTPClient(),
 		endpoint,
+		brotli.WithCompression(),
+		connect.WithSendCompression(brotli.Name),
 		connect.WithSendMaxBytes(remoting.MaxReadFrameSize()),
 		connect.WithReadMaxBytes(remoting.MaxReadFrameSize()),
 		connectproto.WithBinary(
