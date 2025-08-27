@@ -61,6 +61,7 @@ import (
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/hash"
+	"github.com/tochemey/goakt/v3/internal/brotli"
 	"github.com/tochemey/goakt/v3/internal/chain"
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/codec"
@@ -2237,6 +2238,7 @@ func (x *actorSystem) startRemoting(ctx context.Context) error {
 	x.logger.Info("enabling remoting...")
 
 	opts := []connect.HandlerOption{
+		brotli.WithCompression(),
 		connectproto.WithBinary(
 			proto.MarshalOptions{},
 			proto.UnmarshalOptions{DiscardUnknown: true},

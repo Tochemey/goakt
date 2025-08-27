@@ -36,8 +36,8 @@ import (
 	"golang.org/x/net/http2"
 )
 
-// NewClient creates a http client use h2c
-func NewClient(maxReadFrameSize uint32) *http.Client {
+// NewHTTPClient creates a http client use h2c
+func NewHTTPClient(maxReadFrameSize uint32) *http.Client {
 	return &http.Client{
 		// Most RPC servers don't use HTTP redirects
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
@@ -60,9 +60,9 @@ func NewClient(maxReadFrameSize uint32) *http.Client {
 	}
 }
 
-// NewSafeClient creates a http.Client that will use HTTP/2
+// NewHTTPSClient creates a http.Client that will use HTTP/2
 // nolint
-func NewSafeClient(clientTLS *tls.Config, maxReadFrameSize uint32) *http.Client {
+func NewHTTPSClient(clientTLS *tls.Config, maxReadFrameSize uint32) *http.Client {
 	// Create a custom HTTP/2 transport with your desired settings.
 	h2Transport := &http2.Transport{
 		DisableCompression: false,
