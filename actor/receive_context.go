@@ -586,7 +586,12 @@ func (rctx *ReceiveContext) build(ctx context.Context, from, to *PID, message pr
 	rctx.message = message
 
 	if async {
-		rctx.ctx = context.WithoutCancel(ctx)
+		// Avoid allocation when ctx is already non-cancellable
+		if ctx == context.Background() || ctx == context.TODO() {
+			rctx.ctx = ctx
+		} else {
+			rctx.ctx = context.WithoutCancel(ctx)
+		}
 		return rctx
 	}
 

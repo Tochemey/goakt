@@ -25,6 +25,7 @@
 package actor
 
 import (
+	"sync"
 	"sync/atomic"
 	"unsafe"
 )
@@ -33,6 +34,23 @@ import (
 type node struct {
 	value *ReceiveContext
 	next  *node
+}
+
+var nodePool = sync.Pool{ // reuse queue nodes to avoid per-message allocations
+	New: func() any { return new(node) },
+}
+
+func getNode(v *ReceiveContext) *node {
+	n := nodePool.Get().(*node)
+	n.value = v
+	n.next = nil
+	return n
+}
+
+func releaseNode(n *node) {
+	n.value = nil
+	n.next = nil
+	nodePool.Put(n)
 }
 
 // UnboundedMailbox is a Multi-Producer-Single-Consumer Queue (FIFO)
@@ -47,7 +65,7 @@ var _ Mailbox = (*UnboundedMailbox)(nil)
 
 // NewUnboundedMailbox create an instance of UnboundedMailbox
 func NewUnboundedMailbox() *UnboundedMailbox {
-	item := new(node)
+	item := getNode(nil)
 	return &UnboundedMailbox{
 		head:   item,
 		tail:   item,
@@ -57,9 +75,7 @@ func NewUnboundedMailbox() *UnboundedMailbox {
 
 // Enqueue places the given value in the mailbox
 func (m *UnboundedMailbox) Enqueue(value *ReceiveContext) error {
-	tnode := &node{
-		value: value,
-	}
+	tnode := getNode(value)
 	previousHead := (*node)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&m.head)), unsafe.Pointer(tnode)))
 	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&previousHead.next)), unsafe.Pointer(tnode))
 	atomic.AddInt64(&m.length, 1)
@@ -74,10 +90,13 @@ func (m *UnboundedMailbox) Dequeue() *ReceiveContext {
 		return nil
 	}
 
+	oldTail := m.tail
 	m.tail = next
 	value := next.value
 	next.value = nil
 	atomic.AddInt64(&m.length, -1)
+	// recycle the consumed node
+	releaseNode(oldTail)
 	return value
 }
 
