@@ -1441,13 +1441,22 @@ func (pid *PID) schedule() {
 // receiveLoop extracts every message from the actor mailbox
 // and pass it to the appropriate behavior for handling
 func (pid *PID) receiveLoop() {
+	const maxBatch = 64
 	var received *ReceiveContext
 	for {
-		if received != nil {
-			releaseContext(received)
-		}
+		var batchCount int64
 
-		if received = pid.mailbox.Dequeue(); received != nil {
+		// Drain up to maxBatch messages before flipping state
+		for range maxBatch {
+			if received != nil {
+				releaseContext(received)
+				received = nil
+			}
+
+			if received = pid.mailbox.Dequeue(); received == nil {
+				break
+			}
+
 			// Process the message
 			switch msg := received.Message().(type) {
 			case *goaktpb.PoisonPill:
@@ -1462,7 +1471,14 @@ func (pid *PID) receiveLoop() {
 				pid.resumePassivation()
 			default:
 				pid.handleReceived(received)
+				batchCount++
 			}
+		}
+
+		// Flush accounting once per batch
+		if batchCount > 0 {
+			pid.latestReceiveTime.Store(time.Now())
+			pid.processedCount.Add(batchCount)
 		}
 
 		// if no more messages, change busy state to idle
@@ -1488,8 +1504,6 @@ func (pid *PID) handleReadinessProbe(received *ReceiveContext) {
 func (pid *PID) handleReceived(received *ReceiveContext) {
 	defer pid.recovery(received)
 	if behavior := pid.behaviorStack.Peek(); behavior != nil {
-		pid.latestReceiveTime.Store(time.Now().UTC())
-		pid.processedCount.Inc()
 		behavior(received)
 	}
 }
