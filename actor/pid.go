@@ -1444,13 +1444,41 @@ func (pid *PID) schedule() {
 // receiveLoop extracts every message from the actor mailbox
 // and pass it to the appropriate behavior for handling
 func (pid *PID) receiveLoop() {
-	const maxBatch = 64
 	var received *ReceiveContext
+	// Loop-level recovery to avoid per-message defer overhead while preserving safety
+	defer func() {
+		if r := recover(); r != nil {
+			// Build a safe message reference if available
+			var msg proto.Message = new(goaktpb.NoMessage)
+			if received != nil && received.Message() != nil {
+				msg = received.Message()
+			}
+			switch err := r.(type) {
+			case error:
+				var pe *gerrors.PanicError
+				if errors.As(err, &pe) {
+					pid.supervisionChan <- newSupervisionSignal(pe, msg)
+					return
+				}
+				pc, fn, line, _ := runtime.Caller(2)
+				pid.supervisionChan <- newSupervisionSignal(
+					gerrors.NewPanicError(
+						fmt.Errorf("%w at %s[%s:%d]", err, runtime.FuncForPC(pc).Name(), fn, line),
+					), msg)
+			default:
+				pc, fn, line, _ := runtime.Caller(2)
+				pid.supervisionChan <- newSupervisionSignal(
+					gerrors.NewPanicError(
+						fmt.Errorf("%#v at %s[%s:%d]", r, runtime.FuncForPC(pc).Name(), fn, line),
+					), msg)
+			}
+		}
+	}()
 	for {
 		var batchCount int64
 
-		// Drain up to maxBatch messages before flipping state
-		for range maxBatch {
+		// Drain the mailbox fully before flipping state
+		for {
 			if received != nil {
 				releaseContext(received)
 				received = nil
@@ -1474,11 +1502,15 @@ func (pid *PID) receiveLoop() {
 				pid.resumePassivation()
 			default:
 				pid.handleReceived(received)
+				// propagate user-level errors to supervision channel
+				if err := received.getError(); err != nil {
+					pid.supervisionChan <- newSupervisionSignal(err, received.Message())
+				}
 				batchCount++
 			}
 		}
 
-		// Flush accounting once per batch
+		// Flush accounting once per full drain
 		if batchCount > 0 {
 			pid.latestReceiveTime.Store(time.Now())
 			pid.processedCount.Add(batchCount)
@@ -1505,45 +1537,8 @@ func (pid *PID) handleReadinessProbe(received *ReceiveContext) {
 
 // handleReceived picks the right behavior and processes the message
 func (pid *PID) handleReceived(received *ReceiveContext) {
-	defer pid.recovery(received)
 	if behavior := pid.behaviorStack.Peek(); behavior != nil {
 		behavior(received)
-	}
-}
-
-// recovery is called upon after message is processed
-func (pid *PID) recovery(received *ReceiveContext) {
-	if r := recover(); r != nil {
-		switch err, ok := r.(error); {
-		case ok:
-			var pe *gerrors.PanicError
-			if errors.As(err, &pe) {
-				// in case PanicError is sent just forward it
-				pid.supervisionChan <- newSupervisionSignal(pe, received.Message())
-				return
-			}
-
-			// this is a normal error just wrap it with some stack trace
-			// for rich logging purpose
-			pc, fn, line, _ := runtime.Caller(2)
-			pid.supervisionChan <- newSupervisionSignal(
-				gerrors.NewPanicError(
-					fmt.Errorf("%w at %s[%s:%d]", err, runtime.FuncForPC(pc).Name(), fn, line),
-				), received.Message())
-
-		default:
-			// we have no idea what panic it is. Enrich it with some stack trace for rich
-			// logging purpose
-			pc, fn, line, _ := runtime.Caller(2)
-			pid.supervisionChan <- newSupervisionSignal(
-				gerrors.NewPanicError(
-					fmt.Errorf("%#v at %s[%s:%d]", r, runtime.FuncForPC(pc).Name(), fn, line),
-				), received.Message())
-		}
-		return
-	}
-	if err := received.getError(); err != nil {
-		pid.supervisionChan <- newSupervisionSignal(err, received.Message())
 	}
 }
 
