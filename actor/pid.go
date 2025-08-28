@@ -1510,6 +1510,12 @@ func (pid *PID) receiveLoop() {
 			}
 		}
 
+		// Release the last processed context if any
+		if received != nil {
+			releaseContext(received)
+			received = nil
+		}
+
 		// Flush accounting once per full drain
 		if batchCount > 0 {
 			pid.latestReceiveTime.Store(time.Now())
