@@ -1432,7 +1432,10 @@ func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
 // schedule  schedules that a message has arrived and wake up the
 // message processing loop
 func (pid *PID) schedule() {
-	// only signal if the actor is not already processing messages
+	// Fast path: avoid RMW CAS when already busy
+	if pid.processing.Load() == busy {
+		return
+	}
 	if pid.processing.CompareAndSwap(idle, busy) {
 		pid.workerPool.SubmitWork(pid.receiveLoop)
 	}

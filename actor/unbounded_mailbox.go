@@ -107,7 +107,9 @@ func (m *UnboundedMailbox) Len() int64 {
 
 // IsEmpty returns true when the mailbox is empty
 func (m *UnboundedMailbox) IsEmpty() bool {
-	return atomic.LoadInt64(&m.length) == 0
+	// Single-consumer check: queue is empty if tail.next is nil
+	next := (*node)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&m.tail.next))))
+	return next == nil
 }
 
 // Dispose will dispose of this queue and free any blocked threads

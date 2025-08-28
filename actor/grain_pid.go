@@ -183,6 +183,10 @@ func (pid *grainPID) receive(grainContext *GrainContext) {
 // schedule  schedules that a message has arrived and wake up the
 // message processing loop
 func (pid *grainPID) schedule() {
+	// Fast path: avoid CAS when already busy
+	if pid.processing.Load() == busy {
+		return
+	}
 	if pid.processing.CompareAndSwap(idle, busy) {
 		pid.workerPool.SubmitWork(pid.receiveLoop)
 	}
