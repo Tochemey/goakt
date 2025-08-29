@@ -1443,7 +1443,11 @@ func (pid *PID) schedule() {
 // It only attempts to flip busy→idle when the mailbox is observed empty, ensuring we
 // only run when there is work while minimizing unnecessary CAS churn.
 func (pid *PID) receiveLoop() {
-	var received *ReceiveContext
+	var (
+		received      *ReceiveContext
+		receivedCount int64
+		lastTime      time.Time
+	)
 	for {
 		// release the previously handled context before fetching the next one
 		if received != nil {
@@ -1453,6 +1457,16 @@ func (pid *PID) receiveLoop() {
 		// fetch next message
 		received = pid.mailbox.Dequeue()
 		if received == nil {
+			// Flush counters/time once per drain cycle to reduce atomics cost
+			if receivedCount > 0 {
+				if !lastTime.IsZero() {
+					pid.latestReceiveTime.Store(lastTime)
+				}
+				pid.processedCount.Add(receivedCount)
+				receivedCount = 0
+				lastTime = time.Time{}
+			}
+
 			// observed empty: attempt to go idle; if a race enqueued more, re-grab busy
 			if !pid.processing.CompareAndSwap(busy, idle) {
 				return
@@ -1476,6 +1490,9 @@ func (pid *PID) receiveLoop() {
 		case *goaktpb.ResumePassivation:
 			pid.resumePassivation()
 		default:
+			// aggregate metrics locally, flush on idle
+			lastTime = time.Now()
+			receivedCount++
 			pid.handleReceived(received)
 		}
 	}
@@ -1491,8 +1508,6 @@ func (pid *PID) handleReadinessProbe(received *ReceiveContext) {
 func (pid *PID) handleReceived(received *ReceiveContext) {
 	defer pid.recovery(received)
 	if behavior := pid.behaviorStack.Peek(); behavior != nil {
-		pid.latestReceiveTime.Store(time.Now().UTC())
-		pid.processedCount.Inc()
 		behavior(received)
 	}
 }
