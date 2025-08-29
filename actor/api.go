@@ -48,6 +48,7 @@ func Ask(ctx context.Context, to *PID, message proto.Message, timeout time.Durat
 		return nil, err
 	}
 
+	// Kick the processing before we block waiting for response
 	to.doReceive(receiveContext)
 	timer := timers.Get(timeout)
 
@@ -58,13 +59,14 @@ func Ask(ctx context.Context, to *PID, message proto.Message, timeout time.Durat
 		timers.Put(timer)
 		return
 	case <-ctx.Done():
+		// Use stable values, avoid relying on pooled ReceiveContext fields
 		err = errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
-		to.toDeadletters(receiveContext, err)
+		to.toDeadletter(ctx, address.NoSender(), to.Address(), message, err)
 		timers.Put(timer)
 		return nil, err
 	case <-timer.C:
 		err = gerrors.ErrRequestTimeout
-		to.toDeadletters(receiveContext, err)
+		to.toDeadletter(ctx, address.NoSender(), to.Address(), message, err)
 		timers.Put(timer)
 		return
 	}

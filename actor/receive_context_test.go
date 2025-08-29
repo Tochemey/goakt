@@ -1235,7 +1235,6 @@ func TestReceiveContext(t *testing.T) {
 			}
 		}
 
-		noSender := actorSystem.NoSender()
 		require.Len(t, items, 1)
 		deadletter := items[0]
 		msg := deadletter.GetMessage()
@@ -1244,7 +1243,8 @@ func TestReceiveContext(t *testing.T) {
 		require.True(t, proto.Equal(send, actual))
 		require.Equal(t, deadletter.GetReason(), errors.ErrUnhandled.Error())
 		addr := deadletter.GetSender()
-		require.True(t, noSender.Address().Equals(address.From(addr)))
+		expected := address.NoSender()
+		require.True(t, expected.Equals(address.From(addr)))
 
 		assert.EqualValues(t, 1, len(consumer.Topics()))
 

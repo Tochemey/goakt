@@ -939,7 +939,7 @@ func (pid *PID) PipeToName(ctx context.Context, actorName string, task func() (p
 		result, err := runTask()
 		if err != nil {
 			pid.logger.Error(err)
-			pid.sendDeadletter(ctx, pid.Address(), pid.Address(), new(goaktpb.NoMessage), err)
+			pid.toDeadletter(ctx, pid.Address(), pid.Address(), new(goaktpb.NoMessage), err)
 			return
 		}
 
@@ -947,7 +947,7 @@ func (pid *PID) PipeToName(ctx context.Context, actorName string, task func() (p
 		actorSystem := pid.ActorSystem()
 		if err := actorSystem.NoSender().SendAsync(ctx, actorName, result); err != nil {
 			pid.logger.Error(err)
-			pid.sendDeadletter(ctx, pid.Address(), pid.Address(), result, err)
+			pid.toDeadletter(ctx, pid.Address(), pid.Address(), result, err)
 			return
 		}
 	}()
@@ -978,12 +978,13 @@ func (pid *PID) Ask(ctx context.Context, to *PID, message proto.Message, timeout
 		return result, nil
 	case <-ctx.Done():
 		err = errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
-		pid.toDeadletters(receiveContext, err)
+		// Use stable values; do not rely on ReceiveContext after scheduling
+		pid.toDeadletter(ctx, pid.Address(), to.Address(), message, err)
 		timers.Put(timer)
 		return nil, err
 	case <-timer.C:
 		err = gerrors.ErrRequestTimeout
-		pid.toDeadletters(receiveContext, err)
+		pid.toDeadletter(ctx, pid.Address(), to.Address(), message, err)
 		timers.Put(timer)
 		return nil, err
 	}
@@ -1424,7 +1425,7 @@ func (pid *PID) LatestActivityTime() time.Time {
 func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
 	if err := pid.mailbox.Enqueue(receiveCtx); err != nil {
 		pid.logger.Warn(err)
-		pid.toDeadletters(receiveCtx, err)
+		pid.handleReceivedError(receiveCtx, err)
 	}
 	pid.schedule()
 }
@@ -1438,43 +1439,45 @@ func (pid *PID) schedule() {
 	}
 }
 
-// receiveLoop extracts every message from the actor mailbox
-// and pass it to the appropriate behavior for handling
+// receiveLoop extracts messages from the actor mailbox and hands them to the right behavior.
+// It only attempts to flip busy→idle when the mailbox is observed empty, ensuring we
+// only run when there is work while minimizing unnecessary CAS churn.
 func (pid *PID) receiveLoop() {
 	var received *ReceiveContext
 	for {
+		// release the previously handled context before fetching the next one
 		if received != nil {
 			releaseContext(received)
 		}
 
-		if received = pid.mailbox.Dequeue(); received != nil {
-			// Process the message
-			switch msg := received.Message().(type) {
-			case *goaktpb.PoisonPill:
-				_ = pid.Shutdown(received.Context())
-			case *internalpb.ReadinessProbe:
-				pid.handleReadinessProbe(received)
-			case *internalpb.Down:
-				pid.handleFailure(received.Sender(), msg)
-			case *goaktpb.PausePassivation:
-				pid.pausePassivation()
-			case *goaktpb.ResumePassivation:
-				pid.resumePassivation()
-			default:
-				pid.handleReceived(received)
+		// fetch next message
+		received = pid.mailbox.Dequeue()
+		if received == nil {
+			// observed empty: attempt to go idle; if a race enqueued more, re-grab busy
+			if !pid.processing.CompareAndSwap(busy, idle) {
+				return
 			}
-		}
-
-		// if no more messages, change busy state to idle
-		if !pid.processing.CompareAndSwap(busy, idle) {
+			if !pid.mailbox.IsEmpty() && pid.processing.CompareAndSwap(idle, busy) {
+				continue
+			}
 			return
 		}
 
-		// Check if new messages were added in the meantime and restart processing
-		if !pid.mailbox.IsEmpty() && pid.processing.CompareAndSwap(idle, busy) {
-			continue
+		// Process the message
+		switch msg := received.Message().(type) {
+		case *goaktpb.PoisonPill:
+			_ = pid.Shutdown(received.Context())
+		case *internalpb.ReadinessProbe:
+			pid.handleReadinessProbe(received)
+		case *internalpb.Down:
+			pid.handleFailure(received.Sender(), msg)
+		case *goaktpb.PausePassivation:
+			pid.pausePassivation()
+		case *goaktpb.ResumePassivation:
+			pid.resumePassivation()
+		default:
+			pid.handleReceived(received)
 		}
-		return
 	}
 }
 
@@ -1933,8 +1936,8 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 	}
 }
 
-// toDeadletters sends message to deadletter synthetic actor
-func (pid *PID) toDeadletters(receiveCtx *ReceiveContext, err error) {
+// handleReceivedError sends message to deadletter synthetic actor
+func (pid *PID) handleReceivedError(receiveCtx *ReceiveContext, err error) {
 	// the message is lost
 	if pid.eventsStream == nil {
 		return
@@ -1948,19 +1951,46 @@ func (pid *PID) toDeadletters(receiveCtx *ReceiveContext, err error) {
 		// pass through
 	}
 
-	sender := &address.Address{}
-	if receiveCtx.Sender() != nil || receiveCtx.Sender() != pid.ActorSystem().NoSender() {
-		sender = receiveCtx.Sender().Address()
+	// Resolve sender with fallbacks:
+	// 1) local sender when present and not NoSender
+	// 2) remote sender when present
+	// 3) zero address (NoSender)
+	sender := address.NoSender()
+	if s := receiveCtx.Sender(); s != nil && !s.Equals(pid.ActorSystem().NoSender()) {
+		sender = s.Address()
+	} else if rs := receiveCtx.RemoteSender(); !rs.Equals(address.NoSender()) {
+		sender = rs
 	}
 
 	ctx := context.Background()
 	receiver := pid.Address()
-	pid.sendDeadletter(ctx, sender, receiver, receiveCtx.Message(), err)
+	// tolerate nil messages by substituting a NoMessage sentinel
+	msg := receiveCtx.Message()
+	if msg == nil {
+		msg = new(goaktpb.NoMessage)
+	}
+	pid.toDeadletter(ctx, sender, receiver, msg, err)
 }
 
-// sendDeadletter sends a message to the deadletter actor
-func (pid *PID) sendDeadletter(ctx context.Context, from, to *address.Address, message proto.Message, err error) {
+// toDeadletter sends a message to the deadletter actor
+func (pid *PID) toDeadletter(ctx context.Context, from, to *address.Address, message proto.Message, err error) {
+	// defensive: tolerate nil sender/receiver
+	if from == nil {
+		from = address.NoSender()
+	}
+
+	if to == nil {
+		to = pid.Address()
+		if to == nil {
+			to = address.NoSender()
+		}
+	}
+
 	deadletter := pid.ActorSystem().getDeadletter()
+	// ensure message is non-nil
+	if message == nil {
+		message = new(goaktpb.NoMessage)
+	}
 	msg, _ := anypb.New(message)
 
 	// send the message to the deadletter actor
@@ -2019,7 +2049,7 @@ func (pid *PID) handleCompletion(ctx context.Context, config *pipeConfig, comple
 	result, err := runTask()
 	if err != nil {
 		pid.logger.Error(err)
-		pid.sendDeadletter(ctx, pid.Address(), pid.Address(), new(goaktpb.NoMessage), err)
+		pid.toDeadletter(ctx, pid.Address(), pid.Address(), new(goaktpb.NoMessage), err)
 		return
 	}
 
@@ -2027,7 +2057,7 @@ func (pid *PID) handleCompletion(ctx context.Context, config *pipeConfig, comple
 	to := completion.Receiver
 	if !to.IsRunning() {
 		pid.logger.Errorf("unable to pipe message to actor=(%s): not started", to.Name())
-		pid.sendDeadletter(ctx, pid.Address(), pid.Address(), result, gerrors.ErrDead)
+		pid.toDeadletter(ctx, pid.Address(), pid.Address(), result, gerrors.ErrDead)
 		return
 	}
 
