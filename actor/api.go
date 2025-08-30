@@ -59,12 +59,12 @@ func Ask(ctx context.Context, to *PID, message proto.Message, timeout time.Durat
 		return
 	case <-ctx.Done():
 		err = errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
-		to.toDeadletters(receiveContext, err)
+		to.handleReceivedError(receiveContext, err)
 		timers.Put(timer)
 		return nil, err
 	case <-timer.C:
 		err = gerrors.ErrRequestTimeout
-		to.toDeadletters(receiveContext, err)
+		to.handleReceivedError(receiveContext, err)
 		timers.Put(timer)
 		return
 	}

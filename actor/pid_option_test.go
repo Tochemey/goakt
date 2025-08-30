@@ -117,6 +117,13 @@ func TestPIDOptions(t *testing.T) {
 			option:   withWorkerPool(workerPool),
 			expected: &PID{workerPool: workerPool},
 		},
+		{
+			name:   "AsSystemActor",
+			option: asSystemActor(),
+			expected: &PID{
+				isSystem: atomicTrue,
+			},
+		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {

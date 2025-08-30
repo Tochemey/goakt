@@ -142,3 +142,9 @@ func withPassivationStrategy(strategy passivation.Strategy) pidOption {
 		pid.passivationStrategy = strategy
 	}
 }
+
+func asSystemActor() pidOption {
+	return func(pid *PID) {
+		pid.isSystem.Store(true)
+	}
+}

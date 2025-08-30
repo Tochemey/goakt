@@ -144,6 +144,7 @@ type PID struct {
 	startedAt   *atomic.Int64
 	isSingleton atomic.Bool
 	relocatable atomic.Bool
+	isSystem    atomic.Bool
 
 	// the list of dependencies
 	dependencies *collection.Map[string, extension.Dependency]
@@ -203,6 +204,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	pid.processing.Store(int32(idle))
 	pid.relocatable.Store(true)
 	pid.passivating.Store(false)
+	pid.isSystem.Store(false)
 
 	for _, opt := range opts {
 		opt(pid)
@@ -939,7 +941,7 @@ func (pid *PID) PipeToName(ctx context.Context, actorName string, task func() (p
 		result, err := runTask()
 		if err != nil {
 			pid.logger.Error(err)
-			pid.sendDeadletter(ctx, pid.Address(), pid.Address(), new(goaktpb.NoMessage), err)
+			pid.toDeadletter(ctx, pid.Address(), pid.Address(), new(goaktpb.NoMessage), err)
 			return
 		}
 
@@ -947,7 +949,7 @@ func (pid *PID) PipeToName(ctx context.Context, actorName string, task func() (p
 		actorSystem := pid.ActorSystem()
 		if err := actorSystem.NoSender().SendAsync(ctx, actorName, result); err != nil {
 			pid.logger.Error(err)
-			pid.sendDeadletter(ctx, pid.Address(), pid.Address(), result, err)
+			pid.toDeadletter(ctx, pid.Address(), pid.Address(), result, err)
 			return
 		}
 	}()
@@ -978,12 +980,12 @@ func (pid *PID) Ask(ctx context.Context, to *PID, message proto.Message, timeout
 		return result, nil
 	case <-ctx.Done():
 		err = errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
-		pid.toDeadletters(receiveContext, err)
+		pid.handleReceivedError(receiveContext, err)
 		timers.Put(timer)
 		return nil, err
 	case <-timer.C:
 		err = gerrors.ErrRequestTimeout
-		pid.toDeadletters(receiveContext, err)
+		pid.handleReceivedError(receiveContext, err)
 		timers.Put(timer)
 		return nil, err
 	}
@@ -1424,7 +1426,7 @@ func (pid *PID) LatestActivityTime() time.Time {
 func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
 	if err := pid.mailbox.Enqueue(receiveCtx); err != nil {
 		pid.logger.Warn(err)
-		pid.toDeadletters(receiveCtx, err)
+		pid.handleReceivedError(receiveCtx, err)
 	}
 	pid.schedule()
 }
@@ -1933,8 +1935,8 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 	}
 }
 
-// toDeadletters sends message to deadletter synthetic actor
-func (pid *PID) toDeadletters(receiveCtx *ReceiveContext, err error) {
+// handleReceivedError sends message to deadletter synthetic actor
+func (pid *PID) handleReceivedError(receiveCtx *ReceiveContext, err error) {
 	// the message is lost
 	if pid.eventsStream == nil {
 		return
@@ -1955,11 +1957,11 @@ func (pid *PID) toDeadletters(receiveCtx *ReceiveContext, err error) {
 
 	ctx := context.Background()
 	receiver := pid.Address()
-	pid.sendDeadletter(ctx, sender, receiver, receiveCtx.Message(), err)
+	pid.toDeadletter(ctx, sender, receiver, receiveCtx.Message(), err)
 }
 
-// sendDeadletter sends a message to the deadletter actor
-func (pid *PID) sendDeadletter(ctx context.Context, from, to *address.Address, message proto.Message, err error) {
+// toDeadletter sends a message to the deadletter actor
+func (pid *PID) toDeadletter(ctx context.Context, from, to *address.Address, message proto.Message, err error) {
 	deadletter := pid.ActorSystem().getDeadletter()
 	msg, _ := anypb.New(message)
 
@@ -2019,7 +2021,7 @@ func (pid *PID) handleCompletion(ctx context.Context, config *pipeConfig, comple
 	result, err := runTask()
 	if err != nil {
 		pid.logger.Error(err)
-		pid.sendDeadletter(ctx, pid.Address(), pid.Address(), new(goaktpb.NoMessage), err)
+		pid.toDeadletter(ctx, pid.Address(), pid.Address(), new(goaktpb.NoMessage), err)
 		return
 	}
 
@@ -2027,7 +2029,7 @@ func (pid *PID) handleCompletion(ctx context.Context, config *pipeConfig, comple
 	to := completion.Receiver
 	if !to.IsRunning() {
 		pid.logger.Errorf("unable to pipe message to actor=(%s): not started", to.Name())
-		pid.sendDeadletter(ctx, pid.Address(), pid.Address(), result, gerrors.ErrDead)
+		pid.toDeadletter(ctx, pid.Address(), pid.Address(), result, gerrors.ErrDead)
 		return
 	}
 
@@ -2247,13 +2249,18 @@ func (pid *PID) startPassivation() {
 // It has to be very fast for a smooth operation.
 func (pid *PID) checkBootstrap(ctx context.Context) error {
 	logger := pid.logger
+	logger.Infof("%s readiness probe...", pid.Name())
+
+	if pid.isSystem.Load() {
+		logger.Debugf("%s is a system actor. No need for readiness probe.", pid.Name())
+		return nil
+	}
 
 	message := new(internalpb.ReadinessProbe)
 	timeout := pid.initTimeout.Load()
 	numretries := pid.initMaxRetries.Load()
 	noSender := pid.ActorSystem().NoSender()
 
-	logger.Infof("%s bootstrapping...", pid.Name())
 	retrier := retry.NewRetrier(int(numretries), timeout, timeout)
 	err := retrier.RunContext(ctx, func(ctx context.Context) error {
 		_, err := noSender.Ask(ctx, pid, message, DefaultAskTimeout)
@@ -2261,12 +2268,12 @@ func (pid *PID) checkBootstrap(ctx context.Context) error {
 	})
 
 	if err != nil {
-		logger.Errorf("%s failed to bootstrap: %v", pid.Name(), err)
+		logger.Errorf("%s readiness probe failed: %v", pid.Name(), err)
 		// attempt to shut down the actor to free pre-allocated resources
 		return errors.Join(err, pid.Shutdown(ctx))
 	}
 
-	logger.Infof("%s successfully bootstrapped.", pid.Name())
+	logger.Infof("%s readiness probe successfully completed.", pid.Name())
 	return nil
 }
 

@@ -2770,6 +2770,11 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 		return nil, err
 	}
 
+	// set the actor as a system actor when necessary
+	if spawnConfig.isSystem {
+		pidOpts = append(pidOpts, asSystemActor())
+	}
+
 	// set the mailbox option
 	if spawnConfig.mailbox != nil {
 		pidOpts = append(pidOpts, withMailbox(spawnConfig.mailbox))
