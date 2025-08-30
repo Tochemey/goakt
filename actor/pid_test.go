@@ -4568,15 +4568,12 @@ func TestUnWatchWithInexistentNode(t *testing.T) {
 	require.NotNil(t, pid)
 	require.True(t, pid.IsRunning())
 
-	workerPool := actorSystem.getWorkerPool()
-
 	childPath := address.New("child", "sys", "127.0.0.1", ports[0])
 	cid, err := newPID(
 		ctx, childPath,
 		NewMockSupervisor(),
 		withInitMaxRetries(1),
 		withActorSystem(actorSystem),
-		withWorkerPool(workerPool),
 		withCustomLogger(log.DiscardLogger),
 	)
 	require.NoError(t, err)
@@ -4608,7 +4605,6 @@ func TestParentWithInexistenceNodeReturnsNil(t *testing.T) {
 	require.NoError(t, actorSystem.Start(ctx))
 
 	pause.For(time.Second)
-	workerPool := actorSystem.getWorkerPool()
 
 	childPath := address.New("child", "sys", "127.0.0.1", ports[0])
 	cid, err := newPID(
@@ -4616,7 +4612,6 @@ func TestParentWithInexistenceNodeReturnsNil(t *testing.T) {
 		NewMockSupervisor(),
 		withInitMaxRetries(1),
 		withActorSystem(actorSystem),
-		withWorkerPool(workerPool),
 		withCustomLogger(log.DiscardLogger),
 	)
 	require.NoError(t, err)

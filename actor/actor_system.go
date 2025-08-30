@@ -74,7 +74,6 @@ import (
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/internal/ticker"
 	"github.com/tochemey/goakt/v3/internal/validation"
-	"github.com/tochemey/goakt/v3/internal/workerpool"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/memory"
 	"github.com/tochemey/goakt/v3/remote"
@@ -587,7 +586,6 @@ type ActorSystem interface {
 	getDeadletter() *PID
 	getSingletonManager() *PID
 	getRebalancer() *PID
-	getWorkerPool() *workerpool.WorkerPool
 	getReflection() *reflection
 	findRoutee(routeeName string) (*PID, bool)
 	isShuttingDown() bool
@@ -683,7 +681,6 @@ type actorSystem struct {
 
 	tlsInfo           *gtls.Info
 	pubsubEnabled     atomic.Bool
-	workerPool        *workerpool.WorkerPool
 	relocationEnabled atomic.Bool
 	extensions        *collection.Map[string, extension.Extension]
 
@@ -790,13 +787,6 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		opt.Apply(system)
 	}
 
-	// set the worker pool
-	system.workerPool = workerpool.New(
-		workerpool.WithPoolSize(300),
-		workerpool.WithExpiry(time.Second),
-		workerpool.WithLogger(system.logger),
-	)
-
 	if err := system.validate(); err != nil {
 		return nil, err
 	}
@@ -879,7 +869,6 @@ func (x *actorSystem) Start(ctx context.Context) error {
 
 	if err := chain.
 		New(chain.WithFailFast(), chain.WithContext(ctx)).
-		AddRunner(x.workerPool.Start).
 		AddContextRunner(x.startRemoting).
 		AddContextRunner(x.startClustering).
 		AddContextRunner(x.spawnRootGuardian).
@@ -892,7 +881,6 @@ func (x *actorSystem) Start(ctx context.Context) error {
 		AddContextRunner(x.spawnSingletonManager).
 		AddContextRunner(x.spawnTopicActor).
 		Run(); err != nil {
-		x.workerPool.Stop()
 		if stopErr := x.shutdown(ctx); stopErr != nil {
 			return errors.Join(err, stopErr)
 		}
@@ -1984,14 +1972,6 @@ func (x *actorSystem) getDeadletter() *PID {
 	return deadletters
 }
 
-// getWorkerPool returns the system worker pool
-func (x *actorSystem) getWorkerPool() *workerpool.WorkerPool {
-	x.locker.RLock()
-	workerPool := x.workerPool
-	x.locker.RUnlock()
-	return workerPool
-}
-
 // getReflection returns the system reflection
 func (x *actorSystem) getReflection() *reflection {
 	x.locker.RLock()
@@ -2333,7 +2313,6 @@ func (x *actorSystem) validateExtensions() error {
 func (x *actorSystem) reset() {
 	x.started.Store(false)
 	x.starting.Store(false)
-	x.workerPool.Stop()
 	x.extensions.Reset()
 	x.actors.reset()
 	x.grains.Reset()
@@ -2763,7 +2742,6 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 		withEventsStream(x.eventsStream),
 		withInitTimeout(x.actorInitTimeout),
 		withRemoting(x.remoting),
-		withWorkerPool(x.workerPool),
 	}
 
 	if err := spawnConfig.Validate(); err != nil {

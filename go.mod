@@ -17,7 +17,6 @@ require (
 	github.com/kapetan-io/tackle v0.12.0
 	github.com/nats-io/nats-server/v2 v2.11.8
 	github.com/nats-io/nats.go v1.45.0
-	github.com/panjf2000/ants/v2 v2.11.3
 	github.com/redis/go-redis/v9 v9.12.1
 	github.com/reugn/go-quartz v0.15.1
 	github.com/stretchr/testify v1.11.1

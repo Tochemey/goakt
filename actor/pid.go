@@ -55,7 +55,6 @@ import (
 	"github.com/tochemey/goakt/v3/internal/locker"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/internal/ticker"
-	"github.com/tochemey/goakt/v3/internal/workerpool"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/passivation"
 	"github.com/tochemey/goakt/v3/remote"
@@ -140,7 +139,6 @@ type PID struct {
 
 	remoting remote.Remoting
 
-	workerPool  *workerpool.WorkerPool
 	startedAt   *atomic.Int64
 	isSingleton atomic.Bool
 	relocatable atomic.Bool
@@ -640,7 +638,6 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 		withEventsStream(pid.eventsStream),
 		withInitTimeout(pid.initTimeout.Load()),
 		withRemoting(pid.remoting),
-		withWorkerPool(pid.workerPool),
 	}
 
 	if spawnConfig.mailbox != nil {
@@ -1428,56 +1425,55 @@ func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
 		pid.logger.Warn(err)
 		pid.handleReceivedError(receiveCtx, err)
 	}
-	pid.schedule()
+	pid.process()
 }
 
-// schedule  schedules that a message has arrived and wake up the
-// message processing loop
-func (pid *PID) schedule() {
-	// only signal if the actor is not already processing messages
-	if pid.processing.CompareAndSwap(idle, busy) {
-		pid.workerPool.SubmitWork(pid.receiveLoop)
-	}
-}
-
-// receiveLoop extracts every message from the actor mailbox
+// process extracts every message from the actor mailbox
 // and pass it to the appropriate behavior for handling
-func (pid *PID) receiveLoop() {
-	var received *ReceiveContext
-	for {
-		if received != nil {
-			releaseContext(received)
-		}
-
-		if received = pid.mailbox.Dequeue(); received != nil {
-			// Process the message
-			switch msg := received.Message().(type) {
-			case *goaktpb.PoisonPill:
-				_ = pid.Shutdown(received.Context())
-			case *internalpb.ReadinessProbe:
-				pid.handleReadinessProbe(received)
-			case *internalpb.Down:
-				pid.handleFailure(received.Sender(), msg)
-			case *goaktpb.PausePassivation:
-				pid.pausePassivation()
-			case *goaktpb.ResumePassivation:
-				pid.resumePassivation()
-			default:
-				pid.handleReceived(received)
-			}
-		}
-
-		// if no more messages, change busy state to idle
-		if !pid.processing.CompareAndSwap(busy, idle) {
-			return
-		}
-
-		// Check if new messages were added in the meantime and restart processing
-		if !pid.mailbox.IsEmpty() && pid.processing.CompareAndSwap(idle, busy) {
-			continue
-		}
+func (pid *PID) process() {
+	// Only start a processing loop when transitioning from idle -> busy.
+	// If another loop is already running (state is busy), exit early.
+	if !pid.processing.CompareAndSwap(idle, busy) {
 		return
 	}
+
+	go func() {
+		var received *ReceiveContext
+		for {
+			if received != nil {
+				releaseContext(received)
+			}
+
+			if received = pid.mailbox.Dequeue(); received != nil {
+				// Process the message
+				switch msg := received.Message().(type) {
+				case *goaktpb.PoisonPill:
+					_ = pid.Shutdown(received.Context())
+				case *internalpb.ReadinessProbe:
+					pid.handleReadinessProbe(received)
+				case *internalpb.Down:
+					pid.handleFailure(received.Sender(), msg)
+				case *goaktpb.PausePassivation:
+					pid.pausePassivation()
+				case *goaktpb.ResumePassivation:
+					pid.resumePassivation()
+				default:
+					pid.handleReceived(received)
+				}
+			}
+
+			// if no more messages, change busy state to idle
+			if !pid.processing.CompareAndSwap(busy, idle) {
+				return
+			}
+
+			// Check if new messages were added in the meantime and restart processing
+			if !pid.mailbox.IsEmpty() && pid.processing.CompareAndSwap(idle, busy) {
+				continue
+			}
+			return
+		}
+	}()
 }
 
 // handleReadinessProbe is used to handle the readiness probe messages

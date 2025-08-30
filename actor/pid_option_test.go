@@ -34,7 +34,6 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/tochemey/goakt/v3/internal/eventstream"
-	"github.com/tochemey/goakt/v3/internal/workerpool"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/passivation"
 )
@@ -57,7 +56,6 @@ func TestPIDOptions(t *testing.T) {
 	eventsStream := eventstream.New()
 	atomicTrue.Store(true)
 	atomicFalse.Store(false)
-	workerPool := workerpool.New()
 	strategy := passivation.NewLongLivedStrategy()
 
 	testCases := []struct {
@@ -111,11 +109,6 @@ func TestPIDOptions(t *testing.T) {
 			name:     "withRelocationDisabled",
 			option:   withRelocationDisabled(),
 			expected: &PID{relocatable: atomicFalse},
-		},
-		{
-			name:     "WithWorkerPool",
-			option:   withWorkerPool(workerPool),
-			expected: &PID{workerPool: workerPool},
 		},
 		{
 			name:   "AsSystemActor",

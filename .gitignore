@@ -15,3 +15,5 @@ gen/
 bench/*.txt
 playground
 .trunk/
+.gocache/
+.cache/

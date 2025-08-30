@@ -41,7 +41,6 @@ import (
 	"github.com/tochemey/goakt/v3/internal/collection"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/internal/ticker"
-	"github.com/tochemey/goakt/v3/internal/workerpool"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/remote"
 )
@@ -63,8 +62,6 @@ type grainPID struct {
 	processing atomic.Int32
 	remoting   remote.Remoting
 
-	workerPool *workerpool.WorkerPool
-
 	// the list of dependencies
 	dependencies *collection.Map[string, extension.Dependency]
 	activated    *atomic.Bool
@@ -85,7 +82,6 @@ func newGrainPID(identity *GrainIdentity, grain Grain, actorSystem ActorSystem, 
 		actorSystem:        actorSystem,
 		logger:             actorSystem.Logger(),
 		remoting:           actorSystem.getRemoting(),
-		workerPool:         actorSystem.getWorkerPool(),
 		dependencies:       config.dependencies,
 		activated:          atomic.NewBool(false),
 		latestReceiveTime:  atomic.Time{},
@@ -176,47 +172,47 @@ func (pid *grainPID) isActive() bool {
 func (pid *grainPID) receive(grainContext *GrainContext) {
 	if pid.isActive() {
 		pid.mailbox.Enqueue(grainContext)
-		pid.schedule()
+		pid.process()
 	}
 }
 
-// schedule  schedules that a message has arrived and wake up the
-// message processing loop
-func (pid *grainPID) schedule() {
-	if pid.processing.CompareAndSwap(idle, busy) {
-		pid.workerPool.SubmitWork(pid.receiveLoop)
-	}
-}
-
-// receiveLoop extracts every message from the actor mailbox
+// process extracts every message from the actor mailbox
 // and pass it to the appropriate behavior for handling
-func (pid *grainPID) receiveLoop() {
-	var grainContext *GrainContext
-	for {
-		if grainContext != nil {
-			releaseGrainContext(grainContext)
-		}
-
-		if grainContext = pid.mailbox.Dequeue(); grainContext != nil {
-			switch grainContext.Message().(type) {
-			case *goaktpb.PoisonPill:
-				pid.handlePoisonPill(grainContext)
-			default:
-				pid.handleGrainContext(grainContext)
-			}
-		}
-
-		// if no more messages, change busy state to idle
-		if !pid.processing.CompareAndSwap(busy, idle) {
-			return
-		}
-
-		// Check if new messages were added in the meantime and restart processing
-		if !pid.mailbox.IsEmpty() && pid.processing.CompareAndSwap(idle, busy) {
-			continue
-		}
+func (pid *grainPID) process() {
+	// Only start a processing loop when transitioning from idle -> busy.
+	// If another loop is already running (state is busy), exit early.
+	if !pid.processing.CompareAndSwap(idle, busy) {
 		return
 	}
+
+	go func() {
+		var grainContext *GrainContext
+		for {
+			if grainContext != nil {
+				releaseGrainContext(grainContext)
+			}
+
+			if grainContext = pid.mailbox.Dequeue(); grainContext != nil {
+				switch grainContext.Message().(type) {
+				case *goaktpb.PoisonPill:
+					pid.handlePoisonPill(grainContext)
+				default:
+					pid.handleGrainContext(grainContext)
+				}
+			}
+
+			// if no more messages, change busy state to idle
+			if !pid.processing.CompareAndSwap(busy, idle) {
+				return
+			}
+
+			// Check if new messages were added in the meantime and restart processing
+			if !pid.mailbox.IsEmpty() && pid.processing.CompareAndSwap(idle, busy) {
+				continue
+			}
+			return
+		}
+	}()
 }
 
 func (pid *grainPID) handlePoisonPill(grainContext *GrainContext) {

@@ -1028,8 +1028,6 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, parent)
 
-		workerPool := actorSystem.getWorkerPool()
-
 		// create an instance of receive context
 		context := &ReceiveContext{
 			ctx:     ctx,
@@ -1045,7 +1043,6 @@ func TestReceiveContext(t *testing.T) {
 			NewMockSupervisor(),
 			withInitMaxRetries(1),
 			withActorSystem(actorSystem),
-			withWorkerPool(workerPool),
 			withCustomLogger(log.DiscardLogger),
 		)
 

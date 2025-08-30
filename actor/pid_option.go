@@ -30,7 +30,6 @@ import (
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/internal/collection"
 	"github.com/tochemey/goakt/v3/internal/eventstream"
-	"github.com/tochemey/goakt/v3/internal/workerpool"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/passivation"
 	"github.com/tochemey/goakt/v3/remote"
@@ -57,13 +56,6 @@ func withCustomLogger(logger log.Logger) pidOption {
 func withActorSystem(sys ActorSystem) pidOption {
 	return func(pid *PID) {
 		pid.system = sys
-	}
-}
-
-// withWorkerPool sets the worker pool
-func withWorkerPool(pool *workerpool.WorkerPool) pidOption {
-	return func(pid *PID) {
-		pid.workerPool = pool
 	}
 }
 
