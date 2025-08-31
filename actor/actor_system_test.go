@@ -2764,16 +2764,27 @@ func TestRemoteTell(t *testing.T) {
 		assert.NoError(t, err)
 	})
 	t.Run("With TLS enabled", func(t *testing.T) {
-		t.Skip()
 		// create the context
 		ctx := context.TODO()
 		// AutoGenerate TLS certs
-		conf := autotls.Config{
-			AutoTLS:            true,
-			ClientAuth:         tls.RequireAndVerifyClientCert,
+		serverConf := autotls.Config{
+			CaFile:           "../test/data/certs/ca.cert",
+			CertFile:         "../test/data/certs/auto.pem",
+			KeyFile:          "../test/data/certs/auto.key",
+			ClientAuthCaFile: "../test/data/certs/client-auth-ca.pem",
+			ClientAuth:       tls.RequireAndVerifyClientCert,
+		}
+		require.NoError(t, autotls.Setup(&serverConf))
+
+		clientConf := &autotls.Config{
+			CertFile:           "../test/data/certs/client-auth.pem",
+			KeyFile:            "../test/data/certs/client-auth.key",
 			InsecureSkipVerify: true,
 		}
-		require.NoError(t, autotls.Setup(&conf))
+		require.NoError(t, autotls.Setup(clientConf))
+
+		serverConfig := serverConf.ServerTLS
+		clientConfig := clientConf.ClientTLS
 
 		// define the logger to use
 		logger := log.DiscardLogger
@@ -2790,8 +2801,8 @@ func TestRemoteTell(t *testing.T) {
 			WithLogger(logger),
 			WithRemote(remoteConfig),
 			WithTLS(&gtls.Info{
-				ClientConfig: conf.ClientTLS,
-				ServerConfig: conf.ServerTLS,
+				ClientConfig: clientConfig,
+				ServerConfig: serverConfig,
 			}),
 		)
 		// assert there are no error
@@ -2810,7 +2821,7 @@ func TestRemoteTell(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		remoting := remote.NewRemoting(remote.WithRemotingTLS(conf.ClientTLS))
+		remoting := remote.NewRemoting(remote.WithRemotingTLS(clientConfig))
 		// get the address of the actor
 		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.NoError(t, err)
@@ -2818,7 +2829,7 @@ func TestRemoteTell(t *testing.T) {
 		message := new(testpb.TestSend)
 		from := address.NoSender()
 		// send the message to the actor
-		for i := 0; i < 10; i++ {
+		for range 10 {
 			err = remoting.RemoteTell(ctx, from, addr, message)
 			// perform some assertions
 			require.NoError(t, err)
@@ -3356,19 +3367,27 @@ func TestRemoteAsk(t *testing.T) {
 		assert.NoError(t, err)
 	})
 	t.Run("With TLS enabled", func(t *testing.T) {
-		t.Skip()
 		// create the context
 		ctx := context.TODO()
 		// AutoGenerate TLS certs
-		conf := autotls.Config{
-			AutoTLS:            true,
-			ClientAuth:         tls.RequireAndVerifyClientCert,
+		serverConf := autotls.Config{
+			CaFile:           "../test/data/certs/ca.cert",
+			CertFile:         "../test/data/certs/auto.pem",
+			KeyFile:          "../test/data/certs/auto.key",
+			ClientAuthCaFile: "../test/data/certs/client-auth-ca.pem",
+			ClientAuth:       tls.RequireAndVerifyClientCert,
+		}
+		require.NoError(t, autotls.Setup(&serverConf))
+
+		clientConf := &autotls.Config{
+			CertFile:           "../test/data/certs/client-auth.pem",
+			KeyFile:            "../test/data/certs/client-auth.key",
 			InsecureSkipVerify: true,
 		}
-		require.NoError(t, autotls.Setup(&conf))
+		require.NoError(t, autotls.Setup(clientConf))
 
-		serverConfig := conf.ServerTLS
-		clientConfig := conf.ClientTLS
+		serverConfig := serverConf.ServerTLS
+		clientConfig := clientConf.ClientTLS
 		// define the logger to use
 		logger := log.DiscardLogger
 		// generate the remoting port
@@ -3477,16 +3496,27 @@ func TestRemotingLookup(t *testing.T) {
 		)
 	})
 	t.Run("When TLS enabled", func(t *testing.T) {
-		t.Skip()
 		// create the context
 		ctx := context.TODO()
 		// AutoGenerate TLS certs
-		conf := autotls.Config{
-			AutoTLS:            true,
-			ClientAuth:         tls.RequireAndVerifyClientCert,
-			InsecureSkipVerify: false,
+		serverConf := autotls.Config{
+			CaFile:           "../test/data/certs/ca.cert",
+			CertFile:         "../test/data/certs/auto.pem",
+			KeyFile:          "../test/data/certs/auto.key",
+			ClientAuthCaFile: "../test/data/certs/client-auth-ca.pem",
+			ClientAuth:       tls.RequireAndVerifyClientCert,
 		}
-		require.NoError(t, autotls.Setup(&conf))
+		require.NoError(t, autotls.Setup(&serverConf))
+
+		clientConf := &autotls.Config{
+			CertFile:           "../test/data/certs/client-auth.pem",
+			KeyFile:            "../test/data/certs/client-auth.key",
+			InsecureSkipVerify: true,
+		}
+		require.NoError(t, autotls.Setup(clientConf))
+
+		serverConfig := serverConf.ServerTLS
+		clientConfig := clientConf.ClientTLS
 
 		// define the logger to use
 		logger := log.DiscardLogger
@@ -3501,8 +3531,8 @@ func TestRemotingLookup(t *testing.T) {
 			WithLogger(logger),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 			WithTLS(&gtls.Info{
-				ClientConfig: conf.ClientTLS,
-				ServerConfig: conf.ServerTLS,
+				ClientConfig: clientConfig,
+				ServerConfig: serverConfig,
 			}),
 		)
 		// assert there are no error
@@ -3517,7 +3547,7 @@ func TestRemotingLookup(t *testing.T) {
 		// let us disable remoting
 		actorsSystem := sys.(*actorSystem)
 		actorsSystem.remotingEnabled.Store(false)
-		remoting := remote.NewRemoting(remote.WithRemotingTLS(conf.ClientTLS))
+		remoting := remote.NewRemoting(remote.WithRemotingTLS(clientConfig))
 		// create a test actor
 		actorName := "test"
 		// get the address of the actor
@@ -3626,16 +3656,27 @@ func TestRemotingReSpawn(t *testing.T) {
 		assert.NoError(t, err)
 	})
 	t.Run("When TLS enabled", func(t *testing.T) {
-		t.Skip()
 		// create the context
 		ctx := context.TODO()
 		// AutoGenerate TLS certs
-		conf := autotls.Config{
-			AutoTLS:            true,
-			ClientAuth:         tls.RequireAndVerifyClientCert,
-			InsecureSkipVerify: false,
+		serverConf := autotls.Config{
+			CaFile:           "../test/data/certs/ca.cert",
+			CertFile:         "../test/data/certs/auto.pem",
+			KeyFile:          "../test/data/certs/auto.key",
+			ClientAuthCaFile: "../test/data/certs/client-auth-ca.pem",
+			ClientAuth:       tls.RequireAndVerifyClientCert,
 		}
-		require.NoError(t, autotls.Setup(&conf))
+		require.NoError(t, autotls.Setup(&serverConf))
+
+		clientConf := &autotls.Config{
+			CertFile:           "../test/data/certs/client-auth.pem",
+			KeyFile:            "../test/data/certs/client-auth.key",
+			InsecureSkipVerify: true,
+		}
+		require.NoError(t, autotls.Setup(clientConf))
+
+		serverConfig := serverConf.ServerTLS
+		clientConfig := clientConf.ClientTLS
 
 		// define the logger to use
 		logger := log.DiscardLogger
@@ -3650,8 +3691,8 @@ func TestRemotingReSpawn(t *testing.T) {
 			WithLogger(logger),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 			WithTLS(&gtls.Info{
-				ClientConfig: conf.ClientTLS,
-				ServerConfig: conf.ServerTLS,
+				ClientConfig: clientConfig,
+				ServerConfig: serverConfig,
 			}),
 		)
 		// assert there are no error
@@ -3666,7 +3707,7 @@ func TestRemotingReSpawn(t *testing.T) {
 		// let us disable remoting
 		actorsSystem := sys.(*actorSystem)
 		actorsSystem.remotingEnabled.Store(false)
-		remoting := remote.NewRemoting(remote.WithRemotingTLS(conf.ClientTLS))
+		remoting := remote.NewRemoting(remote.WithRemotingTLS(clientConfig))
 		// create a test actor
 		actorName := "test"
 		// get the address of the actor
@@ -3852,17 +3893,28 @@ func TestRemotingStop(t *testing.T) {
 		assert.NoError(t, err)
 	})
 	t.Run("When TLS enabled", func(t *testing.T) {
-		t.Skip("Flaky test")
 		// create the context
 		ctx := context.TODO()
 
 		// AutoGenerate TLS certs
-		conf := autotls.Config{
-			AutoTLS:            true,
-			ClientAuth:         tls.RequireAndVerifyClientCert,
-			InsecureSkipVerify: false,
+		serverConf := autotls.Config{
+			CaFile:           "../test/data/certs/ca.cert",
+			CertFile:         "../test/data/certs/auto.pem",
+			KeyFile:          "../test/data/certs/auto.key",
+			ClientAuthCaFile: "../test/data/certs/client-auth-ca.pem",
+			ClientAuth:       tls.RequireAndVerifyClientCert,
 		}
-		require.NoError(t, autotls.Setup(&conf))
+		require.NoError(t, autotls.Setup(&serverConf))
+
+		clientConf := &autotls.Config{
+			CertFile:           "../test/data/certs/client-auth.pem",
+			KeyFile:            "../test/data/certs/client-auth.key",
+			InsecureSkipVerify: true,
+		}
+		require.NoError(t, autotls.Setup(clientConf))
+
+		serverConfig := serverConf.ServerTLS
+		clientConfig := clientConf.ClientTLS
 
 		// define the logger to use
 		logger := log.DiscardLogger
@@ -3877,8 +3929,8 @@ func TestRemotingStop(t *testing.T) {
 			WithLogger(logger),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 			WithTLS(&gtls.Info{
-				ClientConfig: conf.ClientTLS,
-				ServerConfig: conf.ServerTLS,
+				ClientConfig: clientConfig,
+				ServerConfig: serverConfig,
 			}),
 		)
 		// assert there are no error
@@ -3894,7 +3946,7 @@ func TestRemotingStop(t *testing.T) {
 		actorsSystem := sys.(*actorSystem)
 		actorsSystem.remotingEnabled.Store(false)
 
-		remoting := remote.NewRemoting(remote.WithRemotingTLS(conf.ClientTLS))
+		remoting := remote.NewRemoting(remote.WithRemotingTLS(clientConfig))
 		// create a test actor
 		actorName := "test"
 		// get the address of the actor
@@ -4282,17 +4334,28 @@ func TestRemotingSpawn(t *testing.T) {
 		)
 	})
 	t.Run("When TLS enabled", func(t *testing.T) {
-		t.Skip()
 		// create the context
 		ctx := context.TODO()
 
 		// AutoGenerate TLS certs
-		conf := autotls.Config{
-			AutoTLS:            true,
-			ClientAuth:         tls.RequireAndVerifyClientCert,
-			InsecureSkipVerify: false,
+		serverConf := autotls.Config{
+			CaFile:           "../test/data/certs/ca.cert",
+			CertFile:         "../test/data/certs/auto.pem",
+			KeyFile:          "../test/data/certs/auto.key",
+			ClientAuthCaFile: "../test/data/certs/client-auth-ca.pem",
+			ClientAuth:       tls.RequireAndVerifyClientCert,
 		}
-		require.NoError(t, autotls.Setup(&conf))
+		require.NoError(t, autotls.Setup(&serverConf))
+
+		clientConf := &autotls.Config{
+			CertFile:           "../test/data/certs/client-auth.pem",
+			KeyFile:            "../test/data/certs/client-auth.key",
+			InsecureSkipVerify: true,
+		}
+		require.NoError(t, autotls.Setup(clientConf))
+
+		serverConfig := serverConf.ServerTLS
+		clientConfig := clientConf.ClientTLS
 
 		// define the logger to use
 		logger := log.DiscardLogger
@@ -4307,8 +4370,8 @@ func TestRemotingSpawn(t *testing.T) {
 			WithLogger(logger),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 			WithTLS(&gtls.Info{
-				ClientConfig: conf.ClientTLS,
-				ServerConfig: conf.ServerTLS,
+				ClientConfig: clientConfig,
+				ServerConfig: serverConfig,
 			}),
 		)
 		// assert there are no error
@@ -4322,11 +4385,12 @@ func TestRemotingSpawn(t *testing.T) {
 		actor := &exchanger{}
 		actorName := uuid.NewString()
 
-		remoting := remote.NewRemoting(remote.WithRemotingTLS(conf.ClientTLS))
+		remoting := remote.NewRemoting(remote.WithRemotingTLS(clientConfig))
 		// fetching the address of the that actor should return nil address
 		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.NoError(t, err)
-		require.Nil(t, addr)
+		require.NotNil(t, addr)
+		require.True(t, addr.Equals(address.NoSender()))
 
 		// register the actor
 		err = sys.Register(ctx, actor)

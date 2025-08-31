@@ -26,6 +26,7 @@ package actor
 
 import (
 	"context"
+	cryptotls "crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -34,7 +35,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kapetan-io/tackle/autotls"
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -1258,7 +1258,8 @@ func startEtcdCluster(t *testing.T) *etcdContainer.EtcdContainer {
 
 type testClusterConfig struct {
 	tlsEnabled        bool
-	conf              autotls.Config
+	serverTLS         *cryptotls.Config
+	clientTLS         *cryptotls.Config
 	pubsubEnabled     bool
 	relocationEnabled bool
 	extension         extension.Extension
@@ -1267,10 +1268,11 @@ type testClusterConfig struct {
 
 type testClusterOption func(*testClusterConfig)
 
-func withTestTLS(conf autotls.Config) testClusterOption {
+func withTestTLS(serverTLS, clientTLS *cryptotls.Config) testClusterOption {
 	return func(tc *testClusterConfig) {
 		tc.tlsEnabled = true
-		tc.conf = conf
+		tc.serverTLS = serverTLS
+		tc.clientTLS = clientTLS
 	}
 }
 
@@ -1390,8 +1392,8 @@ func testSystem(t *testing.T, providerFactory providerFactory, opts ...testClust
 
 	if cfg.tlsEnabled {
 		options = append(options, WithTLS(&tls.Info{
-			ClientConfig: cfg.conf.ClientTLS,
-			ServerConfig: cfg.conf.ServerTLS,
+			ClientConfig: cfg.clientTLS,
+			ServerConfig: cfg.serverTLS,
 		}))
 	}
 

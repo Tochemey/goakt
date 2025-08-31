@@ -39,8 +39,9 @@ import (
 	"github.com/kapetan-io/tackle/autotls"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/travisjeffery/go-dynaport"
+
+	"github.com/tochemey/goakt/v3/internal/pause"
 )
 
 func TestTCPTransport(t *testing.T) {
@@ -184,24 +185,24 @@ func makeCluster(t *testing.T) (*mockCluster, func()) {
 		delegates: [2]*delegate{},
 	}
 
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		cluster.delegates[i] = &delegate{}
 		cluster.members[i] = newNode(t, strconv.Itoa(i), cluster.delegates[i])
 	}
 
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		_, err := cluster.members[i].Join([]string{cluster.members[(i+1)%2].LocalNode().Address()})
 		require.NoError(t, err)
 	}
 
 	pause.For(time.Second)
 
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		require.Len(t, cluster.members[i].Members(), 2)
 	}
 
 	cleanupFunc := func() {
-		for i := 0; i < 2; i++ {
+		for i := range 2 {
 			err := cluster.members[i].Shutdown()
 			if err != nil {
 				t.Fatal(err)
@@ -213,14 +214,22 @@ func makeCluster(t *testing.T) (*mockCluster, func()) {
 }
 
 func newNode(t *testing.T, name string, delegate memberlist.Delegate) *memberlist.Memberlist {
-	// TODO: fix TLS verification
-	conf := autotls.Config{
-		AutoTLS:            true,
-		ClientAuth:         tls.NoClientCert,
-		InsecureSkipVerify: false,
+	serverConf := autotls.Config{
+		CaFile:           "../../test/data/certs/ca.cert",
+		CertFile:         "../../test/data/certs/auto.pem",
+		KeyFile:          "../../test/data/certs/auto.key",
+		ClientAuthCaFile: "../../test/data/certs/client-auth-ca.pem",
+		ClientAuth:       tls.RequireAndVerifyClientCert,
 	}
 
-	require.NoError(t, autotls.Setup(&conf))
+	require.NoError(t, autotls.Setup(&serverConf))
+
+	clientConf := &autotls.Config{
+		CertFile:           "../../test/data/certs/client-auth.pem",
+		KeyFile:            "../../test/data/certs/client-auth.key",
+		InsecureSkipVerify: true,
+	}
+	require.NoError(t, autotls.Setup(clientConf))
 
 	mconf := memberlist.DefaultLocalConfig()
 	mconf.BindPort = 0
@@ -233,14 +242,14 @@ func newNode(t *testing.T, name string, delegate memberlist.Delegate) *memberlis
 	tConfig := TransportConfig{
 		BindAddrs:  []string{mconf.BindAddr},
 		BindPort:   mconf.BindPort,
-		TLS:        conf.ServerTLS,
-		TLSEnabled: false, // TODO: fix TLS verification
+		TLS:        clientConf.ClientTLS,
+		TLSEnabled: true,
 	}
 
 	// implement some poor mechanism here
 	retry := func(limit int) (*Transport, error) {
 		var err error
-		for try := 0; try < limit; try++ {
+		for range limit {
 			var transport *Transport
 			if transport, err = NewTransport(tConfig); err == nil {
 				return transport, nil
