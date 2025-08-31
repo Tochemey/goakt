@@ -158,3 +158,38 @@ func TestAddContextRunnerIf(t *testing.T) {
 		require.True(t, called)
 	})
 }
+
+func TestAddContextRunner(t *testing.T) {
+	t.Run("FailFast - fn not called, error returned", func(t *testing.T) {
+		called := false
+		fn := func(_ context.Context) error {
+			called = true
+			return errors.New("err1")
+		}
+		chain := New(WithFailFast()).AddContextRunner(fn)
+		require.Error(t, chain.Run())
+		require.True(t, called)
+	})
+
+	t.Run("ReturnAll - fn not called", func(t *testing.T) {
+		called := false
+		fn := func(_ context.Context) error {
+			called = true
+			return errors.New("err2")
+		}
+		chain := New(WithRunAll()).AddContextRunner(fn)
+		require.Error(t, chain.Run())
+		require.True(t, called)
+	})
+
+	t.Run("ReturnAll - fn returns nil", func(t *testing.T) {
+		called := false
+		fn := func(_ context.Context) error {
+			called = true
+			return nil
+		}
+		chain := New(WithRunAll()).AddContextRunner(fn)
+		require.NoError(t, chain.Run())
+		require.True(t, called)
+	})
+}

@@ -210,7 +210,10 @@ func (r *remoting) RemoteBatchTell(ctx context.Context, from, to *address.Addres
 	remoteMessages := make([]*internalpb.RemoteMessage, 0, len(messages))
 	for _, message := range messages {
 		if message != nil {
-			packed, _ := anypb.New(message)
+			packed, err := anypb.New(message)
+			if err != nil {
+				return gerrors.NewErrInvalidMessage(err)
+			}
 			remoteMessages = append(remoteMessages, &internalpb.RemoteMessage{
 				Sender:   from.Address,
 				Receiver: to.Address,
