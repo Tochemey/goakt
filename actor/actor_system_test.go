@@ -2785,6 +2785,8 @@ func TestRemoteTell(t *testing.T) {
 
 		serverConfig := serverConf.ServerTLS
 		clientConfig := clientConf.ClientTLS
+		serverConfig.NextProtos = []string{"h2", "http/1.1"}
+		clientConfig.NextProtos = []string{"h2", "http/1.1"}
 
 		// define the logger to use
 		logger := log.DiscardLogger
@@ -3388,6 +3390,9 @@ func TestRemoteAsk(t *testing.T) {
 
 		serverConfig := serverConf.ServerTLS
 		clientConfig := clientConf.ClientTLS
+		serverConfig.NextProtos = []string{"h2", "http/1.1"}
+		clientConfig.NextProtos = []string{"h2", "http/1.1"}
+
 		// define the logger to use
 		logger := log.DiscardLogger
 		// generate the remoting port
@@ -3517,6 +3522,8 @@ func TestRemotingLookup(t *testing.T) {
 
 		serverConfig := serverConf.ServerTLS
 		clientConfig := clientConf.ClientTLS
+		serverConfig.NextProtos = []string{"h2", "http/1.1"}
+		clientConfig.NextProtos = []string{"h2", "http/1.1"}
 
 		// define the logger to use
 		logger := log.DiscardLogger
@@ -3677,6 +3684,8 @@ func TestRemotingReSpawn(t *testing.T) {
 
 		serverConfig := serverConf.ServerTLS
 		clientConfig := clientConf.ClientTLS
+		serverConfig.NextProtos = []string{"h2", "http/1.1"}
+		clientConfig.NextProtos = []string{"h2", "http/1.1"}
 
 		// define the logger to use
 		logger := log.DiscardLogger
@@ -3915,6 +3924,8 @@ func TestRemotingStop(t *testing.T) {
 
 		serverConfig := serverConf.ServerTLS
 		clientConfig := clientConf.ClientTLS
+		serverConfig.NextProtos = []string{"h2", "http/1.1"}
+		clientConfig.NextProtos = []string{"h2", "http/1.1"}
 
 		// define the logger to use
 		logger := log.DiscardLogger
@@ -4356,6 +4367,8 @@ func TestRemotingSpawn(t *testing.T) {
 
 		serverConfig := serverConf.ServerTLS
 		clientConfig := clientConf.ClientTLS
+		serverConfig.NextProtos = []string{"h2", "http/1.1"}
+		clientConfig.NextProtos = []string{"h2", "http/1.1"}
 
 		// define the logger to use
 		logger := log.DiscardLogger

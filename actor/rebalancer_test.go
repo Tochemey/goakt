@@ -119,7 +119,6 @@ func TestRebalancingWithTLSEnabled(t *testing.T) {
 	srv := startNatsServer(t)
 
 	// AutoGenerate TLS certs
-	// AutoGenerate TLS certs
 	serverConf := autotls.Config{
 		CaFile:           "../test/data/certs/ca.cert",
 		CertFile:         "../test/data/certs/auto.pem",
@@ -138,6 +137,8 @@ func TestRebalancingWithTLSEnabled(t *testing.T) {
 
 	serverConfig := serverConf.ServerTLS
 	clientConfig := clientConf.ClientTLS
+	serverConfig.NextProtos = []string{"h2", "http/1.1"}
+	clientConfig.NextProtos = []string{"h2", "http/1.1"}
 
 	// create and start system cluster
 	node1, sd1 := testNATs(t, srv.Addr().String(), withTestTLS(serverConfig, clientConfig))

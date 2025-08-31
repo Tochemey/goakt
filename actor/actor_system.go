@@ -791,9 +791,6 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		return nil, err
 	}
 
-	// append the right protocols to the TLS settings
-	system.ensureTLSProtos()
-
 	return system, nil
 }
 
@@ -2277,23 +2274,6 @@ func (x *actorSystem) startMessagesScheduler(ctx context.Context) {
 func (x *actorSystem) startEviction() {
 	if x.evictionStrategy != nil {
 		go x.evictionLoop()
-	}
-}
-
-func (x *actorSystem) ensureTLSProtos() {
-	if x.tlsInfo != nil {
-		// ensure that the required protocols are set for the TLS
-		toAdd := []string{"h2", "http/1.1"}
-
-		// server application protocols setting
-		protos := goset.NewSet(x.tlsInfo.ServerConfig.NextProtos...)
-		protos.Append(toAdd...)
-		x.tlsInfo.ServerConfig.NextProtos = protos.ToSlice()
-
-		// client application protocols setting
-		protos = goset.NewSet(x.tlsInfo.ClientConfig.NextProtos...)
-		protos.Append(toAdd...)
-		x.tlsInfo.ClientConfig.NextProtos = protos.ToSlice()
 	}
 }
 
