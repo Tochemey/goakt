@@ -27,6 +27,7 @@ package actor
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -36,6 +37,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
+	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -44,7 +46,9 @@ import (
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
+	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/log"
+	mocks "github.com/tochemey/goakt/v3/mocks/cluster"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
@@ -306,6 +310,32 @@ func TestGrain(t *testing.T) {
 
 		require.NoError(t, testSystem.Stop(ctx))
 	})
+	t.Run("With activation error when GetGrain in cluster mode returns error", func(t *testing.T) {
+		ctx := t.Context()
+		clmock := mocks.NewInterface(t)
+		testSystem := &actorSystem{
+			cluster:       clmock,
+			clusterConfig: NewClusterConfig(),
+			logger:        log.DiscardLogger,
+			started:       atomic.NewBool(true),
+			shuttingDown:  atomic.NewBool(false),
+		}
+		testSystem.clusterEnabled.Store(true)
+
+		// create a grain instance
+		grain := NewMockGrainActivationFailure()
+		name := "testGrain"
+		kind := registry.Name(grain)
+		identityStr := fmt.Sprintf("%s%s%s", kind, identitySeparator, name)
+
+		clmock.EXPECT().GetGrain(ctx, identityStr).Return(nil, errors.New("test error"))
+
+		identity, err := testSystem.GrainIdentity(ctx, "testGrain", func(_ context.Context) (Grain, error) {
+			return grain, nil
+		})
+		require.Error(t, err)
+		require.Nil(t, identity)
+	})
 	t.Run("With deactivation error", func(t *testing.T) {
 		ctx := t.Context()
 		testSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
@@ -445,6 +475,9 @@ func TestGrain(t *testing.T) {
 		testSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 		require.NoError(t, err)
 		require.NotNil(t, testSystem)
+
+		grains := testSystem.Grains(ctx, time.Second)
+		require.Empty(t, grains)
 
 		// prepare a message to send to the grain
 		message := new(testpb.TestSend)
@@ -1029,7 +1062,6 @@ func TestGrain(t *testing.T) {
 
 		require.NoError(t, testSystem.Stop(ctx))
 	})
-
 	t.Run("With GrainIdentity when dependencies are invalid", func(t *testing.T) {
 		ctx := t.Context()
 		testSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
@@ -1051,5 +1083,272 @@ func TestGrain(t *testing.T) {
 		require.Nil(t, identity)
 
 		require.NoError(t, testSystem.Stop(ctx))
+	})
+}
+
+// nolint
+func TestRecreateGrain(t *testing.T) {
+	t.Run("returns error for reserved name", func(t *testing.T) {
+		ctx := t.Context()
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, sys)
+
+		require.NoError(t, sys.Start(ctx))
+		defer func() { _ = sys.Stop(ctx) }()
+
+		// Value starts with reserved prefix, triggers early reserved-name check
+		grain := &internalpb.Grain{GrainId: &internalpb.GrainId{Value: "GoAkt_reserved_value"}}
+		err = sys.(*actorSystem).recreateGrain(ctx, grain)
+		require.Error(t, err)
+		require.ErrorIs(t, err, gerrors.ErrReservedName)
+	})
+
+	t.Run("returns error for invalid identity", func(t *testing.T) {
+		ctx := t.Context()
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, sys)
+
+		require.NoError(t, sys.Start(ctx))
+		defer func() { _ = sys.Stop(ctx) }()
+
+		// Not reserved, but invalid identity format (no kind/name)
+		grain := &internalpb.Grain{GrainId: &internalpb.GrainId{Value: "invalid"}}
+		err = sys.(*actorSystem).recreateGrain(ctx, grain)
+		require.Error(t, err)
+		require.ErrorIs(t, err, gerrors.ErrInvalidGrainIdentity)
+	})
+
+	t.Run("fails when grain kind not registered", func(t *testing.T) {
+		ctx := t.Context()
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, sys)
+
+		require.NoError(t, sys.Start(ctx))
+		defer func() { _ = sys.Stop(ctx) }()
+
+		// Kind not present in registry -> reflection.NewGrain fails
+		grain := &internalpb.Grain{
+			GrainId: &internalpb.GrainId{
+				Kind:  "actor.FakeGrain",
+				Name:  "g1",
+				Value: "actor.FakeGrain/g1",
+			},
+			ActivationTimeout: durationpb.New(500 * time.Millisecond),
+			ActivationRetries: 1,
+		}
+		err = sys.(*actorSystem).recreateGrain(ctx, grain)
+		require.Error(t, err)
+		require.ErrorIs(t, err, gerrors.ErrGrainNotRegistered)
+	})
+
+	t.Run("creates and activates new grain successfully", func(t *testing.T) {
+		ctx := t.Context()
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, sys)
+
+		require.NoError(t, sys.Start(ctx))
+		defer func() { _ = sys.Stop(ctx) }()
+
+		// Register the grain type so reflection can instantiate it
+		sys.(*actorSystem).registry.Register(NewMockGrain())
+
+		idName := "MyGrain"
+		kind := registry.Name(NewMockGrain()) // e.g., actor.mockgrain
+		// Use cased kind in Value as recreateGrain accepts any case
+		value := "actor.MockGrain/" + idName
+		grain := &internalpb.Grain{
+			GrainId: &internalpb.GrainId{
+				Kind:  kind,
+				Name:  idName,
+				Value: value,
+			},
+			ActivationTimeout: durationpb.New(1 * time.Second),
+			ActivationRetries: 1,
+		}
+
+		err = sys.(*actorSystem).recreateGrain(ctx, grain)
+		require.NoError(t, err)
+
+		// Confirm process is created, registered and active
+		gp, ok := sys.(*actorSystem).grains.Get(value)
+		require.True(t, ok)
+		require.NotNil(t, gp)
+		require.True(t, gp.isActive())
+	})
+
+	t.Run("activates existing inactive process and registers it", func(t *testing.T) {
+		ctx := t.Context()
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, sys)
+
+		require.NoError(t, sys.Start(ctx))
+		defer func() { _ = sys.Stop(ctx) }()
+
+		// Create identity consistent with the serialized value
+		idName := "G2"
+		value := "actor.MockGrain/" + idName
+		identity, ierr := toIdentity(value)
+		require.NoError(t, ierr)
+
+		// Pre-create a process that is not active and not registered
+		pid := newGrainPID(identity, NewMockGrain(), sys, newGrainConfig())
+		sys.(*actorSystem).grains.Set(identity.String(), pid)
+
+		grain := &internalpb.Grain{
+			GrainId: &internalpb.GrainId{
+				Kind:  identity.Kind(),
+				Name:  identity.Name(),
+				Value: identity.String(),
+			},
+			ActivationTimeout: durationpb.New(1 * time.Second),
+			ActivationRetries: 1,
+		}
+
+		err = sys.(*actorSystem).recreateGrain(ctx, grain)
+		require.NoError(t, err)
+
+		// Should be registered now and activated
+		require.True(t, sys.(*actorSystem).registry.Exists(pid.getGrain()))
+		gp, ok := sys.(*actorSystem).grains.Get(identity.String())
+		require.True(t, ok)
+		require.NotNil(t, gp)
+		require.True(t, gp.isActive())
+	})
+
+	t.Run("fails when dependency type not registered", func(t *testing.T) {
+		ctx := t.Context()
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, sys)
+
+		require.NoError(t, sys.Start(ctx))
+		defer func() { _ = sys.Stop(ctx) }()
+
+		// Register grain type but not dependency type
+		sys.(*actorSystem).registry.Register(NewMockGrain())
+
+		idName := "G3"
+		value := "actor.MockGrain/" + idName
+		dep := &internalpb.Dependency{ // unknown type name -> reflection.NewDependency fails
+			Id:       "dep1",
+			TypeName: "actor.UnknownDependency",
+			Bytea:    []byte("noop"),
+		}
+		grain := &internalpb.Grain{
+			GrainId:           &internalpb.GrainId{Kind: registry.Name(NewMockGrain()), Name: idName, Value: value},
+			Dependencies:      []*internalpb.Dependency{dep},
+			ActivationTimeout: durationpb.New(1 * time.Second),
+			ActivationRetries: 1,
+		}
+
+		err = sys.(*actorSystem).recreateGrain(ctx, grain)
+		require.Error(t, err)
+		require.ErrorIs(t, err, gerrors.ErrDependencyTypeNotRegistered)
+	})
+
+	t.Run("fails when dependency id invalid", func(t *testing.T) {
+		ctx := t.Context()
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, sys)
+
+		require.NoError(t, sys.Start(ctx))
+		defer func() { _ = sys.Stop(ctx) }()
+
+		// Register grain and dependency types so decode works
+		sys.(*actorSystem).registry.Register(NewMockGrain())
+		sys.(*actorSystem).registry.Register(new(MockDependency))
+
+		// Create dependency with invalid ID (violates ID validator)
+		bad := NewMockDependency("$omeN@me", "user", "email")
+		bytea, mErr := bad.MarshalBinary()
+		require.NoError(t, mErr)
+
+		idName := "G4"
+		value := "actor.MockGrain/" + idName
+		dep := &internalpb.Dependency{
+			Id:       bad.ID(),
+			TypeName: registry.Name(bad),
+			Bytea:    bytea,
+		}
+		grain := &internalpb.Grain{
+			GrainId:           &internalpb.GrainId{Kind: registry.Name(NewMockGrain()), Name: idName, Value: value},
+			Dependencies:      []*internalpb.Dependency{dep},
+			ActivationTimeout: durationpb.New(1 * time.Second),
+			ActivationRetries: 1,
+		}
+
+		err = sys.(*actorSystem).recreateGrain(ctx, grain)
+		require.Error(t, err)
+	})
+}
+
+// nolint
+func TestEnsureGrainProcess(t *testing.T) {
+	t.Run("returns existing process when registered", func(t *testing.T) {
+		ctx := t.Context()
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, sys)
+		require.NoError(t, sys.Start(ctx))
+		defer func() { _ = sys.Stop(ctx) }()
+
+		// Register the grain type so reflection.Exists returns true
+		sys.(*actorSystem).registry.Register(NewMockGrain())
+
+		id := newGrainIdentity(NewMockGrain(), "g1")
+		pid := newGrainPID(id, NewMockGrain(), sys, newGrainConfig())
+		sys.(*actorSystem).grains.Set(id.String(), pid)
+
+		got, e := sys.(*actorSystem).ensureGrainProcess(id)
+		require.NoError(t, e)
+		require.NotNil(t, got)
+		require.Equal(t, pid, got)
+
+		// still present
+		_, ok := sys.(*actorSystem).grains.Get(id.String())
+		require.True(t, ok)
+	})
+
+	t.Run("deletes and errors when process grain type not registered", func(t *testing.T) {
+		ctx := t.Context()
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, sys)
+		require.NoError(t, sys.Start(ctx))
+		defer func() { _ = sys.Stop(ctx) }()
+
+		// Do NOT register the grain type
+		id := newGrainIdentity(NewMockGrain(), "g2")
+		pid := newGrainPID(id, NewMockGrain(), sys, newGrainConfig())
+		sys.(*actorSystem).grains.Set(id.String(), pid)
+
+		got, e := sys.(*actorSystem).ensureGrainProcess(id)
+		require.Error(t, e)
+		require.ErrorIs(t, e, gerrors.ErrGrainNotRegistered)
+		require.Nil(t, got)
+
+		// entry should be removed
+		_, ok := sys.(*actorSystem).grains.Get(id.String())
+		require.False(t, ok)
+	})
+
+	t.Run("returns nil,nil when process not found", func(t *testing.T) {
+		ctx := t.Context()
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, sys)
+		require.NoError(t, sys.Start(ctx))
+		defer func() { _ = sys.Stop(ctx) }()
+
+		id := newGrainIdentity(NewMockGrain(), "missing")
+		got, e := sys.(*actorSystem).ensureGrainProcess(id)
+		require.NoError(t, e)
+		require.Nil(t, got)
 	})
 }
