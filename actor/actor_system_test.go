@@ -258,12 +258,8 @@ func TestActorSystem(t *testing.T) {
 		require.Nil(t, addr)
 		require.Nil(t, pid)
 
-		t.Cleanup(
-			func() {
-				err = newActorSystem.Stop(ctx)
-				assert.NoError(t, err)
-			},
-		)
+		err = newActorSystem.Stop(ctx)
+		require.NoError(t, err)
 	})
 	t.Run("With ActorOf:remoting not enabled", func(t *testing.T) {
 		ctx := context.TODO()
@@ -287,12 +283,8 @@ func TestActorSystem(t *testing.T) {
 		// stop the actor after some time
 		pause.For(time.Second)
 
-		t.Cleanup(
-			func() {
-				err = sys.Stop(ctx)
-				assert.NoError(t, err)
-			},
-		)
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
 	})
 	t.Run("With ActorOf: not found", func(t *testing.T) {
 		ctx := context.TODO()
@@ -347,6 +339,39 @@ func TestActorSystem(t *testing.T) {
 		require.Nil(t, addr)
 		require.Nil(t, pid)
 	})
+	t.Run("ActorOf returns error when actor is stopping", func(t *testing.T) {
+		ctx := context.TODO()
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		err := actorSystem.Start(ctx)
+		assert.NoError(t, err)
+
+		actorName := "actorQA"
+		actor := NewMockActor()
+		actorRef, err := actorSystem.Spawn(ctx, actorName, actor)
+		assert.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		// initiate stopping of the actor
+		actorRef.stopping.Store(true)
+
+		addr, pid, err := actorSystem.ActorOf(ctx, actorName)
+		require.Error(t, err)
+		require.ErrorIs(t, err, gerrors.ErrActorNotFound)
+		require.Nil(t, pid)
+		require.Nil(t, addr)
+
+		// reset the stopping flag for cleanup
+		actorRef.stopping.Store(false)
+
+		// stop the actor after some time
+		pause.For(time.Second)
+
+		err = actorSystem.Stop(ctx)
+		assert.NoError(t, err)
+	})
+
 	t.Run("With ReSpawn", func(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
@@ -2227,6 +2252,37 @@ func TestActorSystem(t *testing.T) {
 		require.Error(t, err)
 		require.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
 		require.False(t, exists)
+	})
+	t.Run("With ActorExists when actor is stopping", func(t *testing.T) {
+		ctx := context.TODO()
+		actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		err = actorSystem.Start(ctx)
+		require.NoError(t, err)
+
+		// pause for some time. This is an abitrary wait to ensure the actor system is started
+		pause.For(300 * time.Millisecond)
+		actorName := "test"
+		actor := NewMockActor()
+		pid, err := actorSystem.Spawn(ctx, actorName, actor, WithLongLived())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		exists, err := actorSystem.ActorExists(ctx, actorName)
+		require.NoError(t, err)
+		require.True(t, exists)
+
+		// let us fake the actor stopping
+		pid.stopping.Store(true)
+
+		exists, err = actorSystem.ActorExists(ctx, actorName)
+		require.NoError(t, err)
+		require.False(t, exists)
+
+		// reset the stopping flag
+		pid.stopping.Store(false)
+
+		require.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("When trySyncPeersState failed due to get peers failure", func(t *testing.T) {
 		ctx := context.TODO()
