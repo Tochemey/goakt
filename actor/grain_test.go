@@ -1352,3 +1352,90 @@ func TestEnsureGrainProcess(t *testing.T) {
 		require.Nil(t, got)
 	})
 }
+
+// nolint
+func TestRemoteActivateGrain_Failures(t *testing.T) {
+	t.Run("remoting disabled", func(t *testing.T) {
+		ctx := t.Context()
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, sys)
+
+		// Remoting is disabled by default (no WithRemote)
+		grain := &internalpb.Grain{
+			GrainId: &internalpb.GrainId{Value: "actor.MockGrain/g1"},
+			Host:    "127.0.0.1",
+			Port:    12345,
+		}
+
+		_, rerr := sys.(*actorSystem).RemoteActivateGrain(ctx, connect.NewRequest(&internalpb.RemoteActivateGrainRequest{Grain: grain}))
+		require.Error(t, rerr)
+		var cErr *connect.Error
+		require.True(t, errors.As(rerr, &cErr))
+		require.Equal(t, connect.CodeFailedPrecondition, cErr.Code())
+		u := cErr.Unwrap()
+		require.ErrorContains(t, u, gerrors.ErrRemotingDisabled.Error())
+	})
+
+	t.Run("invalid host/port", func(t *testing.T) {
+		ctx := t.Context()
+		ports := dynaport.Get(2)
+		remotingPort := ports[0]
+		wrongPort := ports[1]
+		host := "127.0.0.1"
+
+		sys, err := NewActorSystem(
+			"testSys",
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		require.NoError(t, err)
+		require.NotNil(t, sys)
+
+		// Provide a mismatching port to trigger validateRemoteHost failure
+		grain := &internalpb.Grain{
+			GrainId: &internalpb.GrainId{Value: "actor.MockGrain/g1"},
+			Host:    host,
+			Port:    int32(wrongPort),
+		}
+
+		_, rerr := sys.(*actorSystem).RemoteActivateGrain(ctx, connect.NewRequest(&internalpb.RemoteActivateGrainRequest{Grain: grain}))
+		require.Error(t, rerr)
+		var cErr *connect.Error
+		require.True(t, errors.As(rerr, &cErr))
+		require.Equal(t, connect.CodeInvalidArgument, cErr.Code())
+		u := cErr.Unwrap()
+		require.ErrorContains(t, u, gerrors.ErrInvalidHost.Error())
+	})
+
+	t.Run("recreateGrain failure (reserved name)", func(t *testing.T) {
+		ctx := t.Context()
+		ports := dynaport.Get(1)
+		remotingPort := ports[0]
+		host := "127.0.0.1"
+
+		sys, err := NewActorSystem(
+			"testSys",
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		require.NoError(t, err)
+		require.NotNil(t, sys)
+
+		// Use the system's configured host/port to pass host validation
+		cfg := sys.(*actorSystem).remoteConfig
+		grain := &internalpb.Grain{
+			GrainId: &internalpb.GrainId{Value: "GoAkt_Reserved"}, // triggers reserved name error in recreateGrain
+			Host:    cfg.BindAddr(),
+			Port:    int32(cfg.BindPort()),
+		}
+
+		_, rerr := sys.(*actorSystem).RemoteActivateGrain(ctx, connect.NewRequest(&internalpb.RemoteActivateGrainRequest{Grain: grain}))
+		require.Error(t, rerr)
+		var cErr *connect.Error
+		require.True(t, errors.As(rerr, &cErr))
+		require.Equal(t, connect.CodeInternal, cErr.Code())
+		u := cErr.Unwrap()
+		require.ErrorContains(t, u, gerrors.ErrReservedName.Error())
+	})
+}

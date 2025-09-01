@@ -243,3 +243,27 @@ func TestDiscovery(t *testing.T) {
 		assert.EqualError(t, err, discovery.ErrNotInitialized.Error())
 	})
 }
+
+func TestRegister(t *testing.T) {
+	t.Run("already registered", func(t *testing.T) {
+		provider := NewDiscovery(nil)
+		provider.initialized = atomic.NewBool(true)
+
+		err := provider.Register()
+		require.Error(t, err)
+		require.EqualError(t, err, discovery.ErrAlreadyRegistered.Error())
+	})
+
+	t.Run("in-cluster config error", func(t *testing.T) {
+		// No cluster environment present; InClusterConfig should fail
+		provider := NewDiscovery(nil)
+
+		err := provider.Register()
+		require.Error(t, err)
+		// Check error context while staying resilient to client-go message details
+		require.ErrorContains(t, err, "failed to get the in-cluster config")
+		// Ensure client is not set and not marked initialized
+		require.Nil(t, provider.client)
+		require.False(t, provider.initialized.Load())
+	})
+}
