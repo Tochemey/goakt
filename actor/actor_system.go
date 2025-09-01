@@ -1348,6 +1348,9 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *addr
 	if pidnode, ok := x.actors.node(actorAddress.String()); ok {
 		pid := pidnode.value()
 		x.locker.RUnlock()
+		if pid.IsStopping() {
+			return nil, nil, gerrors.NewErrActorNotFound(actorName)
+		}
 		return pid.Address(), pid, nil
 	}
 
@@ -1391,7 +1394,11 @@ func (x *actorSystem) ActorExists(ctx context.Context, actorName string) (bool, 
 
 	// check locally
 	actorAddress := x.actorAddress(actorName)
-	if _, ok := x.actors.node(actorAddress.String()); ok {
+	if node, ok := x.actors.node(actorAddress.String()); ok {
+		pid := node.value()
+		if pid.IsStopping() {
+			return false, nil
+		}
 		return true, nil
 	}
 

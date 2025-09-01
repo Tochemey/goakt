@@ -432,6 +432,12 @@ func (pid *PID) IsRelocatable() bool {
 	return pid.relocatable.Load()
 }
 
+// IsStopping reports whether the actor is in the process of stopping.
+// It returns true once a stop has been initiated—explicitly or via passivation—and false otherwise.
+func (pid *PID) IsStopping() bool {
+	return pid.stopping.Load() || pid.passivating.Load()
+}
+
 // PassivationStrategy returns the given actor's passivation strategy.
 func (pid *PID) PassivationStrategy() passivation.Strategy {
 	pid.fieldsLocker.RLock()
