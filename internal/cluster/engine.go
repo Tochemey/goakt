@@ -1137,7 +1137,7 @@ func (x *Engine) setupMemberlistConfig(cfg *config.Config) error {
 			Logger:             x.logger,
 			DebugEnabled:       false,
 			TLSEnabled:         true,
-			TLS:                x.tlsInfo.ServerConfig,
+			TLS:                x.tlsInfo.ClientConfig,
 		})
 		if err != nil {
 			x.logger.Errorf("Failed to create memberlist TCP transport: %v", err)

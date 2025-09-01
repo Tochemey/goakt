@@ -100,3 +100,28 @@ protogen:
     SAVE ARTIFACT gen/goakt AS LOCAL goaktpb
     SAVE ARTIFACT gen/test AS LOCAL  test/data/testpb
     SAVE ARTIFACT gen/internal AS LOCAL internal/internalpb
+
+certs:
+    FROM alpine/openssl:3.5.2
+
+    COPY --dir test/data/certs ./certs
+
+    RUN rm certs/*.key || rm certs/*.srl || rm certs/*.csr || rm certs/*.pem || rm certs/*.cert || true
+    RUN openssl genrsa -out certs/ca.key 4096
+    RUN openssl req -new -x509 -key certs/ca.key -sha256 -subj "/C=US/ST=TX/O=Opensource" -days 3650 -out certs/ca.cert
+    RUN openssl genrsa -out certs/auto.key 4096
+    RUN openssl req -new -key certs/auto.key -out certs/auto.csr -config certs/auto.conf
+    RUN openssl x509 -req -in certs/auto.csr -CA certs/ca.cert -CAkey certs/ca.key -set_serial 1 -out certs/auto.pem -days 3650 -sha256 -extfile certs/auto.conf -extensions req_ext
+    RUN openssl genrsa -out certs/auto_no_ip_san.key 4096
+    RUN openssl req -new -key certs/auto_no_ip_san.key -out certs/auto_no_ip_san.csr -config certs/auto_no_ip_san.conf
+    RUN openssl x509 -req -in certs/auto_no_ip_san.csr -CA certs/ca.cert -CAkey certs/ca.key -set_serial 2 -out certs/auto_no_ip_san.pem -days 3650 -sha256 -extfile certs/auto_no_ip_san.conf -extensions req_ext
+
+    # Client Auth
+    RUN openssl req -new -x509 -days 3650 -keyout certs/client-auth-ca.key -out certs/client-auth-ca.pem -subj "/C=TX/ST=TX/O=Opensource/CN=auto.io/emailAddress=admin@auto-rpc.org" -passout pass:test
+    RUN openssl genrsa -out certs/client-auth.key 2048
+    RUN openssl req -sha1 -key certs/client-auth.key -new -out certs/client-auth.req -subj "/C=US/ST=TX/O=Opensource/CN=client.com/emailAddress=admin@auto-rpc.org"
+    RUN openssl x509 -req -days 3650 -in certs/client-auth.req -CA certs/client-auth-ca.pem -CAkey certs/client-auth-ca.key -set_serial 3 -passin pass:test -out certs/client-auth.pem
+    RUN openssl x509 -extfile certs/client-auth.conf -extensions ssl_client -req -days 3650 -in certs/client-auth.req -CA certs/client-auth-ca.pem -CAkey certs/client-auth-ca.key -set_serial 4 -passin pass:test -out certs/client-auth.pem
+
+
+    SAVE ARTIFACT certs AS LOCAL test/data/certs

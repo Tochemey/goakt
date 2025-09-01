@@ -113,32 +113,45 @@ func TestRebalancing(t *testing.T) {
 }
 
 func TestRebalancingWithTLSEnabled(t *testing.T) {
-	t.SkipNow()
 	// create a context
 	ctx := context.TODO()
 	// start the NATS server
 	srv := startNatsServer(t)
 
 	// AutoGenerate TLS certs
-	conf := autotls.Config{
-		AutoTLS:            true,
-		ClientAuth:         tls.RequireAndVerifyClientCert,
+	serverConf := autotls.Config{
+		CaFile:           "../test/data/certs/ca.cert",
+		CertFile:         "../test/data/certs/auto.pem",
+		KeyFile:          "../test/data/certs/auto.key",
+		ClientAuthCaFile: "../test/data/certs/client-auth-ca.pem",
+		ClientAuth:       tls.RequireAndVerifyClientCert,
+	}
+	require.NoError(t, autotls.Setup(&serverConf))
+
+	clientConf := &autotls.Config{
+		CertFile:           "../test/data/certs/client-auth.pem",
+		KeyFile:            "../test/data/certs/client-auth.key",
 		InsecureSkipVerify: true,
 	}
-	require.NoError(t, autotls.Setup(&conf))
+	require.NoError(t, autotls.Setup(clientConf))
+
+	serverConfig := serverConf.ServerTLS
+	clientConfig := clientConf.ClientTLS
+	serverConfig.NextProtos = []string{"h2", "http/1.1"}
+	clientConfig.NextProtos = []string{"h2", "http/1.1"}
 
 	// create and start system cluster
-	node1, sd1 := testNATs(t, srv.Addr().String(), withTestTLS(conf))
+	node1, sd1 := testNATs(t, srv.Addr().String(), withTestTLS(serverConfig, clientConfig))
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start system cluster
-	node2, sd2 := testNATs(t, srv.Addr().String(), withTestTLS(conf))
+	node2, sd2 := testNATs(t, srv.Addr().String(), withTestTLS(serverConfig, clientConfig))
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
 	// create and start system cluster
-	node3, sd3 := testNATs(t, srv.Addr().String(), withTestTLS(conf))
+	node3, sd3 := testNATs(t, srv.Addr().String(), withTestTLS(serverConfig, clientConfig))
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 

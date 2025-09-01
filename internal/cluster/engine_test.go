@@ -26,6 +26,7 @@ package cluster
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net"
 	"strconv"
@@ -969,21 +970,34 @@ func TestMultipleNodes(t *testing.T) {
 	t.Run("With TLS", func(t *testing.T) {
 		ctx := context.TODO()
 		// AutoGenerate TLS certs
-		conf := autotls.Config{AutoTLS: true}
-		require.NoError(t, autotls.Setup(&conf))
+		serverConf := autotls.Config{
+			CaFile:           "../../test/data/certs/ca.cert",
+			CertFile:         "../../test/data/certs/auto.pem",
+			KeyFile:          "../../test/data/certs/auto.key",
+			ClientAuthCaFile: "../../test/data/certs/client-auth-ca.pem",
+			ClientAuth:       tls.RequireAndVerifyClientCert,
+		}
+		require.NoError(t, autotls.Setup(&serverConf))
+
+		clientConf := &autotls.Config{
+			CertFile:           "../../test/data/certs/client-auth.pem",
+			KeyFile:            "../../test/data/certs/client-auth.key",
+			InsecureSkipVerify: true,
+		}
+		require.NoError(t, autotls.Setup(clientConf))
 
 		// start the NATS server
 		srv := startNatsServer(t)
 
 		// create a cluster node1
-		node1, sd1 := startEngineWithTLS(t, srv.Addr().String(), conf)
+		node1, sd1 := startEngineWithTLS(t, srv.Addr().String(), serverConf.ServerTLS, clientConf.ClientTLS)
 		require.NotNil(t, node1)
 
 		// wait for the node to start properly
 		pause.For(2 * time.Second)
 
 		// create a cluster node2
-		node2, sd2 := startEngineWithTLS(t, srv.Addr().String(), conf)
+		node2, sd2 := startEngineWithTLS(t, srv.Addr().String(), serverConf.ServerTLS, clientConf.ClientTLS)
 		require.NotNil(t, node2)
 		node2Addr := node2.node.PeersAddress()
 
@@ -991,7 +1005,7 @@ func TestMultipleNodes(t *testing.T) {
 		pause.For(time.Second)
 
 		// create a cluster node3
-		node3, sd3 := startEngineWithTLS(t, srv.Addr().String(), conf)
+		node3, sd3 := startEngineWithTLS(t, srv.Addr().String(), serverConf.ServerTLS, clientConf.ClientTLS)
 		require.NotNil(t, node3)
 		require.NotNil(t, sd3)
 
@@ -1232,7 +1246,7 @@ func startEngine(t *testing.T, serverAddr string) (*Engine, discovery.Provider) 
 	return engine, provider
 }
 
-func startEngineWithTLS(t *testing.T, serverAddr string, conf autotls.Config) (*Engine, discovery.Provider) {
+func startEngineWithTLS(t *testing.T, serverAddr string, server, client *tls.Config) (*Engine, discovery.Provider) {
 	// create a context
 	ctx := context.TODO()
 
@@ -1270,8 +1284,8 @@ func startEngineWithTLS(t *testing.T, serverAddr string, conf autotls.Config) (*
 	// create the node
 	engine, err := NewEngine(actorSystemName, provider, &hostNode,
 		WithTLS(&gtls.Info{
-			ClientConfig: conf.ClientTLS,
-			ServerConfig: conf.ServerTLS,
+			ClientConfig: client,
+			ServerConfig: server,
 		}),
 		WithLogger(log.DiscardLogger))
 	require.NoError(t, err)
