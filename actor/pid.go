@@ -1664,7 +1664,13 @@ func (pid *PID) freeChildren(ctx context.Context) error {
 				node.descendants.Delete(child.ID())
 				if child.IsSuspended() || child.IsRunning() {
 					if err := child.Shutdown(ctx); err != nil {
-						return fmt.Errorf("parent=(%s) failed to disown descendant=(%s): %w", pid.Name(), child.Name(), err)
+						// only return error when the actor is not dead
+						// because if the actor is dead it means that
+						// it has been stopped or passivated already
+						// this can happen due to timing issue
+						if !errors.Is(err, gerrors.ErrDead) {
+							return fmt.Errorf("parent=(%s) failed to disown descendant=(%s): %w", pid.Name(), child.Name(), err)
+						}
 					}
 					logger.Debugf("parent=(%s) successfully disown descendant=(%s)", pid.Name(), child.Name())
 				}
