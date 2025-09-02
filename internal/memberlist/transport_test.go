@@ -80,14 +80,28 @@ func TestTCPTransport(t *testing.T) {
 	t.Run("NewTCPTransport with TLS", func(t *testing.T) {
 		host := "127.0.0.1"
 		ports := dynaport.Get(1)
-		// AutoGenerate TLS certs
-		conf := autotls.Config{AutoTLS: true}
-		require.NoError(t, autotls.Setup(&conf))
+		serverConf := autotls.Config{
+			CaFile:           "../../test/data/certs/ca.cert",
+			CertFile:         "../../test/data/certs/auto.pem",
+			KeyFile:          "../../test/data/certs/auto.key",
+			ClientAuthCaFile: "../../test/data/certs/client-auth-ca.pem",
+			ClientAuth:       tls.RequireAndVerifyClientCert,
+		}
+
+		require.NoError(t, autotls.Setup(&serverConf))
+
+		clientConf := &autotls.Config{
+			CertFile:           "../../test/data/certs/client-auth.pem",
+			KeyFile:            "../../test/data/certs/client-auth.key",
+			InsecureSkipVerify: true,
+		}
+		require.NoError(t, autotls.Setup(clientConf))
+
 		transport, err := NewTransport(TransportConfig{
 			BindAddrs:  []string{host},
 			BindPort:   ports[0],
 			TLSEnabled: true,
-			TLS:        conf.ServerTLS,
+			TLS:        clientConf.ClientTLS,
 		})
 		require.NoError(t, err)
 		require.NotNil(t, transport)
