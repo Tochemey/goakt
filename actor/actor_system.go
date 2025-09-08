@@ -1539,14 +1539,20 @@ func (x *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[in
 		}
 
 		addr := address.From(receiver)
-		pidNode, exist := x.actors.node(addr.String())
+		node, exist := x.actors.node(addr.String())
 		if !exist {
 			err := gerrors.NewErrAddressNotFound(addr.String())
 			logger.Error(err.Error())
 			return nil, err
 		}
 
-		pid := pidNode.value()
+		pid := node.value()
+		if !pid.IsRunning() {
+			err := gerrors.NewErrRemoteSendFailure(gerrors.ErrDead)
+			logger.Error(err.Error())
+			return nil, err
+		}
+
 		reply, err := x.handleRemoteAsk(ctx, pid, message, timeout)
 		if err != nil {
 			err := gerrors.NewErrRemoteSendFailure(err)
@@ -1573,14 +1579,20 @@ func (x *actorSystem) RemoteTell(ctx context.Context, request *connect.Request[i
 	for _, message := range req.GetRemoteMessages() {
 		receiver := message.GetReceiver()
 		addr := address.From(receiver)
-		pidNode, exist := x.actors.node(addr.String())
+		node, exist := x.actors.node(addr.String())
 		if !exist {
 			err := gerrors.NewErrAddressNotFound(addr.String())
 			logger.Error(err)
 			return nil, err
 		}
 
-		pid := pidNode.value()
+		pid := node.value()
+		if !pid.IsRunning() {
+			err := gerrors.NewErrRemoteSendFailure(gerrors.ErrDead)
+			logger.Error(err.Error())
+			return nil, err
+		}
+
 		if err := x.handleRemoteTell(ctx, pid, message); err != nil {
 			err := gerrors.NewErrRemoteSendFailure(err)
 			logger.Error(err)
@@ -1928,12 +1940,42 @@ func (x *actorSystem) validate() error {
 // handleRemoteAsk handles a synchronous message to another actor and expect a response.
 // This block until a response is received or timed out.
 func (x *actorSystem) handleRemoteAsk(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error) {
-	return Ask(ctx, to, message, timeout)
+	receiveContext, err := toReceiveContext(ctx, x.NoSender(), to, message, false)
+	if err != nil {
+		return nil, err
+	}
+
+	to.doReceive(receiveContext)
+	timer := timers.Get(timeout)
+
+	// await patiently to receive the response from the actor
+	// or wait for the context to be done
+	select {
+	case response = <-receiveContext.response:
+		timers.Put(timer)
+		return
+	case <-ctx.Done():
+		err = errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
+		to.handleReceivedError(receiveContext, err)
+		timers.Put(timer)
+		return nil, err
+	case <-timer.C:
+		err = gerrors.ErrRequestTimeout
+		to.handleReceivedError(receiveContext, err)
+		timers.Put(timer)
+		return
+	}
 }
 
 // handleRemoteTell handles an asynchronous message to an actor
 func (x *actorSystem) handleRemoteTell(ctx context.Context, to *PID, message proto.Message) error {
-	return Tell(ctx, to, message)
+	receiveContext, err := toReceiveContext(ctx, x.NoSender(), to, message, true)
+	if err != nil {
+		return err
+	}
+
+	to.doReceive(receiveContext)
+	return nil
 }
 
 // getRootGuardian returns the system rootGuardian guardian
