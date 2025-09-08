@@ -43,7 +43,7 @@ func Ask(ctx context.Context, to *PID, message proto.Message, timeout time.Durat
 		return nil, gerrors.ErrDead
 	}
 
-	receiveContext, err := toReceiveContext(ctx, to, message, false)
+	receiveContext, err := toReceiveContext(ctx, to.ActorSystem().NoSender(), to, message, false)
 	if err != nil {
 		return nil, err
 	}
@@ -76,7 +76,7 @@ func Tell(ctx context.Context, to *PID, message proto.Message) error {
 		return gerrors.ErrDead
 	}
 
-	receiveContext, err := toReceiveContext(ctx, to, message, true)
+	receiveContext, err := toReceiveContext(ctx, to.ActorSystem().NoSender(), to, message, true)
 	if err != nil {
 		return err
 	}
@@ -115,20 +115,18 @@ func BatchAsk(ctx context.Context, to *PID, timeout time.Duration, messages ...p
 }
 
 // toReceiveContext creates a ReceiveContext provided a message and a receiver
-func toReceiveContext(ctx context.Context, to *PID, message proto.Message, async bool) (*ReceiveContext, error) {
+func toReceiveContext(ctx context.Context, from, to *PID, message proto.Message, async bool) (*ReceiveContext, error) {
 	receiveContext := getContext()
-	noSender := to.ActorSystem().NoSender()
-
 	switch msg := message.(type) {
 	case *internalpb.RemoteMessage:
 		actual, err := msg.GetMessage().UnmarshalNew()
 		if err != nil {
 			return nil, gerrors.NewErrInvalidRemoteMessage(err)
 		}
-		receiveContext.build(ctx, noSender, to, actual, async)
+		receiveContext.build(ctx, from, to, actual, async)
 		return receiveContext.withRemoteSender(address.From(msg.GetSender())), nil
 	default:
-		receiveContext.build(ctx, noSender, to, message, async)
+		receiveContext.build(ctx, from, to, message, async)
 		return receiveContext.withRemoteSender(address.NoSender()), nil
 	}
 }
