@@ -31,6 +31,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
@@ -38,6 +39,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
@@ -80,8 +82,7 @@ func TestAsk(t *testing.T) {
 
 		err = sys.Stop(ctx)
 		require.NoError(t, err)
-	},
-	)
+	})
 	t.Run("With stopped actor", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
@@ -123,9 +124,8 @@ func TestAsk(t *testing.T) {
 
 		err = sys.Stop(ctx)
 		require.NoError(t, err)
-	},
-	)
-	t.Run("With context canceled or timed out", func(t *testing.T) {
+	})
+	t.Run("With context canceled", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// define the logger to use
@@ -156,7 +156,7 @@ func TestAsk(t *testing.T) {
 		cancelCtx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
 		defer cancel()
 		// send the message to the actor
-		reply, err := Ask(cancelCtx, actorRef, message, replyTimeout)
+		reply, err := Ask(cancelCtx, actorRef, message, 2*time.Second)
 		// perform some assertions
 		require.Error(t, err)
 		assert.ErrorIs(t, err, errors.ErrRequestTimeout)
@@ -164,8 +164,7 @@ func TestAsk(t *testing.T) {
 
 		err = sys.Stop(ctx)
 		require.NoError(t, err)
-	},
-	)
+	})
 	t.Run("With request timeout", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
@@ -195,7 +194,7 @@ func TestAsk(t *testing.T) {
 		// create a message to send to the test actor
 		message := new(testpb.TestTimeout)
 		// send the message to the actor
-		reply, err := Ask(ctx, actorRef, message, replyTimeout)
+		reply, err := Ask(ctx, actorRef, message, 100*time.Millisecond)
 		// perform some assertions
 		require.Error(t, err)
 		assert.ErrorIs(t, err, errors.ErrRequestTimeout)
@@ -203,8 +202,7 @@ func TestAsk(t *testing.T) {
 
 		err = sys.Stop(ctx)
 		require.NoError(t, err)
-	},
-	)
+	})
 	t.Run("With invalid remote message", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
@@ -245,8 +243,7 @@ func TestAsk(t *testing.T) {
 
 		err = sys.Stop(ctx)
 		require.NoError(t, err)
-	},
-	)
+	})
 	t.Run("With Batch request happy path", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
@@ -289,8 +286,7 @@ func TestAsk(t *testing.T) {
 
 		err = sys.Stop(ctx)
 		require.NoError(t, err)
-	},
-	)
+	})
 	t.Run("With Batch request with timeout", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
@@ -331,8 +327,7 @@ func TestAsk(t *testing.T) {
 
 		err = sys.Stop(ctx)
 		require.NoError(t, err)
-	},
-	)
+	})
 	t.Run("With Batch request with dead actor", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
@@ -371,8 +366,39 @@ func TestAsk(t *testing.T) {
 
 		err = sys.Stop(ctx)
 		require.NoError(t, err)
-	},
-	)
+	})
+
+	t.Run("With actor not ready", func(t *testing.T) {
+		ctx := context.TODO()
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemote(remote.NewConfig(host, ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		pause.For(time.Second)
+
+		// create the actor path
+		pid, err := actorSystem.Spawn(ctx, "test", NewMockActor())
+		require.NoError(t, err)
+		assert.NotNil(t, pid)
+
+		// stop the actor
+		err = pid.Shutdown(ctx)
+		assert.NoError(t, err)
+
+		actual, err := Ask(ctx, pid, new(testpb.TestReply), replyTimeout)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, errors.ErrDead)
+		assert.Nil(t, actual)
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
 }
 
 func TestTell(t *testing.T) {

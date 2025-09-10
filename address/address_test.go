@@ -30,6 +30,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/tochemey/goakt/v3/goaktpb"
 )
 
 func TestAddress(t *testing.T) {
@@ -116,6 +118,39 @@ func TestAddress(t *testing.T) {
 		err := addr.Validate()
 		assert.Error(t, err)
 	})
+
+	t.Run("Equals returns false when to be compared to is nil", func(t *testing.T) {
+		addr := New("name", "system", "host", 1234)
+		assert.False(t, addr.Equals(nil))
+	})
+
+	t.Run("With Parent", func(t *testing.T) {
+		parent := New("parent", "system", "host", 1234)
+		child := New("child", "system", "host", 1234).WithParent(parent)
+		assert.NotNil(t, child.Parent())
+		assert.True(t, child.Parent().Equals(parent))
+		assert.True(t, proto.Equal(child.Parent(), parent.Address))
+	})
+
+	t.Run("From protobuf address", func(t *testing.T) {
+		protoAddr := &goaktpb.Address{
+			Name:   "name",
+			System: "system",
+			Host:   "host",
+			Port:   1234,
+			Id:     "id",
+			Parent: zeroAddress,
+		}
+		addr := From(protoAddr)
+		assert.NotNil(t, addr)
+		assert.Equal(t, "name", addr.Name())
+		assert.Equal(t, "system", addr.System())
+		assert.Equal(t, "host", addr.Host())
+		assert.EqualValues(t, 1234, addr.Port())
+		assert.Equal(t, "id", addr.ID())
+		assert.NotNil(t, addr.Parent())
+		assert.True(t, proto.Equal(addr.Parent(), zeroAddress))
+	})
 }
 
 func TestParseAddress(t *testing.T) {
@@ -153,6 +188,27 @@ func TestParseAddress(t *testing.T) {
 
 	t.Run("Invalid port", func(t *testing.T) {
 		addrStr := "goakt://system@host:invalid_port/name"
+		addr, err := Parse(addrStr)
+		assert.Error(t, err)
+		assert.Nil(t, addr)
+	})
+
+	t.Run("Empty address string", func(t *testing.T) {
+		addrStr := ""
+		addr, err := Parse(addrStr)
+		assert.Error(t, err)
+		assert.Nil(t, addr)
+	})
+
+	t.Run("Address with no port", func(t *testing.T) {
+		addrStr := "goakt://system@host/name"
+		addr, err := Parse(addrStr)
+		assert.Error(t, err)
+		assert.Nil(t, addr)
+	})
+
+	t.Run("Address with no host and port", func(t *testing.T) {
+		addrStr := "goakt://system"
 		addr, err := Parse(addrStr)
 		assert.Error(t, err)
 		assert.Nil(t, addr)
