@@ -142,17 +142,17 @@ func (a *Address) ID() string {
 // `protocol://system@host:port/name`
 func (a *Address) String() string {
 	buf := bytes.NewBuffer(nil)
-	buf.WriteString(protocol)
-	buf.WriteString("://")
-	buf.WriteString(a.GetSystem())
-	buf.WriteByte('@')
+	_, _ = buf.WriteString(protocol)
+	_, _ = buf.WriteString("://")
+	_, _ = buf.WriteString(a.GetSystem())
+	_ = buf.WriteByte('@')
 
 	// write the host and port to the bytes buffer
-	buf.WriteString(a.GetHost())
-	buf.WriteByte(':')
-	buf.WriteString(strconv.Itoa(int(a.GetPort())))
-	buf.WriteString("/")
-	buf.WriteString(a.GetName())
+	_, _ = buf.WriteString(a.GetHost())
+	_ = buf.WriteByte(':')
+	_, _ = buf.WriteString(strconv.Itoa(int(a.GetPort())))
+	_, _ = buf.WriteString("/")
+	_, _ = buf.WriteString(a.GetName())
 
 	// returns the constructed string value
 	return buf.String()
@@ -164,9 +164,9 @@ func (a *Address) HostPort() string {
 	// create a bytes buffer instance
 	buf := bytes.NewBuffer(nil)
 	// write the host and port value
-	buf.WriteString(a.GetHost())
-	buf.WriteByte(':')
-	buf.WriteString(strconv.Itoa(int(a.GetPort())))
+	_, _ = buf.WriteString(a.GetHost())
+	_ = buf.WriteByte(':')
+	_, _ = buf.WriteString(strconv.Itoa(int(a.GetPort())))
 	// return the constructed string
 	return buf.String()
 }

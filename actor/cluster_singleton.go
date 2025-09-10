@@ -48,7 +48,7 @@ type clusterSingletonManager struct {
 // ensure clusterSingleton implements the Actor interface
 var _ Actor = (*clusterSingletonManager)(nil)
 
-// newClusterSingletonManager creates a new cluster singleton actor.
+// newClusterSingletonManager creates a new cluster singleton manager.
 func newClusterSingletonManager() Actor {
 	return &clusterSingletonManager{}
 }
@@ -60,11 +60,9 @@ func (x *clusterSingletonManager) PreStart(*Context) error {
 
 // Receive handles messages received by the cluster singleton.
 func (x *clusterSingletonManager) Receive(ctx *ReceiveContext) {
-	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	// handle PostStart message
+	if _, ok := ctx.Message().(*goaktpb.PostStart); ok {
 		x.handlePostStart(ctx)
-	default:
-		ctx.Unhandled()
 	}
 }
 

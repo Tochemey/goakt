@@ -201,6 +201,12 @@ func TestTopicActor(t *testing.T) {
 
 		pause.For(time.Second)
 
+		// let's re-publish the same message, this should be ignored
+		err = publisher.Tell(ctx, cl1.TopicActor(), message)
+		require.NoError(t, err)
+
+		pause.For(time.Second)
+
 		// make sure we receive the subscribe ack message
 		require.EqualValues(t, 2, actor1.Actor().(*MockSubscriber).counter.Load())
 		require.EqualValues(t, 2, actor2.Actor().(*MockSubscriber).counter.Load())
