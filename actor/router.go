@@ -30,6 +30,7 @@ import (
 	"reflect"
 	"sync/atomic"
 
+	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/log"
 )
@@ -147,7 +148,8 @@ func (x *router) broadcast(ctx *ReceiveContext) {
 	case *goaktpb.Broadcast:
 		message = msg
 	case *goaktpb.Terminated:
-		delete(x.routeesMap, msg.GetActorId())
+		actorID := address.From(msg.GetAddress()).String()
+		delete(x.routeesMap, actorID)
 		return
 	default:
 		ctx.Unhandled()

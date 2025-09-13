@@ -317,7 +317,7 @@ func TestReceiveContext(t *testing.T) {
 		// get the address of the exchanger actor one
 		addr1 := context.RemoteLookup(host, remotingPort, actorName2)
 		// send the message to t exchanger actor one using remote messaging
-		reply := context.RemoteAsk(address.From(addr1), new(testpb.TestReply), time.Minute)
+		reply := context.RemoteAsk(addr1, new(testpb.TestReply), time.Minute)
 		// perform some assertions
 		require.NotNil(t, reply)
 		require.True(t, reply.MessageIs(new(testpb.Reply)))
@@ -445,7 +445,7 @@ func TestReceiveContext(t *testing.T) {
 		// get the address of the exchanger actor one
 		addr1 := context.RemoteLookup(host, remotingPort, actorName2)
 		// send the message to t exchanger actor one using remote messaging
-		context.RemoteTell(address.From(addr1), new(testpb.TestRemoteSend))
+		context.RemoteTell(addr1, new(testpb.TestRemoteSend))
 		require.NoError(t, context.getError())
 		pause.For(time.Second)
 
@@ -571,7 +571,9 @@ func TestReceiveContext(t *testing.T) {
 			self:    pid1,
 		}
 
-		require.Nil(t, context.RemoteLookup(host, remotingPort, actorName2))
+		addr := context.RemoteLookup(host, remotingPort, actorName2)
+		require.NotNil(t, addr)
+		require.True(t, addr.Equals(address.NoSender()))
 
 		pause.For(time.Second)
 
@@ -1643,7 +1645,7 @@ func TestReceiveContext(t *testing.T) {
 		testerAddr := context.RemoteLookup(host, remotingPort, tester)
 		// send the message to t exchanger actor one using remote messaging
 		messages := []proto.Message{new(testpb.TestSend), new(testpb.TestSend), new(testpb.TestSend)}
-		context.RemoteBatchTell(address.From(testerAddr), messages)
+		context.RemoteBatchTell(testerAddr, messages)
 		require.NoError(t, context.getError())
 		// wait for processing to complete on the actor side
 		pause.For(500 * time.Millisecond)
@@ -1699,7 +1701,7 @@ func TestReceiveContext(t *testing.T) {
 		testerAddr := context.RemoteLookup(host, remotingPort, tester)
 		// send the message to t exchanger actor one using remote messaging
 		messages := []proto.Message{new(testpb.TestReply), new(testpb.TestReply), new(testpb.TestReply)}
-		replies := context.RemoteBatchAsk(address.From(testerAddr), messages, time.Minute)
+		replies := context.RemoteBatchAsk(testerAddr, messages, time.Minute)
 		require.NoError(t, context.getError())
 		require.Len(t, replies, 3)
 		pause.For(time.Second)
@@ -1753,7 +1755,7 @@ func TestReceiveContext(t *testing.T) {
 		testerAddr := context.RemoteLookup(host, remotingPort, tester)
 		// send the message to t exchanger actor one using remote messaging
 		messages := []proto.Message{new(testpb.TestReply), new(testpb.TestReply), new(testpb.TestReply)}
-		replies := context.RemoteBatchAsk(address.From(testerAddr), messages, time.Minute)
+		replies := context.RemoteBatchAsk(testerAddr, messages, time.Minute)
 		err = context.getError()
 		require.Error(t, err)
 		require.Empty(t, replies)
@@ -1870,7 +1872,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// send the message to t exchanger actor one using remote messaging
 		messages := []proto.Message{new(testpb.TestSend), new(testpb.TestSend), new(testpb.TestSend)}
-		context.RemoteBatchTell(address.From(testerAddr), messages)
+		context.RemoteBatchTell(testerAddr, messages)
 		err = context.getError()
 		require.Error(t, err)
 		assert.ErrorIs(t, err, errors.ErrRemotingDisabled)

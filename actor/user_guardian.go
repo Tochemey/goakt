@@ -25,6 +25,7 @@
 package actor
 
 import (
+	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/log"
 )
@@ -59,7 +60,8 @@ func (x *userGuardian) Receive(ctx *ReceiveContext) {
 		x.logger = ctx.Logger()
 		x.logger.Infof("%s started successfully", x.pid.Name())
 	case *goaktpb.Terminated:
-		x.logger.Debugf("%s received a terminated actor=(%s)", x.pid.Name(), msg.GetActorId())
+		actorID := address.From(msg.GetAddress()).String()
+		x.logger.Debugf("%s received a terminated actor=(%s)", x.pid.Name(), actorID)
 		// pass
 	default:
 		ctx.Unhandled()

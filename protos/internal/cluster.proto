@@ -36,7 +36,7 @@ message GetKindsResponse {
   repeated string kinds = 1;
 }
 
-message Disseminate {
+message TopicMessage {
   // Specifies the message unique id
   string id = 1;
   // Specifies the topic

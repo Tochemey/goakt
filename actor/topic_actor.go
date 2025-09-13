@@ -31,6 +31,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
+	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
@@ -97,8 +98,8 @@ func (x *topicActor) Receive(ctx *ReceiveContext) {
 		x.handleUnsubscribe(ctx)
 	case *goaktpb.Publish:
 		x.handlePublish(ctx)
-	case *internalpb.Disseminate:
-		x.handleDisseminate(ctx)
+	case *internalpb.TopicMessage:
+		x.handleTopicMessage(ctx)
 	case *goaktpb.Terminated:
 		x.handleTerminated(msg)
 	default:
@@ -225,7 +226,7 @@ func (x *topicActor) sendToRemoteSubscribers(cctx context.Context, remotePeers [
 					return
 				}
 
-				toSend := &internalpb.Disseminate{
+				toSend := &internalpb.TopicMessage{
 					Id:      messageID,
 					Topic:   topic,
 					Message: message,
@@ -252,7 +253,8 @@ func (x *topicActor) sendToRemoteSubscribers(cctx context.Context, remotePeers [
 func (x *topicActor) handleTerminated(msg *goaktpb.Terminated) {
 	for topic, subscribers := range x.topics.Values() {
 		// remove the subscriber from the topics
-		if subscriber, ok := subscribers.Get(msg.GetActorId()); ok {
+		actorID := address.From(msg.GetAddress()).String()
+		if subscriber, ok := subscribers.Get(actorID); ok {
 			subscribers.Delete(subscriber.ID())
 			x.logger.Debugf("removed actor %s from topic %s", subscriber.Name(), topic)
 		}
@@ -302,15 +304,15 @@ func (x *topicActor) handlePostStart(ctx *ReceiveContext) {
 	x.logger.Infof("%s started successfully", x.pid.Name())
 }
 
-// handleDisseminate sends a cluster pubsub message to the local
+// handleTopicMessage sends a cluster pubsub message to the local
 // subscribers of the given message topic.
 // Disseminate message is sent by another TopicActor.
 // If we already processed the message we discard it.
-func (x *topicActor) handleDisseminate(ctx *ReceiveContext) {
-	if disseminate, ok := ctx.Message().(*internalpb.Disseminate); ok {
-		topic := disseminate.GetTopic()
-		message, _ := disseminate.GetMessage().UnmarshalNew()
-		messageID := disseminate.GetId()
+func (x *topicActor) handleTopicMessage(ctx *ReceiveContext) {
+	if topicMessage, ok := ctx.Message().(*internalpb.TopicMessage); ok {
+		topic := topicMessage.GetTopic()
+		message, _ := topicMessage.GetMessage().UnmarshalNew()
+		messageID := topicMessage.GetId()
 		senderID := ctx.RemoteSender().ID()
 
 		id := key{

@@ -87,7 +87,7 @@ func (x *systemGuardian) handlePostStart(ctx *ReceiveContext) {
 
 // handleTerminated handles Terminated message
 func (x *systemGuardian) handleTerminated(ctx context.Context, msg *goaktpb.Terminated) {
-	actorID := msg.GetActorId()
+	actorID := address.From(msg.GetAddress()).String()
 	systemName := x.system.Name()
 	addr, _ := address.Parse(actorID)
 	actorName := addr.Name()

@@ -34,13 +34,11 @@ import (
 	"sync"
 	"time"
 
-	"connectrpc.com/connect"
 	"github.com/flowchartsman/retry"
 	"go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
-	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/tochemey/goakt/v3/address"
@@ -219,7 +217,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	pid.startSupervision()
 	pid.startPassivation()
 
-	if err := pid.checkBootstrap(ctx); err != nil {
+	if err := pid.healthCheck(ctx); err != nil {
 		return nil, err
 	}
 
@@ -564,7 +562,7 @@ func (pid *PID) Restart(ctx context.Context) error {
 	pid.startSupervision()
 	pid.startPassivation()
 
-	if err := pid.checkBootstrap(ctx); err != nil {
+	if err := pid.healthCheck(ctx); err != nil {
 		return err
 	}
 
@@ -1081,30 +1079,12 @@ func (pid *PID) BatchAsk(ctx context.Context, to *PID, messages []proto.Message,
 }
 
 // RemoteLookup look for an actor address on a remote node.
-func (pid *PID) RemoteLookup(ctx context.Context, host string, port int, name string) (addr *goaktpb.Address, err error) {
+func (pid *PID) RemoteLookup(ctx context.Context, host string, port int, name string) (addr *address.Address, err error) {
 	if pid.remoting == nil {
 		return nil, gerrors.ErrRemotingDisabled
 	}
 
-	remoteClient := pid.remoting.RemotingServiceClient(host, port)
-	request := connect.NewRequest(
-		&internalpb.RemoteLookupRequest{
-			Host: host,
-			Port: int32(port),
-			Name: name,
-		},
-	)
-
-	response, err := remoteClient.RemoteLookup(ctx, request)
-	if err != nil {
-		code := connect.CodeOf(err)
-		if code == connect.CodeNotFound {
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	return response.Msg.GetAddress(), nil
+	return pid.remoting.RemoteLookup(ctx, host, port, name)
 }
 
 // RemoteTell sends a message to an actor remotely without expecting any reply
@@ -1113,32 +1093,7 @@ func (pid *PID) RemoteTell(ctx context.Context, to *address.Address, message pro
 		return gerrors.ErrRemotingDisabled
 	}
 
-	marshaled, err := anypb.New(message)
-	if err != nil {
-		return err
-	}
-
-	remoteService := pid.remoting.RemotingServiceClient(to.GetHost(), int(to.GetPort()))
-	request := connect.NewRequest(&internalpb.RemoteTellRequest{
-		RemoteMessages: []*internalpb.RemoteMessage{
-			{
-				Sender:   pid.Address().Address,
-				Receiver: to.Address,
-				Message:  marshaled,
-			},
-		},
-	})
-
-	pid.logger.Debugf("sending a message to remote=(%s:%d)", to.GetHost(), to.GetPort())
-	_, err = remoteService.RemoteTell(ctx, request)
-	if err != nil {
-		fmtErr := fmt.Errorf("failed to send message to remote=(%s:%d): %w", to.GetHost(), to.GetPort(), err)
-		pid.logger.Error(fmtErr)
-		return fmtErr
-	}
-
-	pid.logger.Debugf("message successfully sent to remote=(%s:%d)", to.GetHost(), to.GetPort())
-	return nil
+	return pid.remoting.RemoteTell(ctx, pid.Address(), to, message)
 }
 
 // RemoteAsk sends a synchronous message to another actor remotely and expect a response.
@@ -1151,36 +1106,7 @@ func (pid *PID) RemoteAsk(ctx context.Context, to *address.Address, message prot
 		return nil, gerrors.ErrInvalidTimeout
 	}
 
-	marshaled, err := anypb.New(message)
-	if err != nil {
-		return nil, err
-	}
-
-	remoteService := pid.remoting.RemotingServiceClient(to.GetHost(), int(to.GetPort()))
-	request := connect.NewRequest(&internalpb.RemoteAskRequest{
-		RemoteMessages: []*internalpb.RemoteMessage{
-			{
-				Sender:   pid.Address().Address,
-				Receiver: to.Address,
-				Message:  marshaled,
-			},
-		},
-		Timeout: durationpb.New(timeout),
-	})
-
-	resp, err := remoteService.RemoteAsk(ctx, request)
-	if err != nil {
-		return nil, err
-	}
-
-	if resp != nil {
-		for _, msg := range resp.Msg.GetMessages() {
-			response = msg
-			break
-		}
-	}
-
-	return
+	return pid.remoting.RemoteAsk(ctx, pid.Address(), to, message, timeout)
 }
 
 // RemoteBatchTell sends a batch of messages to a remote actor in a way fire-and-forget manner
@@ -1190,25 +1116,7 @@ func (pid *PID) RemoteBatchTell(ctx context.Context, to *address.Address, messag
 		return gerrors.ErrRemotingDisabled
 	}
 
-	remoteMessages := make([]*internalpb.RemoteMessage, 0, len(messages))
-	for _, message := range messages {
-		packed, err := anypb.New(message)
-		if err != nil {
-			return gerrors.NewErrInvalidRemoteMessage(err)
-		}
-
-		remoteMessages = append(remoteMessages, &internalpb.RemoteMessage{
-			Sender:   pid.Address().Address,
-			Receiver: to.Address,
-			Message:  packed,
-		})
-	}
-
-	remoteService := pid.remoting.RemotingServiceClient(to.GetHost(), int(to.GetPort()))
-	_, err := remoteService.RemoteTell(ctx, connect.NewRequest(&internalpb.RemoteTellRequest{
-		RemoteMessages: remoteMessages,
-	}))
-	return err
+	return pid.remoting.RemoteBatchTell(ctx, pid.Address(), to, messages)
 }
 
 // RemoteBatchAsk sends a synchronous bunch of messages to a remote actor and expect responses in the same order as the messages.
@@ -1219,36 +1127,7 @@ func (pid *PID) RemoteBatchAsk(ctx context.Context, to *address.Address, message
 		return nil, gerrors.ErrRemotingDisabled
 	}
 
-	remoteMessages := make([]*internalpb.RemoteMessage, 0, len(messages))
-	for _, message := range messages {
-		packed, err := anypb.New(message)
-		if err != nil {
-			return nil, gerrors.NewErrInvalidRemoteMessage(err)
-		}
-
-		remoteMessages = append(
-			remoteMessages, &internalpb.RemoteMessage{
-				Sender:   pid.Address().Address,
-				Receiver: to.Address,
-				Message:  packed,
-			})
-	}
-
-	remoteService := pid.remoting.RemotingServiceClient(to.GetHost(), int(to.GetPort()))
-	resp, err := remoteService.RemoteAsk(ctx, connect.NewRequest(&internalpb.RemoteAskRequest{
-		RemoteMessages: remoteMessages,
-		Timeout:        durationpb.New(timeout),
-	}))
-
-	if err != nil {
-		return nil, err
-	}
-
-	if resp != nil {
-		responses = append(responses, resp.Msg.GetMessages()...)
-	}
-
-	return
+	return pid.remoting.RemoteBatchAsk(ctx, pid.Address(), to, messages, timeout)
 }
 
 // RemoteStop stops an actor on a remote node
@@ -1257,54 +1136,31 @@ func (pid *PID) RemoteStop(ctx context.Context, host string, port int, name stri
 		return gerrors.ErrRemotingDisabled
 	}
 
-	remoteService := pid.remoting.RemotingServiceClient(host, port)
-	request := connect.NewRequest(
-		&internalpb.RemoteStopRequest{
-			Host: host,
-			Port: int32(port),
-			Name: name,
-		},
-	)
-
-	if _, err := remoteService.RemoteStop(ctx, request); err != nil {
-		code := connect.CodeOf(err)
-		if code == connect.CodeNotFound {
-			return nil
-		}
-		return err
-	}
-	return nil
+	return pid.remoting.RemoteStop(ctx, host, port, name)
 }
 
 // RemoteSpawn creates an actor on a remote node. The given actor needs to be registered on the remote node using the Register method of ActorSystem
-func (pid *PID) RemoteSpawn(ctx context.Context, host string, port int, name, actorType string) error {
+func (pid *PID) RemoteSpawn(ctx context.Context, host string, port int, actorName, actorType string, opts ...SpawnOption) error {
 	if pid.remoting == nil {
 		return gerrors.ErrRemotingDisabled
 	}
 
-	remoteService := pid.remoting.RemotingServiceClient(host, port)
-	request := connect.NewRequest(
-		&internalpb.RemoteSpawnRequest{
-			Host:      host,
-			Port:      int32(port),
-			ActorName: name,
-			ActorType: actorType,
-		},
-	)
-
-	if _, err := remoteService.RemoteSpawn(ctx, request); err != nil {
-		code := connect.CodeOf(err)
-		if code == connect.CodeFailedPrecondition {
-			connectErr := err.(*connect.Error)
-			e := connectErr.Unwrap()
-			// TODO: find a better way to use errors.Is with connect.Error
-			if strings.Contains(e.Error(), gerrors.ErrTypeNotRegistered.Error()) {
-				return gerrors.ErrTypeNotRegistered
-			}
-		}
+	config := newSpawnConfig(opts...)
+	if err := config.Validate(); err != nil {
 		return err
 	}
-	return nil
+
+	request := &remote.SpawnRequest{
+		Name:                actorName,
+		Kind:                actorType,
+		Singleton:           config.asSingleton,
+		Relocatable:         config.relocatable,
+		PassivationStrategy: config.passivationStrategy,
+		Dependencies:        config.dependencies,
+		EnableStashing:      config.enableStash,
+	}
+
+	return pid.remoting.RemoteSpawn(ctx, host, port, request)
 }
 
 // RemoteReSpawn restarts an actor on a remote node.
@@ -1313,23 +1169,7 @@ func (pid *PID) RemoteReSpawn(ctx context.Context, host string, port int, name s
 		return gerrors.ErrRemotingDisabled
 	}
 
-	remoteService := pid.remoting.RemotingServiceClient(host, port)
-	request := connect.NewRequest(
-		&internalpb.RemoteReSpawnRequest{
-			Host: host,
-			Port: int32(port),
-			Name: name,
-		},
-	)
-
-	if _, err := remoteService.RemoteReSpawn(ctx, request); err != nil {
-		code := connect.CodeOf(err)
-		if code == connect.CodeNotFound {
-			return nil
-		}
-		return err
-	}
-	return nil
+	return pid.remoting.RemoteReSpawn(ctx, host, port, name)
 }
 
 // Shutdown gracefully shuts down the given actor
@@ -1455,8 +1295,8 @@ func (pid *PID) process() {
 				switch msg := received.Message().(type) {
 				case *goaktpb.PoisonPill:
 					_ = pid.Shutdown(received.Context())
-				case *internalpb.ReadinessProbe:
-					pid.handleReadinessProbe(received)
+				case *internalpb.HealthCheckRequest:
+					pid.handleHealthcheck(received)
 				case *internalpb.Down:
 					pid.handleFailure(received.Sender(), msg)
 				case *goaktpb.PausePassivation:
@@ -1482,10 +1322,10 @@ func (pid *PID) process() {
 	}()
 }
 
-// handleReadinessProbe is used to handle the readiness probe messages
-func (pid *PID) handleReadinessProbe(received *ReceiveContext) {
+// handleHealthcheck is used to handle the readiness probe messages
+func (pid *PID) handleHealthcheck(received *ReceiveContext) {
 	pid.latestReceiveTime.Store(time.Now())
-	received.Response(new(internalpb.ReadinessProbe))
+	received.Response(new(internalpb.HealthCheckResponse))
 }
 
 // handleReceived picks the right behavior and processes the message
@@ -1602,7 +1442,8 @@ func (pid *PID) freeWatchers(ctx context.Context) {
 		for _, watcher := range watchers {
 			watcher := watcher
 			terminated := &goaktpb.Terminated{
-				ActorId: pid.ID(),
+				Address:      pid.Address().Address,
+				TerminatedAt: timestamppb.Now(),
 			}
 
 			if watcher.IsRunning() {
@@ -2063,7 +1904,7 @@ func (pid *PID) handleFailure(cid *PID, msg *internalpb.Down) {
 		// pass
 		case *internalpb.Down_Escalate:
 			// forward the message to the parent and suspend the actor
-			_ = cid.Tell(context.Background(), pid, &goaktpb.Mayday{
+			_ = cid.Tell(context.Background(), pid, &goaktpb.PanicSignal{
 				Reason:    msg.GetErrorMessage(),
 				Message:   msg.GetMessage(),
 				Timestamp: msg.GetTimestamp(),
@@ -2253,9 +2094,9 @@ func (pid *PID) startPassivation() {
 	}
 }
 
-// checkBootstrap is called whenever an actor is spawned to make sure it is ready and functional.
+// healthCheck is called whenever an actor is spawned to make sure it is ready and functional.
 // It has to be very fast for a smooth operation.
-func (pid *PID) checkBootstrap(ctx context.Context) error {
+func (pid *PID) healthCheck(ctx context.Context) error {
 	logger := pid.logger
 	logger.Infof("%s readiness probe...", pid.Name())
 
@@ -2264,7 +2105,7 @@ func (pid *PID) checkBootstrap(ctx context.Context) error {
 		return nil
 	}
 
-	message := new(internalpb.ReadinessProbe)
+	message := new(internalpb.HealthCheckRequest)
 	timeout := pid.initTimeout.Load()
 	numretries := pid.initMaxRetries.Load()
 	noSender := pid.ActorSystem().NoSender()
