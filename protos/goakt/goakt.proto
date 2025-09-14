@@ -121,8 +121,10 @@ message NodeLeft {
 // of the actor they were observing—for example, by cleaning up resources,
 // restarting the actor, or triggering failover behavior.
 message Terminated {
-  // The unique identifier of the actor that has been terminated.
-  string actor_id = 1;
+  // Specifies the actor address
+  Address address = 1;
+  // Specifies the reinstated time
+  google.protobuf.Timestamp terminated_at = 2;
 }
 
 // PoisonPill is a special control message used to gracefully stop an actor.
@@ -191,15 +193,15 @@ message Publish {
 // NoMessage is used to indicate that no message was sent
 message NoMessage {}
 
-// Mayday is a system-level message used in actor-based systems to notify a parent actor
+// PanicSignal is a system-level message used in actor-based systems to notify a parent actor
 // that one of its child actors has encountered a critical failure or unhandled condition.
 // This message is automatically sent when the Escalate supervision directive is invoked,
 // indicating that the issue cannot be handled at the child level.
 //
 // The child actor is suspended, and the parent actor is expected to take appropriate action.
-// Upon receiving a Mayday, the parent actor can decide how to handle the failure,
+// Upon receiving a PanicSignal, the parent actor can decide how to handle the failure,
 // such as restarting the child, stopping it, escalating further, or applying custom recovery logic.
-message Mayday {
+message PanicSignal {
   // The original message that triggered the failure. This is useful for debugging
   // or retrying the operation once the issue is resolved.
   google.protobuf.Any message = 1;
@@ -208,7 +210,7 @@ message Mayday {
   // or error condition that led to the escalation.
   string reason = 2;
 
-  // The UTC timestamp indicating when the Mayday event occurred. This helps in correlating
+  // The UTC timestamp indicating when the PanicSignal event occurred. This helps in correlating
   // logs or monitoring data for incident analysis and resolution timelines.
   google.protobuf.Timestamp timestamp = 3;
 }

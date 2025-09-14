@@ -25,6 +25,7 @@
 package actor
 
 import (
+	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/log"
 )
@@ -46,19 +47,20 @@ func newRootGuardian() *rootGuardian {
 }
 
 // PreStart pre-starts the actor.
-func (r *rootGuardian) PreStart(*Context) error {
+func (x *rootGuardian) PreStart(*Context) error {
 	return nil
 }
 
 // Receive handles message
-func (r *rootGuardian) Receive(ctx *ReceiveContext) {
+func (x *rootGuardian) Receive(ctx *ReceiveContext) {
 	switch msg := ctx.Message().(type) {
 	case *goaktpb.PostStart:
-		r.pid = ctx.Self()
-		r.logger = ctx.Logger()
-		r.logger.Infof("%s started successfully", r.pid.Name())
+		x.pid = ctx.Self()
+		x.logger = ctx.Logger()
+		x.logger.Infof("%s started successfully", x.pid.Name())
 	case *goaktpb.Terminated:
-		r.pid.logger.Debugf("%s terminated", msg.GetActorId())
+		actorID := address.From(msg.GetAddress()).String()
+		x.pid.logger.Debugf("%s terminated", actorID)
 		// TODO: decide what to do the actor
 	default:
 		// pass
@@ -66,7 +68,7 @@ func (r *rootGuardian) Receive(ctx *ReceiveContext) {
 }
 
 // PostStop is executed when the actor is shutting down.
-func (r *rootGuardian) PostStop(*Context) error {
-	r.logger.Infof("%s stopped successfully", r.pid.Name())
+func (x *rootGuardian) PostStop(*Context) error {
+	x.logger.Infof("%s stopped successfully", x.pid.Name())
 	return nil
 }

@@ -163,7 +163,7 @@ func TestReceive(t *testing.T) {
 		require.NoError(t, err)
 		require.NotEmpty(t, items)
 		deadletter := items[0]
-		require.True(t, deadletter.Message.MessageIs(&internalpb.ReadinessProbe{}))
+		require.True(t, deadletter.Message.MessageIs(&internalpb.HealthCheckRequest{}))
 
 		assert.NoError(t, err)
 		assert.NoError(t, actorSystem.Stop(ctx))
@@ -1903,7 +1903,7 @@ func TestRemoting(t *testing.T) {
 		require.NoError(t, err)
 
 		// send the message to exchanger actor one using remote messaging
-		reply, err := actorRef2.RemoteAsk(ctx, address.From(addr1), new(testpb.TestReply), replyTimeout)
+		reply, err := actorRef2.RemoteAsk(ctx, addr1, new(testpb.TestReply), replyTimeout)
 		// perform some assertions
 		require.NoError(t, err)
 		require.NotNil(t, reply)
@@ -1917,7 +1917,7 @@ func TestRemoting(t *testing.T) {
 		assert.True(t, proto.Equal(expected, actual))
 
 		// send a message to stop the first exchange actor
-		err = actorRef2.RemoteTell(ctx, address.From(addr1), new(testpb.TestRemoteSend))
+		err = actorRef2.RemoteTell(ctx, addr1, new(testpb.TestRemoteSend))
 		require.NoError(t, err)
 
 		// stop the actor after some time
@@ -1968,14 +1968,14 @@ func TestRemoting(t *testing.T) {
 
 		actorRef2.remoting = nil
 		// send the message to exchanger actor one using remote messaging
-		reply, err := actorRef2.RemoteAsk(ctx, address.From(addr1), new(testpb.TestReply), replyTimeout)
+		reply, err := actorRef2.RemoteAsk(ctx, addr1, new(testpb.TestReply), replyTimeout)
 		// perform some assertions
 		require.Error(t, err)
 		require.Nil(t, reply)
 		assert.ErrorIs(t, err, errors.ErrRemotingDisabled)
 
 		// send a message to stop the first exchange actor
-		err = actorRef2.RemoteTell(ctx, address.From(addr1), new(testpb.TestRemoteSend))
+		err = actorRef2.RemoteTell(ctx, addr1, new(testpb.TestRemoteSend))
 		require.Error(t, err)
 		assert.ErrorIs(t, err, errors.ErrRemotingDisabled)
 
@@ -2532,7 +2532,8 @@ func TestRemoteLookup(t *testing.T) {
 		actorName2 := "Exchange2"
 		addr, err := actorRef1.RemoteLookup(ctx, host, remotingPort, actorName2)
 		require.NoError(t, err)
-		require.Nil(t, addr)
+		require.NotNil(t, addr)
+		require.True(t, addr.Equals(address.NoSender()))
 
 		t.Cleanup(func() {
 			assert.NoError(t, sys.Stop(ctx))
@@ -3239,10 +3240,11 @@ func TestRemoteSpawn(t *testing.T) {
 		actor := &exchanger{}
 		actorName := uuid.NewString()
 
-		// fetching the address of the that actor should return nil address
+		// fetching the address of the that actor should return address.NoSender
 		addr, err := pid.RemoteLookup(ctx, host, remotingPort, actorName)
 		require.NoError(t, err)
-		require.Nil(t, addr)
+		require.NotNil(t, addr)
+		require.True(t, addr.Equals(address.NoSender()))
 
 		// register the actor
 		err = sys.Register(ctx, actor)
@@ -3258,7 +3260,7 @@ func TestRemoteSpawn(t *testing.T) {
 		require.NotNil(t, addr)
 
 		// send the message to exchanger actor one using remote messaging
-		reply, err := pid.RemoteAsk(ctx, address.From(addr), new(testpb.TestReply), replyTimeout)
+		reply, err := pid.RemoteAsk(ctx, addr, new(testpb.TestReply), replyTimeout)
 
 		require.NoError(t, err)
 		require.NotNil(t, reply)
@@ -3304,10 +3306,11 @@ func TestRemoteSpawn(t *testing.T) {
 		assert.NotNil(t, pid)
 
 		actorName := uuid.NewString()
-		// fetching the address of the that actor should return nil address
+		// fetching the address of the that actor should return NoSender address
 		addr, err := pid.RemoteLookup(ctx, host, remotingPort, actorName)
 		require.NoError(t, err)
-		require.Nil(t, addr)
+		require.NotNil(t, addr)
+		require.True(t, addr.Equals(address.NoSender()))
 
 		// for the sake of the test
 		require.NoError(t, sys.Deregister(ctx, &exchanger{}))
@@ -3391,10 +3394,11 @@ func TestRemoteSpawn(t *testing.T) {
 		actor := &exchanger{}
 		actorName := uuid.NewString()
 
-		// fetching the address of the that actor should return nil address
+		// fetching the address of the that actor should return NoSender address
 		addr, err := pid.RemoteLookup(ctx, host, remotingPort, actorName)
 		require.NoError(t, err)
-		require.Nil(t, addr)
+		require.NotNil(t, addr)
+		require.True(t, addr.Equals(address.NoSender()))
 
 		// register the actor
 		err = sys.Register(ctx, actor)
@@ -3412,6 +3416,55 @@ func TestRemoteSpawn(t *testing.T) {
 			err = sys.Stop(ctx)
 			assert.NoError(t, err)
 		})
+	})
+
+	t.Run("With invalid Spawn Option", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		ports := dynaport.Get(1)
+		remotingPort := ports[0]
+		host := "127.0.0.1"
+
+		// create the actor system
+		sys, err := NewActorSystem("test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		// create an actor
+		pid, err := sys.Spawn(ctx, "Exchange1", &exchanger{})
+		require.NoError(t, err)
+		assert.NotNil(t, pid)
+
+		// create an actor implementation and register it
+		actor := &exchanger{}
+		actorName := uuid.NewString()
+
+		// fetching the address of the that actor should return address.NoSender
+		addr, err := pid.RemoteLookup(ctx, host, remotingPort, actorName)
+		require.NoError(t, err)
+		require.NotNil(t, addr)
+		require.True(t, addr.Equals(address.NoSender()))
+
+		// register the actor
+		err = sys.Register(ctx, actor)
+		require.NoError(t, err)
+
+		// spawn the remote actor
+		err = pid.RemoteSpawn(ctx, host, remotingPort, actorName, "actor.exchanger", WithPassivationStrategy(&MockInvalidPassivationStrategy{}))
+		require.Error(t, err)
+
+		err = sys.Stop(ctx)
+		require.NoError(t, err)
 	})
 }
 func TestName(t *testing.T) {

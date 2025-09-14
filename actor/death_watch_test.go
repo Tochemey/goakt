@@ -34,6 +34,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/anypb"
 
+	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
@@ -132,7 +133,9 @@ func TestDeathWatch(t *testing.T) {
 		pause.For(500 * time.Millisecond)
 		pid := sys.getDeathWatch()
 
-		err = Tell(ctx, pid, &goaktpb.Terminated{ActorId: actorID})
+		addr := address.New(actorID, sys.Name(), sys.Host(), sys.Port())
+
+		err = Tell(ctx, pid, &goaktpb.Terminated{Address: addr.Address})
 		require.NoError(t, err)
 
 		pause.For(time.Second)

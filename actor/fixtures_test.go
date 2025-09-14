@@ -684,7 +684,7 @@ func (e *MockEscalation) PreStart(*Context) error {
 func (e *MockEscalation) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
-	case *goaktpb.Mayday:
+	case *goaktpb.PanicSignal:
 		ctx.Stop(ctx.Sender())
 	default:
 		ctx.Unhandled()
@@ -718,7 +718,7 @@ func (r *MockReinstate) PreStart(*Context) error {
 func (r *MockReinstate) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
-	case *goaktpb.Mayday:
+	case *goaktpb.PanicSignal:
 		actorName := ctx.Sender().Name()
 
 		if actorName == "reinstate" {

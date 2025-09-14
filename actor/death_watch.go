@@ -89,7 +89,7 @@ func (x *deathWatch) handlePostStart(ctx *ReceiveContext) {
 func (x *deathWatch) handleTerminated(ctx *ReceiveContext) error {
 	msg := ctx.Message().(*goaktpb.Terminated)
 
-	actorID := msg.GetActorId()
+	actorID := address.From(msg.GetAddress()).String()
 	addr, _ := address.Parse(actorID)
 	actorName := addr.Name()
 

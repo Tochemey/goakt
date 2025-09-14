@@ -34,7 +34,6 @@ import (
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/extension"
-	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/log"
 )
 
@@ -270,7 +269,7 @@ func (rctx *ReceiveContext) RemoteBatchAsk(to *address.Address, messages []proto
 
 // RemoteLookup look for an actor address on a remote node. If the actorSystem is nil then the lookup will be done
 // using the same actor system as the PID actor system
-func (rctx *ReceiveContext) RemoteLookup(host string, port int, name string) (addr *goaktpb.Address) {
+func (rctx *ReceiveContext) RemoteLookup(host string, port int, name string) (addr *address.Address) {
 	recipient := rctx.self
 	ctx := context.WithoutCancel(rctx.ctx)
 	remoteAddr, err := recipient.RemoteLookup(ctx, host, port, name)
