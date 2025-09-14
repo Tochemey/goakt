@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025 Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -33,7 +33,7 @@ import (
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
-func TestUnboundedPriorityMailBox(t *testing.T) {
+func TestPriorityMailBox(t *testing.T) {
 	t.Run("With highest priority mailbox", func(t *testing.T) {
 		priorityFunc := func(msg1, msg2 proto.Message) bool {
 			p1 := msg1.(*testpb.TestMessage)
@@ -42,7 +42,7 @@ func TestUnboundedPriorityMailBox(t *testing.T) {
 		}
 
 		// create an instance of the mailbox
-		mailbox := NewUnboundedPriorityMailBox(priorityFunc)
+		mailbox := NewPriorityMailBox(priorityFunc)
 		msg1 := &ReceiveContext{message: &testpb.TestMessage{Priority: 1}}
 		msg2 := &ReceiveContext{message: &testpb.TestMessage{Priority: 5}}
 		msg3 := &ReceiveContext{message: &testpb.TestMessage{Priority: 2}}
@@ -79,7 +79,7 @@ func TestUnboundedPriorityMailBox(t *testing.T) {
 		}
 
 		// create an instance of the mailbox
-		mailbox := NewUnboundedPriorityMailBox(priorityFunc)
+		mailbox := NewPriorityMailBox(priorityFunc)
 		msg1 := &ReceiveContext{message: &testpb.TestMessage{Priority: 1}}
 		msg2 := &ReceiveContext{message: &testpb.TestMessage{Priority: 5}}
 		msg3 := &ReceiveContext{message: &testpb.TestMessage{Priority: 2}}
@@ -115,7 +115,7 @@ func TestUnboundedPriorityMailBox(t *testing.T) {
 		}
 
 		// create an instance of the mailbox
-		mailbox := NewUnboundedPriorityMailBox(priorityFunc)
+		mailbox := NewPriorityMailBox(priorityFunc)
 		msg1 := &ReceiveContext{message: &testpb.TestMessage{Priority: 1}}
 		msg2 := &ReceiveContext{message: &testpb.TestMessage{Priority: 5}}
 		msg3 := &ReceiveContext{message: &testpb.TestMessage{Priority: 2}}

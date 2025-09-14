@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025 Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -34,7 +34,7 @@ var (
 	timers = timer.NewPool()
 	// pool holds a pool of ReceiveContext
 	pool = sync.Pool{
-		New: func() interface{} {
+		New: func() any {
 			return new(ReceiveContext)
 		},
 	}

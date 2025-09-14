@@ -165,6 +165,9 @@ var (
 
 	// ErrOnlyOneOptionAllowed is returned when more than one Option
 	ErrOnlyOneOptionAllowed = errors.New("only one option can be set")
+
+	// ErrMailboxFull is returned by Enqueue when the mailbox has reached capacity.
+	ErrMailboxFull = errors.New("mailbox full")
 )
 
 // NewErrInvalidPassivationStrategy formats an error with ErrInvalidPassivationStrategy

@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025 Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -2174,7 +2174,7 @@ func TestSpawnChild(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "child", NewMockSupervised(), WithMailbox(NewBoundedMailbox(20)))
+		child, err := parent.SpawnChild(ctx, "child", NewMockSupervised(), WithMailbox(NewRingBufferMailbox(20)))
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 		pause.For(time.Second)
@@ -2381,7 +2381,7 @@ func TestSpawnChild(t *testing.T) {
 		// create the child actor
 		child, err := parent.SpawnChild(ctx, "child",
 			NewMockSupervised(),
-			WithMailbox(NewBoundedMailbox(20)),
+			WithMailbox(NewRingBufferMailbox(20)),
 			WithPassivateAfter(2*time.Second))
 
 		require.NoError(t, err)
@@ -2435,7 +2435,7 @@ func TestSpawnChild(t *testing.T) {
 		// create the child actor
 		child, err := parent.SpawnChild(ctx, "child",
 			NewMockSupervised(),
-			WithMailbox(NewBoundedMailbox(20)))
+			WithMailbox(NewRingBufferMailbox(20)))
 
 		pause.For(time.Second)
 

@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025 Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -559,6 +559,28 @@ func (rctx *ReceiveContext) ReinstateNamed(actorName string) {
 	if err := recipient.ReinstateNamed(ctx, actorName); err != nil {
 		rctx.Err(err)
 	}
+}
+
+// SenderAddress returns the address of the sender of the message.
+// This can be either a local or remote address.
+// It returns NoSender when the sender is not known
+func (rctx *ReceiveContext) SenderAddress() *address.Address {
+	from := address.NoSender()
+	if rctx.Sender() != nil {
+		from = rctx.Sender().Address()
+	} else if rctx.RemoteSender() != nil {
+		from = rctx.RemoteSender()
+	}
+	return from
+}
+
+// ReceiverAddress returns the address of the receiver of the message
+// It returns NoSender when the receiver is not known
+func (rctx *ReceiveContext) ReceiverAddress() *address.Address {
+	if rctx.self == nil {
+		return address.NoSender()
+	}
+	return rctx.self.Address()
 }
 
 // getError returns any error during message processing

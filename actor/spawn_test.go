@@ -152,7 +152,7 @@ func TestSpawn(t *testing.T) {
 
 		// create the black hole actor
 		actor := NewMockActor()
-		pid, err := actorSystem.Spawn(ctx, "test", actor, WithMailbox(NewBoundedMailbox(10)))
+		pid, err := actorSystem.Spawn(ctx, "test", actor, WithMailbox(NewRingBufferMailbox(10)))
 		assert.NoError(t, err)
 		assert.NotNil(t, pid)
 

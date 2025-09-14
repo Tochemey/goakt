@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025 Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -117,7 +117,7 @@ type PID struct {
 	behaviorStack *behaviorStack
 
 	// stash settings
-	stashBox    *UnboundedMailbox
+	stashBox    Mailbox
 	stashLocker *sync.Mutex
 
 	// define an events stream
@@ -174,7 +174,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		address:               address,
 		fieldsLocker:          new(sync.RWMutex),
 		stopLocker:            new(sync.Mutex),
-		mailbox:               NewUnboundedMailbox(),
+		mailbox:               NewDefaultMailbox(),
 		stashBox:              nil,
 		stashLocker:           &sync.Mutex{},
 		eventsStream:          nil,
@@ -1648,15 +1648,6 @@ func (pid *PID) unsetBehaviorStacked() {
 
 // doStop stops the actor
 func (pid *PID) doStop(ctx context.Context) error {
-	// TODO: just signal stash processing done and ignore the messages or process them
-	if pid.stashBox != nil {
-		if err := pid.unstashAll(); err != nil {
-			pid.logger.Errorf("actor=(%s) failed to unstash messages", pid.Name())
-			pid.running.Store(false)
-			return err
-		}
-	}
-
 	defer func() {
 		pid.running.Store(false)
 		pid.reset()

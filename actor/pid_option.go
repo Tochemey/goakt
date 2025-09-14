@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025 Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -69,7 +69,7 @@ func withSupervisor(supervisor *Supervisor) pidOption {
 // withStash sets the actor's stash buffer
 func withStash() pidOption {
 	return func(pid *PID) {
-		pid.stashBox = NewUnboundedMailbox()
+		pid.stashBox = NewDefaultMailbox()
 	}
 }
 

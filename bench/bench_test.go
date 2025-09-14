@@ -73,6 +73,49 @@ func BenchmarkTell(b *testing.B) {
 	b.ReportMetric(messagesPerSec, "messages/sec")
 }
 
+func BenchmarkTellWithSegmentedRingBufferMailbox(b *testing.B) {
+	ctx := context.Background()
+
+	// create the actor system
+	actorSystem, err := actor.NewActorSystem("bench",
+		actor.WithLogger(log.DiscardLogger),
+		actor.WithActorInitMaxRetries(1))
+	if err != nil {
+		b.Fatalf("failed to create actor system: %v", err)
+	}
+
+	// start the actor system
+	if err := actorSystem.Start(ctx); err != nil {
+		b.Fatalf("failed to start actor system: %v", err)
+	}
+	b.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	// create the actor refs
+	sender, err := actorSystem.Spawn(ctx, "sender", new(Actor), actor.WithMailbox(actor.NewSegmentedRingBufferMailbox()))
+	if err != nil {
+		b.Fatalf("failed to spawn sender: %v", err)
+	}
+	receiver, err := actorSystem.Spawn(ctx, "receiver", new(Actor), actor.WithMailbox(actor.NewSegmentedRingBufferMailbox()))
+	if err != nil {
+		b.Fatalf("failed to spawn receiver: %v", err)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		// Reuse the same message per goroutine to reduce allocs in the hot path.
+		msg := new(testpb.TestSend)
+		for pb.Next() {
+			if err := sender.Tell(ctx, receiver, msg); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	b.StopTimer()
+	messagesPerSec := float64(b.N) / b.Elapsed().Seconds()
+	b.ReportMetric(messagesPerSec, "messages/sec")
+}
+
 func BenchmarkAsk(b *testing.B) {
 	ctx := context.Background()
 
@@ -96,6 +139,49 @@ func BenchmarkAsk(b *testing.B) {
 		b.Fatalf("failed to spawn sender: %v", err)
 	}
 	receiver, err := actorSystem.Spawn(ctx, "receiver", new(Actor))
+	if err != nil {
+		b.Fatalf("failed to spawn receiver: %v", err)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		// Reuse the same message per goroutine to reduce allocs in the hot path.
+		msg := new(testpb.TestReply)
+		for pb.Next() {
+			if _, err := sender.Ask(ctx, receiver, msg, time.Second); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	b.StopTimer()
+	messagesPerSec := float64(b.N) / b.Elapsed().Seconds()
+	b.ReportMetric(messagesPerSec, "messages/sec")
+}
+
+func BenchmarkAskWithSegmentedRingBufferMailbox(b *testing.B) {
+	ctx := context.Background()
+
+	// create the actor system
+	actorSystem, err := actor.NewActorSystem("bench",
+		actor.WithLogger(log.DiscardLogger),
+		actor.WithActorInitMaxRetries(1))
+	if err != nil {
+		b.Fatalf("failed to create actor system: %v", err)
+	}
+
+	// start the actor system
+	if err := actorSystem.Start(ctx); err != nil {
+		b.Fatalf("failed to start actor system: %v", err)
+	}
+	b.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	// create the actor refs
+	sender, err := actorSystem.Spawn(ctx, "sender", new(Actor), actor.WithMailbox(actor.NewSegmentedRingBufferMailbox()))
+	if err != nil {
+		b.Fatalf("failed to spawn sender: %v", err)
+	}
+	receiver, err := actorSystem.Spawn(ctx, "receiver", new(Actor), actor.WithMailbox(actor.NewSegmentedRingBufferMailbox()))
 	if err != nil {
 		b.Fatalf("failed to spawn receiver: %v", err)
 	}

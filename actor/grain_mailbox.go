@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025 Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,60 +25,80 @@
 package actor
 
 import (
+	"sync"
 	"sync/atomic"
-	"unsafe"
 )
 
-type grainInboxNode struct {
+type inboxNode struct {
 	value *GrainContext
-	next  *grainInboxNode
+	next  atomic.Pointer[inboxNode]
 }
 
+var inboxNodePool = sync.Pool{New: func() any { return new(inboxNode) }}
+
 type grainMailbox struct {
-	head, tail *grainInboxNode
-	length     int64
+	// Separate cache lines to avoid false sharing between producers and consumer
+	head  atomic.Pointer[inboxNode] // consumer only
+	_pad1 [64]byte
+	tail  atomic.Pointer[inboxNode] // producers only
+	_pad2 [64]byte
 }
 
 func newGrainMailbox() *grainMailbox {
-	item := new(grainInboxNode)
-	return &grainMailbox{
-		head:   item,
-		tail:   item,
-		length: 0,
-	}
+	dummy := inboxNodePool.Get().(*inboxNode)
+	dummy.next.Store(nil)
+	dummy.value = nil
+	m := &grainMailbox{}
+	m.head.Store(dummy)
+	m.tail.Store(dummy)
+	return m
 }
 
 // Enqueue places the given value in the mailbox
 func (m *grainMailbox) Enqueue(value *GrainContext) {
-	tnode := &grainInboxNode{
-		value: value,
-	}
-	previousHead := (*node)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&m.head)), unsafe.Pointer(tnode)))
-	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&previousHead.next)), unsafe.Pointer(tnode))
-	atomic.AddInt64(&m.length, 1)
+	n := inboxNodePool.Get().(*inboxNode)
+	n.value = value
+
+	// For MPSC, we can use a simpler approach since only one consumer
+	prev := m.tail.Swap(n)
+	prev.next.Store(n)
 }
 
 // Dequeue takes the mail from the mailbox
 // Returns nil if the mailbox is empty. Can be used in a single consumer (goroutine) only.
 func (m *grainMailbox) Dequeue() *GrainContext {
-	next := (*grainInboxNode)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&m.tail.next))))
+	head := m.head.Load() // single consumer
+	next := head.next.Load()
+
 	if next == nil {
 		return nil
 	}
 
-	m.tail = next
+	// Single consumer - no synchronization needed
+	m.head.Store(next)
 	value := next.value
-	next.value = nil
-	atomic.AddInt64(&m.length, -1)
+
+	// Return old head to pool for reuse
+	head.next.Store(nil)
+	mpscNodePool.Put(head)
 	return value
 }
 
 // Len returns mailbox length
 func (m *grainMailbox) Len() int64 {
-	return atomic.LoadInt64(&m.length)
+	// Snapshot traversal: count nodes from head to end.
+	h := m.head.Load()
+	n := h.next.Load()
+	var count int64
+	for n != nil {
+		count++
+		n = n.next.Load()
+	}
+	return count
 }
 
 // IsEmpty returns true when the mailbox is empty
 func (m *grainMailbox) IsEmpty() bool {
-	return m.Len() == 0
+	head := m.head.Load()
+	return head.next.Load() == nil
 }

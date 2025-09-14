@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025 Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -37,7 +37,7 @@ import (
 
 func TestSpawnOption(t *testing.T) {
 	t.Run("spawn option with mailbox", func(t *testing.T) {
-		mailbox := NewUnboundedMailbox()
+		mailbox := NewDefaultMailbox()
 		config := &spawnConfig{}
 		option := WithMailbox(mailbox)
 		option.Apply(config)

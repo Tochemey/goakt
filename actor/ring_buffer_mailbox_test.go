@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025 Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,60 +25,28 @@
 package actor
 
 import (
-	"runtime"
-	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestUnboundedMailbox(t *testing.T) {
-	mailbox := NewUnboundedMailbox()
-
-	in1 := &ReceiveContext{}
-	in2 := &ReceiveContext{}
-
-	err := mailbox.Enqueue(in1)
-	require.NoError(t, err)
-	err = mailbox.Enqueue(in2)
-	require.NoError(t, err)
-
-	out1 := mailbox.Dequeue()
-	out2 := mailbox.Dequeue()
-
-	assert.Equal(t, in1, out1)
-	assert.Equal(t, in2, out2)
+func TestRingBufferMailbox(t *testing.T) {
+	mailbox := NewRingBufferMailbox(20)
+	for i := 0; i < 20; i++ {
+		require.NoError(t, mailbox.Enqueue(&ReceiveContext{}))
+	}
+	assert.False(t, mailbox.IsEmpty())
+	dequeue := mailbox.Dequeue()
+	require.NotNil(t, dequeue)
+	assert.EqualValues(t, 19, mailbox.Len())
+	counter := 19
+	for counter > 0 {
+		mailbox.Dequeue()
+		counter--
+	}
 	assert.True(t, mailbox.IsEmpty())
 	mailbox.Dispose()
-}
-
-func TestUnboundedMailboxOneProducer(t *testing.T) {
-	t.Helper()
-	expCount := 100
-	var wg sync.WaitGroup
-	wg.Add(1)
-	mailbox := NewUnboundedMailbox()
-	go func() {
-		i := 0
-		for {
-			r := mailbox.Dequeue()
-			if r == nil {
-				runtime.Gosched()
-				continue
-			}
-			i++
-			if i == expCount {
-				wg.Done()
-				return
-			}
-		}
-	}()
-
-	for i := 0; i < expCount; i++ {
-		err := mailbox.Enqueue(new(ReceiveContext))
-		require.NoError(t, err)
-	}
-
-	wg.Wait()
+	err := mailbox.Enqueue(&ReceiveContext{})
+	require.Error(t, err)
 }

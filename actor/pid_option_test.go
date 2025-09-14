@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025 Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -39,7 +39,7 @@ import (
 )
 
 func TestPIDOptions(t *testing.T) {
-	mailbox := NewUnboundedMailbox()
+	mailbox := NewDefaultMailbox()
 	supervisor := NewSupervisor(WithStrategy(OneForAllStrategy))
 	var (
 		atomicDuration   atomic.Duration
