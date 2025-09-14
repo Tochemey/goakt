@@ -80,7 +80,7 @@ func (m *grainMailbox) Dequeue() *GrainContext {
 
 	// Return old head to pool for reuse
 	head.next.Store(nil)
-	mpscNodePool.Put(head)
+	inboxNodePool.Put(head)
 	return value
 }
 
