@@ -28,8 +28,22 @@ import (
 	gods "github.com/Workiva/go-datastructures/queue"
 )
 
-// BoundedMailbox defines a bounded mailbox using ring buffer queue
-// This mailbox is thread-safe
+// BoundedMailbox is a bounded, blocking MPSC mailbox backed by a ring
+// buffer.
+//
+// Characteristics
+// - Bounded capacity: the queue has a fixed size.
+// - Blocking semantics:
+//   - Enqueue blocks when the mailbox is full until space becomes available
+//     or the mailbox is disposed.
+//   - Dequeue blocks when the mailbox is empty until a message is available
+//     or the mailbox is disposed.
+//
+// - Concurrency: safe for multiple producers (MPSC) and a single consumer.
+// - FIFO ordering: messages are dequeued in the order they were enqueued.
+//
+// Use this mailbox when you want strict, blocking backpressure with bounded
+// capacity.
 type BoundedMailbox struct {
 	underlying *gods.RingBuffer
 }
@@ -37,21 +51,43 @@ type BoundedMailbox struct {
 // enforce compilation error
 var _ Mailbox = (*BoundedMailbox)(nil)
 
-// NewBoundedMailbox creates a new instance BoundedMailbox
+// NewBoundedMailbox creates a new bounded, blocking mailbox with the given
+// capacity. Capacity must be a positive integer.
+//
+// Behavior
+//   - When the mailbox reaches capacity, Enqueue blocks until space becomes
+//     available (or the mailbox is disposed).
+//   - When the mailbox is empty, Dequeue blocks until a message arrives (or the
+//     mailbox is disposed).
 func NewBoundedMailbox(capacity int) *BoundedMailbox {
 	return &BoundedMailbox{
 		underlying: gods.NewRingBuffer(uint64(capacity)),
 	}
 }
 
-// Enqueue places the given value in the mailbox
-// This will return an error when the mailbox is full
+// Enqueue inserts a message into the mailbox.
+//
+// Semantics
+//   - Blocks when the mailbox is full until space is available or the mailbox is
+//     disposed.
+//   - Returns an error when the mailbox has been disposed or the underlying
+//     buffer reports a failure.
+//
+// Concurrency
+// - Safe for concurrent producers.
 func (mailbox *BoundedMailbox) Enqueue(msg *ReceiveContext) error {
 	return mailbox.underlying.Put(msg)
 }
 
-// Dequeue takes the mail from the mailbox
-// It returns nil when the mailbox is empty
+// Dequeue removes and returns the next message from the mailbox.
+//
+// Semantics
+//   - Blocks when the mailbox is empty until a message is available or the
+//     mailbox is disposed.
+//   - FIFO order is preserved.
+//
+// Concurrency
+// - Intended for a single consumer; behavior follows the underlying ring buffer.
 func (mailbox *BoundedMailbox) Dequeue() (msg *ReceiveContext) {
 	if mailbox.underlying.Len() > 0 {
 		item, _ := mailbox.underlying.Get()
@@ -62,18 +98,22 @@ func (mailbox *BoundedMailbox) Dequeue() (msg *ReceiveContext) {
 	return nil
 }
 
-// IsEmpty returns true when the mailbox is empty
+// IsEmpty reports whether the mailbox currently has no messages.
+// This check is a snapshot and may change immediately under concurrency.
 func (mailbox *BoundedMailbox) IsEmpty() bool {
 	return mailbox.underlying.Len() == 0
 }
 
-// Len returns queue length
+// Len returns the current number of messages in the mailbox.
+// The value is a snapshot and may change immediately after the call under
+// concurrency.
 func (mailbox *BoundedMailbox) Len() int64 {
 	return int64(mailbox.underlying.Len())
 }
 
-// Dispose will dispose of this queue and free any blocked threads
-// in the Enqueue and/or Dequeue methods.
+// Dispose releases resources held by the underlying ring buffer and unblocks
+// any internal waiters maintained by it. Do not use the mailbox after
+// calling Dispose.
 func (mailbox *BoundedMailbox) Dispose() {
 	mailbox.underlying.Dispose()
 }
