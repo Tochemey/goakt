@@ -26,6 +26,7 @@ package brotli
 
 import (
 	"io"
+	"net/http"
 	"sync"
 
 	"github.com/andybalholm/brotli"
@@ -77,11 +78,25 @@ type pooledBrotliDecompressor struct {
 // Close resets and returns the Brotli reader to the pool.
 func (b *pooledBrotliDecompressor) Close() error {
 	if b.Reader != nil {
-		_ = b.Reset(nil) // Reset the reader state
+		// Drop references held by the reader before making it reusable.
+		_ = b.Reader.Reset(http.NoBody)
 		readerPool.Put(b.Reader)
 		b.Reader = nil
 	}
 	return nil
+}
+
+// Reset prepares the decompressor to read from a new source.
+func (b *pooledBrotliDecompressor) Reset(r io.Reader) error {
+	if b.Reader == nil {
+		// When the decompressor is in the pool we release the underlying reader.
+		// Grab a fresh one only when we actually have new data to decode.
+		if r == nil || r == http.NoBody {
+			return nil
+		}
+		b.Reader = readerPool.Get().(*brotli.Reader)
+	}
+	return b.Reader.Reset(r)
 }
 
 // pooledBrotliCompressor wraps a pooled Brotli writer to satisfy connect.Compressor.
@@ -108,7 +123,7 @@ func (b *pooledBrotliCompressor) Close() error {
 	err := b.Writer.Close()
 
 	// Reset and return to pool
-	b.Writer.Reset(nil)
+	b.Writer.Reset(io.Discard)
 	b.pool.Put(b.Writer)
 	b.Writer = nil
 
@@ -117,7 +132,11 @@ func (b *pooledBrotliCompressor) Close() error {
 
 // Reset resets the writer to write to a new destination.
 func (b *pooledBrotliCompressor) Reset(w io.Writer) {
-	if b.Writer != nil {
-		b.Writer.Reset(w)
+	if b.Writer == nil {
+		if w == nil || w == io.Discard {
+			return
+		}
+		b.Writer = b.pool.Get().(*brotli.Writer)
 	}
+	b.Writer.Reset(w)
 }
