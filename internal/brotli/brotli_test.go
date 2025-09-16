@@ -95,9 +95,9 @@ func TestBrotliCompression(t *testing.T) {
 // Focused memory leak detection test
 func TestMemoryLeakDetection(t *testing.T) {
 	t.Skip("Skipping memory leak detection test - enable when needed")
-	if testing.Short() {
-		t.Skip("Skipping memory leak test in short mode")
-	}
+	// if testing.Short() {
+	// 	t.Skip("Skipping memory leak test in short mode")
+	// }
 
 	newDecompressor, newCompressor := brotliCompressions(DefaultCompression)
 	testData := generateRandomString(500)
@@ -122,10 +122,10 @@ func TestMemoryLeakDetection(t *testing.T) {
 		objectsPerCycle := 100
 
 		var peakMemory uint64
-		for cycle := 0; cycle < cycles; cycle++ {
+		for cycle := range cycles {
 			// Create many objects
-			var objects []interface{}
-			for i := 0; i < objectsPerCycle; i++ {
+			var objects []any
+			for range objectsPerCycle {
 				comp := newCompressor()
 				decomp := newDecompressor()
 				objects = append(objects, comp, decomp)
@@ -185,7 +185,7 @@ func TestMemoryLeakDetection(t *testing.T) {
 		measurementInterval := 200
 		var measurements []uint64
 
-		for i := 0; i < iterations; i++ {
+		for i := range iterations {
 			// Simulate typical request processing
 			var compressed bytes.Buffer
 			compressor := newCompressor()
@@ -365,7 +365,7 @@ func TestPoolingBehavior(t *testing.T) {
 		var newCompressors []*pooledBrotliCompressor
 		reusedAddresses := 0
 
-		for i := 0; i < 3; i++ {
+		for i := range 3 {
 			comp := newCompressor().(*pooledBrotliCompressor)
 			newCompressors = append(newCompressors, comp)
 
@@ -434,7 +434,7 @@ func TestPoolingBehavior(t *testing.T) {
 
 		// Phase 3: Create new decompressors - should reuse from pool
 		reusedAddresses := 0
-		for i := 0; i < 3; i++ {
+		for i := range 3 {
 			decomp := newDecompressor().(*pooledBrotliDecompressor)
 
 			readerAddr := uintptr(unsafe.Pointer(decomp.Reader))
@@ -503,7 +503,7 @@ func TestConcurrentUsage(t *testing.T) {
 	errChan := make(chan error, numGoroutines)
 
 	// Run concurrent compression/decompression
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
@@ -569,7 +569,7 @@ func TestMemoryUsage(t *testing.T) {
 
 	// Warm up the pools and stabilize memory
 	t.Log("Warming up pools...")
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		var compressed bytes.Buffer
 		compressor := newCompressor()
 		compressor.Reset(&compressed)
@@ -583,7 +583,7 @@ func TestMemoryUsage(t *testing.T) {
 	}
 
 	// Force multiple GC cycles to stabilize memory
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		runtime.GC()
 		runtime.GC() // Double GC to ensure cleanup
 		time.Sleep(50 * time.Millisecond)
@@ -601,7 +601,7 @@ func TestMemoryUsage(t *testing.T) {
 
 	for batch := 0; batch < iterations/batchSize; batch++ {
 		// Perform a batch of operations
-		for i := 0; i < batchSize; i++ {
+		for range batchSize {
 			var compressed bytes.Buffer
 			compressor := newCompressor()
 			compressor.Reset(&compressed)
@@ -789,63 +789,6 @@ func TestConnectIntegration(t *testing.T) {
 	assert.NotNil(t, compressionOpt.HandlerOption)
 }
 
-// Helper function to generate random strings
-//
-//nolint:gosec
-func generateRandomString(length int) string {
-	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 "
-	b := make([]byte, length)
-	for i := range b {
-		b[i] = charset[rand.Intn(len(charset))]
-	}
-	return string(b)
-}
-
-// Helper function to generate repeating strings (compresses well)
-func generateRepeatingString(pattern string, repeats int) string {
-	var result string
-	for i := 0; i < repeats; i++ {
-		result += pattern
-	}
-	return result
-}
-
-// Helper function to generate JSON-like data
-func generateJSONLikeData(entries int) string {
-	var result bytes.Buffer
-	result.WriteString(`{"users":[`)
-
-	for i := 0; i < entries; i++ {
-		if i > 0 {
-			result.WriteString(",")
-		}
-		result.WriteString(fmt.Sprintf(`{"id":%d,"name":"User%d","email":"user%d@example.com","active":true}`, i, i, i))
-	}
-
-	result.WriteString(`]}`)
-	return result.String()
-}
-
-// Helper function to generate natural text
-func generateLongText(words int) string {
-	commonWords := []string{
-		"the", "quick", "brown", "fox", "jumps", "over", "lazy", "dog", "and", "runs",
-		"through", "forest", "with", "great", "speed", "while", "avoiding", "obstacles",
-		"that", "appear", "along", "the", "path", "making", "sure", "to", "stay", "safe",
-		"from", "any", "potential", "dangers", "that", "might", "be", "lurking", "nearby",
-	}
-
-	var result strings.Builder
-	for i := 0; i < words; i++ {
-		if i > 0 {
-			result.WriteString(" ")
-		}
-		result.WriteString(commonWords[rand.Intn(len(commonWords))]) //nolint:gosec
-	}
-
-	return result.String()
-}
-
 // Load test to simulate high traffic
 func TestHighLoad(t *testing.T) {
 	if testing.Short() {
@@ -917,4 +860,61 @@ func TestHighLoad(t *testing.T) {
 		totalOps, duration, float64(totalOps)/duration.Seconds(), errorCount)
 
 	assert.Equal(t, 0, errorCount, "Should have no errors in load test")
+}
+
+// Helper function to generate random strings
+//
+//nolint:gosec
+func generateRandomString(length int) string {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 "
+	b := make([]byte, length)
+	for i := range b {
+		b[i] = charset[rand.Intn(len(charset))]
+	}
+	return string(b)
+}
+
+// Helper function to generate repeating strings (compresses well)
+func generateRepeatingString(pattern string, repeats int) string {
+	var result string
+	for i := 0; i < repeats; i++ {
+		result += pattern
+	}
+	return result
+}
+
+// Helper function to generate JSON-like data
+func generateJSONLikeData(entries int) string {
+	var result bytes.Buffer
+	result.WriteString(`{"users":[`)
+
+	for i := 0; i < entries; i++ {
+		if i > 0 {
+			result.WriteString(",")
+		}
+		result.WriteString(fmt.Sprintf(`{"id":%d,"name":"User%d","email":"user%d@example.com","active":true}`, i, i, i))
+	}
+
+	result.WriteString(`]}`)
+	return result.String()
+}
+
+// Helper function to generate natural text
+func generateLongText(words int) string {
+	commonWords := []string{
+		"the", "quick", "brown", "fox", "jumps", "over", "lazy", "dog", "and", "runs",
+		"through", "forest", "with", "great", "speed", "while", "avoiding", "obstacles",
+		"that", "appear", "along", "the", "path", "making", "sure", "to", "stay", "safe",
+		"from", "any", "potential", "dangers", "that", "might", "be", "lurking", "nearby",
+	}
+
+	var result strings.Builder
+	for i := 0; i < words; i++ {
+		if i > 0 {
+			result.WriteString(" ")
+		}
+		result.WriteString(commonWords[rand.Intn(len(commonWords))]) //nolint:gosec
+	}
+
+	return result.String()
 }
