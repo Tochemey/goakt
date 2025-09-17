@@ -61,12 +61,23 @@ func brotliCompressions(level int) (
 	newDecompressor func() connect.Decompressor,
 	newCompressor func() connect.Compressor,
 ) {
+	writerPool := getWriterPool(level)
+
 	newDecompressor = func() connect.Decompressor {
-		return &brotliDecompressor{Reader: brotli.NewReader(nil)}
+		reader := readerPool.Get().(*brotli.Reader)
+		return &pooledBrotliDecompressor{
+			Reader: reader,
+		}
 	}
+
 	newCompressor = func() connect.Compressor {
-		return brotli.NewWriterLevel(nil, level)
+		writer := writerPool.Get().(*brotli.Writer)
+		return &pooledBrotliCompressor{
+			Writer: writer,
+			pool:   writerPool,
+		}
 	}
+
 	return
 }
 
@@ -74,16 +85,4 @@ func brotliCompressions(level int) (
 type compressionOption struct {
 	connect.ClientOption
 	connect.HandlerOption
-}
-
-// brotliDecompressor wraps a Brotli reader to satisfy connect.Decompressor.
-type brotliDecompressor struct {
-	*brotli.Reader
-}
-
-// Close resets the underlying Brotli reader. Since Brotli readers
-// cannot be "closed" in the traditional sense, Reset(nil) is used
-// to release resources.
-func (b *brotliDecompressor) Close() error {
-	return b.Reset(nil)
 }
