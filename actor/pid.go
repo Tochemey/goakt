@@ -1648,15 +1648,6 @@ func (pid *PID) unsetBehaviorStacked() {
 
 // doStop stops the actor
 func (pid *PID) doStop(ctx context.Context) error {
-	// TODO: just signal stash processing done and ignore the messages or process them
-	if pid.stashBox != nil {
-		if err := pid.unstashAll(); err != nil {
-			pid.logger.Errorf("actor=(%s) failed to unstash messages", pid.Name())
-			pid.running.Store(false)
-			return err
-		}
-	}
-
 	defer func() {
 		pid.running.Store(false)
 		pid.reset()
