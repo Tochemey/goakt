@@ -37,6 +37,10 @@ Kindly check out the [examples](https://github.com/Tochemey/goakt-examples)' rep
 
 GoAkt is free and open source. If you need priority support on complex topics or request new features, please consider [sponsorship](https://github.com/sponsors/Tochemey).
 
+## 🔒 Security
+
+Applications using this library should routinely upgrade their **Go version** and refresh **dependencies** as needed to mitigate security vulnerabilities. **GoAkt** will make a best effort to keep dependencies current and perform vulnerability checks whenever necessary.
+
 ## 🌍 Community
 
 You can join these groups and chat to discuss and ask GoAkt related questions on:
