@@ -34,7 +34,16 @@ import (
 	"github.com/tochemey/goakt/v3/internal/validation"
 )
 
-// Config defines the remote config
+// Config defines the remote config.
+//
+// BindAddr must be provided as a physical IP address rather than a DNS name so
+// GoAkt can bind to a deterministic network interface without relying on
+// external name resolution. When BindAddr is set to 0.0.0.0 the runtime will
+// attempt to discover an appropriate private IP address to publish to other
+// nodes, only falling back to a public IP when no private candidate exists.
+// The design favors predictable intra-cluster connectivity in multi-homed or
+// containerized deployments where DNS entries may be unavailable or resolve to
+// unintended interfaces.
 type Config struct {
 	maxFrameSize    uint32
 	writeTimeout    time.Duration
@@ -46,15 +55,20 @@ type Config struct {
 
 var _ validation.Validator = (*Config)(nil)
 
-// NewConfig creates an instance of remote config
-func NewConfig(host string, port int, opts ...Option) *Config {
+// NewConfig returns a Config initialized with the supplied bind address, port,
+// and any functional options. The bind address must be a concrete IP (not a
+// hostname); if it is 0.0.0.0, GoAkt will resolve it to a suitable private IP
+// and fall back to a public address only when necessary. Callers can further
+// tailor transport behaviour through Option values such as frame size and
+// timeout tuning.
+func NewConfig(bindAddr string, bindPort int, opts ...Option) *Config {
 	cfg := &Config{
 		maxFrameSize:    16 * size.MB,
 		writeTimeout:    10 * time.Second,
 		readIdleTimeout: 10 * time.Second,
 		idleTimeout:     1200 * time.Second,
-		bindAddr:        host,
-		bindPort:        port,
+		bindAddr:        bindAddr,
+		bindPort:        bindPort,
 	}
 
 	// apply the options
