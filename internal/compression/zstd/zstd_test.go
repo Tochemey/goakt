@@ -150,6 +150,7 @@ func TestZstdCompressionLargePayload(t *testing.T) {
 	}
 }
 
+// nolint:staticcheck
 func TestZstdDecompressorReuseAfterClose(t *testing.T) {
 	newDecompressor, newCompressor := zstdCompressions()
 
@@ -186,6 +187,7 @@ func TestZstdDecompressorReuseAfterClose(t *testing.T) {
 	require.NoError(t, decompressor.Close())
 }
 
+// nolint:staticcheck
 func TestZstdCompressorReuseAfterClose(t *testing.T) {
 	_, newCompressor := zstdCompressions()
 
@@ -212,6 +214,7 @@ func TestZstdCompressorReuseAfterClose(t *testing.T) {
 	pooled.mu.Unlock()
 }
 
+// nolint:staticcheck
 func TestZstdCompressorWritePropagatesInitError(t *testing.T) {
 	_, newCompressor := zstdCompressions()
 
@@ -235,6 +238,7 @@ func TestZstdCompressorWritePropagatesInitError(t *testing.T) {
 	assert.ErrorIs(t, err, sentinel)
 }
 
+// nolint:staticcheck
 func TestZstdDecompressorReadAfterClose(t *testing.T) {
 	newDecompressor, newCompressor := zstdCompressions()
 
