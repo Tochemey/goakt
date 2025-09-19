@@ -1176,6 +1176,14 @@ func (pid *PID) RemoteReSpawn(ctx context.Context, host string, port int, name s
 // All current messages in the mailbox will be processed before the actor shutdown after a period of time
 // that can be configured. All child actors will be gracefully shutdown.
 func (pid *PID) Shutdown(ctx context.Context) error {
+	// we should never shutdown system actors unless the whole system is terminating
+	if actoryStem := pid.ActorSystem(); actoryStem != nil {
+		if !actoryStem.isStopping() && isReservedName(pid.Name()) {
+			pid.logger.Warnf("attempt to shutdown a system actor (%s)", pid.Name())
+			return gerrors.ErrShutdownForbidden
+		}
+	}
+
 	pid.stopLocker.Lock()
 	pid.logger.Infof("shutdown process has started for actor=(%s)...", pid.Name())
 
@@ -1297,8 +1305,8 @@ func (pid *PID) process() {
 					_ = pid.Shutdown(received.Context())
 				case *internalpb.HealthCheckRequest:
 					pid.handleHealthcheck(received)
-				case *internalpb.Down:
-					pid.handleFailure(received.Sender(), msg)
+				case *internalpb.Panicking:
+					pid.handlePanicking(received.Sender(), msg)
 				case *goaktpb.PausePassivation:
 					pid.pausePassivation()
 				case *goaktpb.ResumePassivation:
@@ -1578,7 +1586,7 @@ func (pid *PID) passivationLoop() {
 
 	// if the actor system is shutting down it means that the actor stop mode has been triggered
 	if actoryStem := pid.ActorSystem(); actoryStem != nil {
-		if actoryStem.isShuttingDown() {
+		if actoryStem.isStopping() {
 			return
 		}
 	}
@@ -1721,7 +1729,7 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 
 	// create the message to send to the parent
 	actual, _ := anypb.New(signal.Msg())
-	msg := &internalpb.Down{
+	msg := &internalpb.Panicking{
 		ActorId:      pid.ID(),
 		ErrorMessage: signal.Err().Error(),
 		Message:      actual,
@@ -1730,22 +1738,22 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 
 	switch directive {
 	case StopDirective:
-		msg.Directive = &internalpb.Down_Stop{
+		msg.Directive = &internalpb.Panicking_Stop{
 			Stop: new(internalpb.StopDirective),
 		}
 	case RestartDirective:
-		msg.Directive = &internalpb.Down_Restart{
+		msg.Directive = &internalpb.Panicking_Restart{
 			Restart: &internalpb.RestartDirective{
 				MaxRetries: pid.supervisor.MaxRetries(),
 				Timeout:    int64(pid.supervisor.Timeout()),
 			},
 		}
 	case ResumeDirective:
-		msg.Directive = &internalpb.Down_Resume{
+		msg.Directive = &internalpb.Panicking_Resume{
 			Resume: &internalpb.ResumeDirective{},
 		}
 	case EscalateDirective:
-		msg.Directive = &internalpb.Down_Escalate{
+		msg.Directive = &internalpb.Panicking_Escalate{
 			Escalate: &internalpb.EscalateDirective{},
 		}
 	default:
@@ -1764,15 +1772,24 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 	}
 
 	if parent := pid.Parent(); parent != nil && !parent.Equals(pid.ActorSystem().NoSender()) {
-		pid.logger.Warnf("%s's child actor=(%s) is failing: Err=%s", pid.Name(), parent.Name(), msg.GetErrorMessage())
+		pid.logger.Warnf("%s's child actor=(%s) is failing: Err=%s", parent.Name(), pid.Name(), msg.GetErrorMessage())
 		pid.logger.Infof("%s activates [strategy=%s, directive=%s] for failing child actor=(%s)",
 			parent.Name(),
 			pid.supervisor.Strategy(),
 			directive,
 			pid.Name())
 
+		// notify parent about the failure
 		_ = pid.Tell(context.Background(), parent, msg)
+		// suspend the actor until the parent take an action
+		// based upon the supervisory strategy and directive
+		pid.suspend(msg.GetErrorMessage())
+		return
 	}
+
+	// no parent found, just suspend the actor
+	pid.logger.Warnf("%s has no parent to notify about its failure: Err=%s", pid.Name(), msg.GetErrorMessage())
+	pid.suspend(msg.GetErrorMessage())
 }
 
 // handleReceivedError sends message to deadletter synthetic actor
@@ -1877,30 +1894,30 @@ func (pid *PID) handleCompletion(ctx context.Context, config *pipeConfig, comple
 	to.doReceive(messageContext)
 }
 
-// handleFailure watches for child actor's failure and act based upon the supervisory strategy
-func (pid *PID) handleFailure(cid *PID, msg *internalpb.Down) {
+// handlePanicking watches for child actor's failure and act based upon the supervisory strategy
+func (pid *PID) handlePanicking(cid *PID, msg *internalpb.Panicking) {
 	if cid.ID() == msg.GetActorId() {
 		directive := msg.GetDirective()
 		includeSiblings := msg.GetStrategy() == internalpb.Strategy_STRATEGY_ONE_FOR_ALL
 
 		switch d := directive.(type) {
-		case *internalpb.Down_Stop:
+		case *internalpb.Panicking_Stop:
 			pid.handleStopDirective(cid, includeSiblings)
-		case *internalpb.Down_Restart:
+		case *internalpb.Panicking_Restart:
 			pid.handleRestartDirective(cid,
 				d.Restart.GetMaxRetries(),
 				time.Duration(d.Restart.GetTimeout()),
 				includeSiblings)
-		case *internalpb.Down_Resume:
-		// pass
-		case *internalpb.Down_Escalate:
+		case *internalpb.Panicking_Resume:
+			// simply reinstate the actor
+			cid.doReinstate()
+		case *internalpb.Panicking_Escalate:
 			// forward the message to the parent and suspend the actor
 			_ = cid.Tell(context.Background(), pid, &goaktpb.PanicSignal{
 				Reason:    msg.GetErrorMessage(),
 				Message:   msg.GetMessage(),
 				Timestamp: msg.GetTimestamp(),
 			})
-			cid.suspend(msg.GetErrorMessage())
 		default:
 			pid.handleStopDirective(cid, includeSiblings)
 		}

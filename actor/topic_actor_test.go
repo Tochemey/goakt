@@ -33,6 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/anypb"
 
+	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
@@ -521,6 +522,28 @@ func TestTopicActor(t *testing.T) {
 		subscribers, ok := topicActor.topics.Get(topic)
 		require.True(t, ok)
 		require.EqualValues(t, subscribers.Len(), 2)
+
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
+
+	t.Run("With attempt to shutdown when system is not shutting down", func(t *testing.T) {
+		ctx := context.Background()
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithPubSub())
+
+		// start the actor system
+		err := actorSystem.Start(ctx)
+		assert.NoError(t, err)
+
+		// wait for the actor system to be ready
+		pause.For(time.Second)
+
+		// assert the topic actor is running
+		require.True(t, actorSystem.TopicActor().IsRunning())
+
+		// attempt to shutdown the topic actor
+		err = actorSystem.TopicActor().Shutdown(ctx)
+		require.Error(t, err)
+		require.ErrorIs(t, err, gerrors.ErrShutdownForbidden)
 
 		require.NoError(t, actorSystem.Stop(ctx))
 	})

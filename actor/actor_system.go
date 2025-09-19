@@ -589,7 +589,7 @@ type ActorSystem interface {
 	getRebalancer() *PID
 	getReflection() *reflection
 	findRoutee(routeeName string) (*PID, bool)
-	isShuttingDown() bool
+	isStopping() bool
 	getRemoting() remote.Remoting
 	getGrains() *collection.Map[string, *grainPID]
 	recreateGrain(ctx context.Context, props *internalpb.Grain) error
@@ -2040,8 +2040,8 @@ func (x *actorSystem) findRoutee(routeeName string) (*PID, bool) {
 	return nil, false
 }
 
-// isShuttingDown checks whether the actor system is shutting down
-func (x *actorSystem) isShuttingDown() bool {
+// isStopping checks whether the actor system is shutting down
+func (x *actorSystem) isStopping() bool {
 	return x.shuttingDown.Load()
 }
 
@@ -2470,7 +2470,7 @@ func (x *actorSystem) replicateActors() {
 		if isReservedName(actor.GetAddress().GetName()) {
 			continue
 		}
-		if !x.isShuttingDown() && x.InCluster() {
+		if !x.isStopping() && x.InCluster() {
 			ctx := context.Background()
 			if err := x.cluster.PutActor(ctx, actor); err != nil {
 				x.logger.Warn(err.Error())
@@ -2487,7 +2487,7 @@ func (x *actorSystem) replicateGrains() {
 		if isReservedName(grain.GetGrainId().GetName()) {
 			continue
 		}
-		if !x.isShuttingDown() && x.InCluster() {
+		if !x.isStopping() && x.InCluster() {
 			ctx := context.Background()
 			if err := x.cluster.PutGrain(ctx, grain); err != nil {
 				x.logger.Warn(err.Error())
@@ -2527,7 +2527,7 @@ func (x *actorSystem) resyncGrains() error {
 // clusterEventsLoop listens to cluster events and send them to the event streams
 func (x *actorSystem) clusterEventsLoop() {
 	for event := range x.eventsQueue {
-		if x.isShuttingDown() || !x.InCluster() || event == nil || event.Payload == nil {
+		if x.isStopping() || !x.InCluster() || event == nil || event.Payload == nil {
 			continue
 		}
 
@@ -2642,7 +2642,7 @@ func (x *actorSystem) syncPeersState() {
 		for {
 			select {
 			case <-ticker.Ticks:
-				if x.isShuttingDown() || !x.started.Load() {
+				if x.isStopping() || !x.started.Load() {
 					tickerStopSig <- registry.Unit{}
 					return
 				}

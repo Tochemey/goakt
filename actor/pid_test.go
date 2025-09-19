@@ -1574,6 +1574,43 @@ func TestSupervisorStrategy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
+
+	t.Run("When No Parent found actor is suspended", func(t *testing.T) {
+		ctx := context.TODO()
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemote(remote.NewConfig(host, ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		pause.For(time.Second)
+
+		parent := actorSystem.NoSender()
+
+		// create the child actor
+		escalationStrategy := NewSupervisor(WithDirective(&errors.PanicError{}, EscalateDirective))
+		child, err := parent.SpawnChild(ctx, "noSenderChild", NewMockSupervised(), WithSupervisor(escalationStrategy))
+		require.NoError(t, err)
+		require.NotNil(t, child)
+
+		// send a test panic message to the actor
+		require.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
+
+		// wait for the child to properly shutdown
+		pause.For(time.Second)
+
+		// assert the actor state
+		require.False(t, child.IsRunning())
+
+		//stop the actor
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
 }
 func TestMessaging(t *testing.T) {
 	t.Run("With happy", func(t *testing.T) {
