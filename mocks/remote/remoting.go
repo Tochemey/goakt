@@ -66,6 +66,51 @@ func (_c *Remoting_Close_Call) RunAndReturn(run func()) *Remoting_Close_Call {
 	return _c
 }
 
+// Compression provides a mock function with no fields
+func (_m *Remoting) Compression() v3remote.Compression {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Compression")
+	}
+
+	var r0 v3remote.Compression
+	if rf, ok := ret.Get(0).(func() v3remote.Compression); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(v3remote.Compression)
+	}
+
+	return r0
+}
+
+// Remoting_Compression_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Compression'
+type Remoting_Compression_Call struct {
+	*mock.Call
+}
+
+// Compression is a helper method to define mock.On call
+func (_e *Remoting_Expecter) Compression() *Remoting_Compression_Call {
+	return &Remoting_Compression_Call{Call: _e.mock.On("Compression")}
+}
+
+func (_c *Remoting_Compression_Call) Run(run func()) *Remoting_Compression_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *Remoting_Compression_Call) Return(_a0 v3remote.Compression) *Remoting_Compression_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *Remoting_Compression_Call) RunAndReturn(run func() v3remote.Compression) *Remoting_Compression_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // HTTPClient provides a mock function with no fields
 func (_m *Remoting) HTTPClient() *http.Client {
 	ret := _m.Called()

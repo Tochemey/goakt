@@ -61,11 +61,12 @@ import (
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/hash"
-	"github.com/tochemey/goakt/v3/internal/brotli"
 	"github.com/tochemey/goakt/v3/internal/chain"
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/codec"
 	"github.com/tochemey/goakt/v3/internal/collection"
+	"github.com/tochemey/goakt/v3/internal/compression/brotli"
+	"github.com/tochemey/goakt/v3/internal/compression/zstd"
 	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
@@ -2264,12 +2265,25 @@ func (x *actorSystem) startRemoting(ctx context.Context) error {
 	x.logger.Info("enabling remoting...")
 
 	opts := []connect.HandlerOption{
-		brotli.WithCompression(),
 		connectproto.WithBinary(
 			proto.MarshalOptions{},
 			proto.UnmarshalOptions{DiscardUnknown: true},
 		),
 	}
+
+	if x.remoteConfig.MaxFrameSize() > 0 {
+		opts = append(opts, connect.WithReadMaxBytes(int(x.remoteConfig.MaxFrameSize()))) // nolint
+	}
+
+	switch x.remoteConfig.Compression() {
+	case remote.BrotliCompression:
+		opts = append(opts, brotli.WithCompression())
+	case remote.ZstdCompression:
+		opts = append(opts, zstd.WithCompression())
+	default:
+		// no op
+	}
+
 	remotingServicePath, remotingServiceHandler := internalpbconnect.NewRemotingServiceHandler(x, opts...)
 	clusterServicePath, clusterServiceHandler := internalpbconnect.NewClusterServiceHandler(x, opts...)
 
@@ -2303,6 +2317,7 @@ func (x *actorSystem) setRemoting() {
 		x.remoting = remote.NewRemoting(
 			remote.WithRemotingTLS(x.tlsInfo.ClientConfig),
 			remote.WithRemotingMaxReadFameSize(int(x.remoteConfig.MaxFrameSize())), // nolint
+			remote.WithRemotingCompression(x.remoteConfig.Compression()),
 		)
 		return
 	}

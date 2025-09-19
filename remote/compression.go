@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025 Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,48 +24,17 @@
 
 package remote
 
-import (
-	"testing"
-	"time"
+// Compression represents the compression algorithm to use when sending
+// or receiving data.
+type Compression int
 
-	"github.com/stretchr/testify/assert"
+const (
+	// NoCompression indicates that no compression should be used.
+	NoCompression Compression = iota
+	// GzipCompression indicates that gzip compression should be used.
+	GzipCompression = iota
+	// ZstdCompression indicates that zstd compression should be used.
+	ZstdCompression
+	// BrotliCompression indicates that brotli compression should be used.
+	BrotliCompression
 )
-
-func TestOption(t *testing.T) {
-	testCases := []struct {
-		name     string
-		option   Option
-		expected Config
-	}{
-		{
-			name:     "WithWriteTimeout",
-			option:   WithWriteTimeout(10 * time.Second),
-			expected: Config{writeTimeout: 10 * time.Second},
-		},
-		{
-			name:     "WithReadIdleTimeout",
-			option:   WithReadIdleTimeout(10 * time.Second),
-			expected: Config{readIdleTimeout: 10 * time.Second},
-		},
-		{
-			name:     "WithMaxFrameSize",
-			option:   WithMaxFrameSize(1024),
-			expected: Config{maxFrameSize: 1024},
-		},
-		{
-			name:   "WithCompression",
-			option: WithCompression(GzipCompression),
-			expected: Config{
-				compression: GzipCompression,
-			},
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			var config Config
-			tc.option.Apply(&config)
-			assert.Equal(t, tc.expected, config)
-		})
-	}
-}

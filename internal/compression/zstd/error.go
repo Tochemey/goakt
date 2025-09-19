@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025 Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,50 +22,39 @@
  * SOFTWARE.
  */
 
-package remote
+package zstd
 
-import (
-	"testing"
-	"time"
+import "io"
 
-	"github.com/stretchr/testify/assert"
-)
+// Error wrappers for failed initialization
+type errorDecompressor struct {
+	err error
+}
 
-func TestOption(t *testing.T) {
-	testCases := []struct {
-		name     string
-		option   Option
-		expected Config
-	}{
-		{
-			name:     "WithWriteTimeout",
-			option:   WithWriteTimeout(10 * time.Second),
-			expected: Config{writeTimeout: 10 * time.Second},
-		},
-		{
-			name:     "WithReadIdleTimeout",
-			option:   WithReadIdleTimeout(10 * time.Second),
-			expected: Config{readIdleTimeout: 10 * time.Second},
-		},
-		{
-			name:     "WithMaxFrameSize",
-			option:   WithMaxFrameSize(1024),
-			expected: Config{maxFrameSize: 1024},
-		},
-		{
-			name:   "WithCompression",
-			option: WithCompression(GzipCompression),
-			expected: Config{
-				compression: GzipCompression,
-			},
-		},
-	}
+func (e *errorDecompressor) Read([]byte) (int, error) {
+	return 0, e.err
+}
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			var config Config
-			tc.option.Apply(&config)
-			assert.Equal(t, tc.expected, config)
-		})
-	}
+func (e *errorDecompressor) Reset(io.Reader) error {
+	return e.err
+}
+
+func (e *errorDecompressor) Close() error {
+	return nil
+}
+
+type errorCompressor struct {
+	err error
+}
+
+func (e *errorCompressor) Write([]byte) (int, error) {
+	return 0, e.err
+}
+
+func (e *errorCompressor) Reset(io.Writer) {
+	// no-op
+}
+
+func (e *errorCompressor) Close() error {
+	return nil
 }

@@ -798,6 +798,7 @@ func TestClient(t *testing.T) {
 		expectedErr := fmt.Errorf("remote ask failed: %s", node.address)
 		mockRemoting.EXPECT().RemoteLookup(ctx, remoteHost, remotePort, actor.Name()).Return(addr, nil)
 		mockRemoting.EXPECT().MaxReadFrameSize().Return(1024 * 1024)
+		mockRemoting.EXPECT().Compression().Return(remote.NoCompression)
 		mockRemoting.EXPECT().RemoteAsk(ctx, address.NoSender(), addr, new(testpb.TestReply), time.Minute).Return(nil, expectedErr)
 
 		client, err := New(ctx, []*Node{node})
@@ -1090,6 +1091,7 @@ func TestClient(t *testing.T) {
 		expectedErr := fmt.Errorf("remote lookup failed: %s", node.address)
 		mockRemoting.EXPECT().RemoteLookup(ctx, remoteHost, remotePort, actor.Name()).Return(nil, expectedErr)
 		mockRemoting.EXPECT().MaxReadFrameSize().Return(1024 * 1024)
+		mockRemoting.EXPECT().Compression().Return(remote.NoCompression)
 
 		client, err := New(ctx, []*Node{node})
 		require.NoError(t, err)

@@ -67,3 +67,11 @@ func WithMaxFrameSize(size uint32) Option {
 		config.maxFrameSize = size
 	})
 }
+
+// WithCompression sets the compression algorithm to use
+// when sending or receiving data.
+func WithCompression(c Compression) Option {
+	return OptionFunc(func(config *Config) {
+		config.compression = c
+	})
+}
