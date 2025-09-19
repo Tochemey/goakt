@@ -2900,6 +2900,170 @@ func TestRemoteTell(t *testing.T) {
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
+	t.Run("With Brotli compression", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort,
+				remote.WithCompression(remote.BrotliCompression))),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		remoting := remote.NewRemoting(remote.WithRemotingCompression(remote.BrotliCompression))
+		// get the address of the actor
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+		// create a message to send to the test actor
+		message := new(testpb.TestSend)
+		from := address.NoSender()
+		// send the message to the actor
+		for range 10 {
+			err = remoting.RemoteTell(ctx, from, addr, message)
+			// perform some assertions
+			require.NoError(t, err)
+		}
+
+		// stop the actor after some time
+		pause.For(time.Second)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("With Zstandard compression", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort,
+				remote.WithCompression(remote.ZstdCompression))),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		remoting := remote.NewRemoting(remote.WithRemotingCompression(remote.ZstdCompression))
+		// get the address of the actor
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+		// create a message to send to the test actor
+		message := new(testpb.TestSend)
+		from := address.NoSender()
+		// send the message to the actor
+		for range 10 {
+			err = remoting.RemoteTell(ctx, from, addr, message)
+			// perform some assertions
+			require.NoError(t, err)
+		}
+
+		// stop the actor after some time
+		pause.For(time.Second)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("With Gzip compression", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort,
+				remote.WithCompression(remote.GzipCompression))),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		remoting := remote.NewRemoting(remote.WithRemotingCompression(remote.GzipCompression))
+		// get the address of the actor
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+		// create a message to send to the test actor
+		message := new(testpb.TestSend)
+		from := address.NoSender()
+		// send the message to the actor
+		for range 10 {
+			err = remoting.RemoteTell(ctx, from, addr, message)
+			// perform some assertions
+			require.NoError(t, err)
+		}
+
+		// stop the actor after some time
+		pause.For(time.Second)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
 }
 
 func TestRemoteAsk(t *testing.T) {
@@ -3511,6 +3675,192 @@ func TestRemoteAsk(t *testing.T) {
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
+	t.Run("With Brotli Compression", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort,
+				remote.WithCompression(remote.BrotliCompression))),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		remoting := remote.NewRemoting(remote.WithRemotingCompression(remote.BrotliCompression))
+		from := address.NoSender()
+		// get the address of the actor
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+
+		// create a message to send to the test actor
+		message := new(testpb.TestReply)
+		// send the message to the actor
+		reply, err := remoting.RemoteAsk(ctx, from, addr, message, time.Minute)
+		// perform some assertions
+		require.NoError(t, err)
+		require.NotNil(t, reply)
+		require.True(t, reply.MessageIs(new(testpb.Reply)))
+
+		actual := new(testpb.Reply)
+		err = reply.UnmarshalTo(actual)
+		require.NoError(t, err)
+
+		expected := &testpb.Reply{Content: "received message"}
+		assert.True(t, proto.Equal(expected, actual))
+
+		// stop the actor after some time
+		pause.For(time.Second)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("With Zstandard Compression", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort,
+				remote.WithCompression(remote.ZstdCompression))),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		remoting := remote.NewRemoting(remote.WithRemotingCompression(remote.ZstdCompression))
+		from := address.NoSender()
+		// get the address of the actor
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+
+		// create a message to send to the test actor
+		message := new(testpb.TestReply)
+		// send the message to the actor
+		reply, err := remoting.RemoteAsk(ctx, from, addr, message, time.Minute)
+		// perform some assertions
+		require.NoError(t, err)
+		require.NotNil(t, reply)
+		require.True(t, reply.MessageIs(new(testpb.Reply)))
+
+		actual := new(testpb.Reply)
+		err = reply.UnmarshalTo(actual)
+		require.NoError(t, err)
+
+		expected := &testpb.Reply{Content: "received message"}
+		assert.True(t, proto.Equal(expected, actual))
+
+		// stop the actor after some time
+		pause.For(time.Second)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("With Gzip Compression", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort,
+				remote.WithCompression(remote.GzipCompression))),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		remoting := remote.NewRemoting(remote.WithRemotingCompression(remote.GzipCompression))
+		from := address.NoSender()
+		// get the address of the actor
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+
+		// create a message to send to the test actor
+		message := new(testpb.TestReply)
+		// send the message to the actor
+		reply, err := remoting.RemoteAsk(ctx, from, addr, message, time.Minute)
+		// perform some assertions
+		require.NoError(t, err)
+		require.NotNil(t, reply)
+		require.True(t, reply.MessageIs(new(testpb.Reply)))
+
+		actual := new(testpb.Reply)
+		err = reply.UnmarshalTo(actual)
+		require.NoError(t, err)
+
+		expected := &testpb.Reply{Content: "received message"}
+		assert.True(t, proto.Equal(expected, actual))
+
+		// stop the actor after some time
+		pause.For(time.Second)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
 }
 
 func TestRemotingLookup(t *testing.T) {
@@ -3858,6 +4208,156 @@ func TestRemotingReSpawn(t *testing.T) {
 		err = actorSystem.Stop(ctx)
 		assert.NoError(t, err)
 	})
+	t.Run("When Brotli compression", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort,
+				remote.WithCompression(remote.BrotliCompression))),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		// assert the actor restart count
+		pid := actorRef
+		assert.Zero(t, pid.restartCount.Load())
+		remoting := remote.NewRemoting(remote.WithRemotingCompression(remote.BrotliCompression))
+		// get the address of the actor
+		err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+
+		assert.EqualValues(t, 1, pid.restartCount.Load())
+
+		// stop the actor after some time
+		pause.For(time.Second)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("When Zstandard compression", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort,
+				remote.WithCompression(remote.ZstdCompression))),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		// assert the actor restart count
+		pid := actorRef
+		assert.Zero(t, pid.restartCount.Load())
+		remoting := remote.NewRemoting(remote.WithRemotingCompression(remote.ZstdCompression))
+		// get the address of the actor
+		err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+
+		assert.EqualValues(t, 1, pid.restartCount.Load())
+
+		// stop the actor after some time
+		pause.For(time.Second)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("When Gzip compression", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort,
+				remote.WithCompression(remote.GzipCompression))),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		// assert the actor restart count
+		pid := actorRef
+		assert.Zero(t, pid.restartCount.Load())
+		remoting := remote.NewRemoting(remote.WithRemotingCompression(remote.GzipCompression))
+		// get the address of the actor
+		err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+
+		assert.EqualValues(t, 1, pid.restartCount.Load())
+
+		// stop the actor after some time
+		pause.For(time.Second)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
 }
 
 func TestRemotingStop(t *testing.T) {
@@ -4099,6 +4599,168 @@ func TestRemotingStop(t *testing.T) {
 		require.NoError(t, err)
 
 		pause.For(time.Second)
+		remoting.Close()
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("When Brotli Compression", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort,
+				remote.WithCompression(remote.BrotliCompression))),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		// assert the actor restart count
+		pid := actorRef
+		assert.Zero(t, pid.restartCount.Load())
+
+		remoting := remote.NewRemoting(remote.WithRemotingCompression(remote.BrotliCompression))
+
+		// get the address of the actor
+		err = remoting.RemoteStop(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+
+		pause.For(time.Second)
+
+		assert.Empty(t, sys.Actors())
+
+		// stop the actor after some time
+		pause.For(time.Second)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("When Zstandard Compression", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort,
+				remote.WithCompression(remote.ZstdCompression))),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		// assert the actor restart count
+		pid := actorRef
+		assert.Zero(t, pid.restartCount.Load())
+
+		remoting := remote.NewRemoting(remote.WithRemotingCompression(remote.ZstdCompression))
+
+		// get the address of the actor
+		err = remoting.RemoteStop(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+
+		pause.For(time.Second)
+
+		assert.Empty(t, sys.Actors())
+
+		// stop the actor after some time
+		pause.For(time.Second)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("When Gzip Compression", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort,
+				remote.WithCompression(remote.GzipCompression))),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		// assert the actor restart count
+		pid := actorRef
+		assert.Zero(t, pid.restartCount.Load())
+
+		remoting := remote.NewRemoting(remote.WithRemotingCompression(remote.GzipCompression))
+
+		// get the address of the actor
+		err = remoting.RemoteStop(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+
+		pause.For(time.Second)
+
+		assert.Empty(t, sys.Actors())
+
+		// stop the actor after some time
+		pause.For(time.Second)
+
 		remoting.Close()
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
@@ -4601,6 +5263,255 @@ func TestRemotingSpawn(t *testing.T) {
 		err = sys.Stop(ctx)
 		require.NoError(t, err)
 	})
+	t.Run("With Brotli compression", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		ports := dynaport.Get(1)
+		remotingPort := ports[0]
+		host := "127.0.0.1"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort,
+				remote.WithCompression(remote.BrotliCompression))),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		// register dependencies
+		dependency := NewMockDependency("test", "test", "test")
+		err = sys.Inject(dependency)
+		require.NoError(t, err)
+
+		// create an actor implementation and register it
+		actor := &exchanger{}
+		actorName := uuid.NewString()
+
+		remoting := remote.NewRemoting(remote.WithRemotingCompression(remote.BrotliCompression))
+		// fetching the address of the that actor should return nil address
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+		require.True(t, addr.Equals(address.NoSender()))
+
+		// register the actor
+		err = sys.Register(ctx, actor)
+		require.NoError(t, err)
+
+		// spawn the remote actor
+		request := &remote.SpawnRequest{
+			Name:           actorName,
+			Kind:           "actor.exchanger",
+			Singleton:      false,
+			Relocatable:    false,
+			EnableStashing: false,
+			Dependencies:   []extension.Dependency{dependency},
+		}
+		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
+		require.NoError(t, err)
+
+		// re-fetching the address of the actor should return not nil address after start
+		addr, err = remoting.RemoteLookup(ctx, host, remotingPort, actorName)
+		require.NoError(t, err)
+		require.NotNil(t, addr)
+
+		from := address.NoSender()
+		// send the message to exchanger actor one using remote messaging
+		reply, err := remoting.RemoteAsk(ctx, from, addr, new(testpb.TestReply), time.Minute)
+
+		require.NoError(t, err)
+		require.NotNil(t, reply)
+		require.True(t, reply.MessageIs(new(testpb.Reply)))
+
+		actual := new(testpb.Reply)
+		err = reply.UnmarshalTo(actual)
+		require.NoError(t, err)
+
+		expected := new(testpb.Reply)
+		assert.True(t, proto.Equal(expected, actual))
+
+		remoting.Close()
+		t.Cleanup(
+			func() {
+				err = sys.Stop(ctx)
+				assert.NoError(t, err)
+			},
+		)
+	})
+	t.Run("With Zstandard compression", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		ports := dynaport.Get(1)
+		remotingPort := ports[0]
+		host := "127.0.0.1"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort,
+				remote.WithCompression(remote.ZstdCompression))),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		// register dependencies
+		dependency := NewMockDependency("test", "test", "test")
+		err = sys.Inject(dependency)
+		require.NoError(t, err)
+
+		// create an actor implementation and register it
+		actor := &exchanger{}
+		actorName := uuid.NewString()
+
+		remoting := remote.NewRemoting(remote.WithRemotingCompression(remote.ZstdCompression))
+		// fetching the address of the that actor should return nil address
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+		require.True(t, addr.Equals(address.NoSender()))
+
+		// register the actor
+		err = sys.Register(ctx, actor)
+		require.NoError(t, err)
+
+		// spawn the remote actor
+		request := &remote.SpawnRequest{
+			Name:           actorName,
+			Kind:           "actor.exchanger",
+			Singleton:      false,
+			Relocatable:    false,
+			EnableStashing: false,
+			Dependencies:   []extension.Dependency{dependency},
+		}
+		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
+		require.NoError(t, err)
+
+		// re-fetching the address of the actor should return not nil address after start
+		addr, err = remoting.RemoteLookup(ctx, host, remotingPort, actorName)
+		require.NoError(t, err)
+		require.NotNil(t, addr)
+
+		from := address.NoSender()
+		// send the message to exchanger actor one using remote messaging
+		reply, err := remoting.RemoteAsk(ctx, from, addr, new(testpb.TestReply), time.Minute)
+
+		require.NoError(t, err)
+		require.NotNil(t, reply)
+		require.True(t, reply.MessageIs(new(testpb.Reply)))
+
+		actual := new(testpb.Reply)
+		err = reply.UnmarshalTo(actual)
+		require.NoError(t, err)
+
+		expected := new(testpb.Reply)
+		assert.True(t, proto.Equal(expected, actual))
+
+		remoting.Close()
+		t.Cleanup(
+			func() {
+				err = sys.Stop(ctx)
+				assert.NoError(t, err)
+			},
+		)
+	})
+	t.Run("With Gzip compression", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		ports := dynaport.Get(1)
+		remotingPort := ports[0]
+		host := "127.0.0.1"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort,
+				remote.WithCompression(remote.GzipCompression))),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		// register dependencies
+		dependency := NewMockDependency("test", "test", "test")
+		err = sys.Inject(dependency)
+		require.NoError(t, err)
+
+		// create an actor implementation and register it
+		actor := &exchanger{}
+		actorName := uuid.NewString()
+
+		remoting := remote.NewRemoting(remote.WithRemotingCompression(remote.GzipCompression))
+		// fetching the address of the that actor should return nil address
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+		require.True(t, addr.Equals(address.NoSender()))
+
+		// register the actor
+		err = sys.Register(ctx, actor)
+		require.NoError(t, err)
+
+		// spawn the remote actor
+		request := &remote.SpawnRequest{
+			Name:           actorName,
+			Kind:           "actor.exchanger",
+			Singleton:      false,
+			Relocatable:    false,
+			EnableStashing: false,
+			Dependencies:   []extension.Dependency{dependency},
+		}
+		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
+		require.NoError(t, err)
+
+		// re-fetching the address of the actor should return not nil address after start
+		addr, err = remoting.RemoteLookup(ctx, host, remotingPort, actorName)
+		require.NoError(t, err)
+		require.NotNil(t, addr)
+
+		from := address.NoSender()
+		// send the message to exchanger actor one using remote messaging
+		reply, err := remoting.RemoteAsk(ctx, from, addr, new(testpb.TestReply), time.Minute)
+
+		require.NoError(t, err)
+		require.NotNil(t, reply)
+		require.True(t, reply.MessageIs(new(testpb.Reply)))
+
+		actual := new(testpb.Reply)
+		err = reply.UnmarshalTo(actual)
+		require.NoError(t, err)
+
+		expected := new(testpb.Reply)
+		assert.True(t, proto.Equal(expected, actual))
+
+		remoting.Close()
+		t.Cleanup(
+			func() {
+				err = sys.Stop(ctx)
+				assert.NoError(t, err)
+			},
+		)
+	})
 }
 
 func TestRemotingReinstate(t *testing.T) {
@@ -4768,5 +5679,85 @@ func TestRemotingReinstate(t *testing.T) {
 		remoting.Close()
 		err = sys.Stop(ctx)
 		require.NoError(t, err)
+	})
+	t.Run("With Brotli compression", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort,
+				remote.WithCompression(remote.BrotliCompression))),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// let us disable remoting
+		actorsSystem := sys.(*actorSystem)
+		actorsSystem.remotingEnabled.Store(false)
+
+		remoting := remote.NewRemoting(remote.WithRemotingCompression(remote.BrotliCompression))
+		// create a test actor
+		actorName := "test"
+
+		err = remoting.RemoteReinstate(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.Error(t, err)
+
+		remoting.Close()
+		require.NoError(t, sys.Stop(ctx))
+	})
+	t.Run("With Zstandard compression", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort,
+				remote.WithCompression(remote.ZstdCompression))),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// let us disable remoting
+		actorsSystem := sys.(*actorSystem)
+		actorsSystem.remotingEnabled.Store(false)
+
+		remoting := remote.NewRemoting(remote.WithRemotingCompression(remote.ZstdCompression))
+		// create a test actor
+		actorName := "test"
+
+		err = remoting.RemoteReinstate(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.Error(t, err)
+
+		remoting.Close()
+		require.NoError(t, sys.Stop(ctx))
 	})
 }

@@ -1264,6 +1264,7 @@ type testClusterConfig struct {
 	relocationEnabled bool
 	extension         extension.Extension
 	dependency        extension.Dependency
+	compression       remote.Compression
 }
 
 type testClusterOption func(*testClusterConfig)
@@ -1291,6 +1292,12 @@ func withoutTestRelocation() testClusterOption {
 func withMockExtension(ext extension.Extension) testClusterOption {
 	return func(tcc *testClusterConfig) {
 		tcc.extension = ext
+	}
+}
+
+func withMockCompression(c remote.Compression) testClusterOption {
+	return func(tcc *testClusterConfig) {
+		tcc.compression = c
 	}
 }
 
@@ -1365,7 +1372,6 @@ func testSystem(t *testing.T, providerFactory providerFactory, opts ...testClust
 	// base options
 	options := []Option{
 		WithLogger(logger),
-		WithRemote(remote.NewConfig(host, remotingPort)),
 		WithCluster(
 			NewClusterConfig().
 				WithKinds(new(MockActor), new(MockEntity), new(MockGrainActor)).
@@ -1404,6 +1410,8 @@ func testSystem(t *testing.T, providerFactory providerFactory, opts ...testClust
 	if cfg.extension != nil {
 		options = append(options, WithExtensions(cfg.extension))
 	}
+
+	options = append(options, WithRemote(remote.NewConfig(host, remotingPort, remote.WithCompression(cfg.compression))))
 
 	system, err := NewActorSystem(actorSystemName, options...)
 	require.NotNil(t, system)

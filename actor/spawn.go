@@ -39,8 +39,9 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/internal/brotli"
 	"github.com/tochemey/goakt/v3/internal/cluster"
+	"github.com/tochemey/goakt/v3/internal/compression/brotli"
+	"github.com/tochemey/goakt/v3/internal/compression/zstd"
 	"github.com/tochemey/goakt/v3/internal/http"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
@@ -368,16 +369,36 @@ func (x *actorSystem) clusterClient(peer *cluster.Peer) internalpbconnect.Cluste
 		endpoint = http.URL(peer.Host, peer.RemotingPort)
 	}
 
-	return internalpbconnect.NewClusterServiceClient(
-		remoting.HTTPClient(),
-		endpoint,
-		brotli.WithCompression(),
-		connect.WithSendCompression(brotli.Name),
-		connect.WithSendMaxBytes(remoting.MaxReadFrameSize()),
-		connect.WithReadMaxBytes(remoting.MaxReadFrameSize()),
+	opts := []connect.ClientOption{
 		connectproto.WithBinary(
 			proto.MarshalOptions{},
 			proto.UnmarshalOptions{DiscardUnknown: true},
 		),
+	}
+
+	if remoting.MaxReadFrameSize() > 0 {
+		opts = append(opts,
+			connect.WithSendMaxBytes(remoting.MaxReadFrameSize()),
+			connect.WithReadMaxBytes(remoting.MaxReadFrameSize()),
+		)
+	}
+
+	switch remoting.Compression() {
+	case remote.GzipCompression:
+		opts = append(opts, connect.WithSendGzip())
+	case remote.ZstdCompression:
+		opts = append(opts, zstd.WithCompression())
+		opts = append(opts, connect.WithSendCompression(zstd.Name))
+	case remote.BrotliCompression:
+		opts = append(opts, brotli.WithCompression())
+		opts = append(opts, connect.WithSendCompression(brotli.Name))
+	default:
+		// pass
+	}
+
+	return internalpbconnect.NewClusterServiceClient(
+		remoting.HTTPClient(),
+		endpoint,
+		opts...,
 	)
 }

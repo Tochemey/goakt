@@ -41,8 +41,9 @@ import (
 
 	"github.com/tochemey/goakt/v3/address"
 	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/internal/brotli"
 	"github.com/tochemey/goakt/v3/internal/codec"
+	"github.com/tochemey/goakt/v3/internal/compression/brotli"
+	"github.com/tochemey/goakt/v3/internal/compression/zstd"
 	"github.com/tochemey/goakt/v3/internal/http"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
@@ -65,6 +66,7 @@ type Remoting interface {
 	MaxReadFrameSize() int
 	Close()
 	RemotingServiceClient(host string, port int) internalpbconnect.RemotingServiceClient
+	Compression() Compression
 }
 
 // RemotingOption sets the remoting option
@@ -91,12 +93,21 @@ func WithRemotingMaxReadFameSize(size int) RemotingOption {
 	}
 }
 
+// WithRemotingCompression sets the compression algorithm to use
+// when sending or receiving data.
+func WithRemotingCompression(c Compression) RemotingOption {
+	return func(r *remoting) {
+		r.compression = c
+	}
+}
+
 // Remoting defines the Remoting APIs
 // This requires Remoting is enabled on the connected actor system
 type remoting struct {
 	client           *nethttp.Client
 	tlsConfig        *tls.Config
 	maxReadFrameSize int
+	compression      Compression
 }
 
 var _ Remoting = (*remoting)(nil)
@@ -110,6 +121,7 @@ var _ Remoting = (*remoting)(nil)
 func NewRemoting(opts ...RemotingOption) Remoting {
 	r := &remoting{
 		maxReadFrameSize: DefaultMaxReadFrameSize,
+		compression:      NoCompression,
 	}
 
 	// apply the options
@@ -401,16 +413,42 @@ func (r *remoting) RemotingServiceClient(host string, port int) internalpbconnec
 		endpoint = http.URLs(host, port)
 	}
 
-	return internalpbconnect.NewRemotingServiceClient(
-		r.client,
-		endpoint,
-		brotli.WithCompression(),
-		connect.WithSendCompression(brotli.Name),
-		connect.WithSendMaxBytes(r.maxReadFrameSize),
-		connect.WithReadMaxBytes(r.maxReadFrameSize),
+	opts := []connect.ClientOption{
 		connectproto.WithBinary(
 			proto.MarshalOptions{},
 			proto.UnmarshalOptions{DiscardUnknown: true},
 		),
+	}
+
+	if r.maxReadFrameSize > 0 {
+		opts = append(opts, connect.WithReadMaxBytes(r.maxReadFrameSize))
+		opts = append(opts, connect.WithSendMaxBytes(r.maxReadFrameSize))
+	}
+
+	switch r.compression {
+	case GzipCompression:
+		// Connect clients send uncompressed requests and ask for gzipped responses by default
+		// As a result, specifying a compression of gzip for a client indicates it should also
+		// send gzipped requests
+		opts = append(opts, connect.WithSendGzip())
+	case ZstdCompression:
+		opts = append(opts, zstd.WithCompression())
+		opts = append(opts, connect.WithSendCompression(zstd.Name))
+	case BrotliCompression:
+		opts = append(opts, brotli.WithCompression())
+		opts = append(opts, connect.WithSendCompression(brotli.Name))
+	default:
+		// No compression
+	}
+
+	return internalpbconnect.NewRemotingServiceClient(
+		r.client,
+		endpoint,
+		opts...,
 	)
+}
+
+// Compression returns the compression algorithm used by the remoting instance
+func (r *remoting) Compression() Compression {
+	return r.compression
 }

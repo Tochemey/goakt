@@ -35,8 +35,9 @@ import (
 
 	"github.com/tochemey/goakt/v3/address"
 	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/internal/brotli"
 	"github.com/tochemey/goakt/v3/internal/chain"
+	"github.com/tochemey/goakt/v3/internal/compression/brotli"
+	"github.com/tochemey/goakt/v3/internal/compression/zstd"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v3/internal/locker"
@@ -505,17 +506,35 @@ func (x *Client) refreshNodesLoop() {
 
 // clusterClient returns the cluster service client
 func clusterClient(node *Node) internalpbconnect.ClusterServiceClient {
-	return internalpbconnect.NewClusterServiceClient(
-		node.HTTPClient(),
-		node.HTTPEndPoint(),
-		brotli.WithCompression(),
-		connect.WithSendCompression(brotli.Name),
-		connect.WithSendMaxBytes(node.Remoting().MaxReadFrameSize()),
-		connect.WithReadMaxBytes(node.Remoting().MaxReadFrameSize()),
+	opts := []connect.ClientOption{
 		connectproto.WithBinary(
 			proto.MarshalOptions{},
 			proto.UnmarshalOptions{DiscardUnknown: true},
 		),
+	}
+
+	if node.Remoting().MaxReadFrameSize() > 0 {
+		opts = append(opts,
+			connect.WithSendMaxBytes(node.Remoting().MaxReadFrameSize()),
+			connect.WithReadMaxBytes(node.Remoting().MaxReadFrameSize()),
+		)
+	}
+
+	switch node.Remoting().Compression() {
+	case remote.GzipCompression:
+		opts = append(opts, connect.WithSendGzip())
+	case remote.ZstdCompression:
+		opts = append(opts, zstd.WithCompression())
+		opts = append(opts, connect.WithSendCompression(zstd.Name))
+	case remote.BrotliCompression:
+		opts = append(opts, brotli.WithCompression())
+		opts = append(opts, connect.WithSendCompression(brotli.Name))
+	}
+
+	return internalpbconnect.NewClusterServiceClient(
+		node.HTTPClient(),
+		node.HTTPEndPoint(),
+		opts...,
 	)
 }
 

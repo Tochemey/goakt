@@ -51,6 +51,7 @@ type Config struct {
 	idleTimeout     time.Duration
 	bindAddr        string
 	bindPort        int
+	compression     Compression
 }
 
 var _ validation.Validator = (*Config)(nil)
@@ -69,6 +70,7 @@ func NewConfig(bindAddr string, bindPort int, opts ...Option) *Config {
 		idleTimeout:     1200 * time.Second,
 		bindAddr:        bindAddr,
 		bindPort:        bindPort,
+		compression:     NoCompression,
 	}
 
 	// apply the options
@@ -88,6 +90,7 @@ func DefaultConfig() *Config {
 		idleTimeout:     1200 * time.Second,
 		bindAddr:        "127.0.0.1",
 		bindPort:        0,
+		compression:     NoCompression,
 	}
 }
 
@@ -129,6 +132,11 @@ func (x *Config) BindAddr() string {
 // BindPort returns the bind port
 func (x *Config) BindPort() int {
 	return x.bindPort
+}
+
+// Compression returns the compression algorithm to use
+func (x *Config) Compression() Compression {
+	return x.compression
 }
 
 // Sanitize the configuration
