@@ -26,6 +26,7 @@ package zstd
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"runtime"
 	"strings"
@@ -62,10 +63,10 @@ func TestZstdCompressionRoundTrip(t *testing.T) {
 
 	require.NoError(t, compressor.Close())
 
-	pooledCompressor.zstdCompressor.mu.RLock()
-	assert.True(t, pooledCompressor.zstdCompressor.closed)
-	assert.Nil(t, pooledCompressor.zstdCompressor.encoder)
-	pooledCompressor.zstdCompressor.mu.RUnlock()
+	pooledCompressor.mu.Lock()
+	assert.True(t, pooledCompressor.returned)
+	assert.Nil(t, pooledCompressor.zstdCompressor)
+	pooledCompressor.mu.Unlock()
 
 	decompressor := newDecompressor()
 
@@ -80,10 +81,10 @@ func TestZstdCompressionRoundTrip(t *testing.T) {
 
 	require.NoError(t, decompressor.Close())
 
-	pooledDecompressor.zstdDecompressor.mu.RLock()
-	assert.True(t, pooledDecompressor.zstdDecompressor.closed)
-	assert.Nil(t, pooledDecompressor.zstdDecompressor.decoder)
-	pooledDecompressor.zstdDecompressor.mu.RUnlock()
+	pooledDecompressor.mu.Lock()
+	assert.True(t, pooledDecompressor.returned)
+	assert.Nil(t, pooledDecompressor.zstdDecompressor)
+	pooledDecompressor.mu.Unlock()
 }
 
 // nolint
@@ -118,10 +119,10 @@ func TestZstdCompressionLargePayload(t *testing.T) {
 
 	require.NoError(t, compressor.Close())
 
-	pooledCompressor.zstdCompressor.mu.RLock()
-	assert.True(t, pooledCompressor.zstdCompressor.closed)
-	assert.Nil(t, pooledCompressor.zstdCompressor.encoder)
-	pooledCompressor.zstdCompressor.mu.RUnlock()
+	pooledCompressor.mu.Lock()
+	assert.True(t, pooledCompressor.returned)
+	assert.Nil(t, pooledCompressor.zstdCompressor)
+	pooledCompressor.mu.Unlock()
 
 	assert.Less(t, compressed.Len(), len(input), "compression should reduce large payload size")
 
@@ -138,15 +139,124 @@ func TestZstdCompressionLargePayload(t *testing.T) {
 
 	require.NoError(t, decompressor.Close())
 
-	pooledDecompressor.zstdDecompressor.mu.RLock()
-	assert.True(t, pooledDecompressor.zstdDecompressor.closed)
-	assert.Nil(t, pooledDecompressor.zstdDecompressor.decoder)
-	pooledDecompressor.zstdDecompressor.mu.RUnlock()
+	pooledDecompressor.mu.Lock()
+	assert.True(t, pooledDecompressor.returned)
+	assert.Nil(t, pooledDecompressor.zstdDecompressor)
+	pooledDecompressor.mu.Unlock()
 
 	post := currentHeapAlloc()
 	if post > baseline {
 		assert.LessOrEqual(t, post-baseline, uint64(maxExpectedGrowth), "heap should be near baseline after pooled cleanup")
 	}
+}
+
+func TestZstdDecompressorReuseAfterClose(t *testing.T) {
+	newDecompressor, newCompressor := zstdCompressions()
+
+	firstPayload := "first payload"
+	secondPayload := "second payload"
+
+	var compressed bytes.Buffer
+	compressor := newCompressor()
+	compressor.Reset(&compressed)
+	_, err := compressor.Write([]byte(firstPayload))
+	require.NoError(t, err)
+	require.NoError(t, compressor.Close())
+
+	decompressor, ok := newDecompressor().(*pooledDecompressor)
+	require.True(t, ok)
+
+	require.NoError(t, decompressor.Reset(&compressed))
+	decoded, err := io.ReadAll(decompressor)
+	require.NoError(t, err)
+	assert.Equal(t, firstPayload, string(decoded))
+	require.NoError(t, decompressor.Close())
+
+	compressed.Reset()
+	compressor = newCompressor()
+	compressor.Reset(&compressed)
+	_, err = compressor.Write([]byte(secondPayload))
+	require.NoError(t, err)
+	require.NoError(t, compressor.Close())
+
+	require.NoError(t, decompressor.Reset(&compressed))
+	decoded, err = io.ReadAll(decompressor)
+	require.NoError(t, err)
+	assert.Equal(t, secondPayload, string(decoded))
+	require.NoError(t, decompressor.Close())
+}
+
+func TestZstdCompressorReuseAfterClose(t *testing.T) {
+	_, newCompressor := zstdCompressions()
+
+	var buf bytes.Buffer
+	compressor := newCompressor()
+
+	compressor.Reset(&buf)
+	_, err := compressor.Write([]byte("initial"))
+	require.NoError(t, err)
+	require.NoError(t, compressor.Close())
+
+	buf.Reset()
+	compressor.Reset(&buf)
+	_, err = compressor.Write([]byte("reused"))
+	require.NoError(t, err)
+	require.NoError(t, compressor.Close())
+
+	pooled, ok := compressor.(*pooledCompressor)
+	require.True(t, ok)
+
+	pooled.mu.Lock()
+	assert.True(t, pooled.returned)
+	assert.Nil(t, pooled.zstdCompressor)
+	pooled.mu.Unlock()
+}
+
+func TestZstdCompressorWritePropagatesInitError(t *testing.T) {
+	_, newCompressor := zstdCompressions()
+
+	compressor := newCompressor()
+	compressor.Reset(io.Discard)
+
+	pooled, ok := compressor.(*pooledCompressor)
+	require.True(t, ok)
+
+	pooled.zstdCompressor.mu.Lock()
+	sentinel := errors.New("encoder boom")
+	pooled.zstdCompressor.initErr = sentinel
+	pooled.zstdCompressor.mu.Unlock()
+
+	_, err := compressor.Write([]byte("data"))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, sentinel)
+
+	err = compressor.Close()
+	require.Error(t, err)
+	assert.ErrorIs(t, err, sentinel)
+}
+
+func TestZstdDecompressorReadAfterClose(t *testing.T) {
+	newDecompressor, newCompressor := zstdCompressions()
+
+	var compressed bytes.Buffer
+	compressor := newCompressor()
+	compressor.Reset(&compressed)
+	_, err := compressor.Write([]byte("payload"))
+	require.NoError(t, err)
+	require.NoError(t, compressor.Close())
+
+	decompressor, ok := newDecompressor().(*pooledDecompressor)
+	require.True(t, ok)
+	require.NoError(t, decompressor.Reset(&compressed))
+
+	require.NoError(t, decompressor.zstdDecompressor.Close())
+
+	buf := make([]byte, 4)
+	n, err := decompressor.Read(buf)
+	assert.Equal(t, 0, n)
+	assert.Equal(t, io.EOF, err)
+
+	require.NoError(t, decompressor.Close())
 }
 
 // nolint

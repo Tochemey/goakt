@@ -32,7 +32,7 @@ const (
 	// NoCompression indicates that no compression should be used.
 	NoCompression Compression = iota
 	// GzipCompression indicates that gzip compression should be used.
-	GzipCompression = iota
+	GzipCompression
 	// ZstdCompression indicates that zstd compression should be used.
 	ZstdCompression
 	// BrotliCompression indicates that brotli compression should be used.

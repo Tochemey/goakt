@@ -60,10 +60,11 @@ func TestClient(t *testing.T) {
 		// start the NATS server
 		srv := startNatsServer(t)
 		addr := srv.Addr().String()
+		compression := remote.NoCompression
 
-		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr)
-		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr)
-		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
+		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr, compression)
+		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr, compression)
+		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr, compression)
 
 		// wait for a proper and clean setup of the cluster
 		pause.For(time.Second)
@@ -140,9 +141,10 @@ func TestClient(t *testing.T) {
 		srv := startNatsServer(t)
 		addr := srv.Addr().String()
 
-		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr)
-		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr)
-		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
+		compression := remote.GzipCompression
+		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr, compression)
+		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr, compression)
+		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr, compression)
 
 		// wait for a proper and clean setup of the cluster
 		pause.For(time.Second)
@@ -226,9 +228,11 @@ func TestClient(t *testing.T) {
 		srv := startNatsServer(t)
 		addr := srv.Addr().String()
 
-		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr)
-		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr)
-		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
+		compression := remote.ZstdCompression
+
+		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr, compression)
+		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr, compression)
+		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr, compression)
 
 		// wait for a proper and clean setup of the cluster
 		pause.For(time.Second)
@@ -312,10 +316,11 @@ func TestClient(t *testing.T) {
 		// start the NATS server
 		srv := startNatsServer(t)
 		addr := srv.Addr().String()
+		compression := remote.BrotliCompression
 
-		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr)
-		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr)
-		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
+		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr, compression)
+		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr, compression)
+		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr, compression)
 
 		// wait for a proper and clean setup of the cluster
 		pause.For(time.Second)
@@ -395,10 +400,11 @@ func TestClient(t *testing.T) {
 		// start the NATS server
 		srv := startNatsServer(t)
 		addr := srv.Addr().String()
+		compression := remote.BrotliCompression
 
-		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr)
-		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr)
-		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
+		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr, compression)
+		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr, compression)
+		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr, compression)
 
 		// wait for a proper and clean setup of the cluster
 		pause.For(time.Second)
@@ -477,10 +483,11 @@ func TestClient(t *testing.T) {
 		// start the NATS server
 		srv := startNatsServer(t)
 		addr := srv.Addr().String()
+		compression := remote.BrotliCompression
 
-		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr)
-		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr)
-		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
+		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr, compression)
+		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr, compression)
+		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr, compression)
 
 		// wait for a proper and clean setup of the cluster
 		pause.For(time.Second)
@@ -571,9 +578,9 @@ func TestClient(t *testing.T) {
 		srv := startNatsServer(t)
 		addr := srv.Addr().String()
 
-		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr)
-		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr)
-		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
+		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr, remote.NoCompression)
+		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr, remote.NoCompression)
+		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr, remote.NoCompression)
 
 		// wait for a proper and clean setup of the cluster
 		pause.For(time.Second)
@@ -658,9 +665,9 @@ func TestClient(t *testing.T) {
 		srv := startNatsServer(t)
 		addr := srv.Addr().String()
 
-		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr)
-		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr)
-		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
+		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr, remote.NoCompression)
+		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr, remote.NoCompression)
+		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr, remote.NoCompression)
 
 		// wait for a proper and clean setup of the cluster
 		pause.For(time.Second)
@@ -732,9 +739,9 @@ func TestClient(t *testing.T) {
 		srv := startNatsServer(t)
 		addr := srv.Addr().String()
 
-		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr)
-		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr)
-		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
+		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr, remote.NoCompression)
+		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr, remote.NoCompression)
+		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr, remote.NoCompression)
 
 		// wait for a proper and clean setup of the cluster
 		pause.For(time.Second)
@@ -818,10 +825,11 @@ func TestClient(t *testing.T) {
 		// start the NATS server
 		srv := startNatsServer(t)
 		addr := srv.Addr().String()
+		compression := remote.BrotliCompression
 
-		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr)
-		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr)
-		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
+		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr, compression)
+		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr, compression)
+		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr, compression)
 
 		// wait for a proper and clean setup of the cluster
 		pause.For(time.Second)
@@ -872,10 +880,11 @@ func TestClient(t *testing.T) {
 		// start the NATS server
 		srv := startNatsServer(t)
 		addr := srv.Addr().String()
+		compression := remote.GzipCompression
 
-		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr)
-		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr)
-		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
+		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr, compression)
+		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr, compression)
+		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr, compression)
 
 		// wait for a proper and clean setup of the cluster
 		pause.For(time.Second)
@@ -921,10 +930,11 @@ func TestClient(t *testing.T) {
 		// start the NATS server
 		srv := startNatsServer(t)
 		addr := srv.Addr().String()
+		compression := remote.ZstdCompression
 
-		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr)
-		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr)
-		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
+		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr, compression)
+		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr, compression)
+		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr, compression)
 
 		// wait for a proper and clean setup of the cluster
 		pause.For(time.Second)
@@ -974,9 +984,9 @@ func TestClient(t *testing.T) {
 		srv := startNatsServer(t)
 		addr := srv.Addr().String()
 
-		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr)
-		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr)
-		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
+		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr, remote.NoCompression)
+		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr, remote.NoCompression)
+		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr, remote.NoCompression)
 
 		// wait for a proper and clean setup of the cluster
 		pause.For(time.Second)
@@ -1025,9 +1035,9 @@ func TestClient(t *testing.T) {
 		srv := startNatsServer(t)
 		addr := srv.Addr().String()
 
-		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr)
-		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr)
-		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr)
+		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr, remote.NoCompression)
+		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr, remote.NoCompression)
+		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr, remote.NoCompression)
 
 		// wait for a proper and clean setup of the cluster
 		pause.For(time.Second)
@@ -1145,7 +1155,7 @@ func startNatsServer(t *testing.T) *natsserver.Server {
 	return serv
 }
 
-func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string) (system actors.ActorSystem, remotingHost string, remotingPort int, provider discovery.Provider) {
+func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string, compression remote.Compression) (system actors.ActorSystem, remotingHost string, remotingPort int, provider discovery.Provider) {
 	ctx := context.TODO()
 
 	// generate the ports for the single startNode
@@ -1196,7 +1206,7 @@ func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string) (sy
 	system, err := actors.NewActorSystem(
 		actorSystemName,
 		actors.WithLogger(logger),
-		actors.WithRemote(remote.NewConfig(host, remotePort)),
+		actors.WithRemote(remote.NewConfig(host, remotePort, remote.WithCompression(compression))),
 		actors.WithCluster(clusterConfig),
 	)
 

@@ -392,6 +392,8 @@ func (x *actorSystem) clusterClient(peer *cluster.Peer) internalpbconnect.Cluste
 	case remote.BrotliCompression:
 		opts = append(opts, brotli.WithCompression())
 		opts = append(opts, connect.WithSendCompression(brotli.Name))
+	default:
+		// pass
 	}
 
 	return internalpbconnect.NewClusterServiceClient(

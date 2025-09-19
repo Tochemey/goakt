@@ -24,7 +24,10 @@
 
 package zstd
 
-import "sync"
+import (
+	"io"
+	"sync"
+)
 
 // Pool for reusing decompressors to reduce allocations
 var decompressorPool = sync.Pool{
@@ -55,13 +58,38 @@ func (p *pooledDecompressor) Close() error {
 		return nil
 	}
 
-	err := p.zstdDecompressor.Close()
+	var err error
+	if p.zstdDecompressor != nil {
+		err = p.zstdDecompressor.Close()
+		// Return to pool for reuse
+		decompressorPool.Put(p.zstdDecompressor)
+		p.zstdDecompressor = nil
+	}
 
-	// Return to pool for reuse
-	decompressorPool.Put(p.zstdDecompressor)
 	p.returned = true
 
 	return err
+}
+
+func (p *pooledDecompressor) Reset(r io.Reader) error {
+	p.mu.Lock()
+	if p.returned || p.zstdDecompressor == nil {
+		d := decompressorPool.Get().(*zstdDecompressor)
+		d.mu.Lock()
+		d.closed = false
+		d.decoder = nil
+		d.mu.Unlock()
+		p.zstdDecompressor = d
+		p.returned = false
+	}
+	d := p.zstdDecompressor
+	p.mu.Unlock()
+
+	if d == nil {
+		return io.ErrClosedPipe
+	}
+
+	return d.Reset(r)
 }
 
 // pooledCompressor wraps zstdCompressor to return to pool on close
@@ -79,11 +107,37 @@ func (p *pooledCompressor) Close() error {
 		return nil
 	}
 
-	err := p.zstdCompressor.Close()
+	var err error
+	if p.zstdCompressor != nil {
+		err = p.zstdCompressor.Close()
+		// Return to pool for reuse
+		compressorPool.Put(p.zstdCompressor)
+		p.zstdCompressor = nil
+	}
 
-	// Return to pool for reuse
-	compressorPool.Put(p.zstdCompressor)
 	p.returned = true
 
 	return err
+}
+
+func (p *pooledCompressor) Reset(w io.Writer) {
+	p.mu.Lock()
+	if p.returned || p.zstdCompressor == nil {
+		c := compressorPool.Get().(*zstdCompressor)
+		c.mu.Lock()
+		c.closed = false
+		c.encoder = nil
+		c.initErr = nil
+		c.mu.Unlock()
+		p.zstdCompressor = c
+		p.returned = false
+	}
+	c := p.zstdCompressor
+	p.mu.Unlock()
+
+	if c == nil {
+		return
+	}
+
+	c.Reset(w)
 }
