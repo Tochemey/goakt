@@ -69,10 +69,10 @@ func (Strategy) EnumDescriptor() ([]byte, []int) {
 	return file_internal_supervision_proto_rawDescGZIP(), []int{0}
 }
 
-// Down message is sent by a child
+// Panicking message is sent by a child
 // actor to its parent when it is panicking or returning an error
 // while processing messages
-type Down struct {
+type Panicking struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Specifies the actor id
 	ActorId string `protobuf:"bytes,1,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
@@ -82,11 +82,11 @@ type Down struct {
 	//
 	// Types that are valid to be assigned to Directive:
 	//
-	//	*Down_Stop
-	//	*Down_Resume
-	//	*Down_Restart
-	//	*Down_Escalate
-	Directive isDown_Directive `protobuf_oneof:"directive"`
+	//	*Panicking_Stop
+	//	*Panicking_Resume
+	//	*Panicking_Restart
+	//	*Panicking_Escalate
+	Directive isPanicking_Directive `protobuf_oneof:"directive"`
 	// Specifies the strategy
 	Strategy Strategy `protobuf:"varint,7,opt,name=strategy,proto3,enum=internalpb.Strategy" json:"strategy,omitempty"`
 	// Specifies the message that triggered the failure
@@ -97,20 +97,20 @@ type Down struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *Down) Reset() {
-	*x = Down{}
+func (x *Panicking) Reset() {
+	*x = Panicking{}
 	mi := &file_internal_supervision_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *Down) String() string {
+func (x *Panicking) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*Down) ProtoMessage() {}
+func (*Panicking) ProtoMessage() {}
 
-func (x *Down) ProtoReflect() protoreflect.Message {
+func (x *Panicking) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_supervision_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -122,116 +122,116 @@ func (x *Down) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use Down.ProtoReflect.Descriptor instead.
-func (*Down) Descriptor() ([]byte, []int) {
+// Deprecated: Use Panicking.ProtoReflect.Descriptor instead.
+func (*Panicking) Descriptor() ([]byte, []int) {
 	return file_internal_supervision_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *Down) GetActorId() string {
+func (x *Panicking) GetActorId() string {
 	if x != nil {
 		return x.ActorId
 	}
 	return ""
 }
 
-func (x *Down) GetErrorMessage() string {
+func (x *Panicking) GetErrorMessage() string {
 	if x != nil {
 		return x.ErrorMessage
 	}
 	return ""
 }
 
-func (x *Down) GetDirective() isDown_Directive {
+func (x *Panicking) GetDirective() isPanicking_Directive {
 	if x != nil {
 		return x.Directive
 	}
 	return nil
 }
 
-func (x *Down) GetStop() *StopDirective {
+func (x *Panicking) GetStop() *StopDirective {
 	if x != nil {
-		if x, ok := x.Directive.(*Down_Stop); ok {
+		if x, ok := x.Directive.(*Panicking_Stop); ok {
 			return x.Stop
 		}
 	}
 	return nil
 }
 
-func (x *Down) GetResume() *ResumeDirective {
+func (x *Panicking) GetResume() *ResumeDirective {
 	if x != nil {
-		if x, ok := x.Directive.(*Down_Resume); ok {
+		if x, ok := x.Directive.(*Panicking_Resume); ok {
 			return x.Resume
 		}
 	}
 	return nil
 }
 
-func (x *Down) GetRestart() *RestartDirective {
+func (x *Panicking) GetRestart() *RestartDirective {
 	if x != nil {
-		if x, ok := x.Directive.(*Down_Restart); ok {
+		if x, ok := x.Directive.(*Panicking_Restart); ok {
 			return x.Restart
 		}
 	}
 	return nil
 }
 
-func (x *Down) GetEscalate() *EscalateDirective {
+func (x *Panicking) GetEscalate() *EscalateDirective {
 	if x != nil {
-		if x, ok := x.Directive.(*Down_Escalate); ok {
+		if x, ok := x.Directive.(*Panicking_Escalate); ok {
 			return x.Escalate
 		}
 	}
 	return nil
 }
 
-func (x *Down) GetStrategy() Strategy {
+func (x *Panicking) GetStrategy() Strategy {
 	if x != nil {
 		return x.Strategy
 	}
 	return Strategy_STRATEGY_ONE_FOR_ONE
 }
 
-func (x *Down) GetMessage() *anypb.Any {
+func (x *Panicking) GetMessage() *anypb.Any {
 	if x != nil {
 		return x.Message
 	}
 	return nil
 }
 
-func (x *Down) GetTimestamp() *timestamppb.Timestamp {
+func (x *Panicking) GetTimestamp() *timestamppb.Timestamp {
 	if x != nil {
 		return x.Timestamp
 	}
 	return nil
 }
 
-type isDown_Directive interface {
-	isDown_Directive()
+type isPanicking_Directive interface {
+	isPanicking_Directive()
 }
 
-type Down_Stop struct {
+type Panicking_Stop struct {
 	Stop *StopDirective `protobuf:"bytes,3,opt,name=stop,proto3,oneof"`
 }
 
-type Down_Resume struct {
+type Panicking_Resume struct {
 	Resume *ResumeDirective `protobuf:"bytes,4,opt,name=resume,proto3,oneof"`
 }
 
-type Down_Restart struct {
+type Panicking_Restart struct {
 	Restart *RestartDirective `protobuf:"bytes,5,opt,name=restart,proto3,oneof"`
 }
 
-type Down_Escalate struct {
+type Panicking_Escalate struct {
 	Escalate *EscalateDirective `protobuf:"bytes,6,opt,name=escalate,proto3,oneof"`
 }
 
-func (*Down_Stop) isDown_Directive() {}
+func (*Panicking_Stop) isPanicking_Directive() {}
 
-func (*Down_Resume) isDown_Directive() {}
+func (*Panicking_Resume) isPanicking_Directive() {}
 
-func (*Down_Restart) isDown_Directive() {}
+func (*Panicking_Restart) isPanicking_Directive() {}
 
-func (*Down_Escalate) isDown_Directive() {}
+func (*Panicking_Escalate) isPanicking_Directive() {}
 
 // StopDirective defines the supervisor stop directive
 type StopDirective struct {
@@ -407,8 +407,8 @@ var File_internal_supervision_proto protoreflect.FileDescriptor
 const file_internal_supervision_proto_rawDesc = "" +
 	"\n" +
 	"\x1ainternal/supervision.proto\x12\n" +
-	"internalpb\x1a\x19google/protobuf/any.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xce\x03\n" +
-	"\x04Down\x12\x19\n" +
+	"internalpb\x1a\x19google/protobuf/any.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xd3\x03\n" +
+	"\tPanicking\x12\x19\n" +
 	"\bactor_id\x18\x01 \x01(\tR\aactorId\x12#\n" +
 	"\rerror_message\x18\x02 \x01(\tR\ferrorMessage\x12/\n" +
 	"\x04stop\x18\x03 \x01(\v2\x19.internalpb.StopDirectiveH\x00R\x04stop\x125\n" +
@@ -450,7 +450,7 @@ var file_internal_supervision_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_internal_supervision_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_internal_supervision_proto_goTypes = []any{
 	(Strategy)(0),                 // 0: internalpb.Strategy
-	(*Down)(nil),                  // 1: internalpb.Down
+	(*Panicking)(nil),             // 1: internalpb.Panicking
 	(*StopDirective)(nil),         // 2: internalpb.StopDirective
 	(*ResumeDirective)(nil),       // 3: internalpb.ResumeDirective
 	(*EscalateDirective)(nil),     // 4: internalpb.EscalateDirective
@@ -459,13 +459,13 @@ var file_internal_supervision_proto_goTypes = []any{
 	(*timestamppb.Timestamp)(nil), // 7: google.protobuf.Timestamp
 }
 var file_internal_supervision_proto_depIdxs = []int32{
-	2, // 0: internalpb.Down.stop:type_name -> internalpb.StopDirective
-	3, // 1: internalpb.Down.resume:type_name -> internalpb.ResumeDirective
-	5, // 2: internalpb.Down.restart:type_name -> internalpb.RestartDirective
-	4, // 3: internalpb.Down.escalate:type_name -> internalpb.EscalateDirective
-	0, // 4: internalpb.Down.strategy:type_name -> internalpb.Strategy
-	6, // 5: internalpb.Down.message:type_name -> google.protobuf.Any
-	7, // 6: internalpb.Down.timestamp:type_name -> google.protobuf.Timestamp
+	2, // 0: internalpb.Panicking.stop:type_name -> internalpb.StopDirective
+	3, // 1: internalpb.Panicking.resume:type_name -> internalpb.ResumeDirective
+	5, // 2: internalpb.Panicking.restart:type_name -> internalpb.RestartDirective
+	4, // 3: internalpb.Panicking.escalate:type_name -> internalpb.EscalateDirective
+	0, // 4: internalpb.Panicking.strategy:type_name -> internalpb.Strategy
+	6, // 5: internalpb.Panicking.message:type_name -> google.protobuf.Any
+	7, // 6: internalpb.Panicking.timestamp:type_name -> google.protobuf.Timestamp
 	7, // [7:7] is the sub-list for method output_type
 	7, // [7:7] is the sub-list for method input_type
 	7, // [7:7] is the sub-list for extension type_name
@@ -479,10 +479,10 @@ func file_internal_supervision_proto_init() {
 		return
 	}
 	file_internal_supervision_proto_msgTypes[0].OneofWrappers = []any{
-		(*Down_Stop)(nil),
-		(*Down_Resume)(nil),
-		(*Down_Restart)(nil),
-		(*Down_Escalate)(nil),
+		(*Panicking_Stop)(nil),
+		(*Panicking_Resume)(nil),
+		(*Panicking_Restart)(nil),
+		(*Panicking_Escalate)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

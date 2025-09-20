@@ -63,7 +63,7 @@ import (
 //   - This method abstracts away the details of Grain lifecycle management.
 //   - Use this to obtain a reference to a Grain for message passing or further operations.
 func (x *actorSystem) GrainIdentity(ctx context.Context, name string, factory GrainFactory, opts ...GrainOption) (*GrainIdentity, error) {
-	if !x.started.Load() || x.isShuttingDown() {
+	if !x.started.Load() || x.isStopping() {
 		return nil, gerrors.ErrActorSystemNotStarted
 	}
 
@@ -81,7 +81,7 @@ func (x *actorSystem) GrainIdentity(ctx context.Context, name string, factory Gr
 	}
 
 	// make sure we don't interfere with system actors.
-	if isReservedName(identity.Name()) {
+	if isSystemName(identity.Name()) {
 		return nil, gerrors.NewErrReservedName(identity.String())
 	}
 
@@ -143,7 +143,7 @@ func (x *actorSystem) GrainIdentity(ctx context.Context, name string, factory Gr
 // Returns:
 //   - error: An error if the message could not be delivered or the system is not started.
 func (x *actorSystem) TellGrain(ctx context.Context, identity *GrainIdentity, message proto.Message) error {
-	if !x.started.Load() || x.isShuttingDown() {
+	if !x.started.Load() || x.isStopping() {
 		return gerrors.ErrActorSystemNotStarted
 	}
 
@@ -175,7 +175,7 @@ func (x *actorSystem) TellGrain(ctx context.Context, identity *GrainIdentity, me
 //   - response: The response message from the Grain, if successful.
 //   - error: An error if the request fails, times out, or the system is not started.
 func (x *actorSystem) AskGrain(ctx context.Context, identity *GrainIdentity, message proto.Message, timeout time.Duration) (response proto.Message, err error) {
-	if !x.started.Load() || x.isShuttingDown() {
+	if !x.started.Load() || x.isStopping() {
 		return nil, gerrors.ErrActorSystemNotStarted
 	}
 
@@ -210,7 +210,7 @@ func (x *actorSystem) AskGrain(ctx context.Context, identity *GrainIdentity, mes
 //   - This method abstracts away the details of Grain lifecycle management.
 //   - Use this to obtain references to all active Grains for monitoring, diagnostics, or administrative purposes.
 func (x *actorSystem) Grains(ctx context.Context, timeout time.Duration) []*GrainIdentity {
-	if !x.started.Load() || x.isShuttingDown() {
+	if !x.started.Load() || x.isStopping() {
 		return nil
 	}
 
@@ -276,7 +276,7 @@ func (x *actorSystem) RemoteAskGrain(ctx context.Context, request *connect.Reque
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.Join(err, gerrors.ErrInvalidGrainIdentity))
 	}
 
-	if isReservedName(identity.Name()) {
+	if isSystemName(identity.Name()) {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.NewErrReservedName(identity.String()))
 	}
 
@@ -329,7 +329,7 @@ func (x *actorSystem) RemoteTellGrain(ctx context.Context, request *connect.Requ
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.Join(err, gerrors.ErrInvalidGrainIdentity))
 	}
 
-	if isReservedName(identity.Name()) {
+	if isSystemName(identity.Name()) {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.NewErrReservedName(identity.String()))
 	}
 
@@ -539,7 +539,7 @@ func (x *actorSystem) recreateGrain(ctx context.Context, serializedGrain *intern
 	logger.Infof("recreating grain (%s)...", serializedGrain.GrainId.GetValue())
 
 	// make sure the grain is not a system grain
-	if isReservedName(serializedGrain.GrainId.GetValue()) {
+	if isSystemName(serializedGrain.GrainId.GetValue()) {
 		return gerrors.NewErrReservedName(serializedGrain.GetGrainId().GetValue())
 	}
 

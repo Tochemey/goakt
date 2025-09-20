@@ -27,7 +27,6 @@ package actor
 import (
 	"context"
 
-	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/log"
@@ -65,7 +64,9 @@ func (x *systemGuardian) Receive(ctx *ReceiveContext) {
 		// TODO: TBD with the error
 		_ = x.completeRebalancing(msg)
 	case *goaktpb.Terminated:
-		x.handleTerminated(ctx.Context(), msg)
+		// pass
+	case *goaktpb.PanicSignal:
+		x.handlePanicSignal(ctx)
 	default:
 		ctx.Unhandled()
 	}
@@ -85,20 +86,17 @@ func (x *systemGuardian) handlePostStart(ctx *ReceiveContext) {
 	x.logger.Infof("%s started successfully", x.pid.Name())
 }
 
-// handleTerminated handles Terminated message
-func (x *systemGuardian) handleTerminated(ctx context.Context, msg *goaktpb.Terminated) {
-	actorID := address.From(msg.GetAddress()).String()
+func (x *systemGuardian) handlePanicSignal(ctx *ReceiveContext) {
 	systemName := x.system.Name()
-	addr, _ := address.Parse(actorID)
-	actorName := addr.Name()
-	if !x.system.isShuttingDown() && isReservedName(actorName) {
+	actorName := ctx.Sender().Name()
+	if !x.system.isStopping() && isSystemName(actorName) {
 		// log a message error and stop the actor system
 		x.logger.Warnf("%s is down. %s is going to shutdown. Kindly check logs and fix any potential issue with the system",
-			actorID,
+			actorName,
 			systemName)
 
 		// blindly shutdown the actor system. No need to check any error
-		_ = x.system.Stop(context.WithoutCancel(ctx))
+		_ = x.system.Stop(context.WithoutCancel(ctx.Context()))
 	}
 }
 

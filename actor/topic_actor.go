@@ -369,7 +369,7 @@ func (x *actorSystem) spawnTopicActor(ctx context.Context) error {
 		WithSupervisor(
 			NewSupervisor(
 				WithStrategy(OneForOneStrategy),
-				WithAnyErrorDirective(RestartDirective),
+				WithAnyErrorDirective(ResumeDirective),
 			),
 		),
 	)

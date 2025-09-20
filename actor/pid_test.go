@@ -169,6 +169,41 @@ func TestReceive(t *testing.T) {
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 }
+
+func TestMessageOrdering(t *testing.T) {
+	ctx := context.Background()
+	actorSystem, err := NewActorSystem("fifo", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	require.NoError(t, actorSystem.Start(ctx))
+	defer func() { _ = actorSystem.Stop(ctx) }()
+
+	expected := 128
+	fifoActor := NewMockFIFO(expected)
+	pidName := "fifo-" + uuid.NewString()
+	pid, err := actorSystem.Spawn(ctx, pidName, fifoActor)
+	require.NoError(t, err)
+	defer func() { _ = pid.Shutdown(ctx) }()
+
+	for i := range expected {
+		msg := &testpb.TestCount{Value: int32(i)}
+		require.NoError(t, Tell(ctx, pid, msg))
+	}
+
+	select {
+	case <-fifoActor.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for FIFO actor to receive %d messages", expected)
+	}
+
+	require.Len(t, fifoActor.Seen(), expected)
+	expectedOrder := make([]int32, expected)
+	for i := range expectedOrder {
+		expectedOrder[i] = int32(i)
+	}
+	assert.Equal(t, expectedOrder, fifoActor.Seen())
+}
+
 func TestPassivation(t *testing.T) {
 	t.Run("With actor shutdown failure", func(t *testing.T) {
 		ctx := context.TODO()
@@ -1573,6 +1608,44 @@ func TestSupervisorStrategy(t *testing.T) {
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
 		assert.NoError(t, actorSystem.Stop(ctx))
+	})
+
+	t.Run("When No Parent found actor is suspended", func(t *testing.T) {
+		ctx := context.TODO()
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemote(remote.NewConfig(host, ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		pause.For(time.Second)
+
+		parent := actorSystem.NoSender()
+
+		// create the child actor
+		escalationStrategy := NewSupervisor(WithDirective(&errors.PanicError{}, EscalateDirective))
+		child, err := parent.SpawnChild(ctx, "noSenderChild", NewMockSupervised(), WithSupervisor(escalationStrategy))
+		require.NoError(t, err)
+		require.NotNil(t, child)
+
+		// send a test panic message to the actor
+		require.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
+
+		// wait for the child to properly shutdown
+		pause.For(time.Second)
+
+		// assert the actor state
+		require.False(t, child.IsRunning())
+		require.True(t, child.IsSuspended())
+
+		//stop the actor
+		require.NoError(t, actorSystem.Stop(ctx))
 	})
 }
 func TestMessaging(t *testing.T) {

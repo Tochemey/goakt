@@ -98,7 +98,7 @@ func (x *deathWatch) handleTerminated(ctx *ReceiveContext) error {
 	if node, ok := x.tree.node(actorID); ok {
 		x.actorSystem.decreaseActorsCounter()
 		x.tree.deleteNode(node.value())
-		removeFromCluster := x.actorSystem.InCluster() && !isReservedName(actorName) && !x.actorSystem.isShuttingDown()
+		removeFromCluster := x.actorSystem.InCluster() && !isSystemName(actorName) && !x.actorSystem.isStopping()
 		if removeFromCluster {
 			if err := x.cluster.RemoveActor(context.WithoutCancel(ctx.Context()), node.value().Name()); err != nil {
 				x.logger.Errorf("%s failed to remove [actor=%s] from cluster: %v", x.pid.Name(), actorID, err)

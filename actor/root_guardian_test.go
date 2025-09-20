@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025 Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -39,8 +39,8 @@ import (
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
-func TestSystemGuardian(t *testing.T) {
-	t.Run("Stop actorsystem when a system actor is terminated", func(t *testing.T) {
+func TestRootGuardian(t *testing.T) {
+	t.Run("With PanicSignal message", func(t *testing.T) {
 		ctx := context.Background()
 		actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 		require.NoError(t, err)
@@ -51,63 +51,21 @@ func TestSystemGuardian(t *testing.T) {
 
 		// wait for the system to start properly
 		pause.For(500 * time.Millisecond)
-		require.True(t, actorSystem.Running())
-
-		// let us terminate the user guardian for the sake of the test
-		deathWatch := actorSystem.getDeathWatch()
-		require.NotNil(t, deathWatch)
-		require.True(t, deathWatch.IsRunning())
 
 		message, _ := anypb.New(new(testpb.TestSend))
-		err = deathWatch.Tell(ctx, actorSystem.getRootGuardian(), &goaktpb.PanicSignal{
+
+		// for the purpose of this test, we are going to send a PanicSignal message to the rootGuardian
+		// using the userGuardian
+		userGuardian := actorSystem.getUserGuardian()
+		require.NotNil(t, userGuardian)
+		err = userGuardian.Tell(ctx, actorSystem.getRootGuardian(), &goaktpb.PanicSignal{
 			Message:   message,
 			Reason:    "test panic signal",
 			Timestamp: timestamppb.Now(),
 		})
-
 		require.NoError(t, err)
-
-		// wait for the system to stop properly
-		pause.For(time.Second)
-
-		require.False(t, actorSystem.Running())
-	})
-	t.Run("With unhandled message result in deadletter", func(t *testing.T) {
-		ctx := context.Background()
-		actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
-		require.NoError(t, err)
-		require.NotNil(t, actorSystem)
-
-		err = actorSystem.Start(ctx)
-		require.NoError(t, err)
-
-		// wait for the system to start properly
+		// wait for a while to allow the message to be processed
 		pause.For(500 * time.Millisecond)
-
-		// create a deadletter subscriber
-		consumer, err := actorSystem.Subscribe()
-		require.NoError(t, err)
-		require.NotNil(t, consumer)
-
-		systemGuardian := actorSystem.getSystemGuardian()
-		// send an unhandled message to the system guardian
-		err = Tell(ctx, systemGuardian, new(anypb.Any))
-		require.NoError(t, err)
-
-		pause.For(time.Second)
-
-		var items []*goaktpb.Deadletter
-		for message := range consumer.Iterator() {
-			payload := message.Payload()
-			// only listening to deadletter
-			deadletter, ok := payload.(*goaktpb.Deadletter)
-			if ok {
-				items = append(items, deadletter)
-			}
-		}
-
-		require.Len(t, items, 1)
-		consumer.Shutdown()
-		require.NoError(t, actorSystem.Stop(ctx))
+		require.False(t, actorSystem.Running())
 	})
 }

@@ -589,7 +589,7 @@ type ActorSystem interface {
 	getRebalancer() *PID
 	getReflection() *reflection
 	findRoutee(routeeName string) (*PID, bool)
-	isShuttingDown() bool
+	isStopping() bool
 	getRemoting() remote.Remoting
 	getGrains() *collection.Map[string, *grainPID]
 	recreateGrain(ctx context.Context, props *internalpb.Grain) error
@@ -1221,7 +1221,7 @@ func (x *actorSystem) Kill(ctx context.Context, name string) error {
 	}
 
 	// user should not query system actors
-	if isReservedName(name) {
+	if isSystemName(name) {
 		return gerrors.NewErrActorNotFound(name)
 	}
 
@@ -1246,7 +1246,7 @@ func (x *actorSystem) ReSpawn(ctx context.Context, name string) (*PID, error) {
 	}
 
 	// user should not query system actors
-	if isReservedName(name) {
+	if isSystemName(name) {
 		return nil, gerrors.NewErrActorNotFound(name)
 	}
 
@@ -1280,7 +1280,7 @@ func (x *actorSystem) Actors() []*PID {
 	var actors []*PID
 	for _, node := range nodes {
 		pid := node.value()
-		if !isReservedName(pid.Name()) {
+		if !isSystemName(pid.Name()) {
 			actors = append(actors, pid)
 		}
 	}
@@ -1339,7 +1339,7 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *addr
 
 	x.locker.RLock()
 	// user should not query system actors
-	if isReservedName(actorName) {
+	if isSystemName(actorName) {
 		x.locker.RUnlock()
 		return nil, nil, gerrors.NewErrActorNotFound(actorName)
 	}
@@ -1420,7 +1420,7 @@ func (x *actorSystem) LocalActor(actorName string) (*PID, error) {
 
 	x.locker.RLock()
 	// user should not query system actors
-	if isReservedName(actorName) {
+	if isSystemName(actorName) {
 		x.locker.RUnlock()
 		return nil, gerrors.NewErrActorNotFound(actorName)
 	}
@@ -1447,7 +1447,7 @@ func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *
 
 	x.locker.RLock()
 	// user should not query system actors
-	if isReservedName(actorName) {
+	if isSystemName(actorName) {
 		x.locker.RUnlock()
 		return nil, gerrors.NewErrActorNotFound(actorName)
 	}
@@ -1488,7 +1488,7 @@ func (x *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request
 	}
 
 	actorName := msg.GetName()
-	if !isReservedName(actorName) && x.clusterEnabled.Load() {
+	if !isSystemName(actorName) && x.clusterEnabled.Load() {
 		actor, err := x.cluster.GetActor(ctx, actorName)
 		if err != nil {
 			if errors.Is(err, cluster.ErrActorNotFound) {
@@ -1620,7 +1620,7 @@ func (x *actorSystem) RemoteReSpawn(ctx context.Context, request *connect.Reques
 	}
 
 	// make sure we don't interfere with system actors.
-	if isReservedName(msg.GetName()) {
+	if isSystemName(msg.GetName()) {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.NewErrActorNotFound(msg.GetName()))
 	}
 
@@ -1656,7 +1656,7 @@ func (x *actorSystem) RemoteStop(ctx context.Context, request *connect.Request[i
 	}
 
 	// make sure we don't interfere with system actors.
-	if isReservedName(msg.GetName()) {
+	if isSystemName(msg.GetName()) {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.NewErrActorNotFound(msg.GetName()))
 	}
 
@@ -1691,7 +1691,7 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 	}
 
 	// make sure we don't interfere with system actors.
-	if isReservedName(msg.GetActorName()) {
+	if isSystemName(msg.GetActorName()) {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.NewErrActorNotFound(msg.GetActorName()))
 	}
 
@@ -1763,7 +1763,7 @@ func (x *actorSystem) RemoteReinstate(_ context.Context, request *connect.Reques
 	}
 
 	// make sure we don't interfere with system actors.
-	if isReservedName(msg.GetName()) {
+	if isSystemName(msg.GetName()) {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.NewErrActorNotFound(msg.GetName()))
 	}
 
@@ -2040,8 +2040,8 @@ func (x *actorSystem) findRoutee(routeeName string) (*PID, bool) {
 	return nil, false
 }
 
-// isShuttingDown checks whether the actor system is shutting down
-func (x *actorSystem) isShuttingDown() bool {
+// isStopping checks whether the actor system is shutting down
+func (x *actorSystem) isStopping() bool {
 	return x.shuttingDown.Load()
 }
 
@@ -2467,10 +2467,10 @@ func (x *actorSystem) replicateActors() {
 	for actor := range x.actorsQueue {
 		// never replicate system actors because there are specific to the
 		// started node
-		if isReservedName(actor.GetAddress().GetName()) {
+		if isSystemName(actor.GetAddress().GetName()) {
 			continue
 		}
-		if !x.isShuttingDown() && x.InCluster() {
+		if !x.isStopping() && x.InCluster() {
 			ctx := context.Background()
 			if err := x.cluster.PutActor(ctx, actor); err != nil {
 				x.logger.Warn(err.Error())
@@ -2484,10 +2484,10 @@ func (x *actorSystem) replicateGrains() {
 	for grain := range x.grainsQueue {
 		// never replicate system grains because there are specific to the
 		// started node
-		if isReservedName(grain.GetGrainId().GetName()) {
+		if isSystemName(grain.GetGrainId().GetName()) {
 			continue
 		}
-		if !x.isShuttingDown() && x.InCluster() {
+		if !x.isStopping() && x.InCluster() {
 			ctx := context.Background()
 			if err := x.cluster.PutGrain(ctx, grain); err != nil {
 				x.logger.Warn(err.Error())
@@ -2527,7 +2527,7 @@ func (x *actorSystem) resyncGrains() error {
 // clusterEventsLoop listens to cluster events and send them to the event streams
 func (x *actorSystem) clusterEventsLoop() {
 	for event := range x.eventsQueue {
-		if x.isShuttingDown() || !x.InCluster() || event == nil || event.Payload == nil {
+		if x.isStopping() || !x.InCluster() || event == nil || event.Payload == nil {
 			continue
 		}
 
@@ -2642,7 +2642,7 @@ func (x *actorSystem) syncPeersState() {
 		for {
 			select {
 			case <-ticker.Ticks:
-				if x.isShuttingDown() || !x.started.Load() {
+				if x.isStopping() || !x.started.Load() {
 					tickerStopSig <- registry.Unit{}
 					return
 				}
@@ -2767,7 +2767,7 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 	if !spawnConfig.isSystem {
 		// you should not create a system-based actor or
 		// use the system actor naming convention pattern
-		if isReservedName(name) {
+		if isSystemName(name) {
 			return nil, gerrors.ErrReservedName
 		}
 	}
@@ -2931,7 +2931,10 @@ func (x *actorSystem) spawnSystemGuardian(ctx context.Context) error {
 		newSystemGuardian(),
 		asSystem(),
 		WithLongLived(),
-		WithSupervisor(NewSupervisor()))
+		WithSupervisor(NewSupervisor(
+			WithStrategy(OneForOneStrategy),
+			WithAnyErrorDirective(EscalateDirective),
+		)))
 	if err != nil {
 		return fmt.Errorf("actor=%s failed to start system guardian: %w", actorName, err)
 	}
@@ -2949,7 +2952,10 @@ func (x *actorSystem) spawnUserGuardian(ctx context.Context) error {
 		newUserGuardian(),
 		asSystem(),
 		WithLongLived(),
-		WithSupervisor(NewSupervisor()))
+		WithSupervisor(NewSupervisor(
+			WithStrategy(OneForOneStrategy),
+			WithAnyErrorDirective(EscalateDirective),
+		)))
 	if err != nil {
 		return fmt.Errorf("actor=%s failed to start user guardian: %w", actorName, err)
 	}
@@ -2966,7 +2972,7 @@ func (x *actorSystem) spawnDeathWatch(ctx context.Context) error {
 	// define the supervisor strategy to use
 	supervisor := NewSupervisor(
 		WithStrategy(OneForOneStrategy),
-		WithAnyErrorDirective(StopDirective),
+		WithAnyErrorDirective(EscalateDirective),
 	)
 
 	x.deathWatch, err = x.configPID(ctx,
@@ -3433,7 +3439,7 @@ func runWithRetry(ctx context.Context, hook ShutdownHook, sys *actorSystem, reco
 	})
 }
 
-func isReservedName(name string) bool {
+func isSystemName(name string) bool {
 	return strings.HasPrefix(name, reservedNamesPrefix)
 }
 

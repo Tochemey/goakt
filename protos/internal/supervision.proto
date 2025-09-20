@@ -12,10 +12,10 @@ enum Strategy {
   STRATEGY_ONE_FOR_ALL = 1;
 }
 
-// Down message is sent by a child
+// Panicking message is sent by a child
 // actor to its parent when it is panicking or returning an error
 // while processing messages
-message Down {
+message Panicking {
   // Specifies the actor id
   string actor_id = 1;
   // Specifies the error message
