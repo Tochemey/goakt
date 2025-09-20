@@ -1607,6 +1607,7 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		// assert the actor state
 		require.False(t, child.IsRunning())
+		require.True(t, child.IsSuspended())
 
 		//stop the actor
 		require.NoError(t, actorSystem.Stop(ctx))
