@@ -1,6 +1,6 @@
 module github.com/tochemey/goakt/v3
 
-go 1.24.0
+go 1.25.1
 
 require (
 	connectrpc.com/connect v1.18.1
@@ -11,7 +11,7 @@ require (
 	github.com/flowchartsman/retry v1.2.0
 	github.com/google/uuid v1.6.0
 	github.com/grandcat/zeroconf v1.0.0
-	github.com/hashicorp/consul/api v1.32.1
+	github.com/hashicorp/consul/api v1.32.3
 	github.com/hashicorp/go-sockaddr v1.0.7
 	github.com/hashicorp/memberlist v0.5.3
 	github.com/kapetan-io/tackle v0.12.0
@@ -21,14 +21,14 @@ require (
 	github.com/redis/go-redis/v9 v9.14.0
 	github.com/reugn/go-quartz v0.15.2
 	github.com/stretchr/testify v1.11.1
-	github.com/testcontainers/testcontainers-go v0.38.0
-	github.com/testcontainers/testcontainers-go/modules/consul v0.38.0
-	github.com/testcontainers/testcontainers-go/modules/etcd v0.38.0
+	github.com/testcontainers/testcontainers-go v0.39.0
+	github.com/testcontainers/testcontainers-go/modules/consul v0.39.0
+	github.com/testcontainers/testcontainers-go/modules/etcd v0.39.0
 	github.com/tochemey/olric v0.3.1
 	github.com/travisjeffery/go-dynaport v1.0.0
 	github.com/zeebo/xxh3 v1.0.2
 	go.akshayshah.org/connectproto v0.6.0
-	go.etcd.io/etcd/client/v3 v3.6.4
+	go.etcd.io/etcd/client/v3 v3.6.5
 	go.uber.org/atomic v1.11.0
 	go.uber.org/goleak v1.3.0
 	go.uber.org/multierr v1.11.0
@@ -68,7 +68,7 @@ require (
 	github.com/docker/go-connections v0.6.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/ebitengine/purego v0.8.4 // indirect
+	github.com/ebitengine/purego v0.9.0 // indirect
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
@@ -153,8 +153,8 @@ require (
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
-	go.etcd.io/etcd/api/v3 v3.6.4 // indirect
-	go.etcd.io/etcd/client/pkg/v3 v3.6.4 // indirect
+	go.etcd.io/etcd/api/v3 v3.6.5 // indirect
+	go.etcd.io/etcd/client/pkg/v3 v3.6.5 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.63.0 // indirect
 	go.opentelemetry.io/otel v1.38.0 // indirect
