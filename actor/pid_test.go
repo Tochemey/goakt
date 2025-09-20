@@ -2455,7 +2455,7 @@ func TestSpawnChild(t *testing.T) {
 		child, err := parent.SpawnChild(ctx, "child",
 			NewMockSupervised(),
 			WithMailbox(NewBoundedMailbox(20)),
-			WithPassivateAfter(2*time.Second))
+			WithPassivationStrategy(passivation.NewTimeBasedStrategy(time.Second)))
 
 		require.NoError(t, err)
 		require.NotNil(t, child)
