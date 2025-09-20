@@ -90,8 +90,10 @@ func (rctx *ReceiveContext) Err(err error) {
 
 // Response sets the message response
 func (rctx *ReceiveContext) Response(resp proto.Message) {
+	if rctx.response == nil {
+		return
+	}
 	rctx.response <- resp
-	close(rctx.response)
 }
 
 // Context represents the context attached to the message
@@ -584,7 +586,7 @@ func newReceiveContext(ctx context.Context, from, to *PID, message proto.Message
 		ctx:      ctx,
 		message:  message,
 		sender:   from,
-		response: make(chan proto.Message, 1),
+		response: getResponseChannel(),
 		self:     to,
 	}
 }
@@ -598,12 +600,11 @@ func (rctx *ReceiveContext) build(ctx context.Context, from, to *PID, message pr
 	if async {
 		rctx.detached.Context = ctx
 		rctx.ctx = &rctx.detached
-		rctx.response = nil
 		return rctx
 	}
 
 	rctx.ctx = ctx
-	rctx.response = make(chan proto.Message, 1)
+	rctx.response = getResponseChannel()
 	return rctx
 }
 

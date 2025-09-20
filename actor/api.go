@@ -48,13 +48,17 @@ func Ask(ctx context.Context, to *PID, message proto.Message, timeout time.Durat
 		return nil, err
 	}
 
+	responseCh := receiveContext.response
+	if responseCh != nil {
+		defer putResponseChannel(responseCh)
+	}
 	to.doReceive(receiveContext)
 	timer := timers.Get(timeout)
 
 	// await patiently to receive the response from the actor
 	// or wait for the context to be done
 	select {
-	case response = <-receiveContext.response:
+	case response = <-responseCh:
 		timers.Put(timer)
 		return
 	case <-ctx.Done():

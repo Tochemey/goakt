@@ -27,6 +27,8 @@ package actor
 import (
 	"sync"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/tochemey/goakt/v3/internal/timer"
 )
 
@@ -34,8 +36,13 @@ var (
 	timers = timer.NewPool()
 	// pool holds a pool of ReceiveContext
 	pool = sync.Pool{
-		New: func() interface{} {
+		New: func() any {
 			return new(ReceiveContext)
+		},
+	}
+	responsePool = sync.Pool{
+		New: func() any {
+			return make(chan proto.Message, 1)
 		},
 	}
 )
@@ -49,4 +56,20 @@ func getContext() *ReceiveContext {
 func releaseContext(receiveContext *ReceiveContext) {
 	receiveContext.reset()
 	pool.Put(receiveContext)
+}
+
+func getResponseChannel() chan proto.Message {
+	return responsePool.Get().(chan proto.Message)
+}
+
+func putResponseChannel(ch chan proto.Message) {
+	for {
+		select {
+		case <-ch:
+			continue
+		default:
+			responsePool.Put(ch)
+			return
+		}
+	}
 }

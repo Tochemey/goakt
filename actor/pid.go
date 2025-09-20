@@ -971,12 +971,16 @@ func (pid *PID) Ask(ctx context.Context, to *PID, message proto.Message, timeout
 
 	receiveContext := getContext()
 	receiveContext.build(ctx, pid, to, message, false)
+	responseCh := receiveContext.response
+	if responseCh != nil {
+		defer putResponseChannel(responseCh)
+	}
 	to.doReceive(receiveContext)
 
 	timer := timers.Get(timeout)
 
 	select {
-	case result := <-receiveContext.response:
+	case result := <-responseCh:
 		timers.Put(timer)
 		return result, nil
 	case <-ctx.Done():

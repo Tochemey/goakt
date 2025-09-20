@@ -12,6 +12,8 @@ import (
 
 type Actor struct{}
 
+var replyMessage = &testpb.Reply{Content: "reply"}
+
 func (a *Actor) PreStart(*actor.Context) error {
 	return nil
 }
@@ -20,7 +22,7 @@ func (a *Actor) Receive(ctx *actor.ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *testpb.TestSend:
 	case *testpb.TestReply:
-		ctx.Response(&testpb.Reply{Content: "reply"})
+		ctx.Response(replyMessage)
 	default:
 		ctx.Unhandled()
 	}
