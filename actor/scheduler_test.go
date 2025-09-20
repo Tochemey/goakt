@@ -459,11 +459,9 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.ScheduleWithCron(ctx, message, actorRef, expr)
 		require.NoError(t, err)
 
-		require.Eventually(t, func() bool {
-			return actorRef.ProcessedCount()-1 >= 2
-		}, 5*time.Second, 100*time.Millisecond)
-		processed := actorRef.ProcessedCount() - 1
-		assert.GreaterOrEqual(t, processed, 2)
+		// wait for two seconds
+		pause.For(2 * time.Second)
+		assert.EqualValues(t, 2, actorRef.ProcessedCount()-1)
 
 		// stop the actor
 		err = newActorSystem.Stop(ctx)
@@ -531,11 +529,9 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.ScheduleWithCron(ctx, message, actorRef, expr)
 		require.NoError(t, err)
 
-		require.Eventually(t, func() bool {
-			return actorRef.ProcessedCount()-1 >= 2
-		}, 5*time.Second, 100*time.Millisecond)
-		processed := actorRef.ProcessedCount() - 1
-		assert.GreaterOrEqual(t, processed, 2)
+		// wait for two seconds
+		pause.For(2 * time.Second)
+		assert.EqualValues(t, 2, actorRef.ProcessedCount()-1)
 
 		// stop the actor
 		err = newActorSystem.Stop(ctx)
