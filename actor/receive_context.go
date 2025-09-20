@@ -59,7 +59,6 @@ import (
 //	}
 type ReceiveContext struct {
 	ctx          context.Context
-	detached     noCancelContext
 	message      proto.Message
 	sender       *PID
 	remoteSender *address.Address
@@ -67,16 +66,6 @@ type ReceiveContext struct {
 	self         *PID
 	err          error
 }
-
-type noCancelContext struct {
-	context.Context
-}
-
-func (n *noCancelContext) Deadline() (time.Time, bool) { return time.Time{}, false }
-
-func (n *noCancelContext) Done() <-chan struct{} { return nil }
-
-func (n *noCancelContext) Err() error { return nil }
 
 // Self returns the receiver PID of the message
 func (rctx *ReceiveContext) Self() *PID {
@@ -598,8 +587,7 @@ func (rctx *ReceiveContext) build(ctx context.Context, from, to *PID, message pr
 	rctx.message = message
 
 	if async {
-		rctx.detached.Context = ctx
-		rctx.ctx = &rctx.detached
+		rctx.ctx = context.WithoutCancel(ctx)
 		return rctx
 	}
 
@@ -616,7 +604,6 @@ func (rctx *ReceiveContext) reset() {
 	rctx.sender = pid
 	rctx.err = nil
 	rctx.ctx = nil
-	rctx.detached.Context = nil
 	rctx.response = nil
 }
 
@@ -625,12 +612,11 @@ func (rctx *ReceiveContext) withoutCancel() context.Context {
 		return context.Background()
 	}
 
-	if _, ok := rctx.ctx.(*noCancelContext); ok {
+	if rctx.ctx.Done() == nil {
 		return rctx.ctx
 	}
 
-	rctx.detached.Context = rctx.ctx
-	return &rctx.detached
+	return context.WithoutCancel(rctx.ctx)
 }
 
 // withRemoteSender set the remote sender for a given context
