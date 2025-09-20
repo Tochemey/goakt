@@ -81,7 +81,7 @@ func (x *actorSystem) GrainIdentity(ctx context.Context, name string, factory Gr
 	}
 
 	// make sure we don't interfere with system actors.
-	if isReservedName(identity.Name()) {
+	if isSystemName(identity.Name()) {
 		return nil, gerrors.NewErrReservedName(identity.String())
 	}
 
@@ -276,7 +276,7 @@ func (x *actorSystem) RemoteAskGrain(ctx context.Context, request *connect.Reque
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.Join(err, gerrors.ErrInvalidGrainIdentity))
 	}
 
-	if isReservedName(identity.Name()) {
+	if isSystemName(identity.Name()) {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.NewErrReservedName(identity.String()))
 	}
 
@@ -329,7 +329,7 @@ func (x *actorSystem) RemoteTellGrain(ctx context.Context, request *connect.Requ
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.Join(err, gerrors.ErrInvalidGrainIdentity))
 	}
 
-	if isReservedName(identity.Name()) {
+	if isSystemName(identity.Name()) {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.NewErrReservedName(identity.String()))
 	}
 
@@ -539,7 +539,7 @@ func (x *actorSystem) recreateGrain(ctx context.Context, serializedGrain *intern
 	logger.Infof("recreating grain (%s)...", serializedGrain.GrainId.GetValue())
 
 	// make sure the grain is not a system grain
-	if isReservedName(serializedGrain.GrainId.GetValue()) {
+	if isSystemName(serializedGrain.GrainId.GetValue()) {
 		return gerrors.NewErrReservedName(serializedGrain.GetGrainId().GetValue())
 	}
 

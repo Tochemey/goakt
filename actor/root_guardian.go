@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025 Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,8 @@
 package actor
 
 import (
+	"context"
+
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/log"
@@ -58,6 +60,8 @@ func (x *rootGuardian) Receive(ctx *ReceiveContext) {
 		x.pid = ctx.Self()
 		x.logger = ctx.Logger()
 		x.logger.Infof("%s started successfully", x.pid.Name())
+	case *goaktpb.PanicSignal:
+		x.handlePanicSignal(ctx)
 	case *goaktpb.Terminated:
 		actorID := address.From(msg.GetAddress()).String()
 		x.pid.logger.Debugf("%s terminated", actorID)
@@ -71,4 +75,18 @@ func (x *rootGuardian) Receive(ctx *ReceiveContext) {
 func (x *rootGuardian) PostStop(*Context) error {
 	x.logger.Infof("%s stopped successfully", x.pid.Name())
 	return nil
+}
+
+func (x *rootGuardian) handlePanicSignal(ctx *ReceiveContext) {
+	systemName := ctx.ActorSystem().Name()
+	actorName := ctx.Sender().Name()
+	if !ctx.ActorSystem().isStopping() && isSystemName(actorName) {
+		// log a message error and stop the actor system
+		x.logger.Warnf("%s is down. %s is going to shutdown. Kindly check logs and fix any potential issue with the system",
+			actorName,
+			systemName)
+
+		// blindly shutdown the actor system. No need to check any error
+		_ = ctx.ActorSystem().Stop(context.WithoutCancel(ctx.Context()))
+	}
 }

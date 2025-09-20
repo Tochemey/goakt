@@ -80,7 +80,7 @@ func TestDeathWatch(t *testing.T) {
 		consumer.Shutdown()
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
-	t.Run("Shutdown PID  when RemoveActor call failed in cluster mode", func(t *testing.T) {
+	t.Run("Shutdown PID when RemoveActor call failed in cluster mode", func(t *testing.T) {
 		ctx := context.Background()
 		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 		require.NoError(t, err)
@@ -120,25 +120,25 @@ func TestDeathWatch(t *testing.T) {
 	})
 	t.Run("With Terminated when PID not found return no error", func(t *testing.T) {
 		ctx := context.Background()
-		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 		require.NoError(t, err)
-		require.NotNil(t, sys)
+		require.NotNil(t, actorSystem)
 
 		actorID := "testID"
 
-		err = sys.Start(ctx)
+		err = actorSystem.Start(ctx)
 		require.NoError(t, err)
 
 		// wait for the system to start properly
 		pause.For(500 * time.Millisecond)
-		pid := sys.getDeathWatch()
+		pid := actorSystem.getDeathWatch()
 
-		addr := address.New(actorID, sys.Name(), sys.Host(), sys.Port())
+		addr := address.New(actorID, actorSystem.Name(), actorSystem.Host(), actorSystem.Port())
 
 		err = Tell(ctx, pid, &goaktpb.Terminated{Address: addr.Address})
 		require.NoError(t, err)
 
 		pause.For(time.Second)
-		require.NoError(t, pid.Shutdown(ctx))
+		require.NoError(t, actorSystem.Stop(ctx))
 	})
 }

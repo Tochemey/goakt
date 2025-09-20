@@ -125,7 +125,7 @@ func (r *rebalancer) rebalanceActors(ctx context.Context, eg *errgroup.Group, le
 	if len(leaderShares) > 0 {
 		eg.Go(func() error {
 			for _, actor := range leaderShares {
-				if !isReservedName(actor.GetAddress().GetName()) {
+				if !isSystemName(actor.GetAddress().GetName()) {
 					if err := r.recreateLocally(ctx, actor, true); err != nil {
 						return errors.NewSpawnError(err)
 					}
@@ -141,7 +141,7 @@ func (r *rebalancer) rebalanceActors(ctx context.Context, eg *errgroup.Group, le
 				actors := peersShares[i]
 				peer := peers[i-1]
 				for _, actor := range actors {
-					if !isReservedName(actor.GetAddress().GetName()) && !actor.GetIsSingleton() && actor.GetRelocatable() {
+					if !isSystemName(actor.GetAddress().GetName()) && !actor.GetIsSingleton() && actor.GetRelocatable() {
 						if err := r.spawnRemoteActor(ctx, actor, peer); err != nil {
 							return err
 						}
@@ -197,7 +197,7 @@ func (r *rebalancer) rebalanceGrains(ctx context.Context, eg *errgroup.Group, le
 		leaderPort := int32(r.pid.ActorSystem().Port())
 		eg.Go(func() error {
 			for _, grain := range leaderGrains {
-				if !isReservedName(grain.GetGrainId().GetName()) {
+				if !isSystemName(grain.GetGrainId().GetName()) {
 					grain.Host = leaderHost
 					grain.Port = leaderPort
 					if err := r.pid.ActorSystem().recreateGrain(ctx, grain); err != nil {
@@ -215,7 +215,7 @@ func (r *rebalancer) rebalanceGrains(ctx context.Context, eg *errgroup.Group, le
 				grains := peersGrains[i]
 				peer := peers[i-1]
 				for _, grain := range grains {
-					if !isReservedName(grain.GetGrainId().GetName()) {
+					if !isSystemName(grain.GetGrainId().GetName()) {
 						if err := r.activateRemoteGrain(ctx, grain, peer); err != nil {
 							return err
 						}
