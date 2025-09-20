@@ -31,10 +31,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
 func TestSystemGuardian(t *testing.T) {
@@ -56,7 +58,13 @@ func TestSystemGuardian(t *testing.T) {
 		require.NotNil(t, deathWatch)
 		require.True(t, deathWatch.IsRunning())
 
-		err = deathWatch.Shutdown(ctx)
+		message, _ := anypb.New(new(testpb.TestSend))
+		err = deathWatch.Tell(ctx, actorSystem.getRootGuardian(), &goaktpb.PanicSignal{
+			Message:   message,
+			Reason:    "test panic signal",
+			Timestamp: timestamppb.Now(),
+		})
+
 		require.NoError(t, err)
 
 		// wait for the system to stop properly
