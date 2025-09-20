@@ -169,6 +169,41 @@ func TestReceive(t *testing.T) {
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 }
+
+func TestMessageOrdering(t *testing.T) {
+	ctx := context.Background()
+	actorSystem, err := NewActorSystem("fifo", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	require.NoError(t, actorSystem.Start(ctx))
+	defer func() { _ = actorSystem.Stop(ctx) }()
+
+	expected := 128
+	fifoActor := NewMockFIFO(expected)
+	pidName := "fifo-" + uuid.NewString()
+	pid, err := actorSystem.Spawn(ctx, pidName, fifoActor)
+	require.NoError(t, err)
+	defer func() { _ = pid.Shutdown(ctx) }()
+
+	for i := range expected {
+		msg := &testpb.TestCount{Value: int32(i)}
+		require.NoError(t, Tell(ctx, pid, msg))
+	}
+
+	select {
+	case <-fifoActor.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for FIFO actor to receive %d messages", expected)
+	}
+
+	require.Len(t, fifoActor.Seen(), expected)
+	expectedOrder := make([]int32, expected)
+	for i := range expectedOrder {
+		expectedOrder[i] = int32(i)
+	}
+	assert.Equal(t, expectedOrder, fifoActor.Seen())
+}
+
 func TestPassivation(t *testing.T) {
 	t.Run("With actor shutdown failure", func(t *testing.T) {
 		ctx := context.TODO()

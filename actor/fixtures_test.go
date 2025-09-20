@@ -1203,6 +1203,46 @@ func (m *MockErrorMailbox) Len() int64 {
 	return 0
 }
 
+type MockFIFO struct {
+	expected int
+	seen     []int32
+	done     chan struct{}
+	once     sync.Once
+}
+
+func NewMockFIFO(expected int) *MockFIFO {
+	return &MockFIFO{
+		expected: expected,
+		done:     make(chan struct{}),
+	}
+}
+
+func (a *MockFIFO) PreStart(*Context) error { return nil }
+
+func (a *MockFIFO) Receive(ctx *ReceiveContext) {
+	switch msg := ctx.Message().(type) {
+	case *testpb.TestCount:
+		a.seen = append(a.seen, msg.GetValue())
+		if len(a.seen) == a.expected {
+			a.once.Do(func() { close(a.done) })
+		}
+	default:
+		ctx.Unhandled()
+	}
+}
+
+func (a *MockFIFO) PostStop(*Context) error { return nil }
+
+func (a *MockFIFO) Seen() []int32 {
+	copySeen := make([]int32, len(a.seen))
+	copy(copySeen, a.seen)
+	return copySeen
+}
+
+func (a *MockFIFO) Done() <-chan struct{} {
+	return a.done
+}
+
 // //////////////////////////////////////// CLUSTER PROVIDERS MOCKS //////////////////////////////////////
 type providerFactory func(t *testing.T, host string, discoveryPort int) discovery.Provider
 

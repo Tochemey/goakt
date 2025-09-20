@@ -1317,9 +1317,7 @@ func (pid *PID) process() {
 			}
 
 			// if no more messages, change busy state to idle
-			if !pid.processing.CompareAndSwap(busy, idle) {
-				return
-			}
+			pid.processing.Store(idle)
 
 			// Check if new messages were added in the meantime and restart processing
 			if !pid.mailbox.IsEmpty() && pid.processing.CompareAndSwap(idle, busy) {
@@ -1807,13 +1805,24 @@ func (pid *PID) handleReceivedError(receiveCtx *ReceiveContext, err error) {
 		// pass through
 	}
 
-	sender := &address.Address{}
-	if receiveCtx.Sender() != nil || receiveCtx.Sender() != pid.ActorSystem().NoSender() {
-		sender = receiveCtx.Sender().Address()
+	system := pid.ActorSystem()
+	sender := address.NoSender()
+	if system != nil {
+		sender = system.NoSender().Address()
+	}
+
+	if senderPID := receiveCtx.Sender(); senderPID != nil {
+		if system == nil || !senderPID.Equals(system.NoSender()) {
+			sender = senderPID.Address()
+		}
+	}
+
+	receiver := pid.Address()
+	if receiver == nil {
+		return
 	}
 
 	ctx := context.Background()
-	receiver := pid.Address()
 	pid.toDeadletter(ctx, sender, receiver, receiveCtx.Message(), err)
 }
 

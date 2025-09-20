@@ -34,6 +34,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/goaktpb"
@@ -136,8 +137,17 @@ func TestRouter(t *testing.T) {
 		require.True(t, ok)
 		require.NotNil(t, workerTwoRef)
 
-		require.NoError(t, workerOneRef.Shutdown(ctx))
-		require.NoError(t, workerTwoRef.Shutdown(ctx))
+		require.NoError(t, workerOneRef.Tell(ctx, router, &goaktpb.PanicSignal{
+			Message:   &anypb.Any{},
+			Reason:    "test panic signal",
+			Timestamp: timestamppb.Now(),
+		}))
+
+		require.NoError(t, workerTwoRef.Tell(ctx, router, &goaktpb.PanicSignal{
+			Message:   &anypb.Any{},
+			Reason:    "test panic signal",
+			Timestamp: timestamppb.Now(),
+		}))
 
 		// send a broadcast message to the router
 		message, _ := anypb.New(&testpb.TestLog{Text: "msg"})
@@ -239,8 +249,11 @@ func TestRouter(t *testing.T) {
 		require.True(t, ok)
 		require.NotNil(t, workerOneRef)
 
-		err = workerOneRef.Shutdown(ctx)
-		require.NoError(t, err)
+		require.NoError(t, workerOneRef.Tell(ctx, router, &goaktpb.PanicSignal{
+			Message:   &anypb.Any{},
+			Reason:    "test panic signal",
+			Timestamp: timestamppb.Now(),
+		}))
 
 		pause.For(time.Second)
 

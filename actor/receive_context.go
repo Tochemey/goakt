@@ -59,6 +59,7 @@ import (
 //	}
 type ReceiveContext struct {
 	ctx          context.Context
+	detached     noCancelContext
 	message      proto.Message
 	sender       *PID
 	remoteSender *address.Address
@@ -66,6 +67,16 @@ type ReceiveContext struct {
 	self         *PID
 	err          error
 }
+
+type noCancelContext struct {
+	context.Context
+}
+
+func (n *noCancelContext) Deadline() (time.Time, bool) { return time.Time{}, false }
+
+func (n *noCancelContext) Done() <-chan struct{} { return nil }
+
+func (n *noCancelContext) Err() error { return nil }
 
 // Self returns the receiver PID of the message
 func (rctx *ReceiveContext) Self() *PID {
@@ -156,7 +167,7 @@ func (rctx *ReceiveContext) UnstashAll() {
 // Tell sends an asynchronous message to another PID
 func (rctx *ReceiveContext) Tell(to *PID, message proto.Message) {
 	recipient := rctx.self
-	ctx := context.WithoutCancel(rctx.ctx)
+	ctx := rctx.withoutCancel()
 	if err := recipient.Tell(ctx, to, message); err != nil {
 		rctx.Err(err)
 	}
@@ -168,7 +179,7 @@ func (rctx *ReceiveContext) Tell(to *PID, message proto.Message) {
 // When BatchTell encounter a single message it will fall back to a Tell call.
 func (rctx *ReceiveContext) BatchTell(to *PID, messages ...proto.Message) {
 	recipient := rctx.self
-	ctx := context.WithoutCancel(rctx.ctx)
+	ctx := rctx.withoutCancel()
 	if err := recipient.BatchTell(ctx, to, messages...); err != nil {
 		rctx.Err(err)
 	}
@@ -179,7 +190,7 @@ func (rctx *ReceiveContext) BatchTell(to *PID, messages ...proto.Message) {
 // It is recommended to set a good timeout to quickly receive response and try to avoid false positives
 func (rctx *ReceiveContext) Ask(to *PID, message proto.Message, timeout time.Duration) (response proto.Message) {
 	self := rctx.self
-	ctx := context.WithoutCancel(rctx.ctx)
+	ctx := rctx.withoutCancel()
 	reply, err := self.Ask(ctx, to, message, timeout)
 	if err != nil {
 		rctx.Err(err)
@@ -191,7 +202,7 @@ func (rctx *ReceiveContext) Ask(to *PID, message proto.Message, timeout time.Dur
 // The location of the given actor is transparent to the caller.
 func (rctx *ReceiveContext) SendAsync(actorName string, message proto.Message) {
 	self := rctx.self
-	ctx := context.WithoutCancel(rctx.ctx)
+	ctx := rctx.withoutCancel()
 	if err := self.SendAsync(ctx, actorName, message); err != nil {
 		rctx.Err(err)
 	}
@@ -202,7 +213,7 @@ func (rctx *ReceiveContext) SendAsync(actorName string, message proto.Message) {
 // This block until a response is received or timed out.
 func (rctx *ReceiveContext) SendSync(actorName string, message proto.Message, timeout time.Duration) (response proto.Message) {
 	self := rctx.self
-	ctx := context.WithoutCancel(rctx.ctx)
+	ctx := rctx.withoutCancel()
 	reply, err := self.SendSync(ctx, actorName, message, timeout)
 	if err != nil {
 		rctx.Err(err)
@@ -215,7 +226,7 @@ func (rctx *ReceiveContext) SendSync(actorName string, message proto.Message, ti
 // This is a design choice to follow the simple principle of one message at a time processing by actors.
 func (rctx *ReceiveContext) BatchAsk(to *PID, messages []proto.Message, timeout time.Duration) (responses chan proto.Message) {
 	recipient := rctx.self
-	ctx := context.WithoutCancel(rctx.ctx)
+	ctx := rctx.withoutCancel()
 	reply, err := recipient.BatchAsk(ctx, to, messages, timeout)
 	if err != nil {
 		rctx.Err(err)
@@ -226,7 +237,7 @@ func (rctx *ReceiveContext) BatchAsk(to *PID, messages []proto.Message, timeout 
 // RemoteTell sends a message to an actor remotely without expecting any reply
 func (rctx *ReceiveContext) RemoteTell(to *address.Address, message proto.Message) {
 	recipient := rctx.self
-	ctx := context.WithoutCancel(rctx.ctx)
+	ctx := rctx.withoutCancel()
 	if err := recipient.RemoteTell(ctx, to, message); err != nil {
 		rctx.Err(err)
 	}
@@ -236,7 +247,7 @@ func (rctx *ReceiveContext) RemoteTell(to *address.Address, message proto.Messag
 // immediately.
 func (rctx *ReceiveContext) RemoteAsk(to *address.Address, message proto.Message, timeout time.Duration) (response *anypb.Any) {
 	recipient := rctx.self
-	ctx := context.WithoutCancel(rctx.ctx)
+	ctx := rctx.withoutCancel()
 	reply, err := recipient.RemoteAsk(ctx, to, message, timeout)
 	if err != nil {
 		rctx.Err(err)
@@ -248,7 +259,7 @@ func (rctx *ReceiveContext) RemoteAsk(to *address.Address, message proto.Message
 // Messages are processed one after the other in the order they are sent.
 func (rctx *ReceiveContext) RemoteBatchTell(to *address.Address, messages []proto.Message) {
 	recipient := rctx.self
-	ctx := context.WithoutCancel(rctx.ctx)
+	ctx := rctx.withoutCancel()
 	if err := recipient.RemoteBatchTell(ctx, to, messages); err != nil {
 		rctx.Err(err)
 	}
@@ -259,7 +270,7 @@ func (rctx *ReceiveContext) RemoteBatchTell(to *address.Address, messages []prot
 // This can hinder performance if it is not properly used.
 func (rctx *ReceiveContext) RemoteBatchAsk(to *address.Address, messages []proto.Message, timeout time.Duration) (responses []*anypb.Any) {
 	recipient := rctx.self
-	ctx := context.WithoutCancel(rctx.ctx)
+	ctx := rctx.withoutCancel()
 	replies, err := recipient.RemoteBatchAsk(ctx, to, messages, timeout)
 	if err != nil {
 		rctx.Err(err)
@@ -271,7 +282,7 @@ func (rctx *ReceiveContext) RemoteBatchAsk(to *address.Address, messages []proto
 // using the same actor system as the PID actor system
 func (rctx *ReceiveContext) RemoteLookup(host string, port int, name string) (addr *address.Address) {
 	recipient := rctx.self
-	ctx := context.WithoutCancel(rctx.ctx)
+	ctx := rctx.withoutCancel()
 	remoteAddr, err := recipient.RemoteLookup(ctx, host, port, name)
 	if err != nil {
 		rctx.Err(err)
@@ -284,7 +295,7 @@ func (rctx *ReceiveContext) RemoteLookup(host string, port int, name string) (ad
 // that can be configured. All child actors will be gracefully shutdown.
 func (rctx *ReceiveContext) Shutdown() {
 	recipient := rctx.self
-	ctx := context.WithoutCancel(rctx.ctx)
+	ctx := rctx.withoutCancel()
 	if err := recipient.Shutdown(ctx); err != nil {
 		rctx.Err(err)
 	}
@@ -293,7 +304,7 @@ func (rctx *ReceiveContext) Shutdown() {
 // Spawn creates a child actor or return error
 func (rctx *ReceiveContext) Spawn(name string, actor Actor, opts ...SpawnOption) *PID {
 	recipient := rctx.self
-	ctx := context.WithoutCancel(rctx.ctx)
+	ctx := rctx.withoutCancel()
 	pid, err := recipient.SpawnChild(ctx, name, actor, opts...)
 	if err != nil {
 		rctx.Err(err)
@@ -320,7 +331,7 @@ func (rctx *ReceiveContext) Child(name string) *PID {
 // Nothing happens if child is already stopped. However, it returns an error when the child cannot be stopped.
 func (rctx *ReceiveContext) Stop(child *PID) {
 	recipient := rctx.self
-	ctx := context.WithoutCancel(rctx.ctx)
+	ctx := rctx.withoutCancel()
 	if err := recipient.Stop(ctx, child); err != nil {
 		rctx.Err(err)
 	}
@@ -336,7 +347,7 @@ func (rctx *ReceiveContext) Forward(to *PID) {
 	sender := rctx.Sender()
 
 	if to.IsRunning() {
-		ctx := context.WithoutCancel(rctx.ctx)
+		ctx := rctx.withoutCancel()
 		receiveContext := getContext()
 		receiveContext.build(ctx, sender, to, message, true)
 		to.doReceive(receiveContext)
@@ -351,7 +362,7 @@ func (rctx *ReceiveContext) Forward(to *PID) {
 func (rctx *ReceiveContext) ForwardTo(actorName string) {
 	message := rctx.Message()
 	sender := rctx.Sender()
-	ctx := context.WithoutCancel(rctx.ctx)
+	ctx := rctx.withoutCancel()
 	if rctx.ActorSystem().InCluster() {
 		if err := sender.SendAsync(ctx, actorName, message); err != nil {
 			rctx.Err(err)
@@ -371,7 +382,7 @@ func (rctx *ReceiveContext) RemoteForward(to *address.Address) {
 
 	if !sender.Equals(noSender) {
 		message := rctx.Message()
-		ctx := context.WithoutCancel(rctx.ctx)
+		ctx := rctx.withoutCancel()
 		if err := sender.RemoteTell(ctx, to, message); err != nil {
 			rctx.Err(err)
 		}
@@ -380,7 +391,7 @@ func (rctx *ReceiveContext) RemoteForward(to *address.Address) {
 
 	if !remoteSender.Equals(address.NoSender()) && remoting != nil {
 		message := rctx.Message()
-		ctx := context.WithoutCancel(rctx.ctx)
+		ctx := rctx.withoutCancel()
 		if err := remoting.RemoteTell(ctx, remoteSender, to, message); err != nil {
 			rctx.Err(err)
 		}
@@ -396,7 +407,7 @@ func (rctx *ReceiveContext) Unhandled() {
 // RemoteReSpawn restarts an actor on a remote node.
 func (rctx *ReceiveContext) RemoteReSpawn(host string, port int, name string) {
 	recipient := rctx.self
-	ctx := context.WithoutCancel(rctx.ctx)
+	ctx := rctx.withoutCancel()
 	if err := recipient.RemoteReSpawn(ctx, host, port, name); err != nil {
 		rctx.Err(err)
 	}
@@ -431,7 +442,7 @@ func (rctx *ReceiveContext) RemoteReSpawn(host string, port int, name string) {
 //	})
 func (rctx *ReceiveContext) PipeTo(to *PID, task func() (proto.Message, error), opts ...PipeOption) {
 	recipient := rctx.self
-	ctx := context.WithoutCancel(rctx.ctx)
+	ctx := rctx.withoutCancel()
 	if err := recipient.PipeTo(ctx, to, task, opts...); err != nil {
 		rctx.Err(err)
 	}
@@ -470,7 +481,7 @@ func (rctx *ReceiveContext) PipeTo(to *PID, task func() (proto.Message, error), 
 //	})
 func (rctx *ReceiveContext) PipeToName(actorName string, task func() (proto.Message, error), opts ...PipeOption) {
 	recipient := rctx.self
-	ctx := context.WithoutCancel(rctx.ctx)
+	ctx := rctx.withoutCancel()
 	if err := recipient.PipeToName(ctx, actorName, task, opts...); err != nil {
 		rctx.Err(err)
 	}
@@ -555,7 +566,7 @@ func (rctx *ReceiveContext) Reinstate(cid *PID) {
 // health-check-driven recovery mechanisms.
 func (rctx *ReceiveContext) ReinstateNamed(actorName string) {
 	recipient := rctx.self
-	ctx := context.WithoutCancel(rctx.ctx)
+	ctx := rctx.withoutCancel()
 	if err := recipient.ReinstateNamed(ctx, actorName); err != nil {
 		rctx.Err(err)
 	}
@@ -585,7 +596,9 @@ func (rctx *ReceiveContext) build(ctx context.Context, from, to *PID, message pr
 	rctx.message = message
 
 	if async {
-		rctx.ctx = context.WithoutCancel(ctx)
+		rctx.detached.Context = ctx
+		rctx.ctx = &rctx.detached
+		rctx.response = nil
 		return rctx
 	}
 
@@ -601,6 +614,22 @@ func (rctx *ReceiveContext) reset() {
 	rctx.self = pid
 	rctx.sender = pid
 	rctx.err = nil
+	rctx.ctx = nil
+	rctx.detached.Context = nil
+	rctx.response = nil
+}
+
+func (rctx *ReceiveContext) withoutCancel() context.Context {
+	if rctx.ctx == nil {
+		return context.Background()
+	}
+
+	if _, ok := rctx.ctx.(*noCancelContext); ok {
+		return rctx.ctx
+	}
+
+	rctx.detached.Context = rctx.ctx
+	return &rctx.detached
 }
 
 // withRemoteSender set the remote sender for a given context

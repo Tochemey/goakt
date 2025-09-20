@@ -28,9 +28,9 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"reflect"
+	"strings"
 	"sync/atomic"
 
-	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/log"
 )
@@ -134,7 +134,7 @@ func (x *router) postStart(ctx *ReceiveContext) {
 			WithRelocationDisabled(),
 			WithLongLived(),
 			WithSupervisor(
-				NewSupervisor(WithAnyErrorDirective(StopDirective)),
+				NewSupervisor(WithAnyErrorDirective(EscalateDirective)),
 			))
 		x.routeesMap[routee.ID()] = routee
 	}
@@ -147,9 +147,8 @@ func (x *router) broadcast(ctx *ReceiveContext) {
 	switch msg := ctx.Message().(type) {
 	case *goaktpb.Broadcast:
 		message = msg
-	case *goaktpb.Terminated:
-		actorID := address.From(msg.GetAddress()).String()
-		delete(x.routeesMap, actorID)
+	case *goaktpb.PanicSignal:
+		delete(x.routeesMap, ctx.Sender().ID())
 		return
 	default:
 		ctx.Unhandled()
@@ -204,4 +203,8 @@ func (x *router) availableRoutees() ([]*PID, bool) {
 		routees = append(routees, routee)
 	}
 	return routees, len(routees) > 0
+}
+
+func isRouter(name string) bool {
+	return strings.EqualFold(name, reservedNames[routerType])
 }

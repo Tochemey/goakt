@@ -35,7 +35,7 @@ type CacheLinePadding [64]byte
 
 // node returns the queue node
 type node struct {
-	value *ReceiveContext
+	value atomic.Pointer[ReceiveContext]
 	next  unsafe.Pointer
 }
 
@@ -92,7 +92,7 @@ func NewUnboundedMailbox() *UnboundedMailbox {
 // nil; the error is present to satisfy the Mailbox interface.
 func (m *UnboundedMailbox) Enqueue(value *ReceiveContext) error {
 	tnode := nodePool.Get().(*node)
-	tnode.value = value
+	tnode.value.Store(value)
 	atomic.StorePointer(&tnode.next, nil)
 
 	// Atomically swap the tail pointer and link the previous tail to this node
@@ -115,8 +115,8 @@ func (m *UnboundedMailbox) Dequeue() *ReceiveContext {
 	}
 
 	atomic.StorePointer(&m.head, unsafe.Pointer(next))
-	value := next.value
-	next.value = nil
+	value := next.value.Load()
+	next.value.Store(nil) // avoid memory leaks
 
 	nodePool.Put(head)
 	return value
