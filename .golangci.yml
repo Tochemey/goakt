@@ -49,6 +49,7 @@ linters:
       ignore-rules:
         - cancelled
         - behaviour
+        - initialised
   exclusions:
     generated: lax
     presets:
