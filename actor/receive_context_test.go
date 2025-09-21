@@ -3238,4 +3238,77 @@ func TestReceiveContext(t *testing.T) {
 		assert.NoError(t, pid2.Shutdown(ctx))
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
+	t.Run("With Sender and Receiver Address", func(t *testing.T) {
+		ctx := context.TODO()
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("sys",
+			WithRemote(remote.NewConfig("127.0.0.1", ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		pause.For(time.Second)
+
+		// create actor1
+		actor1 := &exchanger{}
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
+		require.NoError(t, err)
+		require.NotNil(t, pid1)
+
+		// create an instance of receive context
+		context := &ReceiveContext{
+			ctx:          ctx,
+			message:      new(testpb.TestSend),
+			sender:       actorSystem.NoSender(),
+			remoteSender: nil,
+			self:         pid1,
+		}
+
+		senderAddr := context.SenderAddress()
+		require.NotNil(t, senderAddr)
+		require.True(t, senderAddr.Equals(actorSystem.NoSender().Address()))
+
+		receiverAddr := context.ReceiverAddress()
+		require.NotNil(t, receiverAddr)
+		require.True(t, receiverAddr.Equals(pid1.Address()))
+
+		// create actor2
+		actor2 := &exchanger{}
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
+		require.NoError(t, err)
+		require.NotNil(t, pid2)
+
+		context = &ReceiveContext{
+			ctx:          ctx,
+			message:      new(testpb.TestSend),
+			sender:       nil,
+			remoteSender: pid2.Address(),
+			self:         pid1,
+		}
+
+		senderAddr = context.SenderAddress()
+		require.NotNil(t, senderAddr)
+		require.True(t, senderAddr.Equals(pid2.Address()))
+
+		context = &ReceiveContext{
+			ctx:          ctx,
+			message:      new(testpb.TestSend),
+			sender:       nil,
+			remoteSender: nil,
+			self:         nil, // may never happen but for test sake
+		}
+
+		senderAddr = context.SenderAddress()
+		require.NotNil(t, senderAddr)
+		require.True(t, senderAddr.Equals(address.NoSender()))
+
+		receiverAddr = context.ReceiverAddress()
+		require.NotNil(t, receiverAddr)
+		require.True(t, receiverAddr.Equals(address.NoSender()))
+
+		pause.For(time.Second)
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
 }
