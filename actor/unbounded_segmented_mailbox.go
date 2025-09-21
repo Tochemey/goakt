@@ -38,8 +38,8 @@ type segment struct {
 	deqIdx uint64
 	// next points to the next segment; set once by a producer when segment rolls over
 	next atomic.Pointer[segment]
-	// data holds the messages for this segment
-	data [segmentSize]*ReceiveContext
+	// data holds the messages for this segment; atomic to coordinate producers/consumer
+	data [segmentSize]atomic.Pointer[ReceiveContext]
 }
 
 var segmentPool = sync.Pool{New: func() any { return new(segment) }}
@@ -49,7 +49,9 @@ func newSegment() *segment {
 	seg.writeIdx.Store(0)
 	seg.deqIdx = 0
 	seg.next.Store(nil)
-	// data slots will be set as messages arrive; no need to zero entire array
+	for i := range seg.data {
+		seg.data[i].Store(nil)
+	}
 	return seg
 }
 
@@ -137,7 +139,7 @@ func (m *UnboundedSegmentedMailbox) Enqueue(value *ReceiveContext) error {
 		tail := m.tail.Load()
 		idx := tail.writeIdx.Add(1) - 1
 		if idx < segmentSize {
-			tail.data[idx] = value
+			tail.data[idx].Store(value)
 			atomic.AddInt64(&m.length, 1)
 			return nil
 		}
@@ -173,12 +175,12 @@ func (m *UnboundedSegmentedMailbox) Dequeue() *ReceiveContext {
 		enq := min(seg.writeIdx.Load(), segmentSize)
 		if seg.deqIdx < enq {
 			idx := seg.deqIdx
-			val := seg.data[idx]
+			val := seg.data[idx].Load()
 			if val == nil {
 				// not yet published; treat as empty
 				return nil
 			}
-			seg.data[idx] = nil
+			seg.data[idx].Store(nil)
 			seg.deqIdx++
 			atomic.AddInt64(&m.length, -1)
 			return val
