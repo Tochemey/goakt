@@ -42,10 +42,9 @@ import (
 )
 
 type Store struct {
-	db       *badger.DB
-	logger   log.Logger
-	stopSig  chan registry.Unit
-	inmemory bool
+	db      *badger.DB
+	logger  log.Logger
+	stopSig chan registry.Unit
 }
 
 // NewStore creates an instance of Store
@@ -69,16 +68,13 @@ func NewStore(logger log.Logger, dir *string) (*Store, error) {
 
 	// create the store instance
 	s := &Store{
-		db:       db,
-		logger:   logger,
-		stopSig:  make(chan registry.Unit, 1),
-		inmemory: dir == nil,
+		db:      db,
+		logger:  logger,
+		stopSig: make(chan registry.Unit, 1),
 	}
 
-	// run the garbage collector when not running in memory
-	if !s.inmemory {
-		s.runGC()
-	}
+	// run the garbage collector
+	s.runGC()
 
 	return s, nil
 }

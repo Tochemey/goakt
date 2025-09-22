@@ -96,11 +96,16 @@ func (x *deathWatch) handleTerminated(ctx *ReceiveContext) error {
 	x.logger.Infof("%s freeing resource [actor=%s] from system", x.pid.Name(), actorID)
 
 	if node, ok := x.tree.node(actorID); ok {
+		watchedPID := node.value()
 		x.actorSystem.decreaseActorsCounter()
-		x.tree.deleteNode(node.value())
+		if watchedPID == nil {
+			x.logger.Infof("%s successfully free resource [actor=%s] from system", x.pid.Name(), actorID)
+			return nil
+		}
+		x.tree.deleteNode(watchedPID)
 		removeFromCluster := x.actorSystem.InCluster() && !isSystemName(actorName) && !x.actorSystem.isStopping()
 		if removeFromCluster {
-			if err := x.cluster.RemoveActor(context.WithoutCancel(ctx.Context()), node.value().Name()); err != nil {
+			if err := x.cluster.RemoveActor(context.WithoutCancel(ctx.Context()), watchedPID.Name()); err != nil {
 				x.logger.Errorf("%s failed to remove [actor=%s] from cluster: %v", x.pid.Name(), actorID, err)
 				return errors.NewInternalError(err)
 			}

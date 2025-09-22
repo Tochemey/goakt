@@ -365,6 +365,21 @@ func TestRoot(t *testing.T) {
 	t.Cleanup(tree.reset)
 }
 
+func TestDeleteRootNodeClearsRoot(t *testing.T) {
+	ports := dynaport.Get(1)
+	actorSystem, _ := NewActorSystem("TestSys")
+	tree := newTree()
+	pid := &PID{address: address.New("root-delete", "TestSys", "host", ports[0]), fieldsLocker: &sync.RWMutex{}, stopLocker: &sync.Mutex{}, system: actorSystem}
+	require.NoError(t, tree.addRootNode(pid))
+
+	tree.deleteNode(pid)
+
+	root, ok := tree.root()
+	require.False(t, ok)
+	require.Nil(t, root)
+	require.Zero(t, tree.count())
+}
+
 func TestSiblings(t *testing.T) {
 	tree := newTree()
 	actorSystem, _ := NewActorSystem("TestSys")
