@@ -74,7 +74,9 @@ func NewStore(logger log.Logger, dir *string) (*Store, error) {
 	}
 
 	// run the garbage collector
-	s.runGC()
+	if dir != nil {
+		s.runGC()
+	}
 
 	return s, nil
 }
