@@ -312,7 +312,7 @@ func TestGrain(t *testing.T) {
 	})
 	t.Run("With activation error when GetGrain in cluster mode returns error", func(t *testing.T) {
 		ctx := t.Context()
-		clmock := mocks.NewInterface(t)
+		clmock := mocks.NewCluster(t)
 		testSystem := &actorSystem{
 			cluster:       clmock,
 			clusterConfig: NewClusterConfig(),

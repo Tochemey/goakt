@@ -38,7 +38,7 @@ import (
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
-	clustermock "github.com/tochemey/goakt/v3/mocks/cluster"
+	mockscluster "github.com/tochemey/goakt/v3/mocks/cluster"
 )
 
 func TestDeathWatch(t *testing.T) {
@@ -82,32 +82,34 @@ func TestDeathWatch(t *testing.T) {
 	})
 	t.Run("Shutdown PID when RemoveActor call failed in cluster mode", func(t *testing.T) {
 		ctx := context.Background()
-		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		actorSys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 		require.NoError(t, err)
-		require.NotNil(t, sys)
+		require.NotNil(t, actorSys)
 
 		actorID := "testID"
 
 		// mock the cluster interface
-		clmock := new(clustermock.Interface)
+		clmock := mockscluster.NewCluster(t)
 		clmock.EXPECT().RemoveActor(mock.Anything, mock.Anything).Return(assert.AnError)
 		clmock.EXPECT().ActorExists(mock.Anything, actorID).Return(false, nil)
+		clmock.EXPECT().IsLeader(mock.Anything).Return(false).Times(1)
+		clmock.EXPECT().Stop(mock.Anything).Return(nil).Times(1)
 
-		err = sys.Start(ctx)
+		err = actorSys.Start(ctx)
 		require.NoError(t, err)
 
 		// wait for the system to start properly
 		pause.For(500 * time.Millisecond)
-		sys.(*actorSystem).cluster = clmock
-		sys.(*actorSystem).clusterEnabled.Store(true)
+		actorSys.(*actorSystem).cluster = clmock
+		actorSys.(*actorSystem).clusterEnabled.Store(true)
 
-		cid, err := sys.Spawn(ctx, actorID, NewMockActor())
+		cid, err := actorSys.Spawn(ctx, actorID, NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, cid)
 
 		pause.For(500 * time.Millisecond)
 
-		pid := sys.getDeathWatch()
+		pid := actorSys.getDeathWatch()
 		pid.Actor().(*deathWatch).cluster = clmock
 
 		require.NoError(t, cid.Shutdown(ctx))
@@ -115,8 +117,7 @@ func TestDeathWatch(t *testing.T) {
 		pause.For(time.Second)
 
 		require.False(t, pid.IsRunning())
-		require.False(t, sys.Running())
-		clmock.AssertExpectations(t)
+		require.False(t, actorSys.Running())
 	})
 	t.Run("With Terminated when PID not found return no error", func(t *testing.T) {
 		ctx := context.Background()

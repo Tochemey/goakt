@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025 Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,7 @@
 package cluster
 
 import (
+	"context"
 	"testing"
 
 	"github.com/dgraph-io/badger/v4"
@@ -36,9 +37,10 @@ import (
 	"github.com/tochemey/goakt/v3/log"
 )
 
-func TestClusterStore(t *testing.T) {
+func TestBadgerStore(t *testing.T) {
 	t.Run("SetAndGet", func(t *testing.T) {
 		logger := log.DiscardLogger
+		ctx := context.Background()
 		wal := t.TempDir()
 		store, err := NewStore(logger, &wal)
 		require.NoError(t, err)
@@ -52,28 +54,30 @@ func TestClusterStore(t *testing.T) {
 		}
 
 		// Set successful
-		err = store.PersistPeerState(peerState)
+		err = store.PersistPeerState(ctx, peerState)
 		require.NoError(t, err)
 
 		// Get found
 		key := "127.0.0.1:2281"
-		actual, ok := store.GetPeerState(key)
+		actual, ok := store.GetPeerState(ctx, key)
 		require.True(t, ok)
 		assert.True(t, proto.Equal(peerState, actual))
 
 		// Get not found
-		_, ok = store.GetPeerState("127.0.0.1:2282")
+		_, ok = store.GetPeerState(ctx, "127.0.0.1:2282")
 		require.False(t, ok)
 
 		// Get unmarshalling failed
 		// Assume that wrong bytes array in kept in the store
-		err = store.db.Update(func(txn *badger.Txn) error {
+		badgerStore, ok := store.(*BadgerStore)
+		require.True(t, ok)
+		err = badgerStore.db.Update(func(txn *badger.Txn) error {
 			err := txn.Set([]byte(key), []byte("hello"))
 			return err
 		})
 
 		require.NoError(t, err)
-		_, ok = store.GetPeerState(key)
+		_, ok = store.GetPeerState(ctx, key)
 		require.False(t, ok)
 
 		err = store.Close()
@@ -82,6 +86,7 @@ func TestClusterStore(t *testing.T) {
 
 	t.Run("Remove", func(t *testing.T) {
 		logger := log.DiscardLogger
+		ctx := context.Background()
 		store, err := NewStore(logger, nil)
 		require.NoError(t, err)
 		require.NotNil(t, store)
@@ -94,20 +99,20 @@ func TestClusterStore(t *testing.T) {
 		}
 
 		// Set successful
-		err = store.PersistPeerState(peerState)
+		err = store.PersistPeerState(ctx, peerState)
 		require.NoError(t, err)
 
 		// Get found
 		key := "127.0.0.1:2281"
-		actual, ok := store.GetPeerState(key)
+		actual, ok := store.GetPeerState(ctx, key)
 		require.True(t, ok)
 		assert.True(t, proto.Equal(peerState, actual))
 
 		// Remove
-		err = store.DeletePeerState(key)
+		err = store.DeletePeerState(ctx, key)
 		require.NoError(t, err)
 
-		_, ok = store.GetPeerState(key)
+		_, ok = store.GetPeerState(ctx, key)
 		require.False(t, ok)
 
 		err = store.Close()

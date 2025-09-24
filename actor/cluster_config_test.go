@@ -59,7 +59,6 @@ func TestClusterConfig(t *testing.T) {
 			WithReadTimeout(10 * time.Second).
 			WithBootstrapTimeout(10 * time.Second).
 			WithClusterStateSyncInterval(10 * time.Second).
-			WithPeersStateSyncInterval(10 * time.Second).
 			WithDiscovery(provider)
 
 		require.NoError(t, config.Validate())
@@ -75,7 +74,6 @@ func TestClusterConfig(t *testing.T) {
 		assert.Equal(t, 10*time.Second, config.ShutdownTimeout())
 		assert.Equal(t, 10*time.Second, config.BootstrapTimeout())
 		assert.Equal(t, 10*time.Second, config.ClusterStateSyncInterval())
-		assert.Equal(t, 10*time.Second, config.PeersStateSyncInterval())
 
 		wal := config.WAL()
 		assert.NotNil(t, wal)
@@ -104,7 +102,6 @@ func TestClusterConfig(t *testing.T) {
 			WithReadTimeout(10 * time.Second).
 			WithBootstrapTimeout(10 * time.Second).
 			WithClusterStateSyncInterval(10 * time.Second).
-			WithPeersStateSyncInterval(10 * time.Second).
 			WithDiscovery(provider)
 
 		require.NoError(t, config.Validate())
@@ -120,7 +117,6 @@ func TestClusterConfig(t *testing.T) {
 		assert.Equal(t, 10*time.Second, config.ShutdownTimeout())
 		assert.Equal(t, 10*time.Second, config.BootstrapTimeout())
 		assert.Equal(t, 10*time.Second, config.ClusterStateSyncInterval())
-		assert.Equal(t, 10*time.Second, config.PeersStateSyncInterval())
 
 		wal := config.WAL()
 		assert.NotNil(t, wal)

@@ -25,22 +25,39 @@
 package cluster
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
-	testkit "github.com/tochemey/goakt/v3/mocks/hash"
+	"github.com/tochemey/goakt/v3/internal/internalpb"
+	"github.com/tochemey/goakt/v3/log"
 )
 
-func TestHasher(t *testing.T) {
-	// define the key
-	key := []byte("some-key")
-	// mock the hasher
-	hasher := new(testkit.Hasher)
-	expected := uint64(20)
-	hasher.EXPECT().HashCode(key).Return(20)
+func TestMemoryStore(t *testing.T) {
+	logger := log.DiscardLogger
+	store := NewMemoryStore(logger)
+	ctx := context.Background()
 
-	wrapper := &hasherWrapper{hasher: hasher}
-	actual := wrapper.Sum64(key)
-	assert.EqualValues(t, expected, actual)
+	peerState := &internalpb.PeerState{
+		Host:         "127.0.0.1",
+		RemotingPort: 2280,
+		PeersPort:    2281,
+		Actors:       nil,
+	}
+
+	require.NoError(t, store.PersistPeerState(ctx, peerState))
+
+	key := "127.0.0.1:2281"
+	actual, ok := store.GetPeerState(ctx, key)
+	require.True(t, ok)
+	assert.True(t, proto.Equal(peerState, actual))
+
+	require.NoError(t, store.DeletePeerState(ctx, key))
+	_, ok = store.GetPeerState(ctx, key)
+	require.False(t, ok)
+
+	require.NoError(t, store.Close())
 }

@@ -193,6 +193,150 @@ func (x *RebalanceComplete) GetPeerAddress() string {
 	return ""
 }
 
+type StateActor struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the peer host
+	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
+	// Specifies the remoting port
+	RemotingPort int32 `protobuf:"varint,2,opt,name=remoting_port,json=remotingPort,proto3" json:"remoting_port,omitempty"`
+	// Specifies the remoting host
+	PeersPort int32 `protobuf:"varint,3,opt,name=peers_port,json=peersPort,proto3" json:"peers_port,omitempty"`
+	// Specifies the actor
+	Actor         *Actor `protobuf:"bytes,4,opt,name=actor,proto3" json:"actor,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StateActor) Reset() {
+	*x = StateActor{}
+	mi := &file_internal_peers_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StateActor) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StateActor) ProtoMessage() {}
+
+func (x *StateActor) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_peers_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StateActor.ProtoReflect.Descriptor instead.
+func (*StateActor) Descriptor() ([]byte, []int) {
+	return file_internal_peers_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *StateActor) GetHost() string {
+	if x != nil {
+		return x.Host
+	}
+	return ""
+}
+
+func (x *StateActor) GetRemotingPort() int32 {
+	if x != nil {
+		return x.RemotingPort
+	}
+	return 0
+}
+
+func (x *StateActor) GetPeersPort() int32 {
+	if x != nil {
+		return x.PeersPort
+	}
+	return 0
+}
+
+func (x *StateActor) GetActor() *Actor {
+	if x != nil {
+		return x.Actor
+	}
+	return nil
+}
+
+type StateGrain struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the peer host
+	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
+	// Specifies the remoting port
+	RemotingPort int32 `protobuf:"varint,2,opt,name=remoting_port,json=remotingPort,proto3" json:"remoting_port,omitempty"`
+	// Specifies the remoting host
+	PeersPort int32 `protobuf:"varint,3,opt,name=peers_port,json=peersPort,proto3" json:"peers_port,omitempty"`
+	// Specifies the grain
+	Grain         *Grain `protobuf:"bytes,4,opt,name=grain,proto3" json:"grain,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StateGrain) Reset() {
+	*x = StateGrain{}
+	mi := &file_internal_peers_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StateGrain) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StateGrain) ProtoMessage() {}
+
+func (x *StateGrain) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_peers_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StateGrain.ProtoReflect.Descriptor instead.
+func (*StateGrain) Descriptor() ([]byte, []int) {
+	return file_internal_peers_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *StateGrain) GetHost() string {
+	if x != nil {
+		return x.Host
+	}
+	return ""
+}
+
+func (x *StateGrain) GetRemotingPort() int32 {
+	if x != nil {
+		return x.RemotingPort
+	}
+	return 0
+}
+
+func (x *StateGrain) GetPeersPort() int32 {
+	if x != nil {
+		return x.PeersPort
+	}
+	return 0
+}
+
+func (x *StateGrain) GetGrain() *Grain {
+	if x != nil {
+		return x.Grain
+	}
+	return nil
+}
+
 var File_internal_peers_proto protoreflect.FileDescriptor
 
 const file_internal_peers_proto_rawDesc = "" +
@@ -216,7 +360,21 @@ const file_internal_peers_proto_rawDesc = "" +
 	"\n" +
 	"peer_state\x18\x01 \x01(\v2\x15.internalpb.PeerStateR\tpeerState\"6\n" +
 	"\x11RebalanceComplete\x12!\n" +
-	"\fpeer_address\x18\x01 \x01(\tR\vpeerAddressB\xa3\x01\n" +
+	"\fpeer_address\x18\x01 \x01(\tR\vpeerAddress\"\x8d\x01\n" +
+	"\n" +
+	"StateActor\x12\x12\n" +
+	"\x04host\x18\x01 \x01(\tR\x04host\x12#\n" +
+	"\rremoting_port\x18\x02 \x01(\x05R\fremotingPort\x12\x1d\n" +
+	"\n" +
+	"peers_port\x18\x03 \x01(\x05R\tpeersPort\x12'\n" +
+	"\x05actor\x18\x04 \x01(\v2\x11.internalpb.ActorR\x05actor\"\x8d\x01\n" +
+	"\n" +
+	"StateGrain\x12\x12\n" +
+	"\x04host\x18\x01 \x01(\tR\x04host\x12#\n" +
+	"\rremoting_port\x18\x02 \x01(\x05R\fremotingPort\x12\x1d\n" +
+	"\n" +
+	"peers_port\x18\x03 \x01(\x05R\tpeersPort\x12'\n" +
+	"\x05grain\x18\x04 \x01(\v2\x11.internalpb.GrainR\x05grainB\xa3\x01\n" +
 	"\x0ecom.internalpbB\n" +
 	"PeersProtoH\x02P\x01Z;github.com/tochemey/goakt/v3/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
 	"Internalpb\xca\x02\n" +
@@ -235,27 +393,31 @@ func file_internal_peers_proto_rawDescGZIP() []byte {
 	return file_internal_peers_proto_rawDescData
 }
 
-var file_internal_peers_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_internal_peers_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_internal_peers_proto_goTypes = []any{
 	(*PeerState)(nil),         // 0: internalpb.PeerState
 	(*Rebalance)(nil),         // 1: internalpb.Rebalance
 	(*RebalanceComplete)(nil), // 2: internalpb.RebalanceComplete
-	nil,                       // 3: internalpb.PeerState.ActorsEntry
-	nil,                       // 4: internalpb.PeerState.GrainsEntry
-	(*Actor)(nil),             // 5: internalpb.Actor
-	(*Grain)(nil),             // 6: internalpb.Grain
+	(*StateActor)(nil),        // 3: internalpb.StateActor
+	(*StateGrain)(nil),        // 4: internalpb.StateGrain
+	nil,                       // 5: internalpb.PeerState.ActorsEntry
+	nil,                       // 6: internalpb.PeerState.GrainsEntry
+	(*Actor)(nil),             // 7: internalpb.Actor
+	(*Grain)(nil),             // 8: internalpb.Grain
 }
 var file_internal_peers_proto_depIdxs = []int32{
-	3, // 0: internalpb.PeerState.actors:type_name -> internalpb.PeerState.ActorsEntry
-	4, // 1: internalpb.PeerState.grains:type_name -> internalpb.PeerState.GrainsEntry
+	5, // 0: internalpb.PeerState.actors:type_name -> internalpb.PeerState.ActorsEntry
+	6, // 1: internalpb.PeerState.grains:type_name -> internalpb.PeerState.GrainsEntry
 	0, // 2: internalpb.Rebalance.peer_state:type_name -> internalpb.PeerState
-	5, // 3: internalpb.PeerState.ActorsEntry.value:type_name -> internalpb.Actor
-	6, // 4: internalpb.PeerState.GrainsEntry.value:type_name -> internalpb.Grain
-	5, // [5:5] is the sub-list for method output_type
-	5, // [5:5] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	5, // [5:5] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	7, // 3: internalpb.StateActor.actor:type_name -> internalpb.Actor
+	8, // 4: internalpb.StateGrain.grain:type_name -> internalpb.Grain
+	7, // 5: internalpb.PeerState.ActorsEntry.value:type_name -> internalpb.Actor
+	8, // 6: internalpb.PeerState.GrainsEntry.value:type_name -> internalpb.Grain
+	7, // [7:7] is the sub-list for method output_type
+	7, // [7:7] is the sub-list for method input_type
+	7, // [7:7] is the sub-list for extension type_name
+	7, // [7:7] is the sub-list for extension extendee
+	0, // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_internal_peers_proto_init() }
@@ -271,7 +433,7 @@ func file_internal_peers_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_peers_proto_rawDesc), len(file_internal_peers_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -25,22 +25,31 @@
 package cluster
 
 import (
-	"testing"
+	"fmt"
 
-	"github.com/stretchr/testify/assert"
-
-	testkit "github.com/tochemey/goakt/v3/mocks/hash"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
-func TestHasher(t *testing.T) {
-	// define the key
-	key := []byte("some-key")
-	// mock the hasher
-	hasher := new(testkit.Hasher)
-	expected := uint64(20)
-	hasher.EXPECT().HashCode(key).Return(20)
+type EventType int
 
-	wrapper := &hasherWrapper{hasher: hasher}
-	actual := wrapper.Sum64(key)
-	assert.EqualValues(t, expected, actual)
+const (
+	NodeJoined EventType = iota
+	NodeLeft
+)
+
+func (x EventType) String() string {
+	switch x {
+	case NodeJoined:
+		return "NodeJoined"
+	case NodeLeft:
+		return "NodeLeft"
+	default:
+		return fmt.Sprintf("%d", int(x))
+	}
+}
+
+// Event defines the cluster event
+type Event struct {
+	Payload *anypb.Any
+	Type    EventType
 }

@@ -30,3 +30,25 @@ message RebalanceComplete {
   // Specifies the peer address
   string peer_address = 1;
 }
+
+message StateActor {
+  // Specifies the peer host
+  string host = 1;
+  // Specifies the remoting port
+  int32 remoting_port = 2;
+  // Specifies the remoting host
+  int32 peers_port = 3;
+  // Specifies the actor
+  internalpb.Actor actor = 4;
+}
+
+message StateGrain {
+  // Specifies the peer host
+  string host = 1;
+  // Specifies the remoting port
+  int32 remoting_port = 2;
+  // Specifies the remoting host
+  int32 peers_port = 3;
+  // Specifies the grain
+  internalpb.Grain grain = 4;
+}

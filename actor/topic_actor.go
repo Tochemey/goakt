@@ -63,7 +63,7 @@ type topicActor struct {
 	processed *collection.Map[key, registry.Unit]
 	logger    log.Logger
 
-	cluster     cluster.Interface
+	cluster     cluster.Cluster
 	actorSystem ActorSystem
 	remoting    remote.Remoting
 }

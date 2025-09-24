@@ -40,7 +40,7 @@ type deathWatch struct {
 	pid         *PID
 	logger      log.Logger
 	tree        *tree
-	cluster     cluster.Interface
+	cluster     cluster.Cluster
 	actorSystem ActorSystem
 }
 

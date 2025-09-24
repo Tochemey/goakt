@@ -1423,7 +1423,6 @@ func testSystem(t *testing.T, providerFactory providerFactory, opts ...testClust
 				WithDiscoveryPort(discoveryPort).
 				WithBootstrapTimeout(time.Second).
 				WithClusterStateSyncInterval(300 * time.Millisecond).
-				WithPeersStateSyncInterval(500 * time.Millisecond).
 				WithDiscovery(provider)),
 	}
 

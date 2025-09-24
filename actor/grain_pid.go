@@ -34,11 +34,14 @@ import (
 
 	"github.com/flowchartsman/retry"
 	"go.uber.org/atomic"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
+	"github.com/tochemey/goakt/v3/internal/codec"
 	"github.com/tochemey/goakt/v3/internal/collection"
+	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/internal/ticker"
 	"github.com/tochemey/goakt/v3/log"
@@ -308,4 +311,24 @@ func (pid *grainPID) deactivationLoop() {
 	}()
 
 	<-tickerStopSig
+}
+
+func (pid *grainPID) toWireGrain() (*internalpb.Grain, error) {
+	dependencies, err := codec.EncodeDependencies(pid.dependencies.Values()...)
+	if err != nil {
+		return nil, err
+	}
+
+	return &internalpb.Grain{
+		GrainId: &internalpb.GrainId{
+			Kind:  pid.identity.Kind(),
+			Name:  pid.identity.Name(),
+			Value: pid.identity.String(),
+		},
+		Host:              pid.actorSystem.Host(),
+		Port:              int32(pid.actorSystem.Port()),
+		Dependencies:      dependencies,
+		ActivationTimeout: durationpb.New(pid.config.initTimeout.Load()),
+		ActivationRetries: pid.config.initMaxRetries.Load(),
+	}, nil
 }

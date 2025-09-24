@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025 Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,150 +25,38 @@
 package cluster
 
 import (
-	"errors"
-	"fmt"
-	"net"
-	"slices"
-	"strconv"
-	"time"
-
-	"github.com/dgraph-io/badger/v4"
-	"google.golang.org/protobuf/proto"
+	"context"
 
 	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/registry"
-	"github.com/tochemey/goakt/v3/internal/ticker"
-	"github.com/tochemey/goakt/v3/log"
 )
 
-type Store struct {
-	db      *badger.DB
-	logger  log.Logger
-	stopSig chan registry.Unit
-}
+// Store persists and retrieves peer state metadata for the local node.
+// The primary purpose is to retain minimal information about known peers
+// so the cluster membership can be reconstructed after process restarts
+// or transient failures without requiring a full re-discovery round.
+//
+// Implementations may be in-memory (ephemeral) or durable (e.g. disk / KV).
+// Implementations MUST be safe for concurrent use by multiple goroutines.
+// Unless otherwise stated, operations should be idempotent where practical.
+type Store interface {
+	// PersistPeerState stores or updates the given peer state. If a state for
+	// the peer already exists it is replaced. Implementations should treat
+	// identical subsequent writes as idempotent. A non-nil error is returned
+	// when the state cannot be persisted.
+	PersistPeerState(ctx context.Context, peer *internalpb.PeerState) error
 
-// NewStore creates an instance of Store
-func NewStore(logger log.Logger, dir *string) (*Store, error) {
-	dbOpts := badger.
-		DefaultOptions("").
-		WithInMemory(true).
-		WithLogger(nil)
+	// GetPeerState returns the last persisted state for the peer identified
+	// by its address together with a boolean indicating presence. If the
+	// peer is unknown the returned state is nil and the boolean is false.
+	GetPeerState(ctx context.Context, peerAddress string) (*internalpb.PeerState, bool)
 
-	if dir != nil {
-		dbOpts = badger.
-			DefaultOptions(*dir).
-			WithLogger(nil)
-	}
+	// DeletePeerState removes any stored state for the given peer. Deleting
+	// a non-existent peer should not be considered an error (idempotent).
+	// A non-nil error is returned only when the deletion attempt fails.
+	DeletePeerState(ctx context.Context, peerAddress string) error
 
-	// open the database
-	db, err := badger.Open(dbOpts)
-	if err != nil {
-		return nil, err
-	}
-
-	// create the store instance
-	s := &Store{
-		db:      db,
-		logger:  logger,
-		stopSig: make(chan registry.Unit, 1),
-	}
-
-	// run the garbage collector
-	if dir != nil {
-		s.runGC()
-	}
-
-	return s, nil
-}
-
-// PersistPeerState adds a peer to the cache
-func (s *Store) PersistPeerState(peer *internalpb.PeerState) error {
-	peerAddress := net.JoinHostPort(peer.GetHost(), strconv.Itoa(int(peer.GetPeersPort())))
-	value, _ := proto.Marshal(peer)
-
-	return s.db.Update(func(txn *badger.Txn) error {
-		return txn.Set([]byte(peerAddress), value)
-	})
-}
-
-// GetPeerState retrieve a peer from the cache
-func (s *Store) GetPeerState(peerAddress string) (*internalpb.PeerState, bool) {
-	var value []byte
-
-	err := s.db.View(func(txn *badger.Txn) error {
-		item, err := txn.Get([]byte(peerAddress))
-		if err != nil {
-			if errors.Is(err, badger.ErrKeyNotFound) {
-				s.logger.Warn(fmt.Sprintf("peer state not found for peer=(%s): %v", peerAddress, err))
-				return err
-			}
-			s.logger.Error(fmt.Errorf("failed to get peer=(%s) state: %w", peerAddress, err))
-			return err
-		}
-
-		return item.Value(func(val []byte) error {
-			value = slices.Clone(val)
-			return nil
-		})
-	})
-
-	// no need to log error here because the error is already logged in the view function
-	if err != nil {
-		if errors.Is(err, badger.ErrKeyNotFound) {
-			return nil, false
-		}
-		return nil, false
-	}
-
-	peer := new(internalpb.PeerState)
-	if err := proto.Unmarshal(value, peer); err != nil {
-		s.logger.Errorf("failed to unmarshal peer state for peer=(%s): %v", peerAddress, err)
-		return nil, false
-	}
-
-	return peer, true
-}
-
-// DeletePeerState deletes a peer from the cache
-func (s *Store) DeletePeerState(peerAddress string) error {
-	return s.db.Update(func(txn *badger.Txn) error {
-		err := txn.Delete([]byte(peerAddress))
-		if err != nil {
-			return err
-		}
-		return nil
-	})
-}
-
-// Close resets the cache
-func (s *Store) Close() error {
-	close(s.stopSig)
-	return s.db.Close()
-}
-
-// runGC runs the garbage collector
-func (s *Store) runGC() {
-	go func() {
-		ticker := ticker.New(5 * time.Minute)
-		ticker.Start()
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ticker.Ticks:
-				for {
-					if err := s.db.RunValueLogGC(0.7); err != nil {
-						if errors.Is(err, badger.ErrNoRewrite) {
-							break
-						}
-
-						s.logger.Error(fmt.Errorf("failed to run value log GC: %w", err))
-						break
-					}
-				}
-			case <-s.stopSig:
-				return
-			}
-		}
-	}()
+	// Close releases any underlying resources (files, network handles, etc.).
+	// After Close returns, the Store should not be used. Close must be safe
+	// to call once; subsequent calls may return the same error or nil.
+	Close() error
 }

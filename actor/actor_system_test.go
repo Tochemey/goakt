@@ -27,7 +27,6 @@ package actor
 import (
 	"context"
 	"crypto/tls"
-	"errors"
 	"fmt"
 	"net"
 	"reflect"
@@ -39,7 +38,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/kapetan-io/tackle/autotls"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
 	"go.uber.org/atomic"
@@ -49,12 +47,10 @@ import (
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
-	clustermock "github.com/tochemey/goakt/v3/mocks/cluster"
-	mocks "github.com/tochemey/goakt/v3/mocks/discovery"
-	extmocks "github.com/tochemey/goakt/v3/mocks/extension"
+	mocksdiscovery "github.com/tochemey/goakt/v3/mocks/discovery"
+	mocksextension "github.com/tochemey/goakt/v3/mocks/extension"
 	"github.com/tochemey/goakt/v3/passivation"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
@@ -139,7 +135,7 @@ func TestActorSystem(t *testing.T) {
 		}
 
 		// mock the discovery provider
-		provider := new(mocks.Provider)
+		provider := new(mocksdiscovery.Provider)
 		newActorSystem, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
@@ -1042,7 +1038,14 @@ func TestActorSystem(t *testing.T) {
 		}
 
 		// mock the discovery provider
-		provider := new(mocks.Provider)
+		provider := new(mocksdiscovery.Provider)
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
 		newActorSystem, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
@@ -1058,13 +1061,6 @@ func TestActorSystem(t *testing.T) {
 					WithDiscovery(provider)),
 		)
 		require.NoError(t, err)
-
-		provider.EXPECT().ID().Return("testDisco")
-		provider.EXPECT().Initialize().Return(nil)
-		provider.EXPECT().Register().Return(nil)
-		provider.EXPECT().Deregister().Return(nil)
-		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
-		provider.EXPECT().Close().Return(nil)
 
 		// start the actor system
 		err = newActorSystem.Start(ctx)
@@ -1309,7 +1305,7 @@ func TestActorSystem(t *testing.T) {
 		}
 
 		// mock the discovery provider
-		provider := new(mocks.Provider)
+		provider := new(mocksdiscovery.Provider)
 		newActorSystem, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
@@ -1747,7 +1743,7 @@ func TestActorSystem(t *testing.T) {
 		host := "127.0.0.1"
 
 		// mock the discovery provider
-		provider := new(mocks.Provider)
+		provider := new(mocksdiscovery.Provider)
 		newActorSystem, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
@@ -1842,40 +1838,7 @@ func TestActorSystem(t *testing.T) {
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
-	t.Run("With cluster enabled and invalid WAL dir", func(t *testing.T) {
-		ctx := context.TODO()
-		nodePorts := dynaport.Get(3)
-		gossipPort := nodePorts[0]
-		clusterPort := nodePorts[1]
-		remotingPort := nodePorts[2]
 
-		logger := log.DiscardLogger
-		host := "127.0.0.1"
-
-		remoteConfig := remote.NewConfig(host, remotingPort)
-		// mock the discovery provider
-		provider := mocks.NewProvider(t)
-		newActorSystem, err := NewActorSystem(
-			"test",
-			WithLogger(logger),
-			WithRemote(remoteConfig),
-			WithCluster(
-				NewClusterConfig().
-					WithKinds(new(MockActor)).
-					WithPartitionCount(9).
-					WithReplicaCount(1).
-					WithPeersPort(clusterPort).
-					WithMinimumPeersQuorum(1).
-					WithDiscoveryPort(gossipPort).
-					WithWAL("/").
-					WithDiscovery(provider)),
-		)
-		require.NoError(t, err)
-
-		// start the actor system
-		err = newActorSystem.Start(ctx)
-		require.Error(t, err)
-	})
 	t.Run("With Extension", func(t *testing.T) {
 		ext := new(MockExtension)
 		actorSystem, err := NewActorSystem("testSys", WithExtensions(ext))
@@ -1889,20 +1852,18 @@ func TestActorSystem(t *testing.T) {
 		require.True(t, reflect.DeepEqual(extension, ext))
 	})
 	t.Run("With invalid Extension ID length", func(t *testing.T) {
-		ext := extmocks.NewExtension(t)
+		ext := mocksextension.NewExtension(t)
 		ext.EXPECT().ID().Return(strings.Repeat("a", 300))
 		actorSystem, err := NewActorSystem("testSys", WithExtensions(ext))
 		require.Error(t, err)
 		require.Nil(t, actorSystem)
-		ext.AssertExpectations(t)
 	})
 	t.Run("With invalid Extension ID", func(t *testing.T) {
-		ext := extmocks.NewExtension(t)
+		ext := mocksextension.NewExtension(t)
 		ext.EXPECT().ID().Return("$omeN@me")
 		actorSystem, err := NewActorSystem("testSys", WithExtensions(ext))
 		require.Error(t, err)
 		require.Nil(t, actorSystem)
-		ext.AssertExpectations(t)
 	})
 	t.Run("With Inject when actor system not started", func(t *testing.T) {
 		ctx := context.TODO()
@@ -1917,7 +1878,7 @@ func TestActorSystem(t *testing.T) {
 		require.NoError(t, err)
 
 		// register the actor
-		err = sys.Inject(extmocks.NewDependency(t))
+		err = sys.Inject(mocksextension.NewDependency(t))
 		require.Error(t, err)
 		assert.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
 
@@ -1941,7 +1902,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, err)
 
 		// register the actor
-		err = sys.Inject(extmocks.NewDependency(t))
+		err = sys.Inject(mocksextension.NewDependency(t))
 		require.NoError(t, err)
 
 		err = sys.Stop(ctx)
@@ -2283,43 +2244,6 @@ func TestActorSystem(t *testing.T) {
 		pid.stopping.Store(false)
 
 		require.NoError(t, actorSystem.Stop(ctx))
-	})
-	t.Run("When trySyncPeersState failed due to get peers failure", func(t *testing.T) {
-		ctx := context.TODO()
-		clmock := clustermock.NewInterface(t)
-		clmock.EXPECT().Peers(ctx).Return(nil, errors.New("some error")).Once()
-
-		sys := &actorSystem{
-			cluster: clmock,
-		}
-
-		// start the actor system
-		err := sys.trySyncPeersState(ctx)
-		require.Error(t, err)
-	})
-	t.Run("When trySyncPeersState failed due to get peer state failure", func(t *testing.T) {
-		ctx := context.TODO()
-		peer := &cluster.Peer{
-			Host:         "host",
-			PeersPort:    0,
-			Coordinator:  false,
-			RemotingPort: 0,
-		}
-		peers := []*cluster.Peer{peer}
-
-		clmock := clustermock.NewInterface(t)
-		clmock.EXPECT().Peers(ctx).Return(peers, nil).Once()
-		clmock.EXPECT().GetState(mock.Anything, peer.PeerAddress()).Return(nil, errors.New("some error")).Once()
-
-		sys := &actorSystem{
-			cluster:       clmock,
-			clusterConfig: NewClusterConfig(),
-			logger:        log.DiscardLogger,
-		}
-
-		// start the actor system
-		err := sys.trySyncPeersState(ctx)
-		require.Error(t, err)
 	})
 }
 
@@ -4932,7 +4856,7 @@ func TestRemotingSpawn(t *testing.T) {
 		assert.NoError(t, err)
 
 		// register dependencies
-		dependency := extmocks.NewDependency(t)
+		dependency := mocksextension.NewDependency(t)
 		dependency.EXPECT().ID().Return("id")
 		dependency.EXPECT().MarshalBinary().Return(nil, assert.AnError)
 

@@ -48,56 +48,9 @@ import (
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
-	testkit "github.com/tochemey/goakt/v3/mocks/discovery"
+	discoverymock "github.com/tochemey/goakt/v3/mocks/discovery"
 	gtls "github.com/tochemey/goakt/v3/tls"
 )
-
-func setupCluster(t *testing.T) (Cluster, *discovery.Node, context.Context) {
-	t.Helper()
-
-	ctx := context.Background()
-
-	ports := dynaport.Get(3)
-	gossipPort := ports[0]
-	peersPort := ports[1]
-	remotingPort := ports[2]
-
-	addrs := []string{fmt.Sprintf("127.0.0.1:%d", gossipPort)}
-
-	provider := new(testkit.Provider)
-	provider.EXPECT().ID().Return("testDisco")
-	provider.EXPECT().Initialize().Return(nil)
-	provider.EXPECT().Register().Return(nil)
-	provider.EXPECT().Deregister().Return(nil)
-	provider.EXPECT().DiscoverPeers().Return(addrs, nil)
-	provider.EXPECT().Close().Return(nil)
-
-	host := "127.0.0.1"
-	node := &discovery.Node{
-		Name:          host,
-		Host:          host,
-		DiscoveryPort: gossipPort,
-		PeersPort:     peersPort,
-		RemotingPort:  remotingPort,
-	}
-
-	cluster, err := New("test", provider, node, WithClusterLogger(log.DiscardLogger))
-	require.NoError(t, err)
-	require.NotNil(t, cluster)
-
-	require.NoError(t, cluster.Start(ctx))
-
-	t.Cleanup(func() {
-		pause.For(200 * time.Millisecond)
-		stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-
-		require.NoError(t, cluster.Stop(stopCtx))
-		provider.AssertExpectations(t)
-	})
-
-	return cluster, node, ctx
-}
 
 func TestClusterStartStop(t *testing.T) {
 	cluster, _, ctx := setupCluster(t)
@@ -107,6 +60,98 @@ func TestClusterStartStop(t *testing.T) {
 	peers, err := cluster.Peers(ctx)
 	require.NoError(t, err)
 	assert.Len(t, peers, 0)
+}
+
+func TestClusterNotRunningReturnsErrEngineNotRunning(t *testing.T) {
+	ctx := context.Background()
+
+	provider := new(discoverymock.Provider)
+	node := &discovery.Node{
+		Name:          "test-node",
+		Host:          "127.0.0.1",
+		DiscoveryPort: 0,
+		PeersPort:     0,
+		RemotingPort:  0,
+	}
+
+	cluster := New("test", provider, node, WithLogger(log.DiscardLogger))
+	require.NotNil(t, cluster)
+
+	assert.False(t, cluster.IsRunning())
+	assert.False(t, cluster.IsLeader(ctx))
+
+	actor := &internalpb.Actor{Address: &goaktpb.Address{Name: "actor"}}
+	require.ErrorIs(t, cluster.PutActor(ctx, actor), ErrEngineNotRunning)
+
+	_, err := cluster.GetActor(ctx, actor.GetAddress().GetName())
+	require.ErrorIs(t, err, ErrEngineNotRunning)
+
+	require.ErrorIs(t, cluster.RemoveActor(ctx, actor.GetAddress().GetName()), ErrEngineNotRunning)
+
+	actorExists, err := cluster.ActorExists(ctx, actor.GetAddress().GetName())
+	require.False(t, actorExists)
+	require.ErrorIs(t, err, ErrEngineNotRunning)
+
+	actors, err := cluster.Actors(ctx, time.Second)
+	require.ErrorIs(t, err, ErrEngineNotRunning)
+	require.Nil(t, actors)
+
+	grain := &internalpb.Grain{GrainId: &internalpb.GrainId{Value: "grain-id"}}
+	require.ErrorIs(t, cluster.PutGrain(ctx, grain), ErrEngineNotRunning)
+
+	_, err = cluster.GetGrain(ctx, grain.GetGrainId().GetValue())
+	require.ErrorIs(t, err, ErrEngineNotRunning)
+
+	grainExists, err := cluster.GrainExists(ctx, grain.GetGrainId().GetValue())
+	require.False(t, grainExists)
+	require.ErrorIs(t, err, ErrEngineNotRunning)
+
+	require.ErrorIs(t, cluster.RemoveGrain(ctx, grain.GetGrainId().GetValue()), ErrEngineNotRunning)
+
+	grains, err := cluster.Grains(ctx, time.Second)
+	require.ErrorIs(t, err, ErrEngineNotRunning)
+	require.Nil(t, grains)
+
+	require.ErrorIs(t, cluster.PutKind(ctx, "some-kind"), ErrEngineNotRunning)
+
+	kind, err := cluster.LookupKind(ctx, "some-kind")
+	require.Equal(t, "", kind)
+	require.ErrorIs(t, err, ErrEngineNotRunning)
+
+	require.ErrorIs(t, cluster.RemoveKind(ctx, "some-kind"), ErrEngineNotRunning)
+
+	require.ErrorIs(t, cluster.PutJobKey(ctx, "job-id", []byte("metadata")), ErrEngineNotRunning)
+
+	_, err = cluster.JobKey(ctx, "job-id")
+	require.ErrorIs(t, err, ErrEngineNotRunning)
+
+	require.ErrorIs(t, cluster.DeleteJobKey(ctx, "job-id"), ErrEngineNotRunning)
+
+	_, err = cluster.GetState(ctx, node.PeersAddress())
+	require.ErrorIs(t, err, ErrEngineNotRunning)
+
+	peers, err := cluster.Peers(ctx)
+	require.ErrorIs(t, err, ErrEngineNotRunning)
+	require.Nil(t, peers)
+
+	require.Zero(t, cluster.GetPartition(actor.GetAddress().GetName()))
+
+	require.NoError(t, cluster.Stop(ctx))
+
+	provider.AssertExpectations(t)
+}
+
+func TestClusterIsLeader(t *testing.T) {
+	cluster, _, ctx := setupCluster(t)
+
+	require.Eventually(t, func() bool {
+		return cluster.IsLeader(ctx)
+	}, 5*time.Second, 50*time.Millisecond)
+
+	stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	require.NoError(t, cluster.Stop(stopCtx))
+	assert.False(t, cluster.IsLeader(ctx))
 }
 
 func TestClusterDataReplication(t *testing.T) {
@@ -412,6 +457,52 @@ func TestClusterMultipleNodes(t *testing.T) {
 	})
 }
 
+func setupCluster(t *testing.T) (Cluster, *discovery.Node, context.Context) {
+	t.Helper()
+
+	ctx := context.Background()
+
+	ports := dynaport.Get(3)
+	gossipPort := ports[0]
+	peersPort := ports[1]
+	remotingPort := ports[2]
+
+	addrs := []string{fmt.Sprintf("127.0.0.1:%d", gossipPort)}
+
+	provider := new(discoverymock.Provider)
+	provider.EXPECT().ID().Return("testDisco")
+	provider.EXPECT().Initialize().Return(nil)
+	provider.EXPECT().Register().Return(nil)
+	provider.EXPECT().Deregister().Return(nil)
+	provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+	provider.EXPECT().Close().Return(nil)
+
+	host := "127.0.0.1"
+	node := &discovery.Node{
+		Name:          host,
+		Host:          host,
+		DiscoveryPort: gossipPort,
+		PeersPort:     peersPort,
+		RemotingPort:  remotingPort,
+	}
+
+	cluster := New("test", provider, node, WithLogger(log.DiscardLogger))
+	require.NotNil(t, cluster)
+
+	require.NoError(t, cluster.Start(ctx))
+
+	t.Cleanup(func() {
+		pause.For(200 * time.Millisecond)
+		stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+
+		require.NoError(t, cluster.Stop(stopCtx))
+		provider.AssertExpectations(t)
+	})
+
+	return cluster, node, ctx
+}
+
 type clusterHarness struct {
 	Cluster
 	node      *discovery.Node
@@ -459,7 +550,7 @@ func startClusterHarness(t *testing.T, serverAddr string, tlsInfo *gtls.Info) *c
 
 	provider := natsdiscovery.NewDiscovery(&config)
 
-	opts := []ConfigOption{WithClusterLogger(log.DiscardLogger)}
+	opts := []ConfigOption{WithLogger(log.DiscardLogger)}
 	if tlsInfo != nil {
 		info := &gtls.Info{}
 		if tlsInfo.ServerConfig != nil {
@@ -468,11 +559,10 @@ func startClusterHarness(t *testing.T, serverAddr string, tlsInfo *gtls.Info) *c
 		if tlsInfo.ClientConfig != nil {
 			info.ClientConfig = tlsInfo.ClientConfig.Clone()
 		}
-		opts = append(opts, WithSSL(info))
+		opts = append(opts, WithTLS(info))
 	}
 
-	cluster, err := New(actorSystemName, provider, node, opts...)
-	require.NoError(t, err)
+	cluster := New(actorSystemName, provider, node, opts...)
 	require.NotNil(t, cluster)
 	require.NoError(t, cluster.Start(ctx))
 

@@ -53,7 +53,6 @@ type ClusterConfig struct {
 	shutdownTimeout          time.Duration
 	bootstrapTimeout         time.Duration
 	clusterStateSyncInterval time.Duration
-	peersStateSyncInterval   time.Duration
 }
 
 // enforce compilation error
@@ -75,7 +74,6 @@ func NewClusterConfig() *ClusterConfig {
 		shutdownTimeout:          3 * time.Minute,
 		bootstrapTimeout:         DefaultClusterBootstrapTimeout,
 		clusterStateSyncInterval: DefaultClusterStateSyncInterval,
-		peersStateSyncInterval:   DefaultPeerStateSyncInterval,
 	}
 
 	fnActor := new(FuncActor)
@@ -247,31 +245,6 @@ func (x *ClusterConfig) WithClusterStateSyncInterval(interval time.Duration) *Cl
 	return x
 }
 
-// WithPeersStateSyncInterval sets the interval for syncing peers' state.
-//
-// This interval determines how frequently each peer in the cluster synchronizes
-// its view of other peers' states and updates its local cache. Regular synchronization
-// is crucial for maintaining an up-to-date and consistent view of the cluster topology,
-// especially in dynamic environments where nodes may join or leave frequently.
-//
-// A shorter interval allows the cluster to react more quickly to changes (such as
-// node failures or redeployments), but may increase network and processing overhead.
-// A longer interval reduces overhead but may delay detection of cluster changes.
-//
-// The default value is 10 seconds, which provides a balance between responsiveness
-// and resource usage. Adjust this value based on your cluster's size, network
-// characteristics, and desired responsiveness.
-//
-// Example usage:
-//
-//	cfg := NewClusterConfig().WithPeersStateSyncInterval(15 * time.Second)
-//
-// Returns the updated ClusterConfig instance for chaining.
-func (x *ClusterConfig) WithPeersStateSyncInterval(interval time.Duration) *ClusterConfig {
-	x.peersStateSyncInterval = interval
-	return x
-}
-
 // ClusterStateSyncInterval returns the interval at which the cluster synchronizes its routing tables across all nodes.
 //
 // This interval determines how frequently the cluster updates its internal routing information to reflect changes
@@ -311,26 +284,6 @@ func (x *ClusterConfig) ClusterStateSyncInterval() time.Duration {
 // Returns the configured bootstrap timeout.
 func (x *ClusterConfig) BootstrapTimeout() time.Duration {
 	return x.bootstrapTimeout
-}
-
-// PeersStateSyncInterval returns the interval at which each peer in the cluster synchronizes
-// its view of other peers' states and updates its local cache.
-//
-// This interval is crucial for maintaining an up-to-date and consistent view of the cluster topology,
-// especially in dynamic environments where nodes may join or leave frequently. A shorter interval allows
-// the cluster to react more quickly to changes (such as node failures or redeployments), but may increase
-// network and processing overhead. A longer interval reduces overhead but may delay detection of cluster changes.
-//
-// The default value is 10 seconds. Adjust this value based on your cluster's size, network characteristics,
-// and desired responsiveness.
-//
-// Example:
-//
-//	cfg := NewClusterConfig().WithPeersStateSyncInterval(15 * time.Second)
-//
-// Returns the configured peers state sync interval.
-func (x *ClusterConfig) PeersStateSyncInterval() time.Duration {
-	return x.peersStateSyncInterval
 }
 
 // WriteTimeout returns the configured write timeout for cluster write operations.
