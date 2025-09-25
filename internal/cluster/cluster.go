@@ -1251,6 +1251,7 @@ func (x *cluster) processNodeLeft(ev events.NodeLeftEvent) {
 	x.eventsLock.Lock()
 	defer x.eventsLock.Unlock()
 
+	x.nodeJoinedEventsFilter.Remove(ev.NodeLeft)
 	// de-dup
 	if x.nodeLeftEventsFilter.Contains(ev.NodeLeft) {
 		return
