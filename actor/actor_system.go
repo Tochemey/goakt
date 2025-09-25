@@ -610,14 +610,15 @@ type actorSystem struct {
 	// Specifies how long the sender of a message should wait to receive a reply
 	// when using SendReply. The default value is 5s
 	askTimeout time.Duration
-	// Specifies the shutdown timeout. The default value is 30s
+	// Specifies the shutdown timeout. The default value is 3mn
 	shutdownTimeout time.Duration
 	// Specifies the maximum of retries to attempt when the actor
 	// initialization fails. The default value is 5
 	actorInitMaxRetries int
 	// Specifies the actors initialization timeout
 	// The default value is 1s
-	actorInitTimeout time.Duration
+	actorInitTimeout    time.Duration
+	publishStateTimeout time.Duration
 
 	// Specifies whether remoting is enabled.
 	// This allows to handle remote messaging
@@ -741,6 +742,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		actorInitMaxRetries: DefaultInitMaxRetries,
 		locker:              &sync.RWMutex{},
 		shutdownTimeout:     DefaultShutdownTimeout,
+		publishStateTimeout: DefaultPublishStateTimeout,
 		stopGC:              make(chan registry.Unit, 1),
 		eventsStream:        eventstream.New(),
 		partitionHasher:     hash.DefaultHasher(),
@@ -2320,17 +2322,33 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 		x.scheduler.Stop(ctx)
 	}
 
+	werrs := make([]error, 0, len(x.Actors()))
 	wireActors := make([]*internalpb.Actor, 0, len(x.Actors()))
 	for _, actor := range x.Actors() {
 		wireActor, err := actor.toWireActor()
 		if err != nil {
-			return err
+			werrs = append(werrs, err)
+			// if we cannot serialize the actor we stop here
+			break
 		}
 		wireActors = append(wireActors, wireActor)
 	}
 
+	// create a context with timeout to avoid blocking shutdown indefinitely
+	ctx, cancel := context.WithTimeout(ctx, x.shutdownTimeout)
+	defer cancel()
+
+	// notify other nodes about the relocation of actors
+	// we use a dedicated context with a timeout to avoid blocking the shutdown
+	// process in case of network issues
+	timeout := x.effectivePublishStateTimeout()
+	pctx, pcancel := context.WithTimeout(ctx, timeout)
+	err := x.notifyRelocation(pctx, wireActors)
+	pcancel()
+
 	// Run shutdown hooks and collect errors
 	hooksErr := x.runShutdownHooks(ctx)
+	hooksErr = multierr.Combine(hooksErr, multierr.Combine(err, errors.Join(werrs...)))
 
 	// Helper to shut down cluster and remoting
 	shutdownClusterAndRemoting := func() error {
@@ -2340,9 +2358,6 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 			AddRunner(func() error { return x.shutdownRemoting(ctx) }).
 			Run()
 	}
-
-	ctx, cancel := context.WithTimeout(ctx, x.shutdownTimeout)
-	defer cancel()
 
 	// shutdown the various system actors
 	if err := chain.
@@ -2942,7 +2957,7 @@ func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName str
 // notifyRelocation notifies actors/grains to be relocated during node shutdown
 func (x *actorSystem) notifyRelocation(ctx context.Context, actors []*internalpb.Actor) error {
 	// Notify the remain peers of the leaving node's active actors
-	if x.relocationEnabled.Load() {
+	if x.cluster != nil && x.clusterEnabled.Load() && x.relocationEnabled.Load() {
 		x.logger.Infof("node=(%s) requesting actors/grains to be relocated...", x.clusterNode.PeersAddress())
 
 		grains, err := x.getWireGrains()
@@ -3039,7 +3054,6 @@ func (x *actorSystem) shutdownCluster(ctx context.Context, actors []*internalpb.
 		if x.cluster != nil {
 			if err := chain.
 				New(chain.WithFailFast()).
-				AddRunner(func() error { return x.notifyRelocation(ctx, actors) }).
 				AddRunner(func() error { return x.cleanupCluster(ctx, actors) }).
 				AddRunner(func() error { return x.cluster.Stop(ctx) }).
 				Run(); err != nil {

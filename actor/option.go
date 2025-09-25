@@ -239,3 +239,108 @@ func WithEvictionStrategy(strategy *EvictionStrategy, interval time.Duration) Op
 		system.evictionInterval = interval
 	})
 }
+
+// WithPublishStateTimeout sets the maximum duration allowed for publishing this node's
+// in‑memory actor and grain state to the cluster during shutdown (or controlled
+// relocation) before the system gives up and proceeds with termination.
+//
+// What is published:
+//   - Metadata of active actors/grains needed by other nodes to decide relocation,
+//     resurrection or cleanup strategies.
+//
+// When it applies:
+//   - During ActorSystem shutdown (graceful stop).
+//   - When relocation is enabled and the node voluntarily leaves.
+//   - It does NOT apply to sudden crashes (no best‑effort publish is possible).
+//
+// Relationship with other timeouts:
+//   - Must be less than or equal to ShutdownTimeout; if larger, the effective
+//     upper bound is still ShutdownTimeout.
+//   - Independent from WriteTimeout; individual publish operations internally
+//     use WriteTimeout, but the aggregate process is bounded by this timeout.
+//
+// Failure semantics:
+//   - If the timeout elapses before all state is published, shutdown continues.
+//   - Other nodes may experience a short window of partial visibility until
+//     normal reconciliation catches up.
+//   - No panic is raised; an error is logged for observability.
+//
+// Sizing guidance:
+//   - Publishing work is roughly proportional to (#actors + #grains); higher cardinality
+//     requires a longer timeout (marshaling + network round‑trips).
+//   - Large spikes in actor/grain count (e.g. shard fan‑out) should be reflected in this value.
+//   - Small clusters (<=5 nodes): 5–15s is often sufficient.
+//   - Medium clusters (6–25 nodes): 15–30s depending on actor/grain count.
+//   - Large clusters or high churn: 30–60s (default is 1 minute).
+//   - Empirical heuristic:
+//     publishTimeout ≈ P95(single publish latency) * (actors+grains)/parallelism * safetyFactor
+//     where safetyFactor is commonly 2–3.
+//
+// Practical tip:
+//   - Revisit this timeout whenever you significantly change the number of live actors/grains
+//     (e.g. scaling a service or enabling new grain types).
+//
+// Set to zero or a negative duration to revert to the default (not recommended).
+func WithPublishStateTimeout(timeout time.Duration) Option {
+	return OptionFunc(func(system *actorSystem) {
+		if timeout <= 0 {
+			system.publishStateTimeout = DefaultPublishStateTimeout
+			return
+		}
+		system.publishStateTimeout = timeout
+	})
+}
+
+// effectivePublishStateTimeout returns the configured upper bound for publishing this node's
+// in-memory actor and grain metadata to the cluster during a graceful shutdown
+// or voluntary departure.
+//
+// Scope:
+//   - Applies only to best-effort state handoff (not crash scenarios).
+//   - Covers the aggregate of individual publish operations (each still
+//     constrained by WriteTimeout).
+//
+// Sizing considerations:
+//   - Work is roughly proportional to (#actors + #grains); larger cardinality
+//     or heavier serialization needs a higher value.
+//   - Should be <= ShutdownTimeout (effective cap).
+//   - Revisit after significant scale changes (e.g. new grain kinds, load growth).
+//
+// Resolution order:
+//  1. If publishStateTimeout <= 0: derive from default (or 50% of shutdown).
+//  2. If publishStateTimeout > shutdownTimeout: cap at shutdownTimeout.
+//  3. Else: use publishStateTimeout.
+func (x *actorSystem) effectivePublishStateTimeout() time.Duration {
+	st := x.shutdownTimeout
+	pt := x.publishStateTimeout
+
+	// No shutdown budget defined: just return requested publish timeout
+	if st <= 0 {
+		if pt > 0 {
+			return pt
+		}
+		return pt // may be zero; caller can still guard
+	}
+
+	// Derive when unset or invalid
+	if pt <= 0 {
+		// Prefer default if available and <= shutdown
+		d := DefaultPublishStateTimeout
+		if d <= 0 {
+			d = st / 2
+			if d == 0 {
+				d = st
+			}
+		}
+		if d > st {
+			return st
+		}
+		return d
+	}
+
+	// Cap if larger than shutdown
+	if pt > st {
+		return st
+	}
+	return pt
+}

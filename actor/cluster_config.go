@@ -67,7 +67,7 @@ func NewClusterConfig() *ClusterConfig {
 		readQuorum:               1,
 		replicaCount:             1,
 		partitionCount:           271,
-		tableSize:                20 * size.MB,
+		tableSize:                4 * size.MB,
 		writeTimeout:             time.Second,
 		readTimeout:              time.Second,
 		shutdownTimeout:          3 * time.Minute,

@@ -24,7 +24,9 @@
 
 package cluster
 
-import "errors"
+import (
+	"errors"
+)
 
 var (
 	// ErrActorNotFound is return when an actor is not found

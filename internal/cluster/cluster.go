@@ -30,6 +30,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -759,19 +760,142 @@ func (x *cluster) PublishState(ctx context.Context, actors []*internalpb.Actor, 
 		return ErrEngineNotRunning
 	}
 
+	total := len(actors) + len(grains)
+	if total == 0 {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, x.writeTimeout)
+	defer cancel()
+
+	// For small batches, process sequentially to avoid goroutine overhead
+	if total <= 8 {
+		return x.publishStateSequential(ctx, actors, grains)
+	}
+
+	// Use bounded parallelism for larger batches
+	return x.publishStateConcurrent(ctx, actors, grains)
+}
+
+// publishStateSequential handles small batches without goroutine overhead
+func (x *cluster) publishStateSequential(ctx context.Context, actors []*internalpb.Actor, grains []*internalpb.Grain) error {
 	for _, actor := range actors {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err := x.publishStateActor(ctx, actor); err != nil {
+			x.logger.Errorf("failed to publish actor state: %v", err)
 			return err
 		}
 	}
 
 	for _, grain := range grains {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err := x.publishStateGrain(ctx, grain); err != nil {
+			x.logger.Errorf("failed to publish grain state: %v", err)
 			return err
 		}
 	}
 
 	return nil
+}
+
+// publishStateConcurrent handles larger batches with bounded parallelism
+func (x *cluster) publishStateConcurrent(ctx context.Context, actors []*internalpb.Actor, grains []*internalpb.Grain) error {
+	total := len(actors) + len(grains)
+
+	// Use fewer workers for better resource efficiency
+	// Cap at NumCPU but ensure we don't create excessive goroutines
+	maxWorkers := min(max(runtime.NumCPU(), 2), min(total/4, 8))
+
+	// Use buffered channels sized appropriately
+	jobs := make(chan publishJob, min(maxWorkers*2, 64))
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var firstErr error
+
+	// Start workers
+	for range maxWorkers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			x.publishWorker(ctx, jobs, &mu, &firstErr)
+		}()
+	}
+
+	// Feed jobs in a separate goroutine to avoid blocking
+	go func() {
+		defer close(jobs)
+
+		// Send actor jobs
+		for _, actor := range actors {
+			select {
+			case jobs <- publishJob{actor: actor}:
+			case <-ctx.Done():
+				return
+			}
+		}
+
+		// Send grain jobs
+		for _, grain := range grains {
+			select {
+			case jobs <- publishJob{grain: grain}:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	wg.Wait()
+
+	// Check for errors
+	mu.Lock()
+	err := firstErr
+	mu.Unlock()
+
+	if err != nil {
+		return err
+	}
+
+	return ctx.Err()
+}
+
+// publishJob represents a single publish task
+type publishJob struct {
+	actor *internalpb.Actor
+	grain *internalpb.Grain
+}
+
+// publishWorker processes publish jobs from the channel
+func (x *cluster) publishWorker(ctx context.Context, jobs <-chan publishJob, mu *sync.Mutex, firstErr *error) {
+	for job := range jobs {
+		// Fast context cancellation check
+		if ctx.Err() != nil {
+			return
+		}
+
+		var err error
+		if job.actor != nil {
+			err = x.publishStateActor(ctx, job.actor)
+		} else if job.grain != nil {
+			err = x.publishStateGrain(ctx, job.grain)
+		}
+
+		if err != nil {
+			x.logger.Errorf("failed to publish state: %v", err)
+
+			// Record first error only
+			mu.Lock()
+			if *firstErr == nil {
+				*firstErr = err
+			}
+			mu.Unlock()
+			return
+		}
+	}
 }
 
 // buildConfig creates the Olric configuration tailored to the current

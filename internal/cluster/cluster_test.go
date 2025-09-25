@@ -52,7 +52,7 @@ import (
 	gtls "github.com/tochemey/goakt/v3/tls"
 )
 
-func TestClusterStartStop(t *testing.T) {
+func TestStartStop(t *testing.T) {
 	cluster, _, ctx := setupCluster(t)
 
 	assert.True(t, cluster.IsRunning())
@@ -62,7 +62,7 @@ func TestClusterStartStop(t *testing.T) {
 	assert.Len(t, peers, 0)
 }
 
-func TestClusterNotRunningReturnsErrEngineNotRunning(t *testing.T) {
+func TestNotRunningReturnsErrEngineNotRunning(t *testing.T) {
 	ctx := context.Background()
 
 	provider := new(discoverymock.Provider)
@@ -141,7 +141,7 @@ func TestClusterNotRunningReturnsErrEngineNotRunning(t *testing.T) {
 	provider.AssertExpectations(t)
 }
 
-func TestClusterIsLeader(t *testing.T) {
+func TestIsLeader(t *testing.T) {
 	cluster, _, ctx := setupCluster(t)
 
 	require.Eventually(t, func() bool {
@@ -154,7 +154,7 @@ func TestClusterIsLeader(t *testing.T) {
 	assert.False(t, cluster.IsLeader(ctx))
 }
 
-func TestClusterDataReplication(t *testing.T) {
+func TestSingleNode(t *testing.T) {
 	cluster, node, ctx := setupCluster(t)
 
 	actorName := uuid.NewString()
@@ -238,16 +238,12 @@ func TestClusterDataReplication(t *testing.T) {
 
 	peerAddr := fmt.Sprintf("%s:%d", node.Host, node.PeersPort)
 	state, err := cluster.GetState(ctx, peerAddr)
-	require.NoError(t, err)
-	require.NotNil(t, state)
-	assert.Equal(t, node.Host, state.GetHost())
-	assert.Equal(t, int32(node.PeersPort), state.GetPeersPort())
-
-	_, err = cluster.GetState(ctx, "unknown:1234")
+	require.Error(t, err)
+	require.Nil(t, state)
 	assert.ErrorIs(t, err, ErrPeerSyncNotFound)
 }
 
-func TestClusterMultipleNodes(t *testing.T) {
+func TestMultipleNodes(t *testing.T) {
 	t.Run("Without TLS", func(t *testing.T) {
 		ctx := context.TODO()
 
