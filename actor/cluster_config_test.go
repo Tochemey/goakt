@@ -41,7 +41,6 @@ func TestClusterConfig(t *testing.T) {
 		exchanger := new(exchanger)
 		tester := new(MockActor)
 		kinds := []Actor{tester, exchanger}
-		tempdir := t.TempDir()
 
 		config := NewClusterConfig().
 			WithKinds(kinds...).
@@ -53,7 +52,6 @@ func TestClusterConfig(t *testing.T) {
 			WithReadQuorum(1).
 			WithPartitionCount(3).
 			WithTableSize(10 * size.MB).
-			WithWAL(tempdir).
 			WithWriteTimeout(10 * time.Second).
 			WithShutdownTimeout(10 * time.Second).
 			WithReadTimeout(10 * time.Second).
@@ -75,16 +73,12 @@ func TestClusterConfig(t *testing.T) {
 		assert.Equal(t, 10*time.Second, config.BootstrapTimeout())
 		assert.Equal(t, 10*time.Second, config.ClusterStateSyncInterval())
 
-		wal := config.WAL()
-		assert.NotNil(t, wal)
-		assert.Exactly(t, tempdir, *wal)
 		assert.Exactly(t, uint64(10*size.MB), config.TableSize())
 		assert.True(t, provider == config.Discovery())
 		assert.Len(t, config.Kinds(), 3)
 	})
 	t.Run("With happy path with Grains", func(t *testing.T) {
 		provider := new(testkit.Provider)
-		tempdir := t.TempDir()
 
 		config := NewClusterConfig().
 			WithGrains(new(MockGrain)).
@@ -96,7 +90,6 @@ func TestClusterConfig(t *testing.T) {
 			WithReadQuorum(1).
 			WithPartitionCount(3).
 			WithTableSize(10 * size.MB).
-			WithWAL(tempdir).
 			WithWriteTimeout(10 * time.Second).
 			WithShutdownTimeout(10 * time.Second).
 			WithReadTimeout(10 * time.Second).
@@ -118,9 +111,6 @@ func TestClusterConfig(t *testing.T) {
 		assert.Equal(t, 10*time.Second, config.BootstrapTimeout())
 		assert.Equal(t, 10*time.Second, config.ClusterStateSyncInterval())
 
-		wal := config.WAL()
-		assert.NotNil(t, wal)
-		assert.Exactly(t, tempdir, *wal)
 		assert.Exactly(t, uint64(10*size.MB), config.TableSize())
 		assert.True(t, provider == config.Discovery())
 		assert.Len(t, config.Grains(), 1)

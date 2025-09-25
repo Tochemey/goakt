@@ -216,7 +216,7 @@ func New(name string, disco discovery.Provider, node *discovery.Node, opts ...Co
 		nodeJoinedEventsFilter: goset.NewSet[string](),
 		nodeLeftEventsFilter:   goset.NewSet[string](),
 		running:                atomic.NewBool(false),
-		store:                  NewMemoryStore(config.logger), // TODO: switch to high performance store
+		store:                  NewMemoryStore(), // TODO: switch to high performance store
 	}
 }
 

@@ -33,12 +33,10 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/log"
 )
 
 func TestMemoryStore(t *testing.T) {
-	logger := log.DiscardLogger
-	store := NewMemoryStore(logger)
+	store := NewMemoryStore()
 	ctx := context.Background()
 
 	peerState := &internalpb.PeerState{

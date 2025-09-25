@@ -33,7 +33,6 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/log"
 )
 
 // MemoryStore is an in-memory implementation of Store that keeps cluster
@@ -55,26 +54,24 @@ import (
 //   - Call Close to explicitly clear all retained peer state (mainly useful
 //     in tests to release memory deterministically).
 type MemoryStore struct {
-	logger log.Logger
-	mu     sync.RWMutex
-	peers  map[string]*internalpb.PeerState
+	mu    sync.RWMutex
+	peers map[string]*internalpb.PeerState
 }
 
 var _ Store = (*MemoryStore)(nil) // enforce compilation error
 
 // NewMemoryStore returns a new in-memory Store implementation.
 // The provided logger is stored for potential future diagnostic use.
-func NewMemoryStore(logger log.Logger) Store {
+func NewMemoryStore() Store {
 	return &MemoryStore{
-		logger: logger,
-		peers:  make(map[string]*internalpb.PeerState),
+		peers: make(map[string]*internalpb.PeerState),
 	}
 }
 
 // PersistPeerState stores (create or update) the given peer state in memory.
 // A nil peer is ignored and returns nil. The peer is cloned before storage
 // to ensure encapsulation.
-func (m *MemoryStore) PersistPeerState(ctx context.Context, peer *internalpb.PeerState) error {
+func (m *MemoryStore) PersistPeerState(_ context.Context, peer *internalpb.PeerState) error {
 	if peer == nil {
 		return nil
 	}
@@ -92,7 +89,7 @@ func (m *MemoryStore) PersistPeerState(ctx context.Context, peer *internalpb.Pee
 // GetPeerState retrieves the peer state associated with the given peerAddress.
 // The returned state (if found) is a clone, so modifications will not affect
 // the internal store. The boolean indicates presence.
-func (m *MemoryStore) GetPeerState(ctx context.Context, peerAddress string) (*internalpb.PeerState, bool) {
+func (m *MemoryStore) GetPeerState(_ context.Context, peerAddress string) (*internalpb.PeerState, bool) {
 	m.mu.RLock()
 	peer, ok := m.peers[peerAddress]
 	m.mu.RUnlock()
@@ -106,7 +103,7 @@ func (m *MemoryStore) GetPeerState(ctx context.Context, peerAddress string) (*in
 
 // DeletePeerState removes the peer state for the given peerAddress.
 // It is a no-op if the key does not exist.
-func (m *MemoryStore) DeletePeerState(ctx context.Context, peerAddress string) error {
+func (m *MemoryStore) DeletePeerState(_ context.Context, peerAddress string) error {
 	m.mu.Lock()
 	delete(m.peers, peerAddress)
 	m.mu.Unlock()

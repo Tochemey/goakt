@@ -239,7 +239,6 @@ func (m *MultiNodes) StartNode(ctx context.Context, name string) *TestNode {
 				WithMinimumPeersQuorum(1).
 				WithDiscoveryPort(discoveryPort).
 				WithClusterStateSyncInterval(300 * time.Millisecond).
-				WithPeersStateSyncInterval(500 * time.Millisecond).
 				WithDiscovery(provider)),
 	}
 

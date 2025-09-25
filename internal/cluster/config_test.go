@@ -37,6 +37,7 @@ import (
 	gtls "github.com/tochemey/goakt/v3/tls"
 )
 
+// nolint
 func TestConfigOptions(t *testing.T) {
 	mockHasher := new(hashmock.Hasher)
 	tlsCfg := &tls.Config{}

@@ -47,7 +47,6 @@ type ClusterConfig struct {
 	kinds                    *collection.Map[string, Actor]
 	grains                   *collection.Map[string, Grain]
 	tableSize                uint64
-	wal                      *string
 	writeTimeout             time.Duration
 	readTimeout              time.Duration
 	shutdownTimeout          time.Duration
@@ -139,13 +138,6 @@ func (x *ClusterConfig) WithReplicaCount(count uint32) *ClusterConfig {
 // WriteQuorum returns the write quorum
 func (x *ClusterConfig) WriteQuorum() uint32 {
 	return x.writeQuorum
-}
-
-// WithWAL sets a custom WAL directory.
-// GoAkt is required to have the permission to create this directory.
-func (x *ClusterConfig) WithWAL(dir string) *ClusterConfig {
-	x.wal = &dir
-	return x
 }
 
 // WithWriteTimeout sets the write timeout for cluster write operations.
@@ -395,11 +387,6 @@ func (x *ClusterConfig) WithTableSize(size uint64) *ClusterConfig {
 // TableSize returns the cluster storage size
 func (x *ClusterConfig) TableSize() uint64 {
 	return x.tableSize
-}
-
-// WAL returns the WAL directory
-func (x *ClusterConfig) WAL() *string {
-	return x.wal
 }
 
 // Validate validates the cluster config
