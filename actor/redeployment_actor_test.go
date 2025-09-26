@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025 Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -40,7 +40,7 @@ import (
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
-func TestRebalancing(t *testing.T) {
+func TestRedeployment(t *testing.T) {
 	// create a context
 	ctx := context.TODO()
 	// start the NATS server
@@ -112,7 +112,7 @@ func TestRebalancing(t *testing.T) {
 	srv.Shutdown()
 }
 
-func TestRebalancingWithTLSEnabled(t *testing.T) {
+func TestSecuredRedeployment(t *testing.T) {
 	t.Skip("Github actions is not stable with TLS tests")
 	// create a context
 	ctx := context.TODO()
@@ -207,7 +207,7 @@ func TestRebalancingWithTLSEnabled(t *testing.T) {
 	srv.Shutdown()
 }
 
-func TestRebalancingWithSingletonActor(t *testing.T) {
+func TestRedeploymentWithSingletonActor(t *testing.T) {
 	// create a context
 	ctx := context.TODO()
 	// start the NATS server
@@ -250,7 +250,7 @@ func TestRebalancingWithSingletonActor(t *testing.T) {
 	srv.Shutdown()
 }
 
-func TestRebalancingWithActorRelocationDisabled(t *testing.T) {
+func TestRedeploymentWithActorRelocationDisabled(t *testing.T) {
 	// create a context
 	ctx := context.TODO()
 	// start the NATS server
@@ -322,7 +322,7 @@ func TestRebalancingWithActorRelocationDisabled(t *testing.T) {
 	srv.Shutdown()
 }
 
-func TestRebalancingWithSystemRelocationDisabled(t *testing.T) {
+func TestRedeploymentWithSystemRelocationDisabled(t *testing.T) {
 	// create a context
 	ctx := context.TODO()
 	// start the NATS server
@@ -396,7 +396,7 @@ func TestRebalancingWithSystemRelocationDisabled(t *testing.T) {
 	srv.Shutdown()
 }
 
-func TestRebalancingWithExtension(t *testing.T) {
+func TestRedeploymentWithExtension(t *testing.T) {
 	// create a context
 	ctx := context.TODO()
 	// start the NATS server
@@ -494,7 +494,7 @@ func TestRebalancingWithExtension(t *testing.T) {
 	srv.Shutdown()
 }
 
-func TestRebalancingWithDependency(t *testing.T) {
+func TestRedeploymentWithDependency(t *testing.T) {
 	// create a context
 	ctx := context.TODO()
 	// start the NATS server
@@ -647,7 +647,7 @@ func TestIssue781(t *testing.T) {
 }
 
 // nolint
-func TestGrainsRebalancing(t *testing.T) {
+func TestGrainsRedeployment(t *testing.T) {
 	// create a context
 	ctx := t.Context()
 	// start the NATS server
@@ -768,7 +768,7 @@ func TestGrainsRebalancing(t *testing.T) {
 }
 
 // nolint
-func TestPersistenceGrainsRebalancing(t *testing.T) {
+func TestPersistenceGrainsRedeployment(t *testing.T) {
 	// create a context
 	ctx := t.Context()
 	// start the NATS server
@@ -914,7 +914,7 @@ func TestPersistenceGrainsRebalancing(t *testing.T) {
 }
 
 // nolint
-func TestGrainsRebalancingWithDependencies(t *testing.T) {
+func TestGrainsRedeploymentWithDependencies(t *testing.T) {
 	// create a context
 	ctx := t.Context()
 	// start the NATS server
@@ -1045,7 +1045,7 @@ func TestGrainsRebalancingWithDependencies(t *testing.T) {
 	srv.Shutdown()
 }
 
-func TestRebalancing_WithConsulProvider(t *testing.T) {
+func TestRedeployment_WithConsulProvider(t *testing.T) {
 	// create a context
 	ctx := t.Context()
 	agent := startConsulAgent(t)
@@ -1122,7 +1122,7 @@ func TestRebalancing_WithConsulProvider(t *testing.T) {
 	require.NoError(t, sd3.Close())
 }
 
-func TestRebalancing_WithEtcdProvider(t *testing.T) {
+func TestRedeployment_WithEtcdProvider(t *testing.T) {
 	// create a context
 	ctx := t.Context()
 	cluster := startEtcdCluster(t)

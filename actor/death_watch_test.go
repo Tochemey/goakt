@@ -80,7 +80,7 @@ func TestDeathWatch(t *testing.T) {
 		consumer.Shutdown()
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
-	t.Run("Shutdown PID when RemoveActor call failed in cluster mode", func(t *testing.T) {
+	t.Run("System stops when RemoveActor call failed in cluster mode", func(t *testing.T) {
 		ctx := context.Background()
 		actorSys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 		require.NoError(t, err)
@@ -92,8 +92,6 @@ func TestDeathWatch(t *testing.T) {
 		clmock := mockscluster.NewCluster(t)
 		clmock.EXPECT().RemoveActor(mock.Anything, mock.Anything).Return(assert.AnError)
 		clmock.EXPECT().ActorExists(mock.Anything, actorID).Return(false, nil)
-		clmock.EXPECT().IsLeader(mock.Anything).Return(false).Times(1)
-		clmock.EXPECT().Stop(mock.Anything).Return(nil).Times(1)
 
 		err = actorSys.Start(ctx)
 		require.NoError(t, err)

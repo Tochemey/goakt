@@ -869,7 +869,7 @@ func (x *actorSystem) Start(ctx context.Context) error {
 		AddContextRunner(x.spawnSystemGuardian).
 		AddContextRunner(x.spawnNoSender).
 		AddContextRunner(x.spawnUserGuardian).
-		AddContextRunner(x.spawnRebalancer).
+		AddContextRunner(x.spawnRedeployer).
 		AddContextRunner(x.spawnDeathWatch).
 		AddContextRunner(x.spawnDeadletter).
 		AddContextRunner(x.spawnSingletonManager).
@@ -2865,8 +2865,8 @@ func (x *actorSystem) spawnDeathWatch(ctx context.Context) error {
 	return x.actors.addNode(x.systemGuardian, x.deathWatch)
 }
 
-// spawnRebalancer creates the cluster rebalancer
-func (x *actorSystem) spawnRebalancer(ctx context.Context) error {
+// spawnRedeployer creates the cluster rebalancer
+func (x *actorSystem) spawnRedeployer(ctx context.Context) error {
 	if x.clusterEnabled.Load() && x.relocationEnabled.Load() {
 		var err error
 		actorName := x.reservedName(rebalancerType)
@@ -2883,7 +2883,7 @@ func (x *actorSystem) spawnRebalancer(ctx context.Context) error {
 
 		x.rebalancer, err = x.configPID(ctx,
 			actorName,
-			newRebalancer(x.remoting),
+			newRedeploymentActor(x.remoting),
 			asSystem(),
 			WithLongLived(),
 			WithSupervisor(supervisor),
