@@ -30,6 +30,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"runtime"
 	"strconv"
 	"strings"
@@ -194,6 +195,13 @@ func New(name string, disco discovery.Provider, node *discovery.Node, opts ...Co
 		opt(config)
 	}
 
+	// Initialize the persistent store
+	store, err := NewBoltStore()
+	if err != nil {
+		config.logger.Fatalf("failed to create boltdb store: %v", err)
+		os.Exit(1)
+	}
+
 	return &cluster{
 		name:                   name,
 		discoveryProvider:      disco,
@@ -218,7 +226,7 @@ func New(name string, disco discovery.Provider, node *discovery.Node, opts ...Co
 		nodeJoinedEventsFilter: goset.NewSet[string](),
 		nodeLeftEventsFilter:   goset.NewSet[string](),
 		running:                atomic.NewBool(false),
-		store:                  NewMemoryStore(), // TODO: switch to high performance store
+		store:                  store,
 	}
 }
 
@@ -300,6 +308,11 @@ func (x *cluster) Stop(ctx context.Context) error {
 	close(x.events)
 	x.events = nil
 	x.eventsLock.Unlock()
+
+	if err := x.store.Close(); err != nil {
+		x.logger.Errorf("failed to close cluster store: %v", err)
+		return err
+	}
 
 	x.logger.Infof("cluster engine (%s) stopped", x.name)
 	return nil

@@ -127,6 +127,13 @@ func TestOption(t *testing.T) {
 				assert.Equal(t, 2*time.Second, sys.publishStateTimeout)
 			},
 		},
+		{
+			name:   "WithPublishStateTimeout set to zero",
+			option: WithPublishStateTimeout(0),
+			check: func(t *testing.T, sys *actorSystem) {
+				assert.Equal(t, DefaultPublishStateTimeout, sys.publishStateTimeout)
+			},
+		},
 	}
 
 	for _, tc := range testCases {
@@ -184,90 +191,70 @@ func TestWithEvictionStrategy(t *testing.T) {
 // TestEffectivePublishStateTimeout validates the resolution/capping logic of
 // (*actorSystem).effectivePublishStateTimeout().
 func TestEffectivePublishStateTimeout(t *testing.T) {
-	type fields struct {
+	tests := []struct {
+		name     string
 		shutdown time.Duration
 		publish  time.Duration
-	}
-
-	// helper reproducing the resolution logic for derived expectations
-	deriveExpected := func(st, pt time.Duration) time.Duration {
-		if st <= 0 {
-			// No shutdown budget: just return the raw publish timeout (even if zero)
-			return pt
-		}
-		if pt <= 0 {
-			d := DefaultPublishStateTimeout
-			if d <= 0 {
-				d = st / 2
-				if d == 0 {
-					d = st
-				}
-			}
-			if d > st {
-				return st
-			}
-			return d
-		}
-		if pt > st {
-			return st
-		}
-		return pt
-	}
-
-	now := time.Now() // just to avoid lint complaints about time import if unused
-
-	_ = now // keep linter happy in case all durations are constants
-
-	tests := []struct {
-		name   string
-		fields fields
+		expected time.Duration
 	}{
 		{
-			name:   "no shutdown timeout, publish set",
-			fields: fields{shutdown: 0, publish: 15 * time.Second},
+			name:     "no shutdown timeout, publish set",
+			shutdown: 0,
+			publish:  15 * time.Second,
+			expected: 15 * time.Second,
 		},
 		{
-			name:   "no shutdown timeout, publish zero (returns zero)",
-			fields: fields{shutdown: 0, publish: 0},
+			name:     "no shutdown timeout, publish zero (returns zero)",
+			shutdown: 0,
+			publish:  0,
+			expected: 0,
 		},
 		{
-			name:   "shutdown set, publish unset derives from default within cap",
-			fields: fields{shutdown: 1 * time.Minute, publish: 0},
+			name:     "shutdown set, publish unset derives from default within cap",
+			shutdown: 1 * time.Minute,
+			publish:  0,
+			expected: clampPublishTimeout(1 * time.Minute),
 		},
 		{
-			name:   "shutdown smaller than default, publish unset -> capped to shutdown",
-			fields: fields{shutdown: 30 * time.Second, publish: 0},
+			name:     "shutdown smaller than default, publish unset -> capped to shutdown",
+			shutdown: 30 * time.Second,
+			publish:  0,
+			expected: clampPublishTimeout(30 * time.Second),
 		},
 		{
-			name:   "publish greater than shutdown -> capped",
-			fields: fields{shutdown: 1 * time.Minute, publish: 90 * time.Second},
+			name:     "publish greater than shutdown -> capped",
+			shutdown: 1 * time.Minute,
+			publish:  90 * time.Second,
+			expected: 1 * time.Minute,
 		},
 		{
-			name:   "publish equals shutdown -> returns publish",
-			fields: fields{shutdown: 1 * time.Minute, publish: 1 * time.Minute},
+			name:     "publish equals shutdown -> returns publish",
+			shutdown: 1 * time.Minute,
+			publish:  1 * time.Minute,
+			expected: 1 * time.Minute,
 		},
 		{
-			name:   "publish less than shutdown -> returns publish",
-			fields: fields{shutdown: 2 * time.Minute, publish: 30 * time.Second},
+			name:     "publish less than shutdown -> returns publish",
+			shutdown: 2 * time.Minute,
+			publish:  30 * time.Second,
+			expected: 30 * time.Second,
 		},
 		{
-			name:   "negative publish timeout derives from default logic",
-			fields: fields{shutdown: 45 * time.Second, publish: -1},
+			name:     "negative publish timeout derives from default logic",
+			shutdown: 45 * time.Second,
+			publish:  -1,
+			expected: clampPublishTimeout(45 * time.Second),
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			sys := &actorSystem{
-				shutdownTimeout:     tc.fields.shutdown,
-				publishStateTimeout: tc.fields.publish,
+				shutdownTimeout:     tc.shutdown,
+				publishStateTimeout: tc.publish,
 			}
 			got := sys.effectivePublishStateTimeout()
-			want := deriveExpected(tc.fields.shutdown, tc.fields.publish)
-			if got != want {
-				t.Fatalf("effectivePublishStateTimeout() = %v, want %v (shutdown=%v publish=%v default=%v)",
-					got, want, tc.fields.shutdown, tc.fields.publish, DefaultPublishStateTimeout)
-			}
+			require.Equal(t, tc.expected, got, "shutdown=%v publish=%v default=%v", tc.shutdown, tc.publish, DefaultPublishStateTimeout)
 		})
 	}
 }

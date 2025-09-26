@@ -314,33 +314,33 @@ func (x *actorSystem) effectivePublishStateTimeout() time.Duration {
 	st := x.shutdownTimeout
 	pt := x.publishStateTimeout
 
-	// No shutdown budget defined: just return requested publish timeout
 	if st <= 0 {
-		if pt > 0 {
-			return pt
-		}
-		return pt // may be zero; caller can still guard
+		return pt
 	}
 
-	// Derive when unset or invalid
 	if pt <= 0 {
-		// Prefer default if available and <= shutdown
-		d := DefaultPublishStateTimeout
-		if d <= 0 {
-			d = st / 2
-			if d == 0 {
-				d = st
-			}
-		}
-		if d > st {
-			return st
-		}
-		return d
+		return clampPublishTimeout(st)
 	}
 
-	// Cap if larger than shutdown
 	if pt > st {
 		return st
 	}
+
 	return pt
+}
+
+func clampPublishTimeout(shutdown time.Duration) time.Duration {
+	candidate := DefaultPublishStateTimeout
+	if candidate <= 0 {
+		candidate = shutdown / 2
+		if candidate <= 0 {
+			candidate = shutdown
+		}
+	}
+
+	if candidate > shutdown {
+		return shutdown
+	}
+
+	return candidate
 }
