@@ -1412,6 +1412,8 @@ func testSystem(t *testing.T, providerFactory providerFactory, opts ...testClust
 	// base options
 	options := []Option{
 		WithLogger(logger),
+		WithShutdownTimeout(3 * time.Minute),
+		WithPublishStateTimeout(time.Minute),
 		WithCluster(
 			NewClusterConfig().
 				WithKinds(new(MockActor), new(MockEntity), new(MockGrainActor)).
