@@ -319,6 +319,7 @@ func TestGrain(t *testing.T) {
 			logger:        log.DiscardLogger,
 			started:       atomic.NewBool(true),
 			shuttingDown:  atomic.NewBool(false),
+			locker:        &sync.RWMutex{},
 		}
 		testSystem.clusterEnabled.Store(true)
 

@@ -2761,8 +2761,9 @@ func (x *actorSystem) tree() *tree {
 // getCluster returns the cluster engine
 func (x *actorSystem) getCluster() cluster.Cluster {
 	x.locker.RLock()
-	defer x.locker.RUnlock()
-	return x.cluster
+	cluster := x.cluster
+	x.locker.RUnlock()
+	return cluster
 }
 
 // reservedName returns the reserved actor's name
