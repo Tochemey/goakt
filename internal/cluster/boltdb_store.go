@@ -68,7 +68,7 @@ var (
 //     close state to prevent operations once the store is shut down.
 //
 // Efficiency:
-//   - Peer states are marshalled with protobuf and packed directly into a
+//   - Peer states are marshaled with protobuf and packed directly into a
 //     dedicated bucket. Reads avoid allocations unless data exists.
 //   - The DB is opened with a short timeout to avoid blocking on locked files.
 type BoltStore struct {

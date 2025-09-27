@@ -560,6 +560,13 @@ type ActorSystem interface {
 	//  - The value is stable for local use and intended to explicitly indicate the
 	//    absence of a sender (as opposed to nil).
 	NoSender() *PID
+	// PeersPort returns the port known in the cluster.
+	// That port is used by other nodes to communicate with this actor system.
+	// This port is zero when cluster mode is not activated
+	PeersPort() int
+	// DiscoveryPort returns the port used for service discovery.
+	// This port is zero when cluster mode is not activated
+	DiscoveryPort() int
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
 	handleRemoteAsk(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error)
@@ -589,6 +596,8 @@ type ActorSystem interface {
 	getGrains() *collection.Map[string, *grainPID]
 	recreateGrain(ctx context.Context, props *internalpb.Grain) error
 	decreaseActorsCounter()
+	removePeerActor(ctx context.Context, actorName string) error
+	removePeerGrain(ctx context.Context, grainID *internalpb.GrainId) error
 }
 
 // ActorSystem represent a collection of actors on a given node
@@ -617,32 +626,28 @@ type actorSystem struct {
 	actorInitMaxRetries int
 	// Specifies the actors initialization timeout
 	// The default value is 1s
-	actorInitTimeout    time.Duration
-	publishStateTimeout time.Duration
+	actorInitTimeout time.Duration
 
 	// Specifies whether remoting is enabled.
 	// This allows to handle remote messaging
 	remotingEnabled atomic.Bool
 	remoting        remote.Remoting
+
 	// Specifies the remoting server
 	server       *stdhttp.Server
 	listener     net.Listener
 	remoteConfig *remote.Config
 
 	// cluster settings
-	clusterEnabled atomic.Bool
-	// cluster mode
-	cluster            cluster.Cluster
-	actorsQueue        chan *internalpb.Actor
-	eventsQueue        <-chan *cluster.Event
-	clusterSyncStopSig chan registry.Unit
-	partitionHasher    hash.Hasher
-	clusterNode        *discovery.Node
+	clusterEnabled  atomic.Bool
+	cluster         cluster.Cluster
+	actorsQueue     chan *internalpb.Actor
+	eventsQueue     <-chan *cluster.Event
+	partitionHasher hash.Hasher
+	clusterNode     *discovery.Node
 
 	// help protect some the fields to set
 	locker *sync.RWMutex
-
-	stopGC chan registry.Unit
 
 	// specifies the events stream
 	eventsStream eventstream.Stream
@@ -666,6 +671,7 @@ type actorSystem struct {
 	singletonManager *PID
 	topicActor       *PID
 	noSender         *PID
+	stateWriter      *PID
 
 	startedAt       *atomic.Int64
 	rebalancing     *atomic.Bool
@@ -742,14 +748,11 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		actorInitMaxRetries: DefaultInitMaxRetries,
 		locker:              &sync.RWMutex{},
 		shutdownTimeout:     DefaultShutdownTimeout,
-		publishStateTimeout: DefaultPublishStateTimeout,
-		stopGC:              make(chan registry.Unit, 1),
 		eventsStream:        eventstream.New(),
 		partitionHasher:     hash.DefaultHasher(),
 		actorInitTimeout:    DefaultInitTimeout,
 		eventsQueue:         make(chan *cluster.Event, 1),
 		registry:            registry.NewRegistry(),
-		clusterSyncStopSig:  make(chan registry.Unit, 1),
 		remoteConfig:        remote.DefaultConfig(),
 		actors:              newTree(),
 		startedAt:           atomic.NewInt64(0),
@@ -863,8 +866,8 @@ func (x *actorSystem) Start(ctx context.Context) error {
 
 	if err := chain.
 		New(chain.WithFailFast(), chain.WithContext(ctx)).
-		AddContextRunner(x.startRemoting).
-		AddContextRunner(x.startClustering).
+		AddRunner(x.setupRemoting).
+		AddRunner(x.setupCluster).
 		AddContextRunner(x.spawnRootGuardian).
 		AddContextRunner(x.spawnSystemGuardian).
 		AddContextRunner(x.spawnNoSender).
@@ -874,6 +877,9 @@ func (x *actorSystem) Start(ctx context.Context) error {
 		AddContextRunner(x.spawnDeadletter).
 		AddContextRunner(x.spawnSingletonManager).
 		AddContextRunner(x.spawnTopicActor).
+		AddContextRunner(x.spawnStateWriter).
+		AddContextRunner(x.startRemoting).
+		AddContextRunner(x.startClustering).
 		Run(); err != nil {
 		if stopErr := x.shutdown(ctx); stopErr != nil {
 			return errors.Join(err, stopErr)
@@ -946,6 +952,31 @@ func (x *actorSystem) Host() string {
 func (x *actorSystem) Port() int {
 	x.locker.RLock()
 	port := x.remoteConfig.BindPort()
+	x.locker.RUnlock()
+	return port
+}
+
+// DiscoveryPort returns the port used for service discovery.
+// This port is zero when cluster mode is not activated
+func (x *actorSystem) DiscoveryPort() int {
+	if !x.InCluster() {
+		return 0
+	}
+	x.locker.RLock()
+	port := x.clusterNode.DiscoveryPort
+	x.locker.RUnlock()
+	return port
+}
+
+// PeersPort returns the port known in the cluster.
+// That port is used by other nodes to communicate with this actor system.
+// This port is zero when cluster mode is not activated
+func (x *actorSystem) PeersPort() int {
+	if !x.InCluster() {
+		return 0
+	}
+	x.locker.RLock()
+	port := x.clusterNode.PeersPort
 	x.locker.RUnlock()
 	return port
 }
@@ -2113,9 +2144,8 @@ func (x *actorSystem) putGrainOnCluster(pid *grainPID) error {
 	return nil
 }
 
-// startClustering enables clustering. When clustering is enabled remoting is also enabled to facilitate remote
-// communication
-func (x *actorSystem) startClustering(ctx context.Context) error {
+// setupCluster prepares the cluster engine when clustering is enabled
+func (x *actorSystem) setupCluster() error {
 	if !x.clusterEnabled.Load() {
 		return nil
 	}
@@ -2135,7 +2165,7 @@ func (x *actorSystem) startClustering(ctx context.Context) error {
 		RemotingPort:  x.remoteConfig.BindPort(),
 	}
 
-	clusterEngine := cluster.New(
+	x.cluster = cluster.New(
 		x.name,
 		x.clusterConfig.Discovery(),
 		x.clusterNode,
@@ -2155,17 +2185,6 @@ func (x *actorSystem) startClustering(ctx context.Context) error {
 		cluster.WithRoutingTableInterval(x.clusterConfig.ClusterStateSyncInterval()),
 	)
 
-	x.logger.Info("starting cluster engine...")
-	if err := clusterEngine.Start(ctx); err != nil {
-		x.logger.Errorf("failed to start cluster engine: %v", err)
-		return err
-	}
-
-	x.logger.Info("cluster engine successfully started...")
-
-	x.cluster = clusterEngine
-	x.eventsQueue = clusterEngine.Events()
-	x.rebalancingQueue = make(chan *internalpb.PeerState, 1)
 	for _, kind := range x.clusterConfig.Kinds() {
 		x.registry.Register(kind)
 		x.logger.Infof("cluster kind=(%s) registered", registry.Name(kind))
@@ -2178,6 +2197,26 @@ func (x *actorSystem) startClustering(ctx context.Context) error {
 		}
 	}
 
+	return nil
+}
+
+// startClustering enables clustering. When clustering is enabled remoting is also enabled to facilitate remote
+// communication
+func (x *actorSystem) startClustering(ctx context.Context) error {
+	if !x.clusterEnabled.Load() {
+		return nil
+	}
+
+	x.logger.Info("starting cluster engine...")
+	if err := x.cluster.Start(ctx); err != nil {
+		x.logger.Errorf("failed to start cluster engine: %v", err)
+		return err
+	}
+
+	x.logger.Info("cluster engine successfully started...")
+
+	x.eventsQueue = x.cluster.Events()
+	x.rebalancingQueue = make(chan *internalpb.PeerState, 1)
 	go x.clusterEventsLoop()
 	go x.replicateActors()
 	go x.replicateGrains()
@@ -2197,7 +2236,7 @@ func (x *actorSystem) startRemoting(ctx context.Context) error {
 		return nil
 	}
 
-	x.logger.Info("enabling remoting...")
+	x.logger.Info("starting remoting...")
 
 	opts := []connect.HandlerOption{
 		connectproto.WithBinary(
@@ -2240,23 +2279,22 @@ func (x *actorSystem) startRemoting(ctx context.Context) error {
 		}
 	}()
 
-	// configure remoting
-	x.setRemoting()
-	x.logger.Info("remoting enabled...:)")
+	x.logger.Info("remoting started...:)")
 	return nil
 }
 
-// setRemoting sets the remoting service
-func (x *actorSystem) setRemoting() {
+// setupRemoting sets the remoting service
+func (x *actorSystem) setupRemoting() error {
 	if x.tlsInfo != nil {
 		x.remoting = remote.NewRemoting(
 			remote.WithRemotingTLS(x.tlsInfo.ClientConfig),
 			remote.WithRemotingMaxReadFameSize(int(x.remoteConfig.MaxFrameSize())), // nolint
 			remote.WithRemotingCompression(x.remoteConfig.Compression()),
 		)
-		return
+		return nil
 	}
 	x.remoting = remote.NewRemoting(remote.WithRemotingMaxReadFameSize(int(x.remoteConfig.MaxFrameSize())))
+	return nil
 }
 
 // startMessagesScheduler starts the messages scheduler
@@ -2306,7 +2344,6 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 		return gerrors.ErrActorSystemNotStarted
 	}
 
-	x.stopGC <- registry.Unit{}
 	x.logger.Infof("%s is shutting down..:)", x.name)
 	x.shuttingDown.Store(true)
 
@@ -2322,39 +2359,23 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 		x.scheduler.Stop(ctx)
 	}
 
-	werrs := make([]error, 0, len(x.Actors()))
-	wireActors := make([]*internalpb.Actor, 0, len(x.Actors()))
+	actorRefs := make([]ActorRef, 0, len(x.Actors()))
 	for _, actor := range x.Actors() {
-		wireActor, err := actor.toWireActor()
-		if err != nil {
-			werrs = append(werrs, err)
-			// if we cannot serialize the actor we stop here
-			break
-		}
-		wireActors = append(wireActors, wireActor)
+		actorRefs = append(actorRefs, fromPID(actor))
 	}
 
 	// create a context with timeout to avoid blocking shutdown indefinitely
 	ctx, cancel := context.WithTimeout(ctx, x.shutdownTimeout)
 	defer cancel()
 
-	// notify other nodes about the relocation of actors
-	// we use a dedicated context with a timeout to avoid blocking the shutdown
-	// process in case of network issues
-	timeout := x.effectivePublishStateTimeout()
-	pctx, pcancel := context.WithTimeout(ctx, timeout)
-	err := x.notifyRelocation(pctx, wireActors)
-	pcancel()
-
 	// Run shutdown hooks and collect errors
 	hooksErr := x.runShutdownHooks(ctx)
-	hooksErr = multierr.Combine(hooksErr, multierr.Combine(err, errors.Join(werrs...)))
 
 	// Helper to shut down cluster and remoting
 	shutdownClusterAndRemoting := func() error {
 		return chain.
 			New(chain.WithFailFast()).
-			AddRunner(func() error { return x.shutdownCluster(ctx, wireActors) }).
+			AddRunner(func() error { return x.shutdownCluster(ctx, actorRefs) }).
 			AddRunner(func() error { return x.shutdownRemoting(ctx) }).
 			Run()
 	}
@@ -2424,14 +2445,21 @@ func (x *actorSystem) replicateActors() {
 		}
 		if !x.isStopping() && x.InCluster() {
 			ctx := context.Background()
+			cluster := x.getCluster()
 			if actor.GetIsSingleton() {
-				if err := x.cluster.PutKind(ctx, actor.GetType()); err != nil {
+				if err := cluster.PutKind(ctx, actor.GetType()); err != nil {
 					x.logger.Warn(err.Error())
 					continue
 				}
 			}
 
-			if err := x.cluster.PutActor(ctx, actor); err != nil {
+			// publish the actor state to other nodes
+			// we do this before putting the actor into the cluster
+			if err := x.publishPersistPeerActor(ctx, actor); err != nil {
+				x.logger.Warn(err.Error())
+			}
+
+			if err := cluster.PutActor(ctx, actor); err != nil {
 				x.logger.Warn(err.Error())
 			}
 		}
@@ -2448,6 +2476,12 @@ func (x *actorSystem) replicateGrains() {
 		}
 		if !x.isStopping() && x.InCluster() {
 			ctx := context.Background()
+			// publish the grain state to other nodes
+			// we do this before putting the grain into the cluster
+			if err := x.publishPersistPeerGrain(ctx, grain); err != nil {
+				x.logger.Warn(err.Error())
+			}
+
 			if err := x.cluster.PutGrain(ctx, grain); err != nil {
 				x.logger.Warn(err.Error())
 			}
@@ -2726,6 +2760,8 @@ func (x *actorSystem) tree() *tree {
 
 // getCluster returns the cluster engine
 func (x *actorSystem) getCluster() cluster.Cluster {
+	x.locker.RLock()
+	defer x.locker.RUnlock()
 	return x.cluster
 }
 
@@ -2865,7 +2901,7 @@ func (x *actorSystem) spawnDeathWatch(ctx context.Context) error {
 	return x.actors.addNode(x.systemGuardian, x.deathWatch)
 }
 
-// spawnRedeployer creates the cluster rebalancer
+// spawnRedeployer creates the actor responsible for re-deploying actors when a node leaves the cluster
 func (x *actorSystem) spawnRedeployer(ctx context.Context) error {
 	if x.clusterEnabled.Load() && x.relocationEnabled.Load() {
 		var err error
@@ -2954,39 +2990,17 @@ func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName str
 	return nil
 }
 
-// notifyRelocation notifies actors/grains to be relocated during node shutdown
-func (x *actorSystem) notifyRelocation(ctx context.Context, actors []*internalpb.Actor) error {
-	// Notify the remain peers of the leaving node's active actors
-	if x.cluster != nil && x.clusterEnabled.Load() && x.relocationEnabled.Load() {
-		x.logger.Infof("node=(%s) requesting actors/grains to be relocated...", x.clusterNode.PeersAddress())
-
-		grains, err := x.getWireGrains()
-		if err != nil {
-			x.logger.Errorf("failed to get grains to be relocated during node=(%s) shutdown: %v", x.clusterNode.PeersAddress(), err)
-			return err
-		}
-
-		if err := x.cluster.PublishState(ctx, actors, grains); err != nil {
-			x.logger.Errorf("failed to publish node=(%s) state: %v", x.clusterNode.PeersAddress(), err)
-			return err
-		}
-
-		x.logger.Infof("node=(%s) successfully published actors/grains to be relocated", x.clusterNode.PeersAddress())
-	}
-	return nil
-}
-
 // cleanupCluster cleans up the cluster
-func (x *actorSystem) cleanupCluster(ctx context.Context, actorRefs []*internalpb.Actor) error {
+func (x *actorSystem) cleanupCluster(ctx context.Context, actorRefs []ActorRef) error {
 	eg, ctx := errgroup.WithContext(ctx)
 
 	// Remove singleton actors from the cluster
 	if x.cluster.IsLeader(ctx) {
 		for _, actorRef := range actorRefs {
-			if actorRef.GetIsSingleton() {
+			if actorRef.IsSingleton() {
 				actorRef := actorRef
 				eg.Go(func() error {
-					kind := actorRef.GetType()
+					kind := actorRef.Kind()
 					if err := x.cluster.RemoveKind(ctx, kind); err != nil {
 						x.logger.Errorf("failed to remove [actor kind=%s] from cluster: %v", kind, err)
 						return err
@@ -3002,7 +3016,7 @@ func (x *actorSystem) cleanupCluster(ctx context.Context, actorRefs []*internalp
 	for _, actorRef := range actorRefs {
 		actorRef := actorRef
 		eg.Go(func() error {
-			actorName := actorRef.GetAddress().GetName()
+			actorName := actorRef.Name()
 			if err := x.cluster.RemoveActor(ctx, actorName); err != nil {
 				x.logger.Errorf("failed to remove [actor=%s] from cluster: %v", actorName, err)
 				return err
@@ -3049,7 +3063,7 @@ func (x *actorSystem) getSetDeadlettersCount(ctx context.Context) {
 	}
 }
 
-func (x *actorSystem) shutdownCluster(ctx context.Context, actors []*internalpb.Actor) error {
+func (x *actorSystem) shutdownCluster(ctx context.Context, actors []ActorRef) error {
 	if x.clusterEnabled.Load() {
 		if x.cluster != nil {
 			if err := chain.
@@ -3066,7 +3080,6 @@ func (x *actorSystem) shutdownCluster(ctx context.Context, actors []*internalpb.
 			close(x.actorsQueue)
 		}
 
-		x.clusterSyncStopSig <- registry.Unit{}
 		x.clusterEnabled.Store(false)
 		x.rebalancing.Store(false)
 		x.pubsubEnabled.Store(false)

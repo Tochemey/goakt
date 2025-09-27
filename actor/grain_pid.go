@@ -34,6 +34,7 @@ import (
 
 	"github.com/flowchartsman/retry"
 	"go.uber.org/atomic"
+	"go.uber.org/multierr"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	gerrors "github.com/tochemey/goakt/v3/errors"
@@ -152,9 +153,16 @@ func (pid *grainPID) deactivate(ctx context.Context) error {
 		return gerrors.NewErrGrainDeactivationFailure(err)
 	}
 
-	pid.actorSystem.getGrains().Delete(pid.getIdentity().String())
-	if pid.actorSystem.InCluster() {
-		if err := pid.actorSystem.getCluster().RemoveGrain(ctx, pid.identity.String()); err != nil {
+	actorSystem := pid.actorSystem
+	identity := pid.getIdentity()
+	grainID := toWireGrainID(identity)
+
+	actorSystem.getGrains().Delete(identity.String())
+	if actorSystem.InCluster() {
+		rerr := actorSystem.removePeerGrain(ctx, grainID)
+		cerr := actorSystem.getCluster().RemoveGrain(ctx, pid.identity.String())
+
+		if err := multierr.Combine(rerr, cerr); err != nil {
 			pid.logger.Errorf("failed to remove grain %s from cluster: %v", pid.identity.String(), err)
 			return gerrors.NewErrGrainDeactivationFailure(err)
 		}

@@ -193,7 +193,7 @@ func (x *RebalanceComplete) GetPeerAddress() string {
 	return ""
 }
 
-type StateActor struct {
+type PersistPeerActor struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Specifies the peer host
 	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
@@ -207,20 +207,20 @@ type StateActor struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *StateActor) Reset() {
-	*x = StateActor{}
+func (x *PersistPeerActor) Reset() {
+	*x = PersistPeerActor{}
 	mi := &file_internal_peers_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *StateActor) String() string {
+func (x *PersistPeerActor) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*StateActor) ProtoMessage() {}
+func (*PersistPeerActor) ProtoMessage() {}
 
-func (x *StateActor) ProtoReflect() protoreflect.Message {
+func (x *PersistPeerActor) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_peers_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -232,40 +232,40 @@ func (x *StateActor) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use StateActor.ProtoReflect.Descriptor instead.
-func (*StateActor) Descriptor() ([]byte, []int) {
+// Deprecated: Use PersistPeerActor.ProtoReflect.Descriptor instead.
+func (*PersistPeerActor) Descriptor() ([]byte, []int) {
 	return file_internal_peers_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *StateActor) GetHost() string {
+func (x *PersistPeerActor) GetHost() string {
 	if x != nil {
 		return x.Host
 	}
 	return ""
 }
 
-func (x *StateActor) GetRemotingPort() int32 {
+func (x *PersistPeerActor) GetRemotingPort() int32 {
 	if x != nil {
 		return x.RemotingPort
 	}
 	return 0
 }
 
-func (x *StateActor) GetPeersPort() int32 {
+func (x *PersistPeerActor) GetPeersPort() int32 {
 	if x != nil {
 		return x.PeersPort
 	}
 	return 0
 }
 
-func (x *StateActor) GetActor() *Actor {
+func (x *PersistPeerActor) GetActor() *Actor {
 	if x != nil {
 		return x.Actor
 	}
 	return nil
 }
 
-type StateGrain struct {
+type PersistPeerGrain struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Specifies the peer host
 	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
@@ -279,20 +279,20 @@ type StateGrain struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *StateGrain) Reset() {
-	*x = StateGrain{}
+func (x *PersistPeerGrain) Reset() {
+	*x = PersistPeerGrain{}
 	mi := &file_internal_peers_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *StateGrain) String() string {
+func (x *PersistPeerGrain) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*StateGrain) ProtoMessage() {}
+func (*PersistPeerGrain) ProtoMessage() {}
 
-func (x *StateGrain) ProtoReflect() protoreflect.Message {
+func (x *PersistPeerGrain) ProtoReflect() protoreflect.Message {
 	mi := &file_internal_peers_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -304,35 +304,143 @@ func (x *StateGrain) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use StateGrain.ProtoReflect.Descriptor instead.
-func (*StateGrain) Descriptor() ([]byte, []int) {
+// Deprecated: Use PersistPeerGrain.ProtoReflect.Descriptor instead.
+func (*PersistPeerGrain) Descriptor() ([]byte, []int) {
 	return file_internal_peers_proto_rawDescGZIP(), []int{4}
 }
 
-func (x *StateGrain) GetHost() string {
+func (x *PersistPeerGrain) GetHost() string {
 	if x != nil {
 		return x.Host
 	}
 	return ""
 }
 
-func (x *StateGrain) GetRemotingPort() int32 {
+func (x *PersistPeerGrain) GetRemotingPort() int32 {
 	if x != nil {
 		return x.RemotingPort
 	}
 	return 0
 }
 
-func (x *StateGrain) GetPeersPort() int32 {
+func (x *PersistPeerGrain) GetPeersPort() int32 {
 	if x != nil {
 		return x.PeersPort
 	}
 	return 0
 }
 
-func (x *StateGrain) GetGrain() *Grain {
+func (x *PersistPeerGrain) GetGrain() *Grain {
 	if x != nil {
 		return x.Grain
+	}
+	return nil
+}
+
+type RemovePeerActor struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the peer address
+	PeerAddress string `protobuf:"bytes,1,opt,name=peer_address,json=peerAddress,proto3" json:"peer_address,omitempty"`
+	// Specifies the remoting por
+	// Specifies the actor name
+	ActorName     string `protobuf:"bytes,2,opt,name=actor_name,json=actorName,proto3" json:"actor_name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemovePeerActor) Reset() {
+	*x = RemovePeerActor{}
+	mi := &file_internal_peers_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemovePeerActor) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemovePeerActor) ProtoMessage() {}
+
+func (x *RemovePeerActor) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_peers_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemovePeerActor.ProtoReflect.Descriptor instead.
+func (*RemovePeerActor) Descriptor() ([]byte, []int) {
+	return file_internal_peers_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *RemovePeerActor) GetPeerAddress() string {
+	if x != nil {
+		return x.PeerAddress
+	}
+	return ""
+}
+
+func (x *RemovePeerActor) GetActorName() string {
+	if x != nil {
+		return x.ActorName
+	}
+	return ""
+}
+
+type RemovePeerGrain struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the peer address
+	PeerAddress   string   `protobuf:"bytes,1,opt,name=peer_address,json=peerAddress,proto3" json:"peer_address,omitempty"`
+	GrainId       *GrainId `protobuf:"bytes,2,opt,name=grain_id,json=grainId,proto3" json:"grain_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemovePeerGrain) Reset() {
+	*x = RemovePeerGrain{}
+	mi := &file_internal_peers_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemovePeerGrain) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemovePeerGrain) ProtoMessage() {}
+
+func (x *RemovePeerGrain) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_peers_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemovePeerGrain.ProtoReflect.Descriptor instead.
+func (*RemovePeerGrain) Descriptor() ([]byte, []int) {
+	return file_internal_peers_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *RemovePeerGrain) GetPeerAddress() string {
+	if x != nil {
+		return x.PeerAddress
+	}
+	return ""
+}
+
+func (x *RemovePeerGrain) GetGrainId() *GrainId {
+	if x != nil {
+		return x.GrainId
 	}
 	return nil
 }
@@ -360,21 +468,26 @@ const file_internal_peers_proto_rawDesc = "" +
 	"\n" +
 	"peer_state\x18\x01 \x01(\v2\x15.internalpb.PeerStateR\tpeerState\"6\n" +
 	"\x11RebalanceComplete\x12!\n" +
-	"\fpeer_address\x18\x01 \x01(\tR\vpeerAddress\"\x8d\x01\n" +
-	"\n" +
-	"StateActor\x12\x12\n" +
+	"\fpeer_address\x18\x01 \x01(\tR\vpeerAddress\"\x93\x01\n" +
+	"\x10PersistPeerActor\x12\x12\n" +
 	"\x04host\x18\x01 \x01(\tR\x04host\x12#\n" +
 	"\rremoting_port\x18\x02 \x01(\x05R\fremotingPort\x12\x1d\n" +
 	"\n" +
 	"peers_port\x18\x03 \x01(\x05R\tpeersPort\x12'\n" +
-	"\x05actor\x18\x04 \x01(\v2\x11.internalpb.ActorR\x05actor\"\x8d\x01\n" +
-	"\n" +
-	"StateGrain\x12\x12\n" +
+	"\x05actor\x18\x04 \x01(\v2\x11.internalpb.ActorR\x05actor\"\x93\x01\n" +
+	"\x10PersistPeerGrain\x12\x12\n" +
 	"\x04host\x18\x01 \x01(\tR\x04host\x12#\n" +
 	"\rremoting_port\x18\x02 \x01(\x05R\fremotingPort\x12\x1d\n" +
 	"\n" +
 	"peers_port\x18\x03 \x01(\x05R\tpeersPort\x12'\n" +
-	"\x05grain\x18\x04 \x01(\v2\x11.internalpb.GrainR\x05grainB\xa3\x01\n" +
+	"\x05grain\x18\x04 \x01(\v2\x11.internalpb.GrainR\x05grain\"S\n" +
+	"\x0fRemovePeerActor\x12!\n" +
+	"\fpeer_address\x18\x01 \x01(\tR\vpeerAddress\x12\x1d\n" +
+	"\n" +
+	"actor_name\x18\x02 \x01(\tR\tactorName\"d\n" +
+	"\x0fRemovePeerGrain\x12!\n" +
+	"\fpeer_address\x18\x01 \x01(\tR\vpeerAddress\x12.\n" +
+	"\bgrain_id\x18\x02 \x01(\v2\x13.internalpb.GrainIdR\agrainIdB\xa3\x01\n" +
 	"\x0ecom.internalpbB\n" +
 	"PeersProtoH\x02P\x01Z;github.com/tochemey/goakt/v3/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
 	"Internalpb\xca\x02\n" +
@@ -393,31 +506,35 @@ func file_internal_peers_proto_rawDescGZIP() []byte {
 	return file_internal_peers_proto_rawDescData
 }
 
-var file_internal_peers_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_internal_peers_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_internal_peers_proto_goTypes = []any{
 	(*PeerState)(nil),         // 0: internalpb.PeerState
 	(*Rebalance)(nil),         // 1: internalpb.Rebalance
 	(*RebalanceComplete)(nil), // 2: internalpb.RebalanceComplete
-	(*StateActor)(nil),        // 3: internalpb.StateActor
-	(*StateGrain)(nil),        // 4: internalpb.StateGrain
-	nil,                       // 5: internalpb.PeerState.ActorsEntry
-	nil,                       // 6: internalpb.PeerState.GrainsEntry
-	(*Actor)(nil),             // 7: internalpb.Actor
-	(*Grain)(nil),             // 8: internalpb.Grain
+	(*PersistPeerActor)(nil),  // 3: internalpb.PersistPeerActor
+	(*PersistPeerGrain)(nil),  // 4: internalpb.PersistPeerGrain
+	(*RemovePeerActor)(nil),   // 5: internalpb.RemovePeerActor
+	(*RemovePeerGrain)(nil),   // 6: internalpb.RemovePeerGrain
+	nil,                       // 7: internalpb.PeerState.ActorsEntry
+	nil,                       // 8: internalpb.PeerState.GrainsEntry
+	(*Actor)(nil),             // 9: internalpb.Actor
+	(*Grain)(nil),             // 10: internalpb.Grain
+	(*GrainId)(nil),           // 11: internalpb.GrainId
 }
 var file_internal_peers_proto_depIdxs = []int32{
-	5, // 0: internalpb.PeerState.actors:type_name -> internalpb.PeerState.ActorsEntry
-	6, // 1: internalpb.PeerState.grains:type_name -> internalpb.PeerState.GrainsEntry
-	0, // 2: internalpb.Rebalance.peer_state:type_name -> internalpb.PeerState
-	7, // 3: internalpb.StateActor.actor:type_name -> internalpb.Actor
-	8, // 4: internalpb.StateGrain.grain:type_name -> internalpb.Grain
-	7, // 5: internalpb.PeerState.ActorsEntry.value:type_name -> internalpb.Actor
-	8, // 6: internalpb.PeerState.GrainsEntry.value:type_name -> internalpb.Grain
-	7, // [7:7] is the sub-list for method output_type
-	7, // [7:7] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	7,  // 0: internalpb.PeerState.actors:type_name -> internalpb.PeerState.ActorsEntry
+	8,  // 1: internalpb.PeerState.grains:type_name -> internalpb.PeerState.GrainsEntry
+	0,  // 2: internalpb.Rebalance.peer_state:type_name -> internalpb.PeerState
+	9,  // 3: internalpb.PersistPeerActor.actor:type_name -> internalpb.Actor
+	10, // 4: internalpb.PersistPeerGrain.grain:type_name -> internalpb.Grain
+	11, // 5: internalpb.RemovePeerGrain.grain_id:type_name -> internalpb.GrainId
+	9,  // 6: internalpb.PeerState.ActorsEntry.value:type_name -> internalpb.Actor
+	10, // 7: internalpb.PeerState.GrainsEntry.value:type_name -> internalpb.Grain
+	8,  // [8:8] is the sub-list for method output_type
+	8,  // [8:8] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_internal_peers_proto_init() }
@@ -433,7 +550,7 @@ func file_internal_peers_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_peers_proto_rawDesc), len(file_internal_peers_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

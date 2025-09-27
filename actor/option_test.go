@@ -120,20 +120,6 @@ func TestOption(t *testing.T) {
 				assert.False(t, sys.relocationEnabled.Load())
 			},
 		},
-		{
-			name:   "WithPublishStateTimeout",
-			option: WithPublishStateTimeout(2 * time.Second),
-			check: func(t *testing.T, sys *actorSystem) {
-				assert.Equal(t, 2*time.Second, sys.publishStateTimeout)
-			},
-		},
-		{
-			name:   "WithPublishStateTimeout set to zero",
-			option: WithPublishStateTimeout(0),
-			check: func(t *testing.T, sys *actorSystem) {
-				assert.Equal(t, DefaultPublishStateTimeout, sys.publishStateTimeout)
-			},
-		},
 	}
 
 	for _, tc := range testCases {
@@ -186,75 +172,4 @@ func TestWithEvictionStrategy(t *testing.T) {
 		assert.EqualValues(t, 10, system.evictionStrategy.Limit())
 		assert.Equal(t, LRU, system.evictionStrategy.Policy())
 	})
-}
-
-// TestEffectivePublishStateTimeout validates the resolution/capping logic of
-// (*actorSystem).effectivePublishStateTimeout().
-func TestEffectivePublishStateTimeout(t *testing.T) {
-	tests := []struct {
-		name     string
-		shutdown time.Duration
-		publish  time.Duration
-		expected time.Duration
-	}{
-		{
-			name:     "no shutdown timeout, publish set",
-			shutdown: 0,
-			publish:  15 * time.Second,
-			expected: 15 * time.Second,
-		},
-		{
-			name:     "no shutdown timeout, publish zero (returns zero)",
-			shutdown: 0,
-			publish:  0,
-			expected: 0,
-		},
-		{
-			name:     "shutdown set, publish unset derives from default within cap",
-			shutdown: 1 * time.Minute,
-			publish:  0,
-			expected: clampPublishTimeout(1 * time.Minute),
-		},
-		{
-			name:     "shutdown smaller than default, publish unset -> capped to shutdown",
-			shutdown: 30 * time.Second,
-			publish:  0,
-			expected: clampPublishTimeout(30 * time.Second),
-		},
-		{
-			name:     "publish greater than shutdown -> capped",
-			shutdown: 1 * time.Minute,
-			publish:  90 * time.Second,
-			expected: 1 * time.Minute,
-		},
-		{
-			name:     "publish equals shutdown -> returns publish",
-			shutdown: 1 * time.Minute,
-			publish:  1 * time.Minute,
-			expected: 1 * time.Minute,
-		},
-		{
-			name:     "publish less than shutdown -> returns publish",
-			shutdown: 2 * time.Minute,
-			publish:  30 * time.Second,
-			expected: 30 * time.Second,
-		},
-		{
-			name:     "negative publish timeout derives from default logic",
-			shutdown: 45 * time.Second,
-			publish:  -1,
-			expected: clampPublishTimeout(45 * time.Second),
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			sys := &actorSystem{
-				shutdownTimeout:     tc.shutdown,
-				publishStateTimeout: tc.publish,
-			}
-			got := sys.effectivePublishStateTimeout()
-			require.Equal(t, tc.expected, got, "shutdown=%v publish=%v default=%v", tc.shutdown, tc.publish, DefaultPublishStateTimeout)
-		})
-	}
 }

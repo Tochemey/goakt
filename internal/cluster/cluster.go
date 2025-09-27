@@ -31,7 +31,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -45,8 +44,6 @@ import (
 	"github.com/tochemey/olric/hasher"
 	"github.com/tochemey/olric/pkg/storage"
 	"go.uber.org/atomic"
-	"golang.org/x/sync/errgroup"
-	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -61,11 +58,9 @@ import (
 )
 
 const (
-	dMapName              = "goakt.dmap"
-	defaultEventsBufSize  = 256
-	namespaceSeparator    = "::"
-	peerStatesActorsTopic = "goakt.cluster.peerstates.actors"
-	peerStatesGrainsTopic = "goakt.cluster.peerstates.grains"
+	dMapName             = "goakt.dmap"
+	defaultEventsBufSize = 256
+	namespaceSeparator   = "::"
 )
 
 type recordNamespace string
@@ -138,8 +133,10 @@ type Cluster interface {
 	DeleteJobKey(ctx context.Context, jobID string) error
 	// JobKey retrieves stored job metadata.
 	JobKey(ctx context.Context, jobID string) ([]byte, error)
-	// PublishState shares local peer state with other members during shutdown
-	PublishState(ctx context.Context, actors []*internalpb.Actor, grains []*internalpb.Grain) error
+	PersistPeerActor(ctx context.Context, state *internalpb.PersistPeerActor) error
+	PersistPeerGrain(ctx context.Context, state *internalpb.PersistPeerGrain) error
+	RemovePeerActor(ctx context.Context, actorName, peerAddress string) error
+	RemovePeerGrain(ctx context.Context, grainID *internalpb.GrainId, peerAddress string) error
 }
 
 // cluster implements the Cluster interface backed by an Olric unified
@@ -175,7 +172,6 @@ type cluster struct {
 	eventsLock     *sync.Mutex
 	peersStateLock *sync.Mutex
 	subscriber     *redis.PubSub
-	publisher      *olric.PubSub
 	messages       <-chan *redis.Message
 
 	nodeJoinedEventsFilter goset.Set[string]
@@ -768,104 +764,136 @@ func (x *cluster) JobKey(ctx context.Context, jobID string) ([]byte, error) {
 	return x.getRecord(ctx, namespaceJobs, jobID)
 }
 
-// PublishState shares local peer state with other members during shutdown
-func (x *cluster) PublishState(ctx context.Context, actors []*internalpb.Actor, grains []*internalpb.Grain) error {
+// PersistPeerActor implements Cluster.
+func (x *cluster) PersistPeerActor(ctx context.Context, state *internalpb.PersistPeerActor) error {
 	if !x.running.Load() {
 		return ErrEngineNotRunning
 	}
 
-	total := len(actors) + len(grains)
-	if total == 0 {
+	x.peersStateLock.Lock()
+	defer x.peersStateLock.Unlock()
+
+	peerAddress := net.JoinHostPort(state.GetHost(), strconv.Itoa(int(state.GetPeersPort())))
+	// ignore self
+	if x.node.PeersAddress() == peerAddress {
 		return nil
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, x.writeTimeout)
-	defer cancel()
-
-	// For small batches, process sequentially to avoid goroutine overhead
-	if total <= 8 {
-		return x.publishStateSequential(ctx, actors, grains)
+	x.logger.Infof("(%s) processing peer=(%s)'s state", x.node.PeersAddress(), peerAddress)
+	peerState := x.getOrInitPeerState(ctx, state.GetHost(), state.GetRemotingPort(), state.GetPeersPort())
+	actors := peerState.GetActors()
+	if actors == nil {
+		actors = map[string]*internalpb.Actor{}
 	}
 
-	// Use bounded parallelism for larger batches
-	return x.publishStateConcurrent(ctx, actors, grains)
-}
+	key := state.GetActor().GetAddress().GetName()
+	actors[key] = state.GetActor()
+	peerState.Actors = actors
 
-// publishStateSequential handles small batches without goroutine overhead
-func (x *cluster) publishStateSequential(ctx context.Context, actors []*internalpb.Actor, grains []*internalpb.Grain) error {
-	for _, actor := range actors {
-		if err := x.executePublishJob(ctx, publishJob{actor: actor}); err != nil {
-			return err
-		}
+	x.logger.Debugf("(%s) persisting peer=(%s)'s state: [Actors count=(%d), Grains count=(%d)]", x.node.PeersAddress(), peerAddress, len(peerState.GetActors()), len(peerState.GetGrains()))
+	if err := x.store.PersistPeerState(ctx, peerState); err != nil {
+		return fmt.Errorf("persist peer state (actors) [%s]: %w", peerAddress, err)
 	}
 
-	for _, grain := range grains {
-		if err := x.executePublishJob(ctx, publishJob{grain: grain}); err != nil {
-			return err
-		}
-	}
-
+	x.logger.Infof("(%s) processed peer=(%s) successfully ", x.node.PeersAddress(), peerAddress)
 	return nil
 }
 
-// executePublishJob handles the common publish logic with context awareness.
-func (x *cluster) executePublishJob(ctx context.Context, job publishJob) error {
-	if err := ctx.Err(); err != nil {
-		return err
+// PersistPeerGrain implements Cluster.
+func (x *cluster) PersistPeerGrain(ctx context.Context, state *internalpb.PersistPeerGrain) error {
+	if !x.running.Load() {
+		return ErrEngineNotRunning
 	}
 
-	var err error
-	switch {
-	case job.actor != nil:
-		err = x.publishStateActor(ctx, job.actor)
-	case job.grain != nil:
-		err = x.publishStateGrain(ctx, job.grain)
-	default:
+	x.peersStateLock.Lock()
+	defer x.peersStateLock.Unlock()
+
+	peerAddress := net.JoinHostPort(state.GetHost(), strconv.Itoa(int(state.GetPeersPort())))
+	// ignore self
+	if x.node.PeersAddress() == peerAddress {
 		return nil
 	}
 
-	if err != nil {
-		x.logger.Errorf("failed to publish state: %v", err)
+	x.logger.Infof("(%s) processing peer=(%s)'s state", x.node.PeersAddress(), peerAddress)
+	peerState := x.getOrInitPeerState(ctx, state.GetHost(), state.GetRemotingPort(), state.GetPeersPort())
+	grains := peerState.GetGrains()
+	if grains == nil {
+		grains = map[string]*internalpb.Grain{}
 	}
 
-	return err
+	key := state.GetGrain().GetGrainId().GetValue()
+	grains[key] = state.GetGrain()
+	peerState.Grains = grains
+
+	x.logger.Debugf("(%s) persisting peer=(%s)'s state: [Actors count=(%d), Grains count=(%d)]", x.node.PeersAddress(), peerAddress, len(peerState.GetActors()), len(peerState.GetGrains()))
+	if err := x.store.PersistPeerState(ctx, peerState); err != nil {
+		return fmt.Errorf("persist peer state (grains) [%s]: %w", peerAddress, err)
+	}
+
+	x.logger.Infof("(%s) processed peer=(%s) successfully ", x.node.PeersAddress(), peerAddress)
+	return nil
 }
 
-// publishStateConcurrent handles larger batches with bounded parallelism
-func (x *cluster) publishStateConcurrent(ctx context.Context, actors []*internalpb.Actor, grains []*internalpb.Grain) error {
-	total := len(actors) + len(grains)
-	if total == 0 {
+// RemovePeerActor implements Cluster.
+func (x *cluster) RemovePeerActor(ctx context.Context, actorName string, peerAddress string) error {
+	if !x.running.Load() {
+		return ErrEngineNotRunning
+	}
+
+	x.peersStateLock.Lock()
+	defer x.peersStateLock.Unlock()
+
+	// ignore self
+	if x.node.PeersAddress() == peerAddress {
 		return nil
 	}
 
-	// Cap concurrency to avoid saturating the runtime while still keeping throughput
-	perBatchWorkers := min(max(total/4, 1), 8)
-	workerLimit := min(max(runtime.NumCPU(), 2), perBatchWorkers)
-
-	eg, egCtx := errgroup.WithContext(ctx)
-	eg.SetLimit(workerLimit)
-
-	for _, actor := range actors {
-		actor := actor
-		eg.Go(func() error {
-			return x.executePublishJob(egCtx, publishJob{actor: actor})
-		})
+	peerState, ok := x.store.GetPeerState(ctx, peerAddress)
+	if !ok {
+		return nil
 	}
 
-	for _, grain := range grains {
-		grain := grain
-		eg.Go(func() error {
-			return x.executePublishJob(egCtx, publishJob{grain: grain})
-		})
+	actors := peerState.GetActors()
+	delete(actors, actorName)
+
+	x.logger.Debugf("(%s) persisting peer=(%s)'s state: [Actors count=(%d), Grains count=(%d)]", x.node.PeersAddress(), peerAddress, len(peerState.GetActors()), len(peerState.GetGrains()))
+	if err := x.store.PersistPeerState(ctx, peerState); err != nil {
+		return fmt.Errorf("persist peer state (grains) [%s]: %w", peerAddress, err)
 	}
 
-	return eg.Wait()
+	x.logger.Infof("(%s) processed peer=(%s) successfully ", x.node.PeersAddress(), peerAddress)
+	return nil
 }
 
-// publishJob represents a single publish task
-type publishJob struct {
-	actor *internalpb.Actor
-	grain *internalpb.Grain
+// RemovePeerGrain implements Cluster.
+func (x *cluster) RemovePeerGrain(ctx context.Context, grainID *internalpb.GrainId, peerAddress string) error {
+	if !x.running.Load() {
+		return ErrEngineNotRunning
+	}
+
+	x.peersStateLock.Lock()
+	defer x.peersStateLock.Unlock()
+
+	// ignore self
+	if x.node.PeersAddress() == peerAddress {
+		return nil
+	}
+
+	peerState, ok := x.store.GetPeerState(ctx, peerAddress)
+	if !ok {
+		return nil
+	}
+
+	grains := peerState.GetGrains()
+	delete(grains, grainID.GetValue())
+
+	x.logger.Debugf("(%s) persisting peer=(%s)'s state: [Actors count=(%d), Grains count=(%d)]", x.node.PeersAddress(), peerAddress, len(peerState.GetActors()), len(peerState.GetGrains()))
+	if err := x.store.PersistPeerState(ctx, peerState); err != nil {
+		return fmt.Errorf("persist peer state (grains) [%s]: %w", peerAddress, err)
+	}
+
+	x.logger.Infof("(%s) processed peer=(%s) successfully ", x.node.PeersAddress(), peerAddress)
+	return nil
 }
 
 // buildConfig creates the Olric configuration tailored to the current
@@ -1036,50 +1064,15 @@ func (x *cluster) createSubscription(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	x.publisher = ps
-	x.subscriber = ps.Subscribe(ctx, events.ClusterEventsChannel, peerStatesActorsTopic, peerStatesGrainsTopic)
+	x.subscriber = ps.Subscribe(ctx, events.ClusterEventsChannel)
 	x.messages = x.subscriber.Channel()
 	return nil
-}
-
-func (x *cluster) publishStateActor(ctx context.Context, actor *internalpb.Actor) error {
-	stateActor := &internalpb.StateActor{
-		Actor:        actor,
-		Host:         x.node.Host,
-		RemotingPort: int32(x.node.RemotingPort),
-		PeersPort:    int32(x.node.PeersPort),
-	}
-
-	bytea, _ := protojson.Marshal(stateActor)
-	_, err := x.publisher.Publish(ctx, peerStatesActorsTopic, string(bytea))
-	return err
-}
-
-func (x *cluster) publishStateGrain(ctx context.Context, grain *internalpb.Grain) error {
-	stateActor := &internalpb.StateGrain{
-		Grain:        grain,
-		Host:         x.node.Host,
-		RemotingPort: int32(x.node.RemotingPort),
-		PeersPort:    int32(x.node.PeersPort),
-	}
-
-	bytea, _ := protojson.Marshal(stateActor)
-	_, err := x.publisher.Publish(ctx, peerStatesGrainsTopic, string(bytea))
-	return err
 }
 
 // consume listens for cluster membership and peer-state events and delegates handling.
 func (x *cluster) consume() {
 	for message := range x.messages {
 		switch message.Channel {
-		case peerStatesActorsTopic:
-			if err := x.handleActorStateMsg(message.Payload); err != nil {
-				x.logger.Errorf("actor state handling error: %v", err)
-			}
-		case peerStatesGrainsTopic:
-			if err := x.handleGrainStateMsg(message.Payload); err != nil {
-				x.logger.Errorf("grain state handling error: %v", err)
-			}
 		case events.ClusterEventsChannel:
 			if err := x.handleClusterEventMsg(message.Payload); err != nil {
 				x.logger.Errorf("cluster event handling error: %v", err)
@@ -1088,81 +1081,6 @@ func (x *cluster) consume() {
 			// ignore
 		}
 	}
-}
-
-// handleActorStateMsg updates peer actor state from a pub-sub payload.
-func (x *cluster) handleActorStateMsg(payload string) error {
-	x.peersStateLock.Lock()
-	defer x.peersStateLock.Unlock()
-
-	ctx := context.Background()
-
-	state := new(internalpb.StateActor)
-	if err := protojson.Unmarshal([]byte(payload), state); err != nil {
-		return fmt.Errorf("unmarshal state actor: %w", err)
-	}
-
-	peerAddress := net.JoinHostPort(state.GetHost(), strconv.Itoa(int(state.GetPeersPort())))
-	// ignore self
-	if x.node.PeersAddress() == peerAddress {
-		return nil
-	}
-
-	x.logger.Infof("(%s) processing peer=(%s)'s state", x.node.PeersAddress(), peerAddress)
-	peerState := x.getOrInitPeerState(ctx, state.GetHost(), state.GetRemotingPort(), state.GetPeersPort())
-	actors := peerState.GetActors()
-	if actors == nil {
-		actors = map[string]*internalpb.Actor{}
-	}
-
-	key := state.GetActor().GetAddress().GetName()
-	actors[key] = state.GetActor()
-	peerState.Actors = actors
-
-	x.logger.Debugf("(%s) persisting peer=(%s)'s state: [Actors count=(%d), Grains count=(%d)]", x.node.PeersAddress(), peerAddress, len(peerState.GetActors()), len(peerState.GetGrains()))
-	if err := x.store.PersistPeerState(ctx, peerState); err != nil {
-		return fmt.Errorf("persist peer state (actors) [%s]: %w", peerAddress, err)
-	}
-
-	x.logger.Infof("(%s) processed peer=(%s) successfully ", x.node.PeersAddress(), peerAddress)
-	return nil
-}
-
-// handleGrainStateMsg updates peer grain state from a pub-sub payload.
-func (x *cluster) handleGrainStateMsg(payload string) error {
-	x.peersStateLock.Lock()
-	defer x.peersStateLock.Unlock()
-
-	ctx := context.Background()
-	state := new(internalpb.StateGrain)
-	if err := protojson.Unmarshal([]byte(payload), state); err != nil {
-		return fmt.Errorf("unmarshal state grain: %w", err)
-	}
-
-	peerAddress := net.JoinHostPort(state.GetHost(), strconv.Itoa(int(state.GetPeersPort())))
-	// ignore self
-	if x.node.PeersAddress() == peerAddress {
-		return nil
-	}
-
-	x.logger.Infof("(%s) processing peer=(%s)'s state", x.node.PeersAddress(), peerAddress)
-	peerState := x.getOrInitPeerState(ctx, state.GetHost(), state.GetRemotingPort(), state.GetPeersPort())
-	grains := peerState.GetGrains()
-	if grains == nil {
-		grains = map[string]*internalpb.Grain{}
-	}
-
-	key := state.GetGrain().GetGrainId().GetValue()
-	grains[key] = state.GetGrain()
-	peerState.Grains = grains
-
-	x.logger.Debugf("(%s) persisting peer=(%s)'s state: [Actors count=(%d), Grains count=(%d)]", x.node.PeersAddress(), peerAddress, len(peerState.GetActors()), len(peerState.GetGrains()))
-	if err := x.store.PersistPeerState(ctx, peerState); err != nil {
-		return fmt.Errorf("persist peer state (grains) [%s]: %w", peerAddress, err)
-	}
-
-	x.logger.Infof("(%s) processed peer=(%s) successfully ", x.node.PeersAddress(), peerAddress)
-	return nil
 }
 
 // handleClusterEventMsg decodes and dispatches cluster topology events with de-duplication.

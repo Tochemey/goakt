@@ -31,7 +31,7 @@ message RebalanceComplete {
   string peer_address = 1;
 }
 
-message StateActor {
+message PersistPeerActor {
   // Specifies the peer host
   string host = 1;
   // Specifies the remoting port
@@ -42,7 +42,7 @@ message StateActor {
   internalpb.Actor actor = 4;
 }
 
-message StateGrain {
+message PersistPeerGrain {
   // Specifies the peer host
   string host = 1;
   // Specifies the remoting port
@@ -51,4 +51,18 @@ message StateGrain {
   int32 peers_port = 3;
   // Specifies the grain
   internalpb.Grain grain = 4;
+}
+
+message RemovePeerActor {
+  // Specifies the peer address
+  string peer_address = 1;
+  // Specifies the remoting por
+  // Specifies the actor name
+  string actor_name = 2;
+}
+
+message RemovePeerGrain {
+  // Specifies the peer address
+  string peer_address = 1;
+  internalpb.GrainId grain_id = 2;
 }

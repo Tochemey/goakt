@@ -887,17 +887,17 @@ func (_c *Cluster_Peers_Call) RunAndReturn(run func(context.Context) ([]*interna
 	return _c
 }
 
-// PublishState provides a mock function with given fields: ctx, actors, grains
-func (_m *Cluster) PublishState(ctx context.Context, actors []*internalpb.Actor, grains []*internalpb.Grain) error {
-	ret := _m.Called(ctx, actors, grains)
+// PersistPeerActor provides a mock function with given fields: ctx, state
+func (_m *Cluster) PersistPeerActor(ctx context.Context, state *internalpb.PersistPeerActor) error {
+	ret := _m.Called(ctx, state)
 
 	if len(ret) == 0 {
-		panic("no return value specified for PublishState")
+		panic("no return value specified for PersistPeerActor")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, []*internalpb.Actor, []*internalpb.Grain) error); ok {
-		r0 = rf(ctx, actors, grains)
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.PersistPeerActor) error); ok {
+		r0 = rf(ctx, state)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -905,32 +905,78 @@ func (_m *Cluster) PublishState(ctx context.Context, actors []*internalpb.Actor,
 	return r0
 }
 
-// Cluster_PublishState_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PublishState'
-type Cluster_PublishState_Call struct {
+// Cluster_PersistPeerActor_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PersistPeerActor'
+type Cluster_PersistPeerActor_Call struct {
 	*mock.Call
 }
 
-// PublishState is a helper method to define mock.On call
+// PersistPeerActor is a helper method to define mock.On call
 //   - ctx context.Context
-//   - actors []*internalpb.Actor
-//   - grains []*internalpb.Grain
-func (_e *Cluster_Expecter) PublishState(ctx interface{}, actors interface{}, grains interface{}) *Cluster_PublishState_Call {
-	return &Cluster_PublishState_Call{Call: _e.mock.On("PublishState", ctx, actors, grains)}
+//   - state *internalpb.PersistPeerActor
+func (_e *Cluster_Expecter) PersistPeerActor(ctx interface{}, state interface{}) *Cluster_PersistPeerActor_Call {
+	return &Cluster_PersistPeerActor_Call{Call: _e.mock.On("PersistPeerActor", ctx, state)}
 }
 
-func (_c *Cluster_PublishState_Call) Run(run func(ctx context.Context, actors []*internalpb.Actor, grains []*internalpb.Grain)) *Cluster_PublishState_Call {
+func (_c *Cluster_PersistPeerActor_Call) Run(run func(ctx context.Context, state *internalpb.PersistPeerActor)) *Cluster_PersistPeerActor_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].([]*internalpb.Actor), args[2].([]*internalpb.Grain))
+		run(args[0].(context.Context), args[1].(*internalpb.PersistPeerActor))
 	})
 	return _c
 }
 
-func (_c *Cluster_PublishState_Call) Return(_a0 error) *Cluster_PublishState_Call {
+func (_c *Cluster_PersistPeerActor_Call) Return(_a0 error) *Cluster_PersistPeerActor_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *Cluster_PublishState_Call) RunAndReturn(run func(context.Context, []*internalpb.Actor, []*internalpb.Grain) error) *Cluster_PublishState_Call {
+func (_c *Cluster_PersistPeerActor_Call) RunAndReturn(run func(context.Context, *internalpb.PersistPeerActor) error) *Cluster_PersistPeerActor_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// PersistPeerGrain provides a mock function with given fields: ctx, state
+func (_m *Cluster) PersistPeerGrain(ctx context.Context, state *internalpb.PersistPeerGrain) error {
+	ret := _m.Called(ctx, state)
+
+	if len(ret) == 0 {
+		panic("no return value specified for PersistPeerGrain")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.PersistPeerGrain) error); ok {
+		r0 = rf(ctx, state)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// Cluster_PersistPeerGrain_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PersistPeerGrain'
+type Cluster_PersistPeerGrain_Call struct {
+	*mock.Call
+}
+
+// PersistPeerGrain is a helper method to define mock.On call
+//   - ctx context.Context
+//   - state *internalpb.PersistPeerGrain
+func (_e *Cluster_Expecter) PersistPeerGrain(ctx interface{}, state interface{}) *Cluster_PersistPeerGrain_Call {
+	return &Cluster_PersistPeerGrain_Call{Call: _e.mock.On("PersistPeerGrain", ctx, state)}
+}
+
+func (_c *Cluster_PersistPeerGrain_Call) Run(run func(ctx context.Context, state *internalpb.PersistPeerGrain)) *Cluster_PersistPeerGrain_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*internalpb.PersistPeerGrain))
+	})
+	return _c
+}
+
+func (_c *Cluster_PersistPeerGrain_Call) Return(_a0 error) *Cluster_PersistPeerGrain_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *Cluster_PersistPeerGrain_Call) RunAndReturn(run func(context.Context, *internalpb.PersistPeerGrain) error) *Cluster_PersistPeerGrain_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1261,6 +1307,102 @@ func (_c *Cluster_RemoveKind_Call) Return(_a0 error) *Cluster_RemoveKind_Call {
 }
 
 func (_c *Cluster_RemoveKind_Call) RunAndReturn(run func(context.Context, string) error) *Cluster_RemoveKind_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RemovePeerActor provides a mock function with given fields: ctx, actorName, peerAddress
+func (_m *Cluster) RemovePeerActor(ctx context.Context, actorName string, peerAddress string) error {
+	ret := _m.Called(ctx, actorName, peerAddress)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RemovePeerActor")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) error); ok {
+		r0 = rf(ctx, actorName, peerAddress)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// Cluster_RemovePeerActor_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemovePeerActor'
+type Cluster_RemovePeerActor_Call struct {
+	*mock.Call
+}
+
+// RemovePeerActor is a helper method to define mock.On call
+//   - ctx context.Context
+//   - actorName string
+//   - peerAddress string
+func (_e *Cluster_Expecter) RemovePeerActor(ctx interface{}, actorName interface{}, peerAddress interface{}) *Cluster_RemovePeerActor_Call {
+	return &Cluster_RemovePeerActor_Call{Call: _e.mock.On("RemovePeerActor", ctx, actorName, peerAddress)}
+}
+
+func (_c *Cluster_RemovePeerActor_Call) Run(run func(ctx context.Context, actorName string, peerAddress string)) *Cluster_RemovePeerActor_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string))
+	})
+	return _c
+}
+
+func (_c *Cluster_RemovePeerActor_Call) Return(_a0 error) *Cluster_RemovePeerActor_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *Cluster_RemovePeerActor_Call) RunAndReturn(run func(context.Context, string, string) error) *Cluster_RemovePeerActor_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RemovePeerGrain provides a mock function with given fields: ctx, grainID, peerAddress
+func (_m *Cluster) RemovePeerGrain(ctx context.Context, grainID *internalpb.GrainId, peerAddress string) error {
+	ret := _m.Called(ctx, grainID, peerAddress)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RemovePeerGrain")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.GrainId, string) error); ok {
+		r0 = rf(ctx, grainID, peerAddress)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// Cluster_RemovePeerGrain_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemovePeerGrain'
+type Cluster_RemovePeerGrain_Call struct {
+	*mock.Call
+}
+
+// RemovePeerGrain is a helper method to define mock.On call
+//   - ctx context.Context
+//   - grainID *internalpb.GrainId
+//   - peerAddress string
+func (_e *Cluster_Expecter) RemovePeerGrain(ctx interface{}, grainID interface{}, peerAddress interface{}) *Cluster_RemovePeerGrain_Call {
+	return &Cluster_RemovePeerGrain_Call{Call: _e.mock.On("RemovePeerGrain", ctx, grainID, peerAddress)}
+}
+
+func (_c *Cluster_RemovePeerGrain_Call) Run(run func(ctx context.Context, grainID *internalpb.GrainId, peerAddress string)) *Cluster_RemovePeerGrain_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*internalpb.GrainId), args[2].(string))
+	})
+	return _c
+}
+
+func (_c *Cluster_RemovePeerGrain_Call) Return(_a0 error) *Cluster_RemovePeerGrain_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *Cluster_RemovePeerGrain_Call) RunAndReturn(run func(context.Context, *internalpb.GrainId, string) error) *Cluster_RemovePeerGrain_Call {
 	_c.Call.Return(run)
 	return _c
 }

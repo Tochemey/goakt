@@ -130,6 +130,18 @@ func TestNotRunningReturnsErrEngineNotRunning(t *testing.T) {
 	_, err = cluster.GetState(ctx, node.PeersAddress())
 	require.ErrorIs(t, err, ErrEngineNotRunning)
 
+	err = cluster.PersistPeerActor(ctx, new(internalpb.PersistPeerActor))
+	require.ErrorIs(t, err, ErrEngineNotRunning)
+
+	err = cluster.PersistPeerGrain(ctx, new(internalpb.PersistPeerGrain))
+	require.ErrorIs(t, err, ErrEngineNotRunning)
+
+	err = cluster.RemovePeerActor(ctx, node.PeersAddress(), "actor-name")
+	require.ErrorIs(t, err, ErrEngineNotRunning)
+
+	err = cluster.RemovePeerGrain(ctx, &internalpb.GrainId{Value: "grain-id"}, node.PeersAddress())
+	require.ErrorIs(t, err, ErrEngineNotRunning)
+
 	peers, err := cluster.Peers(ctx)
 	require.ErrorIs(t, err, ErrEngineNotRunning)
 	require.Nil(t, peers)
@@ -241,6 +253,154 @@ func TestSingleNode(t *testing.T) {
 	require.Error(t, err)
 	require.Nil(t, state)
 	assert.ErrorIs(t, err, ErrPeerSyncNotFound)
+}
+
+func TestClusterPersistPeerActor(t *testing.T) {
+	cluster, node, ctx := setupCluster(t)
+	store := switchClusterStoreToMemory(t, cluster)
+
+	actorName := uuid.NewString()
+	state := &internalpb.PersistPeerActor{
+		Host:         node.Host,
+		RemotingPort: int32(node.RemotingPort + 1),
+		PeersPort:    int32(node.PeersPort + 10),
+		Actor: &internalpb.Actor{
+			Address: &goaktpb.Address{Name: actorName},
+			Type:    "persisted-kind",
+		},
+	}
+
+	require.NoError(t, cluster.PersistPeerActor(ctx, state))
+
+	peerAddress := net.JoinHostPort(state.GetHost(), strconv.Itoa(int(state.GetPeersPort())))
+	peerState, ok := store.GetPeerState(ctx, peerAddress)
+	require.True(t, ok)
+	require.NotNil(t, peerState)
+
+	actors := peerState.GetActors()
+	require.NotNil(t, actors)
+	storedActor, exists := actors[actorName]
+	require.True(t, exists)
+	assert.True(t, proto.Equal(state.GetActor(), storedActor))
+
+	assert.Equal(t, state.GetHost(), peerState.GetHost())
+	assert.Equal(t, state.GetRemotingPort(), peerState.GetRemotingPort())
+	assert.Equal(t, state.GetPeersPort(), peerState.GetPeersPort())
+}
+
+func TestClusterPersistPeerGrain(t *testing.T) {
+	cluster, node, ctx := setupCluster(t)
+	store := switchClusterStoreToMemory(t, cluster)
+
+	grainID := &internalpb.GrainId{Kind: "kind", Name: "grain", Value: uuid.NewString()}
+	grain := &internalpb.Grain{
+		GrainId: grainID,
+		Host:    node.Host,
+		Port:    int32(node.RemotingPort + 2),
+	}
+	state := &internalpb.PersistPeerGrain{
+		Host:         node.Host,
+		RemotingPort: int32(node.RemotingPort + 2),
+		PeersPort:    int32(node.PeersPort + 20),
+		Grain:        grain,
+	}
+
+	require.NoError(t, cluster.PersistPeerGrain(ctx, state))
+
+	peerAddress := net.JoinHostPort(state.GetHost(), strconv.Itoa(int(state.GetPeersPort())))
+	peerState, ok := store.GetPeerState(ctx, peerAddress)
+	require.True(t, ok)
+	require.NotNil(t, peerState)
+
+	grains := peerState.GetGrains()
+	require.NotNil(t, grains)
+	storedGrain, exists := grains[grainID.GetValue()]
+	require.True(t, exists)
+	assert.True(t, proto.Equal(state.GetGrain(), storedGrain))
+
+	assert.Equal(t, state.GetHost(), peerState.GetHost())
+	assert.Equal(t, state.GetRemotingPort(), peerState.GetRemotingPort())
+	assert.Equal(t, state.GetPeersPort(), peerState.GetPeersPort())
+}
+
+func TestClusterRemovePeerActor(t *testing.T) {
+	cluster, node, ctx := setupCluster(t)
+	store := switchClusterStoreToMemory(t, cluster)
+
+	peerHost := node.Host
+	peerPeersPort := int32(node.PeersPort + 30)
+	peerRemotingPort := int32(node.RemotingPort + 3)
+	peerAddress := net.JoinHostPort(peerHost, strconv.Itoa(int(peerPeersPort)))
+
+	targetActorName := uuid.NewString()
+	remainingActorName := uuid.NewString()
+	targetActor := &internalpb.Actor{Address: &goaktpb.Address{Name: targetActorName}}
+	remainingActor := &internalpb.Actor{Address: &goaktpb.Address{Name: remainingActorName}}
+	initialState := &internalpb.PeerState{
+		Host:         peerHost,
+		RemotingPort: peerRemotingPort,
+		PeersPort:    peerPeersPort,
+		Actors: map[string]*internalpb.Actor{
+			targetActorName:    targetActor,
+			remainingActorName: remainingActor,
+		},
+	}
+
+	require.NoError(t, store.PersistPeerState(ctx, initialState))
+	require.NoError(t, cluster.RemovePeerActor(ctx, targetActorName, peerAddress))
+
+	peerState, ok := store.GetPeerState(ctx, peerAddress)
+	require.True(t, ok)
+	require.NotNil(t, peerState)
+
+	actors := peerState.GetActors()
+	require.NotNil(t, actors)
+	_, exists := actors[targetActorName]
+	assert.False(t, exists)
+	storedRemaining, ok := actors[remainingActorName]
+	require.True(t, ok)
+	assert.True(t, proto.Equal(remainingActor, storedRemaining))
+	assert.Len(t, actors, 1)
+}
+
+func TestClusterRemovePeerGrain(t *testing.T) {
+	cluster, node, ctx := setupCluster(t)
+	store := switchClusterStoreToMemory(t, cluster)
+
+	peerHost := node.Host
+	peerPeersPort := int32(node.PeersPort + 40)
+	peerRemotingPort := int32(node.RemotingPort + 4)
+	peerAddress := net.JoinHostPort(peerHost, strconv.Itoa(int(peerPeersPort)))
+
+	targetGrainID := &internalpb.GrainId{Kind: "kind", Name: "target", Value: uuid.NewString()}
+	remainingGrainID := &internalpb.GrainId{Kind: "kind", Name: "remaining", Value: uuid.NewString()}
+	targetGrain := &internalpb.Grain{GrainId: targetGrainID, Host: peerHost, Port: peerRemotingPort}
+	remainingGrain := &internalpb.Grain{GrainId: remainingGrainID, Host: peerHost, Port: peerRemotingPort}
+	initialState := &internalpb.PeerState{
+		Host:         peerHost,
+		RemotingPort: peerRemotingPort,
+		PeersPort:    peerPeersPort,
+		Grains: map[string]*internalpb.Grain{
+			targetGrainID.GetValue():    targetGrain,
+			remainingGrainID.GetValue(): remainingGrain,
+		},
+	}
+
+	require.NoError(t, store.PersistPeerState(ctx, initialState))
+	require.NoError(t, cluster.RemovePeerGrain(ctx, targetGrainID, peerAddress))
+
+	peerState, ok := store.GetPeerState(ctx, peerAddress)
+	require.True(t, ok)
+	require.NotNil(t, peerState)
+
+	grains := peerState.GetGrains()
+	require.NotNil(t, grains)
+	_, exists := grains[targetGrainID.GetValue()]
+	assert.False(t, exists)
+	storedRemaining, ok := grains[remainingGrainID.GetValue()]
+	require.True(t, ok)
+	assert.True(t, proto.Equal(remainingGrain, storedRemaining))
+	assert.Len(t, grains, 1)
 }
 
 func TestMultipleNodes(t *testing.T) {
@@ -497,6 +657,21 @@ func setupCluster(t *testing.T) (Cluster, *discovery.Node, context.Context) {
 	})
 
 	return cluster, node, ctx
+}
+
+func switchClusterStoreToMemory(t *testing.T, cl Cluster) Store {
+	t.Helper()
+
+	impl, ok := cl.(*cluster)
+	require.True(t, ok)
+
+	memoryStore := NewMemoryStore()
+	originalStore := impl.store
+	impl.store = memoryStore
+
+	require.NoError(t, originalStore.Close())
+
+	return memoryStore
 }
 
 type clusterHarness struct {
