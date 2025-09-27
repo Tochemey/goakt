@@ -29,7 +29,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -90,8 +89,9 @@ func TestDeathWatch(t *testing.T) {
 
 		// mock the cluster interface
 		clmock := mockscluster.NewCluster(t)
-		clmock.EXPECT().RemoveActor(mock.Anything, mock.Anything).Return(assert.AnError)
 		clmock.EXPECT().ActorExists(mock.Anything, actorID).Return(false, nil)
+		clmock.EXPECT().IsLeader(mock.Anything).Return(false)
+		clmock.EXPECT().Stop(mock.Anything).Return(nil)
 
 		err = actorSys.Start(ctx)
 		require.NoError(t, err)
