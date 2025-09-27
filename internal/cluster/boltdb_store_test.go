@@ -25,47 +25,61 @@
 package cluster
 
 import (
-	"google.golang.org/protobuf/proto"
+	"context"
+	"errors"
+	"io/fs"
+	"os"
+	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 )
 
-// encode marshals a wire actor into a byte array
-// the output of this function can be persisted to the Cluster
-func encode(actor *internalpb.Actor) ([]byte, error) {
-	// let us marshal it
-	bytea, _ := proto.Marshal(actor)
-	return bytea, nil
-}
+func TestBoltDBStoreLifecycle(t *testing.T) {
+	useTempHome(t)
 
-// decode decodes the encoded base64 representation of a wire actor
-func decode(bytea []byte) (*internalpb.Actor, error) {
-	// create an instance of a proto message
-	actor := new(internalpb.Actor)
-	// let us unpack the byte array
-	if err := proto.Unmarshal(bytea, actor); err != nil {
-		return nil, err
+	store, err := NewBoltStore()
+	require.NoError(t, err)
+	impl, ok := store.(*BoltStore)
+	require.True(t, ok)
+
+	ctx := context.Background()
+	peer := &internalpb.PeerState{
+		Host:         "127.0.0.1",
+		RemotingPort: 6000,
+		PeersPort:    7000,
 	}
 
-	return actor, nil
+	require.NoError(t, store.PersistPeerState(ctx, peer))
+
+	address := peerKey(peer)
+	loaded, ok := store.GetPeerState(ctx, address)
+	require.True(t, ok)
+	require.Equal(t, peer.GetHost(), loaded.GetHost())
+	require.Equal(t, peer.GetPeersPort(), loaded.GetPeersPort())
+
+	require.NoError(t, store.DeletePeerState(ctx, address))
+	_, ok = store.GetPeerState(ctx, address)
+	require.False(t, ok)
+
+	require.NoError(t, store.Close())
+	_, statErr := os.Stat(impl.path)
+	require.Error(t, statErr)
+	require.True(t, errors.Is(statErr, fs.ErrNotExist))
 }
 
-// encode marshals a wire Grain into a byte array
-// the output of this function can be persisted to the Cluster
-func encodeGrain(grain *internalpb.Grain) ([]byte, error) {
-	// let us marshal it
-	bytea, _ := proto.Marshal(grain)
-	return bytea, nil
+func TestBoltDBStoreCloseIsIdempotent(t *testing.T) {
+	useTempHome(t)
+
+	store, err := NewBoltStore()
+	require.NoError(t, err)
+	require.NoError(t, store.Close())
+	require.NoError(t, store.Close())
 }
 
-// decode decodes the encoded representation of a wire Grain
-func decodeGrain(bytea []byte) (*internalpb.Grain, error) {
-	// create an instance of a proto message
-	grain := new(internalpb.Grain)
-	// let us unpack the byte array
-	if err := proto.Unmarshal(bytea, grain); err != nil {
-		return nil, err
-	}
-
-	return grain, nil
+func useTempHome(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("HOME", root)
+	t.Setenv("USERPROFILE", root)
 }

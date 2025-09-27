@@ -30,6 +30,7 @@ import (
 	"strings"
 
 	gerrors "github.com/tochemey/goakt/v3/errors"
+	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/internal/validation"
 )
@@ -136,4 +137,16 @@ func toIdentity(s string) (*GrainIdentity, error) {
 		return nil, err
 	}
 	return identity, nil
+}
+
+func toWireGrainID(identity *GrainIdentity) *internalpb.GrainId {
+	if identity == nil {
+		return nil
+	}
+
+	return &internalpb.GrainId{
+		Kind:  identity.Kind(),
+		Name:  identity.Name(),
+		Value: identity.String(),
+	}
 }

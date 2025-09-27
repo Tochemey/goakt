@@ -46,6 +46,7 @@ import (
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/chain"
+	"github.com/tochemey/goakt/v3/internal/codec"
 	"github.com/tochemey/goakt/v3/internal/collection"
 	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/future"
@@ -2145,6 +2146,23 @@ func (pid *PID) healthCheck(ctx context.Context) error {
 
 	logger.Infof("%s readiness probe successfully completed.", pid.Name())
 	return nil
+}
+
+func (pid *PID) toWireActor() (*internalpb.Actor, error) {
+	dependencies, err := codec.EncodeDependencies(pid.Dependencies()...)
+	if err != nil {
+		return nil, err
+	}
+
+	return &internalpb.Actor{
+		Address:             pid.Address().Address,
+		Type:                registry.Name(pid.Actor()),
+		IsSingleton:         pid.IsSingleton(),
+		Relocatable:         pid.IsRelocatable(),
+		PassivationStrategy: codec.EncodePassivationStrategy(pid.PassivationStrategy()),
+		Dependencies:        dependencies,
+		EnableStash:         pid.stashBox != nil,
+	}, nil
 }
 
 // isLongLivedStrategy checks whether the given strategy is a long-lived strategy

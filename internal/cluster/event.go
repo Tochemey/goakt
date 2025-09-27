@@ -25,18 +25,31 @@
 package cluster
 
 import (
-	"errors"
+	"fmt"
+
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
-var (
-	// ErrActorNotFound is return when an actor is not found
-	ErrActorNotFound = errors.New("actor not found")
-	// ErrPeerSyncNotFound is returned when a peerSync record is not found
-	ErrPeerSyncNotFound = errors.New("peerSync record not found")
-	// ErrInvalidTLSConfiguration is returned whent the TLS configuration is not properly set
-	ErrInvalidTLSConfiguration = errors.New("TLS configuration is invalid")
-	// ErrEngineNotRunning is returned when the cluster engine is not running
-	ErrEngineNotRunning = errors.New("engine is not running")
-	// ErrGrainNotFound is returned when a grain is not found
-	ErrGrainNotFound = errors.New("grain not found")
+type EventType int
+
+const (
+	NodeJoined EventType = iota
+	NodeLeft
 )
+
+func (x EventType) String() string {
+	switch x {
+	case NodeJoined:
+		return "NodeJoined"
+	case NodeLeft:
+		return "NodeLeft"
+	default:
+		return fmt.Sprintf("%d", int(x))
+	}
+}
+
+// Event defines the cluster event
+type Event struct {
+	Payload *anypb.Any
+	Type    EventType
+}

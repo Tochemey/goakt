@@ -131,14 +131,6 @@ func TestOption(t *testing.T) {
 	}
 }
 
-func TestWithPeerStateInterval(t *testing.T) {
-	system := new(actorSystem)
-	system.clusterConfig = NewClusterConfig()
-	opt := WithPeerStateLoopInterval(10 * time.Second)
-	opt.Apply(system)
-	assert.EqualValues(t, 10*time.Second, system.clusterConfig.PeersStateSyncInterval())
-}
-
 func TestWithCoordinatedShutdown(t *testing.T) {
 	system := new(actorSystem)
 	opt := WithCoordinatedShutdown(&MockShutdownHook{})

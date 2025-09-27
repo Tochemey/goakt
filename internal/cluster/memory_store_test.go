@@ -25,18 +25,37 @@
 package cluster
 
 import (
-	"errors"
+	"context"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
+
+	"github.com/tochemey/goakt/v3/internal/internalpb"
 )
 
-var (
-	// ErrActorNotFound is return when an actor is not found
-	ErrActorNotFound = errors.New("actor not found")
-	// ErrPeerSyncNotFound is returned when a peerSync record is not found
-	ErrPeerSyncNotFound = errors.New("peerSync record not found")
-	// ErrInvalidTLSConfiguration is returned whent the TLS configuration is not properly set
-	ErrInvalidTLSConfiguration = errors.New("TLS configuration is invalid")
-	// ErrEngineNotRunning is returned when the cluster engine is not running
-	ErrEngineNotRunning = errors.New("engine is not running")
-	// ErrGrainNotFound is returned when a grain is not found
-	ErrGrainNotFound = errors.New("grain not found")
-)
+func TestMemoryStore(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := context.Background()
+
+	peerState := &internalpb.PeerState{
+		Host:         "127.0.0.1",
+		RemotingPort: 2280,
+		PeersPort:    2281,
+		Actors:       nil,
+	}
+
+	require.NoError(t, store.PersistPeerState(ctx, peerState))
+
+	key := "127.0.0.1:2281"
+	actual, ok := store.GetPeerState(ctx, key)
+	require.True(t, ok)
+	assert.True(t, proto.Equal(peerState, actual))
+
+	require.NoError(t, store.DeletePeerState(ctx, key))
+	_, ok = store.GetPeerState(ctx, key)
+	require.False(t, ok)
+
+	require.NoError(t, store.Close())
+}

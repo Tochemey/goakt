@@ -31,37 +31,34 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/tochemey/goakt/v3/internal/collection"
-	"github.com/tochemey/goakt/v3/internal/registry"
 )
 
-// pidNode represents a node in the PID tree, encapsulating an actor's PID,
-// its parent, watchers, watchees, and descendants.
+// pidNode represents a node in the PID tree.
 type pidNode struct {
-	pid         atomic.Pointer[PID]               // The PID associated with this node.
-	parent      atomic.Pointer[PID]               // Parent PID; nil if this is the root node.
-	watchers    *collection.Map[string, *PID]     // Actors watching this pidNode.
-	watchees    *collection.Map[string, *PID]     // Actors being watched by this pidNode.
-	descendants *collection.Map[string, *pidNode] // Descendant nodes of this pidNode.
+	pid         atomic.Pointer[PID]               // PID associated with this node.
+	parent      atomic.Pointer[PID]               // Parent PID; nil if root.
+	watchers    *collection.Map[string, *PID]     // Actors watching this node.
+	watchees    *collection.Map[string, *PID]     // Actors this node is watching.
+	descendants *collection.Map[string, *pidNode] // Direct children.
 }
 
 // value returns the PID stored in the node, or nil if not set.
 func (n *pidNode) value() *PID {
-	if pid := n.pid.Load(); pid != nil {
-		return pid
-	}
-	return nil
+	return n.pid.Load()
 }
 
-// tree represents a concurrent-safe tree structure for managing actor PIDs
-// and their relationships (parent, descendants, watchers, watchees).
+// tree maintains actor relationships in a concurrency-safe structure.
 type tree struct {
 	sync.RWMutex
-	rootNode *pidNode                          // Root node of the tree; nil if no actors are registered.
-	pids     *collection.Map[string, *pidNode] // Map of pidNode indexed by their PID string.
-	counter  *atomic.Int64                     // Tracks the number of nodes in the tree.
+	rootNode *pidNode                          // Logical root node (its pid may be nil if cleared).
+	pids     *collection.Map[string, *pidNode] // Index: PID.ID() -> pidNode.
+	counter  *atomic.Int64                     // Number of nodes currently registered.
+	noSender *PID                              // Cached NoSender (set on first root add).
 }
 
-// newTree creates and returns a new, initialized PID tree.
+// newTree creates and returns a new PID tree.
+// Time Complexity: O(1).
+// Space Complexity: O(1) (excluding the internal empty maps allocated).
 func newTree() *tree {
 	return &tree{
 		pids:    collection.NewMap[string, *pidNode](),
@@ -75,8 +72,10 @@ func newTree() *tree {
 	}
 }
 
-// addRootNode adds a root node to the tree with the given PID.
-// Returns an error if the PID is nil, NoSender, or already exists.
+// addRootNode registers the root PID in the tree.
+// Fails if pid is nil, already present, or equals NoSender.
+// Time Complexity: O(1) (amortized for map operations).
+// Space Complexity: O(1) additional.
 func (x *tree) addRootNode(pid *PID) error {
 	x.Lock()
 	defer x.Unlock()
@@ -85,11 +84,13 @@ func (x *tree) addRootNode(pid *PID) error {
 		return errors.New("pid is nil")
 	}
 
-	noSender := pid.ActorSystem().NoSender()
-	if pid.Equals(noSender) {
+	// Cache NoSender once.
+	if x.noSender == nil {
+		x.noSender = pid.ActorSystem().NoSender()
+	}
+	if pid.Equals(x.noSender) {
 		return errors.New("pid cannot be NoSender")
 	}
-
 	if _, exists := x.pids.Get(pid.ID()); exists {
 		return errors.New("pid already exists")
 	}
@@ -100,8 +101,11 @@ func (x *tree) addRootNode(pid *PID) error {
 	return nil
 }
 
-// addNode adds a new node with the given PID as a child of the specified parent PID.
-// Returns an error if the PID or parent is nil, NoSender, or already exists.
+// addNode inserts a child PID under the given parent PID.
+// Fails if inputs are invalid, parent does not exist, or pid already exists.
+// Establishes watcher/watchee links between parent and child.
+// Time Complexity: O(1) (amortized).
+// Space Complexity: O(1) additional (one node plus map entries).
 func (x *tree) addNode(parent, pid *PID) error {
 	x.Lock()
 	defer x.Unlock()
@@ -114,43 +118,47 @@ func (x *tree) addNode(parent, pid *PID) error {
 		return errors.New("parent pid is nil")
 	}
 
-	noSender := pid.ActorSystem().NoSender()
-	if parent.Equals(noSender) {
+	// Ensure NoSender cached (in case addRootNode was not yet called—defensive).
+	if x.noSender == nil {
+		x.noSender = pid.ActorSystem().NoSender()
+	}
+
+	if parent.Equals(x.noSender) {
 		return errors.New("parent pid cannot be NoSender")
 	}
 
-	// check if the pid already exists
 	if _, exists := x.pids.Get(pid.ID()); exists {
 		return errors.New("pid already exists")
 	}
 
-	pidnode := &pidNode{
-		pid:         atomic.Pointer[PID]{},
-		watchers:    collection.NewMap[string, *PID](),
-		watchees:    collection.NewMap[string, *PID](),
-		descendants: collection.NewMap[string, *pidNode](),
-	}
-
-	pidnode.pid.Store(pid)
-	nodeid := pid.ID()
 	parentNode, ok := x.pids.Get(parent.ID())
 	if !ok {
 		return errors.New("parent pid does not exist")
 	}
 
-	// add to the parent's descendants
-	parentNode.descendants.Set(nodeid, pidnode)
-	parentNode.watchees.Set(nodeid, pid)
-	pidnode.watchers.Set(parent.ID(), parent)
-	pidnode.parent.Store(parent)
+	childNode := &pidNode{
+		pid:         atomic.Pointer[PID]{},
+		watchers:    collection.NewMap[string, *PID](),
+		watchees:    collection.NewMap[string, *PID](),
+		descendants: collection.NewMap[string, *pidNode](),
+	}
+	childNode.pid.Store(pid)
+	childNode.parent.Store(parent)
 
-	x.pids.Set(nodeid, pidnode)
+	id := pid.ID()
+	parentNode.descendants.Set(id, childNode)
+	parentNode.watchees.Set(id, pid)
+	childNode.watchers.Set(parent.ID(), parent)
+
+	x.pids.Set(id, childNode)
 	x.counter.Inc()
 	return nil
 }
 
-// addWatcher registers a watcher PID to watch the specified PID.
-// No-op if either PID is nil, NoSender, or not found in the tree.
+// addWatcher registers watcher to watch pid.
+// Silently no-ops if any PID is nil, NoSender, or not found.
+// Time Complexity: O(1) (amortized).
+// Space Complexity: O(1) additional per watcher relationship.
 func (x *tree) addWatcher(pid, watcher *PID) {
 	x.Lock()
 	defer x.Unlock()
@@ -159,9 +167,16 @@ func (x *tree) addWatcher(pid, watcher *PID) {
 		return
 	}
 
-	noSender := pid.ActorSystem().NoSender()
-	if pid.Equals(noSender) || watcher.Equals(noSender) {
-		return
+	if x.noSender != nil {
+		if pid.Equals(x.noSender) || watcher.Equals(x.noSender) {
+			return
+		}
+	} else {
+		// Fallback (should be rare).
+		noSender := pid.ActorSystem().NoSender()
+		if pid.Equals(noSender) || watcher.Equals(noSender) {
+			return
+		}
 	}
 
 	pidNode, ok := x.pids.Get(pid.ID())
@@ -178,8 +193,12 @@ func (x *tree) addWatcher(pid, watcher *PID) {
 	watcherNode.watchees.Set(pid.ID(), pid)
 }
 
-// deleteNode removes the node with the given PID and all its descendants from the tree.
-// Cleans up watcher/watchee relationships as well.
+// deleteNode removes pid and its entire subtree (all descendants).
+// Also cleans all watcher/watchee relationships involving those nodes.
+// Time Complexity: O(k + e) where k is number of nodes in the subtree,
+// and e is the total number of watcher/watchee edges touching them.
+// Space Complexity: O(k) for traversal stacks plus O(1) auxiliary.
+// No-ops if pid is nil, NoSender, or unknown.
 func (x *tree) deleteNode(pid *PID) {
 	x.Lock()
 	defer x.Unlock()
@@ -188,9 +207,13 @@ func (x *tree) deleteNode(pid *PID) {
 		return
 	}
 
-	noSender := pid.ActorSystem().NoSender()
-	if pid.Equals(noSender) {
+	if x.noSender != nil && pid.Equals(x.noSender) {
 		return
+	} else if x.noSender == nil { // Defensive fallback.
+		noSender := pid.ActorSystem().NoSender()
+		if pid.Equals(noSender) {
+			return
+		}
 	}
 
 	node, ok := x.pids.Get(pid.ID())
@@ -198,87 +221,89 @@ func (x *tree) deleteNode(pid *PID) {
 		return
 	}
 
-	// Recursively remove all descendants first
-	var removeDescendants func(*pidNode)
-	removeDescendants = func(node *pidNode) {
-		for _, descendant := range node.descendants.Values() {
-			removeDescendants(descendant)
-			// Clean up watcher/watchee relationships for descendant
-			descendant.watchers.Range(func(_ string, value *PID) {
-				if watcherNode, exists := x.pids.Get(value.ID()); exists {
-					watcherNode.watchees.Delete(descendant.pid.Load().ID())
-				}
-			})
-			descendant.watchees.Range(func(_ string, value *PID) {
-				if watcheeNode, exists := x.pids.Get(value.ID()); exists {
-					watcheeNode.watchers.Delete(descendant.pid.Load().ID())
-				}
-			})
-			// Remove descendant from parent's descendants if applicable
-			if descendant.parent.Load() != nil {
-				if parentNode, exists := x.pids.Get(descendant.parent.Load().ID()); exists {
-					parentNode.descendants.Delete(descendant.pid.Load().ID())
-					parentNode.watchees.Delete(descendant.pid.Load().ID())
-				}
+	// Iterative stack for subtree traversal (post-order style via two slices).
+	stack := make([]*pidNode, 0, 8)
+	post := make([]*pidNode, 0, 8)
+	stack = append(stack, node)
+
+	for len(stack) > 0 {
+		n := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if n == nil {
+			continue
+		}
+		post = append(post, n)
+		n.descendants.Range(func(_ string, child *pidNode) {
+			stack = append(stack, child)
+		})
+	}
+
+	// Process nodes in reverse order so children handled before parents.
+	for i := len(post) - 1; i >= 0; i-- {
+		n := post[i]
+		p := n.pid.Load()
+		if p == nil {
+			continue
+		}
+
+		// Clean watchers.
+		n.watchers.Range(func(_ string, w *PID) {
+			if watcherNode, exists := x.pids.Get(w.ID()); exists {
+				watcherNode.watchees.Delete(p.ID())
 			}
-			x.pids.Delete(descendant.pid.Load().ID())
-			x.counter.Dec()
+		})
+		n.watchers.Reset()
+
+		// Clean watchees.
+		n.watchees.Range(func(_ string, w *PID) {
+			if watcheeNode, exists := x.pids.Get(w.ID()); exists {
+				watcheeNode.watchers.Delete(p.ID())
+			}
+		})
+		n.watchees.Reset()
+
+		// Unlink from parent.
+		if parentPID := n.parent.Load(); parentPID != nil {
+			if parentNode, exists := x.pids.Get(parentPID.ID()); exists {
+				parentNode.descendants.Delete(p.ID())
+				parentNode.watchees.Delete(p.ID())
+			}
 		}
+
+		x.pids.Delete(p.ID())
+		n.parent.Store(nil)
+		n.pid.Store(nil)
+		x.counter.Dec()
 	}
-	removeDescendants(node)
-
-	// Clean up watcher/watchee relationships for the node itself
-	node.watchers.Range(func(_ string, value *PID) {
-		if watcherNode, exists := x.pids.Get(value.ID()); exists {
-			watcherNode.watchees.Delete(pid.ID())
-		}
-	})
-	node.watchees.Range(func(_ string, value *PID) {
-		if watcheeNode, exists := x.pids.Get(value.ID()); exists {
-			watcheeNode.watchers.Delete(pid.ID())
-		}
-	})
-
-	// Remove from parent's descendants if applicable
-	if node.parent.Load() != nil {
-		if parentNode, exists := x.pids.Get(node.parent.Load().ID()); exists {
-			parentNode.descendants.Delete(pid.ID())
-			parentNode.watchees.Delete(pid.ID())
-		}
-	}
-
-	x.pids.Delete(pid.ID())
-	x.counter.Dec()
 }
 
-// node retrieves the pidNode for the given PID string ID.
-// Returns the node and true if found, otherwise nil and false.
+// node returns the internal pidNode by ID.
+// Time Complexity: O(1) (amortized).
+// Space Complexity: O(1).
 func (x *tree) node(id string) (*pidNode, bool) {
 	x.RLock()
 	defer x.RUnlock()
-
-	node, ok := x.pids.Get(id)
-	if !ok {
-		return nil, false
-	}
-	return node, true
+	n, ok := x.pids.Get(id)
+	return n, ok
 }
 
-// nodes returns a slice of all pidNodes currently in the tree.
+// nodes returns all pidNodes currently registered.
+// Time Complexity: O(n) where n is the number of nodes.
+// Space Complexity: O(n) for the returned slice.
 func (x *tree) nodes() []*pidNode {
 	x.RLock()
 	defer x.RUnlock()
-
-	nodes := make([]*pidNode, 0, x.counter.Load())
-	x.pids.Range(func(_ string, node *pidNode) {
-		nodes = append(nodes, node)
+	result := make([]*pidNode, 0, x.counter.Load())
+	x.pids.Range(func(_ string, n *pidNode) {
+		result = append(result, n)
 	})
-
-	return nodes
+	return result
 }
 
-// siblings returns all sibling PIDs of the given PID (excluding itself).
-// Returns nil if PID is nil, NoSender, or not found.
+// siblings returns all sibling PIDs of pid (excluding pid itself).
+// Returns nil if pid is nil/NoSender/unknown; returns empty slice if none.
+// Time Complexity: O(d) where d is the number of children of the parent.
+// Space Complexity: O(d) for the result slice (worst case).
 func (x *tree) siblings(pid *PID) []*PID {
 	x.RLock()
 	defer x.RUnlock()
@@ -286,9 +311,7 @@ func (x *tree) siblings(pid *PID) []*PID {
 	if pid == nil {
 		return nil
 	}
-
-	noSender := pid.ActorSystem().NoSender()
-	if pid.Equals(noSender) {
+	if x.noSender != nil && pid.Equals(x.noSender) {
 		return nil
 	}
 
@@ -296,24 +319,28 @@ func (x *tree) siblings(pid *PID) []*PID {
 	if !ok || node.parent.Load() == nil {
 		return nil
 	}
-
 	parentNode, ok := x.pids.Get(node.parent.Load().ID())
 	if !ok {
 		return nil
 	}
 
-	siblings := make([]*PID, 0)
-	for _, siblingNode := range parentNode.descendants.Values() {
-		siblingPID := siblingNode.pid.Load()
-		if siblingPID != nil && !siblingPID.Equals(pid) {
-			siblings = append(siblings, siblingPID)
-		}
+	size := parentNode.descendants.Len()
+	if size <= 1 {
+		return []*PID{}
 	}
-
-	return siblings
+	sibs := make([]*PID, 0, size-1)
+	parentNode.descendants.Range(func(_ string, s *pidNode) {
+		if sp := s.pid.Load(); sp != nil && !sp.Equals(pid) {
+			sibs = append(sibs, sp)
+		}
+	})
+	return sibs
 }
 
-// children returns all direct child PIDs of the given PID.
+// children returns the direct children of pid.
+// Returns nil if pid is nil/NoSender/unknown; empty slice if no children.
+// Time Complexity: O(c) where c is the number of direct children.
+// Space Complexity: O(c) for the result slice.
 func (x *tree) children(pid *PID) []*PID {
 	x.RLock()
 	defer x.RUnlock()
@@ -321,9 +348,7 @@ func (x *tree) children(pid *PID) []*PID {
 	if pid == nil {
 		return nil
 	}
-
-	noSender := pid.ActorSystem().NoSender()
-	if pid.Equals(noSender) {
+	if x.noSender != nil && pid.Equals(x.noSender) {
 		return nil
 	}
 
@@ -332,19 +357,19 @@ func (x *tree) children(pid *PID) []*PID {
 		return nil
 	}
 
-	var result []*PID
-	for _, descendantNode := range node.descendants.Values() {
-		descendantPID := descendantNode.pid.Load()
-		if descendantPID != nil {
-			result = append(result, descendantPID)
+	result := make([]*PID, 0, node.descendants.Len())
+	node.descendants.Range(func(_ string, child *pidNode) {
+		if cp := child.pid.Load(); cp != nil {
+			result = append(result, cp)
 		}
-	}
-
+	})
 	return result
 }
 
-// descendants returns all descendant PIDs of the given PID in the tree.
-// Returns nil if PID is nil, NoSender, or not found.
+// descendants returns all descendant PIDs of pid (depth-first, no order guarantee).
+// Returns nil if pid is nil/NoSender/unknown; empty slice if no descendants.
+// Time Complexity: O(k) where k is number of descendants.
+// Space Complexity: O(k) for traversal stack + result slice.
 func (x *tree) descendants(pid *PID) []*PID {
 	x.RLock()
 	defer x.RUnlock()
@@ -353,8 +378,7 @@ func (x *tree) descendants(pid *PID) []*PID {
 		return nil
 	}
 
-	noSender := pid.ActorSystem().NoSender()
-	if pid.Equals(noSender) {
+	if x.noSender != nil && pid.Equals(x.noSender) {
 		return nil
 	}
 
@@ -363,27 +387,35 @@ func (x *tree) descendants(pid *PID) []*PID {
 		return nil
 	}
 
-	var result []*PID
-	visited := make(map[string]registry.Unit)
-	var fetch func(n *pidNode)
-	fetch = func(n *pidNode) {
-		for _, descendantNode := range n.descendants.Values() {
-			descendantPID := descendantNode.pid.Load()
-			if descendantPID != nil {
-				if _, seen := visited[descendantPID.ID()]; !seen {
-					visited[descendantPID.ID()] = registry.Unit{}
-					result = append(result, descendantPID)
-					fetch(descendantNode)
-				}
-			}
-		}
+	if node.descendants.Len() == 0 {
+		return []*PID{}
 	}
-	fetch(node)
 
+	stack := make([]*pidNode, 0, node.descendants.Len())
+	node.descendants.Range(func(_ string, child *pidNode) {
+		stack = append(stack, child)
+	})
+
+	result := make([]*PID, 0, len(stack))
+	for len(stack) > 0 {
+		n := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if n == nil {
+			continue
+		}
+		if p := n.pid.Load(); p != nil {
+			result = append(result, p)
+		}
+		n.descendants.Range(func(_ string, c *pidNode) {
+			stack = append(stack, c)
+		})
+	}
 	return result
 }
 
-// reset clears the tree, removing all nodes and resetting the root.
+// reset clears the entire tree (all nodes removed) but preserves cached noSender.
+// Time Complexity: O(n) in effect (map reset may drop references over n nodes).
+// Space Complexity: O(1) additional (old structures become GC candidates).
 func (x *tree) reset() {
 	x.Lock()
 	defer x.Unlock()
@@ -396,28 +428,36 @@ func (x *tree) reset() {
 	}
 	x.pids.Reset()
 	x.counter.Store(0)
+	// Keep cached noSender (still valid for same ActorSystem instances).
 }
 
-// count returns the current number of nodes in the tree.
+// count returns number of registered nodes (lock-free).
+// Time Complexity: O(1).
+// Space Complexity: O(1).
 func (x *tree) count() int64 {
-	x.RLock()
-	defer x.RUnlock()
-
 	return x.counter.Load()
 }
 
-// root returns the PID of the root node, and true if it exists.
+// root returns the root PID if set.
+// Time Complexity: O(1).
+// Space Complexity: O(1).
 func (x *tree) root() (*PID, bool) {
 	x.RLock()
 	defer x.RUnlock()
-
-	if x.rootNode == nil || x.rootNode.pid.Load() == nil {
+	if x.rootNode == nil {
 		return nil, false
 	}
-	return x.rootNode.pid.Load(), true
+	p := x.rootNode.pid.Load()
+	if p == nil {
+		return nil, false
+	}
+	return p, true
 }
 
-// parent returns the parent PID of the given PID, and true if it exists.
+// parent returns the parent PID of pid.
+// Returns (nil,false) if pid is nil/NoSender/unknown or has no parent.
+// Time Complexity: O(1).
+// Space Complexity: O(1).
 func (x *tree) parent(pid *PID) (*PID, bool) {
 	x.RLock()
 	defer x.RUnlock()
@@ -425,22 +465,25 @@ func (x *tree) parent(pid *PID) (*PID, bool) {
 	if pid == nil {
 		return nil, false
 	}
-
-	noSender := pid.ActorSystem().NoSender()
-	if pid.Equals(noSender) {
+	if x.noSender != nil && pid.Equals(x.noSender) {
 		return nil, false
 	}
 
 	node, ok := x.pids.Get(pid.ID())
-	if !ok || node.parent.Load() == nil {
+	if !ok {
 		return nil, false
 	}
-
-	return node.parent.Load(), true
+	pp := node.parent.Load()
+	if pp == nil {
+		return nil, false
+	}
+	return pp, true
 }
 
-// watchers returns a slice of PIDs that are watching the given PID.
-// Returns nil if PID is nil, NoSender, or not found.
+// watchers returns the list of PIDs watching pid.
+// Returns nil if pid is nil/NoSender/unknown.
+// Time Complexity: O(w) where w is the number of watchers.
+// Space Complexity: O(w) for the result slice.
 func (x *tree) watchers(pid *PID) []*PID {
 	x.RLock()
 	defer x.RUnlock()
@@ -449,8 +492,7 @@ func (x *tree) watchers(pid *PID) []*PID {
 		return nil
 	}
 
-	noSender := pid.ActorSystem().NoSender()
-	if pid.Equals(noSender) {
+	if x.noSender != nil && pid.Equals(x.noSender) {
 		return nil
 	}
 
@@ -459,16 +501,17 @@ func (x *tree) watchers(pid *PID) []*PID {
 		return nil
 	}
 
-	watchers := make([]*PID, 0, node.watchers.Len())
-	node.watchers.Range(func(_ string, value *PID) {
-		watchers = append(watchers, value)
+	list := make([]*PID, 0, node.watchers.Len())
+	node.watchers.Range(func(_ string, w *PID) {
+		list = append(list, w)
 	})
-
-	return watchers
+	return list
 }
 
-// watchees returns a slice of PIDs that the given PID is watching.
-// Returns nil if PID is nil, NoSender, or not found.
+// watchees returns the list of PIDs that pid is watching.
+// Returns nil if pid is nil/NoSender/unknown.
+// Time Complexity: O(w) where w is the number of watchees.
+// Space Complexity: O(w) for the result slice.
 func (x *tree) watchees(pid *PID) []*PID {
 	x.RLock()
 	defer x.RUnlock()
@@ -477,8 +520,7 @@ func (x *tree) watchees(pid *PID) []*PID {
 		return nil
 	}
 
-	noSender := pid.ActorSystem().NoSender()
-	if pid.Equals(noSender) {
+	if x.noSender != nil && pid.Equals(x.noSender) {
 		return nil
 	}
 
@@ -487,10 +529,9 @@ func (x *tree) watchees(pid *PID) []*PID {
 		return nil
 	}
 
-	watchees := make([]*PID, 0, node.watchees.Len())
-	node.watchees.Range(func(_ string, value *PID) {
-		watchees = append(watchees, value)
+	list := make([]*PID, 0, node.watchees.Len())
+	node.watchees.Range(func(_ string, w *PID) {
+		list = append(list, w)
 	})
-
-	return watchees
+	return list
 }

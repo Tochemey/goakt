@@ -37,6 +37,7 @@ const (
 	singletonManagerType
 	topicActorType
 	noSenderType
+	stateWriterType
 )
 
 const (
@@ -59,5 +60,6 @@ var (
 		singletonManagerType: "GoAktSingletonManager",
 		topicActorType:       "GoAktTopicActor",
 		noSenderType:         "GoAktNoSender",
+		stateWriterType:      "GoAktStateWriter",
 	}
 )

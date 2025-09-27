@@ -1412,6 +1412,7 @@ func testSystem(t *testing.T, providerFactory providerFactory, opts ...testClust
 	// base options
 	options := []Option{
 		WithLogger(logger),
+		WithShutdownTimeout(3 * time.Minute),
 		WithCluster(
 			NewClusterConfig().
 				WithKinds(new(MockActor), new(MockEntity), new(MockGrainActor)).
@@ -1423,7 +1424,6 @@ func testSystem(t *testing.T, providerFactory providerFactory, opts ...testClust
 				WithDiscoveryPort(discoveryPort).
 				WithBootstrapTimeout(time.Second).
 				WithClusterStateSyncInterval(300 * time.Millisecond).
-				WithPeersStateSyncInterval(500 * time.Millisecond).
 				WithDiscovery(provider)),
 	}
 
