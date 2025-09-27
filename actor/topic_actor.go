@@ -355,8 +355,8 @@ func (x *topicActor) handleTopicMessage(ctx *ReceiveContext) {
 
 // spawnTopicActor spawns a new topic actor
 func (x *actorSystem) spawnTopicActor(ctx context.Context) error {
-	// only start the topic actor when cluster is enabled
-	if !x.clusterEnabled.Load() {
+	// only start the topic actor when cluster is enabled or pubsub is enabled
+	if !x.clusterEnabled.Load() && !x.pubsubEnabled.Load() {
 		return nil
 	}
 
