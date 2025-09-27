@@ -2453,10 +2453,10 @@ func (x *actorSystem) replicateActors() {
 				}
 			}
 
-			// publish the actor state to other nodes
-			// we do this before putting the actor into the cluster
-			if err := x.publishPersistPeerActor(ctx, actor); err != nil {
-				x.logger.Warn(err.Error())
+			if x.relocationEnabled.Load() {
+				if err := x.publishPersistPeerActor(ctx, actor); err != nil {
+					x.logger.Warn(err.Error())
+				}
 			}
 
 			if err := cluster.PutActor(ctx, actor); err != nil {
@@ -2476,10 +2476,11 @@ func (x *actorSystem) replicateGrains() {
 		}
 		if !x.isStopping() && x.InCluster() {
 			ctx := context.Background()
-			// publish the grain state to other nodes
-			// we do this before putting the grain into the cluster
-			if err := x.publishPersistPeerGrain(ctx, grain); err != nil {
-				x.logger.Warn(err.Error())
+
+			if x.relocationEnabled.Load() {
+				if err := x.publishPersistPeerGrain(ctx, grain); err != nil {
+					x.logger.Warn(err.Error())
+				}
 			}
 
 			if err := x.cluster.PutGrain(ctx, grain); err != nil {

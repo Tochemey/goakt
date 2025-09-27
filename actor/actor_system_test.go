@@ -166,6 +166,11 @@ func TestActorSystem(t *testing.T) {
 		// wait for the cluster to start
 		pause.For(time.Second)
 
+		require.NotZero(t, newActorSystem.PeersPort())
+		assert.EqualValues(t, clusterPort, newActorSystem.PeersPort())
+		require.NotZero(t, newActorSystem.DiscoveryPort())
+		assert.EqualValues(t, gossipPort, newActorSystem.DiscoveryPort())
+
 		// create an actor
 		actorName := uuid.NewString()
 		actor := NewMockActor()
@@ -835,6 +840,28 @@ func TestActorSystem(t *testing.T) {
 				assert.NoError(t, err)
 			},
 		)
+	})
+	t.Run("With PeersPort and DiscoveryPort returning zero in non cluster env", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem(
+			"test",
+			WithLogger(log.DiscardLogger),
+		)
+
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
+
+		// wait for the system to properly start
+		pause.For(time.Second)
+
+		port := sys.PeersPort()
+		assert.Zero(t, port)
+		port = sys.DiscoveryPort()
+		assert.Zero(t, port)
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
 	})
 	t.Run("With GetPartition returning zero in non cluster env", func(t *testing.T) {
 		ctx := context.TODO()

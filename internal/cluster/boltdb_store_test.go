@@ -32,6 +32,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	bbolt "go.etcd.io/bbolt"
 
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 )
@@ -76,6 +77,77 @@ func TestBoltDBStoreCloseIsIdempotent(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, store.Close())
 	require.NoError(t, store.Close())
+}
+
+func TestBoltDBStoreNilPeerIsNoop(t *testing.T) {
+	useTempHome(t)
+
+	store, err := NewBoltStore()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+
+	require.NoError(t, store.PersistPeerState(context.Background(), nil))
+}
+
+func TestBoltDBStoreContextCancellation(t *testing.T) {
+	useTempHome(t)
+
+	store, err := NewBoltStore()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+
+	peer := &internalpb.PeerState{Host: "127.0.0.2", PeersPort: 7100}
+	peerAddr := peerKey(peer)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	require.ErrorIs(t, store.PersistPeerState(ctx, peer), context.Canceled)
+	state, ok := store.GetPeerState(ctx, peerAddr)
+	require.False(t, ok)
+	require.Nil(t, state)
+	require.ErrorIs(t, store.DeletePeerState(ctx, peerAddr), context.Canceled)
+}
+
+func TestBoltDBStoreOperationsAfterClose(t *testing.T) {
+	useTempHome(t)
+
+	store, err := NewBoltStore()
+	require.NoError(t, err)
+	require.NoError(t, store.Close())
+
+	peer := &internalpb.PeerState{Host: "127.0.0.3", PeersPort: 7200}
+	peerAddr := peerKey(peer)
+
+	require.ErrorIs(t, store.PersistPeerState(context.Background(), peer), errBoltStoreClosed)
+	state, ok := store.GetPeerState(context.Background(), peerAddr)
+	require.False(t, ok)
+	require.Nil(t, state)
+	require.ErrorIs(t, store.DeletePeerState(context.Background(), peerAddr), errBoltStoreClosed)
+}
+
+func TestBoltDBStoreMissingBucket(t *testing.T) {
+	useTempHome(t)
+
+	store, err := NewBoltStore()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+
+	impl, ok := store.(*BoltStore)
+	require.True(t, ok)
+
+	require.NoError(t, impl.db.Update(func(tx *bbolt.Tx) error {
+		return tx.DeleteBucket(impl.bucket)
+	}))
+
+	peer := &internalpb.PeerState{Host: "127.0.0.4", PeersPort: 7300}
+	peerAddr := peerKey(peer)
+
+	require.Error(t, store.PersistPeerState(context.Background(), peer))
+	state, ok := store.GetPeerState(context.Background(), peerAddr)
+	require.False(t, ok)
+	require.Nil(t, state)
+	require.Error(t, store.DeletePeerState(context.Background(), peerAddr))
 }
 
 func useTempHome(t *testing.T) {

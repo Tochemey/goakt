@@ -42,6 +42,7 @@ import (
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/breaker"
 	"github.com/tochemey/goakt/v3/errors"
+	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/collection"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
@@ -5603,4 +5604,20 @@ func TestPipeToName(t *testing.T) {
 		pause.For(time.Second)
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
+}
+
+func TestToWireActorDependencyError(t *testing.T) {
+	pid := &PID{
+		actor:        NewMockActor(),
+		address:      address.New("actor-to-wire", "testSys", "127.0.0.1", 0),
+		fieldsLocker: &sync.RWMutex{},
+		dependencies: collection.NewMap[string, extension.Dependency](),
+	}
+
+	expectedErr := assert.AnError
+	pid.dependencies.Set("failing", &MockFailingDependency{err: expectedErr})
+
+	wire, err := pid.toWireActor()
+	require.ErrorIs(t, err, expectedErr)
+	require.Nil(t, wire)
 }

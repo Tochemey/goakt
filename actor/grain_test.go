@@ -1409,6 +1409,20 @@ func TestRemoteActivateGrain_Failures(t *testing.T) {
 		require.ErrorContains(t, u, gerrors.ErrInvalidHost.Error())
 	})
 
+	t.Run("toWireGrainEncodingError", func(t *testing.T) {
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+
+		depErr := errors.New("dependency marshal failure")
+		cfg := newGrainConfig(WithGrainDependencies(&MockFailingDependency{err: depErr}))
+		identity := newGrainIdentity(NewMockGrain(), "wire-error")
+		pid := newGrainPID(identity, NewMockGrain(), sys, cfg)
+
+		wire, wErr := pid.toWireGrain()
+		require.ErrorIs(t, wErr, depErr)
+		require.Nil(t, wire)
+	})
+
 	t.Run("recreateGrain failure (reserved name)", func(t *testing.T) {
 		ctx := t.Context()
 		ports := dynaport.Get(1)

@@ -1243,6 +1243,22 @@ func (a *MockFIFO) Done() <-chan struct{} {
 	return a.done
 }
 
+type MockFailingDependency struct {
+	err error
+}
+
+func (d *MockFailingDependency) ID() string {
+	return "failing-dependency"
+}
+
+func (d *MockFailingDependency) MarshalBinary() ([]byte, error) {
+	return nil, d.err
+}
+
+func (d *MockFailingDependency) UnmarshalBinary(_ []byte) error {
+	return nil
+}
+
 // //////////////////////////////////////// CLUSTER PROVIDERS MOCKS //////////////////////////////////////
 type providerFactory func(t *testing.T, host string, discoveryPort int) discovery.Provider
 
