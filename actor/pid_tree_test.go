@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025 Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -35,6 +35,15 @@ import (
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/internal/collection"
 )
+
+func newTestPID(system ActorSystem, name string, port int) *PID {
+	return &PID{
+		address:      address.New(name, system.Name(), "host", port),
+		fieldsLocker: &sync.RWMutex{},
+		stopLocker:   &sync.Mutex{},
+		system:       system,
+	}
+}
 
 func TestTree(t *testing.T) {
 	ports := dynaport.Get(1)
@@ -365,6 +374,21 @@ func TestRoot(t *testing.T) {
 	t.Cleanup(tree.reset)
 }
 
+func TestDeleteRootNodeClearsRoot(t *testing.T) {
+	ports := dynaport.Get(1)
+	actorSystem, _ := NewActorSystem("TestSys")
+	tree := newTree()
+	pid := &PID{address: address.New("root-delete", "TestSys", "host", ports[0]), fieldsLocker: &sync.RWMutex{}, stopLocker: &sync.Mutex{}, system: actorSystem}
+	require.NoError(t, tree.addRootNode(pid))
+
+	tree.deleteNode(pid)
+
+	root, ok := tree.root()
+	require.False(t, ok)
+	require.Nil(t, root)
+	require.Zero(t, tree.count())
+}
+
 func TestSiblings(t *testing.T) {
 	tree := newTree()
 	actorSystem, _ := NewActorSystem("TestSys")
@@ -448,4 +472,253 @@ func TestChildren(t *testing.T) {
 	})
 
 	t.Cleanup(tree.reset)
+}
+
+func TestAddRootNodeValidation(t *testing.T) {
+	system, _ := NewActorSystem("TestSys")
+	impl, ok := system.(*actorSystem)
+	require.True(t, ok)
+	impl.noSender = newTestPID(system, "nosender", 0)
+	noSender := impl.noSender
+
+	t.Run("pid is nil", func(t *testing.T) {
+		tree := newTree()
+		err := tree.addRootNode(nil)
+		require.Error(t, err)
+		require.EqualError(t, err, "pid is nil")
+	})
+
+	t.Run("pid is NoSender", func(t *testing.T) {
+		tree := newTree()
+		tree.noSender = noSender
+		err := tree.addRootNode(noSender)
+		require.Error(t, err)
+		require.EqualError(t, err, "pid cannot be NoSender")
+	})
+
+	t.Run("duplicate pid", func(t *testing.T) {
+		tree := newTree()
+		root := newTestPID(system, "root", 1)
+		require.NoError(t, tree.addRootNode(root))
+		err := tree.addRootNode(root)
+		require.Error(t, err)
+		require.EqualError(t, err, "pid already exists")
+	})
+}
+
+func TestAddNodeParentValidation(t *testing.T) {
+	system, _ := NewActorSystem("TestSys")
+	impl, ok := system.(*actorSystem)
+	require.True(t, ok)
+	impl.noSender = newTestPID(system, "nosender", 0)
+	noSender := impl.noSender
+
+	t.Run("parent is NoSender", func(t *testing.T) {
+		tree := newTree()
+		root := newTestPID(system, "root", 1)
+		child := newTestPID(system, "child", 2)
+		require.NoError(t, tree.addRootNode(root))
+		tree.noSender = noSender
+		err := tree.addNode(noSender, child)
+		require.Error(t, err)
+		require.EqualError(t, err, "parent pid cannot be NoSender")
+	})
+
+	t.Run("parent pid does not exist", func(t *testing.T) {
+		tree := newTree()
+		parent := newTestPID(system, "missing", 3)
+		child := newTestPID(system, "child", 4)
+		err := tree.addNode(parent, child)
+		require.Error(t, err)
+		require.EqualError(t, err, "parent pid does not exist")
+		require.Equal(t, noSender, tree.noSender)
+	})
+}
+
+func TestTreeNoSenderGuards(t *testing.T) {
+	system, _ := NewActorSystem("TestSys")
+	impl, ok := system.(*actorSystem)
+	require.True(t, ok)
+	impl.noSender = newTestPID(system, "nosender", 0)
+	tree := newTree()
+	root := newTestPID(system, "root", 1)
+	child := newTestPID(system, "child", 2)
+
+	require.NoError(t, tree.addRootNode(root))
+	require.NoError(t, tree.addNode(root, child))
+
+	noSender := system.NoSender()
+
+	require.Nil(t, tree.children(noSender))
+	require.Nil(t, tree.descendants(noSender))
+	require.Nil(t, tree.watchers(noSender))
+	require.Nil(t, tree.watchees(noSender))
+	require.Nil(t, tree.siblings(noSender))
+
+	parent, ok := tree.parent(noSender)
+	require.False(t, ok)
+	require.Nil(t, parent)
+
+	countBefore := tree.count()
+	tree.deleteNode(noSender)
+	require.Equal(t, countBefore, tree.count())
+}
+
+func TestAddWatcherNoSenderFallback(t *testing.T) {
+	system, _ := NewActorSystem("TestSys")
+	impl, ok := system.(*actorSystem)
+	require.True(t, ok)
+	impl.noSender = newTestPID(system, "nosender", 0)
+	tree := newTree()
+	root := newTestPID(system, "root", 1)
+	child := newTestPID(system, "child", 2)
+	sibling := newTestPID(system, "sibling", 3)
+
+	require.NoError(t, tree.addRootNode(root))
+	require.NoError(t, tree.addNode(root, child))
+	require.NoError(t, tree.addNode(root, sibling))
+
+	watchers := tree.watchers(child)
+	require.Len(t, watchers, 1)
+	require.Equal(t, root.Name(), watchers[0].Name())
+
+	tree.noSender = nil
+	tree.addWatcher(child, system.NoSender())
+
+	watchers = tree.watchers(child)
+	require.Len(t, watchers, 1)
+	require.Equal(t, root.Name(), watchers[0].Name())
+}
+
+func TestDeleteNodeCleansRelationships(t *testing.T) {
+	system, _ := NewActorSystem("TestSys")
+	impl, ok := system.(*actorSystem)
+	require.True(t, ok)
+	impl.noSender = newTestPID(system, "nosender", 0)
+	tree := newTree()
+	root := newTestPID(system, "root", 1)
+	child := newTestPID(system, "child", 2)
+	grandChild := newTestPID(system, "grandchild", 3)
+	sibling := newTestPID(system, "sibling", 4)
+
+	require.NoError(t, tree.addRootNode(root))
+	require.NoError(t, tree.addNode(root, child))
+	require.NoError(t, tree.addNode(child, grandChild))
+	require.NoError(t, tree.addNode(root, sibling))
+
+	tree.addWatcher(child, sibling)
+
+	getNames := func(pids []*PID) []string {
+		result := make([]string, len(pids))
+		for i, pid := range pids {
+			result[i] = pid.Name()
+		}
+		return result
+	}
+
+	require.ElementsMatch(t, []string{root.Name(), sibling.Name()}, getNames(tree.watchers(child)))
+	require.ElementsMatch(t, []string{child.Name()}, getNames(tree.watchees(sibling)))
+
+	tree.deleteNode(child)
+
+	require.Empty(t, tree.watchees(sibling))
+	children := tree.children(root)
+	require.Len(t, children, 1)
+	require.Equal(t, sibling.Name(), children[0].Name())
+	require.EqualValues(t, 2, tree.count())
+}
+
+func TestDeleteNodeNoSender(t *testing.T) {
+	system, _ := NewActorSystem("TestSys")
+	impl, ok := system.(*actorSystem)
+	require.True(t, ok)
+	impl.noSender = newTestPID(system, "nosender", 0)
+	tree := newTree()
+	root := newTestPID(system, "root", 1)
+	require.NoError(t, tree.addRootNode(root))
+
+	noSender := system.NoSender()
+	tree.deleteNode(noSender)
+	require.EqualValues(t, 1, tree.count())
+
+	tree.noSender = nil
+	tree.deleteNode(noSender)
+	require.EqualValues(t, 1, tree.count())
+}
+
+func TestSiblingsReturnsEmptyWhenSingleChild(t *testing.T) {
+	system, _ := NewActorSystem("TestSys")
+	impl, ok := system.(*actorSystem)
+	require.True(t, ok)
+	impl.noSender = newTestPID(system, "nosender", 0)
+	tree := newTree()
+	root := newTestPID(system, "root", 1)
+	onlyChild := newTestPID(system, "only", 2)
+	require.NoError(t, tree.addRootNode(root))
+	require.NoError(t, tree.addNode(root, onlyChild))
+
+	siblings := tree.siblings(onlyChild)
+	require.NotNil(t, siblings)
+	require.Empty(t, siblings)
+}
+
+func TestChildrenReturnsEmptySlice(t *testing.T) {
+	system, _ := NewActorSystem("TestSys")
+	impl, ok := system.(*actorSystem)
+	require.True(t, ok)
+	impl.noSender = newTestPID(system, "nosender", 0)
+	tree := newTree()
+	root := newTestPID(system, "root", 1)
+	child := newTestPID(system, "child", 2)
+	require.NoError(t, tree.addRootNode(root))
+	require.NoError(t, tree.addNode(root, child))
+
+	children := tree.children(child)
+	require.NotNil(t, children)
+	require.Empty(t, children)
+}
+
+func TestDescendantsReturnsEmptySlice(t *testing.T) {
+	system, _ := NewActorSystem("TestSys")
+	impl, ok := system.(*actorSystem)
+	require.True(t, ok)
+	impl.noSender = newTestPID(system, "nosender", 0)
+	tree := newTree()
+	root := newTestPID(system, "root", 1)
+	child := newTestPID(system, "child", 2)
+	require.NoError(t, tree.addRootNode(root))
+	require.NoError(t, tree.addNode(root, child))
+
+	descendants := tree.descendants(child)
+	require.NotNil(t, descendants)
+	require.Empty(t, descendants)
+}
+
+func TestTreeNodeLookupMissing(t *testing.T) {
+	tree := newTree()
+	_, ok := tree.node("missing")
+	require.False(t, ok)
+}
+
+func TestTreeResetPreservesNoSender(t *testing.T) {
+	system, _ := NewActorSystem("TestSys")
+	impl, ok := system.(*actorSystem)
+	require.True(t, ok)
+	impl.noSender = newTestPID(system, "nosender", 0)
+	tree := newTree()
+	root := newTestPID(system, "root", 1)
+	child := newTestPID(system, "child", 2)
+
+	require.NoError(t, tree.addRootNode(root))
+	require.NoError(t, tree.addNode(root, child))
+	require.NotNil(t, tree.noSender)
+	noSender := tree.noSender
+
+	tree.reset()
+
+	require.EqualValues(t, 0, tree.count())
+	require.Equal(t, noSender, tree.noSender)
+	rootPID, ok := tree.root()
+	require.False(t, ok)
+	require.Nil(t, rootPID)
 }

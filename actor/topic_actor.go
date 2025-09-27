@@ -63,7 +63,7 @@ type topicActor struct {
 	processed *collection.Map[key, registry.Unit]
 	logger    log.Logger
 
-	cluster     cluster.Interface
+	cluster     cluster.Cluster
 	actorSystem ActorSystem
 	remoting    remote.Remoting
 }
@@ -169,7 +169,7 @@ func (x *topicActor) handlePublish(ctx *ReceiveContext) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				x.sendToRemoteSubscribers(cctx, remotePeers, actorName, messageID, topic, message, &wg)
+				x.sendToRemoteTopicActors(cctx, remotePeers, actorName, messageID, topic, message, &wg)
 			}()
 		}
 
@@ -212,7 +212,7 @@ func (x *topicActor) sendToLocalSubscribers(cctx context.Context, topic string, 
 	}
 }
 
-func (x *topicActor) sendToRemoteSubscribers(cctx context.Context, remotePeers []remotePeer, actorName, messageID, topic string, message *anypb.Any, wg *sync.WaitGroup) {
+func (x *topicActor) sendToRemoteTopicActors(cctx context.Context, remotePeers []remotePeer, actorName, messageID, topic string, message *anypb.Any, wg *sync.WaitGroup) {
 	if len(remotePeers) > 0 {
 		for _, peer := range remotePeers {
 			peer := peer
@@ -355,8 +355,8 @@ func (x *topicActor) handleTopicMessage(ctx *ReceiveContext) {
 
 // spawnTopicActor spawns a new topic actor
 func (x *actorSystem) spawnTopicActor(ctx context.Context) error {
-	// only start the topic actor when pubsub is enabled
-	if !x.pubsubEnabled.Load() {
+	// only start the topic actor when cluster is enabled or pubsub is enabled
+	if !x.clusterEnabled.Load() && !x.pubsubEnabled.Load() {
 		return nil
 	}
 

@@ -601,3 +601,15 @@ func (x *actorSystem) recreateGrain(ctx context.Context, serializedGrain *intern
 	// Register in the cluster
 	return x.putGrainOnCluster(process)
 }
+
+func (x *actorSystem) getWireGrains() ([]*internalpb.Grain, error) {
+	grains := make([]*internalpb.Grain, 0, x.grains.Len())
+	for _, grain := range x.grains.Values() {
+		wireGrain, err := grain.toWireGrain()
+		if err != nil {
+			return nil, err
+		}
+		grains = append(grains, wireGrain)
+	}
+	return grains, nil
+}

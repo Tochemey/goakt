@@ -42,7 +42,7 @@ import (
 type clusterSingletonManager struct {
 	logger  log.Logger
 	pid     *PID
-	cluster cluster.Interface
+	cluster cluster.Cluster
 }
 
 // ensure clusterSingleton implements the Actor interface
@@ -108,7 +108,7 @@ func (x *actorSystem) spawnSingletonManager(ctx context.Context) error {
 	return x.actors.addNode(x.systemGuardian, x.singletonManager)
 }
 
-func (x *actorSystem) spawnSingletonOnLeader(ctx context.Context, cl cluster.Interface, name string, actor Actor) error {
+func (x *actorSystem) spawnSingletonOnLeader(ctx context.Context, cl cluster.Cluster, name string, actor Actor) error {
 	peers, err := cl.Peers(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to spawn singleton actor: %w", err)

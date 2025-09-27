@@ -25,7 +25,7 @@
 package actor
 
 import (
-	"context"
+	"go.uber.org/multierr"
 
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/errors"
@@ -40,7 +40,7 @@ type deathWatch struct {
 	pid         *PID
 	logger      log.Logger
 	tree        *tree
-	cluster     cluster.Interface
+	cluster     cluster.Cluster
 	actorSystem ActorSystem
 }
 
@@ -90,17 +90,27 @@ func (x *deathWatch) handleTerminated(ctx *ReceiveContext) error {
 	msg := ctx.Message().(*goaktpb.Terminated)
 
 	actorID := address.From(msg.GetAddress()).String()
-	addr, _ := address.Parse(actorID)
-	actorName := addr.Name()
-
 	x.logger.Infof("%s freeing resource [actor=%s] from system", x.pid.Name(), actorID)
 
 	if node, ok := x.tree.node(actorID); ok {
+		watchedPID := node.value()
 		x.actorSystem.decreaseActorsCounter()
-		x.tree.deleteNode(node.value())
+		if watchedPID == nil {
+			x.logger.Infof("%s successfully free resource [actor=%s] from system", x.pid.Name(), actorID)
+			return nil
+		}
+
+		actorName := watchedPID.Name()
+		x.tree.deleteNode(watchedPID)
 		removeFromCluster := x.actorSystem.InCluster() && !isSystemName(actorName) && !x.actorSystem.isStopping()
+
 		if removeFromCluster {
-			if err := x.cluster.RemoveActor(context.WithoutCancel(ctx.Context()), node.value().Name()); err != nil {
+			ctx := ctx.withoutCancel()
+
+			rerr := x.actorSystem.removePeerActor(ctx, actorName)
+			cerr := x.cluster.RemoveActor(ctx, actorName)
+
+			if err := multierr.Combine(rerr, cerr); err != nil {
 				x.logger.Errorf("%s failed to remove [actor=%s] from cluster: %v", x.pid.Name(), actorID, err)
 				return errors.NewInternalError(err)
 			}

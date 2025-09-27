@@ -312,13 +312,14 @@ func TestGrain(t *testing.T) {
 	})
 	t.Run("With activation error when GetGrain in cluster mode returns error", func(t *testing.T) {
 		ctx := t.Context()
-		clmock := mocks.NewInterface(t)
+		clmock := mocks.NewCluster(t)
 		testSystem := &actorSystem{
 			cluster:       clmock,
 			clusterConfig: NewClusterConfig(),
 			logger:        log.DiscardLogger,
 			started:       atomic.NewBool(true),
 			shuttingDown:  atomic.NewBool(false),
+			locker:        &sync.RWMutex{},
 		}
 		testSystem.clusterEnabled.Store(true)
 
@@ -1406,6 +1407,20 @@ func TestRemoteActivateGrain_Failures(t *testing.T) {
 		require.Equal(t, connect.CodeInvalidArgument, cErr.Code())
 		u := cErr.Unwrap()
 		require.ErrorContains(t, u, gerrors.ErrInvalidHost.Error())
+	})
+
+	t.Run("toWireGrainEncodingError", func(t *testing.T) {
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+
+		depErr := errors.New("dependency marshal failure")
+		cfg := newGrainConfig(WithGrainDependencies(&MockFailingDependency{err: depErr}))
+		identity := newGrainIdentity(NewMockGrain(), "wire-error")
+		pid := newGrainPID(identity, NewMockGrain(), sys, cfg)
+
+		wire, wErr := pid.toWireGrain()
+		require.ErrorIs(t, wErr, depErr)
+		require.Nil(t, wire)
 	})
 
 	t.Run("recreateGrain failure (reserved name)", func(t *testing.T) {

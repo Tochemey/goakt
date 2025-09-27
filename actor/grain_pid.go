@@ -34,11 +34,15 @@ import (
 
 	"github.com/flowchartsman/retry"
 	"go.uber.org/atomic"
+	"go.uber.org/multierr"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
+	"github.com/tochemey/goakt/v3/internal/codec"
 	"github.com/tochemey/goakt/v3/internal/collection"
+	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/internal/ticker"
 	"github.com/tochemey/goakt/v3/log"
@@ -149,9 +153,16 @@ func (pid *grainPID) deactivate(ctx context.Context) error {
 		return gerrors.NewErrGrainDeactivationFailure(err)
 	}
 
-	pid.actorSystem.getGrains().Delete(pid.getIdentity().String())
-	if pid.actorSystem.InCluster() {
-		if err := pid.actorSystem.getCluster().RemoveGrain(ctx, pid.identity.String()); err != nil {
+	actorSystem := pid.actorSystem
+	identity := pid.getIdentity()
+	grainID := toWireGrainID(identity)
+
+	actorSystem.getGrains().Delete(identity.String())
+	if actorSystem.InCluster() {
+		rerr := actorSystem.removePeerGrain(ctx, grainID)
+		cerr := actorSystem.getCluster().RemoveGrain(ctx, pid.identity.String())
+
+		if err := multierr.Combine(rerr, cerr); err != nil {
 			pid.logger.Errorf("failed to remove grain %s from cluster: %v", pid.identity.String(), err)
 			return gerrors.NewErrGrainDeactivationFailure(err)
 		}
@@ -308,4 +319,24 @@ func (pid *grainPID) deactivationLoop() {
 	}()
 
 	<-tickerStopSig
+}
+
+func (pid *grainPID) toWireGrain() (*internalpb.Grain, error) {
+	dependencies, err := codec.EncodeDependencies(pid.dependencies.Values()...)
+	if err != nil {
+		return nil, err
+	}
+
+	return &internalpb.Grain{
+		GrainId: &internalpb.GrainId{
+			Kind:  pid.identity.Kind(),
+			Name:  pid.identity.Name(),
+			Value: pid.identity.String(),
+		},
+		Host:              pid.actorSystem.Host(),
+		Port:              int32(pid.actorSystem.Port()),
+		Dependencies:      dependencies,
+		ActivationTimeout: durationpb.New(pid.config.initTimeout.Load()),
+		ActivationRetries: pid.config.initMaxRetries.Load(),
+	}, nil
 }

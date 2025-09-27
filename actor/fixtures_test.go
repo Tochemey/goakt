@@ -1243,6 +1243,22 @@ func (a *MockFIFO) Done() <-chan struct{} {
 	return a.done
 }
 
+type MockFailingDependency struct {
+	err error
+}
+
+func (d *MockFailingDependency) ID() string {
+	return "failing-dependency"
+}
+
+func (d *MockFailingDependency) MarshalBinary() ([]byte, error) {
+	return nil, d.err
+}
+
+func (d *MockFailingDependency) UnmarshalBinary(_ []byte) error {
+	return nil
+}
+
 // //////////////////////////////////////// CLUSTER PROVIDERS MOCKS //////////////////////////////////////
 type providerFactory func(t *testing.T, host string, discoveryPort int) discovery.Provider
 
@@ -1412,6 +1428,7 @@ func testSystem(t *testing.T, providerFactory providerFactory, opts ...testClust
 	// base options
 	options := []Option{
 		WithLogger(logger),
+		WithShutdownTimeout(3 * time.Minute),
 		WithCluster(
 			NewClusterConfig().
 				WithKinds(new(MockActor), new(MockEntity), new(MockGrainActor)).
@@ -1423,7 +1440,6 @@ func testSystem(t *testing.T, providerFactory providerFactory, opts ...testClust
 				WithDiscoveryPort(discoveryPort).
 				WithBootstrapTimeout(time.Second).
 				WithClusterStateSyncInterval(300 * time.Millisecond).
-				WithPeersStateSyncInterval(500 * time.Millisecond).
 				WithDiscovery(provider)),
 	}
 

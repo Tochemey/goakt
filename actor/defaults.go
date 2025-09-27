@@ -36,11 +36,13 @@ const (
 	// DefaultInitMaxRetries defines the default value for retrying actor initialization
 	DefaultInitMaxRetries = 5
 	// DefaultShutdownTimeout defines the default shutdown timeout
-	DefaultShutdownTimeout = time.Minute
+	DefaultShutdownTimeout = 3 * time.Minute
 	// DefaultInitTimeout defines the default init timeout
 	DefaultInitTimeout = time.Second
-	// DefaultPeerStateSyncInterval defines the default peer state synchronization interval
-	DefaultPeerStateSyncInterval = 10 * time.Second
+	// DefaultPublishStateTimeout defines the default state publication timeout
+	// This is the maximum time to wait for a state to be published to the cluster
+	// before timing out when the actor system is shutting down
+	DefaultPublishStateTimeout = time.Minute
 	// DefaultAskTimeout defines the default ask timeout
 	DefaultAskTimeout = 5 * time.Second
 	// DefaultMaxReadFrameSize defines the default HTTP maximum read frame size

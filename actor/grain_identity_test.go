@@ -104,4 +104,10 @@ func TestIdentity(t *testing.T) {
 		require.False(t, identity1.Equal(identity2), "expected identity to not equal nil")
 		require.Empty(t, identity2.String())
 	})
+
+	t.Run("With Nil identity toWireGrainID", func(t *testing.T) {
+		var identity *GrainIdentity
+		wireID := toWireGrainID(identity)
+		require.Nil(t, wireID)
+	})
 }
