@@ -37,7 +37,7 @@ const (
 	singletonManagerType
 	topicActorType
 	noSenderType
-	stateWriterType
+	peersStatesWriterType
 )
 
 const (
@@ -50,16 +50,16 @@ const (
 
 var (
 	reservedNames = map[nameType]string{
-		routerType:           "GoAktRouter",
-		rebalancerType:       "GoAktRebalancer",
-		rootGuardianType:     "GoAktRootGuardian",
-		userGuardianType:     "GoAktUserGuardian",
-		systemGuardianType:   "GoAktSystemGuardian",
-		deathWatchType:       "GoAktDeathWatch",
-		deadletterType:       "GoAktDeadletter",
-		singletonManagerType: "GoAktSingletonManager",
-		topicActorType:       "GoAktTopicActor",
-		noSenderType:         "GoAktNoSender",
-		stateWriterType:      "GoAktStateWriter",
+		routerType:            "GoAktRouter",
+		rebalancerType:        "GoAktRebalancer",
+		rootGuardianType:      "GoAktRootGuardian",
+		userGuardianType:      "GoAktUserGuardian",
+		systemGuardianType:    "GoAktSystemGuardian",
+		deathWatchType:        "GoAktDeathWatch",
+		deadletterType:        "GoAktDeadletter",
+		singletonManagerType:  "GoAktSingletonManager",
+		topicActorType:        "GoAktTopicActor",
+		noSenderType:          "GoAktNoSender",
+		peersStatesWriterType: "GoAktPeerStatesWriter",
 	}
 )

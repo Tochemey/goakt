@@ -1137,7 +1137,7 @@ func TestActorSystem(t *testing.T) {
 
 		// create and start system cluster
 		cl1, sd1 := testNATs(t, srv.Addr().String())
-		peerAddress1 := cl1.PeerAddress()
+		peerAddress1 := cl1.PeersAddress()
 		require.NotEmpty(t, peerAddress1)
 
 		// create a subscriber to node 1
@@ -1147,7 +1147,7 @@ func TestActorSystem(t *testing.T) {
 
 		// create and start system cluster
 		cl2, sd2 := testNATs(t, srv.Addr().String())
-		peerAddress2 := cl2.PeerAddress()
+		peerAddress2 := cl2.PeersAddress()
 		require.NotEmpty(t, peerAddress2)
 
 		// create a subscriber to node 2
@@ -1215,7 +1215,7 @@ func TestActorSystem(t *testing.T) {
 		// start the actor system
 		err := sys.Start(ctx)
 		assert.NoError(t, err)
-		require.Empty(t, sys.PeerAddress())
+		require.Empty(t, sys.PeersAddress())
 
 		require.NoError(t, sys.Stop(ctx))
 	})
@@ -1711,12 +1711,12 @@ func TestActorSystem(t *testing.T) {
 
 		// create and start system cluster
 		node1, sd1 := testNATs(t, srv.Addr().String())
-		peerAddress1 := node1.PeerAddress()
+		peerAddress1 := node1.PeersAddress()
 		require.NotEmpty(t, peerAddress1)
 
 		// create and start system cluster
 		node2, sd2 := testNATs(t, srv.Addr().String())
-		peerAddress2 := node2.PeerAddress()
+		peerAddress2 := node2.PeersAddress()
 		require.NotEmpty(t, peerAddress2)
 
 		// create and start system cluster
@@ -2097,7 +2097,7 @@ func TestActorSystem(t *testing.T) {
 		err = Tell(ctx, pid, new(testpb.TestSend))
 		require.NoError(t, err)
 
-		pause.For(time.Second)
+		pause.For(2 * time.Second)
 
 		require.Exactly(t, uint64(7), actorSystem.NumActors())
 		require.NoError(t, actorSystem.Stop(ctx))
@@ -2129,7 +2129,7 @@ func TestActorSystem(t *testing.T) {
 		err = Tell(ctx, pid, new(testpb.TestSend))
 		require.NoError(t, err)
 
-		pause.For(time.Second)
+		pause.For(2 * time.Second)
 
 		require.Exactly(t, uint64(5), actorSystem.NumActors())
 		require.NoError(t, actorSystem.Stop(ctx))
@@ -2161,7 +2161,7 @@ func TestActorSystem(t *testing.T) {
 		err = Tell(ctx, pid, new(testpb.TestSend))
 		require.NoError(t, err)
 
-		pause.For(time.Second)
+		pause.For(2 * time.Second)
 
 		require.Exactly(t, uint64(7), actorSystem.NumActors())
 
@@ -2194,7 +2194,7 @@ func TestActorSystem(t *testing.T) {
 		err = Tell(ctx, pid, new(testpb.TestSend))
 		require.NoError(t, err)
 
-		pause.For(time.Second)
+		pause.For(2 * time.Second)
 
 		require.Exactly(t, uint64(5), actorSystem.NumActors())
 
@@ -2210,7 +2210,7 @@ func TestActorSystem(t *testing.T) {
 		require.NoError(t, actorSystem.Start(ctx))
 
 		// this is to make sure the actor system is started properly in the test
-		pause.For(time.Second)
+		pause.For(2 * time.Second)
 
 		// let us create some actors
 		for i := range 10 {

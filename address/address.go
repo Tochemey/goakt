@@ -117,6 +117,32 @@ func New(name, system string, host string, port int) *Address {
 	}
 }
 
+// NewWithParent creates a new Address and optionally sets its parent.
+//
+// It behaves like New(name, system, host, port) and then, if parent is non-nil,
+// assigns the parent's underlying protobuf message to the Parent field. When
+// parent is nil, the Parent is set to NoSender. A fresh opaque ID is generated
+// for the new Address.
+//
+// This constructor does not validate inputs; call Validate on the returned
+// Address. In particular, when a parent is set, Validate ensures that:
+//   - the parent belongs to the same actor system (case-insensitive),
+//   - the parent has the same host and port,
+//   - the parent name differs from the child name,
+//
+// and that all other invariants (system/name syntax, TCP address) hold.
+//
+// Note that the Parent field is not deep-copied. The underlying protobuf
+// message is shared with the provided parent; mutating one will reflect in the
+// other where they reference the same message.
+//
+// Example:
+//
+//	parent := New("parent", "orders", "127.0.0.1", 9000)
+//	child := NewWithParent("child", "orders", "127.0.0.1", 9000, parent)
+//	if err := child.Validate(); err != nil {
+//	  // handle invalid address
+//	}
 func NewWithParent(name, system, host string, port int, parent *Address) *Address {
 	addr := New(name, system, host, port)
 	if parent != nil {
