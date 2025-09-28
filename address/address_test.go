@@ -34,6 +34,98 @@ import (
 	"github.com/tochemey/goakt/v3/goaktpb"
 )
 
+func TestAddressValidate(t *testing.T) {
+	t.Run("No sender is valid", func(t *testing.T) {
+		addr := NoSender()
+		assert.NoError(t, addr.Validate())
+	})
+
+	t.Run("Valid address passes", func(t *testing.T) {
+		addr := New("name", "system", "host", 1234)
+		assert.NoError(t, addr.Validate())
+	})
+
+	t.Run("Invalid TCP endpoint", func(t *testing.T) {
+		addr := New("name", "system", "", 1234)
+		err := addr.Validate()
+		assert.Error(t, err)
+		assert.ErrorContains(t, err, "invalid address")
+	})
+
+	t.Run("Missing system", func(t *testing.T) {
+		addr := New("name", "", "host", 1234)
+		err := addr.Validate()
+		assert.Error(t, err)
+		assert.ErrorContains(t, err, "the [system] is required")
+	})
+
+	t.Run("Missing name", func(t *testing.T) {
+		addr := New("", "system", "host", 1234)
+		err := addr.Validate()
+		assert.Error(t, err)
+		assert.ErrorContains(t, err, "the [name] is required")
+	})
+
+	t.Run("Invalid system pattern", func(t *testing.T) {
+		addr := New("name", "-system", "host", 1234)
+		err := addr.Validate()
+		assert.Error(t, err)
+		assert.ErrorContains(t, err, "must contain only word characters")
+	})
+
+	t.Run("Invalid name pattern", func(t *testing.T) {
+		addr := New("invalid name", "system", "host", 1234)
+		err := addr.Validate()
+		assert.Error(t, err)
+		assert.ErrorContains(t, err, "must contain only word characters")
+	})
+
+	t.Run("Valid parent with different case system passes", func(t *testing.T) {
+		parent := New("parent", "SYSTEM", "host", 1234)
+		child := NewWithParent("child", "system", "host", 1234, parent)
+		assert.NoError(t, child.Validate())
+	})
+
+	t.Run("Invalid parent", func(t *testing.T) {
+		parent := New("", "system", "host", 1234)
+		child := NewWithParent("child", "system", "host", 1234, parent)
+		err := child.Validate()
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, ErrInvalidParent)
+		assert.ErrorContains(t, err, "the [name] is required")
+	})
+
+	t.Run("Parent system mismatch", func(t *testing.T) {
+		parent := New("parent", "other", "host", 1234)
+		child := NewWithParent("child", "system", "host", 1234, parent)
+		err := child.Validate()
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, ErrInvalidActorSystem)
+	})
+
+	t.Run("Parent host mismatch", func(t *testing.T) {
+		parent := New("parent", "system", "otherhost", 4321)
+		child := NewWithParent("child", "system", "host", 1234, parent)
+		err := child.Validate()
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, ErrInvalidHostAddress)
+	})
+
+	t.Run("Parent name reuse", func(t *testing.T) {
+		parent := New("child", "system", "host", 1234)
+		child := NewWithParent("child", "system", "host", 1234, parent)
+		err := child.Validate()
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, ErrInvalidName)
+	})
+
+	t.Run("With actor name too long", func(t *testing.T) {
+		addr := New(strings.Repeat("a", 256), "system", "host", 1234)
+		err := addr.Validate()
+		assert.Error(t, err)
+	})
+}
+
 func TestAddress(t *testing.T) {
 	t.Run("With happy path", func(t *testing.T) {
 		expected := "goakt://system@host:1234/name"
@@ -48,50 +140,6 @@ func TestAddress(t *testing.T) {
 		assert.Equal(t, expected, addr.String())
 	})
 
-	t.Run("With Host change", func(t *testing.T) {
-		expected := "goakt://system@host:1234/name"
-		addr := New("name", "system", "host", 1234)
-		assert.Equal(t, "host:1234", addr.HostPort())
-		assert.Equal(t, "host", addr.Host())
-		assert.EqualValues(t, 1234, addr.Port())
-		assert.Equal(t, expected, addr.String())
-
-		// change the host
-		actual := addr.WithHost("localhost")
-		expected = "goakt://system@localhost:1234/name"
-		assert.Equal(t, "localhost:1234", actual.HostPort())
-		assert.Equal(t, "localhost", actual.Host())
-		assert.EqualValues(t, 1234, actual.Port())
-		assert.Equal(t, expected, actual.String())
-	})
-
-	t.Run("With port change", func(t *testing.T) {
-		addr := New("name", "system", "host", 1234)
-		expected := "goakt://system@host:1234/name"
-		assert.Equal(t, expected, addr.String())
-		actual := addr.WithPort(3000)
-		assert.NotNil(t, actual)
-		expected = "goakt://system@host:3000/name"
-		assert.Equal(t, expected, actual.String())
-	})
-
-	t.Run("With Actor System change", func(t *testing.T) {
-		addr := New("name", "system", "host", 1234)
-		expected := "goakt://system@host:1234/name"
-		assert.Equal(t, expected, addr.String())
-		actual := addr.WithSystem("MySyS")
-		assert.NotNil(t, actual)
-		expected = "goakt://MySyS@host:1234/name"
-		assert.Equal(t, expected, actual.String())
-	})
-	t.Run("With Default", func(t *testing.T) {
-		addr := NoSender()
-		assert.NoError(t, addr.Validate())
-
-		addr.WithHost("localhost").WithPort(123).WithSystem("system").WithName("name")
-		assert.NoError(t, addr.Validate())
-		assert.Equal(t, "goakt://system@localhost:123/name", addr.String())
-	})
 	t.Run("With marshaling", func(t *testing.T) {
 		addr := New("name", "system", "host", 1234)
 
@@ -113,12 +161,6 @@ func TestAddress(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("With actor name too long", func(t *testing.T) {
-		addr := New(strings.Repeat("a", 256), "system", "host", 1234)
-		err := addr.Validate()
-		assert.Error(t, err)
-	})
-
 	t.Run("Equals returns false when to be compared to is nil", func(t *testing.T) {
 		addr := New("name", "system", "host", 1234)
 		assert.False(t, addr.Equals(nil))
@@ -126,7 +168,7 @@ func TestAddress(t *testing.T) {
 
 	t.Run("With Parent", func(t *testing.T) {
 		parent := New("parent", "system", "host", 1234)
-		child := New("child", "system", "host", 1234).WithParent(parent)
+		child := NewWithParent("child", "system", "host", 1234, parent)
 		assert.NotNil(t, child.Parent())
 		assert.True(t, child.Parent().Equals(parent))
 		assert.True(t, proto.Equal(child.Parent(), parent.Address))

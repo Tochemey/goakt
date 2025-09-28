@@ -183,12 +183,12 @@ func TestSpawn(t *testing.T) {
 
 		// create and start system cluster
 		node1, sd1 := testNATs(t, srv.Addr().String())
-		peerAddress1 := node1.PeerAddress()
+		peerAddress1 := node1.PeersAddress()
 		require.NotEmpty(t, peerAddress1)
 
 		// create and start system cluster
 		node2, sd2 := testNATs(t, srv.Addr().String())
-		peerAddress2 := node2.PeerAddress()
+		peerAddress2 := node2.PeersAddress()
 		require.NotEmpty(t, peerAddress2)
 
 		pause.For(time.Second)
@@ -584,7 +584,7 @@ func TestSpawn(t *testing.T) {
 
 		// create and start system cluster
 		node, sd := testNATs(t, srv.Addr().String())
-		peerAddress1 := node.PeerAddress()
+		peerAddress1 := node.PeersAddress()
 		require.NotEmpty(t, peerAddress1)
 		require.NotNil(t, sd)
 
@@ -609,19 +609,19 @@ func TestSpawn(t *testing.T) {
 
 		// create and start system cluster
 		node1, sd1 := testNATs(t, srv.Addr().String())
-		peerAddress1 := node1.PeerAddress()
+		peerAddress1 := node1.PeersAddress()
 		require.NotEmpty(t, peerAddress1)
 		require.NotNil(t, sd1)
 
 		// create and start system cluster
 		node2, sd2 := testNATs(t, srv.Addr().String())
-		peerAddress2 := node2.PeerAddress()
+		peerAddress2 := node2.PeersAddress()
 		require.NotEmpty(t, peerAddress2)
 		require.NotNil(t, sd2)
 
 		// create and start system cluster
 		node3, sd3 := testNATs(t, srv.Addr().String())
-		peerAddress3 := node3.PeerAddress()
+		peerAddress3 := node3.PeersAddress()
 		require.NotEmpty(t, peerAddress3)
 		require.NotNil(t, sd3)
 
@@ -705,19 +705,19 @@ func TestSpawn(t *testing.T) {
 
 		// create and start system cluster
 		node1, sd1 := testNATs(t, srv.Addr().String())
-		peerAddress1 := node1.PeerAddress()
+		peerAddress1 := node1.PeersAddress()
 		require.NotEmpty(t, peerAddress1)
 		require.NotNil(t, sd1)
 
 		// create and start system cluster
 		node2, sd2 := testNATs(t, srv.Addr().String())
-		peerAddress2 := node2.PeerAddress()
+		peerAddress2 := node2.PeersAddress()
 		require.NotEmpty(t, peerAddress2)
 		require.NotNil(t, sd2)
 
 		// create and start system cluster
 		node3, sd3 := testNATs(t, srv.Addr().String())
-		peerAddress3 := node3.PeerAddress()
+		peerAddress3 := node3.PeersAddress()
 		require.NotEmpty(t, peerAddress3)
 		require.NotNil(t, sd3)
 
@@ -756,19 +756,19 @@ func TestSpawn(t *testing.T) {
 
 		// create and start system cluster
 		node1, sd1 := testNATs(t, srv.Addr().String())
-		peerAddress1 := node1.PeerAddress()
+		peerAddress1 := node1.PeersAddress()
 		require.NotEmpty(t, peerAddress1)
 		require.NotNil(t, sd1)
 
 		// create and start system cluster
 		node2, sd2 := testNATs(t, srv.Addr().String())
-		peerAddress2 := node2.PeerAddress()
+		peerAddress2 := node2.PeersAddress()
 		require.NotEmpty(t, peerAddress2)
 		require.NotNil(t, sd2)
 
 		// create and start system cluster
 		node3, sd3 := testNATs(t, srv.Addr().String())
-		peerAddress3 := node3.PeerAddress()
+		peerAddress3 := node3.PeersAddress()
 		require.NotEmpty(t, peerAddress3)
 		require.NotNil(t, sd3)
 
@@ -807,19 +807,19 @@ func TestSpawn(t *testing.T) {
 
 		// create and start system cluster
 		node1, sd1 := testNATs(t, srv.Addr().String())
-		peerAddress1 := node1.PeerAddress()
+		peerAddress1 := node1.PeersAddress()
 		require.NotEmpty(t, peerAddress1)
 		require.NotNil(t, sd1)
 
 		// create and start system cluster
 		node2, sd2 := testNATs(t, srv.Addr().String())
-		peerAddress2 := node2.PeerAddress()
+		peerAddress2 := node2.PeersAddress()
 		require.NotEmpty(t, peerAddress2)
 		require.NotNil(t, sd2)
 
 		// create and start system cluster
 		node3, sd3 := testNATs(t, srv.Addr().String())
-		peerAddress3 := node3.PeerAddress()
+		peerAddress3 := node3.PeersAddress()
 		require.NotEmpty(t, peerAddress3)
 		require.NotNil(t, sd3)
 
@@ -880,19 +880,19 @@ func TestSpawn(t *testing.T) {
 
 		// create and start system cluster
 		node1, sd1 := testNATs(t, srv.Addr().String(), withMockCompression(remote.BrotliCompression))
-		peerAddress1 := node1.PeerAddress()
+		peerAddress1 := node1.PeersAddress()
 		require.NotEmpty(t, peerAddress1)
 		require.NotNil(t, sd1)
 
 		// create and start system cluster
 		node2, sd2 := testNATs(t, srv.Addr().String(), withMockCompression(remote.BrotliCompression))
-		peerAddress2 := node2.PeerAddress()
+		peerAddress2 := node2.PeersAddress()
 		require.NotEmpty(t, peerAddress2)
 		require.NotNil(t, sd2)
 
 		// create and start system cluster
 		node3, sd3 := testNATs(t, srv.Addr().String(), withMockCompression(remote.BrotliCompression))
-		peerAddress3 := node3.PeerAddress()
+		peerAddress3 := node3.PeersAddress()
 		require.NotEmpty(t, peerAddress3)
 		require.NotNil(t, sd3)
 
@@ -935,19 +935,19 @@ func TestSpawn(t *testing.T) {
 
 		// create and start system cluster
 		node1, sd1 := testNATs(t, srv.Addr().String(), withMockCompression(remote.ZstdCompression))
-		peerAddress1 := node1.PeerAddress()
+		peerAddress1 := node1.PeersAddress()
 		require.NotEmpty(t, peerAddress1)
 		require.NotNil(t, sd1)
 
 		// create and start system cluster
 		node2, sd2 := testNATs(t, srv.Addr().String(), withMockCompression(remote.ZstdCompression))
-		peerAddress2 := node2.PeerAddress()
+		peerAddress2 := node2.PeersAddress()
 		require.NotEmpty(t, peerAddress2)
 		require.NotNil(t, sd2)
 
 		// create and start system cluster
 		node3, sd3 := testNATs(t, srv.Addr().String(), withMockCompression(remote.ZstdCompression))
-		peerAddress3 := node3.PeerAddress()
+		peerAddress3 := node3.PeersAddress()
 		require.NotEmpty(t, peerAddress3)
 		require.NotNil(t, sd3)
 
@@ -990,19 +990,19 @@ func TestSpawn(t *testing.T) {
 
 		// create and start system cluster
 		node1, sd1 := testNATs(t, srv.Addr().String(), withMockCompression(remote.GzipCompression))
-		peerAddress1 := node1.PeerAddress()
+		peerAddress1 := node1.PeersAddress()
 		require.NotEmpty(t, peerAddress1)
 		require.NotNil(t, sd1)
 
 		// create and start system cluster
 		node2, sd2 := testNATs(t, srv.Addr().String(), withMockCompression(remote.GzipCompression))
-		peerAddress2 := node2.PeerAddress()
+		peerAddress2 := node2.PeersAddress()
 		require.NotEmpty(t, peerAddress2)
 		require.NotNil(t, sd2)
 
 		// create and start system cluster
 		node3, sd3 := testNATs(t, srv.Addr().String(), withMockCompression(remote.GzipCompression))
-		peerAddress3 := node3.PeerAddress()
+		peerAddress3 := node3.PeersAddress()
 		require.NotEmpty(t, peerAddress3)
 		require.NotNil(t, sd3)
 

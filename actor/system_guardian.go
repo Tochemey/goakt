@@ -107,7 +107,12 @@ func (x *systemGuardian) completeRebalancing(msg *internalpb.RebalanceComplete) 
 	x.logger.Infof("%s rebalancing completed", x.pid.Name())
 
 	x.logger.Infof("%s removing left peer=(%s) from cache", x.pid.Name(), msg.GetPeerAddress())
-	if err := x.pid.ActorSystem().getCluster().DeleteState(context.Background(), msg.GetPeerAddress()); err != nil {
+	stateWriter := x.pid.ActorSystem().getPeerStatesWriter()
+	noSender := x.pid.ActorSystem().NoSender()
+	ctx := context.Background()
+
+	deleteMsg := &internalpb.DeletePeerState{PeerAddress: msg.GetPeerAddress()}
+	if _, err := noSender.Ask(ctx, stateWriter, deleteMsg, DefaultAskTimeout); err != nil {
 		x.logger.Errorf("%s failed to remove left peer=(%s) from cache", x.pid.Name(), msg.GetPeerAddress())
 		return err
 	}

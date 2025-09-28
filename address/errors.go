@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025 Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,44 +22,23 @@
  * SOFTWARE.
  */
 
-package actor
+package address
 
-type nameType int
-
-const (
-	routerType nameType = iota
-	rebalancerType
-	rootGuardianType
-	userGuardianType
-	systemGuardianType
-	deathWatchType
-	deadletterType
-	singletonManagerType
-	topicActorType
-	noSenderType
-	peersStatesWriterType
-)
-
-const (
-	// eventsTopic defines the events topic
-	eventsTopic = "topic.events"
-
-	reservedNamesPrefix = "GoAkt"
-	routeeNamePrefix    = "GoAktRoutee"
-)
+import "errors"
 
 var (
-	reservedNames = map[nameType]string{
-		routerType:            "GoAktRouter",
-		rebalancerType:        "GoAktRebalancer",
-		rootGuardianType:      "GoAktRootGuardian",
-		userGuardianType:      "GoAktUserGuardian",
-		systemGuardianType:    "GoAktSystemGuardian",
-		deathWatchType:        "GoAktDeathWatch",
-		deadletterType:        "GoAktDeadletter",
-		singletonManagerType:  "GoAktSingletonManager",
-		topicActorType:        "GoAktTopicActor",
-		noSenderType:          "GoAktNoSender",
-		peersStatesWriterType: "GoAktPeerStatesWriter",
-	}
+	// ErrInvalidParent is returned when the parent address is invalid.
+	ErrInvalidParent = errors.New("parent address is invalid")
+
+	// ErrInvalidKinds is returned when the given address kind and its parent kind are different.
+	ErrInvalidKinds = errors.New("child and parent kinds must be the same")
+
+	// ErrInvalidHostAddress is returned when the given address host and its parent host are different.
+	ErrInvalidHostAddress = errors.New("child and parent host addresses must be the same")
+
+	// ErrInvalidName is returned when the given address name and its parent name are the same.
+	ErrInvalidName = errors.New("child name and parent name must be different")
+
+	// ErrInvalidActorSystem is returned when the given address actor system and its parent actor system are different.
+	ErrInvalidActorSystem = errors.New("child and parent actor systems must be the same")
 )

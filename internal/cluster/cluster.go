@@ -29,9 +29,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
-	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -113,10 +110,6 @@ type Cluster interface {
 	PutKind(ctx context.Context, kind string) error
 	// RemoveKind deletes an actor kind mapping.
 	RemoveKind(ctx context.Context, kind string) error
-	// GetState returns the peer state for the specified address.
-	GetState(ctx context.Context, peerAddress string) (*internalpb.PeerState, error)
-	// DeleteState removes any stored state for the given peer address.
-	DeleteState(ctx context.Context, peerAddress string) error
 	// Events exposes the event stream describing membership changes.
 	Events() <-chan *Event
 	// Peers lists known cluster members excluding the local node.
@@ -133,10 +126,6 @@ type Cluster interface {
 	DeleteJobKey(ctx context.Context, jobID string) error
 	// JobKey retrieves stored job metadata.
 	JobKey(ctx context.Context, jobID string) ([]byte, error)
-	PersistPeerActor(ctx context.Context, state *internalpb.PersistPeerActor) error
-	PersistPeerGrain(ctx context.Context, state *internalpb.PersistPeerGrain) error
-	RemovePeerActor(ctx context.Context, actorName, peerAddress string) error
-	RemovePeerGrain(ctx context.Context, grainID *internalpb.GrainId, peerAddress string) error
 }
 
 // cluster implements the Cluster interface backed by an Olric unified
@@ -168,17 +157,15 @@ type cluster struct {
 	client olric.Client
 	dmap   olric.DMap
 
-	events         chan *Event
-	eventsLock     *sync.Mutex
-	peersStateLock *sync.Mutex
-	subscriber     *redis.PubSub
-	messages       <-chan *redis.Message
+	events     chan *Event
+	eventsLock *sync.Mutex
+	subscriber *redis.PubSub
+	messages   <-chan *redis.Message
 
 	nodeJoinedEventsFilter goset.Set[string]
 	nodeLeftEventsFilter   goset.Set[string]
 
 	running *atomic.Bool
-	store   Store
 }
 
 var _ Cluster = (*cluster)(nil)
@@ -189,13 +176,6 @@ func New(name string, disco discovery.Provider, node *discovery.Node, opts ...Co
 	config := defaultConfig()
 	for _, opt := range opts {
 		opt(config)
-	}
-
-	// Initialize the persistent store
-	store, err := NewBoltStore()
-	if err != nil {
-		config.logger.Fatalf("failed to create boltdb store: %v", err)
-		os.Exit(1)
 	}
 
 	return &cluster{
@@ -218,11 +198,9 @@ func New(name string, disco discovery.Provider, node *discovery.Node, opts ...Co
 		tlsInfo:                config.tlsInfo,
 		events:                 make(chan *Event, defaultEventsBufSize),
 		eventsLock:             &sync.Mutex{},
-		peersStateLock:         &sync.Mutex{},
 		nodeJoinedEventsFilter: goset.NewSet[string](),
 		nodeLeftEventsFilter:   goset.NewSet[string](),
 		running:                atomic.NewBool(false),
-		store:                  store,
 	}
 }
 
@@ -304,11 +282,6 @@ func (x *cluster) Stop(ctx context.Context) error {
 	close(x.events)
 	x.events = nil
 	x.eventsLock.Unlock()
-
-	if err := x.store.Close(); err != nil {
-		x.logger.Errorf("failed to close cluster store: %v", err)
-		return err
-	}
 
 	x.logger.Infof("cluster engine (%s) stopped", x.name)
 	return nil
@@ -611,35 +584,6 @@ func (x *cluster) RemoveKind(ctx context.Context, kind string) error {
 	return nil
 }
 
-// GetState returns the peer state tracked for the requested address.
-func (x *cluster) GetState(ctx context.Context, peerAddress string) (*internalpb.PeerState, error) {
-	if !x.running.Load() {
-		return nil, ErrEngineNotRunning
-	}
-
-	x.mu.RLock()
-	defer x.mu.RUnlock()
-
-	peerState, ok := x.store.GetPeerState(ctx, peerAddress)
-	if !ok {
-		return nil, ErrPeerSyncNotFound
-	}
-
-	return peerState, nil
-}
-
-// DeleteState removes any stored state for the given peer address.
-func (x *cluster) DeleteState(ctx context.Context, peerAddress string) error {
-	if !x.running.Load() {
-		return ErrEngineNotRunning
-	}
-
-	x.mu.RLock()
-	defer x.mu.RUnlock()
-
-	return x.store.DeletePeerState(ctx, peerAddress)
-}
-
 // Events returns the stream of cluster membership events consumed from the
 // underlying pub-sub channel.
 func (x *cluster) Events() <-chan *Event {
@@ -762,138 +706,6 @@ func (x *cluster) JobKey(ctx context.Context, jobID string) ([]byte, error) {
 	defer x.mu.RUnlock()
 
 	return x.getRecord(ctx, namespaceJobs, jobID)
-}
-
-// PersistPeerActor implements Cluster.
-func (x *cluster) PersistPeerActor(ctx context.Context, state *internalpb.PersistPeerActor) error {
-	if !x.running.Load() {
-		return ErrEngineNotRunning
-	}
-
-	x.peersStateLock.Lock()
-	defer x.peersStateLock.Unlock()
-
-	peerAddress := net.JoinHostPort(state.GetHost(), strconv.Itoa(int(state.GetPeersPort())))
-	// ignore self
-	if x.node.PeersAddress() == peerAddress {
-		return nil
-	}
-
-	x.logger.Infof("(%s) processing peer=(%s)'s state", x.node.PeersAddress(), peerAddress)
-	peerState := x.getOrInitPeerState(ctx, state.GetHost(), state.GetRemotingPort(), state.GetPeersPort())
-	actors := peerState.GetActors()
-	if actors == nil {
-		actors = map[string]*internalpb.Actor{}
-	}
-
-	key := state.GetActor().GetAddress().GetName()
-	actors[key] = state.GetActor()
-	peerState.Actors = actors
-
-	x.logger.Debugf("(%s) persisting peer=(%s)'s state: [Actors count=(%d), Grains count=(%d)]", x.node.PeersAddress(), peerAddress, len(peerState.GetActors()), len(peerState.GetGrains()))
-	if err := x.store.PersistPeerState(ctx, peerState); err != nil {
-		return fmt.Errorf("persist peer state (actors) [%s]: %w", peerAddress, err)
-	}
-
-	x.logger.Infof("(%s) processed peer=(%s) successfully ", x.node.PeersAddress(), peerAddress)
-	return nil
-}
-
-// PersistPeerGrain implements Cluster.
-func (x *cluster) PersistPeerGrain(ctx context.Context, state *internalpb.PersistPeerGrain) error {
-	if !x.running.Load() {
-		return ErrEngineNotRunning
-	}
-
-	x.peersStateLock.Lock()
-	defer x.peersStateLock.Unlock()
-
-	peerAddress := net.JoinHostPort(state.GetHost(), strconv.Itoa(int(state.GetPeersPort())))
-	// ignore self
-	if x.node.PeersAddress() == peerAddress {
-		return nil
-	}
-
-	x.logger.Infof("(%s) processing peer=(%s)'s state", x.node.PeersAddress(), peerAddress)
-	peerState := x.getOrInitPeerState(ctx, state.GetHost(), state.GetRemotingPort(), state.GetPeersPort())
-	grains := peerState.GetGrains()
-	if grains == nil {
-		grains = map[string]*internalpb.Grain{}
-	}
-
-	key := state.GetGrain().GetGrainId().GetValue()
-	grains[key] = state.GetGrain()
-	peerState.Grains = grains
-
-	x.logger.Debugf("(%s) persisting peer=(%s)'s state: [Actors count=(%d), Grains count=(%d)]", x.node.PeersAddress(), peerAddress, len(peerState.GetActors()), len(peerState.GetGrains()))
-	if err := x.store.PersistPeerState(ctx, peerState); err != nil {
-		return fmt.Errorf("persist peer state (grains) [%s]: %w", peerAddress, err)
-	}
-
-	x.logger.Infof("(%s) processed peer=(%s) successfully ", x.node.PeersAddress(), peerAddress)
-	return nil
-}
-
-// RemovePeerActor implements Cluster.
-func (x *cluster) RemovePeerActor(ctx context.Context, actorName string, peerAddress string) error {
-	if !x.running.Load() {
-		return ErrEngineNotRunning
-	}
-
-	x.peersStateLock.Lock()
-	defer x.peersStateLock.Unlock()
-
-	// ignore self
-	if x.node.PeersAddress() == peerAddress {
-		return nil
-	}
-
-	peerState, ok := x.store.GetPeerState(ctx, peerAddress)
-	if !ok {
-		return nil
-	}
-
-	actors := peerState.GetActors()
-	delete(actors, actorName)
-
-	x.logger.Debugf("(%s) persisting peer=(%s)'s state: [Actors count=(%d), Grains count=(%d)]", x.node.PeersAddress(), peerAddress, len(peerState.GetActors()), len(peerState.GetGrains()))
-	if err := x.store.PersistPeerState(ctx, peerState); err != nil {
-		return fmt.Errorf("persist peer state (grains) [%s]: %w", peerAddress, err)
-	}
-
-	x.logger.Infof("(%s) processed peer=(%s) successfully ", x.node.PeersAddress(), peerAddress)
-	return nil
-}
-
-// RemovePeerGrain implements Cluster.
-func (x *cluster) RemovePeerGrain(ctx context.Context, grainID *internalpb.GrainId, peerAddress string) error {
-	if !x.running.Load() {
-		return ErrEngineNotRunning
-	}
-
-	x.peersStateLock.Lock()
-	defer x.peersStateLock.Unlock()
-
-	// ignore self
-	if x.node.PeersAddress() == peerAddress {
-		return nil
-	}
-
-	peerState, ok := x.store.GetPeerState(ctx, peerAddress)
-	if !ok {
-		return nil
-	}
-
-	grains := peerState.GetGrains()
-	delete(grains, grainID.GetValue())
-
-	x.logger.Debugf("(%s) persisting peer=(%s)'s state: [Actors count=(%d), Grains count=(%d)]", x.node.PeersAddress(), peerAddress, len(peerState.GetActors()), len(peerState.GetGrains()))
-	if err := x.store.PersistPeerState(ctx, peerState); err != nil {
-		return fmt.Errorf("persist peer state (grains) [%s]: %w", peerAddress, err)
-	}
-
-	x.logger.Infof("(%s) processed peer=(%s) successfully ", x.node.PeersAddress(), peerAddress)
-	return nil
 }
 
 // buildConfig creates the Olric configuration tailored to the current
@@ -1074,7 +886,7 @@ func (x *cluster) consume() {
 	for message := range x.messages {
 		switch message.Channel {
 		case events.ClusterEventsChannel:
-			if err := x.handleClusterEventMsg(message.Payload); err != nil {
+			if err := x.handleClusterEvent(message.Payload); err != nil {
 				x.logger.Errorf("cluster event handling error: %v", err)
 			}
 		default:
@@ -1083,8 +895,8 @@ func (x *cluster) consume() {
 	}
 }
 
-// handleClusterEventMsg decodes and dispatches cluster topology events with de-duplication.
-func (x *cluster) handleClusterEventMsg(payload string) error {
+// handleClusterEvent decodes and dispatches cluster topology events with de-duplication.
+func (x *cluster) handleClusterEvent(payload string) error {
 	var envelope map[string]any
 	if err := json.Unmarshal([]byte(payload), &envelope); err != nil {
 		return fmt.Errorf("unmarshal cluster event envelope: %w", err)
@@ -1154,19 +966,6 @@ func (x *cluster) processNodeLeft(ev events.NodeLeftEvent) {
 	payload, _ := anypb.New(evt)
 
 	x.sendEventLocked(&Event{Payload: payload, Type: NodeLeft})
-}
-
-// getOrInitPeerState fetches an existing peer state or initializes a new one.
-func (x *cluster) getOrInitPeerState(ctx context.Context, host string, remotingPort, peersPort int32) *internalpb.PeerState {
-	address := net.JoinHostPort(host, strconv.Itoa(int(peersPort)))
-	if ps, ok := x.store.GetPeerState(ctx, address); ok {
-		return ps
-	}
-	return &internalpb.PeerState{
-		Host:         host,
-		RemotingPort: remotingPort,
-		PeersPort:    peersPort,
-	}
 }
 
 // sendEventLocked pushes an event if the channel is active.

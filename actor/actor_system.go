@@ -399,9 +399,9 @@ type ActorSystem interface {
 	// Returns:
 	//   - error: An error is returned if the scheduled message cannot be found, was never paused, has already been delivered, or cannot be resumed.
 	ResumeSchedule(reference string) error
-	// PeerAddress returns the actor system address known in the cluster. That address is used by other nodes to communicate with the actor system.
+	// PeersAddress returns the actor system address known in the cluster. That address is used by other nodes to communicate with the actor system.
 	// This address is empty when cluster mode is not activated
-	PeerAddress() string
+	PeersAddress() string
 	// Register registers an actor for future use. This is necessary when creating an actor remotely
 	Register(ctx context.Context, actor Actor) error
 	// Deregister removes a registered actor from the registry
@@ -589,6 +589,7 @@ type ActorSystem interface {
 	getDeadletter() *PID
 	getSingletonManager() *PID
 	getRebalancer() *PID
+	getPeerStatesWriter() *PID
 	getReflection() *reflection
 	findRoutee(routeeName string) (*PID, bool)
 	isStopping() bool
@@ -671,7 +672,7 @@ type actorSystem struct {
 	singletonManager *PID
 	topicActor       *PID
 	noSender         *PID
-	stateWriter      *PID
+	peerStatesWriter *PID
 
 	startedAt       *atomic.Int64
 	rebalancing     *atomic.Bool
@@ -872,12 +873,12 @@ func (x *actorSystem) Start(ctx context.Context) error {
 		AddContextRunner(x.spawnSystemGuardian).
 		AddContextRunner(x.spawnNoSender).
 		AddContextRunner(x.spawnUserGuardian).
-		AddContextRunner(x.spawnRedeployer).
 		AddContextRunner(x.spawnDeathWatch).
 		AddContextRunner(x.spawnDeadletter).
 		AddContextRunner(x.spawnSingletonManager).
+		AddContextRunner(x.spawnRedeployer).
 		AddContextRunner(x.spawnTopicActor).
-		AddContextRunner(x.spawnStateWriter).
+		AddContextRunner(x.spawnPeerStatesWriter).
 		AddContextRunner(x.startRemoting).
 		AddContextRunner(x.startClustering).
 		Run(); err != nil {
@@ -1345,7 +1346,7 @@ func (x *actorSystem) ActorRefs(ctx context.Context, timeout time.Duration) []Ac
 
 // PeerAddress returns the actor system address known in the cluster. That address is used by other nodesMap to communicate with the actor system.
 // This address is empty when cluster mode is not activated
-func (x *actorSystem) PeerAddress() string {
+func (x *actorSystem) PeersAddress() string {
 	if x.clusterEnabled.Load() {
 		x.locker.RLock()
 		address := x.clusterNode.PeersAddress()
@@ -1934,6 +1935,28 @@ func (x *actorSystem) Inject(dependencies ...extension.Dependency) error {
 	return nil
 }
 
+// String implements fmt.Stringer and returns a human-readable identifier for the
+// actor system node.
+//
+// The format is:
+//
+//	Node[name=<name>, remoteAddr=<host:port>, peersAddr=<peers>]
+//
+// remoteAddr is constructed from Host() and Port(), and peersAddr is the value
+// returned by PeersAddress(). The output is intended for logging and debugging
+// only and should not be relied upon as a stable, machine-parsed format.
+//
+// Example:
+//
+//	Node[name=alpha, remoteAddr=127.0.0.1:8080, peersAddr=10.0.0.2:8080]
+//
+// Note: peersAddr may be empty if the node has no known peers.
+func (x *actorSystem) String() string {
+	return fmt.Sprintf("Node[name=%s, remoteAddr=%s, peersAddr=%s]", x.name,
+		net.JoinHostPort(x.Host(), strconv.Itoa(x.Port())),
+		x.PeersAddress())
+}
+
 // validate checks the actor system configuration and ensures that all required settings are properly defined.
 func (x *actorSystem) validate() error {
 	// validate extensions when defined
@@ -2113,6 +2136,14 @@ func (x *actorSystem) getRebalancer() *PID {
 	rebalancer := x.rebalancer
 	x.locker.RUnlock()
 	return rebalancer
+}
+
+// getPeerStatesWriter returns the peer states writer PID
+func (x *actorSystem) getPeerStatesWriter() *PID {
+	x.locker.RLock()
+	pid := x.peerStatesWriter
+	x.locker.RUnlock()
+	return pid
 }
 
 func (x *actorSystem) completeRebalancing() {
@@ -2388,6 +2419,7 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 		AddContextRunnerIf(x.getRebalancer() != nil, x.getRebalancer().Shutdown).
 		AddContextRunnerIf(x.getDeadletter() != nil, x.getDeadletter().Shutdown).
 		AddContextRunnerIf(x.getDeathWatch() != nil, x.getDeathWatch().Shutdown).
+		AddContextRunnerIf(x.getPeerStatesWriter() != nil, x.getPeerStatesWriter().Shutdown).
 		AddContextRunnerIf(x.TopicActor() != nil, x.TopicActor().Shutdown).
 		AddContextRunnerIf(x.NoSender() != nil, x.NoSender().Shutdown).
 		AddContextRunnerIf(x.getSystemGuardian() != nil, x.getSystemGuardian().Shutdown).
@@ -2532,9 +2564,9 @@ func (x *actorSystem) clusterEventsLoop() {
 		message, _ := event.Payload.UnmarshalNew()
 
 		if x.eventsStream != nil {
-			x.logger.Debugf("node=(%s) publishing cluster event=(%s)....", x.name, event.Type)
+			x.logger.Debugf("(%s) publishing cluster event=(%s)....", x.String(), event.Type)
 			x.eventsStream.Publish(eventsTopic, message)
-			x.logger.Debugf("cluster event=(%s) successfully published by node=(%s)", event.Type, x.name)
+			x.logger.Debugf("(%s) published cluster event=(%s) successfully", x.String(), event.Type)
 		}
 
 		switch event.Type {
@@ -2550,9 +2582,8 @@ func (x *actorSystem) clusterEventsLoop() {
 func (x *actorSystem) handleNodeJoinedEvent(event *cluster.Event) {
 	nodeJoined := new(goaktpb.NodeJoined)
 	_ = event.Payload.UnmarshalTo(nodeJoined)
-	x.logger.Infof("node=[name=%s, addr=%s] detected node joined event: node=(%s)",
-		x.name,
-		x.clusterNode.PeersAddress(),
+	x.logger.Infof("%s detected node joined event: node=(%s)",
+		x.String(),
 		nodeJoined.GetAddress())
 
 	x.resyncAfterClusterEvent("node joined", nodeJoined.GetAddress())
@@ -2563,8 +2594,8 @@ func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
 	nodeLeft := new(goaktpb.NodeLeft)
 	_ = event.Payload.UnmarshalTo(nodeLeft)
 	x.logger.Infof(
-		"node=[name=%s, addr=%s] detected node left event: node=(%s)",
-		x.name, x.clusterNode.PeersAddress(), nodeLeft.GetAddress(),
+		"(%s) detected node left event: node=(%s)",
+		x.String(), nodeLeft.GetAddress(),
 	)
 
 	x.resyncAfterClusterEvent("node left", nodeLeft.GetAddress())
@@ -2574,61 +2605,66 @@ func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
 	}
 
 	ctx := context.Background()
+	stateWriter := x.getPeerStatesWriter()
+
 	if x.cluster.IsLeader(ctx) {
 		x.logger.Infof(
-			"cluster leader node=[name=%s, addr=%s] initiating node=(%s)'s state rebalancing",
-			x.name, x.clusterNode.PeersAddress(), nodeLeft.GetAddress(),
+			"cluster leader (%s) initiating node=(%s)'s state rebalancing",
+			x.String(), nodeLeft.GetAddress(),
 		)
 
 		if !x.rebalancedNodes.Contains(nodeLeft.GetAddress()) {
 			x.rebalancedNodes.Add(nodeLeft.GetAddress())
-			if peerState, err := x.cluster.GetState(context.Background(), nodeLeft.GetAddress()); err == nil {
+
+			msg := &internalpb.GetPeerState{PeerAddress: nodeLeft.GetAddress()}
+			if response, err := x.NoSender().Ask(ctx, stateWriter, msg, DefaultAskTimeout); err == nil {
 				x.rebalanceLocker.Lock()
-				x.rebalancingQueue <- peerState
+				x.rebalancingQueue <- response.(*internalpb.PeerState)
 				x.rebalanceLocker.Unlock()
 				return
 			}
 
-			x.logger.Warnf("cluster leader node=[name=%s, addr=%s] could not find node=(%s)'s state",
-				x.name, x.clusterNode.PeersAddress(), nodeLeft.GetAddress())
+			x.logger.Warnf("cluster leader (%s) could not find node=(%s)'s state",
+				x.String(), nodeLeft.GetAddress())
 		}
 		return
 	}
 
 	x.logger.Debugf(
-		"node=[name=%s, addr=%s] is not the cluster leader; cleaning up node=(%s) left from state cache",
-		x.name, x.clusterNode.PeersAddress(), nodeLeft.GetAddress(),
+		"(%s) is not the cluster leader; cleaning up node=(%s) left from state cache",
+		x.String(), nodeLeft.GetAddress(),
 	)
 
-	if err := x.cluster.DeleteState(context.Background(), nodeLeft.GetAddress()); err != nil {
-		x.logger.Errorf("%s failed to remove left node=(%s) from cluster store: %w", x.name, nodeLeft.GetAddress(), err)
+	msg := &internalpb.DeletePeerState{PeerAddress: nodeLeft.GetAddress()}
+	if _, err := x.NoSender().Ask(ctx, stateWriter, msg, DefaultAskTimeout); err != nil {
+		x.logger.Errorf("(%s) failed to remove left node=(%s) from cluster store: %w", x.String(), nodeLeft.GetAddress(), err)
 	}
 
-	x.logger.Debugf("node=[name=%s, addr=%s] successfully cleaned up node=(%s) left from state cache", x.name, x.clusterNode.PeersAddress(), nodeLeft.GetAddress())
+	x.logger.Debugf("(%s) successfully cleaned up node=(%s) left from state cache", x.String(), nodeLeft.GetAddress())
 }
 
 // resyncAfterClusterEvent handles resyncing actors and grains after a cluster event.
 func (x *actorSystem) resyncAfterClusterEvent(eventType, nodeAddress string) {
-	x.logger.Debugf("node=[name=%s, addr=%s] resyncing actors after %s event: node=(%s)",
-		x.name, x.clusterNode.PeersAddress(), eventType, nodeAddress)
+	x.logger.Debugf("(%s) resyncing actors after %s event: node=(%s)",
+		x.String(), eventType, nodeAddress)
 
 	if err := x.resyncActors(); err != nil {
-		x.logger.Errorf("failed to resync actors after %s event: %v", eventType, err)
+		x.logger.Errorf("(%s) failed to resync actors after %s event: %v", x.String(), eventType, err)
 	}
 
-	x.logger.Debugf("node=[name=%s, addr=%s] successfully resynced actors after %s event: node=(%s)",
-		x.name, x.clusterNode.PeersAddress(), eventType, nodeAddress)
+	x.logger.Debugf("(%s) successfully resynced actors after %s event: node=(%s)",
+		x.String(), eventType, nodeAddress)
 
 	if x.grains.Len() > 0 {
-		x.logger.Debugf("node=[name=%s, addr=%s] resyncing grains after %s event: node=(%s)",
-			x.name, x.clusterNode.PeersAddress(), eventType, nodeAddress)
+		x.logger.Debugf("(%s) resyncing grains after %s event: node=(%s)",
+			x.String(), eventType, nodeAddress)
 
 		if err := x.resyncGrains(); err != nil {
-			x.logger.Errorf("failed to resync grains after %s event: %v", eventType, err)
+			x.logger.Errorf("(%s) failed to resync grains after %s event: %v", x.String(), eventType, err)
 		}
 
-		x.logger.Debugf("node=[name=%s, addr=%s] successfully resynced grains after %s event: node=(%s)",
-			x.name, x.clusterNode.PeersAddress(), eventType, nodeAddress)
+		x.logger.Debugf("(%s) successfully resynced grains after %s event: node=(%s)",
+			x.String(), eventType, nodeAddress)
 	}
 }
 

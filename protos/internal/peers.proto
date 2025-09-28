@@ -66,3 +66,13 @@ message RemovePeerGrain {
   string peer_address = 1;
   internalpb.GrainId grain_id = 2;
 }
+
+message GetPeerState {
+  // Specifies the peer address
+  string peer_address = 1;
+}
+
+message DeletePeerState {
+  // Specifies the peer address
+  string peer_address = 1;
+}

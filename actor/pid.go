@@ -2017,11 +2017,11 @@ func (pid *PID) handleRestartDirective(cid *PID, maxRetries uint32, timeout time
 
 // childAddress returns the address of the given child actor provided the name
 func (pid *PID) childAddress(name string) *address.Address {
-	return address.New(name,
+	return address.NewWithParent(name,
 		pid.Address().System(),
 		pid.Address().Host(),
-		pid.Address().Port()).
-		WithParent(pid.Address())
+		pid.Address().Port(),
+		pid.Address())
 }
 
 // suspend puts the actor in a suspension mode.
