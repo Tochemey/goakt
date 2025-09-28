@@ -47,15 +47,14 @@ import (
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
-	discoverymock "github.com/tochemey/goakt/v3/mocks/discovery"
-	testkit "github.com/tochemey/goakt/v3/mocks/discovery"
+	mocksdiscovery "github.com/tochemey/goakt/v3/mocks/discovery"
 	gtls "github.com/tochemey/goakt/v3/tls"
 )
 
 func TestNotRunningReturnsErrEngineNotRunning(t *testing.T) {
 	ctx := context.Background()
 
-	provider := new(discoverymock.Provider)
+	provider := new(mocksdiscovery.Provider)
 	node := &discovery.Node{
 		Name:          "test-node",
 		Host:          "127.0.0.1",
@@ -145,7 +144,7 @@ func TestSingleNode(t *testing.T) {
 		}
 
 		// mock the discovery provider
-		provider := new(testkit.Provider)
+		provider := new(mocksdiscovery.Provider)
 
 		provider.EXPECT().ID().Return("testDisco")
 		provider.EXPECT().Initialize().Return(nil)
@@ -200,7 +199,7 @@ func TestSingleNode(t *testing.T) {
 		}
 
 		// mock the discovery provider
-		provider := new(testkit.Provider)
+		provider := new(mocksdiscovery.Provider)
 
 		provider.EXPECT().ID().Return("testDisco")
 		provider.EXPECT().Initialize().Return(nil)
@@ -280,7 +279,7 @@ func TestSingleNode(t *testing.T) {
 		}
 
 		// mock the discovery provider
-		provider := new(testkit.Provider)
+		provider := new(mocksdiscovery.Provider)
 
 		provider.EXPECT().ID().Return("testDisco")
 		provider.EXPECT().Initialize().Return(nil)
@@ -352,7 +351,7 @@ func TestSingleNode(t *testing.T) {
 		remotingPort := nodePorts[2]
 
 		// mock the discovery provider
-		provider := new(testkit.Provider)
+		provider := new(mocksdiscovery.Provider)
 
 		// create a Node
 		host := "127.0.0.1"
@@ -408,7 +407,7 @@ func TestSingleNode(t *testing.T) {
 		}
 
 		// mock the discovery provider
-		provider := new(testkit.Provider)
+		provider := new(mocksdiscovery.Provider)
 
 		provider.EXPECT().ID().Return("id")
 		provider.EXPECT().Initialize().Return(nil)
@@ -487,7 +486,7 @@ func TestSingleNode(t *testing.T) {
 		}
 
 		// mock the discovery provider
-		provider := new(testkit.Provider)
+		provider := new(mocksdiscovery.Provider)
 
 		provider.EXPECT().ID().Return("testDisco")
 		provider.EXPECT().Initialize().Return(nil)
@@ -572,7 +571,7 @@ func TestSingleNode(t *testing.T) {
 		}
 
 		// mock the discovery provider
-		provider := new(testkit.Provider)
+		provider := new(mocksdiscovery.Provider)
 
 		provider.EXPECT().ID().Return("testDisco")
 		provider.EXPECT().Initialize().Return(nil)
@@ -650,7 +649,7 @@ func TestSingleNode(t *testing.T) {
 		remotingPort := nodePorts[2]
 
 		// mock the discovery provider
-		provider := new(testkit.Provider)
+		provider := new(mocksdiscovery.Provider)
 
 		// create a Node
 		host := "127.0.0.1"
@@ -710,7 +709,7 @@ func TestSingleNode(t *testing.T) {
 		}
 
 		// mock the discovery provider
-		provider := new(testkit.Provider)
+		provider := new(mocksdiscovery.Provider)
 
 		provider.EXPECT().ID().Return("testDisco")
 		provider.EXPECT().Initialize().Return(nil)
@@ -768,7 +767,7 @@ func TestSingleNode(t *testing.T) {
 		}
 
 		// mock the discovery provider
-		provider := new(testkit.Provider)
+		provider := new(mocksdiscovery.Provider)
 
 		provider.EXPECT().ID().Return("testDisco")
 		provider.EXPECT().Initialize().Return(nil)
@@ -817,7 +816,7 @@ func TestSingleNode(t *testing.T) {
 		remotingPort := nodePorts[2]
 
 		// mock the discovery provider
-		provider := new(testkit.Provider)
+		provider := new(mocksdiscovery.Provider)
 
 		// create a Node
 		host := "127.0.0.1"

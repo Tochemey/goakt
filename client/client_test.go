@@ -785,7 +785,6 @@ func TestClient(t *testing.T) {
 		srv.Shutdown()
 		pause.For(time.Second)
 	})
-
 	t.Run("When RemoteAsk fails", func(t *testing.T) {
 		ctx := context.TODO()
 		actor := NewActor("client.testactor").WithName("actorName")
@@ -816,7 +815,6 @@ func TestClient(t *testing.T) {
 		require.Error(t, err)
 		require.ErrorIs(t, err, expectedErr)
 	})
-
 	t.Run("With Tell when actor not found", func(t *testing.T) {
 		ctx := context.TODO()
 
@@ -1083,7 +1081,6 @@ func TestClient(t *testing.T) {
 		srv.Shutdown()
 		pause.For(time.Second)
 	})
-
 	t.Run("When RemoteLookup fails", func(t *testing.T) {
 		ctx := context.TODO()
 		actor := NewActor("client.testactor").WithName("actorName")
@@ -1127,6 +1124,90 @@ func TestClient(t *testing.T) {
 		err = client.Reinstate(ctx, actor)
 		require.Error(t, err)
 		require.ErrorIs(t, err, expectedErr)
+	})
+	t.Run("With Kinds failure when cluster not enabled", func(t *testing.T) {
+		ctx := context.TODO()
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "127.0.0.1"
+		actorSystemName := "testSystem"
+
+		system, err := actors.NewActorSystem(
+			actorSystemName,
+			actors.WithLogger(log.DiscardLogger),
+			actors.WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+
+		require.NotNil(t, system)
+		require.NoError(t, err)
+
+		// start the node
+		require.NoError(t, system.Start(ctx))
+
+		pause.For(time.Second)
+
+		addresses := []string{
+			fmt.Sprintf("%s:%d", host, remotingPort),
+		}
+
+		nodes := make([]*Node, len(addresses))
+		for i, addr := range addresses {
+			nodes[i] = NewNode(addr)
+		}
+
+		random := NewRandom()
+		random.Set(nodes...)
+
+		client := &Client{
+			nodes:    nodes,
+			locker:   new(sync.Mutex),
+			strategy: RandomStrategy,
+			balancer: random,
+		}
+		kinds, err := client.Kinds(ctx)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, errors.ErrClusterDisabled.Error())
+		assert.Nil(t, kinds)
+		assert.Empty(t, kinds)
+
+		pause.For(time.Second)
+
+		client.Close()
+
+		require.NoError(t, system.Stop(ctx))
+	})
+	t.Run("With GetNodeMetric failure when cluster not enabled", func(t *testing.T) {
+		ctx := context.TODO()
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "127.0.0.1"
+		actorSystemName := "testSystem"
+
+		system, err := actors.NewActorSystem(
+			actorSystemName,
+			actors.WithLogger(log.DiscardLogger),
+			actors.WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+
+		require.NotNil(t, system)
+		require.NoError(t, err)
+
+		// start the node
+		require.NoError(t, system.Start(ctx))
+
+		pause.For(time.Second)
+
+		node := NewNode(fmt.Sprintf("%s:%d", host, remotingPort))
+
+		metric, ok, err := getNodeMetric(ctx, node)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, errors.ErrClusterDisabled.Error())
+		assert.False(t, ok)
+		assert.Zero(t, metric)
+
+		pause.For(time.Second)
+
+		require.NoError(t, system.Stop(ctx))
 	})
 }
 
