@@ -27,45 +27,40 @@ package cluster
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/kapetan-io/tackle/autotls"
 	natsserver "github.com/nats-io/nats-server/v2/server"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tochemey/olric"
+	"github.com/tochemey/olric/events"
 	"github.com/travisjeffery/go-dynaport"
+	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v3/discovery"
-	natsdiscovery "github.com/tochemey/goakt/v3/discovery/nats"
+	"github.com/tochemey/goakt/v3/discovery/nats"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
-	discoverymock "github.com/tochemey/goakt/v3/mocks/discovery"
+	mocksdiscovery "github.com/tochemey/goakt/v3/mocks/discovery"
 	gtls "github.com/tochemey/goakt/v3/tls"
 )
-
-func TestStartStop(t *testing.T) {
-	cluster, _, ctx := setupCluster(t)
-
-	assert.True(t, cluster.IsRunning())
-
-	peers, err := cluster.Peers(ctx)
-	require.NoError(t, err)
-	assert.Len(t, peers, 0)
-}
 
 func TestNotRunningReturnsErrEngineNotRunning(t *testing.T) {
 	ctx := context.Background()
 
-	provider := new(discoverymock.Provider)
+	provider := new(mocksdiscovery.Provider)
 	node := &discovery.Node{
 		Name:          "test-node",
 		Host:          "127.0.0.1",
@@ -138,119 +133,775 @@ func TestNotRunningReturnsErrEngineNotRunning(t *testing.T) {
 	provider.AssertExpectations(t)
 }
 
-func TestIsLeader(t *testing.T) {
-	cluster, _, ctx := setupCluster(t)
-
-	require.Eventually(t, func() bool {
-		return cluster.IsLeader(ctx)
-	}, 5*time.Second, 50*time.Millisecond)
-
-	stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	require.NoError(t, cluster.Stop(stopCtx))
-	assert.False(t, cluster.IsLeader(ctx))
-}
-
 func TestSingleNode(t *testing.T) {
-	cluster, _, ctx := setupCluster(t)
+	t.Run("With Start and Shutdown", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
 
-	actorName := uuid.NewString()
-	actor := &internalpb.Actor{Address: &goaktpb.Address{Name: actorName}}
-	require.NoError(t, cluster.PutActor(ctx, actor))
+		// generate the ports for the single node
+		nodePorts := dynaport.Get(3)
+		gossipPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
 
-	exists, err := cluster.ActorExists(ctx, actorName)
-	require.NoError(t, err)
-	assert.True(t, exists)
+		// define discovered addresses
+		addrs := []string{
+			fmt.Sprintf("127.0.0.1:%d", gossipPort),
+		}
 
-	storedActor, err := cluster.GetActor(ctx, actorName)
-	require.NoError(t, err)
-	assert.True(t, proto.Equal(actor, storedActor))
+		// mock the discovery provider
+		provider := new(mocksdiscovery.Provider)
 
-	list, err := cluster.Actors(ctx, time.Second)
-	require.NoError(t, err)
-	assert.NotEmpty(t, list)
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
 
-	partition := cluster.GetPartition(actorName)
-	assert.GreaterOrEqual(t, partition, uint64(0))
+		// create a Node node
+		host := "127.0.0.1"
 
-	require.NoError(t, cluster.RemoveActor(ctx, actorName))
+		hostNode := discovery.Node{
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: gossipPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
+		}
 
-	exists, err = cluster.ActorExists(ctx, actorName)
-	require.NoError(t, err)
-	assert.False(t, exists)
+		logger := log.DiscardLogger
+		cl := New("test", provider, &hostNode, WithLogger(logger))
+		require.NotNil(t, cl)
 
-	_, err = cluster.GetActor(ctx, actorName)
-	assert.ErrorIs(t, err, ErrActorNotFound)
+		// start the Node node
+		err := cl.Start(ctx)
+		require.NoError(t, err)
 
-	grainID := &internalpb.GrainId{Kind: "test", Name: "grain", Value: uuid.NewString()}
-	grain := &internalpb.Grain{GrainId: grainID}
-	require.NoError(t, cluster.PutGrain(ctx, grain))
+		hostNodeAddr := cl.(*cluster).node.Host
+		assert.Equal(t, host, hostNodeAddr)
 
-	grainExists, err := cluster.GrainExists(ctx, grainID.GetValue())
-	require.NoError(t, err)
-	assert.True(t, grainExists)
+		//  shutdown the Node node
+		ctx, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
 
-	storedGrain, err := cluster.GetGrain(ctx, grainID.GetValue())
-	require.NoError(t, err)
-	assert.True(t, proto.Equal(grain, storedGrain))
+		// stop the node
+		require.NoError(t, cl.Stop(ctx))
+		provider.AssertExpectations(t)
+	})
+	t.Run("With PeerSync and GetActor", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
 
-	grains, err := cluster.Grains(ctx, time.Second)
-	require.NoError(t, err)
-	assert.NotEmpty(t, grains)
+		// generate the ports for the single node
+		nodePorts := dynaport.Get(3)
+		gossipPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
 
-	require.NoError(t, cluster.RemoveGrain(ctx, grainID.GetValue()))
+		// define discovered addresses
+		addrs := []string{
+			fmt.Sprintf("127.0.0.1:%d", gossipPort),
+		}
 
-	grainExists, err = cluster.GrainExists(ctx, grainID.GetValue())
-	require.NoError(t, err)
-	assert.False(t, grainExists)
+		// mock the discovery provider
+		provider := new(mocksdiscovery.Provider)
 
-	_, err = cluster.GetGrain(ctx, grainID.GetValue())
-	assert.ErrorIs(t, err, ErrGrainNotFound)
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
 
-	kind := "singleton-kind"
-	require.NoError(t, cluster.PutKind(ctx, kind))
+		// create a Node
+		host := "127.0.0.1"
+		hostNode := discovery.Node{
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: gossipPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
+		}
 
-	actualKind, err := cluster.LookupKind(ctx, kind)
-	require.NoError(t, err)
-	assert.Equal(t, kind, actualKind)
+		cluster := New("test", provider, &hostNode, WithLogger(log.DiscardLogger))
+		require.NotNil(t, cluster)
 
-	require.NoError(t, cluster.RemoveKind(ctx, kind))
+		// start the Node
+		err := cluster.Start(ctx)
+		require.NoError(t, err)
 
-	actualKind, err = cluster.LookupKind(ctx, kind)
-	require.NoError(t, err)
-	assert.Empty(t, actualKind)
+		// create an actor
+		actorName := uuid.NewString()
+		actor := &internalpb.Actor{Address: &goaktpb.Address{Name: actorName}}
 
-	jobID := uuid.NewString()
-	metadata := []byte("job-metadata")
-	require.NoError(t, cluster.PutJobKey(ctx, jobID, metadata))
+		// replicate the actor in the Node
+		err = cluster.PutActor(ctx, actor)
+		require.NoError(t, err)
 
-	storedMetadata, err := cluster.JobKey(ctx, jobID)
-	require.NoError(t, err)
-	assert.Equal(t, metadata, storedMetadata)
+		// test the actor exists
+		exists, err := cluster.ActorExists(ctx, actorName)
+		require.NoError(t, err)
+		assert.True(t, exists)
 
-	require.NoError(t, cluster.DeleteJobKey(ctx, jobID))
+		// fetch the actor
+		actual, err := cluster.GetActor(ctx, actorName)
+		require.NoError(t, err)
+		require.NotNil(t, actual)
 
-	_, err = cluster.JobKey(ctx, jobID)
-	assert.Error(t, err)
+		assert.True(t, proto.Equal(actor, actual))
+
+		// test non-existing actor does not exist
+		fakeActorName := "fake"
+		exists, err = cluster.ActorExists(ctx, fakeActorName)
+		require.NoError(t, err)
+		assert.False(t, exists)
+
+		// fetch non-existing actor
+		actual, err = cluster.GetActor(ctx, fakeActorName)
+		require.Nil(t, actual)
+		assert.ErrorIs(t, err, ErrActorNotFound)
+
+		//  shutdown the Node
+		pause.For(time.Second)
+
+		// stop the node
+		require.NoError(t, cluster.Stop(ctx))
+		provider.AssertExpectations(t)
+	})
+	t.Run("With RemoveActor", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+
+		// generate the ports for the single node
+		nodePorts := dynaport.Get(3)
+		gossipPort := nodePorts[0]
+		peersPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		// define discovered addresses
+		addrs := []string{
+			fmt.Sprintf("127.0.0.1:%d", gossipPort),
+		}
+
+		// mock the discovery provider
+		provider := new(mocksdiscovery.Provider)
+
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		// create a Node
+		host := "127.0.0.1"
+		hostNode := discovery.Node{
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: gossipPort,
+			PeersPort:     peersPort,
+			RemotingPort:  remotingPort,
+		}
+
+		logger := log.DiscardLogger
+		cluster := New("test", provider, &hostNode, WithLogger(logger))
+		require.NotNil(t, cluster)
+
+		// start the Node
+		err := cluster.Start(ctx)
+		require.NoError(t, err)
+
+		// create an actor
+		actorName := uuid.NewString()
+		actor := &internalpb.Actor{Address: &goaktpb.Address{Name: actorName}}
+		// replicate the actor in the Node
+		err = cluster.PutActor(ctx, actor)
+		require.NoError(t, err)
+
+		// fetch the actor
+		actual, err := cluster.GetActor(ctx, actorName)
+		require.NoError(t, err)
+		require.NotNil(t, actual)
+
+		assert.True(t, proto.Equal(actor, actual))
+
+		// fetch the partition
+		partition := cluster.GetPartition(actorName)
+		require.NotZero(t, partition)
+
+		// let us remove the actor
+		err = cluster.RemoveActor(ctx, actorName)
+		require.NoError(t, err)
+
+		actual, err = cluster.GetActor(ctx, actorName)
+		require.Nil(t, actual)
+		assert.EqualError(t, err, ErrActorNotFound.Error())
+
+		// fetch the partition
+		partition = cluster.GetPartition(actorName)
+		require.Zero(t, partition)
+
+		// stop the node
+		require.NoError(t, cluster.Stop(ctx))
+		provider.AssertExpectations(t)
+	})
+	t.Run("With NotRunning error", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+
+		// generate the ports for the single node
+		nodePorts := dynaport.Get(3)
+		gossipPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		// mock the discovery provider
+		provider := new(mocksdiscovery.Provider)
+
+		// create a Node
+		host := "127.0.0.1"
+
+		hostNode := discovery.Node{
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: gossipPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
+		}
+
+		logger := log.DiscardLogger
+		var err error
+		cluster := New("test", provider, &hostNode, WithLogger(logger))
+		require.NotNil(t, cluster)
+
+		err = cluster.PutActor(ctx, new(internalpb.Actor))
+		require.Error(t, err)
+		require.EqualError(t, err, ErrEngineNotRunning.Error())
+
+		_, err = cluster.GetActor(ctx, "actorName")
+		require.Error(t, err)
+		require.EqualError(t, err, ErrEngineNotRunning.Error())
+
+		_, err = cluster.Peers(ctx)
+		require.Error(t, err)
+		require.EqualError(t, err, ErrEngineNotRunning.Error())
+
+		err = cluster.RemoveActor(ctx, "actorName")
+		require.Error(t, err)
+		require.EqualError(t, err, ErrEngineNotRunning.Error())
+
+		partition := cluster.GetPartition("actorName")
+		require.Zero(t, partition)
+
+		// stop the node
+		require.NoError(t, cluster.Stop(ctx))
+	})
+	t.Run("With Put/RemoveKind and LookupKind", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+
+		// generate the ports for the single node
+		nodePorts := dynaport.Get(3)
+		discoveryPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		// define discovered addresses
+		addrs := []string{
+			fmt.Sprintf("127.0.0.1:%d", discoveryPort),
+		}
+
+		// mock the discovery provider
+		provider := new(mocksdiscovery.Provider)
+
+		provider.EXPECT().ID().Return("id")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		// create a Node
+		host := "127.0.0.1"
+		hostNode := discovery.Node{
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: discoveryPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
+		}
+
+		var err error
+		cluster := New("test", provider, &hostNode, WithLogger(log.DiscardLogger))
+		require.NotNil(t, cluster)
+
+		// start the Node
+		err = cluster.Start(ctx)
+		require.NoError(t, err)
+
+		// create an actor
+		actorName := uuid.NewString()
+		actorKind := "kind"
+		actor := &internalpb.Actor{
+			Address:     &goaktpb.Address{Name: actorName},
+			Type:        actorKind,
+			IsSingleton: true,
+		}
+
+		// replicate the actor in the Node
+		err = cluster.PutActor(ctx, actor)
+		require.NoError(t, err)
+
+		err = cluster.PutKind(ctx, actorKind)
+		require.NoError(t, err)
+
+		actual, err := cluster.LookupKind(ctx, actorKind)
+		require.NoError(t, err)
+		require.NotEmpty(t, actual)
+
+		// remove the kind
+		err = cluster.RemoveKind(ctx, actorKind)
+		require.NoError(t, err)
+
+		// check the kind existence
+		actual, err = cluster.LookupKind(ctx, actorKind)
+		require.NoError(t, err)
+		require.Empty(t, actual)
+
+		//  shutdown the Node
+		pause.For(time.Second)
+
+		// stop the node
+		require.NoError(t, cluster.Stop(ctx))
+		provider.AssertExpectations(t)
+	})
+	t.Run("With PutGrain and GetGrain", func(t *testing.T) {
+		// create the context
+		ctx := t.Context()
+
+		// generate the ports for the single node
+		nodePorts := dynaport.Get(3)
+		discoveryPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		// define discovered addresses
+		addrs := []string{
+			fmt.Sprintf("127.0.0.1:%d", discoveryPort),
+		}
+
+		// mock the discovery provider
+		provider := new(mocksdiscovery.Provider)
+
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		// create a Node
+		host := "127.0.0.1"
+		hostNode := discovery.Node{
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: discoveryPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
+		}
+
+		cluster := New("test", provider, &hostNode, WithLogger(log.DiscardLogger))
+		require.NotNil(t, cluster)
+
+		// start the Node
+		err := cluster.Start(ctx)
+		require.NoError(t, err)
+
+		// create an grain
+		identity := "grainKind/grainName"
+		grain := &internalpb.Grain{
+			GrainId: &internalpb.GrainId{
+				Kind:  "grainKind",
+				Name:  "grainName",
+				Value: identity,
+			},
+			Host: host,
+			Port: int32(remotingPort),
+		}
+
+		// replicate the grain in the Node
+		err = cluster.PutGrain(ctx, grain)
+		require.NoError(t, err)
+
+		exist, err := cluster.GrainExists(ctx, identity)
+		require.NoError(t, err)
+		require.True(t, exist)
+
+		// fetch the grain
+		actual, err := cluster.GetGrain(ctx, identity)
+		require.NoError(t, err)
+		require.NotNil(t, actual)
+		require.True(t, proto.Equal(grain, actual))
+
+		//  fetch non-existing actor
+		fakeGrainIdentity := "fake"
+		actual, err = cluster.GetGrain(ctx, fakeGrainIdentity)
+		require.Nil(t, actual)
+		require.ErrorIs(t, err, ErrGrainNotFound)
+
+		exist, err = cluster.GrainExists(ctx, fakeGrainIdentity)
+		require.NoError(t, err)
+		require.False(t, exist)
+
+		//  shutdown the Node
+		pause.For(time.Second)
+
+		// stop the node
+		require.NoError(t, cluster.Stop(ctx))
+		provider.AssertExpectations(t)
+	})
+	t.Run("With RemoveGrain", func(t *testing.T) {
+		// create the context
+		ctx := t.Context()
+
+		// generate the ports for the single node
+		nodePorts := dynaport.Get(3)
+		discoveryPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		// define discovered addresses
+		addrs := []string{
+			fmt.Sprintf("127.0.0.1:%d", discoveryPort),
+		}
+
+		// mock the discovery provider
+		provider := new(mocksdiscovery.Provider)
+
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		// create a Node
+		host := "127.0.0.1"
+		hostNode := discovery.Node{
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: discoveryPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
+		}
+
+		cluster := New("test", provider, &hostNode, WithLogger(log.DiscardLogger))
+		require.NotNil(t, cluster)
+
+		// start the Node
+		err := cluster.Start(ctx)
+		require.NoError(t, err)
+
+		// create an grain
+		identity := "grainKind/grainName"
+		grain := &internalpb.Grain{
+			GrainId: &internalpb.GrainId{
+				Kind:  "grainKind",
+				Name:  "grainName",
+				Value: identity,
+			},
+			Host: host,
+			Port: int32(remotingPort),
+		}
+
+		// replicate the grain in the Node
+		err = cluster.PutGrain(ctx, grain)
+		require.NoError(t, err)
+
+		exist, err := cluster.GrainExists(ctx, identity)
+		require.NoError(t, err)
+		require.True(t, exist)
+
+		// fetch the grain
+		actual, err := cluster.GetGrain(ctx, identity)
+		require.NoError(t, err)
+		require.NotNil(t, actual)
+		require.True(t, proto.Equal(grain, actual))
+
+		// let us remove the grain
+		err = cluster.RemoveGrain(ctx, identity)
+		require.NoError(t, err)
+
+		exist, err = cluster.GrainExists(ctx, identity)
+		require.NoError(t, err)
+		require.False(t, exist)
+
+		//  shutdown the Node
+		pause.For(time.Second)
+
+		// stop the node
+		require.NoError(t, cluster.Stop(ctx))
+		provider.AssertExpectations(t)
+	})
+	t.Run("With PutGrain and GetGrain when NotRunning", func(t *testing.T) {
+		// create the context
+		ctx := t.Context()
+
+		// generate the ports for the single node
+		nodePorts := dynaport.Get(3)
+		gossipPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		// mock the discovery provider
+		provider := new(mocksdiscovery.Provider)
+
+		// create a Node
+		host := "127.0.0.1"
+
+		hostNode := discovery.Node{
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: gossipPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
+		}
+
+		logger := log.DiscardLogger
+		cluster := New("test", provider, &hostNode, WithLogger(logger))
+		require.NotNil(t, cluster)
+
+		// create an grain
+		identity := "grainKind/grainName"
+		grain := &internalpb.Grain{
+			GrainId: &internalpb.GrainId{
+				Kind:  "grainKind",
+				Name:  "grainName",
+				Value: identity,
+			},
+			Host: host,
+			Port: int32(remotingPort),
+		}
+
+		// replicate the grain in the Node
+		err := cluster.PutGrain(ctx, grain)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrEngineNotRunning)
+
+		// fetch the grain
+		actual, err := cluster.GetGrain(ctx, identity)
+		require.Error(t, err)
+		require.Nil(t, actual)
+		require.ErrorIs(t, err, ErrEngineNotRunning)
+
+		// stop the node
+		require.NoError(t, cluster.Stop(ctx))
+		provider.AssertExpectations(t)
+	})
+	t.Run("With GetGrain when decoding failed", func(t *testing.T) {
+		// create the context
+		ctx := t.Context()
+
+		// generate the ports for the single node
+		nodePorts := dynaport.Get(3)
+		discoveryPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		// define discovered addresses
+		addrs := []string{
+			fmt.Sprintf("127.0.0.1:%d", discoveryPort),
+		}
+
+		// mock the discovery provider
+		provider := new(mocksdiscovery.Provider)
+
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		// create a Node
+		host := "127.0.0.1"
+		hostNode := discovery.Node{
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: discoveryPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
+		}
+
+		cl := New("test", provider, &hostNode, WithLogger(log.DiscardLogger))
+		require.NotNil(t, cl)
+
+		// start the Node
+		err := cl.Start(ctx)
+		require.NoError(t, err)
+
+		// create an grain
+		identity := "grainKind/grainName"
+
+		// replicate the grain in the Node
+		err = cl.(*cluster).dmap.Put(ctx, identity, []byte("invalid grain data"))
+		require.NoError(t, err)
+
+		// fetch the grain
+		actual, err := cl.GetGrain(ctx, identity)
+		require.Error(t, err)
+		require.Nil(t, actual)
+
+		// stop the node
+		require.NoError(t, cl.Stop(ctx))
+		provider.AssertExpectations(t)
+	})
+	t.Run("With GetActor when decoding failed", func(t *testing.T) {
+		// create the context
+		ctx := t.Context()
+
+		// generate the ports for the single node
+		nodePorts := dynaport.Get(3)
+		discoveryPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		// define discovered addresses
+		addrs := []string{
+			fmt.Sprintf("127.0.0.1:%d", discoveryPort),
+		}
+
+		// mock the discovery provider
+		provider := new(mocksdiscovery.Provider)
+
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		// create a Node
+		host := "127.0.0.1"
+		hostNode := discovery.Node{
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: discoveryPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
+		}
+
+		cl := New("test", provider, &hostNode, WithLogger(log.DiscardLogger))
+		require.NotNil(t, cl)
+
+		// start the Node
+		err := cl.Start(ctx)
+		require.NoError(t, err)
+
+		actorName := "actorName"
+		err = cl.(*cluster).dmap.Put(ctx, actorName, []byte("invalid grain data"))
+		require.NoError(t, err)
+
+		actual, err := cl.GetActor(ctx, actorName)
+		require.Error(t, err)
+		require.Nil(t, actual)
+
+		// stop the node
+		require.NoError(t, cl.Stop(ctx))
+		provider.AssertExpectations(t)
+	})
+	t.Run("With RemoveGrain/GrainExists when cluster engine is not running", func(t *testing.T) {
+		// create the context
+		ctx := t.Context()
+
+		// generate the ports for the single node
+		nodePorts := dynaport.Get(3)
+		discoveryPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		// mock the discovery provider
+		provider := new(mocksdiscovery.Provider)
+
+		// create a Node
+		host := "127.0.0.1"
+		hostNode := discovery.Node{
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: discoveryPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
+		}
+
+		cluster := New("test", provider, &hostNode, WithLogger(log.DiscardLogger))
+		require.NotNil(t, cluster)
+
+		// create an grain
+		identity := "grainKind/grainName"
+		exists, err := cluster.GrainExists(ctx, identity)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrEngineNotRunning)
+		require.False(t, exists)
+
+		// let us remove the grain
+		err = cluster.RemoveGrain(ctx, identity)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrEngineNotRunning)
+
+		// stop the node
+		require.NoError(t, cluster.Stop(ctx))
+		provider.AssertExpectations(t)
+	})
 }
 
 func TestMultipleNodes(t *testing.T) {
 	t.Run("Without TLS", func(t *testing.T) {
 		ctx := context.TODO()
 
-		srv := startClusterNatsServer(t)
+		// start the NATS server
+		srv := startNatsServer(t)
 
-		node1 := startClusterHarness(t, srv.Addr().String(), nil)
+		// create a cluster node1
+		node1, sd1 := startEngine(t, srv.Addr().String())
+		require.NotNil(t, node1)
+
+		// wait for the node to start properly
 		pause.For(2 * time.Second)
 
-		node2 := startClusterHarness(t, srv.Addr().String(), nil)
-		node2Addr := net.JoinHostPort(node2.node.Host, strconv.Itoa(node2.node.PeersPort))
+		// create a cluster node2
+		node2, sd2 := startEngine(t, srv.Addr().String())
+		require.NotNil(t, node2)
+		node2Addr := node2.(*cluster).node.PeersAddress()
+
+		// wait for the node to start properly
 		pause.For(time.Second)
 
-		node3 := startClusterHarness(t, srv.Addr().String(), nil)
+		// create a cluster node3
+		node3, sd3 := startEngine(t, srv.Addr().String())
+		require.NotNil(t, node3)
+		require.NotNil(t, sd3)
+
+		// wait for the node to start properly
 		pause.For(time.Second)
 
-		events := collectEvents(node1.Events(), time.Second)
+		// assert the node joined cluster event
+		var events []*Event
+
+		// define an events reader loop and read events for some time
+	L:
+		for {
+			select {
+			case event, ok := <-node1.Events():
+				if ok {
+					events = append(events, event)
+				}
+			case <-time.After(time.Second):
+				break L
+			}
+		}
+
+		require.NotEmpty(t, events)
 		require.Len(t, events, 2)
 		event := events[0]
 		msg, err := event.Payload.UnmarshalNew()
@@ -264,38 +915,74 @@ func TestMultipleNodes(t *testing.T) {
 		require.Len(t, peers, 2)
 		require.Equal(t, node2Addr, net.JoinHostPort(peers[0].Host, strconv.Itoa(peers[0].PeersPort)))
 
+		// wait for some time
+		pause.For(time.Second)
+
+		// create some actors
 		actorName := uuid.NewString()
-		actor := &internalpb.Actor{Address: &goaktpb.Address{Name: actorName}, Type: "actorKind"}
-		require.NoError(t, node2.PutActor(ctx, actor))
+		actor := &internalpb.Actor{
+			Address: &goaktpb.Address{
+				Name: actorName,
+			},
+			Type: "actorKind",
+		}
+
+		// put an actor
+		err = node2.PutActor(ctx, actor)
+		require.NoError(t, err)
+
+		// wait for some time
 		pause.For(time.Second)
 
 		identity := "grainKind/grainName"
 		grain := &internalpb.Grain{
-			GrainId: &internalpb.GrainId{Kind: "grainKind", Name: "grainName", Value: identity},
-			Host:    node2.node.Host,
-			Port:    int32(node2.node.RemotingPort),
+			GrainId: &internalpb.GrainId{
+				Kind:  "grainKind",
+				Name:  "grainName",
+				Value: identity,
+			},
+			Host: node2.(*cluster).node.Host,
+			Port: int32(node2.(*cluster).node.RemotingPort),
 		}
-		require.NoError(t, node2.PutGrain(ctx, grain))
 
+		// replicate the grain in the Node
+		err = node2.PutGrain(ctx, grain)
+		require.NoError(t, err)
+
+		// get the actor from node1 and node3
 		actual, err := node1.GetActor(ctx, actorName)
 		require.NoError(t, err)
+		require.NotNil(t, actual)
 		require.True(t, proto.Equal(actor, actual))
 
+		// fetch the grain
 		actualGrain, err := node1.GetGrain(ctx, identity)
 		require.NoError(t, err)
+		require.NotNil(t, actualGrain)
 		require.True(t, proto.Equal(grain, actualGrain))
 
 		actual, err = node3.GetActor(ctx, actorName)
 		require.NoError(t, err)
+		require.NotNil(t, actual)
 		require.True(t, proto.Equal(actor, actual))
 
 		actualGrain, err = node3.GetGrain(ctx, identity)
 		require.NoError(t, err)
+		require.NotNil(t, actualGrain)
 		require.True(t, proto.Equal(grain, actualGrain))
 
+		// put another actor
 		actorName2 := uuid.NewString()
-		actor2 := &internalpb.Actor{Address: &goaktpb.Address{Name: actorName2}, Type: "actorKind"}
-		require.NoError(t, node1.PutActor(ctx, actor2))
+		actor2 := &internalpb.Actor{
+			Address: &goaktpb.Address{
+				Name: actorName2,
+			},
+			Type: "actorKind",
+		}
+		err = node1.PutActor(ctx, actor2)
+		require.NoError(t, err)
+
+		// wait for some time
 		pause.For(time.Second)
 
 		actors, err := node1.Actors(ctx, time.Second)
@@ -314,10 +1001,28 @@ func TestMultipleNodes(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, actors, 2)
 
+		// stop the second node
 		require.NoError(t, node2.Stop(ctx))
+		// wait for the event to propagate properly
 		pause.For(time.Second)
 
-		events = collectEvents(node1.Events(), time.Second)
+		// reset the slice
+		events = []*Event{}
+
+		// define an events reader loop and read events for some time
+	L2:
+		for {
+			select {
+			case event, ok := <-node1.Events():
+				if ok {
+					events = append(events, event)
+				}
+			case <-time.After(time.Second):
+				break L2
+			}
+		}
+
+		require.NotEmpty(t, events)
 		require.Len(t, events, 1)
 		event = events[0]
 		msg, err = event.Payload.UnmarshalNew()
@@ -329,23 +1034,22 @@ func TestMultipleNodes(t *testing.T) {
 
 		require.NoError(t, node1.Stop(ctx))
 		require.NoError(t, node3.Stop(ctx))
-		require.NoError(t, node1.CloseProvider())
-		require.NoError(t, node2.CloseProvider())
-		require.NoError(t, node3.CloseProvider())
+		require.NoError(t, sd1.Close())
+		require.NoError(t, sd2.Close())
+		require.NoError(t, sd3.Close())
 		srv.Shutdown()
 	})
-
 	t.Run("With TLS", func(t *testing.T) {
 		ctx := context.TODO()
-
-		serverConf := &autotls.Config{
+		// AutoGenerate TLS certs
+		serverConf := autotls.Config{
 			CaFile:           "../../test/data/certs/ca.cert",
 			CertFile:         "../../test/data/certs/auto.pem",
 			KeyFile:          "../../test/data/certs/auto.key",
 			ClientAuthCaFile: "../../test/data/certs/client-auth-ca.pem",
 			ClientAuth:       tls.RequireAndVerifyClientCert,
 		}
-		require.NoError(t, autotls.Setup(serverConf))
+		require.NoError(t, autotls.Setup(&serverConf))
 
 		clientConf := &autotls.Config{
 			CertFile:           "../../test/data/certs/client-auth.pem",
@@ -354,20 +1058,49 @@ func TestMultipleNodes(t *testing.T) {
 		}
 		require.NoError(t, autotls.Setup(clientConf))
 
-		srv := startClusterNatsServer(t)
-		tlsInfo := &gtls.Info{ServerConfig: serverConf.ServerTLS, ClientConfig: clientConf.ClientTLS}
+		// start the NATS server
+		srv := startNatsServer(t)
 
-		node1 := startClusterHarness(t, srv.Addr().String(), tlsInfo)
+		// create a cluster node1
+		node1, sd1 := startEngineWithTLS(t, srv.Addr().String(), serverConf.ServerTLS, clientConf.ClientTLS)
+		require.NotNil(t, node1)
+
+		// wait for the node to start properly
 		pause.For(2 * time.Second)
 
-		node2 := startClusterHarness(t, srv.Addr().String(), tlsInfo)
-		node2Addr := net.JoinHostPort(node2.node.Host, strconv.Itoa(node2.node.PeersPort))
+		// create a cluster node2
+		node2, sd2 := startEngineWithTLS(t, srv.Addr().String(), serverConf.ServerTLS, clientConf.ClientTLS)
+		require.NotNil(t, node2)
+		node2Addr := node2.(*cluster).node.PeersAddress()
+
+		// wait for the node to start properly
 		pause.For(time.Second)
 
-		node3 := startClusterHarness(t, srv.Addr().String(), tlsInfo)
+		// create a cluster node3
+		node3, sd3 := startEngineWithTLS(t, srv.Addr().String(), serverConf.ServerTLS, clientConf.ClientTLS)
+		require.NotNil(t, node3)
+		require.NotNil(t, sd3)
+
+		// wait for the node to start properly
 		pause.For(time.Second)
 
-		events := collectEvents(node1.Events(), time.Second)
+		// assert the node joined cluster event
+		var events []*Event
+
+		// define an events reader loop and read events for some time
+	L:
+		for {
+			select {
+			case event, ok := <-node1.Events():
+				if ok {
+					events = append(events, event)
+				}
+			case <-time.After(time.Second):
+				break L
+			}
+		}
+
+		require.NotEmpty(t, events)
 		require.Len(t, events, 2)
 		event := events[0]
 		msg, err := event.Payload.UnmarshalNew()
@@ -381,37 +1114,74 @@ func TestMultipleNodes(t *testing.T) {
 		require.Len(t, peers, 2)
 		require.Equal(t, node2Addr, net.JoinHostPort(peers[0].Host, strconv.Itoa(peers[0].PeersPort)))
 
+		// wait for some time
+		pause.For(time.Second)
+
+		// create some actors
 		actorName := uuid.NewString()
-		actor := &internalpb.Actor{Address: &goaktpb.Address{Name: actorName}, Type: "actorKind"}
-		require.NoError(t, node2.PutActor(ctx, actor))
+		actor := &internalpb.Actor{
+			Address: &goaktpb.Address{
+				Name: actorName,
+			},
+			Type: "actorKind",
+		}
+
+		// put an actor
+		err = node2.PutActor(ctx, actor)
+		require.NoError(t, err)
 
 		identity := "grainKind/grainName"
 		grain := &internalpb.Grain{
-			GrainId: &internalpb.GrainId{Kind: "grainKind", Name: "grainName", Value: identity},
-			Host:    node2.node.Host,
-			Port:    int32(node2.node.RemotingPort),
+			GrainId: &internalpb.GrainId{
+				Kind:  "grainKind",
+				Name:  "grainName",
+				Value: identity,
+			},
+			Host: node2.(*cluster).node.Host,
+			Port: int32(node2.(*cluster).node.RemotingPort),
 		}
-		require.NoError(t, node2.PutGrain(ctx, grain))
 
+		// replicate the grain in the Node
+		err = node2.PutGrain(ctx, grain)
+		require.NoError(t, err)
+
+		// wait for some time
+		pause.For(time.Second)
+
+		// get the actor from node1 and node3
 		actual, err := node1.GetActor(ctx, actorName)
 		require.NoError(t, err)
+		require.NotNil(t, actual)
 		require.True(t, proto.Equal(actor, actual))
 
+		// fetch the grain
 		actualGrain, err := node1.GetGrain(ctx, identity)
 		require.NoError(t, err)
+		require.NotNil(t, actualGrain)
 		require.True(t, proto.Equal(grain, actualGrain))
 
 		actual, err = node3.GetActor(ctx, actorName)
 		require.NoError(t, err)
+		require.NotNil(t, actual)
 		require.True(t, proto.Equal(actor, actual))
 
 		actualGrain, err = node3.GetGrain(ctx, identity)
 		require.NoError(t, err)
+		require.NotNil(t, actualGrain)
 		require.True(t, proto.Equal(grain, actualGrain))
 
+		// put another actor
 		actorName2 := uuid.NewString()
-		actor2 := &internalpb.Actor{Address: &goaktpb.Address{Name: actorName2}, Type: "actorKind"}
-		require.NoError(t, node1.PutActor(ctx, actor2))
+		actor2 := &internalpb.Actor{
+			Address: &goaktpb.Address{
+				Name: actorName2,
+			},
+			Type: "actorKind",
+		}
+		err = node1.PutActor(ctx, actor2)
+		require.NoError(t, err)
+
+		// wait for some time
 		pause.For(time.Second)
 
 		actors, err := node1.Actors(ctx, time.Second)
@@ -422,10 +1192,44 @@ func TestMultipleNodes(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, grains, 1)
 
+		actors, err = node3.Actors(ctx, time.Second)
+		require.NoError(t, err)
+		require.Len(t, actors, 2)
+
+		grains, err = node3.Grains(ctx, time.Second)
+		require.NoError(t, err)
+		require.Len(t, grains, 1)
+
+		actors, err = node2.Actors(ctx, time.Second)
+		require.NoError(t, err)
+		require.Len(t, actors, 2)
+
+		grains, err = node2.Grains(ctx, time.Second)
+		require.NoError(t, err)
+		require.Len(t, grains, 1)
+
+		// stop the second node
 		require.NoError(t, node2.Stop(ctx))
+		// wait for the event to propagate properly
 		pause.For(time.Second)
 
-		events = collectEvents(node1.Events(), time.Second)
+		// reset the slice
+		events = []*Event{}
+
+		// define an events reader loop and read events for some time
+	L2:
+		for {
+			select {
+			case event, ok := <-node1.Events():
+				if ok {
+					events = append(events, event)
+				}
+			case <-time.After(time.Second):
+				break L2
+			}
+		}
+
+		require.NotEmpty(t, events)
 		require.Len(t, events, 1)
 		event = events[0]
 		msg, err = event.Payload.UnmarshalNew()
@@ -437,160 +1241,20 @@ func TestMultipleNodes(t *testing.T) {
 
 		require.NoError(t, node1.Stop(ctx))
 		require.NoError(t, node3.Stop(ctx))
-		require.NoError(t, node1.CloseProvider())
-		require.NoError(t, node2.CloseProvider())
-		require.NoError(t, node3.CloseProvider())
+		require.NoError(t, sd1.Close())
+		require.NoError(t, sd2.Close())
+		require.NoError(t, sd3.Close())
 		srv.Shutdown()
 	})
 }
 
-func setupCluster(t *testing.T) (Cluster, *discovery.Node, context.Context) {
+func startNatsServer(t *testing.T) *natsserver.Server {
 	t.Helper()
-
-	ctx := context.Background()
-
-	ports := dynaport.Get(3)
-	gossipPort := ports[0]
-	peersPort := ports[1]
-	remotingPort := ports[2]
-
-	addrs := []string{fmt.Sprintf("127.0.0.1:%d", gossipPort)}
-
-	provider := new(discoverymock.Provider)
-	provider.EXPECT().ID().Return("testDisco")
-	provider.EXPECT().Initialize().Return(nil)
-	provider.EXPECT().Register().Return(nil)
-	provider.EXPECT().Deregister().Return(nil)
-	provider.EXPECT().DiscoverPeers().Return(addrs, nil)
-	provider.EXPECT().Close().Return(nil)
-
-	host := "127.0.0.1"
-	node := &discovery.Node{
-		Name:          host,
-		Host:          host,
-		DiscoveryPort: gossipPort,
-		PeersPort:     peersPort,
-		RemotingPort:  remotingPort,
-	}
-
-	cluster := New("test", provider, node, WithLogger(log.DiscardLogger))
-	require.NotNil(t, cluster)
-
-	require.NoError(t, cluster.Start(ctx))
-
-	t.Cleanup(func() {
-		pause.For(200 * time.Millisecond)
-		stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-
-		require.NoError(t, cluster.Stop(stopCtx))
-		provider.AssertExpectations(t)
+	serv, err := natsserver.NewServer(&natsserver.Options{
+		Host: "127.0.0.1",
+		Port: -1,
 	})
 
-	return cluster, node, ctx
-}
-
-type clusterHarness struct {
-	Cluster
-	node      *discovery.Node
-	provider  discovery.Provider
-	closeOnce sync.Once
-	closeErr  error
-}
-
-func (h *clusterHarness) CloseProvider() error {
-	h.closeOnce.Do(func() {
-		h.closeErr = h.provider.Close()
-	})
-	return h.closeErr
-}
-
-func startClusterHarness(t *testing.T, serverAddr string, tlsInfo *gtls.Info) *clusterHarness {
-	t.Helper()
-
-	ctx := context.TODO()
-	ports := dynaport.Get(3)
-	gossipPort := ports[0]
-	clusterPort := ports[1]
-	remotingPort := ports[2]
-
-	const (
-		host            = "127.0.0.1"
-		actorSystemName = "testSystem"
-		natsSubject     = "some-subject"
-	)
-
-	config := natsdiscovery.Config{
-		NatsServer:    fmt.Sprintf("nats://%s", serverAddr),
-		NatsSubject:   natsSubject,
-		Host:          host,
-		DiscoveryPort: gossipPort,
-	}
-
-	node := &discovery.Node{
-		Name:          host,
-		Host:          host,
-		DiscoveryPort: gossipPort,
-		PeersPort:     clusterPort,
-		RemotingPort:  remotingPort,
-	}
-
-	provider := natsdiscovery.NewDiscovery(&config)
-
-	opts := []ConfigOption{WithLogger(log.DiscardLogger)}
-	if tlsInfo != nil {
-		info := &gtls.Info{}
-		if tlsInfo.ServerConfig != nil {
-			info.ServerConfig = tlsInfo.ServerConfig.Clone()
-		}
-		if tlsInfo.ClientConfig != nil {
-			info.ClientConfig = tlsInfo.ClientConfig.Clone()
-		}
-		opts = append(opts, WithTLS(info))
-	}
-
-	cluster := New(actorSystemName, provider, node, opts...)
-	require.NotNil(t, cluster)
-	require.NoError(t, cluster.Start(ctx))
-
-	harness := &clusterHarness{
-		Cluster:  cluster,
-		node:     node,
-		provider: provider,
-	}
-
-	t.Cleanup(func() {
-		stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		_ = harness.Stop(stopCtx)
-		if err := harness.CloseProvider(); err != nil {
-			t.Logf("failed to close discovery provider: %v", err)
-		}
-	})
-
-	return harness
-}
-
-func collectEvents(ch <-chan *Event, wait time.Duration) []*Event {
-	deadline := time.After(wait)
-	events := make([]*Event, 0)
-	for {
-		select {
-		case evt, ok := <-ch:
-			if !ok {
-				return events
-			}
-			events = append(events, evt)
-		case <-deadline:
-			return events
-		}
-	}
-}
-
-func startClusterNatsServer(t *testing.T) *natsserver.Server {
-	t.Helper()
-
-	serv, err := natsserver.NewServer(&natsserver.Options{Host: "127.0.0.1", Port: -1})
 	require.NoError(t, err)
 
 	ready := make(chan bool)
@@ -605,4 +1269,755 @@ func startClusterNatsServer(t *testing.T) *natsserver.Server {
 	}
 
 	return serv
+}
+
+func startEngine(t *testing.T, serverAddr string) (Cluster, discovery.Provider) {
+	// create a context
+	ctx := context.TODO()
+
+	// generate the ports for the single node
+	nodePorts := dynaport.Get(3)
+	gossipPort := nodePorts[0]
+	clusterPort := nodePorts[1]
+	remotingPort := nodePorts[2]
+
+	// create a Cluster node
+	host := "127.0.0.1"
+	// create the various config option
+	actorSystemName := "testSystem"
+	natsSubject := "some-subject"
+
+	// create the config
+	config := nats.Config{
+		NatsServer:    fmt.Sprintf("nats://%s", serverAddr),
+		NatsSubject:   natsSubject,
+		Host:          host,
+		DiscoveryPort: gossipPort,
+	}
+
+	hostNode := discovery.Node{
+		Name:          host,
+		Host:          host,
+		DiscoveryPort: gossipPort,
+		PeersPort:     clusterPort,
+		RemotingPort:  remotingPort,
+	}
+
+	// create the instance of provider
+	provider := nats.NewDiscovery(&config)
+
+	// create the node
+	engine := New(actorSystemName, provider, &hostNode, WithLogger(log.DiscardLogger))
+	require.NotNil(t, engine)
+
+	// start the node
+	require.NoError(t, engine.Start(ctx))
+
+	// return the cluster node
+	return engine, provider
+}
+
+func startEngineWithTLS(t *testing.T, serverAddr string, server, client *tls.Config) (Cluster, discovery.Provider) {
+	// create a context
+	ctx := context.TODO()
+
+	// generate the ports for the single node
+	nodePorts := dynaport.Get(3)
+	gossipPort := nodePorts[0]
+	clusterPort := nodePorts[1]
+	remotingPort := nodePorts[2]
+
+	// create a Cluster node
+	host := "127.0.0.1"
+	// create the various config option
+	actorSystemName := "testSystem"
+	natsSubject := "some-subject"
+
+	// create the config
+	config := nats.Config{
+		NatsServer:    fmt.Sprintf("nats://%s", serverAddr),
+		NatsSubject:   natsSubject,
+		Host:          host,
+		DiscoveryPort: gossipPort,
+	}
+
+	hostNode := discovery.Node{
+		Name:          host,
+		Host:          host,
+		DiscoveryPort: gossipPort,
+		PeersPort:     clusterPort,
+		RemotingPort:  remotingPort,
+	}
+
+	// create the instance of provider
+	provider := nats.NewDiscovery(&config)
+
+	// create the node
+	engine := New(actorSystemName, provider, &hostNode,
+		WithTLS(&gtls.Info{
+			ClientConfig: client,
+			ServerConfig: server,
+		}),
+		WithLogger(log.DiscardLogger))
+	require.NotNil(t, engine)
+
+	// start the node
+	require.NoError(t, engine.Start(ctx))
+
+	// return the cluster node
+	return engine, provider
+}
+
+func TestPutGrainReturnsErrorWhenIDMissing(t *testing.T) {
+	cl := &cluster{
+		running: atomic.NewBool(true),
+	}
+
+	err := cl.PutGrain(context.Background(), &internalpb.Grain{})
+	require.EqualError(t, err, "grain id is not set")
+}
+
+func TestPutGrainReturnsErrorWhenIDValueEmpty(t *testing.T) {
+	cl := &cluster{
+		running: atomic.NewBool(true),
+	}
+
+	grain := &internalpb.Grain{GrainId: &internalpb.GrainId{Value: ""}}
+	err := cl.PutGrain(context.Background(), grain)
+	require.EqualError(t, err, "grain id value is empty")
+}
+
+func TestPutActorPropagatesDMapError(t *testing.T) {
+	putErr := errors.New("put failure")
+	cl := &cluster{
+		running:      atomic.NewBool(true),
+		dmap:         &MockDMap{putErr: putErr},
+		logger:       log.DiscardLogger,
+		writeTimeout: time.Second,
+	}
+
+	actor := &internalpb.Actor{}
+	err := cl.PutActor(context.Background(), actor)
+	require.ErrorIs(t, err, putErr)
+}
+
+func TestGetActorReturnsDMapError(t *testing.T) {
+	expectedErr := errors.New("get failure")
+	cl := &cluster{
+		running:     atomic.NewBool(true),
+		logger:      log.DiscardLogger,
+		readTimeout: time.Second,
+		dmap: &MockDMap{
+			getFn: func(ctx context.Context, key string) (*olric.GetResponse, error) { // nolint
+				require.Equal(t, composeKey(namespaceActors, "actor"), key)
+				return nil, expectedErr
+			},
+		},
+	}
+
+	actor, err := cl.GetActor(context.Background(), "actor")
+	require.Nil(t, actor)
+	require.ErrorIs(t, err, expectedErr)
+}
+
+// nolint
+func TestActorsReturnsScanError(t *testing.T) {
+	expectedErr := errors.New("scan failure")
+	cl := &cluster{
+		running: atomic.NewBool(true),
+		logger:  log.DiscardLogger,
+		dmap: &MockDMap{
+			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
+				return nil, expectedErr
+			},
+		},
+	}
+
+	actors, err := cl.Actors(context.Background(), time.Second)
+	require.Nil(t, actors)
+	require.ErrorIs(t, err, expectedErr)
+}
+
+// nolint
+func TestActorsPropagatesGetError(t *testing.T) {
+	expectedErr := errors.New("actors get failure")
+	cl := &cluster{
+		running: atomic.NewBool(true),
+		logger:  log.DiscardLogger,
+		dmap: &MockDMap{
+			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
+				return &iteratorStub{keys: []string{composeKey(namespaceActors, "actor")}}, nil
+			},
+			getFn: func(ctx context.Context, key string) (*olric.GetResponse, error) {
+				require.Equal(t, composeKey(namespaceActors, "actor"), key)
+				return nil, expectedErr
+			},
+		},
+	}
+
+	actors, err := cl.Actors(context.Background(), time.Second)
+	require.Nil(t, actors)
+	require.ErrorIs(t, err, expectedErr)
+}
+
+// nolint
+func TestActorsPropagatesByteError(t *testing.T) {
+	cl := &cluster{
+		running: atomic.NewBool(true),
+		logger:  log.DiscardLogger,
+		dmap: &MockDMap{
+			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
+				return &iteratorStub{keys: []string{composeKey(namespaceActors, "actor")}}, nil
+			},
+			getFn: func(ctx context.Context, key string) (*olric.GetResponse, error) {
+				require.Equal(t, composeKey(namespaceActors, "actor"), key)
+				return &olric.GetResponse{}, nil
+			},
+		},
+	}
+
+	actors, err := cl.Actors(context.Background(), time.Second)
+	require.Nil(t, actors)
+	require.ErrorIs(t, err, olric.ErrNilResponse)
+}
+
+// nolint
+func TestGetGrainReturnsDMapError(t *testing.T) {
+	expectedErr := errors.New("get failure")
+	cl := &cluster{
+		running:     atomic.NewBool(true),
+		logger:      log.DiscardLogger,
+		readTimeout: time.Second,
+		dmap: &MockDMap{
+			getFn: func(ctx context.Context, key string) (*olric.GetResponse, error) {
+				require.Equal(t, composeKey(namespaceGrains, "grain"), key)
+				return nil, expectedErr
+			},
+		},
+	}
+
+	grain, err := cl.GetGrain(context.Background(), "grain")
+	require.Nil(t, grain)
+	require.ErrorIs(t, err, expectedErr)
+}
+
+// nolint
+func TestGrainsReturnsScanError(t *testing.T) {
+	expectedErr := errors.New("scan failure")
+	cl := &cluster{
+		running: atomic.NewBool(true),
+		logger:  log.DiscardLogger,
+		dmap: &MockDMap{
+			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
+				return nil, expectedErr
+			},
+		},
+	}
+
+	grains, err := cl.Grains(context.Background(), time.Second)
+	require.Nil(t, grains)
+	require.ErrorIs(t, err, expectedErr)
+}
+
+// nolint
+func TestGrainsPropagatesGetError(t *testing.T) {
+	expectedErr := errors.New("grains get failure")
+	cl := &cluster{
+		running: atomic.NewBool(true),
+		logger:  log.DiscardLogger,
+		dmap: &MockDMap{
+			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
+				return &iteratorStub{keys: []string{composeKey(namespaceGrains, "grain")}}, nil
+			},
+			getFn: func(ctx context.Context, key string) (*olric.GetResponse, error) {
+				require.Equal(t, composeKey(namespaceGrains, "grain"), key)
+				return nil, expectedErr
+			},
+		},
+	}
+
+	grains, err := cl.Grains(context.Background(), time.Second)
+	require.Nil(t, grains)
+	require.ErrorIs(t, err, expectedErr)
+}
+
+// nolint
+func TestGrainsPropagatesByteError(t *testing.T) {
+	cl := &cluster{
+		running: atomic.NewBool(true),
+		logger:  log.DiscardLogger,
+		dmap: &MockDMap{
+			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
+				return &iteratorStub{keys: []string{composeKey(namespaceGrains, "grain")}}, nil
+			},
+			getFn: func(ctx context.Context, key string) (*olric.GetResponse, error) {
+				require.Equal(t, composeKey(namespaceGrains, "grain"), key)
+				return &olric.GetResponse{}, nil
+			},
+		},
+	}
+
+	grains, err := cl.Grains(context.Background(), time.Second)
+	require.Nil(t, grains)
+	require.ErrorIs(t, err, olric.ErrNilResponse)
+}
+
+// nolint
+func TestPutJobKeyPropagatesDMapError(t *testing.T) {
+	expectedErr := errors.New("put failure")
+	cl := &cluster{
+		running:      atomic.NewBool(true),
+		logger:       log.DiscardLogger,
+		writeTimeout: time.Second,
+		dmap:         &MockDMap{putErr: expectedErr},
+	}
+
+	err := cl.PutJobKey(context.Background(), "job", []byte("data"))
+	require.ErrorIs(t, err, expectedErr)
+}
+
+// nolint
+func TestPutJobKeyStoresMetadata(t *testing.T) {
+	ctx := context.Background()
+	jobID := "job"
+	metadata := []byte("payload")
+
+	cl := &cluster{
+		running:      atomic.NewBool(true),
+		logger:       log.DiscardLogger,
+		writeTimeout: time.Second,
+		dmap: &MockDMap{
+			putFn: func(_ context.Context, key string, value any, _ ...olric.PutOption) error {
+				require.Equal(t, composeKey(namespaceJobs, jobID), key)
+				require.Equal(t, metadata, value)
+				return nil
+			},
+		},
+	}
+
+	require.NoError(t, cl.PutJobKey(ctx, jobID, metadata))
+}
+
+// nolint
+func TestJobKeyReturnsDMapError(t *testing.T) {
+	expectedErr := errors.New("get failure")
+	cl := &cluster{
+		running:     atomic.NewBool(true),
+		logger:      log.DiscardLogger,
+		readTimeout: time.Second,
+		dmap: &MockDMap{
+			getFn: func(_ context.Context, key string) (*olric.GetResponse, error) {
+				require.Equal(t, composeKey(namespaceJobs, "job"), key)
+				return nil, expectedErr
+			},
+		},
+	}
+
+	value, err := cl.JobKey(context.Background(), "job")
+	require.Nil(t, value)
+	require.ErrorIs(t, err, expectedErr)
+}
+
+// nolint
+func TestJobKeyPropagatesByteError(t *testing.T) {
+	cl := &cluster{
+		running:     atomic.NewBool(true),
+		logger:      log.DiscardLogger,
+		readTimeout: time.Second,
+		dmap: &MockDMap{
+			getFn: func(_ context.Context, key string) (*olric.GetResponse, error) {
+				require.Equal(t, composeKey(namespaceJobs, "job"), key)
+				return &olric.GetResponse{}, nil
+			},
+		},
+	}
+
+	value, err := cl.JobKey(context.Background(), "job")
+	require.Nil(t, value)
+	require.ErrorIs(t, err, olric.ErrNilResponse)
+}
+
+// nolint
+func TestJobKeyReturnsMetadata(t *testing.T) {
+	metadata := []byte("payload")
+	cl := &cluster{
+		running:     atomic.NewBool(true),
+		logger:      log.DiscardLogger,
+		readTimeout: time.Second,
+		dmap: &MockDMap{
+			getFn: func(_ context.Context, key string) (*olric.GetResponse, error) {
+				require.Equal(t, composeKey(namespaceJobs, "job"), key)
+				return newGetResponseWithValue(metadata), nil
+			},
+		},
+	}
+
+	value, err := cl.JobKey(context.Background(), "job")
+	require.NoError(t, err)
+	require.Equal(t, metadata, value)
+}
+
+// nolint
+func TestDeleteJobKeyPropagatesError(t *testing.T) {
+	expectedErr := errors.New("delete failure")
+	cl := &cluster{
+		running:      atomic.NewBool(true),
+		logger:       log.DiscardLogger,
+		writeTimeout: time.Second,
+		dmap: &MockDMap{
+			deleteFn: func(_ context.Context, keys ...string) (int, error) {
+				require.Equal(t, []string{composeKey(namespaceJobs, "job")}, keys)
+				return 0, expectedErr
+			},
+		},
+	}
+
+	require.ErrorIs(t, cl.DeleteJobKey(context.Background(), "job"), expectedErr)
+}
+
+// nolint
+func TestDeleteJobKeySuccess(t *testing.T) {
+	cl := &cluster{
+		running:      atomic.NewBool(true),
+		logger:       log.DiscardLogger,
+		writeTimeout: time.Second,
+		dmap: &MockDMap{
+			deleteFn: func(_ context.Context, keys ...string) (int, error) {
+				require.Equal(t, []string{composeKey(namespaceJobs, "job")}, keys)
+				return 1, nil
+			},
+		},
+	}
+
+	require.NoError(t, cl.DeleteJobKey(context.Background(), "job"))
+}
+
+// nolint
+func TestCreateDMapReturnsClientError(t *testing.T) {
+	expectedErr := errors.New("boom")
+	cl := &cluster{client: &MockClient{newDMapErr: expectedErr}}
+
+	err := cl.createDMap()
+	require.ErrorIs(t, err, expectedErr)
+}
+
+// nolint
+func TestCreateSubscriptionReturnsClientError(t *testing.T) {
+	expectedErr := errors.New("boom")
+	cl := &cluster{
+		client: &MockClient{newPubSubErr: expectedErr},
+		node:   &discovery.Node{Host: "127.0.0.1", PeersPort: 4000},
+	}
+
+	err := cl.createSubscription(context.Background())
+	require.ErrorIs(t, err, expectedErr)
+}
+
+// nolint
+func TestHandleClusterEventInvalidEnvelope(t *testing.T) {
+	cl := &cluster{}
+	err := cl.handleClusterEvent("not-json")
+	require.ErrorContains(t, err, "unmarshal cluster event envelope")
+}
+
+// nolint
+func TestHandleClusterEventInvalidNodeJoin(t *testing.T) {
+	cl := &cluster{}
+	payload := `{"kind":"` + events.KindNodeJoinEvent + `","node_join":123}`
+
+	err := cl.handleClusterEvent(payload)
+	require.ErrorContains(t, err, "unmarshal node join")
+}
+
+// nolint
+func TestHandleClusterEventInvalidNodeLeft(t *testing.T) {
+	cl := &cluster{}
+	payload := `{"kind":"` + events.KindNodeLeftEvent + `","node_left":123}`
+
+	err := cl.handleClusterEvent(payload)
+	require.ErrorContains(t, err, "unmarshal node left")
+}
+
+// nolint
+func TestPeersReturnsClientError(t *testing.T) {
+	expectedErr := errors.New("members failure")
+	cl := &cluster{
+		running: atomic.NewBool(true),
+		client:  &MockClient{membersErr: expectedErr},
+		logger:  log.DiscardLogger,
+		node:    &discovery.Node{Host: "127.0.0.1", PeersPort: 9000},
+	}
+
+	peers, err := cl.Peers(context.Background())
+	require.Nil(t, peers)
+	require.ErrorIs(t, err, expectedErr)
+}
+
+// nolint
+func TestIsLeaderReturnsFalseOnMembersError(t *testing.T) {
+	expectedErr := errors.New("members failure")
+	cl := &cluster{
+		running: atomic.NewBool(true),
+		client:  &MockClient{membersErr: expectedErr},
+		logger:  log.DiscardLogger,
+		node:    &discovery.Node{Host: "127.0.0.1", PeersPort: 9000},
+	}
+
+	isLeader := cl.IsLeader(context.Background())
+	require.False(t, isLeader)
+}
+
+// nolint
+func TestEventsReturnsChannel(t *testing.T) {
+	ch := make(chan *Event)
+	cl := &cluster{events: ch}
+
+	go func() {
+		ch <- &Event{Type: NodeJoined}
+	}()
+
+	select {
+	case evt := <-cl.Events():
+		require.Equal(t, NodeJoined, evt.Type)
+	case <-time.After(time.Second):
+		t.Fatalf("expected event from channel")
+	}
+}
+
+// nolint
+func TestProcessNodeJoin(t *testing.T) {
+	now := time.Now().UnixNano()
+
+	t.Run("emits event", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 4000)
+		ev := events.NodeJoinEvent{NodeJoin: "127.0.0.1:5000", Timestamp: now}
+
+		cl.processNodeJoin(ev)
+
+		select {
+		case evt := <-cl.events:
+			require.Equal(t, NodeJoined, evt.Type)
+			msg, err := evt.Payload.UnmarshalNew()
+			require.NoError(t, err)
+			joined, ok := msg.(*goaktpb.NodeJoined)
+			require.True(t, ok)
+			require.Equal(t, ev.NodeJoin, joined.GetAddress())
+			require.Equal(t, ev.Timestamp/int64(time.Millisecond), joined.GetTimestamp().AsTime().UnixMilli())
+		default:
+			t.Fatalf("expected event")
+		}
+	})
+
+	t.Run("ignores self", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 5000)
+		ev := events.NodeJoinEvent{NodeJoin: cl.node.PeersAddress(), Timestamp: now}
+
+		cl.processNodeJoin(ev)
+
+		select {
+		case <-cl.events:
+			t.Fatalf("unexpected event")
+		default:
+		}
+	})
+
+	t.Run("deduplicates", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 6000)
+		ev := events.NodeJoinEvent{NodeJoin: "127.0.0.1:7000", Timestamp: now}
+
+		cl.processNodeJoin(ev)
+		<-cl.events
+		cl.processNodeJoin(ev)
+
+		select {
+		case <-cl.events:
+			t.Fatalf("expected no duplicate event")
+		default:
+		}
+	})
+}
+
+// nolint
+func TestProcessNodeLeft(t *testing.T) {
+	now := time.Now().UnixNano()
+
+	t.Run("emits event", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 4000)
+		ev := events.NodeLeftEvent{NodeLeft: "127.0.0.1:5000", Timestamp: now}
+
+		cl.processNodeLeft(ev)
+
+		select {
+		case evt := <-cl.events:
+			require.Equal(t, NodeLeft, evt.Type)
+			msg, err := evt.Payload.UnmarshalNew()
+			require.NoError(t, err)
+			left, ok := msg.(*goaktpb.NodeLeft)
+			require.True(t, ok)
+			require.Equal(t, ev.NodeLeft, left.GetAddress())
+			require.Equal(t, ev.Timestamp/int64(time.Millisecond), left.GetTimestamp().AsTime().UnixMilli())
+		default:
+			t.Fatalf("expected event")
+		}
+	})
+
+	t.Run("deduplicates", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 5000)
+		ev := events.NodeLeftEvent{NodeLeft: "127.0.0.1:6000", Timestamp: now}
+
+		cl.processNodeLeft(ev)
+		<-cl.events
+		cl.processNodeLeft(ev)
+
+		select {
+		case <-cl.events:
+			t.Fatalf("expected no duplicate event")
+		default:
+		}
+	})
+}
+
+// nolint
+func TestHandleClusterEventSuccessCases(t *testing.T) {
+	now := time.Now().UnixNano()
+
+	t.Run("node join", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 4000)
+		payload, err := json.Marshal(events.NodeJoinEvent{
+			Kind:      events.KindNodeJoinEvent,
+			NodeJoin:  "127.0.0.1:7000",
+			Timestamp: now,
+		})
+		require.NoError(t, err)
+
+		require.NoError(t, cl.handleClusterEvent(string(payload)))
+
+		select {
+		case evt := <-cl.events:
+			require.Equal(t, NodeJoined, evt.Type)
+		default:
+			t.Fatalf("expected node join event")
+		}
+	})
+
+	t.Run("node left", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 5000)
+		payload, err := json.Marshal(events.NodeLeftEvent{
+			Kind:      events.KindNodeLeftEvent,
+			NodeLeft:  "127.0.0.1:8000",
+			Timestamp: now,
+		})
+		require.NoError(t, err)
+
+		require.NoError(t, cl.handleClusterEvent(string(payload)))
+
+		select {
+		case evt := <-cl.events:
+			require.Equal(t, NodeLeft, evt.Type)
+		default:
+			t.Fatalf("expected node left event")
+		}
+	})
+}
+
+// nolint
+func TestHandleClusterEventUnknownKind(t *testing.T) {
+	cl := newEventTestCluster("127.0.0.1", 4000)
+
+	require.NoError(t, cl.handleClusterEvent(`{"kind":"noop"}`))
+
+	select {
+	case <-cl.events:
+		t.Fatalf("unexpected event")
+	default:
+	}
+}
+
+// nolint
+func TestConsumeDispatchesClusterEvents(t *testing.T) {
+	cl := newEventTestCluster("127.0.0.1", 4000)
+	msgs := make(chan *redis.Message, 1)
+	cl.messages = msgs
+
+	done := make(chan struct{})
+	go func() {
+		cl.consume()
+		close(done)
+	}()
+
+	payload, err := json.Marshal(events.NodeJoinEvent{
+		Kind:      events.KindNodeJoinEvent,
+		NodeJoin:  "127.0.0.1:9000",
+		Timestamp: time.Now().UnixNano(),
+	})
+	require.NoError(t, err)
+
+	msgs <- &redis.Message{Channel: events.ClusterEventsChannel, Payload: string(payload)}
+
+	select {
+	case evt := <-cl.events:
+		require.Equal(t, NodeJoined, evt.Type)
+	case <-time.After(time.Second):
+		t.Fatalf("expected event from consume")
+	}
+
+	close(msgs)
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatalf("consume did not exit")
+	}
+}
+
+// nolint
+func TestPeersFiltersSelfAndParsesMeta(t *testing.T) {
+	cl := &cluster{
+		running: atomic.NewBool(true),
+		logger:  log.DiscardLogger,
+		node:    &discovery.Node{Host: "127.0.0.1", PeersPort: 4000},
+	}
+
+	other := &discovery.Node{Host: "10.0.0.1", PeersPort: 5000, RemotingPort: 7000}
+	selfMeta, err := json.Marshal(cl.node)
+	require.NoError(t, err)
+	otherMeta, err := json.Marshal(other)
+	require.NoError(t, err)
+
+	cl.client = &fakeClient{
+		MockClient: &MockClient{},
+		members: []olric.Member{
+			{Name: cl.node.PeersAddress(), Coordinator: true, Meta: string(selfMeta)},
+			{Name: other.PeersAddress(), Coordinator: false, Meta: string(otherMeta)},
+		},
+	}
+
+	peers, err := cl.Peers(context.Background())
+	require.NoError(t, err)
+	require.Len(t, peers, 1)
+	require.Equal(t, other.Host, peers[0].Host)
+	require.Equal(t, other.PeersPort, peers[0].PeersPort)
+	require.Equal(t, other.RemotingPort, peers[0].RemotingPort)
+	require.False(t, peers[0].Coordinator)
+}
+
+// nolint
+func TestIsLeaderReturnsTrueWhenCoordinator(t *testing.T) {
+	cl := &cluster{
+		running: atomic.NewBool(true),
+		logger:  log.DiscardLogger,
+		node:    &discovery.Node{Host: "127.0.0.1", PeersPort: 4000},
+	}
+
+	meta, err := json.Marshal(cl.node)
+	require.NoError(t, err)
+
+	cl.client = &fakeClient{
+		MockClient: &MockClient{},
+		members: []olric.Member{
+			{Name: cl.node.PeersAddress(), Coordinator: true, Meta: string(meta)},
+		},
+	}
+
+	require.True(t, cl.IsLeader(context.Background()))
 }

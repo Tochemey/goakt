@@ -32,12 +32,14 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/kapetan-io/tackle/autotls"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
 	"go.uber.org/atomic"
@@ -47,8 +49,12 @@ import (
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
+	"github.com/tochemey/goakt/v3/internal/collection"
+	internalpb "github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
+	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/log"
+	mockcluster "github.com/tochemey/goakt/v3/mocks/cluster"
 	mocksdiscovery "github.com/tochemey/goakt/v3/mocks/discovery"
 	mocksextension "github.com/tochemey/goakt/v3/mocks/extension"
 	"github.com/tochemey/goakt/v3/passivation"
@@ -3482,6 +3488,118 @@ func TestRemoteAsk(t *testing.T) {
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
+	t.Run("With actor is dead", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		actorSystem, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = actorSystem.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := actorSystem.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		remoting := remote.NewRemoting()
+		from := address.NoSender()
+		// get the address of the actor
+		addr, err := remoting.RemoteLookup(ctx, actorSystem.Host(), actorSystem.Port(), actorName)
+		require.NoError(t, err)
+
+		// suspend the actor to make it unresponsive
+		actorRef.suspend("testing")
+		pause.For(time.Second)
+
+		// create a message to send to the test actor
+		message := new(testpb.TestReply)
+		// send the message to the actor
+		reply, err := remoting.RemoteAsk(ctx, from, addr, message, time.Minute)
+		// perform some assertions
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "actor is not alive")
+		require.Nil(t, reply)
+
+		// stop the actor after some time
+		pause.For(time.Second)
+
+		remoting.Close()
+		err = actorSystem.Stop(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("With timeout", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		remoting := remote.NewRemoting()
+		from := address.NoSender()
+		// get the address of the actor
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), sys.Port(), actorName)
+		require.NoError(t, err)
+
+		// create a message to send to the test actor
+		message := new(testpb.TestTimeout)
+		// send the message to the actor
+		reply, err := remoting.RemoteAsk(ctx, from, addr, message, 100*time.Millisecond)
+		// perform some assertions
+		require.Error(t, err)
+		require.Contains(t, err.Error(), gerrors.ErrRequestTimeout.Error())
+		require.Nil(t, reply)
+
+		// stop the actor after some time
+		pause.For(time.Second)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
 	t.Run("With Batch actor not found", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
@@ -3812,6 +3930,37 @@ func TestRemoteAsk(t *testing.T) {
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
+	t.Run("With invalid host", func(t *testing.T) {
+		ctx := t.Context()
+		port := dynaport.Get(1)[0]
+
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig("127.0.0.1", port)),
+		)
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
+
+		actorName := "test"
+		pid, err := sys.Spawn(ctx, actorName, NewMockActor())
+		require.NoError(t, err)
+		t.Cleanup(func() { assert.NoError(t, pid.Shutdown(ctx)) })
+
+		rem := remote.NewRemoting()
+		addr, err := rem.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+
+		// Mutate the server’s view so host/port no longer match the request.
+		sys.(*actorSystem).remoteConfig = remote.NewConfig("127.0.0.1", port+1)
+
+		reply, err := rem.RemoteAsk(ctx, address.NoSender(), addr, new(testpb.TestReply), time.Second)
+
+		require.Error(t, err)
+		require.Nil(t, reply)
+		assert.ErrorContains(t, err, gerrors.ErrInvalidHost.Error())
+	})
 }
 
 func TestRemotingLookup(t *testing.T) {
@@ -3856,6 +4005,38 @@ func TestRemotingLookup(t *testing.T) {
 				assert.NoError(t, sys.Stop(ctx))
 			},
 		)
+	})
+	t.Run("With mismatched remote address", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "127.0.0.1"
+
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		require.NoError(t, err)
+
+		require.NoError(t, sys.Start(ctx))
+		pause.For(time.Second)
+
+		const actorName = "test"
+		actualHost := sys.Host()
+		actualPort := int(sys.Port())
+		sys.(*actorSystem).remoteConfig = remote.NewConfig(actualHost, actualPort+1)
+
+		remoting := remote.NewRemoting()
+		t.Cleanup(remoting.Close)
+
+		addr, err := remoting.RemoteLookup(ctx, actualHost, actualPort, actorName)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, gerrors.ErrInvalidHost.Error())
+		require.Nil(t, addr)
+
+		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
 	})
 	t.Run("When TLS enabled", func(t *testing.T) {
 		// create the context
@@ -3969,6 +4150,41 @@ func TestRemotingReSpawn(t *testing.T) {
 				assert.NoError(t, sys.Stop(ctx))
 			},
 		)
+	})
+	t.Run("With mismatched remote address", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "127.0.0.1"
+
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		require.NoError(t, err)
+
+		require.NoError(t, sys.Start(ctx))
+		pause.For(time.Second)
+
+		actor := NewMockActor()
+		const actorName = "test"
+		_, err = sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+
+		actualHost := sys.Host()
+		actualPort := int(sys.Port())
+		sys.(*actorSystem).remoteConfig = remote.NewConfig(actualHost, actualPort+1)
+
+		remoting := remote.NewRemoting()
+		t.Cleanup(remoting.Close)
+
+		err = remoting.RemoteReSpawn(ctx, actualHost, actualPort, actorName)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, gerrors.ErrInvalidHost.Error())
+
+		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
 	})
 	t.Run("When remoting is enabled", func(t *testing.T) {
 		// create the context
@@ -4354,6 +4570,41 @@ func TestRemotingStop(t *testing.T) {
 				assert.NoError(t, sys.Stop(ctx))
 			},
 		)
+	})
+	t.Run("With mismatched remote address", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "127.0.0.1"
+
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		require.NoError(t, err)
+
+		require.NoError(t, sys.Start(ctx))
+		pause.For(time.Second)
+
+		actor := NewMockActor()
+		const actorName = "test"
+		_, err = sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+
+		actualHost := sys.Host()
+		actualPort := int(sys.Port())
+		sys.(*actorSystem).remoteConfig = remote.NewConfig(actualHost, actualPort+1)
+
+		remoting := remote.NewRemoting()
+		t.Cleanup(remoting.Close)
+
+		err = remoting.RemoteStop(ctx, actualHost, actualPort, actorName)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, gerrors.ErrInvalidHost.Error())
+
+		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
 	})
 	t.Run("When remoting is enabled", func(t *testing.T) {
 		// create the context
@@ -4792,6 +5043,104 @@ func TestRemotingSpawn(t *testing.T) {
 
 		expected := new(testpb.Reply)
 		assert.True(t, proto.Equal(expected, actual))
+
+		remoting.Close()
+		t.Cleanup(
+			func() {
+				err = sys.Stop(ctx)
+				assert.NoError(t, err)
+			},
+		)
+	})
+	t.Run("With mismatched remote address", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		ports := dynaport.Get(1)
+		remotingPort := ports[0]
+		host := "127.0.0.1"
+
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		require.NoError(t, err)
+
+		require.NoError(t, sys.Start(ctx))
+		pause.For(time.Second)
+
+		require.NoError(t, sys.Register(ctx, &exchanger{}))
+
+		actualHost := sys.Host()
+		actualPort := int(sys.Port())
+		sys.(*actorSystem).remoteConfig = remote.NewConfig(actualHost, actualPort+1)
+
+		remoting := remote.NewRemoting()
+		t.Cleanup(remoting.Close)
+
+		request := &remote.SpawnRequest{
+			Name: uuid.NewString(),
+			Kind: "actor.exchanger",
+		}
+		err = remoting.RemoteSpawn(ctx, actualHost, actualPort, request)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, gerrors.ErrInvalidHost.Error())
+
+		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
+	})
+	t.Run("When Spawn failed", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		ports := dynaport.Get(1)
+		remotingPort := ports[0]
+		host := "127.0.0.1"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		// register dependencies
+		dependency := NewMockDependency("test", "test", "test")
+		err = sys.Inject(dependency)
+		require.NoError(t, err)
+
+		// create an actor implementation and register it
+		actor := &MockPreStart{}
+		actorName := uuid.NewString()
+
+		remoting := remote.NewRemoting()
+		// fetching the address of the that actor should return nil address
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), sys.Port(), actorName)
+		require.NoError(t, err)
+		require.True(t, addr.Equals(address.NoSender()))
+
+		// register the actor
+		err = sys.Register(ctx, actor)
+		require.NoError(t, err)
+
+		// spawn the remote actor
+		request := &remote.SpawnRequest{
+			Name:           actorName,
+			Kind:           registry.Name(actor),
+			Singleton:      false,
+			Relocatable:    false,
+			EnableStashing: true,
+			Dependencies:   []extension.Dependency{dependency},
+		}
+		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
+		require.Error(t, err)
 
 		remoting.Close()
 		t.Cleanup(
@@ -5505,6 +5854,41 @@ func TestRemotingReinstate(t *testing.T) {
 		remoting.Close()
 		require.NoError(t, sys.Stop(ctx))
 	})
+	t.Run("With mismatched remote address", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "127.0.0.1"
+
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		require.NoError(t, err)
+
+		require.NoError(t, sys.Start(ctx))
+		pause.For(time.Second)
+
+		actor := NewMockActor()
+		const actorName = "test"
+		_, err = sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+
+		actualHost := sys.Host()
+		actualPort := int(sys.Port())
+		sys.(*actorSystem).remoteConfig = remote.NewConfig(actualHost, actualPort+1)
+
+		remoting := remote.NewRemoting()
+		t.Cleanup(remoting.Close)
+
+		err = remoting.RemoteReinstate(ctx, actualHost, actualPort, actorName)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, gerrors.ErrInvalidHost.Error())
+
+		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
+	})
 	t.Run("When remoting is enabled", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
@@ -5711,4 +6095,260 @@ func TestRemotingReinstate(t *testing.T) {
 		remoting.Close()
 		require.NoError(t, sys.Stop(ctx))
 	})
+}
+
+func TestReplicateActors_ErrorPaths(t *testing.T) {
+	clusterMock := new(mockcluster.Cluster)
+	system := MockReplicationTestSystem(clusterMock)
+	system.relocationEnabled.Store(true)
+
+	// Expect PutKind to fail for singleton actors and trigger the warning path.
+	singleton := &internalpb.Actor{
+		Address:     &goaktpb.Address{Host: "127.0.0.1", Port: 8080, Name: "singleton"},
+		Type:        "singleton-kind",
+		IsSingleton: true,
+	}
+	clusterMock.EXPECT().PutKind(mock.Anything, singleton.GetType()).Return(fmt.Errorf("put kind failure")).Once()
+
+	// Expect PutActor to fail for regular actors after publish attempts.
+	regular := &internalpb.Actor{
+		Address: &goaktpb.Address{Host: "127.0.0.1", Port: 8080, Name: "regular"},
+		Type:    "regular-kind",
+	}
+	clusterMock.EXPECT().PutActor(mock.Anything, regular).Return(fmt.Errorf("put actor failure")).Once()
+
+	t.Cleanup(func() { clusterMock.AssertExpectations(t) })
+
+	done := make(chan struct{})
+	go func() {
+		system.replicateActors()
+		close(done)
+	}()
+
+	system.actorsQueue <- singleton
+	system.actorsQueue <- regular
+	close(system.actorsQueue)
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("replicateActors did not drain the queue")
+	}
+}
+
+func TestReplicateGrains_ErrorPaths(t *testing.T) {
+	clusterMock := new(mockcluster.Cluster)
+	system := MockReplicationTestSystem(clusterMock)
+	system.relocationEnabled.Store(true)
+
+	grain := &internalpb.Grain{
+		GrainId: &internalpb.GrainId{Kind: "grain-kind", Name: "grain", Value: "grain"},
+		Host:    "127.0.0.1",
+		Port:    7000,
+	}
+
+	clusterMock.EXPECT().PutGrain(mock.Anything, grain).Return(fmt.Errorf("put grain failure")).Once()
+	clusterMock.EXPECT().PutKind(mock.Anything, grain.GetGrainId().GetKind()).Return(fmt.Errorf("put grain kind failure")).Once()
+
+	t.Cleanup(func() { clusterMock.AssertExpectations(t) })
+
+	done := make(chan struct{})
+	go func() {
+		system.replicateGrains()
+		close(done)
+	}()
+
+	system.grainsQueue <- grain
+	close(system.grainsQueue)
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("replicateGrains did not drain the queue")
+	}
+}
+
+func TestResyncActors_ErrorPaths(t *testing.T) {
+	clusterMock := new(mockcluster.Cluster)
+	system := MockReplicationTestSystem(clusterMock)
+
+	system.locker.Lock()
+	system.actors = newTree()
+	system.actors.noSender = system.noSender
+	system.grains = collection.NewMap[string, *grainPID]()
+	system.locker.Unlock()
+
+	dependency := mocksextension.NewDependency(t)
+	dependency.EXPECT().MarshalBinary().Return(nil, assert.AnError).Once()
+
+	pid := &PID{
+		actor:        NewMockActor(),
+		address:      address.New("resync-actor", system.name, "127.0.0.1", int(system.remoteConfig.BindPort())),
+		fieldsLocker: &sync.RWMutex{},
+		dependencies: collection.NewMap[string, extension.Dependency](),
+		logger:       log.DiscardLogger,
+		system:       system,
+	}
+	pid.dependencies.Set("dep", dependency)
+	pid.running.Store(true)
+
+	node := &pidNode{
+		watchers:    collection.NewMap[string, *PID](),
+		watchees:    collection.NewMap[string, *PID](),
+		descendants: collection.NewMap[string, *pidNode](),
+	}
+	node.pid.Store(pid)
+	system.actors.pids.Set(pid.ID(), node)
+	system.actors.counter.Inc()
+
+	err := system.resyncActors()
+	defer dependency.AssertExpectations(t)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, assert.AnError)
+}
+
+func TestResyncGrains_ErrorPaths(t *testing.T) {
+	clusterMock := new(mockcluster.Cluster)
+	system := MockReplicationTestSystem(clusterMock)
+
+	system.locker.Lock()
+	system.grains = collection.NewMap[string, *grainPID]()
+	system.locker.Unlock()
+
+	dependency := mocksextension.NewDependency(t)
+	dependency.EXPECT().MarshalBinary().Return(nil, assert.AnError).Once()
+
+	config := newGrainConfig()
+	config.dependencies.Set("dep", dependency)
+
+	identity := &GrainIdentity{kind: "grain.kind", name: "grain"}
+	grain := &grainPID{
+		identity:     identity,
+		actorSystem:  system,
+		logger:       log.DiscardLogger,
+		dependencies: config.dependencies,
+		config:       config,
+	}
+	grain.mu = &sync.Mutex{}
+
+	system.grains.Set(identity.String(), grain)
+
+	err := system.resyncGrains()
+	defer dependency.AssertExpectations(t)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, assert.AnError)
+}
+
+func TestCleanupCluster_RemoveKindFailure(t *testing.T) {
+	clusterMock := new(mockcluster.Cluster)
+	system := MockReplicationTestSystem(clusterMock)
+	system.grains = collection.NewMap[string, *grainPID]()
+
+	actorRef := ActorRef{
+		name:        "singleton-actor",
+		kind:        "singleton-kind",
+		address:     address.New("singleton-actor", system.name, "127.0.0.1", 8080),
+		isSingleton: true,
+	}
+
+	clusterMock.EXPECT().IsLeader(mock.Anything).Return(true)
+	clusterMock.EXPECT().RemoveKind(mock.Anything, actorRef.Kind()).Return(assert.AnError)
+	clusterMock.EXPECT().RemoveActor(mock.Anything, actorRef.Name()).Return(nil)
+	t.Cleanup(func() { clusterMock.AssertExpectations(t) })
+
+	err := system.cleanupCluster(context.Background(), []ActorRef{actorRef})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, assert.AnError)
+}
+
+func TestCleanupCluster_RemoveActorFailure(t *testing.T) {
+	clusterMock := new(mockcluster.Cluster)
+	system := MockReplicationTestSystem(clusterMock)
+	system.grains = collection.NewMap[string, *grainPID]()
+
+	actorRef := ActorRef{
+		name:    "actor",
+		kind:    "actor.kind",
+		address: address.New("actor", system.name, "127.0.0.1", 8080),
+	}
+
+	clusterMock.EXPECT().IsLeader(mock.Anything).Return(false)
+	clusterMock.EXPECT().RemoveActor(mock.Anything, actorRef.Name()).Return(assert.AnError)
+	t.Cleanup(func() { clusterMock.AssertExpectations(t) })
+
+	err := system.cleanupCluster(context.Background(), []ActorRef{actorRef})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, assert.AnError)
+}
+
+func TestCleanupCluster_RemoveGrainFailure(t *testing.T) {
+	clusterMock := new(mockcluster.Cluster)
+	system := MockReplicationTestSystem(clusterMock)
+	system.grains = collection.NewMap[string, *grainPID]()
+
+	actorRef := ActorRef{
+		name:    "actor",
+		kind:    "actor.kind",
+		address: address.New("actor", system.name, "127.0.0.1", 8080),
+	}
+	grainID := &GrainIdentity{kind: "grain.kind", name: "grain"}
+	grain := &grainPID{identity: grainID, actorSystem: system, logger: log.DiscardLogger, mu: &sync.Mutex{}}
+	system.grains.Set(grainID.String(), grain)
+
+	clusterMock.EXPECT().IsLeader(mock.Anything).Return(false)
+	clusterMock.EXPECT().RemoveActor(mock.Anything, actorRef.Name()).Return(nil)
+	clusterMock.EXPECT().RemoveGrain(mock.Anything, grainID.String()).Return(assert.AnError)
+	t.Cleanup(func() { clusterMock.AssertExpectations(t) })
+
+	err := system.cleanupCluster(context.Background(), []ActorRef{actorRef})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, assert.AnError)
+}
+
+func TestStopReturnsCleanupClusterError(t *testing.T) {
+	clusterMock := new(mockcluster.Cluster)
+	system := MockReplicationTestSystem(clusterMock)
+	system.grains = collection.NewMap[string, *grainPID]()
+	system.extensions = collection.NewMap[string, extension.Extension]()
+	system.rebalancing = atomic.NewBool(false)
+	system.rebalanceLocker = &sync.Mutex{}
+	system.actors = newTree()
+	system.actors.noSender = nil
+	system.noSender = nil
+	system.topicActor = nil
+	system.rootGuardian = nil
+	system.systemGuardian = nil
+	system.userGuardian = nil
+	system.singletonManager = nil
+	system.rebalancer = nil
+	system.deadletter = nil
+	system.deathWatch = nil
+	system.peerStatesWriter = nil
+	system.remotingEnabled.Store(false)
+
+	pid := &PID{
+		actor:        NewMockActor(),
+		address:      address.New("actor", system.name, "127.0.0.1", 8080),
+		fieldsLocker: &sync.RWMutex{},
+		dependencies: collection.NewMap[string, extension.Dependency](),
+		logger:       log.DiscardLogger,
+		system:       system,
+	}
+	pid.running.Store(true)
+	node := &pidNode{
+		watchers:    collection.NewMap[string, *PID](),
+		watchees:    collection.NewMap[string, *PID](),
+		descendants: collection.NewMap[string, *pidNode](),
+	}
+	node.pid.Store(pid)
+	system.actors.pids.Set(pid.ID(), node)
+	system.actors.counter.Inc()
+
+	clusterMock.EXPECT().IsLeader(mock.Anything).Return(false)
+	clusterMock.EXPECT().RemoveActor(mock.Anything, pid.Name()).Return(assert.AnError)
+	t.Cleanup(func() { clusterMock.AssertExpectations(t) })
+
+	err := system.Stop(context.Background())
+	require.Error(t, err)
+	assert.ErrorIs(t, err, assert.AnError)
 }
