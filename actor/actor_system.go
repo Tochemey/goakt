@@ -2859,23 +2859,16 @@ func (x *actorSystem) configureServer(ctx context.Context, mux *stdhttp.ServeMux
 
 // spawnRootGuardian creates the rootGuardian guardian
 func (x *actorSystem) spawnRootGuardian(ctx context.Context) error {
-	var err error
 	actorName := x.reservedName(rootGuardianType)
-	x.rootGuardian, err = x.configPID(ctx, actorName, newRootGuardian(), asSystem(), WithLongLived())
-	if err != nil {
-		return fmt.Errorf("actor=%s failed to start rootGuardian guardian: %w", actorName, err)
-	}
-
+	x.rootGuardian, _ = x.configPID(ctx, actorName, newRootGuardian(), asSystem(), WithLongLived())
 	// rootGuardian is the rootGuardian node of the actors tree
 	return x.actors.addRootNode(x.rootGuardian)
 }
 
 // spawnSystemGuardian creates the system guardian
 func (x *actorSystem) spawnSystemGuardian(ctx context.Context) error {
-	var err error
 	actorName := x.reservedName(systemGuardianType)
-
-	x.systemGuardian, err = x.configPID(ctx,
+	x.systemGuardian, _ = x.configPID(ctx,
 		actorName,
 		newSystemGuardian(),
 		asSystem(),
@@ -2884,9 +2877,6 @@ func (x *actorSystem) spawnSystemGuardian(ctx context.Context) error {
 			WithStrategy(OneForOneStrategy),
 			WithAnyErrorDirective(EscalateDirective),
 		)))
-	if err != nil {
-		return fmt.Errorf("actor=%s failed to start system guardian: %w", actorName, err)
-	}
 
 	// systemGuardian is a child actor of the rootGuardian actor
 	return x.actors.addNode(x.rootGuardian, x.systemGuardian)
@@ -2894,9 +2884,8 @@ func (x *actorSystem) spawnSystemGuardian(ctx context.Context) error {
 
 // spawnUserGuardian creates the user guardian
 func (x *actorSystem) spawnUserGuardian(ctx context.Context) error {
-	var err error
 	actorName := x.reservedName(userGuardianType)
-	x.userGuardian, err = x.configPID(ctx,
+	x.userGuardian, _ = x.configPID(ctx,
 		actorName,
 		newUserGuardian(),
 		asSystem(),
@@ -2905,9 +2894,6 @@ func (x *actorSystem) spawnUserGuardian(ctx context.Context) error {
 			WithStrategy(OneForOneStrategy),
 			WithAnyErrorDirective(EscalateDirective),
 		)))
-	if err != nil {
-		return fmt.Errorf("actor=%s failed to start user guardian: %w", actorName, err)
-	}
 
 	// userGuardian is a child actor of the rootGuardian actor
 	return x.actors.addNode(x.rootGuardian, x.userGuardian)
@@ -2915,25 +2901,20 @@ func (x *actorSystem) spawnUserGuardian(ctx context.Context) error {
 
 // spawnDeathWatch creates the deathWatch actor
 func (x *actorSystem) spawnDeathWatch(ctx context.Context) error {
-	var err error
 	actorName := x.reservedName(deathWatchType)
-
 	// define the supervisor strategy to use
 	supervisor := NewSupervisor(
 		WithStrategy(OneForOneStrategy),
 		WithAnyErrorDirective(EscalateDirective),
 	)
 
-	x.deathWatch, err = x.configPID(ctx,
+	x.deathWatch, _ = x.configPID(ctx,
 		actorName,
 		newDeathWatch(),
 		asSystem(),
 		WithLongLived(),
 		WithSupervisor(supervisor),
 	)
-	if err != nil {
-		return fmt.Errorf("actor=%s failed to start the deathWatch: %w", actorName, err)
-	}
 
 	// the deathWatch is a child actor of the system guardian
 	return x.actors.addNode(x.systemGuardian, x.deathWatch)
@@ -2942,7 +2923,6 @@ func (x *actorSystem) spawnDeathWatch(ctx context.Context) error {
 // spawnRedeployer creates the actor responsible for re-deploying actors when a node leaves the cluster
 func (x *actorSystem) spawnRedeployer(ctx context.Context) error {
 	if x.clusterEnabled.Load() && x.relocationEnabled.Load() {
-		var err error
 		actorName := x.reservedName(rebalancerType)
 
 		// define the supervisor strategy to use
@@ -2955,17 +2935,13 @@ func (x *actorSystem) spawnRedeployer(ctx context.Context) error {
 			WithDirective(&gerrors.SpawnError{}, ResumeDirective),
 		)
 
-		x.rebalancer, err = x.configPID(ctx,
+		x.rebalancer, _ = x.configPID(ctx,
 			actorName,
 			newRedeploymentActor(x.remoting),
 			asSystem(),
 			WithLongLived(),
 			WithSupervisor(supervisor),
 		)
-		if err != nil {
-			return fmt.Errorf("actor=%s failed to start cluster rebalancer: %w", actorName, err)
-		}
-
 		// the rebalancer is a child actor of the system guardian
 		return x.actors.addNode(x.systemGuardian, x.rebalancer)
 	}
@@ -2974,9 +2950,8 @@ func (x *actorSystem) spawnRedeployer(ctx context.Context) error {
 
 // spawnDeadletter creates the deadletter synthetic actor
 func (x *actorSystem) spawnDeadletter(ctx context.Context) error {
-	var err error
 	actorName := x.reservedName(deadletterType)
-	x.deadletter, err = x.configPID(ctx,
+	x.deadletter, _ = x.configPID(ctx,
 		actorName,
 		newDeadLetter(),
 		asSystem(),
@@ -2988,10 +2963,6 @@ func (x *actorSystem) spawnDeadletter(ctx context.Context) error {
 			),
 		),
 	)
-	if err != nil {
-		return fmt.Errorf("actor=%s failed to start deadletter: %w", actorName, err)
-	}
-
 	// the deadletter is a child actor of the system guardian
 	return x.actors.addNode(x.systemGuardian, x.deadletter)
 }

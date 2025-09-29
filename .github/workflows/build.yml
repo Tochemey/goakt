@@ -79,3 +79,4 @@ jobs:
           files: ./coverage.out
           fail_ci_if_error: false
           verbose: true
+          slug: Tochemey/goakt

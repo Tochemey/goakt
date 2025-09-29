@@ -26,7 +26,6 @@ package actor
 
 import (
 	"context"
-	"fmt"
 )
 
 // NoSender returns a special PID that represents an anonymous / absent sender.
@@ -73,7 +72,6 @@ func (x *noSender) PostStop(*Context) error {
 }
 
 func (x *actorSystem) spawnNoSender(ctx context.Context) error {
-	var err error
 	actorName := x.reservedName(noSenderType)
 
 	supervisor := NewSupervisor(
@@ -81,16 +79,13 @@ func (x *actorSystem) spawnNoSender(ctx context.Context) error {
 		WithAnyErrorDirective(ResumeDirective),
 	)
 
-	x.noSender, err = x.configPID(ctx,
+	x.noSender, _ = x.configPID(ctx,
 		actorName,
 		newNoSender(),
 		asSystem(),
 		WithLongLived(),
 		WithSupervisor(supervisor),
 	)
-	if err != nil {
-		return fmt.Errorf("actor=%s failed to start the noSender: %w", actorName, err)
-	}
 
 	return x.actors.addNode(x.systemGuardian, x.noSender)
 }
