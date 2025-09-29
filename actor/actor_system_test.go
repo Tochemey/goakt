@@ -27,6 +27,7 @@ package actor
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"reflect"
@@ -36,6 +37,7 @@ import (
 	"testing"
 	"time"
 
+	"connectrpc.com/connect"
 	"github.com/google/uuid"
 	"github.com/kapetan-io/tackle/autotls"
 	"github.com/stretchr/testify/assert"
@@ -44,6 +46,7 @@ import (
 	"github.com/travisjeffery/go-dynaport"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/tochemey/goakt/v3/address"
 	gerrors "github.com/tochemey/goakt/v3/errors"
@@ -322,6 +325,28 @@ func TestActorSystem(t *testing.T) {
 				assert.NoError(t, err)
 			},
 		)
+	})
+
+	t.Run("ActorOf returns error when cluster lookup fails", func(t *testing.T) {
+		ctx := context.TODO()
+		actorName := uuid.NewString()
+
+		clusterMock := new(mockcluster.Cluster)
+		system := MockReplicationTestSystem(clusterMock)
+
+		system.locker.Lock()
+		system.actors = newTree()
+		system.locker.Unlock()
+
+		clusterMock.EXPECT().GetActor(mock.Anything, actorName).Return(nil, assert.AnError)
+		t.Cleanup(func() { clusterMock.AssertExpectations(t) })
+
+		addr, pid, err := system.ActorOf(ctx, actorName)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, assert.AnError)
+		assert.ErrorContains(t, err, "failed to fetch remote actor")
+		require.Nil(t, addr)
+		require.Nil(t, pid)
 	})
 	t.Run("With ActorOf actor system started", func(t *testing.T) {
 		ctx := context.TODO()
@@ -714,6 +739,22 @@ func TestActorSystem(t *testing.T) {
 
 		err = newActorSystem.Stop(ctx)
 		require.NoError(t, err)
+	})
+	t.Run("With RemoteActor failure when cluster lookup fails", func(t *testing.T) {
+		ctx := context.TODO()
+		actorName := uuid.NewString()
+
+		clusterMock := new(mockcluster.Cluster)
+		system := MockReplicationTestSystem(clusterMock)
+
+		clusterMock.EXPECT().GetActor(mock.Anything, actorName).Return(nil, assert.AnError)
+		t.Cleanup(func() { clusterMock.AssertExpectations(t) })
+
+		addr, err := system.RemoteActor(ctx, actorName)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, assert.AnError)
+		assert.ErrorContains(t, err, "failed to fetch remote actor")
+		require.Nil(t, addr)
 	})
 	t.Run("With LocalActor", func(t *testing.T) {
 		ctx := context.TODO()
@@ -2334,6 +2375,56 @@ func TestRemoteTell(t *testing.T) {
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
+
+	t.Run("With RemoteTell invalid remote message", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		require.NoError(t, err)
+
+		require.NoError(t, sys.Start(ctx))
+		pause.For(time.Second)
+
+		actorName := "test"
+		actorRef, err := sys.Spawn(ctx, actorName, NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, actorRef)
+
+		system := sys.(*actorSystem)
+		remoting := remote.NewRemoting()
+		t.Cleanup(func() {
+			remoting.Close()
+			assert.NoError(t, system.Stop(ctx))
+		})
+
+		remoteMsg := &internalpb.RemoteMessage{
+			Sender:   address.NoSender().Address,
+			Receiver: actorRef.Address().Address,
+			Message:  &anypb.Any{TypeUrl: "invalid"},
+		}
+
+		req := connect.NewRequest(
+			&internalpb.RemoteTellRequest{RemoteMessages: []*internalpb.RemoteMessage{remoteMsg}},
+		)
+
+		resp, err := system.RemoteTell(ctx, req)
+		require.Error(t, err)
+		require.Nil(t, resp)
+
+		var connectErr *connect.Error
+		require.True(t, errors.As(err, &connectErr))
+		assert.Equal(t, connect.CodeInternal, connectErr.Code())
+		assert.ErrorContains(t, err, gerrors.ErrInvalidRemoteMessage.Error())
+	})
+
 	t.Run("With invalid message", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
@@ -3085,6 +3176,55 @@ func TestRemoteAsk(t *testing.T) {
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
+	t.Run("With RemoteAsk invalid remote message", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		require.NoError(t, err)
+
+		require.NoError(t, sys.Start(ctx))
+		pause.For(time.Second)
+
+		actorName := "test"
+		actorRef, err := sys.Spawn(ctx, actorName, NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, actorRef)
+
+		system := sys.(*actorSystem)
+		remoting := remote.NewRemoting()
+		t.Cleanup(func() {
+			remoting.Close()
+			assert.NoError(t, system.Stop(ctx))
+		})
+
+		remoteMsg := &internalpb.RemoteMessage{
+			Sender:   address.NoSender().Address,
+			Receiver: actorRef.Address().Address,
+			Message:  &anypb.Any{TypeUrl: "invalid"},
+		}
+
+		req := connect.NewRequest(
+			&internalpb.RemoteAskRequest{RemoteMessages: []*internalpb.RemoteMessage{remoteMsg}},
+		)
+
+		resp, err := system.RemoteAsk(ctx, req)
+		require.Error(t, err)
+		require.Nil(t, resp)
+
+		var connectErr *connect.Error
+		require.True(t, errors.As(err, &connectErr))
+		assert.Equal(t, connect.CodeInternal, connectErr.Code())
+		assert.ErrorContains(t, err, gerrors.ErrInvalidRemoteMessage.Error())
+	})
+
 	t.Run("With invalid message", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
@@ -3600,6 +3740,60 @@ func TestRemoteAsk(t *testing.T) {
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
+	t.Run("With context deadline exceeded", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		require.NoError(t, err)
+
+		require.NoError(t, sys.Start(ctx))
+		pause.For(time.Second)
+
+		actorName := "test"
+		actorRef, err := sys.Spawn(ctx, actorName, NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, actorRef)
+
+		system := sys.(*actorSystem)
+		t.Cleanup(func() { assert.NoError(t, system.Stop(ctx)) })
+
+		payload, err := anypb.New(new(testpb.TestTimeout))
+		require.NoError(t, err)
+
+		remoteMsg := &internalpb.RemoteMessage{
+			Sender:   address.NoSender().Address,
+			Receiver: actorRef.Address().Address,
+			Message:  payload,
+		}
+
+		req := connect.NewRequest(
+			&internalpb.RemoteAskRequest{RemoteMessages: []*internalpb.RemoteMessage{remoteMsg}},
+		)
+
+		reqCtx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+
+		resp, err := system.RemoteAsk(reqCtx, req)
+		require.Error(t, err)
+		require.Nil(t, resp)
+
+		var connectErr *connect.Error
+		require.True(t, errors.As(err, &connectErr))
+		assert.Equal(t, connect.CodeInternal, connectErr.Code())
+		assert.ErrorContains(t, err, context.DeadlineExceeded.Error())
+		assert.ErrorContains(t, err, gerrors.ErrRequestTimeout.Error())
+		assert.ErrorContains(t, err, gerrors.ErrRemoteSendFailure.Error())
+
+		pause.For(time.Second)
+	})
 	t.Run("With Batch actor not found", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
@@ -4106,6 +4300,35 @@ func TestRemotingLookup(t *testing.T) {
 			},
 		)
 	})
+	t.Run("When cluster lookup fails", func(t *testing.T) {
+		ctx := context.TODO()
+		actorName := uuid.NewString()
+
+		clusterMock := new(mockcluster.Cluster)
+		system := MockReplicationTestSystem(clusterMock)
+		system.remotingEnabled.Store(true)
+
+		host := system.remoteConfig.BindAddr()
+		port := system.remoteConfig.BindPort()
+
+		clusterMock.EXPECT().GetActor(mock.Anything, actorName).Return(nil, assert.AnError)
+		t.Cleanup(func() { clusterMock.AssertExpectations(t) })
+
+		req := connect.NewRequest(&internalpb.RemoteLookupRequest{
+			Host: host,
+			Port: int32(port),
+			Name: actorName,
+		})
+
+		resp, err := system.RemoteLookup(ctx, req)
+		require.Error(t, err)
+		require.Nil(t, resp)
+
+		var connectErr *connect.Error
+		require.True(t, errors.As(err, &connectErr))
+		assert.Equal(t, connect.CodeInternal, connectErr.Code())
+		assert.ErrorIs(t, err, assert.AnError)
+	})
 }
 
 func TestRemotingReSpawn(t *testing.T) {
@@ -4234,6 +4457,40 @@ func TestRemotingReSpawn(t *testing.T) {
 		remoting.Close()
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
+	})
+	t.Run("When restart fails", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		ports := dynaport.Get(1)
+		remotingPort := ports[0]
+		host := "127.0.0.1"
+
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		require.NoError(t, err)
+
+		require.NoError(t, sys.Start(ctx))
+		pause.For(time.Second)
+
+		actorName := uuid.NewString()
+		actorRef, err := sys.Spawn(ctx, actorName, NewMockRestart())
+		require.NoError(t, err)
+		require.NotNil(t, actorRef)
+
+		remoting := remote.NewRemoting()
+		t.Cleanup(remoting.Close)
+
+		err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "failed to restart actor")
+		assert.Zero(t, actorRef.RestartCount())
+
+		pause.For(time.Second)
+
+		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
 	})
 	t.Run("When TLS enabled", func(t *testing.T) {
 		// create the context
@@ -4659,6 +4916,40 @@ func TestRemotingStop(t *testing.T) {
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
+	t.Run("When shutdown fails", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "127.0.0.1"
+
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		require.NoError(t, err)
+
+		require.NoError(t, sys.Start(ctx))
+		pause.For(time.Second)
+
+		actorName := uuid.NewString()
+		actorRef, err := sys.Spawn(ctx, actorName, &MockPostStop{})
+		require.NoError(t, err)
+		require.NotNil(t, actorRef)
+
+		remoting := remote.NewRemoting()
+		t.Cleanup(remoting.Close)
+
+		err = remoting.RemoteStop(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "failed to stop actor")
+		assert.ErrorContains(t, err, "failed")
+
+		pause.For(time.Second)
+
+		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
+	})
 	t.Run("When TLS enabled", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
@@ -4966,6 +5257,55 @@ func TestRemotingStop(t *testing.T) {
 		remoting.Close()
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
+	})
+}
+
+func TestActorSystemStartClusterErrors(t *testing.T) {
+	t.Run("startClustering returns error when cluster start fails", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig("127.0.0.1", 30003)),
+		)
+		require.NoError(t, err)
+
+		actorSys := sys.(*actorSystem)
+		clusterMock := new(mockcluster.Cluster)
+		clusterMock.EXPECT().Start(mock.Anything).Return(assert.AnError)
+
+		actorSys.clusterEnabled.Store(true)
+		actorSys.cluster = clusterMock
+
+		err = actorSys.startClustering(ctx)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, assert.AnError)
+
+		clusterMock.AssertExpectations(t)
+	})
+
+	t.Run("returns error when clustering enabled without remoting", func(t *testing.T) {
+		ctx := context.TODO()
+
+		provider := mocksdiscovery.NewProvider(t)
+
+		clusterConfig := NewClusterConfig().
+			WithDiscovery(provider).
+			WithDiscoveryPort(30001).
+			WithPeersPort(30002).
+			WithKinds(NewMockActor())
+
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(log.DiscardLogger),
+			WithCluster(clusterConfig),
+		)
+		require.NoError(t, err)
+
+		err = sys.Start(ctx)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "clustering needs remoting to be enabled")
+		assert.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
 	})
 }
 
@@ -5319,6 +5659,78 @@ func TestRemotingSpawn(t *testing.T) {
 				assert.NoError(t, err)
 			},
 		)
+	})
+	t.Run("When registered type is not an actor", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		ports := dynaport.Get(1)
+		remotingPort := ports[0]
+		host := "127.0.0.1"
+
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		require.NoError(t, err)
+
+		require.NoError(t, sys.Start(ctx))
+
+		actual := sys.(*actorSystem)
+		actual.locker.Lock()
+		actual.registry.Register(new(MockUnimplementedActor))
+		actual.locker.Unlock()
+
+		remoting := remote.NewRemoting()
+		t.Cleanup(remoting.Close)
+
+		request := &remote.SpawnRequest{
+			Name: uuid.NewString(),
+			Kind: registry.Name(new(MockUnimplementedActor)),
+		}
+
+		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, gerrors.ErrInstanceNotAnActor.Error())
+
+		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
+	})
+	t.Run("With invalid dependencies", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		ports := dynaport.Get(1)
+		remotingPort := ports[0]
+		host := "127.0.0.1"
+
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		require.NoError(t, err)
+
+		require.NoError(t, sys.Start(ctx))
+
+		actual := sys.(*actorSystem)
+		actual.locker.Lock()
+		actual.registry.Register(new(MockActor))
+		actual.locker.Unlock()
+
+		remoting := remote.NewRemoting()
+		t.Cleanup(remoting.Close)
+
+		request := &remote.SpawnRequest{
+			Name: uuid.NewString(),
+			Kind: registry.Name(new(MockActor)),
+			Dependencies: []extension.Dependency{
+				new(MockFailingDependency),
+			},
+		}
+
+		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
+		require.Error(t, err)
+
+		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
 	})
 	t.Run("When remoting is not enabled", func(t *testing.T) {
 		// create the context

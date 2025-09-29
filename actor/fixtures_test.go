@@ -1295,6 +1295,9 @@ func MockReplicationTestSystem(clusterMock *mockcluster.Cluster) *actorSystem {
 	return sys
 }
 
+// MockUnimplementedActor deliberately does not implement the Actor interface to exercise reflection error paths.
+type MockUnimplementedActor struct{}
+
 // //////////////////////////////////////// CLUSTER PROVIDERS MOCKS //////////////////////////////////////
 type providerFactory func(t *testing.T, host string, discoveryPort int) discovery.Provider
 
