@@ -27,6 +27,7 @@ package cluster
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -37,11 +38,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/kapetan-io/tackle/autotls"
 	natsserver "github.com/nats-io/nats-server/v2/server"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tochemey/olric"
 	"github.com/tochemey/olric/events"
-	"github.com/tochemey/olric/stats"
 	"github.com/travisjeffery/go-dynaport"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
@@ -55,135 +56,6 @@ import (
 	mocksdiscovery "github.com/tochemey/goakt/v3/mocks/discovery"
 	gtls "github.com/tochemey/goakt/v3/tls"
 )
-
-type MockClient struct {
-	newDMapErr   error
-	newPubSubErr error
-	membersErr   error
-}
-
-// nolint
-func (f *MockClient) NewDMap(name string, options ...olric.DMapOption) (olric.DMap, error) {
-	if f.newDMapErr != nil {
-		return nil, f.newDMapErr
-	}
-	return &MockDMap{}, nil
-}
-
-// nolint
-func (f *MockClient) NewPubSub(options ...olric.PubSubOption) (*olric.PubSub, error) {
-	if f.newPubSubErr != nil {
-		return nil, f.newPubSubErr
-	}
-	panic("unexpected call to NewPubSub without error")
-}
-
-// nolint
-func (f *MockClient) Stats(ctx context.Context, address string, options ...olric.StatsOption) (stats.Stats, error) {
-	return stats.Stats{}, nil
-}
-
-// nolint
-func (f *MockClient) Ping(ctx context.Context, address, message string) (string, error) {
-	return "", nil
-}
-
-// nolint
-func (f *MockClient) RoutingTable(ctx context.Context) (olric.RoutingTable, error) {
-	return nil, nil
-}
-
-// nolint
-func (f *MockClient) Members(ctx context.Context) ([]olric.Member, error) {
-	if f.membersErr != nil {
-		return nil, f.membersErr
-	}
-	panic("unexpected call to Members without error")
-}
-
-// nolint
-func (f *MockClient) RefreshMetadata(ctx context.Context) error {
-	return nil
-}
-
-// nolint
-func (f *MockClient) Close(ctx context.Context) error {
-	return nil
-}
-
-type MockDMap struct {
-	putErr error
-}
-
-func (f *MockDMap) Name() string { return "fake-dmap" }
-
-// nolint
-func (f *MockDMap) Put(ctx context.Context, key string, value any, options ...olric.PutOption) error {
-	if f.putErr != nil {
-		return f.putErr
-	}
-	return nil
-}
-
-// nolint
-func (f *MockDMap) Get(ctx context.Context, key string) (*olric.GetResponse, error) {
-	panic("unexpected call to Get")
-}
-
-// nolint
-func (f *MockDMap) Delete(ctx context.Context, keys ...string) (int, error) {
-	panic("unexpected call to Delete")
-}
-
-// nolint
-func (f *MockDMap) Incr(ctx context.Context, key string, delta int) (int, error) {
-	panic("unexpected call to Incr")
-}
-
-// nolint
-func (f *MockDMap) Decr(ctx context.Context, key string, delta int) (int, error) {
-	panic("unexpected call to Decr")
-}
-
-// nolint
-func (f *MockDMap) GetPut(ctx context.Context, key string, value any) (*olric.GetResponse, error) {
-	panic("unexpected call to GetPut")
-}
-
-// nolint
-func (f *MockDMap) IncrByFloat(ctx context.Context, key string, delta float64) (float64, error) {
-	panic("unexpected call to IncrByFloat")
-}
-
-// nolint
-func (f *MockDMap) Expire(ctx context.Context, key string, timeout time.Duration) error {
-	panic("unexpected call to Expire")
-}
-
-// nolint
-func (f *MockDMap) Lock(ctx context.Context, key string, deadline time.Duration) (olric.LockContext, error) {
-	panic("unexpected call to Lock")
-}
-
-// nolint
-func (f *MockDMap) LockWithTimeout(ctx context.Context, key string, timeout, deadline time.Duration) (olric.LockContext, error) {
-	panic("unexpected call to LockWithTimeout")
-}
-
-// nolint
-func (f *MockDMap) Scan(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
-	panic("unexpected call to Scan")
-}
-
-// nolint
-func (f *MockDMap) Destroy(ctx context.Context) error {
-	panic("unexpected call to Destroy")
-}
-
-// nolint
-func (f *MockDMap) Pipeline(opts ...olric.PipelineOption) (*olric.DMapPipeline, error) {
-	panic("unexpected call to Pipeline")
-}
 
 func TestNotRunningReturnsErrEngineNotRunning(t *testing.T) {
 	ctx := context.Background()
@@ -1529,6 +1401,283 @@ func TestPutActorPropagatesDMapError(t *testing.T) {
 	require.ErrorIs(t, err, putErr)
 }
 
+func TestGetActorReturnsDMapError(t *testing.T) {
+	expectedErr := errors.New("get failure")
+	cl := &cluster{
+		running:     atomic.NewBool(true),
+		logger:      log.DiscardLogger,
+		readTimeout: time.Second,
+		dmap: &MockDMap{
+			getFn: func(ctx context.Context, key string) (*olric.GetResponse, error) {
+				require.Equal(t, composeKey(namespaceActors, "actor"), key)
+				return nil, expectedErr
+			},
+		},
+	}
+
+	actor, err := cl.GetActor(context.Background(), "actor")
+	require.Nil(t, actor)
+	require.ErrorIs(t, err, expectedErr)
+}
+
+func TestActorsReturnsScanError(t *testing.T) {
+	expectedErr := errors.New("scan failure")
+	cl := &cluster{
+		running: atomic.NewBool(true),
+		logger:  log.DiscardLogger,
+		dmap: &MockDMap{
+			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
+				return nil, expectedErr
+			},
+		},
+	}
+
+	actors, err := cl.Actors(context.Background(), time.Second)
+	require.Nil(t, actors)
+	require.ErrorIs(t, err, expectedErr)
+}
+
+func TestActorsPropagatesGetError(t *testing.T) {
+	expectedErr := errors.New("actors get failure")
+	cl := &cluster{
+		running: atomic.NewBool(true),
+		logger:  log.DiscardLogger,
+		dmap: &MockDMap{
+			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
+				return &iteratorStub{keys: []string{composeKey(namespaceActors, "actor")}}, nil
+			},
+			getFn: func(ctx context.Context, key string) (*olric.GetResponse, error) {
+				require.Equal(t, composeKey(namespaceActors, "actor"), key)
+				return nil, expectedErr
+			},
+		},
+	}
+
+	actors, err := cl.Actors(context.Background(), time.Second)
+	require.Nil(t, actors)
+	require.ErrorIs(t, err, expectedErr)
+}
+
+func TestActorsPropagatesByteError(t *testing.T) {
+	cl := &cluster{
+		running: atomic.NewBool(true),
+		logger:  log.DiscardLogger,
+		dmap: &MockDMap{
+			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
+				return &iteratorStub{keys: []string{composeKey(namespaceActors, "actor")}}, nil
+			},
+			getFn: func(ctx context.Context, key string) (*olric.GetResponse, error) {
+				require.Equal(t, composeKey(namespaceActors, "actor"), key)
+				return &olric.GetResponse{}, nil
+			},
+		},
+	}
+
+	actors, err := cl.Actors(context.Background(), time.Second)
+	require.Nil(t, actors)
+	require.ErrorIs(t, err, olric.ErrNilResponse)
+}
+
+func TestGetGrainReturnsDMapError(t *testing.T) {
+	expectedErr := errors.New("get failure")
+	cl := &cluster{
+		running:     atomic.NewBool(true),
+		logger:      log.DiscardLogger,
+		readTimeout: time.Second,
+		dmap: &MockDMap{
+			getFn: func(ctx context.Context, key string) (*olric.GetResponse, error) {
+				require.Equal(t, composeKey(namespaceGrains, "grain"), key)
+				return nil, expectedErr
+			},
+		},
+	}
+
+	grain, err := cl.GetGrain(context.Background(), "grain")
+	require.Nil(t, grain)
+	require.ErrorIs(t, err, expectedErr)
+}
+
+func TestGrainsReturnsScanError(t *testing.T) {
+	expectedErr := errors.New("scan failure")
+	cl := &cluster{
+		running: atomic.NewBool(true),
+		logger:  log.DiscardLogger,
+		dmap: &MockDMap{
+			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
+				return nil, expectedErr
+			},
+		},
+	}
+
+	grains, err := cl.Grains(context.Background(), time.Second)
+	require.Nil(t, grains)
+	require.ErrorIs(t, err, expectedErr)
+}
+
+func TestGrainsPropagatesGetError(t *testing.T) {
+	expectedErr := errors.New("grains get failure")
+	cl := &cluster{
+		running: atomic.NewBool(true),
+		logger:  log.DiscardLogger,
+		dmap: &MockDMap{
+			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
+				return &iteratorStub{keys: []string{composeKey(namespaceGrains, "grain")}}, nil
+			},
+			getFn: func(ctx context.Context, key string) (*olric.GetResponse, error) {
+				require.Equal(t, composeKey(namespaceGrains, "grain"), key)
+				return nil, expectedErr
+			},
+		},
+	}
+
+	grains, err := cl.Grains(context.Background(), time.Second)
+	require.Nil(t, grains)
+	require.ErrorIs(t, err, expectedErr)
+}
+
+func TestGrainsPropagatesByteError(t *testing.T) {
+	cl := &cluster{
+		running: atomic.NewBool(true),
+		logger:  log.DiscardLogger,
+		dmap: &MockDMap{
+			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
+				return &iteratorStub{keys: []string{composeKey(namespaceGrains, "grain")}}, nil
+			},
+			getFn: func(ctx context.Context, key string) (*olric.GetResponse, error) {
+				require.Equal(t, composeKey(namespaceGrains, "grain"), key)
+				return &olric.GetResponse{}, nil
+			},
+		},
+	}
+
+	grains, err := cl.Grains(context.Background(), time.Second)
+	require.Nil(t, grains)
+	require.ErrorIs(t, err, olric.ErrNilResponse)
+}
+
+func TestPutJobKeyPropagatesDMapError(t *testing.T) {
+	expectedErr := errors.New("put failure")
+	cl := &cluster{
+		running:      atomic.NewBool(true),
+		logger:       log.DiscardLogger,
+		writeTimeout: time.Second,
+		dmap:         &MockDMap{putErr: expectedErr},
+	}
+
+	err := cl.PutJobKey(context.Background(), "job", []byte("data"))
+	require.ErrorIs(t, err, expectedErr)
+}
+
+func TestPutJobKeyStoresMetadata(t *testing.T) {
+	ctx := context.Background()
+	jobID := "job"
+	metadata := []byte("payload")
+
+	cl := &cluster{
+		running:      atomic.NewBool(true),
+		logger:       log.DiscardLogger,
+		writeTimeout: time.Second,
+		dmap: &MockDMap{
+			putFn: func(_ context.Context, key string, value any, _ ...olric.PutOption) error {
+				require.Equal(t, composeKey(namespaceJobs, jobID), key)
+				require.Equal(t, metadata, value)
+				return nil
+			},
+		},
+	}
+
+	require.NoError(t, cl.PutJobKey(ctx, jobID, metadata))
+}
+
+func TestJobKeyReturnsDMapError(t *testing.T) {
+	expectedErr := errors.New("get failure")
+	cl := &cluster{
+		running:     atomic.NewBool(true),
+		logger:      log.DiscardLogger,
+		readTimeout: time.Second,
+		dmap: &MockDMap{
+			getFn: func(_ context.Context, key string) (*olric.GetResponse, error) {
+				require.Equal(t, composeKey(namespaceJobs, "job"), key)
+				return nil, expectedErr
+			},
+		},
+	}
+
+	value, err := cl.JobKey(context.Background(), "job")
+	require.Nil(t, value)
+	require.ErrorIs(t, err, expectedErr)
+}
+
+func TestJobKeyPropagatesByteError(t *testing.T) {
+	cl := &cluster{
+		running:     atomic.NewBool(true),
+		logger:      log.DiscardLogger,
+		readTimeout: time.Second,
+		dmap: &MockDMap{
+			getFn: func(_ context.Context, key string) (*olric.GetResponse, error) {
+				require.Equal(t, composeKey(namespaceJobs, "job"), key)
+				return &olric.GetResponse{}, nil
+			},
+		},
+	}
+
+	value, err := cl.JobKey(context.Background(), "job")
+	require.Nil(t, value)
+	require.ErrorIs(t, err, olric.ErrNilResponse)
+}
+
+func TestJobKeyReturnsMetadata(t *testing.T) {
+	metadata := []byte("payload")
+	cl := &cluster{
+		running:     atomic.NewBool(true),
+		logger:      log.DiscardLogger,
+		readTimeout: time.Second,
+		dmap: &MockDMap{
+			getFn: func(_ context.Context, key string) (*olric.GetResponse, error) {
+				require.Equal(t, composeKey(namespaceJobs, "job"), key)
+				return newGetResponseWithValue(metadata), nil
+			},
+		},
+	}
+
+	value, err := cl.JobKey(context.Background(), "job")
+	require.NoError(t, err)
+	require.Equal(t, metadata, value)
+}
+
+func TestDeleteJobKeyPropagatesError(t *testing.T) {
+	expectedErr := errors.New("delete failure")
+	cl := &cluster{
+		running:      atomic.NewBool(true),
+		logger:       log.DiscardLogger,
+		writeTimeout: time.Second,
+		dmap: &MockDMap{
+			deleteFn: func(_ context.Context, keys ...string) (int, error) {
+				require.Equal(t, []string{composeKey(namespaceJobs, "job")}, keys)
+				return 0, expectedErr
+			},
+		},
+	}
+
+	require.ErrorIs(t, cl.DeleteJobKey(context.Background(), "job"), expectedErr)
+}
+
+func TestDeleteJobKeySuccess(t *testing.T) {
+	cl := &cluster{
+		running:      atomic.NewBool(true),
+		logger:       log.DiscardLogger,
+		writeTimeout: time.Second,
+		dmap: &MockDMap{
+			deleteFn: func(_ context.Context, keys ...string) (int, error) {
+				require.Equal(t, []string{composeKey(namespaceJobs, "job")}, keys)
+				return 1, nil
+			},
+		},
+	}
+
+	require.NoError(t, cl.DeleteJobKey(context.Background(), "job"))
+}
+
 func TestCreateDMapReturnsClientError(t *testing.T) {
 	expectedErr := errors.New("boom")
 	cl := &cluster{client: &MockClient{newDMapErr: expectedErr}}
@@ -1595,4 +1744,251 @@ func TestIsLeaderReturnsFalseOnMembersError(t *testing.T) {
 
 	isLeader := cl.IsLeader(context.Background())
 	require.False(t, isLeader)
+}
+
+func TestEventsReturnsChannel(t *testing.T) {
+	ch := make(chan *Event)
+	cl := &cluster{events: ch}
+
+	go func() {
+		ch <- &Event{Type: NodeJoined}
+	}()
+
+	select {
+	case evt := <-cl.Events():
+		require.Equal(t, NodeJoined, evt.Type)
+	case <-time.After(time.Second):
+		t.Fatalf("expected event from channel")
+	}
+}
+
+func TestProcessNodeJoin(t *testing.T) {
+	now := time.Now().UnixNano()
+
+	t.Run("emits event", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 4000)
+		ev := events.NodeJoinEvent{NodeJoin: "127.0.0.1:5000", Timestamp: now}
+
+		cl.processNodeJoin(ev)
+
+		select {
+		case evt := <-cl.events:
+			require.Equal(t, NodeJoined, evt.Type)
+			msg, err := evt.Payload.UnmarshalNew()
+			require.NoError(t, err)
+			joined, ok := msg.(*goaktpb.NodeJoined)
+			require.True(t, ok)
+			require.Equal(t, ev.NodeJoin, joined.GetAddress())
+			require.Equal(t, ev.Timestamp/int64(time.Millisecond), joined.GetTimestamp().AsTime().UnixMilli())
+		default:
+			t.Fatalf("expected event")
+		}
+	})
+
+	t.Run("ignores self", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 5000)
+		ev := events.NodeJoinEvent{NodeJoin: cl.node.PeersAddress(), Timestamp: now}
+
+		cl.processNodeJoin(ev)
+
+		select {
+		case <-cl.events:
+			t.Fatalf("unexpected event")
+		default:
+		}
+	})
+
+	t.Run("deduplicates", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 6000)
+		ev := events.NodeJoinEvent{NodeJoin: "127.0.0.1:7000", Timestamp: now}
+
+		cl.processNodeJoin(ev)
+		<-cl.events
+		cl.processNodeJoin(ev)
+
+		select {
+		case <-cl.events:
+			t.Fatalf("expected no duplicate event")
+		default:
+		}
+	})
+}
+
+func TestProcessNodeLeft(t *testing.T) {
+	now := time.Now().UnixNano()
+
+	t.Run("emits event", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 4000)
+		ev := events.NodeLeftEvent{NodeLeft: "127.0.0.1:5000", Timestamp: now}
+
+		cl.processNodeLeft(ev)
+
+		select {
+		case evt := <-cl.events:
+			require.Equal(t, NodeLeft, evt.Type)
+			msg, err := evt.Payload.UnmarshalNew()
+			require.NoError(t, err)
+			left, ok := msg.(*goaktpb.NodeLeft)
+			require.True(t, ok)
+			require.Equal(t, ev.NodeLeft, left.GetAddress())
+			require.Equal(t, ev.Timestamp/int64(time.Millisecond), left.GetTimestamp().AsTime().UnixMilli())
+		default:
+			t.Fatalf("expected event")
+		}
+	})
+
+	t.Run("deduplicates", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 5000)
+		ev := events.NodeLeftEvent{NodeLeft: "127.0.0.1:6000", Timestamp: now}
+
+		cl.processNodeLeft(ev)
+		<-cl.events
+		cl.processNodeLeft(ev)
+
+		select {
+		case <-cl.events:
+			t.Fatalf("expected no duplicate event")
+		default:
+		}
+	})
+}
+
+func TestHandleClusterEventSuccessCases(t *testing.T) {
+	now := time.Now().UnixNano()
+
+	t.Run("node join", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 4000)
+		payload, err := json.Marshal(events.NodeJoinEvent{
+			Kind:      events.KindNodeJoinEvent,
+			NodeJoin:  "127.0.0.1:7000",
+			Timestamp: now,
+		})
+		require.NoError(t, err)
+
+		require.NoError(t, cl.handleClusterEvent(string(payload)))
+
+		select {
+		case evt := <-cl.events:
+			require.Equal(t, NodeJoined, evt.Type)
+		default:
+			t.Fatalf("expected node join event")
+		}
+	})
+
+	t.Run("node left", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 5000)
+		payload, err := json.Marshal(events.NodeLeftEvent{
+			Kind:      events.KindNodeLeftEvent,
+			NodeLeft:  "127.0.0.1:8000",
+			Timestamp: now,
+		})
+		require.NoError(t, err)
+
+		require.NoError(t, cl.handleClusterEvent(string(payload)))
+
+		select {
+		case evt := <-cl.events:
+			require.Equal(t, NodeLeft, evt.Type)
+		default:
+			t.Fatalf("expected node left event")
+		}
+	})
+}
+
+func TestHandleClusterEventUnknownKind(t *testing.T) {
+	cl := newEventTestCluster("127.0.0.1", 4000)
+
+	require.NoError(t, cl.handleClusterEvent(`{"kind":"noop"}`))
+
+	select {
+	case <-cl.events:
+		t.Fatalf("unexpected event")
+	default:
+	}
+}
+
+func TestConsumeDispatchesClusterEvents(t *testing.T) {
+	cl := newEventTestCluster("127.0.0.1", 4000)
+	msgs := make(chan *redis.Message, 1)
+	cl.messages = msgs
+
+	done := make(chan struct{})
+	go func() {
+		cl.consume()
+		close(done)
+	}()
+
+	payload, err := json.Marshal(events.NodeJoinEvent{
+		Kind:      events.KindNodeJoinEvent,
+		NodeJoin:  "127.0.0.1:9000",
+		Timestamp: time.Now().UnixNano(),
+	})
+	require.NoError(t, err)
+
+	msgs <- &redis.Message{Channel: events.ClusterEventsChannel, Payload: string(payload)}
+
+	select {
+	case evt := <-cl.events:
+		require.Equal(t, NodeJoined, evt.Type)
+	case <-time.After(time.Second):
+		t.Fatalf("expected event from consume")
+	}
+
+	close(msgs)
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatalf("consume did not exit")
+	}
+}
+
+func TestPeersFiltersSelfAndParsesMeta(t *testing.T) {
+	cl := &cluster{
+		running: atomic.NewBool(true),
+		logger:  log.DiscardLogger,
+		node:    &discovery.Node{Host: "127.0.0.1", PeersPort: 4000},
+	}
+
+	other := &discovery.Node{Host: "10.0.0.1", PeersPort: 5000, RemotingPort: 7000}
+	selfMeta, err := json.Marshal(cl.node)
+	require.NoError(t, err)
+	otherMeta, err := json.Marshal(other)
+	require.NoError(t, err)
+
+	cl.client = &fakeClient{
+		MockClient: &MockClient{},
+		members: []olric.Member{
+			{Name: cl.node.PeersAddress(), Coordinator: true, Meta: string(selfMeta)},
+			{Name: other.PeersAddress(), Coordinator: false, Meta: string(otherMeta)},
+		},
+	}
+
+	peers, err := cl.Peers(context.Background())
+	require.NoError(t, err)
+	require.Len(t, peers, 1)
+	require.Equal(t, other.Host, peers[0].Host)
+	require.Equal(t, other.PeersPort, peers[0].PeersPort)
+	require.Equal(t, other.RemotingPort, peers[0].RemotingPort)
+	require.False(t, peers[0].Coordinator)
+}
+
+func TestIsLeaderReturnsTrueWhenCoordinator(t *testing.T) {
+	cl := &cluster{
+		running: atomic.NewBool(true),
+		logger:  log.DiscardLogger,
+		node:    &discovery.Node{Host: "127.0.0.1", PeersPort: 4000},
+	}
+
+	meta, err := json.Marshal(cl.node)
+	require.NoError(t, err)
+
+	cl.client = &fakeClient{
+		MockClient: &MockClient{},
+		members: []olric.Member{
+			{Name: cl.node.PeersAddress(), Coordinator: true, Meta: string(meta)},
+		},
+	}
+
+	require.True(t, cl.IsLeader(context.Background()))
 }
