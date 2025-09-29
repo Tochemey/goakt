@@ -1408,7 +1408,7 @@ func TestGetActorReturnsDMapError(t *testing.T) {
 		logger:      log.DiscardLogger,
 		readTimeout: time.Second,
 		dmap: &MockDMap{
-			getFn: func(ctx context.Context, key string) (*olric.GetResponse, error) {
+			getFn: func(ctx context.Context, key string) (*olric.GetResponse, error) { // nolint
 				require.Equal(t, composeKey(namespaceActors, "actor"), key)
 				return nil, expectedErr
 			},
@@ -1420,6 +1420,7 @@ func TestGetActorReturnsDMapError(t *testing.T) {
 	require.ErrorIs(t, err, expectedErr)
 }
 
+// nolint
 func TestActorsReturnsScanError(t *testing.T) {
 	expectedErr := errors.New("scan failure")
 	cl := &cluster{
@@ -1437,6 +1438,7 @@ func TestActorsReturnsScanError(t *testing.T) {
 	require.ErrorIs(t, err, expectedErr)
 }
 
+// nolint
 func TestActorsPropagatesGetError(t *testing.T) {
 	expectedErr := errors.New("actors get failure")
 	cl := &cluster{
@@ -1458,6 +1460,7 @@ func TestActorsPropagatesGetError(t *testing.T) {
 	require.ErrorIs(t, err, expectedErr)
 }
 
+// nolint
 func TestActorsPropagatesByteError(t *testing.T) {
 	cl := &cluster{
 		running: atomic.NewBool(true),
@@ -1478,6 +1481,7 @@ func TestActorsPropagatesByteError(t *testing.T) {
 	require.ErrorIs(t, err, olric.ErrNilResponse)
 }
 
+// nolint
 func TestGetGrainReturnsDMapError(t *testing.T) {
 	expectedErr := errors.New("get failure")
 	cl := &cluster{
@@ -1497,6 +1501,7 @@ func TestGetGrainReturnsDMapError(t *testing.T) {
 	require.ErrorIs(t, err, expectedErr)
 }
 
+// nolint
 func TestGrainsReturnsScanError(t *testing.T) {
 	expectedErr := errors.New("scan failure")
 	cl := &cluster{
@@ -1514,6 +1519,7 @@ func TestGrainsReturnsScanError(t *testing.T) {
 	require.ErrorIs(t, err, expectedErr)
 }
 
+// nolint
 func TestGrainsPropagatesGetError(t *testing.T) {
 	expectedErr := errors.New("grains get failure")
 	cl := &cluster{
@@ -1535,6 +1541,7 @@ func TestGrainsPropagatesGetError(t *testing.T) {
 	require.ErrorIs(t, err, expectedErr)
 }
 
+// nolint
 func TestGrainsPropagatesByteError(t *testing.T) {
 	cl := &cluster{
 		running: atomic.NewBool(true),
@@ -1555,6 +1562,7 @@ func TestGrainsPropagatesByteError(t *testing.T) {
 	require.ErrorIs(t, err, olric.ErrNilResponse)
 }
 
+// nolint
 func TestPutJobKeyPropagatesDMapError(t *testing.T) {
 	expectedErr := errors.New("put failure")
 	cl := &cluster{
@@ -1568,6 +1576,7 @@ func TestPutJobKeyPropagatesDMapError(t *testing.T) {
 	require.ErrorIs(t, err, expectedErr)
 }
 
+// nolint
 func TestPutJobKeyStoresMetadata(t *testing.T) {
 	ctx := context.Background()
 	jobID := "job"
@@ -1589,6 +1598,7 @@ func TestPutJobKeyStoresMetadata(t *testing.T) {
 	require.NoError(t, cl.PutJobKey(ctx, jobID, metadata))
 }
 
+// nolint
 func TestJobKeyReturnsDMapError(t *testing.T) {
 	expectedErr := errors.New("get failure")
 	cl := &cluster{
@@ -1608,6 +1618,7 @@ func TestJobKeyReturnsDMapError(t *testing.T) {
 	require.ErrorIs(t, err, expectedErr)
 }
 
+// nolint
 func TestJobKeyPropagatesByteError(t *testing.T) {
 	cl := &cluster{
 		running:     atomic.NewBool(true),
@@ -1626,6 +1637,7 @@ func TestJobKeyPropagatesByteError(t *testing.T) {
 	require.ErrorIs(t, err, olric.ErrNilResponse)
 }
 
+// nolint
 func TestJobKeyReturnsMetadata(t *testing.T) {
 	metadata := []byte("payload")
 	cl := &cluster{
@@ -1645,6 +1657,7 @@ func TestJobKeyReturnsMetadata(t *testing.T) {
 	require.Equal(t, metadata, value)
 }
 
+// nolint
 func TestDeleteJobKeyPropagatesError(t *testing.T) {
 	expectedErr := errors.New("delete failure")
 	cl := &cluster{
@@ -1662,6 +1675,7 @@ func TestDeleteJobKeyPropagatesError(t *testing.T) {
 	require.ErrorIs(t, cl.DeleteJobKey(context.Background(), "job"), expectedErr)
 }
 
+// nolint
 func TestDeleteJobKeySuccess(t *testing.T) {
 	cl := &cluster{
 		running:      atomic.NewBool(true),
@@ -1678,6 +1692,7 @@ func TestDeleteJobKeySuccess(t *testing.T) {
 	require.NoError(t, cl.DeleteJobKey(context.Background(), "job"))
 }
 
+// nolint
 func TestCreateDMapReturnsClientError(t *testing.T) {
 	expectedErr := errors.New("boom")
 	cl := &cluster{client: &MockClient{newDMapErr: expectedErr}}
@@ -1686,6 +1701,7 @@ func TestCreateDMapReturnsClientError(t *testing.T) {
 	require.ErrorIs(t, err, expectedErr)
 }
 
+// nolint
 func TestCreateSubscriptionReturnsClientError(t *testing.T) {
 	expectedErr := errors.New("boom")
 	cl := &cluster{
@@ -1697,12 +1713,14 @@ func TestCreateSubscriptionReturnsClientError(t *testing.T) {
 	require.ErrorIs(t, err, expectedErr)
 }
 
+// nolint
 func TestHandleClusterEventInvalidEnvelope(t *testing.T) {
 	cl := &cluster{}
 	err := cl.handleClusterEvent("not-json")
 	require.ErrorContains(t, err, "unmarshal cluster event envelope")
 }
 
+// nolint
 func TestHandleClusterEventInvalidNodeJoin(t *testing.T) {
 	cl := &cluster{}
 	payload := `{"kind":"` + events.KindNodeJoinEvent + `","node_join":123}`
@@ -1711,6 +1729,7 @@ func TestHandleClusterEventInvalidNodeJoin(t *testing.T) {
 	require.ErrorContains(t, err, "unmarshal node join")
 }
 
+// nolint
 func TestHandleClusterEventInvalidNodeLeft(t *testing.T) {
 	cl := &cluster{}
 	payload := `{"kind":"` + events.KindNodeLeftEvent + `","node_left":123}`
@@ -1719,6 +1738,7 @@ func TestHandleClusterEventInvalidNodeLeft(t *testing.T) {
 	require.ErrorContains(t, err, "unmarshal node left")
 }
 
+// nolint
 func TestPeersReturnsClientError(t *testing.T) {
 	expectedErr := errors.New("members failure")
 	cl := &cluster{
@@ -1733,6 +1753,7 @@ func TestPeersReturnsClientError(t *testing.T) {
 	require.ErrorIs(t, err, expectedErr)
 }
 
+// nolint
 func TestIsLeaderReturnsFalseOnMembersError(t *testing.T) {
 	expectedErr := errors.New("members failure")
 	cl := &cluster{
@@ -1746,6 +1767,7 @@ func TestIsLeaderReturnsFalseOnMembersError(t *testing.T) {
 	require.False(t, isLeader)
 }
 
+// nolint
 func TestEventsReturnsChannel(t *testing.T) {
 	ch := make(chan *Event)
 	cl := &cluster{events: ch}
@@ -1762,6 +1784,7 @@ func TestEventsReturnsChannel(t *testing.T) {
 	}
 }
 
+// nolint
 func TestProcessNodeJoin(t *testing.T) {
 	now := time.Now().UnixNano()
 
@@ -1814,6 +1837,7 @@ func TestProcessNodeJoin(t *testing.T) {
 	})
 }
 
+// nolint
 func TestProcessNodeLeft(t *testing.T) {
 	now := time.Now().UnixNano()
 
@@ -1853,6 +1877,7 @@ func TestProcessNodeLeft(t *testing.T) {
 	})
 }
 
+// nolint
 func TestHandleClusterEventSuccessCases(t *testing.T) {
 	now := time.Now().UnixNano()
 
@@ -1895,6 +1920,7 @@ func TestHandleClusterEventSuccessCases(t *testing.T) {
 	})
 }
 
+// nolint
 func TestHandleClusterEventUnknownKind(t *testing.T) {
 	cl := newEventTestCluster("127.0.0.1", 4000)
 
@@ -1907,6 +1933,7 @@ func TestHandleClusterEventUnknownKind(t *testing.T) {
 	}
 }
 
+// nolint
 func TestConsumeDispatchesClusterEvents(t *testing.T) {
 	cl := newEventTestCluster("127.0.0.1", 4000)
 	msgs := make(chan *redis.Message, 1)
@@ -1943,6 +1970,7 @@ func TestConsumeDispatchesClusterEvents(t *testing.T) {
 	}
 }
 
+// nolint
 func TestPeersFiltersSelfAndParsesMeta(t *testing.T) {
 	cl := &cluster{
 		running: atomic.NewBool(true),
@@ -1973,6 +2001,7 @@ func TestPeersFiltersSelfAndParsesMeta(t *testing.T) {
 	require.False(t, peers[0].Coordinator)
 }
 
+// nolint
 func TestIsLeaderReturnsTrueWhenCoordinator(t *testing.T) {
 	cl := &cluster{
 		running: atomic.NewBool(true),

@@ -201,6 +201,7 @@ type fakeClient struct {
 	members []olric.Member
 }
 
+// nolint
 func (f *fakeClient) Members(ctx context.Context) ([]olric.Member, error) {
 	if f.MockClient != nil && f.MockClient.membersErr != nil {
 		return nil, f.MockClient.membersErr
