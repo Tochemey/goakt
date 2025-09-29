@@ -28,7 +28,7 @@ jobs:
             runner: ubuntu-latest
     env:
       TZ: UTC
-      CGO_ENABLED: "0"
+      CGO_ENABLED: "1"
       GOTOOLCHAIN: local        # avoid auto-upgrading the toolchain
       # Stabilise tests that rely on randomness/time
       GOFLAGS: -mod=readonly
