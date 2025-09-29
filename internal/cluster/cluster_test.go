@@ -27,6 +27,7 @@ package cluster
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
@@ -38,7 +39,11 @@ import (
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tochemey/olric"
+	"github.com/tochemey/olric/events"
+	"github.com/tochemey/olric/stats"
 	"github.com/travisjeffery/go-dynaport"
+	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v3/discovery"
@@ -50,6 +55,135 @@ import (
 	mocksdiscovery "github.com/tochemey/goakt/v3/mocks/discovery"
 	gtls "github.com/tochemey/goakt/v3/tls"
 )
+
+type MockClient struct {
+	newDMapErr   error
+	newPubSubErr error
+	membersErr   error
+}
+
+// nolint
+func (f *MockClient) NewDMap(name string, options ...olric.DMapOption) (olric.DMap, error) {
+	if f.newDMapErr != nil {
+		return nil, f.newDMapErr
+	}
+	return &MockDMap{}, nil
+}
+
+// nolint
+func (f *MockClient) NewPubSub(options ...olric.PubSubOption) (*olric.PubSub, error) {
+	if f.newPubSubErr != nil {
+		return nil, f.newPubSubErr
+	}
+	panic("unexpected call to NewPubSub without error")
+}
+
+// nolint
+func (f *MockClient) Stats(ctx context.Context, address string, options ...olric.StatsOption) (stats.Stats, error) {
+	return stats.Stats{}, nil
+}
+
+// nolint
+func (f *MockClient) Ping(ctx context.Context, address, message string) (string, error) {
+	return "", nil
+}
+
+// nolint
+func (f *MockClient) RoutingTable(ctx context.Context) (olric.RoutingTable, error) {
+	return nil, nil
+}
+
+// nolint
+func (f *MockClient) Members(ctx context.Context) ([]olric.Member, error) {
+	if f.membersErr != nil {
+		return nil, f.membersErr
+	}
+	panic("unexpected call to Members without error")
+}
+
+// nolint
+func (f *MockClient) RefreshMetadata(ctx context.Context) error {
+	return nil
+}
+
+// nolint
+func (f *MockClient) Close(ctx context.Context) error {
+	return nil
+}
+
+type MockDMap struct {
+	putErr error
+}
+
+func (f *MockDMap) Name() string { return "fake-dmap" }
+
+// nolint
+func (f *MockDMap) Put(ctx context.Context, key string, value any, options ...olric.PutOption) error {
+	if f.putErr != nil {
+		return f.putErr
+	}
+	return nil
+}
+
+// nolint
+func (f *MockDMap) Get(ctx context.Context, key string) (*olric.GetResponse, error) {
+	panic("unexpected call to Get")
+}
+
+// nolint
+func (f *MockDMap) Delete(ctx context.Context, keys ...string) (int, error) {
+	panic("unexpected call to Delete")
+}
+
+// nolint
+func (f *MockDMap) Incr(ctx context.Context, key string, delta int) (int, error) {
+	panic("unexpected call to Incr")
+}
+
+// nolint
+func (f *MockDMap) Decr(ctx context.Context, key string, delta int) (int, error) {
+	panic("unexpected call to Decr")
+}
+
+// nolint
+func (f *MockDMap) GetPut(ctx context.Context, key string, value any) (*olric.GetResponse, error) {
+	panic("unexpected call to GetPut")
+}
+
+// nolint
+func (f *MockDMap) IncrByFloat(ctx context.Context, key string, delta float64) (float64, error) {
+	panic("unexpected call to IncrByFloat")
+}
+
+// nolint
+func (f *MockDMap) Expire(ctx context.Context, key string, timeout time.Duration) error {
+	panic("unexpected call to Expire")
+}
+
+// nolint
+func (f *MockDMap) Lock(ctx context.Context, key string, deadline time.Duration) (olric.LockContext, error) {
+	panic("unexpected call to Lock")
+}
+
+// nolint
+func (f *MockDMap) LockWithTimeout(ctx context.Context, key string, timeout, deadline time.Duration) (olric.LockContext, error) {
+	panic("unexpected call to LockWithTimeout")
+}
+
+// nolint
+func (f *MockDMap) Scan(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
+	panic("unexpected call to Scan")
+}
+
+// nolint
+func (f *MockDMap) Destroy(ctx context.Context) error {
+	panic("unexpected call to Destroy")
+}
+
+// nolint
+func (f *MockDMap) Pipeline(opts ...olric.PipelineOption) (*olric.DMapPipeline, error) {
+	panic("unexpected call to Pipeline")
+}
 
 func TestNotRunningReturnsErrEngineNotRunning(t *testing.T) {
 	ctx := context.Background()
@@ -1360,4 +1494,105 @@ func startEngineWithTLS(t *testing.T, serverAddr string, server, client *tls.Con
 
 	// return the cluster node
 	return engine, provider
+}
+
+func TestPutGrainReturnsErrorWhenIDMissing(t *testing.T) {
+	cl := &cluster{
+		running: atomic.NewBool(true),
+	}
+
+	err := cl.PutGrain(context.Background(), &internalpb.Grain{})
+	require.EqualError(t, err, "grain id is not set")
+}
+
+func TestPutGrainReturnsErrorWhenIDValueEmpty(t *testing.T) {
+	cl := &cluster{
+		running: atomic.NewBool(true),
+	}
+
+	grain := &internalpb.Grain{GrainId: &internalpb.GrainId{Value: ""}}
+	err := cl.PutGrain(context.Background(), grain)
+	require.EqualError(t, err, "grain id value is empty")
+}
+
+func TestPutActorPropagatesDMapError(t *testing.T) {
+	putErr := errors.New("put failure")
+	cl := &cluster{
+		running:      atomic.NewBool(true),
+		dmap:         &MockDMap{putErr: putErr},
+		logger:       log.DiscardLogger,
+		writeTimeout: time.Second,
+	}
+
+	actor := &internalpb.Actor{}
+	err := cl.PutActor(context.Background(), actor)
+	require.ErrorIs(t, err, putErr)
+}
+
+func TestCreateDMapReturnsClientError(t *testing.T) {
+	expectedErr := errors.New("boom")
+	cl := &cluster{client: &MockClient{newDMapErr: expectedErr}}
+
+	err := cl.createDMap()
+	require.ErrorIs(t, err, expectedErr)
+}
+
+func TestCreateSubscriptionReturnsClientError(t *testing.T) {
+	expectedErr := errors.New("boom")
+	cl := &cluster{
+		client: &MockClient{newPubSubErr: expectedErr},
+		node:   &discovery.Node{Host: "127.0.0.1", PeersPort: 4000},
+	}
+
+	err := cl.createSubscription(context.Background())
+	require.ErrorIs(t, err, expectedErr)
+}
+
+func TestHandleClusterEventInvalidEnvelope(t *testing.T) {
+	cl := &cluster{}
+	err := cl.handleClusterEvent("not-json")
+	require.ErrorContains(t, err, "unmarshal cluster event envelope")
+}
+
+func TestHandleClusterEventInvalidNodeJoin(t *testing.T) {
+	cl := &cluster{}
+	payload := `{"kind":"` + events.KindNodeJoinEvent + `","node_join":123}`
+
+	err := cl.handleClusterEvent(payload)
+	require.ErrorContains(t, err, "unmarshal node join")
+}
+
+func TestHandleClusterEventInvalidNodeLeft(t *testing.T) {
+	cl := &cluster{}
+	payload := `{"kind":"` + events.KindNodeLeftEvent + `","node_left":123}`
+
+	err := cl.handleClusterEvent(payload)
+	require.ErrorContains(t, err, "unmarshal node left")
+}
+
+func TestPeersReturnsClientError(t *testing.T) {
+	expectedErr := errors.New("members failure")
+	cl := &cluster{
+		running: atomic.NewBool(true),
+		client:  &MockClient{membersErr: expectedErr},
+		logger:  log.DiscardLogger,
+		node:    &discovery.Node{Host: "127.0.0.1", PeersPort: 9000},
+	}
+
+	peers, err := cl.Peers(context.Background())
+	require.Nil(t, peers)
+	require.ErrorIs(t, err, expectedErr)
+}
+
+func TestIsLeaderReturnsFalseOnMembersError(t *testing.T) {
+	expectedErr := errors.New("members failure")
+	cl := &cluster{
+		running: atomic.NewBool(true),
+		client:  &MockClient{membersErr: expectedErr},
+		logger:  log.DiscardLogger,
+		node:    &discovery.Node{Host: "127.0.0.1", PeersPort: 9000},
+	}
+
+	isLeader := cl.IsLeader(context.Background())
+	require.False(t, isLeader)
 }

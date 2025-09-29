@@ -50,8 +50,10 @@ import (
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
+	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
+	mockcluster "github.com/tochemey/goakt/v3/mocks/cluster"
 	"github.com/tochemey/goakt/v3/passivation"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
@@ -1257,6 +1259,40 @@ func (d *MockFailingDependency) MarshalBinary() ([]byte, error) {
 
 func (d *MockFailingDependency) UnmarshalBinary(_ []byte) error {
 	return nil
+}
+
+func MockReplicationTestSystem(clusterMock *mockcluster.Cluster) *actorSystem {
+	topic := &PID{}
+	topic.running.Store(false)
+	noSender := &PID{}
+	noSender.running.Store(true)
+
+	sys := &actorSystem{
+		name:               "test-replication",
+		logger:             log.DiscardLogger,
+		actorsQueue:        make(chan *internalpb.Actor, 4),
+		grainsQueue:        make(chan *internalpb.Grain, 4),
+		remoteConfig:       remote.NewConfig("127.0.0.1", 8080),
+		clusterNode:        &discovery.Node{Host: "127.0.0.1", PeersPort: 9000},
+		locker:             &sync.RWMutex{},
+		cluster:            clusterMock,
+		started:            atomic.NewBool(true),
+		starting:           atomic.NewBool(false),
+		shuttingDown:       atomic.NewBool(false),
+		startedAt:          atomic.NewInt64(time.Now().Unix()),
+		spawnOnNext:        atomic.NewUint32(0),
+		actorsCounter:      atomic.NewUint64(0),
+		deadlettersCounter: atomic.NewUint64(0),
+		topicActor:         topic,
+		noSender:           noSender,
+	}
+
+	sys.clusterEnabled.Store(true)
+	sys.relocationEnabled.Store(false) // callers toggle when needed
+	sys.noSender.system = sys
+	sys.topicActor.system = sys
+
+	return sys
 }
 
 // //////////////////////////////////////// CLUSTER PROVIDERS MOCKS //////////////////////////////////////
