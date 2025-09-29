@@ -26,6 +26,14 @@ jobs:
         include:
           - os: linux
             runner: ubuntu-latest
+
+    env:
+      TZ: UTC
+      CGO_ENABLED: "0"          # flip to "1" if you need CGO and install libs
+      GOTOOLCHAIN: local        # avoid auto-upgrading the toolchain
+      # Stabilise tests that rely on randomness/time
+      GOFLAGS: -mod=readonly
+
     steps:
       - uses: actions/checkout@v5
         with:
