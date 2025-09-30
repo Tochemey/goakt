@@ -6596,7 +6596,6 @@ func TestResyncActors_ErrorPaths(t *testing.T) {
 	pid := &PID{
 		actor:        NewMockActor(),
 		address:      address.New("resync-actor", system.name, "127.0.0.1", int(system.remoteConfig.BindPort())),
-		fieldsLocker: &sync.RWMutex{},
 		dependencies: collection.NewMap[string, extension.Dependency](),
 		logger:       log.DiscardLogger,
 		system:       system,
@@ -6722,8 +6721,7 @@ func TestStopReturnsCleanupClusterError(t *testing.T) {
 	system := MockReplicationTestSystem(clusterMock)
 	system.grains = collection.NewMap[string, *grainPID]()
 	system.extensions = collection.NewMap[string, extension.Extension]()
-	system.rebalancing = atomic.NewBool(false)
-	system.rebalanceLocker = &sync.Mutex{}
+	system.rebalancing.Store(false)
 	system.actors = newTree()
 	system.actors.noSender = nil
 	system.noSender = nil
@@ -6741,7 +6739,6 @@ func TestStopReturnsCleanupClusterError(t *testing.T) {
 	pid := &PID{
 		actor:        NewMockActor(),
 		address:      address.New("actor", system.name, "127.0.0.1", 8080),
-		fieldsLocker: &sync.RWMutex{},
 		dependencies: collection.NewMap[string, extension.Dependency](),
 		logger:       log.DiscardLogger,
 		system:       system,

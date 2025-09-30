@@ -111,22 +111,22 @@ type PID struct {
 
 	// various lockers to protect the PID fields
 	// in a concurrent environment
-	fieldsLocker *sync.RWMutex
-	stopLocker   *sync.Mutex
+	fieldsLocker sync.RWMutex
+	stopLocker   sync.Mutex
 
 	// specifies the actor behavior stack
 	behaviorStack *behaviorStack
 
 	// stash settings
 	stashBox    *UnboundedMailbox
-	stashLocker *sync.Mutex
+	stashLocker sync.Mutex
 
 	// define an events stream
 	eventsStream eventstream.Stream
 
 	// set the metrics settings
-	restartCount   *atomic.Int64
-	processedCount *atomic.Int64
+	restartCount   atomic.Int64
+	processedCount atomic.Int64
 
 	// supervisor strategy
 	supervisor            *Supervisor
@@ -138,7 +138,7 @@ type PID struct {
 
 	remoting remote.Remoting
 
-	startedAt   *atomic.Int64
+	startedAt   atomic.Int64
 	isSingleton atomic.Bool
 	relocatable atomic.Bool
 	isSystem    atomic.Bool
@@ -152,7 +152,7 @@ type PID struct {
 	passivating atomic.Bool
 
 	passivationStrategy passivation.Strategy
-	passivationPaused   *atomic.Bool
+	passivationPaused   atomic.Bool
 }
 
 // newPID creates a new pid
@@ -173,26 +173,21 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		haltPassivationLnr:    make(chan registry.Unit, 1),
 		logger:                log.New(log.ErrorLevel, os.Stderr),
 		address:               address,
-		fieldsLocker:          new(sync.RWMutex),
-		stopLocker:            new(sync.Mutex),
 		mailbox:               NewUnboundedMailbox(),
-		stashBox:              nil,
-		stashLocker:           &sync.Mutex{},
-		eventsStream:          nil,
-		restartCount:          atomic.NewInt64(0),
-		processedCount:        atomic.NewInt64(0),
 		supervisionChan:       make(chan *supervisionSignal, 1),
 		supervisionStopSignal: make(chan registry.Unit, 1),
 		remoting:              remote.NewRemoting(),
 		supervisor:            NewSupervisor(),
-		startedAt:             atomic.NewInt64(0),
 		dependencies:          collection.NewMap[string, extension.Dependency](),
 		passivationStrategy:   passivation.NewTimeBasedStrategy(DefaultPassivationTimeout),
-		passivationPaused:     atomic.NewBool(false),
 	}
 
 	pid.initMaxRetries.Store(DefaultInitMaxRetries)
 	pid.latestReceiveDuration.Store(0)
+	pid.passivationPaused.Store(false)
+	pid.processedCount.Store(0)
+	pid.startedAt.Store(0)
+	pid.restartCount.Store(0)
 	pid.isSingleton.Store(false)
 	pid.running.Store(false)
 	pid.stopping.Store(false)

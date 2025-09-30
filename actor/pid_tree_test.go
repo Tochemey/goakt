@@ -25,7 +25,6 @@
 package actor
 
 import (
-	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -36,12 +35,10 @@ import (
 	"github.com/tochemey/goakt/v3/internal/collection"
 )
 
-func newTestPID(system ActorSystem, name string, port int) *PID {
+func MockPID(system ActorSystem, name string, port int) *PID {
 	return &PID{
-		address:      address.New(name, system.Name(), "host", port),
-		fieldsLocker: &sync.RWMutex{},
-		stopLocker:   &sync.Mutex{},
-		system:       system,
+		address: address.New(name, system.Name(), "host", port),
+		system:  system,
 	}
 }
 
@@ -49,12 +46,12 @@ func TestTree(t *testing.T) {
 	ports := dynaport.Get(1)
 	actorSystem, _ := NewActorSystem("TestSys")
 
-	a := &PID{address: address.New("a", "TestSys", "host", ports[0]), fieldsLocker: &sync.RWMutex{}, stopLocker: &sync.Mutex{}, system: actorSystem}
-	b := &PID{address: address.New("b", "TestSys", "host", ports[0]), fieldsLocker: &sync.RWMutex{}, stopLocker: &sync.Mutex{}, system: actorSystem}
-	c := &PID{address: address.New("c", "TestSys", "host", ports[0]), fieldsLocker: &sync.RWMutex{}, stopLocker: &sync.Mutex{}, system: actorSystem}
-	d := &PID{address: address.New("d", "TestSys", "host", ports[0]), fieldsLocker: &sync.RWMutex{}, stopLocker: &sync.Mutex{}, system: actorSystem}
-	e := &PID{address: address.New("e", "TestSys", "host", ports[0]), fieldsLocker: &sync.RWMutex{}, stopLocker: &sync.Mutex{}, system: actorSystem}
-	f := &PID{address: address.New("f", "TestSys", "host", ports[0]), fieldsLocker: &sync.RWMutex{}, stopLocker: &sync.Mutex{}, system: actorSystem}
+	a := MockPID(actorSystem, "a", ports[0])
+	b := MockPID(actorSystem, "b", ports[0])
+	c := MockPID(actorSystem, "c", ports[0])
+	d := MockPID(actorSystem, "d", ports[0])
+	e := MockPID(actorSystem, "e", ports[0])
+	f := MockPID(actorSystem, "f", ports[0])
 
 	tree := newTree()
 
@@ -220,8 +217,8 @@ func TestTree(t *testing.T) {
 func TestAddNode(t *testing.T) {
 	ports := dynaport.Get(2)
 	actorSystem, _ := NewActorSystem("TestSys")
-	a := &PID{address: address.New("a", "TestSys", "host", ports[0]), fieldsLocker: &sync.RWMutex{}, stopLocker: &sync.Mutex{}, system: actorSystem}
-	b := &PID{address: address.New("b", "TestSys", "host", ports[0]), fieldsLocker: &sync.RWMutex{}, stopLocker: &sync.Mutex{}, system: actorSystem}
+	a := MockPID(actorSystem, "a", ports[0])
+	b := MockPID(actorSystem, "b", ports[0])
 
 	tree := newTree()
 	require.NoError(t, tree.addRootNode(a))
@@ -251,10 +248,9 @@ func TestAddNode(t *testing.T) {
 func TestAddWatcher(t *testing.T) {
 	ports := dynaport.Get(3)
 	actorSystem, _ := NewActorSystem("TestSys")
-	a := &PID{address: address.New("a", "TestSys", "host", ports[0]), fieldsLocker: &sync.RWMutex{}, stopLocker: &sync.Mutex{}, system: actorSystem}
-	b := &PID{address: address.New("b", "TestSys", "host", ports[0]), fieldsLocker: &sync.RWMutex{}, stopLocker: &sync.Mutex{}, system: actorSystem}
-	c := &PID{address: address.New("c", "TestSys", "host", ports[0]), fieldsLocker: &sync.RWMutex{}, stopLocker: &sync.Mutex{}, system: actorSystem}
-
+	a := MockPID(actorSystem, "a", ports[0])
+	b := MockPID(actorSystem, "b", ports[0])
+	c := MockPID(actorSystem, "c", ports[0])
 	tree := newTree()
 	t.Cleanup(tree.reset)
 
@@ -274,13 +270,13 @@ func TestAddWatcher(t *testing.T) {
 	})
 
 	t.Run("pid does not exist in tree", func(t *testing.T) {
-		d := &PID{address: address.New("d", "TestSys", "host", ports[1]), fieldsLocker: &sync.RWMutex{}, stopLocker: &sync.Mutex{}, system: actorSystem}
+		d := MockPID(actorSystem, "d", ports[1])
 		tree.addWatcher(d, b)
 		require.Empty(t, tree.watchers(d))
 	})
 
 	t.Run("watcher does not exist in tree", func(t *testing.T) {
-		d := &PID{address: address.New("d", "TestSys", "host", ports[1]), fieldsLocker: &sync.RWMutex{}, stopLocker: &sync.Mutex{}, system: actorSystem}
+		d := MockPID(actorSystem, "d", ports[2])
 		tree.addWatcher(b, d)
 		require.NotContains(t, tree.watchers(b), d)
 	})
@@ -312,7 +308,7 @@ func TestWatchers(t *testing.T) {
 	})
 	t.Run("pid not in tree", func(t *testing.T) {
 		actorSystem, _ := NewActorSystem("TestSys")
-		pid := &PID{address: address.New("not_in_tree", "TestSys", "host", 0), fieldsLocker: &sync.RWMutex{}, stopLocker: &sync.Mutex{}, system: actorSystem}
+		pid := &PID{address: address.New("not_in_tree", "TestSys", "host", 0), system: actorSystem}
 		watchers := tree.watchers(pid)
 		require.Empty(t, watchers)
 	})
@@ -328,7 +324,7 @@ func TestWatchees(t *testing.T) {
 		require.Empty(t, watchees)
 	})
 	t.Run("pid not in tree", func(t *testing.T) {
-		pid := &PID{address: address.New("not_in_tree", "TestSys", "host", 0), fieldsLocker: &sync.RWMutex{}, stopLocker: &sync.Mutex{}, system: actorSystem}
+		pid := &PID{address: address.New("not_in_tree", "TestSys", "host", 0), system: actorSystem}
 		watchees := tree.watchees(pid)
 		require.Empty(t, watchees)
 	})
@@ -345,7 +341,7 @@ func TestParent(t *testing.T) {
 		require.Nil(t, parent)
 	})
 	t.Run("pid not in tree", func(t *testing.T) {
-		pid := &PID{address: address.New("not_in_tree", "TestSys", "host", 0), fieldsLocker: &sync.RWMutex{}, stopLocker: &sync.Mutex{}, system: actorSystem}
+		pid := &PID{address: address.New("not_in_tree", "TestSys", "host", 0), system: actorSystem}
 		parent, ok := tree.parent(pid)
 		require.False(t, ok)
 		require.Nil(t, parent)
@@ -364,7 +360,7 @@ func TestRoot(t *testing.T) {
 	})
 
 	t.Run("tree with root", func(t *testing.T) {
-		pid := &PID{address: address.New("root", "TestSys", "host", 0), fieldsLocker: &sync.RWMutex{}, stopLocker: &sync.Mutex{}, system: actorSystem}
+		pid := &PID{address: address.New("root", "TestSys", "host", 0), system: actorSystem}
 		require.NoError(t, tree.addRootNode(pid))
 		root, ok := tree.root()
 		require.True(t, ok)
@@ -378,7 +374,7 @@ func TestDeleteRootNodeClearsRoot(t *testing.T) {
 	ports := dynaport.Get(1)
 	actorSystem, _ := NewActorSystem("TestSys")
 	tree := newTree()
-	pid := &PID{address: address.New("root-delete", "TestSys", "host", ports[0]), fieldsLocker: &sync.RWMutex{}, stopLocker: &sync.Mutex{}, system: actorSystem}
+	pid := &PID{address: address.New("root-delete", "TestSys", "host", ports[0]), system: actorSystem}
 	require.NoError(t, tree.addRootNode(pid))
 
 	tree.deleteNode(pid)
@@ -398,14 +394,14 @@ func TestSiblings(t *testing.T) {
 	})
 
 	t.Run("pid not in tree", func(t *testing.T) {
-		pid := &PID{address: address.New("not_in_tree", "TestSys", "host", 0), fieldsLocker: &sync.RWMutex{}, stopLocker: &sync.Mutex{}, system: actorSystem}
+		pid := &PID{address: address.New("not_in_tree", "TestSys", "host", 0), system: actorSystem}
 		siblings := tree.siblings(pid)
 		require.Empty(t, siblings)
 	})
 
 	// add test for pid has no parent
 	t.Run("pid has no parent", func(t *testing.T) {
-		pid := &PID{address: address.New("no_parent", "TestSys", "host", 0), fieldsLocker: &sync.RWMutex{}, stopLocker: &sync.Mutex{}, system: actorSystem}
+		pid := &PID{address: address.New("no_parent", "TestSys", "host", 0), system: actorSystem}
 		pidnode := &pidNode{
 			pid:         atomic.Pointer[PID]{},
 			watchers:    collection.NewMap[string, *PID](),
@@ -430,7 +426,7 @@ func TestDescendants(t *testing.T) {
 	})
 
 	t.Run("pid not in tree", func(t *testing.T) {
-		pid := &PID{address: address.New("not_in_tree", "TestSys", "host", 0), fieldsLocker: &sync.RWMutex{}, stopLocker: &sync.Mutex{}, system: actorSystem}
+		pid := &PID{address: address.New("not_in_tree", "TestSys", "host", 0), system: actorSystem}
 		descendants := tree.descendants(pid)
 		require.Empty(t, descendants)
 	})
@@ -448,7 +444,7 @@ func TestDeleteNode(t *testing.T) {
 	})
 
 	t.Run("pid not in tree", func(t *testing.T) {
-		pid := &PID{address: address.New("not_in_tree", "TestSys", "host", 0), fieldsLocker: &sync.RWMutex{}, stopLocker: &sync.Mutex{}, system: actorSystem}
+		pid := &PID{address: address.New("not_in_tree", "TestSys", "host", 0), system: actorSystem}
 		require.NotPanics(t, func() {
 			tree.deleteNode(pid)
 		})
@@ -466,7 +462,7 @@ func TestChildren(t *testing.T) {
 	})
 
 	t.Run("pid not in tree", func(t *testing.T) {
-		pid := &PID{address: address.New("not_in_tree", "TestSys", "host", 0), fieldsLocker: &sync.RWMutex{}, stopLocker: &sync.Mutex{}, system: actorSystem}
+		pid := &PID{address: address.New("not_in_tree", "TestSys", "host", 0), system: actorSystem}
 		children := tree.children(pid)
 		require.Empty(t, children)
 	})
@@ -478,7 +474,7 @@ func TestAddRootNodeValidation(t *testing.T) {
 	system, _ := NewActorSystem("TestSys")
 	impl, ok := system.(*actorSystem)
 	require.True(t, ok)
-	impl.noSender = newTestPID(system, "nosender", 0)
+	impl.noSender = MockPID(system, "nosender", 0)
 	noSender := impl.noSender
 
 	t.Run("pid is nil", func(t *testing.T) {
@@ -498,7 +494,7 @@ func TestAddRootNodeValidation(t *testing.T) {
 
 	t.Run("duplicate pid", func(t *testing.T) {
 		tree := newTree()
-		root := newTestPID(system, "root", 1)
+		root := MockPID(system, "root", 1)
 		require.NoError(t, tree.addRootNode(root))
 		err := tree.addRootNode(root)
 		require.Error(t, err)
@@ -510,13 +506,13 @@ func TestAddNodeParentValidation(t *testing.T) {
 	system, _ := NewActorSystem("TestSys")
 	impl, ok := system.(*actorSystem)
 	require.True(t, ok)
-	impl.noSender = newTestPID(system, "nosender", 0)
+	impl.noSender = MockPID(system, "nosender", 0)
 	noSender := impl.noSender
 
 	t.Run("parent is NoSender", func(t *testing.T) {
 		tree := newTree()
-		root := newTestPID(system, "root", 1)
-		child := newTestPID(system, "child", 2)
+		root := MockPID(system, "root", 1)
+		child := MockPID(system, "child", 2)
 		require.NoError(t, tree.addRootNode(root))
 		tree.noSender = noSender
 		err := tree.addNode(noSender, child)
@@ -526,8 +522,8 @@ func TestAddNodeParentValidation(t *testing.T) {
 
 	t.Run("parent pid does not exist", func(t *testing.T) {
 		tree := newTree()
-		parent := newTestPID(system, "missing", 3)
-		child := newTestPID(system, "child", 4)
+		parent := MockPID(system, "missing", 3)
+		child := MockPID(system, "child", 4)
 		err := tree.addNode(parent, child)
 		require.Error(t, err)
 		require.EqualError(t, err, "parent pid does not exist")
@@ -539,10 +535,10 @@ func TestTreeNoSenderGuards(t *testing.T) {
 	system, _ := NewActorSystem("TestSys")
 	impl, ok := system.(*actorSystem)
 	require.True(t, ok)
-	impl.noSender = newTestPID(system, "nosender", 0)
+	impl.noSender = MockPID(system, "nosender", 0)
 	tree := newTree()
-	root := newTestPID(system, "root", 1)
-	child := newTestPID(system, "child", 2)
+	root := MockPID(system, "root", 1)
+	child := MockPID(system, "child", 2)
 
 	require.NoError(t, tree.addRootNode(root))
 	require.NoError(t, tree.addNode(root, child))
@@ -568,11 +564,11 @@ func TestAddWatcherNoSenderFallback(t *testing.T) {
 	system, _ := NewActorSystem("TestSys")
 	impl, ok := system.(*actorSystem)
 	require.True(t, ok)
-	impl.noSender = newTestPID(system, "nosender", 0)
+	impl.noSender = MockPID(system, "nosender", 0)
 	tree := newTree()
-	root := newTestPID(system, "root", 1)
-	child := newTestPID(system, "child", 2)
-	sibling := newTestPID(system, "sibling", 3)
+	root := MockPID(system, "root", 1)
+	child := MockPID(system, "child", 2)
+	sibling := MockPID(system, "sibling", 3)
 
 	require.NoError(t, tree.addRootNode(root))
 	require.NoError(t, tree.addNode(root, child))
@@ -594,12 +590,12 @@ func TestDeleteNodeCleansRelationships(t *testing.T) {
 	system, _ := NewActorSystem("TestSys")
 	impl, ok := system.(*actorSystem)
 	require.True(t, ok)
-	impl.noSender = newTestPID(system, "nosender", 0)
+	impl.noSender = MockPID(system, "nosender", 0)
 	tree := newTree()
-	root := newTestPID(system, "root", 1)
-	child := newTestPID(system, "child", 2)
-	grandChild := newTestPID(system, "grandchild", 3)
-	sibling := newTestPID(system, "sibling", 4)
+	root := MockPID(system, "root", 1)
+	child := MockPID(system, "child", 2)
+	grandChild := MockPID(system, "grandchild", 3)
+	sibling := MockPID(system, "sibling", 4)
 
 	require.NoError(t, tree.addRootNode(root))
 	require.NoError(t, tree.addNode(root, child))
@@ -632,9 +628,9 @@ func TestDeleteNodeNoSender(t *testing.T) {
 	system, _ := NewActorSystem("TestSys")
 	impl, ok := system.(*actorSystem)
 	require.True(t, ok)
-	impl.noSender = newTestPID(system, "nosender", 0)
+	impl.noSender = MockPID(system, "nosender", 0)
 	tree := newTree()
-	root := newTestPID(system, "root", 1)
+	root := MockPID(system, "root", 1)
 	require.NoError(t, tree.addRootNode(root))
 
 	noSender := system.NoSender()
@@ -650,10 +646,10 @@ func TestSiblingsReturnsEmptyWhenSingleChild(t *testing.T) {
 	system, _ := NewActorSystem("TestSys")
 	impl, ok := system.(*actorSystem)
 	require.True(t, ok)
-	impl.noSender = newTestPID(system, "nosender", 0)
+	impl.noSender = MockPID(system, "nosender", 0)
 	tree := newTree()
-	root := newTestPID(system, "root", 1)
-	onlyChild := newTestPID(system, "only", 2)
+	root := MockPID(system, "root", 1)
+	onlyChild := MockPID(system, "only", 2)
 	require.NoError(t, tree.addRootNode(root))
 	require.NoError(t, tree.addNode(root, onlyChild))
 
@@ -666,10 +662,10 @@ func TestChildrenReturnsEmptySlice(t *testing.T) {
 	system, _ := NewActorSystem("TestSys")
 	impl, ok := system.(*actorSystem)
 	require.True(t, ok)
-	impl.noSender = newTestPID(system, "nosender", 0)
+	impl.noSender = MockPID(system, "nosender", 0)
 	tree := newTree()
-	root := newTestPID(system, "root", 1)
-	child := newTestPID(system, "child", 2)
+	root := MockPID(system, "root", 1)
+	child := MockPID(system, "child", 2)
 	require.NoError(t, tree.addRootNode(root))
 	require.NoError(t, tree.addNode(root, child))
 
@@ -682,10 +678,10 @@ func TestDescendantsReturnsEmptySlice(t *testing.T) {
 	system, _ := NewActorSystem("TestSys")
 	impl, ok := system.(*actorSystem)
 	require.True(t, ok)
-	impl.noSender = newTestPID(system, "nosender", 0)
+	impl.noSender = MockPID(system, "nosender", 0)
 	tree := newTree()
-	root := newTestPID(system, "root", 1)
-	child := newTestPID(system, "child", 2)
+	root := MockPID(system, "root", 1)
+	child := MockPID(system, "child", 2)
 	require.NoError(t, tree.addRootNode(root))
 	require.NoError(t, tree.addNode(root, child))
 
@@ -704,10 +700,10 @@ func TestTreeResetPreservesNoSender(t *testing.T) {
 	system, _ := NewActorSystem("TestSys")
 	impl, ok := system.(*actorSystem)
 	require.True(t, ok)
-	impl.noSender = newTestPID(system, "nosender", 0)
+	impl.noSender = MockPID(system, "nosender", 0)
 	tree := newTree()
-	root := newTestPID(system, "root", 1)
-	child := newTestPID(system, "child", 2)
+	root := MockPID(system, "root", 1)
+	child := MockPID(system, "child", 2)
 
 	require.NoError(t, tree.addRootNode(root))
 	require.NoError(t, tree.addNode(root, child))

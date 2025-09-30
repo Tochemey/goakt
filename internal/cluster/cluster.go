@@ -158,7 +158,7 @@ type cluster struct {
 	dmap   olric.DMap
 
 	events     chan *Event
-	eventsLock *sync.Mutex
+	eventsLock sync.Mutex
 	subscriber *redis.PubSub
 	messages   <-chan *redis.Message
 
@@ -197,7 +197,6 @@ func New(name string, disco discovery.Provider, node *discovery.Node, opts ...Co
 		routingTableInterval:   config.routingTableInterval,
 		tlsInfo:                config.tlsInfo,
 		events:                 make(chan *Event, defaultEventsBufSize),
-		eventsLock:             &sync.Mutex{},
 		nodeJoinedEventsFilter: goset.NewSet[string](),
 		nodeLeftEventsFilter:   goset.NewSet[string](),
 		running:                atomic.NewBool(false),
