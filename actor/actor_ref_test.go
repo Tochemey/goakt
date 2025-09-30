@@ -25,7 +25,6 @@
 package actor
 
 import (
-	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -58,9 +57,8 @@ func TestActorRef(t *testing.T) {
 		addr := address.New("name", "system", "host", 1234)
 		actor := NewMockActor()
 		pid := &PID{
-			address:      addr,
-			actor:        actor,
-			fieldsLocker: &sync.RWMutex{},
+			address: addr,
+			actor:   actor,
 		}
 		actorRef := fromPID(pid)
 		require.Equal(t, "name", actorRef.Name())

@@ -627,7 +627,7 @@ func TestRestart(t *testing.T) {
 	})
 	t.Run("noSender cannot be restarted", func(t *testing.T) {
 		pid := &PID{
-			fieldsLocker: &sync.RWMutex{},
+			fieldsLocker: sync.RWMutex{},
 		}
 		err := pid.Restart(context.TODO())
 		assert.Error(t, err)
@@ -4453,7 +4453,7 @@ func TestLogger(t *testing.T) {
 
 	pid := &PID{
 		logger:       log.New(log.InfoLevel, buffer),
-		fieldsLocker: &sync.RWMutex{},
+		fieldsLocker: sync.RWMutex{},
 	}
 
 	pid.Logger().Info("test debug")
@@ -5610,7 +5610,7 @@ func TestToWireActorDependencyError(t *testing.T) {
 	pid := &PID{
 		actor:        NewMockActor(),
 		address:      address.New("actor-to-wire", "testSys", "127.0.0.1", 0),
-		fieldsLocker: &sync.RWMutex{},
+		fieldsLocker: sync.RWMutex{},
 		dependencies: collection.NewMap[string, extension.Dependency](),
 	}
 

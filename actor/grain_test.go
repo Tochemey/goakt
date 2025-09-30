@@ -37,7 +37,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
-	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -317,10 +316,9 @@ func TestGrain(t *testing.T) {
 			cluster:       clmock,
 			clusterConfig: NewClusterConfig(),
 			logger:        log.DiscardLogger,
-			started:       atomic.NewBool(true),
-			shuttingDown:  atomic.NewBool(false),
-			locker:        &sync.RWMutex{},
 		}
+		testSystem.started.Store(true)
+		testSystem.shuttingDown.Store(false)
 		testSystem.clusterEnabled.Store(true)
 
 		// create a grain instance

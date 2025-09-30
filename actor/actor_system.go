@@ -609,8 +609,8 @@ type actorSystem struct {
 	actors *tree
 
 	// states whether the actor system has started or not
-	started  *atomic.Bool
-	starting *atomic.Bool
+	started  atomic.Bool
+	starting atomic.Bool
 
 	// Specifies the actor system name
 	name string
@@ -648,7 +648,7 @@ type actorSystem struct {
 	clusterNode     *discovery.Node
 
 	// help protect some the fields to set
-	locker *sync.RWMutex
+	locker sync.RWMutex
 
 	// specifies the events stream
 	eventsStream eventstream.Stream
@@ -674,21 +674,21 @@ type actorSystem struct {
 	noSender         *PID
 	peerStatesWriter *PID
 
-	startedAt       *atomic.Int64
-	rebalancing     *atomic.Bool
-	rebalanceLocker *sync.Mutex
+	startedAt       atomic.Int64
+	rebalancing     atomic.Bool
+	rebalanceLocker sync.Mutex
 	shutdownHooks   []ShutdownHook
 
-	actorsCounter      *atomic.Uint64
-	deadlettersCounter *atomic.Uint64
+	actorsCounter      atomic.Uint64
+	deadlettersCounter atomic.Uint64
 
 	tlsInfo           *gtls.Info
 	pubsubEnabled     atomic.Bool
 	relocationEnabled atomic.Bool
 	extensions        *collection.Map[string, extension.Extension]
 
-	spawnOnNext      *atomic.Uint32
-	shuttingDown     *atomic.Bool
+	spawnOnNext      atomic.Uint32
+	shuttingDown     atomic.Bool
 	grainsQueue      chan *internalpb.Grain
 	grains           *collection.Map[string, *grainPID]
 	evictionStrategy *EvictionStrategy
@@ -747,7 +747,6 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		name:                name,
 		logger:              log.New(log.ErrorLevel, os.Stderr),
 		actorInitMaxRetries: DefaultInitMaxRetries,
-		locker:              &sync.RWMutex{},
 		shutdownTimeout:     DefaultShutdownTimeout,
 		eventsStream:        eventstream.New(),
 		partitionHasher:     hash.DefaultHasher(),
@@ -756,25 +755,24 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		registry:            registry.NewRegistry(),
 		remoteConfig:        remote.DefaultConfig(),
 		actors:              newTree(),
-		startedAt:           atomic.NewInt64(0),
-		rebalancing:         atomic.NewBool(false),
 		shutdownHooks:       make([]ShutdownHook, 0),
 		rebalancedNodes:     goset.NewSet[string](),
-		rebalanceLocker:     &sync.Mutex{},
-		actorsCounter:       atomic.NewUint64(0),
-		deadlettersCounter:  atomic.NewUint64(0),
 		topicActor:          nil,
 		extensions:          collection.NewMap[string, extension.Extension](),
-		spawnOnNext:         atomic.NewUint32(0),
-		shuttingDown:        atomic.NewBool(false),
-		started:             atomic.NewBool(false),
-		starting:            atomic.NewBool(false),
 		grainsQueue:         make(chan *internalpb.Grain, 10),
 		grains:              collection.NewMap[string, *grainPID](),
 		askTimeout:          DefaultAskTimeout,
 		evictionStopSig:     make(chan registry.Unit, 1),
 	}
 
+	system.startedAt.Store(0)
+	system.rebalancing.Store(false)
+	system.actorsCounter.Store(0)
+	system.deadlettersCounter.Store(0)
+	system.spawnOnNext.Store(0)
+	system.shuttingDown.Store(false)
+	system.started.Store(false)
+	system.starting.Store(false)
 	system.relocationEnabled.Store(true)
 	system.started.Store(false)
 	system.remotingEnabled.Store(false)

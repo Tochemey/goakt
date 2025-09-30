@@ -27,7 +27,6 @@ package cluster
 import (
 	"context"
 	"reflect"
-	"sync"
 	"time"
 	"unsafe"
 
@@ -189,7 +188,6 @@ func newEventTestCluster(host string, port int) *cluster {
 	return &cluster{
 		node:                   &discovery.Node{Host: host, PeersPort: port},
 		events:                 make(chan *Event, defaultEventsBufSize),
-		eventsLock:             &sync.Mutex{},
 		nodeJoinedEventsFilter: goset.NewSet[string](),
 		nodeLeftEventsFilter:   goset.NewSet[string](),
 		logger:                 log.DiscardLogger,
