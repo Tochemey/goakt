@@ -73,100 +73,6 @@ func newSupervisionTestPID(t *testing.T) *PID {
 	}
 }
 
-func TestSupervisionStopSignal(t *testing.T) {
-	t.Run("Suspend does not block when stop already queued", func(t *testing.T) {
-		pid := newSupervisionTestPID(t)
-		pid.supervisionStopSignal <- registry.Unit{}
-
-		done := make(chan struct{})
-		go func() {
-			pid.suspend("test")
-			close(done)
-		}()
-
-		select {
-		case <-done:
-		case <-time.After(500 * time.Millisecond):
-			t.Fatal("suspend blocked with pending supervision stop signal")
-		}
-	})
-
-	t.Run("Stop signal emission is idempotent per cycle", func(t *testing.T) {
-		pid := newSupervisionTestPID(t)
-
-		pid.stopSupervisionLoop()
-		select {
-		case <-pid.supervisionStopSignal:
-		case <-time.After(100 * time.Millisecond):
-			t.Fatal("expected supervision stop signal")
-		}
-
-		pid.stopSupervisionLoop()
-		select {
-		case <-pid.supervisionStopSignal:
-			t.Fatal("unexpected extra supervision stop signal")
-		default:
-		}
-
-		pid.supervisionStopRequested.Store(false)
-		pid.stopSupervisionLoop()
-		select {
-		case <-pid.supervisionStopSignal:
-		case <-time.After(100 * time.Millisecond):
-			t.Fatal("expected supervision stop signal after reset")
-		}
-	})
-}
-
-func TestParentShutdownAfterChildPanicDoesNotDeadlock(t *testing.T) {
-	ctx := context.Background()
-
-	actorSystem, err := NewActorSystem("panic-deadlock", WithLogger(log.DiscardLogger))
-	require.NoError(t, err)
-	require.NotNil(t, actorSystem)
-
-	require.NoError(t, actorSystem.Start(ctx))
-	t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
-
-	consumer, err := actorSystem.Subscribe()
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = actorSystem.Unsubscribe(consumer) })
-
-	parent, err := actorSystem.Spawn(ctx, "panic-parent", NewMockActor())
-	require.NoError(t, err)
-	require.NotNil(t, parent)
-
-	// the default supervisor strategy is to stop the child on panic
-	child, err := parent.SpawnChild(ctx, "panic-child", NewMockSupervised())
-	require.NoError(t, err)
-	require.NotNil(t, child)
-
-	pause.For(200 * time.Millisecond)
-
-	require.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
-
-	require.Eventually(t, func() bool {
-		for message := range consumer.Iterator() {
-			if event, ok := message.Payload().(*goaktpb.ActorSuspended); ok {
-				if event.GetAddress().GetName() == child.Name() {
-					return true
-				}
-			}
-		}
-		return false
-	}, 5*time.Second, 20*time.Millisecond, "timed out waiting for child suspension event")
-
-	down := make(chan error, 1)
-	go func() { down <- parent.Shutdown(ctx) }()
-
-	select {
-	case err := <-down:
-		require.NoError(t, err)
-	case <-time.After(2 * time.Second):
-		t.Fatal("parent shutdown blocked after child panic")
-	}
-}
-
 func TestReceive(t *testing.T) {
 	t.Run("With happy path", func(t *testing.T) {
 		ctx := context.TODO()
@@ -1754,6 +1660,96 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		//stop the actor
 		require.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("Suspend does not block when stop already queued", func(t *testing.T) {
+		pid := newSupervisionTestPID(t)
+		pid.supervisionStopSignal <- registry.Unit{}
+
+		done := make(chan struct{})
+		go func() {
+			pid.suspend("test")
+			close(done)
+		}()
+
+		select {
+		case <-done:
+		case <-time.After(500 * time.Millisecond):
+			t.Fatal("suspend blocked with pending supervision stop signal")
+		}
+	})
+
+	t.Run("Stop signal emission is idempotent per cycle", func(t *testing.T) {
+		pid := newSupervisionTestPID(t)
+
+		pid.stopSupervisionLoop()
+		select {
+		case <-pid.supervisionStopSignal:
+		case <-time.After(100 * time.Millisecond):
+			t.Fatal("expected supervision stop signal")
+		}
+
+		pid.stopSupervisionLoop()
+		select {
+		case <-pid.supervisionStopSignal:
+			t.Fatal("unexpected extra supervision stop signal")
+		default:
+		}
+
+		pid.supervisionStopRequested.Store(false)
+		pid.stopSupervisionLoop()
+		select {
+		case <-pid.supervisionStopSignal:
+		case <-time.After(100 * time.Millisecond):
+			t.Fatal("expected supervision stop signal after reset")
+		}
+	})
+	t.Run("When Parent shuts down child supervision loop does not deadlock", func(t *testing.T) {
+		ctx := context.Background()
+
+		actorSystem, err := NewActorSystem("panic-deadlock", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+		t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+		consumer, err := actorSystem.Subscribe()
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = actorSystem.Unsubscribe(consumer) })
+
+		parent, err := actorSystem.Spawn(ctx, "panic-parent", NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, parent)
+
+		// the default supervisor strategy is to stop the child on panic
+		child, err := parent.SpawnChild(ctx, "panic-child", NewMockSupervised())
+		require.NoError(t, err)
+		require.NotNil(t, child)
+
+		pause.For(200 * time.Millisecond)
+
+		require.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
+
+		require.Eventually(t, func() bool {
+			for message := range consumer.Iterator() {
+				if event, ok := message.Payload().(*goaktpb.ActorSuspended); ok {
+					if event.GetAddress().GetName() == child.Name() {
+						return true
+					}
+				}
+			}
+			return false
+		}, 5*time.Second, 20*time.Millisecond, "timed out waiting for child suspension event")
+
+		down := make(chan error, 1)
+		go func() { down <- parent.Shutdown(ctx) }()
+
+		select {
+		case err := <-down:
+			require.NoError(t, err)
+		case <-time.After(2 * time.Second):
+			t.Fatal("parent shutdown blocked after child panic")
+		}
 	})
 }
 func TestMessaging(t *testing.T) {
