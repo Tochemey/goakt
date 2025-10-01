@@ -1691,6 +1691,21 @@ func (pid *PID) doStop(ctx context.Context) error {
 	return nil
 }
 
+// startSupervision send error notifications to the parent actor
+func (pid *PID) startSupervision() {
+	pid.supervisionStopRequested.Store(false)
+	go func() {
+		for {
+			select {
+			case signal := <-pid.supervisionChan:
+				pid.notifyParent(signal)
+			case <-pid.supervisionStopSignal:
+				return
+			}
+		}
+	}()
+}
+
 // stopSupervisionLoop stops the supervision loop
 // it is safe to call this method multiple times
 func (pid *PID) stopSupervisionLoop() {
@@ -1711,21 +1726,6 @@ func (pid *PID) stopSupervisionLoop() {
 			pid.supervisionStopRequested.Store(false)
 		}
 	}
-}
-
-// startSupervision send error notifications to the parent actor
-func (pid *PID) startSupervision() {
-	pid.supervisionStopRequested.Store(false)
-	go func() {
-		for {
-			select {
-			case signal := <-pid.supervisionChan:
-				pid.notifyParent(signal)
-			case <-pid.supervisionStopSignal:
-				return
-			}
-		}
-	}()
 }
 
 // notifyParent sends a notification to the parent actor
