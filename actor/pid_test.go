@@ -45,8 +45,10 @@ import (
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/collection"
+	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
+	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/log"
 	testkit "github.com/tochemey/goakt/v3/mocks/discovery"
 	"github.com/tochemey/goakt/v3/passivation"
@@ -59,6 +61,111 @@ const (
 	replyTimeout   = 100 * time.Millisecond
 	passivateAfter = 200 * time.Millisecond
 )
+
+func newSupervisionTestPID(t *testing.T) *PID {
+	t.Helper()
+	return &PID{
+		logger:                log.DiscardLogger,
+		address:               address.New("child", "test-system", "127.0.0.1", 0),
+		supervisionStopSignal: make(chan registry.Unit, 1),
+		haltPassivationLnr:    make(chan registry.Unit, 1),
+		eventsStream:          eventstream.New(),
+	}
+}
+
+func TestSupervisionStopSignal(t *testing.T) {
+	t.Run("Suspend does not block when stop already queued", func(t *testing.T) {
+		pid := newSupervisionTestPID(t)
+		pid.supervisionStopSignal <- registry.Unit{}
+
+		done := make(chan struct{})
+		go func() {
+			pid.suspend("test")
+			close(done)
+		}()
+
+		select {
+		case <-done:
+		case <-time.After(500 * time.Millisecond):
+			t.Fatal("suspend blocked with pending supervision stop signal")
+		}
+	})
+
+	t.Run("Stop signal emission is idempotent per cycle", func(t *testing.T) {
+		pid := newSupervisionTestPID(t)
+
+		pid.stopSupervisionLoop()
+		select {
+		case <-pid.supervisionStopSignal:
+		case <-time.After(100 * time.Millisecond):
+			t.Fatal("expected supervision stop signal")
+		}
+
+		pid.stopSupervisionLoop()
+		select {
+		case <-pid.supervisionStopSignal:
+			t.Fatal("unexpected extra supervision stop signal")
+		default:
+		}
+
+		pid.supervisionStopRequested.Store(false)
+		pid.stopSupervisionLoop()
+		select {
+		case <-pid.supervisionStopSignal:
+		case <-time.After(100 * time.Millisecond):
+			t.Fatal("expected supervision stop signal after reset")
+		}
+	})
+}
+
+func TestParentShutdownAfterChildPanicDoesNotDeadlock(t *testing.T) {
+	ctx := context.Background()
+
+	actorSystem, err := NewActorSystem("panic-deadlock", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NotNil(t, actorSystem)
+
+	require.NoError(t, actorSystem.Start(ctx))
+	t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	consumer, err := actorSystem.Subscribe()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = actorSystem.Unsubscribe(consumer) })
+
+	parent, err := actorSystem.Spawn(ctx, "panic-parent", NewMockActor())
+	require.NoError(t, err)
+	require.NotNil(t, parent)
+
+	// the default supervisor strategy is to stop the child on panic
+	child, err := parent.SpawnChild(ctx, "panic-child", NewMockSupervised())
+	require.NoError(t, err)
+	require.NotNil(t, child)
+
+	pause.For(200 * time.Millisecond)
+
+	require.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
+
+	require.Eventually(t, func() bool {
+		for message := range consumer.Iterator() {
+			if event, ok := message.Payload().(*goaktpb.ActorSuspended); ok {
+				if event.GetAddress().GetName() == child.Name() {
+					return true
+				}
+			}
+		}
+		return false
+	}, 5*time.Second, 20*time.Millisecond, "timed out waiting for child suspension event")
+
+	down := make(chan error, 1)
+	go func() { down <- parent.Shutdown(ctx) }()
+
+	select {
+	case err := <-down:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("parent shutdown blocked after child panic")
+	}
+}
 
 func TestReceive(t *testing.T) {
 	t.Run("With happy path", func(t *testing.T) {

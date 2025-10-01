@@ -129,9 +129,10 @@ type PID struct {
 	processedCount atomic.Int64
 
 	// supervisor strategy
-	supervisor            *Supervisor
-	supervisionChan       chan *supervisionSignal
-	supervisionStopSignal chan registry.Unit
+	supervisor               *Supervisor
+	supervisionChan          chan *supervisionSignal
+	supervisionStopSignal    chan registry.Unit
+	supervisionStopRequested atomic.Bool
 
 	// atomic flag indicating whether the actor is processing messages
 	processing atomic.Int32
@@ -1660,7 +1661,7 @@ func (pid *PID) doStop(ctx context.Context) error {
 	}()
 
 	// stop supervisor loop
-	pid.supervisionStopSignal <- registry.Unit{}
+	pid.stopSupervisionLoop()
 
 	if pid.remoting != nil {
 		pid.remoting.Close()
@@ -1690,8 +1691,31 @@ func (pid *PID) doStop(ctx context.Context) error {
 	return nil
 }
 
-// startSupervision send error to watchers
+// stopSupervisionLoop stops the supervision loop
+// it is safe to call this method multiple times
+func (pid *PID) stopSupervisionLoop() {
+	if pid.supervisionStopSignal == nil {
+		return
+	}
+
+	if pid.supervisionStopRequested.Load() {
+		return
+	}
+
+	if pid.supervisionStopRequested.CompareAndSwap(false, true) {
+		select {
+		case pid.supervisionStopSignal <- registry.Unit{}:
+			return
+		default:
+			// channel already has a stop signal queued
+			pid.supervisionStopRequested.Store(false)
+		}
+	}
+}
+
+// startSupervision send error notifications to the parent actor
 func (pid *PID) startSupervision() {
+	pid.supervisionStopRequested.Store(false)
 	go func() {
 		for {
 			select {
@@ -1777,11 +1801,12 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 			directive,
 			pid.Name())
 
-		// notify parent about the failure
-		_ = pid.Tell(context.Background(), parent, msg)
 		// suspend the actor until the parent take an action
 		// based upon the supervisory strategy and directive
 		pid.suspend(msg.GetErrorMessage())
+
+		// notify parent about the failure
+		_ = pid.Tell(context.Background(), parent, msg)
 		return
 	}
 
@@ -2026,7 +2051,7 @@ func (pid *PID) suspend(reason string) {
 	// pause passivation loop
 	pid.pausePassivation()
 	// stop the supervisor loop
-	pid.supervisionStopSignal <- registry.Unit{}
+	pid.stopSupervisionLoop()
 	// publish an event to the events stream
 	pid.eventsStream.Publish(eventsTopic, &goaktpb.ActorSuspended{
 		Address:     pid.Address().Address,
