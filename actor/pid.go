@@ -1801,9 +1801,17 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 			directive,
 			pid.Name())
 
-		// suspend the actor until the parent take an action
-		// based upon the supervisory strategy and directive
-		pid.suspend(msg.GetErrorMessage())
+		// For ResumeDirective, avoid suspending to minimize timing windows where the child appears
+		// temporarily "not running" to observers. For other directives, keep suspension semantics.
+		if directive == ResumeDirective {
+			// If the actor was already suspended due to a prior signal, reinstate immediately.
+			if pid.IsSuspended() {
+				pid.doReinstate()
+			}
+		} else {
+			// suspend the actor until the parent takes an action based on strategy/directive
+			pid.suspend(msg.GetErrorMessage())
+		}
 
 		// notify parent about the failure
 		_ = pid.Tell(context.Background(), parent, msg)
@@ -2092,6 +2100,10 @@ func (pid *PID) fireSystemMessage(ctx context.Context, message proto.Message) {
 
 func (pid *PID) doReinstate() {
 	pid.logger.Infof("%s has been reinstated", pid.Name())
+	// if we're already running and not suspended, nothing to do
+	if pid.IsRunning() && !pid.IsSuspended() {
+		return
+	}
 	pid.suspended.Store(false)
 
 	// resume the supervisor loop
@@ -2109,7 +2121,12 @@ func (pid *PID) doReinstate() {
 // pausePassivation pauses the passivation loop
 func (pid *PID) pausePassivation() {
 	if pid.passivationStrategy != nil {
-		pid.haltPassivationLnr <- registry.Unit{}
+		select {
+		case pid.haltPassivationLnr <- registry.Unit{}:
+			// signaled successfully
+		default:
+			// if the channel already has a signal queued, avoid blocking
+		}
 		pid.passivationPaused.Store(true)
 	}
 }
