@@ -1777,11 +1777,11 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 			directive,
 			pid.Name())
 
-		// notify parent about the failure
-		_ = pid.Tell(context.Background(), parent, msg)
 		// suspend the actor until the parent take an action
 		// based upon the supervisory strategy and directive
 		pid.suspend(msg.GetErrorMessage())
+		// notify parent about the failure
+		_ = pid.Tell(context.Background(), parent, msg)
 		return
 	}
 
