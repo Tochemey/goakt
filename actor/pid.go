@@ -2118,6 +2118,7 @@ func (pid *PID) doReinstate() {
 		return
 	}
 	pid.suspended.Store(false)
+
 	// Guard against a pending passivation path that might have just crossed the threshold
 	// but hasn't yet checked suspension state. Skip the next passivation decision once.
 	pid.passivationSkipNext.Store(true)
