@@ -807,6 +807,53 @@ func TestSupervisorStrategy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
+	// Ensures that when a child panics and receives a Resume directive, the first
+	// time-based passivation decision immediately following reinstate is skipped,
+	// so the child remains running instead of being stopped due to a race.
+	t.Run("With resume + time-based passivation skips immediate stop after reinstate", func(t *testing.T) {
+		ctx := context.Background()
+
+		actorSystem, err := NewActorSystem("reinstate-passivation-skip", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+		t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+		parent, err := actorSystem.Spawn(ctx, "resume-parent", NewMockSupervisor())
+		require.NoError(t, err)
+		require.NotNil(t, parent)
+
+		// Use a short time-based passivation to trigger quickly
+		passiveAfter := 200 * time.Millisecond
+		resumeStrategy := NewSupervisor(WithDirective(&errors.PanicError{}, ResumeDirective))
+
+		child, err := parent.SpawnChild(
+			ctx,
+			"resume-child",
+			NewMockSupervised(),
+			WithSupervisor(resumeStrategy),
+			WithPassivationStrategy(passivation.NewTimeBasedStrategy(passiveAfter)),
+		)
+		require.NoError(t, err)
+		require.NotNil(t, child)
+
+		require.Len(t, parent.Children(), 1)
+
+		// Force a panic; supervisor directive is Resume
+		require.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
+
+		// Wait until the child is running (reinstate completed)
+		require.Eventually(t, func() bool { return child.IsRunning() }, 3*time.Second, 20*time.Millisecond)
+
+		// Now wait until just beyond the passivation timeout and assert the actor remains running.
+		require.Eventually(t, func() bool {
+			return child.IsRunning() && len(parent.Children()) == 1
+		}, 3*time.Second, 20*time.Millisecond)
+
+		// Cleanup
+		require.NoError(t, parent.Shutdown(ctx))
+	})
 	t.Run("With stop as supervisor directive with ONE_FOR_ALL", func(t *testing.T) {
 		ctx := context.TODO()
 		host := "127.0.0.1"

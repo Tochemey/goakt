@@ -154,6 +154,10 @@ type PID struct {
 
 	passivationStrategy passivation.Strategy
 	passivationPaused   atomic.Bool
+	// passivationSkipNext is a one-shot guard to ignore the next passivation decision
+	// (post trigger) if a reinstate just happened. This prevents a race where a pending
+	// passivation proceeds right after the actor has been reinstated by the parent.
+	passivationSkipNext atomic.Bool
 }
 
 // newPID creates a new pid
@@ -1590,6 +1594,12 @@ func (pid *PID) passivationLoop() {
 		}
 	}
 
+	// If a reinstate just happened, skip this passivation decision once.
+	if pid.passivationSkipNext.Swap(false) {
+		pid.logger.Debugf("passivation decision skipped once for %s due to recent reinstate", pid.Name())
+		return
+	}
+
 	if pid.stopping.Load() ||
 		pid.suspended.Load() ||
 		pid.passivationPaused.Load() {
@@ -1804,14 +1814,17 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 		// For ResumeDirective, avoid suspending to minimize timing windows where the child appears
 		// temporarily "not running" to observers. For other directives, keep suspension semantics.
 		if directive == ResumeDirective {
+			// Always skip the next passivation decision once to avoid immediate stop after resume.
+			pid.passivationSkipNext.Store(true)
 			// If the actor was already suspended due to a prior signal, reinstate immediately.
 			if pid.IsSuspended() {
 				pid.doReinstate()
 			}
-		} else {
-			// suspend the actor until the parent takes an action based on strategy/directive
-			pid.suspend(msg.GetErrorMessage())
+			return
 		}
+
+		// suspend the actor until the parent takes an action based on strategy/directive
+		pid.suspend(msg.GetErrorMessage())
 
 		// notify parent about the failure
 		_ = pid.Tell(context.Background(), parent, msg)
@@ -2105,6 +2118,9 @@ func (pid *PID) doReinstate() {
 		return
 	}
 	pid.suspended.Store(false)
+	// Guard against a pending passivation path that might have just crossed the threshold
+	// but hasn't yet checked suspension state. Skip the next passivation decision once.
+	pid.passivationSkipNext.Store(true)
 
 	// resume the supervisor loop
 	pid.startSupervision()
