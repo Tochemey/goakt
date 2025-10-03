@@ -129,9 +129,10 @@ type PID struct {
 	processedCount atomic.Int64
 
 	// supervisor strategy
-	supervisor            *Supervisor
-	supervisionChan       chan *supervisionSignal
-	supervisionStopSignal chan registry.Unit
+	supervisor               *Supervisor
+	supervisionChan          chan *supervisionSignal
+	supervisionStopSignal    chan registry.Unit
+	supervisionStopRequested atomic.Bool
 
 	// atomic flag indicating whether the actor is processing messages
 	processing atomic.Int32
@@ -153,6 +154,10 @@ type PID struct {
 
 	passivationStrategy passivation.Strategy
 	passivationPaused   atomic.Bool
+	// passivationSkipNext is a one-shot guard to ignore the next passivation decision
+	// (post trigger) if a reinstate just happened. This prevents a race where a pending
+	// passivation proceeds right after the actor has been reinstated by the parent.
+	passivationSkipNext atomic.Bool
 }
 
 // newPID creates a new pid
@@ -1589,6 +1594,12 @@ func (pid *PID) passivationLoop() {
 		}
 	}
 
+	// If a reinstate just happened, skip this passivation decision once.
+	if pid.passivationSkipNext.CompareAndSwap(true, false) {
+		pid.logger.Debugf("passivation decision skipped once for %s due to recent reinstate", pid.Name())
+		return
+	}
+
 	if pid.stopping.Load() ||
 		pid.suspended.Load() ||
 		pid.passivationPaused.Load() {
@@ -1604,6 +1615,14 @@ func (pid *PID) passivationLoop() {
 
 	pid.stopLocker.Lock()
 	defer pid.stopLocker.Unlock()
+
+	// Guard against a reinstate that arrived after the initial skip check but before we
+	// entered the critical section protected by stopLocker. This closes a timing window
+	// where passivation could still proceed to doStop even though the actor was reinstated.
+	if pid.passivationSkipNext.CompareAndSwap(true, false) {
+		pid.logger.Debugf("passivation decision aborted for %s due to reinstate observed during critical section", pid.Name())
+		return
+	}
 
 	ctx := context.Background()
 	if err := pid.doStop(ctx); err != nil {
@@ -1660,7 +1679,7 @@ func (pid *PID) doStop(ctx context.Context) error {
 	}()
 
 	// stop supervisor loop
-	pid.supervisionStopSignal <- registry.Unit{}
+	pid.stopSupervisionLoop()
 
 	if pid.remoting != nil {
 		pid.remoting.Close()
@@ -1690,8 +1709,9 @@ func (pid *PID) doStop(ctx context.Context) error {
 	return nil
 }
 
-// startSupervision send error to watchers
+// startSupervision send error notifications to the parent actor
 func (pid *PID) startSupervision() {
+	pid.supervisionStopRequested.Store(false)
 	go func() {
 		for {
 			select {
@@ -1702,6 +1722,28 @@ func (pid *PID) startSupervision() {
 			}
 		}
 	}()
+}
+
+// stopSupervisionLoop stops the supervision loop
+// it is safe to call this method multiple times
+func (pid *PID) stopSupervisionLoop() {
+	if pid.supervisionStopSignal == nil {
+		return
+	}
+
+	if pid.supervisionStopRequested.Load() {
+		return
+	}
+
+	if pid.supervisionStopRequested.CompareAndSwap(false, true) {
+		select {
+		case pid.supervisionStopSignal <- registry.Unit{}:
+			return
+		default:
+			// channel already has a stop signal queued
+			pid.supervisionStopRequested.Store(false)
+		}
+	}
 }
 
 // notifyParent sends a notification to the parent actor
@@ -1777,11 +1819,23 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 			directive,
 			pid.Name())
 
+		// For ResumeDirective, avoid suspending to minimize timing windows where the child appears
+		// temporarily "not running" to observers. For other directives, keep suspension semantics.
+		if directive == ResumeDirective {
+			// Always skip the next passivation decision once to avoid immediate stop after resume.
+			pid.passivationSkipNext.Store(true)
+			// If the actor was already suspended due to a prior signal, reinstate immediately.
+			if pid.IsSuspended() {
+				pid.doReinstate()
+			}
+			return
+		}
+
+		// suspend the actor until the parent takes an action based on strategy/directive
+		pid.suspend(msg.GetErrorMessage())
+
 		// notify parent about the failure
 		_ = pid.Tell(context.Background(), parent, msg)
-		// suspend the actor until the parent take an action
-		// based upon the supervisory strategy and directive
-		pid.suspend(msg.GetErrorMessage())
 		return
 	}
 
@@ -2026,7 +2080,7 @@ func (pid *PID) suspend(reason string) {
 	// pause passivation loop
 	pid.pausePassivation()
 	// stop the supervisor loop
-	pid.supervisionStopSignal <- registry.Unit{}
+	pid.stopSupervisionLoop()
 	// publish an event to the events stream
 	pid.eventsStream.Publish(eventsTopic, &goaktpb.ActorSuspended{
 		Address:     pid.Address().Address,
@@ -2067,7 +2121,15 @@ func (pid *PID) fireSystemMessage(ctx context.Context, message proto.Message) {
 
 func (pid *PID) doReinstate() {
 	pid.logger.Infof("%s has been reinstated", pid.Name())
+	// if we're already running and not suspended, nothing to do
+	if pid.IsRunning() && !pid.IsSuspended() {
+		return
+	}
 	pid.suspended.Store(false)
+
+	// Guard against a pending passivation path that might have just crossed the threshold
+	// but hasn't yet checked suspension state. Skip the next passivation decision once.
+	pid.passivationSkipNext.Store(true)
 
 	// resume the supervisor loop
 	pid.startSupervision()
@@ -2084,7 +2146,12 @@ func (pid *PID) doReinstate() {
 // pausePassivation pauses the passivation loop
 func (pid *PID) pausePassivation() {
 	if pid.passivationStrategy != nil {
-		pid.haltPassivationLnr <- registry.Unit{}
+		select {
+		case pid.haltPassivationLnr <- registry.Unit{}:
+			// signaled successfully
+		default:
+			// if the channel already has a signal queued, avoid blocking
+		}
 		pid.passivationPaused.Store(true)
 	}
 }

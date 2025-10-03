@@ -37,6 +37,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
+	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v3/address"
@@ -45,8 +46,10 @@ import (
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/collection"
+	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
+	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/log"
 	testkit "github.com/tochemey/goakt/v3/mocks/discovery"
 	"github.com/tochemey/goakt/v3/passivation"
@@ -59,6 +62,17 @@ const (
 	replyTimeout   = 100 * time.Millisecond
 	passivateAfter = 200 * time.Millisecond
 )
+
+func MockSupervisionPID(t *testing.T) *PID {
+	t.Helper()
+	return &PID{
+		logger:                log.DiscardLogger,
+		address:               address.New("child", "test-system", "127.0.0.1", 0),
+		supervisionStopSignal: make(chan registry.Unit, 1),
+		haltPassivationLnr:    make(chan registry.Unit, 1),
+		eventsStream:          eventstream.New(),
+	}
+}
 
 func TestReceive(t *testing.T) {
 	t.Run("With happy path", func(t *testing.T) {
@@ -793,6 +807,53 @@ func TestSupervisorStrategy(t *testing.T) {
 		err = parent.Shutdown(ctx)
 		assert.NoError(t, err)
 		assert.NoError(t, actorSystem.Stop(ctx))
+	})
+	// Ensures that when a child panics and receives a Resume directive, the first
+	// time-based passivation decision immediately following reinstate is skipped,
+	// so the child remains running instead of being stopped due to a race.
+	t.Run("With resume + time-based passivation skips immediate stop after reinstate", func(t *testing.T) {
+		ctx := context.Background()
+
+		actorSystem, err := NewActorSystem("reinstate-passivation-skip", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+		t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+		parent, err := actorSystem.Spawn(ctx, "resume-parent", NewMockSupervisor())
+		require.NoError(t, err)
+		require.NotNil(t, parent)
+
+		// Use a short time-based passivation to trigger quickly
+		passiveAfter := 200 * time.Millisecond
+		resumeStrategy := NewSupervisor(WithDirective(&errors.PanicError{}, ResumeDirective))
+
+		child, err := parent.SpawnChild(
+			ctx,
+			"resume-child",
+			NewMockSupervised(),
+			WithSupervisor(resumeStrategy),
+			WithPassivationStrategy(passivation.NewTimeBasedStrategy(passiveAfter)),
+		)
+		require.NoError(t, err)
+		require.NotNil(t, child)
+
+		require.Len(t, parent.Children(), 1)
+
+		// Force a panic; supervisor directive is Resume
+		require.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
+
+		// Wait until the child is running (reinstate completed)
+		require.Eventually(t, func() bool { return child.IsRunning() }, 3*time.Second, 20*time.Millisecond)
+
+		// Now wait until just beyond the passivation timeout and assert the actor remains running.
+		require.Eventually(t, func() bool {
+			return child.IsRunning() && len(parent.Children()) == 1
+		}, 3*time.Second, 20*time.Millisecond)
+
+		// Cleanup
+		require.NoError(t, parent.Shutdown(ctx))
 	})
 	t.Run("With stop as supervisor directive with ONE_FOR_ALL", func(t *testing.T) {
 		ctx := context.TODO()
@@ -1647,6 +1708,96 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		//stop the actor
 		require.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("Suspend does not block when stop already queued", func(t *testing.T) {
+		pid := MockSupervisionPID(t)
+		pid.supervisionStopSignal <- registry.Unit{}
+
+		done := make(chan struct{})
+		go func() {
+			pid.suspend("test")
+			close(done)
+		}()
+
+		select {
+		case <-done:
+		case <-time.After(500 * time.Millisecond):
+			t.Fatal("suspend blocked with pending supervision stop signal")
+		}
+	})
+
+	t.Run("Stop signal emission is idempotent per cycle", func(t *testing.T) {
+		pid := MockSupervisionPID(t)
+
+		pid.stopSupervisionLoop()
+		select {
+		case <-pid.supervisionStopSignal:
+		case <-time.After(100 * time.Millisecond):
+			t.Fatal("expected supervision stop signal")
+		}
+
+		pid.stopSupervisionLoop()
+		select {
+		case <-pid.supervisionStopSignal:
+			t.Fatal("unexpected extra supervision stop signal")
+		default:
+		}
+
+		pid.supervisionStopRequested.Store(false)
+		pid.stopSupervisionLoop()
+		select {
+		case <-pid.supervisionStopSignal:
+		case <-time.After(100 * time.Millisecond):
+			t.Fatal("expected supervision stop signal after reset")
+		}
+	})
+	t.Run("When Parent shuts down child supervision loop does not deadlock", func(t *testing.T) {
+		ctx := context.Background()
+
+		actorSystem, err := NewActorSystem("panic-deadlock", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+		t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+		consumer, err := actorSystem.Subscribe()
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = actorSystem.Unsubscribe(consumer) })
+
+		parent, err := actorSystem.Spawn(ctx, "panic-parent", NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, parent)
+
+		// the default supervisor strategy is to stop the child on panic
+		child, err := parent.SpawnChild(ctx, "panic-child", NewMockSupervised())
+		require.NoError(t, err)
+		require.NotNil(t, child)
+
+		pause.For(200 * time.Millisecond)
+
+		require.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
+
+		require.Eventually(t, func() bool {
+			for message := range consumer.Iterator() {
+				if event, ok := message.Payload().(*goaktpb.ActorSuspended); ok {
+					if event.GetAddress().GetName() == child.Name() {
+						return true
+					}
+				}
+			}
+			return false
+		}, 5*time.Second, 20*time.Millisecond, "timed out waiting for child suspension event")
+
+		down := make(chan error, 1)
+		go func() { down <- parent.Shutdown(ctx) }()
+
+		select {
+		case err := <-down:
+			require.NoError(t, err)
+		case <-time.After(2 * time.Second):
+			t.Fatal("parent shutdown blocked after child panic")
+		}
 	})
 }
 func TestMessaging(t *testing.T) {
@@ -4774,6 +4925,77 @@ func TestReinstate(t *testing.T) {
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
 }
+
+func TestReinstateAvoidsPassivationRace(t *testing.T) {
+	ctx := context.Background()
+
+	actorSystem, err := NewActorSystem("reinstate-passivation-race", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+	t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	postStopCounter := atomic.Int32{}
+	passiveAfter := 20 * time.Millisecond
+
+	pid, err := actorSystem.Spawn(
+		ctx,
+		"reinstate-passivation-race-actor",
+		&MockReinstateRaceActor{postStopCount: &postStopCounter},
+		WithPassivationStrategy(passivation.NewLongLivedStrategy()),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, pid)
+	t.Cleanup(func() { _ = pid.Shutdown(ctx) })
+	require.Equal(t, int32(0), postStopCounter.Load(), "actor should not have stopped before test begins")
+
+	// Swap to a short time-based strategy under lock so only the manual passivation
+	// loop we trigger below uses it.
+	pid.fieldsLocker.Lock()
+	pid.passivationStrategy = passivation.NewTimeBasedStrategy(passiveAfter)
+	pid.fieldsLocker.Unlock()
+
+	pid.latestReceiveTime.Store(time.Now().Add(-time.Minute))
+	pid.passivationSkipNext.Store(false)
+	pid.passivating.Store(false)
+	pid.suspended.Store(false)
+	pid.running.Store(true)
+
+	pid.stopLocker.Lock()
+	locked := true
+	defer func() {
+		if locked {
+			pid.stopLocker.Unlock()
+		}
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		pid.passivationLoop()
+		close(done)
+	}()
+
+	require.Eventually(t, func() bool {
+		return pid.passivating.Load()
+	}, time.Second, 5*time.Millisecond)
+
+	// Simulate a reinstate arriving after the initial skip check but before doStop executes.
+	pid.suspended.Store(true)
+	pid.doReinstate()
+	require.True(t, pid.passivationSkipNext.Load(), "reinstate should set skip flag")
+
+	pid.stopLocker.Unlock()
+	locked = false
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("passivation loop did not exit")
+	}
+
+	require.Equal(t, int32(0), postStopCounter.Load())
+	require.True(t, pid.IsRunning())
+}
+
 func TestReinstateNamed(t *testing.T) {
 	t.Run("When PID is not started", func(t *testing.T) {
 		ctx := context.TODO()
