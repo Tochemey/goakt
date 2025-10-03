@@ -1595,7 +1595,7 @@ func (pid *PID) passivationLoop() {
 	}
 
 	// If a reinstate just happened, skip this passivation decision once.
-	if pid.passivationSkipNext.Swap(false) {
+	if pid.passivationSkipNext.CompareAndSwap(true, false) {
 		pid.logger.Debugf("passivation decision skipped once for %s due to recent reinstate", pid.Name())
 		return
 	}
@@ -1615,6 +1615,14 @@ func (pid *PID) passivationLoop() {
 
 	pid.stopLocker.Lock()
 	defer pid.stopLocker.Unlock()
+
+	// Guard against a reinstate that arrived after the initial skip check but before we
+	// entered the critical section protected by stopLocker. This closes a timing window
+	// where passivation could still proceed to doStop even though the actor was reinstated.
+	if pid.passivationSkipNext.CompareAndSwap(true, false) {
+		pid.logger.Debugf("passivation decision aborted for %s due to reinstate observed during critical section", pid.Name())
+		return
+	}
 
 	ctx := context.Background()
 	if err := pid.doStop(ctx); err != nil {

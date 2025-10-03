@@ -43,6 +43,7 @@ import (
 	"github.com/travisjeffery/go-dynaport"
 	"go.uber.org/atomic"
 
+	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/discovery"
 	"github.com/tochemey/goakt/v3/discovery/consul"
 	"github.com/tochemey/goakt/v3/discovery/etcd"
@@ -1293,6 +1294,28 @@ func MockReplicationTestSystem(clusterMock *mockcluster.Cluster) *actorSystem {
 	sys.topicActor.system = sys
 
 	return sys
+}
+
+func MockPID(system ActorSystem, name string, port int) *PID {
+	return &PID{
+		address: address.New(name, system.Name(), "host", port),
+		system:  system,
+	}
+}
+
+type MockReinstateRaceActor struct {
+	postStopCount *atomic.Int32
+}
+
+func (a *MockReinstateRaceActor) PreStart(*Context) error { return nil }
+
+func (a *MockReinstateRaceActor) Receive(*ReceiveContext) {}
+
+func (a *MockReinstateRaceActor) PostStop(*Context) error {
+	if a.postStopCount != nil {
+		a.postStopCount.Inc()
+	}
+	return nil
 }
 
 // MockUnimplementedActor deliberately does not implement the Actor interface to exercise reflection error paths.

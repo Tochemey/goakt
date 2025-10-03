@@ -37,6 +37,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
+	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v3/address"
@@ -62,7 +63,7 @@ const (
 	passivateAfter = 200 * time.Millisecond
 )
 
-func newSupervisionTestPID(t *testing.T) *PID {
+func MockSupervisionPID(t *testing.T) *PID {
 	t.Helper()
 	return &PID{
 		logger:                log.DiscardLogger,
@@ -1709,7 +1710,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("Suspend does not block when stop already queued", func(t *testing.T) {
-		pid := newSupervisionTestPID(t)
+		pid := MockSupervisionPID(t)
 		pid.supervisionStopSignal <- registry.Unit{}
 
 		done := make(chan struct{})
@@ -1726,7 +1727,7 @@ func TestSupervisorStrategy(t *testing.T) {
 	})
 
 	t.Run("Stop signal emission is idempotent per cycle", func(t *testing.T) {
-		pid := newSupervisionTestPID(t)
+		pid := MockSupervisionPID(t)
 
 		pid.stopSupervisionLoop()
 		select {
@@ -4924,6 +4925,77 @@ func TestReinstate(t *testing.T) {
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
 }
+
+func TestReinstateAvoidsPassivationRace(t *testing.T) {
+	ctx := context.Background()
+
+	actorSystem, err := NewActorSystem("reinstate-passivation-race", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+	t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	postStopCounter := atomic.Int32{}
+	passiveAfter := 20 * time.Millisecond
+
+	pid, err := actorSystem.Spawn(
+		ctx,
+		"reinstate-passivation-race-actor",
+		&MockReinstateRaceActor{postStopCount: &postStopCounter},
+		WithPassivationStrategy(passivation.NewLongLivedStrategy()),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, pid)
+	t.Cleanup(func() { _ = pid.Shutdown(ctx) })
+	require.Equal(t, int32(0), postStopCounter.Load(), "actor should not have stopped before test begins")
+
+	// Swap to a short time-based strategy under lock so only the manual passivation
+	// loop we trigger below uses it.
+	pid.fieldsLocker.Lock()
+	pid.passivationStrategy = passivation.NewTimeBasedStrategy(passiveAfter)
+	pid.fieldsLocker.Unlock()
+
+	pid.latestReceiveTime.Store(time.Now().Add(-time.Minute))
+	pid.passivationSkipNext.Store(false)
+	pid.passivating.Store(false)
+	pid.suspended.Store(false)
+	pid.running.Store(true)
+
+	pid.stopLocker.Lock()
+	locked := true
+	defer func() {
+		if locked {
+			pid.stopLocker.Unlock()
+		}
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		pid.passivationLoop()
+		close(done)
+	}()
+
+	require.Eventually(t, func() bool {
+		return pid.passivating.Load()
+	}, time.Second, 5*time.Millisecond)
+
+	// Simulate a reinstate arriving after the initial skip check but before doStop executes.
+	pid.suspended.Store(true)
+	pid.doReinstate()
+	require.True(t, pid.passivationSkipNext.Load(), "reinstate should set skip flag")
+
+	pid.stopLocker.Unlock()
+	locked = false
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("passivation loop did not exit")
+	}
+
+	require.Equal(t, int32(0), postStopCounter.Load())
+	require.True(t, pid.IsRunning())
+}
+
 func TestReinstateNamed(t *testing.T) {
 	t.Run("When PID is not started", func(t *testing.T) {
 		ctx := context.TODO()

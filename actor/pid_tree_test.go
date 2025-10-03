@@ -35,13 +35,6 @@ import (
 	"github.com/tochemey/goakt/v3/internal/collection"
 )
 
-func MockPID(system ActorSystem, name string, port int) *PID {
-	return &PID{
-		address: address.New(name, system.Name(), "host", port),
-		system:  system,
-	}
-}
-
 func TestTree(t *testing.T) {
 	ports := dynaport.Get(1)
 	actorSystem, _ := NewActorSystem("TestSys")
