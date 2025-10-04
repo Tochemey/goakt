@@ -35,6 +35,8 @@ func TestBehaviorStack(t *testing.T) {
 	stack := newBehaviorStack()
 	assert.NotNil(t, stack)
 	assert.True(t, stack.IsEmpty())
+	pop := stack.Pop()
+	assert.Nil(t, pop)
 
 	// push a behavior onto the stack
 	behavior := func(ctx *ReceiveContext) {}
@@ -48,7 +50,7 @@ func TestBehaviorStack(t *testing.T) {
 	assert.NotNil(t, peek)
 	assert.EqualValues(t, 2, stack.Len())
 
-	pop := stack.Pop()
+	pop = stack.Pop()
 	assert.NotNil(t, pop)
 	assert.EqualValues(t, 1, stack.Len())
 

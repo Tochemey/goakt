@@ -30,6 +30,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 	"sync"
 	"testing"
@@ -1553,4 +1554,10 @@ func testConsul(t *testing.T, agentEndpoint string, opts ...testClusterOption) (
 
 func testEtcd(t *testing.T, serverAddr string, opts ...testClusterOption) (ActorSystem, discovery.Provider) {
 	return testSystem(t, createEtcdProvider(serverAddr), opts...)
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }

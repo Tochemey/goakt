@@ -25,60 +25,74 @@
 package actor
 
 import (
+	"sync"
 	"sync/atomic"
-	"unsafe"
 )
 
-type grainInboxNode struct {
-	value *GrainContext
-	next  *grainInboxNode
+type grainNode struct {
+	value atomic.Pointer[GrainContext]
+	next  atomic.Pointer[grainNode]
 }
 
+var grainNodePool = sync.Pool{New: func() any { return new(grainNode) }}
+
 type grainMailbox struct {
-	head, tail *grainInboxNode
-	length     int64
+	head atomic.Pointer[grainNode]
+	_    CacheLinePadding
+	tail atomic.Pointer[grainNode]
+	_    CacheLinePadding
+	len  atomic.Int64
 }
 
 func newGrainMailbox() *grainMailbox {
-	item := new(grainInboxNode)
-	return &grainMailbox{
-		head:   item,
-		tail:   item,
-		length: 0,
-	}
+	item := new(grainNode)
+	mailbox := &grainMailbox{}
+	mailbox.head.Store(item)
+	mailbox.tail.Store(item)
+	return mailbox
 }
 
-// Enqueue places the given value in the mailbox
+// Enqueue places the given GrainContext at the tail of the mailbox.
+//
+// It is safe for concurrent producers. Ordering is preserved (FIFO).
 func (m *grainMailbox) Enqueue(value *GrainContext) {
-	tnode := &grainInboxNode{
-		value: value,
-	}
-	previousHead := (*node)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&m.head)), unsafe.Pointer(tnode)))
-	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&previousHead.next)), unsafe.Pointer(tnode))
-	atomic.AddInt64(&m.length, 1)
+	n := grainNodePool.Get().(*grainNode)
+	n.value.Store(value)
+	n.next.Store(nil)
+
+	prev := m.tail.Swap(n)
+	prev.next.Store(n)
+	m.len.Add(1)
 }
 
-// Dequeue takes the mail from the mailbox
-// Returns nil if the mailbox is empty. Can be used in a single consumer (goroutine) only.
+// Dequeue removes and returns the next GrainContext from the mailbox.
+//
+// It returns nil when the mailbox is empty. Only a single consumer should
+// invoke Dequeue concurrently.
 func (m *grainMailbox) Dequeue() *GrainContext {
-	next := (*grainInboxNode)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&m.tail.next))))
+	head := m.head.Load()
+	next := head.next.Load()
 	if next == nil {
 		return nil
 	}
 
-	m.tail = next
-	value := next.value
-	next.value = nil
-	atomic.AddInt64(&m.length, -1)
+	m.head.Store(next)
+	value := next.value.Load()
+	next.value.Store(nil)
+	m.len.Add(-1)
+
+	head.next.Store(nil)
+	head.value.Store(nil)
+	grainNodePool.Put(head)
 	return value
 }
 
-// Len returns mailbox length
+// Len returns the current number of messages enqueued in the mailbox.
 func (m *grainMailbox) Len() int64 {
-	return atomic.LoadInt64(&m.length)
+	return m.len.Load()
 }
 
-// IsEmpty returns true when the mailbox is empty
+// IsEmpty reports whether the mailbox currently holds no messages.
 func (m *grainMailbox) IsEmpty() bool {
 	return m.Len() == 0
 }
