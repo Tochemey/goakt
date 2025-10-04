@@ -565,6 +565,9 @@ func (r *remoting) RemoteSpawn(ctx context.Context, host string, port int, spawn
 			if strings.Contains(e.Error(), gerrors.ErrTypeNotRegistered.Error()) {
 				return gerrors.ErrTypeNotRegistered
 			}
+			if strings.Contains(e.Error(), gerrors.ErrRemotingDisabled.Error()) {
+				return gerrors.ErrRemotingDisabled
+			}
 		}
 		return err
 	}

@@ -95,11 +95,6 @@ func (x *deathWatch) handleTerminated(ctx *ReceiveContext) error {
 	if node, ok := x.tree.node(actorID); ok {
 		watchedPID := node.value()
 		x.actorSystem.decreaseActorsCounter()
-		if watchedPID == nil {
-			x.logger.Infof("%s successfully free resource [actor=%s] from system", x.pid.Name(), actorID)
-			return nil
-		}
-
 		actorName := watchedPID.Name()
 		x.tree.deleteNode(watchedPID)
 		removeFromCluster := x.actorSystem.InCluster() && !isSystemName(actorName) && !x.actorSystem.isStopping()

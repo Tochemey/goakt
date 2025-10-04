@@ -29,6 +29,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,13 +37,16 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/proto"
 
 	gerrors "github.com/tochemey/goakt/v3/errors"
+	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
+	mockcluster "github.com/tochemey/goakt/v3/mocks/cluster"
 	mocks "github.com/tochemey/goakt/v3/mocks/discovery"
 	"github.com/tochemey/goakt/v3/passivation"
 	"github.com/tochemey/goakt/v3/remote"
@@ -697,6 +701,63 @@ func TestSpawn(t *testing.T) {
 		err = actorSystem.Stop(ctx)
 		require.NoError(t, err)
 	})
+	t.Run("SpawnOn when cluster peers lookup fails", func(t *testing.T) {
+		ctx := context.TODO()
+		clusterMock := new(mockcluster.Cluster)
+
+		system := MockReplicationTestSystem(clusterMock)
+		system.remoting = remote.NewRemoting()
+		system.remotingEnabled.Store(true)
+
+		actor := NewMockActor()
+		actorName := "actorID"
+
+		clusterMock.EXPECT().ActorExists(mock.Anything, actorName).Return(false, nil)
+		clusterMock.EXPECT().Peers(mock.Anything).Return(nil, assert.AnError)
+
+		t.Cleanup(func() {
+			system.remoting.Close()
+			clusterMock.AssertExpectations(t)
+		})
+
+		err := system.SpawnOn(ctx, actorName, actor)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, assert.AnError)
+		assert.ErrorContains(t, err, "failed to fetch cluster nodes")
+	})
+	t.Run("SpawnOn when node metric fetch fails", func(t *testing.T) {
+		ctx := context.TODO()
+		clusterMock := new(mockcluster.Cluster)
+
+		system := MockReplicationTestSystem(clusterMock)
+		system.remoting = remote.NewRemoting()
+		system.remotingEnabled.Store(true)
+
+		client := system.remoting.HTTPClient()
+		client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return nil, assert.AnError
+		})
+
+		actor := NewMockActor()
+		actorName := "actorID"
+		peers := []*cluster.Peer{
+			{Host: "127.0.0.1", RemotingPort: 10001},
+			{Host: "127.0.0.1", RemotingPort: 10002},
+		}
+
+		clusterMock.EXPECT().ActorExists(mock.Anything, actorName).Return(false, nil)
+		clusterMock.EXPECT().Peers(mock.Anything).Return(peers, nil)
+
+		t.Cleanup(func() {
+			system.remoting.Close()
+			clusterMock.AssertExpectations(t)
+		})
+
+		err := system.SpawnOn(ctx, actorName, actor, WithPlacement(LeastLoad))
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "failed to fetch node metrics")
+		assert.ErrorIs(t, err, assert.AnError)
+	})
 	t.Run("SpawnOn with random placement", func(t *testing.T) {
 		// create a context
 		ctx := context.TODO()
@@ -898,20 +959,38 @@ func TestSpawn(t *testing.T) {
 
 		pause.For(time.Second)
 
-		// create an actor on node1
+		// we create three actors on node1 to simulate load
+		for i := range 3 {
+			_, err := node1.Spawn(ctx, fmt.Sprintf("actor1%d", i), NewMockActor())
+			require.NoError(t, err)
+		}
+
+		// we create two actors on node2 to simulate load
+		for i := range 2 {
+			_, err := node2.Spawn(ctx, fmt.Sprintf("actor2%d", i), NewMockActor())
+			require.NoError(t, err)
+		}
+
+		// we create two actors on node2 to simulate load
+		for i := range 4 {
+			_, err := node3.Spawn(ctx, fmt.Sprintf("actor3%d", i), NewMockActor())
+			require.NoError(t, err)
+		}
+
+		pause.For(time.Second)
+
+		// try creating an actor on node1 and it will be placed on node2
 		actor := NewMockActor()
 		actorName := "actorID"
-		err := node1.SpawnOn(ctx, actorName, actor)
+		err := node1.SpawnOn(ctx, actorName, actor, WithPlacement(LeastLoad))
 		require.NoError(t, err)
 
 		pause.For(200 * time.Millisecond)
 
-		// either we can locate the actor or try to recreate it
-		_, err = node2.Spawn(ctx, actorName, actor)
-		require.Error(t, err)
-		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
+		metric := node2.Metric(ctx)
+		require.Exactly(t, int64(3), metric.ActorsCount())
 
-		err = node1.SpawnOn(ctx, actorName, actor)
+		_, err = node2.Spawn(ctx, actorName, actor)
 		require.Error(t, err)
 		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
 
@@ -953,20 +1032,38 @@ func TestSpawn(t *testing.T) {
 
 		pause.For(time.Second)
 
-		// create an actor on node1
+		// we create three actors on node1 to simulate load
+		for i := range 3 {
+			_, err := node1.Spawn(ctx, fmt.Sprintf("actor1%d", i), NewMockActor())
+			require.NoError(t, err)
+		}
+
+		// we create two actors on node2 to simulate load
+		for i := range 2 {
+			_, err := node2.Spawn(ctx, fmt.Sprintf("actor2%d", i), NewMockActor())
+			require.NoError(t, err)
+		}
+
+		// we create two actors on node2 to simulate load
+		for i := range 4 {
+			_, err := node3.Spawn(ctx, fmt.Sprintf("actor3%d", i), NewMockActor())
+			require.NoError(t, err)
+		}
+
+		pause.For(time.Second)
+
+		// try creating an actor on node1 and it will be placed on node2
 		actor := NewMockActor()
 		actorName := "actorID"
-		err := node1.SpawnOn(ctx, actorName, actor)
+		err := node1.SpawnOn(ctx, actorName, actor, WithPlacement(LeastLoad))
 		require.NoError(t, err)
 
 		pause.For(200 * time.Millisecond)
 
-		// either we can locate the actor or try to recreate it
-		_, err = node2.Spawn(ctx, actorName, actor)
-		require.Error(t, err)
-		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
+		metric := node2.Metric(ctx)
+		require.Exactly(t, int64(3), metric.ActorsCount())
 
-		err = node1.SpawnOn(ctx, actorName, actor)
+		_, err = node2.Spawn(ctx, actorName, actor)
 		require.Error(t, err)
 		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
 
@@ -1008,20 +1105,38 @@ func TestSpawn(t *testing.T) {
 
 		pause.For(time.Second)
 
-		// create an actor on node1
+		// we create three actors on node1 to simulate load
+		for i := range 3 {
+			_, err := node1.Spawn(ctx, fmt.Sprintf("actor1%d", i), NewMockActor())
+			require.NoError(t, err)
+		}
+
+		// we create two actors on node2 to simulate load
+		for i := range 2 {
+			_, err := node2.Spawn(ctx, fmt.Sprintf("actor2%d", i), NewMockActor())
+			require.NoError(t, err)
+		}
+
+		// we create two actors on node2 to simulate load
+		for i := range 4 {
+			_, err := node3.Spawn(ctx, fmt.Sprintf("actor3%d", i), NewMockActor())
+			require.NoError(t, err)
+		}
+
+		pause.For(time.Second)
+
+		// try creating an actor on node1 and it will be placed on node2
 		actor := NewMockActor()
 		actorName := "actorID"
-		err := node1.SpawnOn(ctx, actorName, actor)
+		err := node1.SpawnOn(ctx, actorName, actor, WithPlacement(LeastLoad))
 		require.NoError(t, err)
 
 		pause.For(200 * time.Millisecond)
 
-		// either we can locate the actor or try to recreate it
-		_, err = node2.Spawn(ctx, actorName, actor)
-		require.Error(t, err)
-		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
+		metric := node2.Metric(ctx)
+		require.Exactly(t, int64(3), metric.ActorsCount())
 
-		err = node1.SpawnOn(ctx, actorName, actor)
+		_, err = node2.Spawn(ctx, actorName, actor)
 		require.Error(t, err)
 		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
 

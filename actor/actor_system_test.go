@@ -30,10 +30,14 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
+	"os/signal"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -116,6 +120,35 @@ func TestActorSystem(t *testing.T) {
 		pause.For(time.Second)
 		require.NoError(t, sys.Stop(ctx))
 	})
+	t.Run("When already started", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "127.0.0.1"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+		require.NotNil(t, sys)
+		require.NoError(t, sys.Start(ctx))
+
+		err = sys.Start(ctx)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, gerrors.ErrActorSystemAlreadyStarted)
+
+		pause.For(500 * time.Millisecond)
+		require.NoError(t, sys.Stop(ctx))
+	})
+
 	t.Run("New instance with Missing Name", func(t *testing.T) {
 		sys, err := NewActorSystem("")
 		assert.Error(t, err)
@@ -1786,6 +1819,9 @@ func TestActorSystem(t *testing.T) {
 		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
 
 		actors := node3.ActorRefs(ctx, time.Second)
+		require.Len(t, actors, 1)
+
+		actors = node1.ActorRefs(ctx, time.Second)
 		require.Len(t, actors, 1)
 
 		// free resource
@@ -5490,7 +5526,7 @@ func TestRemotingSpawn(t *testing.T) {
 			},
 		)
 	})
-	t.Run("With invalid dependency", func(t *testing.T) {
+	t.Run("With unregistered dependency", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// define the logger to use
@@ -5547,68 +5583,6 @@ func TestRemotingSpawn(t *testing.T) {
 		remoting.Close()
 		err = sys.Stop(ctx)
 		require.NoError(t, err)
-	})
-	t.Run("With dependency marshaling failure", func(t *testing.T) {
-		// create the context
-		ctx := context.TODO()
-		// define the logger to use
-		logger := log.DiscardLogger
-		// generate the remoting port
-		ports := dynaport.Get(1)
-		remotingPort := ports[0]
-		host := "127.0.0.1"
-
-		// create the actor system
-		sys, err := NewActorSystem(
-			"test",
-			WithLogger(logger),
-			WithRemote(remote.NewConfig(host, remotingPort)),
-		)
-		// assert there are no error
-		require.NoError(t, err)
-
-		// start the actor system
-		err = sys.Start(ctx)
-		assert.NoError(t, err)
-
-		// register dependencies
-		dependency := mocksextension.NewDependency(t)
-		dependency.EXPECT().ID().Return("id")
-		dependency.EXPECT().MarshalBinary().Return(nil, assert.AnError)
-
-		err = sys.Inject(dependency)
-		require.NoError(t, err)
-
-		// create an actor implementation and register it
-		actor := &exchanger{}
-		actorName := uuid.NewString()
-
-		remoting := remote.NewRemoting()
-		// fetching the address of the that actor should return nil address
-		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
-		require.NoError(t, err)
-		require.True(t, addr.Equals(address.NoSender()))
-
-		// register the actor
-		err = sys.Register(ctx, actor)
-		require.NoError(t, err)
-
-		// spawn the remote actor
-		request := &remote.SpawnRequest{
-			Name:           actorName,
-			Kind:           "actor.exchanger",
-			Singleton:      false,
-			Relocatable:    false,
-			EnableStashing: false,
-			Dependencies:   []extension.Dependency{dependency},
-		}
-		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
-		require.Error(t, err)
-
-		remoting.Close()
-		err = sys.Stop(ctx)
-		require.NoError(t, err)
-		dependency.AssertExpectations(t)
 	})
 	t.Run("When actor not registered", func(t *testing.T) {
 		// create the context
@@ -5695,7 +5669,7 @@ func TestRemotingSpawn(t *testing.T) {
 
 		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
 	})
-	t.Run("With invalid dependencies", func(t *testing.T) {
+	t.Run("With dependencies marshaling failure", func(t *testing.T) {
 		ctx := context.TODO()
 		logger := log.DiscardLogger
 		ports := dynaport.Get(1)
@@ -5732,7 +5706,7 @@ func TestRemotingSpawn(t *testing.T) {
 
 		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
 	})
-	t.Run("When remoting is not enabled", func(t *testing.T) {
+	t.Run("When remoting is not available", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// define the logger to use
@@ -5766,6 +5740,56 @@ func TestRemotingSpawn(t *testing.T) {
 		}
 		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
 		require.Error(t, err)
+		code := connect.CodeOf(err)
+		assert.Equal(t, connect.CodeUnavailable, code)
+
+		t.Cleanup(
+			func() {
+				err = sys.Stop(ctx)
+				assert.NoError(t, err)
+			},
+		)
+	})
+	t.Run("When remoting is not enabled", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		ports := dynaport.Get(1)
+		remotingPort := ports[0]
+		host := "127.0.0.1"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		// let us disable remoting
+		actorsSystem := sys.(*actorSystem)
+		actorsSystem.remotingEnabled.Store(false)
+
+		// create an actor implementation and register it
+		actorName := uuid.NewString()
+		remoting := remote.NewRemoting()
+		// spawn the remote actor
+		request := &remote.SpawnRequest{
+			Name:        actorName,
+			Kind:        "actor.exchanger",
+			Singleton:   false,
+			Relocatable: false,
+		}
+		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, gerrors.ErrRemotingDisabled)
 
 		t.Cleanup(
 			func() {
@@ -6760,4 +6784,76 @@ func TestStopReturnsCleanupClusterError(t *testing.T) {
 	err := system.Stop(context.Background())
 	require.Error(t, err)
 	assert.ErrorIs(t, err, assert.AnError)
+}
+
+// nolint:revive
+func TestActorSystemRun(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("signal semantics differ on windows")
+	}
+
+	ctx := context.Background()
+
+	sigterm := make(chan os.Signal, 1)
+	signal.Notify(sigterm, syscall.SIGTERM)
+	defer func() {
+		signal.Stop(sigterm)
+		for len(sigterm) > 0 {
+			<-sigterm
+		}
+	}()
+
+	sys, err := NewActorSystem("testrun", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	startHookCalled := atomic.NewBool(false)
+	stopHookCalled := atomic.NewBool(false)
+
+	done := make(chan struct{})
+	go func() {
+		sys.Run(ctx, func(ctx context.Context) error {
+			startHookCalled.Store(true)
+			return nil
+		}, func(ctx context.Context) error {
+			stopHookCalled.Store(true)
+			return nil
+		})
+		close(done)
+	}()
+
+	require.Eventually(t, func() bool {
+		return startHookCalled.Load()
+	}, 5*time.Second, 10*time.Millisecond)
+
+	require.Eventually(t, func() bool {
+		return sys.Running()
+	}, 5*time.Second, 10*time.Millisecond)
+
+	// Ensure the signal handling goroutine is ready.
+	pause.For(50 * time.Millisecond)
+
+	require.NoError(t, syscall.Kill(os.Getpid(), syscall.SIGINT))
+
+	require.Eventually(t, func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	}, 5*time.Second, 10*time.Millisecond)
+
+	require.Eventually(t, func() bool {
+		return !sys.Running()
+	}, 5*time.Second, 10*time.Millisecond)
+
+	require.Eventually(t, func() bool {
+		return stopHookCalled.Load()
+	}, 5*time.Second, 10*time.Millisecond)
+
+	select {
+	case <-sigterm:
+	case <-time.After(time.Second):
+		t.Fatal("expected SIGTERM to be forwarded")
+	}
 }
