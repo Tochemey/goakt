@@ -26,16 +26,22 @@ package actor
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
 
 	"github.com/tochemey/goakt/v3/errors"
+	internalcluster "github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/pause"
+	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/log"
+	mockcluster "github.com/tochemey/goakt/v3/mocks/cluster"
+	mockremote "github.com/tochemey/goakt/v3/mocks/remote"
 	"github.com/tochemey/goakt/v3/remote"
 )
 
@@ -158,5 +164,95 @@ func TestSingletonActor(t *testing.T) {
 		err = newActorSystem.SpawnSingleton(ctx, actorName, actor)
 		require.Error(t, err)
 		require.ErrorIs(t, err, errors.ErrActorSystemNotStarted)
+	})
+}
+
+func TestActorSystemSpawnSingletonOnLeader(t *testing.T) {
+	t.Run("returns error when fetching peers fails", func(t *testing.T) {
+		ctx := context.Background()
+		cl := mockcluster.NewCluster(t)
+		rem := mockremote.NewRemoting(t)
+
+		system := &actorSystem{remoting: rem}
+
+		expectedErr := fmt.Errorf("cluster unreachable")
+		cl.EXPECT().Peers(mock.Anything).Return(nil, expectedErr).Once()
+
+		err := system.spawnSingletonOnLeader(ctx, cl, "singleton", NewMockActor())
+		require.Error(t, err)
+		require.ErrorIs(t, err, expectedErr)
+	})
+
+	t.Run("returns error when leader is not found", func(t *testing.T) {
+		ctx := context.Background()
+		cl := mockcluster.NewCluster(t)
+		rem := mockremote.NewRemoting(t)
+
+		system := &actorSystem{remoting: rem}
+
+		cl.EXPECT().Peers(mock.Anything).Return([]*internalcluster.Peer{
+			{
+				Host:         "127.0.0.1",
+				PeersPort:    1001,
+				Coordinator:  false,
+				RemotingPort: 9090,
+			},
+			{
+				Host:         "127.0.0.2",
+				PeersPort:    1002,
+				Coordinator:  false,
+				RemotingPort: 9091,
+			},
+		}, nil).Once()
+
+		err := system.spawnSingletonOnLeader(ctx, cl, "singleton", NewMockActor())
+		require.Error(t, err)
+		require.ErrorIs(t, err, errors.ErrLeaderNotFound)
+	})
+
+	t.Run("returns error when remote spawn fails", func(t *testing.T) {
+		ctx := context.Background()
+		cl := mockcluster.NewCluster(t)
+		rem := mockremote.NewRemoting(t)
+
+		system := &actorSystem{remoting: rem}
+
+		leader := &internalcluster.Peer{
+			Host:         "10.0.0.1",
+			PeersPort:    1111,
+			Coordinator:  true,
+			RemotingPort: 2222,
+		}
+
+		cl.EXPECT().Peers(mock.Anything).Return([]*internalcluster.Peer{
+			leader,
+			{
+				Host:         "10.0.0.2",
+				PeersPort:    1112,
+				Coordinator:  false,
+				RemotingPort: 3333,
+			},
+		}, nil).Once()
+
+		name := "singleton"
+		actor := NewMockActor()
+		expectedKind := registry.Name(actor)
+		expectedErr := fmt.Errorf("remote spawn failure")
+
+		rem.EXPECT().
+			RemoteSpawn(mock.Anything, leader.Host, leader.RemotingPort, mock.MatchedBy(
+				func(req *remote.SpawnRequest) bool {
+					return req != nil &&
+						req.Name == name &&
+						req.Kind == expectedKind &&
+						req.Singleton
+				}),
+			).
+			Return(expectedErr).
+			Once()
+
+		err := system.spawnSingletonOnLeader(ctx, cl, name, actor)
+		require.Error(t, err)
+		require.ErrorIs(t, err, expectedErr)
 	})
 }
