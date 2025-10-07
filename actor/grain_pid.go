@@ -213,14 +213,13 @@ func (pid *grainPID) process() {
 			}
 
 			// if no more messages, change busy state to idle
-			if !pid.processing.CompareAndSwap(busy, idle) {
-				return
-			}
+			pid.processing.Store(idle)
 
 			// Check if new messages were added in the meantime and restart processing
 			if !pid.mailbox.IsEmpty() && pid.processing.CompareAndSwap(idle, busy) {
 				continue
 			}
+
 			return
 		}
 	}()

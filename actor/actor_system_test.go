@@ -51,6 +51,7 @@ import (
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	"github.com/tochemey/goakt/v3/address"
 	gerrors "github.com/tochemey/goakt/v3/errors"
@@ -2660,7 +2661,7 @@ func TestRemoteTell(t *testing.T) {
 		// create a message to send to the test actor
 		messages := make([]proto.Message, 10)
 		// send the message to the actor
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			messages[i] = new(testpb.TestSend)
 		}
 
@@ -2671,6 +2672,65 @@ func TestRemoteTell(t *testing.T) {
 		// wait for processing to complete on the actor side
 		pause.For(500 * time.Millisecond)
 		require.EqualValues(t, 10, actorRef.ProcessedCount()-1)
+
+		// stop the actor after some time
+		pause.For(time.Second)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("With Batch invalid message", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		remoting := remote.NewRemoting()
+
+		// get the address of the actor
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+		// create a message to send to the test actor
+		messages := make([]proto.Message, 10)
+		// send the message to the actor
+		for i := range 10 {
+			invalid := string([]byte{0xff, 0xfe, 0xfd})
+			msg := &wrapperspb.StringValue{Value: invalid}
+			messages[i] = msg
+		}
+
+		from := address.NoSender()
+		err = remoting.RemoteBatchTell(ctx, from, addr, messages)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, gerrors.ErrInvalidMessage)
 
 		// stop the actor after some time
 		pause.For(time.Second)
@@ -3488,6 +3548,64 @@ func TestRemoteAsk(t *testing.T) {
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
+
+	t.Run("With Batch invalid message", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// generate the remoting port
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		remoting := remote.NewRemoting()
+		// get the address of the actor
+		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+
+		from := address.NoSender()
+		// create a message to send to the test actor
+		invalid := string([]byte{0xff, 0xfe, 0xfd})
+		message := &wrapperspb.StringValue{Value: invalid}
+		// send the message to the actor
+		replies, err := remoting.RemoteBatchAsk(ctx, from, addr, []proto.Message{message}, time.Minute)
+		// perform some assertions
+		require.Error(t, err)
+		require.Nil(t, replies)
+		assert.Empty(t, replies)
+		assert.ErrorIs(t, err, gerrors.ErrInvalidMessage)
+
+		// stop the actor after some time
+		pause.For(time.Second)
+
+		remoting.Close()
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+
 	t.Run("With Batch service failure", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
@@ -5693,16 +5811,22 @@ func TestRemotingSpawn(t *testing.T) {
 		remoting := remote.NewRemoting()
 		t.Cleanup(remoting.Close)
 
+		mockedErr := errors.New("failed to marshal dependency")
+		dependency := &MockFailingDependency{
+			err: mockedErr,
+		}
+
 		request := &remote.SpawnRequest{
 			Name: uuid.NewString(),
 			Kind: registry.Name(new(MockActor)),
 			Dependencies: []extension.Dependency{
-				new(MockFailingDependency),
+				dependency,
 			},
 		}
 
 		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
 		require.Error(t, err)
+		assert.ErrorIs(t, err, mockedErr)
 
 		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
 	})
