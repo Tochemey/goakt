@@ -34,6 +34,8 @@ import (
 	"github.com/kapetan-io/tackle/autotls"
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
+
+	"github.com/tochemey/goakt/v3/remote"
 )
 
 func TestNode(t *testing.T) {
@@ -47,7 +49,7 @@ func TestNode(t *testing.T) {
 	}
 	require.NoError(t, autotls.Setup(&conf))
 
-	node := NewNode(address, WithWeight(10), WithTLS(conf.ClientTLS))
+	node := NewNode(address, WithWeight(10), WithRemoting(remote.NewRemoting(remote.WithRemotingTLS(conf.ClientTLS))))
 	require.NotNil(t, node)
 	require.Equal(t, address, node.Address())
 	require.Exactly(t, float64(10), node.Weight())
