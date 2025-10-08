@@ -25,7 +25,6 @@
 package client
 
 import (
-	"crypto/tls"
 	"net"
 	nethttp "net/http"
 	"strconv"
@@ -47,17 +46,10 @@ func WithWeight(weight float64) NodeOption {
 	}
 }
 
-// WithTLS configures the node to use a secure connection
-// for communication with the specified remote node. This requires a TLS
-// client configuration to enable secure interactions with the remote actor system.
-//
-// Ensure that the actor cluster is configured with TLS enabled and
-// capable of completing a successful handshake. It is recommended that both
-// systems share the same root Certificate Authority (CA) for mutual trust and
-// secure communication.
-func WithTLS(config *tls.Config) NodeOption {
+// WithRemoting sets the remoting instance to be used by the node
+func WithRemoting(remoting remote.Remoting) NodeOption {
 	return func(n *Node) {
-		n.tlsConfig = config
+		n.remoting = remoting
 	}
 }
 
@@ -66,11 +58,9 @@ type Node struct {
 	_       locker.NoCopy
 	address string
 	weight  float64
-	mutex   *sync.RWMutex
+	mutex   sync.RWMutex
 
-	client    *nethttp.Client
-	remoting  remote.Remoting
-	tlsConfig *tls.Config
+	remoting remote.Remoting
 }
 
 // NewNode creates an instance of Node
@@ -79,25 +69,12 @@ func NewNode(address string, opts ...NodeOption) *Node {
 	remoting := remote.NewRemoting(remote.WithRemotingMaxReadFameSize(16 * size.MB))
 	node := &Node{
 		address:  address,
-		mutex:    &sync.RWMutex{},
-		client:   remoting.HTTPClient(),
 		remoting: remoting,
 		weight:   0,
 	}
 
 	for _, opt := range opts {
 		opt(node)
-	}
-
-	if node.tlsConfig != nil {
-		// overwrite the remoting
-		node.remoting = remote.NewRemoting(
-			remote.WithRemotingMaxReadFameSize(16*size.MB),
-			remote.WithRemotingTLS(node.tlsConfig),
-		)
-
-		// reset the client
-		node.client = remoting.HTTPClient()
 	}
 
 	return node
@@ -137,7 +114,7 @@ func (n *Node) Validate() error {
 // HTTPClient returns the underlying http client for the given node
 func (n *Node) HTTPClient() *nethttp.Client {
 	n.mutex.RLock()
-	client := n.client
+	client := n.remoting.HTTPClient()
 	n.mutex.RUnlock()
 	return client
 }
@@ -155,8 +132,9 @@ func (n *Node) HTTPEndPoint() string {
 	n.mutex.RLock()
 	host, p, _ := net.SplitHostPort(n.address)
 	port, _ := strconv.Atoi(p)
+	tlsConfig := n.remoting.TLSConfig()
 	n.mutex.RUnlock()
-	if n.tlsConfig != nil {
+	if tlsConfig != nil {
 		return http.URLs(host, port)
 	}
 	return http.URL(host, port)

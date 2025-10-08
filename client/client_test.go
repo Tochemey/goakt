@@ -26,14 +26,19 @@ package client
 
 import (
 	"context"
+	"crypto/tls"
+	stderrors "errors"
 	"fmt"
 	nethttp "net/http"
-	"sync"
+	nethttptest "net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"connectrpc.com/connect"
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/proto"
@@ -44,12 +49,73 @@ import (
 	"github.com/tochemey/goakt/v3/discovery/nats"
 	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/goaktpb"
+	"github.com/tochemey/goakt/v3/internal/internalpb"
+	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v3/internal/pause"
+	"github.com/tochemey/goakt/v3/internal/size"
 	"github.com/tochemey/goakt/v3/log"
 	mocks "github.com/tochemey/goakt/v3/mocks/remote"
 	"github.com/tochemey/goakt/v3/remote"
-	testpb "github.com/tochemey/goakt/v3/test/data/testpb"
+	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
+
+func TestNewReturnsErrorWithNoNodes(t *testing.T) {
+	ctx := context.Background()
+
+	cl, err := New(ctx, nil)
+	require.Error(t, err)
+	require.Nil(t, cl)
+	require.ErrorContains(t, err, "nodes are required")
+}
+
+// nolint:revive
+func TestClientUpdateNodes(t *testing.T) {
+	t.Run("updates weight when metrics available", func(t *testing.T) {
+		client, node, cleanup := setupUpdateNodesTest(t, func(ctx context.Context, _ *connect.Request[internalpb.GetNodeMetricRequest]) (*connect.Response[internalpb.GetNodeMetricResponse], error) {
+			return connect.NewResponse(&internalpb.GetNodeMetricResponse{ActorsCount: 5}), nil
+		})
+		defer cleanup()
+
+		client.locker.Lock()
+		err := client.updateNodes(context.Background())
+		client.locker.Unlock()
+
+		require.NoError(t, err)
+		assert.Equal(t, float64(5), node.Weight())
+	})
+
+	t.Run("keeps existing weight when node unavailable", func(t *testing.T) {
+		client, node, cleanup := setupUpdateNodesTest(t, func(ctx context.Context, _ *connect.Request[internalpb.GetNodeMetricRequest]) (*connect.Response[internalpb.GetNodeMetricResponse], error) {
+			return nil, connect.NewError(connect.CodeUnavailable, stderrors.New("temporary outage"))
+		})
+		defer cleanup()
+
+		node.SetWeight(3)
+
+		client.locker.Lock()
+		err := client.updateNodes(context.Background())
+		client.locker.Unlock()
+
+		require.NoError(t, err)
+		assert.Equal(t, float64(3), node.Weight())
+	})
+
+	t.Run("returns error when fetching metrics fails", func(t *testing.T) {
+		client, node, cleanup := setupUpdateNodesTest(t, func(ctx context.Context, _ *connect.Request[internalpb.GetNodeMetricRequest]) (*connect.Response[internalpb.GetNodeMetricResponse], error) {
+			return nil, connect.NewError(connect.CodeInternal, stderrors.New("boom"))
+		})
+		defer cleanup()
+
+		node.SetWeight(7)
+
+		client.locker.Lock()
+		err := client.updateNodes(context.Background())
+		client.locker.Unlock()
+
+		require.Error(t, err)
+		assert.Equal(t, float64(7), node.Weight())
+	})
+}
 
 func TestClient(t *testing.T) {
 	t.Run("With defaults", func(t *testing.T) {
@@ -656,6 +722,67 @@ func TestClient(t *testing.T) {
 			},
 		)
 	})
+
+	t.Run("With ReSpawn returns no error when lookup returns no sender", func(t *testing.T) {
+		ctx := context.TODO()
+		actor := NewActor("client.testactor").WithName("actorName")
+
+		mockRemoting := mocks.NewRemoting(t)
+		node := &Node{
+			remoting: mockRemoting,
+			address:  "127.0.0.1:12345",
+		}
+
+		remoteHost, remotePort := node.HostAndPort()
+		mockRemoting.EXPECT().MaxReadFrameSize().Return(1024 * 1024)
+		mockRemoting.EXPECT().Compression().Return(remote.NoCompression)
+		mockRemoting.EXPECT().HTTPClient().Return(nethttp.DefaultClient)
+		mockRemoting.EXPECT().TLSConfig().Return(nil)
+		mockRemoting.EXPECT().RemoteLookup(ctx, remoteHost, remotePort, actor.Name()).Return(address.NoSender(), nil)
+		mockRemoting.EXPECT().Close()
+
+		client, err := New(ctx, []*Node{node})
+		require.NoError(t, err)
+		require.NotNil(t, client)
+
+		err = client.ReSpawn(ctx, actor)
+		require.NoError(t, err)
+		mockRemoting.AssertNotCalled(t, "RemoteReSpawn", mock.Anything, mock.Anything, mock.Anything)
+
+		client.Close()
+	})
+
+	t.Run("With ReSpawn returns error when lookup fails", func(t *testing.T) {
+		ctx := context.TODO()
+		actor := NewActor("client.testactor").WithName("actorName")
+
+		mockRemoting := mocks.NewRemoting(t)
+		node := &Node{
+			remoting: mockRemoting,
+			address:  "127.0.0.1:12345",
+		}
+
+		remoteHost, remotePort := node.HostAndPort()
+		expectedErr := fmt.Errorf("remote lookup failed: %s", node.address)
+		mockRemoting.EXPECT().MaxReadFrameSize().Return(1024 * 1024)
+		mockRemoting.EXPECT().Compression().Return(remote.NoCompression)
+		mockRemoting.EXPECT().HTTPClient().Return(nethttp.DefaultClient)
+		mockRemoting.EXPECT().TLSConfig().Return(nil)
+		mockRemoting.EXPECT().RemoteLookup(ctx, remoteHost, remotePort, actor.Name()).Return(nil, expectedErr)
+		mockRemoting.EXPECT().Close()
+
+		client, err := New(ctx, []*Node{node})
+		require.NoError(t, err)
+		require.NotNil(t, client)
+
+		err = client.ReSpawn(ctx, actor)
+		require.Error(t, err)
+		require.ErrorIs(t, err, expectedErr)
+		mockRemoting.AssertNotCalled(t, "RemoteReSpawn", mock.Anything, mock.Anything, mock.Anything)
+
+		client.Close()
+	})
+
 	t.Run("With Whereis", func(t *testing.T) {
 		ctx := context.TODO()
 
@@ -789,13 +916,10 @@ func TestClient(t *testing.T) {
 		ctx := context.TODO()
 		actor := NewActor("client.testactor").WithName("actorName")
 
-		httpClient := nethttp.DefaultClient
 		mockRemoting := mocks.NewRemoting(t)
 		node := &Node{
 			remoting: mockRemoting,
 			address:  "127.0.1:12345",
-			mutex:    &sync.RWMutex{},
-			client:   httpClient,
 		}
 
 		remoteHost, remotePort := node.HostAndPort()
@@ -805,6 +929,8 @@ func TestClient(t *testing.T) {
 		mockRemoting.EXPECT().RemoteLookup(ctx, remoteHost, remotePort, actor.Name()).Return(addr, nil)
 		mockRemoting.EXPECT().MaxReadFrameSize().Return(1024 * 1024)
 		mockRemoting.EXPECT().Compression().Return(remote.NoCompression)
+		mockRemoting.EXPECT().HTTPClient().Return(nethttp.DefaultClient)
+		mockRemoting.EXPECT().TLSConfig().Return(nil)
 		mockRemoting.EXPECT().RemoteAsk(ctx, address.NoSender(), addr, new(testpb.TestReply), time.Minute).Return(nil, expectedErr)
 
 		client, err := New(ctx, []*Node{node})
@@ -1085,13 +1211,10 @@ func TestClient(t *testing.T) {
 		ctx := context.TODO()
 		actor := NewActor("client.testactor").WithName("actorName")
 
-		httpClient := nethttp.DefaultClient
 		mockRemoting := mocks.NewRemoting(t)
 		node := &Node{
 			remoting: mockRemoting,
 			address:  "127.0.1:12345",
-			mutex:    &sync.RWMutex{},
-			client:   httpClient,
 		}
 
 		remoteHost, remotePort := node.HostAndPort()
@@ -1099,6 +1222,8 @@ func TestClient(t *testing.T) {
 		mockRemoting.EXPECT().RemoteLookup(ctx, remoteHost, remotePort, actor.Name()).Return(nil, expectedErr)
 		mockRemoting.EXPECT().MaxReadFrameSize().Return(1024 * 1024)
 		mockRemoting.EXPECT().Compression().Return(remote.NoCompression)
+		mockRemoting.EXPECT().HTTPClient().Return(nethttp.DefaultClient)
+		mockRemoting.EXPECT().TLSConfig().Return(nil)
 
 		client, err := New(ctx, []*Node{node})
 		require.NoError(t, err)
@@ -1125,6 +1250,202 @@ func TestClient(t *testing.T) {
 		require.Error(t, err)
 		require.ErrorIs(t, err, expectedErr)
 	})
+
+	t.Run("With Kinds using gzip compression", func(t *testing.T) {
+		ctx := context.TODO()
+
+		logger := log.DiscardLogger
+
+		// start the NATS server
+		srv := startNatsServer(t)
+		addr := srv.Addr().String()
+		compression := remote.GzipCompression
+
+		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr, compression)
+		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr, compression)
+		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr, compression)
+
+		// wait for a proper and clean setup of the cluster
+		pause.For(time.Second)
+
+		addresses := []string{
+			fmt.Sprintf("%s:%d", node1Host, node1Port),
+			fmt.Sprintf("%s:%d", node2Host, node2Port),
+			fmt.Sprintf("%s:%d", node3Host, node3Port),
+		}
+
+		nodes := make([]*Node, len(addresses))
+		for i, addr := range addresses {
+			remoting := remote.NewRemoting(
+				remote.WithRemotingMaxReadFameSize(16*size.MB),
+				remote.WithRemotingCompression(compression))
+			nodes[i] = NewNode(addr, WithRemoting(remoting))
+		}
+
+		client, err := New(ctx, nodes)
+		require.NoError(t, err)
+		require.NotNil(t, client)
+
+		kinds, err := client.Kinds(ctx)
+		require.NoError(t, err)
+		require.NotNil(t, kinds)
+		require.NotEmpty(t, kinds)
+		require.Len(t, kinds, 2)
+
+		expected := []string{
+			"actor.funcactor",
+			"client.testactor",
+		}
+
+		require.ElementsMatch(t, expected, kinds)
+
+		t.Cleanup(
+			func() {
+				client.Close()
+
+				require.NoError(t, sys1.Stop(ctx))
+				require.NoError(t, sys2.Stop(ctx))
+				require.NoError(t, sys3.Stop(ctx))
+
+				require.NoError(t, sd1.Close())
+				require.NoError(t, sd2.Close())
+				require.NoError(t, sd3.Close())
+
+				srv.Shutdown()
+				pause.For(time.Second)
+			})
+	})
+
+	t.Run("With Kinds using Zstandard compression", func(t *testing.T) {
+		ctx := context.TODO()
+
+		logger := log.DiscardLogger
+
+		// start the NATS server
+		srv := startNatsServer(t)
+		addr := srv.Addr().String()
+		compression := remote.ZstdCompression
+
+		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr, compression)
+		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr, compression)
+		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr, compression)
+
+		// wait for a proper and clean setup of the cluster
+		pause.For(time.Second)
+
+		addresses := []string{
+			fmt.Sprintf("%s:%d", node1Host, node1Port),
+			fmt.Sprintf("%s:%d", node2Host, node2Port),
+			fmt.Sprintf("%s:%d", node3Host, node3Port),
+		}
+
+		nodes := make([]*Node, len(addresses))
+		for i, addr := range addresses {
+			remoting := remote.NewRemoting(
+				remote.WithRemotingMaxReadFameSize(16*size.MB),
+				remote.WithRemotingCompression(compression))
+			nodes[i] = NewNode(addr, WithRemoting(remoting))
+		}
+
+		client, err := New(ctx, nodes)
+		require.NoError(t, err)
+		require.NotNil(t, client)
+
+		kinds, err := client.Kinds(ctx)
+		require.NoError(t, err)
+		require.NotNil(t, kinds)
+		require.NotEmpty(t, kinds)
+		require.Len(t, kinds, 2)
+
+		expected := []string{
+			"actor.funcactor",
+			"client.testactor",
+		}
+
+		require.ElementsMatch(t, expected, kinds)
+
+		t.Cleanup(
+			func() {
+				client.Close()
+
+				require.NoError(t, sys1.Stop(ctx))
+				require.NoError(t, sys2.Stop(ctx))
+				require.NoError(t, sys3.Stop(ctx))
+
+				require.NoError(t, sd1.Close())
+				require.NoError(t, sd2.Close())
+				require.NoError(t, sd3.Close())
+
+				srv.Shutdown()
+				pause.For(time.Second)
+			})
+	})
+
+	t.Run("With Kinds using brotli compression", func(t *testing.T) {
+		ctx := context.TODO()
+
+		logger := log.DiscardLogger
+
+		// start the NATS server
+		srv := startNatsServer(t)
+		addr := srv.Addr().String()
+		compression := remote.BrotliCompression
+
+		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr, compression)
+		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr, compression)
+		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr, compression)
+
+		// wait for a proper and clean setup of the cluster
+		pause.For(time.Second)
+
+		addresses := []string{
+			fmt.Sprintf("%s:%d", node1Host, node1Port),
+			fmt.Sprintf("%s:%d", node2Host, node2Port),
+			fmt.Sprintf("%s:%d", node3Host, node3Port),
+		}
+
+		nodes := make([]*Node, len(addresses))
+		for i, addr := range addresses {
+			remoting := remote.NewRemoting(
+				remote.WithRemotingMaxReadFameSize(16*size.MB),
+				remote.WithRemotingCompression(compression))
+			nodes[i] = NewNode(addr, WithRemoting(remoting))
+		}
+
+		client, err := New(ctx, nodes)
+		require.NoError(t, err)
+		require.NotNil(t, client)
+
+		kinds, err := client.Kinds(ctx)
+		require.NoError(t, err)
+		require.NotNil(t, kinds)
+		require.NotEmpty(t, kinds)
+		require.Len(t, kinds, 2)
+
+		expected := []string{
+			"actor.funcactor",
+			"client.testactor",
+		}
+
+		require.ElementsMatch(t, expected, kinds)
+
+		t.Cleanup(
+			func() {
+				client.Close()
+
+				require.NoError(t, sys1.Stop(ctx))
+				require.NoError(t, sys2.Stop(ctx))
+				require.NoError(t, sys3.Stop(ctx))
+
+				require.NoError(t, sd1.Close())
+				require.NoError(t, sd2.Close())
+				require.NoError(t, sd3.Close())
+
+				srv.Shutdown()
+				pause.For(time.Second)
+			})
+	})
+
 	t.Run("With Kinds failure when cluster not enabled", func(t *testing.T) {
 		ctx := context.TODO()
 		nodePorts := dynaport.Get(1)
@@ -1160,7 +1481,6 @@ func TestClient(t *testing.T) {
 
 		client := &Client{
 			nodes:    nodes,
-			locker:   new(sync.Mutex),
 			strategy: RandomStrategy,
 			balancer: random,
 		}
@@ -1208,6 +1528,16 @@ func TestClient(t *testing.T) {
 		pause.For(time.Second)
 
 		require.NoError(t, system.Stop(ctx))
+	})
+}
+
+func TestRefreshNodesLoopPanics(t *testing.T) {
+	client := &Client{
+		refreshInterval: 0,
+	}
+
+	require.PanicsWithValue(t, "intervals must be greater than zero", func() {
+		client.refreshNodesLoop()
 	})
 }
 
@@ -1337,4 +1667,54 @@ func (p *testActor) Receive(ctx *actors.ReceiveContext) {
 	default:
 		ctx.Unhandled()
 	}
+}
+
+func setupUpdateNodesTest(t *testing.T, handler func(context.Context, *connect.Request[internalpb.GetNodeMetricRequest]) (*connect.Response[internalpb.GetNodeMetricResponse], error)) (*Client, *Node, func()) {
+	t.Helper()
+
+	service := &clusterServiceStub{
+		getNodeMetric: handler,
+	}
+
+	path, handlerFunc := internalpbconnect.NewClusterServiceHandler(service)
+	mux := nethttp.NewServeMux()
+	mux.Handle(path, handlerFunc)
+
+	server := nethttptest.NewServer(mux)
+
+	mockRemoting := new(mocks.Remoting)
+	mockRemoting.On("MaxReadFrameSize").Return(0)
+	mockRemoting.On("Compression").Return(remote.NoCompression)
+	mockRemoting.On("HTTPClient").Return(server.Client())
+	mockRemoting.On("TLSConfig").Return((*tls.Config)(nil))
+
+	address := strings.TrimPrefix(server.URL, "http://")
+	address = strings.TrimPrefix(address, "https://")
+	node := NewNode(address, WithRemoting(mockRemoting))
+
+	client := &Client{
+		nodes: []*Node{node},
+	}
+
+	cleanup := func() {
+		server.Close()
+		mockRemoting.AssertExpectations(t)
+	}
+
+	return client, node, cleanup
+}
+
+type clusterServiceStub struct {
+	getNodeMetric func(context.Context, *connect.Request[internalpb.GetNodeMetricRequest]) (*connect.Response[internalpb.GetNodeMetricResponse], error)
+}
+
+func (c *clusterServiceStub) GetNodeMetric(ctx context.Context, req *connect.Request[internalpb.GetNodeMetricRequest]) (*connect.Response[internalpb.GetNodeMetricResponse], error) {
+	if c.getNodeMetric != nil {
+		return c.getNodeMetric(ctx, req)
+	}
+	return connect.NewResponse(&internalpb.GetNodeMetricResponse{}), nil
+}
+
+func (c *clusterServiceStub) GetKinds(context.Context, *connect.Request[internalpb.GetKindsRequest]) (*connect.Response[internalpb.GetKindsResponse], error) {
+	return connect.NewResponse(&internalpb.GetKindsResponse{}), nil
 }

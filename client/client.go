@@ -64,7 +64,7 @@ import (
 type Client struct {
 	_               locker.NoCopy
 	nodes           []*Node
-	locker          *sync.Mutex
+	locker          sync.Mutex
 	strategy        BalancerStrategy
 	balancer        Balancer
 	closeSignal     chan registry.Unit
@@ -101,7 +101,6 @@ func New(ctx context.Context, nodes []*Node, opts ...Option) (*Client, error) {
 	}
 
 	cl := &Client{
-		locker:          &sync.Mutex{},
 		strategy:        RoundRobinStrategy,
 		refreshInterval: -1,
 	}
@@ -540,16 +539,17 @@ func clusterClient(node *Node) internalpbconnect.ClusterServiceClient {
 
 // getBalancer returns the balancer based upon the strategy
 func getBalancer(strategy BalancerStrategy) Balancer {
+	var balancer Balancer
+	balancer = NewRoundRobin()
 	switch strategy {
 	case RoundRobinStrategy:
-		return NewRoundRobin()
+		balancer = NewRoundRobin()
 	case RandomStrategy:
-		return NewRandom()
+		balancer = NewRandom()
 	case LeastLoadStrategy:
-		return NewLeastLoad()
-	default:
-		return NewRoundRobin()
+		balancer = NewLeastLoad()
 	}
+	return balancer
 }
 
 // getNodeMetric pings a given node and get the node metric info and

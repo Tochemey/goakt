@@ -277,6 +277,10 @@ type Remoting interface {
 	// client. This governs both the content encoding offered for responses and,
 	// where supported, the encoding used for outbound requests.
 	Compression() Compression
+
+	// TLSConfig returns the TLS configuration used by this client, if any. A
+	// nil return value indicates that the client is using an insecure transport.
+	TLSConfig() *tls.Config
 }
 
 // RemotingOption configures a remoting client instance during construction.
@@ -712,4 +716,10 @@ func (r *remoting) RemotingServiceClient(host string, port int) internalpbconnec
 // supported, the encoding used for outbound requests.
 func (r *remoting) Compression() Compression {
 	return r.compression
+}
+
+// TLSConfig returns the TLS configuration used by this client, if any. A
+// nil return value indicates that the client is using an insecure transport.
+func (r *remoting) TLSConfig() *tls.Config {
+	return r.tlsConfig
 }
