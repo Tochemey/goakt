@@ -27,11 +27,16 @@ package log
 import (
 	"bytes"
 	"encoding/json"
+	"io"
+	"os"
+	"os/exec"
 	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 func TestDefaultLogger(t *testing.T) {
@@ -392,6 +397,28 @@ func TestLogOutput(t *testing.T) {
 	require.IsType(t, buffer, output)
 }
 
+func TestLogLevelFatal(t *testing.T) {
+	buffer := new(bytes.Buffer)
+	logger := New(FatalLevel, buffer)
+	require.Equal(t, FatalLevel, logger.LogLevel())
+}
+
+func TestLogLevelInvalid(t *testing.T) {
+	encoderCfg := zapcore.EncoderConfig{
+		MessageKey:  "msg",
+		LevelKey:    "level",
+		EncodeLevel: zapcore.LowercaseLevelEncoder,
+	}
+	core := zapcore.NewCore(
+		zapcore.NewJSONEncoder(encoderCfg),
+		zapcore.AddSync(io.Discard),
+		zapcore.DPanicLevel,
+	)
+	logger := &Log{logger: zap.New(core)}
+
+	require.Equal(t, InvalidLevel, logger.LogLevel())
+}
+
 func TestPanic(t *testing.T) {
 	// create a bytes buffer that implements an io.Writer
 	buffer := new(bytes.Buffer)
@@ -407,6 +434,117 @@ func TestPanic(t *testing.T) {
 		msg := "test debug"
 		logger.Panicf("%s", msg)
 	})
+}
+
+// nolint
+func TestLogFatal(t *testing.T) {
+	if os.Getenv("GO_TEST_FATAL") == "1" {
+		logger := New(FatalLevel, os.Stdout)
+		logger.Fatal("fatal message")
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestFatalHelperProcess$", "-test.v")
+	cmd.Env = append(os.Environ(), "GO_TEST_FATAL=1")
+
+	out, err := cmd.CombinedOutput()
+	var exitErr *exec.ExitError
+	require.ErrorAs(t, err, &exitErr)
+	assert.Equal(t, 1, exitErr.ExitCode())
+
+	line := extractLogLine(out)
+	require.NotNil(t, line, "expected fatal log output")
+
+	msg, err := extractMessage(line)
+	require.NoError(t, err)
+	assert.Equal(t, "fatal message", msg)
+
+	lvl, err := extractLevel(line)
+	require.NoError(t, err)
+	assert.Equal(t, FatalLevel.String(), lvl)
+}
+
+func TestFatalHelperProcess(t *testing.T) {
+	if os.Getenv("GO_TEST_FATAL") != "1" {
+		t.Skip("helper process")
+	}
+	logger := New(FatalLevel, os.Stdout)
+	logger.Fatal("fatal message")
+}
+
+// nolint
+func TestLogFatalf(t *testing.T) {
+	if os.Getenv("GO_TEST_FATALF") == "1" {
+		logger := New(FatalLevel, os.Stdout)
+		logger.Fatalf("fatal formatted %d", 42)
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestFatalfHelperProcess$", "-test.v")
+	cmd.Env = append(os.Environ(), "GO_TEST_FATALF=1")
+
+	out, err := cmd.CombinedOutput()
+	var exitErr *exec.ExitError
+	require.ErrorAs(t, err, &exitErr)
+	assert.Equal(t, 1, exitErr.ExitCode())
+
+	line := extractLogLine(out)
+	require.NotNil(t, line, "expected fatalf log output")
+
+	msg, err := extractMessage(line)
+	require.NoError(t, err)
+	assert.Equal(t, "fatal formatted 42", msg)
+
+	lvl, err := extractLevel(line)
+	require.NoError(t, err)
+	assert.Equal(t, FatalLevel.String(), lvl)
+}
+
+func TestFatalfHelperProcess(t *testing.T) {
+	if os.Getenv("GO_TEST_FATALF") != "1" {
+		t.Skip("helper process")
+	}
+	logger := New(FatalLevel, os.Stdout)
+	logger.Fatalf("fatal formatted %d", 42)
+}
+
+func TestStdLogger(t *testing.T) {
+	buffer := new(bytes.Buffer)
+	logger := New(InfoLevel, buffer)
+
+	std := logger.StdLogger()
+	std.Print("std logger message")
+
+	line := buffer.Bytes()
+	require.NotEmpty(t, line)
+
+	msg, err := extractMessage(line)
+	require.NoError(t, err)
+	assert.Equal(t, "std logger message", msg)
+
+	lvl, err := extractLevel(line)
+	require.NoError(t, err)
+	assert.Equal(t, InfoLevel.String(), lvl)
+}
+
+func extractLogLine(out []byte) []byte {
+	for _, line := range bytes.Split(out, []byte("\n")) {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		if line[0] != '{' {
+			continue
+		}
+		var payload map[string]json.RawMessage
+		if err := json.Unmarshal(line, &payload); err != nil {
+			continue
+		}
+		if _, ok := payload["msg"]; ok {
+			return line
+		}
+	}
+	return nil
 }
 
 func extractMessage(bytes []byte) (string, error) {
