@@ -6,19 +6,27 @@ import "goakt/goakt.proto";
 
 option go_package = "github.com/tochemey/goakt/v3/internal/internalpb;internalpb";
 
-message GetDeadletters {}
+// PublishDeadletters is used to trigger the publishing of all accumulated deadletters.
+// This message does not carry any payload.
+message PublishDeadletters {}
 
-message EmitDeadletter {
-  // Specifies the deadletter to emit
+// SendDeadletter is used to emit a single deadletter event.
+// The deadletter field contains the details of the failed message.
+message SendDeadletter {
+  // Specifies the deadletter to emit.
   goaktpb.Deadletter deadletter = 1;
 }
 
-message GetDeadlettersCount {
-  // optional for a specific actor
+// DeadlettersCountRequest requests the count of deadletters.
+// Optionally, the actor_id can be provided to filter deadletters for a specific actor.
+message DeadlettersCountRequest {
+  // Optional: actor ID to filter deadletters for a specific actor.
   optional string actor_id = 1;
 }
 
-message DeadlettersCount {
-  // Specifies the total count
+// DeadlettersCountResponse returns the total number of deadletters.
+// The total_count field contains the count of deadletters found.
+message DeadlettersCountResponse {
+  // Specifies the total count of deadletters.
   int64 total_count = 1;
 }

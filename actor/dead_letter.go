@@ -69,15 +69,13 @@ func (x *deadLetter) Receive(ctx *ReceiveContext) {
 	switch msg := ctx.Message().(type) {
 	case *goaktpb.PostStart:
 		x.handlePostStart(ctx)
-	case *internalpb.EmitDeadletter:
+	case *internalpb.SendDeadletter:
 		x.handleDeadletter(msg.GetDeadletter())
-	case *internalpb.GetDeadletters:
-		x.handleGetDeadletters()
-	case *internalpb.GetDeadlettersCount:
+	case *internalpb.PublishDeadletters:
+		x.handlePublishDeadletters()
+	case *internalpb.DeadlettersCountRequest:
 		count := x.count(msg)
-		ctx.Response(&internalpb.DeadlettersCount{
-			TotalCount: count,
-		})
+		ctx.Response(&internalpb.DeadlettersCountResponse{TotalCount: count})
 	default:
 		// simply ignore anyhing else
 	}
@@ -117,15 +115,15 @@ func (x *deadLetter) handleDeadletter(msg *goaktpb.Deadletter) {
 	x.counters.Set(id, counter)
 }
 
-// handleGetDeadletters pushes the actor state back to the stream
-func (x *deadLetter) handleGetDeadletters() {
+// handlePublishDeadletters pushes the actor state back to the stream
+func (x *deadLetter) handlePublishDeadletters() {
 	x.letters.Range(func(_ string, deadletter *goaktpb.Deadletter) {
 		x.eventsStream.Publish(eventsTopic, deadletter)
 	})
 }
 
 // count returns the deadletter count
-func (x *deadLetter) count(msg *internalpb.GetDeadlettersCount) int64 {
+func (x *deadLetter) count(msg *internalpb.DeadlettersCountRequest) int64 {
 	if msg.ActorId != nil {
 		if counter, ok := x.counters.Get(msg.GetActorId()); ok {
 			return counter.Load()

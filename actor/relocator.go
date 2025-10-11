@@ -42,46 +42,42 @@ import (
 	"github.com/tochemey/goakt/v3/remote"
 )
 
-// redeploymentActor is a system actor that helps rebalance cluster
+// relocator is a system actor that helps rebalance cluster
 // when the cluster topology changes
-type redeploymentActor struct {
+type relocator struct {
 	remoting remote.Remoting
 	pid      *PID
 	logger   log.Logger
 }
 
 // enforce compilation error
-var _ Actor = (*redeploymentActor)(nil)
+var _ Actor = (*relocator)(nil)
 
-// newRedeploymentActor creates an instance of rebalancer
-func newRedeploymentActor(remoting remote.Remoting) *redeploymentActor {
-	return &redeploymentActor{
+// newRelocator creates an instance of relocator
+func newRelocator(remoting remote.Remoting) *relocator {
+	return &relocator{
 		remoting: remoting,
 	}
 }
 
 // PreStart pre-starts the actor.
-func (r *redeploymentActor) PreStart(*Context) error {
+func (r *relocator) PreStart(*Context) error {
 	return nil
 }
 
-// Receive handles messages sent to the rebalancer
-func (r *redeploymentActor) Receive(ctx *ReceiveContext) {
-	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+// Receive handles messages sent to the relocator
+func (r *relocator) Receive(ctx *ReceiveContext) {
+	if _, ok := ctx.Message().(*goaktpb.PostStart); ok {
 		r.pid = ctx.Self()
 		r.logger = ctx.Logger()
 		r.logger.Infof("%s started successfully", r.pid.Name())
-		ctx.Become(r.Rebalance)
-	default:
-		ctx.Unhandled()
+		ctx.Become(r.Relocate)
 	}
 }
 
-// Rebalance behavior
-func (r *redeploymentActor) Rebalance(ctx *ReceiveContext) {
-	switch msg := ctx.Message().(type) {
-	case *internalpb.Rebalance:
+// Relocate behavior
+func (r *relocator) Relocate(ctx *ReceiveContext) {
+	if msg, ok := ctx.Message().(*internalpb.Rebalance); ok {
 		rctx := context.WithoutCancel(ctx.Context())
 		peerState := msg.GetPeerState()
 
@@ -95,7 +91,7 @@ func (r *redeploymentActor) Rebalance(ctx *ReceiveContext) {
 		eg, egCtx := errgroup.WithContext(rctx)
 		logger := r.pid.Logger()
 
-		r.rebalanceActors(egCtx, eg, leaderShares, peersShares, peers)
+		r.relocateActors(egCtx, eg, leaderShares, peersShares, peers)
 
 		if len(peerState.GetGrains()) > 0 {
 			leaderGrains, peersGrains := r.allocateGrains(len(peers)+1, peerState)
@@ -115,13 +111,10 @@ func (r *redeploymentActor) Rebalance(ctx *ReceiveContext) {
 		ctx.Tell(ctx.Sender(), &internalpb.RebalanceComplete{
 			PeerAddress: net.JoinHostPort(peerState.GetHost(), strconv.Itoa(int(peerState.GetPeersPort()))),
 		})
-
-	default:
-		ctx.Unhandled()
 	}
 }
 
-func (r *redeploymentActor) rebalanceActors(ctx context.Context, eg *errgroup.Group, leaderShares []*internalpb.Actor, peersShares [][]*internalpb.Actor, peers []*cluster.Peer) {
+func (r *relocator) relocateActors(ctx context.Context, eg *errgroup.Group, leaderShares []*internalpb.Actor, peersShares [][]*internalpb.Actor, peers []*cluster.Peer) {
 	if len(leaderShares) > 0 {
 		eg.Go(func() error {
 			for _, actor := range leaderShares {
@@ -153,7 +146,7 @@ func (r *redeploymentActor) rebalanceActors(ctx context.Context, eg *errgroup.Gr
 	}
 }
 
-func (r *redeploymentActor) spawnRemoteActor(ctx context.Context, actor *internalpb.Actor, peer *cluster.Peer) error {
+func (r *relocator) spawnRemoteActor(ctx context.Context, actor *internalpb.Actor, peer *cluster.Peer) error {
 	remoteHost := peer.Host
 	remotingPort := peer.RemotingPort
 	actorSystem := r.pid.ActorSystem()
@@ -191,7 +184,7 @@ func (r *redeploymentActor) spawnRemoteActor(ctx context.Context, actor *interna
 	return nil
 }
 
-func (r *redeploymentActor) rebalanceGrains(ctx context.Context, eg *errgroup.Group, leaderGrains []*internalpb.Grain, peersGrains [][]*internalpb.Grain, peers []*cluster.Peer) {
+func (r *relocator) rebalanceGrains(ctx context.Context, eg *errgroup.Group, leaderGrains []*internalpb.Grain, peersGrains [][]*internalpb.Grain, peers []*cluster.Peer) {
 	if len(leaderGrains) > 0 {
 		leaderHost := r.pid.ActorSystem().Host()
 		leaderPort := int32(r.pid.ActorSystem().Port())
@@ -227,7 +220,7 @@ func (r *redeploymentActor) rebalanceGrains(ctx context.Context, eg *errgroup.Gr
 	}
 }
 
-func (r *redeploymentActor) activateRemoteGrain(ctx context.Context, grain *internalpb.Grain, peer *cluster.Peer) error {
+func (r *relocator) activateRemoteGrain(ctx context.Context, grain *internalpb.Grain, peer *cluster.Peer) error {
 	remoteHost := peer.Host
 	remotingPort := peer.RemotingPort
 	remoting := r.pid.ActorSystem().getRemoting()
@@ -257,14 +250,14 @@ func (r *redeploymentActor) activateRemoteGrain(ctx context.Context, grain *inte
 }
 
 // PostStop is executed when the actor is shutting down.
-func (r *redeploymentActor) PostStop(*Context) error {
+func (r *relocator) PostStop(*Context) error {
 	r.remoting.Close()
 	r.logger.Infof("%s stopped successfully", r.pid.Name())
 	return nil
 }
 
 // allocateActors build the list of actors to create on the leader node and the peers in the cluster
-func (r *redeploymentActor) allocateActors(totalPeers int, nodeLeftState *internalpb.PeerState) (leaderShares []*internalpb.Actor, peersShares [][]*internalpb.Actor) {
+func (r *relocator) allocateActors(totalPeers int, nodeLeftState *internalpb.PeerState) (leaderShares []*internalpb.Actor, peersShares [][]*internalpb.Actor) {
 	actors := nodeLeftState.GetActors()
 	actorsCount := len(actors)
 
@@ -304,7 +297,7 @@ func (r *redeploymentActor) allocateActors(totalPeers int, nodeLeftState *intern
 }
 
 // recreateLocally recreates the actor
-func (r *redeploymentActor) recreateLocally(ctx context.Context, props *internalpb.Actor, enforceSingleton bool) error {
+func (r *relocator) recreateLocally(ctx context.Context, props *internalpb.Actor, enforceSingleton bool) error {
 	// remove the given actor from the cluster
 	if err := r.pid.ActorSystem().getCluster().RemoveActor(ctx, props.GetAddress().GetName()); err != nil {
 		return errors.NewInternalError(err)
@@ -349,7 +342,7 @@ func (r *redeploymentActor) recreateLocally(ctx context.Context, props *internal
 // It returns two values:
 //   - leaderShares: grains to be created on the leader node
 //   - peersShares: a slice of grain slices, each assigned to a peer node
-func (r *redeploymentActor) allocateGrains(totalPeers int, nodeLeftState *internalpb.PeerState) (leaderShares []*internalpb.Grain, peersShares [][]*internalpb.Grain) {
+func (r *relocator) allocateGrains(totalPeers int, nodeLeftState *internalpb.PeerState) (leaderShares []*internalpb.Grain, peersShares [][]*internalpb.Grain) {
 	grains := nodeLeftState.GetGrains()
 	grainCount := len(grains)
 

@@ -1888,7 +1888,7 @@ func (pid *PID) toDeadletter(ctx context.Context, from, to *address.Address, mes
 	// send the message to the deadletter actor
 	_ = pid.Tell(ctx,
 		deadletter,
-		&internalpb.EmitDeadletter{
+		&internalpb.SendDeadletter{
 			Deadletter: &goaktpb.Deadletter{
 				Sender:   from.Address,
 				Receiver: to.Address,
@@ -2095,7 +2095,7 @@ func (pid *PID) getDeadlettersCount(ctx context.Context) int64 {
 		name    = pid.ID()
 		to      = pid.ActorSystem().getDeadletter()
 		from    = pid.ActorSystem().getSystemGuardian()
-		message = &internalpb.GetDeadlettersCount{
+		message = &internalpb.DeadlettersCountRequest{
 			ActorId: &name,
 		}
 	)
@@ -2105,7 +2105,7 @@ func (pid *PID) getDeadlettersCount(ctx context.Context) int64 {
 		// note: no need to check for error because this call is internal
 		message, _ := from.Ask(ctx, to, message, DefaultAskTimeout)
 		// cast the response received from the deadletter
-		deadlettersCount := message.(*internalpb.DeadlettersCount)
+		deadlettersCount := message.(*internalpb.DeadlettersCountResponse)
 		return deadlettersCount.GetTotalCount()
 	}
 	return 0
