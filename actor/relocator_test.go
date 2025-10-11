@@ -51,7 +51,7 @@ import (
 func TestRelocatorPeersError(t *testing.T) {
 	ctx := context.Background()
 
-	system, err := NewActorSystem("relocator-peers-error", WithLogger(log.DiscardLogger))
+	system, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
 	require.NoError(t, err)
 	require.NotNil(t, system)
 
@@ -62,20 +62,19 @@ func TestRelocatorPeersError(t *testing.T) {
 	clusterMock.EXPECT().Peers(mock.Anything).Return(nil, expectedErr).Once()
 
 	sys.cluster = clusterMock
+	sys.relocationEnabled.Store(true)
 
-	relocatorActor := newRelocator(remote.NewRemoting())
-	pid, err := sys.configPID(ctx, "relocator-under-test", relocatorActor, asSystem())
-	require.NoError(t, err)
-	require.NotNil(t, pid)
-
-	require.Eventually(t, func() bool {
-		return relocatorActor.pid != nil && relocatorActor.logger != nil
-	}, time.Second, 10*time.Millisecond, "relocator actor did not initialize")
+	actor := &relocator{
+		remoting: remote.NewRemoting(),
+		pid: &PID{
+			system: system,
+		},
+	}
 
 	msg := &internalpb.Rebalance{PeerState: new(internalpb.PeerState)}
-	receiveCtx := newReceiveContext(ctx, nil, pid, msg)
+	receiveCtx := newReceiveContext(ctx, nil, actor.pid, msg)
 
-	relocatorActor.Relocate(receiveCtx)
+	actor.Relocate(receiveCtx)
 
 	errRecorded := receiveCtx.getError()
 	require.Error(t, errRecorded)
@@ -98,16 +97,15 @@ func TestRelocatorSpawnRemoteActorActorExistsError(t *testing.T) {
 	expectedErr := stdErrors.New("cluster ActorExists failure")
 	clusterMock.EXPECT().ActorExists(mock.Anything, "relocated-actor").Return(false, expectedErr).Once()
 
+	sys.relocationEnabled.Store(true)
 	sys.cluster = clusterMock
 
-	relocatorActor := newRelocator(remote.NewRemoting())
-	pid, err := sys.configPID(ctx, "relocator-actor-exists", relocatorActor, asSystem())
-	require.NoError(t, err)
-	require.NotNil(t, pid)
-
-	require.Eventually(t, func() bool {
-		return relocatorActor.pid != nil && relocatorActor.logger != nil
-	}, time.Second, 10*time.Millisecond, "relocator actor did not initialize")
+	actor := &relocator{
+		remoting: remote.NewRemoting(),
+		pid: &PID{
+			system: system,
+		},
+	}
 
 	targetActor := &internalpb.Actor{
 		Address: &goaktpb.Address{Name: "relocated-actor"},
@@ -117,7 +115,7 @@ func TestRelocatorSpawnRemoteActorActorExistsError(t *testing.T) {
 		RemotingPort: 8080,
 	}
 
-	err = relocatorActor.spawnRemoteActor(ctx, targetActor, targetPeer)
+	err = actor.spawnRemoteActor(ctx, targetActor, targetPeer)
 	require.Error(t, err)
 
 	var internalErr *errors.InternalError
@@ -128,7 +126,7 @@ func TestRelocatorSpawnRemoteActorActorExistsError(t *testing.T) {
 func TestRelocatorSpawnRemoteActorRemoveActorError(t *testing.T) {
 	ctx := context.Background()
 
-	system, err := NewActorSystem("relocator-remove-actor-error", WithLogger(log.DiscardLogger))
+	system, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
 	require.NoError(t, err)
 	require.NotNil(t, system)
 
@@ -141,14 +139,15 @@ func TestRelocatorSpawnRemoteActorRemoveActorError(t *testing.T) {
 
 	sys.cluster = clusterMock
 
-	relocatorActor := newRelocator(remote.NewRemoting())
-	pid, err := sys.configPID(ctx, "relocator-remove-actor", relocatorActor, asSystem())
-	require.NoError(t, err)
-	require.NotNil(t, pid)
+	sys.relocationEnabled.Store(true)
+	sys.cluster = clusterMock
 
-	require.Eventually(t, func() bool {
-		return relocatorActor.pid != nil && relocatorActor.logger != nil
-	}, time.Second, 10*time.Millisecond, "relocator actor did not initialize")
+	actor := &relocator{
+		remoting: remote.NewRemoting(),
+		pid: &PID{
+			system: system,
+		},
+	}
 
 	targetActor := &internalpb.Actor{
 		Address: &goaktpb.Address{Name: "relocated-actor"},
@@ -158,7 +157,7 @@ func TestRelocatorSpawnRemoteActorRemoveActorError(t *testing.T) {
 		RemotingPort: 8080,
 	}
 
-	err = relocatorActor.spawnRemoteActor(ctx, targetActor, targetPeer)
+	err = actor.spawnRemoteActor(ctx, targetActor, targetPeer)
 	require.Error(t, err)
 
 	var internalErr *errors.InternalError
