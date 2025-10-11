@@ -30,10 +30,36 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
+
+// nolint
+func TestReleaseGrainContextResetsFields(t *testing.T) {
+	ctx := getGrainContext()
+
+	identity := &GrainIdentity{kind: "TestKind", name: "id"}
+	ctx.self = identity
+	ctx.message = &testpb.TestMessage{}
+	ctx.err = make(chan error, 1)
+	ctx.response = make(chan proto.Message, 1)
+	ctx.pid = &grainPID{}
+
+	releaseGrainContext(ctx)
+
+	require.Nil(t, ctx.self)
+	require.Nil(t, ctx.message)
+	require.Nil(t, ctx.err)
+	require.Nil(t, ctx.response)
+	require.Nil(t, ctx.pid)
+
+	// Return the context to the pool to keep the pool populated for other tests.
+	// releaseGrainContext already returned it, but we re-acquire and release to ensure clean state.
+	acquired := getGrainContext()
+	releaseGrainContext(acquired)
+}
 
 func TestGrainContext(t *testing.T) {
 	t.Run("With Grain to Actor messaging", func(t *testing.T) {

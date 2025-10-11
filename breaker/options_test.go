@@ -144,3 +144,17 @@ func TestOptionsSanitize(t *testing.T) {
 	opts.Sanitize()
 	require.NoError(t, opts.Validate())
 }
+
+// nolint
+func TestOptionsSanitizeClampsFailureRate(t *testing.T) {
+	t.Run("below zero", func(t *testing.T) {
+		opts := &options{failureRate: -0.3}
+		opts.Sanitize()
+		require.Equal(t, 0.5, opts.failureRate)
+	})
+	t.Run("above one", func(t *testing.T) {
+		opts := &options{failureRate: 1.3}
+		opts.Sanitize()
+		require.Equal(t, 0.5, opts.failureRate)
+	})
+}

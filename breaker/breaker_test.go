@@ -323,3 +323,49 @@ func TestBreakerTryAllowClosedAlwaysTrue(t *testing.T) {
 	b := NewCircuitBreaker()
 	assert.True(t, b.tryAllow())
 }
+
+// nolint
+func TestHalfOpenFailureReopensBreaker(t *testing.T) {
+	b := NewCircuitBreaker(WithMinRequests(1), WithFailureRate(0.5))
+	b.toHalfOpen()
+	require.Equal(t, HalfOpen, b.State())
+
+	b.onFailure()
+
+	require.Equal(t, Open, b.State())
+}
+
+// nolint
+func TestEnsureSemInitializesWhenUnset(t *testing.T) {
+	b := NewCircuitBreaker()
+	b.semCh = nil
+	// force invalid configuration to take default path
+	b.opts.halfOpenMaxCalls = 0
+
+	b.ensureSem()
+
+	require.NotNil(t, b.semCh)
+	assert.Equal(t, 1, cap(b.semCh))
+}
+
+// nolint
+func TestTransitionToReturnsFalseForSameState(t *testing.T) {
+	b := NewCircuitBreaker()
+
+	changed := b.transitionTo(Closed)
+
+	require.False(t, changed)
+	require.Equal(t, Closed, b.State())
+}
+
+// nolint
+func TestTransitionToHalfOpenDefaultsMaxCalls(t *testing.T) {
+	b := NewCircuitBreaker()
+	b.opts.halfOpenMaxCalls = 0
+
+	b.transitionTo(HalfOpen)
+
+	require.Equal(t, HalfOpen, b.State())
+	assert.NotNil(t, b.semCh)
+	assert.Equal(t, 1, cap(b.semCh))
+}

@@ -1322,6 +1322,27 @@ func (a *MockReinstateRaceActor) PostStop(*Context) error {
 // MockUnimplementedActor deliberately does not implement the Actor interface to exercise reflection error paths.
 type MockUnimplementedActor struct{}
 
+type MockContextReleasingGrain struct {
+	done chan *GrainContext
+}
+
+var _ Grain = (*MockContextReleasingGrain)(nil)
+
+// nolint
+func (g *MockContextReleasingGrain) OnActivate(ctx context.Context, props *GrainProps) error {
+	return nil
+}
+
+func (g *MockContextReleasingGrain) OnReceive(ctx *GrainContext) {
+	g.done <- ctx
+	ctx.NoErr()
+}
+
+// nolint
+func (g *MockContextReleasingGrain) OnDeactivate(ctx context.Context, props *GrainProps) error {
+	return nil
+}
+
 // //////////////////////////////////////// CLUSTER PROVIDERS MOCKS //////////////////////////////////////
 type providerFactory func(t *testing.T, host string, discoveryPort int) discovery.Provider
 

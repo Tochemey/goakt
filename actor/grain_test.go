@@ -53,6 +53,43 @@ import (
 )
 
 // nolint
+func TestGrainPIDProcessReleasesContexts(t *testing.T) {
+	grain := &MockContextReleasingGrain{done: make(chan *GrainContext, 2)}
+	pid := &grainPID{
+		grain:   grain,
+		mailbox: newGrainMailbox(),
+		logger:  log.DiscardLogger,
+		mu:      &sync.Mutex{},
+	}
+
+	pid.processing.Store(idle)
+
+	ctx := context.Background()
+	identity := &GrainIdentity{kind: "TestKind", name: "TestID"}
+
+	first := getGrainContext().build(ctx, pid, nil, identity, &testpb.TestReply{}, false)
+	second := getGrainContext().build(ctx, pid, nil, identity, &testpb.TestReply{}, false)
+
+	pid.mailbox.Enqueue(first)
+	pid.mailbox.Enqueue(second)
+
+	pid.process()
+
+	require.Same(t, first, <-grain.done)
+	require.Same(t, second, <-grain.done)
+
+	require.Eventually(t, func() bool {
+		return pid.mailbox.IsEmpty() && pid.processing.Load() == idle
+	}, time.Second, 10*time.Millisecond)
+
+	require.Nil(t, first.Message())
+	require.Nil(t, first.self)
+	require.Nil(t, first.getError())
+	require.Nil(t, first.getResponse())
+	require.Nil(t, first.pid)
+}
+
+// nolint
 func TestGrain(t *testing.T) {
 	t.Run("With single node", func(t *testing.T) {
 		ctx := t.Context()
