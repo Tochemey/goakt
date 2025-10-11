@@ -6869,7 +6869,7 @@ func TestStopReturnsCleanupClusterError(t *testing.T) {
 	system := MockReplicationTestSystem(clusterMock)
 	system.grains = collection.NewMap[string, *grainPID]()
 	system.extensions = collection.NewMap[string, extension.Extension]()
-	system.rebalancing.Store(false)
+	system.relocating.Store(false)
 	system.actors = newTree()
 	system.actors.noSender = nil
 	system.noSender = nil
@@ -6878,7 +6878,7 @@ func TestStopReturnsCleanupClusterError(t *testing.T) {
 	system.systemGuardian = nil
 	system.userGuardian = nil
 	system.singletonManager = nil
-	system.rebalancer = nil
+	system.relocator = nil
 	system.deadletter = nil
 	system.deathWatch = nil
 	system.peerStatesWriter = nil

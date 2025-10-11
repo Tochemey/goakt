@@ -83,10 +83,10 @@ func TestDeadletter(t *testing.T) {
 		}
 
 		require.Len(t, items, 5)
-		reply, err := Ask(ctx, sys.getDeadletter(), &internalpb.GetDeadlettersCount{}, 500*time.Millisecond)
+		reply, err := Ask(ctx, sys.getDeadletter(), &internalpb.DeadlettersCountRequest{}, 500*time.Millisecond)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
-		response, ok := reply.(*internalpb.DeadlettersCount)
+		response, ok := reply.(*internalpb.DeadlettersCountResponse)
 		require.True(t, ok)
 		require.EqualValues(t, 5, response.GetTotalCount())
 
@@ -126,12 +126,12 @@ func TestDeadletter(t *testing.T) {
 		pause.For(time.Second)
 
 		actorID := actorRef.ID()
-		reply, err := Ask(ctx, sys.getDeadletter(), &internalpb.GetDeadlettersCount{
+		reply, err := Ask(ctx, sys.getDeadletter(), &internalpb.DeadlettersCountRequest{
 			ActorId: &actorID,
 		}, 500*time.Millisecond)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
-		response, ok := reply.(*internalpb.DeadlettersCount)
+		response, ok := reply.(*internalpb.DeadlettersCountResponse)
 		require.True(t, ok)
 		require.EqualValues(t, 5, response.GetTotalCount())
 
@@ -184,7 +184,7 @@ func TestDeadletter(t *testing.T) {
 		// let us empty the item list
 		items = []*goaktpb.Deadletter{}
 
-		err = Tell(ctx, sys.getDeadletter(), &internalpb.GetDeadletters{})
+		err = Tell(ctx, sys.getDeadletter(), &internalpb.PublishDeadletters{})
 		require.NoError(t, err)
 
 		pause.For(time.Second)

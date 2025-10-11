@@ -27,20 +27,145 @@ package actor
 import (
 	"context"
 	"crypto/tls"
+	stdErrors "errors"
 	"fmt"
 	"testing"
 	"time"
 
 	"github.com/kapetan-io/tackle/autotls"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/tochemey/goakt/v3/errors"
+	"github.com/tochemey/goakt/v3/goaktpb"
+	"github.com/tochemey/goakt/v3/internal/cluster"
+	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
+	"github.com/tochemey/goakt/v3/log"
+	mockscluster "github.com/tochemey/goakt/v3/mocks/cluster"
+	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
-func TestRedeployment(t *testing.T) {
+func TestRelocatorPeersError(t *testing.T) {
+	ctx := context.Background()
+
+	system, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NotNil(t, system)
+
+	sys := system.(*actorSystem)
+
+	clusterMock := mockscluster.NewCluster(t)
+	expectedErr := stdErrors.New("cluster failure")
+	clusterMock.EXPECT().Peers(mock.Anything).Return(nil, expectedErr).Once()
+
+	sys.cluster = clusterMock
+	sys.relocationEnabled.Store(true)
+
+	actor := &relocator{
+		remoting: remote.NewRemoting(),
+		pid: &PID{
+			system: system,
+		},
+	}
+
+	msg := &internalpb.Rebalance{PeerState: new(internalpb.PeerState)}
+	receiveCtx := newReceiveContext(ctx, nil, actor.pid, msg)
+
+	actor.Relocate(receiveCtx)
+
+	errRecorded := receiveCtx.getError()
+	require.Error(t, errRecorded)
+
+	var internalErr *errors.InternalError
+	require.ErrorAs(t, errRecorded, &internalErr)
+	require.Contains(t, errRecorded.Error(), expectedErr.Error())
+}
+
+func TestRelocatorSpawnRemoteActorActorExistsError(t *testing.T) {
+	ctx := context.Background()
+
+	system, err := NewActorSystem("relocator-actor-exists-error", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NotNil(t, system)
+
+	sys := system.(*actorSystem)
+
+	clusterMock := mockscluster.NewCluster(t)
+	expectedErr := stdErrors.New("cluster ActorExists failure")
+	clusterMock.EXPECT().ActorExists(mock.Anything, "relocated-actor").Return(false, expectedErr).Once()
+
+	sys.relocationEnabled.Store(true)
+	sys.cluster = clusterMock
+
+	actor := &relocator{
+		remoting: remote.NewRemoting(),
+		pid: &PID{
+			system: system,
+		},
+	}
+
+	targetActor := &internalpb.Actor{
+		Address: &goaktpb.Address{Name: "relocated-actor"},
+	}
+	targetPeer := &cluster.Peer{
+		Host:         "127.0.0.1",
+		RemotingPort: 8080,
+	}
+
+	err = actor.spawnRemoteActor(ctx, targetActor, targetPeer)
+	require.Error(t, err)
+
+	var internalErr *errors.InternalError
+	require.ErrorAs(t, err, &internalErr)
+	require.Contains(t, err.Error(), expectedErr.Error())
+}
+
+func TestRelocatorSpawnRemoteActorRemoveActorError(t *testing.T) {
+	ctx := context.Background()
+
+	system, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NotNil(t, system)
+
+	sys := system.(*actorSystem)
+
+	clusterMock := mockscluster.NewCluster(t)
+	clusterMock.EXPECT().ActorExists(mock.Anything, "relocated-actor").Return(true, nil).Once()
+	expectedErr := fmt.Errorf("failed to remove actor from cluster")
+	clusterMock.EXPECT().RemoveActor(mock.Anything, "relocated-actor").Return(expectedErr).Once()
+
+	sys.cluster = clusterMock
+
+	sys.relocationEnabled.Store(true)
+	sys.cluster = clusterMock
+
+	actor := &relocator{
+		remoting: remote.NewRemoting(),
+		pid: &PID{
+			system: system,
+		},
+	}
+
+	targetActor := &internalpb.Actor{
+		Address: &goaktpb.Address{Name: "relocated-actor"},
+	}
+	targetPeer := &cluster.Peer{
+		Host:         "127.0.0.1",
+		RemotingPort: 8080,
+	}
+
+	err = actor.spawnRemoteActor(ctx, targetActor, targetPeer)
+	require.Error(t, err)
+
+	var internalErr *errors.InternalError
+	require.ErrorAs(t, err, &internalErr)
+	require.Contains(t, err.Error(), expectedErr.Error())
+}
+
+func TestRelocation(t *testing.T) {
 	// create a context
 	ctx := context.TODO()
 	// start the NATS server
@@ -112,7 +237,7 @@ func TestRedeployment(t *testing.T) {
 	srv.Shutdown()
 }
 
-func TestSecuredRedeployment(t *testing.T) {
+func TestRelocationWithTLS(t *testing.T) {
 	t.Skip("Github actions is not stable with TLS tests")
 	// create a context
 	ctx := context.TODO()
@@ -207,7 +332,7 @@ func TestSecuredRedeployment(t *testing.T) {
 	srv.Shutdown()
 }
 
-func TestRedeploymentWithSingletonActor(t *testing.T) {
+func TestRelocationWithSingletonActor(t *testing.T) {
 	// create a context
 	ctx := context.TODO()
 	// start the NATS server
@@ -250,7 +375,7 @@ func TestRedeploymentWithSingletonActor(t *testing.T) {
 	srv.Shutdown()
 }
 
-func TestRedeploymentWithActorRelocationDisabled(t *testing.T) {
+func TestRelocationWithActorRelocationDisabled(t *testing.T) {
 	// create a context
 	ctx := context.TODO()
 	// start the NATS server
@@ -322,7 +447,7 @@ func TestRedeploymentWithActorRelocationDisabled(t *testing.T) {
 	srv.Shutdown()
 }
 
-func TestRedeploymentWithSystemRelocationDisabled(t *testing.T) {
+func TestRelocationWithSystemRelocationDisabled(t *testing.T) {
 	// create a context
 	ctx := context.TODO()
 	// start the NATS server
@@ -396,7 +521,7 @@ func TestRedeploymentWithSystemRelocationDisabled(t *testing.T) {
 	srv.Shutdown()
 }
 
-func TestRedeploymentWithExtension(t *testing.T) {
+func TestRelocationWithExtension(t *testing.T) {
 	// create a context
 	ctx := context.TODO()
 	// start the NATS server
@@ -494,7 +619,7 @@ func TestRedeploymentWithExtension(t *testing.T) {
 	srv.Shutdown()
 }
 
-func TestRedeploymentWithDependency(t *testing.T) {
+func TestRelocationWithDependency(t *testing.T) {
 	// create a context
 	ctx := context.TODO()
 	// start the NATS server
@@ -567,7 +692,7 @@ func TestRedeploymentWithDependency(t *testing.T) {
 	srv.Shutdown()
 }
 
-func TestIssue781(t *testing.T) {
+func TestRelocationIssue781(t *testing.T) {
 	// reference: https://github.com/Tochemey/goakt/issues/781
 	// create a context
 	ctx := t.Context()
@@ -647,7 +772,7 @@ func TestIssue781(t *testing.T) {
 }
 
 // nolint
-func TestGrainsRedeployment(t *testing.T) {
+func TestGrainsRelocation(t *testing.T) {
 	// create a context
 	ctx := t.Context()
 	// start the NATS server
@@ -768,7 +893,7 @@ func TestGrainsRedeployment(t *testing.T) {
 }
 
 // nolint
-func TestPersistenceGrainsRedeployment(t *testing.T) {
+func TestPersistenceGrainsRelocation(t *testing.T) {
 	// create a context
 	ctx := t.Context()
 	// start the NATS server
@@ -914,7 +1039,7 @@ func TestPersistenceGrainsRedeployment(t *testing.T) {
 }
 
 // nolint
-func TestGrainsRedeploymentWithDependencies(t *testing.T) {
+func TestGrainsWithDependenciesRelocation(t *testing.T) {
 	// create a context
 	ctx := t.Context()
 	// start the NATS server
@@ -1045,7 +1170,7 @@ func TestGrainsRedeploymentWithDependencies(t *testing.T) {
 	srv.Shutdown()
 }
 
-func TestRedeployment_WithConsulProvider(t *testing.T) {
+func TestRelocationWithConsulProvider(t *testing.T) {
 	// create a context
 	ctx := t.Context()
 	agent := startConsulAgent(t)
@@ -1122,7 +1247,7 @@ func TestRedeployment_WithConsulProvider(t *testing.T) {
 	require.NoError(t, sd3.Close())
 }
 
-func TestRedeployment_WithEtcdProvider(t *testing.T) {
+func TestRelocationWithEtcdProvider(t *testing.T) {
 	// create a context
 	ctx := t.Context()
 	cluster := startEtcdCluster(t)

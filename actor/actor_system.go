@@ -581,14 +581,14 @@ type ActorSystem interface {
 	// tree returns the actors tree
 	tree() *tree
 
-	completeRebalancing()
+	completeRelocation()
 	getRootGuardian() *PID
 	getSystemGuardian() *PID
 	getUserGuardian() *PID
 	getDeathWatch() *PID
 	getDeadletter() *PID
 	getSingletonManager() *PID
-	getRebalancer() *PID
+	getRelocator() *PID
 	getPeerStatesWriter() *PID
 	getReflection() *reflection
 	findRoutee(routeeName string) (*PID, bool)
@@ -663,7 +663,7 @@ type actorSystem struct {
 	rebalancingQueue chan *internalpb.PeerState
 	rebalancedNodes  goset.Set[string]
 
-	rebalancer       *PID
+	relocator        *PID
 	rootGuardian     *PID
 	userGuardian     *PID
 	systemGuardian   *PID
@@ -674,10 +674,10 @@ type actorSystem struct {
 	noSender         *PID
 	peerStatesWriter *PID
 
-	startedAt       atomic.Int64
-	rebalancing     atomic.Bool
-	rebalanceLocker sync.Mutex
-	shutdownHooks   []ShutdownHook
+	startedAt        atomic.Int64
+	relocating       atomic.Bool
+	relocatingLocker sync.Mutex
+	shutdownHooks    []ShutdownHook
 
 	actorsCounter      atomic.Uint64
 	deadlettersCounter atomic.Uint64
@@ -766,7 +766,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	}
 
 	system.startedAt.Store(0)
-	system.rebalancing.Store(false)
+	system.relocating.Store(false)
 	system.actorsCounter.Store(0)
 	system.deadlettersCounter.Store(0)
 	system.spawnOnNext.Store(0)
@@ -874,7 +874,7 @@ func (x *actorSystem) Start(ctx context.Context) error {
 		AddContextRunner(x.spawnDeathWatch).
 		AddContextRunner(x.spawnDeadletter).
 		AddContextRunner(x.spawnSingletonManager).
-		AddContextRunner(x.spawnRedeployer).
+		AddContextRunner(x.spawnRelocator).
 		AddContextRunner(x.spawnTopicActor).
 		AddContextRunner(x.spawnPeerStatesWriter).
 		AddContextRunner(x.startRemoting).
@@ -2128,10 +2128,10 @@ func (x *actorSystem) getSingletonManager() *PID {
 	return singletonManager
 }
 
-// getRebalancer returns the rebalancer PID
-func (x *actorSystem) getRebalancer() *PID {
+// getRelocator returns the relocator PID
+func (x *actorSystem) getRelocator() *PID {
 	x.locker.RLock()
-	rebalancer := x.rebalancer
+	rebalancer := x.relocator
 	x.locker.RUnlock()
 	return rebalancer
 }
@@ -2144,8 +2144,8 @@ func (x *actorSystem) getPeerStatesWriter() *PID {
 	return pid
 }
 
-func (x *actorSystem) completeRebalancing() {
-	x.rebalancing.Store(false)
+func (x *actorSystem) completeRelocation() {
+	x.relocating.Store(false)
 }
 
 // putActorOnCluster broadcast the newly (re)spawned actor into the cluster
@@ -2414,7 +2414,7 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 		New(chain.WithFailFast(), chain.WithContext(ctx)).
 		AddContextRunnerIf(x.getUserGuardian() != nil, x.getUserGuardian().Shutdown).
 		AddContextRunnerIf(x.getSingletonManager() != nil, x.getSingletonManager().Shutdown).
-		AddContextRunnerIf(x.getRebalancer() != nil, x.getRebalancer().Shutdown).
+		AddContextRunnerIf(x.getRelocator() != nil, x.getRelocator().Shutdown).
 		AddContextRunnerIf(x.getDeadletter() != nil, x.getDeadletter().Shutdown).
 		AddContextRunnerIf(x.getDeathWatch() != nil, x.getDeathWatch().Shutdown).
 		AddContextRunnerIf(x.getPeerStatesWriter() != nil, x.getPeerStatesWriter().Shutdown).
@@ -2616,9 +2616,9 @@ func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
 
 			msg := &internalpb.GetPeerState{PeerAddress: nodeLeft.GetAddress()}
 			if response, err := x.NoSender().Ask(ctx, stateWriter, msg, DefaultAskTimeout); err == nil {
-				x.rebalanceLocker.Lock()
+				x.relocatingLocker.Lock()
 				x.rebalancingQueue <- response.(*internalpb.PeerState)
-				x.rebalanceLocker.Unlock()
+				x.relocatingLocker.Unlock()
 				return
 			}
 
@@ -2676,16 +2676,16 @@ func (x *actorSystem) rebalancingLoop() {
 			continue
 		}
 
-		if x.rebalancing.Load() {
-			x.rebalanceLocker.Lock()
+		if x.relocating.Load() {
+			x.relocatingLocker.Lock()
 			x.rebalancingQueue <- peerState
-			x.rebalanceLocker.Unlock()
+			x.relocatingLocker.Unlock()
 			continue
 		}
 
-		x.rebalancing.Store(true)
+		x.relocating.Store(true)
 		message := &internalpb.Rebalance{PeerState: peerState}
-		if err := x.systemGuardian.Tell(ctx, x.rebalancer, message); err != nil {
+		if err := x.systemGuardian.Tell(ctx, x.relocator, message); err != nil {
 			x.logger.Error(err)
 		}
 	}
@@ -2918,8 +2918,8 @@ func (x *actorSystem) spawnDeathWatch(ctx context.Context) error {
 	return x.actors.addNode(x.systemGuardian, x.deathWatch)
 }
 
-// spawnRedeployer creates the actor responsible for re-deploying actors when a node leaves the cluster
-func (x *actorSystem) spawnRedeployer(ctx context.Context) error {
+// spawnRelocator creates the actor responsible for re-deploying actors when a node leaves the cluster
+func (x *actorSystem) spawnRelocator(ctx context.Context) error {
 	if x.clusterEnabled.Load() && x.relocationEnabled.Load() {
 		actorName := x.reservedName(rebalancerType)
 
@@ -2933,15 +2933,15 @@ func (x *actorSystem) spawnRedeployer(ctx context.Context) error {
 			WithDirective(&gerrors.SpawnError{}, ResumeDirective),
 		)
 
-		x.rebalancer, _ = x.configPID(ctx,
+		x.relocator, _ = x.configPID(ctx,
 			actorName,
-			newRedeploymentActor(x.remoting),
+			newRelocator(x.remoting),
 			asSystem(),
 			WithLongLived(),
 			WithSupervisor(supervisor),
 		)
-		// the rebalancer is a child actor of the system guardian
-		return x.actors.addNode(x.systemGuardian, x.rebalancer)
+		// the relocator is a child actor of the system guardian
+		return x.actors.addNode(x.systemGuardian, x.relocator)
 	}
 	return nil
 }
@@ -3056,7 +3056,7 @@ func (x *actorSystem) getSetDeadlettersCount(ctx context.Context) {
 	var (
 		to      = x.getDeadletter()
 		from    = x.getSystemGuardian()
-		message = new(internalpb.GetDeadlettersCount)
+		message = new(internalpb.DeadlettersCountRequest)
 	)
 	if to.IsRunning() {
 		// ask the deadletter actor for the count
@@ -3064,7 +3064,7 @@ func (x *actorSystem) getSetDeadlettersCount(ctx context.Context) {
 		// note: no need to check for error because this call is internal
 		message, _ := from.Ask(ctx, to, message, DefaultAskTimeout)
 		// cast the response received from the deadletter
-		deadlettersCount := message.(*internalpb.DeadlettersCount)
+		deadlettersCount := message.(*internalpb.DeadlettersCountResponse)
 		// set the counter
 		x.deadlettersCounter.Store(uint64(deadlettersCount.GetTotalCount()))
 	}
@@ -3088,9 +3088,9 @@ func (x *actorSystem) shutdownCluster(ctx context.Context, actors []ActorRef) er
 		}
 
 		x.clusterEnabled.Store(false)
-		x.rebalancing.Store(false)
+		x.relocating.Store(false)
 		x.pubsubEnabled.Store(false)
-		x.rebalanceLocker.Lock()
+		x.relocatingLocker.Lock()
 
 		if x.rebalancingQueue != nil {
 			close(x.rebalancingQueue)
@@ -3100,7 +3100,7 @@ func (x *actorSystem) shutdownCluster(ctx context.Context, actors []ActorRef) er
 			close(x.grainsQueue)
 		}
 
-		x.rebalanceLocker.Unlock()
+		x.relocatingLocker.Unlock()
 	}
 	return nil
 }

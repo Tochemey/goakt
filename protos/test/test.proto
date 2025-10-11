@@ -1,90 +1,161 @@
 syntax = "proto3";
 
+// Test protocol buffers used by the goakt test suite.
+// These messages drive actor behaviors, assertions, and cluster scenarios.
+// They are not intended for production APIs.
 package testpb;
 
 import "google/protobuf/any.proto";
 
 option go_package = "github.com/tochemey/goakt/v3/test/data;testpb";
 
+// TestReply is a simple acknowledgement payload with no fields.
 message TestReply {}
+
+// TestPanic instructs an actor to panic; used to test supervision strategies.
 message TestPanic {}
+
+// TestPanicError instructs an actor to panic with an error value.
 message TestPanicError {}
+
+// TestTimeout is used to simulate a request that will time out (no response).
 message TestTimeout {}
+
+// Reply carries a small text response used in request/response tests.
 message Reply {
+  // content is the plain\-text payload of the reply.
   string content = 1;
 }
 
+// TestSend triggers a local send scenario in tests.
 message TestSend {}
+
+// TestRemoteSend triggers a remote send scenario (inter\-node) in tests.
 message TestRemoteSend {}
 
+// Account represents a snapshot of an account aggregate used in tests.
 message Account {
+  // account_id is the unique identifier of the account.
   string account_id = 1;
+  // account_balance is the current balance of the account.
   double account_balance = 2;
 }
 
+// CreateAccount is a command to create a new test account.
 message CreateAccount {
+  // account_balance is the initial balance of the account.
   double account_balance = 2;
 }
 
+// CreditAccount is a command to credit an existing account.
 message CreditAccount {
+  // account_id identifies the target account.
   string account_id = 1;
+  // balance is the amount to add to the account.
   double balance = 2;
 }
 
+// AccountCreated is an event emitted after an account is created.
 message AccountCreated {
+  // account_id is the identifier of the created account.
   string account_id = 1;
+  // account_balance is the starting balance.
   double account_balance = 2;
 }
 
+// AccountCredited is an event emitted after a successful credit.
 message AccountCredited {
+  // account_id is the identifier of the credited account.
   string account_id = 1;
+  // account_balance is the resulting account balance after credit.
   double account_balance = 2;
 }
 
+// DebitAccount is a command used in tests to exercise debit flows.
 message DebitAccount {}
+
+// AccountDebited is an event emitted after a successful debit in tests.
 message AccountDebited {}
 
+// GetAccount is a query to fetch the current state of an account.
 message GetAccount {
+  // account_id identifies the account to retrieve.
   string account_id = 1;
 }
 
+// TestLogin requests a login flow in tests.
 message TestLogin {}
+
+// TestLoginSuccess indicates a successful login in tests.
 message TestLoginSuccess {}
+
+// TestReadiness asks an actor to report readiness.
 message TestReadiness {}
+
+// TestReady indicates an actor has reached a ready state.
 message TestReady {}
+
+// TestBye is a termination/cleanup signal used in tests.
 message TestBye {}
 
+// TestStash asks the actor to stash the current message.
 message TestStash {}
+
+// TestUnstash asks the actor to unstash a single message.
 message TestUnstash {}
+
+// TestUnstashAll asks the actor to unstash all stashed messages.
 message TestUnstashAll {}
 
+// TestPing is a heartbeat request in tests.
 message TestPing {}
+
+// TestPong is the heartbeat response in tests.
 message TestPong {}
 
+// TestWait instructs an actor to wait before responding; used to test timeouts.
 message TestWait {
+  // duration is the delay before responding (test\-defined time unit).
   uint64 duration = 1;
 }
 
+// TestRunTask asks an actor to run a background task and complete later.
 message TestRunTask {
+  // duration is the simulated task runtime (test\-defined time unit).
   uint64 duration = 1;
 }
 
+// TaskComplete notifies that a previously started task has finished.
 message TaskComplete {}
 
+// TestLog asks an actor to log a line of text (useful for tracing tests).
 message TestLog {
+  // text is the message to be logged.
   string text = 1;
 }
 
+// TestGetCount queries an actor for its current counter value.
 message TestGetCount {}
 
+// TestCount carries the counter value returned by an actor.
 message TestCount {
+  // value is the current counter value.
   int32 value = 1;
 }
 
+// TestRemoteForward signals the actor to forward a message across nodes.
 message TestRemoteForward {}
+
+// TestClusterForward signals the actor to forward via a cluster\-aware route.
 message TestClusterForward {}
 
+// TestMessage wraps an arbitrary payload with an optional priority hint.
 message TestMessage {
+  // message is an arbitrary payload packed as google.protobuf.Any.
+  // The embedded type_url and value should be set by the sender.
   google.protobuf.Any message = 1;
+
+  // priority is an optional delivery/processing hint used in tests.
+  // Higher values typically indicate higher precedence; 0 means default.
   int64 priority = 2;
 }

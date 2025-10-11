@@ -26,18 +26,26 @@ package actor
 
 import (
 	"context"
+	stdErrors "errors"
+	"net"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/tochemey/goakt/v3/address"
+	"github.com/tochemey/goakt/v3/discovery"
+	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
 	mockscluster "github.com/tochemey/goakt/v3/mocks/cluster"
+	mocksdiscovery "github.com/tochemey/goakt/v3/mocks/discovery"
+	"github.com/tochemey/goakt/v3/remote"
 )
 
 func TestDeathWatch(t *testing.T) {
@@ -139,5 +147,87 @@ func TestDeathWatch(t *testing.T) {
 
 		pause.For(time.Second)
 		require.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("With Terminated when cluster removal fails returns internal error", func(t *testing.T) {
+		ctx := context.Background()
+
+		ports := dynaport.Get(3)
+
+		discoveryPort := ports[0]
+		peersPort := ports[1]
+		remotingPort := ports[2]
+
+		host := "127.0.0.1"
+
+		// define discovered addresses
+		addrs := []string{
+			net.JoinHostPort(host, strconv.Itoa(discoveryPort)),
+		}
+
+		actorSys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSys)
+
+		clmock := mockscluster.NewCluster(t)
+		provider := mocksdiscovery.NewProvider(t)
+		provider.EXPECT().ID().Return("test")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		sys := actorSys.(*actorSystem)
+		sys.cluster = clmock
+		sys.clusterEnabled.Store(true)
+		sys.remotingEnabled.Store(true)
+		sys.remoteConfig = remote.NewConfig(host, remotingPort)
+		sys.clusterNode = &discovery.Node{Host: host, PeersPort: peersPort, DiscoveryPort: discoveryPort}
+
+		clConfig := NewClusterConfig()
+		clConfig.discoveryPort = 9001
+		clConfig.discovery = provider
+
+		sys.clusterConfig = clConfig
+
+		err = actorSys.Start(ctx)
+		require.NoError(t, err)
+
+		pause.For(500 * time.Millisecond)
+
+		t.Cleanup(func() {
+			require.NoError(t, actorSys.Stop(ctx))
+		})
+
+		const actorName = "actor-to-free"
+		cid, err := actorSys.Spawn(ctx, actorName, NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, cid)
+
+		// allow the spawned actor to register with the tree
+		pause.For(500 * time.Millisecond)
+
+		clusterErr := stdErrors.New("cluster failure")
+		clmock.EXPECT().RemoveActor(mock.Anything, actorName).Return(clusterErr)
+
+		deathWatchPID := actorSys.getDeathWatch()
+		require.NotNil(t, deathWatchPID)
+		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
+		deathWatchActor.cluster = clmock
+		deathWatchActor.actorSystem = actorSys
+		deathWatchActor.pid = deathWatchPID
+		deathWatchActor.logger = log.DiscardLogger
+		deathWatchActor.tree = sys.tree()
+
+		terminated := &goaktpb.Terminated{Address: cid.Address().Address}
+		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, terminated)
+
+		err = deathWatchActor.handleTerminated(receiveCtx)
+		require.Error(t, err)
+		var internalErr *gerrors.InternalError
+		require.ErrorAs(t, err, &internalErr)
+		require.Contains(t, err.Error(), clusterErr.Error())
+
+		require.NoError(t, cid.Shutdown(ctx))
 	})
 }

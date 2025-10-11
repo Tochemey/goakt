@@ -103,7 +103,7 @@ func (x *systemGuardian) handlePanicSignal(ctx *ReceiveContext) {
 // completeRebalancing wraps up the rebalancing of left node in the cluster
 func (x *systemGuardian) completeRebalancing(msg *internalpb.RebalanceComplete) error {
 	x.logger.Infof("%s completing rebalancing", x.pid.Name())
-	x.pid.ActorSystem().completeRebalancing()
+	x.pid.ActorSystem().completeRelocation()
 	x.logger.Infof("%s rebalancing completed", x.pid.Name())
 
 	x.logger.Infof("%s removing left peer=(%s) from cache", x.pid.Name(), msg.GetPeerAddress())
