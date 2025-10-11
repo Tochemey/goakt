@@ -68,8 +68,9 @@ func TestRelocatorPeersError(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, pid)
 
-	relocatorActor.pid = pid
-	relocatorActor.logger = log.DiscardLogger
+	require.Eventually(t, func() bool {
+		return relocatorActor.pid != nil && relocatorActor.logger != nil
+	}, time.Second, 10*time.Millisecond, "relocator actor did not initialize")
 
 	msg := &internalpb.Rebalance{PeerState: new(internalpb.PeerState)}
 	receiveCtx := newReceiveContext(ctx, nil, pid, msg)
@@ -104,8 +105,9 @@ func TestRelocatorSpawnRemoteActorActorExistsError(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, pid)
 
-	relocatorActor.pid = pid
-	relocatorActor.logger = log.DiscardLogger
+	require.Eventually(t, func() bool {
+		return relocatorActor.pid != nil && relocatorActor.logger != nil
+	}, time.Second, 10*time.Millisecond, "relocator actor did not initialize")
 
 	targetActor := &internalpb.Actor{
 		Address: &goaktpb.Address{Name: "relocated-actor"},
@@ -144,8 +146,9 @@ func TestRelocatorSpawnRemoteActorRemoveActorError(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, pid)
 
-	relocatorActor.pid = pid
-	relocatorActor.logger = log.DiscardLogger
+	require.Eventually(t, func() bool {
+		return relocatorActor.pid != nil && relocatorActor.logger != nil
+	}, time.Second, 10*time.Millisecond, "relocator actor did not initialize")
 
 	targetActor := &internalpb.Actor{
 		Address: &goaktpb.Address{Name: "relocated-actor"},
