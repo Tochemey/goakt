@@ -28,21 +28,28 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestErrors(t *testing.T) {
-	internalErr := NewInternalError(errors.New("something went wrong"))
+	err := errors.New("something went wrong")
+	internalErr := NewInternalError(err)
 	require.Error(t, internalErr)
 	require.EqualError(t, internalErr, "internal error: something went wrong")
+	assert.ErrorIs(t, internalErr.Unwrap(), err)
 
-	spawnErr := NewSpawnError(errors.New("something went wrong"))
+	err = errors.New("something went wrong")
+	spawnErr := NewSpawnError(err)
 	require.Error(t, spawnErr)
 	require.EqualError(t, spawnErr, "spawn error: something went wrong")
+	assert.ErrorIs(t, spawnErr.Unwrap(), err)
 
-	rebalancingErr := NewRebalancingError(errors.New("something went wrong"))
+	err = errors.New("something went wrong")
+	rebalancingErr := NewRebalancingError(err)
 	require.Error(t, rebalancingErr)
 	require.EqualError(t, rebalancingErr, "rebalancing: something went wrong")
+	assert.ErrorIs(t, rebalancingErr.Unwrap(), err)
 
 	anyError := &AnyError{}
 	require.Equal(t, anyError.Error(), "*")
