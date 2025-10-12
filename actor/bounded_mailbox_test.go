@@ -33,7 +33,8 @@ import (
 
 func TestBoundedMailbox(t *testing.T) {
 	mailbox := NewBoundedMailbox(20)
-	for i := 0; i < 20; i++ {
+	assert.Nil(t, mailbox.Dequeue())
+	for range 20 {
 		require.NoError(t, mailbox.Enqueue(&ReceiveContext{}))
 	}
 	assert.False(t, mailbox.IsEmpty())

@@ -183,6 +183,34 @@ func TestUnboundedSegmentedMailbox_Dequeue_Interleaved(t *testing.T) {
 	assert.Nil(t, mb.Dequeue())
 }
 
+func TestUnboundedSegmentedMailbox_EnqueueAdvancesLinkedTail(t *testing.T) {
+	mb := NewUnboundedSegmentedMailbox()
+
+	for range segmentSize {
+		require.NoError(t, mb.Enqueue(new(ReceiveContext)))
+	}
+
+	firstTail := mb.tail.Load()
+	require.NotNil(t, firstTail)
+
+	nextSeg := newSegment()
+	firstTail.next.Store(nextSeg)
+
+	marker := &ReceiveContext{}
+	require.NoError(t, mb.Enqueue(marker))
+	assert.Equal(t, nextSeg, mb.tail.Load())
+
+	for range segmentSize {
+		require.NotNil(t, mb.Dequeue())
+	}
+
+	got := mb.Dequeue()
+	require.NotNil(t, got)
+	assert.Equal(t, marker, got)
+	assert.True(t, mb.IsEmpty())
+	mb.Dispose()
+}
+
 func BenchmarkUnboundedSegmentedMailbox(b *testing.B) {
 	mb := NewUnboundedSegmentedMailbox()
 

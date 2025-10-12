@@ -27,6 +27,7 @@ package actor
 import (
 	"fmt"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -209,6 +210,101 @@ func TestUnboundedFairMailboxPreservesPerSenderOrdering(t *testing.T) {
 	require.Equal(t, []string{"s2-1", "s2-2"}, got[senderTwo.String()])
 }
 
+func TestUnboundedFairMailboxConcurrentSenderCreation(t *testing.T) {
+	t.Helper()
+	mailbox := NewUnboundedFairMailbox()
+
+	const (
+		workers   = 8
+		rounds    = 128
+		baseLabel = "race-sender"
+	)
+
+	for r := range rounds {
+		start := make(chan struct{})
+		ready := make(chan struct{}, workers)
+		errs := make(chan error, workers)
+
+		for i := range workers {
+			ctx := makeReceiveContextWithPayload(baseLabel, fmt.Sprintf("msg-%d-%d", r, i))
+			go func(rc *ReceiveContext) {
+				ready <- struct{}{}
+				<-start
+				errs <- mailbox.Enqueue(rc)
+			}(ctx)
+		}
+
+		for range workers {
+			<-ready
+		}
+		close(start)
+
+		for range workers {
+			require.NoError(t, <-errs)
+		}
+	}
+
+	key := deriveSenderKey(makeReceiveContext(baseLabel))
+	value, ok := mailbox.senders.Load(key)
+	require.True(t, ok)
+	sq := value.(*senderBox)
+	require.EqualValues(t, workers*rounds, atomic.LoadInt64(&sq.pending))
+
+	for range workers * rounds {
+		require.NotNil(t, mailbox.Dequeue())
+	}
+	require.Nil(t, mailbox.Dequeue())
+}
+
+func TestUnboundedFairMailboxEnqueueHandlesLoadOrStoreRace(t *testing.T) {
+	mailbox := NewUnboundedFairMailbox()
+	existing := &senderBox{mailbox: NewUnboundedMailbox()}
+
+	withSenderLoadOrStoreStub(t, func(m *sync.Map, key string, value any) (any, bool) {
+		m.Store(key, existing)
+		return existing, true
+	})
+
+	msg := makeReceiveContext("load-or-store")
+	require.NoError(t, mailbox.Enqueue(msg))
+
+	key := deriveSenderKey(msg)
+	value, ok := mailbox.senders.Load(key)
+	require.True(t, ok)
+	sq := value.(*senderBox)
+	require.Equal(t, existing, sq)
+	require.EqualValues(t, 1, atomic.LoadInt64(&sq.pending))
+	require.NotNil(t, mailbox.Dequeue())
+	require.Nil(t, mailbox.Dequeue())
+}
+
+func TestUnboundedFairMailboxDequeueHandlesDrainedSender(t *testing.T) {
+	mailbox := NewUnboundedFairMailbox()
+
+	sq := &senderBox{mailbox: MockNopMailbox{}}
+	sq.active.Store(true)
+	atomic.StoreInt64(&sq.pending, 1)
+	mailbox.active.enqueue(sq)
+
+	require.Nil(t, mailbox.Dequeue())
+	require.False(t, sq.active.Load())
+	require.EqualValues(t, 1, atomic.LoadInt64(&sq.pending))
+}
+
+func TestUnboundedFairMailboxFinalizeSenderResetsNegativePending(t *testing.T) {
+	mailbox := NewUnboundedFairMailbox()
+	sq := &senderBox{mailbox: NewUnboundedMailbox()}
+	sq.active.Store(true)
+
+	remaining := atomic.AddInt64(&sq.pending, -1)
+	require.EqualValues(t, -1, remaining)
+
+	mailbox.finalizeSender(sq, remaining)
+	require.False(t, sq.active.Load())
+	require.Zero(t, atomic.LoadInt64(&sq.pending))
+	require.Nil(t, mailbox.active.dequeue())
+}
+
 func BenchmarkUnbundedFairMailbox(b *testing.B) {
 	mb := NewUnboundedFairMailbox()
 
@@ -288,4 +384,13 @@ func BenchmarkUnboundedFairMailbox_DistinctSendersPreallocated(b *testing.B) {
 
 	opsPerSec := float64(b.N) / b.Elapsed().Seconds()
 	b.ReportMetric(opsPerSec, "ops/sec")
+}
+
+func withSenderLoadOrStoreStub(t *testing.T, stub func(*sync.Map, string, any) (any, bool)) {
+	t.Helper()
+	original := senderLoadOrStoreFn.Load()
+	senderLoadOrStoreFn.Store(&stub)
+	t.Cleanup(func() {
+		senderLoadOrStoreFn.Store(original)
+	})
 }

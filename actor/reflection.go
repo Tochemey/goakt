@@ -56,9 +56,6 @@ func (r *reflection) NewActor(typeName string) (actor Actor, err error) {
 	}
 
 	instance := reflect.New(rtype)
-	if !instance.IsValid() {
-		return nil, errors.ErrInvalidInstance
-	}
 	return instance.Interface().(Actor), nil
 }
 
@@ -75,10 +72,6 @@ func (r *reflection) NewDependency(typeName string, bytea []byte) (extension.Dep
 	}
 
 	instance := reflect.New(dept)
-	if !instance.IsValid() {
-		return nil, errors.ErrInvalidInstance
-	}
-
 	if dependency, ok := instance.Interface().(extension.Dependency); ok {
 		if err := dependency.UnmarshalBinary(bytea); err != nil {
 			return nil, err

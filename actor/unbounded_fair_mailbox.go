@@ -111,6 +111,22 @@ type UnboundedFairMailbox struct {
 // enforces compilation error
 var _ Mailbox = (*UnboundedFairMailbox)(nil)
 
+var (
+	defaultSenderLoadOrStore = func(m *sync.Map, key string, value any) (any, bool) {
+		return m.LoadOrStore(key, value)
+	}
+	senderLoadOrStoreFn atomic.Pointer[func(*sync.Map, string, any) (any, bool)]
+)
+
+func init() {
+	senderLoadOrStoreFn.Store(&defaultSenderLoadOrStore)
+}
+
+func senderLoadOrStore(m *UnboundedFairMailbox, key string, value any) (any, bool) {
+	fn := senderLoadOrStoreFn.Load()
+	return (*fn)(&m.senders, key, value)
+}
+
 // NewUnboundedFairMailbox creates a new UnboundedFairMailbox instance with all bookkeeping
 // structures initialised and ready for concurrent producers. The mailbox is
 // unbounded, so memory consumption grows with the number of messages and active
@@ -141,7 +157,7 @@ func (m *UnboundedFairMailbox) Enqueue(msg *ReceiveContext) error {
 	} else {
 		// use DefaultMailbox per sender (unbounded MPSC, thread‑safe)
 		nsq := &senderBox{mailbox: NewUnboundedMailbox()}
-		if actual, loaded := m.senders.LoadOrStore(key, nsq); loaded {
+		if actual, loaded := senderLoadOrStore(m, key, nsq); loaded {
 			sq = actual.(*senderBox)
 		} else {
 			sq = nsq

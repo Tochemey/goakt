@@ -1343,6 +1343,14 @@ func (g *MockContextReleasingGrain) OnDeactivate(ctx context.Context, props *Gra
 	return nil
 }
 
+type MockNopMailbox struct{}
+
+func (MockNopMailbox) Enqueue(*ReceiveContext) error { return nil }
+func (MockNopMailbox) Dequeue() *ReceiveContext      { return nil }
+func (MockNopMailbox) IsEmpty() bool                 { return true }
+func (MockNopMailbox) Len() int64                    { return 0 }
+func (MockNopMailbox) Dispose()                      {}
+
 // //////////////////////////////////////// CLUSTER PROVIDERS MOCKS //////////////////////////////////////
 type providerFactory func(t *testing.T, host string, discoveryPort int) discovery.Provider
 
