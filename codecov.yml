@@ -3,10 +3,10 @@ coverage:
   status:
     patch:
       default:
-        target: 80%
+        target: 90%
     project:
       default:
-        target: 80%    # the required coverage value
+        target: 90%    # the required coverage value
         base: auto
 ignore:
   - "test"

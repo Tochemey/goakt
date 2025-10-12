@@ -38,23 +38,6 @@ import (
 	"github.com/tochemey/goakt/v3/address"
 )
 
-func makeReceiveContext(sender string) *ReceiveContext {
-	return makeReceiveContextWithPayload(sender, "")
-}
-
-func makeReceiveContextWithPayload(sender, payload string) *ReceiveContext {
-	addr := address.New(sender, "test-system", "localhost", 0)
-	return makeReceiveContextFromAddress(addr, payload)
-}
-
-func makeReceiveContextFromAddress(addr *address.Address, payload string) *ReceiveContext {
-	ctx := &ReceiveContext{remoteSender: addr}
-	if payload != "" {
-		ctx.message = &anypb.Any{TypeUrl: "test/payload", Value: []byte(payload)}
-	}
-	return ctx
-}
-
 func TestUnboundedFairMailboxNoStarvation(t *testing.T) {
 	mailbox := NewUnboundedFairMailbox()
 	verbose := address.New("verbose", "test-system", "localhost", 0)
@@ -210,6 +193,7 @@ func TestUnboundedFairMailboxPreservesPerSenderOrdering(t *testing.T) {
 	require.Equal(t, []string{"s2-1", "s2-2"}, got[senderTwo.String()])
 }
 
+// nolint
 func TestUnboundedFairMailboxConcurrentSenderCreation(t *testing.T) {
 	t.Helper()
 	mailbox := NewUnboundedFairMailbox()
@@ -256,6 +240,7 @@ func TestUnboundedFairMailboxConcurrentSenderCreation(t *testing.T) {
 	require.Nil(t, mailbox.Dequeue())
 }
 
+// nolint
 func TestUnboundedFairMailboxEnqueueHandlesLoadOrStoreRace(t *testing.T) {
 	mailbox := NewUnboundedFairMailbox()
 	existing := &senderBox{mailbox: NewUnboundedMailbox()}
@@ -278,6 +263,7 @@ func TestUnboundedFairMailboxEnqueueHandlesLoadOrStoreRace(t *testing.T) {
 	require.Nil(t, mailbox.Dequeue())
 }
 
+// nolint
 func TestUnboundedFairMailboxDequeueHandlesDrainedSender(t *testing.T) {
 	mailbox := NewUnboundedFairMailbox()
 
@@ -291,6 +277,7 @@ func TestUnboundedFairMailboxDequeueHandlesDrainedSender(t *testing.T) {
 	require.EqualValues(t, 1, atomic.LoadInt64(&sq.pending))
 }
 
+// nolint
 func TestUnboundedFairMailboxFinalizeSenderResetsNegativePending(t *testing.T) {
 	mailbox := NewUnboundedFairMailbox()
 	sq := &senderBox{mailbox: NewUnboundedMailbox()}
@@ -386,6 +373,7 @@ func BenchmarkUnboundedFairMailbox_DistinctSendersPreallocated(b *testing.B) {
 	b.ReportMetric(opsPerSec, "ops/sec")
 }
 
+// nolint
 func withSenderLoadOrStoreStub(t *testing.T, stub func(*sync.Map, string, any) (any, bool)) {
 	t.Helper()
 	original := senderLoadOrStoreFn.Load()
@@ -393,4 +381,21 @@ func withSenderLoadOrStoreStub(t *testing.T, stub func(*sync.Map, string, any) (
 	t.Cleanup(func() {
 		senderLoadOrStoreFn.Store(original)
 	})
+}
+
+func makeReceiveContext(sender string) *ReceiveContext {
+	return makeReceiveContextWithPayload(sender, "")
+}
+
+func makeReceiveContextWithPayload(sender, payload string) *ReceiveContext {
+	addr := address.New(sender, "test-system", "localhost", 0)
+	return makeReceiveContextFromAddress(addr, payload)
+}
+
+func makeReceiveContextFromAddress(addr *address.Address, payload string) *ReceiveContext {
+	ctx := &ReceiveContext{remoteSender: addr}
+	if payload != "" {
+		ctx.message = &anypb.Any{TypeUrl: "test/payload", Value: []byte(payload)}
+	}
+	return ctx
 }
