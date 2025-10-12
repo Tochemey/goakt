@@ -27,6 +27,7 @@ package actor
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/tochemey/goakt/v3/errors"
@@ -61,4 +62,16 @@ func TestEvictionStrategy(t *testing.T) {
 		require.Error(t, err)
 		require.Nil(t, strategy)
 	})
+}
+
+func TestNewEvictionStrategy(t *testing.T) {
+	actual, err := NewEvictionStrategy(10, LRU, -1)
+	require.NoError(t, err)
+	require.NotNil(t, actual)
+	assert.Zero(t, actual.Percentage())
+
+	instance, err := NewEvictionStrategy(10, LRU, 200)
+	require.NoError(t, err)
+	require.NotNil(t, instance)
+	assert.EqualValues(t, 100, instance.Percentage())
 }

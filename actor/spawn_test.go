@@ -42,7 +42,9 @@ import (
 	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/tochemey/goakt/v3/address"
 	gerrors "github.com/tochemey/goakt/v3/errors"
+	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
@@ -560,6 +562,62 @@ func TestSpawn(t *testing.T) {
 				assert.Error(t, sys.Stop(ctx))
 			},
 		)
+	})
+	t.Run("With SpawnFromFunc with ReceiveFunc error", func(t *testing.T) {
+		ctx := context.TODO()
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		err := actorSystem.Start(ctx)
+		assert.NoError(t, err)
+
+		// wait for complete start
+		pause.For(time.Second)
+
+		// create a deadletter subscriber
+		consumer, err := actorSystem.Subscribe()
+		require.NoError(t, err)
+		require.NotNil(t, consumer)
+
+		mockErr := errors.New("failed to process message")
+		receiveFn := func(ctx context.Context, message proto.Message) error { // nolint
+			return mockErr
+		}
+
+		pid, err := actorSystem.SpawnFromFunc(ctx, receiveFn)
+		assert.NoError(t, err)
+		assert.NotNil(t, pid)
+
+		pause.For(time.Second)
+
+		msg := new(testpb.TestSend)
+		// send a message to the actor
+		require.NoError(t, Tell(ctx, pid, msg))
+
+		pause.For(time.Second)
+
+		// the actor will be suspended because there is no supervisor strategy
+		require.True(t, pid.IsSuspended())
+
+		var items []*goaktpb.ActorSuspended
+		for message := range consumer.Iterator() {
+			payload := message.Payload()
+			suspended, ok := payload.(*goaktpb.ActorSuspended)
+			if ok {
+				items = append(items, suspended)
+			}
+		}
+
+		require.Len(t, items, 1)
+		item := items[0]
+		assert.True(t, pid.Address().Equals(address.From(item.GetAddress())))
+		assert.Equal(t, mockErr.Error(), item.GetReason())
+
+		// unsubscribe the consumer
+		err = actorSystem.Unsubscribe(consumer)
+		require.NoError(t, err)
+
+		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With SpawnFromFunc with actorSystem not started", func(t *testing.T) {
 		ctx := context.TODO()

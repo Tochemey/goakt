@@ -30,6 +30,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/anypb"
 
@@ -156,6 +157,8 @@ func TestUnboundedFairMailboxProcessesMultipleSenders(t *testing.T) {
 		require.NoError(t, mailbox.Enqueue(ctx))
 	}
 
+	assert.False(t, mailbox.IsEmpty())
+
 	var received []string
 	for range enqueueSeq {
 		msg := mailbox.Dequeue()
@@ -172,6 +175,8 @@ func TestUnboundedFairMailboxProcessesMultipleSenders(t *testing.T) {
 		"bravo-2",
 		"charlie-2",
 	}, received)
+
+	mailbox.Dispose()
 }
 
 func TestUnboundedFairMailboxPreservesPerSenderOrdering(t *testing.T) {

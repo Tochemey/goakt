@@ -1759,7 +1759,7 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 		// let us check whether we have all errors directive
 		directive, ok = pid.supervisor.Directive(new(gerrors.AnyError))
 		if !ok {
-			pid.logger.Debugf("no supervisor directive found for error: %s", errorType(signal.Err()))
+			pid.logger.Debugf("No supervisor directive found for error: %s", errorType(signal.Err()))
 			pid.suspend(signal.Err().Error())
 			return
 		}
