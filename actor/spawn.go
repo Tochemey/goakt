@@ -199,6 +199,7 @@ func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opt
 
 	var peer *cluster.Peer
 
+	// TODO: filter peers by role if set in config
 	if len(peers) > 1 {
 		switch config.placement {
 		case Random:

@@ -88,6 +88,8 @@ type spawnConfig struct {
 	placement SpawnPlacement
 	// passivationStrategy defines the strategy used for actor passivation.
 	passivationStrategy passivation.Strategy
+	// role defines the role required for the node to spawn the actor.
+	role string
 }
 
 var _ validation.Validator = (*spawnConfig)(nil)
@@ -324,6 +326,40 @@ func WithPlacement(strategy SpawnPlacement) SpawnOption {
 func WithPassivationStrategy(strategy passivation.Strategy) SpawnOption {
 	return spawnOption(func(config *spawnConfig) {
 		config.passivationStrategy = strategy
+	})
+}
+
+// WithRole returns a SpawnOption that records the role a cluster node must
+// advertise before it is considered a valid host for the actor.
+//
+// In cluster mode, peers call ClusterConfig.WithRoles to publish the workloads
+// they can run (for example: "projection", "payments", or "api"). Supplying
+// WithRole when spawning an actor stores the role label in the spawnConfig; the
+// placement layer can then reject nodes that do not report the same role. When
+// running outside of a cluster this option has no effect.
+//
+// Note: This option only has an effect when used with SpawnOn in a cluster-enabled
+// actor system. If cluster mode is disabled, the role restriction is ignored
+// and the actor will be spawned locally. When role is set, the placement strategy is ignored
+// and the actor is placed on a node that matches the role. When multiple nodes advertise the same role,
+// the placement strategy (RoundRobin, Random, etc.) is applied among those nodes only.
+//
+// Example:
+//
+//	pid, err := system.SpawnOn(ctx, "payment-saga", NewPaymentSaga(),
+//	    WithRole("payments"))
+//	if err != nil {
+//	    return err
+//	}
+//
+// Parameters:
+//   - role: role label (for example "projection" or "payments") that a node must advertise.
+//
+// Returns:
+//   - SpawnOption that captures the required role in the spawn configuration.
+func WithRole(role string) SpawnOption {
+	return spawnOption(func(config *spawnConfig) {
+		config.role = role
 	})
 }
 

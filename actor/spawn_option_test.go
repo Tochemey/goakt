@@ -74,6 +74,12 @@ func TestSpawnOption(t *testing.T) {
 		option.Apply(config)
 		require.Equal(t, &spawnConfig{placement: RoundRobin}, config)
 	})
+	t.Run("spawn option with role", func(t *testing.T) {
+		config := &spawnConfig{}
+		option := WithRole("api")
+		option.Apply(config)
+		require.Equal(t, &spawnConfig{role: "api"}, config)
+	})
 }
 
 func TestNewSpawnConfig(t *testing.T) {

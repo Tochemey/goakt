@@ -51,13 +51,14 @@ func TestClusterConfig(t *testing.T) {
 			WithWriteQuorum(1).
 			WithReadQuorum(1).
 			WithPartitionCount(3).
-			WithTableSize(10 * size.MB).
-			WithWriteTimeout(10 * time.Second).
-			WithShutdownTimeout(10 * time.Second).
-			WithReadTimeout(10 * time.Second).
-			WithBootstrapTimeout(10 * time.Second).
-			WithClusterStateSyncInterval(10 * time.Second).
-			WithDiscovery(provider)
+			WithTableSize(10*size.MB).
+			WithWriteTimeout(10*time.Second).
+			WithShutdownTimeout(10*time.Second).
+			WithReadTimeout(10*time.Second).
+			WithBootstrapTimeout(10*time.Second).
+			WithClusterStateSyncInterval(10*time.Second).
+			WithDiscovery(provider).
+			WithRoles("role1", "role2", "role1") // role1 is duplicated to test deduplication
 
 		require.NoError(t, config.Validate())
 		assert.EqualValues(t, 3220, config.DiscoveryPort())
@@ -72,6 +73,7 @@ func TestClusterConfig(t *testing.T) {
 		assert.Equal(t, 10*time.Second, config.ShutdownTimeout())
 		assert.Equal(t, 10*time.Second, config.BootstrapTimeout())
 		assert.Equal(t, 10*time.Second, config.ClusterStateSyncInterval())
+		assert.ElementsMatch(t, []string{"role1", "role2"}, config.Roles())
 
 		assert.Exactly(t, uint64(10*size.MB), config.TableSize())
 		assert.True(t, provider == config.Discovery())

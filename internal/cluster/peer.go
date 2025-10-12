@@ -26,6 +26,7 @@ package cluster
 
 import (
 	"net"
+	"slices"
 	"strconv"
 )
 
@@ -40,9 +41,16 @@ type Peer struct {
 	Coordinator bool
 	// RemotingPort
 	RemotingPort int
+	// Roles represents the peer roles
+	Roles []string
 }
 
 // PeerAddress returns address the node's peers will use to connect to
 func (peer Peer) PeerAddress() string {
 	return net.JoinHostPort(peer.Host, strconv.Itoa(peer.PeersPort))
+}
+
+// HasRole checks if the peer has the given role
+func (peer Peer) HasRole(role string) bool {
+	return slices.Contains(peer.Roles, role)
 }
