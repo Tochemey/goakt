@@ -22,35 +22,18 @@
  * SOFTWARE.
  */
 
-package cluster
+package pointer
 
-import (
-	"net"
-	"slices"
-	"strconv"
-)
-
-// Peer defines the peer info
-type Peer struct {
-	// Host represents the peer address.
-	Host string
-	// PeersPort represents the peer port
-	PeersPort int
-	// Coordinator states that the given peer is the leader not.
-	// A peer is a coordinator when it is the oldest node in the cluster
-	Coordinator bool
-	// RemotingPort
-	RemotingPort int
-	// Roles represents the peer roles
-	Roles []string
+// To returns a pointer to the given value.
+func To[T any](v T) *T {
+	return &v
 }
 
-// PeerAddress returns address the node's peers will use to connect to
-func (peer Peer) PeerAddress() string {
-	return net.JoinHostPort(peer.Host, strconv.Itoa(peer.PeersPort))
-}
-
-// HasRole checks if the peer has the given role
-func (peer Peer) HasRole(role string) bool {
-	return slices.Contains(peer.Roles, role)
+// Deref dereferences ptr and returns the value it points to if no nil, or else
+// returns def.
+func Deref[T any](ptr *T, def T) T {
+	if ptr != nil {
+		return *ptr
+	}
+	return def
 }

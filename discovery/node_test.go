@@ -30,7 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNode_PeersAddress(t *testing.T) {
+func TestNodePeersAddress(t *testing.T) {
 	t.Run("IPv4 host", func(t *testing.T) {
 		n := &Node{Host: "127.0.0.1", PeersPort: 7000}
 		require.Equal(t, "127.0.0.1:7000", n.PeersAddress())
@@ -42,7 +42,7 @@ func TestNode_PeersAddress(t *testing.T) {
 	})
 }
 
-func TestNode_DiscoveryAddress(t *testing.T) {
+func TestNodeDiscoveryAddress(t *testing.T) {
 	t.Run("IPv4 host", func(t *testing.T) {
 		n := &Node{Host: "localhost", DiscoveryPort: 9000}
 		require.Equal(t, "localhost:9000", n.DiscoveryAddress())
@@ -54,7 +54,7 @@ func TestNode_DiscoveryAddress(t *testing.T) {
 	})
 }
 
-func TestNode_String(t *testing.T) {
+func TestNodeString(t *testing.T) {
 	n := &Node{
 		Name:          "node-a",
 		Host:          "10.0.0.1",
@@ -65,4 +65,18 @@ func TestNode_String(t *testing.T) {
 	// keep exact spacing as in fmt string (double space before peers)
 	expected := "[name=node-a host=10.0.0.1 gossip=7946  peers=8500 remoting=8080]"
 	require.Equal(t, expected, n.String())
+}
+
+func TestNodeHasRole(t *testing.T) {
+	n := &Node{
+		Name:          "node-a",
+		Host:          "10.0.0.1",
+		DiscoveryPort: 7946,
+		PeersPort:     8500,
+		RemotingPort:  8080,
+		Roles:         []string{"order", "billing"},
+	}
+	require.True(t, n.HasRole("order"))
+	require.True(t, n.HasRole("billing"))
+	require.False(t, n.HasRole("inventory"))
 }

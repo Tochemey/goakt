@@ -1413,6 +1413,7 @@ type testClusterConfig struct {
 	extension         extension.Extension
 	dependency        extension.Dependency
 	compression       remote.Compression
+	roles             []string
 }
 
 type testClusterOption func(*testClusterConfig)
@@ -1446,6 +1447,12 @@ func withMockExtension(ext extension.Extension) testClusterOption {
 func withMockCompression(c remote.Compression) testClusterOption {
 	return func(tcc *testClusterConfig) {
 		tcc.compression = c
+	}
+}
+
+func withMockRoles(roles ...string) testClusterOption {
+	return func(tcc *testClusterConfig) {
+		tcc.roles = roles
 	}
 }
 
@@ -1517,6 +1524,11 @@ func testSystem(t *testing.T, providerFactory providerFactory, opts ...testClust
 	// provider
 	provider := providerFactory(t, host, discoveryPort)
 
+	cfg := &testClusterConfig{relocationEnabled: true}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
 	// base options
 	options := []Option{
 		WithLogger(logger),
@@ -1532,12 +1544,8 @@ func testSystem(t *testing.T, providerFactory providerFactory, opts ...testClust
 				WithDiscoveryPort(discoveryPort).
 				WithBootstrapTimeout(time.Second).
 				WithClusterStateSyncInterval(300 * time.Millisecond).
+				WithRoles(cfg.roles...).
 				WithDiscovery(provider)),
-	}
-
-	cfg := &testClusterConfig{relocationEnabled: true}
-	for _, opt := range opts {
-		opt(cfg)
 	}
 
 	if cfg.pubsubEnabled {

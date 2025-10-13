@@ -29,6 +29,7 @@ import (
 
 	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/extension"
+	"github.com/tochemey/goakt/v3/internal/pointer"
 	"github.com/tochemey/goakt/v3/internal/validation"
 	"github.com/tochemey/goakt/v3/passivation"
 )
@@ -88,6 +89,8 @@ type spawnConfig struct {
 	placement SpawnPlacement
 	// passivationStrategy defines the strategy used for actor passivation.
 	passivationStrategy passivation.Strategy
+	// role defines the role required for the node to spawn the actor.
+	role *string
 }
 
 var _ validation.Validator = (*spawnConfig)(nil)
@@ -324,6 +327,39 @@ func WithPlacement(strategy SpawnPlacement) SpawnOption {
 func WithPassivationStrategy(strategy passivation.Strategy) SpawnOption {
 	return spawnOption(func(config *spawnConfig) {
 		config.passivationStrategy = strategy
+	})
+}
+
+// WithRole records a required node role for actor placement.
+//
+// In cluster mode, peers advertise roles via ClusterConfig.WithRoles (e.g. "projection",
+// "payments", "api"). When used with SpawnOn in a cluster-enabled system, the actor will
+// only be placed on nodes that advertise the same role. If multiple nodes match, the
+// placement strategy (RoundRobin, Random, etc.) is applied among those nodes.
+// If clustering is disabled, this option is ignored and the actor is spawned locally.
+//
+// If no node with the required role exists, spawning returns an error. This prevents
+// accidental placement on unsuitable nodes and protects actors that depend on role-specific services or colocation.
+//
+// Tip: omit WithRole to allow placement on any node (or ensure all nodes advertise
+// the role if you want it universal).
+//
+// Example:
+//
+//	pid, err := system.SpawnOn(ctx, "payment-saga", NewPaymentSaga(), WithRole("payments"))
+//	if err != nil {
+//	    return err
+//	}
+//
+// Parameters:
+//
+//	role — label a node must advertise (e.g. "projection", "payments").
+//
+// Returns:
+//   - SpawnOption that sets the role in the spawn configuration.
+func WithRole(role string) SpawnOption {
+	return spawnOption(func(config *spawnConfig) {
+		config.role = pointer.To(role)
 	})
 }
 

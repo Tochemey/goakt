@@ -27,6 +27,7 @@ package discovery
 import (
 	"fmt"
 	"net"
+	"slices"
 	"strconv"
 )
 
@@ -42,6 +43,8 @@ type Node struct {
 	PeersPort int
 	// RemotingPort
 	RemotingPort int
+	// Roles represents the node roles
+	Roles []string
 }
 
 // PeersAddress returns address the node's peers will use to connect to
@@ -52,6 +55,11 @@ func (n *Node) PeersAddress() string {
 // DiscoveryAddress returns the node discovery address
 func (n *Node) DiscoveryAddress() string {
 	return net.JoinHostPort(n.Host, strconv.Itoa(n.DiscoveryPort))
+}
+
+// HasRole checks if the node has the given role
+func (n *Node) HasRole(role string) bool {
+	return slices.Contains(n.Roles, role)
 }
 
 // String returns the printable representation of Node

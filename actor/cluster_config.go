@@ -25,7 +25,10 @@
 package actor
 
 import (
+	"sort"
 	"time"
+
+	goset "github.com/deckarep/golang-set/v2"
 
 	"github.com/tochemey/goakt/v3/discovery"
 	"github.com/tochemey/goakt/v3/internal/collection"
@@ -52,6 +55,7 @@ type ClusterConfig struct {
 	shutdownTimeout          time.Duration
 	bootstrapTimeout         time.Duration
 	clusterStateSyncInterval time.Duration
+	roles                    goset.Set[string]
 }
 
 // enforce compilation error
@@ -73,6 +77,7 @@ func NewClusterConfig() *ClusterConfig {
 		shutdownTimeout:          3 * time.Minute,
 		bootstrapTimeout:         DefaultClusterBootstrapTimeout,
 		clusterStateSyncInterval: DefaultClusterStateSyncInterval,
+		roles:                    goset.NewSet[string](),
 	}
 
 	fnActor := new(FuncActor)
@@ -403,4 +408,39 @@ func (x *ClusterConfig) Validate() error {
 		AddAssertion(x.writeQuorum >= 1, "cluster writeQuorum is invalid").
 		AddAssertion(x.readQuorum >= 1, "cluster readQuorum is invalid").
 		Validate()
+}
+
+// WithRoles sets the roles advertised by this node.
+//
+// A role is a label/metadata used by the cluster to define a node’s
+// responsibilities (e.g., "web", "entity", "projection"). Not all nodes
+// need to run the same workloads—roles let you dedicate nodes to specific
+// purposes such as the web front-end, data access layer, or background
+// processing.
+//
+// In practice, nodes with the "entity" role run actors/services such as
+// persistent entities, while nodes with the "projection" role run read-side
+// projections. This lets you scale parts of your application independently
+// and optimize resource usage.
+//
+// Once roles are set, you can use SpawnOn("<role>") to spawn an actor on a
+// node that advertises that role.
+//
+// This call replaces any previously configured roles. Duplicates are
+// de-duplicated; order is not meaningful
+func (x *ClusterConfig) WithRoles(roles ...string) *ClusterConfig {
+	x.roles.Append(roles...)
+	return x
+}
+
+// Roles returns the roles advertised by this node.
+//
+// A role is a label/metadata used by the cluster to define a node’s
+// responsibilities (see WithRoles for details and examples). The returned
+// slice is derived from an internal set: there are no duplicates and the
+// order is unspecified.
+func (x *ClusterConfig) Roles() []string {
+	roles := x.roles.ToSlice()
+	sort.Strings(roles)
+	return roles
 }

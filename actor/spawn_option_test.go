@@ -32,6 +32,7 @@ import (
 
 	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/extension"
+	"github.com/tochemey/goakt/v3/internal/pointer"
 	"github.com/tochemey/goakt/v3/passivation"
 )
 
@@ -73,6 +74,12 @@ func TestSpawnOption(t *testing.T) {
 		option := WithPlacement(RoundRobin)
 		option.Apply(config)
 		require.Equal(t, &spawnConfig{placement: RoundRobin}, config)
+	})
+	t.Run("spawn option with role", func(t *testing.T) {
+		config := &spawnConfig{}
+		option := WithRole("api")
+		option.Apply(config)
+		require.Equal(t, &spawnConfig{role: pointer.To("api")}, config)
 	})
 }
 

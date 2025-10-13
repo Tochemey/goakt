@@ -2192,6 +2192,7 @@ func (x *actorSystem) setupCluster() error {
 		DiscoveryPort: x.clusterConfig.DiscoveryPort(),
 		PeersPort:     x.clusterConfig.PeersPort(),
 		RemotingPort:  x.remoteConfig.BindPort(),
+		Roles:         x.clusterConfig.Roles(),
 	}
 
 	x.cluster = cluster.New(

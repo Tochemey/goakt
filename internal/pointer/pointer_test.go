@@ -22,35 +22,40 @@
  * SOFTWARE.
  */
 
-package cluster
+package pointer
 
 import (
-	"net"
-	"slices"
-	"strconv"
+	"testing"
 )
 
-// Peer defines the peer info
-type Peer struct {
-	// Host represents the peer address.
-	Host string
-	// PeersPort represents the peer port
-	PeersPort int
-	// Coordinator states that the given peer is the leader not.
-	// A peer is a coordinator when it is the oldest node in the cluster
-	Coordinator bool
-	// RemotingPort
-	RemotingPort int
-	// Roles represents the peer roles
-	Roles []string
+func TestRef(t *testing.T) {
+	type T int
+
+	val := T(0)
+	pointer := To(val)
+	if *pointer != val {
+		t.Errorf("expected %d, got %d", val, *pointer)
+	}
+
+	val = T(1)
+	pointer = To(val)
+	if *pointer != val {
+		t.Errorf("expected %d, got %d", val, *pointer)
+	}
 }
 
-// PeerAddress returns address the node's peers will use to connect to
-func (peer Peer) PeerAddress() string {
-	return net.JoinHostPort(peer.Host, strconv.Itoa(peer.PeersPort))
-}
+func TestDeref(t *testing.T) {
+	type T int
 
-// HasRole checks if the peer has the given role
-func (peer Peer) HasRole(role string) bool {
-	return slices.Contains(peer.Roles, role)
+	var val, def T = 1, 0
+
+	out := Deref(&val, def)
+	if out != val {
+		t.Errorf("expected %d, got %d", val, out)
+	}
+
+	out = Deref(nil, def)
+	if out != def {
+		t.Errorf("expected %d, got %d", def, out)
+	}
 }
