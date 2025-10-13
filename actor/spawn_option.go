@@ -29,6 +29,7 @@ import (
 
 	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/extension"
+	"github.com/tochemey/goakt/v3/internal/pointer"
 	"github.com/tochemey/goakt/v3/internal/validation"
 	"github.com/tochemey/goakt/v3/passivation"
 )
@@ -89,7 +90,7 @@ type spawnConfig struct {
 	// passivationStrategy defines the strategy used for actor passivation.
 	passivationStrategy passivation.Strategy
 	// role defines the role required for the node to spawn the actor.
-	role string
+	role *string
 }
 
 var _ validation.Validator = (*spawnConfig)(nil)
@@ -329,37 +330,36 @@ func WithPassivationStrategy(strategy passivation.Strategy) SpawnOption {
 	})
 }
 
-// WithRole returns a SpawnOption that records the role a cluster node must
-// advertise before it is considered a valid host for the actor.
+// WithRole records a required node role for actor placement.
 //
-// In cluster mode, peers call ClusterConfig.WithRoles to publish the workloads
-// they can run (for example: "projection", "payments", or "api"). Supplying
-// WithRole when spawning an actor stores the role label in the spawnConfig; the
-// placement layer can then reject nodes that do not report the same role. When
-// running outside of a cluster this option has no effect.
+// In cluster mode, peers advertise roles via ClusterConfig.WithRoles (e.g. "projection",
+// "payments", "api"). When used with SpawnOn in a cluster-enabled system, the actor will
+// only be placed on nodes that advertise the same role. If multiple nodes match, the
+// placement strategy (RoundRobin, Random, etc.) is applied among those nodes.
+// If clustering is disabled, this option is ignored and the actor is spawned locally.
 //
-// Note: This option only has an effect when used with SpawnOn in a cluster-enabled
-// actor system. If cluster mode is disabled, the role restriction is ignored
-// and the actor will be spawned locally. When role is set, the placement strategy is ignored
-// and the actor is placed on a node that matches the role. When multiple nodes advertise the same role,
-// the placement strategy (RoundRobin, Random, etc.) is applied among those nodes only.
+// If no node with the required role exists, spawning returns an error. This prevents
+// accidental placement on unsuitable nodes and protects actors that depend on role-specific services or colocation.
+//
+// Tip: omit WithRole to allow placement on any node (or ensure all nodes advertise
+// the role if you want it universal).
 //
 // Example:
 //
-//	pid, err := system.SpawnOn(ctx, "payment-saga", NewPaymentSaga(),
-//	    WithRole("payments"))
+//	pid, err := system.SpawnOn(ctx, "payment-saga", NewPaymentSaga(), WithRole("payments"))
 //	if err != nil {
 //	    return err
 //	}
 //
 // Parameters:
-//   - role: role label (for example "projection" or "payments") that a node must advertise.
+//
+//	role — label a node must advertise (e.g. "projection", "payments").
 //
 // Returns:
-//   - SpawnOption that captures the required role in the spawn configuration.
+//   - SpawnOption that sets the role in the spawn configuration.
 func WithRole(role string) SpawnOption {
 	return spawnOption(func(config *spawnConfig) {
-		config.role = role
+		config.role = pointer.To(role)
 	})
 }
 

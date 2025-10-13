@@ -45,6 +45,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/http"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
+	"github.com/tochemey/goakt/v3/internal/pointer"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/remote"
 )
@@ -197,9 +198,23 @@ func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opt
 		return fmt.Errorf("failed to fetch cluster nodes: %w", err)
 	}
 
-	var peer *cluster.Peer
+	if config.role != nil {
+		role := pointer.Deref(config.role, "")
+		filtered := make([]*cluster.Peer, 0, len(peers))
+		for _, peer := range peers {
+			if peer.HasRole(role) {
+				filtered = append(filtered, peer)
+			}
+		}
 
-	// TODO: filter peers by role if set in config
+		if len(filtered) == 0 {
+			return fmt.Errorf("no nodes with role %s found in the cluster", role)
+		}
+
+		peers = filtered
+	}
+
+	var peer *cluster.Peer
 	if len(peers) > 1 {
 		switch config.placement {
 		case Random:
