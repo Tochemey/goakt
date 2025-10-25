@@ -20,6 +20,7 @@ func TestGrainIdentity_RemoteActivationOnDifferentPeer(t *testing.T) {
 	name := "remote-grain"
 	identity := newGrainIdentity(grain, name)
 	remotePeer := &cluster.Peer{Host: "192.0.2.10", PeersPort: 15000, RemotingPort: 16000}
+	alternatePeer := &cluster.Peer{Host: "192.0.2.11", PeersPort: 15001, RemotingPort: 16001}
 	localPeer := &cluster.Peer{Host: "127.0.0.1", PeersPort: 14000, RemotingPort: 8080}
 
 	cl := mockcluster.NewCluster(t)
@@ -29,12 +30,12 @@ func TestGrainIdentity_RemoteActivationOnDifferentPeer(t *testing.T) {
 	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
 
 	cl.EXPECT().GetGrain(ctx, identity.String()).Return(nil, cluster.ErrGrainNotFound)
-	cl.EXPECT().Peers(ctx).Return([]*cluster.Peer{remotePeer, localPeer}, nil)
+	cl.EXPECT().Peers(ctx).Return([]*cluster.Peer{remotePeer, alternatePeer}, nil)
 	rem.EXPECT().RemotingServiceClient(remotePeer.Host, remotePeer.RemotingPort).Return(client)
 
 	got, err := sys.GrainIdentity(ctx, name, func(context.Context) (Grain, error) {
 		return grain, nil
-	})
+	}, WithActivationStrategy(RoundRobinActivation))
 
 	require.NoError(t, err)
 	require.NotNil(t, got)
@@ -50,6 +51,7 @@ func TestGrainIdentity_RemoteActivationErrorPropagates(t *testing.T) {
 	name := "remote-grain-error"
 	identity := newGrainIdentity(grain, name)
 	remotePeer := &cluster.Peer{Host: "192.0.2.20", PeersPort: 17000, RemotingPort: 18000}
+	alternatePeer := &cluster.Peer{Host: "192.0.2.21", PeersPort: 17001, RemotingPort: 18001}
 	localPeer := &cluster.Peer{Host: "127.0.0.1", PeersPort: 16500, RemotingPort: 8181}
 
 	cl := mockcluster.NewCluster(t)
@@ -60,12 +62,12 @@ func TestGrainIdentity_RemoteActivationErrorPropagates(t *testing.T) {
 	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
 
 	cl.EXPECT().GetGrain(ctx, identity.String()).Return(nil, cluster.ErrGrainNotFound)
-	cl.EXPECT().Peers(ctx).Return([]*cluster.Peer{remotePeer, localPeer}, nil)
+	cl.EXPECT().Peers(ctx).Return([]*cluster.Peer{remotePeer, alternatePeer}, nil)
 	rem.EXPECT().RemotingServiceClient(remotePeer.Host, remotePeer.RemotingPort).Return(client)
 
 	got, err := sys.GrainIdentity(ctx, name, func(context.Context) (Grain, error) {
 		return grain, nil
-	})
+	}, WithActivationStrategy(RoundRobinActivation))
 
 	require.Error(t, err)
 	require.ErrorIs(t, err, clientErr)
@@ -79,6 +81,7 @@ func TestGrainIdentity_RemoteActivationWireEncodingError(t *testing.T) {
 	name := "remote-wire-error"
 	identity := newGrainIdentity(grain, name)
 	remotePeer := &cluster.Peer{Host: "192.0.2.30", PeersPort: 17500, RemotingPort: 18500}
+	alternatePeer := &cluster.Peer{Host: "192.0.2.31", PeersPort: 17501, RemotingPort: 18501}
 	localPeer := &cluster.Peer{Host: "127.0.0.1", PeersPort: 17550, RemotingPort: 8250}
 	failErr := errors.New("dependency encode failure")
 
@@ -88,11 +91,11 @@ func TestGrainIdentity_RemoteActivationWireEncodingError(t *testing.T) {
 	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
 
 	cl.EXPECT().GetGrain(ctx, identity.String()).Return(nil, cluster.ErrGrainNotFound)
-	cl.EXPECT().Peers(ctx).Return([]*cluster.Peer{remotePeer, localPeer}, nil)
+	cl.EXPECT().Peers(ctx).Return([]*cluster.Peer{remotePeer, alternatePeer}, nil)
 
 	got, err := sys.GrainIdentity(ctx, name, func(context.Context) (Grain, error) {
 		return grain, nil
-	}, WithGrainDependencies(&MockFailingDependency{err: failErr}))
+	}, WithGrainDependencies(&MockFailingDependency{err: failErr}), WithActivationStrategy(RoundRobinActivation))
 
 	require.Error(t, err)
 	require.ErrorIs(t, err, failErr)
