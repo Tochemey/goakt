@@ -1319,4 +1319,66 @@ func TestSpawn(t *testing.T) {
 		// shutdown the nats server gracefully
 		srv.Shutdown()
 	})
+
+	t.Run("SpawnOn happy path with role-based and local placement", func(t *testing.T) {
+		// create a context
+		ctx := context.TODO()
+		// start the NATS server
+		srv := startNatsServer(t)
+
+		roles := []string{"backend", "api", "worker"}
+
+		// create and start system cluster
+		node1, sd1 := testNATs(t, srv.Addr().String(), withMockRoles(roles...))
+		peerAddress1 := node1.PeersAddress()
+		require.NotEmpty(t, peerAddress1)
+		require.NotNil(t, sd1)
+
+		// create and start system cluster
+		node2, sd2 := testNATs(t, srv.Addr().String(), withMockRoles(roles...))
+		peerAddress2 := node2.PeersAddress()
+		require.NotEmpty(t, peerAddress2)
+		require.NotNil(t, sd2)
+
+		// create and start system cluster
+		node3, sd3 := testNATs(t, srv.Addr().String(), withMockRoles(roles...))
+		peerAddress3 := node3.PeersAddress()
+		require.NotEmpty(t, peerAddress3)
+		require.NotNil(t, sd3)
+
+		pause.For(time.Second)
+
+		// create an actor on node1
+		actor := NewMockActor()
+		actorName := "actorID"
+		role := "api"
+		err := node1.SpawnOn(ctx, actorName, actor, WithRole(role), WithPlacement(Local))
+		require.NoError(t, err)
+
+		pause.For(200 * time.Millisecond)
+		actors := node1.Actors()
+		assert.Len(t, actors, 1)
+		got := actors[0]
+		assert.Equal(t, actorName, got.Name())
+
+		_, err = node2.Spawn(ctx, actorName, actor)
+		require.Error(t, err)
+		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
+
+		err = node1.SpawnOn(ctx, actorName, actor, WithRole(role))
+		require.Error(t, err)
+		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
+
+		// free resources
+		require.NoError(t, node2.Stop(ctx))
+		require.NoError(t, node1.Stop(ctx))
+		require.NoError(t, node3.Stop(ctx))
+
+		require.NoError(t, sd3.Close())
+		require.NoError(t, sd2.Close())
+		require.NoError(t, sd1.Close())
+
+		// shutdown the nats server gracefully
+		srv.Shutdown()
+	})
 }

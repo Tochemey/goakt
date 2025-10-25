@@ -35,6 +35,7 @@ import (
 
 	"connectrpc.com/connect"
 	goset "github.com/deckarep/golang-set/v2"
+	"go.akshayshah.org/connectproto"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -42,8 +43,13 @@ import (
 
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/internal/cluster"
+	"github.com/tochemey/goakt/v3/internal/compression/brotli"
+	"github.com/tochemey/goakt/v3/internal/compression/zstd"
+	"github.com/tochemey/goakt/v3/internal/http"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
+	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v3/internal/pointer"
+	"github.com/tochemey/goakt/v3/remote"
 )
 
 // GrainIdentity retrieves or activates a Grain (virtual actor) identified by the given name.
@@ -731,4 +737,47 @@ func (x *actorSystem) leastLoadedPeer(ctx context.Context, peers []*cluster.Peer
 	}
 
 	return least.Peer, nil
+}
+
+func (x *actorSystem) clusterClient(peer *cluster.Peer) internalpbconnect.ClusterServiceClient {
+	remoting := x.remoting
+	var endpoint string
+	if x.tlsInfo != nil {
+		endpoint = http.URLs(peer.Host, peer.RemotingPort)
+	} else {
+		endpoint = http.URL(peer.Host, peer.RemotingPort)
+	}
+
+	opts := []connect.ClientOption{
+		connectproto.WithBinary(
+			proto.MarshalOptions{},
+			proto.UnmarshalOptions{DiscardUnknown: true},
+		),
+	}
+
+	if remoting.MaxReadFrameSize() > 0 {
+		opts = append(opts,
+			connect.WithSendMaxBytes(remoting.MaxReadFrameSize()),
+			connect.WithReadMaxBytes(remoting.MaxReadFrameSize()),
+		)
+	}
+
+	switch remoting.Compression() {
+	case remote.GzipCompression:
+		opts = append(opts, connect.WithSendGzip())
+	case remote.ZstdCompression:
+		opts = append(opts, zstd.WithCompression())
+		opts = append(opts, connect.WithSendCompression(zstd.Name))
+	case remote.BrotliCompression:
+		opts = append(opts, brotli.WithCompression())
+		opts = append(opts, connect.WithSendCompression(brotli.Name))
+	default:
+		// pass
+	}
+
+	return internalpbconnect.NewClusterServiceClient(
+		remoting.HTTPClient(),
+		endpoint,
+		opts...,
+	)
 }

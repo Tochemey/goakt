@@ -66,8 +66,8 @@ func newGrainProps(identity *GrainIdentity, actorSystem ActorSystem, dependencie
 //
 // Returns:
 //   - *GrainIdentity: The identity object representing this Grain.
-func (p *GrainProps) Identity() *GrainIdentity {
-	return p.identity
+func (props *GrainProps) Identity() *GrainIdentity {
+	return props.identity
 }
 
 // ActorSystem returns the ActorSystem instance associated with these Grain properties.
@@ -77,8 +77,8 @@ func (p *GrainProps) Identity() *GrainIdentity {
 //
 // Returns:
 //   - ActorSystem: The actor system managing this Grain.
-func (p *GrainProps) ActorSystem() ActorSystem {
-	return p.actorSystem
+func (props *GrainProps) ActorSystem() ActorSystem {
+	return props.actorSystem
 }
 
 // Dependencies returns the dependencies registered with this GrainProps.
@@ -95,6 +95,6 @@ func (p *GrainProps) ActorSystem() ActorSystem {
 //	for _, dep := range deps {
 //	    // Use dep as needed
 //	}
-func (p *GrainProps) Dependencies() []extension.Dependency {
-	return p.dependencies
+func (props *GrainProps) Dependencies() []extension.Dependency {
+	return props.dependencies
 }

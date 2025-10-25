@@ -1389,10 +1389,10 @@ func (MockNopMailbox) IsEmpty() bool                 { return true }
 func (MockNopMailbox) Len() int64                    { return 0 }
 func (MockNopMailbox) Dispose()                      {}
 
-func MockClusterPeer(t *testing.T, load uint64, metricErr error) *cluster.Peer {
+func MockClusterPeer(t *testing.T, load uint64, metricErr error, opts ...connect.HandlerOption) *cluster.Peer {
 	t.Helper()
-	service := &ClusterServiceStub{load: load, err: metricErr}
-	path, handler := internalpbconnect.NewClusterServiceHandler(service)
+	service := &ClusterServiceStub{Load: load, Err: metricErr}
+	path, handler := internalpbconnect.NewClusterServiceHandler(service, opts...)
 	mux := http.NewServeMux()
 	mux.Handle(path, handler)
 	server := httptest.NewServer(mux)
@@ -1416,15 +1416,15 @@ func MockClusterPeer(t *testing.T, load uint64, metricErr error) *cluster.Peer {
 type providerFactory func(t *testing.T, host string, discoveryPort int) discovery.Provider
 
 type ClusterServiceStub struct {
-	load uint64
-	err  error
+	Load uint64
+	Err  error
 }
 
 func (stub *ClusterServiceStub) GetNodeMetric(_ context.Context, _ *connect.Request[internalpb.GetNodeMetricRequest]) (*connect.Response[internalpb.GetNodeMetricResponse], error) {
-	if stub.err != nil {
-		return nil, stub.err
+	if stub.Err != nil {
+		return nil, stub.Err
 	}
-	return connect.NewResponse(&internalpb.GetNodeMetricResponse{ActorsCount: stub.load}), nil
+	return connect.NewResponse(&internalpb.GetNodeMetricResponse{ActorsCount: stub.Load}), nil
 }
 
 func (stub *ClusterServiceStub) GetKinds(_ context.Context, _ *connect.Request[internalpb.GetKindsRequest]) (*connect.Response[internalpb.GetKindsResponse], error) {

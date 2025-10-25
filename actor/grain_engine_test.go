@@ -3,6 +3,7 @@ package actor
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/mock"
@@ -12,6 +13,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	mockcluster "github.com/tochemey/goakt/v3/mocks/cluster"
 	mockremote "github.com/tochemey/goakt/v3/mocks/remote"
+	"github.com/tochemey/goakt/v3/remote"
 )
 
 func TestGrainIdentity_RemoteActivationOnDifferentPeer(t *testing.T) {
@@ -43,6 +45,123 @@ func TestGrainIdentity_RemoteActivationOnDifferentPeer(t *testing.T) {
 	require.True(t, client.called)
 	require.NotNil(t, client.lastRequest)
 	require.Equal(t, identity.String(), client.lastRequest.GetGrain().GetGrainId().GetValue())
+}
+
+func TestGrainIdentity_RemoteActivationOnDifferentPeer_WithBrotliCompression(t *testing.T) {
+	ctx := t.Context()
+	grain := NewMockGrain()
+	name := "remote-grain-brotli"
+	identity := newGrainIdentity(grain, name)
+
+	httpClient := &http.Client{}
+	remotePeer := &cluster.Peer{Host: "192.0.2.40", PeersPort: 15010, RemotingPort: 16010}
+	alternatePeer := &cluster.Peer{Host: "192.0.2.41", PeersPort: 15011, RemotingPort: 16011}
+	localPeer := &cluster.Peer{Host: "127.0.0.1", PeersPort: 14010, RemotingPort: 8085}
+
+	cl := mockcluster.NewCluster(t)
+	rem := mockremote.NewRemoting(t)
+	client := &RemotingServiceClientStub{}
+	node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
+	actorSystem := MockSimpleClusterReadyActorSystem(rem, cl, node)
+
+	cl.EXPECT().GetGrain(ctx, identity.String()).Return(nil, cluster.ErrGrainNotFound)
+	cl.EXPECT().Peers(ctx).Return([]*cluster.Peer{remotePeer, alternatePeer}, nil)
+	rem.EXPECT().RemotingServiceClient(remotePeer.Host, remotePeer.RemotingPort).Return(client)
+	rem.EXPECT().MaxReadFrameSize().Return(0)
+	rem.EXPECT().Compression().Return(remote.BrotliCompression)
+	rem.EXPECT().HTTPClient().Return(httpClient)
+
+	got, err := actorSystem.GrainIdentity(ctx, name, func(context.Context) (Grain, error) {
+		return grain, nil
+	}, WithActivationStrategy(RoundRobinActivation))
+
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, identity.String(), got.String())
+	require.True(t, client.called)
+	require.NotNil(t, client.lastRequest)
+	require.Equal(t, identity.String(), client.lastRequest.GetGrain().GetGrainId().GetValue())
+
+	clusterSvc := actorSystem.clusterClient(remotePeer)
+	require.NotNil(t, clusterSvc)
+}
+
+func TestGrainIdentity_RemoteActivationOnDifferentPeer_WithZstandardCompression(t *testing.T) {
+	ctx := t.Context()
+	grain := NewMockGrain()
+	name := "remote-grain-brotli"
+	identity := newGrainIdentity(grain, name)
+
+	httpClient := &http.Client{}
+	remotePeer := &cluster.Peer{Host: "192.0.2.40", PeersPort: 15010, RemotingPort: 16010}
+	alternatePeer := &cluster.Peer{Host: "192.0.2.41", PeersPort: 15011, RemotingPort: 16011}
+	localPeer := &cluster.Peer{Host: "127.0.0.1", PeersPort: 14010, RemotingPort: 8085}
+
+	cl := mockcluster.NewCluster(t)
+	rem := mockremote.NewRemoting(t)
+	client := &RemotingServiceClientStub{}
+	node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
+	actorSystem := MockSimpleClusterReadyActorSystem(rem, cl, node)
+
+	cl.EXPECT().GetGrain(ctx, identity.String()).Return(nil, cluster.ErrGrainNotFound)
+	cl.EXPECT().Peers(ctx).Return([]*cluster.Peer{remotePeer, alternatePeer}, nil)
+	rem.EXPECT().RemotingServiceClient(remotePeer.Host, remotePeer.RemotingPort).Return(client)
+	rem.EXPECT().MaxReadFrameSize().Return(0)
+	rem.EXPECT().Compression().Return(remote.ZstdCompression)
+	rem.EXPECT().HTTPClient().Return(httpClient)
+
+	got, err := actorSystem.GrainIdentity(ctx, name, func(context.Context) (Grain, error) {
+		return grain, nil
+	}, WithActivationStrategy(RoundRobinActivation))
+
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, identity.String(), got.String())
+	require.True(t, client.called)
+	require.NotNil(t, client.lastRequest)
+	require.Equal(t, identity.String(), client.lastRequest.GetGrain().GetGrainId().GetValue())
+
+	clusterSvc := actorSystem.clusterClient(remotePeer)
+	require.NotNil(t, clusterSvc)
+}
+
+func TestGrainIdentity_RemoteActivationOnDifferentPeer_WithGzipCompression(t *testing.T) {
+	ctx := t.Context()
+	grain := NewMockGrain()
+	name := "remote-grain-brotli"
+	identity := newGrainIdentity(grain, name)
+
+	httpClient := &http.Client{}
+	remotePeer := &cluster.Peer{Host: "192.0.2.40", PeersPort: 15010, RemotingPort: 16010}
+	alternatePeer := &cluster.Peer{Host: "192.0.2.41", PeersPort: 15011, RemotingPort: 16011}
+	localPeer := &cluster.Peer{Host: "127.0.0.1", PeersPort: 14010, RemotingPort: 8085}
+
+	cl := mockcluster.NewCluster(t)
+	rem := mockremote.NewRemoting(t)
+	client := &RemotingServiceClientStub{}
+	node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
+	actorSystem := MockSimpleClusterReadyActorSystem(rem, cl, node)
+
+	cl.EXPECT().GetGrain(ctx, identity.String()).Return(nil, cluster.ErrGrainNotFound)
+	cl.EXPECT().Peers(ctx).Return([]*cluster.Peer{remotePeer, alternatePeer}, nil)
+	rem.EXPECT().RemotingServiceClient(remotePeer.Host, remotePeer.RemotingPort).Return(client)
+	rem.EXPECT().MaxReadFrameSize().Return(0)
+	rem.EXPECT().Compression().Return(remote.GzipCompression)
+	rem.EXPECT().HTTPClient().Return(httpClient)
+
+	got, err := actorSystem.GrainIdentity(ctx, name, func(context.Context) (Grain, error) {
+		return grain, nil
+	}, WithActivationStrategy(RoundRobinActivation))
+
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, identity.String(), got.String())
+	require.True(t, client.called)
+	require.NotNil(t, client.lastRequest)
+	require.Equal(t, identity.String(), client.lastRequest.GetGrain().GetGrainId().GetValue())
+
+	clusterSvc := actorSystem.clusterClient(remotePeer)
+	require.NotNil(t, clusterSvc)
 }
 
 func TestGrainIdentity_RemoteActivationErrorPropagates(t *testing.T) {
