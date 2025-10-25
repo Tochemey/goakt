@@ -28,14 +28,11 @@ import (
 	"context"
 	"fmt"
 	"math/rand/v2"
-	"net"
 	"runtime"
-	"strconv"
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
 	"go.akshayshah.org/connectproto"
-	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 
 	gerrors "github.com/tochemey/goakt/v3/errors"
@@ -43,9 +40,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/compression/brotli"
 	"github.com/tochemey/goakt/v3/internal/compression/zstd"
 	"github.com/tochemey/goakt/v3/internal/http"
-	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
-	"github.com/tochemey/goakt/v3/internal/pointer"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/remote"
 )
@@ -198,81 +193,19 @@ func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opt
 		return fmt.Errorf("failed to fetch cluster nodes: %w", err)
 	}
 
-	if config.role != nil {
-		role := pointer.Deref(config.role, "")
-		filtered := make([]*cluster.Peer, 0, len(peers))
-		for _, peer := range peers {
-			if peer.HasRole(role) {
-				filtered = append(filtered, peer)
-			}
-		}
-
-		if len(filtered) == 0 {
-			return fmt.Errorf("no nodes with role %s found in the cluster", role)
-		}
-
-		peers = filtered
+	peers, err = x.filterPeersByRole(peers, config.role)
+	if err != nil {
+		return err
 	}
 
-	var peer *cluster.Peer
-	if len(peers) > 1 {
-		switch config.placement {
-		case Random:
-			peer = peers[rand.IntN(len(peers))] //nolint:gosec
-		case RoundRobin:
-			x.spawnOnNext.Inc()
-			n := x.spawnOnNext.Load()
-			peer = peers[(int(n)-1)%len(peers)]
-		case LeastLoad:
-			type nodeMetric struct {
-				Peer *cluster.Peer
-				Load uint64
-			}
+	if len(peers) <= 1 {
+		_, err := x.Spawn(ctx, name, actor, opts...)
+		return err
+	}
 
-			metrics := make([]nodeMetric, len(peers))
-			eg, egCtx := errgroup.WithContext(ctx)
-
-			for index, peer := range peers {
-				index, peer := index, peer
-				eg.Go(func() error {
-					client := x.clusterClient(peer)
-					addr := net.JoinHostPort(peer.Host, strconv.Itoa(peer.RemotingPort))
-					resp, err := client.GetNodeMetric(egCtx, connect.NewRequest(&internalpb.GetNodeMetricRequest{NodeAddress: addr}))
-					if err != nil {
-						return fmt.Errorf("failed to fetch node metric from %s: %w", addr, err)
-					}
-					metrics[index] = nodeMetric{Peer: peer, Load: resp.Msg.GetActorsCount()}
-					return nil
-				})
-			}
-
-			if err := eg.Wait(); err != nil {
-				return fmt.Errorf("failed to fetch node metrics: %w", err)
-			}
-
-			// add the local node metric
-			metrics = append(metrics, nodeMetric{
-				Peer: &cluster.Peer{
-					Host:         x.clusterNode.Host,
-					RemotingPort: x.clusterNode.RemotingPort,
-				},
-				Load: x.actorsCounter.Load(),
-			})
-
-			// find the node with the least load
-			// in case of a tie, the first node with the least load is chosen
-			// this is a simple linear search, as the number of nodes in a cluster.
-			least := metrics[0]
-			for _, metric := range metrics[1:] {
-				if metric.Load < least.Load {
-					least = metric
-				}
-			}
-
-			peer = least.Peer
-		default:
-			// pass
-		}
+	peer, err := x.selectPlacementPeer(ctx, peers, config.placement)
+	if err != nil {
+		return err
 	}
 
 	// spawn the actor on the local node
@@ -374,6 +307,21 @@ func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Act
 	_ = x.actors.addNode(x.singletonManager, pid)
 	x.actors.addWatcher(pid, x.deathWatch)
 	return x.putActorOnCluster(pid)
+}
+
+func (x *actorSystem) selectPlacementPeer(ctx context.Context, peers []*cluster.Peer, placement SpawnPlacement) (*cluster.Peer, error) {
+	switch placement {
+	case Random:
+		return peers[rand.IntN(len(peers))], nil //nolint:gosec
+	case RoundRobin:
+		x.spawnOnNext.Inc()
+		n := x.spawnOnNext.Load()
+		return peers[(int(n)-1)%len(peers)], nil
+	case LeastLoad:
+		return x.leastLoadedPeer(ctx, peers)
+	default:
+		return nil, nil
+	}
 }
 
 func (x *actorSystem) clusterClient(peer *cluster.Peer) internalpbconnect.ClusterServiceClient {

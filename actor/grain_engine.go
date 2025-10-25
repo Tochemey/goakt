@@ -634,86 +634,101 @@ func (x *actorSystem) findActivationPeer(ctx context.Context, config *grainConfi
 		return nil, fmt.Errorf("failed to fetch cluster nodes: %w", err)
 	}
 
-	if config.role != nil {
-		role := pointer.Deref(config.role, "")
-		filtered := make([]*cluster.Peer, 0, len(peers))
-		for _, peer := range peers {
-			if peer.HasRole(role) {
-				filtered = append(filtered, peer)
-			}
-		}
-
-		if len(filtered) == 0 {
-			return nil, fmt.Errorf("no nodes with role %s found in the cluster", role)
-		}
-
-		peers = filtered
+	peers, err = x.filterPeersByRole(peers, config.role)
+	if err != nil {
+		return nil, err
 	}
 
-	var peer *cluster.Peer
-	if len(peers) > 1 {
-		switch config.activationStrategy {
-		case RandomActivation:
-			peer = peers[rand.IntN(len(peers))] //nolint:gosec
-		case RoundRobinActivation:
-			x.grainActivationNext.Inc()
-			n := x.grainActivationNext.Load()
-			peer = peers[(int(n)-1)%len(peers)]
-		case LeastLoadActivation:
-			type nodeMetric struct {
-				Peer *cluster.Peer
-				Load uint64
-			}
-
-			metrics := make([]nodeMetric, len(peers))
-			eg, egCtx := errgroup.WithContext(ctx)
-
-			for index, peer := range peers {
-				index, peer := index, peer
-				eg.Go(func() error {
-					client := x.clusterClient(peer)
-					addr := net.JoinHostPort(peer.Host, strconv.Itoa(peer.RemotingPort))
-					resp, err := client.GetNodeMetric(egCtx, connect.NewRequest(&internalpb.GetNodeMetricRequest{NodeAddress: addr}))
-					if err != nil {
-						return fmt.Errorf("failed to fetch node metric from %s: %w", addr, err)
-					}
-					metrics[index] = nodeMetric{Peer: peer, Load: resp.Msg.GetActorsCount()}
-					return nil
-				})
-			}
-
-			if err := eg.Wait(); err != nil {
-				return nil, fmt.Errorf("failed to fetch node metrics: %w", err)
-			}
-
-			// add the local node metric
-			metrics = append(metrics, nodeMetric{
-				Peer: &cluster.Peer{
-					Host:         x.clusterNode.Host,
-					RemotingPort: x.clusterNode.RemotingPort,
-				},
-				Load: x.actorsCounter.Load(),
-			})
-
-			// find the node with the least load
-			// in case of a tie, the first node with the least load is chosen
-			// this is a simple linear search, as the number of nodes in a cluster.
-			least := metrics[0]
-			for _, metric := range metrics[1:] {
-				if metric.Load < least.Load {
-					least = metric
-				}
-			}
-
-			peer = least.Peer
-		default:
-			// pass
-		}
-	}
-
-	// activate the grain on the local node
-	if peer == nil {
+	if len(peers) <= 1 {
 		return nil, nil
 	}
+
+	peer, err := x.selectActivationPeer(ctx, peers, config.activationStrategy)
+	if err != nil {
+		return nil, err
+	}
 	return peer, nil
+}
+
+func (x *actorSystem) filterPeersByRole(peers []*cluster.Peer, rolePtr *string) ([]*cluster.Peer, error) {
+	if rolePtr == nil {
+		return peers, nil
+	}
+
+	role := pointer.Deref(rolePtr, "")
+	filtered := make([]*cluster.Peer, 0, len(peers))
+	for _, peer := range peers {
+		if peer.HasRole(role) {
+			filtered = append(filtered, peer)
+		}
+	}
+
+	if len(filtered) == 0 {
+		if x.clusterNode != nil && x.clusterNode.HasRole(role) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("no nodes with role %s found in the cluster", role)
+	}
+
+	return filtered, nil
+}
+
+func (x *actorSystem) selectActivationPeer(ctx context.Context, peers []*cluster.Peer, strategy ActivationStrategy) (*cluster.Peer, error) {
+	switch strategy {
+	case RandomActivation:
+		return peers[rand.IntN(len(peers))], nil //nolint:gosec
+	case RoundRobinActivation:
+		x.grainActivationNext.Inc()
+		n := x.grainActivationNext.Load()
+		return peers[(int(n)-1)%len(peers)], nil
+	case LeastLoadActivation:
+		return x.leastLoadedPeer(ctx, peers)
+	default:
+		return nil, nil
+	}
+}
+
+func (x *actorSystem) leastLoadedPeer(ctx context.Context, peers []*cluster.Peer) (*cluster.Peer, error) {
+	type nodeMetric struct {
+		Peer *cluster.Peer
+		Load uint64
+	}
+
+	metrics := make([]nodeMetric, len(peers))
+	eg, egCtx := errgroup.WithContext(ctx)
+
+	for index, peer := range peers {
+		index, peer := index, peer
+		eg.Go(func() error {
+			client := x.clusterClient(peer)
+			addr := net.JoinHostPort(peer.Host, strconv.Itoa(peer.RemotingPort))
+			resp, err := client.GetNodeMetric(egCtx, connect.NewRequest(&internalpb.GetNodeMetricRequest{NodeAddress: addr}))
+			if err != nil {
+				return fmt.Errorf("failed to fetch node metric from %s: %w", addr, err)
+			}
+			metrics[index] = nodeMetric{Peer: peer, Load: resp.Msg.GetActorsCount()}
+			return nil
+		})
+	}
+
+	if err := eg.Wait(); err != nil {
+		return nil, fmt.Errorf("failed to fetch node metrics: %w", err)
+	}
+
+	metrics = append(metrics, nodeMetric{
+		Peer: &cluster.Peer{
+			Host:         x.clusterNode.Host,
+			RemotingPort: x.clusterNode.RemotingPort,
+		},
+		Load: x.actorsCounter.Load(),
+	})
+
+	least := metrics[0]
+	for _, metric := range metrics[1:] {
+		if metric.Load < least.Load {
+			least = metric
+		}
+	}
+
+	return least.Peer, nil
 }
