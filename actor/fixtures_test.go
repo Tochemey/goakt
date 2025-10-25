@@ -30,12 +30,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"sync"
 	"testing"
 	"time"
 
+	"connectrpc.com/connect"
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -52,8 +56,12 @@ import (
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
+	"github.com/tochemey/goakt/v3/internal/cluster"
+	"github.com/tochemey/goakt/v3/internal/collection"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
+	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v3/internal/pause"
+	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/log"
 	mockcluster "github.com/tochemey/goakt/v3/mocks/cluster"
 	"github.com/tochemey/goakt/v3/passivation"
@@ -1297,6 +1305,36 @@ func MockReplicationTestSystem(clusterMock *mockcluster.Cluster) *actorSystem {
 	return sys
 }
 
+func MockSimpleClusterReadyActorSystem(rem remote.Remoting, cl cluster.Cluster, node *discovery.Node) *actorSystem {
+	sys := &actorSystem{
+		logger:      log.DiscardLogger,
+		cluster:     cl,
+		remoting:    rem,
+		clusterNode: node,
+		remoteConfig: remote.NewConfig(
+			node.Host,
+			node.RemotingPort,
+		),
+	}
+
+	sys.started.Store(true)
+	sys.clusterEnabled.Store(true)
+	sys.shuttingDown.Store(false)
+	sys.grains = collection.NewMap[string, *grainPID]()
+	sys.registry = registry.NewRegistry()
+	sys.reflection = newReflection(sys.registry)
+	sys.grainsQueue = make(chan *internalpb.Grain, 1)
+
+	// nolint
+	go func() {
+		for range sys.grainsQueue {
+			// drop test grains
+		}
+	}()
+
+	return sys
+}
+
 func MockPID(system ActorSystem, name string, port int) *PID {
 	return &PID{
 		address: address.New(name, system.Name(), "host", port),
@@ -1351,8 +1389,100 @@ func (MockNopMailbox) IsEmpty() bool                 { return true }
 func (MockNopMailbox) Len() int64                    { return 0 }
 func (MockNopMailbox) Dispose()                      {}
 
+func MockClusterPeer(t *testing.T, load uint64, metricErr error) *cluster.Peer {
+	t.Helper()
+	service := &ClusterServiceStub{load: load, err: metricErr}
+	path, handler := internalpbconnect.NewClusterServiceHandler(service)
+	mux := http.NewServeMux()
+	mux.Handle(path, handler)
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	u, err := url.Parse(server.URL)
+	require.NoError(t, err)
+	host, portStr, err := net.SplitHostPort(u.Host)
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	return &cluster.Peer{
+		Host:         host,
+		PeersPort:    port,
+		RemotingPort: port,
+	}
+}
+
 // //////////////////////////////////////// CLUSTER PROVIDERS MOCKS //////////////////////////////////////
 type providerFactory func(t *testing.T, host string, discoveryPort int) discovery.Provider
+
+type ClusterServiceStub struct {
+	load uint64
+	err  error
+}
+
+func (stub *ClusterServiceStub) GetNodeMetric(_ context.Context, _ *connect.Request[internalpb.GetNodeMetricRequest]) (*connect.Response[internalpb.GetNodeMetricResponse], error) {
+	if stub.err != nil {
+		return nil, stub.err
+	}
+	return connect.NewResponse(&internalpb.GetNodeMetricResponse{ActorsCount: stub.load}), nil
+}
+
+func (stub *ClusterServiceStub) GetKinds(_ context.Context, _ *connect.Request[internalpb.GetKindsRequest]) (*connect.Response[internalpb.GetKindsResponse], error) {
+	return connect.NewResponse(&internalpb.GetKindsResponse{}), nil
+}
+
+type RemotingServiceClientStub struct {
+	called      bool
+	lastRequest *internalpb.RemoteActivateGrainRequest
+	activateErr error
+}
+
+var _ internalpbconnect.RemotingServiceClient = (*RemotingServiceClientStub)(nil)
+
+func (stub *RemotingServiceClientStub) RemoteActivateGrain(_ context.Context, req *connect.Request[internalpb.RemoteActivateGrainRequest]) (*connect.Response[internalpb.RemoteActivateGrainResponse], error) {
+	stub.called = true
+	stub.lastRequest = req.Msg
+	if stub.activateErr != nil {
+		return nil, stub.activateErr
+	}
+	return connect.NewResponse(&internalpb.RemoteActivateGrainResponse{}), nil
+}
+
+func (stub *RemotingServiceClientStub) RemoteAsk(context.Context, *connect.Request[internalpb.RemoteAskRequest]) (*connect.Response[internalpb.RemoteAskResponse], error) {
+	return nil, errors.New("not implemented")
+}
+
+func (stub *RemotingServiceClientStub) RemoteTell(context.Context, *connect.Request[internalpb.RemoteTellRequest]) (*connect.Response[internalpb.RemoteTellResponse], error) {
+	return nil, errors.New("not implemented")
+}
+
+func (stub *RemotingServiceClientStub) RemoteLookup(context.Context, *connect.Request[internalpb.RemoteLookupRequest]) (*connect.Response[internalpb.RemoteLookupResponse], error) {
+	return nil, errors.New("not implemented")
+}
+
+func (stub *RemotingServiceClientStub) RemoteReSpawn(context.Context, *connect.Request[internalpb.RemoteReSpawnRequest]) (*connect.Response[internalpb.RemoteReSpawnResponse], error) {
+	return nil, errors.New("not implemented")
+}
+
+func (stub *RemotingServiceClientStub) RemoteStop(context.Context, *connect.Request[internalpb.RemoteStopRequest]) (*connect.Response[internalpb.RemoteStopResponse], error) {
+	return nil, errors.New("not implemented")
+}
+
+func (stub *RemotingServiceClientStub) RemoteSpawn(context.Context, *connect.Request[internalpb.RemoteSpawnRequest]) (*connect.Response[internalpb.RemoteSpawnResponse], error) {
+	return nil, errors.New("not implemented")
+}
+
+func (stub *RemotingServiceClientStub) RemoteReinstate(context.Context, *connect.Request[internalpb.RemoteReinstateRequest]) (*connect.Response[internalpb.RemoteReinstateResponse], error) {
+	return nil, errors.New("not implemented")
+}
+
+func (stub *RemotingServiceClientStub) RemoteAskGrain(context.Context, *connect.Request[internalpb.RemoteAskGrainRequest]) (*connect.Response[internalpb.RemoteAskGrainResponse], error) {
+	return nil, errors.New("not implemented")
+}
+
+func (stub *RemotingServiceClientStub) RemoteTellGrain(context.Context, *connect.Request[internalpb.RemoteTellGrainRequest]) (*connect.Response[internalpb.RemoteTellGrainResponse], error) {
+	return nil, errors.New("not implemented")
+}
 
 func startNatsServer(t *testing.T) *natsserver.Server {
 	t.Helper()

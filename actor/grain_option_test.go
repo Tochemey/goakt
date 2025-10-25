@@ -75,4 +75,32 @@ func TestGrainOptions(t *testing.T) {
 		err := config.Validate()
 		require.Error(t, err)
 	})
+
+	t.Run("With Local Activation strategy", func(t *testing.T) {
+		config := &grainConfig{}
+		option := WithActivationStrategy(LocalActivation)
+		option(config)
+		require.Equal(t, LocalActivation, config.activationStrategy)
+	})
+
+	t.Run("With RoundRobin Activation strategy", func(t *testing.T) {
+		config := &grainConfig{}
+		option := WithActivationStrategy(RoundRobinActivation)
+		option(config)
+		require.Equal(t, RoundRobinActivation, config.activationStrategy)
+	})
+
+	t.Run("With Random Activation strategy", func(t *testing.T) {
+		config := &grainConfig{}
+		option := WithActivationStrategy(RandomActivation)
+		option(config)
+		require.Equal(t, RandomActivation, config.activationStrategy)
+	})
+
+	t.Run("With LeastLoad Activation strategy", func(t *testing.T) {
+		config := &grainConfig{}
+		option := WithActivationStrategy(LeastLoadActivation)
+		option(config)
+		require.Equal(t, LeastLoadActivation, config.activationStrategy)
+	})
 }
