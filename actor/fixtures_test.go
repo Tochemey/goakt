@@ -1325,6 +1325,7 @@ func MockSimpleClusterReadyActorSystem(rem remote.Remoting, cl cluster.Cluster, 
 	sys.reflection = newReflection(sys.registry)
 	sys.grainsQueue = make(chan *internalpb.Grain, 1)
 
+	// nolint
 	go func() {
 		for range sys.grainsQueue {
 			// drop test grains
