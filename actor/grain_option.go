@@ -103,7 +103,7 @@ func newGrainConfig(opts ...GrainOption) *grainConfig {
 		initTimeout:        atomic.Duration{},
 		deactivateAfter:    DefaultPassivationTimeout,
 		dependencies:       collection.NewMap[string, extension.Dependency](),
-		activationStrategy: RoundRobinActivation,
+		activationStrategy: LocalActivation,
 	}
 
 	// Set default values
