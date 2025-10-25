@@ -28,6 +28,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
@@ -41,13 +42,16 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
 
+	"github.com/tochemey/goakt/v3/discovery"
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/goaktpb"
+	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/log"
 	mocks "github.com/tochemey/goakt/v3/mocks/cluster"
+	mocksremote "github.com/tochemey/goakt/v3/mocks/remote"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
@@ -1119,6 +1123,172 @@ func TestGrain(t *testing.T) {
 		require.Nil(t, identity)
 
 		require.NoError(t, testSystem.Stop(ctx))
+	})
+}
+
+func TestFindActivationPeer(t *testing.T) {
+	t.Run("fails when peers lookup fails", func(t *testing.T) {
+		ctx := t.Context()
+		clmock := mocks.NewCluster(t)
+		sys := &actorSystem{
+			cluster: clmock,
+			logger:  log.DiscardLogger,
+		}
+
+		clmock.EXPECT().Peers(ctx).Return(nil, errors.New("boom"))
+
+		peer, err := sys.findActivationPeer(ctx, newGrainConfig())
+		require.Error(t, err)
+		require.Nil(t, peer)
+		require.ErrorContains(t, err, "failed to fetch cluster nodes")
+	})
+
+	t.Run("fails when no peer matches required role", func(t *testing.T) {
+		ctx := t.Context()
+		clmock := mocks.NewCluster(t)
+		sys := &actorSystem{
+			cluster: clmock,
+			logger:  log.DiscardLogger,
+		}
+
+		config := newGrainConfig(WithActivationRole("analytics"))
+		peers := []*cluster.Peer{{Host: "10.0.0.2", Roles: []string{"api"}}}
+		clmock.EXPECT().Peers(ctx).Return(peers, nil)
+
+		peer, err := sys.findActivationPeer(ctx, config)
+		require.Error(t, err)
+		require.Nil(t, peer)
+		require.ErrorContains(t, err, "no nodes with role analytics")
+	})
+
+	t.Run("returns nil when only one peer is available", func(t *testing.T) {
+		ctx := t.Context()
+		clmock := mocks.NewCluster(t)
+		sys := &actorSystem{
+			cluster: clmock,
+			logger:  log.DiscardLogger,
+		}
+
+		peers := []*cluster.Peer{{Host: "10.0.0.2"}}
+		clmock.EXPECT().Peers(ctx).Return(peers, nil)
+
+		peer, err := sys.findActivationPeer(ctx, newGrainConfig())
+		require.NoError(t, err)
+		require.Nil(t, peer)
+	})
+
+	t.Run("random activation picks a remote peer", func(t *testing.T) {
+		ctx := t.Context()
+		clmock := mocks.NewCluster(t)
+		sys := &actorSystem{
+			cluster: clmock,
+			logger:  log.DiscardLogger,
+		}
+
+		peers := []*cluster.Peer{
+			{Host: "10.0.0.2"},
+			{Host: "10.0.0.3"},
+			{Host: "10.0.0.4"},
+		}
+		clmock.EXPECT().Peers(ctx).Return(peers, nil)
+
+		peer, err := sys.findActivationPeer(ctx, newGrainConfig(WithActivationStrategy(RandomActivation)))
+		require.NoError(t, err)
+		require.NotNil(t, peer)
+		isCandidate := false
+		for _, candidate := range peers {
+			if peer == candidate {
+				isCandidate = true
+				break
+			}
+		}
+		require.True(t, isCandidate, "peer %v not part of candidates", peer)
+	})
+
+	t.Run("round robin cycles through peers", func(t *testing.T) {
+		ctx := t.Context()
+		clmock := mocks.NewCluster(t)
+		sys := &actorSystem{
+			cluster: clmock,
+			logger:  log.DiscardLogger,
+		}
+
+		peers := []*cluster.Peer{
+			{Host: "10.0.0.2"},
+			{Host: "10.0.0.3"},
+		}
+		clmock.EXPECT().Peers(ctx).Return(peers, nil).Twice()
+
+		config := newGrainConfig(WithActivationStrategy(RoundRobinActivation))
+		peer1, err := sys.findActivationPeer(ctx, config)
+		require.NoError(t, err)
+		require.Equal(t, peers[0], peer1)
+
+		peer2, err := sys.findActivationPeer(ctx, config)
+		require.NoError(t, err)
+		require.Equal(t, peers[1], peer2)
+	})
+
+	t.Run("least load prefers the lightest node", func(t *testing.T) {
+		ctx := t.Context()
+		httpClient := &http.Client{}
+		clmock := mocks.NewCluster(t)
+		remoting := mocksremote.NewRemoting(t)
+
+		peerLow := MockClusterPeer(t, 1, nil)
+		peerHigh := MockClusterPeer(t, 10, nil)
+		peers := []*cluster.Peer{peerHigh, peerLow}
+
+		clmock.EXPECT().Peers(ctx).Return(peers, nil)
+		remoting.EXPECT().MaxReadFrameSize().Return(0).Times(len(peers))
+		remoting.EXPECT().Compression().Return(remote.NoCompression).Times(len(peers))
+		remoting.EXPECT().HTTPClient().Return(httpClient).Times(len(peers))
+
+		sys := &actorSystem{
+			cluster:  clmock,
+			logger:   log.DiscardLogger,
+			remoting: remoting,
+			clusterNode: &discovery.Node{
+				Host:         "127.0.0.1",
+				RemotingPort: 9000,
+			},
+		}
+		sys.actorsCounter.Store(5)
+
+		peer, err := sys.findActivationPeer(ctx, newGrainConfig(WithActivationStrategy(LeastLoadActivation)))
+		require.NoError(t, err)
+		require.Equal(t, peerLow, peer)
+	})
+
+	t.Run("least load reports metric failures", func(t *testing.T) {
+		ctx := t.Context()
+		httpClient := &http.Client{}
+		clmock := mocks.NewCluster(t)
+		remoting := mocksremote.NewRemoting(t)
+
+		errPeer := MockClusterPeer(t, 0, errors.New("metrics down"))
+		successPeer := MockClusterPeer(t, 2, nil)
+		peers := []*cluster.Peer{errPeer, successPeer}
+
+		clmock.EXPECT().Peers(ctx).Return(peers, nil)
+		remoting.EXPECT().MaxReadFrameSize().Return(0).Times(len(peers))
+		remoting.EXPECT().Compression().Return(remote.NoCompression).Times(len(peers))
+		remoting.EXPECT().HTTPClient().Return(httpClient).Times(len(peers))
+
+		sys := &actorSystem{
+			cluster:  clmock,
+			logger:   log.DiscardLogger,
+			remoting: remoting,
+			clusterNode: &discovery.Node{
+				Host:         "127.0.0.1",
+				RemotingPort: 9100,
+			},
+		}
+
+		peer, err := sys.findActivationPeer(ctx, newGrainConfig(WithActivationStrategy(LeastLoadActivation)))
+		require.Error(t, err)
+		require.Nil(t, peer)
+		require.ErrorContains(t, err, "failed to fetch node metrics")
 	})
 }
 

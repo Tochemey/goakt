@@ -31,7 +31,46 @@ import (
 
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/internal/collection"
+	"github.com/tochemey/goakt/v3/internal/pointer"
 	"github.com/tochemey/goakt/v3/internal/validation"
+)
+
+// ActivationStrategy defines the algorithm used by the actor system to determine
+// where a grain should be activated in a clustered environment.
+//
+// This strategy is only relevant when cluster mode is enabled.
+// It affects how grains are distributed across the nodes in the cluster.
+type ActivationStrategy int
+
+const (
+	// RoundRobinActivation distributes grains evenly across nodes
+	// by cycling through the available nodes in a round-robin manner.
+	// This strategy provides balanced load distribution over time.
+	// ⚠️ Note: This strategy will only be applied if the given Grain does not exist yet when cluster mode is enabled.
+	// If the Grain already exists on another node, it will be activated there instead.
+	RoundRobinActivation ActivationStrategy = iota
+
+	// Random selects a node at random from the available pool of nodes.
+	// This strategy is stateless and can help quickly spread grains across the cluster,
+	// but may result in uneven load distribution.
+	// ⚠️ Note: This strategy will only be applied if the given Grain does not exist yet when cluster mode is enabled.
+	// If the Grain already exists on another node, it will be activated there instead.
+	RandomActivation
+
+	// LocalActivation forces the grain to be activated on the local node.
+	// Useful when locality is important (e.g., accessing local resources).
+	// ⚠️ Note: This strategy will only be applied if the given Grain does not exist yet when cluster mode is enabled.
+	// If the Grain already exists on another node, it will be activated there instead.
+	LocalActivation
+
+	// LeastLoadActivation selects the node with the least current load to activate the grain.
+	// This strategy aims to optimize resource utilization by placing grains
+	// on nodes that are less busy, potentially improving performance and responsiveness.
+	// ⚠️ Note: This strategy may require additional overhead when placing grains,
+	// as it needs to get nodes load metrics depending on the cluster size.
+	// ⚠️ Note: This strategy will only be applied if the given Grain does not exist yet when cluster mode is enabled.
+	// If the Grain already exists on another node, it will be activated there instead.
+	LeastLoadActivation
 )
 
 type GrainOption func(config *grainConfig)
@@ -42,6 +81,10 @@ type grainConfig struct {
 	initTimeout     atomic.Duration
 	deactivateAfter time.Duration
 	dependencies    *collection.Map[string, extension.Dependency]
+	// role defines the role required for the node to activate the grain.
+	role *string
+	// placement specifies the placement strategy for activating the grain in a cluster.
+	activationStrategy ActivationStrategy
 }
 
 // newGrainConfig creates a new grainConfig instance and applies the provided GrainOption(s).
@@ -56,10 +99,11 @@ type grainConfig struct {
 //   - *grainConfig: a pointer to the configured grainConfig instance.
 func newGrainConfig(opts ...GrainOption) *grainConfig {
 	config := &grainConfig{
-		initMaxRetries:  atomic.Int32{},
-		initTimeout:     atomic.Duration{},
-		deactivateAfter: DefaultPassivationTimeout,
-		dependencies:    collection.NewMap[string, extension.Dependency](),
+		initMaxRetries:     atomic.Int32{},
+		initTimeout:        atomic.Duration{},
+		deactivateAfter:    DefaultPassivationTimeout,
+		dependencies:       collection.NewMap[string, extension.Dependency](),
+		activationStrategy: RoundRobinActivation,
 	}
 
 	// Set default values
@@ -186,5 +230,51 @@ func WithGrainDependencies(deps ...extension.Dependency) GrainOption {
 				config.dependencies.Set(dep.ID(), dep)
 			}
 		}
+	}
+}
+
+// WithActivationStrategy returns a GrainOption that sets the placement strategy to be used when activating a Grain
+// in cluster mode.
+//
+// This option determines how the actor system selects a target node for activating
+// the Grain across the cluster. Valid strategies include RoundRobin, Random, and Local.
+//
+// Note: This option only has an effect in a cluster-enabled actor system. If cluster mode is disabled, the placement strategy is ignored
+// and the Grain will be activated locally.
+//
+// Parameters:
+//   - strategy: A ActivationStrategy value specifying how to distribute the Grain.
+//
+// Returns:
+//   - GrainOption that sets the activation strategy.
+func WithActivationStrategy(strategy ActivationStrategy) GrainOption {
+	return func(config *grainConfig) {
+		config.activationStrategy = strategy
+	}
+}
+
+// WithActivationRole records a required node role for Grain placement.
+//
+// In cluster mode, peers advertise roles via ClusterConfig.WithRoles (e.g. "projection",
+// "payments", "api"). When used with SpawnOn in a cluster-enabled system, the Grain will
+// only be activated on nodes that advertise the same role. If multiple nodes match, the
+// placement strategy (RoundRobin, Random, etc.) is applied among those nodes.
+// If clustering is disabled, this option is ignored and the Grain is activated locally.
+//
+// If no node with the required role exists, activation returns an error. This prevents
+// accidental placement on unsuitable nodes and protects Grains that depend on role-specific services or colocation.
+//
+// Tip: omit WithActivationRole to allow placement on any node (or ensure all nodes advertise
+// the role if you want it universal).
+//
+// Parameters:
+//
+//	role — label a node must advertise (e.g. "projection", "payments").
+//
+// Returns:
+//   - GrainOption that sets the role in the grainConfig.
+func WithActivationRole(role string) GrainOption {
+	return func(config *grainConfig) {
+		config.role = pointer.To(role)
 	}
 }

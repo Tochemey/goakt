@@ -28,12 +28,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"net"
 	"strconv"
 	"time"
 
 	"connectrpc.com/connect"
 	goset "github.com/deckarep/golang-set/v2"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -41,6 +43,7 @@ import (
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
+	"github.com/tochemey/goakt/v3/internal/pointer"
 )
 
 // GrainIdentity retrieves or activates a Grain (virtual actor) identified by the given name.
@@ -109,25 +112,48 @@ func (x *actorSystem) GrainIdentity(ctx context.Context, name string, factory Gr
 			}
 			return identity, nil
 		}
+
+		peer, err := x.findActivationPeer(ctx, config)
+		if err != nil {
+			return nil, err
+		}
+
+		if peer != nil && (peer.PeerAddress() != x.PeersAddress()) {
+			pid := newGrainPID(identity, grain, x, config)
+			grainInfo, err = pid.toWireGrain()
+			if err != nil {
+				return nil, err
+			}
+
+			remoteClient := x.remoting.RemotingServiceClient(peer.Host, int(peer.RemotingPort))
+			request := connect.NewRequest(&internalpb.RemoteActivateGrainRequest{
+				Grain: grainInfo,
+			})
+
+			if _, err := remoteClient.RemoteActivateGrain(ctx, request); err != nil {
+				return nil, err
+			}
+			return identity, nil
+		}
 	}
 
-	process, ok := x.grains.Get(identity.String())
+	pid, ok := x.grains.Get(identity.String())
 	if !ok {
-		process = newGrainPID(identity, grain, x, config)
+		pid = newGrainPID(identity, grain, x, config)
 	}
 
 	if !x.registry.Exists(grain) {
 		x.registry.Register(grain)
 	}
 
-	if !process.isActive() {
-		if err := process.activate(ctx); err != nil {
+	if !pid.isActive() {
+		if err := pid.activate(ctx); err != nil {
 			return nil, err
 		}
 	}
 
-	x.grains.Set(identity.String(), process)
-	return identity, x.putGrainOnCluster(process)
+	x.grains.Set(identity.String(), pid)
+	return identity, x.putGrainOnCluster(pid)
 }
 
 // TellGrain sends an asynchronous message to a Grain (virtual actor) identified by the given identity.
@@ -600,4 +626,94 @@ func (x *actorSystem) recreateGrain(ctx context.Context, serializedGrain *intern
 
 	// Register in the cluster
 	return x.putGrainOnCluster(process)
+}
+
+func (x *actorSystem) findActivationPeer(ctx context.Context, config *grainConfig) (*cluster.Peer, error) {
+	peers, err := x.cluster.Peers(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch cluster nodes: %w", err)
+	}
+
+	if config.role != nil {
+		role := pointer.Deref(config.role, "")
+		filtered := make([]*cluster.Peer, 0, len(peers))
+		for _, peer := range peers {
+			if peer.HasRole(role) {
+				filtered = append(filtered, peer)
+			}
+		}
+
+		if len(filtered) == 0 {
+			return nil, fmt.Errorf("no nodes with role %s found in the cluster", role)
+		}
+
+		peers = filtered
+	}
+
+	var peer *cluster.Peer
+	if len(peers) > 1 {
+		switch config.activationStrategy {
+		case RandomActivation:
+			peer = peers[rand.IntN(len(peers))] //nolint:gosec
+		case RoundRobinActivation:
+			x.grainActivationNext.Inc()
+			n := x.grainActivationNext.Load()
+			peer = peers[(int(n)-1)%len(peers)]
+		case LeastLoadActivation:
+			type nodeMetric struct {
+				Peer *cluster.Peer
+				Load uint64
+			}
+
+			metrics := make([]nodeMetric, len(peers))
+			eg, egCtx := errgroup.WithContext(ctx)
+
+			for index, peer := range peers {
+				index, peer := index, peer
+				eg.Go(func() error {
+					client := x.clusterClient(peer)
+					addr := net.JoinHostPort(peer.Host, strconv.Itoa(peer.RemotingPort))
+					resp, err := client.GetNodeMetric(egCtx, connect.NewRequest(&internalpb.GetNodeMetricRequest{NodeAddress: addr}))
+					if err != nil {
+						return fmt.Errorf("failed to fetch node metric from %s: %w", addr, err)
+					}
+					metrics[index] = nodeMetric{Peer: peer, Load: resp.Msg.GetActorsCount()}
+					return nil
+				})
+			}
+
+			if err := eg.Wait(); err != nil {
+				return nil, fmt.Errorf("failed to fetch node metrics: %w", err)
+			}
+
+			// add the local node metric
+			metrics = append(metrics, nodeMetric{
+				Peer: &cluster.Peer{
+					Host:         x.clusterNode.Host,
+					RemotingPort: x.clusterNode.RemotingPort,
+				},
+				Load: x.actorsCounter.Load(),
+			})
+
+			// find the node with the least load
+			// in case of a tie, the first node with the least load is chosen
+			// this is a simple linear search, as the number of nodes in a cluster.
+			least := metrics[0]
+			for _, metric := range metrics[1:] {
+				if metric.Load < least.Load {
+					least = metric
+				}
+			}
+
+			peer = least.Peer
+		default:
+			// pass
+		}
+	}
+
+	// activate the grain on the local node
+	if peer == nil {
+		return nil, nil
+	}
+	return peer, nil
 }
