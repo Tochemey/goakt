@@ -176,7 +176,7 @@ func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opt
 	}
 
 	config := newSpawnConfig(opts...)
-	if !x.InCluster() || config.placement == Local {
+	if !x.InCluster() {
 		_, err := x.Spawn(ctx, name, actor, opts...)
 		return err
 	}
