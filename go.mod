@@ -1,6 +1,6 @@
 module github.com/tochemey/goakt/v3
 
-go 1.25.1
+go 1.25.3
 
 require (
 	connectrpc.com/connect v1.19.1
@@ -10,7 +10,7 @@ require (
 	github.com/flowchartsman/retry v1.2.0
 	github.com/google/uuid v1.6.0
 	github.com/grandcat/zeroconf v1.0.0
-	github.com/hashicorp/consul/api v1.32.4
+	github.com/hashicorp/consul/api v1.33.0
 	github.com/hashicorp/go-sockaddr v1.0.7
 	github.com/hashicorp/memberlist v0.5.3
 	github.com/kapetan-io/tackle v0.13.0
@@ -50,7 +50,7 @@ require (
 	github.com/RoaringBitmap/roaring v1.9.4 // indirect
 	github.com/antithesishq/antithesis-sdk-go v0.5.0 // indirect
 	github.com/armon/go-metrics v0.4.1 // indirect
-	github.com/bits-and-blooms/bitset v1.24.1 // indirect
+	github.com/bits-and-blooms/bitset v1.24.3 // indirect
 	github.com/buraksezer/consistent v0.10.0 // indirect
 	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect

@@ -25,50 +25,46 @@
 package cluster
 
 import (
-	"net"
-	"slices"
-	"strconv"
+	"reflect"
+	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/tochemey/goakt/v3/remote"
 )
 
-// Peer defines the peer info
-type Peer struct {
-	// Host represents the peer address.
-	Host string
-	// DiscoveryPort
-	DiscoveryPort int
-	// PeersPort represents the peer port
-	PeersPort int
-	// Coordinator states that the given peer is the leader not.
-	// A peer is a coordinator when it is the oldest node in the cluster
-	Coordinator bool
-	// RemotingPort
-	RemotingPort int
-	// Roles represents the peer roles
-	Roles []string
-}
-
-// PeerAddress returns address the node's peers will use to connect to
-func (peer Peer) PeerAddress() string {
-	return net.JoinHostPort(peer.Host, strconv.Itoa(peer.PeersPort))
-}
-
-// HasRole checks if the peer has the given role
-func (peer Peer) HasRole(role string) bool {
-	return slices.Contains(peer.Roles, role)
-}
-
-func ToRemotePeers(peers []*Peer) []*remote.Peer {
-	remotePeers := make([]*remote.Peer, len(peers))
-	for i, peer := range peers {
-		remotePeers[i] = &remote.Peer{
-			Host:          peer.Host,
-			RemotingPort:  peer.RemotingPort,
-			PeersPort:     peer.PeersPort,
-			Roles:         peer.Roles,
-			DiscoveryPort: peer.DiscoveryPort,
-		}
+func TestPeer(t *testing.T) {
+	peer := Peer{
+		Host:          "127.0.0.1",
+		PeersPort:     9000,
+		RemotingPort:  9100,
+		Roles:         []string{"role1", "role2"},
+		DiscoveryPort: 9200,
 	}
-	return remotePeers
+	require.True(t, peer.HasRole("role1"))
+	expectedPeerAddress := "127.0.0.1:9000"
+	require.Equal(t, expectedPeerAddress, peer.PeerAddress())
+}
+
+func TestToRemotePeers(t *testing.T) {
+	peers := []*Peer{
+		{
+			Host:          "127.0.0.1",
+			PeersPort:     9000,
+			RemotingPort:  9100,
+			Roles:         []string{"role1", "role2"},
+			DiscoveryPort: 9200,
+		},
+	}
+	remotePeers := ToRemotePeers(peers)
+	require.NotEmpty(t, remotePeers)
+	require.Equal(t, 1, len(remotePeers))
+	expected := &remote.Peer{
+		Host:          "127.0.0.1",
+		PeersPort:     9000,
+		RemotingPort:  9100,
+		Roles:         []string{"role1", "role2"},
+		DiscoveryPort: 9200,
+	}
+	require.True(t, reflect.DeepEqual(expected, remotePeers[0]))
 }

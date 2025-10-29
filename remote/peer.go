@@ -22,53 +22,31 @@
  * SOFTWARE.
  */
 
-package cluster
+package remote
 
-import (
-	"net"
-	"slices"
-	"strconv"
-
-	"github.com/tochemey/goakt/v3/remote"
-)
-
-// Peer defines the peer info
+// Peer describes a remote node discovered in the cluster and the network
+// endpoints it exposes for discovery, inter-peer coordination, and remoting.
 type Peer struct {
-	// Host represents the peer address.
+	// Host is the DNS name or IP address of the node that other peers can reach.
 	Host string
-	// DiscoveryPort
+
+	// DiscoveryPort is the network port on which the node participates in
+	// service discovery (for advertising itself and discovering other nodes).
+	// Valid range is 1–65535.
 	DiscoveryPort int
-	// PeersPort represents the peer port
+
+	// PeersPort is the network port used for peer-to-peer coordination traffic
+	// between nodes (such as membership, gossip, or health checks).
+	// Valid range is 1–65535.
 	PeersPort int
-	// Coordinator states that the given peer is the leader not.
-	// A peer is a coordinator when it is the oldest node in the cluster
-	Coordinator bool
-	// RemotingPort
+
+	// RemotingPort is the network port used for application remoting, such as
+	// RPC or actor message delivery between nodes.
+	// Valid range is 1–65535.
 	RemotingPort int
-	// Roles represents the peer roles
+
+	// Roles lists the logical roles or capabilities this node advertises
+	// (for example: "frontend", "backend", "shard"). Roles can be used for
+	// routing or placement decisions. An empty list means no special roles.
 	Roles []string
-}
-
-// PeerAddress returns address the node's peers will use to connect to
-func (peer Peer) PeerAddress() string {
-	return net.JoinHostPort(peer.Host, strconv.Itoa(peer.PeersPort))
-}
-
-// HasRole checks if the peer has the given role
-func (peer Peer) HasRole(role string) bool {
-	return slices.Contains(peer.Roles, role)
-}
-
-func ToRemotePeers(peers []*Peer) []*remote.Peer {
-	remotePeers := make([]*remote.Peer, len(peers))
-	for i, peer := range peers {
-		remotePeers[i] = &remote.Peer{
-			Host:          peer.Host,
-			RemotingPort:  peer.RemotingPort,
-			PeersPort:     peer.PeersPort,
-			Roles:         peer.Roles,
-			DiscoveryPort: peer.DiscoveryPort,
-		}
-	}
-	return remotePeers
 }
