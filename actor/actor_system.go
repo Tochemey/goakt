@@ -567,6 +567,49 @@ type ActorSystem interface {
 	// DiscoveryPort returns the port used for service discovery.
 	// This port is zero when cluster mode is not activated
 	DiscoveryPort() int
+	// Peers returns a best-effort snapshot of currently known peer nodes in the cluster.
+	//
+	// Behavior:
+	//   - Requires cluster mode. If clustering is disabled, an empty slice is returned
+	//     and ErrClusterDisabled may be reported depending on the implementation.
+	//   - Returns an eventually consistent view of membership as observed by this node.
+	//     The result can be stale or incomplete while membership information propagates.
+	//   - If the lookup exceeds the provided timeout or fails, a partial snapshot may
+	//     be returned (possibly empty) along with a non-nil error.
+	//
+	// Concurrency and Ordering:
+	//   - The returned slice is a point-in-time snapshot. Cluster membership can change
+	//     immediately after the call returns.
+	//   - The order of peers is unspecified and should not be relied upon.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation and deadline control.
+	//   - timeout: Maximum duration allowed for cluster membership lookup.
+	//
+	// Returns:
+	//   - []*remote.Peer: Zero or more peer descriptors known to this node at call time.
+	//   - error: May be non-nil if the lookup timed out, was canceled, or another error occurred.
+	//
+	// Possible Errors:
+	//   - ErrActorSystemNotStarted: The actor system has not been started.
+	//   - ErrClusterDisabled: Clustering is not enabled for this node.
+	//   - context.DeadlineExceeded: The operation exceeded the supplied timeout.
+	//   - context.Canceled: The context was canceled.
+	//   - Other transient network/storage errors from the underlying cluster engine.
+	//
+	// Example:
+	//   ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	//   defer cancel()
+	//
+	//   peers, err := system.Peers(ctx, 2*time.Second)
+	//   if err != nil {
+	//       system.Logger().Warnf("peer lookup returned an error: %v", err)
+	//   }
+	//   for _, p := range peers {
+	//       // Use p (e.g., p.Address(), p.Host(), p.Port(), etc.)
+	//   }
+	Peers(ctx context.Context, timeout time.Duration) ([]*remote.Peer, error)
+
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
 	handleRemoteAsk(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error)
@@ -955,6 +998,67 @@ func (x *actorSystem) Port() int {
 	port := x.remoteConfig.BindPort()
 	x.locker.RUnlock()
 	return port
+}
+
+// Peers returns a best-effort snapshot of currently known peer nodes in the cluster.
+//
+// Behavior:
+//   - Requires cluster mode. If clustering is disabled, an empty slice is returned
+//     and ErrClusterDisabled may be reported depending on the implementation.
+//   - Returns an eventually consistent view of membership as observed by this node.
+//     The result can be stale or incomplete while membership information propagates.
+//   - If the lookup exceeds the provided timeout or fails, a partial snapshot may
+//     be returned (possibly empty) along with a non-nil error.
+//
+// Concurrency and Ordering:
+//   - The returned slice is a point-in-time snapshot. Cluster membership can change
+//     immediately after the call returns.
+//   - The order of peers is unspecified and should not be relied upon.
+//
+// Parameters:
+//   - ctx: Context for cancellation and deadline control.
+//   - timeout: Maximum duration allowed for cluster membership lookup.
+//
+// Returns:
+//   - []*remote.Peer: Zero or more peer descriptors known to this node at call time.
+//   - error: May be non-nil if the lookup timed out, was canceled, or another error occurred.
+//
+// Possible Errors:
+//   - ErrActorSystemNotStarted: The actor system has not been started.
+//   - ErrClusterDisabled: Clustering is not enabled for this node.
+//   - context.DeadlineExceeded: The operation exceeded the supplied timeout.
+//   - context.Canceled: The context was canceled.
+//   - Other transient network/storage errors from the underlying cluster engine.
+//
+// Example:
+//
+//	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+//	defer cancel()
+//
+//	peers, err := system.Peers(ctx, 2*time.Second)
+//	if err != nil {
+//	    system.Logger().Warnf("peer lookup returned an error: %v", err)
+//	}
+//	for _, p := range peers {
+//	    // Use p (e.g., p.Address(), p.Host(), p.Port(), etc.)
+//	}
+func (x *actorSystem) Peers(ctx context.Context, timeout time.Duration) ([]*remote.Peer, error) {
+	if !x.Running() {
+		return nil, gerrors.ErrActorSystemNotStarted
+	}
+
+	if !x.clusterEnabled.Load() {
+		return nil, gerrors.ErrClusterDisabled
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	peers, err := x.cluster.Peers(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return cluster.ToRemotePeers(peers), nil
 }
 
 // DiscoveryPort returns the port used for service discovery.

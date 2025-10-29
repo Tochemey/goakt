@@ -613,11 +613,12 @@ func (x *cluster) Peers(ctx context.Context) ([]*Peer, error) {
 		_ = json.Unmarshal([]byte(member.Meta), node)
 		roles := goset.NewSet(node.Roles...)
 		peers = append(peers, &Peer{
-			Host:         node.Host,
-			PeersPort:    node.PeersPort,
-			Coordinator:  member.Coordinator,
-			RemotingPort: node.RemotingPort,
-			Roles:        roles.ToSlice(),
+			Host:          node.Host,
+			DiscoveryPort: node.DiscoveryPort,
+			PeersPort:     node.PeersPort,
+			Coordinator:   member.Coordinator,
+			RemotingPort:  node.RemotingPort,
+			Roles:         roles.ToSlice(),
 		})
 	}
 	return peers, nil

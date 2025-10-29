@@ -1975,10 +1975,10 @@ func TestPeersFiltersSelfAndParsesMeta(t *testing.T) {
 	cl := &cluster{
 		running: atomic.NewBool(true),
 		logger:  log.DiscardLogger,
-		node:    &discovery.Node{Host: "127.0.0.1", PeersPort: 4000},
+		node:    &discovery.Node{Host: "127.0.0.1", PeersPort: 4000, RemotingPort: 4001, DiscoveryPort: 3000},
 	}
 
-	other := &discovery.Node{Host: "10.0.0.1", PeersPort: 5000, RemotingPort: 7000}
+	other := &discovery.Node{Host: "10.0.0.1", PeersPort: 5000, RemotingPort: 7000, DiscoveryPort: 3001}
 	selfMeta, err := json.Marshal(cl.node)
 	require.NoError(t, err)
 	otherMeta, err := json.Marshal(other)
@@ -1998,7 +1998,9 @@ func TestPeersFiltersSelfAndParsesMeta(t *testing.T) {
 	require.Equal(t, other.Host, peers[0].Host)
 	require.Equal(t, other.PeersPort, peers[0].PeersPort)
 	require.Equal(t, other.RemotingPort, peers[0].RemotingPort)
+	require.Equal(t, other.DiscoveryPort, peers[0].DiscoveryPort)
 	require.False(t, peers[0].Coordinator)
+	require.Empty(t, peers[0].Roles)
 }
 
 // nolint
