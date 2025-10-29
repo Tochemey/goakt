@@ -1,6 +1,6 @@
 VERSION 0.8
 
-FROM golang:1.25.2-alpine
+FROM golang:1.25.3-alpine
 
 # install gcc dependencies into alpine for CGO
 RUN apk --no-cache add git ca-certificates gcc musl-dev libc-dev binutils-gold curl openssh
