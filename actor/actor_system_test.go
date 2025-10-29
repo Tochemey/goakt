@@ -6981,3 +6981,108 @@ func TestActorSystemRun(t *testing.T) {
 		t.Fatal("expected SIGTERM to be forwarded")
 	}
 }
+
+func TestPeers(t *testing.T) {
+	t.Run("Happy path", func(t *testing.T) {
+		ctx := t.Context()
+		nodePorts := dynaport.Get(3)
+		discoveryPort := nodePorts[0]
+		peersPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		logger := log.DiscardLogger
+		host := "127.0.0.1"
+
+		// define discovered addresses
+		addrs := []string{
+			net.JoinHostPort(host, strconv.Itoa(discoveryPort)),
+		}
+
+		// mock the discovery provider
+		provider := mocksdiscovery.NewProvider(t)
+		provider.EXPECT().ID().Return("test")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		actorSystem, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+			WithCluster(
+				NewClusterConfig().
+					WithKinds(new(MockActor)).
+					WithPartitionCount(9).
+					WithReplicaCount(1).
+					WithPeersPort(peersPort).
+					WithMinimumPeersQuorum(1).
+					WithDiscoveryPort(discoveryPort).
+					WithDiscovery(provider)),
+		)
+		require.NoError(t, err)
+
+		// start the actor system
+		err = actorSystem.Start(ctx)
+		require.NoError(t, err)
+
+		pause.For(time.Second)
+
+		peers, err := actorSystem.Peers(t.Context(), time.Second)
+		require.NoError(t, err)
+		require.Empty(t, peers)
+
+		err = actorSystem.Stop(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("When system has not started", func(t *testing.T) {
+		nodePorts := dynaport.Get(3)
+		discoveryPort := nodePorts[0]
+		peersPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		logger := log.DiscardLogger
+		host := "127.0.0.1"
+
+		// mock the discovery provider
+		provider := mocksdiscovery.NewProvider(t)
+		actorSystem, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+			WithCluster(
+				NewClusterConfig().
+					WithKinds(new(MockActor)).
+					WithPartitionCount(9).
+					WithReplicaCount(1).
+					WithPeersPort(peersPort).
+					WithMinimumPeersQuorum(1).
+					WithDiscoveryPort(discoveryPort).
+					WithDiscovery(provider)),
+		)
+		require.NoError(t, err)
+
+		peers, err := actorSystem.Peers(t.Context(), time.Second)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
+		require.Empty(t, peers)
+	})
+	t.Run("When cluster is enabled", func(t *testing.T) {
+		ctx := context.TODO()
+
+		clusterMock := mockcluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+
+		system.locker.Lock()
+		system.actors = newTree()
+		system.locker.Unlock()
+
+		clusterMock.EXPECT().Peers(mock.Anything).Return(nil, assert.AnError)
+
+		peers, err := system.Peers(ctx, time.Second)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, assert.AnError)
+		require.Empty(t, peers)
+	})
+}
