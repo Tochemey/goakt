@@ -8,6 +8,7 @@ on:
       - "**/renovate.json5"
       - "**/scorecard.yml"
       - "**/stale.yml"
+      - "**/ISSUE_TEMPLATE/**"
 
 permissions:
   contents: read

@@ -11,7 +11,7 @@ assignees: Tochemey
 A clear and concise description of what the bug is.
 
 **How to reproduce it?**
-Kindly provide all the steps to reproduce the bug.
+Kindly list every step required to reproduce the bug. Rather than a code fragment, attach a reproducible sample project and comment the precise location of the problem.
 
 **Expected behavior**
 A clear and concise description of what you expected to happen.
