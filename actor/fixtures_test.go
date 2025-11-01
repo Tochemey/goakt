@@ -1412,6 +1412,30 @@ func MockClusterPeer(t *testing.T, load uint64, metricErr error, opts ...connect
 	}
 }
 
+func MockSingletonClusterReadyActorSystem(t *testing.T) *actorSystem {
+	t.Helper()
+	ports := dynaport.Get(3)
+
+	sys, err := NewActorSystem("spawn-test", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	clusterNode := &discovery.Node{
+		Name:          "spawn-test-node",
+		Host:          "127.0.0.1",
+		DiscoveryPort: ports[0],
+		PeersPort:     ports[1],
+		RemotingPort:  ports[2],
+	}
+
+	actorSys := sys.(*actorSystem)
+	actorSys.started.Store(true)
+	actorSys.clusterEnabled.Store(true)
+	actorSys.remotingEnabled.Store(true)
+	actorSys.clusterNode = clusterNode
+
+	return actorSys
+}
+
 // //////////////////////////////////////// CLUSTER PROVIDERS MOCKS //////////////////////////////////////
 type providerFactory func(t *testing.T, host string, discoveryPort int) discovery.Provider
 

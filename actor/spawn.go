@@ -29,11 +29,14 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"runtime"
+	"sort"
+	"strings"
 
 	"github.com/google/uuid"
 
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/internal/cluster"
+	"github.com/tochemey/goakt/v3/internal/pointer"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/remote"
 )
@@ -69,7 +72,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 	}
 
 	// check some preconditions
-	if err := x.checkSpawnPreconditions(ctx, name, actor, false); err != nil {
+	if err := x.checkSpawnPreconditions(ctx, name, actor, false, nil); err != nil {
 		return nil, err
 	}
 
@@ -106,7 +109,7 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 	actor := newFuncActor(name, receiveFunc, config)
 
 	// check some preconditions
-	if err := x.checkSpawnPreconditions(ctx, name, actor, false); err != nil {
+	if err := x.checkSpawnPreconditions(ctx, name, actor, false, nil); err != nil {
 		return nil, err
 	}
 
@@ -171,7 +174,7 @@ func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opt
 	}
 
 	// check some preconditions
-	if err := x.checkSpawnPreconditions(ctx, name, actor, false); err != nil {
+	if err := x.checkSpawnPreconditions(ctx, name, actor, false, nil); err != nil {
 		return err
 	}
 
@@ -259,7 +262,7 @@ func (x *actorSystem) SpawnRouter(ctx context.Context, poolSize int, routeesKind
 // The cluster singleton is automatically started on the oldest node in the cluster.
 // When the oldest node leaves the cluster unexpectedly, the singleton is restarted on the new oldest node.
 // This is useful for managing shared resources or coordinating tasks that should be handled by a single actor.
-func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Actor) error {
+func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Actor, opts ...ClusterSingletonOption) error {
 	if !x.Running() {
 		return gerrors.ErrActorSystemNotStarted
 	}
@@ -270,19 +273,72 @@ func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Act
 
 	cl := x.getCluster()
 
+	config := newClusterSingletonConfig(opts...)
+	role := strings.TrimSpace(pointer.Deref(config.Role(), ""))
+	if role != "" {
+		return x.spawnSingletonWithRole(ctx, cl, name, actor, role)
+	}
+
 	// only create the singleton actor on the oldest node in the cluster
 	if !cl.IsLeader(ctx) {
 		return x.spawnSingletonOnLeader(ctx, cl, name, actor)
 	}
 
+	return x.spawnSingletonOnLocal(ctx, name, actor, nil)
+}
+
+func (x *actorSystem) spawnSingletonWithRole(ctx context.Context, cl cluster.Cluster, name string, actor Actor, role string) error {
+	// fetch all cluster members
+	members, err := cl.Members(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to fetch cluster members: %w", err)
+	}
+
+	filtered := make([]*cluster.Peer, 0, len(members))
+	for _, peer := range members {
+		if peer.HasRole(role) {
+			filtered = append(filtered, peer)
+		}
+	}
+
+	if len(filtered) == 0 {
+		return fmt.Errorf("no cluster members found with role %s", role)
+	}
+
+	// find the oldest node in the filtered peers
+	sort.Slice(filtered, func(i int, j int) bool {
+		return filtered[i].CreatedAt < filtered[j].CreatedAt
+	})
+
+	leader := filtered[0]
+	if leader.PeerAddress() != x.clusterNode.PeersAddress() {
+		var (
+			actorType = registry.Name(actor)
+			host      = leader.Host
+			port      = leader.RemotingPort
+		)
+
+		return x.remoting.RemoteSpawn(ctx, host, port, &remote.SpawnRequest{
+			Name:      name,
+			Kind:      actorType,
+			Singleton: true,
+			Role:      pointer.To(role),
+		})
+	}
+
+	return x.spawnSingletonOnLocal(ctx, name, actor, pointer.To(role))
+}
+
+func (x *actorSystem) spawnSingletonOnLocal(ctx context.Context, name string, actor Actor, role *string) error {
 	// check some preconditions
-	if err := x.checkSpawnPreconditions(ctx, name, actor, true); err != nil {
+	if err := x.checkSpawnPreconditions(ctx, name, actor, true, role); err != nil {
 		return err
 	}
 
 	pid, err := x.configPID(ctx, name, actor,
 		WithLongLived(),
 		withSingleton(),
+		WithRole(pointer.Deref(role, "")),
 		WithSupervisor(
 			NewSupervisor(
 				WithStrategy(OneForOneStrategy),
@@ -315,4 +371,8 @@ func (x *actorSystem) selectPlacementPeer(ctx context.Context, peers []*cluster.
 	default:
 		return nil, nil
 	}
+}
+
+func kindRole(kind, role string) string {
+	return fmt.Sprintf("%s%s%s", kind, kindRoleSeparator, role)
 }

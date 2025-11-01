@@ -36,7 +36,7 @@ import (
 	"github.com/travisjeffery/go-dynaport"
 
 	"github.com/tochemey/goakt/v3/errors"
-	internalcluster "github.com/tochemey/goakt/v3/internal/cluster"
+	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/log"
@@ -165,10 +165,7 @@ func TestSingletonActor(t *testing.T) {
 		require.Error(t, err)
 		require.ErrorIs(t, err, errors.ErrActorSystemNotStarted)
 	})
-}
-
-func TestActorSystemSpawnSingletonOnLeader(t *testing.T) {
-	t.Run("returns error when fetching peers fails", func(t *testing.T) {
+	t.Run("Returns error when fetching peers fails", func(t *testing.T) {
 		ctx := context.Background()
 		cl := mockcluster.NewCluster(t)
 		rem := mockremote.NewRemoting(t)
@@ -183,14 +180,14 @@ func TestActorSystemSpawnSingletonOnLeader(t *testing.T) {
 		require.ErrorIs(t, err, expectedErr)
 	})
 
-	t.Run("returns error when leader is not found", func(t *testing.T) {
+	t.Run("Returns error when leader is not found", func(t *testing.T) {
 		ctx := context.Background()
 		cl := mockcluster.NewCluster(t)
 		rem := mockremote.NewRemoting(t)
 
 		system := &actorSystem{remoting: rem}
 
-		cl.EXPECT().Peers(mock.Anything).Return([]*internalcluster.Peer{
+		cl.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{
 			{
 				Host:         "127.0.0.1",
 				PeersPort:    1001,
@@ -210,21 +207,21 @@ func TestActorSystemSpawnSingletonOnLeader(t *testing.T) {
 		require.ErrorIs(t, err, errors.ErrLeaderNotFound)
 	})
 
-	t.Run("returns error when remote spawn fails", func(t *testing.T) {
+	t.Run("Returns error when remote spawn fails", func(t *testing.T) {
 		ctx := context.Background()
 		cl := mockcluster.NewCluster(t)
 		rem := mockremote.NewRemoting(t)
 
 		system := &actorSystem{remoting: rem}
 
-		leader := &internalcluster.Peer{
+		leader := &cluster.Peer{
 			Host:         "10.0.0.1",
 			PeersPort:    1111,
 			Coordinator:  true,
 			RemotingPort: 2222,
 		}
 
-		cl.EXPECT().Peers(mock.Anything).Return([]*internalcluster.Peer{
+		cl.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{
 			leader,
 			{
 				Host:         "10.0.0.2",
@@ -254,5 +251,251 @@ func TestActorSystemSpawnSingletonOnLeader(t *testing.T) {
 		err := system.spawnSingletonOnLeader(ctx, cl, name, actor)
 		require.Error(t, err)
 		require.ErrorIs(t, err, expectedErr)
+	})
+	t.Run("When not coordinator delegates to leader", func(t *testing.T) {
+		ctx := context.Background()
+		ports := dynaport.Get(3)
+
+		clusterMock := mockcluster.NewCluster(t)
+		remotingMock := mockremote.NewRemoting(t)
+		system := MockSingletonClusterReadyActorSystem(t)
+		system.remoting = remotingMock
+
+		system.locker.Lock()
+		system.cluster = clusterMock
+		system.locker.Unlock()
+
+		clusterMock.EXPECT().IsLeader(mock.Anything).Return(false).Once()
+
+		leader := &cluster.Peer{
+			Host:          "127.0.0.1",
+			DiscoveryPort: ports[0],
+			PeersPort:     ports[1],
+			RemotingPort:  ports[2],
+			Coordinator:   true,
+		}
+
+		clusterMock.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{leader}, nil).Once()
+		remotingMock.EXPECT().
+			RemoteSpawn(
+				mock.Anything,
+				leader.Host,
+				leader.RemotingPort,
+				mock.MatchedBy(func(req *remote.SpawnRequest) bool {
+					return req != nil &&
+						req.Name == "singleton" &&
+						req.Kind == "actor.mockactor" &&
+						req.Singleton &&
+						req.Role == nil
+				}),
+			).Return(nil).Once()
+
+		err := system.SpawnSingleton(ctx, "singleton", NewMockActor())
+		require.NoError(t, err)
+	})
+	t.Run("With role and member error returns error", func(t *testing.T) {
+		ctx := context.Background()
+		clusterMock := mockcluster.NewCluster(t)
+		remotingMock := mockremote.NewRemoting(t)
+		system := MockSingletonClusterReadyActorSystem(t)
+		system.remoting = remotingMock
+
+		system.locker.Lock()
+		system.cluster = clusterMock
+		system.locker.Unlock()
+
+		expectedErr := fmt.Errorf("cluster unavailable")
+		clusterMock.EXPECT().Members(mock.Anything).Return(nil, expectedErr).Once()
+
+		err := system.spawnSingletonWithRole(ctx, clusterMock, "singleton", NewMockActor(), "blue")
+		require.Error(t, err)
+		require.ErrorContains(t, err, expectedErr.Error())
+	})
+	t.Run("With role and no matching peers", func(t *testing.T) {
+		ctx := context.Background()
+		ports := dynaport.Get(3)
+
+		clusterMock := mockcluster.NewCluster(t)
+		remotingMock := mockremote.NewRemoting(t)
+		system := MockSingletonClusterReadyActorSystem(t)
+		system.remoting = remotingMock
+
+		system.locker.Lock()
+		system.cluster = clusterMock
+		system.locker.Unlock()
+
+		role := "roleA"
+		clusterMock.EXPECT().
+			Members(mock.Anything).
+			Return([]*cluster.Peer{
+				{
+					Host:          "127.0.0.1",
+					DiscoveryPort: ports[0],
+					PeersPort:     ports[1],
+					RemotingPort:  ports[2],
+					Roles:         []string{"search"},
+					CreatedAt:     time.Now().UnixNano(),
+				},
+			}, nil).
+			Once()
+
+		err := system.spawnSingletonWithRole(ctx, clusterMock, "singleton", NewMockActor(), role)
+		require.Error(t, err)
+		require.EqualError(t, err, fmt.Sprintf("no cluster members found with role %s", role))
+	})
+	t.Run("With role and spawn on remote leader", func(t *testing.T) {
+		ctx := context.Background()
+		ports := dynaport.Get(3)
+
+		clusterMock := mockcluster.NewCluster(t)
+		remotingMock := mockremote.NewRemoting(t)
+		system := MockSingletonClusterReadyActorSystem(t)
+		system.remoting = remotingMock
+
+		system.locker.Lock()
+		system.cluster = clusterMock
+		system.locker.Unlock()
+
+		t1 := time.Now().UnixNano()
+		t2 := time.Now().Add(1 * time.Minute).UnixNano()
+		role := "role"
+
+		local := &cluster.Peer{
+			Host:         system.clusterNode.Host,
+			PeersPort:    system.clusterNode.PeersPort,
+			RemotingPort: system.clusterNode.RemotingPort,
+			Roles:        []string{role},
+			CreatedAt:    t2,
+		}
+		remoteLeader := &cluster.Peer{
+			Host:          "127.0.0.1",
+			DiscoveryPort: ports[0],
+			PeersPort:     ports[1],
+			RemotingPort:  ports[2],
+			Roles:         []string{role},
+			CreatedAt:     t1,
+		}
+
+		clusterMock.EXPECT().
+			Members(mock.Anything).
+			Return([]*cluster.Peer{local, remoteLeader}, nil).
+			Once()
+
+		remotingMock.EXPECT().
+			RemoteSpawn(
+				mock.Anything,
+				remoteLeader.Host,
+				remoteLeader.RemotingPort,
+				mock.MatchedBy(func(req *remote.SpawnRequest) bool {
+					return req != nil &&
+						req.Name == "singleton" &&
+						req.Kind == "actor.mockactor" &&
+						req.Singleton &&
+						req.Role != nil &&
+						*req.Role == role
+				}),
+			).Return(nil).Once()
+
+		err := system.spawnSingletonWithRole(ctx, clusterMock, "singleton", NewMockActor(), role)
+		require.NoError(t, err)
+	})
+	t.Run("With role happy path", func(t *testing.T) {
+		ctx := context.Background()
+		ports := dynaport.Get(3)
+		clusterMock := mockcluster.NewCluster(t)
+		remotingMock := mockremote.NewRemoting(t)
+		system := MockSingletonClusterReadyActorSystem(t)
+		system.remoting = remotingMock
+
+		system.locker.Lock()
+		system.cluster = clusterMock
+		system.locker.Unlock()
+
+		t1 := time.Now().UnixNano()
+		t2 := time.Now().Add(1 * time.Minute).UnixNano()
+
+		role := "role"
+		localPeer := &cluster.Peer{
+			Host:         system.clusterNode.Host,
+			PeersPort:    system.clusterNode.PeersPort,
+			RemotingPort: system.clusterNode.RemotingPort,
+			Roles:        []string{role},
+			CreatedAt:    t1,
+		}
+		remotePeer := &cluster.Peer{
+			Host:          "127.0.0.1",
+			DiscoveryPort: ports[0],
+			PeersPort:     ports[1],
+			RemotingPort:  ports[2],
+			Roles:         []string{role},
+			CreatedAt:     t2,
+		}
+
+		clusterMock.EXPECT().
+			Members(mock.Anything).
+			Return([]*cluster.Peer{remotePeer, localPeer}, nil).
+			Once()
+
+		clusterMock.EXPECT().
+			LookupKind(mock.Anything, "actor.mockactor::role").
+			Return("", nil).
+			Once()
+
+		clusterMock.EXPECT().
+			ActorExists(mock.Anything, "singleton").
+			Return(false, nil).
+			Once()
+
+		err := system.spawnSingletonWithRole(ctx, clusterMock, "singleton", NewMockActor(), role)
+		require.NoError(t, err)
+		require.Equal(t, uint64(1), system.actorsCounter.Load())
+	})
+	t.Run("With role based Singleton Actor e2e", func(t *testing.T) {
+		// create a context
+		ctx := context.TODO()
+		// start the NATS server
+		srv := startNatsServer(t)
+
+		roles := []string{"backend", "api", "worker"}
+
+		cl1, sd1 := testNATs(t, srv.Addr().String(), withMockRoles(roles...))
+		require.NotNil(t, cl1)
+		require.NotNil(t, sd1)
+
+		cl2, sd2 := testNATs(t, srv.Addr().String(), withMockRoles(roles...))
+		require.NotNil(t, cl2)
+		require.NotNil(t, sd2)
+
+		cl3, sd3 := testNATs(t, srv.Addr().String())
+		require.NotNil(t, cl3)
+		require.NotNil(t, sd3)
+
+		pause.For(time.Second)
+
+		// create a singleton actor
+		actor := NewMockActor()
+		actorName := "actorID"
+		role := "api"
+		// create a singleton actor
+		err := cl1.SpawnSingleton(ctx, actorName, actor, WithSingletonRole(role))
+		require.NoError(t, err)
+
+		// attempt to create another singleton actor with the same actor
+		err = cl2.SpawnSingleton(ctx, "actorName", actor)
+		require.NoError(t, err)
+
+		err = cl3.SpawnSingleton(ctx, "actor2", actor, WithSingletonRole(role))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), errors.ErrSingletonAlreadyExists.Error())
+
+		// free resources
+		require.NoError(t, cl3.Stop(ctx))
+		require.NoError(t, sd3.Close())
+		require.NoError(t, cl1.Stop(ctx))
+		require.NoError(t, sd1.Close())
+		require.NoError(t, cl2.Stop(ctx))
+		require.NoError(t, sd2.Close())
+		// shutdown the nats server gracefully
+		srv.Shutdown()
 	})
 }

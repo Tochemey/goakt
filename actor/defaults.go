@@ -53,6 +53,8 @@ const (
 	DefaultClusterStateSyncInterval = time.Minute
 	// DefaultGrainRequestTimeout defines the default grain request timeout
 	DefaultGrainRequestTimeout = 5 * time.Second
+
+	kindRoleSeparator = "::"
 )
 
 var (

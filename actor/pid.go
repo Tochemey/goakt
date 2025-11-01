@@ -158,6 +158,10 @@ type PID struct {
 	// (post trigger) if a reinstate just happened. This prevents a race where a pending
 	// passivation proceeds right after the actor has been reinstated by the parent.
 	passivationSkipNext atomic.Bool
+
+	// this is used to specify a role the actor belongs to
+	// this field is optional and will be set when the actor is created with a given role
+	role *string
 }
 
 // newPID creates a new pid
@@ -226,6 +230,39 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 
 	pid.startedAt.Store(time.Now().Unix())
 	return pid, nil
+}
+
+// Role narrows placement to cluster members that advertise the given role.
+//
+// In a clustered deployment, GoAkt uses placement roles to constrain where actors may be
+// started or relocated. When `Role` is non-nil the actor will only be considered for nodes
+// that list the same role; clearing the field makes the actor eligible on any node.
+//
+// ⚠️ Note: This setting has effect only for `SpawnOn` and `SpawnSingleton` requests. Local-only
+// spawns ignore it.
+//
+// Returns:
+//   - *string: a pointer to the role name if one was assigned when the actor
+//     was spawned; nil if the actor is not bound to any role.
+//
+// Notes:
+//   - The value may be nil; callers should check for nil before dereferencing.
+//   - Roles are typically provided via spawn options at creation time.
+//   - The returned pointer should be treated as read-only; copy the value if you
+//     need to store it elsewhere.
+//
+// Example:
+//
+//	if r := pid.Role(); r != nil {
+//	    fmt.Printf("actor pinned to role %q\n", *r)
+//	} else {
+//	    fmt.Println("actor has no role")
+//	}
+func (pid *PID) Role() *string {
+	pid.fieldsLocker.RLock()
+	role := pid.role
+	pid.fieldsLocker.RUnlock()
+	return role
 }
 
 // Dependencies returns a slice containing all dependencies currently registered
@@ -2224,6 +2261,7 @@ func (pid *PID) toWireActor() (*internalpb.Actor, error) {
 		PassivationStrategy: codec.EncodePassivationStrategy(pid.PassivationStrategy()),
 		Dependencies:        dependencies,
 		EnableStash:         pid.stashBox != nil,
+		Role:                pid.Role(),
 	}, nil
 }
 

@@ -22,6 +22,8 @@ message Actor {
   PassivationStrategy passivation_strategy = 5;
   // Specifies the dependencies
   repeated internalpb.Dependency dependencies = 6;
-  //  States whether the actor will require a stash buffer
+  // States whether the actor will require a stash buffer
   bool enable_stash = 7;
+  // Specifies the role the actor belongs to
+  optional string role = 8;
 }

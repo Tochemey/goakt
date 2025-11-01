@@ -136,3 +136,12 @@ func TestWithDependencies(t *testing.T) {
 	actual := pid.Dependency("id")
 	require.True(t, reflect.DeepEqual(actual, dependency))
 }
+
+func TestWithRole(t *testing.T) {
+	pid := &PID{}
+	option := withRole("payments")
+	option(pid)
+	role := pid.Role()
+	require.NotNil(t, role)
+	assert.Equal(t, "payments", *role)
+}

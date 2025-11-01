@@ -126,6 +126,8 @@ type Cluster interface {
 	DeleteJobKey(ctx context.Context, jobID string) error
 	// JobKey retrieves stored job metadata.
 	JobKey(ctx context.Context, jobID string) ([]byte, error)
+	// Members lists all cluster members including the local node.
+	Members(ctx context.Context) ([]*Peer, error)
 }
 
 // cluster implements the Cluster interface backed by an Olric unified
@@ -591,6 +593,25 @@ func (x *cluster) Events() <-chan *Event {
 
 // Peers lists known members of the cluster excluding the local node.
 func (x *cluster) Peers(ctx context.Context) ([]*Peer, error) {
+	members, err := x.Members(ctx)
+	if err != nil {
+		x.logger.Errorf("failed to read cluster peers: %v", err)
+		return nil, err
+	}
+
+	peers := make([]*Peer, 0, len(members))
+	for _, member := range members {
+		if member.PeerAddress() == x.node.PeersAddress() {
+			continue
+		}
+		peers = append(peers, member)
+	}
+
+	return peers, nil
+}
+
+// Members lists all cluster members including the local node.
+func (x *cluster) Members(ctx context.Context) ([]*Peer, error) {
 	if !x.running.Load() {
 		return nil, ErrEngineNotRunning
 	}
@@ -600,15 +621,11 @@ func (x *cluster) Peers(ctx context.Context) ([]*Peer, error) {
 
 	members, err := x.client.Members(ctx)
 	if err != nil {
-		x.logger.Errorf("failed to read cluster peers: %v", err)
 		return nil, err
 	}
 
 	peers := make([]*Peer, 0, len(members))
 	for _, member := range members {
-		if member.Name == x.node.PeersAddress() {
-			continue
-		}
 		node := new(discovery.Node)
 		_ = json.Unmarshal([]byte(member.Meta), node)
 		roles := goset.NewSet(node.Roles...)
@@ -619,6 +636,7 @@ func (x *cluster) Peers(ctx context.Context) ([]*Peer, error) {
 			Coordinator:   member.Coordinator,
 			RemotingPort:  node.RemotingPort,
 			Roles:         roles.ToSlice(),
+			CreatedAt:     member.Birthdate,
 		})
 	}
 	return peers, nil

@@ -47,6 +47,8 @@ type Peer struct {
 	RemotingPort int
 	// Roles represents the peer roles
 	Roles []string
+	// CreatedAt represents the time in nanoseconds the peer was created
+	CreatedAt int64
 }
 
 // PeerAddress returns address the node's peers will use to connect to

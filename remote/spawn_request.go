@@ -93,6 +93,16 @@ type SpawnRequest struct {
 	// When used correctly, the stash buffer is a powerful tool for managing transient states
 	// and preserving actor responsiveness while maintaining orderly message handling.
 	EnableStashing bool
+
+	// Role narrows placement to cluster members that advertise the given role.
+	//
+	// In a clustered deployment, GoAkt uses placement roles to constrain where actors may be
+	// started or relocated. When `Role` is non-nil the actor will only be considered for nodes
+	// that list the same role; clearing the field makes the actor eligible on any node.
+	//
+	// ⚠️ Note: This setting has effect only for `SpawnOn` and `SpawnSingleton` requests. Local-only
+	// spawns ignore it.
+	Role *string
 }
 
 // _ ensures that SpawnRequest implements the validation.Validator interface at compile time.
