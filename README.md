@@ -75,7 +75,7 @@ Before you start, make sure you have these installed:
     ```
     This ensures all dependencies are correctly listed and downloaded.
 
-### Making Contributions
+### Contributions
 
 1. Make your changes in your fork.
 2. Ensure your code adheres to the project's style and passes tests `earthly +test`.
@@ -90,16 +90,10 @@ Prior to submitting a [pull request](https://help.github.com/articles/using-pull
 earthly +test
 ```
 
-## 📦 In Production
+## 💬 Feedback
 
-This project is used in production by the following projects/companies:
-
-- [Modus](https://docs.hypermode.com/modus/overview) by [Hypermode](https://hypermode.com/)
+Kindly use the [issue](https://github.com/Tochemey/goakt/issues/948) to give us your feedback that can help us enhance the framework.
 
 ## 📊 Benchmark
 
 One can find the benchmark tests in this repository: [Benchmark](https://github.com/Tochemey/goakt-examples/tree/main/actor-benchmark)
-
-## 💰 Sponsors
-
-<!-- sponsors --><!-- sponsors -->
