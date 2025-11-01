@@ -38,7 +38,9 @@ type Actor struct {
 	// Specifies the dependencies
 	Dependencies []*Dependency `protobuf:"bytes,6,rep,name=dependencies,proto3" json:"dependencies,omitempty"`
 	// States whether the actor will require a stash buffer
-	EnableStash   bool `protobuf:"varint,7,opt,name=enable_stash,json=enableStash,proto3" json:"enable_stash,omitempty"`
+	EnableStash bool `protobuf:"varint,7,opt,name=enable_stash,json=enableStash,proto3" json:"enable_stash,omitempty"`
+	// Specifies the role the actor belongs to
+	Role          *string `protobuf:"bytes,8,opt,name=role,proto3,oneof" json:"role,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -122,12 +124,19 @@ func (x *Actor) GetEnableStash() bool {
 	return false
 }
 
+func (x *Actor) GetRole() string {
+	if x != nil && x.Role != nil {
+		return *x.Role
+	}
+	return ""
+}
+
 var File_internal_actor_proto protoreflect.FileDescriptor
 
 const file_internal_actor_proto_rawDesc = "" +
 	"\n" +
 	"\x14internal/actor.proto\x12\n" +
-	"internalpb\x1a\x11goakt/goakt.proto\x1a\x19internal/dependency.proto\x1a\x1ainternal/passivation.proto\"\xbf\x02\n" +
+	"internalpb\x1a\x11goakt/goakt.proto\x1a\x19internal/dependency.proto\x1a\x1ainternal/passivation.proto\"\xe1\x02\n" +
 	"\x05Actor\x12*\n" +
 	"\aaddress\x18\x01 \x01(\v2\x10.goaktpb.AddressR\aaddress\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12!\n" +
@@ -135,7 +144,9 @@ const file_internal_actor_proto_rawDesc = "" +
 	"\vrelocatable\x18\x04 \x01(\bR\vrelocatable\x12R\n" +
 	"\x14passivation_strategy\x18\x05 \x01(\v2\x1f.internalpb.PassivationStrategyR\x13passivationStrategy\x12:\n" +
 	"\fdependencies\x18\x06 \x03(\v2\x16.internalpb.DependencyR\fdependencies\x12!\n" +
-	"\fenable_stash\x18\a \x01(\bR\venableStashB\xa3\x01\n" +
+	"\fenable_stash\x18\a \x01(\bR\venableStash\x12\x17\n" +
+	"\x04role\x18\b \x01(\tH\x00R\x04role\x88\x01\x01B\a\n" +
+	"\x05_roleB\xa3\x01\n" +
 	"\x0ecom.internalpbB\n" +
 	"ActorProtoH\x02P\x01Z;github.com/tochemey/goakt/v3/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
 	"Internalpb\xca\x02\n" +
@@ -179,6 +190,7 @@ func file_internal_actor_proto_init() {
 	}
 	file_internal_dependency_proto_init()
 	file_internal_passivation_proto_init()
+	file_internal_actor_proto_msgTypes[0].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

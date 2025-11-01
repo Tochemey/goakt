@@ -557,6 +557,7 @@ func (r *remoting) RemoteSpawn(ctx context.Context, host string, port int, spawn
 			PassivationStrategy: codec.EncodePassivationStrategy(spawnRequest.PassivationStrategy),
 			Dependencies:        dependencies,
 			EnableStash:         spawnRequest.EnableStashing,
+			Role:                spawnRequest.Role,
 		},
 	)
 

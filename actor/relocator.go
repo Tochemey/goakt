@@ -175,6 +175,7 @@ func (r *relocator) spawnRemoteActor(ctx context.Context, actor *internalpb.Acto
 		Dependencies:        dependencies,
 		PassivationStrategy: codec.DecodePassivationStrategy(actor.GetPassivationStrategy()),
 		EnableStashing:      actor.GetEnableStash(),
+		Role:                actor.Role,
 	}
 
 	if err := r.remoting.RemoteSpawn(ctx, remoteHost, remotingPort, spawnRequest); err != nil {
@@ -310,7 +311,7 @@ func (r *relocator) recreateLocally(ctx context.Context, props *internalpb.Actor
 
 	if enforceSingleton && props.GetIsSingleton() {
 		// spawn the singleton actor
-		return r.pid.ActorSystem().SpawnSingleton(ctx, props.GetAddress().GetName(), actor)
+		return r.pid.ActorSystem().SpawnSingleton(ctx, props.GetAddress().GetName(), actor, WithSingletonRole(props.GetRole()))
 	}
 
 	if !props.GetRelocatable() {
@@ -323,6 +324,10 @@ func (r *relocator) recreateLocally(ctx context.Context, props *internalpb.Actor
 
 	if props.GetEnableStash() {
 		spawnOpts = append(spawnOpts, WithStashing())
+	}
+
+	if props.GetRole() != "" {
+		spawnOpts = append(spawnOpts, WithRole(props.GetRole()))
 	}
 
 	if len(props.GetDependencies()) > 0 {

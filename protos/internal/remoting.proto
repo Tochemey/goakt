@@ -132,6 +132,8 @@ message RemoteSpawnRequest {
   repeated internalpb.Dependency dependencies = 8;
   //  States whether the actor will require a stash buffer
   bool enable_stash = 9;
+  // Specifies the role the actor belongs to
+  optional string role = 10;
 }
 
 message RemoteSpawnResponse {}

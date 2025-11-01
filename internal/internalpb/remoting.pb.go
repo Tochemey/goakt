@@ -599,7 +599,9 @@ type RemoteSpawnRequest struct {
 	// Specifies the dependencies
 	Dependencies []*Dependency `protobuf:"bytes,8,rep,name=dependencies,proto3" json:"dependencies,omitempty"`
 	// States whether the actor will require a stash buffer
-	EnableStash   bool `protobuf:"varint,9,opt,name=enable_stash,json=enableStash,proto3" json:"enable_stash,omitempty"`
+	EnableStash bool `protobuf:"varint,9,opt,name=enable_stash,json=enableStash,proto3" json:"enable_stash,omitempty"`
+	// Specifies the role the actor belongs to
+	Role          *string `protobuf:"bytes,10,opt,name=role,proto3,oneof" json:"role,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -695,6 +697,13 @@ func (x *RemoteSpawnRequest) GetEnableStash() bool {
 		return x.EnableStash
 	}
 	return false
+}
+
+func (x *RemoteSpawnRequest) GetRole() string {
+	if x != nil && x.Role != nil {
+		return *x.Role
+	}
+	return ""
 }
 
 type RemoteSpawnResponse struct {
@@ -1137,7 +1146,7 @@ const file_internal_remoting_proto_rawDesc = "" +
 	"\x04host\x18\x01 \x01(\tR\x04host\x12\x12\n" +
 	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\"\x14\n" +
-	"\x12RemoteStopResponse\"\xf2\x02\n" +
+	"\x12RemoteStopResponse\"\x94\x03\n" +
 	"\x12RemoteSpawnRequest\x12\x12\n" +
 	"\x04host\x18\x01 \x01(\tR\x04host\x12\x12\n" +
 	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x1d\n" +
@@ -1149,7 +1158,10 @@ const file_internal_remoting_proto_rawDesc = "" +
 	"\vrelocatable\x18\x06 \x01(\bR\vrelocatable\x12R\n" +
 	"\x14passivation_strategy\x18\a \x01(\v2\x1f.internalpb.PassivationStrategyR\x13passivationStrategy\x12:\n" +
 	"\fdependencies\x18\b \x03(\v2\x16.internalpb.DependencyR\fdependencies\x12!\n" +
-	"\fenable_stash\x18\t \x01(\bR\venableStash\"\x15\n" +
+	"\fenable_stash\x18\t \x01(\bR\venableStash\x12\x17\n" +
+	"\x04role\x18\n" +
+	" \x01(\tH\x00R\x04role\x88\x01\x01B\a\n" +
+	"\x05_role\"\x15\n" +
 	"\x13RemoteSpawnResponse\"T\n" +
 	"\x16RemoteReinstateRequest\x12\x12\n" +
 	"\x04host\x18\x01 \x01(\tR\x04host\x12\x12\n" +
@@ -1282,6 +1294,7 @@ func file_internal_remoting_proto_init() {
 	file_internal_dependency_proto_init()
 	file_internal_grain_proto_init()
 	file_internal_passivation_proto_init()
+	file_internal_remoting_proto_msgTypes[11].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

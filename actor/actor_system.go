@@ -71,6 +71,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v3/internal/locker"
 	"github.com/tochemey/goakt/v3/internal/network"
+	"github.com/tochemey/goakt/v3/internal/pointer"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/internal/ticker"
 	"github.com/tochemey/goakt/v3/internal/validation"
@@ -208,7 +209,7 @@ type ActorSystem interface {
 	// The cluster singleton is automatically started on the oldest node in the cluster.
 	// If the oldest node leaves the cluster, the singleton is restarted on the new oldest node.
 	// This is useful for managing shared resources or coordinating tasks that should be handled by a single actor.
-	SpawnSingleton(ctx context.Context, name string, actor Actor) error
+	SpawnSingleton(ctx context.Context, name string, actor Actor, opts ...ClusterSingletonOption) error
 	// Kill stops a given actor in the system
 	Kill(ctx context.Context, name string) error
 	// ReSpawn recreates a given actor in the system
@@ -1860,6 +1861,10 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 		opts = append(opts, WithStashing())
 	}
 
+	if msg.GetRole() != "" {
+		opts = append(opts, WithRole(msg.GetRole()))
+	}
+
 	// set the dependencies if any
 	if len(msg.GetDependencies()) > 0 {
 		dependencies, err := x.reflection.NewDependencies(msg.GetDependencies()...)
@@ -2585,7 +2590,13 @@ func (x *actorSystem) replicateActors() {
 			ctx := context.Background()
 			cluster := x.getCluster()
 			if actor.GetIsSingleton() {
-				if err := cluster.PutKind(ctx, actor.GetType()); err != nil {
+				kind := actor.GetType()
+				role := actor.GetRole()
+				if role != "" {
+					kind = kindRole(kind, role)
+				}
+
+				if err := cluster.PutKind(ctx, kind); err != nil {
 					x.logger.Warn(err.Error())
 					continue
 				}
@@ -2873,6 +2884,11 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 		pidOpts = append(pidOpts, withStash())
 	}
 
+	// set the role
+	if spawnConfig.role != nil {
+		pidOpts = append(pidOpts, withRole(pointer.Deref(spawnConfig.role, "")))
+	}
+
 	// set the dependencies when defined
 	if spawnConfig.dependencies != nil {
 		for _, dependency := range spawnConfig.dependencies {
@@ -3074,13 +3090,28 @@ func (x *actorSystem) spawnDeadletter(ctx context.Context) error {
 }
 
 // checkSpawnPreconditions make sure before an actor is created some pre-conditions are checks
-func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName string, kind Actor, singleton bool) error {
+func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName string, actor Actor, singleton bool, singletonRole *string) error {
 	// check the existence of the actor given the kind prior to creating it
 	if x.clusterEnabled.Load() {
+		// here we make sure in cluster mode that the given actor is uniquely created
+		exists, err := x.cluster.ActorExists(ctx, actorName)
+		if err != nil {
+			return err
+		}
+		if exists {
+			return gerrors.NewErrActorAlreadyExists(actorName)
+		}
+
 		// a singleton actor must only have one instance at a given time of its kind
 		// in the whole cluster
 		if singleton {
-			id, err := x.cluster.LookupKind(ctx, registry.Name(kind))
+			kind := registry.Name(actor)
+			role := strings.TrimSpace(pointer.Deref(singletonRole, ""))
+			if role != "" {
+				kind = kindRole(kind, role)
+			}
+
+			id, err := x.cluster.LookupKind(ctx, kind)
 			if err != nil {
 				return err
 			}
@@ -3090,15 +3121,6 @@ func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName str
 			}
 
 			return nil
-		}
-
-		// here we make sure in cluster mode that the given actor is uniquely created
-		exists, err := x.cluster.ActorExists(ctx, actorName)
-		if err != nil {
-			return err
-		}
-		if exists {
-			return gerrors.NewErrActorAlreadyExists(actorName)
 		}
 	}
 

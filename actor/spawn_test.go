@@ -237,11 +237,9 @@ func TestSpawn(t *testing.T) {
 
 		// let us sleep for some time to make the actor idle
 		wg := sync.WaitGroup{}
-		wg.Add(1)
-		go func() {
+		wg.Go(func() {
 			pause.For(receivingDelay)
-			wg.Done()
-		}()
+		})
 		// block until timer is up
 		wg.Wait()
 		// let us send a message to the actor
@@ -267,11 +265,9 @@ func TestSpawn(t *testing.T) {
 
 		// let us sleep for some time to make the actor idle
 		wg := sync.WaitGroup{}
-		wg.Add(1)
-		go func() {
+		wg.Go(func() {
 			pause.For(receivingDelay)
-			wg.Done()
-		}()
+		})
 		// block until timer is up
 		wg.Wait()
 		// let us send a message to the actor
