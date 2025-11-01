@@ -35,6 +35,7 @@ jobs:
               - 'internal/**'
               - 'pkg/**'
               - '.github/workflows/build.yml'
+              - '.github/workflows/pr.yml'
 
   build:
     name: Tests on ${{ matrix.os }}
