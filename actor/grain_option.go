@@ -256,7 +256,7 @@ func WithActivationStrategy(strategy ActivationStrategy) GrainOption {
 // WithActivationRole records a required node role for Grain placement.
 //
 // In cluster mode, peers advertise roles via ClusterConfig.WithRoles (e.g. "projection",
-// "payments", "api"). When used with SpawnOn in a cluster-enabled system, the Grain will
+// "payments", "api"). When role is used the Grain will
 // only be activated on nodes that advertise the same role. If multiple nodes match, the
 // placement strategy (RoundRobin, Random, etc.) is applied among those nodes.
 // If clustering is disabled, this option is ignored and the Grain is activated locally.
