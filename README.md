@@ -97,3 +97,7 @@ Kindly use the [issue](https://github.com/Tochemey/goakt/issues/948) to give us 
 ## 📊 Benchmark
 
 One can find the benchmark tests in this repository: [Benchmark](https://github.com/Tochemey/goakt-examples/tree/main/actor-benchmark)
+
+## 💰 Sponsors
+
+<!-- sponsors --><!-- sponsors -->
