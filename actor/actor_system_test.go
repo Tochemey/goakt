@@ -7086,3 +7086,178 @@ func TestPeers(t *testing.T) {
 		require.Empty(t, peers)
 	})
 }
+
+func TestIsLeader(t *testing.T) {
+	t.Run("When actor system is not started", func(t *testing.T) {
+		logger := log.DiscardLogger
+
+		actorSystem, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+		)
+		require.NoError(t, err)
+
+		isLeader, err := actorSystem.IsLeader(t.Context())
+		require.Error(t, err)
+		assert.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
+		assert.False(t, isLeader)
+	})
+	t.Run("When cluster is enabled", func(t *testing.T) {
+		// create a context
+		ctx := context.TODO()
+		// start the NATS server
+		srv := startNatsServer(t)
+
+		// create and start a system cluster
+		node1, sd1 := testNATs(t, srv.Addr().String())
+		require.NotNil(t, node1)
+		require.NotNil(t, sd1)
+
+		// create and start a system cluster
+		node2, sd2 := testNATs(t, srv.Addr().String())
+		require.NotNil(t, node2)
+		require.NotNil(t, sd2)
+
+		// create and start a system cluster
+		node3, sd3 := testNATs(t, srv.Addr().String())
+		require.NotNil(t, node3)
+		require.NotNil(t, sd3)
+
+		pause.For(time.Second)
+		isLeader, err := node1.IsLeader(ctx)
+		require.NoError(t, err)
+		assert.True(t, isLeader)
+
+		isLeader, err = node2.IsLeader(ctx)
+		require.NoError(t, err)
+		assert.False(t, isLeader)
+
+		isLeader, err = node3.IsLeader(ctx)
+		require.NoError(t, err)
+		assert.False(t, isLeader)
+
+		assert.NoError(t, node1.Stop(ctx))
+		assert.NoError(t, node3.Stop(ctx))
+		assert.NoError(t, sd1.Close())
+		assert.NoError(t, sd3.Close())
+		srv.Shutdown()
+	})
+	t.Run("When cluster is disabled", func(t *testing.T) {
+		// create a context
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+
+		actorSystem, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+		)
+		require.NoError(t, err)
+
+		// start the actor system
+		err = actorSystem.Start(ctx)
+		require.NoError(t, err)
+
+		isLeader, err := actorSystem.IsLeader(ctx)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, gerrors.ErrClusterDisabled)
+		assert.False(t, isLeader)
+
+		err = actorSystem.Stop(ctx)
+		require.NoError(t, err)
+	})
+}
+
+func TestLeader(t *testing.T) {
+	t.Run("When cluster is enabled", func(t *testing.T) {
+		// create a context
+		ctx := context.TODO()
+		// start the NATS server
+		srv := startNatsServer(t)
+
+		// create and start a system cluster
+		node1, sd1 := testNATs(t, srv.Addr().String())
+		require.NotNil(t, node1)
+		require.NotNil(t, sd1)
+
+		// create and start a system cluster
+		node2, sd2 := testNATs(t, srv.Addr().String())
+		require.NotNil(t, node2)
+		require.NotNil(t, sd2)
+
+		// create and start a system cluster
+		node3, sd3 := testNATs(t, srv.Addr().String())
+		require.NotNil(t, node3)
+		require.NotNil(t, sd3)
+
+		pause.For(time.Second)
+		leader, err := node1.Leader(ctx)
+		require.NoError(t, err)
+		require.NotNil(t, leader)
+		assert.Equal(t, node1.PeersAddress(), leader.PeersAddress())
+
+		leader, err = node2.Leader(ctx)
+		require.NoError(t, err)
+		require.NotNil(t, leader)
+		assert.Equal(t, node1.PeersAddress(), leader.PeersAddress())
+
+		leader, err = node3.Leader(ctx)
+		require.NoError(t, err)
+		require.NotNil(t, leader)
+		assert.Equal(t, node1.PeersAddress(), leader.PeersAddress())
+
+		assert.NoError(t, node1.Stop(ctx))
+		assert.NoError(t, node3.Stop(ctx))
+		assert.NoError(t, sd1.Close())
+		assert.NoError(t, sd3.Close())
+		srv.Shutdown()
+	})
+	t.Run("When cluster members lookup fails", func(t *testing.T) {
+		ctx := t.Context()
+		clusterMock := mockcluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+
+		clusterMock.EXPECT().Members(mock.Anything).Return(nil, assert.AnError)
+
+		leader, err := system.Leader(ctx)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, assert.AnError)
+		assert.Nil(t, leader)
+	})
+	t.Run("When cluster is disabled", func(t *testing.T) {
+		// create a context
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+
+		actorSystem, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+		)
+		require.NoError(t, err)
+
+		// start the actor system
+		err = actorSystem.Start(ctx)
+		require.NoError(t, err)
+
+		leader, err := actorSystem.Leader(ctx)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, gerrors.ErrClusterDisabled)
+		require.Nil(t, leader)
+
+		err = actorSystem.Stop(ctx)
+		require.NoError(t, err)
+	})
+	t.Run("When actor system not started", func(t *testing.T) {
+		logger := log.DiscardLogger
+		ctx := t.Context()
+
+		actorSystem, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+		)
+		require.NoError(t, err)
+		leader, err := actorSystem.Leader(ctx)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
+		assert.Nil(t, leader)
+	})
+}

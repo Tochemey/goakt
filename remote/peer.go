@@ -24,6 +24,11 @@
 
 package remote
 
+import (
+	"net"
+	"strconv"
+)
+
 // Peer describes a remote node discovered in the cluster and the network
 // endpoints it exposes for discovery, inter-peer coordination, and remoting.
 type Peer struct {
@@ -49,4 +54,18 @@ type Peer struct {
 	// (for example: "frontend", "backend", "shard"). Roles can be used for
 	// routing or placement decisions. An empty list means no special roles.
 	Roles []string
+
+	// CreatedAt is a Unix timestamp (in nanoseconds) indicating when this
+	// peer was first discovered or registered.
+	CreatedAt int64
+}
+
+// PeersAddress returns address the node's peers will use to connect To
+func (peer Peer) PeersAddress() string {
+	return net.JoinHostPort(peer.Host, strconv.Itoa(peer.PeersPort))
+}
+
+// RemotingAddress returns address the node's remoting clients will use to connect To
+func (peer Peer) RemotingAddress() string {
+	return net.JoinHostPort(peer.Host, strconv.Itoa(peer.RemotingPort))
 }

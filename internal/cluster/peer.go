@@ -64,13 +64,18 @@ func (peer Peer) HasRole(role string) bool {
 func ToRemotePeers(peers []*Peer) []*remote.Peer {
 	remotePeers := make([]*remote.Peer, len(peers))
 	for i, peer := range peers {
-		remotePeers[i] = &remote.Peer{
-			Host:          peer.Host,
-			RemotingPort:  peer.RemotingPort,
-			PeersPort:     peer.PeersPort,
-			Roles:         peer.Roles,
-			DiscoveryPort: peer.DiscoveryPort,
-		}
+		remotePeers[i] = ToRemotePeer(peer)
 	}
 	return remotePeers
+}
+
+func ToRemotePeer(peer *Peer) *remote.Peer {
+	return &remote.Peer{
+		Host:          peer.Host,
+		RemotingPort:  peer.RemotingPort,
+		PeersPort:     peer.PeersPort,
+		Roles:         peer.Roles,
+		DiscoveryPort: peer.DiscoveryPort,
+		CreatedAt:     peer.CreatedAt,
+	}
 }

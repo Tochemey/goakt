@@ -610,6 +610,73 @@ type ActorSystem interface {
 	//       // Use p (e.g., p.Address(), p.Host(), p.Port(), etc.)
 	//   }
 	Peers(ctx context.Context, timeout time.Duration) ([]*remote.Peer, error)
+	// IsLeader returns true if the current node is the cluster leader.
+	//
+	// Behavior:
+	//   - Requires cluster mode. If clustering is disabled, false is returned
+	//     along with ErrClusterDisabled.
+	//   - The leader is determined by the underlying cluster engine and may change
+	//     over time as nodes join/leave or failures occur.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation and deadline control.
+	//
+	// Returns:
+	//   - bool: True if this node is the current cluster leader; false otherwise.
+	//   - error: May be non-nil if clustering is disabled or another error occurred.
+	//
+	// Possible Errors:
+	//   - ErrActorSystemNotStarted: The actor system has not been started.
+	//   - ErrClusterDisabled: Clustering is not enabled for this node.
+	//   - context.Canceled: The context was canceled.
+	//   - Other transient errors from the underlying cluster engine.
+	//
+	// Example:
+	//   ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	//   defer cancel()
+	//
+	//   isLeader, err := system.IsLeader(ctx)
+	//   if err != nil {
+	//       system.Logger().Errorf("failed to determine cluster leader status: %v", err)
+	//   } else if isLeader {
+	//       system.Logger().Info("this node is the cluster leader")
+	//   } else {
+	//       system.Logger().Info("this node is not the cluster leader")
+	//   }
+	IsLeader(ctx context.Context) (bool, error)
+	// Leader returns the current cluster leader peer information.
+	//
+	// Behavior:
+	//   - Requires cluster mode. If clustering is disabled, nil is returned
+	//     along with ErrClusterDisabled.
+	//   - The leader is determined by the underlying cluster engine and may change
+	//     over time as nodes join/leave or failures occur.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation and deadline control.
+	//
+	// Returns:
+	//   - *remote.Peer: The current cluster leader peer, or nil if not available.
+	//   - error: May be non-nil if clustering is disabled or another error occurred.
+	//
+	// Possible Errors:
+	//   - ErrActorSystemNotStarted: The actor system has not been started.
+	//   - ErrClusterDisabled: Clustering is not enabled for this node.
+	//   - context.Canceled: The context was canceled.
+	//   - Other transient errors from the underlying cluster engine.
+	// Example:
+	//   ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	//   defer cancel()
+	//
+	//   leader, err := system.Leader(ctx)
+	//   if err != nil {
+	//       system.Logger().Errorf("failed to retrieve cluster leader: %v", err)
+	//   } else if leader != nil {
+	//       system.Logger().Infof("current cluster leader is at %s", leader.Address())
+	//   } else {
+	//       system.Logger().Info("no cluster leader is currently elected")
+	//   }
+	Leader(ctx context.Context) (leader *remote.Peer, err error)
 
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
@@ -1060,6 +1127,108 @@ func (x *actorSystem) Peers(ctx context.Context, timeout time.Duration) ([]*remo
 	}
 
 	return cluster.ToRemotePeers(peers), nil
+}
+
+// IsLeader returns true if the current node is the cluster leader.
+//
+// Behavior:
+//   - Requires cluster mode. If clustering is disabled, false is returned
+//     along with ErrClusterDisabled.
+//   - The leader is determined by the underlying cluster engine and may change
+//     over time as nodes join/leave or failures occur.
+//
+// Parameters:
+//   - ctx: Context for cancellation and deadline control.
+//
+// Returns:
+//   - bool: True if this node is the current cluster leader; false otherwise.
+//   - error: May be non-nil if clustering is disabled or another error occurred.
+//
+// Possible Errors:
+//   - ErrActorSystemNotStarted: The actor system has not been started.
+//   - ErrClusterDisabled: Clustering is not enabled for this node.
+//   - context.Canceled: The context was canceled.
+//   - Other transient errors from the underlying cluster engine.
+//
+// Example:
+//
+//	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+//	defer cancel()
+//
+//	isLeader, err := system.IsLeader(ctx)
+//	if err != nil {
+//	    system.Logger().Errorf("failed to determine cluster leader status: %v", err)
+//	} else if isLeader {
+//	    system.Logger().Info("this node is the cluster leader")
+//	} else {
+//	    system.Logger().Info("this node is not the cluster leader")
+//	}
+func (x *actorSystem) IsLeader(ctx context.Context) (bool, error) {
+	if !x.Running() {
+		return false, gerrors.ErrActorSystemNotStarted
+	}
+
+	if !x.clusterEnabled.Load() {
+		return false, gerrors.ErrClusterDisabled
+	}
+
+	return x.cluster.IsLeader(ctx), nil
+}
+
+// Leader returns the current cluster leader peer information.
+//
+// Behavior:
+//   - Requires cluster mode. If clustering is disabled, nil is returned
+//     along with ErrClusterDisabled.
+//   - The leader is determined by the underlying cluster engine and may change
+//     over time as nodes join/leave or failures occur.
+//
+// Parameters:
+//   - ctx: Context for cancellation and deadline control.
+//
+// Returns:
+//   - *remote.Peer: The current cluster leader peer, or nil if not available.
+//   - error: May be non-nil if clustering is disabled or another error occurred.
+//
+// Possible Errors:
+//   - ErrActorSystemNotStarted: The actor system has not been started.
+//   - ErrClusterDisabled: Clustering is not enabled for this node.
+//   - context.Canceled: The context was canceled.
+//   - Other transient errors from the underlying cluster engine.
+//
+// Example:
+//
+//	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+//	defer cancel()
+//
+//	leader, err := system.Leader(ctx)
+//	if err != nil {
+//	    system.Logger().Errorf("failed to retrieve cluster leader: %v", err)
+//	} else if leader != nil {
+//	    system.Logger().Infof("current cluster leader is at %s", leader.Address())
+//	} else {
+//	    system.Logger().Info("no cluster leader is currently elected")
+//	}
+func (x *actorSystem) Leader(ctx context.Context) (leader *remote.Peer, err error) {
+	if !x.Running() {
+		return nil, gerrors.ErrActorSystemNotStarted
+	}
+
+	if !x.clusterEnabled.Load() {
+		return nil, gerrors.ErrClusterDisabled
+	}
+
+	members, err := x.cluster.Members(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	sort.Slice(members, func(i int, j int) bool {
+		return members[i].CreatedAt < members[j].CreatedAt
+	})
+
+	leader = cluster.ToRemotePeer(members[0])
+	return leader, nil
 }
 
 // DiscoveryPort returns the port used for service discovery.

@@ -1,4 +1,4 @@
-name: Stale
+name: stale
 
 on:
   workflow_dispatch:
