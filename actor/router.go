@@ -148,6 +148,9 @@ func (x *router) broadcast(ctx *ReceiveContext) {
 	case *goaktpb.Broadcast:
 		message = msg
 	case *goaktpb.PanicSignal:
+		// shutdown the routee to free resources
+		ctx.Stop(ctx.Sender())
+		// remove from the routees map
 		delete(x.routeesMap, ctx.Sender().ID())
 		return
 	default:
