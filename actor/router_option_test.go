@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025 Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,42 +24,34 @@
 
 package actor
 
-type nameType int
+import (
+	"testing"
+	"time"
 
-const (
-	routerType nameType = iota
-	rebalancerType
-	rootGuardianType
-	userGuardianType
-	systemGuardianType
-	deathWatchType
-	deadletterType
-	singletonManagerType
-	topicActorType
-	noSenderType
-	peersStatesWriterType
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-const (
-	// eventsTopic defines the events topic
-	eventsTopic = "topic.events"
-
-	reservedNamesPrefix = "GoAkt"
-	routeeNamePrefix    = "Routee"
-)
-
-var (
-	reservedNames = map[nameType]string{
-		routerType:            "GoAktRouter",
-		rebalancerType:        "GoAktRebalancer",
-		rootGuardianType:      "GoAktRootGuardian",
-		userGuardianType:      "GoAktUserGuardian",
-		systemGuardianType:    "GoAktSystemGuardian",
-		deathWatchType:        "GoAktDeathWatch",
-		deadletterType:        "GoAktDeadletter",
-		singletonManagerType:  "GoAktSingletonManager",
-		topicActorType:        "GoAktTopicActor",
-		noSenderType:          "GoAktNoSender",
-		peersStatesWriterType: "GoAktPeerStatesWriter",
-	}
-)
+func TestRouterOption(t *testing.T) {
+	t.Run("WithRoutingStrategy", func(t *testing.T) {
+		router := &router{}
+		option := WithRoutingStrategy(RandomRouting)
+		option.Apply(router)
+		assert.Equal(t, RandomRouting, router.strategy)
+	})
+	t.Run("AsTailChoppingRouter", func(t *testing.T) {
+		router := &router{}
+		option := AsTailChopping(time.Second, time.Second)
+		option.Apply(router)
+		require.Equal(t, tailChoppingRouter, router.kind)
+		assert.Equal(t, time.Second, router.within)
+		assert.Equal(t, time.Second, router.interval)
+	})
+	t.Run("AsScatterGatherFirst", func(t *testing.T) {
+		router := &router{}
+		option := AsScatterGatherFirst(time.Second)
+		option.Apply(router)
+		require.Equal(t, scatterGatherFirstRouter, router.kind)
+		assert.Equal(t, time.Second, router.within)
+	})
+}
