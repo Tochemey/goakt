@@ -231,3 +231,11 @@ message PausePassivation {}
 // This will no-op if the actor does not have passivation enabled.
 // If the actor is not created with a custom passivation timeout, it will use the default passivation timeout.
 message ResumePassivation {}
+
+// StatusFailure is used to indicate a failure status with an error message
+message StatusFailure {
+  // Specifies the error message
+  string error = 1;
+  // Specifies the actual message that caused the failure
+  google.protobuf.Any message = 2;
+}

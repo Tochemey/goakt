@@ -165,6 +165,15 @@ var (
 
 	// ErrShutdownForbidden is returned when an attempt is made to shutdown a system actor while the actor system is running.
 	ErrShutdownForbidden = errors.New("shutdown forbidden for this actor")
+
+	// ErrInvalidRouterPoolSize is returned when a router is configured with a pool size less than or equal to zero.
+	ErrInvalidRouterPoolSize = errors.New("invalid router pool size, must be greater than zero")
+
+	// ErrTailChopingRouterMisconfigured is returned when a tail-chopping router is misconfigured.
+	ErrTailChopingRouterMisconfigured = errors.New("tail-chopping router misconfigured: interval and within must be greater than zero")
+
+	// ErrScatterGatherFirstRouterMisconfigured is returned when a scatter-gather-first router is misconfigured.
+	ErrScatterGatherFirstRouterMisconfigured = errors.New("scatter-gather router misconfigured: within must be greater than zero")
 )
 
 // NewErrInvalidPassivationStrategy formats an error with ErrInvalidPassivationStrategy

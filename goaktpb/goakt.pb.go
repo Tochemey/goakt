@@ -1351,6 +1351,61 @@ func (*ResumePassivation) Descriptor() ([]byte, []int) {
 	return file_goakt_goakt_proto_rawDescGZIP(), []int{23}
 }
 
+// StatusFailure is used to indicate a failure status with an error message
+type StatusFailure struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the error message
+	Error string `protobuf:"bytes,1,opt,name=error,proto3" json:"error,omitempty"`
+	// Specifies the actual message that caused the failure
+	Message       *anypb.Any `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StatusFailure) Reset() {
+	*x = StatusFailure{}
+	mi := &file_goakt_goakt_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StatusFailure) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StatusFailure) ProtoMessage() {}
+
+func (x *StatusFailure) ProtoReflect() protoreflect.Message {
+	mi := &file_goakt_goakt_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StatusFailure.ProtoReflect.Descriptor instead.
+func (*StatusFailure) Descriptor() ([]byte, []int) {
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *StatusFailure) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *StatusFailure) GetMessage() *anypb.Any {
+	if x != nil {
+		return x.Message
+	}
+	return nil
+}
+
 var File_goakt_goakt_proto protoreflect.FileDescriptor
 
 const file_goakt_goakt_proto_rawDesc = "" +
@@ -1430,7 +1485,10 @@ const file_goakt_goakt_proto_rawDesc = "" +
 	"\x06reason\x18\x02 \x01(\tR\x06reason\x128\n" +
 	"\ttimestamp\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\"\x12\n" +
 	"\x10PausePassivation\"\x13\n" +
-	"\x11ResumePassivationB\x85\x01\n" +
+	"\x11ResumePassivation\"U\n" +
+	"\rStatusFailure\x12\x14\n" +
+	"\x05error\x18\x01 \x01(\tR\x05error\x12.\n" +
+	"\amessage\x18\x02 \x01(\v2\x14.google.protobuf.AnyR\amessageB\x85\x01\n" +
 	"\vcom.goaktpbB\n" +
 	"GoaktProtoH\x02P\x01Z,github.com/tochemey/goakt/v3/goaktpb;goaktpb\xa2\x02\x03GXX\xaa\x02\aGoaktpb\xca\x02\aGoaktpb\xe2\x02\x13Goaktpb\\GPBMetadata\xea\x02\aGoaktpbb\x06proto3"
 
@@ -1446,7 +1504,7 @@ func file_goakt_goakt_proto_rawDescGZIP() []byte {
 	return file_goakt_goakt_proto_rawDescData
 }
 
-var file_goakt_goakt_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
+var file_goakt_goakt_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
 var file_goakt_goakt_proto_goTypes = []any{
 	(*Address)(nil),               // 0: goaktpb.Address
 	(*Deadletter)(nil),            // 1: goaktpb.Deadletter
@@ -1472,43 +1530,45 @@ var file_goakt_goakt_proto_goTypes = []any{
 	(*PanicSignal)(nil),           // 21: goaktpb.PanicSignal
 	(*PausePassivation)(nil),      // 22: goaktpb.PausePassivation
 	(*ResumePassivation)(nil),     // 23: goaktpb.ResumePassivation
-	(*anypb.Any)(nil),             // 24: google.protobuf.Any
-	(*timestamppb.Timestamp)(nil), // 25: google.protobuf.Timestamp
+	(*StatusFailure)(nil),         // 24: goaktpb.StatusFailure
+	(*anypb.Any)(nil),             // 25: google.protobuf.Any
+	(*timestamppb.Timestamp)(nil), // 26: google.protobuf.Timestamp
 }
 var file_goakt_goakt_proto_depIdxs = []int32{
 	0,  // 0: goaktpb.Address.parent:type_name -> goaktpb.Address
 	0,  // 1: goaktpb.Deadletter.sender:type_name -> goaktpb.Address
 	0,  // 2: goaktpb.Deadletter.receiver:type_name -> goaktpb.Address
-	24, // 3: goaktpb.Deadletter.message:type_name -> google.protobuf.Any
-	25, // 4: goaktpb.Deadletter.send_time:type_name -> google.protobuf.Timestamp
+	25, // 3: goaktpb.Deadletter.message:type_name -> google.protobuf.Any
+	26, // 4: goaktpb.Deadletter.send_time:type_name -> google.protobuf.Timestamp
 	0,  // 5: goaktpb.ActorStarted.address:type_name -> goaktpb.Address
-	25, // 6: goaktpb.ActorStarted.started_at:type_name -> google.protobuf.Timestamp
+	26, // 6: goaktpb.ActorStarted.started_at:type_name -> google.protobuf.Timestamp
 	0,  // 7: goaktpb.ActorStopped.address:type_name -> goaktpb.Address
-	25, // 8: goaktpb.ActorStopped.stopped_at:type_name -> google.protobuf.Timestamp
+	26, // 8: goaktpb.ActorStopped.stopped_at:type_name -> google.protobuf.Timestamp
 	0,  // 9: goaktpb.ActorPassivated.address:type_name -> goaktpb.Address
-	25, // 10: goaktpb.ActorPassivated.passivated_at:type_name -> google.protobuf.Timestamp
+	26, // 10: goaktpb.ActorPassivated.passivated_at:type_name -> google.protobuf.Timestamp
 	0,  // 11: goaktpb.ActorChildCreated.address:type_name -> goaktpb.Address
 	0,  // 12: goaktpb.ActorChildCreated.parent:type_name -> goaktpb.Address
-	25, // 13: goaktpb.ActorChildCreated.created_at:type_name -> google.protobuf.Timestamp
+	26, // 13: goaktpb.ActorChildCreated.created_at:type_name -> google.protobuf.Timestamp
 	0,  // 14: goaktpb.ActorRestarted.address:type_name -> goaktpb.Address
-	25, // 15: goaktpb.ActorRestarted.restarted_at:type_name -> google.protobuf.Timestamp
+	26, // 15: goaktpb.ActorRestarted.restarted_at:type_name -> google.protobuf.Timestamp
 	0,  // 16: goaktpb.ActorSuspended.address:type_name -> goaktpb.Address
-	25, // 17: goaktpb.ActorSuspended.suspended_at:type_name -> google.protobuf.Timestamp
+	26, // 17: goaktpb.ActorSuspended.suspended_at:type_name -> google.protobuf.Timestamp
 	0,  // 18: goaktpb.ActorReinstated.address:type_name -> goaktpb.Address
-	25, // 19: goaktpb.ActorReinstated.reinstated_at:type_name -> google.protobuf.Timestamp
-	25, // 20: goaktpb.NodeJoined.timestamp:type_name -> google.protobuf.Timestamp
-	25, // 21: goaktpb.NodeLeft.timestamp:type_name -> google.protobuf.Timestamp
+	26, // 19: goaktpb.ActorReinstated.reinstated_at:type_name -> google.protobuf.Timestamp
+	26, // 20: goaktpb.NodeJoined.timestamp:type_name -> google.protobuf.Timestamp
+	26, // 21: goaktpb.NodeLeft.timestamp:type_name -> google.protobuf.Timestamp
 	0,  // 22: goaktpb.Terminated.address:type_name -> goaktpb.Address
-	25, // 23: goaktpb.Terminated.terminated_at:type_name -> google.protobuf.Timestamp
-	24, // 24: goaktpb.Broadcast.message:type_name -> google.protobuf.Any
-	24, // 25: goaktpb.Publish.message:type_name -> google.protobuf.Any
-	24, // 26: goaktpb.PanicSignal.message:type_name -> google.protobuf.Any
-	25, // 27: goaktpb.PanicSignal.timestamp:type_name -> google.protobuf.Timestamp
-	28, // [28:28] is the sub-list for method output_type
-	28, // [28:28] is the sub-list for method input_type
-	28, // [28:28] is the sub-list for extension type_name
-	28, // [28:28] is the sub-list for extension extendee
-	0,  // [0:28] is the sub-list for field type_name
+	26, // 23: goaktpb.Terminated.terminated_at:type_name -> google.protobuf.Timestamp
+	25, // 24: goaktpb.Broadcast.message:type_name -> google.protobuf.Any
+	25, // 25: goaktpb.Publish.message:type_name -> google.protobuf.Any
+	25, // 26: goaktpb.PanicSignal.message:type_name -> google.protobuf.Any
+	26, // 27: goaktpb.PanicSignal.timestamp:type_name -> google.protobuf.Timestamp
+	25, // 28: goaktpb.StatusFailure.message:type_name -> google.protobuf.Any
+	29, // [29:29] is the sub-list for method output_type
+	29, // [29:29] is the sub-list for method input_type
+	29, // [29:29] is the sub-list for extension type_name
+	29, // [29:29] is the sub-list for extension extendee
+	0,  // [0:29] is the sub-list for field type_name
 }
 
 func init() { file_goakt_goakt_proto_init() }
@@ -1522,7 +1582,7 @@ func file_goakt_goakt_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_goakt_goakt_proto_rawDesc), len(file_goakt_goakt_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   24,
+			NumMessages:   25,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
