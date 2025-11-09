@@ -489,6 +489,155 @@ func (x *MockRouter) PostStop(*Context) error {
 	return nil
 }
 
+type MockRoutee struct {
+	counter int
+	logger  log.Logger
+}
+
+var _ Actor = (*MockRoutee)(nil)
+
+func (x *MockRoutee) PreStart(*Context) error {
+	x.logger = log.DiscardLogger
+	return nil
+}
+
+func (x *MockRoutee) Receive(ctx *ReceiveContext) {
+	switch msg := ctx.Message().(type) {
+	case *testpb.TestLog:
+		x.counter++
+		x.logger.Infof("Got message: %s", msg.GetText())
+	case *testpb.TestGetCount:
+		x.counter++
+		ctx.Response(&testpb.TestCount{Value: int32(x.counter)})
+	case *testpb.TestSum:
+		if msg.Delay != nil {
+			wg := sync.WaitGroup{}
+			wg.Go(func() {
+				pause.For(msg.GetDelay().AsDuration())
+			})
+			wg.Wait()
+		}
+
+		sum := msg.GetA() + msg.GetB()
+		ctx.Response(&testpb.TestSumResult{Result: sum})
+	default:
+		ctx.Unhandled()
+	}
+}
+
+func (x *MockRoutee) PostStop(*Context) error {
+	return nil
+}
+
+type BlockingRoutee struct{}
+
+var _ Actor = (*BlockingRoutee)(nil)
+
+func (b *BlockingRoutee) PreStart(*Context) error {
+	return nil
+}
+
+func (b *BlockingRoutee) Receive(ctx *ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *testpb.TestSum:
+		pause.For(10 * time.Second)
+	default:
+		ctx.Unhandled()
+	}
+}
+
+func (b *BlockingRoutee) PostStop(*Context) error {
+	return nil
+}
+
+type MockSum struct {
+	sum          int64
+	failureCount int32
+}
+
+var _ Actor = (*MockSum)(nil)
+
+func NewMockSum() *MockSum {
+	return &MockSum{}
+}
+
+func (m *MockSum) PostStop(*Context) error {
+	return nil
+}
+
+func (m *MockSum) PreStart(*Context) error {
+	return nil
+}
+
+func (m *MockSum) Receive(ctx *ReceiveContext) {
+	switch msg := ctx.Message().(type) {
+	case *testpb.TestSumResult:
+		m.sum = msg.GetResult()
+	case *testpb.TestGetSumResult:
+		ctx.Response(&testpb.TestSumResult{Result: m.sum})
+	case *goaktpb.StatusFailure:
+		m.failureCount++
+	case *testpb.TestGetCount:
+		ctx.Response(&testpb.TestCount{Value: m.failureCount})
+	}
+}
+
+type TailChopProbe struct {
+	sum           atomic.Int64
+	failures      atomic.Int32
+	failureNotifs chan struct{}
+}
+
+var _ Actor = (*TailChopProbe)(nil)
+
+func NewTailChopProbe() *TailChopProbe {
+	return &TailChopProbe{
+		failureNotifs: make(chan struct{}, 1),
+	}
+}
+
+func (x *TailChopProbe) PreStart(*Context) error {
+	return nil
+}
+
+func (x *TailChopProbe) PostStop(*Context) error {
+	return nil
+}
+
+func (x *TailChopProbe) Receive(ctx *ReceiveContext) {
+	switch msg := ctx.Message().(type) {
+	case *testpb.TestSumResult:
+		x.sum.Store(msg.GetResult())
+	case *goaktpb.StatusFailure:
+		x.failures.Inc()
+		select {
+		case x.failureNotifs <- struct{}{}:
+		default:
+		}
+	case *testpb.TestGetSumResult:
+		ctx.Response(&testpb.TestSumResult{Result: x.sum.Load()})
+	case *testpb.TestGetCount:
+		ctx.Response(&testpb.TestCount{Value: x.failures.Load()})
+	}
+}
+
+func (x *TailChopProbe) WaitForFailure(timeout time.Duration) bool {
+	select {
+	case <-x.failureNotifs:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
+
+func (x *TailChopProbe) FailureCount() int32 {
+	return x.failures.Load()
+}
+
+func (x *TailChopProbe) Sum() int64 {
+	return x.sum.Load()
+}
+
 func extractMessage(bytes []byte) (string, error) {
 	// a map container to decode the JSON structure into
 	c := make(map[string]json.RawMessage)

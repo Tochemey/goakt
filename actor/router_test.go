@@ -34,6 +34,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/tochemey/goakt/v3/errors"
@@ -48,7 +49,7 @@ func TestRouter(t *testing.T) {
 		ctx := context.TODO()
 		logger := log.DiscardLogger
 		system, err := NewActorSystem(
-			"testSystem",
+			"test",
 			WithLogger(logger))
 
 		require.NoError(t, err)
@@ -58,7 +59,7 @@ func TestRouter(t *testing.T) {
 
 		pause.For(time.Second)
 
-		routeesKind := new(MockRouter)
+		routeesKind := new(MockRoutee)
 		poolSize := 2
 		routingStrategy := FanOutRouting
 		router, err := system.SpawnRouter(ctx, poolSize, routeesKind, WithRoutingStrategy(routingStrategy))
@@ -91,8 +92,7 @@ func TestRouter(t *testing.T) {
 		reply, err := Ask(ctx, workerOneRef, new(testpb.TestGetCount), time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
-		assert.True(t, proto.Equal(expected, reply))
-
+		require.True(t, proto.Equal(expected, reply))
 		reply, err = Ask(ctx, workerTwoRef, new(testpb.TestGetCount), time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
@@ -116,7 +116,7 @@ func TestRouter(t *testing.T) {
 
 		pause.For(time.Second)
 
-		routeesKind := new(MockRouter)
+		routeesKind := new(MockRoutee)
 		poolSize := 2
 		routingStrategy := FanOutRouting
 		router, err := system.SpawnRouter(ctx, poolSize, routeesKind, WithRoutingStrategy(routingStrategy))
@@ -179,7 +179,7 @@ func TestRouter(t *testing.T) {
 
 		pause.For(time.Second)
 
-		routeesKind := new(MockRouter)
+		routeesKind := new(MockRoutee)
 		poolSize := 1
 		routingStrategy := RoundRobinRouting
 		router, err := system.SpawnRouter(ctx, poolSize, routeesKind, WithRoutingStrategy(routingStrategy))
@@ -233,7 +233,7 @@ func TestRouter(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, consumer)
 
-		routeesKind := new(MockRouter)
+		routeesKind := new(MockRoutee)
 		poolSize := 1
 		routingStrategy := RoundRobinRouting
 		router, err := system.SpawnRouter(ctx, poolSize, routeesKind, WithRoutingStrategy(routingStrategy))
@@ -295,7 +295,7 @@ func TestRouter(t *testing.T) {
 
 		pause.For(time.Second)
 
-		routeesKind := new(MockRouter)
+		routeesKind := new(MockRoutee)
 		poolSize := 1
 		routingStrategy := RandomRouting
 		router, err := system.SpawnRouter(ctx, poolSize, routeesKind, WithRoutingStrategy(routingStrategy))
@@ -328,5 +328,173 @@ func TestRouter(t *testing.T) {
 		t.Cleanup(func() {
 			assert.NoError(t, system.Stop(ctx))
 		})
+	})
+
+	t.Run("As TailChopping router", func(t *testing.T) {
+		ctx := t.Context()
+		logger := log.DiscardLogger
+		system, err := NewActorSystem(
+			"testSystem",
+			WithLogger(logger))
+
+		require.NoError(t, err)
+		require.NotNil(t, system)
+
+		require.NoError(t, system.Start(ctx))
+
+		pause.For(time.Second)
+
+		summationActor, err := system.Spawn(ctx, "summation", NewMockSum())
+		require.NoError(t, err)
+		require.NotNil(t, summationActor)
+
+		poolSize := 2
+		router, err := system.SpawnRouter(ctx, poolSize, new(MockRoutee), AsTailChopping(2*time.Second, 20*time.Millisecond))
+		require.NoError(t, err)
+		require.NotNil(t, router)
+
+		pause.For(time.Second)
+
+		// send a broadcast message to the router
+		summation := &testpb.TestSum{A: 10, B: 20}
+		message, _ := anypb.New(summation)
+		err = summationActor.Tell(ctx, router, &goaktpb.Broadcast{Message: message})
+		require.NoError(t, err)
+
+		expected := &testpb.TestSumResult{Result: 30}
+		require.Eventually(t, func() bool {
+			reply, err := Ask(ctx, summationActor, new(testpb.TestGetSumResult), time.Second)
+			if err != nil {
+				return false
+			}
+			sum, ok := reply.(*testpb.TestSumResult)
+			if !ok {
+				return false
+			}
+			return proto.Equal(expected, sum)
+		}, 5*time.Second, 100*time.Millisecond, "expected sum result to match")
+
+		assert.NoError(t, system.Stop(ctx))
+	})
+
+	t.Run("As ScatterGatherFirst router", func(t *testing.T) {
+		ctx := t.Context()
+		logger := log.DiscardLogger
+		system, err := NewActorSystem(
+			"testSystem",
+			WithLogger(logger))
+
+		require.NoError(t, err)
+		require.NotNil(t, system)
+
+		require.NoError(t, system.Start(ctx))
+
+		pause.For(time.Second)
+
+		probe := NewTailChopProbe()
+		summationActor, err := system.Spawn(ctx, "summation", probe)
+		require.NoError(t, err)
+		require.NotNil(t, summationActor)
+
+		poolSize := 2
+		router, err := system.SpawnRouter(ctx, poolSize, new(MockRoutee), AsScatterGatherFirst(2*time.Second))
+		require.NoError(t, err)
+		require.NotNil(t, router)
+
+		pause.For(time.Second)
+
+		// send a broadcast message to the router
+		summation := &testpb.TestSum{A: 10, B: 20}
+		message, _ := anypb.New(summation)
+		err = summationActor.Tell(ctx, router, &goaktpb.Broadcast{Message: message})
+		require.NoError(t, err)
+
+		pause.For(3 * time.Second)
+		expected := &testpb.TestSumResult{Result: 30}
+
+		reply, err := Ask(ctx, summationActor, new(testpb.TestGetSumResult), time.Second)
+		require.NoError(t, err)
+		require.NotNil(t, reply)
+		assert.True(t, proto.Equal(expected, reply))
+
+		assert.NoError(t, system.Stop(ctx))
+	})
+	t.Run("As ScatterGatherFirst router with StatusFailure", func(t *testing.T) {
+		ctx := t.Context()
+		logger := log.DiscardLogger
+		system, err := NewActorSystem(
+			"testSystem",
+			WithLogger(logger))
+
+		require.NoError(t, err)
+		require.NotNil(t, system)
+
+		require.NoError(t, system.Start(ctx))
+
+		pause.For(time.Second)
+
+		probe := NewTailChopProbe()
+		summationActor, err := system.Spawn(ctx, "summation", probe)
+		require.NoError(t, err)
+		require.NotNil(t, summationActor)
+
+		poolSize := 2
+		router, err := system.SpawnRouter(ctx, poolSize, new(BlockingRoutee), AsScatterGatherFirst(2*time.Second))
+		require.NoError(t, err)
+		require.NotNil(t, router)
+
+		pause.For(time.Second)
+
+		// send a broadcast message to the router
+		summation := &testpb.TestSum{A: 10, B: 20}
+		message, _ := anypb.New(summation)
+		err = summationActor.Tell(ctx, router, &goaktpb.Broadcast{Message: message})
+		require.NoError(t, err)
+
+		require.True(t, probe.WaitForFailure(5*time.Second), "expected status failure")
+		assert.EqualValues(t, 0, probe.Sum())
+		assert.EqualValues(t, 1, probe.FailureCount())
+
+		assert.NoError(t, system.Stop(ctx))
+	})
+
+	t.Run("As TailChopping router with StatusFailure", func(t *testing.T) {
+		ctx := t.Context()
+		logger := log.DiscardLogger
+		system, err := NewActorSystem(
+			"testSystem",
+			WithLogger(logger))
+
+		require.NoError(t, err)
+		require.NotNil(t, system)
+
+		require.NoError(t, system.Start(ctx))
+
+		pause.For(time.Second)
+
+		probe := NewTailChopProbe()
+		summationActor, err := system.Spawn(ctx, "summation", probe)
+		require.NoError(t, err)
+		require.NotNil(t, summationActor)
+
+		poolSize := 2
+		router, err := system.SpawnRouter(ctx, poolSize, new(MockRoutee), AsTailChopping(2*time.Second, 20*time.Millisecond))
+		require.NoError(t, err)
+		require.NotNil(t, router)
+
+		pause.For(time.Second)
+
+		// send a broadcast message to the router
+		summation := &testpb.TestSum{A: 10, B: 20, Delay: durationpb.New(3 * time.Second)}
+		message, _ := anypb.New(summation)
+		err = summationActor.Tell(ctx, router, &goaktpb.Broadcast{Message: message})
+		require.NoError(t, err)
+
+		pause.For(3 * time.Second)
+		require.True(t, probe.WaitForFailure(5*time.Second), "expected status failure (sum=%d failures=%d)", probe.Sum(), probe.FailureCount())
+		assert.EqualValues(t, 0, probe.Sum())
+		assert.EqualValues(t, 1, probe.FailureCount())
+
+		assert.NoError(t, system.Stop(ctx))
 	})
 }

@@ -14,6 +14,7 @@ import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	anypb "google.golang.org/protobuf/types/known/anypb"
+	durationpb "google.golang.org/protobuf/types/known/durationpb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -1439,11 +1440,151 @@ func (x *TestMessage) GetPriority() int64 {
 	return 0
 }
 
+type TestSum struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	A             int64                  `protobuf:"varint,1,opt,name=a,proto3" json:"a,omitempty"`
+	B             int64                  `protobuf:"varint,2,opt,name=b,proto3" json:"b,omitempty"`
+	Delay         *durationpb.Duration   `protobuf:"bytes,3,opt,name=delay,proto3,oneof" json:"delay,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TestSum) Reset() {
+	*x = TestSum{}
+	mi := &file_test_test_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TestSum) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TestSum) ProtoMessage() {}
+
+func (x *TestSum) ProtoReflect() protoreflect.Message {
+	mi := &file_test_test_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TestSum.ProtoReflect.Descriptor instead.
+func (*TestSum) Descriptor() ([]byte, []int) {
+	return file_test_test_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *TestSum) GetA() int64 {
+	if x != nil {
+		return x.A
+	}
+	return 0
+}
+
+func (x *TestSum) GetB() int64 {
+	if x != nil {
+		return x.B
+	}
+	return 0
+}
+
+func (x *TestSum) GetDelay() *durationpb.Duration {
+	if x != nil {
+		return x.Delay
+	}
+	return nil
+}
+
+type TestSumResult struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Result        int64                  `protobuf:"varint,1,opt,name=result,proto3" json:"result,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TestSumResult) Reset() {
+	*x = TestSumResult{}
+	mi := &file_test_test_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TestSumResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TestSumResult) ProtoMessage() {}
+
+func (x *TestSumResult) ProtoReflect() protoreflect.Message {
+	mi := &file_test_test_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TestSumResult.ProtoReflect.Descriptor instead.
+func (*TestSumResult) Descriptor() ([]byte, []int) {
+	return file_test_test_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *TestSumResult) GetResult() int64 {
+	if x != nil {
+		return x.Result
+	}
+	return 0
+}
+
+type TestGetSumResult struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TestGetSumResult) Reset() {
+	*x = TestGetSumResult{}
+	mi := &file_test_test_proto_msgTypes[36]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TestGetSumResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TestGetSumResult) ProtoMessage() {}
+
+func (x *TestGetSumResult) ProtoReflect() protoreflect.Message {
+	mi := &file_test_test_proto_msgTypes[36]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TestGetSumResult.ProtoReflect.Descriptor instead.
+func (*TestGetSumResult) Descriptor() ([]byte, []int) {
+	return file_test_test_proto_rawDescGZIP(), []int{36}
+}
+
 var File_test_test_proto protoreflect.FileDescriptor
 
 const file_test_test_proto_rawDesc = "" +
 	"\n" +
-	"\x0ftest/test.proto\x12\x06testpb\x1a\x19google/protobuf/any.proto\"\v\n" +
+	"\x0ftest/test.proto\x12\x06testpb\x1a\x19google/protobuf/any.proto\x1a\x1egoogle/protobuf/duration.proto\"\v\n" +
 	"\tTestReply\"\v\n" +
 	"\tTestPanic\"\x10\n" +
 	"\x0eTestPanicError\"\r\n" +
@@ -1503,7 +1644,15 @@ const file_test_test_proto_rawDesc = "" +
 	"\x12TestClusterForward\"Y\n" +
 	"\vTestMessage\x12.\n" +
 	"\amessage\x18\x01 \x01(\v2\x14.google.protobuf.AnyR\amessage\x12\x1a\n" +
-	"\bpriority\x18\x02 \x01(\x03R\bpriorityB\x80\x01\n" +
+	"\bpriority\x18\x02 \x01(\x03R\bpriority\"e\n" +
+	"\aTestSum\x12\f\n" +
+	"\x01a\x18\x01 \x01(\x03R\x01a\x12\f\n" +
+	"\x01b\x18\x02 \x01(\x03R\x01b\x124\n" +
+	"\x05delay\x18\x03 \x01(\v2\x19.google.protobuf.DurationH\x00R\x05delay\x88\x01\x01B\b\n" +
+	"\x06_delay\"'\n" +
+	"\rTestSumResult\x12\x16\n" +
+	"\x06result\x18\x01 \x01(\x03R\x06result\"\x12\n" +
+	"\x10TestGetSumResultB\x80\x01\n" +
 	"\n" +
 	"com.testpbB\tTestProtoH\x02P\x01Z-github.com/tochemey/goakt/v3/test/data;testpb\xa2\x02\x03TXX\xaa\x02\x06Testpb\xca\x02\x06Testpb\xe2\x02\x12Testpb\\GPBMetadata\xea\x02\x06Testpbb\x06proto3"
 
@@ -1519,51 +1668,56 @@ func file_test_test_proto_rawDescGZIP() []byte {
 	return file_test_test_proto_rawDescData
 }
 
-var file_test_test_proto_msgTypes = make([]protoimpl.MessageInfo, 34)
+var file_test_test_proto_msgTypes = make([]protoimpl.MessageInfo, 37)
 var file_test_test_proto_goTypes = []any{
-	(*TestReply)(nil),          // 0: testpb.TestReply
-	(*TestPanic)(nil),          // 1: testpb.TestPanic
-	(*TestPanicError)(nil),     // 2: testpb.TestPanicError
-	(*TestTimeout)(nil),        // 3: testpb.TestTimeout
-	(*Reply)(nil),              // 4: testpb.Reply
-	(*TestSend)(nil),           // 5: testpb.TestSend
-	(*TestRemoteSend)(nil),     // 6: testpb.TestRemoteSend
-	(*Account)(nil),            // 7: testpb.Account
-	(*CreateAccount)(nil),      // 8: testpb.CreateAccount
-	(*CreditAccount)(nil),      // 9: testpb.CreditAccount
-	(*AccountCreated)(nil),     // 10: testpb.AccountCreated
-	(*AccountCredited)(nil),    // 11: testpb.AccountCredited
-	(*DebitAccount)(nil),       // 12: testpb.DebitAccount
-	(*AccountDebited)(nil),     // 13: testpb.AccountDebited
-	(*GetAccount)(nil),         // 14: testpb.GetAccount
-	(*TestLogin)(nil),          // 15: testpb.TestLogin
-	(*TestLoginSuccess)(nil),   // 16: testpb.TestLoginSuccess
-	(*TestReadiness)(nil),      // 17: testpb.TestReadiness
-	(*TestReady)(nil),          // 18: testpb.TestReady
-	(*TestBye)(nil),            // 19: testpb.TestBye
-	(*TestStash)(nil),          // 20: testpb.TestStash
-	(*TestUnstash)(nil),        // 21: testpb.TestUnstash
-	(*TestUnstashAll)(nil),     // 22: testpb.TestUnstashAll
-	(*TestPing)(nil),           // 23: testpb.TestPing
-	(*TestPong)(nil),           // 24: testpb.TestPong
-	(*TestWait)(nil),           // 25: testpb.TestWait
-	(*TestRunTask)(nil),        // 26: testpb.TestRunTask
-	(*TaskComplete)(nil),       // 27: testpb.TaskComplete
-	(*TestLog)(nil),            // 28: testpb.TestLog
-	(*TestGetCount)(nil),       // 29: testpb.TestGetCount
-	(*TestCount)(nil),          // 30: testpb.TestCount
-	(*TestRemoteForward)(nil),  // 31: testpb.TestRemoteForward
-	(*TestClusterForward)(nil), // 32: testpb.TestClusterForward
-	(*TestMessage)(nil),        // 33: testpb.TestMessage
-	(*anypb.Any)(nil),          // 34: google.protobuf.Any
+	(*TestReply)(nil),           // 0: testpb.TestReply
+	(*TestPanic)(nil),           // 1: testpb.TestPanic
+	(*TestPanicError)(nil),      // 2: testpb.TestPanicError
+	(*TestTimeout)(nil),         // 3: testpb.TestTimeout
+	(*Reply)(nil),               // 4: testpb.Reply
+	(*TestSend)(nil),            // 5: testpb.TestSend
+	(*TestRemoteSend)(nil),      // 6: testpb.TestRemoteSend
+	(*Account)(nil),             // 7: testpb.Account
+	(*CreateAccount)(nil),       // 8: testpb.CreateAccount
+	(*CreditAccount)(nil),       // 9: testpb.CreditAccount
+	(*AccountCreated)(nil),      // 10: testpb.AccountCreated
+	(*AccountCredited)(nil),     // 11: testpb.AccountCredited
+	(*DebitAccount)(nil),        // 12: testpb.DebitAccount
+	(*AccountDebited)(nil),      // 13: testpb.AccountDebited
+	(*GetAccount)(nil),          // 14: testpb.GetAccount
+	(*TestLogin)(nil),           // 15: testpb.TestLogin
+	(*TestLoginSuccess)(nil),    // 16: testpb.TestLoginSuccess
+	(*TestReadiness)(nil),       // 17: testpb.TestReadiness
+	(*TestReady)(nil),           // 18: testpb.TestReady
+	(*TestBye)(nil),             // 19: testpb.TestBye
+	(*TestStash)(nil),           // 20: testpb.TestStash
+	(*TestUnstash)(nil),         // 21: testpb.TestUnstash
+	(*TestUnstashAll)(nil),      // 22: testpb.TestUnstashAll
+	(*TestPing)(nil),            // 23: testpb.TestPing
+	(*TestPong)(nil),            // 24: testpb.TestPong
+	(*TestWait)(nil),            // 25: testpb.TestWait
+	(*TestRunTask)(nil),         // 26: testpb.TestRunTask
+	(*TaskComplete)(nil),        // 27: testpb.TaskComplete
+	(*TestLog)(nil),             // 28: testpb.TestLog
+	(*TestGetCount)(nil),        // 29: testpb.TestGetCount
+	(*TestCount)(nil),           // 30: testpb.TestCount
+	(*TestRemoteForward)(nil),   // 31: testpb.TestRemoteForward
+	(*TestClusterForward)(nil),  // 32: testpb.TestClusterForward
+	(*TestMessage)(nil),         // 33: testpb.TestMessage
+	(*TestSum)(nil),             // 34: testpb.TestSum
+	(*TestSumResult)(nil),       // 35: testpb.TestSumResult
+	(*TestGetSumResult)(nil),    // 36: testpb.TestGetSumResult
+	(*anypb.Any)(nil),           // 37: google.protobuf.Any
+	(*durationpb.Duration)(nil), // 38: google.protobuf.Duration
 }
 var file_test_test_proto_depIdxs = []int32{
-	34, // 0: testpb.TestMessage.message:type_name -> google.protobuf.Any
-	1,  // [1:1] is the sub-list for method output_type
-	1,  // [1:1] is the sub-list for method input_type
-	1,  // [1:1] is the sub-list for extension type_name
-	1,  // [1:1] is the sub-list for extension extendee
-	0,  // [0:1] is the sub-list for field type_name
+	37, // 0: testpb.TestMessage.message:type_name -> google.protobuf.Any
+	38, // 1: testpb.TestSum.delay:type_name -> google.protobuf.Duration
+	2,  // [2:2] is the sub-list for method output_type
+	2,  // [2:2] is the sub-list for method input_type
+	2,  // [2:2] is the sub-list for extension type_name
+	2,  // [2:2] is the sub-list for extension extendee
+	0,  // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_test_test_proto_init() }
@@ -1571,13 +1725,14 @@ func file_test_test_proto_init() {
 	if File_test_test_proto != nil {
 		return
 	}
+	file_test_test_proto_msgTypes[34].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_test_test_proto_rawDesc), len(file_test_test_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   34,
+			NumMessages:   37,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
