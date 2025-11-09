@@ -473,9 +473,9 @@ func TestRouter(t *testing.T) {
 		pause.For(time.Second)
 
 		probe := NewTailChopProbe()
-		summationActor, err := system.Spawn(ctx, "summation", probe)
+		pid, err := system.Spawn(ctx, "summation", probe)
 		require.NoError(t, err)
-		require.NotNil(t, summationActor)
+		require.NotNil(t, pid)
 
 		poolSize := 2
 		router, err := system.SpawnRouter(ctx, poolSize, new(MockRoutee), AsTailChopping(2*time.Second, 20*time.Millisecond))
@@ -487,7 +487,7 @@ func TestRouter(t *testing.T) {
 		// send a broadcast message to the router
 		summation := &testpb.TestSum{A: 10, B: 20, Delay: durationpb.New(3 * time.Second)}
 		message, _ := anypb.New(summation)
-		err = summationActor.Tell(ctx, router, &goaktpb.Broadcast{Message: message})
+		err = pid.Tell(ctx, router, &goaktpb.Broadcast{Message: message})
 		require.NoError(t, err)
 
 		pause.For(3 * time.Second)
