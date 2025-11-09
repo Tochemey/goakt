@@ -497,4 +497,67 @@ func TestRouter(t *testing.T) {
 
 		assert.NoError(t, system.Stop(ctx))
 	})
+	t.Run("With PreStart failure due to invalid poolsize", func(t *testing.T) {
+		ctx := t.Context()
+		logger := log.DiscardLogger
+		system, err := NewActorSystem(
+			"testSystem",
+			WithLogger(logger))
+
+		require.NoError(t, err)
+		require.NotNil(t, system)
+
+		require.NoError(t, system.Start(ctx))
+
+		pause.For(time.Second)
+
+		router, err := system.SpawnRouter(ctx, 0, new(MockRoutee), AsTailChopping(2*time.Second, 20*time.Millisecond))
+		require.Error(t, err)
+		require.Nil(t, router)
+		assert.ErrorIs(t, err, errors.ErrInvalidRouterPoolSize)
+
+		assert.NoError(t, system.Stop(ctx))
+	})
+	t.Run("With PreStart failure due to invalid TailChopping setting", func(t *testing.T) {
+		ctx := t.Context()
+		logger := log.DiscardLogger
+		system, err := NewActorSystem(
+			"testSystem",
+			WithLogger(logger))
+
+		require.NoError(t, err)
+		require.NotNil(t, system)
+
+		require.NoError(t, system.Start(ctx))
+
+		pause.For(time.Second)
+
+		router, err := system.SpawnRouter(ctx, 1, new(MockRoutee), AsTailChopping(0, 0))
+		require.Error(t, err)
+		require.Nil(t, router)
+		assert.ErrorIs(t, err, errors.ErrTailChopingRouterMisconfigured)
+
+		assert.NoError(t, system.Stop(ctx))
+	})
+	t.Run("With PreStart failure due to invalid ScatterGatherFirst setting", func(t *testing.T) {
+		ctx := t.Context()
+		logger := log.DiscardLogger
+		system, err := NewActorSystem(
+			"testSystem",
+			WithLogger(logger))
+
+		require.NoError(t, err)
+		require.NotNil(t, system)
+
+		require.NoError(t, system.Start(ctx))
+
+		pause.For(time.Second)
+
+		router, err := system.SpawnRouter(ctx, 1, new(MockRoutee), AsScatterGatherFirst(0))
+		require.Error(t, err)
+		require.Nil(t, router)
+		assert.ErrorIs(t, err, errors.ErrScatterGatherFirstRouterMisconfigured)
+
+		assert.NoError(t, system.Stop(ctx))
+	})
 }
