@@ -399,12 +399,6 @@ func (x *router) scatterGatherFirst(ctx *ReceiveContext, msg proto.Message, rout
 		})
 	}
 
-	if len(routees) == 0 {
-		sendTimeout()
-		ctx.Unhandled()
-		return
-	}
-
 	noSender := ctx.ActorSystem().NoSender()
 
 	deadlineCtx, cancel := context.WithTimeout(ctx.Context(), within)
@@ -418,14 +412,10 @@ func (x *router) scatterGatherFirst(ctx *ReceiveContext, msg proto.Message, rout
 
 	for _, routee := range routees {
 		payload := proto.Clone(msg)
-		if payload == nil {
-			payload = msg
-		}
-
-		go func(to *PID) {
+		go func(to *PID, payload proto.Message) {
 			resp, err := noSender.Ask(deadlineCtx, to, payload, within)
 			results <- askResult{resp: resp, err: err}
-		}(routee)
+		}(routee, payload)
 	}
 
 	pending := len(routees)
@@ -485,12 +475,6 @@ func (x *router) tailChopping(ctx *ReceiveContext, msg proto.Message, routees []
 		})
 	}
 
-	if len(routees) == 0 {
-		sendTimeout()
-		ctx.Unhandled()
-		return
-	}
-
 	shuffled := reshuffleRoutees(routees)
 	noSender := ctx.ActorSystem().NoSender()
 
@@ -516,10 +500,6 @@ func (x *router) tailChopping(ctx *ReceiveContext, msg proto.Message, routees []
 		}
 
 		payload := proto.Clone(msg)
-		if payload == nil {
-			payload = msg
-		}
-
 		go func(to *PID, timeout time.Duration) {
 			resp, err := noSender.Ask(deadlineCtx, to, payload, timeout)
 			results <- askResult{resp: resp, err: err}
