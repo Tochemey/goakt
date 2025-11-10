@@ -37,7 +37,7 @@ func TestRouterOption(t *testing.T) {
 		router := &router{}
 		option := WithRoutingStrategy(RandomRouting)
 		option.Apply(router)
-		assert.Equal(t, RandomRouting, router.strategy)
+		assert.Equal(t, RandomRouting, router.routingStrategy)
 	})
 	t.Run("AsTailChoppingRouter", func(t *testing.T) {
 		router := &router{}
@@ -53,5 +53,25 @@ func TestRouterOption(t *testing.T) {
 		option.Apply(router)
 		require.Equal(t, scatterGatherFirstRouter, router.kind)
 		assert.Equal(t, time.Second, router.within)
+	})
+	t.Run("WithResumeRouteeOnFailure", func(t *testing.T) {
+		router := &router{}
+		option := WithResumeRouteeOnFailure()
+		option.Apply(router)
+		assert.Equal(t, resumeRoutee, router.supervisorDirective)
+	})
+	t.Run("WithRestartRouteeOnFailure", func(t *testing.T) {
+		router := &router{}
+		option := WithRestartRouteeOnFailure(2, time.Second)
+		option.Apply(router)
+		assert.EqualValues(t, 2, router.restartRouteeAttempts)
+		assert.Equal(t, time.Second, router.restartRouteeWithin)
+		assert.Equal(t, restartRoutee, router.supervisorDirective)
+	})
+	t.Run("WithStopRouteeOnFailure", func(t *testing.T) {
+		router := &router{}
+		option := WithStopRouteeOnFailure()
+		option.Apply(router)
+		assert.Equal(t, stopRoutee, router.supervisorDirective)
 	})
 }

@@ -1220,7 +1220,7 @@ func (pid *PID) RemoteReSpawn(ctx context.Context, host string, port int, name s
 func (pid *PID) Shutdown(ctx context.Context) error {
 	// we should never shutdown system actors unless the whole system is terminating
 	if actoryStem := pid.ActorSystem(); actoryStem != nil {
-		if !actoryStem.isStopping() && isSystemName(pid.Name()) && !isRouter(pid.Name()) {
+		if !actoryStem.isStopping() && isSystemName(pid.Name()) {
 			pid.logger.Warnf("attempt to shutdown a system actor (%s)", pid.Name())
 			return gerrors.ErrShutdownForbidden
 		}

@@ -50,7 +50,7 @@ func (f RouterOptionFunc) Apply(r *router) {
 // as a new message rather than through Ask.
 func WithRoutingStrategy(strategy RoutingStrategy) RouterOption {
 	return RouterOptionFunc(func(r *router) {
-		r.strategy = strategy
+		r.routingStrategy = strategy
 	})
 }
 
@@ -147,5 +147,56 @@ func AsScatterGatherFirst(within time.Duration) RouterOption {
 	return RouterOptionFunc(func(r *router) {
 		r.kind = scatterGatherFirstRouter
 		r.within = within
+	})
+}
+
+// WithResumeRouteeOnFailure sets the router's supervision directive for its routees to Resume.
+//
+// Behavior:
+//   - The failing routee keeps its current in-memory state and continues processing the next messages.
+//   - The failing message is not retried by the router.
+//   - Best for transient, non-corrupting failures (e.g., timeouts, temporary downstream issues).
+//
+// Notes:
+//   - Mutually exclusive with WithRestartRouteeOnFailure and WithStopRouteeOnFailure; the last applied wins.
+//   - If no directive option is provided, the default is Restart.
+func WithResumeRouteeOnFailure() RouterOption {
+	return RouterOptionFunc(func(r *router) {
+		r.supervisorDirective = resumeRoutee
+	})
+}
+
+// WithRestartRouteeOnFailure sets the router's supervision directive for its routees to Restart.
+//
+// Behavior:
+//   - The failing routee is restarted (stopped and started anew), resetting its internal state.
+//   - The failing message is not retried by the router.
+//   - Subsequent messages may be processed after the restart.
+//   - Use when local state may be corrupted or requires re-initialization.
+//
+// Notes:
+//   - Mutually exclusive with WithResumeRouteeOnFailure and WithStopRouteeOnFailure; the last applied wins.
+func WithRestartRouteeOnFailure(maxRetries uint32, timeout time.Duration) RouterOption {
+	return RouterOptionFunc(func(r *router) {
+		r.supervisorDirective = restartRoutee
+		r.restartRouteeAttempts = maxRetries
+		r.restartRouteeWithin = timeout
+	})
+}
+
+// WithStopRouteeOnFailure sets the router's supervision directive for its routees to Stop.
+//
+// Behavior:
+//   - The failing routee is terminated and removed from the routing pool.
+//   - The failing message is not retried by the router.
+//   - Use when the routee cannot continue safely or should be quarantined.
+//
+// Notes:
+//   - Mutually exclusive with WithResumeRouteeOnFailure and WithRestartRouteeOnFailure; the last applied wins.
+//   - The router will stop sending messages to the stopped routee; it is not automatically replaced by this option.
+//   - This is the default directive if none is specified.
+func WithStopRouteeOnFailure() RouterOption {
+	return RouterOptionFunc(func(r *router) {
+		r.supervisorDirective = stopRoutee
 	})
 }

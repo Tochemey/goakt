@@ -26,7 +26,6 @@ package actor
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -62,7 +61,8 @@ func TestRouter(t *testing.T) {
 		routeesKind := new(MockRoutee)
 		poolSize := 2
 		routingStrategy := FanOutRouting
-		router, err := system.SpawnRouter(ctx, poolSize, routeesKind, WithRoutingStrategy(routingStrategy))
+		routerName := "workerPool"
+		router, err := system.SpawnRouter(ctx, routerName, poolSize, routeesKind, WithRoutingStrategy(routingStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, router)
 
@@ -76,8 +76,8 @@ func TestRouter(t *testing.T) {
 		pause.For(time.Second)
 
 		// this is just for tests purpose
-		workerOneName := fmt.Sprintf("GoAktRoutee-%s-%d", router.Name(), 0)
-		workerTwoName := fmt.Sprintf("GoAktRoutee-%s-%d", router.Name(), 1)
+		workerOneName := routeeName(0, routerName)
+		workerTwoName := routeeName(1, routerName)
 
 		workerOneRef, ok := system.findRoutee(workerOneName)
 		require.True(t, ok)
@@ -98,9 +98,7 @@ func TestRouter(t *testing.T) {
 		require.NotNil(t, reply)
 		assert.True(t, proto.Equal(expected, reply))
 
-		t.Cleanup(func() {
-			assert.NoError(t, system.Stop(ctx))
-		})
+		assert.NoError(t, system.Stop(ctx))
 	})
 	t.Run("With Fan-Out strategy With no available routees router shuts down", func(t *testing.T) {
 		ctx := context.TODO()
@@ -119,15 +117,16 @@ func TestRouter(t *testing.T) {
 		routeesKind := new(MockRoutee)
 		poolSize := 2
 		routingStrategy := FanOutRouting
-		router, err := system.SpawnRouter(ctx, poolSize, routeesKind, WithRoutingStrategy(routingStrategy))
+		routerName := "workerPool"
+		router, err := system.SpawnRouter(ctx, routerName, poolSize, routeesKind, WithRoutingStrategy(routingStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, router)
 
 		pause.For(time.Second)
 
 		// this is just for tests purpose
-		workerOneName := fmt.Sprintf("GoAktRoutee-%s-%d", router.Name(), 0)
-		workerTwoName := fmt.Sprintf("GoAktRoutee-%s-%d", router.Name(), 1)
+		workerOneName := routeeName(0, routerName)
+		workerTwoName := routeeName(1, routerName)
 
 		workerOneRef, ok := system.findRoutee(workerOneName)
 		require.True(t, ok)
@@ -156,14 +155,12 @@ func TestRouter(t *testing.T) {
 
 		pause.For(time.Second)
 
-		ref, err := system.LocalActor("routerQA-pool")
+		ref, err := system.LocalActor(routerName)
 		require.Error(t, err)
 		require.Nil(t, ref)
 		assert.ErrorIs(t, err, errors.ErrActorNotFound)
 
-		t.Cleanup(func() {
-			assert.NoError(t, system.Stop(ctx))
-		})
+		assert.NoError(t, system.Stop(ctx))
 	})
 	t.Run("With Round Robin strategy", func(t *testing.T) {
 		ctx := context.TODO()
@@ -182,7 +179,8 @@ func TestRouter(t *testing.T) {
 		routeesKind := new(MockRoutee)
 		poolSize := 1
 		routingStrategy := RoundRobinRouting
-		router, err := system.SpawnRouter(ctx, poolSize, routeesKind, WithRoutingStrategy(routingStrategy))
+		routerName := "workerPool"
+		router, err := system.SpawnRouter(ctx, routerName, poolSize, routeesKind, WithRoutingStrategy(routingStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, router)
 
@@ -196,7 +194,7 @@ func TestRouter(t *testing.T) {
 		pause.For(time.Second)
 
 		// this is just for tests purpose
-		workerName := fmt.Sprintf("GoAktRoutee-%s-%d", router.Name(), 0)
+		workerName := routeeName(0, routerName)
 
 		workerOneRef, ok := system.findRoutee(workerName)
 		require.True(t, ok)
@@ -209,9 +207,7 @@ func TestRouter(t *testing.T) {
 		require.NotNil(t, reply)
 		assert.True(t, proto.Equal(expected, reply))
 
-		t.Cleanup(func() {
-			assert.NoError(t, system.Stop(ctx))
-		})
+		assert.NoError(t, system.Stop(ctx))
 	})
 	t.Run("With Round Robin strategy With no available routees router is alive and message in deadletter", func(t *testing.T) {
 		ctx := context.TODO()
@@ -236,7 +232,8 @@ func TestRouter(t *testing.T) {
 		routeesKind := new(MockRoutee)
 		poolSize := 1
 		routingStrategy := RoundRobinRouting
-		router, err := system.SpawnRouter(ctx, poolSize, routeesKind, WithRoutingStrategy(routingStrategy))
+		routerName := "workerPool"
+		router, err := system.SpawnRouter(ctx, routerName, poolSize, routeesKind, WithRoutingStrategy(routingStrategy))
 
 		require.NoError(t, err)
 		require.NotNil(t, router)
@@ -244,7 +241,7 @@ func TestRouter(t *testing.T) {
 		pause.For(time.Second)
 
 		// this is just for tests purpose
-		workerName := fmt.Sprintf("GoAktRoutee-%s-%d", router.Name(), 0)
+		workerName := routeeName(0, routerName)
 		workerOneRef, ok := system.findRoutee(workerName)
 		require.True(t, ok)
 		require.NotNil(t, workerOneRef)
@@ -298,7 +295,8 @@ func TestRouter(t *testing.T) {
 		routeesKind := new(MockRoutee)
 		poolSize := 1
 		routingStrategy := RandomRouting
-		router, err := system.SpawnRouter(ctx, poolSize, routeesKind, WithRoutingStrategy(routingStrategy))
+		routerName := "workerPool"
+		router, err := system.SpawnRouter(ctx, routerName, poolSize, routeesKind, WithRoutingStrategy(routingStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, router)
 
@@ -312,7 +310,7 @@ func TestRouter(t *testing.T) {
 		pause.For(time.Second)
 
 		// this is just for tests purpose
-		workerName := fmt.Sprintf("GoAktRoutee-%s-%d", router.Name(), 0)
+		workerName := routeeName(0, routerName)
 
 		workerOneRef, ok := system.findRoutee(workerName)
 		require.True(t, ok)
@@ -325,9 +323,7 @@ func TestRouter(t *testing.T) {
 		require.NotNil(t, reply)
 		assert.True(t, proto.Equal(expected, reply))
 
-		t.Cleanup(func() {
-			assert.NoError(t, system.Stop(ctx))
-		})
+		assert.NoError(t, system.Stop(ctx))
 	})
 
 	t.Run("As TailChopping router", func(t *testing.T) {
@@ -349,7 +345,8 @@ func TestRouter(t *testing.T) {
 		require.NotNil(t, summationActor)
 
 		poolSize := 2
-		router, err := system.SpawnRouter(ctx, poolSize, new(MockRoutee), AsTailChopping(2*time.Second, 20*time.Millisecond))
+		routerName := "tailChopRouter"
+		router, err := system.SpawnRouter(ctx, routerName, poolSize, new(MockRoutee), AsTailChopping(2*time.Second, 20*time.Millisecond))
 		require.NoError(t, err)
 		require.NotNil(t, router)
 
@@ -397,7 +394,8 @@ func TestRouter(t *testing.T) {
 		require.NotNil(t, summationActor)
 
 		poolSize := 2
-		router, err := system.SpawnRouter(ctx, poolSize, new(MockRoutee), AsScatterGatherFirst(2*time.Second))
+		routerName := "scatterGatherRouter"
+		router, err := system.SpawnRouter(ctx, routerName, poolSize, new(MockRoutee), AsScatterGatherFirst(2*time.Second))
 		require.NoError(t, err)
 		require.NotNil(t, router)
 
@@ -439,7 +437,8 @@ func TestRouter(t *testing.T) {
 		require.NotNil(t, summationActor)
 
 		poolSize := 2
-		router, err := system.SpawnRouter(ctx, poolSize, new(BlockingRoutee), AsScatterGatherFirst(2*time.Second))
+		routerName := "scatterGatherRouter"
+		router, err := system.SpawnRouter(ctx, routerName, poolSize, new(BlockingRoutee), AsScatterGatherFirst(2*time.Second))
 		require.NoError(t, err)
 		require.NotNil(t, router)
 
@@ -478,7 +477,8 @@ func TestRouter(t *testing.T) {
 		require.NotNil(t, pid)
 
 		poolSize := 2
-		router, err := system.SpawnRouter(ctx, poolSize, new(MockRoutee), AsTailChopping(2*time.Second, 20*time.Millisecond))
+		routerName := "tailChopRouter"
+		router, err := system.SpawnRouter(ctx, routerName, poolSize, new(MockRoutee), AsTailChopping(2*time.Second, 20*time.Millisecond))
 		require.NoError(t, err)
 		require.NotNil(t, router)
 
@@ -511,7 +511,8 @@ func TestRouter(t *testing.T) {
 
 		pause.For(time.Second)
 
-		router, err := system.SpawnRouter(ctx, 0, new(MockRoutee), AsTailChopping(2*time.Second, 20*time.Millisecond))
+		routerName := "invalidPoolRouter"
+		router, err := system.SpawnRouter(ctx, routerName, 0, new(MockRoutee), AsTailChopping(2*time.Second, 20*time.Millisecond))
 		require.Error(t, err)
 		require.Nil(t, router)
 		assert.ErrorIs(t, err, errors.ErrInvalidRouterPoolSize)
@@ -532,7 +533,8 @@ func TestRouter(t *testing.T) {
 
 		pause.For(time.Second)
 
-		router, err := system.SpawnRouter(ctx, 1, new(MockRoutee), AsTailChopping(0, 0))
+		routerName := "invalidTailChopRouter"
+		router, err := system.SpawnRouter(ctx, routerName, 1, new(MockRoutee), AsTailChopping(0, 0))
 		require.Error(t, err)
 		require.Nil(t, router)
 		assert.ErrorIs(t, err, errors.ErrTailChopingRouterMisconfigured)
@@ -553,7 +555,8 @@ func TestRouter(t *testing.T) {
 
 		pause.For(time.Second)
 
-		router, err := system.SpawnRouter(ctx, 1, new(MockRoutee), AsScatterGatherFirst(0))
+		routerName := "invalidScatterGatherRouter"
+		router, err := system.SpawnRouter(ctx, routerName, 1, new(MockRoutee), AsScatterGatherFirst(0))
 		require.Error(t, err)
 		require.Nil(t, router)
 		assert.ErrorIs(t, err, errors.ErrScatterGatherFirstRouterMisconfigured)

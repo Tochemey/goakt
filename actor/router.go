@@ -29,10 +29,10 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"reflect"
-	"strings"
 	"sync/atomic"
 	"time"
 
+	"github.com/flowchartsman/retry"
 	"google.golang.org/protobuf/proto"
 
 	gerrors "github.com/tochemey/goakt/v3/errors"
@@ -49,35 +49,52 @@ const (
 	tailChoppingRouter
 )
 
+type routeeSupervisorDirective int
+
+const (
+	restartRoutee routeeSupervisorDirective = iota
+	stopRoutee
+	resumeRoutee
+)
+
 // router is an actor that depending upon the routing
 // strategy route message to its routees.
 type router struct {
-	strategy RoutingStrategy
-	poolSize int
-	// list of routees
-	routeesMap  map[string]*PID
-	next        uint32
-	routeesKind reflect.Type
-	logger      log.Logger
+	routingStrategy       RoutingStrategy
+	poolSize              int
+	routeesMap            map[string]*PID
+	routeesKind           reflect.Type
+	supervisorDirective   routeeSupervisorDirective
+	restartRouteeAttempts uint32
+	restartRouteeWithin   time.Duration
+	roundRobinNext        uint32
+	logger                log.Logger
 
 	// these fields are only used for tail chopping routing strategy and scatter-gather
 	within   time.Duration
 	interval time.Duration
-	kind     routerKind
+
+	kind routerKind
+	name string
 }
 
 var _ Actor = (*router)(nil)
 
 // newRouter creates an instance of router giving the routing strategy and poolSize
 // The poolSize specifies the number of routees to spawn by the router
-func newRouter(poolSize int, routeesKind Actor, loggger log.Logger, opts ...RouterOption) *router {
+func newRouter(poolSize int, routeesKind Actor, logger log.Logger, opts ...RouterOption) *router {
 	router := &router{
-		strategy:    FanOutRouting,
-		poolSize:    poolSize,
-		routeesMap:  make(map[string]*PID, poolSize),
-		routeesKind: reflect.TypeOf(routeesKind).Elem(),
-		logger:      loggger,
-		kind:        standardRouter,
+		routingStrategy:     FanOutRouting,
+		poolSize:            poolSize,
+		routeesMap:          make(map[string]*PID, poolSize),
+		routeesKind:         reflect.TypeOf(routeesKind).Elem(),
+		logger:              logger,
+		kind:                standardRouter,
+		supervisorDirective: stopRoutee,
+
+		// TODO: revisit these defaults
+		restartRouteeAttempts: 3,
+		restartRouteeWithin:   time.Second,
 	}
 
 	// apply the various options
@@ -88,8 +105,9 @@ func newRouter(poolSize int, routeesKind Actor, loggger log.Logger, opts ...Rout
 }
 
 // PreStart pre-starts the actor.
-func (x *router) PreStart(*Context) error {
-	x.logger.Info("starting the router...")
+func (x *router) PreStart(ctx *Context) error {
+	x.name = ctx.ActorName()
+	x.logger.Infof("starting the router (%s)...", x.name)
 	return x.validate()
 }
 
@@ -106,16 +124,17 @@ func (x *router) Receive(ctx *ReceiveContext) {
 
 // PostStop is executed when the actor is shutting down.
 func (x *router) PostStop(*Context) error {
-	x.logger.Info("router stopped")
+	x.logger.Infof("router (%s) stopped", x.name)
 	return nil
 }
 
 // postStart spawns routeesMap
 func (x *router) postStart(ctx *ReceiveContext) {
-	x.logger.Info("router successfully started")
-	x.logger.Infof("spawning %d routees...", x.poolSize)
+	x.logger.Infof("router (%s) successfully started", x.name)
+	x.logger.Infof("router (%s) spawning (%d) routees...", x.name, x.poolSize)
+
 	for i := 0; i < x.poolSize; i++ {
-		routeeName := routeeName(i)
+		routeeName := routeeName(i, x.name)
 		actor := reflect.New(x.routeesKind).Interface().(Actor)
 		routee := ctx.Spawn(routeeName, actor,
 			asSystem(),
@@ -135,11 +154,61 @@ func (x *router) broadcast(ctx *ReceiveContext) {
 	case *goaktpb.Broadcast:
 		x.handleBroadcast(ctx)
 	case *goaktpb.PanicSignal:
-		ctx.Stop(ctx.Sender())
-		delete(x.routeesMap, ctx.Sender().ID())
+		x.handlePanicSignal(ctx)
 	default:
 		ctx.Unhandled()
 	}
+}
+
+func (x *router) handlePanicSignal(ctx *ReceiveContext) {
+	switch x.supervisorDirective {
+	case restartRoutee:
+		x.handleRestartRoutee(ctx)
+	case stopRoutee:
+		x.handleStopRoutee(ctx)
+	case resumeRoutee:
+		x.handleResumeRoutee(ctx)
+	default:
+		x.handleStopRoutee(ctx)
+	}
+}
+
+func (x *router) handleRestartRoutee(ctx *ReceiveContext) {
+	goCtx := ctx.withoutCancel()
+	sender := ctx.Sender()
+	x.logger.Infof("restarting routee (%s)...", sender.ID())
+
+	var err error
+
+	switch {
+	case x.restartRouteeAttempts == 0 || x.restartRouteeWithin <= 0:
+		err = sender.Restart(goCtx)
+	default:
+		retrier := retry.NewRetrier(int(x.restartRouteeAttempts), x.restartRouteeWithin, x.restartRouteeWithin)
+		err = retrier.RunContext(goCtx, sender.Restart)
+	}
+
+	if err != nil {
+		x.logger.Errorf("failed to restart routee (%s): %v", sender.ID(), err)
+		x.handleStopRoutee(ctx)
+		return
+	}
+
+	x.logger.Infof("routee (%s) restarted successfully", sender.ID())
+	x.routeesMap[sender.ID()] = sender
+}
+
+func (x *router) handleResumeRoutee(ctx *ReceiveContext) {
+	sender := ctx.Sender()
+	x.logger.Infof("resuming routee (%s)...", sender.ID())
+	ctx.Reinstate(sender)
+}
+
+func (x *router) handleStopRoutee(ctx *ReceiveContext) {
+	sender := ctx.Sender()
+	x.logger.Infof("stopping routee (%s)...", sender.ID())
+	ctx.Stop(sender)
+	delete(x.routeesMap, sender.ID())
 }
 
 func (x *router) handleBroadcast(ctx *ReceiveContext) {
@@ -197,9 +266,9 @@ func (x *router) dispatchToRoutees(ctx *ReceiveContext, msg proto.Message, route
 }
 
 func (x *router) routeByStrategy(ctx *ReceiveContext, msg proto.Message, routees []*PID) {
-	switch x.strategy {
+	switch x.routingStrategy {
 	case RoundRobinRouting:
-		n := atomic.AddUint32(&x.next, 1)
+		n := atomic.AddUint32(&x.roundRobinNext, 1)
 		routee := routees[(int(n)-1)%len(routees)]
 		ctx.Tell(routee, msg)
 	case RandomRouting:
@@ -376,13 +445,11 @@ func (x *router) tailChopping(ctx *ReceiveContext, msg proto.Message, routees []
 				return
 			}
 
-			// TODO: revisit this code path when Escalation strategy is clearly defined for faulty routees
-			// TODO: At the moment the routee is stopped whenever it panics
-			//logger.Warnf("tail-chopping: attempt failed: %v", r.err)
-			//if pending == 0 && next >= len(shuffled) {
-			//	sendTimeout()
-			//	return
-			//}
+			x.logger.Warnf("tail-chopping: attempt failed: %v", r.err)
+			if pending == 0 && next >= len(shuffled) {
+				sendTimeout()
+				return
+			}
 
 		case <-func() <-chan time.Time {
 			if clock == nil {
@@ -403,8 +470,8 @@ func (x *router) tailChopping(ctx *ReceiveContext, msg proto.Message, routees []
 }
 
 // routeeName returns the routee name
-func routeeName(index int) string {
-	return fmt.Sprintf("%s%d", routeeNamePrefix, index)
+func routeeName(index int, routerName string) string {
+	return fmt.Sprintf("%s%s%d", routerName, routeeNamePrefix, index)
 }
 
 func (x *router) availableRoutees() ([]*PID, bool) {
@@ -449,8 +516,4 @@ func reshuffleRoutees(routees []*PID) []*PID {
 	})
 
 	return shuffled
-}
-
-func isRouter(name string) bool {
-	return strings.EqualFold(name, reservedNames[routerType])
 }
