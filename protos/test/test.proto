@@ -6,6 +6,7 @@ syntax = "proto3";
 package testpb;
 
 import "google/protobuf/any.proto";
+import "google/protobuf/duration.proto";
 
 option go_package = "github.com/tochemey/goakt/v3/test/data;testpb";
 
@@ -159,3 +160,15 @@ message TestMessage {
   // Higher values typically indicate higher precedence; 0 means default.
   int64 priority = 2;
 }
+
+message TestSum {
+  int64 a = 1;
+  int64 b = 2;
+  optional google.protobuf.Duration delay = 3;
+}
+
+message TestSumResult {
+  int64 result = 1;
+}
+
+message TestGetSumResult {}

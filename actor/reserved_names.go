@@ -27,8 +27,7 @@ package actor
 type nameType int
 
 const (
-	routerType nameType = iota
-	rebalancerType
+	rebalancerType nameType = iota
 	rootGuardianType
 	userGuardianType
 	systemGuardianType
@@ -45,12 +44,11 @@ const (
 	eventsTopic = "topic.events"
 
 	reservedNamesPrefix = "GoAkt"
-	routeeNamePrefix    = "GoAktRoutee"
+	routeeNamePrefix    = "Routee"
 )
 
 var (
 	reservedNames = map[nameType]string{
-		routerType:            "GoAktRouter",
 		rebalancerType:        "GoAktRebalancer",
 		rootGuardianType:      "GoAktRootGuardian",
 		userGuardianType:      "GoAktUserGuardian",

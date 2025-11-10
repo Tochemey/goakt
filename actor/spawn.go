@@ -240,10 +240,9 @@ func (x *actorSystem) SpawnFromFunc(ctx context.Context, receiveFunc ReceiveFunc
 //
 // Use routers when you need to fan out work across multiple workers while preserving
 // the isolation and safety guarantees of the actor model.
-func (x *actorSystem) SpawnRouter(ctx context.Context, poolSize int, routeesKind Actor, opts ...RouterOption) (*PID, error) {
+func (x *actorSystem) SpawnRouter(ctx context.Context, name string, poolSize int, routeesKind Actor, opts ...RouterOption) (*PID, error) {
 	router := newRouter(poolSize, routeesKind, x.logger, opts...)
-	routerName := x.reservedName(routerType)
-	return x.Spawn(ctx, routerName, router,
+	return x.Spawn(ctx, name, router,
 		WithRelocationDisabled(),
 		asSystem(),
 		WithSupervisor(

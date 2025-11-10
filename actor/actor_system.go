@@ -198,7 +198,7 @@ type ActorSystem interface {
 	//
 	// Use routers when you need to fan out work across multiple workers while preserving
 	// the isolation and safety guarantees of the actor model.
-	SpawnRouter(ctx context.Context, poolSize int, routeesKind Actor, opts ...RouterOption) (*PID, error)
+	SpawnRouter(ctx context.Context, name string, poolSize int, routeesKind Actor, opts ...RouterOption) (*PID, error)
 	// SpawnSingleton creates a singleton actor in the system.
 	//
 	// A singleton actor is instantiated when cluster mode is enabled.
