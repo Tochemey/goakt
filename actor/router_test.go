@@ -456,6 +456,42 @@ func TestRouter(t *testing.T) {
 
 		assert.NoError(t, system.Stop(ctx))
 	})
+	t.Run("As ScatterGatherFirst router with routee errors", func(t *testing.T) {
+		ctx := t.Context()
+		logger := log.DiscardLogger
+		system, err := NewActorSystem(
+			"testSystem",
+			WithLogger(logger))
+
+		require.NoError(t, err)
+		require.NotNil(t, system)
+
+		require.NoError(t, system.Start(ctx))
+
+		pause.For(time.Second)
+
+		probe := NewTailChopProbe()
+		summationActor, err := system.Spawn(ctx, "scatterErrorProbe", probe)
+		require.NoError(t, err)
+		require.NotNil(t, summationActor)
+
+		routerName := "scatterGatherErrorRouter"
+		router, err := system.SpawnRouter(ctx, routerName, 1, new(MockFaultyRoutee), AsScatterGatherFirst(50*time.Millisecond))
+		require.NoError(t, err)
+		require.NotNil(t, router)
+
+		pause.For(time.Second)
+
+		summation := &testpb.TestSum{A: 5, B: 7}
+		message, _ := anypb.New(summation)
+		err = summationActor.Tell(ctx, router, &goaktpb.Broadcast{Message: message})
+		require.NoError(t, err)
+
+		require.True(t, probe.WaitForFailure(5*time.Second), "expected status failure due to routee errors")
+		assert.EqualValues(t, 1, probe.FailureCount())
+
+		assert.NoError(t, system.Stop(ctx))
+	})
 	t.Run("As TailChopping router with StatusFailure", func(t *testing.T) {
 		ctx := t.Context()
 		logger := log.DiscardLogger
@@ -492,6 +528,41 @@ func TestRouter(t *testing.T) {
 		pause.For(3 * time.Second)
 		require.True(t, probe.WaitForFailure(5*time.Second), "expected status failure (sum=%d failures=%d)", probe.Sum(), probe.FailureCount())
 		assert.EqualValues(t, 0, probe.Sum())
+		assert.EqualValues(t, 1, probe.FailureCount())
+
+		assert.NoError(t, system.Stop(ctx))
+	})
+	t.Run("As TailChopping router with exhausted deadline", func(t *testing.T) {
+		ctx := t.Context()
+		logger := log.DiscardLogger
+		system, err := NewActorSystem(
+			"testSystem",
+			WithLogger(logger))
+
+		require.NoError(t, err)
+		require.NotNil(t, system)
+
+		require.NoError(t, system.Start(ctx))
+
+		pause.For(time.Second)
+
+		probe := NewTailChopProbe()
+		pid, err := system.Spawn(ctx, "tailDeadlineProbe", probe)
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		routerName := "tailDeadlineRouter"
+		router, err := system.SpawnRouter(ctx, routerName, 1, new(MockRoutee), AsTailChopping(time.Nanosecond, time.Nanosecond))
+		require.NoError(t, err)
+		require.NotNil(t, router)
+
+		pause.For(time.Second)
+
+		message, _ := anypb.New(&testpb.TestSum{A: 1, B: 2})
+		err = pid.Tell(ctx, router, &goaktpb.Broadcast{Message: message})
+		require.NoError(t, err)
+
+		require.True(t, probe.WaitForFailure(5*time.Second), "expected status failure due to exhausted deadline")
 		assert.EqualValues(t, 1, probe.FailureCount())
 
 		assert.NoError(t, system.Stop(ctx))
