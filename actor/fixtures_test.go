@@ -638,6 +638,27 @@ func (x *TailChopProbe) Sum() int64 {
 	return x.sum.Load()
 }
 
+type MockFaultyRoutee struct{}
+
+var _ Actor = (*MockFaultyRoutee)(nil)
+
+func (x *MockFaultyRoutee) PostStop(*Context) error {
+	return nil
+}
+
+func (x *MockFaultyRoutee) PreStart(*Context) error {
+	return nil
+}
+
+func (x *MockFaultyRoutee) Receive(ctx *ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *goaktpb.PostStart:
+		// pass
+	default:
+		ctx.Err(errors.New("routee failure"))
+	}
+}
+
 func extractMessage(bytes []byte) (string, error) {
 	// a map container to decode the JSON structure into
 	c := make(map[string]json.RawMessage)

@@ -132,8 +132,81 @@ func (x *router) PostStop(*Context) error {
 func (x *router) postStart(ctx *ReceiveContext) {
 	x.logger.Infof("router (%s) successfully started", x.name)
 	x.logger.Infof("router (%s) spawning (%d) routees...", x.name, x.poolSize)
+	x.spawnRoutees(ctx, 0, x.poolSize)
+	ctx.Become(x.broadcast)
+}
 
-	for i := 0; i < x.poolSize; i++ {
+// broadcast send message to all the routeesMap
+func (x *router) broadcast(ctx *ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *goaktpb.Broadcast:
+		x.handleBroadcast(ctx)
+	case *goaktpb.PanicSignal:
+		x.handlePanicSignal(ctx)
+	case *goaktpb.GetRoutees:
+		x.handleGetRoutees(ctx)
+	case *goaktpb.AdjustRouterPoolSize:
+		x.handleAjustRouterPoolSize(ctx)
+	default:
+		ctx.Unhandled()
+	}
+}
+
+func (x *router) handleAjustRouterPoolSize(ctx *ReceiveContext) {
+	message := ctx.Message().(*goaktpb.AdjustRouterPoolSize)
+	delta := int(message.GetPoolSize())
+	if delta == 0 {
+		// nothing to do
+		return
+	}
+
+	if delta > 0 {
+		x.scaleUp(ctx, delta)
+		return
+	}
+
+	x.scaleDown(ctx, -delta)
+}
+
+func (x *router) scaleUp(ctx *ReceiveContext, delta int) {
+	if delta <= 0 {
+		return
+	}
+	currentSize := len(x.routeesMap)
+	targetSize := currentSize + delta
+	x.logger.Infof("scaling up router (%s) pool size from %d to %d", x.name, currentSize, targetSize)
+	x.poolSize = targetSize
+	x.spawnRoutees(ctx, currentSize, targetSize)
+}
+
+func (x *router) scaleDown(ctx *ReceiveContext, delta int) {
+	if delta <= 0 {
+		return
+	}
+	routees, ok := x.availableRoutees()
+	if !ok {
+		return
+	}
+
+	currentSize := len(routees)
+	if delta > currentSize {
+		delta = currentSize
+	}
+
+	targetSize := currentSize - delta
+	x.logger.Infof("scaling down router (%s) pool size from %d to %d", x.name, currentSize, targetSize)
+	x.poolSize = targetSize
+
+	for i := 0; i < delta; i++ {
+		routee := routees[i]
+		x.logger.Infof("stopping routee (%s)...", routee.ID())
+		ctx.Stop(routee)
+		delete(x.routeesMap, routee.ID())
+	}
+}
+
+func (x *router) spawnRoutees(ctx *ReceiveContext, start, size int) {
+	for i := start; i < size; i++ {
 		routeeName := routeeName(i, x.name)
 		actor := reflect.New(x.routeesKind).Interface().(Actor)
 		routee := ctx.Spawn(routeeName, actor,
@@ -145,19 +218,17 @@ func (x *router) postStart(ctx *ReceiveContext) {
 			))
 		x.routeesMap[routee.ID()] = routee
 	}
-	ctx.Become(x.broadcast)
 }
 
-// broadcast send message to all the routeesMap
-func (x *router) broadcast(ctx *ReceiveContext) {
-	switch ctx.Message().(type) {
-	case *goaktpb.Broadcast:
-		x.handleBroadcast(ctx)
-	case *goaktpb.PanicSignal:
-		x.handlePanicSignal(ctx)
-	default:
-		ctx.Unhandled()
+func (x *router) handleGetRoutees(ctx *ReceiveContext) {
+	routees, _ := x.availableRoutees()
+	names := make([]string, 0, len(routees))
+	for _, routee := range routees {
+		names = append(names, routee.Name())
 	}
+	ctx.Response(&goaktpb.Routees{
+		Names: names,
+	})
 }
 
 func (x *router) handlePanicSignal(ctx *ReceiveContext) {

@@ -852,7 +852,9 @@ func (*PostStart) Descriptor() ([]byte, []int) {
 	return file_goakt_goakt_proto_rawDescGZIP(), []int{13}
 }
 
-// Broadcast is used to send message to a router
+// Broadcast is used to send message to a router via Tell
+// The router will broadcast the message to all its routees
+// given the routing strategy or the type of router used.
 type Broadcast struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Specifies the actual message
@@ -1406,6 +1408,194 @@ func (x *StatusFailure) GetMessage() *anypb.Any {
 	return nil
 }
 
+// GetRoutees requests a snapshot of the router’s current routee set.
+//
+// Usage:
+//   - Send with Ask to a router PID to retrieve the list of active routee names.
+//   - The router replies with a Routees message. If no routees are available, the list is empty.
+//
+// Scope and consistency:
+//   - Routers are local to an actor system; this message is only valid within the same process/system.
+//   - The returned list is a point-in-time snapshot.
+//
+// Resolving names:
+//   - Use ActorSystem.LocalActor (or LocalActor) to resolve a returned name to a local PID/reference.
+//   - Names are unique within the router’s namespace.
+type GetRoutees struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetRoutees) Reset() {
+	*x = GetRoutees{}
+	mi := &file_goakt_goakt_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetRoutees) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetRoutees) ProtoMessage() {}
+
+func (x *GetRoutees) ProtoReflect() protoreflect.Message {
+	mi := &file_goakt_goakt_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetRoutees.ProtoReflect.Descriptor instead.
+func (*GetRoutees) Descriptor() ([]byte, []int) {
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{25}
+}
+
+// Routees contains the set of routee names managed by a router at the time of the GetRoutees request.
+//
+// Semantics:
+//   - names represents the router’s best-effort snapshot when the request was handled.
+//   - A name can be resolved to a local PID/reference via ActorSystem.LocalActor (or LocalActor).
+//   - Since routers are locally scoped, these names are not valid across different actor systems or nodes.
+//
+// Example (Go):
+//
+//	resp, err := ctx.Ask(routerPID, &goaktpb.GetRoutees{}, 500*time.Millisecond)
+//	if err == nil {
+//	    r := resp.(*goaktpb.Routees)
+//	    for _, name := range r.GetNames() {
+//	        if pid := ctx.ActorSystem().LocalActor(name); pid != nil {
+//	            ctx.Tell(pid, &MyMessage{})
+//	        }
+//	    }
+//	}
+type Routees struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// List of routee actor names (unique within the router’s scope).
+	Names         []string `protobuf:"bytes,1,rep,name=names,proto3" json:"names,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Routees) Reset() {
+	*x = Routees{}
+	mi := &file_goakt_goakt_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Routees) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Routees) ProtoMessage() {}
+
+func (x *Routees) ProtoReflect() protoreflect.Message {
+	mi := &file_goakt_goakt_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Routees.ProtoReflect.Descriptor instead.
+func (*Routees) Descriptor() ([]byte, []int) {
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *Routees) GetNames() []string {
+	if x != nil {
+		return x.Names
+	}
+	return nil
+}
+
+// AdjustRouterPoolSize requests a runtime delta resize of a router's routee pool.
+//
+// Semantics (delta-based):
+//   - pool_size > 0: Scale up by pool_size (spawn that many additional routees).
+//   - pool_size < 0: Scale down by |pool_size| (stop that many existing routees).
+//   - pool_size == 0: No-op.
+//
+// Notes:
+//   - The resulting pool size never goes below 0. If |pool_size| exceeds the current size, the pool becomes 0.
+//   - This is not idempotent: sending +N twice grows by 2N. Prefer absolute-size semantics at the call site if needed.
+//   - Resizes are processed in mailbox order; intermediate sizes may be observed while scaling is in progress.
+//   - Routing continues during resize using currently available routees.
+//
+// Constraints:
+//   - Negative values are allowed and indicate downsizing.
+//   - Routees are local to the actor system hosting the router.
+//   - Supervisory directives (restart/resume/stop) apply to failures, not to normal downsizing.
+//
+// Verification:
+//   - Use GetRoutees after some delay to observe effective membership.
+//
+// Examples (Go):
+//
+//	// Grow by 5
+//	ctx.Tell(routerPID, &goaktpb.AdjustRouterPoolSize{PoolSize: 5})
+//	// Shrink by 3
+//	ctx.Tell(routerPID, &goaktpb.AdjustRouterPoolSize{PoolSize: -3})
+type AdjustRouterPoolSize struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Signed delta of routees to apply:
+	//
+	//	> 0 increases the pool by this many,
+	//	< 0 decreases it by the absolute value,
+	//	= 0 is a no-op.
+	PoolSize      int32 `protobuf:"varint,1,opt,name=pool_size,json=poolSize,proto3" json:"pool_size,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdjustRouterPoolSize) Reset() {
+	*x = AdjustRouterPoolSize{}
+	mi := &file_goakt_goakt_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdjustRouterPoolSize) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdjustRouterPoolSize) ProtoMessage() {}
+
+func (x *AdjustRouterPoolSize) ProtoReflect() protoreflect.Message {
+	mi := &file_goakt_goakt_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdjustRouterPoolSize.ProtoReflect.Descriptor instead.
+func (*AdjustRouterPoolSize) Descriptor() ([]byte, []int) {
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *AdjustRouterPoolSize) GetPoolSize() int32 {
+	if x != nil {
+		return x.PoolSize
+	}
+	return 0
+}
+
 var File_goakt_goakt_proto protoreflect.FileDescriptor
 
 const file_goakt_goakt_proto_rawDesc = "" +
@@ -1488,7 +1678,13 @@ const file_goakt_goakt_proto_rawDesc = "" +
 	"\x11ResumePassivation\"U\n" +
 	"\rStatusFailure\x12\x14\n" +
 	"\x05error\x18\x01 \x01(\tR\x05error\x12.\n" +
-	"\amessage\x18\x02 \x01(\v2\x14.google.protobuf.AnyR\amessageB\x85\x01\n" +
+	"\amessage\x18\x02 \x01(\v2\x14.google.protobuf.AnyR\amessage\"\f\n" +
+	"\n" +
+	"GetRoutees\"\x1f\n" +
+	"\aRoutees\x12\x14\n" +
+	"\x05names\x18\x01 \x03(\tR\x05names\"3\n" +
+	"\x14AdjustRouterPoolSize\x12\x1b\n" +
+	"\tpool_size\x18\x01 \x01(\x05R\bpoolSizeB\x85\x01\n" +
 	"\vcom.goaktpbB\n" +
 	"GoaktProtoH\x02P\x01Z,github.com/tochemey/goakt/v3/goaktpb;goaktpb\xa2\x02\x03GXX\xaa\x02\aGoaktpb\xca\x02\aGoaktpb\xe2\x02\x13Goaktpb\\GPBMetadata\xea\x02\aGoaktpbb\x06proto3"
 
@@ -1504,7 +1700,7 @@ func file_goakt_goakt_proto_rawDescGZIP() []byte {
 	return file_goakt_goakt_proto_rawDescData
 }
 
-var file_goakt_goakt_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
+var file_goakt_goakt_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
 var file_goakt_goakt_proto_goTypes = []any{
 	(*Address)(nil),               // 0: goaktpb.Address
 	(*Deadletter)(nil),            // 1: goaktpb.Deadletter
@@ -1531,39 +1727,42 @@ var file_goakt_goakt_proto_goTypes = []any{
 	(*PausePassivation)(nil),      // 22: goaktpb.PausePassivation
 	(*ResumePassivation)(nil),     // 23: goaktpb.ResumePassivation
 	(*StatusFailure)(nil),         // 24: goaktpb.StatusFailure
-	(*anypb.Any)(nil),             // 25: google.protobuf.Any
-	(*timestamppb.Timestamp)(nil), // 26: google.protobuf.Timestamp
+	(*GetRoutees)(nil),            // 25: goaktpb.GetRoutees
+	(*Routees)(nil),               // 26: goaktpb.Routees
+	(*AdjustRouterPoolSize)(nil),  // 27: goaktpb.AdjustRouterPoolSize
+	(*anypb.Any)(nil),             // 28: google.protobuf.Any
+	(*timestamppb.Timestamp)(nil), // 29: google.protobuf.Timestamp
 }
 var file_goakt_goakt_proto_depIdxs = []int32{
 	0,  // 0: goaktpb.Address.parent:type_name -> goaktpb.Address
 	0,  // 1: goaktpb.Deadletter.sender:type_name -> goaktpb.Address
 	0,  // 2: goaktpb.Deadletter.receiver:type_name -> goaktpb.Address
-	25, // 3: goaktpb.Deadletter.message:type_name -> google.protobuf.Any
-	26, // 4: goaktpb.Deadletter.send_time:type_name -> google.protobuf.Timestamp
+	28, // 3: goaktpb.Deadletter.message:type_name -> google.protobuf.Any
+	29, // 4: goaktpb.Deadletter.send_time:type_name -> google.protobuf.Timestamp
 	0,  // 5: goaktpb.ActorStarted.address:type_name -> goaktpb.Address
-	26, // 6: goaktpb.ActorStarted.started_at:type_name -> google.protobuf.Timestamp
+	29, // 6: goaktpb.ActorStarted.started_at:type_name -> google.protobuf.Timestamp
 	0,  // 7: goaktpb.ActorStopped.address:type_name -> goaktpb.Address
-	26, // 8: goaktpb.ActorStopped.stopped_at:type_name -> google.protobuf.Timestamp
+	29, // 8: goaktpb.ActorStopped.stopped_at:type_name -> google.protobuf.Timestamp
 	0,  // 9: goaktpb.ActorPassivated.address:type_name -> goaktpb.Address
-	26, // 10: goaktpb.ActorPassivated.passivated_at:type_name -> google.protobuf.Timestamp
+	29, // 10: goaktpb.ActorPassivated.passivated_at:type_name -> google.protobuf.Timestamp
 	0,  // 11: goaktpb.ActorChildCreated.address:type_name -> goaktpb.Address
 	0,  // 12: goaktpb.ActorChildCreated.parent:type_name -> goaktpb.Address
-	26, // 13: goaktpb.ActorChildCreated.created_at:type_name -> google.protobuf.Timestamp
+	29, // 13: goaktpb.ActorChildCreated.created_at:type_name -> google.protobuf.Timestamp
 	0,  // 14: goaktpb.ActorRestarted.address:type_name -> goaktpb.Address
-	26, // 15: goaktpb.ActorRestarted.restarted_at:type_name -> google.protobuf.Timestamp
+	29, // 15: goaktpb.ActorRestarted.restarted_at:type_name -> google.protobuf.Timestamp
 	0,  // 16: goaktpb.ActorSuspended.address:type_name -> goaktpb.Address
-	26, // 17: goaktpb.ActorSuspended.suspended_at:type_name -> google.protobuf.Timestamp
+	29, // 17: goaktpb.ActorSuspended.suspended_at:type_name -> google.protobuf.Timestamp
 	0,  // 18: goaktpb.ActorReinstated.address:type_name -> goaktpb.Address
-	26, // 19: goaktpb.ActorReinstated.reinstated_at:type_name -> google.protobuf.Timestamp
-	26, // 20: goaktpb.NodeJoined.timestamp:type_name -> google.protobuf.Timestamp
-	26, // 21: goaktpb.NodeLeft.timestamp:type_name -> google.protobuf.Timestamp
+	29, // 19: goaktpb.ActorReinstated.reinstated_at:type_name -> google.protobuf.Timestamp
+	29, // 20: goaktpb.NodeJoined.timestamp:type_name -> google.protobuf.Timestamp
+	29, // 21: goaktpb.NodeLeft.timestamp:type_name -> google.protobuf.Timestamp
 	0,  // 22: goaktpb.Terminated.address:type_name -> goaktpb.Address
-	26, // 23: goaktpb.Terminated.terminated_at:type_name -> google.protobuf.Timestamp
-	25, // 24: goaktpb.Broadcast.message:type_name -> google.protobuf.Any
-	25, // 25: goaktpb.Publish.message:type_name -> google.protobuf.Any
-	25, // 26: goaktpb.PanicSignal.message:type_name -> google.protobuf.Any
-	26, // 27: goaktpb.PanicSignal.timestamp:type_name -> google.protobuf.Timestamp
-	25, // 28: goaktpb.StatusFailure.message:type_name -> google.protobuf.Any
+	29, // 23: goaktpb.Terminated.terminated_at:type_name -> google.protobuf.Timestamp
+	28, // 24: goaktpb.Broadcast.message:type_name -> google.protobuf.Any
+	28, // 25: goaktpb.Publish.message:type_name -> google.protobuf.Any
+	28, // 26: goaktpb.PanicSignal.message:type_name -> google.protobuf.Any
+	29, // 27: goaktpb.PanicSignal.timestamp:type_name -> google.protobuf.Timestamp
+	28, // 28: goaktpb.StatusFailure.message:type_name -> google.protobuf.Any
 	29, // [29:29] is the sub-list for method output_type
 	29, // [29:29] is the sub-list for method input_type
 	29, // [29:29] is the sub-list for extension type_name
@@ -1582,7 +1781,7 @@ func file_goakt_goakt_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_goakt_goakt_proto_rawDesc), len(file_goakt_goakt_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   25,
+			NumMessages:   28,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

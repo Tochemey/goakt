@@ -141,7 +141,9 @@ message PoisonPill {}
 // PostStart is used when an actor has successfully started
 message PostStart {}
 
-// Broadcast is used to send message to a router
+// Broadcast is used to send message to a router via Tell
+// The router will broadcast the message to all its routees
+// given the routing strategy or the type of router used.
 message Broadcast {
   // Specifies the actual message
   google.protobuf.Any message = 1;
@@ -238,4 +240,75 @@ message StatusFailure {
   string error = 1;
   // Specifies the actual message that caused the failure
   google.protobuf.Any message = 2;
+}
+
+// GetRoutees requests a snapshot of the router’s current routee set.
+//
+// Usage:
+//   - Send with Ask to a router PID to retrieve the list of active routee names.
+//   - The router replies with a Routees message. If no routees are available, the list is empty.
+//
+// Scope and consistency:
+//   - Routers are local to an actor system; this message is only valid within the same process/system.
+//   - The returned list is a point-in-time snapshot.
+//
+// Resolving names:
+//   - Use ActorSystem.LocalActor (or LocalActor) to resolve a returned name to a local PID/reference.
+//   - Names are unique within the router’s namespace.
+message GetRoutees {}
+
+// Routees contains the set of routee names managed by a router at the time of the GetRoutees request.
+//
+// Semantics:
+//   - names represents the router’s best-effort snapshot when the request was handled.
+//   - A name can be resolved to a local PID/reference via ActorSystem.LocalActor (or LocalActor).
+//   - Since routers are locally scoped, these names are not valid across different actor systems or nodes.
+//
+// Example (Go):
+//   resp, err := ctx.Ask(routerPID, &goaktpb.GetRoutees{}, 500*time.Millisecond)
+//   if err == nil {
+//       r := resp.(*goaktpb.Routees)
+//       for _, name := range r.GetNames() {
+//           if pid := ctx.ActorSystem().LocalActor(name); pid != nil {
+//               ctx.Tell(pid, &MyMessage{})
+//           }
+//       }
+//   }
+message Routees {
+  // List of routee actor names (unique within the router’s scope).
+  repeated string names = 1;
+}
+
+// AdjustRouterPoolSize requests a runtime delta resize of a router's routee pool.
+//
+// Semantics (delta-based):
+//   - pool_size > 0: Scale up by pool_size (spawn that many additional routees).
+//   - pool_size < 0: Scale down by |pool_size| (stop that many existing routees).
+//   - pool_size == 0: No-op.
+//
+// Notes:
+//   - The resulting pool size never goes below 0. If |pool_size| exceeds the current size, the pool becomes 0.
+//   - This is not idempotent: sending +N twice grows by 2N. Prefer absolute-size semantics at the call site if needed.
+//   - Resizes are processed in mailbox order; intermediate sizes may be observed while scaling is in progress.
+//   - Routing continues during resize using currently available routees.
+//
+// Constraints:
+//   - Negative values are allowed and indicate downsizing.
+//   - Routees are local to the actor system hosting the router.
+//   - Supervisory directives (restart/resume/stop) apply to failures, not to normal downsizing.
+//
+// Verification:
+//   - Use GetRoutees after some delay to observe effective membership.
+//
+// Examples (Go):
+//   // Grow by 5
+//   ctx.Tell(routerPID, &goaktpb.AdjustRouterPoolSize{PoolSize: 5})
+//   // Shrink by 3
+//   ctx.Tell(routerPID, &goaktpb.AdjustRouterPoolSize{PoolSize: -3})
+message AdjustRouterPoolSize {
+  // Signed delta of routees to apply:
+  //   > 0 increases the pool by this many,
+  //   < 0 decreases it by the absolute value,
+  //   = 0 is a no-op.
+  int32 pool_size = 1;
 }
