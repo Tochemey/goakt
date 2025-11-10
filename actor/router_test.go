@@ -605,7 +605,50 @@ func TestRouter(t *testing.T) {
 
 		assert.NoError(t, system.Stop(ctx))
 	})
-	t.Run("With Restarting routee", func(t *testing.T) {
+	t.Run("With Restarting routee with no retries", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		system, err := NewActorSystem(
+			"test",
+			WithLogger(logger))
+
+		require.NoError(t, err)
+		require.NotNil(t, system)
+
+		require.NoError(t, system.Start(ctx))
+
+		pause.For(time.Second)
+
+		routeesKind := new(MockFaultyRoutee)
+		poolSize := 1
+		routingStrategy := FanOutRouting
+		routerName := "workerPool"
+		router, err := system.SpawnRouter(ctx, routerName, poolSize, routeesKind,
+			WithRoutingStrategy(routingStrategy),
+			WithRestartRouteeOnFailure(0, -1))
+		require.NoError(t, err)
+		require.NotNil(t, router)
+
+		pause.For(time.Second)
+
+		// send a broadcast message to the router
+		message, _ := anypb.New(&testpb.TestLog{Text: "msg"})
+		err = Tell(ctx, router, &goaktpb.Broadcast{Message: message})
+		require.NoError(t, err)
+
+		pause.For(2 * time.Second)
+
+		// this is just for tests purpose
+		workerOneName := routeeName(0, routerName)
+		workerOneRef, ok := system.findRoutee(workerOneName)
+		require.True(t, ok)
+		require.NotNil(t, workerOneRef)
+		require.True(t, workerOneRef.IsRunning())
+		require.EqualValues(t, 1, workerOneRef.RestartCount())
+
+		assert.NoError(t, system.Stop(ctx))
+	})
+	t.Run("With Resuming routee", func(t *testing.T) {
 		ctx := context.TODO()
 		logger := log.DiscardLogger
 		system, err := NewActorSystem(
@@ -754,6 +797,22 @@ func TestRouter(t *testing.T) {
 		require.True(t, ok)
 		require.NotNil(t, routeesResponse)
 		require.Len(t, routeesResponse.GetNames(), 2)
+
+		// scale down the router by 3 (delta)
+		err = system.NoSender().Tell(ctx, router, &goaktpb.AdjustRouterPoolSize{
+			PoolSize: -3,
+		})
+		require.NoError(t, err)
+
+		pause.For(time.Second)
+
+		response, err = Ask(ctx, router, new(goaktpb.GetRoutees), time.Second)
+		require.NoError(t, err)
+		require.NotNil(t, response)
+		routeesResponse, ok = response.(*goaktpb.Routees)
+		require.True(t, ok)
+		require.NotNil(t, routeesResponse)
+		require.Empty(t, routeesResponse.GetNames())
 
 		assert.NoError(t, system.Stop(ctx))
 	})

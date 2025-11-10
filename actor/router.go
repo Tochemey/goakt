@@ -169,9 +169,6 @@ func (x *router) handleAjustRouterPoolSize(ctx *ReceiveContext) {
 }
 
 func (x *router) scaleUp(ctx *ReceiveContext, delta int) {
-	if delta <= 0 {
-		return
-	}
 	currentSize := len(x.routeesMap)
 	targetSize := currentSize + delta
 	x.logger.Infof("scaling up router (%s) pool size from %d to %d", x.name, currentSize, targetSize)
@@ -180,9 +177,6 @@ func (x *router) scaleUp(ctx *ReceiveContext, delta int) {
 }
 
 func (x *router) scaleDown(ctx *ReceiveContext, delta int) {
-	if delta <= 0 {
-		return
-	}
 	routees, ok := x.availableRoutees()
 	if !ok {
 		return
