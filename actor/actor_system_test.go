@@ -1819,10 +1819,12 @@ func TestActorSystem(t *testing.T) {
 		require.Error(t, err)
 		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
 
-		actors := node3.ActorRefs(ctx, time.Second)
+		actors, err := node3.ActorRefs(ctx, time.Second)
+		require.NoError(t, err)
 		require.Len(t, actors, 1)
 
-		actors = node1.ActorRefs(ctx, time.Second)
+		actors, err = node1.ActorRefs(ctx, time.Second)
+		require.NoError(t, err)
 		require.Len(t, actors, 1)
 
 		// free resource
@@ -1834,6 +1836,23 @@ func TestActorSystem(t *testing.T) {
 		require.NoError(t, sd3.Close())
 		// shutdown the nats server gracefully
 		srv.Shutdown()
+	})
+	t.Run("ActorRefs returns error when cluster scan fails", func(t *testing.T) {
+		ctx := context.TODO()
+		clusterMock := new(mockcluster.Cluster)
+		system := MockReplicationTestSystem(clusterMock)
+
+		system.locker.Lock()
+		system.actors = newTree()
+		system.locker.Unlock()
+
+		clusterMock.EXPECT().Actors(mock.Anything, mock.Anything).Return(nil, assert.AnError)
+		t.Cleanup(func() { clusterMock.AssertExpectations(t) })
+
+		actorRefs, err := system.ActorRefs(ctx, time.Second)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, assert.AnError)
+		require.Nil(t, actorRefs)
 	})
 	t.Run("With invalid remote config address", func(t *testing.T) {
 		remotingPort := dynaport.Get(1)[0]

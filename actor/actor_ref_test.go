@@ -37,12 +37,12 @@ import (
 func TestActorRef(t *testing.T) {
 	t.Run("With Equals", func(t *testing.T) {
 		addr := address.New("name", "system", "host", 1234)
-		actorRef := fromActorRef(&internalpb.Actor{
+		actorRef := toActorRef(&internalpb.Actor{
 			Address: addr.Address,
 			Type:    "kind",
 		})
 
-		newActorRef := fromActorRef(&internalpb.Actor{
+		newActorRef := toActorRef(&internalpb.Actor{
 			Address: addr.Address,
 			Type:    "kind",
 		})
