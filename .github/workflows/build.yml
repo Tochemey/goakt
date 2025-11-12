@@ -31,9 +31,6 @@ jobs:
               - 'go.mod'
               - 'go.sum'
               - '.golangci.yml'
-              - 'cmd/**'
-              - 'internal/**'
-              - 'pkg/**'
               - '.github/workflows/build.yml'
               - '.github/workflows/pr.yml'
 
