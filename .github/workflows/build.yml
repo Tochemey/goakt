@@ -23,6 +23,7 @@ jobs:
       - uses: dorny/paths-filter@v3
         id: filter
         with:
+          predicate-quantifier: 'every'
           # "build" is true if any of these paths changed
           filters: |
             build:
