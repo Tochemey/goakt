@@ -27,6 +27,7 @@ jobs:
           filters: |
             build:
               - '**/*.go'
+              - '!playground/**'
               - 'go.mod'
               - 'go.sum'
               - '.golangci.yml'
@@ -90,7 +91,7 @@ jobs:
       - name: Run tests
         shell: bash
         run: |
-          go-acc ./... -o coverage.out --ignore goaktpb,mocks,internal/internalpb,bench -- -mod=vendor -p 1 -timeout 0 -race -v
+          go-acc ./... -o coverage.out --ignore goaktpb,mocks,internal/internalpb,bench,playground -- -mod=vendor -p 1 -timeout 0 -race -v
       - name: Upload coverage to Codecov
         if: matrix.os == 'linux'
         uses: codecov/codecov-action@v5

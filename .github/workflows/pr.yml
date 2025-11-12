@@ -28,6 +28,7 @@ jobs:
           filters: |
             build:
               - '**/*.go'
+              - '!playground/**'
               - 'go.mod'
               - 'go.sum'
               - '.golangci.yml'
