@@ -104,10 +104,10 @@ type ActorSystem interface {
 	// ActorRefs retrieves a list of active actors, including both local actors
 	// and, when cluster mode is enabled, actors across the cluster. Use this
 	// method cautiously, as the scanning process may impact system performance.
-	// If the cluster request fails, only locally active actors will be returned.
+	// If the cluster request fails, an error will be returned.
 	// The timeout parameter defines the maximum duration for cluster-based requests
 	// before they are terminated.
-	ActorRefs(ctx context.Context, timeout time.Duration) []ActorRef
+	ActorRefs(ctx context.Context, timeout time.Duration) ([]ActorRef, error)
 	// Start initializes the actor system.
 	// To guarantee a clean shutdown during unexpected system terminations,
 	// developers must handle SIGTERM and SIGINT signals appropriately and invoke Stop.
@@ -1592,10 +1592,10 @@ func (x *actorSystem) Actors() []*PID {
 // ActorRefs retrieves a list of active actors, including both local actors
 // and, when cluster mode is enabled, actors across the cluster. Use this
 // method cautiously, as the scanning process may impact system performance.
-// If the cluster request fails, only locally active actors will be returned.
+// If the cluster request fails, an error is returned.
 // The timeout parameter defines the maximum duration for cluster-based requests
 // before they are terminated.
-func (x *actorSystem) ActorRefs(ctx context.Context, timeout time.Duration) []ActorRef {
+func (x *actorSystem) ActorRefs(ctx context.Context, timeout time.Duration) ([]ActorRef, error) {
 	pids := x.Actors()
 	actorRefs := make([]ActorRef, len(pids))
 	uniques := make(map[string]registry.Unit)
@@ -1605,17 +1605,20 @@ func (x *actorSystem) ActorRefs(ctx context.Context, timeout time.Duration) []Ac
 	}
 
 	if x.InCluster() {
-		if actors, err := x.getCluster().Actors(ctx, timeout); err == nil {
-			for _, actor := range actors {
-				actorRef := fromActorRef(actor)
-				if _, ok := uniques[actorRef.Address().String()]; !ok {
-					actorRefs = append(actorRefs, actorRef)
-				}
+		actors, err := x.getCluster().Actors(ctx, timeout)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, actor := range actors {
+			actorRef := toActorRef(actor)
+			if _, ok := uniques[actorRef.Address().String()]; !ok {
+				actorRefs = append(actorRefs, actorRef)
 			}
 		}
 	}
 
-	return actorRefs
+	return actorRefs, nil
 }
 
 // PeerAddress returns the actor system address known in the cluster. That address is used by other nodesMap to communicate with the actor system.

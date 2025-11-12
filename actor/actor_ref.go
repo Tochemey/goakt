@@ -92,7 +92,7 @@ func (x ActorRef) Equals(actor ActorRef) bool {
 	return x.address.Equals(actor.address)
 }
 
-func fromActorRef(actorRef *internalpb.Actor) ActorRef {
+func toActorRef(actorRef *internalpb.Actor) ActorRef {
 	return ActorRef{
 		name:        actorRef.GetAddress().GetName(),
 		kind:        actorRef.GetType(),
