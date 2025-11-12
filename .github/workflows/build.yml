@@ -23,16 +23,15 @@ jobs:
       - uses: dorny/paths-filter@v3
         id: filter
         with:
+          predicate-quantifier: 'every'
           # "build" is true if any of these paths changed
           filters: |
             build:
               - '**/*.go'
+              - '!playground/**'
               - 'go.mod'
               - 'go.sum'
               - '.golangci.yml'
-              - 'cmd/**'
-              - 'internal/**'
-              - 'pkg/**'
               - '.github/workflows/build.yml'
               - '.github/workflows/pr.yml'
 
@@ -90,7 +89,7 @@ jobs:
       - name: Run tests
         shell: bash
         run: |
-          go-acc ./... -o coverage.out --ignore goaktpb,mocks,internal/internalpb,bench -- -mod=vendor -p 1 -timeout 0 -race -v
+          go-acc ./... -o coverage.out --ignore goaktpb,mocks,internal/internalpb,bench,playground -- -mod=vendor -p 1 -timeout 0 -race -v
       - name: Upload coverage to Codecov
         if: matrix.os == 'linux'
         uses: codecov/codecov-action@v5
