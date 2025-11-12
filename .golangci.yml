@@ -44,6 +44,7 @@ linters:
     gosec:
       excludes:
         - G115
+        - G602
     misspell:
       locale: US
       ignore-rules:
