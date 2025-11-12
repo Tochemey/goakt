@@ -81,7 +81,7 @@ Before you start, make sure you have these installed:
 2. Ensure your code adheres to the project's style and passes tests `earthly +test`.
 3. Commit your changes using a **Conventional Commit** message. See [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
 4. Submit a [pull request](https://help.github.com/articles/using-pull-requests) from your fork to the `main` branch of the original repository.
-5. (optional) Following the instructions in the `playground` package to leave a working sample code in case it is a bug.
+5. Following the instructions in the `playground` package to leave a working sample code in case it is a bug.
 
 ### Test & Linter
 
