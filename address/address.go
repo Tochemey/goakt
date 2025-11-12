@@ -262,11 +262,11 @@ func (x *Address) HostPort() string {
 // is nil.
 //
 // This comparison includes System, Host, Port, Name, ID, and Parent.
-func (a *Address) Equals(x *Address) bool {
-	if a == nil || x == nil {
+func (x *Address) Equals(y *Address) bool {
+	if x == nil || y == nil {
 		return false
 	}
-	return proto.Equal(a.Address, x.Address)
+	return proto.Equal(x.Address, y.Address)
 }
 
 // MarshalBinary encodes the Address to a binary form.
