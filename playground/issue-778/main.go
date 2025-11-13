@@ -1,9 +1,7 @@
-//go:build darwin || freebsd || openbsd || dragonfly || netbsd
-
 /*
  * MIT License
  *
- * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025 Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,22 +22,53 @@
  * SOFTWARE.
  */
 
-package memory
+package main
 
 import (
-	"syscall"
-	"unsafe"
+	"context"
+	"fmt"
+
+	"github.com/tochemey/goakt/v3/actor"
+	"github.com/tochemey/goakt/v3/goaktpb"
+	"github.com/tochemey/goakt/v3/log"
 )
 
-func sysctl(name string) (uint64, error) {
-	s, err := syscall.Sysctl(name)
-	if err != nil {
-		return 0, err
+func main() {
+	ctx := context.Background()
+
+	fmt.Println("Starting actor system...")
+	actorSystem, _ := actor.NewActorSystem("Test", actor.WithLogger(log.DiscardLogger))
+	_ = actorSystem.Start(ctx)
+
+	fmt.Println("\nSpawning actor...")
+	pid, _ := actorSystem.Spawn(ctx, "actor1", &MyActor{}, actor.WithLongLived())
+
+	fmt.Println("\nRestarting actor...")
+	pid.Restart(ctx)
+
+	fmt.Println("\nStopping actor system...")
+	_ = actorSystem.Stop(ctx)
+}
+
+type MyActor struct{}
+
+var _ actor.Actor = (*MyActor)(nil)
+
+func (x *MyActor) PreStart(*actor.Context) error {
+	fmt.Println("PreStart")
+	return nil
+}
+
+func (x *MyActor) Receive(ctx *actor.ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *goaktpb.PostStart:
+		fmt.Println("PostStart")
+	default:
+		ctx.Unhandled()
 	}
-	// hack because the string conversion above drops a \0
-	b := []byte(s)
-	if len(b) < 8 {
-		b = append(b, 0)
-	}
-	return *(*uint64)(unsafe.Pointer(&b[0])), nil
+}
+
+func (x *MyActor) PostStop(*actor.Context) error {
+	fmt.Println("PostStop")
+	return nil
 }

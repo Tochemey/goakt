@@ -13,7 +13,6 @@ gen.env
 gen/
 /.fleet/settings.json
 bench/*.txt
-playground
 .trunk/
 .gocache/
 .cache/
