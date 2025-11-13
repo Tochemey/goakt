@@ -46,8 +46,10 @@ const (
 	// RoundRobinActivation distributes grains evenly across nodes
 	// by cycling through the available nodes in a round-robin manner.
 	// This strategy provides balanced load distribution over time.
+	// ⚠️ Note: This strategy is subject to the cluster topology at the time of activation. For a stable cluster topology,
+	// it ensures an even distribution of grains across all nodes.
 	// ⚠️ Note: This strategy will only be applied if the given Grain does not exist yet when cluster mode is enabled.
-	// If the Grain already exists on another node, it will be activated there instead.
+	// ⚠️ Note: If the Grain already exists on another node, it will be activated there instead.
 	RoundRobinActivation ActivationStrategy = iota
 
 	// Random selects a node at random from the available pool of nodes.

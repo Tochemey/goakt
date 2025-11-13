@@ -128,6 +128,14 @@ func TestNotRunningReturnsErrEngineNotRunning(t *testing.T) {
 
 	require.Zero(t, cluster.GetPartition(actor.GetAddress().GetName()))
 
+	next, err := cluster.NextRoundRobinValue(ctx, ActorsRoundRobinKey)
+	require.ErrorIs(t, err, ErrEngineNotRunning)
+	require.Equal(t, -1, next)
+
+	next, err = cluster.NextRoundRobinValue(ctx, GrainsRoundRobinKey)
+	require.ErrorIs(t, err, ErrEngineNotRunning)
+	require.Equal(t, -1, next)
+
 	require.NoError(t, cluster.Stop(ctx))
 
 	provider.AssertExpectations(t)
@@ -853,6 +861,73 @@ func TestSingleNode(t *testing.T) {
 		require.NoError(t, cluster.Stop(ctx))
 		provider.AssertExpectations(t)
 	})
+	t.Run("With GetRoundRobinNextValue", func(t *testing.T) {
+		// create the context
+		ctx := t.Context()
+
+		// generate the ports for the single node
+		nodePorts := dynaport.Get(3)
+		discoveryPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		// define discovered addresses
+		addrs := []string{
+			fmt.Sprintf("127.0.0.1:%d", discoveryPort),
+		}
+
+		// mock the discovery provider
+		provider := new(mocksdiscovery.Provider)
+
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		// create a Node
+		host := "127.0.0.1"
+		hostNode := discovery.Node{
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: discoveryPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
+		}
+
+		cluster := New("test", provider, &hostNode, WithLogger(log.DiscardLogger))
+		require.NotNil(t, cluster)
+
+		// start the Node
+		err := cluster.Start(ctx)
+		require.NoError(t, err)
+
+		// get next value for actors
+		next, err := cluster.NextRoundRobinValue(ctx, ActorsRoundRobinKey)
+		require.NoError(t, err)
+		require.Equal(t, 1, next)
+
+		next, err = cluster.NextRoundRobinValue(ctx, ActorsRoundRobinKey)
+		require.NoError(t, err)
+		require.Equal(t, 2, next)
+
+		// get next value for grains
+		next, err = cluster.NextRoundRobinValue(ctx, GrainsRoundRobinKey)
+		require.NoError(t, err)
+		require.Equal(t, 1, next)
+
+		next, err = cluster.NextRoundRobinValue(ctx, GrainsRoundRobinKey)
+		require.NoError(t, err)
+		require.Equal(t, 2, next)
+
+		//  shutdown the Node
+		pause.For(time.Second)
+
+		// stop the node
+		require.NoError(t, cluster.Stop(ctx))
+		provider.AssertExpectations(t)
+	})
 }
 
 func TestMultipleNodes(t *testing.T) {
@@ -1246,6 +1321,168 @@ func TestMultipleNodes(t *testing.T) {
 		require.NoError(t, sd3.Close())
 		srv.Shutdown()
 	})
+	t.Run("With NextRoundRobinValue", func(t *testing.T) {
+		ctx := context.TODO()
+
+		// start the NATS server
+		srv := startNatsServer(t)
+
+		// create a cluster node1
+		node1, sd1 := startEngine(t, srv.Addr().String())
+		require.NotNil(t, node1)
+
+		// wait for the node to start properly
+		pause.For(2 * time.Second)
+
+		// create a cluster node2
+		node2, sd2 := startEngine(t, srv.Addr().String())
+		require.NotNil(t, node2)
+
+		// wait for the node to start properly
+		pause.For(time.Second)
+
+		// create a cluster node3
+		node3, sd3 := startEngine(t, srv.Addr().String())
+		require.NotNil(t, node3)
+		require.NotNil(t, sd3)
+
+		// wait for the node to start properly
+		pause.For(time.Second)
+
+		// get next value for actors from node2
+		next, err := node1.NextRoundRobinValue(ctx, ActorsRoundRobinKey)
+		require.NoError(t, err)
+		require.Equal(t, 1, next)
+
+		next, err = node2.NextRoundRobinValue(ctx, ActorsRoundRobinKey)
+		require.NoError(t, err)
+		require.Equal(t, 2, next)
+
+		next, err = node3.NextRoundRobinValue(ctx, ActorsRoundRobinKey)
+		require.NoError(t, err)
+		require.Equal(t, 3, next)
+
+		next, err = node1.NextRoundRobinValue(ctx, ActorsRoundRobinKey)
+		require.NoError(t, err)
+		require.Equal(t, 4, next)
+
+		// get next value for grains from node2
+		next, err = node1.NextRoundRobinValue(ctx, GrainsRoundRobinKey)
+		require.NoError(t, err)
+		require.Equal(t, 1, next)
+
+		next, err = node2.NextRoundRobinValue(ctx, GrainsRoundRobinKey)
+		require.NoError(t, err)
+		require.Equal(t, 2, next)
+
+		next, err = node3.NextRoundRobinValue(ctx, GrainsRoundRobinKey)
+		require.NoError(t, err)
+		require.Equal(t, 3, next)
+
+		next, err = node1.NextRoundRobinValue(ctx, GrainsRoundRobinKey)
+		require.NoError(t, err)
+		require.Equal(t, 4, next)
+
+		// stop the second node
+		require.NoError(t, node2.Stop(ctx))
+		pause.For(time.Second)
+
+		next, err = node1.NextRoundRobinValue(ctx, GrainsRoundRobinKey)
+		require.NoError(t, err)
+		require.Equal(t, 5, next)
+
+		next, err = node3.NextRoundRobinValue(ctx, ActorsRoundRobinKey)
+		require.NoError(t, err)
+		require.Equal(t, 5, next)
+
+		require.NoError(t, node1.Stop(ctx))
+		require.NoError(t, node3.Stop(ctx))
+		require.NoError(t, sd1.Close())
+		require.NoError(t, sd2.Close())
+		require.NoError(t, sd3.Close())
+		srv.Shutdown()
+	})
+	t.Run("With NextRoundRobinValue on starting node down", func(t *testing.T) {
+		ctx := context.TODO()
+
+		// start the NATS server
+		srv := startNatsServer(t)
+
+		// create a cluster node1
+		node1, sd1 := startEngine(t, srv.Addr().String())
+		require.NotNil(t, node1)
+
+		// wait for the node to start properly
+		pause.For(2 * time.Second)
+
+		// create a cluster node2
+		node2, sd2 := startEngine(t, srv.Addr().String())
+		require.NotNil(t, node2)
+
+		// wait for the node to start properly
+		pause.For(time.Second)
+
+		// create a cluster node3
+		node3, sd3 := startEngine(t, srv.Addr().String())
+		require.NotNil(t, node3)
+		require.NotNil(t, sd3)
+
+		// wait for the node to start properly
+		pause.For(time.Second)
+
+		// get next value for actors from node2
+		next, err := node2.NextRoundRobinValue(ctx, ActorsRoundRobinKey)
+		require.NoError(t, err)
+		require.Equal(t, 1, next)
+
+		next, err = node1.NextRoundRobinValue(ctx, ActorsRoundRobinKey)
+		require.NoError(t, err)
+		require.Equal(t, 2, next)
+
+		next, err = node3.NextRoundRobinValue(ctx, ActorsRoundRobinKey)
+		require.NoError(t, err)
+		require.Equal(t, 3, next)
+
+		next, err = node1.NextRoundRobinValue(ctx, ActorsRoundRobinKey)
+		require.NoError(t, err)
+		require.Equal(t, 4, next)
+
+		// get next value for grains from node2
+		next, err = node2.NextRoundRobinValue(ctx, GrainsRoundRobinKey)
+		require.NoError(t, err)
+		require.Equal(t, 1, next)
+
+		next, err = node1.NextRoundRobinValue(ctx, GrainsRoundRobinKey)
+		require.NoError(t, err)
+		require.Equal(t, 2, next)
+
+		next, err = node3.NextRoundRobinValue(ctx, GrainsRoundRobinKey)
+		require.NoError(t, err)
+		require.Equal(t, 3, next)
+
+		next, err = node1.NextRoundRobinValue(ctx, GrainsRoundRobinKey)
+		require.NoError(t, err)
+		require.Equal(t, 4, next)
+
+		// stop the second node
+		require.NoError(t, node2.Stop(ctx))
+		pause.For(time.Second)
+
+		next, err = node1.NextRoundRobinValue(ctx, GrainsRoundRobinKey)
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, next, 1)
+
+		next, err = node3.NextRoundRobinValue(ctx, ActorsRoundRobinKey)
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, next, 1)
+
+		require.NoError(t, node1.Stop(ctx))
+		require.NoError(t, node3.Stop(ctx))
+		require.NoError(t, sd1.Close())
+		require.NoError(t, sd2.Close())
+		require.NoError(t, sd3.Close())
+		srv.Shutdown()
+	})
 }
 
 func startNatsServer(t *testing.T) *natsserver.Server {
@@ -1399,6 +1636,37 @@ func TestPutActorPropagatesDMapError(t *testing.T) {
 	actor := &internalpb.Actor{}
 	err := cl.PutActor(context.Background(), actor)
 	require.ErrorIs(t, err, putErr)
+}
+
+func TestNextRoundRobinValuePropagatesIncrError(t *testing.T) {
+	expectedErr := errors.New("incr failure")
+	cl := &cluster{
+		running:     atomic.NewBool(true),
+		logger:      log.DiscardLogger,
+		readTimeout: time.Second,
+		dmap: &MockDMap{
+			incrFn: func(ctx context.Context, key string, delta int) (int, error) { // nolint
+				require.Equal(t, composeKey(namespaceActors, ActorsRoundRobinKey), key)
+				require.Equal(t, 1, delta)
+				return 0, expectedErr
+			},
+		},
+	}
+
+	_, err := cl.NextRoundRobinValue(context.Background(), ActorsRoundRobinKey)
+	require.ErrorIs(t, err, expectedErr)
+}
+
+func TestNextRoundRobinValueReturnsErrorForInvalidKey(t *testing.T) {
+	cl := &cluster{
+		running:     atomic.NewBool(true),
+		logger:      log.DiscardLogger,
+		readTimeout: time.Second,
+	}
+
+	next, err := cl.NextRoundRobinValue(context.Background(), "invalid-key")
+	require.Equal(t, -1, next)
+	require.EqualError(t, err, "invalid round-robin key: invalid-key")
 }
 
 func TestGetActorReturnsDMapError(t *testing.T) {

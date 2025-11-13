@@ -184,18 +184,18 @@ func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opt
 		return err
 	}
 
-	peers, err := x.cluster.Peers(ctx)
+	peers, err := x.cluster.Members(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to fetch cluster nodes: %w", err)
 	}
 
-	peers, err = x.filterPeersByRole(peers, config.role)
-	if err != nil {
+	if len(peers) == 0 {
+		_, err := x.Spawn(ctx, name, actor, opts...)
 		return err
 	}
 
-	if len(peers) == 0 {
-		_, err := x.Spawn(ctx, name, actor, opts...)
+	peers, err = x.filterPeersByRole(peers, config.role)
+	if err != nil {
 		return err
 	}
 
@@ -362,9 +362,7 @@ func (x *actorSystem) selectPlacementPeer(ctx context.Context, peers []*cluster.
 	case Random:
 		return peers[rand.IntN(len(peers))], nil //nolint:gosec
 	case RoundRobin:
-		x.spawnOnNext.Inc()
-		n := x.spawnOnNext.Load()
-		return peers[(int(n)-1)%len(peers)], nil
+		return x.actorsRoundRobinPlacementPeer(ctx, peers)
 	case LeastLoad:
 		return x.leastLoadedPeer(ctx, peers)
 	default:
@@ -374,4 +372,12 @@ func (x *actorSystem) selectPlacementPeer(ctx context.Context, peers []*cluster.
 
 func kindRole(kind, role string) string {
 	return fmt.Sprintf("%s%s%s", kind, kindRoleSeparator, role)
+}
+
+func (x *actorSystem) actorsRoundRobinPlacementPeer(ctx context.Context, peers []*cluster.Peer) (*cluster.Peer, error) {
+	next, err := x.cluster.NextRoundRobinValue(ctx, cluster.ActorsRoundRobinKey)
+	if err != nil {
+		return nil, err
+	}
+	return peers[(next-1)%len(peers)], nil
 }

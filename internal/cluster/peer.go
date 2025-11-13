@@ -56,6 +56,11 @@ func (peer Peer) PeerAddress() string {
 	return net.JoinHostPort(peer.Host, strconv.Itoa(peer.PeersPort))
 }
 
+// RemotingAddress returns address the node's remoting will use to connect to
+func (peer Peer) RemotingAddress() string {
+	return net.JoinHostPort(peer.Host, strconv.Itoa(peer.RemotingPort))
+}
+
 // HasRole checks if the peer has the given role
 func (peer Peer) HasRole(role string) bool {
 	return slices.Contains(peer.Roles, role)

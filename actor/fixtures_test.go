@@ -1463,7 +1463,6 @@ func MockReplicationTestSystem(clusterMock *mockcluster.Cluster) *actorSystem {
 	sys.starting.Store(false)
 	sys.shuttingDown.Store(false)
 	sys.startedAt.Store(time.Now().Unix())
-	sys.spawnOnNext.Store(0)
 	sys.actorsCounter.Store(0)
 	sys.deadlettersCounter.Store(0)
 

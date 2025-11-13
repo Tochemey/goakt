@@ -798,14 +798,12 @@ type actorSystem struct {
 	relocationEnabled atomic.Bool
 	extensions        *collection.Map[string, extension.Extension]
 
-	spawnOnNext         atomic.Uint32
-	grainActivationNext atomic.Uint32
-	shuttingDown        atomic.Bool
-	grainsQueue         chan *internalpb.Grain
-	grains              *collection.Map[string, *grainPID]
-	evictionStrategy    *EvictionStrategy
-	evictionInterval    time.Duration
-	evictionStopSig     chan registry.Unit
+	shuttingDown     atomic.Bool
+	grainsQueue      chan *internalpb.Grain
+	grains           *collection.Map[string, *grainPID]
+	evictionStrategy *EvictionStrategy
+	evictionInterval time.Duration
+	evictionStopSig  chan registry.Unit
 }
 
 var (
@@ -881,8 +879,6 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	system.relocating.Store(false)
 	system.actorsCounter.Store(0)
 	system.deadlettersCounter.Store(0)
-	system.spawnOnNext.Store(0)
-	system.grainActivationNext.Store(0)
 	system.shuttingDown.Store(false)
 	system.started.Store(false)
 	system.starting.Store(false)
@@ -2646,8 +2642,6 @@ func (x *actorSystem) reset() {
 	x.extensions.Reset()
 	x.actors.reset()
 	x.grains.Reset()
-	x.spawnOnNext.Store(0)
-	x.grainActivationNext.Store(0)
 	x.shuttingDown.Store(false)
 }
 

@@ -58,6 +58,8 @@ const (
 	dMapName             = "goakt.dmap"
 	defaultEventsBufSize = 256
 	namespaceSeparator   = "::"
+	ActorsRoundRobinKey  = "actors_rr_index"
+	GrainsRoundRobinKey  = "grains_rr_index"
 )
 
 type recordNamespace string
@@ -128,6 +130,10 @@ type Cluster interface {
 	JobKey(ctx context.Context, jobID string) ([]byte, error)
 	// Members lists all cluster members including the local node.
 	Members(ctx context.Context) ([]*Peer, error)
+	// NextRoundRobinValue returns the next value in a round-robin sequence for the given key.
+	// The key here is either actors or grains. When the node that owns the key goes down,
+	// the sequence may be reset.
+	NextRoundRobinValue(ctx context.Context, key string) (int, error)
 }
 
 // cluster implements the Cluster interface backed by an Olric unified
@@ -685,6 +691,38 @@ func (x *cluster) GetPartition(actorName string) uint64 {
 		return 0
 	}
 	return resp.Partition()
+}
+
+// NextRoundRobinValue returns the next value in a round-robin sequence for the given key.
+// The key here is either actors or grains.
+func (x *cluster) NextRoundRobinValue(ctx context.Context, key string) (int, error) {
+	if !x.running.Load() {
+		return -1, ErrEngineNotRunning
+	}
+
+	x.mu.Lock()
+	defer x.mu.Unlock()
+
+	ctx = context.WithoutCancel(ctx)
+	ctx, cancel := context.WithTimeout(ctx, x.readTimeout)
+	defer cancel()
+
+	var composedKey string
+	switch key {
+	case ActorsRoundRobinKey:
+		composedKey = composeKey(namespaceActors, key)
+	case GrainsRoundRobinKey:
+		composedKey = composeKey(namespaceGrains, key)
+	default:
+		return -1, fmt.Errorf("invalid round-robin key: %s", key)
+	}
+
+	next, err := x.dmap.Incr(ctx, composedKey, 1)
+	if err != nil {
+		return -1, err
+	}
+
+	return next, nil
 }
 
 // IsRunning exposes whether the cluster engine has been started.
