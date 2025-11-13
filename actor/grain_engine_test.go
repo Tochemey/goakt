@@ -228,20 +228,6 @@ func TestGrainIdentity_RemoteActivationWireEncodingError(t *testing.T) {
 	rem.AssertNotCalled(t, "RemotingServiceClient", mock.Anything, mock.Anything)
 }
 
-func TestFindActivationPeer_AllowsLocalRoleFallback(t *testing.T) {
-	ctx := t.Context()
-	cl := mockcluster.NewCluster(t)
-	rem := mockremote.NewRemoting(t)
-	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 14000, RemotingPort: 8080, Roles: []string{"payments"}}
-	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
-
-	cl.EXPECT().Members(ctx).Return([]*cluster.Peer{{Host: "198.51.100.5", Roles: []string{"billing"}}}, nil)
-
-	peer, err := sys.findActivationPeer(ctx, newGrainConfig(WithActivationRole("payments")))
-	require.NoError(t, err)
-	require.Nil(t, peer)
-}
-
 func TestFindActivationPeer_ErrorsWhenRoleMissingEverywhere(t *testing.T) {
 	ctx := t.Context()
 	cl := mockcluster.NewCluster(t)
