@@ -781,6 +781,63 @@ func (_c *Cluster_Members_Call) RunAndReturn(run func(context.Context) ([]*inter
 	return _c
 }
 
+// NextRoundRobinValue provides a mock function with given fields: ctx, key
+func (_m *Cluster) NextRoundRobinValue(ctx context.Context, key string) (int, error) {
+	ret := _m.Called(ctx, key)
+
+	if len(ret) == 0 {
+		panic("no return value specified for NextRoundRobinValue")
+	}
+
+	var r0 int
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (int, error)); ok {
+		return rf(ctx, key)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) int); ok {
+		r0 = rf(ctx, key)
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, key)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// Cluster_NextRoundRobinValue_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'NextRoundRobinValue'
+type Cluster_NextRoundRobinValue_Call struct {
+	*mock.Call
+}
+
+// NextRoundRobinValue is a helper method to define mock.On call
+//   - ctx context.Context
+//   - key string
+func (_e *Cluster_Expecter) NextRoundRobinValue(ctx interface{}, key interface{}) *Cluster_NextRoundRobinValue_Call {
+	return &Cluster_NextRoundRobinValue_Call{Call: _e.mock.On("NextRoundRobinValue", ctx, key)}
+}
+
+func (_c *Cluster_NextRoundRobinValue_Call) Run(run func(ctx context.Context, key string)) *Cluster_NextRoundRobinValue_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *Cluster_NextRoundRobinValue_Call) Return(_a0 int, _a1 error) *Cluster_NextRoundRobinValue_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *Cluster_NextRoundRobinValue_Call) RunAndReturn(run func(context.Context, string) (int, error)) *Cluster_NextRoundRobinValue_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Peers provides a mock function with given fields: ctx
 func (_m *Cluster) Peers(ctx context.Context) ([]*internalcluster.Peer, error) {
 	ret := _m.Called(ctx)

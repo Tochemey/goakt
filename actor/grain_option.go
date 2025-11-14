@@ -46,21 +46,23 @@ const (
 	// RoundRobinActivation distributes grains evenly across nodes
 	// by cycling through the available nodes in a round-robin manner.
 	// This strategy provides balanced load distribution over time.
+	// ⚠️ Note: This strategy is subject to the cluster topology at the time of activation. For a stable cluster topology,
+	// it ensures an even distribution of grains across all nodes.
 	// ⚠️ Note: This strategy will only be applied if the given Grain does not exist yet when cluster mode is enabled.
-	// If the Grain already exists on another node, it will be activated there instead.
+	// ⚠️ Note: If the Grain already exists on another node, it will be activated there instead.
 	RoundRobinActivation ActivationStrategy = iota
 
 	// Random selects a node at random from the available pool of nodes.
 	// This strategy is stateless and can help quickly spread grains across the cluster,
 	// but may result in uneven load distribution.
 	// ⚠️ Note: This strategy will only be applied if the given Grain does not exist yet when cluster mode is enabled.
-	// If the Grain already exists on another node, it will be activated there instead.
+	// ⚠️ Note: If the Grain already exists on another node, it will be activated there instead.
 	RandomActivation
 
 	// LocalActivation forces the grain to be activated on the local node.
 	// Useful when locality is important (e.g., accessing local resources).
 	// ⚠️ Note: This strategy will only be applied if the given Grain does not exist yet when cluster mode is enabled.
-	// If the Grain already exists on another node, it will be activated there instead.
+	// ⚠️ Note: If the Grain already exists on another node, it will be activated there instead.
 	LocalActivation
 
 	// LeastLoadActivation selects the node with the least current load to activate the grain.
@@ -69,7 +71,7 @@ const (
 	// ⚠️ Note: This strategy may require additional overhead when placing grains,
 	// as it needs to get nodes load metrics depending on the cluster size.
 	// ⚠️ Note: This strategy will only be applied if the given Grain does not exist yet when cluster mode is enabled.
-	// If the Grain already exists on another node, it will be activated there instead.
+	// ⚠️ Note: If the Grain already exists on another node, it will be activated there instead.
 	LeastLoadActivation
 )
 

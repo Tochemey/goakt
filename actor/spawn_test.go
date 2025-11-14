@@ -767,7 +767,7 @@ func TestSpawn(t *testing.T) {
 		actorName := "actorID"
 
 		clusterMock.EXPECT().ActorExists(mock.Anything, actorName).Return(false, nil)
-		clusterMock.EXPECT().Peers(mock.Anything).Return(nil, assert.AnError)
+		clusterMock.EXPECT().Members(mock.Anything).Return(nil, assert.AnError)
 
 		t.Cleanup(func() {
 			system.remoting.Close()
@@ -778,6 +778,47 @@ func TestSpawn(t *testing.T) {
 		require.Error(t, err)
 		assert.ErrorIs(t, err, assert.AnError)
 		assert.ErrorContains(t, err, "failed to fetch cluster nodes")
+	})
+	t.Run("SpawnOn when cluster has no members spawns locally", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, err := NewActorSystem("spawn-no-peers", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+
+		actorSystem := sys.(*actorSystem)
+		err = actorSystem.Start(ctx)
+		require.NoError(t, err)
+
+		pause.For(time.Second)
+
+		clusterMock := mockcluster.NewCluster(t)
+
+		actorSystem.locker.Lock()
+		actorSystem.cluster = clusterMock
+		actorSystem.locker.Unlock()
+		actorSystem.clusterEnabled.Store(true)
+
+		t.Cleanup(func() {
+			actorSystem.clusterEnabled.Store(false)
+			actorSystem.locker.Lock()
+			actorSystem.cluster = nil
+			actorSystem.locker.Unlock()
+			assert.NoError(t, actorSystem.Stop(ctx))
+		})
+
+		actor := NewMockActor()
+		actorName := "actorID"
+
+		clusterMock.EXPECT().ActorExists(mock.Anything, actorName).Return(false, nil).Twice()
+		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{}, nil).Once()
+
+		err = actorSystem.SpawnOn(ctx, actorName, actor)
+		require.NoError(t, err)
+
+		pause.For(200 * time.Millisecond)
+
+		actors := actorSystem.Actors()
+		require.Len(t, actors, 1)
+		assert.Equal(t, actorName, actors[0].Name())
 	})
 	t.Run("SpawnOn when node metric fetch fails", func(t *testing.T) {
 		ctx := context.TODO()
@@ -800,7 +841,7 @@ func TestSpawn(t *testing.T) {
 		}
 
 		clusterMock.EXPECT().ActorExists(mock.Anything, actorName).Return(false, nil)
-		clusterMock.EXPECT().Peers(mock.Anything).Return(peers, nil)
+		clusterMock.EXPECT().Members(mock.Anything).Return(peers, nil)
 
 		t.Cleanup(func() {
 			system.remoting.Close()
@@ -946,11 +987,15 @@ func TestSpawn(t *testing.T) {
 			require.NoError(t, err)
 		}
 
+		pause.For(time.Second)
+
 		// we create two actors on node2 to simulate load
 		for i := range 2 {
 			_, err := node2.Spawn(ctx, fmt.Sprintf("actor2%d", i), NewMockActor())
 			require.NoError(t, err)
 		}
+
+		pause.For(time.Second)
 
 		// we create two actors on node2 to simulate load
 		for i := range 4 {
@@ -966,7 +1011,7 @@ func TestSpawn(t *testing.T) {
 		err := node1.SpawnOn(ctx, actorName, actor, WithPlacement(LeastLoad))
 		require.NoError(t, err)
 
-		pause.For(200 * time.Millisecond)
+		pause.For(time.Second)
 
 		metric := node2.Metric(ctx)
 		require.Exactly(t, int64(3), metric.ActorsCount())
@@ -1376,5 +1421,79 @@ func TestSpawn(t *testing.T) {
 
 		// shutdown the nats server gracefully
 		srv.Shutdown()
+	})
+	t.Run("SpawnOn with round-robin placement", func(t *testing.T) {
+		// create a context
+		ctx := context.TODO()
+		// start the NATS server
+		srv := startNatsServer(t)
+
+		// create and start system cluster
+		node1, sd1 := testNATs(t, srv.Addr().String())
+		peerAddress1 := node1.PeersAddress()
+		require.NotEmpty(t, peerAddress1)
+		require.NotNil(t, sd1)
+
+		// create and start system cluster
+		node2, sd2 := testNATs(t, srv.Addr().String())
+		peerAddress2 := node2.PeersAddress()
+		require.NotEmpty(t, peerAddress2)
+		require.NotNil(t, sd2)
+
+		// create and start system cluster
+		node3, sd3 := testNATs(t, srv.Addr().String())
+		peerAddress3 := node3.PeersAddress()
+		require.NotEmpty(t, peerAddress3)
+		require.NotNil(t, sd3)
+
+		pause.For(time.Second)
+
+		// create an actor on node1
+		actor := NewMockActor()
+		actorName := "actorID"
+		err := node1.SpawnOn(ctx, actorName, actor, WithPlacement(RoundRobin))
+		require.NoError(t, err)
+
+		pause.For(200 * time.Millisecond)
+
+		// either we can locate the actor or try to recreate it
+		_, err = node2.Spawn(ctx, actorName, actor)
+		require.Error(t, err)
+		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
+
+		// free resources
+		require.NoError(t, node2.Stop(ctx))
+		require.NoError(t, node1.Stop(ctx))
+		require.NoError(t, node3.Stop(ctx))
+
+		require.NoError(t, sd3.Close())
+		require.NoError(t, sd2.Close())
+		require.NoError(t, sd1.Close())
+
+		// shutdown the nats server gracefully
+		srv.Shutdown()
+	})
+	t.Run("SpawnOn with round-robin when getting next value failed", func(t *testing.T) {
+		ctx := t.Context()
+		clmock := mockcluster.NewCluster(t)
+		system := MockReplicationTestSystem(clmock)
+		system.remoting = remote.NewRemoting()
+		system.remotingEnabled.Store(true)
+		system.clusterEnabled.Store(true)
+
+		peers := []*cluster.Peer{
+			{Host: "10.0.0.2"},
+			{Host: "10.0.0.3"},
+		}
+
+		actorName := "actorID"
+		clmock.EXPECT().ActorExists(ctx, actorName).Return(false, nil).Once()
+		clmock.EXPECT().Members(ctx).Return(peers, nil).Once()
+		clmock.EXPECT().NextRoundRobinValue(ctx, cluster.ActorsRoundRobinKey).Return(-1, assert.AnError).Once()
+
+		actor := NewMockActor()
+		err := system.SpawnOn(ctx, actorName, actor, WithPlacement(RoundRobin))
+		require.Error(t, err)
+		assert.ErrorIs(t, err, assert.AnError)
 	})
 }

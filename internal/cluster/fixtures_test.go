@@ -100,6 +100,8 @@ type MockDMap struct {
 	getFn    func(ctx context.Context, key string) (*olric.GetResponse, error)
 	scanFn   func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error)
 	deleteFn func(ctx context.Context, keys ...string) (int, error)
+	incrFn   func(ctx context.Context, key string, delta int) (int, error)
+	incrErr  error
 }
 
 func (f *MockDMap) Name() string { return "fake-dmap" }
@@ -133,6 +135,12 @@ func (f *MockDMap) Delete(ctx context.Context, keys ...string) (int, error) {
 
 // nolint
 func (f *MockDMap) Incr(ctx context.Context, key string, delta int) (int, error) {
+	if f.incrFn != nil {
+		return f.incrFn(ctx, key, delta)
+	}
+	if f.incrErr != nil {
+		return 0, f.incrErr
+	}
 	panic("unexpected call to Incr")
 }
 

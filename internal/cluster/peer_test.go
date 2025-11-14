@@ -44,6 +44,8 @@ func TestPeer(t *testing.T) {
 	require.True(t, peer.HasRole("role1"))
 	expectedPeerAddress := "127.0.0.1:9000"
 	require.Equal(t, expectedPeerAddress, peer.PeerAddress())
+	expectedRemotingAddress := "127.0.0.1:9100"
+	require.Equal(t, expectedRemotingAddress, peer.RemotingAddress())
 }
 
 func TestToRemotePeers(t *testing.T) {

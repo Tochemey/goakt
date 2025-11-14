@@ -45,6 +45,8 @@ const (
 	// RoundRobin distributes actors evenly across nodes
 	// by cycling through the available nodes in a round-robin manner.
 	// This strategy provides balanced load distribution over time.
+	// ⚠️ Note: This strategy is subject to the cluster topology at the time of creation. For a stable cluster topology,
+	// it ensures an even distribution of actors across all nodes.
 	RoundRobin SpawnPlacement = iota
 
 	// Random selects a node at random from the available pool of nodes.

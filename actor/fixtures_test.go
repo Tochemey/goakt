@@ -1463,7 +1463,6 @@ func MockReplicationTestSystem(clusterMock *mockcluster.Cluster) *actorSystem {
 	sys.starting.Store(false)
 	sys.shuttingDown.Store(false)
 	sys.startedAt.Store(time.Now().Unix())
-	sys.spawnOnNext.Store(0)
 	sys.actorsCounter.Store(0)
 	sys.deadlettersCounter.Store(0)
 
@@ -1618,7 +1617,7 @@ func (stub *ClusterServiceStub) GetNodeMetric(_ context.Context, _ *connect.Requ
 	if stub.Err != nil {
 		return nil, stub.Err
 	}
-	return connect.NewResponse(&internalpb.GetNodeMetricResponse{ActorsCount: stub.Load}), nil
+	return connect.NewResponse(&internalpb.GetNodeMetricResponse{Load: stub.Load}), nil
 }
 
 func (stub *ClusterServiceStub) GetKinds(_ context.Context, _ *connect.Request[internalpb.GetKindsRequest]) (*connect.Response[internalpb.GetKindsResponse], error) {

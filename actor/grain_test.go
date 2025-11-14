@@ -29,6 +29,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -1135,7 +1136,7 @@ func TestFindActivationPeer(t *testing.T) {
 			logger:  log.DiscardLogger,
 		}
 
-		clmock.EXPECT().Peers(ctx).Return(nil, errors.New("boom"))
+		clmock.EXPECT().Members(ctx).Return(nil, errors.New("boom"))
 
 		peer, err := sys.findActivationPeer(ctx, newGrainConfig())
 		require.Error(t, err)
@@ -1153,7 +1154,7 @@ func TestFindActivationPeer(t *testing.T) {
 
 		config := newGrainConfig(WithActivationRole("analytics"))
 		peers := []*cluster.Peer{{Host: "10.0.0.2", Roles: []string{"api"}}}
-		clmock.EXPECT().Peers(ctx).Return(peers, nil)
+		clmock.EXPECT().Members(ctx).Return(peers, nil)
 
 		peer, err := sys.findActivationPeer(ctx, config)
 		require.Error(t, err)
@@ -1170,7 +1171,7 @@ func TestFindActivationPeer(t *testing.T) {
 		}
 
 		peers := []*cluster.Peer{{Host: "10.0.0.2"}}
-		clmock.EXPECT().Peers(ctx).Return(peers, nil)
+		clmock.EXPECT().Members(ctx).Return(peers, nil)
 
 		peer, err := sys.findActivationPeer(ctx, newGrainConfig())
 		require.NoError(t, err)
@@ -1190,18 +1191,12 @@ func TestFindActivationPeer(t *testing.T) {
 			{Host: "10.0.0.3"},
 			{Host: "10.0.0.4"},
 		}
-		clmock.EXPECT().Peers(ctx).Return(peers, nil)
+		clmock.EXPECT().Members(ctx).Return(peers, nil)
 
 		peer, err := sys.findActivationPeer(ctx, newGrainConfig(WithActivationStrategy(RandomActivation)))
 		require.NoError(t, err)
 		require.NotNil(t, peer)
-		isCandidate := false
-		for _, candidate := range peers {
-			if peer == candidate {
-				isCandidate = true
-				break
-			}
-		}
+		isCandidate := slices.Contains(peers, peer)
 		require.True(t, isCandidate, "peer %v not part of candidates", peer)
 	})
 
@@ -1217,7 +1212,9 @@ func TestFindActivationPeer(t *testing.T) {
 			{Host: "10.0.0.2"},
 			{Host: "10.0.0.3"},
 		}
-		clmock.EXPECT().Peers(ctx).Return(peers, nil).Twice()
+		clmock.EXPECT().Members(ctx).Return(peers, nil).Twice()
+		clmock.EXPECT().NextRoundRobinValue(ctx, cluster.GrainsRoundRobinKey).Return(1, nil).Once()
+		clmock.EXPECT().NextRoundRobinValue(ctx, cluster.GrainsRoundRobinKey).Return(2, nil).Once()
 
 		config := newGrainConfig(WithActivationStrategy(RoundRobinActivation))
 		peer1, err := sys.findActivationPeer(ctx, config)
@@ -1227,6 +1224,27 @@ func TestFindActivationPeer(t *testing.T) {
 		peer2, err := sys.findActivationPeer(ctx, config)
 		require.NoError(t, err)
 		require.Equal(t, peers[1], peer2)
+	})
+
+	t.Run("round robin cycles when getting next value failed", func(t *testing.T) {
+		ctx := t.Context()
+		clmock := mocks.NewCluster(t)
+		sys := &actorSystem{
+			cluster: clmock,
+			logger:  log.DiscardLogger,
+		}
+
+		peers := []*cluster.Peer{
+			{Host: "10.0.0.2"},
+			{Host: "10.0.0.3"},
+		}
+		clmock.EXPECT().Members(ctx).Return(peers, nil).Once()
+		clmock.EXPECT().NextRoundRobinValue(ctx, cluster.GrainsRoundRobinKey).Return(-1, assert.AnError).Once()
+
+		config := newGrainConfig(WithActivationStrategy(RoundRobinActivation))
+		peer1, err := sys.findActivationPeer(ctx, config)
+		require.Error(t, err)
+		require.Nil(t, peer1)
 	})
 
 	t.Run("least load prefers the lightest node", func(t *testing.T) {
@@ -1239,7 +1257,7 @@ func TestFindActivationPeer(t *testing.T) {
 		peerHigh := MockClusterPeer(t, 10, nil)
 		peers := []*cluster.Peer{peerHigh, peerLow}
 
-		clmock.EXPECT().Peers(ctx).Return(peers, nil)
+		clmock.EXPECT().Members(ctx).Return(peers, nil)
 		remoting.EXPECT().MaxReadFrameSize().Return(0).Times(len(peers))
 		remoting.EXPECT().Compression().Return(remote.NoCompression).Times(len(peers))
 		remoting.EXPECT().HTTPClient().Return(httpClient).Times(len(peers))
@@ -1270,7 +1288,7 @@ func TestFindActivationPeer(t *testing.T) {
 		successPeer := MockClusterPeer(t, 2, nil)
 		peers := []*cluster.Peer{errPeer, successPeer}
 
-		clmock.EXPECT().Peers(ctx).Return(peers, nil)
+		clmock.EXPECT().Members(ctx).Return(peers, nil)
 		remoting.EXPECT().MaxReadFrameSize().Return(0).Times(len(peers))
 		remoting.EXPECT().Compression().Return(remote.NoCompression).Times(len(peers))
 		remoting.EXPECT().HTTPClient().Return(httpClient).Times(len(peers))

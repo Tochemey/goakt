@@ -21,9 +21,9 @@ message GetNodeMetricRequest {
 
 message GetNodeMetricResponse {
   // Specifies the node address
-  string node_remote_address = 1;
-  // Specifies the actors count for the given node
-  uint64 actors_count = 2;
+  string node_address = 1;
+  // Specifies the total number of actors and grains for the given node
+  uint64 load = 2;
 }
 
 message GetKindsRequest {

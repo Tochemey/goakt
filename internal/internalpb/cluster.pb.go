@@ -70,9 +70,9 @@ func (x *GetNodeMetricRequest) GetNodeAddress() string {
 type GetNodeMetricResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Specifies the node address
-	NodeRemoteAddress string `protobuf:"bytes,1,opt,name=node_remote_address,json=nodeRemoteAddress,proto3" json:"node_remote_address,omitempty"`
-	// Specifies the actors count for the given node
-	ActorsCount   uint64 `protobuf:"varint,2,opt,name=actors_count,json=actorsCount,proto3" json:"actors_count,omitempty"`
+	NodeAddress string `protobuf:"bytes,1,opt,name=node_address,json=nodeAddress,proto3" json:"node_address,omitempty"`
+	// Specifies the total number of actors and grains for the given node
+	Load          uint64 `protobuf:"varint,2,opt,name=load,proto3" json:"load,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -107,16 +107,16 @@ func (*GetNodeMetricResponse) Descriptor() ([]byte, []int) {
 	return file_internal_cluster_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *GetNodeMetricResponse) GetNodeRemoteAddress() string {
+func (x *GetNodeMetricResponse) GetNodeAddress() string {
 	if x != nil {
-		return x.NodeRemoteAddress
+		return x.NodeAddress
 	}
 	return ""
 }
 
-func (x *GetNodeMetricResponse) GetActorsCount() uint64 {
+func (x *GetNodeMetricResponse) GetLoad() uint64 {
 	if x != nil {
-		return x.ActorsCount
+		return x.Load
 	}
 	return 0
 }
@@ -281,10 +281,10 @@ const file_internal_cluster_proto_rawDesc = "" +
 	"\x16internal/cluster.proto\x12\n" +
 	"internalpb\x1a\x19google/protobuf/any.proto\"9\n" +
 	"\x14GetNodeMetricRequest\x12!\n" +
-	"\fnode_address\x18\x01 \x01(\tR\vnodeAddress\"j\n" +
-	"\x15GetNodeMetricResponse\x12.\n" +
-	"\x13node_remote_address\x18\x01 \x01(\tR\x11nodeRemoteAddress\x12!\n" +
-	"\factors_count\x18\x02 \x01(\x04R\vactorsCount\"4\n" +
+	"\fnode_address\x18\x01 \x01(\tR\vnodeAddress\"N\n" +
+	"\x15GetNodeMetricResponse\x12!\n" +
+	"\fnode_address\x18\x01 \x01(\tR\vnodeAddress\x12\x12\n" +
+	"\x04load\x18\x02 \x01(\x04R\x04load\"4\n" +
 	"\x0fGetKindsRequest\x12!\n" +
 	"\fnode_address\x18\x01 \x01(\tR\vnodeAddress\"(\n" +
 	"\x10GetKindsResponse\x12\x14\n" +
