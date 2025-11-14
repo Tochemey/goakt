@@ -718,7 +718,7 @@ func (x *actorSystem) leastLoadedPeer(ctx context.Context, peers []*cluster.Peer
 			if err != nil {
 				return fmt.Errorf("failed to fetch node metric from %s: %w", addr, err)
 			}
-			metrics[index] = nodeMetric{Peer: peer, Load: resp.Msg.GetActorsCount()}
+			metrics[index] = nodeMetric{Peer: peer, Load: resp.Msg.GetLoad()}
 			return nil
 		})
 	}

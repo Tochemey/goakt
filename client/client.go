@@ -568,7 +568,7 @@ func getNodeMetric(ctx context.Context, node *Node) (int, bool, error) {
 
 		return 0, false, err
 	}
-	return int(response.Msg.GetActorsCount()), true, nil
+	return int(response.Msg.GetLoad()), true, nil
 }
 
 // validateNodes validate the incoming nodes

@@ -56,10 +56,24 @@ func main() {
 
 	pause.For(10 * time.Second)
 
+	// create 3 actors on sys1
+	for i := range 3 {
+		actorName := fmt.Sprintf("actor-s1-%d", i)
+		spawnActor(ctx, sys1, actorName)
+	}
+
+	// create 2 actors on sys2
+	for i := range 2 {
+		actorName := fmt.Sprintf("actor-s2-%d", i)
+		spawnActor(ctx, sys2, actorName)
+	}
+
 	// Grain activations with RoundRobin strategy
+	activationStrategy := actor.LeastLoadActivation
+	fmt.Printf("Activating grains with %T strategy\n", activationStrategy)
 	for i := range 5 {
 		grainName := fmt.Sprintf("grain-%d", i)
-		activateGrain(ctx, sys1, grainName, actor.RoundRobinActivation)
+		activateGrain(ctx, sys1, grainName, activationStrategy)
 	}
 
 	pause.For(10 * time.Second)
@@ -130,15 +144,15 @@ func activateGrain(ctx context.Context, actorSystem actor.ActorSystem, grainName
 }
 
 func spawnActor(ctx context.Context, actorSystem actor.ActorSystem, actorName string) {
-	systemName := actorSystem.Name()
-	fmt.Printf("Spawning long lived actor %s on %s...\n", actorName, systemName)
+	peersAddr := actorSystem.PeersAddress()
+	fmt.Printf("Spawning long lived actor %s on %s...\n", actorName, peersAddr)
 	if _, err := actorSystem.Spawn(ctx, actorName, &MyActor{}, actor.WithLongLived()); err != nil {
-		fmt.Printf("Error spawning actor %s on %s: %v\n", actorName, systemName, err)
+		fmt.Printf("Error spawning actor %s on %s: %v\n", actorName, peersAddr, err)
 		os.Exit(1)
 	}
 
 	time.Sleep(time.Second) // wait for actor to be ready
-	fmt.Printf("Actor %s spawned successfully on %s.\n", actorName, systemName)
+	fmt.Printf("Actor %s spawned successfully on %s.\n", actorName, peersAddr)
 }
 
 func stopActorSystem(ctx context.Context, actorSystem actor.ActorSystem) {

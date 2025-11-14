@@ -56,13 +56,13 @@ const (
 	// This strategy is stateless and can help quickly spread grains across the cluster,
 	// but may result in uneven load distribution.
 	// ⚠️ Note: This strategy will only be applied if the given Grain does not exist yet when cluster mode is enabled.
-	// If the Grain already exists on another node, it will be activated there instead.
+	// ⚠️ Note: If the Grain already exists on another node, it will be activated there instead.
 	RandomActivation
 
 	// LocalActivation forces the grain to be activated on the local node.
 	// Useful when locality is important (e.g., accessing local resources).
 	// ⚠️ Note: This strategy will only be applied if the given Grain does not exist yet when cluster mode is enabled.
-	// If the Grain already exists on another node, it will be activated there instead.
+	// ⚠️ Note: If the Grain already exists on another node, it will be activated there instead.
 	LocalActivation
 
 	// LeastLoadActivation selects the node with the least current load to activate the grain.
@@ -71,7 +71,7 @@ const (
 	// ⚠️ Note: This strategy may require additional overhead when placing grains,
 	// as it needs to get nodes load metrics depending on the cluster size.
 	// ⚠️ Note: This strategy will only be applied if the given Grain does not exist yet when cluster mode is enabled.
-	// If the Grain already exists on another node, it will be activated there instead.
+	// ⚠️ Note: If the Grain already exists on another node, it will be activated there instead.
 	LeastLoadActivation
 )
 

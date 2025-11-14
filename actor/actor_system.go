@@ -2099,11 +2099,11 @@ func (x *actorSystem) GetNodeMetric(_ context.Context, request *connect.Request[
 		return nil, connect.NewError(connect.CodeInvalidArgument, gerrors.ErrInvalidHost)
 	}
 
-	actorCount := x.actorsCounter.Load()
+	load := x.actorsCounter.Load() + uint64(x.grains.Len())
 	return connect.NewResponse(
 		&internalpb.GetNodeMetricResponse{
-			NodeRemoteAddress: remoteAddr,
-			ActorsCount:       uint64(actorCount),
+			NodeAddress: remoteAddr,
+			Load:        load,
 		},
 	), nil
 }

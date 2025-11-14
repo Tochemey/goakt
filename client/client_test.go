@@ -72,7 +72,7 @@ func TestNewReturnsErrorWithNoNodes(t *testing.T) {
 func TestClientUpdateNodes(t *testing.T) {
 	t.Run("updates weight when metrics available", func(t *testing.T) {
 		client, node, cleanup := setupUpdateNodesTest(t, func(ctx context.Context, _ *connect.Request[internalpb.GetNodeMetricRequest]) (*connect.Response[internalpb.GetNodeMetricResponse], error) {
-			return connect.NewResponse(&internalpb.GetNodeMetricResponse{ActorsCount: 5}), nil
+			return connect.NewResponse(&internalpb.GetNodeMetricResponse{Load: 5}), nil
 		})
 		defer cleanup()
 
