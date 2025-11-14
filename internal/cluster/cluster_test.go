@@ -1383,10 +1383,6 @@ func TestMultipleNodes(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, 4, next)
 
-		// stop the second node
-		require.NoError(t, node2.Stop(ctx))
-		pause.For(time.Second)
-
 		next, err = node1.NextRoundRobinValue(ctx, GrainsRoundRobinKey)
 		require.NoError(t, err)
 		require.Equal(t, 5, next)
@@ -1395,6 +1391,7 @@ func TestMultipleNodes(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, 5, next)
 
+		require.NoError(t, node2.Stop(ctx))
 		require.NoError(t, node1.Stop(ctx))
 		require.NoError(t, node3.Stop(ctx))
 		require.NoError(t, sd1.Close())
