@@ -5001,6 +5001,35 @@ func TestReinstateAvoidsPassivationRace(t *testing.T) {
 	require.True(t, pid.IsRunning())
 }
 
+func TestPIDTryPassivationSkipsWhenSystemStopping(t *testing.T) {
+	pid := MockPassivationPID(t, "system-stopping", passivation.NewTimeBasedStrategy(time.Second))
+
+	sys := &actorSystem{}
+	sys.shuttingDown.Store(true)
+
+	pid.fieldsLocker.Lock()
+	pid.system = sys
+	pid.fieldsLocker.Unlock()
+
+	require.False(t, pid.tryPassivation("system stopping"))
+}
+
+func TestPIDTryPassivationSkipsWhenSkipFlagSet(t *testing.T) {
+	pid := MockPassivationPID(t, "skip-flag", passivation.NewTimeBasedStrategy(time.Second))
+	pid.toggleFlag(passivationSkipNextFlag, true)
+
+	require.True(t, pid.isFlagEnabled(passivationSkipNextFlag))
+	require.False(t, pid.tryPassivation("skip"))
+	require.False(t, pid.isFlagEnabled(passivationSkipNextFlag))
+}
+
+func TestPIDTryPassivationSkipsWhenStoppingFlagRaised(t *testing.T) {
+	pid := MockPassivationPID(t, "stopping-flag", passivation.NewTimeBasedStrategy(time.Second))
+	pid.toggleFlag(stoppingFlag, true)
+
+	require.False(t, pid.tryPassivation("already stopping"))
+}
+
 func TestReinstateNamed(t *testing.T) {
 	t.Run("When PID is not started", func(t *testing.T) {
 		ctx := context.TODO()

@@ -323,21 +323,23 @@ func (pid *grainPID) markActivity(at time.Time) {
 }
 
 func (pid *grainPID) shouldAutoPassivate() bool {
-	return pid.passivationManager != nil &&
-		pid.deactivateAfter != nil &&
-		pid.deactivateAfter.Load() > 0
+	return pid.passivationTimeout() > 0
 }
 
 func (pid *grainPID) startPassivation() {
-	if !pid.shouldAutoPassivate() {
-		return
-	}
-	timeout := pid.deactivateAfter.Load()
+	timeout := pid.passivationTimeout()
 	if timeout <= 0 {
 		return
 	}
 	strategy := passivation.NewTimeBasedStrategy(timeout)
 	pid.passivationManager.Register(pid, strategy)
+}
+
+func (pid *grainPID) passivationTimeout() time.Duration {
+	if pid.passivationManager == nil || pid.deactivateAfter == nil {
+		return 0
+	}
+	return pid.deactivateAfter.Load()
 }
 
 func (pid *grainPID) unregisterPassivation() {
