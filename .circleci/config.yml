@@ -1,0 +1,77 @@
+# .circleci/config.yml
+version: 2.1
+
+orbs:
+  codecov: codecov/codecov@5.4.3
+
+jobs:
+  test:
+    docker:
+      # Go 1.25.x image (adjust patch version if you really need 1.25.3)
+      - image: cimg/go:1.25.3
+
+    environment:
+      TZ: UTC
+      CGO_ENABLED: "1"
+      GOTOOLCHAIN: local        # avoid auto-upgrading the toolchain
+      GOFLAGS: -mod=readonly    # stabilise tests that rely on modules
+
+    steps:
+      - checkout
+
+      # Restore Go cache (build cache + module cache)
+      - restore_cache:
+          keys:
+            - go-cache-v1-{{ arch }}-{{ checksum "go.sum" }}
+            - go-cache-v1-{{ arch }}
+
+      - run:
+          name: Go version
+          command: go version
+
+      - run:
+          name: Vendoring and Tidy
+          command: go mod tidy && go mod vendor
+
+      - run:
+          name: Install dependencies
+          command: go mod download
+
+      - save_cache:
+          key: go-cache-v1-{{ arch }}-{{ checksum "go.sum" }}
+          paths:
+            - ~/.cache/go-build
+            - ~/go/pkg/mod
+
+      - run:
+          name: Install golangci-lint
+          command: |
+            curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh \
+              | sh -s -- -b "$(go env GOPATH)/bin" v2.6.1
+
+      - run:
+          name: Run linter
+          command: golangci-lint run --timeout 10m --config .golangci.yml
+
+      - run:
+          name: Install go-acc
+          command: go install github.com/ory/go-acc@latest
+
+      - run:
+          name: Run tests with coverage
+          command: |
+            go-acc ./... -o coverage.out \
+              --ignore goaktpb,mocks,internal/internalpb,bench,playground \
+              -- -mod=vendor -p 1 -timeout 0 -race -v
+
+      - codecov/upload:
+          files: ./coverage.out
+          # token is read from the CODECOV_TOKEN env var in CircleCI project settings
+
+workflows:
+  build:
+    jobs:
+      - test:
+          filters:
+            branches:
+              only: main
