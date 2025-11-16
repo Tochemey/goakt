@@ -111,13 +111,3 @@ func TestGrainPIDShouldAutoPassivate(t *testing.T) {
 	pid.passivationManager = nil
 	require.False(t, pid.shouldAutoPassivate())
 }
-
-func TestPassivationManagerFromReturnsNilWithUnknownSystem(t *testing.T) {
-	require.Nil(t, passivationManagerFrom(nil))
-}
-
-func TestPassivationManagerFromReturnsConcreteManager(t *testing.T) {
-	manager := newPassivationManager(log.DiscardLogger)
-	sys := &actorSystem{passivator: manager}
-	require.Equal(t, manager, passivationManagerFrom(sys))
-}

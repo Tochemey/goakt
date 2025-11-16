@@ -93,7 +93,7 @@ func newGrainPID(identity *GrainIdentity, grain Grain, actorSystem ActorSystem, 
 		config:             config,
 		mu:                 &sync.Mutex{},
 		onPoisonPill:       atomic.NewBool(false),
-		passivationManager: passivationManagerFrom(actorSystem),
+		passivationManager: actorSystem.passivationManager(),
 	}
 
 	pid.processing.Store(idle)
@@ -366,11 +366,4 @@ func (pid *grainPID) toWireGrain() (*internalpb.Grain, error) {
 		ActivationTimeout: durationpb.New(pid.config.initTimeout.Load()),
 		ActivationRetries: pid.config.initMaxRetries.Load(),
 	}, nil
-}
-
-func passivationManagerFrom(system ActorSystem) *passivationManager {
-	if sys, ok := system.(*actorSystem); ok {
-		return sys.passivator
-	}
-	return nil
 }

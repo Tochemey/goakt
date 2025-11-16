@@ -711,6 +711,7 @@ type ActorSystem interface {
 	decreaseActorsCounter()
 	removePeerActor(ctx context.Context, actorName string) error
 	removePeerGrain(ctx context.Context, grainID *internalpb.GrainId) error
+	passivationManager() *passivationManager
 }
 
 // ActorSystem represent a collection of actors on a given node
@@ -3645,6 +3646,14 @@ func (x *actorSystem) getMRUActors(threshold uint64, percentageToReturn int) []*
 
 	evictionCount := computeEvictionCount(total, threshold, len(evictions), percentageToReturn)
 	return evictions[:evictionCount]
+}
+
+// passivationManager returns the passivation manager
+func (x *actorSystem) passivationManager() *passivationManager {
+	x.locker.RLock()
+	passivator := x.passivator
+	x.locker.RUnlock()
+	return passivator
 }
 
 func computeEvictionCount(total, threshold uint64, totalEvictions, percentageToReturn int) int {
