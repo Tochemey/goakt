@@ -77,6 +77,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/validation"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/memory"
+	"github.com/tochemey/goakt/v3/passivation"
 	"github.com/tochemey/goakt/v3/remote"
 	gtls "github.com/tochemey/goakt/v3/tls"
 )
@@ -770,6 +771,9 @@ type actorSystem struct {
 	// manages passivation deadlines without per-actor goroutines
 	passivator *passivationManager
 
+	defaultSupervisor          *Supervisor
+	defaultPassivationStrategy passivation.Strategy
+
 	registry   registry.Registry
 	reflection *reflection
 
@@ -892,6 +896,8 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	system.pubsubEnabled.Store(false)
 
 	system.reflection = newReflection(system.registry)
+	system.defaultSupervisor = NewSupervisor()
+	system.defaultPassivationStrategy = passivation.NewTimeBasedStrategy(DefaultPassivationTimeout)
 	system.passivator = newPassivationManager(system.logger)
 
 	// apply the various options
@@ -3042,9 +3048,12 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 		pidOpts = append(pidOpts, withMailbox(spawnConfig.mailbox))
 	}
 
-	// set the supervisor strategies when defined
-	if spawnConfig.supervisor != nil {
-		pidOpts = append(pidOpts, withSupervisor(spawnConfig.supervisor))
+	supervisor := spawnConfig.supervisor
+	if supervisor == nil {
+		supervisor = x.defaultSupervisor
+	}
+	if supervisor != nil {
+		pidOpts = append(pidOpts, withSupervisor(supervisor))
 	}
 
 	// define the actor as singleton when necessary
@@ -3074,7 +3083,11 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 		pidOpts = append(pidOpts, withDependencies(spawnConfig.dependencies...))
 	}
 
-	pidOpts = append(pidOpts, withPassivationStrategy(spawnConfig.passivationStrategy))
+	strategy := spawnConfig.passivationStrategy
+	if strategy == nil {
+		strategy = x.defaultPassivationStrategy
+	}
+	pidOpts = append(pidOpts, withPassivationStrategy(strategy))
 
 	pid, err := newPID(
 		ctx,

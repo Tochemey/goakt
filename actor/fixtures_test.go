@@ -1459,9 +1459,9 @@ func (d *MockFailingDependency) UnmarshalBinary(_ []byte) error {
 
 func MockReplicationTestSystem(clusterMock *mockcluster.Cluster) *actorSystem {
 	topic := &PID{}
-	topic.running.Store(false)
+	topic.toggleFlag(runningFlag, false)
 	noSender := &PID{}
-	noSender.running.Store(true)
+	noSender.toggleFlag(runningFlag, true)
 
 	sys := &actorSystem{
 		name:         "test-replication",

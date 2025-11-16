@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tochemey/goakt/v3/address"
-	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/passivation"
 )
@@ -31,7 +30,7 @@ func TestPassivationManager_TimeBasedTrigger(t *testing.T) {
 	triggered := make(chan struct{}, 1)
 	manager.passivateFn = func(entry *passivationEntry) bool {
 		select {
-		case triggered <- registry.Unit{}:
+		case triggered <- struct{}{}:
 		default:
 		}
 		return true
@@ -61,7 +60,7 @@ func TestPassivationManager_MessageCountTrigger(t *testing.T) {
 	triggered := make(chan struct{}, 1)
 	manager.passivateFn = func(entry *passivationEntry) bool {
 		select {
-		case triggered <- registry.Unit{}:
+		case triggered <- struct{}{}:
 		default:
 		}
 		return true

@@ -77,6 +77,8 @@ type grainPID struct {
 	onPoisonPill *atomic.Bool
 }
 
+var _ passivationParticipant = (*grainPID)(nil)
+
 func newGrainPID(identity *GrainIdentity, grain Grain, actorSystem ActorSystem, config *grainConfig) *grainPID {
 	pid := &grainPID{
 		grain:              grain,
@@ -288,8 +290,6 @@ func (pid *grainPID) getIdentity() *GrainIdentity {
 	pid.mu.Unlock()
 	return id
 }
-
-var _ passivationParticipant = (*grainPID)(nil)
 
 func (pid *grainPID) passivationID() string {
 	if pid.identity == nil {

@@ -130,14 +130,11 @@ func (s *spawnConfig) Validate() error {
 //   - Pointer to a configured spawnConfig instance.
 func newSpawnConfig(opts ...SpawnOption) *spawnConfig {
 	config := &spawnConfig{
-		relocatable:         true,
-		asSingleton:         false,
-		enableStash:         false,
-		isSystem:            false,
-		supervisor:          NewSupervisor(),
-		dependencies:        make([]extension.Dependency, 0),
-		placement:           RoundRobin,
-		passivationStrategy: passivation.NewTimeBasedStrategy(DefaultPassivationTimeout),
+		relocatable: true,
+		asSingleton: false,
+		enableStash: false,
+		isSystem:    false,
+		placement:   RoundRobin,
 	}
 
 	for _, opt := range opts {

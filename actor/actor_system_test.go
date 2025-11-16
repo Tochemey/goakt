@@ -420,7 +420,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// initiate stopping of the actor
-		actorRef.stopping.Store(true)
+		actorRef.toggleFlag(stoppingFlag, true)
 
 		addr, pid, err := actorSystem.ActorOf(ctx, actorName)
 		require.Error(t, err)
@@ -429,7 +429,7 @@ func TestActorSystem(t *testing.T) {
 		require.Nil(t, addr)
 
 		// reset the stopping flag for cleanup
-		actorRef.stopping.Store(false)
+		actorRef.toggleFlag(stoppingFlag, false)
 
 		// stop the actor after some time
 		pause.For(time.Second)
@@ -2364,14 +2364,14 @@ func TestActorSystem(t *testing.T) {
 		require.True(t, exists)
 
 		// let us fake the actor stopping
-		pid.stopping.Store(true)
+		pid.toggleFlag(stoppingFlag, true)
 
 		exists, err = actorSystem.ActorExists(ctx, actorName)
 		require.NoError(t, err)
 		require.False(t, exists)
 
 		// reset the stopping flag
-		pid.stopping.Store(false)
+		pid.toggleFlag(stoppingFlag, false)
 
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
@@ -6768,7 +6768,7 @@ func TestResyncActors_ErrorPaths(t *testing.T) {
 		system:       system,
 	}
 	pid.dependencies.Set("dep", dependency)
-	pid.running.Store(true)
+	pid.toggleFlag(runningFlag, true)
 
 	node := &pidNode{
 		watchers:    collection.NewMap[string, *PID](),
@@ -6910,7 +6910,7 @@ func TestStopReturnsCleanupClusterError(t *testing.T) {
 		logger:       log.DiscardLogger,
 		system:       system,
 	}
-	pid.running.Store(true)
+	pid.toggleFlag(runningFlag, true)
 	node := &pidNode{
 		watchers:    collection.NewMap[string, *PID](),
 		watchees:    collection.NewMap[string, *PID](),

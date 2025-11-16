@@ -26,25 +26,33 @@ package actor
 
 import (
 	"errors"
+	"sync"
 
 	gerrors "github.com/tochemey/goakt/v3/errors"
 )
 
+type stashState struct {
+	box    *UnboundedMailbox
+	locker sync.Mutex
+}
+
 // stash adds the current message to the stash buffer
 func (pid *PID) stash(ctx *ReceiveContext) error {
-	if pid.stashBox == nil {
+	state := pid.stashBuffer
+	if state == nil || state.box == nil {
 		return gerrors.ErrStashBufferNotSet
 	}
-	return pid.stashBox.Enqueue(ctx)
+	return state.box.Enqueue(ctx)
 }
 
 // unstash unstashes the oldest message in the stash and prepends to the mailbox
 func (pid *PID) unstash() error {
-	if pid.stashBox == nil {
+	state := pid.stashBuffer
+	if state == nil || state.box == nil {
 		return gerrors.ErrStashBufferNotSet
 	}
 
-	received := pid.stashBox.Dequeue()
+	received := state.box.Dequeue()
 	if received == nil {
 		return errors.New("stash buffer may be closed")
 	}
@@ -55,16 +63,17 @@ func (pid *PID) unstash() error {
 // unstashAll unstashes all messages from the stash buffer and prepends in the mailbox
 // (it keeps the messages in the same order as received, unstashing older messages before newer).
 func (pid *PID) unstashAll() error {
-	if pid.stashBox == nil {
+	state := pid.stashBuffer
+	if state == nil || state.box == nil {
 		return gerrors.ErrStashBufferNotSet
 	}
 
-	pid.stashLocker.Lock()
-	for !pid.stashBox.IsEmpty() {
-		if received := pid.stashBox.Dequeue(); received != nil {
+	state.locker.Lock()
+	for !state.box.IsEmpty() {
+		if received := state.box.Dequeue(); received != nil {
 			pid.doReceive(received)
 		}
 	}
-	pid.stashLocker.Unlock()
+	state.locker.Unlock()
 	return nil
 }

@@ -68,7 +68,7 @@ type passivationParticipant interface {
 	passivationTry(reason string) bool
 }
 
-// passivationEntry stores all scheduling metadata for a PID.
+// passivationEntry stores all scheduling metadata for a participant.
 // Fields:
 //   - target/id: participant plus its stable ID string for map lookups.
 //   - strategy: The selected passivation strategy (time-based or message-count).
@@ -76,9 +76,8 @@ type passivationParticipant interface {
 //   - deadline: Absolute timestamp for the next passivation attempt (time-based only).
 //   - maxMessages: Threshold for MessagesCountBasedStrategy; <=0 means immediate passivation.
 //   - baseline:    Processed count snapshot captured when the strategy is registered.
-//   - index:       Current position within the heap; -1 means “not present in heap”. This lets
-//     us call heap.Fix/Remove only when the entry is actually enqueued.
-//   - paused:      Tracks whether scheduling is paused for this PID.
+//   - index:       Current position within the heap; -1 means “not present in heap”.
+//   - paused:      Tracks whether scheduling is paused for this participant.
 //   - pending:     Signals that a message-count trigger was raised but not yet processed.
 //   - enqueued:    Guards against double-enqueueing onto messageTriggers.
 type passivationEntry struct {
@@ -107,7 +106,7 @@ func newPassivationManager(logger log.Logger) *passivationManager {
 	}
 }
 
-func (m *passivationManager) Start(_ context.Context) {
+func (m *passivationManager) Start(context.Context) {
 	if !m.started.CompareAndSwap(false, true) {
 		return
 	}
@@ -150,8 +149,8 @@ func (m *passivationManager) Register(participant passivationParticipant, strate
 		cheaps.Remove(&m.queue, entry.index)
 		entry.index = -1
 	}
-	entry.target = participant
 
+	entry.target = participant
 	entry.strategy = strategy
 	entry.paused = false
 	entry.pending = false
@@ -284,6 +283,10 @@ func (m *passivationManager) Touch(participant passivationParticipant) {
 // run multiplexes between timeouts, message-count triggers, and shutdown signals.
 // Only one goroutine is needed for all actors, drastically reducing footprint.
 func (m *passivationManager) run() {
+	// Initialize the timer with an arbitrary long duration. We stop it right away
+	// so the first iteration can safely Reset() to the actual wait time without
+	// allocating a new timer per loop. This pattern avoids both extra heap churn
+	// and subtle races where Reset is called on an uninitialized timer.
 	timer := time.NewTimer(time.Hour)
 	if !timer.Stop() {
 		select {
@@ -358,10 +361,7 @@ func (m *passivationManager) nextEntry() (*passivationEntry, time.Duration) {
 			continue
 		}
 
-		wait := time.Until(entry.deadline)
-		if wait < 0 {
-			wait = 0
-		}
+		wait := max(time.Until(entry.deadline), 0)
 		return entry, wait
 	}
 
@@ -452,7 +452,7 @@ func (m *passivationManager) MessageProcessed(pid *PID) {
 		return
 	}
 
-	key := pidKey(pid)
+	key := pid.passivationID()
 	if key == "" {
 		return
 	}
@@ -557,14 +557,7 @@ func (m *passivationManager) passivate(entry *passivationEntry) bool {
 	return entry.target.passivationTry(passivationReason(entry))
 }
 
-// pidKey returns a stable string key for the PID map lookups.
-func pidKey(pid *PID) string {
-	if pid == nil || pid.Address() == nil {
-		return ""
-	}
-	return pid.ID()
-}
-
+// passivationReason extracts a human-readable reason from the entry's strategy.
 func passivationReason(entry *passivationEntry) string {
 	if entry == nil || entry.strategy == nil {
 		return ""

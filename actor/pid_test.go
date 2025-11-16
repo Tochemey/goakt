@@ -4933,10 +4933,10 @@ func TestReinstateAvoidsPassivationRace(t *testing.T) {
 	pid.fieldsLocker.Unlock()
 
 	pid.latestReceiveTime.Store(time.Now().Add(-time.Minute))
-	pid.passivationSkipNext.Store(false)
-	pid.passivating.Store(false)
-	pid.suspended.Store(false)
-	pid.running.Store(true)
+	pid.toggleFlag(passivationSkipNextFlag, false)
+	pid.toggleFlag(passivatingFlag, false)
+	pid.toggleFlag(suspendedFlag, false)
+	pid.toggleFlag(runningFlag, true)
 
 	pid.stopLocker.Lock()
 	locked := true
@@ -4954,13 +4954,13 @@ func TestReinstateAvoidsPassivationRace(t *testing.T) {
 	}()
 
 	require.Eventually(t, func() bool {
-		return pid.passivating.Load()
+		return pid.isFlagEnabled(passivatingFlag)
 	}, time.Second, 5*time.Millisecond)
 
 	// Simulate a reinstate arriving after the initial skip check but before doStop executes.
-	pid.suspended.Store(true)
+	pid.toggleFlag(suspendedFlag, true)
 	pid.doReinstate()
-	require.True(t, pid.passivationSkipNext.Load(), "reinstate should set skip flag")
+	require.True(t, pid.isFlagEnabled(passivationSkipNextFlag), "reinstate should set skip flag")
 
 	pid.stopLocker.Unlock()
 	locked = false
