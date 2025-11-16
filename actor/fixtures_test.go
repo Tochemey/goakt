@@ -1357,17 +1357,47 @@ func (m *MockShutdownHookWithoutRecovery) Recovery() *ShutdownHookRecovery {
 	return nil
 }
 
-type MockInvalidPassivationStrategy struct{}
+type MockFakePassivationStrategy struct{}
 
-// Name implements passivation.Strategy.
-func (x *MockInvalidPassivationStrategy) Name() string {
-	return "MockInvalidPassivationStrategy"
+func (x *MockFakePassivationStrategy) Name() string {
+	return "MockFakePassivationStrategy"
 }
 
-var _ passivation.Strategy = (*MockInvalidPassivationStrategy)(nil)
+var _ passivation.Strategy = (*MockFakePassivationStrategy)(nil)
 
-func (x *MockInvalidPassivationStrategy) String() string {
-	return "MockInvalidPassivationStrategy"
+func (x *MockFakePassivationStrategy) String() string {
+	return "MockFakePassivationStrategy"
+}
+
+func MockPassivationPID(t *testing.T, name string, strategy passivation.Strategy) *PID {
+	t.Helper()
+	pid := &PID{
+		address:             address.New(name, "test-system", "127.0.0.1", 0),
+		passivationStrategy: strategy,
+		logger:              log.DiscardLogger,
+	}
+	return pid
+}
+
+type MockPassivationParticipant struct {
+	id        string
+	last      time.Time
+	passivate func(string) bool
+}
+
+func (s *MockPassivationParticipant) passivationID() string {
+	return s.id
+}
+
+func (s *MockPassivationParticipant) passivationLatestActivity() time.Time {
+	return s.last
+}
+
+func (s *MockPassivationParticipant) passivationTry(reason string) bool {
+	if s.passivate != nil {
+		return s.passivate(reason)
+	}
+	return true
 }
 
 type MockErrorMailbox struct{}

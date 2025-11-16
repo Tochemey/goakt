@@ -120,7 +120,7 @@ func TestSpawnConfig(t *testing.T) {
 	})
 	t.Run("With invalid passivation strategy", func(t *testing.T) {
 		config := newSpawnConfig()
-		option := WithPassivationStrategy(&MockInvalidPassivationStrategy{})
+		option := WithPassivationStrategy(&MockFakePassivationStrategy{})
 		option.Apply(config)
 		err := config.Validate()
 		require.Error(t, err)

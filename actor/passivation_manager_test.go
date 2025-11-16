@@ -1,26 +1,16 @@
 package actor
 
 import (
+	cheaps "container/heap"
 	"context"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/passivation"
 )
-
-func MockPassivationPID(t *testing.T, name string, strategy passivation.Strategy) *PID {
-	t.Helper()
-	pid := &PID{
-		address:             address.New(name, "test-system", "127.0.0.1", 0),
-		passivationStrategy: strategy,
-		logger:              log.DiscardLogger,
-	}
-	return pid
-}
 
 // nolint
 func TestPassivationManager_TimeBasedTrigger(t *testing.T) {
@@ -89,4 +79,239 @@ func TestPassivationManager_MessageCountTrigger(t *testing.T) {
 		_, ok := manager.entries[pid.ID()]
 		return !ok
 	}, time.Second, 5*time.Millisecond)
+}
+
+func TestPassivationManager_RegisterGuards(t *testing.T) {
+	t.Run("ignores when not started", func(t *testing.T) {
+		manager := newPassivationManager(log.DiscardLogger)
+		strategy := passivation.NewTimeBasedStrategy(time.Second)
+		participant := &MockPassivationParticipant{id: "guarded", last: time.Now()}
+
+		manager.Register(participant, strategy)
+
+		manager.mu.Lock()
+		defer manager.mu.Unlock()
+		require.Empty(t, manager.entries)
+	})
+
+	t.Run("ignores empty id", func(t *testing.T) {
+		manager := newPassivationManager(log.DiscardLogger)
+		manager.Start(context.Background())
+		defer manager.Stop(context.Background())
+
+		strategy := passivation.NewTimeBasedStrategy(time.Second)
+		manager.Register(&MockPassivationParticipant{last: time.Now()}, strategy)
+
+		manager.mu.Lock()
+		defer manager.mu.Unlock()
+		require.Empty(t, manager.entries)
+	})
+
+	t.Run("ignores nil strategy", func(t *testing.T) {
+		manager := newPassivationManager(log.DiscardLogger)
+		manager.Start(context.Background())
+		defer manager.Stop(context.Background())
+
+		manager.Register(&MockPassivationParticipant{id: "no-strategy", last: time.Now()}, nil)
+
+		manager.mu.Lock()
+		defer manager.mu.Unlock()
+		require.Empty(t, manager.entries)
+	})
+}
+
+func TestPassivationManager_RegisterStrategies(t *testing.T) {
+	t.Run("updates existing time-based entry", func(t *testing.T) {
+		manager := newPassivationManager(log.DiscardLogger)
+		manager.Start(context.Background())
+		defer manager.Stop(context.Background())
+
+		strategy := passivation.NewTimeBasedStrategy(time.Minute)
+		pid := MockPassivationPID(t, "time-entry", strategy)
+		pid.latestReceiveTime.Store(time.Now())
+
+		manager.Register(pid, strategy)
+
+		manager.mu.Lock()
+		entry := manager.entries[pid.ID()]
+		require.NotNil(t, entry)
+		require.Equal(t, 0, entry.index)
+		manager.mu.Unlock()
+
+		pid.latestReceiveTime.Store(time.Now().Add(time.Second))
+		manager.Register(pid, strategy)
+
+		manager.mu.Lock()
+		entry = manager.entries[pid.ID()]
+		require.NotNil(t, entry)
+		require.Equal(t, 1, len(manager.queue))
+		require.Equal(t, 0, entry.index)
+		manager.mu.Unlock()
+	})
+
+	t.Run("records baseline for non pid message strategy", func(t *testing.T) {
+		manager := newPassivationManager(log.DiscardLogger)
+		manager.Start(context.Background())
+		defer manager.Stop(context.Background())
+
+		strategy := passivation.NewMessageCountBasedStrategy(5)
+		participant := &MockPassivationParticipant{id: "custom", last: time.Now()}
+		manager.Register(participant, strategy)
+
+		manager.mu.Lock()
+		entry := manager.entries[participant.id]
+		manager.mu.Unlock()
+
+		require.NotNil(t, entry)
+		require.Equal(t, int64(0), entry.baseline)
+	})
+
+	t.Run("removes unknown strategies", func(t *testing.T) {
+		manager := newPassivationManager(log.DiscardLogger)
+		manager.Start(context.Background())
+		defer manager.Stop(context.Background())
+
+		participant := &MockPassivationParticipant{id: "fake", last: time.Now()}
+		manager.Register(participant, &MockFakePassivationStrategy{})
+
+		manager.mu.Lock()
+		_, ok := manager.entries[participant.id]
+		manager.mu.Unlock()
+
+		require.False(t, ok)
+	})
+}
+
+func TestPassivationManager_GuardMethods(t *testing.T) {
+	manager := newPassivationManager(log.DiscardLogger)
+
+	require.False(t, manager.Resume(&MockPassivationParticipant{}))
+	manager.Unregister(&MockPassivationParticipant{})
+	manager.Touch(&MockPassivationParticipant{})
+}
+
+func TestPassivationManager_NextEntrySkipsPaused(t *testing.T) {
+	manager := newPassivationManager(log.DiscardLogger)
+
+	paused := &passivationEntry{
+		id:       "paused",
+		deadline: time.Now().Add(time.Hour),
+		paused:   true,
+	}
+	active := &passivationEntry{
+		id:       "active",
+		deadline: time.Now().Add(2 * time.Hour),
+	}
+
+	cheaps.Push(&manager.queue, paused)
+	cheaps.Push(&manager.queue, active)
+
+	entry, wait := manager.nextEntry()
+	require.Equal(t, active, entry)
+	require.Greater(t, wait, time.Duration(0))
+	require.Equal(t, -1, paused.index)
+}
+
+func TestPassivationManager_TriggerPaths(t *testing.T) {
+	t.Run("ignores mismatched entry", func(t *testing.T) {
+		manager := newPassivationManager(log.DiscardLogger)
+		entry := &passivationEntry{
+			id:       "expected",
+			deadline: time.Now().Add(-time.Second),
+		}
+		manager.entries[entry.id] = entry
+		cheaps.Push(&manager.queue, entry)
+
+		manager.trigger(&passivationEntry{id: "other"})
+
+		manager.mu.Lock()
+		defer manager.mu.Unlock()
+		require.Equal(t, entry, manager.queue[0])
+	})
+
+	t.Run("requeues when passivation skipped", func(t *testing.T) {
+		manager := newPassivationManager(log.DiscardLogger)
+		stub := &MockPassivationParticipant{
+			id:   "requeue",
+			last: time.Now(),
+		}
+		entry := &passivationEntry{
+			target:   stub,
+			id:       stub.id,
+			strategy: passivation.NewTimeBasedStrategy(time.Second),
+			timeout:  time.Second,
+			deadline: time.Now().Add(-time.Second),
+		}
+		manager.entries[entry.id] = entry
+		cheaps.Push(&manager.queue, entry)
+		manager.passivateFn = func(*passivationEntry) bool { return false }
+
+		manager.trigger(entry)
+
+		manager.mu.Lock()
+		require.Equal(t, entry, manager.queue[0])
+		require.Equal(t, 0, entry.index)
+		manager.mu.Unlock()
+
+		select {
+		case <-manager.wake:
+		case <-time.After(time.Second):
+			t.Fatal("expected notify to signal wake channel")
+		}
+	})
+}
+
+func TestPassivationManager_Notify(t *testing.T) {
+	manager := newPassivationManager(log.DiscardLogger)
+
+	manager.notify()
+
+	select {
+	case <-manager.wake:
+	case <-time.After(50 * time.Millisecond):
+		t.Fatal("expected notify to signal wake channel")
+	}
+}
+
+func TestPassivationManager_RunHandlesChannels(t *testing.T) {
+	manager := newPassivationManager(log.DiscardLogger)
+	passivated := make(chan string, 1)
+	manager.passivateFn = func(entry *passivationEntry) bool {
+		passivated <- entry.id
+		return true
+	}
+
+	manager.Start(context.Background())
+	t.Cleanup(func() {
+		manager.Stop(context.Background())
+	})
+
+	timeStrategy := passivation.NewTimeBasedStrategy(2 * time.Second)
+	timePID := MockPassivationPID(t, "timer", timeStrategy)
+	timePID.latestReceiveTime.Store(time.Now())
+	manager.Register(timePID, timeStrategy)
+
+	msgStrategy := passivation.NewMessageCountBasedStrategy(1)
+	msgPID := MockPassivationPID(t, "message", msgStrategy)
+	manager.Register(msgPID, msgStrategy)
+
+	msgPID.processedCount.Store(2)
+	manager.MessageProcessed(msgPID)
+
+	require.Eventually(t, func() bool {
+		select {
+		case id := <-passivated:
+			return id == msgPID.ID()
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond, "expected message entry passivation")
+
+	time.Sleep(10 * time.Millisecond)
+	manager.notify()
+	require.Eventually(t, func() bool {
+		return len(manager.wake) == 0
+	}, time.Second, time.Millisecond, "wake signal not drained")
+
+	manager.Stop(context.Background())
 }

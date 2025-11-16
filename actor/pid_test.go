@@ -3688,7 +3688,7 @@ func TestRemoteSpawn(t *testing.T) {
 		require.NoError(t, err)
 
 		// spawn the remote actor
-		err = pid.RemoteSpawn(ctx, host, remotingPort, actorName, "actor.exchanger", WithPassivationStrategy(&MockInvalidPassivationStrategy{}))
+		err = pid.RemoteSpawn(ctx, host, remotingPort, actorName, "actor.exchanger", WithPassivationStrategy(&MockFakePassivationStrategy{}))
 		require.Error(t, err)
 
 		err = sys.Stop(ctx)
