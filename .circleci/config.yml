@@ -71,7 +71,4 @@ jobs:
 workflows:
   build:
     jobs:
-      - test:
-          filters:
-            branches:
-              only: main
+      - test
