@@ -5,7 +5,7 @@ orbs:
   codecov: codecov/codecov@5.4.3
 
 jobs:
-  test:
+  build_and_test:
     docker:
       # Go 1.25.x image (adjust patch version if you really need 1.25.3)
       - image: cimg/go:1.25.3
@@ -71,4 +71,4 @@ jobs:
 workflows:
   build:
     jobs:
-      - test
+      - build_and_test

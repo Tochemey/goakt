@@ -669,6 +669,7 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 		withEventsStream(pid.eventsStream),
 		withInitTimeout(pid.initTimeout.Load()),
 		withRemoting(pid.remoting),
+		withPassivationManager(pid.passivationManager),
 	}
 
 	if spawnConfig.mailbox != nil {
@@ -2151,6 +2152,9 @@ func (pid *PID) doReinstate() {
 	// Guard against a pending passivation path that might have just crossed the threshold
 	// but hasn't yet checked suspension state. Skip the next passivation decision once.
 	pid.toggleFlag(passivationSkipNextFlag, true)
+	// Treat reinstate as activity so any freshly registered passivation deadline
+	// doesn't immediately fire before the skip guard can cancel the in-flight attempt.
+	pid.markActivity(time.Now())
 
 	// resume the supervisor loop
 	pid.startSupervision()
