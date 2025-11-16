@@ -36,7 +36,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -6807,7 +6806,6 @@ func TestResyncGrains_ErrorPaths(t *testing.T) {
 		dependencies: config.dependencies,
 		config:       config,
 	}
-	grain.mu = &sync.Mutex{}
 
 	system.grains.Set(identity.String(), grain)
 
@@ -6870,7 +6868,7 @@ func TestCleanupCluster_RemoveGrainFailure(t *testing.T) {
 		address: address.New("actor", system.name, "127.0.0.1", 8080),
 	}
 	grainID := &GrainIdentity{kind: "grain.kind", name: "grain"}
-	grain := &grainPID{identity: grainID, actorSystem: system, logger: log.DiscardLogger, mu: &sync.Mutex{}}
+	grain := &grainPID{identity: grainID, actorSystem: system, logger: log.DiscardLogger}
 	system.grains.Set(grainID.String(), grain)
 
 	clusterMock.EXPECT().IsLeader(mock.Anything).Return(false)

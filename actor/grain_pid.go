@@ -67,11 +67,11 @@ type grainPID struct {
 
 	// the list of dependencies
 	dependencies *collection.Map[string, extension.Dependency]
-	activated    *atomic.Bool
+	activated    atomic.Bool
 	config       *grainConfig
 
-	mu                 *sync.Mutex
-	deactivateAfter    *atomic.Duration
+	mu                 sync.Mutex
+	deactivateAfter    atomic.Duration
 	passivationManager *passivationManager
 
 	onPoisonPill *atomic.Bool
@@ -88,15 +88,14 @@ func newGrainPID(identity *GrainIdentity, grain Grain, actorSystem ActorSystem, 
 		logger:             actorSystem.Logger(),
 		remoting:           actorSystem.getRemoting(),
 		dependencies:       config.dependencies,
-		activated:          atomic.NewBool(false),
 		latestReceiveTime:  atomic.Time{},
 		config:             config,
-		mu:                 &sync.Mutex{},
 		onPoisonPill:       atomic.NewBool(false),
 		passivationManager: actorSystem.passivationManager(),
 	}
 
 	pid.processing.Store(idle)
+	pid.activated.Store(false)
 
 	return pid
 }
@@ -121,7 +120,7 @@ func (pid *grainPID) activate(ctx context.Context) error {
 	}
 
 	pid.activated.Store(true)
-	pid.deactivateAfter = atomic.NewDuration(pid.config.deactivateAfter)
+	pid.deactivateAfter.Store(pid.config.deactivateAfter)
 	pid.logger.Infof("Grain %s successfully activated.", pid.identity.String())
 	cancel()
 
@@ -336,7 +335,7 @@ func (pid *grainPID) startPassivation() {
 }
 
 func (pid *grainPID) passivationTimeout() time.Duration {
-	if pid.passivationManager == nil || pid.deactivateAfter == nil {
+	if pid.passivationManager == nil {
 		return 0
 	}
 	return pid.deactivateAfter.Load()

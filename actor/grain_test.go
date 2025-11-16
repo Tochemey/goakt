@@ -64,7 +64,6 @@ func TestGrainPIDProcessReleasesContexts(t *testing.T) {
 		grain:   grain,
 		mailbox: newGrainMailbox(),
 		logger:  log.DiscardLogger,
-		mu:      &sync.Mutex{},
 	}
 
 	pid.processing.Store(idle)

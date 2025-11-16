@@ -1,7 +1,6 @@
 package actor
 
 import (
-	"sync"
 	"testing"
 	"time"
 
@@ -20,13 +19,12 @@ func TestGrainPIDPassivationIDEmptyWithoutIdentity(t *testing.T) {
 
 func TestGrainPIDPassivationTrySkipsWhenInactive(t *testing.T) {
 	pid := &grainPID{
-		logger:          log.DiscardLogger,
-		activated:       atomic.NewBool(false),
-		onPoisonPill:    atomic.NewBool(false),
-		dependencies:    collection.NewMap[string, extension.Dependency](),
-		mu:              &sync.Mutex{},
-		deactivateAfter: atomic.NewDuration(time.Second),
+		logger:       log.DiscardLogger,
+		onPoisonPill: atomic.NewBool(false),
+		dependencies: collection.NewMap[string, extension.Dependency](),
 	}
+	pid.activated.Store(false)
+	pid.deactivateAfter.Store(time.Second)
 	require.False(t, pid.passivationTry("no-op"))
 }
 
@@ -35,13 +33,12 @@ func TestGrainPIDPassivationTryFailsOnDeactivateError(t *testing.T) {
 		identity:           &GrainIdentity{kind: "Kind", name: "Name"},
 		logger:             log.DiscardLogger,
 		grain:              &MockGrainDeactivationFailure{},
-		activated:          atomic.NewBool(true),
 		onPoisonPill:       atomic.NewBool(false),
 		dependencies:       collection.NewMap[string, extension.Dependency](),
-		mu:                 &sync.Mutex{},
 		passivationManager: nil,
 	}
 
+	pid.activated.Store(true)
 	require.False(t, pid.passivationTry("deactivate failure"))
 }
 
@@ -51,7 +48,6 @@ func TestGrainPIDStartPassivationSkipsWhenAutoDisabled(t *testing.T) {
 
 	pid := &grainPID{
 		passivationManager: manager,
-		deactivateAfter:    nil,
 	}
 
 	pid.startPassivation()
@@ -68,11 +64,10 @@ func TestGrainPIDStartPassivationSkipsWhenTimeoutNonPositive(t *testing.T) {
 	pid := &grainPID{
 		identity:           &GrainIdentity{kind: "Kind", name: "Name"},
 		passivationManager: manager,
-		deactivateAfter:    atomic.NewDuration(0),
 		logger:             log.DiscardLogger,
-		mu:                 &sync.Mutex{},
 	}
 
+	pid.deactivateAfter.Store(0)
 	pid.startPassivation()
 
 	manager.mu.Lock()
@@ -87,11 +82,10 @@ func TestGrainPIDStartPassivationRegistersStrategy(t *testing.T) {
 	pid := &grainPID{
 		identity:           &GrainIdentity{kind: "Kind", name: "Name"},
 		passivationManager: manager,
-		deactivateAfter:    atomic.NewDuration(time.Second),
 		logger:             log.DiscardLogger,
-		mu:                 &sync.Mutex{},
 	}
 
+	pid.deactivateAfter.Store(time.Second)
 	pid.startPassivation()
 
 	manager.mu.Lock()
@@ -104,8 +98,8 @@ func TestGrainPIDShouldAutoPassivate(t *testing.T) {
 	manager.started.Store(true)
 	pid := &grainPID{
 		passivationManager: manager,
-		deactivateAfter:    atomic.NewDuration(time.Second),
 	}
+	pid.deactivateAfter.Store(time.Second)
 	require.True(t, pid.shouldAutoPassivate())
 
 	pid.passivationManager = nil
