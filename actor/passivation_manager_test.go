@@ -23,6 +23,7 @@ func MockPassivationPID(t *testing.T, name string, strategy passivation.Strategy
 	return pid
 }
 
+// nolint
 func TestPassivationManager_TimeBasedTrigger(t *testing.T) {
 	manager := newPassivationManager(log.DiscardLogger)
 	defer manager.Stop(context.Background())
@@ -52,6 +53,7 @@ func TestPassivationManager_TimeBasedTrigger(t *testing.T) {
 	}
 }
 
+// nolint
 func TestPassivationManager_MessageCountTrigger(t *testing.T) {
 	manager := newPassivationManager(log.DiscardLogger)
 	defer manager.Stop(context.Background())

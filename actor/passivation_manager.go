@@ -62,9 +62,15 @@ type passivationManager struct {
 	passivateFn     func(*passivationEntry) bool
 }
 
+type passivationParticipant interface {
+	passivationID() string
+	passivationLatestActivity() time.Time
+	passivationTry(reason string) bool
+}
+
 // passivationEntry stores all scheduling metadata for a PID.
 // Fields:
-//   - pid/id:   PID pointer plus its stable ID string for map lookups.
+//   - target/id: participant plus its stable ID string for map lookups.
 //   - strategy: The selected passivation strategy (time-based or message-count).
 //   - timeout:  Duration extracted from TimeBasedStrategy.
 //   - deadline: Absolute timestamp for the next passivation attempt (time-based only).
@@ -76,7 +82,7 @@ type passivationManager struct {
 //   - pending:     Signals that a message-count trigger was raised but not yet processed.
 //   - enqueued:    Guards against double-enqueueing onto messageTriggers.
 type passivationEntry struct {
-	pid         *PID
+	target      passivationParticipant
 	id          string
 	strategy    passivation.Strategy
 	timeout     time.Duration
@@ -121,10 +127,10 @@ func (m *passivationManager) Stop(context.Context) {
 	m.started.Store(false)
 }
 
-// Register hooks a PID into the passivation scheduler using its selected strategy.
+// Register hooks a participant into the passivation scheduler using its selected strategy.
 // Existing entries are updated in-place so swapping strategies at runtime remains safe.
-func (m *passivationManager) Register(pid *PID, strategy passivation.Strategy) {
-	key := pidKey(pid)
+func (m *passivationManager) Register(participant passivationParticipant, strategy passivation.Strategy) {
+	key := participant.passivationID()
 	if key == "" || strategy == nil || !m.started.Load() {
 		return
 	}
@@ -135,44 +141,47 @@ func (m *passivationManager) Register(pid *PID, strategy passivation.Strategy) {
 	entry, ok := m.entries[key]
 	if !ok {
 		entry = &passivationEntry{
-			pid: pid,
-			id:  key,
-			// index starts at -1 to indicate the entry is not in the heap yet.
-			// This prevents accidental heap.Fix/Remove calls before registration.
-			index: -1,
+			target: participant,
+			id:     key,
+			index:  -1,
 		}
 		m.entries[key] = entry
 	} else if entry.index >= 0 {
 		cheaps.Remove(&m.queue, entry.index)
 		entry.index = -1
 	}
+	entry.target = participant
 
 	entry.strategy = strategy
 	entry.paused = false
 	entry.pending = false
 	entry.enqueued = false
 
-	switch strat := strategy.(type) {
+	switch s := strategy.(type) {
 	case *passivation.TimeBasedStrategy:
-		entry.timeout = strat.Timeout()
+		entry.timeout = s.Timeout()
 		// Equivalent to running a ticker that periodically evaluates
-		// elapsed := time.Since(pid.latestReceiveTime.Load()) and triggers
+		// elapsed := time.Since(participant.passivationLatestActivity()) and triggers
 		// passivation when elapsed >= timeout. By storing the absolute
 		// deadline (last activity + timeout) we avoid per-actor goroutines.
 		entry.refreshDeadline()
 		cheaps.Push(&m.queue, entry)
 		m.notifyLocked()
 	case *passivation.MessagesCountBasedStrategy:
-		entry.maxMessages = strat.MaxMessages()
-		entry.baseline = pid.processedCount.Load() + 1
+		entry.maxMessages = s.MaxMessages()
+		if pid, ok := participant.(*PID); ok {
+			entry.baseline = pid.processedCount.Load() + 1
+		} else {
+			entry.baseline = 0
+		}
 	default:
 		delete(m.entries, key)
 	}
 }
 
-// Unregister removes a PID from any passivation bookkeeping.
-func (m *passivationManager) Unregister(pid *PID) {
-	key := pidKey(pid)
+// Unregister removes a participant from any passivation bookkeeping.
+func (m *passivationManager) Unregister(participant passivationParticipant) {
+	key := participant.passivationID()
 	if key == "" {
 		return
 	}
@@ -192,9 +201,9 @@ func (m *passivationManager) Unregister(pid *PID) {
 	delete(m.entries, key)
 }
 
-// Pause temporarily removes a PID from scheduling so passivation cannot fire.
-func (m *passivationManager) Pause(pid *PID) {
-	key := pidKey(pid)
+// Pause temporarily removes a participant from scheduling so passivation cannot fire.
+func (m *passivationManager) Pause(participant passivationParticipant) {
+	key := participant.passivationID()
 	if key == "" {
 		return
 	}
@@ -214,10 +223,10 @@ func (m *passivationManager) Pause(pid *PID) {
 	}
 }
 
-// Resume reactivates scheduling for a paused PID.
+// Resume reactivates scheduling for a paused participant.
 // It requeues time-based entries onto the heap or drains any pending message-count trigger.
-func (m *passivationManager) Resume(pid *PID) bool {
-	key := pidKey(pid)
+func (m *passivationManager) Resume(participant passivationParticipant) bool {
+	key := participant.passivationID()
 	if key == "" {
 		return false
 	}
@@ -249,8 +258,8 @@ func (m *passivationManager) Resume(pid *PID) bool {
 }
 
 // Touch refreshes the inactivity deadline for time-based strategies after a message was processed.
-func (m *passivationManager) Touch(pid *PID) {
-	key := pidKey(pid)
+func (m *passivationManager) Touch(participant passivationParticipant) {
+	key := participant.passivationID()
 	if key == "" {
 		return
 	}
@@ -424,11 +433,11 @@ func (m *passivationManager) notifyLocked() {
 }
 
 // refreshDeadline recomputes the absolute deadline for time-based passivation.
-// It reads the PID's latestReceiveTime (which is updated after every message) and
+// It reads the participant's latest activity timestamp (which is updated after every message) and
 // adds the configured timeout so the next passivation attempt only fires after an
 // entire period of inactivity has elapsed.
 func (entry *passivationEntry) refreshDeadline() {
-	last := entry.pid.latestReceiveTime.Load()
+	last := entry.target.passivationLatestActivity()
 	if last.IsZero() {
 		last = time.Now()
 	}
@@ -542,10 +551,10 @@ func (m *passivationManager) passivate(entry *passivationEntry) bool {
 	if m.passivateFn != nil {
 		return m.passivateFn(entry)
 	}
-	if entry == nil || entry.pid == nil {
+	if entry == nil || entry.target == nil {
 		return false
 	}
-	return entry.pid.tryPassivation(passivationReason(entry))
+	return entry.target.passivationTry(passivationReason(entry))
 }
 
 // pidKey returns a stable string key for the PID map lookups.

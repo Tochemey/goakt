@@ -1061,11 +1061,9 @@ func TestGrain(t *testing.T) {
 		require.NotNil(t, identity)
 
 		wg := sync.WaitGroup{}
-		wg.Add(1)
-		go func() {
+		wg.Go(func() {
 			pause.For(500 * time.Millisecond)
-			wg.Done()
-		}()
+		})
 		// block until timer is up
 		wg.Wait()
 

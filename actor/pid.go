@@ -163,6 +163,8 @@ type PID struct {
 	role *string
 }
 
+var _ passivationParticipant = (*PID)(nil)
+
 // newPID creates a new pid
 func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...pidOption) (*PID, error) {
 	// actor address is required
@@ -1394,6 +1396,18 @@ func (pid *PID) recordProcessedMessage() {
 	if pid.passivationManager != nil {
 		pid.passivationManager.MessageProcessed(pid)
 	}
+}
+
+func (pid *PID) passivationID() string {
+	return pid.ID()
+}
+
+func (pid *PID) passivationLatestActivity() time.Time {
+	return pid.latestReceiveTime.Load()
+}
+
+func (pid *PID) passivationTry(reason string) bool {
+	return pid.tryPassivation(reason)
 }
 
 // recovery is called upon after message is processed

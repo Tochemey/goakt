@@ -43,9 +43,8 @@ import (
 	"github.com/tochemey/goakt/v3/internal/codec"
 	"github.com/tochemey/goakt/v3/internal/collection"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/registry"
-	"github.com/tochemey/goakt/v3/internal/ticker"
 	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v3/passivation"
 	"github.com/tochemey/goakt/v3/remote"
 )
 
@@ -72,8 +71,8 @@ type grainPID struct {
 	config       *grainConfig
 
 	mu                 *sync.Mutex
-	haltPassivationLnr chan registry.Unit
 	deactivateAfter    *atomic.Duration
+	passivationManager *passivationManager
 
 	onPoisonPill *atomic.Bool
 }
@@ -90,9 +89,9 @@ func newGrainPID(identity *GrainIdentity, grain Grain, actorSystem ActorSystem, 
 		activated:          atomic.NewBool(false),
 		latestReceiveTime:  atomic.Time{},
 		config:             config,
-		haltPassivationLnr: make(chan registry.Unit, 1),
 		mu:                 &sync.Mutex{},
 		onPoisonPill:       atomic.NewBool(false),
+		passivationManager: passivationManagerFrom(actorSystem),
 	}
 
 	pid.processing.Store(idle)
@@ -124,8 +123,10 @@ func (pid *grainPID) activate(ctx context.Context) error {
 	pid.logger.Infof("Grain %s successfully activated.", pid.identity.String())
 	cancel()
 
-	if pid.deactivateAfter.Load() > 0 {
-		go pid.deactivationLoop()
+	pid.markActivity(time.Now())
+
+	if pid.shouldAutoPassivate() {
+		pid.startPassivation()
 	}
 
 	return nil
@@ -135,13 +136,13 @@ func (pid *grainPID) activate(ctx context.Context) error {
 func (pid *grainPID) deactivate(ctx context.Context) error {
 	logger := pid.logger
 
+	pid.unregisterPassivation()
+
 	defer func() {
 		pid.activated.Store(false)
 		pid.latestReceiveTime.Store(time.Time{})
 		pid.onPoisonPill.Store(false)
 	}()
-
-	pid.haltPassivationLnr <- registry.Unit{}
 
 	logger.Infof("Deactivating Grain %s ...", pid.identity.String())
 	if pid.remoting != nil {
@@ -237,7 +238,7 @@ func (pid *grainPID) handlePoisonPill(grainContext *GrainContext) {
 
 func (pid *grainPID) handleGrainContext(grainContext *GrainContext) {
 	defer pid.recovery(grainContext)
-	pid.latestReceiveTime.Store(time.Now())
+	pid.markActivity(time.Now())
 	pid.grain.OnReceive(grainContext)
 }
 
@@ -288,36 +289,61 @@ func (pid *grainPID) getIdentity() *GrainIdentity {
 	return id
 }
 
-func (pid *grainPID) deactivationLoop() {
-	clock := ticker.New(pid.deactivateAfter.Load())
-	defer clock.Stop()
+var _ passivationParticipant = (*grainPID)(nil)
 
-	tickerStopSig := make(chan registry.Unit, 1)
+func (pid *grainPID) passivationID() string {
+	if pid.identity == nil {
+		return ""
+	}
+	return pid.identity.String()
+}
 
-	clock.Start()
+func (pid *grainPID) passivationLatestActivity() time.Time {
+	return pid.latestReceiveTime.Load()
+}
 
-	go func() {
-		for {
-			select {
-			case <-clock.Ticks:
-				elapsed := time.Since(pid.latestReceiveTime.Load())
-				if elapsed >= pid.deactivateAfter.Load() {
-					if !pid.onPoisonPill.Load() {
-						if err := pid.deactivate(context.Background()); err != nil {
-							pid.logger.Errorf("deactivation loop failed for Grain=(%s): %v", pid.identity.String(), err)
-						}
-					}
-					tickerStopSig <- registry.Unit{}
-					return
-				}
-			case <-pid.haltPassivationLnr:
-				tickerStopSig <- registry.Unit{}
-				return
-			}
-		}
-	}()
+func (pid *grainPID) passivationTry(reason string) bool {
+	if !pid.isActive() || pid.onPoisonPill.Load() {
+		return false
+	}
 
-	<-tickerStopSig
+	pid.logger.Infof("passivation triggered for Grain %s (%s)", pid.identity.String(), reason)
+	if err := pid.deactivate(context.Background()); err != nil {
+		pid.logger.Errorf("failed to passivate Grain %s: %v", pid.identity.String(), err)
+		return false
+	}
+	return true
+}
+
+func (pid *grainPID) markActivity(at time.Time) {
+	pid.latestReceiveTime.Store(at)
+	if pid.passivationManager != nil {
+		pid.passivationManager.Touch(pid)
+	}
+}
+
+func (pid *grainPID) shouldAutoPassivate() bool {
+	return pid.passivationManager != nil &&
+		pid.deactivateAfter != nil &&
+		pid.deactivateAfter.Load() > 0
+}
+
+func (pid *grainPID) startPassivation() {
+	if !pid.shouldAutoPassivate() {
+		return
+	}
+	timeout := pid.deactivateAfter.Load()
+	if timeout <= 0 {
+		return
+	}
+	strategy := passivation.NewTimeBasedStrategy(timeout)
+	pid.passivationManager.Register(pid, strategy)
+}
+
+func (pid *grainPID) unregisterPassivation() {
+	if pid.passivationManager != nil {
+		pid.passivationManager.Unregister(pid)
+	}
 }
 
 func (pid *grainPID) toWireGrain() (*internalpb.Grain, error) {
@@ -338,4 +364,11 @@ func (pid *grainPID) toWireGrain() (*internalpb.Grain, error) {
 		ActivationTimeout: durationpb.New(pid.config.initTimeout.Load()),
 		ActivationRetries: pid.config.initMaxRetries.Load(),
 	}, nil
+}
+
+func passivationManagerFrom(system ActorSystem) *passivationManager {
+	if sys, ok := system.(*actorSystem); ok {
+		return sys.passivator
+	}
+	return nil
 }
