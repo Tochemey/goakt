@@ -288,12 +288,7 @@ func (m *passivationManager) run() {
 	// allocating a new timer per loop. This pattern avoids both extra heap churn
 	// and subtle races where Reset is called on an uninitialized timer.
 	timer := time.NewTimer(time.Hour)
-	if !timer.Stop() {
-		select {
-		case <-timer.C:
-		default:
-		}
-	}
+	stopTimer(timer)
 
 	for {
 		entry, wait := m.nextEntry()
@@ -305,7 +300,7 @@ func (m *passivationManager) run() {
 				m.processMessageEntry(msgEntry)
 				continue
 			case <-m.stop:
-				timer.Stop()
+				stopTimer(timer)
 				close(m.done)
 				return
 			}
@@ -322,27 +317,12 @@ func (m *passivationManager) run() {
 		case <-timer.C:
 			m.trigger(entry)
 		case msgEntry := <-m.messageTriggers:
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
+			stopTimer(timer)
 			m.processMessageEntry(msgEntry)
 		case <-m.wake:
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
+			stopTimer(timer)
 		case <-m.stop:
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
+			stopTimer(timer)
 			close(m.done)
 			return
 		}
@@ -605,4 +585,19 @@ func (h *passivationHeap) Pop() any {
 	entry.index = -1
 	*h = old[:n-1]
 	return entry
+}
+
+// stopTimer stops a timer and drains its channel when the timer has already fired.
+// This mirrors the recommended pattern from the Go time package to ensure timers
+// can be safely reused after Stop reports false.
+func stopTimer(timer *time.Timer) {
+	if timer == nil {
+		return
+	}
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
+	}
 }

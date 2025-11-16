@@ -81,6 +81,143 @@ func TestPassivationManager_MessageCountTrigger(t *testing.T) {
 	}, time.Second, 5*time.Millisecond)
 }
 
+func TestPassivationManager_MessageProcessedGuards(t *testing.T) {
+	t.Run("skips enqueue when entry paused", func(t *testing.T) {
+		manager := newPassivationManager(log.DiscardLogger)
+		manager.started.Store(true)
+
+		strategy := passivation.NewMessageCountBasedStrategy(1)
+		pid := MockPassivationPID(t, "paused-entry", strategy)
+		manager.Register(pid, strategy)
+
+		manager.mu.Lock()
+		entry := manager.entries[pid.ID()]
+		entry.paused = true
+		threshold := entry.baseline + int64(entry.maxMessages)
+		manager.mu.Unlock()
+
+		pid.processedCount.Store(threshold)
+
+		manager.MessageProcessed(pid)
+
+		manager.mu.Lock()
+		require.True(t, entry.pending, "pending flag should be set")
+		require.False(t, entry.enqueued, "paused entry must not enqueue")
+		manager.mu.Unlock()
+		require.Equal(t, 0, len(manager.messageTriggers))
+	})
+
+	t.Run("skips enqueue when already enqueued", func(t *testing.T) {
+		manager := newPassivationManager(log.DiscardLogger)
+		manager.started.Store(true)
+
+		strategy := passivation.NewMessageCountBasedStrategy(1)
+		pid := MockPassivationPID(t, "enqueued-entry", strategy)
+		manager.Register(pid, strategy)
+
+		manager.mu.Lock()
+		entry := manager.entries[pid.ID()]
+		entry.enqueued = true
+		threshold := entry.baseline + int64(entry.maxMessages)
+		manager.mu.Unlock()
+
+		pid.processedCount.Store(threshold)
+
+		manager.MessageProcessed(pid)
+
+		manager.mu.Lock()
+		require.True(t, entry.pending, "pending flag should stay set")
+		require.True(t, entry.enqueued, "entry should remain enqueued")
+		manager.mu.Unlock()
+		require.Equal(t, 0, len(manager.messageTriggers))
+	})
+}
+
+func TestPassivationManager_ProcessMessageEntry_PostPassivate(t *testing.T) {
+	t.Run("returns early when paused after passivate", func(t *testing.T) {
+		manager := newPassivationManager(log.DiscardLogger)
+		manager.started.Store(true)
+
+		entry := &passivationEntry{
+			target:   &MockPassivationParticipant{id: "paused-post", last: time.Now()},
+			id:       "paused-post",
+			strategy: passivation.NewMessageCountBasedStrategy(1),
+			pending:  true,
+			enqueued: true,
+		}
+		manager.entries[entry.id] = entry
+		manager.passivateFn = func(pe *passivationEntry) bool {
+			pe.paused = true
+			return false
+		}
+
+		manager.processMessageEntry(entry)
+
+		manager.mu.Lock()
+		require.True(t, entry.paused)
+		require.False(t, entry.enqueued)
+		manager.mu.Unlock()
+		require.Equal(t, 0, len(manager.messageTriggers))
+	})
+
+	t.Run("re-enqueues pending entry after skipped passivation", func(t *testing.T) {
+		manager := newPassivationManager(log.DiscardLogger)
+		manager.started.Store(true)
+
+		entry := &passivationEntry{
+			target:   &MockPassivationParticipant{id: "pending-requeue", last: time.Now()},
+			id:       "pending-requeue",
+			strategy: passivation.NewMessageCountBasedStrategy(1),
+			pending:  true,
+		}
+		manager.entries[entry.id] = entry
+		manager.passivateFn = func(*passivationEntry) bool { return false }
+
+		manager.processMessageEntry(entry)
+
+		manager.mu.Lock()
+		require.True(t, entry.enqueued, "entry should be marked as enqueued")
+		manager.mu.Unlock()
+
+		select {
+		case got := <-manager.messageTriggers:
+			require.Equal(t, entry, got)
+		default:
+			t.Fatal("expected entry to be scheduled again")
+		}
+	})
+}
+
+func TestPassivationManager_SignalMessageEntryDefault(t *testing.T) {
+	manager := newPassivationManager(log.DiscardLogger)
+	manager.started.Store(true)
+	manager.messageTriggers = make(chan *passivationEntry, 1)
+
+	first := &passivationEntry{id: "first"}
+	second := &passivationEntry{id: "second"}
+
+	// Fill the buffer so signalMessageEntry must take the default branch.
+	manager.messageTriggers <- first
+
+	manager.signalMessageEntry(second)
+
+	require.Equal(t, 1, len(manager.messageTriggers), "channel should remain full until drained")
+
+	select {
+	case got := <-manager.messageTriggers:
+		require.Equal(t, first, got)
+	case <-time.After(time.Second):
+		t.Fatal("expected to receive buffered entry")
+	}
+
+	select {
+	case got := <-manager.messageTriggers:
+		require.Equal(t, second, got)
+	case <-time.After(time.Second):
+		t.Fatal("expected default branch to schedule entry asynchronously")
+	}
+}
+
 func TestPassivationManager_RegisterGuards(t *testing.T) {
 	t.Run("ignores when not started", func(t *testing.T) {
 		manager := newPassivationManager(log.DiscardLogger)
@@ -190,6 +327,86 @@ func TestPassivationManager_GuardMethods(t *testing.T) {
 	manager.Touch(&MockPassivationParticipant{})
 }
 
+func TestPassivationManager_PauseIgnoresEmptyID(t *testing.T) {
+	manager := newPassivationManager(log.DiscardLogger)
+	manager.Start(context.Background())
+	t.Cleanup(func() {
+		manager.Stop(context.Background())
+	})
+
+	manager.Pause(&MockPassivationParticipant{})
+
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	require.Empty(t, manager.entries)
+}
+
+func TestPassivationManager_ResumeMessageStrategy(t *testing.T) {
+	manager := newPassivationManager(log.DiscardLogger)
+	manager.started.Store(true)
+
+	manager.messageTriggers = make(chan *passivationEntry, 1)
+
+	strategy := passivation.NewMessageCountBasedStrategy(1)
+	pid := MockPassivationPID(t, "resume-message", strategy)
+	manager.Register(pid, strategy)
+
+	manager.mu.Lock()
+	entry := manager.entries[pid.ID()]
+	entry.paused = true
+	entry.pending = true
+	manager.mu.Unlock()
+
+	resumed := manager.Resume(pid)
+	require.True(t, resumed, "resume should succeed for paused entry")
+
+	manager.mu.Lock()
+	require.True(t, entry.enqueued, "entry should be marked as enqueued")
+	manager.mu.Unlock()
+
+	select {
+	case got := <-manager.messageTriggers:
+		require.Equal(t, entry, got)
+	case <-time.After(time.Second):
+		t.Fatal("expected message entry to be signaled")
+	}
+
+	// Ensure the channel is empty for the next phase
+	require.Equal(t, 0, len(manager.messageTriggers))
+}
+
+func TestPassivationManager_ResumeSignalsWhenChannelFull(t *testing.T) {
+	manager := newPassivationManager(log.DiscardLogger)
+	manager.started.Store(true)
+	manager.messageTriggers = make(chan *passivationEntry, 1)
+
+	strategy := passivation.NewMessageCountBasedStrategy(1)
+	pid := MockPassivationPID(t, "resume-message-full-channel", strategy)
+	manager.Register(pid, strategy)
+
+	manager.mu.Lock()
+	entry := manager.entries[pid.ID()]
+	entry.paused = true
+	entry.pending = true
+	manager.mu.Unlock()
+
+	// Fill the channel so Resume must rely on the signalMessageEntry default branch.
+	blocker := &passivationEntry{id: "blocker"}
+	manager.messageTriggers <- blocker
+
+	require.True(t, manager.Resume(pid))
+
+	// Drain the blocker to free capacity and expect our entry to arrive.
+	require.Equal(t, blocker, <-manager.messageTriggers)
+
+	select {
+	case got := <-manager.messageTriggers:
+		require.Equal(t, entry, got)
+	case <-time.After(time.Second):
+		t.Fatal("expected pending entry to be signaled once capacity freed")
+	}
+}
+
 func TestPassivationManager_NextEntrySkipsPaused(t *testing.T) {
 	manager := newPassivationManager(log.DiscardLogger)
 
@@ -259,6 +476,35 @@ func TestPassivationManager_TriggerPaths(t *testing.T) {
 			t.Fatal("expected notify to signal wake channel")
 		}
 	})
+
+	t.Run("returns early when entry paused mid-trigger", func(t *testing.T) {
+		manager := newPassivationManager(log.DiscardLogger)
+		stub := &MockPassivationParticipant{
+			id:   "paused-mid-trigger",
+			last: time.Now(),
+		}
+		entry := &passivationEntry{
+			target:   stub,
+			id:       stub.id,
+			strategy: passivation.NewTimeBasedStrategy(time.Second),
+			timeout:  time.Second,
+			deadline: time.Now().Add(-time.Second),
+		}
+		manager.entries[entry.id] = entry
+		cheaps.Push(&manager.queue, entry)
+		manager.passivateFn = func(pe *passivationEntry) bool {
+			pe.paused = true
+			return false
+		}
+
+		manager.trigger(entry)
+
+		require.Equal(t, -1, entry.index)
+		manager.mu.Lock()
+		_, tracked := manager.entries[entry.id]
+		manager.mu.Unlock()
+		require.True(t, tracked)
+	})
 }
 
 func TestPassivationManager_Notify(t *testing.T) {
@@ -314,4 +560,29 @@ func TestPassivationManager_RunHandlesChannels(t *testing.T) {
 	}, time.Second, time.Millisecond, "wake signal not drained")
 
 	manager.Stop(context.Background())
+}
+
+func TestStopTimerDrainsExpiredTimer(t *testing.T) {
+	timer := time.NewTimer(5 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond) // ensure the timer fires
+
+	stopTimer(timer)
+
+	select {
+	case <-timer.C:
+		t.Fatal("timer channel should have been drained")
+	default:
+	}
+}
+
+func TestStopTimerHandlesActiveTimer(t *testing.T) {
+	timer := time.NewTimer(time.Hour)
+
+	stopTimer(timer)
+
+	select {
+	case <-timer.C:
+		t.Fatal("timer should not fire after stop")
+	default:
+	}
 }
