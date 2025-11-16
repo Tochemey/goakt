@@ -375,6 +375,31 @@ func TestPassivation(t *testing.T) {
 		assert.ErrorIs(t, err, errors.ErrDead)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
+	t.Run("Message-count passivation honors pause", func(t *testing.T) {
+		ctx := context.TODO()
+
+		system, err := NewActorSystem("pause-passivation", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, system.Start(ctx))
+		t.Cleanup(func() { _ = system.Stop(ctx) })
+
+		pid, err := system.Spawn(ctx, "pause-test", NewMockActor(),
+			WithPassivationStrategy(passivation.NewMessageCountBasedStrategy(1)))
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		require.NoError(t, Tell(ctx, pid, new(testpb.TestSend)))
+		require.True(t, pid.IsRunning())
+
+		require.NoError(t, Tell(ctx, pid, new(goaktpb.PausePassivation)))
+
+		require.Eventually(t, func() bool {
+			return pid.passivationManager != nil &&
+				len(pid.passivationManager.messageTriggers) == 0
+		}, time.Second, 5*time.Millisecond)
+
+		require.True(t, pid.IsRunning())
+	})
 	t.Run("With Time-based passivation", func(t *testing.T) {
 		ctx := context.TODO()
 		ports := dynaport.Get(1)

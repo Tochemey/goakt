@@ -496,11 +496,24 @@ func (m *passivationManager) processMessageEntry(entry *passivationEntry) {
 		return
 	}
 
+	m.mu.Lock()
+	current, ok := m.entries[entry.id]
+	if !ok || current != entry {
+		m.mu.Unlock()
+		return
+	}
+	if entry.paused {
+		entry.enqueued = false
+		m.mu.Unlock()
+		return
+	}
+	m.mu.Unlock()
+
 	passivated := m.passivate(entry)
 
 	m.mu.Lock()
 	entry.enqueued = false
-	current, ok := m.entries[entry.id]
+	current, ok = m.entries[entry.id]
 	if !ok || current != entry {
 		m.mu.Unlock()
 		return
