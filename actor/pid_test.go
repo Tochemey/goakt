@@ -46,7 +46,6 @@ import (
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/collection"
-	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/internal/registry"
@@ -62,17 +61,6 @@ const (
 	replyTimeout   = 100 * time.Millisecond
 	passivateAfter = 200 * time.Millisecond
 )
-
-func MockSupervisionPID(t *testing.T) *PID {
-	t.Helper()
-	return &PID{
-		logger:                log.DiscardLogger,
-		address:               address.New("child", "test-system", "127.0.0.1", 0),
-		supervisionStopSignal: make(chan registry.Unit, 1),
-		haltPassivationLnr:    make(chan registry.Unit, 1),
-		eventsStream:          eventstream.New(),
-	}
-}
 
 func TestReceive(t *testing.T) {
 	t.Run("With happy path", func(t *testing.T) {
@@ -244,11 +232,9 @@ func TestPassivation(t *testing.T) {
 
 		// let us sleep for some time to make the actor idle
 		wg := sync.WaitGroup{}
-		wg.Add(1)
-		go func() {
+		wg.Go(func() {
 			pause.For(receivingDelay)
-			wg.Done()
-		}()
+		})
 		// block until timer is up
 		wg.Wait()
 		// let us send a message to the actor
@@ -288,11 +274,9 @@ func TestPassivation(t *testing.T) {
 
 		// let us sleep for some time to make the actor idle
 		wg := sync.WaitGroup{}
-		wg.Add(1)
-		go func() {
+		wg.Go(func() {
 			pause.For(time.Second)
-			wg.Done()
-		}()
+		})
 		// block until timer is up
 		wg.Wait()
 		require.True(t, pid.IsRunning())
@@ -302,11 +286,9 @@ func TestPassivation(t *testing.T) {
 		require.NoError(t, err)
 
 		wg = sync.WaitGroup{}
-		wg.Add(1)
-		go func() {
+		wg.Go(func() {
 			pause.For(time.Second)
-			wg.Done()
-		}()
+		})
 		// block until timer is up
 		wg.Wait()
 		// let us send a message to the actor
@@ -344,11 +326,9 @@ func TestPassivation(t *testing.T) {
 
 		// let us sleep for some time to make the actor idle
 		wg := sync.WaitGroup{}
-		wg.Add(1)
-		go func() {
+		wg.Go(func() {
 			pause.For(receivingDelay)
-			wg.Done()
-		}()
+		})
 		// block until timer is up
 		wg.Wait()
 
@@ -418,11 +398,9 @@ func TestPassivation(t *testing.T) {
 
 		// let us sleep for some time to make the actor idle
 		wg := sync.WaitGroup{}
-		wg.Add(1)
-		go func() {
+		wg.Go(func() {
 			pause.For(receivingDelay)
-			wg.Done()
-		}()
+		})
 		// block until timer is up
 		wg.Wait()
 		// let us send a message to the actor
@@ -479,7 +457,7 @@ func TestRestart(t *testing.T) {
 		assert.NotZero(t, pid.Uptime())
 		// let us send 10 messages to the actor
 		count := 10
-		for i := 0; i < count; i++ {
+		for range count {
 			err = Tell(ctx, pid, new(testpb.TestSend))
 			assert.NoError(t, err)
 		}
@@ -510,7 +488,7 @@ func TestRestart(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, pid)
 		count := 10
-		for i := 0; i < count; i++ {
+		for range count {
 			err := Tell(ctx, pid, new(testpb.TestSend))
 			assert.NoError(t, err)
 		}
@@ -4969,9 +4947,10 @@ func TestReinstateAvoidsPassivationRace(t *testing.T) {
 	}()
 
 	done := make(chan struct{})
+	var passivated atomic.Bool
 	go func() {
-		pid.passivationLoop()
-		close(done)
+		defer close(done)
+		passivated.Store(pid.tryPassivation("test-passivation"))
 	}()
 
 	require.Eventually(t, func() bool {
@@ -4989,10 +4968,11 @@ func TestReinstateAvoidsPassivationRace(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(time.Second):
-		t.Fatal("passivation loop did not exit")
+		t.Fatal("passivation attempt did not exit")
 	}
 
 	require.Equal(t, int32(0), postStopCounter.Load())
+	require.False(t, passivated.Load(), "passivation should be skipped due to reinstate")
 	require.True(t, pid.IsRunning())
 }
 

@@ -58,6 +58,7 @@ import (
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/collection"
+	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v3/internal/pause"
@@ -144,6 +145,16 @@ func (p *MockActor) Receive(ctx *ReceiveContext) {
 		wg.Wait()
 	default:
 		ctx.Unhandled()
+	}
+}
+
+func MockSupervisionPID(t *testing.T) *PID {
+	t.Helper()
+	return &PID{
+		logger:                log.DiscardLogger,
+		address:               address.New("child", "test-system", "127.0.0.1", 0),
+		supervisionStopSignal: make(chan registry.Unit, 1),
+		eventsStream:          eventstream.New(),
 	}
 }
 
@@ -1347,6 +1358,11 @@ func (m *MockShutdownHookWithoutRecovery) Recovery() *ShutdownHookRecovery {
 }
 
 type MockInvalidPassivationStrategy struct{}
+
+// Name implements passivation.Strategy.
+func (x *MockInvalidPassivationStrategy) Name() string {
+	return "MockInvalidPassivationStrategy"
+}
 
 var _ passivation.Strategy = (*MockInvalidPassivationStrategy)(nil)
 

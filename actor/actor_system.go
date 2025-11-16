@@ -767,6 +767,9 @@ type actorSystem struct {
 	// specifies the message scheduler
 	scheduler *scheduler
 
+	// manages passivation deadlines without per-actor goroutines
+	passivator *passivationManager
+
 	registry   registry.Registry
 	reflection *reflection
 
@@ -889,6 +892,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	system.pubsubEnabled.Store(false)
 
 	system.reflection = newReflection(system.registry)
+	system.passivator = newPassivationManager(system.logger)
 
 	// apply the various options
 	for _, opt := range opts {
@@ -997,6 +1001,9 @@ func (x *actorSystem) Start(ctx context.Context) error {
 	}
 
 	x.startMessagesScheduler(ctx)
+	if x.passivator != nil {
+		x.passivator.Start(ctx)
+	}
 	x.startEviction()
 	x.started.Store(true)
 	x.starting.Store(false)
@@ -2663,6 +2670,9 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 		close(x.evictionStopSig)
 	}
 
+	if x.passivator != nil {
+		x.passivator.Stop(ctx)
+	}
 	if x.scheduler != nil {
 		x.scheduler.Stop(ctx)
 	}
@@ -3015,6 +3025,7 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 		withEventsStream(x.eventsStream),
 		withInitTimeout(x.actorInitTimeout),
 		withRemoting(x.remoting),
+		withPassivationManager(x.passivator),
 	}
 
 	if err := spawnConfig.Validate(); err != nil {

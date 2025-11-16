@@ -102,6 +102,13 @@ func withRemoting(remoting remote.Remoting) pidOption {
 	}
 }
 
+// withPassivationManager sets the passivation manager responsible for scheduling inactivity checks.
+func withPassivationManager(manager *passivationManager) pidOption {
+	return func(pid *PID) {
+		pid.passivationManager = manager
+	}
+}
+
 // asSingleton set the actor as singleton
 func asSingleton() pidOption {
 	return func(pid *PID) {

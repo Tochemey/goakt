@@ -101,8 +101,6 @@ type PID struct {
 	// specifies the actor mailbox
 	mailbox Mailbox
 
-	haltPassivationLnr chan registry.Unit
-
 	// the actor system
 	system ActorSystem
 
@@ -158,6 +156,7 @@ type PID struct {
 	// (post trigger) if a reinstate just happened. This prevents a race where a pending
 	// passivation proceeds right after the actor has been reinstated by the parent.
 	passivationSkipNext atomic.Bool
+	passivationManager  *passivationManager
 
 	// this is used to specify a role the actor belongs to
 	// this field is optional and will be set when the actor is created with a given role
@@ -179,7 +178,6 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	pid := &PID{
 		actor:                 actor,
 		latestReceiveTime:     atomic.Time{},
-		haltPassivationLnr:    make(chan registry.Unit, 1),
 		logger:                log.New(log.ErrorLevel, os.Stderr),
 		address:               address,
 		mailbox:               NewUnboundedMailbox(),
@@ -1236,10 +1234,7 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 	}
 
 	pid.stopping.Store(true)
-	if pid.passivationStrategy != nil && !isLongLivedPassivationStrategy(pid.passivationStrategy) {
-		pid.logger.Debug("sending a signal to stop passivation listener....")
-		pid.haltPassivationLnr <- registry.Unit{}
-	}
+	pid.unregisterPassivation()
 
 	if err := pid.doStop(ctx); err != nil {
 		pid.logger.Errorf("actor=(%s) failed to cleanly stop", pid.Name())
@@ -1372,7 +1367,7 @@ func (pid *PID) process() {
 
 // handleHealthcheck is used to handle the readiness probe messages
 func (pid *PID) handleHealthcheck(received *ReceiveContext) {
-	pid.latestReceiveTime.Store(time.Now())
+	pid.markActivity(time.Now())
 	received.Response(new(internalpb.HealthCheckResponse))
 }
 
@@ -1380,9 +1375,24 @@ func (pid *PID) handleHealthcheck(received *ReceiveContext) {
 func (pid *PID) handleReceived(received *ReceiveContext) {
 	defer pid.recovery(received)
 	if behavior := pid.behaviorStack.Peek(); behavior != nil {
-		pid.latestReceiveTime.Store(time.Now().UTC())
-		pid.processedCount.Inc()
+		pid.markActivity(time.Now().UTC())
+		pid.recordProcessedMessage()
 		behavior(received)
+	}
+}
+
+// markActivity updates the last receive timestamp and notifies the shared passivation manager.
+func (pid *PID) markActivity(at time.Time) {
+	pid.latestReceiveTime.Store(at)
+	if pid.passivationManager != nil {
+		pid.passivationManager.Touch(pid)
+	}
+}
+
+func (pid *PID) recordProcessedMessage() {
+	pid.processedCount.Inc()
+	if pid.passivationManager != nil {
+		pid.passivationManager.MessageProcessed(pid)
 	}
 }
 
@@ -1476,6 +1486,7 @@ func (pid *PID) reset() {
 	pid.dependencies.Reset()
 	pid.passivationPaused.Store(false)
 	pid.passivating.Store(false)
+	pid.passivationSkipNext.Store(false)
 }
 
 // freeWatchers releases all the actors watching this actor
@@ -1579,92 +1590,51 @@ func (pid *PID) freeChildren(ctx context.Context) error {
 	return nil
 }
 
-// passivationLoop checks whether the actor is processing public or not.
-// when the actor is idle, it automatically shuts down to free resources
-func (pid *PID) passivationLoop() {
-	pid.logger.Info("start the passivation listener for ", pid.Name())
-	pid.logger.Infof("%s passivation strategy %s", pid.Name(), pid.passivationStrategy.String())
-	var clock *ticker.Ticker
-	var exec func()
-	tickerStopSig := make(chan registry.Unit, 1)
-
-	switch s := pid.passivationStrategy.(type) {
-	case *passivation.TimeBasedStrategy:
-		clock = ticker.New(s.Timeout())
-		exec = func() {
-			elapsed := time.Since(pid.latestReceiveTime.Load())
-			if elapsed >= s.Timeout() {
-				tickerStopSig <- registry.Unit{}
-			}
-		}
-	case *passivation.MessagesCountBasedStrategy:
-		clock = ticker.New(100 * time.Millisecond) // TODO: revisit this number
-		exec = func() {
-			currentCount := pid.ProcessedCount() - 1
-			if currentCount >= s.MaxMessages() {
-				tickerStopSig <- registry.Unit{}
-			}
-		}
+// tryPassivation evaluates the current passivation strategy and, when conditions are met,
+// stops the actor to free up resources.
+//
+// Returns true when the actor was successfully passivated.
+func (pid *PID) tryPassivation(reason string) bool {
+	if pid.passivationStrategy == nil || isLongLivedPassivationStrategy(pid.passivationStrategy) {
+		return false
 	}
 
-	clock.Start()
-
-	go func() {
-		for {
-			select {
-			case <-clock.Ticks:
-				exec()
-			case <-pid.haltPassivationLnr:
-				tickerStopSig <- registry.Unit{}
-				return
-			}
-		}
-	}()
-
-	<-tickerStopSig
-	clock.Stop()
-
-	// if the actor system is shutting down it means that the actor stop mode has been triggered
 	if actoryStem := pid.ActorSystem(); actoryStem != nil {
 		if actoryStem.isStopping() {
-			return
+			return false
 		}
 	}
 
-	// If a reinstate just happened, skip this passivation decision once.
 	if pid.passivationSkipNext.CompareAndSwap(true, false) {
 		pid.logger.Debugf("passivation decision skipped once for %s due to recent reinstate", pid.Name())
-		return
+		return false
 	}
 
 	if pid.stopping.Load() ||
 		pid.suspended.Load() ||
 		pid.passivationPaused.Load() {
 		pid.logger.Infof("No need to passivate actor=%s", pid.Name())
-		return
+		return false
 	}
 
-	pid.logger.Infof("passivation mode has been triggered for actor=%s...", pid.Name())
+	pid.logger.Infof("passivation mode has been triggered for actor=%s (%s)...", pid.Name(), reason)
 	pid.passivating.Store(true)
-	defer func() {
-		pid.passivating.Store(false)
-	}()
+	defer pid.passivating.Store(false)
 
 	pid.stopLocker.Lock()
 	defer pid.stopLocker.Unlock()
 
-	// Guard against a reinstate that arrived after the initial skip check but before we
-	// entered the critical section protected by stopLocker. This closes a timing window
-	// where passivation could still proceed to doStop even though the actor was reinstated.
 	if pid.passivationSkipNext.CompareAndSwap(true, false) {
 		pid.logger.Debugf("passivation decision aborted for %s due to reinstate observed during critical section", pid.Name())
-		return
+		return false
 	}
+
+	pid.unregisterPassivation()
 
 	ctx := context.Background()
 	if err := pid.doStop(ctx); err != nil {
 		pid.logger.Errorf("failed to passivate actor=(%s): reason=(%v)", pid.Name(), err)
-		return
+		return false
 	}
 
 	if pid.eventsStream != nil {
@@ -1676,6 +1646,7 @@ func (pid *PID) passivationLoop() {
 	}
 
 	pid.logger.Infof("actor=%s successfully passivated", pid.Name())
+	return true
 }
 
 // setBehavior is a utility function that helps set the actor behavior
@@ -2180,39 +2151,55 @@ func (pid *PID) doReinstate() {
 	})
 }
 
+func (pid *PID) shouldAutoPassivate() bool {
+	return pid.passivationStrategy != nil && !isLongLivedPassivationStrategy(pid.passivationStrategy)
+}
+
+func (pid *PID) unregisterPassivation() {
+	if pid.passivationManager != nil {
+		pid.passivationManager.Unregister(pid)
+	}
+}
+
 // pausePassivation pauses the passivation loop
 func (pid *PID) pausePassivation() {
-	if pid.passivationStrategy != nil {
-		select {
-		case pid.haltPassivationLnr <- registry.Unit{}:
-			// signaled successfully
-		default:
-			// if the channel already has a signal queued, avoid blocking
-		}
-		pid.passivationPaused.Store(true)
+	if pid.passivationStrategy == nil {
+		return
 	}
+
+	if pid.passivationManager != nil {
+		pid.passivationManager.Pause(pid)
+	}
+	pid.passivationPaused.Store(true)
 }
 
 // resumePassivation resumes a paused passivation
 func (pid *PID) resumePassivation() {
+	if pid.passivationStrategy == nil {
+		return
+	}
+
 	if pid.passivationPaused.Load() {
 		pid.passivationPaused.Store(false)
-		pid.startPassivation()
+		if pid.passivationManager != nil {
+			if pid.passivationManager.Resume(pid) {
+				return
+			}
+		}
 	}
+
+	pid.startPassivation()
 }
 
-// startPassivation starts the passivation loop if the passivation strategy is not long-lived
-// This is used to automatically passivate actors that are not processing messages
-// for a certain period of time or have reached a certain message count.
-// It is called when the actor is started or when the passivation strategy is set.
-// If the passivation strategy is a long-lived strategy, the actor will not be passivated automatically.
-// It is also called when the actor is reinstated to ensure that the passivation loop is running.
-// If the passivation strategy is nil, it does nothing.
+// startPassivation registers the passivation strategy with the shared scheduler when applicable.
+// It is called when the actor is started, reinstated, or when passivation resumes.
+// Long-lived strategies opt out of automatic passivation.
 func (pid *PID) startPassivation() {
-	if pid.passivationStrategy != nil &&
-		!isLongLivedPassivationStrategy(pid.passivationStrategy) {
-		go pid.passivationLoop()
+	if !pid.shouldAutoPassivate() || pid.passivationManager == nil {
+		return
 	}
+
+	pid.passivationManager.Register(pid, pid.passivationStrategy)
 }
 
 // healthCheck is called whenever an actor is spawned to make sure it is ready and functional.
