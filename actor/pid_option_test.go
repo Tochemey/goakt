@@ -31,7 +31,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/atomic"
 
 	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/log"
@@ -39,92 +38,69 @@ import (
 )
 
 func TestPIDOptions(t *testing.T) {
-	mailbox := NewUnboundedMailbox()
-	supervisor := NewSupervisor(WithStrategy(OneForAllStrategy))
-	var (
-		atomicDuration   atomic.Duration
-		atomicInt        atomic.Int32
-		negativeDuration atomic.Duration
-		atomicUint64     atomic.Uint64
-		atomicTrue       atomic.Bool
-		atomicFalse      atomic.Bool
-	)
-	negativeDuration.Store(-1)
-	atomicInt.Store(5)
-	atomicDuration.Store(time.Second)
-	atomicUint64.Store(10)
-	eventsStream := eventstream.New()
-	atomicTrue.Store(true)
-	atomicFalse.Store(false)
-	strategy := passivation.NewLongLivedStrategy()
+	t.Run("WithPassivationStrategy", func(t *testing.T) {
+		strategy := passivation.NewLongLivedStrategy()
+		pid := &PID{}
+		withPassivationStrategy(strategy)(pid)
+		assert.Equal(t, strategy, pid.passivationStrategy)
+	})
 
-	testCases := []struct {
-		name     string
-		option   pidOption
-		expected *PID
-	}{
-		{
-			name:     "WithPassivationStrategy",
-			option:   withPassivationStrategy(strategy),
-			expected: &PID{passivationStrategy: strategy},
-		},
-		{
-			name:     "WithInitMaxRetries",
-			option:   withInitMaxRetries(5),
-			expected: &PID{initMaxRetries: atomicInt},
-		},
-		{
-			name:     "WithLogger",
-			option:   withCustomLogger(log.DebugLogger),
-			expected: &PID{logger: log.DebugLogger},
-		},
-		{
-			name:     "WithSupervisor",
-			option:   withSupervisor(supervisor),
-			expected: &PID{supervisor: supervisor},
-		},
-		{
-			name:     "withEventsStream",
-			option:   withEventsStream(eventsStream),
-			expected: &PID{eventsStream: eventsStream},
-		},
-		{
-			name:     "withInitTimeout",
-			option:   withInitTimeout(time.Second),
-			expected: &PID{initTimeout: atomicDuration},
-		},
-		{
-			name:     "WithMailbox",
-			option:   withMailbox(mailbox),
-			expected: &PID{mailbox: mailbox},
-		},
-		{
-			name:   "AsSingleton",
-			option: asSingleton(),
-			expected: &PID{
-				isSingleton: atomicTrue,
-			},
-		},
-		{
-			name:     "withRelocationDisabled",
-			option:   withRelocationDisabled(),
-			expected: &PID{relocatable: atomicFalse},
-		},
-		{
-			name:   "AsSystemActor",
-			option: asSystemActor(),
-			expected: &PID{
-				isSystem: atomicTrue,
-			},
-		},
-	}
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			pid := &PID{}
-			tc.option(pid)
-			assert.Equal(t, tc.expected, pid)
-		})
-	}
+	t.Run("WithInitMaxRetries", func(t *testing.T) {
+		pid := &PID{}
+		withInitMaxRetries(5)(pid)
+		assert.Equal(t, int32(5), pid.initMaxRetries.Load())
+	})
+
+	t.Run("WithLogger", func(t *testing.T) {
+		pid := &PID{}
+		withCustomLogger(log.DebugLogger)(pid)
+		assert.Equal(t, log.DebugLogger, pid.logger)
+	})
+
+	t.Run("WithSupervisor", func(t *testing.T) {
+		supervisor := NewSupervisor()
+		pid := &PID{}
+		withSupervisor(supervisor)(pid)
+		assert.Equal(t, supervisor, pid.supervisor)
+	})
+
+	t.Run("withEventsStream", func(t *testing.T) {
+		stream := eventstream.New()
+		pid := &PID{}
+		withEventsStream(stream)(pid)
+		assert.Equal(t, stream, pid.eventsStream)
+	})
+
+	t.Run("withInitTimeout", func(t *testing.T) {
+		pid := &PID{}
+		withInitTimeout(time.Second)(pid)
+		assert.Equal(t, time.Second, pid.initTimeout.Load())
+	})
+
+	t.Run("WithMailbox", func(t *testing.T) {
+		box := NewUnboundedMailbox()
+		pid := &PID{}
+		withMailbox(box)(pid)
+		assert.Equal(t, box, pid.mailbox)
+	})
+
+	t.Run("AsSingleton", func(t *testing.T) {
+		pid := &PID{}
+		asSingleton()(pid)
+		assert.True(t, pid.isFlagEnabled(isSingletonFlag))
+	})
+
+	t.Run("withRelocationDisabled", func(t *testing.T) {
+		pid := &PID{}
+		withRelocationDisabled()(pid)
+		assert.False(t, pid.isFlagEnabled(isRelocatableFlag))
+	})
+
+	t.Run("AsSystemActor", func(t *testing.T) {
+		pid := &PID{}
+		asSystemActor()(pid)
+		assert.True(t, pid.isFlagEnabled(isSystemFlag))
+	})
 }
 
 func TestWithDependencies(t *testing.T) {

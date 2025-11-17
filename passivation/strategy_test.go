@@ -39,12 +39,15 @@ func TestStrategy(t *testing.T) {
 	require.Implements(t, (*Strategy)(nil), timeStrategy)
 	require.Equal(t, 5*time.Minute, timeStrategy.Timeout())
 	require.Equal(t, fmt.Sprintf("Timed-Based of Duration=[%s]", duration.Format(5*time.Minute)), timeStrategy.String())
+	require.Equal(t, "TimeBased", timeStrategy.Name())
 
 	messageCountStrategy := NewMessageCountBasedStrategy(2)
 	require.Implements(t, (*Strategy)(nil), messageCountStrategy)
 	require.EqualValues(t, 2, messageCountStrategy.MaxMessages())
+	require.Equal(t, "MessagesCountBased", messageCountStrategy.Name())
 
 	longlivedStrategy := NewLongLivedStrategy()
 	require.Implements(t, (*Strategy)(nil), longlivedStrategy)
 	require.Equal(t, "Long Lived", longlivedStrategy.String())
+	require.Equal(t, "LongLived", longlivedStrategy.Name())
 }

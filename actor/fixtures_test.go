@@ -58,6 +58,7 @@ import (
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/collection"
+	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v3/internal/pause"
@@ -144,6 +145,16 @@ func (p *MockActor) Receive(ctx *ReceiveContext) {
 		wg.Wait()
 	default:
 		ctx.Unhandled()
+	}
+}
+
+func MockSupervisionPID(t *testing.T) *PID {
+	t.Helper()
+	return &PID{
+		logger:                log.DiscardLogger,
+		address:               address.New("child", "test-system", "127.0.0.1", 0),
+		supervisionStopSignal: make(chan registry.Unit, 1),
+		eventsStream:          eventstream.New(),
 	}
 }
 
@@ -1346,12 +1357,47 @@ func (m *MockShutdownHookWithoutRecovery) Recovery() *ShutdownHookRecovery {
 	return nil
 }
 
-type MockInvalidPassivationStrategy struct{}
+type MockFakePassivationStrategy struct{}
 
-var _ passivation.Strategy = (*MockInvalidPassivationStrategy)(nil)
+func (x *MockFakePassivationStrategy) Name() string {
+	return "MockFakePassivationStrategy"
+}
 
-func (x *MockInvalidPassivationStrategy) String() string {
-	return "MockInvalidPassivationStrategy"
+var _ passivation.Strategy = (*MockFakePassivationStrategy)(nil)
+
+func (x *MockFakePassivationStrategy) String() string {
+	return "MockFakePassivationStrategy"
+}
+
+func MockPassivationPID(t *testing.T, name string, strategy passivation.Strategy) *PID {
+	t.Helper()
+	pid := &PID{
+		address:             address.New(name, "test-system", "127.0.0.1", 0),
+		passivationStrategy: strategy,
+		logger:              log.DiscardLogger,
+	}
+	return pid
+}
+
+type MockPassivationParticipant struct {
+	id        string
+	last      time.Time
+	passivate func(string) bool
+}
+
+func (s *MockPassivationParticipant) passivationID() string {
+	return s.id
+}
+
+func (s *MockPassivationParticipant) passivationLatestActivity() time.Time {
+	return s.last
+}
+
+func (s *MockPassivationParticipant) passivationTry(reason string) bool {
+	if s.passivate != nil {
+		return s.passivate(reason)
+	}
+	return true
 }
 
 type MockErrorMailbox struct{}
@@ -1443,9 +1489,9 @@ func (d *MockFailingDependency) UnmarshalBinary(_ []byte) error {
 
 func MockReplicationTestSystem(clusterMock *mockcluster.Cluster) *actorSystem {
 	topic := &PID{}
-	topic.running.Store(false)
+	topic.toggleFlag(runningFlag, false)
 	noSender := &PID{}
-	noSender.running.Store(true)
+	noSender.toggleFlag(runningFlag, true)
 
 	sys := &actorSystem{
 		name:         "test-replication",

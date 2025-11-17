@@ -36,6 +36,7 @@ import (
 // based on specific conditions or events, such as inactivity or message count.
 type Strategy interface {
 	fmt.Stringer
+	Name() string
 }
 
 // TimeBasedStrategy is a passivation strategy that triggers passivation
@@ -79,9 +80,13 @@ func (t *TimeBasedStrategy) Timeout() time.Duration {
 	return t.timeout
 }
 
-// String implements Strategy.
+// String returns the string representation of the TimeBasedStrategy.
 func (t *TimeBasedStrategy) String() string {
 	return fmt.Sprintf("Timed-Based of Duration=[%s]", duration.Format(t.timeout))
+}
+
+func (t *TimeBasedStrategy) Name() string {
+	return "TimeBased"
 }
 
 type MessagesCountBasedStrategy struct {
@@ -122,9 +127,14 @@ func (m *MessagesCountBasedStrategy) MaxMessages() int {
 	return m.maxMessages
 }
 
-// String implements Strategy.
+// String returns the string representation of the MessagesCountBasedStrategy.
 func (m *MessagesCountBasedStrategy) String() string {
 	return fmt.Sprintf("Messages Count-Based with maximum of %d", m.maxMessages)
+}
+
+// Name returns the name of the MessagesCountBasedStrategy.
+func (m *MessagesCountBasedStrategy) Name() string {
+	return "MessagesCountBased"
 }
 
 // LongLivedStrategy is a passivation strategy that does not trigger passivation,
@@ -144,7 +154,12 @@ func NewLongLivedStrategy() *LongLivedStrategy {
 	return &LongLivedStrategy{}
 }
 
-// String implements Strategy.
+// String returns the string representation of the LongLivedStrategy.
 func (l *LongLivedStrategy) String() string {
 	return "Long Lived"
+}
+
+// Name returns the name of the LongLivedStrategy.
+func (l *LongLivedStrategy) Name() string {
+	return "LongLived"
 }

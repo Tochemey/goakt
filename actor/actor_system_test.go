@@ -36,7 +36,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -420,7 +419,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// initiate stopping of the actor
-		actorRef.stopping.Store(true)
+		actorRef.toggleFlag(stoppingFlag, true)
 
 		addr, pid, err := actorSystem.ActorOf(ctx, actorName)
 		require.Error(t, err)
@@ -429,7 +428,7 @@ func TestActorSystem(t *testing.T) {
 		require.Nil(t, addr)
 
 		// reset the stopping flag for cleanup
-		actorRef.stopping.Store(false)
+		actorRef.toggleFlag(stoppingFlag, false)
 
 		// stop the actor after some time
 		pause.For(time.Second)
@@ -2364,14 +2363,14 @@ func TestActorSystem(t *testing.T) {
 		require.True(t, exists)
 
 		// let us fake the actor stopping
-		pid.stopping.Store(true)
+		pid.toggleFlag(stoppingFlag, true)
 
 		exists, err = actorSystem.ActorExists(ctx, actorName)
 		require.NoError(t, err)
 		require.False(t, exists)
 
 		// reset the stopping flag
-		pid.stopping.Store(false)
+		pid.toggleFlag(stoppingFlag, false)
 
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
@@ -6768,7 +6767,7 @@ func TestResyncActors_ErrorPaths(t *testing.T) {
 		system:       system,
 	}
 	pid.dependencies.Set("dep", dependency)
-	pid.running.Store(true)
+	pid.toggleFlag(runningFlag, true)
 
 	node := &pidNode{
 		watchers:    collection.NewMap[string, *PID](),
@@ -6807,7 +6806,6 @@ func TestResyncGrains_ErrorPaths(t *testing.T) {
 		dependencies: config.dependencies,
 		config:       config,
 	}
-	grain.mu = &sync.Mutex{}
 
 	system.grains.Set(identity.String(), grain)
 
@@ -6870,7 +6868,7 @@ func TestCleanupCluster_RemoveGrainFailure(t *testing.T) {
 		address: address.New("actor", system.name, "127.0.0.1", 8080),
 	}
 	grainID := &GrainIdentity{kind: "grain.kind", name: "grain"}
-	grain := &grainPID{identity: grainID, actorSystem: system, logger: log.DiscardLogger, mu: &sync.Mutex{}}
+	grain := &grainPID{identity: grainID, actorSystem: system, logger: log.DiscardLogger}
 	system.grains.Set(grainID.String(), grain)
 
 	clusterMock.EXPECT().IsLeader(mock.Anything).Return(false)
@@ -6910,7 +6908,7 @@ func TestStopReturnsCleanupClusterError(t *testing.T) {
 		logger:       log.DiscardLogger,
 		system:       system,
 	}
-	pid.running.Store(true)
+	pid.toggleFlag(runningFlag, true)
 	node := &pidNode{
 		watchers:    collection.NewMap[string, *PID](),
 		watchees:    collection.NewMap[string, *PID](),

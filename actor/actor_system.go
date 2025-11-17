@@ -77,6 +77,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/validation"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/memory"
+	"github.com/tochemey/goakt/v3/passivation"
 	"github.com/tochemey/goakt/v3/remote"
 	gtls "github.com/tochemey/goakt/v3/tls"
 )
@@ -710,6 +711,7 @@ type ActorSystem interface {
 	decreaseActorsCounter()
 	removePeerActor(ctx context.Context, actorName string) error
 	removePeerGrain(ctx context.Context, grainID *internalpb.GrainId) error
+	passivationManager() *passivationManager
 }
 
 // ActorSystem represent a collection of actors on a given node
@@ -766,6 +768,12 @@ type actorSystem struct {
 
 	// specifies the message scheduler
 	scheduler *scheduler
+
+	// manages passivation deadlines without per-actor goroutines
+	passivator *passivationManager
+
+	defaultSupervisor          *Supervisor
+	defaultPassivationStrategy passivation.Strategy
 
 	registry   registry.Registry
 	reflection *reflection
@@ -889,6 +897,9 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	system.pubsubEnabled.Store(false)
 
 	system.reflection = newReflection(system.registry)
+	system.defaultSupervisor = NewSupervisor()
+	system.defaultPassivationStrategy = passivation.NewTimeBasedStrategy(DefaultPassivationTimeout)
+	system.passivator = newPassivationManager(system.logger)
 
 	// apply the various options
 	for _, opt := range opts {
@@ -997,6 +1008,9 @@ func (x *actorSystem) Start(ctx context.Context) error {
 	}
 
 	x.startMessagesScheduler(ctx)
+	if x.passivator != nil {
+		x.passivator.Start(ctx)
+	}
 	x.startEviction()
 	x.started.Store(true)
 	x.starting.Store(false)
@@ -2663,6 +2677,9 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 		close(x.evictionStopSig)
 	}
 
+	if x.passivator != nil {
+		x.passivator.Stop(ctx)
+	}
 	if x.scheduler != nil {
 		x.scheduler.Stop(ctx)
 	}
@@ -3015,6 +3032,7 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 		withEventsStream(x.eventsStream),
 		withInitTimeout(x.actorInitTimeout),
 		withRemoting(x.remoting),
+		withPassivationManager(x.passivator),
 	}
 
 	if err := spawnConfig.Validate(); err != nil {
@@ -3031,9 +3049,12 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 		pidOpts = append(pidOpts, withMailbox(spawnConfig.mailbox))
 	}
 
-	// set the supervisor strategies when defined
-	if spawnConfig.supervisor != nil {
-		pidOpts = append(pidOpts, withSupervisor(spawnConfig.supervisor))
+	supervisor := spawnConfig.supervisor
+	if supervisor == nil {
+		supervisor = x.defaultSupervisor
+	}
+	if supervisor != nil {
+		pidOpts = append(pidOpts, withSupervisor(supervisor))
 	}
 
 	// define the actor as singleton when necessary
@@ -3063,7 +3084,11 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 		pidOpts = append(pidOpts, withDependencies(spawnConfig.dependencies...))
 	}
 
-	pidOpts = append(pidOpts, withPassivationStrategy(spawnConfig.passivationStrategy))
+	strategy := spawnConfig.passivationStrategy
+	if strategy == nil {
+		strategy = x.defaultPassivationStrategy
+	}
+	pidOpts = append(pidOpts, withPassivationStrategy(strategy))
 
 	pid, err := newPID(
 		ctx,
@@ -3621,6 +3646,14 @@ func (x *actorSystem) getMRUActors(threshold uint64, percentageToReturn int) []*
 
 	evictionCount := computeEvictionCount(total, threshold, len(evictions), percentageToReturn)
 	return evictions[:evictionCount]
+}
+
+// passivationManager returns the passivation manager
+func (x *actorSystem) passivationManager() *passivationManager {
+	x.locker.RLock()
+	passivator := x.passivator
+	x.locker.RUnlock()
+	return passivator
 }
 
 func computeEvictionCount(total, threshold uint64, totalEvictions, percentageToReturn int) int {
