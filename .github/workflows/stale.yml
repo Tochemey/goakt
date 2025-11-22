@@ -31,3 +31,4 @@ jobs:
           days-before-pr-close: 10
           stale-pr-label: 'stale-label'
           stale-issue-label: 'stale-label'
+          exempt-issue-labels: 'release-tag,feedback'
