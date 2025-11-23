@@ -38,7 +38,7 @@ type stashState struct {
 
 // stash adds the current message to the stash buffer
 func (pid *PID) stash(ctx *ReceiveContext) error {
-	state := pid.stashBuffer
+	state := pid.stashState
 	if state == nil || state.box == nil {
 		return gerrors.ErrStashBufferNotSet
 	}
@@ -47,7 +47,7 @@ func (pid *PID) stash(ctx *ReceiveContext) error {
 
 // unstash unstashes the oldest message in the stash and prepends to the mailbox
 func (pid *PID) unstash() error {
-	state := pid.stashBuffer
+	state := pid.stashState
 	if state == nil || state.box == nil {
 		return gerrors.ErrStashBufferNotSet
 	}
@@ -63,7 +63,7 @@ func (pid *PID) unstash() error {
 // unstashAll unstashes all messages from the stash buffer and prepends in the mailbox
 // (it keeps the messages in the same order as received, unstashing older messages before newer).
 func (pid *PID) unstashAll() error {
-	state := pid.stashBuffer
+	state := pid.stashState
 	if state == nil || state.box == nil {
 		return gerrors.ErrStashBufferNotSet
 	}

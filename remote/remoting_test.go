@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025 Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,32 +22,41 @@
  * SOFTWARE.
  */
 
-package validation
+package remote
 
 import (
-	"errors"
+	"crypto/tls"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
-func TestPatternValidator(t *testing.T) {
-	pattern := "^[a-zA-Z0-9][a-zA-Z0-9-_\\.]*$"
-	expression := "discarder"
-	validator := NewPatternValidator(pattern, expression, nil)
-	assert.NoError(t, validator.Validate())
+func TestRemotingOptionsAndDefaults(t *testing.T) {
+	r := NewRemoting().(*remoting)
 
-	// default error path with no custom error provided
-	invalid := NewPatternValidator(pattern, "$omeN@me", nil)
-	err := invalid.Validate()
-	require.Error(t, err)
-	assert.EqualError(t, err, "invalid expression")
+	assert.NotNil(t, r.HTTPClient())
+	assert.Equal(t, DefaultMaxReadFrameSize, r.MaxReadFrameSize())
+	assert.Equal(t, NoCompression, r.Compression())
+	assert.Nil(t, r.TLSConfig())
 
-	expression = "$omeN@me"
-	customError := errors.New("custom error")
-	validator = NewPatternValidator(pattern, expression, customError)
-	err = validator.Validate()
-	require.Error(t, err)
-	assert.EqualError(t, err, customError.Error())
+	// ensure close does not panic
+	r.Close()
+}
+
+// nolint
+func TestRemotingOptionApplication(t *testing.T) {
+	tlsCfg := &tls.Config{}
+	r := NewRemoting(
+		WithRemotingTLS(tlsCfg),
+		WithRemotingMaxReadFameSize(1024),
+		WithRemotingCompression(GzipCompression),
+	).(*remoting)
+
+	assert.Equal(t, tlsCfg, r.TLSConfig())
+	assert.Equal(t, 1024, r.MaxReadFrameSize())
+	assert.Equal(t, GzipCompression, r.Compression())
+
+	// RemotingServiceClient should build without hitting network.
+	client := r.RemotingServiceClient("localhost", 8080)
+	assert.NotNil(t, client)
 }

@@ -190,6 +190,49 @@ func TestLogWriter(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, log.WarningLevel.String(), lvl)
 	})
+
+	t.Run("With unknown log level prefix", func(t *testing.T) {
+		buffer := new(bytes.Buffer)
+		logger := log.New(log.InfoLevel, buffer)
+		message := "2023/11/06 20:40:24 [TRACE] some verbose trace that should be ignored"
+
+		logWriter := newLogWriter(logger)
+		res, err := logWriter.Write([]byte(message))
+		require.NoError(t, err)
+		require.EqualValues(t, len(message), res)
+		require.Zero(t, buffer.Len())
+	})
+
+	t.Run("With multiple brackets only one matching level", func(t *testing.T) {
+		buffer := new(bytes.Buffer)
+		logger := log.New(log.InfoLevel, buffer)
+		message := "prefix [SKIP] [INFO] only the info message should be logged"
+
+		logWriter := newLogWriter(logger)
+		res, err := logWriter.Write([]byte(message))
+		require.NoError(t, err)
+		require.EqualValues(t, len(message), res)
+
+		expected := "only the info message should be logged"
+		actual, err := extractMessage(buffer.Bytes())
+		require.NoError(t, err)
+		require.Equal(t, expected, actual)
+		lvl, err := extractLevel(buffer.Bytes())
+		require.NoError(t, err)
+		require.Equal(t, log.InfoLevel.String(), lvl)
+	})
+
+	t.Run("With empty log message", func(t *testing.T) {
+		buffer := new(bytes.Buffer)
+		logger := log.New(log.InfoLevel, buffer)
+		message := "    "
+
+		logWriter := newLogWriter(logger)
+		res, err := logWriter.Write([]byte(message))
+		require.NoError(t, err)
+		require.EqualValues(t, len(message), res)
+		require.Zero(t, buffer.Len())
+	})
 }
 
 // TODO: move this utility into some package

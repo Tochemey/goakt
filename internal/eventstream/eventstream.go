@@ -85,14 +85,7 @@ func (b *EventsStream) RemoveSubscriber(sub Subscriber) {
 // Broadcast notifies all subscribers of a given topic of a new message
 func (b *EventsStream) Broadcast(msg any, topics []string) {
 	for _, topic := range topics {
-		if subscribers, ok := b.topics.Get(topic); ok && subscribers.Len() != 0 {
-			for _, subscriber := range subscribers.Values() {
-				if !subscriber.Active() {
-					continue
-				}
-				go subscriber.signal(NewMessage(topic, msg))
-			}
-		}
+		b.publishToTopic(topic, msg)
 	}
 }
 
@@ -134,14 +127,7 @@ func (b *EventsStream) Unsubscribe(subscriber Subscriber, topic string) {
 
 // Publish publishes a message to a topic
 func (b *EventsStream) Publish(topic string, msg any) {
-	if subscribers, ok := b.topics.Get(topic); ok && subscribers.Len() != 0 {
-		for _, subscriber := range subscribers.Values() {
-			if !subscriber.Active() {
-				continue
-			}
-			go subscriber.signal(NewMessage(topic, msg))
-		}
-	}
+	b.publishToTopic(topic, msg)
 }
 
 // Close closes the stream
@@ -153,4 +139,22 @@ func (b *EventsStream) Close() {
 	}
 	b.subscribers.Reset()
 	b.topics.Reset()
+}
+
+// publishToTopic delivers the message to active subscribers of the given topic.
+// It performs a single message allocation per topic publish and signals
+// asynchronously to avoid blocking the caller.
+func (b *EventsStream) publishToTopic(topic string, msg any) {
+	subscribers, ok := b.topics.Get(topic)
+	if !ok || subscribers.Len() == 0 {
+		return
+	}
+
+	message := NewMessage(topic, msg)
+	// fan-out concurrently so subscribers are signaled at roughly the same time.
+	subscribers.Range(func(_ string, sub Subscriber) {
+		if sub.Active() {
+			go sub.signal(message)
+		}
+	})
 }

@@ -5008,7 +5008,7 @@ func TestPIDTryPassivationSkipsWhenSystemStopping(t *testing.T) {
 	sys.shuttingDown.Store(true)
 
 	pid.fieldsLocker.Lock()
-	pid.system = sys
+	pid.actorSystem = sys
 	pid.fieldsLocker.Unlock()
 
 	require.False(t, pid.tryPassivation("system stopping"))

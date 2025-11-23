@@ -45,12 +45,14 @@ type ChainOption func(*Chain)
 
 // New creates a new validation chain.
 func New(opts ...ChainOption) *Chain {
-	chain := &Chain{
-		validators: make([]Validator, 0),
-	}
+	chain := &Chain{}
 
 	for _, opt := range opts {
 		opt(chain)
+	}
+
+	if chain.validators == nil {
+		chain.validators = make([]Validator, 0)
 	}
 
 	return chain
@@ -81,15 +83,20 @@ func (c *Chain) AddAssertion(isTrue bool, message string) *Chain {
 // Validate runs validation chain and returns resulting error(s).
 // It returns all validation error by default, use FailFast option to stop validation on first error.
 func (c *Chain) Validate() error {
+	// reset previous violations
+	c.violations = nil
+	var violations error
+
 	for _, v := range c.validators {
-		if violations := v.Validate(); violations != nil {
+		if verr := v.Validate(); verr != nil {
 			if c.failFast {
 				// just return the error
-				return violations
+				return verr
 			}
 			// append error to the violations
-			c.violations = multierr.Append(c.violations, violations)
+			multierr.AppendInto(&violations, verr)
 		}
 	}
+	c.violations = violations
 	return c.violations
 }

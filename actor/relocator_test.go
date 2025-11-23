@@ -67,7 +67,7 @@ func TestRelocatorPeersError(t *testing.T) {
 	actor := &relocator{
 		remoting: remote.NewRemoting(),
 		pid: &PID{
-			system: system,
+			actorSystem: system,
 		},
 	}
 
@@ -103,7 +103,7 @@ func TestRelocatorSpawnRemoteActorActorExistsError(t *testing.T) {
 	actor := &relocator{
 		remoting: remote.NewRemoting(),
 		pid: &PID{
-			system: system,
+			actorSystem: system,
 		},
 	}
 
@@ -145,7 +145,7 @@ func TestRelocatorSpawnRemoteActorRemoveActorError(t *testing.T) {
 	actor := &relocator{
 		remoting: remote.NewRemoting(),
 		pid: &PID{
-			system: system,
+			actorSystem: system,
 		},
 	}
 

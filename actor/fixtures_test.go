@@ -1514,8 +1514,8 @@ func MockReplicationTestSystem(clusterMock *mockcluster.Cluster) *actorSystem {
 
 	sys.clusterEnabled.Store(true)
 	sys.relocationEnabled.Store(false) // callers toggle when needed
-	sys.noSender.system = sys
-	sys.topicActor.system = sys
+	sys.noSender.actorSystem = sys
+	sys.topicActor.actorSystem = sys
 
 	return sys
 }
@@ -1552,8 +1552,8 @@ func MockSimpleClusterReadyActorSystem(rem remote.Remoting, cl cluster.Cluster, 
 
 func MockPID(system ActorSystem, name string, port int) *PID {
 	return &PID{
-		address: address.New(name, system.Name(), "host", port),
-		system:  system,
+		address:     address.New(name, system.Name(), "host", port),
+		actorSystem: system,
 	}
 }
 

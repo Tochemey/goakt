@@ -66,6 +66,14 @@ func TestDiscoveryProvider(t *testing.T) {
 		assert.Error(t, err)
 		provider.AssertExpectations(t)
 	})
+	t.Run("With Initialize: provider is nil", func(t *testing.T) {
+		wrapper := &discoveryProvider{
+			log: log.DebugLogger.StdLogger(),
+		}
+
+		err := wrapper.Initialize()
+		assert.Error(t, err)
+	})
 	t.Run("With Initialize: already done", func(t *testing.T) {
 		// mock the underlying discovery provider
 		provider := new(testkit.Provider)

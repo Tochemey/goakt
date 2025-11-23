@@ -101,8 +101,8 @@ type PID struct {
 	// specifies the actor mailbox
 	mailbox Mailbox
 
-	// the actor system
-	system ActorSystem
+	// the actor actorSystem
+	actorSystem ActorSystem
 
 	// specifies the logger to use
 	logger log.Logger
@@ -116,7 +116,7 @@ type PID struct {
 	behaviorStack *behaviorStack
 
 	// stash settings
-	stashBuffer *stashState
+	stashState *stashState
 
 	// define an events stream
 	eventsStream eventstream.Stream
@@ -348,7 +348,7 @@ func (pid *PID) Child(name string) (*PID, error) {
 	}
 
 	childAddress := pid.childAddress(name)
-	if cidNode, ok := pid.system.tree().node(childAddress.String()); ok {
+	if cidNode, ok := pid.actorSystem.tree().node(childAddress.String()); ok {
 		cid := cidNode.value()
 		if cid.IsRunning() {
 			return cid, nil
@@ -403,7 +403,7 @@ func (pid *PID) Stop(ctx context.Context, cid *PID) error {
 
 	// Check if the child exists in the actor tree.
 	pid.fieldsLocker.RLock()
-	tree := pid.system.tree()
+	tree := pid.actorSystem.tree()
 	_, exists := tree.node(cid.Address().String())
 	pid.fieldsLocker.RUnlock()
 
@@ -474,7 +474,7 @@ func (pid *PID) PassivationStrategy() passivation.Strategy {
 // ActorSystem returns the actor system
 func (pid *PID) ActorSystem() ActorSystem {
 	pid.fieldsLocker.RLock()
-	sys := pid.system
+	sys := pid.actorSystem
 	pid.fieldsLocker.RUnlock()
 	return sys
 }
@@ -653,7 +653,7 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 	}
 
 	childAddress := pid.childAddress(name)
-	tree := pid.system.tree()
+	tree := pid.actorSystem.tree()
 	if cnode, ok := tree.node(childAddress.String()); ok {
 		cid := cnode.value()
 		if cid.IsRunning() {
@@ -665,7 +665,7 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 	pidOptions := []pidOption{
 		withInitMaxRetries(int(pid.initMaxRetries.Load())),
 		withCustomLogger(pid.logger),
-		withActorSystem(pid.system),
+		withActorSystem(pid.actorSystem),
 		withEventsStream(pid.eventsStream),
 		withInitTimeout(pid.initTimeout.Load()),
 		withRemoting(pid.remoting),
@@ -834,10 +834,10 @@ func (pid *PID) ReinstateNamed(ctx context.Context, actorName string) error {
 
 // StashSize returns the stash buffer size
 func (pid *PID) StashSize() uint64 {
-	if pid.stashBuffer == nil || pid.stashBuffer.box == nil {
+	if pid.stashState == nil || pid.stashState.box == nil {
 		return 0
 	}
-	return uint64(pid.stashBuffer.box.Len())
+	return uint64(pid.stashState.box.Len())
 }
 
 // PipeTo executes a long-running task asynchronously and delivers its result
@@ -1444,7 +1444,7 @@ func (pid *PID) recovery(received *ReceiveContext) {
 func (pid *PID) init(ctx context.Context) error {
 	pid.logger.Infof("%s initializing...", pid.Name())
 
-	initContext := newContext(ctx, pid.Name(), pid.system, pid.Dependencies()...)
+	initContext := newContext(ctx, pid.Name(), pid.actorSystem, pid.Dependencies()...)
 
 	cctx, cancel := context.WithTimeout(ctx, pid.initTimeout.Load())
 	retrier := retry.NewRetrier(int(pid.initMaxRetries.Load()), time.Millisecond, pid.initTimeout.Load())
@@ -1488,7 +1488,7 @@ func (pid *PID) reset() {
 	pid.toggleFlag(stoppingFlag, false)
 	pid.toggleFlag(suspendedFlag, false)
 	if pid.supervisor != nil {
-		if sys, ok := pid.system.(*actorSystem); !ok || pid.supervisor != sys.defaultSupervisor {
+		if sys, ok := pid.actorSystem.(*actorSystem); !ok || pid.supervisor != sys.defaultSupervisor {
 			pid.supervisor.Reset()
 		}
 	}
@@ -1715,7 +1715,7 @@ func (pid *PID) doStop(ctx context.Context) error {
 		return err
 	}
 
-	stopContext := newContext(ctx, pid.Name(), pid.system, pid.Dependencies()...)
+	stopContext := newContext(ctx, pid.Name(), pid.actorSystem, pid.Dependencies()...)
 
 	// run the PostStop hook and let watchers know
 	// you are terminated
@@ -2264,7 +2264,7 @@ func (pid *PID) toWireActor() (*internalpb.Actor, error) {
 		Relocatable:         pid.IsRelocatable(),
 		PassivationStrategy: codec.EncodePassivationStrategy(pid.PassivationStrategy()),
 		Dependencies:        dependencies,
-		EnableStash:         pid.stashBuffer != nil && pid.stashBuffer.box != nil,
+		EnableStash:         pid.stashState != nil && pid.stashState.box != nil,
 		Role:                pid.Role(),
 	}, nil
 }
