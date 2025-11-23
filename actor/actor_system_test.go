@@ -6764,7 +6764,7 @@ func TestResyncActors_ErrorPaths(t *testing.T) {
 		address:      address.New("resync-actor", system.name, "127.0.0.1", int(system.remoteConfig.BindPort())),
 		dependencies: collection.NewMap[string, extension.Dependency](),
 		logger:       log.DiscardLogger,
-		system:       system,
+		actorSystem:  system,
 	}
 	pid.dependencies.Set("dep", dependency)
 	pid.toggleFlag(runningFlag, true)
@@ -6906,7 +6906,7 @@ func TestStopReturnsCleanupClusterError(t *testing.T) {
 		address:      address.New("actor", system.name, "127.0.0.1", 8080),
 		dependencies: collection.NewMap[string, extension.Dependency](),
 		logger:       log.DiscardLogger,
-		system:       system,
+		actorSystem:  system,
 	}
 	pid.toggleFlag(runningFlag, true)
 	node := &pidNode{

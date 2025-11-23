@@ -56,7 +56,7 @@ func withCustomLogger(logger log.Logger) pidOption {
 // withActorSystem set the actor system of the pid
 func withActorSystem(sys ActorSystem) pidOption {
 	return func(pid *PID) {
-		pid.system = sys
+		pid.actorSystem = sys
 	}
 }
 
@@ -70,7 +70,7 @@ func withSupervisor(supervisor *Supervisor) pidOption {
 // withStash sets the actor's stash buffer
 func withStash() pidOption {
 	return func(pid *PID) {
-		pid.stashBuffer = &stashState{box: NewUnboundedMailbox()}
+		pid.stashState = &stashState{box: NewUnboundedMailbox()}
 	}
 }
 

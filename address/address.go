@@ -43,8 +43,6 @@
 package address
 
 import (
-	"bytes"
-	"encoding"
 	"errors"
 	"net"
 	"strconv"
@@ -57,8 +55,8 @@ import (
 	"github.com/tochemey/goakt/v3/internal/validation"
 )
 
-// protocol defines the Go-Akt addressing protocol
-const protocol = "goakt"
+// scheme defines the Go-Akt addressing scheme
+const scheme = "goakt"
 
 // zeroAddress means that there is no sender
 var zeroAddress = new(goaktpb.Address)
@@ -86,8 +84,6 @@ type Address struct {
 }
 
 var _ validation.Validator = (*Address)(nil)
-var _ encoding.BinaryMarshaler = (*Address)(nil)
-var _ encoding.BinaryUnmarshaler = (*Address)(nil)
 
 // New creates a new Address with the given attributes.
 //
@@ -223,21 +219,28 @@ func (x *Address) ID() string {
 //
 // Note: The output does not include the Parent or ID fields.
 func (x *Address) String() string {
-	buf := bytes.NewBuffer(nil)
-	_, _ = buf.WriteString(protocol)
-	_, _ = buf.WriteString("://")
-	_, _ = buf.WriteString(x.GetSystem())
-	_ = buf.WriteByte('@')
+	system := x.GetSystem()
+	host := x.GetHost()
+	name := x.GetName()
 
-	// write the host and port to the bytes buffer
-	_, _ = buf.WriteString(x.GetHost())
-	_ = buf.WriteByte(':')
-	_, _ = buf.WriteString(strconv.Itoa(int(x.GetPort())))
-	_, _ = buf.WriteString("/")
-	_, _ = buf.WriteString(x.GetName())
+	var portBuf [6]byte
+	portBytes := strconv.AppendInt(portBuf[:0], int64(x.GetPort()), 10)
 
-	// returns the constructed string value
-	return buf.String()
+	totalLen := len(scheme) + len("://") + len(system) + 1 + len(host) + 1 + len(portBytes) + 1 + len(name)
+	var builder strings.Builder
+	builder.Grow(totalLen)
+
+	_, _ = builder.WriteString(scheme)
+	_, _ = builder.WriteString("://")
+	_, _ = builder.WriteString(system)
+	_ = builder.WriteByte('@')
+	_, _ = builder.WriteString(host)
+	_ = builder.WriteByte(':')
+	_, _ = builder.Write(portBytes)
+	_ = builder.WriteByte('/')
+	_, _ = builder.WriteString(name)
+
+	return builder.String()
 }
 
 // HostPort returns the "host:port" portion of the Address.
@@ -245,14 +248,18 @@ func (x *Address) String() string {
 // This is suitable for dialing or logging the network endpoint. It does not
 // include the protocol, system, or name components.
 func (x *Address) HostPort() string {
-	// create a bytes buffer instance
-	buf := bytes.NewBuffer(nil)
-	// write the host and port value
-	_, _ = buf.WriteString(x.GetHost())
-	_ = buf.WriteByte(':')
-	_, _ = buf.WriteString(strconv.Itoa(int(x.GetPort())))
-	// return the constructed string
-	return buf.String()
+	host := x.GetHost()
+	var portBuf [6]byte
+	portBytes := strconv.AppendInt(portBuf[:0], int64(x.GetPort()), 10)
+
+	var builder strings.Builder
+	builder.Grow(len(host) + 1 + len(portBytes))
+
+	_, _ = builder.WriteString(host)
+	_ = builder.WriteByte(':')
+	_, _ = builder.Write(portBytes)
+
+	return builder.String()
 }
 
 // Equals reports whether x and a represent the same address.
@@ -267,35 +274,6 @@ func (x *Address) Equals(y *Address) bool {
 		return false
 	}
 	return proto.Equal(x.Address, y.Address)
-}
-
-// MarshalBinary encodes the Address to a binary form.
-//
-// The encoding is the protobuf wire format of the underlying goaktpb.Address.
-// MarshalBinary implements encoding.BinaryMarshaler. The returned bytes are
-// suitable for persistence or transmission.
-//
-// Note: Wire compatibility follows the protobuf schema guarantees; additions of
-// new fields are backward compatible, but field renames/removals are not.
-func (x *Address) MarshalBinary() (data []byte, err error) {
-	return proto.Marshal(x)
-}
-
-// UnmarshalBinary decodes the Address from its binary form.
-//
-// The input must be the protobuf wire format produced by MarshalBinary.
-// UnmarshalBinary replaces the receiver's underlying protobuf message with the
-// decoded value. It copies from the provided data and does not retain the byte
-// slice after returning.
-//
-// UnmarshalBinary implements encoding.BinaryUnmarshaler.
-func (x *Address) UnmarshalBinary(data []byte) error {
-	pb := new(goaktpb.Address)
-	if err := proto.Unmarshal(data, pb); err != nil {
-		return err
-	}
-	x.Address = pb
-	return nil
 }
 
 // Validate checks whether the Address is well-formed.

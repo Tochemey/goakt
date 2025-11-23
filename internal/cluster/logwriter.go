@@ -27,76 +27,141 @@ package cluster
 import (
 	"bytes"
 	"io"
-	"regexp"
 
 	"github.com/tochemey/goakt/v3/log"
 )
 
-// logWriter is a wrapper for the olric logging
+// logLevel enumerates recognized severity levels parsed from Olric log lines.
+// It is an internal representation used to dispatch to the appropriate Logger method.
+type logLevel uint8
+
+const (
+	// infoLevel maps to informational messages.
+	infoLevel logLevel = iota + 1
+	// debugLevel maps to verbose debug messages.
+	debugLevel
+	// warnLevel maps to warning conditions.
+	warnLevel
+	// errorLevel maps to error conditions.
+	errorLevel
+)
+
+var (
+	infoPrefix  = []byte("[INFO]")
+	debugPrefix = []byte("[DEBUG]")
+	warnPrefix  = []byte("[WARN]")
+	errorPrefix = []byte("[ERROR]")
+)
+
+type parsedMessage struct {
+	level logLevel
+	text  string
+}
+
+// logWriter adapts Olric's raw log output (written via io.Writer) to the goakt Logger.
+// It parses severity prefixes ([INFO],[DEBUG],[WARN],[ERROR]) in each line and forwards
+// the stripped message to the matching Logger method. Unknown lines are ignored.
+// It is safe for concurrent use because the underlying Logger is expected to be thread‑safe.
 type logWriter struct {
 	logger log.Logger
-	info   *regexp.Regexp
-	debug  *regexp.Regexp
-	warn   *regexp.Regexp
-	error  *regexp.Regexp
 }
 
 // make sure that the logWriter implements the io.Writer interface fully
 var _ io.Writer = (*logWriter)(nil)
 
-// newLogWriter create an instance of logWriter
+// newLogWriter creates a logWriter bound to the provided Logger.
+//
+// Usage:
+//
+//	lw := newLogWriter(logger) // pass lw to Olric configuration expecting an io.Writer
+//
+// The returned writer performs lightweight prefix parsing on each Write without regex.
 func newLogWriter(logger log.Logger) *logWriter {
-	return &logWriter{
-		logger: logger,
-		info:   regexp.MustCompile(`\[INFO\] (.+)`),
-		debug:  regexp.MustCompile(`\[DEBUG\] (.+)`),
-		warn:   regexp.MustCompile(`\[WARN\] (.+)`),
-		error:  regexp.MustCompile(`\[ERROR\] (.+)`),
-	}
+	return &logWriter{logger: logger}
 }
 
-// Write writes len(p) bytes from p to the underlying data stream.
+// Write parses a single Olric log line and dispatches it to the Logger.
+// Behavior:
+//   - Trims surrounding whitespace.
+//   - Detects the earliest occurrence of any known severity prefix.
+//   - Strips one optional space after the prefix.
+//   - Forwards remaining text to the appropriate logger method.
+//   - Ignores lines with no known prefix (returns len(message) with nil error).
+//
+// Concurrency:
+//   - Safe if the provided Logger is concurrency-safe.
+//
+// It never returns an error to avoid breaking Olric's logging flow.
 func (l *logWriter) Write(message []byte) (n int, err error) {
-	// trim all spaces
-	trimmed := bytes.TrimSpace(message)
-	// get the text value of the log message
-	text := string(trimmed)
-
-	// parse info message
-	matches := l.info.FindStringSubmatch(text)
-	if len(matches) > 1 {
-		// info message found
-		infoText := matches[1]
-		l.logger.Info(infoText)
-		return len(message), nil
-	}
-
-	// parse debug message
-	matches = l.debug.FindStringSubmatch(text)
-	if len(matches) > 1 {
-		// debug message found
-		debugText := matches[1]
-		l.logger.Debug(debugText)
-		return len(message), nil
-	}
-
-	// parse warn messages
-	matches = l.warn.FindStringSubmatch(text)
-	if len(matches) > 1 {
-		// debug message found
-		warnText := matches[1]
-		l.logger.Warn(warnText)
-		return len(message), nil
-	}
-
-	// parse error messages
-	matches = l.error.FindStringSubmatch(text)
-	if len(matches) > 1 {
-		// error message found
-		errorText := matches[1]
-		l.logger.Error(errorText)
-		return len(message), nil
+	switch msg, ok := parseLogLine(bytes.TrimSpace(message)); {
+	case !ok:
+		// message does not have a known prefix; ignore
+	case msg.level == infoLevel:
+		l.logger.Info(msg.text)
+	case msg.level == debugLevel:
+		l.logger.Debug(msg.text)
+	case msg.level == warnLevel:
+		l.logger.Warn(msg.text)
+	case msg.level == errorLevel:
+		l.logger.Error(msg.text)
 	}
 
 	return len(message), nil
+}
+
+// parseLogLine extracts severity level and message body from a trimmed log line.
+// Implementation details:
+//   - Scans for each known prefix and picks the earliest match (works with timestamped lines).
+//   - Strips a single leading space after the prefix when present.
+//   - Avoids regex and minimizes allocations (only converts the tail segment to string).
+//
+// Returns:
+//   - parsedMessage plus true when a prefix was found.
+//   - Zero value plus false when no known prefix exists.
+func parseLogLine(line []byte) (parsedMessage, bool) {
+	if len(line) == 0 {
+		return parsedMessage{}, false
+	}
+
+	level, idx, plen, ok := findFirstPrefix(line)
+	if !ok {
+		return parsedMessage{}, false
+	}
+
+	text := line[idx+plen:]
+	if len(text) > 0 && text[0] == ' ' {
+		text = text[1:]
+	}
+
+	return parsedMessage{
+		level: level,
+		text:  string(text),
+	}, true
+}
+
+// findFirstPrefix searches line for all known severity prefixes and returns metadata
+// for the earliest occurrence.
+// Returns:
+//   - level: matched logLevel
+//   - idx: start index of the matched prefix
+//   - plen: length of the matched prefix
+//   - ok: true if any prefix was found
+//
+// Complexity is proportional to the number of prefixes times bytes.Index cost.
+// Given the tiny fixed set, this is effectively O(n) for n = len(line).
+func findFirstPrefix(line []byte) (level logLevel, idx int, plen int, ok bool) {
+	firstIdx := -1
+	// save keeps the earliest valid prefix candidate seen so far.
+	save := func(candidateIdx int, l logLevel, p []byte) {
+		if candidateIdx >= 0 && (firstIdx == -1 || candidateIdx < firstIdx) {
+			firstIdx, level, plen, ok = candidateIdx, l, len(p), true
+		}
+	}
+
+	save(bytes.Index(line, infoPrefix), infoLevel, infoPrefix)
+	save(bytes.Index(line, debugPrefix), debugLevel, debugPrefix)
+	save(bytes.Index(line, warnPrefix), warnLevel, warnPrefix)
+	save(bytes.Index(line, errorPrefix), errorLevel, errorPrefix)
+
+	return level, firstIdx, plen, ok
 }

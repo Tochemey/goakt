@@ -79,10 +79,6 @@ func newSubscriber() *subscriber {
 
 // ID return consumer id
 func (x *subscriber) ID() string {
-	// acquire the lock
-	x.sem.Lock()
-	// release the lock once done
-	defer x.sem.Unlock()
 	return x.id
 }
 
@@ -110,26 +106,21 @@ func (x *subscriber) Shutdown() {
 }
 
 func (x *subscriber) Iterator() chan *Message {
-	out := make(chan *Message)
-	go func() {
-		defer close(out)
-		for x.active.Load() && x.messages.Length() > 0 {
-			msg := x.messages.Dequeue()
-			if msg == nil {
-				break
-			}
-			out <- msg.(*Message)
+	// buffer to the current queue length to avoid blocking the caller
+	out := make(chan *Message, x.messages.Length())
+	for x.active.Load() && x.messages.Length() > 0 {
+		msg := x.messages.Dequeue()
+		if msg == nil {
+			break
 		}
-	}()
+		out <- msg.(*Message)
+	}
+	close(out)
 	return out
 }
 
 // signal is used to push a message to the subscriber
 func (x *subscriber) signal(message *Message) {
-	// acquire the lock
-	x.sem.Lock()
-	// release the lock once done
-	defer x.sem.Unlock()
 	// only receive message when active
 	if x.active.Load() {
 		x.messages.Enqueue(message)

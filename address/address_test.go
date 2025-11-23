@@ -140,27 +140,6 @@ func TestAddress(t *testing.T) {
 		assert.Equal(t, expected, addr.String())
 	})
 
-	t.Run("With marshaling", func(t *testing.T) {
-		addr := New("name", "system", "host", 1234)
-
-		bytea, err := addr.MarshalBinary()
-		assert.NoError(t, err)
-		assert.NotNil(t, bytea)
-
-		actual := new(Address)
-		err = actual.UnmarshalBinary(bytea)
-		assert.NoError(t, err)
-
-		assert.True(t, actual.Equals(addr))
-	})
-
-	t.Run("With unmarshaling failure", func(t *testing.T) {
-		bytea := []byte("some")
-		actual := new(Address)
-		err := actual.UnmarshalBinary(bytea)
-		assert.Error(t, err)
-	})
-
 	t.Run("Equals returns false when to be compared to is nil", func(t *testing.T) {
 		addr := New("name", "system", "host", 1234)
 		assert.False(t, addr.Equals(nil))

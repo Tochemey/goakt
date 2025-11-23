@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025 Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,32 +22,17 @@
  * SOFTWARE.
  */
 
-package validation
+package remote
 
 import (
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
-func TestPatternValidator(t *testing.T) {
-	pattern := "^[a-zA-Z0-9][a-zA-Z0-9-_\\.]*$"
-	expression := "discarder"
-	validator := NewPatternValidator(pattern, expression, nil)
-	assert.NoError(t, validator.Validate())
+func TestPeerAddresses(t *testing.T) {
+	peer := Peer{Host: "127.0.0.1", PeersPort: 9000, RemotingPort: 9001}
 
-	// default error path with no custom error provided
-	invalid := NewPatternValidator(pattern, "$omeN@me", nil)
-	err := invalid.Validate()
-	require.Error(t, err)
-	assert.EqualError(t, err, "invalid expression")
-
-	expression = "$omeN@me"
-	customError := errors.New("custom error")
-	validator = NewPatternValidator(pattern, expression, customError)
-	err = validator.Validate()
-	require.Error(t, err)
-	assert.EqualError(t, err, customError.Error())
+	assert.Equal(t, "127.0.0.1:9000", peer.PeersAddress())
+	assert.Equal(t, "127.0.0.1:9001", peer.RemotingAddress())
 }

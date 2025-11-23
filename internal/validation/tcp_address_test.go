@@ -51,4 +51,12 @@ func TestTCPAddressValidator(t *testing.T) {
 		addr := ":3222"
 		assert.Error(t, NewTCPAddressValidator(addr).Validate())
 	})
+	t.Run("With non numeric port", func(t *testing.T) {
+		addr := "127.0.0.1:abc"
+		assert.Error(t, NewTCPAddressValidator(addr).Validate())
+	})
+	t.Run("With missing port", func(t *testing.T) {
+		addr := "127.0.0.1"
+		assert.Error(t, NewTCPAddressValidator(addr).Validate())
+	})
 }
