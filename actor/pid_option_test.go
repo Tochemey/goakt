@@ -33,6 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tochemey/goakt/v3/internal/eventstream"
+	"github.com/tochemey/goakt/v3/internal/metric"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/passivation"
 )
@@ -100,6 +101,13 @@ func TestPIDOptions(t *testing.T) {
 		pid := &PID{}
 		asSystemActor()(pid)
 		assert.True(t, pid.isFlagEnabled(isSystemFlag))
+	})
+
+	t.Run("withMetricProvider", func(t *testing.T) {
+		pid := &PID{}
+		metricProvider := metric.New()
+		withMeterProvider(metricProvider)(pid)
+		assert.Equal(t, metricProvider, pid.metricProvider)
 	})
 }
 

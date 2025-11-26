@@ -35,6 +35,8 @@ import (
 	"time"
 
 	"github.com/flowchartsman/retry"
+	"go.opentelemetry.io/otel/attribute"
+	otelmetric "go.opentelemetry.io/otel/metric"
 	"go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
@@ -52,6 +54,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/future"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/locker"
+	"github.com/tochemey/goakt/v3/internal/metric"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/internal/ticker"
 	"github.com/tochemey/goakt/v3/log"
@@ -148,6 +151,8 @@ type PID struct {
 	// this is used to specify a role the actor belongs to
 	// this field is optional and will be set when the actor is created with a given role
 	role *string
+
+	metricProvider *metric.Provider
 }
 
 var _ passivationParticipant = (*PID)(nil)
@@ -206,6 +211,10 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	pid.startPassivation()
 
 	if err := pid.healthCheck(ctx); err != nil {
+		return nil, err
+	}
+
+	if err := pid.registerMetrics(); err != nil {
 		return nil, err
 	}
 
@@ -602,6 +611,10 @@ func (pid *PID) Restart(ctx context.Context) error {
 				RestartedAt: timestamppb.Now(),
 			},
 		)
+	}
+
+	if err := pid.registerMetrics(); err != nil {
+		return err
 	}
 
 	pid.logger.Debugf("actor=(%s) successfully restarted..:)", pid.Name())
@@ -2267,6 +2280,43 @@ func (pid *PID) toWireActor() (*internalpb.Actor, error) {
 		EnableStash:         pid.stashState != nil && pid.stashState.box != nil,
 		Role:                pid.Role(),
 	}, nil
+}
+
+func (pid *PID) registerMetrics() error {
+	if pid.metricProvider != nil && pid.metricProvider.Meter() != nil {
+		meter := pid.metricProvider.Meter()
+		metrics, err := metric.NewActorMetric(meter)
+		if err != nil {
+			return err
+		}
+
+		observeOptions := []otelmetric.ObserveOption{
+			otelmetric.WithAttributes(attribute.String("actor.system", pid.actorSystem.Name())),
+			otelmetric.WithAttributes(attribute.String("actor.name", pid.Name())),
+			otelmetric.WithAttributes(attribute.String("actor.path", pid.ID())),
+		}
+
+		_, err = meter.RegisterCallback(func(ctx context.Context, observer otelmetric.Observer) error {
+			observer.ObserveInt64(metrics.ChildrenCount(), int64(pid.ChildrenCount()), observeOptions...)
+			observer.ObserveInt64(metrics.StashSize(), int64(pid.StashSize()), observeOptions...)
+			observer.ObserveInt64(metrics.RestartCount(), int64(pid.RestartCount()), observeOptions...)
+			observer.ObserveInt64(metrics.ProcessedCount(), int64(pid.ProcessedCount()-1), observeOptions...)
+			observer.ObserveInt64(metrics.LastReceivedDuration(), pid.LatestProcessedDuration().Milliseconds(), observeOptions...)
+			observer.ObserveInt64(metrics.Uptime(), pid.Uptime(), observeOptions...)
+			observer.ObserveInt64(metrics.DeadlettersCount(), pid.getDeadlettersCount(ctx), observeOptions...)
+			return nil
+		}, metrics.ChildrenCount(),
+			metrics.StashSize(),
+			metrics.RestartCount(),
+			metrics.ProcessedCount(),
+			metrics.LastReceivedDuration(),
+			metrics.Uptime(),
+			metrics.DeadlettersCount(),
+		)
+
+		return err
+	}
+	return nil
 }
 
 // isLongLivedStrategy checks whether the given strategy is a long-lived strategy
