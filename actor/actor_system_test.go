@@ -210,6 +210,19 @@ func TestActorSystem(t *testing.T) {
 		require.ErrorIs(t, err, errRegister)
 		require.False(t, sys.Running())
 	})
+	t.Run("When metrics enabled without cluster", func(t *testing.T) {
+		ctx := context.TODO()
+
+		sys, err := NewActorSystem(
+			"testSys",
+			WithLogger(log.DiscardLogger),
+			WithMetrics(),
+		)
+		require.NoError(t, err)
+
+		require.NoError(t, sys.Start(ctx))
+		require.NoError(t, sys.Stop(ctx))
+	})
 
 	t.Run("New instance with Missing Name", func(t *testing.T) {
 		sys, err := NewActorSystem("")

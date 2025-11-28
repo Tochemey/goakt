@@ -3685,14 +3685,18 @@ func (x *actorSystem) registerMetrics() error {
 		}
 
 		_, err = meter.RegisterCallback(func(ctx context.Context, observer otelmetric.Observer) error {
-			peers, err := x.cluster.Members(ctx)
-			if err != nil {
-				return err
+			var peersCount int64
+			if x.clusterEnabled.Load() && x.cluster != nil {
+				peers, err := x.cluster.Members(ctx)
+				if err != nil {
+					return err
+				}
+				peersCount = int64(len(peers))
 			}
 
 			observer.ObserveInt64(metrics.PIDsCount(), int64(x.actorsCounter.Load()), observeOptions...)
 			observer.ObserveInt64(metrics.Uptime(), x.Uptime(), observeOptions...)
-			observer.ObserveInt64(metrics.PeersCount(), int64(len(peers)), observeOptions...)
+			observer.ObserveInt64(metrics.PeersCount(), peersCount, observeOptions...)
 			observer.ObserveInt64(metrics.DeadlettersCount(), int64(x.deadlettersCounter.Load()), observeOptions...)
 			return nil
 		}, metrics.PIDsCount(),
