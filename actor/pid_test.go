@@ -4615,8 +4615,7 @@ func TestNewPID(t *testing.T) {
 
 		addr := address.New("actor", actorSystem.Name(), "127.0.0.1", 0)
 
-		prevProvider := otel.GetMeterProvider()
-		t.Cleanup(func() { otel.SetMeterProvider(prevProvider) })
+		t.Cleanup(func() { otel.SetMeterProvider(noopmetric.NewMeterProvider()) })
 
 		errRegister := assert.AnError
 		baseProvider := noopmetric.NewMeterProvider()
@@ -4653,8 +4652,7 @@ func TestNewPID(t *testing.T) {
 
 		addr := address.New("actor", actorSystem.Name(), "127.0.0.1", 0)
 
-		prevProvider := otel.GetMeterProvider()
-		t.Cleanup(func() { otel.SetMeterProvider(prevProvider) })
+		t.Cleanup(func() { otel.SetMeterProvider(noopmetric.NewMeterProvider()) })
 
 		errInstrument := assert.AnError
 		baseProvider := noopmetric.NewMeterProvider()

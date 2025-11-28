@@ -159,8 +159,7 @@ func TestActorSystem(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		prevProvider := otel.GetMeterProvider()
-		t.Cleanup(func() { otel.SetMeterProvider(prevProvider) })
+		t.Cleanup(func() { otel.SetMeterProvider(noopmetric.NewMeterProvider()) })
 
 		errInstrument := assert.AnError
 		baseProvider := noopmetric.NewMeterProvider()
@@ -189,8 +188,7 @@ func TestActorSystem(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		prevProvider := otel.GetMeterProvider()
-		t.Cleanup(func() { otel.SetMeterProvider(prevProvider) })
+		t.Cleanup(func() { otel.SetMeterProvider(noopmetric.NewMeterProvider()) })
 
 		errRegister := assert.AnError
 		baseProvider := noopmetric.NewMeterProvider()
