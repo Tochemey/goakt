@@ -41,6 +41,8 @@ import (
 //   - pid.last.received.duration     (Int64ObservableCounter, unit: ms)
 //   - pid.processed.count            (Int64ObservableCounter)
 //   - pid.uptime                     (Int64ObservableCounter, unit: s)
+//   - pid.failure.count              (Int64ObservableCounter)
+//   - pid.reinstate.count            (Int64ObservableCounter)
 type ActorMetric struct {
 	deadlettersCount     metric.Int64ObservableCounter
 	childrenCount        metric.Int64ObservableCounter
@@ -49,6 +51,8 @@ type ActorMetric struct {
 	processedCount       metric.Int64ObservableCounter
 	stashSize            metric.Int64ObservableCounter
 	uptime               metric.Int64ObservableCounter
+	failureCount         metric.Int64ObservableCounter
+	reinstateCount       metric.Int64ObservableCounter
 }
 
 // NewActorMetric constructs all actor-level instruments with the provided Meter.
@@ -117,6 +121,22 @@ func NewActorMetric(meter metric.Meter) (*ActorMetric, error) {
 		return nil, fmt.Errorf("failed to create uptime instrument, %v", err)
 	}
 
+	// set the failure count instrument
+	if instruments.failureCount, err = meter.Int64ObservableCounter(
+		"actor.failure.count",
+		metric.WithDescription("Total number of failures observed"),
+	); err != nil {
+		return nil, fmt.Errorf("failed to create failureCount instrument, %v", err)
+	}
+
+	// set the reinstate count instrument
+	if instruments.reinstateCount, err = meter.Int64ObservableCounter(
+		"actor.reinstate.count",
+		metric.WithDescription("Total number of reinstatements (suspended -> resumed)"),
+	); err != nil {
+		return nil, fmt.Errorf("failed to create reinstateCount instrument, %v", err)
+	}
+
 	return &instruments, nil
 }
 
@@ -167,4 +187,17 @@ func (x *ActorMetric) ProcessedCount() metric.Int64ObservableCounter {
 //	inst.Uptime().Record(ctx, time.Since(start).Seconds(), metric.WithAttributes(...))
 func (x *ActorMetric) Uptime() metric.Int64ObservableCounter {
 	return x.uptime
+}
+
+// FailureCount returns an observable counter for the total number of failures
+// observed by the PID. Observe this via Meter.RegisterCallback.
+func (x *ActorMetric) FailureCount() metric.Int64ObservableCounter {
+	return x.failureCount
+}
+
+// ReinstateCount returns an observable counter for the total number of
+// reinstatements (suspended -> resumed transitions) of the PID.
+// Observe this via Meter.RegisterCallback.
+func (x *ActorMetric) ReinstateCount() metric.Int64ObservableCounter {
+	return x.reinstateCount
 }

@@ -116,6 +116,8 @@ func TestReceive(t *testing.T) {
 		assert.Zero(t, metric.RestartCount())
 		assert.Zero(t, metric.StashSize())
 		assert.Zero(t, metric.DeadlettersCount())
+		assert.Zero(t, metric.FailureCount())
+		assert.Zero(t, metric.ReinstateCount())
 
 		// stop the actor
 		err = pid.Shutdown(ctx)

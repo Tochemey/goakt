@@ -46,6 +46,8 @@ func TestActorMetric(t *testing.T) {
 	require.NotNil(t, instruments.LastReceivedDuration())
 	require.NotNil(t, instruments.ProcessedCount())
 	require.NotNil(t, instruments.Uptime())
+	require.NotNil(t, instruments.FailureCount())
+	require.NotNil(t, instruments.ReinstateCount())
 }
 
 func TestActorMetricErrors(t *testing.T) {
@@ -65,6 +67,8 @@ func TestActorMetricErrors(t *testing.T) {
 		{name: "last received duration histogram", failKey: "actor.last.received.duration"},
 		{name: "processed counter", failKey: "actor.processed.count"},
 		{name: "uptime histogram", failKey: "actor.uptime"},
+		{name: "failure counter", failKey: "actor.failure.count"},
+		{name: "reinstate counter", failKey: "actor.reinstate.count"},
 	}
 
 	for _, tt := range testCases {

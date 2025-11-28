@@ -26,19 +26,24 @@ package actor
 
 import "time"
 
-// Metric defines the actor system metric
+// Metric is an immutable snapshot of node-level statistics returned by ActorSystem.Metric.
+//
+// The values are gathered locally (not aggregated across a cluster) and represent a single
+// point in time. Use it to drive dashboards, health checks, or lightweight telemetry without
+// wiring up OpenTelemetry. Callers typically fetch a Metric just before inspecting fields;
+// values will not update after the struct is created.
 type Metric struct {
-	// DeadlettersCount returns the total number of deadletter
+	// DeadlettersCount returns the total number of messages dropped to deadletters on this node.
 	deadlettersCount int64
-	// ActorsCount returns the total number of actors in the system
+	// ActorsCount returns the total number of live actors on this node.
 	actorsCount int64
-	// Uptime returns the number of seconds since the actor/system started
+	// Uptime returns the number of seconds since the actor system on this node started.
 	uptime int64
-	// memSize returns the total memory of the system in bytes
+	// memSize is the total system memory in bytes, as reported by the host.
 	memSize uint64
-	// memAvail returns the free memory of the system in bytes
+	// memAvail is the currently available memory in bytes.
 	memAvail uint64
-	// memUsed returns the used memory of the system in bytes
+	// memUsed is the currently used memory in bytes.
 	memUsed uint64
 }
 
@@ -73,56 +78,82 @@ func (m Metric) Uptime() int64 {
 	return m.uptime
 }
 
-// ActorMetric defines actor specific metrics
+// ActorMetric is a point-in-time view of a single actor’s counters and timings.
+//
+// It is returned by PID.Metric(ctx) and reflects only the local actor state; no cluster
+// aggregation is performed. Metrics are captured at the moment Metric is called and will
+// not update afterwards. If the actor is not running when requested, PID.Metric returns nil.
 type ActorMetric struct { //nolint:revive
-	// DeadlettersCount returns the total number of deadletter
-	// deadlettersCount returns the total number of deadletter
+	// deadlettersCount is the total number of messages this actor sent to deadletters.
 	deadlettersCount uint64
-	// childrenCount returns the total number of child actor given a specific PID
+	// childrenCount is the total number of direct child actors for this actor.
 	childrenCount uint64
-	// uptime returns the number of seconds since the actor/system started
+	// uptime is the number of seconds this actor has been alive (resets after restarts).
 	uptime int64
-	// lastProcessingDuration returns the duration of the latest message processed
+	// latestProcessedDuration is the duration of the most recent message processing.
 	latestProcessedDuration time.Duration
-	// restartCount returns the total number of re-starts by the given PID
+	// restartCount is the total number of restarts the actor has undergone.
 	restartCount uint64
-	// processedCount returns the total number of messages processed at a given time
+	// processedCount is the total number of messages processed so far.
 	processedCount uint64
-	// stashSize returns the stash size at a given time
+	// stashSize is the current number of stashed messages.
 	stashSize uint64
+	// failureCount is the total number of failures observed for this actor.
+	failureCount uint64
+	// reinstateCount is the total number of reinstatements (suspended -> resumed transitions).
+	reinstateCount uint64
 }
 
-// LatestProcessedDuration returns the duration of the latest message processed duration
+// LatestProcessedDuration returns the duration of the latest message processing.
+// Unit: time.Duration (nanoseconds). Useful for latency observations on the last handled message.
 func (x ActorMetric) LatestProcessedDuration() time.Duration {
 	return x.latestProcessedDuration
 }
 
-// RestartCount returns the total number of re-starts by the given PID
+// RestartCount returns the cumulative number of restarts for this actor (PID).
+// Increments when supervision restarts the actor. Does not include normal stops.
 func (x ActorMetric) RestartCount() uint64 {
 	return x.restartCount
 }
 
-// DeadlettersCount returns the total number of deadletter
+// DeadlettersCount returns the total number of messages sent to deadletters by this actor.
+// Indicates local delivery failures or unhandled messages.
 func (x ActorMetric) DeadlettersCount() uint64 {
 	return x.deadlettersCount
 }
 
-// ChidrenCount returns the total number of child actor given a specific PID
+// ChidrenCount returns the current number of child actors owned by this actor.
+// Represents the actor’s immediate descendants (not a transitive count).
 func (x ActorMetric) ChidrenCount() uint64 {
 	return x.childrenCount
 }
 
-// Uptime returns the number of seconds since the actor/system started
+// Uptime returns the elapsed time this actor has been alive, in seconds.
+// Resets to zero on actor restart.
 func (x ActorMetric) Uptime() int64 {
 	return x.uptime
 }
 
-// ProcessedCount returns the total number of messages processed at a given time
+// ProcessedCount returns the cumulative number of messages this actor has processed.
+// Increments after successful handling; excludes stashed or dropped messages.
 func (x ActorMetric) ProcessedCount() uint64 {
 	return x.processedCount
 }
 
-// StashSize returns the stash size at a given time
+// StashSize returns the current number of messages stashed by this actor.
+// Fluctuates as messages are stashed/unstashed under behaviors like become/unbecome.
 func (x ActorMetric) StashSize() uint64 {
 	return x.stashSize
+}
+
+// FailureCount returns the cumulative number of failures observed by this actor.
+// Typically increments on panics or errors that trigger supervision actions.
+func (x ActorMetric) FailureCount() uint64 {
+	return x.failureCount
+}
+
+// ReinstateCount returns the cumulative number of reinstatements for this actor.
+// A reinstatement occurs when an actor transitions from suspended to resumed state.
+func (x ActorMetric) ReinstateCount() uint64 {
+	return x.reinstateCount
 }

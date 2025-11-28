@@ -127,6 +127,8 @@ type PID struct {
 	// set the metrics settings
 	restartCount   atomic.Int64
 	processedCount atomic.Int64
+	failureCount   atomic.Int64
+	reinstateCount atomic.Int64
 
 	// supervisor strategy
 	supervisor               *Supervisor
@@ -184,6 +186,8 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	pid.processedCount.Store(0)
 	pid.startedAt.Store(0)
 	pid.restartCount.Store(0)
+	pid.failureCount.Store(0)
+	pid.reinstateCount.Store(0)
 	pid.initTimeout.Store(DefaultInitTimeout)
 	pid.processing.Store(int32(idle))
 	pid.toggleFlag(isRelocatableFlag, true)
@@ -308,6 +312,8 @@ func (pid *PID) Metric(ctx context.Context) *ActorMetric {
 			restartCount:            uint64(restartCount),
 			processedCount:          uint64(processedCount),
 			stashSize:               stashSize,
+			failureCount:            uint64(pid.failureCount.Load()),
+			reinstateCount:          uint64(pid.reinstateCount.Load()),
 		}
 	}
 	return nil
@@ -1496,6 +1502,8 @@ func (pid *PID) reset() {
 	pid.initTimeout.Store(DefaultInitTimeout)
 	pid.behaviorStack.Reset()
 	pid.processedCount.Store(0)
+	pid.failureCount.Store(0)
+	pid.reinstateCount.Store(0)
 	pid.restartCount.Store(0)
 	pid.startedAt.Store(0)
 	pid.toggleFlag(runningFlag, false)
@@ -2113,6 +2121,8 @@ func (pid *PID) childAddress(name string) *address.Address {
 func (pid *PID) suspend(reason string) {
 	pid.logger.Infof("%s going into suspension mode", pid.Name())
 	pid.toggleFlag(suspendedFlag, true)
+	// increment suspension count
+	pid.failureCount.Inc()
 	// pause passivation loop
 	pid.pausePassivation()
 	// stop the supervisor loop
@@ -2162,7 +2172,8 @@ func (pid *PID) doReinstate() {
 		return
 	}
 	pid.toggleFlag(suspendedFlag, false)
-
+	// increment reinstate count
+	pid.reinstateCount.Inc()
 	// Guard against a pending passivation path that might have just crossed the threshold
 	// but hasn't yet checked suspension state. Skip the next passivation decision once.
 	pid.toggleFlag(passivationSkipNextFlag, true)
@@ -2294,7 +2305,8 @@ func (pid *PID) registerMetrics() error {
 		observeOptions := []otelmetric.ObserveOption{
 			otelmetric.WithAttributes(attribute.String("actor.system", pid.actorSystem.Name())),
 			otelmetric.WithAttributes(attribute.String("actor.name", pid.Name())),
-			otelmetric.WithAttributes(attribute.String("actor.path", pid.ID())),
+			otelmetric.WithAttributes(attribute.String("actor.kind", registry.Name(pid.Actor()))),
+			otelmetric.WithAttributes(attribute.String("actor.address", pid.ID())),
 		}
 
 		_, err = meter.RegisterCallback(func(ctx context.Context, observer otelmetric.Observer) error {
@@ -2305,6 +2317,8 @@ func (pid *PID) registerMetrics() error {
 			observer.ObserveInt64(metrics.LastReceivedDuration(), pid.LatestProcessedDuration().Milliseconds(), observeOptions...)
 			observer.ObserveInt64(metrics.Uptime(), pid.Uptime(), observeOptions...)
 			observer.ObserveInt64(metrics.DeadlettersCount(), pid.getDeadlettersCount(ctx), observeOptions...)
+			observer.ObserveInt64(metrics.FailureCount(), int64(pid.failureCount.Load()), observeOptions...)
+			observer.ObserveInt64(metrics.ReinstateCount(), int64(pid.reinstateCount.Load()), observeOptions...)
 			return nil
 		}, metrics.ChildrenCount(),
 			metrics.StashSize(),
@@ -2313,6 +2327,8 @@ func (pid *PID) registerMetrics() error {
 			metrics.LastReceivedDuration(),
 			metrics.Uptime(),
 			metrics.DeadlettersCount(),
+			metrics.FailureCount(),
+			metrics.ReinstateCount(),
 		)
 
 		return err
