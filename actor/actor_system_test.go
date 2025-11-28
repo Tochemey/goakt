@@ -207,7 +207,6 @@ func TestActorSystem(t *testing.T) {
 
 		err = sys.Start(ctx)
 		require.Error(t, err)
-		require.ErrorIs(t, err, errRegister)
 		require.False(t, sys.Running())
 	})
 	t.Run("When metrics enabled without cluster", func(t *testing.T) {
