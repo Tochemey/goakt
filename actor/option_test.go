@@ -173,3 +173,11 @@ func TestWithEvictionStrategy(t *testing.T) {
 		assert.Equal(t, LRU, system.evictionStrategy.Policy())
 	})
 }
+
+func TestWithMetrics(t *testing.T) {
+	system := new(actorSystem)
+	opt := WithMetrics()
+	opt.Apply(system)
+
+	assert.NotNil(t, system.metricProvider)
+}

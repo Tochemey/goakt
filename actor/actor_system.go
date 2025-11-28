@@ -46,6 +46,8 @@ import (
 	goset "github.com/deckarep/golang-set/v2"
 	"github.com/flowchartsman/retry"
 	"go.akshayshah.org/connectproto"
+	"go.opentelemetry.io/otel/attribute"
+	otelmetric "go.opentelemetry.io/otel/metric"
 	"go.uber.org/atomic"
 	"go.uber.org/multierr"
 	"golang.org/x/net/http2"
@@ -70,6 +72,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v3/internal/locker"
+	"github.com/tochemey/goakt/v3/internal/metric"
 	"github.com/tochemey/goakt/v3/internal/network"
 	"github.com/tochemey/goakt/v3/internal/pointer"
 	"github.com/tochemey/goakt/v3/internal/registry"
@@ -812,6 +815,8 @@ type actorSystem struct {
 	evictionStrategy *EvictionStrategy
 	evictionInterval time.Duration
 	evictionStopSig  chan registry.Unit
+
+	metricProvider *metric.Provider
 }
 
 var (
@@ -1015,6 +1020,16 @@ func (x *actorSystem) Start(ctx context.Context) error {
 	x.started.Store(true)
 	x.starting.Store(false)
 	x.startedAt.Store(time.Now().Unix())
+
+	if err := x.registerMetrics(); err != nil {
+		x.logger.Errorf("failed to register actor system metrics: %v", err)
+		if stopErr := x.shutdown(ctx); stopErr != nil {
+			return errors.Join(err, stopErr)
+		}
+
+		return err
+	}
+
 	x.logger.Infof("%s actor system successfully started..:)", x.name)
 	return nil
 }
@@ -3033,6 +3048,7 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 		withInitTimeout(x.actorInitTimeout),
 		withRemoting(x.remoting),
 		withPassivationManager(x.passivator),
+		withMetricProvider(x.metricProvider),
 	}
 
 	if err := spawnConfig.Validate(); err != nil {
@@ -3654,6 +3670,44 @@ func (x *actorSystem) passivationManager() *passivationManager {
 	passivator := x.passivator
 	x.locker.RUnlock()
 	return passivator
+}
+
+func (x *actorSystem) registerMetrics() error {
+	if x.metricProvider != nil && x.metricProvider.Meter() != nil {
+		meter := x.metricProvider.Meter()
+		metrics, err := metric.NewActorSystemMetric(meter)
+		if err != nil {
+			return err
+		}
+
+		observeOptions := []otelmetric.ObserveOption{
+			otelmetric.WithAttributes(attribute.String("actor.system", x.Name())),
+		}
+
+		_, err = meter.RegisterCallback(func(ctx context.Context, observer otelmetric.Observer) error {
+			var peersCount int64
+			if x.clusterEnabled.Load() && x.cluster != nil {
+				peers, err := x.cluster.Members(ctx)
+				if err != nil {
+					return err
+				}
+				peersCount = int64(len(peers))
+			}
+
+			observer.ObserveInt64(metrics.PIDsCount(), int64(x.actorsCounter.Load()), observeOptions...)
+			observer.ObserveInt64(metrics.Uptime(), x.Uptime(), observeOptions...)
+			observer.ObserveInt64(metrics.PeersCount(), peersCount, observeOptions...)
+			observer.ObserveInt64(metrics.DeadlettersCount(), int64(x.deadlettersCounter.Load()), observeOptions...)
+			return nil
+		}, metrics.PIDsCount(),
+			metrics.Uptime(),
+			metrics.PeersCount(),
+			metrics.DeadlettersCount(),
+		)
+
+		return err
+	}
+	return nil
 }
 
 func computeEvictionCount(total, threshold uint64, totalEvictions, percentageToReturn int) int {

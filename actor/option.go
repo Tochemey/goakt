@@ -30,6 +30,7 @@ import (
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/hash"
 	"github.com/tochemey/goakt/v3/internal/collection"
+	"github.com/tochemey/goakt/v3/internal/metric"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/tls"
@@ -237,5 +238,12 @@ func WithEvictionStrategy(strategy *EvictionStrategy, interval time.Duration) Op
 		}
 		system.evictionStrategy = strategy
 		system.evictionInterval = interval
+	})
+}
+
+// WithMetrics enables metrics collection for the actor system.
+func WithMetrics() Option {
+	return OptionFunc(func(system *actorSystem) {
+		system.metricProvider = metric.NewProvider()
 	})
 }

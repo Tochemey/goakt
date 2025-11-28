@@ -46,6 +46,7 @@ import (
 	consulcontainer "github.com/testcontainers/testcontainers-go/modules/consul"
 	etcdContainer "github.com/testcontainers/testcontainers-go/modules/etcd"
 	"github.com/travisjeffery/go-dynaport"
+	otelmetric "go.opentelemetry.io/otel/metric"
 	"go.uber.org/atomic"
 
 	"github.com/tochemey/goakt/v3/address"
@@ -1966,4 +1967,16 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
+}
+
+type MockMeterProvider struct {
+	otelmetric.MeterProvider
+	meter otelmetric.Meter
+}
+
+func (x *MockMeterProvider) Meter(name string, opts ...otelmetric.MeterOption) otelmetric.Meter {
+	if x.meter != nil {
+		return x.meter
+	}
+	return x.MeterProvider.Meter(name, opts...)
 }

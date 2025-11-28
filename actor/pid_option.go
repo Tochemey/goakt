@@ -30,6 +30,7 @@ import (
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/internal/collection"
 	"github.com/tochemey/goakt/v3/internal/eventstream"
+	"github.com/tochemey/goakt/v3/internal/metric"
 	"github.com/tochemey/goakt/v3/internal/pointer"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/passivation"
@@ -154,6 +155,15 @@ func withRole(role string) pidOption {
 	return func(pid *PID) {
 		if role != "" {
 			pid.role = pointer.To(role)
+		}
+	}
+}
+
+// withMetricProvider sets the metric provider for the PID
+func withMetricProvider(metricProvider *metric.Provider) pidOption {
+	return func(pid *PID) {
+		if metricProvider != nil {
+			pid.metricProvider = metricProvider
 		}
 	}
 }

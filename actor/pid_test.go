@@ -27,6 +27,7 @@ package actor
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net"
 	"strconv"
 	"sync"
@@ -37,6 +38,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
+	"go.opentelemetry.io/otel"
+	otelmetric "go.opentelemetry.io/otel/metric"
+	noopmetric "go.opentelemetry.io/otel/metric/noop"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
@@ -47,6 +51,7 @@ import (
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/collection"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
+	"github.com/tochemey/goakt/v3/internal/metric"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/log"
@@ -4601,7 +4606,110 @@ func TestNewPID(t *testing.T) {
 		require.Error(t, err)
 		assert.Nil(t, pid)
 	})
+	t.Run("With metrics registration error", func(t *testing.T) {
+		ctx := context.Background()
+
+		actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		addr := address.New("actor", actorSystem.Name(), "127.0.0.1", 0)
+
+		prevProvider := otel.GetMeterProvider()
+		t.Cleanup(func() { otel.SetMeterProvider(prevProvider) })
+
+		errRegister := assert.AnError
+		baseProvider := noopmetric.NewMeterProvider()
+		otel.SetMeterProvider(&MockMeterProvider{
+			MeterProvider: baseProvider,
+			meter: registerCallbackFailingMeter{
+				Meter: baseProvider.Meter("test"),
+				err:   errRegister,
+			},
+		})
+		metricProvider := metric.NewProvider()
+
+		pid, err := newPID(
+			ctx,
+			addr,
+			NewMockActor(),
+			withActorSystem(actorSystem),
+			withMetricProvider(metricProvider),
+			asSystemActor(),
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+		)
+
+		require.Error(t, err)
+		require.ErrorIs(t, err, errRegister)
+		require.Nil(t, pid)
+	})
+	t.Run("With metric instrument creation error", func(t *testing.T) {
+		ctx := context.Background()
+
+		actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		addr := address.New("actor", actorSystem.Name(), "127.0.0.1", 0)
+
+		prevProvider := otel.GetMeterProvider()
+		t.Cleanup(func() { otel.SetMeterProvider(prevProvider) })
+
+		errInstrument := assert.AnError
+		baseProvider := noopmetric.NewMeterProvider()
+		otel.SetMeterProvider(&MockMeterProvider{
+			MeterProvider: baseProvider,
+			meter: instrumentFailingMeter{
+				Meter: baseProvider.Meter("test"),
+				failures: map[string]error{
+					"actor.children.count": errInstrument,
+				},
+			},
+		})
+		metricProvider := metric.NewProvider()
+
+		pid, err := newPID(
+			ctx,
+			addr,
+			NewMockActor(),
+			withActorSystem(actorSystem),
+			withMetricProvider(metricProvider),
+			asSystemActor(),
+			withInitMaxRetries(1),
+			withCustomLogger(log.DiscardLogger),
+		)
+
+		require.Error(t, err)
+		require.EqualError(t, err, fmt.Sprintf("failed to create childrenCount instrument, %v", errInstrument))
+		require.Nil(t, pid)
+	})
 }
+
+type registerCallbackFailingMeter struct {
+	otelmetric.Meter
+	err error
+}
+
+func (m registerCallbackFailingMeter) RegisterCallback(_ otelmetric.Callback, _ ...otelmetric.Observable) (otelmetric.Registration, error) {
+	return nil, m.err
+}
+
+type instrumentFailingMeter struct {
+	otelmetric.Meter
+	failures map[string]error
+}
+
+func (m instrumentFailingMeter) Int64ObservableCounter(
+	name string,
+	options ...otelmetric.Int64ObservableCounterOption,
+) (otelmetric.Int64ObservableCounter, error) {
+	if err, ok := m.failures[name]; ok {
+		return nil, err
+	}
+	return m.Meter.Int64ObservableCounter(name, options...)
+}
+
 func TestLogger(t *testing.T) {
 	buffer := new(bytes.Buffer)
 
