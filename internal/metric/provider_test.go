@@ -48,44 +48,10 @@ func TestNewInstrumentationUsesGlobalProvider(t *testing.T) {
 		otel.SetMeterProvider(prevProvider)
 	})
 
-	telemetry := New()
+	telemetry := NewProvider()
 	require.NotNil(t, telemetry)
 	require.NotNil(t, telemetry.Meter())
-	require.Equal(t, recorder, telemetry.meterProvider)
 	require.Equal(t, baseMeter, telemetry.meter)
-	require.Equal(t, []string{instrumentationName}, recorder.called)
-}
-
-func TestWithMeterProviderOverridesDefault(t *testing.T) {
-	customProvider := &recorderMeterProvider{
-		MeterProvider: noop.NewMeterProvider(),
-		meter:         noop.NewMeterProvider().Meter("custom"),
-	}
-
-	telemetry := New(WithMeterProvider(customProvider))
-
-	require.Equal(t, customProvider, telemetry.meterProvider)
-	require.Equal(t, customProvider.meter, telemetry.meter)
-	require.Equal(t, []string{instrumentationName}, customProvider.called)
-}
-
-func TestWithMeterProviderIgnoresNil(t *testing.T) {
-	prevProvider := otel.GetMeterProvider()
-	baseProvider := noop.NewMeterProvider()
-
-	recorder := &recorderMeterProvider{
-		MeterProvider: baseProvider,
-	}
-
-	otel.SetMeterProvider(recorder)
-	t.Cleanup(func() {
-		otel.SetMeterProvider(prevProvider)
-	})
-
-	telemetry := New(WithMeterProvider(nil))
-
-	require.Equal(t, recorder, telemetry.meterProvider)
-	require.NotNil(t, telemetry.meter)
 	require.Equal(t, []string{instrumentationName}, recorder.called)
 }
 

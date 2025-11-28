@@ -105,8 +105,8 @@ func TestPIDOptions(t *testing.T) {
 
 	t.Run("withMetricProvider", func(t *testing.T) {
 		pid := &PID{}
-		metricProvider := metric.New()
-		withMeterProvider(metricProvider)(pid)
+		metricProvider := metric.NewProvider()
+		withMetricProvider(metricProvider)(pid)
 		assert.Equal(t, metricProvider, pid.metricProvider)
 	})
 }

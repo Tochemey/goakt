@@ -33,36 +33,17 @@ const (
 	instrumentationName = "github.com/Tochemey/goakt/v3/telemetry"
 )
 
-type Option func(*Provider)
-
 type Provider struct {
-	meterProvider metric.MeterProvider
-	meter         metric.Meter
+	meter metric.Meter
 }
 
-func WithMeterProvider(provider metric.MeterProvider) Option {
-	return func(t *Provider) {
-		if provider != nil {
-			t.meterProvider = provider
-		}
+func NewProvider() *Provider {
+	return &Provider{
+		meter: otel.GetMeterProvider().Meter(instrumentationName),
 	}
-}
-
-func New(opts ...Option) *Provider {
-	t := &Provider{
-		meterProvider: otel.GetMeterProvider(),
-	}
-
-	for _, opt := range opts {
-		opt(t)
-	}
-
-	t.meter = t.meterProvider.Meter(instrumentationName)
-
-	return t
 }
 
 // Meter returns the Meter used by this Provider.
-func (p *Provider) Meter() metric.Meter {
-	return p.meter
+func (x *Provider) Meter() metric.Meter {
+	return x.meter
 }

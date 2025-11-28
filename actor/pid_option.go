@@ -160,7 +160,7 @@ func withRole(role string) pidOption {
 }
 
 // withMetricProvider sets the metric provider for the PID
-func withMeterProvider(metricProvider *metric.Provider) pidOption {
+func withMetricProvider(metricProvider *metric.Provider) pidOption {
 	return func(pid *PID) {
 		if metricProvider != nil {
 			pid.metricProvider = metricProvider

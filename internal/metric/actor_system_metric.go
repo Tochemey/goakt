@@ -61,7 +61,7 @@ func NewActorSystemMetric(meter metric.Meter) (*ActorSystemMetric, error) {
 	}
 
 	if instruments.pidsCount, err = meter.Int64ObservableCounter(
-		"actorsystem.pids.count",
+		"actorsystem.actors.count",
 		metric.WithDescription("Total number of PIDs in the actor system"),
 	); err != nil {
 		return nil, err

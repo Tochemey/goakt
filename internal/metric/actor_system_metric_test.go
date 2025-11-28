@@ -55,7 +55,7 @@ func TestActorSystemInstrumentErrors(t *testing.T) {
 		failKey string
 	}{
 		{name: "deadletters counter", failKey: "actorsystem.deadletters.count"},
-		{name: "pids counter", failKey: "actorsystem.pids.count"},
+		{name: "pids counter", failKey: "actorsystem.actors.count"},
 		{name: "uptime histogram", failKey: "actorsystem.uptime"},
 		{name: "peers counter", failKey: "actorsystem.peers.count"},
 	}

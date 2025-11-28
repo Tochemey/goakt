@@ -47,6 +47,8 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
+	"go.opentelemetry.io/otel"
+	noopmetric "go.opentelemetry.io/otel/metric/noop"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -58,6 +60,7 @@ import (
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/collection"
 	internalpb "github.com/tochemey/goakt/v3/internal/internalpb"
+	"github.com/tochemey/goakt/v3/internal/metric"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/log"
@@ -147,6 +150,65 @@ func TestActorSystem(t *testing.T) {
 
 		pause.For(500 * time.Millisecond)
 		require.NoError(t, sys.Stop(ctx))
+	})
+	t.Run("When metrics instruments cannot be created", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, err := NewActorSystem(
+			"testSys",
+			WithLogger(log.DiscardLogger),
+		)
+		require.NoError(t, err)
+
+		prevProvider := otel.GetMeterProvider()
+		t.Cleanup(func() { otel.SetMeterProvider(prevProvider) })
+
+		errInstrument := assert.AnError
+		baseProvider := noopmetric.NewMeterProvider()
+		otel.SetMeterProvider(&MockMeterProvider{
+			MeterProvider: baseProvider,
+			meter: instrumentFailingMeter{
+				Meter: baseProvider.Meter("test"),
+				failures: map[string]error{
+					"actorsystem.deadletters.count": errInstrument,
+				},
+			},
+		})
+
+		sysImpl := sys.(*actorSystem)
+		sysImpl.metricProvider = metric.NewProvider()
+
+		err = sys.Start(ctx)
+		require.Error(t, err)
+		require.ErrorIs(t, err, errInstrument)
+	})
+	t.Run("When metrics callback registration fails", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, err := NewActorSystem(
+			"testSys",
+			WithLogger(log.DiscardLogger),
+		)
+		require.NoError(t, err)
+
+		prevProvider := otel.GetMeterProvider()
+		t.Cleanup(func() { otel.SetMeterProvider(prevProvider) })
+
+		errRegister := assert.AnError
+		baseProvider := noopmetric.NewMeterProvider()
+		otel.SetMeterProvider(&MockMeterProvider{
+			MeterProvider: baseProvider,
+			meter: registerCallbackFailingMeter{
+				Meter: baseProvider.Meter("test"),
+				err:   errRegister,
+			},
+		})
+
+		sysImpl := sys.(*actorSystem)
+		sysImpl.metricProvider = metric.NewProvider()
+
+		err = sys.Start(ctx)
+		require.Error(t, err)
+		require.ErrorIs(t, err, errRegister)
+		require.False(t, sys.Running())
 	})
 
 	t.Run("New instance with Missing Name", func(t *testing.T) {

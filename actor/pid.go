@@ -683,6 +683,7 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 		withInitTimeout(pid.initTimeout.Load()),
 		withRemoting(pid.remoting),
 		withPassivationManager(pid.passivationManager),
+		withMetricProvider(pid.metricProvider),
 	}
 
 	if spawnConfig.mailbox != nil {
