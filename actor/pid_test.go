@@ -49,6 +49,7 @@ import (
 	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
+	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/collection"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/metric"
@@ -4684,6 +4685,37 @@ func TestNewPID(t *testing.T) {
 		require.EqualError(t, err, fmt.Sprintf("failed to create childrenCount instrument, %v", errInstrument))
 		require.Nil(t, pid)
 	})
+	t.Run("With RegisterMetrics callback", func(t *testing.T) {
+		ctx := context.Background()
+
+		prevProvider := otel.GetMeterProvider()
+		meterProvider := newManualMeterProvider()
+		otel.SetMeterProvider(meterProvider)
+		t.Cleanup(func() { otel.SetMeterProvider(prevProvider) })
+
+		sys, err := NewActorSystem("testSys",
+			WithLogger(log.DiscardLogger),
+			WithMetrics())
+		require.NoError(t, err)
+		require.NotNil(t, sys)
+
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { require.NoError(t, sys.Stop(ctx)) })
+
+		pid, err := sys.Spawn(ctx, "metrics-actor", NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		manual, ok := meterProvider.meter.(*manualMeter)
+		require.True(t, ok)
+		require.NotEmpty(t, manual.callbacks)
+
+		observer := &manualObserver{}
+		for _, cb := range manual.callbacks {
+			require.NoError(t, cb(ctx, observer))
+		}
+		require.NotEmpty(t, observer.records)
+	})
 }
 
 type registerCallbackFailingMeter struct {
@@ -4708,6 +4740,72 @@ func (m instrumentFailingMeter) Int64ObservableCounter(
 		return nil, err
 	}
 	return m.Meter.Int64ObservableCounter(name, options...)
+}
+
+type manualMeterProvider struct {
+	otelmetric.MeterProvider
+	meter otelmetric.Meter
+}
+
+func newManualMeterProvider() *manualMeterProvider {
+	delegate := noopmetric.NewMeterProvider()
+	return &manualMeterProvider{
+		MeterProvider: delegate,
+		meter: &manualMeter{
+			Meter: delegate.Meter("test"),
+		},
+	}
+}
+
+func (m *manualMeterProvider) Meter(_ string, _ ...otelmetric.MeterOption) otelmetric.Meter {
+	return m.meter
+}
+
+type manualMeter struct {
+	otelmetric.Meter
+	callbacks []otelmetric.Callback
+}
+
+func (m *manualMeter) RegisterCallback(cb otelmetric.Callback, _ ...otelmetric.Observable) (otelmetric.Registration, error) {
+	m.callbacks = append(m.callbacks, cb)
+	return noopmetric.Registration{}, nil
+}
+
+// immediateMeter triggers the callback at registration time.
+// It is useful to surface errors that occur inside the callback, such as
+// cluster membership lookups during metrics observation.
+type immediateMeter struct {
+	*manualMeter
+	system  *actorSystem
+	cluster cluster.Cluster
+}
+
+func (m *immediateMeter) RegisterCallback(cb otelmetric.Callback, _ ...otelmetric.Observable) (otelmetric.Registration, error) {
+	// enable cluster path for the callback
+	if m.system != nil {
+		m.system.clusterEnabled.Store(true)
+		m.system.cluster = m.cluster
+	}
+	observer := &manualObserver{}
+	err := cb(context.Background(), observer)
+	return noopmetric.Registration{}, err
+}
+
+type manualObserver struct {
+	noopmetric.Observer
+	records []observeRecord
+}
+
+type observeRecord struct {
+	instrument string
+	value      int64
+}
+
+func (o *manualObserver) ObserveInt64(obsrv otelmetric.Int64Observable, value int64, _ ...otelmetric.ObserveOption) {
+	o.records = append(o.records, observeRecord{
+		instrument: fmt.Sprintf("%T", obsrv),
+		value:      value,
+	})
 }
 
 func TestLogger(t *testing.T) {

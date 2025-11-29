@@ -207,6 +207,42 @@ func TestActorSystem(t *testing.T) {
 		require.Error(t, err)
 		require.False(t, sys.Running())
 	})
+	t.Run("When metrics callback fails fetching cluster members", func(t *testing.T) {
+		clusterMock := mockcluster.NewCluster(t)
+
+		sys, err := NewActorSystem(
+			"testSys",
+			WithLogger(log.DiscardLogger),
+			WithMetrics(),
+		)
+		require.NoError(t, err)
+
+		sysImpl := sys.(*actorSystem)
+		sysImpl.cluster = clusterMock
+		sysImpl.clusterEnabled.Store(true)
+
+		immediate := &immediateMeter{
+			manualMeter: &manualMeter{
+				Meter: noopmetric.NewMeterProvider().Meter("test"),
+			},
+			system:  sysImpl,
+			cluster: clusterMock,
+		}
+
+		otel.SetMeterProvider(&manualMeterProvider{
+			MeterProvider: noopmetric.NewMeterProvider(),
+			meter:         immediate,
+		})
+		t.Cleanup(func() { otel.SetMeterProvider(noopmetric.NewMeterProvider()) })
+
+		sysImpl.metricProvider = metric.NewProvider()
+
+		clusterMock.EXPECT().Members(mock.Anything).Return(nil, assert.AnError)
+
+		err = sysImpl.registerMetrics()
+		require.Error(t, err)
+		require.ErrorIs(t, err, assert.AnError)
+	})
 	t.Run("When metrics enabled without cluster", func(t *testing.T) {
 		ctx := context.TODO()
 
@@ -7348,5 +7384,36 @@ func TestLeader(t *testing.T) {
 		require.Error(t, err)
 		assert.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
 		assert.Nil(t, leader)
+	})
+	t.Run("With RegisterMetrics callback", func(t *testing.T) {
+		ctx := context.Background()
+
+		prevProvider := otel.GetMeterProvider()
+		meterProvider := newManualMeterProvider()
+		otel.SetMeterProvider(meterProvider)
+		t.Cleanup(func() { otel.SetMeterProvider(prevProvider) })
+
+		sys, err := NewActorSystem("testSys",
+			WithLogger(log.DiscardLogger),
+			WithMetrics())
+		require.NoError(t, err)
+		require.NotNil(t, sys)
+
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { require.NoError(t, sys.Stop(ctx)) })
+
+		actorRef, err := sys.Spawn(ctx, "metrics-system-actor", NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, actorRef)
+
+		manual, ok := meterProvider.meter.(*manualMeter)
+		require.True(t, ok)
+		require.NotEmpty(t, manual.callbacks)
+
+		observer := &manualObserver{}
+		for _, cb := range manual.callbacks {
+			require.NoError(t, cb(ctx, observer))
+		}
+		require.GreaterOrEqual(t, len(observer.records), 4)
 	})
 }
