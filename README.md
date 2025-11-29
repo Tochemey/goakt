@@ -75,13 +75,13 @@ Before you start, make sure you have these installed:
     ```
     This ensures all dependencies are correctly listed and downloaded.
 
-### Contributions
+### How to Contribute
 
 1. Make your changes in your fork.
 2. Ensure your code adheres to the project's style and passes tests `earthly +test`.
 3. Commit your changes using a **Conventional Commit** message. See [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
 4. Submit a [pull request](https://help.github.com/articles/using-pull-requests) from your fork to the `main` branch of the original repository.
-5. Following the instructions in the `playground` package to leave a working sample code in case it is a bug.
+5. Following the instructions in the `playground` package to leave a working sample code in case it is a bug you are fixing.
 
 ### Test & Linter
 
@@ -93,11 +93,11 @@ earthly +test
 
 ## 💬 Feedback
 
-Kindly use the [issue](https://github.com/Tochemey/goakt/issues/948) to give us your feedback that can help us enhance the framework.
+Kindly use this [issue](https://github.com/Tochemey/goakt/issues/948) to give us your feedback that can help us enhance the framework.
 
 ## 📊 Benchmark
 
-One can find the benchmark tests in this repository: [Benchmark](https://github.com/Tochemey/goakt-examples/tree/main/actor-benchmark)
+One can find the benchmark tests here: [Benchmark](./bench/)
 
 ## 💰 Sponsors
 
