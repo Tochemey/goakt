@@ -39,6 +39,18 @@ import (
 	"github.com/tochemey/goakt/v3/log"
 )
 
+type MockFailingGetDMap struct {
+	olric.DMap
+	key string
+}
+
+func (x MockFailingGetDMap) Get(ctx context.Context, key string) (*olric.GetResponse, error) {
+	if key == x.key {
+		return nil, olric.ErrKeyNotFound
+	}
+	return x.DMap.Get(ctx, key)
+}
+
 type MockClient struct {
 	newDMapErr   error
 	newPubSubErr error

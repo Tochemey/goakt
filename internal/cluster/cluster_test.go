@@ -928,6 +928,314 @@ func TestSingleNode(t *testing.T) {
 		require.NoError(t, cluster.Stop(ctx))
 		provider.AssertExpectations(t)
 	})
+	t.Run("With Actors skips round robin counter entry", func(t *testing.T) {
+		ctx := t.Context()
+
+		nodePorts := dynaport.Get(3)
+		discoveryPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		addrs := []string{
+			fmt.Sprintf("127.0.0.1:%d", discoveryPort),
+		}
+
+		provider := new(mocksdiscovery.Provider)
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		host := "127.0.0.1"
+		hostNode := discovery.Node{
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: discoveryPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
+		}
+
+		cluster := New("test", provider, &hostNode, WithLogger(log.DiscardLogger))
+		require.NotNil(t, cluster)
+
+		err := cluster.Start(ctx)
+		require.NoError(t, err)
+
+		actorName := uuid.NewString()
+		actor := &internalpb.Actor{Address: &goaktpb.Address{Name: actorName}}
+		err = cluster.PutActor(ctx, actor)
+		require.NoError(t, err)
+
+		_, err = cluster.NextRoundRobinValue(ctx, ActorsRoundRobinKey)
+		require.NoError(t, err)
+
+		actors, err := cluster.Actors(ctx, time.Second)
+		require.NoError(t, err)
+		require.Len(t, actors, 1)
+		assert.True(t, proto.Equal(actor, actors[0]))
+
+		require.NoError(t, cluster.Stop(ctx))
+		provider.AssertExpectations(t)
+	})
+	t.Run("With Grains skips round robin counter entry", func(t *testing.T) {
+		ctx := t.Context()
+
+		nodePorts := dynaport.Get(3)
+		discoveryPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		addrs := []string{
+			fmt.Sprintf("127.0.0.1:%d", discoveryPort),
+		}
+
+		provider := new(mocksdiscovery.Provider)
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		host := "127.0.0.1"
+		hostNode := discovery.Node{
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: discoveryPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
+		}
+
+		cluster := New("test", provider, &hostNode, WithLogger(log.DiscardLogger))
+		require.NotNil(t, cluster)
+
+		err := cluster.Start(ctx)
+		require.NoError(t, err)
+
+		identity := "grainKind/grainName"
+		grain := &internalpb.Grain{
+			GrainId: &internalpb.GrainId{
+				Kind:  "grainKind",
+				Name:  "grainName",
+				Value: identity,
+			},
+			Host: host,
+			Port: int32(remotingPort),
+		}
+		err = cluster.PutGrain(ctx, grain)
+		require.NoError(t, err)
+
+		_, err = cluster.NextRoundRobinValue(ctx, GrainsRoundRobinKey)
+		require.NoError(t, err)
+
+		grains, err := cluster.Grains(ctx, time.Second)
+		require.NoError(t, err)
+		require.Len(t, grains, 1)
+		assert.True(t, proto.Equal(grain, grains[0]))
+
+		require.NoError(t, cluster.Stop(ctx))
+		provider.AssertExpectations(t)
+	})
+	t.Run("With Grains ignores missing entry during scan", func(t *testing.T) {
+		ctx := t.Context()
+
+		nodePorts := dynaport.Get(3)
+		discoveryPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		addrs := []string{
+			fmt.Sprintf("127.0.0.1:%d", discoveryPort),
+		}
+
+		provider := new(mocksdiscovery.Provider)
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		host := "127.0.0.1"
+		hostNode := discovery.Node{
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: discoveryPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
+		}
+
+		cl := New("test", provider, &hostNode, WithLogger(log.DiscardLogger))
+		require.NotNil(t, cl)
+
+		err := cl.Start(ctx)
+		require.NoError(t, err)
+
+		identity := "grainKind/grainName"
+		grain := &internalpb.Grain{
+			GrainId: &internalpb.GrainId{
+				Kind:  "grainKind",
+				Name:  "grainName",
+				Value: identity,
+			},
+			Host: host,
+			Port: int32(remotingPort),
+		}
+		err = cl.PutGrain(ctx, grain)
+		require.NoError(t, err)
+
+		missingKey := composeKey(namespaceGrains, identity)
+		cl.(*cluster).dmap = MockFailingGetDMap{DMap: cl.(*cluster).dmap, key: missingKey}
+
+		grains, err := cl.Grains(ctx, time.Second)
+		require.NoError(t, err)
+		require.Empty(t, grains)
+
+		require.NoError(t, cl.Stop(ctx))
+		provider.AssertExpectations(t)
+	})
+	t.Run("With Grains returns decode error during scan", func(t *testing.T) {
+		ctx := t.Context()
+
+		nodePorts := dynaport.Get(3)
+		discoveryPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		addrs := []string{
+			fmt.Sprintf("127.0.0.1:%d", discoveryPort),
+		}
+
+		provider := new(mocksdiscovery.Provider)
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		host := "127.0.0.1"
+		hostNode := discovery.Node{
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: discoveryPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
+		}
+
+		cl := New("test", provider, &hostNode, WithLogger(log.DiscardLogger))
+		require.NotNil(t, cl)
+
+		err := cl.Start(ctx)
+		require.NoError(t, err)
+
+		err = cl.(*cluster).dmap.Put(ctx, composeKey(namespaceGrains, "bad-grain"), []byte("invalid-grain"))
+		require.NoError(t, err)
+
+		grains, err := cl.Grains(ctx, time.Second)
+		require.Error(t, err)
+		require.Nil(t, grains)
+
+		require.NoError(t, cl.Stop(ctx))
+		provider.AssertExpectations(t)
+	})
+	t.Run("With Actors ignores missing entry during scan", func(t *testing.T) {
+		ctx := t.Context()
+
+		nodePorts := dynaport.Get(3)
+		discoveryPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		addrs := []string{
+			fmt.Sprintf("127.0.0.1:%d", discoveryPort),
+		}
+
+		provider := new(mocksdiscovery.Provider)
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		host := "127.0.0.1"
+		hostNode := discovery.Node{
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: discoveryPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
+		}
+
+		cl := New("test", provider, &hostNode, WithLogger(log.DiscardLogger))
+		require.NotNil(t, cl)
+
+		err := cl.Start(ctx)
+		require.NoError(t, err)
+
+		actorName := uuid.NewString()
+		actor := &internalpb.Actor{Address: &goaktpb.Address{Name: actorName}}
+		err = cl.PutActor(ctx, actor)
+		require.NoError(t, err)
+
+		missingKey := composeKey(namespaceActors, actorName)
+		cl.(*cluster).dmap = MockFailingGetDMap{DMap: cl.(*cluster).dmap, key: missingKey}
+
+		actors, err := cl.Actors(ctx, time.Second)
+		require.NoError(t, err)
+		require.Empty(t, actors)
+
+		require.NoError(t, cl.Stop(ctx))
+		provider.AssertExpectations(t)
+	})
+	t.Run("With Actors returns decode error during scan", func(t *testing.T) {
+		ctx := t.Context()
+
+		nodePorts := dynaport.Get(3)
+		discoveryPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		addrs := []string{
+			fmt.Sprintf("127.0.0.1:%d", discoveryPort),
+		}
+
+		provider := new(mocksdiscovery.Provider)
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		host := "127.0.0.1"
+		hostNode := discovery.Node{
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: discoveryPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
+		}
+
+		cl := New("test", provider, &hostNode, WithLogger(log.DiscardLogger))
+		require.NotNil(t, cl)
+
+		err := cl.Start(ctx)
+		require.NoError(t, err)
+
+		err = cl.(*cluster).dmap.Put(ctx, composeKey(namespaceActors, "bad-actor"), []byte("invalid-actor"))
+		require.NoError(t, err)
+
+		actors, err := cl.Actors(ctx, time.Second)
+		require.Error(t, err)
+		require.Nil(t, actors)
+
+		require.NoError(t, cl.Stop(ctx))
+		provider.AssertExpectations(t)
+	})
 }
 
 func TestMultipleNodes(t *testing.T) {
