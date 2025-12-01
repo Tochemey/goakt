@@ -385,10 +385,15 @@ func (x *cluster) Actors(ctx context.Context, timeout time.Duration) ([]*interna
 	}
 	defer scanner.Close()
 
+	rrKey := composeKey(namespaceActors, ActorsRoundRobinKey)
 	actors := make([]*internalpb.Actor, 0)
 	for scanner.Next() {
 		key := scanner.Key()
 		if !hasNamespace(key, namespaceActors) {
+			continue
+		}
+		if key == rrKey {
+			// skip the round-robin counter entry which is not actor metadata
 			continue
 		}
 
@@ -511,10 +516,15 @@ func (x *cluster) Grains(ctx context.Context, timeout time.Duration) ([]*interna
 	}
 	defer scanner.Close()
 
+	rrKey := composeKey(namespaceGrains, GrainsRoundRobinKey)
 	grains := make([]*internalpb.Grain, 0)
 	for scanner.Next() {
 		key := scanner.Key()
 		if !hasNamespace(key, namespaceGrains) {
+			continue
+		}
+		if key == rrKey {
+			// skip the round-robin counter entry which is not grain metadata
 			continue
 		}
 
