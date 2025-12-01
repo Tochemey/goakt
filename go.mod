@@ -14,10 +14,10 @@ require (
 	github.com/hashicorp/go-sockaddr v1.0.7
 	github.com/hashicorp/memberlist v0.5.3
 	github.com/kapetan-io/tackle v0.13.0
-	github.com/klauspost/compress v1.18.1
+	github.com/klauspost/compress v1.18.2
 	github.com/nats-io/nats-server/v2 v2.12.2
 	github.com/nats-io/nats.go v1.47.0
-	github.com/redis/go-redis/v9 v9.17.1
+	github.com/redis/go-redis/v9 v9.17.2
 	github.com/reugn/go-quartz v0.15.2
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go v0.40.0
@@ -138,7 +138,7 @@ require (
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55 // indirect
 	github.com/sean-/seed v0.0.0-20170313163322-e2103e2c3529 // indirect
-	github.com/shirou/gopsutil/v4 v4.25.10 // indirect
+	github.com/shirou/gopsutil/v4 v4.25.11 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/stretchr/objx v0.5.3 // indirect
 	github.com/tidwall/btree v1.8.1 // indirect
