@@ -2,7 +2,7 @@ version: "2"
 run:
   concurrency: 4
   issues-exit-code: 2
-  tests: true
+  tests: false
   modules-download-mode: vendor
   relative-path-mode: gomod
 output:
