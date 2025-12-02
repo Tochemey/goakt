@@ -141,8 +141,8 @@ type PID struct {
 
 	remoting remote.Remoting
 
-	startedAt  atomic.Int64
-	stateFlags atomic.Uint32
+	startedAt atomic.Int64
+	state     atomic.Uint32
 
 	// the list of dependencies
 	dependencies *collection.Map[string, extension.Dependency]
@@ -190,7 +190,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	pid.reinstateCount.Store(0)
 	pid.initTimeout.Store(DefaultInitTimeout)
 	pid.processing.Store(int32(idle))
-	pid.toggleFlag(isRelocatableFlag, true)
+	pid.flipState(relocationState, true)
 
 	for _, opt := range opts {
 		opt(pid)
@@ -437,16 +437,16 @@ func (pid *PID) Stop(ctx context.Context, cid *PID) error {
 // when the actor is stopped or not started at all
 func (pid *PID) IsRunning() bool {
 	return pid != nil &&
-		pid.isFlagEnabled(runningFlag) &&
-		!pid.isFlagEnabled(stoppingFlag) &&
-		!pid.isFlagEnabled(passivatingFlag) &&
-		!pid.isFlagEnabled(suspendedFlag)
+		pid.isStateSet(runningState) &&
+		!pid.isStateSet(stoppingState) &&
+		!pid.isStateSet(passivatingState) &&
+		!pid.isStateSet(suspendedState)
 }
 
 // IsSuspended returns true when the actor is suspended
 // A suspended actor is a faulty actor
 func (pid *PID) IsSuspended() bool {
-	return pid.isFlagEnabled(suspendedFlag)
+	return pid.isStateSet(suspendedState)
 }
 
 // IsSingleton returns true when the actor is a singleton.
@@ -460,7 +460,7 @@ func (pid *PID) IsSuspended() bool {
 // When the oldest node leaves the cluster unexpectedly, the singleton is restarted on the new oldest node.
 // This is useful for managing shared resources or coordinating tasks that should be handled by a single actor.
 func (pid *PID) IsSingleton() bool {
-	return pid.isFlagEnabled(isSingletonFlag)
+	return pid.isStateSet(singletonState)
 }
 
 // IsRelocatable determines whether the actor can be relocated to another node when its host node shuts down unexpectedly.
@@ -469,13 +469,13 @@ func (pid *PID) IsSingleton() bool {
 //
 // Returns true if relocation is allowed, and false if relocation is disabled.
 func (pid *PID) IsRelocatable() bool {
-	return pid.isFlagEnabled(isRelocatableFlag)
+	return pid.isStateSet(relocationState)
 }
 
 // IsStopping reports whether the actor is in the process of stopping.
 // It returns true once a stop has been initiated—explicitly or via passivation—and false otherwise.
 func (pid *PID) IsStopping() bool {
-	return pid.isFlagEnabled(stoppingFlag) || pid.isFlagEnabled(passivatingFlag)
+	return pid.isStateSet(stoppingState) || pid.isStateSet(passivatingState)
 }
 
 // PassivationStrategy returns the given actor's passivation strategy.
@@ -594,13 +594,13 @@ func (pid *PID) Restart(ctx context.Context) error {
 	// wait for the child actor to spawn
 	if err := eg.Wait(); err != nil {
 		// disable messages processing
-		pid.toggleFlag(stoppingFlag, true)
-		pid.toggleFlag(runningFlag, false)
+		pid.flipState(stoppingState, true)
+		pid.flipState(runningState, false)
 		return fmt.Errorf("actor=(%s) failed to restart: %w", pid.Name(), err)
 	}
 
 	pid.processing.Store(idle)
-	pid.toggleFlag(suspendedFlag, false)
+	pid.flipState(suspendedState, false)
 	pid.startSupervision()
 	pid.startPassivation()
 
@@ -1239,13 +1239,13 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 	pid.stopLocker.Lock()
 	pid.logger.Infof("shutdown process has started for actor=(%s)...", pid.Name())
 
-	if !pid.isFlagEnabled(runningFlag) {
+	if !pid.isStateSet(runningState) {
 		pid.logger.Infof("actor=%s is offline. Maybe it has been passivated or stopped already", pid.Name())
 		pid.stopLocker.Unlock()
 		return nil
 	}
 
-	pid.toggleFlag(stoppingFlag, true)
+	pid.flipState(stoppingState, true)
 	pid.unregisterPassivation()
 
 	if err := pid.doStop(ctx); err != nil {
@@ -1478,7 +1478,7 @@ func (pid *PID) init(ctx context.Context) error {
 		return e
 	}
 
-	pid.toggleFlag(runningFlag, true)
+	pid.flipState(runningState, true)
 	pid.logger.Infof("%s successfully started.", pid.Name())
 
 	if pid.eventsStream != nil {
@@ -1506,23 +1506,23 @@ func (pid *PID) reset() {
 	pid.reinstateCount.Store(0)
 	pid.restartCount.Store(0)
 	pid.startedAt.Store(0)
-	pid.toggleFlag(runningFlag, false)
-	pid.toggleFlag(stoppingFlag, false)
-	pid.toggleFlag(suspendedFlag, false)
+	pid.flipState(runningState, false)
+	pid.flipState(stoppingState, false)
+	pid.flipState(suspendedState, false)
 	if pid.supervisor != nil {
 		if sys, ok := pid.actorSystem.(*actorSystem); !ok || pid.supervisor != sys.defaultSupervisor {
 			pid.supervisor.Reset()
 		}
 	}
 	pid.mailbox.Dispose()
-	pid.toggleFlag(isSingletonFlag, false)
-	pid.toggleFlag(isRelocatableFlag, true)
+	pid.flipState(singletonState, false)
+	pid.flipState(relocationState, true)
 	if pid.dependencies != nil {
 		pid.dependencies.Reset()
 	}
-	pid.toggleFlag(passivationPausedFlag, false)
-	pid.toggleFlag(passivatingFlag, false)
-	pid.toggleFlag(passivationSkipNextFlag, false)
+	pid.flipState(passivationPausedState, false)
+	pid.flipState(passivatingState, false)
+	pid.flipState(passivationSkipNextState, false)
 }
 
 // freeWatchers releases all the actors watching this actor
@@ -1641,26 +1641,26 @@ func (pid *PID) tryPassivation(reason string) bool {
 		}
 	}
 
-	if pid.compareAndSwapFlag(passivationSkipNextFlag, true, false) {
+	if pid.compareAndSwapState(passivationSkipNextState, true, false) {
 		pid.logger.Debugf("passivation decision skipped once for %s due to recent reinstate", pid.Name())
 		return false
 	}
 
-	if pid.isFlagEnabled(stoppingFlag) ||
-		pid.isFlagEnabled(suspendedFlag) ||
-		pid.isFlagEnabled(passivationPausedFlag) {
+	if pid.isStateSet(stoppingState) ||
+		pid.isStateSet(suspendedState) ||
+		pid.isStateSet(passivationPausedState) {
 		pid.logger.Infof("No need to passivate actor=%s", pid.Name())
 		return false
 	}
 
 	pid.logger.Infof("passivation mode has been triggered for actor=%s (%s)...", pid.Name(), reason)
-	pid.toggleFlag(passivatingFlag, true)
-	defer pid.toggleFlag(passivatingFlag, false)
+	pid.flipState(passivatingState, true)
+	defer pid.flipState(passivatingState, false)
 
 	pid.stopLocker.Lock()
 	defer pid.stopLocker.Unlock()
 
-	if pid.compareAndSwapFlag(passivationSkipNextFlag, true, false) {
+	if pid.compareAndSwapState(passivationSkipNextState, true, false) {
 		pid.logger.Debugf("passivation decision aborted for %s due to reinstate observed during critical section", pid.Name())
 		return false
 	}
@@ -1718,7 +1718,7 @@ func (pid *PID) unsetBehaviorStacked() {
 // doStop stops the actor
 func (pid *PID) doStop(ctx context.Context) error {
 	defer func() {
-		pid.toggleFlag(runningFlag, false)
+		pid.flipState(runningState, false)
 		pid.reset()
 	}()
 
@@ -1867,7 +1867,7 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 		// temporarily "not running" to observers. For other directives, keep suspension semantics.
 		if directive == ResumeDirective {
 			// Always skip the next passivation decision once to avoid immediate stop after resume.
-			pid.toggleFlag(passivationSkipNextFlag, true)
+			pid.flipState(passivationSkipNextState, true)
 			// If the actor was already suspended due to a prior signal, reinstate immediately.
 			if pid.IsSuspended() {
 				pid.doReinstate()
@@ -2120,7 +2120,7 @@ func (pid *PID) childAddress(name string) *address.Address {
 // suspend puts the actor in a suspension mode.
 func (pid *PID) suspend(reason string) {
 	pid.logger.Infof("%s going into suspension mode", pid.Name())
-	pid.toggleFlag(suspendedFlag, true)
+	pid.flipState(suspendedState, true)
 	// increment suspension count
 	pid.failureCount.Inc()
 	// pause passivation loop
@@ -2171,12 +2171,12 @@ func (pid *PID) doReinstate() {
 	if pid.IsRunning() && !pid.IsSuspended() {
 		return
 	}
-	pid.toggleFlag(suspendedFlag, false)
+	pid.flipState(suspendedState, false)
 	// increment reinstate count
 	pid.reinstateCount.Inc()
 	// Guard against a pending passivation path that might have just crossed the threshold
 	// but hasn't yet checked suspension state. Skip the next passivation decision once.
-	pid.toggleFlag(passivationSkipNextFlag, true)
+	pid.flipState(passivationSkipNextState, true)
 	// Treat reinstate as activity so any freshly registered passivation deadline
 	// doesn't immediately fire before the skip guard can cancel the in-flight attempt.
 	pid.markActivity(time.Now())
@@ -2212,7 +2212,7 @@ func (pid *PID) pausePassivation() {
 	if pid.passivationManager != nil {
 		pid.passivationManager.Pause(pid)
 	}
-	pid.toggleFlag(passivationPausedFlag, true)
+	pid.flipState(passivationPausedState, true)
 }
 
 // resumePassivation resumes a paused passivation
@@ -2221,8 +2221,8 @@ func (pid *PID) resumePassivation() {
 		return
 	}
 
-	if pid.isFlagEnabled(passivationPausedFlag) {
-		pid.toggleFlag(passivationPausedFlag, false)
+	if pid.isStateSet(passivationPausedState) {
+		pid.flipState(passivationPausedState, false)
 		if pid.passivationManager != nil {
 			if pid.passivationManager.Resume(pid) {
 				return
@@ -2250,7 +2250,7 @@ func (pid *PID) healthCheck(ctx context.Context) error {
 	logger := pid.logger
 	logger.Infof("%s readiness probe...", pid.Name())
 
-	if pid.isFlagEnabled(isSystemFlag) {
+	if pid.isStateSet(systemState) {
 		logger.Debugf("%s is a system actor. No need for readiness probe.", pid.Name())
 		return nil
 	}

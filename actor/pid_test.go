@@ -5164,10 +5164,10 @@ func TestReinstateAvoidsPassivationRace(t *testing.T) {
 	pid.fieldsLocker.Unlock()
 
 	pid.latestReceiveTime.Store(time.Now().Add(-time.Minute))
-	pid.toggleFlag(passivationSkipNextFlag, false)
-	pid.toggleFlag(passivatingFlag, false)
-	pid.toggleFlag(suspendedFlag, false)
-	pid.toggleFlag(runningFlag, true)
+	pid.flipState(passivationSkipNextState, false)
+	pid.flipState(passivatingState, false)
+	pid.flipState(suspendedState, false)
+	pid.flipState(runningState, true)
 
 	pid.stopLocker.Lock()
 	locked := true
@@ -5185,13 +5185,13 @@ func TestReinstateAvoidsPassivationRace(t *testing.T) {
 	}()
 
 	require.Eventually(t, func() bool {
-		return pid.isFlagEnabled(passivatingFlag)
+		return pid.isStateSet(passivatingState)
 	}, time.Second, 5*time.Millisecond)
 
 	// Simulate a reinstate arriving after the initial skip check but before doStop executes.
-	pid.toggleFlag(suspendedFlag, true)
+	pid.flipState(suspendedState, true)
 	pid.doReinstate()
-	require.True(t, pid.isFlagEnabled(passivationSkipNextFlag), "reinstate should set skip flag")
+	require.True(t, pid.isStateSet(passivationSkipNextState), "reinstate should set skip flag")
 
 	pid.stopLocker.Unlock()
 	locked = false
@@ -5222,16 +5222,16 @@ func TestPIDTryPassivationSkipsWhenSystemStopping(t *testing.T) {
 
 func TestPIDTryPassivationSkipsWhenSkipFlagSet(t *testing.T) {
 	pid := MockPassivationPID(t, "skip-flag", passivation.NewTimeBasedStrategy(time.Second))
-	pid.toggleFlag(passivationSkipNextFlag, true)
+	pid.flipState(passivationSkipNextState, true)
 
-	require.True(t, pid.isFlagEnabled(passivationSkipNextFlag))
+	require.True(t, pid.isStateSet(passivationSkipNextState))
 	require.False(t, pid.tryPassivation("skip"))
-	require.False(t, pid.isFlagEnabled(passivationSkipNextFlag))
+	require.False(t, pid.isStateSet(passivationSkipNextState))
 }
 
 func TestPIDTryPassivationSkipsWhenStoppingFlagRaised(t *testing.T) {
 	pid := MockPassivationPID(t, "stopping-flag", passivation.NewTimeBasedStrategy(time.Second))
-	pid.toggleFlag(stoppingFlag, true)
+	pid.flipState(stoppingState, true)
 
 	require.False(t, pid.tryPassivation("already stopping"))
 }

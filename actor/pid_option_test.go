@@ -88,19 +88,19 @@ func TestPIDOptions(t *testing.T) {
 	t.Run("AsSingleton", func(t *testing.T) {
 		pid := &PID{}
 		asSingleton()(pid)
-		assert.True(t, pid.isFlagEnabled(isSingletonFlag))
+		assert.True(t, pid.isStateSet(singletonState))
 	})
 
 	t.Run("withRelocationDisabled", func(t *testing.T) {
 		pid := &PID{}
 		withRelocationDisabled()(pid)
-		assert.False(t, pid.isFlagEnabled(isRelocatableFlag))
+		assert.False(t, pid.isStateSet(relocationState))
 	})
 
 	t.Run("AsSystemActor", func(t *testing.T) {
 		pid := &PID{}
 		asSystemActor()(pid)
-		assert.True(t, pid.isFlagEnabled(isSystemFlag))
+		assert.True(t, pid.isStateSet(systemState))
 	})
 
 	t.Run("withMetricProvider", func(t *testing.T) {

@@ -24,80 +24,80 @@
 
 package actor
 
-// pidFlag models the bitmask used to track the PID's internal state. Instead of
+// pidState models the bitmask used to track the PID's internal state. Instead of
 // sprinkling multiple atomic.Bool fields across the struct (which wastes cache
 // lines and padding), we flip individual bits inside a single atomic.Uint32.
 // Each flag represents a mutually independent property—e.g. "running" and
 // "suspended" should never be true at the same time—but the combined value lets
 // us toggle them efficiently.
-type pidFlag uint32
+type pidState uint32
 
 // PID flag definitions. Each flag occupies a dedicated bit inside PID.stateFlags.
 //
-//   - runningFlag:     PID has completed initialization and may process messages.
-//   - stoppingFlag:    PID is in the middle of Shutdown/Stop/Passivation.
-//   - suspendedFlag:   PID has been suspended by the supervisor.
-//   - passivatingFlag: PID is currently executing the passivation path.
-//   - passivationPausedFlag: Passivation is temporarily paused (e.g. during Watch/Reinstate).
-//   - passivationSkipNextFlag: One-shot guard to skip the next passivation decision.
-//   - isSingletonFlag: PID represents a cluster singleton.
-//   - isRelocatableFlag: PID may be relocated to another node (cluster mode).
-//   - isSystemFlag:    PID is a system actor (guardian, topic actor, etc.).
+//   - runningState:     PID has completed initialization and may process messages.
+//   - stoppingState:    PID is in the middle of Shutdown/Stop/Passivation.
+//   - suspendedState:   PID has been suspended by the supervisor.
+//   - passivatingState: PID is currently executing the passivation path.
+//   - passivationPausedState: Passivation is temporarily paused (e.g. during Watch/Reinstate).
+//   - passivationSkipNextState: One-shot guard to skip the next passivation decision.
+//   - singletonState: PID represents a cluster singleton.
+//   - relocationState: PID may be relocated to another node (cluster mode).
+//   - systemState:    PID is a system actor (guardian, topic actor, etc.).
 const (
-	runningFlag pidFlag = 1 << iota
-	stoppingFlag
-	suspendedFlag
-	passivatingFlag
-	passivationPausedFlag
-	passivationSkipNextFlag
-	isSingletonFlag
-	isRelocatableFlag
-	isSystemFlag
+	runningState pidState = 1 << iota
+	stoppingState
+	suspendedState
+	passivatingState
+	passivationPausedState
+	passivationSkipNextState
+	singletonState
+	relocationState
+	systemState
 )
 
-func (pid *PID) isFlagEnabled(flag pidFlag) bool {
-	return pid.stateFlags.Load()&uint32(flag) != 0
+func (pid *PID) isStateSet(state pidState) bool {
+	return pid.state.Load()&uint32(state) != 0
 }
 
-// toggleFlag sets or clears the given flag.
+// flipState sets or clears the given flag.
 // It uses a CAS loop to avoid races when multiple goroutines try to update
 // different PID state bits at the same time. If the flag already matches the
 // requested state we exit early to avoid an unnecessary write.
-func (pid *PID) toggleFlag(flag pidFlag, enabled bool) {
+func (pid *PID) flipState(state pidState, enabled bool) {
 	for {
-		state := pid.stateFlags.Load()
+		pidState := pid.state.Load()
 		var desired uint32
 		if enabled {
-			desired = state | uint32(flag)
+			desired = pidState | uint32(state)
 		} else {
-			desired = state &^ uint32(flag)
+			desired = pidState &^ uint32(state)
 		}
-		if desired == state {
+		if desired == pidState {
 			return
 		}
-		if pid.stateFlags.CompareAndSwap(state, desired) {
+		if pid.state.CompareAndSwap(pidState, desired) {
 			return
 		}
 	}
 }
 
-// compareAndSwapFlag changes the flag only when the current state matches `old`.
+// compareAndSwapState changes the state only when the current state matches `old`.
 // This is useful for one-shot guards—e.g. passivationSkipNext—which should only
 // flip when the caller knows the previous value. Returns true if the swap happened.
-func (pid *PID) compareAndSwapFlag(flag pidFlag, prev, next bool) bool {
+func (pid *PID) compareAndSwapState(state pidState, prev, next bool) bool {
 	for {
-		state := pid.stateFlags.Load()
-		has := state&uint32(flag) != 0
+		pidState := pid.state.Load()
+		has := pidState&uint32(state) != 0
 		if has != prev {
 			return false
 		}
 		var desired uint32
 		if next {
-			desired = state | uint32(flag)
+			desired = pidState | uint32(state)
 		} else {
-			desired = state &^ uint32(flag)
+			desired = pidState &^ uint32(state)
 		}
-		if pid.stateFlags.CompareAndSwap(state, desired) {
+		if pid.state.CompareAndSwap(pidState, desired) {
 			return true
 		}
 	}
