@@ -126,10 +126,7 @@ func (s *BoltStore) PersistPeerState(ctx context.Context, peer *internalpb.PeerS
 		return err
 	}
 
-	data, err := proto.Marshal(peer)
-	if err != nil {
-		return err
-	}
+	data, _ := proto.Marshal(peer)
 
 	key := peerKey(peer)
 

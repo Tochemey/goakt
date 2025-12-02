@@ -157,3 +157,37 @@ func TestConfigOptions(t *testing.T) {
 		})
 	}
 }
+
+func TestConfigOptionsIgnoreZeroOrNil(t *testing.T) {
+	cfg := defaultConfig()
+	original := *cfg
+
+	WithLogger(nil)(cfg)
+	WithPartitioner(nil)(cfg)
+	WithShardCount(0)(cfg)
+	WithReplicasCount(0)(cfg)
+	WithMinimumMembersQuorum(0)(cfg)
+	WithMembersWriteQuorum(0)(cfg)
+	WithMembersReadQuorum(0)(cfg)
+	WithDataTableSize(0)(cfg)
+	WithWriteTimeout(0)(cfg)
+	WithReadTimeout(0)(cfg)
+	WithShutdownTimeout(0)(cfg)
+	WithBootstrapTimeout(0)(cfg)
+	WithRoutingTableInterval(0)(cfg)
+
+	assert.Equal(t, original.logger, cfg.logger)
+	assert.Equal(t, original.shardHasher, cfg.shardHasher)
+	assert.Equal(t, original.shardCount, cfg.shardCount)
+	assert.Equal(t, original.replicasCount, cfg.replicasCount)
+	assert.Equal(t, original.minimumMembersQuorum, cfg.minimumMembersQuorum)
+	assert.Equal(t, original.membersWriteQuorum, cfg.membersWriteQuorum)
+	assert.Equal(t, original.membersReadQuorum, cfg.membersReadQuorum)
+	assert.Equal(t, original.tableSize, cfg.tableSize)
+	assert.Equal(t, original.writeTimeout, cfg.writeTimeout)
+	assert.Equal(t, original.readTimeout, cfg.readTimeout)
+	assert.Equal(t, original.shutdownTimeout, cfg.shutdownTimeout)
+	assert.Equal(t, original.bootstrapTimeout, cfg.bootstrapTimeout)
+	assert.Equal(t, original.routingTableInterval, cfg.routingTableInterval)
+	assert.Nil(t, cfg.tlsInfo)
+}

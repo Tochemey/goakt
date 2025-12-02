@@ -59,3 +59,32 @@ func TestMemoryStore(t *testing.T) {
 
 	require.NoError(t, store.Close())
 }
+
+func TestMemoryPersistPeerStateWhenNil(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := context.Background()
+
+	err := store.PersistPeerState(ctx, nil)
+	require.NoError(t, err)
+}
+
+func TestMemoryStoreClose(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := context.Background()
+
+	peerState := &internalpb.PeerState{
+		Host:         "127.0.0.1",
+		RemotingPort: 2280,
+		PeersPort:    2281,
+		Actors:       nil,
+	}
+
+	require.NoError(t, store.PersistPeerState(ctx, peerState))
+
+	key := "127.0.0.1:2281"
+	actual, ok := store.GetPeerState(ctx, key)
+	require.True(t, ok)
+	assert.True(t, proto.Equal(peerState, actual))
+
+	require.NoError(t, store.Close())
+}

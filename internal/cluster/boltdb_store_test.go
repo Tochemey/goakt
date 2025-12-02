@@ -29,8 +29,13 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"path/filepath"
+	"reflect"
 	"testing"
+	"time"
+	"unsafe"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	bbolt "go.etcd.io/bbolt"
 
@@ -150,8 +155,183 @@ func TestBoltDBStoreMissingBucket(t *testing.T) {
 	require.Error(t, store.DeletePeerState(context.Background(), peerAddr))
 }
 
+func TestNewBoltStoreMkdirError(t *testing.T) {
+	t.Setenv("HOME", "/dev/null")
+	t.Setenv("USERPROFILE", "/dev/null")
+
+	store, err := NewBoltStore()
+	require.Error(t, err)
+	require.Nil(t, store)
+}
+
+func TestNewBoltStoreDefaultBoltPathError(t *testing.T) {
+	// Attempt to force os.UserHomeDir to fail by clearing home-related env vars
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	t.Setenv("HOMEDRIVE", "")
+	t.Setenv("HOMEPATH", "")
+	t.Setenv("GODEBUG", "osusergo=1")
+
+	store, err := NewBoltStore()
+	if err == nil {
+		t.Skip("os.UserHomeDir resolved successfully; cannot force failure on this platform")
+	}
+	require.Error(t, err)
+	require.Nil(t, store)
+}
+
+func TestNewBoltStoreOpenError(t *testing.T) {
+	useTempHome(t)
+
+	original := defaultBoltOptions
+	defaultBoltOptions = &bbolt.Options{Timeout: boltTimeout, ReadOnly: true}
+	defer func() { defaultBoltOptions = original }()
+
+	store, err := NewBoltStore()
+	require.Error(t, err)
+	require.Nil(t, store)
+}
+
+func TestNewBoltStoreBucketInitializationError(t *testing.T) {
+	useTempHome(t)
+
+	// ensure predictable path
+	boltPathCounter.Store(0)
+	path, err := defaultBoltPath()
+	require.NoError(t, err)
+
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+
+	// create a bolt file so read-only open succeeds
+	db, err := bbolt.Open(path, boltFileMode, defaultBoltOptions)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+
+	// force read-only to trigger bucket creation failure
+	original := defaultBoltOptions
+	optsCopy := *defaultBoltOptions
+	optsCopy.ReadOnly = true
+	defaultBoltOptions = &optsCopy
+	defer func() { defaultBoltOptions = original }()
+
+	boltPathCounter.Store(0)
+	store, err := NewBoltStore()
+	require.Error(t, err)
+	require.Nil(t, store)
+}
+
+func TestBoltDBStoreGetPeerStateUnmarshalError(t *testing.T) {
+	useTempHome(t)
+
+	store, err := NewBoltStore()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+
+	impl := store.(*BoltStore)
+	require.NoError(t, impl.db.Update(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket(impl.bucket)
+		require.NotNil(t, bucket)
+		return bucket.Put([]byte("bad-peer"), []byte("not-proto"))
+	}))
+
+	state, ok := store.GetPeerState(context.Background(), "bad-peer")
+	require.False(t, ok)
+	require.Nil(t, state)
+}
+
+func TestBoltDBStoreCloseRemoveError(t *testing.T) {
+	useTempHome(t)
+
+	store, err := NewBoltStore()
+	require.NoError(t, err)
+
+	impl := store.(*BoltStore)
+	origPath := impl.path
+	impl.path = "/"
+
+	err = impl.Close()
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "/")
+
+	_ = os.Remove(origPath)
+}
+
+func TestBoltDBStoreCloseJoinErrors(t *testing.T) {
+	useTempHome(t)
+
+	store, err := NewBoltStore()
+	require.NoError(t, err)
+
+	impl := store.(*BoltStore)
+	origPath := impl.path
+	impl.path = "/"
+
+	fileField := reflect.ValueOf(impl.db).Elem().FieldByName("file")
+	filePtr := (**os.File)(unsafe.Pointer(fileField.UnsafeAddr()))
+	*filePtr = os.NewFile(^uintptr(0), impl.path)
+
+	err = impl.Close()
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "/")
+
+	_ = os.Remove(origPath)
+}
+
+func TestBoltDBStoreCloseRemoveErrNotExist(t *testing.T) {
+	useTempHome(t)
+
+	store, err := NewBoltStore()
+	require.NoError(t, err)
+	impl := store.(*BoltStore)
+
+	require.NoError(t, impl.db.Close())
+	impl.closed.Store(false)
+
+	impl.path = filepath.Join(t.TempDir(), "does-not-exist")
+
+	err = impl.Close()
+	require.NoError(t, err)
+}
+
+func TestHasNamespace(t *testing.T) {
+	actorKey := composeKey(namespaceActors, "actor-1")
+	assert.True(t, hasNamespace(actorKey, namespaceActors))
+	assert.False(t, hasNamespace(actorKey, namespaceGrains))
+}
+
+func TestContextErr(t *testing.T) {
+	var mockContext *MockContext
+	mockContext = nil
+	require.Nil(t, contextErr(mockContext))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	require.NoError(t, contextErr(ctx))
+
+	cancel()
+	require.ErrorIs(t, contextErr(ctx), context.Canceled)
+}
 func useTempHome(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("HOME", root)
 	t.Setenv("USERPROFILE", root)
+}
+
+type MockContext struct{}
+
+var _ context.Context = (*MockContext)(nil)
+
+func (m *MockContext) Deadline() (deadline time.Time, ok bool) {
+	return time.Time{}, false
+}
+
+func (m *MockContext) Done() <-chan struct{} {
+	return nil
+}
+
+func (m *MockContext) Err() error {
+	return nil
+}
+
+func (m *MockContext) Value(key any) any { //nolint
+	return nil
 }
