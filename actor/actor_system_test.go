@@ -5956,6 +5956,43 @@ func TestRemotingSpawn(t *testing.T) {
 
 		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
 	})
+	t.Run("With dependency reflection failure", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		ports := dynaport.Get(1)
+		remotingPort := ports[0]
+		host := "127.0.0.1"
+
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		require.NoError(t, err)
+
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
+
+		require.NoError(t, sys.Register(ctx, &exchanger{}))
+
+		remoting := remote.NewRemoting()
+		t.Cleanup(remoting.Close)
+		role := "role"
+
+		request := &remote.SpawnRequest{
+			Name: "actorName",
+			Kind: "actor.exchanger",
+			Role: &role,
+			Dependencies: []extension.Dependency{
+				NewMockDependency("dep-id", "test", "test"),
+			},
+		}
+
+		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
+		require.Error(t, err)
+		assert.Equal(t, connect.CodeInternal, connect.CodeOf(err))
+		assert.ErrorContains(t, err, gerrors.ErrDependencyTypeNotRegistered.Error())
+	})
 	t.Run("When remoting is not available", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
@@ -7107,6 +7144,84 @@ func TestActorSystemRun(t *testing.T) {
 	}
 }
 
+func TestGetNodeMetric(t *testing.T) {
+	t.Run("With mismatched node address", func(t *testing.T) {
+		ctx := context.TODO()
+		discoveryPort := 19001
+		peersPort := 19002
+		remotingPort := 19003
+		host := "127.0.0.1"
+
+		provider := mocksdiscovery.NewProvider(t)
+
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+			WithCluster(
+				NewClusterConfig().
+					WithKinds(new(MockActor)).
+					WithDiscovery(provider).
+					WithDiscoveryPort(discoveryPort).
+					WithPeersPort(peersPort),
+			),
+		)
+		require.NoError(t, err)
+
+		request := connect.NewRequest(&internalpb.GetNodeMetricRequest{
+			NodeAddress: net.JoinHostPort(host, strconv.Itoa(remotingPort+1)),
+		})
+
+		resp, err := sys.(*actorSystem).GetNodeMetric(ctx, request)
+		require.Error(t, err)
+		assert.Nil(t, resp)
+
+		var connectErr *connect.Error
+		require.True(t, errors.As(err, &connectErr))
+		assert.Equal(t, connect.CodeInvalidArgument, connectErr.Code())
+		assert.ErrorContains(t, err, gerrors.ErrInvalidHost.Error())
+	})
+}
+
+func TestGetKinds(t *testing.T) {
+	t.Run("With mismatched node address", func(t *testing.T) {
+		ctx := context.TODO()
+		discoveryPort := 19101
+		peersPort := 19102
+		remotingPort := 19103
+		host := "127.0.0.1"
+
+		provider := mocksdiscovery.NewProvider(t)
+
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+			WithCluster(
+				NewClusterConfig().
+					WithKinds(new(MockActor)).
+					WithDiscovery(provider).
+					WithDiscoveryPort(discoveryPort).
+					WithPeersPort(peersPort),
+			),
+		)
+		require.NoError(t, err)
+
+		request := connect.NewRequest(&internalpb.GetKindsRequest{
+			NodeAddress: net.JoinHostPort(host, strconv.Itoa(remotingPort+1)),
+		})
+
+		resp, err := sys.(*actorSystem).GetKinds(ctx, request)
+		require.Error(t, err)
+		assert.Nil(t, resp)
+
+		var connectErr *connect.Error
+		require.True(t, errors.As(err, &connectErr))
+		assert.Equal(t, connect.CodeInvalidArgument, connectErr.Code())
+		assert.ErrorContains(t, err, gerrors.ErrInvalidHost.Error())
+	})
+}
+
 func TestPeers(t *testing.T) {
 	t.Run("Happy path", func(t *testing.T) {
 		ctx := t.Context()
@@ -7209,6 +7324,30 @@ func TestPeers(t *testing.T) {
 		require.Error(t, err)
 		assert.ErrorIs(t, err, assert.AnError)
 		require.Empty(t, peers)
+	})
+	t.Run("When cluster is not enabled", func(t *testing.T) {
+		ctx := t.Context()
+		logger := log.DiscardLogger
+
+		actorSystem, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+		)
+		require.NoError(t, err)
+
+		// start the actor system
+		err = actorSystem.Start(ctx)
+		require.NoError(t, err)
+
+		pause.For(time.Second)
+
+		peers, err := actorSystem.Peers(ctx, time.Second)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, gerrors.ErrClusterDisabled)
+		require.Empty(t, peers)
+
+		err = actorSystem.Stop(ctx)
+		assert.NoError(t, err)
 	})
 }
 

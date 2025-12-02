@@ -145,6 +145,47 @@ func TestSpawn(t *testing.T) {
 		)
 	})
 
+	t.Run("With Spawn an actor with invalid spawn option", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("test", WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
+
+		actor := NewMockActor()
+		pid, err := sys.Spawn(ctx, "Test", actor, WithDependencies(NewMockDependency("$omeN@me", "user", "email")))
+		require.Error(t, err)
+		assert.Nil(t, pid)
+
+		t.Cleanup(
+			func() {
+				err = sys.Stop(ctx)
+				assert.NoError(t, err)
+			},
+		)
+	})
+	t.Run("With Spawn an actor with GoAkt system name", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("test", WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
+
+		actor := NewMockActor()
+		pid, err := sys.Spawn(ctx, "GoAktTest", actor)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, gerrors.ErrReservedName)
+		assert.Nil(t, pid)
+
+		t.Cleanup(
+			func() {
+				err = sys.Stop(ctx)
+				assert.NoError(t, err)
+			},
+		)
+	})
 	t.Run("With Spawn with custom mailbox", func(t *testing.T) {
 		ctx := context.TODO()
 		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))

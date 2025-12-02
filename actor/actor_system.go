@@ -3051,10 +3051,6 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 		withMetricProvider(x.metricProvider),
 	}
 
-	if err := spawnConfig.Validate(); err != nil {
-		return nil, err
-	}
-
 	// set the actor as a system actor when necessary
 	if spawnConfig.isSystem {
 		pidOpts = append(pidOpts, asSystemActor())
