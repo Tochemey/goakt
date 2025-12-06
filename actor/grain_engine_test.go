@@ -5,15 +5,21 @@ import (
 	"errors"
 	"net/http"
 	"testing"
+	"time"
 
+	"connectrpc.com/connect"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/tochemey/goakt/v3/discovery"
 	"github.com/tochemey/goakt/v3/internal/cluster"
+	"github.com/tochemey/goakt/v3/internal/internalpb"
 	mockcluster "github.com/tochemey/goakt/v3/mocks/cluster"
 	mockremote "github.com/tochemey/goakt/v3/mocks/remote"
 	"github.com/tochemey/goakt/v3/remote"
+	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
 func TestGrainIdentity_RemoteActivationOnDifferentPeer(t *testing.T) {
@@ -27,7 +33,7 @@ func TestGrainIdentity_RemoteActivationOnDifferentPeer(t *testing.T) {
 
 	cl := mockcluster.NewCluster(t)
 	rem := mockremote.NewRemoting(t)
-	client := &RemotingServiceClientStub{}
+	client := &MockRemotingServiceClient{}
 	node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
 	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
 
@@ -61,7 +67,7 @@ func TestGrainIdentity_RemoteActivationOnDifferentPeer_WithBrotliCompression(t *
 
 	cl := mockcluster.NewCluster(t)
 	rem := mockremote.NewRemoting(t)
-	client := &RemotingServiceClientStub{}
+	client := &MockRemotingServiceClient{}
 	node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
 	actorSystem := MockSimpleClusterReadyActorSystem(rem, cl, node)
 
@@ -101,7 +107,7 @@ func TestGrainIdentity_RemoteActivationOnDifferentPeer_WithZstandardCompression(
 
 	cl := mockcluster.NewCluster(t)
 	rem := mockremote.NewRemoting(t)
-	client := &RemotingServiceClientStub{}
+	client := &MockRemotingServiceClient{}
 	node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
 	actorSystem := MockSimpleClusterReadyActorSystem(rem, cl, node)
 
@@ -141,7 +147,7 @@ func TestGrainIdentity_RemoteActivationOnDifferentPeer_WithGzipCompression(t *te
 
 	cl := mockcluster.NewCluster(t)
 	rem := mockremote.NewRemoting(t)
-	client := &RemotingServiceClientStub{}
+	client := &MockRemotingServiceClient{}
 	node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
 	actorSystem := MockSimpleClusterReadyActorSystem(rem, cl, node)
 
@@ -180,7 +186,7 @@ func TestGrainIdentity_RemoteActivationErrorPropagates(t *testing.T) {
 	cl := mockcluster.NewCluster(t)
 	rem := mockremote.NewRemoting(t)
 	clientErr := errors.New("remote activate failed")
-	client := &RemotingServiceClientStub{activateErr: clientErr}
+	client := &MockRemotingServiceClient{activateErr: clientErr}
 	node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
 	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
 
@@ -242,4 +248,142 @@ func TestFindActivationPeer_ErrorsWhenRoleMissingEverywhere(t *testing.T) {
 	require.Error(t, err)
 	require.Nil(t, peer)
 	require.ErrorContains(t, err, role)
+}
+
+func TestRemoteAskGrain_InjectsContextValues(t *testing.T) {
+	ctxKey := struct{}{}
+	headerKey := "x-goakt-propagated"
+	headerVal := "abc-123"
+
+	ctx := context.WithValue(context.Background(), ctxKey, headerVal)
+	cl := mockcluster.NewCluster(t)
+	rem := mockremote.NewRemoting(t)
+	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 9000, RemotingPort: 9100}
+	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+	sys.remoteConfig = remote.NewConfig(node.Host, node.RemotingPort, remote.WithContextPropagator(&headerPropagator{headerKey: headerKey, ctxKey: ctxKey}))
+
+	grain := NewMockGrain()
+	identity := newGrainIdentity(grain, "remote-grain")
+
+	grainInfo := &internalpb.Grain{
+		GrainId: &internalpb.GrainId{Value: identity.String()},
+		Host:    "192.0.2.10",
+		Port:    16010,
+	}
+
+	client := &MockRemotingServiceClient{
+		askResponse: &testpb.Reply{Content: "ok"},
+	}
+
+	cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(grainInfo, nil)
+	rem.EXPECT().RemotingServiceClient(grainInfo.Host, int(grainInfo.Port)).Return(client)
+
+	_, err := sys.AskGrain(ctx, identity, &testpb.TestReply{}, time.Second)
+	require.NoError(t, err)
+	require.Equal(t, headerVal, client.askHeaders.Get(headerKey))
+}
+
+func TestRemoteTellGrain_InjectsContextValues(t *testing.T) {
+	ctxKey := struct{}{}
+	headerKey := "x-goakt-propagated"
+	headerVal := "tell-abc"
+
+	ctx := context.WithValue(context.Background(), ctxKey, headerVal)
+	cl := mockcluster.NewCluster(t)
+	rem := mockremote.NewRemoting(t)
+	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 9001, RemotingPort: 9101}
+	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+	sys.remoteConfig = remote.NewConfig(node.Host, node.RemotingPort, remote.WithContextPropagator(&headerPropagator{headerKey: headerKey, ctxKey: ctxKey}))
+
+	grain := NewMockGrain()
+	identity := newGrainIdentity(grain, "remote-grain-tell")
+
+	grainInfo := &internalpb.Grain{
+		GrainId: &internalpb.GrainId{Value: identity.String()},
+		Host:    "192.0.2.11",
+		Port:    16011,
+	}
+
+	client := &MockRemotingServiceClient{}
+
+	cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(grainInfo, nil)
+	rem.EXPECT().RemotingServiceClient(grainInfo.Host, int(grainInfo.Port)).Return(client)
+
+	require.NoError(t, sys.TellGrain(ctx, identity, &testpb.TestSend{}))
+	require.Equal(t, headerVal, client.tellHeaders.Get(headerKey))
+}
+
+func TestRemoteAskGrain_ExtractsContextValues(t *testing.T) {
+	ctxKey := struct{}{}
+	headerKey := "x-goakt-propagated"
+	headerVal := "inbound-ask"
+	host := "127.0.0.1"
+	port := 9102
+
+	cl := mockcluster.NewCluster(t)
+	rem := mockremote.NewRemoting(t)
+	node := &discovery.Node{Host: host, PeersPort: 9002, RemotingPort: port}
+	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+	sys.remoteConfig = remote.NewConfig(node.Host, node.RemotingPort, remote.WithContextPropagator(&headerPropagator{headerKey: headerKey, ctxKey: ctxKey}))
+	sys.remotingEnabled.Store(true)
+
+	grain := &contextEchoGrain{key: ctxKey}
+	sys.registry.Register(grain)
+	identity := newGrainIdentity(grain, "local-grain")
+	pid := newGrainPID(identity, grain, sys, newGrainConfig())
+	pid.activated.Store(true)
+	sys.grains.Set(identity.String(), pid)
+
+	msg, _ := anypb.New(&testpb.TestReply{})
+	req := connect.NewRequest(&internalpb.RemoteAskGrainRequest{
+		Grain: &internalpb.Grain{
+			GrainId: &internalpb.GrainId{Value: identity.String()},
+			Host:    host,
+			Port:    int32(port),
+		},
+		Message:        msg,
+		RequestTimeout: durationpb.New(2 * time.Second),
+	})
+	req.Header().Set(headerKey, headerVal)
+
+	_, err := sys.RemoteAskGrain(context.Background(), req)
+	require.NoError(t, err)
+	require.Equal(t, headerVal, grain.seen)
+}
+
+func TestRemoteTellGrain_ExtractsContextValues(t *testing.T) {
+	ctxKey := struct{}{}
+	headerKey := "x-goakt-propagated"
+	headerVal := "inbound-tell"
+	host := "127.0.0.1"
+	port := 9103
+
+	cl := mockcluster.NewCluster(t)
+	rem := mockremote.NewRemoting(t)
+	node := &discovery.Node{Host: host, PeersPort: 9003, RemotingPort: port}
+	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+	sys.remoteConfig = remote.NewConfig(node.Host, node.RemotingPort, remote.WithContextPropagator(&headerPropagator{headerKey: headerKey, ctxKey: ctxKey}))
+	sys.remotingEnabled.Store(true)
+
+	grain := &contextEchoGrain{key: ctxKey}
+	sys.registry.Register(grain)
+	identity := newGrainIdentity(grain, "local-grain-tell")
+	pid := newGrainPID(identity, grain, sys, newGrainConfig())
+	pid.activated.Store(true)
+	sys.grains.Set(identity.String(), pid)
+
+	msg, _ := anypb.New(&testpb.TestSend{})
+	req := connect.NewRequest(&internalpb.RemoteTellGrainRequest{
+		Grain: &internalpb.Grain{
+			GrainId: &internalpb.GrainId{Value: identity.String()},
+			Host:    host,
+			Port:    int32(port),
+		},
+		Message: msg,
+	})
+	req.Header().Set(headerKey, headerVal)
+
+	_, err := sys.RemoteTellGrain(context.Background(), req)
+	require.NoError(t, err)
+	require.Equal(t, headerVal, grain.seen)
 }

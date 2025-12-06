@@ -1860,6 +1860,14 @@ func (x *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[in
 		timeout = req.GetTimeout().AsDuration()
 	}
 
+	if propagator := x.remoteConfig.ContextPropagator(); propagator != nil {
+		var err error
+		ctx, err = propagator.Extract(ctx, request.Header())
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		}
+	}
+
 	responses := make([]*anypb.Any, 0, len(req.GetRemoteMessages()))
 	for _, message := range req.GetRemoteMessages() {
 		receiver := message.GetReceiver()
@@ -1907,6 +1915,15 @@ func (x *actorSystem) RemoteTell(ctx context.Context, request *connect.Request[i
 	}
 
 	req := request.Msg
+
+	if propagator := x.remoteConfig.ContextPropagator(); propagator != nil {
+		var err error
+		ctx, err = propagator.Extract(ctx, request.Header())
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		}
+	}
+
 	for _, message := range req.GetRemoteMessages() {
 		receiver := message.GetReceiver()
 		addr := address.From(receiver)
@@ -2623,15 +2640,20 @@ func (x *actorSystem) startRemoting(ctx context.Context) error {
 
 // setupRemoting sets the remoting service
 func (x *actorSystem) setupRemoting() error {
-	if x.tlsInfo != nil {
-		x.remoting = remote.NewRemoting(
-			remote.WithRemotingTLS(x.tlsInfo.ClientConfig),
-			remote.WithRemotingMaxReadFameSize(int(x.remoteConfig.MaxFrameSize())), // nolint
-			remote.WithRemotingCompression(x.remoteConfig.Compression()),
-		)
-		return nil
+	opts := []remote.RemotingOption{
+		remote.WithRemotingMaxReadFameSize(int(x.remoteConfig.MaxFrameSize())), // nolint
+		remote.WithRemotingCompression(x.remoteConfig.Compression()),
 	}
-	x.remoting = remote.NewRemoting(remote.WithRemotingMaxReadFameSize(int(x.remoteConfig.MaxFrameSize())))
+
+	if propagator := x.remoteConfig.ContextPropagator(); propagator != nil {
+		opts = append(opts, remote.WithRemotingContextPropagator(propagator))
+	}
+
+	if x.tlsInfo != nil {
+		opts = append(opts, remote.WithRemotingTLS(x.tlsInfo.ClientConfig))
+	}
+
+	x.remoting = remote.NewRemoting(opts...)
 	return nil
 }
 

@@ -301,6 +301,14 @@ func (x *actorSystem) RemoteAskGrain(ctx context.Context, request *connect.Reque
 		return nil, err
 	}
 
+	if propagator := x.remoteConfig.ContextPropagator(); propagator != nil {
+		var err error
+		ctx, err = propagator.Extract(ctx, request.Header())
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		}
+	}
+
 	message, _ := msg.GetMessage().UnmarshalNew()
 	timeout := msg.GetRequestTimeout()
 
@@ -353,6 +361,14 @@ func (x *actorSystem) RemoteTellGrain(ctx context.Context, request *connect.Requ
 	port := msg.GetGrain().GetPort()
 	if err := x.validateRemoteHost(host, port); err != nil {
 		return nil, err
+	}
+
+	if propagator := x.remoteConfig.ContextPropagator(); propagator != nil {
+		var err error
+		ctx, err = propagator.Extract(ctx, request.Header())
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		}
 	}
 
 	message, _ := msg.GetMessage().UnmarshalNew()
@@ -446,6 +462,12 @@ func (x *actorSystem) remoteTellGrain(ctx context.Context, id *GrainIdentity, me
 		Message: serialized,
 	})
 
+	if propagator := x.remoteConfig.ContextPropagator(); propagator != nil {
+		if err := propagator.Inject(ctx, request.Header()); err != nil {
+			return err
+		}
+	}
+
 	_, err = remoteClient.RemoteTellGrain(ctx, request)
 	return err
 }
@@ -481,6 +503,12 @@ func (x *actorSystem) remoteAskGrain(ctx context.Context, id *GrainIdentity, mes
 		RequestTimeout: durationpb.New(timeout),
 		Message:        msg,
 	})
+
+	if propagator := x.remoteConfig.ContextPropagator(); propagator != nil {
+		if err := propagator.Inject(ctx, request.Header()); err != nil {
+			return nil, err
+		}
+	}
 
 	res, err := remoteClient.RemoteAskGrain(ctx, request)
 	if err != nil {

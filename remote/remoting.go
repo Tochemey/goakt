@@ -319,14 +319,26 @@ func WithRemotingCompression(c Compression) RemotingOption {
 	}
 }
 
+// WithRemotingContextPropagator sets a propagator used to inject context values into outbound remoting calls.
+// If nil, no propagation occurs.
+func WithRemotingContextPropagator(propagator ContextPropagator) RemotingOption {
+	return func(r *remoting) {
+		if propagator != nil {
+			r.contextPropagator = propagator
+		}
+	}
+}
+
 // remoting is the default Remoting implementation backed by Connect RPC
 // clients. It encapsulates transport setup, compression, and TLS configuration
 // required to reach remote actor systems.
 type remoting struct {
-	client           *nethttp.Client
-	tlsConfig        *tls.Config
-	maxReadFrameSize int
-	compression      Compression
+	client            *nethttp.Client
+	tlsConfig         *tls.Config
+	maxReadFrameSize  int
+	compression       Compression
+	contextPropagator ContextPropagator
+	clientFactory     func(host string, port int) internalpbconnect.RemotingServiceClient
 }
 
 var _ Remoting = (*remoting)(nil)
@@ -353,6 +365,10 @@ func NewRemoting(opts ...RemotingOption) Remoting {
 		r.client = http.NewHTTPSClient(r.tlsConfig, uint32(r.maxReadFrameSize)) // nolint
 	} else {
 		r.client = http.NewHTTPClient(uint32(r.maxReadFrameSize))
+	}
+
+	r.clientFactory = func(host string, port int) internalpbconnect.RemotingServiceClient {
+		return r.newRemotingServiceClient(host, port)
 	}
 	return r
 }
@@ -383,6 +399,12 @@ func (r *remoting) RemoteTell(ctx context.Context, from, to *address.Address, me
 		},
 	})
 
+	if propagator := r.contextPropagator; propagator != nil {
+		if err := propagator.Inject(ctx, request.Header()); err != nil {
+			return err
+		}
+	}
+
 	_, err = remoteClient.RemoteTell(ctx, request)
 	return err
 }
@@ -412,6 +434,12 @@ func (r *remoting) RemoteAsk(ctx context.Context, from, to *address.Address, mes
 		Timeout: durationpb.New(timeout),
 	})
 
+	if propagator := r.contextPropagator; propagator != nil {
+		if err := propagator.Inject(ctx, request.Header()); err != nil {
+			return nil, err
+		}
+	}
+
 	resp, err := remoteClient.RemoteAsk(ctx, request)
 	if err != nil {
 		return nil, err
@@ -440,6 +468,12 @@ func (r *remoting) RemoteLookup(ctx context.Context, host string, port int, name
 			Name: name,
 		},
 	)
+
+	if propagator := r.contextPropagator; propagator != nil {
+		if err := propagator.Inject(ctx, request.Header()); err != nil {
+			return nil, err
+		}
+	}
 
 	response, err := remoteClient.RemoteLookup(ctx, request)
 	if err != nil {
@@ -475,9 +509,17 @@ func (r *remoting) RemoteBatchTell(ctx context.Context, from, to *address.Addres
 		}
 	}
 
-	_, err := remoteClient.RemoteTell(ctx, connect.NewRequest(&internalpb.RemoteTellRequest{
+	req := connect.NewRequest(&internalpb.RemoteTellRequest{
 		RemoteMessages: remoteMessages,
-	}))
+	})
+
+	if propagator := r.contextPropagator; propagator != nil {
+		if err := propagator.Inject(ctx, req.Header()); err != nil {
+			return err
+		}
+	}
+
+	_, err := remoteClient.RemoteTell(ctx, req)
 	return err
 }
 
@@ -504,10 +546,18 @@ func (r *remoting) RemoteBatchAsk(ctx context.Context, from, to *address.Address
 		}
 	}
 
-	resp, err := remoteClient.RemoteAsk(ctx, connect.NewRequest(&internalpb.RemoteAskRequest{
+	req := connect.NewRequest(&internalpb.RemoteAskRequest{
 		RemoteMessages: remoteMessages,
 		Timeout:        durationpb.New(timeout),
-	}))
+	})
+
+	if propagator := r.contextPropagator; propagator != nil {
+		if err := propagator.Inject(ctx, req.Header()); err != nil {
+			return nil, err
+		}
+	}
+
+	resp, err := remoteClient.RemoteAsk(ctx, req)
 
 	if err != nil {
 		return nil, err
@@ -561,6 +611,12 @@ func (r *remoting) RemoteSpawn(ctx context.Context, host string, port int, spawn
 		},
 	)
 
+	if propagator := r.contextPropagator; propagator != nil {
+		if err := propagator.Inject(ctx, request.Header()); err != nil {
+			return err
+		}
+	}
+
 	if _, err := remoteClient.RemoteSpawn(ctx, request); err != nil {
 		code := connect.CodeOf(err)
 		if code == connect.CodeFailedPrecondition {
@@ -590,6 +646,12 @@ func (r *remoting) RemoteReSpawn(ctx context.Context, host string, port int, nam
 		},
 	)
 
+	if propagator := r.contextPropagator; propagator != nil {
+		if err := propagator.Inject(ctx, request.Header()); err != nil {
+			return err
+		}
+	}
+
 	if _, err := remoteClient.RemoteReSpawn(ctx, request); err != nil {
 		code := connect.CodeOf(err)
 		if code == connect.CodeNotFound {
@@ -613,6 +675,12 @@ func (r *remoting) RemoteStop(ctx context.Context, host string, port int, name s
 		},
 	)
 
+	if propagator := r.contextPropagator; propagator != nil {
+		if err := propagator.Inject(ctx, request.Header()); err != nil {
+			return err
+		}
+	}
+
 	if _, err := remoteClient.RemoteStop(ctx, request); err != nil {
 		code := connect.CodeOf(err)
 		if code == connect.CodeNotFound {
@@ -635,6 +703,12 @@ func (r *remoting) RemoteReinstate(ctx context.Context, host string, port int, n
 			Name: name,
 		},
 	)
+
+	if propagator := r.contextPropagator; propagator != nil {
+		if err := propagator.Inject(ctx, request.Header()); err != nil {
+			return err
+		}
+	}
 
 	if _, err := remoteClient.RemoteReinstate(ctx, request); err != nil {
 		code := connect.CodeOf(err)
@@ -673,6 +747,14 @@ func (r *remoting) Close() {
 // endpoint, applying the remoting client's transport and compression settings.
 // This is primarily for advanced scenarios where direct RPC access is required.
 func (r *remoting) RemotingServiceClient(host string, port int) internalpbconnect.RemotingServiceClient {
+	if r.clientFactory != nil {
+		return r.clientFactory(host, port)
+	}
+
+	return r.newRemotingServiceClient(host, port)
+}
+
+func (r *remoting) newRemotingServiceClient(host string, port int) internalpbconnect.RemotingServiceClient {
 	endpoint := http.URL(host, port)
 	if r.tlsConfig != nil {
 		endpoint = http.URLs(host, port)

@@ -45,13 +45,14 @@ import (
 // containerized deployments where DNS entries may be unavailable or resolve to
 // unintended interfaces.
 type Config struct {
-	maxFrameSize    uint32
-	writeTimeout    time.Duration
-	readIdleTimeout time.Duration
-	idleTimeout     time.Duration
-	bindAddr        string
-	bindPort        int
-	compression     Compression
+	maxFrameSize      uint32
+	writeTimeout      time.Duration
+	readIdleTimeout   time.Duration
+	idleTimeout       time.Duration
+	bindAddr          string
+	bindPort          int
+	compression       Compression
+	contextPropagator ContextPropagator
 }
 
 var _ validation.Validator = (*Config)(nil)
@@ -137,6 +138,11 @@ func (x *Config) BindPort() int {
 // Compression returns the compression algorithm to use
 func (x *Config) Compression() Compression {
 	return x.compression
+}
+
+// ContextPropagator returns the context propagator
+func (x *Config) ContextPropagator() ContextPropagator {
+	return x.contextPropagator
 }
 
 // Sanitize the configuration
