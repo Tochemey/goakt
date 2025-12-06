@@ -11,4 +11,5 @@ plugins:
     opt: paths=source_relative
   - local: protoc-gen-connect-go
     out: gen
-    opt: paths=source_relative
+    opt:
+      - paths=source_relative
