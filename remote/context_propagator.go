@@ -29,46 +29,20 @@ import (
 	nethttp "net/http"
 )
 
-// ContextPropagator injects and extracts metadata from remoting requests.
+// ContextPropagator defines how Go context values travel across remoting and cluster
+// boundaries by injecting them into outbound HTTP headers and extracting them on the
+// receiving side (trace IDs, auth tokens, correlation IDs, and similar metadata).
 //
-// It defines how context-scoped values (e.g., trace IDs, auth tokens, correlation IDs)
-// are carried across RPC boundaries by reading/writing HTTP headers.
+// Implementations should be stateless, safe for concurrent use, favor stable header keys,
+// and avoid leaking sensitive data unless explicitly required. Validate inputs to guard
+// against header injection or oversized header sets. Go-Akt relies on a ContextPropagator
+// so that context-derived metadata survives hops to remote actors or cluster peers and
+// can be read safely during messages handling via ReceiveContext.Context() or GrainContext.Context().
 //
-// Implementations should:
-//   - Be side-effect free and stateless (safe for concurrent use).
-//   - Prefer stable, vendor-neutral header keys when possible.
-//   - Validate and sanitize inputs to avoid header injection or oversized headers.
-//   - Avoid propagating sensitive values unless explicitly required and securely handled.
-//
-// Usage:
-//
-//	// Server-side: extract values from incoming headers into request context.
-//	func handler(w http.ResponseWriter, r *nethttp.Request, p ContextPropagator) {
-//	    ctx, err := p.Extract(r.Context(), r.Header)
-//	    if err != nil {
-//	        // decide policy: log, mask, or fail the request
-//	    }
-//	    // use ctx for request-scoped operations
-//	}
-//
-//	// Client-side: inject values from context into outgoing request headers.
-//	func call(ctx context.Context, req *nethttp.Request, p ContextPropagator) error {
-//	    if err := p.Inject(ctx, req.Header); err != nil {
-//	        return err
-//	    }
-//	    // perform the HTTP call
-//	    return nil
-//	}
-//
-// Common patterns:
-//   - Correlation: propagate "X-Request-ID" or similar across services.
-//   - Tracing: integrate with OpenTelemetry/B3/W3C Trace-Context by mapping context fields.
-//   - Security: propagate JWT/bearer tokens via "Authorization" only when appropriate.
-//
-// Error handling recommendations:
-//   - Inject should return an error only for unrecoverable conditions (e.g., invalid header write).
-//   - Extract may return a non-nil ctx with a best-effort parse and an error describing issues.
-//   - Callers should define clear policies for partial failures (log-and-continue vs. fail-fast).
+// Error handling:
+//   - Inject should fail only when headers cannot be written.
+//   - Extract should return a derived context and report parse issues via the error,
+//     letting callers choose log-and-continue vs fail-fast policies.
 type ContextPropagator interface {
 	// Inject writes context values into headers for an outgoing request.
 	// Implementations should not mutate ctx and must be safe for concurrent use.

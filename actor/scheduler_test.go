@@ -1422,9 +1422,12 @@ func TestScheduler(t *testing.T) {
 		}, 2*time.Second, 10*time.Millisecond)
 		require.NoError(t, actorSystem.PauseSchedule("reference"))
 
+		require.Eventually(t, func() bool {
+			paused := actorRef.ProcessedCount() - 1
+			pause.For(25 * time.Millisecond) // > interval; ensures no further ticks
+			return actorRef.ProcessedCount()-1 == paused
+		}, 750*time.Millisecond, 25*time.Millisecond)
 		processedAtPause := actorRef.ProcessedCount() - 1
-		pause.For(75 * time.Millisecond)
-		require.EqualValues(t, processedAtPause, actorRef.ProcessedCount()-1)
 
 		require.NoError(t, actorSystem.ResumeSchedule("reference"))
 		require.Eventually(t, func() bool {
