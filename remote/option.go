@@ -75,3 +75,28 @@ func WithCompression(c Compression) Option {
 		config.compression = c
 	})
 }
+
+// WithContextPropagator sets the ContextPropagator used to inject and extract
+// cross-cutting metadata (e.g., custom headers, correlation IDs, auth tokens)
+// for remote calls.
+//
+// Passing a non-nil propagator enables propagation across process boundaries,
+// ensuring values from a context are serialized into headers on outgoing calls
+// and restored into the context on incoming calls.
+// If propagator is nil, this option is ignored and the default/no-op propagator
+// remains in effect.
+//
+// Typical use:
+//   - Integrate distributed tracing (e.g., OpenTelemetry) by providing a propagator
+//     implementation that injects/extracts trace context.
+//   - Forward request-scoped metadata like user/session IDs or feature flags.
+//
+// Note: Only non-nil propagators are applied.
+// Multiple calls will overwrite the previous propagator with the last non-nil value.
+func WithContextPropagator(propagator ContextPropagator) Option {
+	return OptionFunc(func(config *Config) {
+		if propagator != nil {
+			config.contextPropagator = propagator
+		}
+	})
+}
