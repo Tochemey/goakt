@@ -1830,6 +1830,18 @@ func (a *contextEchoActor) Seen() any {
 	return a.seen
 }
 
+type MockFailingContextPropagator struct {
+	err error
+}
+
+func (f *MockFailingContextPropagator) Inject(_ context.Context, _ http.Header) error {
+	return nil
+}
+
+func (f *MockFailingContextPropagator) Extract(ctx context.Context, _ http.Header) (context.Context, error) {
+	return ctx, f.err
+}
+
 func startNatsServer(t *testing.T) *natsserver.Server {
 	t.Helper()
 	serv, err := natsserver.NewServer(&natsserver.Options{

@@ -2651,6 +2651,64 @@ func TestRemoteContextPropagation(t *testing.T) {
 			return actor.Seen() == headerVal
 		}, time.Second, 10*time.Millisecond)
 	})
+
+	t.Run("RemoteAsk returns invalid argument when context extraction fails", func(t *testing.T) {
+		extractErr := errors.New("extract failed")
+		host := "127.0.0.1"
+		port := 9300
+
+		sys, err := NewActorSystem(
+			"ctx-extract-ask-error",
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig(host, port, remote.WithContextPropagator(&MockFailingContextPropagator{err: extractErr}))),
+		)
+		require.NoError(t, err)
+		sysImpl := sys.(*actorSystem)
+		sysImpl.remotingEnabled.Store(true)
+
+		req := connect.NewRequest(&internalpb.RemoteAskRequest{
+			RemoteMessages: []*internalpb.RemoteMessage{
+				{Receiver: &goaktpb.Address{System: sys.Name(), Host: host, Port: int32(port), Name: "actor"}},
+			},
+		})
+
+		_, err = sysImpl.RemoteAsk(context.Background(), req)
+		require.Error(t, err)
+
+		var connectErr *connect.Error
+		require.ErrorAs(t, err, &connectErr)
+		require.Equal(t, connect.CodeInvalidArgument, connectErr.Code())
+		require.ErrorIs(t, connectErr, extractErr)
+	})
+
+	t.Run("RemoteTell returns invalid argument when context extraction fails", func(t *testing.T) {
+		extractErr := errors.New("extract failed")
+		host := "127.0.0.1"
+		port := 9301
+
+		sys, err := NewActorSystem(
+			"ctx-extract-tell-error",
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig(host, port, remote.WithContextPropagator(&MockFailingContextPropagator{err: extractErr}))),
+		)
+		require.NoError(t, err)
+		sysImpl := sys.(*actorSystem)
+		sysImpl.remotingEnabled.Store(true)
+
+		req := connect.NewRequest(&internalpb.RemoteTellRequest{
+			RemoteMessages: []*internalpb.RemoteMessage{
+				{Receiver: &goaktpb.Address{System: sys.Name(), Host: host, Port: int32(port), Name: "actor"}},
+			},
+		})
+
+		_, err = sysImpl.RemoteTell(context.Background(), req)
+		require.Error(t, err)
+
+		var connectErr *connect.Error
+		require.ErrorAs(t, err, &connectErr)
+		require.Equal(t, connect.CodeInvalidArgument, connectErr.Code())
+		require.ErrorIs(t, connectErr, extractErr)
+	})
 }
 
 func TestRemoteTell(t *testing.T) {

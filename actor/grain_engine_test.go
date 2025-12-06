@@ -14,6 +14,7 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/tochemey/goakt/v3/discovery"
+	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	mockcluster "github.com/tochemey/goakt/v3/mocks/cluster"
@@ -351,6 +352,107 @@ func TestRemoteAskGrain_ExtractsContextValues(t *testing.T) {
 	require.Equal(t, headerVal, grain.seen)
 }
 
+func TestRemoteAskGrain_ContextExtractionError(t *testing.T) {
+	extractErr := errors.New("extract failed")
+	host := "127.0.0.1"
+	port := 9104
+
+	cl := mockcluster.NewCluster(t)
+	rem := mockremote.NewRemoting(t)
+	node := &discovery.Node{Host: host, PeersPort: 9004, RemotingPort: port}
+	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+	sys.remoteConfig = remote.NewConfig(node.Host, node.RemotingPort, remote.WithContextPropagator(&MockFailingContextPropagator{err: extractErr}))
+	sys.remotingEnabled.Store(true)
+
+	identity := newGrainIdentity(NewMockGrain(), "extract-error-grain")
+	msg, _ := anypb.New(&testpb.TestReply{})
+	req := connect.NewRequest(&internalpb.RemoteAskGrainRequest{
+		Grain: &internalpb.Grain{
+			GrainId: &internalpb.GrainId{Value: identity.String()},
+			Host:    host,
+			Port:    int32(port),
+		},
+		Message:        msg,
+		RequestTimeout: durationpb.New(time.Second),
+	})
+
+	_, err := sys.RemoteAskGrain(context.Background(), req)
+	require.Error(t, err)
+
+	var connectErr *connect.Error
+	require.ErrorAs(t, err, &connectErr)
+	require.Equal(t, connect.CodeInvalidArgument, connectErr.Code())
+	require.ErrorIs(t, connectErr, extractErr)
+}
+
+func TestRemoteAskGrain_InvalidGrainIdentity(t *testing.T) {
+	host := "127.0.0.1"
+	port := 9200
+
+	cl := mockcluster.NewCluster(t)
+	rem := mockremote.NewRemoting(t)
+	node := &discovery.Node{Host: host, PeersPort: 9020, RemotingPort: port}
+	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+	sys.remotingEnabled.Store(true)
+
+	invalidIdentity := "actor.MockGrain/invalid name"
+	msg, _ := anypb.New(&testpb.TestReply{})
+	req := connect.NewRequest(&internalpb.RemoteAskGrainRequest{
+		Grain: &internalpb.Grain{
+			GrainId: &internalpb.GrainId{Value: invalidIdentity},
+			Host:    host,
+			Port:    int32(port),
+		},
+		Message:        msg,
+		RequestTimeout: durationpb.New(time.Second),
+	})
+
+	_, err := sys.RemoteAskGrain(context.Background(), req)
+	require.Error(t, err)
+
+	var connectErr *connect.Error
+	require.ErrorAs(t, err, &connectErr)
+	require.Equal(t, connect.CodeInvalidArgument, connectErr.Code())
+	require.ErrorIs(t, connectErr, gerrors.ErrInvalidGrainIdentity)
+}
+
+func TestRemoteAskGrain_LocalSendError(t *testing.T) {
+	host := "127.0.0.1"
+	port := 9201
+
+	cl := mockcluster.NewCluster(t)
+	rem := mockremote.NewRemoting(t)
+	node := &discovery.Node{Host: host, PeersPort: 9021, RemotingPort: port}
+	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+	sys.remotingEnabled.Store(true)
+
+	grain := NewMockGrainReceiveFailure()
+	sys.registry.Register(grain)
+	identity := newGrainIdentity(grain, "receive-failure")
+	pid := newGrainPID(identity, grain, sys, newGrainConfig())
+	pid.activated.Store(true)
+	sys.grains.Set(identity.String(), pid)
+
+	msg, _ := anypb.New(&testpb.TestSend{})
+	req := connect.NewRequest(&internalpb.RemoteAskGrainRequest{
+		Grain: &internalpb.Grain{
+			GrainId: &internalpb.GrainId{Value: identity.String()},
+			Host:    host,
+			Port:    int32(port),
+		},
+		Message:        msg,
+		RequestTimeout: durationpb.New(time.Second),
+	})
+
+	_, err := sys.RemoteAskGrain(context.Background(), req)
+	require.Error(t, err)
+
+	var connectErr *connect.Error
+	require.ErrorAs(t, err, &connectErr)
+	require.Equal(t, connect.CodeInternal, connectErr.Code())
+	require.Contains(t, connectErr.Message(), "failed to process message")
+}
+
 func TestRemoteTellGrain_ExtractsContextValues(t *testing.T) {
 	ctxKey := struct{}{}
 	headerKey := "x-goakt-propagated"
@@ -386,4 +488,108 @@ func TestRemoteTellGrain_ExtractsContextValues(t *testing.T) {
 	_, err := sys.RemoteTellGrain(context.Background(), req)
 	require.NoError(t, err)
 	require.Equal(t, headerVal, grain.seen)
+}
+
+func TestRemoteTellGrain_ContextExtractionError(t *testing.T) {
+	extractErr := errors.New("extract failed")
+	host := "127.0.0.1"
+	port := 9202
+
+	cl := mockcluster.NewCluster(t)
+	rem := mockremote.NewRemoting(t)
+	node := &discovery.Node{Host: host, PeersPort: 9022, RemotingPort: port}
+	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+	sys.remoteConfig = remote.NewConfig(node.Host, node.RemotingPort, remote.WithContextPropagator(&MockFailingContextPropagator{err: extractErr}))
+	sys.remotingEnabled.Store(true)
+
+	grain := NewMockGrain()
+	identity := newGrainIdentity(grain, "tell-extract-error")
+	pid := newGrainPID(identity, grain, sys, newGrainConfig())
+	pid.activated.Store(true)
+	sys.registry.Register(grain)
+	sys.grains.Set(identity.String(), pid)
+
+	msg, _ := anypb.New(&testpb.TestSend{})
+	req := connect.NewRequest(&internalpb.RemoteTellGrainRequest{
+		Grain: &internalpb.Grain{
+			GrainId: &internalpb.GrainId{Value: identity.String()},
+			Host:    host,
+			Port:    int32(port),
+		},
+		Message: msg,
+	})
+
+	_, err := sys.RemoteTellGrain(context.Background(), req)
+	require.Error(t, err)
+
+	var connectErr *connect.Error
+	require.ErrorAs(t, err, &connectErr)
+	require.Equal(t, connect.CodeInvalidArgument, connectErr.Code())
+	require.ErrorIs(t, connectErr, extractErr)
+}
+
+func TestRemoteTellGrain_InvalidGrainIdentity(t *testing.T) {
+	host := "127.0.0.1"
+	port := 9203
+
+	cl := mockcluster.NewCluster(t)
+	rem := mockremote.NewRemoting(t)
+	node := &discovery.Node{Host: host, PeersPort: 9023, RemotingPort: port}
+	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+	sys.remotingEnabled.Store(true)
+
+	invalidIdentity := "actor.MockGrain/invalid name"
+	msg, _ := anypb.New(&testpb.TestSend{})
+	req := connect.NewRequest(&internalpb.RemoteTellGrainRequest{
+		Grain: &internalpb.Grain{
+			GrainId: &internalpb.GrainId{Value: invalidIdentity},
+			Host:    host,
+			Port:    int32(port),
+		},
+		Message: msg,
+	})
+
+	_, err := sys.RemoteTellGrain(context.Background(), req)
+	require.Error(t, err)
+
+	var connectErr *connect.Error
+	require.ErrorAs(t, err, &connectErr)
+	require.Equal(t, connect.CodeInvalidArgument, connectErr.Code())
+	require.ErrorIs(t, connectErr, gerrors.ErrInvalidGrainIdentity)
+}
+
+func TestRemoteTellGrain_LocalSendError(t *testing.T) {
+	host := "127.0.0.1"
+	port := 9204
+
+	cl := mockcluster.NewCluster(t)
+	rem := mockremote.NewRemoting(t)
+	node := &discovery.Node{Host: host, PeersPort: 9024, RemotingPort: port}
+	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+	sys.remotingEnabled.Store(true)
+
+	grain := NewMockGrainReceiveFailure()
+	sys.registry.Register(grain)
+	identity := newGrainIdentity(grain, "tell-receive-failure")
+	pid := newGrainPID(identity, grain, sys, newGrainConfig())
+	pid.activated.Store(true)
+	sys.grains.Set(identity.String(), pid)
+
+	msg, _ := anypb.New(&testpb.TestSend{})
+	req := connect.NewRequest(&internalpb.RemoteTellGrainRequest{
+		Grain: &internalpb.Grain{
+			GrainId: &internalpb.GrainId{Value: identity.String()},
+			Host:    host,
+			Port:    int32(port),
+		},
+		Message: msg,
+	})
+
+	_, err := sys.RemoteTellGrain(context.Background(), req)
+	require.Error(t, err)
+
+	var connectErr *connect.Error
+	require.ErrorAs(t, err, &connectErr)
+	require.Equal(t, connect.CodeInternal, connectErr.Code())
+	require.Contains(t, connectErr.Message(), "failed to process message")
 }
