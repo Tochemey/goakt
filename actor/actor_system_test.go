@@ -30,6 +30,9 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/signal"
 	"reflect"
@@ -50,6 +53,8 @@ import (
 	"go.opentelemetry.io/otel"
 	noopmetric "go.opentelemetry.io/otel/metric/noop"
 	"go.uber.org/atomic"
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
@@ -60,6 +65,7 @@ import (
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/collection"
 	internalpb "github.com/tochemey/goakt/v3/internal/internalpb"
+	internalpbconnect "github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v3/internal/metric"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/internal/registry"
@@ -2481,6 +2487,227 @@ func TestActorSystem(t *testing.T) {
 		pid.flipState(stoppingState, false)
 
 		require.NoError(t, actorSystem.Stop(ctx))
+	})
+}
+
+func TestRemoteContextPropagation(t *testing.T) {
+	t.Run("RemoteAsk injects context values", func(t *testing.T) {
+		ctxKey := struct{}{}
+		headerKey := "x-goakt-propagated"
+		headerVal := "actor-ask"
+
+		handler := &actorHandler{}
+		path, remotingHandler := internalpbconnect.NewRemotingServiceHandler(handler)
+		mux := http.NewServeMux()
+		mux.Handle(path, remotingHandler)
+		server := httptest.NewUnstartedServer(h2c.NewHandler(mux, &http2.Server{}))
+		server.Start()
+		t.Cleanup(server.Close)
+
+		parsed, err := url.Parse(server.URL)
+		require.NoError(t, err)
+		host, portStr, err := net.SplitHostPort(parsed.Host)
+		require.NoError(t, err)
+		port, err := strconv.Atoi(portStr)
+		require.NoError(t, err)
+
+		ctx := context.Background()
+		sys, err := NewActorSystem(
+			"ctx-prop-ask",
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig("127.0.0.1", dynaport.Get(1)[0],
+				remote.WithContextPropagator(&headerPropagator{headerKey: headerKey, ctxKey: ctxKey}))),
+		)
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		pause.For(200 * time.Millisecond)
+		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
+
+		sysImpl := sys.(*actorSystem)
+		require.NotNil(t, sysImpl.remoting)
+
+		askCtx := context.WithValue(context.Background(), ctxKey, headerVal)
+		to := address.New("remote", "remote-sys", host, port)
+
+		_, err = sysImpl.remoting.RemoteAsk(askCtx, address.NoSender(), to, new(testpb.TestReply), time.Second)
+		require.NoError(t, err)
+		require.Equal(t, headerVal, handler.askHeader.Get(headerKey))
+	})
+
+	t.Run("RemoteTell injects context values", func(t *testing.T) {
+		ctxKey := struct{}{}
+		headerKey := "x-goakt-propagated"
+		headerVal := "actor-tell"
+
+		handler := &actorHandler{}
+		path, remotingHandler := internalpbconnect.NewRemotingServiceHandler(handler)
+		mux := http.NewServeMux()
+		mux.Handle(path, remotingHandler)
+		server := httptest.NewUnstartedServer(h2c.NewHandler(mux, &http2.Server{}))
+		server.Start()
+		t.Cleanup(server.Close)
+
+		parsed, err := url.Parse(server.URL)
+		require.NoError(t, err)
+		host, portStr, err := net.SplitHostPort(parsed.Host)
+		require.NoError(t, err)
+		port, err := strconv.Atoi(portStr)
+		require.NoError(t, err)
+
+		ctx := context.Background()
+		sys, err := NewActorSystem(
+			"ctx-prop-tell",
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig("127.0.0.1", dynaport.Get(1)[0],
+				remote.WithContextPropagator(&headerPropagator{headerKey: headerKey, ctxKey: ctxKey}))),
+		)
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		pause.For(200 * time.Millisecond)
+		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
+
+		sysImpl := sys.(*actorSystem)
+		require.NotNil(t, sysImpl.remoting)
+
+		tellCtx := context.WithValue(context.Background(), ctxKey, headerVal)
+		to := address.New("remote", "remote-sys", host, port)
+
+		require.NoError(t, sysImpl.remoting.RemoteTell(tellCtx, address.NoSender(), to, new(testpb.TestSend)))
+		require.Equal(t, headerVal, handler.tellHeader.Get(headerKey))
+	})
+
+	t.Run("RemoteAsk extracts context values", func(t *testing.T) {
+		ctxKey := struct{}{}
+		headerKey := "x-goakt-propagated"
+		headerVal := "inbound-ask"
+		ctx := context.Background()
+
+		sys, err := NewActorSystem(
+			"ctx-extract-ask",
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig("127.0.0.1", dynaport.Get(1)[0],
+				remote.WithContextPropagator(&headerPropagator{headerKey: headerKey, ctxKey: ctxKey}))),
+		)
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		pause.For(200 * time.Millisecond)
+		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
+
+		actor := &contextEchoActor{key: ctxKey}
+		actorName := "context-ask"
+		pid, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		rem := remote.NewRemoting(remote.WithRemotingContextPropagator(&headerPropagator{headerKey: headerKey, ctxKey: ctxKey}))
+		t.Cleanup(rem.Close)
+
+		addr, err := rem.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+
+		requestCtx := context.WithValue(context.Background(), ctxKey, headerVal)
+		reply, err := rem.RemoteAsk(requestCtx, address.NoSender(), addr, new(testpb.TestReply), time.Second)
+		require.NoError(t, err)
+
+		actual := new(testpb.Reply)
+		require.NoError(t, reply.UnmarshalTo(actual))
+		require.Equal(t, headerVal, actual.GetContent())
+		require.Equal(t, headerVal, actor.Seen())
+	})
+
+	t.Run("RemoteTell extracts context values", func(t *testing.T) {
+		ctxKey := struct{}{}
+		headerKey := "x-goakt-propagated"
+		headerVal := "inbound-tell"
+		ctx := context.Background()
+
+		sys, err := NewActorSystem(
+			"ctx-extract-tell",
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig("127.0.0.1", dynaport.Get(1)[0],
+				remote.WithContextPropagator(&headerPropagator{headerKey: headerKey, ctxKey: ctxKey}))),
+		)
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		pause.For(200 * time.Millisecond)
+		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
+
+		actor := &contextEchoActor{key: ctxKey}
+		actorName := "context-tell"
+		pid, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		rem := remote.NewRemoting(remote.WithRemotingContextPropagator(&headerPropagator{headerKey: headerKey, ctxKey: ctxKey}))
+		t.Cleanup(rem.Close)
+
+		addr, err := rem.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+
+		tellCtx := context.WithValue(context.Background(), ctxKey, headerVal)
+		require.NoError(t, rem.RemoteTell(tellCtx, address.NoSender(), addr, new(testpb.TestSend)))
+
+		require.Eventually(t, func() bool {
+			return actor.Seen() == headerVal
+		}, time.Second, 10*time.Millisecond)
+	})
+
+	t.Run("RemoteAsk returns invalid argument when context extraction fails", func(t *testing.T) {
+		extractErr := errors.New("extract failed")
+		host := "127.0.0.1"
+		port := 9300
+
+		sys, err := NewActorSystem(
+			"ctx-extract-ask-error",
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig(host, port, remote.WithContextPropagator(&MockFailingContextPropagator{err: extractErr}))),
+		)
+		require.NoError(t, err)
+		sysImpl := sys.(*actorSystem)
+		sysImpl.remotingEnabled.Store(true)
+
+		req := connect.NewRequest(&internalpb.RemoteAskRequest{
+			RemoteMessages: []*internalpb.RemoteMessage{
+				{Receiver: &goaktpb.Address{System: sys.Name(), Host: host, Port: int32(port), Name: "actor"}},
+			},
+		})
+
+		_, err = sysImpl.RemoteAsk(context.Background(), req)
+		require.Error(t, err)
+
+		var connectErr *connect.Error
+		require.ErrorAs(t, err, &connectErr)
+		require.Equal(t, connect.CodeInvalidArgument, connectErr.Code())
+		require.ErrorIs(t, connectErr, extractErr)
+	})
+
+	t.Run("RemoteTell returns invalid argument when context extraction fails", func(t *testing.T) {
+		extractErr := errors.New("extract failed")
+		host := "127.0.0.1"
+		port := 9301
+
+		sys, err := NewActorSystem(
+			"ctx-extract-tell-error",
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig(host, port, remote.WithContextPropagator(&MockFailingContextPropagator{err: extractErr}))),
+		)
+		require.NoError(t, err)
+		sysImpl := sys.(*actorSystem)
+		sysImpl.remotingEnabled.Store(true)
+
+		req := connect.NewRequest(&internalpb.RemoteTellRequest{
+			RemoteMessages: []*internalpb.RemoteMessage{
+				{Receiver: &goaktpb.Address{System: sys.Name(), Host: host, Port: int32(port), Name: "actor"}},
+			},
+		})
+
+		_, err = sysImpl.RemoteTell(context.Background(), req)
+		require.Error(t, err)
+
+		var connectErr *connect.Error
+		require.ErrorAs(t, err, &connectErr)
+		require.Equal(t, connect.CodeInvalidArgument, connectErr.Code())
+		require.ErrorIs(t, connectErr, extractErr)
 	})
 }
 

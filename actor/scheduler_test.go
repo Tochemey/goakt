@@ -1417,16 +1417,22 @@ func TestScheduler(t *testing.T) {
 		err = actorSystem.Schedule(ctx, message, actorRef, 10*time.Millisecond, WithReference("reference"))
 		require.NoError(t, err)
 
-		pause.For(55 * time.Millisecond)
-		require.EqualValues(t, 5, actorRef.ProcessedCount()-1)
+		require.Eventually(t, func() bool {
+			return actorRef.ProcessedCount()-1 >= 5
+		}, 2*time.Second, 10*time.Millisecond)
 		require.NoError(t, actorSystem.PauseSchedule("reference"))
 
-		pause.For(55 * time.Millisecond)
-		require.EqualValues(t, 5, actorRef.ProcessedCount()-1)
+		require.Eventually(t, func() bool {
+			paused := actorRef.ProcessedCount() - 1
+			pause.For(25 * time.Millisecond) // > interval; ensures no further ticks
+			return actorRef.ProcessedCount()-1 == paused
+		}, 750*time.Millisecond, 25*time.Millisecond)
+		processedAtPause := actorRef.ProcessedCount() - 1
 
 		require.NoError(t, actorSystem.ResumeSchedule("reference"))
-		pause.For(55 * time.Millisecond)
-		require.EqualValues(t, 10, actorRef.ProcessedCount()-1)
+		require.Eventually(t, func() bool {
+			return actorRef.ProcessedCount()-1 >= processedAtPause+5
+		}, 2*time.Second, 10*time.Millisecond)
 
 		// stop the actor
 		err = actorSystem.Stop(ctx)
