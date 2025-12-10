@@ -91,6 +91,13 @@ Prior to submitting a [pull request](https://help.github.com/articles/using-pull
 earthly +test
 ```
 
+## 📦 In Production
+
+This framework is used in production by the following projects/companies:
+
+- [Baki Money](https://www.baki.money/): AI-powered Expense Tracking platform that turns receipts into stories you can actually understand.
+
+
 ## 💬 Feedback
 
 Kindly use this [issue](https://github.com/Tochemey/goakt/issues/948) to give us your feedback that can help us enhance the framework.
