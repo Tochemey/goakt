@@ -95,7 +95,7 @@ earthly +test
 
 This framework is used in production by the following projects/companies:
 
-- [Baki Money](https://www.baki.money/): AI-powered Expense Tracking platform that turns receipts into stories you can actually understand.
+- [Baki Money](https://www.baki.money/): AI-powered Expense Tracking platform that turns receipts into stories...
 
 
 ## 💬 Feedback
