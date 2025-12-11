@@ -63,6 +63,7 @@ import (
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
+	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/collection"
 	internalpb "github.com/tochemey/goakt/v3/internal/internalpb"
 	internalpbconnect "github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
@@ -73,6 +74,7 @@ import (
 	mockcluster "github.com/tochemey/goakt/v3/mocks/cluster"
 	mocksdiscovery "github.com/tochemey/goakt/v3/mocks/discovery"
 	mocksextension "github.com/tochemey/goakt/v3/mocks/extension"
+	mockremote "github.com/tochemey/goakt/v3/mocks/remote"
 	"github.com/tochemey/goakt/v3/passivation"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
@@ -993,6 +995,68 @@ func TestActorSystem(t *testing.T) {
 				assert.NoError(t, err)
 			},
 		)
+	})
+	t.Run("With Kill: remote actor not found in cluster", func(t *testing.T) {
+		ctx := context.TODO()
+		actorName := "remoteActor"
+
+		clusterMock := mockcluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+
+		system.locker.Lock()
+		system.actors = newTree()
+		system.locker.Unlock()
+
+		clusterMock.EXPECT().GetActor(mock.Anything, actorName).Return(nil, cluster.ErrActorNotFound)
+
+		err := system.Kill(ctx, actorName)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, gerrors.ErrActorNotFound)
+	})
+	t.Run("With Kill: cluster lookup failure", func(t *testing.T) {
+		ctx := context.TODO()
+		actorName := "remoteActor"
+
+		clusterMock := mockcluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+
+		system.locker.Lock()
+		system.actors = newTree()
+		system.locker.Unlock()
+
+		clusterMock.EXPECT().GetActor(mock.Anything, actorName).Return(nil, assert.AnError)
+
+		err := system.Kill(ctx, actorName)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, assert.AnError)
+		assert.ErrorContains(t, err, "failed to fetch remote actor")
+	})
+	t.Run("With Kill: stop remote actor via remoting", func(t *testing.T) {
+		ctx := context.TODO()
+		actorName := "remoteActor"
+		remoteHost := "10.0.0.1"
+		remotePort := 9090
+
+		clusterMock := mockcluster.NewCluster(t)
+		remotingMock := mockremote.NewRemoting(t)
+		system := MockReplicationTestSystem(clusterMock)
+
+		system.locker.Lock()
+		system.actors = newTree()
+		system.remoting = remotingMock
+		system.locker.Unlock()
+
+		clusterMock.EXPECT().GetActor(mock.Anything, actorName).Return(&internalpb.Actor{
+			Address: &goaktpb.Address{
+				Host: remoteHost,
+				Port: int32(remotePort),
+				Name: actorName,
+			},
+		}, nil)
+		remotingMock.EXPECT().RemoteStop(mock.Anything, remoteHost, remotePort, actorName).Return(nil)
+
+		err := system.Kill(ctx, actorName)
+		require.NoError(t, err)
 	})
 	t.Run("With housekeeping", func(t *testing.T) {
 		ctx := context.TODO()
