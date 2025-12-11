@@ -63,6 +63,7 @@ import (
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
+	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/collection"
 	internalpb "github.com/tochemey/goakt/v3/internal/internalpb"
 	internalpbconnect "github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
@@ -73,6 +74,7 @@ import (
 	mockcluster "github.com/tochemey/goakt/v3/mocks/cluster"
 	mocksdiscovery "github.com/tochemey/goakt/v3/mocks/discovery"
 	mocksextension "github.com/tochemey/goakt/v3/mocks/extension"
+	mockremote "github.com/tochemey/goakt/v3/mocks/remote"
 	"github.com/tochemey/goakt/v3/passivation"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
@@ -993,6 +995,144 @@ func TestActorSystem(t *testing.T) {
 				assert.NoError(t, err)
 			},
 		)
+	})
+	t.Run("With Kill: remote actor not found in cluster", func(t *testing.T) {
+		ctx := context.TODO()
+		actorName := "remoteActor"
+
+		clusterMock := mockcluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+
+		system.locker.Lock()
+		system.actors = newTree()
+		system.locker.Unlock()
+
+		clusterMock.EXPECT().GetActor(mock.Anything, actorName).Return(nil, cluster.ErrActorNotFound)
+
+		err := system.Kill(ctx, actorName)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, gerrors.ErrActorNotFound)
+	})
+	t.Run("With Kill: cluster lookup failure", func(t *testing.T) {
+		ctx := context.TODO()
+		actorName := "remoteActor"
+
+		clusterMock := mockcluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+
+		system.locker.Lock()
+		system.actors = newTree()
+		system.locker.Unlock()
+
+		clusterMock.EXPECT().GetActor(mock.Anything, actorName).Return(nil, assert.AnError)
+
+		err := system.Kill(ctx, actorName)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, assert.AnError)
+		assert.ErrorContains(t, err, "failed to fetch remote actor")
+	})
+	t.Run("With Kill: stop remote actor via remoting", func(t *testing.T) {
+		ctx := context.TODO()
+		actorName := "remoteActor"
+		remoteHost := "10.0.0.1"
+		remotePort := 9090
+
+		clusterMock := mockcluster.NewCluster(t)
+		remotingMock := mockremote.NewRemoting(t)
+		system := MockReplicationTestSystem(clusterMock)
+
+		system.locker.Lock()
+		system.actors = newTree()
+		system.remoting = remotingMock
+		system.locker.Unlock()
+
+		clusterMock.EXPECT().GetActor(mock.Anything, actorName).Return(&internalpb.Actor{
+			Address: &goaktpb.Address{
+				Host: remoteHost,
+				Port: int32(remotePort),
+				Name: actorName,
+			},
+		}, nil)
+		remotingMock.EXPECT().RemoteStop(mock.Anything, remoteHost, remotePort, actorName).Return(nil)
+
+		err := system.Kill(ctx, actorName)
+		require.NoError(t, err)
+	})
+	t.Run("With kill: stop remote actor", func(t *testing.T) {
+		// create a context
+		ctx := context.TODO()
+		// start the NATS server
+		srv := startNatsServer(t)
+
+		// create and start a system cluster
+		node1, sd1 := testNATs(t, srv.Addr().String())
+		require.NotNil(t, node1)
+		require.NotNil(t, sd1)
+
+		// create and start a system cluster
+		node2, sd2 := testNATs(t, srv.Addr().String())
+		require.NotNil(t, node2)
+		require.NotNil(t, sd2)
+
+		// create and start a system cluster
+		node3, sd3 := testNATs(t, srv.Addr().String())
+		require.NotNil(t, node3)
+		require.NotNil(t, sd3)
+
+		// let us create 4 actors on each node
+		for j := 1; j <= 4; j++ {
+			actorName := fmt.Sprintf("Actor1-%d", j)
+			pid, err := node1.Spawn(ctx, actorName, NewMockActor(), WithRelocationDisabled())
+			require.NoError(t, err)
+			require.NotNil(t, pid)
+		}
+
+		pause.For(time.Second)
+
+		for j := 1; j <= 4; j++ {
+			actorName := fmt.Sprintf("Actor2-%d", j)
+			pid, err := node2.Spawn(ctx, actorName, NewMockActor(), WithRelocationDisabled())
+			require.NoError(t, err)
+			require.NotNil(t, pid)
+		}
+
+		pause.For(time.Second)
+
+		for j := 1; j <= 4; j++ {
+			actorName := fmt.Sprintf("Actor3-%d", j)
+			pid, err := node3.Spawn(ctx, actorName, NewMockActor(), WithRelocationDisabled())
+			require.NoError(t, err)
+			require.NotNil(t, pid)
+		}
+
+		pause.For(time.Second)
+
+		sender, err := node1.LocalActor("Actor1-1")
+		require.NoError(t, err)
+		require.NotNil(t, sender)
+
+		// let us access some of the node2 actors from node 1 and  node 3
+		actorName := "Actor2-1"
+		err = node1.Kill(ctx, actorName)
+		require.NoError(t, err)
+
+		pause.For(time.Second)
+
+		err = node3.Kill(ctx, actorName)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, gerrors.ErrActorNotFound)
+
+		err = node2.Kill(ctx, actorName)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, gerrors.ErrActorNotFound)
+
+		assert.NoError(t, node1.Stop(ctx))
+		assert.NoError(t, node2.Stop(ctx))
+		assert.NoError(t, node3.Stop(ctx))
+		assert.NoError(t, sd1.Close())
+		assert.NoError(t, sd2.Close())
+		assert.NoError(t, sd3.Close())
+		srv.Shutdown()
 	})
 	t.Run("With housekeeping", func(t *testing.T) {
 		ctx := context.TODO()

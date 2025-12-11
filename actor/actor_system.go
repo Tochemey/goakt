@@ -214,7 +214,7 @@ type ActorSystem interface {
 	// If the oldest node leaves the cluster, the singleton is restarted on the new oldest node.
 	// This is useful for managing shared resources or coordinating tasks that should be handled by a single actor.
 	SpawnSingleton(ctx context.Context, name string, actor Actor, opts ...ClusterSingletonOption) error
-	// Kill stops a given actor in the system
+	// Kill stops a given actor in the system either locally or on a remote node(when clustering is enabled)
 	Kill(ctx context.Context, name string) error
 	// ReSpawn recreates a given actor in the system
 	// During restart all messages that are in the mailbox and not yet processed will be ignored.
@@ -1557,6 +1557,19 @@ func (x *actorSystem) Kill(ctx context.Context, name string) error {
 	if exist {
 		pid := pidNode.value()
 		return pid.Shutdown(ctx)
+	}
+
+	if x.InCluster() {
+		actor, err := x.cluster.GetActor(ctx, name)
+		if err != nil {
+			if errors.Is(err, cluster.ErrActorNotFound) {
+				x.logger.Infof("actor=%s not found", name)
+				return gerrors.NewErrActorNotFound(name)
+			}
+			return fmt.Errorf("failed to fetch remote actor=%s: %w", name, err)
+		}
+
+		return x.getRemoting().RemoteStop(ctx, actor.Address.GetHost(), int(actor.GetAddress().GetPort()), name)
 	}
 
 	return gerrors.NewErrActorNotFound(actorAddress.String())
