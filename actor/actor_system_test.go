@@ -1058,6 +1058,82 @@ func TestActorSystem(t *testing.T) {
 		err := system.Kill(ctx, actorName)
 		require.NoError(t, err)
 	})
+	t.Run("With kill: stop remote actor", func(t *testing.T) {
+		// create a context
+		ctx := context.TODO()
+		// start the NATS server
+		srv := startNatsServer(t)
+
+		// create and start a system cluster
+		node1, sd1 := testNATs(t, srv.Addr().String())
+		require.NotNil(t, node1)
+		require.NotNil(t, sd1)
+
+		// create and start a system cluster
+		node2, sd2 := testNATs(t, srv.Addr().String())
+		require.NotNil(t, node2)
+		require.NotNil(t, sd2)
+
+		// create and start a system cluster
+		node3, sd3 := testNATs(t, srv.Addr().String())
+		require.NotNil(t, node3)
+		require.NotNil(t, sd3)
+
+		// let us create 4 actors on each node
+		for j := 1; j <= 4; j++ {
+			actorName := fmt.Sprintf("Actor1-%d", j)
+			pid, err := node1.Spawn(ctx, actorName, NewMockActor(), WithRelocationDisabled())
+			require.NoError(t, err)
+			require.NotNil(t, pid)
+		}
+
+		pause.For(time.Second)
+
+		for j := 1; j <= 4; j++ {
+			actorName := fmt.Sprintf("Actor2-%d", j)
+			pid, err := node2.Spawn(ctx, actorName, NewMockActor(), WithRelocationDisabled())
+			require.NoError(t, err)
+			require.NotNil(t, pid)
+		}
+
+		pause.For(time.Second)
+
+		for j := 1; j <= 4; j++ {
+			actorName := fmt.Sprintf("Actor3-%d", j)
+			pid, err := node3.Spawn(ctx, actorName, NewMockActor(), WithRelocationDisabled())
+			require.NoError(t, err)
+			require.NotNil(t, pid)
+		}
+
+		pause.For(time.Second)
+
+		sender, err := node1.LocalActor("Actor1-1")
+		require.NoError(t, err)
+		require.NotNil(t, sender)
+
+		// let us access some of the node2 actors from node 1 and  node 3
+		actorName := "Actor2-1"
+		err = node1.Kill(ctx, actorName)
+		require.NoError(t, err)
+
+		pause.For(time.Second)
+
+		err = node3.Kill(ctx, actorName)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, gerrors.ErrActorNotFound)
+
+		err = node2.Kill(ctx, actorName)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, gerrors.ErrActorNotFound)
+
+		assert.NoError(t, node1.Stop(ctx))
+		assert.NoError(t, node2.Stop(ctx))
+		assert.NoError(t, node3.Stop(ctx))
+		assert.NoError(t, sd1.Close())
+		assert.NoError(t, sd2.Close())
+		assert.NoError(t, sd3.Close())
+		srv.Shutdown()
+	})
 	t.Run("With housekeeping", func(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem(
