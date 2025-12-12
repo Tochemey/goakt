@@ -96,6 +96,7 @@ earthly +test
 This framework is used in production by the following projects/companies:
 
 - [Baki Money](https://www.baki.money/): AI-powered Expense Tracking platform that turns receipts into stories...
+- [Event Processor](https://www.v-app.io/iot-builder-3/): Clustered Complex Event Processor (CEP) that will be integrated into our V-App IoT Builder
 
 
 ## 💬 Feedback
