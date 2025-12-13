@@ -162,7 +162,7 @@ func (r *relocator) spawnRemoteActor(ctx context.Context, actor *internalpb.Acto
 		}
 	}
 
-	dependencies, err := actorSystem.getReflection().NewDependencies(actor.GetDependencies()...)
+	dependencies, err := actorSystem.getReflection().dependenciesFromProto(actor.GetDependencies()...)
 	if err != nil {
 		return err
 	}
@@ -304,7 +304,7 @@ func (r *relocator) recreateLocally(ctx context.Context, props *internalpb.Actor
 		return errors.NewInternalError(err)
 	}
 
-	actor, err := r.pid.ActorSystem().getReflection().NewActor(props.GetType())
+	actor, err := r.pid.ActorSystem().getReflection().instantiateActor(props.GetType())
 	if err != nil {
 		return err
 	}
@@ -331,7 +331,7 @@ func (r *relocator) recreateLocally(ctx context.Context, props *internalpb.Actor
 	}
 
 	if len(props.GetDependencies()) > 0 {
-		dependencies, err := r.pid.ActorSystem().getReflection().NewDependencies(props.GetDependencies()...)
+		dependencies, err := r.pid.ActorSystem().getReflection().dependenciesFromProto(props.GetDependencies()...)
 		if err != nil {
 			return err
 		}

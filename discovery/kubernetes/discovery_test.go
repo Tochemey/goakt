@@ -25,6 +25,7 @@
 package kubernetes
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -35,6 +36,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	testclient "k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/tochemey/goakt/v3/discovery"
 )
@@ -265,5 +267,117 @@ func TestRegister(t *testing.T) {
 		// Ensure client is not set and not marked initialized
 		require.Nil(t, provider.client)
 		require.False(t, provider.initialized.Load())
+	})
+}
+
+func TestDiscoverPeersFailures(t *testing.T) {
+	newConfig := func() *Config {
+		return &Config{
+			Namespace:         "test",
+			DiscoveryPortName: gossipPortName,
+			RemotingPortName:  remotingPortName,
+			PeersPortName:     peersPortName,
+			PodLabels: map[string]string{
+				"app.kubernetes.io/name": "test",
+			},
+		}
+	}
+
+	t.Run("kubernetes client failure", func(t *testing.T) {
+		config := newConfig()
+		client := testclient.NewSimpleClientset()
+		client.PrependReactor("list", "pods", func(action k8stesting.Action) (handled bool, ret runtime.Object, err error) {
+			return true, nil, errors.New("list failure")
+		})
+
+		provider := Discovery{
+			client:      client,
+			initialized: atomic.NewBool(true),
+			config:      config,
+		}
+
+		peers, err := provider.DiscoverPeers()
+		require.Error(t, err)
+		require.Nil(t, peers)
+	})
+
+	t.Run("filters out non ready pods", func(t *testing.T) {
+		config := newConfig()
+		ns := "test"
+
+		labels := map[string]string{
+			"app.kubernetes.io/name": "test",
+		}
+
+		pods := []runtime.Object{
+			&corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "pending-pod",
+					Namespace: ns,
+					Labels:    labels,
+				},
+				Status: corev1.PodStatus{
+					Phase: corev1.PodPending,
+					PodIP: "10.0.0.30",
+				},
+			},
+			&corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "not-ready",
+					Namespace: ns,
+					Labels:    labels,
+				},
+				Status: corev1.PodStatus{
+					Phase: corev1.PodRunning,
+					PodIP: "10.0.0.31",
+					Conditions: []corev1.PodCondition{
+						{
+							Type:   corev1.PodReady,
+							Status: corev1.ConditionFalse,
+						},
+					},
+				},
+			},
+			&corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "no-discovery-port",
+					Namespace: ns,
+					Labels:    labels,
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Ports: []corev1.ContainerPort{
+								{
+									Name:          "metrics",
+									ContainerPort: 9090,
+								},
+							},
+						},
+					},
+				},
+				Status: corev1.PodStatus{
+					Phase: corev1.PodRunning,
+					PodIP: "10.0.0.32",
+					Conditions: []corev1.PodCondition{
+						{
+							Type:   corev1.PodReady,
+							Status: corev1.ConditionTrue,
+						},
+					},
+				},
+			},
+		}
+
+		client := testclient.NewClientset(pods...)
+		provider := Discovery{
+			client:      client,
+			initialized: atomic.NewBool(true),
+			config:      config,
+		}
+
+		peers, err := provider.DiscoverPeers()
+		require.NoError(t, err)
+		assert.Empty(t, peers)
 	})
 }
