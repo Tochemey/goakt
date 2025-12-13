@@ -2055,7 +2055,7 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.NewErrActorNotFound(msg.GetActorName()))
 	}
 
-	actor, err := x.reflection.NewActor(msg.GetActorType())
+	actor, err := x.reflection.instantiateActor(msg.GetActorType())
 	if err != nil {
 		logger.Errorf(
 			"failed to create actor=[(%s) of type (%s)] on [host=%s, port=%d]: reason: (%v)",
@@ -2094,7 +2094,7 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 
 	// set the dependencies if any
 	if len(msg.GetDependencies()) > 0 {
-		dependencies, err := x.reflection.NewDependencies(msg.GetDependencies()...)
+		dependencies, err := x.reflection.dependenciesFromProto(msg.GetDependencies()...)
 		if err != nil {
 			logger.Errorf("failed to create actor=(%s) on [host=%s, port=%d]: reason: (%v)", msg.GetActorName(), msg.GetHost(), msg.GetPort(), err)
 			return nil, connect.NewError(connect.CodeInternal, err)
