@@ -43,8 +43,8 @@ func newReflection(registry registry.Registry) *reflection {
 	return &reflection{registry: registry}
 }
 
-// NewActor creates a new instance of Actor from its FQN
-func (r *reflection) NewActor(typeName string) (actor Actor, err error) {
+// instantiateActor creates a new instance of Actor from its FQN
+func (r *reflection) instantiateActor(typeName string) (actor Actor, err error) {
 	rtype, ok := r.registry.TypeOf(typeName)
 	if !ok {
 		return nil, errors.ErrTypeNotRegistered
@@ -59,8 +59,8 @@ func (r *reflection) NewActor(typeName string) (actor Actor, err error) {
 	return instance.Interface().(Actor), nil
 }
 
-// NewDependency creates a new instance of Dependency from its type name and bytes array
-func (r *reflection) NewDependency(typeName string, bytea []byte) (extension.Dependency, error) {
+// dependencyFromBytes creates a new instance of Dependency from its type name and bytes array
+func (r *reflection) dependencyFromBytes(typeName string, bytea []byte) (extension.Dependency, error) {
 	dept, ok := r.registry.TypeOf(typeName)
 	if !ok {
 		return nil, errors.ErrDependencyTypeNotRegistered
@@ -81,11 +81,11 @@ func (r *reflection) NewDependency(typeName string, bytea []byte) (extension.Dep
 	return nil, errors.ErrInvalidInstance
 }
 
-// NewDependencies reflects the dependencies defined in the protobuf
-func (r *reflection) NewDependencies(dependencies ...*internalpb.Dependency) ([]extension.Dependency, error) {
+// dependenciesFromProto reflects the dependencies defined in the protobuf
+func (r *reflection) dependenciesFromProto(dependencies ...*internalpb.Dependency) ([]extension.Dependency, error) {
 	deps := make([]extension.Dependency, 0, len(dependencies))
 	for _, dep := range dependencies {
-		dependency, err := r.NewDependency(dep.GetTypeName(), dep.GetBytea())
+		dependency, err := r.dependencyFromBytes(dep.GetTypeName(), dep.GetBytea())
 		if err != nil {
 			return nil, err
 		}
@@ -94,8 +94,8 @@ func (r *reflection) NewDependencies(dependencies ...*internalpb.Dependency) ([]
 	return deps, nil
 }
 
-// NewGrain creates a new instance of Grain from its FQN
-func (r *reflection) NewGrain(kind string) (Grain, error) {
+// instantiateGrain creates a new instance of Grain from its FQN
+func (r *reflection) instantiateGrain(kind string) (Grain, error) {
 	rtype, ok := r.registry.TypeOf(kind)
 	if !ok {
 		return nil, errors.ErrGrainNotRegistered

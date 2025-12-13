@@ -37,6 +37,9 @@ func TestConfig(t *testing.T) {
 			DiscoveryPortName: "gossipName",
 			RemotingPortName:  "remotingName",
 			PeersPortName:     "peersPortName",
+			PodLabels: map[string]string{
+				"app": "my-actor-system",
+			},
 		}
 		assert.NoError(t, config.Validate())
 	})

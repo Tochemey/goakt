@@ -42,7 +42,7 @@ func TestReflection(t *testing.T) {
 		actor := NewMockActor()
 		newRegistry.Register(actor)
 		reflection := newReflection(newRegistry)
-		actual, err := reflection.NewActor("actor.MockActor")
+		actual, err := reflection.instantiateActor("actor.MockActor")
 		assert.NoError(t, err)
 		assert.NotNil(t, actual)
 		assert.IsType(t, new(MockActor), actual)
@@ -50,14 +50,14 @@ func TestReflection(t *testing.T) {
 	t.Run("With NewActor actor not found", func(t *testing.T) {
 		newRegistry := registry.NewRegistry()
 		reflection := newReflection(newRegistry)
-		actual, err := reflection.NewActor("actor.fakeActor")
+		actual, err := reflection.instantiateActor("actor.fakeActor")
 		assert.Error(t, err)
 		assert.Nil(t, actual)
 	})
 	t.Run("With unregistered actor", func(t *testing.T) {
 		tl := registry.NewRegistry()
 		reflection := newReflection(tl)
-		actual, err := reflection.NewActor("actor.fakeActor")
+		actual, err := reflection.instantiateActor("actor.fakeActor")
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, errors.ErrTypeNotRegistered)
 		assert.Nil(t, actual)
@@ -67,7 +67,7 @@ func TestReflection(t *testing.T) {
 		type normalStruct struct{}
 		newRegistry.Register(new(normalStruct))
 		reflection := newReflection(newRegistry)
-		actual, err := reflection.NewActor("actor.normalStruct")
+		actual, err := reflection.instantiateActor("actor.normalStruct")
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, errors.ErrInstanceNotAnActor)
 		assert.Nil(t, actual)
@@ -83,7 +83,7 @@ func TestReflection(t *testing.T) {
 		require.NotNil(t, bytea)
 		require.NotEmpty(t, bytea)
 
-		actual, err := reflection.NewDependency(typeName, bytea)
+		actual, err := reflection.dependencyFromBytes(typeName, bytea)
 		require.NoError(t, err)
 		require.NotNil(t, actual)
 		require.IsType(t, dependency, actual)
@@ -94,7 +94,7 @@ func TestReflection(t *testing.T) {
 		type normalStruct struct{}
 		newRegistry.Register(new(normalStruct))
 		reflection := newReflection(newRegistry)
-		actual, err := reflection.NewDependency("actor.normalStruct", []byte{})
+		actual, err := reflection.dependencyFromBytes("actor.normalStruct", []byte{})
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, errors.ErrInstanceNotDependency)
 		assert.Nil(t, actual)
@@ -102,7 +102,7 @@ func TestReflection(t *testing.T) {
 	t.Run("With unregistered dependency", func(t *testing.T) {
 		tl := registry.NewRegistry()
 		reflection := newReflection(tl)
-		actual, err := reflection.NewDependency("actor.fakeDependency", []byte{})
+		actual, err := reflection.dependencyFromBytes("actor.fakeDependency", []byte{})
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, errors.ErrDependencyTypeNotRegistered)
 		assert.Nil(t, actual)
@@ -114,7 +114,7 @@ func TestReflection(t *testing.T) {
 		reflection := newReflection(newRegistry)
 		typeName := registry.Name(dependency)
 
-		actual, err := reflection.NewDependency(typeName, []byte("invalid"))
+		actual, err := reflection.dependencyFromBytes(typeName, []byte("invalid"))
 		require.Error(t, err)
 		require.Nil(t, actual)
 	})
@@ -135,7 +135,7 @@ func TestReflection(t *testing.T) {
 			Bytea:    bytea,
 		}
 
-		dependencies, err := reflection.NewDependencies(pb)
+		dependencies, err := reflection.dependenciesFromProto(pb)
 		require.NoError(t, err)
 		require.NotNil(t, dependencies)
 		require.Len(t, dependencies, 1)
@@ -156,7 +156,7 @@ func TestReflection(t *testing.T) {
 			Bytea:    []byte("invalid"),
 		}
 
-		dependencies, err := reflection.NewDependencies(pb)
+		dependencies, err := reflection.dependenciesFromProto(pb)
 		require.Error(t, err)
 		require.Nil(t, dependencies)
 		require.Empty(t, dependencies)
@@ -166,7 +166,7 @@ func TestReflection(t *testing.T) {
 		grain := NewMockGrain()
 		newRegistry.Register(grain)
 		reflection := newReflection(newRegistry)
-		actual, err := reflection.NewGrain("actor.MockGrain")
+		actual, err := reflection.instantiateGrain("actor.MockGrain")
 		assert.NoError(t, err)
 		assert.NotNil(t, actual)
 		assert.IsType(t, new(MockGrain), actual)
@@ -174,14 +174,14 @@ func TestReflection(t *testing.T) {
 	t.Run("With NewGrain grain not found", func(t *testing.T) {
 		newRegistry := registry.NewRegistry()
 		reflection := newReflection(newRegistry)
-		actual, err := reflection.NewGrain("actor.fakeGrain")
+		actual, err := reflection.instantiateGrain("actor.fakeGrain")
 		assert.Error(t, err)
 		assert.Nil(t, actual)
 	})
 	t.Run("With unregistered grain", func(t *testing.T) {
 		tl := registry.NewRegistry()
 		reflection := newReflection(tl)
-		actual, err := reflection.NewGrain("actor.fakeGrain")
+		actual, err := reflection.instantiateGrain("actor.fakeGrain")
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, errors.ErrGrainNotRegistered)
 		assert.Nil(t, actual)
@@ -191,7 +191,7 @@ func TestReflection(t *testing.T) {
 		type normalStruct struct{}
 		newRegistry.Register(new(normalStruct))
 		reflection := newReflection(newRegistry)
-		actual, err := reflection.NewGrain("actor.normalStruct")
+		actual, err := reflection.instantiateGrain("actor.normalStruct")
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, errors.ErrInstanceNotAnGrain)
 		assert.Nil(t, actual)

@@ -620,12 +620,12 @@ func (x *actorSystem) recreateGrain(ctx context.Context, serializedGrain *intern
 
 	process, ok = x.grains.Get(identity.String())
 	if !ok {
-		grain, err := x.getReflection().NewGrain(identity.Kind())
+		grain, err := x.getReflection().instantiateGrain(identity.Kind())
 		if err != nil {
 			return err
 		}
 
-		dependencies, err := x.getReflection().NewDependencies(serializedGrain.GetDependencies()...)
+		dependencies, err := x.getReflection().dependenciesFromProto(serializedGrain.GetDependencies()...)
 		if err != nil {
 			return err
 		}
