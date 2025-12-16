@@ -23,7 +23,7 @@ require (
 	github.com/testcontainers/testcontainers-go v0.40.0
 	github.com/testcontainers/testcontainers-go/modules/consul v0.40.0
 	github.com/testcontainers/testcontainers-go/modules/etcd v0.40.0
-	github.com/tochemey/olric v0.3.2
+	github.com/tochemey/olric v0.3.3
 	github.com/travisjeffery/go-dynaport v1.0.0
 	github.com/zeebo/xxh3 v1.0.2
 	go.akshayshah.org/connectproto v0.6.0
@@ -51,7 +51,6 @@ require (
 	github.com/antithesishq/antithesis-sdk-go v0.5.0 // indirect
 	github.com/armon/go-metrics v0.4.1 // indirect
 	github.com/bits-and-blooms/bitset v1.24.4 // indirect
-	github.com/buraksezer/consistent v0.10.0 // indirect
 	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
