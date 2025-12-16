@@ -12,7 +12,7 @@ require (
 	github.com/grandcat/zeroconf v1.0.0
 	github.com/hashicorp/consul/api v1.33.0
 	github.com/hashicorp/go-sockaddr v1.0.7
-	github.com/hashicorp/memberlist v0.5.3
+	github.com/hashicorp/memberlist v0.5.4
 	github.com/kapetan-io/tackle v0.13.0
 	github.com/klauspost/compress v1.18.2
 	github.com/nats-io/nats-server/v2 v2.12.2
