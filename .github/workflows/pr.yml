@@ -18,7 +18,7 @@ jobs:
     outputs:
       build: ${{ steps.filter.outputs.build }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - uses: dorny/paths-filter@v3
@@ -54,7 +54,7 @@ jobs:
       GOFLAGS: -mod=readonly
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           submodules: false
           fetch-depth: 0

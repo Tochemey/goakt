@@ -16,7 +16,7 @@ jobs:
     steps:
       - name: Checkout
         id: checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
       - name: Stale
         id: stale
         uses: actions/stale@v10
