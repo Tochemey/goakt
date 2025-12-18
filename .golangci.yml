@@ -51,6 +51,15 @@ linters:
         - cancelled
         - behaviour
         - initialised
+    revive:
+      enable-all-rules: false
+      enable-default-rules: false
+      rules:
+        - name: var-naming
+          arguments:
+            - [] # allowlist for initialisms
+            - [] # blocklist for initialisms
+            - [ { skipPackageNameChecks: true } ]
   exclusions:
     generated: lax
     presets:
