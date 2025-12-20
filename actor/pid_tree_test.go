@@ -689,6 +689,58 @@ func TestTreeNodeLookupMissing(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestNodeByName(t *testing.T) {
+	newTreeWithNodes := func(t *testing.T) (*tree, *PID, *PID) {
+		t.Helper()
+		system, _ := NewActorSystem("TestSys")
+		tree := newTree()
+		root := MockPID(system, "root", 1)
+		child := MockPID(system, "child", 2)
+		require.NoError(t, tree.addRootNode(root))
+		require.NoError(t, tree.addNode(root, child))
+		t.Cleanup(tree.reset)
+		return tree, root, child
+	}
+
+	t.Run("empty name", func(t *testing.T) {
+		tree := newTree()
+		node, ok := tree.nodeByName("")
+		require.False(t, ok)
+		require.Nil(t, node)
+	})
+
+	t.Run("missing name", func(t *testing.T) {
+		tree, _, _ := newTreeWithNodes(t)
+		node, ok := tree.nodeByName("missing")
+		require.False(t, ok)
+		require.Nil(t, node)
+	})
+
+	t.Run("root name", func(t *testing.T) {
+		tree, root, _ := newTreeWithNodes(t)
+		node, ok := tree.nodeByName(root.Name())
+		require.True(t, ok)
+		require.NotNil(t, node)
+		require.Equal(t, root.ID(), node.pid.Load().ID())
+	})
+
+	t.Run("child name", func(t *testing.T) {
+		tree, _, child := newTreeWithNodes(t)
+		node, ok := tree.nodeByName(child.Name())
+		require.True(t, ok)
+		require.NotNil(t, node)
+		require.Equal(t, child.ID(), node.pid.Load().ID())
+	})
+
+	t.Run("deleted name", func(t *testing.T) {
+		tree, _, child := newTreeWithNodes(t)
+		tree.deleteNode(child)
+		node, ok := tree.nodeByName(child.Name())
+		require.False(t, ok)
+		require.Nil(t, node)
+	})
+}
+
 func TestTreeResetPreservesNoSender(t *testing.T) {
 	system, _ := NewActorSystem("TestSys")
 	impl, ok := system.(*actorSystem)

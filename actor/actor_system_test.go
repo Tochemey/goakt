@@ -71,10 +71,10 @@ import (
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/log"
-	mockcluster "github.com/tochemey/goakt/v3/mocks/cluster"
+	mockscluster "github.com/tochemey/goakt/v3/mocks/cluster"
 	mocksdiscovery "github.com/tochemey/goakt/v3/mocks/discovery"
 	mocksextension "github.com/tochemey/goakt/v3/mocks/extension"
-	mockremote "github.com/tochemey/goakt/v3/mocks/remote"
+	mocksremote "github.com/tochemey/goakt/v3/mocks/remote"
 	"github.com/tochemey/goakt/v3/passivation"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
@@ -216,7 +216,7 @@ func TestActorSystem(t *testing.T) {
 		require.False(t, sys.Running())
 	})
 	t.Run("When metrics callback fails fetching cluster members", func(t *testing.T) {
-		clusterMock := mockcluster.NewCluster(t)
+		clusterMock := mockscluster.NewCluster(t)
 
 		sys, err := NewActorSystem(
 			"testSys",
@@ -480,7 +480,7 @@ func TestActorSystem(t *testing.T) {
 		ctx := context.TODO()
 		actorName := uuid.NewString()
 
-		clusterMock := new(mockcluster.Cluster)
+		clusterMock := new(mockscluster.Cluster)
 		system := MockReplicationTestSystem(clusterMock)
 
 		system.locker.Lock()
@@ -886,7 +886,7 @@ func TestActorSystem(t *testing.T) {
 		ctx := context.TODO()
 		actorName := uuid.NewString()
 
-		clusterMock := new(mockcluster.Cluster)
+		clusterMock := new(mockscluster.Cluster)
 		system := MockReplicationTestSystem(clusterMock)
 
 		clusterMock.EXPECT().GetActor(mock.Anything, actorName).Return(nil, assert.AnError)
@@ -896,6 +896,45 @@ func TestActorSystem(t *testing.T) {
 		require.Error(t, err)
 		assert.ErrorIs(t, err, assert.AnError)
 		assert.ErrorContains(t, err, "failed to fetch remote actor")
+		require.Nil(t, addr)
+	})
+	t.Run("With ActorOf failure when cluster address is invalid", func(t *testing.T) {
+		ctx := context.TODO()
+		actorName := "remoteActor"
+
+		clusterMock := new(mockscluster.Cluster)
+		system := MockReplicationTestSystem(clusterMock)
+
+		system.locker.Lock()
+		system.actors = newTree()
+		system.locker.Unlock()
+
+		clusterMock.EXPECT().GetActor(mock.Anything, actorName).Return(&internalpb.Actor{
+			Address: "invalid-address",
+		}, nil)
+		t.Cleanup(func() { clusterMock.AssertExpectations(t) })
+
+		addr, pid, err := system.ActorOf(ctx, actorName)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "address format is invalid")
+		require.Nil(t, addr)
+		require.Nil(t, pid)
+	})
+	t.Run("With RemoteActor failure when cluster address is invalid", func(t *testing.T) {
+		ctx := context.TODO()
+		actorName := "remoteActor"
+
+		clusterMock := new(mockscluster.Cluster)
+		system := MockReplicationTestSystem(clusterMock)
+
+		clusterMock.EXPECT().GetActor(mock.Anything, actorName).Return(&internalpb.Actor{
+			Address: "invalid-address",
+		}, nil)
+		t.Cleanup(func() { clusterMock.AssertExpectations(t) })
+
+		addr, err := system.RemoteActor(ctx, actorName)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "address format is invalid")
 		require.Nil(t, addr)
 	})
 	t.Run("With LocalActor", func(t *testing.T) {
@@ -993,7 +1032,7 @@ func TestActorSystem(t *testing.T) {
 		ctx := context.TODO()
 		actorName := "remoteActor"
 
-		clusterMock := mockcluster.NewCluster(t)
+		clusterMock := mockscluster.NewCluster(t)
 		system := MockReplicationTestSystem(clusterMock)
 
 		system.locker.Lock()
@@ -1010,7 +1049,7 @@ func TestActorSystem(t *testing.T) {
 		ctx := context.TODO()
 		actorName := "remoteActor"
 
-		clusterMock := mockcluster.NewCluster(t)
+		clusterMock := mockscluster.NewCluster(t)
 		system := MockReplicationTestSystem(clusterMock)
 
 		system.locker.Lock()
@@ -1024,14 +1063,34 @@ func TestActorSystem(t *testing.T) {
 		assert.ErrorIs(t, err, assert.AnError)
 		assert.ErrorContains(t, err, "failed to fetch remote actor")
 	})
+	t.Run("With Kill: cluster returned invalid address", func(t *testing.T) {
+		ctx := context.TODO()
+		actorName := "remoteActor"
+
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+
+		system.locker.Lock()
+		system.actors = newTree()
+		system.locker.Unlock()
+
+		clusterMock.EXPECT().GetActor(mock.Anything, actorName).Return(&internalpb.Actor{
+			Address: "invalid-address",
+		}, nil)
+
+		err := system.Kill(ctx, actorName)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "failed to parse remote actor")
+		assert.ErrorContains(t, err, "address format is invalid")
+	})
 	t.Run("With Kill: stop remote actor via remoting", func(t *testing.T) {
 		ctx := context.TODO()
 		actorName := "remoteActor"
 		remoteHost := "10.0.0.1"
 		remotePort := 9090
 
-		clusterMock := mockcluster.NewCluster(t)
-		remotingMock := mockremote.NewRemoting(t)
+		clusterMock := mockscluster.NewCluster(t)
+		remotingMock := mocksremote.NewRemoting(t)
 		system := MockReplicationTestSystem(clusterMock)
 
 		system.locker.Lock()
@@ -2082,7 +2141,7 @@ func TestActorSystem(t *testing.T) {
 	})
 	t.Run("ActorRefs returns error when cluster scan fails", func(t *testing.T) {
 		ctx := context.TODO()
-		clusterMock := new(mockcluster.Cluster)
+		clusterMock := new(mockscluster.Cluster)
 		system := MockReplicationTestSystem(clusterMock)
 
 		system.locker.Lock()
@@ -2946,6 +3005,49 @@ func TestRemoteTell(t *testing.T) {
 		assert.Equal(t, connect.CodeInternal, connectErr.Code())
 		assert.ErrorContains(t, err, gerrors.ErrInvalidRemoteMessage.Error())
 	})
+	t.Run("With RemoteTell invalid receiver address", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		require.NoError(t, err)
+
+		require.NoError(t, sys.Start(ctx))
+		pause.For(time.Second)
+
+		system := sys.(*actorSystem)
+		t.Cleanup(func() {
+			assert.NoError(t, system.Stop(ctx))
+		})
+
+		anyMessage, err := anypb.New(new(testpb.TestSend))
+		require.NoError(t, err)
+
+		remoteMsg := &internalpb.RemoteMessage{
+			Receiver: "invalid-address",
+			Message:  anyMessage,
+		}
+
+		req := connect.NewRequest(
+			&internalpb.RemoteTellRequest{RemoteMessages: []*internalpb.RemoteMessage{remoteMsg}},
+		)
+
+		resp, err := system.RemoteTell(ctx, req)
+		require.Error(t, err)
+		require.Nil(t, resp)
+
+		var connectErr *connect.Error
+		require.True(t, errors.As(err, &connectErr))
+		assert.Equal(t, connect.CodeInvalidArgument, connectErr.Code())
+		assert.ErrorContains(t, err, "address format is invalid")
+	})
 
 	t.Run("With invalid message", func(t *testing.T) {
 		// create the context
@@ -3794,6 +3896,49 @@ func TestRemoteAsk(t *testing.T) {
 		require.True(t, errors.As(err, &connectErr))
 		assert.Equal(t, connect.CodeInternal, connectErr.Code())
 		assert.ErrorContains(t, err, gerrors.ErrInvalidRemoteMessage.Error())
+	})
+	t.Run("With RemoteAsk invalid receiver address", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "0.0.0.0"
+
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
+		require.NoError(t, err)
+
+		require.NoError(t, sys.Start(ctx))
+		pause.For(time.Second)
+
+		system := sys.(*actorSystem)
+		t.Cleanup(func() {
+			assert.NoError(t, system.Stop(ctx))
+		})
+
+		anyMessage, err := anypb.New(new(testpb.TestReply))
+		require.NoError(t, err)
+
+		remoteMsg := &internalpb.RemoteMessage{
+			Receiver: "invalid-address",
+			Message:  anyMessage,
+		}
+
+		req := connect.NewRequest(
+			&internalpb.RemoteAskRequest{RemoteMessages: []*internalpb.RemoteMessage{remoteMsg}},
+		)
+
+		resp, err := system.RemoteAsk(ctx, req)
+		require.Error(t, err)
+		require.Nil(t, resp)
+
+		var connectErr *connect.Error
+		require.True(t, errors.As(err, &connectErr))
+		assert.Equal(t, connect.CodeInvalidArgument, connectErr.Code())
+		assert.ErrorContains(t, err, "address format is invalid")
 	})
 
 	t.Run("With invalid message", func(t *testing.T) {
@@ -4923,7 +5068,7 @@ func TestRemotingLookup(t *testing.T) {
 		ctx := context.TODO()
 		actorName := uuid.NewString()
 
-		clusterMock := new(mockcluster.Cluster)
+		clusterMock := new(mockscluster.Cluster)
 		system := MockReplicationTestSystem(clusterMock)
 		system.remotingEnabled.Store(true)
 
@@ -5890,7 +6035,7 @@ func TestActorSystemStartClusterErrors(t *testing.T) {
 		require.NoError(t, err)
 
 		actorSys := sys.(*actorSystem)
-		clusterMock := new(mockcluster.Cluster)
+		clusterMock := new(mockscluster.Cluster)
 		clusterMock.EXPECT().Start(mock.Anything).Return(assert.AnError)
 
 		actorSys.clusterEnabled.Store(true)
@@ -7160,7 +7305,7 @@ func TestRemotingReinstate(t *testing.T) {
 }
 
 func TestReplicateActors_ErrorPaths(t *testing.T) {
-	clusterMock := new(mockcluster.Cluster)
+	clusterMock := new(mockscluster.Cluster)
 	system := MockReplicationTestSystem(clusterMock)
 	system.relocationEnabled.Store(true)
 
@@ -7200,7 +7345,7 @@ func TestReplicateActors_ErrorPaths(t *testing.T) {
 }
 
 func TestReplicateGrains_ErrorPaths(t *testing.T) {
-	clusterMock := new(mockcluster.Cluster)
+	clusterMock := new(mockscluster.Cluster)
 	system := MockReplicationTestSystem(clusterMock)
 	system.relocationEnabled.Store(true)
 
@@ -7232,7 +7377,7 @@ func TestReplicateGrains_ErrorPaths(t *testing.T) {
 }
 
 func TestResyncActors_ErrorPaths(t *testing.T) {
-	clusterMock := new(mockcluster.Cluster)
+	clusterMock := new(mockscluster.Cluster)
 	system := MockReplicationTestSystem(clusterMock)
 
 	system.locker.Lock()
@@ -7270,7 +7415,7 @@ func TestResyncActors_ErrorPaths(t *testing.T) {
 }
 
 func TestResyncGrains_ErrorPaths(t *testing.T) {
-	clusterMock := new(mockcluster.Cluster)
+	clusterMock := new(mockscluster.Cluster)
 	system := MockReplicationTestSystem(clusterMock)
 
 	system.locker.Lock()
@@ -7301,7 +7446,7 @@ func TestResyncGrains_ErrorPaths(t *testing.T) {
 }
 
 func TestCleanupCluster_RemoveKindFailure(t *testing.T) {
-	clusterMock := new(mockcluster.Cluster)
+	clusterMock := new(mockscluster.Cluster)
 	system := MockReplicationTestSystem(clusterMock)
 	system.grains = ds.NewMap[string, *grainPID]()
 
@@ -7323,7 +7468,7 @@ func TestCleanupCluster_RemoveKindFailure(t *testing.T) {
 }
 
 func TestCleanupCluster_RemoveActorFailure(t *testing.T) {
-	clusterMock := new(mockcluster.Cluster)
+	clusterMock := new(mockscluster.Cluster)
 	system := MockReplicationTestSystem(clusterMock)
 	system.grains = ds.NewMap[string, *grainPID]()
 
@@ -7343,7 +7488,7 @@ func TestCleanupCluster_RemoveActorFailure(t *testing.T) {
 }
 
 func TestCleanupCluster_RemoveGrainFailure(t *testing.T) {
-	clusterMock := new(mockcluster.Cluster)
+	clusterMock := new(mockscluster.Cluster)
 	system := MockReplicationTestSystem(clusterMock)
 	system.grains = ds.NewMap[string, *grainPID]()
 
@@ -7367,7 +7512,7 @@ func TestCleanupCluster_RemoveGrainFailure(t *testing.T) {
 }
 
 func TestStopReturnsCleanupClusterError(t *testing.T) {
-	clusterMock := new(mockcluster.Cluster)
+	clusterMock := new(mockscluster.Cluster)
 	system := MockReplicationTestSystem(clusterMock)
 	system.grains = ds.NewMap[string, *grainPID]()
 	system.extensions = ds.NewMap[string, extension.Extension]()
@@ -7651,7 +7796,7 @@ func TestPeers(t *testing.T) {
 	t.Run("When cluster is enabled", func(t *testing.T) {
 		ctx := context.TODO()
 
-		clusterMock := mockcluster.NewCluster(t)
+		clusterMock := mockscluster.NewCluster(t)
 		system := MockReplicationTestSystem(clusterMock)
 
 		system.locker.Lock()
@@ -7817,7 +7962,7 @@ func TestLeader(t *testing.T) {
 	})
 	t.Run("When cluster members lookup fails", func(t *testing.T) {
 		ctx := t.Context()
-		clusterMock := mockcluster.NewCluster(t)
+		clusterMock := mockscluster.NewCluster(t)
 		system := MockReplicationTestSystem(clusterMock)
 
 		clusterMock.EXPECT().Members(mock.Anything).Return(nil, assert.AnError)

@@ -546,7 +546,7 @@ func TestRestart(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
-	t.Run("With restart an actor and its children", func(t *testing.T) {
+	t.Run("With restart an actor and its descendants", func(t *testing.T) {
 		ctx := context.TODO()
 		host := "127.0.0.1"
 		ports := dynaport.Get(1)
@@ -596,9 +596,11 @@ func TestRestart(t *testing.T) {
 
 		require.EqualValues(t, 1, pid.RestartCount())
 		require.EqualValues(t, 1, pid.ChildrenCount())
+		require.EqualValues(t, 1, cid.RestartCount())
+		require.EqualValues(t, 1, gcid.RestartCount())
 
 		// let us send 10 messages to the actor
-		for i := 0; i < count; i++ {
+		for range count {
 			err = Tell(ctx, pid, new(testpb.TestSend))
 			assert.NoError(t, err)
 		}
@@ -607,6 +609,173 @@ func TestRestart(t *testing.T) {
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
 		assert.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("With restart an actor and its suspended descendant", func(t *testing.T) {
+		ctx := context.TODO()
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemote(remote.NewConfig(host, ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		pause.For(time.Second)
+
+		pid, err := actorSystem.Spawn(ctx, "test", NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		child, err := pid.SpawnChild(ctx, "child", NewMockSupervised())
+		require.NoError(t, err)
+		require.NotNil(t, child)
+
+		pause.For(time.Second)
+
+		child.supervisor = &Supervisor{
+			Mutex:      sync.Mutex{},
+			strategy:   OneForOneStrategy,
+			maxRetries: 0,
+			timeout:    0,
+			directives: ds.NewMap[string, Directive](),
+		}
+
+		require.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
+		pause.For(time.Second)
+
+		require.False(t, child.IsRunning())
+		require.True(t, child.IsSuspended())
+
+		err = pid.Restart(ctx)
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		require.True(t, pid.IsRunning())
+		require.True(t, child.IsRunning())
+		require.False(t, child.IsSuspended())
+		require.EqualValues(t, 1, pid.ChildrenCount())
+		require.EqualValues(t, 1, child.RestartCount())
+
+		err = pid.Shutdown(ctx)
+		assert.NoError(t, err)
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("With restart an actor and its descendant failure", func(t *testing.T) {
+		ctx := context.TODO()
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemote(remote.NewConfig(host, ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		pause.For(time.Second)
+
+		pid, err := actorSystem.Spawn(ctx, "test", NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		child, err := pid.SpawnChild(ctx, "child", NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, child)
+		pause.For(500 * time.Millisecond)
+
+		grandchild, err := child.SpawnChild(ctx, "grandchild", NewMockRestart())
+		require.NoError(t, err)
+		require.NotNil(t, grandchild)
+		pause.For(500 * time.Millisecond)
+
+		err = pid.Restart(ctx)
+		require.Error(t, err)
+		require.False(t, pid.IsRunning())
+
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("With restart subtree reattaches existing nodes", func(t *testing.T) {
+		ctx := context.TODO()
+
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+
+		system := sys.(*actorSystem)
+		system.noSender = &PID{actorSystem: system, logger: log.DiscardLogger}
+		system.noSender.flipState(runningState, true)
+
+		rootAddr := system.actorAddress("root")
+		root, err := newPID(ctx, rootAddr, NewMockActor(), withActorSystem(system), withCustomLogger(log.DiscardLogger))
+		require.NoError(t, err)
+
+		childAddr := address.NewWithParent("child", rootAddr.System(), rootAddr.Host(), rootAddr.Port(), rootAddr)
+		child, err := newPID(ctx, childAddr, NewMockActor(), withActorSystem(system), withCustomLogger(log.DiscardLogger))
+		require.NoError(t, err)
+
+		t.Cleanup(func() {
+			root.stopSupervisionLoop()
+			child.stopSupervisionLoop()
+		})
+
+		tree := system.tree()
+		require.NoError(t, tree.addRootNode(root))
+		require.NoError(t, tree.addNode(root, child))
+
+		parentNode, ok := tree.node(root.ID())
+		require.True(t, ok)
+		parentNode.descendants.Delete(child.ID())
+		parentNode.watchees.Delete(child.ID())
+
+		childNode, ok := tree.node(child.ID())
+		require.True(t, ok)
+		childNode.parent.Store(nil)
+
+		child.flipState(runningState, false)
+
+		err = restartSubtree(ctx, &restartNode{pid: child}, root, tree, nil, system)
+		require.NoError(t, err)
+
+		require.Len(t, root.Children(), 1)
+		require.Equal(t, root.ID(), child.Parent().ID())
+	})
+	t.Run("With restart subtree ignores non-running descendants", func(t *testing.T) {
+		ctx := context.TODO()
+
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+
+		system := sys.(*actorSystem)
+		system.noSender = &PID{actorSystem: system, logger: log.DiscardLogger}
+		system.noSender.flipState(runningState, true)
+
+		rootAddr := system.actorAddress("root")
+		root, err := newPID(ctx, rootAddr, NewMockActor(), withActorSystem(system), withCustomLogger(log.DiscardLogger))
+		require.NoError(t, err)
+
+		childAddr := address.NewWithParent("child", rootAddr.System(), rootAddr.Host(), rootAddr.Port(), rootAddr)
+		child, err := newPID(ctx, childAddr, NewMockActor(), withActorSystem(system), withCustomLogger(log.DiscardLogger))
+		require.NoError(t, err)
+
+		t.Cleanup(func() {
+			root.stopSupervisionLoop()
+			child.stopSupervisionLoop()
+		})
+
+		tree := system.tree()
+		require.NoError(t, tree.addRootNode(root))
+		require.NoError(t, tree.addNode(root, child))
+
+		child.flipState(runningState, false)
+
+		require.Len(t, tree.descendants(root), 1)
+		subtree := buildRestartSubtree(root, tree)
+		require.Empty(t, subtree.children)
 	})
 	t.Run("With restart an actor with PreStart failure", func(t *testing.T) {
 		ctx := context.TODO()

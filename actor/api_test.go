@@ -244,6 +244,53 @@ func TestAsk(t *testing.T) {
 		err = sys.Stop(ctx)
 		require.NoError(t, err)
 	})
+	t.Run("With invalid remote sender address", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		pause.For(time.Second)
+
+		anyMessage, err := anypb.New(new(testpb.TestSend))
+		require.NoError(t, err)
+
+		// create a message to send to the test actor
+		message := &internalpb.RemoteMessage{
+			Sender:   "invalid-address",
+			Receiver: actorRef.Address().String(),
+			Message:  anyMessage,
+		}
+		// send the message to the actor
+		reply, err := Ask(ctx, actorRef, message, replyTimeout)
+		// perform some assertions
+		require.Error(t, err)
+		assert.ErrorIs(t, err, errors.ErrInvalidRemoteMessage)
+		assert.Nil(t, reply)
+
+		err = sys.Stop(ctx)
+		require.NoError(t, err)
+	})
 	t.Run("With Batch request happy path", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()

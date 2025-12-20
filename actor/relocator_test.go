@@ -36,6 +36,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/errors"
@@ -163,6 +164,73 @@ func TestRelocatorSpawnRemoteActorRemoveActorError(t *testing.T) {
 	var internalErr *errors.InternalError
 	require.ErrorAs(t, err, &internalErr)
 	require.Contains(t, err.Error(), expectedErr.Error())
+}
+
+func TestRelocatorSpawnRemoteActorInvalidAddress(t *testing.T) {
+	ctx := context.Background()
+
+	system := MockReplicationTestSystem(mockscluster.NewCluster(t))
+
+	actor := &relocator{
+		remoting: remote.NewRemoting(),
+		pid: &PID{
+			actorSystem: system,
+		},
+	}
+
+	targetActor := &internalpb.Actor{
+		Address: "invalid-address",
+	}
+	targetPeer := &cluster.Peer{
+		Host:         "127.0.0.1",
+		RemotingPort: 8080,
+	}
+
+	err := actor.spawnRemoteActor(ctx, targetActor, targetPeer)
+	require.Error(t, err)
+
+	var internalErr *errors.InternalError
+	require.ErrorAs(t, err, &internalErr)
+	assert.ErrorContains(t, err, "address format is invalid")
+}
+
+func TestRelocatorRelocateActorsInvalidAddress(t *testing.T) {
+	ctx := context.Background()
+
+	actor := &relocator{}
+
+	var eg errgroup.Group
+	actor.relocateActors(ctx, &eg, []*internalpb.Actor{
+		{Address: "invalid-address"},
+	}, nil, nil)
+
+	err := eg.Wait()
+	require.Error(t, err)
+
+	var spawnErr *errors.SpawnError
+	require.ErrorAs(t, err, &spawnErr)
+	assert.ErrorContains(t, err, "address format is invalid")
+}
+
+func TestRelocatorRelocateActorsInvalidAddressForPeerShare(t *testing.T) {
+	ctx := context.Background()
+
+	actor := &relocator{}
+
+	var eg errgroup.Group
+	actor.relocateActors(ctx, &eg, nil, [][]*internalpb.Actor{
+		nil,
+		{{Address: "invalid-address"}},
+	}, []*cluster.Peer{
+		{Host: "127.0.0.1", RemotingPort: 8080},
+	})
+
+	err := eg.Wait()
+	require.Error(t, err)
+
+	var spawnErr *errors.SpawnError
+	require.ErrorAs(t, err, &spawnErr)
+	assert.ErrorContains(t, err, "address format is invalid")
 }
 
 func TestRelocation(t *testing.T) {

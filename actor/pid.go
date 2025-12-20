@@ -79,6 +79,11 @@ type taskCompletion struct {
 	Task     func() (proto.Message, error)
 }
 
+type restartNode struct {
+	pid      *PID
+	children []*restartNode
+}
+
 // PID specifies an actor unique process
 // With the PID one can send a ReceiveContext to the actor
 // PID helps to identify the actor in the local actor system
@@ -504,9 +509,9 @@ func (pid *PID) Address() *address.Address {
 
 // Restart restarts the actor.
 // During restart all messages that are in the mailbox and not yet processed will be ignored.
-// Only the direct alive children of the given actor will be shudown and respawned with their initial state.
+// All alive descendants of the given actor will be shutdown and respawned with their initial state.
 // Bear in mind that restarting an actor will reinitialize the actor to initial state.
-// In case any of the direct child restart fails the given actor will not be started at all.
+// In case any descendant restart fails the given actor will not be started at all.
 func (pid *PID) Restart(ctx context.Context) error {
 	if pid == nil || pid.Address() == nil {
 		return gerrors.ErrUndefinedActor
@@ -517,114 +522,16 @@ func (pid *PID) Restart(ctx context.Context) error {
 	tree := actorSystem.tree()
 	deathWatch := actorSystem.getDeathWatch()
 
-	// prepare the child actors to respawn
-	// because during the restart process they will be gone
-	// from the system and need to be restarted. Only direct children that are alive
-	children := pid.Children()
+	// snapshot all alive descendants before shutdown so we can rebuild the full subtree
+	// even after the death watch removes entries from the tree.
+	subtree := buildRestartSubtree(pid, tree)
 	// get the parent node of the actor
 	parent := pid.ActorSystem().NoSender()
 	if ppid, ok := tree.parent(pid); ok {
 		parent = ppid
 	}
 
-	if pid.IsRunning() {
-		if err := pid.Shutdown(ctx); err != nil {
-			return err
-		}
-		tk := ticker.New(10 * time.Millisecond)
-		tk.Start()
-		tickerStopSig := make(chan registry.Unit, 1)
-		go func() {
-			for range tk.Ticks {
-				if !pid.IsRunning() {
-					tickerStopSig <- registry.Unit{}
-					return
-				}
-			}
-		}()
-		<-tickerStopSig
-		tk.Stop()
-	}
-
-	pid.resetBehavior()
-	if err := pid.init(ctx); err != nil {
-		return err
-	}
-
-	if !pid.IsSuspended() {
-		// re-add the actor back to the actor tree and cluster
-		if err := chain.New(chain.WithFailFast()).
-			AddRunner(func() error {
-				if !parent.Equals(pid.ActorSystem().NoSender()) {
-					return tree.addNode(parent, pid)
-				}
-				return nil
-			}).
-			AddRunner(func() error { tree.addWatcher(pid, deathWatch); return nil }).
-			AddRunner(func() error { return actorSystem.putActorOnCluster(pid) }).
-			Run(); err != nil {
-			return err
-		}
-	}
-
-	// restart all the previous children
-	eg, gctx := errgroup.WithContext(ctx)
-	for _, child := range children {
-		child := child
-		eg.Go(func() error {
-			if err := child.Restart(gctx); err != nil {
-				return err
-			}
-
-			if !child.IsSuspended() {
-				// re-add the child back to the tree and cluster
-				// since these calls are idempotent
-				if err := chain.New(chain.WithFailFast()).
-					AddRunner(func() error { return tree.addNode(pid, child) }).
-					AddRunner(func() error { tree.addWatcher(child, deathWatch); return nil }).
-					AddRunner(func() error { return actorSystem.putActorOnCluster(child) }).
-					Run(); err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-	}
-
-	// wait for the child actor to spawn
-	if err := eg.Wait(); err != nil {
-		// disable messages processing
-		pid.flipState(stoppingState, true)
-		pid.flipState(runningState, false)
-		return fmt.Errorf("actor=(%s) failed to restart: %w", pid.Name(), err)
-	}
-
-	pid.processing.Store(idle)
-	pid.flipState(suspendedState, false)
-	pid.startSupervision()
-	pid.startPassivation()
-
-	if err := pid.healthCheck(ctx); err != nil {
-		return err
-	}
-
-	pid.restartCount.Inc()
-	pid.fireSystemMessage(ctx, new(goaktpb.PostStart))
-	if pid.eventsStream != nil {
-		pid.eventsStream.Publish(
-			eventsTopic, &goaktpb.ActorRestarted{
-				Address:     pid.ID(),
-				RestartedAt: timestamppb.Now(),
-			},
-		)
-	}
-
-	if err := pid.registerMetrics(); err != nil {
-		return err
-	}
-
-	pid.logger.Debugf("actor=(%s) successfully restarted..:)", pid.Name())
-	return nil
+	return restartSubtree(ctx, subtree, parent, tree, deathWatch, actorSystem)
 }
 
 // RestartCount returns the total number of re-starts by the given PID
@@ -2333,6 +2240,123 @@ func (pid *PID) registerMetrics() error {
 
 		return err
 	}
+	return nil
+}
+
+func buildRestartSubtree(root *PID, tree *tree) *restartNode {
+	rootNode := &restartNode{pid: root}
+	descendants := tree.descendants(root)
+	if len(descendants) == 0 {
+		return rootNode
+	}
+
+	nodes := make(map[string]*restartNode, len(descendants))
+	for _, descendant := range descendants {
+		if descendant.IsRunning() || descendant.IsSuspended() {
+			nodes[descendant.ID()] = &restartNode{pid: descendant}
+		}
+	}
+	if len(nodes) == 0 {
+		return rootNode
+	}
+
+	for _, node := range nodes {
+		parent, ok := tree.parent(node.pid)
+		if !ok || parent == nil {
+			continue
+		}
+		if parent.Equals(root) {
+			rootNode.children = append(rootNode.children, node)
+			continue
+		}
+		if parentNode, ok := nodes[parent.ID()]; ok {
+			parentNode.children = append(parentNode.children, node)
+		}
+	}
+
+	return rootNode
+}
+
+func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *tree, deathWatch *PID, actorSystem ActorSystem) error {
+	if node == nil || node.pid == nil {
+		return nil
+	}
+
+	pid := node.pid
+	if pid.IsRunning() {
+		if err := pid.Shutdown(ctx); err != nil {
+			return err
+		}
+		tk := ticker.New(10 * time.Millisecond)
+		tk.Start()
+		tickerStopSig := make(chan registry.Unit, 1)
+		go func() {
+			for range tk.Ticks {
+				if !pid.IsRunning() {
+					tickerStopSig <- registry.Unit{}
+					return
+				}
+			}
+		}()
+		<-tickerStopSig
+		tk.Stop()
+	}
+
+	pid.resetBehavior()
+	if err := pid.init(ctx); err != nil {
+		return err
+	}
+
+	// re-add the actor back to the actor tree and cluster
+	if err := chain.New(chain.WithFailFast()).
+		AddRunner(func() error { return tree.addOrAttachNode(parent, pid) }).
+		AddRunner(func() error { tree.addWatcher(pid, deathWatch); return nil }).
+		AddRunner(func() error { return actorSystem.putActorOnCluster(pid) }).
+		Run(); err != nil {
+		return err
+	}
+
+	eg, gctx := errgroup.WithContext(ctx)
+	for _, child := range node.children {
+		child := child
+		eg.Go(func() error {
+			return restartSubtree(gctx, child, pid, tree, deathWatch, actorSystem)
+		})
+	}
+
+	// wait for descendant actors to restart
+	if err := eg.Wait(); err != nil {
+		// disable messages processing
+		pid.flipState(stoppingState, true)
+		pid.flipState(runningState, false)
+		return fmt.Errorf("actor=(%s) failed to restart: %w", pid.Name(), err)
+	}
+
+	pid.processing.Store(idle)
+	pid.flipState(suspendedState, false)
+	pid.startSupervision()
+	pid.startPassivation()
+
+	if err := pid.healthCheck(ctx); err != nil {
+		return err
+	}
+
+	pid.restartCount.Inc()
+	pid.fireSystemMessage(ctx, new(goaktpb.PostStart))
+	if pid.eventsStream != nil {
+		pid.eventsStream.Publish(
+			eventsTopic, &goaktpb.ActorRestarted{
+				Address:     pid.ID(),
+				RestartedAt: timestamppb.Now(),
+			},
+		)
+	}
+
+	if err := pid.registerMetrics(); err != nil {
+		return err
+	}
+
+	pid.logger.Debugf("actor=(%s) successfully restarted..:)", pid.Name())
 	return nil
 }
 

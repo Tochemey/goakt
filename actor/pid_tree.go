@@ -159,6 +159,59 @@ func (x *tree) addNode(parent, pid *PID) error {
 	return nil
 }
 
+// attachNode links an existing pid under the given parent.
+// It reestablishes parent/child and watcher/watchee relationships without
+// creating a new node or changing the tree size.
+func (x *tree) attachNode(parent, pid *PID) error {
+	x.Lock()
+	defer x.Unlock()
+
+	if pid == nil {
+		return errors.New("pid is nil")
+	}
+
+	if parent == nil {
+		return errors.New("parent pid is nil")
+	}
+
+	if parent.Equals(pid.ActorSystem().NoSender()) {
+		return errors.New("parent pid cannot be NoSender")
+	}
+
+	parentNode, ok := x.pids.Get(parent.ID())
+	if !ok {
+		return errors.New("parent pid does not exist")
+	}
+
+	childNode, ok := x.pids.Get(pid.ID())
+	if !ok {
+		return errors.New("pid does not exist")
+	}
+
+	childNode.parent.Store(parent)
+	parentNode.descendants.Set(pid.ID(), childNode)
+	parentNode.watchees.Set(pid.ID(), pid)
+	childNode.watchers.Set(parent.ID(), parent)
+	return nil
+}
+
+// addOrAttachNode ensures pid is linked under parent, adding it when missing.
+func (x *tree) addOrAttachNode(parent, pid *PID) error {
+	if pid == nil || parent == nil {
+		return nil
+	}
+
+	if parent.Equals(pid.ActorSystem().NoSender()) {
+		return nil
+	}
+
+	if _, ok := x.node(pid.ID()); ok {
+		return x.attachNode(parent, pid)
+	}
+
+	return x.addNode(parent, pid)
+}
+
 // addWatcher registers watcher to watch pid.
 // Silently no-ops if any PID is nil, NoSender, or not found.
 // Time Complexity: O(1) (amortized).

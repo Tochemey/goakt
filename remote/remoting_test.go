@@ -210,6 +210,17 @@ func TestRemoteLookup_NotFoundReturnsNoSender(t *testing.T) {
 	assert.True(t, addr.Equals(address.NoSender()))
 }
 
+func TestRemoteLookup_InvalidAddress(t *testing.T) {
+	r := NewRemoting()
+	mockClient := &mockRemotingServiceClient{lookupAddress: "invalid-address"}
+	setClientFactory(t, r, func(string, int) internalpbconnect.RemotingServiceClient { return mockClient })
+
+	addr, err := r.RemoteLookup(context.Background(), "host", 1000, "actor")
+	assert.Error(t, err)
+	assert.Nil(t, addr)
+	assert.ErrorContains(t, err, "address format is invalid")
+}
+
 func TestRemotingContextPropagatorInjectError(t *testing.T) {
 	injectErr := fmt.Errorf("inject failure")
 	prop := &failingPropagator{err: injectErr}
@@ -322,6 +333,7 @@ type mockRemotingServiceClient struct {
 	lastTellReq     *internalpb.RemoteTellRequest
 	lastAskReq      *internalpb.RemoteAskRequest
 	batchResponses  []*anypb.Any
+	lookupAddress   string
 }
 
 func (x *mockRemotingServiceClient) RemoteAsk(_ context.Context, req *connect.Request[internalpb.RemoteAskRequest]) (*connect.Response[internalpb.RemoteAskResponse], error) {
@@ -344,7 +356,10 @@ func (x *mockRemotingServiceClient) RemoteTell(_ context.Context, req *connect.R
 func (x *mockRemotingServiceClient) RemoteLookup(_ context.Context, req *connect.Request[internalpb.RemoteLookupRequest]) (*connect.Response[internalpb.RemoteLookupResponse], error) {
 	x.lookupHeader = req.Header().Clone()
 	msg := req.Msg
-	addr := address.New(msg.GetName(), "sys", msg.GetHost(), int(msg.GetPort())).String()
+	addr := x.lookupAddress
+	if addr == "" {
+		addr = address.New(msg.GetName(), "sys", msg.GetHost(), int(msg.GetPort())).String()
+	}
 	return connect.NewResponse(&internalpb.RemoteLookupResponse{Address: addr}), nil
 }
 
