@@ -27,7 +27,6 @@ package actor
 import (
 	"context"
 
-	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/log"
 )
@@ -63,7 +62,7 @@ func (x *rootGuardian) Receive(ctx *ReceiveContext) {
 	case *goaktpb.PanicSignal:
 		x.handlePanicSignal(ctx)
 	case *goaktpb.Terminated:
-		actorID := address.From(msg.GetAddress()).String()
+		actorID := msg.GetAddress()
 		x.pid.logger.Debugf("%s terminated", actorID)
 		// TODO: decide what to do the actor
 	default:

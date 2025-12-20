@@ -39,7 +39,7 @@ import (
 	"github.com/tochemey/goakt/v3/discovery/nats"
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/internal/chain"
-	"github.com/tochemey/goakt/v3/internal/collection"
+	"github.com/tochemey/goakt/v3/internal/ds"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/remote"
@@ -49,7 +49,7 @@ type MultiNodes struct {
 	extensions []extension.Extension
 	gt         *testing.T
 	logger     log.Logger
-	nodes      *collection.Map[string, *TestNode]
+	nodes      *ds.Map[string, *TestNode]
 	kinds      []actor.Actor
 	started    *atomic.Bool
 	server     *natsserver.Server
@@ -65,7 +65,7 @@ func NewMultiNodes(t *testing.T, logger log.Logger, kinds []actor.Actor, extensi
 	instance := &MultiNodes{
 		gt:         t,
 		logger:     logger,
-		nodes:      collection.NewMap[string, *TestNode](),
+		nodes:      ds.NewMap[string, *TestNode](),
 		kinds:      kinds,
 		extensions: extensions,
 		started:    atomic.NewBool(false),

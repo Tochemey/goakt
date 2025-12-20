@@ -34,7 +34,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/internal/collection"
+	"github.com/tochemey/goakt/v3/internal/ds"
 )
 
 // Strategy represents the type of supervision strategy used by an actor's supervisor.
@@ -196,7 +196,7 @@ type Supervisor struct {
 	// Specifies the time range to restart the faulty actor
 	timeout time.Duration
 
-	directives *collection.Map[string, Directive]
+	directives *ds.Map[string, Directive]
 }
 
 // NewSupervisor creates a new instance of supervisor behavior for managing actor supervision.
@@ -216,7 +216,7 @@ func NewSupervisor(opts ...SupervisorOption) *Supervisor {
 	s := &Supervisor{
 		Mutex:      sync.Mutex{},
 		strategy:   OneForOneStrategy,
-		directives: collection.NewMap[string, Directive](),
+		directives: ds.NewMap[string, Directive](),
 		maxRetries: 0,
 		timeout:    -1,
 	}
@@ -269,7 +269,7 @@ func (s *Supervisor) Timeout() time.Duration {
 func (s *Supervisor) Reset() {
 	s.Lock()
 	s.strategy = OneForAllStrategy
-	s.directives = collection.NewMap[string, Directive]()
+	s.directives = ds.NewMap[string, Directive]()
 	s.Unlock()
 }
 

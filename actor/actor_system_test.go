@@ -64,7 +64,7 @@ import (
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
-	"github.com/tochemey/goakt/v3/internal/collection"
+	"github.com/tochemey/goakt/v3/internal/ds"
 	internalpb "github.com/tochemey/goakt/v3/internal/internalpb"
 	internalpbconnect "github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v3/internal/metric"
@@ -354,7 +354,7 @@ func TestActorSystem(t *testing.T) {
 		remoteAddr, err := newActorSystem.RemoteActor(ctx, actorName)
 		require.NoError(t, err)
 		require.NotNil(t, remoteAddr)
-		require.True(t, proto.Equal(remoteAddr, addr))
+		require.True(t, remoteAddr.Equals(addr))
 
 		remoting := remote.NewRemoting()
 		from := address.NoSender()
@@ -796,14 +796,7 @@ func TestActorSystem(t *testing.T) {
 		require.True(t, addr.Equals(address.NoSender()))
 
 		// attempt to send a message will fail
-		addr = address.From(
-			&goaktpb.Address{
-				Host: host,
-				Port: int32(remotingPort),
-				Name: actorName,
-				Id:   "",
-			},
-		)
+		addr = address.New(actorName, "", host, remotingPort)
 		from := address.NoSender()
 		reply, err := remoting.RemoteAsk(ctx, from, addr, new(testpb.TestReply), 20*time.Second)
 		require.Error(t, err)
@@ -1046,12 +1039,9 @@ func TestActorSystem(t *testing.T) {
 		system.remoting = remotingMock
 		system.locker.Unlock()
 
+		addr := address.New(actorName, "test-replication", remoteHost, remotePort)
 		clusterMock.EXPECT().GetActor(mock.Anything, actorName).Return(&internalpb.Actor{
-			Address: &goaktpb.Address{
-				Host: remoteHost,
-				Port: int32(remotePort),
-				Name: actorName,
-			},
+			Address: addr.String(),
 		}, nil)
 		remotingMock.EXPECT().RemoteStop(mock.Anything, remoteHost, remotePort, actorName).Return(nil)
 
@@ -2806,9 +2796,10 @@ func TestRemoteContextPropagation(t *testing.T) {
 		sysImpl := sys.(*actorSystem)
 		sysImpl.remotingEnabled.Store(true)
 
+		addr := address.New("actor", sys.Name(), host, port)
 		req := connect.NewRequest(&internalpb.RemoteAskRequest{
 			RemoteMessages: []*internalpb.RemoteMessage{
-				{Receiver: &goaktpb.Address{System: sys.Name(), Host: host, Port: int32(port), Name: "actor"}},
+				{Receiver: addr.String()},
 			},
 		})
 
@@ -2835,9 +2826,10 @@ func TestRemoteContextPropagation(t *testing.T) {
 		sysImpl := sys.(*actorSystem)
 		sysImpl.remotingEnabled.Store(true)
 
+		addr := address.New("actor", sys.Name(), host, port)
 		req := connect.NewRequest(&internalpb.RemoteTellRequest{
 			RemoteMessages: []*internalpb.RemoteMessage{
-				{Receiver: &goaktpb.Address{System: sys.Name(), Host: host, Port: int32(port), Name: "actor"}},
+				{Receiver: addr.String()},
 			},
 		})
 
@@ -2936,8 +2928,8 @@ func TestRemoteTell(t *testing.T) {
 		})
 
 		remoteMsg := &internalpb.RemoteMessage{
-			Sender:   address.NoSender().Address,
-			Receiver: actorRef.Address().Address,
+			Sender:   address.NoSender().String(),
+			Receiver: actorRef.Address().String(),
 			Message:  &anypb.Any{TypeUrl: "invalid"},
 		}
 
@@ -3035,20 +3027,15 @@ func TestRemoteTell(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		// create a wrong address
-		addr := &goaktpb.Address{
-			Host: host,
-			Port: 2222,
-			Name: "",
-			Id:   "",
-		}
+		// create a wrong address with no name
+		addr := address.New("", sys.Name(), host, 2222)
 
 		remoting := remote.NewRemoting()
 		// create a message to send to the test actor
 		message := new(testpb.TestSend)
 		// send the message to the actor
 		from := address.NoSender()
-		err = remoting.RemoteTell(ctx, from, address.From(addr), message)
+		err = remoting.RemoteTell(ctx, from, addr, message)
 		// perform some assertions
 		require.Error(t, err)
 
@@ -3266,19 +3253,14 @@ func TestRemoteTell(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// create a wrong address
-		addr := &goaktpb.Address{
-			Host: host,
-			Port: 2222,
-			Name: "",
-			Id:   "",
-		}
+		addr := address.New("", sys.Name(), host, 2222)
 
 		remoting := remote.NewRemoting()
 		from := address.NoSender()
 		// create a message to send to the test actor
 		message := new(testpb.TestSend)
 		// send the message to the actor
-		err = remoting.RemoteBatchTell(ctx, from, address.From(addr), []proto.Message{message})
+		err = remoting.RemoteBatchTell(ctx, from, addr, []proto.Message{message})
 		// perform some assertions
 		require.Error(t, err)
 
@@ -3795,8 +3777,8 @@ func TestRemoteAsk(t *testing.T) {
 		})
 
 		remoteMsg := &internalpb.RemoteMessage{
-			Sender:   address.NoSender().Address,
-			Receiver: actorRef.Address().Address,
+			Sender:   address.NoSender().String(),
+			Receiver: actorRef.Address().String(),
 			Message:  &anypb.Any{TypeUrl: "invalid"},
 		}
 
@@ -3897,19 +3879,14 @@ func TestRemoteAsk(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// get the address of the actor
-		addr := &goaktpb.Address{
-			Host: host,
-			Port: 2222,
-			Name: "",
-			Id:   "",
-		}
+		addr := address.New("", sys.Name(), host, 2222)
 
 		remoting := remote.NewRemoting()
 		from := address.NoSender()
 		// create a message to send to the test actor
 		message := new(testpb.TestReply)
 		// send the message to the actor
-		reply, err := remoting.RemoteAsk(ctx, from, address.From(addr), message, time.Minute)
+		reply, err := remoting.RemoteAsk(ctx, from, addr, message, time.Minute)
 		// perform some assertions
 		require.Error(t, err)
 		require.Nil(t, reply)
@@ -4132,19 +4109,14 @@ func TestRemoteAsk(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// get the address of the actor
-		addr := &goaktpb.Address{
-			Host: host,
-			Port: 2222,
-			Name: "",
-			Id:   "",
-		}
+		addr := address.New("", sys.Name(), host, 2222)
 
 		remoting := remote.NewRemoting()
 		from := address.NoSender()
 		// create a message to send to the test actor
 		message := new(testpb.TestReply)
 		// send the message to the actor
-		reply, err := remoting.RemoteBatchAsk(ctx, from, address.From(addr), []proto.Message{message}, time.Minute)
+		reply, err := remoting.RemoteBatchAsk(ctx, from, addr, []proto.Message{message}, time.Minute)
 		// perform some assertions
 		require.Error(t, err)
 		require.Nil(t, reply)
@@ -4416,8 +4388,8 @@ func TestRemoteAsk(t *testing.T) {
 		require.NoError(t, err)
 
 		remoteMsg := &internalpb.RemoteMessage{
-			Sender:   address.NoSender().Address,
-			Receiver: actorRef.Address().Address,
+			Sender:   address.NoSender().String(),
+			Receiver: actorRef.Address().String(),
 			Message:  payload,
 		}
 
@@ -7193,8 +7165,9 @@ func TestReplicateActors_ErrorPaths(t *testing.T) {
 	system.relocationEnabled.Store(true)
 
 	// Expect PutKind to fail for singleton actors and trigger the warning path.
+	addr := address.New("singleton", "test-replication", "127.0.0.1", 8080)
 	singleton := &internalpb.Actor{
-		Address:     &goaktpb.Address{Host: "127.0.0.1", Port: 8080, Name: "singleton"},
+		Address:     addr.String(),
 		Type:        "singleton-kind",
 		IsSingleton: true,
 	}
@@ -7202,7 +7175,7 @@ func TestReplicateActors_ErrorPaths(t *testing.T) {
 
 	// Expect PutActor to fail for regular actors after publish attempts.
 	regular := &internalpb.Actor{
-		Address: &goaktpb.Address{Host: "127.0.0.1", Port: 8080, Name: "regular"},
+		Address: address.New("regular", "test-replication", "127.0.0.1", 8080).String(),
 		Type:    "regular-kind",
 	}
 	clusterMock.EXPECT().PutActor(mock.Anything, regular).Return(fmt.Errorf("put actor failure")).Once()
@@ -7265,7 +7238,7 @@ func TestResyncActors_ErrorPaths(t *testing.T) {
 	system.locker.Lock()
 	system.actors = newTree()
 	system.actors.noSender = system.noSender
-	system.grains = collection.NewMap[string, *grainPID]()
+	system.grains = ds.NewMap[string, *grainPID]()
 	system.locker.Unlock()
 
 	dependency := mocksextension.NewDependency(t)
@@ -7274,7 +7247,7 @@ func TestResyncActors_ErrorPaths(t *testing.T) {
 	pid := &PID{
 		actor:        NewMockActor(),
 		address:      address.New("resync-actor", system.name, "127.0.0.1", int(system.remoteConfig.BindPort())),
-		dependencies: collection.NewMap[string, extension.Dependency](),
+		dependencies: ds.NewMap[string, extension.Dependency](),
 		logger:       log.DiscardLogger,
 		actorSystem:  system,
 	}
@@ -7282,9 +7255,9 @@ func TestResyncActors_ErrorPaths(t *testing.T) {
 	pid.flipState(runningState, true)
 
 	node := &pidNode{
-		watchers:    collection.NewMap[string, *PID](),
-		watchees:    collection.NewMap[string, *PID](),
-		descendants: collection.NewMap[string, *pidNode](),
+		watchers:    ds.NewMap[string, *PID](),
+		watchees:    ds.NewMap[string, *PID](),
+		descendants: ds.NewMap[string, *pidNode](),
 	}
 	node.pid.Store(pid)
 	system.actors.pids.Set(pid.ID(), node)
@@ -7301,7 +7274,7 @@ func TestResyncGrains_ErrorPaths(t *testing.T) {
 	system := MockReplicationTestSystem(clusterMock)
 
 	system.locker.Lock()
-	system.grains = collection.NewMap[string, *grainPID]()
+	system.grains = ds.NewMap[string, *grainPID]()
 	system.locker.Unlock()
 
 	dependency := mocksextension.NewDependency(t)
@@ -7330,7 +7303,7 @@ func TestResyncGrains_ErrorPaths(t *testing.T) {
 func TestCleanupCluster_RemoveKindFailure(t *testing.T) {
 	clusterMock := new(mockcluster.Cluster)
 	system := MockReplicationTestSystem(clusterMock)
-	system.grains = collection.NewMap[string, *grainPID]()
+	system.grains = ds.NewMap[string, *grainPID]()
 
 	actorRef := ActorRef{
 		name:        "singleton-actor",
@@ -7352,7 +7325,7 @@ func TestCleanupCluster_RemoveKindFailure(t *testing.T) {
 func TestCleanupCluster_RemoveActorFailure(t *testing.T) {
 	clusterMock := new(mockcluster.Cluster)
 	system := MockReplicationTestSystem(clusterMock)
-	system.grains = collection.NewMap[string, *grainPID]()
+	system.grains = ds.NewMap[string, *grainPID]()
 
 	actorRef := ActorRef{
 		name:    "actor",
@@ -7372,7 +7345,7 @@ func TestCleanupCluster_RemoveActorFailure(t *testing.T) {
 func TestCleanupCluster_RemoveGrainFailure(t *testing.T) {
 	clusterMock := new(mockcluster.Cluster)
 	system := MockReplicationTestSystem(clusterMock)
-	system.grains = collection.NewMap[string, *grainPID]()
+	system.grains = ds.NewMap[string, *grainPID]()
 
 	actorRef := ActorRef{
 		name:    "actor",
@@ -7396,8 +7369,8 @@ func TestCleanupCluster_RemoveGrainFailure(t *testing.T) {
 func TestStopReturnsCleanupClusterError(t *testing.T) {
 	clusterMock := new(mockcluster.Cluster)
 	system := MockReplicationTestSystem(clusterMock)
-	system.grains = collection.NewMap[string, *grainPID]()
-	system.extensions = collection.NewMap[string, extension.Extension]()
+	system.grains = ds.NewMap[string, *grainPID]()
+	system.extensions = ds.NewMap[string, extension.Extension]()
 	system.relocating.Store(false)
 	system.actors = newTree()
 	system.actors.noSender = nil
@@ -7416,15 +7389,15 @@ func TestStopReturnsCleanupClusterError(t *testing.T) {
 	pid := &PID{
 		actor:        NewMockActor(),
 		address:      address.New("actor", system.name, "127.0.0.1", 8080),
-		dependencies: collection.NewMap[string, extension.Dependency](),
+		dependencies: ds.NewMap[string, extension.Dependency](),
 		logger:       log.DiscardLogger,
 		actorSystem:  system,
 	}
 	pid.flipState(runningState, true)
 	node := &pidNode{
-		watchers:    collection.NewMap[string, *PID](),
-		watchees:    collection.NewMap[string, *PID](),
-		descendants: collection.NewMap[string, *pidNode](),
+		watchers:    ds.NewMap[string, *PID](),
+		watchees:    ds.NewMap[string, *PID](),
+		descendants: ds.NewMap[string, *pidNode](),
 	}
 	node.pid.Store(pid)
 	system.actors.pids.Set(pid.ID(), node)

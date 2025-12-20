@@ -127,8 +127,14 @@ func toReceiveContext(ctx context.Context, from, to *PID, message proto.Message,
 		if err != nil {
 			return nil, gerrors.NewErrInvalidRemoteMessage(err)
 		}
+
 		receiveContext.build(ctx, from, to, actual, async)
-		return receiveContext.withRemoteSender(address.From(msg.GetSender())), nil
+		addr, err := address.Parse(msg.GetSender())
+		if err != nil {
+			return nil, gerrors.NewErrInvalidRemoteMessage(err)
+		}
+
+		return receiveContext.withRemoteSender(addr), nil
 	default:
 		receiveContext.build(ctx, from, to, message, async)
 		return receiveContext.withRemoteSender(address.NoSender()), nil

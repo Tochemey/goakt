@@ -22,47 +22,52 @@
  * SOFTWARE.
  */
 
-package actor
+package chunk
 
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/tochemey/goakt/v3/address"
-	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/registry"
 )
 
-func TestActorRef(t *testing.T) {
-	t.Run("With Equals", func(t *testing.T) {
-		addr := address.New("name", "system", "host", 1234)
-		actorRef := toActorRef(&internalpb.Actor{
-			Address: addr.String(),
-			Type:    "kind",
-		})
-
-		newActorRef := toActorRef(&internalpb.Actor{
-			Address: addr.String(),
-			Type:    "kind",
-		})
-
-		require.Equal(t, "name", actorRef.Name())
-		require.Equal(t, "kind", actorRef.Kind())
-		require.True(t, addr.Equals(actorRef.Address()))
-		require.True(t, newActorRef.Equals(actorRef))
-		require.False(t, newActorRef.IsRelocatable())
+func TestChunk(t *testing.T) {
+	t.Run("With empty slice", func(t *testing.T) {
+		var items []int
+		chunkSize := 2
+		chunks := Chunkify(items, chunkSize)
+		require.Empty(t, chunks)
 	})
-	t.Run("From PID", func(t *testing.T) {
-		addr := address.New("name", "system", "host", 1234)
-		actor := NewMockActor()
-		pid := &PID{
-			address: addr,
-			actor:   actor,
+	t.Run("With chunk size a dividend of total number of items", func(t *testing.T) {
+		items := []int{2, 7, 9, 4, 6, 10}
+		chunkSize := 2
+		chunks := Chunkify(items, chunkSize)
+		expected := [][]int{
+			{2, 7},
+			{9, 4},
+			{6, 10},
 		}
-		actorRef := fromPID(pid)
-		require.Equal(t, "name", actorRef.Name())
-		require.Equal(t, registry.Name(actor), actorRef.Kind())
-		require.False(t, actorRef.IsRelocatable())
+
+		require.EqualValues(t, len(expected), len(chunks))
+		require.ElementsMatch(t, expected[0], chunks[0])
+		require.ElementsMatch(t, expected[1], chunks[1])
+		assert.ElementsMatch(t, expected[2], chunks[2])
+	})
+	t.Run("With chunk size not a dividend of total number of items", func(t *testing.T) {
+		items := []int{2, 7, 9, 4, 6, 10, 11}
+		chunkSize := 2
+		chunks := Chunkify(items, chunkSize)
+		expected := [][]int{
+			{2, 7},
+			{9, 4},
+			{6, 10},
+			{11},
+		}
+
+		require.EqualValues(t, len(expected), len(chunks))
+		require.ElementsMatch(t, expected[0], chunks[0])
+		require.ElementsMatch(t, expected[1], chunks[1])
+		require.ElementsMatch(t, expected[2], chunks[2])
+		assert.ElementsMatch(t, expected[3], chunks[3])
 	})
 }

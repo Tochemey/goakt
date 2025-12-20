@@ -388,12 +388,12 @@ func (r *remoting) RemoteTell(ctx context.Context, from, to *address.Address, me
 		return gerrors.NewErrInvalidMessage(err)
 	}
 
-	remoteClient := r.RemotingServiceClient(to.GetHost(), int(to.GetPort()))
+	remoteClient := r.RemotingServiceClient(to.Host(), to.Port())
 	request := connect.NewRequest(&internalpb.RemoteTellRequest{
 		RemoteMessages: []*internalpb.RemoteMessage{
 			{
-				Sender:   from.Address,
-				Receiver: to.Address,
+				Sender:   from.String(),
+				Receiver: to.String(),
 				Message:  marshaled,
 			},
 		},
@@ -422,12 +422,12 @@ func (r *remoting) RemoteAsk(ctx context.Context, from, to *address.Address, mes
 		return nil, gerrors.NewErrInvalidMessage(err)
 	}
 
-	remoteClient := r.RemotingServiceClient(to.GetHost(), int(to.GetPort()))
+	remoteClient := r.RemotingServiceClient(to.Host(), to.Port())
 	request := connect.NewRequest(&internalpb.RemoteAskRequest{
 		RemoteMessages: []*internalpb.RemoteMessage{
 			{
-				Sender:   from.Address,
-				Receiver: to.Address,
+				Sender:   from.String(),
+				Receiver: to.String(),
 				Message:  marshaled,
 			},
 		},
@@ -484,7 +484,7 @@ func (r *remoting) RemoteLookup(ctx context.Context, host string, port int, name
 		return nil, err
 	}
 
-	return address.From(response.Msg.GetAddress()), nil
+	return address.Parse(response.Msg.GetAddress())
 }
 
 // RemoteBatchTell sends multiple asynchronous messages to the same remote actor
@@ -493,7 +493,7 @@ func (r *remoting) RemoteLookup(ctx context.Context, host string, port int, name
 // The call succeeds or fails as a whole at the transport layer; no per-message
 // acknowledgement is returned.
 func (r *remoting) RemoteBatchTell(ctx context.Context, from, to *address.Address, messages []proto.Message) error {
-	remoteClient := r.RemotingServiceClient(to.GetHost(), int(to.GetPort()))
+	remoteClient := r.RemotingServiceClient(to.Host(), to.Port())
 	remoteMessages := make([]*internalpb.RemoteMessage, 0, len(messages))
 	for _, message := range messages {
 		if message != nil {
@@ -502,8 +502,8 @@ func (r *remoting) RemoteBatchTell(ctx context.Context, from, to *address.Addres
 				return gerrors.NewErrInvalidMessage(err)
 			}
 			remoteMessages = append(remoteMessages, &internalpb.RemoteMessage{
-				Sender:   from.Address,
-				Receiver: to.Address,
+				Sender:   from.String(),
+				Receiver: to.String(),
 				Message:  packed,
 			})
 		}
@@ -529,7 +529,7 @@ func (r *remoting) RemoteBatchTell(ctx context.Context, from, to *address.Addres
 // The number and order of responses may not match the requests. If correlation
 // is required, include a correlation ID within your message payloads.
 func (r *remoting) RemoteBatchAsk(ctx context.Context, from, to *address.Address, messages []proto.Message, timeout time.Duration) (responses []*anypb.Any, err error) {
-	remoteClient := r.RemotingServiceClient(to.GetHost(), int(to.GetPort()))
+	remoteClient := r.RemotingServiceClient(to.Host(), to.Port())
 
 	remoteMessages := make([]*internalpb.RemoteMessage, 0, len(messages))
 	for _, message := range messages {
@@ -539,8 +539,8 @@ func (r *remoting) RemoteBatchAsk(ctx context.Context, from, to *address.Address
 				return nil, gerrors.NewErrInvalidMessage(err)
 			}
 			remoteMessages = append(remoteMessages, &internalpb.RemoteMessage{
-				Sender:   from.Address,
-				Receiver: to.Address,
+				Sender:   from.String(),
+				Receiver: to.String(),
 				Message:  packed,
 			})
 		}

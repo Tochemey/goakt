@@ -647,7 +647,9 @@ func TestSpawn(t *testing.T) {
 
 		require.Len(t, items, 1)
 		item := items[0]
-		assert.True(t, pid.Address().Equals(address.From(item.GetAddress())))
+		addr, err := address.Parse(item.GetAddress())
+		require.NoError(t, err)
+		assert.True(t, pid.Address().Equals(addr))
 		assert.Equal(t, mockErr.Error(), item.GetReason())
 
 		// unsubscribe the consumer

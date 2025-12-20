@@ -47,6 +47,7 @@ import (
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/discovery"
 	"github.com/tochemey/goakt/v3/discovery/nats"
 	"github.com/tochemey/goakt/v3/goaktpb"
@@ -75,15 +76,16 @@ func TestNotRunningReturnsErrEngineNotRunning(t *testing.T) {
 	assert.False(t, cluster.IsRunning())
 	assert.False(t, cluster.IsLeader(ctx))
 
-	actor := &internalpb.Actor{Address: &goaktpb.Address{Name: "actor"}}
+	addr := address.New("actor", "system", "127.0.0.1", 0)
+	actor := &internalpb.Actor{Address: addr.String()}
 	require.ErrorIs(t, cluster.PutActor(ctx, actor), ErrEngineNotRunning)
 
-	_, err := cluster.GetActor(ctx, actor.GetAddress().GetName())
+	_, err := cluster.GetActor(ctx, "actor")
 	require.ErrorIs(t, err, ErrEngineNotRunning)
 
-	require.ErrorIs(t, cluster.RemoveActor(ctx, actor.GetAddress().GetName()), ErrEngineNotRunning)
+	require.ErrorIs(t, cluster.RemoveActor(ctx, "actor"), ErrEngineNotRunning)
 
-	actorExists, err := cluster.ActorExists(ctx, actor.GetAddress().GetName())
+	actorExists, err := cluster.ActorExists(ctx, "actor")
 	require.False(t, actorExists)
 	require.ErrorIs(t, err, ErrEngineNotRunning)
 
@@ -126,7 +128,7 @@ func TestNotRunningReturnsErrEngineNotRunning(t *testing.T) {
 	require.ErrorIs(t, err, ErrEngineNotRunning)
 	require.Nil(t, peers)
 
-	require.Zero(t, cluster.GetPartition(actor.GetAddress().GetName()))
+	require.Zero(t, cluster.GetPartition("actor"))
 
 	next, err := cluster.NextRoundRobinValue(ctx, ActorsRoundRobinKey)
 	require.ErrorIs(t, err, ErrEngineNotRunning)
@@ -241,7 +243,8 @@ func TestSingleNode(t *testing.T) {
 
 		// create an actor
 		actorName := uuid.NewString()
-		actor := &internalpb.Actor{Address: &goaktpb.Address{Name: actorName}}
+		addr := address.New(actorName, "system", host, remotingPort)
+		actor := &internalpb.Actor{Address: addr.String()}
 
 		// replicate the actor in the Node
 		err = cluster.PutActor(ctx, actor)
@@ -322,7 +325,8 @@ func TestSingleNode(t *testing.T) {
 
 		// create an actor
 		actorName := uuid.NewString()
-		actor := &internalpb.Actor{Address: &goaktpb.Address{Name: actorName}}
+		addr := address.New(actorName, "system", host, remotingPort)
+		actor := &internalpb.Actor{Address: addr.String()}
 		// replicate the actor in the Node
 		err = cluster.PutActor(ctx, actor)
 		require.NoError(t, err)
@@ -451,8 +455,9 @@ func TestSingleNode(t *testing.T) {
 		// create an actor
 		actorName := uuid.NewString()
 		actorKind := "kind"
+		addr := address.New(actorName, "system", host, remotingPort)
 		actor := &internalpb.Actor{
-			Address:     &goaktpb.Address{Name: actorName},
+			Address:     addr.String(),
 			Type:        actorKind,
 			IsSingleton: true,
 		}
@@ -964,7 +969,8 @@ func TestSingleNode(t *testing.T) {
 		require.NoError(t, err)
 
 		actorName := uuid.NewString()
-		actor := &internalpb.Actor{Address: &goaktpb.Address{Name: actorName}}
+		addr := address.New(actorName, "system", host, remotingPort)
+		actor := &internalpb.Actor{Address: addr.String()}
 		err = cluster.PutActor(ctx, actor)
 		require.NoError(t, err)
 
@@ -1177,7 +1183,8 @@ func TestSingleNode(t *testing.T) {
 		require.NoError(t, err)
 
 		actorName := uuid.NewString()
-		actor := &internalpb.Actor{Address: &goaktpb.Address{Name: actorName}}
+		addr := address.New(actorName, "system", host, remotingPort)
+		actor := &internalpb.Actor{Address: addr.String()}
 		err = cl.PutActor(ctx, actor)
 		require.NoError(t, err)
 
@@ -1303,11 +1310,13 @@ func TestMultipleNodes(t *testing.T) {
 
 		// create some actors
 		actorName := uuid.NewString()
+		node2Imp := node2.(*cluster)
+		remotingPort := node2Imp.node.RemotingPort
+		host := node2Imp.node.Host
+		addr := address.New(actorName, "testSystem", host, remotingPort)
 		actor := &internalpb.Actor{
-			Address: &goaktpb.Address{
-				Name: actorName,
-			},
-			Type: "actorKind",
+			Address: addr.String(),
+			Type:    "actorKind",
 		}
 
 		// put an actor
@@ -1356,11 +1365,10 @@ func TestMultipleNodes(t *testing.T) {
 
 		// put another actor
 		actorName2 := uuid.NewString()
+		node1Imp := node1.(*cluster)
 		actor2 := &internalpb.Actor{
-			Address: &goaktpb.Address{
-				Name: actorName2,
-			},
-			Type: "actorKind",
+			Address: address.New(actorName2, "testSystem", node1Imp.node.Host, node1Imp.node.RemotingPort).String(),
+			Type:    "actorKind",
 		}
 		err = node1.PutActor(ctx, actor2)
 		require.NoError(t, err)
@@ -1502,11 +1510,13 @@ func TestMultipleNodes(t *testing.T) {
 
 		// create some actors
 		actorName := uuid.NewString()
+		node2Imp := node2.(*cluster)
+		remotingPort := node2Imp.node.RemotingPort
+		host := node2Imp.node.Host
+		addr := address.New(actorName, "testSystem", host, remotingPort)
 		actor := &internalpb.Actor{
-			Address: &goaktpb.Address{
-				Name: actorName,
-			},
-			Type: "actorKind",
+			Address: addr.String(),
+			Type:    "actorKind",
 		}
 
 		// put an actor
@@ -1555,11 +1565,10 @@ func TestMultipleNodes(t *testing.T) {
 
 		// put another actor
 		actorName2 := uuid.NewString()
+		node1Imp := node1.(*cluster)
 		actor2 := &internalpb.Actor{
-			Address: &goaktpb.Address{
-				Name: actorName2,
-			},
-			Type: "actorKind",
+			Address: address.New(actorName2, "testSystem", node1Imp.node.Host, node1Imp.node.RemotingPort).String(),
+			Type:    "actorKind",
 		}
 		err = node1.PutActor(ctx, actor2)
 		require.NoError(t, err)

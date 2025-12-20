@@ -30,7 +30,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/atomic"
 
-	"github.com/tochemey/goakt/v3/internal/collection/queue"
+	"github.com/tochemey/goakt/v3/internal/queue"
 )
 
 // Subscriber defines the Subscriber Interface

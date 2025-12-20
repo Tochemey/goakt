@@ -60,7 +60,7 @@ import (
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
-	"github.com/tochemey/goakt/v3/internal/collection"
+	"github.com/tochemey/goakt/v3/internal/ds"
 	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
@@ -1538,7 +1538,7 @@ func MockSimpleClusterReadyActorSystem(rem remote.Remoting, cl cluster.Cluster, 
 	sys.started.Store(true)
 	sys.clusterEnabled.Store(true)
 	sys.shuttingDown.Store(false)
-	sys.grains = collection.NewMap[string, *grainPID]()
+	sys.grains = ds.NewMap[string, *grainPID]()
 	sys.registry = registry.NewRegistry()
 	sys.reflection = newReflection(sys.registry)
 	sys.grainsQueue = make(chan *internalpb.Grain, 1)

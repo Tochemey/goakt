@@ -7,7 +7,6 @@
 package internalpb
 
 import (
-	goaktpb "github.com/tochemey/goakt/v3/goaktpb"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -26,7 +25,7 @@ const (
 type Actor struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Specifies the actor address
-	Address *goaktpb.Address `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	Address string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
 	// Specifies the actor type
 	Type string `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
 	// Specifies if the actor is a singleton
@@ -75,11 +74,11 @@ func (*Actor) Descriptor() ([]byte, []int) {
 	return file_internal_actor_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *Actor) GetAddress() *goaktpb.Address {
+func (x *Actor) GetAddress() string {
 	if x != nil {
 		return x.Address
 	}
-	return nil
+	return ""
 }
 
 func (x *Actor) GetType() string {
@@ -136,9 +135,9 @@ var File_internal_actor_proto protoreflect.FileDescriptor
 const file_internal_actor_proto_rawDesc = "" +
 	"\n" +
 	"\x14internal/actor.proto\x12\n" +
-	"internalpb\x1a\x11goakt/goakt.proto\x1a\x19internal/dependency.proto\x1a\x1ainternal/passivation.proto\"\xe1\x02\n" +
-	"\x05Actor\x12*\n" +
-	"\aaddress\x18\x01 \x01(\v2\x10.goaktpb.AddressR\aaddress\x12\x12\n" +
+	"internalpb\x1a\x19internal/dependency.proto\x1a\x1ainternal/passivation.proto\"\xcf\x02\n" +
+	"\x05Actor\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12!\n" +
 	"\fis_singleton\x18\x03 \x01(\bR\visSingleton\x12 \n" +
 	"\vrelocatable\x18\x04 \x01(\bR\vrelocatable\x12R\n" +
@@ -168,19 +167,17 @@ func file_internal_actor_proto_rawDescGZIP() []byte {
 var file_internal_actor_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
 var file_internal_actor_proto_goTypes = []any{
 	(*Actor)(nil),               // 0: internalpb.Actor
-	(*goaktpb.Address)(nil),     // 1: goaktpb.Address
-	(*PassivationStrategy)(nil), // 2: internalpb.PassivationStrategy
-	(*Dependency)(nil),          // 3: internalpb.Dependency
+	(*PassivationStrategy)(nil), // 1: internalpb.PassivationStrategy
+	(*Dependency)(nil),          // 2: internalpb.Dependency
 }
 var file_internal_actor_proto_depIdxs = []int32{
-	1, // 0: internalpb.Actor.address:type_name -> goaktpb.Address
-	2, // 1: internalpb.Actor.passivation_strategy:type_name -> internalpb.PassivationStrategy
-	3, // 2: internalpb.Actor.dependencies:type_name -> internalpb.Dependency
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	1, // 0: internalpb.Actor.passivation_strategy:type_name -> internalpb.PassivationStrategy
+	2, // 1: internalpb.Actor.dependencies:type_name -> internalpb.Dependency
+	2, // [2:2] is the sub-list for method output_type
+	2, // [2:2] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	2, // [2:2] is the sub-list for extension extendee
+	0, // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_internal_actor_proto_init() }

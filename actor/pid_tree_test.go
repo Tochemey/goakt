@@ -32,7 +32,7 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/tochemey/goakt/v3/address"
-	"github.com/tochemey/goakt/v3/internal/collection"
+	"github.com/tochemey/goakt/v3/internal/ds"
 )
 
 func TestTree(t *testing.T) {
@@ -397,9 +397,9 @@ func TestSiblings(t *testing.T) {
 		pid := &PID{address: address.New("no_parent", "TestSys", "host", 0), actorSystem: actorSystem}
 		pidnode := &pidNode{
 			pid:         atomic.Pointer[PID]{},
-			watchers:    collection.NewMap[string, *PID](),
-			watchees:    collection.NewMap[string, *PID](),
-			descendants: collection.NewMap[string, *pidNode](),
+			watchers:    ds.NewMap[string, *PID](),
+			watchees:    ds.NewMap[string, *PID](),
+			descendants: ds.NewMap[string, *pidNode](),
 		}
 		pidnode.pid.Store(pid)
 

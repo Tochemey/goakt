@@ -50,7 +50,7 @@ import (
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
-	"github.com/tochemey/goakt/v3/internal/collection"
+	"github.com/tochemey/goakt/v3/internal/ds"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/metric"
 	"github.com/tochemey/goakt/v3/internal/pause"
@@ -1084,7 +1084,7 @@ func TestSupervisorStrategy(t *testing.T) {
 			strategy:   OneForOneStrategy,
 			maxRetries: 0,
 			timeout:    0,
-			directives: collection.NewMap[string, Directive](),
+			directives: ds.NewMap[string, Directive](),
 		}
 
 		require.Len(t, parent.Children(), 1)
@@ -1149,7 +1149,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
-	t.Run("With restart as supervisor strategy", func(t *testing.T) {
+	t.Run("With restart as supervisor strategy of a child actor", func(t *testing.T) {
 		ctx := context.TODO()
 		host := "127.0.0.1"
 		ports := dynaport.Get(1)
@@ -1425,7 +1425,7 @@ func TestSupervisorStrategy(t *testing.T) {
 			strategy:   OneForOneStrategy,
 			maxRetries: 0,
 			timeout:    0,
-			directives: collection.NewMap[string, Directive](),
+			directives: ds.NewMap[string, Directive](),
 		}
 
 		require.Len(t, parent.Children(), 1)
@@ -1453,7 +1453,7 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		require.NotNil(t, suspendedEvent)
 		require.False(t, proto.Equal(suspendedEvent, new(goaktpb.ActorSuspended)))
-		require.Equal(t, child.Name(), suspendedEvent.GetAddress().GetName())
+		require.Equal(t, child.ID(), suspendedEvent.GetAddress())
 
 		// unsubscribe the consumer
 		err = actorSystem.Unsubscribe(subscriber)
@@ -1682,7 +1682,6 @@ func TestSupervisorStrategy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
-
 	t.Run("When No Parent found actor is suspended", func(t *testing.T) {
 		ctx := context.TODO()
 		host := "127.0.0.1"
@@ -1736,7 +1735,6 @@ func TestSupervisorStrategy(t *testing.T) {
 			t.Fatal("suspend blocked with pending supervision stop signal")
 		}
 	})
-
 	t.Run("Stop signal emission is idempotent per cycle", func(t *testing.T) {
 		pid := MockSupervisionPID(t)
 
@@ -1792,7 +1790,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.Eventually(t, func() bool {
 			for message := range consumer.Iterator() {
 				if event, ok := message.Payload().(*goaktpb.ActorSuspended); ok {
-					if event.GetAddress().GetName() == child.Name() {
+					if event.GetAddress() == child.ID() {
 						return true
 					}
 				}
@@ -2424,7 +2422,7 @@ func TestSpawnChild(t *testing.T) {
 		pause.For(time.Second)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
-	t.Run("With restarting child actor when not shutdown", func(t *testing.T) {
+	t.Run("With recreating the same child actor will no-op", func(t *testing.T) {
 		ctx := context.TODO()
 		host := "127.0.0.1"
 		ports := dynaport.Get(1)
@@ -2584,7 +2582,7 @@ func TestSpawnChild(t *testing.T) {
 		require.Len(t, events, 1)
 
 		event := events[0]
-		assert.True(t, proto.Equal(parent.Address().Address, event.GetParent()))
+		assert.Equal(t, parent.ID(), event.GetParent())
 
 		//stop the actor
 		err = parent.Shutdown(ctx)
@@ -6073,7 +6071,7 @@ func TestToWireActorDependencyError(t *testing.T) {
 		actor:        NewMockActor(),
 		address:      address.New("actor-to-wire", "testSys", "127.0.0.1", 0),
 		fieldsLocker: sync.RWMutex{},
-		dependencies: collection.NewMap[string, extension.Dependency](),
+		dependencies: ds.NewMap[string, extension.Dependency](),
 	}
 
 	expectedErr := assert.AnError

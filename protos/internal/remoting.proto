@@ -2,7 +2,6 @@ syntax = "proto3";
 
 package internalpb;
 
-import "goakt/goakt.proto";
 import "google/protobuf/any.proto";
 import "google/protobuf/duration.proto";
 import "internal/dependency.proto";
@@ -77,15 +76,15 @@ message RemoteLookupRequest {
 
 message RemoteLookupResponse {
   // Specifies the actor address
-  goaktpb.Address address = 1;
+  string address = 1;
 }
 
 // RemoteMessage will be used by Actors to communicate remotely
 message RemoteMessage {
   // Specifies the sender' address
-  goaktpb.Address sender = 1;
+  string sender = 1;
   // Specifies the actor address
-  goaktpb.Address receiver = 2;
+  string receiver = 2;
   // Specifies the message to send to the actor
   // Any proto message is allowed to be sent
   google.protobuf.Any message = 3;

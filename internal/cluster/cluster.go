@@ -44,6 +44,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/discovery"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/hash"
@@ -304,8 +305,9 @@ func (x *cluster) PutActor(ctx context.Context, actor *internalpb.Actor) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
-	address := actor.GetAddress()
-	key := address.GetName()
+	// no need to check for nil address as it is validated during actor creation
+	addr, _ := address.Parse(actor.GetAddress())
+	key := addr.Name()
 
 	encoded, err := encode(actor)
 	if err != nil {

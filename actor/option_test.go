@@ -181,3 +181,26 @@ func TestWithMetrics(t *testing.T) {
 
 	assert.NotNil(t, system.metricProvider)
 }
+
+func TestWithDefaultSupervisor(t *testing.T) {
+	t.Run("When supervisor is nil", func(t *testing.T) {
+		system := new(actorSystem)
+		existing := NewSupervisor(WithStrategy(OneForAllStrategy))
+		system.defaultSupervisor = existing
+
+		opt := WithDefaultSupervisor(nil)
+		opt.Apply(system)
+
+		assert.Same(t, existing, system.defaultSupervisor)
+	})
+
+	t.Run("When supervisor is not nil", func(t *testing.T) {
+		system := new(actorSystem)
+		custom := NewSupervisor(WithStrategy(OneForAllStrategy))
+
+		opt := WithDefaultSupervisor(custom)
+		opt.Apply(system)
+
+		assert.Same(t, custom, system.defaultSupervisor)
+	})
+}

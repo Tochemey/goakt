@@ -27,25 +27,20 @@ package cluster
 import (
 	"testing"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/tochemey/goakt/v3/goaktpb"
+	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 )
 
 func TestCodec(t *testing.T) {
 	t.Run("With happy path", func(t *testing.T) {
 		// create an instance of wire actor
+		addr := address.New("account-1", "system", "127.0.0.1", 2345)
 		actor := &internalpb.Actor{
-			Address: &goaktpb.Address{
-				Host: "127.0.0.1",
-				Port: 2345,
-				Name: "account-1",
-				Id:   uuid.NewString(),
-			},
+			Address: addr.String(),
 		}
 
 		// encode the actor

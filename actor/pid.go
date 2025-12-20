@@ -49,7 +49,7 @@ import (
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/chain"
 	"github.com/tochemey/goakt/v3/internal/codec"
-	"github.com/tochemey/goakt/v3/internal/collection"
+	"github.com/tochemey/goakt/v3/internal/ds"
 	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/future"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
@@ -145,7 +145,7 @@ type PID struct {
 	state     atomic.Uint32
 
 	// the list of dependencies
-	dependencies *collection.Map[string, extension.Dependency]
+	dependencies *ds.Map[string, extension.Dependency]
 
 	passivationStrategy passivation.Strategy
 	passivationManager  *passivationManager
@@ -613,7 +613,7 @@ func (pid *PID) Restart(ctx context.Context) error {
 	if pid.eventsStream != nil {
 		pid.eventsStream.Publish(
 			eventsTopic, &goaktpb.ActorRestarted{
-				Address:     pid.Address().Address,
+				Address:     pid.ID(),
 				RestartedAt: timestamppb.Now(),
 			},
 		)
@@ -740,9 +740,9 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 	if eventsStream != nil {
 		eventsStream.Publish(
 			eventsTopic, &goaktpb.ActorChildCreated{
-				Address:   cid.Address().Address,
+				Address:   cid.ID(),
 				CreatedAt: timestamppb.Now(),
-				Parent:    pid.Address().Address,
+				Parent:    pid.ID(),
 			},
 		)
 	}
@@ -1257,7 +1257,7 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 	if pid.eventsStream != nil {
 		pid.eventsStream.Publish(
 			eventsTopic, &goaktpb.ActorStopped{
-				Address:   pid.Address().Address,
+				Address:   pid.ID(),
 				StoppedAt: timestamppb.Now(),
 			},
 		)
@@ -1484,7 +1484,7 @@ func (pid *PID) init(ctx context.Context) error {
 	if pid.eventsStream != nil {
 		pid.eventsStream.Publish(
 			eventsTopic, &goaktpb.ActorStarted{
-				Address:   pid.Address().Address,
+				Address:   pid.ID(),
 				StartedAt: timestamppb.Now(),
 			},
 		)
@@ -1537,7 +1537,7 @@ func (pid *PID) freeWatchers(ctx context.Context) {
 		for _, watcher := range watchers {
 			watcher := watcher
 			terminated := &goaktpb.Terminated{
-				Address:      pid.Address().Address,
+				Address:      pid.ID(),
 				TerminatedAt: timestamppb.Now(),
 			}
 
@@ -1675,7 +1675,7 @@ func (pid *PID) tryPassivation(reason string) bool {
 
 	if pid.eventsStream != nil {
 		event := &goaktpb.ActorPassivated{
-			Address:      pid.Address().Address,
+			Address:      pid.ID(),
 			PassivatedAt: timestamppb.Now(),
 		}
 		pid.eventsStream.Publish(eventsTopic, event)
@@ -1934,8 +1934,8 @@ func (pid *PID) toDeadletter(ctx context.Context, from, to *address.Address, mes
 		deadletter,
 		&internalpb.SendDeadletter{
 			Deadletter: &goaktpb.Deadletter{
-				Sender:   from.Address,
-				Receiver: to.Address,
+				Sender:   from.String(),
+				Receiver: to.String(),
 				Message:  msg,
 				SendTime: timestamppb.Now(),
 				Reason:   err.Error(),
@@ -2129,7 +2129,7 @@ func (pid *PID) suspend(reason string) {
 	pid.stopSupervisionLoop()
 	// publish an event to the events stream
 	pid.eventsStream.Publish(eventsTopic, &goaktpb.ActorSuspended{
-		Address:     pid.Address().Address,
+		Address:     pid.ID(),
 		SuspendedAt: timestamppb.Now(),
 		Reason:      reason,
 	})
@@ -2188,7 +2188,7 @@ func (pid *PID) doReinstate() {
 
 	// publish an event to the events stream
 	pid.eventsStream.Publish(eventsTopic, &goaktpb.ActorReinstated{
-		Address:      pid.Address().Address,
+		Address:      pid.ID(),
 		ReinstatedAt: timestamppb.Now(),
 	})
 }
@@ -2283,7 +2283,7 @@ func (pid *PID) toWireActor() (*internalpb.Actor, error) {
 	}
 
 	return &internalpb.Actor{
-		Address:             pid.Address().Address,
+		Address:             pid.ID(),
 		Type:                registry.Name(pid.Actor()),
 		IsSingleton:         pid.IsSingleton(),
 		Relocatable:         pid.IsRelocatable(),

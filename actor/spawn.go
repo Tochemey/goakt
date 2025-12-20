@@ -76,8 +76,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 		return nil, err
 	}
 
-	actorAddress := x.actorAddress(name)
-	pidNode, exist := x.actors.node(actorAddress.String())
+	pidNode, exist := x.actors.nodeByName(name)
 	if exist {
 		pid := pidNode.value()
 		if pid.IsRunning() {
@@ -113,8 +112,7 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 		return nil, err
 	}
 
-	actorAddress := x.actorAddress(name)
-	pidNode, exist := x.actors.node(actorAddress.String())
+	pidNode, exist := x.actors.nodeByName(name)
 	if exist {
 		pid := pidNode.value()
 		if pid.IsRunning() {

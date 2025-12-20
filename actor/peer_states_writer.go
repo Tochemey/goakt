@@ -35,6 +35,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
+	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
@@ -165,7 +166,8 @@ func (s *peerStatesWriter) persistPeerActor(ctx context.Context, state *internal
 		actors = map[string]*internalpb.Actor{}
 	}
 
-	key := state.GetActor().GetAddress().GetName()
+	addr, _ := address.Parse(state.GetActor().GetAddress())
+	key := addr.Name()
 	actors[key] = state.GetActor()
 	peerState.Actors = actors
 

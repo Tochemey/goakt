@@ -43,44 +43,49 @@ import (
 
 func main() {
 	ctx := context.Background()
-
-	system := "system"
+	systemName := "test"
 	server := NatServer()
 	serverAddr := server.Addr().String()
-	defer server.Shutdown()
 
-	// make two actor systems
-	sys1 := startActorSystem(ctx, system, serverAddr)
-	sys2 := startActorSystem(ctx, system, serverAddr)
-	sys3 := startActorSystem(ctx, system, serverAddr)
+	sys1 := startActorSystem(ctx, systemName, serverAddr)
+	sys2 := startActorSystem(ctx, systemName, serverAddr)
 
-	pause.For(10 * time.Second)
+	spawnActor(ctx, sys1, "actor1")
 
-	// create 3 actors on sys1
-	for i := range 3 {
-		actorName := fmt.Sprintf("actor-s1-%d", i)
-		spawnActor(ctx, sys1, actorName)
+	// ideally this sleep should not be needed, but omitting it will fail the next step
+	pause.For(1 * time.Second)
+
+	pid, _ := sys1.LocalActor("actor1")
+	children := pid.Children()
+	fmt.Printf("Actor has %d children before relocation\n", len(children))
+
+	// system 2 should be able to retrieve the remote actor from system 1
+	fmt.Println("\nRetrieving remote actor from system 1...")
+	if _, err := sys2.RemoteActor(ctx, "actor1"); err != nil {
+		fmt.Printf("Error retrieving remote actor: %v\n", err)
+		os.Exit(1)
 	}
+	fmt.Println("Remote actor retrieved successfully.")
 
-	// create 2 actors on sys2
-	for i := range 2 {
-		actorName := fmt.Sprintf("actor-s2-%d", i)
-		spawnActor(ctx, sys2, actorName)
-	}
-
-	// Grain activations with RoundRobin strategy
-	activationStrategy := actor.LeastLoadActivation
-	fmt.Printf("Activating grains with %T strategy\n", activationStrategy)
-	for i := range 5 {
-		grainName := fmt.Sprintf("grain-%d", i)
-		activateGrain(ctx, sys1, grainName, activationStrategy)
-	}
-
-	pause.For(10 * time.Second)
-
+	// stopping system 1 should relocate the actor to system 2
 	stopActorSystem(ctx, sys1)
+
+	// ideally this sleep should not be needed, but let's leave time for the expected relocation to happen
+	pause.For(5 * time.Second)
+
+	// system 2 should now be able to retrieve the local actor - but it fails to do so
+	fmt.Println("\nRetrieving local actor from system 2...")
+	pid, err := sys2.LocalActor("actor1")
+	if err != nil {
+		fmt.Printf("Error retrieving local actor: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("Local actor retrieved successfully.")
+	children = pid.Children()
+	fmt.Printf("Actor has %d children after relocation\n", len(children))
+
 	stopActorSystem(ctx, sys2)
-	stopActorSystem(ctx, sys3)
 }
 
 func startActorSystem(ctx context.Context, systemName, serverAddr string) actor.ActorSystem {
@@ -111,8 +116,7 @@ func startActorSystem(ctx context.Context, systemName, serverAddr string) actor.
 			WithDiscoveryPort(discoveryPort).
 			WithBootstrapTimeout(time.Second).
 			WithClusterStateSyncInterval(300*time.Millisecond).
-			WithKinds(&MyActor{}).
-			WithGrains(&MyGrain{}),
+			WithKinds(&MyActor{}),
 		))
 
 	if err != nil {
@@ -129,30 +133,36 @@ func startActorSystem(ctx context.Context, systemName, serverAddr string) actor.
 	return actorSystem
 }
 
-// nolint
-func activateGrain(ctx context.Context, actorSystem actor.ActorSystem, grainName string, strategy actor.ActivationStrategy) {
-	fmt.Printf("Activating grain %s...\n", grainName)
-	if _, err := actorSystem.GrainIdentity(ctx, grainName, func(ctx context.Context) (actor.Grain, error) {
-		return &MyGrain{}, nil
-	}, actor.WithActivationStrategy(strategy)); err != nil {
-		fmt.Printf("Error activating grain %s: %v\n", grainName, err)
-		os.Exit(1)
-	}
-
-	time.Sleep(time.Second) // wait for grain to be ready
-	fmt.Printf("Grain %s activated successfully.\n", grainName)
-}
-
 func spawnActor(ctx context.Context, actorSystem actor.ActorSystem, actorName string) {
 	peersAddr := actorSystem.PeersAddress()
+
+	supervisor := actor.NewSupervisor(
+		actor.WithStrategy(actor.OneForOneStrategy),
+		actor.WithAnyErrorDirective(actor.RestartDirective),
+	)
+
 	fmt.Printf("Spawning long lived actor %s on %s...\n", actorName, peersAddr)
-	if _, err := actorSystem.Spawn(ctx, actorName, &MyActor{}, actor.WithLongLived()); err != nil {
+	pid, err := actorSystem.Spawn(ctx, actorName, &MyActor{}, actor.WithLongLived(), actor.WithSupervisor(supervisor))
+	if err != nil {
 		fmt.Printf("Error spawning actor %s on %s: %v\n", actorName, peersAddr, err)
 		os.Exit(1)
 	}
 
-	time.Sleep(time.Second) // wait for actor to be ready
+	pause.For(time.Second) // wait for actor to be ready
 	fmt.Printf("Actor %s spawned successfully on %s.\n", actorName, peersAddr)
+
+	// let us start three children for this actor
+	for i := range 3 {
+		childName := fmt.Sprintf("%s-child-%d", actorName, i)
+		fmt.Printf("Spawning child actor %s under %s on %s...\n", childName, actorName, peersAddr)
+		_, err := pid.SpawnChild(ctx, childName, &MyActor{}, actor.WithLongLived(), actor.WithSupervisor(supervisor))
+		if err != nil {
+			fmt.Printf("Error spawning child actor %s under %s on %s: %v\n", childName, actorName, peersAddr, err)
+			os.Exit(1)
+		}
+		pause.For(time.Second) // wait for child actor to be ready
+		fmt.Printf("Child actor %s under %s spawned successfully on %s.\n", childName, actorName, peersAddr)
+	}
 }
 
 func stopActorSystem(ctx context.Context, actorSystem actor.ActorSystem) {
@@ -164,25 +174,6 @@ func stopActorSystem(ctx context.Context, actorSystem actor.ActorSystem) {
 	}
 
 	fmt.Printf("Actor system %s stopped successfully.\n", peersAddress)
-}
-
-type MyGrain struct {
-}
-
-var _ actor.Grain = (*MyGrain)(nil)
-
-func (x *MyGrain) OnActivate(_ context.Context, props *actor.GrainProps) error {
-	fmt.Printf("%s OnActivate on %s\n", props.Identity().String(), props.ActorSystem().PeersAddress())
-	return nil
-}
-
-func (x *MyGrain) OnReceive(ctx *actor.GrainContext) {
-	ctx.Unhandled()
-}
-
-func (x *MyGrain) OnDeactivate(_ context.Context, props *actor.GrainProps) error {
-	fmt.Printf("%s OnDeactivate on %s\n", props.Identity().String(), props.ActorSystem().PeersAddress())
-	return nil
 }
 
 type MyActor struct{}

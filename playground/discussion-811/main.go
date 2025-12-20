@@ -32,7 +32,6 @@ import (
 	"time"
 
 	"github.com/tochemey/goakt/v3/actor"
-	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/passivation"
@@ -43,7 +42,7 @@ func main() {
 	ctx := context.Background()
 
 	// use the address default log. real-life implement the log interface`
-	logger := log.DiscardLogger
+	logger := log.DefaultLogger
 
 	// create the actor system. kindly in real-life application handle the error
 	actorSystem, _ := actor.NewActorSystem("ParenChild",
@@ -110,7 +109,7 @@ func (p *Parent) Receive(ctx *actor.ReceiveContext) {
 		}
 	case *goaktpb.Terminated:
 		// Handle termination of child actors
-		actorID := address.From(msg.GetAddress()).String()
+		actorID := msg.GetAddress()
 		ctx.Logger().Infof("Child actor %s has been terminated", actorID)
 	default:
 		ctx.Unhandled()

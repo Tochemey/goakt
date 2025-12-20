@@ -22,15 +22,39 @@
  * SOFTWARE.
  */
 
-package collection
+package ds
 
-// Filter returns a new slice containing elements from the input slice that satisfy the predicate.
-func Filter[T any](slice []T, predicate func(T) bool) []T {
-	var result []T
-	for _, v := range slice {
-		if predicate(v) {
-			result = append(result, v)
-		}
-	}
-	return result
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
+
+func TestList(t *testing.T) {
+	// create a concurrent slice of integer
+	sl := NewList[int]()
+
+	// add some items
+	sl.Append(2)
+	sl.Append(4)
+	sl.Append(5)
+
+	// assert the length
+	assert.EqualValues(t, 3, sl.Len())
+	assert.NotEmpty(t, sl.Items())
+	assert.Len(t, sl.Items(), 3)
+	// get the element at index 2
+	assert.EqualValues(t, 5, sl.Get(2))
+	// remove the element at index 1
+	sl.Delete(1)
+	// assert the length
+	assert.EqualValues(t, 2, sl.Len())
+	assert.Zero(t, sl.Get(4))
+	sl.Reset()
+	assert.Zero(t, sl.Len())
+	sl.AppendMany(1, 2, 3, 4, 5)
+	assert.EqualValues(t, 5, sl.Len())
+
+	// deleting an item that does not exist should not panic
+	sl.Delete(10)
 }

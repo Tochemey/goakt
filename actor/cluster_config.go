@@ -31,7 +31,7 @@ import (
 	goset "github.com/deckarep/golang-set/v2"
 
 	"github.com/tochemey/goakt/v3/discovery"
-	"github.com/tochemey/goakt/v3/internal/collection"
+	"github.com/tochemey/goakt/v3/internal/ds"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/internal/size"
 	"github.com/tochemey/goakt/v3/internal/validation"
@@ -47,8 +47,8 @@ type ClusterConfig struct {
 	readQuorum               uint32
 	discoveryPort            int
 	peersPort                int
-	kinds                    *collection.Map[string, Actor]
-	grains                   *collection.Map[string, Grain]
+	kinds                    *ds.Map[string, Actor]
+	grains                   *ds.Map[string, Grain]
 	tableSize                uint64
 	writeTimeout             time.Duration
 	readTimeout              time.Duration
@@ -64,8 +64,8 @@ var _ validation.Validator = (*ClusterConfig)(nil)
 // NewClusterConfig creates an instance of ClusterConfig
 func NewClusterConfig() *ClusterConfig {
 	config := &ClusterConfig{
-		kinds:                    collection.NewMap[string, Actor](),
-		grains:                   collection.NewMap[string, Grain](),
+		kinds:                    ds.NewMap[string, Actor](),
+		grains:                   ds.NewMap[string, Grain](),
 		minimumPeersQuorum:       1,
 		writeQuorum:              1,
 		readQuorum:               1,

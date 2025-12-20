@@ -42,7 +42,6 @@ import (
 
 	"github.com/tochemey/goakt/v3/address"
 	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
 )
@@ -344,7 +343,7 @@ func (x *mockRemotingServiceClient) RemoteTell(_ context.Context, req *connect.R
 // Unimplemented methods to satisfy the interface.
 func (x *mockRemotingServiceClient) RemoteLookup(_ context.Context, req *connect.Request[internalpb.RemoteLookupRequest]) (*connect.Response[internalpb.RemoteLookupResponse], error) {
 	x.lookupHeader = req.Header().Clone()
-	return connect.NewResponse(&internalpb.RemoteLookupResponse{Address: &goaktpb.Address{}}), nil
+	return connect.NewResponse(&internalpb.RemoteLookupResponse{}), nil
 }
 
 func (x *mockRemotingServiceClient) RemoteReSpawn(_ context.Context, req *connect.Request[internalpb.RemoteReSpawnRequest]) (*connect.Response[internalpb.RemoteReSpawnResponse], error) {

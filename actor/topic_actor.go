@@ -31,11 +31,10 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
-	"github.com/tochemey/goakt/v3/internal/collection"
+	"github.com/tochemey/goakt/v3/internal/ds"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/log"
@@ -59,8 +58,8 @@ type key struct {
 type topicActor struct {
 	pid *PID
 	// topics holds the list of all topics and their subscribers
-	topics    *collection.Map[string, *collection.Map[string, *PID]]
-	processed *collection.Map[key, registry.Unit]
+	topics    *ds.Map[string, *ds.Map[string, *PID]]
+	processed *ds.Map[key, registry.Unit]
 	logger    log.Logger
 
 	cluster     cluster.Cluster
@@ -74,8 +73,8 @@ var _ Actor = (*topicActor)(nil)
 // newTopicActor creates a new cluster pubsub mediator.
 func newTopicActor(remoting remote.Remoting) Actor {
 	return &topicActor{
-		topics:    collection.NewMap[string, *collection.Map[string, *PID]](),
-		processed: collection.NewMap[key, registry.Unit](),
+		topics:    ds.NewMap[string, *ds.Map[string, *PID]](),
+		processed: ds.NewMap[key, registry.Unit](),
 		remoting:  remoting,
 	}
 }
@@ -253,7 +252,7 @@ func (x *topicActor) sendToRemoteTopicActors(cctx context.Context, remotePeers [
 func (x *topicActor) handleTerminated(msg *goaktpb.Terminated) {
 	for topic, subscribers := range x.topics.Values() {
 		// remove the subscriber from the topics
-		actorID := address.From(msg.GetAddress()).String()
+		actorID := msg.GetAddress()
 		if subscriber, ok := subscribers.Get(actorID); ok {
 			subscribers.Delete(subscriber.ID())
 			x.logger.Debugf("removed actor %s from topic %s", subscriber.Name(), topic)
@@ -287,7 +286,7 @@ func (x *topicActor) handleSubscribe(ctx *ReceiveContext) {
 		}
 
 		// here the topic does not exist
-		subscribers := collection.NewMap[string, *PID]()
+		subscribers := ds.NewMap[string, *PID]()
 		subscribers.Set(sender.ID(), sender)
 		x.topics.Set(topic, subscribers)
 		ctx.Watch(sender)
@@ -313,7 +312,7 @@ func (x *topicActor) handleTopicMessage(ctx *ReceiveContext) {
 		topic := topicMessage.GetTopic()
 		message, _ := topicMessage.GetMessage().UnmarshalNew()
 		messageID := topicMessage.GetId()
-		senderID := ctx.RemoteSender().ID()
+		senderID := ctx.RemoteSender().String()
 
 		id := key{
 			senderID:  senderID,

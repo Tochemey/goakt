@@ -29,7 +29,7 @@ import (
 
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/hash"
-	"github.com/tochemey/goakt/v3/internal/collection"
+	"github.com/tochemey/goakt/v3/internal/ds"
 	"github.com/tochemey/goakt/v3/internal/metric"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/remote"
@@ -206,7 +206,7 @@ func WithoutRelocation() Option {
 func WithExtensions(extensions ...extension.Extension) Option {
 	return OptionFunc(func(system *actorSystem) {
 		if system.extensions == nil {
-			system.extensions = collection.NewMap[string, extension.Extension]()
+			system.extensions = ds.NewMap[string, extension.Extension]()
 		}
 		for _, ext := range extensions {
 			system.extensions.Set(ext.ID(), ext)
@@ -241,9 +241,48 @@ func WithEvictionStrategy(strategy *EvictionStrategy, interval time.Duration) Op
 	})
 }
 
-// WithMetrics enables metrics collection for the actor system.
+// WithMetrics enables OpenTelemetry metrics collection for the ActorSystem.
+//
+// This option wires goakt's internal metric provider so that runtime metrics
+// for the actor system can be recorded. Metrics are not exported unless the
+// OpenTelemetry metrics SDK is initialized and a MeterProvider/exporter is
+// configured.
+//
+// Initialize the SDK before starting the system:
+//
+//	https://opentelemetry.io/docs/languages/go/getting-started/#initialize-the-opentelemetry-sdk
+//
+// Example:
+//
+//	system := NewActorSystem(
+//	    WithLogger(logger),
+//	    WithMetrics(),
+//	)
+//
+// Returns an Option that enables metrics instrumentation during system construction.
 func WithMetrics() Option {
 	return OptionFunc(func(system *actorSystem) {
 		system.metricProvider = metric.NewProvider()
+	})
+}
+
+// WithDefaultSupervisor configures the ActorSystem-wide supervisor used for actors that
+// are spawned without an explicit supervisor.
+//
+// This option lets you enforce a consistent supervision strategy across the system.
+// It is applied at ActorSystem construction time and becomes the fallback supervisor
+// for any actor whose spawn configuration does not specify a supervisor.
+//
+// Precedence:
+//   - If an actor is spawned with an explicitly configured supervisor, that supervisor
+//     is used.
+//   - Otherwise, the ActorSystem's default supervisor (configured by this option) is used.
+//   - If supervisor is nil, this option makes no change and the built-in default supervisor
+//     remains in effect.
+func WithDefaultSupervisor(supervisor *Supervisor) Option {
+	return OptionFunc(func(system *actorSystem) {
+		if supervisor != nil {
+			system.defaultSupervisor = supervisor
+		}
 	})
 }

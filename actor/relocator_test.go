@@ -37,8 +37,8 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
@@ -108,7 +108,7 @@ func TestRelocatorSpawnRemoteActorActorExistsError(t *testing.T) {
 	}
 
 	targetActor := &internalpb.Actor{
-		Address: &goaktpb.Address{Name: "relocated-actor"},
+		Address: address.New("relocated-actor", "system", "127.0.0.1", 8080).String(),
 	}
 	targetPeer := &cluster.Peer{
 		Host:         "127.0.0.1",
@@ -150,7 +150,7 @@ func TestRelocatorSpawnRemoteActorRemoveActorError(t *testing.T) {
 	}
 
 	targetActor := &internalpb.Actor{
-		Address: &goaktpb.Address{Name: "relocated-actor"},
+		Address: address.New("relocated-actor", "system", "127.0.0.1", 8080).String(),
 	}
 	targetPeer := &cluster.Peer{
 		Host:         "127.0.0.1",

@@ -8,7 +8,7 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/tochemey/goakt/v3/extension"
-	"github.com/tochemey/goakt/v3/internal/collection"
+	"github.com/tochemey/goakt/v3/internal/ds"
 	"github.com/tochemey/goakt/v3/log"
 )
 
@@ -21,7 +21,7 @@ func TestGrainPIDPassivationTrySkipsWhenInactive(t *testing.T) {
 	pid := &grainPID{
 		logger:       log.DiscardLogger,
 		onPoisonPill: atomic.NewBool(false),
-		dependencies: collection.NewMap[string, extension.Dependency](),
+		dependencies: ds.NewMap[string, extension.Dependency](),
 	}
 	pid.activated.Store(false)
 	pid.deactivateAfter.Store(time.Second)
@@ -34,7 +34,7 @@ func TestGrainPIDPassivationTryFailsOnDeactivateError(t *testing.T) {
 		logger:             log.DiscardLogger,
 		grain:              &MockGrainDeactivationFailure{},
 		onPoisonPill:       atomic.NewBool(false),
-		dependencies:       collection.NewMap[string, extension.Dependency](),
+		dependencies:       ds.NewMap[string, extension.Dependency](),
 		passivationManager: nil,
 	}
 

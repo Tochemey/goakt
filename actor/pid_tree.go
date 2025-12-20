@@ -30,16 +30,16 @@ import (
 
 	"go.uber.org/atomic"
 
-	"github.com/tochemey/goakt/v3/internal/collection"
+	"github.com/tochemey/goakt/v3/internal/ds"
 )
 
 // pidNode represents a node in the PID tree.
 type pidNode struct {
-	pid         atomic.Pointer[PID]               // PID associated with this node.
-	parent      atomic.Pointer[PID]               // Parent PID; nil if root.
-	watchers    *collection.Map[string, *PID]     // Actors watching this node.
-	watchees    *collection.Map[string, *PID]     // Actors this node is watching.
-	descendants *collection.Map[string, *pidNode] // Direct children.
+	pid         atomic.Pointer[PID]       // PID associated with this node.
+	parent      atomic.Pointer[PID]       // Parent PID; nil if root.
+	watchers    *ds.Map[string, *PID]     // Actors watching this node.
+	watchees    *ds.Map[string, *PID]     // Actors this node is watching.
+	descendants *ds.Map[string, *pidNode] // Direct children.
 }
 
 // value returns the PID stored in the node, or nil if not set.
@@ -50,10 +50,11 @@ func (n *pidNode) value() *PID {
 // tree maintains actor relationships in a concurrency-safe structure.
 type tree struct {
 	sync.RWMutex
-	rootNode *pidNode                          // Logical root node (its pid may be nil if cleared).
-	pids     *collection.Map[string, *pidNode] // Index: PID.ID() -> pidNode.
-	counter  *atomic.Int64                     // Number of nodes currently registered.
-	noSender *PID                              // Cached NoSender (set on first root add).
+	rootNode *pidNode                  // Logical root node (its pid may be nil if cleared).
+	pids     *ds.Map[string, *pidNode] // Index: PID.ID() -> pidNode.
+	names    *ds.Map[string, *pidNode] // Index: PID.Name() -> pidNode.
+	counter  *atomic.Int64             // Number of nodes currently registered.
+	noSender *PID                      // Cached NoSender (set on first root add).
 }
 
 // newTree creates and returns a new PID tree.
@@ -61,13 +62,14 @@ type tree struct {
 // Space Complexity: O(1) (excluding the internal empty maps allocated).
 func newTree() *tree {
 	return &tree{
-		pids:    collection.NewMap[string, *pidNode](),
+		pids:    ds.NewMap[string, *pidNode](),
+		names:   ds.NewMap[string, *pidNode](),
 		counter: atomic.NewInt64(0),
 		rootNode: &pidNode{
 			pid:         atomic.Pointer[PID]{},
-			watchers:    collection.NewMap[string, *PID](),
-			watchees:    collection.NewMap[string, *PID](),
-			descendants: collection.NewMap[string, *pidNode](),
+			watchers:    ds.NewMap[string, *PID](),
+			watchees:    ds.NewMap[string, *PID](),
+			descendants: ds.NewMap[string, *pidNode](),
 		},
 	}
 }
@@ -97,6 +99,7 @@ func (x *tree) addRootNode(pid *PID) error {
 
 	x.rootNode.pid.Store(pid)
 	x.pids.Set(pid.ID(), x.rootNode)
+	x.names.Set(pid.Name(), x.rootNode)
 	x.counter.Inc()
 	return nil
 }
@@ -138,9 +141,9 @@ func (x *tree) addNode(parent, pid *PID) error {
 
 	childNode := &pidNode{
 		pid:         atomic.Pointer[PID]{},
-		watchers:    collection.NewMap[string, *PID](),
-		watchees:    collection.NewMap[string, *PID](),
-		descendants: collection.NewMap[string, *pidNode](),
+		watchers:    ds.NewMap[string, *PID](),
+		watchees:    ds.NewMap[string, *PID](),
+		descendants: ds.NewMap[string, *pidNode](),
 	}
 	childNode.pid.Store(pid)
 	childNode.parent.Store(parent)
@@ -151,6 +154,7 @@ func (x *tree) addNode(parent, pid *PID) error {
 	childNode.watchers.Set(parent.ID(), parent)
 
 	x.pids.Set(id, childNode)
+	x.names.Set(pid.Name(), childNode)
 	x.counter.Inc()
 	return nil
 }
@@ -245,6 +249,7 @@ func (x *tree) deleteNode(pid *PID) {
 		if p == nil {
 			continue
 		}
+		name := p.Name()
 
 		// Clean watchers.
 		n.watchers.Range(func(_ string, w *PID) {
@@ -271,6 +276,9 @@ func (x *tree) deleteNode(pid *PID) {
 		}
 
 		x.pids.Delete(p.ID())
+		if current, ok := x.names.Get(name); ok && current == n {
+			x.names.Delete(name)
+		}
 		n.parent.Store(nil)
 		n.pid.Store(nil)
 		x.counter.Dec()
@@ -285,6 +293,14 @@ func (x *tree) node(id string) (*pidNode, bool) {
 	defer x.RUnlock()
 	n, ok := x.pids.Get(id)
 	return n, ok
+}
+
+func (x *tree) nodeByName(name string) (*pidNode, bool) {
+	if name == "" {
+		return nil, false
+	}
+	node, ok := x.names.Get(name)
+	return node, ok
 }
 
 // nodes returns all pidNodes currently registered.
@@ -422,11 +438,12 @@ func (x *tree) reset() {
 
 	x.rootNode = &pidNode{
 		pid:         atomic.Pointer[PID]{},
-		watchers:    collection.NewMap[string, *PID](),
-		watchees:    collection.NewMap[string, *PID](),
-		descendants: collection.NewMap[string, *pidNode](),
+		watchers:    ds.NewMap[string, *PID](),
+		watchees:    ds.NewMap[string, *PID](),
+		descendants: ds.NewMap[string, *pidNode](),
 	}
 	x.pids.Reset()
+	x.names.Reset()
 	x.counter.Store(0)
 	// Keep cached noSender (still valid for same ActorSystem instances).
 }

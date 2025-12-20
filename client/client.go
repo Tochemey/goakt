@@ -268,7 +268,7 @@ func (x *Client) ReSpawn(ctx context.Context, actor *Actor) (err error) {
 		return nil
 	}
 
-	return remoting.RemoteReSpawn(ctx, addr.GetHost(), int(addr.GetPort()), actor.Name())
+	return remoting.RemoteReSpawn(ctx, addr.Host(), addr.Port(), actor.Name())
 }
 
 // Tell sends a message to the specified actor.
@@ -383,7 +383,7 @@ func (x *Client) Stop(ctx context.Context, actor *Actor) error {
 		return nil
 	}
 
-	return remoting.RemoteStop(ctx, addr.GetHost(), int(addr.GetPort()), actor.Name())
+	return remoting.RemoteStop(ctx, addr.Host(), addr.Port(), actor.Name())
 }
 
 // Whereis looks up the location of the specified actor and returns its address.
@@ -454,7 +454,7 @@ func (x *Client) Reinstate(ctx context.Context, actor *Actor) error {
 		return nil
 	}
 
-	return remoting.RemoteReinstate(ctx, addr.GetHost(), int(addr.GetPort()), actor.Name())
+	return remoting.RemoteReinstate(ctx, addr.Host(), addr.Port(), actor.Name())
 }
 
 // nextNode returns the next node host and port
