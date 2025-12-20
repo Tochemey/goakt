@@ -507,11 +507,24 @@ func (pid *PID) Address() *address.Address {
 	return path
 }
 
-// Restart restarts the actor.
-// During restart all messages that are in the mailbox and not yet processed will be ignored.
-// All alive descendants of the given actor will be shutdown and respawned with their initial state.
-// Bear in mind that restarting an actor will reinitialize the actor to initial state.
-// In case any descendant restart fails the given actor will not be started at all.
+// Restart restarts this actor and all *running or suspended* descendants.
+//
+// The operation snapshots the current subtree (running/suspended only), rebuilds the same
+// parent/child topology, and re-initializes the actor by re-running its startup hook
+// (`PreStart`). A `PostStart` system message is emitted on success.
+//
+// Runtime effects:
+//   - Only running actors are shut down; suspended actors are reinitialized without a shutdown step.
+//   - Non-running descendants are skipped and not restarted.
+//   - Mailboxes are not preserved; queued or in-flight messages may be dropped.
+//   - Death-watch and tree bookkeeping are updated to keep watchers and cluster state consistent.
+//
+// Failure behavior:
+//   - If restarting any descendant fails, Restart returns that error and the subtree may
+//     be only partially restarted.
+//   - On failure, the target actor remains non-running to avoid serving in an inconsistent state.
+//
+// Use Restart for administrative recovery or supervision; it is disruptive and best-effort.
 func (pid *PID) Restart(ctx context.Context) error {
 	if pid == nil || pid.Address() == nil {
 		return gerrors.ErrUndefinedActor
