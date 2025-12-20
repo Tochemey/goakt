@@ -31,7 +31,7 @@ import (
 
 // Int2Int32 converts an int to int32 with explicit bounds checking.
 func Int2Int32(value int) (int32, error) {
-	if int64(value) < math.MinInt32 || int64(value) > math.MaxInt32 {
+	if value < math.MinInt32 || value > math.MaxInt32 {
 		return 0, fmt.Errorf("value %d out of range for int32", value)
 	}
 	return int32(value), nil
