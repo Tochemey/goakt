@@ -48,6 +48,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v3/internal/size"
+	"github.com/tochemey/goakt/v3/internal/strconvx"
 )
 
 const DefaultMaxReadFrameSize = 16 * size.MB
@@ -460,11 +461,15 @@ func (r *remoting) RemoteAsk(ctx context.Context, from, to *address.Address, mes
 //
 // Errors are returned for transport problems or other server-side failures.
 func (r *remoting) RemoteLookup(ctx context.Context, host string, port int, name string) (addr *address.Address, err error) {
+	port32, err := strconvx.Int2Int32(port)
+	if err != nil {
+		return nil, err
+	}
 	remoteClient := r.RemotingServiceClient(host, port)
 	request := connect.NewRequest(
 		&internalpb.RemoteLookupRequest{
 			Host: host,
-			Port: int32(port),
+			Port: port32,
 			Name: name,
 		},
 	)
@@ -595,11 +600,16 @@ func (r *remoting) RemoteSpawn(ctx context.Context, host string, port int, spawn
 		}
 	}
 
+	port32, err := strconvx.Int2Int32(port)
+	if err != nil {
+		return err
+	}
+
 	remoteClient := r.RemotingServiceClient(host, port)
 	request := connect.NewRequest(
 		&internalpb.RemoteSpawnRequest{
 			Host:                host,
-			Port:                int32(port),
+			Port:                port32,
 			ActorName:           spawnRequest.Name,
 			ActorType:           spawnRequest.Kind,
 			IsSingleton:         spawnRequest.Singleton,
@@ -637,11 +647,15 @@ func (r *remoting) RemoteSpawn(ctx context.Context, host string, port int, spawn
 
 // RemoteReSpawn requests a restart of an existing actor on the remote node.
 func (r *remoting) RemoteReSpawn(ctx context.Context, host string, port int, name string) error {
+	port32, err := strconvx.Int2Int32(port)
+	if err != nil {
+		return err
+	}
 	remoteClient := r.RemotingServiceClient(host, port)
 	request := connect.NewRequest(
 		&internalpb.RemoteReSpawnRequest{
 			Host: host,
-			Port: int32(port),
+			Port: port32,
 			Name: name,
 		},
 	)
@@ -666,11 +680,15 @@ func (r *remoting) RemoteReSpawn(ctx context.Context, host string, port int, nam
 // RemoteStop terminates the specified actor on the remote node. Missing actors
 // are ignored and return nil.
 func (r *remoting) RemoteStop(ctx context.Context, host string, port int, name string) error {
+	port32, err := strconvx.Int2Int32(port)
+	if err != nil {
+		return err
+	}
 	remoteClient := r.RemotingServiceClient(host, port)
 	request := connect.NewRequest(
 		&internalpb.RemoteStopRequest{
 			Host: host,
-			Port: int32(port),
+			Port: port32,
 			Name: name,
 		},
 	)
@@ -695,11 +713,15 @@ func (r *remoting) RemoteStop(ctx context.Context, host string, port int, name s
 // RemoteReinstate reactivates a previously passivated actor on the remote node.
 // Missing actors are treated as a no-op and return nil.
 func (r *remoting) RemoteReinstate(ctx context.Context, host string, port int, name string) error {
+	port32, err := strconvx.Int2Int32(port)
+	if err != nil {
+		return err
+	}
 	remoteClient := r.RemotingServiceClient(host, port)
 	request := connect.NewRequest(
 		&internalpb.RemoteReinstateRequest{
 			Host: host,
-			Port: int32(port),
+			Port: port32,
 			Name: name,
 		},
 	)

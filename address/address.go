@@ -52,6 +52,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/tochemey/goakt/v3/internal/strconvx"
 	"github.com/tochemey/goakt/v3/internal/validation"
 )
 
@@ -412,10 +413,11 @@ func Parse(addr string) (*Address, error) {
 		return nil, errors.New("address format is invalid")
 	}
 
-	port, err := strconv.Atoi(portStr)
+	parsedPort, err := strconvx.ParseInt32(portStr)
 	if err != nil {
 		return nil, err
 	}
+	port := int(parsedPort)
 
 	parentName := ""
 	name := path
