@@ -610,6 +610,7 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 		withRemoting(pid.remoting),
 		withPassivationManager(pid.passivationManager),
 		withMetricProvider(pid.metricProvider),
+		withRelocationDisabled(), // by default child is not relocatable
 	}
 
 	if spawnConfig.mailbox != nil {
@@ -619,11 +620,6 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 	// set the supervisor strategies when defined
 	if spawnConfig.supervisor != nil {
 		pidOptions = append(pidOptions, withSupervisor(spawnConfig.supervisor))
-	}
-
-	// set the relocation flag
-	if !spawnConfig.relocatable {
-		pidOptions = append(pidOptions, withRelocationDisabled())
 	}
 
 	// enable stash

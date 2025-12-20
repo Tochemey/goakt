@@ -2601,7 +2601,63 @@ func (x *actorSystem) startClustering(ctx context.Context) error {
 		go x.rebalancingLoop()
 	}
 
+	if err := x.cleanupStaleLocalActors(ctx); err != nil {
+		x.logger.Warnf("failed to cleanup stale cluster actors: %v", err)
+	}
+
 	x.logger.Info("clustering enabled...:)")
+	return nil
+}
+
+// cleanupStaleLocalActors removes cluster actor records that belong to this node
+// but have no corresponding local PID. This is a best-effort cleanup for unclean
+// restarts and does not fail startup on errors.
+func (x *actorSystem) cleanupStaleLocalActors(ctx context.Context) error {
+	if !x.clusterEnabled.Load() || x.cluster == nil {
+		return nil
+	}
+
+	timeout := time.Second
+	if x.clusterConfig != nil {
+		timeout = x.clusterConfig.ReadTimeout()
+	}
+
+	actors, err := x.cluster.Actors(ctx, timeout)
+	if err != nil {
+		return err
+	}
+
+	host := x.remoteConfig.BindAddr()
+	port := x.remoteConfig.BindPort()
+
+	for _, actor := range actors {
+		addr, err := address.Parse(actor.GetAddress())
+		if err != nil {
+			x.logger.Warnf("failed to parse cluster actor address=%q: %v", actor.GetAddress(), err)
+			continue
+		}
+
+		if !strings.EqualFold(addr.System(), x.name) {
+			continue
+		}
+		if addr.Host() != host || addr.Port() != port {
+			continue
+		}
+		if isSystemName(addr.Name()) {
+			continue
+		}
+		if _, ok := x.actors.node(addr.String()); ok {
+			continue
+		}
+
+		if err := x.cluster.RemoveActor(ctx, addr.Name()); err != nil {
+			x.logger.Warnf("failed to remove stale cluster actor=%s: %v", addr.String(), err)
+			continue
+		}
+
+		x.logger.Debugf("removed stale cluster actor=%s", addr.String())
+	}
+
 	return nil
 }
 

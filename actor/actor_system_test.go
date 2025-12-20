@@ -7376,6 +7376,91 @@ func TestReplicateGrains_ErrorPaths(t *testing.T) {
 	}
 }
 
+func TestCleanupStaleLocalActors(t *testing.T) {
+	t.Run("returns nil when clustering disabled", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		system.actors = newTree()
+		system.clusterEnabled.Store(false)
+		system.cluster = nil
+
+		require.NoError(t, system.cleanupStaleLocalActors(context.Background()))
+	})
+
+	t.Run("returns nil when cluster is nil", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		system.actors = newTree()
+		system.cluster = nil
+
+		require.NoError(t, system.cleanupStaleLocalActors(context.Background()))
+	})
+
+	t.Run("returns error when cluster actors lookup fails", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		system.actors = newTree()
+
+		clusterMock.EXPECT().Actors(mock.Anything, mock.Anything).Return(nil, assert.AnError).Once()
+
+		err := system.cleanupStaleLocalActors(context.Background())
+		require.Error(t, err)
+		require.ErrorIs(t, err, assert.AnError)
+	})
+
+	t.Run("skips non-stale entries and removes stale local actors", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		system.actors = newTree()
+
+		addPIDNode := func(pid *PID) {
+			node := &pidNode{
+				pid:         atomic.Pointer[PID]{},
+				watchers:    ds.NewMap[string, *PID](),
+				watchees:    ds.NewMap[string, *PID](),
+				descendants: ds.NewMap[string, *pidNode](),
+			}
+			node.pid.Store(pid)
+			system.actors.pids.Set(pid.ID(), node)
+			system.actors.names.Set(pid.Name(), node)
+		}
+
+		localAddr := address.New("local", system.name, "127.0.0.1", 8080)
+		localPID := &PID{address: localAddr, actorSystem: system}
+		addPIDNode(localPID)
+
+		staleAddr := address.New("stale", system.name, "127.0.0.1", 8080)
+		actors := []*internalpb.Actor{
+			{Address: "not-a-valid-address"},
+			{Address: address.New("other", "other-system", "127.0.0.1", 8080).String()},
+			{Address: address.New("other-host", system.name, "127.0.0.2", 8080).String()},
+			{Address: address.New("other-port", system.name, "127.0.0.1", 8081).String()},
+			{Address: address.New("GoAktSystemGuardian", system.name, "127.0.0.1", 8080).String()},
+			{Address: localAddr.String()},
+			{Address: staleAddr.String()},
+		}
+
+		clusterMock.EXPECT().Actors(mock.Anything, mock.Anything).Return(actors, nil).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, staleAddr.Name()).Return(nil).Once()
+
+		require.NoError(t, system.cleanupStaleLocalActors(context.Background()))
+	})
+
+	t.Run("removal failure does not fail cleanup", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		system.actors = newTree()
+
+		staleAddr := address.New("stale", system.name, "127.0.0.1", 8080)
+		actors := []*internalpb.Actor{{Address: staleAddr.String()}}
+
+		clusterMock.EXPECT().Actors(mock.Anything, mock.Anything).Return(actors, nil).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, staleAddr.Name()).Return(assert.AnError).Once()
+
+		require.NoError(t, system.cleanupStaleLocalActors(context.Background()))
+	})
+}
+
 func TestResyncActors_ErrorPaths(t *testing.T) {
 	clusterMock := new(mockscluster.Cluster)
 	system := MockReplicationTestSystem(clusterMock)
