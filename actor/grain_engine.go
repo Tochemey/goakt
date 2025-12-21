@@ -119,155 +119,6 @@ func (x *actorSystem) GrainIdentity(ctx context.Context, name string, factory Gr
 	return identity, nil
 }
 
-// prepareGrainIdentity executes the factory and validates identity/config for activation.
-func (x *actorSystem) prepareGrainIdentity(ctx context.Context, name string, factory GrainFactory, opts ...GrainOption) (Grain, *GrainIdentity, *grainConfig, error) {
-	grain, err := factory(ctx)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	identity := newGrainIdentity(grain, name)
-	x.logger.Infof("activating grain (%s)...", identity.String())
-	if err := identity.Validate(); err != nil {
-		return nil, nil, nil, err
-	}
-
-	// make sure we don't interfere with system actors.
-	if isSystemName(identity.Name()) {
-		return nil, nil, nil, gerrors.NewErrReservedName(identity.String())
-	}
-
-	config := newGrainConfig(opts...)
-	if err := config.Validate(); err != nil {
-		return nil, nil, nil, err
-	}
-
-	return grain, identity, config, nil
-}
-
-// resolveGrainOwner returns the cluster owner record when clustering is enabled.
-func (x *actorSystem) resolveGrainOwner(ctx context.Context, identity *GrainIdentity) (*internalpb.Grain, error) {
-	if !x.InCluster() {
-		return nil, nil
-	}
-	return x.getGrainOwner(ctx, identity)
-}
-
-// tryRemoteGrainActivation attempts to activate the grain on a remote owner or activation peer.
-// It returns true when the caller should stop and return the identity without local activation.
-func (x *actorSystem) tryRemoteGrainActivation(ctx context.Context, identity *GrainIdentity, grain Grain, config *grainConfig, owner *internalpb.Grain) (bool, error) {
-	if !x.InCluster() {
-		return false, nil
-	}
-
-	if owner != nil && !proto.Equal(owner, new(internalpb.Grain)) {
-		if !x.isLocalGrainOwner(owner) {
-			if err := x.sendRemoteActivateGrain(ctx, owner); err != nil {
-				return false, err
-			}
-			return true, nil
-		}
-		return false, nil
-	}
-
-	if owner != nil {
-		return false, nil
-	}
-
-	peer, err := x.findActivationPeer(ctx, config)
-	if err != nil {
-		return false, err
-	}
-
-	if peer == nil || peer.PeerAddress() == x.PeersAddress() {
-		return false, nil
-	}
-
-	return x.tryPeerActivation(ctx, identity, grain, config, peer)
-}
-
-// tryPeerActivation claims the grain for a remote peer and triggers remote activation.
-func (x *actorSystem) tryPeerActivation(ctx context.Context, identity *GrainIdentity, grain Grain, config *grainConfig, peer *cluster.Peer) (bool, error) {
-	pid := newGrainPID(identity, grain, x, config)
-	grainInfo, err := pid.toWireGrain()
-	if err != nil {
-		return false, err
-	}
-
-	// override the grain info with peer (host and remoting port)
-	grainInfo.Host = peer.Host
-	grainInfo.Port = int32(peer.RemotingPort)
-
-	claimed, _, err := x.tryClaimGrain(ctx, grainInfo)
-	if err != nil {
-		return false, err
-	}
-
-	if !claimed {
-		return true, nil
-	}
-
-	if err := x.sendRemoteActivateGrain(ctx, grainInfo); err != nil {
-		_ = x.getCluster().RemoveGrain(ctx, identity.String())
-		return false, err
-	}
-
-	return true, nil
-}
-
-// activateGrainLocally ensures a local grain exists, claims ownership when needed, and activates it.
-func (x *actorSystem) activateGrainLocally(ctx context.Context, identity *GrainIdentity, grain Grain, config *grainConfig, owner *internalpb.Grain) error {
-	pid, ok := x.grains.Get(identity.String())
-	if !ok {
-		pid = newGrainPID(identity, grain, x, config)
-	}
-
-	if !x.registry.Exists(grain) {
-		x.registry.Register(grain)
-	}
-
-	claimed := false
-	if x.InCluster() && owner == nil {
-		wire, err := pid.toWireGrain()
-		if err != nil {
-			return err
-		}
-
-		var claimOwner *internalpb.Grain
-		claimed, claimOwner, err = x.tryClaimGrain(ctx, wire)
-		if err != nil {
-			return err
-		}
-
-		if !claimed && claimOwner != nil && !x.isLocalGrainOwner(claimOwner) {
-			return nil
-		}
-	}
-
-	if !pid.isActive() {
-		if err := pid.activate(ctx); err != nil {
-			if claimed && x.InCluster() {
-				_ = x.getCluster().RemoveGrain(ctx, identity.String())
-			}
-			return err
-		}
-	}
-
-	x.grains.Set(identity.String(), pid)
-	return x.putGrainOnCluster(pid)
-}
-
-// sendRemoteActivateGrain triggers activation on a remote node for the provided grain identity.
-func (x *actorSystem) sendRemoteActivateGrain(ctx context.Context, grain *internalpb.Grain) error {
-	remoteClient := x.remoting.RemotingServiceClient(grain.GetHost(), int(grain.GetPort()))
-	request := connect.NewRequest(&internalpb.RemoteActivateGrainRequest{
-		Grain: grain,
-	})
-
-	_, err := remoteClient.RemoteActivateGrain(ctx, request)
-	return err
-}
-
 // TellGrain sends an asynchronous message to a Grain (virtual actor) identified by the given identity.
 //
 // This method locates or activates the target Grain (locally or in the cluster) and delivers the provided
@@ -521,6 +372,155 @@ func (x *actorSystem) RemoteActivateGrain(ctx context.Context, request *connect.
 
 	logger.Infof("recreated grain (%s) on [host=%s, port=%d]", grain.GetGrainId().GetValue(), host, port)
 	return connect.NewResponse(&internalpb.RemoteActivateGrainResponse{}), nil
+}
+
+// prepareGrainIdentity executes the factory and validates identity/config for activation.
+func (x *actorSystem) prepareGrainIdentity(ctx context.Context, name string, factory GrainFactory, opts ...GrainOption) (Grain, *GrainIdentity, *grainConfig, error) {
+	grain, err := factory(ctx)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	identity := newGrainIdentity(grain, name)
+	x.logger.Infof("activating grain (%s)...", identity.String())
+	if err := identity.Validate(); err != nil {
+		return nil, nil, nil, err
+	}
+
+	// make sure we don't interfere with system actors.
+	if isSystemName(identity.Name()) {
+		return nil, nil, nil, gerrors.NewErrReservedName(identity.String())
+	}
+
+	config := newGrainConfig(opts...)
+	if err := config.Validate(); err != nil {
+		return nil, nil, nil, err
+	}
+
+	return grain, identity, config, nil
+}
+
+// resolveGrainOwner returns the cluster owner record when clustering is enabled.
+func (x *actorSystem) resolveGrainOwner(ctx context.Context, identity *GrainIdentity) (*internalpb.Grain, error) {
+	if !x.InCluster() {
+		return nil, nil
+	}
+	return x.getGrainOwner(ctx, identity)
+}
+
+// tryRemoteGrainActivation attempts to activate the grain on a remote owner or activation peer.
+// It returns true when the caller should stop and return the identity without local activation.
+func (x *actorSystem) tryRemoteGrainActivation(ctx context.Context, identity *GrainIdentity, grain Grain, config *grainConfig, owner *internalpb.Grain) (bool, error) {
+	if !x.InCluster() {
+		return false, nil
+	}
+
+	if owner != nil && !proto.Equal(owner, new(internalpb.Grain)) {
+		if !x.isLocalGrainOwner(owner) {
+			if err := x.sendRemoteActivateGrain(ctx, owner); err != nil {
+				return false, err
+			}
+			return true, nil
+		}
+		return false, nil
+	}
+
+	if owner != nil {
+		return false, nil
+	}
+
+	peer, err := x.findActivationPeer(ctx, config)
+	if err != nil {
+		return false, err
+	}
+
+	if peer == nil || peer.PeerAddress() == x.PeersAddress() {
+		return false, nil
+	}
+
+	return x.tryPeerActivation(ctx, identity, grain, config, peer)
+}
+
+// tryPeerActivation claims the grain for a remote peer and triggers remote activation.
+func (x *actorSystem) tryPeerActivation(ctx context.Context, identity *GrainIdentity, grain Grain, config *grainConfig, peer *cluster.Peer) (bool, error) {
+	pid := newGrainPID(identity, grain, x, config)
+	grainInfo, err := pid.toWireGrain()
+	if err != nil {
+		return false, err
+	}
+
+	// override the grain info with peer (host and remoting port)
+	grainInfo.Host = peer.Host
+	grainInfo.Port = int32(peer.RemotingPort)
+
+	claimed, _, err := x.tryClaimGrain(ctx, grainInfo)
+	if err != nil {
+		return false, err
+	}
+
+	if !claimed {
+		return true, nil
+	}
+
+	if err := x.sendRemoteActivateGrain(ctx, grainInfo); err != nil {
+		_ = x.getCluster().RemoveGrain(ctx, identity.String())
+		return false, err
+	}
+
+	return true, nil
+}
+
+// activateGrainLocally ensures a local grain exists, claims ownership when needed, and activates it.
+func (x *actorSystem) activateGrainLocally(ctx context.Context, identity *GrainIdentity, grain Grain, config *grainConfig, owner *internalpb.Grain) error {
+	pid, ok := x.grains.Get(identity.String())
+	if !ok {
+		pid = newGrainPID(identity, grain, x, config)
+	}
+
+	if !x.registry.Exists(grain) {
+		x.registry.Register(grain)
+	}
+
+	claimed := false
+	if x.InCluster() && owner == nil {
+		wire, err := pid.toWireGrain()
+		if err != nil {
+			return err
+		}
+
+		var claimOwner *internalpb.Grain
+		claimed, claimOwner, err = x.tryClaimGrain(ctx, wire)
+		if err != nil {
+			return err
+		}
+
+		if !claimed && claimOwner != nil && !x.isLocalGrainOwner(claimOwner) {
+			return nil
+		}
+	}
+
+	if !pid.isActive() {
+		if err := pid.activate(ctx); err != nil {
+			if claimed && x.InCluster() {
+				_ = x.getCluster().RemoveGrain(ctx, identity.String())
+			}
+			return err
+		}
+	}
+
+	x.grains.Set(identity.String(), pid)
+	return x.putGrainOnCluster(pid)
+}
+
+// sendRemoteActivateGrain triggers activation on a remote node for the provided grain identity.
+func (x *actorSystem) sendRemoteActivateGrain(ctx context.Context, grain *internalpb.Grain) error {
+	remoteClient := x.remoting.RemotingServiceClient(grain.GetHost(), int(grain.GetPort()))
+	request := connect.NewRequest(&internalpb.RemoteActivateGrainRequest{
+		Grain: grain,
+	})
+
+	_, err := remoteClient.RemoteActivateGrain(ctx, request)
+	return err
 }
 
 // validateRemoteHost checks if the incoming request is for the correct host/port.
