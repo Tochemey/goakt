@@ -22,7 +22,7 @@ Also, check the reference section at the end of the post for more material regar
 
 ## 🚀 Features
 - **Actor Model**: Build concurrent and distributed systems using the actor model with typed protobuf messages.
-- **Async Messaging**: Tell/Ask APIs for fire-and-forget or request/response flows.
+- **Messaging**: Tell/Ask APIs for fire-and-forget or request/response flows.
 - **Supervision**: One-for-one/one-for-all strategies, directives, and retry windows for fault tolerance.
 - **Remoting**: Seamless communication between actors across nodes (Connect over HTTP/2).
 - **Context Propagation**: Pluggable context propagation for request-scoped metadata.
