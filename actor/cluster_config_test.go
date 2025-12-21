@@ -146,4 +146,11 @@ func TestClusterConfig(t *testing.T) {
 
 		assert.Error(t, config.Validate())
 	})
+
+	t.Run("With grain activation barrier unset returns zero timeout", func(t *testing.T) {
+		config := NewClusterConfig()
+
+		assert.False(t, config.grainActivationBarrierEnabled())
+		assert.Zero(t, config.grainActivationBarrierTimeout())
+	})
 }

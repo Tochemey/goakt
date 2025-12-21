@@ -623,6 +623,17 @@ func TestActivateGrainLocally(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "pre-activated", grain.name)
 	})
+
+	t.Run("returns error when activation barrier times out", func(t *testing.T) {
+		ctx := t.Context()
+		grain := NewMockGrain()
+		sys, _, _, identity := newActivationTestSystem(t, grain, "local-barrier-timeout", false)
+		sys.grainBarrier = newGrainActivationBarrier(2, 10*time.Millisecond)
+		owner := &internalpb.Grain{GrainId: &internalpb.GrainId{Value: identity.String()}}
+
+		err := sys.activateGrainLocally(ctx, identity, grain, newGrainConfig(), owner)
+		require.ErrorIs(t, err, gerrors.ErrGrainActivationBarrierTimeout)
+	})
 }
 
 func TestFindActivationPeer_ErrorsWhenRoleMissingEverywhere(t *testing.T) {
