@@ -38,9 +38,14 @@ func TestGrainIdentity_RemoteActivationOnDifferentPeer(t *testing.T) {
 	node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
 	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
 
+	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
 	cl.EXPECT().GetGrain(ctx, identity.String()).Return(nil, cluster.ErrGrainNotFound)
 	cl.EXPECT().Members(ctx).Return([]*cluster.Peer{remotePeer, alternatePeer}, nil)
 	cl.EXPECT().NextRoundRobinValue(ctx, cluster.GrainsRoundRobinKey).Return(1, nil)
+	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, nil).Once()
+	cl.EXPECT().PutGrain(mock.Anything, mock.MatchedBy(func(actual *internalpb.Grain) bool {
+		return actual != nil && actual.GetGrainId().GetValue() == identity.String()
+	})).Return(nil).Once()
 	rem.EXPECT().RemotingServiceClient(remotePeer.Host, remotePeer.RemotingPort).Return(client)
 
 	got, err := sys.GrainIdentity(ctx, name, func(context.Context) (Grain, error) {
@@ -72,9 +77,14 @@ func TestGrainIdentity_RemoteActivationOnDifferentPeer_WithBrotliCompression(t *
 	node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
 	actorSystem := MockSimpleClusterReadyActorSystem(rem, cl, node)
 
+	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
 	cl.EXPECT().GetGrain(ctx, identity.String()).Return(nil, cluster.ErrGrainNotFound)
 	cl.EXPECT().Members(ctx).Return([]*cluster.Peer{remotePeer, alternatePeer}, nil)
 	cl.EXPECT().NextRoundRobinValue(ctx, cluster.GrainsRoundRobinKey).Return(1, nil)
+	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, nil).Once()
+	cl.EXPECT().PutGrain(mock.Anything, mock.MatchedBy(func(actual *internalpb.Grain) bool {
+		return actual != nil && actual.GetGrainId().GetValue() == identity.String()
+	})).Return(nil).Once()
 	rem.EXPECT().RemotingServiceClient(remotePeer.Host, remotePeer.RemotingPort).Return(client)
 	rem.EXPECT().MaxReadFrameSize().Return(0)
 	rem.EXPECT().Compression().Return(remote.BrotliCompression)
@@ -112,9 +122,14 @@ func TestGrainIdentity_RemoteActivationOnDifferentPeer_WithZstandardCompression(
 	node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
 	actorSystem := MockSimpleClusterReadyActorSystem(rem, cl, node)
 
+	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
 	cl.EXPECT().GetGrain(ctx, identity.String()).Return(nil, cluster.ErrGrainNotFound)
 	cl.EXPECT().Members(ctx).Return([]*cluster.Peer{remotePeer, alternatePeer}, nil)
 	cl.EXPECT().NextRoundRobinValue(ctx, cluster.GrainsRoundRobinKey).Return(1, nil)
+	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, nil).Once()
+	cl.EXPECT().PutGrain(mock.Anything, mock.MatchedBy(func(actual *internalpb.Grain) bool {
+		return actual != nil && actual.GetGrainId().GetValue() == identity.String()
+	})).Return(nil).Once()
 	rem.EXPECT().RemotingServiceClient(remotePeer.Host, remotePeer.RemotingPort).Return(client)
 	rem.EXPECT().MaxReadFrameSize().Return(0)
 	rem.EXPECT().Compression().Return(remote.ZstdCompression)
@@ -152,9 +167,14 @@ func TestGrainIdentity_RemoteActivationOnDifferentPeer_WithGzipCompression(t *te
 	node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
 	actorSystem := MockSimpleClusterReadyActorSystem(rem, cl, node)
 
+	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
 	cl.EXPECT().GetGrain(ctx, identity.String()).Return(nil, cluster.ErrGrainNotFound)
 	cl.EXPECT().Members(ctx).Return([]*cluster.Peer{remotePeer, alternatePeer}, nil)
 	cl.EXPECT().NextRoundRobinValue(ctx, cluster.GrainsRoundRobinKey).Return(1, nil)
+	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, nil).Once()
+	cl.EXPECT().PutGrain(mock.Anything, mock.MatchedBy(func(actual *internalpb.Grain) bool {
+		return actual != nil && actual.GetGrainId().GetValue() == identity.String()
+	})).Return(nil).Once()
 	rem.EXPECT().RemotingServiceClient(remotePeer.Host, remotePeer.RemotingPort).Return(client)
 	rem.EXPECT().MaxReadFrameSize().Return(0)
 	rem.EXPECT().Compression().Return(remote.GzipCompression)
@@ -191,9 +211,15 @@ func TestGrainIdentity_RemoteActivationErrorPropagates(t *testing.T) {
 	node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
 	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
 
+	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
 	cl.EXPECT().GetGrain(ctx, identity.String()).Return(nil, cluster.ErrGrainNotFound)
 	cl.EXPECT().Members(ctx).Return([]*cluster.Peer{remotePeer, alternatePeer}, nil)
 	cl.EXPECT().NextRoundRobinValue(ctx, cluster.GrainsRoundRobinKey).Return(1, nil)
+	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, nil).Once()
+	cl.EXPECT().PutGrain(mock.Anything, mock.MatchedBy(func(actual *internalpb.Grain) bool {
+		return actual != nil && actual.GetGrainId().GetValue() == identity.String()
+	})).Return(nil).Once()
+	cl.EXPECT().RemoveGrain(mock.Anything, identity.String()).Return(nil).Once()
 	rem.EXPECT().RemotingServiceClient(remotePeer.Host, remotePeer.RemotingPort).Return(client)
 
 	got, err := sys.GrainIdentity(ctx, name, func(context.Context) (Grain, error) {
@@ -221,6 +247,7 @@ func TestGrainIdentity_RemoteActivationWireEncodingError(t *testing.T) {
 	node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
 	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
 
+	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
 	cl.EXPECT().GetGrain(ctx, identity.String()).Return(nil, cluster.ErrGrainNotFound)
 	cl.EXPECT().Members(ctx).Return([]*cluster.Peer{remotePeer, alternatePeer}, nil)
 	cl.EXPECT().NextRoundRobinValue(ctx, cluster.GrainsRoundRobinKey).Return(1, nil)
