@@ -449,6 +449,38 @@ func (x *cluster) PutGrain(ctx context.Context, grain *internalpb.Grain) error {
 	return x.putRecord(ctx, namespaceGrains, key, encoded)
 }
 
+// PutGrainIfAbsent stores the grain metadata only if the entry does not already exist.
+// It returns ErrGrainAlreadyExists when another node has already claimed the grain.
+func PutGrainIfAbsent(ctx context.Context, cl Cluster, grain *internalpb.Grain) error {
+	if cl == nil {
+		return errors.New("cluster is nil")
+	}
+
+	grainID := grain.GetGrainId()
+	if grainID == nil {
+		return fmt.Errorf("grain id is not set")
+	}
+
+	key := grainID.GetValue()
+	if key == "" {
+		return fmt.Errorf("grain id value is empty")
+	}
+
+	if c, ok := cl.(*cluster); ok {
+		return c.putGrainIfAbsent(ctx, grain)
+	}
+
+	exists, err := cl.GrainExists(ctx, key)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return ErrGrainAlreadyExists
+	}
+
+	return cl.PutGrain(ctx, grain)
+}
+
 // GetGrain loads a grain by identity from the unified map.
 func (x *cluster) GetGrain(ctx context.Context, identity string) (*internalpb.Grain, error) {
 	if !x.running.Load() {
@@ -1053,6 +1085,42 @@ func (x *cluster) putRecord(ctx context.Context, namespace recordNamespace, key 
 	defer cancel()
 
 	return x.dmap.Put(ctx, composeKey(namespace, key), value)
+}
+
+func (x *cluster) putGrainIfAbsent(ctx context.Context, grain *internalpb.Grain) error {
+	if !x.running.Load() {
+		return ErrEngineNotRunning
+	}
+
+	x.mu.Lock()
+	defer x.mu.Unlock()
+
+	key := grain.GetGrainId().GetValue()
+	if key == "" {
+		return fmt.Errorf("grain id value is empty")
+	}
+
+	encoded, err := encodeGrain(grain)
+	if err != nil {
+		return err
+	}
+
+	if err := x.putRecordIfAbsent(ctx, namespaceGrains, key, encoded); err != nil {
+		if errors.Is(err, olric.ErrKeyFound) {
+			return ErrGrainAlreadyExists
+		}
+		return err
+	}
+
+	return nil
+}
+
+func (x *cluster) putRecordIfAbsent(ctx context.Context, namespace recordNamespace, key string, value []byte) error {
+	ctx = context.WithoutCancel(ctx)
+	ctx, cancel := context.WithTimeout(ctx, x.writeTimeout)
+	defer cancel()
+
+	return x.dmap.Put(ctx, composeKey(namespace, key), value, olric.NX())
 }
 
 // getRecord fetches a namespaced record from the unified map.

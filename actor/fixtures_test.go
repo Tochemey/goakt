@@ -67,7 +67,8 @@ import (
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/log"
-	mockcluster "github.com/tochemey/goakt/v3/mocks/cluster"
+	mockscluster "github.com/tochemey/goakt/v3/mocks/cluster"
+	mocksremote "github.com/tochemey/goakt/v3/mocks/remote"
 	"github.com/tochemey/goakt/v3/passivation"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
@@ -1490,7 +1491,7 @@ func (d *MockFailingDependency) UnmarshalBinary(_ []byte) error {
 	return nil
 }
 
-func MockReplicationTestSystem(clusterMock *mockcluster.Cluster) *actorSystem {
+func MockReplicationTestSystem(clusterMock *mockscluster.Cluster) *actorSystem {
 	topic := &PID{}
 	topic.flipState(runningState, false)
 	noSender := &PID{}
@@ -1840,6 +1841,32 @@ func (f *MockFailingContextPropagator) Inject(_ context.Context, _ http.Header) 
 
 func (f *MockFailingContextPropagator) Extract(ctx context.Context, _ http.Header) (context.Context, error) {
 	return ctx, f.err
+}
+
+func MockClusterEnsureGrainSystem(t *testing.T, grain Grain, name string) (*actorSystem, *mockscluster.Cluster, *GrainIdentity) {
+	t.Helper()
+
+	clusterMock := mockscluster.NewCluster(t)
+	remotingMock := mocksremote.NewRemoting(t)
+	node := &discovery.Node{
+		Host:          "127.0.0.1",
+		PeersPort:     14000,
+		RemotingPort:  15000,
+		DiscoveryPort: 0,
+	}
+	sys := MockSimpleClusterReadyActorSystem(remotingMock, clusterMock, node)
+	sys.registry.Register(grain)
+
+	return sys, clusterMock, newGrainIdentity(grain, name)
+}
+
+func seedInactiveGrainPID(sys *actorSystem, id *GrainIdentity, grain Grain, config *grainConfig) *grainPID {
+	if config == nil {
+		config = newGrainConfig()
+	}
+	pid := newGrainPID(id, grain, sys, config)
+	sys.grains.Set(id.String(), pid)
+	return pid
 }
 
 func startNatsServer(t *testing.T) *natsserver.Server {

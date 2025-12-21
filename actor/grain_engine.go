@@ -52,6 +52,17 @@ import (
 	"github.com/tochemey/goakt/v3/remote"
 )
 
+type grainOwnerMismatchError struct {
+	owner *internalpb.Grain
+}
+
+func (e *grainOwnerMismatchError) Error() string {
+	if e.owner == nil {
+		return "grain owner is unknown"
+	}
+	return fmt.Sprintf("grain is owned by %s:%d", e.owner.GetHost(), e.owner.GetPort())
+}
+
 // GrainIdentity retrieves or activates a Grain (virtual actor) identified by the given name.
 //
 // This method ensures that a Grain with the specified name exists in the system. If the Grain is not already active,
@@ -68,6 +79,12 @@ import (
 //   - *GrainIdentity: The identity object representing the located or newly activated Grain.
 //   - error: An error if the Grain could not be found, created, or activated.
 //
+// Algorithm (cluster-aware):
+//  1. Build and validate the Grain identity and config.
+//  2. If a remote owner exists, request remote activation and return.
+//  3. If unowned, optionally select a peer and attempt a claimed remote activation.
+//  4. Otherwise, claim and activate locally, then publish to the cluster registry.
+//
 // Note:
 //   - This method abstracts away the details of Grain lifecycle management.
 //   - Use this to obtain a reference to a Grain for message passing or further operations.
@@ -76,94 +93,30 @@ func (x *actorSystem) GrainIdentity(ctx context.Context, name string, factory Gr
 		return nil, gerrors.ErrActorSystemNotStarted
 	}
 
-	logger := x.logger
-
-	grain, err := factory(ctx)
+	grain, identity, config, err := x.prepareGrainIdentity(ctx, name, factory, opts...)
 	if err != nil {
 		return nil, err
 	}
 
-	identity := newGrainIdentity(grain, name)
-	logger.Infof("activating grain (%s)...", identity.String())
-	if err := identity.Validate(); err != nil {
+	owner, err := x.resolveGrainOwner(ctx, identity)
+	if err != nil {
 		return nil, err
 	}
 
-	// make sure we don't interfere with system actors.
-	if isSystemName(identity.Name()) {
-		return nil, gerrors.NewErrReservedName(identity.String())
-	}
-
-	config := newGrainConfig(opts...)
-	if err := config.Validate(); err != nil {
+	handled, err := x.tryRemoteGrainActivation(ctx, identity, grain, config, owner)
+	if err != nil {
 		return nil, err
 	}
 
-	if x.InCluster() {
-		grainInfo, err := x.getCluster().GetGrain(ctx, identity.String())
-		if err != nil {
-			if !errors.Is(err, cluster.ErrGrainNotFound) {
-				return nil, err
-			}
-		}
-
-		if grainInfo != nil && !proto.Equal(grainInfo, new(internalpb.Grain)) {
-			remoteClient := x.remoting.RemotingServiceClient(grainInfo.GetHost(), int(grainInfo.GetPort()))
-			request := connect.NewRequest(&internalpb.RemoteActivateGrainRequest{
-				Grain: grainInfo,
-			})
-
-			if _, err := remoteClient.RemoteActivateGrain(ctx, request); err != nil {
-				return nil, err
-			}
-			return identity, nil
-		}
-
-		peer, err := x.findActivationPeer(ctx, config)
-		if err != nil {
-			return nil, err
-		}
-
-		if peer != nil && (peer.PeerAddress() != x.PeersAddress()) {
-			pid := newGrainPID(identity, grain, x, config)
-			grainInfo, err = pid.toWireGrain()
-			if err != nil {
-				return nil, err
-			}
-
-			// override the grain info with peer (host and remoting port)
-			grainInfo.Host = peer.Host
-			grainInfo.Port = int32(peer.RemotingPort)
-
-			remoteClient := x.remoting.RemotingServiceClient(peer.Host, int(peer.RemotingPort))
-			request := connect.NewRequest(&internalpb.RemoteActivateGrainRequest{
-				Grain: grainInfo,
-			})
-
-			if _, err := remoteClient.RemoteActivateGrain(ctx, request); err != nil {
-				return nil, err
-			}
-			return identity, nil
-		}
+	if handled {
+		return identity, nil
 	}
 
-	pid, ok := x.grains.Get(identity.String())
-	if !ok {
-		pid = newGrainPID(identity, grain, x, config)
+	if err := x.activateGrainLocally(ctx, identity, grain, config, owner); err != nil {
+		return nil, err
 	}
 
-	if !x.registry.Exists(grain) {
-		x.registry.Register(grain)
-	}
-
-	if !pid.isActive() {
-		if err := pid.activate(ctx); err != nil {
-			return nil, err
-		}
-	}
-
-	x.grains.Set(identity.String(), pid)
-	return identity, x.putGrainOnCluster(pid)
+	return identity, nil
 }
 
 // TellGrain sends an asynchronous message to a Grain (virtual actor) identified by the given identity.
@@ -421,6 +374,171 @@ func (x *actorSystem) RemoteActivateGrain(ctx context.Context, request *connect.
 	return connect.NewResponse(&internalpb.RemoteActivateGrainResponse{}), nil
 }
 
+// prepareGrainIdentity executes the factory and validates identity/config for activation.
+func (x *actorSystem) prepareGrainIdentity(ctx context.Context, name string, factory GrainFactory, opts ...GrainOption) (Grain, *GrainIdentity, *grainConfig, error) {
+	grain, err := factory(ctx)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	identity := newGrainIdentity(grain, name)
+	x.logger.Infof("activating grain (%s)...", identity.String())
+	if err := identity.Validate(); err != nil {
+		return nil, nil, nil, err
+	}
+
+	// make sure we don't interfere with system actors.
+	if isSystemName(identity.Name()) {
+		return nil, nil, nil, gerrors.NewErrReservedName(identity.String())
+	}
+
+	config := newGrainConfig(opts...)
+	if err := config.Validate(); err != nil {
+		return nil, nil, nil, err
+	}
+
+	return grain, identity, config, nil
+}
+
+// resolveGrainOwner returns the cluster owner record when clustering is enabled.
+func (x *actorSystem) resolveGrainOwner(ctx context.Context, identity *GrainIdentity) (*internalpb.Grain, error) {
+	if !x.InCluster() {
+		return nil, nil
+	}
+	return x.getGrainOwner(ctx, identity)
+}
+
+// tryRemoteGrainActivation attempts to activate the grain on a remote owner or activation peer.
+// It returns true when the caller should stop and return the identity without local activation.
+func (x *actorSystem) tryRemoteGrainActivation(ctx context.Context, identity *GrainIdentity, grain Grain, config *grainConfig, owner *internalpb.Grain) (bool, error) {
+	if !x.InCluster() {
+		return false, nil
+	}
+
+	if owner != nil && !proto.Equal(owner, new(internalpb.Grain)) {
+		if !x.isLocalGrainOwner(owner) {
+			if err := x.sendRemoteActivateGrain(ctx, owner); err != nil {
+				return false, err
+			}
+			return true, nil
+		}
+		return false, nil
+	}
+
+	if owner != nil {
+		return false, nil
+	}
+
+	peer, err := x.findActivationPeer(ctx, config)
+	if err != nil {
+		return false, err
+	}
+
+	if peer == nil || peer.PeerAddress() == x.PeersAddress() {
+		return false, nil
+	}
+
+	return x.tryPeerActivation(ctx, identity, grain, config, peer)
+}
+
+// tryPeerActivation claims the grain for a remote peer and triggers remote activation.
+func (x *actorSystem) tryPeerActivation(ctx context.Context, identity *GrainIdentity, grain Grain, config *grainConfig, peer *cluster.Peer) (bool, error) {
+	pid := newGrainPID(identity, grain, x, config)
+	grainInfo, err := pid.toWireGrain()
+	if err != nil {
+		return false, err
+	}
+
+	// override the grain info with peer (host and remoting port)
+	grainInfo.Host = peer.Host
+	grainInfo.Port = int32(peer.RemotingPort)
+
+	claimed, _, err := x.tryClaimGrain(ctx, grainInfo)
+	if err != nil {
+		return false, err
+	}
+
+	if !claimed {
+		return true, nil
+	}
+
+	if err := x.sendRemoteActivateGrain(ctx, grainInfo); err != nil {
+		_ = x.getCluster().RemoveGrain(ctx, identity.String())
+		return false, err
+	}
+
+	return true, nil
+}
+
+// activateGrainLocally ensures a local grain exists, claims ownership when needed, and activates it.
+func (x *actorSystem) activateGrainLocally(ctx context.Context, identity *GrainIdentity, grain Grain, config *grainConfig, owner *internalpb.Grain) error {
+	_, err := x.runGrainActivation(identity.String(), func() (*grainPID, error) {
+		pid, ok := x.grains.Get(identity.String())
+		if !ok {
+			pid = newGrainPID(identity, grain, x, config)
+		}
+
+		if !x.registry.Exists(grain) {
+			x.registry.Register(grain)
+		}
+
+		claimed := false
+		if x.InCluster() && owner == nil {
+			wire, err := pid.toWireGrain()
+			if err != nil {
+				return nil, err
+			}
+
+			var claimOwner *internalpb.Grain
+			claimed, claimOwner, err = x.tryClaimGrain(ctx, wire)
+			if err != nil {
+				return nil, err
+			}
+
+			if !claimed && claimOwner != nil && !x.isLocalGrainOwner(claimOwner) {
+				return nil, &grainOwnerMismatchError{owner: claimOwner}
+			}
+		}
+
+		if !pid.isActive() {
+			if err := x.waitForGrainActivationBarrier(ctx); err != nil {
+				return nil, err
+			}
+
+			if err := pid.activate(ctx); err != nil {
+				if claimed && x.InCluster() {
+					_ = x.getCluster().RemoveGrain(ctx, identity.String())
+				}
+				return nil, err
+			}
+		}
+
+		x.grains.Set(identity.String(), pid)
+		if err := x.putGrainOnCluster(pid); err != nil {
+			return nil, err
+		}
+		return pid, nil
+	})
+	if err != nil {
+		var ownerErr *grainOwnerMismatchError
+		if errors.As(err, &ownerErr) {
+			return nil
+		}
+	}
+	return err
+}
+
+// sendRemoteActivateGrain triggers activation on a remote node for the provided grain identity.
+func (x *actorSystem) sendRemoteActivateGrain(ctx context.Context, grain *internalpb.Grain) error {
+	remoteClient := x.remoting.RemotingServiceClient(grain.GetHost(), int(grain.GetPort()))
+	request := connect.NewRequest(&internalpb.RemoteActivateGrainRequest{
+		Grain: grain,
+	})
+
+	_, err := remoteClient.RemoteActivateGrain(ctx, request)
+	return err
+}
+
 // validateRemoteHost checks if the incoming request is for the correct host/port.
 func (x *actorSystem) validateRemoteHost(host string, port int32) error {
 	addr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
@@ -454,22 +572,7 @@ func (x *actorSystem) remoteTellGrain(ctx context.Context, id *GrainIdentity, me
 		return err
 	}
 
-	// just send the message without activating the grain
-	serialized, _ := anypb.New(message)
-	remoteClient := x.remoting.RemotingServiceClient(grain.GetHost(), int(grain.GetPort()))
-	request := connect.NewRequest(&internalpb.RemoteTellGrainRequest{
-		Grain:   grain,
-		Message: serialized,
-	})
-
-	if propagator := x.remoteConfig.ContextPropagator(); propagator != nil {
-		if err := propagator.Inject(ctx, request.Header()); err != nil {
-			return err
-		}
-	}
-
-	_, err = remoteClient.RemoteTellGrain(ctx, request)
-	return err
+	return x.sendRemoteTellGrainRequest(ctx, grain, message)
 }
 
 // remoteAskGrain sends a message to a Grain in the cluster.
@@ -496,25 +599,7 @@ func (x *actorSystem) remoteAskGrain(ctx context.Context, id *GrainIdentity, mes
 		return nil, err
 	}
 
-	msg, _ := anypb.New(message)
-	remoteClient := x.remoting.RemotingServiceClient(gw.GetHost(), int(gw.GetPort()))
-	request := connect.NewRequest(&internalpb.RemoteAskGrainRequest{
-		Grain:          gw,
-		RequestTimeout: durationpb.New(timeout),
-		Message:        msg,
-	})
-
-	if propagator := x.remoteConfig.ContextPropagator(); propagator != nil {
-		if err := propagator.Inject(ctx, request.Header()); err != nil {
-			return nil, err
-		}
-	}
-
-	res, err := remoteClient.RemoteAskGrain(ctx, request)
-	if err != nil {
-		return nil, err
-	}
-	return res.Msg.GetMessage().UnmarshalNew()
+	return x.sendRemoteAskGrainRequest(ctx, gw, message, timeout)
 }
 
 // localSend sends a message to a local Grain.
@@ -533,15 +618,14 @@ func (x *actorSystem) remoteAskGrain(ctx context.Context, id *GrainIdentity, mes
 //   - proto.Message: the response from the Grain (if synchronous).
 //   - error: error if the request fails.
 func (x *actorSystem) localSend(ctx context.Context, id *GrainIdentity, message proto.Message, timeout time.Duration, synchronous bool) (proto.Message, error) {
-	// Ensure the grain process exists
-	pid, err := x.ensureGrainProcess(id)
+	// Ensure the grain process exists and is activated if needed.
+	pid, err := x.ensureGrainProcess(ctx, id)
 	if err != nil {
+		var ownerErr *grainOwnerMismatchError
+		if errors.As(err, &ownerErr) {
+			return x.sendToGrainOwner(ctx, ownerErr.owner, message, timeout, synchronous)
+		}
 		return nil, err
-	}
-
-	// Ensure the process is running
-	if !pid.isActive() {
-		pid.activated.Store(true)
 	}
 
 	// Build and send the grainContext
@@ -579,19 +663,271 @@ func (x *actorSystem) localSend(ctx context.Context, id *GrainIdentity, message 
 	}
 }
 
-// ensureGrainProcess returns an existing grain process or creates and activates a new one.
-func (x *actorSystem) ensureGrainProcess(id *GrainIdentity) (*grainPID, error) {
-	process, ok := x.grains.Get(id.String())
-	if ok {
-		if !x.reflection.registry.Exists(process.getGrain()) {
-			x.grains.Delete(id.String())
-			return nil, gerrors.ErrGrainNotRegistered
+// runGrainActivation ensures only one activation attempt per grain ID executes at a time.
+// Callers share the same result/error for concurrent requests on the same ID.
+// When id is empty, the function runs without coordination.
+func (x *actorSystem) runGrainActivation(id string, fn func() (*grainPID, error)) (*grainPID, error) {
+	if id == "" {
+		return fn()
+	}
+
+	res, err, _ := x.grainActivation.Do(id, func() (any, error) {
+		return fn()
+	})
+	if err != nil {
+		return nil, err
+	}
+	if res == nil {
+		return nil, nil
+	}
+
+	pid, ok := res.(*grainPID)
+	if !ok {
+		return nil, fmt.Errorf("unexpected grain activation result for %s", id)
+	}
+	return pid, nil
+}
+
+// ensureGrainProcess ensures a local grain process exists and is ready to receive messages.
+// Algorithm (cluster-aware):
+//  1. If a local process exists, validate registration and (re)activate if needed.
+//  2. When clustering is enabled, confirm the cluster owner; if remote, return a mismatch error.
+//  3. If no owner is recorded, attempt an atomic claim before local activation.
+//  4. On activation failure after a claim, remove the cluster entry to avoid stale ownership.
+//  5. Publish successful activation to the cluster registry.
+func (x *actorSystem) ensureGrainProcess(ctx context.Context, id *GrainIdentity) (*grainPID, error) {
+	return x.runGrainActivation(id.String(), func() (*grainPID, error) {
+		if process, ok := x.grains.Get(id.String()); ok {
+			return x.ensureExistingGrainProcess(ctx, id, process)
 		}
 
-		return process, nil
+		return x.ensureNewGrainProcess(ctx, id)
+	})
+}
+
+func (x *actorSystem) ensureExistingGrainProcess(ctx context.Context, id *GrainIdentity, process *grainPID) (*grainPID, error) {
+	// Guard against stale entries for grains that are no longer registered.
+	if !x.reflection.registry.Exists(process.getGrain()) {
+		x.grains.Delete(id.String())
+		return nil, gerrors.ErrGrainNotRegistered
+	}
+
+	if !process.isActive() {
+		if err := x.waitForGrainActivationBarrier(ctx); err != nil {
+			return nil, err
+		}
+
+		claimed, err := x.ensureGrainOwnership(ctx, id, process)
+		if err != nil {
+			return nil, err
+		}
+
+		// Activate locally; roll back any claim if activation fails.
+		if err := process.activate(ctx); err != nil {
+			if claimed && x.InCluster() {
+				_ = x.getCluster().RemoveGrain(ctx, id.String())
+			}
+			return nil, err
+		}
+
+		// Broadcast the activation to the cluster when clustering is enabled.
+		if err := x.putGrainOnCluster(process); err != nil {
+			return nil, err
+		}
 	}
 
 	return process, nil
+}
+
+func (x *actorSystem) ensureNewGrainProcess(ctx context.Context, id *GrainIdentity) (*grainPID, error) {
+	// No local process yet: create one from the registry and follow the same cluster-claim flow.
+	if err := x.waitForGrainActivationBarrier(ctx); err != nil {
+		return nil, err
+	}
+
+	grain, err := x.getReflection().instantiateGrain(id.Kind())
+	if err != nil {
+		return nil, err
+	}
+
+	config := newGrainConfig()
+	if err := config.Validate(); err != nil {
+		return nil, err
+	}
+
+	process := newGrainPID(id, grain, x, config)
+	claimed, err := x.ensureGrainOwnership(ctx, id, process)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := process.activate(ctx); err != nil {
+		if claimed && x.InCluster() {
+			_ = x.getCluster().RemoveGrain(ctx, id.String())
+		}
+		return nil, err
+	}
+
+	x.grains.Set(id.String(), process)
+	return process, x.putGrainOnCluster(process)
+}
+
+// ensureGrainOwnership verifies cluster ownership and attempts a claim when unowned.
+// It returns whether a claim was made so callers can roll it back if activation fails.
+func (x *actorSystem) ensureGrainOwnership(ctx context.Context, id *GrainIdentity, process *grainPID) (bool, error) {
+	if !x.InCluster() {
+		return false, nil
+	}
+
+	owner, err := x.getGrainOwner(ctx, id)
+	if err != nil {
+		return false, err
+	}
+
+	if owner != nil && !x.isLocalGrainOwner(owner) {
+		return false, &grainOwnerMismatchError{owner: owner}
+	}
+
+	if owner == nil {
+		// Claim ownership before local activation to avoid duplicate creation.
+		wire, err := process.toWireGrain()
+		if err != nil {
+			return false, err
+		}
+
+		claimed, claimOwner, err := x.tryClaimGrain(ctx, wire)
+		if err != nil {
+			return false, err
+		}
+
+		if !claimed && claimOwner != nil && !x.isLocalGrainOwner(claimOwner) {
+			return false, &grainOwnerMismatchError{owner: claimOwner}
+		}
+
+		return claimed, nil
+	}
+
+	return false, nil
+}
+
+func (x *actorSystem) isLocalGrainOwner(grain *internalpb.Grain) bool {
+	if grain == nil {
+		return false
+	}
+	return grain.GetHost() == x.Host() && grain.GetPort() == int32(x.Port())
+}
+
+func (x *actorSystem) getGrainOwner(ctx context.Context, id *GrainIdentity) (*internalpb.Grain, error) {
+	exists, err := x.getCluster().GrainExists(ctx, id.String())
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, nil
+	}
+
+	owner, err := x.getCluster().GetGrain(ctx, id.String())
+	if err != nil {
+		if errors.Is(err, cluster.ErrGrainNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return owner, nil
+}
+
+func (x *actorSystem) tryClaimGrain(ctx context.Context, grain *internalpb.Grain) (bool, *internalpb.Grain, error) {
+	if err := cluster.PutGrainIfAbsent(ctx, x.getCluster(), grain); err != nil {
+		if errors.Is(err, cluster.ErrGrainAlreadyExists) {
+			owner, err := x.getCluster().GetGrain(ctx, grain.GetGrainId().GetValue())
+			if err != nil {
+				if errors.Is(err, cluster.ErrGrainNotFound) {
+					return false, nil, nil
+				}
+				return false, nil, err
+			}
+			return false, owner, nil
+		}
+		return false, nil, err
+	}
+	return true, grain, nil
+}
+
+// sendToGrainOwner forwards a message to the owning node using Ask/Tell semantics.
+func (x *actorSystem) sendToGrainOwner(ctx context.Context, owner *internalpb.Grain, message proto.Message, timeout time.Duration, synchronous bool) (proto.Message, error) {
+	if owner == nil {
+		return nil, errors.New("grain owner is unknown")
+	}
+
+	if synchronous {
+		return x.sendRemoteAskGrainRequest(ctx, owner, message, timeout)
+	}
+
+	return nil, x.sendRemoteTellGrainRequest(ctx, owner, message)
+}
+
+// sendRemoteAskGrainRequest sends a request to a known Grain endpoint and returns the decoded reply.
+// It handles protobuf serialization, context propagation headers, and response decoding.
+func (x *actorSystem) sendRemoteAskGrainRequest(ctx context.Context, grain *internalpb.Grain, message proto.Message, timeout time.Duration) (proto.Message, error) {
+	request, err := x.buildRemoteAskGrainRequest(ctx, grain, message, timeout)
+	if err != nil {
+		return nil, err
+	}
+
+	remoteClient := x.remoting.RemotingServiceClient(grain.GetHost(), int(grain.GetPort()))
+	res, err := remoteClient.RemoteAskGrain(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+	return res.Msg.GetMessage().UnmarshalNew()
+}
+
+// sendRemoteTellGrainRequest sends a fire-and-forget message to a known Grain endpoint.
+// It handles protobuf serialization and context propagation headers.
+func (x *actorSystem) sendRemoteTellGrainRequest(ctx context.Context, grain *internalpb.Grain, message proto.Message) error {
+	request, err := x.buildRemoteTellGrainRequest(ctx, grain, message)
+	if err != nil {
+		return err
+	}
+
+	remoteClient := x.remoting.RemotingServiceClient(grain.GetHost(), int(grain.GetPort()))
+	_, err = remoteClient.RemoteTellGrain(ctx, request)
+	return err
+}
+
+// buildRemoteAskGrainRequest constructs a RemoteAskGrain request and injects context propagation headers.
+func (x *actorSystem) buildRemoteAskGrainRequest(ctx context.Context, grain *internalpb.Grain, message proto.Message, timeout time.Duration) (*connect.Request[internalpb.RemoteAskGrainRequest], error) {
+	serialized, _ := anypb.New(message)
+	request := connect.NewRequest(&internalpb.RemoteAskGrainRequest{
+		Grain:          grain,
+		RequestTimeout: durationpb.New(timeout),
+		Message:        serialized,
+	})
+
+	if propagator := x.remoteConfig.ContextPropagator(); propagator != nil {
+		if err := propagator.Inject(ctx, request.Header()); err != nil {
+			return nil, err
+		}
+	}
+
+	return request, nil
+}
+
+// buildRemoteTellGrainRequest constructs a RemoteTellGrain request and injects context propagation headers.
+func (x *actorSystem) buildRemoteTellGrainRequest(ctx context.Context, grain *internalpb.Grain, message proto.Message) (*connect.Request[internalpb.RemoteTellGrainRequest], error) {
+	serialized, _ := anypb.New(message)
+	request := connect.NewRequest(&internalpb.RemoteTellGrainRequest{
+		Grain:   grain,
+		Message: serialized,
+	})
+
+	if propagator := x.remoteConfig.ContextPropagator(); propagator != nil {
+		if err := propagator.Inject(ctx, request.Header()); err != nil {
+			return nil, err
+		}
+	}
+
+	return request, nil
 }
 
 // recreateGrain recreates a serialized Grain.
@@ -599,18 +935,26 @@ func (x *actorSystem) ensureGrainProcess(id *GrainIdentity) (*grainPID, error) {
 // It instantiates the grain, activates it, registers it locally, and updates the cluster registry.
 // Returns an error if any step fails.
 func (x *actorSystem) recreateGrain(ctx context.Context, serializedGrain *internalpb.Grain) error {
+	grainID := serializedGrain.GetGrainId().GetValue()
+	_, err := x.runGrainActivation(grainID, func() (*grainPID, error) {
+		return x.recreateGrainOnce(ctx, serializedGrain)
+	})
+	return err
+}
+
+func (x *actorSystem) recreateGrainOnce(ctx context.Context, serializedGrain *internalpb.Grain) (*grainPID, error) {
 	logger := x.logger
 	logger.Infof("recreating grain (%s)...", serializedGrain.GrainId.GetValue())
 
 	// make sure the grain is not a system grain
 	if isSystemName(serializedGrain.GrainId.GetValue()) {
-		return gerrors.NewErrReservedName(serializedGrain.GetGrainId().GetValue())
+		return nil, gerrors.NewErrReservedName(serializedGrain.GetGrainId().GetValue())
 	}
 
 	// Parse grain identity
 	identity, err := toIdentity(serializedGrain.GetGrainId().GetValue())
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	var (
@@ -620,14 +964,18 @@ func (x *actorSystem) recreateGrain(ctx context.Context, serializedGrain *intern
 
 	process, ok = x.grains.Get(identity.String())
 	if !ok {
+		if err := x.waitForGrainActivationBarrier(ctx); err != nil {
+			return nil, err
+		}
+
 		grain, err := x.getReflection().instantiateGrain(identity.Kind())
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		dependencies, err := x.getReflection().dependenciesFromProto(serializedGrain.GetDependencies()...)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		config := newGrainConfig(
@@ -637,19 +985,22 @@ func (x *actorSystem) recreateGrain(ctx context.Context, serializedGrain *intern
 		)
 
 		if err := config.Validate(); err != nil {
-			return err
+			return nil, err
 		}
 
 		process = newGrainPID(identity, grain, x, config)
 		if err := process.activate(ctx); err != nil {
-			return err
+			return nil, err
 		}
 
 		// Register locally
 		x.getGrains().Set(identity.String(), process)
 
 		// Register in the cluster
-		return x.putGrainOnCluster(process)
+		if err := x.putGrainOnCluster(process); err != nil {
+			return nil, err
+		}
+		return process, nil
 	}
 
 	if !x.registry.Exists(process.getGrain()) {
@@ -657,13 +1008,20 @@ func (x *actorSystem) recreateGrain(ctx context.Context, serializedGrain *intern
 	}
 
 	if !process.isActive() {
+		if err := x.waitForGrainActivationBarrier(ctx); err != nil {
+			return nil, err
+		}
+
 		if err := process.activate(ctx); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
 	// Register in the cluster
-	return x.putGrainOnCluster(process)
+	if err := x.putGrainOnCluster(process); err != nil {
+		return nil, err
+	}
+	return process, nil
 }
 
 func (x *actorSystem) findActivationPeer(ctx context.Context, config *grainConfig) (*cluster.Peer, error) {
@@ -806,4 +1164,65 @@ func (x *actorSystem) clusterClient(peer *cluster.Peer) internalpbconnect.Cluste
 		endpoint,
 		opts...,
 	)
+}
+
+func (x *actorSystem) setupGrainActivationBarrier(ctx context.Context) {
+	if !x.clusterEnabled.Load() || x.clusterConfig == nil || !x.clusterConfig.grainActivationBarrierEnabled() {
+		return
+	}
+
+	barrier := newGrainActivationBarrier(
+		x.clusterConfig.minimumPeersQuorum,
+		x.clusterConfig.grainActivationBarrierTimeout(),
+	)
+	x.grainBarrier = barrier
+
+	if barrier.minPeers <= 1 {
+		barrier.open()
+		return
+	}
+
+	x.tryOpenGrainActivationBarrier(ctx)
+}
+
+func (x *actorSystem) tryOpenGrainActivationBarrier(ctx context.Context) {
+	barrier := x.grainBarrier
+	if barrier == nil {
+		return
+	}
+
+	select {
+	case <-barrier.ready:
+		return
+	default:
+	}
+
+	if x.cluster == nil {
+		return
+	}
+
+	timeout := time.Second
+	if x.clusterConfig != nil && x.clusterConfig.readTimeout > 0 {
+		timeout = x.clusterConfig.readTimeout
+	}
+
+	checkCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	peers, err := x.cluster.Members(checkCtx)
+	if err != nil {
+		return
+	}
+
+	if uint32(len(peers)) >= barrier.minPeers {
+		barrier.open()
+	}
+}
+
+func (x *actorSystem) waitForGrainActivationBarrier(ctx context.Context) error {
+	barrier := x.grainBarrier
+	if barrier == nil {
+		return nil
+	}
+	return barrier.wait(ctx)
 }

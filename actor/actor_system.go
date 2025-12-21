@@ -53,6 +53,7 @@ import (
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/singleflight"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
@@ -813,6 +814,8 @@ type actorSystem struct {
 	shuttingDown     atomic.Bool
 	grainsQueue      chan *internalpb.Grain
 	grains           *ds.Map[string, *grainPID]
+	grainBarrier     *grainActivationBarrier
+	grainActivation  singleflight.Group
 	evictionStrategy *EvictionStrategy
 	evictionInterval time.Duration
 	evictionStopSig  chan registry.Unit
@@ -2196,8 +2199,8 @@ func (x *actorSystem) GetKinds(_ context.Context, request *connect.Request[inter
 		return nil, connect.NewError(connect.CodeInvalidArgument, gerrors.ErrInvalidHost)
 	}
 
-	kinds := make([]string, len(x.clusterConfig.Kinds()))
-	for i, kind := range x.clusterConfig.Kinds() {
+	kinds := make([]string, len(x.clusterConfig.kinds.Values()))
+	for i, kind := range x.clusterConfig.kinds.Values() {
 		kinds[i] = registry.Name(kind)
 	}
 
@@ -2541,39 +2544,40 @@ func (x *actorSystem) setupCluster() error {
 	x.clusterNode = &discovery.Node{
 		Name:          x.name,
 		Host:          x.remoteConfig.BindAddr(),
-		DiscoveryPort: x.clusterConfig.DiscoveryPort(),
-		PeersPort:     x.clusterConfig.PeersPort(),
+		DiscoveryPort: x.clusterConfig.discoveryPort,
+		PeersPort:     x.clusterConfig.peersPort,
 		RemotingPort:  x.remoteConfig.BindPort(),
-		Roles:         x.clusterConfig.Roles(),
+		Roles:         x.clusterConfig.getRoles(),
 	}
 
 	x.cluster = cluster.New(
 		x.name,
-		x.clusterConfig.Discovery(),
+		x.clusterConfig.discovery,
 		x.clusterNode,
 		cluster.WithLogger(x.logger),
-		cluster.WithShardCount(x.clusterConfig.PartitionCount()),
+		cluster.WithShardCount(x.clusterConfig.partitionCount),
 		cluster.WithPartitioner(x.partitionHasher),
-		cluster.WithMinimumMembersQuorum(x.clusterConfig.MinimumPeersQuorum()),
-		cluster.WithMembersWriteQuorum(x.clusterConfig.WriteQuorum()),
-		cluster.WithMembersReadQuorum(x.clusterConfig.ReadQuorum()),
-		cluster.WithReplicasCount(x.clusterConfig.ReplicaCount()),
+		cluster.WithMinimumMembersQuorum(x.clusterConfig.minimumPeersQuorum),
+		cluster.WithMembersWriteQuorum(x.clusterConfig.writeQuorum),
+		cluster.WithMembersReadQuorum(x.clusterConfig.readQuorum),
+		cluster.WithReplicasCount(x.clusterConfig.replicaCount),
 		cluster.WithTLS(x.tlsInfo),
-		cluster.WithWriteTimeout(x.clusterConfig.WriteTimeout()),
-		cluster.WithReadTimeout(x.clusterConfig.ReadTimeout()),
-		cluster.WithShutdownTimeout(x.clusterConfig.ShutdownTimeout()),
-		cluster.WithDataTableSize(x.clusterConfig.TableSize()),
-		cluster.WithBootstrapTimeout(x.clusterConfig.BootstrapTimeout()),
-		cluster.WithRoutingTableInterval(x.clusterConfig.ClusterStateSyncInterval()),
+		cluster.WithWriteTimeout(x.clusterConfig.writeTimeout),
+		cluster.WithReadTimeout(x.clusterConfig.readTimeout),
+		cluster.WithShutdownTimeout(x.clusterConfig.shutdownTimeout),
+		cluster.WithDataTableSize(x.clusterConfig.tableSize),
+		cluster.WithBootstrapTimeout(x.clusterConfig.bootstrapTimeout),
+		cluster.WithRoutingTableInterval(x.clusterConfig.clusterStateSyncInterval),
 	)
 
-	for _, kind := range x.clusterConfig.Kinds() {
+	for _, kind := range x.clusterConfig.kinds.Values() {
 		x.registry.Register(kind)
 		x.logger.Infof("cluster kind=(%s) registered", registry.Name(kind))
 	}
 
-	if len(x.clusterConfig.Grains()) > 0 {
-		for _, grain := range x.clusterConfig.Grains() {
+	grains := x.clusterConfig.grains.Values()
+	if len(grains) > 0 {
+		for _, grain := range grains {
 			x.registry.Register(grain)
 			x.logger.Infof("cluster Grain=(%s) registered", registry.Name(grain))
 		}
@@ -2596,6 +2600,8 @@ func (x *actorSystem) startClustering(ctx context.Context) error {
 	}
 
 	x.logger.Info("cluster engine successfully started...")
+
+	x.setupGrainActivationBarrier(ctx)
 
 	x.eventsQueue = x.cluster.Events()
 	x.rebalancingQueue = make(chan *internalpb.PeerState, 1)
@@ -2626,7 +2632,7 @@ func (x *actorSystem) cleanupStaleLocalActors(ctx context.Context) error {
 
 	timeout := time.Second
 	if x.clusterConfig != nil {
-		timeout = x.clusterConfig.ReadTimeout()
+		timeout = x.clusterConfig.readTimeout
 	}
 
 	actors, err := x.cluster.Actors(ctx, timeout)
@@ -3007,6 +3013,7 @@ func (x *actorSystem) handleNodeJoinedEvent(event *cluster.Event) {
 		x.String(),
 		nodeJoined.GetAddress())
 
+	x.tryOpenGrainActivationBarrier(context.Background())
 	x.resyncAfterClusterEvent("node joined", nodeJoined.GetAddress())
 }
 

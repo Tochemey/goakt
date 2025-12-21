@@ -39,4 +39,6 @@ var (
 	ErrEngineNotRunning = errors.New("cluster engine is not running")
 	// ErrGrainNotFound is returned when a grain is not found
 	ErrGrainNotFound = errors.New("grain not found")
+	// ErrGrainAlreadyExists is returned when a grain entry already exists.
+	ErrGrainAlreadyExists = errors.New("grain already exists")
 )

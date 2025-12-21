@@ -1938,6 +1938,160 @@ func TestPutGrainReturnsErrorWhenIDValueEmpty(t *testing.T) {
 	require.EqualError(t, err, "grain id value is empty")
 }
 
+func TestPutGrainIfAbsentReturnsErrorWhenClusterNil(t *testing.T) {
+	grain := &internalpb.Grain{GrainId: &internalpb.GrainId{Value: "grain-id"}}
+	err := PutGrainIfAbsent(context.Background(), nil, grain)
+	require.EqualError(t, err, "cluster is nil")
+}
+
+func TestPutGrainIfAbsentReturnsErrorWhenIDMissing(t *testing.T) {
+	cl := &cluster{
+		running: atomic.NewBool(true),
+	}
+
+	err := PutGrainIfAbsent(context.Background(), cl, &internalpb.Grain{})
+	require.EqualError(t, err, "grain id is not set")
+}
+
+func TestPutGrainIfAbsentReturnsErrorWhenIDValueEmpty(t *testing.T) {
+	cl := &cluster{
+		running: atomic.NewBool(true),
+	}
+
+	grain := &internalpb.Grain{GrainId: &internalpb.GrainId{Value: ""}}
+	err := PutGrainIfAbsent(context.Background(), cl, grain)
+	require.EqualError(t, err, "grain id value is empty")
+}
+
+func TestPutGrainIfAbsentReturnsErrorWhenNotRunning(t *testing.T) {
+	cl := &cluster{
+		running: atomic.NewBool(false),
+	}
+
+	grain := &internalpb.Grain{GrainId: &internalpb.GrainId{Value: "grain-id"}}
+	err := PutGrainIfAbsent(context.Background(), cl, grain)
+	require.ErrorIs(t, err, ErrEngineNotRunning)
+}
+
+func TestPutGrainIfAbsentReturnsAlreadyExists(t *testing.T) {
+	cl := &cluster{
+		running:      atomic.NewBool(true),
+		dmap:         &MockDMap{putErr: olric.ErrKeyFound},
+		writeTimeout: time.Second,
+	}
+
+	grain := &internalpb.Grain{GrainId: &internalpb.GrainId{Value: "grain-id"}}
+	err := PutGrainIfAbsent(context.Background(), cl, grain)
+	require.ErrorIs(t, err, ErrGrainAlreadyExists)
+}
+
+func TestPutGrainIfAbsentPropagatesDMapError(t *testing.T) {
+	expectedErr := errors.New("put failure")
+	cl := &cluster{
+		running:      atomic.NewBool(true),
+		dmap:         &MockDMap{putErr: expectedErr},
+		writeTimeout: time.Second,
+	}
+
+	grain := &internalpb.Grain{GrainId: &internalpb.GrainId{Value: "grain-id"}}
+	err := PutGrainIfAbsent(context.Background(), cl, grain)
+	require.ErrorIs(t, err, expectedErr)
+}
+
+func TestPutGrainIfAbsentSucceeds(t *testing.T) {
+	called := false
+	cl := &cluster{
+		running:      atomic.NewBool(true),
+		writeTimeout: time.Second,
+		dmap: &MockDMap{
+			putFn: func(ctx context.Context, key string, value any, options ...olric.PutOption) error { // nolint
+				called = true
+				require.NotEmpty(t, options)
+				return nil
+			},
+		},
+	}
+
+	grain := &internalpb.Grain{GrainId: &internalpb.GrainId{Value: "grain-id"}}
+	err := PutGrainIfAbsent(context.Background(), cl, grain)
+	require.NoError(t, err)
+	require.True(t, called)
+}
+
+func TestPutGrainIfAbsentFallbackPropagatesGrainExistsError(t *testing.T) {
+	ctx := context.Background()
+	grain := &internalpb.Grain{GrainId: &internalpb.GrainId{Value: "grain-id"}}
+	expectedErr := errors.New("grain exists lookup failed")
+	cl := &MockCluster{
+		grainExistsFn: func(ctx context.Context, identity string) (bool, error) {
+			require.Equal(t, grain.GetGrainId().GetValue(), identity)
+			return false, expectedErr
+		},
+	}
+
+	err := PutGrainIfAbsent(ctx, cl, grain)
+	require.ErrorIs(t, err, expectedErr)
+	require.Equal(t, 1, cl.grainExistsCalls)
+	require.Zero(t, cl.putGrainCalls)
+}
+
+func TestPutGrainIfAbsentFallbackReturnsAlreadyExists(t *testing.T) {
+	ctx := context.Background()
+	grain := &internalpb.Grain{GrainId: &internalpb.GrainId{Value: "grain-id"}}
+	cl := &MockCluster{
+		grainExistsFn: func(ctx context.Context, identity string) (bool, error) {
+			require.Equal(t, grain.GetGrainId().GetValue(), identity)
+			return true, nil
+		},
+	}
+
+	err := PutGrainIfAbsent(ctx, cl, grain)
+	require.ErrorIs(t, err, ErrGrainAlreadyExists)
+	require.Equal(t, 1, cl.grainExistsCalls)
+	require.Zero(t, cl.putGrainCalls)
+}
+
+func TestPutGrainIfAbsentFallbackPropagatesPutGrainError(t *testing.T) {
+	ctx := context.Background()
+	grain := &internalpb.Grain{GrainId: &internalpb.GrainId{Value: "grain-id"}}
+	expectedErr := errors.New("put grain failed")
+	cl := &MockCluster{
+		grainExistsFn: func(ctx context.Context, identity string) (bool, error) {
+			require.Equal(t, grain.GetGrainId().GetValue(), identity)
+			return false, nil
+		},
+		putGrainFn: func(ctx context.Context, actual *internalpb.Grain) error {
+			require.Equal(t, grain, actual)
+			return expectedErr
+		},
+	}
+
+	err := PutGrainIfAbsent(ctx, cl, grain)
+	require.ErrorIs(t, err, expectedErr)
+	require.Equal(t, 1, cl.grainExistsCalls)
+	require.Equal(t, 1, cl.putGrainCalls)
+}
+
+func TestPutGrainIfAbsentFallbackCallsPutGrain(t *testing.T) {
+	ctx := context.Background()
+	grain := &internalpb.Grain{GrainId: &internalpb.GrainId{Value: "grain-id"}}
+	cl := &MockCluster{
+		grainExistsFn: func(ctx context.Context, identity string) (bool, error) {
+			require.Equal(t, grain.GetGrainId().GetValue(), identity)
+			return false, nil
+		},
+		putGrainFn: func(ctx context.Context, actual *internalpb.Grain) error {
+			require.Equal(t, grain, actual)
+			return nil
+		},
+	}
+
+	err := PutGrainIfAbsent(ctx, cl, grain)
+	require.NoError(t, err)
+	require.Equal(t, 1, cl.grainExistsCalls)
+	require.Equal(t, 1, cl.putGrainCalls)
+}
+
 func TestPutActorPropagatesDMapError(t *testing.T) {
 	putErr := errors.New("put failure")
 	cl := &cluster{
