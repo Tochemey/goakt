@@ -501,6 +501,10 @@ func (x *actorSystem) activateGrainLocally(ctx context.Context, identity *GrainI
 		}
 
 		if !pid.isActive() {
+			if err := x.waitForGrainActivationBarrier(ctx); err != nil {
+				return nil, err
+			}
+
 			if err := pid.activate(ctx); err != nil {
 				if claimed && x.InCluster() {
 					_ = x.getCluster().RemoveGrain(ctx, identity.String())
@@ -709,6 +713,10 @@ func (x *actorSystem) ensureExistingGrainProcess(ctx context.Context, id *GrainI
 	}
 
 	if !process.isActive() {
+		if err := x.waitForGrainActivationBarrier(ctx); err != nil {
+			return nil, err
+		}
+
 		claimed, err := x.ensureGrainOwnership(ctx, id, process)
 		if err != nil {
 			return nil, err
@@ -733,6 +741,10 @@ func (x *actorSystem) ensureExistingGrainProcess(ctx context.Context, id *GrainI
 
 func (x *actorSystem) ensureNewGrainProcess(ctx context.Context, id *GrainIdentity) (*grainPID, error) {
 	// No local process yet: create one from the registry and follow the same cluster-claim flow.
+	if err := x.waitForGrainActivationBarrier(ctx); err != nil {
+		return nil, err
+	}
+
 	grain, err := x.getReflection().instantiateGrain(id.Kind())
 	if err != nil {
 		return nil, err
@@ -952,6 +964,10 @@ func (x *actorSystem) recreateGrainOnce(ctx context.Context, serializedGrain *in
 
 	process, ok = x.grains.Get(identity.String())
 	if !ok {
+		if err := x.waitForGrainActivationBarrier(ctx); err != nil {
+			return nil, err
+		}
+
 		grain, err := x.getReflection().instantiateGrain(identity.Kind())
 		if err != nil {
 			return nil, err
@@ -992,6 +1008,10 @@ func (x *actorSystem) recreateGrainOnce(ctx context.Context, serializedGrain *in
 	}
 
 	if !process.isActive() {
+		if err := x.waitForGrainActivationBarrier(ctx); err != nil {
+			return nil, err
+		}
+
 		if err := process.activate(ctx); err != nil {
 			return nil, err
 		}
@@ -1144,4 +1164,65 @@ func (x *actorSystem) clusterClient(peer *cluster.Peer) internalpbconnect.Cluste
 		endpoint,
 		opts...,
 	)
+}
+
+func (x *actorSystem) setupGrainActivationBarrier(ctx context.Context) {
+	if !x.clusterEnabled.Load() || x.clusterConfig == nil || !x.clusterConfig.grainActivationBarrierEnabled() {
+		return
+	}
+
+	barrier := newGrainActivationBarrier(
+		x.clusterConfig.minimumPeersQuorum,
+		x.clusterConfig.grainActivationBarrierTimeout(),
+	)
+	x.grainBarrier = barrier
+
+	if barrier.minPeers <= 1 {
+		barrier.open()
+		return
+	}
+
+	x.tryOpenGrainActivationBarrier(ctx)
+}
+
+func (x *actorSystem) tryOpenGrainActivationBarrier(ctx context.Context) {
+	barrier := x.grainBarrier
+	if barrier == nil {
+		return
+	}
+
+	select {
+	case <-barrier.ready:
+		return
+	default:
+	}
+
+	if x.cluster == nil {
+		return
+	}
+
+	timeout := time.Second
+	if x.clusterConfig != nil && x.clusterConfig.readTimeout > 0 {
+		timeout = x.clusterConfig.readTimeout
+	}
+
+	checkCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	peers, err := x.cluster.Members(checkCtx)
+	if err != nil {
+		return
+	}
+
+	if uint32(len(peers)) >= barrier.minPeers {
+		barrier.open()
+	}
+}
+
+func (x *actorSystem) waitForGrainActivationBarrier(ctx context.Context) error {
+	barrier := x.grainBarrier
+	if barrier == nil {
+		return nil
+	}
+	return barrier.wait(ctx)
 }

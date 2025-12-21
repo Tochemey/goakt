@@ -667,6 +667,32 @@ func TestAskGrain_ClusterFallbackAutoProvisions(t *testing.T) {
 	require.True(t, ok)
 }
 
+func TestEnsureNewGrainProcess_ActivationBarrierTimeout(t *testing.T) {
+	ctx := t.Context()
+	grain := NewMockGrain()
+	sys, _, _, identity := newActivationTestSystem(t, grain, "barrier-new", true)
+
+	sys.grainBarrier = newGrainActivationBarrier(2, 10*time.Millisecond)
+
+	process, err := sys.ensureNewGrainProcess(ctx, identity)
+	require.ErrorIs(t, err, gerrors.ErrGrainActivationBarrierTimeout)
+	require.Nil(t, process)
+}
+
+func TestEnsureExistingGrainProcess_ActivationBarrierTimeout(t *testing.T) {
+	ctx := t.Context()
+	grain := NewMockGrain()
+	sys, _, _, identity := newActivationTestSystem(t, grain, "barrier-existing", true)
+	pid := newGrainPID(identity, grain, sys, newGrainConfig())
+	sys.grains.Set(identity.String(), pid)
+
+	sys.grainBarrier = newGrainActivationBarrier(2, 10*time.Millisecond)
+
+	process, err := sys.ensureExistingGrainProcess(ctx, identity, pid)
+	require.ErrorIs(t, err, gerrors.ErrGrainActivationBarrierTimeout)
+	require.Nil(t, process)
+}
+
 func TestRecreateGrain_SingleflightActivation(t *testing.T) {
 	ctx := t.Context()
 	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))

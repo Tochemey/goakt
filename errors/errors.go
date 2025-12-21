@@ -145,6 +145,9 @@ var (
 	// ErrGrainDeactivationFailure is returned when Grain deactivation failed
 	ErrGrainDeactivationFailure = errors.New("grain deactivation failed")
 
+	// ErrGrainActivationBarrierTimeout is returned when the activation barrier times out.
+	ErrGrainActivationBarrierTimeout = errors.New("grain activation barrier timeout")
+
 	// ErrInvalidGrainIdentity is returned when a Grain identity is malformed or invalid.
 	ErrInvalidGrainIdentity = errors.New("invalid graind identity")
 

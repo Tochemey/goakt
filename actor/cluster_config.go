@@ -55,7 +55,13 @@ type ClusterConfig struct {
 	shutdownTimeout          time.Duration
 	bootstrapTimeout         time.Duration
 	clusterStateSyncInterval time.Duration
+	grainActivationBarrier   *grainActivationBarrierConfig
 	roles                    goset.Set[string]
+}
+
+type grainActivationBarrierConfig struct {
+	enabled bool
+	timeout time.Duration
 }
 
 // enforce compilation error
@@ -138,11 +144,6 @@ func (x *ClusterConfig) WithPeersPort(peersPort int) *ClusterConfig {
 func (x *ClusterConfig) WithReplicaCount(count uint32) *ClusterConfig {
 	x.replicaCount = count
 	return x
-}
-
-// WriteQuorum returns the write quorum
-func (x *ClusterConfig) WriteQuorum() uint32 {
-	return x.writeQuorum
 }
 
 // WithWriteTimeout sets the write timeout for cluster write operations.
@@ -242,128 +243,29 @@ func (x *ClusterConfig) WithClusterStateSyncInterval(interval time.Duration) *Cl
 	return x
 }
 
-// ClusterStateSyncInterval returns the interval at which the cluster synchronizes its routing tables across all nodes.
+// WithGrainActivationBarrier enables the grain activation barrier.
 //
-// This interval determines how frequently the cluster updates its internal routing information to reflect changes
-// in topology, such as node joins or departures. Keeping routing tables up-to-date is essential for accurate message
-// delivery and partition management.
+// When enabled, grain activation will be delayed until the cluster has reached
+// the configured minimum peers quorum (see WithMinimumPeersQuorum), or until
+// the provided timeout elapses—whichever happens first.
 //
-// It is recommended to set this interval to a value greater than the write timeout to avoid updating routing tables
-// during ongoing write operations. A shorter interval increases consistency and responsiveness to cluster changes,
-// but may introduce additional network and processing overhead. Conversely, a longer interval reduces overhead but
-// may delay the propagation of topology changes.
+// This is useful during startup and rolling deployments to avoid activating
+// grains while the cluster is still forming, which can reduce early churn and
+// unnecessary rebalancing.
 //
-// The default value is 1 minute. Adjust this value based on your cluster's size, network characteristics, and
-// required responsiveness.
-//
-// Example:
-//
-//	cfg := NewClusterConfig().WithClusterStateSyncInterval(2 * time.Minute)
-//
-// Returns the configured sync interval.
-func (x *ClusterConfig) ClusterStateSyncInterval() time.Duration {
-	return x.clusterStateSyncInterval
-}
-
-// BootstrapTimeout returns the maximum duration the cluster will wait for all required nodes to join and complete
-// the bootstrap sequence before considering the operation as failed.
-//
-// If the cluster does not bootstrap within this timeout, an error is returned and the cluster will not start.
-// This setting is useful for controlling startup responsiveness, especially in automated or orchestrated environments
-// where rapid cluster formation is critical.
-//
-// The default value is 10 seconds. Increase this value if your environment has slow node startups or network delays.
+// Timeout semantics:
+//   - timeout == 0: wait indefinitely for quorum
+//   - timeout  > 0: wait up to the given duration, then proceed even if quorum
+//     has not been reached
 //
 // Example:
 //
-//	cfg := NewClusterConfig().WithBootstrapTimeout(15 * time.Second)
-//
-// Returns the configured bootstrap timeout.
-func (x *ClusterConfig) BootstrapTimeout() time.Duration {
-	return x.bootstrapTimeout
-}
-
-// WriteTimeout returns the configured write timeout for cluster write operations.
-//
-// This value represents the maximum duration a write operation is allowed to take before
-// being considered failed. Use this to tune the responsiveness and reliability of write
-// operations in your cluster.
-//
-// Returns the write timeout as a time.Duration.
-func (x *ClusterConfig) WriteTimeout() time.Duration {
-	return x.writeTimeout
-}
-
-// ReadTimeout returns the configured read timeout for cluster read operations.
-//
-// This value represents the maximum duration a read operation is allowed to take before
-// being considered failed. Use this to tune the responsiveness and reliability of read
-// operations in your cluster.
-//
-// Returns the read timeout as a time.Duration.
-func (x *ClusterConfig) ReadTimeout() time.Duration {
-	return x.readTimeout
-}
-
-// ShutdownTimeout returns the configured timeout for graceful cluster shutdown.
-//
-// This value determines how long the cluster will wait for all shutdown operations to
-// complete before forcing termination. Adjust this value to ensure a clean and orderly
-// shutdown process.
-//
-// Returns the shutdown timeout as a time.Duration.
-func (x *ClusterConfig) ShutdownTimeout() time.Duration {
-	return x.shutdownTimeout
-}
-
-// ReplicaCount returns the configured number of replicas for the cluster.
-//
-// This value determines how many copies of each partition are maintained across the cluster
-// for redundancy and fault tolerance. Increasing the replica count improves data availability
-// but may increase resource usage.
-//
-// Returns the replica count as a uint32.
-func (x *ClusterConfig) ReplicaCount() uint32 {
-	return x.replicaCount
-}
-
-// Discovery returns the discovery provider
-func (x *ClusterConfig) Discovery() discovery.Provider {
-	return x.discovery
-}
-
-// PartitionCount returns the partition count
-func (x *ClusterConfig) PartitionCount() uint64 {
-	return x.partitionCount
-}
-
-// MinimumPeersQuorum returns the minimum peers quorum
-func (x *ClusterConfig) MinimumPeersQuorum() uint32 {
-	return x.minimumPeersQuorum
-}
-
-// DiscoveryPort returns the discovery port
-func (x *ClusterConfig) DiscoveryPort() int {
-	return x.discoveryPort
-}
-
-// PeersPort returns the peers port
-func (x *ClusterConfig) PeersPort() int {
-	return x.peersPort
-}
-
-// Kinds returns the actor kinds
-func (x *ClusterConfig) Kinds() []Actor {
-	return x.kinds.Values()
-}
-
-func (x *ClusterConfig) Grains() []Grain {
-	return x.grains.Values()
-}
-
-// ReadQuorum returns the read quorum
-func (x *ClusterConfig) ReadQuorum() uint32 {
-	return x.readQuorum
+//	cfg := NewClusterConfig().
+//		WithMinimumPeersQuorum(3).
+//		WithGrainActivationBarrier(10 * time.Second)
+func (x *ClusterConfig) WithGrainActivationBarrier(timeout time.Duration) *ClusterConfig {
+	x.grainActivationBarrier = &grainActivationBarrierConfig{enabled: true, timeout: timeout}
+	return x
 }
 
 // WithWriteQuorum sets the write quorum
@@ -389,27 +291,6 @@ func (x *ClusterConfig) WithTableSize(size uint64) *ClusterConfig {
 	return x
 }
 
-// TableSize returns the cluster storage size
-func (x *ClusterConfig) TableSize() uint64 {
-	return x.tableSize
-}
-
-// Validate validates the cluster config
-func (x *ClusterConfig) Validate() error {
-	return validation.
-		New(validation.AllErrors()).
-		AddAssertion(x.discovery != nil, "discovery provider is not set").
-		AddAssertion(x.partitionCount > 0, "partition count need to greater than zero").
-		AddAssertion(x.minimumPeersQuorum >= 1, "minimum peers quorum must be at least one").
-		AddAssertion(x.discoveryPort > 0, "discovery port is invalid").
-		AddAssertion(x.peersPort > 0, "peers port is invalid").
-		AddAssertion(len(x.kinds.Values()) > 1 || len(x.grains.Values()) >= 1, "actor kinds are not defined").
-		AddAssertion(x.replicaCount >= 1, "cluster replicaCount is invalid").
-		AddAssertion(x.writeQuorum >= 1, "cluster writeQuorum is invalid").
-		AddAssertion(x.readQuorum >= 1, "cluster readQuorum is invalid").
-		Validate()
-}
-
 // WithRoles sets the roles advertised by this node.
 //
 // A role is a label/metadata used by the cluster to define a node’s
@@ -433,14 +314,45 @@ func (x *ClusterConfig) WithRoles(roles ...string) *ClusterConfig {
 	return x
 }
 
-// Roles returns the roles advertised by this node.
+// getRoles returns the roles advertised by this node.
 //
 // A role is a label/metadata used by the cluster to define a node’s
 // responsibilities (see WithRoles for details and examples). The returned
 // slice is derived from an internal set: there are no duplicates and the
 // order is unspecified.
-func (x *ClusterConfig) Roles() []string {
+func (x *ClusterConfig) getRoles() []string {
 	roles := x.roles.ToSlice()
 	sort.Strings(roles)
 	return roles
+}
+
+// grainActivationBarrierEnabled reports whether the grain activation barrier is enabled.
+func (x *ClusterConfig) grainActivationBarrierEnabled() bool {
+	return x.grainActivationBarrier != nil && x.grainActivationBarrier.enabled
+}
+
+// grainActivationBarrierTimeout returns the grain activation barrier timeout.
+// A zero value means wait indefinitely.
+func (x *ClusterConfig) grainActivationBarrierTimeout() time.Duration {
+	if x.grainActivationBarrier == nil {
+		return 0
+	}
+	return x.grainActivationBarrier.timeout
+}
+
+// Validate validates the cluster config
+func (x *ClusterConfig) Validate() error {
+	return validation.
+		New(validation.AllErrors()).
+		AddAssertion(x.discovery != nil, "discovery provider is not set").
+		AddAssertion(x.partitionCount > 0, "partition count need to greater than zero").
+		AddAssertion(x.minimumPeersQuorum >= 1, "minimum peers quorum must be at least one").
+		AddAssertion(x.discoveryPort > 0, "discovery port is invalid").
+		AddAssertion(x.peersPort > 0, "peers port is invalid").
+		AddAssertion(len(x.kinds.Values()) > 1 || len(x.grains.Values()) >= 1, "actor kinds are not defined").
+		AddAssertion(x.replicaCount >= 1, "cluster replicaCount is invalid").
+		AddAssertion(x.writeQuorum >= 1, "cluster writeQuorum is invalid").
+		AddAssertion(x.readQuorum >= 1, "cluster readQuorum is invalid").
+		AddAssertion(x.grainActivationBarrier == nil || x.grainActivationBarrier.timeout >= 0, "grain activation barrier timeout is invalid").
+		Validate()
 }
