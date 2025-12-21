@@ -53,6 +53,7 @@ import (
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/singleflight"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
@@ -813,6 +814,7 @@ type actorSystem struct {
 	shuttingDown     atomic.Bool
 	grainsQueue      chan *internalpb.Grain
 	grains           *ds.Map[string, *grainPID]
+	grainActivation  singleflight.Group
 	evictionStrategy *EvictionStrategy
 	evictionInterval time.Duration
 	evictionStopSig  chan registry.Unit

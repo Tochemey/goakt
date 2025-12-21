@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,6 +19,7 @@ import (
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
+	"github.com/tochemey/goakt/v3/log"
 	mockcluster "github.com/tochemey/goakt/v3/mocks/cluster"
 	mockremote "github.com/tochemey/goakt/v3/mocks/remote"
 	"github.com/tochemey/goakt/v3/remote"
@@ -35,6 +38,37 @@ func newActivationTestSystem(t *testing.T, grain Grain, name string, register bo
 	}
 
 	return sys, cl, rem, newGrainIdentity(grain, name)
+}
+
+type activationProbe struct {
+	started chan struct{}
+	release chan struct{}
+	count   atomic.Int32
+}
+
+var activationProbePtr atomic.Pointer[activationProbe]
+
+type activationProbeGrain struct{}
+
+func (g *activationProbeGrain) OnActivate(ctx context.Context, props *GrainProps) error {
+	probe := activationProbePtr.Load()
+	if probe != nil {
+		probe.count.Add(1)
+		select {
+		case probe.started <- struct{}{}:
+		default:
+		}
+		<-probe.release
+	}
+	return nil
+}
+
+func (g *activationProbeGrain) OnReceive(ctx *GrainContext) {
+	ctx.NoErr()
+}
+
+func (g *activationProbeGrain) OnDeactivate(ctx context.Context, props *GrainProps) error {
+	return nil
 }
 
 func TestGrainIdentity_RemoteActivationOnDifferentPeer(t *testing.T) {
@@ -631,6 +665,74 @@ func TestAskGrain_ClusterFallbackAutoProvisions(t *testing.T) {
 
 	_, ok := sys.grains.Get(identity.String())
 	require.True(t, ok)
+}
+
+func TestRecreateGrain_SingleflightActivation(t *testing.T) {
+	ctx := t.Context()
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+	t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+	as := sys.(*actorSystem)
+	as.registry.Register(&activationProbeGrain{})
+
+	identity := newGrainIdentity(&activationProbeGrain{}, "singleflight")
+	pid := newGrainPID(identity, &activationProbeGrain{}, sys, newGrainConfig())
+	wire, err := pid.toWireGrain()
+	require.NoError(t, err)
+
+	probe := &activationProbe{
+		started: make(chan struct{}, 16),
+		release: make(chan struct{}),
+	}
+	activationProbePtr.Store(probe)
+
+	closeRelease := sync.OnceFunc(func() {
+		close(probe.release)
+	})
+	t.Cleanup(func() {
+		activationProbePtr.Store(nil)
+		closeRelease()
+	})
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- as.recreateGrain(ctx, wire)
+	}()
+
+	select {
+	case <-probe.started:
+	case <-time.After(1 * time.Second):
+		t.Fatal("activation did not start")
+	}
+
+	const concurrent = 25
+	var wg sync.WaitGroup
+	wg.Add(concurrent)
+	errs := make(chan error, concurrent)
+	for range concurrent {
+		go func() {
+			defer wg.Done()
+			errs <- as.recreateGrain(ctx, wire)
+		}()
+	}
+
+	select {
+	case <-probe.started:
+		t.Fatalf("expected single activation while activation is in flight")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	closeRelease()
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	require.NoError(t, <-errCh)
+	require.Equal(t, int32(1), probe.count.Load())
 }
 
 func TestLocalSend_ErrorsWhenEnsureGrainProcessFails(t *testing.T) {
