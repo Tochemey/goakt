@@ -22,55 +22,52 @@
  * SOFTWARE.
  */
 
-package actor
+package chunk
 
 import (
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/tochemey/goakt/v3/errors"
 )
 
-func TestSupervisorOption(t *testing.T) {
-	testCases := []struct {
-		name     string
-		option   SupervisorOption
-		expected *Supervisor
-	}{
-		{
-			name:     "WithStrategy",
-			option:   WithStrategy(OneForAllStrategy),
-			expected: &Supervisor{strategy: OneForAllStrategy},
-		},
-		{
-			name:     "WithRetry",
-			option:   WithRetry(2, time.Second),
-			expected: &Supervisor{timeout: time.Second, maxRetries: 2},
-		},
-	}
+func TestChunk(t *testing.T) {
+	t.Run("With empty slice", func(t *testing.T) {
+		var items []int
+		chunkSize := 2
+		chunks := Chunkify(items, chunkSize)
+		require.Empty(t, chunks)
+	})
+	t.Run("With chunk size a dividend of total number of items", func(t *testing.T) {
+		items := []int{2, 7, 9, 4, 6, 10}
+		chunkSize := 2
+		chunks := Chunkify(items, chunkSize)
+		expected := [][]int{
+			{2, 7},
+			{9, 4},
+			{6, 10},
+		}
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			supervisor := &Supervisor{}
-			tc.option(supervisor)
-			assert.Equal(t, tc.expected, supervisor)
-		})
-	}
-}
+		require.EqualValues(t, len(expected), len(chunks))
+		require.ElementsMatch(t, expected[0], chunks[0])
+		require.ElementsMatch(t, expected[1], chunks[1])
+		assert.ElementsMatch(t, expected[2], chunks[2])
+	})
+	t.Run("With chunk size not a dividend of total number of items", func(t *testing.T) {
+		items := []int{2, 7, 9, 4, 6, 10, 11}
+		chunkSize := 2
+		chunks := Chunkify(items, chunkSize)
+		expected := [][]int{
+			{2, 7},
+			{9, 4},
+			{6, 10},
+			{11},
+		}
 
-func TestSupervisorWithAnyError(t *testing.T) {
-	supervisor := NewSupervisor(WithAnyErrorDirective(RestartDirective))
-	directive, ok := supervisor.Directive(new(errors.AnyError))
-	require.True(t, ok)
-	require.Exactly(t, RestartDirective, directive)
-}
-
-func TestSupervisorWithDirective(t *testing.T) {
-	supervisor := NewSupervisor(WithDirective(&errors.InternalError{}, RestartDirective))
-	directive, ok := supervisor.Directive(&errors.InternalError{})
-	require.True(t, ok)
-	require.Exactly(t, RestartDirective, directive)
+		require.EqualValues(t, len(expected), len(chunks))
+		require.ElementsMatch(t, expected[0], chunks[0])
+		require.ElementsMatch(t, expected[1], chunks[1])
+		require.ElementsMatch(t, expected[2], chunks[2])
+		assert.ElementsMatch(t, expected[3], chunks[3])
+	})
 }

@@ -26,19 +26,34 @@ package codec
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/types/known/durationpb"
 
+	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/extension"
+	"github.com/tochemey/goakt/v3/internal/ds"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	mocks "github.com/tochemey/goakt/v3/mocks/extension"
 	"github.com/tochemey/goakt/v3/passivation"
+	"github.com/tochemey/goakt/v3/supervisor"
 )
+
+type decodeDirectiveError struct{}
+
+func (decodeDirectiveError) Error() string { return "escalate" }
+
+type unknownStrategy struct{}
+
+func (unknownStrategy) String() string { return "unknown" }
+
+func (unknownStrategy) Name() string { return "unknown" }
 
 func TestEncodeDecodePassivationStrategy(t *testing.T) {
 	t.Run("TimeBasedStrategy", func(t *testing.T) {
@@ -89,6 +104,18 @@ func TestEncodeDecodePassivationStrategy(t *testing.T) {
 	})
 }
 
+func TestEncodePassivationStrategyUnknown(t *testing.T) {
+	require.Nil(t, EncodePassivationStrategy(unknownStrategy{}))
+}
+
+func TestDecodePassivationStrategyNil(t *testing.T) {
+	require.Nil(t, DecodePassivationStrategy(nil))
+}
+
+func TestDecodePassivationStrategyUnknown(t *testing.T) {
+	require.Nil(t, DecodePassivationStrategy(&internalpb.PassivationStrategy{}))
+}
+
 func TestEncodeDependencies(t *testing.T) {
 	t.Run("EncodeDependencies Happy Path", func(t *testing.T) {
 		mockDependency := mocks.NewDependency(t)
@@ -113,4 +140,166 @@ func TestEncodeDependencies(t *testing.T) {
 		require.Error(t, err)
 		require.Nil(t, result)
 	})
+}
+
+func TestEncodeDecodeRoundTrip(t *testing.T) {
+	sup := supervisor.NewSupervisor(
+		supervisor.WithStrategy(supervisor.OneForAllStrategy),
+		supervisor.WithRetry(3, 2*time.Second),
+		supervisor.WithDirective(&gerrors.InternalError{}, supervisor.RestartDirective),
+	)
+
+	spec := EncodeSupervisor(sup)
+	require.NotNil(t, spec)
+	require.Equal(t, internalpb.SupervisorStrategy_SUPERVISOR_STRATEGY_ONE_FOR_ALL, spec.GetStrategy())
+	require.EqualValues(t, 3, spec.GetMaxRetries())
+	require.NotNil(t, spec.GetTimeout())
+	require.Equal(t, 2*time.Second, spec.GetTimeout().AsDuration())
+
+	decoded := DecodeSupervisor(spec)
+	require.NotNil(t, decoded)
+	require.Equal(t, supervisor.OneForAllStrategy, decoded.Strategy())
+	require.EqualValues(t, 3, decoded.MaxRetries())
+	require.Equal(t, 2*time.Second, decoded.Timeout())
+
+	directive, ok := decoded.Directive(&gerrors.InternalError{})
+	require.True(t, ok)
+	require.Equal(t, supervisor.RestartDirective, directive)
+}
+
+func TestEncodeSupervisorAnyError(t *testing.T) {
+	sup := supervisor.NewSupervisor(supervisor.WithAnyErrorDirective(supervisor.ResumeDirective))
+
+	spec := EncodeSupervisor(sup)
+	require.NotNil(t, spec)
+	require.NotNil(t, spec.AnyErrorDirective)
+	require.Equal(t, internalpb.SupervisorDirective_SUPERVISOR_DIRECTIVE_RESUME, spec.GetAnyErrorDirective())
+	require.Len(t, spec.GetDirectives(), 0)
+
+	decoded := DecodeSupervisor(spec)
+	directive, ok := decoded.Directive(new(gerrors.AnyError))
+	require.True(t, ok)
+	require.Equal(t, supervisor.ResumeDirective, directive)
+
+	_, ok = decoded.Directive(&gerrors.InternalError{})
+	require.False(t, ok)
+}
+
+func TestEncodeNilSupervisor(t *testing.T) {
+	require.Nil(t, EncodeSupervisor(nil))
+}
+
+func TestEncodeNilDirectives(t *testing.T) {
+	spec := EncodeSupervisor(&supervisor.Supervisor{})
+	require.NotNil(t, spec)
+	require.Len(t, spec.GetDirectives(), 0)
+	require.Nil(t, spec.AnyErrorDirective)
+}
+
+func TestEncodeEmptyDirectives(t *testing.T) {
+	sup := supervisor.NewSupervisor()
+	sup.Reset()
+
+	spec := EncodeSupervisor(sup)
+	require.NotNil(t, spec)
+	require.Len(t, spec.GetDirectives(), 0)
+	require.Nil(t, spec.AnyErrorDirective)
+}
+
+func TestEncodeSortsDirectives(t *testing.T) {
+	sup := supervisor.NewSupervisor()
+	sup.Reset()
+	sup.SetDirectiveByType("errors.BError", supervisor.RestartDirective)
+	sup.SetDirectiveByType("errors.AError", supervisor.ResumeDirective)
+
+	spec := EncodeSupervisor(sup)
+	require.Len(t, spec.GetDirectives(), 2)
+	require.Equal(t, "errors.AError", spec.GetDirectives()[0].GetErrorType())
+	require.Equal(t, "errors.BError", spec.GetDirectives()[1].GetErrorType())
+}
+
+func TestEncodeSupervisorSkipsEmptyErrorType(t *testing.T) {
+	sup := &supervisor.Supervisor{}
+	directives := ds.NewMap[string, supervisor.Directive]()
+	directives.Set("", supervisor.ResumeDirective)
+	setSupervisorDirectives(sup, directives)
+
+	spec := EncodeSupervisor(sup)
+	require.NotNil(t, spec)
+	require.Len(t, spec.GetDirectives(), 0)
+	require.Nil(t, spec.AnyErrorDirective)
+}
+
+func TestEncodeSupervisorDirectiveVariants(t *testing.T) {
+	sup := supervisor.NewSupervisor()
+	sup.Reset()
+	sup.SetDirectiveByType("errors.AError", supervisor.EscalateDirective)
+	sup.SetDirectiveByType("errors.BError", supervisor.StopDirective)
+
+	spec := EncodeSupervisor(sup)
+	require.Len(t, spec.GetDirectives(), 2)
+	require.Equal(t, "errors.AError", spec.GetDirectives()[0].GetErrorType())
+	require.Equal(t, internalpb.SupervisorDirective_SUPERVISOR_DIRECTIVE_ESCALATE, spec.GetDirectives()[0].GetDirective())
+	require.Equal(t, "errors.BError", spec.GetDirectives()[1].GetErrorType())
+	require.Equal(t, internalpb.SupervisorDirective_SUPERVISOR_DIRECTIVE_STOP, spec.GetDirectives()[1].GetDirective())
+}
+
+func TestDecodeNilSpec(t *testing.T) {
+	require.Nil(t, DecodeSupervisor(nil))
+}
+
+func TestDecodeSkipsInvalidRules(t *testing.T) {
+	errType := errorType(&decodeDirectiveError{})
+	spec := &internalpb.SupervisorSpec{
+		Strategy: internalpb.SupervisorStrategy_SUPERVISOR_STRATEGY_ONE_FOR_ONE,
+		Directives: []*internalpb.SupervisorDirectiveRule{
+			nil,
+			{
+				ErrorType: "",
+				Directive: internalpb.SupervisorDirective_SUPERVISOR_DIRECTIVE_RESTART,
+			},
+			{
+				ErrorType: errType,
+				Directive: internalpb.SupervisorDirective_SUPERVISOR_DIRECTIVE_ESCALATE,
+			},
+		},
+	}
+
+	decoded := DecodeSupervisor(spec)
+	require.NotNil(t, decoded)
+	require.Equal(t, supervisor.OneForOneStrategy, decoded.Strategy())
+	require.EqualValues(t, 0, decoded.MaxRetries())
+	require.Equal(t, time.Duration(-1), decoded.Timeout())
+
+	directive, ok := decoded.Directive(&decodeDirectiveError{})
+	require.True(t, ok)
+	require.Equal(t, supervisor.EscalateDirective, directive)
+}
+
+func TestDecodeWithMaxRetriesOnly(t *testing.T) {
+	spec := &internalpb.SupervisorSpec{
+		Strategy:   internalpb.SupervisorStrategy_SUPERVISOR_STRATEGY_ONE_FOR_ONE,
+		MaxRetries: 5,
+	}
+
+	decoded := DecodeSupervisor(spec)
+	require.NotNil(t, decoded)
+	require.EqualValues(t, 5, decoded.MaxRetries())
+	require.Equal(t, time.Duration(0), decoded.Timeout())
+}
+
+func errorType(err error) string {
+	if err == nil {
+		return "nil"
+	}
+	rtype := reflect.TypeOf(err)
+	if rtype.Kind() == reflect.Ptr {
+		rtype = rtype.Elem()
+	}
+	return rtype.String()
+}
+
+func setSupervisorDirectives(sup *supervisor.Supervisor, directives *ds.Map[string, supervisor.Directive]) {
+	field := reflect.ValueOf(sup).Elem().FieldByName("directives")
+	reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).Elem().Set(reflect.ValueOf(directives))
 }

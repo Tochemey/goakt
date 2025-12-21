@@ -25,44 +25,45 @@
 package actor
 
 import (
-	"testing"
+	"reflect"
 
-	"github.com/stretchr/testify/require"
-
-	"github.com/tochemey/goakt/v3/address"
-	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/registry"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-func TestActorRef(t *testing.T) {
-	t.Run("With Equals", func(t *testing.T) {
-		addr := address.New("name", "system", "host", 1234)
-		actorRef := toActorRef(&internalpb.Actor{
-			Address: addr.String(),
-			Type:    "kind",
-		})
+type supervisionSignal struct {
+	err       error
+	msg       proto.Message
+	timestamp *timestamppb.Timestamp
+}
 
-		newActorRef := toActorRef(&internalpb.Actor{
-			Address: addr.String(),
-			Type:    "kind",
-		})
+func newSupervisionSignal(err error, msg proto.Message) *supervisionSignal {
+	return &supervisionSignal{
+		err:       err,
+		msg:       msg,
+		timestamp: timestamppb.Now(),
+	}
+}
 
-		require.Equal(t, "name", actorRef.Name())
-		require.Equal(t, "kind", actorRef.Kind())
-		require.True(t, addr.Equals(actorRef.Address()))
-		require.True(t, newActorRef.Equals(actorRef))
-		require.False(t, newActorRef.IsRelocatable())
-	})
-	t.Run("From PID", func(t *testing.T) {
-		addr := address.New("name", "system", "host", 1234)
-		actor := NewMockActor()
-		pid := &PID{
-			address: addr,
-			actor:   actor,
-		}
-		actorRef := fromPID(pid)
-		require.Equal(t, "name", actorRef.Name())
-		require.Equal(t, registry.Name(actor), actorRef.Kind())
-		require.False(t, actorRef.IsRelocatable())
-	})
+func (s *supervisionSignal) Err() error {
+	return s.err
+}
+
+func (s *supervisionSignal) Msg() proto.Message {
+	return s.msg
+}
+
+func (s *supervisionSignal) Timestamp() *timestamppb.Timestamp {
+	return s.timestamp
+}
+
+func errorType(err error) string {
+	if err == nil {
+		return "nil"
+	}
+	rtype := reflect.TypeOf(err)
+	if rtype.Kind() == reflect.Ptr {
+		rtype = rtype.Elem()
+	}
+	return rtype.String()
 }

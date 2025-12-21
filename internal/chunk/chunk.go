@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package collection
+package chunk
 
 // Chunkify helps chunk a slice into equal size
 func Chunkify[T any](slice []T, chunkSize int) [][]T {

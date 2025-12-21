@@ -29,9 +29,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"google.golang.org/protobuf/proto"
-
-	"github.com/tochemey/goakt/v3/goaktpb"
 )
 
 func TestAddressValidate(t *testing.T) {
@@ -134,10 +131,14 @@ func TestAddress(t *testing.T) {
 		assert.Equal(t, "host", addr.Host())
 		assert.Equal(t, "name", addr.Name())
 		assert.EqualValues(t, 1234, addr.Port())
-		assert.NotEmpty(t, addr.ID())
-		assert.NotNil(t, addr.Parent())
-		assert.True(t, proto.Equal(addr.Parent(), zeroAddress))
+		assert.Nil(t, addr.Parent())
 		assert.Equal(t, expected, addr.String())
+	})
+
+	t.Run("With parent string", func(t *testing.T) {
+		parent := New("parent", "system", "host", 1234)
+		child := NewWithParent("child", "system", "host", 1234, parent)
+		assert.Equal(t, "goakt://system@host:1234/parent/child", child.String())
 	})
 
 	t.Run("Equals returns false when to be compared to is nil", func(t *testing.T) {
@@ -150,26 +151,79 @@ func TestAddress(t *testing.T) {
 		child := NewWithParent("child", "system", "host", 1234, parent)
 		assert.NotNil(t, child.Parent())
 		assert.True(t, child.Parent().Equals(parent))
-		assert.True(t, proto.Equal(child.Parent(), parent.Address))
+		assert.True(t, child.Parent().Equals(parent))
+	})
+}
+
+func TestAddressNilReceiver(t *testing.T) {
+	var addr *Address
+	assert.Nil(t, addr.Parent())
+	assert.Equal(t, "", addr.Name())
+	assert.Equal(t, "", addr.Host())
+	assert.EqualValues(t, 0, addr.Port())
+	assert.Equal(t, "", addr.System())
+	assert.Equal(t, "", addr.String())
+	assert.Equal(t, ":0", addr.HostPort())
+	assert.False(t, addr.Equals(nil))
+	assert.NoError(t, addr.Validate())
+}
+
+func TestParse(t *testing.T) {
+	t.Run("Without parent", func(t *testing.T) {
+		addr, err := Parse("goakt://system@host:1234/name")
+		assert.NoError(t, err)
+		if assert.NotNil(t, addr) {
+			assert.Equal(t, "system", addr.System())
+			assert.Equal(t, "host", addr.Host())
+			assert.EqualValues(t, 1234, addr.Port())
+			assert.Equal(t, "name", addr.Name())
+		}
 	})
 
-	t.Run("From protobuf address", func(t *testing.T) {
-		protoAddr := &goaktpb.Address{
-			Name:   "name",
-			System: "system",
-			Host:   "host",
-			Port:   1234,
-			Id:     "id",
-			Parent: zeroAddress,
+	t.Run("With parent", func(t *testing.T) {
+		addr, err := Parse("goakt://system@host:1234/parent/child")
+		assert.NoError(t, err)
+		if assert.NotNil(t, addr) {
+			assert.Equal(t, "system", addr.System())
+			assert.Equal(t, "host", addr.Host())
+			assert.EqualValues(t, 1234, addr.Port())
+			assert.Equal(t, "child", addr.Name())
+			assert.NotNil(t, addr.Parent())
+			if assert.NotNil(t, addr.Parent()) {
+				assert.Equal(t, "parent", addr.Parent().Name())
+				assert.Equal(t, "system", addr.Parent().System())
+				assert.Equal(t, "host", addr.Parent().Host())
+				assert.EqualValues(t, 1234, addr.Parent().Port())
+			}
 		}
-		addr := From(protoAddr)
-		assert.NotNil(t, addr)
-		assert.Equal(t, "name", addr.Name())
-		assert.Equal(t, "system", addr.System())
-		assert.Equal(t, "host", addr.Host())
-		assert.EqualValues(t, 1234, addr.Port())
-		assert.Equal(t, "id", addr.ID())
-		assert.NotNil(t, addr.Parent())
-		assert.True(t, proto.Equal(addr.Parent(), zeroAddress))
+	})
+
+	t.Run("Invalid address", func(t *testing.T) {
+		tests := []struct {
+			name        string
+			addr        string
+			errContains string
+		}{
+			{name: "Empty", addr: "", errContains: "address is required"},
+			{name: "Wrong scheme", addr: "http://system@host:1234/name", errContains: "address protocol is not supported"},
+			{name: "Missing scheme separator", addr: "goakt:/system@host:1234/name", errContains: "address format is invalid"},
+			{name: "Missing system separator", addr: "goakt://systemhost:1234/name", errContains: "address format is invalid"},
+			{name: "Missing path separator", addr: "goakt://system@host:1234", errContains: "address format is invalid"},
+			{name: "Missing host port separator", addr: "goakt://system@host1234/name", errContains: "address format is invalid"},
+			{name: "Invalid port", addr: "goakt://system@host:abc/name", errContains: "invalid syntax"},
+			{name: "Extra path segment", addr: "goakt://system@host:1234/parent/child/grandchild", errContains: "address format is invalid"},
+			{name: "Double slash path", addr: "goakt://system@host:1234//child", errContains: "address format is invalid"},
+			{name: "Extra scheme separator", addr: "goakt://system@host://1234/name", errContains: "address format is invalid"},
+			{name: "Extra system separator", addr: "goakt://system@host@other:1234/name", errContains: "address format is invalid"},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				parsed, err := Parse(tt.addr)
+				assert.Nil(t, parsed)
+				assert.Error(t, err)
+				assert.ErrorContains(t, err, tt.errContains)
+			})
+		}
 	})
 }

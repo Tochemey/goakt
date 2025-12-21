@@ -27,9 +27,8 @@ package actor
 import (
 	"go.uber.org/atomic"
 
-	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/internal/collection"
+	"github.com/tochemey/goakt/v3/internal/ds"
 	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/log"
@@ -42,8 +41,8 @@ type deadLetter struct {
 	pid          *PID
 	logger       log.Logger
 	counter      *atomic.Int64
-	letters      *collection.Map[string, *goaktpb.Deadletter]
-	counters     *collection.Map[string, *atomic.Int64]
+	letters      *ds.Map[string, *goaktpb.Deadletter]
+	counters     *ds.Map[string, *atomic.Int64]
 }
 
 // enforce the implementation of the Actor interface
@@ -53,8 +52,8 @@ var _ Actor = (*deadLetter)(nil)
 func newDeadLetter() *deadLetter {
 	counter := atomic.NewInt64(0)
 	return &deadLetter{
-		letters:  collection.NewMap[string, *goaktpb.Deadletter](),
-		counters: collection.NewMap[string, *atomic.Int64](),
+		letters:  ds.NewMap[string, *goaktpb.Deadletter](),
+		counters: ds.NewMap[string, *atomic.Int64](),
 		counter:  counter,
 	}
 }
@@ -91,8 +90,8 @@ func (x *deadLetter) handlePostStart(ctx *ReceiveContext) {
 	x.eventsStream = ctx.Self().eventsStream
 	x.logger = ctx.Logger()
 	x.pid = ctx.Self()
-	x.letters = collection.NewMap[string, *goaktpb.Deadletter]()
-	x.counters = collection.NewMap[string, *atomic.Int64]()
+	x.letters = ds.NewMap[string, *goaktpb.Deadletter]()
+	x.counters = ds.NewMap[string, *atomic.Int64]()
 	x.counter.Store(0)
 	x.logger.Infof("%s started successfully", x.pid.Name())
 }
@@ -104,7 +103,7 @@ func (x *deadLetter) handleDeadletter(msg *goaktpb.Deadletter) {
 	x.eventsStream.Publish(eventsTopic, msg)
 
 	// letters the message for future query
-	id := address.From(msg.GetReceiver()).String()
+	id := msg.GetReceiver()
 	x.letters.Set(id, msg)
 	if counter, ok := x.counters.Get(id); ok {
 		counter.Inc()

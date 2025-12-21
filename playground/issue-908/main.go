@@ -33,6 +33,7 @@ import (
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v3/supervisor"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
@@ -91,8 +92,8 @@ func main() {
 	_, err = system.Spawn(
 		context.Background(), "b", &B{},
 		goakt.WithLongLived(),
-		goakt.WithSupervisor(goakt.NewSupervisor(
-			goakt.WithAnyErrorDirective(goakt.ResumeDirective),
+		goakt.WithSupervisor(supervisor.NewSupervisor(
+			supervisor.WithAnyErrorDirective(supervisor.ResumeDirective),
 		)),
 	)
 	if err != nil {

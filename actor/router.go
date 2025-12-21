@@ -39,6 +39,7 @@ import (
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/ticker"
 	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v3/supervisor"
 )
 
 type routerKind int
@@ -208,7 +209,7 @@ func (x *router) spawnRoutees(ctx *ReceiveContext, start, size int) {
 			WithRelocationDisabled(),
 			WithLongLived(),
 			WithSupervisor(
-				NewSupervisor(WithAnyErrorDirective(EscalateDirective)),
+				supervisor.NewSupervisor(supervisor.WithAnyErrorDirective(supervisor.EscalateDirective)),
 			))
 		x.routeesMap[routee.ID()] = routee
 	}

@@ -65,9 +65,9 @@ import (
 	"github.com/tochemey/goakt/v3/internal/chain"
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/codec"
-	"github.com/tochemey/goakt/v3/internal/collection"
 	"github.com/tochemey/goakt/v3/internal/compression/brotli"
 	"github.com/tochemey/goakt/v3/internal/compression/zstd"
+	"github.com/tochemey/goakt/v3/internal/ds"
 	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
@@ -82,6 +82,7 @@ import (
 	"github.com/tochemey/goakt/v3/memory"
 	"github.com/tochemey/goakt/v3/passivation"
 	"github.com/tochemey/goakt/v3/remote"
+	sup "github.com/tochemey/goakt/v3/supervisor"
 	gtls "github.com/tochemey/goakt/v3/tls"
 )
 
@@ -709,7 +710,7 @@ type ActorSystem interface {
 	findRoutee(routeeName string) (*PID, bool)
 	isStopping() bool
 	getRemoting() remote.Remoting
-	getGrains() *collection.Map[string, *grainPID]
+	getGrains() *ds.Map[string, *grainPID]
 	recreateGrain(ctx context.Context, props *internalpb.Grain) error
 	decreaseActorsCounter()
 	removePeerActor(ctx context.Context, actorName string) error
@@ -775,7 +776,7 @@ type actorSystem struct {
 	// manages passivation deadlines without per-actor goroutines
 	passivator *passivationManager
 
-	defaultSupervisor          *Supervisor
+	defaultSupervisor          *sup.Supervisor
 	defaultPassivationStrategy passivation.Strategy
 
 	registry   registry.Registry
@@ -807,11 +808,11 @@ type actorSystem struct {
 	tlsInfo           *gtls.Info
 	pubsubEnabled     atomic.Bool
 	relocationEnabled atomic.Bool
-	extensions        *collection.Map[string, extension.Extension]
+	extensions        *ds.Map[string, extension.Extension]
 
 	shuttingDown     atomic.Bool
 	grainsQueue      chan *internalpb.Grain
-	grains           *collection.Map[string, *grainPID]
+	grains           *ds.Map[string, *grainPID]
 	evictionStrategy *EvictionStrategy
 	evictionInterval time.Duration
 	evictionStopSig  chan registry.Unit
@@ -881,9 +882,9 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		shutdownHooks:       make([]ShutdownHook, 0),
 		rebalancedNodes:     goset.NewSet[string](),
 		topicActor:          nil,
-		extensions:          collection.NewMap[string, extension.Extension](),
+		extensions:          ds.NewMap[string, extension.Extension](),
 		grainsQueue:         make(chan *internalpb.Grain, 10),
-		grains:              collection.NewMap[string, *grainPID](),
+		grains:              ds.NewMap[string, *grainPID](),
 		askTimeout:          DefaultAskTimeout,
 		evictionStopSig:     make(chan registry.Unit, 1),
 	}
@@ -902,7 +903,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	system.pubsubEnabled.Store(false)
 
 	system.reflection = newReflection(system.registry)
-	system.defaultSupervisor = NewSupervisor()
+	system.defaultSupervisor = sup.NewSupervisor()
 	system.defaultPassivationStrategy = passivation.NewTimeBasedStrategy(DefaultPassivationTimeout)
 	system.passivator = newPassivationManager(system.logger)
 
@@ -1552,8 +1553,7 @@ func (x *actorSystem) Kill(ctx context.Context, name string) error {
 		return gerrors.NewErrActorNotFound(name)
 	}
 
-	actorAddress := x.actorAddress(name)
-	pidNode, exist := x.actors.node(actorAddress.String())
+	pidNode, exist := x.actors.nodeByName(name)
 	if exist {
 		pid := pidNode.value()
 		return pid.Shutdown(ctx)
@@ -1569,10 +1569,15 @@ func (x *actorSystem) Kill(ctx context.Context, name string) error {
 			return fmt.Errorf("failed to fetch remote actor=%s: %w", name, err)
 		}
 
-		return x.getRemoting().RemoteStop(ctx, actor.Address.GetHost(), int(actor.GetAddress().GetPort()), name)
+		addr, err := address.Parse(actor.GetAddress())
+		if err != nil {
+			return fmt.Errorf("failed to parse remote actor=%s address=%s: %w", name, actor.GetAddress(), err)
+		}
+
+		return x.getRemoting().RemoteStop(ctx, addr.Host(), addr.Port(), name)
 	}
 
-	return gerrors.NewErrActorNotFound(actorAddress.String())
+	return gerrors.NewErrActorNotFound(name)
 }
 
 // ReSpawn recreates a given actor in the system
@@ -1590,17 +1595,16 @@ func (x *actorSystem) ReSpawn(ctx context.Context, name string) (*PID, error) {
 		return nil, gerrors.NewErrActorNotFound(name)
 	}
 
-	actorAddress := x.actorAddress(name)
-	node, exist := x.actors.node(actorAddress.String())
+	node, exist := x.actors.nodeByName(name)
 	if exist {
 		pid := node.value()
 		if err := pid.Restart(ctx); err != nil {
-			return nil, fmt.Errorf("failed to restart actor=%s: %w", actorAddress.String(), err)
+			return nil, fmt.Errorf("failed to restart actor=%s: %w", pid.ID(), err)
 		}
 		return pid, nil
 	}
 
-	return nil, gerrors.NewErrActorNotFound(actorAddress.String())
+	return nil, gerrors.NewErrActorNotFound(name)
 }
 
 // Name returns the actor system name
@@ -1688,8 +1692,7 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *addr
 	}
 
 	// first check whether the actor exist locally
-	actorAddress := x.actorAddress(actorName)
-	if pidnode, ok := x.actors.node(actorAddress.String()); ok {
+	if pidnode, ok := x.actors.nodeByName(actorName); ok {
 		pid := pidnode.value()
 		x.locker.RUnlock()
 		if pid.IsStopping() {
@@ -1713,7 +1716,8 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *addr
 		}
 
 		x.locker.RUnlock()
-		return address.From(actor.GetAddress()), nil, nil
+		addr, err := address.Parse(actor.GetAddress())
+		return addr, nil, err
 	}
 
 	if x.remotingEnabled.Load() {
@@ -1737,8 +1741,7 @@ func (x *actorSystem) ActorExists(ctx context.Context, actorName string) (bool, 
 	defer x.locker.RUnlock()
 
 	// check locally
-	actorAddress := x.actorAddress(actorName)
-	if node, ok := x.actors.node(actorAddress.String()); ok {
+	if node, ok := x.actors.nodeByName(actorName); ok {
 		pid := node.value()
 		if pid.IsStopping() {
 			return false, nil
@@ -1768,8 +1771,7 @@ func (x *actorSystem) LocalActor(actorName string) (*PID, error) {
 		return nil, gerrors.NewErrActorNotFound(actorName)
 	}
 
-	actorAddress := x.actorAddress(actorName)
-	if pidnode, ok := x.actors.node(actorAddress.String()); ok {
+	if pidnode, ok := x.actors.nodeByName(actorName); ok {
 		pid := pidnode.value()
 		x.locker.RUnlock()
 		return pid, nil
@@ -1813,7 +1815,7 @@ func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *
 	}
 
 	x.locker.RUnlock()
-	return address.From(actor.GetAddress()), nil
+	return address.Parse(actor.GetAddress())
 }
 
 // RemoteLookup for an actor on a remote host.
@@ -1854,7 +1856,7 @@ func (x *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request
 	}
 
 	pid := pidNode.value()
-	return connect.NewResponse(&internalpb.RemoteLookupResponse{Address: pid.Address().Address}), nil
+	return connect.NewResponse(&internalpb.RemoteLookupResponse{Address: pid.ID()}), nil
 }
 
 // RemoteAsk is used to send a message to an actor remotely and expect a response
@@ -1884,13 +1886,16 @@ func (x *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[in
 	responses := make([]*anypb.Any, 0, len(req.GetRemoteMessages()))
 	for _, message := range req.GetRemoteMessages() {
 		receiver := message.GetReceiver()
+		addr, err := address.Parse(receiver)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		}
 
 		remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
-		if remoteAddr != net.JoinHostPort(receiver.GetHost(), strconv.Itoa(int(receiver.GetPort()))) {
+		if remoteAddr != net.JoinHostPort(addr.Host(), strconv.Itoa(addr.Port())) {
 			return nil, connect.NewError(connect.CodeInvalidArgument, gerrors.ErrInvalidHost)
 		}
 
-		addr := address.From(receiver)
 		node, exist := x.actors.node(addr.String())
 		if !exist {
 			err := gerrors.NewErrAddressNotFound(addr.String())
@@ -1939,7 +1944,11 @@ func (x *actorSystem) RemoteTell(ctx context.Context, request *connect.Request[i
 
 	for _, message := range req.GetRemoteMessages() {
 		receiver := message.GetReceiver()
-		addr := address.From(receiver)
+		addr, err := address.Parse(receiver)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		}
+
 		node, exist := x.actors.node(addr.String())
 		if !exist {
 			err := gerrors.NewErrAddressNotFound(addr.String())
@@ -2090,6 +2099,12 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 
 	if msg.GetRole() != "" {
 		opts = append(opts, WithRole(msg.GetRole()))
+	}
+
+	if msg.GetSupervisor() != nil {
+		if decoded := codec.DecodeSupervisor(msg.GetSupervisor()); decoded != nil {
+			opts = append(opts, WithSupervisor(decoded))
+		}
 	}
 
 	// set the dependencies if any
@@ -2420,8 +2435,7 @@ func (x *actorSystem) getReflection() *reflection {
 // findRoutee searches for a routee by its name within the actor system and returns its PID if found or an error otherwise.
 func (x *actorSystem) findRoutee(routeeName string) (*PID, bool) {
 	x.locker.RLock()
-	actorAddress := x.actorAddress(routeeName)
-	if pidnode, ok := x.actors.node(actorAddress.String()); ok {
+	if pidnode, ok := x.actors.nodeByName(routeeName); ok {
 		pid := pidnode.value()
 		x.locker.RUnlock()
 		return pid, true
@@ -2451,7 +2465,7 @@ func (x *actorSystem) getRemoting() remote.Remoting {
 }
 
 // getGrains returns the grains map of the actor system
-func (x *actorSystem) getGrains() *collection.Map[string, *grainPID] {
+func (x *actorSystem) getGrains() *ds.Map[string, *grainPID] {
 	x.locker.RLock()
 	grains := x.grains
 	x.locker.RUnlock()
@@ -2594,7 +2608,63 @@ func (x *actorSystem) startClustering(ctx context.Context) error {
 		go x.rebalancingLoop()
 	}
 
+	if err := x.cleanupStaleLocalActors(ctx); err != nil {
+		x.logger.Warnf("failed to cleanup stale cluster actors: %v", err)
+	}
+
 	x.logger.Info("clustering enabled...:)")
+	return nil
+}
+
+// cleanupStaleLocalActors removes cluster actor records that belong to this node
+// but have no corresponding local PID. This is a best-effort cleanup for unclean
+// restarts and does not fail startup on errors.
+func (x *actorSystem) cleanupStaleLocalActors(ctx context.Context) error {
+	if !x.clusterEnabled.Load() || x.cluster == nil {
+		return nil
+	}
+
+	timeout := time.Second
+	if x.clusterConfig != nil {
+		timeout = x.clusterConfig.ReadTimeout()
+	}
+
+	actors, err := x.cluster.Actors(ctx, timeout)
+	if err != nil {
+		return err
+	}
+
+	host := x.remoteConfig.BindAddr()
+	port := x.remoteConfig.BindPort()
+
+	for _, actor := range actors {
+		addr, err := address.Parse(actor.GetAddress())
+		if err != nil {
+			x.logger.Warnf("failed to parse cluster actor address=%q: %v", actor.GetAddress(), err)
+			continue
+		}
+
+		if !strings.EqualFold(addr.System(), x.name) {
+			continue
+		}
+		if addr.Host() != host || addr.Port() != port {
+			continue
+		}
+		if isSystemName(addr.Name()) {
+			continue
+		}
+		if _, ok := x.actors.node(addr.String()); ok {
+			continue
+		}
+
+		if err := x.cluster.RemoveActor(ctx, addr.Name()); err != nil {
+			x.logger.Warnf("failed to remove stale cluster actor=%s: %v", addr.String(), err)
+			continue
+		}
+
+		x.logger.Debugf("removed stale cluster actor=%s", addr.String())
+	}
+
 	return nil
 }
 
@@ -2816,7 +2886,8 @@ func (x *actorSystem) replicateActors() {
 	for actor := range x.actorsQueue {
 		// never replicate system actors because there are specific to the
 		// started node
-		if isSystemName(actor.GetAddress().GetName()) {
+		addr, _ := address.Parse(actor.GetAddress())
+		if isSystemName(addr.Name()) {
 			continue
 		}
 		if !x.isStopping() && x.InCluster() {
@@ -3233,9 +3304,9 @@ func (x *actorSystem) spawnSystemGuardian(ctx context.Context) error {
 		newSystemGuardian(),
 		asSystem(),
 		WithLongLived(),
-		WithSupervisor(NewSupervisor(
-			WithStrategy(OneForOneStrategy),
-			WithAnyErrorDirective(EscalateDirective),
+		WithSupervisor(sup.NewSupervisor(
+			sup.WithStrategy(sup.OneForOneStrategy),
+			sup.WithAnyErrorDirective(sup.EscalateDirective),
 		)))
 
 	// systemGuardian is a child actor of the rootGuardian actor
@@ -3250,9 +3321,9 @@ func (x *actorSystem) spawnUserGuardian(ctx context.Context) error {
 		newUserGuardian(),
 		asSystem(),
 		WithLongLived(),
-		WithSupervisor(NewSupervisor(
-			WithStrategy(OneForOneStrategy),
-			WithAnyErrorDirective(EscalateDirective),
+		WithSupervisor(sup.NewSupervisor(
+			sup.WithStrategy(sup.OneForOneStrategy),
+			sup.WithAnyErrorDirective(sup.EscalateDirective),
 		)))
 
 	// userGuardian is a child actor of the rootGuardian actor
@@ -3263,9 +3334,9 @@ func (x *actorSystem) spawnUserGuardian(ctx context.Context) error {
 func (x *actorSystem) spawnDeathWatch(ctx context.Context) error {
 	actorName := x.reservedName(deathWatchType)
 	// define the supervisor strategy to use
-	supervisor := NewSupervisor(
-		WithStrategy(OneForOneStrategy),
-		WithAnyErrorDirective(EscalateDirective),
+	supervisor := sup.NewSupervisor(
+		sup.WithStrategy(sup.OneForOneStrategy),
+		sup.WithAnyErrorDirective(sup.EscalateDirective),
 	)
 
 	x.deathWatch, _ = x.configPID(ctx,
@@ -3286,13 +3357,13 @@ func (x *actorSystem) spawnRelocator(ctx context.Context) error {
 		actorName := x.reservedName(rebalancerType)
 
 		// define the supervisor strategy to use
-		supervisor := NewSupervisor(
-			WithStrategy(OneForOneStrategy),
-			WithDirective(&gerrors.PanicError{}, RestartDirective),
-			WithDirective(&runtime.PanicNilError{}, RestartDirective),
-			WithDirective(&gerrors.RebalancingError{}, RestartDirective),
-			WithDirective(&gerrors.InternalError{}, ResumeDirective),
-			WithDirective(&gerrors.SpawnError{}, ResumeDirective),
+		supervisor := sup.NewSupervisor(
+			sup.WithStrategy(sup.OneForOneStrategy),
+			sup.WithDirective(&gerrors.PanicError{}, sup.RestartDirective),
+			sup.WithDirective(&runtime.PanicNilError{}, sup.RestartDirective),
+			sup.WithDirective(&gerrors.RebalancingError{}, sup.RestartDirective),
+			sup.WithDirective(&gerrors.InternalError{}, sup.ResumeDirective),
+			sup.WithDirective(&gerrors.SpawnError{}, sup.ResumeDirective),
 		)
 
 		x.relocator, _ = x.configPID(ctx,
@@ -3317,9 +3388,9 @@ func (x *actorSystem) spawnDeadletter(ctx context.Context) error {
 		asSystem(),
 		WithLongLived(),
 		WithSupervisor(
-			NewSupervisor(
-				WithStrategy(OneForOneStrategy),
-				WithAnyErrorDirective(ResumeDirective),
+			sup.NewSupervisor(
+				sup.WithStrategy(sup.OneForOneStrategy),
+				sup.WithAnyErrorDirective(sup.ResumeDirective),
 			),
 		),
 	)

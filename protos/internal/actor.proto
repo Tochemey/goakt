@@ -2,16 +2,52 @@ syntax = "proto3";
 
 package internalpb;
 
-import "goakt/goakt.proto";
+import "google/protobuf/duration.proto";
 import "internal/dependency.proto";
 import "internal/passivation.proto";
 
 option go_package = "github.com/tochemey/goakt/v3/internal/internalpb;internalpb";
 
+// SupervisorStrategy defines how directives apply across failing actors.
+enum SupervisorStrategy {
+  SUPERVISOR_STRATEGY_ONE_FOR_ONE = 0;
+  SUPERVISOR_STRATEGY_ONE_FOR_ALL = 1;
+}
+
+// SupervisorDirective defines the action to apply when an actor fails.
+enum SupervisorDirective {
+  SUPERVISOR_DIRECTIVE_STOP = 0;
+  SUPERVISOR_DIRECTIVE_RESUME = 1;
+  SUPERVISOR_DIRECTIVE_RESTART = 2;
+  SUPERVISOR_DIRECTIVE_ESCALATE = 3;
+}
+
+// SupervisorDirectiveRule binds an error type to a directive.
+message SupervisorDirectiveRule {
+  // Fully-qualified Go error type name (reflect.Type.String()).
+  string error_type = 1;
+  // Specifies the directive to apply.
+  SupervisorDirective directive = 2;
+}
+
+// SupervisorSpec defines an explicit supervisor configuration for an actor.
+message SupervisorSpec {
+  // Specifies the supervisor strategy.
+  SupervisorStrategy strategy = 1;
+  // Specifies the maximum number of retries.
+  uint32 max_retries = 2;
+  // Specifies the restart timeout window.
+  google.protobuf.Duration timeout = 3;
+  // Specifies error-type specific directives.
+  repeated SupervisorDirectiveRule directives = 4;
+  // Specifies the directive to apply for any error.
+  optional SupervisorDirective any_error_directive = 5;
+}
+
 // Actor represents the actor information on the wire.
 message Actor {
   // Specifies the actor address
-  goaktpb.Address address = 1;
+  string address = 1;
   // Specifies the actor type
   string type = 2;
   // Specifies if the actor is a singleton
@@ -26,4 +62,6 @@ message Actor {
   bool enable_stash = 7;
   // Specifies the role the actor belongs to
   optional string role = 8;
+  // Specifies the supervisor configuration when explicitly set
+  SupervisorSpec supervisor = 9;
 }

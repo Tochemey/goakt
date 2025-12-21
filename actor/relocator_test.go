@@ -36,15 +36,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 
+	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
 	mockscluster "github.com/tochemey/goakt/v3/mocks/cluster"
 	"github.com/tochemey/goakt/v3/remote"
+	"github.com/tochemey/goakt/v3/supervisor"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
@@ -108,7 +110,7 @@ func TestRelocatorSpawnRemoteActorActorExistsError(t *testing.T) {
 	}
 
 	targetActor := &internalpb.Actor{
-		Address: &goaktpb.Address{Name: "relocated-actor"},
+		Address: address.New("relocated-actor", "system", "127.0.0.1", 8080).String(),
 	}
 	targetPeer := &cluster.Peer{
 		Host:         "127.0.0.1",
@@ -150,7 +152,7 @@ func TestRelocatorSpawnRemoteActorRemoveActorError(t *testing.T) {
 	}
 
 	targetActor := &internalpb.Actor{
-		Address: &goaktpb.Address{Name: "relocated-actor"},
+		Address: address.New("relocated-actor", "system", "127.0.0.1", 8080).String(),
 	}
 	targetPeer := &cluster.Peer{
 		Host:         "127.0.0.1",
@@ -163,6 +165,73 @@ func TestRelocatorSpawnRemoteActorRemoveActorError(t *testing.T) {
 	var internalErr *errors.InternalError
 	require.ErrorAs(t, err, &internalErr)
 	require.Contains(t, err.Error(), expectedErr.Error())
+}
+
+func TestRelocatorSpawnRemoteActorInvalidAddress(t *testing.T) {
+	ctx := context.Background()
+
+	system := MockReplicationTestSystem(mockscluster.NewCluster(t))
+
+	actor := &relocator{
+		remoting: remote.NewRemoting(),
+		pid: &PID{
+			actorSystem: system,
+		},
+	}
+
+	targetActor := &internalpb.Actor{
+		Address: "invalid-address",
+	}
+	targetPeer := &cluster.Peer{
+		Host:         "127.0.0.1",
+		RemotingPort: 8080,
+	}
+
+	err := actor.spawnRemoteActor(ctx, targetActor, targetPeer)
+	require.Error(t, err)
+
+	var internalErr *errors.InternalError
+	require.ErrorAs(t, err, &internalErr)
+	assert.ErrorContains(t, err, "address format is invalid")
+}
+
+func TestRelocatorRelocateActorsInvalidAddress(t *testing.T) {
+	ctx := context.Background()
+
+	actor := &relocator{}
+
+	var eg errgroup.Group
+	actor.relocateActors(ctx, &eg, []*internalpb.Actor{
+		{Address: "invalid-address"},
+	}, nil, nil)
+
+	err := eg.Wait()
+	require.Error(t, err)
+
+	var spawnErr *errors.SpawnError
+	require.ErrorAs(t, err, &spawnErr)
+	assert.ErrorContains(t, err, "address format is invalid")
+}
+
+func TestRelocatorRelocateActorsInvalidAddressForPeerShare(t *testing.T) {
+	ctx := context.Background()
+
+	actor := &relocator{}
+
+	var eg errgroup.Group
+	actor.relocateActors(ctx, &eg, nil, [][]*internalpb.Actor{
+		nil,
+		{{Address: "invalid-address"}},
+	}, []*cluster.Peer{
+		{Host: "127.0.0.1", RemotingPort: 8080},
+	})
+
+	err := eg.Wait()
+	require.Error(t, err)
+
+	var spawnErr *errors.SpawnError
+	require.ErrorAs(t, err, &spawnErr)
+	assert.ErrorContains(t, err, "address format is invalid")
 }
 
 func TestRelocation(t *testing.T) {
@@ -234,6 +303,53 @@ func TestRelocation(t *testing.T) {
 	assert.NoError(t, node3.Stop(ctx))
 	assert.NoError(t, sd1.Close())
 	assert.NoError(t, sd3.Close())
+	srv.Shutdown()
+}
+
+func TestRelocationWithCustomSupervisor(t *testing.T) {
+	ctx := context.TODO()
+	srv := startNatsServer(t)
+
+	node1, sd1 := testNATs(t, srv.Addr().String())
+	require.NotNil(t, node1)
+	require.NotNil(t, sd1)
+
+	node2, sd2 := testNATs(t, srv.Addr().String())
+	require.NotNil(t, node2)
+	require.NotNil(t, sd2)
+
+	customSupervisor := supervisor.NewSupervisor(
+		supervisor.WithStrategy(supervisor.OneForAllStrategy),
+		supervisor.WithRetry(3, 2*time.Second),
+		supervisor.WithDirective(&errors.InternalError{}, supervisor.RestartDirective),
+	)
+
+	pid, err := node2.Spawn(ctx, "custom-supervised-actor", NewMockActor(), WithSupervisor(customSupervisor))
+	require.NoError(t, err)
+	require.NotNil(t, pid)
+
+	pause.For(time.Second)
+
+	require.NoError(t, node2.Stop(ctx))
+	require.NoError(t, sd2.Close())
+
+	pause.For(time.Minute)
+
+	relocated, err := node1.LocalActor("custom-supervised-actor")
+	require.NoError(t, err)
+	require.NotNil(t, relocated)
+	require.NotNil(t, relocated.supervisor)
+
+	require.Equal(t, supervisor.OneForAllStrategy, relocated.supervisor.Strategy())
+	require.EqualValues(t, 3, relocated.supervisor.MaxRetries())
+	require.Equal(t, 2*time.Second, relocated.supervisor.Timeout())
+
+	directive, ok := relocated.supervisor.Directive(&errors.InternalError{})
+	require.True(t, ok)
+	require.Equal(t, supervisor.RestartDirective, directive)
+
+	assert.NoError(t, node1.Stop(ctx))
+	assert.NoError(t, sd1.Close())
 	srv.Shutdown()
 }
 

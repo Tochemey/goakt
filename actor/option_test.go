@@ -35,6 +35,7 @@ import (
 	"github.com/tochemey/goakt/v3/hash"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/remote"
+	sup "github.com/tochemey/goakt/v3/supervisor"
 	gtls "github.com/tochemey/goakt/v3/tls"
 )
 
@@ -180,4 +181,27 @@ func TestWithMetrics(t *testing.T) {
 	opt.Apply(system)
 
 	assert.NotNil(t, system.metricProvider)
+}
+
+func TestWithDefaultSupervisor(t *testing.T) {
+	t.Run("When supervisor is nil", func(t *testing.T) {
+		system := new(actorSystem)
+		existing := sup.NewSupervisor(sup.WithStrategy(sup.OneForAllStrategy))
+		system.defaultSupervisor = existing
+
+		opt := WithDefaultSupervisor(nil)
+		opt.Apply(system)
+
+		assert.Same(t, existing, system.defaultSupervisor)
+	})
+
+	t.Run("When supervisor is not nil", func(t *testing.T) {
+		system := new(actorSystem)
+		custom := sup.NewSupervisor(sup.WithStrategy(sup.OneForAllStrategy))
+
+		opt := WithDefaultSupervisor(custom)
+		opt.Apply(system)
+
+		assert.Same(t, custom, system.defaultSupervisor)
+	})
 }

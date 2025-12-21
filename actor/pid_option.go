@@ -28,13 +28,14 @@ import (
 	"time"
 
 	"github.com/tochemey/goakt/v3/extension"
-	"github.com/tochemey/goakt/v3/internal/collection"
+	"github.com/tochemey/goakt/v3/internal/ds"
 	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/metric"
 	"github.com/tochemey/goakt/v3/internal/pointer"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/passivation"
 	"github.com/tochemey/goakt/v3/remote"
+	"github.com/tochemey/goakt/v3/supervisor"
 )
 
 // pidOption represents the pid
@@ -62,7 +63,7 @@ func withActorSystem(sys ActorSystem) pidOption {
 }
 
 // withSupervisor defines the supervisor
-func withSupervisor(supervisor *Supervisor) pidOption {
+func withSupervisor(supervisor *supervisor.Supervisor) pidOption {
 	return func(pid *PID) {
 		pid.supervisor = supervisor
 	}
@@ -129,7 +130,7 @@ func withRelocationDisabled() pidOption {
 func withDependencies(dependencies ...extension.Dependency) pidOption {
 	return func(pid *PID) {
 		if pid.dependencies == nil {
-			pid.dependencies = collection.NewMap[string, extension.Dependency]()
+			pid.dependencies = ds.NewMap[string, extension.Dependency]()
 		}
 		for _, dependency := range dependencies {
 			pid.dependencies.Set(dependency.ID(), dependency)

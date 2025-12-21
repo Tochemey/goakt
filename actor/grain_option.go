@@ -30,7 +30,7 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/tochemey/goakt/v3/extension"
-	"github.com/tochemey/goakt/v3/internal/collection"
+	"github.com/tochemey/goakt/v3/internal/ds"
 	"github.com/tochemey/goakt/v3/internal/pointer"
 	"github.com/tochemey/goakt/v3/internal/validation"
 )
@@ -82,7 +82,7 @@ type grainConfig struct {
 	// initTimeout is the timeout duration for grain initialization.
 	initTimeout     atomic.Duration
 	deactivateAfter time.Duration
-	dependencies    *collection.Map[string, extension.Dependency]
+	dependencies    *ds.Map[string, extension.Dependency]
 	// role defines the role required for the node to activate the grain.
 	role *string
 	// placement specifies the placement strategy for activating the grain in a cluster.
@@ -104,7 +104,7 @@ func newGrainConfig(opts ...GrainOption) *grainConfig {
 		initMaxRetries:     atomic.Int32{},
 		initTimeout:        atomic.Duration{},
 		deactivateAfter:    DefaultPassivationTimeout,
-		dependencies:       collection.NewMap[string, extension.Dependency](),
+		dependencies:       ds.NewMap[string, extension.Dependency](),
 		activationStrategy: LocalActivation,
 	}
 
@@ -225,7 +225,7 @@ func WithLongLivedGrain() GrainOption {
 func WithGrainDependencies(deps ...extension.Dependency) GrainOption {
 	return func(config *grainConfig) {
 		if config.dependencies == nil {
-			config.dependencies = collection.NewMap[string, extension.Dependency]()
+			config.dependencies = ds.NewMap[string, extension.Dependency]()
 		}
 		for _, dep := range deps {
 			if dep != nil {

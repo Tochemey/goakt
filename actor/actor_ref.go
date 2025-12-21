@@ -93,10 +93,11 @@ func (x ActorRef) Equals(actor ActorRef) bool {
 }
 
 func toActorRef(actorRef *internalpb.Actor) ActorRef {
+	addr, _ := address.Parse(actorRef.GetAddress())
 	return ActorRef{
-		name:        actorRef.GetAddress().GetName(),
+		name:        addr.Name(),
 		kind:        actorRef.GetType(),
-		address:     address.From(actorRef.GetAddress()),
+		address:     addr,
 		isSingleton: actorRef.GetIsSingleton(),
 		relocatable: actorRef.GetRelocatable(),
 	}

@@ -50,7 +50,7 @@ import (
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
-	"github.com/tochemey/goakt/v3/internal/collection"
+	"github.com/tochemey/goakt/v3/internal/ds"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/metric"
 	"github.com/tochemey/goakt/v3/internal/pause"
@@ -59,6 +59,7 @@ import (
 	testkit "github.com/tochemey/goakt/v3/mocks/discovery"
 	"github.com/tochemey/goakt/v3/passivation"
 	"github.com/tochemey/goakt/v3/remote"
+	"github.com/tochemey/goakt/v3/supervisor"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
@@ -67,6 +68,13 @@ const (
 	replyTimeout   = 100 * time.Millisecond
 	passivateAfter = 200 * time.Millisecond
 )
+
+func newBareSupervisor(strategy supervisor.Strategy) *supervisor.Supervisor {
+	supv := supervisor.NewSupervisor()
+	supv.Reset()
+	supervisor.WithStrategy(strategy)(supv)
+	return supv
+}
 
 func TestReceive(t *testing.T) {
 	t.Run("With happy path", func(t *testing.T) {
@@ -546,7 +554,7 @@ func TestRestart(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
-	t.Run("With restart an actor and its children", func(t *testing.T) {
+	t.Run("With restart an actor and its descendants", func(t *testing.T) {
 		ctx := context.TODO()
 		host := "127.0.0.1"
 		ports := dynaport.Get(1)
@@ -596,9 +604,11 @@ func TestRestart(t *testing.T) {
 
 		require.EqualValues(t, 1, pid.RestartCount())
 		require.EqualValues(t, 1, pid.ChildrenCount())
+		require.EqualValues(t, 1, cid.RestartCount())
+		require.EqualValues(t, 1, gcid.RestartCount())
 
 		// let us send 10 messages to the actor
-		for i := 0; i < count; i++ {
+		for range count {
 			err = Tell(ctx, pid, new(testpb.TestSend))
 			assert.NoError(t, err)
 		}
@@ -607,6 +617,167 @@ func TestRestart(t *testing.T) {
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
 		assert.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("With restart an actor and its suspended descendant", func(t *testing.T) {
+		ctx := context.TODO()
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemote(remote.NewConfig(host, ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		pause.For(time.Second)
+
+		pid, err := actorSystem.Spawn(ctx, "test", NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		child, err := pid.SpawnChild(ctx, "child", NewMockSupervised())
+		require.NoError(t, err)
+		require.NotNil(t, child)
+
+		pause.For(time.Second)
+
+		child.supervisor = newBareSupervisor(supervisor.OneForOneStrategy)
+
+		require.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
+		pause.For(time.Second)
+
+		require.False(t, child.IsRunning())
+		require.True(t, child.IsSuspended())
+
+		err = pid.Restart(ctx)
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		require.True(t, pid.IsRunning())
+		require.True(t, child.IsRunning())
+		require.False(t, child.IsSuspended())
+		require.EqualValues(t, 1, pid.ChildrenCount())
+		require.EqualValues(t, 1, child.RestartCount())
+
+		err = pid.Shutdown(ctx)
+		assert.NoError(t, err)
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("With restart an actor and its descendant failure", func(t *testing.T) {
+		ctx := context.TODO()
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("testSys",
+			WithRemote(remote.NewConfig(host, ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		pause.For(time.Second)
+
+		pid, err := actorSystem.Spawn(ctx, "test", NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		child, err := pid.SpawnChild(ctx, "child", NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, child)
+		pause.For(500 * time.Millisecond)
+
+		grandchild, err := child.SpawnChild(ctx, "grandchild", NewMockRestart())
+		require.NoError(t, err)
+		require.NotNil(t, grandchild)
+		pause.For(500 * time.Millisecond)
+
+		err = pid.Restart(ctx)
+		require.Error(t, err)
+		require.False(t, pid.IsRunning())
+
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("With restart subtree reattaches existing nodes", func(t *testing.T) {
+		ctx := context.TODO()
+
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+
+		system := sys.(*actorSystem)
+		system.noSender = &PID{actorSystem: system, logger: log.DiscardLogger}
+		system.noSender.flipState(runningState, true)
+
+		rootAddr := system.actorAddress("root")
+		root, err := newPID(ctx, rootAddr, NewMockActor(), withActorSystem(system), withCustomLogger(log.DiscardLogger))
+		require.NoError(t, err)
+
+		childAddr := address.NewWithParent("child", rootAddr.System(), rootAddr.Host(), rootAddr.Port(), rootAddr)
+		child, err := newPID(ctx, childAddr, NewMockActor(), withActorSystem(system), withCustomLogger(log.DiscardLogger))
+		require.NoError(t, err)
+
+		t.Cleanup(func() {
+			root.stopSupervisionLoop()
+			child.stopSupervisionLoop()
+		})
+
+		tree := system.tree()
+		require.NoError(t, tree.addRootNode(root))
+		require.NoError(t, tree.addNode(root, child))
+
+		parentNode, ok := tree.node(root.ID())
+		require.True(t, ok)
+		parentNode.descendants.Delete(child.ID())
+		parentNode.watchees.Delete(child.ID())
+
+		childNode, ok := tree.node(child.ID())
+		require.True(t, ok)
+		childNode.parent.Store(nil)
+
+		child.flipState(runningState, false)
+
+		err = restartSubtree(ctx, &restartNode{pid: child}, root, tree, nil, system)
+		require.NoError(t, err)
+
+		require.Len(t, root.Children(), 1)
+		require.Equal(t, root.ID(), child.Parent().ID())
+	})
+	t.Run("With restart subtree ignores non-running descendants", func(t *testing.T) {
+		ctx := context.TODO()
+
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+
+		system := sys.(*actorSystem)
+		system.noSender = &PID{actorSystem: system, logger: log.DiscardLogger}
+		system.noSender.flipState(runningState, true)
+
+		rootAddr := system.actorAddress("root")
+		root, err := newPID(ctx, rootAddr, NewMockActor(), withActorSystem(system), withCustomLogger(log.DiscardLogger))
+		require.NoError(t, err)
+
+		childAddr := address.NewWithParent("child", rootAddr.System(), rootAddr.Host(), rootAddr.Port(), rootAddr)
+		child, err := newPID(ctx, childAddr, NewMockActor(), withActorSystem(system), withCustomLogger(log.DiscardLogger))
+		require.NoError(t, err)
+
+		t.Cleanup(func() {
+			root.stopSupervisionLoop()
+			child.stopSupervisionLoop()
+		})
+
+		tree := system.tree()
+		require.NoError(t, tree.addRootNode(root))
+		require.NoError(t, tree.addNode(root, child))
+
+		child.flipState(runningState, false)
+
+		require.Len(t, tree.descendants(root), 1)
+		subtree := buildRestartSubtree(root, tree)
+		require.Empty(t, subtree.children)
 	})
 	t.Run("With restart an actor with PreStart failure", func(t *testing.T) {
 		ctx := context.TODO()
@@ -801,7 +972,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NotNil(t, parent)
 
 		// create the child actor
-		stopStrategy := NewSupervisor(WithDirective(&errors.PanicError{}, StopDirective))
+		stopStrategy := supervisor.NewSupervisor(supervisor.WithDirective(&errors.PanicError{}, supervisor.StopDirective))
 
 		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(stopStrategy))
 		require.NoError(t, err)
@@ -838,7 +1009,7 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		// Use a short time-based passivation to trigger quickly
 		passiveAfter := 200 * time.Millisecond
-		resumeStrategy := NewSupervisor(WithDirective(&errors.PanicError{}, ResumeDirective))
+		resumeStrategy := supervisor.NewSupervisor(supervisor.WithDirective(&errors.PanicError{}, supervisor.ResumeDirective))
 
 		child, err := parent.SpawnChild(
 			ctx,
@@ -887,9 +1058,9 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NotNil(t, parent)
 
 		// create the child actor
-		stopStrategy := NewSupervisor(
-			WithStrategy(OneForAllStrategy),
-			WithDirective(&errors.PanicError{}, StopDirective),
+		stopStrategy := supervisor.NewSupervisor(
+			supervisor.WithStrategy(supervisor.OneForAllStrategy),
+			supervisor.WithDirective(&errors.PanicError{}, supervisor.StopDirective),
 		)
 
 		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(stopStrategy))
@@ -1024,7 +1195,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NotNil(t, parent)
 
 		// create the child actor
-		fakeStrategy := NewSupervisor(WithDirective(&errors.PanicError{}, 4)) // undefined directive
+		fakeStrategy := supervisor.NewSupervisor(supervisor.WithDirective(&errors.PanicError{}, 4)) // undefined directive
 		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(fakeStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
@@ -1079,13 +1250,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		pause.For(time.Second)
 
 		// bare supervisor
-		child.supervisor = &Supervisor{
-			Mutex:      sync.Mutex{},
-			strategy:   OneForOneStrategy,
-			maxRetries: 0,
-			timeout:    0,
-			directives: collection.NewMap[string, Directive](),
-		}
+		child.supervisor = newBareSupervisor(supervisor.OneForOneStrategy)
 
 		require.Len(t, parent.Children(), 1)
 		// send a message to the actor which result in panic
@@ -1126,7 +1291,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NotNil(t, parent)
 
 		// create the child actor
-		stopStrategy := NewSupervisor(WithDirective(&errors.PanicError{}, DefaultSupervisorDirective))
+		stopStrategy := supervisor.NewSupervisor(supervisor.WithDirective(&errors.PanicError{}, DefaultSupervisorDirective))
 		child, err := parent.SpawnChild(ctx, "SpawnChild", &MockPostStop{}, WithSupervisor(stopStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
@@ -1149,7 +1314,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
-	t.Run("With restart as supervisor strategy", func(t *testing.T) {
+	t.Run("With restart as supervisor strategy of a child actor", func(t *testing.T) {
 		ctx := context.TODO()
 		host := "127.0.0.1"
 		ports := dynaport.Get(1)
@@ -1170,7 +1335,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NotNil(t, parent)
 
 		// create the child actor
-		restartStrategy := NewSupervisor(WithDirective(&errors.PanicError{}, RestartDirective))
+		restartStrategy := supervisor.NewSupervisor(supervisor.WithDirective(&errors.PanicError{}, supervisor.RestartDirective))
 		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(restartStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
@@ -1216,9 +1381,9 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NotNil(t, parent)
 
 		// create the child actor
-		restartStrategy := NewSupervisor(
-			WithStrategy(OneForAllStrategy),
-			WithDirective(&errors.PanicError{}, RestartDirective))
+		restartStrategy := supervisor.NewSupervisor(
+			supervisor.WithStrategy(supervisor.OneForAllStrategy),
+			supervisor.WithDirective(&errors.PanicError{}, supervisor.RestartDirective))
 		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(restartStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
@@ -1315,7 +1480,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		resumeStrategy := NewSupervisor(WithDirective(&errors.PanicError{}, ResumeDirective))
+		resumeStrategy := supervisor.NewSupervisor(supervisor.WithDirective(&errors.PanicError{}, supervisor.ResumeDirective))
 		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(resumeStrategy))
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
@@ -1362,10 +1527,10 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, parent)
 
-		restartStrategy := NewSupervisor(
-			WithStrategy(OneForOneStrategy),
-			WithDirective(&errors.PanicError{}, RestartDirective),
-			WithRetry(2, time.Minute),
+		restartStrategy := supervisor.NewSupervisor(
+			supervisor.WithStrategy(supervisor.OneForOneStrategy),
+			supervisor.WithDirective(&errors.PanicError{}, supervisor.RestartDirective),
+			supervisor.WithRetry(2, time.Minute),
 		)
 
 		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(restartStrategy))
@@ -1420,13 +1585,7 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		pause.For(time.Second)
 
-		child.supervisor = &Supervisor{
-			Mutex:      sync.Mutex{},
-			strategy:   OneForOneStrategy,
-			maxRetries: 0,
-			timeout:    0,
-			directives: collection.NewMap[string, Directive](),
-		}
+		child.supervisor = newBareSupervisor(supervisor.OneForOneStrategy)
 
 		require.Len(t, parent.Children(), 1)
 		// send a message to the actor which result in panic
@@ -1453,7 +1612,7 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		require.NotNil(t, suspendedEvent)
 		require.False(t, proto.Equal(suspendedEvent, new(goaktpb.ActorSuspended)))
-		require.Equal(t, child.Name(), suspendedEvent.GetAddress().GetName())
+		require.Equal(t, child.ID(), suspendedEvent.GetAddress())
 
 		// unsubscribe the consumer
 		err = actorSystem.Unsubscribe(subscriber)
@@ -1493,7 +1652,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NotNil(t, parent)
 
 		// create the child actor
-		stopStrategy := NewSupervisor(WithAnyErrorDirective(StopDirective))
+		stopStrategy := supervisor.NewSupervisor(supervisor.WithAnyErrorDirective(supervisor.StopDirective))
 
 		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(stopStrategy))
 		require.NoError(t, err)
@@ -1532,7 +1691,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NotNil(t, parent)
 
 		// create the child actor
-		escalationStrategy := NewSupervisor(WithDirective(&errors.PanicError{}, EscalateDirective))
+		escalationStrategy := supervisor.NewSupervisor(supervisor.WithDirective(&errors.PanicError{}, supervisor.EscalateDirective))
 		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(escalationStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
@@ -1574,7 +1733,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NotNil(t, parent)
 
 		// create the child actor
-		escalationStrategy := NewSupervisor(WithDirective(&errors.PanicError{}, EscalateDirective))
+		escalationStrategy := supervisor.NewSupervisor(supervisor.WithDirective(&errors.PanicError{}, supervisor.EscalateDirective))
 		child, err := parent.SpawnChild(ctx, "reinstate", NewMockSupervised(), WithSupervisor(escalationStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
@@ -1616,7 +1775,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NotNil(t, parent)
 
 		// create the child actor
-		restartStrategy := NewSupervisor(WithAnyErrorDirective(RestartDirective))
+		restartStrategy := supervisor.NewSupervisor(supervisor.WithAnyErrorDirective(supervisor.RestartDirective))
 		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(restartStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
@@ -1658,7 +1817,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		pause.For(time.Second)
 
 		// create the child actor
-		restartStrategy := NewSupervisor(WithAnyErrorDirective(RestartDirective))
+		restartStrategy := supervisor.NewSupervisor(supervisor.WithAnyErrorDirective(supervisor.RestartDirective))
 		pid, err := actorSystem.Spawn(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(restartStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -1682,7 +1841,6 @@ func TestSupervisorStrategy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
-
 	t.Run("When No Parent found actor is suspended", func(t *testing.T) {
 		ctx := context.TODO()
 		host := "127.0.0.1"
@@ -1702,7 +1860,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		parent := actorSystem.NoSender()
 
 		// create the child actor
-		escalationStrategy := NewSupervisor(WithDirective(&errors.PanicError{}, EscalateDirective))
+		escalationStrategy := supervisor.NewSupervisor(supervisor.WithDirective(&errors.PanicError{}, supervisor.EscalateDirective))
 		child, err := parent.SpawnChild(ctx, "noSenderChild", NewMockSupervised(), WithSupervisor(escalationStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
@@ -1736,7 +1894,6 @@ func TestSupervisorStrategy(t *testing.T) {
 			t.Fatal("suspend blocked with pending supervision stop signal")
 		}
 	})
-
 	t.Run("Stop signal emission is idempotent per cycle", func(t *testing.T) {
 		pid := MockSupervisionPID(t)
 
@@ -1792,7 +1949,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.Eventually(t, func() bool {
 			for message := range consumer.Iterator() {
 				if event, ok := message.Payload().(*goaktpb.ActorSuspended); ok {
-					if event.GetAddress().GetName() == child.Name() {
+					if event.GetAddress() == child.ID() {
 						return true
 					}
 				}
@@ -2424,7 +2581,7 @@ func TestSpawnChild(t *testing.T) {
 		pause.For(time.Second)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
-	t.Run("With restarting child actor when not shutdown", func(t *testing.T) {
+	t.Run("With recreating the same child actor will no-op", func(t *testing.T) {
 		ctx := context.TODO()
 		host := "127.0.0.1"
 		ports := dynaport.Get(1)
@@ -2584,7 +2741,7 @@ func TestSpawnChild(t *testing.T) {
 		require.Len(t, events, 1)
 
 		event := events[0]
-		assert.True(t, proto.Equal(parent.Address().Address, event.GetParent()))
+		assert.Equal(t, parent.ID(), event.GetParent())
 
 		//stop the actor
 		err = parent.Shutdown(ctx)
@@ -6073,7 +6230,7 @@ func TestToWireActorDependencyError(t *testing.T) {
 		actor:        NewMockActor(),
 		address:      address.New("actor-to-wire", "testSys", "127.0.0.1", 0),
 		fieldsLocker: sync.RWMutex{},
-		dependencies: collection.NewMap[string, extension.Dependency](),
+		dependencies: ds.NewMap[string, extension.Dependency](),
 	}
 
 	expectedErr := assert.AnError
@@ -6082,4 +6239,28 @@ func TestToWireActorDependencyError(t *testing.T) {
 	wire, err := pid.toWireActor()
 	require.ErrorIs(t, err, expectedErr)
 	require.Nil(t, wire)
+}
+
+func TestToWireActorSupervisorSpec(t *testing.T) {
+	noSupervisorPID := &PID{
+		actor:        NewMockActor(),
+		address:      address.New("actor-to-wire-nosupervisor", "testSys", "127.0.0.1", 0),
+		fieldsLocker: sync.RWMutex{},
+	}
+
+	wire, err := noSupervisorPID.toWireActor()
+	require.NoError(t, err)
+	require.Nil(t, wire.GetSupervisor())
+
+	withSupervisorPID := &PID{
+		actor:        NewMockActor(),
+		address:      address.New("actor-to-wire-supervisor", "testSys", "127.0.0.1", 0),
+		fieldsLocker: sync.RWMutex{},
+		supervisor:   supervisor.NewSupervisor(supervisor.WithStrategy(supervisor.OneForAllStrategy)),
+	}
+
+	wire, err = withSupervisorPID.toWireActor()
+	require.NoError(t, err)
+	require.NotNil(t, wire.GetSupervisor())
+	require.Equal(t, internalpb.SupervisorStrategy_SUPERVISOR_STRATEGY_ONE_FOR_ALL, wire.GetSupervisor().GetStrategy())
 }

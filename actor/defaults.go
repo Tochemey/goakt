@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/tochemey/goakt/v3/internal/size"
+	"github.com/tochemey/goakt/v3/supervisor"
 )
 
 const (
@@ -59,5 +60,5 @@ const (
 
 var (
 	// DefaultSupervisorDirective defines the default supervisory strategy directive
-	DefaultSupervisorDirective = StopDirective
+	DefaultSupervisorDirective = supervisor.StopDirective
 )

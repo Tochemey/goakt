@@ -36,6 +36,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/metric"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/passivation"
+	"github.com/tochemey/goakt/v3/supervisor"
 )
 
 func TestPIDOptions(t *testing.T) {
@@ -59,7 +60,7 @@ func TestPIDOptions(t *testing.T) {
 	})
 
 	t.Run("WithSupervisor", func(t *testing.T) {
-		supervisor := NewSupervisor()
+		supervisor := supervisor.NewSupervisor()
 		pid := &PID{}
 		withSupervisor(supervisor)(pid)
 		assert.Equal(t, supervisor, pid.supervisor)

@@ -22,47 +22,47 @@
  * SOFTWARE.
  */
 
-package actor
+package strconvx
 
 import (
 	"testing"
 
-	"github.com/stretchr/testify/require"
-
-	"github.com/tochemey/goakt/v3/address"
-	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/registry"
+	"github.com/stretchr/testify/assert"
 )
 
-func TestActorRef(t *testing.T) {
-	t.Run("With Equals", func(t *testing.T) {
-		addr := address.New("name", "system", "host", 1234)
-		actorRef := toActorRef(&internalpb.Actor{
-			Address: addr.String(),
-			Type:    "kind",
-		})
-
-		newActorRef := toActorRef(&internalpb.Actor{
-			Address: addr.String(),
-			Type:    "kind",
-		})
-
-		require.Equal(t, "name", actorRef.Name())
-		require.Equal(t, "kind", actorRef.Kind())
-		require.True(t, addr.Equals(actorRef.Address()))
-		require.True(t, newActorRef.Equals(actorRef))
-		require.False(t, newActorRef.IsRelocatable())
+func TestParseInt32(t *testing.T) {
+	t.Run("With valid value", func(t *testing.T) {
+		got, err := ParseInt32("123")
+		assert.NoError(t, err)
+		assert.EqualValues(t, 123, got)
 	})
-	t.Run("From PID", func(t *testing.T) {
-		addr := address.New("name", "system", "host", 1234)
-		actor := NewMockActor()
-		pid := &PID{
-			address: addr,
-			actor:   actor,
-		}
-		actorRef := fromPID(pid)
-		require.Equal(t, "name", actorRef.Name())
-		require.Equal(t, registry.Name(actor), actorRef.Kind())
-		require.False(t, actorRef.IsRelocatable())
+
+	t.Run("With max int32", func(t *testing.T) {
+		got, err := ParseInt32("2147483647")
+		assert.NoError(t, err)
+		assert.EqualValues(t, 2147483647, got)
+	})
+
+	t.Run("With min int32", func(t *testing.T) {
+		got, err := ParseInt32("-2147483648")
+		assert.NoError(t, err)
+		assert.EqualValues(t, -2147483648, got)
+	})
+
+	t.Run("With invalid value", func(t *testing.T) {
+		_, err := ParseInt32("abc")
+		assert.Error(t, err)
+	})
+
+	t.Run("With out of range positive", func(t *testing.T) {
+		_, err := ParseInt32("2147483648")
+		assert.Error(t, err)
+		assert.ErrorContains(t, err, "out of range")
+	})
+
+	t.Run("With out of range negative", func(t *testing.T) {
+		_, err := ParseInt32("-2147483649")
+		assert.Error(t, err)
+		assert.ErrorContains(t, err, "out of range")
 	})
 }

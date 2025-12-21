@@ -42,7 +42,6 @@ import (
 
 	"github.com/tochemey/goakt/v3/address"
 	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
 )
@@ -211,6 +210,17 @@ func TestRemoteLookup_NotFoundReturnsNoSender(t *testing.T) {
 	assert.True(t, addr.Equals(address.NoSender()))
 }
 
+func TestRemoteLookup_InvalidAddress(t *testing.T) {
+	r := NewRemoting()
+	mockClient := &mockRemotingServiceClient{lookupAddress: "invalid-address"}
+	setClientFactory(t, r, func(string, int) internalpbconnect.RemotingServiceClient { return mockClient })
+
+	addr, err := r.RemoteLookup(context.Background(), "host", 1000, "actor")
+	assert.Error(t, err)
+	assert.Nil(t, addr)
+	assert.ErrorContains(t, err, "address format is invalid")
+}
+
 func TestRemotingContextPropagatorInjectError(t *testing.T) {
 	injectErr := fmt.Errorf("inject failure")
 	prop := &failingPropagator{err: injectErr}
@@ -323,6 +333,7 @@ type mockRemotingServiceClient struct {
 	lastTellReq     *internalpb.RemoteTellRequest
 	lastAskReq      *internalpb.RemoteAskRequest
 	batchResponses  []*anypb.Any
+	lookupAddress   string
 }
 
 func (x *mockRemotingServiceClient) RemoteAsk(_ context.Context, req *connect.Request[internalpb.RemoteAskRequest]) (*connect.Response[internalpb.RemoteAskResponse], error) {
@@ -344,7 +355,12 @@ func (x *mockRemotingServiceClient) RemoteTell(_ context.Context, req *connect.R
 // Unimplemented methods to satisfy the interface.
 func (x *mockRemotingServiceClient) RemoteLookup(_ context.Context, req *connect.Request[internalpb.RemoteLookupRequest]) (*connect.Response[internalpb.RemoteLookupResponse], error) {
 	x.lookupHeader = req.Header().Clone()
-	return connect.NewResponse(&internalpb.RemoteLookupResponse{Address: &goaktpb.Address{}}), nil
+	msg := req.Msg
+	addr := x.lookupAddress
+	if addr == "" {
+		addr = address.New(msg.GetName(), "sys", msg.GetHost(), int(msg.GetPort())).String()
+	}
+	return connect.NewResponse(&internalpb.RemoteLookupResponse{Address: addr}), nil
 }
 
 func (x *mockRemotingServiceClient) RemoteReSpawn(_ context.Context, req *connect.Request[internalpb.RemoteReSpawnRequest]) (*connect.Response[internalpb.RemoteReSpawnResponse], error) {

@@ -28,7 +28,7 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/tochemey/goakt/v3/internal/collection"
+	"github.com/tochemey/goakt/v3/internal/ds"
 )
 
 // Registry defines the types registry interface
@@ -48,7 +48,7 @@ type Registry interface {
 }
 
 type registry struct {
-	m *collection.Map[string, reflect.Type]
+	m *ds.Map[string, reflect.Type]
 }
 
 var _ Registry = (*registry)(nil)
@@ -56,7 +56,7 @@ var _ Registry = (*registry)(nil)
 // NewRegistry creates a new types registry
 func NewRegistry() Registry {
 	return &registry{
-		m: collection.NewMap[string, reflect.Type](),
+		m: ds.NewMap[string, reflect.Type](),
 	}
 }
 

@@ -22,47 +22,30 @@
  * SOFTWARE.
  */
 
-package actor
+package strconvx
 
 import (
+	"math"
+	"strconv"
 	"testing"
 
-	"github.com/stretchr/testify/require"
-
-	"github.com/tochemey/goakt/v3/address"
-	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/registry"
+	"github.com/stretchr/testify/assert"
 )
 
-func TestActorRef(t *testing.T) {
-	t.Run("With Equals", func(t *testing.T) {
-		addr := address.New("name", "system", "host", 1234)
-		actorRef := toActorRef(&internalpb.Actor{
-			Address: addr.String(),
-			Type:    "kind",
-		})
-
-		newActorRef := toActorRef(&internalpb.Actor{
-			Address: addr.String(),
-			Type:    "kind",
-		})
-
-		require.Equal(t, "name", actorRef.Name())
-		require.Equal(t, "kind", actorRef.Kind())
-		require.True(t, addr.Equals(actorRef.Address()))
-		require.True(t, newActorRef.Equals(actorRef))
-		require.False(t, newActorRef.IsRelocatable())
+func TestInt32FromInt(t *testing.T) {
+	t.Run("With valid value", func(t *testing.T) {
+		got, err := Int2Int32(123)
+		assert.NoError(t, err)
+		assert.EqualValues(t, 123, got)
 	})
-	t.Run("From PID", func(t *testing.T) {
-		addr := address.New("name", "system", "host", 1234)
-		actor := NewMockActor()
-		pid := &PID{
-			address: addr,
-			actor:   actor,
+
+	t.Run("With out of range", func(t *testing.T) {
+		if strconv.IntSize == 32 {
+			t.Skip("int cannot exceed int32 range on 32-bit platforms")
 		}
-		actorRef := fromPID(pid)
-		require.Equal(t, "name", actorRef.Name())
-		require.Equal(t, registry.Name(actor), actorRef.Kind())
-		require.False(t, actorRef.IsRelocatable())
+		tooLarge := int64(math.MaxInt32) + 1
+		got, err := Int2Int32(int(tooLarge))
+		assert.Error(t, err)
+		assert.EqualValues(t, 0, got)
 	})
 }

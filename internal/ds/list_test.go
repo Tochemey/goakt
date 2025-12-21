@@ -22,47 +22,39 @@
  * SOFTWARE.
  */
 
-package actor
+package ds
 
 import (
 	"testing"
 
-	"github.com/stretchr/testify/require"
-
-	"github.com/tochemey/goakt/v3/address"
-	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/registry"
+	"github.com/stretchr/testify/assert"
 )
 
-func TestActorRef(t *testing.T) {
-	t.Run("With Equals", func(t *testing.T) {
-		addr := address.New("name", "system", "host", 1234)
-		actorRef := toActorRef(&internalpb.Actor{
-			Address: addr.String(),
-			Type:    "kind",
-		})
+func TestList(t *testing.T) {
+	// create a concurrent slice of integer
+	sl := NewList[int]()
 
-		newActorRef := toActorRef(&internalpb.Actor{
-			Address: addr.String(),
-			Type:    "kind",
-		})
+	// add some items
+	sl.Append(2)
+	sl.Append(4)
+	sl.Append(5)
 
-		require.Equal(t, "name", actorRef.Name())
-		require.Equal(t, "kind", actorRef.Kind())
-		require.True(t, addr.Equals(actorRef.Address()))
-		require.True(t, newActorRef.Equals(actorRef))
-		require.False(t, newActorRef.IsRelocatable())
-	})
-	t.Run("From PID", func(t *testing.T) {
-		addr := address.New("name", "system", "host", 1234)
-		actor := NewMockActor()
-		pid := &PID{
-			address: addr,
-			actor:   actor,
-		}
-		actorRef := fromPID(pid)
-		require.Equal(t, "name", actorRef.Name())
-		require.Equal(t, registry.Name(actor), actorRef.Kind())
-		require.False(t, actorRef.IsRelocatable())
-	})
+	// assert the length
+	assert.EqualValues(t, 3, sl.Len())
+	assert.NotEmpty(t, sl.Items())
+	assert.Len(t, sl.Items(), 3)
+	// get the element at index 2
+	assert.EqualValues(t, 5, sl.Get(2))
+	// remove the element at index 1
+	sl.Delete(1)
+	// assert the length
+	assert.EqualValues(t, 2, sl.Len())
+	assert.Zero(t, sl.Get(4))
+	sl.Reset()
+	assert.Zero(t, sl.Len())
+	sl.AppendMany(1, 2, 3, 4, 5)
+	assert.EqualValues(t, 5, sl.Len())
+
+	// deleting an item that does not exist should not panic
+	sl.Delete(10)
 }

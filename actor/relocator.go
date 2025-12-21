@@ -32,12 +32,14 @@ import (
 	"connectrpc.com/connect"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/goaktpb"
+	"github.com/tochemey/goakt/v3/internal/chunk"
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/codec"
-	"github.com/tochemey/goakt/v3/internal/collection"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
+	"github.com/tochemey/goakt/v3/internal/slices"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/remote"
 )
@@ -118,7 +120,12 @@ func (r *relocator) relocateActors(ctx context.Context, eg *errgroup.Group, lead
 	if len(leaderShares) > 0 {
 		eg.Go(func() error {
 			for _, actor := range leaderShares {
-				if !isSystemName(actor.GetAddress().GetName()) {
+				addr, err := address.Parse(actor.GetAddress())
+				if err != nil {
+					return errors.NewSpawnError(err)
+				}
+
+				if !isSystemName(addr.Name()) {
 					if err := r.recreateLocally(ctx, actor, true); err != nil {
 						return errors.NewSpawnError(err)
 					}
@@ -134,7 +141,12 @@ func (r *relocator) relocateActors(ctx context.Context, eg *errgroup.Group, lead
 				actors := peersShares[i]
 				peer := peers[i-1]
 				for _, actor := range actors {
-					if !isSystemName(actor.GetAddress().GetName()) && !actor.GetIsSingleton() && actor.GetRelocatable() {
+					addr, err := address.Parse(actor.GetAddress())
+					if err != nil {
+						return errors.NewSpawnError(err)
+					}
+
+					if !isSystemName(addr.Name()) && !actor.GetIsSingleton() && actor.GetRelocatable() {
 						if err := r.spawnRemoteActor(ctx, actor, peer); err != nil {
 							return err
 						}
@@ -151,13 +163,17 @@ func (r *relocator) spawnRemoteActor(ctx context.Context, actor *internalpb.Acto
 	remotingPort := peer.RemotingPort
 	actorSystem := r.pid.ActorSystem()
 	cluster := actorSystem.getCluster()
+	addr, err := address.Parse(actor.GetAddress())
+	if err != nil {
+		return errors.NewInternalError(err)
+	}
 
-	exists, err := cluster.ActorExists(ctx, actor.GetAddress().GetName())
+	exists, err := cluster.ActorExists(ctx, addr.Name())
 	if err != nil {
 		return errors.NewInternalError(err)
 	}
 	if exists {
-		if err := cluster.RemoveActor(ctx, actor.GetAddress().GetName()); err != nil {
+		if err := cluster.RemoveActor(ctx, addr.Name()); err != nil {
 			return errors.NewInternalError(err)
 		}
 	}
@@ -168,7 +184,7 @@ func (r *relocator) spawnRemoteActor(ctx context.Context, actor *internalpb.Acto
 	}
 
 	spawnRequest := &remote.SpawnRequest{
-		Name:                actor.GetAddress().GetName(),
+		Name:                addr.Name(),
 		Kind:                actor.GetType(),
 		Singleton:           false,
 		Relocatable:         true,
@@ -176,6 +192,9 @@ func (r *relocator) spawnRemoteActor(ctx context.Context, actor *internalpb.Acto
 		PassivationStrategy: codec.DecodePassivationStrategy(actor.GetPassivationStrategy()),
 		EnableStashing:      actor.GetEnableStash(),
 		Role:                actor.Role,
+	}
+	if actor.GetSupervisor() != nil {
+		spawnRequest.Supervisor = codec.DecodeSupervisor(actor.GetSupervisor())
 	}
 
 	if err := r.remoting.RemoteSpawn(ctx, remoteHost, remotingPort, spawnRequest); err != nil {
@@ -269,12 +288,12 @@ func (r *relocator) allocateActors(totalPeers int, nodeLeftState *internalpb.Pee
 	}
 
 	// Separate singleton actors to be assigned to the leader
-	leaderShares = collection.Filter(toRebalances, func(actor *internalpb.Actor) bool {
+	leaderShares = slices.Filter(toRebalances, func(actor *internalpb.Actor) bool {
 		return actor.GetIsSingleton()
 	})
 
 	// Remove singleton actors from the list
-	toRebalances = collection.Filter(toRebalances, func(actor *internalpb.Actor) bool {
+	toRebalances = slices.Filter(toRebalances, func(actor *internalpb.Actor) bool {
 		return !actor.GetIsSingleton()
 	})
 
@@ -287,7 +306,7 @@ func (r *relocator) allocateActors(totalPeers int, nodeLeftState *internalpb.Pee
 	leaderShares = append(leaderShares, toRebalances[:remainder]...)
 
 	// Chunk the remaining actors for peers
-	chunks := collection.Chunkify(toRebalances[remainder:], quotient)
+	chunks := chunk.Chunkify(toRebalances[remainder:], quotient)
 
 	// Ensure leader takes the first chunk
 	if len(chunks) > 0 {
@@ -299,8 +318,13 @@ func (r *relocator) allocateActors(totalPeers int, nodeLeftState *internalpb.Pee
 
 // recreateLocally recreates the actor
 func (r *relocator) recreateLocally(ctx context.Context, props *internalpb.Actor, enforceSingleton bool) error {
+	addr, err := address.Parse(props.GetAddress())
+	if err != nil {
+		return errors.NewInternalError(err)
+	}
+
 	// remove the given actor from the cluster
-	if err := r.pid.ActorSystem().getCluster().RemoveActor(ctx, props.GetAddress().GetName()); err != nil {
+	if err := r.pid.ActorSystem().getCluster().RemoveActor(ctx, addr.Name()); err != nil {
 		return errors.NewInternalError(err)
 	}
 
@@ -311,7 +335,7 @@ func (r *relocator) recreateLocally(ctx context.Context, props *internalpb.Actor
 
 	if enforceSingleton && props.GetIsSingleton() {
 		// spawn the singleton actor
-		return r.pid.ActorSystem().SpawnSingleton(ctx, props.GetAddress().GetName(), actor, WithSingletonRole(props.GetRole()))
+		return r.pid.ActorSystem().SpawnSingleton(ctx, addr.Name(), actor, WithSingletonRole(props.GetRole()))
 	}
 
 	if !props.GetRelocatable() {
@@ -329,6 +353,11 @@ func (r *relocator) recreateLocally(ctx context.Context, props *internalpb.Actor
 	if props.GetRole() != "" {
 		spawnOpts = append(spawnOpts, WithRole(props.GetRole()))
 	}
+	if props.GetSupervisor() != nil {
+		if decoded := codec.DecodeSupervisor(props.GetSupervisor()); decoded != nil {
+			spawnOpts = append(spawnOpts, WithSupervisor(decoded))
+		}
+	}
 
 	if len(props.GetDependencies()) > 0 {
 		dependencies, err := r.pid.ActorSystem().getReflection().dependenciesFromProto(props.GetDependencies()...)
@@ -338,7 +367,7 @@ func (r *relocator) recreateLocally(ctx context.Context, props *internalpb.Actor
 		spawnOpts = append(spawnOpts, WithDependencies(dependencies...))
 	}
 
-	_, err = r.pid.ActorSystem().Spawn(ctx, props.GetAddress().GetName(), actor, spawnOpts...)
+	_, err = r.pid.ActorSystem().Spawn(ctx, addr.Name(), actor, spawnOpts...)
 	return err
 }
 
@@ -364,7 +393,7 @@ func (r *relocator) allocateGrains(totalPeers int, nodeLeftState *internalpb.Pee
 	leaderShares = append(leaderShares, toRebalances[:remainder]...)
 
 	// Chunk the remaining actors for peers
-	peersShares = collection.Chunkify(toRebalances[remainder:], quotient)
+	peersShares = chunk.Chunkify(toRebalances[remainder:], quotient)
 
 	// Ensure leader takes the first chunk
 	if len(peersShares) > 0 {

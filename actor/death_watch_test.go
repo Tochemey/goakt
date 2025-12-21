@@ -142,7 +142,7 @@ func TestDeathWatch(t *testing.T) {
 
 		addr := address.New(actorID, actorSystem.Name(), actorSystem.Host(), actorSystem.Port())
 
-		err = Tell(ctx, pid, &goaktpb.Terminated{Address: addr.Address})
+		err = Tell(ctx, pid, &goaktpb.Terminated{Address: addr.String()})
 		require.NoError(t, err)
 
 		pause.For(time.Second)
@@ -219,7 +219,7 @@ func TestDeathWatch(t *testing.T) {
 		deathWatchActor.logger = log.DiscardLogger
 		deathWatchActor.tree = sys.tree()
 
-		terminated := &goaktpb.Terminated{Address: cid.Address().Address}
+		terminated := &goaktpb.Terminated{Address: cid.ID()}
 		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, terminated)
 
 		err = deathWatchActor.handleTerminated(receiveCtx)

@@ -20,6 +20,24 @@ across a cluster of computers.
 If you are not familiar with the actor model, the blog post from Brian Storti [here](https://www.brianstorti.com/the-actor-model/) is an excellent and short introduction to the actor model.
 Also, check the reference section at the end of the post for more material regarding the actor model.
 
+## 🚀 Features
+- **Actor Model**: Build concurrent and distributed systems using the actor model with typed protobuf messages.
+- **Messaging**: Tell/Ask APIs for fire-and-forget or request/response flows.
+- **Supervision**: One-for-one/one-for-all strategies, directives, and retry windows for fault tolerance.
+- **Remoting**: Seamless communication between actors across nodes (Connect over HTTP/2).
+- **Context Propagation**: Pluggable context propagation for request-scoped metadata.
+- **Clustering**: Multiple discovery backends (Consul, etcd, Kubernetes, NATS, mDNS, static).
+- **Location Transparency**: Interact with actors without needing to know their physical location.
+- **Relocation**: Automatic actor relocation on node failure with configurable policies.
+- **Cluster Singletons**: Run a single instance across the cluster with guardian-based lifecycle.
+- **Grains**: Virtual actors with activation and passivation strategies (time-based, message-count, long-lived).
+- **Routers**: Routing strategies such as round robin, random, and fan-out.
+- **Scheduling**: Timers and delayed messaging built into the runtime.
+- **Stashing & Mailboxes**: Stash buffers and customizable mailboxes (bounded/unbounded, priority).
+- **Dependency Injection**: Attach runtime dependencies to actors at spawn time.
+- **Observability**: OpenTelemetry metrics, event stream, and dead letters.
+- **Extensions**: Pluggable APIs for cross-cutting capabilities.
+
 ## 💻 Installation
 ```shell
 go get github.com/tochemey/goakt/v3

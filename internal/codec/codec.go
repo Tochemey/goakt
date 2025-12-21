@@ -25,12 +25,16 @@
 package codec
 
 import (
+	"sort"
+	"time"
+
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/passivation"
+	"github.com/tochemey/goakt/v3/supervisor"
 )
 
 // EncodeDependencies transforms a list of dependencies into their serialized protobuf representations.
@@ -99,5 +103,133 @@ func DecodePassivationStrategy(proto *internalpb.PassivationStrategy) passivatio
 		return passivation.NewLongLivedStrategy()
 	default:
 		return nil
+	}
+}
+
+// EncodeSupervisor converts a supervisor instance to its internal protobuf representation.
+func EncodeSupervisor(supervisor *supervisor.Supervisor) *internalpb.SupervisorSpec {
+	if supervisor == nil {
+		return nil
+	}
+
+	spec := &internalpb.SupervisorSpec{
+		Strategy:   encodeSupervisorStrategy(supervisor.Strategy()),
+		MaxRetries: supervisor.MaxRetries(),
+		Timeout:    durationpb.New(supervisor.Timeout()),
+	}
+
+	if directive, ok := supervisor.AnyErrorDirective(); ok {
+		encoded := encodeSupervisorDirective(directive)
+		spec.AnyErrorDirective = &encoded
+		return spec
+	}
+
+	rules := supervisor.Rules()
+	if len(rules) == 0 {
+		return spec
+	}
+
+	directives := make([]*internalpb.SupervisorDirectiveRule, 0, len(rules))
+	for _, rule := range rules {
+		if rule.ErrorType == "" {
+			continue
+		}
+		directives = append(directives, &internalpb.SupervisorDirectiveRule{
+			ErrorType: rule.ErrorType,
+			Directive: encodeSupervisorDirective(rule.Directive),
+		})
+	}
+
+	if len(directives) == 0 {
+		return spec
+	}
+
+	sort.Slice(directives, func(i, j int) bool {
+		return directives[i].GetErrorType() < directives[j].GetErrorType()
+	})
+	spec.Directives = directives
+	return spec
+}
+
+// DecodeSupervisor converts an internal protobuf representation into a supervisor instance.
+func DecodeSupervisor(spec *internalpb.SupervisorSpec) *supervisor.Supervisor {
+	if spec == nil {
+		return nil
+	}
+
+	opts := []supervisor.SupervisorOption{
+		supervisor.WithStrategy(decodeSupervisorStrategy(spec.GetStrategy())),
+	}
+
+	timeoutSet := spec.GetTimeout() != nil
+	var timeout time.Duration
+	if timeoutSet {
+		timeout = spec.GetTimeout().AsDuration()
+	}
+	if timeoutSet || spec.GetMaxRetries() != 0 {
+		opts = append(opts, supervisor.WithRetry(spec.GetMaxRetries(), timeout))
+	}
+
+	if spec.AnyErrorDirective != nil {
+		opts = append(opts, supervisor.WithAnyErrorDirective(decodeSupervisorDirective(spec.GetAnyErrorDirective())))
+		return supervisor.NewSupervisor(opts...)
+	}
+
+	decoded := supervisor.NewSupervisor(opts...)
+	for _, rule := range spec.GetDirectives() {
+		if rule == nil {
+			continue
+		}
+		errType := rule.GetErrorType()
+		if errType == "" {
+			continue
+		}
+		decoded.SetDirectiveByType(errType, decodeSupervisorDirective(rule.GetDirective()))
+	}
+
+	return decoded
+}
+
+func encodeSupervisorStrategy(strategy supervisor.Strategy) internalpb.SupervisorStrategy {
+	switch strategy {
+	case supervisor.OneForAllStrategy:
+		return internalpb.SupervisorStrategy_SUPERVISOR_STRATEGY_ONE_FOR_ALL
+	default:
+		return internalpb.SupervisorStrategy_SUPERVISOR_STRATEGY_ONE_FOR_ONE
+	}
+}
+
+func decodeSupervisorStrategy(strategy internalpb.SupervisorStrategy) supervisor.Strategy {
+	switch strategy {
+	case internalpb.SupervisorStrategy_SUPERVISOR_STRATEGY_ONE_FOR_ALL:
+		return supervisor.OneForAllStrategy
+	default:
+		return supervisor.OneForOneStrategy
+	}
+}
+
+func encodeSupervisorDirective(directive supervisor.Directive) internalpb.SupervisorDirective {
+	switch directive {
+	case supervisor.ResumeDirective:
+		return internalpb.SupervisorDirective_SUPERVISOR_DIRECTIVE_RESUME
+	case supervisor.RestartDirective:
+		return internalpb.SupervisorDirective_SUPERVISOR_DIRECTIVE_RESTART
+	case supervisor.EscalateDirective:
+		return internalpb.SupervisorDirective_SUPERVISOR_DIRECTIVE_ESCALATE
+	default:
+		return internalpb.SupervisorDirective_SUPERVISOR_DIRECTIVE_STOP
+	}
+}
+
+func decodeSupervisorDirective(directive internalpb.SupervisorDirective) supervisor.Directive {
+	switch directive {
+	case internalpb.SupervisorDirective_SUPERVISOR_DIRECTIVE_RESUME:
+		return supervisor.ResumeDirective
+	case internalpb.SupervisorDirective_SUPERVISOR_DIRECTIVE_RESTART:
+		return supervisor.RestartDirective
+	case internalpb.SupervisorDirective_SUPERVISOR_DIRECTIVE_ESCALATE:
+		return supervisor.EscalateDirective
+	default:
+		return supervisor.StopDirective
 	}
 }

@@ -22,52 +22,41 @@
  * SOFTWARE.
  */
 
-package collection
+package actor
 
 import (
+	"errors"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/tochemey/goakt/v3/goaktpb"
 )
 
-func TestChunk(t *testing.T) {
-	t.Run("With empty slice", func(t *testing.T) {
-		var items []int
-		chunkSize := 2
-		chunks := Chunkify(items, chunkSize)
-		require.Empty(t, chunks)
-	})
-	t.Run("With chunk size a dividend of total number of items", func(t *testing.T) {
-		items := []int{2, 7, 9, 4, 6, 10}
-		chunkSize := 2
-		chunks := Chunkify(items, chunkSize)
-		expected := [][]int{
-			{2, 7},
-			{9, 4},
-			{6, 10},
-		}
+type supervisionSignalTestError struct{}
 
-		require.EqualValues(t, len(expected), len(chunks))
-		require.ElementsMatch(t, expected[0], chunks[0])
-		require.ElementsMatch(t, expected[1], chunks[1])
-		assert.ElementsMatch(t, expected[2], chunks[2])
-	})
-	t.Run("With chunk size not a dividend of total number of items", func(t *testing.T) {
-		items := []int{2, 7, 9, 4, 6, 10, 11}
-		chunkSize := 2
-		chunks := Chunkify(items, chunkSize)
-		expected := [][]int{
-			{2, 7},
-			{9, 4},
-			{6, 10},
-			{11},
-		}
+func (supervisionSignalTestError) Error() string { return "supervision-signal" }
 
-		require.EqualValues(t, len(expected), len(chunks))
-		require.ElementsMatch(t, expected[0], chunks[0])
-		require.ElementsMatch(t, expected[1], chunks[1])
-		require.ElementsMatch(t, expected[2], chunks[2])
-		assert.ElementsMatch(t, expected[3], chunks[3])
-	})
+func TestSupervisionSignalAccessors(t *testing.T) {
+	expectedErr := errors.New("boom")
+	expectedMsg := new(goaktpb.PostStart)
+
+	signal := newSupervisionSignal(expectedErr, expectedMsg)
+
+	require.Equal(t, expectedErr, signal.Err())
+	require.Equal(t, expectedMsg, signal.Msg())
+	require.NotNil(t, signal.Timestamp())
+	require.False(t, signal.Timestamp().AsTime().IsZero())
+}
+
+func TestErrorTypeNil(t *testing.T) {
+	require.Equal(t, "nil", errorType(nil))
+}
+
+func TestErrorTypePointerAndValue(t *testing.T) {
+	valueErr := supervisionSignalTestError{}
+	require.Equal(t, errorType(valueErr), errorType(&valueErr))
+
+	var nilPtr *supervisionSignalTestError
+	require.Equal(t, errorType(valueErr), errorType(nilPtr))
 }

@@ -49,7 +49,7 @@ import (
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/chain"
 	"github.com/tochemey/goakt/v3/internal/codec"
-	"github.com/tochemey/goakt/v3/internal/collection"
+	"github.com/tochemey/goakt/v3/internal/ds"
 	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/future"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
@@ -60,6 +60,7 @@ import (
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/passivation"
 	"github.com/tochemey/goakt/v3/remote"
+	"github.com/tochemey/goakt/v3/supervisor"
 )
 
 // specifies the state in which the PID is
@@ -77,6 +78,11 @@ const (
 type taskCompletion struct {
 	Receiver *PID
 	Task     func() (proto.Message, error)
+}
+
+type restartNode struct {
+	pid      *PID
+	children []*restartNode
 }
 
 // PID specifies an actor unique process
@@ -131,7 +137,7 @@ type PID struct {
 	reinstateCount atomic.Int64
 
 	// supervisor strategy
-	supervisor               *Supervisor
+	supervisor               *supervisor.Supervisor
 	supervisionChan          chan *supervisionSignal
 	supervisionStopSignal    chan registry.Unit
 	supervisionStopRequested atomic.Bool
@@ -145,7 +151,7 @@ type PID struct {
 	state     atomic.Uint32
 
 	// the list of dependencies
-	dependencies *collection.Map[string, extension.Dependency]
+	dependencies *ds.Map[string, extension.Dependency]
 
 	passivationStrategy passivation.Strategy
 	passivationManager  *passivationManager
@@ -197,7 +203,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	}
 
 	if pid.supervisor == nil {
-		pid.supervisor = NewSupervisor()
+		pid.supervisor = supervisor.NewSupervisor()
 	}
 	if pid.passivationStrategy == nil {
 		pid.passivationStrategy = passivation.NewTimeBasedStrategy(DefaultPassivationTimeout)
@@ -502,11 +508,24 @@ func (pid *PID) Address() *address.Address {
 	return path
 }
 
-// Restart restarts the actor.
-// During restart all messages that are in the mailbox and not yet processed will be ignored.
-// Only the direct alive children of the given actor will be shudown and respawned with their initial state.
-// Bear in mind that restarting an actor will reinitialize the actor to initial state.
-// In case any of the direct child restart fails the given actor will not be started at all.
+// Restart restarts this actor and all *running or suspended* descendants.
+//
+// The operation snapshots the current subtree (running/suspended only), rebuilds the same
+// parent/child topology, and re-initializes the actor by re-running its startup hook
+// (`PreStart`). A `PostStart` system message is emitted on success.
+//
+// Runtime effects:
+//   - Only running actors are shut down; suspended actors are reinitialized without a shutdown step.
+//   - Non-running descendants are skipped and not restarted.
+//   - Mailboxes are not preserved; queued or in-flight messages may be dropped.
+//   - Death-watch and tree bookkeeping are updated to keep watchers and cluster state consistent.
+//
+// Failure behavior:
+//   - If restarting any descendant fails, Restart returns that error and the subtree may
+//     be only partially restarted.
+//   - On failure, the target actor remains non-running to avoid serving in an inconsistent state.
+//
+// Use Restart for administrative recovery or supervision; it is disruptive and best-effort.
 func (pid *PID) Restart(ctx context.Context) error {
 	if pid == nil || pid.Address() == nil {
 		return gerrors.ErrUndefinedActor
@@ -517,114 +536,16 @@ func (pid *PID) Restart(ctx context.Context) error {
 	tree := actorSystem.tree()
 	deathWatch := actorSystem.getDeathWatch()
 
-	// prepare the child actors to respawn
-	// because during the restart process they will be gone
-	// from the system and need to be restarted. Only direct children that are alive
-	children := pid.Children()
+	// snapshot all alive descendants before shutdown so we can rebuild the full subtree
+	// even after the death watch removes entries from the tree.
+	subtree := buildRestartSubtree(pid, tree)
 	// get the parent node of the actor
 	parent := pid.ActorSystem().NoSender()
 	if ppid, ok := tree.parent(pid); ok {
 		parent = ppid
 	}
 
-	if pid.IsRunning() {
-		if err := pid.Shutdown(ctx); err != nil {
-			return err
-		}
-		tk := ticker.New(10 * time.Millisecond)
-		tk.Start()
-		tickerStopSig := make(chan registry.Unit, 1)
-		go func() {
-			for range tk.Ticks {
-				if !pid.IsRunning() {
-					tickerStopSig <- registry.Unit{}
-					return
-				}
-			}
-		}()
-		<-tickerStopSig
-		tk.Stop()
-	}
-
-	pid.resetBehavior()
-	if err := pid.init(ctx); err != nil {
-		return err
-	}
-
-	if !pid.IsSuspended() {
-		// re-add the actor back to the actor tree and cluster
-		if err := chain.New(chain.WithFailFast()).
-			AddRunner(func() error {
-				if !parent.Equals(pid.ActorSystem().NoSender()) {
-					return tree.addNode(parent, pid)
-				}
-				return nil
-			}).
-			AddRunner(func() error { tree.addWatcher(pid, deathWatch); return nil }).
-			AddRunner(func() error { return actorSystem.putActorOnCluster(pid) }).
-			Run(); err != nil {
-			return err
-		}
-	}
-
-	// restart all the previous children
-	eg, gctx := errgroup.WithContext(ctx)
-	for _, child := range children {
-		child := child
-		eg.Go(func() error {
-			if err := child.Restart(gctx); err != nil {
-				return err
-			}
-
-			if !child.IsSuspended() {
-				// re-add the child back to the tree and cluster
-				// since these calls are idempotent
-				if err := chain.New(chain.WithFailFast()).
-					AddRunner(func() error { return tree.addNode(pid, child) }).
-					AddRunner(func() error { tree.addWatcher(child, deathWatch); return nil }).
-					AddRunner(func() error { return actorSystem.putActorOnCluster(child) }).
-					Run(); err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-	}
-
-	// wait for the child actor to spawn
-	if err := eg.Wait(); err != nil {
-		// disable messages processing
-		pid.flipState(stoppingState, true)
-		pid.flipState(runningState, false)
-		return fmt.Errorf("actor=(%s) failed to restart: %w", pid.Name(), err)
-	}
-
-	pid.processing.Store(idle)
-	pid.flipState(suspendedState, false)
-	pid.startSupervision()
-	pid.startPassivation()
-
-	if err := pid.healthCheck(ctx); err != nil {
-		return err
-	}
-
-	pid.restartCount.Inc()
-	pid.fireSystemMessage(ctx, new(goaktpb.PostStart))
-	if pid.eventsStream != nil {
-		pid.eventsStream.Publish(
-			eventsTopic, &goaktpb.ActorRestarted{
-				Address:     pid.Address().Address,
-				RestartedAt: timestamppb.Now(),
-			},
-		)
-	}
-
-	if err := pid.registerMetrics(); err != nil {
-		return err
-	}
-
-	pid.logger.Debugf("actor=(%s) successfully restarted..:)", pid.Name())
-	return nil
+	return restartSubtree(ctx, subtree, parent, tree, deathWatch, actorSystem)
 }
 
 // RestartCount returns the total number of re-starts by the given PID
@@ -690,6 +611,7 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 		withRemoting(pid.remoting),
 		withPassivationManager(pid.passivationManager),
 		withMetricProvider(pid.metricProvider),
+		withRelocationDisabled(), // by default child is not relocatable
 	}
 
 	if spawnConfig.mailbox != nil {
@@ -699,11 +621,6 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 	// set the supervisor strategies when defined
 	if spawnConfig.supervisor != nil {
 		pidOptions = append(pidOptions, withSupervisor(spawnConfig.supervisor))
-	}
-
-	// set the relocation flag
-	if !spawnConfig.relocatable {
-		pidOptions = append(pidOptions, withRelocationDisabled())
 	}
 
 	// enable stash
@@ -740,9 +657,9 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 	if eventsStream != nil {
 		eventsStream.Publish(
 			eventsTopic, &goaktpb.ActorChildCreated{
-				Address:   cid.Address().Address,
+				Address:   cid.ID(),
 				CreatedAt: timestamppb.Now(),
-				Parent:    pid.Address().Address,
+				Parent:    pid.ID(),
 			},
 		)
 	}
@@ -1212,6 +1129,10 @@ func (pid *PID) RemoteSpawn(ctx context.Context, host string, port int, actorNam
 		EnableStashing:      config.enableStash,
 	}
 
+	if config.supervisor != nil {
+		request.Supervisor = config.supervisor
+	}
+
 	return pid.remoting.RemoteSpawn(ctx, host, port, request)
 }
 
@@ -1257,7 +1178,7 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 	if pid.eventsStream != nil {
 		pid.eventsStream.Publish(
 			eventsTopic, &goaktpb.ActorStopped{
-				Address:   pid.Address().Address,
+				Address:   pid.ID(),
 				StoppedAt: timestamppb.Now(),
 			},
 		)
@@ -1484,7 +1405,7 @@ func (pid *PID) init(ctx context.Context) error {
 	if pid.eventsStream != nil {
 		pid.eventsStream.Publish(
 			eventsTopic, &goaktpb.ActorStarted{
-				Address:   pid.Address().Address,
+				Address:   pid.ID(),
 				StartedAt: timestamppb.Now(),
 			},
 		)
@@ -1537,7 +1458,7 @@ func (pid *PID) freeWatchers(ctx context.Context) {
 		for _, watcher := range watchers {
 			watcher := watcher
 			terminated := &goaktpb.Terminated{
-				Address:      pid.Address().Address,
+				Address:      pid.ID(),
 				TerminatedAt: timestamppb.Now(),
 			}
 
@@ -1675,7 +1596,7 @@ func (pid *PID) tryPassivation(reason string) bool {
 
 	if pid.eventsStream != nil {
 		event := &goaktpb.ActorPassivated{
-			Address:      pid.Address().Address,
+			Address:      pid.ID(),
 			PassivatedAt: timestamppb.Now(),
 		}
 		pid.eventsStream.Publish(eventsTopic, event)
@@ -1821,22 +1742,22 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 	}
 
 	switch directive {
-	case StopDirective:
+	case supervisor.StopDirective:
 		msg.Directive = &internalpb.Panicking_Stop{
 			Stop: new(internalpb.StopDirective),
 		}
-	case RestartDirective:
+	case supervisor.RestartDirective:
 		msg.Directive = &internalpb.Panicking_Restart{
 			Restart: &internalpb.RestartDirective{
 				MaxRetries: pid.supervisor.MaxRetries(),
 				Timeout:    int64(pid.supervisor.Timeout()),
 			},
 		}
-	case ResumeDirective:
+	case supervisor.ResumeDirective:
 		msg.Directive = &internalpb.Panicking_Resume{
 			Resume: &internalpb.ResumeDirective{},
 		}
-	case EscalateDirective:
+	case supervisor.EscalateDirective:
 		msg.Directive = &internalpb.Panicking_Escalate{
 			Escalate: &internalpb.EscalateDirective{},
 		}
@@ -1847,9 +1768,9 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 	}
 
 	switch pid.supervisor.Strategy() {
-	case OneForOneStrategy:
+	case supervisor.OneForOneStrategy:
 		msg.Strategy = internalpb.Strategy_STRATEGY_ONE_FOR_ONE
-	case OneForAllStrategy:
+	case supervisor.OneForAllStrategy:
 		msg.Strategy = internalpb.Strategy_STRATEGY_ONE_FOR_ALL
 	default:
 		msg.Strategy = internalpb.Strategy_STRATEGY_ONE_FOR_ONE
@@ -1865,7 +1786,7 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 
 		// For ResumeDirective, avoid suspending to minimize timing windows where the child appears
 		// temporarily "not running" to observers. For other directives, keep suspension semantics.
-		if directive == ResumeDirective {
+		if directive == supervisor.ResumeDirective {
 			// Always skip the next passivation decision once to avoid immediate stop after resume.
 			pid.flipState(passivationSkipNextState, true)
 			// If the actor was already suspended due to a prior signal, reinstate immediately.
@@ -1934,8 +1855,8 @@ func (pid *PID) toDeadletter(ctx context.Context, from, to *address.Address, mes
 		deadletter,
 		&internalpb.SendDeadletter{
 			Deadletter: &goaktpb.Deadletter{
-				Sender:   from.Address,
-				Receiver: to.Address,
+				Sender:   from.String(),
+				Receiver: to.String(),
 				Message:  msg,
 				SendTime: timestamppb.Now(),
 				Reason:   err.Error(),
@@ -2129,7 +2050,7 @@ func (pid *PID) suspend(reason string) {
 	pid.stopSupervisionLoop()
 	// publish an event to the events stream
 	pid.eventsStream.Publish(eventsTopic, &goaktpb.ActorSuspended{
-		Address:     pid.Address().Address,
+		Address:     pid.ID(),
 		SuspendedAt: timestamppb.Now(),
 		Reason:      reason,
 	})
@@ -2188,7 +2109,7 @@ func (pid *PID) doReinstate() {
 
 	// publish an event to the events stream
 	pid.eventsStream.Publish(eventsTopic, &goaktpb.ActorReinstated{
-		Address:      pid.Address().Address,
+		Address:      pid.ID(),
 		ReinstatedAt: timestamppb.Now(),
 	})
 }
@@ -2282,8 +2203,13 @@ func (pid *PID) toWireActor() (*internalpb.Actor, error) {
 		return nil, err
 	}
 
+	var supervisorSpec *internalpb.SupervisorSpec
+	if pid.supervisor != nil {
+		supervisorSpec = codec.EncodeSupervisor(pid.supervisor)
+	}
+
 	return &internalpb.Actor{
-		Address:             pid.Address().Address,
+		Address:             pid.ID(),
 		Type:                registry.Name(pid.Actor()),
 		IsSingleton:         pid.IsSingleton(),
 		Relocatable:         pid.IsRelocatable(),
@@ -2291,6 +2217,7 @@ func (pid *PID) toWireActor() (*internalpb.Actor, error) {
 		Dependencies:        dependencies,
 		EnableStash:         pid.stashState != nil && pid.stashState.box != nil,
 		Role:                pid.Role(),
+		Supervisor:          supervisorSpec,
 	}, nil
 }
 
@@ -2333,6 +2260,123 @@ func (pid *PID) registerMetrics() error {
 
 		return err
 	}
+	return nil
+}
+
+func buildRestartSubtree(root *PID, tree *tree) *restartNode {
+	rootNode := &restartNode{pid: root}
+	descendants := tree.descendants(root)
+	if len(descendants) == 0 {
+		return rootNode
+	}
+
+	nodes := make(map[string]*restartNode, len(descendants))
+	for _, descendant := range descendants {
+		if descendant.IsRunning() || descendant.IsSuspended() {
+			nodes[descendant.ID()] = &restartNode{pid: descendant}
+		}
+	}
+	if len(nodes) == 0 {
+		return rootNode
+	}
+
+	for _, node := range nodes {
+		parent, ok := tree.parent(node.pid)
+		if !ok || parent == nil {
+			continue
+		}
+		if parent.Equals(root) {
+			rootNode.children = append(rootNode.children, node)
+			continue
+		}
+		if parentNode, ok := nodes[parent.ID()]; ok {
+			parentNode.children = append(parentNode.children, node)
+		}
+	}
+
+	return rootNode
+}
+
+func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *tree, deathWatch *PID, actorSystem ActorSystem) error {
+	if node == nil || node.pid == nil {
+		return nil
+	}
+
+	pid := node.pid
+	if pid.IsRunning() {
+		if err := pid.Shutdown(ctx); err != nil {
+			return err
+		}
+		tk := ticker.New(10 * time.Millisecond)
+		tk.Start()
+		tickerStopSig := make(chan registry.Unit, 1)
+		go func() {
+			for range tk.Ticks {
+				if !pid.IsRunning() {
+					tickerStopSig <- registry.Unit{}
+					return
+				}
+			}
+		}()
+		<-tickerStopSig
+		tk.Stop()
+	}
+
+	pid.resetBehavior()
+	if err := pid.init(ctx); err != nil {
+		return err
+	}
+
+	// re-add the actor back to the actor tree and cluster
+	if err := chain.New(chain.WithFailFast()).
+		AddRunner(func() error { return tree.addOrAttachNode(parent, pid) }).
+		AddRunner(func() error { tree.addWatcher(pid, deathWatch); return nil }).
+		AddRunner(func() error { return actorSystem.putActorOnCluster(pid) }).
+		Run(); err != nil {
+		return err
+	}
+
+	eg, gctx := errgroup.WithContext(ctx)
+	for _, child := range node.children {
+		child := child
+		eg.Go(func() error {
+			return restartSubtree(gctx, child, pid, tree, deathWatch, actorSystem)
+		})
+	}
+
+	// wait for descendant actors to restart
+	if err := eg.Wait(); err != nil {
+		// disable messages processing
+		pid.flipState(stoppingState, true)
+		pid.flipState(runningState, false)
+		return fmt.Errorf("actor=(%s) failed to restart: %w", pid.Name(), err)
+	}
+
+	pid.processing.Store(idle)
+	pid.flipState(suspendedState, false)
+	pid.startSupervision()
+	pid.startPassivation()
+
+	if err := pid.healthCheck(ctx); err != nil {
+		return err
+	}
+
+	pid.restartCount.Inc()
+	pid.fireSystemMessage(ctx, new(goaktpb.PostStart))
+	if pid.eventsStream != nil {
+		pid.eventsStream.Publish(
+			eventsTopic, &goaktpb.ActorRestarted{
+				Address:     pid.ID(),
+				RestartedAt: timestamppb.Now(),
+			},
+		)
+	}
+
+	if err := pid.registerMetrics(); err != nil {
+		return err
+	}
+
+	pid.logger.Debugf("actor=(%s) successfully restarted..:)", pid.Name())
 	return nil
 }
 

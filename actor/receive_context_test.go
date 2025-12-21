@@ -372,14 +372,8 @@ func TestReceiveContext(t *testing.T) {
 			self:    pid1,
 		}
 
-		context.RemoteAsk(address.From(
-			&goaktpb.Address{
-				Host: "127.0.0.1",
-				Port: int32(remotingPort),
-				Name: actorName2,
-				Id:   "",
-			},
-		), new(testpb.TestReply), time.Minute)
+		addr := address.New(actorName2, sys.Name(), "127.0.0.1", remotingPort)
+		context.RemoteAsk(addr, new(testpb.TestReply), time.Minute)
 		require.Error(t, context.getError())
 		pause.For(time.Second)
 
@@ -505,14 +499,8 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// send the message to the exchanger actor one using remote messaging
-		context.RemoteTell(address.From(
-			&goaktpb.Address{
-				Host: "127.0.0.1",
-				Port: int32(remotingPort),
-				Name: actorName2,
-				Id:   "",
-			},
-		), new(testpb.TestRemoteSend))
+		addr := address.New(actorName2, sys.Name(), "127.0.0.1", remotingPort)
+		context.RemoteTell(addr, new(testpb.TestRemoteSend))
 		require.Error(t, context.getError())
 		pause.For(time.Second)
 
@@ -1243,7 +1231,9 @@ func TestReceiveContext(t *testing.T) {
 		require.True(t, proto.Equal(send, actual))
 		require.Equal(t, deadletter.GetReason(), errors.ErrUnhandled.Error())
 		addr := deadletter.GetSender()
-		require.True(t, noSender.Address().Equals(address.From(addr)))
+		parsed, err := address.Parse(addr)
+		require.NoError(t, err)
+		require.True(t, noSender.Address().Equals(parsed))
 
 		assert.EqualValues(t, 1, len(consumer.Topics()))
 
@@ -1315,7 +1305,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, msg.UnmarshalTo(actual))
 		require.True(t, proto.Equal(send, actual))
 		require.Equal(t, deadletter.GetReason(), errors.ErrUnhandled.Error())
-		assert.True(t, proto.Equal(deadletter.GetSender(), pid2.Address().Address))
+		assert.Equal(t, deadletter.GetSender(), pid2.Address().String())
 
 		assert.EqualValues(t, 1, len(consumer.Topics()))
 
@@ -1810,14 +1800,8 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// send the message to the exchanger actor one using remote messaging
-		context.RemoteBatchTell(address.From(
-			&goaktpb.Address{
-				Host: "127.0.0.1",
-				Port: int32(remotingPort),
-				Name: actorName2,
-				Id:   "",
-			},
-		), []proto.Message{new(testpb.TestRemoteSend)})
+		addr := address.New(actorName2, sys.Name(), "127.0.0.1", remotingPort)
+		context.RemoteBatchTell(addr, []proto.Message{new(testpb.TestRemoteSend)})
 		require.Error(t, context.getError())
 		pause.For(time.Second)
 
@@ -1926,14 +1910,8 @@ func TestReceiveContext(t *testing.T) {
 			self:    pid1,
 		}
 
-		context.RemoteBatchAsk(address.From(
-			&goaktpb.Address{
-				Host: "127.0.0.1",
-				Port: int32(remotingPort),
-				Name: actorName2,
-				Id:   "",
-			},
-		), []proto.Message{new(testpb.TestReply)}, time.Minute)
+		addr := address.New(actorName2, sys.Name(), "127.0.0.1", remotingPort)
+		context.RemoteBatchAsk(addr, []proto.Message{new(testpb.TestReply)}, time.Minute)
 		require.Error(t, context.getError())
 		pause.For(time.Second)
 

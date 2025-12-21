@@ -32,10 +32,10 @@ import (
 	"time"
 
 	"github.com/tochemey/goakt/v3/actor"
-	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/passivation"
+	"github.com/tochemey/goakt/v3/supervisor"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
@@ -43,7 +43,7 @@ func main() {
 	ctx := context.Background()
 
 	// use the address default log. real-life implement the log interface`
-	logger := log.DiscardLogger
+	logger := log.DefaultLogger
 
 	// create the actor system. kindly in real-life application handle the error
 	actorSystem, _ := actor.NewActorSystem("ParenChild",
@@ -59,7 +59,7 @@ func main() {
 	// create the parent actor
 	_, err := actorSystem.Spawn(ctx, "Parent", &Parent{},
 		actor.WithPassivationStrategy(passivation.NewTimeBasedStrategy(24*time.Hour)),
-		actor.WithSupervisor(actor.NewSupervisor(actor.WithAnyErrorDirective(actor.StopDirective))))
+		actor.WithSupervisor(supervisor.NewSupervisor(supervisor.WithAnyErrorDirective(supervisor.StopDirective))))
 	if err != nil {
 		logger.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func (p *Parent) Receive(ctx *actor.ReceiveContext) {
 		// Spawn a child actor
 		pid := ctx.Spawn("child", &Child{},
 			actor.WithPassivationStrategy(passivation.NewTimeBasedStrategy(24*time.Hour)),
-			actor.WithSupervisor(actor.NewSupervisor(actor.WithAnyErrorDirective(actor.StopDirective))),
+			actor.WithSupervisor(supervisor.NewSupervisor(supervisor.WithAnyErrorDirective(supervisor.StopDirective))),
 		)
 
 		// check if the child actor is running
@@ -110,7 +110,7 @@ func (p *Parent) Receive(ctx *actor.ReceiveContext) {
 		}
 	case *goaktpb.Terminated:
 		// Handle termination of child actors
-		actorID := address.From(msg.GetAddress()).String()
+		actorID := msg.GetAddress()
 		ctx.Logger().Infof("Child actor %s has been terminated", actorID)
 	default:
 		ctx.Unhandled()

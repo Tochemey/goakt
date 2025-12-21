@@ -32,6 +32,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/pointer"
 	"github.com/tochemey/goakt/v3/internal/validation"
 	"github.com/tochemey/goakt/v3/passivation"
+	"github.com/tochemey/goakt/v3/supervisor"
 )
 
 // SpawnPlacement defines the algorithm used by the actor system to determine
@@ -76,7 +77,7 @@ type spawnConfig struct {
 	// mailbox defines the mailbox to use when spawning the actor.
 	mailbox Mailbox
 	// supervisor specifies the supervisor strategy for handling actor failures.
-	supervisor *Supervisor
+	supervisor *supervisor.Supervisor
 	// asSingleton indicates whether the actor should be a singleton within the system.
 	asSingleton bool
 	// relocatable determines if the actor can be relocated to another node in cluster mode.
@@ -187,7 +188,7 @@ func WithMailbox(mailbox Mailbox) SpawnOption {
 //
 // Returns:
 //   - SpawnOption that sets the supervisor in the spawn configuration.
-func WithSupervisor(supervisor *Supervisor) SpawnOption {
+func WithSupervisor(supervisor *supervisor.Supervisor) SpawnOption {
 	return spawnOption(func(config *spawnConfig) {
 		config.supervisor = supervisor
 	})

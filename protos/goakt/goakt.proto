@@ -7,28 +7,12 @@ import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/tochemey/goakt/v3/goaktpb;goaktpb";
 
-// Address represents an actor address
-message Address {
-  // Specifies the remote host address
-  string host = 1;
-  // Specifies the remote port
-  int32 port = 2;
-  // Specifies the actor name
-  string name = 3;
-  // Specifies the actor unique id
-  string id = 4;
-  // Specifies the actor system
-  string system = 5;
-  // Specifies the parent address
-  Address parent = 6;
-}
-
 // Deadletter defines the deadletter event
 message Deadletter {
   // Specifies the sender's address
-  Address sender = 1;
+  string sender = 1;
   // Specifies the actor address
-  Address receiver = 2;
+  string receiver = 2;
   // Specifies the message to send to the actor
   // Any proto message is allowed to be sent
   google.protobuf.Any message = 3;
@@ -41,7 +25,7 @@ message Deadletter {
 // ActorStarted defines the actor started event
 message ActorStarted {
   // Specifies the actor address
-  Address address = 1;
+  string address = 1;
   // Specifies the started time
   google.protobuf.Timestamp started_at = 2;
 }
@@ -49,7 +33,7 @@ message ActorStarted {
 // ActorStopped defines the actor stopped event
 message ActorStopped {
   // Specifies the actor address
-  Address address = 1;
+  string address = 1;
   // Specifies the stop time
   google.protobuf.Timestamp stopped_at = 2;
 }
@@ -57,7 +41,7 @@ message ActorStopped {
 // ActorPassivated define the actor passivated event
 message ActorPassivated {
   // Specifies the actor address
-  Address address = 1;
+  string address = 1;
   // Specifies the passivation time
   google.protobuf.Timestamp passivated_at = 2;
 }
@@ -65,9 +49,9 @@ message ActorPassivated {
 // ActorChildCreated defines the child actor created event
 message ActorChildCreated {
   // Specifies the actor address
-  Address address = 1;
+  string address = 1;
   // Specifies the parent address
-  Address parent = 2;
+  string parent = 2;
   // Specifies the started time
   google.protobuf.Timestamp created_at = 3;
 }
@@ -75,7 +59,7 @@ message ActorChildCreated {
 // ActorRestarted defines the actor restarted event
 message ActorRestarted {
   // Specifies the actor address
-  Address address = 1;
+  string address = 1;
   // Specifies the restarted time
   google.protobuf.Timestamp restarted_at = 2;
 }
@@ -83,7 +67,7 @@ message ActorRestarted {
 // ActorSuspended defines the actor suspended event
 message ActorSuspended {
   // Specifies the actor address
-  Address address = 1;
+  string address = 1;
   // Specifies the suspended time
   google.protobuf.Timestamp suspended_at = 2;
   // Specifies the suspension reason
@@ -93,7 +77,7 @@ message ActorSuspended {
 // ActorReinstated is triggered when an actor is reinstated
 message ActorReinstated {
   // Specifies the actor address
-  Address address = 1;
+  string address = 1;
   // Specifies the reinstated time
   google.protobuf.Timestamp reinstated_at = 2;
 }
@@ -122,7 +106,7 @@ message NodeLeft {
 // restarting the actor, or triggering failover behavior.
 message Terminated {
   // Specifies the actor address
-  Address address = 1;
+  string address = 1;
   // Specifies the reinstated time
   google.protobuf.Timestamp terminated_at = 2;
 }

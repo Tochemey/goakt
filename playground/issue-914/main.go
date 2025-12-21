@@ -38,6 +38,7 @@ import (
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/remote"
+	"github.com/tochemey/goakt/v3/supervisor"
 )
 
 const (
@@ -139,9 +140,9 @@ func main() {
 			NewActor1(i),
 			goakt.WithLongLived(),
 			goakt.WithSupervisor(
-				goakt.NewSupervisor(
-					goakt.WithStrategy(goakt.OneForOneStrategy),
-					goakt.WithAnyErrorDirective(goakt.ResumeDirective),
+				supervisor.NewSupervisor(
+					supervisor.WithStrategy(supervisor.OneForOneStrategy),
+					supervisor.WithAnyErrorDirective(supervisor.ResumeDirective),
 				)),
 		)
 		if err != nil {

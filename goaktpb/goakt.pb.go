@@ -23,104 +23,13 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// Address represents an actor address
-type Address struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the remote host address
-	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
-	// Specifies the remote port
-	Port int32 `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
-	// Specifies the actor name
-	Name string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	// Specifies the actor unique id
-	Id string `protobuf:"bytes,4,opt,name=id,proto3" json:"id,omitempty"`
-	// Specifies the actor system
-	System string `protobuf:"bytes,5,opt,name=system,proto3" json:"system,omitempty"`
-	// Specifies the parent address
-	Parent        *Address `protobuf:"bytes,6,opt,name=parent,proto3" json:"parent,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *Address) Reset() {
-	*x = Address{}
-	mi := &file_goakt_goakt_proto_msgTypes[0]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *Address) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*Address) ProtoMessage() {}
-
-func (x *Address) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[0]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use Address.ProtoReflect.Descriptor instead.
-func (*Address) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{0}
-}
-
-func (x *Address) GetHost() string {
-	if x != nil {
-		return x.Host
-	}
-	return ""
-}
-
-func (x *Address) GetPort() int32 {
-	if x != nil {
-		return x.Port
-	}
-	return 0
-}
-
-func (x *Address) GetName() string {
-	if x != nil {
-		return x.Name
-	}
-	return ""
-}
-
-func (x *Address) GetId() string {
-	if x != nil {
-		return x.Id
-	}
-	return ""
-}
-
-func (x *Address) GetSystem() string {
-	if x != nil {
-		return x.System
-	}
-	return ""
-}
-
-func (x *Address) GetParent() *Address {
-	if x != nil {
-		return x.Parent
-	}
-	return nil
-}
-
 // Deadletter defines the deadletter event
 type Deadletter struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Specifies the sender's address
-	Sender *Address `protobuf:"bytes,1,opt,name=sender,proto3" json:"sender,omitempty"`
+	Sender string `protobuf:"bytes,1,opt,name=sender,proto3" json:"sender,omitempty"`
 	// Specifies the actor address
-	Receiver *Address `protobuf:"bytes,2,opt,name=receiver,proto3" json:"receiver,omitempty"`
+	Receiver string `protobuf:"bytes,2,opt,name=receiver,proto3" json:"receiver,omitempty"`
 	// Specifies the message to send to the actor
 	// Any proto message is allowed to be sent
 	Message *anypb.Any `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
@@ -134,7 +43,7 @@ type Deadletter struct {
 
 func (x *Deadletter) Reset() {
 	*x = Deadletter{}
-	mi := &file_goakt_goakt_proto_msgTypes[1]
+	mi := &file_goakt_goakt_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -146,7 +55,7 @@ func (x *Deadletter) String() string {
 func (*Deadletter) ProtoMessage() {}
 
 func (x *Deadletter) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[1]
+	mi := &file_goakt_goakt_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -159,21 +68,21 @@ func (x *Deadletter) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Deadletter.ProtoReflect.Descriptor instead.
 func (*Deadletter) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{1}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *Deadletter) GetSender() *Address {
+func (x *Deadletter) GetSender() string {
 	if x != nil {
 		return x.Sender
 	}
-	return nil
+	return ""
 }
 
-func (x *Deadletter) GetReceiver() *Address {
+func (x *Deadletter) GetReceiver() string {
 	if x != nil {
 		return x.Receiver
 	}
-	return nil
+	return ""
 }
 
 func (x *Deadletter) GetMessage() *anypb.Any {
@@ -201,7 +110,7 @@ func (x *Deadletter) GetReason() string {
 type ActorStarted struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Specifies the actor address
-	Address *Address `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	Address string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
 	// Specifies the started time
 	StartedAt     *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -210,7 +119,7 @@ type ActorStarted struct {
 
 func (x *ActorStarted) Reset() {
 	*x = ActorStarted{}
-	mi := &file_goakt_goakt_proto_msgTypes[2]
+	mi := &file_goakt_goakt_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -222,7 +131,7 @@ func (x *ActorStarted) String() string {
 func (*ActorStarted) ProtoMessage() {}
 
 func (x *ActorStarted) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[2]
+	mi := &file_goakt_goakt_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -235,14 +144,14 @@ func (x *ActorStarted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActorStarted.ProtoReflect.Descriptor instead.
 func (*ActorStarted) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{2}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *ActorStarted) GetAddress() *Address {
+func (x *ActorStarted) GetAddress() string {
 	if x != nil {
 		return x.Address
 	}
-	return nil
+	return ""
 }
 
 func (x *ActorStarted) GetStartedAt() *timestamppb.Timestamp {
@@ -256,7 +165,7 @@ func (x *ActorStarted) GetStartedAt() *timestamppb.Timestamp {
 type ActorStopped struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Specifies the actor address
-	Address *Address `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	Address string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
 	// Specifies the stop time
 	StoppedAt     *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=stopped_at,json=stoppedAt,proto3" json:"stopped_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -265,7 +174,7 @@ type ActorStopped struct {
 
 func (x *ActorStopped) Reset() {
 	*x = ActorStopped{}
-	mi := &file_goakt_goakt_proto_msgTypes[3]
+	mi := &file_goakt_goakt_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -277,7 +186,7 @@ func (x *ActorStopped) String() string {
 func (*ActorStopped) ProtoMessage() {}
 
 func (x *ActorStopped) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[3]
+	mi := &file_goakt_goakt_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -290,14 +199,14 @@ func (x *ActorStopped) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActorStopped.ProtoReflect.Descriptor instead.
 func (*ActorStopped) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{3}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *ActorStopped) GetAddress() *Address {
+func (x *ActorStopped) GetAddress() string {
 	if x != nil {
 		return x.Address
 	}
-	return nil
+	return ""
 }
 
 func (x *ActorStopped) GetStoppedAt() *timestamppb.Timestamp {
@@ -311,7 +220,7 @@ func (x *ActorStopped) GetStoppedAt() *timestamppb.Timestamp {
 type ActorPassivated struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Specifies the actor address
-	Address *Address `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	Address string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
 	// Specifies the passivation time
 	PassivatedAt  *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=passivated_at,json=passivatedAt,proto3" json:"passivated_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -320,7 +229,7 @@ type ActorPassivated struct {
 
 func (x *ActorPassivated) Reset() {
 	*x = ActorPassivated{}
-	mi := &file_goakt_goakt_proto_msgTypes[4]
+	mi := &file_goakt_goakt_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -332,7 +241,7 @@ func (x *ActorPassivated) String() string {
 func (*ActorPassivated) ProtoMessage() {}
 
 func (x *ActorPassivated) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[4]
+	mi := &file_goakt_goakt_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -345,14 +254,14 @@ func (x *ActorPassivated) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActorPassivated.ProtoReflect.Descriptor instead.
 func (*ActorPassivated) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{4}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *ActorPassivated) GetAddress() *Address {
+func (x *ActorPassivated) GetAddress() string {
 	if x != nil {
 		return x.Address
 	}
-	return nil
+	return ""
 }
 
 func (x *ActorPassivated) GetPassivatedAt() *timestamppb.Timestamp {
@@ -366,9 +275,9 @@ func (x *ActorPassivated) GetPassivatedAt() *timestamppb.Timestamp {
 type ActorChildCreated struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Specifies the actor address
-	Address *Address `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	Address string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
 	// Specifies the parent address
-	Parent *Address `protobuf:"bytes,2,opt,name=parent,proto3" json:"parent,omitempty"`
+	Parent string `protobuf:"bytes,2,opt,name=parent,proto3" json:"parent,omitempty"`
 	// Specifies the started time
 	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -377,7 +286,7 @@ type ActorChildCreated struct {
 
 func (x *ActorChildCreated) Reset() {
 	*x = ActorChildCreated{}
-	mi := &file_goakt_goakt_proto_msgTypes[5]
+	mi := &file_goakt_goakt_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -389,7 +298,7 @@ func (x *ActorChildCreated) String() string {
 func (*ActorChildCreated) ProtoMessage() {}
 
 func (x *ActorChildCreated) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[5]
+	mi := &file_goakt_goakt_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -402,21 +311,21 @@ func (x *ActorChildCreated) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActorChildCreated.ProtoReflect.Descriptor instead.
 func (*ActorChildCreated) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{5}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{4}
 }
 
-func (x *ActorChildCreated) GetAddress() *Address {
+func (x *ActorChildCreated) GetAddress() string {
 	if x != nil {
 		return x.Address
 	}
-	return nil
+	return ""
 }
 
-func (x *ActorChildCreated) GetParent() *Address {
+func (x *ActorChildCreated) GetParent() string {
 	if x != nil {
 		return x.Parent
 	}
-	return nil
+	return ""
 }
 
 func (x *ActorChildCreated) GetCreatedAt() *timestamppb.Timestamp {
@@ -430,7 +339,7 @@ func (x *ActorChildCreated) GetCreatedAt() *timestamppb.Timestamp {
 type ActorRestarted struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Specifies the actor address
-	Address *Address `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	Address string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
 	// Specifies the restarted time
 	RestartedAt   *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=restarted_at,json=restartedAt,proto3" json:"restarted_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -439,7 +348,7 @@ type ActorRestarted struct {
 
 func (x *ActorRestarted) Reset() {
 	*x = ActorRestarted{}
-	mi := &file_goakt_goakt_proto_msgTypes[6]
+	mi := &file_goakt_goakt_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -451,7 +360,7 @@ func (x *ActorRestarted) String() string {
 func (*ActorRestarted) ProtoMessage() {}
 
 func (x *ActorRestarted) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[6]
+	mi := &file_goakt_goakt_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -464,14 +373,14 @@ func (x *ActorRestarted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActorRestarted.ProtoReflect.Descriptor instead.
 func (*ActorRestarted) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{6}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{5}
 }
 
-func (x *ActorRestarted) GetAddress() *Address {
+func (x *ActorRestarted) GetAddress() string {
 	if x != nil {
 		return x.Address
 	}
-	return nil
+	return ""
 }
 
 func (x *ActorRestarted) GetRestartedAt() *timestamppb.Timestamp {
@@ -485,7 +394,7 @@ func (x *ActorRestarted) GetRestartedAt() *timestamppb.Timestamp {
 type ActorSuspended struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Specifies the actor address
-	Address *Address `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	Address string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
 	// Specifies the suspended time
 	SuspendedAt *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=suspended_at,json=suspendedAt,proto3" json:"suspended_at,omitempty"`
 	// Specifies the suspension reason
@@ -496,7 +405,7 @@ type ActorSuspended struct {
 
 func (x *ActorSuspended) Reset() {
 	*x = ActorSuspended{}
-	mi := &file_goakt_goakt_proto_msgTypes[7]
+	mi := &file_goakt_goakt_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -508,7 +417,7 @@ func (x *ActorSuspended) String() string {
 func (*ActorSuspended) ProtoMessage() {}
 
 func (x *ActorSuspended) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[7]
+	mi := &file_goakt_goakt_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -521,14 +430,14 @@ func (x *ActorSuspended) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActorSuspended.ProtoReflect.Descriptor instead.
 func (*ActorSuspended) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{7}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{6}
 }
 
-func (x *ActorSuspended) GetAddress() *Address {
+func (x *ActorSuspended) GetAddress() string {
 	if x != nil {
 		return x.Address
 	}
-	return nil
+	return ""
 }
 
 func (x *ActorSuspended) GetSuspendedAt() *timestamppb.Timestamp {
@@ -549,7 +458,7 @@ func (x *ActorSuspended) GetReason() string {
 type ActorReinstated struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Specifies the actor address
-	Address *Address `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	Address string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
 	// Specifies the reinstated time
 	ReinstatedAt  *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=reinstated_at,json=reinstatedAt,proto3" json:"reinstated_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -558,7 +467,7 @@ type ActorReinstated struct {
 
 func (x *ActorReinstated) Reset() {
 	*x = ActorReinstated{}
-	mi := &file_goakt_goakt_proto_msgTypes[8]
+	mi := &file_goakt_goakt_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -570,7 +479,7 @@ func (x *ActorReinstated) String() string {
 func (*ActorReinstated) ProtoMessage() {}
 
 func (x *ActorReinstated) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[8]
+	mi := &file_goakt_goakt_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -583,14 +492,14 @@ func (x *ActorReinstated) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActorReinstated.ProtoReflect.Descriptor instead.
 func (*ActorReinstated) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{8}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{7}
 }
 
-func (x *ActorReinstated) GetAddress() *Address {
+func (x *ActorReinstated) GetAddress() string {
 	if x != nil {
 		return x.Address
 	}
-	return nil
+	return ""
 }
 
 func (x *ActorReinstated) GetReinstatedAt() *timestamppb.Timestamp {
@@ -613,7 +522,7 @@ type NodeJoined struct {
 
 func (x *NodeJoined) Reset() {
 	*x = NodeJoined{}
-	mi := &file_goakt_goakt_proto_msgTypes[9]
+	mi := &file_goakt_goakt_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -625,7 +534,7 @@ func (x *NodeJoined) String() string {
 func (*NodeJoined) ProtoMessage() {}
 
 func (x *NodeJoined) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[9]
+	mi := &file_goakt_goakt_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -638,7 +547,7 @@ func (x *NodeJoined) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeJoined.ProtoReflect.Descriptor instead.
 func (*NodeJoined) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{9}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *NodeJoined) GetAddress() string {
@@ -668,7 +577,7 @@ type NodeLeft struct {
 
 func (x *NodeLeft) Reset() {
 	*x = NodeLeft{}
-	mi := &file_goakt_goakt_proto_msgTypes[10]
+	mi := &file_goakt_goakt_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -680,7 +589,7 @@ func (x *NodeLeft) String() string {
 func (*NodeLeft) ProtoMessage() {}
 
 func (x *NodeLeft) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[10]
+	mi := &file_goakt_goakt_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -693,7 +602,7 @@ func (x *NodeLeft) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeLeft.ProtoReflect.Descriptor instead.
 func (*NodeLeft) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{10}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *NodeLeft) GetAddress() string {
@@ -719,7 +628,7 @@ func (x *NodeLeft) GetTimestamp() *timestamppb.Timestamp {
 type Terminated struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Specifies the actor address
-	Address *Address `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	Address string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
 	// Specifies the reinstated time
 	TerminatedAt  *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=terminated_at,json=terminatedAt,proto3" json:"terminated_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -728,7 +637,7 @@ type Terminated struct {
 
 func (x *Terminated) Reset() {
 	*x = Terminated{}
-	mi := &file_goakt_goakt_proto_msgTypes[11]
+	mi := &file_goakt_goakt_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -740,7 +649,7 @@ func (x *Terminated) String() string {
 func (*Terminated) ProtoMessage() {}
 
 func (x *Terminated) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[11]
+	mi := &file_goakt_goakt_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -753,14 +662,14 @@ func (x *Terminated) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Terminated.ProtoReflect.Descriptor instead.
 func (*Terminated) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{11}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{10}
 }
 
-func (x *Terminated) GetAddress() *Address {
+func (x *Terminated) GetAddress() string {
 	if x != nil {
 		return x.Address
 	}
-	return nil
+	return ""
 }
 
 func (x *Terminated) GetTerminatedAt() *timestamppb.Timestamp {
@@ -787,7 +696,7 @@ type PoisonPill struct {
 
 func (x *PoisonPill) Reset() {
 	*x = PoisonPill{}
-	mi := &file_goakt_goakt_proto_msgTypes[12]
+	mi := &file_goakt_goakt_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -799,7 +708,7 @@ func (x *PoisonPill) String() string {
 func (*PoisonPill) ProtoMessage() {}
 
 func (x *PoisonPill) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[12]
+	mi := &file_goakt_goakt_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -812,7 +721,7 @@ func (x *PoisonPill) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PoisonPill.ProtoReflect.Descriptor instead.
 func (*PoisonPill) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{12}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{11}
 }
 
 // PostStart is used when an actor has successfully started
@@ -824,7 +733,7 @@ type PostStart struct {
 
 func (x *PostStart) Reset() {
 	*x = PostStart{}
-	mi := &file_goakt_goakt_proto_msgTypes[13]
+	mi := &file_goakt_goakt_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -836,7 +745,7 @@ func (x *PostStart) String() string {
 func (*PostStart) ProtoMessage() {}
 
 func (x *PostStart) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[13]
+	mi := &file_goakt_goakt_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -849,7 +758,7 @@ func (x *PostStart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PostStart.ProtoReflect.Descriptor instead.
 func (*PostStart) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{13}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{12}
 }
 
 // Broadcast is used to send message to a router via Tell
@@ -865,7 +774,7 @@ type Broadcast struct {
 
 func (x *Broadcast) Reset() {
 	*x = Broadcast{}
-	mi := &file_goakt_goakt_proto_msgTypes[14]
+	mi := &file_goakt_goakt_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -877,7 +786,7 @@ func (x *Broadcast) String() string {
 func (*Broadcast) ProtoMessage() {}
 
 func (x *Broadcast) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[14]
+	mi := &file_goakt_goakt_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -890,7 +799,7 @@ func (x *Broadcast) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Broadcast.ProtoReflect.Descriptor instead.
 func (*Broadcast) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{14}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *Broadcast) GetMessage() *anypb.Any {
@@ -913,7 +822,7 @@ type Subscribe struct {
 
 func (x *Subscribe) Reset() {
 	*x = Subscribe{}
-	mi := &file_goakt_goakt_proto_msgTypes[15]
+	mi := &file_goakt_goakt_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -925,7 +834,7 @@ func (x *Subscribe) String() string {
 func (*Subscribe) ProtoMessage() {}
 
 func (x *Subscribe) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[15]
+	mi := &file_goakt_goakt_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -938,7 +847,7 @@ func (x *Subscribe) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Subscribe.ProtoReflect.Descriptor instead.
 func (*Subscribe) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{15}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *Subscribe) GetTopic() string {
@@ -961,7 +870,7 @@ type Unsubscribe struct {
 
 func (x *Unsubscribe) Reset() {
 	*x = Unsubscribe{}
-	mi := &file_goakt_goakt_proto_msgTypes[16]
+	mi := &file_goakt_goakt_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -973,7 +882,7 @@ func (x *Unsubscribe) String() string {
 func (*Unsubscribe) ProtoMessage() {}
 
 func (x *Unsubscribe) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[16]
+	mi := &file_goakt_goakt_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -986,7 +895,7 @@ func (x *Unsubscribe) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Unsubscribe.ProtoReflect.Descriptor instead.
 func (*Unsubscribe) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{16}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *Unsubscribe) GetTopic() string {
@@ -1008,7 +917,7 @@ type SubscribeAck struct {
 
 func (x *SubscribeAck) Reset() {
 	*x = SubscribeAck{}
-	mi := &file_goakt_goakt_proto_msgTypes[17]
+	mi := &file_goakt_goakt_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1020,7 +929,7 @@ func (x *SubscribeAck) String() string {
 func (*SubscribeAck) ProtoMessage() {}
 
 func (x *SubscribeAck) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[17]
+	mi := &file_goakt_goakt_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1033,7 +942,7 @@ func (x *SubscribeAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubscribeAck.ProtoReflect.Descriptor instead.
 func (*SubscribeAck) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{17}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *SubscribeAck) GetTopic() string {
@@ -1055,7 +964,7 @@ type UnsubscribeAck struct {
 
 func (x *UnsubscribeAck) Reset() {
 	*x = UnsubscribeAck{}
-	mi := &file_goakt_goakt_proto_msgTypes[18]
+	mi := &file_goakt_goakt_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1067,7 +976,7 @@ func (x *UnsubscribeAck) String() string {
 func (*UnsubscribeAck) ProtoMessage() {}
 
 func (x *UnsubscribeAck) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[18]
+	mi := &file_goakt_goakt_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1080,7 +989,7 @@ func (x *UnsubscribeAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnsubscribeAck.ProtoReflect.Descriptor instead.
 func (*UnsubscribeAck) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{18}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *UnsubscribeAck) GetTopic() string {
@@ -1108,7 +1017,7 @@ type Publish struct {
 
 func (x *Publish) Reset() {
 	*x = Publish{}
-	mi := &file_goakt_goakt_proto_msgTypes[19]
+	mi := &file_goakt_goakt_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1120,7 +1029,7 @@ func (x *Publish) String() string {
 func (*Publish) ProtoMessage() {}
 
 func (x *Publish) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[19]
+	mi := &file_goakt_goakt_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1133,7 +1042,7 @@ func (x *Publish) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Publish.ProtoReflect.Descriptor instead.
 func (*Publish) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{19}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *Publish) GetId() string {
@@ -1166,7 +1075,7 @@ type NoMessage struct {
 
 func (x *NoMessage) Reset() {
 	*x = NoMessage{}
-	mi := &file_goakt_goakt_proto_msgTypes[20]
+	mi := &file_goakt_goakt_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1178,7 +1087,7 @@ func (x *NoMessage) String() string {
 func (*NoMessage) ProtoMessage() {}
 
 func (x *NoMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[20]
+	mi := &file_goakt_goakt_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1191,7 +1100,7 @@ func (x *NoMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NoMessage.ProtoReflect.Descriptor instead.
 func (*NoMessage) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{20}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{19}
 }
 
 // PanicSignal is a system-level message used in actor-based systems to notify a parent actor
@@ -1219,7 +1128,7 @@ type PanicSignal struct {
 
 func (x *PanicSignal) Reset() {
 	*x = PanicSignal{}
-	mi := &file_goakt_goakt_proto_msgTypes[21]
+	mi := &file_goakt_goakt_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1231,7 +1140,7 @@ func (x *PanicSignal) String() string {
 func (*PanicSignal) ProtoMessage() {}
 
 func (x *PanicSignal) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[21]
+	mi := &file_goakt_goakt_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1244,7 +1153,7 @@ func (x *PanicSignal) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PanicSignal.ProtoReflect.Descriptor instead.
 func (*PanicSignal) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{21}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *PanicSignal) GetMessage() *anypb.Any {
@@ -1281,7 +1190,7 @@ type PausePassivation struct {
 
 func (x *PausePassivation) Reset() {
 	*x = PausePassivation{}
-	mi := &file_goakt_goakt_proto_msgTypes[22]
+	mi := &file_goakt_goakt_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1293,7 +1202,7 @@ func (x *PausePassivation) String() string {
 func (*PausePassivation) ProtoMessage() {}
 
 func (x *PausePassivation) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[22]
+	mi := &file_goakt_goakt_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1306,7 +1215,7 @@ func (x *PausePassivation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PausePassivation.ProtoReflect.Descriptor instead.
 func (*PausePassivation) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{22}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{21}
 }
 
 // ResumePassivation is a system-level message used to resume the passivation of an actor.
@@ -1325,7 +1234,7 @@ type ResumePassivation struct {
 
 func (x *ResumePassivation) Reset() {
 	*x = ResumePassivation{}
-	mi := &file_goakt_goakt_proto_msgTypes[23]
+	mi := &file_goakt_goakt_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1337,7 +1246,7 @@ func (x *ResumePassivation) String() string {
 func (*ResumePassivation) ProtoMessage() {}
 
 func (x *ResumePassivation) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[23]
+	mi := &file_goakt_goakt_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1350,7 +1259,7 @@ func (x *ResumePassivation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResumePassivation.ProtoReflect.Descriptor instead.
 func (*ResumePassivation) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{23}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{22}
 }
 
 // StatusFailure is used to indicate a failure status with an error message
@@ -1366,7 +1275,7 @@ type StatusFailure struct {
 
 func (x *StatusFailure) Reset() {
 	*x = StatusFailure{}
-	mi := &file_goakt_goakt_proto_msgTypes[24]
+	mi := &file_goakt_goakt_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1378,7 +1287,7 @@ func (x *StatusFailure) String() string {
 func (*StatusFailure) ProtoMessage() {}
 
 func (x *StatusFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[24]
+	mi := &file_goakt_goakt_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1391,7 +1300,7 @@ func (x *StatusFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatusFailure.ProtoReflect.Descriptor instead.
 func (*StatusFailure) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{24}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *StatusFailure) GetError() string {
@@ -1429,7 +1338,7 @@ type GetRoutees struct {
 
 func (x *GetRoutees) Reset() {
 	*x = GetRoutees{}
-	mi := &file_goakt_goakt_proto_msgTypes[25]
+	mi := &file_goakt_goakt_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1441,7 +1350,7 @@ func (x *GetRoutees) String() string {
 func (*GetRoutees) ProtoMessage() {}
 
 func (x *GetRoutees) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[25]
+	mi := &file_goakt_goakt_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1454,7 +1363,7 @@ func (x *GetRoutees) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetRoutees.ProtoReflect.Descriptor instead.
 func (*GetRoutees) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{25}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{24}
 }
 
 // Routees contains the set of routee names managed by a router at the time of the GetRoutees request.
@@ -1485,7 +1394,7 @@ type Routees struct {
 
 func (x *Routees) Reset() {
 	*x = Routees{}
-	mi := &file_goakt_goakt_proto_msgTypes[26]
+	mi := &file_goakt_goakt_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1497,7 +1406,7 @@ func (x *Routees) String() string {
 func (*Routees) ProtoMessage() {}
 
 func (x *Routees) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[26]
+	mi := &file_goakt_goakt_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1510,7 +1419,7 @@ func (x *Routees) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Routees.ProtoReflect.Descriptor instead.
 func (*Routees) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{26}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *Routees) GetNames() []string {
@@ -1561,7 +1470,7 @@ type AdjustRouterPoolSize struct {
 
 func (x *AdjustRouterPoolSize) Reset() {
 	*x = AdjustRouterPoolSize{}
-	mi := &file_goakt_goakt_proto_msgTypes[27]
+	mi := &file_goakt_goakt_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1573,7 +1482,7 @@ func (x *AdjustRouterPoolSize) String() string {
 func (*AdjustRouterPoolSize) ProtoMessage() {}
 
 func (x *AdjustRouterPoolSize) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[27]
+	mi := &file_goakt_goakt_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1586,7 +1495,7 @@ func (x *AdjustRouterPoolSize) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AdjustRouterPoolSize.ProtoReflect.Descriptor instead.
 func (*AdjustRouterPoolSize) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{27}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *AdjustRouterPoolSize) GetPoolSize() int32 {
@@ -1600,46 +1509,39 @@ var File_goakt_goakt_proto protoreflect.FileDescriptor
 
 const file_goakt_goakt_proto_rawDesc = "" +
 	"\n" +
-	"\x11goakt/goakt.proto\x12\agoaktpb\x1a\x19google/protobuf/any.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x97\x01\n" +
-	"\aAddress\x12\x12\n" +
-	"\x04host\x18\x01 \x01(\tR\x04host\x12\x12\n" +
-	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x12\n" +
-	"\x04name\x18\x03 \x01(\tR\x04name\x12\x0e\n" +
-	"\x02id\x18\x04 \x01(\tR\x02id\x12\x16\n" +
-	"\x06system\x18\x05 \x01(\tR\x06system\x12(\n" +
-	"\x06parent\x18\x06 \x01(\v2\x10.goaktpb.AddressR\x06parent\"\xe5\x01\n" +
+	"\x11goakt/goakt.proto\x12\agoaktpb\x1a\x19google/protobuf/any.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xc1\x01\n" +
 	"\n" +
-	"Deadletter\x12(\n" +
-	"\x06sender\x18\x01 \x01(\v2\x10.goaktpb.AddressR\x06sender\x12,\n" +
-	"\breceiver\x18\x02 \x01(\v2\x10.goaktpb.AddressR\breceiver\x12.\n" +
+	"Deadletter\x12\x16\n" +
+	"\x06sender\x18\x01 \x01(\tR\x06sender\x12\x1a\n" +
+	"\breceiver\x18\x02 \x01(\tR\breceiver\x12.\n" +
 	"\amessage\x18\x03 \x01(\v2\x14.google.protobuf.AnyR\amessage\x127\n" +
 	"\tsend_time\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\bsendTime\x12\x16\n" +
-	"\x06reason\x18\x05 \x01(\tR\x06reason\"u\n" +
-	"\fActorStarted\x12*\n" +
-	"\aaddress\x18\x01 \x01(\v2\x10.goaktpb.AddressR\aaddress\x129\n" +
+	"\x06reason\x18\x05 \x01(\tR\x06reason\"c\n" +
+	"\fActorStarted\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\x129\n" +
 	"\n" +
-	"started_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\"u\n" +
-	"\fActorStopped\x12*\n" +
-	"\aaddress\x18\x01 \x01(\v2\x10.goaktpb.AddressR\aaddress\x129\n" +
+	"started_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\"c\n" +
+	"\fActorStopped\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\x129\n" +
 	"\n" +
-	"stopped_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\tstoppedAt\"~\n" +
-	"\x0fActorPassivated\x12*\n" +
-	"\aaddress\x18\x01 \x01(\v2\x10.goaktpb.AddressR\aaddress\x12?\n" +
-	"\rpassivated_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\fpassivatedAt\"\xa4\x01\n" +
-	"\x11ActorChildCreated\x12*\n" +
-	"\aaddress\x18\x01 \x01(\v2\x10.goaktpb.AddressR\aaddress\x12(\n" +
-	"\x06parent\x18\x02 \x01(\v2\x10.goaktpb.AddressR\x06parent\x129\n" +
+	"stopped_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\tstoppedAt\"l\n" +
+	"\x0fActorPassivated\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\x12?\n" +
+	"\rpassivated_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\fpassivatedAt\"\x80\x01\n" +
+	"\x11ActorChildCreated\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x16\n" +
+	"\x06parent\x18\x02 \x01(\tR\x06parent\x129\n" +
 	"\n" +
-	"created_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"{\n" +
-	"\x0eActorRestarted\x12*\n" +
-	"\aaddress\x18\x01 \x01(\v2\x10.goaktpb.AddressR\aaddress\x12=\n" +
-	"\frestarted_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\vrestartedAt\"\x93\x01\n" +
-	"\x0eActorSuspended\x12*\n" +
-	"\aaddress\x18\x01 \x01(\v2\x10.goaktpb.AddressR\aaddress\x12=\n" +
+	"created_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"i\n" +
+	"\x0eActorRestarted\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\x12=\n" +
+	"\frestarted_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\vrestartedAt\"\x81\x01\n" +
+	"\x0eActorSuspended\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\x12=\n" +
 	"\fsuspended_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\vsuspendedAt\x12\x16\n" +
-	"\x06reason\x18\x03 \x01(\tR\x06reason\"~\n" +
-	"\x0fActorReinstated\x12*\n" +
-	"\aaddress\x18\x01 \x01(\v2\x10.goaktpb.AddressR\aaddress\x12?\n" +
+	"\x06reason\x18\x03 \x01(\tR\x06reason\"l\n" +
+	"\x0fActorReinstated\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\x12?\n" +
 	"\rreinstated_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\freinstatedAt\"`\n" +
 	"\n" +
 	"NodeJoined\x12\x18\n" +
@@ -1647,10 +1549,10 @@ const file_goakt_goakt_proto_rawDesc = "" +
 	"\ttimestamp\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\"^\n" +
 	"\bNodeLeft\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\x128\n" +
-	"\ttimestamp\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\"y\n" +
+	"\ttimestamp\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\"g\n" +
 	"\n" +
-	"Terminated\x12*\n" +
-	"\aaddress\x18\x01 \x01(\v2\x10.goaktpb.AddressR\aaddress\x12?\n" +
+	"Terminated\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\x12?\n" +
 	"\rterminated_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\fterminatedAt\"\f\n" +
 	"\n" +
 	"PoisonPill\"\v\n" +
@@ -1700,74 +1602,61 @@ func file_goakt_goakt_proto_rawDescGZIP() []byte {
 	return file_goakt_goakt_proto_rawDescData
 }
 
-var file_goakt_goakt_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
+var file_goakt_goakt_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
 var file_goakt_goakt_proto_goTypes = []any{
-	(*Address)(nil),               // 0: goaktpb.Address
-	(*Deadletter)(nil),            // 1: goaktpb.Deadletter
-	(*ActorStarted)(nil),          // 2: goaktpb.ActorStarted
-	(*ActorStopped)(nil),          // 3: goaktpb.ActorStopped
-	(*ActorPassivated)(nil),       // 4: goaktpb.ActorPassivated
-	(*ActorChildCreated)(nil),     // 5: goaktpb.ActorChildCreated
-	(*ActorRestarted)(nil),        // 6: goaktpb.ActorRestarted
-	(*ActorSuspended)(nil),        // 7: goaktpb.ActorSuspended
-	(*ActorReinstated)(nil),       // 8: goaktpb.ActorReinstated
-	(*NodeJoined)(nil),            // 9: goaktpb.NodeJoined
-	(*NodeLeft)(nil),              // 10: goaktpb.NodeLeft
-	(*Terminated)(nil),            // 11: goaktpb.Terminated
-	(*PoisonPill)(nil),            // 12: goaktpb.PoisonPill
-	(*PostStart)(nil),             // 13: goaktpb.PostStart
-	(*Broadcast)(nil),             // 14: goaktpb.Broadcast
-	(*Subscribe)(nil),             // 15: goaktpb.Subscribe
-	(*Unsubscribe)(nil),           // 16: goaktpb.Unsubscribe
-	(*SubscribeAck)(nil),          // 17: goaktpb.SubscribeAck
-	(*UnsubscribeAck)(nil),        // 18: goaktpb.UnsubscribeAck
-	(*Publish)(nil),               // 19: goaktpb.Publish
-	(*NoMessage)(nil),             // 20: goaktpb.NoMessage
-	(*PanicSignal)(nil),           // 21: goaktpb.PanicSignal
-	(*PausePassivation)(nil),      // 22: goaktpb.PausePassivation
-	(*ResumePassivation)(nil),     // 23: goaktpb.ResumePassivation
-	(*StatusFailure)(nil),         // 24: goaktpb.StatusFailure
-	(*GetRoutees)(nil),            // 25: goaktpb.GetRoutees
-	(*Routees)(nil),               // 26: goaktpb.Routees
-	(*AdjustRouterPoolSize)(nil),  // 27: goaktpb.AdjustRouterPoolSize
-	(*anypb.Any)(nil),             // 28: google.protobuf.Any
-	(*timestamppb.Timestamp)(nil), // 29: google.protobuf.Timestamp
+	(*Deadletter)(nil),            // 0: goaktpb.Deadletter
+	(*ActorStarted)(nil),          // 1: goaktpb.ActorStarted
+	(*ActorStopped)(nil),          // 2: goaktpb.ActorStopped
+	(*ActorPassivated)(nil),       // 3: goaktpb.ActorPassivated
+	(*ActorChildCreated)(nil),     // 4: goaktpb.ActorChildCreated
+	(*ActorRestarted)(nil),        // 5: goaktpb.ActorRestarted
+	(*ActorSuspended)(nil),        // 6: goaktpb.ActorSuspended
+	(*ActorReinstated)(nil),       // 7: goaktpb.ActorReinstated
+	(*NodeJoined)(nil),            // 8: goaktpb.NodeJoined
+	(*NodeLeft)(nil),              // 9: goaktpb.NodeLeft
+	(*Terminated)(nil),            // 10: goaktpb.Terminated
+	(*PoisonPill)(nil),            // 11: goaktpb.PoisonPill
+	(*PostStart)(nil),             // 12: goaktpb.PostStart
+	(*Broadcast)(nil),             // 13: goaktpb.Broadcast
+	(*Subscribe)(nil),             // 14: goaktpb.Subscribe
+	(*Unsubscribe)(nil),           // 15: goaktpb.Unsubscribe
+	(*SubscribeAck)(nil),          // 16: goaktpb.SubscribeAck
+	(*UnsubscribeAck)(nil),        // 17: goaktpb.UnsubscribeAck
+	(*Publish)(nil),               // 18: goaktpb.Publish
+	(*NoMessage)(nil),             // 19: goaktpb.NoMessage
+	(*PanicSignal)(nil),           // 20: goaktpb.PanicSignal
+	(*PausePassivation)(nil),      // 21: goaktpb.PausePassivation
+	(*ResumePassivation)(nil),     // 22: goaktpb.ResumePassivation
+	(*StatusFailure)(nil),         // 23: goaktpb.StatusFailure
+	(*GetRoutees)(nil),            // 24: goaktpb.GetRoutees
+	(*Routees)(nil),               // 25: goaktpb.Routees
+	(*AdjustRouterPoolSize)(nil),  // 26: goaktpb.AdjustRouterPoolSize
+	(*anypb.Any)(nil),             // 27: google.protobuf.Any
+	(*timestamppb.Timestamp)(nil), // 28: google.protobuf.Timestamp
 }
 var file_goakt_goakt_proto_depIdxs = []int32{
-	0,  // 0: goaktpb.Address.parent:type_name -> goaktpb.Address
-	0,  // 1: goaktpb.Deadletter.sender:type_name -> goaktpb.Address
-	0,  // 2: goaktpb.Deadletter.receiver:type_name -> goaktpb.Address
-	28, // 3: goaktpb.Deadletter.message:type_name -> google.protobuf.Any
-	29, // 4: goaktpb.Deadletter.send_time:type_name -> google.protobuf.Timestamp
-	0,  // 5: goaktpb.ActorStarted.address:type_name -> goaktpb.Address
-	29, // 6: goaktpb.ActorStarted.started_at:type_name -> google.protobuf.Timestamp
-	0,  // 7: goaktpb.ActorStopped.address:type_name -> goaktpb.Address
-	29, // 8: goaktpb.ActorStopped.stopped_at:type_name -> google.protobuf.Timestamp
-	0,  // 9: goaktpb.ActorPassivated.address:type_name -> goaktpb.Address
-	29, // 10: goaktpb.ActorPassivated.passivated_at:type_name -> google.protobuf.Timestamp
-	0,  // 11: goaktpb.ActorChildCreated.address:type_name -> goaktpb.Address
-	0,  // 12: goaktpb.ActorChildCreated.parent:type_name -> goaktpb.Address
-	29, // 13: goaktpb.ActorChildCreated.created_at:type_name -> google.protobuf.Timestamp
-	0,  // 14: goaktpb.ActorRestarted.address:type_name -> goaktpb.Address
-	29, // 15: goaktpb.ActorRestarted.restarted_at:type_name -> google.protobuf.Timestamp
-	0,  // 16: goaktpb.ActorSuspended.address:type_name -> goaktpb.Address
-	29, // 17: goaktpb.ActorSuspended.suspended_at:type_name -> google.protobuf.Timestamp
-	0,  // 18: goaktpb.ActorReinstated.address:type_name -> goaktpb.Address
-	29, // 19: goaktpb.ActorReinstated.reinstated_at:type_name -> google.protobuf.Timestamp
-	29, // 20: goaktpb.NodeJoined.timestamp:type_name -> google.protobuf.Timestamp
-	29, // 21: goaktpb.NodeLeft.timestamp:type_name -> google.protobuf.Timestamp
-	0,  // 22: goaktpb.Terminated.address:type_name -> goaktpb.Address
-	29, // 23: goaktpb.Terminated.terminated_at:type_name -> google.protobuf.Timestamp
-	28, // 24: goaktpb.Broadcast.message:type_name -> google.protobuf.Any
-	28, // 25: goaktpb.Publish.message:type_name -> google.protobuf.Any
-	28, // 26: goaktpb.PanicSignal.message:type_name -> google.protobuf.Any
-	29, // 27: goaktpb.PanicSignal.timestamp:type_name -> google.protobuf.Timestamp
-	28, // 28: goaktpb.StatusFailure.message:type_name -> google.protobuf.Any
-	29, // [29:29] is the sub-list for method output_type
-	29, // [29:29] is the sub-list for method input_type
-	29, // [29:29] is the sub-list for extension type_name
-	29, // [29:29] is the sub-list for extension extendee
-	0,  // [0:29] is the sub-list for field type_name
+	27, // 0: goaktpb.Deadletter.message:type_name -> google.protobuf.Any
+	28, // 1: goaktpb.Deadletter.send_time:type_name -> google.protobuf.Timestamp
+	28, // 2: goaktpb.ActorStarted.started_at:type_name -> google.protobuf.Timestamp
+	28, // 3: goaktpb.ActorStopped.stopped_at:type_name -> google.protobuf.Timestamp
+	28, // 4: goaktpb.ActorPassivated.passivated_at:type_name -> google.protobuf.Timestamp
+	28, // 5: goaktpb.ActorChildCreated.created_at:type_name -> google.protobuf.Timestamp
+	28, // 6: goaktpb.ActorRestarted.restarted_at:type_name -> google.protobuf.Timestamp
+	28, // 7: goaktpb.ActorSuspended.suspended_at:type_name -> google.protobuf.Timestamp
+	28, // 8: goaktpb.ActorReinstated.reinstated_at:type_name -> google.protobuf.Timestamp
+	28, // 9: goaktpb.NodeJoined.timestamp:type_name -> google.protobuf.Timestamp
+	28, // 10: goaktpb.NodeLeft.timestamp:type_name -> google.protobuf.Timestamp
+	28, // 11: goaktpb.Terminated.terminated_at:type_name -> google.protobuf.Timestamp
+	27, // 12: goaktpb.Broadcast.message:type_name -> google.protobuf.Any
+	27, // 13: goaktpb.Publish.message:type_name -> google.protobuf.Any
+	27, // 14: goaktpb.PanicSignal.message:type_name -> google.protobuf.Any
+	28, // 15: goaktpb.PanicSignal.timestamp:type_name -> google.protobuf.Timestamp
+	27, // 16: goaktpb.StatusFailure.message:type_name -> google.protobuf.Any
+	17, // [17:17] is the sub-list for method output_type
+	17, // [17:17] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_goakt_goakt_proto_init() }
@@ -1781,7 +1670,7 @@ func file_goakt_goakt_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_goakt_goakt_proto_rawDesc), len(file_goakt_goakt_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   28,
+			NumMessages:   27,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -22,47 +22,15 @@
  * SOFTWARE.
  */
 
-package actor
+package slices
 
-import (
-	"testing"
-
-	"github.com/stretchr/testify/require"
-
-	"github.com/tochemey/goakt/v3/address"
-	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/registry"
-)
-
-func TestActorRef(t *testing.T) {
-	t.Run("With Equals", func(t *testing.T) {
-		addr := address.New("name", "system", "host", 1234)
-		actorRef := toActorRef(&internalpb.Actor{
-			Address: addr.String(),
-			Type:    "kind",
-		})
-
-		newActorRef := toActorRef(&internalpb.Actor{
-			Address: addr.String(),
-			Type:    "kind",
-		})
-
-		require.Equal(t, "name", actorRef.Name())
-		require.Equal(t, "kind", actorRef.Kind())
-		require.True(t, addr.Equals(actorRef.Address()))
-		require.True(t, newActorRef.Equals(actorRef))
-		require.False(t, newActorRef.IsRelocatable())
-	})
-	t.Run("From PID", func(t *testing.T) {
-		addr := address.New("name", "system", "host", 1234)
-		actor := NewMockActor()
-		pid := &PID{
-			address: addr,
-			actor:   actor,
+// Filter returns a new slice containing elements from the input slice that satisfy the predicate.
+func Filter[T any](slice []T, predicate func(T) bool) []T {
+	var result []T
+	for _, v := range slice {
+		if predicate(v) {
+			result = append(result, v)
 		}
-		actorRef := fromPID(pid)
-		require.Equal(t, "name", actorRef.Name())
-		require.Equal(t, registry.Name(actor), actorRef.Kind())
-		require.False(t, actorRef.IsRelocatable())
-	})
+	}
+	return result
 }

@@ -22,21 +22,17 @@
  * SOFTWARE.
  */
 
-package collection
+package strconvx
 
 import (
-	"testing"
-
-	"github.com/stretchr/testify/require"
+	"fmt"
+	"math"
 )
 
-func TestFilter(t *testing.T) {
-	slice := []int{1, 2, 3, 4, 5, 6, 7, 8, 9}
-	result := Filter(slice, func(v int) bool {
-		return v%2 == 0
-	})
-
-	expected := []int{2, 4, 6, 8}
-	require.Len(t, result, 4)
-	require.ElementsMatch(t, expected, result)
+// Int2Int32 converts an int to int32 with explicit bounds checking.
+func Int2Int32(value int) (int32, error) {
+	if value < math.MinInt32 || value > math.MaxInt32 {
+		return 0, fmt.Errorf("value %d out of range for int32", value)
+	}
+	return int32(value), nil
 }

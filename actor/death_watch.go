@@ -27,7 +27,6 @@ package actor
 import (
 	"go.uber.org/multierr"
 
-	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
@@ -89,7 +88,7 @@ func (x *deathWatch) handlePostStart(ctx *ReceiveContext) {
 func (x *deathWatch) handleTerminated(ctx *ReceiveContext) error {
 	msg := ctx.Message().(*goaktpb.Terminated)
 
-	actorID := address.From(msg.GetAddress()).String()
+	actorID := msg.GetAddress()
 	x.logger.Infof("%s freeing resource [actor=%s] from system", x.pid.Name(), actorID)
 
 	if node, ok := x.tree.node(actorID); ok {
