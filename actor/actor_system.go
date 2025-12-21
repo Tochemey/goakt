@@ -82,6 +82,7 @@ import (
 	"github.com/tochemey/goakt/v3/memory"
 	"github.com/tochemey/goakt/v3/passivation"
 	"github.com/tochemey/goakt/v3/remote"
+	sup "github.com/tochemey/goakt/v3/supervisor"
 	gtls "github.com/tochemey/goakt/v3/tls"
 )
 
@@ -775,7 +776,7 @@ type actorSystem struct {
 	// manages passivation deadlines without per-actor goroutines
 	passivator *passivationManager
 
-	defaultSupervisor          *Supervisor
+	defaultSupervisor          *sup.Supervisor
 	defaultPassivationStrategy passivation.Strategy
 
 	registry   registry.Registry
@@ -902,7 +903,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	system.pubsubEnabled.Store(false)
 
 	system.reflection = newReflection(system.registry)
-	system.defaultSupervisor = NewSupervisor()
+	system.defaultSupervisor = sup.NewSupervisor()
 	system.defaultPassivationStrategy = passivation.NewTimeBasedStrategy(DefaultPassivationTimeout)
 	system.passivator = newPassivationManager(system.logger)
 
@@ -2098,6 +2099,12 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 
 	if msg.GetRole() != "" {
 		opts = append(opts, WithRole(msg.GetRole()))
+	}
+
+	if msg.GetSupervisor() != nil {
+		if decoded := codec.DecodeSupervisor(msg.GetSupervisor()); decoded != nil {
+			opts = append(opts, WithSupervisor(decoded))
+		}
 	}
 
 	// set the dependencies if any
@@ -3297,9 +3304,9 @@ func (x *actorSystem) spawnSystemGuardian(ctx context.Context) error {
 		newSystemGuardian(),
 		asSystem(),
 		WithLongLived(),
-		WithSupervisor(NewSupervisor(
-			WithStrategy(OneForOneStrategy),
-			WithAnyErrorDirective(EscalateDirective),
+		WithSupervisor(sup.NewSupervisor(
+			sup.WithStrategy(sup.OneForOneStrategy),
+			sup.WithAnyErrorDirective(sup.EscalateDirective),
 		)))
 
 	// systemGuardian is a child actor of the rootGuardian actor
@@ -3314,9 +3321,9 @@ func (x *actorSystem) spawnUserGuardian(ctx context.Context) error {
 		newUserGuardian(),
 		asSystem(),
 		WithLongLived(),
-		WithSupervisor(NewSupervisor(
-			WithStrategy(OneForOneStrategy),
-			WithAnyErrorDirective(EscalateDirective),
+		WithSupervisor(sup.NewSupervisor(
+			sup.WithStrategy(sup.OneForOneStrategy),
+			sup.WithAnyErrorDirective(sup.EscalateDirective),
 		)))
 
 	// userGuardian is a child actor of the rootGuardian actor
@@ -3327,9 +3334,9 @@ func (x *actorSystem) spawnUserGuardian(ctx context.Context) error {
 func (x *actorSystem) spawnDeathWatch(ctx context.Context) error {
 	actorName := x.reservedName(deathWatchType)
 	// define the supervisor strategy to use
-	supervisor := NewSupervisor(
-		WithStrategy(OneForOneStrategy),
-		WithAnyErrorDirective(EscalateDirective),
+	supervisor := sup.NewSupervisor(
+		sup.WithStrategy(sup.OneForOneStrategy),
+		sup.WithAnyErrorDirective(sup.EscalateDirective),
 	)
 
 	x.deathWatch, _ = x.configPID(ctx,
@@ -3350,13 +3357,13 @@ func (x *actorSystem) spawnRelocator(ctx context.Context) error {
 		actorName := x.reservedName(rebalancerType)
 
 		// define the supervisor strategy to use
-		supervisor := NewSupervisor(
-			WithStrategy(OneForOneStrategy),
-			WithDirective(&gerrors.PanicError{}, RestartDirective),
-			WithDirective(&runtime.PanicNilError{}, RestartDirective),
-			WithDirective(&gerrors.RebalancingError{}, RestartDirective),
-			WithDirective(&gerrors.InternalError{}, ResumeDirective),
-			WithDirective(&gerrors.SpawnError{}, ResumeDirective),
+		supervisor := sup.NewSupervisor(
+			sup.WithStrategy(sup.OneForOneStrategy),
+			sup.WithDirective(&gerrors.PanicError{}, sup.RestartDirective),
+			sup.WithDirective(&runtime.PanicNilError{}, sup.RestartDirective),
+			sup.WithDirective(&gerrors.RebalancingError{}, sup.RestartDirective),
+			sup.WithDirective(&gerrors.InternalError{}, sup.ResumeDirective),
+			sup.WithDirective(&gerrors.SpawnError{}, sup.ResumeDirective),
 		)
 
 		x.relocator, _ = x.configPID(ctx,
@@ -3381,9 +3388,9 @@ func (x *actorSystem) spawnDeadletter(ctx context.Context) error {
 		asSystem(),
 		WithLongLived(),
 		WithSupervisor(
-			NewSupervisor(
-				WithStrategy(OneForOneStrategy),
-				WithAnyErrorDirective(ResumeDirective),
+			sup.NewSupervisor(
+				sup.WithStrategy(sup.OneForOneStrategy),
+				sup.WithAnyErrorDirective(sup.ResumeDirective),
 			),
 		),
 	)

@@ -35,6 +35,7 @@ import (
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/passivation"
 	"github.com/tochemey/goakt/v3/remote"
+	"github.com/tochemey/goakt/v3/supervisor"
 )
 
 // pidOption represents the pid
@@ -62,7 +63,7 @@ func withActorSystem(sys ActorSystem) pidOption {
 }
 
 // withSupervisor defines the supervisor
-func withSupervisor(supervisor *Supervisor) pidOption {
+func withSupervisor(supervisor *supervisor.Supervisor) pidOption {
 	return func(pid *PID) {
 		pid.supervisor = supervisor
 	}

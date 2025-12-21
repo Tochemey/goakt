@@ -60,6 +60,7 @@ import (
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/passivation"
 	"github.com/tochemey/goakt/v3/remote"
+	"github.com/tochemey/goakt/v3/supervisor"
 )
 
 // specifies the state in which the PID is
@@ -136,7 +137,7 @@ type PID struct {
 	reinstateCount atomic.Int64
 
 	// supervisor strategy
-	supervisor               *Supervisor
+	supervisor               *supervisor.Supervisor
 	supervisionChan          chan *supervisionSignal
 	supervisionStopSignal    chan registry.Unit
 	supervisionStopRequested atomic.Bool
@@ -202,7 +203,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	}
 
 	if pid.supervisor == nil {
-		pid.supervisor = NewSupervisor()
+		pid.supervisor = supervisor.NewSupervisor()
 	}
 	if pid.passivationStrategy == nil {
 		pid.passivationStrategy = passivation.NewTimeBasedStrategy(DefaultPassivationTimeout)
@@ -1128,6 +1129,10 @@ func (pid *PID) RemoteSpawn(ctx context.Context, host string, port int, actorNam
 		EnableStashing:      config.enableStash,
 	}
 
+	if config.supervisor != nil {
+		request.Supervisor = config.supervisor
+	}
+
 	return pid.remoting.RemoteSpawn(ctx, host, port, request)
 }
 
@@ -1737,22 +1742,22 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 	}
 
 	switch directive {
-	case StopDirective:
+	case supervisor.StopDirective:
 		msg.Directive = &internalpb.Panicking_Stop{
 			Stop: new(internalpb.StopDirective),
 		}
-	case RestartDirective:
+	case supervisor.RestartDirective:
 		msg.Directive = &internalpb.Panicking_Restart{
 			Restart: &internalpb.RestartDirective{
 				MaxRetries: pid.supervisor.MaxRetries(),
 				Timeout:    int64(pid.supervisor.Timeout()),
 			},
 		}
-	case ResumeDirective:
+	case supervisor.ResumeDirective:
 		msg.Directive = &internalpb.Panicking_Resume{
 			Resume: &internalpb.ResumeDirective{},
 		}
-	case EscalateDirective:
+	case supervisor.EscalateDirective:
 		msg.Directive = &internalpb.Panicking_Escalate{
 			Escalate: &internalpb.EscalateDirective{},
 		}
@@ -1763,9 +1768,9 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 	}
 
 	switch pid.supervisor.Strategy() {
-	case OneForOneStrategy:
+	case supervisor.OneForOneStrategy:
 		msg.Strategy = internalpb.Strategy_STRATEGY_ONE_FOR_ONE
-	case OneForAllStrategy:
+	case supervisor.OneForAllStrategy:
 		msg.Strategy = internalpb.Strategy_STRATEGY_ONE_FOR_ALL
 	default:
 		msg.Strategy = internalpb.Strategy_STRATEGY_ONE_FOR_ONE
@@ -1781,7 +1786,7 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 
 		// For ResumeDirective, avoid suspending to minimize timing windows where the child appears
 		// temporarily "not running" to observers. For other directives, keep suspension semantics.
-		if directive == ResumeDirective {
+		if directive == supervisor.ResumeDirective {
 			// Always skip the next passivation decision once to avoid immediate stop after resume.
 			pid.flipState(passivationSkipNextState, true)
 			// If the actor was already suspended due to a prior signal, reinstate immediately.
@@ -2198,6 +2203,11 @@ func (pid *PID) toWireActor() (*internalpb.Actor, error) {
 		return nil, err
 	}
 
+	var supervisorSpec *internalpb.SupervisorSpec
+	if pid.supervisor != nil {
+		supervisorSpec = codec.EncodeSupervisor(pid.supervisor)
+	}
+
 	return &internalpb.Actor{
 		Address:             pid.ID(),
 		Type:                registry.Name(pid.Actor()),
@@ -2207,6 +2217,7 @@ func (pid *PID) toWireActor() (*internalpb.Actor, error) {
 		Dependencies:        dependencies,
 		EnableStash:         pid.stashState != nil && pid.stashState.box != nil,
 		Role:                pid.Role(),
+		Supervisor:          supervisorSpec,
 	}, nil
 }
 

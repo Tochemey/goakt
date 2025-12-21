@@ -4,6 +4,7 @@ package internalpb;
 
 import "google/protobuf/any.proto";
 import "google/protobuf/duration.proto";
+import "internal/actor.proto";
 import "internal/dependency.proto";
 import "internal/grain.proto";
 import "internal/passivation.proto";
@@ -133,6 +134,8 @@ message RemoteSpawnRequest {
   bool enable_stash = 9;
   // Specifies the role the actor belongs to
   optional string role = 10;
+  // Specifies the supervisor configuration when explicitly set
+  SupervisorSpec supervisor = 11;
 }
 
 message RemoteSpawnResponse {}

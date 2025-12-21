@@ -46,6 +46,7 @@ import (
 	"github.com/tochemey/goakt/v3/log"
 	mockscluster "github.com/tochemey/goakt/v3/mocks/cluster"
 	"github.com/tochemey/goakt/v3/remote"
+	"github.com/tochemey/goakt/v3/supervisor"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
@@ -302,6 +303,53 @@ func TestRelocation(t *testing.T) {
 	assert.NoError(t, node3.Stop(ctx))
 	assert.NoError(t, sd1.Close())
 	assert.NoError(t, sd3.Close())
+	srv.Shutdown()
+}
+
+func TestRelocationWithCustomSupervisor(t *testing.T) {
+	ctx := context.TODO()
+	srv := startNatsServer(t)
+
+	node1, sd1 := testNATs(t, srv.Addr().String())
+	require.NotNil(t, node1)
+	require.NotNil(t, sd1)
+
+	node2, sd2 := testNATs(t, srv.Addr().String())
+	require.NotNil(t, node2)
+	require.NotNil(t, sd2)
+
+	customSupervisor := supervisor.NewSupervisor(
+		supervisor.WithStrategy(supervisor.OneForAllStrategy),
+		supervisor.WithRetry(3, 2*time.Second),
+		supervisor.WithDirective(&errors.InternalError{}, supervisor.RestartDirective),
+	)
+
+	pid, err := node2.Spawn(ctx, "custom-supervised-actor", NewMockActor(), WithSupervisor(customSupervisor))
+	require.NoError(t, err)
+	require.NotNil(t, pid)
+
+	pause.For(time.Second)
+
+	require.NoError(t, node2.Stop(ctx))
+	require.NoError(t, sd2.Close())
+
+	pause.For(time.Minute)
+
+	relocated, err := node1.LocalActor("custom-supervised-actor")
+	require.NoError(t, err)
+	require.NotNil(t, relocated)
+	require.NotNil(t, relocated.supervisor)
+
+	require.Equal(t, supervisor.OneForAllStrategy, relocated.supervisor.Strategy())
+	require.EqualValues(t, 3, relocated.supervisor.MaxRetries())
+	require.Equal(t, 2*time.Second, relocated.supervisor.Timeout())
+
+	directive, ok := relocated.supervisor.Directive(&errors.InternalError{})
+	require.True(t, ok)
+	require.Equal(t, supervisor.RestartDirective, directive)
+
+	assert.NoError(t, node1.Stop(ctx))
+	assert.NoError(t, sd1.Close())
 	srv.Shutdown()
 }
 

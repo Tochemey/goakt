@@ -22,16 +22,13 @@
  * SOFTWARE.
  */
 
-package actor
+package supervisor
 
 import (
 	"reflect"
 	"runtime"
 	"sync"
 	"time"
-
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/internal/ds"
@@ -178,14 +175,34 @@ func WithAnyErrorDirective(directive Directive) SupervisorOption {
 	}
 }
 
-// Supervisor defines the supervisor behavior rules applied to a faulty actor during message processing.
+// DirectiveRule describes a directive rule keyed by error type.
+type DirectiveRule struct {
+	// ErrorType should be the fully-qualified Go error type name (reflect.Type.String()).
+	ErrorType string
+	// Directive is the directive to apply for ErrorType.
+	Directive Directive
+}
+
+// Supervisor defines how a parent reacts when a child actor fails.
 //
-// A supervision behavior determines how a supervisor responds when a child actor encounters an error.
-// The strategy dictates whether the faulty actor should be resumed, restarted, stopped, or if the error
-// should be escalated to the supervisor’s parent.
+// It combines:
+//   - a strategy (one-for-one vs one-for-all), and
+//   - directive rules that map error types to actions (stop, resume, restart, escalate).
 //
-// The default supervision strategy is OneForOneStrategy, meaning that failures are handled individually,
-// affecting only the actor that encountered the error.
+// Defaults:
+//   - Strategy: OneForOneStrategy.
+//   - Directives: PanicError -> Stop, runtime.PanicNilError -> Restart.
+//   - Retries: 0 (no retry window unless configured with WithRetry).
+//
+// Rules are keyed by the error's concrete type name (reflect.Type.String()) as
+// provided by WithDirective. If you set an "any error" directive via
+// WithAnyErrorDirective, it becomes the sole rule and overrides any
+// error-specific directives.
+//
+// The Restart directive uses MaxRetries and Timeout to bound restarts within a
+// window; use WithRetry to configure them.
+//
+// Supervisor methods are safe for concurrent use.
 type Supervisor struct {
 	sync.Mutex
 	// Specifies the strategy
@@ -238,7 +255,7 @@ func NewSupervisor(opts ...SupervisorOption) *Supervisor {
 	return s
 }
 
-// Strategy returns the supervisor strategy
+// Strategy returns the configured supervision strategy.
 func (s *Supervisor) Strategy() Strategy {
 	s.Lock()
 	strategy := s.strategy
@@ -246,30 +263,94 @@ func (s *Supervisor) Strategy() Strategy {
 	return strategy
 }
 
-// Directive returns the directive associated to a given error
+// Directive returns the directive configured for the concrete type of err.
+// It does not fall back to the "any error" directive; use AnyErrorDirective
+// when you need the catch-all behavior.
 func (s *Supervisor) Directive(err error) (Directive, bool) {
 	s.Lock()
+	if s.directives == nil {
+		s.Unlock()
+		return 0, false
+	}
 	directive, ok := s.directives.Get(errorType(err))
 	s.Unlock()
 	return directive, ok
 }
 
-// MaxRetries returns the maximum number of times an actor will be restarted after failure.
+// MaxRetries returns the restart retry budget used with RestartDirective.
 func (s *Supervisor) MaxRetries() uint32 {
 	return s.maxRetries
 }
 
-// Timeout returns the timeout
-// This is the duration to wait before attempting a retry.
+// Timeout returns the retry window used with RestartDirective.
 func (s *Supervisor) Timeout() time.Duration {
 	return s.timeout
 }
 
-// Reset resets the strategy
+// Reset clears all directive rules and sets the strategy to OneForAllStrategy.
+// It does not modify retry settings.
 func (s *Supervisor) Reset() {
 	s.Lock()
 	s.strategy = OneForAllStrategy
 	s.directives = ds.NewMap[string, Directive]()
+	s.Unlock()
+}
+
+// Rules returns a snapshot of the directive rules currently configured.
+// The returned slice is a copy; ordering is not guaranteed.
+func (s *Supervisor) Rules() []DirectiveRule {
+	s.Lock()
+	defer s.Unlock()
+	if s.directives == nil || s.directives.Len() == 0 {
+		return nil
+	}
+	rules := make([]DirectiveRule, 0, s.directives.Len())
+	s.directives.Range(func(errorType string, directive Directive) {
+		rules = append(rules, DirectiveRule{
+			ErrorType: errorType,
+			Directive: directive,
+		})
+	})
+	return rules
+}
+
+// AnyErrorDirective returns the directive for the catch-all error type, if configured.
+func (s *Supervisor) AnyErrorDirective() (Directive, bool) {
+	s.Lock()
+	if s.directives == nil {
+		s.Unlock()
+		return 0, false
+	}
+	directive, ok := s.directives.Get(errorType(new(errors.AnyError)))
+	s.Unlock()
+	return directive, ok
+}
+
+// SetDirectiveByType associates a supervision directive with an error type name.
+//
+// The key must be the concrete (non-pointer) error type string as returned by
+// reflect.Type.String() (for example: "net.OpError" or "github.com/acme/pkg.MyError").
+// Callers typically obtain this value via the internal helper errorType(err).
+//
+// This is a low-level helper intended for cases where the error type is only known
+// by name (e.g., configuration-driven rules). Prefer WithDirective / WithAnyErrorDirective
+// when you have an error value or want the catch-all behavior.
+//
+// Notes:
+//   - Unlike WithAnyErrorDirective, this does not clear or override existing rules.
+//   - If a catch-all rule (errors.AnyError) is configured, it is NOT automatically applied here;
+//     resolution behavior depends on how Directive(err) is called.
+//   - Empty errorType is ignored.
+//   - Safe for concurrent use.
+func (s *Supervisor) SetDirectiveByType(errorType string, directive Directive) {
+	if errorType == "" {
+		return
+	}
+	s.Lock()
+	if s.directives == nil {
+		s.directives = ds.NewMap[string, Directive]()
+	}
+	s.directives.Set(errorType, directive)
 	s.Unlock()
 }
 
@@ -281,33 +362,9 @@ func errorType(err error) string {
 	}
 
 	rtype := reflect.TypeOf(err)
-	if rtype.Kind() == reflect.Ptr {
+	if rtype.Kind() == reflect.Pointer {
 		rtype = rtype.Elem()
 	}
 
 	return rtype.String()
-}
-
-type supervisionSignal struct {
-	err       error
-	msg       proto.Message
-	timestamp *timestamppb.Timestamp
-}
-
-func newSupervisionSignal(err error, msg proto.Message) *supervisionSignal {
-	return &supervisionSignal{
-		err:       err,
-		msg:       msg,
-		timestamp: timestamppb.Now(),
-	}
-}
-
-func (s *supervisionSignal) Err() error {
-	return s.err
-}
-func (s *supervisionSignal) Msg() proto.Message {
-	return s.msg
-}
-func (s *supervisionSignal) Timestamp() *timestamppb.Timestamp {
-	return s.timestamp
 }

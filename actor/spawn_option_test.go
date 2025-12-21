@@ -34,6 +34,7 @@ import (
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/internal/pointer"
 	"github.com/tochemey/goakt/v3/passivation"
+	"github.com/tochemey/goakt/v3/supervisor"
 )
 
 func TestSpawnOption(t *testing.T) {
@@ -46,7 +47,7 @@ func TestSpawnOption(t *testing.T) {
 	})
 	t.Run("spawn option with supervisor strategy", func(t *testing.T) {
 		config := &spawnConfig{}
-		supervisor := NewSupervisor(WithStrategy(OneForOneStrategy))
+		supervisor := supervisor.NewSupervisor(supervisor.WithStrategy(supervisor.OneForOneStrategy))
 		option := WithSupervisor(supervisor)
 		option.Apply(config)
 		require.Equal(t, &spawnConfig{supervisor: supervisor}, config)

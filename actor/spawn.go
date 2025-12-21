@@ -39,6 +39,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/pointer"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/remote"
+	"github.com/tochemey/goakt/v3/supervisor"
 )
 
 // Spawn creates and starts a new actor in the local actor system.
@@ -208,7 +209,7 @@ func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opt
 		return err
 	}
 
-	return x.remoting.RemoteSpawn(ctx, peer.Host, peer.RemotingPort, &remote.SpawnRequest{
+	request := &remote.SpawnRequest{
 		Name:                name,
 		Kind:                registry.Name(actor),
 		Singleton:           false,
@@ -216,7 +217,12 @@ func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opt
 		PassivationStrategy: config.passivationStrategy,
 		Dependencies:        config.dependencies,
 		EnableStashing:      config.enableStash,
-	})
+	}
+	if config.supervisor != nil {
+		request.Supervisor = config.supervisor
+	}
+
+	return x.remoting.RemoteSpawn(ctx, peer.Host, peer.RemotingPort, request)
 }
 
 // SpawnFromFunc creates an actor with the given receive function.
@@ -244,7 +250,7 @@ func (x *actorSystem) SpawnRouter(ctx context.Context, name string, poolSize int
 		WithRelocationDisabled(),
 		asSystem(),
 		WithSupervisor(
-			NewSupervisor(WithAnyErrorDirective(ResumeDirective)),
+			supervisor.NewSupervisor(supervisor.WithAnyErrorDirective(supervisor.ResumeDirective)),
 		))
 }
 
@@ -337,11 +343,11 @@ func (x *actorSystem) spawnSingletonOnLocal(ctx context.Context, name string, ac
 		withSingleton(),
 		WithRole(pointer.Deref(role, "")),
 		WithSupervisor(
-			NewSupervisor(
-				WithStrategy(OneForOneStrategy),
-				WithDirective(&gerrors.PanicError{}, StopDirective),
-				WithDirective(&gerrors.InternalError{}, StopDirective),
-				WithDirective(&runtime.PanicNilError{}, StopDirective),
+			supervisor.NewSupervisor(
+				supervisor.WithStrategy(supervisor.OneForOneStrategy),
+				supervisor.WithDirective(&gerrors.PanicError{}, supervisor.StopDirective),
+				supervisor.WithDirective(&gerrors.InternalError{}, supervisor.StopDirective),
+				supervisor.WithDirective(&runtime.PanicNilError{}, supervisor.StopDirective),
 			),
 		))
 	if err != nil {

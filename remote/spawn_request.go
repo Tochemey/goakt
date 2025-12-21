@@ -30,6 +30,7 @@ import (
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/internal/validation"
 	"github.com/tochemey/goakt/v3/passivation"
+	"github.com/tochemey/goakt/v3/supervisor"
 )
 
 // SpawnRequest defines configuration options for spawning an actor on a remote node.
@@ -62,6 +63,23 @@ type SpawnRequest struct {
 	// duration. If the actor receives a message before this timeout,
 	// the passivation timer is reset.
 	PassivationStrategy passivation.Strategy
+
+	// Supervisor defines the supervision strategy for the actor being spawned.
+	//
+	// When set, this supervisor configuration is attached to the actor’s parent/manager (depending on the
+	// spawn path) and governs how failures are handled at runtime. It typically controls:
+	//   - Restart behavior (e.g., whether the actor is restarted on panic/error)
+	//   - Backoff/retry characteristics (if supported by the chosen supervisor)
+	//   - Escalation semantics (how failures propagate within a supervision tree)
+	//
+	// If nil, the system default supervision configuration is used.
+	//
+	// Notes:
+	//   - Supervision affects *failure handling*, not *placement*. Use Role/Singleton/Relocatable to
+	//     influence where and how the actor is (re)deployed across the cluster.
+	//   - In a relocatable/singleton scenario, the supervisor still applies after the actor is started
+	//     on the target node.
+	Supervisor *supervisor.Supervisor
 
 	// Dependencies define the list of dependencies that injects the given dependencies into
 	// the actor during its initialization.

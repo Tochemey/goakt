@@ -39,6 +39,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/remote"
+	"github.com/tochemey/goakt/v3/supervisor"
 )
 
 type remotePeer struct {
@@ -366,9 +367,9 @@ func (x *actorSystem) spawnTopicActor(ctx context.Context) error {
 		asSystem(),
 		WithLongLived(),
 		WithSupervisor(
-			NewSupervisor(
-				WithStrategy(OneForOneStrategy),
-				WithAnyErrorDirective(ResumeDirective),
+			supervisor.NewSupervisor(
+				supervisor.WithStrategy(supervisor.OneForOneStrategy),
+				supervisor.WithAnyErrorDirective(supervisor.ResumeDirective),
 			),
 		),
 	)

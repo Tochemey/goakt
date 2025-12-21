@@ -9,6 +9,7 @@ package internalpb
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	durationpb "google.golang.org/protobuf/types/known/durationpb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -20,6 +21,243 @@ const (
 	// Verify that runtime/protoimpl is sufficiently up-to-date.
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
+
+// SupervisorStrategy defines how directives apply across failing actors.
+type SupervisorStrategy int32
+
+const (
+	SupervisorStrategy_SUPERVISOR_STRATEGY_ONE_FOR_ONE SupervisorStrategy = 0
+	SupervisorStrategy_SUPERVISOR_STRATEGY_ONE_FOR_ALL SupervisorStrategy = 1
+)
+
+// Enum value maps for SupervisorStrategy.
+var (
+	SupervisorStrategy_name = map[int32]string{
+		0: "SUPERVISOR_STRATEGY_ONE_FOR_ONE",
+		1: "SUPERVISOR_STRATEGY_ONE_FOR_ALL",
+	}
+	SupervisorStrategy_value = map[string]int32{
+		"SUPERVISOR_STRATEGY_ONE_FOR_ONE": 0,
+		"SUPERVISOR_STRATEGY_ONE_FOR_ALL": 1,
+	}
+)
+
+func (x SupervisorStrategy) Enum() *SupervisorStrategy {
+	p := new(SupervisorStrategy)
+	*p = x
+	return p
+}
+
+func (x SupervisorStrategy) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (SupervisorStrategy) Descriptor() protoreflect.EnumDescriptor {
+	return file_internal_actor_proto_enumTypes[0].Descriptor()
+}
+
+func (SupervisorStrategy) Type() protoreflect.EnumType {
+	return &file_internal_actor_proto_enumTypes[0]
+}
+
+func (x SupervisorStrategy) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use SupervisorStrategy.Descriptor instead.
+func (SupervisorStrategy) EnumDescriptor() ([]byte, []int) {
+	return file_internal_actor_proto_rawDescGZIP(), []int{0}
+}
+
+// SupervisorDirective defines the action to apply when an actor fails.
+type SupervisorDirective int32
+
+const (
+	SupervisorDirective_SUPERVISOR_DIRECTIVE_STOP     SupervisorDirective = 0
+	SupervisorDirective_SUPERVISOR_DIRECTIVE_RESUME   SupervisorDirective = 1
+	SupervisorDirective_SUPERVISOR_DIRECTIVE_RESTART  SupervisorDirective = 2
+	SupervisorDirective_SUPERVISOR_DIRECTIVE_ESCALATE SupervisorDirective = 3
+)
+
+// Enum value maps for SupervisorDirective.
+var (
+	SupervisorDirective_name = map[int32]string{
+		0: "SUPERVISOR_DIRECTIVE_STOP",
+		1: "SUPERVISOR_DIRECTIVE_RESUME",
+		2: "SUPERVISOR_DIRECTIVE_RESTART",
+		3: "SUPERVISOR_DIRECTIVE_ESCALATE",
+	}
+	SupervisorDirective_value = map[string]int32{
+		"SUPERVISOR_DIRECTIVE_STOP":     0,
+		"SUPERVISOR_DIRECTIVE_RESUME":   1,
+		"SUPERVISOR_DIRECTIVE_RESTART":  2,
+		"SUPERVISOR_DIRECTIVE_ESCALATE": 3,
+	}
+)
+
+func (x SupervisorDirective) Enum() *SupervisorDirective {
+	p := new(SupervisorDirective)
+	*p = x
+	return p
+}
+
+func (x SupervisorDirective) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (SupervisorDirective) Descriptor() protoreflect.EnumDescriptor {
+	return file_internal_actor_proto_enumTypes[1].Descriptor()
+}
+
+func (SupervisorDirective) Type() protoreflect.EnumType {
+	return &file_internal_actor_proto_enumTypes[1]
+}
+
+func (x SupervisorDirective) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use SupervisorDirective.Descriptor instead.
+func (SupervisorDirective) EnumDescriptor() ([]byte, []int) {
+	return file_internal_actor_proto_rawDescGZIP(), []int{1}
+}
+
+// SupervisorDirectiveRule binds an error type to a directive.
+type SupervisorDirectiveRule struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Fully-qualified Go error type name (reflect.Type.String()).
+	ErrorType string `protobuf:"bytes,1,opt,name=error_type,json=errorType,proto3" json:"error_type,omitempty"`
+	// Specifies the directive to apply.
+	Directive     SupervisorDirective `protobuf:"varint,2,opt,name=directive,proto3,enum=internalpb.SupervisorDirective" json:"directive,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SupervisorDirectiveRule) Reset() {
+	*x = SupervisorDirectiveRule{}
+	mi := &file_internal_actor_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SupervisorDirectiveRule) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SupervisorDirectiveRule) ProtoMessage() {}
+
+func (x *SupervisorDirectiveRule) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_actor_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SupervisorDirectiveRule.ProtoReflect.Descriptor instead.
+func (*SupervisorDirectiveRule) Descriptor() ([]byte, []int) {
+	return file_internal_actor_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *SupervisorDirectiveRule) GetErrorType() string {
+	if x != nil {
+		return x.ErrorType
+	}
+	return ""
+}
+
+func (x *SupervisorDirectiveRule) GetDirective() SupervisorDirective {
+	if x != nil {
+		return x.Directive
+	}
+	return SupervisorDirective_SUPERVISOR_DIRECTIVE_STOP
+}
+
+// SupervisorSpec defines an explicit supervisor configuration for an actor.
+type SupervisorSpec struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the supervisor strategy.
+	Strategy SupervisorStrategy `protobuf:"varint,1,opt,name=strategy,proto3,enum=internalpb.SupervisorStrategy" json:"strategy,omitempty"`
+	// Specifies the maximum number of retries.
+	MaxRetries uint32 `protobuf:"varint,2,opt,name=max_retries,json=maxRetries,proto3" json:"max_retries,omitempty"`
+	// Specifies the restart timeout window.
+	Timeout *durationpb.Duration `protobuf:"bytes,3,opt,name=timeout,proto3" json:"timeout,omitempty"`
+	// Specifies error-type specific directives.
+	Directives []*SupervisorDirectiveRule `protobuf:"bytes,4,rep,name=directives,proto3" json:"directives,omitempty"`
+	// Specifies the directive to apply for any error.
+	AnyErrorDirective *SupervisorDirective `protobuf:"varint,5,opt,name=any_error_directive,json=anyErrorDirective,proto3,enum=internalpb.SupervisorDirective,oneof" json:"any_error_directive,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *SupervisorSpec) Reset() {
+	*x = SupervisorSpec{}
+	mi := &file_internal_actor_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SupervisorSpec) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SupervisorSpec) ProtoMessage() {}
+
+func (x *SupervisorSpec) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_actor_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SupervisorSpec.ProtoReflect.Descriptor instead.
+func (*SupervisorSpec) Descriptor() ([]byte, []int) {
+	return file_internal_actor_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *SupervisorSpec) GetStrategy() SupervisorStrategy {
+	if x != nil {
+		return x.Strategy
+	}
+	return SupervisorStrategy_SUPERVISOR_STRATEGY_ONE_FOR_ONE
+}
+
+func (x *SupervisorSpec) GetMaxRetries() uint32 {
+	if x != nil {
+		return x.MaxRetries
+	}
+	return 0
+}
+
+func (x *SupervisorSpec) GetTimeout() *durationpb.Duration {
+	if x != nil {
+		return x.Timeout
+	}
+	return nil
+}
+
+func (x *SupervisorSpec) GetDirectives() []*SupervisorDirectiveRule {
+	if x != nil {
+		return x.Directives
+	}
+	return nil
+}
+
+func (x *SupervisorSpec) GetAnyErrorDirective() SupervisorDirective {
+	if x != nil && x.AnyErrorDirective != nil {
+		return *x.AnyErrorDirective
+	}
+	return SupervisorDirective_SUPERVISOR_DIRECTIVE_STOP
+}
 
 // Actor represents the actor information on the wire.
 type Actor struct {
@@ -39,14 +277,16 @@ type Actor struct {
 	// States whether the actor will require a stash buffer
 	EnableStash bool `protobuf:"varint,7,opt,name=enable_stash,json=enableStash,proto3" json:"enable_stash,omitempty"`
 	// Specifies the role the actor belongs to
-	Role          *string `protobuf:"bytes,8,opt,name=role,proto3,oneof" json:"role,omitempty"`
+	Role *string `protobuf:"bytes,8,opt,name=role,proto3,oneof" json:"role,omitempty"`
+	// Specifies the supervisor configuration when explicitly set
+	Supervisor    *SupervisorSpec `protobuf:"bytes,9,opt,name=supervisor,proto3" json:"supervisor,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Actor) Reset() {
 	*x = Actor{}
-	mi := &file_internal_actor_proto_msgTypes[0]
+	mi := &file_internal_actor_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -58,7 +298,7 @@ func (x *Actor) String() string {
 func (*Actor) ProtoMessage() {}
 
 func (x *Actor) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_actor_proto_msgTypes[0]
+	mi := &file_internal_actor_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -71,7 +311,7 @@ func (x *Actor) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Actor.ProtoReflect.Descriptor instead.
 func (*Actor) Descriptor() ([]byte, []int) {
-	return file_internal_actor_proto_rawDescGZIP(), []int{0}
+	return file_internal_actor_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Actor) GetAddress() string {
@@ -130,12 +370,33 @@ func (x *Actor) GetRole() string {
 	return ""
 }
 
+func (x *Actor) GetSupervisor() *SupervisorSpec {
+	if x != nil {
+		return x.Supervisor
+	}
+	return nil
+}
+
 var File_internal_actor_proto protoreflect.FileDescriptor
 
 const file_internal_actor_proto_rawDesc = "" +
 	"\n" +
 	"\x14internal/actor.proto\x12\n" +
-	"internalpb\x1a\x19internal/dependency.proto\x1a\x1ainternal/passivation.proto\"\xcf\x02\n" +
+	"internalpb\x1a\x1egoogle/protobuf/duration.proto\x1a\x19internal/dependency.proto\x1a\x1ainternal/passivation.proto\"w\n" +
+	"\x17SupervisorDirectiveRule\x12\x1d\n" +
+	"\n" +
+	"error_type\x18\x01 \x01(\tR\terrorType\x12=\n" +
+	"\tdirective\x18\x02 \x01(\x0e2\x1f.internalpb.SupervisorDirectiveR\tdirective\"\xd5\x02\n" +
+	"\x0eSupervisorSpec\x12:\n" +
+	"\bstrategy\x18\x01 \x01(\x0e2\x1e.internalpb.SupervisorStrategyR\bstrategy\x12\x1f\n" +
+	"\vmax_retries\x18\x02 \x01(\rR\n" +
+	"maxRetries\x123\n" +
+	"\atimeout\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\atimeout\x12C\n" +
+	"\n" +
+	"directives\x18\x04 \x03(\v2#.internalpb.SupervisorDirectiveRuleR\n" +
+	"directives\x12T\n" +
+	"\x13any_error_directive\x18\x05 \x01(\x0e2\x1f.internalpb.SupervisorDirectiveH\x00R\x11anyErrorDirective\x88\x01\x01B\x16\n" +
+	"\x14_any_error_directive\"\x8b\x03\n" +
 	"\x05Actor\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12!\n" +
@@ -144,8 +405,19 @@ const file_internal_actor_proto_rawDesc = "" +
 	"\x14passivation_strategy\x18\x05 \x01(\v2\x1f.internalpb.PassivationStrategyR\x13passivationStrategy\x12:\n" +
 	"\fdependencies\x18\x06 \x03(\v2\x16.internalpb.DependencyR\fdependencies\x12!\n" +
 	"\fenable_stash\x18\a \x01(\bR\venableStash\x12\x17\n" +
-	"\x04role\x18\b \x01(\tH\x00R\x04role\x88\x01\x01B\a\n" +
-	"\x05_roleB\xa3\x01\n" +
+	"\x04role\x18\b \x01(\tH\x00R\x04role\x88\x01\x01\x12:\n" +
+	"\n" +
+	"supervisor\x18\t \x01(\v2\x1a.internalpb.SupervisorSpecR\n" +
+	"supervisorB\a\n" +
+	"\x05_role*^\n" +
+	"\x12SupervisorStrategy\x12#\n" +
+	"\x1fSUPERVISOR_STRATEGY_ONE_FOR_ONE\x10\x00\x12#\n" +
+	"\x1fSUPERVISOR_STRATEGY_ONE_FOR_ALL\x10\x01*\x9a\x01\n" +
+	"\x13SupervisorDirective\x12\x1d\n" +
+	"\x19SUPERVISOR_DIRECTIVE_STOP\x10\x00\x12\x1f\n" +
+	"\x1bSUPERVISOR_DIRECTIVE_RESUME\x10\x01\x12 \n" +
+	"\x1cSUPERVISOR_DIRECTIVE_RESTART\x10\x02\x12!\n" +
+	"\x1dSUPERVISOR_DIRECTIVE_ESCALATE\x10\x03B\xa3\x01\n" +
 	"\x0ecom.internalpbB\n" +
 	"ActorProtoH\x02P\x01Z;github.com/tochemey/goakt/v3/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
 	"Internalpb\xca\x02\n" +
@@ -164,20 +436,32 @@ func file_internal_actor_proto_rawDescGZIP() []byte {
 	return file_internal_actor_proto_rawDescData
 }
 
-var file_internal_actor_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
+var file_internal_actor_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_internal_actor_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_internal_actor_proto_goTypes = []any{
-	(*Actor)(nil),               // 0: internalpb.Actor
-	(*PassivationStrategy)(nil), // 1: internalpb.PassivationStrategy
-	(*Dependency)(nil),          // 2: internalpb.Dependency
+	(SupervisorStrategy)(0),         // 0: internalpb.SupervisorStrategy
+	(SupervisorDirective)(0),        // 1: internalpb.SupervisorDirective
+	(*SupervisorDirectiveRule)(nil), // 2: internalpb.SupervisorDirectiveRule
+	(*SupervisorSpec)(nil),          // 3: internalpb.SupervisorSpec
+	(*Actor)(nil),                   // 4: internalpb.Actor
+	(*durationpb.Duration)(nil),     // 5: google.protobuf.Duration
+	(*PassivationStrategy)(nil),     // 6: internalpb.PassivationStrategy
+	(*Dependency)(nil),              // 7: internalpb.Dependency
 }
 var file_internal_actor_proto_depIdxs = []int32{
-	1, // 0: internalpb.Actor.passivation_strategy:type_name -> internalpb.PassivationStrategy
-	2, // 1: internalpb.Actor.dependencies:type_name -> internalpb.Dependency
-	2, // [2:2] is the sub-list for method output_type
-	2, // [2:2] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	1, // 0: internalpb.SupervisorDirectiveRule.directive:type_name -> internalpb.SupervisorDirective
+	0, // 1: internalpb.SupervisorSpec.strategy:type_name -> internalpb.SupervisorStrategy
+	5, // 2: internalpb.SupervisorSpec.timeout:type_name -> google.protobuf.Duration
+	2, // 3: internalpb.SupervisorSpec.directives:type_name -> internalpb.SupervisorDirectiveRule
+	1, // 4: internalpb.SupervisorSpec.any_error_directive:type_name -> internalpb.SupervisorDirective
+	6, // 5: internalpb.Actor.passivation_strategy:type_name -> internalpb.PassivationStrategy
+	7, // 6: internalpb.Actor.dependencies:type_name -> internalpb.Dependency
+	3, // 7: internalpb.Actor.supervisor:type_name -> internalpb.SupervisorSpec
+	8, // [8:8] is the sub-list for method output_type
+	8, // [8:8] is the sub-list for method input_type
+	8, // [8:8] is the sub-list for extension type_name
+	8, // [8:8] is the sub-list for extension extendee
+	0, // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_internal_actor_proto_init() }
@@ -187,19 +471,21 @@ func file_internal_actor_proto_init() {
 	}
 	file_internal_dependency_proto_init()
 	file_internal_passivation_proto_init()
-	file_internal_actor_proto_msgTypes[0].OneofWrappers = []any{}
+	file_internal_actor_proto_msgTypes[1].OneofWrappers = []any{}
+	file_internal_actor_proto_msgTypes[2].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_actor_proto_rawDesc), len(file_internal_actor_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   1,
+			NumEnums:      2,
+			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
 		GoTypes:           file_internal_actor_proto_goTypes,
 		DependencyIndexes: file_internal_actor_proto_depIdxs,
+		EnumInfos:         file_internal_actor_proto_enumTypes,
 		MessageInfos:      file_internal_actor_proto_msgTypes,
 	}.Build()
 	File_internal_actor_proto = out.File

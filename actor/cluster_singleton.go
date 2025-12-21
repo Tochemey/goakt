@@ -34,6 +34,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/remote"
+	sup "github.com/tochemey/goakt/v3/supervisor"
 )
 
 // clusterSingletonManager is a system actor that manages the lifecycle of singleton actors
@@ -97,9 +98,9 @@ func (x *actorSystem) spawnSingletonManager(ctx context.Context) error {
 		asSystem(),
 		WithLongLived(),
 		WithSupervisor(
-			NewSupervisor(
-				WithStrategy(OneForOneStrategy),
-				WithAnyErrorDirective(RestartDirective),
+			sup.NewSupervisor(
+				sup.WithStrategy(sup.OneForOneStrategy),
+				sup.WithAnyErrorDirective(sup.RestartDirective),
 			),
 		),
 	)

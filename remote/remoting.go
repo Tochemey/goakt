@@ -618,6 +618,7 @@ func (r *remoting) RemoteSpawn(ctx context.Context, host string, port int, spawn
 			Dependencies:        dependencies,
 			EnableStash:         spawnRequest.EnableStashing,
 			Role:                spawnRequest.Role,
+			Supervisor:          codec.EncodeSupervisor(spawnRequest.Supervisor),
 		},
 	)
 

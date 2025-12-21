@@ -59,6 +59,7 @@ import (
 	testkit "github.com/tochemey/goakt/v3/mocks/discovery"
 	"github.com/tochemey/goakt/v3/passivation"
 	"github.com/tochemey/goakt/v3/remote"
+	"github.com/tochemey/goakt/v3/supervisor"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
@@ -67,6 +68,13 @@ const (
 	replyTimeout   = 100 * time.Millisecond
 	passivateAfter = 200 * time.Millisecond
 )
+
+func newBareSupervisor(strategy supervisor.Strategy) *supervisor.Supervisor {
+	supv := supervisor.NewSupervisor()
+	supv.Reset()
+	supervisor.WithStrategy(strategy)(supv)
+	return supv
+}
 
 func TestReceive(t *testing.T) {
 	t.Run("With happy path", func(t *testing.T) {
@@ -636,13 +644,7 @@ func TestRestart(t *testing.T) {
 
 		pause.For(time.Second)
 
-		child.supervisor = &Supervisor{
-			Mutex:      sync.Mutex{},
-			strategy:   OneForOneStrategy,
-			maxRetries: 0,
-			timeout:    0,
-			directives: ds.NewMap[string, Directive](),
-		}
+		child.supervisor = newBareSupervisor(supervisor.OneForOneStrategy)
 
 		require.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
 		pause.For(time.Second)
@@ -970,7 +972,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NotNil(t, parent)
 
 		// create the child actor
-		stopStrategy := NewSupervisor(WithDirective(&errors.PanicError{}, StopDirective))
+		stopStrategy := supervisor.NewSupervisor(supervisor.WithDirective(&errors.PanicError{}, supervisor.StopDirective))
 
 		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(stopStrategy))
 		require.NoError(t, err)
@@ -1007,7 +1009,7 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		// Use a short time-based passivation to trigger quickly
 		passiveAfter := 200 * time.Millisecond
-		resumeStrategy := NewSupervisor(WithDirective(&errors.PanicError{}, ResumeDirective))
+		resumeStrategy := supervisor.NewSupervisor(supervisor.WithDirective(&errors.PanicError{}, supervisor.ResumeDirective))
 
 		child, err := parent.SpawnChild(
 			ctx,
@@ -1056,9 +1058,9 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NotNil(t, parent)
 
 		// create the child actor
-		stopStrategy := NewSupervisor(
-			WithStrategy(OneForAllStrategy),
-			WithDirective(&errors.PanicError{}, StopDirective),
+		stopStrategy := supervisor.NewSupervisor(
+			supervisor.WithStrategy(supervisor.OneForAllStrategy),
+			supervisor.WithDirective(&errors.PanicError{}, supervisor.StopDirective),
 		)
 
 		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(stopStrategy))
@@ -1193,7 +1195,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NotNil(t, parent)
 
 		// create the child actor
-		fakeStrategy := NewSupervisor(WithDirective(&errors.PanicError{}, 4)) // undefined directive
+		fakeStrategy := supervisor.NewSupervisor(supervisor.WithDirective(&errors.PanicError{}, 4)) // undefined directive
 		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(fakeStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
@@ -1248,13 +1250,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		pause.For(time.Second)
 
 		// bare supervisor
-		child.supervisor = &Supervisor{
-			Mutex:      sync.Mutex{},
-			strategy:   OneForOneStrategy,
-			maxRetries: 0,
-			timeout:    0,
-			directives: ds.NewMap[string, Directive](),
-		}
+		child.supervisor = newBareSupervisor(supervisor.OneForOneStrategy)
 
 		require.Len(t, parent.Children(), 1)
 		// send a message to the actor which result in panic
@@ -1295,7 +1291,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NotNil(t, parent)
 
 		// create the child actor
-		stopStrategy := NewSupervisor(WithDirective(&errors.PanicError{}, DefaultSupervisorDirective))
+		stopStrategy := supervisor.NewSupervisor(supervisor.WithDirective(&errors.PanicError{}, DefaultSupervisorDirective))
 		child, err := parent.SpawnChild(ctx, "SpawnChild", &MockPostStop{}, WithSupervisor(stopStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
@@ -1339,7 +1335,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NotNil(t, parent)
 
 		// create the child actor
-		restartStrategy := NewSupervisor(WithDirective(&errors.PanicError{}, RestartDirective))
+		restartStrategy := supervisor.NewSupervisor(supervisor.WithDirective(&errors.PanicError{}, supervisor.RestartDirective))
 		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(restartStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
@@ -1385,9 +1381,9 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NotNil(t, parent)
 
 		// create the child actor
-		restartStrategy := NewSupervisor(
-			WithStrategy(OneForAllStrategy),
-			WithDirective(&errors.PanicError{}, RestartDirective))
+		restartStrategy := supervisor.NewSupervisor(
+			supervisor.WithStrategy(supervisor.OneForAllStrategy),
+			supervisor.WithDirective(&errors.PanicError{}, supervisor.RestartDirective))
 		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(restartStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
@@ -1484,7 +1480,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		resumeStrategy := NewSupervisor(WithDirective(&errors.PanicError{}, ResumeDirective))
+		resumeStrategy := supervisor.NewSupervisor(supervisor.WithDirective(&errors.PanicError{}, supervisor.ResumeDirective))
 		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(resumeStrategy))
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
@@ -1531,10 +1527,10 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, parent)
 
-		restartStrategy := NewSupervisor(
-			WithStrategy(OneForOneStrategy),
-			WithDirective(&errors.PanicError{}, RestartDirective),
-			WithRetry(2, time.Minute),
+		restartStrategy := supervisor.NewSupervisor(
+			supervisor.WithStrategy(supervisor.OneForOneStrategy),
+			supervisor.WithDirective(&errors.PanicError{}, supervisor.RestartDirective),
+			supervisor.WithRetry(2, time.Minute),
 		)
 
 		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(restartStrategy))
@@ -1589,13 +1585,7 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		pause.For(time.Second)
 
-		child.supervisor = &Supervisor{
-			Mutex:      sync.Mutex{},
-			strategy:   OneForOneStrategy,
-			maxRetries: 0,
-			timeout:    0,
-			directives: ds.NewMap[string, Directive](),
-		}
+		child.supervisor = newBareSupervisor(supervisor.OneForOneStrategy)
 
 		require.Len(t, parent.Children(), 1)
 		// send a message to the actor which result in panic
@@ -1662,7 +1652,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NotNil(t, parent)
 
 		// create the child actor
-		stopStrategy := NewSupervisor(WithAnyErrorDirective(StopDirective))
+		stopStrategy := supervisor.NewSupervisor(supervisor.WithAnyErrorDirective(supervisor.StopDirective))
 
 		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(stopStrategy))
 		require.NoError(t, err)
@@ -1701,7 +1691,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NotNil(t, parent)
 
 		// create the child actor
-		escalationStrategy := NewSupervisor(WithDirective(&errors.PanicError{}, EscalateDirective))
+		escalationStrategy := supervisor.NewSupervisor(supervisor.WithDirective(&errors.PanicError{}, supervisor.EscalateDirective))
 		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(escalationStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
@@ -1743,7 +1733,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NotNil(t, parent)
 
 		// create the child actor
-		escalationStrategy := NewSupervisor(WithDirective(&errors.PanicError{}, EscalateDirective))
+		escalationStrategy := supervisor.NewSupervisor(supervisor.WithDirective(&errors.PanicError{}, supervisor.EscalateDirective))
 		child, err := parent.SpawnChild(ctx, "reinstate", NewMockSupervised(), WithSupervisor(escalationStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
@@ -1785,7 +1775,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NotNil(t, parent)
 
 		// create the child actor
-		restartStrategy := NewSupervisor(WithAnyErrorDirective(RestartDirective))
+		restartStrategy := supervisor.NewSupervisor(supervisor.WithAnyErrorDirective(supervisor.RestartDirective))
 		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(restartStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
@@ -1827,7 +1817,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		pause.For(time.Second)
 
 		// create the child actor
-		restartStrategy := NewSupervisor(WithAnyErrorDirective(RestartDirective))
+		restartStrategy := supervisor.NewSupervisor(supervisor.WithAnyErrorDirective(supervisor.RestartDirective))
 		pid, err := actorSystem.Spawn(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(restartStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -1870,7 +1860,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		parent := actorSystem.NoSender()
 
 		// create the child actor
-		escalationStrategy := NewSupervisor(WithDirective(&errors.PanicError{}, EscalateDirective))
+		escalationStrategy := supervisor.NewSupervisor(supervisor.WithDirective(&errors.PanicError{}, supervisor.EscalateDirective))
 		child, err := parent.SpawnChild(ctx, "noSenderChild", NewMockSupervised(), WithSupervisor(escalationStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
@@ -6249,4 +6239,28 @@ func TestToWireActorDependencyError(t *testing.T) {
 	wire, err := pid.toWireActor()
 	require.ErrorIs(t, err, expectedErr)
 	require.Nil(t, wire)
+}
+
+func TestToWireActorSupervisorSpec(t *testing.T) {
+	noSupervisorPID := &PID{
+		actor:        NewMockActor(),
+		address:      address.New("actor-to-wire-nosupervisor", "testSys", "127.0.0.1", 0),
+		fieldsLocker: sync.RWMutex{},
+	}
+
+	wire, err := noSupervisorPID.toWireActor()
+	require.NoError(t, err)
+	require.Nil(t, wire.GetSupervisor())
+
+	withSupervisorPID := &PID{
+		actor:        NewMockActor(),
+		address:      address.New("actor-to-wire-supervisor", "testSys", "127.0.0.1", 0),
+		fieldsLocker: sync.RWMutex{},
+		supervisor:   supervisor.NewSupervisor(supervisor.WithStrategy(supervisor.OneForAllStrategy)),
+	}
+
+	wire, err = withSupervisorPID.toWireActor()
+	require.NoError(t, err)
+	require.NotNil(t, wire.GetSupervisor())
+	require.Equal(t, internalpb.SupervisorStrategy_SUPERVISOR_STRATEGY_ONE_FOR_ALL, wire.GetSupervisor().GetStrategy())
 }

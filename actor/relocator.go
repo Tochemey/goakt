@@ -193,6 +193,9 @@ func (r *relocator) spawnRemoteActor(ctx context.Context, actor *internalpb.Acto
 		EnableStashing:      actor.GetEnableStash(),
 		Role:                actor.Role,
 	}
+	if actor.GetSupervisor() != nil {
+		spawnRequest.Supervisor = codec.DecodeSupervisor(actor.GetSupervisor())
+	}
 
 	if err := r.remoting.RemoteSpawn(ctx, remoteHost, remotingPort, spawnRequest); err != nil {
 		r.logger.Error(err)
@@ -349,6 +352,11 @@ func (r *relocator) recreateLocally(ctx context.Context, props *internalpb.Actor
 
 	if props.GetRole() != "" {
 		spawnOpts = append(spawnOpts, WithRole(props.GetRole()))
+	}
+	if props.GetSupervisor() != nil {
+		if decoded := codec.DecodeSupervisor(props.GetSupervisor()); decoded != nil {
+			spawnOpts = append(spawnOpts, WithSupervisor(decoded))
+		}
 	}
 
 	if len(props.GetDependencies()) > 0 {

@@ -34,6 +34,7 @@ import (
 	goakt "github.com/tochemey/goakt/v3/actor"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v3/supervisor"
 )
 
 type Foo struct{}
@@ -47,8 +48,8 @@ func (c *Foo) Receive(ctx *goakt.ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 		ctx.Spawn("bar", &Bar{},
-			goakt.WithSupervisor(goakt.NewSupervisor(
-				goakt.WithAnyErrorDirective(goakt.EscalateDirective),
+			goakt.WithSupervisor(supervisor.NewSupervisor(
+				supervisor.WithAnyErrorDirective(supervisor.EscalateDirective),
 			)),
 		)
 	case *goaktpb.PanicSignal:

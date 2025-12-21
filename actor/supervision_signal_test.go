@@ -25,52 +25,38 @@
 package actor
 
 import (
+	"errors"
 	"testing"
-	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tochemey/goakt/v3/errors"
+	"github.com/tochemey/goakt/v3/goaktpb"
 )
 
-func TestSupervisorOption(t *testing.T) {
-	testCases := []struct {
-		name     string
-		option   SupervisorOption
-		expected *Supervisor
-	}{
-		{
-			name:     "WithStrategy",
-			option:   WithStrategy(OneForAllStrategy),
-			expected: &Supervisor{strategy: OneForAllStrategy},
-		},
-		{
-			name:     "WithRetry",
-			option:   WithRetry(2, time.Second),
-			expected: &Supervisor{timeout: time.Second, maxRetries: 2},
-		},
-	}
+type supervisionSignalTestError struct{}
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			supervisor := &Supervisor{}
-			tc.option(supervisor)
-			assert.Equal(t, tc.expected, supervisor)
-		})
-	}
+func (supervisionSignalTestError) Error() string { return "supervision-signal" }
+
+func TestSupervisionSignalAccessors(t *testing.T) {
+	expectedErr := errors.New("boom")
+	expectedMsg := new(goaktpb.PostStart)
+
+	signal := newSupervisionSignal(expectedErr, expectedMsg)
+
+	require.Equal(t, expectedErr, signal.Err())
+	require.Equal(t, expectedMsg, signal.Msg())
+	require.NotNil(t, signal.Timestamp())
+	require.False(t, signal.Timestamp().AsTime().IsZero())
 }
 
-func TestSupervisorWithAnyError(t *testing.T) {
-	supervisor := NewSupervisor(WithAnyErrorDirective(RestartDirective))
-	directive, ok := supervisor.Directive(new(errors.AnyError))
-	require.True(t, ok)
-	require.Exactly(t, RestartDirective, directive)
+func TestErrorTypeNil(t *testing.T) {
+	require.Equal(t, "nil", errorType(nil))
 }
 
-func TestSupervisorWithDirective(t *testing.T) {
-	supervisor := NewSupervisor(WithDirective(&errors.InternalError{}, RestartDirective))
-	directive, ok := supervisor.Directive(&errors.InternalError{})
-	require.True(t, ok)
-	require.Exactly(t, RestartDirective, directive)
+func TestErrorTypePointerAndValue(t *testing.T) {
+	valueErr := supervisionSignalTestError{}
+	require.Equal(t, errorType(valueErr), errorType(&valueErr))
+
+	var nilPtr *supervisionSignalTestError
+	require.Equal(t, errorType(valueErr), errorType(nilPtr))
 }

@@ -33,6 +33,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/metric"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/remote"
+	"github.com/tochemey/goakt/v3/supervisor"
 	"github.com/tochemey/goakt/v3/tls"
 )
 
@@ -279,7 +280,7 @@ func WithMetrics() Option {
 //   - Otherwise, the ActorSystem's default supervisor (configured by this option) is used.
 //   - If supervisor is nil, this option makes no change and the built-in default supervisor
 //     remains in effect.
-func WithDefaultSupervisor(supervisor *Supervisor) Option {
+func WithDefaultSupervisor(supervisor *supervisor.Supervisor) Option {
 	return OptionFunc(func(system *actorSystem) {
 		if supervisor != nil {
 			system.defaultSupervisor = supervisor

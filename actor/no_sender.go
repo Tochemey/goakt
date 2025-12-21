@@ -26,6 +26,8 @@ package actor
 
 import (
 	"context"
+
+	sup "github.com/tochemey/goakt/v3/supervisor"
 )
 
 // NoSender returns a special PID that represents an anonymous / absent sender.
@@ -74,9 +76,9 @@ func (x *noSender) PostStop(*Context) error {
 func (x *actorSystem) spawnNoSender(ctx context.Context) error {
 	actorName := x.reservedName(noSenderType)
 
-	supervisor := NewSupervisor(
-		WithStrategy(OneForOneStrategy),
-		WithAnyErrorDirective(ResumeDirective),
+	supervisor := sup.NewSupervisor(
+		sup.WithStrategy(sup.OneForOneStrategy),
+		sup.WithAnyErrorDirective(sup.ResumeDirective),
 	)
 
 	x.noSender, _ = x.configPID(ctx,

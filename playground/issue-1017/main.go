@@ -39,6 +39,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/remote"
+	"github.com/tochemey/goakt/v3/supervisor"
 )
 
 func main() {
@@ -136,9 +137,9 @@ func startActorSystem(ctx context.Context, systemName, serverAddr string) actor.
 func spawnActor(ctx context.Context, actorSystem actor.ActorSystem, actorName string) {
 	peersAddr := actorSystem.PeersAddress()
 
-	supervisor := actor.NewSupervisor(
-		actor.WithStrategy(actor.OneForOneStrategy),
-		actor.WithAnyErrorDirective(actor.RestartDirective),
+	supervisor := supervisor.NewSupervisor(
+		supervisor.WithStrategy(supervisor.OneForOneStrategy),
+		supervisor.WithAnyErrorDirective(supervisor.RestartDirective),
 	)
 
 	fmt.Printf("Spawning long lived actor %s on %s...\n", actorName, peersAddr)

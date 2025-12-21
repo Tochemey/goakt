@@ -35,6 +35,7 @@ import (
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/passivation"
+	"github.com/tochemey/goakt/v3/supervisor"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
@@ -58,7 +59,7 @@ func main() {
 	// create the parent actor
 	_, err := actorSystem.Spawn(ctx, "Parent", &Parent{},
 		actor.WithPassivationStrategy(passivation.NewTimeBasedStrategy(24*time.Hour)),
-		actor.WithSupervisor(actor.NewSupervisor(actor.WithAnyErrorDirective(actor.StopDirective))))
+		actor.WithSupervisor(supervisor.NewSupervisor(supervisor.WithAnyErrorDirective(supervisor.StopDirective))))
 	if err != nil {
 		logger.Fatal(err)
 	}
@@ -99,7 +100,7 @@ func (p *Parent) Receive(ctx *actor.ReceiveContext) {
 		// Spawn a child actor
 		pid := ctx.Spawn("child", &Child{},
 			actor.WithPassivationStrategy(passivation.NewTimeBasedStrategy(24*time.Hour)),
-			actor.WithSupervisor(actor.NewSupervisor(actor.WithAnyErrorDirective(actor.StopDirective))),
+			actor.WithSupervisor(supervisor.NewSupervisor(supervisor.WithAnyErrorDirective(supervisor.StopDirective))),
 		)
 
 		// check if the child actor is running
