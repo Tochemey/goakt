@@ -37,6 +37,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/proto"
@@ -1526,10 +1527,12 @@ func TestEnsureGrainProcess(t *testing.T) {
 		pid := newGrainPID(id, NewMockGrain(), sys, newGrainConfig())
 		sys.(*actorSystem).grains.Set(id.String(), pid)
 
-		got, e := sys.(*actorSystem).ensureGrainProcess(id)
+		got, e := sys.(*actorSystem).ensureGrainProcess(ctx, id)
 		require.NoError(t, e)
 		require.NotNil(t, got)
 		require.Equal(t, pid, got)
+		require.True(t, got.isActive())
+		require.Equal(t, "g1", got.getGrain().(*MockGrain).name)
 
 		// still present
 		_, ok := sys.(*actorSystem).grains.Get(id.String())
@@ -1549,7 +1552,7 @@ func TestEnsureGrainProcess(t *testing.T) {
 		pid := newGrainPID(id, NewMockGrain(), sys, newGrainConfig())
 		sys.(*actorSystem).grains.Set(id.String(), pid)
 
-		got, e := sys.(*actorSystem).ensureGrainProcess(id)
+		got, e := sys.(*actorSystem).ensureGrainProcess(ctx, id)
 		require.Error(t, e)
 		require.ErrorIs(t, e, gerrors.ErrGrainNotRegistered)
 		require.Nil(t, got)
@@ -1559,7 +1562,7 @@ func TestEnsureGrainProcess(t *testing.T) {
 		require.False(t, ok)
 	})
 
-	t.Run("returns nil,nil when process not found", func(t *testing.T) {
+	t.Run("creates process when missing", func(t *testing.T) {
 		ctx := t.Context()
 		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 		require.NoError(t, err)
@@ -1567,10 +1570,269 @@ func TestEnsureGrainProcess(t *testing.T) {
 		require.NoError(t, sys.Start(ctx))
 		defer func() { _ = sys.Stop(ctx) }()
 
+		sys.(*actorSystem).registry.Register(NewMockGrain())
 		id := newGrainIdentity(NewMockGrain(), "missing")
-		got, e := sys.(*actorSystem).ensureGrainProcess(id)
+		got, e := sys.(*actorSystem).ensureGrainProcess(ctx, id)
 		require.NoError(t, e)
+		require.NotNil(t, got)
+		require.True(t, got.isActive())
+		require.Equal(t, "missing", got.getGrain().(*MockGrain).name)
+		_, ok := sys.(*actorSystem).grains.Get(id.String())
+		require.True(t, ok)
+	})
+
+	t.Run("errors when missing and grain type not registered", func(t *testing.T) {
+		ctx := t.Context()
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, sys)
+		require.NoError(t, sys.Start(ctx))
+		defer func() { _ = sys.Stop(ctx) }()
+
+		id := newGrainIdentity(NewMockGrain(), "unregistered")
+		got, e := sys.(*actorSystem).ensureGrainProcess(ctx, id)
+		require.Error(t, e)
+		require.ErrorIs(t, e, gerrors.ErrGrainNotRegistered)
 		require.Nil(t, got)
+		_, ok := sys.(*actorSystem).grains.Get(id.String())
+		require.False(t, ok)
+	})
+}
+
+// nolint
+func TestEnsureGrainProcessCluster(t *testing.T) {
+	t.Run("existing process returns owner lookup error", func(t *testing.T) {
+		ctx := t.Context()
+		grain := NewMockGrain()
+		sys, cl, id := MockClusterEnsureGrainSystem(t, grain, "cluster-existing-owner-error")
+		seedInactiveGrainPID(sys, id, grain, newGrainConfig())
+		expectedErr := errors.New("owner lookup failed")
+
+		cl.EXPECT().GrainExists(ctx, id.String()).Return(false, expectedErr).Once()
+
+		got, err := sys.ensureGrainProcess(ctx, id)
+		require.ErrorIs(t, err, expectedErr)
+		require.Nil(t, got)
+	})
+
+	t.Run("existing process returns owner mismatch", func(t *testing.T) {
+		ctx := t.Context()
+		grain := NewMockGrain()
+		sys, cl, id := MockClusterEnsureGrainSystem(t, grain, "cluster-existing-owner-mismatch")
+		seedInactiveGrainPID(sys, id, grain, newGrainConfig())
+		remoteOwner := &internalpb.Grain{
+			GrainId: &internalpb.GrainId{Value: id.String()},
+			Host:    "192.0.2.10",
+			Port:    9001,
+		}
+
+		cl.EXPECT().GrainExists(ctx, id.String()).Return(true, nil).Once()
+		cl.EXPECT().GetGrain(ctx, id.String()).Return(remoteOwner, nil).Once()
+
+		got, err := sys.ensureGrainProcess(ctx, id)
+		require.Nil(t, got)
+		var ownerErr *grainOwnerMismatchError
+		require.ErrorAs(t, err, &ownerErr)
+		require.Equal(t, remoteOwner, ownerErr.owner)
+	})
+
+	t.Run("existing process returns toWireGrain error when claiming", func(t *testing.T) {
+		ctx := t.Context()
+		grain := NewMockGrain()
+		sys, cl, id := MockClusterEnsureGrainSystem(t, grain, "cluster-existing-wire-error")
+		expectedErr := errors.New("dependency marshal failed")
+		config := newGrainConfig(WithGrainDependencies(&MockFailingDependency{err: expectedErr}))
+		seedInactiveGrainPID(sys, id, grain, config)
+
+		cl.EXPECT().GrainExists(ctx, id.String()).Return(false, nil).Once()
+
+		got, err := sys.ensureGrainProcess(ctx, id)
+		require.ErrorIs(t, err, expectedErr)
+		require.Nil(t, got)
+	})
+
+	t.Run("existing process returns claim error", func(t *testing.T) {
+		ctx := t.Context()
+		grain := NewMockGrain()
+		sys, cl, id := MockClusterEnsureGrainSystem(t, grain, "cluster-existing-claim-error")
+		seedInactiveGrainPID(sys, id, grain, newGrainConfig())
+		expectedErr := errors.New("claim failed")
+
+		cl.EXPECT().GrainExists(ctx, id.String()).Return(false, nil).Once()
+		cl.EXPECT().GrainExists(ctx, id.String()).Return(false, expectedErr).Once()
+
+		got, err := sys.ensureGrainProcess(ctx, id)
+		require.ErrorIs(t, err, expectedErr)
+		require.Nil(t, got)
+	})
+
+	t.Run("existing process returns claim owner mismatch", func(t *testing.T) {
+		ctx := t.Context()
+		grain := NewMockGrain()
+		sys, cl, id := MockClusterEnsureGrainSystem(t, grain, "cluster-existing-claim-mismatch")
+		seedInactiveGrainPID(sys, id, grain, newGrainConfig())
+		remoteOwner := &internalpb.Grain{
+			GrainId: &internalpb.GrainId{Value: id.String()},
+			Host:    "192.0.2.11",
+			Port:    9002,
+		}
+
+		cl.EXPECT().GrainExists(ctx, id.String()).Return(false, nil).Once()
+		cl.EXPECT().GrainExists(ctx, id.String()).Return(true, nil).Once()
+		cl.EXPECT().GetGrain(ctx, id.String()).Return(remoteOwner, nil).Once()
+
+		got, err := sys.ensureGrainProcess(ctx, id)
+		require.Nil(t, got)
+		var ownerErr *grainOwnerMismatchError
+		require.ErrorAs(t, err, &ownerErr)
+		require.Equal(t, remoteOwner, ownerErr.owner)
+	})
+
+	t.Run("existing process cleans up claim on activation failure", func(t *testing.T) {
+		ctx := t.Context()
+		grain := NewMockGrainActivationFailure()
+		sys, cl, id := MockClusterEnsureGrainSystem(t, grain, "cluster-existing-activate-fail")
+		config := newGrainConfig(
+			WithGrainInitMaxRetries(1),
+			WithGrainInitTimeout(10*time.Millisecond),
+		)
+		seedInactiveGrainPID(sys, id, grain, config)
+
+		cl.EXPECT().GrainExists(ctx, id.String()).Return(false, nil).Once()
+		cl.EXPECT().GrainExists(ctx, id.String()).Return(false, nil).Once()
+		cl.EXPECT().PutGrain(ctx, mock.MatchedBy(func(actual *internalpb.Grain) bool {
+			return actual != nil && actual.GetGrainId().GetValue() == id.String()
+		})).Return(nil).Once()
+		cl.EXPECT().RemoveGrain(ctx, id.String()).Return(nil).Once()
+
+		got, err := sys.ensureGrainProcess(ctx, id)
+		require.ErrorIs(t, err, gerrors.ErrGrainActivationFailure)
+		require.Nil(t, got)
+	})
+
+	t.Run("existing process returns cluster publish error", func(t *testing.T) {
+		ctx := t.Context()
+		grain := NewMockGrain()
+		sys, cl, id := MockClusterEnsureGrainSystem(t, grain, "cluster-existing-publish-error")
+		expectedErr := errors.New("encode failed")
+		config := newGrainConfig(WithGrainDependencies(&MockFailingDependency{err: expectedErr}))
+		seedInactiveGrainPID(sys, id, grain, config)
+		localOwner := &internalpb.Grain{
+			GrainId: &internalpb.GrainId{Value: id.String()},
+			Host:    sys.Host(),
+			Port:    int32(sys.Port()),
+		}
+
+		cl.EXPECT().GrainExists(ctx, id.String()).Return(true, nil).Once()
+		cl.EXPECT().GetGrain(ctx, id.String()).Return(localOwner, nil).Once()
+
+		got, err := sys.ensureGrainProcess(ctx, id)
+		require.ErrorIs(t, err, expectedErr)
+		require.Nil(t, got)
+	})
+
+	t.Run("missing process returns owner lookup error", func(t *testing.T) {
+		ctx := t.Context()
+		grain := NewMockGrain()
+		sys, cl, id := MockClusterEnsureGrainSystem(t, grain, "cluster-missing-owner-error")
+		expectedErr := errors.New("owner lookup failed")
+
+		cl.EXPECT().GrainExists(ctx, id.String()).Return(false, expectedErr).Once()
+
+		got, err := sys.ensureGrainProcess(ctx, id)
+		require.ErrorIs(t, err, expectedErr)
+		require.Nil(t, got)
+	})
+
+	t.Run("missing process returns owner mismatch", func(t *testing.T) {
+		ctx := t.Context()
+		grain := NewMockGrain()
+		sys, cl, id := MockClusterEnsureGrainSystem(t, grain, "cluster-missing-owner-mismatch")
+		remoteOwner := &internalpb.Grain{
+			GrainId: &internalpb.GrainId{Value: id.String()},
+			Host:    "192.0.2.12",
+			Port:    9003,
+		}
+
+		cl.EXPECT().GrainExists(ctx, id.String()).Return(true, nil).Once()
+		cl.EXPECT().GetGrain(ctx, id.String()).Return(remoteOwner, nil).Once()
+
+		got, err := sys.ensureGrainProcess(ctx, id)
+		require.Nil(t, got)
+		var ownerErr *grainOwnerMismatchError
+		require.ErrorAs(t, err, &ownerErr)
+		require.Equal(t, remoteOwner, ownerErr.owner)
+	})
+
+	t.Run("missing process returns claim error", func(t *testing.T) {
+		ctx := t.Context()
+		grain := NewMockGrain()
+		sys, cl, id := MockClusterEnsureGrainSystem(t, grain, "cluster-missing-claim-error")
+		expectedErr := errors.New("claim failed")
+
+		cl.EXPECT().GrainExists(ctx, id.String()).Return(false, nil).Once()
+		cl.EXPECT().GrainExists(ctx, id.String()).Return(false, expectedErr).Once()
+
+		got, err := sys.ensureGrainProcess(ctx, id)
+		require.ErrorIs(t, err, expectedErr)
+		require.Nil(t, got)
+	})
+
+	t.Run("missing process returns claim owner mismatch", func(t *testing.T) {
+		ctx := t.Context()
+		grain := NewMockGrain()
+		sys, cl, id := MockClusterEnsureGrainSystem(t, grain, "cluster-missing-claim-mismatch")
+		remoteOwner := &internalpb.Grain{
+			GrainId: &internalpb.GrainId{Value: id.String()},
+			Host:    "192.0.2.13",
+			Port:    9004,
+		}
+
+		cl.EXPECT().GrainExists(ctx, id.String()).Return(false, nil).Once()
+		cl.EXPECT().GrainExists(ctx, id.String()).Return(true, nil).Once()
+		cl.EXPECT().GetGrain(ctx, id.String()).Return(remoteOwner, nil).Once()
+
+		got, err := sys.ensureGrainProcess(ctx, id)
+		require.Nil(t, got)
+		var ownerErr *grainOwnerMismatchError
+		require.ErrorAs(t, err, &ownerErr)
+		require.Equal(t, remoteOwner, ownerErr.owner)
+	})
+
+	t.Run("missing process cleans up claim on activation failure", func(t *testing.T) {
+		ctx := t.Context()
+		grain := NewMockGrainActivationFailure()
+		sys, cl, id := MockClusterEnsureGrainSystem(t, grain, "cluster-missing-activate-fail")
+
+		cl.EXPECT().GrainExists(ctx, id.String()).Return(false, nil).Once()
+		cl.EXPECT().GrainExists(ctx, id.String()).Return(false, nil).Once()
+		cl.EXPECT().PutGrain(ctx, mock.MatchedBy(func(actual *internalpb.Grain) bool {
+			return actual != nil && actual.GetGrainId().GetValue() == id.String()
+		})).Return(nil).Once()
+		cl.EXPECT().RemoveGrain(ctx, id.String()).Return(nil).Once()
+
+		got, err := sys.ensureGrainProcess(ctx, id)
+		require.ErrorIs(t, err, gerrors.ErrGrainActivationFailure)
+		require.Nil(t, got)
+	})
+
+	t.Run("missing process claims and activates", func(t *testing.T) {
+		ctx := t.Context()
+		grain := NewMockGrain()
+		sys, cl, id := MockClusterEnsureGrainSystem(t, grain, "cluster-missing-claim-success")
+
+		cl.EXPECT().GrainExists(ctx, id.String()).Return(false, nil).Once()
+		cl.EXPECT().GrainExists(ctx, id.String()).Return(false, nil).Once()
+		cl.EXPECT().PutGrain(ctx, mock.MatchedBy(func(actual *internalpb.Grain) bool {
+			return actual != nil && actual.GetGrainId().GetValue() == id.String()
+		})).Return(nil).Once()
+
+		got, err := sys.ensureGrainProcess(ctx, id)
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		require.True(t, got.isActive())
+		_, ok := sys.grains.Get(id.String())
+		require.True(t, ok)
 	})
 }
 

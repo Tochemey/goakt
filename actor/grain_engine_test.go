@@ -251,6 +251,32 @@ func TestFindActivationPeer_ErrorsWhenRoleMissingEverywhere(t *testing.T) {
 	require.ErrorContains(t, err, role)
 }
 
+func TestAskGrain_ClusterFallbackAutoProvisions(t *testing.T) {
+	ctx := t.Context()
+	cl := mockcluster.NewCluster(t)
+	rem := mockremote.NewRemoting(t)
+	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 9003, RemotingPort: 9103}
+	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+
+	grain := NewMockGrain()
+	sys.registry.Register(grain)
+	identity := newGrainIdentity(grain, "auto-provision")
+
+	cl.EXPECT().GetGrain(ctx, identity.String()).Return(nil, cluster.ErrGrainNotFound)
+	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, nil).Twice()
+	cl.EXPECT().PutGrain(mock.Anything, mock.MatchedBy(func(actual *internalpb.Grain) bool {
+		return actual != nil && actual.GetGrainId().GetValue() == identity.String()
+	})).Return(nil).Once()
+
+	resp, err := sys.AskGrain(ctx, identity, &testpb.TestReply{}, time.Second)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, "received message", resp.(*testpb.Reply).Content)
+
+	_, ok := sys.grains.Get(identity.String())
+	require.True(t, ok)
+}
+
 func TestRemoteAskGrain_InjectsContextValues(t *testing.T) {
 	ctxKey := struct{}{}
 	headerKey := "x-goakt-propagated"
