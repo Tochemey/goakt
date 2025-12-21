@@ -369,6 +369,7 @@ func TestGrain(t *testing.T) {
 		kind := registry.Name(grain)
 		identityStr := fmt.Sprintf("%s%s%s", kind, identitySeparator, name)
 
+		clmock.EXPECT().GrainExists(ctx, identityStr).Return(true, nil)
 		clmock.EXPECT().GetGrain(ctx, identityStr).Return(nil, errors.New("test error"))
 
 		identity, err := testSystem.GrainIdentity(ctx, "testGrain", func(_ context.Context) (Grain, error) {
