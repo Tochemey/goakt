@@ -3845,10 +3845,6 @@ func runWithRetry(ctx context.Context, hook ShutdownHook, sys *actorSystem, reco
 	})
 }
 
-func isSystemName(name string) bool {
-	return strings.HasPrefix(name, reservedNamesPrefix)
-}
-
 // getServer creates an instance of http server
 func getServer(ctx context.Context, address string) *stdhttp.Server {
 	return &stdhttp.Server{
