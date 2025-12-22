@@ -183,9 +183,8 @@ func TestNewBoltStoreDefaultBoltPathError(t *testing.T) {
 func TestNewBoltStoreOpenError(t *testing.T) {
 	useTempHome(t)
 
-	original := defaultBoltOptions
-	defaultBoltOptions = &bbolt.Options{Timeout: boltTimeout, ReadOnly: true}
-	defer func() { defaultBoltOptions = original }()
+	badPath := t.TempDir()
+	withBoltPathGenerator(t, func() (string, error) { return badPath, nil })
 
 	store, err := NewBoltStore()
 	require.Error(t, err)
@@ -195,18 +194,6 @@ func TestNewBoltStoreOpenError(t *testing.T) {
 func TestNewBoltStoreBucketInitializationError(t *testing.T) {
 	useTempHome(t)
 
-	// ensure predictable path
-	boltPathCounter.Store(0)
-	path, err := defaultBoltPath()
-	require.NoError(t, err)
-
-	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
-
-	// create a bolt file so read-only open succeeds
-	db, err := bbolt.Open(path, boltFileMode, defaultBoltOptions)
-	require.NoError(t, err)
-	require.NoError(t, db.Close())
-
 	// force read-only to trigger bucket creation failure
 	original := defaultBoltOptions
 	optsCopy := *defaultBoltOptions
@@ -214,7 +201,6 @@ func TestNewBoltStoreBucketInitializationError(t *testing.T) {
 	defaultBoltOptions = &optsCopy
 	defer func() { defaultBoltOptions = original }()
 
-	boltPathCounter.Store(0)
 	store, err := NewBoltStore()
 	require.Error(t, err)
 	require.Nil(t, store)
@@ -314,6 +300,13 @@ func useTempHome(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("HOME", root)
 	t.Setenv("USERPROFILE", root)
+}
+
+func withBoltPathGenerator(t *testing.T, fn func() (string, error)) {
+	t.Helper()
+	original := boltPathGenerator
+	boltPathGenerator = fn
+	t.Cleanup(func() { boltPathGenerator = original })
 }
 
 type MockContext struct{}

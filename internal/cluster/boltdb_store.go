@@ -55,10 +55,8 @@ var (
 	boltTimeout        = 5 * time.Second
 	defaultBoltOptions = &bbolt.Options{Timeout: boltTimeout, NoGrowSync: true}
 	errBoltStoreClosed = errors.New("cluster: boltdb store is closed")
-)
-
-var (
-	boltPathCounter atomic.Uint64
+	// boltPathGenerator allows tests to override BoltDB path generation.
+	boltPathGenerator = defaultBoltPath
 )
 
 // BoltStore implements Store using go.etcd.io/bbolt for durable persistence.
@@ -80,20 +78,16 @@ type BoltStore struct {
 
 var _ Store = (*BoltStore)(nil)
 
-// NewBoltStore opens (or creates) a BoltDB-backed Store. Each invocation obtains
+// NewBoltStore opens (or creates) a BoltDB-backed Store. Each invocation reserves
 // a unique database file rooted under the user's home directory
-// ("~/.goakt/cluster/peers-<n>.db"), allowing multiple stores to coexist inside
-// a single process without clashing on file locks. The database is configured
-// with production defaults (short open timeout, NoGrowSync). Closing the store
-// closes the underlying Bolt database and deletes the backing file.
+// ("~/.goakt/cluster/peers-*.db"), allowing multiple stores to coexist across
+// processes without clashing on file locks. The database is configured with
+// production defaults (short open timeout, NoGrowSync). Closing the store closes
+// the underlying Bolt database and deletes the backing file.
 func NewBoltStore() (Store, error) {
-	path, err := defaultBoltPath()
+	path, err := boltPathGenerator()
 	if err != nil {
 		return nil, err
-	}
-
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return nil, fmt.Errorf("cluster: unable to create boltdb directory: %w", err)
 	}
 
 	optionsCopy := *defaultBoltOptions
@@ -239,7 +233,18 @@ func defaultBoltPath() (string, error) {
 		return "", fmt.Errorf("cluster: determine user home directory: %w", err)
 	}
 	dir := filepath.Join(home, boltFolder, boltClusterFolder)
-	seq := boltPathCounter.Add(1)
-	filename := fmt.Sprintf("%s-%d%s", boltFilePrefix, seq, boltFileExtension)
-	return filepath.Join(dir, filename), nil
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("cluster: unable to create boltdb directory: %w", err)
+	}
+	pattern := fmt.Sprintf("%s-*%s", boltFilePrefix, boltFileExtension)
+	file, err := os.CreateTemp(dir, pattern)
+	if err != nil {
+		return "", fmt.Errorf("cluster: create boltdb file: %w", err)
+	}
+	path := file.Name()
+	if err := file.Close(); err != nil {
+		_ = os.Remove(path)
+		return "", fmt.Errorf("cluster: close boltdb file: %w", err)
+	}
+	return path, nil
 }
