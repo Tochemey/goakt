@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025 Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,10 @@
  */
 
 package actor
+
+import (
+	"strings"
+)
 
 type nameType int
 
@@ -61,3 +65,7 @@ var (
 		peersStatesWriterType: "GoAktPeerStatesWriter",
 	}
 )
+
+func isSystemName(name string) bool {
+	return strings.HasPrefix(name, reservedNamesPrefix)
+}

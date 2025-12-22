@@ -1,3 +1,27 @@
+/*
+ * MIT License
+ *
+ * Copyright (c) 2022-2025 Arsene Tochemey Gandote
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
 package actor
 
 import (
@@ -5,82 +29,123 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/assert"
 
 	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/internal/cluster"
-	mockscluster "github.com/tochemey/goakt/v3/mocks/cluster"
 )
 
-func TestGrainActivationBarrier_WaitReady(t *testing.T) {
-	barrier := newGrainActivationBarrier(2, 50*time.Millisecond)
-	barrier.open()
+func TestNewGrainActivationBarrier(t *testing.T) {
+	barrier := newGrainActivationBarrier(0, 5*time.Second)
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-
-	require.NoError(t, barrier.wait(ctx))
-}
-
-func TestGrainActivationBarrier_WaitTimeout(t *testing.T) {
-	barrier := newGrainActivationBarrier(2, 20*time.Millisecond)
-	err := barrier.wait(context.Background())
-	require.ErrorIs(t, err, gerrors.ErrGrainActivationBarrierTimeout)
-}
-
-func TestGrainActivationBarrier_WaitContextCancel(t *testing.T) {
-	barrier := newGrainActivationBarrier(2, 0)
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	err := barrier.wait(ctx)
-	require.ErrorIs(t, err, context.Canceled)
-}
-
-func TestActorSystemWaitForGrainActivationBarrier_NoBarrier(t *testing.T) {
-	sys := &actorSystem{}
-	sys.clusterEnabled.Store(true)
-
-	require.NoError(t, sys.waitForGrainActivationBarrier(context.Background()))
-}
-
-func TestActorSystemSetupGrainActivationBarrier_ImmediateOpen(t *testing.T) {
-	config := NewClusterConfig().
-		WithMinimumPeersQuorum(1).
-		WithGrainActivationBarrier(10 * time.Millisecond)
-
-	sys := &actorSystem{clusterConfig: config}
-	sys.clusterEnabled.Store(true)
-
-	sys.setupGrainActivationBarrier(context.Background())
-	require.NotNil(t, sys.grainBarrier)
-
+	assert.True(t, barrier.enabled)
+	assert.EqualValues(t, 1, barrier.minPeers)
+	assert.Equal(t, 5*time.Second, barrier.timeout)
 	select {
-	case <-sys.grainBarrier.ready:
+	case <-barrier.ready:
+		t.Fatal("expected ready channel to remain open")
 	default:
-		t.Fatal("expected activation barrier to be open")
 	}
 }
 
-func TestActorSystemTryOpenGrainActivationBarrier(t *testing.T) {
-	cl := mockscluster.NewCluster(t)
-	config := NewClusterConfig().
-		WithMinimumPeersQuorum(2).
-		WithGrainActivationBarrier(0)
+func TestGrainActivationBarrierOpen(t *testing.T) {
+	t.Run("nil barrier does nothing", func(t *testing.T) {
+		var barrier *grainActivationBarrier
+		assert.NotPanics(t, func() {
+			barrier.open()
+		})
+	})
 
-	sys := &actorSystem{cluster: cl, clusterConfig: config}
-	sys.clusterEnabled.Store(true)
-	sys.grainBarrier = newGrainActivationBarrier(2, 0)
+	t.Run("disabled barrier does not close", func(t *testing.T) {
+		barrier := newGrainActivationBarrier(1, 0)
+		barrier.enabled = false
 
-	peers := []*cluster.Peer{{Host: "127.0.0.1"}, {Host: "127.0.0.2"}}
-	cl.EXPECT().Members(mock.Anything).Return(peers, nil).Once()
+		barrier.open()
 
-	sys.tryOpenGrainActivationBarrier(context.Background())
+		select {
+		case <-barrier.ready:
+			t.Fatal("expected ready channel to remain open")
+		default:
+		}
+	})
 
-	select {
-	case <-sys.grainBarrier.ready:
-	default:
-		t.Fatal("expected activation barrier to be open")
-	}
+	t.Run("enabled barrier closes once", func(t *testing.T) {
+		barrier := newGrainActivationBarrier(1, 0)
+
+		barrier.open()
+		barrier.open()
+
+		select {
+		case <-barrier.ready:
+		default:
+			t.Fatal("expected ready channel to be closed")
+		}
+	})
+}
+
+func TestGrainActivationBarrierWait(t *testing.T) {
+	t.Run("nil barrier returns nil", func(t *testing.T) {
+		var barrier *grainActivationBarrier
+		assert.NoError(t, barrier.wait(context.Background()))
+	})
+
+	t.Run("disabled barrier returns nil", func(t *testing.T) {
+		barrier := newGrainActivationBarrier(1, 0)
+		barrier.enabled = false
+
+		assert.NoError(t, barrier.wait(context.Background()))
+	})
+
+	t.Run("ready already open returns nil", func(t *testing.T) {
+		barrier := newGrainActivationBarrier(1, 0)
+		barrier.open()
+
+		assert.NoError(t, barrier.wait(context.Background()))
+	})
+
+	t.Run("timeout returns barrier error", func(t *testing.T) {
+		barrier := newGrainActivationBarrier(1, 20*time.Millisecond)
+
+		err := barrier.wait(context.Background())
+		assert.ErrorIs(t, err, gerrors.ErrGrainActivationBarrierTimeout)
+	})
+
+	t.Run("opens while waiting with timeout", func(t *testing.T) {
+		barrier := newGrainActivationBarrier(1, 100*time.Millisecond)
+
+		go func() {
+			time.Sleep(10 * time.Millisecond)
+			barrier.open()
+		}()
+
+		assert.NoError(t, barrier.wait(context.Background()))
+	})
+
+	t.Run("context cancellation beats timeout", func(t *testing.T) {
+		barrier := newGrainActivationBarrier(1, 50*time.Millisecond)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		err := barrier.wait(ctx)
+		assert.ErrorIs(t, err, context.Canceled)
+	})
+
+	t.Run("opens while waiting without timeout", func(t *testing.T) {
+		barrier := newGrainActivationBarrier(1, 0)
+
+		go func() {
+			time.Sleep(10 * time.Millisecond)
+			barrier.open()
+		}()
+
+		assert.NoError(t, barrier.wait(context.Background()))
+	})
+
+	t.Run("context cancellation without timeout", func(t *testing.T) {
+		barrier := newGrainActivationBarrier(1, 0)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		err := barrier.wait(ctx)
+		assert.ErrorIs(t, err, context.Canceled)
+	})
 }
