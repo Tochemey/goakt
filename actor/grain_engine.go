@@ -63,6 +63,56 @@ func (e *grainOwnerMismatchError) Error() string {
 	return fmt.Sprintf("grain is owned by %s:%d", e.owner.GetHost(), e.owner.GetPort())
 }
 
+// DeregisterGrainKind removes a previously registered Grain kind from the local registry.
+//
+// Deregistration affects future activations that rely on kind lookup (e.g. remote activation/recreation
+// requests and lazy/local activation when a GrainIdentity is resolved by kind). It does not stop or
+// deactivate already-running Grain instances of that kind; it only prevents new activations via the
+// registry.
+//
+// Notes:
+//   - Deregistration is local to the current actor system instance.
+//   - The operation is idempotent: deregistering a kind that is not registered is safe.
+//   - The provided context is currently unused and is reserved for future enhancements.
+//
+// Returns ErrActorSystemNotStarted if the actor system is not running.
+func (x *actorSystem) DeregisterGrainKind(ctx context.Context, kind Grain) error {
+	if !x.Running() {
+		return gerrors.ErrActorSystemNotStarted
+	}
+
+	x.locker.Lock()
+	x.registry.Deregister(kind)
+	x.locker.Unlock()
+	return nil
+}
+
+// RegisterGrainKind registers a Grain kind in the local registry.
+//
+// Registration associates the Grain's kind (as returned by the Grain implementation) with the
+// factory/metadata used by the actor system to instantiate that kind on demand.
+//
+// This is required for:
+//   - Remote activation/recreation: when another node asks this node to activate a Grain of a given kind.
+//   - Lazy/local activation: when a GrainIdentity is resolved locally via kind lookup.
+//
+// Notes:
+//   - Registration is local to the current actor system instance.
+//   - The operation is idempotent: registering the same kind multiple times is safe.
+//   - The provided context is currently unused and is reserved for future enhancements.
+//
+// Returns ErrActorSystemNotStarted if the actor system is not running.
+func (x *actorSystem) RegisterGrainKind(_ context.Context, kind Grain) error {
+	if !x.Running() {
+		return gerrors.ErrActorSystemNotStarted
+	}
+
+	x.locker.Lock()
+	x.registry.Register(kind)
+	x.locker.Unlock()
+	return nil
+}
+
 // GrainIdentity retrieves or activates a Grain (virtual actor) identified by the given name.
 //
 // This method ensures that a Grain with the specified name exists in the system. If the Grain is not already active,
@@ -519,6 +569,7 @@ func (x *actorSystem) activateGrainLocally(ctx context.Context, identity *GrainI
 		}
 		return pid, nil
 	})
+
 	if err != nil {
 		var ownerErr *grainOwnerMismatchError
 		if errors.As(err, &ownerErr) {

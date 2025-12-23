@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025 Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,35 +22,42 @@
  * SOFTWARE.
  */
 
-package client
+package remote
 
-// Actor defines a given actor name and kind.
-// Kind is a string representation of the type within its package (e.g pkg/User)
-type Actor struct {
-	name string // Name defines the actor name. This will be unique in the Client
-	kind string // Kind specifies the actor kind.
+import (
+	"testing"
+	"time"
 
-}
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
-// NewActor creates an instance of Actor
-func NewActor(kind string) *Actor {
-	return &Actor{
-		kind: kind,
-	}
-}
+	"github.com/tochemey/goakt/v3/extension"
+)
 
-// WithName set the given name
-func (x *Actor) WithName(name string) *Actor {
-	x.name = name
-	return x
-}
+func TestGrainActivationRequestValidateAndSanitize(t *testing.T) {
+	t.Run("valid request", func(t *testing.T) {
+		req := &GrainRequest{
+			Name:              " grain ",
+			Kind:              " kind ",
+			Dependencies:      []extension.Dependency{mockDependency{id: "dep"}},
+			ActivationTimeout: 0,
+			ActivationRetries: 0,
+		}
+		require.NoError(t, req.Validate())
+		req.Sanitize()
+		assert.Equal(t, "grain", req.Name)
+		assert.Equal(t, "kind", req.Kind)
+		assert.Equal(t, time.Second, req.ActivationTimeout)
+		assert.Equal(t, 5, req.ActivationRetries)
+	})
 
-// Name returns the actor name
-func (x *Actor) Name() string {
-	return x.name
-}
-
-// Kind returns the actor kind
-func (x *Actor) Kind() string {
-	return x.kind
+	t.Run("invalid dependency id", func(t *testing.T) {
+		req := &GrainRequest{
+			Name:         "grain",
+			Kind:         "kind",
+			Dependencies: []extension.Dependency{mockDependency{id: ""}},
+		}
+		err := req.Validate()
+		require.Error(t, err)
+	})
 }

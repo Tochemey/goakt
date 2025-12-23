@@ -250,6 +250,60 @@ type Remoting interface {
 	//   - Transport and context errors.
 	RemoteReinstate(ctx context.Context, host string, port int, name string) error
 
+	// RemoteActivateGrain requests activation of a grain on the given remote node.
+	//
+	// Parameters:
+	//   - ctx: Governs cancellation and deadlines for the outbound RPC.
+	//   - host, port: Location of the remote actor system where the grain should be activated.
+	//   - grainRequest: Grain activation details (identity, kind, and any activation metadata).
+	//
+	// Behavior:
+	//   - Ensures the target grain instance is activated on the remote system (idempotency is server-dependent).
+	//
+	// Errors:
+	//   - Transport and context errors.
+	//   - Server-side failures surfaced as connect errors (e.g., Unavailable, DeadlineExceeded).
+	//
+	// Note: The grain kind must be registered on the remote actor system using RegisterGrainKind.
+	RemoteActivateGrain(ctx context.Context, host string, port int, grainRequest *GrainRequest) error
+
+	// RemoteTellGrain sends a one-way (fire-and-forget) message to a grain.
+	//
+	// Parameters:
+	//   - ctx: Governs cancellation and deadlines for the outbound RPC.
+	//   - host, port: Location of the remote actor system where the grain is hosted.
+	//   - grainRequest: Grain activation details (identity, kind, and any activation metadata).
+	//   - message: A protobuf message that will be packed into a google.protobuf.Any.
+	//
+	// Behavior:
+	//   - Returns when the RPC completes; no application-level acknowledgement is awaited.
+	//   - Message packing failures return gerrors.NewErrInvalidMessage.
+	//
+	// Errors:
+	//   - Transport and context errors.
+	//
+	// Note: The grain must already be activated, or the grain kind must be registered on the remote actor system using RegisterGrainKind.
+	RemoteTellGrain(ctx context.Context, host string, port int, grainRequest *GrainRequest, message proto.Message) error
+
+	// RemoteAskGrain sends a request message to a grain and waits for a reply, subject to the provided timeout and context.
+	//
+	// Parameters:
+	//   - ctx: Governs cancellation and deadlines for the outbound RPC.
+	//   - host, port: Location of the remote actor system where the grain is hosted.
+	//   - grainRequest: Grain activation details (identity, kind, and any activation metadata).
+	//   - message: A protobuf message to send; packed into a google.protobuf.Any.
+	//   - timeout: A server-side processing window for sending the request and collecting the response. If zero, the server may apply a default policy; ctx still applies.
+	//
+	// Returns:
+	//   - response: The response from the remote grain, if any, wrapped in Any.
+	//
+	// Errors:
+	//   - Packing failures return gerrors.NewErrInvalidMessage.
+	//   - Transport and context errors.
+	//
+	// Note: The grain must already be activated, or the grain kind must be registered on the remote actor system using RegisterGrainKind.
+	RemoteAskGrain(ctx context.Context, host string, port int, grainRequest *GrainRequest, message proto.Message, timeout time.Duration) (response *anypb.Any, err error)
+
 	// HTTPClient returns the underlying net/http.Client used by this instance.
 	//
 	// The returned client reflects the TLS, compression, and frame size
@@ -372,6 +426,138 @@ func NewRemoting(opts ...RemotingOption) Remoting {
 		return r.newRemotingServiceClient(host, port)
 	}
 	return r
+}
+
+// RemoteActivateGrain requests activation of a grain on the given remote node.
+//
+// Parameters:
+//   - ctx: Governs cancellation and deadlines for the outbound RPC.
+//   - host, port: Location of the remote actor system where the grain should be activated.
+//   - grainRequest: Grain activation details (identity, kind, and any activation metadata).
+//
+// Behavior:
+//   - Ensures the target grain instance is activated on the remote system (idempotency is server-dependent).
+//
+// Errors:
+//   - Transport and context errors.
+//   - Server-side failures surfaced as connect errors (e.g., Unavailable, DeadlineExceeded).
+//
+// Note: The grain kind must be registered on the remote actor system using RegisterGrainKind.
+func (r *remoting) RemoteActivateGrain(ctx context.Context, host string, port int, grainRequest *GrainRequest) error {
+	grain, err := getGrainFromRequest(host, port, grainRequest)
+	if err != nil {
+		return err
+	}
+
+	remoteClient := r.RemotingServiceClient(host, port)
+	request := connect.NewRequest(&internalpb.RemoteActivateGrainRequest{
+		Grain: grain,
+	})
+
+	if propagator := r.contextPropagator; propagator != nil {
+		if err := propagator.Inject(ctx, request.Header()); err != nil {
+			return err
+		}
+	}
+
+	_, err = remoteClient.RemoteActivateGrain(ctx, request)
+	return err
+}
+
+// RemoteAskGrain sends a request message to a grain and waits for a reply, subject to the provided timeout and context.
+//
+// Parameters:
+//   - ctx: Governs cancellation and deadlines for the outbound RPC.
+//   - host, port: Location of the remote actor system where the grain is hosted.
+//   - grainRequest: Grain activation details (identity, kind, and any activation metadata).
+//   - message: A protobuf message to send; packed into a google.protobuf.Any.
+//   - timeout: A server-side processing window for sending the request and collecting the response. If zero, the server may apply a default policy; ctx still applies.
+//
+// Returns:
+//   - response: The response from the remote grain, if any, wrapped in Any.
+//
+// Errors:
+//   - Packing failures return gerrors.NewErrInvalidMessage.
+//   - Transport and context errors.
+//
+// Note: The grain must already be activated, or the grain kind must be registered on the remote actor system using RegisterGrainKind.
+func (r *remoting) RemoteAskGrain(ctx context.Context, host string, port int, grainRequest *GrainRequest, message proto.Message, timeout time.Duration) (response *anypb.Any, err error) {
+	grain, err := getGrainFromRequest(host, port, grainRequest)
+	if err != nil {
+		return nil, err
+	}
+
+	marshaled, err := anypb.New(message)
+	if err != nil {
+		return nil, gerrors.NewErrInvalidMessage(err)
+	}
+
+	remoteClient := r.RemotingServiceClient(host, port)
+	request := connect.NewRequest(&internalpb.RemoteAskGrainRequest{
+		Grain:          grain,
+		Message:        marshaled,
+		RequestTimeout: durationpb.New(timeout),
+	})
+
+	if propagator := r.contextPropagator; propagator != nil {
+		if err := propagator.Inject(ctx, request.Header()); err != nil {
+			return nil, err
+		}
+	}
+
+	resp, err := remoteClient.RemoteAskGrain(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp != nil {
+		response = resp.Msg.GetMessage()
+	}
+
+	return
+}
+
+// RemoteTellGrain sends a one-way (fire-and-forget) message to a grain.
+//
+// Parameters:
+//   - ctx: Governs cancellation and deadlines for the outbound RPC.
+//   - host, port: Location of the remote actor system where the grain is hosted.
+//   - grainRequest: Grain activation details (identity, kind, and any activation metadata).
+//   - message: A protobuf message that will be packed into a google.protobuf.Any.
+//
+// Behavior:
+//   - Returns when the RPC completes; no application-level acknowledgement is awaited.
+//   - Message packing failures return gerrors.NewErrInvalidMessage.
+//
+// Errors:
+//   - Transport and context errors.
+//
+// Note: The grain must already be activated, or the grain kind must be registered on the remote actor system using RegisterGrainKind.
+func (r *remoting) RemoteTellGrain(ctx context.Context, host string, port int, grainRequest *GrainRequest, message proto.Message) error {
+	grain, err := getGrainFromRequest(host, port, grainRequest)
+	if err != nil {
+		return err
+	}
+
+	marshaled, err := anypb.New(message)
+	if err != nil {
+		return gerrors.NewErrInvalidMessage(err)
+	}
+
+	remoteClient := r.RemotingServiceClient(host, port)
+	request := connect.NewRequest(&internalpb.RemoteTellGrainRequest{
+		Grain:   grain,
+		Message: marshaled,
+	})
+
+	if propagator := r.contextPropagator; propagator != nil {
+		if err := propagator.Inject(ctx, request.Header()); err != nil {
+			return err
+		}
+	}
+
+	_, err = remoteClient.RemoteTellGrain(ctx, request)
+	return err
 }
 
 // RemoteTell sends a message to a remote actor without awaiting a reply. The
@@ -777,6 +963,13 @@ func (r *remoting) RemotingServiceClient(host string, port int) internalpbconnec
 	return r.newRemotingServiceClient(host, port)
 }
 
+func (r *remoting) setClientFactory(factory func(string, int) internalpbconnect.RemotingServiceClient) {
+	if factory == nil {
+		return
+	}
+	r.clientFactory = factory
+}
+
 func (r *remoting) newRemotingServiceClient(host string, port int) internalpbconnect.RemotingServiceClient {
 	endpoint := http.URL(host, port)
 	if r.tlsConfig != nil {
@@ -828,4 +1021,41 @@ func (r *remoting) Compression() Compression {
 // nil return value indicates that the client is using an insecure transport.
 func (r *remoting) TLSConfig() *tls.Config {
 	return r.tlsConfig
+}
+
+func getGrainFromRequest(host string, port int, grainRequest *GrainRequest) (*internalpb.Grain, error) {
+	if err := grainRequest.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid grain request: %w", err)
+	}
+
+	grainRequest.Sanitize()
+
+	port32, err := strconvx.Int2Int32(port)
+	if err != nil {
+		return nil, err
+	}
+
+	var dependencies []*internalpb.Dependency
+
+	if len(grainRequest.Dependencies) > 0 {
+		dependencies, err = codec.EncodeDependencies(grainRequest.Dependencies...)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	grain := &internalpb.Grain{
+		Host: host,
+		Port: port32,
+		GrainId: &internalpb.GrainId{
+			Kind:  grainRequest.Kind,
+			Name:  grainRequest.Name,
+			Value: fmt.Sprintf("%s/%s", grainRequest.Kind, grainRequest.Name),
+		},
+		Dependencies:      dependencies,
+		ActivationRetries: int32(grainRequest.ActivationRetries),
+		ActivationTimeout: durationpb.New(grainRequest.ActivationTimeout),
+	}
+
+	return grain, nil
 }
