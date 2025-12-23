@@ -68,8 +68,8 @@ func (x *clusterSingletonManager) Receive(ctx *ReceiveContext) {
 }
 
 // PostStop implements the post-stop hook.
-func (x *clusterSingletonManager) PostStop(*Context) error {
-	x.logger.Infof("%s stopped successfully", x.pid.Name())
+func (x *clusterSingletonManager) PostStop(ctx *Context) error {
+	ctx.ActorSystem().Logger().Infof("%s stopped successfully", ctx.ActorName())
 	return nil
 }
 

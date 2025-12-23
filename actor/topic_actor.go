@@ -108,10 +108,10 @@ func (x *topicActor) Receive(ctx *ReceiveContext) {
 }
 
 // PostStop is called when the actor is stopped
-func (x *topicActor) PostStop(*Context) error {
+func (x *topicActor) PostStop(ctx *Context) error {
 	x.topics.Reset()
 	x.processed.Reset()
-	x.logger.Infof("%s stopped successfully", x.pid.Name())
+	ctx.ActorSystem().Logger().Infof("%s stopped successfully", ctx.ActorName())
 	return nil
 }
 

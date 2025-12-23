@@ -2364,6 +2364,8 @@ func (x *actorSystem) handleRemoteAsk(ctx context.Context, to *PID, message prot
 	if err != nil {
 		return nil, err
 	}
+	msg := receiveContext.Message()
+	sender := receiveContext.Sender()
 
 	responseCh := receiveContext.response
 	if responseCh != nil {
@@ -2380,12 +2382,12 @@ func (x *actorSystem) handleRemoteAsk(ctx context.Context, to *PID, message prot
 		return
 	case <-ctx.Done():
 		err = errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
-		to.handleReceivedError(receiveContext, err)
+		to.handleReceivedErrorWithMessage(sender, msg, err)
 		timers.Put(timer)
 		return nil, err
 	case <-timer.C:
 		err = gerrors.ErrRequestTimeout
-		to.handleReceivedError(receiveContext, err)
+		to.handleReceivedErrorWithMessage(sender, msg, err)
 		timers.Put(timer)
 		return
 	}
@@ -2846,7 +2848,7 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 			Run()
 	}
 
-	// shutdown the various system actors
+	// shutdown user-facing actors first so grains can be safely deactivated without in-flight usage
 	if err := chain.
 		New(chain.WithFailFast(), chain.WithContext(ctx)).
 		AddContextRunnerIf(x.getUserGuardian() != nil, x.getUserGuardian().Shutdown).
@@ -2854,11 +2856,6 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 		AddContextRunnerIf(x.getRelocator() != nil, x.getRelocator().Shutdown).
 		AddContextRunnerIf(x.getDeadletter() != nil, x.getDeadletter().Shutdown).
 		AddContextRunnerIf(x.getDeathWatch() != nil, x.getDeathWatch().Shutdown).
-		AddContextRunnerIf(x.getPeerStatesWriter() != nil, x.getPeerStatesWriter().Shutdown).
-		AddContextRunnerIf(x.TopicActor() != nil, x.TopicActor().Shutdown).
-		AddContextRunnerIf(x.NoSender() != nil, x.NoSender().Shutdown).
-		AddContextRunnerIf(x.getSystemGuardian() != nil, x.getSystemGuardian().Shutdown).
-		AddContextRunnerIf(x.getRootGuardian() != nil, x.getRootGuardian().Shutdown).
 		Run(); err != nil {
 		x.logger.Errorf("%s failed to shutdown cleanly: %v", x.name, err)
 		clusterErr := shutdownClusterAndRemoting()
@@ -2866,9 +2863,7 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 		return multierr.Combine(hooksErr, err, clusterErr)
 	}
 
-	x.actors.deleteNode(x.getRootGuardian())
-
-	// deactivate all grains
+	// deactivate all grains while cluster + pubsub system actors are still alive
 	if x.grains.Len() > 0 {
 		x.logger.Infof("%s deactivating all grains...", x.name)
 		grains := x.grains.Values()
@@ -2882,6 +2877,23 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 			x.logger.Infof("%s successfully deactivated grain=(%s)", x.name, grain.getIdentity().String())
 		}
 	}
+
+	// shutdown remaining system actors
+	if err := chain.
+		New(chain.WithFailFast(), chain.WithContext(ctx)).
+		AddContextRunnerIf(x.getPeerStatesWriter() != nil, x.getPeerStatesWriter().Shutdown).
+		AddContextRunnerIf(x.TopicActor() != nil, x.TopicActor().Shutdown).
+		AddContextRunnerIf(x.NoSender() != nil, x.NoSender().Shutdown).
+		AddContextRunnerIf(x.getSystemGuardian() != nil, x.getSystemGuardian().Shutdown).
+		AddContextRunnerIf(x.getRootGuardian() != nil, x.getRootGuardian().Shutdown).
+		Run(); err != nil {
+		x.logger.Errorf("%s failed to shutdown cleanly: %v", x.name, err)
+		clusterErr := shutdownClusterAndRemoting()
+		// Combine all errors if present
+		return multierr.Combine(hooksErr, err, clusterErr)
+	}
+
+	x.actors.deleteNode(x.getRootGuardian())
 
 	if x.eventsStream != nil {
 		x.eventsStream.Close()
