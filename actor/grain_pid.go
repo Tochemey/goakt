@@ -101,7 +101,7 @@ func newGrainPID(identity *GrainIdentity, grain Grain, actorSystem ActorSystem, 
 }
 
 // activate activates the Grain
-func (pid *grainPID) activate(ctx context.Context) error {
+func (pid *grainPID) activate(ctx context.Context) (err error) {
 	logger := pid.logger
 	logger.Infof("Activating Grain %s ...", pid.identity.String())
 
@@ -110,6 +110,34 @@ func (pid *grainPID) activate(ctx context.Context) error {
 
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	retrier := retry.NewRetrier(int(retries), timeout, timeout)
+
+	defer func() {
+		if r := recover(); r != nil {
+			cancel()
+			switch v := r.(type) {
+			case error:
+				var pe *gerrors.PanicError
+				if errors.As(v, &pe) {
+					err = gerrors.NewErrGrainActivationFailure(pe)
+					return
+				}
+
+				pc, fn, line, _ := runtime.Caller(2)
+				err = gerrors.NewErrGrainActivationFailure(
+					gerrors.NewPanicError(
+						fmt.Errorf("%w at %s[%s:%d]", v, runtime.FuncForPC(pc).Name(), fn, line),
+					),
+				)
+			default:
+				pc, fn, line, _ := runtime.Caller(2)
+				err = gerrors.NewErrGrainActivationFailure(
+					gerrors.NewPanicError(
+						fmt.Errorf("%#v at %s[%s:%d]", r, runtime.FuncForPC(pc).Name(), fn, line),
+					),
+				)
+			}
+		}
+	}()
 
 	if err := retrier.RunContext(cctx, func(ctx context.Context) error {
 		return pid.grain.OnActivate(ctx, newGrainProps(pid.identity, pid.actorSystem, pid.dependencies.Values()))
@@ -134,8 +162,35 @@ func (pid *grainPID) activate(ctx context.Context) error {
 }
 
 // deactivate deactivates the Grain
-func (pid *grainPID) deactivate(ctx context.Context) error {
+func (pid *grainPID) deactivate(ctx context.Context) (err error) {
 	logger := pid.logger
+
+	defer func() {
+		if r := recover(); r != nil {
+			switch v := r.(type) {
+			case error:
+				var pe *gerrors.PanicError
+				if errors.As(v, &pe) {
+					err = gerrors.NewErrGrainDeactivationFailure(pe)
+					return
+				}
+
+				pc, fn, line, _ := runtime.Caller(2)
+				err = gerrors.NewErrGrainDeactivationFailure(
+					gerrors.NewPanicError(
+						fmt.Errorf("%w at %s[%s:%d]", v, runtime.FuncForPC(pc).Name(), fn, line),
+					),
+				)
+			default:
+				pc, fn, line, _ := runtime.Caller(2)
+				err = gerrors.NewErrGrainDeactivationFailure(
+					gerrors.NewPanicError(
+						fmt.Errorf("%#v at %s[%s:%d]", r, runtime.FuncForPC(pc).Name(), fn, line),
+					),
+				)
+			}
+		}
+	}()
 
 	pid.unregisterPassivation()
 

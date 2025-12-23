@@ -1140,6 +1140,27 @@ func (m *MockGrainReceiveFailure) OnReceive(ctx *GrainContext) {
 	}
 }
 
+type MockPanickingActivateDeactivateGrain struct {
+	activatePanicValue any
+	panicValue         any
+}
+
+func (x *MockPanickingActivateDeactivateGrain) OnActivate(context.Context, *GrainProps) error {
+	if x.activatePanicValue != nil {
+		panic(x.activatePanicValue)
+	}
+	return nil
+}
+
+func (x *MockPanickingActivateDeactivateGrain) OnDeactivate(context.Context, *GrainProps) error {
+	if x.panicValue != nil {
+		panic(x.panicValue)
+	}
+	panic("deactivate panic")
+}
+
+func (x *MockPanickingActivateDeactivateGrain) OnReceive(*GrainContext) {}
+
 type MockPersistenceGrain struct {
 	persistenceID string
 	currentState  *atomic.Pointer[testpb.Account]
