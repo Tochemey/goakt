@@ -10,8 +10,10 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
 
@@ -19,6 +21,7 @@ import (
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
+	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
 	mockcluster "github.com/tochemey/goakt/v3/mocks/cluster"
 	mockremote "github.com/tochemey/goakt/v3/mocks/remote"
@@ -832,6 +835,157 @@ func TestTryClaimGrain_AlreadyExistsOwnerLookupError(t *testing.T) {
 	require.Nil(t, owner)
 }
 
+func TestRemoting_RemoteActivateGrain_WithActorSystem(t *testing.T) {
+	ctx := context.TODO()
+	logger := log.DiscardLogger
+	ports := dynaport.Get(1)
+	remotingPort := ports[0]
+	host := "0.0.0.0"
+
+	sys, err := NewActorSystem(
+		"remote-grain-activate",
+		WithLogger(logger),
+		WithRemote(remote.NewConfig(host, remotingPort)),
+	)
+	require.NoError(t, err)
+
+	err = sys.Start(ctx)
+	assert.NoError(t, err)
+
+	pause.For(time.Second)
+
+	err = sys.RegisterGrainKind(ctx, &MockGrain{})
+	require.NoError(t, err)
+
+	remoting := remote.NewRemoting()
+
+	identity := newGrainIdentity(NewMockGrain(), "grain-activate")
+	err = remoting.RemoteActivateGrain(ctx, sys.Host(), sys.Port(), &remote.GrainRequest{
+		Name: identity.Name(),
+		Kind: identity.Kind(),
+	})
+	require.NoError(t, err)
+
+	grains := sys.Grains(ctx, time.Second)
+	found := false
+	for _, grain := range grains {
+		if grain.String() == identity.String() {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found)
+
+	pause.For(time.Second)
+
+	remoting.Close()
+	err = sys.Stop(ctx)
+	assert.NoError(t, err)
+}
+
+func TestRemoting_RemoteTellGrain_WithActorSystem(t *testing.T) {
+	ctx := context.TODO()
+	logger := log.DiscardLogger
+	ports := dynaport.Get(1)
+	remotingPort := ports[0]
+	host := "0.0.0.0"
+
+	sys, err := NewActorSystem(
+		"remote-grain-tell",
+		WithLogger(logger),
+		WithRemote(remote.NewConfig(host, remotingPort)),
+	)
+	require.NoError(t, err)
+
+	err = sys.Start(ctx)
+	assert.NoError(t, err)
+
+	pause.For(time.Second)
+
+	err = sys.RegisterGrainKind(ctx, &MockGrain{})
+	require.NoError(t, err)
+
+	remoting := remote.NewRemoting()
+
+	identity := newGrainIdentity(NewMockGrain(), "grain-tell")
+	for range 10 {
+		err = remoting.RemoteTellGrain(ctx, sys.Host(), sys.Port(), &remote.GrainRequest{
+			Name: identity.Name(),
+			Kind: identity.Kind(),
+		}, &testpb.TestSend{})
+		require.NoError(t, err)
+	}
+
+	grains := sys.Grains(ctx, time.Second)
+	found := false
+	for _, grain := range grains {
+		if grain.String() == identity.String() {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found)
+
+	pause.For(time.Second)
+
+	remoting.Close()
+	err = sys.Stop(ctx)
+	assert.NoError(t, err)
+}
+
+func TestRemoting_RemoteAskGrain_WithActorSystem(t *testing.T) {
+	ctx := context.TODO()
+	logger := log.DiscardLogger
+	ports := dynaport.Get(1)
+	remotingPort := ports[0]
+	host := "0.0.0.0"
+
+	sys, err := NewActorSystem(
+		"remote-grain-ask",
+		WithLogger(logger),
+		WithRemote(remote.NewConfig(host, remotingPort)),
+	)
+	require.NoError(t, err)
+
+	err = sys.Start(ctx)
+	assert.NoError(t, err)
+
+	pause.For(time.Second)
+
+	err = sys.RegisterGrainKind(ctx, &MockGrain{})
+	require.NoError(t, err)
+
+	remoting := remote.NewRemoting()
+
+	identity := newGrainIdentity(NewMockGrain(), "grain-ask")
+	resp, err := remoting.RemoteAskGrain(ctx, sys.Host(), sys.Port(), &remote.GrainRequest{
+		Name: identity.Name(),
+		Kind: identity.Kind(),
+	}, &testpb.TestReply{}, time.Minute)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	actual := new(testpb.Reply)
+	require.NoError(t, resp.UnmarshalTo(actual))
+	assert.Equal(t, "received message", actual.Content)
+
+	grains := sys.Grains(ctx, time.Second)
+	found := false
+	for _, grain := range grains {
+		if grain.String() == identity.String() {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found)
+
+	pause.For(time.Second)
+
+	remoting.Close()
+	err = sys.Stop(ctx)
+	assert.NoError(t, err)
+}
+
 func TestRemoteAskGrain_InjectsContextValues(t *testing.T) {
 	ctxKey := struct{}{}
 	headerKey := "x-goakt-propagated"
@@ -1243,4 +1397,95 @@ func TestRemoteTellGrain_LocalSendError(t *testing.T) {
 	require.ErrorAs(t, err, &connectErr)
 	require.Equal(t, connect.CodeInternal, connectErr.Code())
 	require.Contains(t, connectErr.Message(), "failed to process message")
+}
+
+func TestGrainRegistrationAndDeregistration(t *testing.T) {
+	t.Run("With happy path Register", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		// register the actor
+		err = sys.RegisterGrainKind(ctx, &MockGrain{})
+		require.NoError(t, err)
+
+		err = sys.Stop(ctx)
+		require.NoError(t, err)
+	})
+	t.Run("With Register when actor system not started", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// register the actor
+		err = sys.RegisterGrainKind(ctx, &MockGrain{})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
+
+		err = sys.Stop(ctx)
+		require.Error(t, err)
+	})
+	t.Run("With happy path Deregister", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+
+		// register the actor
+		err = sys.RegisterGrainKind(ctx, &MockGrain{})
+		require.NoError(t, err)
+
+		err = sys.DeregisterGrainKind(ctx, &MockGrain{})
+		require.NoError(t, err)
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+	t.Run("With Deregister when actor system not started", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+
+		// create the actor system
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		err = sys.DeregisterGrainKind(ctx, &MockGrain{})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
+
+		err = sys.Stop(ctx)
+		assert.Error(t, err)
+	})
 }

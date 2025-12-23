@@ -48,6 +48,7 @@ import (
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
+	"github.com/tochemey/goakt/v3/internal/id"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/internal/registry"
@@ -367,7 +368,7 @@ func TestGrain(t *testing.T) {
 		grain := NewMockGrainActivationFailure()
 		name := "testGrain"
 		kind := registry.Name(grain)
-		identityStr := fmt.Sprintf("%s%s%s", kind, identitySeparator, name)
+		identityStr := fmt.Sprintf("%s%s%s", kind, id.GrainIdentitySeparator, name)
 
 		clmock.EXPECT().GrainExists(ctx, identityStr).Return(true, nil)
 		clmock.EXPECT().GetGrain(ctx, identityStr).Return(nil, errors.New("test error"))

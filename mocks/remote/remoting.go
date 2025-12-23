@@ -205,6 +205,55 @@ func (_c *Remoting_MaxReadFrameSize_Call) RunAndReturn(run func() int) *Remoting
 	return _c
 }
 
+// RemoteActivateGrain provides a mock function with given fields: ctx, host, port, grainRequest
+func (_m *Remoting) RemoteActivateGrain(ctx context.Context, host string, port int, grainRequest *v3remote.GrainRequest) error {
+	ret := _m.Called(ctx, host, port, grainRequest)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RemoteActivateGrain")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, int, *v3remote.GrainRequest) error); ok {
+		r0 = rf(ctx, host, port, grainRequest)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// Remoting_RemoteActivateGrain_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoteActivateGrain'
+type Remoting_RemoteActivateGrain_Call struct {
+	*mock.Call
+}
+
+// RemoteActivateGrain is a helper method to define mock.On call
+//   - ctx context.Context
+//   - host string
+//   - port int
+//   - grainRequest *v3remote.GrainRequest
+func (_e *Remoting_Expecter) RemoteActivateGrain(ctx interface{}, host interface{}, port interface{}, grainRequest interface{}) *Remoting_RemoteActivateGrain_Call {
+	return &Remoting_RemoteActivateGrain_Call{Call: _e.mock.On("RemoteActivateGrain", ctx, host, port, grainRequest)}
+}
+
+func (_c *Remoting_RemoteActivateGrain_Call) Run(run func(ctx context.Context, host string, port int, grainRequest *v3remote.GrainRequest)) *Remoting_RemoteActivateGrain_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(int), args[3].(*v3remote.GrainRequest))
+	})
+	return _c
+}
+
+func (_c *Remoting_RemoteActivateGrain_Call) Return(_a0 error) *Remoting_RemoteActivateGrain_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *Remoting_RemoteActivateGrain_Call) RunAndReturn(run func(context.Context, string, int, *v3remote.GrainRequest) error) *Remoting_RemoteActivateGrain_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RemoteAsk provides a mock function with given fields: ctx, from, to, message, timeout
 func (_m *Remoting) RemoteAsk(ctx context.Context, from *address.Address, to *address.Address, message protoreflect.ProtoMessage, timeout time.Duration) (*anypb.Any, error) {
 	ret := _m.Called(ctx, from, to, message, timeout)
@@ -263,6 +312,69 @@ func (_c *Remoting_RemoteAsk_Call) Return(response *anypb.Any, err error) *Remot
 }
 
 func (_c *Remoting_RemoteAsk_Call) RunAndReturn(run func(context.Context, *address.Address, *address.Address, protoreflect.ProtoMessage, time.Duration) (*anypb.Any, error)) *Remoting_RemoteAsk_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RemoteAskGrain provides a mock function with given fields: ctx, host, port, grainRequest, message, timeout
+func (_m *Remoting) RemoteAskGrain(ctx context.Context, host string, port int, grainRequest *v3remote.GrainRequest, message protoreflect.ProtoMessage, timeout time.Duration) (*anypb.Any, error) {
+	ret := _m.Called(ctx, host, port, grainRequest, message, timeout)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RemoteAskGrain")
+	}
+
+	var r0 *anypb.Any
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, int, *v3remote.GrainRequest, protoreflect.ProtoMessage, time.Duration) (*anypb.Any, error)); ok {
+		return rf(ctx, host, port, grainRequest, message, timeout)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, int, *v3remote.GrainRequest, protoreflect.ProtoMessage, time.Duration) *anypb.Any); ok {
+		r0 = rf(ctx, host, port, grainRequest, message, timeout)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*anypb.Any)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, int, *v3remote.GrainRequest, protoreflect.ProtoMessage, time.Duration) error); ok {
+		r1 = rf(ctx, host, port, grainRequest, message, timeout)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// Remoting_RemoteAskGrain_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoteAskGrain'
+type Remoting_RemoteAskGrain_Call struct {
+	*mock.Call
+}
+
+// RemoteAskGrain is a helper method to define mock.On call
+//   - ctx context.Context
+//   - host string
+//   - port int
+//   - grainRequest *v3remote.GrainRequest
+//   - message protoreflect.ProtoMessage
+//   - timeout time.Duration
+func (_e *Remoting_Expecter) RemoteAskGrain(ctx interface{}, host interface{}, port interface{}, grainRequest interface{}, message interface{}, timeout interface{}) *Remoting_RemoteAskGrain_Call {
+	return &Remoting_RemoteAskGrain_Call{Call: _e.mock.On("RemoteAskGrain", ctx, host, port, grainRequest, message, timeout)}
+}
+
+func (_c *Remoting_RemoteAskGrain_Call) Run(run func(ctx context.Context, host string, port int, grainRequest *v3remote.GrainRequest, message protoreflect.ProtoMessage, timeout time.Duration)) *Remoting_RemoteAskGrain_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(int), args[3].(*v3remote.GrainRequest), args[4].(protoreflect.ProtoMessage), args[5].(time.Duration))
+	})
+	return _c
+}
+
+func (_c *Remoting_RemoteAskGrain_Call) Return(response *anypb.Any, err error) *Remoting_RemoteAskGrain_Call {
+	_c.Call.Return(response, err)
+	return _c
+}
+
+func (_c *Remoting_RemoteAskGrain_Call) RunAndReturn(run func(context.Context, string, int, *v3remote.GrainRequest, protoreflect.ProtoMessage, time.Duration) (*anypb.Any, error)) *Remoting_RemoteAskGrain_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -680,6 +792,56 @@ func (_c *Remoting_RemoteTell_Call) Return(_a0 error) *Remoting_RemoteTell_Call 
 }
 
 func (_c *Remoting_RemoteTell_Call) RunAndReturn(run func(context.Context, *address.Address, *address.Address, protoreflect.ProtoMessage) error) *Remoting_RemoteTell_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RemoteTellGrain provides a mock function with given fields: ctx, host, port, grainRequest, message
+func (_m *Remoting) RemoteTellGrain(ctx context.Context, host string, port int, grainRequest *v3remote.GrainRequest, message protoreflect.ProtoMessage) error {
+	ret := _m.Called(ctx, host, port, grainRequest, message)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RemoteTellGrain")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, int, *v3remote.GrainRequest, protoreflect.ProtoMessage) error); ok {
+		r0 = rf(ctx, host, port, grainRequest, message)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// Remoting_RemoteTellGrain_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoteTellGrain'
+type Remoting_RemoteTellGrain_Call struct {
+	*mock.Call
+}
+
+// RemoteTellGrain is a helper method to define mock.On call
+//   - ctx context.Context
+//   - host string
+//   - port int
+//   - grainRequest *v3remote.GrainRequest
+//   - message protoreflect.ProtoMessage
+func (_e *Remoting_Expecter) RemoteTellGrain(ctx interface{}, host interface{}, port interface{}, grainRequest interface{}, message interface{}) *Remoting_RemoteTellGrain_Call {
+	return &Remoting_RemoteTellGrain_Call{Call: _e.mock.On("RemoteTellGrain", ctx, host, port, grainRequest, message)}
+}
+
+func (_c *Remoting_RemoteTellGrain_Call) Run(run func(ctx context.Context, host string, port int, grainRequest *v3remote.GrainRequest, message protoreflect.ProtoMessage)) *Remoting_RemoteTellGrain_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(int), args[3].(*v3remote.GrainRequest), args[4].(protoreflect.ProtoMessage))
+	})
+	return _c
+}
+
+func (_c *Remoting_RemoteTellGrain_Call) Return(_a0 error) *Remoting_RemoteTellGrain_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *Remoting_RemoteTellGrain_Call) RunAndReturn(run func(context.Context, string, int, *v3remote.GrainRequest, protoreflect.ProtoMessage) error) *Remoting_RemoteTellGrain_Call {
 	_c.Call.Return(run)
 	return _c
 }

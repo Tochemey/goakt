@@ -683,7 +683,22 @@ type ActorSystem interface {
 	//       system.Logger().Info("no cluster leader is currently elected")
 	//   }
 	Leader(ctx context.Context) (leader *remote.Peer, err error)
-
+	// RegisterGrainKind registers a Grain kind in the local registry.
+	//
+	// Registration associates the Grain's kind (as returned by the Grain implementation) with the
+	// factory/metadata used by the actor system to instantiate that kind on demand.
+	//
+	// This is required for:
+	//   - Remote activation/recreation: when another node asks this node to activate a Grain of a given kind.
+	//   - Lazy/local activation: when a GrainIdentity is resolved locally via kind lookup.
+	RegisterGrainKind(ctx context.Context, kind Grain) error
+	// DeregisterGrainKind removes a previously registered Grain kind from the local registry.
+	//
+	// Deregistration affects future activations that rely on kind lookup (e.g. remote activation/recreation
+	// requests and lazy/local activation when a GrainIdentity is resolved by kind). It does not stop or
+	// deactivate already-running Grain instances of that kind; it only prevents new activations via the
+	// registry.
+	DeregisterGrainKind(ctx context.Context, kind Grain) error
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
 	handleRemoteAsk(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error)

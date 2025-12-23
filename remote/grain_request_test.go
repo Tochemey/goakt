@@ -22,17 +22,42 @@
  * SOFTWARE.
  */
 
-package strconvx
+package remote
 
 import (
-	"fmt"
-	"math"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/tochemey/goakt/v3/extension"
 )
 
-// Int2Int32 converts an int to int32 with explicit bounds checking.
-func Int2Int32(value int) (int32, error) {
-	if value < math.MinInt32 || value > math.MaxInt32 {
-		return 0, fmt.Errorf("value %d out of range for int32", value)
-	}
-	return int32(value), nil
+func TestGrainActivationRequestValidateAndSanitize(t *testing.T) {
+	t.Run("valid request", func(t *testing.T) {
+		req := &GrainRequest{
+			Name:              " grain ",
+			Kind:              " kind ",
+			Dependencies:      []extension.Dependency{mockDependency{id: "dep"}},
+			ActivationTimeout: 0,
+			ActivationRetries: 0,
+		}
+		require.NoError(t, req.Validate())
+		req.Sanitize()
+		assert.Equal(t, "grain", req.Name)
+		assert.Equal(t, "kind", req.Kind)
+		assert.Equal(t, time.Second, req.ActivationTimeout)
+		assert.Equal(t, 5, req.ActivationRetries)
+	})
+
+	t.Run("invalid dependency id", func(t *testing.T) {
+		req := &GrainRequest{
+			Name:         "grain",
+			Kind:         "kind",
+			Dependencies: []extension.Dependency{mockDependency{id: ""}},
+		}
+		err := req.Validate()
+		require.Error(t, err)
+	})
 }

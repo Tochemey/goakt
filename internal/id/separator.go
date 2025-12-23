@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2022-2025  Arsene Tochemey Gandote
+ * Copyright (c) 2022-2025 Arsene Tochemey Gandote
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,35 +22,8 @@
  * SOFTWARE.
  */
 
-package client
+package id
 
-// Actor defines a given actor name and kind.
-// Kind is a string representation of the type within its package (e.g pkg/User)
-type Actor struct {
-	name string // Name defines the actor name. This will be unique in the Client
-	kind string // Kind specifies the actor kind.
-
-}
-
-// NewActor creates an instance of Actor
-func NewActor(kind string) *Actor {
-	return &Actor{
-		kind: kind,
-	}
-}
-
-// WithName set the given name
-func (x *Actor) WithName(name string) *Actor {
-	x.name = name
-	return x
-}
-
-// Name returns the actor name
-func (x *Actor) Name() string {
-	return x.name
-}
-
-// Kind returns the actor kind
-func (x *Actor) Kind() string {
-	return x.kind
-}
+const (
+	GrainIdentitySeparator = "/"
+)

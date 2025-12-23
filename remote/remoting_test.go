@@ -29,10 +29,8 @@ import (
 	"crypto/tls"
 	"fmt"
 	nethttp "net/http"
-	"reflect"
 	"testing"
 	"time"
-	"unsafe"
 
 	"connectrpc.com/connect"
 	"github.com/stretchr/testify/assert"
@@ -223,7 +221,7 @@ func TestRemoteLookup_InvalidAddress(t *testing.T) {
 
 func TestRemotingContextPropagatorInjectError(t *testing.T) {
 	injectErr := fmt.Errorf("inject failure")
-	prop := &failingPropagator{err: injectErr}
+	prop := &mockContextPropagator{err: injectErr}
 	r := NewRemoting(WithRemotingContextPropagator(prop))
 	// Use a mockClient client to avoid unexpected network calls if inject succeeds (it should not).
 	mockClient := &mockRemotingServiceClient{}
@@ -302,6 +300,183 @@ func TestRemotingContextPropagatorInjectError(t *testing.T) {
 	}
 }
 
+func TestRemoting_RemoteActivateGrain(t *testing.T) {
+	t.Run("returns error for invalid request", func(t *testing.T) {
+		r := NewRemoting()
+		err := r.RemoteActivateGrain(context.Background(), "host", 1000, &GrainRequest{})
+		assert.Error(t, err)
+		assert.ErrorContains(t, err, "invalid grain request")
+	})
+
+	t.Run("returns error when inject fails", func(t *testing.T) {
+		injectErr := fmt.Errorf("inject failure")
+		r := NewRemoting(WithRemotingContextPropagator(&mockContextPropagator{err: injectErr}))
+		mockClient := &mockRemotingServiceClient{}
+		setClientFactory(t, r, func(string, int) internalpbconnect.RemotingServiceClient { return mockClient })
+
+		err := r.RemoteActivateGrain(context.Background(), "host", 1000, &GrainRequest{Name: "grain", Kind: "kind"})
+		assert.ErrorIs(t, err, injectErr)
+	})
+
+	t.Run("returns error when client fails", func(t *testing.T) {
+		expectedErr := fmt.Errorf("activate failed")
+		mockClient := &mockRemotingServiceClient{activateGrainErr: expectedErr}
+		r := NewRemoting()
+		setClientFactory(t, r, func(string, int) internalpbconnect.RemotingServiceClient { return mockClient })
+
+		err := r.RemoteActivateGrain(context.Background(), "host", 1000, &GrainRequest{Name: "grain", Kind: "kind"})
+		assert.ErrorIs(t, err, expectedErr)
+	})
+
+	t.Run("sends sanitized request", func(t *testing.T) {
+		ctxKey := struct{}{}
+		headerKey := "x-goakt-propagated"
+		headerVal := "activate-context"
+
+		ctx := context.WithValue(context.Background(), ctxKey, headerVal)
+		mockClient := &mockRemotingServiceClient{}
+		r := NewRemoting(WithRemotingContextPropagator(&testHeaderPropagator{key: ctxKey, header: headerKey}))
+		setClientFactory(t, r, func(string, int) internalpbconnect.RemotingServiceClient { return mockClient })
+
+		request := &GrainRequest{
+			Name:              " grain ",
+			Kind:              " kind ",
+			ActivationTimeout: 0,
+			ActivationRetries: 0,
+		}
+		err := r.RemoteActivateGrain(ctx, "host", 1000, request)
+		assert.NoError(t, err)
+		assert.Equal(t, headerVal, mockClient.activateGrainHeader.Get(headerKey))
+
+		grain := mockClient.lastActivateGrainReq.GetGrain()
+		assert.NotNil(t, grain)
+		assert.Equal(t, "host", grain.GetHost())
+		assert.Equal(t, int32(1000), grain.GetPort())
+		assert.Equal(t, "grain", grain.GetGrainId().GetName())
+		assert.Equal(t, "kind", grain.GetGrainId().GetKind())
+		assert.Equal(t, "kind/grain", grain.GetGrainId().GetValue())
+		assert.Equal(t, int32(5), grain.GetActivationRetries())
+		assert.Equal(t, time.Second, grain.GetActivationTimeout().AsDuration())
+	})
+}
+
+func TestRemoting_RemoteTellGrain(t *testing.T) {
+	t.Run("returns error for invalid request", func(t *testing.T) {
+		r := NewRemoting()
+		err := r.RemoteTellGrain(context.Background(), "host", 1000, &GrainRequest{}, &internalpb.RemoteTellRequest{})
+		assert.Error(t, err)
+		assert.ErrorContains(t, err, "invalid grain request")
+	})
+
+	t.Run("returns error for invalid message", func(t *testing.T) {
+		r := NewRemoting()
+		err := r.RemoteTellGrain(context.Background(), "host", 1000, &GrainRequest{Name: "grain", Kind: "kind"}, nil)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, gerrors.ErrInvalidMessage)
+	})
+
+	t.Run("returns error when inject fails", func(t *testing.T) {
+		injectErr := fmt.Errorf("inject failure")
+		r := NewRemoting(WithRemotingContextPropagator(&mockContextPropagator{err: injectErr}))
+		mockClient := &mockRemotingServiceClient{}
+		setClientFactory(t, r, func(string, int) internalpbconnect.RemotingServiceClient { return mockClient })
+
+		err := r.RemoteTellGrain(context.Background(), "host", 1000, &GrainRequest{Name: "grain", Kind: "kind"}, &internalpb.RemoteTellRequest{})
+		assert.ErrorIs(t, err, injectErr)
+	})
+
+	t.Run("returns error when client fails", func(t *testing.T) {
+		expectedErr := fmt.Errorf("tell failed")
+		mockClient := &mockRemotingServiceClient{tellGrainErr: expectedErr}
+		r := NewRemoting()
+		setClientFactory(t, r, func(string, int) internalpbconnect.RemotingServiceClient { return mockClient })
+
+		err := r.RemoteTellGrain(context.Background(), "host", 1000, &GrainRequest{Name: "grain", Kind: "kind"}, &internalpb.RemoteTellRequest{})
+		assert.ErrorIs(t, err, expectedErr)
+	})
+
+	t.Run("injects headers and sends request", func(t *testing.T) {
+		ctxKey := struct{}{}
+		headerKey := "x-goakt-propagated"
+		headerVal := "tell-context"
+
+		ctx := context.WithValue(context.Background(), ctxKey, headerVal)
+		mockClient := &mockRemotingServiceClient{}
+		r := NewRemoting(WithRemotingContextPropagator(&testHeaderPropagator{key: ctxKey, header: headerKey}))
+		setClientFactory(t, r, func(string, int) internalpbconnect.RemotingServiceClient { return mockClient })
+
+		err := r.RemoteTellGrain(ctx, "host", 1000, &GrainRequest{Name: "grain", Kind: "kind"}, &internalpb.RemoteTellRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, headerVal, mockClient.tellGrainHeader.Get(headerKey))
+	})
+}
+
+func TestRemoting_RemoteAskGrain(t *testing.T) {
+	t.Run("returns error for invalid request", func(t *testing.T) {
+		r := NewRemoting()
+		_, err := r.RemoteAskGrain(context.Background(), "host", 1000, &GrainRequest{}, &internalpb.RemoteLookupRequest{}, time.Second)
+		assert.Error(t, err)
+		assert.ErrorContains(t, err, "invalid grain request")
+	})
+
+	t.Run("returns error for invalid message", func(t *testing.T) {
+		r := NewRemoting()
+		_, err := r.RemoteAskGrain(context.Background(), "host", 1000, &GrainRequest{Name: "grain", Kind: "kind"}, nil, time.Second)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, gerrors.ErrInvalidMessage)
+	})
+
+	t.Run("returns error when inject fails", func(t *testing.T) {
+		injectErr := fmt.Errorf("inject failure")
+		r := NewRemoting(WithRemotingContextPropagator(&mockContextPropagator{err: injectErr}))
+		mockClient := &mockRemotingServiceClient{askGrainResponse: durationpb.New(time.Second)}
+		setClientFactory(t, r, func(string, int) internalpbconnect.RemotingServiceClient { return mockClient })
+
+		_, err := r.RemoteAskGrain(context.Background(), "host", 1000, &GrainRequest{Name: "grain", Kind: "kind"}, &internalpb.RemoteLookupRequest{}, time.Second)
+		assert.ErrorIs(t, err, injectErr)
+	})
+
+	t.Run("returns error when client fails", func(t *testing.T) {
+		expectedErr := fmt.Errorf("ask failed")
+		mockClient := &mockRemotingServiceClient{askGrainErr: expectedErr}
+		r := NewRemoting()
+		setClientFactory(t, r, func(string, int) internalpbconnect.RemotingServiceClient { return mockClient })
+
+		_, err := r.RemoteAskGrain(context.Background(), "host", 1000, &GrainRequest{Name: "grain", Kind: "kind"}, &internalpb.RemoteLookupRequest{}, time.Second)
+		assert.ErrorIs(t, err, expectedErr)
+	})
+
+	t.Run("returns response and injects headers", func(t *testing.T) {
+		ctxKey := struct{}{}
+		headerKey := "x-goakt-propagated"
+		headerVal := "ask-context"
+
+		ctx := context.WithValue(context.Background(), ctxKey, headerVal)
+		mockClient := &mockRemotingServiceClient{askGrainResponse: durationpb.New(2 * time.Second)}
+		r := NewRemoting(WithRemotingContextPropagator(&testHeaderPropagator{key: ctxKey, header: headerKey}))
+		setClientFactory(t, r, func(string, int) internalpbconnect.RemotingServiceClient { return mockClient })
+
+		resp, err := r.RemoteAskGrain(ctx, "host", 1000, &GrainRequest{Name: "grain", Kind: "kind"}, &internalpb.RemoteLookupRequest{}, time.Second)
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+		assert.Equal(t, headerVal, mockClient.askGrainHeader.Get(headerKey))
+
+		actual := new(durationpb.Duration)
+		assert.NoError(t, resp.UnmarshalTo(actual))
+		assert.Equal(t, 2*time.Second, actual.AsDuration())
+	})
+
+	t.Run("returns nil when response is nil", func(t *testing.T) {
+		mockClient := &mockRemotingServiceClient{returnNilAskGrainResponse: true}
+		r := NewRemoting()
+		setClientFactory(t, r, func(string, int) internalpbconnect.RemotingServiceClient { return mockClient })
+
+		resp, err := r.RemoteAskGrain(context.Background(), "host", 1000, &GrainRequest{Name: "grain", Kind: "kind"}, &internalpb.RemoteLookupRequest{}, time.Second)
+		assert.NoError(t, err)
+		assert.Nil(t, resp)
+	})
+}
+
 type testHeaderPropagator struct {
 	key    any
 	header string
@@ -323,17 +498,28 @@ func (p *testHeaderPropagator) Extract(ctx context.Context, headers nethttp.Head
 
 type mockRemotingServiceClient struct {
 	internalpbconnect.UnimplementedRemotingServiceHandler
-	askHeader       nethttp.Header
-	tellHeader      nethttp.Header
-	lookupHeader    nethttp.Header
-	spawnHeader     nethttp.Header
-	respawnHeader   nethttp.Header
-	stopHeader      nethttp.Header
-	reinstateHeader nethttp.Header
-	lastTellReq     *internalpb.RemoteTellRequest
-	lastAskReq      *internalpb.RemoteAskRequest
-	batchResponses  []*anypb.Any
-	lookupAddress   string
+	askHeader                 nethttp.Header
+	tellHeader                nethttp.Header
+	lookupHeader              nethttp.Header
+	spawnHeader               nethttp.Header
+	respawnHeader             nethttp.Header
+	stopHeader                nethttp.Header
+	reinstateHeader           nethttp.Header
+	askGrainHeader            nethttp.Header
+	tellGrainHeader           nethttp.Header
+	activateGrainHeader       nethttp.Header
+	lastTellReq               *internalpb.RemoteTellRequest
+	lastAskReq                *internalpb.RemoteAskRequest
+	lastAskGrainReq           *internalpb.RemoteAskGrainRequest
+	lastTellGrainReq          *internalpb.RemoteTellGrainRequest
+	lastActivateGrainReq      *internalpb.RemoteActivateGrainRequest
+	batchResponses            []*anypb.Any
+	lookupAddress             string
+	askGrainResponse          proto.Message
+	askGrainErr               error
+	tellGrainErr              error
+	activateGrainErr          error
+	returnNilAskGrainResponse bool
 }
 
 func (x *mockRemotingServiceClient) RemoteAsk(_ context.Context, req *connect.Request[internalpb.RemoteAskRequest]) (*connect.Response[internalpb.RemoteAskResponse], error) {
@@ -383,16 +569,39 @@ func (x *mockRemotingServiceClient) RemoteReinstate(_ context.Context, req *conn
 	return connect.NewResponse(new(internalpb.RemoteReinstateResponse)), nil
 }
 
-func (x *mockRemotingServiceClient) RemoteAskGrain(context.Context, *connect.Request[internalpb.RemoteAskGrainRequest]) (*connect.Response[internalpb.RemoteAskGrainResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("not implemented"))
+func (x *mockRemotingServiceClient) RemoteAskGrain(_ context.Context, req *connect.Request[internalpb.RemoteAskGrainRequest]) (*connect.Response[internalpb.RemoteAskGrainResponse], error) {
+	x.askGrainHeader = req.Header().Clone()
+	x.lastAskGrainReq = req.Msg
+	if x.askGrainErr != nil {
+		return nil, x.askGrainErr
+	}
+	if x.returnNilAskGrainResponse {
+		return nil, nil
+	}
+	response := x.askGrainResponse
+	if response == nil {
+		response = durationpb.New(time.Second)
+	}
+	msg, _ := anypb.New(response)
+	return connect.NewResponse(&internalpb.RemoteAskGrainResponse{Message: msg}), nil
 }
 
-func (x *mockRemotingServiceClient) RemoteTellGrain(context.Context, *connect.Request[internalpb.RemoteTellGrainRequest]) (*connect.Response[internalpb.RemoteTellGrainResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("not implemented"))
+func (x *mockRemotingServiceClient) RemoteTellGrain(_ context.Context, req *connect.Request[internalpb.RemoteTellGrainRequest]) (*connect.Response[internalpb.RemoteTellGrainResponse], error) {
+	x.tellGrainHeader = req.Header().Clone()
+	x.lastTellGrainReq = req.Msg
+	if x.tellGrainErr != nil {
+		return nil, x.tellGrainErr
+	}
+	return connect.NewResponse(new(internalpb.RemoteTellGrainResponse)), nil
 }
 
-func (x *mockRemotingServiceClient) RemoteActivateGrain(context.Context, *connect.Request[internalpb.RemoteActivateGrainRequest]) (*connect.Response[internalpb.RemoteActivateGrainResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("not implemented"))
+func (x *mockRemotingServiceClient) RemoteActivateGrain(_ context.Context, req *connect.Request[internalpb.RemoteActivateGrainRequest]) (*connect.Response[internalpb.RemoteActivateGrainResponse], error) {
+	x.activateGrainHeader = req.Header().Clone()
+	x.lastActivateGrainReq = req.Msg
+	if x.activateGrainErr != nil {
+		return nil, x.activateGrainErr
+	}
+	return connect.NewResponse(new(internalpb.RemoteActivateGrainResponse)), nil
 }
 
 type notFoundClient struct {
@@ -403,25 +612,21 @@ func (*notFoundClient) RemoteLookup(context.Context, *connect.Request[internalpb
 	return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("not found"))
 }
 
-type failingPropagator struct {
+type mockContextPropagator struct {
 	err error
 }
 
-func (f *failingPropagator) Inject(context.Context, nethttp.Header) error { return f.err }
-func (f *failingPropagator) Extract(ctx context.Context, _ nethttp.Header) (context.Context, error) {
+func (x *mockContextPropagator) Inject(context.Context, nethttp.Header) error { return x.err }
+func (x *mockContextPropagator) Extract(ctx context.Context, _ nethttp.Header) (context.Context, error) {
 	return ctx, nil
 }
 
 // setClientFactory overrides the remoting client factory via reflection for testing without changing the public API.
 func setClientFactory(t *testing.T, r Remoting, factory func(string, int) internalpbconnect.RemotingServiceClient) {
 	t.Helper()
-	rv := reflect.ValueOf(r)
-	assert.Equal(t, reflect.Pointer, rv.Kind())
-	elem := rv.Elem()
-	field := elem.FieldByName("clientFactory")
-	assert.True(t, field.IsValid())
-	field = reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).Elem()
-	field.Set(reflect.ValueOf(factory))
+	impl, ok := r.(*remoting)
+	assert.True(t, ok)
+	impl.setClientFactory(factory)
 }
 
 func mustAny(msg proto.Message) *anypb.Any {

@@ -48,10 +48,12 @@ import (
 	"github.com/tochemey/goakt/v3/discovery"
 	"github.com/tochemey/goakt/v3/discovery/nats"
 	"github.com/tochemey/goakt/v3/errors"
+	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v3/internal/pause"
+	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/internal/size"
 	"github.com/tochemey/goakt/v3/log"
 	mocks "github.com/tochemey/goakt/v3/mocks/remote"
@@ -135,6 +137,14 @@ func TestClient(t *testing.T) {
 		// wait for a proper and clean setup of the cluster
 		pause.For(time.Second)
 
+		// register grains kinds
+		err := sys1.RegisterGrainKind(ctx, &MockGrain{})
+		require.NoError(t, err)
+		err = sys2.RegisterGrainKind(ctx, &MockGrain{})
+		require.NoError(t, err)
+		err = sys3.RegisterGrainKind(ctx, &MockGrain{})
+		require.NoError(t, err)
+
 		addresses := []string{
 			fmt.Sprintf("%s:%d", node1Host, node1Port),
 			fmt.Sprintf("%s:%d", node2Host, node2Port),
@@ -162,26 +172,50 @@ func TestClient(t *testing.T) {
 		}
 
 		require.ElementsMatch(t, expected, kinds)
-		actor := NewActor("client.testactor").WithName("actorName")
+		actorName := "actorName"
+		request := &remote.SpawnRequest{
+			Kind:        "client.testactor",
+			Name:        actorName,
+			Relocatable: true,
+		}
 
-		err = client.Spawn(ctx, actor, false, true)
+		err = client.Spawn(ctx, request)
 		require.NoError(t, err)
 
 		pause.For(time.Second)
 
 		// send a message
-		reply, err := client.Ask(ctx, actor, new(testpb.TestReply), time.Minute)
+		reply, err := client.Ask(ctx, actorName, new(testpb.TestReply), time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expectedReply := &testpb.Reply{Content: "received message"}
 		assert.True(t, proto.Equal(expectedReply, reply))
 
-		pause.For(time.Second)
+		pause.For(500 * time.Millisecond)
 
-		err = client.Tell(ctx, actor, new(testpb.TestSend))
+		grainRequest := &remote.GrainRequest{
+			Name:              "grain",
+			Kind:              registry.Name(&MockGrain{}),
+			ActivationTimeout: 0,
+			ActivationRetries: 0,
+		}
+
+		reply, err = client.AskGrain(ctx, grainRequest, new(testpb.TestReply), time.Minute)
+		require.NoError(t, err)
+		require.NotNil(t, reply)
+		assert.True(t, proto.Equal(expectedReply, reply))
+
+		pause.For(500 * time.Millisecond)
+
+		err = client.Tell(ctx, actorName, new(testpb.TestSend))
 		require.NoError(t, err)
 
-		err = client.Stop(ctx, actor)
+		pause.For(500 * time.Millisecond)
+
+		err = client.TellGrain(ctx, grainRequest, new(testpb.TestSend))
+		require.NoError(t, err)
+
+		err = client.Stop(ctx, actorName)
 		require.NoError(t, err)
 
 		t.Cleanup(
@@ -247,15 +281,21 @@ func TestClient(t *testing.T) {
 		}
 
 		require.ElementsMatch(t, expected, kinds)
-		actor := NewActor("client.testactor").WithName("actorName")
 
-		err = client.Spawn(ctx, actor, false, true)
+		actorName := "actorName"
+		request := &remote.SpawnRequest{
+			Kind:        "client.testactor",
+			Name:        actorName,
+			Relocatable: true,
+		}
+
+		err = client.Spawn(ctx, request)
 		require.NoError(t, err)
 
 		pause.For(time.Second)
 
 		// send a message
-		reply, err := client.Ask(ctx, actor, new(testpb.TestReply), time.Minute)
+		reply, err := client.Ask(ctx, actorName, new(testpb.TestReply), time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expectedReply := &testpb.Reply{Content: "received message"}
@@ -263,10 +303,10 @@ func TestClient(t *testing.T) {
 
 		pause.For(time.Second)
 
-		err = client.Tell(ctx, actor, new(testpb.TestSend))
+		err = client.Tell(ctx, actorName, new(testpb.TestSend))
 		require.NoError(t, err)
 
-		err = client.Stop(ctx, actor)
+		err = client.Stop(ctx, actorName)
 		require.NoError(t, err)
 
 		t.Cleanup(
@@ -335,15 +375,20 @@ func TestClient(t *testing.T) {
 		}
 
 		require.ElementsMatch(t, expected, kinds)
-		actor := NewActor("client.testactor").WithName("actorName")
+		actorName := "actorName"
+		request := &remote.SpawnRequest{
+			Kind:        "client.testactor",
+			Name:        actorName,
+			Relocatable: true,
+		}
 
-		err = client.Spawn(ctx, actor, false, true)
+		err = client.Spawn(ctx, request)
 		require.NoError(t, err)
 
 		pause.For(time.Second)
 
 		// send a message
-		reply, err := client.Ask(ctx, actor, new(testpb.TestReply), time.Minute)
+		reply, err := client.Ask(ctx, actorName, new(testpb.TestReply), time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expectedReply := &testpb.Reply{Content: "received message"}
@@ -351,10 +396,10 @@ func TestClient(t *testing.T) {
 
 		pause.For(time.Second)
 
-		err = client.Tell(ctx, actor, new(testpb.TestSend))
+		err = client.Tell(ctx, actorName, new(testpb.TestSend))
 		require.NoError(t, err)
 
-		err = client.Stop(ctx, actor)
+		err = client.Stop(ctx, actorName)
 		require.NoError(t, err)
 
 		t.Cleanup(
@@ -418,15 +463,20 @@ func TestClient(t *testing.T) {
 		}
 
 		require.ElementsMatch(t, expected, kinds)
-		actor := NewActor("client.testactor").WithName("actorName")
 
-		err = client.Spawn(ctx, actor, false, true)
+		actorName := "actorName"
+		request := &remote.SpawnRequest{
+			Kind:        "client.testactor",
+			Name:        actorName,
+			Relocatable: true,
+		}
+		err = client.Spawn(ctx, request)
 		require.NoError(t, err)
 
 		pause.For(time.Second)
 
 		// send a message
-		reply, err := client.Ask(ctx, actor, new(testpb.TestReply), time.Minute)
+		reply, err := client.Ask(ctx, actorName, new(testpb.TestReply), time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expectedReply := &testpb.Reply{Content: "received message"}
@@ -434,10 +484,10 @@ func TestClient(t *testing.T) {
 
 		pause.For(time.Second)
 
-		err = client.Tell(ctx, actor, new(testpb.TestSend))
+		err = client.Tell(ctx, actorName, new(testpb.TestSend))
 		require.NoError(t, err)
 
-		err = client.Stop(ctx, actor)
+		err = client.Stop(ctx, actorName)
 		require.NoError(t, err)
 
 		t.Cleanup(
@@ -502,15 +552,21 @@ func TestClient(t *testing.T) {
 		}
 
 		require.ElementsMatch(t, expected, kinds)
-		actor := NewActor("client.testactor").WithName("actorName")
 
-		err = client.SpawnBalanced(ctx, actor, false, true, RandomStrategy)
+		actorName := "actorName"
+		request := &remote.SpawnRequest{
+			Kind:        "client.testactor",
+			Name:        actorName,
+			Relocatable: true,
+		}
+
+		err = client.SpawnBalanced(ctx, request, RandomStrategy)
 		require.NoError(t, err)
 
 		pause.For(time.Second)
 
 		// send a message
-		reply, err := client.Ask(ctx, actor, new(testpb.TestReply), time.Minute)
+		reply, err := client.Ask(ctx, actorName, new(testpb.TestReply), time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expectedReply := &testpb.Reply{Content: "received message"}
@@ -518,10 +574,10 @@ func TestClient(t *testing.T) {
 
 		pause.For(time.Second)
 
-		err = client.Tell(ctx, actor, new(testpb.TestSend))
+		err = client.Tell(ctx, actorName, new(testpb.TestSend))
 		require.NoError(t, err)
 
-		err = client.Stop(ctx, actor)
+		err = client.Stop(ctx, actorName)
 		require.NoError(t, err)
 
 		t.Cleanup(
@@ -585,15 +641,20 @@ func TestClient(t *testing.T) {
 		}
 
 		require.ElementsMatch(t, expected, kinds)
-		actor := NewActor("client.testactor").WithName("actorName")
 
-		err = client.Spawn(ctx, actor, false, true)
+		actorName := "actorName"
+		request := &remote.SpawnRequest{
+			Kind:        "client.testactor",
+			Name:        actorName,
+			Relocatable: true,
+		}
+		err = client.Spawn(ctx, request)
 		require.NoError(t, err)
 
 		pause.For(time.Second)
 
 		// send a message
-		reply, err := client.Ask(ctx, actor, new(testpb.TestReply), time.Minute)
+		reply, err := client.Ask(ctx, actorName, new(testpb.TestReply), time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expectedReply := &testpb.Reply{Content: "received message"}
@@ -601,21 +662,21 @@ func TestClient(t *testing.T) {
 
 		pause.For(time.Second)
 
-		err = client.Tell(ctx, actor, new(testpb.TestSend))
+		err = client.Tell(ctx, actorName, new(testpb.TestSend))
 		require.NoError(t, err)
 
-		err = client.ReSpawn(ctx, actor)
+		err = client.ReSpawn(ctx, actorName)
 		require.NoError(t, err)
 
 		pause.For(time.Second)
 
-		reply, err = client.Ask(ctx, actor, new(testpb.TestReply), time.Minute)
+		reply, err = client.Ask(ctx, actorName, new(testpb.TestReply), time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expectedReply = &testpb.Reply{Content: "received message"}
 		assert.True(t, proto.Equal(expectedReply, reply))
 
-		err = client.Stop(ctx, actor)
+		err = client.Stop(ctx, actorName)
 		require.NoError(t, err)
 
 		t.Cleanup(
@@ -678,15 +739,20 @@ func TestClient(t *testing.T) {
 		}
 
 		require.ElementsMatch(t, expected, kinds)
-		actor := NewActor("client.testactor").WithName("actorName")
+		actorName := "actorName"
+		request := &remote.SpawnRequest{
+			Kind:        "client.testactor",
+			Name:        actorName,
+			Relocatable: true,
+		}
 
-		err = client.Spawn(ctx, actor, false, true)
+		err = client.Spawn(ctx, request)
 		require.NoError(t, err)
 
 		pause.For(time.Second)
 
 		// send a message
-		reply, err := client.Ask(ctx, actor, new(testpb.TestReply), time.Minute)
+		reply, err := client.Ask(ctx, actorName, new(testpb.TestReply), time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expectedReply := &testpb.Reply{Content: "received message"}
@@ -694,15 +760,15 @@ func TestClient(t *testing.T) {
 
 		pause.For(time.Second)
 
-		err = client.Tell(ctx, actor, new(testpb.TestSend))
+		err = client.Tell(ctx, actorName, new(testpb.TestSend))
 		require.NoError(t, err)
 
 		pause.For(time.Second)
 
-		err = client.Stop(ctx, actor)
+		err = client.Stop(ctx, actorName)
 		require.NoError(t, err)
 
-		err = client.ReSpawn(ctx, actor)
+		err = client.ReSpawn(ctx, actorName)
 		require.NoError(t, err)
 
 		t.Cleanup(
@@ -725,7 +791,7 @@ func TestClient(t *testing.T) {
 
 	t.Run("With ReSpawn returns no error when lookup returns no sender", func(t *testing.T) {
 		ctx := context.TODO()
-		actor := NewActor("client.testactor").WithName("actorName")
+		actorName := "actorName"
 
 		mockRemoting := mocks.NewRemoting(t)
 		node := &Node{
@@ -738,14 +804,14 @@ func TestClient(t *testing.T) {
 		mockRemoting.EXPECT().Compression().Return(remote.NoCompression)
 		mockRemoting.EXPECT().HTTPClient().Return(nethttp.DefaultClient)
 		mockRemoting.EXPECT().TLSConfig().Return(nil)
-		mockRemoting.EXPECT().RemoteLookup(ctx, remoteHost, remotePort, actor.Name()).Return(address.NoSender(), nil)
+		mockRemoting.EXPECT().RemoteLookup(ctx, remoteHost, remotePort, actorName).Return(address.NoSender(), nil)
 		mockRemoting.EXPECT().Close()
 
 		client, err := New(ctx, []*Node{node})
 		require.NoError(t, err)
 		require.NotNil(t, client)
 
-		err = client.ReSpawn(ctx, actor)
+		err = client.ReSpawn(ctx, actorName)
 		require.NoError(t, err)
 		mockRemoting.AssertNotCalled(t, "RemoteReSpawn", mock.Anything, mock.Anything, mock.Anything)
 
@@ -754,7 +820,7 @@ func TestClient(t *testing.T) {
 
 	t.Run("With ReSpawn returns error when lookup fails", func(t *testing.T) {
 		ctx := context.TODO()
-		actor := NewActor("client.testactor").WithName("actorName")
+		actorName := "actorName"
 
 		mockRemoting := mocks.NewRemoting(t)
 		node := &Node{
@@ -768,14 +834,14 @@ func TestClient(t *testing.T) {
 		mockRemoting.EXPECT().Compression().Return(remote.NoCompression)
 		mockRemoting.EXPECT().HTTPClient().Return(nethttp.DefaultClient)
 		mockRemoting.EXPECT().TLSConfig().Return(nil)
-		mockRemoting.EXPECT().RemoteLookup(ctx, remoteHost, remotePort, actor.Name()).Return(nil, expectedErr)
+		mockRemoting.EXPECT().RemoteLookup(ctx, remoteHost, remotePort, actorName).Return(nil, expectedErr)
 		mockRemoting.EXPECT().Close()
 
 		client, err := New(ctx, []*Node{node})
 		require.NoError(t, err)
 		require.NotNil(t, client)
 
-		err = client.ReSpawn(ctx, actor)
+		err = client.ReSpawn(ctx, actorName)
 		require.Error(t, err)
 		require.ErrorIs(t, err, expectedErr)
 		mockRemoting.AssertNotCalled(t, "RemoteReSpawn", mock.Anything, mock.Anything, mock.Anything)
@@ -826,19 +892,24 @@ func TestClient(t *testing.T) {
 		}
 
 		require.ElementsMatch(t, expected, kinds)
-		actor := NewActor("client.testactor").WithName("actorName")
+		actorName := "actorName"
+		request := &remote.SpawnRequest{
+			Kind:        "client.testactor",
+			Name:        actorName,
+			Relocatable: true,
+		}
 
-		err = client.Spawn(ctx, actor, false, true)
+		err = client.Spawn(ctx, request)
 		require.NoError(t, err)
 
 		pause.For(time.Second)
 
-		whereis, err := client.Whereis(ctx, actor)
+		whereis, err := client.Whereis(ctx, actorName)
 		require.NoError(t, err)
 		require.NotNil(t, whereis)
-		assert.Equal(t, actor.Name(), whereis.Name())
+		assert.Equal(t, actorName, whereis.Name())
 
-		err = client.Stop(ctx, actor)
+		err = client.Stop(ctx, actorName)
 		require.NoError(t, err)
 
 		t.Cleanup(
@@ -857,6 +928,63 @@ func TestClient(t *testing.T) {
 				pause.For(time.Second)
 			})
 	})
+	t.Run("With AskGrain with error", func(t *testing.T) {
+		ctx := context.TODO()
+
+		logger := log.DiscardLogger
+
+		// start the NATS server
+		srv := startNatsServer(t)
+		addr := srv.Addr().String()
+
+		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr, remote.NoCompression)
+		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr, remote.NoCompression)
+		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr, remote.NoCompression)
+
+		// wait for a proper and clean setup of the cluster
+		pause.For(time.Second)
+
+		addresses := []string{
+			fmt.Sprintf("%s:%d", node1Host, node1Port),
+			fmt.Sprintf("%s:%d", node2Host, node2Port),
+			fmt.Sprintf("%s:%d", node3Host, node3Port),
+		}
+
+		nodes := make([]*Node, len(addresses))
+		for i, addr := range addresses {
+			nodes[i] = NewNode(addr)
+		}
+
+		client, err := New(ctx, nodes)
+		require.NoError(t, err)
+		require.NotNil(t, client)
+
+		grainRequest := &remote.GrainRequest{
+			Name:              "grain",
+			Kind:              registry.Name(&MockGrain{}),
+			ActivationTimeout: 0,
+			ActivationRetries: 0,
+		}
+
+		reply, err := client.AskGrain(ctx, grainRequest, new(testpb.TestReply), time.Minute)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, gerrors.ErrGrainNotRegistered.Error())
+		require.Nil(t, reply)
+
+		client.Close()
+
+		require.NoError(t, sys1.Stop(ctx))
+		require.NoError(t, sys2.Stop(ctx))
+		require.NoError(t, sys3.Stop(ctx))
+
+		require.NoError(t, sd1.Close())
+		require.NoError(t, sd2.Close())
+		require.NoError(t, sd3.Close())
+
+		srv.Shutdown()
+		pause.For(time.Second)
+	})
+
 	t.Run("With Ask when actor not found", func(t *testing.T) {
 		ctx := context.TODO()
 
@@ -888,15 +1016,15 @@ func TestClient(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, client)
 
-		actor := NewActor("client.testactor").WithName("actorName")
+		actorName := "actorName"
 
 		// send a message
-		reply, err := client.Ask(ctx, actor, new(testpb.TestReply), time.Minute)
+		reply, err := client.Ask(ctx, actorName, new(testpb.TestReply), time.Minute)
 		require.Error(t, err)
 		require.ErrorIs(t, err, errors.ErrActorNotFound)
 		require.Nil(t, reply)
 
-		err = client.Stop(ctx, actor)
+		err = client.Stop(ctx, actorName)
 		require.NoError(t, err)
 
 		client.Close()
@@ -912,9 +1040,10 @@ func TestClient(t *testing.T) {
 		srv.Shutdown()
 		pause.For(time.Second)
 	})
+
 	t.Run("When RemoteAsk fails", func(t *testing.T) {
 		ctx := context.TODO()
-		actor := NewActor("client.testactor").WithName("actorName")
+		actorName := "actorName"
 
 		mockRemoting := mocks.NewRemoting(t)
 		node := &Node{
@@ -923,10 +1052,10 @@ func TestClient(t *testing.T) {
 		}
 
 		remoteHost, remotePort := node.HostAndPort()
-		addr := address.New(actor.Name(), "system", remoteHost, remotePort)
+		addr := address.New(actorName, "system", remoteHost, remotePort)
 
 		expectedErr := fmt.Errorf("remote ask failed: %s", node.address)
-		mockRemoting.EXPECT().RemoteLookup(ctx, remoteHost, remotePort, actor.Name()).Return(addr, nil)
+		mockRemoting.EXPECT().RemoteLookup(ctx, remoteHost, remotePort, actorName).Return(addr, nil)
 		mockRemoting.EXPECT().MaxReadFrameSize().Return(1024 * 1024)
 		mockRemoting.EXPECT().Compression().Return(remote.NoCompression)
 		mockRemoting.EXPECT().HTTPClient().Return(nethttp.DefaultClient)
@@ -937,7 +1066,7 @@ func TestClient(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, client)
 
-		_, err = client.Ask(ctx, actor, new(testpb.TestReply), time.Minute)
+		_, err = client.Ask(ctx, actorName, new(testpb.TestReply), time.Minute)
 		require.Error(t, err)
 		require.ErrorIs(t, err, expectedErr)
 	})
@@ -973,14 +1102,14 @@ func TestClient(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, client)
 
-		actor := NewActor("client.testactor").WithName("actorName")
+		actorName := "actorName"
 
 		// send a message
-		err = client.Tell(ctx, actor, new(testpb.TestReply))
+		err = client.Tell(ctx, actorName, new(testpb.TestReply))
 		require.Error(t, err)
 		require.ErrorIs(t, err, errors.ErrActorNotFound)
 
-		err = client.Stop(ctx, actor)
+		err = client.Stop(ctx, actorName)
 		require.NoError(t, err)
 
 		client.Close()
@@ -1028,9 +1157,9 @@ func TestClient(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, client)
 
-		actor := NewActor("client.testactor").WithName("actorName")
+		actorName := "actorName"
 
-		err = client.Stop(ctx, actor)
+		err = client.Stop(ctx, actorName)
 		require.NoError(t, err)
 
 		client.Close()
@@ -1078,12 +1207,12 @@ func TestClient(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, client)
 
-		actor := NewActor("client.testactor").WithName("actorName")
-		whereis, err := client.Whereis(ctx, actor)
+		actorName := "actorName"
+		whereis, err := client.Whereis(ctx, actorName)
 		require.Error(t, err)
 		require.Nil(t, whereis)
 
-		err = client.Stop(ctx, actor)
+		err = client.Stop(ctx, actorName)
 		require.NoError(t, err)
 
 		client.Close()
@@ -1130,11 +1259,11 @@ func TestClient(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, client)
 
-		actor := NewActor("client.testactor").WithName("actorName")
-		err = client.Reinstate(ctx, actor)
+		actorName := "actorName"
+		err = client.Reinstate(ctx, actorName)
 		require.NoError(t, err)
 
-		err = client.Stop(ctx, actor)
+		err = client.Stop(ctx, actorName)
 		require.NoError(t, err)
 
 		client.Close()
@@ -1181,17 +1310,22 @@ func TestClient(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, client)
 
-		actor := NewActor("client.testactor").WithName("actorName")
+		actorName := "actorName"
+		request := &remote.SpawnRequest{
+			Kind:        "client.testactor",
+			Name:        actorName,
+			Relocatable: true,
+		}
 
-		err = client.Spawn(ctx, actor, false, true)
+		err = client.Spawn(ctx, request)
 		require.NoError(t, err)
 
 		pause.For(time.Second)
 
-		err = client.Reinstate(ctx, actor)
+		err = client.Reinstate(ctx, actorName)
 		require.NoError(t, err)
 
-		err = client.Stop(ctx, actor)
+		err = client.Stop(ctx, actorName)
 		require.NoError(t, err)
 
 		client.Close()
@@ -1209,7 +1343,7 @@ func TestClient(t *testing.T) {
 	})
 	t.Run("When RemoteLookup fails", func(t *testing.T) {
 		ctx := context.TODO()
-		actor := NewActor("client.testactor").WithName("actorName")
+		actorName := "actorName"
 
 		mockRemoting := mocks.NewRemoting(t)
 		node := &Node{
@@ -1219,7 +1353,7 @@ func TestClient(t *testing.T) {
 
 		remoteHost, remotePort := node.HostAndPort()
 		expectedErr := fmt.Errorf("remote lookup failed: %s", node.address)
-		mockRemoting.EXPECT().RemoteLookup(ctx, remoteHost, remotePort, actor.Name()).Return(nil, expectedErr)
+		mockRemoting.EXPECT().RemoteLookup(ctx, remoteHost, remotePort, actorName).Return(nil, expectedErr)
 		mockRemoting.EXPECT().MaxReadFrameSize().Return(1024 * 1024)
 		mockRemoting.EXPECT().Compression().Return(remote.NoCompression)
 		mockRemoting.EXPECT().HTTPClient().Return(nethttp.DefaultClient)
@@ -1230,23 +1364,23 @@ func TestClient(t *testing.T) {
 		require.NotNil(t, client)
 
 		// send a message
-		err = client.Tell(ctx, actor, new(testpb.TestReply))
+		err = client.Tell(ctx, actorName, new(testpb.TestReply))
 		require.Error(t, err)
 		require.ErrorIs(t, err, expectedErr)
 
-		_, err = client.Ask(ctx, actor, new(testpb.TestReply), time.Minute)
+		_, err = client.Ask(ctx, actorName, new(testpb.TestReply), time.Minute)
 		require.Error(t, err)
 		require.ErrorIs(t, err, expectedErr)
 
-		err = client.Stop(ctx, actor)
+		err = client.Stop(ctx, actorName)
 		require.Error(t, err)
 		require.ErrorIs(t, err, expectedErr)
 
-		_, err = client.Whereis(ctx, actor)
+		_, err = client.Whereis(ctx, actorName)
 		require.Error(t, err)
 		require.ErrorIs(t, err, expectedErr)
 
-		err = client.Reinstate(ctx, actor)
+		err = client.Reinstate(ctx, actorName)
 		require.Error(t, err)
 		require.ErrorIs(t, err, expectedErr)
 	})
@@ -1643,26 +1777,56 @@ var _ actors.Actor = (*testActor)(nil)
 
 // Init initialize the actor. This function can be used to set up some database connections
 // or some sort of initialization before the actor init processing public
-func (p *testActor) PreStart(*actors.Context) error {
-	p.logger = log.DiscardLogger
-	p.logger.Info("pre start")
+func (x *testActor) PreStart(*actors.Context) error {
+	x.logger = log.DiscardLogger
+	x.logger.Info("pre start")
 	return nil
 }
 
 // Shutdown gracefully shuts down the given actor
-func (p *testActor) PostStop(*actors.Context) error {
-	p.logger.Info("post stop")
+func (x *testActor) PostStop(*actors.Context) error {
+	x.logger.Info("post stop")
 	return nil
 }
 
 // Receive processes any message dropped into the actor mailbox without a reply
-func (p *testActor) Receive(ctx *actors.ReceiveContext) {
+func (x *testActor) Receive(ctx *actors.ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
-		p.logger.Info("post start")
+		x.logger.Info("post start")
 	case *testpb.TestSend:
 	case *testpb.TestReply:
-		p.logger.Info("received a test reply message...")
+		x.logger.Info("received a test reply message...")
+		ctx.Response(&testpb.Reply{Content: "received message"})
+	default:
+		ctx.Unhandled()
+	}
+}
+
+type MockGrain struct {
+	name string
+}
+
+var _ actors.Grain = (*MockGrain)(nil)
+
+func NewMockGrain() *MockGrain {
+	return &MockGrain{}
+}
+
+func (m *MockGrain) OnActivate(ctx context.Context, props *actors.GrainProps) error {
+	m.name = props.Identity().Name()
+	return nil
+}
+
+func (m *MockGrain) OnDeactivate(ctx context.Context, props *actors.GrainProps) error {
+	return nil
+}
+
+func (m *MockGrain) OnReceive(ctx *actors.GrainContext) {
+	switch ctx.Message().(type) {
+	case *testpb.TestSend:
+		ctx.NoErr()
+	case *testpb.TestReply:
 		ctx.Response(&testpb.Reply{Content: "received message"})
 	default:
 		ctx.Unhandled()
@@ -1672,7 +1836,7 @@ func (p *testActor) Receive(ctx *actors.ReceiveContext) {
 func setupUpdateNodesTest(t *testing.T, handler func(context.Context, *connect.Request[internalpb.GetNodeMetricRequest]) (*connect.Response[internalpb.GetNodeMetricResponse], error)) (*Client, *Node, func()) {
 	t.Helper()
 
-	service := &clusterServiceStub{
+	service := &MockClusterService{
 		getNodeMetric: handler,
 	}
 
@@ -1704,17 +1868,17 @@ func setupUpdateNodesTest(t *testing.T, handler func(context.Context, *connect.R
 	return client, node, cleanup
 }
 
-type clusterServiceStub struct {
+type MockClusterService struct {
 	getNodeMetric func(context.Context, *connect.Request[internalpb.GetNodeMetricRequest]) (*connect.Response[internalpb.GetNodeMetricResponse], error)
 }
 
-func (c *clusterServiceStub) GetNodeMetric(ctx context.Context, req *connect.Request[internalpb.GetNodeMetricRequest]) (*connect.Response[internalpb.GetNodeMetricResponse], error) {
+func (c *MockClusterService) GetNodeMetric(ctx context.Context, req *connect.Request[internalpb.GetNodeMetricRequest]) (*connect.Response[internalpb.GetNodeMetricResponse], error) {
 	if c.getNodeMetric != nil {
 		return c.getNodeMetric(ctx, req)
 	}
 	return connect.NewResponse(&internalpb.GetNodeMetricResponse{}), nil
 }
 
-func (c *clusterServiceStub) GetKinds(context.Context, *connect.Request[internalpb.GetKindsRequest]) (*connect.Response[internalpb.GetKindsResponse], error) {
+func (c *MockClusterService) GetKinds(context.Context, *connect.Request[internalpb.GetKindsRequest]) (*connect.Response[internalpb.GetKindsResponse], error) {
 	return connect.NewResponse(&internalpb.GetKindsResponse{}), nil
 }
