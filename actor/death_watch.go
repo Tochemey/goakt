@@ -69,8 +69,8 @@ func (x *deathWatch) Receive(ctx *ReceiveContext) {
 }
 
 // PostStop is executed when the actor is shutting down.
-func (x *deathWatch) PostStop(*Context) error {
-	x.logger.Infof("%s stopped successfully", x.pid.Name())
+func (x *deathWatch) PostStop(ctx *Context) error {
+	ctx.ActorSystem().Logger().Infof("%s stopped successfully", ctx.ActorName())
 	return nil
 }
 

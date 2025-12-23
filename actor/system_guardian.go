@@ -73,8 +73,8 @@ func (x *systemGuardian) Receive(ctx *ReceiveContext) {
 }
 
 // PostStop is the post-stop hook
-func (x *systemGuardian) PostStop(*Context) error {
-	x.logger.Infof("%s stopped successfully", x.pid.Name())
+func (x *systemGuardian) PostStop(ctx *Context) error {
+	ctx.ActorSystem().Logger().Infof("%s stopped successfully", ctx.ActorName())
 	return nil
 }
 

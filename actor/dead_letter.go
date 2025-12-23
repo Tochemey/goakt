@@ -81,8 +81,8 @@ func (x *deadLetter) Receive(ctx *ReceiveContext) {
 }
 
 // PostStop handles post procedures
-func (x *deadLetter) PostStop(*Context) error {
-	x.logger.Infof("%s stopped successfully", x.pid.Name())
+func (x *deadLetter) PostStop(ctx *Context) error {
+	ctx.ActorSystem().Logger().Infof("%s stopped successfully", ctx.ActorName())
 	return nil
 }
 

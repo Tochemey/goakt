@@ -936,12 +936,15 @@ func (pid *PID) Ask(ctx context.Context, to *PID, message proto.Message, timeout
 
 	receiveContext := getContext()
 	receiveContext.build(ctx, pid, to, message, false)
+	msg := receiveContext.Message()
+	sender := receiveContext.Sender()
 	responseCh := receiveContext.response
+
 	if responseCh != nil {
 		defer putResponseChannel(responseCh)
 	}
-	to.doReceive(receiveContext)
 
+	to.doReceive(receiveContext)
 	timer := timers.Get(timeout)
 
 	select {
@@ -950,12 +953,12 @@ func (pid *PID) Ask(ctx context.Context, to *PID, message proto.Message, timeout
 		return result, nil
 	case <-ctx.Done():
 		err = errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
-		pid.handleReceivedError(receiveContext, err)
+		pid.handleReceivedErrorWithMessage(sender, msg, err)
 		timers.Put(timer)
 		return nil, err
 	case <-timer.C:
 		err = gerrors.ErrRequestTimeout
-		pid.handleReceivedError(receiveContext, err)
+		pid.handleReceivedErrorWithMessage(sender, msg, err)
 		timers.Put(timer)
 		return nil, err
 	}
@@ -1811,13 +1814,20 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 
 // handleReceivedError sends message to deadletter synthetic actor
 func (pid *PID) handleReceivedError(receiveCtx *ReceiveContext, err error) {
+	if receiveCtx == nil {
+		return
+	}
+	pid.handleReceivedErrorWithMessage(receiveCtx.Sender(), receiveCtx.Message(), err)
+}
+
+func (pid *PID) handleReceivedErrorWithMessage(senderPID *PID, message proto.Message, err error) {
 	// the message is lost
 	if pid.eventsStream == nil {
 		return
 	}
 
 	// skip system messages
-	switch receiveCtx.Message().(type) {
+	switch message.(type) {
 	case *goaktpb.PostStart, *goaktpb.Terminated:
 		return
 	default:
@@ -1830,7 +1840,7 @@ func (pid *PID) handleReceivedError(receiveCtx *ReceiveContext, err error) {
 		sender = system.NoSender().Address()
 	}
 
-	if senderPID := receiveCtx.Sender(); senderPID != nil {
+	if senderPID != nil {
 		if system == nil || !senderPID.Equals(system.NoSender()) {
 			sender = senderPID.Address()
 		}
@@ -1842,7 +1852,7 @@ func (pid *PID) handleReceivedError(receiveCtx *ReceiveContext, err error) {
 	}
 
 	ctx := context.Background()
-	pid.toDeadletter(ctx, sender, receiver, receiveCtx.Message(), err)
+	pid.toDeadletter(ctx, sender, receiver, message, err)
 }
 
 // toDeadletter sends a message to the deadletter actor

@@ -48,6 +48,9 @@ func Ask(ctx context.Context, to *PID, message proto.Message, timeout time.Durat
 		return nil, err
 	}
 
+	msg := receiveContext.Message()
+	sender := receiveContext.Sender()
+
 	responseCh := receiveContext.response
 	if responseCh != nil {
 		defer putResponseChannel(responseCh)
@@ -63,12 +66,12 @@ func Ask(ctx context.Context, to *PID, message proto.Message, timeout time.Durat
 		return
 	case <-ctx.Done():
 		err = errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
-		to.handleReceivedError(receiveContext, err)
+		to.handleReceivedErrorWithMessage(sender, msg, err)
 		timers.Put(timer)
 		return nil, err
 	case <-timer.C:
 		err = gerrors.ErrRequestTimeout
-		to.handleReceivedError(receiveContext, err)
+		to.handleReceivedErrorWithMessage(sender, msg, err)
 		timers.Put(timer)
 		return
 	}

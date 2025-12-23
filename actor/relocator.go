@@ -270,9 +270,11 @@ func (r *relocator) activateRemoteGrain(ctx context.Context, grain *internalpb.G
 }
 
 // PostStop is executed when the actor is shutting down.
-func (r *relocator) PostStop(*Context) error {
-	r.remoting.Close()
-	r.logger.Infof("%s stopped successfully", r.pid.Name())
+func (r *relocator) PostStop(ctx *Context) error {
+	if r.remoting != nil {
+		r.remoting.Close()
+	}
+	ctx.ActorSystem().Logger().Infof("%s stopped successfully", ctx.ActorName())
 	return nil
 }
 
