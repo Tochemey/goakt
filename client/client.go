@@ -326,6 +326,66 @@ func (x *Client) Ask(ctx context.Context, actorName string, message proto.Messag
 	return response.UnmarshalNew()
 }
 
+// AskGrain sends a message to a Grain and waits for a response.
+//
+// This method sends a message to the specified Grain and blocks until
+// a reply is received or the timeout is reached. It is intended for request-response
+// communication patterns with Grains.
+//
+// Parameters:
+//   - ctx: Context used for cancellation and deadline control.
+//   - grainRequest: The GrainRequest identifying the target Grain.
+//   - message: The message to send to the Grain.
+//   - timeout: The maximum duration to wait for a response from the Grain.
+//
+// Returns:
+//   - reply: The response returned by the Grain.
+//   - err: Returns an error if the Grain is not found, if the timeout is exceeded,
+//     or if message delivery or handling fails.
+//
+// Note:
+//   - If the Grain does not exist or is unreachable, an error is returned.
+//   - Ensure the Grain is designed to handle the incoming message and reply appropriately.
+//   - The grain kind must be registered on the remote actor system using RegisterGrainKind.
+func (x *Client) AskGrain(ctx context.Context, grainRequest *remote.GrainRequest, message proto.Message, timeout time.Duration) (reply proto.Message, err error) {
+	x.locker.Lock()
+	node := nextNode(x.balancer)
+	remoteHost, remotePort := node.HostAndPort()
+	remoting := node.Remoting()
+	x.locker.Unlock()
+
+	response, err := remoting.RemoteAskGrain(ctx, remoteHost, remotePort, grainRequest, message, timeout)
+	if err != nil {
+		return nil, err
+	}
+	return response.UnmarshalNew()
+}
+
+// TellGrain sends a message to the specified Grain.
+//
+// This method delivers the given message to the target Grain.
+// It is intended for fire-and-forget messaging patterns.
+//
+// Parameters:
+//   - ctx: Context used for cancellation and timeout control.
+//   - grainRequest: The GrainRequest identifying the target Grain.
+//   - message: The message to send to the Grain.
+//
+// Returns:
+//   - error: Returns nil on success. Returns an error if message delivery fails.
+//
+// Note:
+//   - This method is asynchronous; it does not wait for a response.
+//   - The grain kind must be registered on the remote actor system using RegisterGrainKind.
+func (x *Client) TellGrain(ctx context.Context, grainRequest *remote.GrainRequest, message proto.Message) error {
+	x.locker.Lock()
+	node := nextNode(x.balancer)
+	remoteHost, remotePort := node.HostAndPort()
+	remoting := node.Remoting()
+	x.locker.Unlock()
+	return remoting.RemoteTellGrain(ctx, remoteHost, remotePort, grainRequest, message)
+}
+
 // Stop gracefully stops or forcefully terminates the specified actor.
 //
 // This method instructs the Client to stop the given actor, releasing any resources

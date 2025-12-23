@@ -30,7 +30,8 @@ Also, check the reference section at the end of the post for more material regar
 - **Location Transparency**: Interact with actors without needing to know their physical location.
 - **Relocation**: Automatic actor relocation on node failure with configurable policies.
 - **Cluster Singletons**: Run a single instance across the cluster with guardian-based lifecycle.
-- **Grains**: Virtual actors with activation and passivation strategies (time-based, message-count, long-lived).
+- **Grains**: Virtual actors capabilities.
+- **Passivation**: Automatically stop idle actors and reclaim resources.
 - **Routers**: Routing strategies such as round robin, random, and fan-out.
 - **Scheduling**: Timers and delayed messaging built into the runtime.
 - **Stashing & Mailboxes**: Stash buffers and customizable mailboxes (bounded/unbounded, priority).

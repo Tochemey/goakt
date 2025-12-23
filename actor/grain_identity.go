@@ -30,13 +30,10 @@ import (
 	"strings"
 
 	gerrors "github.com/tochemey/goakt/v3/errors"
+	"github.com/tochemey/goakt/v3/internal/id"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/internal/validation"
-)
-
-const (
-	identitySeparator = "/"
 )
 
 // GrainIdentity uniquely identifies a grain (virtual actor) instance within the actor system.
@@ -100,7 +97,7 @@ func (g *GrainIdentity) String() string {
 	if g == nil {
 		return ""
 	}
-	return fmt.Sprintf("%s%s%s", g.kind, identitySeparator, g.name)
+	return fmt.Sprintf("%s%s%s", g.kind, id.GrainIdentitySeparator, g.name)
 }
 
 // Equal checks whether this GrainIdentity is equal to another.
@@ -128,7 +125,7 @@ func (g *GrainIdentity) Validate() error {
 
 // toIdentity reconstructs a given GrainIdentity from its string representation
 func toIdentity(s string) (*GrainIdentity, error) {
-	parts := strings.SplitN(s, identitySeparator, 2)
+	parts := strings.SplitN(s, id.GrainIdentitySeparator, 2)
 	if len(parts) != 2 {
 		return nil, gerrors.ErrInvalidGrainIdentity
 	}

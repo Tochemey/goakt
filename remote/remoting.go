@@ -45,6 +45,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/compression/brotli"
 	"github.com/tochemey/goakt/v3/internal/compression/zstd"
 	"github.com/tochemey/goakt/v3/internal/http"
+	"github.com/tochemey/goakt/v3/internal/id"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v3/internal/size"
@@ -1050,7 +1051,7 @@ func getGrainFromRequest(host string, port int, grainRequest *GrainRequest) (*in
 		GrainId: &internalpb.GrainId{
 			Kind:  grainRequest.Kind,
 			Name:  grainRequest.Name,
-			Value: fmt.Sprintf("%s/%s", grainRequest.Kind, grainRequest.Name),
+			Value: fmt.Sprintf("%s%s%s", grainRequest.Kind, id.GrainIdentitySeparator, grainRequest.Name),
 		},
 		Dependencies:      dependencies,
 		ActivationRetries: int32(grainRequest.ActivationRetries),

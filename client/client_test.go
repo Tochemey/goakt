@@ -48,10 +48,12 @@ import (
 	"github.com/tochemey/goakt/v3/discovery"
 	"github.com/tochemey/goakt/v3/discovery/nats"
 	"github.com/tochemey/goakt/v3/errors"
+	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v3/internal/pause"
+	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/internal/size"
 	"github.com/tochemey/goakt/v3/log"
 	mocks "github.com/tochemey/goakt/v3/mocks/remote"
@@ -135,6 +137,14 @@ func TestClient(t *testing.T) {
 		// wait for a proper and clean setup of the cluster
 		pause.For(time.Second)
 
+		// register grains kinds
+		err := sys1.RegisterGrainKind(ctx, &MockGrain{})
+		require.NoError(t, err)
+		err = sys2.RegisterGrainKind(ctx, &MockGrain{})
+		require.NoError(t, err)
+		err = sys3.RegisterGrainKind(ctx, &MockGrain{})
+		require.NoError(t, err)
+
 		addresses := []string{
 			fmt.Sprintf("%s:%d", node1Host, node1Port),
 			fmt.Sprintf("%s:%d", node2Host, node2Port),
@@ -181,9 +191,28 @@ func TestClient(t *testing.T) {
 		expectedReply := &testpb.Reply{Content: "received message"}
 		assert.True(t, proto.Equal(expectedReply, reply))
 
-		pause.For(time.Second)
+		pause.For(500 * time.Millisecond)
+
+		grainRequest := &remote.GrainRequest{
+			Name:              "grain",
+			Kind:              registry.Name(&MockGrain{}),
+			ActivationTimeout: 0,
+			ActivationRetries: 0,
+		}
+
+		reply, err = client.AskGrain(ctx, grainRequest, new(testpb.TestReply), time.Minute)
+		require.NoError(t, err)
+		require.NotNil(t, reply)
+		assert.True(t, proto.Equal(expectedReply, reply))
+
+		pause.For(500 * time.Millisecond)
 
 		err = client.Tell(ctx, actorName, new(testpb.TestSend))
+		require.NoError(t, err)
+
+		pause.For(500 * time.Millisecond)
+
+		err = client.TellGrain(ctx, grainRequest, new(testpb.TestSend))
 		require.NoError(t, err)
 
 		err = client.Stop(ctx, actorName)
@@ -899,6 +928,63 @@ func TestClient(t *testing.T) {
 				pause.For(time.Second)
 			})
 	})
+	t.Run("With AskGrain with error", func(t *testing.T) {
+		ctx := context.TODO()
+
+		logger := log.DiscardLogger
+
+		// start the NATS server
+		srv := startNatsServer(t)
+		addr := srv.Addr().String()
+
+		sys1, node1Host, node1Port, sd1 := startNode(t, logger, "node1", addr, remote.NoCompression)
+		sys2, node2Host, node2Port, sd2 := startNode(t, logger, "node2", addr, remote.NoCompression)
+		sys3, node3Host, node3Port, sd3 := startNode(t, logger, "node3", addr, remote.NoCompression)
+
+		// wait for a proper and clean setup of the cluster
+		pause.For(time.Second)
+
+		addresses := []string{
+			fmt.Sprintf("%s:%d", node1Host, node1Port),
+			fmt.Sprintf("%s:%d", node2Host, node2Port),
+			fmt.Sprintf("%s:%d", node3Host, node3Port),
+		}
+
+		nodes := make([]*Node, len(addresses))
+		for i, addr := range addresses {
+			nodes[i] = NewNode(addr)
+		}
+
+		client, err := New(ctx, nodes)
+		require.NoError(t, err)
+		require.NotNil(t, client)
+
+		grainRequest := &remote.GrainRequest{
+			Name:              "grain",
+			Kind:              registry.Name(&MockGrain{}),
+			ActivationTimeout: 0,
+			ActivationRetries: 0,
+		}
+
+		reply, err := client.AskGrain(ctx, grainRequest, new(testpb.TestReply), time.Minute)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, gerrors.ErrGrainNotRegistered.Error())
+		require.Nil(t, reply)
+
+		client.Close()
+
+		require.NoError(t, sys1.Stop(ctx))
+		require.NoError(t, sys2.Stop(ctx))
+		require.NoError(t, sys3.Stop(ctx))
+
+		require.NoError(t, sd1.Close())
+		require.NoError(t, sd2.Close())
+		require.NoError(t, sd3.Close())
+
+		srv.Shutdown()
+		pause.For(time.Second)
+	})
+
 	t.Run("With Ask when actor not found", func(t *testing.T) {
 		ctx := context.TODO()
 
@@ -954,6 +1040,7 @@ func TestClient(t *testing.T) {
 		srv.Shutdown()
 		pause.For(time.Second)
 	})
+
 	t.Run("When RemoteAsk fails", func(t *testing.T) {
 		ctx := context.TODO()
 		actorName := "actorName"
@@ -1690,26 +1777,56 @@ var _ actors.Actor = (*testActor)(nil)
 
 // Init initialize the actor. This function can be used to set up some database connections
 // or some sort of initialization before the actor init processing public
-func (p *testActor) PreStart(*actors.Context) error {
-	p.logger = log.DiscardLogger
-	p.logger.Info("pre start")
+func (x *testActor) PreStart(*actors.Context) error {
+	x.logger = log.DiscardLogger
+	x.logger.Info("pre start")
 	return nil
 }
 
 // Shutdown gracefully shuts down the given actor
-func (p *testActor) PostStop(*actors.Context) error {
-	p.logger.Info("post stop")
+func (x *testActor) PostStop(*actors.Context) error {
+	x.logger.Info("post stop")
 	return nil
 }
 
 // Receive processes any message dropped into the actor mailbox without a reply
-func (p *testActor) Receive(ctx *actors.ReceiveContext) {
+func (x *testActor) Receive(ctx *actors.ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
-		p.logger.Info("post start")
+		x.logger.Info("post start")
 	case *testpb.TestSend:
 	case *testpb.TestReply:
-		p.logger.Info("received a test reply message...")
+		x.logger.Info("received a test reply message...")
+		ctx.Response(&testpb.Reply{Content: "received message"})
+	default:
+		ctx.Unhandled()
+	}
+}
+
+type MockGrain struct {
+	name string
+}
+
+var _ actors.Grain = (*MockGrain)(nil)
+
+func NewMockGrain() *MockGrain {
+	return &MockGrain{}
+}
+
+func (m *MockGrain) OnActivate(ctx context.Context, props *actors.GrainProps) error {
+	m.name = props.Identity().Name()
+	return nil
+}
+
+func (m *MockGrain) OnDeactivate(ctx context.Context, props *actors.GrainProps) error {
+	return nil
+}
+
+func (m *MockGrain) OnReceive(ctx *actors.GrainContext) {
+	switch ctx.Message().(type) {
+	case *testpb.TestSend:
+		ctx.NoErr()
+	case *testpb.TestReply:
 		ctx.Response(&testpb.Reply{Content: "received message"})
 	default:
 		ctx.Unhandled()
@@ -1719,7 +1836,7 @@ func (p *testActor) Receive(ctx *actors.ReceiveContext) {
 func setupUpdateNodesTest(t *testing.T, handler func(context.Context, *connect.Request[internalpb.GetNodeMetricRequest]) (*connect.Response[internalpb.GetNodeMetricResponse], error)) (*Client, *Node, func()) {
 	t.Helper()
 
-	service := &clusterServiceStub{
+	service := &MockClusterService{
 		getNodeMetric: handler,
 	}
 
@@ -1751,17 +1868,17 @@ func setupUpdateNodesTest(t *testing.T, handler func(context.Context, *connect.R
 	return client, node, cleanup
 }
 
-type clusterServiceStub struct {
+type MockClusterService struct {
 	getNodeMetric func(context.Context, *connect.Request[internalpb.GetNodeMetricRequest]) (*connect.Response[internalpb.GetNodeMetricResponse], error)
 }
 
-func (c *clusterServiceStub) GetNodeMetric(ctx context.Context, req *connect.Request[internalpb.GetNodeMetricRequest]) (*connect.Response[internalpb.GetNodeMetricResponse], error) {
+func (c *MockClusterService) GetNodeMetric(ctx context.Context, req *connect.Request[internalpb.GetNodeMetricRequest]) (*connect.Response[internalpb.GetNodeMetricResponse], error) {
 	if c.getNodeMetric != nil {
 		return c.getNodeMetric(ctx, req)
 	}
 	return connect.NewResponse(&internalpb.GetNodeMetricResponse{}), nil
 }
 
-func (c *clusterServiceStub) GetKinds(context.Context, *connect.Request[internalpb.GetKindsRequest]) (*connect.Response[internalpb.GetKindsResponse], error) {
+func (c *MockClusterService) GetKinds(context.Context, *connect.Request[internalpb.GetKindsRequest]) (*connect.Response[internalpb.GetKindsResponse], error) {
 	return connect.NewResponse(&internalpb.GetKindsResponse{}), nil
 }

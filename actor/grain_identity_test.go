@@ -32,6 +32,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tochemey/goakt/v3/errors"
+	"github.com/tochemey/goakt/v3/internal/id"
 	"github.com/tochemey/goakt/v3/internal/registry"
 )
 
@@ -42,7 +43,7 @@ func TestIdentity(t *testing.T) {
 		identity := newGrainIdentity(grain, name)
 		require.NotNil(t, identity)
 		expectedKind := registry.Name(grain)
-		expectedStr := fmt.Sprintf("%s%s%s", expectedKind, identitySeparator, name)
+		expectedStr := fmt.Sprintf("%s%s%s", expectedKind, id.GrainIdentitySeparator, name)
 		require.Equal(t, expectedKind, identity.Kind(), "expected kind to match grain type name")
 		require.Equal(t, "testGrain", identity.Name(), "expected name to match provided name")
 		require.Equal(t, expectedStr, identity.String(), "expected string representation to match format")
@@ -83,7 +84,7 @@ func TestIdentity(t *testing.T) {
 		require.Nil(t, actual)
 	})
 	t.Run("With invalid", func(t *testing.T) {
-		identity := fmt.Sprintf("%s%s%s", "kind", identitySeparator, strings.Repeat("a", 300))
+		identity := fmt.Sprintf("%s%s%s", "kind", id.GrainIdentitySeparator, strings.Repeat("a", 300))
 		actual, err := toIdentity(identity)
 		require.Error(t, err)
 		require.Nil(t, actual)
