@@ -123,7 +123,7 @@ func TestTestProbe(t *testing.T) {
 		// send a message to the actor to be tested
 		probe.Send("pinger", new(testpb.TestPing))
 
-		probe.ExpectMessageOfType(msg.ProtoReflect().Type())
+		probe.ExpectMessageOfType(msg)
 		probe.ExpectNoMessage()
 
 		probe.Stop()
@@ -169,7 +169,7 @@ func TestTestProbe(t *testing.T) {
 		duration := time.Second
 		probe.Send("pinger", &testpb.TestWait{Duration: uint64(duration)})
 
-		probe.ExpectMessageOfTypeWithin(2*time.Second, msg.ProtoReflect().Type())
+		probe.ExpectMessageOfTypeWithin(2*time.Second, msg)
 		probe.ExpectNoMessage()
 
 		probe.Stop()
@@ -271,14 +271,15 @@ func TestTestProbe(t *testing.T) {
 	})
 }
 
-type pinger struct {
-}
+type pinger struct{}
 
-func (t pinger) PreStart(_ *actors.Context) error {
+var _ actors.Actor = &pinger{}
+
+func (x pinger) PreStart(_ *actors.Context) error {
 	return nil
 }
 
-func (t pinger) Receive(ctx *actors.ReceiveContext) {
+func (x pinger) Receive(ctx *actors.ReceiveContext) {
 	switch x := ctx.Message().(type) {
 	case *testpb.TestPing:
 		ctx.Tell(ctx.Sender(), new(testpb.TestPong))
@@ -287,11 +288,9 @@ func (t pinger) Receive(ctx *actors.ReceiveContext) {
 	case *testpb.TestWait:
 		// delay for a while before sending the reply
 		wg := sync.WaitGroup{}
-		wg.Add(1)
-		go func() {
+		wg.Go(func() {
 			pause.For(time.Duration(x.Duration))
-			wg.Done()
-		}()
+		})
 		// block until timer is up
 		wg.Wait()
 		// reply the sender
@@ -299,8 +298,6 @@ func (t pinger) Receive(ctx *actors.ReceiveContext) {
 	}
 }
 
-func (t pinger) PostStop(_ *actors.Context) error {
+func (x pinger) PostStop(_ *actors.Context) error {
 	return nil
 }
-
-var _ actors.Actor = &pinger{}

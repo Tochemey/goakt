@@ -164,6 +164,7 @@ func TestGrainPIDActivateReturnsPanicErrorOnActivatePanicError(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorIs(t, err, gerrors.ErrGrainActivationFailure)
 	require.ErrorIs(t, err, panicErr)
+	require.Zero(t, pid.uptime())
 	var panicErrResult *gerrors.PanicError
 	require.ErrorAs(t, err, &panicErrResult)
 	require.Same(t, panicErr, panicErrResult)

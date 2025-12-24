@@ -128,6 +128,9 @@ func TestGrain(t *testing.T) {
 		require.True(t, ok)
 		require.NotNil(t, gp)
 		require.True(t, gp.isActive())
+		require.Eventually(t, func() bool {
+			return gp.uptime() > 0
+		}, 2*time.Second, 10*time.Millisecond)
 
 		response, err = testSystem.AskGrain(ctx, identity, message, time.Second)
 		require.NoError(t, err)

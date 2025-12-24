@@ -76,7 +76,7 @@ func (e *grainOwnerMismatchError) Error() string {
 //   - The provided context is currently unused and is reserved for future enhancements.
 //
 // Returns ErrActorSystemNotStarted if the actor system is not running.
-func (x *actorSystem) DeregisterGrainKind(ctx context.Context, kind Grain) error {
+func (x *actorSystem) DeregisterGrainKind(_ context.Context, kind Grain) error {
 	if !x.Running() {
 		return gerrors.ErrActorSystemNotStarted
 	}

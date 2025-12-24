@@ -53,7 +53,7 @@ linters:
         - initialised
     revive:
       enable-all-rules: false
-      enable-default-rules: false
+      enable-default-rules: true
       rules:
         - name: var-naming
           arguments:

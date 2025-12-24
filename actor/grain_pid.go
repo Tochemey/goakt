@@ -54,6 +54,7 @@ type grainPID struct {
 	mailbox  *grainMailbox
 
 	latestReceiveTime atomic.Time
+	processedCount    atomic.Int64
 
 	// the actor system
 	actorSystem ActorSystem
@@ -61,13 +62,14 @@ type grainPID struct {
 	// specifies the logger to use
 	logger log.Logger
 
-	// atomic flag indicating whether the actor is processing messages
+	// atomic flag indicating whether the grain is processing messages
 	processing atomic.Int32
 	remoting   remote.Remoting
 
 	// the list of dependencies
 	dependencies *ds.Map[string, extension.Dependency]
 	activated    atomic.Bool
+	activatedAt  atomic.Int64
 	config       *grainConfig
 
 	mu                 sync.Mutex
@@ -96,6 +98,8 @@ func newGrainPID(identity *GrainIdentity, grain Grain, actorSystem ActorSystem, 
 
 	pid.processing.Store(idle)
 	pid.activated.Store(false)
+	pid.processedCount.Store(0)
+	pid.activatedAt.Store(0)
 
 	return pid
 }
@@ -148,6 +152,7 @@ func (pid *grainPID) activate(ctx context.Context) (err error) {
 	}
 
 	pid.activated.Store(true)
+	pid.activatedAt.Store(time.Now().Unix())
 	pid.deactivateAfter.Store(pid.config.deactivateAfter)
 	pid.logger.Infof("Grain %s successfully activated.", pid.identity.String())
 	cancel()
@@ -196,6 +201,7 @@ func (pid *grainPID) deactivate(ctx context.Context) (err error) {
 
 	defer func() {
 		pid.activated.Store(false)
+		pid.activatedAt.Store(0)
 		pid.latestReceiveTime.Store(time.Time{})
 		pid.onPoisonPill.Store(false)
 	}()
@@ -294,6 +300,7 @@ func (pid *grainPID) handlePoisonPill(grainContext *GrainContext) {
 
 func (pid *grainPID) handleGrainContext(grainContext *GrainContext) {
 	defer pid.recovery(grainContext)
+	pid.processedCount.Inc()
 	pid.markActivity(time.Now())
 	pid.grain.OnReceive(grainContext)
 }
@@ -327,6 +334,14 @@ func (pid *grainPID) recovery(received *GrainContext) {
 
 		return
 	}
+}
+
+// uptime returns the number of seconds since the grain has been active
+func (pid *grainPID) uptime() int64 {
+	if pid.isActive() {
+		return time.Now().Unix() - pid.activatedAt.Load()
+	}
+	return 0
 }
 
 // getGrain returns the Grain instance

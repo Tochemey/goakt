@@ -73,11 +73,11 @@ type Probe interface {
 
 	// ExpectMessageOfType asserts that the next received message matches the given message type.
 	// It fails the test if no message is received or the type does not match.
-	ExpectMessageOfType(messageType protoreflect.MessageType)
+	ExpectMessageOfType(message proto.Message)
 
 	// ExpectMessageOfTypeWithin asserts that a message of the given type is received within the specified duration.
 	// It fails the test if the type does not match or if the timeout is reached.
-	ExpectMessageOfTypeWithin(duration time.Duration, messageType protoreflect.MessageType)
+	ExpectMessageOfTypeWithin(duration time.Duration, message proto.Message)
 
 	// ExpectTerminated asserts that the actor with the specified name has terminated.
 	// This is useful when verifying actor shutdown behavior.
@@ -92,7 +92,7 @@ type Probe interface {
 	//
 	// Parameters:
 	//   - actorName: the name of the target actor registered within the actor system.
-	//   - message: the protocol buffer message to send to the actor.
+	//   - message: the message to send to the actor.
 	//
 	// Behavior:
 	//   - If the target actor does not exist, is unregistered, or is unreachable, the test will immediately fail.
@@ -108,18 +108,13 @@ type Probe interface {
 	// This method simulates the "Ask" pattern (request-response) and is primarily used in test scenarios to
 	// validate an actor's reply behavior and response correctness.
 	//
+	// Unlike SendContext, which uses a context for cancellation and timeout, SendSync directly relies on the provided
+	// timeout value for awaiting a response.
 	//
 	// Parameters:
 	//   - actorName: the registered name of the target actor to which the message should be sent.
 	//   - msg: the protocol buffer message to send to the actor.
 	//   - timeout: the duration to wait for a response before failing the test.
-	//
-	// Returns:
-	//   - The response as a proto.Message if the actor responds within the timeout period.
-	//   - The test will fail immediately if:
-	//       - The actor does not exist or is not reachable.
-	//       - The actor fails to respond within the timeout.
-	//       - An internal error occurs during the send or receive operation.
 	//
 	// Notes:
 	//   - This method is intended for use within testing frameworks via a test probe.
@@ -249,14 +244,14 @@ func newProbe(ctx context.Context, actorSystem actors.ActorSystem, t *testing.T)
 
 // ExpectMessageOfType asserts that the next received message matches the given message type.
 // It fails the test if no message is received or the type does not match.
-func (x *probe) ExpectMessageOfType(messageType protoreflect.MessageType) {
-	x.expectMessageOfType(x.defaultTimeout, messageType)
+func (x *probe) ExpectMessageOfType(message proto.Message) {
+	x.expectMessageOfType(x.defaultTimeout, message.ProtoReflect().Type())
 }
 
 // ExpectMessageOfTypeWithin asserts that a message of the given type is received within the specified duration.
 // It fails the test if the type does not match or if the timeout is reached.
-func (x *probe) ExpectMessageOfTypeWithin(duration time.Duration, messageType protoreflect.MessageType) {
-	x.expectMessageOfType(duration, messageType)
+func (x *probe) ExpectMessageOfTypeWithin(duration time.Duration, message proto.Message) {
+	x.expectMessageOfType(duration, message.ProtoReflect().Type())
 }
 
 // ExpectTerminated asserts that the actor with the specified name has terminated.
@@ -310,7 +305,7 @@ func (x *probe) ExpectAnyMessageWithin(duration time.Duration) proto.Message {
 //
 // Parameters:
 //   - actorName: the name of the target actor registered within the actor system.
-//   - message: the protocol buffer message to send to the actor.
+//   - message: the message to send to the actor.
 //
 // Behavior:
 //   - If the target actor does not exist, is unregistered, or is unreachable, the test will immediately fail.
@@ -343,13 +338,6 @@ func (x *probe) Send(actorName string, message proto.Message) {
 //   - actorName: the registered name of the target actor to which the message should be sent.
 //   - msg: the protocol buffer message to send to the actor.
 //   - timeout: the duration to wait for a response before failing the test.
-//
-// Returns:
-//   - The response as a proto.Message if the actor responds within the timeout period.
-//   - The test will fail immediately if:
-//   - The actor does not exist or is not reachable.
-//   - The actor fails to respond within the timeout.
-//   - An internal error occurs during the send or receive operation.
 //
 // Notes:
 //   - This method is intended for use within testing frameworks via a test probe.
