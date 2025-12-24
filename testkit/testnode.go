@@ -126,3 +126,27 @@ func (x TestNode) Kill(ctx context.Context, name string) {
 	require.False(x.testingT, pid.Equals(x.actorSystem.NoSender()), "cannot kill actor with no address")
 	require.NoError(x.testingT, pid.Shutdown(ctx))
 }
+
+// SpawnGrainProbe creates a new grain test probe, which can be used to observe and assert
+// messages sent by grain actors during test execution.
+//
+// Parameters:
+//   - ctx: context for managing cancellation and deadlines.
+//
+// Returns:
+//   - A GrainProbe instance that can be used to send, receive, and assert messages.
+func (x TestNode) SpawnGrainProbe(ctx context.Context) GrainProbe {
+	require.True(x.testingT, x.created.Load(), "cannot create a grain test probe before the test node is created")
+	testProbe, err := newGrainProbe(ctx, x.testingT, x.actorSystem)
+	require.NoError(x.testingT, err)
+	return testProbe
+}
+
+// GrainIdentity creates a grain identity
+func (x TestNode) GrainIdentity(ctx context.Context, name string, factory goakt.GrainFactory, opts ...goakt.GrainOption) *goakt.GrainIdentity {
+	require.NotNil(x.testingT, factory)
+	identity, err := x.actorSystem.GrainIdentity(ctx, name, factory, opts...)
+	require.NoError(x.testingT, err)
+	require.NotNil(x.testingT, identity)
+	return identity
+}
