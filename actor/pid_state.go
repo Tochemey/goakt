@@ -59,11 +59,11 @@ func (pid *PID) isStateSet(state pidState) bool {
 	return pid.state.Load()&uint32(state) != 0
 }
 
-// flipState sets or clears the given flag.
+// setState sets or clears the given flag.
 // It uses a CAS loop to avoid races when multiple goroutines try to update
 // different PID state bits at the same time. If the flag already matches the
 // requested state we exit early to avoid an unnecessary write.
-func (pid *PID) flipState(state pidState, enabled bool) {
+func (pid *PID) setState(state pidState, enabled bool) {
 	for {
 		pidState := pid.state.Load()
 		var desired uint32

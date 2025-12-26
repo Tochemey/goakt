@@ -88,15 +88,19 @@ func (x *deathWatch) handlePostStart(ctx *ReceiveContext) {
 func (x *deathWatch) handleTerminated(ctx *ReceiveContext) error {
 	msg := ctx.Message().(*goaktpb.Terminated)
 
-	actorID := msg.GetAddress()
-	x.logger.Infof("%s freeing resource [actor=%s] from system", x.pid.Name(), actorID)
+	addr := msg.GetAddress()
+	x.logger.Infof("%s freeing resource [actor=%s] from system", x.pid.Name(), addr)
 
-	if node, ok := x.tree.node(actorID); ok {
-		watchedPID := node.value()
-		x.actorSystem.decreaseActorsCounter()
-		actorName := watchedPID.Name()
-		x.tree.deleteNode(watchedPID)
-		removeFromCluster := x.actorSystem.InCluster() && !isSystemName(actorName) && !x.actorSystem.isStopping()
+	if node, ok := x.tree.node(addr); ok {
+		pid := node.value()
+
+		if !pid.isStateSet(systemState) {
+			x.actorSystem.decreaseActorsCounter()
+		}
+
+		actorName := pid.Name()
+		x.tree.deleteNode(pid)
+		removeFromCluster := x.actorSystem.InCluster() && !pid.isStateSet(systemState) && !x.actorSystem.isStopping()
 
 		if removeFromCluster {
 			ctx := ctx.withoutCancel()
@@ -105,14 +109,14 @@ func (x *deathWatch) handleTerminated(ctx *ReceiveContext) error {
 			cerr := x.cluster.RemoveActor(ctx, actorName)
 
 			if err := multierr.Combine(rerr, cerr); err != nil {
-				x.logger.Errorf("%s failed to remove [actor=%s] from cluster: %v", x.pid.Name(), actorID, err)
+				x.logger.Errorf("%s failed to remove [actor=%s] from cluster: %v", x.pid.Name(), addr, err)
 				return errors.NewInternalError(err)
 			}
 		}
 
-		x.logger.Infof("%s successfully free resource [actor=%s] from system", x.pid.Name(), actorID)
+		x.logger.Infof("%s successfully free resource [actor=%s] from system", x.pid.Name(), addr)
 		return nil
 	}
-	x.logger.Infof("%s could not locate resource [actor=%s] in system. Maybe already freed.", x.pid.Name(), actorID)
+	x.logger.Infof("%s could not locate resource [actor=%s] in system. Maybe already freed.", x.pid.Name(), addr)
 	return nil
 }

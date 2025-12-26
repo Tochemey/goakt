@@ -90,7 +90,10 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 		return nil, err
 	}
 
-	x.actorsCounter.Inc()
+	if !pid.isStateSet(systemState) {
+		x.increaseActorsCounter()
+	}
+
 	// add the given actor to the tree and supervise it
 	guardian := x.getUserGuardian()
 	_ = x.actors.addNode(guardian, pid)
@@ -126,7 +129,10 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 		return nil, err
 	}
 
-	x.actorsCounter.Inc()
+	if !pid.isStateSet(systemState) {
+		x.increaseActorsCounter()
+	}
+
 	_ = x.actors.addNode(x.userGuardian, pid)
 	x.actors.addWatcher(pid, x.deathWatch)
 	return pid, x.putActorOnCluster(pid)
@@ -354,7 +360,10 @@ func (x *actorSystem) spawnSingletonOnLocal(ctx context.Context, name string, ac
 		return err
 	}
 
-	x.actorsCounter.Inc()
+	if !pid.isStateSet(systemState) {
+		x.increaseActorsCounter()
+	}
+
 	// add the given actor to the tree and supervise it
 	_ = x.actors.addNode(x.singletonManager, pid)
 	x.actors.addWatcher(pid, x.deathWatch)

@@ -196,7 +196,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	pid.reinstateCount.Store(0)
 	pid.initTimeout.Store(DefaultInitTimeout)
 	pid.processing.Store(int32(idle))
-	pid.flipState(relocationState, true)
+	pid.setState(relocationState, true)
 
 	for _, opt := range opts {
 		opt(pid)
@@ -646,6 +646,10 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 
 	if err != nil {
 		return nil, err
+	}
+
+	if !cid.isStateSet(systemState) {
+		pid.ActorSystem().increaseActorsCounter()
 	}
 
 	// no need to handle the error because the given parent exist and running
@@ -1169,7 +1173,7 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 		return nil
 	}
 
-	pid.flipState(stoppingState, true)
+	pid.setState(stoppingState, true)
 	pid.unregisterPassivation()
 
 	if err := pid.doStop(ctx); err != nil {
@@ -1402,7 +1406,7 @@ func (pid *PID) init(ctx context.Context) error {
 		return e
 	}
 
-	pid.flipState(runningState, true)
+	pid.setState(runningState, true)
 	pid.logger.Infof("%s successfully started.", pid.Name())
 
 	if pid.eventsStream != nil {
@@ -1430,23 +1434,23 @@ func (pid *PID) reset() {
 	pid.reinstateCount.Store(0)
 	pid.restartCount.Store(0)
 	pid.startedAt.Store(0)
-	pid.flipState(runningState, false)
-	pid.flipState(stoppingState, false)
-	pid.flipState(suspendedState, false)
+	pid.setState(runningState, false)
+	pid.setState(stoppingState, false)
+	pid.setState(suspendedState, false)
 	if pid.supervisor != nil {
 		if sys, ok := pid.actorSystem.(*actorSystem); !ok || pid.supervisor != sys.defaultSupervisor {
 			pid.supervisor.Reset()
 		}
 	}
 	pid.mailbox.Dispose()
-	pid.flipState(singletonState, false)
-	pid.flipState(relocationState, true)
+	pid.setState(singletonState, false)
+	pid.setState(relocationState, true)
 	if pid.dependencies != nil {
 		pid.dependencies.Reset()
 	}
-	pid.flipState(passivationPausedState, false)
-	pid.flipState(passivatingState, false)
-	pid.flipState(passivationSkipNextState, false)
+	pid.setState(passivationPausedState, false)
+	pid.setState(passivatingState, false)
+	pid.setState(passivationSkipNextState, false)
 }
 
 // freeWatchers releases all the actors watching this actor
@@ -1578,8 +1582,8 @@ func (pid *PID) tryPassivation(reason string) bool {
 	}
 
 	pid.logger.Infof("passivation mode has been triggered for actor=%s (%s)...", pid.Name(), reason)
-	pid.flipState(passivatingState, true)
-	defer pid.flipState(passivatingState, false)
+	pid.setState(passivatingState, true)
+	defer pid.setState(passivatingState, false)
 
 	pid.stopLocker.Lock()
 	defer pid.stopLocker.Unlock()
@@ -1642,7 +1646,7 @@ func (pid *PID) unsetBehaviorStacked() {
 // doStop stops the actor
 func (pid *PID) doStop(ctx context.Context) error {
 	defer func() {
-		pid.flipState(runningState, false)
+		pid.setState(runningState, false)
 		pid.reset()
 	}()
 
@@ -1791,7 +1795,7 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 		// temporarily "not running" to observers. For other directives, keep suspension semantics.
 		if directive == supervisor.ResumeDirective {
 			// Always skip the next passivation decision once to avoid immediate stop after resume.
-			pid.flipState(passivationSkipNextState, true)
+			pid.setState(passivationSkipNextState, true)
 			// If the actor was already suspended due to a prior signal, reinstate immediately.
 			if pid.IsSuspended() {
 				pid.doReinstate()
@@ -2051,7 +2055,7 @@ func (pid *PID) childAddress(name string) *address.Address {
 // suspend puts the actor in a suspension mode.
 func (pid *PID) suspend(reason string) {
 	pid.logger.Infof("%s going into suspension mode", pid.Name())
-	pid.flipState(suspendedState, true)
+	pid.setState(suspendedState, true)
 	// increment suspension count
 	pid.failureCount.Inc()
 	// pause passivation loop
@@ -2102,12 +2106,12 @@ func (pid *PID) doReinstate() {
 	if pid.IsRunning() && !pid.IsSuspended() {
 		return
 	}
-	pid.flipState(suspendedState, false)
+	pid.setState(suspendedState, false)
 	// increment reinstate count
 	pid.reinstateCount.Inc()
 	// Guard against a pending passivation path that might have just crossed the threshold
 	// but hasn't yet checked suspension state. Skip the next passivation decision once.
-	pid.flipState(passivationSkipNextState, true)
+	pid.setState(passivationSkipNextState, true)
 	// Treat reinstate as activity so any freshly registered passivation deadline
 	// doesn't immediately fire before the skip guard can cancel the in-flight attempt.
 	pid.markActivity(time.Now())
@@ -2143,7 +2147,7 @@ func (pid *PID) pausePassivation() {
 	if pid.passivationManager != nil {
 		pid.passivationManager.Pause(pid)
 	}
-	pid.flipState(passivationPausedState, true)
+	pid.setState(passivationPausedState, true)
 }
 
 // resumePassivation resumes a paused passivation
@@ -2153,7 +2157,7 @@ func (pid *PID) resumePassivation() {
 	}
 
 	if pid.isStateSet(passivationPausedState) {
-		pid.flipState(passivationPausedState, false)
+		pid.setState(passivationPausedState, false)
 		if pid.passivationManager != nil {
 			if pid.passivationManager.Resume(pid) {
 				return
@@ -2313,10 +2317,13 @@ func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *t
 	}
 
 	pid := node.pid
+	_, wasInTree := tree.node(pid.ID())
+	didShutdown := false
 	if pid.IsRunning() {
 		if err := pid.Shutdown(ctx); err != nil {
 			return err
 		}
+		didShutdown = true
 		tk := ticker.New(10 * time.Millisecond)
 		tk.Start()
 		tickerStopSig := make(chan registry.Unit, 1)
@@ -2357,13 +2364,13 @@ func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *t
 	// wait for descendant actors to restart
 	if err := eg.Wait(); err != nil {
 		// disable messages processing
-		pid.flipState(stoppingState, true)
-		pid.flipState(runningState, false)
+		pid.setState(stoppingState, true)
+		pid.setState(runningState, false)
 		return fmt.Errorf("actor=(%s) failed to restart: %w", pid.Name(), err)
 	}
 
 	pid.processing.Store(idle)
-	pid.flipState(suspendedState, false)
+	pid.setState(suspendedState, false)
 	pid.startSupervision()
 	pid.startPassivation()
 
@@ -2380,6 +2387,10 @@ func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *t
 				RestartedAt: timestamppb.Now(),
 			},
 		)
+	}
+
+	if actorSystem != nil && !pid.isStateSet(systemState) && (didShutdown || !wasInTree) {
+		actorSystem.increaseActorsCounter()
 	}
 
 	if err := pid.registerMetrics(); err != nil {
