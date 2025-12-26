@@ -114,14 +114,14 @@ func withPassivationManager(manager *passivationManager) pidOption {
 // asSingleton set the actor as singleton
 func asSingleton() pidOption {
 	return func(pid *PID) {
-		pid.flipState(singletonState, true)
+		pid.setState(singletonState, true)
 	}
 }
 
 // withRelocationDisabled disables the actor relocation
 func withRelocationDisabled() pidOption {
 	return func(pid *PID) {
-		pid.flipState(relocationState, false)
+		pid.setState(relocationState, false)
 	}
 }
 
@@ -147,7 +147,7 @@ func withPassivationStrategy(strategy passivation.Strategy) pidOption {
 
 func asSystemActor() pidOption {
 	return func(pid *PID) {
-		pid.flipState(systemState, true)
+		pid.setState(systemState, true)
 	}
 }
 

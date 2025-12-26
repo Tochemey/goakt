@@ -586,6 +586,10 @@ func TestRestart(t *testing.T) {
 		require.NotNil(t, gcid)
 		pause.For(500 * time.Millisecond)
 
+		metric := actorSystem.Metric(ctx)
+		require.NotNil(t, metric)
+		require.EqualValues(t, 3, metric.ActorsCount())
+
 		require.EqualValues(t, 1, pid.ChildrenCount())
 
 		// let us send 10 messages to the actor
@@ -601,6 +605,10 @@ func TestRestart(t *testing.T) {
 		require.True(t, pid.IsRunning())
 
 		pause.For(time.Second)
+
+		metric = actorSystem.Metric(ctx)
+		require.NotNil(t, metric)
+		require.EqualValues(t, 3, metric.ActorsCount())
 
 		require.EqualValues(t, 1, pid.RestartCount())
 		require.EqualValues(t, 1, pid.ChildrenCount())
@@ -710,7 +718,7 @@ func TestRestart(t *testing.T) {
 
 		system := sys.(*actorSystem)
 		system.noSender = &PID{actorSystem: system, logger: log.DiscardLogger}
-		system.noSender.flipState(runningState, true)
+		system.noSender.setState(runningState, true)
 
 		rootAddr := system.actorAddress("root")
 		root, err := newPID(ctx, rootAddr, NewMockActor(), withActorSystem(system), withCustomLogger(log.DiscardLogger))
@@ -738,7 +746,7 @@ func TestRestart(t *testing.T) {
 		require.True(t, ok)
 		childNode.parent.Store(nil)
 
-		child.flipState(runningState, false)
+		child.setState(runningState, false)
 
 		err = restartSubtree(ctx, &restartNode{pid: child}, root, tree, nil, system)
 		require.NoError(t, err)
@@ -754,7 +762,7 @@ func TestRestart(t *testing.T) {
 
 		system := sys.(*actorSystem)
 		system.noSender = &PID{actorSystem: system, logger: log.DiscardLogger}
-		system.noSender.flipState(runningState, true)
+		system.noSender.setState(runningState, true)
 
 		rootAddr := system.actorAddress("root")
 		root, err := newPID(ctx, rootAddr, NewMockActor(), withActorSystem(system), withCustomLogger(log.DiscardLogger))
@@ -773,7 +781,7 @@ func TestRestart(t *testing.T) {
 		require.NoError(t, tree.addRootNode(root))
 		require.NoError(t, tree.addNode(root, child))
 
-		child.flipState(runningState, false)
+		child.setState(runningState, false)
 
 		require.Len(t, tree.descendants(root), 1)
 		subtree := buildRestartSubtree(root, tree)
@@ -5321,10 +5329,10 @@ func TestReinstateAvoidsPassivationRace(t *testing.T) {
 	pid.fieldsLocker.Unlock()
 
 	pid.latestReceiveTime.Store(time.Now().Add(-time.Minute))
-	pid.flipState(passivationSkipNextState, false)
-	pid.flipState(passivatingState, false)
-	pid.flipState(suspendedState, false)
-	pid.flipState(runningState, true)
+	pid.setState(passivationSkipNextState, false)
+	pid.setState(passivatingState, false)
+	pid.setState(suspendedState, false)
+	pid.setState(runningState, true)
 
 	pid.stopLocker.Lock()
 	locked := true
@@ -5346,7 +5354,7 @@ func TestReinstateAvoidsPassivationRace(t *testing.T) {
 	}, time.Second, 5*time.Millisecond)
 
 	// Simulate a reinstate arriving after the initial skip check but before doStop executes.
-	pid.flipState(suspendedState, true)
+	pid.setState(suspendedState, true)
 	pid.doReinstate()
 	require.True(t, pid.isStateSet(passivationSkipNextState), "reinstate should set skip flag")
 
@@ -5379,7 +5387,7 @@ func TestPIDTryPassivationSkipsWhenSystemStopping(t *testing.T) {
 
 func TestPIDTryPassivationSkipsWhenSkipFlagSet(t *testing.T) {
 	pid := MockPassivationPID(t, "skip-flag", passivation.NewTimeBasedStrategy(time.Second))
-	pid.flipState(passivationSkipNextState, true)
+	pid.setState(passivationSkipNextState, true)
 
 	require.True(t, pid.isStateSet(passivationSkipNextState))
 	require.False(t, pid.tryPassivation("skip"))
@@ -5388,7 +5396,7 @@ func TestPIDTryPassivationSkipsWhenSkipFlagSet(t *testing.T) {
 
 func TestPIDTryPassivationSkipsWhenStoppingFlagRaised(t *testing.T) {
 	pid := MockPassivationPID(t, "stopping-flag", passivation.NewTimeBasedStrategy(time.Second))
-	pid.flipState(stoppingState, true)
+	pid.setState(stoppingState, true)
 
 	require.False(t, pid.tryPassivation("already stopping"))
 }

@@ -9,12 +9,12 @@ func TestPIDStateStoreAndEnabled(t *testing.T) {
 		t.Fatalf("expected running flag to be false by default")
 	}
 
-	pid.flipState(runningState, true)
+	pid.setState(runningState, true)
 	if !pid.isStateSet(runningState) {
 		t.Fatalf("expected running flag to be true after store")
 	}
 
-	pid.flipState(runningState, false)
+	pid.setState(runningState, false)
 	if pid.isStateSet(runningState) {
 		t.Fatalf("expected running flag to be false after clearing")
 	}

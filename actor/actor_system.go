@@ -729,6 +729,7 @@ type ActorSystem interface {
 	getGrains() *ds.Map[string, *grainPID]
 	recreateGrain(ctx context.Context, props *internalpb.Grain) error
 	decreaseActorsCounter()
+	increaseActorsCounter()
 	removePeerActor(ctx context.Context, actorName string) error
 	removePeerGrain(ctx context.Context, grainID *internalpb.GrainId) error
 	passivationManager() *passivationManager
@@ -2469,9 +2470,12 @@ func (x *actorSystem) isStopping() bool {
 	return x.shuttingDown.Load()
 }
 
-// decreaseActorsCounter implements ActorSystem.
 func (x *actorSystem) decreaseActorsCounter() {
 	x.actorsCounter.Dec()
+}
+
+func (x *actorSystem) increaseActorsCounter() {
+	x.actorsCounter.Inc()
 }
 
 // getRemoting returns the remoting instance of the actor system
