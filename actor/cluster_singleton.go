@@ -27,6 +27,7 @@ package actor
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/goaktpb"
@@ -109,7 +110,7 @@ func (x *actorSystem) spawnSingletonManager(ctx context.Context) error {
 	return x.actors.addNode(x.systemGuardian, x.singletonManager)
 }
 
-func (x *actorSystem) spawnSingletonOnLeader(ctx context.Context, cl cluster.Cluster, name string, actor Actor) error {
+func (x *actorSystem) spawnSingletonOnLeader(ctx context.Context, cl cluster.Cluster, name string, actor Actor, spawnTimeout, waitInterval time.Duration, retries int32) error {
 	peers, err := cl.Peers(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to spawn singleton actor: %w", err)
@@ -135,8 +136,12 @@ func (x *actorSystem) spawnSingletonOnLeader(ctx context.Context, cl cluster.Clu
 	)
 
 	return x.remoting.RemoteSpawn(ctx, host, port, &remote.SpawnRequest{
-		Name:      name,
-		Kind:      actorType,
-		Singleton: true,
+		Name: name,
+		Kind: actorType,
+		Singleton: &remote.SingletonSpec{
+			SpawnTimeout: spawnTimeout,
+			WaitInterval: waitInterval,
+			MaxRetries:   retries,
+		},
 	})
 }

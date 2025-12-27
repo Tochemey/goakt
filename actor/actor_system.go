@@ -733,6 +733,7 @@ type ActorSystem interface {
 	removePeerActor(ctx context.Context, actorName string) error
 	removePeerGrain(ctx context.Context, grainID *internalpb.GrainId) error
 	passivationManager() *passivationManager
+	removeNodeLeft(address string)
 }
 
 // ActorSystem represent a collection of actors on a given node
@@ -2107,11 +2108,25 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 		return connect.NewError(connect.CodeInternal, err)
 	}
 
-	if msg.GetIsSingleton() {
-		if err := x.SpawnSingleton(ctx, msg.GetActorName(), actor); err != nil {
+	if msg.GetSingleton() != nil {
+		// define singleton options
+		singletonOpts := []ClusterSingletonOption{
+			WithSingletonSpawnTimeout(msg.GetSingleton().GetSpawnTimeout().AsDuration()),
+			WithSingletonSpawnWaitInterval(msg.GetSingleton().GetWaitInterval().AsDuration()),
+			WithSingletonSpawnRetries(int(msg.GetSingleton().GetMaxRetries())),
+		}
+
+		if msg.GetRole() != "" {
+			singletonOpts = append(singletonOpts, WithSingletonRole(msg.GetRole()))
+		}
+
+		if err := x.SpawnSingleton(ctx, msg.GetActorName(), actor, singletonOpts...); err != nil {
 			logger.Errorf("failed to create actor=(%s) on [host=%s, port=%d]: reason: (%v)", msg.GetActorName(), msg.GetHost(), msg.GetPort(), err)
 			return nil, wrapSpawnErr(err)
 		}
+
+		logger.Infof("actor=(%s) successfully created on [host=%s, port=%d]", msg.GetActorName(), msg.GetHost(), msg.GetPort())
+		return connect.NewResponse(new(internalpb.RemoteSpawnResponse)), nil
 	}
 
 	opts := []SpawnOption{
@@ -2940,7 +2955,7 @@ func (x *actorSystem) replicateActors() {
 		if !x.isStopping() && x.InCluster() {
 			ctx := context.Background()
 			cluster := x.getCluster()
-			if actor.GetIsSingleton() {
+			if actor.GetSingleton() != nil {
 				kind := actor.GetType()
 				role := actor.GetRole()
 				if role != "" {
@@ -3822,6 +3837,13 @@ func (x *actorSystem) passivationManager() *passivationManager {
 	passivator := x.passivator
 	x.locker.RUnlock()
 	return passivator
+}
+
+// removeNodeLeft removes the given left node from the actor system
+func (x *actorSystem) removeNodeLeft(address string) {
+	x.locker.RLock()
+	x.rebalancedNodes.Remove(address)
+	x.locker.RUnlock()
 }
 
 func (x *actorSystem) registerMetrics() error {

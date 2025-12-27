@@ -123,6 +123,7 @@ func (s *peerStatesWriter) handleDeletePeerState(ctx *ReceiveContext) {
 		ctx.Err(err)
 		return
 	}
+	ctx.ActorSystem().removeNodeLeft(msg.GetPeerAddress())
 	ctx.Response(new(goaktpb.NoMessage))
 }
 

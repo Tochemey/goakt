@@ -58,6 +58,7 @@ import (
 	"golang.org/x/net/http2/h2c"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	"github.com/tochemey/goakt/v3/address"
@@ -1759,7 +1760,7 @@ func TestActorSystem(t *testing.T) {
 		request := &remote.SpawnRequest{
 			Name:        actorName,
 			Kind:        "actor.exchanger",
-			Singleton:   false,
+			Singleton:   nil,
 			Relocatable: true,
 		}
 		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
@@ -1813,7 +1814,7 @@ func TestActorSystem(t *testing.T) {
 			Port:        int32(system.remoteConfig.BindPort()),
 			ActorName:   "actor",
 			ActorType:   actorType,
-			IsSingleton: false,
+			Singleton:   nil,
 			Relocatable: true,
 		})
 
@@ -1843,7 +1844,7 @@ func TestActorSystem(t *testing.T) {
 			Port:        int32(system.remoteConfig.BindPort()),
 			ActorName:   "actor",
 			ActorType:   actorType,
-			IsSingleton: false,
+			Singleton:   nil,
 			Relocatable: true,
 		})
 
@@ -1851,6 +1852,39 @@ func TestActorSystem(t *testing.T) {
 		require.Error(t, err)
 		require.Equal(t, connect.CodeUnavailable, connect.CodeOf(err))
 		require.ErrorIs(t, err, gerrors.ErrWriteQuorum)
+	})
+	t.Run("RemoteSpawn singleton short-circuits standard spawn", func(t *testing.T) {
+		ctx := context.Background()
+		system := MockSingletonClusterReadyActorSystem(t)
+		system.remoteConfig = remote.NewConfig("127.0.0.1", 9003)
+
+		clusterMock := mockscluster.NewCluster(t)
+		system.locker.Lock()
+		system.cluster = clusterMock
+		system.locker.Unlock()
+
+		system.registry.Register(new(MockActor))
+		actorType := registry.Name(new(MockActor))
+
+		clusterMock.EXPECT().IsLeader(mock.Anything).Return(true).Once()
+		clusterMock.EXPECT().LookupKind(mock.Anything, actorType).Return("", nil).Once()
+		clusterMock.EXPECT().ActorExists(mock.Anything, "singleton").Return(false, nil).Once()
+
+		request := connect.NewRequest(&internalpb.RemoteSpawnRequest{
+			Host:      system.remoteConfig.BindAddr(),
+			Port:      int32(system.remoteConfig.BindPort()),
+			ActorName: "singleton",
+			ActorType: actorType,
+			Singleton: &internalpb.SingletonSpec{
+				SpawnTimeout: durationpb.New(2 * time.Second),
+				WaitInterval: durationpb.New(200 * time.Millisecond),
+				MaxRetries:   int32(2),
+			},
+			Relocatable: true,
+		})
+
+		_, err := system.RemoteSpawn(ctx, request)
+		require.NoError(t, err)
 	})
 
 	t.Run("With CoordinatedShutdown with ShouldFail strategy", func(t *testing.T) {
@@ -6181,7 +6215,7 @@ func TestRemotingSpawn(t *testing.T) {
 		request := &remote.SpawnRequest{
 			Name:           actorName,
 			Kind:           "actor.exchanger",
-			Singleton:      false,
+			Singleton:      nil,
 			Relocatable:    false,
 			EnableStashing: false,
 			Dependencies:   []extension.Dependency{dependency},
@@ -6299,7 +6333,7 @@ func TestRemotingSpawn(t *testing.T) {
 		request := &remote.SpawnRequest{
 			Name:           actorName,
 			Kind:           registry.Name(actor),
-			Singleton:      false,
+			Singleton:      nil,
 			Relocatable:    false,
 			EnableStashing: true,
 			Dependencies:   []extension.Dependency{dependency},
@@ -6361,7 +6395,7 @@ func TestRemotingSpawn(t *testing.T) {
 		request := &remote.SpawnRequest{
 			Name:           actorName,
 			Kind:           "actor.exchanger",
-			Singleton:      false,
+			Singleton:      nil,
 			Relocatable:    false,
 			EnableStashing: false,
 			Dependencies:   []extension.Dependency{new(MockDependency)},
@@ -6409,7 +6443,7 @@ func TestRemotingSpawn(t *testing.T) {
 		request := &remote.SpawnRequest{
 			Name:        actorName,
 			Kind:        "actor.exchanger",
-			Singleton:   false,
+			Singleton:   nil,
 			Relocatable: false,
 		}
 		err = remoting.RemoteSpawn(ctx, sys.Host(), int(sys.Port()), request)
@@ -6567,7 +6601,7 @@ func TestRemotingSpawn(t *testing.T) {
 		request := &remote.SpawnRequest{
 			Name:        actorName,
 			Kind:        "actor.exchanger",
-			Singleton:   false,
+			Singleton:   nil,
 			Relocatable: false,
 		}
 		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
@@ -6616,7 +6650,7 @@ func TestRemotingSpawn(t *testing.T) {
 		request := &remote.SpawnRequest{
 			Name:        actorName,
 			Kind:        "actor.exchanger",
-			Singleton:   false,
+			Singleton:   nil,
 			Relocatable: false,
 		}
 		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
@@ -6699,7 +6733,7 @@ func TestRemotingSpawn(t *testing.T) {
 		request := &remote.SpawnRequest{
 			Name:        actorName,
 			Kind:        "actor.exchanger",
-			Singleton:   false,
+			Singleton:   nil,
 			Relocatable: false,
 		}
 		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
@@ -6774,7 +6808,7 @@ func TestRemotingSpawn(t *testing.T) {
 		request := &remote.SpawnRequest{
 			Name:        "",
 			Kind:        "actor.exchanger",
-			Singleton:   false,
+			Singleton:   nil,
 			Relocatable: false,
 		}
 		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
@@ -6819,7 +6853,7 @@ func TestRemotingSpawn(t *testing.T) {
 		request := &remote.SpawnRequest{
 			Name:           actorName,
 			Kind:           "actor.exchanger",
-			Singleton:      false,
+			Singleton:      nil,
 			Relocatable:    false,
 			EnableStashing: false,
 			Dependencies:   []extension.Dependency{dependency},
@@ -6878,7 +6912,7 @@ func TestRemotingSpawn(t *testing.T) {
 		request := &remote.SpawnRequest{
 			Name:           actorName,
 			Kind:           "actor.exchanger",
-			Singleton:      false,
+			Singleton:      nil,
 			Relocatable:    false,
 			EnableStashing: false,
 			Dependencies:   []extension.Dependency{dependency},
@@ -6961,7 +6995,7 @@ func TestRemotingSpawn(t *testing.T) {
 		request := &remote.SpawnRequest{
 			Name:           actorName,
 			Kind:           "actor.exchanger",
-			Singleton:      false,
+			Singleton:      nil,
 			Relocatable:    false,
 			EnableStashing: false,
 			Dependencies:   []extension.Dependency{dependency},
@@ -7044,7 +7078,7 @@ func TestRemotingSpawn(t *testing.T) {
 		request := &remote.SpawnRequest{
 			Name:           actorName,
 			Kind:           "actor.exchanger",
-			Singleton:      false,
+			Singleton:      nil,
 			Relocatable:    false,
 			EnableStashing: false,
 			Dependencies:   []extension.Dependency{dependency},
@@ -7373,9 +7407,13 @@ func TestReplicateActors_ErrorPaths(t *testing.T) {
 	// Expect PutKind to fail for singleton actors and trigger the warning path.
 	addr := address.New("singleton", "test-replication", "127.0.0.1", 8080)
 	singleton := &internalpb.Actor{
-		Address:     addr.String(),
-		Type:        "singleton-kind",
-		IsSingleton: true,
+		Address: addr.String(),
+		Type:    "singleton-kind",
+		Singleton: &internalpb.SingletonSpec{
+			SpawnTimeout: durationpb.New(time.Second),
+			WaitInterval: durationpb.New(500 * time.Millisecond),
+			MaxRetries:   int32(3),
+		},
 	}
 	clusterMock.EXPECT().PutKind(mock.Anything, singleton.GetType()).Return(fmt.Errorf("put kind failure")).Once()
 

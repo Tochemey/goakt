@@ -46,6 +46,7 @@ import (
 	"github.com/travisjeffery/go-dynaport"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/discovery"
@@ -457,9 +458,13 @@ func TestSingleNode(t *testing.T) {
 		actorKind := "kind"
 		addr := address.New(actorName, "system", host, remotingPort)
 		actor := &internalpb.Actor{
-			Address:     addr.String(),
-			Type:        actorKind,
-			IsSingleton: true,
+			Address: addr.String(),
+			Type:    actorKind,
+			Singleton: &internalpb.SingletonSpec{
+				SpawnTimeout: durationpb.New(time.Second),
+				WaitInterval: durationpb.New(300 * time.Millisecond),
+				MaxRetries:   int32(3),
+			},
 		}
 
 		// replicate the actor in the Node

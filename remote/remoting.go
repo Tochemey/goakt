@@ -793,6 +793,15 @@ func (r *remoting) RemoteSpawn(ctx context.Context, host string, port int, spawn
 		return err
 	}
 
+	var singletonSpec *internalpb.SingletonSpec
+	if spawnRequest.Singleton != nil {
+		singletonSpec = &internalpb.SingletonSpec{
+			SpawnTimeout: durationpb.New(spawnRequest.Singleton.SpawnTimeout),
+			WaitInterval: durationpb.New(spawnRequest.Singleton.WaitInterval),
+			MaxRetries:   spawnRequest.Singleton.MaxRetries,
+		}
+	}
+
 	remoteClient := r.RemotingServiceClient(host, port)
 	request := connect.NewRequest(
 		&internalpb.RemoteSpawnRequest{
@@ -800,7 +809,7 @@ func (r *remoting) RemoteSpawn(ctx context.Context, host string, port int, spawn
 			Port:                port32,
 			ActorName:           spawnRequest.Name,
 			ActorType:           spawnRequest.Kind,
-			IsSingleton:         spawnRequest.Singleton,
+			Singleton:           singletonSpec,
 			Relocatable:         spawnRequest.Relocatable,
 			PassivationStrategy: codec.EncodePassivationStrategy(spawnRequest.PassivationStrategy),
 			Dependencies:        dependencies,

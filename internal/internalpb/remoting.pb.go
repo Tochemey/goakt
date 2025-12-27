@@ -590,7 +590,7 @@ type RemoteSpawnRequest struct {
 	// Specifies the actor type
 	ActorType string `protobuf:"bytes,4,opt,name=actor_type,json=actorType,proto3" json:"actor_type,omitempty"`
 	// Specifies if the actor is a singleton
-	IsSingleton bool `protobuf:"varint,5,opt,name=is_singleton,json=isSingleton,proto3" json:"is_singleton,omitempty"`
+	Singleton *SingletonSpec `protobuf:"bytes,5,opt,name=singleton,proto3" json:"singleton,omitempty"`
 	// Specifies if the actor is relocatable
 	Relocatable bool `protobuf:"varint,6,opt,name=relocatable,proto3" json:"relocatable,omitempty"`
 	// Specifies the passivation strategy
@@ -665,11 +665,11 @@ func (x *RemoteSpawnRequest) GetActorType() string {
 	return ""
 }
 
-func (x *RemoteSpawnRequest) GetIsSingleton() bool {
+func (x *RemoteSpawnRequest) GetSingleton() *SingletonSpec {
 	if x != nil {
-		return x.IsSingleton
+		return x.Singleton
 	}
-	return false
+	return nil
 }
 
 func (x *RemoteSpawnRequest) GetRelocatable() bool {
@@ -1154,15 +1154,15 @@ const file_internal_remoting_proto_rawDesc = "" +
 	"\x04host\x18\x01 \x01(\tR\x04host\x12\x12\n" +
 	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\"\x14\n" +
-	"\x12RemoteStopResponse\"\xd0\x03\n" +
+	"\x12RemoteStopResponse\"\xe6\x03\n" +
 	"\x12RemoteSpawnRequest\x12\x12\n" +
 	"\x04host\x18\x01 \x01(\tR\x04host\x12\x12\n" +
 	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x1d\n" +
 	"\n" +
 	"actor_name\x18\x03 \x01(\tR\tactorName\x12\x1d\n" +
 	"\n" +
-	"actor_type\x18\x04 \x01(\tR\tactorType\x12!\n" +
-	"\fis_singleton\x18\x05 \x01(\bR\visSingleton\x12 \n" +
+	"actor_type\x18\x04 \x01(\tR\tactorType\x127\n" +
+	"\tsingleton\x18\x05 \x01(\v2\x19.internalpb.SingletonSpecR\tsingleton\x12 \n" +
 	"\vrelocatable\x18\x06 \x01(\bR\vrelocatable\x12R\n" +
 	"\x14passivation_strategy\x18\a \x01(\v2\x1f.internalpb.PassivationStrategyR\x13passivationStrategy\x12:\n" +
 	"\fdependencies\x18\b \x03(\v2\x16.internalpb.DependencyR\fdependencies\x12!\n" +
@@ -1247,10 +1247,11 @@ var file_internal_remoting_proto_goTypes = []any{
 	(*RemoteActivateGrainResponse)(nil), // 20: internalpb.RemoteActivateGrainResponse
 	(*durationpb.Duration)(nil),         // 21: google.protobuf.Duration
 	(*anypb.Any)(nil),                   // 22: google.protobuf.Any
-	(*PassivationStrategy)(nil),         // 23: internalpb.PassivationStrategy
-	(*Dependency)(nil),                  // 24: internalpb.Dependency
-	(*SupervisorSpec)(nil),              // 25: internalpb.SupervisorSpec
-	(*Grain)(nil),                       // 26: internalpb.Grain
+	(*SingletonSpec)(nil),               // 23: internalpb.SingletonSpec
+	(*PassivationStrategy)(nil),         // 24: internalpb.PassivationStrategy
+	(*Dependency)(nil),                  // 25: internalpb.Dependency
+	(*SupervisorSpec)(nil),              // 26: internalpb.SupervisorSpec
+	(*Grain)(nil),                       // 27: internalpb.Grain
 }
 var file_internal_remoting_proto_depIdxs = []int32{
 	6,  // 0: internalpb.RemoteAskRequest.remote_messages:type_name -> internalpb.RemoteMessage
@@ -1258,41 +1259,42 @@ var file_internal_remoting_proto_depIdxs = []int32{
 	22, // 2: internalpb.RemoteAskResponse.messages:type_name -> google.protobuf.Any
 	6,  // 3: internalpb.RemoteTellRequest.remote_messages:type_name -> internalpb.RemoteMessage
 	22, // 4: internalpb.RemoteMessage.message:type_name -> google.protobuf.Any
-	23, // 5: internalpb.RemoteSpawnRequest.passivation_strategy:type_name -> internalpb.PassivationStrategy
-	24, // 6: internalpb.RemoteSpawnRequest.dependencies:type_name -> internalpb.Dependency
-	25, // 7: internalpb.RemoteSpawnRequest.supervisor:type_name -> internalpb.SupervisorSpec
-	26, // 8: internalpb.RemoteAskGrainRequest.grain:type_name -> internalpb.Grain
-	22, // 9: internalpb.RemoteAskGrainRequest.message:type_name -> google.protobuf.Any
-	21, // 10: internalpb.RemoteAskGrainRequest.request_timeout:type_name -> google.protobuf.Duration
-	22, // 11: internalpb.RemoteAskGrainResponse.message:type_name -> google.protobuf.Any
-	26, // 12: internalpb.RemoteTellGrainRequest.grain:type_name -> internalpb.Grain
-	22, // 13: internalpb.RemoteTellGrainRequest.message:type_name -> google.protobuf.Any
-	26, // 14: internalpb.RemoteActivateGrainRequest.grain:type_name -> internalpb.Grain
-	0,  // 15: internalpb.RemotingService.RemoteAsk:input_type -> internalpb.RemoteAskRequest
-	2,  // 16: internalpb.RemotingService.RemoteTell:input_type -> internalpb.RemoteTellRequest
-	4,  // 17: internalpb.RemotingService.RemoteLookup:input_type -> internalpb.RemoteLookupRequest
-	7,  // 18: internalpb.RemotingService.RemoteReSpawn:input_type -> internalpb.RemoteReSpawnRequest
-	9,  // 19: internalpb.RemotingService.RemoteStop:input_type -> internalpb.RemoteStopRequest
-	11, // 20: internalpb.RemotingService.RemoteSpawn:input_type -> internalpb.RemoteSpawnRequest
-	13, // 21: internalpb.RemotingService.RemoteReinstate:input_type -> internalpb.RemoteReinstateRequest
-	15, // 22: internalpb.RemotingService.RemoteAskGrain:input_type -> internalpb.RemoteAskGrainRequest
-	17, // 23: internalpb.RemotingService.RemoteTellGrain:input_type -> internalpb.RemoteTellGrainRequest
-	19, // 24: internalpb.RemotingService.RemoteActivateGrain:input_type -> internalpb.RemoteActivateGrainRequest
-	1,  // 25: internalpb.RemotingService.RemoteAsk:output_type -> internalpb.RemoteAskResponse
-	3,  // 26: internalpb.RemotingService.RemoteTell:output_type -> internalpb.RemoteTellResponse
-	5,  // 27: internalpb.RemotingService.RemoteLookup:output_type -> internalpb.RemoteLookupResponse
-	8,  // 28: internalpb.RemotingService.RemoteReSpawn:output_type -> internalpb.RemoteReSpawnResponse
-	10, // 29: internalpb.RemotingService.RemoteStop:output_type -> internalpb.RemoteStopResponse
-	12, // 30: internalpb.RemotingService.RemoteSpawn:output_type -> internalpb.RemoteSpawnResponse
-	14, // 31: internalpb.RemotingService.RemoteReinstate:output_type -> internalpb.RemoteReinstateResponse
-	16, // 32: internalpb.RemotingService.RemoteAskGrain:output_type -> internalpb.RemoteAskGrainResponse
-	18, // 33: internalpb.RemotingService.RemoteTellGrain:output_type -> internalpb.RemoteTellGrainResponse
-	20, // 34: internalpb.RemotingService.RemoteActivateGrain:output_type -> internalpb.RemoteActivateGrainResponse
-	25, // [25:35] is the sub-list for method output_type
-	15, // [15:25] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	23, // 5: internalpb.RemoteSpawnRequest.singleton:type_name -> internalpb.SingletonSpec
+	24, // 6: internalpb.RemoteSpawnRequest.passivation_strategy:type_name -> internalpb.PassivationStrategy
+	25, // 7: internalpb.RemoteSpawnRequest.dependencies:type_name -> internalpb.Dependency
+	26, // 8: internalpb.RemoteSpawnRequest.supervisor:type_name -> internalpb.SupervisorSpec
+	27, // 9: internalpb.RemoteAskGrainRequest.grain:type_name -> internalpb.Grain
+	22, // 10: internalpb.RemoteAskGrainRequest.message:type_name -> google.protobuf.Any
+	21, // 11: internalpb.RemoteAskGrainRequest.request_timeout:type_name -> google.protobuf.Duration
+	22, // 12: internalpb.RemoteAskGrainResponse.message:type_name -> google.protobuf.Any
+	27, // 13: internalpb.RemoteTellGrainRequest.grain:type_name -> internalpb.Grain
+	22, // 14: internalpb.RemoteTellGrainRequest.message:type_name -> google.protobuf.Any
+	27, // 15: internalpb.RemoteActivateGrainRequest.grain:type_name -> internalpb.Grain
+	0,  // 16: internalpb.RemotingService.RemoteAsk:input_type -> internalpb.RemoteAskRequest
+	2,  // 17: internalpb.RemotingService.RemoteTell:input_type -> internalpb.RemoteTellRequest
+	4,  // 18: internalpb.RemotingService.RemoteLookup:input_type -> internalpb.RemoteLookupRequest
+	7,  // 19: internalpb.RemotingService.RemoteReSpawn:input_type -> internalpb.RemoteReSpawnRequest
+	9,  // 20: internalpb.RemotingService.RemoteStop:input_type -> internalpb.RemoteStopRequest
+	11, // 21: internalpb.RemotingService.RemoteSpawn:input_type -> internalpb.RemoteSpawnRequest
+	13, // 22: internalpb.RemotingService.RemoteReinstate:input_type -> internalpb.RemoteReinstateRequest
+	15, // 23: internalpb.RemotingService.RemoteAskGrain:input_type -> internalpb.RemoteAskGrainRequest
+	17, // 24: internalpb.RemotingService.RemoteTellGrain:input_type -> internalpb.RemoteTellGrainRequest
+	19, // 25: internalpb.RemotingService.RemoteActivateGrain:input_type -> internalpb.RemoteActivateGrainRequest
+	1,  // 26: internalpb.RemotingService.RemoteAsk:output_type -> internalpb.RemoteAskResponse
+	3,  // 27: internalpb.RemotingService.RemoteTell:output_type -> internalpb.RemoteTellResponse
+	5,  // 28: internalpb.RemotingService.RemoteLookup:output_type -> internalpb.RemoteLookupResponse
+	8,  // 29: internalpb.RemotingService.RemoteReSpawn:output_type -> internalpb.RemoteReSpawnResponse
+	10, // 30: internalpb.RemotingService.RemoteStop:output_type -> internalpb.RemoteStopResponse
+	12, // 31: internalpb.RemotingService.RemoteSpawn:output_type -> internalpb.RemoteSpawnResponse
+	14, // 32: internalpb.RemotingService.RemoteReinstate:output_type -> internalpb.RemoteReinstateResponse
+	16, // 33: internalpb.RemotingService.RemoteAskGrain:output_type -> internalpb.RemoteAskGrainResponse
+	18, // 34: internalpb.RemotingService.RemoteTellGrain:output_type -> internalpb.RemoteTellGrainResponse
+	20, // 35: internalpb.RemotingService.RemoteActivateGrain:output_type -> internalpb.RemoteActivateGrainResponse
+	26, // [26:36] is the sub-list for method output_type
+	16, // [16:26] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_internal_remoting_proto_init() }

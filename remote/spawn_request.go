@@ -26,12 +26,60 @@ package remote
 
 import (
 	"strings"
+	"time"
 
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/internal/validation"
 	"github.com/tochemey/goakt/v3/passivation"
 	"github.com/tochemey/goakt/v3/supervisor"
 )
+
+// SingletonSpec defines configuration options for *cluster singletons*.
+//
+// A cluster singleton is an actor for which only one active instance is allowed
+// across the whole cluster at any moment. SingletonSpec controls how long the
+// caller should wait and how aggressively it should poll when the singleton is
+// being created (or relocated) on some node.
+//
+// This spec does not change *where* the singleton is placed; it only governs the
+// client-side waiting/retry behavior while ensuring the singleton becomes available.
+//
+// All durations are expressed as integers to match the wire format used by remote
+// spawn requests (typically representing a time.Duration in nanoseconds or
+// milliseconds depending on the surrounding API). Use the constructor/helpers
+// provided by the package (if any) to avoid unit mistakes.
+type SingletonSpec struct {
+	// SpawnTimeout is the maximum time to wait for the singleton actor to become
+	// available after a spawn request is issued.
+	//
+	// This should account for network latency, leader/placement decisions, and the
+	// time required to start the actor on the chosen node.
+	//
+	// A zero value usually means "use the system default" (if supported by the caller).
+	SpawnTimeout time.Duration
+
+	// WaitInterval is the delay between successive checks (polls) for the singleton’s
+	// spawn/availability status.
+	//
+	// Smaller values detect readiness sooner but increase control-plane traffic;
+	// larger values reduce traffic but may add latency before the caller observes that
+	// the singleton is ready.
+	//
+	// A zero value usually means "use the system default" (if supported by the caller).
+	WaitInterval time.Duration
+
+	// MaxRetries is the maximum number of status-check attempts performed while waiting
+	// for the singleton to become available.
+	//
+	// Implementations typically stop waiting when either:
+	//   - the singleton becomes available, or
+	//   - MaxRetries is reached, or
+	//   - SpawnTimeout elapses (whichever happens first).
+	//
+	// A value <= 0 usually means "use the system default" or "do not retry" depending on
+	// the caller semantics.
+	MaxRetries int32
+}
 
 // SpawnRequest defines configuration options for spawning an actor on a remote node.
 // These options control the actor’s identity, behavior, and lifecycle, especially in scenarios involving node failures or load balancing.
@@ -48,7 +96,7 @@ type SpawnRequest struct {
 	// can exist across the entire cluster at any given time.
 	// This option is useful for actors responsible for global coordination or shared state.
 	// When Singleton is set to true it means that the given actor is automatically relocatable
-	Singleton bool
+	Singleton *SingletonSpec
 
 	// Relocatable indicates whether the actor can be automatically relocated to another node
 	// if its current host node unexpectedly shuts down.
@@ -150,7 +198,7 @@ func (s *SpawnRequest) Validate() error {
 func (s *SpawnRequest) Sanitize() {
 	s.Name = strings.TrimSpace(s.Name)
 	s.Kind = strings.TrimSpace(s.Kind)
-	if s.Singleton {
+	if s.Singleton != nil {
 		s.Relocatable = true
 	}
 }

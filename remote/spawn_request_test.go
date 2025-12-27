@@ -27,6 +27,7 @@ package remote
 import (
 	"encoding"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -52,9 +53,13 @@ var _ extension.Dependency = (*mockDependency)(nil)
 func TestSpawnRequestValidateAndSanitize(t *testing.T) {
 	t.Run("valid request", func(t *testing.T) {
 		req := &SpawnRequest{
-			Name:           " actor ",
-			Kind:           " kind ",
-			Singleton:      true,
+			Name: " actor ",
+			Kind: " kind ",
+			Singleton: &SingletonSpec{
+				SpawnTimeout: time.Second,
+				WaitInterval: 300 * time.Millisecond,
+				MaxRetries:   3,
+			},
 			Relocatable:    false,
 			Dependencies:   []extension.Dependency{},
 			EnableStashing: true,

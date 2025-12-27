@@ -27,6 +27,8 @@ package actor
 import (
 	"context"
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -88,6 +90,23 @@ func TestSingletonActor(t *testing.T) {
 		require.NoError(t, sd2.Close())
 		// shutdown the nats server gracefully
 		srv.Shutdown()
+	})
+	t.Run("With Singleton Actor returns error when retries overflow int32", func(t *testing.T) {
+		if strconv.IntSize == 32 {
+			t.Skip("int overflow case not representable on 32-bit platforms")
+		}
+
+		ctx := context.Background()
+		system := MockSingletonClusterReadyActorSystem(t)
+		clusterMock := mockcluster.NewCluster(t)
+		system.locker.Lock()
+		system.cluster = clusterMock
+		system.locker.Unlock()
+
+		retries := int(math.MaxInt32) + 1
+		err := system.SpawnSingleton(ctx, "singleton", NewMockActor(), WithSingletonSpawnRetries(retries))
+		require.Error(t, err)
+		require.ErrorContains(t, err, "out of range for int32")
 	})
 	t.Run("With Singleton Actor when cluster is not enabled returns error", func(t *testing.T) {
 		ctx := context.TODO()
@@ -173,10 +192,19 @@ func TestSingletonActor(t *testing.T) {
 
 		system := &actorSystem{remoting: rem}
 
+		singletonSpec := &remote.SingletonSpec{
+			SpawnTimeout: time.Second,
+			WaitInterval: time.Millisecond,
+			MaxRetries:   2,
+		}
+
 		expectedErr := fmt.Errorf("cluster unreachable")
 		cl.EXPECT().Peers(mock.Anything).Return(nil, expectedErr).Once()
 
-		err := system.spawnSingletonOnLeader(ctx, cl, "singleton", NewMockActor())
+		err := system.spawnSingletonOnLeader(ctx, cl, "singleton", NewMockActor(),
+			singletonSpec.SpawnTimeout,
+			singletonSpec.WaitInterval,
+			singletonSpec.MaxRetries)
 		require.Error(t, err)
 		require.ErrorIs(t, err, expectedErr)
 	})
@@ -187,6 +215,12 @@ func TestSingletonActor(t *testing.T) {
 		rem := mockremote.NewRemoting(t)
 
 		system := &actorSystem{remoting: rem}
+
+		singletonSpec := &remote.SingletonSpec{
+			SpawnTimeout: time.Second,
+			WaitInterval: time.Millisecond,
+			MaxRetries:   2,
+		}
 
 		cl.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{
 			{
@@ -203,7 +237,10 @@ func TestSingletonActor(t *testing.T) {
 			},
 		}, nil).Once()
 
-		err := system.spawnSingletonOnLeader(ctx, cl, "singleton", NewMockActor())
+		err := system.spawnSingletonOnLeader(ctx, cl, "singleton", NewMockActor(),
+			singletonSpec.SpawnTimeout,
+			singletonSpec.WaitInterval,
+			singletonSpec.MaxRetries)
 		require.Error(t, err)
 		require.ErrorIs(t, err, errors.ErrLeaderNotFound)
 	})
@@ -236,6 +273,11 @@ func TestSingletonActor(t *testing.T) {
 		actor := NewMockActor()
 		expectedKind := registry.Name(actor)
 		expectedErr := fmt.Errorf("remote spawn failure")
+		singletonSpec := &remote.SingletonSpec{
+			SpawnTimeout: 5 * time.Second,
+			WaitInterval: 500 * time.Millisecond,
+			MaxRetries:   3,
+		}
 
 		rem.EXPECT().
 			RemoteSpawn(mock.Anything, leader.Host, leader.RemotingPort, mock.MatchedBy(
@@ -243,13 +285,18 @@ func TestSingletonActor(t *testing.T) {
 					return req != nil &&
 						req.Name == name &&
 						req.Kind == expectedKind &&
-						req.Singleton
+						req.Singleton.SpawnTimeout == singletonSpec.SpawnTimeout &&
+						req.Singleton.WaitInterval == singletonSpec.WaitInterval &&
+						req.Singleton.MaxRetries == singletonSpec.MaxRetries
 				}),
 			).
 			Return(expectedErr).
 			Once()
 
-		err := system.spawnSingletonOnLeader(ctx, cl, name, actor)
+		err := system.spawnSingletonOnLeader(ctx, cl, name, actor,
+			singletonSpec.SpawnTimeout,
+			singletonSpec.WaitInterval,
+			singletonSpec.MaxRetries)
 		require.Error(t, err)
 		require.ErrorIs(t, err, expectedErr)
 	})
@@ -276,6 +323,12 @@ func TestSingletonActor(t *testing.T) {
 			Coordinator:   true,
 		}
 
+		singletonSpec := &remote.SingletonSpec{
+			SpawnTimeout: 5 * time.Second,
+			WaitInterval: 500 * time.Millisecond,
+			MaxRetries:   3,
+		}
+
 		clusterMock.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{leader}, nil).Once()
 		remotingMock.EXPECT().
 			RemoteSpawn(
@@ -286,12 +339,18 @@ func TestSingletonActor(t *testing.T) {
 					return req != nil &&
 						req.Name == "singleton" &&
 						req.Kind == "actor.mockactor" &&
-						req.Singleton &&
+						req.Singleton != nil &&
+						req.Singleton.SpawnTimeout == singletonSpec.SpawnTimeout &&
+						req.Singleton.WaitInterval == singletonSpec.WaitInterval &&
+						req.Singleton.MaxRetries == singletonSpec.MaxRetries &&
 						req.Role == nil
 				}),
 			).Return(nil).Once()
 
-		err := system.SpawnSingleton(ctx, "singleton", NewMockActor())
+		err := system.SpawnSingleton(ctx, "singleton", NewMockActor(),
+			WithSingletonSpawnRetries(int(singletonSpec.MaxRetries)),
+			WithSingletonSpawnWaitInterval(singletonSpec.WaitInterval),
+			WithSingletonSpawnTimeout(singletonSpec.SpawnTimeout))
 		require.NoError(t, err)
 	})
 	t.Run("With role and member error returns error", func(t *testing.T) {
@@ -301,6 +360,12 @@ func TestSingletonActor(t *testing.T) {
 		system := MockSingletonClusterReadyActorSystem(t)
 		system.remoting = remotingMock
 
+		singletonSpec := &remote.SingletonSpec{
+			SpawnTimeout: time.Second,
+			WaitInterval: time.Millisecond,
+			MaxRetries:   2,
+		}
+
 		system.locker.Lock()
 		system.cluster = clusterMock
 		system.locker.Unlock()
@@ -308,7 +373,10 @@ func TestSingletonActor(t *testing.T) {
 		expectedErr := fmt.Errorf("cluster unavailable")
 		clusterMock.EXPECT().Members(mock.Anything).Return(nil, expectedErr).Once()
 
-		err := system.spawnSingletonWithRole(ctx, clusterMock, "singleton", NewMockActor(), "blue")
+		err := system.spawnSingletonWithRole(ctx, clusterMock, "singleton", NewMockActor(), "blue",
+			singletonSpec.SpawnTimeout,
+			singletonSpec.WaitInterval,
+			singletonSpec.MaxRetries)
 		require.Error(t, err)
 		require.ErrorContains(t, err, expectedErr.Error())
 	})
@@ -325,6 +393,12 @@ func TestSingletonActor(t *testing.T) {
 		system.cluster = clusterMock
 		system.locker.Unlock()
 
+		singletonSpec := &remote.SingletonSpec{
+			SpawnTimeout: time.Second,
+			WaitInterval: time.Millisecond,
+			MaxRetries:   2,
+		}
+
 		role := "roleA"
 		clusterMock.EXPECT().
 			Members(mock.Anything).
@@ -340,7 +414,10 @@ func TestSingletonActor(t *testing.T) {
 			}, nil).
 			Once()
 
-		err := system.spawnSingletonWithRole(ctx, clusterMock, "singleton", NewMockActor(), role)
+		err := system.spawnSingletonWithRole(ctx, clusterMock, "singleton", NewMockActor(), role,
+			singletonSpec.SpawnTimeout,
+			singletonSpec.WaitInterval,
+			singletonSpec.MaxRetries)
 		require.Error(t, err)
 		require.EqualError(t, err, fmt.Sprintf("no cluster members found with role %s", role))
 	})
@@ -382,6 +459,12 @@ func TestSingletonActor(t *testing.T) {
 			Return([]*cluster.Peer{local, remoteLeader}, nil).
 			Once()
 
+		singletonSpec := &remote.SingletonSpec{
+			SpawnTimeout: 5 * time.Second,
+			WaitInterval: 500 * time.Millisecond,
+			MaxRetries:   3,
+		}
+
 		remotingMock.EXPECT().
 			RemoteSpawn(
 				mock.Anything,
@@ -391,13 +474,19 @@ func TestSingletonActor(t *testing.T) {
 					return req != nil &&
 						req.Name == "singleton" &&
 						req.Kind == "actor.mockactor" &&
-						req.Singleton &&
+						req.Singleton != nil &&
+						req.Singleton.SpawnTimeout == singletonSpec.SpawnTimeout &&
+						req.Singleton.WaitInterval == singletonSpec.WaitInterval &&
+						req.Singleton.MaxRetries == singletonSpec.MaxRetries &&
 						req.Role != nil &&
 						*req.Role == role
 				}),
 			).Return(nil).Once()
 
-		err := system.spawnSingletonWithRole(ctx, clusterMock, "singleton", NewMockActor(), role)
+		err := system.spawnSingletonWithRole(ctx, clusterMock, "singleton", NewMockActor(), role,
+			singletonSpec.SpawnTimeout,
+			singletonSpec.WaitInterval,
+			singletonSpec.MaxRetries)
 		require.NoError(t, err)
 	})
 	t.Run("With role happy path", func(t *testing.T) {
@@ -447,7 +536,16 @@ func TestSingletonActor(t *testing.T) {
 			Return(false, nil).
 			Once()
 
-		err := system.spawnSingletonWithRole(ctx, clusterMock, "singleton", NewMockActor(), role)
+		singletonSpec := &remote.SingletonSpec{
+			SpawnTimeout: time.Second,
+			WaitInterval: time.Millisecond,
+			MaxRetries:   2,
+		}
+
+		err := system.spawnSingletonWithRole(ctx, clusterMock, "singleton", NewMockActor(), role,
+			singletonSpec.SpawnTimeout,
+			singletonSpec.WaitInterval,
+			singletonSpec.MaxRetries)
 		require.NoError(t, err)
 		require.Equal(t, uint64(1), system.actorsCounter.Load())
 	})
@@ -673,6 +771,12 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 		}
 		clusterMock.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{leader}, nil).Once()
 
+		singletonSpec := &remote.SingletonSpec{
+			SpawnTimeout: time.Second,
+			WaitInterval: time.Millisecond,
+			MaxRetries:   2,
+		}
+
 		remotingMock.EXPECT().
 			RemoteSpawn(
 				mock.Anything,
@@ -682,7 +786,10 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 					return req != nil &&
 						req.Name == "singleton" &&
 						req.Kind == "actor.mockactor" &&
-						req.Singleton &&
+						req.Singleton != nil &&
+						req.Singleton.SpawnTimeout == singletonSpec.SpawnTimeout &&
+						req.Singleton.WaitInterval == singletonSpec.WaitInterval &&
+						req.Singleton.MaxRetries == singletonSpec.MaxRetries &&
 						req.Role == nil
 				}),
 			).
@@ -798,10 +905,17 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 			Roles:         []string{role},
 			CreatedAt:     time.Now().Add(1 * time.Minute).UnixNano(),
 		}
+
 		clusterMock.EXPECT().
 			Members(mock.Anything).
 			Return([]*cluster.Peer{rolePeer}, nil).
 			Once()
+
+		singletonSpec := &remote.SingletonSpec{
+			SpawnTimeout: time.Second,
+			WaitInterval: time.Millisecond,
+			MaxRetries:   2,
+		}
 
 		remotingMock.EXPECT().
 			RemoteSpawn(
@@ -812,7 +926,10 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 					return req != nil &&
 						req.Name == "singleton" &&
 						req.Kind == "actor.mockactor" &&
-						req.Singleton &&
+						req.Singleton != nil &&
+						req.Singleton.SpawnTimeout == singletonSpec.SpawnTimeout &&
+						req.Singleton.WaitInterval == singletonSpec.WaitInterval &&
+						req.Singleton.MaxRetries == singletonSpec.MaxRetries &&
 						req.Role != nil &&
 						*req.Role == role
 				}),
@@ -853,7 +970,14 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 			RemotingPort: ports[2],
 			Coordinator:  true,
 		}
+
 		clusterMock.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{leader}, nil).Once()
+
+		singletonSpec := &remote.SingletonSpec{
+			SpawnTimeout: time.Second,
+			WaitInterval: time.Millisecond,
+			MaxRetries:   2,
+		}
 
 		remotingMock.EXPECT().
 			RemoteSpawn(
@@ -864,7 +988,10 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 					return req != nil &&
 						req.Name == "singleton" &&
 						req.Kind == "actor.mockactor" &&
-						req.Singleton &&
+						req.Singleton != nil &&
+						req.Singleton.SpawnTimeout == singletonSpec.SpawnTimeout &&
+						req.Singleton.WaitInterval == singletonSpec.WaitInterval &&
+						req.Singleton.MaxRetries == singletonSpec.MaxRetries &&
 						req.Role == nil
 				}),
 			).
@@ -920,6 +1047,12 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 				clusterMock.EXPECT().IsLeader(mock.Anything).Return(false).Times(2)
 				clusterMock.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{leader}, nil).Times(2)
 
+				singletonSpec := &remote.SingletonSpec{
+					SpawnTimeout: time.Second,
+					WaitInterval: time.Millisecond,
+					MaxRetries:   2,
+				}
+
 				remotingMock.EXPECT().
 					RemoteSpawn(
 						mock.Anything,
@@ -929,7 +1062,10 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 							return req != nil &&
 								req.Name == "singleton" &&
 								req.Kind == "actor.mockactor" &&
-								req.Singleton &&
+								req.Singleton != nil &&
+								req.Singleton.SpawnTimeout == singletonSpec.SpawnTimeout &&
+								req.Singleton.WaitInterval == singletonSpec.WaitInterval &&
+								req.Singleton.MaxRetries == singletonSpec.MaxRetries &&
 								req.Role == nil
 						}),
 					).
@@ -945,7 +1081,10 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 							return req != nil &&
 								req.Name == "singleton" &&
 								req.Kind == "actor.mockactor" &&
-								req.Singleton &&
+								req.Singleton != nil &&
+								req.Singleton.SpawnTimeout == singletonSpec.SpawnTimeout &&
+								req.Singleton.WaitInterval == singletonSpec.WaitInterval &&
+								req.Singleton.MaxRetries == singletonSpec.MaxRetries &&
 								req.Role == nil
 						}),
 					).

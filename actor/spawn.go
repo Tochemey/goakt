@@ -32,6 +32,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/flowchartsman/retry"
@@ -41,6 +42,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/pointer"
 	"github.com/tochemey/goakt/v3/internal/registry"
+	"github.com/tochemey/goakt/v3/internal/strconvx"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/supervisor"
 )
@@ -221,7 +223,7 @@ func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opt
 	request := &remote.SpawnRequest{
 		Name:                name,
 		Kind:                registry.Name(actor),
-		Singleton:           false,
+		Singleton:           nil,
 		Relocatable:         config.relocatable,
 		PassivationStrategy: config.passivationStrategy,
 		Dependencies:        config.dependencies,
@@ -284,6 +286,11 @@ func (x *actorSystem) SpawnRouter(ctx context.Context, name string, poolSize int
 // deadline/unavailable errors) are retried until the retry budget is exhausted or the
 // context is done.
 //
+// Clustered usage note:
+// SpawnSingleton should be called only on the leader node. Concurrent calls from
+// multiple nodes can race with cluster state propagation and surface
+// ErrActorAlreadyExists even though the singleton was successfully created.
+//
 // Errors:
 //   - ErrActorSystemNotStarted, ErrClusterDisabled when the system is not ready.
 //   - ErrActorAlreadyExists when the requested name is already used by another actor.
@@ -302,6 +309,13 @@ func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Act
 
 	config := newClusterSingletonConfig(opts...)
 	role := strings.TrimSpace(pointer.Deref(config.Role(), ""))
+	spawnTimeout := config.spawnTimeout
+	waitInterval := config.waitInterval
+	numberOfRetries, err := strconvx.Int2Int32(config.numberOfRetries)
+	if err != nil {
+		return err
+	}
+
 	singletonKind := registry.Name(actor)
 	if role != "" {
 		singletonKind = kindRole(singletonKind, role)
@@ -309,15 +323,15 @@ func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Act
 
 	return x.retrySpawnSingleton(ctx, config, singletonKind, func(ctx context.Context) error {
 		if role != "" {
-			return x.spawnSingletonWithRole(ctx, cl, name, actor, role)
+			return x.spawnSingletonWithRole(ctx, cl, name, actor, role, spawnTimeout, waitInterval, numberOfRetries)
 		}
 
 		// only create the singleton actor on the oldest node in the cluster
 		if !cl.IsLeader(ctx) {
-			return x.spawnSingletonOnLeader(ctx, cl, name, actor)
+			return x.spawnSingletonOnLeader(ctx, cl, name, actor, spawnTimeout, waitInterval, numberOfRetries)
 		}
 
-		return x.spawnSingletonOnLocal(ctx, name, actor, nil)
+		return x.spawnSingletonOnLocal(ctx, name, actor, nil, spawnTimeout, waitInterval, numberOfRetries)
 	})
 }
 
@@ -433,7 +447,7 @@ func isNoRoleMembersError(err error) bool {
 	return errors.As(err, &noRole)
 }
 
-func (x *actorSystem) spawnSingletonWithRole(ctx context.Context, cl cluster.Cluster, name string, actor Actor, role string) error {
+func (x *actorSystem) spawnSingletonWithRole(ctx context.Context, cl cluster.Cluster, name string, actor Actor, role string, spawnTimeout, waitInterval time.Duration, retries int32) error {
 	// fetch all cluster members
 	members, err := cl.Members(ctx)
 	if err != nil {
@@ -465,17 +479,21 @@ func (x *actorSystem) spawnSingletonWithRole(ctx context.Context, cl cluster.Clu
 		)
 
 		return x.remoting.RemoteSpawn(ctx, host, port, &remote.SpawnRequest{
-			Name:      name,
-			Kind:      actorType,
-			Singleton: true,
-			Role:      pointer.To(role),
+			Name: name,
+			Kind: actorType,
+			Singleton: &remote.SingletonSpec{
+				SpawnTimeout: spawnTimeout,
+				WaitInterval: waitInterval,
+				MaxRetries:   retries,
+			},
+			Role: pointer.To(role),
 		})
 	}
 
-	return x.spawnSingletonOnLocal(ctx, name, actor, pointer.To(role))
+	return x.spawnSingletonOnLocal(ctx, name, actor, pointer.To(role), spawnTimeout, waitInterval, retries)
 }
 
-func (x *actorSystem) spawnSingletonOnLocal(ctx context.Context, name string, actor Actor, role *string) error {
+func (x *actorSystem) spawnSingletonOnLocal(ctx context.Context, name string, actor Actor, role *string, spawnTimeout, waitInterval time.Duration, retries int32) error {
 	// check some preconditions
 	if err := x.checkSpawnPreconditions(ctx, name, actor, true, role); err != nil {
 		return err
@@ -483,7 +501,11 @@ func (x *actorSystem) spawnSingletonOnLocal(ctx context.Context, name string, ac
 
 	pid, err := x.configPID(ctx, name, actor,
 		WithLongLived(),
-		withSingleton(),
+		withSingleton(&singletonSpec{
+			SpawnTimeout: spawnTimeout,
+			WaitInterval: waitInterval,
+			MaxRetries:   retries,
+		}),
 		WithRole(pointer.Deref(role, "")),
 		WithSupervisor(
 			supervisor.NewSupervisor(
