@@ -2097,10 +2097,20 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
+	wrapSpawnErr := func(err error) error {
+		if errors.Is(err, gerrors.ErrActorAlreadyExists) || errors.Is(err, gerrors.ErrSingletonAlreadyExists) {
+			return connect.NewError(connect.CodeAlreadyExists, err)
+		}
+		if cluster.IsQuorumError(err) {
+			return connect.NewError(connect.CodeUnavailable, cluster.NormalizeQuorumError(err))
+		}
+		return connect.NewError(connect.CodeInternal, err)
+	}
+
 	if msg.GetIsSingleton() {
 		if err := x.SpawnSingleton(ctx, msg.GetActorName(), actor); err != nil {
 			logger.Errorf("failed to create actor=(%s) on [host=%s, port=%d]: reason: (%v)", msg.GetActorName(), msg.GetHost(), msg.GetPort(), err)
-			return nil, connect.NewError(connect.CodeInternal, err)
+			return nil, wrapSpawnErr(err)
 		}
 	}
 
@@ -2138,7 +2148,7 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 
 	if _, err = x.Spawn(ctx, msg.GetActorName(), actor, opts...); err != nil {
 		logger.Errorf("failed to create actor=(%s) on [host=%s, port=%d]: reason: (%v)", msg.GetActorName(), msg.GetHost(), msg.GetPort(), err)
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, wrapSpawnErr(err)
 	}
 
 	logger.Infof("actor=(%s) successfully created on [host=%s, port=%d]", msg.GetActorName(), msg.GetHost(), msg.GetPort())
@@ -3440,15 +3450,6 @@ func (x *actorSystem) spawnDeadletter(ctx context.Context) error {
 func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName string, actor Actor, singleton bool, singletonRole *string) error {
 	// check the existence of the actor given the kind prior to creating it
 	if x.clusterEnabled.Load() {
-		// here we make sure in cluster mode that the given actor is uniquely created
-		exists, err := x.cluster.ActorExists(ctx, actorName)
-		if err != nil {
-			return err
-		}
-		if exists {
-			return gerrors.NewErrActorAlreadyExists(actorName)
-		}
-
 		// a singleton actor must only have one instance at a given time of its kind
 		// in the whole cluster
 		if singleton {
@@ -3466,7 +3467,18 @@ func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName str
 			if id != "" {
 				return gerrors.ErrSingletonAlreadyExists
 			}
+		}
 
+		// here we make sure in cluster mode that the given actor is uniquely created
+		exists, err := x.cluster.ActorExists(ctx, actorName)
+		if err != nil {
+			return err
+		}
+		if exists {
+			return gerrors.NewErrActorAlreadyExists(actorName)
+		}
+
+		if singleton {
 			return nil
 		}
 	}

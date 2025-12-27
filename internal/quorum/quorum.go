@@ -22,36 +22,36 @@
  * SOFTWARE.
  */
 
-package cluster
+package quorum
 
 import (
 	"errors"
 
-	"github.com/tochemey/goakt/v3/internal/quorum"
+	gerrors "github.com/tochemey/goakt/v3/errors"
+	"github.com/tochemey/olric"
 )
 
-var (
-	// ErrActorNotFound is return when an actor is not found
-	ErrActorNotFound = errors.New("actor not found")
-	// ErrPeerSyncNotFound is returned when a peerSync record is not found
-	ErrPeerSyncNotFound = errors.New("peerSync record not found")
-	// ErrInvalidTLSConfiguration is returned whent the TLS configuration is not properly set
-	ErrInvalidTLSConfiguration = errors.New("TLS configuration is invalid")
-	// ErrEngineNotRunning is returned when the cluster engine is not running
-	ErrEngineNotRunning = errors.New("cluster engine is not running")
-	// ErrGrainNotFound is returned when a grain is not found
-	ErrGrainNotFound = errors.New("grain not found")
-	// ErrGrainAlreadyExists is returned when a grain entry already exists.
-	ErrGrainAlreadyExists = errors.New("grain already exists")
-)
-
-// IsQuorumError returns true when a cluster operation failed due to quorum constraints.
+// IsQuorumError returns true when the error indicates a quorum-related failure.
 func IsQuorumError(err error) bool {
-	return quorum.IsQuorumError(err)
+	return errors.Is(err, gerrors.ErrWriteQuorum) ||
+		errors.Is(err, gerrors.ErrReadQuorum) ||
+		errors.Is(err, gerrors.ErrClusterQuorum) ||
+		errors.Is(err, olric.ErrWriteQuorum) ||
+		errors.Is(err, olric.ErrReadQuorum) ||
+		errors.Is(err, olric.ErrClusterQuorum)
 }
 
 // NormalizeQuorumError maps backend quorum errors to the exported Go-Akt errors.
 // It returns the original error when it does not represent a quorum failure.
 func NormalizeQuorumError(err error) error {
-	return quorum.NormalizeQuorumError(err)
+	switch {
+	case errors.Is(err, gerrors.ErrWriteQuorum) || errors.Is(err, olric.ErrWriteQuorum):
+		return gerrors.ErrWriteQuorum
+	case errors.Is(err, gerrors.ErrReadQuorum) || errors.Is(err, olric.ErrReadQuorum):
+		return gerrors.ErrReadQuorum
+	case errors.Is(err, gerrors.ErrClusterQuorum) || errors.Is(err, olric.ErrClusterQuorum):
+		return gerrors.ErrClusterQuorum
+	default:
+		return err
+	}
 }

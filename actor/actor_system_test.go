@@ -49,6 +49,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"github.com/tochemey/olric"
 	"github.com/travisjeffery/go-dynaport"
 	"go.opentelemetry.io/otel"
 	noopmetric "go.opentelemetry.io/otel/metric/noop"
@@ -1790,6 +1791,66 @@ func TestActorSystem(t *testing.T) {
 				assert.NoError(t, err)
 			},
 		)
+	})
+
+	t.Run("RemoteSpawn maps already exists errors", func(t *testing.T) {
+		ctx := context.Background()
+		system := MockSingletonClusterReadyActorSystem(t)
+		system.remoteConfig = remote.NewConfig("127.0.0.1", 9001)
+
+		clusterMock := mockscluster.NewCluster(t)
+		system.locker.Lock()
+		system.cluster = clusterMock
+		system.locker.Unlock()
+
+		system.registry.Register(new(MockActor))
+		actorType := registry.Name(new(MockActor))
+
+		clusterMock.EXPECT().ActorExists(mock.Anything, "actor").Return(true, nil).Once()
+
+		request := connect.NewRequest(&internalpb.RemoteSpawnRequest{
+			Host:        system.remoteConfig.BindAddr(),
+			Port:        int32(system.remoteConfig.BindPort()),
+			ActorName:   "actor",
+			ActorType:   actorType,
+			IsSingleton: false,
+			Relocatable: true,
+		})
+
+		_, err := system.RemoteSpawn(ctx, request)
+		require.Error(t, err)
+		require.Equal(t, connect.CodeAlreadyExists, connect.CodeOf(err))
+		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
+	})
+
+	t.Run("RemoteSpawn maps quorum errors", func(t *testing.T) {
+		ctx := context.Background()
+		system := MockSingletonClusterReadyActorSystem(t)
+		system.remoteConfig = remote.NewConfig("127.0.0.1", 9002)
+
+		clusterMock := mockscluster.NewCluster(t)
+		system.locker.Lock()
+		system.cluster = clusterMock
+		system.locker.Unlock()
+
+		system.registry.Register(new(MockActor))
+		actorType := registry.Name(new(MockActor))
+
+		clusterMock.EXPECT().ActorExists(mock.Anything, "actor").Return(false, olric.ErrWriteQuorum).Once()
+
+		request := connect.NewRequest(&internalpb.RemoteSpawnRequest{
+			Host:        system.remoteConfig.BindAddr(),
+			Port:        int32(system.remoteConfig.BindPort()),
+			ActorName:   "actor",
+			ActorType:   actorType,
+			IsSingleton: false,
+			Relocatable: true,
+		})
+
+		_, err := system.RemoteSpawn(ctx, request)
+		require.Error(t, err)
+		require.Equal(t, connect.CodeUnavailable, connect.CodeOf(err))
+		require.ErrorIs(t, err, gerrors.ErrWriteQuorum)
 	})
 
 	t.Run("With CoordinatedShutdown with ShouldFail strategy", func(t *testing.T) {

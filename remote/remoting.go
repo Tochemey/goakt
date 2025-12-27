@@ -48,6 +48,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/id"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
+	"github.com/tochemey/goakt/v3/internal/quorum"
 	"github.com/tochemey/goakt/v3/internal/size"
 	"github.com/tochemey/goakt/v3/internal/strconvx"
 )
@@ -816,19 +817,7 @@ func (r *remoting) RemoteSpawn(ctx context.Context, host string, port int, spawn
 	}
 
 	if _, err := remoteClient.RemoteSpawn(ctx, request); err != nil {
-		code := connect.CodeOf(err)
-		if code == connect.CodeFailedPrecondition {
-			var connectErr *connect.Error
-			errors.As(err, &connectErr)
-			e := connectErr.Unwrap()
-			if strings.Contains(e.Error(), gerrors.ErrTypeNotRegistered.Error()) {
-				return gerrors.ErrTypeNotRegistered
-			}
-			if strings.Contains(e.Error(), gerrors.ErrRemotingDisabled.Error()) {
-				return gerrors.ErrRemotingDisabled
-			}
-		}
-		return err
+		return mapRemoteSpawnError(err)
 	}
 	return nil
 }
@@ -1059,4 +1048,68 @@ func getGrainFromRequest(host string, port int, grainRequest *GrainRequest) (*in
 	}
 
 	return grain, nil
+}
+
+func mapRemoteSpawnError(err error) error {
+	var connectErr *connect.Error
+	if !errors.As(err, &connectErr) {
+		return err
+	}
+
+	if mapped := mapRemoteSpawnConnectError(connectErr); mapped != nil {
+		return mapped
+	}
+
+	return err
+}
+
+func mapRemoteSpawnConnectError(err *connect.Error) error {
+	switch err.Code() {
+	case connect.CodeFailedPrecondition:
+		return mapRemoteSpawnFailedPrecondition(err)
+	case connect.CodeAlreadyExists:
+		return mapRemoteSpawnAlreadyExists(err)
+	case connect.CodeUnavailable:
+		return mapRemoteSpawnUnavailable(err)
+	default:
+		return nil
+	}
+}
+
+func mapRemoteSpawnFailedPrecondition(err *connect.Error) error {
+	message := err.Message()
+	underlying := err.Unwrap()
+	if matchesConnectError(message, underlying, gerrors.ErrTypeNotRegistered) {
+		return gerrors.ErrTypeNotRegistered
+	}
+
+	if matchesConnectError(message, underlying, gerrors.ErrRemotingDisabled) {
+		return gerrors.ErrRemotingDisabled
+	}
+	return nil
+}
+
+func mapRemoteSpawnAlreadyExists(err *connect.Error) error {
+	message := err.Message()
+	underlying := err.Unwrap()
+	if matchesConnectError(message, underlying, gerrors.ErrSingletonAlreadyExists) {
+		return gerrors.ErrSingletonAlreadyExists
+	}
+
+	if matchesConnectError(message, underlying, gerrors.ErrActorAlreadyExists) {
+		return gerrors.ErrActorAlreadyExists
+	}
+	return nil
+}
+
+func mapRemoteSpawnUnavailable(err *connect.Error) error {
+	underlying := err.Unwrap()
+	if quorum.IsQuorumError(underlying) {
+		return quorum.NormalizeQuorumError(underlying)
+	}
+	return nil
+}
+
+func matchesConnectError(message string, underlying error, target error) bool {
+	return errors.Is(underlying, target) || strings.Contains(message, target.Error())
 }

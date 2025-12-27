@@ -126,6 +126,12 @@ var (
 
 	// ErrLeaderNotFound is returned when the cluster leader (oldest node) cannot be found.
 	ErrLeaderNotFound = errors.New("leader is not found")
+	// ErrWriteQuorum is returned when the cluster cannot reach the configured write quorum.
+	ErrWriteQuorum = errors.New("write quorum cannot be reached")
+	// ErrReadQuorum is returned when the cluster cannot reach the configured read quorum.
+	ErrReadQuorum = errors.New("read quorum cannot be reached")
+	// ErrClusterQuorum is returned when the cluster cannot reach the minimum member quorum.
+	ErrClusterQuorum = errors.New("cluster quorum cannot be reached")
 
 	// ErrDependencyTypeNotRegistered is returned when a cluster-aware dependency type is not registered.
 	ErrDependencyTypeNotRegistered = errors.New("dependency type is not registered")
