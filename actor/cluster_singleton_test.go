@@ -747,7 +747,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 					CreatedAt:     time.Now().UnixNano(),
 				},
 			}, nil).
-			Once()
+			Times(2)
 
 		err := system.SpawnSingleton(
 			ctx,
@@ -760,6 +760,76 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 		)
 		require.Error(t, err)
 		require.ErrorContains(t, err, fmt.Sprintf("no cluster members found with role %s", role))
+	})
+
+	t.Run("retries until a role member becomes available", func(t *testing.T) {
+		ctx := context.Background()
+		ports := dynaport.Get(6)
+
+		clusterMock := mockcluster.NewCluster(t)
+		remotingMock := mockremote.NewRemoting(t)
+		system := MockSingletonClusterReadyActorSystem(t)
+		system.remoting = remotingMock
+
+		system.locker.Lock()
+		system.cluster = clusterMock
+		system.locker.Unlock()
+
+		role := "control"
+		clusterMock.EXPECT().
+			Members(mock.Anything).
+			Return([]*cluster.Peer{
+				{
+					Host:          "127.0.0.1",
+					DiscoveryPort: ports[0],
+					PeersPort:     ports[1],
+					RemotingPort:  ports[2],
+					Roles:         []string{"worker"},
+					CreatedAt:     time.Now().UnixNano(),
+				},
+			}, nil).
+			Once()
+
+		rolePeer := &cluster.Peer{
+			Host:          "127.0.0.2",
+			DiscoveryPort: ports[3],
+			PeersPort:     ports[4],
+			RemotingPort:  ports[5],
+			Roles:         []string{role},
+			CreatedAt:     time.Now().Add(1 * time.Minute).UnixNano(),
+		}
+		clusterMock.EXPECT().
+			Members(mock.Anything).
+			Return([]*cluster.Peer{rolePeer}, nil).
+			Once()
+
+		remotingMock.EXPECT().
+			RemoteSpawn(
+				mock.Anything,
+				rolePeer.Host,
+				rolePeer.RemotingPort,
+				mock.MatchedBy(func(req *remote.SpawnRequest) bool {
+					return req != nil &&
+						req.Name == "singleton" &&
+						req.Kind == "actor.mockactor" &&
+						req.Singleton &&
+						req.Role != nil &&
+						*req.Role == role
+				}),
+			).
+			Return(nil).
+			Once()
+
+		err := system.SpawnSingleton(
+			ctx,
+			"singleton",
+			NewMockActor(),
+			WithSingletonRole(role),
+			WithSingletonSpawnRetries(2),
+			WithSingletonSpawnWaitInterval(time.Millisecond),
+			WithSingletonSpawnTimeout(time.Second),
+		)
+		require.NoError(t, err)
 	})
 
 	t.Run("retries until a leader is elected", func(t *testing.T) {
@@ -813,68 +883,85 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 	})
 
 	t.Run("retries when the leader is temporarily unavailable", func(t *testing.T) {
-		ctx := context.Background()
-		ports := dynaport.Get(3)
-
-		clusterMock := mockcluster.NewCluster(t)
-		remotingMock := mockremote.NewRemoting(t)
-		system := MockSingletonClusterReadyActorSystem(t)
-		system.remoting = remotingMock
-
-		system.locker.Lock()
-		system.cluster = clusterMock
-		system.locker.Unlock()
-
-		leader := &cluster.Peer{
-			Host:         "127.0.0.1",
-			RemotingPort: ports[2],
-			Coordinator:  true,
+		cases := []struct {
+			name string
+			err  error
+		}{
+			{
+				name: "connection refused",
+				err:  connect.NewError(connect.CodeUnavailable, fmt.Errorf("connection refused")),
+			},
+			{
+				name: "deadline exceeded",
+				err:  connect.NewError(connect.CodeDeadlineExceeded, context.DeadlineExceeded),
+			},
 		}
 
-		clusterMock.EXPECT().IsLeader(mock.Anything).Return(false).Times(2)
-		clusterMock.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{leader}, nil).Times(2)
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				ctx := context.Background()
+				ports := dynaport.Get(3)
 
-		transient := connect.NewError(connect.CodeUnavailable, fmt.Errorf("connection refused"))
-		remotingMock.EXPECT().
-			RemoteSpawn(
-				mock.Anything,
-				leader.Host,
-				leader.RemotingPort,
-				mock.MatchedBy(func(req *remote.SpawnRequest) bool {
-					return req != nil &&
-						req.Name == "singleton" &&
-						req.Kind == "actor.mockactor" &&
-						req.Singleton &&
-						req.Role == nil
-				}),
-			).
-			Return(transient).
-			Once()
+				clusterMock := mockcluster.NewCluster(t)
+				remotingMock := mockremote.NewRemoting(t)
+				system := MockSingletonClusterReadyActorSystem(t)
+				system.remoting = remotingMock
 
-		remotingMock.EXPECT().
-			RemoteSpawn(
-				mock.Anything,
-				leader.Host,
-				leader.RemotingPort,
-				mock.MatchedBy(func(req *remote.SpawnRequest) bool {
-					return req != nil &&
-						req.Name == "singleton" &&
-						req.Kind == "actor.mockactor" &&
-						req.Singleton &&
-						req.Role == nil
-				}),
-			).
-			Return(nil).
-			Once()
+				system.locker.Lock()
+				system.cluster = clusterMock
+				system.locker.Unlock()
 
-		err := system.SpawnSingleton(
-			ctx,
-			"singleton",
-			NewMockActor(),
-			WithSingletonSpawnRetries(2),
-			WithSingletonSpawnWaitInterval(time.Millisecond),
-			WithSingletonSpawnTimeout(time.Second),
-		)
-		require.NoError(t, err)
+				leader := &cluster.Peer{
+					Host:         "127.0.0.1",
+					RemotingPort: ports[2],
+					Coordinator:  true,
+				}
+
+				clusterMock.EXPECT().IsLeader(mock.Anything).Return(false).Times(2)
+				clusterMock.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{leader}, nil).Times(2)
+
+				remotingMock.EXPECT().
+					RemoteSpawn(
+						mock.Anything,
+						leader.Host,
+						leader.RemotingPort,
+						mock.MatchedBy(func(req *remote.SpawnRequest) bool {
+							return req != nil &&
+								req.Name == "singleton" &&
+								req.Kind == "actor.mockactor" &&
+								req.Singleton &&
+								req.Role == nil
+						}),
+					).
+					Return(tc.err).
+					Once()
+
+				remotingMock.EXPECT().
+					RemoteSpawn(
+						mock.Anything,
+						leader.Host,
+						leader.RemotingPort,
+						mock.MatchedBy(func(req *remote.SpawnRequest) bool {
+							return req != nil &&
+								req.Name == "singleton" &&
+								req.Kind == "actor.mockactor" &&
+								req.Singleton &&
+								req.Role == nil
+						}),
+					).
+					Return(nil).
+					Once()
+
+				err := system.SpawnSingleton(
+					ctx,
+					"singleton",
+					NewMockActor(),
+					WithSingletonSpawnRetries(2),
+					WithSingletonSpawnWaitInterval(time.Millisecond),
+					WithSingletonSpawnTimeout(time.Second),
+				)
+				require.NoError(t, err)
+			})
+		}
 	})
 }

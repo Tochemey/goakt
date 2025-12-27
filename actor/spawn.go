@@ -279,7 +279,10 @@ func (x *actorSystem) SpawnRouter(ctx context.Context, name string, poolSize int
 // with the configured role). If the caller is not the target, it issues a RemoteSpawn
 // to that node; otherwise, the singleton is spawned locally. The operation is
 // idempotent: if a singleton for the same kind/role is already registered, the call
-// returns nil.
+// returns nil. When spawn retries are configured, transient conditions (e.g. quorum
+// errors, leader unavailability, temporary lack of eligible role members, or remoting
+// deadline/unavailable errors) are retried until the retry budget is exhausted or the
+// context is done.
 //
 // Errors:
 //   - ErrActorSystemNotStarted, ErrClusterDisabled when the system is not ready.
@@ -355,8 +358,8 @@ func (x *actorSystem) spawnSingletonRetryError(ctx context.Context, err error, s
 		return x.handleSingletonNameConflict(ctx, err, singletonKind)
 	}
 
-	if isContextDone(err) {
-		return retry.Stop(err)
+	if isContextDone(ctx) {
+		return retry.Stop(ctx.Err())
 	}
 
 	if shouldRetrySpawnSingleton(err) {
@@ -389,8 +392,8 @@ func (x *actorSystem) handleSingletonNameConflict(ctx context.Context, err error
 	return retry.Stop(err)
 }
 
-func isContextDone(err error) bool {
-	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+func isContextDone(ctx context.Context) bool {
+	return ctx.Err() != nil
 }
 
 func shouldRetrySpawnSingleton(err error) bool {
@@ -402,7 +405,11 @@ func shouldRetrySpawnSingleton(err error) bool {
 		return true
 	}
 
-	return connect.CodeOf(err) == connect.CodeUnavailable
+	if isNoRoleMembersError(err) {
+		return true
+	}
+
+	return connect.CodeOf(err) == connect.CodeUnavailable || connect.CodeOf(err) == connect.CodeDeadlineExceeded
 }
 
 func (x *actorSystem) singletonRegistered(ctx context.Context, kind string) (bool, error) {
@@ -411,6 +418,19 @@ func (x *actorSystem) singletonRegistered(ctx context.Context, kind string) (boo
 		return false, err
 	}
 	return id != "", nil
+}
+
+type errNoRoleMembers struct {
+	role string
+}
+
+func (e errNoRoleMembers) Error() string {
+	return fmt.Sprintf("no cluster members found with role %s", e.role)
+}
+
+func isNoRoleMembersError(err error) bool {
+	var noRole errNoRoleMembers
+	return errors.As(err, &noRole)
 }
 
 func (x *actorSystem) spawnSingletonWithRole(ctx context.Context, cl cluster.Cluster, name string, actor Actor, role string) error {
@@ -428,7 +448,7 @@ func (x *actorSystem) spawnSingletonWithRole(ctx context.Context, cl cluster.Clu
 	}
 
 	if len(filtered) == 0 {
-		return fmt.Errorf("no cluster members found with role %s", role)
+		return errNoRoleMembers{role: role}
 	}
 
 	// find the oldest node in the filtered peers
