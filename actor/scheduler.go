@@ -76,7 +76,17 @@ type scheduler struct {
 // newScheduler creates an instance of scheduler
 func newScheduler(logger log.Logger, shutdownTimeout time.Duration, opts ...schedulerOption) *scheduler {
 	// create an instance of quartz scheduler with logger off
-	quartzScheduler, _ := quartz.NewStdScheduler(quartz.WithLogger(quartzlogger.NewSimpleLogger(nil, quartzlogger.LevelOff)))
+	// Set a high OutdatedThreshold to prevent RunOnceTrigger jobs from being
+	// silently dropped when they become "outdated" (scheduled time passed).
+	// The default 100ms threshold causes issues because:
+	// 1. RunOnceTrigger marks itself as expired during initial scheduling
+	// 2. If the job becomes outdated, go-quartz tries to reschedule it
+	// 3. The already-expired trigger returns an error, causing the job to be dropped
+	// By setting a 24-hour threshold, we ensure jobs are executed even if delayed.
+	quartzScheduler, _ := quartz.NewStdScheduler(
+		quartz.WithLogger(quartzlogger.NewSimpleLogger(nil, quartzlogger.LevelOff)),
+		quartz.WithOutdatedThreshold(24*time.Hour),
+	)
 
 	// create an instance of scheduler
 	scheduler := &scheduler{
