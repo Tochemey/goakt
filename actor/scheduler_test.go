@@ -89,6 +89,52 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Stop(ctx)
 		assert.NoError(t, err)
 	})
+	t.Run("With ScheduleOnce repeated calls", func(t *testing.T) {
+		// This test verifies that repeated ScheduleOnce calls work correctly
+		// and don't stop triggering after some time (issue #1037)
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+		)
+		require.NoError(t, err)
+
+		err = newActorSystem.Start(ctx)
+		require.NoError(t, err)
+
+		pause.For(time.Second)
+
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		require.NotNil(t, actorRef)
+
+		pause.For(time.Second)
+
+		// Schedule multiple messages with short delays
+		numMessages := 20
+		for i := 0; i < numMessages; i++ {
+			message := new(testpb.TestSend)
+			err = newActorSystem.ScheduleOnce(ctx, message, actorRef, 50*time.Millisecond)
+			require.NoError(t, err)
+			// Small pause between scheduling to simulate real-world usage
+			pause.For(10 * time.Millisecond)
+		}
+
+		// Wait for all messages to be delivered
+		require.Eventually(t, func() bool {
+			// ProcessedCount includes the initial PostStart message, so we subtract 1
+			return actorRef.ProcessedCount()-1 >= numMessages
+		}, 5*time.Second, 100*time.Millisecond)
+
+		processed := actorRef.ProcessedCount() - 1
+		assert.GreaterOrEqual(t, processed, numMessages)
+
+		err = newActorSystem.Stop(ctx)
+		require.NoError(t, err)
+	})
 	t.Run("With ScheduleOnce when cluster is enabled", func(t *testing.T) {
 		ctx := context.TODO()
 		nodePorts := dynaport.Get(3)
