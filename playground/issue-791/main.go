@@ -105,6 +105,7 @@ func startActorSystem(ctx context.Context, serverAddress string) actor.ActorSyst
 			WithReplicaCount(1).
 			WithMinimumPeersQuorum(1).
 			WithClusterStateSyncInterval(300*time.Millisecond).
+			WithClusterBalancerInterval(100*time.Millisecond).
 			WithKinds(&MyActor{}),
 		))
 

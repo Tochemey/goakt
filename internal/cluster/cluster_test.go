@@ -2526,14 +2526,34 @@ func TestEventsReturnsChannel(t *testing.T) {
 }
 
 // nolint
-func TestProcessNodeJoin(t *testing.T) {
+func TestTrackNodeJoinEvent(t *testing.T) {
 	now := time.Now().UnixNano()
 
-	t.Run("emits event", func(t *testing.T) {
+	t.Run("defers emission until rebalance completes", func(t *testing.T) {
 		cl := newEventTestCluster("127.0.0.1", 4000)
-		ev := events.NodeJoinEvent{NodeJoin: "127.0.0.1:5000", Timestamp: now}
+		node := "127.0.0.1:5000"
 
-		cl.processNodeJoin(ev)
+		cl.trackNodeJoinEvent(events.NodeJoinEvent{NodeJoin: node, Timestamp: now})
+
+		select {
+		case <-cl.events:
+			t.Fatalf("unexpected event")
+		default:
+		}
+
+		cl.processRebalanceStart(events.RebalanceStartEvent{
+			Epoch:  1,
+			Reason: rebalanceReasonNodeJoin,
+			Node:   node,
+		})
+
+		select {
+		case <-cl.events:
+			t.Fatalf("unexpected event")
+		default:
+		}
+
+		cl.processRebalanceComplete(events.RebalanceCompleteEvent{Epoch: 1})
 
 		select {
 		case evt := <-cl.events:
@@ -2542,8 +2562,8 @@ func TestProcessNodeJoin(t *testing.T) {
 			require.NoError(t, err)
 			joined, ok := msg.(*goaktpb.NodeJoined)
 			require.True(t, ok)
-			require.Equal(t, ev.NodeJoin, joined.GetAddress())
-			require.Equal(t, ev.Timestamp/int64(time.Millisecond), joined.GetTimestamp().AsTime().UnixMilli())
+			require.Equal(t, node, joined.GetAddress())
+			require.Equal(t, now/int64(time.Millisecond), joined.GetTimestamp().AsTime().UnixMilli())
 		default:
 			t.Fatalf("expected event")
 		}
@@ -2553,7 +2573,7 @@ func TestProcessNodeJoin(t *testing.T) {
 		cl := newEventTestCluster("127.0.0.1", 5000)
 		ev := events.NodeJoinEvent{NodeJoin: cl.node.PeersAddress(), Timestamp: now}
 
-		cl.processNodeJoin(ev)
+		cl.trackNodeJoinEvent(ev)
 
 		select {
 		case <-cl.events:
@@ -2562,13 +2582,31 @@ func TestProcessNodeJoin(t *testing.T) {
 		}
 	})
 
-	t.Run("deduplicates", func(t *testing.T) {
+	t.Run("deduplicates node-join tracking", func(t *testing.T) {
 		cl := newEventTestCluster("127.0.0.1", 6000)
-		ev := events.NodeJoinEvent{NodeJoin: "127.0.0.1:7000", Timestamp: now}
+		node := "127.0.0.1:7000"
+		later := now + int64(time.Second)
 
-		cl.processNodeJoin(ev)
-		<-cl.events
-		cl.processNodeJoin(ev)
+		cl.trackNodeJoinEvent(events.NodeJoinEvent{NodeJoin: node, Timestamp: now})
+		cl.trackNodeJoinEvent(events.NodeJoinEvent{NodeJoin: node, Timestamp: later})
+		cl.processRebalanceStart(events.RebalanceStartEvent{
+			Epoch:  1,
+			Reason: rebalanceReasonNodeJoin,
+			Node:   node,
+		})
+		cl.processRebalanceComplete(events.RebalanceCompleteEvent{Epoch: 1})
+
+		select {
+		case evt := <-cl.events:
+			require.Equal(t, NodeJoined, evt.Type)
+			msg, err := evt.Payload.UnmarshalNew()
+			require.NoError(t, err)
+			joined, ok := msg.(*goaktpb.NodeJoined)
+			require.True(t, ok)
+			require.Equal(t, now/int64(time.Millisecond), joined.GetTimestamp().AsTime().UnixMilli())
+		default:
+			t.Fatalf("expected event")
+		}
 
 		select {
 		case <-cl.events:
@@ -2579,14 +2617,34 @@ func TestProcessNodeJoin(t *testing.T) {
 }
 
 // nolint
-func TestProcessNodeLeft(t *testing.T) {
+func TestTrackNodeLeftEvent(t *testing.T) {
 	now := time.Now().UnixNano()
 
-	t.Run("emits event", func(t *testing.T) {
+	t.Run("defers emission until rebalance completes", func(t *testing.T) {
 		cl := newEventTestCluster("127.0.0.1", 4000)
-		ev := events.NodeLeftEvent{NodeLeft: "127.0.0.1:5000", Timestamp: now}
+		node := "127.0.0.1:5000"
 
-		cl.processNodeLeft(ev)
+		cl.trackNodeLeftEvent(events.NodeLeftEvent{NodeLeft: node, Timestamp: now})
+
+		select {
+		case <-cl.events:
+			t.Fatalf("unexpected event")
+		default:
+		}
+
+		cl.processRebalanceStart(events.RebalanceStartEvent{
+			Epoch:  1,
+			Reason: rebalanceReasonNodeLeft,
+			Node:   node,
+		})
+
+		select {
+		case <-cl.events:
+			t.Fatalf("unexpected event")
+		default:
+		}
+
+		cl.processRebalanceComplete(events.RebalanceCompleteEvent{Epoch: 1})
 
 		select {
 		case evt := <-cl.events:
@@ -2595,20 +2653,38 @@ func TestProcessNodeLeft(t *testing.T) {
 			require.NoError(t, err)
 			left, ok := msg.(*goaktpb.NodeLeft)
 			require.True(t, ok)
-			require.Equal(t, ev.NodeLeft, left.GetAddress())
-			require.Equal(t, ev.Timestamp/int64(time.Millisecond), left.GetTimestamp().AsTime().UnixMilli())
+			require.Equal(t, node, left.GetAddress())
+			require.Equal(t, now/int64(time.Millisecond), left.GetTimestamp().AsTime().UnixMilli())
 		default:
 			t.Fatalf("expected event")
 		}
 	})
 
-	t.Run("deduplicates", func(t *testing.T) {
+	t.Run("deduplicates node-left tracking", func(t *testing.T) {
 		cl := newEventTestCluster("127.0.0.1", 5000)
-		ev := events.NodeLeftEvent{NodeLeft: "127.0.0.1:6000", Timestamp: now}
+		node := "127.0.0.1:6000"
+		later := now + int64(time.Second)
 
-		cl.processNodeLeft(ev)
-		<-cl.events
-		cl.processNodeLeft(ev)
+		cl.trackNodeLeftEvent(events.NodeLeftEvent{NodeLeft: node, Timestamp: now})
+		cl.trackNodeLeftEvent(events.NodeLeftEvent{NodeLeft: node, Timestamp: later})
+		cl.processRebalanceStart(events.RebalanceStartEvent{
+			Epoch:  1,
+			Reason: rebalanceReasonNodeLeft,
+			Node:   node,
+		})
+		cl.processRebalanceComplete(events.RebalanceCompleteEvent{Epoch: 1})
+
+		select {
+		case evt := <-cl.events:
+			require.Equal(t, NodeLeft, evt.Type)
+			msg, err := evt.Payload.UnmarshalNew()
+			require.NoError(t, err)
+			left, ok := msg.(*goaktpb.NodeLeft)
+			require.True(t, ok)
+			require.Equal(t, now/int64(time.Millisecond), left.GetTimestamp().AsTime().UnixMilli())
+		default:
+			t.Fatalf("expected event")
+		}
 
 		select {
 		case <-cl.events:
@@ -2619,23 +2695,83 @@ func TestProcessNodeLeft(t *testing.T) {
 }
 
 // nolint
+func TestRebalanceEventDedup(t *testing.T) {
+	now := time.Now().UnixNano()
+	cl := newEventTestCluster("127.0.0.1", 4000)
+	node := "127.0.0.1:7000"
+
+	cl.trackNodeLeftEvent(events.NodeLeftEvent{NodeLeft: node, Timestamp: now})
+
+	start := events.RebalanceStartEvent{
+		Epoch:  1,
+		Reason: rebalanceReasonNodeLeft,
+		Node:   node,
+	}
+	complete := events.RebalanceCompleteEvent{Epoch: 1}
+
+	cl.processRebalanceStart(start)
+	cl.processRebalanceStart(start)
+	cl.processRebalanceComplete(complete)
+	cl.processRebalanceComplete(complete)
+
+	select {
+	case evt := <-cl.events:
+		require.Equal(t, NodeLeft, evt.Type)
+	default:
+		t.Fatalf("expected event")
+	}
+
+	select {
+	case <-cl.events:
+		t.Fatalf("expected no duplicate event")
+	default:
+	}
+}
+
+// nolint
 func TestHandleClusterEventSuccessCases(t *testing.T) {
 	now := time.Now().UnixNano()
 
 	t.Run("node join", func(t *testing.T) {
 		cl := newEventTestCluster("127.0.0.1", 4000)
+		node := "127.0.0.1:7000"
 		payload, err := json.Marshal(events.NodeJoinEvent{
 			Kind:      events.KindNodeJoinEvent,
-			NodeJoin:  "127.0.0.1:7000",
+			NodeJoin:  node,
 			Timestamp: now,
 		})
 		require.NoError(t, err)
 
 		require.NoError(t, cl.handleClusterEvent(string(payload)))
 
+		startPayload, err := json.Marshal(events.RebalanceStartEvent{
+			Kind:      events.KindRebalanceStartEvent,
+			Epoch:     11,
+			Reason:    rebalanceReasonNodeJoin,
+			Node:      node,
+			Timestamp: now + int64(time.Millisecond),
+		})
+		require.NoError(t, err)
+
+		completePayload, err := json.Marshal(events.RebalanceCompleteEvent{
+			Kind:      events.KindRebalanceCompleteEvent,
+			Epoch:     11,
+			Timestamp: now + int64(2*time.Millisecond),
+		})
+		require.NoError(t, err)
+
+		require.NoError(t, cl.handleClusterEvent(string(startPayload)))
+		require.NoError(t, cl.handleClusterEvent(string(completePayload)))
+
 		select {
 		case evt := <-cl.events:
 			require.Equal(t, NodeJoined, evt.Type)
+			msg, err := evt.Payload.UnmarshalNew()
+			require.NoError(t, err)
+			joined, ok := msg.(*goaktpb.NodeJoined)
+			require.True(t, ok)
+			require.Equal(t, node, joined.GetAddress())
+			require.Equal(t, now/int64(time.Millisecond), joined.GetTimestamp().AsTime().UnixMilli())
 		default:
 			t.Fatalf("expected node join event")
 		}
@@ -2643,18 +2779,44 @@ func TestHandleClusterEventSuccessCases(t *testing.T) {
 
 	t.Run("node left", func(t *testing.T) {
 		cl := newEventTestCluster("127.0.0.1", 5000)
+		node := "127.0.0.1:8000"
 		payload, err := json.Marshal(events.NodeLeftEvent{
 			Kind:      events.KindNodeLeftEvent,
-			NodeLeft:  "127.0.0.1:8000",
+			NodeLeft:  node,
 			Timestamp: now,
 		})
 		require.NoError(t, err)
 
 		require.NoError(t, cl.handleClusterEvent(string(payload)))
 
+		startPayload, err := json.Marshal(events.RebalanceStartEvent{
+			Kind:      events.KindRebalanceStartEvent,
+			Epoch:     42,
+			Reason:    rebalanceReasonNodeLeft,
+			Node:      node,
+			Timestamp: now + int64(time.Millisecond),
+		})
+		require.NoError(t, err)
+
+		completePayload, err := json.Marshal(events.RebalanceCompleteEvent{
+			Kind:      events.KindRebalanceCompleteEvent,
+			Epoch:     42,
+			Timestamp: now + int64(2*time.Millisecond),
+		})
+		require.NoError(t, err)
+
+		require.NoError(t, cl.handleClusterEvent(string(startPayload)))
+		require.NoError(t, cl.handleClusterEvent(string(completePayload)))
+
 		select {
 		case evt := <-cl.events:
 			require.Equal(t, NodeLeft, evt.Type)
+			msg, err := evt.Payload.UnmarshalNew()
+			require.NoError(t, err)
+			left, ok := msg.(*goaktpb.NodeLeft)
+			require.True(t, ok)
+			require.Equal(t, node, left.GetAddress())
+			require.Equal(t, now/int64(time.Millisecond), left.GetTimestamp().AsTime().UnixMilli())
 		default:
 			t.Fatalf("expected node left event")
 		}
@@ -2686,14 +2848,32 @@ func TestConsumeDispatchesClusterEvents(t *testing.T) {
 		close(done)
 	}()
 
+	node := "127.0.0.1:9000"
 	payload, err := json.Marshal(events.NodeJoinEvent{
 		Kind:      events.KindNodeJoinEvent,
-		NodeJoin:  "127.0.0.1:9000",
+		NodeJoin:  node,
 		Timestamp: time.Now().UnixNano(),
 	})
 	require.NoError(t, err)
 
 	msgs <- &redis.Message{Channel: events.ClusterEventsChannel, Payload: string(payload)}
+	startPayload, err := json.Marshal(events.RebalanceStartEvent{
+		Kind:      events.KindRebalanceStartEvent,
+		Epoch:     7,
+		Reason:    rebalanceReasonNodeJoin,
+		Node:      node,
+		Timestamp: time.Now().Add(time.Millisecond).UnixNano(),
+	})
+	require.NoError(t, err)
+	msgs <- &redis.Message{Channel: events.ClusterEventsChannel, Payload: string(startPayload)}
+
+	completePayload, err := json.Marshal(events.RebalanceCompleteEvent{
+		Kind:      events.KindRebalanceCompleteEvent,
+		Epoch:     7,
+		Timestamp: time.Now().Add(2 * time.Millisecond).UnixNano(),
+	})
+	require.NoError(t, err)
+	msgs <- &redis.Message{Channel: events.ClusterEventsChannel, Payload: string(completePayload)}
 
 	select {
 	case evt := <-cl.events:
@@ -2725,7 +2905,7 @@ func TestPeersFiltersSelfAndParsesMeta(t *testing.T) {
 	otherMeta, err := json.Marshal(other)
 	require.NoError(t, err)
 
-	cl.client = &fakeClient{
+	cl.client = &MockOlricClient{
 		MockClient: &MockClient{},
 		members: []olric.Member{
 			{Name: cl.node.PeersAddress(), Coordinator: true, Meta: string(selfMeta)},
@@ -2755,7 +2935,7 @@ func TestIsLeaderReturnsTrueWhenCoordinator(t *testing.T) {
 	meta, err := json.Marshal(cl.node)
 	require.NoError(t, err)
 
-	cl.client = &fakeClient{
+	cl.client = &MockOlricClient{
 		MockClient: &MockClient{},
 		members: []olric.Member{
 			{Name: cl.node.PeersAddress(), Coordinator: true, Meta: string(meta)},

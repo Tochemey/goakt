@@ -2080,6 +2080,7 @@ func testSystem(t *testing.T, providerFactory providerFactory, opts ...testClust
 				WithDiscoveryPort(discoveryPort).
 				WithBootstrapTimeout(time.Second).
 				WithClusterStateSyncInterval(300 * time.Millisecond).
+				WithClusterBalancerInterval(100 * time.Millisecond).
 				WithRoles(cfg.roles...).
 				WithDiscovery(provider)),
 	}

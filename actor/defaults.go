@@ -55,7 +55,9 @@ const (
 	// DefaultGrainRequestTimeout defines the default grain request timeout
 	DefaultGrainRequestTimeout = 5 * time.Second
 
-	kindRoleSeparator = "::"
+	// DefaultClusterBalancerInterval defines the default cluster balancer interval
+	DefaultClusterBalancerInterval = time.Second
+	kindRoleSeparator              = "::"
 )
 
 var (

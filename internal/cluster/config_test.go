@@ -141,6 +141,13 @@ func TestConfigOptions(t *testing.T) {
 			},
 		},
 		{
+			name:   "WithBalancerInterval",
+			option: WithBalancerInterval(2 * time.Second),
+			assert: func(t *testing.T, cfg *config) {
+				assert.Equal(t, 2*time.Second, cfg.triggerBalancerInterval)
+			},
+		},
+		{
 			name:   "WithTLS",
 			option: WithTLS(tlsInfo),
 			assert: func(t *testing.T, cfg *config) {
@@ -175,6 +182,7 @@ func TestConfigOptionsIgnoreZeroOrNil(t *testing.T) {
 	WithShutdownTimeout(0)(cfg)
 	WithBootstrapTimeout(0)(cfg)
 	WithRoutingTableInterval(0)(cfg)
+	WithBalancerInterval(0)(cfg)
 
 	assert.Equal(t, original.logger, cfg.logger)
 	assert.Equal(t, original.shardHasher, cfg.shardHasher)
@@ -189,5 +197,6 @@ func TestConfigOptionsIgnoreZeroOrNil(t *testing.T) {
 	assert.Equal(t, original.shutdownTimeout, cfg.shutdownTimeout)
 	assert.Equal(t, original.bootstrapTimeout, cfg.bootstrapTimeout)
 	assert.Equal(t, original.routingTableInterval, cfg.routingTableInterval)
+	assert.Equal(t, original.triggerBalancerInterval, cfg.triggerBalancerInterval)
 	assert.Nil(t, cfg.tlsInfo)
 }

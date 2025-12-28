@@ -2614,6 +2614,7 @@ func (x *actorSystem) setupCluster() error {
 		cluster.WithDataTableSize(x.clusterConfig.tableSize),
 		cluster.WithBootstrapTimeout(x.clusterConfig.bootstrapTimeout),
 		cluster.WithRoutingTableInterval(x.clusterConfig.clusterStateSyncInterval),
+		cluster.WithBalancerInterval(x.clusterConfig.clusterBalancerInterval),
 	)
 
 	for _, kind := range x.clusterConfig.kinds.Values() {
