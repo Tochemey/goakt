@@ -297,7 +297,7 @@ func (r *relocator) allocateActors(totalPeers int, nodeLeftState *internalpb.Pee
 
 	// Remove singleton actors from the list
 	toRebalances = slices.Filter(toRebalances, func(actor *internalpb.Actor) bool {
-		return !(actor.GetSingleton() != nil)
+		return actor.GetSingleton() == nil
 	})
 
 	// Distribute remaining actors among peers
