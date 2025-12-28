@@ -117,6 +117,7 @@ func startActorSystem(ctx context.Context, systemName, serverAddr string) actor.
 			WithDiscoveryPort(discoveryPort).
 			WithBootstrapTimeout(time.Second).
 			WithClusterStateSyncInterval(300*time.Millisecond).
+			WithClusterBalancerInterval(100*time.Millisecond).
 			WithKinds(&MyActor{}),
 		))
 

@@ -68,6 +68,12 @@ const (
 	LeastLoad
 )
 
+type singletonSpec struct {
+	SpawnTimeout time.Duration
+	WaitInterval time.Duration
+	MaxRetries   int32
+}
+
 // spawnConfig defines the configuration options applied when creating an actor.
 //
 // It encapsulates all settings that influence actor spawning, such as mailbox type,
@@ -94,6 +100,8 @@ type spawnConfig struct {
 	passivationStrategy passivation.Strategy
 	// role defines the role required for the node to spawn the actor.
 	role *string
+	// singletonSpec holds the singleton configuration if the actor is a singleton.
+	singletonSpec *singletonSpec
 }
 
 var _ validation.Validator = (*spawnConfig)(nil)
@@ -369,9 +377,10 @@ func WithRole(role string) SpawnOption {
 //
 // Returns:
 //   - SpawnOption that marks the actor as a singleton.
-func withSingleton() SpawnOption {
+func withSingleton(spec *singletonSpec) SpawnOption {
 	return spawnOption(func(config *spawnConfig) {
 		config.asSingleton = true
+		config.singletonSpec = spec
 	})
 }
 

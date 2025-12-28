@@ -146,7 +146,8 @@ func (r *relocator) relocateActors(ctx context.Context, eg *errgroup.Group, lead
 						return errors.NewSpawnError(err)
 					}
 
-					if !isSystemName(addr.Name()) && !actor.GetIsSingleton() && actor.GetRelocatable() {
+					notSingleton := actor.GetSingleton() == nil
+					if !isSystemName(addr.Name()) && notSingleton && actor.GetRelocatable() {
 						if err := r.spawnRemoteActor(ctx, actor, peer); err != nil {
 							return err
 						}
@@ -186,7 +187,7 @@ func (r *relocator) spawnRemoteActor(ctx context.Context, actor *internalpb.Acto
 	spawnRequest := &remote.SpawnRequest{
 		Name:                addr.Name(),
 		Kind:                actor.GetType(),
-		Singleton:           false,
+		Singleton:           nil,
 		Relocatable:         true,
 		Dependencies:        dependencies,
 		PassivationStrategy: codec.DecodePassivationStrategy(actor.GetPassivationStrategy()),
@@ -291,12 +292,12 @@ func (r *relocator) allocateActors(totalPeers int, nodeLeftState *internalpb.Pee
 
 	// Separate singleton actors to be assigned to the leader
 	leaderShares = slices.Filter(toRebalances, func(actor *internalpb.Actor) bool {
-		return actor.GetIsSingleton()
+		return actor.GetSingleton() != nil
 	})
 
 	// Remove singleton actors from the list
 	toRebalances = slices.Filter(toRebalances, func(actor *internalpb.Actor) bool {
-		return !actor.GetIsSingleton()
+		return actor.GetSingleton() == nil
 	})
 
 	// Distribute remaining actors among peers
@@ -335,9 +336,20 @@ func (r *relocator) recreateLocally(ctx context.Context, props *internalpb.Actor
 		return err
 	}
 
-	if enforceSingleton && props.GetIsSingleton() {
+	if enforceSingleton && props.GetSingleton() != nil {
+		// define singleton options
+		singletonOpts := []ClusterSingletonOption{
+			WithSingletonSpawnTimeout(props.GetSingleton().GetSpawnTimeout().AsDuration()),
+			WithSingletonSpawnWaitInterval(props.GetSingleton().GetWaitInterval().AsDuration()),
+			WithSingletonSpawnRetries(int(props.GetSingleton().GetMaxRetries())),
+		}
+
+		if props.GetRole() != "" {
+			singletonOpts = append(singletonOpts, WithSingletonRole(props.GetRole()))
+		}
+
 		// spawn the singleton actor
-		return r.pid.ActorSystem().SpawnSingleton(ctx, addr.Name(), actor, WithSingletonRole(props.GetRole()))
+		return r.pid.ActorSystem().SpawnSingleton(ctx, addr.Name(), actor, singletonOpts...)
 	}
 
 	if !props.GetRelocatable() {

@@ -54,9 +54,14 @@ func TestSpawnOption(t *testing.T) {
 	})
 	t.Run("spawn option with singleton", func(t *testing.T) {
 		config := &spawnConfig{}
-		option := withSingleton()
+		spec := &singletonSpec{
+			SpawnTimeout: 10 * time.Second,
+			WaitInterval: 500 * time.Millisecond,
+			MaxRetries:   3,
+		}
+		option := withSingleton(spec)
 		option.Apply(config)
-		require.Equal(t, &spawnConfig{asSingleton: true}, config)
+		require.Equal(t, &spawnConfig{asSingleton: true, singletonSpec: spec}, config)
 	})
 	t.Run("spawn option with relocation disabled", func(t *testing.T) {
 		config := &spawnConfig{}

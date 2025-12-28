@@ -27,13 +27,16 @@ package remote
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
+	"math"
 	nethttp "net/http"
 	"testing"
 	"time"
 
 	"connectrpc.com/connect"
 	"github.com/stretchr/testify/assert"
+	"github.com/tochemey/olric"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -72,6 +75,16 @@ func TestRemotingOptionApplication(t *testing.T) {
 	// RemotingServiceClient should build without hitting network.
 	client := r.RemotingServiceClient("localhost", 8080)
 	assert.NotNil(t, client)
+}
+
+func TestRemotingClientFactory_NoOpOnNil(t *testing.T) {
+	r := NewRemoting().(*remoting)
+	mockClient := &mockRemotingServiceClient{}
+	r.setClientFactory(func(string, int) internalpbconnect.RemotingServiceClient { return mockClient })
+	r.setClientFactory(nil)
+
+	client := r.RemotingServiceClient("host", 1000)
+	assert.Same(t, mockClient, client)
 }
 
 func TestRemotingHeaderPropagation(t *testing.T) {
@@ -198,6 +211,185 @@ func TestRemoteSpawn_InvalidRequest(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestRemoteSpawn_InvalidPort(t *testing.T) {
+	r := NewRemoting()
+	port := int(math.MaxInt32) + 1
+
+	err := r.RemoteSpawn(context.Background(), "host", port, &SpawnRequest{Name: "actor", Kind: "kind"})
+	assert.Error(t, err)
+	assert.ErrorContains(t, err, "out of range")
+}
+
+func TestRemoteSpawn_MapsAlreadyExistsErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		err     error
+		wantErr error
+	}{
+		{
+			name:    "singleton already exists",
+			err:     gerrors.ErrSingletonAlreadyExists,
+			wantErr: gerrors.ErrSingletonAlreadyExists,
+		},
+		{
+			name:    "actor already exists",
+			err:     gerrors.ErrActorAlreadyExists,
+			wantErr: gerrors.ErrActorAlreadyExists,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := NewRemoting()
+			mockClient := &mockRemotingServiceClient{
+				spawnErr: connect.NewError(connect.CodeAlreadyExists, tt.err),
+			}
+			setClientFactory(t, r, func(string, int) internalpbconnect.RemotingServiceClient { return mockClient })
+
+			err := r.RemoteSpawn(context.Background(), "host", 1000, &SpawnRequest{Name: "actor", Kind: "kind"})
+			assert.ErrorIs(t, err, tt.wantErr)
+		})
+	}
+}
+
+func TestRemoteSpawn_MapsFailedPreconditionErrors(t *testing.T) {
+	testCases := []struct {
+		name    string
+		err     error
+		wantErr error
+	}{
+		{
+			name:    "type not registered (underlying)",
+			err:     gerrors.ErrTypeNotRegistered,
+			wantErr: gerrors.ErrTypeNotRegistered,
+		},
+		{
+			name:    "type not registered (message)",
+			err:     errors.New(gerrors.ErrTypeNotRegistered.Error()),
+			wantErr: gerrors.ErrTypeNotRegistered,
+		},
+		{
+			name:    "remoting disabled (underlying)",
+			err:     gerrors.ErrRemotingDisabled,
+			wantErr: gerrors.ErrRemotingDisabled,
+		},
+		{
+			name:    "remoting disabled (message)",
+			err:     errors.New(gerrors.ErrRemotingDisabled.Error()),
+			wantErr: gerrors.ErrRemotingDisabled,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			r := NewRemoting()
+			mockClient := &mockRemotingServiceClient{
+				spawnErr: connect.NewError(connect.CodeFailedPrecondition, testCase.err),
+			}
+			setClientFactory(t, r, func(string, int) internalpbconnect.RemotingServiceClient { return mockClient })
+
+			err := r.RemoteSpawn(context.Background(), "host", 1000, &SpawnRequest{Name: "actor", Kind: "kind"})
+			assert.ErrorIs(t, err, testCase.wantErr)
+		})
+	}
+}
+
+func TestRemoteSpawn_PassesThroughTransportErrors(t *testing.T) {
+	r := NewRemoting()
+	mockClient := &mockRemotingServiceClient{
+		spawnErr: context.DeadlineExceeded,
+	}
+	setClientFactory(t, r, func(string, int) internalpbconnect.RemotingServiceClient { return mockClient })
+
+	err := r.RemoteSpawn(context.Background(), "host", 1000, &SpawnRequest{Name: "actor", Kind: "kind"})
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+func TestRemoteSpawn_PassesThroughUnmappedConnectErrors(t *testing.T) {
+	testCases := []struct {
+		name       string
+		code       connect.Code
+		underlying error
+		wantMsg    string
+	}{
+		{
+			name:       "invalid spawn request",
+			code:       connect.CodeInvalidArgument,
+			underlying: errors.New("invalid spawn request payload"),
+			wantMsg:    "invalid spawn request payload",
+		},
+		{
+			name:       "failed precondition with unrelated error",
+			code:       connect.CodeFailedPrecondition,
+			underlying: errors.New("precondition failed: invalid host"),
+			wantMsg:    "invalid host",
+		},
+		{
+			name:       "already exists with generic resource",
+			code:       connect.CodeAlreadyExists,
+			underlying: errors.New("resource already exists"),
+			wantMsg:    "resource already exists",
+		},
+		{
+			name:       "unavailable due to transport",
+			code:       connect.CodeUnavailable,
+			underlying: errors.New("connection refused"),
+			wantMsg:    "connection refused",
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			r := NewRemoting()
+			mockClient := &mockRemotingServiceClient{
+				spawnErr: connect.NewError(testCase.code, testCase.underlying),
+			}
+			setClientFactory(t, r, func(string, int) internalpbconnect.RemotingServiceClient { return mockClient })
+
+			err := r.RemoteSpawn(context.Background(), "host", 1000, &SpawnRequest{Name: "actor", Kind: "kind"})
+			assert.Equal(t, testCase.code, connect.CodeOf(err))
+			assert.ErrorContains(t, err, testCase.wantMsg)
+		})
+	}
+}
+
+func TestRemoteSpawn_MapsQuorumErrors(t *testing.T) {
+	testCases := []struct {
+		name    string
+		err     error
+		wantErr error
+	}{
+		{
+			name:    "write quorum",
+			err:     olric.ErrWriteQuorum,
+			wantErr: gerrors.ErrWriteQuorum,
+		},
+		{
+			name:    "read quorum",
+			err:     olric.ErrReadQuorum,
+			wantErr: gerrors.ErrReadQuorum,
+		},
+		{
+			name:    "cluster quorum",
+			err:     olric.ErrClusterQuorum,
+			wantErr: gerrors.ErrClusterQuorum,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			r := NewRemoting()
+			mockClient := &mockRemotingServiceClient{
+				spawnErr: connect.NewError(connect.CodeUnavailable, testCase.err),
+			}
+			setClientFactory(t, r, func(string, int) internalpbconnect.RemotingServiceClient { return mockClient })
+
+			err := r.RemoteSpawn(context.Background(), "host", 1000, &SpawnRequest{Name: "actor", Kind: "kind"})
+			assert.ErrorIs(t, err, testCase.wantErr)
+		})
+	}
+}
+
 func TestRemoteLookup_NotFoundReturnsNoSender(t *testing.T) {
 	r := NewRemoting()
 	mockClient := &notFoundClient{}
@@ -217,6 +409,16 @@ func TestRemoteLookup_InvalidAddress(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, addr)
 	assert.ErrorContains(t, err, "address format is invalid")
+}
+
+func TestRemoteLookup_InvalidPort(t *testing.T) {
+	r := NewRemoting()
+	port := int(math.MaxInt32) + 1
+
+	addr, err := r.RemoteLookup(context.Background(), "host", port, "actor")
+	assert.Error(t, err)
+	assert.Nil(t, addr)
+	assert.ErrorContains(t, err, "out of range")
 }
 
 func TestRemotingContextPropagatorInjectError(t *testing.T) {
@@ -298,6 +500,33 @@ func TestRemotingContextPropagatorInjectError(t *testing.T) {
 			assert.ErrorIs(t, err, injectErr)
 		})
 	}
+}
+
+func TestRemoteReSpawn_InvalidPort(t *testing.T) {
+	r := NewRemoting()
+	port := int(math.MaxInt32) + 1
+
+	err := r.RemoteReSpawn(context.Background(), "host", port, "actor")
+	assert.Error(t, err)
+	assert.ErrorContains(t, err, "out of range")
+}
+
+func TestRemoteStop_InvalidPort(t *testing.T) {
+	r := NewRemoting()
+	port := int(math.MaxInt32) + 1
+
+	err := r.RemoteStop(context.Background(), "host", port, "actor")
+	assert.Error(t, err)
+	assert.ErrorContains(t, err, "out of range")
+}
+
+func TestRemoteReinstate_InvalidPort(t *testing.T) {
+	r := NewRemoting()
+	port := int(math.MaxInt32) + 1
+
+	err := r.RemoteReinstate(context.Background(), "host", port, "actor")
+	assert.Error(t, err)
+	assert.ErrorContains(t, err, "out of range")
 }
 
 func TestRemoting_RemoteActivateGrain(t *testing.T) {
@@ -520,6 +749,7 @@ type mockRemotingServiceClient struct {
 	tellGrainErr              error
 	activateGrainErr          error
 	returnNilAskGrainResponse bool
+	spawnErr                  error
 }
 
 func (x *mockRemotingServiceClient) RemoteAsk(_ context.Context, req *connect.Request[internalpb.RemoteAskRequest]) (*connect.Response[internalpb.RemoteAskResponse], error) {
@@ -561,6 +791,9 @@ func (x *mockRemotingServiceClient) RemoteStop(_ context.Context, req *connect.R
 
 func (x *mockRemotingServiceClient) RemoteSpawn(_ context.Context, req *connect.Request[internalpb.RemoteSpawnRequest]) (*connect.Response[internalpb.RemoteSpawnResponse], error) {
 	x.spawnHeader = req.Header().Clone()
+	if x.spawnErr != nil {
+		return nil, x.spawnErr
+	}
 	return connect.NewResponse(new(internalpb.RemoteSpawnResponse)), nil
 }
 

@@ -41,6 +41,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/tochemey/goakt/v3/address"
@@ -159,6 +160,9 @@ type PID struct {
 	// this is used to specify a role the actor belongs to
 	// this field is optional and will be set when the actor is created with a given role
 	role *string
+
+	// only set this when the actor is a singleton
+	singletonSpec *singletonSpec
 
 	metricProvider *metric.Provider
 }
@@ -1126,10 +1130,19 @@ func (pid *PID) RemoteSpawn(ctx context.Context, host string, port int, actorNam
 		return err
 	}
 
+	var singletonSpec *remote.SingletonSpec
+	if config.asSingleton && pid.singletonSpec != nil {
+		singletonSpec = &remote.SingletonSpec{
+			SpawnTimeout: pid.singletonSpec.SpawnTimeout,
+			WaitInterval: pid.singletonSpec.WaitInterval,
+			MaxRetries:   int32(pid.singletonSpec.MaxRetries),
+		}
+	}
+
 	request := &remote.SpawnRequest{
 		Name:                actorName,
 		Kind:                actorType,
-		Singleton:           config.asSingleton,
+		Singleton:           singletonSpec,
 		Relocatable:         config.relocatable,
 		PassivationStrategy: config.passivationStrategy,
 		Dependencies:        config.dependencies,
@@ -2222,10 +2235,19 @@ func (pid *PID) toWireActor() (*internalpb.Actor, error) {
 		supervisorSpec = codec.EncodeSupervisor(pid.supervisor)
 	}
 
+	var singletonSpec *internalpb.SingletonSpec
+	if pid.IsSingleton() && pid.singletonSpec != nil {
+		singletonSpec = &internalpb.SingletonSpec{
+			SpawnTimeout: durationpb.New(pid.singletonSpec.SpawnTimeout),
+			WaitInterval: durationpb.New(pid.singletonSpec.WaitInterval),
+			MaxRetries:   pid.singletonSpec.MaxRetries,
+		}
+	}
+
 	return &internalpb.Actor{
 		Address:             pid.ID(),
 		Type:                registry.Name(pid.Actor()),
-		IsSingleton:         pid.IsSingleton(),
+		Singleton:           singletonSpec,
 		Relocatable:         pid.IsRelocatable(),
 		PassivationStrategy: codec.EncodePassivationStrategy(pid.PassivationStrategy()),
 		Dependencies:        dependencies,

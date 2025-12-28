@@ -268,25 +268,31 @@ func (x *MockCluster) NextRoundRobinValue(context.Context, string) (int, error) 
 
 func newEventTestCluster(host string, port int) *cluster {
 	return &cluster{
-		node:                   &discovery.Node{Host: host, PeersPort: port},
-		events:                 make(chan *Event, defaultEventsBufSize),
-		nodeJoinedEventsFilter: goset.NewSet[string](),
-		nodeLeftEventsFilter:   goset.NewSet[string](),
-		logger:                 log.DiscardLogger,
+		node:                    &discovery.Node{Host: host, PeersPort: port},
+		events:                  make(chan *Event, defaultEventsBufSize),
+		nodeJoinedEventsFilter:  goset.NewSet[string](),
+		nodeLeftEventsFilter:    goset.NewSet[string](),
+		nodeJoinTimestamps:      make(map[string]int64),
+		nodeLeftTimestamps:      make(map[string]int64),
+		rebalanceJoinNodeEpochs: make(map[string]uint64),
+		rebalanceLeftNodeEpochs: make(map[string]uint64),
+		rebalanceStartSeen:      make(map[uint64]struct{}),
+		rebalanceCompleteSeen:   make(map[uint64]struct{}),
+		logger:                  log.DiscardLogger,
 	}
 }
 
-type fakeClient struct {
+type MockOlricClient struct {
 	*MockClient
 	members []olric.Member
 }
 
 // nolint
-func (f *fakeClient) Members(ctx context.Context) ([]olric.Member, error) {
-	if f.MockClient != nil && f.MockClient.membersErr != nil {
-		return nil, f.MockClient.membersErr
+func (x *MockOlricClient) Members(ctx context.Context) ([]olric.Member, error) {
+	if x.MockClient != nil && x.MockClient.membersErr != nil {
+		return nil, x.MockClient.membersErr
 	}
-	return f.members, nil
+	return x.members, nil
 }
 
 type iteratorStub struct {

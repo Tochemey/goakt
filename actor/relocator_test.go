@@ -37,18 +37,37 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
+	"github.com/tochemey/goakt/v3/internal/pointer"
+	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/log"
 	mockscluster "github.com/tochemey/goakt/v3/mocks/cluster"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/supervisor"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
+
+type spawnSingletonSpy struct {
+	*actorSystem
+	called    bool
+	actorName string
+	actor     Actor
+	config    *clusterSingletonConfig
+}
+
+func (s *spawnSingletonSpy) SpawnSingleton(ctx context.Context, name string, actor Actor, opts ...ClusterSingletonOption) error {
+	s.called = true
+	s.actorName = name
+	s.actor = actor
+	s.config = newClusterSingletonConfig(opts...)
+	return nil
+}
 
 func TestRelocatorPeersError(t *testing.T) {
 	ctx := context.Background()
@@ -232,6 +251,50 @@ func TestRelocatorRelocateActorsInvalidAddressForPeerShare(t *testing.T) {
 	var spawnErr *errors.SpawnError
 	require.ErrorAs(t, err, &spawnErr)
 	assert.ErrorContains(t, err, "address format is invalid")
+}
+
+func TestRelocatorRecreateLocallyUsesSingletonSpec(t *testing.T) {
+	ctx := context.Background()
+	system := MockSingletonClusterReadyActorSystem(t)
+	clusterMock := mockscluster.NewCluster(t)
+	system.locker.Lock()
+	system.cluster = clusterMock
+	system.locker.Unlock()
+
+	system.registry.Register(new(MockActor))
+
+	singletonSpec := &internalpb.SingletonSpec{
+		SpawnTimeout: durationpb.New(3 * time.Second),
+		WaitInterval: durationpb.New(250 * time.Millisecond),
+		MaxRetries:   int32(4),
+	}
+	props := &internalpb.Actor{
+		Address: address.New("singleton", system.Name(), "127.0.0.1", 8080).String(),
+		Type:    registry.Name(new(MockActor)),
+		Singleton: &internalpb.SingletonSpec{
+			SpawnTimeout: singletonSpec.SpawnTimeout,
+			WaitInterval: singletonSpec.WaitInterval,
+			MaxRetries:   singletonSpec.MaxRetries,
+		},
+		Role: pointer.To("blue"),
+	}
+
+	clusterMock.EXPECT().RemoveActor(mock.Anything, "singleton").Return(nil).Once()
+
+	spy := &spawnSingletonSpy{actorSystem: system}
+	relocator := &relocator{pid: &PID{actorSystem: spy}}
+	err := relocator.recreateLocally(ctx, props, true)
+	require.NoError(t, err)
+
+	require.True(t, spy.called)
+	require.Equal(t, "singleton", spy.actorName)
+	require.Equal(t, props.GetType(), registry.Name(spy.actor))
+	require.NotNil(t, spy.config)
+	require.Equal(t, singletonSpec.SpawnTimeout.AsDuration(), spy.config.spawnTimeout)
+	require.Equal(t, singletonSpec.WaitInterval.AsDuration(), spy.config.waitInterval)
+	require.Equal(t, int(singletonSpec.MaxRetries), spy.config.numberOfRetries)
+	require.NotNil(t, spy.config.Role())
+	require.Equal(t, props.GetRole(), *spy.config.Role())
 }
 
 func TestRelocation(t *testing.T) {

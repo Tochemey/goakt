@@ -58,6 +58,7 @@ func TestClusterConfig(t *testing.T) {
 			WithBootstrapTimeout(10*time.Second).
 			WithClusterStateSyncInterval(10*time.Second).
 			WithGrainActivationBarrier(5*time.Second).
+			WithClusterBalancerInterval(5*time.Second).
 			WithDiscovery(provider).
 			WithRoles("role1", "role2", "role1") // role1 is duplicated to test deduplication
 

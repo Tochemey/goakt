@@ -57,6 +57,7 @@ type ClusterConfig struct {
 	clusterStateSyncInterval time.Duration
 	grainActivationBarrier   *grainActivationBarrierConfig
 	roles                    goset.Set[string]
+	clusterBalancerInterval  time.Duration
 }
 
 type grainActivationBarrierConfig struct {
@@ -84,6 +85,7 @@ func NewClusterConfig() *ClusterConfig {
 		bootstrapTimeout:         DefaultClusterBootstrapTimeout,
 		clusterStateSyncInterval: DefaultClusterStateSyncInterval,
 		roles:                    goset.NewSet[string](),
+		clusterBalancerInterval:  DefaultClusterBalancerInterval,
 	}
 
 	fnActor := new(FuncActor)
@@ -311,6 +313,38 @@ func (x *ClusterConfig) WithTableSize(size uint64) *ClusterConfig {
 // de-duplicated; order is not meaningful
 func (x *ClusterConfig) WithRoles(roles ...string) *ClusterConfig {
 	x.roles.Append(roles...)
+	return x
+}
+
+// WithClusterBalancerInterval sets the cluster balancer interval.
+//
+// This interval controls how frequently the cluster balancer runs to evaluate
+// and adjust actor/grain placement. It also drives when a rebalance epoch can
+// be acknowledged, which in turn gates stable cluster events.
+//
+// Relationship to WithClusterStateSyncInterval:
+//   - Keep the balancer interval shorter than the state sync interval so each
+//     routing epoch can complete before the next one starts. If the balancer
+//     interval is too large relative to the sync interval, epochs may overlap
+//     and stable cluster events can be delayed.
+//
+// Recommended starting points:
+//   - Small/medium clusters: 1s to 5s balancer interval with 30s to 1m state sync.
+//   - Large/busy clusters: increase both intervals together (for example,
+//     5s balancer with 1m to 2m state sync) to reduce overhead while keeping
+//     epochs from stacking.
+//
+// Example usage:
+//
+//	cfg := NewClusterConfig().
+//		WithClusterStateSyncInterval(1 * time.Minute).
+//		WithClusterBalancerInterval(2 * time.Second)
+//
+// Returns the updated ClusterConfig instance for chaining.
+func (x *ClusterConfig) WithClusterBalancerInterval(interval time.Duration) *ClusterConfig {
+	if interval > 0 {
+		x.clusterBalancerInterval = interval
+	}
 	return x
 }
 

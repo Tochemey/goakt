@@ -24,17 +24,31 @@
 
 package actor
 
-import "github.com/tochemey/goakt/v3/internal/pointer"
+import (
+	"time"
+
+	"github.com/tochemey/goakt/v3/internal/pointer"
+)
 
 // clusterSingletonConfig holds configuration options for cluster singleton actors.
 type clusterSingletonConfig struct {
 	// role defines the role required for the node to spawn the singleton actor.
 	role *string
+	// spawnTimeout defines the maximum duration to wait for the singleton to be spawned.
+	spawnTimeout time.Duration
+	// waitInterval defines the interval between spawn status checks.
+	waitInterval time.Duration
+	// numberOfRetries defines the number of retries to check for singleton spawn status.
+	numberOfRetries int
 }
 
 // newClusterSingletonConfig creates a new cluster singleton configuration.
 func newClusterSingletonConfig(opts ...ClusterSingletonOption) *clusterSingletonConfig {
-	csc := &clusterSingletonConfig{}
+	csc := &clusterSingletonConfig{
+		spawnTimeout:    30 * time.Second,
+		waitInterval:    500 * time.Millisecond,
+		numberOfRetries: 5,
+	}
 	for _, opt := range opts {
 		opt(csc)
 	}
@@ -72,6 +86,54 @@ func WithSingletonRole(role string) ClusterSingletonOption {
 	return func(c *clusterSingletonConfig) {
 		if role != "" {
 			c.role = pointer.To(role)
+		}
+	}
+}
+
+// WithSingletonSpawnTimeout sets the maximum amount of time `SpawnSingleton` will spend
+// retrying before giving up.
+//
+// Notes:
+//   - Values <= 0 are ignored and the existing/default timeout is kept.
+//   - This timeout is an overall upper bound; retry attempts (see
+//     `WithSingletonSpawnWaitInterval` and `WithSingletonSpawnRetries`) may cause
+//     `SpawnSingleton` to return earlier if retries are exhausted.
+//   - Default: 30 seconds.
+func WithSingletonSpawnTimeout(timeout time.Duration) ClusterSingletonOption {
+	return func(c *clusterSingletonConfig) {
+		if timeout > 0 {
+			c.spawnTimeout = timeout
+		}
+	}
+}
+
+// WithSingletonSpawnWaitInterval sets the base delay between `SpawnSingleton` retry attempts.
+//
+// Notes:
+//   - Values <= 0 are ignored and the existing/default interval is kept.
+//   - Used together with `WithSingletonSpawnRetries` to define the retry budget.
+//     Approximate retry window: `tries * interval` (best-effort; scheduling can add jitter).
+//   - Default: 500 milliseconds.
+func WithSingletonSpawnWaitInterval(interval time.Duration) ClusterSingletonOption {
+	return func(c *clusterSingletonConfig) {
+		if interval > 0 {
+			c.waitInterval = interval
+		}
+	}
+}
+
+// WithSingletonSpawnRetries sets the maximum number of `SpawnSingleton` attempts before giving up.
+//
+// Notes:
+//   - Values <= 0 are ignored and the existing/default retry count is kept.
+//   - Combined with `WithSingletonSpawnWaitInterval`, this controls how long `SpawnSingleton`
+//     will keep retrying (roughly `tries * interval`), up to the overall timeout set by
+//     `WithSingletonSpawnTimeout`.
+//   - Default: 5.
+func WithSingletonSpawnRetries(retries int) ClusterSingletonOption {
+	return func(c *clusterSingletonConfig) {
+		if retries > 0 {
+			c.numberOfRetries = retries
 		}
 	}
 }

@@ -56,11 +56,13 @@ import (
 )
 
 const (
-	dMapName             = "goakt.dmap"
-	defaultEventsBufSize = 256
-	namespaceSeparator   = "::"
-	ActorsRoundRobinKey  = "actors_rr_index"
-	GrainsRoundRobinKey  = "grains_rr_index"
+	dMapName                = "goakt.dmap"
+	defaultEventsBufSize    = 256
+	namespaceSeparator      = "::"
+	ActorsRoundRobinKey     = "actors_rr_index"
+	GrainsRoundRobinKey     = "grains_rr_index"
+	rebalanceReasonNodeLeft = "node-left"
+	rebalanceReasonNodeJoin = "node-join"
 )
 
 type recordNamespace string
@@ -144,23 +146,24 @@ type cluster struct {
 	_  locker.NoCopy
 	mu sync.RWMutex
 
-	name                 string
-	discoveryProvider    discovery.Provider
-	node                 *discovery.Node
-	logger               log.Logger
-	hasher               hash.Hasher
-	partitionsCount      uint64
-	minimumPeersQuorum   uint32
-	replicaCount         uint32
-	writeQuorum          uint32
-	readQuorum           uint32
-	tableSize            uint64
-	writeTimeout         time.Duration
-	readTimeout          time.Duration
-	shutdownTimeout      time.Duration
-	bootstrapTimeout     time.Duration
-	routingTableInterval time.Duration
-	tlsInfo              *gtls.Info
+	name                    string
+	discoveryProvider       discovery.Provider
+	node                    *discovery.Node
+	logger                  log.Logger
+	hasher                  hash.Hasher
+	partitionsCount         uint64
+	minimumPeersQuorum      uint32
+	replicaCount            uint32
+	writeQuorum             uint32
+	readQuorum              uint32
+	tableSize               uint64
+	writeTimeout            time.Duration
+	readTimeout             time.Duration
+	shutdownTimeout         time.Duration
+	bootstrapTimeout        time.Duration
+	routingTableInterval    time.Duration
+	triggerBalancerInterval time.Duration
+	tlsInfo                 *gtls.Info
 
 	server *olric.Olric
 	client olric.Client
@@ -171,8 +174,16 @@ type cluster struct {
 	subscriber *redis.PubSub
 	messages   <-chan *redis.Message
 
-	nodeJoinedEventsFilter goset.Set[string]
-	nodeLeftEventsFilter   goset.Set[string]
+	nodeJoinedEventsFilter   goset.Set[string]
+	nodeLeftEventsFilter     goset.Set[string]
+	nodeJoinTimestamps       map[string]int64
+	nodeLeftTimestamps       map[string]int64
+	rebalanceJoinNodeEpochs  map[string]uint64
+	rebalanceLeftNodeEpochs  map[string]uint64
+	rebalanceJoinLatestEpoch uint64
+	rebalanceLeftLatestEpoch uint64
+	rebalanceStartSeen       map[uint64]struct{}
+	rebalanceCompleteSeen    map[uint64]struct{}
 
 	running *atomic.Bool
 }
@@ -188,27 +199,34 @@ func New(name string, disco discovery.Provider, node *discovery.Node, opts ...Co
 	}
 
 	return &cluster{
-		name:                   name,
-		discoveryProvider:      disco,
-		node:                   node,
-		logger:                 config.logger,
-		hasher:                 config.shardHasher,
-		partitionsCount:        config.shardCount,
-		minimumPeersQuorum:     config.minimumMembersQuorum,
-		replicaCount:           config.replicasCount,
-		writeQuorum:            config.membersWriteQuorum,
-		readQuorum:             config.membersReadQuorum,
-		tableSize:              config.tableSize,
-		writeTimeout:           config.writeTimeout,
-		readTimeout:            config.readTimeout,
-		shutdownTimeout:        config.shutdownTimeout,
-		bootstrapTimeout:       config.bootstrapTimeout,
-		routingTableInterval:   config.routingTableInterval,
-		tlsInfo:                config.tlsInfo,
-		events:                 make(chan *Event, defaultEventsBufSize),
-		nodeJoinedEventsFilter: goset.NewSet[string](),
-		nodeLeftEventsFilter:   goset.NewSet[string](),
-		running:                atomic.NewBool(false),
+		name:                    name,
+		discoveryProvider:       disco,
+		node:                    node,
+		logger:                  config.logger,
+		hasher:                  config.shardHasher,
+		partitionsCount:         config.shardCount,
+		minimumPeersQuorum:      config.minimumMembersQuorum,
+		replicaCount:            config.replicasCount,
+		writeQuorum:             config.membersWriteQuorum,
+		readQuorum:              config.membersReadQuorum,
+		tableSize:               config.tableSize,
+		writeTimeout:            config.writeTimeout,
+		readTimeout:             config.readTimeout,
+		shutdownTimeout:         config.shutdownTimeout,
+		bootstrapTimeout:        config.bootstrapTimeout,
+		routingTableInterval:    config.routingTableInterval,
+		triggerBalancerInterval: config.triggerBalancerInterval,
+		tlsInfo:                 config.tlsInfo,
+		events:                  make(chan *Event, defaultEventsBufSize),
+		nodeJoinedEventsFilter:  goset.NewSet[string](),
+		nodeLeftEventsFilter:    goset.NewSet[string](),
+		nodeJoinTimestamps:      make(map[string]int64),
+		nodeLeftTimestamps:      make(map[string]int64),
+		rebalanceJoinNodeEpochs: make(map[string]uint64),
+		rebalanceLeftNodeEpochs: make(map[string]uint64),
+		rebalanceStartSeen:      make(map[uint64]struct{}),
+		rebalanceCompleteSeen:   make(map[uint64]struct{}),
+		running:                 atomic.NewBool(false),
 	}
 }
 
@@ -855,7 +873,7 @@ func (x *cluster) buildConfig() (*oconfig.Config, error) {
 		LogOutput:                  newLogWriter(x.logger),
 		EnableClusterEventsChannel: true,
 		Hasher:                     hasher.NewDefaultHasher(),
-		TriggerBalancerInterval:    oconfig.DefaultTriggerBalancerInterval,
+		TriggerBalancerInterval:    x.triggerBalancerInterval, // keep rebalance completion timely for stable event emission
 		MemberMeta:                 meta,
 	}
 
@@ -1010,21 +1028,34 @@ func (x *cluster) handleClusterEvent(payload string) error {
 		if err := json.Unmarshal([]byte(payload), &ev); err != nil {
 			return fmt.Errorf("unmarshal node join: %w", err)
 		}
-		x.processNodeJoin(ev)
+		x.trackNodeJoinEvent(ev)
 	case events.KindNodeLeftEvent:
 		var ev events.NodeLeftEvent
 		if err := json.Unmarshal([]byte(payload), &ev); err != nil {
 			return fmt.Errorf("unmarshal node left: %w", err)
 		}
-		x.processNodeLeft(ev)
+		x.trackNodeLeftEvent(ev)
+	case events.KindRebalanceStartEvent:
+		var ev events.RebalanceStartEvent
+		if err := json.Unmarshal([]byte(payload), &ev); err != nil {
+			return fmt.Errorf("unmarshal rebalance start: %w", err)
+		}
+		x.processRebalanceStart(ev)
+	case events.KindRebalanceCompleteEvent:
+		var ev events.RebalanceCompleteEvent
+		if err := json.Unmarshal([]byte(payload), &ev); err != nil {
+			return fmt.Errorf("unmarshal rebalance complete: %w", err)
+		}
+		x.processRebalanceComplete(ev)
 	default:
 		// unknown or unhandled kind
 	}
 	return nil
 }
 
-// processNodeJoin applies de-dup and forwards a NodeJoined event.
-func (x *cluster) processNodeJoin(ev events.NodeJoinEvent) {
+// trackNodeJoinEvent records node-join metadata and defers NodeJoined emission until
+// the matching rebalance epoch completes so cluster events reflect a stable topology.
+func (x *cluster) trackNodeJoinEvent(ev events.NodeJoinEvent) {
 	x.eventsLock.Lock()
 	defer x.eventsLock.Unlock()
 
@@ -1032,42 +1063,170 @@ func (x *cluster) processNodeJoin(ev events.NodeJoinEvent) {
 	if x.node.PeersAddress() == ev.NodeJoin {
 		return
 	}
-	// de-dup
 	if x.nodeJoinedEventsFilter.Contains(ev.NodeJoin) {
 		return
 	}
-	x.nodeJoinedEventsFilter.Add(ev.NodeJoin)
-
-	timeMilli := ev.Timestamp / int64(1e6)
-	evt := &goaktpb.NodeJoined{
-		Address:   ev.NodeJoin,
-		Timestamp: timestamppb.New(time.UnixMilli(timeMilli)),
+	if _, exists := x.nodeJoinTimestamps[ev.NodeJoin]; exists {
+		return
 	}
-	payload, _ := anypb.New(evt)
+	x.nodeJoinTimestamps[ev.NodeJoin] = ev.Timestamp
 
-	x.sendEventLocked(&Event{Payload: payload, Type: NodeJoined})
+	if x.rebalanceJoinLatestEpoch != 0 {
+		x.rebalanceJoinNodeEpochs[ev.NodeJoin] = x.rebalanceJoinLatestEpoch
+		if _, complete := x.rebalanceCompleteSeen[x.rebalanceJoinLatestEpoch]; complete {
+			x.emitPendingJoinForEpochLocked(x.rebalanceJoinLatestEpoch)
+		}
+	}
 }
 
-// processNodeLeft applies de-dup and forwards a NodeLeft event.
-func (x *cluster) processNodeLeft(ev events.NodeLeftEvent) {
+// trackNodeLeftEvent records node-left metadata and defers NodeLeft emission until
+// the matching rebalance epoch completes, keeping relocation aligned with routing
+// table convergence while preserving the original node-left timestamp.
+func (x *cluster) trackNodeLeftEvent(ev events.NodeLeftEvent) {
 	x.eventsLock.Lock()
 	defer x.eventsLock.Unlock()
 
 	x.nodeJoinedEventsFilter.Remove(ev.NodeLeft)
-	// de-dup
 	if x.nodeLeftEventsFilter.Contains(ev.NodeLeft) {
 		return
 	}
-	x.nodeLeftEventsFilter.Add(ev.NodeLeft)
+	if _, exists := x.nodeLeftTimestamps[ev.NodeLeft]; exists {
+		return
+	}
+	x.nodeLeftTimestamps[ev.NodeLeft] = ev.Timestamp
 
-	timeMilli := ev.Timestamp / int64(1e6)
+	if x.rebalanceLeftLatestEpoch != 0 {
+		x.rebalanceLeftNodeEpochs[ev.NodeLeft] = x.rebalanceLeftLatestEpoch
+		if _, complete := x.rebalanceCompleteSeen[x.rebalanceLeftLatestEpoch]; complete {
+			x.emitPendingLeftForEpochLocked(x.rebalanceLeftLatestEpoch)
+		}
+	}
+}
+
+// processRebalanceStart records rebalance epochs tied to join/leave triggers.
+func (x *cluster) processRebalanceStart(ev events.RebalanceStartEvent) {
+	if ev.Reason != rebalanceReasonNodeLeft && ev.Reason != rebalanceReasonNodeJoin {
+		return
+	}
+	if ev.Reason == rebalanceReasonNodeJoin && ev.Node == x.node.PeersAddress() {
+		return
+	}
+
+	x.eventsLock.Lock()
+	defer x.eventsLock.Unlock()
+
+	if _, seen := x.rebalanceStartSeen[ev.Epoch]; seen {
+		return
+	}
+	x.rebalanceStartSeen[ev.Epoch] = struct{}{}
+
+	switch ev.Reason {
+	case rebalanceReasonNodeLeft:
+		x.rebalanceLeftLatestEpoch = ev.Epoch
+		x.assignLeftEpochLocked(ev.Epoch)
+		if _, complete := x.rebalanceCompleteSeen[ev.Epoch]; complete {
+			x.emitPendingLeftForEpochLocked(ev.Epoch)
+		}
+	case rebalanceReasonNodeJoin:
+		x.rebalanceJoinLatestEpoch = ev.Epoch
+		x.assignJoinEpochLocked(ev.Epoch)
+		if _, complete := x.rebalanceCompleteSeen[ev.Epoch]; complete {
+			x.emitPendingJoinForEpochLocked(ev.Epoch)
+		}
+	}
+}
+
+// processRebalanceComplete emits pending NodeLeft and NodeJoined events when the rebalance epoch completes.
+func (x *cluster) processRebalanceComplete(ev events.RebalanceCompleteEvent) {
+	x.eventsLock.Lock()
+	defer x.eventsLock.Unlock()
+
+	if _, seen := x.rebalanceCompleteSeen[ev.Epoch]; seen {
+		return
+	}
+	x.rebalanceCompleteSeen[ev.Epoch] = struct{}{}
+
+	x.emitPendingLeftForEpochLocked(ev.Epoch)
+	x.emitPendingJoinForEpochLocked(ev.Epoch)
+}
+
+// assignJoinEpochLocked maps pending joins to the latest rebalance epoch since newer epochs
+// supersede earlier ones and act as the stable barrier for event emission.
+func (x *cluster) assignJoinEpochLocked(epoch uint64) {
+	for node := range x.nodeJoinTimestamps {
+		x.rebalanceJoinNodeEpochs[node] = epoch
+	}
+}
+
+// assignLeftEpochLocked maps pending leaves to the latest rebalance epoch to avoid
+// emitting on superseded epochs.
+func (x *cluster) assignLeftEpochLocked(epoch uint64) {
+	for node := range x.nodeLeftTimestamps {
+		x.rebalanceLeftNodeEpochs[node] = epoch
+	}
+}
+
+func (x *cluster) emitPendingJoinForEpochLocked(epoch uint64) {
+	for node, nodeEpoch := range x.rebalanceJoinNodeEpochs {
+		if nodeEpoch != epoch {
+			continue
+		}
+		timestamp, ok := x.nodeJoinTimestamps[node]
+		if !ok {
+			delete(x.rebalanceJoinNodeEpochs, node)
+			continue
+		}
+		x.emitNodeJoinedLocked(node, timestamp)
+		delete(x.nodeJoinTimestamps, node)
+		delete(x.rebalanceJoinNodeEpochs, node)
+	}
+}
+
+func (x *cluster) emitPendingLeftForEpochLocked(epoch uint64) {
+	for node, nodeEpoch := range x.rebalanceLeftNodeEpochs {
+		if nodeEpoch != epoch {
+			continue
+		}
+		timestamp, ok := x.nodeLeftTimestamps[node]
+		if !ok {
+			delete(x.rebalanceLeftNodeEpochs, node)
+			continue
+		}
+		x.emitNodeLeftLocked(node, timestamp)
+		delete(x.nodeLeftTimestamps, node)
+		delete(x.rebalanceLeftNodeEpochs, node)
+	}
+}
+
+func (x *cluster) emitNodeLeftLocked(node string, timestamp int64) {
+	x.nodeJoinedEventsFilter.Remove(node)
+	if x.nodeLeftEventsFilter.Contains(node) {
+		return
+	}
+	x.nodeLeftEventsFilter.Add(node)
+
+	timeMilli := timestamp / int64(time.Millisecond)
 	evt := &goaktpb.NodeLeft{
-		Address:   ev.NodeLeft,
+		Address:   node,
 		Timestamp: timestamppb.New(time.UnixMilli(timeMilli)),
 	}
 	payload, _ := anypb.New(evt)
-
 	x.sendEventLocked(&Event{Payload: payload, Type: NodeLeft})
+}
+
+func (x *cluster) emitNodeJoinedLocked(node string, timestamp int64) {
+	if x.nodeJoinedEventsFilter.Contains(node) {
+		return
+	}
+	x.nodeJoinedEventsFilter.Add(node)
+
+	timeMilli := timestamp / int64(time.Millisecond)
+	evt := &goaktpb.NodeJoined{
+		Address:   node,
+		Timestamp: timestamppb.New(time.UnixMilli(timeMilli)),
+	}
+	payload, _ := anypb.New(evt)
+	x.sendEventLocked(&Event{Payload: payload, Type: NodeJoined})
 }
 
 // sendEventLocked pushes an event if the channel is active.

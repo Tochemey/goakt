@@ -26,6 +26,7 @@ package actor
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -36,6 +37,13 @@ func TestClusterSingletonOption(t *testing.T) {
 
 	role := "payments"
 	WithSingletonRole(role)(cfg)
+	WithSingletonSpawnTimeout(time.Second)(cfg)
+	WithSingletonSpawnWaitInterval(100 * time.Millisecond)(cfg)
+	WithSingletonSpawnRetries(10)(cfg)
+
+	require.Equal(t, 10, cfg.numberOfRetries)
+	require.Equal(t, 100*time.Millisecond, cfg.waitInterval)
+	require.Equal(t, time.Second, cfg.spawnTimeout)
 	require.NotNil(t, cfg.Role())
 	require.Equal(t, role, *cfg.Role())
 }

@@ -51,7 +51,7 @@ message Actor {
   // Specifies the actor type
   string type = 2;
   // Specifies if the actor is a singleton
-  bool is_singleton = 3;
+  SingletonSpec singleton = 3;
   // Specifies if the actor is disabled for relocation
   bool relocatable = 4;
   // Specifies the passivation strategy
@@ -64,4 +64,13 @@ message Actor {
   optional string role = 8;
   // Specifies the supervisor configuration when explicitly set
   SupervisorSpec supervisor = 9;
+}
+
+message SingletonSpec {
+  // Specifies the spawn timeout for the singleton actor
+  google.protobuf.Duration spawn_timeout = 1;
+  // Specifies the wait interval between spawn retries
+  google.protobuf.Duration wait_interval = 2;
+  // Specifies the maximum number of spawn retries
+  int32 max_retries = 3;
 }

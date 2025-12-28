@@ -98,7 +98,7 @@ func toActorRef(actorRef *internalpb.Actor) ActorRef {
 		name:        addr.Name(),
 		kind:        actorRef.GetType(),
 		address:     addr,
-		isSingleton: actorRef.GetIsSingleton(),
+		isSingleton: actorRef.Singleton != nil,
 		relocatable: actorRef.GetRelocatable(),
 	}
 }

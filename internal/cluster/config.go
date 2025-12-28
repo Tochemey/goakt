@@ -35,38 +35,40 @@ import (
 )
 
 type config struct {
-	shardCount           uint64
-	minimumMembersQuorum uint32
-	replicasCount        uint32
-	membersWriteQuorum   uint32
-	membersReadQuorum    uint32
-	tableSize            uint64
-	writeTimeout         time.Duration
-	readTimeout          time.Duration
-	shutdownTimeout      time.Duration
-	bootstrapTimeout     time.Duration
-	routingTableInterval time.Duration
-	logger               log.Logger
-	shardHasher          hash.Hasher
-	tlsInfo              *gtls.Info
+	shardCount              uint64
+	minimumMembersQuorum    uint32
+	replicasCount           uint32
+	membersWriteQuorum      uint32
+	membersReadQuorum       uint32
+	tableSize               uint64
+	writeTimeout            time.Duration
+	readTimeout             time.Duration
+	shutdownTimeout         time.Duration
+	bootstrapTimeout        time.Duration
+	routingTableInterval    time.Duration
+	triggerBalancerInterval time.Duration
+	logger                  log.Logger
+	shardHasher             hash.Hasher
+	tlsInfo                 *gtls.Info
 }
 
 func defaultConfig() *config {
 	return &config{
-		shardCount:           271,
-		minimumMembersQuorum: 1,
-		replicasCount:        1,
-		membersWriteQuorum:   1,
-		membersReadQuorum:    1,
-		tableSize:            4 * size.MB,
-		writeTimeout:         time.Second,
-		readTimeout:          time.Second,
-		shutdownTimeout:      3 * time.Minute,
-		bootstrapTimeout:     10 * time.Second,
-		routingTableInterval: time.Minute,
-		logger:               log.New(log.ErrorLevel, os.Stderr),
-		shardHasher:          hash.DefaultHasher(),
-		tlsInfo:              nil,
+		shardCount:              271,
+		minimumMembersQuorum:    1,
+		replicasCount:           1,
+		membersWriteQuorum:      1,
+		membersReadQuorum:       1,
+		tableSize:               4 * size.MB,
+		writeTimeout:            time.Second,
+		readTimeout:             time.Second,
+		shutdownTimeout:         3 * time.Minute,
+		bootstrapTimeout:        10 * time.Second,
+		routingTableInterval:    time.Minute,
+		triggerBalancerInterval: time.Second,
+		logger:                  log.New(log.ErrorLevel, os.Stderr),
+		shardHasher:             hash.DefaultHasher(),
+		tlsInfo:                 nil,
 	}
 }
 
@@ -189,6 +191,15 @@ func WithRoutingTableInterval(interval time.Duration) ConfigOption {
 	return func(cfg *config) {
 		if interval > 0 {
 			cfg.routingTableInterval = interval
+		}
+	}
+}
+
+// WithBalancerInterval configures how frequently the Olric balancer runs.
+func WithBalancerInterval(interval time.Duration) ConfigOption {
+	return func(cfg *config) {
+		if interval > 0 {
+			cfg.triggerBalancerInterval = interval
 		}
 	}
 }
