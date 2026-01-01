@@ -1,8 +1,6 @@
 # Changelog
 
-Changes since `v3.11.2`.
-
-## Unreleased
+## [v3.12.0] - 2025-31-12
 
 ### ✨ Features
 - 🧭 `SpawnOn` now uses the system-wide default supervisor strategy configured via `WithDefaultSupervisor`.
