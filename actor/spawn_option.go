@@ -96,6 +96,8 @@ type spawnConfig struct {
 	placement SpawnPlacement
 	// passivationStrategy defines the strategy used for actor passivation.
 	passivationStrategy passivation.Strategy
+	// reentrancy defines the async request behavior for the actor.
+	reentrancy *reentrancyConfig
 	// role defines the role required for the node to spawn the actor.
 	role *string
 	// singletonSpec holds the singleton configuration if the actor is a singleton.
@@ -115,6 +117,10 @@ func (s *spawnConfig) Validate() error {
 		default:
 			return errors.NewErrInvalidPassivationStrategy(s.passivationStrategy)
 		}
+	}
+
+	if s.reentrancy != nil && !s.reentrancy.valid() {
+		return errors.ErrInvalidReentrancyMode
 	}
 
 	for _, dependency := range s.dependencies {

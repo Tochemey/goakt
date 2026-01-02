@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/extension"
 )
 
@@ -77,5 +78,32 @@ func TestSpawnRequestValidateAndSanitize(t *testing.T) {
 		}
 		err := req.Validate()
 		require.Error(t, err)
+	})
+
+	t.Run("invalid reentrancy mode", func(t *testing.T) {
+		req := &SpawnRequest{
+			Name: "actor",
+			Kind: "kind",
+			Reentrancy: &ReentrancyConfig{
+				Mode: ReentrancyMode(99),
+			},
+		}
+		err := req.Validate()
+		require.Error(t, err)
+		require.ErrorIs(t, err, gerrors.ErrInvalidReentrancyMode)
+	})
+
+	t.Run("sanitize clamps reentrancy max in flight", func(t *testing.T) {
+		req := &SpawnRequest{
+			Name: "actor",
+			Kind: "kind",
+			Reentrancy: &ReentrancyConfig{
+				Mode:        ReentrancyAllowAll,
+				MaxInFlight: -10,
+			},
+		}
+		req.Sanitize()
+		require.NotNil(t, req.Reentrancy)
+		assert.Equal(t, 0, req.Reentrancy.MaxInFlight)
 	})
 }

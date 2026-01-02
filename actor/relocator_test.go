@@ -335,6 +335,12 @@ func TestRelocation(t *testing.T) {
 
 	pause.For(time.Second)
 
+	reentrantName := "Reentrant-Actor"
+	pid, err := node2.Spawn(ctx, reentrantName, NewMockActor(),
+		WithReentrancy(ReentrancyStashNonReentrant, WithMaxInFlight(3)))
+	require.NoError(t, err)
+	require.NotNil(t, pid)
+
 	for j := 1; j <= 4; j++ {
 		actorName := fmt.Sprintf("Actor3-%d", j)
 		pid, err := node3.Spawn(ctx, actorName, NewMockActor())
@@ -359,6 +365,17 @@ func TestRelocation(t *testing.T) {
 	actorName := "Actor2-1"
 	err = sender.SendAsync(ctx, actorName, new(testpb.TestSend))
 	require.NoError(t, err)
+
+	relocated, err := node1.LocalActor(reentrantName)
+	if err != nil {
+		require.ErrorIs(t, err, errors.ErrActorNotFound)
+		relocated, err = node3.LocalActor(reentrantName)
+		require.NoError(t, err)
+	}
+	require.NotNil(t, relocated)
+	require.NotNil(t, relocated.reentrancy)
+	require.Equal(t, ReentrancyStashNonReentrant, relocated.reentrancy.mode)
+	require.Equal(t, 3, relocated.reentrancy.maxInFlight)
 
 	assert.NoError(t, node1.Stop(ctx))
 	assert.NoError(t, node3.Stop(ctx))

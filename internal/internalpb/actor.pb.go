@@ -279,7 +279,9 @@ type Actor struct {
 	// Specifies the role the actor belongs to
 	Role *string `protobuf:"bytes,8,opt,name=role,proto3,oneof" json:"role,omitempty"`
 	// Specifies the supervisor configuration when explicitly set
-	Supervisor    *SupervisorSpec `protobuf:"bytes,9,opt,name=supervisor,proto3" json:"supervisor,omitempty"`
+	Supervisor *SupervisorSpec `protobuf:"bytes,9,opt,name=supervisor,proto3" json:"supervisor,omitempty"`
+	// Specifies the reentrancy configuration when explicitly set
+	Reentrancy    *ReentrancyConfig `protobuf:"bytes,10,opt,name=reentrancy,proto3" json:"reentrancy,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -377,6 +379,13 @@ func (x *Actor) GetSupervisor() *SupervisorSpec {
 	return nil
 }
 
+func (x *Actor) GetReentrancy() *ReentrancyConfig {
+	if x != nil {
+		return x.Reentrancy
+	}
+	return nil
+}
+
 type SingletonSpec struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Specifies the spawn timeout for the singleton actor
@@ -445,7 +454,7 @@ var File_internal_actor_proto protoreflect.FileDescriptor
 const file_internal_actor_proto_rawDesc = "" +
 	"\n" +
 	"\x14internal/actor.proto\x12\n" +
-	"internalpb\x1a\x1egoogle/protobuf/duration.proto\x1a\x19internal/dependency.proto\x1a\x1ainternal/passivation.proto\"w\n" +
+	"internalpb\x1a\x1egoogle/protobuf/duration.proto\x1a\x19internal/dependency.proto\x1a\x1ainternal/passivation.proto\x1a\x19internal/reentrancy.proto\"w\n" +
 	"\x17SupervisorDirectiveRule\x12\x1d\n" +
 	"\n" +
 	"error_type\x18\x01 \x01(\tR\terrorType\x12=\n" +
@@ -459,7 +468,7 @@ const file_internal_actor_proto_rawDesc = "" +
 	"directives\x18\x04 \x03(\v2#.internalpb.SupervisorDirectiveRuleR\n" +
 	"directives\x12T\n" +
 	"\x13any_error_directive\x18\x05 \x01(\x0e2\x1f.internalpb.SupervisorDirectiveH\x00R\x11anyErrorDirective\x88\x01\x01B\x16\n" +
-	"\x14_any_error_directive\"\xa1\x03\n" +
+	"\x14_any_error_directive\"\xdf\x03\n" +
 	"\x05Actor\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x127\n" +
@@ -471,7 +480,11 @@ const file_internal_actor_proto_rawDesc = "" +
 	"\x04role\x18\b \x01(\tH\x00R\x04role\x88\x01\x01\x12:\n" +
 	"\n" +
 	"supervisor\x18\t \x01(\v2\x1a.internalpb.SupervisorSpecR\n" +
-	"supervisorB\a\n" +
+	"supervisor\x12<\n" +
+	"\n" +
+	"reentrancy\x18\n" +
+	" \x01(\v2\x1c.internalpb.ReentrancyConfigR\n" +
+	"reentrancyB\a\n" +
 	"\x05_role\"\xb0\x01\n" +
 	"\rSingletonSpec\x12>\n" +
 	"\rspawn_timeout\x18\x01 \x01(\v2\x19.google.protobuf.DurationR\fspawnTimeout\x12>\n" +
@@ -516,6 +529,7 @@ var file_internal_actor_proto_goTypes = []any{
 	(*durationpb.Duration)(nil),     // 6: google.protobuf.Duration
 	(*PassivationStrategy)(nil),     // 7: internalpb.PassivationStrategy
 	(*Dependency)(nil),              // 8: internalpb.Dependency
+	(*ReentrancyConfig)(nil),        // 9: internalpb.ReentrancyConfig
 }
 var file_internal_actor_proto_depIdxs = []int32{
 	1,  // 0: internalpb.SupervisorDirectiveRule.directive:type_name -> internalpb.SupervisorDirective
@@ -527,13 +541,14 @@ var file_internal_actor_proto_depIdxs = []int32{
 	7,  // 6: internalpb.Actor.passivation_strategy:type_name -> internalpb.PassivationStrategy
 	8,  // 7: internalpb.Actor.dependencies:type_name -> internalpb.Dependency
 	3,  // 8: internalpb.Actor.supervisor:type_name -> internalpb.SupervisorSpec
-	6,  // 9: internalpb.SingletonSpec.spawn_timeout:type_name -> google.protobuf.Duration
-	6,  // 10: internalpb.SingletonSpec.wait_interval:type_name -> google.protobuf.Duration
-	11, // [11:11] is the sub-list for method output_type
-	11, // [11:11] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	9,  // 9: internalpb.Actor.reentrancy:type_name -> internalpb.ReentrancyConfig
+	6,  // 10: internalpb.SingletonSpec.spawn_timeout:type_name -> google.protobuf.Duration
+	6,  // 11: internalpb.SingletonSpec.wait_interval:type_name -> google.protobuf.Duration
+	12, // [12:12] is the sub-list for method output_type
+	12, // [12:12] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_internal_actor_proto_init() }
@@ -543,6 +558,7 @@ func file_internal_actor_proto_init() {
 	}
 	file_internal_dependency_proto_init()
 	file_internal_passivation_proto_init()
+	file_internal_reentrancy_proto_init()
 	file_internal_actor_proto_msgTypes[1].OneofWrappers = []any{}
 	file_internal_actor_proto_msgTypes[2].OneofWrappers = []any{}
 	type x struct{}

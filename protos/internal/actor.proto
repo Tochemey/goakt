@@ -5,6 +5,7 @@ package internalpb;
 import "google/protobuf/duration.proto";
 import "internal/dependency.proto";
 import "internal/passivation.proto";
+import "internal/reentrancy.proto";
 
 option go_package = "github.com/tochemey/goakt/v3/internal/internalpb;internalpb";
 
@@ -64,6 +65,8 @@ message Actor {
   optional string role = 8;
   // Specifies the supervisor configuration when explicitly set
   SupervisorSpec supervisor = 9;
+  // Specifies the reentrancy configuration when explicitly set
+  ReentrancyConfig reentrancy = 10;
 }
 
 message SingletonSpec {

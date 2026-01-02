@@ -73,6 +73,21 @@ func TestSpawnOption(t *testing.T) {
 		option.Apply(config)
 		require.Equal(t, &spawnConfig{enableStash: true}, config)
 	})
+	t.Run("spawn option with reentrancy", func(t *testing.T) {
+		config := &spawnConfig{}
+		option := WithReentrancy(ReentrancyAllowAll, WithMaxInFlight(4))
+		option.Apply(config)
+		require.NotNil(t, config.reentrancy)
+		require.Equal(t, ReentrancyAllowAll, config.reentrancy.mode)
+		require.Equal(t, 4, config.reentrancy.maxInFlight)
+	})
+	t.Run("spawn option with reentrancy max in flight clamp", func(t *testing.T) {
+		config := &spawnConfig{}
+		option := WithReentrancy(ReentrancyAllowAll, WithMaxInFlight(-1))
+		option.Apply(config)
+		require.NotNil(t, config.reentrancy)
+		require.Equal(t, 0, config.reentrancy.maxInFlight)
+	})
 	t.Run("spawn option with placement", func(t *testing.T) {
 		config := &spawnConfig{}
 		option := WithPlacement(RoundRobin)
@@ -129,5 +144,13 @@ func TestSpawnConfig(t *testing.T) {
 		err := config.Validate()
 		require.Error(t, err)
 		require.ErrorIs(t, err, errors.ErrInvalidPassivationStrategy)
+	})
+	t.Run("With invalid reentrancy mode", func(t *testing.T) {
+		config := newSpawnConfig()
+		option := WithReentrancy(ReentrancyMode(99))
+		option.Apply(config)
+		err := config.Validate()
+		require.Error(t, err)
+		require.ErrorIs(t, err, errors.ErrInvalidReentrancyMode)
 	})
 }

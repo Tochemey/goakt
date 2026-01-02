@@ -2139,6 +2139,11 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 		opts = append(opts, WithStashing())
 	}
 
+	if msg.GetReentrancy() != nil {
+		reentrancy := reentrancyConfigFromProto(msg.GetReentrancy())
+		opts = append(opts, WithReentrancy(reentrancy.mode, WithMaxInFlight(reentrancy.maxInFlight)))
+	}
+
 	if msg.GetRole() != "" {
 		opts = append(opts, WithRole(msg.GetRole()))
 	}
@@ -3249,6 +3254,11 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 	// enable stash
 	if spawnConfig.enableStash {
 		pidOpts = append(pidOpts, withStash())
+	}
+
+	// enable reentrancy when configured
+	if spawnConfig.reentrancy != nil {
+		pidOpts = append(pidOpts, withReentrancy(spawnConfig.reentrancy))
 	}
 
 	// set the role

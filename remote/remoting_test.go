@@ -34,6 +34,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/tochemey/olric"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -216,6 +217,26 @@ func TestRemoteSpawn_InvalidPort(t *testing.T) {
 	err := r.RemoteSpawn(context.Background(), "host", port, &SpawnRequest{Name: "actor", Kind: "kind"})
 	assert.Error(t, err)
 	assert.ErrorContains(t, err, "out of range")
+}
+
+func TestRemoteSpawn_MapsReentrancyConfig(t *testing.T) {
+	r := NewRemoting()
+	mockClient := &mockRemotingServiceClient{}
+	setClientFactory(t, r, func(string, int) internalpbconnect.RemotingServiceClient { return mockClient })
+
+	err := r.RemoteSpawn(context.Background(), "host", 1000, &SpawnRequest{
+		Name: "actor",
+		Kind: "kind",
+		Reentrancy: &ReentrancyConfig{
+			Mode:        ReentrancyStashNonReentrant,
+			MaxInFlight: 5,
+		},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, mockClient.lastSpawnReq)
+	require.NotNil(t, mockClient.lastSpawnReq.GetReentrancy())
+	assert.Equal(t, internalpb.ReentrancyMode_REENTRANCY_MODE_STASH_NON_REENTRANT, mockClient.lastSpawnReq.GetReentrancy().GetMode())
+	assert.Equal(t, uint32(5), mockClient.lastSpawnReq.GetReentrancy().GetMaxInFlight())
 }
 
 func TestRemoteSpawn_MapsAlreadyExistsErrors(t *testing.T) {
@@ -737,6 +758,7 @@ type mockRemotingServiceClient struct {
 	activateGrainHeader       nethttp.Header
 	lastTellReq               *internalpb.RemoteTellRequest
 	lastAskReq                *internalpb.RemoteAskRequest
+	lastSpawnReq              *internalpb.RemoteSpawnRequest
 	lastAskGrainReq           *internalpb.RemoteAskGrainRequest
 	lastTellGrainReq          *internalpb.RemoteTellGrainRequest
 	lastActivateGrainReq      *internalpb.RemoteActivateGrainRequest
@@ -789,6 +811,7 @@ func (x *mockRemotingServiceClient) RemoteStop(_ context.Context, req *connect.R
 
 func (x *mockRemotingServiceClient) RemoteSpawn(_ context.Context, req *connect.Request[internalpb.RemoteSpawnRequest]) (*connect.Response[internalpb.RemoteSpawnResponse], error) {
 	x.spawnHeader = req.Header().Clone()
+	x.lastSpawnReq = req.Msg
 	if x.spawnErr != nil {
 		return nil, x.spawnErr
 	}
