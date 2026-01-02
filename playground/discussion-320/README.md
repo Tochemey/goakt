@@ -1,5 +1,7 @@
 # Discussion-320: Reentrancy Example
 
+For more context check the github [discussion-320](https://github.com/Tochemey/goakt/discussions/320)
+
 This playground demonstrates how reentrancy enables safe request/response cycles
 between actors without blocking the caller.
 
