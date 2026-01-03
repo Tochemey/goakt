@@ -30,6 +30,7 @@ import (
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/internal/validation"
 	"github.com/tochemey/goakt/v3/passivation"
+	"github.com/tochemey/goakt/v3/reentrancy"
 	"github.com/tochemey/goakt/v3/supervisor"
 )
 
@@ -78,31 +79,6 @@ type SingletonSpec struct {
 	// A value <= 0 usually means "use the system default" or "do not retry" depending on
 	// the caller semantics.
 	MaxRetries int32
-}
-
-// ReentrancyMode determines how an actor processes messages while awaiting async responses.
-//
-// This mirrors the actor-level reentrancy policy to keep remote spawn options explicit.
-type ReentrancyMode int32
-
-const (
-	// ReentrancyOff disables async requests.
-	ReentrancyOff ReentrancyMode = iota
-	// ReentrancyAllowAll allows processing all messages while awaiting responses.
-	ReentrancyAllowAll
-	// ReentrancyStashNonReentrant stashes user messages while awaiting responses.
-	ReentrancyStashNonReentrant
-)
-
-// ReentrancyConfig defines reentrancy settings for a remotely spawned actor.
-//
-// Design decision: reentrancy is explicit on remote requests to avoid hidden
-// defaults drifting across nodes.
-type ReentrancyConfig struct {
-	// Mode defines the async processing behavior.
-	Mode ReentrancyMode
-	// MaxInFlight limits concurrent async requests. Zero means unlimited.
-	MaxInFlight int
 }
 
 // SpawnRequest defines configuration options for spawning an actor on a remote node.
@@ -196,7 +172,7 @@ type SpawnRequest struct {
 
 	// Reentrancy defines async request behavior for the spawned actor.
 	// When nil, async requests are disabled (default behavior).
-	Reentrancy *ReentrancyConfig
+	Reentrancy *reentrancy.Reentrancy
 }
 
 // _ ensures that SpawnRequest implements the validation.Validator interface at compile time.
@@ -220,7 +196,7 @@ func (s *SpawnRequest) Validate() error {
 		}
 	}
 
-	if s.Reentrancy != nil && !s.Reentrancy.Mode.valid() {
+	if s.Reentrancy != nil && s.Reentrancy.Validate() != nil {
 		return gerrors.ErrInvalidReentrancyMode
 	}
 
@@ -233,18 +209,5 @@ func (s *SpawnRequest) Sanitize() {
 	s.Kind = strings.TrimSpace(s.Kind)
 	if s.Singleton != nil {
 		s.Relocatable = true
-	}
-	if s.Reentrancy != nil && s.Reentrancy.MaxInFlight < 0 {
-		s.Reentrancy.MaxInFlight = 0
-	}
-}
-
-func (m ReentrancyMode) valid() bool {
-	// valid guards against unknown reentrancy enum values.
-	switch m {
-	case ReentrancyOff, ReentrancyAllowAll, ReentrancyStashNonReentrant:
-		return true
-	default:
-		return false
 	}
 }

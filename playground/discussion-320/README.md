@@ -44,7 +44,7 @@ Expected output includes:
 - Prompt to press Ctrl+C to stop the system.
 
 ## Notes
-- ActorA is spawned with WithReentrancy(ReentrancyAllowAll) to allow the cycle.
+- ActorA is spawned with `WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll)))` to allow the cycle.
 - WithMaxInFlight sets a guardrail for outstanding Request calls.
 - WithRequestTimeout bounds each request so failures do not stall the actor.
 - RequestName records errors on the ReceiveContext and returns nil on failure.

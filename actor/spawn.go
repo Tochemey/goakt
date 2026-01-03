@@ -226,13 +226,7 @@ func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opt
 		PassivationStrategy: config.passivationStrategy,
 		Dependencies:        config.dependencies,
 		EnableStashing:      config.enableStash,
-	}
-
-	if config.reentrancy != nil {
-		request.Reentrancy = &remote.ReentrancyConfig{
-			Mode:        remote.ReentrancyMode(config.reentrancy.mode),
-			MaxInFlight: config.reentrancy.maxInFlight,
-		}
+		Reentrancy:          config.reentrancy,
 	}
 
 	if config.supervisor != nil {

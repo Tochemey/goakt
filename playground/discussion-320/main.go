@@ -35,6 +35,7 @@ import (
 	"github.com/tochemey/goakt/v3/actor"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v3/reentrancy"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
@@ -58,8 +59,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	actorA, err := system.Spawn(ctx, actorAName, &ActorA{targetName: actorBName},
-		actor.WithReentrancy(actor.ReentrancyAllowAll, actor.WithMaxInFlight(4)))
+	actorA, err := system.Spawn(ctx, actorAName, &ActorA{targetName: actorBName}, actor.WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll), reentrancy.WithMaxInFlight(4))))
 	if err != nil {
 		fmt.Printf("Error spawning %s: %v\n", actorAName, err)
 		os.Exit(1)

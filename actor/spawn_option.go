@@ -30,6 +30,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/pointer"
 	"github.com/tochemey/goakt/v3/internal/validation"
 	"github.com/tochemey/goakt/v3/passivation"
+	"github.com/tochemey/goakt/v3/reentrancy"
 	"github.com/tochemey/goakt/v3/supervisor"
 )
 
@@ -97,7 +98,7 @@ type spawnConfig struct {
 	// passivationStrategy defines the strategy used for actor passivation.
 	passivationStrategy passivation.Strategy
 	// reentrancy defines the async request behavior for the actor.
-	reentrancy *reentrancyConfig
+	reentrancy *reentrancy.Reentrancy
 	// role defines the role required for the node to spawn the actor.
 	role *string
 	// singletonSpec holds the singleton configuration if the actor is a singleton.
@@ -119,7 +120,7 @@ func (s *spawnConfig) Validate() error {
 		}
 	}
 
-	if s.reentrancy != nil && !s.reentrancy.valid() {
+	if s.reentrancy != nil && s.reentrancy.Validate() != nil {
 		return errors.ErrInvalidReentrancyMode
 	}
 
@@ -372,6 +373,26 @@ func WithPassivationStrategy(strategy passivation.Strategy) SpawnOption {
 func WithRole(role string) SpawnOption {
 	return spawnOption(func(config *spawnConfig) {
 		config.role = pointer.To(role)
+	})
+}
+
+// WithReentrancy enables async requests for an actor and sets the default policy.
+//
+// Request/RequestName are disabled unless reentrancy is configured on the actor.
+// Per-call overrides are available via WithReentrancyMode.
+//
+// Design decision: reentrancy is opt-in to preserve backward compatibility for
+// existing actors. Enabling it makes Request/RequestName available; per-call
+// overrides via WithReentrancyMode can tighten or relax behavior for a single
+// request.
+//
+// Production note: prefer reentrancy.AllowAll for throughput and to avoid
+// deadlocks in call cycles (A -> B -> A). Use reentrancy.StashNonReentrant only
+// when strict message ordering is required, and always set Request timeouts to
+// prevent indefinite stashing if a dependency slows or fails.
+func WithReentrancy(reentrancy *reentrancy.Reentrancy) SpawnOption {
+	return spawnOption(func(config *spawnConfig) {
+		config.reentrancy = reentrancy
 	})
 }
 

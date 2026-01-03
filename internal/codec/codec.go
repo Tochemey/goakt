@@ -23,6 +23,7 @@
 package codec
 
 import (
+	"math"
 	"sort"
 	"time"
 
@@ -32,6 +33,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/passivation"
+	"github.com/tochemey/goakt/v3/reentrancy"
 	"github.com/tochemey/goakt/v3/supervisor"
 )
 
@@ -186,6 +188,67 @@ func DecodeSupervisor(spec *internalpb.SupervisorSpec) *supervisor.Supervisor {
 	}
 
 	return decoded
+}
+
+// EncodeReentrancy encodes a Reentrancy configuration into its protobuf representation.
+func EncodeReentrancy(reentrancy *reentrancy.Reentrancy) *internalpb.ReentrancyConfig {
+	if reentrancy == nil {
+		return nil
+	}
+	maxInFlight := reentrancy.MaxInFlight()
+	if maxInFlight < 0 {
+		maxInFlight = 0
+	}
+	var limit uint32
+	switch {
+	case maxInFlight <= 0:
+		limit = 0
+	case uint64(maxInFlight) > math.MaxUint32:
+		limit = math.MaxUint32
+	default:
+		limit = uint32(maxInFlight)
+	}
+	return &internalpb.ReentrancyConfig{
+		Mode:        toInternalReentrancyMode(reentrancy.Mode()),
+		MaxInFlight: limit,
+	}
+}
+
+// DecodeReentrancy decodes a protobuf representation of a Reentrancy configuration into its corresponding Reentrancy instance.
+func DecodeReentrancy(config *internalpb.ReentrancyConfig) *reentrancy.Reentrancy {
+	if config == nil {
+		return nil
+	}
+	mode := fromInternalReentrancyMode(config.GetMode())
+	maxInFlight := int(config.GetMaxInFlight())
+	return reentrancy.New(
+		reentrancy.WithMode(mode),
+		reentrancy.WithMaxInFlight(maxInFlight),
+	)
+}
+
+// toInternalReentrancyMode maps local modes to protobuf enums.
+func toInternalReentrancyMode(mode reentrancy.Mode) internalpb.ReentrancyMode {
+	switch mode {
+	case reentrancy.AllowAll:
+		return internalpb.ReentrancyMode_REENTRANCY_MODE_ALLOW_ALL
+	case reentrancy.StashNonReentrant:
+		return internalpb.ReentrancyMode_REENTRANCY_MODE_STASH_NON_REENTRANT
+	default:
+		return internalpb.ReentrancyMode_REENTRANCY_MODE_OFF
+	}
+}
+
+// fromInternalReentrancyMode maps protobuf enums to local modes.
+func fromInternalReentrancyMode(mode internalpb.ReentrancyMode) reentrancy.Mode {
+	switch mode {
+	case internalpb.ReentrancyMode_REENTRANCY_MODE_ALLOW_ALL:
+		return reentrancy.AllowAll
+	case internalpb.ReentrancyMode_REENTRANCY_MODE_STASH_NON_REENTRANT:
+		return reentrancy.StashNonReentrant
+	default:
+		return reentrancy.Off
+	}
 }
 
 func encodeSupervisorStrategy(strategy supervisor.Strategy) internalpb.SupervisorStrategy {

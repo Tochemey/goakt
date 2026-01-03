@@ -24,7 +24,9 @@ package codec
 
 import (
 	"errors"
+	"math"
 	"reflect"
+	"strconv"
 	"testing"
 	"time"
 	"unsafe"
@@ -40,6 +42,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/registry"
 	mocks "github.com/tochemey/goakt/v3/mocks/extension"
 	"github.com/tochemey/goakt/v3/passivation"
+	"github.com/tochemey/goakt/v3/reentrancy"
 	"github.com/tochemey/goakt/v3/supervisor"
 )
 
@@ -112,6 +115,146 @@ func TestDecodePassivationStrategyNil(t *testing.T) {
 
 func TestDecodePassivationStrategyUnknown(t *testing.T) {
 	require.Nil(t, DecodePassivationStrategy(&internalpb.PassivationStrategy{}))
+}
+
+func TestEncodeReentrancy(t *testing.T) {
+	tests := []struct {
+		name      string
+		value     *reentrancy.Reentrancy
+		wantMode  internalpb.ReentrancyMode
+		wantLimit uint32
+	}{
+		{
+			name: "allow all",
+			value: reentrancy.New(
+				reentrancy.WithMode(reentrancy.AllowAll),
+				reentrancy.WithMaxInFlight(5),
+			),
+			wantMode:  internalpb.ReentrancyMode_REENTRANCY_MODE_ALLOW_ALL,
+			wantLimit: 5,
+		},
+		{
+			name: "stash non reentrant",
+			value: reentrancy.New(
+				reentrancy.WithMode(reentrancy.StashNonReentrant),
+				reentrancy.WithMaxInFlight(2),
+			),
+			wantMode:  internalpb.ReentrancyMode_REENTRANCY_MODE_STASH_NON_REENTRANT,
+			wantLimit: 2,
+		},
+		{
+			name: "off defaults",
+			value: reentrancy.New(
+				reentrancy.WithMode(reentrancy.Off),
+				reentrancy.WithMaxInFlight(0),
+			),
+			wantMode:  internalpb.ReentrancyMode_REENTRANCY_MODE_OFF,
+			wantLimit: 0,
+		},
+		{
+			name: "unknown mode defaults to off",
+			value: reentrancy.New(
+				reentrancy.WithMode(reentrancy.Mode(99)),
+				reentrancy.WithMaxInFlight(3),
+			),
+			wantMode:  internalpb.ReentrancyMode_REENTRANCY_MODE_OFF,
+			wantLimit: 3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			encoded := EncodeReentrancy(tt.value)
+			require.NotNil(t, encoded)
+			require.Equal(t, tt.wantMode, encoded.GetMode())
+			require.Equal(t, tt.wantLimit, encoded.GetMaxInFlight())
+		})
+	}
+}
+
+func TestEncodeReentrancyNegativeMaxInFlightClamps(t *testing.T) {
+	cfg := reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))
+	setReentrancyMaxInFlight(cfg, -5)
+
+	encoded := EncodeReentrancy(cfg)
+	require.NotNil(t, encoded)
+	require.Equal(t, uint32(0), encoded.GetMaxInFlight())
+}
+
+func TestEncodeReentrancyLargeMaxInFlightClamps(t *testing.T) {
+	if strconv.IntSize < 64 {
+		t.Skip("int size too small to exceed MaxUint32")
+	}
+
+	cfg := reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))
+	setReentrancyMaxInFlight(cfg, int(uint64(math.MaxUint32)+1))
+
+	encoded := EncodeReentrancy(cfg)
+	require.NotNil(t, encoded)
+	require.Equal(t, uint32(math.MaxUint32), encoded.GetMaxInFlight())
+}
+
+func TestEncodeReentrancyNil(t *testing.T) {
+	require.Nil(t, EncodeReentrancy(nil))
+}
+
+func TestDecodeReentrancy(t *testing.T) {
+	tests := []struct {
+		name      string
+		value     *internalpb.ReentrancyConfig
+		wantMode  reentrancy.Mode
+		wantLimit int
+	}{
+		{
+			name: "allow all",
+			value: &internalpb.ReentrancyConfig{
+				Mode:        internalpb.ReentrancyMode_REENTRANCY_MODE_ALLOW_ALL,
+				MaxInFlight: 5,
+			},
+			wantMode:  reentrancy.AllowAll,
+			wantLimit: 5,
+		},
+		{
+			name: "stash non reentrant",
+			value: &internalpb.ReentrancyConfig{
+				Mode:        internalpb.ReentrancyMode_REENTRANCY_MODE_STASH_NON_REENTRANT,
+				MaxInFlight: 2,
+			},
+			wantMode:  reentrancy.StashNonReentrant,
+			wantLimit: 2,
+		},
+		{
+			name: "off",
+			value: &internalpb.ReentrancyConfig{
+				Mode:        internalpb.ReentrancyMode_REENTRANCY_MODE_OFF,
+				MaxInFlight: 0,
+			},
+			wantMode:  reentrancy.Off,
+			wantLimit: 0,
+		},
+		{
+			name: "unknown defaults to off",
+			value: &internalpb.ReentrancyConfig{
+				Mode:        internalpb.ReentrancyMode(99),
+				MaxInFlight: 3,
+			},
+			wantMode:  reentrancy.Off,
+			wantLimit: 3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			decoded := DecodeReentrancy(tt.value)
+			require.NotNil(t, decoded)
+			require.Equal(t, tt.wantMode, decoded.Mode())
+			require.Equal(t, tt.wantLimit, decoded.MaxInFlight())
+		})
+	}
+}
+
+func TestDecodeReentrancyNil(t *testing.T) {
+	require.Nil(t, DecodeReentrancy(nil))
 }
 
 func TestEncodeDependencies(t *testing.T) {
@@ -300,4 +443,12 @@ func errorType(err error) string {
 func setSupervisorDirectives(sup *supervisor.Supervisor, directives *ds.Map[string, supervisor.Directive]) {
 	field := reflect.ValueOf(sup).Elem().FieldByName("directives")
 	reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).Elem().Set(reflect.ValueOf(directives))
+}
+
+func setReentrancyMaxInFlight(cfg *reentrancy.Reentrancy, maxInFlight int) {
+	if cfg == nil {
+		return
+	}
+	field := reflect.ValueOf(cfg).Elem().FieldByName("maxInFlight")
+	reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).Elem().SetInt(int64(maxInFlight))
 }

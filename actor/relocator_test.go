@@ -47,6 +47,7 @@ import (
 	"github.com/tochemey/goakt/v3/log"
 	mockscluster "github.com/tochemey/goakt/v3/mocks/cluster"
 	mocksremote "github.com/tochemey/goakt/v3/mocks/remote"
+	"github.com/tochemey/goakt/v3/reentrancy"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/supervisor"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
@@ -228,7 +229,7 @@ func TestRelocatorSpawnRemoteActorSetsReentrancyConfig(t *testing.T) {
 	remotingMock.EXPECT().RemoteSpawn(mock.Anything, "127.0.0.1", 9000, mock.Anything).
 		Run(func(_ context.Context, _ string, _ int, req *remote.SpawnRequest) {
 			require.NotNil(t, req.Reentrancy)
-			require.Equal(t, remote.ReentrancyStashNonReentrant, req.Reentrancy.Mode)
+			require.Equal(t, reentrancy.StashNonReentrant, req.Reentrancy.Mode)
 			require.Equal(t, 5, req.Reentrancy.MaxInFlight)
 		}).
 		Return(nil).
@@ -384,7 +385,7 @@ func TestRelocation(t *testing.T) {
 
 	reentrantName := "Reentrant-Actor"
 	pid, err := node2.Spawn(ctx, reentrantName, NewMockActor(),
-		WithReentrancy(ReentrancyStashNonReentrant, WithMaxInFlight(3)))
+		WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.StashNonReentrant), reentrancy.WithMaxInFlight(3))))
 	require.NoError(t, err)
 	require.NotNil(t, pid)
 
@@ -421,7 +422,7 @@ func TestRelocation(t *testing.T) {
 	}
 	require.NotNil(t, relocated)
 	require.NotNil(t, relocated.reentrancy)
-	require.Equal(t, ReentrancyStashNonReentrant, relocated.reentrancy.mode)
+	require.Equal(t, reentrancy.StashNonReentrant, relocated.reentrancy.mode)
 	require.Equal(t, 3, relocated.reentrancy.maxInFlight)
 
 	assert.NoError(t, node1.Stop(ctx))

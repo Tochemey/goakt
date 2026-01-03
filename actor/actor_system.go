@@ -2140,8 +2140,8 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 	}
 
 	if msg.GetReentrancy() != nil {
-		reentrancy := reentrancyConfigFromProto(msg.GetReentrancy())
-		opts = append(opts, WithReentrancy(reentrancy.mode, WithMaxInFlight(reentrancy.maxInFlight)))
+		reentrancy := codec.DecodeReentrancy(msg.GetReentrancy())
+		opts = append(opts, WithReentrancy(reentrancy))
 	}
 
 	if msg.GetRole() != "" {

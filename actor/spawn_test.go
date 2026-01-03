@@ -50,6 +50,7 @@ import (
 	mocks "github.com/tochemey/goakt/v3/mocks/discovery"
 	mocksremote "github.com/tochemey/goakt/v3/mocks/remote"
 	"github.com/tochemey/goakt/v3/passivation"
+	"github.com/tochemey/goakt/v3/reentrancy"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
@@ -838,7 +839,7 @@ func TestSpawn(t *testing.T) {
 		remotingMock.EXPECT().RemoteSpawn(mock.Anything, peer.Host, peer.RemotingPort, mock.Anything).
 			Run(func(_ context.Context, _ string, _ int, request *remote.SpawnRequest) {
 				require.NotNil(t, request.Reentrancy)
-				require.Equal(t, remote.ReentrancyAllowAll, request.Reentrancy.Mode)
+				require.Equal(t, reentrancy.AllowAll, request.Reentrancy.Mode)
 				require.Equal(t, 7, request.Reentrancy.MaxInFlight)
 			}).
 			Return(nil).
@@ -846,7 +847,10 @@ func TestSpawn(t *testing.T) {
 
 		err := system.SpawnOn(ctx, actorName, actor,
 			WithPlacement(Random),
-			WithReentrancy(ReentrancyAllowAll, WithMaxInFlight(7)),
+			WithReentrancy(reentrancy.New(
+				reentrancy.WithMode(reentrancy.AllowAll),
+				reentrancy.WithMaxInFlight(7),
+			)),
 		)
 		require.NoError(t, err)
 	})

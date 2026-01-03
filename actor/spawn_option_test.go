@@ -32,6 +32,7 @@ import (
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/internal/pointer"
 	"github.com/tochemey/goakt/v3/passivation"
+	"github.com/tochemey/goakt/v3/reentrancy"
 	"github.com/tochemey/goakt/v3/supervisor"
 )
 
@@ -75,18 +76,18 @@ func TestSpawnOption(t *testing.T) {
 	})
 	t.Run("spawn option with reentrancy", func(t *testing.T) {
 		config := &spawnConfig{}
-		option := WithReentrancy(ReentrancyAllowAll, WithMaxInFlight(4))
+		option := WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll), reentrancy.WithMaxInFlight(4)))
 		option.Apply(config)
 		require.NotNil(t, config.reentrancy)
-		require.Equal(t, ReentrancyAllowAll, config.reentrancy.mode)
-		require.Equal(t, 4, config.reentrancy.maxInFlight)
+		require.Equal(t, reentrancy.AllowAll, config.reentrancy.Mode())
+		require.Equal(t, 4, config.reentrancy.MaxInFlight())
 	})
 	t.Run("spawn option with reentrancy max in flight clamp", func(t *testing.T) {
 		config := &spawnConfig{}
-		option := WithReentrancy(ReentrancyAllowAll, WithMaxInFlight(-1))
+		option := WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll), reentrancy.WithMaxInFlight(-1)))
 		option.Apply(config)
 		require.NotNil(t, config.reentrancy)
-		require.Equal(t, 0, config.reentrancy.maxInFlight)
+		require.Equal(t, 0, config.reentrancy.MaxInFlight())
 	})
 	t.Run("spawn option with placement", func(t *testing.T) {
 		config := &spawnConfig{}
@@ -147,7 +148,7 @@ func TestSpawnConfig(t *testing.T) {
 	})
 	t.Run("With invalid reentrancy mode", func(t *testing.T) {
 		config := newSpawnConfig()
-		option := WithReentrancy(ReentrancyMode(99))
+		option := WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.Mode(99))))
 		option.Apply(config)
 		err := config.Validate()
 		require.Error(t, err)

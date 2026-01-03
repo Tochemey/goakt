@@ -44,6 +44,7 @@ import (
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
+	"github.com/tochemey/goakt/v3/reentrancy"
 )
 
 func TestRemotingOptionsAndDefaults(t *testing.T) {
@@ -227,10 +228,10 @@ func TestRemoteSpawn_MapsReentrancyConfig(t *testing.T) {
 	err := r.RemoteSpawn(context.Background(), "host", 1000, &SpawnRequest{
 		Name: "actor",
 		Kind: "kind",
-		Reentrancy: &ReentrancyConfig{
-			Mode:        ReentrancyStashNonReentrant,
-			MaxInFlight: 5,
-		},
+		Reentrancy: reentrancy.New(
+			reentrancy.WithMode(reentrancy.StashNonReentrant),
+			reentrancy.WithMaxInFlight(5),
+		),
 	})
 	require.NoError(t, err)
 	require.NotNil(t, mockClient.lastSpawnReq)

@@ -32,6 +32,7 @@ import (
 
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/extension"
+	"github.com/tochemey/goakt/v3/reentrancy"
 )
 
 type mockDependency struct {
@@ -82,11 +83,9 @@ func TestSpawnRequestValidateAndSanitize(t *testing.T) {
 
 	t.Run("invalid reentrancy mode", func(t *testing.T) {
 		req := &SpawnRequest{
-			Name: "actor",
-			Kind: "kind",
-			Reentrancy: &ReentrancyConfig{
-				Mode: ReentrancyMode(99),
-			},
+			Name:       "actor",
+			Kind:       "kind",
+			Reentrancy: reentrancy.New(reentrancy.WithMode(99)),
 		}
 		err := req.Validate()
 		require.Error(t, err)
@@ -97,13 +96,12 @@ func TestSpawnRequestValidateAndSanitize(t *testing.T) {
 		req := &SpawnRequest{
 			Name: "actor",
 			Kind: "kind",
-			Reentrancy: &ReentrancyConfig{
-				Mode:        ReentrancyAllowAll,
-				MaxInFlight: -10,
-			},
+			Reentrancy: reentrancy.New(
+				reentrancy.WithMode(reentrancy.AllowAll),
+				reentrancy.WithMaxInFlight(-10)),
 		}
 		req.Sanitize()
 		require.NotNil(t, req.Reentrancy)
-		assert.Equal(t, 0, req.Reentrancy.MaxInFlight)
+		assert.Equal(t, 0, req.Reentrancy.MaxInFlight())
 	})
 }
