@@ -35,6 +35,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/tochemey/goakt/v3/address"
@@ -605,9 +606,14 @@ func TestRelocationWithSingletonActor(t *testing.T) {
 	require.NoError(t, node1.Stop(ctx))
 	require.NoError(t, sd1.Close())
 
-	pause.For(2 * time.Minute)
-
-	_, _, err = node2.ActorOf(ctx, "actorName")
+	deadline := time.Now().Add(2 * time.Minute)
+	for time.Now().Before(deadline) {
+		_, _, err = node2.ActorOf(ctx, "actorName")
+		if err == nil {
+			break
+		}
+		pause.For(500 * time.Millisecond)
+	}
 	require.NoError(t, err)
 
 	assert.NoError(t, node2.Stop(ctx))
@@ -837,16 +843,24 @@ func TestRelocationWithExtension(t *testing.T) {
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
-	// Wait for cluster rebalancing
-	pause.For(time.Minute)
-
 	sender, err := node1.LocalActor("node1-entity-1")
 	require.NoError(t, err)
 	require.NotNil(t, sender)
 
 	// let us access some of the node2 actors from node 1
 	entityID := "node2-entity-1"
-	response, err := sender.SendSync(ctx, entityID, new(testpb.GetAccount), time.Minute)
+	var response proto.Message
+	deadline := time.Now().Add(2 * time.Minute)
+	for time.Now().Before(deadline) {
+		response, err = sender.SendSync(ctx, entityID, new(testpb.GetAccount), time.Minute)
+		if err == nil {
+			break
+		}
+		if !stdErrors.Is(err, errors.ErrActorNotFound) {
+			break
+		}
+		pause.For(500 * time.Millisecond)
+	}
 	require.NoError(t, err)
 	account, ok := response.(*testpb.Account)
 	require.True(t, ok)
@@ -1471,16 +1485,23 @@ func TestRelocationWithConsulProvider(t *testing.T) {
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
-	// Wait for cluster rebalancing
-	pause.For(time.Minute)
-
 	sender, err := node1.LocalActor("Actor11")
 	require.NoError(t, err)
 	require.NotNil(t, sender)
 
 	// let us access some of the node2 actors from node 1 and  node 3
 	actorName := "Actor21"
-	err = sender.SendAsync(ctx, actorName, new(testpb.TestSend))
+	deadline := time.Now().Add(time.Minute)
+	for time.Now().Before(deadline) {
+		err = sender.SendAsync(ctx, actorName, new(testpb.TestSend))
+		if err == nil {
+			break
+		}
+		if !stdErrors.Is(err, errors.ErrActorNotFound) {
+			break
+		}
+		pause.For(500 * time.Millisecond)
+	}
 	require.NoError(t, err)
 
 	require.NoError(t, node1.Stop(ctx))
@@ -1547,16 +1568,23 @@ func TestRelocationWithEtcdProvider(t *testing.T) {
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
-	// Wait for cluster rebalancing
-	pause.For(time.Minute)
-
 	sender, err := node1.LocalActor("Actor11")
 	require.NoError(t, err)
 	require.NotNil(t, sender)
 
 	// let us access some of the node2 actors from node 1 and  node 3
 	actorName := "Actor21"
-	err = sender.SendAsync(ctx, actorName, new(testpb.TestSend))
+	deadline := time.Now().Add(time.Minute)
+	for time.Now().Before(deadline) {
+		err = sender.SendAsync(ctx, actorName, new(testpb.TestSend))
+		if err == nil {
+			break
+		}
+		if !stdErrors.Is(err, errors.ErrActorNotFound) {
+			break
+		}
+		pause.For(500 * time.Millisecond)
+	}
 	require.NoError(t, err)
 
 	require.NoError(t, node1.Stop(ctx))
