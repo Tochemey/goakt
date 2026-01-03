@@ -149,13 +149,11 @@ func withPassivationStrategy(strategy passivation.Strategy) pidOption {
 // stash-based policy can defer messages without additional user setup.
 func withReentrancy(config *reentrancyConfig) pidOption {
 	return func(pid *PID) {
-		if config == nil {
-			return
-		}
-
-		pid.reentrancy = newReentrancyState(config.mode, config.maxInFlight)
-		if pid.stashState == nil {
-			pid.stashState = &stashState{box: NewUnboundedMailbox()}
+		if config != nil {
+			pid.reentrancy = newReentrancyState(config.mode, config.maxInFlight)
+			if pid.stashState == nil {
+				pid.stashState = &stashState{box: NewUnboundedMailbox()}
+			}
 		}
 	}
 }

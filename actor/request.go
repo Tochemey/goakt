@@ -34,42 +34,62 @@ import (
 	"github.com/tochemey/goakt/v3/internal/ds"
 )
 
-// RequestHandle represents a pending async request started via Request/RequestName.
+// RequestCall represents a handle to a pending asynchronous request started via
+// Request or RequestName.
 //
-// Design decision: callbacks run on the actor's mailbox thread to preserve
-// single-threaded state access. Call Then from within Receive to avoid executing
-// callbacks outside the actor's message loop.
-type RequestHandle interface {
-	// Then registers a continuation to run when the response arrives or fails.
+// A RequestCall lets callers:
+//   - register exactly one completion continuation (Then), and
+//   - attempt to cancel the in-flight request (Cancel).
+//
+// # Concurrency and execution model
+//
+// To preserve single-threaded access to an actor's internal state, continuations
+// registered with Then are intended to run on the actor's mailbox (processing)
+// thread when the request completes.
+//
+// Call Then from within Receive (or otherwise from the actor's message loop) to
+// ensure the continuation executes on the mailbox thread. If Then is registered
+// after the request has already completed, the continuation is invoked
+// synchronously in the caller's goroutine.
+//
+// Then is one-shot: only the first call registers a continuation; subsequent
+// calls are ignored.
+//
+// # Cancellation
+//
+// Cancel requests cancellation of the pending request. Cancellation is best-effort:
+// the request may still complete successfully or with an error if it races with
+// completion or if the underlying operation cannot be interrupted.
+//
+// Cancel is idempotent: it may be called multiple times. If the request is
+// already completed or cancellation has already been requested, Cancel returns nil.
+//
+// When possible, cancellation is delivered through the actor's mailbox so that
+// any completion continuation runs on the actor's processing thread.
+type RequestCall interface {
+	// Then registers a continuation to be invoked when the request completes.
+	//
+	// The callback is passed either the response message (as proto.Message) and
+	// a nil error, or a nil message and a non-nil error.
+	//
+	// Execution:
+	//   - If registered before completion, the continuation is intended to run on
+	//     the actor's mailbox thread (see the type-level comment).
+	//   - If called after completion, the continuation runs immediately and
+	//     synchronously in the caller's goroutine.
+	//
+	// Only the first call to Then is honored; subsequent calls are ignored.
 	Then(func(proto.Message, error))
-	// Cancel aborts the pending request. Cancel is idempotent.
+
+	// Cancel requests cancellation of the pending request.
+	//
+	// Cancel is safe to call multiple times. It returns nil if the request has
+	// already completed or cancellation has already been requested.
+	//
+	// Cancellation is best-effort and may race with completion. When possible,
+	// the cancellation is delivered via the actor's mailbox so that any
+	// continuation runs on the actor's processing thread.
 	Cancel() error
-}
-
-type asyncCall struct {
-	state *asyncCallState
-}
-
-// Then is safe to call multiple times; only the first callback is kept.
-//
-// Design decision: if the call already completed, the callback executes immediately
-// to avoid forcing callers to handle a separate "already done" state.
-func (c *asyncCall) Then(callback func(proto.Message, error)) {
-	if c == nil || c.state == nil || callback == nil {
-		return
-	}
-	c.state.setCallback(callback)
-}
-
-// Cancel returns ErrInvalidMessage when the call handle is not usable.
-//
-// Design decision: cancellation is delivered through the actor mailbox so that
-// continuations run on the actor's processing thread.
-func (c *asyncCall) Cancel() error {
-	if c == nil || c.state == nil {
-		return gerrors.ErrInvalidMessage
-	}
-	return c.state.cancel()
 }
 
 // RequestOption configures a single async request.
@@ -112,6 +132,37 @@ func WithRequestTimeout(timeout time.Duration) RequestOption {
 	}
 }
 
+type requestHandle struct {
+	state *requestState
+}
+
+// Then registers a continuation to run when the request completes.
+// If Then is called after completion, the callback runs synchronously in
+// the caller's goroutine. Additional calls are ignored.
+//
+// Design decision: if the call already completed, the callback executes immediately
+// to avoid forcing callers to handle a separate "already done" state.
+func (x *requestHandle) Then(callback func(proto.Message, error)) {
+	if x == nil || x.state == nil || callback == nil {
+		return
+	}
+	x.state.setCallback(callback)
+}
+
+// Cancel requests cancellation of the pending request.
+// It is safe to call multiple times. If the call already completed or has a
+// cancellation pending, Cancel returns nil. It returns ErrInvalidMessage when
+// the handle is not usable.
+//
+// Design decision: cancellation is delivered through the actor mailbox so that
+// continuations run on the actor's processing thread.
+func (x *requestHandle) Cancel() error {
+	if x == nil || x.state == nil {
+		return gerrors.ErrInvalidMessage
+	}
+	return x.state.cancel()
+}
+
 type requestConfig struct {
 	mode    ReentrancyMode
 	modeSet bool
@@ -129,7 +180,7 @@ func newRequestConfig(opts ...RequestOption) *requestConfig {
 	return config
 }
 
-type asyncCallState struct {
+type requestState struct {
 	id   string
 	mode ReentrancyMode
 	pid  *PID
@@ -143,11 +194,11 @@ type asyncCallState struct {
 	stopTimeout     func()
 }
 
-// newAsyncCallState initializes tracking for a single in-flight request.
+// newRequestState initializes tracking for a single in-flight request.
 //
 // Design decision: state is keyed by correlation ID to support concurrent calls.
-func newAsyncCallState(id string, mode ReentrancyMode, pid *PID) *asyncCallState {
-	return &asyncCallState{
+func newRequestState(id string, mode ReentrancyMode, pid *PID) *requestState {
+	return &requestState{
 		id:   id,
 		mode: mode,
 		pid:  pid,
@@ -157,7 +208,7 @@ func newAsyncCallState(id string, mode ReentrancyMode, pid *PID) *asyncCallState
 // setCallback installs the continuation, or runs it immediately if already completed.
 //
 // Design decision: immediate execution avoids extra scheduling for completed calls.
-func (s *asyncCallState) setCallback(callback func(proto.Message, error)) {
+func (s *requestState) setCallback(callback func(proto.Message, error)) {
 	s.mu.Lock()
 	if s.callback != nil {
 		s.mu.Unlock()
@@ -180,7 +231,7 @@ func (s *asyncCallState) setCallback(callback func(proto.Message, error)) {
 // complete marks the call as done; returns the callback to execute if any.
 //
 // Design decision: completion is idempotent to tolerate duplicate responses.
-func (s *asyncCallState) complete(result proto.Message, err error) (func(proto.Message, error), bool) {
+func (s *requestState) complete(result proto.Message, err error) (func(proto.Message, error), bool) {
 	s.mu.Lock()
 	if s.completed {
 		s.mu.Unlock()
@@ -197,7 +248,7 @@ func (s *asyncCallState) complete(result proto.Message, err error) (func(proto.M
 // cancel enqueues a cancellation error on the actor's mailbox.
 //
 // Design decision: mailbox delivery preserves single-threaded actor state access.
-func (s *asyncCallState) cancel() error {
+func (s *requestState) cancel() error {
 	s.mu.Lock()
 	if s.completed || s.cancelRequested {
 		s.mu.Unlock()
@@ -211,7 +262,7 @@ func (s *asyncCallState) cancel() error {
 // startTimeout triggers a timeout error via the shared timer pool.
 //
 // Design decision: using the timer pool reduces allocations under load.
-func (s *asyncCallState) startTimeout(timeout time.Duration) {
+func (s *requestState) startTimeout(timeout time.Duration) {
 	if timeout <= 0 {
 		return
 	}
@@ -243,7 +294,7 @@ func (s *asyncCallState) startTimeout(timeout time.Duration) {
 // stopTimeoutIfSet cancels any active timeout goroutine.
 //
 // Design decision: timeouts are stoppable to avoid spurious errors after completion.
-func (s *asyncCallState) stopTimeoutIfSet() {
+func (s *requestState) stopTimeoutIfSet() {
 	s.mu.Lock()
 	stop := s.stopTimeout
 	s.stopTimeout = nil
@@ -256,7 +307,7 @@ func (s *asyncCallState) stopTimeoutIfSet() {
 type reentrancyState struct {
 	mode          ReentrancyMode
 	maxInFlight   int
-	calls         *ds.Map[string, *asyncCallState]
+	requestStates *ds.Map[string, *requestState]
 	inFlightCount atomic.Int64
 	blockingCount atomic.Int64
 }
@@ -266,9 +317,9 @@ type reentrancyState struct {
 // Design decision: counters are atomic to avoid blocking the mailbox loop.
 func newReentrancyState(mode ReentrancyMode, maxInFlight int) *reentrancyState {
 	return &reentrancyState{
-		mode:        mode,
-		maxInFlight: maxInFlight,
-		calls:       ds.NewMap[string, *asyncCallState](),
+		mode:          mode,
+		maxInFlight:   maxInFlight,
+		requestStates: ds.NewMap[string, *requestState](),
 	}
 }
 
@@ -279,7 +330,7 @@ func (s *reentrancyState) reset() {
 	if s == nil {
 		return
 	}
-	s.calls.Reset()
+	s.requestStates.Reset()
 	s.inFlightCount.Store(0)
 	s.blockingCount.Store(0)
 }

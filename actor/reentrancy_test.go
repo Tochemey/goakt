@@ -31,14 +31,18 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/tochemey/goakt/v3/address"
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
+	mockcluster "github.com/tochemey/goakt/v3/mocks/cluster"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
@@ -50,135 +54,73 @@ const (
 	reentrancyDispatchWait = 20 * time.Millisecond
 )
 
-type reentrancyTestActor struct {
-	receive func(*ReceiveContext)
-}
+func TestReentrancyCycleAllowAll(t *testing.T) {
+	// Scenario: user -> A (Request) -> B -> A (Ask) -> B (Response) -> A -> user.
+	sys, ctx := newReentrancySystem(t)
 
-func (x *reentrancyTestActor) PreStart(*Context) error { return nil }
+	replyCh := make(chan *testpb.TestCount, 1)
+	errCh := make(chan error, 1)
 
-func (x *reentrancyTestActor) Receive(ctx *ReceiveContext) {
-	if x.receive != nil {
-		x.receive(ctx)
-	}
-}
-
-func (x *reentrancyTestActor) PostStop(*Context) error { return nil }
-
-// newReentrancySystem starts a minimal actor system for reentrancy tests.
-func newReentrancySystem(t *testing.T) (ActorSystem, context.Context) {
-	t.Helper()
-	ctx := context.Background()
-	sys, err := NewActorSystem("reentrancy-"+uuid.NewString(), WithLogger(log.DiscardLogger))
-	require.NoError(t, err)
-	require.NoError(t, sys.Start(ctx))
-	t.Cleanup(func() { _ = sys.Stop(ctx) })
-	return sys, ctx
-}
-
-// spawnReentrancyActor creates a test actor with a custom Receive handler.
-func spawnReentrancyActor(t *testing.T, sys ActorSystem, ctx context.Context, name string, receive func(*ReceiveContext), opts ...SpawnOption) *PID {
-	t.Helper()
-	pid, err := sys.Spawn(ctx, name, &reentrancyTestActor{receive: receive}, opts...)
-	require.NoError(t, err)
-	require.NotNil(t, pid)
-	return pid
-}
-
-// responderWithDelay replies after a delay or remains silent for timeout tests.
-func responderWithDelay(delay time.Duration, corrCh chan string) func(*ReceiveContext) {
-	return func(ctx *ReceiveContext) {
-		switch msg := ctx.Message().(type) {
-		case *testpb.TestWait:
-			if corrCh != nil {
-				select {
-				case corrCh <- ctx.CorrelationID():
-				default:
-				}
-			}
-			wait := delay
-			if msg.GetDuration() > 0 {
-				wait = time.Duration(msg.GetDuration()) * time.Millisecond
-			}
-			if wait > 0 {
-				pause.For(wait)
-			}
-			ctx.Response(&testpb.Reply{Content: "ok"})
-		case *testpb.TestTimeout:
-			// intentionally no response
+	user := spawnReentrancyActor(t, sys, ctx, "cycle-user", func(rctx *ReceiveContext) {
+		switch msg := rctx.Message().(type) {
+		case *testpb.TestCount:
+			replyCh <- msg
 		default:
-			ctx.Response(&testpb.Reply{Content: "ok"})
+			rctx.Unhandled()
 		}
-	}
-}
+	})
 
-func waitForError(t *testing.T, errCh <-chan error, expected error, timeout time.Duration) {
-	t.Helper()
-	select {
-	case err := <-errCh:
-		require.ErrorIs(t, err, expected)
-	case <-time.After(timeout):
-		t.Fatalf("expected error: %v", expected)
-	}
-}
+	var actorA *PID
+	actorB := spawnReentrancyActor(t, sys, ctx, "cycle-b", func(rctx *ReceiveContext) {
+		switch rctx.Message().(type) {
+		case *testpb.TestPing:
+			resp, err := rctx.Self().Ask(rctx.Context(), actorA, new(testpb.TestGetCount), reentrancyReplyTimeout)
+			if err != nil {
+				reportScenarioError(errCh, err)
+				return
+			}
+			rctx.Response(resp)
+		default:
+			rctx.Unhandled()
+		}
+	})
 
-func waitForReply(t *testing.T, replyCh <-chan proto.Message, errCh <-chan error, timeout time.Duration) {
-	t.Helper()
+	actorA = spawnReentrancyActor(t, sys, ctx, "cycle-a", func(rctx *ReceiveContext) {
+		switch rctx.Message().(type) {
+		case *testpb.TestPing:
+			sender := rctx.Sender()
+			call := rctx.Request(actorB, new(testpb.TestPing), WithRequestTimeout(reentrancyReplyTimeout))
+			if call == nil {
+				reportScenarioError(errCh, rctx.getError())
+				return
+			}
+			self := rctx.Self()
+			call.Then(func(resp proto.Message, err error) {
+				if err != nil {
+					reportScenarioError(errCh, err)
+					return
+				}
+				if err := self.Tell(context.Background(), sender, resp); err != nil {
+					reportScenarioError(errCh, err)
+				}
+			})
+		case *testpb.TestGetCount:
+			rctx.Response(&testpb.TestCount{Value: 42})
+		default:
+			rctx.Unhandled()
+		}
+	}, WithReentrancy(ReentrancyAllowAll))
+
+	require.NoError(t, user.Tell(ctx, actorA, new(testpb.TestPing)))
+
 	select {
-	case <-replyCh:
-		return
 	case err := <-errCh:
 		t.Fatalf("unexpected error: %v", err)
-	case <-time.After(timeout):
-		t.Fatal("expected async reply")
+	case msg := <-replyCh:
+		require.EqualValues(t, 42, msg.GetValue())
+	case <-time.After(reentrancyReplyTimeout):
+		t.Fatal("expected reply from reentrant call cycle")
 	}
-}
-
-func waitForSignal(t *testing.T, sigCh <-chan struct{}, timeout time.Duration, message string) {
-	t.Helper()
-	select {
-	case <-sigCh:
-		return
-	case <-time.After(timeout):
-		t.Fatal(message)
-	}
-}
-
-func assertNoSignal(t *testing.T, sigCh <-chan struct{}, errCh <-chan error, timeout time.Duration, message string) {
-	t.Helper()
-	select {
-	case <-sigCh:
-		t.Fatal(message)
-	case err := <-errCh:
-		t.Fatalf("unexpected error: %v", err)
-	case <-time.After(timeout):
-		return
-	}
-}
-
-func waitForProcessedBeforeReply(t *testing.T, processedCh <-chan struct{}, replyCh <-chan proto.Message, errCh <-chan error, timeout time.Duration) {
-	t.Helper()
-	select {
-	case <-processedCh:
-		return
-	case resp := <-replyCh:
-		t.Fatalf("reply arrived before other message processed: %T", resp)
-	case err := <-errCh:
-		t.Fatalf("unexpected error: %v", err)
-	case <-time.After(timeout):
-		t.Fatal("expected other message to be processed while awaiting response")
-	}
-}
-
-func waitForCorrelationID(t *testing.T, corrCh <-chan string, timeout time.Duration) string {
-	t.Helper()
-	select {
-	case id := <-corrCh:
-		require.NotEmpty(t, id)
-		return id
-	case <-time.After(timeout):
-		t.Fatal("expected correlation id to be set")
-	}
-	return ""
 }
 
 func TestRequestRequiresReentrancy(t *testing.T) {
@@ -363,12 +305,12 @@ func TestRequestTimeout(t *testing.T) {
 	waitForError(t, errCh, gerrors.ErrRequestTimeout, reentrancyReplyTimeout)
 }
 
-func TestRequestHandleCancel(t *testing.T) {
+func TestRequestCallCancel(t *testing.T) {
 	sys, ctx := newReentrancySystem(t)
 	target := spawnReentrancyActor(t, sys, ctx, "cancel-target", responderWithDelay(reentrancyDelay, nil))
 
 	errCh := make(chan error, 2)
-	var call RequestHandle
+	var call RequestCall
 
 	requester := spawnReentrancyActor(t, sys, ctx, "cancel-requester", func(rctx *ReceiveContext) {
 		switch msg := rctx.Message().(type) {
@@ -402,13 +344,13 @@ func TestRequestHandleCancel(t *testing.T) {
 	waitForError(t, errCh, gerrors.ErrRequestCanceled, reentrancyReplyTimeout)
 }
 
-func TestRequestHandleThenAfterCompletion(t *testing.T) {
+func TestRequestCallThenAfterCompletion(t *testing.T) {
 	sys, ctx := newReentrancySystem(t)
 	target := spawnReentrancyActor(t, sys, ctx, "after-target", responderWithDelay(0, nil))
 
 	replyCh := make(chan proto.Message, 1)
 	errCh := make(chan error, 1)
-	var call RequestHandle
+	var call RequestCall
 
 	requester := spawnReentrancyActor(t, sys, ctx, "after-requester", func(rctx *ReceiveContext) {
 		switch msg := rctx.Message().(type) {
@@ -492,7 +434,7 @@ func TestCancelInFlightRequests(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, call)
 
-	state := call.(*asyncCall).state
+	state := call.(*requestHandle).state
 	requester.cancelInFlightRequests(gerrors.ErrRequestCanceled)
 
 	state.mu.Lock()
@@ -504,7 +446,7 @@ func TestCancelInFlightRequests(t *testing.T) {
 	require.ErrorIs(t, cerr, gerrors.ErrRequestCanceled)
 	require.EqualValues(t, 0, requester.reentrancy.inFlightCount.Load())
 	require.EqualValues(t, 0, requester.reentrancy.blockingCount.Load())
-	require.Zero(t, requester.reentrancy.calls.Len())
+	require.Zero(t, requester.reentrancy.requestStates.Len())
 }
 
 func TestToWireActorIncludesReentrancy(t *testing.T) {
@@ -564,9 +506,834 @@ func TestRequestConfigTimeoutClamp(t *testing.T) {
 	require.Nil(t, cfg.timeout)
 }
 
-func TestRequestHandleCancelWithNilState(t *testing.T) {
-	call := &asyncCall{}
+func TestRequestCallCancelWithNilState(t *testing.T) {
+	call := &requestHandle{}
 	err := call.Cancel()
 	require.ErrorIs(t, err, gerrors.ErrInvalidMessage)
 	require.True(t, errors.Is(err, gerrors.ErrInvalidMessage))
+}
+
+func TestRequestValidationFailures(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("dead requester", func(t *testing.T) {
+		pid := &PID{}
+		_, err := pid.request(ctx, &PID{}, new(testpb.TestSend))
+		require.ErrorIs(t, err, gerrors.ErrDead)
+	})
+
+	t.Run("nil target", func(t *testing.T) {
+		pid := &PID{}
+		pid.setState(runningState, true)
+		_, err := pid.request(ctx, nil, new(testpb.TestSend))
+		require.ErrorIs(t, err, gerrors.ErrDead)
+	})
+
+	t.Run("nil message", func(t *testing.T) {
+		pid := &PID{}
+		pid.setState(runningState, true)
+		target := &PID{}
+		target.setState(runningState, true)
+		_, err := pid.request(ctx, target, nil)
+		require.ErrorIs(t, err, gerrors.ErrInvalidMessage)
+	})
+
+	t.Run("reentrancy off", func(t *testing.T) {
+		pid := newRunningPIDWithReentrancy(ReentrancyOff, 0)
+		target := &PID{}
+		target.setState(runningState, true)
+		_, err := pid.request(ctx, target, new(testpb.TestSend))
+		require.ErrorIs(t, err, gerrors.ErrReentrancyDisabled)
+	})
+}
+
+func TestRequestBuildAsyncRequestErrorDeregisters(t *testing.T) {
+	ctx := context.Background()
+	pid := newRunningPIDWithReentrancy(ReentrancyAllowAll, 0)
+	target := &PID{}
+	target.setState(runningState, true)
+
+	var invalid *testpb.TestWait
+	_, err := pid.request(ctx, target, invalid)
+	require.Error(t, err)
+	require.Zero(t, pid.reentrancy.inFlightCount.Load())
+	require.Zero(t, pid.reentrancy.requestStates.Len())
+}
+
+func TestRequestTellErrorDeregisters(t *testing.T) {
+	ctx := context.Background()
+	pid := newRunningPIDWithReentrancy(ReentrancyAllowAll, 0)
+	target := &PID{mailbox: NewUnboundedMailbox(), logger: log.DiscardLogger}
+	target.setState(runningState, true)
+
+	msg := &blockingProto{ready: make(chan struct{}), release: make(chan struct{})}
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := pid.request(ctx, target, msg)
+		errCh <- err
+	}()
+
+	select {
+	case <-msg.ready:
+	case <-time.After(reentrancyReplyTimeout):
+		close(msg.release)
+		t.Fatal("expected request to reach buildAsyncRequest")
+	}
+
+	target.setState(runningState, false)
+	close(msg.release)
+
+	select {
+	case err := <-errCh:
+		require.ErrorIs(t, err, gerrors.ErrDead)
+	case <-time.After(reentrancyReplyTimeout):
+		t.Fatal("expected request to return")
+	}
+
+	require.Zero(t, pid.reentrancy.inFlightCount.Load())
+	require.Zero(t, pid.reentrancy.requestStates.Len())
+}
+
+func TestRequestNameValidationFailures(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("dead requester", func(t *testing.T) {
+		pid := &PID{}
+		_, err := pid.requestName(ctx, "actor", new(testpb.TestSend))
+		require.ErrorIs(t, err, gerrors.ErrDead)
+	})
+
+	t.Run("nil message", func(t *testing.T) {
+		pid := &PID{}
+		pid.setState(runningState, true)
+		pid.reentrancy = newReentrancyState(ReentrancyAllowAll, 0)
+		_, err := pid.requestName(ctx, "actor", nil)
+		require.ErrorIs(t, err, gerrors.ErrInvalidMessage)
+	})
+
+	t.Run("reentrancy disabled", func(t *testing.T) {
+		pid := &PID{}
+		pid.setState(runningState, true)
+		_, err := pid.requestName(ctx, "actor", new(testpb.TestSend))
+		require.ErrorIs(t, err, gerrors.ErrReentrancyDisabled)
+	})
+
+	t.Run("override off", func(t *testing.T) {
+		pid := &PID{}
+		pid.setState(runningState, true)
+		pid.reentrancy = newReentrancyState(ReentrancyAllowAll, 0)
+		_, err := pid.requestName(ctx, "actor", new(testpb.TestSend), WithReentrancyMode(ReentrancyOff))
+		require.ErrorIs(t, err, gerrors.ErrReentrancyDisabled)
+	})
+
+	t.Run("invalid mode", func(t *testing.T) {
+		pid := &PID{}
+		pid.setState(runningState, true)
+		pid.reentrancy = newReentrancyState(ReentrancyAllowAll, 0)
+		_, err := pid.requestName(ctx, "actor", new(testpb.TestSend), WithReentrancyMode(ReentrancyMode(99)))
+		require.ErrorIs(t, err, gerrors.ErrInvalidReentrancyMode)
+	})
+}
+
+func TestRequestNameActorOfError(t *testing.T) {
+	sys, ctx := newReentrancySystem(t)
+	requester := spawnReentrancyActor(t, sys, ctx, "actorof-requester", func(*ReceiveContext) {}, WithReentrancy(ReentrancyAllowAll))
+
+	_, err := requester.requestName(ctx, "missing-actor", new(testpb.TestSend))
+	require.ErrorIs(t, err, gerrors.ErrActorNotFound)
+}
+
+func TestRequestNameRegisterLimit(t *testing.T) {
+	sys, ctx := newReentrancySystem(t)
+	_ = spawnReentrancyActor(t, sys, ctx, "limit-target", func(*ReceiveContext) {})
+	requester := spawnReentrancyActor(t, sys, ctx, "limit-requester", func(*ReceiveContext) {}, WithReentrancy(ReentrancyAllowAll, WithMaxInFlight(1)))
+
+	state := newRequestState("limit", ReentrancyAllowAll, requester)
+	require.NoError(t, requester.registerRequestState(state))
+	t.Cleanup(func() { requester.deregisterRequestState(state) })
+
+	_, err := requester.requestName(ctx, "limit-target", new(testpb.TestSend))
+	require.ErrorIs(t, err, gerrors.ErrReentrancyInFlightLimit)
+}
+
+func TestRequestNameTimeoutStarts(t *testing.T) {
+	sys, ctx := newReentrancySystem(t)
+	_ = spawnReentrancyActor(t, sys, ctx, "timeout-target", func(*ReceiveContext) {})
+	requester := spawnReentrancyActor(t, sys, ctx, "timeout-requester", func(*ReceiveContext) {}, WithReentrancy(ReentrancyAllowAll))
+
+	call, err := requester.requestName(ctx, "timeout-target", new(testpb.TestWait), WithRequestTimeout(reentrancyReplyTimeout))
+	require.NoError(t, err)
+
+	state := call.(*requestHandle).state
+	require.NotNil(t, state.stopTimeout)
+	requester.deregisterRequestState(state)
+}
+
+func TestRequestNameBuildAsyncRequestError(t *testing.T) {
+	sys, ctx := newReentrancySystem(t)
+	_ = spawnReentrancyActor(t, sys, ctx, "build-target", func(*ReceiveContext) {})
+	requester := spawnReentrancyActor(t, sys, ctx, "build-requester", func(*ReceiveContext) {}, WithReentrancy(ReentrancyAllowAll))
+
+	var invalid *testpb.TestWait
+	_, err := requester.requestName(ctx, "build-target", invalid)
+	require.Error(t, err)
+	require.Zero(t, requester.reentrancy.inFlightCount.Load())
+	require.Zero(t, requester.reentrancy.requestStates.Len())
+}
+
+func TestRequestNameTellErrorOnStoppedTarget(t *testing.T) {
+	sys, ctx := newReentrancySystem(t)
+	target := spawnReentrancyActor(t, sys, ctx, "tell-stop-target", func(*ReceiveContext) {})
+	requester := spawnReentrancyActor(t, sys, ctx, "tell-stop-requester", func(*ReceiveContext) {}, WithReentrancy(ReentrancyAllowAll))
+
+	msg := &blockingProto{ready: make(chan struct{}), release: make(chan struct{})}
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := requester.requestName(ctx, "tell-stop-target", msg)
+		errCh <- err
+	}()
+
+	select {
+	case <-msg.ready:
+	case <-time.After(reentrancyReplyTimeout):
+		close(msg.release)
+		t.Fatal("expected requestName to reach buildAsyncRequest")
+	}
+
+	require.NoError(t, target.Shutdown(ctx))
+	close(msg.release)
+
+	select {
+	case err := <-errCh:
+		require.ErrorIs(t, err, gerrors.ErrDead)
+	case <-time.After(reentrancyReplyTimeout):
+		t.Fatal("expected requestName to return")
+	}
+
+	require.Zero(t, requester.reentrancy.inFlightCount.Load())
+	require.Zero(t, requester.reentrancy.requestStates.Len())
+}
+
+func TestRequestNameRemoteTellError(t *testing.T) {
+	clusterMock := mockcluster.NewCluster(t)
+	sys := MockReplicationTestSystem(clusterMock)
+	sys.actors = newTree()
+
+	remoteAddr := address.New("remote-actor", "remote-system", "127.0.0.1", 9001).String()
+	clusterMock.EXPECT().GetActor(mock.Anything, "remote-actor").Return(&internalpb.Actor{Address: remoteAddr}, nil)
+
+	pid := &PID{
+		actorSystem: sys,
+		logger:      log.DiscardLogger,
+		reentrancy:  newReentrancyState(ReentrancyAllowAll, 0),
+	}
+	pid.setState(runningState, true)
+
+	_, err := pid.requestName(context.Background(), "remote-actor", new(testpb.TestSend))
+	require.ErrorIs(t, err, gerrors.ErrRemotingDisabled)
+}
+
+func TestProcessStashErrorPath(t *testing.T) {
+	pid := &PID{
+		mailbox:    NewUnboundedMailbox(),
+		logger:     log.DiscardLogger,
+		reentrancy: newReentrancyState(ReentrancyAllowAll, 0),
+	}
+	pid.reentrancy.blockingCount.Store(1)
+
+	receiveCtx := getContext()
+	receiveCtx.build(context.Background(), pid, pid, new(testpb.TestSend), true)
+	pid.doReceive(receiveCtx)
+
+	require.Eventually(t, func() bool {
+		return pid.processing.Load() == idle && pid.mailbox.IsEmpty()
+	}, reentrancyReplyTimeout, reentrancyShortWait)
+}
+
+func TestHandleAsyncRequestValidationErrors(t *testing.T) {
+	pid := &PID{logger: log.DiscardLogger}
+
+	t.Run("nil request", func(t *testing.T) {
+		pid.handleAsyncRequest(nil, nil)
+	})
+
+	t.Run("missing fields", func(t *testing.T) {
+		received := newReceiveContext(context.Background(), pid, pid, new(testpb.TestSend))
+		pid.handleAsyncRequest(received, &internalpb.AsyncRequest{})
+	})
+
+	t.Run("invalid payload", func(t *testing.T) {
+		received := newReceiveContext(context.Background(), pid, pid, new(testpb.TestSend))
+		req := &internalpb.AsyncRequest{
+			CorrelationId: "corr",
+			ReplyTo:       "reply",
+			Message:       &anypb.Any{TypeUrl: "type.googleapis.com/nope.Nope", Value: []byte("bad")},
+		}
+		pid.handleAsyncRequest(received, req)
+	})
+}
+
+func TestHandleAsyncResponsePaths(t *testing.T) {
+	t.Run("nil response", func(t *testing.T) {
+		pid := &PID{logger: log.DiscardLogger}
+		pid.handleAsyncResponse(nil, nil)
+	})
+
+	t.Run("empty correlation", func(t *testing.T) {
+		pid := &PID{logger: log.DiscardLogger}
+		pid.handleAsyncResponse(nil, &internalpb.AsyncResponse{CorrelationId: "  "})
+	})
+
+	t.Run("error response completes", func(t *testing.T) {
+		pid := newRunningPIDWithReentrancy(ReentrancyAllowAll, 0)
+		state := newRequestState("err", ReentrancyAllowAll, pid)
+		require.NoError(t, pid.registerRequestState(state))
+
+		errCh := make(chan error, 1)
+		state.setCallback(func(_ proto.Message, err error) {
+			errCh <- err
+		})
+
+		resp := &internalpb.AsyncResponse{
+			CorrelationId: state.id,
+			Error:         gerrors.ErrRequestTimeout.Error(),
+		}
+		pid.handleAsyncResponse(nil, resp)
+
+		select {
+		case err := <-errCh:
+			require.ErrorIs(t, err, gerrors.ErrRequestTimeout)
+		case <-time.After(reentrancyReplyTimeout):
+			t.Fatal("expected error callback")
+		}
+		require.Zero(t, pid.reentrancy.requestStates.Len())
+	})
+
+	t.Run("error response unknown", func(t *testing.T) {
+		pid := newRunningPIDWithReentrancy(ReentrancyAllowAll, 0)
+		pid.handleAsyncResponse(nil, &internalpb.AsyncResponse{
+			CorrelationId: "missing",
+			Error:         "boom",
+		})
+	})
+
+	t.Run("nil message completes", func(t *testing.T) {
+		pid := newRunningPIDWithReentrancy(ReentrancyAllowAll, 0)
+		state := newRequestState("nil-msg", ReentrancyAllowAll, pid)
+		require.NoError(t, pid.registerRequestState(state))
+
+		errCh := make(chan error, 1)
+		state.setCallback(func(_ proto.Message, err error) {
+			errCh <- err
+		})
+
+		pid.handleAsyncResponse(nil, &internalpb.AsyncResponse{CorrelationId: state.id})
+
+		select {
+		case err := <-errCh:
+			require.ErrorIs(t, err, gerrors.ErrInvalidMessage)
+		case <-time.After(reentrancyReplyTimeout):
+			t.Fatal("expected invalid message callback")
+		}
+		require.Zero(t, pid.reentrancy.requestStates.Len())
+	})
+
+	t.Run("nil message unknown", func(t *testing.T) {
+		pid := newRunningPIDWithReentrancy(ReentrancyAllowAll, 0)
+		pid.handleAsyncResponse(nil, &internalpb.AsyncResponse{CorrelationId: "missing"})
+	})
+
+	t.Run("invalid any completes", func(t *testing.T) {
+		pid := newRunningPIDWithReentrancy(ReentrancyAllowAll, 0)
+		state := newRequestState("bad-any", ReentrancyAllowAll, pid)
+		require.NoError(t, pid.registerRequestState(state))
+
+		errCh := make(chan error, 1)
+		state.setCallback(func(_ proto.Message, err error) {
+			errCh <- err
+		})
+
+		pid.handleAsyncResponse(nil, &internalpb.AsyncResponse{
+			CorrelationId: state.id,
+			Message:       &anypb.Any{TypeUrl: "type.googleapis.com/nope.Nope", Value: []byte("bad")},
+		})
+
+		select {
+		case err := <-errCh:
+			require.Error(t, err)
+		case <-time.After(reentrancyReplyTimeout):
+			t.Fatal("expected invalid any callback")
+		}
+		require.Zero(t, pid.reentrancy.requestStates.Len())
+	})
+
+	t.Run("invalid any unknown", func(t *testing.T) {
+		pid := newRunningPIDWithReentrancy(ReentrancyAllowAll, 0)
+		pid.handleAsyncResponse(nil, &internalpb.AsyncResponse{
+			CorrelationId: "missing",
+			Message:       &anypb.Any{TypeUrl: "type.googleapis.com/nope.Nope", Value: []byte("bad")},
+		})
+	})
+
+	t.Run("success completes", func(t *testing.T) {
+		pid := newRunningPIDWithReentrancy(ReentrancyAllowAll, 0)
+		state := newRequestState("ok", ReentrancyAllowAll, pid)
+		require.NoError(t, pid.registerRequestState(state))
+
+		respCh := make(chan proto.Message, 1)
+		state.setCallback(func(msg proto.Message, err error) {
+			if err == nil {
+				respCh <- msg
+			}
+		})
+
+		payload, err := anypb.New(&testpb.Reply{Content: "ok"})
+		require.NoError(t, err)
+		pid.handleAsyncResponse(nil, &internalpb.AsyncResponse{
+			CorrelationId: state.id,
+			Message:       payload,
+		})
+
+		select {
+		case msg := <-respCh:
+			reply, ok := msg.(*testpb.Reply)
+			require.True(t, ok)
+			require.Equal(t, "ok", reply.GetContent())
+		case <-time.After(reentrancyReplyTimeout):
+			t.Fatal("expected success callback")
+		}
+		require.Zero(t, pid.reentrancy.requestStates.Len())
+	})
+
+	t.Run("success unknown", func(t *testing.T) {
+		pid := newRunningPIDWithReentrancy(ReentrancyAllowAll, 0)
+		payload, err := anypb.New(&testpb.Reply{Content: "ok"})
+		require.NoError(t, err)
+		pid.handleAsyncResponse(nil, &internalpb.AsyncResponse{
+			CorrelationId: "missing",
+			Message:       payload,
+		})
+	})
+}
+
+func TestAsyncErrorFromString(t *testing.T) {
+	require.ErrorIs(t, asyncErrorFromString(gerrors.ErrRequestTimeout.Error()), gerrors.ErrRequestTimeout)
+	require.ErrorIs(t, asyncErrorFromString(gerrors.ErrRequestCanceled.Error()), gerrors.ErrRequestCanceled)
+	require.EqualError(t, asyncErrorFromString("boom"), "boom")
+}
+
+func TestRegisterRequestStateValidation(t *testing.T) {
+	pid := &PID{}
+	state := newRequestState("id", ReentrancyAllowAll, pid)
+	err := pid.registerRequestState(state)
+	require.ErrorIs(t, err, gerrors.ErrReentrancyDisabled)
+
+	pid = &PID{reentrancy: newReentrancyState(ReentrancyAllowAll, 0)}
+	err = pid.registerRequestState(nil)
+	require.ErrorIs(t, err, gerrors.ErrInvalidMessage)
+}
+
+func TestRegisterRequestStateTracksCounts(t *testing.T) {
+	pid := &PID{reentrancy: newReentrancyState(ReentrancyAllowAll, 1)}
+	state := newRequestState("id", ReentrancyAllowAll, pid)
+	require.NoError(t, pid.registerRequestState(state))
+	require.EqualValues(t, 1, pid.reentrancy.inFlightCount.Load())
+	pid.deregisterRequestState(state)
+
+	pid = &PID{reentrancy: newReentrancyState(ReentrancyAllowAll, 0)}
+	state = newRequestState("stash", ReentrancyStashNonReentrant, pid)
+	require.NoError(t, pid.registerRequestState(state))
+	require.EqualValues(t, 1, pid.reentrancy.inFlightCount.Load())
+	require.EqualValues(t, 1, pid.reentrancy.blockingCount.Load())
+}
+
+func TestRegisterRequestStateLimit(t *testing.T) {
+	pid := &PID{reentrancy: newReentrancyState(ReentrancyAllowAll, 1)}
+	state1 := newRequestState("id1", ReentrancyAllowAll, pid)
+	state2 := newRequestState("id2", ReentrancyAllowAll, pid)
+
+	require.NoError(t, pid.registerRequestState(state1))
+	t.Cleanup(func() { pid.deregisterRequestState(state1) })
+	err := pid.registerRequestState(state2)
+	require.ErrorIs(t, err, gerrors.ErrReentrancyInFlightLimit)
+}
+
+func TestDeregisterRequestStateNoop(t *testing.T) {
+	pid := &PID{}
+	pid.deregisterRequestState(nil)
+
+	pid = &PID{reentrancy: newReentrancyState(ReentrancyAllowAll, 0)}
+	state := newRequestState("missing", ReentrancyAllowAll, pid)
+	pid.deregisterRequestState(state)
+}
+
+func TestDeregisterRequestStateUnstashOnLastBlocking(t *testing.T) {
+	pid := &PID{
+		logger:     log.DiscardLogger,
+		reentrancy: newReentrancyState(ReentrancyAllowAll, 0),
+	}
+	state := newRequestState("id", ReentrancyStashNonReentrant, pid)
+	pid.reentrancy.requestStates.Set(state.id, state)
+	pid.reentrancy.inFlightCount.Store(1)
+	pid.reentrancy.blockingCount.Store(1)
+
+	pid.deregisterRequestState(state)
+
+	require.Zero(t, pid.reentrancy.inFlightCount.Load())
+	require.Zero(t, pid.reentrancy.blockingCount.Load())
+	require.Zero(t, pid.reentrancy.requestStates.Len())
+}
+
+func TestCompleteRequest(t *testing.T) {
+	t.Run("no reentrancy", func(t *testing.T) {
+		pid := &PID{}
+		require.False(t, pid.completeRequest("id", nil, nil))
+	})
+
+	t.Run("unknown correlation", func(t *testing.T) {
+		pid := &PID{reentrancy: newReentrancyState(ReentrancyAllowAll, 0)}
+		require.False(t, pid.completeRequest("missing", nil, nil))
+	})
+
+	t.Run("idempotent completion", func(t *testing.T) {
+		pid := &PID{reentrancy: newReentrancyState(ReentrancyAllowAll, 0)}
+		state := newRequestState("idempotent", ReentrancyAllowAll, pid)
+		pid.reentrancy.requestStates.Set(state.id, state)
+		state.complete(nil, nil)
+
+		require.True(t, pid.completeRequest(state.id, &testpb.Reply{}, nil))
+		_, exists := pid.reentrancy.requestStates.Get(state.id)
+		require.True(t, exists)
+	})
+
+	t.Run("completes and invokes callback", func(t *testing.T) {
+		pid := &PID{
+			logger:     log.DiscardLogger,
+			reentrancy: newReentrancyState(ReentrancyAllowAll, 0),
+		}
+		state := newRequestState("done", ReentrancyAllowAll, pid)
+		require.NoError(t, pid.registerRequestState(state))
+
+		respCh := make(chan proto.Message, 1)
+		state.setCallback(func(msg proto.Message, err error) {
+			if err == nil {
+				respCh <- msg
+			}
+		})
+
+		payload := &testpb.Reply{Content: "ok"}
+		require.True(t, pid.completeRequest(state.id, payload, nil))
+
+		select {
+		case msg := <-respCh:
+			require.Equal(t, payload, msg)
+		case <-time.After(reentrancyReplyTimeout):
+			t.Fatal("expected completion callback")
+		}
+
+		require.Zero(t, pid.reentrancy.requestStates.Len())
+		require.Zero(t, pid.reentrancy.inFlightCount.Load())
+	})
+}
+
+func TestEnqueueAsyncError(t *testing.T) {
+	ctx := context.Background()
+	pid := newRunningPIDWithReentrancy(ReentrancyAllowAll, 0)
+
+	require.ErrorIs(t, pid.enqueueAsyncError(ctx, "", gerrors.ErrRequestTimeout), gerrors.ErrInvalidMessage)
+	require.NoError(t, pid.enqueueAsyncError(ctx, "noop", nil))
+
+	state := newRequestState("corr", ReentrancyAllowAll, pid)
+	require.NoError(t, pid.registerRequestState(state))
+
+	errCh := make(chan error, 1)
+	state.setCallback(func(_ proto.Message, err error) {
+		errCh <- err
+	})
+
+	require.NoError(t, pid.enqueueAsyncError(ctx, "corr", gerrors.ErrRequestTimeout))
+
+	select {
+	case err := <-errCh:
+		require.ErrorIs(t, err, gerrors.ErrRequestTimeout)
+	case <-time.After(reentrancyReplyTimeout):
+		t.Fatal("expected async error callback")
+	}
+}
+
+func TestSendAsyncResponsePaths(t *testing.T) {
+	t.Run("invalid correlation", func(t *testing.T) {
+		pid := &PID{}
+		err := pid.sendAsyncResponse(context.Background(), "reply", "", new(testpb.TestSend), nil)
+		require.ErrorIs(t, err, gerrors.ErrInvalidMessage)
+	})
+
+	t.Run("invalid replyTo", func(t *testing.T) {
+		pid := &PID{}
+		err := pid.sendAsyncResponse(context.Background(), "", "corr", new(testpb.TestSend), nil)
+		require.ErrorIs(t, err, gerrors.ErrInvalidMessage)
+	})
+
+	t.Run("nil message", func(t *testing.T) {
+		pid := &PID{}
+		err := pid.sendAsyncResponse(context.Background(), "reply", "corr", nil, nil)
+		require.ErrorIs(t, err, gerrors.ErrInvalidMessage)
+	})
+
+	t.Run("marshal error", func(t *testing.T) {
+		pid := &PID{}
+		var invalid *testpb.TestWait
+		err := pid.sendAsyncResponse(context.Background(), "reply", "corr", invalid, nil)
+		require.Error(t, err)
+	})
+
+	t.Run("address parse error", func(t *testing.T) {
+		pid := &PID{}
+		err := pid.sendAsyncResponse(context.Background(), "not-an-addr", "corr", &testpb.Reply{Content: "ok"}, nil)
+		require.Error(t, err)
+	})
+
+	t.Run("actor system not started", func(t *testing.T) {
+		pid := &PID{logger: log.DiscardLogger}
+		replyTo := address.New("actor", "sys", "127.0.0.1", 9000).String()
+		err := pid.sendAsyncResponse(context.Background(), replyTo, "corr", &testpb.Reply{Content: "ok"}, nil)
+		require.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
+	})
+
+	t.Run("local success and error", func(t *testing.T) {
+		sys, ctx := newReentrancySystem(t)
+		replyCh := make(chan *internalpb.AsyncResponse, 2)
+		receiver := spawnReentrancyActor(t, sys, ctx, "reply-receiver", func(rctx *ReceiveContext) {
+			if resp, ok := rctx.Message().(*internalpb.AsyncResponse); ok {
+				replyCh <- resp
+			}
+		})
+		sender := spawnReentrancyActor(t, sys, ctx, "reply-sender", func(*ReceiveContext) {})
+
+		require.NoError(t, sender.sendAsyncResponse(ctx, receiver.Address().String(), "corr-ok", &testpb.Reply{Content: "ok"}, nil))
+		select {
+		case resp := <-replyCh:
+			require.Equal(t, "corr-ok", resp.GetCorrelationId())
+			require.Empty(t, resp.GetError())
+			msg, err := resp.GetMessage().UnmarshalNew()
+			require.NoError(t, err)
+			reply, ok := msg.(*testpb.Reply)
+			require.True(t, ok)
+			require.Equal(t, "ok", reply.GetContent())
+		case <-time.After(reentrancyReplyTimeout):
+			t.Fatal("expected async response")
+		}
+
+		require.NoError(t, sender.sendAsyncResponse(ctx, receiver.Address().String(), "corr-err", nil, errors.New("boom")))
+		select {
+		case resp := <-replyCh:
+			require.Equal(t, "corr-err", resp.GetCorrelationId())
+			require.Equal(t, "boom", resp.GetError())
+			require.Nil(t, resp.GetMessage())
+		case <-time.After(reentrancyReplyTimeout):
+			t.Fatal("expected error response")
+		}
+	})
+
+	t.Run("remote error", func(t *testing.T) {
+		sys, ctx := newReentrancySystem(t)
+		sender := spawnReentrancyActor(t, sys, ctx, "remote-sender", func(*ReceiveContext) {})
+		replyTo := address.New("remote", "remote-system", "127.0.0.1", 9002).String()
+		err := sender.sendAsyncResponse(ctx, replyTo, "corr", &testpb.Reply{Content: "ok"}, nil)
+		require.ErrorIs(t, err, gerrors.ErrRemotingDisabled)
+	})
+}
+
+func TestCancelInFlightRequestsBranches(t *testing.T) {
+	t.Run("nil reentrancy", func(t *testing.T) {
+		pid := &PID{}
+		pid.cancelInFlightRequests(gerrors.ErrRequestCanceled)
+	})
+
+	t.Run("skips nil and completed states", func(t *testing.T) {
+		pid := &PID{reentrancy: newReentrancyState(ReentrancyAllowAll, 0)}
+		pid.reentrancy.requestStates.Set("nil", nil)
+
+		completed := newRequestState("done", ReentrancyAllowAll, pid)
+		completed.complete(nil, nil)
+		pid.reentrancy.requestStates.Set("done", completed)
+
+		stash := newRequestState("stash", ReentrancyStashNonReentrant, pid)
+		pid.reentrancy.requestStates.Set("stash", stash)
+
+		pid.reentrancy.inFlightCount.Store(1)
+		pid.reentrancy.blockingCount.Store(1)
+
+		pid.cancelInFlightRequests(gerrors.ErrRequestCanceled)
+
+		require.Zero(t, pid.reentrancy.inFlightCount.Load())
+		require.Zero(t, pid.reentrancy.blockingCount.Load())
+		_, ok := pid.reentrancy.requestStates.Get("stash")
+		require.False(t, ok)
+		_, ok = pid.reentrancy.requestStates.Get("done")
+		require.True(t, ok)
+	})
+}
+
+func reportScenarioError(errCh chan<- error, err error) {
+	if err == nil {
+		return
+	}
+	select {
+	case errCh <- err:
+	default:
+	}
+}
+
+type blockingProto struct {
+	ready   chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (b *blockingProto) ProtoReflect() protoreflect.Message {
+	b.once.Do(func() { close(b.ready) })
+	<-b.release
+	return (&testpb.TestWait{}).ProtoReflect()
+}
+
+func newRunningPIDWithReentrancy(mode ReentrancyMode, maxInFlight int) *PID {
+	pid := &PID{
+		logger:     log.DiscardLogger,
+		mailbox:    NewUnboundedMailbox(),
+		reentrancy: newReentrancyState(mode, maxInFlight),
+	}
+	pid.setState(runningState, true)
+	return pid
+}
+
+type reentrancyTestActor struct {
+	receive func(*ReceiveContext)
+}
+
+func (x *reentrancyTestActor) PreStart(*Context) error { return nil }
+
+func (x *reentrancyTestActor) Receive(ctx *ReceiveContext) {
+	if x.receive != nil {
+		x.receive(ctx)
+	}
+}
+
+func (x *reentrancyTestActor) PostStop(*Context) error { return nil }
+
+// newReentrancySystem starts a minimal actor system for reentrancy tests.
+func newReentrancySystem(t *testing.T) (ActorSystem, context.Context) {
+	t.Helper()
+	ctx := context.Background()
+	sys, err := NewActorSystem("reentrancy-"+uuid.NewString(), WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+	t.Cleanup(func() { _ = sys.Stop(ctx) })
+	return sys, ctx
+}
+
+// spawnReentrancyActor creates a test actor with a custom Receive handler.
+func spawnReentrancyActor(t *testing.T, sys ActorSystem, ctx context.Context, name string, receive func(*ReceiveContext), opts ...SpawnOption) *PID {
+	t.Helper()
+	pid, err := sys.Spawn(ctx, name, &reentrancyTestActor{receive: receive}, opts...)
+	require.NoError(t, err)
+	require.NotNil(t, pid)
+	return pid
+}
+
+// responderWithDelay replies after a delay or remains silent for timeout tests.
+func responderWithDelay(delay time.Duration, corrCh chan string) func(*ReceiveContext) {
+	return func(ctx *ReceiveContext) {
+		switch msg := ctx.Message().(type) {
+		case *testpb.TestWait:
+			if corrCh != nil {
+				select {
+				case corrCh <- ctx.CorrelationID():
+				default:
+				}
+			}
+			wait := delay
+			if msg.GetDuration() > 0 {
+				wait = time.Duration(msg.GetDuration()) * time.Millisecond
+			}
+			if wait > 0 {
+				pause.For(wait)
+			}
+			ctx.Response(&testpb.Reply{Content: "ok"})
+		case *testpb.TestTimeout:
+			// intentionally no response
+		default:
+			ctx.Response(&testpb.Reply{Content: "ok"})
+		}
+	}
+}
+
+func waitForError(t *testing.T, errCh <-chan error, expected error, timeout time.Duration) {
+	t.Helper()
+	select {
+	case err := <-errCh:
+		require.ErrorIs(t, err, expected)
+	case <-time.After(timeout):
+		t.Fatalf("expected error: %v", expected)
+	}
+}
+
+func waitForReply(t *testing.T, replyCh <-chan proto.Message, errCh <-chan error, timeout time.Duration) {
+	t.Helper()
+	select {
+	case <-replyCh:
+		return
+	case err := <-errCh:
+		t.Fatalf("unexpected error: %v", err)
+	case <-time.After(timeout):
+		t.Fatal("expected async reply")
+	}
+}
+
+func waitForSignal(t *testing.T, sigCh <-chan struct{}, timeout time.Duration, message string) {
+	t.Helper()
+	select {
+	case <-sigCh:
+		return
+	case <-time.After(timeout):
+		t.Fatal(message)
+	}
+}
+
+func assertNoSignal(t *testing.T, sigCh <-chan struct{}, errCh <-chan error, timeout time.Duration, message string) {
+	t.Helper()
+	select {
+	case <-sigCh:
+		t.Fatal(message)
+	case err := <-errCh:
+		t.Fatalf("unexpected error: %v", err)
+	case <-time.After(timeout):
+		return
+	}
+}
+
+func waitForProcessedBeforeReply(t *testing.T, processedCh <-chan struct{}, replyCh <-chan proto.Message, errCh <-chan error, timeout time.Duration) {
+	t.Helper()
+	select {
+	case <-processedCh:
+		return
+	case resp := <-replyCh:
+		t.Fatalf("reply arrived before other message processed: %T", resp)
+	case err := <-errCh:
+		t.Fatalf("unexpected error: %v", err)
+	case <-time.After(timeout):
+		t.Fatal("expected other message to be processed while awaiting response")
+	}
+}
+
+func waitForCorrelationID(t *testing.T, corrCh <-chan string, timeout time.Duration) string {
+	t.Helper()
+	select {
+	case id := <-corrCh:
+		require.NotEmpty(t, id)
+		return id
+	case <-time.After(timeout):
+		t.Fatal("expected correlation id to be set")
+	}
+	return ""
 }

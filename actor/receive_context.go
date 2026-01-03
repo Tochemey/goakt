@@ -301,7 +301,7 @@ func (rctx *ReceiveContext) Ask(to *PID, message proto.Message, timeout time.Dur
 	return reply
 }
 
-// Request sends a message to another actor and returns a RequestHandle.
+// Request sends a message to another actor and returns a RequestCall.
 //
 // Request is the non-blocking counterpart of Ask. Use it when the current actor must
 // remain responsive (e.g., fan-out, long I/O via PipeTo, or avoiding call cycles like
@@ -311,7 +311,7 @@ func (rctx *ReceiveContext) Ask(to *PID, message proto.Message, timeout time.Dur
 //   - The reply is delivered back through this actor’s mailbox (single-threaded), so
 //     any continuation registered on the returned handle executes within the actor
 //     processing model.
-//   - Use the returned RequestHandle to register a continuation (e.g., Then) and/or
+//   - Use the returned RequestCall to register a continuation (e.g., Then) and/or
 //     cancel the request.
 //
 // Reentrancy requirement:
@@ -322,8 +322,8 @@ func (rctx *ReceiveContext) Ask(to *PID, message proto.Message, timeout time.Dur
 //   - Per-call behavior (timeout, mode/policy) can be customized via RequestOption.
 //     Defaults may be configured at actor/system level.
 //
-// On failure to initiate the request, Err is set and the returned handle is nil.
-func (rctx *ReceiveContext) Request(to *PID, message proto.Message, opts ...RequestOption) RequestHandle {
+// On failure to initiate the request, Err is set and the returned call is nil.
+func (rctx *ReceiveContext) Request(to *PID, message proto.Message, opts ...RequestOption) RequestCall {
 	self := rctx.self
 	ctx := rctx.withoutCancel()
 	call, err := self.request(ctx, to, message, opts...)
@@ -334,7 +334,7 @@ func (rctx *ReceiveContext) Request(to *PID, message proto.Message, opts ...Requ
 	return call
 }
 
-// RequestName sends a message to an actor identified by name and returns a RequestHandle.
+// RequestName sends a message to an actor identified by name and returns a RequestCall.
 //
 // This is the non-blocking, location-transparent counterpart of SendSync: the target may be
 // local or remote depending on the actor system configuration (e.g., cluster/remoting).
@@ -343,7 +343,7 @@ func (rctx *ReceiveContext) Request(to *PID, message proto.Message, opts ...Requ
 // Reply delivery and continuations:
 //   - Replies are delivered back to the caller through this actor’s mailbox, preserving the
 //     single-threaded actor processing model.
-//   - Use the returned RequestHandle to register continuations (e.g., Then) and/or cancel
+//   - Use the returned RequestCall to register continuations (e.g., Then) and/or cancel
 //     the request.
 //
 // Reentrancy requirement:
@@ -354,8 +354,8 @@ func (rctx *ReceiveContext) Request(to *PID, message proto.Message, opts ...Requ
 //   - Per-call behavior (timeout, mode/policy, etc.) can be customized via RequestOption.
 //     Defaults may be configured at actor/system level.
 //
-// On failure to initiate the request, Err is set and the returned handle is nil.
-func (rctx *ReceiveContext) RequestName(actorName string, message proto.Message, opts ...RequestOption) RequestHandle {
+// On failure to initiate the request, Err is set and the returned call is nil.
+func (rctx *ReceiveContext) RequestName(actorName string, message proto.Message, opts ...RequestOption) RequestCall {
 	self := rctx.self
 	ctx := rctx.withoutCancel()
 	call, err := self.requestName(ctx, actorName, message, opts...)

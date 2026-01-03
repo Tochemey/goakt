@@ -1263,11 +1263,11 @@ func (pid *PID) LatestActivityTime() time.Time {
 	return pid.latestReceiveTime.Load()
 }
 
-// request sends an asynchronous request to another PID and returns a RequestHandle.
+// request sends an asynchronous request to another PID and returns a RequestCall.
 //
 // Design decision: async requests are opt-in per actor to preserve legacy semantics.
 // The caller must have reentrancy enabled; otherwise ErrReentrancyDisabled is returned.
-func (pid *PID) request(ctx context.Context, to *PID, message proto.Message, opts ...RequestOption) (RequestHandle, error) {
+func (pid *PID) request(ctx context.Context, to *PID, message proto.Message, opts ...RequestOption) (RequestCall, error) {
 	if !pid.IsRunning() {
 		return nil, gerrors.ErrDead
 	}
@@ -1299,8 +1299,8 @@ func (pid *PID) request(ctx context.Context, to *PID, message proto.Message, opt
 	}
 
 	correlationID := uuid.NewString()
-	state := newAsyncCallState(correlationID, mode, pid)
-	if err := pid.registerAsyncCall(state); err != nil {
+	state := newRequestState(correlationID, mode, pid)
+	if err := pid.registerRequestState(state); err != nil {
 		return nil, err
 	}
 
@@ -1310,16 +1310,16 @@ func (pid *PID) request(ctx context.Context, to *PID, message proto.Message, opt
 
 	req, err := pid.buildAsyncRequest(message, correlationID)
 	if err != nil {
-		pid.unregisterAsyncCall(state)
+		pid.deregisterRequestState(state)
 		return nil, err
 	}
 
 	if err := pid.Tell(ctx, to, req); err != nil {
-		pid.unregisterAsyncCall(state)
+		pid.deregisterRequestState(state)
 		return nil, err
 	}
 
-	return &asyncCall{state: state}, nil
+	return &requestHandle{state: state}, nil
 }
 
 // requestName sends an asynchronous request to a named actor.
@@ -1327,7 +1327,7 @@ func (pid *PID) request(ctx context.Context, to *PID, message proto.Message, opt
 // Design decision: name resolution is performed once to avoid an extra lookup and
 // to keep control of the async envelope before sending. The caller must have
 // reentrancy enabled; otherwise ErrReentrancyDisabled is returned.
-func (pid *PID) requestName(ctx context.Context, actorName string, message proto.Message, opts ...RequestOption) (RequestHandle, error) {
+func (pid *PID) requestName(ctx context.Context, actorName string, message proto.Message, opts ...RequestOption) (RequestCall, error) {
 	if !pid.IsRunning() {
 		return nil, gerrors.ErrDead
 	}
@@ -1360,8 +1360,8 @@ func (pid *PID) requestName(ctx context.Context, actorName string, message proto
 	}
 
 	correlationID := uuid.NewString()
-	state := newAsyncCallState(correlationID, mode, pid)
-	if err := pid.registerAsyncCall(state); err != nil {
+	state := newRequestState(correlationID, mode, pid)
+	if err := pid.registerRequestState(state); err != nil {
 		return nil, err
 	}
 
@@ -1371,21 +1371,21 @@ func (pid *PID) requestName(ctx context.Context, actorName string, message proto
 
 	req, err := pid.buildAsyncRequest(message, correlationID)
 	if err != nil {
-		pid.unregisterAsyncCall(state)
+		pid.deregisterRequestState(state)
 		return nil, err
 	}
 
 	if cid != nil {
 		if err := pid.Tell(ctx, cid, req); err != nil {
-			pid.unregisterAsyncCall(state)
+			pid.deregisterRequestState(state)
 			return nil, err
 		}
 	} else if err := pid.RemoteTell(ctx, addr, req); err != nil {
-		pid.unregisterAsyncCall(state)
+		pid.deregisterRequestState(state)
 		return nil, err
 	}
 
-	return &asyncCall{state: state}, nil
+	return &requestHandle{state: state}, nil
 }
 
 // buildAsyncRequest wraps the payload with correlation and reply metadata.
@@ -1556,14 +1556,14 @@ func (pid *PID) handleAsyncResponse(received *ReceiveContext, resp *internalpb.A
 	}
 
 	if resp.GetError() != "" {
-		if !pid.completeAsyncCall(correlationID, nil, asyncErrorFromString(resp.GetError())) {
+		if !pid.completeRequest(correlationID, nil, asyncErrorFromString(resp.GetError())) {
 			pid.logger.Warnf("async response dropped: unknown correlation id=%s", correlationID)
 		}
 		return
 	}
 
 	if resp.GetMessage() == nil {
-		if !pid.completeAsyncCall(correlationID, nil, gerrors.ErrInvalidMessage) {
+		if !pid.completeRequest(correlationID, nil, gerrors.ErrInvalidMessage) {
 			pid.logger.Warnf("async response dropped: unknown correlation id=%s", correlationID)
 		}
 		return
@@ -1571,13 +1571,13 @@ func (pid *PID) handleAsyncResponse(received *ReceiveContext, resp *internalpb.A
 
 	message, err := resp.GetMessage().UnmarshalNew()
 	if err != nil {
-		if !pid.completeAsyncCall(correlationID, nil, fmt.Errorf("invalid async response: %w", err)) {
+		if !pid.completeRequest(correlationID, nil, fmt.Errorf("invalid async response: %w", err)) {
 			pid.logger.Warnf("async response dropped: unknown correlation id=%s", correlationID)
 		}
 		return
 	}
 
-	if !pid.completeAsyncCall(correlationID, message, nil) {
+	if !pid.completeRequest(correlationID, message, nil) {
 		pid.logger.Warnf("async response dropped: unknown correlation id=%s", correlationID)
 	}
 }
@@ -1597,25 +1597,27 @@ func asyncErrorFromString(err string) error {
 	}
 }
 
-// registerAsyncCall tracks an in-flight async request and enforces limits.
+// registerRequestState tracks an in-flight async request and enforces limits.
 //
 // Design decision: blockingCount reflects stash-mode requests so stashing can
 // release only when the last blocking call completes.
-func (pid *PID) registerAsyncCall(state *asyncCallState) error {
+func (pid *PID) registerRequestState(state *requestState) error {
 	if pid.reentrancy == nil {
 		return gerrors.ErrReentrancyDisabled
 	}
+
 	if state == nil {
 		return gerrors.ErrInvalidMessage
 	}
 
 	if pid.reentrancy.maxInFlight > 0 {
-		max := int64(pid.reentrancy.maxInFlight)
+		maxInFlight := int64(pid.reentrancy.maxInFlight)
 		for {
 			current := pid.reentrancy.inFlightCount.Load()
-			if current >= max {
+			if current >= maxInFlight {
 				return gerrors.ErrReentrancyInFlightLimit
 			}
+
 			if pid.reentrancy.inFlightCount.CompareAndSwap(current, current+1) {
 				break
 			}
@@ -1628,24 +1630,24 @@ func (pid *PID) registerAsyncCall(state *asyncCallState) error {
 		pid.reentrancy.blockingCount.Inc()
 	}
 
-	pid.reentrancy.calls.Set(state.id, state)
+	pid.reentrancy.requestStates.Set(state.id, state)
 	return nil
 }
 
-// unregisterAsyncCall removes an in-flight async request and releases stashed messages.
+// deregisterRequestState removes an in-flight async request and releases stashed messages.
 //
 // Design decision: when the last blocking request completes, unstash all messages
 // to preserve original mailbox order.
-func (pid *PID) unregisterAsyncCall(state *asyncCallState) {
+func (pid *PID) deregisterRequestState(state *requestState) {
 	if pid.reentrancy == nil || state == nil {
 		return
 	}
 
-	if _, ok := pid.reentrancy.calls.Get(state.id); !ok {
+	if _, ok := pid.reentrancy.requestStates.Get(state.id); !ok {
 		return
 	}
 
-	pid.reentrancy.calls.Delete(state.id)
+	pid.reentrancy.requestStates.Delete(state.id)
 	pid.reentrancy.inFlightCount.Dec()
 	if state.mode == ReentrancyStashNonReentrant {
 		remaining := pid.reentrancy.blockingCount.Dec()
@@ -1659,15 +1661,15 @@ func (pid *PID) unregisterAsyncCall(state *asyncCallState) {
 	state.stopTimeoutIfSet()
 }
 
-// completeAsyncCall marks an async request as completed and runs its callback.
+// completeRequest marks an async request as completed and runs its callback.
 //
 // Design decision: completion is idempotent; only the first result wins.
-func (pid *PID) completeAsyncCall(correlationID string, result proto.Message, err error) bool {
+func (pid *PID) completeRequest(correlationID string, result proto.Message, err error) bool {
 	if pid.reentrancy == nil {
 		return false
 	}
 
-	state, ok := pid.reentrancy.calls.Get(correlationID)
+	state, ok := pid.reentrancy.requestStates.Get(correlationID)
 	if !ok {
 		return false
 	}
@@ -1677,7 +1679,7 @@ func (pid *PID) completeAsyncCall(correlationID string, result proto.Message, er
 		return true
 	}
 
-	pid.unregisterAsyncCall(state)
+	pid.deregisterRequestState(state)
 	if callback != nil {
 		callback(result, err)
 	}
@@ -1765,16 +1767,16 @@ func (pid *PID) cancelInFlightRequests(reason error) {
 		return
 	}
 
-	keys := pid.reentrancy.calls.Keys()
+	keys := pid.reentrancy.requestStates.Keys()
 	for _, key := range keys {
-		state, ok := pid.reentrancy.calls.Get(key)
+		state, ok := pid.reentrancy.requestStates.Get(key)
 		if !ok || state == nil {
 			continue
 		}
 		if _, completed := state.complete(nil, reason); !completed {
 			continue
 		}
-		pid.reentrancy.calls.Delete(key)
+		pid.reentrancy.requestStates.Delete(key)
 		pid.reentrancy.inFlightCount.Dec()
 		if state.mode == ReentrancyStashNonReentrant {
 			pid.reentrancy.blockingCount.Dec()
