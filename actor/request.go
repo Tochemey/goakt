@@ -100,23 +100,42 @@ type RequestOption func(*requestConfig)
 
 // WithReentrancyMode overrides the actor-level reentrancy policy for this request.
 //
+// This is a per-call override: it affects only the async request being started
+// (via Request/RequestName) and does not mutate the actor's configured default.
+//
+// Use this to temporarily opt into stricter or looser reentrancy semantics for a
+// single interaction—for example, select ReentrancyStashNonReentrant for a
+// blocking/serialized request—while leaving the actor's overall behavior unchanged.
+//
+// If the actor does not have reentrancy enabled, Request/RequestName still return
+// ErrReentrancyDisabled regardless of this option. If mode is ReentrancyOff, the
+// request is rejected with ErrReentrancyDisabled.
+//
 // Design decision: per-call overrides allow safe, targeted deviations from the
 // actor default (e.g., stashing a single request while keeping general throughput).
 func WithReentrancyMode(mode ReentrancyMode) RequestOption {
 	return func(config *requestConfig) {
-		if config == nil {
-			return
+		if config != nil {
+			config.mode = mode
+			config.modeSet = true
 		}
-
-		config.mode = mode
-		config.modeSet = true
 	}
 }
 
-// WithRequestTimeout sets a timeout for the async request.
+// WithRequestTimeout sets a timeout for a single async request.
 //
-// Design decision: timeouts are per-request to avoid forcing a global timeout
-// policy on the actor. A value <= 0 disables the timeout for the request.
+// If the timeout elapses before a response is observed, the request completes
+// with ErrRequestTimeout. The timeout signal is delivered through the requester's
+// mailbox, so completion timing depends on mailbox processing. It is best-effort
+// and may race with a successful response (whichever completion wins).
+//
+// A value <= 0 disables the timeout for this request (no automatic expiry).
+//
+// Notes:
+//   - This option is per-request; there is no implicit/global default timeout.
+//   - On completion (success, error, cancellation, or timeout) any registered
+//     continuation (Then) is invoked according to RequestCall's execution rules.
+//   - Cancel and timeout are independent signals; either may "win" depending on timing.
 func WithRequestTimeout(timeout time.Duration) RequestOption {
 	return func(config *requestConfig) {
 		if config == nil {

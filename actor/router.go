@@ -339,10 +339,15 @@ func (x *router) routeByStrategy(ctx *ReceiveContext, msg proto.Message, routees
 		routee := routees[rand.IntN(len(routees))] //nolint:gosec
 		ctx.Tell(routee, msg)
 	default:
+		sender := ctx.Self()
+		sendCtx := ctx.withoutCancel()
 		for _, routee := range routees {
-			go func(pid *PID) {
-				ctx.Tell(pid, msg)
-			}(routee)
+			routee := routee
+			go func() {
+				if err := sender.Tell(sendCtx, routee, msg); err != nil {
+					x.logger.Warn(err)
+				}
+			}()
 		}
 	}
 }
