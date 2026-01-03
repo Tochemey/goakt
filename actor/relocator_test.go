@@ -403,24 +403,45 @@ func TestRelocation(t *testing.T) {
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
-	// Wait for cluster rebalancing
-	pause.For(time.Minute)
-
 	sender, err := node1.LocalActor("Actor1-1")
 	require.NoError(t, err)
 	require.NotNil(t, sender)
 
 	// let us access some of the node2 actors from node 1 and  node 3
 	actorName := "Actor2-1"
-	err = sender.SendAsync(ctx, actorName, new(testpb.TestSend))
+	deadline := time.Now().Add(2 * time.Minute)
+	for time.Now().Before(deadline) {
+		err = sender.SendAsync(ctx, actorName, new(testpb.TestSend))
+		if err == nil {
+			break
+		}
+		if !stdErrors.Is(err, errors.ErrActorNotFound) {
+			break
+		}
+		pause.For(500 * time.Millisecond)
+	}
 	require.NoError(t, err)
 
-	relocated, err := node1.LocalActor(reentrantName)
-	if err != nil {
-		require.ErrorIs(t, err, errors.ErrActorNotFound)
+	var relocated *PID
+	deadline = time.Now().Add(2 * time.Minute)
+	for time.Now().Before(deadline) {
+		relocated, err = node1.LocalActor(reentrantName)
+		if err == nil {
+			break
+		}
+		if !stdErrors.Is(err, errors.ErrActorNotFound) {
+			break
+		}
 		relocated, err = node3.LocalActor(reentrantName)
-		require.NoError(t, err)
+		if err == nil {
+			break
+		}
+		if !stdErrors.Is(err, errors.ErrActorNotFound) {
+			break
+		}
+		pause.For(500 * time.Millisecond)
 	}
+	require.NoError(t, err)
 	require.NotNil(t, relocated)
 	require.NotNil(t, relocated.reentrancy)
 	require.Equal(t, reentrancy.StashNonReentrant, relocated.reentrancy.mode)
