@@ -31,6 +31,9 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v3/errors"
+	"github.com/tochemey/goakt/v3/goaktpb"
+	"github.com/tochemey/goakt/v3/internal/future"
+	"github.com/tochemey/goakt/v3/log"
 )
 
 // pool holds a pool of ReceiveContext
@@ -277,6 +280,74 @@ func (gctx *GrainContext) TellGrain(to *GrainIdentity, message proto.Message) er
 	return gctx.actorSystem.TellGrain(ctx, to, message)
 }
 
+// PipeToGrain runs a task asynchronously and delivers its result to the target Grain.
+//
+// While the task is executing, the calling Grain can continue processing other messages.
+// On success, the task result is sent to the target Grain as a normal message.
+// On failure, a StatusFailure message containing the error is delivered to the target Grain.
+//
+// The task runs outside the Grain's message loop. Avoid mutating Grain state inside
+// the task; communicate results via the returned message instead.
+//
+// Use PipeOptions (e.g., WithTimeout, WithCircuitBreaker) to control execution.
+//
+// Returns an error when the task is nil or the target identity is invalid.
+func (gctx *GrainContext) PipeToGrain(to *GrainIdentity, task func() (proto.Message, error), opts ...PipeOption) error {
+	if task == nil {
+		return errors.ErrUndefinedTask
+	}
+
+	if to == nil {
+		return errors.ErrInvalidGrainIdentity
+	}
+
+	if err := to.Validate(); err != nil {
+		return errors.NewErrInvalidGrainIdentity(err)
+	}
+
+	ctx := context.WithoutCancel(gctx.Context())
+	var config *pipeConfig
+	if len(opts) > 0 {
+		config = newPipeConfig(opts...)
+	}
+
+	go handleGrainCompletion(ctx, gctx.actorSystem, config, &grainTaskCompletion{
+		Target: to,
+		Task:   task,
+	})
+
+	return nil
+}
+
+// PipeToActor runs a task asynchronously and delivers its result to the named actor.
+//
+// While the task is executing, the calling Grain can continue processing other messages.
+// On success, the task result is sent to the target actor as a normal message.
+// On failure, the error is handled according to PipeTo semantics (e.g., deadletter).
+//
+// The task runs outside the Grain's message loop. Avoid mutating Grain state inside
+// the task; communicate results via the returned message instead.
+//
+// Use PipeOptions (e.g., WithTimeout, WithCircuitBreaker) to control execution.
+func (gctx *GrainContext) PipeToActor(actorName string, task func() (proto.Message, error), opts ...PipeOption) error {
+	ctx := context.WithoutCancel(gctx.Context())
+	return gctx.actorSystem.NoSender().PipeToName(ctx, actorName, task, opts...)
+}
+
+// PipeToSelf runs a task asynchronously and delivers its result to this Grain.
+//
+// While the task is executing, the calling Grain can continue processing other messages.
+// On success, the task result is sent to this Grain as a normal message.
+// On failure, a StatusFailure message containing the error is delivered to this Grain.
+//
+// The task runs outside the Grain's message loop. Avoid mutating Grain state inside
+// the task; communicate results via the returned message instead.
+//
+// Use PipeOptions (e.g., WithTimeout, WithCircuitBreaker) to control execution.
+func (gctx *GrainContext) PipeToSelf(task func() (proto.Message, error), opts ...PipeOption) error {
+	return gctx.PipeToGrain(gctx.Self(), task, opts...)
+}
+
 // GrainIdentity creates or retrieves a unique identity for a Grain instance.
 //
 // This method is used to generate a GrainIdentity for a given grain name and factory,
@@ -304,7 +375,63 @@ func (gctx *GrainContext) GrainIdentity(name string, factory GrainFactory, opts 
 	return gctx.actorSystem.GrainIdentity(ctx, name, factory, opts...)
 }
 
-// build sets the necessary fields of ReceiveContext
+type grainPipeSystem interface {
+	TellGrain(ctx context.Context, identity *GrainIdentity, message proto.Message) error
+	Logger() log.Logger
+}
+
+type grainTaskCompletion struct {
+	Target *GrainIdentity
+	Task   func() (proto.Message, error)
+}
+
+// handleGrainCompletion processes a long-running task and delivers its result to a Grain.
+func handleGrainCompletion(ctx context.Context, system grainPipeSystem, config *pipeConfig, completion *grainTaskCompletion) error {
+	// apply timeout if provided
+	var cancel context.CancelFunc
+	if config != nil && config.timeout != nil {
+		ctx, cancel = context.WithTimeout(ctx, *config.timeout)
+		defer cancel()
+	}
+
+	// wrap the provided completion task into a future
+	fut := future.New(completion.Task)
+
+	// execute the task, optionally via circuit breaker
+	runTask := func() (proto.Message, error) {
+		if config != nil && config.circuitBreaker != nil {
+			outcome, err := config.circuitBreaker.Execute(ctx, func(ctx context.Context) (any, error) {
+				return fut.Await(ctx)
+			})
+			if err != nil {
+				return nil, err
+			}
+			// no need to check the type since the future.Await returns proto.Message
+			// if there is no error
+			return outcome.(proto.Message), nil
+		}
+		return fut.Await(ctx)
+	}
+
+	result, err := runTask()
+	if err != nil {
+		failure := &goaktpb.StatusFailure{Error: err.Error()}
+		if sendErr := system.TellGrain(ctx, completion.Target, failure); sendErr != nil {
+			system.Logger().Error(sendErr)
+			return sendErr
+		}
+		return nil
+	}
+
+	if sendErr := system.TellGrain(ctx, completion.Target, result); sendErr != nil {
+		system.Logger().Error(sendErr)
+		return sendErr
+	}
+
+	return nil
+}
+
+// build sets the necessary fields of GrainContext.
 func (gctx *GrainContext) build(ctx context.Context, pid *grainPID, actorSystem ActorSystem, to *GrainIdentity, message proto.Message, synchronous bool) *GrainContext {
 	gctx.self = to
 	gctx.message = message
@@ -321,7 +448,7 @@ func (gctx *GrainContext) build(ctx context.Context, pid *grainPID, actorSystem 
 	return gctx
 }
 
-// reset resets the fields of ReceiveContext
+// reset resets the fields of GrainContext.
 func (gctx *GrainContext) reset() {
 	var id *GrainIdentity
 	gctx.message = nil
