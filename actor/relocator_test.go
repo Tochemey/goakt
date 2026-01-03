@@ -27,6 +27,8 @@ import (
 	"crypto/tls"
 	stdErrors "errors"
 	"fmt"
+	"net"
+	"strconv"
 	"testing"
 	"time"
 
@@ -391,6 +393,8 @@ func TestRelocation(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, pid)
 
+	pause.For(time.Second)
+
 	for j := 1; j <= 4; j++ {
 		actorName := fmt.Sprintf("Actor3-%d", j)
 		pid, err := node3.Spawn(ctx, actorName, NewMockActor(), WithLongLived())
@@ -416,13 +420,33 @@ func TestRelocation(t *testing.T) {
 	err = sender.SendAsync(ctx, actorName, new(testpb.TestSend))
 	require.NoError(t, err)
 
-	var relocated *PID
-	relocated, err = node1.LocalActor(reentrantName)
+	relocated, err := node1.ActorExists(ctx, reentrantName)
 	require.NoError(t, err)
-	require.NotNil(t, relocated)
-	require.NotNil(t, relocated.reentrancy)
-	require.Equal(t, reentrancy.StashNonReentrant, relocated.reentrancy.mode)
-	require.Equal(t, 3, relocated.reentrancy.maxInFlight)
+	require.True(t, relocated)
+
+	addr, pid, err := node1.ActorOf(ctx, reentrantName)
+	require.NoError(t, err)
+	if pid != nil {
+		require.NotNil(t, pid.reentrancy)
+		require.Equal(t, reentrancy.StashNonReentrant, pid.reentrancy.mode)
+		require.Equal(t, 3, pid.reentrancy.maxInFlight)
+	}
+
+	if addr.HostPort() == net.JoinHostPort(node1.Host(), strconv.Itoa(node1.Port())) {
+		pid, err = node1.LocalActor(reentrantName)
+		require.NoError(t, err)
+		require.NotNil(t, pid.reentrancy)
+		require.Equal(t, reentrancy.StashNonReentrant, pid.reentrancy.mode)
+		require.Equal(t, 3, pid.reentrancy.maxInFlight)
+	}
+
+	if addr.HostPort() == net.JoinHostPort(node3.Host(), strconv.Itoa(node3.Port())) {
+		pid, err = node3.LocalActor(reentrantName)
+		require.NoError(t, err)
+		require.NotNil(t, pid.reentrancy)
+		require.Equal(t, reentrancy.StashNonReentrant, pid.reentrancy.mode)
+		require.Equal(t, 3, pid.reentrancy.maxInFlight)
+	}
 
 	assert.NoError(t, node1.Stop(ctx))
 	assert.NoError(t, node3.Stop(ctx))
