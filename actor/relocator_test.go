@@ -377,7 +377,7 @@ func TestRelocation(t *testing.T) {
 
 	for j := 1; j <= 4; j++ {
 		actorName := fmt.Sprintf("Actor2-%d", j)
-		pid, err := node2.Spawn(ctx, actorName, NewMockActor())
+		pid, err := node2.Spawn(ctx, actorName, NewMockActor(), WithLongLived())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 	}
@@ -386,13 +386,14 @@ func TestRelocation(t *testing.T) {
 
 	reentrantName := "Reentrant-Actor"
 	pid, err := node2.Spawn(ctx, reentrantName, NewMockActor(),
+		WithLongLived(),
 		WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.StashNonReentrant), reentrancy.WithMaxInFlight(3))))
 	require.NoError(t, err)
 	require.NotNil(t, pid)
 
 	for j := 1; j <= 4; j++ {
 		actorName := fmt.Sprintf("Actor3-%d", j)
-		pid, err := node3.Spawn(ctx, actorName, NewMockActor())
+		pid, err := node3.Spawn(ctx, actorName, NewMockActor(), WithLongLived())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 	}
@@ -404,7 +405,7 @@ func TestRelocation(t *testing.T) {
 	require.NoError(t, sd2.Close())
 
 	// Wait for cluster rebalancing
-	pause.For(time.Minute)
+	pause.For(2 * time.Minute)
 
 	sender, err := node1.LocalActor("Actor1-1")
 	require.NoError(t, err)
@@ -412,17 +413,7 @@ func TestRelocation(t *testing.T) {
 
 	// let us access some of the node2 actors from node 1 and  node 3
 	actorName := "Actor2-1"
-	sendDeadline := time.Now().Add(2 * time.Minute)
-	for time.Now().Before(sendDeadline) {
-		err = sender.SendAsync(ctx, actorName, new(testpb.TestSend))
-		if err == nil {
-			break
-		}
-		if !stdErrors.Is(err, errors.ErrActorNotFound) {
-			break
-		}
-		pause.For(500 * time.Millisecond)
-	}
+	err = sender.SendAsync(ctx, actorName, new(testpb.TestSend))
 	require.NoError(t, err)
 
 	var relocated *PID
