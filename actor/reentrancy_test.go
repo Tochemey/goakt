@@ -553,7 +553,7 @@ func TestRequestBuildAsyncRequestErrorDeregisters(t *testing.T) {
 	target := &PID{}
 	target.setState(runningState, true)
 
-	var invalid *testpb.TestWait
+	invalid := &testpb.Reply{Content: invalidUTF8String()}
 	_, err := pid.request(ctx, target, invalid)
 	require.Error(t, err)
 	require.Zero(t, pid.reentrancy.inFlightCount.Load())
@@ -674,8 +674,7 @@ func TestRequestNameBuildAsyncRequestError(t *testing.T) {
 	_ = spawnReentrancyActor(t, sys, ctx, "build-target", func(*ReceiveContext) {})
 	requester := spawnReentrancyActor(t, sys, ctx, "build-requester", func(*ReceiveContext) {}, WithReentrancy(ReentrancyAllowAll))
 
-	var invalid *testpb.TestWait
-	_, err := requester.requestName(ctx, "build-target", invalid)
+	_, err := requester.requestName(ctx, "build-target", &testpb.Reply{Content: invalidUTF8String()})
 	require.Error(t, err)
 	require.Zero(t, requester.reentrancy.inFlightCount.Load())
 	require.Zero(t, requester.reentrancy.requestStates.Len())
@@ -1082,8 +1081,7 @@ func TestSendAsyncResponsePaths(t *testing.T) {
 
 	t.Run("marshal error", func(t *testing.T) {
 		pid := &PID{}
-		var invalid *testpb.TestWait
-		err := pid.sendAsyncResponse(context.Background(), "reply", "corr", invalid, nil)
+		err := pid.sendAsyncResponse(context.Background(), "reply", "corr", &testpb.Reply{Content: invalidUTF8String()}, nil)
 		require.Error(t, err)
 	})
 
@@ -1102,21 +1100,23 @@ func TestSendAsyncResponsePaths(t *testing.T) {
 
 	t.Run("local success and error", func(t *testing.T) {
 		sys, ctx := newReentrancySystem(t)
-		replyCh := make(chan *internalpb.AsyncResponse, 2)
-		receiver := spawnReentrancyActor(t, sys, ctx, "reply-receiver", func(rctx *ReceiveContext) {
-			if resp, ok := rctx.Message().(*internalpb.AsyncResponse); ok {
-				replyCh <- resp
+		receiver := spawnReentrancyActor(t, sys, ctx, "reply-receiver", func(*ReceiveContext) {}, WithReentrancy(ReentrancyAllowAll))
+		sender := spawnReentrancyActor(t, sys, ctx, "reply-sender", func(*ReceiveContext) {})
+
+		okState := newRequestState("corr-ok", ReentrancyAllowAll, receiver)
+		require.NoError(t, receiver.registerRequestState(okState))
+		t.Cleanup(func() { receiver.deregisterRequestState(okState) })
+
+		okCh := make(chan proto.Message, 1)
+		okState.setCallback(func(msg proto.Message, err error) {
+			if err == nil {
+				okCh <- msg
 			}
 		})
-		sender := spawnReentrancyActor(t, sys, ctx, "reply-sender", func(*ReceiveContext) {})
 
 		require.NoError(t, sender.sendAsyncResponse(ctx, receiver.Address().String(), "corr-ok", &testpb.Reply{Content: "ok"}, nil))
 		select {
-		case resp := <-replyCh:
-			require.Equal(t, "corr-ok", resp.GetCorrelationId())
-			require.Empty(t, resp.GetError())
-			msg, err := resp.GetMessage().UnmarshalNew()
-			require.NoError(t, err)
+		case msg := <-okCh:
 			reply, ok := msg.(*testpb.Reply)
 			require.True(t, ok)
 			require.Equal(t, "ok", reply.GetContent())
@@ -1124,15 +1124,26 @@ func TestSendAsyncResponsePaths(t *testing.T) {
 			t.Fatal("expected async response")
 		}
 
+		errState := newRequestState("corr-err", ReentrancyAllowAll, receiver)
+		require.NoError(t, receiver.registerRequestState(errState))
+		t.Cleanup(func() { receiver.deregisterRequestState(errState) })
+
+		errCh := make(chan error, 1)
+		errState.setCallback(func(_ proto.Message, err error) {
+			if err != nil {
+				errCh <- err
+			}
+		})
+
 		require.NoError(t, sender.sendAsyncResponse(ctx, receiver.Address().String(), "corr-err", nil, errors.New("boom")))
 		select {
-		case resp := <-replyCh:
-			require.Equal(t, "corr-err", resp.GetCorrelationId())
-			require.Equal(t, "boom", resp.GetError())
-			require.Nil(t, resp.GetMessage())
+		case err := <-errCh:
+			require.EqualError(t, err, "boom")
 		case <-time.After(reentrancyReplyTimeout):
 			t.Fatal("expected error response")
 		}
+
+		require.Zero(t, receiver.reentrancy.requestStates.Len())
 	})
 
 	t.Run("remote error", func(t *testing.T) {
@@ -1183,6 +1194,10 @@ func reportScenarioError(errCh chan<- error, err error) {
 	case errCh <- err:
 	default:
 	}
+}
+
+func invalidUTF8String() string {
+	return string([]byte{0xff})
 }
 
 type blockingProto struct {

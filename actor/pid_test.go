@@ -34,6 +34,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
 	"go.opentelemetry.io/otel"
@@ -55,6 +56,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/log"
 	testkit "github.com/tochemey/goakt/v3/mocks/discovery"
+	mocksremote "github.com/tochemey/goakt/v3/mocks/remote"
 	"github.com/tochemey/goakt/v3/passivation"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/supervisor"
@@ -2387,6 +2389,44 @@ func TestRemoting(t *testing.T) {
 		})
 	})
 }
+
+type actorSystemWrapper struct {
+	*actorSystem
+}
+
+func TestPIDRemotingEnabledGuard(t *testing.T) {
+	t.Run("Actor system nil", func(t *testing.T) {
+		remotingMock := mocksremote.NewRemoting(t)
+		pid := &PID{
+			logger:   log.DiscardLogger,
+			remoting: remotingMock,
+			address:  address.New("pid", "sys", "127.0.0.1", 9000),
+		}
+
+		err := pid.RemoteTell(context.Background(), address.New("target", "sys", "127.0.0.1", 9001), new(testpb.TestSend))
+		require.ErrorIs(t, err, errors.ErrRemotingDisabled)
+		remotingMock.AssertNotCalled(t, "RemoteTell", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+	})
+
+	t.Run("Non actorSystem implementation", func(t *testing.T) {
+		sys, err := NewActorSystem("wrapper-sys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+
+		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock.EXPECT().RemoteTell(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+
+		pid := &PID{
+			logger:      log.DiscardLogger,
+			actorSystem: &actorSystemWrapper{actorSystem: sys.(*actorSystem)},
+			remoting:    remotingMock,
+			address:     address.New("pid", "sys", "127.0.0.1", 9000),
+		}
+
+		err = pid.RemoteTell(context.Background(), address.New("target", "sys", "127.0.0.1", 9001), new(testpb.TestSend))
+		require.NoError(t, err)
+	})
+}
+
 func TestActorHandle(t *testing.T) {
 	ctx := context.TODO()
 	host := "127.0.0.1"

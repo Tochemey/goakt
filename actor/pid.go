@@ -775,6 +775,10 @@ func (pid *PID) ReinstateNamed(ctx context.Context, actorName string) error {
 		return nil
 	}
 
+	if !pid.remotingEnabled() {
+		return gerrors.ErrRemotingDisabled
+	}
+
 	return pid.remoting.RemoteReinstate(ctx, addr.Host(), addr.Port(), actorName)
 }
 
@@ -1061,7 +1065,7 @@ func (pid *PID) BatchAsk(ctx context.Context, to *PID, messages []proto.Message,
 
 // RemoteLookup look for an actor address on a remote node.
 func (pid *PID) RemoteLookup(ctx context.Context, host string, port int, name string) (addr *address.Address, err error) {
-	if pid.remoting == nil {
+	if !pid.remotingEnabled() {
 		return nil, gerrors.ErrRemotingDisabled
 	}
 
@@ -1070,7 +1074,7 @@ func (pid *PID) RemoteLookup(ctx context.Context, host string, port int, name st
 
 // RemoteTell sends a message to an actor remotely without expecting any reply
 func (pid *PID) RemoteTell(ctx context.Context, to *address.Address, message proto.Message) error {
-	if pid.remoting == nil {
+	if !pid.remotingEnabled() {
 		return gerrors.ErrRemotingDisabled
 	}
 
@@ -1079,7 +1083,7 @@ func (pid *PID) RemoteTell(ctx context.Context, to *address.Address, message pro
 
 // RemoteAsk sends a synchronous message to another actor remotely and expect a response.
 func (pid *PID) RemoteAsk(ctx context.Context, to *address.Address, message proto.Message, timeout time.Duration) (response *anypb.Any, err error) {
-	if pid.remoting == nil {
+	if !pid.remotingEnabled() {
 		return nil, gerrors.ErrRemotingDisabled
 	}
 
@@ -1093,7 +1097,7 @@ func (pid *PID) RemoteAsk(ctx context.Context, to *address.Address, message prot
 // RemoteBatchTell sends a batch of messages to a remote actor in a way fire-and-forget manner
 // Messages are processed one after the other in the order they are sent.
 func (pid *PID) RemoteBatchTell(ctx context.Context, to *address.Address, messages []proto.Message) error {
-	if pid.remoting == nil {
+	if !pid.remotingEnabled() {
 		return gerrors.ErrRemotingDisabled
 	}
 
@@ -1104,7 +1108,7 @@ func (pid *PID) RemoteBatchTell(ctx context.Context, to *address.Address, messag
 // Messages are processed one after the other in the order they are sent.
 // This can hinder performance if it is not properly used.
 func (pid *PID) RemoteBatchAsk(ctx context.Context, to *address.Address, messages []proto.Message, timeout time.Duration) (responses []*anypb.Any, err error) {
-	if pid.remoting == nil {
+	if !pid.remotingEnabled() {
 		return nil, gerrors.ErrRemotingDisabled
 	}
 
@@ -1113,7 +1117,7 @@ func (pid *PID) RemoteBatchAsk(ctx context.Context, to *address.Address, message
 
 // RemoteStop stops an actor on a remote node
 func (pid *PID) RemoteStop(ctx context.Context, host string, port int, name string) error {
-	if pid.remoting == nil {
+	if !pid.remotingEnabled() {
 		return gerrors.ErrRemotingDisabled
 	}
 
@@ -1122,7 +1126,7 @@ func (pid *PID) RemoteStop(ctx context.Context, host string, port int, name stri
 
 // RemoteSpawn creates an actor on a remote node. The given actor needs to be registered on the remote node using the Register method of ActorSystem
 func (pid *PID) RemoteSpawn(ctx context.Context, host string, port int, actorName, actorType string, opts ...SpawnOption) error {
-	if pid.remoting == nil {
+	if !pid.remotingEnabled() {
 		return gerrors.ErrRemotingDisabled
 	}
 
@@ -1159,7 +1163,7 @@ func (pid *PID) RemoteSpawn(ctx context.Context, host string, port int, actorNam
 
 // RemoteReSpawn restarts an actor on a remote node.
 func (pid *PID) RemoteReSpawn(ctx context.Context, host string, port int, name string) error {
-	if pid.remoting == nil {
+	if !pid.remotingEnabled() {
 		return gerrors.ErrRemotingDisabled
 	}
 
@@ -1393,6 +1397,10 @@ func (pid *PID) requestName(ctx context.Context, actorName string, message proto
 // Design decision: AsyncRequest uses Any to preserve the protobuf-only message
 // contract while keeping the async envelope stable across message types.
 func (pid *PID) buildAsyncRequest(message proto.Message, correlationID string) (*internalpb.AsyncRequest, error) {
+	if message == nil {
+		return nil, gerrors.ErrInvalidMessage
+	}
+
 	payload, err := anypb.New(message)
 	if err != nil {
 		return nil, err
@@ -2681,6 +2689,23 @@ func (pid *PID) healthCheck(ctx context.Context) error {
 
 	logger.Infof("%s readiness probe successfully completed.", pid.Name())
 	return nil
+}
+
+func (pid *PID) remotingEnabled() bool {
+	if pid.remoting == nil {
+		return false
+	}
+
+	system := pid.ActorSystem()
+	if system == nil {
+		return false
+	}
+
+	if sys, ok := system.(*actorSystem); ok {
+		return sys.remotingEnabled.Load()
+	}
+
+	return true
 }
 
 func (pid *PID) toWireActor() (*internalpb.Actor, error) {
