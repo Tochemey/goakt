@@ -868,6 +868,8 @@ func TestRelocationWithExtension(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, sender)
 
+	pause.For(time.Second)
+
 	// let us access some of the node2 actors from node 1
 	entityID := "node2-entity-1"
 	var response proto.Message
