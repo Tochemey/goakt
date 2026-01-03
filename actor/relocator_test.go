@@ -1504,6 +1504,8 @@ func TestRelocationWithConsulProvider(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, sender)
 
+	pause.For(time.Second)
+
 	// let us access some of the node2 actors from node 1 and  node 3
 	actorName := "Actor21"
 	err = sender.SendAsync(ctx, actorName, new(testpb.TestSend))
@@ -1578,6 +1580,8 @@ func TestRelocationWithEtcdProvider(t *testing.T) {
 	sender, err := node1.LocalActor("Actor11")
 	require.NoError(t, err)
 	require.NotNil(t, sender)
+
+	pause.For(time.Second)
 
 	// let us access some of the node2 actors from node 1 and  node 3
 	actorName := "Actor21"
