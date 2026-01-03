@@ -24,13 +24,18 @@ package actor
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/tochemey/goakt/v3/breaker"
+	gerrors "github.com/tochemey/goakt/v3/errors"
+	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
+	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
@@ -186,4 +191,328 @@ func TestGrainContext(t *testing.T) {
 		require.NoError(t, sd3.Close())
 		srv.Shutdown()
 	})
+}
+
+func TestGrainContextPipeToGrain(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		ctx := t.Context()
+		sys := startTestActorSystem(t, "pipe-grain-success")
+
+		target := newPipeTargetGrain()
+		identity, err := sys.GrainIdentity(ctx, "pipe-target-success", func(_ context.Context) (Grain, error) {
+			return target, nil
+		})
+		require.NoError(t, err)
+
+		gctx := &GrainContext{ctx: ctx, actorSystem: sys}
+		err = gctx.PipeToGrain(identity, func() (proto.Message, error) {
+			return &testpb.Reply{Content: "ok"}, nil
+		})
+		require.NoError(t, err)
+
+		select {
+		case msg := <-target.received:
+			reply, ok := msg.(*testpb.Reply)
+			require.True(t, ok)
+			require.Equal(t, "ok", reply.GetContent())
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for piped grain message")
+		}
+	})
+
+	t.Run("error", func(t *testing.T) {
+		ctx := t.Context()
+		sys := startTestActorSystem(t, "pipe-grain-error")
+
+		target := newPipeTargetGrain()
+		identity, err := sys.GrainIdentity(ctx, "pipe-target-error", func(_ context.Context) (Grain, error) {
+			return target, nil
+		})
+		require.NoError(t, err)
+
+		gctx := &GrainContext{ctx: ctx, actorSystem: sys}
+		err = gctx.PipeToGrain(identity, func() (proto.Message, error) {
+			return nil, errors.New("boom")
+		})
+		require.NoError(t, err)
+
+		select {
+		case failure := <-target.failures:
+			require.Contains(t, failure.GetError(), "boom")
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for piped grain failure")
+		}
+	})
+
+	t.Run("timeout", func(t *testing.T) {
+		ctx := t.Context()
+		sys := startTestActorSystem(t, "pipe-grain-timeout")
+
+		target := newPipeTargetGrain()
+		identity, err := sys.GrainIdentity(ctx, "pipe-target-timeout", func(_ context.Context) (Grain, error) {
+			return target, nil
+		})
+		require.NoError(t, err)
+
+		gctx := &GrainContext{ctx: ctx, actorSystem: sys}
+		err = gctx.PipeToGrain(identity, func() (proto.Message, error) {
+			time.Sleep(150 * time.Millisecond)
+			return &testpb.Reply{Content: "late"}, nil
+		}, WithTimeout(50*time.Millisecond))
+		require.NoError(t, err)
+
+		select {
+		case failure := <-target.failures:
+			require.Contains(t, failure.GetError(), context.DeadlineExceeded.Error())
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for piped grain timeout")
+		}
+	})
+
+	t.Run("circuit breaker", func(t *testing.T) {
+		ctx := t.Context()
+		sys := startTestActorSystem(t, "pipe-grain-breaker")
+
+		target := newPipeTargetGrain()
+		identity, err := sys.GrainIdentity(ctx, "pipe-target-breaker", func(_ context.Context) (Grain, error) {
+			return target, nil
+		})
+		require.NoError(t, err)
+
+		cb := breaker.NewCircuitBreaker(breaker.WithMinRequests(1))
+		gctx := &GrainContext{ctx: ctx, actorSystem: sys}
+		err = gctx.PipeToGrain(identity, func() (proto.Message, error) {
+			return &testpb.Reply{Content: "ok"}, nil
+		}, WithCircuitBreaker(cb))
+		require.NoError(t, err)
+
+		select {
+		case msg := <-target.received:
+			_, ok := msg.(*testpb.Reply)
+			require.True(t, ok)
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for piped grain message")
+		}
+	})
+}
+
+func TestGrainContextPipeToGrainInvalidInput(t *testing.T) {
+	gctx := &GrainContext{ctx: context.Background()}
+
+	t.Run("nil task", func(t *testing.T) {
+		err := gctx.PipeToGrain(nil, nil)
+		require.ErrorIs(t, err, gerrors.ErrUndefinedTask)
+	})
+
+	t.Run("nil identity", func(t *testing.T) {
+		err := gctx.PipeToGrain(nil, func() (proto.Message, error) {
+			return &testpb.Reply{Content: "ok"}, nil
+		})
+		require.ErrorIs(t, err, gerrors.ErrInvalidGrainIdentity)
+	})
+
+	t.Run("invalid identity", func(t *testing.T) {
+		invalid := &GrainIdentity{kind: "bad", name: ""}
+		err := gctx.PipeToGrain(invalid, func() (proto.Message, error) {
+			return &testpb.Reply{Content: "ok"}, nil
+		})
+		require.ErrorIs(t, err, gerrors.ErrInvalidGrainIdentity)
+	})
+}
+
+func TestGrainContextPipeToActor(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		ctx := t.Context()
+		sys := startTestActorSystem(t, "pipe-actor-success")
+
+		target := newPipeTargetActor()
+		_, err := sys.Spawn(ctx, "pipe-target-actor", target)
+		require.NoError(t, err)
+
+		gctx := &GrainContext{ctx: ctx, actorSystem: sys}
+		err = gctx.PipeToActor("pipe-target-actor", func() (proto.Message, error) {
+			return &testpb.Reply{Content: "ok"}, nil
+		})
+		require.NoError(t, err)
+
+		select {
+		case msg := <-target.received:
+			reply, ok := msg.(*testpb.Reply)
+			require.True(t, ok)
+			require.Equal(t, "ok", reply.GetContent())
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for piped actor message")
+		}
+	})
+
+	t.Run("nil task", func(t *testing.T) {
+		ctx := t.Context()
+		sys := startTestActorSystem(t, "pipe-actor-nil-task")
+
+		gctx := &GrainContext{ctx: ctx, actorSystem: sys}
+		err := gctx.PipeToActor("pipe-target-actor", nil)
+		require.ErrorIs(t, err, gerrors.ErrUndefinedTask)
+	})
+}
+
+func TestGrainContextPipeToSelf(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		ctx := t.Context()
+		sys := startTestActorSystem(t, "pipe-self-success")
+
+		target := newPipeTargetGrain()
+		identity, err := sys.GrainIdentity(ctx, "pipe-self-target", func(_ context.Context) (Grain, error) {
+			return target, nil
+		})
+		require.NoError(t, err)
+
+		gctx := &GrainContext{ctx: ctx, actorSystem: sys, self: identity}
+		err = gctx.PipeToSelf(func() (proto.Message, error) {
+			return &testpb.Reply{Content: "ok"}, nil
+		})
+		require.NoError(t, err)
+
+		select {
+		case msg := <-target.received:
+			reply, ok := msg.(*testpb.Reply)
+			require.True(t, ok)
+			require.Equal(t, "ok", reply.GetContent())
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for piped self message")
+		}
+	})
+
+	t.Run("nil self", func(t *testing.T) {
+		gctx := &GrainContext{ctx: context.Background()}
+		err := gctx.PipeToSelf(func() (proto.Message, error) {
+			return &testpb.Reply{Content: "ok"}, nil
+		})
+		require.ErrorIs(t, err, gerrors.ErrInvalidGrainIdentity)
+	})
+}
+
+func TestHandleGrainCompletionSendError(t *testing.T) {
+	t.Run("failure message send error", func(t *testing.T) {
+		sendErr := errors.New("send failure")
+		system := &stubGrainPipeSystem{err: sendErr}
+		completion := &grainTaskCompletion{
+			Target: &GrainIdentity{kind: "grain", name: "id"},
+			Task: func() (proto.Message, error) {
+				return nil, errors.New("boom")
+			},
+		}
+
+		err := handleGrainCompletion(context.Background(), system, nil, completion)
+		require.ErrorIs(t, err, sendErr)
+		require.IsType(t, &goaktpb.StatusFailure{}, system.lastMessage)
+	})
+
+	t.Run("success message send error", func(t *testing.T) {
+		sendErr := errors.New("send failure")
+		system := &stubGrainPipeSystem{err: sendErr}
+		completion := &grainTaskCompletion{
+			Target: &GrainIdentity{kind: "grain", name: "id"},
+			Task: func() (proto.Message, error) {
+				return &testpb.Reply{Content: "ok"}, nil
+			},
+		}
+
+		err := handleGrainCompletion(context.Background(), system, nil, completion)
+		require.ErrorIs(t, err, sendErr)
+		require.IsType(t, &testpb.Reply{}, system.lastMessage)
+	})
+}
+
+type pipeTargetGrain struct {
+	received chan proto.Message
+	failures chan *goaktpb.StatusFailure
+}
+
+func newPipeTargetGrain() *pipeTargetGrain {
+	return &pipeTargetGrain{
+		received: make(chan proto.Message, 1),
+		failures: make(chan *goaktpb.StatusFailure, 1),
+	}
+}
+
+func (p *pipeTargetGrain) OnActivate(context.Context, *GrainProps) error {
+	return nil
+}
+
+func (p *pipeTargetGrain) OnDeactivate(context.Context, *GrainProps) error {
+	return nil
+}
+
+func (p *pipeTargetGrain) OnReceive(ctx *GrainContext) {
+	switch msg := ctx.Message().(type) {
+	case *goaktpb.StatusFailure:
+		select {
+		case p.failures <- msg:
+		default:
+		}
+	default:
+		select {
+		case p.received <- msg:
+		default:
+		}
+	}
+	ctx.NoErr()
+}
+
+type pipeTargetActor struct {
+	received chan proto.Message
+}
+
+func newPipeTargetActor() *pipeTargetActor {
+	return &pipeTargetActor{
+		received: make(chan proto.Message, 1),
+	}
+}
+
+func (p *pipeTargetActor) PreStart(*Context) error {
+	return nil
+}
+
+func (p *pipeTargetActor) PostStop(*Context) error {
+	return nil
+}
+
+func (p *pipeTargetActor) Receive(ctx *ReceiveContext) {
+	switch msg := ctx.Message().(type) {
+	case *testpb.Reply:
+		select {
+		case p.received <- msg:
+		default:
+		}
+	}
+}
+
+type stubGrainPipeSystem struct {
+	err         error
+	lastMessage proto.Message
+}
+
+func (s *stubGrainPipeSystem) TellGrain(ctx context.Context, identity *GrainIdentity, message proto.Message) error {
+	s.lastMessage = message
+	return s.err
+}
+
+func (s *stubGrainPipeSystem) Logger() log.Logger {
+	return log.DiscardLogger
+}
+
+func startTestActorSystem(t *testing.T, name string) ActorSystem {
+	t.Helper()
+
+	sys, err := NewActorSystem(name, WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(t.Context()))
+
+	t.Cleanup(func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = sys.Stop(stopCtx)
+	})
+
+	return sys
 }

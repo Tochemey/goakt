@@ -143,6 +143,21 @@ func withPassivationStrategy(strategy passivation.Strategy) pidOption {
 	}
 }
 
+// withReentrancy sets the async request behavior for the actor.
+//
+// Design decision: enabling reentrancy also ensures a stash buffer so the
+// stash-based policy can defer messages without additional user setup.
+func withReentrancy(config *reentrancyConfig) pidOption {
+	return func(pid *PID) {
+		if config != nil {
+			pid.reentrancy = newReentrancyState(config.mode, config.maxInFlight)
+			if pid.stashState == nil {
+				pid.stashState = &stashState{box: NewUnboundedMailbox()}
+			}
+		}
+	}
+}
+
 func asSystemActor() pidOption {
 	return func(pid *PID) {
 		pid.setState(systemState, true)

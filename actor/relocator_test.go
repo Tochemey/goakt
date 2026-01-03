@@ -46,6 +46,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/log"
 	mockscluster "github.com/tochemey/goakt/v3/mocks/cluster"
+	mocksremote "github.com/tochemey/goakt/v3/mocks/remote"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/supervisor"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
@@ -212,6 +213,52 @@ func TestRelocatorSpawnRemoteActorInvalidAddress(t *testing.T) {
 	assert.ErrorContains(t, err, "address format is invalid")
 }
 
+func TestRelocatorSpawnRemoteActorSetsReentrancyConfig(t *testing.T) {
+	ctx := context.Background()
+
+	system, err := NewActorSystem("relocator-reentrancy", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	sys := system.(*actorSystem)
+	clusterMock := mockscluster.NewCluster(t)
+	clusterMock.EXPECT().ActorExists(mock.Anything, "relocated-actor").Return(false, nil).Once()
+	sys.cluster = clusterMock
+
+	remotingMock := mocksremote.NewRemoting(t)
+	remotingMock.EXPECT().RemoteSpawn(mock.Anything, "127.0.0.1", 9000, mock.Anything).
+		Run(func(_ context.Context, _ string, _ int, req *remote.SpawnRequest) {
+			require.NotNil(t, req.Reentrancy)
+			require.Equal(t, remote.ReentrancyStashNonReentrant, req.Reentrancy.Mode)
+			require.Equal(t, 5, req.Reentrancy.MaxInFlight)
+		}).
+		Return(nil).
+		Once()
+
+	actor := &relocator{
+		remoting: remotingMock,
+		pid: &PID{
+			actorSystem: system,
+		},
+		logger: log.DiscardLogger,
+	}
+
+	targetActor := &internalpb.Actor{
+		Address: address.New("relocated-actor", system.Name(), "127.0.0.1", 8080).String(),
+		Type:    "relocated-kind",
+		Reentrancy: &internalpb.ReentrancyConfig{
+			Mode:        internalpb.ReentrancyMode_REENTRANCY_MODE_STASH_NON_REENTRANT,
+			MaxInFlight: 5,
+		},
+	}
+	targetPeer := &cluster.Peer{
+		Host:         "127.0.0.1",
+		RemotingPort: 9000,
+	}
+
+	err = actor.spawnRemoteActor(ctx, targetActor, targetPeer)
+	require.NoError(t, err)
+}
+
 func TestRelocatorRelocateActorsInvalidAddress(t *testing.T) {
 	ctx := context.Background()
 
@@ -335,6 +382,12 @@ func TestRelocation(t *testing.T) {
 
 	pause.For(time.Second)
 
+	reentrantName := "Reentrant-Actor"
+	pid, err := node2.Spawn(ctx, reentrantName, NewMockActor(),
+		WithReentrancy(ReentrancyStashNonReentrant, WithMaxInFlight(3)))
+	require.NoError(t, err)
+	require.NotNil(t, pid)
+
 	for j := 1; j <= 4; j++ {
 		actorName := fmt.Sprintf("Actor3-%d", j)
 		pid, err := node3.Spawn(ctx, actorName, NewMockActor())
@@ -359,6 +412,17 @@ func TestRelocation(t *testing.T) {
 	actorName := "Actor2-1"
 	err = sender.SendAsync(ctx, actorName, new(testpb.TestSend))
 	require.NoError(t, err)
+
+	relocated, err := node1.LocalActor(reentrantName)
+	if err != nil {
+		require.ErrorIs(t, err, errors.ErrActorNotFound)
+		relocated, err = node3.LocalActor(reentrantName)
+		require.NoError(t, err)
+	}
+	require.NotNil(t, relocated)
+	require.NotNil(t, relocated.reentrancy)
+	require.Equal(t, ReentrancyStashNonReentrant, relocated.reentrancy.mode)
+	require.Equal(t, 3, relocated.reentrancy.maxInFlight)
 
 	assert.NoError(t, node1.Stop(ctx))
 	assert.NoError(t, node3.Stop(ctx))

@@ -1884,6 +1884,41 @@ func TestActorSystem(t *testing.T) {
 		_, err := system.RemoteSpawn(ctx, request)
 		require.NoError(t, err)
 	})
+	t.Run("RemoteSpawn applies reentrancy config", func(t *testing.T) {
+		ctx := context.Background()
+		host := "127.0.0.1"
+		remotingPort := dynaport.Get(1)[0]
+
+		sys, err := NewActorSystem("remote-spawn-reentrancy", WithLogger(log.DiscardLogger), WithRemote(remote.NewConfig(host, remotingPort)))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+		system := sys.(*actorSystem)
+		system.registry.Register(new(MockActor))
+		actorType := registry.Name(new(MockActor))
+
+		request := connect.NewRequest(&internalpb.RemoteSpawnRequest{
+			Host:      host,
+			Port:      int32(remotingPort),
+			ActorName: "reentrant-actor",
+			ActorType: actorType,
+			Reentrancy: &internalpb.ReentrancyConfig{
+				Mode:        internalpb.ReentrancyMode_REENTRANCY_MODE_ALLOW_ALL,
+				MaxInFlight: 4,
+			},
+			Relocatable: true,
+		})
+
+		_, err = system.RemoteSpawn(ctx, request)
+		require.NoError(t, err)
+
+		pid, err := system.LocalActor("reentrant-actor")
+		require.NoError(t, err)
+		require.NotNil(t, pid.reentrancy)
+		require.Equal(t, ReentrancyAllowAll, pid.reentrancy.mode)
+		require.Equal(t, 4, pid.reentrancy.maxInFlight)
+	})
 
 	t.Run("With CoordinatedShutdown with ShouldFail strategy", func(t *testing.T) {
 		ctx := context.TODO()

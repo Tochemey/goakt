@@ -791,21 +791,14 @@ func TestRouter(t *testing.T) {
 		err = Tell(ctx, router, &goaktpb.Broadcast{Message: message})
 		require.NoError(t, err)
 
-		pause.For(2 * time.Second)
-
-		response, err := Ask(ctx, router, new(goaktpb.GetRoutees), time.Second)
-		require.NoError(t, err)
-		require.NotNil(t, response)
-		routeesResponse, ok := response.(*goaktpb.Routees)
-		require.True(t, ok)
-		require.NotNil(t, routeesResponse)
-		require.Empty(t, routeesResponse.GetNames())
+		waitForRouteeCount(t, ctx, router, 0)
 
 		// this is just for tests purpose
 		workerOneName := routeeName(0, routerName)
-		workerOneRef, ok := system.findRoutee(workerOneName)
-		require.False(t, ok)
-		require.Nil(t, workerOneRef)
+		require.Eventually(t, func() bool {
+			workerOneRef, ok := system.findRoutee(workerOneName)
+			return !ok && workerOneRef == nil
+		}, 5*time.Second, 100*time.Millisecond, "expected routee to be removed")
 
 		assert.NoError(t, system.Stop(ctx))
 	})
@@ -841,15 +834,7 @@ func TestRouter(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		pause.For(time.Second)
-
-		response, err := Ask(ctx, router, new(goaktpb.GetRoutees), time.Second)
-		require.NoError(t, err)
-		require.NotNil(t, response)
-		routeesResponse, ok := response.(*goaktpb.Routees)
-		require.True(t, ok)
-		require.NotNil(t, routeesResponse)
-		require.Len(t, routeesResponse.GetNames(), 4)
+		waitForRouteeCount(t, ctx, router, 4)
 
 		// scale down the router by 2 (delta)
 		err = system.NoSender().Tell(ctx, router, &goaktpb.AdjustRouterPoolSize{
@@ -857,15 +842,7 @@ func TestRouter(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		pause.For(time.Second)
-
-		response, err = Ask(ctx, router, new(goaktpb.GetRoutees), time.Second)
-		require.NoError(t, err)
-		require.NotNil(t, response)
-		routeesResponse, ok = response.(*goaktpb.Routees)
-		require.True(t, ok)
-		require.NotNil(t, routeesResponse)
-		require.Len(t, routeesResponse.GetNames(), 2)
+		waitForRouteeCount(t, ctx, router, 2)
 
 		// scale down the router by 3 (delta)
 		err = system.NoSender().Tell(ctx, router, &goaktpb.AdjustRouterPoolSize{
@@ -873,16 +850,23 @@ func TestRouter(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		pause.For(time.Second)
-
-		response, err = Ask(ctx, router, new(goaktpb.GetRoutees), time.Second)
-		require.NoError(t, err)
-		require.NotNil(t, response)
-		routeesResponse, ok = response.(*goaktpb.Routees)
-		require.True(t, ok)
-		require.NotNil(t, routeesResponse)
-		require.Empty(t, routeesResponse.GetNames())
+		waitForRouteeCount(t, ctx, router, 0)
 
 		assert.NoError(t, system.Stop(ctx))
 	})
+}
+
+func waitForRouteeCount(t *testing.T, ctx context.Context, router *PID, expected int) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		response, err := Ask(ctx, router, new(goaktpb.GetRoutees), time.Second)
+		if err != nil || response == nil {
+			return false
+		}
+		routeesResponse, ok := response.(*goaktpb.Routees)
+		if !ok || routeesResponse == nil {
+			return false
+		}
+		return len(routeesResponse.GetNames()) == expected
+	}, 5*time.Second, 100*time.Millisecond, "expected %d routees", expected)
 }

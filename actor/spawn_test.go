@@ -48,6 +48,7 @@ import (
 	"github.com/tochemey/goakt/v3/log"
 	mockcluster "github.com/tochemey/goakt/v3/mocks/cluster"
 	mocks "github.com/tochemey/goakt/v3/mocks/discovery"
+	mocksremote "github.com/tochemey/goakt/v3/mocks/remote"
 	"github.com/tochemey/goakt/v3/passivation"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
@@ -819,6 +820,35 @@ func TestSpawn(t *testing.T) {
 		require.Error(t, err)
 		assert.ErrorIs(t, err, assert.AnError)
 		assert.ErrorContains(t, err, "failed to fetch cluster nodes")
+	})
+	t.Run("SpawnOn remote includes reentrancy config", func(t *testing.T) {
+		ctx := context.TODO()
+		clusterMock := mockcluster.NewCluster(t)
+		remotingMock := mocksremote.NewRemoting(t)
+
+		system := MockReplicationTestSystem(clusterMock)
+		system.remoting = remotingMock
+
+		actor := NewMockActor()
+		actorName := "actorID"
+		peer := &cluster.Peer{Host: "127.0.0.1", RemotingPort: 9000}
+
+		clusterMock.EXPECT().ActorExists(mock.Anything, actorName).Return(false, nil).Once()
+		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{peer}, nil).Once()
+		remotingMock.EXPECT().RemoteSpawn(mock.Anything, peer.Host, peer.RemotingPort, mock.Anything).
+			Run(func(_ context.Context, _ string, _ int, request *remote.SpawnRequest) {
+				require.NotNil(t, request.Reentrancy)
+				require.Equal(t, remote.ReentrancyAllowAll, request.Reentrancy.Mode)
+				require.Equal(t, 7, request.Reentrancy.MaxInFlight)
+			}).
+			Return(nil).
+			Once()
+
+		err := system.SpawnOn(ctx, actorName, actor,
+			WithPlacement(Random),
+			WithReentrancy(ReentrancyAllowAll, WithMaxInFlight(7)),
+		)
+		require.NoError(t, err)
 	})
 	t.Run("SpawnOn when cluster has no members spawns locally", func(t *testing.T) {
 		ctx := context.TODO()

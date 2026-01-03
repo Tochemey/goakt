@@ -40,8 +40,8 @@ import (
 //   - Message metadata (Message, Sender, RemoteSender, SenderAddress, ReceiverAddress)
 //   - Actor lifecycle and behavior management (Become, BecomeStacked, UnBecome, UnBecomeStacked,
 //     Stash, Unstash, UnstashAll, Stop, Shutdown, Watch, UnWatch, Reinstate, ReinstateNamed)
-//   - Messaging operations (Tell, Ask, BatchTell, BatchAsk, SendAsync, SendSync, Forward, ForwardTo,
-//     RemoteTell/Ask/BatchTell/BatchAsk/Forward, RemoteLookup)
+//   - Messaging operations (Tell, Ask, Request/RequestName, BatchTell, BatchAsk, SendAsync, SendSync,
+//     Forward, ForwardTo, RemoteTell/Ask/BatchTell/BatchAsk/Forward, RemoteLookup)
 //   - Utilities (Context, Logger, Err, Response for Ask, PipeTo/PipeToName, ActorSystem access,
 //     Extension/Extensions)
 //
@@ -80,13 +80,15 @@ import (
 //	    }
 //	}
 type ReceiveContext struct {
-	ctx          context.Context
-	message      proto.Message
-	sender       *PID
-	remoteSender *address.Address
-	response     chan proto.Message
-	self         *PID
-	err          error
+	ctx            context.Context
+	message        proto.Message
+	sender         *PID
+	remoteSender   *address.Address
+	response       chan proto.Message
+	requestID      string
+	requestReplyTo string
+	self           *PID
+	err            error
 }
 
 // Self returns the PID of the currently executing actor.
@@ -114,16 +116,25 @@ func (rctx *ReceiveContext) Err(err error) {
 	rctx.err = err
 }
 
-// Response publishes a reply when handling a message initiated with Ask.
+// Response publishes a reply to the sender of the current message.
 //
-// This is the counterpart to Ask when the current message expects a response.
-// If there is no pending Ask (no response channel), the call is a no-op.
-// The method is non-blocking for the caller; the framework delivers the response.
+// Design decision:
+//   - If the message was initiated via Ask, Response completes that request.
+//   - If the message was initiated via Request/RequestName, Response sends an async
+//     reply to the stored correlation ID and reply address.
+//   - If neither applies, Response is a no-op.
 //
 // Use Respond/Response exactly once per Ask-initiated message. Multiple calls may
 // be ignored or override each other depending on the underlying channel semantics.
 func (rctx *ReceiveContext) Response(resp proto.Message) {
 	if rctx.response == nil {
+		if rctx.requestID == "" {
+			return
+		}
+
+		if err := rctx.self.sendAsyncResponse(rctx.withoutCancel(), rctx.requestReplyTo, rctx.requestID, resp, nil); err != nil {
+			rctx.Err(err)
+		}
 		return
 	}
 	rctx.response <- resp
@@ -164,6 +175,15 @@ func (rctx *ReceiveContext) RemoteSender() *address.Address {
 // on the message type to implement your actor behavior.
 func (rctx *ReceiveContext) Message() proto.Message {
 	return rctx.message
+}
+
+// CorrelationID returns the async correlation ID when handling a Request/RequestName message.
+//
+// Design decision: correlation IDs are internal to the async envelope and exposed
+// for tracing/debugging without changing the user message contract.
+// For non-async messages this returns an empty string.
+func (rctx *ReceiveContext) CorrelationID() string {
+	return rctx.requestID
 }
 
 // BecomeStacked pushes a new behavior on top of the current one.
@@ -279,6 +299,71 @@ func (rctx *ReceiveContext) Ask(to *PID, message proto.Message, timeout time.Dur
 		rctx.Err(err)
 	}
 	return reply
+}
+
+// Request sends a message to another actor and returns a RequestCall.
+//
+// Request is the non-blocking counterpart of Ask. Use it when the current actor must
+// remain responsive (e.g., fan-out, long I/O via PipeTo, or avoiding call cycles like
+// A -> B -> A). Unlike Ask/SendSync, this method does not wait for a reply.
+//
+// Reply delivery and continuations:
+//   - The reply is delivered back through this actor’s mailbox (single-threaded), so
+//     any continuation registered on the returned handle executes within the actor
+//     processing model.
+//   - Use the returned RequestCall to register a continuation (e.g., Then) and/or
+//     cancel the request.
+//
+// Reentrancy requirement:
+//   - The actor must be spawned with WithReentrancy enabled; otherwise the request may
+//     be rejected and Err will be set.
+//
+// Timeouts and options:
+//   - Per-call behavior (timeout, mode/policy) can be customized via RequestOption.
+//     Defaults may be configured at actor/system level.
+//
+// On failure to initiate the request, Err is set and the returned call is nil.
+func (rctx *ReceiveContext) Request(to *PID, message proto.Message, opts ...RequestOption) RequestCall {
+	self := rctx.self
+	ctx := rctx.withoutCancel()
+	call, err := self.request(ctx, to, message, opts...)
+	if err != nil {
+		rctx.Err(err)
+		return nil
+	}
+	return call
+}
+
+// RequestName sends a message to an actor identified by name and returns a RequestCall.
+//
+// This is the non-blocking, location-transparent counterpart of SendSync: the target may be
+// local or remote depending on the actor system configuration (e.g., cluster/remoting).
+// Name resolution happens once at call time (local registry and/or cluster lookup, if enabled).
+//
+// Reply delivery and continuations:
+//   - Replies are delivered back to the caller through this actor’s mailbox, preserving the
+//     single-threaded actor processing model.
+//   - Use the returned RequestCall to register continuations (e.g., Then) and/or cancel
+//     the request.
+//
+// Reentrancy requirement:
+//   - The actor must be spawned with reentrancy enabled; otherwise the request may be rejected
+//     and Err will be set.
+//
+// Options:
+//   - Per-call behavior (timeout, mode/policy, etc.) can be customized via RequestOption.
+//     Defaults may be configured at actor/system level.
+//
+// On failure to initiate the request, Err is set and the returned call is nil.
+func (rctx *ReceiveContext) RequestName(actorName string, message proto.Message, opts ...RequestOption) RequestCall {
+	self := rctx.self
+	ctx := rctx.withoutCancel()
+	call, err := self.requestName(ctx, actorName, message, opts...)
+	if err != nil {
+		rctx.Err(err)
+		return nil
+	}
+	return call
 }
 
 // SendAsync sends an asynchronous message to a named actor.
@@ -698,6 +783,8 @@ func (rctx *ReceiveContext) reset() {
 	rctx.err = nil
 	rctx.ctx = nil
 	rctx.response = nil
+	rctx.requestID = ""
+	rctx.requestReplyTo = ""
 }
 
 // withoutCancel safely derives a non-cancelable context from the current context.
@@ -721,5 +808,15 @@ func (rctx *ReceiveContext) withoutCancel() context.Context {
 // This is used by the runtime to attach remote sender information during dispatch.
 func (rctx *ReceiveContext) withRemoteSender(remoteSender *address.Address) *ReceiveContext {
 	rctx.remoteSender = remoteSender
+	return rctx
+}
+
+// withRequestMeta sets async request metadata for internal dispatch.
+//
+// Design decision: metadata stays off the user message type to keep protobuf
+// payloads stable and backward compatible.
+func (rctx *ReceiveContext) withRequestMeta(correlationID, replyTo string) *ReceiveContext {
+	rctx.requestID = correlationID
+	rctx.requestReplyTo = replyTo
 	return rctx
 }

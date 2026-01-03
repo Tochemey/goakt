@@ -52,6 +52,14 @@ var (
 
 	// ErrRequestTimeout indicates that an Ask message timed out while waiting for a response.
 	ErrRequestTimeout = errors.New("request timed out")
+	// ErrRequestCanceled indicates that an async request was canceled before completion.
+	ErrRequestCanceled = errors.New("request canceled")
+	// ErrReentrancyDisabled indicates async requests are disabled for the actor.
+	ErrReentrancyDisabled = errors.New("reentrancy is disabled")
+	// ErrInvalidReentrancyMode indicates a reentrancy mode is not supported.
+	ErrInvalidReentrancyMode = errors.New("invalid reentrancy mode")
+	// ErrReentrancyInFlightLimit indicates an actor has reached its async in-flight limit.
+	ErrReentrancyInFlightLimit = errors.New("reentrancy in-flight limit reached")
 
 	// ErrRemotingDisabled is returned when remote messaging is attempted but remoting is not enabled.
 	ErrRemotingDisabled = errors.New("remoting is not enabled")

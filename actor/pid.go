@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/flowchartsman/retry"
+	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/attribute"
 	otelmetric "go.opentelemetry.io/otel/metric"
 	"go.uber.org/atomic"
@@ -125,6 +126,8 @@ type PID struct {
 
 	// stash settings
 	stashState *stashState
+	// reentrancy settings
+	reentrancy *reentrancyState
 
 	// define an events stream
 	eventsStream eventstream.Stream
@@ -772,6 +775,10 @@ func (pid *PID) ReinstateNamed(ctx context.Context, actorName string) error {
 		return nil
 	}
 
+	if !pid.remotingEnabled() {
+		return gerrors.ErrRemotingDisabled
+	}
+
 	return pid.remoting.RemoteReinstate(ctx, addr.Host(), addr.Port(), actorName)
 }
 
@@ -1058,7 +1065,7 @@ func (pid *PID) BatchAsk(ctx context.Context, to *PID, messages []proto.Message,
 
 // RemoteLookup look for an actor address on a remote node.
 func (pid *PID) RemoteLookup(ctx context.Context, host string, port int, name string) (addr *address.Address, err error) {
-	if pid.remoting == nil {
+	if !pid.remotingEnabled() {
 		return nil, gerrors.ErrRemotingDisabled
 	}
 
@@ -1067,7 +1074,7 @@ func (pid *PID) RemoteLookup(ctx context.Context, host string, port int, name st
 
 // RemoteTell sends a message to an actor remotely without expecting any reply
 func (pid *PID) RemoteTell(ctx context.Context, to *address.Address, message proto.Message) error {
-	if pid.remoting == nil {
+	if !pid.remotingEnabled() {
 		return gerrors.ErrRemotingDisabled
 	}
 
@@ -1076,7 +1083,7 @@ func (pid *PID) RemoteTell(ctx context.Context, to *address.Address, message pro
 
 // RemoteAsk sends a synchronous message to another actor remotely and expect a response.
 func (pid *PID) RemoteAsk(ctx context.Context, to *address.Address, message proto.Message, timeout time.Duration) (response *anypb.Any, err error) {
-	if pid.remoting == nil {
+	if !pid.remotingEnabled() {
 		return nil, gerrors.ErrRemotingDisabled
 	}
 
@@ -1090,7 +1097,7 @@ func (pid *PID) RemoteAsk(ctx context.Context, to *address.Address, message prot
 // RemoteBatchTell sends a batch of messages to a remote actor in a way fire-and-forget manner
 // Messages are processed one after the other in the order they are sent.
 func (pid *PID) RemoteBatchTell(ctx context.Context, to *address.Address, messages []proto.Message) error {
-	if pid.remoting == nil {
+	if !pid.remotingEnabled() {
 		return gerrors.ErrRemotingDisabled
 	}
 
@@ -1101,7 +1108,7 @@ func (pid *PID) RemoteBatchTell(ctx context.Context, to *address.Address, messag
 // Messages are processed one after the other in the order they are sent.
 // This can hinder performance if it is not properly used.
 func (pid *PID) RemoteBatchAsk(ctx context.Context, to *address.Address, messages []proto.Message, timeout time.Duration) (responses []*anypb.Any, err error) {
-	if pid.remoting == nil {
+	if !pid.remotingEnabled() {
 		return nil, gerrors.ErrRemotingDisabled
 	}
 
@@ -1110,7 +1117,7 @@ func (pid *PID) RemoteBatchAsk(ctx context.Context, to *address.Address, message
 
 // RemoteStop stops an actor on a remote node
 func (pid *PID) RemoteStop(ctx context.Context, host string, port int, name string) error {
-	if pid.remoting == nil {
+	if !pid.remotingEnabled() {
 		return gerrors.ErrRemotingDisabled
 	}
 
@@ -1119,7 +1126,7 @@ func (pid *PID) RemoteStop(ctx context.Context, host string, port int, name stri
 
 // RemoteSpawn creates an actor on a remote node. The given actor needs to be registered on the remote node using the Register method of ActorSystem
 func (pid *PID) RemoteSpawn(ctx context.Context, host string, port int, actorName, actorType string, opts ...SpawnOption) error {
-	if pid.remoting == nil {
+	if !pid.remotingEnabled() {
 		return gerrors.ErrRemotingDisabled
 	}
 
@@ -1156,7 +1163,7 @@ func (pid *PID) RemoteSpawn(ctx context.Context, host string, port int, actorNam
 
 // RemoteReSpawn restarts an actor on a remote node.
 func (pid *PID) RemoteReSpawn(ctx context.Context, host string, port int, name string) error {
-	if pid.remoting == nil {
+	if !pid.remotingEnabled() {
 		return gerrors.ErrRemotingDisabled
 	}
 
@@ -1260,6 +1267,152 @@ func (pid *PID) LatestActivityTime() time.Time {
 	return pid.latestReceiveTime.Load()
 }
 
+// request sends an asynchronous request to another PID and returns a RequestCall.
+//
+// Design decision: async requests are opt-in per actor to preserve legacy semantics.
+// The caller must have reentrancy enabled; otherwise ErrReentrancyDisabled is returned.
+func (pid *PID) request(ctx context.Context, to *PID, message proto.Message, opts ...RequestOption) (RequestCall, error) {
+	if !pid.IsRunning() {
+		return nil, gerrors.ErrDead
+	}
+
+	if to == nil || !to.IsRunning() {
+		return nil, gerrors.ErrDead
+	}
+
+	if message == nil {
+		return nil, gerrors.ErrInvalidMessage
+	}
+
+	if pid.reentrancy == nil {
+		return nil, gerrors.ErrReentrancyDisabled
+	}
+
+	config := newRequestConfig(opts...)
+	mode := pid.reentrancy.mode
+	if config.modeSet {
+		mode = config.mode
+	}
+
+	if mode == ReentrancyOff {
+		return nil, gerrors.ErrReentrancyDisabled
+	}
+
+	if !isValidReentrancyMode(mode) {
+		return nil, gerrors.ErrInvalidReentrancyMode
+	}
+
+	correlationID := uuid.NewString()
+	state := newRequestState(correlationID, mode, pid)
+	if err := pid.registerRequestState(state); err != nil {
+		return nil, err
+	}
+
+	if config.timeout != nil {
+		state.startTimeout(*config.timeout)
+	}
+
+	req, err := pid.buildAsyncRequest(message, correlationID)
+	if err != nil {
+		pid.deregisterRequestState(state)
+		return nil, err
+	}
+
+	if err := pid.Tell(ctx, to, req); err != nil {
+		pid.deregisterRequestState(state)
+		return nil, err
+	}
+
+	return &requestHandle{state: state}, nil
+}
+
+// requestName sends an asynchronous request to a named actor.
+//
+// Design decision: name resolution is performed once to avoid an extra lookup and
+// to keep control of the async envelope before sending. The caller must have
+// reentrancy enabled; otherwise ErrReentrancyDisabled is returned.
+func (pid *PID) requestName(ctx context.Context, actorName string, message proto.Message, opts ...RequestOption) (RequestCall, error) {
+	if !pid.IsRunning() {
+		return nil, gerrors.ErrDead
+	}
+
+	if message == nil {
+		return nil, gerrors.ErrInvalidMessage
+	}
+
+	if pid.reentrancy == nil {
+		return nil, gerrors.ErrReentrancyDisabled
+	}
+
+	config := newRequestConfig(opts...)
+	mode := pid.reentrancy.mode
+	if config.modeSet {
+		mode = config.mode
+	}
+
+	if mode == ReentrancyOff {
+		return nil, gerrors.ErrReentrancyDisabled
+	}
+
+	if !isValidReentrancyMode(mode) {
+		return nil, gerrors.ErrInvalidReentrancyMode
+	}
+
+	addr, cid, err := pid.ActorSystem().ActorOf(ctx, actorName)
+	if err != nil {
+		return nil, err
+	}
+
+	correlationID := uuid.NewString()
+	state := newRequestState(correlationID, mode, pid)
+	if err := pid.registerRequestState(state); err != nil {
+		return nil, err
+	}
+
+	if config.timeout != nil {
+		state.startTimeout(*config.timeout)
+	}
+
+	req, err := pid.buildAsyncRequest(message, correlationID)
+	if err != nil {
+		pid.deregisterRequestState(state)
+		return nil, err
+	}
+
+	if cid != nil {
+		if err := pid.Tell(ctx, cid, req); err != nil {
+			pid.deregisterRequestState(state)
+			return nil, err
+		}
+	} else if err := pid.RemoteTell(ctx, addr, req); err != nil {
+		pid.deregisterRequestState(state)
+		return nil, err
+	}
+
+	return &requestHandle{state: state}, nil
+}
+
+// buildAsyncRequest wraps the payload with correlation and reply metadata.
+//
+// Design decision: AsyncRequest uses Any to preserve the protobuf-only message
+// contract while keeping the async envelope stable across message types.
+func (pid *PID) buildAsyncRequest(message proto.Message, correlationID string) (*internalpb.AsyncRequest, error) {
+	if message == nil {
+		return nil, gerrors.ErrInvalidMessage
+	}
+
+	payload, err := anypb.New(message)
+	if err != nil {
+		return nil, err
+	}
+
+	return &internalpb.AsyncRequest{
+		CorrelationId: correlationID,
+		ReplyTo:       pid.Address().String(),
+		Message:       payload,
+	}, nil
+}
+
 // doReceive pushes a given message to the actor mailbox
 // and signals the receiveLoop to process it
 func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
@@ -1287,6 +1440,14 @@ func (pid *PID) process() {
 			}
 
 			if received = pid.mailbox.Dequeue(); received != nil {
+				if pid.enableReentrancyStash(received) {
+					if err := pid.stash(received); err != nil {
+						pid.logger.Warn(err)
+						pid.handleReceivedError(received, err)
+					}
+					received = nil
+					continue
+				}
 				// Process the message
 				switch msg := received.Message().(type) {
 				case *goaktpb.PoisonPill:
@@ -1299,6 +1460,10 @@ func (pid *PID) process() {
 					pid.pausePassivation()
 				case *goaktpb.ResumePassivation:
 					pid.resumePassivation()
+				case *internalpb.AsyncRequest:
+					pid.handleAsyncRequest(received, msg)
+				case *internalpb.AsyncResponse:
+					pid.handleAsyncResponse(received, msg)
 				default:
 					pid.handleReceived(received)
 				}
@@ -1330,6 +1495,305 @@ func (pid *PID) handleReceived(received *ReceiveContext) {
 		pid.recordProcessedMessage()
 		behavior(received)
 	}
+}
+
+// enableReentrancyStash decides whether to stash the current message due to
+// reentrancy blocking.
+//
+// Design decision: async responses and critical system/control messages bypass
+// stashing to avoid deadlocks and preserve liveness.
+func (pid *PID) enableReentrancyStash(received *ReceiveContext) bool {
+	if pid.reentrancy == nil || pid.reentrancy.blockingCount.Load() <= 0 {
+		return false
+	}
+
+	switch received.Message().(type) {
+	case *internalpb.AsyncResponse,
+		*goaktpb.PoisonPill,
+		*internalpb.HealthCheckRequest,
+		*internalpb.Panicking,
+		*goaktpb.PausePassivation,
+		*goaktpb.ResumePassivation:
+		return false
+	default:
+		return true
+	}
+}
+
+// handleAsyncRequest unwraps an AsyncRequest and dispatches the inner message.
+//
+// Design decision: async metadata is carried on ReceiveContext to enable Response
+// to send AsyncResponse without changing the user-facing API.
+func (pid *PID) handleAsyncRequest(received *ReceiveContext, req *internalpb.AsyncRequest) {
+	if received == nil || req == nil {
+		pid.handleReceivedError(received, gerrors.ErrInvalidMessage)
+		return
+	}
+
+	if req.GetCorrelationId() == "" || req.GetReplyTo() == "" || req.GetMessage() == nil {
+		pid.handleReceivedError(received, gerrors.ErrInvalidMessage)
+		return
+	}
+
+	msg, err := req.GetMessage().UnmarshalNew()
+	if err != nil {
+		pid.handleReceivedError(received, fmt.Errorf("invalid async request: %w", err))
+		return
+	}
+
+	received.message = msg
+	received.response = nil
+	received.withRequestMeta(req.GetCorrelationId(), req.GetReplyTo())
+	pid.handleReceived(received)
+}
+
+// handleAsyncResponse resolves an AsyncResponse and completes the tracked call.
+//
+// Design decision: errors are encoded as strings on the wire to keep the response
+// envelope stable and avoid cross-version type coupling.
+func (pid *PID) handleAsyncResponse(received *ReceiveContext, resp *internalpb.AsyncResponse) {
+	if resp == nil {
+		pid.handleReceivedError(received, gerrors.ErrInvalidMessage)
+		return
+	}
+
+	correlationID := strings.TrimSpace(resp.GetCorrelationId())
+	if correlationID == "" {
+		pid.handleReceivedError(received, gerrors.ErrInvalidMessage)
+		return
+	}
+
+	if resp.GetError() != "" {
+		if !pid.completeRequest(correlationID, nil, asyncErrorFromString(resp.GetError())) {
+			pid.logger.Warnf("async response dropped: unknown correlation id=%s", correlationID)
+		}
+		return
+	}
+
+	if resp.GetMessage() == nil {
+		if !pid.completeRequest(correlationID, nil, gerrors.ErrInvalidMessage) {
+			pid.logger.Warnf("async response dropped: unknown correlation id=%s", correlationID)
+		}
+		return
+	}
+
+	message, err := resp.GetMessage().UnmarshalNew()
+	if err != nil {
+		if !pid.completeRequest(correlationID, nil, fmt.Errorf("invalid async response: %w", err)) {
+			pid.logger.Warnf("async response dropped: unknown correlation id=%s", correlationID)
+		}
+		return
+	}
+
+	if !pid.completeRequest(correlationID, message, nil) {
+		pid.logger.Warnf("async response dropped: unknown correlation id=%s", correlationID)
+	}
+}
+
+// asyncErrorFromString maps well-known async error strings back to typed errors.
+//
+// Design decision: preserve known error identities when possible while tolerating
+// opaque error strings from other nodes or versions.
+func asyncErrorFromString(err string) error {
+	switch err {
+	case gerrors.ErrRequestTimeout.Error():
+		return gerrors.ErrRequestTimeout
+	case gerrors.ErrRequestCanceled.Error():
+		return gerrors.ErrRequestCanceled
+	default:
+		return errors.New(err)
+	}
+}
+
+// registerRequestState tracks an in-flight async request and enforces limits.
+//
+// Design decision: blockingCount reflects stash-mode requests so stashing can
+// release only when the last blocking call completes.
+func (pid *PID) registerRequestState(state *requestState) error {
+	if pid.reentrancy == nil {
+		return gerrors.ErrReentrancyDisabled
+	}
+
+	if state == nil {
+		return gerrors.ErrInvalidMessage
+	}
+
+	if pid.reentrancy.maxInFlight > 0 {
+		maxInFlight := int64(pid.reentrancy.maxInFlight)
+		for {
+			current := pid.reentrancy.inFlightCount.Load()
+			if current >= maxInFlight {
+				return gerrors.ErrReentrancyInFlightLimit
+			}
+
+			if pid.reentrancy.inFlightCount.CompareAndSwap(current, current+1) {
+				break
+			}
+		}
+	} else {
+		pid.reentrancy.inFlightCount.Inc()
+	}
+
+	if state.mode == ReentrancyStashNonReentrant {
+		pid.reentrancy.blockingCount.Inc()
+	}
+
+	pid.reentrancy.requestStates.Set(state.id, state)
+	return nil
+}
+
+// deregisterRequestState removes an in-flight async request and releases stashed messages.
+//
+// Design decision: when the last blocking request completes, unstash all messages
+// to preserve original mailbox order.
+func (pid *PID) deregisterRequestState(state *requestState) {
+	if pid.reentrancy == nil || state == nil {
+		return
+	}
+
+	if _, ok := pid.reentrancy.requestStates.Get(state.id); !ok {
+		return
+	}
+
+	pid.reentrancy.requestStates.Delete(state.id)
+	pid.reentrancy.inFlightCount.Dec()
+	if state.mode == ReentrancyStashNonReentrant {
+		remaining := pid.reentrancy.blockingCount.Dec()
+		if remaining == 0 {
+			if err := pid.unstashAll(); err != nil {
+				pid.logger.Warn(err)
+			}
+		}
+	}
+
+	state.stopTimeoutIfSet()
+}
+
+// completeRequest marks an async request as completed and runs its callback.
+//
+// Design decision: completion is idempotent; only the first result wins.
+func (pid *PID) completeRequest(correlationID string, result proto.Message, err error) bool {
+	if pid.reentrancy == nil {
+		return false
+	}
+
+	state, ok := pid.reentrancy.requestStates.Get(correlationID)
+	if !ok {
+		return false
+	}
+
+	callback, completed := state.complete(result, err)
+	if !completed {
+		return true
+	}
+
+	pid.deregisterRequestState(state)
+	if callback != nil {
+		callback(result, err)
+	}
+
+	return true
+}
+
+// enqueueAsyncError injects an AsyncResponse error into the actor's mailbox.
+//
+// Design decision: errors are funneled through the mailbox to keep callbacks on
+// the actor's processing thread.
+func (pid *PID) enqueueAsyncError(ctx context.Context, correlationID string, err error) error {
+	if correlationID == "" {
+		return gerrors.ErrInvalidMessage
+	}
+	if err == nil {
+		return nil
+	}
+
+	response := &internalpb.AsyncResponse{
+		CorrelationId: correlationID,
+		Error:         err.Error(),
+	}
+
+	receiveContext := getContext()
+	receiveContext.build(ctx, pid, pid, response, true)
+	pid.doReceive(receiveContext)
+	return nil
+}
+
+// sendAsyncResponse delivers an AsyncResponse to the original requester.
+//
+// Design decision: reply routing uses the string address embedded in AsyncRequest
+// to support local and remote responders with the same flow.
+func (pid *PID) sendAsyncResponse(ctx context.Context, replyTo, correlationID string, message proto.Message, err error) error {
+	if correlationID == "" || replyTo == "" {
+		return gerrors.ErrInvalidMessage
+	}
+
+	response := &internalpb.AsyncResponse{
+		CorrelationId: correlationID,
+	}
+
+	if err != nil {
+		response.Error = err.Error()
+	} else {
+		if message == nil {
+			return gerrors.ErrInvalidMessage
+		}
+		payload, err := anypb.New(message)
+		if err != nil {
+			return err
+		}
+		response.Message = payload
+	}
+
+	addr, err := address.Parse(replyTo)
+	if err != nil {
+		return err
+	}
+
+	system := pid.ActorSystem()
+	if system == nil {
+		return gerrors.ErrActorSystemNotStarted
+	}
+
+	isLocal := addr.System() == system.Name() && addr.Host() == system.Host() && addr.Port() == system.Port()
+	if isLocal {
+		target, err := system.LocalActor(addr.Name())
+		if err != nil {
+			return err
+		}
+		return pid.Tell(ctx, target, response)
+	}
+
+	return pid.RemoteTell(ctx, addr, response)
+}
+
+// cancelInFlightRequests completes all in-flight async calls with the given reason.
+//
+// Design decision: cancellations are local-only to keep shutdown fast and avoid
+// cross-node coordination.
+func (pid *PID) cancelInFlightRequests(reason error) {
+	if pid.reentrancy == nil {
+		return
+	}
+
+	keys := pid.reentrancy.requestStates.Keys()
+	for _, key := range keys {
+		state, ok := pid.reentrancy.requestStates.Get(key)
+		if !ok || state == nil {
+			continue
+		}
+		if _, completed := state.complete(nil, reason); !completed {
+			continue
+		}
+		pid.reentrancy.requestStates.Delete(key)
+		pid.reentrancy.inFlightCount.Dec()
+		if state.mode == ReentrancyStashNonReentrant {
+			pid.reentrancy.blockingCount.Dec()
+		}
+		state.stopTimeoutIfSet()
+	}
+
+	pid.reentrancy.inFlightCount.Store(0)
+	pid.reentrancy.blockingCount.Store(0)
 }
 
 // markActivity updates the last receive timestamp and notifies the shared passivation manager.
@@ -1462,6 +1926,9 @@ func (pid *PID) reset() {
 	pid.setState(passivationPausedState, false)
 	pid.setState(passivatingState, false)
 	pid.setState(passivationSkipNextState, false)
+	if pid.reentrancy != nil {
+		pid.reentrancy.reset()
+	}
 }
 
 // freeWatchers releases all the actors watching this actor
@@ -1656,6 +2123,8 @@ func (pid *PID) unsetBehaviorStacked() {
 
 // doStop stops the actor
 func (pid *PID) doStop(ctx context.Context) error {
+	pid.cancelInFlightRequests(gerrors.ErrRequestCanceled)
+
 	defer func() {
 		pid.setState(runningState, false)
 		pid.reset()
@@ -2222,6 +2691,23 @@ func (pid *PID) healthCheck(ctx context.Context) error {
 	return nil
 }
 
+func (pid *PID) remotingEnabled() bool {
+	if pid.remoting == nil {
+		return false
+	}
+
+	system := pid.ActorSystem()
+	if system == nil {
+		return false
+	}
+
+	if sys, ok := system.(*actorSystem); ok {
+		return sys.remotingEnabled.Load()
+	}
+
+	return true
+}
+
 func (pid *PID) toWireActor() (*internalpb.Actor, error) {
 	dependencies, err := codec.EncodeDependencies(pid.Dependencies()...)
 	if err != nil {
@@ -2242,6 +2728,14 @@ func (pid *PID) toWireActor() (*internalpb.Actor, error) {
 		}
 	}
 
+	var reentrancy *internalpb.ReentrancyConfig
+	if pid.reentrancy != nil {
+		reentrancy = (&reentrancyConfig{
+			mode:        pid.reentrancy.mode,
+			maxInFlight: pid.reentrancy.maxInFlight,
+		}).toProto()
+	}
+
 	return &internalpb.Actor{
 		Address:             pid.ID(),
 		Type:                registry.Name(pid.Actor()),
@@ -2252,6 +2746,7 @@ func (pid *PID) toWireActor() (*internalpb.Actor, error) {
 		EnableStash:         pid.stashState != nil && pid.stashState.box != nil,
 		Role:                pid.Role(),
 		Supervisor:          supervisorSpec,
+		Reentrancy:          reentrancy,
 	}, nil
 }
 
@@ -2337,6 +2832,7 @@ func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *t
 	}
 
 	pid := node.pid
+	pid.cancelInFlightRequests(gerrors.ErrRequestCanceled)
 	_, wasInTree := tree.node(pid.ID())
 	didShutdown := false
 	if pid.IsRunning() {

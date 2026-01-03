@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+package internalpb;
+
+import "google/protobuf/any.proto";
+
+option go_package = "github.com/tochemey/goakt/v3/internal/internalpb;internalpb";
+
+// ReentrancyMode defines how an actor processes other messages while awaiting
+// an async request response.
+enum ReentrancyMode {
+  // REENTRANCY_MODE_OFF disables async request processing.
+  REENTRANCY_MODE_OFF = 0;
+  // REENTRANCY_MODE_ALLOW_ALL allows the actor to continue processing all messages.
+  REENTRANCY_MODE_ALLOW_ALL = 1;
+  // REENTRANCY_MODE_STASH_NON_REENTRANT stashes user messages until the response arrives.
+  REENTRANCY_MODE_STASH_NON_REENTRANT = 2;
+}
+
+// ReentrancyConfig captures the reentrancy settings for an actor.
+message ReentrancyConfig {
+  // mode defines the reentrancy behavior.
+  ReentrancyMode mode = 1;
+  // max_in_flight limits outstanding async requests. Zero means unlimited.
+  uint32 max_in_flight = 2;
+}
+
+// AsyncRequest wraps a user message with correlation and reply metadata.
+message AsyncRequest {
+  // correlation_id links requests to responses.
+  string correlation_id = 1;
+  // reply_to is the address of the actor that should receive the response.
+  string reply_to = 2;
+  // message is the original user payload.
+  google.protobuf.Any message = 3;
+}
+
+// AsyncResponse delivers a response or error for an AsyncRequest.
+message AsyncResponse {
+  // correlation_id matches the original AsyncRequest.
+  string correlation_id = 1;
+  // message is the successful response payload.
+  google.protobuf.Any message = 2;
+  // error is set when the request fails or times out.
+  string error = 3;
+}
