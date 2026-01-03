@@ -20,9 +20,10 @@ across a cluster of computers.
 If you are not familiar with the actor model, the blog post from Brian Storti [here](https://www.brianstorti.com/the-actor-model/) is an excellent and short introduction to the actor model.
 Also, check the reference section at the end of the post for more material regarding the actor model.
 
-## 🚀 Features
+## ✨ Features
 - **Actor Model**: Build concurrent and distributed systems using the actor model with typed protobuf messages.
 - **Messaging**: Tell/Ask APIs for fire-and-forget or request/response flows.
+- **Reentrancy**: Reentrancy-enabled async request messaging with configurable modes and per-call overrides.
 - **Supervision**: One-for-one/one-for-all strategies, directives, and retry windows for fault tolerance.
 - **Remoting**: Seamless communication between actors across nodes (Connect over HTTP/2).
 - **Context Propagation**: Pluggable context propagation for request-scoped metadata.
