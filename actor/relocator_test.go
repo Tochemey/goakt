@@ -415,7 +415,7 @@ func TestRelocation(t *testing.T) {
 		if err == nil {
 			break
 		}
-		if !stdErrors.Is(err, errors.ErrActorNotFound) {
+		if !stdErrors.Is(err, errors.ErrActorNotFound) && !stdErrors.Is(err, errors.ErrDead) {
 			break
 		}
 		pause.For(500 * time.Millisecond)
