@@ -1509,23 +1509,15 @@ func TestRelocationWithConsulProvider(t *testing.T) {
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
+	pause.For(2 * time.Minute)
+
 	sender, err := node1.LocalActor("Actor11")
 	require.NoError(t, err)
 	require.NotNil(t, sender)
 
 	// let us access some of the node2 actors from node 1 and  node 3
 	actorName := "Actor21"
-	deadline := time.Now().Add(time.Minute)
-	for time.Now().Before(deadline) {
-		err = sender.SendAsync(ctx, actorName, new(testpb.TestSend))
-		if err == nil {
-			break
-		}
-		if !stdErrors.Is(err, errors.ErrActorNotFound) {
-			break
-		}
-		pause.For(500 * time.Millisecond)
-	}
+	err = sender.SendAsync(ctx, actorName, new(testpb.TestSend))
 	require.NoError(t, err)
 
 	require.NoError(t, node1.Stop(ctx))
