@@ -2826,18 +2826,14 @@ func TestSpawnChild(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, child)
 
-		pause.For(time.Second)
-		assert.Len(t, parent.Children(), 1)
+		require.Eventually(t, func() bool {
+			return len(parent.Children()) == 1
+		}, time.Second, 10*time.Millisecond)
 
-		// let us sleep for some time to make the actor idle
-		wg := sync.WaitGroup{}
-		wg.Add(1)
-		go func() {
-			pause.For(2 * time.Second)
-			wg.Done()
-		}()
-		// block until timer is up
-		wg.Wait()
+		// wait until the child passivates after inactivity
+		require.Eventually(t, func() bool {
+			return !child.IsRunning()
+		}, 3*time.Second, 20*time.Millisecond)
 
 		err = Tell(ctx, child, new(testpb.TestSend))
 		assert.Error(t, err)
