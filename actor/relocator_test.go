@@ -368,7 +368,7 @@ func TestRelocation(t *testing.T) {
 	// let us create 4 actors on each node
 	for j := 1; j <= 4; j++ {
 		actorName := fmt.Sprintf("Actor1-%d", j)
-		pid, err := node1.Spawn(ctx, actorName, NewMockActor())
+		pid, err := node1.Spawn(ctx, actorName, NewMockActor(), WithLongLived())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 	}
