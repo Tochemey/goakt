@@ -230,8 +230,8 @@ func TestRelocatorSpawnRemoteActorSetsReentrancyConfig(t *testing.T) {
 	remotingMock.EXPECT().RemoteSpawn(mock.Anything, "127.0.0.1", 9000, mock.Anything).
 		Run(func(_ context.Context, _ string, _ int, req *remote.SpawnRequest) {
 			require.NotNil(t, req.Reentrancy)
-			require.Equal(t, reentrancy.StashNonReentrant, req.Reentrancy.Mode)
-			require.Equal(t, 5, req.Reentrancy.MaxInFlight)
+			require.Equal(t, reentrancy.StashNonReentrant, req.Reentrancy.Mode())
+			require.Equal(t, 5, req.Reentrancy.MaxInFlight())
 		}).
 		Return(nil).
 		Once()
