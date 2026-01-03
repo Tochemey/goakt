@@ -839,8 +839,8 @@ func TestSpawn(t *testing.T) {
 		remotingMock.EXPECT().RemoteSpawn(mock.Anything, peer.Host, peer.RemotingPort, mock.Anything).
 			Run(func(_ context.Context, _ string, _ int, request *remote.SpawnRequest) {
 				require.NotNil(t, request.Reentrancy)
-				require.Equal(t, reentrancy.AllowAll, request.Reentrancy.Mode)
-				require.Equal(t, 7, request.Reentrancy.MaxInFlight)
+				require.Equal(t, reentrancy.AllowAll, request.Reentrancy.Mode())
+				require.Equal(t, 7, request.Reentrancy.MaxInFlight())
 			}).
 			Return(nil).
 			Once()
