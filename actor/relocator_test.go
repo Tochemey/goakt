@@ -417,24 +417,7 @@ func TestRelocation(t *testing.T) {
 	require.NoError(t, err)
 
 	var relocated *PID
-	relocatedDeadline := time.Now().Add(2 * time.Minute)
-	for time.Now().Before(relocatedDeadline) {
-		relocated, err = node1.LocalActor(reentrantName)
-		if err == nil {
-			break
-		}
-		if !stdErrors.Is(err, errors.ErrActorNotFound) {
-			break
-		}
-		relocated, err = node3.LocalActor(reentrantName)
-		if err == nil {
-			break
-		}
-		if !stdErrors.Is(err, errors.ErrActorNotFound) {
-			break
-		}
-		pause.For(500 * time.Millisecond)
-	}
+	relocated, err = node1.LocalActor(reentrantName)
 	require.NoError(t, err)
 	require.NotNil(t, relocated)
 	require.NotNil(t, relocated.reentrancy)
