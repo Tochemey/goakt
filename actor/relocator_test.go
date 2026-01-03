@@ -814,7 +814,7 @@ func TestRelocationWithExtension(t *testing.T) {
 	// let us create 4 entities on each node
 	for j := 1; j <= 4; j++ {
 		entityID := fmt.Sprintf("node1-entity-%d", j)
-		pid, err := node1.Spawn(ctx, entityID, NewMockEntity())
+		pid, err := node1.Spawn(ctx, entityID, NewMockEntity(), WithLongLived())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
@@ -829,7 +829,7 @@ func TestRelocationWithExtension(t *testing.T) {
 
 	for j := 1; j <= 4; j++ {
 		entityID := fmt.Sprintf("node2-entity-%d", j)
-		pid, err := node2.Spawn(ctx, entityID, NewMockEntity())
+		pid, err := node2.Spawn(ctx, entityID, NewMockEntity(), WithLongLived())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
@@ -844,7 +844,7 @@ func TestRelocationWithExtension(t *testing.T) {
 
 	for j := 1; j <= 4; j++ {
 		entityID := fmt.Sprintf("node3-entity-%d", j)
-		pid, err := node3.Spawn(ctx, entityID, NewMockEntity())
+		pid, err := node3.Spawn(ctx, entityID, NewMockEntity(), WithLongLived())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
@@ -861,6 +861,9 @@ func TestRelocationWithExtension(t *testing.T) {
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
+	// Wait for cluster rebalancing
+	pause.For(2 * time.Minute)
+
 	sender, err := node1.LocalActor("node1-entity-1")
 	require.NoError(t, err)
 	require.NotNil(t, sender)
@@ -868,17 +871,7 @@ func TestRelocationWithExtension(t *testing.T) {
 	// let us access some of the node2 actors from node 1
 	entityID := "node2-entity-1"
 	var response proto.Message
-	deadline := time.Now().Add(2 * time.Minute)
-	for time.Now().Before(deadline) {
-		response, err = sender.SendSync(ctx, entityID, new(testpb.GetAccount), time.Minute)
-		if err == nil {
-			break
-		}
-		if !stdErrors.Is(err, errors.ErrActorNotFound) {
-			break
-		}
-		pause.For(500 * time.Millisecond)
-	}
+	response, err = sender.SendSync(ctx, entityID, new(testpb.GetAccount), time.Minute)
 	require.NoError(t, err)
 	account, ok := response.(*testpb.Account)
 	require.True(t, ok)
@@ -915,7 +908,7 @@ func TestRelocationWithDependency(t *testing.T) {
 		entityID := fmt.Sprintf("node1-actor-%d", j)
 		// create the dependency
 		dependency := NewMockDependency(dependencyID, entityID, "email")
-		pid, err := node1.Spawn(ctx, entityID, NewMockActor(), WithDependencies(dependency))
+		pid, err := node1.Spawn(ctx, entityID, NewMockActor(), WithDependencies(dependency), WithLongLived())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 	}
@@ -926,7 +919,7 @@ func TestRelocationWithDependency(t *testing.T) {
 		entityID := fmt.Sprintf("node2-actor-%d", j)
 		// create the dependency
 		dependency := NewMockDependency(dependencyID, entityID, "email")
-		pid, err := node2.Spawn(ctx, entityID, NewMockActor(), WithDependencies(dependency))
+		pid, err := node2.Spawn(ctx, entityID, NewMockActor(), WithDependencies(dependency), WithLongLived())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 	}
@@ -938,7 +931,7 @@ func TestRelocationWithDependency(t *testing.T) {
 	require.NoError(t, sd2.Close())
 
 	// Wait for cluster rebalancing
-	pause.For(time.Minute)
+	pause.For(2 * time.Minute)
 
 	sender, err := node1.LocalActor("node1-actor-1")
 	require.NoError(t, err)
