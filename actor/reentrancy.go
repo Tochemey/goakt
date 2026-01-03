@@ -110,6 +110,9 @@ type RequestOption func(*requestConfig)
 // single interaction—for example, select reentrancy.StashNonReentrant for a
 // blocking/serialized request—while leaving the actor's overall behavior unchanged.
 //
+// Note: while any StashNonReentrant request is in flight, user messages are stashed
+// until the last blocking request completes; per-call overrides do not bypass this.
+//
 // If the actor does not have reentrancy enabled, Request/RequestName still return
 // ErrReentrancyDisabled regardless of this option. If mode is reentrancy.Off, the
 // request is rejected with ErrReentrancyDisabled.

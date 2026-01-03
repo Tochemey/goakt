@@ -33,7 +33,9 @@ import (
 // Modes:
 //   - Off disables async requests for the actor.
 //   - AllowAll keeps processing all messages while awaiting a response.
-//   - StashNonReentrant stashes user messages until the response arrives.
+//   - StashNonReentrant stashes user messages until the response arrives. While any
+//     stash-mode request is in flight, user messages are stashed until the last
+//     blocking request completes.
 //
 // Design decision:
 //   - Off preserves legacy behavior by disabling async requests.
@@ -80,13 +82,40 @@ func WithMaxInFlight(maxInFlight int) Option {
 }
 
 // WithMode sets the reentrancy mode.
+//
+// Use AllowAll to keep processing messages while awaiting responses. This avoids
+// deadlocks in call cycles but allows actor state to change between request and
+// response handling.
+//
+// Use StashNonReentrant when strict message ordering is required; while any
+// stash-mode request is in flight, user messages are stashed until the last
+// blocking request completes. Always pair this with request timeouts and a
+// finite MaxInFlight limit to avoid unbounded stashing.
+//
+// Off disables async requests.
 func WithMode(mode Mode) Option {
 	return func(r *Reentrancy) {
 		r.mode = mode
 	}
 }
 
-// Reentrancy configures actor reentrancy behavior.
+// Reentrancy  defines how actors handle messages while awaiting async responses and changes the actor messaging model. In AllowAll mode, the actor keeps
+// processing messages while a request is in flight, which can improve throughput
+// and avoid call-cycle deadlocks (A -> B -> A), but actor state may change between
+// the request and its response.
+//
+// Production cautions:
+//   - AllowAll can introduce state races if your logic assumes strict ordering.
+//   - StashNonReentrant can block user messages and grow memory if dependencies stall.
+//   - Mixed-version clusters may decode unknown modes to Off, disabling async requests.
+//   - Then callbacks can run synchronously when registered after completion.
+//
+// In StashNonReentrant mode, user messages are stashed while any stash-mode request
+// is in flight, preserving mailbox order. This can increase latency and memory
+// usage under load; always pair it with per-request timeouts and a finite
+// MaxInFlight limit to avoid unbounded stashing.
+//
+// Off disables async requests.
 type Reentrancy struct {
 	mode        Mode
 	maxInFlight int

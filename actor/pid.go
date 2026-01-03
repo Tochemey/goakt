@@ -1636,6 +1636,9 @@ func (pid *PID) registerRequestState(state *requestState) error {
 	}
 
 	if state.mode == reentrancy.StashNonReentrant {
+		if pid.stashState == nil {
+			pid.stashState = &stashState{box: NewUnboundedMailbox()}
+		}
 		pid.reentrancy.blockingCount.Inc()
 	}
 

@@ -464,6 +464,18 @@ func TestToWireActorIncludesReentrancy(t *testing.T) {
 	require.Equal(t, uint32(3), wire.GetReentrancy().GetMaxInFlight())
 }
 
+func TestWithReentrancyDoesNotEnableStash(t *testing.T) {
+	pid := &PID{}
+	withReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll)))(pid)
+	require.NotNil(t, pid.reentrancy)
+	require.Nil(t, pid.stashState)
+
+	pid = &PID{}
+	withReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.StashNonReentrant)))(pid)
+	require.NotNil(t, pid.reentrancy)
+	require.Nil(t, pid.stashState)
+}
+
 func TestRequestConfigTimeoutClamp(t *testing.T) {
 	cfg := newRequestConfig(WithRequestTimeout(-1))
 	require.NotNil(t, cfg)
@@ -905,6 +917,7 @@ func TestRegisterRequestStateTracksCounts(t *testing.T) {
 	state := newRequestState("id", reentrancy.AllowAll, pid)
 	require.NoError(t, pid.registerRequestState(state))
 	require.EqualValues(t, 1, pid.reentrancy.inFlightCount.Load())
+	require.Nil(t, pid.stashState)
 	pid.deregisterRequestState(state)
 
 	pid = &PID{reentrancy: newReentrancyState(reentrancy.AllowAll, 0)}
@@ -912,6 +925,20 @@ func TestRegisterRequestStateTracksCounts(t *testing.T) {
 	require.NoError(t, pid.registerRequestState(state))
 	require.EqualValues(t, 1, pid.reentrancy.inFlightCount.Load())
 	require.EqualValues(t, 1, pid.reentrancy.blockingCount.Load())
+	require.NotNil(t, pid.stashState)
+	require.NotNil(t, pid.stashState.box)
+}
+
+func TestRegisterRequestStatePreservesExistingStash(t *testing.T) {
+	pid := &PID{
+		reentrancy: newReentrancyState(reentrancy.AllowAll, 0),
+		stashState: &stashState{box: NewUnboundedMailbox()},
+	}
+	existing := pid.stashState
+	state := newRequestState("stash", reentrancy.StashNonReentrant, pid)
+	require.NoError(t, pid.registerRequestState(state))
+	require.Same(t, existing, pid.stashState)
+	pid.deregisterRequestState(state)
 }
 
 func TestRegisterRequestStateLimit(t *testing.T) {
