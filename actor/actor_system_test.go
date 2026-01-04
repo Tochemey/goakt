@@ -76,6 +76,7 @@ import (
 	mocksextension "github.com/tochemey/goakt/v3/mocks/extension"
 	mocksremote "github.com/tochemey/goakt/v3/mocks/remote"
 	"github.com/tochemey/goakt/v3/passivation"
+	"github.com/tochemey/goakt/v3/reentrancy"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 	gtls "github.com/tochemey/goakt/v3/tls"
@@ -1916,7 +1917,7 @@ func TestActorSystem(t *testing.T) {
 		pid, err := system.LocalActor("reentrant-actor")
 		require.NoError(t, err)
 		require.NotNil(t, pid.reentrancy)
-		require.Equal(t, ReentrancyAllowAll, pid.reentrancy.mode)
+		require.Equal(t, reentrancy.AllowAll, pid.reentrancy.mode)
 		require.Equal(t, 4, pid.reentrancy.maxInFlight)
 	})
 

@@ -33,6 +33,7 @@ import (
 
 	"github.com/tochemey/goakt/v3/actor"
 	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v3/reentrancy"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
@@ -177,7 +178,7 @@ func BenchmarkRequest(b *testing.B) {
 		doneCh: doneCh,
 		errCh:  errCh,
 	}
-	requester, err := actorSystem.Spawn(ctx, "requester", requesterActor, actor.WithReentrancy(actor.ReentrancyAllowAll))
+	requester, err := actorSystem.Spawn(ctx, "requester", requesterActor, actor.WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
 	if err != nil {
 		b.Fatalf("failed to spawn requester: %v", err)
 	}

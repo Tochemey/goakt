@@ -30,7 +30,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -43,6 +42,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
 	mockcluster "github.com/tochemey/goakt/v3/mocks/cluster"
+	"github.com/tochemey/goakt/v3/reentrancy"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
@@ -109,7 +109,7 @@ func TestReentrancyCycleAllowAll(t *testing.T) {
 		default:
 			rctx.Unhandled()
 		}
-	}, WithReentrancy(ReentrancyAllowAll))
+	}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
 
 	require.NoError(t, user.Tell(ctx, actorA, new(testpb.TestPing)))
 
@@ -170,7 +170,7 @@ func TestRequestAllowAllProcessesOtherMessages(t *testing.T) {
 		case *testpb.TestSend:
 			processedCh <- struct{}{}
 		}
-	}, WithReentrancy(ReentrancyAllowAll))
+	}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
 
 	require.NoError(t, Tell(ctx, requester, &testpb.TestWait{Duration: 200}))
 	require.NoError(t, Tell(ctx, requester, new(testpb.TestSend)))
@@ -206,7 +206,7 @@ func TestRequestStashNonReentrant(t *testing.T) {
 		case *testpb.TestSend:
 			processedCh <- struct{}{}
 		}
-	}, WithReentrancy(ReentrancyStashNonReentrant))
+	}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.StashNonReentrant))))
 
 	require.NoError(t, Tell(ctx, requester, &testpb.TestWait{Duration: 200}))
 	require.NoError(t, Tell(ctx, requester, new(testpb.TestSend)))
@@ -227,7 +227,7 @@ func TestRequestStashOverride(t *testing.T) {
 	requester := spawnReentrancyActor(t, sys, ctx, "override-requester", func(rctx *ReceiveContext) {
 		switch msg := rctx.Message().(type) {
 		case *testpb.TestWait:
-			call := rctx.Request(target, msg, WithReentrancyMode(ReentrancyStashNonReentrant))
+			call := rctx.Request(target, msg, WithReentrancyMode(reentrancy.StashNonReentrant))
 			if call == nil {
 				errCh <- rctx.getError()
 				return
@@ -242,7 +242,7 @@ func TestRequestStashOverride(t *testing.T) {
 		case *testpb.TestSend:
 			processedCh <- struct{}{}
 		}
-	}, WithReentrancy(ReentrancyAllowAll))
+	}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
 
 	require.NoError(t, Tell(ctx, requester, &testpb.TestWait{Duration: 200}))
 	require.NoError(t, Tell(ctx, requester, new(testpb.TestSend)))
@@ -276,7 +276,7 @@ func TestRequestName(t *testing.T) {
 				replyCh <- resp
 			})
 		}
-	}, WithReentrancy(ReentrancyAllowAll))
+	}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
 
 	require.NoError(t, Tell(ctx, requester, &testpb.TestWait{Duration: 1}))
 	waitForReply(t, replyCh, errCh, reentrancyReplyTimeout)
@@ -299,7 +299,7 @@ func TestRequestTimeout(t *testing.T) {
 				errCh <- err
 			})
 		}
-	}, WithReentrancy(ReentrancyAllowAll))
+	}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
 
 	require.NoError(t, Tell(ctx, requester, &testpb.TestWait{Duration: 200}))
 	waitForError(t, errCh, gerrors.ErrRequestTimeout, reentrancyReplyTimeout)
@@ -335,7 +335,7 @@ func TestRequestCallCancel(t *testing.T) {
 				errCh <- err
 			}
 		}
-	}, WithReentrancy(ReentrancyAllowAll))
+	}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
 
 	require.NoError(t, Tell(ctx, requester, &testpb.TestWait{Duration: 200}))
 	pause.For(reentrancyDispatchWait)
@@ -371,7 +371,7 @@ func TestRequestCallThenAfterCompletion(t *testing.T) {
 				errCh <- err
 			})
 		}
-	}, WithReentrancy(ReentrancyAllowAll))
+	}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
 
 	require.NoError(t, Tell(ctx, requester, &testpb.TestWait{Duration: 1}))
 	pause.For(reentrancyDispatchWait)
@@ -388,13 +388,13 @@ func TestRequestInvalidMode(t *testing.T) {
 	requester := spawnReentrancyActor(t, sys, ctx, "invalid-requester", func(rctx *ReceiveContext) {
 		switch msg := rctx.Message().(type) {
 		case *testpb.TestWait:
-			call := rctx.Request(target, msg, WithReentrancyMode(ReentrancyMode(99)))
+			call := rctx.Request(target, msg, WithReentrancyMode(reentrancy.Mode(99)))
 			if call != nil {
 				return
 			}
 			errCh <- rctx.getError()
 		}
-	}, WithReentrancy(ReentrancyAllowAll))
+	}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
 
 	require.NoError(t, Tell(ctx, requester, &testpb.TestWait{Duration: 1}))
 	waitForError(t, errCh, gerrors.ErrInvalidReentrancyMode, reentrancyReplyTimeout)
@@ -416,7 +416,7 @@ func TestRequestMaxInFlight(t *testing.T) {
 			}
 			errCh <- rctx.getError()
 		}
-	}, WithReentrancy(ReentrancyAllowAll, WithMaxInFlight(1)))
+	}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll), reentrancy.WithMaxInFlight(1))))
 
 	require.NoError(t, Tell(ctx, requester, &testpb.TestWait{Duration: 200}))
 	pause.For(reentrancyDispatchWait)
@@ -429,7 +429,7 @@ func TestCancelInFlightRequests(t *testing.T) {
 	sys, ctx := newReentrancySystem(t)
 	target := spawnReentrancyActor(t, sys, ctx, "cancel-inflight-target", responderWithDelay(reentrancyDelay, nil))
 
-	requester := spawnReentrancyActor(t, sys, ctx, "cancel-inflight-requester", func(*ReceiveContext) {}, WithReentrancy(ReentrancyAllowAll))
+	requester := spawnReentrancyActor(t, sys, ctx, "cancel-inflight-requester", func(*ReceiveContext) {}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
 	call, err := requester.request(ctx, target, &testpb.TestWait{Duration: 200})
 	require.NoError(t, err)
 	require.NotNil(t, call)
@@ -454,7 +454,7 @@ func TestToWireActorIncludesReentrancy(t *testing.T) {
 		actor:        NewMockActor(),
 		address:      address.New("actor-reentrancy-wire", "testSys", "127.0.0.1", 0),
 		fieldsLocker: sync.RWMutex{},
-		reentrancy:   newReentrancyState(ReentrancyAllowAll, 3),
+		reentrancy:   newReentrancyState(reentrancy.AllowAll, 3),
 	}
 
 	wire, err := pid.toWireActor()
@@ -464,36 +464,16 @@ func TestToWireActorIncludesReentrancy(t *testing.T) {
 	require.Equal(t, uint32(3), wire.GetReentrancy().GetMaxInFlight())
 }
 
-func TestReentrancyModeMappings(t *testing.T) {
-	assert.True(t, isValidReentrancyMode(ReentrancyAllowAll))
-	assert.True(t, isValidReentrancyMode(ReentrancyStashNonReentrant))
-	assert.True(t, isValidReentrancyMode(ReentrancyOff))
-	assert.False(t, isValidReentrancyMode(ReentrancyMode(99)))
+func TestWithReentrancyDoesNotEnableStash(t *testing.T) {
+	pid := &PID{}
+	withReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll)))(pid)
+	require.NotNil(t, pid.reentrancy)
+	require.Nil(t, pid.stashState)
 
-	assert.Equal(t, internalpb.ReentrancyMode_REENTRANCY_MODE_ALLOW_ALL, toInternalReentrancyMode(ReentrancyAllowAll))
-	assert.Equal(t, internalpb.ReentrancyMode_REENTRANCY_MODE_STASH_NON_REENTRANT, toInternalReentrancyMode(ReentrancyStashNonReentrant))
-	assert.Equal(t, internalpb.ReentrancyMode_REENTRANCY_MODE_OFF, toInternalReentrancyMode(ReentrancyOff))
-
-	assert.Equal(t, ReentrancyAllowAll, fromInternalReentrancyMode(internalpb.ReentrancyMode_REENTRANCY_MODE_ALLOW_ALL))
-	assert.Equal(t, ReentrancyStashNonReentrant, fromInternalReentrancyMode(internalpb.ReentrancyMode_REENTRANCY_MODE_STASH_NON_REENTRANT))
-	assert.Equal(t, ReentrancyOff, fromInternalReentrancyMode(internalpb.ReentrancyMode_REENTRANCY_MODE_OFF))
-	assert.Equal(t, ReentrancyOff, fromInternalReentrancyMode(internalpb.ReentrancyMode(99)))
-}
-
-func TestReentrancyConfigConversions(t *testing.T) {
-	cfg := &reentrancyConfig{mode: ReentrancyStashNonReentrant, maxInFlight: 7}
-	wire := cfg.toProto()
-	require.NotNil(t, wire)
-	assert.Equal(t, internalpb.ReentrancyMode_REENTRANCY_MODE_STASH_NON_REENTRANT, wire.GetMode())
-	assert.Equal(t, uint32(7), wire.GetMaxInFlight())
-
-	roundTrip := reentrancyConfigFromProto(&internalpb.ReentrancyConfig{
-		Mode:        internalpb.ReentrancyMode_REENTRANCY_MODE_ALLOW_ALL,
-		MaxInFlight: 5,
-	})
-	require.NotNil(t, roundTrip)
-	assert.Equal(t, ReentrancyAllowAll, roundTrip.mode)
-	assert.Equal(t, 5, roundTrip.maxInFlight)
+	pid = &PID{}
+	withReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.StashNonReentrant)))(pid)
+	require.NotNil(t, pid.reentrancy)
+	require.Nil(t, pid.stashState)
 }
 
 func TestRequestConfigTimeoutClamp(t *testing.T) {
@@ -539,7 +519,7 @@ func TestRequestValidationFailures(t *testing.T) {
 	})
 
 	t.Run("reentrancy off", func(t *testing.T) {
-		pid := newRunningPIDWithReentrancy(ReentrancyOff, 0)
+		pid := newRunningPIDWithReentrancy(reentrancy.Off, 0)
 		target := &PID{}
 		target.setState(runningState, true)
 		_, err := pid.request(ctx, target, new(testpb.TestSend))
@@ -549,7 +529,7 @@ func TestRequestValidationFailures(t *testing.T) {
 
 func TestRequestBuildAsyncRequestErrorDeregisters(t *testing.T) {
 	ctx := context.Background()
-	pid := newRunningPIDWithReentrancy(ReentrancyAllowAll, 0)
+	pid := newRunningPIDWithReentrancy(reentrancy.AllowAll, 0)
 	target := &PID{}
 	target.setState(runningState, true)
 
@@ -562,7 +542,7 @@ func TestRequestBuildAsyncRequestErrorDeregisters(t *testing.T) {
 
 func TestRequestTellErrorDeregisters(t *testing.T) {
 	ctx := context.Background()
-	pid := newRunningPIDWithReentrancy(ReentrancyAllowAll, 0)
+	pid := newRunningPIDWithReentrancy(reentrancy.AllowAll, 0)
 	target := &PID{mailbox: NewUnboundedMailbox(), logger: log.DiscardLogger}
 	target.setState(runningState, true)
 
@@ -606,7 +586,7 @@ func TestRequestNameValidationFailures(t *testing.T) {
 	t.Run("nil message", func(t *testing.T) {
 		pid := &PID{}
 		pid.setState(runningState, true)
-		pid.reentrancy = newReentrancyState(ReentrancyAllowAll, 0)
+		pid.reentrancy = newReentrancyState(reentrancy.AllowAll, 0)
 		_, err := pid.requestName(ctx, "actor", nil)
 		require.ErrorIs(t, err, gerrors.ErrInvalidMessage)
 	})
@@ -621,23 +601,23 @@ func TestRequestNameValidationFailures(t *testing.T) {
 	t.Run("override off", func(t *testing.T) {
 		pid := &PID{}
 		pid.setState(runningState, true)
-		pid.reentrancy = newReentrancyState(ReentrancyAllowAll, 0)
-		_, err := pid.requestName(ctx, "actor", new(testpb.TestSend), WithReentrancyMode(ReentrancyOff))
+		pid.reentrancy = newReentrancyState(reentrancy.AllowAll, 0)
+		_, err := pid.requestName(ctx, "actor", new(testpb.TestSend), WithReentrancyMode(reentrancy.Off))
 		require.ErrorIs(t, err, gerrors.ErrReentrancyDisabled)
 	})
 
 	t.Run("invalid mode", func(t *testing.T) {
 		pid := &PID{}
 		pid.setState(runningState, true)
-		pid.reentrancy = newReentrancyState(ReentrancyAllowAll, 0)
-		_, err := pid.requestName(ctx, "actor", new(testpb.TestSend), WithReentrancyMode(ReentrancyMode(99)))
+		pid.reentrancy = newReentrancyState(reentrancy.AllowAll, 0)
+		_, err := pid.requestName(ctx, "actor", new(testpb.TestSend), WithReentrancyMode(reentrancy.Mode(99)))
 		require.ErrorIs(t, err, gerrors.ErrInvalidReentrancyMode)
 	})
 }
 
 func TestRequestNameActorOfError(t *testing.T) {
 	sys, ctx := newReentrancySystem(t)
-	requester := spawnReentrancyActor(t, sys, ctx, "actorof-requester", func(*ReceiveContext) {}, WithReentrancy(ReentrancyAllowAll))
+	requester := spawnReentrancyActor(t, sys, ctx, "actorof-requester", func(*ReceiveContext) {}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
 
 	_, err := requester.requestName(ctx, "missing-actor", new(testpb.TestSend))
 	require.ErrorIs(t, err, gerrors.ErrActorNotFound)
@@ -646,9 +626,9 @@ func TestRequestNameActorOfError(t *testing.T) {
 func TestRequestNameRegisterLimit(t *testing.T) {
 	sys, ctx := newReentrancySystem(t)
 	_ = spawnReentrancyActor(t, sys, ctx, "limit-target", func(*ReceiveContext) {})
-	requester := spawnReentrancyActor(t, sys, ctx, "limit-requester", func(*ReceiveContext) {}, WithReentrancy(ReentrancyAllowAll, WithMaxInFlight(1)))
+	requester := spawnReentrancyActor(t, sys, ctx, "limit-requester", func(*ReceiveContext) {}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll), reentrancy.WithMaxInFlight(1))))
 
-	state := newRequestState("limit", ReentrancyAllowAll, requester)
+	state := newRequestState("limit", reentrancy.AllowAll, requester)
 	require.NoError(t, requester.registerRequestState(state))
 	t.Cleanup(func() { requester.deregisterRequestState(state) })
 
@@ -659,7 +639,7 @@ func TestRequestNameRegisterLimit(t *testing.T) {
 func TestRequestNameTimeoutStarts(t *testing.T) {
 	sys, ctx := newReentrancySystem(t)
 	_ = spawnReentrancyActor(t, sys, ctx, "timeout-target", func(*ReceiveContext) {})
-	requester := spawnReentrancyActor(t, sys, ctx, "timeout-requester", func(*ReceiveContext) {}, WithReentrancy(ReentrancyAllowAll))
+	requester := spawnReentrancyActor(t, sys, ctx, "timeout-requester", func(*ReceiveContext) {}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
 
 	call, err := requester.requestName(ctx, "timeout-target", new(testpb.TestWait), WithRequestTimeout(reentrancyReplyTimeout))
 	require.NoError(t, err)
@@ -672,7 +652,7 @@ func TestRequestNameTimeoutStarts(t *testing.T) {
 func TestRequestNameBuildAsyncRequestError(t *testing.T) {
 	sys, ctx := newReentrancySystem(t)
 	_ = spawnReentrancyActor(t, sys, ctx, "build-target", func(*ReceiveContext) {})
-	requester := spawnReentrancyActor(t, sys, ctx, "build-requester", func(*ReceiveContext) {}, WithReentrancy(ReentrancyAllowAll))
+	requester := spawnReentrancyActor(t, sys, ctx, "build-requester", func(*ReceiveContext) {}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
 
 	_, err := requester.requestName(ctx, "build-target", &testpb.Reply{Content: invalidUTF8String()})
 	require.Error(t, err)
@@ -683,7 +663,7 @@ func TestRequestNameBuildAsyncRequestError(t *testing.T) {
 func TestRequestNameTellErrorOnStoppedTarget(t *testing.T) {
 	sys, ctx := newReentrancySystem(t)
 	target := spawnReentrancyActor(t, sys, ctx, "tell-stop-target", func(*ReceiveContext) {})
-	requester := spawnReentrancyActor(t, sys, ctx, "tell-stop-requester", func(*ReceiveContext) {}, WithReentrancy(ReentrancyAllowAll))
+	requester := spawnReentrancyActor(t, sys, ctx, "tell-stop-requester", func(*ReceiveContext) {}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
 
 	msg := &blockingProto{ready: make(chan struct{}), release: make(chan struct{})}
 	errCh := make(chan error, 1)
@@ -724,7 +704,7 @@ func TestRequestNameRemoteTellError(t *testing.T) {
 	pid := &PID{
 		actorSystem: sys,
 		logger:      log.DiscardLogger,
-		reentrancy:  newReentrancyState(ReentrancyAllowAll, 0),
+		reentrancy:  newReentrancyState(reentrancy.AllowAll, 0),
 	}
 	pid.setState(runningState, true)
 
@@ -736,7 +716,7 @@ func TestProcessStashErrorPath(t *testing.T) {
 	pid := &PID{
 		mailbox:    NewUnboundedMailbox(),
 		logger:     log.DiscardLogger,
-		reentrancy: newReentrancyState(ReentrancyAllowAll, 0),
+		reentrancy: newReentrancyState(reentrancy.AllowAll, 0),
 	}
 	pid.reentrancy.blockingCount.Store(1)
 
@@ -784,8 +764,8 @@ func TestHandleAsyncResponsePaths(t *testing.T) {
 	})
 
 	t.Run("error response completes", func(t *testing.T) {
-		pid := newRunningPIDWithReentrancy(ReentrancyAllowAll, 0)
-		state := newRequestState("err", ReentrancyAllowAll, pid)
+		pid := newRunningPIDWithReentrancy(reentrancy.AllowAll, 0)
+		state := newRequestState("err", reentrancy.AllowAll, pid)
 		require.NoError(t, pid.registerRequestState(state))
 
 		errCh := make(chan error, 1)
@@ -809,7 +789,7 @@ func TestHandleAsyncResponsePaths(t *testing.T) {
 	})
 
 	t.Run("error response unknown", func(t *testing.T) {
-		pid := newRunningPIDWithReentrancy(ReentrancyAllowAll, 0)
+		pid := newRunningPIDWithReentrancy(reentrancy.AllowAll, 0)
 		pid.handleAsyncResponse(nil, &internalpb.AsyncResponse{
 			CorrelationId: "missing",
 			Error:         "boom",
@@ -817,8 +797,8 @@ func TestHandleAsyncResponsePaths(t *testing.T) {
 	})
 
 	t.Run("nil message completes", func(t *testing.T) {
-		pid := newRunningPIDWithReentrancy(ReentrancyAllowAll, 0)
-		state := newRequestState("nil-msg", ReentrancyAllowAll, pid)
+		pid := newRunningPIDWithReentrancy(reentrancy.AllowAll, 0)
+		state := newRequestState("nil-msg", reentrancy.AllowAll, pid)
 		require.NoError(t, pid.registerRequestState(state))
 
 		errCh := make(chan error, 1)
@@ -838,13 +818,13 @@ func TestHandleAsyncResponsePaths(t *testing.T) {
 	})
 
 	t.Run("nil message unknown", func(t *testing.T) {
-		pid := newRunningPIDWithReentrancy(ReentrancyAllowAll, 0)
+		pid := newRunningPIDWithReentrancy(reentrancy.AllowAll, 0)
 		pid.handleAsyncResponse(nil, &internalpb.AsyncResponse{CorrelationId: "missing"})
 	})
 
 	t.Run("invalid any completes", func(t *testing.T) {
-		pid := newRunningPIDWithReentrancy(ReentrancyAllowAll, 0)
-		state := newRequestState("bad-any", ReentrancyAllowAll, pid)
+		pid := newRunningPIDWithReentrancy(reentrancy.AllowAll, 0)
+		state := newRequestState("bad-any", reentrancy.AllowAll, pid)
 		require.NoError(t, pid.registerRequestState(state))
 
 		errCh := make(chan error, 1)
@@ -867,7 +847,7 @@ func TestHandleAsyncResponsePaths(t *testing.T) {
 	})
 
 	t.Run("invalid any unknown", func(t *testing.T) {
-		pid := newRunningPIDWithReentrancy(ReentrancyAllowAll, 0)
+		pid := newRunningPIDWithReentrancy(reentrancy.AllowAll, 0)
 		pid.handleAsyncResponse(nil, &internalpb.AsyncResponse{
 			CorrelationId: "missing",
 			Message:       &anypb.Any{TypeUrl: "type.googleapis.com/nope.Nope", Value: []byte("bad")},
@@ -875,8 +855,8 @@ func TestHandleAsyncResponsePaths(t *testing.T) {
 	})
 
 	t.Run("success completes", func(t *testing.T) {
-		pid := newRunningPIDWithReentrancy(ReentrancyAllowAll, 0)
-		state := newRequestState("ok", ReentrancyAllowAll, pid)
+		pid := newRunningPIDWithReentrancy(reentrancy.AllowAll, 0)
+		state := newRequestState("ok", reentrancy.AllowAll, pid)
 		require.NoError(t, pid.registerRequestState(state))
 
 		respCh := make(chan proto.Message, 1)
@@ -905,7 +885,7 @@ func TestHandleAsyncResponsePaths(t *testing.T) {
 	})
 
 	t.Run("success unknown", func(t *testing.T) {
-		pid := newRunningPIDWithReentrancy(ReentrancyAllowAll, 0)
+		pid := newRunningPIDWithReentrancy(reentrancy.AllowAll, 0)
 		payload, err := anypb.New(&testpb.Reply{Content: "ok"})
 		require.NoError(t, err)
 		pid.handleAsyncResponse(nil, &internalpb.AsyncResponse{
@@ -923,33 +903,48 @@ func TestAsyncErrorFromString(t *testing.T) {
 
 func TestRegisterRequestStateValidation(t *testing.T) {
 	pid := &PID{}
-	state := newRequestState("id", ReentrancyAllowAll, pid)
+	state := newRequestState("id", reentrancy.AllowAll, pid)
 	err := pid.registerRequestState(state)
 	require.ErrorIs(t, err, gerrors.ErrReentrancyDisabled)
 
-	pid = &PID{reentrancy: newReentrancyState(ReentrancyAllowAll, 0)}
+	pid = &PID{reentrancy: newReentrancyState(reentrancy.AllowAll, 0)}
 	err = pid.registerRequestState(nil)
 	require.ErrorIs(t, err, gerrors.ErrInvalidMessage)
 }
 
 func TestRegisterRequestStateTracksCounts(t *testing.T) {
-	pid := &PID{reentrancy: newReentrancyState(ReentrancyAllowAll, 1)}
-	state := newRequestState("id", ReentrancyAllowAll, pid)
+	pid := &PID{reentrancy: newReentrancyState(reentrancy.AllowAll, 1)}
+	state := newRequestState("id", reentrancy.AllowAll, pid)
 	require.NoError(t, pid.registerRequestState(state))
 	require.EqualValues(t, 1, pid.reentrancy.inFlightCount.Load())
+	require.Nil(t, pid.stashState)
 	pid.deregisterRequestState(state)
 
-	pid = &PID{reentrancy: newReentrancyState(ReentrancyAllowAll, 0)}
-	state = newRequestState("stash", ReentrancyStashNonReentrant, pid)
+	pid = &PID{reentrancy: newReentrancyState(reentrancy.AllowAll, 0)}
+	state = newRequestState("stash", reentrancy.StashNonReentrant, pid)
 	require.NoError(t, pid.registerRequestState(state))
 	require.EqualValues(t, 1, pid.reentrancy.inFlightCount.Load())
 	require.EqualValues(t, 1, pid.reentrancy.blockingCount.Load())
+	require.NotNil(t, pid.stashState)
+	require.NotNil(t, pid.stashState.box)
+}
+
+func TestRegisterRequestStatePreservesExistingStash(t *testing.T) {
+	pid := &PID{
+		reentrancy: newReentrancyState(reentrancy.AllowAll, 0),
+		stashState: &stashState{box: NewUnboundedMailbox()},
+	}
+	existing := pid.stashState
+	state := newRequestState("stash", reentrancy.StashNonReentrant, pid)
+	require.NoError(t, pid.registerRequestState(state))
+	require.Same(t, existing, pid.stashState)
+	pid.deregisterRequestState(state)
 }
 
 func TestRegisterRequestStateLimit(t *testing.T) {
-	pid := &PID{reentrancy: newReentrancyState(ReentrancyAllowAll, 1)}
-	state1 := newRequestState("id1", ReentrancyAllowAll, pid)
-	state2 := newRequestState("id2", ReentrancyAllowAll, pid)
+	pid := &PID{reentrancy: newReentrancyState(reentrancy.AllowAll, 1)}
+	state1 := newRequestState("id1", reentrancy.AllowAll, pid)
+	state2 := newRequestState("id2", reentrancy.AllowAll, pid)
 
 	require.NoError(t, pid.registerRequestState(state1))
 	t.Cleanup(func() { pid.deregisterRequestState(state1) })
@@ -961,17 +956,17 @@ func TestDeregisterRequestStateNoop(t *testing.T) {
 	pid := &PID{}
 	pid.deregisterRequestState(nil)
 
-	pid = &PID{reentrancy: newReentrancyState(ReentrancyAllowAll, 0)}
-	state := newRequestState("missing", ReentrancyAllowAll, pid)
+	pid = &PID{reentrancy: newReentrancyState(reentrancy.AllowAll, 0)}
+	state := newRequestState("missing", reentrancy.AllowAll, pid)
 	pid.deregisterRequestState(state)
 }
 
 func TestDeregisterRequestStateUnstashOnLastBlocking(t *testing.T) {
 	pid := &PID{
 		logger:     log.DiscardLogger,
-		reentrancy: newReentrancyState(ReentrancyAllowAll, 0),
+		reentrancy: newReentrancyState(reentrancy.AllowAll, 0),
 	}
-	state := newRequestState("id", ReentrancyStashNonReentrant, pid)
+	state := newRequestState("id", reentrancy.StashNonReentrant, pid)
 	pid.reentrancy.requestStates.Set(state.id, state)
 	pid.reentrancy.inFlightCount.Store(1)
 	pid.reentrancy.blockingCount.Store(1)
@@ -990,13 +985,13 @@ func TestCompleteRequest(t *testing.T) {
 	})
 
 	t.Run("unknown correlation", func(t *testing.T) {
-		pid := &PID{reentrancy: newReentrancyState(ReentrancyAllowAll, 0)}
+		pid := &PID{reentrancy: newReentrancyState(reentrancy.AllowAll, 0)}
 		require.False(t, pid.completeRequest("missing", nil, nil))
 	})
 
 	t.Run("idempotent completion", func(t *testing.T) {
-		pid := &PID{reentrancy: newReentrancyState(ReentrancyAllowAll, 0)}
-		state := newRequestState("idempotent", ReentrancyAllowAll, pid)
+		pid := &PID{reentrancy: newReentrancyState(reentrancy.AllowAll, 0)}
+		state := newRequestState("idempotent", reentrancy.AllowAll, pid)
 		pid.reentrancy.requestStates.Set(state.id, state)
 		state.complete(nil, nil)
 
@@ -1008,9 +1003,9 @@ func TestCompleteRequest(t *testing.T) {
 	t.Run("completes and invokes callback", func(t *testing.T) {
 		pid := &PID{
 			logger:     log.DiscardLogger,
-			reentrancy: newReentrancyState(ReentrancyAllowAll, 0),
+			reentrancy: newReentrancyState(reentrancy.AllowAll, 0),
 		}
-		state := newRequestState("done", ReentrancyAllowAll, pid)
+		state := newRequestState("done", reentrancy.AllowAll, pid)
 		require.NoError(t, pid.registerRequestState(state))
 
 		respCh := make(chan proto.Message, 1)
@@ -1037,12 +1032,12 @@ func TestCompleteRequest(t *testing.T) {
 
 func TestEnqueueAsyncError(t *testing.T) {
 	ctx := context.Background()
-	pid := newRunningPIDWithReentrancy(ReentrancyAllowAll, 0)
+	pid := newRunningPIDWithReentrancy(reentrancy.AllowAll, 0)
 
 	require.ErrorIs(t, pid.enqueueAsyncError(ctx, "", gerrors.ErrRequestTimeout), gerrors.ErrInvalidMessage)
 	require.NoError(t, pid.enqueueAsyncError(ctx, "noop", nil))
 
-	state := newRequestState("corr", ReentrancyAllowAll, pid)
+	state := newRequestState("corr", reentrancy.AllowAll, pid)
 	require.NoError(t, pid.registerRequestState(state))
 
 	errCh := make(chan error, 1)
@@ -1100,10 +1095,10 @@ func TestSendAsyncResponsePaths(t *testing.T) {
 
 	t.Run("local success and error", func(t *testing.T) {
 		sys, ctx := newReentrancySystem(t)
-		receiver := spawnReentrancyActor(t, sys, ctx, "reply-receiver", func(*ReceiveContext) {}, WithReentrancy(ReentrancyAllowAll))
+		receiver := spawnReentrancyActor(t, sys, ctx, "reply-receiver", func(*ReceiveContext) {}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
 		sender := spawnReentrancyActor(t, sys, ctx, "reply-sender", func(*ReceiveContext) {})
 
-		okState := newRequestState("corr-ok", ReentrancyAllowAll, receiver)
+		okState := newRequestState("corr-ok", reentrancy.AllowAll, receiver)
 		require.NoError(t, receiver.registerRequestState(okState))
 		t.Cleanup(func() { receiver.deregisterRequestState(okState) })
 
@@ -1124,7 +1119,7 @@ func TestSendAsyncResponsePaths(t *testing.T) {
 			t.Fatal("expected async response")
 		}
 
-		errState := newRequestState("corr-err", ReentrancyAllowAll, receiver)
+		errState := newRequestState("corr-err", reentrancy.AllowAll, receiver)
 		require.NoError(t, receiver.registerRequestState(errState))
 		t.Cleanup(func() { receiver.deregisterRequestState(errState) })
 
@@ -1162,14 +1157,14 @@ func TestCancelInFlightRequestsBranches(t *testing.T) {
 	})
 
 	t.Run("skips nil and completed states", func(t *testing.T) {
-		pid := &PID{reentrancy: newReentrancyState(ReentrancyAllowAll, 0)}
+		pid := &PID{reentrancy: newReentrancyState(reentrancy.AllowAll, 0)}
 		pid.reentrancy.requestStates.Set("nil", nil)
 
-		completed := newRequestState("done", ReentrancyAllowAll, pid)
+		completed := newRequestState("done", reentrancy.AllowAll, pid)
 		completed.complete(nil, nil)
 		pid.reentrancy.requestStates.Set("done", completed)
 
-		stash := newRequestState("stash", ReentrancyStashNonReentrant, pid)
+		stash := newRequestState("stash", reentrancy.StashNonReentrant, pid)
 		pid.reentrancy.requestStates.Set("stash", stash)
 
 		pid.reentrancy.inFlightCount.Store(1)
@@ -1212,7 +1207,7 @@ func (b *blockingProto) ProtoReflect() protoreflect.Message {
 	return (&testpb.TestWait{}).ProtoReflect()
 }
 
-func newRunningPIDWithReentrancy(mode ReentrancyMode, maxInFlight int) *PID {
+func newRunningPIDWithReentrancy(mode reentrancy.Mode, maxInFlight int) *PID {
 	pid := &PID{
 		logger:     log.DiscardLogger,
 		mailbox:    NewUnboundedMailbox(),

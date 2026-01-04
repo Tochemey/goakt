@@ -191,13 +191,7 @@ func (r *relocator) spawnRemoteActor(ctx context.Context, actor *internalpb.Acto
 		PassivationStrategy: codec.DecodePassivationStrategy(actor.GetPassivationStrategy()),
 		EnableStashing:      actor.GetEnableStash(),
 		Role:                actor.Role,
-	}
-
-	if actor.GetReentrancy() != nil {
-		spawnRequest.Reentrancy = &remote.ReentrancyConfig{
-			Mode:        remoteReentrancyModeFromInternal(actor.GetReentrancy().GetMode()),
-			MaxInFlight: int(actor.GetReentrancy().GetMaxInFlight()),
-		}
+		Reentrancy:          codec.DecodeReentrancy(actor.GetReentrancy()),
 	}
 
 	if actor.GetSupervisor() != nil {
@@ -375,8 +369,8 @@ func (r *relocator) recreateLocally(ctx context.Context, props *internalpb.Actor
 	}
 
 	if props.GetReentrancy() != nil {
-		reentrancy := reentrancyConfigFromProto(props.GetReentrancy())
-		spawnOpts = append(spawnOpts, WithReentrancy(reentrancy.mode, WithMaxInFlight(reentrancy.maxInFlight)))
+		reentrancy := codec.DecodeReentrancy(props.GetReentrancy())
+		spawnOpts = append(spawnOpts, WithReentrancy(reentrancy))
 	}
 
 	if props.GetSupervisor() != nil {
@@ -395,18 +389,6 @@ func (r *relocator) recreateLocally(ctx context.Context, props *internalpb.Actor
 
 	_, err = r.pid.ActorSystem().Spawn(ctx, addr.Name(), actor, spawnOpts...)
 	return err
-}
-
-func remoteReentrancyModeFromInternal(mode internalpb.ReentrancyMode) remote.ReentrancyMode {
-	// remoteReentrancyModeFromInternal maps internal enums to remote spawn modes.
-	switch mode {
-	case internalpb.ReentrancyMode_REENTRANCY_MODE_ALLOW_ALL:
-		return remote.ReentrancyAllowAll
-	case internalpb.ReentrancyMode_REENTRANCY_MODE_STASH_NON_REENTRANT:
-		return remote.ReentrancyStashNonReentrant
-	default:
-		return remote.ReentrancyOff
-	}
 }
 
 // allocateGrains distributes grains among the leader and peers for rebalancing.

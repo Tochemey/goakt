@@ -32,6 +32,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/pointer"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/passivation"
+	"github.com/tochemey/goakt/v3/reentrancy"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/supervisor"
 )
@@ -144,16 +145,10 @@ func withPassivationStrategy(strategy passivation.Strategy) pidOption {
 }
 
 // withReentrancy sets the async request behavior for the actor.
-//
-// Design decision: enabling reentrancy also ensures a stash buffer so the
-// stash-based policy can defer messages without additional user setup.
-func withReentrancy(config *reentrancyConfig) pidOption {
+func withReentrancy(reentrancy *reentrancy.Reentrancy) pidOption {
 	return func(pid *PID) {
-		if config != nil {
-			pid.reentrancy = newReentrancyState(config.mode, config.maxInFlight)
-			if pid.stashState == nil {
-				pid.stashState = &stashState{box: NewUnboundedMailbox()}
-			}
+		if reentrancy != nil {
+			pid.reentrancy = newReentrancyState(reentrancy.Mode(), reentrancy.MaxInFlight())
 		}
 	}
 }

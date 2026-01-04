@@ -59,6 +59,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/ticker"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/passivation"
+	"github.com/tochemey/goakt/v3/reentrancy"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/supervisor"
 )
@@ -1294,11 +1295,11 @@ func (pid *PID) request(ctx context.Context, to *PID, message proto.Message, opt
 		mode = config.mode
 	}
 
-	if mode == ReentrancyOff {
+	if mode == reentrancy.Off {
 		return nil, gerrors.ErrReentrancyDisabled
 	}
 
-	if !isValidReentrancyMode(mode) {
+	if !reentrancy.IsValidReentrancyMode(mode) {
 		return nil, gerrors.ErrInvalidReentrancyMode
 	}
 
@@ -1350,11 +1351,11 @@ func (pid *PID) requestName(ctx context.Context, actorName string, message proto
 		mode = config.mode
 	}
 
-	if mode == ReentrancyOff {
+	if mode == reentrancy.Off {
 		return nil, gerrors.ErrReentrancyDisabled
 	}
 
-	if !isValidReentrancyMode(mode) {
+	if !reentrancy.IsValidReentrancyMode(mode) {
 		return nil, gerrors.ErrInvalidReentrancyMode
 	}
 
@@ -1634,7 +1635,10 @@ func (pid *PID) registerRequestState(state *requestState) error {
 		pid.reentrancy.inFlightCount.Inc()
 	}
 
-	if state.mode == ReentrancyStashNonReentrant {
+	if state.mode == reentrancy.StashNonReentrant {
+		if pid.stashState == nil {
+			pid.stashState = &stashState{box: NewUnboundedMailbox()}
+		}
 		pid.reentrancy.blockingCount.Inc()
 	}
 
@@ -1657,7 +1661,7 @@ func (pid *PID) deregisterRequestState(state *requestState) {
 
 	pid.reentrancy.requestStates.Delete(state.id)
 	pid.reentrancy.inFlightCount.Dec()
-	if state.mode == ReentrancyStashNonReentrant {
+	if state.mode == reentrancy.StashNonReentrant {
 		remaining := pid.reentrancy.blockingCount.Dec()
 		if remaining == 0 {
 			if err := pid.unstashAll(); err != nil {
@@ -1786,7 +1790,7 @@ func (pid *PID) cancelInFlightRequests(reason error) {
 		}
 		pid.reentrancy.requestStates.Delete(key)
 		pid.reentrancy.inFlightCount.Dec()
-		if state.mode == ReentrancyStashNonReentrant {
+		if state.mode == reentrancy.StashNonReentrant {
 			pid.reentrancy.blockingCount.Dec()
 		}
 		state.stopTimeoutIfSet()
@@ -2730,10 +2734,7 @@ func (pid *PID) toWireActor() (*internalpb.Actor, error) {
 
 	var reentrancy *internalpb.ReentrancyConfig
 	if pid.reentrancy != nil {
-		reentrancy = (&reentrancyConfig{
-			mode:        pid.reentrancy.mode,
-			maxInFlight: pid.reentrancy.maxInFlight,
-		}).toProto()
+		reentrancy = pid.reentrancy.toProto()
 	}
 
 	return &internalpb.Actor{

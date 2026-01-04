@@ -227,6 +227,9 @@ func (rctx *ReceiveContext) Become(behavior Behavior) {
 // This is useful when the message cannot be handled under the current behavior
 // (e.g., waiting for some state or handshake). Messages are preserved in arrival order.
 //
+// Stash requires a stash buffer (enable via WithStashing or a stash-mode reentrancy
+// request); otherwise ErrStashBufferNotSet is recorded.
+//
 // Beware that indiscriminate stashing can grow memory usage. Always ensure stashed
 // messages are eventually unstashed.
 func (rctx *ReceiveContext) Stash() {

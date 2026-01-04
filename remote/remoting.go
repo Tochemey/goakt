@@ -802,10 +802,7 @@ func (r *remoting) RemoteSpawn(ctx context.Context, host string, port int, spawn
 
 	var reentrancy *internalpb.ReentrancyConfig
 	if spawnRequest.Reentrancy != nil {
-		reentrancy = &internalpb.ReentrancyConfig{
-			Mode:        toInternalReentrancyMode(spawnRequest.Reentrancy.Mode),
-			MaxInFlight: uint32(spawnRequest.Reentrancy.MaxInFlight),
-		}
+		reentrancy = codec.EncodeReentrancy(spawnRequest.Reentrancy)
 	}
 
 	remoteClient := r.RemotingServiceClient(host, port)
@@ -836,18 +833,6 @@ func (r *remoting) RemoteSpawn(ctx context.Context, host string, port int, spawn
 		return mapRemoteSpawnError(err)
 	}
 	return nil
-}
-
-func toInternalReentrancyMode(mode ReentrancyMode) internalpb.ReentrancyMode {
-	// toInternalReentrancyMode maps remote spawn modes to protobuf enums.
-	switch mode {
-	case ReentrancyAllowAll:
-		return internalpb.ReentrancyMode_REENTRANCY_MODE_ALLOW_ALL
-	case ReentrancyStashNonReentrant:
-		return internalpb.ReentrancyMode_REENTRANCY_MODE_STASH_NON_REENTRANT
-	default:
-		return internalpb.ReentrancyMode_REENTRANCY_MODE_OFF
-	}
 }
 
 // RemoteReSpawn requests a restart of an existing actor on the remote node.
