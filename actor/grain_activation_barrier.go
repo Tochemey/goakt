@@ -28,7 +28,7 @@ import (
 	"time"
 
 	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/internal/registry"
+	"github.com/tochemey/goakt/v3/internal/types"
 )
 
 // grainActivationBarrier is a startup coordination gate that delays grain activation
@@ -60,7 +60,7 @@ type grainActivationBarrier struct {
 	enabled  bool
 	minPeers uint32
 	timeout  time.Duration
-	ready    chan registry.Unit
+	ready    chan types.Unit
 	once     sync.Once
 }
 
@@ -72,7 +72,7 @@ func newGrainActivationBarrier(minPeers uint32, timeout time.Duration) *grainAct
 		enabled:  true,
 		minPeers: minPeers,
 		timeout:  timeout,
-		ready:    make(chan registry.Unit),
+		ready:    make(chan types.Unit),
 	}
 }
 

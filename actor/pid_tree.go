@@ -28,16 +28,16 @@ import (
 
 	"go.uber.org/atomic"
 
-	"github.com/tochemey/goakt/v3/internal/ds"
+	"github.com/tochemey/goakt/v3/internal/xsync"
 )
 
 // pidNode represents a node in the PID tree.
 type pidNode struct {
-	pid         atomic.Pointer[PID]       // PID associated with this node.
-	parent      atomic.Pointer[PID]       // Parent PID; nil if root.
-	watchers    *ds.Map[string, *PID]     // Actors watching this node.
-	watchees    *ds.Map[string, *PID]     // Actors this node is watching.
-	descendants *ds.Map[string, *pidNode] // Direct children.
+	pid         atomic.Pointer[PID]          // PID associated with this node.
+	parent      atomic.Pointer[PID]          // Parent PID; nil if root.
+	watchers    *xsync.Map[string, *PID]     // Actors watching this node.
+	watchees    *xsync.Map[string, *PID]     // Actors this node is watching.
+	descendants *xsync.Map[string, *pidNode] // Direct children.
 }
 
 // value returns the PID stored in the node, or nil if not set.
@@ -48,11 +48,11 @@ func (n *pidNode) value() *PID {
 // tree maintains actor relationships in a concurrency-safe structure.
 type tree struct {
 	sync.RWMutex
-	rootNode *pidNode                  // Logical root node (its pid may be nil if cleared).
-	pids     *ds.Map[string, *pidNode] // Index: PID.ID() -> pidNode.
-	names    *ds.Map[string, *pidNode] // Index: PID.Name() -> pidNode.
-	counter  *atomic.Int64             // Number of nodes currently registered.
-	noSender *PID                      // Cached NoSender (set on first root add).
+	rootNode *pidNode                     // Logical root node (its pid may be nil if cleared).
+	pids     *xsync.Map[string, *pidNode] // Index: PID.ID() -> pidNode.
+	names    *xsync.Map[string, *pidNode] // Index: PID.Name() -> pidNode.
+	counter  *atomic.Int64                // Number of nodes currently registered.
+	noSender *PID                         // Cached NoSender (set on first root add).
 }
 
 // newTree creates and returns a new PID tree.
@@ -60,14 +60,14 @@ type tree struct {
 // Space Complexity: O(1) (excluding the internal empty maps allocated).
 func newTree() *tree {
 	return &tree{
-		pids:    ds.NewMap[string, *pidNode](),
-		names:   ds.NewMap[string, *pidNode](),
+		pids:    xsync.NewMap[string, *pidNode](),
+		names:   xsync.NewMap[string, *pidNode](),
 		counter: atomic.NewInt64(0),
 		rootNode: &pidNode{
 			pid:         atomic.Pointer[PID]{},
-			watchers:    ds.NewMap[string, *PID](),
-			watchees:    ds.NewMap[string, *PID](),
-			descendants: ds.NewMap[string, *pidNode](),
+			watchers:    xsync.NewMap[string, *PID](),
+			watchees:    xsync.NewMap[string, *PID](),
+			descendants: xsync.NewMap[string, *pidNode](),
 		},
 	}
 }
@@ -139,9 +139,9 @@ func (x *tree) addNode(parent, pid *PID) error {
 
 	childNode := &pidNode{
 		pid:         atomic.Pointer[PID]{},
-		watchers:    ds.NewMap[string, *PID](),
-		watchees:    ds.NewMap[string, *PID](),
-		descendants: ds.NewMap[string, *pidNode](),
+		watchers:    xsync.NewMap[string, *PID](),
+		watchees:    xsync.NewMap[string, *PID](),
+		descendants: xsync.NewMap[string, *pidNode](),
 	}
 	childNode.pid.Store(pid)
 	childNode.parent.Store(parent)
@@ -489,9 +489,9 @@ func (x *tree) reset() {
 
 	x.rootNode = &pidNode{
 		pid:         atomic.Pointer[PID]{},
-		watchers:    ds.NewMap[string, *PID](),
-		watchees:    ds.NewMap[string, *PID](),
-		descendants: ds.NewMap[string, *pidNode](),
+		watchers:    xsync.NewMap[string, *PID](),
+		watchees:    xsync.NewMap[string, *PID](),
+		descendants: xsync.NewMap[string, *pidNode](),
 	}
 	x.pids.Reset()
 	x.names.Reset()

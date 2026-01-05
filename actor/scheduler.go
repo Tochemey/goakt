@@ -36,7 +36,7 @@ import (
 
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/internal/ds"
+	"github.com/tochemey/goakt/v3/internal/xsync"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/remote"
 )
@@ -68,7 +68,7 @@ type scheduler struct {
 	// remoting engine
 	remoting remote.Remoting
 	// specifies the job keys mapping
-	scheduledKeys *ds.Map[string, *quartz.JobKey]
+	scheduledKeys *xsync.Map[string, *quartz.JobKey]
 }
 
 // newScheduler creates an instance of scheduler
@@ -93,7 +93,7 @@ func newScheduler(logger log.Logger, shutdownTimeout time.Duration, opts ...sche
 		quartzScheduler: quartzScheduler,
 		logger:          logger,
 		shutdownTimeout: shutdownTimeout,
-		scheduledKeys:   ds.NewMap[string, *quartz.JobKey](),
+		scheduledKeys:   xsync.NewMap[string, *quartz.JobKey](),
 	}
 
 	// set the custom options to override the default values

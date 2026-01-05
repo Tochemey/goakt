@@ -32,9 +32,9 @@ import (
 	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
-	"github.com/tochemey/goakt/v3/internal/ds"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/registry"
+	"github.com/tochemey/goakt/v3/internal/types"
+	"github.com/tochemey/goakt/v3/internal/xsync"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/supervisor"
@@ -57,8 +57,8 @@ type key struct {
 type topicActor struct {
 	pid *PID
 	// topics holds the list of all topics and their subscribers
-	topics    *ds.Map[string, *ds.Map[string, *PID]]
-	processed *ds.Map[key, registry.Unit]
+	topics    *xsync.Map[string, *xsync.Map[string, *PID]]
+	processed *xsync.Map[key, types.Unit]
 	logger    log.Logger
 
 	cluster     cluster.Cluster
@@ -72,8 +72,8 @@ var _ Actor = (*topicActor)(nil)
 // newTopicActor creates a new cluster pubsub mediator.
 func newTopicActor(remoting remote.Remoting) Actor {
 	return &topicActor{
-		topics:    ds.NewMap[string, *ds.Map[string, *PID]](),
-		processed: ds.NewMap[key, registry.Unit](),
+		topics:    xsync.NewMap[string, *xsync.Map[string, *PID]](),
+		processed: xsync.NewMap[key, types.Unit](),
 		remoting:  remoting,
 	}
 }
@@ -137,7 +137,7 @@ func (x *topicActor) handlePublish(ctx *ReceiveContext) {
 		}
 
 		// mark the message as processed
-		x.processed.Set(id, registry.Unit{})
+		x.processed.Set(id, types.Unit{})
 
 		cctx := context.WithoutCancel(ctx.Context())
 		var wg sync.WaitGroup
@@ -285,7 +285,7 @@ func (x *topicActor) handleSubscribe(ctx *ReceiveContext) {
 		}
 
 		// here the topic does not exist
-		subscribers := ds.NewMap[string, *PID]()
+		subscribers := xsync.NewMap[string, *PID]()
 		subscribers.Set(sender.ID(), sender)
 		x.topics.Set(topic, subscribers)
 		ctx.Watch(sender)

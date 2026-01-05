@@ -29,7 +29,7 @@ import (
 	"time"
 
 	"github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/internal/ds"
+	"github.com/tochemey/goakt/v3/internal/xsync"
 )
 
 // Strategy represents the type of supervision strategy used by an actor's supervisor.
@@ -211,7 +211,7 @@ type Supervisor struct {
 	// Specifies the time range to restart the faulty actor
 	timeout time.Duration
 
-	directives *ds.Map[string, Directive]
+	directives *xsync.Map[string, Directive]
 }
 
 // NewSupervisor creates a new instance of supervisor behavior for managing actor supervision.
@@ -231,7 +231,7 @@ func NewSupervisor(opts ...SupervisorOption) *Supervisor {
 	s := &Supervisor{
 		Mutex:      sync.Mutex{},
 		strategy:   OneForOneStrategy,
-		directives: ds.NewMap[string, Directive](),
+		directives: xsync.NewMap[string, Directive](),
 		maxRetries: 0,
 		timeout:    -1,
 	}
@@ -290,7 +290,7 @@ func (s *Supervisor) Timeout() time.Duration {
 func (s *Supervisor) Reset() {
 	s.Lock()
 	s.strategy = OneForAllStrategy
-	s.directives = ds.NewMap[string, Directive]()
+	s.directives = xsync.NewMap[string, Directive]()
 	s.Unlock()
 }
 
@@ -346,7 +346,7 @@ func (s *Supervisor) SetDirectiveByType(errorType string, directive Directive) {
 	}
 	s.Lock()
 	if s.directives == nil {
-		s.directives = ds.NewMap[string, Directive]()
+		s.directives = xsync.NewMap[string, Directive]()
 	}
 	s.directives.Set(errorType, directive)
 	s.Unlock()

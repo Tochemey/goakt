@@ -58,12 +58,13 @@ import (
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
-	"github.com/tochemey/goakt/v3/internal/ds"
 	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/internal/registry"
+	"github.com/tochemey/goakt/v3/internal/types"
+	"github.com/tochemey/goakt/v3/internal/xsync"
 	"github.com/tochemey/goakt/v3/log"
 	mockscluster "github.com/tochemey/goakt/v3/mocks/cluster"
 	mocksremote "github.com/tochemey/goakt/v3/mocks/remote"
@@ -155,7 +156,7 @@ func MockSupervisionPID(t *testing.T) *PID {
 	return &PID{
 		logger:                log.DiscardLogger,
 		address:               address.New("child", "test-system", "127.0.0.1", 0),
-		supervisionStopSignal: make(chan registry.Unit, 1),
+		supervisionStopSignal: make(chan types.Unit, 1),
 		eventsStream:          eventstream.New(),
 	}
 }
@@ -1558,7 +1559,7 @@ func MockSimpleClusterReadyActorSystem(rem remote.Remoting, cl cluster.Cluster, 
 	sys.started.Store(true)
 	sys.clusterEnabled.Store(true)
 	sys.shuttingDown.Store(false)
-	sys.grains = ds.NewMap[string, *grainPID]()
+	sys.grains = xsync.NewMap[string, *grainPID]()
 	sys.registry = registry.NewRegistry()
 	sys.reflection = newReflection(sys.registry)
 	sys.grainsQueue = make(chan *internalpb.Grain, 1)

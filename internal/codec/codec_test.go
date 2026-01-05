@@ -37,9 +37,9 @@ import (
 
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/extension"
-	"github.com/tochemey/goakt/v3/internal/ds"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/registry"
+	"github.com/tochemey/goakt/v3/internal/xsync"
 	mocks "github.com/tochemey/goakt/v3/mocks/extension"
 	"github.com/tochemey/goakt/v3/passivation"
 	"github.com/tochemey/goakt/v3/reentrancy"
@@ -361,7 +361,7 @@ func TestEncodeSortsDirectives(t *testing.T) {
 
 func TestEncodeSupervisorSkipsEmptyErrorType(t *testing.T) {
 	sup := &supervisor.Supervisor{}
-	directives := ds.NewMap[string, supervisor.Directive]()
+	directives := xsync.NewMap[string, supervisor.Directive]()
 	directives.Set("", supervisor.ResumeDirective)
 	setSupervisorDirectives(sup, directives)
 
@@ -440,7 +440,7 @@ func errorType(err error) string {
 	return rtype.String()
 }
 
-func setSupervisorDirectives(sup *supervisor.Supervisor, directives *ds.Map[string, supervisor.Directive]) {
+func setSupervisorDirectives(sup *supervisor.Supervisor, directives *xsync.Map[string, supervisor.Directive]) {
 	field := reflect.ValueOf(sup).Elem().FieldByName("directives")
 	reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).Elem().Set(reflect.ValueOf(directives))
 }

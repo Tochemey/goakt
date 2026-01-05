@@ -39,8 +39,8 @@ import (
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/codec"
-	"github.com/tochemey/goakt/v3/internal/ds"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
+	"github.com/tochemey/goakt/v3/internal/xsync"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/passivation"
 	"github.com/tochemey/goakt/v3/remote"
@@ -65,7 +65,7 @@ type grainPID struct {
 	remoting   remote.Remoting
 
 	// the list of dependencies
-	dependencies *ds.Map[string, extension.Dependency]
+	dependencies *xsync.Map[string, extension.Dependency]
 	activated    atomic.Bool
 	activatedAt  atomic.Int64
 	config       *grainConfig

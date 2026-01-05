@@ -49,7 +49,6 @@ import (
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/chain"
 	"github.com/tochemey/goakt/v3/internal/codec"
-	"github.com/tochemey/goakt/v3/internal/ds"
 	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/future"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
@@ -57,6 +56,8 @@ import (
 	"github.com/tochemey/goakt/v3/internal/metric"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/internal/ticker"
+	"github.com/tochemey/goakt/v3/internal/types"
+	"github.com/tochemey/goakt/v3/internal/xsync"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/passivation"
 	"github.com/tochemey/goakt/v3/reentrancy"
@@ -142,7 +143,7 @@ type PID struct {
 	// supervisor strategy
 	supervisor               *supervisor.Supervisor
 	supervisionChan          chan *supervisionSignal
-	supervisionStopSignal    chan registry.Unit
+	supervisionStopSignal    chan types.Unit
 	supervisionStopRequested atomic.Bool
 
 	// atomic flag indicating whether the actor is processing messages
@@ -154,7 +155,7 @@ type PID struct {
 	state     atomic.Uint32
 
 	// the list of dependencies
-	dependencies *ds.Map[string, extension.Dependency]
+	dependencies *xsync.Map[string, extension.Dependency]
 
 	passivationStrategy passivation.Strategy
 	passivationManager  *passivationManager
@@ -190,7 +191,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		address:               address,
 		mailbox:               NewUnboundedMailbox(),
 		supervisionChan:       make(chan *supervisionSignal, 1),
-		supervisionStopSignal: make(chan registry.Unit, 1),
+		supervisionStopSignal: make(chan types.Unit, 1),
 	}
 
 	pid.initMaxRetries.Store(DefaultInitMaxRetries)
@@ -2193,7 +2194,7 @@ func (pid *PID) stopSupervisionLoop() {
 
 	if pid.supervisionStopRequested.CompareAndSwap(false, true) {
 		select {
-		case pid.supervisionStopSignal <- registry.Unit{}:
+		case pid.supervisionStopSignal <- types.Unit{}:
 			return
 		default:
 			// channel already has a stop signal queued
@@ -2843,11 +2844,11 @@ func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *t
 		didShutdown = true
 		tk := ticker.New(10 * time.Millisecond)
 		tk.Start()
-		tickerStopSig := make(chan registry.Unit, 1)
+		tickerStopSig := make(chan types.Unit, 1)
 		go func() {
 			for range tk.Ticks {
 				if !pid.IsRunning() {
-					tickerStopSig <- registry.Unit{}
+					tickerStopSig <- types.Unit{}
 					return
 				}
 			}
