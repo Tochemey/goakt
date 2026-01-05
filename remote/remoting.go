@@ -46,6 +46,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/id"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
+	"github.com/tochemey/goakt/v3/internal/pointer"
 	"github.com/tochemey/goakt/v3/internal/quorum"
 	"github.com/tochemey/goakt/v3/internal/size"
 	"github.com/tochemey/goakt/v3/internal/strconvx"
@@ -1058,6 +1059,7 @@ func getGrainFromRequest(host string, port int, grainRequest *GrainRequest) (*in
 		Dependencies:      dependencies,
 		ActivationRetries: int32(grainRequest.ActivationRetries),
 		ActivationTimeout: durationpb.New(grainRequest.ActivationTimeout),
+		MailboxCapacity:   pointer.To(grainRequest.MailboxCapacity),
 	}
 
 	return grain, nil
