@@ -23,6 +23,7 @@
 package actor
 
 import (
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -185,4 +186,54 @@ func TestGrainMailboxCapacityZeroOrNegative_IsUnbounded(t *testing.T) {
 
 	require.EqualValues(t, 1000, m0.Len())
 	require.EqualValues(t, 1000, mNeg.Len())
+}
+
+func TestGrainMailboxDequeue_WaitsForLinkAfterTailSwap(t *testing.T) {
+	m := newGrainMailbox(0) // unbounded or bounded doesn't matter for this path
+
+	// Arrange: create the node we will "half-enqueue"
+	ctx := &GrainContext{}
+	n := grainNodePool.Get().(*grainNode)
+	n.value.Store(ctx)
+	n.next.Store(nil)
+
+	// Step 1 of enqueue: advance tail, but DO NOT link prev.next yet.
+	prev := m.tail.Swap(n)
+
+	// Sanity: head is still the dummy; tail is now n; dummy.next is still nil.
+	head := m.head.Load()
+	require.Same(t, prev, head)
+	require.Nil(t, head.next.Load())
+	require.Same(t, n, m.tail.Load())
+
+	// Start consumer. It should enter the "wait for link" loop and block.
+	resultCh := make(chan *GrainContext, 1)
+	go func() {
+		resultCh <- m.Dequeue()
+	}()
+
+	// Give it a moment; it should NOT return yet (would be a spurious empty).
+	select {
+	case v := <-resultCh:
+		t.Fatalf("Dequeue returned early (spurious empty or wrong behavior): %+v", v)
+	case <-time.After(10 * time.Millisecond):
+		// good: likely stuck in the for next == nil loop
+	}
+
+	// Step 2 of enqueue: publish the link.
+	prev.next.Store(n)
+
+	// Now Dequeue should complete and return ctx.
+	select {
+	case v := <-resultCh:
+		require.Equal(t, ctx, v)
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("Dequeue did not return after publishing prev.next")
+	}
+
+	// Optional: drain again; should be empty.
+	require.Nil(t, m.Dequeue())
+
+	// Cleanup: ensure no goroutine is stuck (best-effort yield).
+	runtime.Gosched()
 }
