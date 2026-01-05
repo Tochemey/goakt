@@ -415,6 +415,8 @@ func TestRelocation(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, sender)
 
+	pause.For(time.Second)
+
 	// let us access some of the node2 actors from node 1 and  node 3
 	actorName := "Actor2-1"
 	err = sender.SendAsync(ctx, actorName, new(testpb.TestSend))
