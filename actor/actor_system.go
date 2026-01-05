@@ -66,7 +66,6 @@ import (
 	"github.com/tochemey/goakt/v3/internal/codec"
 	"github.com/tochemey/goakt/v3/internal/compression/brotli"
 	"github.com/tochemey/goakt/v3/internal/compression/zstd"
-	"github.com/tochemey/goakt/v3/internal/ds"
 	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
@@ -76,7 +75,9 @@ import (
 	"github.com/tochemey/goakt/v3/internal/pointer"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/internal/ticker"
+	"github.com/tochemey/goakt/v3/internal/types"
 	"github.com/tochemey/goakt/v3/internal/validation"
+	"github.com/tochemey/goakt/v3/internal/xsync"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/memory"
 	"github.com/tochemey/goakt/v3/passivation"
@@ -724,7 +725,7 @@ type ActorSystem interface {
 	findRoutee(routeeName string) (*PID, bool)
 	isStopping() bool
 	getRemoting() remote.Remoting
-	getGrains() *ds.Map[string, *grainPID]
+	getGrains() *xsync.Map[string, *grainPID]
 	recreateGrain(ctx context.Context, props *internalpb.Grain) error
 	decreaseActorsCounter()
 	increaseActorsCounter()
@@ -824,16 +825,16 @@ type actorSystem struct {
 	tlsInfo           *gtls.Info
 	pubsubEnabled     atomic.Bool
 	relocationEnabled atomic.Bool
-	extensions        *ds.Map[string, extension.Extension]
+	extensions        *xsync.Map[string, extension.Extension]
 
 	shuttingDown     atomic.Bool
 	grainsQueue      chan *internalpb.Grain
-	grains           *ds.Map[string, *grainPID]
+	grains           *xsync.Map[string, *grainPID]
 	grainBarrier     *grainActivationBarrier
 	grainActivation  singleflight.Group
 	evictionStrategy *EvictionStrategy
 	evictionInterval time.Duration
-	evictionStopSig  chan registry.Unit
+	evictionStopSig  chan types.Unit
 
 	metricProvider *metric.Provider
 }
@@ -900,11 +901,11 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		shutdownHooks:       make([]ShutdownHook, 0),
 		rebalancedNodes:     goset.NewSet[string](),
 		topicActor:          nil,
-		extensions:          ds.NewMap[string, extension.Extension](),
+		extensions:          xsync.NewMap[string, extension.Extension](),
 		grainsQueue:         make(chan *internalpb.Grain, 10),
-		grains:              ds.NewMap[string, *grainPID](),
+		grains:              xsync.NewMap[string, *grainPID](),
 		askTimeout:          DefaultAskTimeout,
-		evictionStopSig:     make(chan registry.Unit, 1),
+		evictionStopSig:     make(chan types.Unit, 1),
 	}
 
 	system.startedAt.Store(0)
@@ -960,7 +961,7 @@ func (x *actorSystem) Run(ctx context.Context, startHook func(ctx context.Contex
 
 	// wait for interruption/termination
 	notifier := make(chan os.Signal, 1)
-	done := make(chan registry.Unit, 1)
+	done := make(chan types.Unit, 1)
 	signal.Notify(notifier, syscall.SIGINT, syscall.SIGTERM)
 
 	// wait for a shutdown signal, and then shutdown
@@ -977,7 +978,7 @@ func (x *actorSystem) Run(ctx context.Context, startHook func(ctx context.Contex
 		}
 
 		signal.Stop(notifier)
-		done <- registry.Unit{}
+		done <- types.Unit{}
 	}()
 	<-done
 	pid := os.Getpid()
@@ -1658,10 +1659,10 @@ func (x *actorSystem) Actors() []*PID {
 func (x *actorSystem) ActorRefs(ctx context.Context, timeout time.Duration) ([]ActorRef, error) {
 	pids := x.Actors()
 	actorRefs := make([]ActorRef, len(pids))
-	uniques := make(map[string]registry.Unit)
+	uniques := make(map[string]types.Unit)
 	for index, pid := range pids {
 		actorRefs[index] = fromPID(pid)
-		uniques[pid.Address().String()] = registry.Unit{}
+		uniques[pid.Address().String()] = types.Unit{}
 	}
 
 	if x.InCluster() {
@@ -2517,7 +2518,7 @@ func (x *actorSystem) getRemoting() remote.Remoting {
 }
 
 // getGrains returns the grains map of the actor system
-func (x *actorSystem) getGrains() *ds.Map[string, *grainPID] {
+func (x *actorSystem) getGrains() *xsync.Map[string, *grainPID] {
 	x.locker.RLock()
 	grains := x.grains
 	x.locker.RUnlock()
@@ -3717,7 +3718,7 @@ func (x *actorSystem) evictionLoop() {
 	x.logger.Info("start the system wide eviction loop", x.Name())
 	x.logger.Infof("%s eviction policy %s", x.Name(), x.evictionStrategy.String())
 	var clock *ticker.Ticker
-	tickerStopSig := make(chan registry.Unit, 1)
+	tickerStopSig := make(chan types.Unit, 1)
 	clock = ticker.New(x.evictionInterval)
 	clock.Start()
 
@@ -3727,7 +3728,7 @@ func (x *actorSystem) evictionLoop() {
 			case <-clock.Ticks:
 				x.runEviction()
 			case <-x.evictionStopSig:
-				tickerStopSig <- registry.Unit{}
+				tickerStopSig <- types.Unit{}
 				return
 			}
 		}

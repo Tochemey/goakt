@@ -64,12 +64,12 @@ import (
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
-	"github.com/tochemey/goakt/v3/internal/ds"
 	internalpb "github.com/tochemey/goakt/v3/internal/internalpb"
 	internalpbconnect "github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v3/internal/metric"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/internal/registry"
+	"github.com/tochemey/goakt/v3/internal/xsync"
 	"github.com/tochemey/goakt/v3/log"
 	mockscluster "github.com/tochemey/goakt/v3/mocks/cluster"
 	mocksdiscovery "github.com/tochemey/goakt/v3/mocks/discovery"
@@ -7549,9 +7549,9 @@ func TestCleanupStaleLocalActors(t *testing.T) {
 		addPIDNode := func(pid *PID) {
 			node := &pidNode{
 				pid:         atomic.Pointer[PID]{},
-				watchers:    ds.NewMap[string, *PID](),
-				watchees:    ds.NewMap[string, *PID](),
-				descendants: ds.NewMap[string, *pidNode](),
+				watchers:    xsync.NewMap[string, *PID](),
+				watchees:    xsync.NewMap[string, *PID](),
+				descendants: xsync.NewMap[string, *pidNode](),
 			}
 			node.pid.Store(pid)
 			system.actors.pids.Set(pid.ID(), node)
@@ -7601,7 +7601,7 @@ func TestResyncActors_ErrorPaths(t *testing.T) {
 	system.locker.Lock()
 	system.actors = newTree()
 	system.actors.noSender = system.noSender
-	system.grains = ds.NewMap[string, *grainPID]()
+	system.grains = xsync.NewMap[string, *grainPID]()
 	system.locker.Unlock()
 
 	dependency := mocksextension.NewDependency(t)
@@ -7610,7 +7610,7 @@ func TestResyncActors_ErrorPaths(t *testing.T) {
 	pid := &PID{
 		actor:        NewMockActor(),
 		address:      address.New("resync-actor", system.name, "127.0.0.1", int(system.remoteConfig.BindPort())),
-		dependencies: ds.NewMap[string, extension.Dependency](),
+		dependencies: xsync.NewMap[string, extension.Dependency](),
 		logger:       log.DiscardLogger,
 		actorSystem:  system,
 	}
@@ -7618,9 +7618,9 @@ func TestResyncActors_ErrorPaths(t *testing.T) {
 	pid.setState(runningState, true)
 
 	node := &pidNode{
-		watchers:    ds.NewMap[string, *PID](),
-		watchees:    ds.NewMap[string, *PID](),
-		descendants: ds.NewMap[string, *pidNode](),
+		watchers:    xsync.NewMap[string, *PID](),
+		watchees:    xsync.NewMap[string, *PID](),
+		descendants: xsync.NewMap[string, *pidNode](),
 	}
 	node.pid.Store(pid)
 	system.actors.pids.Set(pid.ID(), node)
@@ -7637,7 +7637,7 @@ func TestResyncGrains_ErrorPaths(t *testing.T) {
 	system := MockReplicationTestSystem(clusterMock)
 
 	system.locker.Lock()
-	system.grains = ds.NewMap[string, *grainPID]()
+	system.grains = xsync.NewMap[string, *grainPID]()
 	system.locker.Unlock()
 
 	dependency := mocksextension.NewDependency(t)
@@ -7666,7 +7666,7 @@ func TestResyncGrains_ErrorPaths(t *testing.T) {
 func TestCleanupCluster_RemoveKindFailure(t *testing.T) {
 	clusterMock := new(mockscluster.Cluster)
 	system := MockReplicationTestSystem(clusterMock)
-	system.grains = ds.NewMap[string, *grainPID]()
+	system.grains = xsync.NewMap[string, *grainPID]()
 
 	actorRef := ActorRef{
 		name:        "singleton-actor",
@@ -7688,7 +7688,7 @@ func TestCleanupCluster_RemoveKindFailure(t *testing.T) {
 func TestCleanupCluster_RemoveActorFailure(t *testing.T) {
 	clusterMock := new(mockscluster.Cluster)
 	system := MockReplicationTestSystem(clusterMock)
-	system.grains = ds.NewMap[string, *grainPID]()
+	system.grains = xsync.NewMap[string, *grainPID]()
 
 	actorRef := ActorRef{
 		name:    "actor",
@@ -7708,7 +7708,7 @@ func TestCleanupCluster_RemoveActorFailure(t *testing.T) {
 func TestCleanupCluster_RemoveGrainFailure(t *testing.T) {
 	clusterMock := new(mockscluster.Cluster)
 	system := MockReplicationTestSystem(clusterMock)
-	system.grains = ds.NewMap[string, *grainPID]()
+	system.grains = xsync.NewMap[string, *grainPID]()
 
 	actorRef := ActorRef{
 		name:    "actor",
@@ -7732,8 +7732,8 @@ func TestCleanupCluster_RemoveGrainFailure(t *testing.T) {
 func TestStopReturnsCleanupClusterError(t *testing.T) {
 	clusterMock := new(mockscluster.Cluster)
 	system := MockReplicationTestSystem(clusterMock)
-	system.grains = ds.NewMap[string, *grainPID]()
-	system.extensions = ds.NewMap[string, extension.Extension]()
+	system.grains = xsync.NewMap[string, *grainPID]()
+	system.extensions = xsync.NewMap[string, extension.Extension]()
 	system.relocating.Store(false)
 	system.actors = newTree()
 	system.actors.noSender = nil
@@ -7752,15 +7752,15 @@ func TestStopReturnsCleanupClusterError(t *testing.T) {
 	pid := &PID{
 		actor:        NewMockActor(),
 		address:      address.New("actor", system.name, "127.0.0.1", 8080),
-		dependencies: ds.NewMap[string, extension.Dependency](),
+		dependencies: xsync.NewMap[string, extension.Dependency](),
 		logger:       log.DiscardLogger,
 		actorSystem:  system,
 	}
 	pid.setState(runningState, true)
 	node := &pidNode{
-		watchers:    ds.NewMap[string, *PID](),
-		watchees:    ds.NewMap[string, *PID](),
-		descendants: ds.NewMap[string, *pidNode](),
+		watchers:    xsync.NewMap[string, *PID](),
+		watchees:    xsync.NewMap[string, *PID](),
+		descendants: xsync.NewMap[string, *pidNode](),
 	}
 	node.pid.Store(pid)
 	system.actors.pids.Set(pid.ID(), node)

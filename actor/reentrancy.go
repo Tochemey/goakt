@@ -32,8 +32,9 @@ import (
 
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/internal/codec"
-	"github.com/tochemey/goakt/v3/internal/ds"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
+	"github.com/tochemey/goakt/v3/internal/types"
+	"github.com/tochemey/goakt/v3/internal/xsync"
 	"github.com/tochemey/goakt/v3/reentrancy"
 )
 
@@ -292,7 +293,7 @@ func (s *requestState) startTimeout(timeout time.Duration) {
 		return
 	}
 
-	stopCh := make(chan struct{})
+	stopCh := make(chan types.Unit)
 	var once sync.Once
 	stop := func() {
 		once.Do(func() {
@@ -332,7 +333,7 @@ func (s *requestState) stopTimeoutIfSet() {
 type reentrancyState struct {
 	mode          reentrancy.Mode
 	maxInFlight   int
-	requestStates *ds.Map[string, *requestState]
+	requestStates *xsync.Map[string, *requestState]
 	inFlightCount atomic.Int64
 	blockingCount atomic.Int64
 }
@@ -344,7 +345,7 @@ func newReentrancyState(mode reentrancy.Mode, maxInFlight int) *reentrancyState 
 	return &reentrancyState{
 		mode:          mode,
 		maxInFlight:   maxInFlight,
-		requestStates: ds.NewMap[string, *requestState](),
+		requestStates: xsync.NewMap[string, *requestState](),
 	}
 }
 

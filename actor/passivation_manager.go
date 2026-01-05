@@ -30,7 +30,7 @@ import (
 
 	"go.uber.org/atomic"
 
-	"github.com/tochemey/goakt/v3/internal/registry"
+	"github.com/tochemey/goakt/v3/internal/types"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/passivation"
 )
@@ -50,9 +50,9 @@ type passivationManager struct {
 	entries map[string]*passivationEntry
 	queue   passivationHeap
 
-	wake     chan registry.Unit
-	stop     chan registry.Unit
-	done     chan registry.Unit
+	wake     chan types.Unit
+	stop     chan types.Unit
+	done     chan types.Unit
 	stopOnce sync.Once
 	started  atomic.Bool
 
@@ -97,9 +97,9 @@ func newPassivationManager(logger log.Logger) *passivationManager {
 		logger:          logger,
 		entries:         make(map[string]*passivationEntry),
 		queue:           passivationHeap{},
-		wake:            make(chan registry.Unit, 1),
-		stop:            make(chan registry.Unit),
-		done:            make(chan registry.Unit),
+		wake:            make(chan types.Unit, 1),
+		stop:            make(chan types.Unit),
+		done:            make(chan types.Unit),
 		messageTriggers: make(chan *passivationEntry, 1024),
 	}
 }
@@ -405,7 +405,7 @@ func (m *passivationManager) notify() {
 
 func (m *passivationManager) notifyLocked() {
 	select {
-	case m.wake <- registry.Unit{}:
+	case m.wake <- types.Unit{}:
 	default:
 	}
 }

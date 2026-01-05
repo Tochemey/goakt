@@ -49,11 +49,11 @@ import (
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
-	"github.com/tochemey/goakt/v3/internal/ds"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/metric"
 	"github.com/tochemey/goakt/v3/internal/pause"
-	"github.com/tochemey/goakt/v3/internal/registry"
+	"github.com/tochemey/goakt/v3/internal/types"
+	"github.com/tochemey/goakt/v3/internal/xsync"
 	"github.com/tochemey/goakt/v3/log"
 	testkit "github.com/tochemey/goakt/v3/mocks/discovery"
 	mocksremote "github.com/tochemey/goakt/v3/mocks/remote"
@@ -1888,7 +1888,7 @@ func TestSupervisorStrategy(t *testing.T) {
 	})
 	t.Run("Suspend does not block when stop already queued", func(t *testing.T) {
 		pid := MockSupervisionPID(t)
-		pid.supervisionStopSignal <- registry.Unit{}
+		pid.supervisionStopSignal <- types.Unit{}
 
 		done := make(chan struct{})
 		go func() {
@@ -6272,7 +6272,7 @@ func TestToWireActorDependencyError(t *testing.T) {
 		actor:        NewMockActor(),
 		address:      address.New("actor-to-wire", "testSys", "127.0.0.1", 0),
 		fieldsLocker: sync.RWMutex{},
-		dependencies: ds.NewMap[string, extension.Dependency](),
+		dependencies: xsync.NewMap[string, extension.Dependency](),
 	}
 
 	expectedErr := assert.AnError

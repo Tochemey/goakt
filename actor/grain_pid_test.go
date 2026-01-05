@@ -34,7 +34,7 @@ import (
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/internal/ds"
+	"github.com/tochemey/goakt/v3/internal/xsync"
 	"github.com/tochemey/goakt/v3/log"
 )
 
@@ -47,7 +47,7 @@ func TestGrainPIDPassivationTrySkipsWhenInactive(t *testing.T) {
 	pid := &grainPID{
 		logger:       log.DiscardLogger,
 		onPoisonPill: atomic.NewBool(false),
-		dependencies: ds.NewMap[string, extension.Dependency](),
+		dependencies: xsync.NewMap[string, extension.Dependency](),
 	}
 	pid.activated.Store(false)
 	pid.deactivateAfter.Store(time.Second)
@@ -60,7 +60,7 @@ func TestGrainPIDPassivationTryFailsOnDeactivateError(t *testing.T) {
 		logger:             log.DiscardLogger,
 		grain:              &MockGrainDeactivationFailure{},
 		onPoisonPill:       atomic.NewBool(false),
-		dependencies:       ds.NewMap[string, extension.Dependency](),
+		dependencies:       xsync.NewMap[string, extension.Dependency](),
 		passivationManager: nil,
 	}
 
@@ -198,7 +198,7 @@ func TestGrainPIDDeactivateReturnsPanicErrorOnDeactivatePanic(t *testing.T) {
 		logger:       log.DiscardLogger,
 		grain:        &MockPanickingActivateDeactivateGrain{},
 		onPoisonPill: atomic.NewBool(false),
-		dependencies: ds.NewMap[string, extension.Dependency](),
+		dependencies: xsync.NewMap[string, extension.Dependency](),
 	}
 	pid.activated.Store(true)
 
@@ -219,7 +219,7 @@ func TestGrainPIDDeactivateReturnsPanicErrorOnDeactivateErrorPanic(t *testing.T)
 		logger:       log.DiscardLogger,
 		grain:        &MockPanickingActivateDeactivateGrain{panicValue: panicErr},
 		onPoisonPill: atomic.NewBool(false),
-		dependencies: ds.NewMap[string, extension.Dependency](),
+		dependencies: xsync.NewMap[string, extension.Dependency](),
 	}
 	pid.activated.Store(true)
 
@@ -238,7 +238,7 @@ func TestGrainPIDDeactivateReturnsPanicErrorOnDeactivatePanicError(t *testing.T)
 		logger:       log.DiscardLogger,
 		grain:        &MockPanickingActivateDeactivateGrain{panicValue: panicErr},
 		onPoisonPill: atomic.NewBool(false),
-		dependencies: ds.NewMap[string, extension.Dependency](),
+		dependencies: xsync.NewMap[string, extension.Dependency](),
 	}
 	pid.activated.Store(true)
 
@@ -257,7 +257,7 @@ func TestGrainPIDHandlePoisonPillRecoversDeactivatePanic(t *testing.T) {
 		logger:       log.DiscardLogger,
 		grain:        &MockPanickingActivateDeactivateGrain{},
 		onPoisonPill: atomic.NewBool(false),
-		dependencies: ds.NewMap[string, extension.Dependency](),
+		dependencies: xsync.NewMap[string, extension.Dependency](),
 	}
 	pid.activated.Store(true)
 

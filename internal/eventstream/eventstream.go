@@ -23,7 +23,7 @@
 package eventstream
 
 import (
-	"github.com/tochemey/goakt/v3/internal/ds"
+	"github.com/tochemey/goakt/v3/internal/xsync"
 )
 
 type Stream interface {
@@ -47,8 +47,8 @@ type Stream interface {
 
 // EventsStream defines the stream broker
 type EventsStream struct {
-	subscribers *ds.Map[string, Subscriber]
-	topics      *ds.Map[string, *ds.Map[string, Subscriber]]
+	subscribers *xsync.Map[string, Subscriber]
+	topics      *xsync.Map[string, *xsync.Map[string, Subscriber]]
 }
 
 // enforce a compilation error
@@ -57,8 +57,8 @@ var _ Stream = (*EventsStream)(nil)
 // New creates an instance of EventsStream
 func New() Stream {
 	return &EventsStream{
-		subscribers: ds.NewMap[string, Subscriber](),
-		topics:      ds.NewMap[string, *ds.Map[string, Subscriber]](),
+		subscribers: xsync.NewMap[string, Subscriber](),
+		topics:      xsync.NewMap[string, *xsync.Map[string, Subscriber]](),
 	}
 }
 
@@ -110,7 +110,7 @@ func (b *EventsStream) Subscribe(subscriber Subscriber, topic string) {
 	}
 
 	// here the topic does not exist
-	subscribers := ds.NewMap[string, Subscriber]()
+	subscribers := xsync.NewMap[string, Subscriber]()
 	subscribers.Set(subscriber.ID(), subscriber)
 	b.topics.Set(topic, subscribers)
 }

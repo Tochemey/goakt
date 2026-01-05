@@ -27,8 +27,8 @@ import (
 
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/hash"
-	"github.com/tochemey/goakt/v3/internal/ds"
 	"github.com/tochemey/goakt/v3/internal/metric"
+	"github.com/tochemey/goakt/v3/internal/xsync"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/supervisor"
@@ -205,7 +205,7 @@ func WithoutRelocation() Option {
 func WithExtensions(extensions ...extension.Extension) Option {
 	return OptionFunc(func(system *actorSystem) {
 		if system.extensions == nil {
-			system.extensions = ds.NewMap[string, extension.Extension]()
+			system.extensions = xsync.NewMap[string, extension.Extension]()
 		}
 		for _, ext := range extensions {
 			system.extensions.Set(ext.ID(), ext)

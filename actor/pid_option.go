@@ -26,10 +26,10 @@ import (
 	"time"
 
 	"github.com/tochemey/goakt/v3/extension"
-	"github.com/tochemey/goakt/v3/internal/ds"
 	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/metric"
 	"github.com/tochemey/goakt/v3/internal/pointer"
+	"github.com/tochemey/goakt/v3/internal/xsync"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/passivation"
 	"github.com/tochemey/goakt/v3/reentrancy"
@@ -129,7 +129,7 @@ func withRelocationDisabled() pidOption {
 func withDependencies(dependencies ...extension.Dependency) pidOption {
 	return func(pid *PID) {
 		if pid.dependencies == nil {
-			pid.dependencies = ds.NewMap[string, extension.Dependency]()
+			pid.dependencies = xsync.NewMap[string, extension.Dependency]()
 		}
 		for _, dependency := range dependencies {
 			pid.dependencies.Set(dependency.ID(), dependency)
