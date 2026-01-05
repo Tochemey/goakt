@@ -139,7 +139,7 @@ func (m *grainMailbox) tryEnqueue(value *GrainContext) bool {
 	n.value.Store(value)
 	n.next.Store(nil)
 
-	// MPSC link step: swap tail, then link prev.next.
+	// swap tail, then link prev.next.
 	prev := m.tail.Swap(n)
 	prev.next.Store(n)
 
