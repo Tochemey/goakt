@@ -680,20 +680,26 @@ func (x *actorSystem) localSend(ctx context.Context, id *GrainIdentity, message 
 	// Build and send the grainContext
 	grainContext := getGrainContext()
 	grainContext.build(ctx, pid, x, id, message, synchronous)
-	if err := pid.receive(grainContext); err != nil {
-		releaseGrainContext(grainContext)
-		return nil, err
+	errCh := grainContext.err
+	if errCh != nil {
+		putErrorChannel(errCh)
 	}
 
 	timer := timers.Get(timeout)
 
 	// Handle synchronous (Ask) case
 	if synchronous {
+		responseCh := grainContext.response
+		if responseCh != nil {
+			putResponseChannel(responseCh)
+		}
+
+		pid.receive(grainContext)
 		select {
-		case res := <-grainContext.getResponse():
+		case res := <-responseCh:
 			timers.Put(timer)
 			return res, nil
-		case err := <-grainContext.getError():
+		case err := <-errCh:
 			timers.Put(timer)
 			return nil, err
 		case <-ctx.Done():
@@ -706,8 +712,9 @@ func (x *actorSystem) localSend(ctx context.Context, id *GrainIdentity, message 
 	}
 
 	// Asynchronous (Tell) case
+	pid.receive(grainContext)
 	select {
-	case err := <-grainContext.getError():
+	case err := <-errCh:
 		return nil, err
 	case <-timer.C:
 		return nil, gerrors.ErrRequestTimeout

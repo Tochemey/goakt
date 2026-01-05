@@ -38,6 +38,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
+	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -88,8 +89,8 @@ func TestGrainPIDProcessReleasesContexts(t *testing.T) {
 
 	require.Nil(t, first.Message())
 	require.Nil(t, first.self)
-	require.Nil(t, first.getError())
-	require.Nil(t, first.getResponse())
+	require.Nil(t, first.err)
+	require.Nil(t, first.response)
 	require.Nil(t, first.pid)
 }
 
@@ -1123,6 +1124,64 @@ func TestGrain(t *testing.T) {
 		}, WithGrainDependencies(dependency))
 		require.Error(t, err)
 		require.Nil(t, identity)
+
+		require.NoError(t, testSystem.Stop(ctx))
+	})
+	t.Run("With TellGrain with mailbox full", func(t *testing.T) {
+		ctx := t.Context()
+		testSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, testSystem)
+
+		// start the actor system
+		err = testSystem.Start(ctx)
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		capacity := int64(2)
+
+		// create a grain instance
+		grain := NewMockGrain()
+		identity, err := testSystem.GrainIdentity(ctx, "testGrain", func(ctx context.Context) (Grain, error) {
+			return grain, nil
+		}, WithGrainMailboxCapacity(capacity))
+		require.NoError(t, err)
+		require.NotNil(t, identity)
+
+		var okCount atomic.Int64
+		var fullCount atomic.Int64
+		var wg sync.WaitGroup
+		attempts := 8
+		producersCount := 10
+
+		wg.Add(10)
+
+		for range producersCount {
+			go func() {
+				defer wg.Done()
+				for range attempts {
+					message := new(testpb.TestSend)
+					err := testSystem.TellGrain(ctx, identity, message)
+					if err != nil {
+						require.Error(t, err)
+						require.ErrorIs(t, err, gerrors.ErrMailboxFull)
+						fullCount.Add(1)
+					} else {
+						okCount.Add(1)
+					}
+				}
+			}()
+		}
+
+		wg.Wait()
+
+		require.Greater(t, fullCount.Load(), int64(0), "expected some mailbox full errors")
+
+		// check if the grain is activated
+		gp, ok := testSystem.(*actorSystem).grains.Get(identity.String())
+		require.True(t, ok)
+		require.NotNil(t, gp)
+		require.True(t, gp.isActive())
 
 		require.NoError(t, testSystem.Stop(ctx))
 	})

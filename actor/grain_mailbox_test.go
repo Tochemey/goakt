@@ -133,10 +133,10 @@ func TestGrainMailboxBounded_DoesNotOvershootCapacity_Concurrent(t *testing.T) {
 	var okCount atomic.Int64
 	var fullCount atomic.Int64
 
-	for i := 0; i < producers; i++ {
+	for range producers {
 		go func() {
 			defer wg.Done()
-			for j := 0; j < attemptsPerProducer; j++ {
+			for range attemptsPerProducer {
 				err := mailbox.Enqueue(&GrainContext{})
 				if err == nil {
 					okCount.Add(1)

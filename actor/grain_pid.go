@@ -242,14 +242,14 @@ func (pid *grainPID) isActive() bool {
 
 // receive pushes a given message to the actor mailbox
 // and signals the receiveLoop to process it
-func (pid *grainPID) receive(grainContext *GrainContext) error {
+func (pid *grainPID) receive(grainContext *GrainContext) {
 	if pid.isActive() {
 		if err := pid.mailbox.Enqueue(grainContext); err != nil {
-			return err
+			grainContext.Err(err)
+			return
 		}
 		pid.process()
 	}
-	return nil
 }
 
 // process extracts every message from the actor mailbox

@@ -277,7 +277,7 @@ func TestGrainPIDHandlePoisonPillRecoversDeactivatePanic(t *testing.T) {
 		pid.handlePoisonPill(grainContext)
 	})
 
-	err := <-grainContext.getError()
+	err := <-grainContext.err
 	require.Error(t, err)
 	require.ErrorIs(t, err, gerrors.ErrGrainDeactivationFailure)
 	var panicErr *gerrors.PanicError

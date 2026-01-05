@@ -43,6 +43,11 @@ var (
 			return make(chan proto.Message, 1)
 		},
 	}
+	errorPool = sync.Pool{
+		New: func() any {
+			return make(chan error, 1)
+		},
+	}
 )
 
 // getContext retrieves a message from the pool
@@ -67,6 +72,22 @@ func putResponseChannel(ch chan proto.Message) {
 			continue
 		default:
 			responsePool.Put(ch)
+			return
+		}
+	}
+}
+
+func getErrorChannel() chan error {
+	return errorPool.Get().(chan error)
+}
+
+func putErrorChannel(ch chan error) {
+	for {
+		select {
+		case <-ch:
+			continue
+		default:
+			errorPool.Put(ch)
 			return
 		}
 	}

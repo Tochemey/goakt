@@ -147,7 +147,6 @@ func (gctx *GrainContext) Message() proto.Message {
 //	}
 func (gctx *GrainContext) Err(err error) {
 	gctx.err <- err
-	close(gctx.err)
 }
 
 // NoErr marks the successful completion of a message handler without any error.
@@ -171,17 +170,16 @@ func (gctx *GrainContext) Err(err error) {
 //	    }
 //	}
 func (gctx *GrainContext) NoErr() {
-	// No error to report, just close the channel
+	// No error to report
 	if gctx.synchronous {
-		close(gctx.response)
+		gctx.response <- nil
 	}
-	close(gctx.err)
+	gctx.err <- nil
 }
 
 // Response sets the message response
 func (gctx *GrainContext) Response(resp proto.Message) {
 	gctx.response <- resp
-	close(gctx.response)
 }
 
 // Unhandled marks the currently received message as unhandled by the Grain.
@@ -211,7 +209,6 @@ func (gctx *GrainContext) Response(resp proto.Message) {
 func (gctx *GrainContext) Unhandled() {
 	msg := gctx.Message()
 	gctx.err <- errors.NewErrUnhandledMessage(fmt.Errorf("unhandled message type %s", msg.ProtoReflect().Descriptor().FullName()))
-	close(gctx.err)
 }
 
 // AskActor sends a message to another actor by name and waits for a response.
@@ -437,12 +434,12 @@ func (gctx *GrainContext) build(ctx context.Context, pid *grainPID, actorSystem 
 	gctx.message = message
 	gctx.ctx = ctx
 	gctx.actorSystem = actorSystem
-	gctx.err = make(chan error, 1)
+	gctx.err = getErrorChannel()
 	gctx.synchronous = synchronous
 	gctx.pid = pid
 
 	if synchronous {
-		gctx.response = make(chan proto.Message, 1)
+		gctx.response = getResponseChannel()
 	}
 
 	return gctx
@@ -456,12 +453,4 @@ func (gctx *GrainContext) reset() {
 	gctx.err = nil
 	gctx.response = nil
 	gctx.pid = nil
-}
-
-func (gctx *GrainContext) getError() <-chan error {
-	return gctx.err
-}
-
-func (gctx *GrainContext) getResponse() <-chan proto.Message {
-	return gctx.response
 }
