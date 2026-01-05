@@ -91,6 +91,7 @@ type Grain struct {
 	Dependencies      []*Dependency          `protobuf:"bytes,4,rep,name=dependencies,proto3" json:"dependencies,omitempty"`
 	ActivationTimeout *durationpb.Duration   `protobuf:"bytes,5,opt,name=activation_timeout,json=activationTimeout,proto3" json:"activation_timeout,omitempty"`
 	ActivationRetries int32                  `protobuf:"varint,6,opt,name=activation_retries,json=activationRetries,proto3" json:"activation_retries,omitempty"`
+	MailboxCapacity   *int64                 `protobuf:"varint,7,opt,name=mailbox_capacity,json=mailboxCapacity,proto3,oneof" json:"mailbox_capacity,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -167,6 +168,13 @@ func (x *Grain) GetActivationRetries() int32 {
 	return 0
 }
 
+func (x *Grain) GetMailboxCapacity() int64 {
+	if x != nil && x.MailboxCapacity != nil {
+		return *x.MailboxCapacity
+	}
+	return 0
+}
+
 var File_internal_grain_proto protoreflect.FileDescriptor
 
 const file_internal_grain_proto_rawDesc = "" +
@@ -176,14 +184,16 @@ const file_internal_grain_proto_rawDesc = "" +
 	"\aGrainId\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
-	"\x05value\x18\x03 \x01(\tR\x05value\"\x94\x02\n" +
+	"\x05value\x18\x03 \x01(\tR\x05value\"\xd9\x02\n" +
 	"\x05Grain\x12.\n" +
 	"\bgrain_id\x18\x01 \x01(\v2\x13.internalpb.GrainIdR\agrainId\x12\x12\n" +
 	"\x04host\x18\x02 \x01(\tR\x04host\x12\x12\n" +
 	"\x04port\x18\x03 \x01(\x05R\x04port\x12:\n" +
 	"\fdependencies\x18\x04 \x03(\v2\x16.internalpb.DependencyR\fdependencies\x12H\n" +
 	"\x12activation_timeout\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\x11activationTimeout\x12-\n" +
-	"\x12activation_retries\x18\x06 \x01(\x05R\x11activationRetriesB\xa3\x01\n" +
+	"\x12activation_retries\x18\x06 \x01(\x05R\x11activationRetries\x12.\n" +
+	"\x10mailbox_capacity\x18\a \x01(\x03H\x00R\x0fmailboxCapacity\x88\x01\x01B\x13\n" +
+	"\x11_mailbox_capacityB\xa3\x01\n" +
 	"\x0ecom.internalpbB\n" +
 	"GrainProtoH\x02P\x01Z;github.com/tochemey/goakt/v3/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
 	"Internalpb\xca\x02\n" +
@@ -226,6 +236,7 @@ func file_internal_grain_proto_init() {
 		return
 	}
 	file_internal_dependency_proto_init()
+	file_internal_grain_proto_msgTypes[1].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

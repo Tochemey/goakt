@@ -23,30 +23,34 @@
 package actor
 
 import (
+	"runtime"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/atomic"
+
+	gerrors "github.com/tochemey/goakt/v3/errors"
 )
 
-func TestGrainMailboxEmpty(t *testing.T) {
-	mailbox := newGrainMailbox()
+func TestGrainMailboxEmpty_Unbounded(t *testing.T) {
+	mailbox := newGrainMailbox(0) // unbounded
 	require.True(t, mailbox.IsEmpty())
 	require.EqualValues(t, 0, mailbox.Len())
 	require.Nil(t, mailbox.Dequeue())
 }
 
-func TestGrainMailboxFIFO(t *testing.T) {
-	mailbox := newGrainMailbox()
+func TestGrainMailboxFIFO_Unbounded(t *testing.T) {
+	mailbox := newGrainMailbox(0) // unbounded
 
 	ctx1 := &GrainContext{}
 	ctx2 := &GrainContext{}
 	ctx3 := &GrainContext{}
 
-	mailbox.Enqueue(ctx1)
-	mailbox.Enqueue(ctx2)
-	mailbox.Enqueue(ctx3)
+	require.NoError(t, mailbox.Enqueue(ctx1))
+	require.NoError(t, mailbox.Enqueue(ctx2))
+	require.NoError(t, mailbox.Enqueue(ctx3))
 
 	require.EqualValues(t, 3, mailbox.Len())
 	require.False(t, mailbox.IsEmpty())
@@ -58,23 +62,24 @@ func TestGrainMailboxFIFO(t *testing.T) {
 	require.Nil(t, mailbox.Dequeue())
 	require.True(t, mailbox.IsEmpty())
 	require.EqualValues(t, 0, mailbox.Len())
+	require.Zero(t, mailbox.Capacity())
 }
 
-func TestGrainMailboxConcurrentEnqueue(t *testing.T) {
+func TestGrainMailboxConcurrentEnqueue_Unbounded(t *testing.T) {
 	const producers = 16
 	const messagesPerProducer = 32
 	total := producers * messagesPerProducer
 
-	mailbox := newGrainMailbox()
+	mailbox := newGrainMailbox(0) // unbounded
 
 	var wg sync.WaitGroup
 	wg.Add(producers)
 
-	for range producers {
+	for i := 0; i < producers; i++ {
 		go func() {
 			defer wg.Done()
-			for range messagesPerProducer {
-				mailbox.Enqueue(&GrainContext{})
+			for j := 0; j < messagesPerProducer; j++ {
+				require.NoError(t, mailbox.Enqueue(&GrainContext{}))
 			}
 		}()
 	}
@@ -97,4 +102,138 @@ func TestGrainMailboxConcurrentEnqueue(t *testing.T) {
 	require.Equal(t, total, count)
 	require.True(t, mailbox.IsEmpty())
 	require.EqualValues(t, 0, mailbox.Len())
+}
+
+func TestGrainMailboxBounded_FullReturnsError(t *testing.T) {
+	mailbox := newGrainMailbox(2)
+
+	require.NoError(t, mailbox.Enqueue(&GrainContext{}))
+	require.NoError(t, mailbox.Enqueue(&GrainContext{}))
+
+	require.EqualValues(t, 2, mailbox.Len())
+	require.ErrorIs(t, mailbox.Enqueue(&GrainContext{}), gerrors.ErrMailboxFull)
+
+	// Make sure dequeue frees space and enqueue works again.
+	require.NotNil(t, mailbox.Dequeue())
+	require.EqualValues(t, 1, mailbox.Len())
+
+	require.NoError(t, mailbox.Enqueue(&GrainContext{}))
+	require.EqualValues(t, 2, mailbox.Len())
+}
+
+func TestGrainMailboxBounded_DoesNotOvershootCapacity_Concurrent(t *testing.T) {
+	const cap = 64
+	const producers = 16
+	const attemptsPerProducer = 64 // 1024 attempts > cap
+
+	mailbox := newGrainMailbox(cap)
+
+	var wg sync.WaitGroup
+	wg.Add(producers)
+
+	var okCount atomic.Int64
+	var fullCount atomic.Int64
+
+	for range producers {
+		go func() {
+			defer wg.Done()
+			for range attemptsPerProducer {
+				err := mailbox.Enqueue(&GrainContext{})
+				if err == nil {
+					okCount.Add(1)
+					continue
+				}
+				if err == gerrors.ErrMailboxFull {
+					fullCount.Add(1)
+					continue
+				}
+				require.NoError(t, err) // fail on unexpected error
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	// Exactly 'cap' successful enqueues, rest should be full.
+	require.EqualValues(t, cap, okCount.Load())
+	require.EqualValues(t, producers*attemptsPerProducer-cap, fullCount.Load())
+
+	// Length must never exceed capacity; by the end it should be exactly cap.
+	require.EqualValues(t, cap, mailbox.Len())
+
+	// Drain and ensure we got exactly cap messages.
+	drained := 0
+	for {
+		if mailbox.Dequeue() == nil {
+			break
+		}
+		drained++
+	}
+	require.Equal(t, cap, drained)
+	require.True(t, mailbox.IsEmpty())
+	require.EqualValues(t, 0, mailbox.Len())
+}
+
+func TestGrainMailboxCapacityZeroOrNegative_IsUnbounded(t *testing.T) {
+	m0 := newGrainMailbox(0)
+	mNeg := newGrainMailbox(-10)
+
+	// Try to enqueue a bunch; should never return ErrMailboxFull.
+	for i := 0; i < 1000; i++ {
+		require.NoError(t, m0.Enqueue(&GrainContext{}))
+		require.NoError(t, mNeg.Enqueue(&GrainContext{}))
+	}
+
+	require.EqualValues(t, 1000, m0.Len())
+	require.EqualValues(t, 1000, mNeg.Len())
+}
+
+func TestGrainMailboxDequeue_WaitsForLinkAfterTailSwap(t *testing.T) {
+	m := newGrainMailbox(0) // unbounded or bounded doesn't matter for this path
+
+	// Arrange: create the node we will "half-enqueue"
+	ctx := &GrainContext{}
+	n := grainNodePool.Get().(*grainNode)
+	n.value.Store(ctx)
+	n.next.Store(nil)
+
+	// Step 1 of enqueue: advance tail, but DO NOT link prev.next yet.
+	prev := m.tail.Swap(n)
+
+	// Sanity: head is still the dummy; tail is now n; dummy.next is still nil.
+	head := m.head.Load()
+	require.Same(t, prev, head)
+	require.Nil(t, head.next.Load())
+	require.Same(t, n, m.tail.Load())
+
+	// Start consumer. It should enter the "wait for link" loop and block.
+	resultCh := make(chan *GrainContext, 1)
+	go func() {
+		resultCh <- m.Dequeue()
+	}()
+
+	// Give it a moment; it should NOT return yet (would be a spurious empty).
+	select {
+	case v := <-resultCh:
+		t.Fatalf("Dequeue returned early (spurious empty or wrong behavior): %+v", v)
+	case <-time.After(10 * time.Millisecond):
+		// good: likely stuck in the for next == nil loop
+	}
+
+	// Step 2 of enqueue: publish the link.
+	prev.next.Store(n)
+
+	// Now Dequeue should complete and return ctx.
+	select {
+	case v := <-resultCh:
+		require.Equal(t, ctx, v)
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("Dequeue did not return after publishing prev.next")
+	}
+
+	// Optional: drain again; should be empty.
+	require.Nil(t, m.Dequeue())
+
+	// Cleanup: ensure no goroutine is stuck (best-effort yield).
+	runtime.Gosched()
 }

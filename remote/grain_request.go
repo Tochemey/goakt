@@ -63,6 +63,9 @@ type GrainRequest struct {
 	// ActivationRetries is the number of additional activation attempts to perform after a failure.
 	// A value of 0 means "do not retry".
 	ActivationRetries int
+
+	// MailboxCapacity is the capacity of the Grain mailbox (<=0 means unbounded).
+	MailboxCapacity int64
 }
 
 var _ validation.Validator = (*GrainRequest)(nil)

@@ -85,6 +85,10 @@ type grainConfig struct {
 	role *string
 	// placement specifies the placement strategy for activating the grain in a cluster.
 	activationStrategy ActivationStrategy
+	// capacity:
+	//   <= 0 : unbounded
+	//   >  0 : bounded to capacity
+	capacity int64
 }
 
 // newGrainConfig creates a new grainConfig instance and applies the provided GrainOption(s).
@@ -104,6 +108,7 @@ func newGrainConfig(opts ...GrainOption) *grainConfig {
 		deactivateAfter:    DefaultPassivationTimeout,
 		dependencies:       xsync.NewMap[string, extension.Dependency](),
 		activationStrategy: LocalActivation,
+		capacity:           0,
 	}
 
 	// Set default values
@@ -276,5 +281,46 @@ func WithActivationStrategy(strategy ActivationStrategy) GrainOption {
 func WithActivationRole(role string) GrainOption {
 	return func(config *grainConfig) {
 		config.role = pointer.To(role)
+	}
+}
+
+// WithGrainMailboxCapacity returns a GrainOption that configures the capacity
+// of a grain's mailbox.
+//
+// By default, a grain uses an unbounded mailbox. When a positive capacity is
+// specified, the mailbox becomes bounded and can hold at most `capacity`
+// messages at any given time.
+//
+// In bounded mode:
+//   - Enqueue operations are non-blocking.
+//   - If the mailbox is full, enqueue attempts fail immediately and return
+//     ErrMailboxFull.
+//   - The capacity limit is enforced atomically and is safe under concurrent
+//     producers.
+//
+// A capacity less than or equal to zero configures an unbounded mailbox,
+// which never rejects enqueues due to capacity.
+//
+// This option is typically used to provide backpressure and prevent unbounded
+// memory growth for hot or slow-processing grains.
+//
+// Parameters:
+//   - capacity: the maximum number of messages allowed in the mailbox.
+//     Values <= 0 configure an unbounded mailbox (default behavior).
+//
+// Returns:
+//   - GrainOption: an option that sets the mailbox capacity on the grain
+//     configuration.
+//
+// Example:
+//
+//	cfg := newGrainConfig(
+//	    WithGrainMailboxCapacity(1024),
+//	)
+func WithGrainMailboxCapacity(capacity int64) GrainOption {
+	return func(config *grainConfig) {
+		if capacity > 0 {
+			config.capacity = capacity
+		}
 	}
 }

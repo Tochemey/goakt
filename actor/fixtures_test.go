@@ -1047,11 +1047,9 @@ func (m *MockGrain) OnReceive(ctx *GrainContext) {
 		ctx.Response(&testpb.Reply{Content: "received message"})
 	case *testpb.TestTimeout:
 		wg := sync.WaitGroup{}
-		wg.Add(1)
-		go func() {
+		wg.Go(func() {
 			pause.For(time.Minute)
-			wg.Done()
-		}()
+		})
 		wg.Wait()
 		ctx.NoErr()
 	default:
