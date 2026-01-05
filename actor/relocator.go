@@ -95,7 +95,7 @@ func (r *relocator) Relocate(ctx *ReceiveContext) {
 
 		if len(peerState.GetGrains()) > 0 {
 			leaderGrains, peersGrains := r.allocateGrains(len(peers)+1, peerState)
-			r.rebalanceGrains(egCtx, eg, leaderGrains, peersGrains, peers)
+			r.relocateGrains(egCtx, eg, leaderGrains, peersGrains, peers)
 		}
 
 		// only block when there are go routines running
@@ -205,7 +205,7 @@ func (r *relocator) spawnRemoteActor(ctx context.Context, actor *internalpb.Acto
 	return nil
 }
 
-func (r *relocator) rebalanceGrains(ctx context.Context, eg *errgroup.Group, leaderGrains []*internalpb.Grain, peersGrains [][]*internalpb.Grain, peers []*cluster.Peer) {
+func (r *relocator) relocateGrains(ctx context.Context, eg *errgroup.Group, leaderGrains []*internalpb.Grain, peersGrains [][]*internalpb.Grain, peers []*cluster.Peer) {
 	if len(leaderGrains) > 0 {
 		leaderHost := r.pid.ActorSystem().Host()
 		leaderPort := int32(r.pid.ActorSystem().Port())

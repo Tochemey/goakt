@@ -40,6 +40,7 @@ import (
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/codec"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
+	"github.com/tochemey/goakt/v3/internal/pointer"
 	"github.com/tochemey/goakt/v3/internal/xsync"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/passivation"
@@ -83,7 +84,7 @@ func newGrainPID(identity *GrainIdentity, grain Grain, actorSystem ActorSystem, 
 	pid := &grainPID{
 		grain:              grain,
 		identity:           identity,
-		mailbox:            newGrainMailbox(),
+		mailbox:            newGrainMailbox(config.capacity),
 		actorSystem:        actorSystem,
 		logger:             actorSystem.Logger(),
 		remoting:           actorSystem.getRemoting(),
@@ -241,11 +242,14 @@ func (pid *grainPID) isActive() bool {
 
 // receive pushes a given message to the actor mailbox
 // and signals the receiveLoop to process it
-func (pid *grainPID) receive(grainContext *GrainContext) {
+func (pid *grainPID) receive(grainContext *GrainContext) error {
 	if pid.isActive() {
-		pid.mailbox.Enqueue(grainContext)
+		if err := pid.mailbox.Enqueue(grainContext); err != nil {
+			return err
+		}
 		pid.process()
 	}
+	return nil
 }
 
 // process extracts every message from the actor mailbox
@@ -432,5 +436,6 @@ func (pid *grainPID) toWireGrain() (*internalpb.Grain, error) {
 		Dependencies:      dependencies,
 		ActivationTimeout: durationpb.New(pid.config.initTimeout.Load()),
 		ActivationRetries: pid.config.initMaxRetries.Load(),
+		MailboxCapacity:   pointer.To(pid.mailbox.Capacity()),
 	}, nil
 }

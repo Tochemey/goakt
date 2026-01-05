@@ -37,7 +37,7 @@ jobs:
   build:
     name: Tests on ${{ matrix.os }}
     needs: changes
-    if: needs.changes.outputs.build == 'true'
+    if: needs.changes.outputs.build == 'true' && github.event.pull_request.draft == false
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false

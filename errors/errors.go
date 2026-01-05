@@ -189,6 +189,12 @@ var (
 
 	// ErrScatterGatherFirstRouterMisconfigured is returned when a scatter-gather-first router is misconfigured.
 	ErrScatterGatherFirstRouterMisconfigured = errors.New("scatter-gather router misconfigured: within must be greater than zero")
+
+	// ErrMailboxFull is returned when a bounded mailbox has reached its capacity.
+	ErrMailboxFull = errors.New("mailbox is full")
+
+	// ErrMailboxDisposed is returned when operations are attempted on a disposed mailbox.
+	ErrMailboxDisposed = errors.New("mailbox has been disposed")
 )
 
 // NewErrInvalidPassivationStrategy formats an error with ErrInvalidPassivationStrategy

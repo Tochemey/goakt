@@ -62,7 +62,7 @@ func TestGrainPIDProcessReleasesContexts(t *testing.T) {
 	grain := &MockContextReleasingGrain{done: make(chan *GrainContext, 2)}
 	pid := &grainPID{
 		grain:   grain,
-		mailbox: newGrainMailbox(),
+		mailbox: newGrainMailbox(0), // unbounded
 		logger:  log.DiscardLogger,
 	}
 

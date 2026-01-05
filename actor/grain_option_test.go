@@ -101,4 +101,10 @@ func TestGrainOptions(t *testing.T) {
 		option(config)
 		require.Equal(t, LeastLoadActivation, config.activationStrategy)
 	})
+	t.Run("With Mailbox capacity", func(t *testing.T) {
+		config := new(grainConfig)
+		option := WithGrainMailboxCapacity(10)
+		option(config)
+		require.EqualValues(t, 10, config.capacity)
+	})
 }

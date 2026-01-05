@@ -680,7 +680,11 @@ func (x *actorSystem) localSend(ctx context.Context, id *GrainIdentity, message 
 	// Build and send the grainContext
 	grainContext := getGrainContext()
 	grainContext.build(ctx, pid, x, id, message, synchronous)
-	pid.receive(grainContext)
+	if err := pid.receive(grainContext); err != nil {
+		releaseGrainContext(grainContext)
+		return nil, err
+	}
+
 	timer := timers.Get(timeout)
 
 	// Handle synchronous (Ask) case
@@ -1027,12 +1031,18 @@ func (x *actorSystem) recreateGrainOnce(ctx context.Context, serializedGrain *in
 			return nil, err
 		}
 
-		config := newGrainConfig(
+		options := []GrainOption{
 			WithGrainInitTimeout(serializedGrain.GetActivationTimeout().AsDuration()),
 			WithGrainInitMaxRetries(int(serializedGrain.GetActivationRetries())),
 			WithGrainDependencies(dependencies...),
-		)
+		}
 
+		if serializedGrain.MailboxCapacity != nil {
+			capacity := serializedGrain.GetMailboxCapacity()
+			options = append(options, WithGrainMailboxCapacity(capacity))
+		}
+
+		config := newGrainConfig(options...)
 		if err := config.Validate(); err != nil {
 			return nil, err
 		}

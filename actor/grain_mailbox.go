@@ -23,8 +23,11 @@
 package actor
 
 import (
+	"runtime"
 	"sync"
 	"sync/atomic"
+
+	gerrors "github.com/tochemey/goakt/v3/errors"
 )
 
 type grainNode struct {
@@ -39,12 +42,19 @@ type grainMailbox struct {
 	_    CacheLinePadding
 	tail atomic.Pointer[grainNode]
 	_    CacheLinePadding
-	len  atomic.Int64
+	// len is the number of enqueued messages. In bounded mode, producers
+	// reserve capacity by CAS-incrementing len before linking their node.
+	len atomic.Int64
+
+	// capacity:
+	//   <= 0 : unbounded
+	//   >  0 : bounded to capacity
+	capacity int64
 }
 
-func newGrainMailbox() *grainMailbox {
+func newGrainMailbox(capacity int64) *grainMailbox {
 	item := new(grainNode)
-	mailbox := &grainMailbox{}
+	mailbox := &grainMailbox{capacity: capacity}
 	mailbox.head.Store(item)
 	mailbox.tail.Store(item)
 	return mailbox
@@ -53,14 +63,11 @@ func newGrainMailbox() *grainMailbox {
 // Enqueue places the given GrainContext at the tail of the mailbox.
 //
 // It is safe for concurrent producers. Ordering is preserved (FIFO).
-func (m *grainMailbox) Enqueue(value *GrainContext) {
-	n := grainNodePool.Get().(*grainNode)
-	n.value.Store(value)
-	n.next.Store(nil)
-
-	prev := m.tail.Swap(n)
-	prev.next.Store(n)
-	m.len.Add(1)
+func (m *grainMailbox) Enqueue(value *GrainContext) error {
+	if ok := m.tryEnqueue(value); !ok {
+		return gerrors.ErrMailboxFull
+	}
+	return nil
 }
 
 // Dequeue removes and returns the next GrainContext from the mailbox.
@@ -70,18 +77,32 @@ func (m *grainMailbox) Enqueue(value *GrainContext) {
 func (m *grainMailbox) Dequeue() *GrainContext {
 	head := m.head.Load()
 	next := head.next.Load()
+
+	// Avoid spurious empty: a producer may have swapped tail but not linked yet.
 	if next == nil {
-		return nil
+		if head == m.tail.Load() {
+			return nil // truly empty
+		}
+
+		for next == nil {
+			runtime.Gosched()
+			next = head.next.Load()
+		}
 	}
 
 	m.head.Store(next)
+
 	value := next.value.Load()
 	next.value.Store(nil)
+
+	// Decrement for both modes (bounded producers pre-incremented).
 	m.len.Add(-1)
 
+	// Recycle old head.
 	head.next.Store(nil)
 	head.value.Store(nil)
 	grainNodePool.Put(head)
+
 	return value
 }
 
@@ -93,4 +114,39 @@ func (m *grainMailbox) Len() int64 {
 // IsEmpty reports whether the mailbox currently holds no messages.
 func (m *grainMailbox) IsEmpty() bool {
 	return m.Len() == 0
+}
+
+// Capacity returns the mailbox capacity (<=0 means unbounded).
+func (m *grainMailbox) Capacity() int64 { return m.capacity }
+
+// tryEnqueue returns false if bounded and full.
+func (m *grainMailbox) tryEnqueue(value *GrainContext) bool {
+	// reserve capacity first (bounded only) so concurrent producers
+	// can't overshoot the bound.
+	if m.capacity > 0 {
+		for {
+			l := m.len.Load()
+			if l >= m.capacity {
+				return false
+			}
+			if m.len.CompareAndSwap(l, l+1) {
+				break
+			}
+		}
+	}
+
+	n := grainNodePool.Get().(*grainNode)
+	n.value.Store(value)
+	n.next.Store(nil)
+
+	// MPSC link step: swap tail, then link prev.next.
+	prev := m.tail.Swap(n)
+	prev.next.Store(n)
+
+	// unbounded increments after linking.
+	if m.capacity <= 0 {
+		m.len.Add(1)
+	}
+
+	return true
 }

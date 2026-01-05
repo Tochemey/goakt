@@ -21,4 +21,5 @@ message Grain {
   repeated internalpb.Dependency dependencies = 4;
   google.protobuf.Duration activation_timeout = 5;
   int32 activation_retries = 6;
+  optional int64 mailbox_capacity = 7;
 }
