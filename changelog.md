@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [v3.12.1] - 2026-06-01
 
 ### ✨ Features
 - 🔁 Added reentrancy-enabled request messaging (`Request`/`RequestName`) with configurable modes (AllowAll/StashNonReentrant), per-call overrides/timeouts, and per-actor in-flight limits; replies are delivered via `Response` and in-flight requests are canceled on restart/passivation.
