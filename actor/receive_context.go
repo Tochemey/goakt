@@ -735,6 +735,36 @@ func (rctx *ReceiveContext) ReceiverAddress() *address.Address {
 	return rctx.self.Address()
 }
 
+// Dependencies returns a slice containing all dependencies currently registered
+// within the given actor
+//
+// These dependencies are typically injected at actor initialization (via SpawnOptions)
+// and made accessible during the actor's lifecycle. They can include services, clients,
+// or other resources that the actor may utilize while processing messages.
+//
+// Returns:
+//   - []extension.Dependency: All registered dependencies in the actor.
+func (rctx *ReceiveContext) Dependencies() []extension.Dependency {
+	return rctx.self.Dependencies()
+}
+
+// Dependency retrieves a specific dependency registered in the actor by its unique ID.
+//
+// This allows actors to access injected services or resources directly from the ReceiveContext.
+//
+// Parameters:
+//   - dependencyID: A unique string identifier used when the dependency was registered.
+//
+// Returns:
+//   - extension.Dependency: The corresponding dependency if found, or nil otherwise.
+//
+// Example:
+//
+//	myService := rctx.Dependency("dependencyID").(MyService)
+func (rctx *ReceiveContext) Dependency(dependencyID string) extension.Dependency {
+	return rctx.self.Dependency(dependencyID)
+}
+
 // getError returns any error recorded during message processing.
 //
 // This is intended for internal use by the runtime/supervision logic.
