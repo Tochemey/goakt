@@ -3287,4 +3287,48 @@ func TestReceiveContext(t *testing.T) {
 		pause.For(time.Second)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
+	t.Run("With dependency injection", func(t *testing.T) {
+		ctx := context.TODO()
+		ports := dynaport.Get(1)
+
+		actorSystem, err := NewActorSystem("sys",
+			WithRemote(remote.NewConfig("127.0.0.1", ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		pause.For(time.Second)
+
+		dependencyID := "dependency"
+		dependency := NewMockDependency(dependencyID, "some-test", "some-test")
+		actor1 := &exchanger{}
+		pid, err := actorSystem.Spawn(ctx, "Exchange1", actor1, WithDependencies(dependency), WithLongLived())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		pause.For(time.Second)
+
+		// create an instance of receive context
+		context := &ReceiveContext{
+			ctx:          ctx,
+			message:      new(testpb.TestSend),
+			sender:       actorSystem.NoSender(),
+			remoteSender: nil,
+			self:         pid,
+		}
+
+		deps := context.Dependencies()
+		require.NotNil(t, deps)
+		require.Len(t, deps, 1)
+
+		dep := context.Dependency(dependencyID)
+		require.NotNil(t, dep)
+
+		mockDep, ok := dep.(*MockDependency)
+		require.True(t, ok)
+		require.Equal(t, dependencyID, mockDep.id)
+
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
 }

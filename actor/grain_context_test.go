@@ -191,6 +191,97 @@ func TestGrainContext(t *testing.T) {
 		require.NoError(t, sd3.Close())
 		srv.Shutdown()
 	})
+	t.Run("With Dependencies", func(t *testing.T) {
+		ctx := t.Context()
+		testSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, testSystem)
+
+		// start the actor system
+		err = testSystem.Start(ctx)
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		dependencyID := "MyDependency"
+		dependency := NewMockDependency(dependencyID, "user", "email")
+
+		grain := NewMockGrain()
+		identity, err := testSystem.GrainIdentity(ctx, "testGrain", func(_ context.Context) (Grain, error) {
+			return grain, nil
+		}, WithGrainDependencies(dependency))
+		require.NoError(t, err)
+		require.NotNil(t, identity)
+
+		pause.For(time.Second)
+
+		// check if the grain is activated
+		gp, ok := testSystem.(*actorSystem).grains.Get(identity.String())
+		require.True(t, ok)
+		require.NotNil(t, gp)
+		require.True(t, gp.isActive())
+
+		// mirror the grain context
+		gctx := &GrainContext{
+			ctx:         ctx,
+			actorSystem: testSystem,
+			self:        identity,
+			pid:         gp,
+		}
+
+		// retrieve dependencies from the grain context
+		dependencies := gctx.Dependencies()
+		require.Len(t, dependencies, 1)
+		actual := gctx.Dependency(dependencyID)
+		require.NotNil(t, actual)
+		require.Equal(t, dependencyID, actual.ID())
+
+		require.NoError(t, testSystem.Stop(ctx))
+	})
+	t.Run("With Extensions", func(t *testing.T) {
+		ctx := t.Context()
+		ext := new(MockExtension)
+		testSystem, err := NewActorSystem("testSys",
+			WithLogger(log.DiscardLogger),
+			WithExtensions(ext))
+		require.NoError(t, err)
+		require.NotNil(t, testSystem)
+
+		// start the actor system
+		err = testSystem.Start(ctx)
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		grain := NewMockGrain()
+		identity, err := testSystem.GrainIdentity(ctx, "testGrain", func(_ context.Context) (Grain, error) {
+			return grain, nil
+		})
+		require.NoError(t, err)
+		require.NotNil(t, identity)
+
+		pause.For(time.Second)
+
+		// check if the grain is activated
+		gp, ok := testSystem.(*actorSystem).grains.Get(identity.String())
+		require.True(t, ok)
+		require.NotNil(t, gp)
+		require.True(t, gp.isActive())
+
+		// mirror the grain context
+		gctx := &GrainContext{
+			ctx:         ctx,
+			actorSystem: testSystem,
+			self:        identity,
+			pid:         gp,
+		}
+
+		// retrieve extensions from the grain context
+		extensions := gctx.Extensions()
+		require.Len(t, extensions, 1)
+		actual := gctx.Extension(ext.ID())
+		require.NotNil(t, actual)
+
+		require.NoError(t, testSystem.Stop(ctx))
+	})
 }
 
 func TestGrainContextPipeToGrain(t *testing.T) {

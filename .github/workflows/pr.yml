@@ -14,7 +14,7 @@ concurrency:
 jobs:
   changes:
     name: Detect changes
-    runs-on: ubuntu-latest
+    runs-on: buildjet-16vcpu-ubuntu-2204
     outputs:
       build: ${{ steps.filter.outputs.build }}
     steps:
@@ -44,7 +44,7 @@ jobs:
       matrix:
         include:
           - os: linux
-            runner: ubuntu-latest
+            runner: buildjet-16vcpu-ubuntu-2204
 
     env:
       TZ: UTC
@@ -64,7 +64,7 @@ jobs:
           check-latest: false
           cache-dependency-path: "**/*.sum"
       - run: go version
-      - uses: actions/cache@v4
+      - uses: buildjet/cache@v3
         with:
           path: |
             ~/.cache/go-build

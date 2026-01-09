@@ -31,6 +31,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v3/errors"
+	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/future"
 	"github.com/tochemey/goakt/v3/log"
@@ -370,6 +371,70 @@ func (gctx *GrainContext) PipeToSelf(task func() (proto.Message, error), opts ..
 func (gctx *GrainContext) GrainIdentity(name string, factory GrainFactory, opts ...GrainOption) (*GrainIdentity, error) {
 	ctx := context.WithoutCancel(gctx.Context())
 	return gctx.actorSystem.GrainIdentity(ctx, name, factory, opts...)
+}
+
+// Dependencies returns a slice containing all dependencies currently registered
+// within the Grain's local context.
+//
+// These dependencies are typically injected at grain initialization (via GrainOptions)
+// and can include services, repositories, or other components the grain relies on.
+//
+// Returns:
+//   - []extension.Dependency: All registered dependencies in the Grain's context.
+func (gctx *GrainContext) Dependencies() []extension.Dependency {
+	return gctx.pid.dependencies.Values()
+}
+
+// Dependency retrieves a specific dependency registered in the Grain's context by its unique ID.
+//
+// This allows grains to access shared functionality injected into their context,
+// such as services, repositories, or application components.
+//
+// Example:
+//
+//	db := x.Dependency("database").(DatabaseService)
+//
+// Parameters:
+//   - dependencyID: A unique string identifier used when the dependency was registered.
+//
+// Returns:
+//   - extension.Dependency: The corresponding dependency if found, or nil otherwise.
+func (gctx *GrainContext) Dependency(dependencyID string) extension.Dependency {
+	if dependency, ok := gctx.pid.dependencies.Get(dependencyID); ok {
+		return dependency
+	}
+	return nil
+}
+
+// Extensions returns a slice of all extensions registered within the ActorSystem
+// associated with the GrainContext.
+//
+//	This allows system-level introspection or iteration over all available extensions.
+//
+// It can be useful for message processing.
+//
+// Returns:
+//   - []extension.Extension: All registered extensions in the ActorSystem.
+func (gctx *GrainContext) Extensions() []extension.Extension {
+	return gctx.ActorSystem().Extensions()
+}
+
+// Extension retrieves a specific extension registered in the ActorSystem by its unique ID.
+//
+// This allows grains to access shared functionality injected into the system, such as
+// event sourcing, metrics, tracing, or custom application services, directly from the GrainContext.
+//
+// Example:
+//
+//	logger := x.Extension("extensionID").(MyExtension)
+//
+// Parameters:
+//   - extensionID: A unique string identifier used when the extension was registered.
+//
+// Returns:
+//   - extension.Extension: The corresponding extension if found, or nil otherwise.
+func (gctx *GrainContext) Extension(extensionID string) extension.Extension {
+	return gctx.ActorSystem().Extension(extensionID)
 }
 
 type grainPipeSystem interface {
