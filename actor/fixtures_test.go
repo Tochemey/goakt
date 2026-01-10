@@ -2075,6 +2075,7 @@ func testSystem(t *testing.T, providerFactory providerFactory, opts ...testClust
 				WithPeersPort(peersPort).
 				WithMinimumPeersQuorum(1).
 				WithDiscoveryPort(discoveryPort).
+				WithReadTimeout(5 * time.Second).
 				WithBootstrapTimeout(time.Second).
 				WithClusterStateSyncInterval(300 * time.Millisecond).
 				WithClusterBalancerInterval(100 * time.Millisecond).

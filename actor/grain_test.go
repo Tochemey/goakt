@@ -359,7 +359,7 @@ func TestGrain(t *testing.T) {
 		clmock := mocks.NewCluster(t)
 		testSystem := &actorSystem{
 			cluster:       clmock,
-			clusterConfig: NewClusterConfig(),
+			clusterConfig: NewClusterConfig().WithReadTimeout(5 * time.Second),
 			logger:        log.DiscardLogger,
 		}
 		testSystem.started.Store(true)
