@@ -2473,7 +2473,7 @@ func (pid *PID) handleStopDirective(cid *PID, includeSiblings bool) {
 			// TODO: revisit this
 			//pid.UnWatch(spid)
 			if err := spid.Shutdown(ctx); err != nil {
-				pid.logger.Error(fmt.Errorf("Failed to shutdown actor=(%s): %w", spid.Name(), err))
+				pid.logger.Error(fmt.Errorf("failed to shutdown actor=(%s): %w", spid.Name(), err))
 				// we need to suspend the actor since its shutdown is the result of
 				// one of its faulty siblings
 				spid.suspend(err.Error())
