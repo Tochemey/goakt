@@ -235,7 +235,6 @@ func (x *cluster) Start(ctx context.Context) error {
 		return nil
 	}
 
-	x.logger.Infof("starting cluster engine (%s)", x.name)
 	conf, err := x.buildConfig()
 	if err != nil {
 		x.logger.Errorf("failed to build engine config: %v", err)
@@ -280,7 +279,6 @@ func (x *cluster) Start(ctx context.Context) error {
 
 	x.running.Store(true)
 	go x.consume()
-	x.logger.Infof("cluster engine (%s) started", x.name)
 	return nil
 }
 
@@ -294,9 +292,7 @@ func (x *cluster) Stop(ctx context.Context) error {
 	ctx, cancelFn := context.WithTimeout(ctx, x.shutdownTimeout)
 	defer cancelFn()
 
-	x.logger.Infof("stopping cluster engine (%s)", x.name)
 	defer x.running.Store(false)
-
 	if err := x.server.Shutdown(ctx); err != nil {
 		x.logger.Errorf("failed to stop cluster engine: %v", err)
 		return err
@@ -307,7 +303,6 @@ func (x *cluster) Stop(ctx context.Context) error {
 	x.events = nil
 	x.eventsLock.Unlock()
 
-	x.logger.Infof("cluster engine (%s) stopped", x.name)
 	return nil
 }
 

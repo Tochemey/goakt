@@ -195,6 +195,9 @@ var (
 
 	// ErrMailboxDisposed is returned when operations are attempted on a disposed mailbox.
 	ErrMailboxDisposed = errors.New("mailbox has been disposed")
+
+	// ErrPeerStateSyncNotReady is returned when peer state synchronization is not yet ready.
+	ErrPeerStateSyncNotReady = errors.New("peer state sync not ready")
 )
 
 // NewErrInvalidPassivationStrategy formats an error with ErrInvalidPassivationStrategy

@@ -116,7 +116,7 @@ func startActorSystem(ctx context.Context, systemName, serverAddr string) actor.
 
 	host := "127.0.0.1"
 	actorSystem, err := actor.NewActorSystem(systemName,
-		actor.WithLogger(log.DiscardLogger),
+		actor.WithLogger(log.DefaultLogger),
 		actor.WithRemote(remote.NewConfig(host, remotingPort)),
 		actor.WithCluster(actor.NewClusterConfig().
 			WithDiscovery(nats.NewDiscovery(&nats.Config{

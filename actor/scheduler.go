@@ -109,10 +109,10 @@ func newScheduler(logger log.Logger, shutdownTimeout time.Duration, opts ...sche
 func (x *scheduler) Start(ctx context.Context) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
-	x.logger.Info("starting messages scheduler...")
+	x.logger.Info("Starting messages scheduler...")
 	x.quartzScheduler.Start(ctx)
 	x.started.Store(x.quartzScheduler.IsStarted())
-	x.logger.Info("messages scheduler started.:)")
+	x.logger.Info("Messages scheduler started.:)")
 }
 
 // Stop stops the scheduler
@@ -121,7 +121,7 @@ func (x *scheduler) Stop(ctx context.Context) {
 		return
 	}
 
-	x.logger.Info("stopping messages scheduler...")
+	x.logger.Info("Stopping messages scheduler...")
 	x.mu.Lock()
 	defer x.mu.Unlock()
 	_ = x.quartzScheduler.Clear()
@@ -133,7 +133,7 @@ func (x *scheduler) Stop(ctx context.Context) {
 	x.quartzScheduler.Wait(ctx)
 
 	x.scheduledKeys.Reset()
-	x.logger.Info("messages scheduler stopped...:)")
+	x.logger.Info("Messages scheduler stopped...:)")
 }
 
 // ScheduleOnce schedules a one-time delivery of a message to the specified actor (PID) after a given delay.
