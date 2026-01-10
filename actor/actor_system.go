@@ -71,6 +71,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v3/internal/locker"
 	"github.com/tochemey/goakt/v3/internal/metric"
+	"github.com/tochemey/goakt/v3/internal/multidatacentermanager"
 	"github.com/tochemey/goakt/v3/internal/network"
 	"github.com/tochemey/goakt/v3/internal/pointer"
 	"github.com/tochemey/goakt/v3/internal/registry"
@@ -803,6 +804,13 @@ type actorSystem struct {
 	rebalancingQueue chan *internalpb.PeerState
 	rebalancedNodes  goset.Set[string]
 
+	dataCentersManager           *multidatacentermanager.Manager
+	dataCentersManagerMu         sync.Mutex
+	dataCentersLeaderTicker      *ticker.Ticker
+	dataCentersLeaderStopSig     chan types.Unit
+	dataCentersLeaderMu          sync.Mutex
+	dataCentersReconcileInFlight atomic.Bool
+
 	relocator        *PID
 	rootGuardian     *PID
 	userGuardian     *PID
@@ -1024,6 +1032,8 @@ func (x *actorSystem) Start(ctx context.Context) error {
 		AddContextRunner(x.spawnPeerStatesWriter).
 		AddContextRunner(x.startRemoting).
 		AddContextRunner(x.startClustering).
+		AddContextRunner(x.ensureMultiDataCenterManager).
+		AddContextRunner(x.startMultiDataCenterLeaderWatch).
 		Run(); err != nil {
 		if stopErr := x.shutdown(ctx); stopErr != nil {
 			return errors.Join(err, stopErr)
@@ -2600,6 +2610,10 @@ func (x *actorSystem) setupCluster() error {
 		Roles:         x.clusterConfig.getRoles(),
 	}
 
+	if x.clusterConfig.multiDCConfig != nil {
+		x.clusterNode.DataCenter = &x.clusterConfig.multiDCConfig.DataCenter
+	}
+
 	x.cluster = cluster.New(
 		x.name,
 		x.clusterConfig.discovery,
@@ -2835,6 +2849,10 @@ func (x *actorSystem) reset() {
 	x.actors.reset()
 	x.grains.Reset()
 	x.shuttingDown.Store(false)
+	x.dataCentersManager = nil
+	x.dataCentersLeaderTicker = nil
+	x.dataCentersLeaderStopSig = nil
+	x.dataCentersReconcileInFlight.Store(false)
 }
 
 // shutdown stops the actor system
@@ -2871,6 +2889,9 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, x.shutdownTimeout)
 	defer cancel()
 
+	x.stopmultiDataCenterLeaderWatch()
+	managerErr := x.shutdownMultiDataCenterManager(ctx)
+
 	// Run shutdown hooks and collect errors
 	hooksErr := x.runShutdownHooks(ctx)
 
@@ -2895,7 +2916,7 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 		x.logger.Errorf("%s failed to shutdown cleanly: %v", x.name, err)
 		clusterErr := shutdownClusterAndRemoting()
 		// Combine all errors if present
-		return multierr.Combine(hooksErr, err, clusterErr)
+		return multierr.Combine(hooksErr, err, clusterErr, managerErr)
 	}
 
 	// deactivate all grains while cluster + pubsub system actors are still alive
@@ -2925,7 +2946,7 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 		x.logger.Errorf("%s failed to shutdown cleanly: %v", x.name, err)
 		clusterErr := shutdownClusterAndRemoting()
 		// Combine all errors if present
-		return multierr.Combine(hooksErr, err, clusterErr)
+		return multierr.Combine(hooksErr, err, clusterErr, managerErr)
 	}
 
 	x.actors.deleteNode(x.getRootGuardian())
@@ -2937,12 +2958,12 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 	// Always attempt to shutdown cluster and remoting
 	if err := shutdownClusterAndRemoting(); err != nil {
 		x.logger.Errorf("%s failed to shutdown: %v", x.name, err)
-		return multierr.Combine(hooksErr, err)
+		return multierr.Combine(hooksErr, err, managerErr)
 	}
 
-	if hooksErr != nil {
+	if hooksErr != nil || managerErr != nil {
 		x.logger.Errorf("%s failed to shutdown cleanly. Shutdown hooks Failure: %v", x.name, hooksErr)
-		return hooksErr
+		return multierr.Combine(hooksErr, managerErr)
 	}
 
 	x.logger.Infof("%s shuts down successfully", x.name)
@@ -3256,6 +3277,7 @@ func (x *actorSystem) handleNodeJoinedEvent(event *cluster.Event) {
 
 	x.tryOpenGrainActivationBarrier(context.Background())
 	x.resyncAfterClusterEvent("node joined", nodeJoined.GetAddress())
+	x.triggerMultiDataCenterManagerReconciliation()
 }
 
 // handleNodeLeftEvent processes a NodeLeft cluster event.
@@ -3268,6 +3290,7 @@ func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
 	)
 
 	x.resyncAfterClusterEvent("node left", nodeLeft.GetAddress())
+	x.triggerMultiDataCenterManagerReconciliation()
 
 	if !x.relocationEnabled.Load() {
 		return
@@ -4074,6 +4097,162 @@ func (x *actorSystem) registerMetrics() error {
 		return err
 	}
 	return nil
+}
+
+// ensureMultiDataCenterManager starts or stops the multi-DC manager based on leader status.
+func (x *actorSystem) ensureMultiDataCenterManager(ctx context.Context) error {
+	if x.isStopping() {
+		return nil
+	}
+
+	if !x.dataCentersReconcileInFlight.CompareAndSwap(false, true) {
+		return nil
+	}
+
+	defer x.dataCentersReconcileInFlight.Store(false)
+
+	if x.clusterConfig == nil || x.clusterConfig.multiDCConfig == nil {
+		return nil
+	}
+
+	if !x.clusterEnabled.Load() || x.cluster == nil {
+		return nil
+	}
+
+	isLeader := x.cluster.IsLeader(ctx)
+
+	x.dataCentersManagerMu.Lock()
+	defer x.dataCentersManagerMu.Unlock()
+
+	// Only the DC leader should run the manager. Followers must stop it to
+	// avoid multiple writers and conflicting heartbeats in the control plane.
+	//
+	// We still handle the follower stop path because leadership can change over
+	// time (re-election, partition heal). A node that previously led the DC
+	// must stop its manager when it loses leadership to prevent stale writers.
+	if !isLeader {
+		if x.dataCentersManager == nil {
+			return nil
+		}
+
+		if err := x.dataCentersManager.Stop(ctx); err != nil {
+			x.logger.Errorf("failed to stop multi-dc manager: %v", err)
+			return err
+		}
+		x.dataCentersManager = nil
+		return nil
+	}
+
+	if x.dataCentersManager != nil {
+		return nil
+	}
+
+	// Leader is responsible for owning the manager lifecycle; start it once.
+	manager, err := multidatacentermanager.NewManager(x.clusterConfig.multiDCConfig)
+	if err != nil {
+		return err
+	}
+
+	if err := manager.Start(ctx); err != nil {
+		return err
+	}
+
+	x.dataCentersManager = manager
+	return nil
+}
+
+func (x *actorSystem) triggerMultiDataCenterManagerReconciliation() {
+	if x.isStopping() {
+		return
+	}
+
+	if x.dataCentersReconcileInFlight.Load() {
+		return
+	}
+	go func() {
+		if err := x.ensureMultiDataCenterManager(context.Background()); err != nil {
+			x.logger.Errorf("failed to reconcile multi-dc manager: %v", err)
+		}
+	}()
+}
+
+func (x *actorSystem) startMultiDataCenterLeaderWatch(ctx context.Context) error {
+	if x.clusterConfig == nil || x.clusterConfig.multiDCConfig == nil {
+		return nil
+	}
+
+	if !x.clusterEnabled.Load() || x.cluster == nil {
+		return nil
+	}
+
+	x.dataCentersLeaderMu.Lock()
+	defer x.dataCentersLeaderMu.Unlock()
+
+	if x.dataCentersLeaderTicker != nil {
+		return nil
+	}
+
+	interval := x.clusterConfig.multiDCConfig.LeaderCheckInterval
+	clock := ticker.New(interval)
+	stopSig := make(chan types.Unit, 1)
+
+	x.dataCentersLeaderTicker = clock
+	x.dataCentersLeaderStopSig = stopSig
+
+	clock.Start()
+	go x.multiDataCenterLeaderWatchLoop(ctx, clock, stopSig)
+	return nil
+}
+
+func (x *actorSystem) multiDataCenterLeaderWatchLoop(ctx context.Context, clock *ticker.Ticker, stopSig <-chan types.Unit) {
+	defer clock.Stop()
+
+	for {
+		select {
+		case <-clock.Ticks:
+			x.triggerMultiDataCenterManagerReconciliation()
+		case <-stopSig:
+			return
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func (x *actorSystem) shutdownMultiDataCenterManager(ctx context.Context) error {
+	x.dataCentersManagerMu.Lock()
+	defer x.dataCentersManagerMu.Unlock()
+	if x.dataCentersManager == nil {
+		return nil
+	}
+
+	if err := x.dataCentersManager.Stop(ctx); err != nil {
+		x.logger.Errorf("failed to stop multi-dc manager: %v", err)
+		return err
+	}
+
+	x.dataCentersManager = nil
+	return nil
+}
+
+func (x *actorSystem) stopmultiDataCenterLeaderWatch() {
+	x.dataCentersLeaderMu.Lock()
+	defer x.dataCentersLeaderMu.Unlock()
+
+	if x.dataCentersLeaderTicker == nil {
+		return
+	}
+
+	x.dataCentersLeaderTicker.Stop()
+	x.dataCentersLeaderTicker = nil
+
+	if x.dataCentersLeaderStopSig != nil {
+		select {
+		case x.dataCentersLeaderStopSig <- types.Unit{}:
+		default:
+		}
+		x.dataCentersLeaderStopSig = nil
+	}
 }
 
 func computeEvictionCount(total, threshold uint64, totalEvictions, percentageToReturn int) int {

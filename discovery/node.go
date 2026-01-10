@@ -27,6 +27,9 @@ import (
 	"net"
 	"slices"
 	"strconv"
+	"strings"
+
+	"github.com/tochemey/goakt/v3/multidatacenter"
 )
 
 // Node represents a discovered Node
@@ -43,6 +46,8 @@ type Node struct {
 	RemotingPort int
 	// Roles represents the node roles
 	Roles []string
+	// DataCenter specifies the node's datacenter metadata (multi-DC only).
+	DataCenter *multidatacenter.DataCenter
 }
 
 // PeersAddress returns address the node's peers will use to connect to
@@ -62,5 +67,22 @@ func (n *Node) HasRole(role string) bool {
 
 // String returns the printable representation of Node
 func (n *Node) String() string {
-	return fmt.Sprintf("[name=%s host=%s gossip=%d  peers=%d remoting=%d]", n.Name, n.Host, n.DiscoveryPort, n.PeersPort, n.RemotingPort)
+	var b strings.Builder
+	_, _ = fmt.Fprintf(&b, "[name=%s host=%s gossip=%d  peers=%d remoting=%d", n.Name, n.Host, n.DiscoveryPort, n.PeersPort, n.RemotingPort)
+	if n.DataCenter != nil {
+		if n.DataCenter.Name != "" {
+			_, _ = fmt.Fprintf(&b, " dc=%s", n.DataCenter.Name)
+		}
+
+		if n.DataCenter.Region != "" {
+			_, _ = fmt.Fprintf(&b, " region=%s", n.DataCenter.Region)
+		}
+
+		if n.DataCenter.Zone != "" {
+			_, _ = fmt.Fprintf(&b, " zone=%s", n.DataCenter.Zone)
+		}
+	}
+
+	_, _ = b.WriteString("]")
+	return b.String()
 }
