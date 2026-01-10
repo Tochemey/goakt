@@ -38,7 +38,7 @@ import (
 )
 
 func TestOption(t *testing.T) {
-	clusterConfig := NewClusterConfig()
+	clusterConfig := NewClusterConfig().WithReadTimeout(5 * time.Second)
 	hasher := hash.DefaultHasher()
 	// nolint
 	tlsConfig := &tls.Config{}

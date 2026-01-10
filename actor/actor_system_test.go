@@ -307,6 +307,7 @@ func TestActorSystem(t *testing.T) {
 					WithPeersPort(clusterPort).
 					WithMinimumPeersQuorum(1).
 					WithDiscoveryPort(gossipPort).
+					WithReadTimeout(5 * time.Second).
 					WithDiscovery(provider)),
 		)
 		require.NoError(t, err)
@@ -1469,6 +1470,7 @@ func TestActorSystem(t *testing.T) {
 					WithPeersPort(clusterPort).
 					WithMinimumPeersQuorum(1).
 					WithDiscoveryPort(gossipPort).
+					WithReadTimeout(5 * time.Second).
 					WithDiscovery(provider)),
 		)
 		require.NoError(t, err)
@@ -1729,6 +1731,7 @@ func TestActorSystem(t *testing.T) {
 					WithPeersPort(clusterPort).
 					WithMinimumPeersQuorum(1).
 					WithDiscoveryPort(gossipPort).
+					WithReadTimeout(5 * time.Second).
 					WithDiscovery(provider)),
 		)
 		require.NoError(t, err)
@@ -2317,6 +2320,7 @@ func TestActorSystem(t *testing.T) {
 					WithPeersPort(-1).
 					WithMinimumPeersQuorum(1).
 					WithDiscoveryPort(-1).
+					WithReadTimeout(5 * time.Second).
 					WithDiscovery(provider)),
 		)
 		require.Error(t, err)
@@ -6186,6 +6190,7 @@ func TestActorSystemStartClusterErrors(t *testing.T) {
 			WithDiscovery(provider).
 			WithDiscoveryPort(30001).
 			WithPeersPort(30002).
+			WithReadTimeout(5 * time.Second).
 			WithKinds(NewMockActor())
 
 		sys, err := NewActorSystem(
@@ -7866,6 +7871,7 @@ func TestGetNodeMetric(t *testing.T) {
 					WithKinds(new(MockActor)).
 					WithDiscovery(provider).
 					WithDiscoveryPort(discoveryPort).
+					WithReadTimeout(5 * time.Second).
 					WithPeersPort(peersPort),
 			),
 		)
@@ -7905,6 +7911,7 @@ func TestGetKinds(t *testing.T) {
 					WithKinds(new(MockActor)).
 					WithDiscovery(provider).
 					WithDiscoveryPort(discoveryPort).
+					WithReadTimeout(5 * time.Second).
 					WithPeersPort(peersPort),
 			),
 		)
@@ -7962,6 +7969,7 @@ func TestPeers(t *testing.T) {
 					WithPeersPort(peersPort).
 					WithMinimumPeersQuorum(1).
 					WithDiscoveryPort(discoveryPort).
+					WithReadTimeout(5 * time.Second).
 					WithDiscovery(provider)),
 		)
 		require.NoError(t, err)
@@ -8002,6 +8010,7 @@ func TestPeers(t *testing.T) {
 					WithPeersPort(peersPort).
 					WithMinimumPeersQuorum(1).
 					WithDiscoveryPort(discoveryPort).
+					WithReadTimeout(5 * time.Second).
 					WithDiscovery(provider)),
 		)
 		require.NoError(t, err)

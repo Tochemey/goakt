@@ -162,6 +162,7 @@ func TestScheduler(t *testing.T) {
 					WithPeersPort(clusterPort).
 					WithMinimumPeersQuorum(1).
 					WithDiscoveryPort(discoveryPort).
+					WithReadTimeout(5 * time.Second).
 					WithDiscovery(provider)),
 		)
 		require.NoError(t, err)
@@ -369,6 +370,7 @@ func TestScheduler(t *testing.T) {
 					WithPeersPort(clusterPort).
 					WithMinimumPeersQuorum(1).
 					WithDiscoveryPort(discoveryPort).
+					WithReadTimeout(5 * time.Second).
 					WithDiscovery(provider)),
 		)
 		require.NoError(t, err)
@@ -540,6 +542,7 @@ func TestScheduler(t *testing.T) {
 					WithPeersPort(clusterPort).
 					WithMinimumPeersQuorum(1).
 					WithDiscoveryPort(discoveryPort).
+					WithReadTimeout(5 * time.Second).
 					WithDiscovery(provider)),
 		)
 		require.NoError(t, err)
@@ -748,6 +751,7 @@ func TestScheduler(t *testing.T) {
 					WithPeersPort(clusterPort).
 					WithMinimumPeersQuorum(1).
 					WithDiscoveryPort(discoveryPort).
+					WithReadTimeout(5 * time.Second).
 					WithDiscovery(provider)),
 		)
 		require.NoError(t, err)
@@ -972,6 +976,7 @@ func TestScheduler(t *testing.T) {
 					WithPeersPort(clusterPort).
 					WithMinimumPeersQuorum(1).
 					WithDiscoveryPort(discoveryPort).
+					WithReadTimeout(5 * time.Second).
 					WithDiscovery(provider)),
 		)
 		require.NoError(t, err)
@@ -1377,6 +1382,7 @@ func TestScheduler(t *testing.T) {
 					WithPeersPort(clusterPort).
 					WithMinimumPeersQuorum(1).
 					WithDiscoveryPort(discoveryPort).
+					WithReadTimeout(5 * time.Second).
 					WithDiscovery(provider)),
 		)
 		require.NoError(t, err)

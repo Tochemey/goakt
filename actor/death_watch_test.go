@@ -182,7 +182,7 @@ func TestDeathWatch(t *testing.T) {
 		sys.remoteConfig = remote.NewConfig(host, remotingPort)
 		sys.clusterNode = &discovery.Node{Host: host, PeersPort: peersPort, DiscoveryPort: discoveryPort}
 
-		clConfig := NewClusterConfig()
+		clConfig := NewClusterConfig().WithReadTimeout(5 * time.Second)
 		clConfig.discoveryPort = 9001
 		clConfig.discovery = provider
 
