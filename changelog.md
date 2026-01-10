@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+### 🐛 Fixes
+- Use a write lock when removing `rebalancedNodes` in `removeNodeLeft` to avoid data races during node-left cleanup.
+- Publish peer state during resync so nodes joining after relocation can rebalance without missing state.
+- Rebuild peer state from the cluster registry on cluster start to repopulate local caches after restarts.
+
+### ✨ Features
+- Added `Dependencies()` and `Dependency(dependencyID string) ` to `GrainContext` to access the grain's dependency container.
+- Added `Extensions()` and `Extension(extensionID string)` to `GrainContext` to access grain extensions.
+- Added ` Dependencies()` and `Dependency(dependencyID string)` to `ReceiveContext` to access the actor's dependency container.
+
+
 ## [v3.12.1] - 2026-06-01
 
 ### ✨ Features

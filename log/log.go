@@ -105,50 +105,30 @@ func New(level Level, writers ...io.Writer) *Log {
 	}
 
 	// set the log level
+	logLevel := zapcore.DebugLevel
 	switch level {
 	case InfoLevel:
-		core = zapcore.NewCore(
-			zapcore.NewJSONEncoder(cfg.EncoderConfig),
-			zap.CombineWriteSyncers(syncWriters...),
-			zapcore.InfoLevel,
-		)
+		logLevel = zapcore.InfoLevel
 	case DebugLevel:
-		core = zapcore.NewCore(
-			zapcore.NewJSONEncoder(cfg.EncoderConfig),
-			zap.CombineWriteSyncers(syncWriters...),
-			zapcore.DebugLevel,
-		)
+		logLevel = zapcore.DebugLevel
 	case WarningLevel:
-		core = zapcore.NewCore(
-			zapcore.NewJSONEncoder(cfg.EncoderConfig),
-			zap.CombineWriteSyncers(syncWriters...),
-			zapcore.WarnLevel,
-		)
+		logLevel = zapcore.WarnLevel
 	case ErrorLevel:
-		core = zapcore.NewCore(
-			zapcore.NewJSONEncoder(cfg.EncoderConfig),
-			zap.CombineWriteSyncers(syncWriters...),
-			zapcore.ErrorLevel,
-		)
+		logLevel = zapcore.ErrorLevel
 	case PanicLevel:
-		core = zapcore.NewCore(
-			zapcore.NewJSONEncoder(cfg.EncoderConfig),
-			zap.CombineWriteSyncers(syncWriters...),
-			zapcore.PanicLevel,
-		)
+		logLevel = zapcore.PanicLevel
 	case FatalLevel:
-		core = zapcore.NewCore(
-			zapcore.NewJSONEncoder(cfg.EncoderConfig),
-			zap.CombineWriteSyncers(syncWriters...),
-			zapcore.FatalLevel,
-		)
+		logLevel = zapcore.FatalLevel
 	default:
-		core = zapcore.NewCore(
-			zapcore.NewJSONEncoder(cfg.EncoderConfig),
-			zap.CombineWriteSyncers(syncWriters...),
-			zapcore.DebugLevel,
-		)
+		// pass
 	}
+
+	core = zapcore.NewCore(
+		zapcore.NewJSONEncoder(cfg.EncoderConfig),
+		zap.CombineWriteSyncers(syncWriters...),
+		logLevel,
+	)
+
 	// get the zap Log
 	zapLogger := zap.New(core,
 		zap.AddCaller(),
