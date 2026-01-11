@@ -33,6 +33,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/size"
 	"github.com/tochemey/goakt/v3/internal/validation"
 	"github.com/tochemey/goakt/v3/internal/xsync"
+	"github.com/tochemey/goakt/v3/multidatacenter"
 )
 
 // ClusterConfig defines the cluster mode settings
@@ -56,6 +57,7 @@ type ClusterConfig struct {
 	grainActivationBarrier   *grainActivationBarrierConfig
 	roles                    goset.Set[string]
 	clusterBalancerInterval  time.Duration
+	multiDCConfig            *multidatacenter.Config
 }
 
 type grainActivationBarrierConfig struct {
@@ -346,6 +348,33 @@ func (x *ClusterConfig) WithClusterBalancerInterval(interval time.Duration) *Clu
 	return x
 }
 
+// WithMultiDataCenter sets the multi-DC configuration for the cluster.
+//
+// Multi-DC integration is only effective when clustering is enabled. The provided
+// config is sanitized before storage; full validation happens when the actor
+// system starts. At minimum, ControlPlane, DataCenter.Name, and Endpoints must
+// be set on the config.
+//
+// Passing nil leaves any existing multi-DC configuration unchanged.
+//
+// Example usage:
+//
+//	mdc := multidatacenter.NewConfig()
+//	mdc.ControlPlane = controlPlane
+//	mdc.DataCenter = multidatacenter.DataCenter{Name: "dc-1", Region: "us-east-1"}
+//	mdc.Endpoints = []string{"10.0.0.10:8443"}
+//
+//	cfg := NewClusterConfig().WithMultiDataCenter(mdc)
+//
+// Returns the updated ClusterConfig instance for chaining.
+func (x *ClusterConfig) WithMultiDataCenter(config *multidatacenter.Config) *ClusterConfig {
+	if config != nil {
+		config.Sanitize()
+		x.multiDCConfig = config
+	}
+	return x
+}
+
 // getRoles returns the roles advertised by this node.
 //
 // A role is a label/metadata used by the cluster to define a node’s
@@ -374,7 +403,7 @@ func (x *ClusterConfig) grainActivationBarrierTimeout() time.Duration {
 
 // Validate validates the cluster config
 func (x *ClusterConfig) Validate() error {
-	return validation.
+	if err := validation.
 		New(validation.AllErrors()).
 		AddAssertion(x.discovery != nil, "discovery provider is not set").
 		AddAssertion(x.partitionCount > 0, "partition count need to greater than zero").
@@ -386,5 +415,15 @@ func (x *ClusterConfig) Validate() error {
 		AddAssertion(x.writeQuorum >= 1, "cluster writeQuorum is invalid").
 		AddAssertion(x.readQuorum >= 1, "cluster readQuorum is invalid").
 		AddAssertion(x.grainActivationBarrier == nil || x.grainActivationBarrier.timeout >= 0, "grain activation barrier timeout is invalid").
-		Validate()
+		Validate(); err != nil {
+		return err
+	}
+
+	if x.multiDCConfig != nil {
+		if err := x.multiDCConfig.Validate(); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

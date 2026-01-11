@@ -1,0 +1,67 @@
+syntax = "proto3";
+
+package internalpb;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/tochemey/goakt/v3/internal/internalpb;internalpb";
+
+// DataCenter defines metadata used for multi-DC routing and placement.
+message DataCenter {
+  // Name is the datacenter identifier.
+  string name = 1;
+  // Region optionally groups datacenters into a higher-level region.
+  string region = 2;
+  // Zone optionally specifies an availability zone.
+  string zone = 3;
+  // Labels provides routing metadata for placement and policy decisions.
+  map<string, string> labels = 4;
+}
+
+// DataCenterState defines the lifecycle state for a DataCenterRecord.
+enum DataCenterState {
+  // DATA_CENTER_STATE_UNSPECIFIED means the state is unknown.
+  DATA_CENTER_STATE_UNSPECIFIED = 0;
+  // DATA_CENTER_STATE_REGISTERED indicates the record is registered but not active.
+  DATA_CENTER_STATE_REGISTERED = 1;
+  // DATA_CENTER_STATE_ACTIVE indicates the record is eligible for routing.
+  DATA_CENTER_STATE_ACTIVE = 2;
+  // DATA_CENTER_STATE_DRAINING indicates new placements should be avoided.
+  DATA_CENTER_STATE_DRAINING = 3;
+  // DATA_CENTER_STATE_INACTIVE indicates the record is not eligible for routing.
+  DATA_CENTER_STATE_INACTIVE = 4;
+}
+
+// DataCenterRecord represents the control plane view of a datacenter.
+message DataCenterRecord {
+  // Id is the stable, immutable identifier for the record.
+  string id = 1;
+  // DataCenter holds the datacenter metadata.
+  DataCenter data_center = 2;
+  // Endpoints is the list of advertised addresses for routing.
+  repeated string endpoints = 3;
+  // State reflects the record lifecycle state.
+  DataCenterState state = 4;
+  // LeaseExpiry is the time when the record becomes inactive if not renewed.
+  google.protobuf.Timestamp lease_expiry = 5;
+  // Version is a monotonic revision for conflict-free updates.
+  uint64 version = 6;
+}
+
+// ControlPlaneEventType describes the kind of change for a watch event.
+enum ControlPlaneEventType {
+  // CONTROL_PLANE_EVENT_TYPE_UNSPECIFIED means the event type is unknown.
+  CONTROL_PLANE_EVENT_TYPE_UNSPECIFIED = 0;
+  // CONTROL_PLANE_EVENT_TYPE_UPSERT indicates a record was created or updated.
+  CONTROL_PLANE_EVENT_TYPE_UPSERT = 1;
+  // CONTROL_PLANE_EVENT_TYPE_DELETE indicates a record was removed or expired.
+  CONTROL_PLANE_EVENT_TYPE_DELETE = 2;
+}
+
+// ControlPlaneEvent represents a control plane change notification.
+message ControlPlaneEvent {
+  // Type describes the change type.
+  ControlPlaneEventType type = 1;
+  // Record carries the updated record.
+  DataCenterRecord record = 2;
+}
