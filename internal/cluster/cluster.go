@@ -493,6 +493,36 @@ func PutGrainIfAbsent(ctx context.Context, cl Cluster, grain *internalpb.Grain) 
 	return cl.PutGrain(ctx, grain)
 }
 
+// PutKindIfAbsent registers the actor kind only if it does not already exist.
+// It returns ErrKindAlreadyExists when another node has already registered the kind.
+func PutKindIfAbsent(ctx context.Context, cl Cluster, kind string) error {
+	if cl == nil {
+		return errors.New("cluster is nil")
+	}
+
+	if strings.TrimSpace(kind) == "" {
+		return fmt.Errorf("kind is empty")
+	}
+
+	// Fast path for the built-in implementation: use an atomic NX write.
+	if c, ok := cl.(*cluster); ok {
+		return c.putKindIfAbsent(ctx, kind)
+	}
+
+	// Best-effort fallback for other Cluster implementations.
+	// Note: still subject to races since the interface doesn't expose an NX/transactional API.
+	value, err := cl.LookupKind(ctx, kind)
+	if err != nil {
+		return err
+	}
+
+	if value == kind {
+		return ErrKindAlreadyExists
+	}
+
+	return cl.PutKind(ctx, kind)
+}
+
 // GetGrain loads a grain by identity from the unified map.
 func (x *cluster) GetGrain(ctx context.Context, identity string) (*internalpb.Grain, error) {
 	if !x.running.Load() {
@@ -1274,6 +1304,23 @@ func (x *cluster) putRecordIfAbsent(ctx context.Context, namespace recordNamespa
 	defer cancel()
 
 	return x.dmap.Put(ctx, composeKey(namespace, key), value, olric.NX())
+}
+
+func (x *cluster) putKindIfAbsent(ctx context.Context, kind string) error {
+	if !x.running.Load() {
+		return ErrEngineNotRunning
+	}
+
+	x.mu.Lock()
+	defer x.mu.Unlock()
+
+	if err := x.putRecordIfAbsent(ctx, namespaceKinds, kind, []byte(kind)); err != nil {
+		if errors.Is(err, olric.ErrKeyFound) {
+			return ErrKindAlreadyExists
+		}
+		return err
+	}
+	return nil
 }
 
 // getRecord fetches a namespaced record from the unified map.

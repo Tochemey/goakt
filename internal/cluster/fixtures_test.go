@@ -206,8 +206,12 @@ func (x *MockDMap) Pipeline(opts ...olric.PipelineOption) (*olric.DMapPipeline, 
 type MockCluster struct {
 	grainExistsFn    func(context.Context, string) (bool, error)
 	putGrainFn       func(context.Context, *internalpb.Grain) error
+	putKindFn        func(context.Context, string) error
+	lookupKindFn     func(context.Context, string) (string, error)
 	grainExistsCalls int
 	putGrainCalls    int
+	putKindCalls     int
+	lookupKindCalls  int
 }
 
 func (x *MockCluster) Start(context.Context) error { panic("unexpected call") }
@@ -232,6 +236,23 @@ func (x *MockCluster) PutGrain(ctx context.Context, grain *internalpb.Grain) err
 	}
 	return nil
 }
+
+func (x *MockCluster) PutKind(ctx context.Context, kind string) error {
+	x.putKindCalls++
+	if x.putKindFn != nil {
+		return x.putKindFn(ctx, kind)
+	}
+	return nil
+}
+
+func (x *MockCluster) LookupKind(ctx context.Context, kind string) (string, error) {
+	x.lookupKindCalls++
+	if x.lookupKindFn != nil {
+		return x.lookupKindFn(ctx, kind)
+	}
+	return "", nil
+}
+
 func (x *MockCluster) GetGrain(context.Context, string) (*internalpb.Grain, error) {
 	panic("unexpected call")
 }
@@ -246,10 +267,7 @@ func (x *MockCluster) GrainExists(ctx context.Context, identity string) (bool, e
 func (x *MockCluster) Grains(context.Context, time.Duration) ([]*internalpb.Grain, error) {
 	panic("unexpected call")
 }
-func (x *MockCluster) LookupKind(context.Context, string) (string, error) {
-	panic("unexpected call")
-}
-func (x *MockCluster) PutKind(context.Context, string) error           { panic("unexpected call") }
+
 func (x *MockCluster) RemoveKind(context.Context, string) error        { panic("unexpected call") }
 func (x *MockCluster) Events() <-chan *Event                           { panic("unexpected call") }
 func (x *MockCluster) Peers(context.Context) ([]*Peer, error)          { panic("unexpected call") }

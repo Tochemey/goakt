@@ -23,9 +23,15 @@
 package actor
 
 import (
+	"strings"
+
+	"go.uber.org/multierr"
+
 	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
+	"github.com/tochemey/goakt/v3/internal/pointer"
+	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/log"
 )
 
@@ -100,7 +106,21 @@ func (x *deathWatch) handleTerminated(ctx *ReceiveContext) error {
 
 		if removeFromCluster {
 			ctx := ctx.withoutCancel()
-			if err := x.cluster.RemoveActor(ctx, actorName); err != nil {
+			var err error
+			multierr.AppendInto(&err, x.cluster.RemoveActor(ctx, actorName))
+
+			// for singleton actors, we also need to remove the kind entry
+			// TODO: add unit tests for this
+			if pid.IsSingleton() {
+				singletonRole := strings.TrimSpace(pointer.Deref(pid.role, ""))
+				singletonKind := registry.Name(pid.Actor())
+				if singletonRole != "" {
+					singletonKind = kindRole(singletonKind, singletonRole)
+				}
+				multierr.AppendInto(&err, x.cluster.RemoveKind(ctx, singletonKind))
+			}
+
+			if err != nil {
 				x.logger.Errorf("Failed to remove dead Actor %s resource from cluster: %v", addr, err)
 				return errors.NewInternalError(err)
 			}

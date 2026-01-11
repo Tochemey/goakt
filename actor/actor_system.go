@@ -3505,13 +3505,11 @@ func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName str
 				kind = kindRole(kind, role)
 			}
 
-			id, err := x.cluster.LookupKind(ctx, kind)
-			if err != nil {
+			if err := cluster.PutKindIfAbsent(ctx, x.cluster, kind); err != nil {
+				if errors.Is(err, cluster.ErrKindAlreadyExists) {
+					return gerrors.ErrSingletonAlreadyExists
+				}
 				return err
-			}
-
-			if id != "" {
-				return gerrors.ErrSingletonAlreadyExists
 			}
 		}
 
@@ -3520,12 +3518,9 @@ func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName str
 		if err != nil {
 			return err
 		}
+
 		if exists {
 			return gerrors.NewErrActorAlreadyExists(actorName)
-		}
-
-		if singleton {
-			return nil
 		}
 	}
 

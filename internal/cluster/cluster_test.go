@@ -2942,3 +2942,159 @@ func TestIsLeaderReturnsTrueWhenCoordinator(t *testing.T) {
 
 	require.True(t, cl.IsLeader(context.Background()))
 }
+
+func TestPutKindIfAbsent(t *testing.T) {
+	t.Run("returns error when cluster is nil", func(t *testing.T) {
+		err := PutKindIfAbsent(context.Background(), nil, "actor.mock")
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "cluster is nil")
+	})
+
+	t.Run("returns error when kind is empty/blank", func(t *testing.T) {
+		cl := &MockCluster{}
+		err := PutKindIfAbsent(context.Background(), cl, "   ")
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "kind is empty")
+	})
+
+	t.Run("returns error when lookup fails", func(t *testing.T) {
+		ctx := context.Background()
+		expected := errors.New("lookup failed")
+		cl := &MockCluster{
+			lookupKindFn: func(ctx context.Context, kind string) (string, error) {
+				require.Equal(t, "actor.mock", kind)
+				return "", expected
+			},
+		}
+
+		err := PutKindIfAbsent(ctx, cl, "actor.mock")
+		require.ErrorIs(t, err, expected)
+		require.Equal(t, 1, cl.lookupKindCalls)
+		require.Equal(t, 0, cl.putKindCalls)
+	})
+
+	t.Run("returns ErrKindAlreadyExists when kind already registered", func(t *testing.T) {
+		ctx := context.Background()
+		cl := &MockCluster{
+			lookupKindFn: func(ctx context.Context, kind string) (string, error) {
+				require.Equal(t, "actor.mock", kind)
+				return kind, nil
+			},
+		}
+
+		err := PutKindIfAbsent(ctx, cl, "actor.mock")
+		require.ErrorIs(t, err, ErrKindAlreadyExists)
+		require.Equal(t, 1, cl.lookupKindCalls)
+		require.Equal(t, 0, cl.putKindCalls)
+	})
+
+	t.Run("returns error when put fails", func(t *testing.T) {
+		ctx := context.Background()
+		expected := errors.New("put failed")
+		cl := &MockCluster{
+			lookupKindFn: func(ctx context.Context, kind string) (string, error) {
+				require.Equal(t, "actor.mock", kind)
+				return "", nil
+			},
+			putKindFn: func(ctx context.Context, kind string) error {
+				require.Equal(t, "actor.mock", kind)
+				return expected
+			},
+		}
+
+		err := PutKindIfAbsent(ctx, cl, "actor.mock")
+		require.ErrorIs(t, err, expected)
+		require.Equal(t, 1, cl.lookupKindCalls)
+		require.Equal(t, 1, cl.putKindCalls)
+	})
+
+	t.Run("succeeds when kind does not exist and put succeeds", func(t *testing.T) {
+		ctx := context.Background()
+		cl := &MockCluster{
+			lookupKindFn: func(ctx context.Context, kind string) (string, error) {
+				require.Equal(t, "actor.mock", kind)
+				return "", nil
+			},
+			putKindFn: func(ctx context.Context, kind string) error {
+				require.Equal(t, "actor.mock", kind)
+				return nil
+			},
+		}
+
+		err := PutKindIfAbsent(ctx, cl, "actor.mock")
+		require.NoError(t, err)
+		require.Equal(t, 1, cl.lookupKindCalls)
+		require.Equal(t, 1, cl.putKindCalls)
+	})
+
+	t.Run("without fallback when absent succeeds", func(t *testing.T) {
+		called := false
+		cl := &cluster{
+			running:      atomic.NewBool(true),
+			writeTimeout: time.Second,
+			dmap: &MockDMap{
+				putFn: func(ctx context.Context, key string, value any, options ...olric.PutOption) error { // nolint
+					called = true
+					require.NotEmpty(t, options)
+					return nil
+				},
+			},
+		}
+
+		kind := "actor.mock"
+		err := PutKindIfAbsent(context.Background(), cl, kind)
+		require.NoError(t, err)
+		require.True(t, called)
+	})
+
+	t.Run("without fallback when cluster not running", func(t *testing.T) {
+		cl := &cluster{
+			running: atomic.NewBool(false),
+		}
+
+		kind := "actor.mock"
+		err := PutKindIfAbsent(context.Background(), cl, kind)
+		require.ErrorIs(t, err, ErrEngineNotRunning)
+	})
+
+	t.Run("without fallback when kind is empty", func(t *testing.T) {
+		cl := &cluster{
+			running: atomic.NewBool(true),
+		}
+
+		kind := ""
+		err := PutKindIfAbsent(context.Background(), cl, kind)
+		require.Error(t, err)
+	})
+
+	t.Run("without fallback when cluster is nil", func(t *testing.T) {
+		kind := "actor.mock"
+		err := PutKindIfAbsent(context.Background(), nil, kind)
+		require.Error(t, err)
+	})
+
+	t.Run("when already exist", func(t *testing.T) {
+		cl := &cluster{
+			running:      atomic.NewBool(true),
+			dmap:         &MockDMap{putErr: olric.ErrKeyFound},
+			writeTimeout: time.Second,
+		}
+
+		kind := "actor.mock"
+		err := PutKindIfAbsent(context.Background(), cl, kind)
+		require.ErrorIs(t, err, ErrKindAlreadyExists)
+	})
+
+	t.Run("when DMap returns an error", func(t *testing.T) {
+		expectedErr := errors.New("put failure")
+		cl := &cluster{
+			running:      atomic.NewBool(true),
+			dmap:         &MockDMap{putErr: expectedErr},
+			writeTimeout: time.Second,
+		}
+
+		kind := "actor.mock"
+		err := PutKindIfAbsent(context.Background(), cl, kind)
+		require.ErrorIs(t, err, expectedErr)
+	})
+}

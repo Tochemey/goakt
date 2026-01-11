@@ -24,7 +24,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -36,7 +35,6 @@ import (
 
 	"github.com/tochemey/goakt/v3/actor"
 	"github.com/tochemey/goakt/v3/discovery/nats"
-	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/remote"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
@@ -159,20 +157,9 @@ func main() {
 
 	fmt.Println("Cluster started")
 
-	isLeader, err := actorSystem.IsLeader(ctx)
+	err = actorSystem.SpawnSingleton(ctx, "hello-world", NewHelloWorld())
 	if err != nil {
-		fmt.Printf("Error checking leader: %v\n", err)
-		os.Exit(1)
-	}
-
-	if isLeader {
-		err = actorSystem.SpawnSingleton(ctx, "hello-world", NewHelloWorld())
-		if err != nil {
-			if !errors.Is(err, gerrors.ErrActorAlreadyExists) {
-				fmt.Printf("Error starting cluster: %v\n", err)
-				os.Exit(1)
-			}
-		}
+		fmt.Printf("Error spawning singleton actor: %v\n", err)
 	}
 
 	time.Sleep(2 * time.Second)

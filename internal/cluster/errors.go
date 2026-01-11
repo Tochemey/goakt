@@ -41,6 +41,8 @@ var (
 	ErrGrainNotFound = errors.New("grain not found")
 	// ErrGrainAlreadyExists is returned when a grain entry already exists.
 	ErrGrainAlreadyExists = errors.New("grain already exists")
+	// ErrKindAlreadyExists is returned when an actor kind entry already exists.
+	ErrKindAlreadyExists = errors.New("kind already exists")
 )
 
 // IsQuorumError returns true when a cluster operation failed due to quorum constraints.
