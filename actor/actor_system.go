@@ -735,6 +735,11 @@ type ActorSystem interface {
 	removeNodeLeft(address string)
 }
 
+type registryBucket struct {
+	actors []*internalpb.Actor
+	grains []*internalpb.Grain
+}
+
 // ActorSystem represent a collection of actors on a given node
 // Only a single instance of the ActorSystem can be created on a given node
 type actorSystem struct {
@@ -816,7 +821,10 @@ type actorSystem struct {
 
 	startedAt        atomic.Int64
 	relocating       atomic.Bool
+	peerStateSyncing atomic.Bool
 	relocatingLocker sync.Mutex
+	peerInfoLock     sync.RWMutex
+	peerInfo         map[string]*cluster.Peer
 	shutdownHooks    []ShutdownHook
 
 	actorsCounter      atomic.Uint64
@@ -906,6 +914,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		grains:              xsync.NewMap[string, *grainPID](),
 		askTimeout:          DefaultAskTimeout,
 		evictionStopSig:     make(chan types.Unit, 1),
+		peerInfo:            make(map[string]*cluster.Peer),
 	}
 
 	system.startedAt.Store(0)
@@ -2663,7 +2672,9 @@ func (x *actorSystem) startClustering(ctx context.Context) error {
 	// start the various relocation loops when relocation is enabled
 	if x.relocationEnabled.Load() {
 		go x.rebalancingLoop()
-		go x.syncPeerStatesOnStart(ctx)
+		syncCtx, cancel := context.WithTimeout(ctx, x.peerStateSyncTimeout())
+		x.syncPeerStatesOnStart(syncCtx)
+		cancel()
 	}
 
 	if err := x.cleanupStaleLocalActors(ctx); err != nil {
@@ -2835,6 +2846,9 @@ func (x *actorSystem) reset() {
 	x.actors.reset()
 	x.grains.Reset()
 	x.shuttingDown.Store(false)
+	x.peerInfoLock.Lock()
+	x.peerInfo = make(map[string]*cluster.Peer)
+	x.peerInfoLock.Unlock()
 }
 
 // shutdown stops the actor system
@@ -3053,6 +3067,9 @@ func (x *actorSystem) rebuildPeerStatesFromCluster(ctx context.Context) error {
 
 	actors, grains, err := x.loadClusterRegistry(ctx, clusterEngine, timeout)
 	if err != nil {
+		if x.peerStateSyncRetryable(err) {
+			return gerrors.ErrPeerStateSyncNotReady
+		}
 		return err
 	}
 
@@ -3060,7 +3077,6 @@ func (x *actorSystem) rebuildPeerStatesFromCluster(ctx context.Context) error {
 		return gerrors.ErrPeerStateSyncNotReady
 	}
 
-	x.clearPeerStates(ctx, sender, stateWriter, members)
 	peersByRemoting := x.buildPeerRemotingIndex(members)
 	x.persistPeerStateActors(ctx, sender, stateWriter, peersByRemoting, actors)
 	x.persistPeerStateGrains(ctx, sender, stateWriter, peersByRemoting, grains)
@@ -3086,6 +3102,8 @@ func (x *actorSystem) peerStateSyncPrereqs(ctx context.Context) (cluster.Cluster
 		return nil, nil, nil, nil, 0, gerrors.ErrPeerStateSyncNotReady
 	}
 
+	x.cachePeerInfo(members)
+
 	stateWriter := x.getPeerStatesWriter()
 	if stateWriter == nil || !stateWriter.IsRunning() {
 		return nil, nil, nil, nil, 0, gerrors.ErrPeerStateSyncNotReady
@@ -3096,15 +3114,22 @@ func (x *actorSystem) peerStateSyncPrereqs(ctx context.Context) (cluster.Cluster
 		return nil, nil, nil, nil, 0, gerrors.ErrPeerStateSyncNotReady
 	}
 
+	if !x.membersStable(ctx, clusterEngine, members) {
+		return nil, nil, nil, nil, 0, gerrors.ErrPeerStateSyncNotReady
+	}
+
 	return clusterEngine, members, stateWriter, sender, x.peerStateSyncTimeout(), nil
 }
 
 func (x *actorSystem) peerStateSyncTimeout() time.Duration {
-	timeout := time.Second
+	timeout := DefaultClusterBootstrapTimeout
 	if x.clusterConfig != nil {
 		timeout = x.clusterConfig.readTimeout
 		if x.clusterConfig.bootstrapTimeout > timeout {
 			timeout = x.clusterConfig.bootstrapTimeout
+		}
+		if timeout < DefaultClusterBootstrapTimeout {
+			timeout = DefaultClusterBootstrapTimeout
 		}
 	}
 	return timeout
@@ -3113,10 +3138,72 @@ func (x *actorSystem) peerStateSyncTimeout() time.Duration {
 func (x *actorSystem) buildPeerRemotingIndex(members []*cluster.Peer) map[string]*cluster.Peer {
 	peersByRemoting := make(map[string]*cluster.Peer, len(members))
 	for _, peer := range members {
+		if peer == nil {
+			continue
+		}
 		remotingKey := peer.RemotingAddress()
 		peersByRemoting[remotingKey] = peer
 	}
+
+	x.peerInfoLock.RLock()
+	for _, peer := range x.peerInfo {
+		if peer == nil {
+			continue
+		}
+		remotingKey := peer.RemotingAddress()
+		if _, ok := peersByRemoting[remotingKey]; ok {
+			continue
+		}
+		peersByRemoting[remotingKey] = peer
+	}
+	x.peerInfoLock.RUnlock()
+
 	return peersByRemoting
+}
+
+func (x *actorSystem) membersStable(ctx context.Context, clusterEngine cluster.Cluster, members []*cluster.Peer) bool {
+	if len(members) <= 1 {
+		return true
+	}
+
+	stableWindow := 250 * time.Millisecond
+	if x.clusterConfig != nil && x.clusterConfig.clusterStateSyncInterval > 0 &&
+		x.clusterConfig.clusterStateSyncInterval < stableWindow {
+		stableWindow = x.clusterConfig.clusterStateSyncInterval
+	}
+
+	timer := time.NewTimer(stableWindow)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+	}
+
+	latest, err := clusterEngine.Members(ctx)
+	if err != nil {
+		return false
+	}
+
+	return sameMembers(members, latest)
+}
+
+func sameMembers(a, b []*cluster.Peer) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	index := make(map[string]struct{}, len(a))
+	for _, peer := range a {
+		index[peer.PeerAddress()] = struct{}{}
+	}
+	for _, peer := range b {
+		if _, ok := index[peer.PeerAddress()]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func (x *actorSystem) clearPeerStates(ctx context.Context, sender, stateWriter *PID, members []*cluster.Peer) {
@@ -3211,26 +3298,56 @@ func (x *actorSystem) syncPeerStatesOnStart(ctx context.Context) {
 	if !x.clusterEnabled.Load() || !x.relocationEnabled.Load() {
 		return
 	}
+	if !x.peerStateSyncing.CompareAndSwap(false, true) {
+		return
+	}
+	defer x.peerStateSyncing.Store(false)
 
 	delay := 200 * time.Millisecond
 	maxWait := DefaultClusterBootstrapTimeout
-	if x.clusterConfig != nil && x.clusterConfig.bootstrapTimeout > 0 {
+	if x.clusterConfig != nil && x.clusterConfig.bootstrapTimeout > maxWait {
 		maxWait = x.clusterConfig.bootstrapTimeout
 	}
 
 	retries := maxInt(int(maxWait/delay), 1)
-
-	ctx, cancel := context.WithTimeout(ctx, maxWait)
-	defer cancel()
+	retryPause := delay
+	if x.clusterConfig != nil && x.clusterConfig.clusterStateSyncInterval > retryPause {
+		retryPause = x.clusterConfig.clusterStateSyncInterval
+	}
 
 	retrier := retry.NewRetrier(retries, delay, delay)
-	if err := retrier.RunContext(ctx, func(ctx context.Context) error {
+	for {
 		if x.isStopping() {
-			return retry.Stop(context.Canceled)
+			return
 		}
-		return x.rebuildPeerStatesFromCluster(ctx)
-	}); err != nil && !errors.Is(err, gerrors.ErrPeerStateSyncNotReady) && !errors.Is(err, context.Canceled) {
-		x.logger.Warnf("Node=(%s) peer state sync failed: %v", x.String(), err)
+
+		attemptCtx, cancel := context.WithTimeout(ctx, maxWait)
+		err := retrier.RunContext(attemptCtx, func(ctx context.Context) error {
+			if x.isStopping() {
+				return retry.Stop(context.Canceled)
+			}
+			if err := x.rebuildPeerStatesFromCluster(ctx); err != nil {
+				if errors.Is(err, gerrors.ErrPeerStateSyncNotReady) {
+					return retry.Stop(err)
+				}
+				return err
+			}
+			return nil
+		})
+		cancel()
+
+		if err == nil || errors.Is(err, context.Canceled) {
+			return
+		}
+
+		if !errors.Is(err, gerrors.ErrPeerStateSyncNotReady) {
+			x.logger.Warnf("Node=(%s) peer state sync failed: %v", x.String(), err)
+			return
+		}
+
+		if !sleepWithContext(ctx, retryPause) {
+			return
+		}
 	}
 }
 
@@ -3266,8 +3383,15 @@ func (x *actorSystem) handleNodeJoinedEvent(event *cluster.Event) {
 		x.String(),
 		nodeJoined.GetAddress())
 
+	if clusterEngine := x.getCluster(); clusterEngine != nil {
+		if members, err := clusterEngine.Members(context.Background()); err == nil {
+			x.cachePeerInfo(members)
+		}
+	}
+
 	x.tryOpenGrainActivationBarrier(context.Background())
 	x.resyncAfterClusterEvent("node joined", nodeJoined.GetAddress())
+	go x.syncPeerStatesOnStart(context.Background())
 }
 
 // handleNodeLeftEvent processes a NodeLeft cluster event.
@@ -3295,18 +3419,7 @@ func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
 		)
 
 		if !x.rebalancedNodes.Contains(nodeLeft.GetAddress()) {
-			x.rebalancedNodes.Add(nodeLeft.GetAddress())
-
-			msg := &internalpb.GetPeerState{PeerAddress: nodeLeft.GetAddress()}
-			if response, err := x.NoSender().Ask(ctx, stateWriter, msg, DefaultAskTimeout); err == nil {
-				x.relocatingLocker.Lock()
-				x.rebalancingQueue <- response.(*internalpb.PeerState)
-				x.relocatingLocker.Unlock()
-				return
-			}
-
-			x.logger.Warnf("Cluster leader (%s) could not find node=(%s)'s state",
-				x.String(), nodeLeft.GetAddress())
+			go x.enqueueRebalanceForLeftNode(nodeLeft.GetAddress())
 		}
 		return
 	}
@@ -3705,6 +3818,18 @@ func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName str
 
 // cleanupCluster cleans up the cluster
 func (x *actorSystem) cleanupCluster(ctx context.Context, actorRefs []ActorRef) error {
+	if x.relocationEnabled.Load() {
+		peers, err := x.cluster.Peers(ctx)
+		if err != nil || len(peers) > 0 {
+			if err != nil {
+				x.logger.Warnf("Skipping cluster cleanup on shutdown because relocation is enabled: %v", err)
+			} else {
+				x.logger.Infof("Skipping cluster cleanup on shutdown because relocation is enabled and peers are present")
+			}
+			return nil
+		}
+	}
+
 	eg, ctx := errgroup.WithContext(ctx)
 
 	// Remove singleton actors from the cluster
@@ -4112,6 +4237,389 @@ func runWithRetry(ctx context.Context, hook ShutdownHook, sys *actorSystem, reco
 	return retrier.RunContext(ctx, func(ctx context.Context) error {
 		return hook.Execute(ctx, sys)
 	})
+}
+
+func sleepWithContext(ctx context.Context, duration time.Duration) bool {
+	if duration <= 0 {
+		return true
+	}
+
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+func (x *actorSystem) peerStateSyncRetryable(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	if errors.Is(err, cluster.ErrEngineNotRunning) || cluster.IsQuorumError(err) {
+		return true
+	}
+	if errors.Is(err, syscall.ECONNREFUSED) ||
+		errors.Is(err, syscall.ECONNRESET) ||
+		errors.Is(err, syscall.ECONNABORTED) ||
+		errors.Is(err, syscall.ENETUNREACH) ||
+		errors.Is(err, syscall.ETIMEDOUT) {
+		return true
+	}
+
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+
+	return false
+}
+
+// waitForPeerStateSync blocks until the peer-state sync completes or the timeout elapses.
+// It polls the sync flag with a short sleep to avoid busy waiting.
+// It returns true when syncing finished (or never started) and false on timeout/cancellation.
+func (x *actorSystem) waitForPeerStateSync(ctx context.Context, timeout time.Duration) bool {
+	if !x.peerStateSyncing.Load() {
+		return true
+	}
+
+	if timeout <= 0 {
+		timeout = DefaultAskTimeout
+	}
+
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	for x.peerStateSyncing.Load() {
+		if !sleepWithContext(waitCtx, 50*time.Millisecond) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func (x *actorSystem) cachePeerInfo(peers []*cluster.Peer) {
+	if len(peers) == 0 {
+		return
+	}
+
+	x.peerInfoLock.Lock()
+	defer x.peerInfoLock.Unlock()
+
+	if x.peerInfo == nil {
+		x.peerInfo = make(map[string]*cluster.Peer, len(peers))
+	}
+
+	for _, peer := range peers {
+		if peer == nil {
+			continue
+		}
+		peerCopy := *peer
+		x.peerInfo[peerCopy.PeerAddress()] = &peerCopy
+	}
+}
+
+func (x *actorSystem) peerInfoForAddress(address string) (*cluster.Peer, bool) {
+	x.peerInfoLock.RLock()
+	defer x.peerInfoLock.RUnlock()
+
+	peer, ok := x.peerInfo[address]
+	return peer, ok
+}
+
+// buildPeerStateFromRegistry reconstructs a peer state from the cluster registry.
+// Algorithm:
+//   - Use cached peer info (peers address -> remoting/peers ports) to collect actors/grains
+//     matching the remoting address.
+//   - If the cache misses, refresh membership to populate it and retry.
+//   - As a fallback, scan registry entries not owned by current members, prefer the same-host
+//     buckets, and pick the largest bucket.
+//
+// Returns nil when no state can be reconstructed.
+func (x *actorSystem) buildPeerStateFromRegistry(ctx context.Context, peerAddress string) *internalpb.PeerState {
+	clusterEngine := x.getCluster()
+	if clusterEngine == nil {
+		return nil
+	}
+
+	peerHost, peersPort, ok := splitHostPort(peerAddress)
+	if !ok {
+		return nil
+	}
+
+	if state := x.buildPeerStateFromRegistryUsingCache(ctx, clusterEngine, peerAddress); state != nil {
+		return state
+	}
+
+	members, err := clusterEngine.Members(ctx)
+	if err != nil {
+		return nil
+	}
+	x.cachePeerInfo(members)
+	if state := x.buildPeerStateFromRegistryUsingCache(ctx, clusterEngine, peerAddress); state != nil {
+		return state
+	}
+
+	return x.buildPeerStateFromRegistryFallback(ctx, clusterEngine, members, peerAddress, peerHost, peersPort)
+}
+
+func splitHostPort(address string) (string, int, bool) {
+	host, portStr, err := net.SplitHostPort(address)
+	if err != nil {
+		return "", 0, false
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return "", 0, false
+	}
+	return host, port, true
+}
+
+func (x *actorSystem) buildPeerStateFromRegistryUsingCache(ctx context.Context, clusterEngine cluster.Cluster, peerAddress string) *internalpb.PeerState {
+	peerInfo, ok := x.peerInfoForAddress(peerAddress)
+	if !ok || peerInfo == nil {
+		return nil
+	}
+
+	return x.buildPeerStateFromRegistryForPeer(ctx, clusterEngine, peerInfo)
+}
+
+func (x *actorSystem) buildPeerStateFromRegistryForPeer(ctx context.Context, clusterEngine cluster.Cluster, peerInfo *cluster.Peer) *internalpb.PeerState {
+	actors, grains, err := x.loadClusterRegistry(ctx, clusterEngine, x.peerStateSyncTimeout())
+	if err != nil {
+		return nil
+	}
+
+	remotingKey := net.JoinHostPort(peerInfo.Host, strconv.Itoa(peerInfo.RemotingPort))
+	actorsMap := x.collectActorsForRemotingKey(actors, remotingKey)
+	grainsMap := x.collectGrainsForRemotingKey(grains, remotingKey)
+	return x.newPeerState(peerInfo.Host, peerInfo.RemotingPort, peerInfo.PeersPort, actorsMap, grainsMap)
+}
+
+func (x *actorSystem) buildPeerStateFromRegistryFallback(ctx context.Context, clusterEngine cluster.Cluster, members []*cluster.Peer, peerAddress, peerHost string, peersPort int) *internalpb.PeerState {
+	remotingMembers := x.buildRemotingMembersIndex(members, peerAddress)
+	actors, grains, err := x.loadClusterRegistry(ctx, clusterEngine, x.peerStateSyncTimeout())
+	if err != nil {
+		return nil
+	}
+
+	buckets := x.buildRegistryBuckets(actors, grains, remotingMembers)
+	selectedKey, selectedBucket := selectRegistryBucket(buckets, peerHost)
+	if selectedBucket == nil {
+		return nil
+	}
+
+	remotingHost, remotingPort, ok := splitHostPort(selectedKey)
+	if !ok {
+		return nil
+	}
+
+	actorsMap := x.collectActorsForRemotingKey(selectedBucket.actors, "")
+	grainsMap := x.collectGrainsForRemotingKey(selectedBucket.grains, "")
+	return x.newPeerState(remotingHost, remotingPort, peersPort, actorsMap, grainsMap)
+}
+
+func (x *actorSystem) buildRemotingMembersIndex(members []*cluster.Peer, peerAddress string) map[string]struct{} {
+	remotingMembers := make(map[string]struct{}, len(members))
+	for _, peer := range members {
+		if peer == nil {
+			continue
+		}
+		if peer.PeerAddress() == peerAddress {
+			continue
+		}
+		remotingMembers[peer.RemotingAddress()] = struct{}{}
+	}
+	return remotingMembers
+}
+
+func (x *actorSystem) buildRegistryBuckets(actors []*internalpb.Actor, grains []*internalpb.Grain, remotingMembers map[string]struct{}) map[string]*registryBucket {
+	buckets := make(map[string]*registryBucket)
+	for _, actor := range actors {
+		if actor == nil {
+			continue
+		}
+
+		addr, err := address.Parse(actor.GetAddress())
+		if err != nil {
+			continue
+		}
+
+		remotingKey := net.JoinHostPort(addr.Host(), strconv.Itoa(addr.Port()))
+		if _, ok := remotingMembers[remotingKey]; ok {
+			continue
+		}
+
+		bucket := buckets[remotingKey]
+		if bucket == nil {
+			bucket = &registryBucket{}
+			buckets[remotingKey] = bucket
+		}
+		bucket.actors = append(bucket.actors, actor)
+	}
+
+	for _, grain := range grains {
+		if grain == nil {
+			continue
+		}
+
+		remotingKey := net.JoinHostPort(grain.GetHost(), strconv.Itoa(int(grain.GetPort())))
+		if _, ok := remotingMembers[remotingKey]; ok {
+			continue
+		}
+
+		bucket := buckets[remotingKey]
+		if bucket == nil {
+			bucket = &registryBucket{}
+			buckets[remotingKey] = bucket
+		}
+		bucket.grains = append(bucket.grains, grain)
+	}
+
+	return buckets
+}
+
+func selectRegistryBucket(buckets map[string]*registryBucket, preferredHost string) (string, *registryBucket) {
+	var selectedKey string
+	var selectedBucket *registryBucket
+	selectedCount := 0
+
+	for key, bucket := range buckets {
+		keyHost, _, ok := splitHostPort(key)
+		if !ok || keyHost != preferredHost {
+			continue
+		}
+		count := len(bucket.actors) + len(bucket.grains)
+		if count > selectedCount {
+			selectedKey = key
+			selectedBucket = bucket
+			selectedCount = count
+		}
+	}
+
+	if selectedBucket == nil {
+		for key, bucket := range buckets {
+			count := len(bucket.actors) + len(bucket.grains)
+			if count > selectedCount {
+				selectedKey = key
+				selectedBucket = bucket
+				selectedCount = count
+			}
+		}
+	}
+
+	return selectedKey, selectedBucket
+}
+
+func (x *actorSystem) collectActorsForRemotingKey(actors []*internalpb.Actor, remotingKey string) map[string]*internalpb.Actor {
+	actorsMap := make(map[string]*internalpb.Actor)
+	for _, actor := range actors {
+		if actor == nil {
+			continue
+		}
+		addr, err := address.Parse(actor.GetAddress())
+		if err != nil || isSystemName(addr.Name()) {
+			continue
+		}
+		if remotingKey != "" && net.JoinHostPort(addr.Host(), strconv.Itoa(addr.Port())) != remotingKey {
+			continue
+		}
+		actorsMap[addr.Name()] = actor
+	}
+	return actorsMap
+}
+
+func (x *actorSystem) collectGrainsForRemotingKey(grains []*internalpb.Grain, remotingKey string) map[string]*internalpb.Grain {
+	grainsMap := make(map[string]*internalpb.Grain)
+	for _, grain := range grains {
+		if grain == nil {
+			continue
+		}
+		if remotingKey != "" && net.JoinHostPort(grain.GetHost(), strconv.Itoa(int(grain.GetPort()))) != remotingKey {
+			continue
+		}
+		grainID := grain.GetGrainId()
+		if grainID == nil {
+			continue
+		}
+		grainsMap[grainID.GetValue()] = grain
+	}
+	return grainsMap
+}
+
+func (x *actorSystem) newPeerState(host string, remotingPort, peersPort int, actors map[string]*internalpb.Actor, grains map[string]*internalpb.Grain) *internalpb.PeerState {
+	if len(actors) == 0 && len(grains) == 0 {
+		return nil
+	}
+
+	peerState := &internalpb.PeerState{
+		Host:         host,
+		RemotingPort: int32(remotingPort), // nolint
+		PeersPort:    int32(peersPort),    // nolint
+	}
+
+	if len(actors) > 0 {
+		peerState.Actors = actors
+	}
+
+	if len(grains) > 0 {
+		peerState.Grains = grains
+	}
+	return peerState
+}
+
+func (x *actorSystem) enqueueRebalanceForLeftNode(peerAddress string) {
+	if x.rebalancedNodes.Contains(peerAddress) {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), x.peerStateSyncTimeout())
+	defer cancel()
+
+	stateWriter := x.getPeerStatesWriter()
+	sender := x.NoSender()
+	if stateWriter == nil || sender == nil {
+		return
+	}
+
+	x.syncPeerStatesOnStart(ctx)
+	if !x.waitForPeerStateSync(ctx, x.peerStateSyncTimeout()) {
+		x.logger.Warnf("Cluster leader (%s) timed out waiting for peer state sync before rebalancing node=(%s)",
+			x.String(), peerAddress)
+	}
+
+	msg := &internalpb.GetPeerState{PeerAddress: peerAddress}
+	for {
+		if response, err := sender.Ask(ctx, stateWriter, msg, DefaultAskTimeout); err == nil {
+			x.rebalancedNodes.Add(peerAddress)
+			x.relocatingLocker.Lock()
+			x.rebalancingQueue <- response.(*internalpb.PeerState)
+			x.relocatingLocker.Unlock()
+			return
+		}
+
+		if state := x.buildPeerStateFromRegistry(ctx, peerAddress); state != nil {
+			x.rebalancedNodes.Add(peerAddress)
+			x.relocatingLocker.Lock()
+			x.rebalancingQueue <- state
+			x.relocatingLocker.Unlock()
+			return
+		}
+
+		if !sleepWithContext(ctx, 200*time.Millisecond) {
+			break
+		}
+	}
+
+	x.logger.Warnf("Cluster leader (%s) could not find node=(%s)'s state after retrying",
+		x.String(), peerAddress)
 }
 
 // getServer creates an instance of http server
