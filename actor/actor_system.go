@@ -2663,7 +2663,7 @@ func (x *actorSystem) startClustering(ctx context.Context) error {
 	// start the various relocation loops when relocation is enabled
 	if x.relocationEnabled.Load() {
 		go x.rebalancingLoop()
-		go x.syncPeerStatesOnStart()
+		go x.syncPeerStatesOnStart(ctx)
 	}
 
 	if err := x.cleanupStaleLocalActors(ctx); err != nil {
@@ -3051,7 +3051,6 @@ func (x *actorSystem) rebuildPeerStatesFromCluster(ctx context.Context) error {
 		return err
 	}
 
-	peersByRemoting := x.buildPeerRemotingIndex(ctx, members, stateWriter, sender)
 	actors, grains, err := x.loadClusterRegistry(ctx, clusterEngine, timeout)
 	if err != nil {
 		return err
@@ -3061,6 +3060,8 @@ func (x *actorSystem) rebuildPeerStatesFromCluster(ctx context.Context) error {
 		return gerrors.ErrPeerStateSyncNotReady
 	}
 
+	x.clearPeerStates(ctx, sender, stateWriter, members)
+	peersByRemoting := x.buildPeerRemotingIndex(members)
 	x.persistPeerStateActors(ctx, sender, stateWriter, peersByRemoting, actors)
 	x.persistPeerStateGrains(ctx, sender, stateWriter, peersByRemoting, grains)
 	return nil
@@ -3102,21 +3103,29 @@ func (x *actorSystem) peerStateSyncTimeout() time.Duration {
 	timeout := time.Second
 	if x.clusterConfig != nil {
 		timeout = x.clusterConfig.readTimeout
+		if x.clusterConfig.bootstrapTimeout > timeout {
+			timeout = x.clusterConfig.bootstrapTimeout
+		}
 	}
 	return timeout
 }
 
-func (x *actorSystem) buildPeerRemotingIndex(ctx context.Context, members []*cluster.Peer, stateWriter, sender *PID) map[string]*cluster.Peer {
+func (x *actorSystem) buildPeerRemotingIndex(members []*cluster.Peer) map[string]*cluster.Peer {
 	peersByRemoting := make(map[string]*cluster.Peer, len(members))
 	for _, peer := range members {
 		remotingKey := peer.RemotingAddress()
 		peersByRemoting[remotingKey] = peer
+	}
+	return peersByRemoting
+}
+
+func (x *actorSystem) clearPeerStates(ctx context.Context, sender, stateWriter *PID, members []*cluster.Peer) {
+	for _, peer := range members {
 		peerAddress := peer.PeerAddress()
-		if err := sender.Tell(ctx, stateWriter, &internalpb.DeletePeerState{PeerAddress: peerAddress}); err != nil {
+		if _, err := sender.Ask(ctx, stateWriter, &internalpb.DeletePeerState{PeerAddress: peerAddress}, DefaultAskTimeout); err != nil {
 			x.logger.Warnf("Node=(%s) failed to clear peer state for %s: %v", x.String(), peerAddress, err)
 		}
 	}
-	return peersByRemoting
 }
 
 func (x *actorSystem) loadClusterRegistry(ctx context.Context, clusterEngine cluster.Cluster, timeout time.Duration) ([]*internalpb.Actor, []*internalpb.Grain, error) {
@@ -3198,7 +3207,7 @@ func (x *actorSystem) persistPeerStateGrains(ctx context.Context, sender, stateW
 	}
 }
 
-func (x *actorSystem) syncPeerStatesOnStart() {
+func (x *actorSystem) syncPeerStatesOnStart(ctx context.Context) {
 	if !x.clusterEnabled.Load() || !x.relocationEnabled.Load() {
 		return
 	}
@@ -3211,13 +3220,16 @@ func (x *actorSystem) syncPeerStatesOnStart() {
 
 	retries := maxInt(int(maxWait/delay), 1)
 
-	ctx, cancel := context.WithTimeout(context.Background(), maxWait)
+	ctx, cancel := context.WithTimeout(ctx, maxWait)
 	defer cancel()
 
 	retrier := retry.NewRetrier(retries, delay, delay)
 	if err := retrier.RunContext(ctx, func(ctx context.Context) error {
+		if x.isStopping() {
+			return retry.Stop(context.Canceled)
+		}
 		return x.rebuildPeerStatesFromCluster(ctx)
-	}); err != nil && !errors.Is(err, gerrors.ErrPeerStateSyncNotReady) {
+	}); err != nil && !errors.Is(err, gerrors.ErrPeerStateSyncNotReady) && !errors.Is(err, context.Canceled) {
 		x.logger.Warnf("Node=(%s) peer state sync failed: %v", x.String(), err)
 	}
 }
