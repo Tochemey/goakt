@@ -7767,7 +7767,9 @@ func TestStopReturnsCleanupClusterError(t *testing.T) {
 	system.actors.counter.Inc()
 
 	clusterMock.EXPECT().IsLeader(mock.Anything).Return(false)
+	clusterMock.EXPECT().Peers(mock.Anything).Return(nil, nil)
 	clusterMock.EXPECT().RemoveActor(mock.Anything, pid.Name()).Return(assert.AnError)
+	clusterMock.EXPECT().Stop(mock.Anything).Return(nil)
 	t.Cleanup(func() { clusterMock.AssertExpectations(t) })
 
 	err := system.Stop(context.Background())
@@ -7922,6 +7924,83 @@ func TestGetKinds(t *testing.T) {
 		require.True(t, errors.As(err, &connectErr))
 		assert.Equal(t, connect.CodeInvalidArgument, connectErr.Code())
 		assert.ErrorContains(t, err, gerrors.ErrInvalidHost.Error())
+	})
+}
+
+func TestPersistPeerState(t *testing.T) {
+	t.Run("When cluster is disabled", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+
+		store := &recordingPeerStateStore{}
+		system := sys.(*actorSystem)
+		system.clusterStore = store
+
+		request := connect.NewRequest(&internalpb.PersistPeerStateRequest{
+			PeerState: &internalpb.PeerState{
+				Host:      "127.0.0.1",
+				PeersPort: 9001,
+			},
+		})
+
+		resp, err := system.PersistPeerState(ctx, request)
+		require.Error(t, err)
+		assert.Nil(t, resp)
+		assert.False(t, store.called)
+
+		var connectErr *connect.Error
+		require.True(t, errors.As(err, &connectErr))
+		assert.Equal(t, connect.CodeFailedPrecondition, connectErr.Code())
+		assert.ErrorContains(t, err, gerrors.ErrClusterDisabled.Error())
+	})
+	t.Run("When persistence fails", func(t *testing.T) {
+		ctx := context.TODO()
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+
+		storeErr := assert.AnError
+		store := &recordingPeerStateStore{err: storeErr}
+		system.clusterStore = store
+
+		peerState := &internalpb.PeerState{
+			Host:      "127.0.0.1",
+			PeersPort: 9101,
+		}
+		request := connect.NewRequest(&internalpb.PersistPeerStateRequest{PeerState: peerState})
+
+		resp, err := system.PersistPeerState(ctx, request)
+		require.Error(t, err)
+		assert.Nil(t, resp)
+		assert.True(t, store.called)
+		assert.True(t, proto.Equal(peerState, store.lastPeer))
+
+		var connectErr *connect.Error
+		require.True(t, errors.As(err, &connectErr))
+		assert.Equal(t, connect.CodeInternal, connectErr.Code())
+	})
+	t.Run("When persistence succeeds", func(t *testing.T) {
+		ctx := context.TODO()
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+
+		store := cluster.NewMemoryStore()
+		system.clusterStore = store
+
+		peerState := &internalpb.PeerState{
+			Host:      "127.0.0.1",
+			PeersPort: 9201,
+		}
+		request := connect.NewRequest(&internalpb.PersistPeerStateRequest{PeerState: peerState})
+
+		resp, err := system.PersistPeerState(ctx, request)
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+
+		peerAddr := net.JoinHostPort(peerState.GetHost(), strconv.Itoa(int(peerState.GetPeersPort())))
+		persisted, ok := store.GetPeerState(ctx, peerAddr)
+		require.True(t, ok)
+		assert.True(t, proto.Equal(peerState, persisted))
 	})
 }
 

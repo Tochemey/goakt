@@ -720,7 +720,6 @@ type ActorSystem interface {
 	getDeadletter() *PID
 	getSingletonManager() *PID
 	getRelocator() *PID
-	getPeerStatesWriter() *PID
 	getReflection() *reflection
 	findRoutee(routeeName string) (*PID, bool)
 	isStopping() bool
@@ -729,10 +728,9 @@ type ActorSystem interface {
 	recreateGrain(ctx context.Context, props *internalpb.Grain) error
 	decreaseActorsCounter()
 	increaseActorsCounter()
-	removePeerActor(ctx context.Context, actorName string) error
-	removePeerGrain(ctx context.Context, grainID *internalpb.GrainId) error
 	passivationManager() *passivationManager
 	removeNodeLeft(address string)
+	getClusterStore() cluster.Store
 }
 
 // ActorSystem represent a collection of actors on a given node
@@ -837,6 +835,8 @@ type actorSystem struct {
 	evictionStopSig  chan types.Unit
 
 	metricProvider *metric.Provider
+
+	clusterStore cluster.Store
 }
 
 var (
@@ -967,7 +967,7 @@ func (x *actorSystem) Run(ctx context.Context, startHook func(ctx context.Contex
 	// wait for a shutdown signal, and then shutdown
 	go func() {
 		sig := <-notifier
-		x.logger.Infof("received an interrupt signal (%s) to shutdown", sig.String())
+		x.logger.Infof("Received an interrupt signal (%s) to shutdown", sig.String())
 
 		if err := chain.
 			New(chain.WithFailFast(), chain.WithContext(ctx)).
@@ -1005,7 +1005,7 @@ func (x *actorSystem) Start(ctx context.Context) error {
 		return gerrors.ErrActorSystemAlreadyStarted
 	}
 
-	x.logger.Infof("%s actor system starting on %s/%s..", x.name, runtime.GOOS, runtime.GOARCH)
+	x.logger.Infof("Starting Actor System (%s) on %s/%s..", x.name, runtime.GOOS, runtime.GOARCH)
 	x.starting.Store(true)
 
 	if err := chain.
@@ -1021,7 +1021,6 @@ func (x *actorSystem) Start(ctx context.Context) error {
 		AddContextRunner(x.spawnSingletonManager).
 		AddContextRunner(x.spawnRelocator).
 		AddContextRunner(x.spawnTopicActor).
-		AddContextRunner(x.spawnPeerStatesWriter).
 		AddContextRunner(x.startRemoting).
 		AddContextRunner(x.startClustering).
 		Run(); err != nil {
@@ -1042,7 +1041,7 @@ func (x *actorSystem) Start(ctx context.Context) error {
 	x.startedAt.Store(time.Now().Unix())
 
 	if err := x.registerMetrics(); err != nil {
-		x.logger.Errorf("failed to register actor system metrics: %v", err)
+		x.logger.Errorf("Failed to register actor system metrics: %v", err)
 		if stopErr := x.shutdown(ctx); stopErr != nil {
 			return errors.Join(err, stopErr)
 		}
@@ -1050,7 +1049,7 @@ func (x *actorSystem) Start(ctx context.Context) error {
 		return err
 	}
 
-	x.logger.Infof("%s actor system successfully started..:)", x.name)
+	x.logger.Infof("Actor System (%s) successfully started..:)", x.name)
 	return nil
 }
 
@@ -1582,7 +1581,7 @@ func (x *actorSystem) Kill(ctx context.Context, name string) error {
 		actor, err := x.cluster.GetActor(ctx, name)
 		if err != nil {
 			if errors.Is(err, cluster.ErrActorNotFound) {
-				x.logger.Infof("actor=%s not found", name)
+				x.logger.Warnf("Actor %s not found", name)
 				return gerrors.NewErrActorNotFound(name)
 			}
 			return fmt.Errorf("failed to fetch remote actor=%s: %w", name, err)
@@ -1725,7 +1724,7 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *addr
 		actor, err := x.cluster.GetActor(ctx, actorName)
 		if err != nil {
 			if errors.Is(err, cluster.ErrActorNotFound) {
-				x.logger.Infof("actor=%s not found", actorName)
+				x.logger.Warnf("Actor %s not found", actorName)
 				x.locker.RUnlock()
 				return nil, nil, gerrors.NewErrActorNotFound(actorName)
 			}
@@ -1744,7 +1743,7 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *addr
 		return nil, nil, gerrors.ErrMethodCallNotAllowed
 	}
 
-	x.logger.Infof("actor=%s not found", actorName)
+	x.logger.Warnf("Actor %s not found", actorName)
 	x.locker.RUnlock()
 	return nil, nil, gerrors.NewErrActorNotFound(actorName)
 }
@@ -1796,7 +1795,7 @@ func (x *actorSystem) LocalActor(actorName string) (*PID, error) {
 		return pid, nil
 	}
 
-	x.logger.Infof("actor=%s not found", actorName)
+	x.logger.Warnf("Actor %s not found", actorName)
 	x.locker.RUnlock()
 	return nil, gerrors.NewErrActorNotFound(actorName)
 }
@@ -1824,7 +1823,7 @@ func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *
 	actor, err := x.cluster.GetActor(ctx, actorName)
 	if err != nil {
 		if errors.Is(err, cluster.ErrActorNotFound) {
-			x.logger.Infof("actor=%s not found", actorName)
+			x.logger.Warnf("Actor %s not found", actorName)
 			x.locker.RUnlock()
 			return nil, gerrors.NewErrActorNotFound(actorName)
 		}
@@ -2086,7 +2085,7 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 	actor, err := x.reflection.instantiateActor(msg.GetActorType())
 	if err != nil {
 		logger.Errorf(
-			"failed to create actor=[(%s) of type (%s)] on [host=%s, port=%d]: reason: (%v)",
+			"Failed to create Actor [(%s) of type (%s)] on [host=%s, port=%d]: reason: (%v)",
 			msg.GetActorName(), msg.GetActorType(), msg.GetHost(), msg.GetPort(), err,
 		)
 
@@ -2120,11 +2119,11 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 		}
 
 		if err := x.SpawnSingleton(ctx, msg.GetActorName(), actor, singletonOpts...); err != nil {
-			logger.Errorf("failed to create actor=(%s) on [host=%s, port=%d]: reason: (%v)", msg.GetActorName(), msg.GetHost(), msg.GetPort(), err)
+			logger.Errorf("Failed to create Actor (%s) on [host=%s, port=%d]: reason: (%v)", msg.GetActorName(), msg.GetHost(), msg.GetPort(), err)
 			return nil, wrapSpawnErr(err)
 		}
 
-		logger.Infof("actor=(%s) successfully created on [host=%s, port=%d]", msg.GetActorName(), msg.GetHost(), msg.GetPort())
+		logger.Infof("Actor (%s) successfully created on [host=%s, port=%d]", msg.GetActorName(), msg.GetHost(), msg.GetPort())
 		return connect.NewResponse(new(internalpb.RemoteSpawnResponse)), nil
 	}
 
@@ -2159,18 +2158,18 @@ func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[
 	if len(msg.GetDependencies()) > 0 {
 		dependencies, err := x.reflection.dependenciesFromProto(msg.GetDependencies()...)
 		if err != nil {
-			logger.Errorf("failed to create actor=(%s) on [host=%s, port=%d]: reason: (%v)", msg.GetActorName(), msg.GetHost(), msg.GetPort(), err)
+			logger.Errorf("Failed to create Actor (%s) on [host=%s, port=%d]: reason: (%v)", msg.GetActorName(), msg.GetHost(), msg.GetPort(), err)
 			return nil, connect.NewError(connect.CodeInternal, err)
 		}
 		opts = append(opts, WithDependencies(dependencies...))
 	}
 
 	if _, err = x.Spawn(ctx, msg.GetActorName(), actor, opts...); err != nil {
-		logger.Errorf("failed to create actor=(%s) on [host=%s, port=%d]: reason: (%v)", msg.GetActorName(), msg.GetHost(), msg.GetPort(), err)
+		logger.Errorf("Failed to create Actor (%s) on [host=%s, port=%d]: reason: (%v)", msg.GetActorName(), msg.GetHost(), msg.GetPort(), err)
 		return nil, wrapSpawnErr(err)
 	}
 
-	logger.Infof("actor=(%s) successfully created on [host=%s, port=%d]", msg.GetActorName(), msg.GetHost(), msg.GetPort())
+	logger.Infof("Actor (%s) successfully created on [host=%s, port=%d]", msg.GetActorName(), msg.GetHost(), msg.GetPort())
 	return connect.NewResponse(new(internalpb.RemoteSpawnResponse)), nil
 }
 
@@ -2250,6 +2249,23 @@ func (x *actorSystem) GetKinds(_ context.Context, request *connect.Request[inter
 	}
 
 	return connect.NewResponse(&internalpb.GetKindsResponse{Kinds: kinds}), nil
+}
+
+// PersistPeerState persists the peer state for a given node that is gracefully leaving the cluster
+func (x *actorSystem) PersistPeerState(ctx context.Context, request *connect.Request[internalpb.PersistPeerStateRequest]) (*connect.Response[internalpb.PersistPeerStateResponse], error) {
+	if !x.clusterEnabled.Load() {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrClusterDisabled)
+	}
+
+	peerAddr := fmt.Sprintf("%s:%d", request.Msg.GetPeerState().GetHost(), request.Msg.GetPeerState().GetPeersPort())
+	x.logger.Infof("Node (%s) is persisting its Peer (%s) state", x.PeersAddress(), peerAddr)
+
+	if err := x.clusterStore.PersistPeerState(ctx, request.Msg.GetPeerState()); err != nil {
+		x.logger.Errorf("Node (%s) failed to persist Peer (%s) state: %v", x.PeersAddress(), peerAddr, err)
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	return connect.NewResponse(new(internalpb.PersistPeerStateResponse)), nil
 }
 
 // TopicActor returns the topic actor, a system-managed actor responsible for handling
@@ -2351,7 +2367,7 @@ func (x *actorSystem) Inject(dependencies ...extension.Dependency) error {
 //
 // Note: peersAddr may be empty if the node has no known peers.
 func (x *actorSystem) String() string {
-	return fmt.Sprintf("Node[name=%s, remoteAddr=%s, peersAddr=%s]", x.name,
+	return fmt.Sprintf("[name=%s, remoteAddr=%s, peersAddr=%s]", x.name,
 		net.JoinHostPort(x.Host(), strconv.Itoa(x.Port())),
 		x.PeersAddress())
 }
@@ -2517,6 +2533,13 @@ func (x *actorSystem) getRemoting() remote.Remoting {
 	return remoting
 }
 
+func (x *actorSystem) getClusterStore() cluster.Store {
+	x.locker.RLock()
+	store := x.clusterStore
+	x.locker.RUnlock()
+	return store
+}
+
 // getGrains returns the grains map of the actor system
 func (x *actorSystem) getGrains() *xsync.Map[string, *grainPID] {
 	x.locker.RLock()
@@ -2539,14 +2562,6 @@ func (x *actorSystem) getRelocator() *PID {
 	rebalancer := x.relocator
 	x.locker.RUnlock()
 	return rebalancer
-}
-
-// getPeerStatesWriter returns the peer states writer PID
-func (x *actorSystem) getPeerStatesWriter() *PID {
-	x.locker.RLock()
-	pid := x.peerStatesWriter
-	x.locker.RUnlock()
-	return pid
 }
 
 func (x *actorSystem) completeRelocation() {
@@ -2584,10 +2599,10 @@ func (x *actorSystem) setupCluster() error {
 		return nil
 	}
 
-	x.logger.Info("enabling clustering...")
+	x.logger.Info("Enabling clustering...")
 
 	if !x.remotingEnabled.Load() {
-		x.logger.Error("clustering needs remoting to be enabled")
+		x.logger.Error("Remoting must be enabled to use clustering")
 		return errors.New("clustering needs remoting to be enabled")
 	}
 
@@ -2621,19 +2636,27 @@ func (x *actorSystem) setupCluster() error {
 		cluster.WithBalancerInterval(x.clusterConfig.clusterBalancerInterval),
 	)
 
+	var err error
+	x.clusterStore, err = cluster.NewBoltStore()
+	if err != nil {
+		x.logger.Errorf("Failed to initialize cluster store: %v", err)
+		return err
+	}
+
 	for _, kind := range x.clusterConfig.kinds.Values() {
 		x.registry.Register(kind)
-		x.logger.Infof("cluster kind=(%s) registered", registry.Name(kind))
+		x.logger.Infof("Kind (%s) registered", registry.Name(kind))
 	}
 
 	grains := x.clusterConfig.grains.Values()
 	if len(grains) > 0 {
 		for _, grain := range grains {
 			x.registry.Register(grain)
-			x.logger.Infof("cluster Grain=(%s) registered", registry.Name(grain))
+			x.logger.Infof("Grain (%s) registered", registry.Name(grain))
 		}
 	}
 
+	x.logger.Info("Clustering is enabled...:)")
 	return nil
 }
 
@@ -2644,13 +2667,13 @@ func (x *actorSystem) startClustering(ctx context.Context) error {
 		return nil
 	}
 
-	x.logger.Info("starting cluster engine...")
+	x.logger.Info("Starting cluster engine...")
 	if err := x.cluster.Start(ctx); err != nil {
 		x.logger.Errorf("failed to start cluster engine: %v", err)
 		return err
 	}
 
-	x.logger.Info("cluster engine successfully started...")
+	x.logger.Info("Cluster engine successfully started...")
 
 	x.setupGrainActivationBarrier(ctx)
 
@@ -2666,10 +2689,10 @@ func (x *actorSystem) startClustering(ctx context.Context) error {
 	}
 
 	if err := x.cleanupStaleLocalActors(ctx); err != nil {
-		x.logger.Warnf("failed to cleanup stale cluster actors: %v", err)
+		x.logger.Warnf("Failed to cleanup stale cluster actors: %v", err)
 	}
 
-	x.logger.Info("clustering enabled...:)")
+	x.logger.Info("Clustering started...:)")
 	return nil
 }
 
@@ -2697,7 +2720,7 @@ func (x *actorSystem) cleanupStaleLocalActors(ctx context.Context) error {
 	for _, actor := range actors {
 		addr, err := address.Parse(actor.GetAddress())
 		if err != nil {
-			x.logger.Warnf("failed to parse cluster actor address=%q: %v", actor.GetAddress(), err)
+			x.logger.Warnf("Failed to parse cluster Actor address %q: %v", actor.GetAddress(), err)
 			continue
 		}
 
@@ -2715,11 +2738,11 @@ func (x *actorSystem) cleanupStaleLocalActors(ctx context.Context) error {
 		}
 
 		if err := x.cluster.RemoveActor(ctx, addr.Name()); err != nil {
-			x.logger.Warnf("failed to remove stale cluster actor=%s: %v", addr.String(), err)
+			x.logger.Warnf("Failed to remove stale cluster Actor %s: %v", addr.String(), err)
 			continue
 		}
 
-		x.logger.Debugf("removed stale cluster actor=%s", addr.String())
+		x.logger.Debugf("Removed stale cluster Actor %s", addr.String())
 	}
 
 	return nil
@@ -2731,7 +2754,7 @@ func (x *actorSystem) startRemoting(ctx context.Context) error {
 		return nil
 	}
 
-	x.logger.Info("starting remoting...")
+	x.logger.Info("Starting remoting...")
 
 	opts := []connect.HandlerOption{
 		connectproto.WithBinary(
@@ -2774,7 +2797,7 @@ func (x *actorSystem) startRemoting(ctx context.Context) error {
 		}
 	}()
 
-	x.logger.Info("remoting started...:)")
+	x.logger.Info("Remoting started...:)")
 	return nil
 }
 
@@ -2834,6 +2857,7 @@ func (x *actorSystem) reset() {
 	x.actors.reset()
 	x.grains.Reset()
 	x.shuttingDown.Store(false)
+	x.clusterStore = nil
 }
 
 // shutdown stops the actor system
@@ -2843,7 +2867,7 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 		return gerrors.ErrActorSystemNotStarted
 	}
 
-	x.logger.Infof("%s is shutting down..:)", x.name)
+	x.logger.Info("Shutdown process begins.:)")
 	x.shuttingDown.Store(true)
 
 	defer func() {
@@ -2876,10 +2900,17 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 	// Helper to shut down cluster and remoting
 	shutdownClusterAndRemoting := func() error {
 		return chain.
-			New(chain.WithFailFast()).
+			New(chain.WithRunAll()).
 			AddRunner(func() error { return x.shutdownCluster(ctx, actorRefs) }).
 			AddRunner(func() error { return x.shutdownRemoting(ctx) }).
 			Run()
+	}
+
+	if err := x.preShutdown(ctx); err != nil {
+		x.logger.Errorf("Failed to run pre-shutdown workflow: %v", err)
+		clusterErr := shutdownClusterAndRemoting()
+		// Combine all errors if present
+		return multierr.Combine(hooksErr, err, clusterErr)
 	}
 
 	// shutdown user-facing actors first so grains can be safely deactivated without in-flight usage
@@ -2891,7 +2922,7 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 		AddContextRunnerIf(x.getDeadletter() != nil, x.getDeadletter().Shutdown).
 		AddContextRunnerIf(x.getDeathWatch() != nil, x.getDeathWatch().Shutdown).
 		Run(); err != nil {
-		x.logger.Errorf("%s failed to shutdown cleanly: %v", x.name, err)
+		x.logger.Errorf("Failed to shutdown cleanly: %v", err)
 		clusterErr := shutdownClusterAndRemoting()
 		// Combine all errors if present
 		return multierr.Combine(hooksErr, err, clusterErr)
@@ -2899,29 +2930,28 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 
 	// deactivate all grains while cluster + pubsub system actors are still alive
 	if x.grains.Len() > 0 {
-		x.logger.Infof("%s deactivating all grains...", x.name)
+		x.logger.Info("Deactivating all grains...")
 		grains := x.grains.Values()
 		for _, grain := range grains {
 			if err := grain.deactivate(ctx); err != nil {
-				x.logger.Errorf("%s failed to shutdown grain=(%s): %v", x.name, grain.getIdentity().String(), err)
+				x.logger.Errorf("Failed to deactivate Grain (%s): %v", grain.getIdentity().String(), err)
 				// TODO: should we return here or continue with the next grain?
 				//return multierr.Combine(hooksErr, err)
 			}
 			x.grains.Delete(grain.getIdentity().String())
-			x.logger.Infof("%s successfully deactivated grain=(%s)", x.name, grain.getIdentity().String())
+			x.logger.Infof("Grain (%s) successfully deactivated", grain.getIdentity().String())
 		}
 	}
 
 	// shutdown remaining system actors
 	if err := chain.
 		New(chain.WithFailFast(), chain.WithContext(ctx)).
-		AddContextRunnerIf(x.getPeerStatesWriter() != nil, x.getPeerStatesWriter().Shutdown).
 		AddContextRunnerIf(x.TopicActor() != nil, x.TopicActor().Shutdown).
 		AddContextRunnerIf(x.NoSender() != nil, x.NoSender().Shutdown).
 		AddContextRunnerIf(x.getSystemGuardian() != nil, x.getSystemGuardian().Shutdown).
 		AddContextRunnerIf(x.getRootGuardian() != nil, x.getRootGuardian().Shutdown).
 		Run(); err != nil {
-		x.logger.Errorf("%s failed to shutdown cleanly: %v", x.name, err)
+		x.logger.Errorf("Failed to shutdown cleanly: %v", err)
 		clusterErr := shutdownClusterAndRemoting()
 		// Combine all errors if present
 		return multierr.Combine(hooksErr, err, clusterErr)
@@ -2935,16 +2965,16 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 
 	// Always attempt to shutdown cluster and remoting
 	if err := shutdownClusterAndRemoting(); err != nil {
-		x.logger.Errorf("%s failed to shutdown: %v", x.name, err)
+		x.logger.Errorf("Failed shutdown: %v", err)
 		return multierr.Combine(hooksErr, err)
 	}
 
 	if hooksErr != nil {
-		x.logger.Errorf("%s failed to shutdown cleanly. Shutdown hooks Failure: %v", x.name, hooksErr)
+		x.logger.Errorf("Failed shutdown cleanly. Shutdown hooks Failure: %v", hooksErr)
 		return hooksErr
 	}
 
-	x.logger.Infof("%s shuts down successfully", x.name)
+	x.logger.Info("Shutdown successfully")
 	return nil
 }
 
@@ -2957,6 +2987,7 @@ func (x *actorSystem) replicateActors() {
 		if isSystemName(addr.Name()) {
 			continue
 		}
+
 		if !x.isStopping() && x.InCluster() {
 			ctx := context.Background()
 			cluster := x.getCluster()
@@ -2970,12 +3001,6 @@ func (x *actorSystem) replicateActors() {
 				if err := cluster.PutKind(ctx, kind); err != nil {
 					x.logger.Warn(err.Error())
 					continue
-				}
-			}
-
-			if x.relocationEnabled.Load() {
-				if err := x.publishPersistPeerActor(ctx, actor); err != nil {
-					x.logger.Warn(err.Error())
 				}
 			}
 
@@ -2994,14 +3019,9 @@ func (x *actorSystem) replicateGrains() {
 		if isSystemName(grain.GetGrainId().GetName()) {
 			continue
 		}
+
 		if !x.isStopping() && x.InCluster() {
 			ctx := context.Background()
-
-			if x.relocationEnabled.Load() {
-				if err := x.publishPersistPeerGrain(ctx, grain); err != nil {
-					x.logger.Warn(err.Error())
-				}
-			}
 
 			if err := x.cluster.PutGrain(ctx, grain); err != nil {
 				x.logger.Warn(err.Error())
@@ -3021,8 +3041,8 @@ func (x *actorSystem) resyncActors() error {
 	actors := x.Actors()
 	for _, actor := range actors {
 		if err := x.putActorOnCluster(actor); err != nil {
-			x.logger.Errorf("failed to resync actor=(%s): %v", actor.Address().String(), err)
-			return fmt.Errorf("failed to resync actor=(%s): %w", actor.Address().String(), err)
+			x.logger.Errorf("Failed to resync Actor (%s): %v", actor.Address().String(), err)
+			return fmt.Errorf("failed to resync Actor (%s): %w", actor.Address().String(), err)
 		}
 	}
 	return nil
@@ -3035,8 +3055,8 @@ func (x *actorSystem) resyncGrains() error {
 	grains := x.grains.Values()
 	for _, grain := range grains {
 		if err := x.putGrainOnCluster(grain); err != nil {
-			x.logger.Errorf("failed to resync grain=(%s): %v", grain.getIdentity().String(), err)
-			return fmt.Errorf("failed to resync grain=(%s): %w", grain.getIdentity().String(), err)
+			x.logger.Errorf("Failed to resync Grain (%s): %v", grain.getIdentity().String(), err)
+			return fmt.Errorf("failed to resync Grain (%s): %w", grain.getIdentity().String(), err)
 		}
 	}
 	return nil
@@ -3052,9 +3072,9 @@ func (x *actorSystem) clusterEventsLoop() {
 		message, _ := event.Payload.UnmarshalNew()
 
 		if x.eventsStream != nil {
-			x.logger.Debugf("(%s) publishing cluster event=(%s)....", x.String(), event.Type)
+			x.logger.Debugf("Node (%s) publishing cluster event=(%s)....", x.String(), event.Type)
 			x.eventsStream.Publish(eventsTopic, message)
-			x.logger.Debugf("(%s) published cluster event=(%s) successfully", x.String(), event.Type)
+			x.logger.Debugf("Node (%s) published cluster event=(%s) successfully", x.String(), event.Type)
 		}
 
 		switch event.Type {
@@ -3070,7 +3090,7 @@ func (x *actorSystem) clusterEventsLoop() {
 func (x *actorSystem) handleNodeJoinedEvent(event *cluster.Event) {
 	nodeJoined := new(goaktpb.NodeJoined)
 	_ = event.Payload.UnmarshalTo(nodeJoined)
-	x.logger.Infof("%s detected node joined event: node=(%s)",
+	x.logger.Infof("Node %s detected node joined event: Node (%s)",
 		x.String(),
 		nodeJoined.GetAddress())
 
@@ -3083,7 +3103,7 @@ func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
 	nodeLeft := new(goaktpb.NodeLeft)
 	_ = event.Payload.UnmarshalTo(nodeLeft)
 	x.logger.Infof(
-		"(%s) detected node left event: node=(%s)",
+		"Node (%s) detected node left event: Node (%s)",
 		x.String(), nodeLeft.GetAddress(),
 	)
 
@@ -3094,65 +3114,66 @@ func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
 	}
 
 	ctx := context.Background()
-	stateWriter := x.getPeerStatesWriter()
 
 	if x.cluster.IsLeader(ctx) {
 		x.logger.Infof(
-			"cluster leader (%s) initiating node=(%s)'s state rebalancing",
+			"Leader (%s) initiating Node (%s)'s state rebalancing",
 			x.String(), nodeLeft.GetAddress(),
 		)
 
 		if !x.rebalancedNodes.Contains(nodeLeft.GetAddress()) {
 			x.rebalancedNodes.Add(nodeLeft.GetAddress())
 
-			msg := &internalpb.GetPeerState{PeerAddress: nodeLeft.GetAddress()}
-			if response, err := x.NoSender().Ask(ctx, stateWriter, msg, DefaultAskTimeout); err == nil {
-				x.relocatingLocker.Lock()
-				x.rebalancingQueue <- response.(*internalpb.PeerState)
-				x.relocatingLocker.Unlock()
+			// fetch the peer state of the node that left from the cluster store
+			// and enqueue it for rebalancing
+			peerState, ok := x.clusterStore.GetPeerState(ctx, nodeLeft.GetAddress())
+			if !ok {
+				x.logger.Warnf("Leader (%s) could not find Node (%s)'s state in cluster store",
+					x.String(), nodeLeft.GetAddress())
 				return
 			}
 
-			x.logger.Warnf("cluster leader (%s) could not find node=(%s)'s state",
-				x.String(), nodeLeft.GetAddress())
+			x.relocatingLocker.Lock()
+			x.rebalancingQueue <- peerState
+			x.relocatingLocker.Unlock()
 		}
 		return
 	}
 
+	// clean up the peer state of the node that left from the cluster store
 	x.logger.Debugf(
-		"(%s) is not the cluster leader; cleaning up node=(%s) left from state cache",
+		"Node (%s) is not the cluster leader; cleaning up Node (%s) left from state cache",
 		x.String(), nodeLeft.GetAddress(),
 	)
 
-	msg := &internalpb.DeletePeerState{PeerAddress: nodeLeft.GetAddress()}
-	if _, err := x.NoSender().Ask(ctx, stateWriter, msg, DefaultAskTimeout); err != nil {
-		x.logger.Errorf("(%s) failed to remove left node=(%s) from cluster store: %w", x.String(), nodeLeft.GetAddress(), err)
+	if err := x.clusterStore.DeletePeerState(ctx, nodeLeft.GetAddress()); err != nil {
+		x.logger.Errorf("Node (%s) failed to remove left Node (%s) from cluster store: %w", x.String(), nodeLeft.GetAddress(), err)
 	}
 
-	x.logger.Debugf("(%s) successfully cleaned up node=(%s) left from state cache", x.String(), nodeLeft.GetAddress())
+	x.logger.Debugf("Node (%s) successfully cleaned up Node (%s) left from state cache", x.String(), nodeLeft.GetAddress())
 }
 
 // resyncAfterClusterEvent handles resyncing actors and grains after a cluster event.
 func (x *actorSystem) resyncAfterClusterEvent(eventType, nodeAddress string) {
-	x.logger.Debugf("(%s) resyncing actors after %s event: node=(%s)",
+	x.logger.Debugf("Node (%s) resyncing actors after %s event: Node (%s)",
 		x.String(), eventType, nodeAddress)
 
 	if err := x.resyncActors(); err != nil {
-		x.logger.Errorf("(%s) failed to resync actors after %s event: %v", x.String(), eventType, err)
+		x.logger.Errorf("Node (%s) failed to resync actors after %s event: %v", x.String(), eventType, err)
 	}
 
-	x.logger.Debugf("(%s) successfully resynced actors after %s event: node=(%s)",
+	x.logger.Debugf("Node (%s) successfully resynced actors after %s event: Node (%s)",
 		x.String(), eventType, nodeAddress)
 
 	if x.grains.Len() > 0 {
-		x.logger.Debugf("(%s) resyncing grains after %s event: node=(%s)",
+		x.logger.Debugf("Node (%s) resyncing grains after %s event: node=(%s)",
 			x.String(), eventType, nodeAddress)
 
 		if err := x.resyncGrains(); err != nil {
-			x.logger.Errorf("(%s) failed to resync grains after %s event: %v", x.String(), eventType, err)
+			x.logger.Errorf("Node (%s) failed to resync grains after %s event: %v", x.String(), eventType, err)
 		}
 
-		x.logger.Debugf("(%s) successfully resynced grains after %s event: node=(%s)",
+		x.logger.Debugf("Node (%s) successfully resynced grains after %s event: Node (%s)",
 			x.String(), eventType, nodeAddress)
 	}
 }
@@ -3162,7 +3183,7 @@ func (x *actorSystem) rebalancingLoop() {
 	for peerState := range x.rebalancingQueue {
 		ctx := context.Background()
 		if !x.shouldRebalance(peerState) {
-			x.logger.Debugf("(%s) found no peer=(%s)'s state to rebalance", x.name,
+			x.logger.Debugf("Node (%s) found no Peer (%s)'s state to rebalance", x.name,
 				net.JoinHostPort(peerState.GetHost(), strconv.Itoa(int(peerState.GetPeersPort()))))
 			continue
 		}
@@ -3523,10 +3544,10 @@ func (x *actorSystem) cleanupCluster(ctx context.Context, actorRefs []ActorRef) 
 				eg.Go(func() error {
 					kind := actorRef.Kind()
 					if err := x.cluster.RemoveKind(ctx, kind); err != nil {
-						x.logger.Errorf("failed to remove [actor kind=%s] from cluster: %v", kind, err)
+						x.logger.Errorf("Failed to remove Kind (%s) from cluster: %v", kind, err)
 						return err
 					}
-					x.logger.Infof("[actor kind=%s] removed from cluster", kind)
+					x.logger.Infof("Kind (%s) removed from cluster", kind)
 					return nil
 				})
 			}
@@ -3539,10 +3560,10 @@ func (x *actorSystem) cleanupCluster(ctx context.Context, actorRefs []ActorRef) 
 		eg.Go(func() error {
 			actorName := actorRef.Name()
 			if err := x.cluster.RemoveActor(ctx, actorName); err != nil {
-				x.logger.Errorf("failed to remove [actor=%s] from cluster: %v", actorName, err)
+				x.logger.Errorf("Failed to Actor (%s) from cluster: %v", actorName, err)
 				return err
 			}
-			x.logger.Infof("[actor=%s] removed from cluster", actorName)
+			x.logger.Infof("Actor (%s) removed from cluster", actorName)
 			return nil
 		})
 	}
@@ -3553,10 +3574,10 @@ func (x *actorSystem) cleanupCluster(ctx context.Context, actorRefs []ActorRef) 
 			grain := grain
 			eg.Go(func() error {
 				if err := x.cluster.RemoveGrain(ctx, grain.identity.String()); err != nil {
-					x.logger.Errorf("failed to remove [grain=%s] from cluster: %v", grain.identity.String(), err)
+					x.logger.Errorf("Failed to remove Grain (%s) from cluster: %v", grain.identity.String(), err)
 					return err
 				}
-				x.logger.Infof("[grain=%s] removed from cluster", grain.identity.String())
+				x.logger.Infof("Grain (%s) removed from cluster", grain.identity.String())
 				return nil
 			})
 		}
@@ -3588,11 +3609,17 @@ func (x *actorSystem) shutdownCluster(ctx context.Context, actors []ActorRef) er
 	if x.clusterEnabled.Load() {
 		if x.cluster != nil {
 			if err := chain.
-				New(chain.WithFailFast()).
+				New(chain.WithRunAll()).
 				AddRunner(func() error { return x.cleanupCluster(ctx, actors) }).
 				AddRunner(func() error { return x.cluster.Stop(ctx) }).
+				AddRunner(func() error {
+					if x.clusterStore != nil {
+						return x.clusterStore.Close()
+					}
+					return nil
+				}).
 				Run(); err != nil {
-				x.logger.Errorf("%s failed to shutdown cleanly: %w", x.name, err)
+				x.logger.Errorf("Failed to shutdown cleanly: %w", err)
 				return err
 			}
 		}
@@ -3627,7 +3654,7 @@ func (x *actorSystem) shutdownRemoting(ctx context.Context) error {
 
 		if x.server != nil {
 			if err := x.shutdownHTTPServer(ctx); err != nil {
-				x.logger.Errorf("%s failed to shutdown: %w", x.name, err)
+				x.logger.Errorf("Failed to shutdown server: %w", err)
 				return err
 			}
 			x.remotingEnabled.Store(false)
@@ -3715,8 +3742,8 @@ func (x *actorSystem) runShutdownHooks(ctx context.Context) (err error) {
 
 // evictionLoop starts the system wide eviction loop
 func (x *actorSystem) evictionLoop() {
-	x.logger.Info("start the system wide eviction loop", x.Name())
-	x.logger.Infof("%s eviction policy %s", x.Name(), x.evictionStrategy.String())
+	x.logger.Info("Start the system wide eviction loop", x.Name())
+	x.logger.Infof("System wide eviction policy %s", x.evictionStrategy.String())
 	var clock *ticker.Ticker
 	tickerStopSig := make(chan types.Unit, 1)
 	clock = ticker.New(x.evictionInterval)
@@ -3736,7 +3763,7 @@ func (x *actorSystem) evictionLoop() {
 
 	<-tickerStopSig
 	clock.Stop()
-	x.logger.Info("the system wide eviction loop stopped", x.Name())
+	x.logger.Info("System wide eviction loop stopped")
 }
 
 // runEviction returns the eviction function based on the eviction strategy
@@ -3755,7 +3782,7 @@ func (x *actorSystem) runEviction() {
 
 	for _, actor := range actors {
 		if err := actor.Shutdown(ctx); err != nil {
-			x.logger.Errorf("%s failed to shutdown: %w", actor.Name(), err)
+			x.logger.Errorf("Failed to shutdown Actor %s: %w", actor.Name(), err)
 		}
 	}
 }
@@ -3892,6 +3919,84 @@ func (x *actorSystem) registerMetrics() error {
 		return err
 	}
 	return nil
+}
+
+func (x *actorSystem) preShutdown(ctx context.Context) error {
+	if !x.clusterEnabled.Load() || x.cluster == nil {
+		x.logger.Infof("Node (%s) is not part of a cluster; skipping peer state persistence", x.PeersAddress())
+		return nil
+	}
+
+	peers, err := x.cluster.Peers(ctx)
+	if err != nil {
+		x.logger.Errorf("Node (%s) failed to get cluster peers: %v", x.PeersAddress(), err)
+		return err
+	}
+
+	if len(peers) == 0 {
+		x.logger.Infof("Node (%s) found no cluster peers to persist state", x.PeersAddress())
+		return nil
+	}
+
+	actors := x.Actors()
+	grains := x.grains.Values()
+
+	wireActors := make(map[string]*internalpb.Actor, len(actors))
+	for _, actor := range actors {
+		wireActor, err := actor.toWireActor()
+		if err != nil {
+			return err
+		}
+		wireActors[actor.ID()] = wireActor
+	}
+
+	wireGrains := make(map[string]*internalpb.Grain, len(grains))
+	for _, grain := range grains {
+		wireGrain, err := grain.toWireGrain()
+		if err != nil {
+			return err
+		}
+		wireGrains[grain.getIdentity().String()] = wireGrain
+	}
+
+	peerAddr := x.PeersAddress()
+	peerState := &internalpb.PeerState{
+		Host:         x.Host(),
+		PeersPort:    int32(x.clusterNode.PeersPort), // nolint
+		RemotingPort: int32(x.Port()),                // nolint
+		Actors:       wireActors,
+		Grains:       wireGrains,
+	}
+
+	action := func(ctx context.Context, peer *cluster.Peer, state *internalpb.PeerState, addr string) error {
+		remoteHost := peer.Host
+		remotingPort := peer.RemotingPort
+		remoting := x.getRemoting()
+		remoteClient := remoting.RemotingServiceClient(remoteHost, remotingPort)
+		request := connect.NewRequest(&internalpb.PersistPeerStateRequest{
+			PeerState: state,
+		})
+
+		_, err := remoteClient.PersistPeerState(ctx, request)
+		if err != nil {
+			x.logger.Errorf("Node (%s) failed to persist peer state to remote Peer (%s:%d): %v", addr, remoteHost, remotingPort, err)
+			return err
+		}
+
+		x.logger.Infof("Node (%s) successfully persisted peer state to remote Peer (%s:%d)", addr, remoteHost, remotingPort)
+		return nil
+	}
+
+	eg, ctx := errgroup.WithContext(ctx)
+	eg.SetLimit(len(peers))
+	for _, peer := range peers {
+		peer := peer
+		eg.Go(func() error {
+			return action(ctx, peer, peerState, peerAddr)
+		})
+	}
+
+	return eg.Wait()
 }
 
 func computeEvictionCount(total, threshold uint64, totalEvictions, percentageToReturn int) int {

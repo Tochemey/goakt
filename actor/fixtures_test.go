@@ -1763,6 +1763,10 @@ func (x *MockRemotingServiceClient) RemoteTellGrain(_ context.Context, req *conn
 	return connect.NewResponse(&internalpb.RemoteTellGrainResponse{}), nil
 }
 
+func (x *MockRemotingServiceClient) PersistPeerState(context.Context, *connect.Request[internalpb.PersistPeerStateRequest]) (*connect.Response[internalpb.PersistPeerStateResponse], error) {
+	panic("unimplemented")
+}
+
 type actorHandler struct {
 	internalpbconnect.UnimplementedRemotingServiceHandler
 	askHeader  http.Header
@@ -2143,4 +2147,28 @@ func (x *MockMeterProvider) Meter(name string, opts ...otelmetric.MeterOption) o
 		return x.meter
 	}
 	return x.MeterProvider.Meter(name, opts...)
+}
+
+type recordingPeerStateStore struct {
+	err      error
+	called   bool
+	lastPeer *internalpb.PeerState
+}
+
+func (s *recordingPeerStateStore) PersistPeerState(_ context.Context, peer *internalpb.PeerState) error {
+	s.called = true
+	s.lastPeer = peer
+	return s.err
+}
+
+func (s *recordingPeerStateStore) GetPeerState(_ context.Context, _ string) (*internalpb.PeerState, bool) {
+	return nil, false
+}
+
+func (s *recordingPeerStateStore) DeletePeerState(_ context.Context, _ string) error {
+	return nil
+}
+
+func (s *recordingPeerStateStore) Close() error {
+	return nil
 }

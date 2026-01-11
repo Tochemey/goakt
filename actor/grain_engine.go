@@ -146,17 +146,21 @@ func (x *actorSystem) GrainIdentity(ctx context.Context, name string, factory Gr
 		return nil, err
 	}
 
+	x.logger.Infof("Activating Grain (%s)...", identity.String())
 	owner, err := x.resolveGrainOwner(ctx, identity)
 	if err != nil {
+		x.logger.Errorf("Failed to resolve owner for Grain (%s): %v", identity.String(), err)
 		return nil, err
 	}
 
 	handled, err := x.tryRemoteGrainActivation(ctx, identity, grain, config, owner)
 	if err != nil {
+		x.logger.Errorf("Failed to attempt remote activation for Grain (%s): %v", identity.String(), err)
 		return nil, err
 	}
 
 	if handled {
+		x.logger.Infof("Grain (%s) activated remotely.", identity.String())
 		return identity, nil
 	}
 
@@ -164,6 +168,7 @@ func (x *actorSystem) GrainIdentity(ctx context.Context, name string, factory Gr
 		return nil, err
 	}
 
+	x.logger.Infof("Grain (%s) activated locally.", identity.String())
 	return identity, nil
 }
 
@@ -327,7 +332,7 @@ func (x *actorSystem) RemoteAskGrain(ctx context.Context, request *connect.Reque
 
 	reply, err := x.localSend(ctx, identity, message, timeout.AsDuration(), true)
 	if err != nil {
-		logger.Errorf("failed to create grain (%s) on [host=%s, port=%d]: reason: (%v)", identity.String(), msg.GetGrain().GetHost(), msg.GetGrain().GetPort(), err)
+		logger.Errorf("Failed to create Grain (%s) on [host=%s, port=%d]: reason: (%v)", identity.String(), msg.GetGrain().GetHost(), msg.GetGrain().GetPort(), err)
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
@@ -388,7 +393,7 @@ func (x *actorSystem) RemoteTellGrain(ctx context.Context, request *connect.Requ
 
 	_, err = x.localSend(ctx, identity, message, DefaultGrainRequestTimeout, false)
 	if err != nil {
-		logger.Errorf("failed to create grain (%s) on [host=%s, port=%d]: reason: (%v)", identity.String(), msg.GetGrain().GetHost(), msg.GetGrain().GetPort(), err)
+		logger.Errorf("Failed to create Grain (%s) on [host=%s, port=%d]: reason: (%v)", identity.String(), msg.GetGrain().GetHost(), msg.GetGrain().GetPort(), err)
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
@@ -414,11 +419,11 @@ func (x *actorSystem) RemoteActivateGrain(ctx context.Context, request *connect.
 	}
 
 	if err := x.recreateGrain(ctx, grain); err != nil {
-		logger.Errorf("failed to recreate grain (%s) on [host=%s, port=%d]: reason: (%v)", grain.GetGrainId().GetValue(), host, port, err)
+		logger.Errorf("Failed to recreate Grain (%s) on [host=%s, port=%d]: reason: (%v)", grain.GetGrainId().GetValue(), host, port, err)
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	logger.Infof("recreated grain (%s) on [host=%s, port=%d]", grain.GetGrainId().GetValue(), host, port)
+	logger.Infof("Recreated Grain (%s) on [host=%s, port=%d]", grain.GetGrainId().GetValue(), host, port)
 	return connect.NewResponse(&internalpb.RemoteActivateGrainResponse{}), nil
 }
 
@@ -430,7 +435,6 @@ func (x *actorSystem) prepareGrainIdentity(ctx context.Context, name string, fac
 	}
 
 	identity := newGrainIdentity(grain, name)
-	x.logger.Infof("activating grain (%s)...", identity.String())
 	if err := identity.Validate(); err != nil {
 		return nil, nil, nil, err
 	}
@@ -1004,7 +1008,7 @@ func (x *actorSystem) recreateGrain(ctx context.Context, serializedGrain *intern
 
 func (x *actorSystem) recreateGrainOnce(ctx context.Context, serializedGrain *internalpb.Grain) (*grainPID, error) {
 	logger := x.logger
-	logger.Infof("recreating grain (%s)...", serializedGrain.GrainId.GetValue())
+	logger.Infof("Recreating Grain (%s)...", serializedGrain.GrainId.GetValue())
 
 	// make sure the grain is not a system grain
 	if isSystemName(serializedGrain.GrainId.GetValue()) {

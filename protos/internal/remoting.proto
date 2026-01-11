@@ -8,6 +8,7 @@ import "internal/actor.proto";
 import "internal/dependency.proto";
 import "internal/grain.proto";
 import "internal/passivation.proto";
+import "internal/peers.proto";
 import "internal/reentrancy.proto";
 
 option go_package = "github.com/tochemey/goakt/v3/internal/internalpb;internalpb";
@@ -41,6 +42,8 @@ service RemotingService {
   rpc RemoteTellGrain(RemoteTellGrainRequest) returns (RemoteTellGrainResponse);
   // RemoteActivateGrain is used to activate a Grain on a remote node
   rpc RemoteActivateGrain(RemoteActivateGrainRequest) returns (RemoteActivateGrainResponse);
+  // PersistPeerState is used to persist the peer state on a remote node
+  rpc PersistPeerState(PersistPeerStateRequest) returns (PersistPeerStateResponse);
 }
 
 // RemoteAsk is used to send a message to an actor remotely and expect a response
@@ -176,3 +179,10 @@ message RemoteActivateGrainRequest {
 }
 
 message RemoteActivateGrainResponse {}
+
+message PersistPeerStateRequest {
+  // Specifies the peer state
+  PeerState peer_state = 1;
+}
+
+message PersistPeerStateResponse {}

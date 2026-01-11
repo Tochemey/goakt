@@ -35,7 +35,7 @@ const (
 	// DefaultInitMaxRetries defines the default value for retrying actor initialization
 	DefaultInitMaxRetries = 5
 	// DefaultShutdownTimeout defines the default shutdown timeout
-	DefaultShutdownTimeout = 3 * time.Minute
+	DefaultShutdownTimeout = 5 * time.Minute
 	// DefaultInitTimeout defines the default init timeout
 	DefaultInitTimeout = time.Second
 	// DefaultPublishStateTimeout defines the default state publication timeout

@@ -63,6 +63,9 @@ const (
 	// RemotingServiceRemoteActivateGrainProcedure is the fully-qualified name of the RemotingService's
 	// RemoteActivateGrain RPC.
 	RemotingServiceRemoteActivateGrainProcedure = "/internalpb.RemotingService/RemoteActivateGrain"
+	// RemotingServicePersistPeerStateProcedure is the fully-qualified name of the RemotingService's
+	// PersistPeerState RPC.
+	RemotingServicePersistPeerStateProcedure = "/internalpb.RemotingService/PersistPeerState"
 )
 
 // RemotingServiceClient is a client for the internalpb.RemotingService service.
@@ -88,6 +91,8 @@ type RemotingServiceClient interface {
 	RemoteTellGrain(context.Context, *connect.Request[internalpb.RemoteTellGrainRequest]) (*connect.Response[internalpb.RemoteTellGrainResponse], error)
 	// RemoteActivateGrain is used to activate a Grain on a remote node
 	RemoteActivateGrain(context.Context, *connect.Request[internalpb.RemoteActivateGrainRequest]) (*connect.Response[internalpb.RemoteActivateGrainResponse], error)
+	// PersistPeerState is used to persist the peer state on a remote node
+	PersistPeerState(context.Context, *connect.Request[internalpb.PersistPeerStateRequest]) (*connect.Response[internalpb.PersistPeerStateResponse], error)
 }
 
 // NewRemotingServiceClient constructs a client for the internalpb.RemotingService service. By
@@ -161,6 +166,12 @@ func NewRemotingServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(remotingServiceMethods.ByName("RemoteActivateGrain")),
 			connect.WithClientOptions(opts...),
 		),
+		persistPeerState: connect.NewClient[internalpb.PersistPeerStateRequest, internalpb.PersistPeerStateResponse](
+			httpClient,
+			baseURL+RemotingServicePersistPeerStateProcedure,
+			connect.WithSchema(remotingServiceMethods.ByName("PersistPeerState")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -176,6 +187,7 @@ type remotingServiceClient struct {
 	remoteAskGrain      *connect.Client[internalpb.RemoteAskGrainRequest, internalpb.RemoteAskGrainResponse]
 	remoteTellGrain     *connect.Client[internalpb.RemoteTellGrainRequest, internalpb.RemoteTellGrainResponse]
 	remoteActivateGrain *connect.Client[internalpb.RemoteActivateGrainRequest, internalpb.RemoteActivateGrainResponse]
+	persistPeerState    *connect.Client[internalpb.PersistPeerStateRequest, internalpb.PersistPeerStateResponse]
 }
 
 // RemoteAsk calls internalpb.RemotingService.RemoteAsk.
@@ -228,6 +240,11 @@ func (c *remotingServiceClient) RemoteActivateGrain(ctx context.Context, req *co
 	return c.remoteActivateGrain.CallUnary(ctx, req)
 }
 
+// PersistPeerState calls internalpb.RemotingService.PersistPeerState.
+func (c *remotingServiceClient) PersistPeerState(ctx context.Context, req *connect.Request[internalpb.PersistPeerStateRequest]) (*connect.Response[internalpb.PersistPeerStateResponse], error) {
+	return c.persistPeerState.CallUnary(ctx, req)
+}
+
 // RemotingServiceHandler is an implementation of the internalpb.RemotingService service.
 type RemotingServiceHandler interface {
 	// RemoteAsk is used to send a message to an actor remotely and expect a response immediately.
@@ -251,6 +268,8 @@ type RemotingServiceHandler interface {
 	RemoteTellGrain(context.Context, *connect.Request[internalpb.RemoteTellGrainRequest]) (*connect.Response[internalpb.RemoteTellGrainResponse], error)
 	// RemoteActivateGrain is used to activate a Grain on a remote node
 	RemoteActivateGrain(context.Context, *connect.Request[internalpb.RemoteActivateGrainRequest]) (*connect.Response[internalpb.RemoteActivateGrainResponse], error)
+	// PersistPeerState is used to persist the peer state on a remote node
+	PersistPeerState(context.Context, *connect.Request[internalpb.PersistPeerStateRequest]) (*connect.Response[internalpb.PersistPeerStateResponse], error)
 }
 
 // NewRemotingServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -320,6 +339,12 @@ func NewRemotingServiceHandler(svc RemotingServiceHandler, opts ...connect.Handl
 		connect.WithSchema(remotingServiceMethods.ByName("RemoteActivateGrain")),
 		connect.WithHandlerOptions(opts...),
 	)
+	remotingServicePersistPeerStateHandler := connect.NewUnaryHandler(
+		RemotingServicePersistPeerStateProcedure,
+		svc.PersistPeerState,
+		connect.WithSchema(remotingServiceMethods.ByName("PersistPeerState")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/internalpb.RemotingService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case RemotingServiceRemoteAskProcedure:
@@ -342,6 +367,8 @@ func NewRemotingServiceHandler(svc RemotingServiceHandler, opts ...connect.Handl
 			remotingServiceRemoteTellGrainHandler.ServeHTTP(w, r)
 		case RemotingServiceRemoteActivateGrainProcedure:
 			remotingServiceRemoteActivateGrainHandler.ServeHTTP(w, r)
+		case RemotingServicePersistPeerStateProcedure:
+			remotingServicePersistPeerStateHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -389,4 +416,8 @@ func (UnimplementedRemotingServiceHandler) RemoteTellGrain(context.Context, *con
 
 func (UnimplementedRemotingServiceHandler) RemoteActivateGrain(context.Context, *connect.Request[internalpb.RemoteActivateGrainRequest]) (*connect.Response[internalpb.RemoteActivateGrainResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("internalpb.RemotingService.RemoteActivateGrain is not implemented"))
+}
+
+func (UnimplementedRemotingServiceHandler) PersistPeerState(context.Context, *connect.Request[internalpb.PersistPeerStateRequest]) (*connect.Response[internalpb.PersistPeerStateResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("internalpb.RemotingService.PersistPeerState is not implemented"))
 }

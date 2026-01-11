@@ -96,8 +96,8 @@ func TestDeathWatch(t *testing.T) {
 		// mock the cluster interface
 		clmock := mockscluster.NewCluster(t)
 		clmock.EXPECT().ActorExists(mock.Anything, actorID).Return(false, nil)
-		clmock.EXPECT().IsLeader(mock.Anything).Return(false)
-		clmock.EXPECT().Stop(mock.Anything).Return(nil)
+		clmock.EXPECT().RemoveActor(mock.Anything, actorID).Return(stdErrors.New("removal failed"))
+		clmock.EXPECT().Peers(mock.Anything).Return(nil, nil)
 
 		err = actorSys.Start(ctx)
 		require.NoError(t, err)
@@ -106,6 +106,8 @@ func TestDeathWatch(t *testing.T) {
 		pause.For(500 * time.Millisecond)
 		actorSys.(*actorSystem).cluster = clmock
 		actorSys.(*actorSystem).clusterEnabled.Store(true)
+		actorSys.(*actorSystem).remotingEnabled.Store(true)
+		actorSys.(*actorSystem).relocationEnabled.Store(false)
 
 		cid, err := actorSys.Spawn(ctx, actorID, NewMockActor())
 		require.NoError(t, err)
