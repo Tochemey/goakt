@@ -1868,6 +1868,7 @@ func TestActorSystem(t *testing.T) {
 		clusterMock.EXPECT().IsLeader(mock.Anything).Return(true).Once()
 		clusterMock.EXPECT().LookupKind(mock.Anything, actorType).Return("", nil).Once()
 		clusterMock.EXPECT().ActorExists(mock.Anything, "singleton").Return(false, nil).Once()
+		clusterMock.EXPECT().PutKind(mock.Anything, actorType).Return(nil).Once()
 
 		request := connect.NewRequest(&internalpb.RemoteSpawnRequest{
 			Host:      system.remoteConfig.BindAddr(),
