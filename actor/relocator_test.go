@@ -416,6 +416,9 @@ func TestRelocation(t *testing.T) {
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
+	// Allow time for the cluster to detect node2 leaving and start relocation
+	pause.For(2 * time.Second)
+
 	// Wait for cluster rebalancing - verify actor relocation actually occurred.
 	// The relocation process:
 	// 1. Node2 shutdown: cleanupCluster removes actors from cluster map (synchronous)
@@ -447,7 +450,7 @@ func TestRelocation(t *testing.T) {
 		// Critical check: actor must have a NEW address (not node2's address)
 		// If it still has node2's address, relocation hasn't happened yet
 		return actorAddr != node2Address
-	}, 2*time.Minute, time.Second, "Actor %s should be relocated from node2 (was %s) to a live node", actorName, node2Address)
+	}, 2*time.Minute, 500*time.Millisecond, "Actor %s should be relocated from node2 (was %s) to a live node", actorName, node2Address)
 
 	sender, err := node1.LocalActor("Actor1-1")
 	require.NoError(t, err)
@@ -458,9 +461,16 @@ func TestRelocation(t *testing.T) {
 	require.NoError(t, err)
 
 	// Wait for reentrant actor to be relocated - verify it's on a live node
+	// During relocation, the actor may temporarily not exist (removed but not yet re-added),
+	// so we accept either: actor doesn't exist (relocation in progress) OR actor exists with new address (relocation complete).
 	require.Eventually(t, func() bool {
 		exists, err := node1.ActorExists(ctx, reentrantName)
-		if err != nil || !exists {
+		if err != nil {
+			return false
+		}
+		if !exists {
+			// Actor doesn't exist - this is OK during relocation (removed but not yet re-added)
+			// We'll keep checking until it's re-added with new address
 			return false
 		}
 		// Verify actor is actually on a live node (node1 or node3), not on dead node2
@@ -471,7 +481,7 @@ func TestRelocation(t *testing.T) {
 		actorAddr := reentrantAddr.HostPort()
 		// Actor should be on node1 or node3, not on node2 (which is down)
 		return actorAddr != node2Address
-	}, 30*time.Second, time.Second, "Reentrant actor %s should be relocated from node2 to a live node", reentrantName)
+	}, 30*time.Second, 500*time.Millisecond, "Reentrant actor %s should be relocated from node2 (was %s) to a live node", reentrantName, node2Address)
 
 	reentrantAddr, pid, err := node1.ActorOf(ctx, reentrantName)
 	require.NoError(t, err)
@@ -539,18 +549,41 @@ func TestRelocationWithCustomSupervisor(t *testing.T) {
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
+	// Allow time for the cluster to detect node2 leaving and start relocation
+	pause.For(2 * time.Second)
+
 	// Wait for relocation - verify actor exists and is on a live node (not node2)
+	// The relocation process:
+	// 1. Node2 shutdown: cleanupCluster removes actors from cluster map (synchronous)
+	// 2. NodeLeft event is emitted and processed by leader
+	// 3. Leader fetches peer state from cluster store and enqueues for relocation
+	// 4. Relocator processes: recreateLocally removes actor from cluster map, then spawns locally
+	// 5. New actor is registered in cluster map with NEW address (via putActorOnCluster)
+	//
+	// The test must verify the actor is relocated (has new address), not just that it exists.
+	// During relocation, the actor may temporarily not exist (removed but not yet re-added),
+	// so we accept either: actor doesn't exist (relocation in progress) OR actor exists with new address (relocation complete).
+	// We reject: actor exists with old address (relocation hasn't started or failed).
 	require.Eventually(t, func() bool {
 		exists, err := node1.ActorExists(ctx, actorName)
-		if err != nil || !exists {
+		if err != nil {
 			return false
 		}
+		if !exists {
+			// Actor doesn't exist - this is OK during relocation (removed but not yet re-added)
+			// We'll keep checking until it's re-added with new address
+			return false
+		}
+		// Actor exists - verify it's on a live node (not node2)
 		relocatedAddr, _, err := node1.ActorOf(ctx, actorName)
 		if err != nil || relocatedAddr == nil {
 			return false
 		}
-		return relocatedAddr.HostPort() != node2Address
-	}, 2*time.Minute, time.Second, "Actor %s should be relocated from node2 to a live node", actorName)
+		actorAddr := relocatedAddr.HostPort()
+		// Critical check: actor must have a NEW address (not node2's address)
+		// If it still has node2's address, relocation hasn't happened yet
+		return actorAddr != node2Address
+	}, 2*time.Minute, 500*time.Millisecond, "Actor %s should be relocated from node2 (was %s) to a live node", actorName, node2Address)
 
 	relocated, err := node1.LocalActor(actorName)
 	require.NoError(t, err)
@@ -704,18 +737,41 @@ func TestRelocationWithSingletonActor(t *testing.T) {
 	require.NoError(t, node1.Stop(ctx))
 	require.NoError(t, sd1.Close())
 
+	// Allow time for the cluster to detect node1 leaving and start relocation
+	pause.For(2 * time.Second)
+
 	// Wait for singleton relocation - verify it exists and is on a live node (not node1)
+	// The relocation process:
+	// 1. Node1 shutdown: cleanupCluster removes actors from cluster map (synchronous)
+	// 2. NodeLeft event is emitted and processed by leader
+	// 3. Leader fetches peer state from cluster store and enqueues for relocation
+	// 4. Relocator processes: recreateLocally removes actor from cluster map, then spawns locally
+	// 5. New singleton is registered in cluster map with NEW address (via putActorOnCluster)
+	//
+	// The test must verify the singleton is relocated (has new address), not just that it exists.
+	// During relocation, the singleton may temporarily not exist (removed but not yet re-added),
+	// so we accept either: singleton doesn't exist (relocation in progress) OR singleton exists with new address (relocation complete).
+	// We reject: singleton exists with old address (relocation hasn't started or failed).
 	require.Eventually(t, func() bool {
 		exists, err := node2.ActorExists(ctx, actorName)
-		if err != nil || !exists {
+		if err != nil {
 			return false
 		}
+		if !exists {
+			// Singleton doesn't exist - this is OK during relocation (removed but not yet re-added)
+			// We'll keep checking until it's re-added with new address
+			return false
+		}
+		// Singleton exists - verify it's on a live node (not node1)
 		relocatedAddr, _, err := node2.ActorOf(ctx, actorName)
 		if err != nil || relocatedAddr == nil {
 			return false
 		}
-		return relocatedAddr.HostPort() != node1Address
-	}, 2*time.Minute, time.Second, "Singleton %s should be relocated from node1 to a live node", actorName)
+		actorAddr := relocatedAddr.HostPort()
+		// Critical check: singleton must have a NEW address (not node1's address)
+		// If it still has node1's address, relocation hasn't happened yet
+		return actorAddr != node1Address
+	}, 2*time.Minute, 500*time.Millisecond, "Singleton %s should be relocated from node1 (was %s) to a live node", actorName, node1Address)
 
 	assert.NoError(t, node2.Stop(ctx))
 	assert.NoError(t, node3.Stop(ctx))
@@ -952,18 +1008,41 @@ func TestRelocationWithExtension(t *testing.T) {
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
+	// Allow time for the cluster to detect node2 leaving and start relocation
+	pause.For(2 * time.Second)
+
 	// Wait for relocation - verify entity exists and is on a live node (not node2)
+	// The relocation process:
+	// 1. Node2 shutdown: cleanupCluster removes actors from cluster map (synchronous)
+	// 2. NodeLeft event is emitted and processed by leader
+	// 3. Leader fetches peer state from cluster store and enqueues for relocation
+	// 4. Relocator processes: recreateLocally removes actor from cluster map, then spawns locally
+	// 5. New actor is registered in cluster map with NEW address (via putActorOnCluster)
+	//
+	// The test must verify the entity is relocated (has new address), not just that it exists.
+	// During relocation, the entity may temporarily not exist (removed but not yet re-added),
+	// so we accept either: entity doesn't exist (relocation in progress) OR entity exists with new address (relocation complete).
+	// We reject: entity exists with old address (relocation hasn't started or failed).
 	require.Eventually(t, func() bool {
 		exists, err := node1.ActorExists(ctx, entityID)
-		if err != nil || !exists {
+		if err != nil {
 			return false
 		}
+		if !exists {
+			// Entity doesn't exist - this is OK during relocation (removed but not yet re-added)
+			// We'll keep checking until it's re-added with new address
+			return false
+		}
+		// Entity exists - verify it's on a live node (not node2)
 		relocatedAddr, _, err := node1.ActorOf(ctx, entityID)
 		if err != nil || relocatedAddr == nil {
 			return false
 		}
-		return relocatedAddr.HostPort() != node2Address
-	}, 2*time.Minute, time.Second, "Entity %s should be relocated from node2 to a live node", entityID)
+		actorAddr := relocatedAddr.HostPort()
+		// Critical check: entity must have a NEW address (not node2's address)
+		// If it still has node2's address, relocation hasn't happened yet
+		return actorAddr != node2Address
+	}, 2*time.Minute, 500*time.Millisecond, "Entity %s should be relocated from node2 (was %s) to a live node", entityID, node2Address)
 
 	sender, err := node1.LocalActor("node1-entity-1")
 	require.NoError(t, err)
@@ -1038,18 +1117,41 @@ func TestRelocationWithDependency(t *testing.T) {
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
+	// Allow time for the cluster to detect node2 leaving and start relocation
+	pause.For(2 * time.Second)
+
 	// Wait for relocation - verify actor exists and is on a live node (not node2)
+	// The relocation process:
+	// 1. Node2 shutdown: cleanupCluster removes actors from cluster map (synchronous)
+	// 2. NodeLeft event is emitted and processed by leader
+	// 3. Leader fetches peer state from cluster store and enqueues for relocation
+	// 4. Relocator processes: recreateLocally removes actor from cluster map, then spawns locally
+	// 5. New actor is registered in cluster map with NEW address (via putActorOnCluster)
+	//
+	// The test must verify the actor is relocated (has new address), not just that it exists.
+	// During relocation, the actor may temporarily not exist (removed but not yet re-added),
+	// so we accept either: actor doesn't exist (relocation in progress) OR actor exists with new address (relocation complete).
+	// We reject: actor exists with old address (relocation hasn't started or failed).
 	require.Eventually(t, func() bool {
 		exists, err := node1.ActorExists(ctx, actorName)
-		if err != nil || !exists {
+		if err != nil {
 			return false
 		}
+		if !exists {
+			// Actor doesn't exist - this is OK during relocation (removed but not yet re-added)
+			// We'll keep checking until it's re-added with new address
+			return false
+		}
+		// Actor exists - verify it's on a live node (not node2)
 		relocatedAddr, _, err := node1.ActorOf(ctx, actorName)
 		if err != nil || relocatedAddr == nil {
 			return false
 		}
-		return relocatedAddr.HostPort() != node2Address
-	}, 2*time.Minute, time.Second, "Actor %s should be relocated from node2 to a live node", actorName)
+		actorAddr := relocatedAddr.HostPort()
+		// Critical check: actor must have a NEW address (not node2's address)
+		// If it still has node2's address, relocation hasn't happened yet
+		return actorAddr != node2Address
+	}, 2*time.Minute, 500*time.Millisecond, "Actor %s should be relocated from node2 (was %s) to a live node", actorName, node2Address)
 
 	sender, err := node1.LocalActor("node1-actor-1")
 	require.NoError(t, err)
