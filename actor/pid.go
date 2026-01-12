@@ -1424,7 +1424,7 @@ func (pid *PID) buildAsyncRequest(message proto.Message, correlationID string) (
 // and signals the receiveLoop to process it
 func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
 	// fast path: check if system is shutting down
-	if system := pid.ActorSystem(); system != nil && system.isStopping() {
+	if system := pid.actorSystem; system != nil && system.isStopping() {
 		// slow path: only check message type if shutting down
 		// system messages must be allowed through for proper shutdown/supervision
 		if !pid.isSystemMessage(receiveCtx.Message()) {
