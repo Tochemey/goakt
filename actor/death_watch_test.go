@@ -98,7 +98,6 @@ func TestDeathWatch(t *testing.T) {
 		clmock := mockscluster.NewCluster(t)
 		clmock.EXPECT().ActorExists(mock.Anything, actorID).Return(false, nil)
 		clmock.EXPECT().RemoveActor(mock.Anything, actorID).Return(stdErrors.New("removal failed"))
-		clmock.EXPECT().Peers(mock.Anything).Return(nil, nil)
 
 		err = actorSys.Start(ctx)
 		require.NoError(t, err)
