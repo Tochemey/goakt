@@ -2415,7 +2415,12 @@ func (x *actorSystem) handleRemoteAsk(ctx context.Context, to *PID, message prot
 
 	responseCh := receiveContext.response
 	if responseCh != nil {
-		defer putResponseChannel(responseCh)
+		defer func() {
+			// Mark closed so a late Response won't write into a pooled channel that may
+			// be reused by another Ask call.
+			receiveContext.responseClosed.Store(true)
+			putResponseChannel(responseCh)
+		}()
 	}
 	to.doReceive(receiveContext)
 	timer := timers.Get(timeout)
@@ -3607,11 +3612,12 @@ func (x *actorSystem) getSetDeadlettersCount(ctx context.Context) {
 		// ask the deadletter actor for the count
 		// using the default ask timeout
 		// note: no need to check for error because this call is internal
-		message, _ := from.Ask(ctx, to, message, DefaultAskTimeout)
-		// cast the response received from the deadletter
-		deadlettersCount := message.(*internalpb.DeadlettersCountResponse)
-		// set the counter
-		x.deadlettersCounter.Store(uint64(deadlettersCount.GetTotalCount()))
+		reply, _ := from.Ask(ctx, to, message, DefaultAskTimeout)
+		// Be defensive: if the actor is shutting down or a call was timed out and a late
+		// response got dropped, reply can be nil or an unexpected type.
+		if deadlettersCount, ok := reply.(*internalpb.DeadlettersCountResponse); ok && deadlettersCount != nil {
+			x.deadlettersCounter.Store(uint64(deadlettersCount.GetTotalCount()))
+		}
 	}
 }
 

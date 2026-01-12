@@ -51,7 +51,12 @@ func Ask(ctx context.Context, to *PID, message proto.Message, timeout time.Durat
 
 	responseCh := receiveContext.response
 	if responseCh != nil {
-		defer putResponseChannel(responseCh)
+		defer func() {
+			// Mark closed so a late Response won't write into a pooled channel that may
+			// be reused by another Ask call.
+			receiveContext.responseClosed.Store(true)
+			putResponseChannel(responseCh)
+		}()
 	}
 	to.doReceive(receiveContext)
 	timer := timers.Get(timeout)

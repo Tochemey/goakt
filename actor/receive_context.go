@@ -24,6 +24,7 @@ package actor
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -85,6 +86,7 @@ type ReceiveContext struct {
 	sender         *PID
 	remoteSender   *address.Address
 	response       chan proto.Message
+	responseClosed atomic.Bool
 	requestID      string
 	requestReplyTo string
 	self           *PID
@@ -137,7 +139,17 @@ func (rctx *ReceiveContext) Response(resp proto.Message) {
 		}
 		return
 	}
-	rctx.response <- resp
+	// For Ask-based replies, guard against late responses after the caller timed out.
+	// This prevents pooled response channels from receiving stale replies that could
+	// be consumed by a later Ask call.
+	if !rctx.responseClosed.CompareAndSwap(false, true) {
+		return
+	}
+	select {
+	case rctx.response <- resp:
+	default:
+		// Channel is full or caller is gone; drop the response.
+	}
 }
 
 // Context returns the context associated with the current message.
@@ -777,13 +789,15 @@ func (rctx *ReceiveContext) getError() error {
 // Callers should prefer the context provided by the framework during message delivery.
 func newReceiveContext(ctx context.Context, from, to *PID, message proto.Message) *ReceiveContext {
 	// create a message receiveContext
-	return &ReceiveContext{
+	rc := &ReceiveContext{
 		ctx:      ctx,
 		message:  message,
 		sender:   from,
 		response: getResponseChannel(),
 		self:     to,
 	}
+	rc.responseClosed.Store(false)
+	return rc
 }
 
 // build initializes or reuses a ReceiveContext instance for internal dispatch.
@@ -794,6 +808,7 @@ func (rctx *ReceiveContext) build(ctx context.Context, from, to *PID, message pr
 	rctx.sender = from
 	rctx.self = to
 	rctx.message = message
+	rctx.responseClosed.Store(false)
 
 	if async {
 		rctx.ctx = context.WithoutCancel(ctx)
@@ -816,6 +831,7 @@ func (rctx *ReceiveContext) reset() {
 	rctx.err = nil
 	rctx.ctx = nil
 	rctx.response = nil
+	rctx.responseClosed.Store(false)
 	rctx.requestID = ""
 	rctx.requestReplyTo = ""
 }
