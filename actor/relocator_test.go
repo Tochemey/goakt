@@ -1714,18 +1714,41 @@ func TestRelocationWithEtcdProvider(t *testing.T) {
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
-	// Wait for relocation - verify actor exists and is on a live node (not node2)
+	// Give the cluster time to detect the node failure and start relocation
+	pause.For(2 * time.Second)
+
+	// Wait for cluster rebalancing - verify actor relocation actually occurred.
+	// The relocation process:
+	// 1. Node2 shutdown: cleanupCluster removes actors from cluster map (synchronous)
+	// 2. NodeLeft event is emitted and processed by leader
+	// 3. Leader fetches peer state from cluster store and enqueues for relocation
+	// 4. Relocator processes: recreateLocally removes actor from cluster map, then spawns locally
+	// 5. New actor is registered in cluster map with NEW address (via putActorOnCluster)
+	//
+	// The test must verify the actor is relocated (has new address), not just that it exists.
+	// During relocation, the actor may temporarily not exist (removed but not yet re-added),
+	// so we accept either: actor doesn't exist (relocation in progress) OR actor exists with new address (relocation complete).
+	// We reject: actor exists with old address (relocation hasn't started or failed).
 	require.Eventually(t, func() bool {
 		exists, err := node1.ActorExists(ctx, actorName)
-		if err != nil || !exists {
+		if err != nil {
 			return false
 		}
+		if !exists {
+			// Actor doesn't exist - this is OK during relocation (removed but not yet re-added)
+			// We'll keep checking until it's re-added with new address
+			return false
+		}
+		// Actor exists - verify it's on a live node (not node2)
 		relocatedAddr, _, err := node1.ActorOf(ctx, actorName)
 		if err != nil || relocatedAddr == nil {
 			return false
 		}
-		return relocatedAddr.HostPort() != node2Address
-	}, 2*time.Minute, time.Second, "Actor %s should be relocated from node2 to a live node", actorName)
+		actorAddr := relocatedAddr.HostPort()
+		// Critical check: actor must have a NEW address (not node2's address)
+		// If it still has node2's address, relocation hasn't happened yet
+		return actorAddr != node2Address
+	}, 2*time.Minute, time.Second, "Actor %s should be relocated from node2 (was %s) to a live node", actorName, node2Address)
 
 	sender, err := node1.LocalActor("Actor11")
 	require.NoError(t, err)
