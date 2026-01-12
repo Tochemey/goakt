@@ -40,6 +40,7 @@ import (
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
+	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/log"
 	mockscluster "github.com/tochemey/goakt/v3/mocks/cluster"
 	mocksdiscovery "github.com/tochemey/goakt/v3/mocks/discovery"
@@ -229,5 +230,69 @@ func TestDeathWatch(t *testing.T) {
 		require.Contains(t, err.Error(), clusterErr.Error())
 
 		require.NoError(t, cid.Shutdown(ctx))
+	})
+
+	t.Run("With Terminated removes singleton kind entry", func(t *testing.T) {
+		ctx := context.Background()
+
+		actorSys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSys)
+
+		err = actorSys.Start(ctx)
+		require.NoError(t, err)
+		pause.For(500 * time.Millisecond)
+
+		sys := actorSys.(*actorSystem)
+
+		t.Cleanup(func() {
+			// Detach the mocked cluster before stopping the system to avoid background
+			// shutdown workflows (preShutdown) calling into unexpected mock methods.
+			sys.clusterEnabled.Store(false)
+			sys.cluster = nil
+			require.NoError(t, actorSys.Stop(ctx))
+		})
+
+		// Mock cluster removal for both actor name and singleton kind.
+		clmock := mockscluster.NewCluster(t)
+		sys.cluster = clmock
+		sys.clusterEnabled.Store(true)
+
+		// Create a singleton actor PID and register it in the tree so deathWatch can find it.
+		const (
+			actorName = "singleton-to-free"
+			role      = "blue"
+		)
+		actor := NewMockActor()
+		singletonPID, err := sys.configPID(ctx, actorName, actor,
+			WithLongLived(),
+			withSingleton(&singletonSpec{}),
+			WithRole(role),
+		)
+		require.NoError(t, err)
+		require.NotNil(t, singletonPID)
+
+		// Register under the user guardian (any existing parent works).
+		require.NoError(t, sys.tree().addNode(sys.getUserGuardian(), singletonPID))
+
+		// Wire the deathWatch actor with our mocked cluster and tree.
+		deathWatchPID := actorSys.getDeathWatch()
+		require.NotNil(t, deathWatchPID)
+		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
+		deathWatchActor.cluster = clmock
+		deathWatchActor.actorSystem = actorSys
+		deathWatchActor.pid = deathWatchPID
+		deathWatchActor.logger = log.DiscardLogger
+		deathWatchActor.tree = sys.tree()
+
+		expectedKind := kindRole(registry.Name(actor), role)
+		clmock.EXPECT().RemoveActor(mock.Anything, actorName).Return(nil).Once()
+		clmock.EXPECT().RemoveKind(mock.Anything, expectedKind).Return(nil).Once()
+
+		terminated := &goaktpb.Terminated{Address: singletonPID.ID()}
+		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, terminated)
+
+		require.NoError(t, deathWatchActor.handleTerminated(receiveCtx))
+		require.NoError(t, singletonPID.Shutdown(ctx))
 	})
 }

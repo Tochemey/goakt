@@ -3496,6 +3496,7 @@ func (x *actorSystem) spawnDeadletter(ctx context.Context) error {
 func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName string, actor Actor, singleton bool, singletonRole *string) error {
 	// check the existence of the actor given the kind prior to creating it
 	if x.clusterEnabled.Load() {
+		var reservedKind string
 		// a singleton actor must only have one instance at a given time of its kind
 		// in the whole cluster
 		if singleton {
@@ -3511,15 +3512,25 @@ func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName str
 				}
 				return err
 			}
+			// We successfully reserved the singleton kind in the cluster. If we fail later in
+			// preconditions (e.g., name already taken), we must release it to avoid leaking the
+			// singleton reservation.
+			reservedKind = kind
 		}
 
 		// here we make sure in cluster mode that the given actor is uniquely created
 		exists, err := x.cluster.ActorExists(ctx, actorName)
 		if err != nil {
+			if reservedKind != "" {
+				_ = x.cluster.RemoveKind(ctx, reservedKind)
+			}
 			return err
 		}
 
 		if exists {
+			if reservedKind != "" {
+				_ = x.cluster.RemoveKind(ctx, reservedKind)
+			}
 			return gerrors.NewErrActorAlreadyExists(actorName)
 		}
 	}

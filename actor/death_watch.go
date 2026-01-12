@@ -110,7 +110,6 @@ func (x *deathWatch) handleTerminated(ctx *ReceiveContext) error {
 			multierr.AppendInto(&err, x.cluster.RemoveActor(ctx, actorName))
 
 			// for singleton actors, we also need to remove the kind entry
-			// TODO: add unit tests for this
 			if pid.IsSingleton() {
 				singletonRole := strings.TrimSpace(pointer.Deref(pid.role, ""))
 				singletonKind := registry.Name(pid.Actor())

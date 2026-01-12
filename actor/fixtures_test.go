@@ -131,6 +131,7 @@ func (p *MockActor) PostStop(*Context) error {
 func (p *MockActor) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
+		ctx.Logger().Info("MockActor started")
 	case *testpb.TestSend:
 	case *testpb.TestPanic:
 		panic("Boom")
@@ -139,11 +140,9 @@ func (p *MockActor) Receive(ctx *ReceiveContext) {
 	case *testpb.TestTimeout:
 		// delay for a while before sending the reply
 		wg := sync.WaitGroup{}
-		wg.Add(1)
-		go func() {
+		wg.Go(func() {
 			pause.For(receivingDelay)
-			wg.Done()
-		}()
+		})
 		// block until timer is up
 		wg.Wait()
 	default:

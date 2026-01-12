@@ -1865,10 +1865,24 @@ func TestActorSystem(t *testing.T) {
 		system.registry.Register(new(MockActor))
 		actorType := registry.Name(new(MockActor))
 
-		clusterMock.EXPECT().IsLeader(mock.Anything).Return(true).Once()
+		// SpawnSingleton now resolves the coordinator via Members() (includes local node) and spawns locally
+		// when the coordinator matches the local peer address.
+		clusterMock.EXPECT().
+			Members(mock.Anything).
+			Return([]*cluster.Peer{
+				{
+					Host:         system.clusterNode.Host,
+					PeersPort:    system.clusterNode.PeersPort,
+					RemotingPort: system.clusterNode.RemotingPort,
+					Coordinator:  true,
+				},
+			}, nil).
+			Once()
+
+		// Singleton uniqueness is enforced via kind reservation (LookupKind/PutKind) before name uniqueness.
 		clusterMock.EXPECT().LookupKind(mock.Anything, actorType).Return("", nil).Once()
-		clusterMock.EXPECT().ActorExists(mock.Anything, "singleton").Return(false, nil).Once()
 		clusterMock.EXPECT().PutKind(mock.Anything, actorType).Return(nil).Once()
+		clusterMock.EXPECT().ActorExists(mock.Anything, "singleton").Return(false, nil).Once()
 
 		request := connect.NewRequest(&internalpb.RemoteSpawnRequest{
 			Host:      system.remoteConfig.BindAddr(),

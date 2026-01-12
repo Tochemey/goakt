@@ -109,12 +109,18 @@ func (x *actorSystem) spawnSingletonManager(ctx context.Context) error {
 }
 
 func (x *actorSystem) spawnSingletonOnLeader(ctx context.Context, cl cluster.Cluster, name string, actor Actor, spawnTimeout, waitInterval time.Duration, retries int32) error {
-	peers, err := cl.Peers(ctx)
+	// spawnSingletonOnLeader resolves the cluster coordinator and ensures the singleton is spawned on it.
+	//
+	// Implementation notes:
+	//   - We use Members (includes the local node) rather than Peers (excludes local) so callers can invoke
+	//     SpawnSingleton from any node without requiring leader knowledge.
+	//   - If the coordinator is the local node, we spawn locally to avoid a needless RemoteSpawn round-trip.
+	peers, err := cl.Members(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to spawn singleton actor: %w", err)
 	}
 
-	// find the oldest node in the cluster
+	// find the coordinator (leader) node in the cluster
 	var leader *cluster.Peer
 	for _, peer := range peers {
 		if peer.Coordinator {
@@ -125,6 +131,16 @@ func (x *actorSystem) spawnSingletonOnLeader(ctx context.Context, cl cluster.Clu
 
 	if leader == nil {
 		return errors.ErrLeaderNotFound
+	}
+
+	// If the leader is the local node, spawn locally.
+	localAddr := ""
+	if x.clusterNode != nil {
+		localAddr = x.clusterNode.PeersAddress()
+	}
+
+	if localAddr != "" && leader.PeerAddress() == localAddr {
+		return x.spawnSingletonOnLocal(ctx, name, actor, nil, spawnTimeout, waitInterval, retries)
 	}
 
 	var (
