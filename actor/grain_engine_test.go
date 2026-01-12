@@ -688,7 +688,7 @@ func TestAskGrain_ClusterFallbackAutoProvisions(t *testing.T) {
 	sys.registry.Register(grain)
 	identity := newGrainIdentity(grain, "auto-provision")
 
-	cl.EXPECT().GetGrain(ctx, identity.String()).Return(nil, cluster.ErrGrainNotFound)
+	cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(nil, cluster.ErrGrainNotFound)
 	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, nil).Twice()
 	cl.EXPECT().PutGrain(mock.Anything, mock.MatchedBy(func(actual *internalpb.Grain) bool {
 		return actual != nil && actual.GetGrainId().GetValue() == identity.String()
