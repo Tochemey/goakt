@@ -1423,6 +1423,16 @@ func (pid *PID) buildAsyncRequest(message proto.Message, correlationID string) (
 // doReceive pushes a given message to the actor mailbox
 // and signals the receiveLoop to process it
 func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
+	// fast path: check if system is shutting down
+	if system := pid.ActorSystem(); system != nil && system.isStopping() {
+		// slow path: only check message type if shutting down
+		// system messages must be allowed through for proper shutdown/supervision
+		if !pid.isSystemMessage(receiveCtx.Message()) {
+			pid.handleReceivedError(receiveCtx, gerrors.ErrSystemShuttingDown)
+			return
+		}
+	}
+
 	if err := pid.mailbox.Enqueue(receiveCtx); err != nil {
 		pid.logger.Warn(err)
 		pid.handleReceivedError(receiveCtx, err)
@@ -1501,6 +1511,28 @@ func (pid *PID) handleReceived(received *ReceiveContext) {
 		pid.markActivity(time.Now().UTC())
 		pid.recordProcessedMessage()
 		behavior(received)
+	}
+}
+
+// isSystemMessage checks if a message is a system message that must be allowed
+// through even during system shutdown (e.g., for proper shutdown, supervision, lifecycle).
+//
+// This is a zero-allocation type switch that identifies critical system messages.
+func (pid *PID) isSystemMessage(message proto.Message) bool {
+	switch message.(type) {
+	case *internalpb.AsyncResponse,
+		*internalpb.AsyncRequest,
+		*goaktpb.PoisonPill,
+		*internalpb.HealthCheckRequest,
+		*internalpb.Panicking,
+		*goaktpb.PausePassivation,
+		*goaktpb.ResumePassivation,
+		*goaktpb.PostStart,
+		*goaktpb.Terminated,
+		*goaktpb.PanicSignal:
+		return true
+	default:
+		return false
 	}
 }
 
