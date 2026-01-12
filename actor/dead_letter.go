@@ -25,8 +25,8 @@ package actor
 import (
 	"go.uber.org/atomic"
 
+	"github.com/tochemey/goakt/v3/eventstream"
 	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/xsync"
 	"github.com/tochemey/goakt/v3/log"

@@ -91,7 +91,6 @@ func TestStream(t *testing.T) {
 	t.Run("With Subscription", func(t *testing.T) {
 		broker := New()
 
-		// add consumer
 		cons := broker.AddSubscriber()
 		require.NotNil(t, cons)
 		broker.Subscribe(cons, "t1")
@@ -100,7 +99,6 @@ func TestStream(t *testing.T) {
 		require.EqualValues(t, 1, broker.SubscribersCount("t1"))
 		require.EqualValues(t, 1, broker.SubscribersCount("t2"))
 
-		// remove the consumer
 		broker.RemoveSubscriber(cons)
 		assert.Zero(t, broker.SubscribersCount("t1"))
 		assert.Zero(t, broker.SubscribersCount("t2"))
@@ -110,10 +108,10 @@ func TestStream(t *testing.T) {
 
 		broker.Close()
 	})
+
 	t.Run("With Unsubscription", func(t *testing.T) {
 		broker := New()
 
-		// add consumer
 		cons := broker.AddSubscriber()
 		require.NotNil(t, cons)
 		broker.Subscribe(cons, "t1")
@@ -128,7 +126,6 @@ func TestStream(t *testing.T) {
 
 		sub2.Shutdown()
 
-		// Unsubscribe the consumer
 		broker.Unsubscribe(cons, "t1")
 		broker.Unsubscribe(sub2, "t1")
 		require.Zero(t, broker.SubscribersCount("t1"))
@@ -137,7 +134,6 @@ func TestStream(t *testing.T) {
 		broker.Subscribe(cons, "t3")
 		require.EqualValues(t, 1, broker.SubscribersCount("t3"))
 
-		// remove the consumer
 		broker.RemoveSubscriber(cons)
 		broker.Subscribe(cons, "t4")
 		assert.Zero(t, broker.SubscribersCount("t4"))
@@ -189,7 +185,6 @@ func TestStream(t *testing.T) {
 	t.Run("With Publication", func(t *testing.T) {
 		broker := New()
 
-		// add consumer
 		cons := broker.AddSubscriber()
 		require.NotNil(t, cons)
 		broker.Subscribe(cons, "t1")
@@ -222,10 +217,10 @@ func TestStream(t *testing.T) {
 
 		broker.Close()
 	})
+
 	t.Run("With Broadcast", func(t *testing.T) {
 		broker := New()
 
-		// add consumer
 		cons := broker.AddSubscriber()
 		require.NotNil(t, cons)
 		broker.Subscribe(cons, "t1")

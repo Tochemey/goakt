@@ -31,8 +31,8 @@ import (
 	"go.uber.org/atomic"
 
 	goakt "github.com/tochemey/goakt/v3/actor"
+	"github.com/tochemey/goakt/v3/eventstream"
 	"github.com/tochemey/goakt/v3/extension"
-	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/log"
 )
 

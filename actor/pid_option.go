@@ -25,8 +25,8 @@ package actor
 import (
 	"time"
 
+	"github.com/tochemey/goakt/v3/eventstream"
 	"github.com/tochemey/goakt/v3/extension"
-	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/metric"
 	"github.com/tochemey/goakt/v3/internal/pointer"
 	"github.com/tochemey/goakt/v3/internal/xsync"
@@ -114,6 +114,13 @@ func withPassivationManager(manager *passivationManager) pidOption {
 func asSingleton() pidOption {
 	return func(pid *PID) {
 		pid.setState(singletonState, true)
+	}
+}
+
+// withSingletonSpec records the singleton configuration on the PID.
+func withSingletonSpec(spec *singletonSpec) pidOption {
+	return func(pid *PID) {
+		pid.singletonSpec = spec
 	}
 }
 

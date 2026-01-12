@@ -31,7 +31,7 @@ import (
 
 	goakt "github.com/tochemey/goakt/v3/actor"
 	"github.com/tochemey/goakt/v3/discovery"
-	"github.com/tochemey/goakt/v3/internal/eventstream"
+	"github.com/tochemey/goakt/v3/eventstream"
 )
 
 // TestNode represents a test instance of an actor system cluster node.

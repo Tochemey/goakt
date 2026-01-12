@@ -30,7 +30,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tochemey/goakt/v3/internal/eventstream"
+	"github.com/tochemey/goakt/v3/eventstream"
 	"github.com/tochemey/goakt/v3/internal/metric"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/passivation"
@@ -127,4 +127,16 @@ func TestWithRole(t *testing.T) {
 	role := pid.Role()
 	require.NotNil(t, role)
 	assert.Equal(t, "payments", *role)
+}
+
+func TestWithSingletonSpec(t *testing.T) {
+	pid := &PID{}
+	spec := &singletonSpec{
+		SpawnTimeout: time.Second,
+		WaitInterval: 500 * time.Millisecond,
+		MaxRetries:   3,
+	}
+	option := withSingletonSpec(spec)
+	option(pid)
+	require.Equal(t, spec, pid.singletonSpec)
 }

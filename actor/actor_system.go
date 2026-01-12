@@ -58,6 +58,7 @@ import (
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/discovery"
 	gerrors "github.com/tochemey/goakt/v3/errors"
+	"github.com/tochemey/goakt/v3/eventstream"
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/hash"
@@ -66,7 +67,6 @@ import (
 	"github.com/tochemey/goakt/v3/internal/codec"
 	"github.com/tochemey/goakt/v3/internal/compression/brotli"
 	"github.com/tochemey/goakt/v3/internal/compression/zstd"
-	"github.com/tochemey/goakt/v3/internal/eventstream"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v3/internal/locker"
@@ -3267,6 +3267,10 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 	// define the actor as singleton when necessary
 	if spawnConfig.asSingleton {
 		pidOpts = append(pidOpts, asSingleton())
+		// this should always be set when the actor is a singleton
+		// no need to check for nil because it is always set when the actor is a singleton
+		// and it is not possible to spawn a singleton actor without a singleton spec
+		pidOpts = append(pidOpts, withSingletonSpec(spawnConfig.singletonSpec))
 	}
 
 	if !spawnConfig.relocatable {

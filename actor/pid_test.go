@@ -6229,16 +6229,14 @@ func TestPipeToName(t *testing.T) {
 		require.NoError(t, pid2.Shutdown(ctx))
 
 		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
+		wg.Go(func() {
 			// Wait for some time and during that period send some messages to the actor
 			// send three messages while waiting for the future to completed
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
 			pause.For(time.Second)
-			wg.Done()
-		}()
+		})
 		wg.Wait()
 
 		pause.For(time.Second)
@@ -6305,4 +6303,27 @@ func TestToWireActorSupervisorSpec(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, wire.GetSupervisor())
 	require.Equal(t, internalpb.SupervisorStrategy_SUPERVISOR_STRATEGY_ONE_FOR_ALL, wire.GetSupervisor().GetStrategy())
+}
+
+func TestToWireActorIncludesSingletonSpecWhenSingleton(t *testing.T) {
+	spec := &singletonSpec{
+		SpawnTimeout: time.Second,
+		WaitInterval: 500 * time.Millisecond,
+		MaxRetries:   3,
+	}
+
+	pid := &PID{
+		actor:   NewMockActor(),
+		address: address.New("singleton", "test-system", "127.0.0.1", 0),
+	}
+	pid.setState(singletonState, true)
+	pid.singletonSpec = spec
+
+	wire, err := pid.toWireActor()
+	require.NoError(t, err)
+
+	require.NotNil(t, wire.GetSingleton())
+	assert.Equal(t, spec.MaxRetries, wire.GetSingleton().GetMaxRetries())
+	assert.Equal(t, spec.SpawnTimeout, wire.GetSingleton().GetSpawnTimeout().AsDuration())
+	assert.Equal(t, spec.WaitInterval, wire.GetSingleton().GetWaitInterval().AsDuration())
 }

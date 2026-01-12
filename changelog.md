@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### 🐛 Fixes
+- Fix and simplify the implementation of the relocation engine.
+- Harden the cluster singleton implementation with well guided godoc
+- Exposed the eventstream package that was accidentally moved into the internal package
+
+### ✨ Features
+- Added `Dependencies()` and `Dependency(dependencyID string) ` to `GrainContext` to access the grain's dependency container.
+- Added `Extensions()` and `Extension(extensionID string)` to `GrainContext` to access grain extensions.
+- Added ` Dependencies()` and `Dependency(dependencyID string)` to `ReceiveContext` to access the actor's dependency container.
+
 ## [v3.12.1] - 2026-06-01
 
 ### ✨ Features
