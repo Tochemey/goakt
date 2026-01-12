@@ -448,12 +448,19 @@ func (pid *PID) Stop(ctx context.Context, cid *PID) error {
 
 // IsRunning returns true when the actor is alive ready to process messages and false
 // when the actor is stopped or not started at all
+//
+// Optimized to use a single atomic load instead of multiple calls to isStateSet(),
+// reducing from 4 atomic loads to 1 atomic load + 4 bitwise operations.
 func (pid *PID) IsRunning() bool {
-	return pid != nil &&
-		pid.isStateSet(runningState) &&
-		!pid.isStateSet(stoppingState) &&
-		!pid.isStateSet(passivatingState) &&
-		!pid.isStateSet(suspendedState)
+	if pid == nil {
+		return false
+	}
+	// Single atomic load, then check all flags with bitwise operations
+	state := pid.state.Load()
+	return state&uint32(runningState) != 0 &&
+		state&uint32(stoppingState) == 0 &&
+		state&uint32(passivatingState) == 0 &&
+		state&uint32(suspendedState) == 0
 }
 
 // IsSuspended returns true when the actor is suspended
