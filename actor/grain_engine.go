@@ -686,7 +686,7 @@ func (x *actorSystem) localSend(ctx context.Context, id *GrainIdentity, message 
 	grainContext.build(ctx, pid, x, id, message, synchronous)
 	errCh := grainContext.err
 	if errCh != nil {
-		putErrorChannel(errCh)
+		defer putErrorChannel(errCh)
 	}
 
 	timer := timers.Get(timeout)
@@ -695,7 +695,7 @@ func (x *actorSystem) localSend(ctx context.Context, id *GrainIdentity, message 
 	if synchronous {
 		responseCh := grainContext.response
 		if responseCh != nil {
-			putResponseChannel(responseCh)
+			defer putResponseChannel(responseCh)
 		}
 
 		pid.receive(grainContext)
@@ -719,10 +719,13 @@ func (x *actorSystem) localSend(ctx context.Context, id *GrainIdentity, message 
 	pid.receive(grainContext)
 	select {
 	case err := <-errCh:
+		timers.Put(timer)
 		return nil, err
 	case <-timer.C:
+		timers.Put(timer)
 		return nil, gerrors.ErrRequestTimeout
 	case <-ctx.Done():
+		timers.Put(timer)
 		return nil, errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
 	}
 }
