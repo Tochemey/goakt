@@ -404,29 +404,76 @@ func TestRelocation(t *testing.T) {
 
 	pause.For(time.Second)
 
+	// Verify actors are on node2 before shutdown
+	actorName := "Actor2-1"
+	node2Address := net.JoinHostPort(node2.Host(), strconv.Itoa(node2.Port()))
+	addr, _, err := node1.ActorOf(ctx, actorName)
+	require.NoError(t, err)
+	require.NotNil(t, addr)
+	require.Equal(t, node2Address, addr.HostPort(), "Actor %s should be on node2 before shutdown", actorName)
+
 	// take down node2
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
-	// Wait for cluster rebalancing
-	pause.For(2 * time.Minute)
+	// Wait for cluster rebalancing - verify actor relocation actually occurred.
+	// The relocation process:
+	// 1. Node2 shutdown: cleanupCluster removes actors from cluster map (synchronous)
+	// 2. NodeLeft event is emitted and processed by leader
+	// 3. Leader fetches peer state from cluster store and enqueues for relocation
+	// 4. Relocator processes: recreateLocally removes actor from cluster map, then spawns locally
+	// 5. New actor is registered in cluster map with NEW address (via putActorOnCluster)
+	//
+	// The test must verify the actor is relocated (has new address), not just that it exists.
+	// During relocation, the actor may temporarily not exist (removed but not yet re-added),
+	// so we accept either: actor doesn't exist (relocation in progress) OR actor exists with new address (relocation complete).
+	// We reject: actor exists with old address (relocation hasn't started or failed).
+	require.Eventually(t, func() bool {
+		exists, err := node1.ActorExists(ctx, actorName)
+		if err != nil {
+			return false
+		}
+		if !exists {
+			// Actor doesn't exist - this is OK during relocation (removed but not yet re-added)
+			// We'll keep checking until it's re-added with new address
+			return false
+		}
+		// Actor exists - verify it's on a live node (not node2)
+		relocatedAddr, _, err := node1.ActorOf(ctx, actorName)
+		if err != nil || relocatedAddr == nil {
+			return false
+		}
+		actorAddr := relocatedAddr.HostPort()
+		// Critical check: actor must have a NEW address (not node2's address)
+		// If it still has node2's address, relocation hasn't happened yet
+		return actorAddr != node2Address
+	}, 2*time.Minute, time.Second, "Actor %s should be relocated from node2 (was %s) to a live node", actorName, node2Address)
 
 	sender, err := node1.LocalActor("Actor1-1")
 	require.NoError(t, err)
 	require.NotNil(t, sender)
 
-	pause.For(time.Second)
-
-	// let us access some of the node2 actors from node 1 and  node 3
-	actorName := "Actor2-1"
+	// Actor should now exist, safe to send
 	err = sender.SendAsync(ctx, actorName, new(testpb.TestSend))
 	require.NoError(t, err)
 
-	relocated, err := node1.ActorExists(ctx, reentrantName)
-	require.NoError(t, err)
-	require.True(t, relocated)
+	// Wait for reentrant actor to be relocated - verify it's on a live node
+	require.Eventually(t, func() bool {
+		exists, err := node1.ActorExists(ctx, reentrantName)
+		if err != nil || !exists {
+			return false
+		}
+		// Verify actor is actually on a live node (node1 or node3), not on dead node2
+		reentrantAddr, _, err := node1.ActorOf(ctx, reentrantName)
+		if err != nil || reentrantAddr == nil {
+			return false
+		}
+		actorAddr := reentrantAddr.HostPort()
+		// Actor should be on node1 or node3, not on node2 (which is down)
+		return actorAddr != node2Address
+	}, 30*time.Second, time.Second, "Reentrant actor %s should be relocated from node2 to a live node", reentrantName)
 
-	addr, pid, err := node1.ActorOf(ctx, reentrantName)
+	reentrantAddr, pid, err := node1.ActorOf(ctx, reentrantName)
 	require.NoError(t, err)
 	if pid != nil {
 		require.NotNil(t, pid.reentrancy)
@@ -434,7 +481,7 @@ func TestRelocation(t *testing.T) {
 		require.Equal(t, 3, pid.reentrancy.maxInFlight)
 	}
 
-	if addr.HostPort() == net.JoinHostPort(node1.Host(), strconv.Itoa(node1.Port())) {
+	if reentrantAddr.HostPort() == net.JoinHostPort(node1.Host(), strconv.Itoa(node1.Port())) {
 		pid, err = node1.LocalActor(reentrantName)
 		require.NoError(t, err)
 		require.NotNil(t, pid.reentrancy)
@@ -442,7 +489,7 @@ func TestRelocation(t *testing.T) {
 		require.Equal(t, 3, pid.reentrancy.maxInFlight)
 	}
 
-	if addr.HostPort() == net.JoinHostPort(node3.Host(), strconv.Itoa(node3.Port())) {
+	if reentrantAddr.HostPort() == net.JoinHostPort(node3.Host(), strconv.Itoa(node3.Port())) {
 		pid, err = node3.LocalActor(reentrantName)
 		require.NoError(t, err)
 		require.NotNil(t, pid.reentrancy)
@@ -475,18 +522,37 @@ func TestRelocationWithCustomSupervisor(t *testing.T) {
 		supervisor.WithDirective(&errors.InternalError{}, supervisor.RestartDirective),
 	)
 
-	pid, err := node2.Spawn(ctx, "custom-supervised-actor", NewMockActor(), WithSupervisor(customSupervisor))
+	actorName := "custom-supervised-actor"
+	pid, err := node2.Spawn(ctx, actorName, NewMockActor(), WithSupervisor(customSupervisor))
 	require.NoError(t, err)
 	require.NotNil(t, pid)
 
 	pause.For(time.Second)
 
+	// Verify actor is on node2 before shutdown
+	node2Address := net.JoinHostPort(node2.Host(), strconv.Itoa(node2.Port()))
+	addr, _, err := node1.ActorOf(ctx, actorName)
+	require.NoError(t, err)
+	require.NotNil(t, addr)
+	require.Equal(t, node2Address, addr.HostPort(), "Actor %s should be on node2 before shutdown", actorName)
+
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
-	pause.For(time.Minute)
+	// Wait for relocation - verify actor exists and is on a live node (not node2)
+	require.Eventually(t, func() bool {
+		exists, err := node1.ActorExists(ctx, actorName)
+		if err != nil || !exists {
+			return false
+		}
+		relocatedAddr, _, err := node1.ActorOf(ctx, actorName)
+		if err != nil || relocatedAddr == nil {
+			return false
+		}
+		return relocatedAddr.HostPort() != node2Address
+	}, 2*time.Minute, time.Second, "Actor %s should be relocated from node2 to a live node", actorName)
 
-	relocated, err := node1.LocalActor("custom-supervised-actor")
+	relocated, err := node1.LocalActor(actorName)
 	require.NoError(t, err)
 	require.NotNil(t, relocated)
 	require.NotNil(t, relocated.supervisor)
@@ -621,20 +687,35 @@ func TestRelocationWithSingletonActor(t *testing.T) {
 	require.NotNil(t, sd3)
 
 	// create a singleton actor
-	err := node1.SpawnSingleton(ctx, "actorName", NewMockActor())
+	actorName := "actorName"
+	err := node1.SpawnSingleton(ctx, actorName, NewMockActor())
 	require.NoError(t, err)
 
 	pause.For(time.Second)
+
+	// Verify singleton is on node1 before shutdown
+	node1Address := net.JoinHostPort(node1.Host(), strconv.Itoa(node1.Port()))
+	addr, _, err := node2.ActorOf(ctx, actorName)
+	require.NoError(t, err)
+	require.NotNil(t, addr)
+	require.Equal(t, node1Address, addr.HostPort(), "Singleton %s should be on node1 before shutdown", actorName)
 
 	// take down node1 since it is the first node created in the cluster
 	require.NoError(t, node1.Stop(ctx))
 	require.NoError(t, sd1.Close())
 
-	pause.For(2 * time.Minute)
-
-	exists, err := node2.ActorExists(ctx, "actorName")
-	require.NoError(t, err)
-	require.True(t, exists)
+	// Wait for singleton relocation - verify it exists and is on a live node (not node1)
+	require.Eventually(t, func() bool {
+		exists, err := node2.ActorExists(ctx, actorName)
+		if err != nil || !exists {
+			return false
+		}
+		relocatedAddr, _, err := node2.ActorOf(ctx, actorName)
+		if err != nil || relocatedAddr == nil {
+			return false
+		}
+		return relocatedAddr.HostPort() != node1Address
+	}, 2*time.Minute, time.Second, "Singleton %s should be relocated from node1 to a live node", actorName)
 
 	assert.NoError(t, node2.Stop(ctx))
 	assert.NoError(t, node3.Stop(ctx))
@@ -859,21 +940,36 @@ func TestRelocationWithExtension(t *testing.T) {
 
 	pause.For(time.Second)
 
+	// Verify entity is on node2 before shutdown
+	entityID := "node2-entity-1"
+	node2Address := net.JoinHostPort(node2.Host(), strconv.Itoa(node2.Port()))
+	addr, _, err := node1.ActorOf(ctx, entityID)
+	require.NoError(t, err)
+	require.NotNil(t, addr)
+	require.Equal(t, node2Address, addr.HostPort(), "Entity %s should be on node2 before shutdown", entityID)
+
 	// take down node2
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
-	// Wait for cluster rebalancing
-	pause.For(2 * time.Minute)
+	// Wait for relocation - verify entity exists and is on a live node (not node2)
+	require.Eventually(t, func() bool {
+		exists, err := node1.ActorExists(ctx, entityID)
+		if err != nil || !exists {
+			return false
+		}
+		relocatedAddr, _, err := node1.ActorOf(ctx, entityID)
+		if err != nil || relocatedAddr == nil {
+			return false
+		}
+		return relocatedAddr.HostPort() != node2Address
+	}, 2*time.Minute, time.Second, "Entity %s should be relocated from node2 to a live node", entityID)
 
 	sender, err := node1.LocalActor("node1-entity-1")
 	require.NoError(t, err)
 	require.NotNil(t, sender)
 
-	pause.For(time.Second)
-
 	// let us access some of the node2 actors from node 1
-	entityID := "node2-entity-1"
 	var response proto.Message
 	response, err = sender.SendSync(ctx, entityID, new(testpb.GetAccount), time.Minute)
 	require.NoError(t, err)
@@ -930,19 +1026,34 @@ func TestRelocationWithDependency(t *testing.T) {
 
 	pause.For(time.Second)
 
+	// Verify actor is on node2 before shutdown
+	actorName := "node2-actor-1"
+	node2Address := net.JoinHostPort(node2.Host(), strconv.Itoa(node2.Port()))
+	addr, _, err := node1.ActorOf(ctx, actorName)
+	require.NoError(t, err)
+	require.NotNil(t, addr)
+	require.Equal(t, node2Address, addr.HostPort(), "Actor %s should be on node2 before shutdown", actorName)
+
 	// take down node2
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
-	// Wait for cluster rebalancing
-	pause.For(2 * time.Minute)
+	// Wait for relocation - verify actor exists and is on a live node (not node2)
+	require.Eventually(t, func() bool {
+		exists, err := node1.ActorExists(ctx, actorName)
+		if err != nil || !exists {
+			return false
+		}
+		relocatedAddr, _, err := node1.ActorOf(ctx, actorName)
+		if err != nil || relocatedAddr == nil {
+			return false
+		}
+		return relocatedAddr.HostPort() != node2Address
+	}, 2*time.Minute, time.Second, "Actor %s should be relocated from node2 to a live node", actorName)
 
 	sender, err := node1.LocalActor("node1-actor-1")
 	require.NoError(t, err)
 	require.NotNil(t, sender)
-
-	// let us access some of the node2 actors from node 1 and node 3
-	actorName := "node2-actor-1"
 
 	// we know the actor will be on node 1
 	pid, err := node1.LocalActor(actorName)
@@ -1498,20 +1609,36 @@ func TestRelocationWithConsulProvider(t *testing.T) {
 
 	pause.For(time.Second)
 
+	// Verify actor is on node2 before shutdown
+	actorName := "Actor21"
+	node2Address := net.JoinHostPort(node2.Host(), strconv.Itoa(node2.Port()))
+	addr, _, err := node1.ActorOf(ctx, actorName)
+	require.NoError(t, err)
+	require.NotNil(t, addr)
+	require.Equal(t, node2Address, addr.HostPort(), "Actor %s should be on node2 before shutdown", actorName)
+
 	// take down node2
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
-	pause.For(2 * time.Minute)
+	// Wait for relocation - verify actor exists and is on a live node (not node2)
+	require.Eventually(t, func() bool {
+		exists, err := node1.ActorExists(ctx, actorName)
+		if err != nil || !exists {
+			return false
+		}
+		relocatedAddr, _, err := node1.ActorOf(ctx, actorName)
+		if err != nil || relocatedAddr == nil {
+			return false
+		}
+		return relocatedAddr.HostPort() != node2Address
+	}, 2*time.Minute, time.Second, "Actor %s should be relocated from node2 to a live node", actorName)
 
 	sender, err := node1.LocalActor("Actor11")
 	require.NoError(t, err)
 	require.NotNil(t, sender)
 
-	pause.For(time.Second)
-
 	// let us access some of the node2 actors from node 1 and  node 3
-	actorName := "Actor21"
 	err = sender.SendAsync(ctx, actorName, new(testpb.TestSend))
 	require.NoError(t, err)
 
@@ -1575,20 +1702,36 @@ func TestRelocationWithEtcdProvider(t *testing.T) {
 
 	pause.For(time.Second)
 
+	// Verify actor is on node2 before shutdown
+	actorName := "Actor21"
+	node2Address := net.JoinHostPort(node2.Host(), strconv.Itoa(node2.Port()))
+	addr, _, err := node1.ActorOf(ctx, actorName)
+	require.NoError(t, err)
+	require.NotNil(t, addr)
+	require.Equal(t, node2Address, addr.HostPort(), "Actor %s should be on node2 before shutdown", actorName)
+
 	// take down node2
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
-	pause.For(2 * time.Minute)
+	// Wait for relocation - verify actor exists and is on a live node (not node2)
+	require.Eventually(t, func() bool {
+		exists, err := node1.ActorExists(ctx, actorName)
+		if err != nil || !exists {
+			return false
+		}
+		relocatedAddr, _, err := node1.ActorOf(ctx, actorName)
+		if err != nil || relocatedAddr == nil {
+			return false
+		}
+		return relocatedAddr.HostPort() != node2Address
+	}, 2*time.Minute, time.Second, "Actor %s should be relocated from node2 to a live node", actorName)
 
 	sender, err := node1.LocalActor("Actor11")
 	require.NoError(t, err)
 	require.NotNil(t, sender)
 
-	pause.For(time.Second)
-
 	// let us access some of the node2 actors from node 1 and  node 3
-	actorName := "Actor21"
 	err = sender.SendAsync(ctx, actorName, new(testpb.TestSend))
 	require.NoError(t, err)
 

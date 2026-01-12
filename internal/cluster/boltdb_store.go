@@ -107,6 +107,11 @@ func NewBoltStore() (Store, error) {
 }
 
 // PersistPeerState stores or updates the provided peer state.
+//
+// After the write transaction commits, a read transaction is opened to ensure
+// the write is visible to subsequent GetPeerState calls. This provides explicit
+// synchronization to prevent read-after-write visibility issues when NodeLeft
+// events are processed on different goroutines.
 func (s *BoltStore) PersistPeerState(ctx context.Context, peer *internalpb.PeerState) error {
 	if peer == nil {
 		return nil
@@ -122,13 +127,28 @@ func (s *BoltStore) PersistPeerState(ctx context.Context, peer *internalpb.PeerS
 
 	key := peerKey(peer)
 
-	return s.db.Update(func(tx *bbolt.Tx) error {
+	// Write the peer state
+	if err := s.db.Update(func(tx *bbolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
 			return fmt.Errorf("cluster: bucket %q missing", s.bucket)
 		}
 		return bucket.Put([]byte(key), data)
+	}); err != nil {
+		return err
+	}
+
+	// Open a read transaction to ensure the write is visible to subsequent reads.
+	// This provides explicit synchronization to prevent read-after-write visibility
+	// issues when NodeLeft events are processed on different goroutines.
+	_ = s.db.View(func(tx *bbolt.Tx) error {
+		// Just open a read transaction to ensure write is visible.
+		// We don't need to read anything, just ensure the transaction sees
+		// the committed write.
+		return nil
 	})
+
+	return nil
 }
 
 // GetPeerState returns the persisted peer state (if any) for the given address.

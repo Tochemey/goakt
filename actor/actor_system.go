@@ -2902,20 +2902,23 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 	// Run shutdown hooks and collect errors
 	hooksErr := x.runShutdownHooks(ctx)
 
+	// Build peer state snapshot early in shutdown process.
+	// Actual persistence happens later in shutdownCluster before leaving membership.
+	peerState, preShutdownErr := x.preShutdown(ctx)
+	if preShutdownErr != nil {
+		x.logger.Errorf("Failed to build peer state snapshot: %v", preShutdownErr)
+		// Continue with shutdown to free resources, but track error
+	}
+
 	// Helper to shut down cluster and remoting
+	// Includes preShutdownErr in the chain so it's properly tracked and returned
 	shutdownClusterAndRemoting := func() error {
 		return chain.
 			New(chain.WithRunAll()).
-			AddRunner(func() error { return x.shutdownCluster(ctx, actorRefs) }).
+			AddRunner(func() error { return preShutdownErr }).
+			AddRunner(func() error { return x.shutdownCluster(ctx, actorRefs, peerState) }).
 			AddRunner(func() error { return x.shutdownRemoting(ctx) }).
 			Run()
-	}
-
-	if err := x.preShutdown(ctx); err != nil {
-		x.logger.Errorf("Failed to run pre-shutdown workflow: %v", err)
-		clusterErr := shutdownClusterAndRemoting()
-		// Combine all errors if present
-		return multierr.Combine(hooksErr, err, clusterErr)
 	}
 
 	// shutdown user-facing actors first so grains can be safely deactivated without in-flight usage
@@ -2969,13 +2972,15 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 	}
 
 	// Always attempt to shutdown cluster and remoting
-	if err := shutdownClusterAndRemoting(); err != nil {
-		x.logger.Errorf("Failed shutdown: %v", err)
-		return multierr.Combine(hooksErr, err)
+	// clusterErr includes preShutdownErr if it exists (via chain)
+	clusterErr := shutdownClusterAndRemoting()
+	if clusterErr != nil {
+		x.logger.Errorf("Failed shutdown: %v", clusterErr)
+		return multierr.Combine(hooksErr, clusterErr)
 	}
 
 	if hooksErr != nil {
-		x.logger.Errorf("Failed shutdown cleanly. Shutdown hooks Failure: %v", hooksErr)
+		x.logger.Errorf("Failed shutdown cleanly: %v", hooksErr)
 		return hooksErr
 	}
 
@@ -3621,19 +3626,19 @@ func (x *actorSystem) getSetDeadlettersCount(ctx context.Context) {
 	}
 }
 
-func (x *actorSystem) shutdownCluster(ctx context.Context, actors []ActorRef) error {
+func (x *actorSystem) shutdownCluster(ctx context.Context, actors []ActorRef, peerState *internalpb.PeerState) error {
 	if x.clusterEnabled.Load() {
 		if x.cluster != nil {
+			// Persist peer state to all cluster peers before leaving membership.
+			// This ensures state is available for relocation when NodeLeft event
+			// is processed. Errors are returned but we proceed with shutdown to
+			// ensure resources are freed (chain uses WithRunAll).
 			if err := chain.
-				New(chain.WithRunAll()).
-				AddRunner(func() error { return x.cleanupCluster(ctx, actors) }).
-				AddRunner(func() error { return x.cluster.Stop(ctx) }).
-				AddRunner(func() error {
-					if x.clusterStore != nil {
-						return x.clusterStore.Close()
-					}
-					return nil
-				}).
+				New(chain.WithRunAll(), chain.WithContext(ctx)).
+				AddContextRunnerIf(peerState != nil, func(cctx context.Context) error { return x.persistPeerStateToPeers(cctx, peerState) }).
+				AddContextRunner(func(cctx context.Context) error { return x.cleanupCluster(cctx, actors) }).
+				AddContextRunner(func(cctx context.Context) error { return x.cluster.Stop(cctx) }).
+				AddContextRunnerIf(x.clusterStore != nil, func(cctx context.Context) error { return x.clusterStore.Close() }).
 				Run(); err != nil {
 				x.logger.Errorf("Failed to shutdown cleanly: %w", err)
 				return err
@@ -3937,9 +3942,53 @@ func (x *actorSystem) registerMetrics() error {
 	return nil
 }
 
-func (x *actorSystem) preShutdown(ctx context.Context) error {
+// preShutdown builds the peer state snapshot for cluster persistence.
+// This snapshot includes all actors and grains currently active on this node.
+// The actual persistence to remote peers happens later in shutdownCluster
+// to ensure proper ordering: persist state before leaving membership.
+func (x *actorSystem) preShutdown(ctx context.Context) (*internalpb.PeerState, error) {
 	if !x.clusterEnabled.Load() || x.cluster == nil {
-		x.logger.Infof("Node (%s) is not part of a cluster; skipping peer state persistence", x.PeersAddress())
+		x.logger.Infof("Node (%s) is not part of a cluster; skipping peer state build", x.PeersAddress())
+		return nil, nil
+	}
+
+	actors := x.Actors()
+	grains := x.grains.Values()
+
+	wireActors := make(map[string]*internalpb.Actor, len(actors))
+	for _, actor := range actors {
+		wireActor, err := actor.toWireActor()
+		if err != nil {
+			return nil, err
+		}
+		wireActors[actor.ID()] = wireActor
+	}
+
+	wireGrains := make(map[string]*internalpb.Grain, len(grains))
+	for _, grain := range grains {
+		wireGrain, err := grain.toWireGrain()
+		if err != nil {
+			return nil, err
+		}
+		wireGrains[grain.getIdentity().String()] = wireGrain
+	}
+
+	peerState := &internalpb.PeerState{
+		Host:         x.Host(),
+		PeersPort:    int32(x.clusterNode.PeersPort), // nolint
+		RemotingPort: int32(x.Port()),                // nolint
+		Actors:       wireActors,
+		Grains:       wireGrains,
+	}
+
+	return peerState, nil
+}
+
+// persistPeerStateToPeers sends the peer state to all cluster peers via RPC.
+// This is called during shutdown before leaving membership to ensure state
+// is available for relocation. Failures are logged but do not block shutdown.
+func (x *actorSystem) persistPeerStateToPeers(ctx context.Context, peerState *internalpb.PeerState) error {
+	if peerState == nil {
 		return nil
 	}
 
@@ -3954,61 +4003,30 @@ func (x *actorSystem) preShutdown(ctx context.Context) error {
 		return nil
 	}
 
-	actors := x.Actors()
-	grains := x.grains.Values()
-
-	wireActors := make(map[string]*internalpb.Actor, len(actors))
-	for _, actor := range actors {
-		wireActor, err := actor.toWireActor()
-		if err != nil {
-			return err
-		}
-		wireActors[actor.ID()] = wireActor
-	}
-
-	wireGrains := make(map[string]*internalpb.Grain, len(grains))
-	for _, grain := range grains {
-		wireGrain, err := grain.toWireGrain()
-		if err != nil {
-			return err
-		}
-		wireGrains[grain.getIdentity().String()] = wireGrain
-	}
-
 	peerAddr := x.PeersAddress()
-	peerState := &internalpb.PeerState{
-		Host:         x.Host(),
-		PeersPort:    int32(x.clusterNode.PeersPort), // nolint
-		RemotingPort: int32(x.Port()),                // nolint
-		Actors:       wireActors,
-		Grains:       wireGrains,
-	}
+	remoting := x.getRemoting()
 
-	action := func(ctx context.Context, peer *cluster.Peer, state *internalpb.PeerState, addr string) error {
-		remoteHost := peer.Host
-		remotingPort := peer.RemotingPort
-		remoting := x.getRemoting()
-		remoteClient := remoting.RemotingServiceClient(remoteHost, remotingPort)
-		request := connect.NewRequest(&internalpb.PersistPeerStateRequest{
-			PeerState: state,
-		})
-
-		_, err := remoteClient.PersistPeerState(ctx, request)
-		if err != nil {
-			x.logger.Errorf("Node (%s) failed to persist peer state to remote Peer (%s:%d): %v", addr, remoteHost, remotingPort, err)
-			return err
-		}
-
-		x.logger.Infof("Node (%s) successfully persisted peer state to remote Peer (%s:%d)", addr, remoteHost, remotingPort)
-		return nil
-	}
-
-	eg, ctx := errgroup.WithContext(ctx)
+	eg, egCtx := errgroup.WithContext(ctx)
 	eg.SetLimit(len(peers))
+
 	for _, peer := range peers {
 		peer := peer
 		eg.Go(func() error {
-			return action(ctx, peer, peerState, peerAddr)
+			remoteClient := remoting.RemotingServiceClient(peer.Host, peer.RemotingPort)
+			request := connect.NewRequest(&internalpb.PersistPeerStateRequest{
+				PeerState: peerState,
+			})
+
+			_, err := remoteClient.PersistPeerState(egCtx, request)
+			if err != nil {
+				x.logger.Errorf("Node (%s) failed to persist peer state to remote Peer (%s:%d): %v",
+					peerAddr, peer.Host, peer.RemotingPort, err)
+				return err
+			}
+
+			x.logger.Infof("Node (%s) successfully persisted peer state to remote Peer (%s:%d)",
+				peerAddr, peer.Host, peer.RemotingPort)
+			return nil
 		})
 	}
 
