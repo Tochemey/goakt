@@ -1176,7 +1176,7 @@ func TestRemoteAskGrain_ExtractsContextValues(t *testing.T) {
 
 	_, err := sys.RemoteAskGrain(context.Background(), req)
 	require.NoError(t, err)
-	require.Equal(t, headerVal, grain.seen)
+	require.Equal(t, headerVal, grain.Seen())
 }
 
 func TestRemoteAskGrain_ContextExtractionError(t *testing.T) {
@@ -1314,7 +1314,7 @@ func TestRemoteTellGrain_ExtractsContextValues(t *testing.T) {
 
 	_, err := sys.RemoteTellGrain(context.Background(), req)
 	require.NoError(t, err)
-	require.Equal(t, headerVal, grain.seen)
+	require.Equal(t, headerVal, grain.Seen())
 }
 
 func TestRemoteTellGrain_ContextExtractionError(t *testing.T) {

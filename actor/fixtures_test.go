@@ -1804,6 +1804,7 @@ func (x *headerPropagator) Extract(ctx context.Context, headers http.Header) (co
 
 type contextEchoGrain struct {
 	key  any
+	mu   sync.RWMutex
 	seen any
 }
 
@@ -1811,12 +1812,24 @@ func (*contextEchoGrain) OnActivate(context.Context, *GrainProps) error   { retu
 func (*contextEchoGrain) OnDeactivate(context.Context, *GrainProps) error { return nil }
 
 func (g *contextEchoGrain) OnReceive(ctx *GrainContext) {
-	g.seen = ctx.Context().Value(g.key)
+	g.setSeen(ctx.Context().Value(g.key))
 	if _, ok := ctx.Message().(*testpb.TestReply); ok {
-		ctx.Response(&testpb.Reply{Content: fmt.Sprint(g.seen)})
+		ctx.Response(&testpb.Reply{Content: fmt.Sprint(g.Seen())})
 		return
 	}
 	ctx.NoErr()
+}
+
+func (g *contextEchoGrain) setSeen(val any) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.seen = val
+}
+
+func (g *contextEchoGrain) Seen() any {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.seen
 }
 
 type contextEchoActor struct {
