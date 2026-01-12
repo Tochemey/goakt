@@ -195,6 +195,9 @@ var (
 
 	// ErrMailboxDisposed is returned when operations are attempted on a disposed mailbox.
 	ErrMailboxDisposed = errors.New("mailbox has been disposed")
+
+	// ErrSystemShuttingDown is returned when a message is sent to an actor while the actor system is shutting down.
+	ErrSystemShuttingDown = errors.New("actor system is shutting down")
 )
 
 // NewErrInvalidPassivationStrategy formats an error with ErrInvalidPassivationStrategy

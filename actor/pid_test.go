@@ -46,6 +46,7 @@ import (
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/breaker"
 	"github.com/tochemey/goakt/v3/errors"
+	"github.com/tochemey/goakt/v3/eventstream"
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
@@ -5433,6 +5434,215 @@ func TestPIDTryPassivationSkipsWhenStoppingFlagRaised(t *testing.T) {
 	pid.setState(stoppingState, true)
 
 	require.False(t, pid.tryPassivation("already stopping"))
+}
+
+func TestPIDDoReceiveDuringShutdown(t *testing.T) {
+	t.Run("With user message rejected during shutdown", func(t *testing.T) {
+		ctx := context.TODO()
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		sys, err := NewActorSystem("testSys",
+			WithRemote(remote.NewConfig(host, ports[0])),
+			WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, sys)
+
+		require.NoError(t, sys.Start(ctx))
+		defer func() { _ = sys.Stop(ctx) }()
+
+		pause.For(time.Second)
+
+		// Create an actor
+		pid, err := sys.Spawn(ctx, "test-actor", NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		pause.For(time.Second)
+
+		// Subscribe to deadletter events
+		consumer, err := sys.Subscribe()
+		require.NoError(t, err)
+		require.NotNil(t, consumer)
+		defer func() { _ = sys.Unsubscribe(consumer) }()
+
+		// Create a mock actorSystem with shuttingDown set to true
+		// Copy all necessary fields from the real system to avoid nil pointer issues
+		mockSys := &actorSystem{}
+		mockSys.shuttingDown.Store(true)
+		mockSys.logger = log.DiscardLogger
+		if actualSys, ok := sys.(interface{ getDeadletter() *PID }); ok {
+			mockSys.deadletter = actualSys.getDeadletter()
+		}
+		if actualSys, ok := sys.(interface{ tree() *tree }); ok {
+			mockSys.actors = actualSys.tree()
+		}
+		if actualSys, ok := sys.(interface{ NoSender() *PID }); ok {
+			mockSys.noSender = actualSys.NoSender()
+		}
+		// Copy eventsStream to allow deadletter publishing
+		if actualSys, ok := sys.(interface{ EventsStream() eventstream.Stream }); ok {
+			mockSys.eventsStream = actualSys.EventsStream()
+		}
+		// Set the mock system on the PID
+		pid.fieldsLocker.Lock()
+		originalSys := pid.actorSystem
+		pid.actorSystem = mockSys
+		// Ensure PID has eventsStream set (it's needed for handleReceivedError)
+		if pid.eventsStream == nil && mockSys.eventsStream != nil {
+			pid.eventsStream = mockSys.eventsStream
+		}
+		pid.fieldsLocker.Unlock()
+
+		// Create a user message (non-system message)
+		userMessage := new(testpb.TestSend)
+		receiveContext := &ReceiveContext{
+			ctx:     ctx,
+			message: userMessage,
+			sender:  sys.NoSender(),
+			self:    pid,
+		}
+
+		// Attempt to receive user message during shutdown
+		pid.doReceive(receiveContext)
+
+		// Restore original system immediately to avoid issues
+		pid.fieldsLocker.Lock()
+		pid.actorSystem = originalSys
+		pid.fieldsLocker.Unlock()
+
+		// Wait for deadletter to be sent
+		pause.For(500 * time.Millisecond)
+
+		// Verify message was sent to deadletter
+		var deadletterItems []*goaktpb.Deadletter
+		for message := range consumer.Iterator() {
+			payload := message.Payload()
+			if deadletter, ok := payload.(*goaktpb.Deadletter); ok {
+				deadletterItems = append(deadletterItems, deadletter)
+				// Check that the deadletter contains our user message
+				var testSend testpb.TestSend
+				if err := deadletter.GetMessage().UnmarshalTo(&testSend); err == nil {
+					require.Equal(t, errors.ErrSystemShuttingDown.Error(), deadletter.GetReason())
+					break
+				}
+			}
+		}
+
+		require.NotEmpty(t, deadletterItems, "Expected deadletter to receive rejected message")
+	})
+
+	t.Run("With system message allowed during shutdown", func(t *testing.T) {
+		ctx := context.TODO()
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		sys, err := NewActorSystem("testSys",
+			WithRemote(remote.NewConfig(host, ports[0])),
+			WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, sys)
+
+		require.NoError(t, sys.Start(ctx))
+		defer func() { _ = sys.Stop(ctx) }()
+
+		pause.For(time.Second)
+
+		// Create an actor
+		pid, err := sys.Spawn(ctx, "test-actor", NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		pause.For(time.Second)
+
+		// Create a mock actorSystem with shuttingDown set to true
+		mockSys := &actorSystem{}
+		mockSys.shuttingDown.Store(true)
+		mockSys.logger = log.DiscardLogger
+
+		// Set the mock system on the PID
+		pid.fieldsLocker.Lock()
+		originalSys := pid.actorSystem
+		pid.actorSystem = mockSys
+		pid.fieldsLocker.Unlock()
+
+		// Test various system messages that should be allowed
+		systemMessages := []proto.Message{
+			new(goaktpb.PoisonPill),
+			new(internalpb.HealthCheckRequest),
+			new(internalpb.Panicking),
+			new(goaktpb.PausePassivation),
+			new(goaktpb.ResumePassivation),
+			new(goaktpb.PostStart),
+			new(goaktpb.Terminated),
+			new(goaktpb.PanicSignal),
+		}
+
+		for _, sysMsg := range systemMessages {
+			receiveContext := &ReceiveContext{
+				ctx:     ctx,
+				message: sysMsg,
+				sender:  sys.NoSender(),
+				self:    pid,
+			}
+
+			// System messages should be allowed through (no panic, no error)
+			require.NotPanics(t, func() {
+				pid.doReceive(receiveContext)
+			}, "System message %T should be allowed during shutdown", sysMsg)
+		}
+
+		// Restore original system
+		pid.fieldsLocker.Lock()
+		pid.actorSystem = originalSys
+		pid.fieldsLocker.Unlock()
+
+		// Clean up
+		pause.For(100 * time.Millisecond)
+	})
+
+	t.Run("With no shutdown check when system not shutting down", func(t *testing.T) {
+		ctx := context.TODO()
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		sys, err := NewActorSystem("testSys",
+			WithRemote(remote.NewConfig(host, ports[0])),
+			WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, sys)
+
+		require.NoError(t, sys.Start(ctx))
+		defer func() { _ = sys.Stop(ctx) }()
+
+		pause.For(time.Second)
+
+		// Create an actor
+		pid, err := sys.Spawn(ctx, "test-actor", NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		pause.For(time.Second)
+
+		// Create a user message
+		userMessage := new(testpb.TestSend)
+		receiveContext := &ReceiveContext{
+			ctx:     ctx,
+			message: userMessage,
+			sender:  sys.NoSender(),
+			self:    pid,
+		}
+
+		// User message should be accepted normally
+		initialCount := pid.ProcessedCount()
+		pid.doReceive(receiveContext)
+
+		// Wait for message to be processed
+		pause.For(500 * time.Millisecond)
+
+		// Verify message was processed (count increased)
+		require.Greater(t, pid.ProcessedCount(), initialCount, "User message should be processed when system is not shutting down")
+	})
 }
 
 func TestReinstateNamed(t *testing.T) {

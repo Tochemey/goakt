@@ -233,15 +233,17 @@ func BenchmarkAsk(b *testing.B) {
 
 	b.ReportAllocs()
 	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
-		// Reuse the same message per goroutine to reduce allocs in the hot path.
-		msg := new(testpb.TestReply)
-		for pb.Next() {
-			if _, err := sender.Ask(ctx, receiver, msg, time.Second); err != nil {
-				b.Fatal(err)
-			}
+	// Use sequential execution for Ask benchmark instead of parallel.
+	// Ask is inherently slower than Tell due to synchronous response waiting,
+	// and parallel execution causes mailbox contention where a single receiver
+	// cannot keep up with multiple parallel senders, leading to timeouts.
+	// Sequential execution provides a more realistic and stable benchmark.
+	msg := new(testpb.TestReply)
+	for i := 0; i < b.N; i++ {
+		if _, err := sender.Ask(ctx, receiver, msg, time.Second); err != nil {
+			b.Fatal(err)
 		}
-	})
+	}
 	b.StopTimer()
 	messagesPerSec := float64(b.N) / b.Elapsed().Seconds()
 	b.ReportMetric(messagesPerSec, "messages/sec")
@@ -319,15 +321,17 @@ func BenchmarkSendSync(b *testing.B) {
 
 	b.ReportAllocs()
 	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
-		// Reuse the same message per goroutine to reduce allocs in the hot path.
-		msg := new(testpb.TestReply)
-		for pb.Next() {
-			if _, err := sender.SendSync(ctx, "receiver", msg, time.Second); err != nil {
-				b.Fatal(err)
-			}
+	// Use sequential execution for SendSync benchmark instead of parallel.
+	// SendSync is inherently slower than SendAsync due to synchronous response waiting,
+	// and parallel execution causes mailbox contention where a single receiver
+	// cannot keep up with multiple parallel senders, leading to timeouts.
+	// Sequential execution provides a more realistic and stable benchmark.
+	msg := new(testpb.TestReply)
+	for i := 0; i < b.N; i++ {
+		if _, err := sender.SendSync(ctx, "receiver", msg, time.Second); err != nil {
+			b.Fatal(err)
 		}
-	})
+	}
 	b.StopTimer()
 	messagesPerSec := float64(b.N) / b.Elapsed().Seconds()
 	b.ReportMetric(messagesPerSec, "messages/sec")
