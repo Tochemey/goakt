@@ -1444,7 +1444,6 @@ func TestGrainsWithDependenciesRelocation(t *testing.T) {
 }
 
 func TestRelocationWithConsulProvider(t *testing.T) {
-	t.Skip("Skipping test for flaky behavior in CI/CD pipelines")
 	// create a context
 	ctx := t.Context()
 	agent := startConsulAgent(t)
@@ -1523,7 +1522,6 @@ func TestRelocationWithConsulProvider(t *testing.T) {
 }
 
 func TestRelocationWithEtcdProvider(t *testing.T) {
-	t.Skip("Skipping test for flaky behavior in CI/CD pipelines")
 	// create a context
 	ctx := t.Context()
 	cluster := startEtcdCluster(t)
