@@ -1023,6 +1023,9 @@ func TestRelocationWithExtension(t *testing.T) {
 	// During relocation, the entity may temporarily not exist (removed but not yet re-added),
 	// so we accept either: entity doesn't exist (relocation in progress) OR entity exists with new address (relocation complete).
 	// We reject: entity exists with old address (relocation hasn't started or failed).
+	//
+	// On CI, cluster state updates may take longer, so we use a longer check interval (1s instead of 500ms)
+	// to reduce contention and allow cluster state to properly propagate.
 	require.Eventually(t, func() bool {
 		exists, err := node1.ActorExists(ctx, entityID)
 		if err != nil {
@@ -1034,15 +1037,21 @@ func TestRelocationWithExtension(t *testing.T) {
 			return false
 		}
 		// Entity exists - verify it's on a live node (not node2)
-		relocatedAddr, _, err := node1.ActorOf(ctx, entityID)
+		relocatedAddr, pid, err := node1.ActorOf(ctx, entityID)
 		if err != nil || relocatedAddr == nil {
 			return false
 		}
+		
+		// If the entity is local (pid != nil), it's definitely been relocated to this node
+		if pid != nil {
+			return true
+		}
+		
 		actorAddr := relocatedAddr.HostPort()
 		// Critical check: entity must have a NEW address (not node2's address)
 		// If it still has node2's address, relocation hasn't happened yet
 		return actorAddr != node2Address
-	}, 2*time.Minute, 500*time.Millisecond, "Entity %s should be relocated from node2 (was %s) to a live node", entityID, node2Address)
+	}, 2*time.Minute, time.Second, "Entity %s should be relocated from node2 (was %s) to a live node", entityID, node2Address)
 
 	sender, err := node1.LocalActor("node1-entity-1")
 	require.NoError(t, err)
