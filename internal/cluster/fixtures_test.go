@@ -32,6 +32,7 @@ import (
 	"github.com/tochemey/olric"
 	"github.com/tochemey/olric/pkg/storage"
 	"github.com/tochemey/olric/stats"
+	"go.uber.org/atomic"
 
 	"github.com/tochemey/goakt/v3/discovery"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
@@ -295,6 +296,8 @@ func newEventTestCluster(host string, port int) *cluster {
 		rebalanceStartSeen:      make(map[uint64]struct{}),
 		rebalanceCompleteSeen:   make(map[uint64]struct{}),
 		logger:                  log.DiscardLogger,
+		shutdownTimeout:         5 * time.Second,
+		running:                 atomic.NewBool(true),
 	}
 }
 

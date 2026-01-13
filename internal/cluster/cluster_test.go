@@ -2839,9 +2839,12 @@ func TestConsumeDispatchesClusterEvents(t *testing.T) {
 	cl := newEventTestCluster("127.0.0.1", 4000)
 	msgs := make(chan *redis.Message, 1)
 	cl.messages = msgs
+	cl.consumeCtx, cl.consumeCancel = context.WithCancel(context.Background())
 
 	done := make(chan struct{})
+	cl.consumeWg.Add(1)
 	go func() {
+		defer cl.consumeWg.Done()
 		cl.consume()
 		close(done)
 	}()
@@ -2887,6 +2890,256 @@ func TestConsumeDispatchesClusterEvents(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatalf("consume did not exit")
 	}
+}
+
+// nolint
+func TestSendEventLockedNonBlocking(t *testing.T) {
+	cl := newEventTestCluster("127.0.0.1", 4000)
+	// Create a small channel to force blocking scenario
+	cl.events = make(chan *Event, 1)
+
+	// Fill the channel
+	cl.events <- &Event{Type: NodeJoined}
+
+	// This should not block even though channel is full
+	start := time.Now()
+	cl.sendEventLocked(&Event{Type: NodeLeft})
+	duration := time.Since(start)
+
+	require.Less(t, duration, 50*time.Millisecond, "sendEventLocked should not block")
+	
+	// Verify event was dropped (channel still has first event)
+	select {
+	case evt := <-cl.events:
+		require.Equal(t, NodeJoined, evt.Type)
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("expected first event in channel")
+	}
+}
+
+// nolint
+func TestSendEventLockedDropsWhenChannelFull(t *testing.T) {
+	cl := newEventTestCluster("127.0.0.1", 4000)
+	cl.events = make(chan *Event, 1)
+	// Use discard logger to avoid test output noise
+	cl.logger = log.DiscardLogger
+
+	// Fill the channel
+	cl.events <- &Event{Type: NodeJoined}
+
+	// Send multiple events - all should be dropped without blocking
+	for i := 0; i < 10; i++ {
+		start := time.Now()
+		cl.sendEventLocked(&Event{Type: NodeLeft})
+		duration := time.Since(start)
+		require.Less(t, duration, 10*time.Millisecond, "sendEventLocked should not block")
+	}
+
+	// Only first event should be in channel
+	select {
+	case evt := <-cl.events:
+		require.Equal(t, NodeJoined, evt.Type)
+		// Channel should be empty now
+		select {
+		case <-cl.events:
+			t.Fatal("expected channel to be empty")
+		default:
+			// Good, channel is empty
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("expected first event in channel")
+	}
+}
+
+// nolint
+func TestStopWaitsForConsume(t *testing.T) {
+	cl := newEventTestCluster("127.0.0.1", 4000)
+	cl.consumeCtx, cl.consumeCancel = context.WithCancel(context.Background())
+	msgs := make(chan *redis.Message, 10)
+	cl.messages = msgs
+	cl.shutdownTimeout = 5 * time.Second
+	// Create a mock server to avoid nil pointer in Stop()
+	cl.server = &olric.Olric{}
+
+	cl.consumeWg.Add(1)
+	go func() {
+		defer cl.consumeWg.Done()
+		cl.consume()
+	}()
+
+	// Send a message to ensure consume is processing
+	msgs <- &redis.Message{
+		Channel: events.ClusterEventsChannel,
+		Payload: `{"kind":"node-join-event","node_join":"127.0.0.1:9000","timestamp":1000000}`,
+	}
+
+	// Give it time to process
+	time.Sleep(50 * time.Millisecond)
+
+	// Test the shutdown synchronization - cancel context and wait for consume
+	cl.consumeCancel()
+	done := make(chan struct{})
+	go func() {
+		cl.consumeWg.Wait()
+		close(done)
+	}()
+
+	// Should wait for consume to finish (it should exit quickly after cancel)
+	start := time.Now()
+	select {
+	case <-done:
+		duration := time.Since(start)
+		require.Less(t, duration, 1*time.Second, "Should complete within reasonable time")
+		// Consume should exit quickly after context cancellation
+		require.Greater(t, duration, time.Microsecond, "Should have waited at least briefly")
+	case <-time.After(2 * time.Second):
+		t.Fatal("consume did not finish")
+	}
+}
+
+// nolint
+func TestStopNoPanicOnClosedChannel(t *testing.T) {
+	cl := newEventTestCluster("127.0.0.1", 4000)
+	cl.consumeCtx, cl.consumeCancel = context.WithCancel(context.Background())
+	msgs := make(chan *redis.Message)
+	cl.messages = msgs
+	cl.shutdownTimeout = 5 * time.Second
+	close(msgs) // Close immediately
+
+	cl.consumeWg.Add(1)
+	go func() {
+		defer cl.consumeWg.Done()
+		cl.consume()
+	}()
+
+	// Wait for consume to finish
+	time.Sleep(100 * time.Millisecond)
+
+	// Test that closing events channel after consume finishes doesn't panic
+	cl.consumeCancel()
+	cl.consumeWg.Wait()
+
+	// Now safe to close events channel
+	require.NotPanics(t, func() {
+		cl.eventsLock.Lock()
+		if cl.events != nil {
+			close(cl.events)
+			cl.events = nil
+		}
+		cl.eventsLock.Unlock()
+	})
+}
+
+// nolint
+func TestConsumeRespectsContextCancellation(t *testing.T) {
+	cl := newEventTestCluster("127.0.0.1", 4000)
+	cl.consumeCtx, cl.consumeCancel = context.WithCancel(context.Background())
+	msgs := make(chan *redis.Message, 10)
+	cl.messages = msgs
+
+	cl.consumeWg.Add(1)
+	done := make(chan struct{})
+	go func() {
+		defer cl.consumeWg.Done()
+		cl.consume()
+		close(done)
+	}()
+
+	// Cancel context
+	cl.consumeCancel()
+
+	// Consume should exit
+	select {
+	case <-done:
+		// Good, consume exited
+	case <-time.After(time.Second):
+		t.Fatal("consume did not exit on context cancellation")
+	}
+}
+
+// nolint
+func TestConsumeHandlesChannelClose(t *testing.T) {
+	cl := newEventTestCluster("127.0.0.1", 4000)
+	cl.consumeCtx, cl.consumeCancel = context.WithCancel(context.Background())
+	msgs := make(chan *redis.Message, 10)
+	cl.messages = msgs
+
+	cl.consumeWg.Add(1)
+	done := make(chan struct{})
+	go func() {
+		defer cl.consumeWg.Done()
+		cl.consume()
+		close(done)
+	}()
+
+	// Send a message first
+	msgs <- &redis.Message{
+		Channel: events.ClusterEventsChannel,
+		Payload: `{"kind":"node-join-event","node_join":"127.0.0.1:9000","timestamp":1000000}`,
+	}
+
+	// Close channel
+	close(msgs)
+
+	// Consume should exit
+	select {
+	case <-done:
+		// Good, consume exited
+	case <-time.After(time.Second):
+		t.Fatal("consume did not exit when channel closed")
+	}
+}
+
+// nolint
+func TestStopTimeoutHandling(t *testing.T) {
+	cl := newEventTestCluster("127.0.0.1", 4000)
+	cl.consumeCtx, cl.consumeCancel = context.WithCancel(context.Background())
+	msgs := make(chan *redis.Message)
+	cl.messages = msgs
+	shutdownTimeout := 100 * time.Millisecond // Short timeout
+
+	cl.consumeWg.Add(1)
+	go func() {
+		defer cl.consumeWg.Done()
+		// Simulate slow processing - block on reading from channel
+		select {
+		case <-msgs:
+		case <-time.After(500 * time.Millisecond):
+		}
+		cl.consume()
+	}()
+
+	// Test timeout behavior
+	ctx, cancelFn := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancelFn()
+
+	cl.consumeCancel()
+	done := make(chan struct{})
+	go func() {
+		cl.consumeWg.Wait()
+		close(done)
+	}()
+
+	start := time.Now()
+	select {
+	case <-done:
+		t.Fatal("consume finished too quickly")
+	case <-ctx.Done():
+		duration := time.Since(start)
+		require.GreaterOrEqual(t, duration, 100*time.Millisecond)
+		require.Less(t, duration, 200*time.Millisecond) // Should timeout quickly
+	}
+}
+
+// nolint
+func TestSendEventLockedHandlesNilChannel(t *testing.T) {
+	cl := newEventTestCluster("127.0.0.1", 4000)
+	cl.events = nil
+
+	// Should not panic
+	require.NotPanics(t, func() {
+		cl.sendEventLocked(&Event{Type: NodeJoined})
+	})
 }
 
 // nolint
