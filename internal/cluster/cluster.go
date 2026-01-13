@@ -172,6 +172,10 @@ type cluster struct {
 	subscriber *redis.PubSub
 	messages   <-chan *redis.Message
 
+	consumeCtx    context.Context
+	consumeCancel context.CancelFunc
+	consumeWg     sync.WaitGroup
+
 	nodeJoinedEventsFilter   goset.Set[string]
 	nodeLeftEventsFilter     goset.Set[string]
 	nodeJoinTimestamps       map[string]int64
@@ -278,7 +282,10 @@ func (x *cluster) Start(ctx context.Context) error {
 	}
 
 	x.running.Store(true)
-	go x.consume()
+	x.consumeCtx, x.consumeCancel = context.WithCancel(ctx)
+	x.consumeWg.Go(func() {
+		x.consume()
+	})
 	return nil
 }
 
@@ -294,15 +301,37 @@ func (x *cluster) Stop(ctx context.Context) error {
 
 	defer x.running.Store(false)
 
+	// Cancel consume context first to signal consume() to stop
+	if x.consumeCancel != nil {
+		x.consumeCancel()
+	}
+
+	// Wait for consume to finish with timeout
+	done := make(chan struct{})
+	go func() {
+		x.consumeWg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		x.logger.Debugf("consume goroutine stopped")
+	case <-ctx.Done():
+		x.logger.Warnf("timeout waiting for consume to finish")
+	}
+
+	// Now safe to close events channel
+	x.eventsLock.Lock()
+	if x.events != nil {
+		close(x.events)
+		x.events = nil
+	}
+	x.eventsLock.Unlock()
+
 	if err := x.server.Shutdown(ctx); err != nil {
 		x.logger.Errorf("Failed to stop cluster engine: %v", err)
 		return err
 	}
-
-	x.eventsLock.Lock()
-	close(x.events)
-	x.events = nil
-	x.eventsLock.Unlock()
 
 	return nil
 }
@@ -1027,14 +1056,24 @@ func (x *cluster) createSubscription(ctx context.Context) error {
 
 // consume listens for cluster membership and peer-state events and delegates handling.
 func (x *cluster) consume() {
-	for message := range x.messages {
-		switch message.Channel {
-		case events.ClusterEventsChannel:
-			if err := x.handleClusterEvent(message.Payload); err != nil {
-				x.logger.Errorf("cluster event handling error: %v", err)
+	for {
+		select {
+		case message, ok := <-x.messages:
+			if !ok {
+				x.logger.Debugf("messages channel closed, exiting consume")
+				return
 			}
-		default:
-			// ignore
+			switch message.Channel {
+			case events.ClusterEventsChannel:
+				if err := x.handleClusterEvent(message.Payload); err != nil {
+					x.logger.Errorf("cluster event handling error: %v", err)
+				}
+			default:
+				// ignore
+			}
+		case <-x.consumeCtx.Done():
+			x.logger.Debugf("consume context cancelled, exiting")
+			return
 		}
 	}
 }
@@ -1253,12 +1292,18 @@ func (x *cluster) emitNodeJoinedLocked(node string, timestamp int64) {
 	x.sendEventLocked(&Event{Payload: payload, Type: NodeJoined})
 }
 
-// sendEventLocked pushes an event if the channel is active.
+// sendEventLocked pushes an event if the channel is active, using non-blocking send.
 func (x *cluster) sendEventLocked(e *Event) {
 	if x.events == nil {
 		return
 	}
-	x.events <- e
+	select {
+	case x.events <- e:
+		// Successfully sent
+	default:
+		// Channel full - log warning but don't block
+		x.logger.Warnf("cluster event channel full, dropping event type=%s", e.Type)
+	}
 }
 
 // putRecord writes a namespaced record to the unified map applying timeouts.
