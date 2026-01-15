@@ -45,6 +45,7 @@ import (
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/discovery"
@@ -55,6 +56,7 @@ import (
 	"github.com/tochemey/goakt/v3/log"
 	mocksdiscovery "github.com/tochemey/goakt/v3/mocks/discovery"
 	gtls "github.com/tochemey/goakt/v3/tls"
+	"sync"
 )
 
 func TestNotRunningReturnsErrEngineNotRunning(t *testing.T) {
@@ -136,6 +138,14 @@ func TestNotRunningReturnsErrEngineNotRunning(t *testing.T) {
 	next, err = cluster.NextRoundRobinValue(ctx, GrainsRoundRobinKey)
 	require.ErrorIs(t, err, ErrEngineNotRunning)
 	require.Equal(t, -1, next)
+
+	actors, err = cluster.GetActorsByOwner(ctx, "127.0.0.1:8080")
+	require.ErrorIs(t, err, ErrEngineNotRunning)
+	require.Nil(t, actors)
+
+	grains, err = cluster.GetGrainsByOwner(ctx, "127.0.0.1:8080")
+	require.ErrorIs(t, err, ErrEngineNotRunning)
+	require.Nil(t, grains)
 
 	require.NoError(t, cluster.Stop(ctx))
 
@@ -2301,6 +2311,313 @@ func TestGrainsPropagatesByteError(t *testing.T) {
 	require.ErrorIs(t, err, olric.ErrNilResponse)
 }
 
+func TestGetActorsByOwnerReturnsErrorWhenNotRunning(t *testing.T) {
+	cl := &cluster{
+		running: atomic.NewBool(false),
+		logger:  log.DiscardLogger,
+	}
+
+	actors, err := cl.GetActorsByOwner(context.Background(), "127.0.0.1:8080")
+	require.Nil(t, actors)
+	require.ErrorIs(t, err, ErrEngineNotRunning)
+}
+
+func TestGetActorsByOwnerReturnsScanError(t *testing.T) {
+	expectedErr := errors.New("scan failure")
+	cl := &cluster{
+		running:     atomic.NewBool(true),
+		logger:      log.DiscardLogger,
+		readTimeout: time.Second,
+		dmap: &MockDMap{
+			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
+				return nil, expectedErr
+			},
+		},
+	}
+
+	actors, err := cl.GetActorsByOwner(context.Background(), "127.0.0.1:8080")
+	require.Nil(t, actors)
+	require.ErrorIs(t, err, expectedErr)
+}
+
+func TestGetActorsByOwnerFiltersByOwner(t *testing.T) {
+	ctx := context.Background()
+	ownerNode := "127.0.0.1:8080"
+	otherNode := "127.0.0.1:8081"
+
+	actor1 := &internalpb.Actor{
+		Address:   "actor1",
+		OwnerNode: ownerNode,
+	}
+	actor2 := &internalpb.Actor{
+		Address:   "actor2",
+		OwnerNode: otherNode,
+	}
+	actor3 := &internalpb.Actor{
+		Address:   "actor3",
+		OwnerNode: ownerNode,
+	}
+
+	actor1Bytes, _ := proto.Marshal(actor1)
+	actor2Bytes, _ := proto.Marshal(actor2)
+	actor3Bytes, _ := proto.Marshal(actor3)
+
+	cl := &cluster{
+		running:     atomic.NewBool(true),
+		logger:      log.DiscardLogger,
+		readTimeout: time.Second,
+		dmap: &MockDMap{
+			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
+				return &iteratorStub{
+					keys: []string{
+						composeKey(namespaceActors, "actor1"),
+						composeKey(namespaceActors, "actor2"),
+						composeKey(namespaceActors, "actor3"),
+					},
+				}, nil
+			},
+			getFn: func(ctx context.Context, key string) (*olric.GetResponse, error) {
+				var data []byte
+				switch key {
+				case composeKey(namespaceActors, "actor1"):
+					data = actor1Bytes
+				case composeKey(namespaceActors, "actor2"):
+					data = actor2Bytes
+				case composeKey(namespaceActors, "actor3"):
+					data = actor3Bytes
+				default:
+					return nil, olric.ErrKeyNotFound
+				}
+				return newGetResponseWithValue(data), nil
+			},
+		},
+	}
+
+	actors, err := cl.GetActorsByOwner(ctx, ownerNode)
+	require.NoError(t, err)
+	require.Len(t, actors, 2)
+	require.Equal(t, "actor1", actors[0].GetAddress())
+	require.Equal(t, "actor3", actors[1].GetAddress())
+}
+
+func TestGetActorsByOwnerSkipsInvalidEntries(t *testing.T) {
+	ctx := context.Background()
+	ownerNode := "127.0.0.1:8080"
+
+	actor1 := &internalpb.Actor{
+		Address:   "actor1",
+		OwnerNode: ownerNode,
+	}
+	actor1Bytes, _ := proto.Marshal(actor1)
+
+	cl := &cluster{
+		running:     atomic.NewBool(true),
+		logger:      log.DiscardLogger,
+		readTimeout: time.Second,
+		dmap: &MockDMap{
+			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
+				return &iteratorStub{
+					keys: []string{
+						composeKey(namespaceActors, "actor1"),
+						composeKey(namespaceActors, "actor2"),
+					},
+				}, nil
+			},
+			getFn: func(ctx context.Context, key string) (*olric.GetResponse, error) {
+				if key == composeKey(namespaceActors, "actor1") {
+					return newGetResponseWithValue(actor1Bytes), nil
+				}
+				// Return invalid data for actor2
+				return newGetResponseWithValue([]byte("invalid")), nil
+			},
+		},
+	}
+
+	actors, err := cl.GetActorsByOwner(ctx, ownerNode)
+	require.NoError(t, err)
+	require.Len(t, actors, 1)
+	require.Equal(t, "actor1", actors[0].GetAddress())
+}
+
+func TestGetGrainsByOwnerReturnsErrorWhenNotRunning(t *testing.T) {
+	cl := &cluster{
+		running: atomic.NewBool(false),
+		logger:  log.DiscardLogger,
+	}
+
+	grains, err := cl.GetGrainsByOwner(context.Background(), "127.0.0.1:8080")
+	require.Nil(t, grains)
+	require.ErrorIs(t, err, ErrEngineNotRunning)
+}
+
+func TestGetGrainsByOwnerReturnsScanError(t *testing.T) {
+	expectedErr := errors.New("scan failure")
+	cl := &cluster{
+		running:     atomic.NewBool(true),
+		logger:      log.DiscardLogger,
+		readTimeout: time.Second,
+		dmap: &MockDMap{
+			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
+				return nil, expectedErr
+			},
+		},
+	}
+
+	grains, err := cl.GetGrainsByOwner(context.Background(), "127.0.0.1:8080")
+	require.Nil(t, grains)
+	require.ErrorIs(t, err, expectedErr)
+}
+
+func TestGetGrainsByOwnerFiltersByOwner(t *testing.T) {
+	ctx := context.Background()
+	ownerNode := "127.0.0.1:8080"
+	otherNode := "127.0.0.1:8081"
+
+	grain1 := &internalpb.Grain{
+		GrainId:   &internalpb.GrainId{Value: "grain1"},
+		OwnerNode: ownerNode,
+	}
+	grain2 := &internalpb.Grain{
+		GrainId:   &internalpb.GrainId{Value: "grain2"},
+		OwnerNode: otherNode,
+	}
+	grain3 := &internalpb.Grain{
+		GrainId:   &internalpb.GrainId{Value: "grain3"},
+		OwnerNode: ownerNode,
+	}
+
+	grain1Bytes, _ := proto.Marshal(grain1)
+	grain2Bytes, _ := proto.Marshal(grain2)
+	grain3Bytes, _ := proto.Marshal(grain3)
+
+	cl := &cluster{
+		running:     atomic.NewBool(true),
+		logger:      log.DiscardLogger,
+		readTimeout: time.Second,
+		dmap: &MockDMap{
+			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
+				return &iteratorStub{
+					keys: []string{
+						composeKey(namespaceGrains, "grain1"),
+						composeKey(namespaceGrains, "grain2"),
+						composeKey(namespaceGrains, "grain3"),
+						composeKey(namespaceGrains, GrainsRoundRobinKey),
+					},
+				}, nil
+			},
+			getFn: func(ctx context.Context, key string) (*olric.GetResponse, error) {
+				if key == composeKey(namespaceGrains, GrainsRoundRobinKey) {
+					return nil, olric.ErrKeyNotFound
+				}
+				var data []byte
+				switch key {
+				case composeKey(namespaceGrains, "grain1"):
+					data = grain1Bytes
+				case composeKey(namespaceGrains, "grain2"):
+					data = grain2Bytes
+				case composeKey(namespaceGrains, "grain3"):
+					data = grain3Bytes
+				default:
+					return nil, olric.ErrKeyNotFound
+				}
+				return newGetResponseWithValue(data), nil
+			},
+		},
+	}
+
+	grains, err := cl.GetGrainsByOwner(ctx, ownerNode)
+	require.NoError(t, err)
+	require.Len(t, grains, 2)
+	require.Equal(t, "grain1", grains[0].GetGrainId().GetValue())
+	require.Equal(t, "grain3", grains[1].GetGrainId().GetValue())
+}
+
+func TestPutActorSetsOwnershipMetadata(t *testing.T) {
+	ctx := context.Background()
+	host := "127.0.0.1"
+	peersPort := 8080
+	remotingPort := 9090
+
+	node := &discovery.Node{
+		Host:         host,
+		PeersPort:    peersPort,
+		RemotingPort: remotingPort,
+	}
+
+	actor := &internalpb.Actor{
+		Address:   "test-actor",
+		OwnerNode: node.PeersAddress(),
+		CreatedAt: timestamppb.Now(),
+		UpdatedAt: timestamppb.Now(),
+	}
+
+	cl := &cluster{
+		running:      atomic.NewBool(true),
+		logger:       log.DiscardLogger,
+		node:         node,
+		writeTimeout: time.Second,
+		dmap: &MockDMap{
+			putFn: func(ctx context.Context, key string, value any, options ...olric.PutOption) error {
+				// Decode to verify ownership was set
+				encoded, ok := value.([]byte)
+				require.True(t, ok)
+				decoded := new(internalpb.Actor)
+				require.NoError(t, proto.Unmarshal(encoded, decoded))
+				require.Equal(t, node.PeersAddress(), decoded.GetOwnerNode())
+				require.NotNil(t, decoded.GetCreatedAt())
+				require.NotNil(t, decoded.GetUpdatedAt())
+				return nil
+			},
+		},
+	}
+
+	err := cl.PutActor(ctx, actor)
+	require.NoError(t, err)
+}
+
+func TestPutGrainSetsOwnershipMetadata(t *testing.T) {
+	ctx := context.Background()
+	host := "127.0.0.1"
+	peersPort := 8080
+	remotingPort := 9090
+
+	node := &discovery.Node{
+		Host:         host,
+		PeersPort:    peersPort,
+		RemotingPort: remotingPort,
+	}
+
+	grain := &internalpb.Grain{
+		GrainId:   &internalpb.GrainId{Value: "test-grain"},
+		OwnerNode: node.PeersAddress(),
+		CreatedAt: timestamppb.Now(),
+		UpdatedAt: timestamppb.Now(),
+	}
+
+	cl := &cluster{
+		running:      atomic.NewBool(true),
+		logger:       log.DiscardLogger,
+		node:         node,
+		writeTimeout: time.Second,
+		dmap: &MockDMap{
+			putFn: func(ctx context.Context, key string, value any, options ...olric.PutOption) error {
+				// Decode to verify ownership was set
+				encoded, ok := value.([]byte)
+				require.True(t, ok)
+				decoded := new(internalpb.Grain)
+				require.NoError(t, proto.Unmarshal(encoded, decoded))
+				require.Equal(t, node.PeersAddress(), decoded.GetOwnerNode())
+				require.NotNil(t, decoded.GetCreatedAt())
+				require.NotNil(t, decoded.GetUpdatedAt())
+				return nil
+			},
+		},
+	}
+
+	err := cl.PutGrain(ctx, grain)
+	require.NoError(t, err)
+}
+
 // nolint
 func TestPutJobKeyPropagatesDMapError(t *testing.T) {
 	expectedErr := errors.New("put failure")
@@ -2907,7 +3224,7 @@ func TestSendEventLockedNonBlocking(t *testing.T) {
 	duration := time.Since(start)
 
 	require.Less(t, duration, 50*time.Millisecond, "sendEventLocked should not block")
-	
+
 	// Verify event was dropped (channel still has first event)
 	select {
 	case evt := <-cl.events:
@@ -3350,4 +3667,173 @@ func TestPutKindIfAbsent(t *testing.T) {
 		err := PutKindIfAbsent(context.Background(), cl, kind)
 		require.ErrorIs(t, err, expectedErr)
 	})
+}
+
+// TestGetGrainsByOwnerSkipsInvalidEntries tests that GetGrainsByOwner skips invalid grain entries
+// when decode fails, similar to GetActorsByOwner behavior.
+func TestGetGrainsByOwnerSkipsInvalidEntries(t *testing.T) {
+	ctx := context.Background()
+	ownerNode := "127.0.0.1:8080"
+
+	grain1 := &internalpb.Grain{
+		GrainId:  &internalpb.GrainId{Value: "grain1"},
+		OwnerNode: ownerNode,
+	}
+	grain1Bytes, _ := proto.Marshal(grain1)
+
+	cl := &cluster{
+		running:     atomic.NewBool(true),
+		logger:      log.DiscardLogger,
+		readTimeout: time.Second,
+		dmap: &MockDMap{
+			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
+				return &iteratorStub{
+					keys: []string{
+						composeKey(namespaceGrains, "grain1"),
+						composeKey(namespaceGrains, "grain2"),
+					},
+				}, nil
+			},
+			getFn: func(ctx context.Context, key string) (*olric.GetResponse, error) {
+				if key == composeKey(namespaceGrains, "grain1") {
+					return newGetResponseWithValue(grain1Bytes), nil
+				}
+				// Return invalid data for grain2
+				return newGetResponseWithValue([]byte("invalid")), nil
+			},
+		},
+	}
+
+	grains, err := cl.GetGrainsByOwner(ctx, ownerNode)
+	require.NoError(t, err)
+	require.Len(t, grains, 1)
+	require.Equal(t, "grain1", grains[0].GetGrainId().GetValue())
+}
+
+// TestRemoveKindReturnsNilWhenKeyNotFound tests that RemoveKind returns nil (not error)
+// when the key is not found, as per the implementation.
+func TestRemoveKindReturnsNilWhenKeyNotFound(t *testing.T) {
+	cl := &cluster{
+		running:      atomic.NewBool(true),
+		logger:       log.DiscardLogger,
+		writeTimeout: time.Second,
+		dmap: &MockDMap{
+			deleteFn: func(ctx context.Context, keys ...string) (int, error) {
+				return 0, olric.ErrKeyNotFound
+			},
+		},
+	}
+
+	err := cl.RemoveKind(context.Background(), "nonexistent-kind")
+	require.NoError(t, err)
+}
+
+// TestProcessRebalanceStartIgnoresUnknownReason tests that processRebalanceStart
+// ignores events with reasons other than node-left or node-join.
+func TestProcessRebalanceStartIgnoresUnknownReason(t *testing.T) {
+	cl := &cluster{
+		node:   &discovery.Node{Host: "127.0.0.1", PeersPort: 8080},
+		logger: log.DiscardLogger,
+	}
+	cl.eventsLock = sync.Mutex{}
+	cl.rebalanceStartSeen = make(map[uint64]struct{})
+
+	ev := events.RebalanceStartEvent{
+		Epoch:  1,
+		Reason: "unknown-reason",
+		Node:   "127.0.0.1:8081",
+	}
+
+	// Should return without error and without processing
+	cl.processRebalanceStart(ev)
+	require.Empty(t, cl.rebalanceStartSeen)
+}
+
+// TestProcessRebalanceStartIgnoresSelfJoin tests that processRebalanceStart
+// ignores node-join events when the node is the local node.
+func TestProcessRebalanceStartIgnoresSelfJoin(t *testing.T) {
+	selfAddr := "127.0.0.1:8080"
+	cl := &cluster{
+		node:   &discovery.Node{Host: "127.0.0.1", PeersPort: 8080},
+		logger: log.DiscardLogger,
+	}
+	cl.eventsLock = sync.Mutex{}
+	cl.rebalanceStartSeen = make(map[uint64]struct{})
+
+	ev := events.RebalanceStartEvent{
+		Epoch:  1,
+		Reason: rebalanceReasonNodeJoin,
+		Node:   selfAddr,
+	}
+
+	// Should return without error and without processing
+	cl.processRebalanceStart(ev)
+	require.Empty(t, cl.rebalanceStartSeen)
+}
+
+// TestProcessRebalanceStartHandlesAlreadySeenEpoch tests that processRebalanceStart
+// ignores epochs that have already been seen.
+func TestProcessRebalanceStartHandlesAlreadySeenEpoch(t *testing.T) {
+	cl := &cluster{
+		node:   &discovery.Node{Host: "127.0.0.1", PeersPort: 8080},
+		logger: log.DiscardLogger,
+	}
+	cl.eventsLock = sync.Mutex{}
+	cl.rebalanceStartSeen = map[uint64]struct{}{
+		1: {},
+	}
+	cl.rebalanceCompleteSeen = make(map[uint64]struct{})
+
+	ev := events.RebalanceStartEvent{
+		Epoch:  1,
+		Reason: rebalanceReasonNodeLeft,
+		Node:   "127.0.0.1:8081",
+	}
+
+	// Should return without error and without adding to seen again
+	initialSeenCount := len(cl.rebalanceStartSeen)
+	cl.processRebalanceStart(ev)
+	require.Equal(t, initialSeenCount, len(cl.rebalanceStartSeen))
+}
+
+// TestGetGrainsByOwnerSkipsRoundRobinKey tests that GetGrainsByOwner skips
+// the round-robin counter key when scanning.
+func TestGetGrainsByOwnerSkipsRoundRobinKey(t *testing.T) {
+	ctx := context.Background()
+	ownerNode := "127.0.0.1:8080"
+
+	grain1 := &internalpb.Grain{
+		GrainId:  &internalpb.GrainId{Value: "grain1"},
+		OwnerNode: ownerNode,
+	}
+	grain1Bytes, _ := proto.Marshal(grain1)
+
+	rrKey := composeKey(namespaceGrains, GrainsRoundRobinKey)
+
+	cl := &cluster{
+		running:     atomic.NewBool(true),
+		logger:      log.DiscardLogger,
+		readTimeout: time.Second,
+		dmap: &MockDMap{
+			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
+				return &iteratorStub{
+					keys: []string{
+						rrKey,
+						composeKey(namespaceGrains, "grain1"),
+					},
+				}, nil
+			},
+			getFn: func(ctx context.Context, key string) (*olric.GetResponse, error) {
+				if key == composeKey(namespaceGrains, "grain1") {
+					return newGetResponseWithValue(grain1Bytes), nil
+				}
+				return nil, olric.ErrKeyNotFound
+			},
+		},
+	}
+
+	grains, err := cl.GetGrainsByOwner(ctx, ownerNode)
+	require.NoError(t, err)
+	require.Len(t, grains, 1)
+	require.Equal(t, "grain1", grains[0].GetGrainId().GetValue())
 }

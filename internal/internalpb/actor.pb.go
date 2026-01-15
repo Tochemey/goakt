@@ -10,6 +10,7 @@ import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	durationpb "google.golang.org/protobuf/types/known/durationpb"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -281,7 +282,13 @@ type Actor struct {
 	// Specifies the supervisor configuration when explicitly set
 	Supervisor *SupervisorSpec `protobuf:"bytes,9,opt,name=supervisor,proto3" json:"supervisor,omitempty"`
 	// Specifies the reentrancy configuration when explicitly set
-	Reentrancy    *ReentrancyConfig `protobuf:"bytes,10,opt,name=reentrancy,proto3" json:"reentrancy,omitempty"`
+	Reentrancy *ReentrancyConfig `protobuf:"bytes,10,opt,name=reentrancy,proto3" json:"reentrancy,omitempty"`
+	// Specifies the node address (host:peersPort) that owns this actor
+	OwnerNode string `protobuf:"bytes,11,opt,name=owner_node,json=ownerNode,proto3" json:"owner_node,omitempty"`
+	// Specifies when the actor was created
+	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,12,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	// Specifies when the actor was last updated
+	UpdatedAt     *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -386,6 +393,27 @@ func (x *Actor) GetReentrancy() *ReentrancyConfig {
 	return nil
 }
 
+func (x *Actor) GetOwnerNode() string {
+	if x != nil {
+		return x.OwnerNode
+	}
+	return ""
+}
+
+func (x *Actor) GetCreatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return nil
+}
+
+func (x *Actor) GetUpdatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.UpdatedAt
+	}
+	return nil
+}
+
 type SingletonSpec struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Specifies the spawn timeout for the singleton actor
@@ -454,7 +482,7 @@ var File_internal_actor_proto protoreflect.FileDescriptor
 const file_internal_actor_proto_rawDesc = "" +
 	"\n" +
 	"\x14internal/actor.proto\x12\n" +
-	"internalpb\x1a\x1egoogle/protobuf/duration.proto\x1a\x19internal/dependency.proto\x1a\x1ainternal/passivation.proto\x1a\x19internal/reentrancy.proto\"w\n" +
+	"internalpb\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x19internal/dependency.proto\x1a\x1ainternal/passivation.proto\x1a\x19internal/reentrancy.proto\"w\n" +
 	"\x17SupervisorDirectiveRule\x12\x1d\n" +
 	"\n" +
 	"error_type\x18\x01 \x01(\tR\terrorType\x12=\n" +
@@ -468,7 +496,7 @@ const file_internal_actor_proto_rawDesc = "" +
 	"directives\x18\x04 \x03(\v2#.internalpb.SupervisorDirectiveRuleR\n" +
 	"directives\x12T\n" +
 	"\x13any_error_directive\x18\x05 \x01(\x0e2\x1f.internalpb.SupervisorDirectiveH\x00R\x11anyErrorDirective\x88\x01\x01B\x16\n" +
-	"\x14_any_error_directive\"\xdf\x03\n" +
+	"\x14_any_error_directive\"\xf4\x04\n" +
 	"\x05Actor\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x127\n" +
@@ -484,7 +512,13 @@ const file_internal_actor_proto_rawDesc = "" +
 	"\n" +
 	"reentrancy\x18\n" +
 	" \x01(\v2\x1c.internalpb.ReentrancyConfigR\n" +
-	"reentrancyB\a\n" +
+	"reentrancy\x12\x1d\n" +
+	"\n" +
+	"owner_node\x18\v \x01(\tR\townerNode\x129\n" +
+	"\n" +
+	"created_at\x18\f \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
+	"\n" +
+	"updated_at\x18\r \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAtB\a\n" +
 	"\x05_role\"\xb0\x01\n" +
 	"\rSingletonSpec\x12>\n" +
 	"\rspawn_timeout\x18\x01 \x01(\v2\x19.google.protobuf.DurationR\fspawnTimeout\x12>\n" +
@@ -530,6 +564,7 @@ var file_internal_actor_proto_goTypes = []any{
 	(*PassivationStrategy)(nil),     // 7: internalpb.PassivationStrategy
 	(*Dependency)(nil),              // 8: internalpb.Dependency
 	(*ReentrancyConfig)(nil),        // 9: internalpb.ReentrancyConfig
+	(*timestamppb.Timestamp)(nil),   // 10: google.protobuf.Timestamp
 }
 var file_internal_actor_proto_depIdxs = []int32{
 	1,  // 0: internalpb.SupervisorDirectiveRule.directive:type_name -> internalpb.SupervisorDirective
@@ -542,13 +577,15 @@ var file_internal_actor_proto_depIdxs = []int32{
 	8,  // 7: internalpb.Actor.dependencies:type_name -> internalpb.Dependency
 	3,  // 8: internalpb.Actor.supervisor:type_name -> internalpb.SupervisorSpec
 	9,  // 9: internalpb.Actor.reentrancy:type_name -> internalpb.ReentrancyConfig
-	6,  // 10: internalpb.SingletonSpec.spawn_timeout:type_name -> google.protobuf.Duration
-	6,  // 11: internalpb.SingletonSpec.wait_interval:type_name -> google.protobuf.Duration
-	12, // [12:12] is the sub-list for method output_type
-	12, // [12:12] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	10, // 10: internalpb.Actor.created_at:type_name -> google.protobuf.Timestamp
+	10, // 11: internalpb.Actor.updated_at:type_name -> google.protobuf.Timestamp
+	6,  // 12: internalpb.SingletonSpec.spawn_timeout:type_name -> google.protobuf.Duration
+	6,  // 13: internalpb.SingletonSpec.wait_interval:type_name -> google.protobuf.Duration
+	14, // [14:14] is the sub-list for method output_type
+	14, // [14:14] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_internal_actor_proto_init() }

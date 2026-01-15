@@ -101,7 +101,7 @@ func (r *relocator) Relocate(ctx *ReceiveContext) {
 		// only block when there are go routines running
 		if len(leaderShares) > 0 || len(peersShares) > 0 || len(peerState.GetGrains()) > 0 {
 			if err := eg.Wait(); err != nil {
-				logger.Errorf("cluster rebalancing failed: %v", err)
+				logger.Errorf("cluster rebalancing failed: %s", err.Error())
 				ctx.Err(err)
 				// TODO: let us add the supervisor to handle this error
 				return
@@ -333,10 +333,15 @@ func (r *relocator) recreateLocally(ctx context.Context, props *internalpb.Actor
 
 	actor, err := r.pid.ActorSystem().getReflection().instantiateActor(props.GetType())
 	if err != nil {
-		return err
+		return errors.NewInternalError(err)
 	}
 
 	if enforceSingleton && props.GetSingleton() != nil {
+		// first remove the singleton kind from the cluster
+		if err := r.pid.ActorSystem().getCluster().RemoveKind(ctx, props.GetType()); err != nil {
+			return errors.NewInternalError(err)
+		}
+
 		// define singleton options
 		singletonOpts := []ClusterSingletonOption{
 			WithSingletonSpawnTimeout(props.GetSingleton().GetSpawnTimeout().AsDuration()),

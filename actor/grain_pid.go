@@ -33,6 +33,7 @@ import (
 	"github.com/flowchartsman/retry"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/extension"
@@ -432,5 +433,8 @@ func (pid *grainPID) toWireGrain() (*internalpb.Grain, error) {
 		ActivationTimeout: durationpb.New(pid.config.initTimeout.Load()),
 		ActivationRetries: pid.config.initMaxRetries.Load(),
 		MailboxCapacity:   pointer.To(pid.mailbox.Capacity()),
+		OwnerNode:         pid.actorSystem.PeersAddress(),
+		CreatedAt:         timestamppb.Now(),
+		UpdatedAt:         timestamppb.Now(),
 	}, nil
 }

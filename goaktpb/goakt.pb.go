@@ -515,7 +515,13 @@ type NodeJoined struct {
 	// Specifies the node address
 	Address string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
 	// Specifies the timestamp
-	Timestamp     *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	Timestamp *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	// Specifies the node host
+	Host string `protobuf:"bytes,3,opt,name=host,proto3" json:"host,omitempty"`
+	// Specifies the remoting port
+	RemotingPort int32 `protobuf:"varint,4,opt,name=remoting_port,json=remotingPort,proto3" json:"remoting_port,omitempty"`
+	// Specifies the peers port
+	PeersPort     int32 `protobuf:"varint,5,opt,name=peers_port,json=peersPort,proto3" json:"peers_port,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -564,13 +570,40 @@ func (x *NodeJoined) GetTimestamp() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *NodeJoined) GetHost() string {
+	if x != nil {
+		return x.Host
+	}
+	return ""
+}
+
+func (x *NodeJoined) GetRemotingPort() int32 {
+	if x != nil {
+		return x.RemotingPort
+	}
+	return 0
+}
+
+func (x *NodeJoined) GetPeersPort() int32 {
+	if x != nil {
+		return x.PeersPort
+	}
+	return 0
+}
+
 // NodeLeft defines the node left event
 type NodeLeft struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Specifies the node address
 	Address string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
 	// Specifies the timestamp
-	Timestamp     *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	Timestamp *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	// Specifies the node host
+	Host string `protobuf:"bytes,3,opt,name=host,proto3" json:"host,omitempty"`
+	// Specifies the remoting port
+	RemotingPort int32 `protobuf:"varint,4,opt,name=remoting_port,json=remotingPort,proto3" json:"remoting_port,omitempty"`
+	// Specifies the peers port
+	PeersPort     int32 `protobuf:"varint,5,opt,name=peers_port,json=peersPort,proto3" json:"peers_port,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -617,6 +650,27 @@ func (x *NodeLeft) GetTimestamp() *timestamppb.Timestamp {
 		return x.Timestamp
 	}
 	return nil
+}
+
+func (x *NodeLeft) GetHost() string {
+	if x != nil {
+		return x.Host
+	}
+	return ""
+}
+
+func (x *NodeLeft) GetRemotingPort() int32 {
+	if x != nil {
+		return x.RemotingPort
+	}
+	return 0
+}
+
+func (x *NodeLeft) GetPeersPort() int32 {
+	if x != nil {
+		return x.PeersPort
+	}
+	return 0
 }
 
 // Terminated is a lifecycle notification message sent to all actors
@@ -1542,14 +1596,22 @@ const file_goakt_goakt_proto_rawDesc = "" +
 	"\x06reason\x18\x03 \x01(\tR\x06reason\"l\n" +
 	"\x0fActorReinstated\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\x12?\n" +
-	"\rreinstated_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\freinstatedAt\"`\n" +
+	"\rreinstated_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\freinstatedAt\"\xb8\x01\n" +
 	"\n" +
 	"NodeJoined\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\x128\n" +
-	"\ttimestamp\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\"^\n" +
+	"\ttimestamp\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x12\x12\n" +
+	"\x04host\x18\x03 \x01(\tR\x04host\x12#\n" +
+	"\rremoting_port\x18\x04 \x01(\x05R\fremotingPort\x12\x1d\n" +
+	"\n" +
+	"peers_port\x18\x05 \x01(\x05R\tpeersPort\"\xb6\x01\n" +
 	"\bNodeLeft\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\x128\n" +
-	"\ttimestamp\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\"g\n" +
+	"\ttimestamp\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x12\x12\n" +
+	"\x04host\x18\x03 \x01(\tR\x04host\x12#\n" +
+	"\rremoting_port\x18\x04 \x01(\x05R\fremotingPort\x12\x1d\n" +
+	"\n" +
+	"peers_port\x18\x05 \x01(\x05R\tpeersPort\"g\n" +
 	"\n" +
 	"Terminated\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\x12?\n" +

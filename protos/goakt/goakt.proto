@@ -88,6 +88,12 @@ message NodeJoined {
   string address = 1;
   // Specifies the timestamp
   google.protobuf.Timestamp timestamp = 2;
+  // Specifies the node host
+  string host = 3;
+  // Specifies the remoting port
+  int32 remoting_port = 4;
+  // Specifies the peers port
+  int32 peers_port = 5;
 }
 
 // NodeLeft defines the node left event
@@ -96,6 +102,12 @@ message NodeLeft {
   string address = 1;
   // Specifies the timestamp
   google.protobuf.Timestamp timestamp = 2;
+  // Specifies the node host
+  string host = 3;
+  // Specifies the remoting port
+  int32 remoting_port = 4;
+  // Specifies the peers port
+  int32 peers_port = 5;
 }
 
 // Terminated is a lifecycle notification message sent to all actors

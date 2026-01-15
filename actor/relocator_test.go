@@ -224,6 +224,20 @@ func TestRelocatorSpawnRemoteActorSetsReentrancyConfig(t *testing.T) {
 	require.NoError(t, err)
 
 	sys := system.(*actorSystem)
+	targetActor := &internalpb.Actor{
+		Address: address.New("relocated-actor", system.Name(), "127.0.0.1", 8080).String(),
+		Type:    "relocated-kind",
+		Reentrancy: &internalpb.ReentrancyConfig{
+			Mode:        internalpb.ReentrancyMode_REENTRANCY_MODE_STASH_NON_REENTRANT,
+			MaxInFlight: 5,
+		},
+	}
+	targetPeer := &cluster.Peer{
+		Host:         "127.0.0.1",
+		RemotingPort: 9000,
+		PeersPort:    0,
+	}
+
 	clusterMock := mockscluster.NewCluster(t)
 	clusterMock.EXPECT().ActorExists(mock.Anything, "relocated-actor").Return(false, nil).Once()
 	sys.cluster = clusterMock
@@ -244,19 +258,6 @@ func TestRelocatorSpawnRemoteActorSetsReentrancyConfig(t *testing.T) {
 			actorSystem: system,
 		},
 		logger: log.DiscardLogger,
-	}
-
-	targetActor := &internalpb.Actor{
-		Address: address.New("relocated-actor", system.Name(), "127.0.0.1", 8080).String(),
-		Type:    "relocated-kind",
-		Reentrancy: &internalpb.ReentrancyConfig{
-			Mode:        internalpb.ReentrancyMode_REENTRANCY_MODE_STASH_NON_REENTRANT,
-			MaxInFlight: 5,
-		},
-	}
-	targetPeer := &cluster.Peer{
-		Host:         "127.0.0.1",
-		RemotingPort: 9000,
 	}
 
 	err = actor.spawnRemoteActor(ctx, targetActor, targetPeer)
@@ -329,6 +330,7 @@ func TestRelocatorRecreateLocallyUsesSingletonSpec(t *testing.T) {
 	}
 
 	clusterMock.EXPECT().RemoveActor(mock.Anything, "singleton").Return(nil).Once()
+	clusterMock.EXPECT().RemoveKind(mock.Anything, props.GetType()).Return(nil).Once()
 
 	spy := &spawnSingletonSpy{actorSystem: system}
 	relocator := &relocator{pid: &PID{actorSystem: spy}}
@@ -347,7 +349,6 @@ func TestRelocatorRecreateLocallyUsesSingletonSpec(t *testing.T) {
 }
 
 func TestRelocation(t *testing.T) {
-	// create a context
 	ctx := context.TODO()
 	// start the NATS server
 	srv := startNatsServer(t)
@@ -369,8 +370,7 @@ func TestRelocation(t *testing.T) {
 
 	// let us create 4 actors on each node
 	for j := 1; j <= 4; j++ {
-		actorName := fmt.Sprintf("Actor1-%d", j)
-		pid, err := node1.Spawn(ctx, actorName, NewMockActor(), WithLongLived())
+		pid, err := node1.Spawn(ctx, fmt.Sprintf("Actor1%d", j), NewMockActor(), WithLongLived())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 	}
@@ -378,8 +378,7 @@ func TestRelocation(t *testing.T) {
 	pause.For(time.Second)
 
 	for j := 1; j <= 4; j++ {
-		actorName := fmt.Sprintf("Actor2-%d", j)
-		pid, err := node2.Spawn(ctx, actorName, NewMockActor(), WithLongLived())
+		pid, err := node2.Spawn(ctx, fmt.Sprintf("Actor2%d", j), NewMockActor(), WithLongLived())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 	}
@@ -396,8 +395,7 @@ func TestRelocation(t *testing.T) {
 	pause.For(time.Second)
 
 	for j := 1; j <= 4; j++ {
-		actorName := fmt.Sprintf("Actor3-%d", j)
-		pid, err := node3.Spawn(ctx, actorName, NewMockActor(), WithLongLived())
+		pid, err := node3.Spawn(ctx, fmt.Sprintf("Actor3%d", j), NewMockActor(), WithLongLived())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 	}
@@ -405,12 +403,11 @@ func TestRelocation(t *testing.T) {
 	pause.For(time.Second)
 
 	// Verify actors are on node2 before shutdown
-	actorName := "Actor2-1"
 	node2Address := net.JoinHostPort(node2.Host(), strconv.Itoa(node2.Port()))
-	addr, _, err := node1.ActorOf(ctx, actorName)
+	addr, _, err := node1.ActorOf(ctx, "Actor21")
 	require.NoError(t, err)
 	require.NotNil(t, addr)
-	require.Equal(t, node2Address, addr.HostPort(), "Actor %s should be on node2 before shutdown", actorName)
+	require.Equal(t, node2Address, addr.HostPort(), "Actor Actor21 should be on node2 before shutdown")
 
 	// take down node2
 	require.NoError(t, node2.Stop(ctx))
@@ -432,7 +429,7 @@ func TestRelocation(t *testing.T) {
 	// so we accept either: actor doesn't exist (relocation in progress) OR actor exists with new address (relocation complete).
 	// We reject: actor exists with old address (relocation hasn't started or failed).
 	require.Eventually(t, func() bool {
-		exists, err := node1.ActorExists(ctx, actorName)
+		exists, err := node1.ActorExists(ctx, "Actor21")
 		if err != nil {
 			return false
 		}
@@ -442,7 +439,7 @@ func TestRelocation(t *testing.T) {
 			return false
 		}
 		// Actor exists - verify it's on a live node (not node2)
-		relocatedAddr, _, err := node1.ActorOf(ctx, actorName)
+		relocatedAddr, _, err := node1.ActorOf(ctx, "Actor21")
 		if err != nil || relocatedAddr == nil {
 			return false
 		}
@@ -450,14 +447,14 @@ func TestRelocation(t *testing.T) {
 		// Critical check: actor must have a NEW address (not node2's address)
 		// If it still has node2's address, relocation hasn't happened yet
 		return actorAddr != node2Address
-	}, 2*time.Minute, 500*time.Millisecond, "Actor %s should be relocated from node2 (was %s) to a live node", actorName, node2Address)
+	}, 2*time.Minute, 500*time.Millisecond, "Actor Actor21 should be relocated from node2 (was %s) to a live node", node2Address)
 
-	sender, err := node1.LocalActor("Actor1-1")
+	sender, err := node1.LocalActor("Actor11")
 	require.NoError(t, err)
 	require.NotNil(t, sender)
 
 	// Actor should now exist, safe to send
-	err = sender.SendAsync(ctx, actorName, new(testpb.TestSend))
+	err = sender.SendAsync(ctx, "Actor21", new(testpb.TestSend))
 	require.NoError(t, err)
 
 	// Wait for reentrant actor to be relocated - verify it's on a live node
@@ -1041,12 +1038,12 @@ func TestRelocationWithExtension(t *testing.T) {
 		if err != nil || relocatedAddr == nil {
 			return false
 		}
-		
+
 		// If the entity is local (pid != nil), it's definitely been relocated to this node
 		if pid != nil {
 			return true
 		}
-		
+
 		actorAddr := relocatedAddr.HostPort()
 		// Critical check: entity must have a NEW address (not node2's address)
 		// If it still has node2's address, relocation hasn't happened yet
@@ -1188,7 +1185,7 @@ func TestRelocationWithDependency(t *testing.T) {
 func TestRelocationIssue781(t *testing.T) {
 	// reference: https://github.com/Tochemey/goakt/issues/781
 	// create a context
-	ctx := t.Context()
+	ctx := context.TODO()
 	// start the NATS server
 	srv := startNatsServer(t)
 
@@ -1269,7 +1266,7 @@ func TestRelocationIssue781(t *testing.T) {
 // nolint
 func TestGrainsRelocation(t *testing.T) {
 	// create a context
-	ctx := t.Context()
+	ctx := context.TODO()
 	// start the NATS server
 	srv := startNatsServer(t)
 
@@ -1390,7 +1387,7 @@ func TestGrainsRelocation(t *testing.T) {
 // nolint
 func TestPersistenceGrainsRelocation(t *testing.T) {
 	// create a context
-	ctx := t.Context()
+	ctx := context.TODO()
 	// start the NATS server
 	srv := startNatsServer(t)
 
@@ -1536,7 +1533,7 @@ func TestPersistenceGrainsRelocation(t *testing.T) {
 // nolint
 func TestGrainsWithDependenciesRelocation(t *testing.T) {
 	// create a context
-	ctx := t.Context()
+	ctx := context.TODO()
 	// start the NATS server
 	srv := startNatsServer(t)
 
@@ -1667,7 +1664,7 @@ func TestGrainsWithDependenciesRelocation(t *testing.T) {
 
 func TestRelocationWithConsulProvider(t *testing.T) {
 	// create a context
-	ctx := t.Context()
+	ctx := context.TODO()
 	agent := startConsulAgent(t)
 
 	endpoint, err := agent.ApiEndpoint(ctx)
@@ -1761,7 +1758,7 @@ func TestRelocationWithConsulProvider(t *testing.T) {
 
 func TestRelocationWithEtcdProvider(t *testing.T) {
 	// create a context
-	ctx := t.Context()
+	ctx := context.TODO()
 	cluster := startEtcdCluster(t)
 
 	endpoints, err := cluster.ClientEndpoints(ctx)

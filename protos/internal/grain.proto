@@ -3,6 +3,7 @@ syntax = "proto3";
 package internalpb;
 
 import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
 import "internal/dependency.proto";
 
 option go_package = "github.com/tochemey/goakt/v3/internal/internalpb;internalpb";
@@ -22,4 +23,10 @@ message Grain {
   google.protobuf.Duration activation_timeout = 5;
   int32 activation_retries = 6;
   optional int64 mailbox_capacity = 7;
+  // Specifies the node address (host:peersPort) that owns this grain
+  string owner_node = 8;
+  // Specifies when the grain was created
+  google.protobuf.Timestamp created_at = 9;
+  // Specifies when the grain was last updated
+  google.protobuf.Timestamp updated_at = 10;
 }

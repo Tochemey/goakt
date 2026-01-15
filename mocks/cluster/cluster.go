@@ -295,6 +295,65 @@ func (_c *Cluster_GetActor_Call) RunAndReturn(run func(context.Context, string) 
 	return _c
 }
 
+// GetActorsByOwner provides a mock function with given fields: ctx, ownerNode
+func (_m *Cluster) GetActorsByOwner(ctx context.Context, ownerNode string) ([]*internalpb.Actor, error) {
+	ret := _m.Called(ctx, ownerNode)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetActorsByOwner")
+	}
+
+	var r0 []*internalpb.Actor
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) ([]*internalpb.Actor, error)); ok {
+		return rf(ctx, ownerNode)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) []*internalpb.Actor); ok {
+		r0 = rf(ctx, ownerNode)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*internalpb.Actor)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, ownerNode)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// Cluster_GetActorsByOwner_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetActorsByOwner'
+type Cluster_GetActorsByOwner_Call struct {
+	*mock.Call
+}
+
+// GetActorsByOwner is a helper method to define mock.On call
+//   - ctx context.Context
+//   - ownerNode string
+func (_e *Cluster_Expecter) GetActorsByOwner(ctx interface{}, ownerNode interface{}) *Cluster_GetActorsByOwner_Call {
+	return &Cluster_GetActorsByOwner_Call{Call: _e.mock.On("GetActorsByOwner", ctx, ownerNode)}
+}
+
+func (_c *Cluster_GetActorsByOwner_Call) Run(run func(ctx context.Context, ownerNode string)) *Cluster_GetActorsByOwner_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *Cluster_GetActorsByOwner_Call) Return(_a0 []*internalpb.Actor, _a1 error) *Cluster_GetActorsByOwner_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *Cluster_GetActorsByOwner_Call) RunAndReturn(run func(context.Context, string) ([]*internalpb.Actor, error)) *Cluster_GetActorsByOwner_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetGrain provides a mock function with given fields: ctx, identity
 func (_m *Cluster) GetGrain(ctx context.Context, identity string) (*internalpb.Grain, error) {
 	ret := _m.Called(ctx, identity)
@@ -350,6 +409,65 @@ func (_c *Cluster_GetGrain_Call) Return(_a0 *internalpb.Grain, _a1 error) *Clust
 }
 
 func (_c *Cluster_GetGrain_Call) RunAndReturn(run func(context.Context, string) (*internalpb.Grain, error)) *Cluster_GetGrain_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetGrainsByOwner provides a mock function with given fields: ctx, ownerNode
+func (_m *Cluster) GetGrainsByOwner(ctx context.Context, ownerNode string) ([]*internalpb.Grain, error) {
+	ret := _m.Called(ctx, ownerNode)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetGrainsByOwner")
+	}
+
+	var r0 []*internalpb.Grain
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) ([]*internalpb.Grain, error)); ok {
+		return rf(ctx, ownerNode)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) []*internalpb.Grain); ok {
+		r0 = rf(ctx, ownerNode)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*internalpb.Grain)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, ownerNode)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// Cluster_GetGrainsByOwner_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetGrainsByOwner'
+type Cluster_GetGrainsByOwner_Call struct {
+	*mock.Call
+}
+
+// GetGrainsByOwner is a helper method to define mock.On call
+//   - ctx context.Context
+//   - ownerNode string
+func (_e *Cluster_Expecter) GetGrainsByOwner(ctx interface{}, ownerNode interface{}) *Cluster_GetGrainsByOwner_Call {
+	return &Cluster_GetGrainsByOwner_Call{Call: _e.mock.On("GetGrainsByOwner", ctx, ownerNode)}
+}
+
+func (_c *Cluster_GetGrainsByOwner_Call) Run(run func(ctx context.Context, ownerNode string)) *Cluster_GetGrainsByOwner_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *Cluster_GetGrainsByOwner_Call) Return(_a0 []*internalpb.Grain, _a1 error) *Cluster_GetGrainsByOwner_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *Cluster_GetGrainsByOwner_Call) RunAndReturn(run func(context.Context, string) ([]*internalpb.Grain, error)) *Cluster_GetGrainsByOwner_Call {
 	_c.Call.Return(run)
 	return _c
 }

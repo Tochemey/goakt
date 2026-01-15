@@ -3,6 +3,7 @@ syntax = "proto3";
 package internalpb;
 
 import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
 import "internal/dependency.proto";
 import "internal/passivation.proto";
 import "internal/reentrancy.proto";
@@ -67,6 +68,12 @@ message Actor {
   SupervisorSpec supervisor = 9;
   // Specifies the reentrancy configuration when explicitly set
   ReentrancyConfig reentrancy = 10;
+  // Specifies the node address (host:peersPort) that owns this actor
+  string owner_node = 11;
+  // Specifies when the actor was created
+  google.protobuf.Timestamp created_at = 12;
+  // Specifies when the actor was last updated
+  google.protobuf.Timestamp updated_at = 13;
 }
 
 message SingletonSpec {

@@ -730,7 +730,6 @@ type ActorSystem interface {
 	increaseActorsCounter()
 	passivationManager() *passivationManager
 	removeNodeLeft(address string)
-	getClusterStore() cluster.Store
 }
 
 // ActorSystem represent a collection of actors on a given node
@@ -835,8 +834,6 @@ type actorSystem struct {
 	evictionStopSig  chan types.Unit
 
 	metricProvider *metric.Provider
-
-	clusterStore cluster.Store
 }
 
 var (
@@ -2251,23 +2248,6 @@ func (x *actorSystem) GetKinds(_ context.Context, request *connect.Request[inter
 	return connect.NewResponse(&internalpb.GetKindsResponse{Kinds: kinds}), nil
 }
 
-// PersistPeerState persists the peer state for a given node that is gracefully leaving the cluster
-func (x *actorSystem) PersistPeerState(ctx context.Context, request *connect.Request[internalpb.PersistPeerStateRequest]) (*connect.Response[internalpb.PersistPeerStateResponse], error) {
-	if !x.clusterEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrClusterDisabled)
-	}
-
-	peerAddr := fmt.Sprintf("%s:%d", request.Msg.GetPeerState().GetHost(), request.Msg.GetPeerState().GetPeersPort())
-	x.logger.Infof("Node (%s) is persisting its Peer (%s) state", x.PeersAddress(), peerAddr)
-
-	if err := x.clusterStore.PersistPeerState(ctx, request.Msg.GetPeerState()); err != nil {
-		x.logger.Errorf("Node (%s) failed to persist Peer (%s) state: %v", x.PeersAddress(), peerAddr, err)
-		return nil, connect.NewError(connect.CodeInternal, err)
-	}
-
-	return connect.NewResponse(new(internalpb.PersistPeerStateResponse)), nil
-}
-
 // TopicActor returns the topic actor, a system-managed actor responsible for handling
 // publish-subscribe (pub-sub) functionality within the actor system.
 //
@@ -2538,13 +2518,6 @@ func (x *actorSystem) getRemoting() remote.Remoting {
 	return remoting
 }
 
-func (x *actorSystem) getClusterStore() cluster.Store {
-	x.locker.RLock()
-	store := x.clusterStore
-	x.locker.RUnlock()
-	return store
-}
-
 // getGrains returns the grains map of the actor system
 func (x *actorSystem) getGrains() *xsync.Map[string, *grainPID] {
 	x.locker.RLock()
@@ -2640,13 +2613,6 @@ func (x *actorSystem) setupCluster() error {
 		cluster.WithRoutingTableInterval(x.clusterConfig.clusterStateSyncInterval),
 		cluster.WithBalancerInterval(x.clusterConfig.clusterBalancerInterval),
 	)
-
-	var err error
-	x.clusterStore, err = cluster.NewBoltStore()
-	if err != nil {
-		x.logger.Errorf("Failed to initialize cluster store: %v", err)
-		return err
-	}
 
 	for _, kind := range x.clusterConfig.kinds.Values() {
 		x.registry.Register(kind)
@@ -2862,7 +2828,6 @@ func (x *actorSystem) reset() {
 	x.actors.reset()
 	x.grains.Reset()
 	x.shuttingDown.Store(false)
-	x.clusterStore = nil
 }
 
 // shutdown stops the actor system
@@ -2886,13 +2851,9 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 	if x.passivator != nil {
 		x.passivator.Stop(ctx)
 	}
+
 	if x.scheduler != nil {
 		x.scheduler.Stop(ctx)
-	}
-
-	actorRefs := make([]ActorRef, 0, len(x.Actors()))
-	for _, actor := range x.Actors() {
-		actorRefs = append(actorRefs, fromPID(actor))
 	}
 
 	// create a context with timeout to avoid blocking shutdown indefinitely
@@ -2902,21 +2863,10 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 	// Run shutdown hooks and collect errors
 	hooksErr := x.runShutdownHooks(ctx)
 
-	// Build peer state snapshot early in shutdown process.
-	// Actual persistence happens later in shutdownCluster before leaving membership.
-	peerState, preShutdownErr := x.preShutdown(ctx)
-	if preShutdownErr != nil {
-		x.logger.Errorf("Failed to build peer state snapshot: %v", preShutdownErr)
-		// Continue with shutdown to free resources, but track error
-	}
-
-	// Helper to shut down cluster and remoting
-	// Includes preShutdownErr in the chain so it's properly tracked and returned
 	shutdownClusterAndRemoting := func() error {
 		return chain.
 			New(chain.WithRunAll()).
-			AddRunner(func() error { return preShutdownErr }).
-			AddRunner(func() error { return x.shutdownCluster(ctx, actorRefs, peerState) }).
+			AddRunner(func() error { return x.shutdownCluster(ctx) }).
 			AddRunner(func() error { return x.shutdownRemoting(ctx) }).
 			Run()
 	}
@@ -3105,10 +3055,11 @@ func (x *actorSystem) handleNodeJoinedEvent(event *cluster.Event) {
 		nodeJoined.GetAddress())
 
 	x.tryOpenGrainActivationBarrier(context.Background())
-	x.resyncAfterClusterEvent("node joined", nodeJoined.GetAddress())
 }
 
 // handleNodeLeftEvent processes a NodeLeft cluster event.
+// It handles the departure of a node from the cluster, initiating rebalancing
+// if this node is the leader, or logging a debug message if it's not.
 func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
 	nodeLeft := new(goaktpb.NodeLeft)
 	_ = event.Payload.UnmarshalTo(nodeLeft)
@@ -3117,87 +3068,156 @@ func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
 		x.String(), nodeLeft.GetAddress(),
 	)
 
-	x.resyncAfterClusterEvent("node left", nodeLeft.GetAddress())
-
-	if !x.relocationEnabled.Load() {
-		return
-	}
-
 	ctx := context.Background()
-
 	if x.cluster.IsLeader(ctx) {
-		x.logger.Infof(
-			"Leader (%s) initiating Node (%s)'s state rebalancing",
-			x.String(), nodeLeft.GetAddress(),
-		)
-
-		if !x.rebalancedNodes.Contains(nodeLeft.GetAddress()) {
-			x.rebalancedNodes.Add(nodeLeft.GetAddress())
-
-			// fetch the peer state of the node that left from the cluster store
-			// and enqueue it for rebalancing
-			peerState, ok := x.clusterStore.GetPeerState(ctx, nodeLeft.GetAddress())
-			if !ok {
-				x.logger.Warnf("Leader (%s) could not find Node (%s)'s state in cluster store",
-					x.String(), nodeLeft.GetAddress())
-				return
-			}
-
-			x.relocatingLocker.Lock()
-			x.rebalancingQueue <- peerState
-			x.relocatingLocker.Unlock()
-		}
+		x.handleLeaderNodeLeft(ctx, nodeLeft)
 		return
 	}
 
-	// clean up the peer state of the node that left from the cluster store
+	// Non-leader nodes: no cleanup needed
 	x.logger.Debugf(
-		"Node (%s) is not the cluster leader; cleaning up Node (%s) left from state cache",
+		"Node (%s) is not the cluster leader",
+		x.String(),
+	)
+}
+
+// handleLeaderNodeLeft handles the node left event when this node is the cluster leader.
+// It initiates state rebalancing for the departed node's actors and grains.
+func (x *actorSystem) handleLeaderNodeLeft(ctx context.Context, nodeLeft *goaktpb.NodeLeft) {
+	x.logger.Infof(
+		"Leader (%s) initiating Node (%s)'s state rebalancing",
 		x.String(), nodeLeft.GetAddress(),
 	)
 
-	if err := x.clusterStore.DeletePeerState(ctx, nodeLeft.GetAddress()); err != nil {
-		x.logger.Errorf("Node (%s) failed to remove left Node (%s) from cluster store: %w", x.String(), nodeLeft.GetAddress(), err)
+	if x.rebalancedNodes.Contains(nodeLeft.GetAddress()) {
+		return
 	}
 
-	x.logger.Debugf("Node (%s) successfully cleaned up Node (%s) left from state cache", x.String(), nodeLeft.GetAddress())
+	x.rebalancedNodes.Add(nodeLeft.GetAddress())
+
+	actors, grains, err := x.queryDepartedNodeActorsAndGrains(ctx, nodeLeft.GetAddress())
+	if err != nil {
+		return
+	}
+
+	if x.shouldSkipRebalancing(actors, grains, nodeLeft.GetAddress()) {
+		return
+	}
+
+	if !x.relocationEnabled.Load() {
+		x.handleRelocationDisabled(ctx, actors, grains)
+		return
+	}
+
+	peerState := x.buildPeerState(nodeLeft, actors, grains)
+	x.enqueueRebalancing(peerState)
 }
 
-// resyncAfterClusterEvent handles resyncing actors and grains after a cluster event.
-func (x *actorSystem) resyncAfterClusterEvent(eventType, nodeAddress string) {
-	x.logger.Debugf("Node (%s) resyncing actors after %s event: Node (%s)",
-		x.String(), eventType, nodeAddress)
-
-	if err := x.resyncActors(); err != nil {
-		x.logger.Errorf("Node (%s) failed to resync actors after %s event: %v", x.String(), eventType, err)
+// queryDepartedNodeActorsAndGrains queries the cluster for actors and grains
+// owned by the departed node. Returns the actors, grains, and any error encountered.
+// If an error occurs, it is logged and the error is returned.
+func (x *actorSystem) queryDepartedNodeActorsAndGrains(ctx context.Context, nodeAddress string) ([]*internalpb.Actor, []*internalpb.Grain, error) {
+	actors, err := x.cluster.GetActorsByOwner(ctx, nodeAddress)
+	if err != nil {
+		x.logger.Errorf("Leader (%s) failed to query actors for Node (%s): %v",
+			x.String(), nodeAddress, err)
+		return nil, nil, err
 	}
 
-	x.logger.Debugf("Node (%s) successfully resynced actors after %s event: Node (%s)",
-		x.String(), eventType, nodeAddress)
+	grains, err := x.cluster.GetGrainsByOwner(ctx, nodeAddress)
+	if err != nil {
+		x.logger.Errorf("Leader (%s) failed to query grains for Node (%s): %v",
+			x.String(), nodeAddress, err)
+		return nil, nil, err
+	}
 
-	if x.grains.Len() > 0 {
-		x.logger.Debugf("Node (%s) resyncing grains after %s event: node=(%s)",
-			x.String(), eventType, nodeAddress)
+	return actors, grains, nil
+}
 
-		if err := x.resyncGrains(); err != nil {
-			x.logger.Errorf("Node (%s) failed to resync grains after %s event: %v", x.String(), eventType, err)
+// shouldSkipRebalancing checks if rebalancing should be skipped because there are
+// no actors or grains owned by the departed node. Returns true if rebalancing should be skipped.
+func (x *actorSystem) shouldSkipRebalancing(actors []*internalpb.Actor, grains []*internalpb.Grain, nodeAddress string) bool {
+	if len(actors) == 0 && len(grains) == 0 {
+		x.logger.Warnf("Leader (%s) found no actors or grains owned by Node (%s)",
+			x.String(), nodeAddress)
+		return true
+	}
+	return false
+}
+
+// handleRelocationDisabled handles the case when relocation is disabled.
+// It cleans up the cluster by removing the departed node's actors and grains.
+func (x *actorSystem) handleRelocationDisabled(ctx context.Context, actors []*internalpb.Actor, grains []*internalpb.Grain) {
+	x.logger.Infof("Leader (%s) relocation is disabled; no need to rebalance. Cleaning up cluster...", x.String())
+	if err := x.cleanupCluster(ctx, actors, grains); err != nil {
+		x.logger.Errorf("Leader (%s) failed to cleanup cluster: %v", x.String(), err)
+		return
+	}
+	x.logger.Infof("Leader (%s) successfully cleaned up cluster", x.String())
+}
+
+// buildPeerActorsMap builds a map of actor names to actor protobuf messages
+// from the list of actors owned by the departed node. Invalid actors are skipped.
+func (x *actorSystem) buildPeerActorsMap(actors []*internalpb.Actor) map[string]*internalpb.Actor {
+	peerActors := make(map[string]*internalpb.Actor, len(actors))
+	for _, actor := range actors {
+		if actor == nil || proto.Equal(actor, new(internalpb.Actor)) {
+			continue
 		}
 
-		x.logger.Debugf("Node (%s) successfully resynced grains after %s event: Node (%s)",
-			x.String(), eventType, nodeAddress)
+		addr, err := address.Parse(actor.GetAddress())
+		if err != nil {
+			x.logger.Warnf("Leader (%s) failed to parse actor address (%s): %v",
+				x.String(), actor.GetAddress(), err)
+			continue
+		}
+		peerActors[addr.Name()] = actor
 	}
+	return peerActors
+}
+
+// buildPeerGrainsMap builds a map of grain IDs to grain protobuf messages
+// from the list of grains owned by the departed node. Invalid grains are skipped.
+func (x *actorSystem) buildPeerGrainsMap(grains []*internalpb.Grain) map[string]*internalpb.Grain {
+	peerGrains := make(map[string]*internalpb.Grain, len(grains))
+	for _, grain := range grains {
+		if grain == nil || proto.Equal(grain, new(internalpb.Grain)) {
+			continue
+		}
+
+		peerGrains[grain.GetGrainId().GetValue()] = grain
+	}
+	return peerGrains
+}
+
+// buildPeerState constructs a PeerState protobuf message from the node left event
+// and the actors and grains maps. This state represents the departed node's
+// complete actor system state that needs to be rebalanced.
+func (x *actorSystem) buildPeerState(nodeLeft *goaktpb.NodeLeft, actors []*internalpb.Actor, grains []*internalpb.Grain) *internalpb.PeerState {
+	peerActors := x.buildPeerActorsMap(actors)
+	peerGrains := x.buildPeerGrainsMap(grains)
+
+	return &internalpb.PeerState{
+		Host:         nodeLeft.GetHost(),
+		PeersPort:    nodeLeft.GetPeersPort(),
+		RemotingPort: nodeLeft.GetRemotingPort(),
+		Actors:       peerActors,
+		Grains:       peerGrains,
+	}
+}
+
+// enqueueRebalancing enqueues the peer state for rebalancing by sending it
+// to the rebalancing queue. This method is thread-safe.
+func (x *actorSystem) enqueueRebalancing(peerState *internalpb.PeerState) {
+	x.relocatingLocker.Lock()
+	x.rebalancingQueue <- peerState
+	x.relocatingLocker.Unlock()
 }
 
 // rebalancingLoop helps perform cluster rebalancing
 func (x *actorSystem) rebalancingLoop() {
 	for peerState := range x.rebalancingQueue {
 		ctx := context.Background()
-		if !x.shouldRebalance(peerState) {
-			x.logger.Debugf("Node (%s) found no Peer (%s)'s state to rebalance", x.name,
-				net.JoinHostPort(peerState.GetHost(), strconv.Itoa(int(peerState.GetPeersPort()))))
-			continue
-		}
-
 		if x.relocating.Load() {
 			x.relocatingLocker.Lock()
 			x.rebalancingQueue <- peerState
@@ -3211,15 +3231,6 @@ func (x *actorSystem) rebalancingLoop() {
 			x.logger.Error(err)
 		}
 	}
-}
-
-// shouldRebalance returns true when the current node can perform the cluster rebalancing
-func (x *actorSystem) shouldRebalance(peerState *internalpb.PeerState) bool {
-	return peerState != nil &&
-		x.InCluster() &&
-		!proto.Equal(peerState, new(internalpb.PeerState)) &&
-		(len(peerState.GetActors()) != 0 ||
-			len(peerState.GetGrains()) != 0)
 }
 
 // configPID constructs a PID provided the actor name and the actor kind
@@ -3553,51 +3564,55 @@ func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName str
 }
 
 // cleanupCluster cleans up the cluster
-func (x *actorSystem) cleanupCluster(ctx context.Context, actorRefs []ActorRef) error {
+func (x *actorSystem) cleanupCluster(ctx context.Context, actors []*internalpb.Actor, grains []*internalpb.Grain) error {
 	eg, ctx := errgroup.WithContext(ctx)
 
 	// Remove singleton actors from the cluster
-	if x.cluster.IsLeader(ctx) {
-		for _, actorRef := range actorRefs {
-			if actorRef.IsSingleton() {
-				actorRef := actorRef
-				eg.Go(func() error {
-					kind := actorRef.Kind()
-					if err := x.cluster.RemoveKind(ctx, kind); err != nil {
-						x.logger.Errorf("Failed to remove Kind (%s) from cluster: %v", kind, err)
-						return err
-					}
-					x.logger.Infof("Kind (%s) removed from cluster", kind)
-					return nil
-				})
-			}
+	for _, actor := range actors {
+		if actor.GetSingleton() != nil {
+			eg.Go(func() error {
+				kind := actor.GetType()
+				if err := x.cluster.RemoveKind(ctx, kind); err != nil {
+					x.logger.Errorf("Failed to remove Kind (%s) from cluster: %v", kind, err)
+					return err
+				}
+				x.logger.Infof("Kind (%s) removed from cluster", kind)
+				return nil
+			})
 		}
 	}
 
 	// Remove all actors from the cluster
-	for _, actorRef := range actorRefs {
-		actorRef := actorRef
+	for _, actor := range actors {
+		actor := actor
 		eg.Go(func() error {
-			actorName := actorRef.Name()
+			addr, err := address.Parse(actor.GetAddress())
+			if err != nil {
+				return err
+			}
+
+			actorName := addr.Name()
 			if err := x.cluster.RemoveActor(ctx, actorName); err != nil {
 				x.logger.Errorf("Failed to Actor (%s) from cluster: %v", actorName, err)
 				return err
 			}
+
 			x.logger.Infof("Actor (%s) removed from cluster", actorName)
 			return nil
 		})
 	}
 
 	// Remove all grains from the cluster if exists
-	if x.grains.Len() > 0 {
-		for _, grain := range x.grains.Values() {
+	if len(grains) > 0 {
+		for _, grain := range grains {
 			grain := grain
 			eg.Go(func() error {
-				if err := x.cluster.RemoveGrain(ctx, grain.identity.String()); err != nil {
-					x.logger.Errorf("Failed to remove Grain (%s) from cluster: %v", grain.identity.String(), err)
+				identity := grain.GetGrainId().GetValue()
+				if err := x.cluster.RemoveGrain(ctx, identity); err != nil {
+					x.logger.Errorf("Failed to remove Grain (%s) from cluster: %v", identity, err)
 					return err
 				}
-				x.logger.Infof("Grain (%s) removed from cluster", grain.identity.String())
+				x.logger.Infof("Grain (%s) removed from cluster", identity)
 				return nil
 			})
 		}
@@ -3626,19 +3641,12 @@ func (x *actorSystem) getSetDeadlettersCount(ctx context.Context) {
 	}
 }
 
-func (x *actorSystem) shutdownCluster(ctx context.Context, actors []ActorRef, peerState *internalpb.PeerState) error {
+func (x *actorSystem) shutdownCluster(ctx context.Context) error {
 	if x.clusterEnabled.Load() {
 		if x.cluster != nil {
-			// Persist peer state to all cluster peers before leaving membership.
-			// This ensures state is available for relocation when NodeLeft event
-			// is processed. Errors are returned but we proceed with shutdown to
-			// ensure resources are freed (chain uses WithRunAll).
 			if err := chain.
 				New(chain.WithRunAll(), chain.WithContext(ctx)).
-				AddContextRunnerIf(peerState != nil, func(cctx context.Context) error { return x.persistPeerStateToPeers(cctx, peerState) }).
-				AddContextRunner(func(cctx context.Context) error { return x.cleanupCluster(cctx, actors) }).
 				AddContextRunner(func(cctx context.Context) error { return x.cluster.Stop(cctx) }).
-				AddContextRunnerIf(x.clusterStore != nil, func(cctx context.Context) error { return x.clusterStore.Close() }).
 				Run(); err != nil {
 				x.logger.Errorf("Failed to shutdown cleanly: %w", err)
 				return err
@@ -3940,97 +3948,6 @@ func (x *actorSystem) registerMetrics() error {
 		return err
 	}
 	return nil
-}
-
-// preShutdown builds the peer state snapshot for cluster persistence.
-// This snapshot includes all actors and grains currently active on this node.
-// The actual persistence to remote peers happens later in shutdownCluster
-// to ensure proper ordering: persist state before leaving membership.
-func (x *actorSystem) preShutdown(ctx context.Context) (*internalpb.PeerState, error) {
-	if !x.clusterEnabled.Load() || x.cluster == nil {
-		x.logger.Infof("Node (%s) is not part of a cluster; skipping peer state build", x.PeersAddress())
-		return nil, nil
-	}
-
-	actors := x.Actors()
-	grains := x.grains.Values()
-
-	wireActors := make(map[string]*internalpb.Actor, len(actors))
-	for _, actor := range actors {
-		wireActor, err := actor.toWireActor()
-		if err != nil {
-			return nil, err
-		}
-		wireActors[actor.ID()] = wireActor
-	}
-
-	wireGrains := make(map[string]*internalpb.Grain, len(grains))
-	for _, grain := range grains {
-		wireGrain, err := grain.toWireGrain()
-		if err != nil {
-			return nil, err
-		}
-		wireGrains[grain.getIdentity().String()] = wireGrain
-	}
-
-	peerState := &internalpb.PeerState{
-		Host:         x.Host(),
-		PeersPort:    int32(x.clusterNode.PeersPort), // nolint
-		RemotingPort: int32(x.Port()),                // nolint
-		Actors:       wireActors,
-		Grains:       wireGrains,
-	}
-
-	return peerState, nil
-}
-
-// persistPeerStateToPeers sends the peer state to all cluster peers via RPC.
-// This is called during shutdown before leaving membership to ensure state
-// is available for relocation. Failures are logged but do not block shutdown.
-func (x *actorSystem) persistPeerStateToPeers(ctx context.Context, peerState *internalpb.PeerState) error {
-	if peerState == nil {
-		return nil
-	}
-
-	peers, err := x.cluster.Peers(ctx)
-	if err != nil {
-		x.logger.Errorf("Node (%s) failed to get cluster peers: %v", x.PeersAddress(), err)
-		return err
-	}
-
-	if len(peers) == 0 {
-		x.logger.Infof("Node (%s) found no cluster peers to persist state", x.PeersAddress())
-		return nil
-	}
-
-	peerAddr := x.PeersAddress()
-	remoting := x.getRemoting()
-
-	eg, egCtx := errgroup.WithContext(ctx)
-	eg.SetLimit(len(peers))
-
-	for _, peer := range peers {
-		peer := peer
-		eg.Go(func() error {
-			remoteClient := remoting.RemotingServiceClient(peer.Host, peer.RemotingPort)
-			request := connect.NewRequest(&internalpb.PersistPeerStateRequest{
-				PeerState: peerState,
-			})
-
-			_, err := remoteClient.PersistPeerState(egCtx, request)
-			if err != nil {
-				x.logger.Errorf("Node (%s) failed to persist peer state to remote Peer (%s:%d): %v",
-					peerAddr, peer.Host, peer.RemotingPort, err)
-				return err
-			}
-
-			x.logger.Infof("Node (%s) successfully persisted peer state to remote Peer (%s:%d)",
-				peerAddr, peer.Host, peer.RemotingPort)
-			return nil
-		})
-	}
-
-	return eg.Wait()
 }
 
 func computeEvictionCount(total, threshold uint64, totalEvictions, percentageToReturn int) int {

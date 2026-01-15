@@ -282,6 +282,12 @@ func (x *MockCluster) Members(context.Context) ([]*Peer, error)        { panic("
 func (x *MockCluster) NextRoundRobinValue(context.Context, string) (int, error) {
 	panic("unexpected call")
 }
+func (x *MockCluster) GetActorsByOwner(context.Context, string) ([]*internalpb.Actor, error) {
+	panic("unexpected call")
+}
+func (x *MockCluster) GetGrainsByOwner(context.Context, string) ([]*internalpb.Grain, error) {
+	panic("unexpected call")
+}
 
 func newEventTestCluster(host string, port int) *cluster {
 	return &cluster{
@@ -290,7 +296,9 @@ func newEventTestCluster(host string, port int) *cluster {
 		nodeJoinedEventsFilter:  goset.NewSet[string](),
 		nodeLeftEventsFilter:    goset.NewSet[string](),
 		nodeJoinTimestamps:      make(map[string]int64),
+		nodeJoinMetadata:        make(map[string]string),
 		nodeLeftTimestamps:      make(map[string]int64),
+		nodeLeftMetadata:        make(map[string]string),
 		rebalanceJoinNodeEpochs: make(map[string]uint64),
 		rebalanceLeftNodeEpochs: make(map[string]uint64),
 		rebalanceStartSeen:      make(map[uint64]struct{}),
@@ -339,6 +347,10 @@ func (i *iteratorStub) Close() {
 	if i.closeFn != nil {
 		i.closeFn()
 	}
+}
+
+func (i *iteratorStub) Err() error {
+	return nil
 }
 
 type testEntry struct {

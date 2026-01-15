@@ -10,6 +10,7 @@ import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	durationpb "google.golang.org/protobuf/types/known/durationpb"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -92,8 +93,14 @@ type Grain struct {
 	ActivationTimeout *durationpb.Duration   `protobuf:"bytes,5,opt,name=activation_timeout,json=activationTimeout,proto3" json:"activation_timeout,omitempty"`
 	ActivationRetries int32                  `protobuf:"varint,6,opt,name=activation_retries,json=activationRetries,proto3" json:"activation_retries,omitempty"`
 	MailboxCapacity   *int64                 `protobuf:"varint,7,opt,name=mailbox_capacity,json=mailboxCapacity,proto3,oneof" json:"mailbox_capacity,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Specifies the node address (host:peersPort) that owns this grain
+	OwnerNode string `protobuf:"bytes,8,opt,name=owner_node,json=ownerNode,proto3" json:"owner_node,omitempty"`
+	// Specifies when the grain was created
+	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	// Specifies when the grain was last updated
+	UpdatedAt     *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Grain) Reset() {
@@ -175,16 +182,37 @@ func (x *Grain) GetMailboxCapacity() int64 {
 	return 0
 }
 
+func (x *Grain) GetOwnerNode() string {
+	if x != nil {
+		return x.OwnerNode
+	}
+	return ""
+}
+
+func (x *Grain) GetCreatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return nil
+}
+
+func (x *Grain) GetUpdatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.UpdatedAt
+	}
+	return nil
+}
+
 var File_internal_grain_proto protoreflect.FileDescriptor
 
 const file_internal_grain_proto_rawDesc = "" +
 	"\n" +
 	"\x14internal/grain.proto\x12\n" +
-	"internalpb\x1a\x1egoogle/protobuf/duration.proto\x1a\x19internal/dependency.proto\"G\n" +
+	"internalpb\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x19internal/dependency.proto\"G\n" +
 	"\aGrainId\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
-	"\x05value\x18\x03 \x01(\tR\x05value\"\xd9\x02\n" +
+	"\x05value\x18\x03 \x01(\tR\x05value\"\xee\x03\n" +
 	"\x05Grain\x12.\n" +
 	"\bgrain_id\x18\x01 \x01(\v2\x13.internalpb.GrainIdR\agrainId\x12\x12\n" +
 	"\x04host\x18\x02 \x01(\tR\x04host\x12\x12\n" +
@@ -192,7 +220,14 @@ const file_internal_grain_proto_rawDesc = "" +
 	"\fdependencies\x18\x04 \x03(\v2\x16.internalpb.DependencyR\fdependencies\x12H\n" +
 	"\x12activation_timeout\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\x11activationTimeout\x12-\n" +
 	"\x12activation_retries\x18\x06 \x01(\x05R\x11activationRetries\x12.\n" +
-	"\x10mailbox_capacity\x18\a \x01(\x03H\x00R\x0fmailboxCapacity\x88\x01\x01B\x13\n" +
+	"\x10mailbox_capacity\x18\a \x01(\x03H\x00R\x0fmailboxCapacity\x88\x01\x01\x12\x1d\n" +
+	"\n" +
+	"owner_node\x18\b \x01(\tR\townerNode\x129\n" +
+	"\n" +
+	"created_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
+	"\n" +
+	"updated_at\x18\n" +
+	" \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAtB\x13\n" +
 	"\x11_mailbox_capacityB\xa3\x01\n" +
 	"\x0ecom.internalpbB\n" +
 	"GrainProtoH\x02P\x01Z;github.com/tochemey/goakt/v3/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
@@ -214,20 +249,23 @@ func file_internal_grain_proto_rawDescGZIP() []byte {
 
 var file_internal_grain_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
 var file_internal_grain_proto_goTypes = []any{
-	(*GrainId)(nil),             // 0: internalpb.GrainId
-	(*Grain)(nil),               // 1: internalpb.Grain
-	(*Dependency)(nil),          // 2: internalpb.Dependency
-	(*durationpb.Duration)(nil), // 3: google.protobuf.Duration
+	(*GrainId)(nil),               // 0: internalpb.GrainId
+	(*Grain)(nil),                 // 1: internalpb.Grain
+	(*Dependency)(nil),            // 2: internalpb.Dependency
+	(*durationpb.Duration)(nil),   // 3: google.protobuf.Duration
+	(*timestamppb.Timestamp)(nil), // 4: google.protobuf.Timestamp
 }
 var file_internal_grain_proto_depIdxs = []int32{
 	0, // 0: internalpb.Grain.grain_id:type_name -> internalpb.GrainId
 	2, // 1: internalpb.Grain.dependencies:type_name -> internalpb.Dependency
 	3, // 2: internalpb.Grain.activation_timeout:type_name -> google.protobuf.Duration
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	4, // 3: internalpb.Grain.created_at:type_name -> google.protobuf.Timestamp
+	4, // 4: internalpb.Grain.updated_at:type_name -> google.protobuf.Timestamp
+	5, // [5:5] is the sub-list for method output_type
+	5, // [5:5] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_internal_grain_proto_init() }

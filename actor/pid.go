@@ -2793,6 +2793,9 @@ func (pid *PID) toWireActor() (*internalpb.Actor, error) {
 		Role:                pid.Role(),
 		Supervisor:          supervisorSpec,
 		Reentrancy:          reentrancy,
+		OwnerNode:           pid.ActorSystem().PeersAddress(),
+		CreatedAt:           timestamppb.Now(),
+		UpdatedAt:           timestamppb.Now(),
 	}, nil
 }
 

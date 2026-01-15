@@ -55,12 +55,11 @@ func (x *systemGuardian) PreStart(*Context) error {
 
 // Receive handle message
 func (x *systemGuardian) Receive(ctx *ReceiveContext) {
-	switch msg := ctx.Message().(type) {
+	switch ctx.Message().(type) {
 	case *goaktpb.PostStart:
 		x.handlePostStart(ctx)
 	case *internalpb.RebalanceComplete:
-		// TODO: TBD with the error
-		_ = x.completeRebalancing(msg)
+		x.handleRebalanceComplete(ctx)
 	case *goaktpb.Terminated:
 		// pass
 	case *goaktpb.PanicSignal:
@@ -98,22 +97,10 @@ func (x *systemGuardian) handlePanicSignal(ctx *ReceiveContext) {
 	}
 }
 
-// completeRebalancing wraps up the rebalancing of left node in the cluster
-func (x *systemGuardian) completeRebalancing(msg *internalpb.RebalanceComplete) error {
-	x.logger.Info("Completing rebalancing...")
-	x.pid.ActorSystem().completeRelocation()
-
-	x.logger.Infof("Removing left Node (%s) from cluster store", msg.GetPeerAddress())
-
-	ctx := context.Background()
-	clusterStore := x.pid.ActorSystem().getClusterStore()
-	if err := clusterStore.DeletePeerState(ctx, msg.GetPeerAddress()); err != nil {
-		x.logger.Errorf("Failed to remove left Node (%s) from cluster store: %v", msg.GetPeerAddress(), err)
-		return err
+func (x *systemGuardian) handleRebalanceComplete(ctx *ReceiveContext) {
+	if msg, ok := ctx.Message().(*internalpb.RebalanceComplete); ok {
+		ctx.Logger().Info("Completing rebalancing...")
+		ctx.ActorSystem().completeRelocation()
+		ctx.Logger().Infof("Rebalancing completed successfully for Node (%s);", msg.GetPeerAddress())
 	}
-
-	x.logger.Infof("Left Node (%s) successfully removed from cache", msg.GetPeerAddress())
-
-	x.logger.Info("Rebalancing completed successfully")
-	return nil
 }

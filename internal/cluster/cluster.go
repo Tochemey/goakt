@@ -135,6 +135,10 @@ type Cluster interface {
 	// The key here is either actors or grains. When the node that owns the key goes down,
 	// the sequence may be reset.
 	NextRoundRobinValue(ctx context.Context, key string) (int, error)
+	// GetActorsByOwner returns all actors owned by the specified node address.
+	GetActorsByOwner(ctx context.Context, ownerNode string) ([]*internalpb.Actor, error)
+	// GetGrainsByOwner returns all grains owned by the specified node address.
+	GetGrainsByOwner(ctx context.Context, ownerNode string) ([]*internalpb.Grain, error)
 }
 
 // cluster implements the Cluster interface backed by an Olric unified
@@ -179,7 +183,9 @@ type cluster struct {
 	nodeJoinedEventsFilter   goset.Set[string]
 	nodeLeftEventsFilter     goset.Set[string]
 	nodeJoinTimestamps       map[string]int64
+	nodeJoinMetadata         map[string]string
 	nodeLeftTimestamps       map[string]int64
+	nodeLeftMetadata         map[string]string
 	rebalanceJoinNodeEpochs  map[string]uint64
 	rebalanceLeftNodeEpochs  map[string]uint64
 	rebalanceJoinLatestEpoch uint64
@@ -223,7 +229,9 @@ func New(name string, disco discovery.Provider, node *discovery.Node, opts ...Co
 		nodeJoinedEventsFilter:  goset.NewSet[string](),
 		nodeLeftEventsFilter:    goset.NewSet[string](),
 		nodeJoinTimestamps:      make(map[string]int64),
+		nodeJoinMetadata:        make(map[string]string),
 		nodeLeftTimestamps:      make(map[string]int64),
+		nodeLeftMetadata:        make(map[string]string),
 		rebalanceJoinNodeEpochs: make(map[string]uint64),
 		rebalanceLeftNodeEpochs: make(map[string]uint64),
 		rebalanceStartSeen:      make(map[uint64]struct{}),
@@ -656,6 +664,120 @@ func (x *cluster) Grains(ctx context.Context, timeout time.Duration) ([]*interna
 	return grains, nil
 }
 
+// GetActorsByOwner returns all actors owned by the specified node address.
+func (x *cluster) GetActorsByOwner(ctx context.Context, ownerNode string) ([]*internalpb.Actor, error) {
+	if !x.running.Load() {
+		return nil, ErrEngineNotRunning
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, x.readTimeout)
+	defer cancel()
+
+	x.mu.RLock()
+	defer x.mu.RUnlock()
+
+	scanner, err := x.dmap.Scan(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer scanner.Close()
+
+	actors := make([]*internalpb.Actor, 0)
+	prefix := composeKey(namespaceActors, "")
+
+	for scanner.Next() {
+		key := scanner.Key()
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+
+		resp, err := x.dmap.Get(ctx, key)
+		if err != nil {
+			if errors.Is(err, olric.ErrKeyNotFound) {
+				continue
+			}
+			return nil, err
+		}
+
+		value, err := resp.Byte()
+		if err != nil {
+			return nil, err
+		}
+
+		actor, err := decode(value)
+		if err != nil {
+			// Skip invalid entries
+			continue
+		}
+
+		if actor.GetOwnerNode() == ownerNode {
+			actors = append(actors, actor)
+		}
+	}
+
+	return actors, nil
+}
+
+// GetGrainsByOwner returns all grains owned by the specified node address.
+func (x *cluster) GetGrainsByOwner(ctx context.Context, ownerNode string) ([]*internalpb.Grain, error) {
+	if !x.running.Load() {
+		return nil, ErrEngineNotRunning
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, x.readTimeout)
+	defer cancel()
+
+	x.mu.RLock()
+	defer x.mu.RUnlock()
+
+	scanner, err := x.dmap.Scan(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer scanner.Close()
+
+	grains := make([]*internalpb.Grain, 0)
+	prefix := composeKey(namespaceGrains, "")
+	rrKey := composeKey(namespaceGrains, GrainsRoundRobinKey)
+
+	for scanner.Next() {
+		key := scanner.Key()
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+
+		if key == rrKey {
+			// skip the round-robin counter entry which is not grain metadata
+			continue
+		}
+
+		resp, err := x.dmap.Get(ctx, key)
+		if err != nil {
+			if errors.Is(err, olric.ErrKeyNotFound) {
+				continue
+			}
+			return nil, err
+		}
+
+		value, err := resp.Byte()
+		if err != nil {
+			return nil, err
+		}
+
+		grain, err := decodeGrain(value)
+		if err != nil {
+			// Skip invalid entries
+			continue
+		}
+
+		if grain.GetOwnerNode() == ownerNode {
+			grains = append(grains, grain)
+		}
+	}
+
+	return grains, nil
+}
+
 // LookupKind fetches the value registered for the provided actor kind.
 func (x *cluster) LookupKind(ctx context.Context, kind string) (string, error) {
 	if !x.running.Load() {
@@ -901,7 +1023,7 @@ func (x *cluster) buildConfig() (*oconfig.Config, error) {
 	options := storage.NewConfig(nil)
 	options.Add("tableSize", x.tableSize)
 
-	cfg := &oconfig.Config{
+	config := &oconfig.Config{
 		BindAddr:          x.node.Host,
 		BindPort:          x.node.PeersPort,
 		ReadRepair:        true,
@@ -930,24 +1052,26 @@ func (x *cluster) buildConfig() (*oconfig.Config, error) {
 		MemberMeta:                 meta,
 	}
 
+	// by default, disable redis-client logging
+	config.Client = &oconfig.Client{
+		DisableRedisLogging: true,
+	}
+
+	if x.logger.LogLevel() == log.DebugLevel {
+		config.LogVerbosity = oconfig.DefaultLogVerbosity
+		config.Client.DisableRedisLogging = false
+	}
+
 	if x.tlsInfo != nil {
-		cfg.TLS = &oconfig.TLS{
+		config.TLS = &oconfig.TLS{
 			Client: x.tlsInfo.ClientConfig,
 			Server: x.tlsInfo.ServerConfig,
 		}
 
-		client := &oconfig.Client{TLS: x.tlsInfo.ClientConfig}
-		if err := client.Sanitize(); err != nil {
-			return nil, fmt.Errorf("failed to sanitize client config: %v", err)
-		}
-		cfg.Client = client
+		config.Client.TLS = x.tlsInfo.ClientConfig
 	}
 
-	if x.logger.LogLevel() == log.DebugLevel {
-		cfg.LogVerbosity = oconfig.DefaultLogVerbosity
-	}
-
-	return cfg, nil
+	return config, config.Client.Sanitize()
 }
 
 // setupMemberlistConfig applies memberlist specific configuration to the
@@ -1072,7 +1196,7 @@ func (x *cluster) consume() {
 				// ignore
 			}
 		case <-x.consumeCtx.Done():
-			x.logger.Debugf("consume context cancelled, exiting")
+			x.logger.Debugf("stopping consume loop")
 			return
 		}
 	}
@@ -1126,13 +1250,17 @@ func (x *cluster) trackNodeJoinEvent(ev events.NodeJoinEvent) {
 	if x.node.PeersAddress() == ev.NodeJoin {
 		return
 	}
+
 	if x.nodeJoinedEventsFilter.Contains(ev.NodeJoin) {
 		return
 	}
+
 	if _, exists := x.nodeJoinTimestamps[ev.NodeJoin]; exists {
 		return
 	}
+
 	x.nodeJoinTimestamps[ev.NodeJoin] = ev.Timestamp
+	x.nodeJoinMetadata[ev.NodeJoin] = ev.NodeMeta
 
 	if x.rebalanceJoinLatestEpoch != 0 {
 		x.rebalanceJoinNodeEpochs[ev.NodeJoin] = x.rebalanceJoinLatestEpoch
@@ -1153,10 +1281,13 @@ func (x *cluster) trackNodeLeftEvent(ev events.NodeLeftEvent) {
 	if x.nodeLeftEventsFilter.Contains(ev.NodeLeft) {
 		return
 	}
+
 	if _, exists := x.nodeLeftTimestamps[ev.NodeLeft]; exists {
 		return
 	}
+
 	x.nodeLeftTimestamps[ev.NodeLeft] = ev.Timestamp
+	x.nodeLeftMetadata[ev.NodeLeft] = ev.NodeMeta
 
 	if x.rebalanceLeftLatestEpoch != 0 {
 		x.rebalanceLeftNodeEpochs[ev.NodeLeft] = x.rebalanceLeftLatestEpoch
@@ -1241,6 +1372,7 @@ func (x *cluster) emitPendingJoinForEpochLocked(epoch uint64) {
 		}
 		x.emitNodeJoinedLocked(node, timestamp)
 		delete(x.nodeJoinTimestamps, node)
+		delete(x.nodeJoinMetadata, node)
 		delete(x.rebalanceJoinNodeEpochs, node)
 	}
 }
@@ -1257,6 +1389,7 @@ func (x *cluster) emitPendingLeftForEpochLocked(epoch uint64) {
 		}
 		x.emitNodeLeftLocked(node, timestamp)
 		delete(x.nodeLeftTimestamps, node)
+		delete(x.nodeLeftMetadata, node)
 		delete(x.rebalanceLeftNodeEpochs, node)
 	}
 }
@@ -1266,12 +1399,20 @@ func (x *cluster) emitNodeLeftLocked(node string, timestamp int64) {
 	if x.nodeLeftEventsFilter.Contains(node) {
 		return
 	}
+
 	x.nodeLeftEventsFilter.Add(node)
+	nodeMeta := x.nodeJoinMetadata[node]
+	disconode := new(discovery.Node)
+	// no need to check error here as we know the nodeMeta is valid
+	_ = json.Unmarshal([]byte(nodeMeta), disconode)
 
 	timeMilli := timestamp / int64(time.Millisecond)
 	evt := &goaktpb.NodeLeft{
-		Address:   node,
-		Timestamp: timestamppb.New(time.UnixMilli(timeMilli)),
+		Address:      node,
+		Timestamp:    timestamppb.New(time.UnixMilli(timeMilli)),
+		Host:         disconode.Host,
+		RemotingPort: int32(disconode.RemotingPort),
+		PeersPort:    int32(disconode.PeersPort),
 	}
 	payload, _ := anypb.New(evt)
 	x.sendEventLocked(&Event{Payload: payload, Type: NodeLeft})
@@ -1281,12 +1422,20 @@ func (x *cluster) emitNodeJoinedLocked(node string, timestamp int64) {
 	if x.nodeJoinedEventsFilter.Contains(node) {
 		return
 	}
+
 	x.nodeJoinedEventsFilter.Add(node)
+	nodeMeta := x.nodeJoinMetadata[node]
+	disconode := new(discovery.Node)
+	// no need to check error here as we know the nodeMeta is valid
+	_ = json.Unmarshal([]byte(nodeMeta), disconode)
 
 	timeMilli := timestamp / int64(time.Millisecond)
 	evt := &goaktpb.NodeJoined{
-		Address:   node,
-		Timestamp: timestamppb.New(time.UnixMilli(timeMilli)),
+		Address:      node,
+		Timestamp:    timestamppb.New(time.UnixMilli(timeMilli)),
+		Host:         disconode.Host,
+		RemotingPort: int32(disconode.RemotingPort),
+		PeersPort:    int32(disconode.PeersPort),
 	}
 	payload, _ := anypb.New(evt)
 	x.sendEventLocked(&Event{Payload: payload, Type: NodeJoined})
