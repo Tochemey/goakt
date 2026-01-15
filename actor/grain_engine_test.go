@@ -1176,7 +1176,10 @@ func TestRemoteAskGrain_ExtractsContextValues(t *testing.T) {
 
 	_, err := sys.RemoteAskGrain(context.Background(), req)
 	require.NoError(t, err)
-	require.Equal(t, headerVal, grain.Seen())
+	// Wait for grain to finish processing the message and set the seen value
+	require.Eventually(t, func() bool {
+		return grain.Seen() == headerVal
+	}, 2*time.Second, 10*time.Millisecond, "Context value should be extracted and set in grain")
 }
 
 func TestRemoteAskGrain_ContextExtractionError(t *testing.T) {
@@ -1272,12 +1275,12 @@ func TestRemoteAskGrain_LocalSendError(t *testing.T) {
 	})
 
 	_, err := sys.RemoteAskGrain(context.Background(), req)
-	require.Error(t, err)
+	require.Error(t, err, "Expected error when grain fails to process message")
 
 	var connectErr *connect.Error
-	require.ErrorAs(t, err, &connectErr)
-	require.Equal(t, connect.CodeInternal, connectErr.Code())
-	require.Contains(t, connectErr.Message(), "failed to process message")
+	require.ErrorAs(t, err, &connectErr, "Error should be a connect.Error")
+	require.Equal(t, connect.CodeInternal, connectErr.Code(), "Error code should be Internal")
+	require.Contains(t, connectErr.Message(), "failed to process message", "Error message should contain failure reason")
 }
 
 func TestRemoteTellGrain_ExtractsContextValues(t *testing.T) {
