@@ -6476,11 +6476,16 @@ func TestPipeToName(t *testing.T) {
 }
 
 func TestToWireActorDependencyError(t *testing.T) {
+	actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NotNil(t, actorSystem)
+
 	pid := &PID{
 		actor:        NewMockActor(),
 		address:      address.New("actor-to-wire", "testSys", "127.0.0.1", 0),
 		fieldsLocker: sync.RWMutex{},
 		dependencies: xsync.NewMap[string, extension.Dependency](),
+		actorSystem:  actorSystem,
 	}
 
 	expectedErr := assert.AnError
@@ -6492,10 +6497,15 @@ func TestToWireActorDependencyError(t *testing.T) {
 }
 
 func TestToWireActorSupervisorSpec(t *testing.T) {
+	actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NotNil(t, actorSystem)
+
 	noSupervisorPID := &PID{
 		actor:        NewMockActor(),
 		address:      address.New("actor-to-wire-nosupervisor", "testSys", "127.0.0.1", 0),
 		fieldsLocker: sync.RWMutex{},
+		actorSystem:  actorSystem,
 	}
 
 	wire, err := noSupervisorPID.toWireActor()
@@ -6507,6 +6517,7 @@ func TestToWireActorSupervisorSpec(t *testing.T) {
 		address:      address.New("actor-to-wire-supervisor", "testSys", "127.0.0.1", 0),
 		fieldsLocker: sync.RWMutex{},
 		supervisor:   supervisor.NewSupervisor(supervisor.WithStrategy(supervisor.OneForAllStrategy)),
+		actorSystem:  actorSystem,
 	}
 
 	wire, err = withSupervisorPID.toWireActor()
@@ -6516,6 +6527,10 @@ func TestToWireActorSupervisorSpec(t *testing.T) {
 }
 
 func TestToWireActorIncludesSingletonSpecWhenSingleton(t *testing.T) {
+	actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NotNil(t, actorSystem)
+
 	spec := &singletonSpec{
 		SpawnTimeout: time.Second,
 		WaitInterval: 500 * time.Millisecond,
@@ -6523,8 +6538,9 @@ func TestToWireActorIncludesSingletonSpecWhenSingleton(t *testing.T) {
 	}
 
 	pid := &PID{
-		actor:   NewMockActor(),
-		address: address.New("singleton", "test-system", "127.0.0.1", 0),
+		actor:       NewMockActor(),
+		address:     address.New("singleton", "test-system", "127.0.0.1", 0),
+		actorSystem: actorSystem,
 	}
 	pid.setState(singletonState, true)
 	pid.singletonSpec = spec

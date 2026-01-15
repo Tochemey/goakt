@@ -450,11 +450,16 @@ func TestCancelInFlightRequests(t *testing.T) {
 }
 
 func TestToWireActorIncludesReentrancy(t *testing.T) {
+	actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NotNil(t, actorSystem)
+
 	pid := &PID{
 		actor:        NewMockActor(),
 		address:      address.New("actor-reentrancy-wire", "testSys", "127.0.0.1", 0),
 		fieldsLocker: sync.RWMutex{},
 		reentrancy:   newReentrancyState(reentrancy.AllowAll, 3),
+		actorSystem:  actorSystem,
 	}
 
 	wire, err := pid.toWireActor()
