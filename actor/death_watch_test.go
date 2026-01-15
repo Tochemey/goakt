@@ -98,16 +98,29 @@ func TestDeathWatch(t *testing.T) {
 		clmock := mockscluster.NewCluster(t)
 		clmock.EXPECT().ActorExists(mock.Anything, actorID).Return(false, nil)
 		clmock.EXPECT().RemoveActor(mock.Anything, actorID).Return(stdErrors.New("removal failed"))
+		clmock.EXPECT().Stop(mock.Anything).Return(nil)
 
 		err = actorSys.Start(ctx)
 		require.NoError(t, err)
 
 		// wait for the system to start properly
 		pause.For(500 * time.Millisecond)
-		actorSys.(*actorSystem).cluster = clmock
-		actorSys.(*actorSystem).clusterEnabled.Store(true)
-		actorSys.(*actorSystem).remotingEnabled.Store(true)
-		actorSys.(*actorSystem).relocationEnabled.Store(false)
+		sys := actorSys.(*actorSystem)
+		sys.cluster = clmock
+		sys.clusterEnabled.Store(true)
+		sys.remotingEnabled.Store(true)
+		sys.relocationEnabled.Store(false)
+		// Initialize clusterNode to avoid nil pointer dereference during shutdown
+		if sys.clusterNode == nil {
+			host := sys.Host()
+			port := sys.Port()
+			sys.clusterNode = &discovery.Node{
+				Host:          host,
+				PeersPort:     port,
+				DiscoveryPort: port,
+				RemotingPort:  port,
+			}
+		}
 
 		cid, err := actorSys.Spawn(ctx, actorID, NewMockActor())
 		require.NoError(t, err)

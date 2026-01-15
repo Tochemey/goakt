@@ -7715,10 +7715,7 @@ func TestStopReturnsCleanupClusterError(t *testing.T) {
 	system.actors.pids.Set(pid.ID(), node)
 	system.actors.counter.Inc()
 
-	clusterMock.EXPECT().IsLeader(mock.Anything).Return(false)
-	clusterMock.EXPECT().Peers(mock.Anything).Return(nil, nil)
-	clusterMock.EXPECT().RemoveActor(mock.Anything, pid.Name()).Return(assert.AnError)
-	clusterMock.EXPECT().Stop(mock.Anything).Return(nil)
+	clusterMock.EXPECT().Stop(mock.Anything).Return(assert.AnError)
 	t.Cleanup(func() { clusterMock.AssertExpectations(t) })
 
 	err := system.Stop(context.Background())
@@ -8236,8 +8233,14 @@ func TestLargeScaleActorsAndGrains(t *testing.T) {
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 
-	// Wait for cluster to stabilize
-	pause.For(2 * time.Second)
+	// Wait for cluster to stabilize - verify all nodes can see each other
+	require.Eventually(t, func() bool {
+		peers1, err1 := node1.getCluster().Peers(ctx)
+		peers2, err2 := node2.getCluster().Peers(ctx)
+		peers3, err3 := node3.getCluster().Peers(ctx)
+		return err1 == nil && err2 == nil && err3 == nil &&
+			len(peers1) >= 2 && len(peers2) >= 2 && len(peers3) >= 2
+	}, 10*time.Second, 500*time.Millisecond, "Cluster should stabilize with all nodes visible")
 
 	// Get node addresses for ownership tracking
 	node1Addr := node1.PeersAddress()
@@ -8273,9 +8276,6 @@ func TestLargeScaleActorsAndGrains(t *testing.T) {
 		actorNames = append(actorNames, name)
 	}
 
-	// Wait for actors to be replicated
-	pause.For(3 * time.Second)
-
 	// Verify that actors are replicated before querying
 	require.Eventually(t, func() bool {
 		// Check a few specific actors exist rather than scanning all
@@ -8294,6 +8294,9 @@ func TestLargeScaleActorsAndGrains(t *testing.T) {
 	require.NoError(t, err)
 	require.Greater(t, len(node1Actors), 0, "Should find actors owned by node1")
 	require.GreaterOrEqual(t, len(node1Actors), actorsPerNode-5, "Should find most actors owned by node1")
+
+	// Small delay to allow Olric's background goroutines from GetActorsByOwner to settle
+	pause.For(100 * time.Millisecond)
 
 	// Verify all actors have correct ownership
 	for _, actor := range node1Actors {
@@ -8324,8 +8327,6 @@ func TestLargeScaleActorsAndGrains(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	pause.For(time.Second)
-
 	// Create grains on node2
 	for i := range grainsPerNode {
 		name := fmt.Sprintf("grain-node2-%d", i)
@@ -8342,8 +8343,6 @@ func TestLargeScaleActorsAndGrains(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	pause.For(time.Second)
-
 	// Create grains on node3
 	for i := range grainsPerNode {
 		name := fmt.Sprintf("grain-node3-%d", i)
@@ -8359,9 +8358,6 @@ func TestLargeScaleActorsAndGrains(t *testing.T) {
 		_, err = node3.AskGrain(ctx, identity, new(testpb.TestReply), time.Second)
 		require.NoError(t, err)
 	}
-
-	// Wait for grains to be replicated
-	pause.For(time.Second)
 
 	// Verify that grains are replicated before querying
 	// Check that we can see grains exist (lenient check - just verify grains were created)
@@ -8381,6 +8377,9 @@ func TestLargeScaleActorsAndGrains(t *testing.T) {
 	require.Greater(t, len(node1Grains), 0, "Should find grains owned by node1")
 	require.GreaterOrEqual(t, len(node1Grains), grainsPerNode-5, "Should find most grains owned by node1")
 
+	// Small delay to allow Olric's background goroutines from GetGrainsByOwner to settle
+	pause.For(100 * time.Millisecond)
+
 	// Verify all grains have correct ownership
 	for _, grain := range node1Grains {
 		require.Equal(t, node1Addr, grain.GetOwnerNode(), "Grain should have correct owner")
@@ -8391,21 +8390,28 @@ func TestLargeScaleActorsAndGrains(t *testing.T) {
 	// Test rebalancing: stop node3 and verify actors/grains are rebalanced
 	require.NoError(t, node3.Stop(ctx))
 	assert.NoError(t, sd3.Close())
-	pause.For(8 * time.Second) // Wait for rebalancing to complete
 
-	// Verify rebalancing - check that node3's actors have been relocated
-	// Note: Query may timeout during rebalancing, which is acceptable
-	// We verify that the system handles node departure correctly
-	queryCtx3, queryCancel3 := context.WithTimeout(ctx, 5*time.Second)
+	// Wait for rebalancing to progress - verify node3's actors are being relocated
+	// Note: Rebalancing may take time, so we check that it's progressing rather than requiring completion
+	queryCtx3, queryCancel3 := context.WithTimeout(ctx, 30*time.Second)
 	defer queryCancel3()
 
-	// Try to query node3's actors after it left (may timeout - that's OK)
-	node3ActorsAfter, err := node1.getCluster().GetActorsByOwner(queryCtx3, node3Addr)
-	if err == nil {
-		// If query succeeds, verify that most actors have been relocated
-		require.LessOrEqual(t, len(node3ActorsAfter), actorsPerNode, "Most actors should have been relocated")
-	}
-	// If query times out, that's acceptable - rebalancing may still be in progress
+	// Verify rebalancing is progressing - check that node3's actor count decreases or system remains functional
+	require.Eventually(t, func() bool {
+		// Try to query node3's actors - may timeout during rebalancing (acceptable)
+		node3ActorsAfter, err := node1.getCluster().GetActorsByOwner(queryCtx3, node3Addr)
+		if err != nil {
+			// Query timeout during rebalancing is acceptable - verify system still functions
+			// Check that remaining nodes' actors are still accessible
+			node1ActorsCheck, checkErr := node1.getCluster().GetActorsByOwner(queryCtx3, node1Addr)
+			return checkErr == nil && len(node1ActorsCheck) > 0
+		}
+		// If query succeeds, verify that rebalancing has made progress
+		return len(node3ActorsAfter) <= actorsPerNode
+	}, 30*time.Second, 1*time.Second, "Rebalancing should progress or system should remain functional")
+
+	// Small delay to allow Olric's background goroutines to settle before next query
+	pause.For(100 * time.Millisecond)
 
 	// Verify that actors from remaining nodes still exist and are accessible
 	// This confirms the system continues to function after node departure
@@ -8431,7 +8437,7 @@ func TestMultiNodeClusterStress(t *testing.T) {
 		t.Skip("skipping stress test in short mode")
 	}
 
-	ctx := t.Context()
+	ctx := context.Background()
 	srv := startNatsServer(t)
 
 	// Create 3-node cluster
