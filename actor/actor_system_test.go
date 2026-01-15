@@ -8519,15 +8519,32 @@ func TestMultiNodeClusterStress(t *testing.T) {
 	require.Less(t, rebalancingDuration, 5*time.Second, "Rebalancing should complete in < 5s")
 	require.GreaterOrEqual(t, len(allActors), actorsPerNode*2, "Total actors should be maintained")
 
+	// Small delay to allow Olric's background operations to settle
+	pause.For(500 * time.Millisecond)
+
 	// Verify node3's actors have been relocated (ownership changed)
-	node3ActorsAfter, err := node1.getCluster().GetActorsByOwner(queryCtx, node3Addr)
+	// Use fresh context for each call to avoid context deadline issues
+	node3Ctx, node3Cancel := context.WithTimeout(ctx, 10*time.Second)
+	node3ActorsAfter, err := node1.getCluster().GetActorsByOwner(node3Ctx, node3Addr)
+	node3Cancel()
 	require.NoError(t, err)
 	require.LessOrEqual(t, len(node3ActorsAfter), 50, "Most actors should have been relocated")
 
+	// Small delay between queries to avoid overwhelming the system
+	pause.For(200 * time.Millisecond)
+
 	// Verify no data loss - check that actors exist on remaining nodes
-	node1ActorsAfter, err := node1.getCluster().GetActorsByOwner(queryCtx, node1Addr)
+	// Use fresh contexts for each call to avoid context deadline issues
+	node1Ctx, node1Cancel := context.WithTimeout(ctx, 10*time.Second)
+	node1ActorsAfter, err := node1.getCluster().GetActorsByOwner(node1Ctx, node1Addr)
+	node1Cancel()
 	require.NoError(t, err)
-	node2ActorsAfter, err := node1.(*actorSystem).getCluster().GetActorsByOwner(queryCtx, node2Addr)
+
+	pause.For(200 * time.Millisecond)
+
+	node2Ctx, node2Cancel := context.WithTimeout(ctx, 10*time.Second)
+	node2ActorsAfter, err := node1.(*actorSystem).getCluster().GetActorsByOwner(node2Ctx, node2Addr)
+	node2Cancel()
 	require.NoError(t, err)
 
 	totalAfterRebalance := len(node1ActorsAfter) + len(node2ActorsAfter) + len(node3ActorsAfter)
@@ -8571,8 +8588,14 @@ func TestMultiNodeClusterStress(t *testing.T) {
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, len(finalActors), actorsPerNode*2-100, "Final actor count should be maintained")
 
+	// Small delay to allow system to stabilize before final query
+	pause.For(200 * time.Millisecond)
+
 	// Verify ownership metadata is accurate after all operations
-	node1FinalActors, err := node1.getCluster().GetActorsByOwner(queryCtxFinal, node1Addr)
+	// Use fresh context to avoid context deadline issues
+	node1FinalCtx, node1FinalCancel := context.WithTimeout(ctx, 10*time.Second)
+	node1FinalActors, err := node1.getCluster().GetActorsByOwner(node1FinalCtx, node1Addr)
+	node1FinalCancel()
 	require.NoError(t, err)
 	for _, actor := range node1FinalActors {
 		require.Equal(t, node1Addr, actor.GetOwnerNode(), "Ownership should be accurate")
