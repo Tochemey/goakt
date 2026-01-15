@@ -41,6 +41,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v3/address"
+	"github.com/tochemey/goakt/v3/discovery"
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
@@ -822,6 +823,40 @@ func TestSpawn(t *testing.T) {
 		assert.ErrorIs(t, err, assert.AnError)
 		assert.ErrorContains(t, err, "failed to fetch cluster nodes")
 	})
+	t.Run("SpawnOn when cluster has no members", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+
+		system := sys.(*actorSystem)
+		clusterMock := mockcluster.NewCluster(t)
+		system.cluster = clusterMock
+		system.clusterEnabled.Store(true)
+		system.clusterNode = &discovery.Node{
+			Name:         system.name,
+			Host:         "127.0.0.1",
+			PeersPort:    9000,
+			RemotingPort: system.remoteConfig.BindPort(),
+		}
+
+		actor := NewMockActor()
+		actorName := "actorID"
+
+		clusterMock.EXPECT().ActorExists(mock.Anything, actorName).Return(false, nil).Twice()
+		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{}, nil).Once()
+		clusterMock.EXPECT().Stop(mock.Anything).Return(nil).Once()
+
+		err = system.SpawnOn(ctx, actorName, actor)
+		require.NoError(t, err)
+
+		pid, err := system.LocalActor(actorName)
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+		assert.True(t, pid.IsRunning())
+
+		require.NoError(t, system.Stop(ctx))
+	})
 	t.Run("SpawnOn remote includes reentrancy config", func(t *testing.T) {
 		ctx := context.TODO()
 		clusterMock := mockcluster.NewCluster(t)
@@ -854,47 +889,7 @@ func TestSpawn(t *testing.T) {
 		)
 		require.NoError(t, err)
 	})
-	t.Run("SpawnOn when cluster has no members spawns locally", func(t *testing.T) {
-		ctx := context.TODO()
-		sys, err := NewActorSystem("spawn-no-peers", WithLogger(log.DiscardLogger))
-		require.NoError(t, err)
 
-		actorSystem := sys.(*actorSystem)
-		err = actorSystem.Start(ctx)
-		require.NoError(t, err)
-
-		pause.For(time.Second)
-
-		clusterMock := mockcluster.NewCluster(t)
-
-		actorSystem.locker.Lock()
-		actorSystem.cluster = clusterMock
-		actorSystem.locker.Unlock()
-		actorSystem.clusterEnabled.Store(true)
-
-		t.Cleanup(func() {
-			actorSystem.clusterEnabled.Store(false)
-			actorSystem.locker.Lock()
-			actorSystem.cluster = nil
-			actorSystem.locker.Unlock()
-			assert.NoError(t, actorSystem.Stop(ctx))
-		})
-
-		actor := NewMockActor()
-		actorName := "actorID"
-
-		clusterMock.EXPECT().ActorExists(mock.Anything, actorName).Return(false, nil).Twice()
-		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{}, nil).Once()
-
-		err = actorSystem.SpawnOn(ctx, actorName, actor)
-		require.NoError(t, err)
-
-		pause.For(200 * time.Millisecond)
-
-		actors := actorSystem.Actors()
-		require.Len(t, actors, 1)
-		assert.Equal(t, actorName, actors[0].Name())
-	})
 	t.Run("SpawnOn when node metric fetch fails", func(t *testing.T) {
 		ctx := context.TODO()
 		clusterMock := new(mockcluster.Cluster)
