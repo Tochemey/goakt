@@ -36,6 +36,6 @@ type Config struct {
 // Validate checks whether the given discovery configuration is valid
 func (x Config) Validate() error {
 	return validation.New(validation.FailFast()).
-		AddValidator(validation.NewEmptyStringValidator("Namespace", x.DomainName)).
+		AddValidator(validation.NewEmptyStringValidator("DomainName", x.DomainName)).
 		Validate()
 }
