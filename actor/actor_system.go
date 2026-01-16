@@ -87,6 +87,16 @@ import (
 	gtls "github.com/tochemey/goakt/v3/tls"
 )
 
+const (
+	// leaderRefreshRetryInterval keeps leader rechecks responsive without tight loops.
+	leaderRefreshRetryInterval = 500 * time.Millisecond
+	// leaderRefreshRetryWindow bounds retries to avoid long-lived goroutines.
+	leaderRefreshRetryWindow = 30 * time.Second
+	// leaderRefreshIdleInterval is a low-frequency safety net to detect departures
+	// even when cluster events are delayed or missed.
+	leaderRefreshIdleInterval = 2 * time.Second
+)
+
 // ActorSystem defines the contract of an actor system
 //
 //nolint:revive
@@ -797,9 +807,12 @@ type actorSystem struct {
 	registry   registry.Registry
 	reflection *reflection
 
-	clusterConfig    *ClusterConfig
-	rebalancingQueue chan *internalpb.PeerState
-	rebalancedNodes  goset.Set[string]
+	clusterConfig     *ClusterConfig
+	rebalancingQueue  chan *internalpb.PeerState
+	rebalancedNodes   goset.Set[string]
+	leaderRefreshCh   chan types.Unit
+	leaderRefreshStop chan types.Unit
+	leaderRefreshMu   sync.Mutex
 
 	relocator        *PID
 	rootGuardian     *PID
@@ -835,6 +848,14 @@ type actorSystem struct {
 	evictionStopSig  chan types.Unit
 
 	metricProvider *metric.Provider
+
+	pendingNodeLeftMu sync.Mutex
+	pendingNodeLeft   map[string]*goaktpb.NodeLeft
+	// memberSnapshotPrev tracks the last membership snapshot keyed by peer address.
+	memberSnapshotPrev map[string]*cluster.Peer
+	// memberSnapshotNext is a scratch map reused to diff membership snapshots
+	// without allocating on every refresh.
+	memberSnapshotNext map[string]*cluster.Peer
 }
 
 var (
@@ -2659,6 +2680,7 @@ func (x *actorSystem) startClustering(ctx context.Context) error {
 
 	// start the various relocation loops when relocation is enabled
 	if x.relocationEnabled.Load() {
+		x.startLeaderRefreshLoop()
 		go x.rebalancingLoop()
 	}
 
@@ -3058,6 +3080,9 @@ func (x *actorSystem) handleNodeJoinedEvent(event *cluster.Event) {
 		nodeJoined.GetAddress())
 
 	x.tryOpenGrainActivationBarrier(context.Background())
+	if x.relocationEnabled.Load() {
+		x.requestLeaderRefresh()
+	}
 }
 
 // handleNodeLeftEvent processes a NodeLeft cluster event.
@@ -3077,11 +3102,244 @@ func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
 		return
 	}
 
-	// Non-leader nodes: no cleanup needed
+	// Non-leader nodes: keep the event around in case leadership changes.
 	x.logger.Debugf(
 		"Node (%s) is not the cluster leader",
 		x.String(),
 	)
+	if x.relocationEnabled.Load() {
+		x.enqueuePendingNodeLeft(nodeLeft)
+		x.requestLeaderRefresh()
+	}
+}
+
+// startLeaderRefreshLoop initializes the leader refresh loop if needed.
+// It is event-driven via requestLeaderRefresh and avoids per-event goroutines.
+func (x *actorSystem) startLeaderRefreshLoop() {
+	x.leaderRefreshMu.Lock()
+	if x.leaderRefreshCh != nil {
+		x.leaderRefreshMu.Unlock()
+		return
+	}
+	x.leaderRefreshCh = make(chan types.Unit, 1)
+	x.leaderRefreshStop = make(chan types.Unit)
+	refreshCh := x.leaderRefreshCh
+	stopCh := x.leaderRefreshStop
+	x.leaderRefreshMu.Unlock()
+
+	go x.leaderRefreshLoop(refreshCh, stopCh)
+	x.requestLeaderRefresh()
+}
+
+// stopLeaderRefreshLoop stops the leader refresh loop and releases channels.
+func (x *actorSystem) stopLeaderRefreshLoop() {
+	x.leaderRefreshMu.Lock()
+	if x.leaderRefreshStop == nil {
+		x.leaderRefreshMu.Unlock()
+		return
+	}
+	close(x.leaderRefreshStop)
+	x.leaderRefreshStop = nil
+	x.leaderRefreshCh = nil
+	x.leaderRefreshMu.Unlock()
+}
+
+// requestLeaderRefresh coalesces refresh requests to keep GC and CPU low.
+func (x *actorSystem) requestLeaderRefresh() {
+	x.leaderRefreshMu.Lock()
+	refreshCh := x.leaderRefreshCh
+	x.leaderRefreshMu.Unlock()
+	if refreshCh == nil {
+		return
+	}
+	select {
+	case refreshCh <- types.Unit{}:
+	default:
+	}
+}
+
+// leaderRefreshLoop recalculates the leader on demand and processes pending
+// NodeLeft events when this node becomes leader.
+//
+// Algorithm:
+//  1. On any leader refresh request, attempt a refresh immediately.
+//  2. If there are pending NodeLeft events and this node is not leader yet,
+//     enable a bounded retry window and re-check at a fixed interval.
+//  3. Stop retrying once there is no pending work or the window expires.
+func (x *actorSystem) leaderRefreshLoop(refreshCh <-chan types.Unit, stopCh <-chan types.Unit) {
+	var (
+		idleTicker  = time.NewTicker(leaderRefreshIdleInterval)
+		retryTicker = time.NewTicker(leaderRefreshRetryInterval)
+		retryCh     <-chan time.Time
+		retryUntil  time.Time
+	)
+	defer idleTicker.Stop()
+	defer retryTicker.Stop()
+
+	for {
+		select {
+		case <-refreshCh:
+			// Algorithm: attempt a refresh on demand; if there are pending NodeLeft
+			// events and we are not the leader yet, keep retrying for a bounded window.
+			if x.refreshLeader(context.Background()) {
+				retryUntil = time.Now().Add(leaderRefreshRetryWindow)
+				retryCh = retryTicker.C
+			}
+		case <-retryCh:
+			if time.Now().After(retryUntil) {
+				retryCh = nil
+				continue
+			}
+			if !x.refreshLeader(context.Background()) {
+				retryCh = nil
+			}
+		case <-idleTicker.C:
+			_ = x.refreshLeader(context.Background())
+		case <-stopCh:
+			return
+		}
+	}
+}
+
+// refreshLeader reconciles membership and drains pending NodeLeft work when
+// this node is the leader. It returns true when there is still pending work
+// and we are not the leader yet, so the caller should keep retrying.
+func (x *actorSystem) refreshLeader(ctx context.Context) bool {
+	if !x.clusterEnabled.Load() || x.cluster == nil {
+		return false
+	}
+
+	members, err := x.cluster.Members(ctx)
+	if err != nil || len(members) == 0 {
+		return x.hasPendingNodeLeft()
+	}
+
+	departed := x.collectDepartedMembers(members)
+	for _, peer := range departed {
+		x.enqueuePendingNodeLeft(nodeLeftFromPeer(peer))
+	}
+
+	leader := pickOldestMember(members)
+	if leader == nil {
+		return x.hasPendingNodeLeft()
+	}
+
+	if leader.PeerAddress() == x.PeersAddress() {
+		x.processPendingNodeLeft(ctx)
+		return false
+	}
+	return x.hasPendingNodeLeft()
+}
+
+// enqueuePendingNodeLeft stores a NodeLeft event until the leader can process it.
+// Deduplication is keyed by node address to keep memory bounded.
+func (x *actorSystem) enqueuePendingNodeLeft(nodeLeft *goaktpb.NodeLeft) {
+	x.pendingNodeLeftMu.Lock()
+	if x.pendingNodeLeft == nil {
+		x.pendingNodeLeft = make(map[string]*goaktpb.NodeLeft, 4)
+	}
+	x.pendingNodeLeft[nodeLeft.GetAddress()] = nodeLeft
+	x.pendingNodeLeftMu.Unlock()
+}
+
+// collectDepartedMembers compares the previous and current membership snapshots
+// and returns peers that disappeared since the last refresh. It reuses internal
+// maps to minimize allocations.
+func (x *actorSystem) collectDepartedMembers(members []*cluster.Peer) []*cluster.Peer {
+	if x.memberSnapshotNext == nil {
+		x.memberSnapshotNext = make(map[string]*cluster.Peer, len(members))
+	} else {
+		for key := range x.memberSnapshotNext {
+			delete(x.memberSnapshotNext, key)
+		}
+	}
+
+	for _, member := range members {
+		if member == nil {
+			continue
+		}
+		x.memberSnapshotNext[member.PeerAddress()] = member
+	}
+
+	var departed []*cluster.Peer
+	if len(x.memberSnapshotPrev) > 0 {
+		for addr, peer := range x.memberSnapshotPrev {
+			if _, ok := x.memberSnapshotNext[addr]; !ok {
+				departed = append(departed, peer)
+			}
+		}
+	}
+
+	x.memberSnapshotPrev, x.memberSnapshotNext = x.memberSnapshotNext, x.memberSnapshotPrev
+	return departed
+}
+
+// hasPendingNodeLeft reports whether there is pending node-left work.
+func (x *actorSystem) hasPendingNodeLeft() bool {
+	x.pendingNodeLeftMu.Lock()
+	hasPending := len(x.pendingNodeLeft) > 0
+	x.pendingNodeLeftMu.Unlock()
+	return hasPending
+}
+
+// popPendingNodeLeft pops one pending node-left event (arbitrary order).
+func (x *actorSystem) popPendingNodeLeft() *goaktpb.NodeLeft {
+	x.pendingNodeLeftMu.Lock()
+	defer x.pendingNodeLeftMu.Unlock()
+	for key, nodeLeft := range x.pendingNodeLeft {
+		delete(x.pendingNodeLeft, key)
+		return nodeLeft
+	}
+	return nil
+}
+
+// processPendingNodeLeft drains pending node-left events as leader.
+func (x *actorSystem) processPendingNodeLeft(ctx context.Context) {
+	for {
+		nodeLeft := x.popPendingNodeLeft()
+		if nodeLeft == nil {
+			return
+		}
+		x.handleLeaderNodeLeft(ctx, nodeLeft)
+	}
+}
+
+// nodeLeftFromPeer builds a NodeLeft payload from membership data.
+// It normalizes membership-diff results into the same shape used by cluster
+// NodeLeft events so the relocation pipeline can share one code path.
+// This keeps mapping logic centralized and avoids duplicate field wiring.
+func nodeLeftFromPeer(peer *cluster.Peer) *goaktpb.NodeLeft {
+	if peer == nil {
+		return nil
+	}
+	return &goaktpb.NodeLeft{
+		Address:      peer.PeerAddress(),
+		Host:         peer.Host,
+		PeersPort:    int32(peer.PeersPort),
+		RemotingPort: int32(peer.RemotingPort),
+	}
+}
+
+// pickOldestMember returns the coordinator when present and falls back to the
+// oldest member by CreatedAt if no coordinator is flagged yet.
+func pickOldestMember(members []*cluster.Peer) *cluster.Peer {
+	if len(members) == 0 {
+		return nil
+	}
+
+	for _, member := range members {
+		if member != nil && member.Coordinator {
+			return member
+		}
+	}
+
+	leader := members[0]
+	for _, member := range members[1:] {
+		if member != nil && member.CreatedAt < leader.CreatedAt {
+			leader = member
+		}
+	}
+	return leader
 }
 
 // handleLeaderNodeLeft handles the node left event when this node is the cluster leader.
@@ -3672,6 +3930,8 @@ func (x *actorSystem) shutdownCluster(ctx context.Context) error {
 		if x.grainsQueue != nil {
 			close(x.grainsQueue)
 		}
+
+		x.stopLeaderRefreshLoop()
 
 		x.relocatingLocker.Unlock()
 	}

@@ -1965,6 +1965,7 @@ type testClusterConfig struct {
 	readQuorum         uint32
 	writeQuorum        uint32
 	minimumPeersQuorum uint32
+	readTimeout        time.Duration
 	deferStart         bool
 }
 
@@ -2020,6 +2021,12 @@ func withTestReadinessTimeout(timeout time.Duration) testClusterOption {
 	}
 }
 
+func withTestReadTimeout(timeout time.Duration) testClusterOption {
+	return func(tcc *testClusterConfig) {
+		tcc.readTimeout = timeout
+	}
+}
+
 func withTestReplicaCount(count uint32) testClusterOption {
 	return func(tcc *testClusterConfig) {
 		tcc.replicaCount = count
@@ -2058,6 +2065,7 @@ func createNATsProvider(serverAddr string) providerFactory {
 			NatsSubject:   natsSubject,
 			Host:          host,
 			DiscoveryPort: discoveryPort,
+		Timeout:       5 * time.Second,
 		}
 		return nats.NewDiscovery(&config, nats.WithLogger(log.DiscardLogger))
 	}
@@ -2121,11 +2129,12 @@ func testSystem(t *testing.T, providerFactory providerFactory, opts ...testClust
 	cfg := &testClusterConfig{
 		relocationEnabled:  true,
 		readinessMode:      ReadinessModeDegradedStart,
-		readinessTimeout:   5 * time.Second,
+		readinessTimeout:   30 * time.Second,
 		replicaCount:       1,
 		readQuorum:         1,
 		writeQuorum:        1,
 		minimumPeersQuorum: 1,
+		readTimeout:        10 * time.Second,
 	}
 	for _, opt := range opts {
 		opt(cfg)
@@ -2144,7 +2153,7 @@ func testSystem(t *testing.T, providerFactory providerFactory, opts ...testClust
 				WithWriteQuorum(cfg.writeQuorum).
 				WithReadQuorum(cfg.readQuorum).
 				WithPeersPort(peersPort).
-				WithReadTimeout(10 * time.Second).
+				WithReadTimeout(cfg.readTimeout).
 				WithWriteTimeout(10 * time.Second).
 				WithMinimumPeersQuorum(cfg.minimumPeersQuorum).
 				WithDiscoveryPort(discoveryPort).

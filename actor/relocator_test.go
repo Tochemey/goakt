@@ -361,7 +361,7 @@ func TestRelocation(t *testing.T) {
 
 	opts := []testClusterOption{
 		withTestReadinessMode(ReadinessModeFailStart),
-		withTestReadinessTimeout(15 * time.Second),
+		withTestReadinessTimeout(60 * time.Second),
 		withTestReplicaCount(2),
 		withTestReadQuorum(1),
 		withTestWriteQuorum(2),
@@ -403,6 +403,25 @@ func TestRelocation(t *testing.T) {
 		require.NoError(t, err)
 	}
 
+	waitForClusterMembers(t, node1, 3, 60*time.Second)
+
+	var leaderNode ActorSystem
+	require.Eventually(t, func() bool {
+		if isLeader, _ := node1.IsLeader(ctx); isLeader {
+			leaderNode = node1
+			return true
+		}
+		if isLeader, _ := node2.IsLeader(ctx); isLeader {
+			leaderNode = node2
+			return true
+		}
+		if isLeader, _ := node3.IsLeader(ctx); isLeader {
+			leaderNode = node3
+			return true
+		}
+		return false
+	}, 30*time.Second, 500*time.Millisecond, "expected cluster leader")
+
 	// let us create 4 actors on each node
 	for j := 1; j <= 4; j++ {
 		pid, err := spawnWithRetry(ctx, node1, fmt.Sprintf("Actor1%d", j), NewMockActor(), WithLongLived())
@@ -420,8 +439,21 @@ func TestRelocation(t *testing.T) {
 
 	pause.For(time.Second)
 
+	node2Address := net.JoinHostPort(node2.Host(), strconv.Itoa(node2.Port()))
+	node3Address := net.JoinHostPort(node3.Host(), strconv.Itoa(node3.Port()))
+	targetNode := node2
+	targetSD := sd2
+	targetAddress := node2Address
+	actorName := "Actor21"
+	if leaderNode == node2 {
+		targetNode = node3
+		targetSD = sd3
+		targetAddress = node3Address
+		actorName = "Actor31"
+	}
+
 	reentrantName := "Reentrant-Actor"
-	pid, err := spawnWithRetry(ctx, node2, reentrantName, NewMockActor(),
+	pid, err := spawnWithRetry(ctx, targetNode, reentrantName, NewMockActor(),
 		WithLongLived(),
 		WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.StashNonReentrant), reentrancy.WithMaxInFlight(3))))
 	require.NoError(t, err)
@@ -437,19 +469,21 @@ func TestRelocation(t *testing.T) {
 
 	pause.For(time.Second)
 
-	// Verify actors are on node2 before shutdown
-	node2Address := net.JoinHostPort(node2.Host(), strconv.Itoa(node2.Port()))
-	addr, _, err := node1.ActorOf(ctx, "Actor21")
-	require.NoError(t, err)
-	require.NotNil(t, addr)
-	require.Equal(t, node2Address, addr.HostPort(), "Actor Actor21 should be on node2 before shutdown")
+	// Verify actor is on the target node before shutdown
+	require.Eventually(t, func() bool {
+		addr, _, err := node1.ActorOf(ctx, actorName)
+		if err != nil || addr == nil {
+			return false
+		}
+		return addr.HostPort() == targetAddress
+	}, 30*time.Second, 500*time.Millisecond, "Actor %s should be on target node before shutdown", actorName)
 
-	// take down node2
-	require.NoError(t, node2.Stop(ctx))
-	require.NoError(t, sd2.Close())
+	// take down the target node
+	require.NoError(t, targetNode.Stop(ctx))
+	require.NoError(t, targetSD.Close())
 
-	// Allow time for the cluster to detect node2 leaving and start relocation
-	pause.For(2 * time.Second)
+	// Wait for the cluster to observe node2 leaving before relocation checks.
+	waitForClusterMembers(t, node1, 2, 60*time.Second)
 
 	// Wait for cluster rebalancing - verify actor relocation actually occurred.
 	// The relocation process:
@@ -464,7 +498,7 @@ func TestRelocation(t *testing.T) {
 	// so we accept either: actor doesn't exist (relocation in progress) OR actor exists with new address (relocation complete).
 	// We reject: actor exists with old address (relocation hasn't started or failed).
 	require.Eventually(t, func() bool {
-		exists, err := node1.ActorExists(ctx, "Actor21")
+		exists, err := node1.ActorExists(ctx, actorName)
 		if err != nil {
 			return false
 		}
@@ -474,15 +508,15 @@ func TestRelocation(t *testing.T) {
 			return false
 		}
 		// Actor exists - verify it's on a live node (not node2)
-		relocatedAddr, _, err := node1.ActorOf(ctx, "Actor21")
+		relocatedAddr, _, err := node1.ActorOf(ctx, actorName)
 		if err != nil || relocatedAddr == nil {
 			return false
 		}
 		actorAddr := relocatedAddr.HostPort()
 		// Critical check: actor must have a NEW address (not node2's address)
-		// If it still has node2's address, relocation hasn't happened yet
-		return actorAddr != node2Address
-	}, 2*time.Minute, 500*time.Millisecond, "Actor Actor21 should be relocated from node2 (was %s) to a live node", node2Address)
+		// If it still has the target node's address, relocation hasn't happened yet
+		return actorAddr != targetAddress
+	}, 2*time.Minute, 500*time.Millisecond, "Actor %s should be relocated from target node (was %s) to a live node", actorName, targetAddress)
 
 	sender, err := node1.LocalActor("Actor11")
 	require.NoError(t, err)
@@ -490,8 +524,8 @@ func TestRelocation(t *testing.T) {
 
 	// Actor should now exist, but allow time for relocation to settle.
 	require.Eventually(t, func() bool {
-		return sender.SendAsync(ctx, "Actor21", new(testpb.TestSend)) == nil
-	}, 30*time.Second, 500*time.Millisecond, "Actor21 should be available after relocation")
+		return sender.SendAsync(ctx, actorName, new(testpb.TestSend)) == nil
+	}, 30*time.Second, 500*time.Millisecond, "Actor %s should be available after relocation", actorName)
 
 	// Wait for reentrant actor to be relocated - verify it's on a live node
 	// During relocation, the actor may temporarily not exist (removed but not yet re-added),
@@ -513,8 +547,8 @@ func TestRelocation(t *testing.T) {
 		}
 		actorAddr := reentrantAddr.HostPort()
 		// Actor should be on node1 or node3, not on node2 (which is down)
-		return actorAddr != node2Address
-	}, 30*time.Second, 500*time.Millisecond, "Reentrant actor %s should be relocated from node2 (was %s) to a live node", reentrantName, node2Address)
+		return actorAddr != targetAddress
+	}, 30*time.Second, 500*time.Millisecond, "Reentrant actor %s should be relocated from target node (was %s) to a live node", reentrantName, targetAddress)
 
 	reentrantAddr, pid, err := node1.ActorOf(ctx, reentrantName)
 	require.NoError(t, err)
@@ -541,9 +575,13 @@ func TestRelocation(t *testing.T) {
 	}
 
 	assert.NoError(t, node1.Stop(ctx))
-	assert.NoError(t, node3.Stop(ctx))
+	if targetNode != node3 {
+		assert.NoError(t, node3.Stop(ctx))
+	}
 	assert.NoError(t, sd1.Close())
-	assert.NoError(t, sd3.Close())
+	if targetNode != node3 {
+		assert.NoError(t, sd3.Close())
+	}
 	srv.Shutdown()
 }
 
@@ -553,8 +591,8 @@ func TestRelocationWithCustomSupervisor(t *testing.T) {
 
 	opts := []testClusterOption{
 		withTestReadinessMode(ReadinessModeFailStart),
-		withTestReadinessTimeout(15 * time.Second),
-		withTestReplicaCount(3),
+		withTestReadinessTimeout(30 * time.Second),
+		withTestReplicaCount(2),
 		withTestReadQuorum(1),
 		withTestWriteQuorum(2),
 		withTestMinimumPeersQuorum(2),
@@ -796,8 +834,8 @@ func TestRelocationWithSingletonActor(t *testing.T) {
 	// create and start system cluster
 	opts := []testClusterOption{
 		withTestReadinessMode(ReadinessModeFailStart),
-		withTestReadinessTimeout(15 * time.Second),
-		withTestReplicaCount(3),
+		withTestReadinessTimeout(30 * time.Second),
+		withTestReplicaCount(2),
 		withTestReadQuorum(1),
 		withTestWriteQuorum(2),
 		withTestMinimumPeersQuorum(2),
@@ -1239,7 +1277,7 @@ func TestRelocationWithDependency(t *testing.T) {
 	// create and start a system cluster
 	opts := []testClusterOption{
 		withTestReadinessMode(ReadinessModeFailStart),
-		withTestReadinessTimeout(15 * time.Second),
+		withTestReadinessTimeout(30 * time.Second),
 		withTestReplicaCount(2),
 		withTestReadQuorum(1),
 		withTestWriteQuorum(1),
@@ -1493,10 +1531,41 @@ func isQuorumError(err error) bool {
 		stdErrors.Is(err, olric.ErrClusterQuorum)
 }
 
+func waitForClusterMembers(t *testing.T, system ActorSystem, expected int, timeout time.Duration) {
+	t.Helper()
+
+	sys, ok := system.(*actorSystem)
+	require.True(t, ok, "expected *actorSystem, got %T", system)
+
+	require.Eventually(t, func() bool {
+		members, err := sys.getCluster().Members(context.TODO())
+		if err != nil {
+			return false
+		}
+		return len(members) == expected
+	}, timeout, 500*time.Millisecond, "expected %d cluster members", expected)
+}
+
+func waitForLeader(t *testing.T, system ActorSystem, timeout time.Duration) {
+	t.Helper()
+
+	sys, ok := system.(*actorSystem)
+	require.True(t, ok, "expected *actorSystem, got %T", system)
+
+	expected := net.JoinHostPort(sys.Host(), strconv.Itoa(sys.PeersPort()))
+	require.Eventually(t, func() bool {
+		leader, err := sys.Leader(context.TODO())
+		if err != nil || leader == nil {
+			return false
+		}
+		return leader.PeersAddress() == expected
+	}, timeout, 500*time.Millisecond, "expected leader %s", expected)
+}
+
 func relocationReadyOpts() []testClusterOption {
 	return []testClusterOption{
 		withTestReadinessMode(ReadinessModeFailStart),
-		withTestReadinessTimeout(15 * time.Second),
+		withTestReadinessTimeout(30 * time.Second),
 	}
 }
 

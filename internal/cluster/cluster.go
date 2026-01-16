@@ -1062,6 +1062,10 @@ func (x *cluster) awaitReady(ctx context.Context, startErrCh <-chan error, shutd
 		return err
 	}
 
+	if err := x.waitForMemberlistQuorum(ctx); err != nil {
+		return err
+	}
+
 	if err := x.waitForClusterReady(ctx, x.createDMap); err != nil {
 		return err
 	}
@@ -1075,6 +1079,68 @@ func (x *cluster) awaitReady(ctx context.Context, startErrCh <-chan error, shutd
 	x.ready.Store(true)
 	x.startConsume()
 	return nil
+}
+
+// waitForMemberlistQuorum blocks until the embedded cluster memberlist reports
+// enough members to satisfy the required count or the context is canceled.
+func (x *cluster) waitForMemberlistQuorum(ctx context.Context) error {
+	required := x.requiredMemberCount()
+	if required <= 1 {
+		return nil
+	}
+
+	clock := ticker.New(250 * time.Millisecond)
+	clock.Start()
+	defer clock.Stop()
+
+	lastCount := -1
+	x.logger.Infof("Waiting for memberlist quorum: required=%d", required)
+
+	for {
+		members, err := x.client.Members(ctx)
+		if err == nil {
+			count := x.countMemberlistMembers(members)
+			if count != lastCount {
+				lastCount = count
+				x.logger.Infof("Memberlist quorum progress: members=%d required=%d", count, required)
+			}
+
+			if uint32(count) >= required {
+				x.logger.Infof("Memberlist quorum reached: members=%d required=%d", count, required)
+				return nil
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			if lastCount < 0 {
+				lastCount = 0
+			}
+			err := fmt.Errorf("memberlist quorum not reached (members=%d required=%d)", lastCount, required)
+			return errors.Join(err, olric.ErrClusterQuorum, ctx.Err())
+		case <-clock.Ticks:
+		}
+	}
+}
+
+// countMemberlistMembers returns the total member count implied by the
+// memberlist results. Some backends may omit the local node, so we
+// add one for self unless it is already present.
+func (x *cluster) countMemberlistMembers(members []olric.Member) int {
+	if len(members) == 0 {
+		return 0
+	}
+
+	self := x.node.PeersAddress()
+	for _, member := range members {
+		node := new(discovery.Node)
+		_ = json.Unmarshal([]byte(member.Meta), node)
+		if node.PeersAddress() == self {
+			return len(members)
+		}
+	}
+
+	return len(members) + 1
 }
 
 // startConsume ensures the cluster event consumer is started exactly once.

@@ -257,7 +257,7 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 	// report their presence.
 	// collect as many responses as possible in the given timeout.
 	inbox := nats.NewInbox()
-	recv := make(chan *nats.Msg, 1)
+	recv := make(chan *nats.Msg, 32)
 
 	// bind to receive messages
 	sub, err := d.connection.ChanSubscribe(inbox, recv)
