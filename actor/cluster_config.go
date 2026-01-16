@@ -43,6 +43,8 @@ type ClusterConfig struct {
 	replicaCount             uint32
 	writeQuorum              uint32
 	readQuorum               uint32
+	readinessTimeout         time.Duration
+	readinessMode            ReadinessMode
 	discoveryPort            int
 	peersPort                int
 	kinds                    *xsync.Map[string, Actor]
@@ -63,6 +65,16 @@ type grainActivationBarrierConfig struct {
 	timeout time.Duration
 }
 
+// ReadinessMode defines how Start behaves when the cluster is not ready.
+type ReadinessMode uint8
+
+const (
+	// ReadinessModeFailStart makes Start return an error if readiness is not achieved.
+	ReadinessModeFailStart ReadinessMode = iota
+	// ReadinessModeDegradedStart lets Start return successfully but rejects operations until ready.
+	ReadinessModeDegradedStart
+)
+
 // enforce compilation error
 var _ validation.Validator = (*ClusterConfig)(nil)
 
@@ -81,6 +93,8 @@ func NewClusterConfig() *ClusterConfig {
 		readTimeout:              time.Second,
 		shutdownTimeout:          3 * time.Minute,
 		bootstrapTimeout:         DefaultClusterBootstrapTimeout,
+		readinessTimeout:         DefaultClusterBootstrapTimeout,
+		readinessMode:            ReadinessModeDegradedStart,
 		clusterStateSyncInterval: DefaultClusterStateSyncInterval,
 		roles:                    goset.NewSet[string](),
 		clusterBalancerInterval:  DefaultClusterBalancerInterval,
@@ -214,6 +228,41 @@ func (x *ClusterConfig) WithShutdownTimeout(timeout time.Duration) *ClusterConfi
 // Returns the updated ClusterConfig instance for chaining.
 func (x *ClusterConfig) WithBootstrapTimeout(timeout time.Duration) *ClusterConfig {
 	x.bootstrapTimeout = timeout
+	return x
+}
+
+// WithReadinessTimeout sets the maximum time Start waits for the cluster to become ready.
+//
+// This timeout is only enforced when ReadinessModeFailStart is selected. In
+// ReadinessModeDegradedStart, Start returns immediately and readiness is checked
+// asynchronously while cluster-backed operations are gated until ready.
+//
+// Operational guidance:
+//   - Choose a value that covers discovery and memberlist convergence for your
+//     environment (e.g., higher latency or larger clusters).
+//   - Use the same timeout consistently across nodes to avoid staggered startup
+//     behavior in the same cluster.
+//   - Keep it higher than transient join delays but bounded to fail fast on
+//     misconfiguration.
+func (x *ClusterConfig) WithReadinessTimeout(timeout time.Duration) *ClusterConfig {
+	x.readinessTimeout = timeout
+	return x
+}
+
+// WithReadinessMode configures how Start behaves when readiness is not achieved.
+//
+// ReadinessModeFailStart blocks Start until readiness is reached or the readiness
+// timeout elapses, returning an error on timeout.
+// ReadinessModeDegradedStart returns from Start immediately and rejects
+// cluster-backed operations until readiness is reached.
+//
+// Operational guidance:
+//   - Use ReadinessModeFailStart for strict startup gating (e.g., critical data
+//     correctness or initial load safety).
+//   - Use ReadinessModeDegradedStart for fast process startup while deferring
+//     readiness-dependent work to callers.
+func (x *ClusterConfig) WithReadinessMode(mode ReadinessMode) *ClusterConfig {
+	x.readinessMode = mode
 	return x
 }
 

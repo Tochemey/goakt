@@ -32,12 +32,24 @@ import (
 	gtls "github.com/tochemey/goakt/v3/tls"
 )
 
+// ReadinessMode defines how Start behaves when the cluster is not ready.
+type ReadinessMode uint8
+
+const (
+	// ReadinessModeFailStart makes Start return an error if readiness is not achieved.
+	ReadinessModeFailStart ReadinessMode = iota
+	// ReadinessModeDegradedStart lets Start return successfully but rejects operations until ready.
+	ReadinessModeDegradedStart
+)
+
 type config struct {
 	shardCount              uint64
 	minimumMembersQuorum    uint32
 	replicasCount           uint32
 	membersWriteQuorum      uint32
 	membersReadQuorum       uint32
+	readinessTimeout        time.Duration
+	readinessMode           ReadinessMode
 	tableSize               uint64
 	writeTimeout            time.Duration
 	readTimeout             time.Duration
@@ -57,6 +69,8 @@ func defaultConfig() *config {
 		replicasCount:           1,
 		membersWriteQuorum:      1,
 		membersReadQuorum:       1,
+		readinessTimeout:        10 * time.Second,
+		readinessMode:           ReadinessModeDegradedStart,
 		tableSize:               4 * size.MB,
 		writeTimeout:            time.Second,
 		readTimeout:             time.Second,
@@ -135,6 +149,42 @@ func WithMembersReadQuorum(quorum uint32) ConfigOption {
 		if quorum > 0 {
 			cfg.membersReadQuorum = quorum
 		}
+	}
+}
+
+// WithReadinessTimeout sets the maximum time Start waits for the cluster to become ready.
+//
+// This timeout applies only when ReadinessModeFailStart is used. In
+// ReadinessModeDegradedStart, Start returns immediately and readiness is checked
+// asynchronously while data-plane operations are gated until ready.
+//
+// Operational guidance:
+// - Set this to cover discovery and routing table convergence for your cluster.
+// - Use the same value across nodes to avoid uneven startup behavior.
+// - Keep it bounded to surface misconfiguration quickly.
+func WithReadinessTimeout(timeout time.Duration) ConfigOption {
+	return func(cfg *config) {
+		if timeout > 0 {
+			cfg.readinessTimeout = timeout
+		}
+	}
+}
+
+// WithReadinessMode configures how Start behaves when readiness is not achieved.
+//
+// ReadinessModeFailStart blocks Start until readiness is reached or the readiness
+// timeout elapses, returning an error on timeout.
+// ReadinessModeDegradedStart returns from Start immediately and rejects
+// operations that require readiness until it is reached.
+//
+// Operational guidance:
+//   - Use ReadinessModeFailStart when you must prevent any cluster operations
+//     before quorum is established.
+//   - Use ReadinessModeDegradedStart for fast process startup and explicit
+//     readiness-aware callers.
+func WithReadinessMode(mode ReadinessMode) ConfigOption {
+	return func(cfg *config) {
+		cfg.readinessMode = mode
 	}
 }
 

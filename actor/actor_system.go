@@ -70,6 +70,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v3/internal/locker"
+	"github.com/tochemey/goakt/v3/internal/mathx"
 	"github.com/tochemey/goakt/v3/internal/metric"
 	"github.com/tochemey/goakt/v3/internal/network"
 	"github.com/tochemey/goakt/v3/internal/pointer"
@@ -2610,6 +2611,8 @@ func (x *actorSystem) setupCluster() error {
 		cluster.WithShutdownTimeout(x.clusterConfig.shutdownTimeout),
 		cluster.WithDataTableSize(x.clusterConfig.tableSize),
 		cluster.WithBootstrapTimeout(x.clusterConfig.bootstrapTimeout),
+		cluster.WithReadinessTimeout(x.clusterConfig.readinessTimeout),
+		cluster.WithReadinessMode(cluster.ReadinessMode(x.clusterConfig.readinessMode)),
 		cluster.WithRoutingTableInterval(x.clusterConfig.clusterStateSyncInterval),
 		cluster.WithBalancerInterval(x.clusterConfig.clusterBalancerInterval),
 	)
@@ -3953,7 +3956,7 @@ func (x *actorSystem) registerMetrics() error {
 func computeEvictionCount(total, threshold uint64, totalEvictions, percentageToReturn int) int {
 	requiredToEvict := int(total - threshold)
 	percentageBasedEvict := (totalEvictions * percentageToReturn) / 100
-	toReturn := maxInt(requiredToEvict, percentageBasedEvict)
+	toReturn := mathx.Max(requiredToEvict, percentageBasedEvict)
 
 	// Ensure at least 1 item is returned if there are actors over the threshold
 	// and the percentage is non-zero, but the calculation resulted in 0.
@@ -3989,12 +3992,4 @@ func getServer(ctx context.Context, address string) *stdhttp.Server {
 			return ctx
 		},
 	}
-}
-
-// maxInt returns the maximum of two integers. Helper for calculation.
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }

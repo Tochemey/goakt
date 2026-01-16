@@ -54,6 +54,8 @@ func TestClusterConfig(t *testing.T) {
 			WithShutdownTimeout(10*time.Second).
 			WithReadTimeout(10*time.Second).
 			WithBootstrapTimeout(10*time.Second).
+			WithReadinessTimeout(10*time.Second).
+			WithReadinessMode(ReadinessModeDegradedStart).
 			WithClusterStateSyncInterval(10*time.Second).
 			WithGrainActivationBarrier(5*time.Second).
 			WithClusterBalancerInterval(5*time.Second).
@@ -72,6 +74,8 @@ func TestClusterConfig(t *testing.T) {
 		assert.Equal(t, 10*time.Second, config.readTimeout)
 		assert.Equal(t, 10*time.Second, config.shutdownTimeout)
 		assert.Equal(t, 10*time.Second, config.bootstrapTimeout)
+		assert.Equal(t, 10*time.Second, config.readinessTimeout)
+		assert.Equal(t, ReadinessModeDegradedStart, config.readinessMode)
 		assert.Equal(t, 10*time.Second, config.clusterStateSyncInterval)
 		assert.True(t, config.grainActivationBarrierEnabled())
 		assert.Equal(t, 5*time.Second, config.grainActivationBarrierTimeout())
@@ -98,6 +102,8 @@ func TestClusterConfig(t *testing.T) {
 			WithShutdownTimeout(10 * time.Second).
 			WithReadTimeout(10 * time.Second).
 			WithBootstrapTimeout(10 * time.Second).
+			WithReadinessTimeout(10 * time.Second).
+			WithReadinessMode(ReadinessModeDegradedStart).
 			WithClusterStateSyncInterval(10 * time.Second).
 			WithDiscovery(provider)
 
@@ -113,6 +119,8 @@ func TestClusterConfig(t *testing.T) {
 		assert.Equal(t, 10*time.Second, config.readTimeout)
 		assert.Equal(t, 10*time.Second, config.shutdownTimeout)
 		assert.Equal(t, 10*time.Second, config.bootstrapTimeout)
+		assert.Equal(t, 10*time.Second, config.readinessTimeout)
+		assert.Equal(t, ReadinessModeDegradedStart, config.readinessMode)
 		assert.Equal(t, 10*time.Second, config.clusterStateSyncInterval)
 
 		assert.Exactly(t, uint64(10*size.MB), config.tableSize)

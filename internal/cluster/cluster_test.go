@@ -29,9 +29,12 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"reflect"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/google/uuid"
 	"github.com/kapetan-io/tackle/autotls"
@@ -40,6 +43,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tochemey/olric"
+	oconfig "github.com/tochemey/olric/config"
 	"github.com/tochemey/olric/events"
 	"github.com/travisjeffery/go-dynaport"
 	"go.uber.org/atomic"
@@ -56,7 +60,6 @@ import (
 	"github.com/tochemey/goakt/v3/log"
 	mocksdiscovery "github.com/tochemey/goakt/v3/mocks/discovery"
 	gtls "github.com/tochemey/goakt/v3/tls"
-	"sync"
 )
 
 func TestNotRunningReturnsErrEngineNotRunning(t *testing.T) {
@@ -152,6 +155,563 @@ func TestNotRunningReturnsErrEngineNotRunning(t *testing.T) {
 	provider.AssertExpectations(t)
 }
 
+func TestRequiredMemberCount(t *testing.T) {
+	t.Run("returns max of configured thresholds", func(t *testing.T) {
+		cl := &cluster{
+			replicaCount:       2,
+			readQuorum:         3,
+			writeQuorum:        4,
+			minimumPeersQuorum: 5,
+		}
+
+		require.EqualValues(t, 5, cl.requiredMemberCount())
+	})
+
+	t.Run("defaults to one when all values are zero", func(t *testing.T) {
+		cl := &cluster{}
+		require.EqualValues(t, 1, cl.requiredMemberCount())
+	})
+}
+
+func TestCountDiscoveredMembers(t *testing.T) {
+	cl := &cluster{
+		node: &discovery.Node{Host: "127.0.0.1", DiscoveryPort: 3322},
+	}
+
+	require.EqualValues(t, 1, cl.countDiscoveredMembers(nil))
+
+	self := cl.node.DiscoveryAddress()
+	require.EqualValues(t, 1, cl.countDiscoveredMembers([]string{self}))
+	require.EqualValues(t, 2, cl.countDiscoveredMembers([]string{"127.0.0.1:9000"}))
+}
+
+func TestEnsureReady(t *testing.T) {
+	cl := &cluster{}
+	require.NoError(t, cl.ensureReady())
+
+	cl.ready = atomic.NewBool(false)
+	require.ErrorIs(t, cl.ensureReady(), olric.ErrClusterQuorum)
+
+	cl.ready.Store(true)
+	require.NoError(t, cl.ensureReady())
+}
+
+func TestWaitForClusterReadyRetries(t *testing.T) {
+	cl := &cluster{}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	calls := 0
+	err := cl.waitForClusterReady(ctx, func() error {
+		calls++
+		if calls < 3 {
+			return olric.ErrClusterQuorum
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, 3, calls)
+}
+
+func TestWaitForClusterReadyNonRetryable(t *testing.T) {
+	cl := &cluster{}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	expectedErr := errors.New("boom")
+	err := cl.waitForClusterReady(ctx, func() error {
+		return expectedErr
+	})
+	require.ErrorIs(t, err, expectedErr)
+}
+
+func TestWaitForQuorumStartError(t *testing.T) {
+	provider := new(mocksdiscovery.Provider)
+	provider.EXPECT().DiscoverPeers().Return([]string{}, nil).Maybe()
+
+	cl := &cluster{
+		discoveryProvider:  provider,
+		node:               &discovery.Node{Host: "127.0.0.1", DiscoveryPort: 3322},
+		replicaCount:       2,
+		readQuorum:         1,
+		writeQuorum:        1,
+		minimumPeersQuorum: 1,
+		logger:             log.DiscardLogger,
+	}
+
+	startErrCh := make(chan error, 1)
+	startErr := errors.New("start failed")
+	startErrCh <- startErr
+
+	err := cl.waitForQuorum(context.Background(), startErrCh)
+	require.ErrorIs(t, err, startErr)
+	provider.AssertExpectations(t)
+}
+
+func TestWaitForQuorumContextDeadline(t *testing.T) {
+	provider := new(mocksdiscovery.Provider)
+	provider.EXPECT().DiscoverPeers().Return([]string{}, nil).Maybe()
+
+	cl := &cluster{
+		discoveryProvider:  provider,
+		node:               &discovery.Node{Host: "127.0.0.1", DiscoveryPort: 3322},
+		replicaCount:       2,
+		readQuorum:         1,
+		writeQuorum:        1,
+		minimumPeersQuorum: 1,
+		logger:             log.DiscardLogger,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	err := cl.waitForQuorum(ctx, nil)
+	require.ErrorIs(t, err, olric.ErrClusterQuorum)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	provider.AssertExpectations(t)
+}
+
+func TestWaitForQuorumStartErrChannelClosed(t *testing.T) {
+	provider := new(mocksdiscovery.Provider)
+	provider.EXPECT().DiscoverPeers().Return([]string{}, nil).Maybe()
+
+	cl := &cluster{
+		discoveryProvider:  provider,
+		node:               &discovery.Node{Host: "127.0.0.1", DiscoveryPort: 3322},
+		replicaCount:       2,
+		readQuorum:         1,
+		writeQuorum:        1,
+		minimumPeersQuorum: 1,
+		logger:             log.DiscardLogger,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	startErrCh := make(chan error)
+	close(startErrCh)
+
+	err := cl.waitForQuorum(ctx, startErrCh)
+	require.ErrorIs(t, err, olric.ErrClusterQuorum)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	provider.AssertExpectations(t)
+}
+
+func TestHandleReadinessDeadline(t *testing.T) {
+	provider := new(mocksdiscovery.Provider)
+	provider.EXPECT().DiscoverPeers().Return([]string{}, nil).Maybe()
+
+	cl := &cluster{
+		discoveryProvider:  provider,
+		node:               &discovery.Node{Host: "127.0.0.1", DiscoveryPort: 3322},
+		replicaCount:       2,
+		readQuorum:         1,
+		writeQuorum:        1,
+		minimumPeersQuorum: 1,
+		ready:              atomic.NewBool(false),
+		running:            atomic.NewBool(true),
+		logger:             log.DiscardLogger,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	cl.handleReadiness(ctx, nil, context.Background())
+	require.False(t, cl.ready.Load())
+	provider.AssertExpectations(t)
+}
+
+func TestIsRetryableClusterError(t *testing.T) {
+	require.True(t, isRetryableClusterError(olric.ErrClusterQuorum))
+	require.True(t, isRetryableClusterError(olric.ErrOperationTimeout))
+	require.True(t, isRetryableClusterError(olric.ErrServerGone))
+	require.False(t, isRetryableClusterError(errors.New("boom")))
+}
+
+func TestBuildConfigWithTLSAndDebug(t *testing.T) {
+	info := &gtls.Info{
+		ClientConfig: &tls.Config{},
+		ServerConfig: &tls.Config{},
+	}
+	cl := &cluster{
+		logger:  log.DebugLogger,
+		node:    &discovery.Node{Host: "127.0.0.1", PeersPort: 3322, DiscoveryPort: 3323},
+		tlsInfo: info,
+	}
+
+	cfg, err := cl.buildConfig()
+	require.NoError(t, err)
+	require.NotNil(t, cfg.TLS)
+	require.NotNil(t, cfg.Client.TLS)
+	require.False(t, cfg.Client.DisableRedisLogging)
+	require.EqualValues(t, oconfig.DefaultLogVerbosity, cfg.LogVerbosity)
+}
+
+func TestSetupMemberlistConfigWithTLS(t *testing.T) {
+	cert, err := tls.LoadX509KeyPair("../../test/data/certs/auto.pem", "../../test/data/certs/auto.key")
+	require.NoError(t, err)
+	info := &gtls.Info{
+		ClientConfig: &tls.Config{Certificates: []tls.Certificate{cert}},
+		ServerConfig: &tls.Config{Certificates: []tls.Certificate{cert}},
+	}
+	cl := &cluster{
+		logger:  log.DiscardLogger,
+		node:    &discovery.Node{Host: "127.0.0.1", PeersPort: 3322, DiscoveryPort: 3323},
+		tlsInfo: info,
+	}
+
+	cfg := &oconfig.Config{}
+	err = cl.setupMemberlistConfig(cfg)
+	require.NoError(t, err)
+	require.NotNil(t, cfg.MemberlistConfig)
+	require.NotNil(t, cfg.MemberlistConfig.Transport)
+}
+
+func TestAwaitReadySuccess(t *testing.T) {
+	pubsub := newTestPubSub(t)
+	client := &readyClient{MockClient: &MockClient{}, pubsub: pubsub}
+	ctx, cancel := context.WithCancel(context.Background())
+
+	cl := &cluster{
+		client:         client,
+		node:           &discovery.Node{Host: "127.0.0.1", PeersPort: 3322},
+		replicaCount:   1,
+		readQuorum:     1,
+		writeQuorum:    1,
+		ready:          atomic.NewBool(false),
+		logger:         log.DiscardLogger,
+		consumeStarted: atomic.NewBool(false),
+		consumeCtx:     ctx,
+		consumeCancel:  cancel,
+	}
+
+	err := cl.awaitReady(context.Background(), nil, context.Background())
+	require.NoError(t, err)
+	require.True(t, cl.ready.Load())
+
+	cancel()
+	done := make(chan struct{})
+	go func() {
+		cl.consumeWg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("consume did not stop")
+	}
+}
+
+func TestHandleReadinessSuccess(t *testing.T) {
+	pubsub := newTestPubSub(t)
+	client := &readyClient{MockClient: &MockClient{}, pubsub: pubsub}
+	ctx, cancel := context.WithCancel(context.Background())
+
+	cl := &cluster{
+		client:         client,
+		node:           &discovery.Node{Host: "127.0.0.1", PeersPort: 3322},
+		replicaCount:   1,
+		readQuorum:     1,
+		writeQuorum:    1,
+		ready:          atomic.NewBool(false),
+		logger:         log.DiscardLogger,
+		consumeStarted: atomic.NewBool(false),
+		consumeCtx:     ctx,
+		consumeCancel:  cancel,
+	}
+
+	cl.handleReadiness(context.Background(), nil, context.Background())
+	require.True(t, cl.ready.Load())
+
+	cancel()
+	done := make(chan struct{})
+	go func() {
+		cl.consumeWg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("consume did not stop")
+	}
+}
+
+func TestAwaitReadyStopsOnCreateDMapError(t *testing.T) {
+	expectedErr := errors.New("dmap failure")
+	cl := &cluster{
+		client:         &MockClient{newDMapErr: expectedErr},
+		replicaCount:   1,
+		readQuorum:     1,
+		writeQuorum:    1,
+		ready:          atomic.NewBool(false),
+		logger:         log.DiscardLogger,
+		consumeStarted: atomic.NewBool(false),
+		consumeCtx:     context.Background(),
+	}
+
+	err := cl.awaitReady(context.Background(), nil, context.Background())
+	require.ErrorIs(t, err, expectedErr)
+}
+
+func TestWaitForQuorumReachesTarget(t *testing.T) {
+	provider := new(mocksdiscovery.Provider)
+	self := "127.0.0.1:3322"
+	provider.EXPECT().DiscoverPeers().Return([]string{self, "127.0.0.1:4000"}, nil).Maybe()
+
+	cl := &cluster{
+		discoveryProvider:  provider,
+		node:               &discovery.Node{Host: "127.0.0.1", DiscoveryPort: 3322},
+		replicaCount:       2,
+		readQuorum:         1,
+		writeQuorum:        1,
+		minimumPeersQuorum: 1,
+		logger:             log.DiscardLogger,
+	}
+
+	err := cl.waitForQuorum(context.Background(), nil)
+	require.NoError(t, err)
+	provider.AssertExpectations(t)
+}
+
+func TestWaitForClusterReadyTimeout(t *testing.T) {
+	cl := &cluster{}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	err := cl.waitForClusterReady(ctx, func() error {
+		return olric.ErrClusterQuorum
+	})
+	require.ErrorIs(t, err, olric.ErrClusterQuorum)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+func TestStartConsumeIdempotent(t *testing.T) {
+	cl := &cluster{
+		consumeStarted: atomic.NewBool(true),
+	}
+
+	require.NotPanics(t, func() {
+		cl.startConsume()
+	})
+}
+
+func TestStartConsumeInitializes(t *testing.T) {
+	cl := &cluster{
+		consumeCtx: context.Background(),
+		logger:     log.DiscardLogger,
+	}
+	msgs := make(chan *redis.Message)
+	close(msgs)
+	cl.messages = msgs
+
+	require.NotPanics(t, func() {
+		cl.startConsume()
+	})
+
+	done := make(chan struct{})
+	go func() {
+		cl.consumeWg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("consume did not stop")
+	}
+}
+
+func TestPutRecordRequiresReadiness(t *testing.T) {
+	cl := &cluster{
+		ready: atomic.NewBool(false),
+		dmap:  &MockDMap{},
+	}
+	err := cl.putRecord(context.Background(), namespaceActors, "key", []byte("value"))
+	require.ErrorIs(t, err, olric.ErrClusterQuorum)
+}
+
+func TestGetRecordRequiresReadiness(t *testing.T) {
+	cl := &cluster{
+		ready: atomic.NewBool(false),
+		dmap:  &MockDMap{},
+	}
+	_, err := cl.getRecord(context.Background(), namespaceActors, "key")
+	require.ErrorIs(t, err, olric.ErrClusterQuorum)
+}
+
+func TestDeleteRecordRequiresReadiness(t *testing.T) {
+	cl := &cluster{
+		ready: atomic.NewBool(false),
+		dmap:  &MockDMap{},
+	}
+	err := cl.deleteRecord(context.Background(), namespaceActors, "key")
+	require.ErrorIs(t, err, olric.ErrClusterQuorum)
+}
+
+func TestPutActorRequiresReadiness(t *testing.T) {
+	actor := &internalpb.Actor{
+		Address: address.New("actor", "system", "127.0.0.1", 8000).String(),
+	}
+	cl := &cluster{
+		running:      atomic.NewBool(true),
+		ready:        atomic.NewBool(false),
+		writeTimeout: time.Second,
+		dmap:         &MockDMap{},
+	}
+
+	err := cl.PutActor(context.Background(), actor)
+	require.ErrorIs(t, err, olric.ErrClusterQuorum)
+}
+
+func TestActorExistsRequiresReadiness(t *testing.T) {
+	cl := &cluster{
+		running: atomic.NewBool(true),
+		ready:   atomic.NewBool(false),
+	}
+	_, err := cl.ActorExists(context.Background(), "actor")
+	require.ErrorIs(t, err, olric.ErrClusterQuorum)
+}
+
+func TestGrainExistsRequiresReadiness(t *testing.T) {
+	cl := &cluster{
+		running: atomic.NewBool(true),
+		ready:   atomic.NewBool(false),
+	}
+	_, err := cl.GrainExists(context.Background(), "grain")
+	require.ErrorIs(t, err, olric.ErrClusterQuorum)
+}
+
+func TestLookupKindRequiresReadiness(t *testing.T) {
+	cl := &cluster{
+		running: atomic.NewBool(true),
+		ready:   atomic.NewBool(false),
+	}
+	_, err := cl.LookupKind(context.Background(), "kind")
+	require.ErrorIs(t, err, olric.ErrClusterQuorum)
+}
+
+func TestRemoveKindRequiresReadiness(t *testing.T) {
+	cl := &cluster{
+		running: atomic.NewBool(true),
+		ready:   atomic.NewBool(false),
+	}
+	err := cl.RemoveKind(context.Background(), "kind")
+	require.ErrorIs(t, err, olric.ErrClusterQuorum)
+}
+
+func TestGrainsRequiresReadiness(t *testing.T) {
+	cl := &cluster{
+		running: atomic.NewBool(true),
+		ready:   atomic.NewBool(false),
+	}
+	grains, err := cl.Grains(context.Background(), time.Second)
+	require.ErrorIs(t, err, olric.ErrClusterQuorum)
+	require.Nil(t, grains)
+}
+
+func TestActorsRequiresReadiness(t *testing.T) {
+	cl := &cluster{
+		running: atomic.NewBool(true),
+		ready:   atomic.NewBool(false),
+	}
+	actors, err := cl.Actors(context.Background(), time.Second)
+	require.ErrorIs(t, err, olric.ErrClusterQuorum)
+	require.Nil(t, actors)
+}
+
+func TestGetActorsByOwnerRequiresReadiness(t *testing.T) {
+	cl := &cluster{
+		running: atomic.NewBool(true),
+		ready:   atomic.NewBool(false),
+	}
+	actors, err := cl.GetActorsByOwner(context.Background(), "127.0.0.1:8080")
+	require.ErrorIs(t, err, olric.ErrClusterQuorum)
+	require.Nil(t, actors)
+}
+
+func TestGetGrainsByOwnerRequiresReadiness(t *testing.T) {
+	cl := &cluster{
+		running: atomic.NewBool(true),
+		ready:   atomic.NewBool(false),
+	}
+	grains, err := cl.GetGrainsByOwner(context.Background(), "127.0.0.1:8080")
+	require.ErrorIs(t, err, olric.ErrClusterQuorum)
+	require.Nil(t, grains)
+}
+
+func TestGetPartitionRequiresReadiness(t *testing.T) {
+	cl := &cluster{
+		running: atomic.NewBool(true),
+		ready:   atomic.NewBool(false),
+	}
+	require.Zero(t, cl.GetPartition("actor"))
+}
+
+func TestNextRoundRobinValueRequiresReadiness(t *testing.T) {
+	cl := &cluster{
+		running: atomic.NewBool(true),
+		ready:   atomic.NewBool(false),
+	}
+	_, err := cl.NextRoundRobinValue(context.Background(), ActorsRoundRobinKey)
+	require.ErrorIs(t, err, olric.ErrClusterQuorum)
+}
+
+func TestGetActorsByOwnerSkipsMissingKey(t *testing.T) {
+	ctx := context.Background()
+	owner := "127.0.0.1:8080"
+
+	actor := &internalpb.Actor{Address: "actor1", OwnerNode: owner}
+	actorBytes, _ := proto.Marshal(actor)
+
+	cl := &cluster{
+		running: atomic.NewBool(true),
+		ready:   atomic.NewBool(true),
+		logger:  log.DiscardLogger,
+		dmap: &MockDMap{
+			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
+				return &iteratorStub{keys: []string{
+					composeKey(namespaceActors, "missing"),
+					composeKey(namespaceActors, "actor1"),
+				}}, nil
+			},
+			getFn: func(ctx context.Context, key string) (*olric.GetResponse, error) {
+				if key == composeKey(namespaceActors, "missing") {
+					return nil, olric.ErrKeyNotFound
+				}
+				return newGetResponseWithValue(actorBytes), nil
+			},
+		},
+	}
+
+	actors, err := cl.GetActorsByOwner(ctx, owner)
+	require.NoError(t, err)
+	require.Len(t, actors, 1)
+	require.Equal(t, "actor1", actors[0].GetAddress())
+}
+
+func TestGetGrainsByOwnerPropagatesByteError(t *testing.T) {
+	ctx := context.Background()
+	owner := "127.0.0.1:8080"
+
+	cl := &cluster{
+		running: atomic.NewBool(true),
+		ready:   atomic.NewBool(true),
+		logger:  log.DiscardLogger,
+		dmap: &MockDMap{
+			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
+				return &iteratorStub{keys: []string{composeKey(namespaceGrains, "grain1")}}, nil
+			},
+			getFn: func(ctx context.Context, key string) (*olric.GetResponse, error) {
+				return &olric.GetResponse{}, nil
+			},
+		},
+	}
+
+	grains, err := cl.GetGrainsByOwner(ctx, owner)
+	require.ErrorIs(t, err, olric.ErrNilResponse)
+	require.Nil(t, grains)
+}
+
 func TestSingleNode(t *testing.T) {
 	t.Run("With Start and Shutdown", func(t *testing.T) {
 		// create the context
@@ -175,7 +735,7 @@ func TestSingleNode(t *testing.T) {
 		provider.EXPECT().Initialize().Return(nil)
 		provider.EXPECT().Register().Return(nil)
 		provider.EXPECT().Deregister().Return(nil)
-		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil).Maybe()
 		provider.EXPECT().Close().Return(nil)
 
 		// create a Node node
@@ -208,6 +768,56 @@ func TestSingleNode(t *testing.T) {
 		require.NoError(t, cl.Stop(ctx))
 		provider.AssertExpectations(t)
 	})
+	t.Run("With Start when quorum is not met", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		nodePorts := dynaport.Get(3)
+		gossipPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		addrs := []string{
+			fmt.Sprintf("127.0.0.1:%d", gossipPort),
+		}
+
+		provider := new(mocksdiscovery.Provider)
+
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil).Maybe()
+		provider.EXPECT().Close().Return(nil)
+
+		host := "127.0.0.1"
+		hostNode := discovery.Node{
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: gossipPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
+		}
+
+		logger := log.DiscardLogger
+		cl := New(
+			"test",
+			provider,
+			&hostNode,
+			WithLogger(logger),
+			WithMinimumMembersQuorum(2),
+			WithReadinessTimeout(250*time.Millisecond),
+			WithReadinessMode(ReadinessModeFailStart),
+		)
+		require.NotNil(t, cl)
+
+		err := cl.Start(ctx)
+		require.Error(t, err)
+		require.ErrorIs(t, err, olric.ErrClusterQuorum)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+
+		provider.AssertExpectations(t)
+	})
 	t.Run("With PeerSync and GetActor", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
@@ -230,7 +840,7 @@ func TestSingleNode(t *testing.T) {
 		provider.EXPECT().Initialize().Return(nil)
 		provider.EXPECT().Register().Return(nil)
 		provider.EXPECT().Deregister().Return(nil)
-		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil).Maybe()
 		provider.EXPECT().Close().Return(nil)
 
 		// create a Node
@@ -311,7 +921,7 @@ func TestSingleNode(t *testing.T) {
 		provider.EXPECT().Initialize().Return(nil)
 		provider.EXPECT().Register().Return(nil)
 		provider.EXPECT().Deregister().Return(nil)
-		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil).Maybe()
 		provider.EXPECT().Close().Return(nil)
 
 		// create a Node
@@ -440,7 +1050,7 @@ func TestSingleNode(t *testing.T) {
 		provider.EXPECT().Initialize().Return(nil)
 		provider.EXPECT().Register().Return(nil)
 		provider.EXPECT().Deregister().Return(nil)
-		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil).Maybe()
 		provider.EXPECT().Close().Return(nil)
 
 		// create a Node
@@ -524,7 +1134,7 @@ func TestSingleNode(t *testing.T) {
 		provider.EXPECT().Initialize().Return(nil)
 		provider.EXPECT().Register().Return(nil)
 		provider.EXPECT().Deregister().Return(nil)
-		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil).Maybe()
 		provider.EXPECT().Close().Return(nil)
 
 		// create a Node
@@ -609,7 +1219,7 @@ func TestSingleNode(t *testing.T) {
 		provider.EXPECT().Initialize().Return(nil)
 		provider.EXPECT().Register().Return(nil)
 		provider.EXPECT().Deregister().Return(nil)
-		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil).Maybe()
 		provider.EXPECT().Close().Return(nil)
 
 		// create a Node
@@ -747,7 +1357,7 @@ func TestSingleNode(t *testing.T) {
 		provider.EXPECT().Initialize().Return(nil)
 		provider.EXPECT().Register().Return(nil)
 		provider.EXPECT().Deregister().Return(nil)
-		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil).Maybe()
 		provider.EXPECT().Close().Return(nil)
 
 		// create a Node
@@ -805,7 +1415,7 @@ func TestSingleNode(t *testing.T) {
 		provider.EXPECT().Initialize().Return(nil)
 		provider.EXPECT().Register().Return(nil)
 		provider.EXPECT().Deregister().Return(nil)
-		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil).Maybe()
 		provider.EXPECT().Close().Return(nil)
 
 		// create a Node
@@ -901,7 +1511,7 @@ func TestSingleNode(t *testing.T) {
 		provider.EXPECT().Initialize().Return(nil)
 		provider.EXPECT().Register().Return(nil)
 		provider.EXPECT().Deregister().Return(nil)
-		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil).Maybe()
 		provider.EXPECT().Close().Return(nil)
 
 		// create a Node
@@ -963,7 +1573,7 @@ func TestSingleNode(t *testing.T) {
 		provider.EXPECT().Initialize().Return(nil)
 		provider.EXPECT().Register().Return(nil)
 		provider.EXPECT().Deregister().Return(nil)
-		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil).Maybe()
 		provider.EXPECT().Close().Return(nil)
 
 		host := "127.0.0.1"
@@ -1015,7 +1625,7 @@ func TestSingleNode(t *testing.T) {
 		provider.EXPECT().Initialize().Return(nil)
 		provider.EXPECT().Register().Return(nil)
 		provider.EXPECT().Deregister().Return(nil)
-		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil).Maybe()
 		provider.EXPECT().Close().Return(nil)
 
 		host := "127.0.0.1"
@@ -1074,7 +1684,7 @@ func TestSingleNode(t *testing.T) {
 		provider.EXPECT().Initialize().Return(nil)
 		provider.EXPECT().Register().Return(nil)
 		provider.EXPECT().Deregister().Return(nil)
-		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil).Maybe()
 		provider.EXPECT().Close().Return(nil)
 
 		host := "127.0.0.1"
@@ -1132,7 +1742,7 @@ func TestSingleNode(t *testing.T) {
 		provider.EXPECT().Initialize().Return(nil)
 		provider.EXPECT().Register().Return(nil)
 		provider.EXPECT().Deregister().Return(nil)
-		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil).Maybe()
 		provider.EXPECT().Close().Return(nil)
 
 		host := "127.0.0.1"
@@ -1177,7 +1787,7 @@ func TestSingleNode(t *testing.T) {
 		provider.EXPECT().Initialize().Return(nil)
 		provider.EXPECT().Register().Return(nil)
 		provider.EXPECT().Deregister().Return(nil)
-		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil).Maybe()
 		provider.EXPECT().Close().Return(nil)
 
 		host := "127.0.0.1"
@@ -1228,7 +1838,7 @@ func TestSingleNode(t *testing.T) {
 		provider.EXPECT().Initialize().Return(nil)
 		provider.EXPECT().Register().Return(nil)
 		provider.EXPECT().Deregister().Return(nil)
-		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil).Maybe()
 		provider.EXPECT().Close().Return(nil)
 
 		host := "127.0.0.1"
@@ -1935,6 +2545,7 @@ func startEngineWithTLS(t *testing.T, serverAddr string, server, client *tls.Con
 func TestPutGrainReturnsErrorWhenIDMissing(t *testing.T) {
 	cl := &cluster{
 		running: atomic.NewBool(true),
+		ready:   atomic.NewBool(true),
 	}
 
 	err := cl.PutGrain(context.Background(), &internalpb.Grain{})
@@ -1944,6 +2555,7 @@ func TestPutGrainReturnsErrorWhenIDMissing(t *testing.T) {
 func TestPutGrainReturnsErrorWhenIDValueEmpty(t *testing.T) {
 	cl := &cluster{
 		running: atomic.NewBool(true),
+		ready:   atomic.NewBool(true),
 	}
 
 	grain := &internalpb.Grain{GrainId: &internalpb.GrainId{Value: ""}}
@@ -1960,6 +2572,7 @@ func TestPutGrainIfAbsentReturnsErrorWhenClusterNil(t *testing.T) {
 func TestPutGrainIfAbsentReturnsErrorWhenIDMissing(t *testing.T) {
 	cl := &cluster{
 		running: atomic.NewBool(true),
+		ready:   atomic.NewBool(true),
 	}
 
 	err := PutGrainIfAbsent(context.Background(), cl, &internalpb.Grain{})
@@ -1969,6 +2582,7 @@ func TestPutGrainIfAbsentReturnsErrorWhenIDMissing(t *testing.T) {
 func TestPutGrainIfAbsentReturnsErrorWhenIDValueEmpty(t *testing.T) {
 	cl := &cluster{
 		running: atomic.NewBool(true),
+		ready:   atomic.NewBool(true),
 	}
 
 	grain := &internalpb.Grain{GrainId: &internalpb.GrainId{Value: ""}}
@@ -2174,6 +2788,7 @@ func TestActorsReturnsScanError(t *testing.T) {
 	expectedErr := errors.New("scan failure")
 	cl := &cluster{
 		running: atomic.NewBool(true),
+		ready:   atomic.NewBool(true),
 		logger:  log.DiscardLogger,
 		dmap: &MockDMap{
 			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
@@ -2192,6 +2807,7 @@ func TestActorsPropagatesGetError(t *testing.T) {
 	expectedErr := errors.New("actors get failure")
 	cl := &cluster{
 		running: atomic.NewBool(true),
+		ready:   atomic.NewBool(true),
 		logger:  log.DiscardLogger,
 		dmap: &MockDMap{
 			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
@@ -2213,6 +2829,7 @@ func TestActorsPropagatesGetError(t *testing.T) {
 func TestActorsPropagatesByteError(t *testing.T) {
 	cl := &cluster{
 		running: atomic.NewBool(true),
+		ready:   atomic.NewBool(true),
 		logger:  log.DiscardLogger,
 		dmap: &MockDMap{
 			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
@@ -2255,6 +2872,7 @@ func TestGrainsReturnsScanError(t *testing.T) {
 	expectedErr := errors.New("scan failure")
 	cl := &cluster{
 		running: atomic.NewBool(true),
+		ready:   atomic.NewBool(true),
 		logger:  log.DiscardLogger,
 		dmap: &MockDMap{
 			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
@@ -2273,6 +2891,7 @@ func TestGrainsPropagatesGetError(t *testing.T) {
 	expectedErr := errors.New("grains get failure")
 	cl := &cluster{
 		running: atomic.NewBool(true),
+		ready:   atomic.NewBool(true),
 		logger:  log.DiscardLogger,
 		dmap: &MockDMap{
 			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
@@ -2294,6 +2913,7 @@ func TestGrainsPropagatesGetError(t *testing.T) {
 func TestGrainsPropagatesByteError(t *testing.T) {
 	cl := &cluster{
 		running: atomic.NewBool(true),
+		ready:   atomic.NewBool(true),
 		logger:  log.DiscardLogger,
 		dmap: &MockDMap{
 			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
@@ -2799,6 +3419,7 @@ func TestPeersReturnsClientError(t *testing.T) {
 	expectedErr := errors.New("members failure")
 	cl := &cluster{
 		running: atomic.NewBool(true),
+		ready:   atomic.NewBool(true),
 		client:  &MockClient{membersErr: expectedErr},
 		logger:  log.DiscardLogger,
 		node:    &discovery.Node{Host: "127.0.0.1", PeersPort: 9000},
@@ -2814,6 +3435,7 @@ func TestIsLeaderReturnsFalseOnMembersError(t *testing.T) {
 	expectedErr := errors.New("members failure")
 	cl := &cluster{
 		running: atomic.NewBool(true),
+		ready:   atomic.NewBool(true),
 		client:  &MockClient{membersErr: expectedErr},
 		logger:  log.DiscardLogger,
 		node:    &discovery.Node{Host: "127.0.0.1", PeersPort: 9000},
@@ -3041,6 +3663,28 @@ func TestRebalanceEventDedup(t *testing.T) {
 		t.Fatalf("expected no duplicate event")
 	default:
 	}
+}
+
+func TestEmitPendingJoinForEpochLockedDropsMissingTimestamp(t *testing.T) {
+	cl := newEventTestCluster("127.0.0.1", 4000)
+	node := "127.0.0.1:7000"
+	cl.rebalanceJoinNodeEpochs[node] = 1
+
+	cl.emitPendingJoinForEpochLocked(1)
+	require.Empty(t, cl.rebalanceJoinNodeEpochs)
+	require.Empty(t, cl.nodeJoinTimestamps)
+	require.Empty(t, cl.nodeJoinMetadata)
+}
+
+func TestEmitPendingLeftForEpochLockedDropsMissingTimestamp(t *testing.T) {
+	cl := newEventTestCluster("127.0.0.1", 4000)
+	node := "127.0.0.1:7000"
+	cl.rebalanceLeftNodeEpochs[node] = 1
+
+	cl.emitPendingLeftForEpochLocked(1)
+	require.Empty(t, cl.rebalanceLeftNodeEpochs)
+	require.Empty(t, cl.nodeLeftTimestamps)
+	require.Empty(t, cl.nodeLeftMetadata)
 }
 
 // nolint
@@ -3291,7 +3935,7 @@ func TestStopWaitsForConsume(t *testing.T) {
 	}
 
 	// Give it time to process
-	time.Sleep(50 * time.Millisecond)
+	pause.For(50 * time.Millisecond)
 
 	// Test the shutdown synchronization - cancel context and wait for consume
 	cl.consumeCancel()
@@ -3330,7 +3974,7 @@ func TestStopNoPanicOnClosedChannel(t *testing.T) {
 	}()
 
 	// Wait for consume to finish
-	time.Sleep(100 * time.Millisecond)
+	pause.For(100 * time.Millisecond)
 
 	// Test that closing events channel after consume finishes doesn't panic
 	cl.consumeCancel()
@@ -3463,6 +4107,7 @@ func TestSendEventLockedHandlesNilChannel(t *testing.T) {
 func TestPeersFiltersSelfAndParsesMeta(t *testing.T) {
 	cl := &cluster{
 		running: atomic.NewBool(true),
+		ready:   atomic.NewBool(true),
 		logger:  log.DiscardLogger,
 		node:    &discovery.Node{Host: "127.0.0.1", PeersPort: 4000, RemotingPort: 4001, DiscoveryPort: 3000},
 	}
@@ -3496,6 +4141,7 @@ func TestPeersFiltersSelfAndParsesMeta(t *testing.T) {
 func TestIsLeaderReturnsTrueWhenCoordinator(t *testing.T) {
 	cl := &cluster{
 		running: atomic.NewBool(true),
+		ready:   atomic.NewBool(true),
 		logger:  log.DiscardLogger,
 		node:    &discovery.Node{Host: "127.0.0.1", PeersPort: 4000},
 	}
@@ -3630,6 +4276,7 @@ func TestPutKindIfAbsent(t *testing.T) {
 	t.Run("without fallback when kind is empty", func(t *testing.T) {
 		cl := &cluster{
 			running: atomic.NewBool(true),
+			ready:   atomic.NewBool(true),
 		}
 
 		kind := ""
@@ -3676,7 +4323,7 @@ func TestGetGrainsByOwnerSkipsInvalidEntries(t *testing.T) {
 	ownerNode := "127.0.0.1:8080"
 
 	grain1 := &internalpb.Grain{
-		GrainId:  &internalpb.GrainId{Value: "grain1"},
+		GrainId:   &internalpb.GrainId{Value: "grain1"},
 		OwnerNode: ownerNode,
 	}
 	grain1Bytes, _ := proto.Marshal(grain1)
@@ -3803,7 +4450,7 @@ func TestGetGrainsByOwnerSkipsRoundRobinKey(t *testing.T) {
 	ownerNode := "127.0.0.1:8080"
 
 	grain1 := &internalpb.Grain{
-		GrainId:  &internalpb.GrainId{Value: "grain1"},
+		GrainId:   &internalpb.GrainId{Value: "grain1"},
 		OwnerNode: ownerNode,
 	}
 	grain1Bytes, _ := proto.Marshal(grain1)
@@ -3836,4 +4483,29 @@ func TestGetGrainsByOwnerSkipsRoundRobinKey(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, grains, 1)
 	require.Equal(t, "grain1", grains[0].GetGrainId().GetValue())
+}
+
+type readyClient struct {
+	*MockClient
+	pubsub *olric.PubSub
+}
+
+func (c *readyClient) NewPubSub(options ...olric.PubSubOption) (*olric.PubSub, error) {
+	return c.pubsub, nil
+}
+
+func newTestPubSub(t *testing.T) *olric.PubSub {
+	t.Helper()
+
+	rc := redis.NewClient(&redis.Options{
+		Addr:         "127.0.0.1:0",
+		DialTimeout:  10 * time.Millisecond,
+		ReadTimeout:  10 * time.Millisecond,
+		WriteTimeout: 10 * time.Millisecond,
+	})
+	ps := &olric.PubSub{}
+	rv := reflect.ValueOf(ps).Elem()
+	field := rv.FieldByName("rc")
+	reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).Elem().Set(reflect.ValueOf(rc))
+	return ps
 }

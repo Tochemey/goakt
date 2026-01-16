@@ -97,6 +97,20 @@ func TestConfigOptions(t *testing.T) {
 			},
 		},
 		{
+			name:   "WithReadinessTimeout",
+			option: WithReadinessTimeout(12 * time.Second),
+			assert: func(t *testing.T, cfg *config) {
+				assert.Equal(t, 12*time.Second, cfg.readinessTimeout)
+			},
+		},
+		{
+			name:   "WithReadinessMode",
+			option: WithReadinessMode(ReadinessModeDegradedStart),
+			assert: func(t *testing.T, cfg *config) {
+				assert.Equal(t, ReadinessModeDegradedStart, cfg.readinessMode)
+			},
+		},
+		{
 			name:   "WithDataTableSize",
 			option: WithDataTableSize(sizeVal),
 			assert: func(t *testing.T, cfg *config) {
@@ -174,6 +188,7 @@ func TestConfigOptionsIgnoreZeroOrNil(t *testing.T) {
 	WithMinimumMembersQuorum(0)(cfg)
 	WithMembersWriteQuorum(0)(cfg)
 	WithMembersReadQuorum(0)(cfg)
+	WithReadinessTimeout(0)(cfg)
 	WithDataTableSize(0)(cfg)
 	WithWriteTimeout(0)(cfg)
 	WithReadTimeout(0)(cfg)
@@ -189,6 +204,8 @@ func TestConfigOptionsIgnoreZeroOrNil(t *testing.T) {
 	assert.Equal(t, original.minimumMembersQuorum, cfg.minimumMembersQuorum)
 	assert.Equal(t, original.membersWriteQuorum, cfg.membersWriteQuorum)
 	assert.Equal(t, original.membersReadQuorum, cfg.membersReadQuorum)
+	assert.Equal(t, original.readinessTimeout, cfg.readinessTimeout)
+	assert.Equal(t, original.readinessMode, cfg.readinessMode)
 	assert.Equal(t, original.tableSize, cfg.tableSize)
 	assert.Equal(t, original.writeTimeout, cfg.writeTimeout)
 	assert.Equal(t, original.readTimeout, cfg.readTimeout)

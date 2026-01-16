@@ -1950,15 +1950,22 @@ func startEtcdCluster(t *testing.T) *etcdContainer.EtcdContainer {
 }
 
 type testClusterConfig struct {
-	tlsEnabled        bool
-	serverTLS         *cryptotls.Config
-	clientTLS         *cryptotls.Config
-	pubsubEnabled     bool
-	relocationEnabled bool
-	extension         extension.Extension
-	dependency        extension.Dependency
-	compression       remote.Compression
-	roles             []string
+	tlsEnabled         bool
+	serverTLS          *cryptotls.Config
+	clientTLS          *cryptotls.Config
+	pubsubEnabled      bool
+	relocationEnabled  bool
+	extension          extension.Extension
+	dependency         extension.Dependency
+	compression        remote.Compression
+	roles              []string
+	readinessMode      ReadinessMode
+	readinessTimeout   time.Duration
+	replicaCount       uint32
+	readQuorum         uint32
+	writeQuorum        uint32
+	minimumPeersQuorum uint32
+	deferStart         bool
 }
 
 type testClusterOption func(*testClusterConfig)
@@ -1998,6 +2005,48 @@ func withMockCompression(c remote.Compression) testClusterOption {
 func withMockRoles(roles ...string) testClusterOption {
 	return func(tcc *testClusterConfig) {
 		tcc.roles = roles
+	}
+}
+
+func withTestReadinessMode(mode ReadinessMode) testClusterOption {
+	return func(tcc *testClusterConfig) {
+		tcc.readinessMode = mode
+	}
+}
+
+func withTestReadinessTimeout(timeout time.Duration) testClusterOption {
+	return func(tcc *testClusterConfig) {
+		tcc.readinessTimeout = timeout
+	}
+}
+
+func withTestReplicaCount(count uint32) testClusterOption {
+	return func(tcc *testClusterConfig) {
+		tcc.replicaCount = count
+	}
+}
+
+func withTestReadQuorum(count uint32) testClusterOption {
+	return func(tcc *testClusterConfig) {
+		tcc.readQuorum = count
+	}
+}
+
+func withTestWriteQuorum(count uint32) testClusterOption {
+	return func(tcc *testClusterConfig) {
+		tcc.writeQuorum = count
+	}
+}
+
+func withTestMinimumPeersQuorum(count uint32) testClusterOption {
+	return func(tcc *testClusterConfig) {
+		tcc.minimumPeersQuorum = count
+	}
+}
+
+func withDeferredStart() testClusterOption {
+	return func(tcc *testClusterConfig) {
+		tcc.deferStart = true
 	}
 }
 
@@ -2069,7 +2118,15 @@ func testSystem(t *testing.T, providerFactory providerFactory, opts ...testClust
 	// provider
 	provider := providerFactory(t, host, discoveryPort)
 
-	cfg := &testClusterConfig{relocationEnabled: true}
+	cfg := &testClusterConfig{
+		relocationEnabled:  true,
+		readinessMode:      ReadinessModeDegradedStart,
+		readinessTimeout:   5 * time.Second,
+		replicaCount:       1,
+		readQuorum:         1,
+		writeQuorum:        1,
+		minimumPeersQuorum: 1,
+	}
 	for _, opt := range opts {
 		opt(cfg)
 	}
@@ -2083,15 +2140,17 @@ func testSystem(t *testing.T, providerFactory providerFactory, opts ...testClust
 				WithKinds(new(MockActor), new(MockEntity), new(MockGrainActor)).
 				WithGrains(new(MockGrain)).
 				WithPartitionCount(7).
-				WithReplicaCount(3).
-				WithWriteQuorum(1).
-				WithReadQuorum(1).
+				WithReplicaCount(cfg.replicaCount).
+				WithWriteQuorum(cfg.writeQuorum).
+				WithReadQuorum(cfg.readQuorum).
 				WithPeersPort(peersPort).
 				WithReadTimeout(10 * time.Second).
 				WithWriteTimeout(10 * time.Second).
-				WithMinimumPeersQuorum(1).
+				WithMinimumPeersQuorum(cfg.minimumPeersQuorum).
 				WithDiscoveryPort(discoveryPort).
 				WithBootstrapTimeout(time.Second).
+				WithReadinessTimeout(cfg.readinessTimeout).
+				WithReadinessMode(cfg.readinessMode).
 				WithClusterStateSyncInterval(300 * time.Millisecond).
 				WithClusterBalancerInterval(100 * time.Millisecond).
 				WithRoles(cfg.roles...).
@@ -2127,12 +2186,23 @@ func testSystem(t *testing.T, providerFactory providerFactory, opts ...testClust
 		require.NoError(t, system.Inject(cfg.dependency))
 	}
 
-	require.NoError(t, system.Start(ctx))
+	if !cfg.deferStart {
+		require.NoError(t, system.Start(ctx))
+	}
 	return system, provider
+}
+
+func testSystemNoStart(t *testing.T, providerFactory providerFactory, opts ...testClusterOption) (ActorSystem, discovery.Provider) {
+	opts = append(opts, withDeferredStart())
+	return testSystem(t, providerFactory, opts...)
 }
 
 func testNATs(t *testing.T, serverAddr string, opts ...testClusterOption) (ActorSystem, discovery.Provider) {
 	return testSystem(t, createNATsProvider(serverAddr), opts...)
+}
+
+func testNATsNoStart(t *testing.T, serverAddr string, opts ...testClusterOption) (ActorSystem, discovery.Provider) {
+	return testSystemNoStart(t, createNATsProvider(serverAddr), opts...)
 }
 
 func testConsul(t *testing.T, agentEndpoint string, opts ...testClusterOption) (ActorSystem, discovery.Provider) {

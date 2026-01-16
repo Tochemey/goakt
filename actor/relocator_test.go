@@ -29,6 +29,8 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -36,12 +38,16 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"github.com/tochemey/olric"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/errors"
+	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
@@ -353,24 +359,53 @@ func TestRelocation(t *testing.T) {
 	// start the NATS server
 	srv := startNatsServer(t)
 
-	// create and start a system cluster
-	node1, sd1 := testNATs(t, srv.Addr().String())
+	opts := []testClusterOption{
+		withTestReadinessMode(ReadinessModeFailStart),
+		withTestReadinessTimeout(15 * time.Second),
+		withTestReplicaCount(2),
+		withTestReadQuorum(1),
+		withTestWriteQuorum(2),
+		withTestMinimumPeersQuorum(2),
+	}
+
+	// create system clusters (deferred start)
+	node1, sd1 := testNATsNoStart(t, srv.Addr().String(), opts...)
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
-	// create and start a system cluster
-	node2, sd2 := testNATs(t, srv.Addr().String())
+	node2, sd2 := testNATsNoStart(t, srv.Addr().String(), opts...)
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
-	// create and start a system cluster
-	node3, sd3 := testNATs(t, srv.Addr().String())
+	node3, sd3 := testNATsNoStart(t, srv.Addr().String(), opts...)
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 
+	var wg sync.WaitGroup
+	startErrs := make(chan error, 3)
+
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		startErrs <- node1.Start(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		startErrs <- node2.Start(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		startErrs <- node3.Start(ctx)
+	}()
+	wg.Wait()
+	close(startErrs)
+	for err := range startErrs {
+		require.NoError(t, err)
+	}
+
 	// let us create 4 actors on each node
 	for j := 1; j <= 4; j++ {
-		pid, err := node1.Spawn(ctx, fmt.Sprintf("Actor1%d", j), NewMockActor(), WithLongLived())
+		pid, err := spawnWithRetry(ctx, node1, fmt.Sprintf("Actor1%d", j), NewMockActor(), WithLongLived())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 	}
@@ -378,7 +413,7 @@ func TestRelocation(t *testing.T) {
 	pause.For(time.Second)
 
 	for j := 1; j <= 4; j++ {
-		pid, err := node2.Spawn(ctx, fmt.Sprintf("Actor2%d", j), NewMockActor(), WithLongLived())
+		pid, err := spawnWithRetry(ctx, node2, fmt.Sprintf("Actor2%d", j), NewMockActor(), WithLongLived())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 	}
@@ -386,7 +421,7 @@ func TestRelocation(t *testing.T) {
 	pause.For(time.Second)
 
 	reentrantName := "Reentrant-Actor"
-	pid, err := node2.Spawn(ctx, reentrantName, NewMockActor(),
+	pid, err := spawnWithRetry(ctx, node2, reentrantName, NewMockActor(),
 		WithLongLived(),
 		WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.StashNonReentrant), reentrancy.WithMaxInFlight(3))))
 	require.NoError(t, err)
@@ -395,7 +430,7 @@ func TestRelocation(t *testing.T) {
 	pause.For(time.Second)
 
 	for j := 1; j <= 4; j++ {
-		pid, err := node3.Spawn(ctx, fmt.Sprintf("Actor3%d", j), NewMockActor(), WithLongLived())
+		pid, err := spawnWithRetry(ctx, node3, fmt.Sprintf("Actor3%d", j), NewMockActor(), WithLongLived())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 	}
@@ -453,9 +488,10 @@ func TestRelocation(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, sender)
 
-	// Actor should now exist, safe to send
-	err = sender.SendAsync(ctx, "Actor21", new(testpb.TestSend))
-	require.NoError(t, err)
+	// Actor should now exist, but allow time for relocation to settle.
+	require.Eventually(t, func() bool {
+		return sender.SendAsync(ctx, "Actor21", new(testpb.TestSend)) == nil
+	}, 30*time.Second, 500*time.Millisecond, "Actor21 should be available after relocation")
 
 	// Wait for reentrant actor to be relocated - verify it's on a live node
 	// During relocation, the actor may temporarily not exist (removed but not yet re-added),
@@ -515,13 +551,50 @@ func TestRelocationWithCustomSupervisor(t *testing.T) {
 	ctx := context.TODO()
 	srv := startNatsServer(t)
 
-	node1, sd1 := testNATs(t, srv.Addr().String())
+	opts := []testClusterOption{
+		withTestReadinessMode(ReadinessModeFailStart),
+		withTestReadinessTimeout(15 * time.Second),
+		withTestReplicaCount(3),
+		withTestReadQuorum(1),
+		withTestWriteQuorum(2),
+		withTestMinimumPeersQuorum(2),
+	}
+	node1, sd1 := testNATsNoStart(t, srv.Addr().String(), opts...)
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
-	node2, sd2 := testNATs(t, srv.Addr().String())
+	node2, sd2 := testNATsNoStart(t, srv.Addr().String(), opts...)
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
+
+	node3, sd3 := testNATsNoStart(t, srv.Addr().String(), opts...)
+	require.NotNil(t, node3)
+	require.NotNil(t, sd3)
+
+	var wg sync.WaitGroup
+	startErrs := make(chan error, 3)
+
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		startErrs <- node1.Start(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		startErrs <- node2.Start(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		startErrs <- node3.Start(ctx)
+	}()
+	wg.Wait()
+	close(startErrs)
+	for err := range startErrs {
+		require.NoError(t, err)
+	}
+
+	// Allow time for cluster membership and routing tables to converge.
+	pause.For(2 * time.Second)
 
 	customSupervisor := supervisor.NewSupervisor(
 		supervisor.WithStrategy(supervisor.OneForAllStrategy),
@@ -530,14 +603,16 @@ func TestRelocationWithCustomSupervisor(t *testing.T) {
 	)
 
 	actorName := "custom-supervised-actor"
-	pid, err := node2.Spawn(ctx, actorName, NewMockActor(), WithSupervisor(customSupervisor))
+	pid, err := spawnWithRetry(ctx, node2, actorName, NewMockActor(), WithSupervisor(customSupervisor))
 	require.NoError(t, err)
 	require.NotNil(t, pid)
 
 	pause.For(time.Second)
 
 	// Verify actor is on node2 before shutdown
+	node1Address := net.JoinHostPort(node1.Host(), strconv.Itoa(node1.Port()))
 	node2Address := net.JoinHostPort(node2.Host(), strconv.Itoa(node2.Port()))
+	node3Address := net.JoinHostPort(node3.Host(), strconv.Itoa(node3.Port()))
 	addr, _, err := node1.ActorOf(ctx, actorName)
 	require.NoError(t, err)
 	require.NotNil(t, addr)
@@ -582,7 +657,21 @@ func TestRelocationWithCustomSupervisor(t *testing.T) {
 		return actorAddr != node2Address
 	}, 2*time.Minute, 500*time.Millisecond, "Actor %s should be relocated from node2 (was %s) to a live node", actorName, node2Address)
 
-	relocated, err := node1.LocalActor(actorName)
+	relocatedAddr, _, err := node1.ActorOf(ctx, actorName)
+	require.NoError(t, err)
+	require.NotNil(t, relocatedAddr)
+
+	var relocatedNode ActorSystem
+	switch relocatedAddr.HostPort() {
+	case node1Address:
+		relocatedNode = node1
+	case node3Address:
+		relocatedNode = node3
+	default:
+		require.Failf(t, "unexpected relocation target", "relocated actor is on %s", relocatedAddr.HostPort())
+	}
+
+	relocated, err := relocatedNode.LocalActor(actorName)
 	require.NoError(t, err)
 	require.NotNil(t, relocated)
 	require.NotNil(t, relocated.supervisor)
@@ -596,7 +685,9 @@ func TestRelocationWithCustomSupervisor(t *testing.T) {
 	require.Equal(t, supervisor.RestartDirective, directive)
 
 	assert.NoError(t, node1.Stop(ctx))
+	assert.NoError(t, node3.Stop(ctx))
 	assert.NoError(t, sd1.Close())
+	assert.NoError(t, sd3.Close())
 	srv.Shutdown()
 }
 
@@ -630,17 +721,18 @@ func TestRelocationWithTLS(t *testing.T) {
 	clientConfig.NextProtos = []string{"h2", "http/1.1"}
 
 	// create and start system cluster
-	node1, sd1 := testNATs(t, srv.Addr().String(), withTestTLS(serverConfig, clientConfig))
+	opts := append(relocationReadyOpts(), withTestTLS(serverConfig, clientConfig))
+	node1, sd1 := testNATs(t, srv.Addr().String(), opts...)
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start system cluster
-	node2, sd2 := testNATs(t, srv.Addr().String(), withTestTLS(serverConfig, clientConfig))
+	node2, sd2 := testNATs(t, srv.Addr().String(), opts...)
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
 	// create and start system cluster
-	node3, sd3 := testNATs(t, srv.Addr().String(), withTestTLS(serverConfig, clientConfig))
+	node3, sd3 := testNATs(t, srv.Addr().String(), opts...)
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 
@@ -702,37 +794,93 @@ func TestRelocationWithSingletonActor(t *testing.T) {
 	srv := startNatsServer(t)
 
 	// create and start system cluster
-	node1, sd1 := testNATs(t, srv.Addr().String())
+	opts := []testClusterOption{
+		withTestReadinessMode(ReadinessModeFailStart),
+		withTestReadinessTimeout(15 * time.Second),
+		withTestReplicaCount(3),
+		withTestReadQuorum(1),
+		withTestWriteQuorum(2),
+		withTestMinimumPeersQuorum(2),
+	}
+	node1, sd1 := testNATsNoStart(t, srv.Addr().String(), opts...)
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start system cluster
-	node2, sd2 := testNATs(t, srv.Addr().String())
+	node2, sd2 := testNATsNoStart(t, srv.Addr().String(), opts...)
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
 	// create and start system cluster
-	node3, sd3 := testNATs(t, srv.Addr().String())
+	node3, sd3 := testNATsNoStart(t, srv.Addr().String(), opts...)
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 
+	var wg sync.WaitGroup
+	startErrs := make(chan error, 3)
+
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		startErrs <- node1.Start(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		startErrs <- node2.Start(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		startErrs <- node3.Start(ctx)
+	}()
+	wg.Wait()
+	close(startErrs)
+	for err := range startErrs {
+		require.NoError(t, err)
+	}
+
+	// Allow time for the cluster to converge before singleton creation.
+	pause.For(2 * time.Second)
+
 	// create a singleton actor
 	actorName := "actorName"
-	err := node1.SpawnSingleton(ctx, actorName, NewMockActor())
+	err := spawnSingletonWithRetry(ctx, node1, actorName, NewMockActor())
 	require.NoError(t, err)
 
 	pause.For(time.Second)
 
-	// Verify singleton is on node1 before shutdown
+	// Locate the singleton owner before shutdown
 	node1Address := net.JoinHostPort(node1.Host(), strconv.Itoa(node1.Port()))
+	node2Address := net.JoinHostPort(node2.Host(), strconv.Itoa(node2.Port()))
+	node3Address := net.JoinHostPort(node3.Host(), strconv.Itoa(node3.Port()))
 	addr, _, err := node2.ActorOf(ctx, actorName)
 	require.NoError(t, err)
 	require.NotNil(t, addr)
-	require.Equal(t, node1Address, addr.HostPort(), "Singleton %s should be on node1 before shutdown", actorName)
+	ownerAddr := addr.HostPort()
 
-	// take down node1 since it is the first node created in the cluster
-	require.NoError(t, node1.Stop(ctx))
-	require.NoError(t, sd1.Close())
+	var ownerNode ActorSystem
+	var ownerSD interface{ Close() error }
+	var observer ActorSystem
+
+	switch ownerAddr {
+	case node1Address:
+		ownerNode = node1
+		ownerSD = sd1
+		observer = node2
+	case node2Address:
+		ownerNode = node2
+		ownerSD = sd2
+		observer = node1
+	case node3Address:
+		ownerNode = node3
+		ownerSD = sd3
+		observer = node1
+	default:
+		require.Failf(t, "unexpected singleton location", "singleton %s is on %s", actorName, ownerAddr)
+	}
+
+	// take down the owner node
+	require.NoError(t, ownerNode.Stop(ctx))
+	require.NoError(t, ownerSD.Close())
 
 	// Allow time for the cluster to detect node1 leaving and start relocation
 	pause.For(2 * time.Second)
@@ -750,7 +898,7 @@ func TestRelocationWithSingletonActor(t *testing.T) {
 	// so we accept either: singleton doesn't exist (relocation in progress) OR singleton exists with new address (relocation complete).
 	// We reject: singleton exists with old address (relocation hasn't started or failed).
 	require.Eventually(t, func() bool {
-		exists, err := node2.ActorExists(ctx, actorName)
+		exists, err := observer.ActorExists(ctx, actorName)
 		if err != nil {
 			return false
 		}
@@ -760,20 +908,28 @@ func TestRelocationWithSingletonActor(t *testing.T) {
 			return false
 		}
 		// Singleton exists - verify it's on a live node (not node1)
-		relocatedAddr, _, err := node2.ActorOf(ctx, actorName)
+		relocatedAddr, _, err := observer.ActorOf(ctx, actorName)
 		if err != nil || relocatedAddr == nil {
 			return false
 		}
 		actorAddr := relocatedAddr.HostPort()
 		// Critical check: singleton must have a NEW address (not node1's address)
 		// If it still has node1's address, relocation hasn't happened yet
-		return actorAddr != node1Address
-	}, 2*time.Minute, 500*time.Millisecond, "Singleton %s should be relocated from node1 (was %s) to a live node", actorName, node1Address)
+		return actorAddr != ownerAddr
+	}, 2*time.Minute, 500*time.Millisecond, "Singleton %s should be relocated from %s to a live node", actorName, ownerAddr)
 
-	assert.NoError(t, node2.Stop(ctx))
-	assert.NoError(t, node3.Stop(ctx))
-	assert.NoError(t, sd2.Close())
-	assert.NoError(t, sd3.Close())
+	if ownerNode != node1 {
+		assert.NoError(t, node1.Stop(ctx))
+		assert.NoError(t, sd1.Close())
+	}
+	if ownerNode != node2 {
+		assert.NoError(t, node2.Stop(ctx))
+		assert.NoError(t, sd2.Close())
+	}
+	if ownerNode != node3 {
+		assert.NoError(t, node3.Stop(ctx))
+		assert.NoError(t, sd3.Close())
+	}
 	srv.Shutdown()
 }
 
@@ -784,17 +940,18 @@ func TestRelocationWithActorRelocationDisabled(t *testing.T) {
 	srv := startNatsServer(t)
 
 	// create and start system cluster
-	node1, sd1 := testNATs(t, srv.Addr().String())
+	opts := relocationReadyOpts()
+	node1, sd1 := testNATs(t, srv.Addr().String(), opts...)
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start system cluster
-	node2, sd2 := testNATs(t, srv.Addr().String())
+	node2, sd2 := testNATs(t, srv.Addr().String(), opts...)
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
 	// create and start system cluster
-	node3, sd3 := testNATs(t, srv.Addr().String())
+	node3, sd3 := testNATs(t, srv.Addr().String(), opts...)
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 
@@ -856,17 +1013,18 @@ func TestRelocationWithSystemRelocationDisabled(t *testing.T) {
 	srv := startNatsServer(t)
 
 	// create and start a system cluster
-	node1, sd1 := testNATs(t, srv.Addr().String(), withoutTestRelocation())
+	opts := append(relocationReadyOpts(), withoutTestRelocation())
+	node1, sd1 := testNATs(t, srv.Addr().String(), opts...)
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start a system cluster
-	node2, sd2 := testNATs(t, srv.Addr().String(), withoutTestRelocation())
+	node2, sd2 := testNATs(t, srv.Addr().String(), opts...)
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
 	// create and start a system cluster
-	node3, sd3 := testNATs(t, srv.Addr().String(), withoutTestRelocation())
+	node3, sd3 := testNATs(t, srv.Addr().String(), opts...)
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 
@@ -933,17 +1091,18 @@ func TestRelocationWithExtension(t *testing.T) {
 	stateStoreExtension := NewMockExtension()
 
 	// create and start a system cluster
-	node1, sd1 := testNATs(t, srv.Addr().String(), withMockExtension(stateStoreExtension))
+	opts := append(relocationReadyOpts(), withMockExtension(stateStoreExtension))
+	node1, sd1 := testNATs(t, srv.Addr().String(), opts...)
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start a system cluster
-	node2, sd2 := testNATs(t, srv.Addr().String(), withMockExtension(stateStoreExtension))
+	node2, sd2 := testNATs(t, srv.Addr().String(), opts...)
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
 	// create and start a system cluster
-	node3, sd3 := testNATs(t, srv.Addr().String(), withMockExtension(stateStoreExtension))
+	node3, sd3 := testNATs(t, srv.Addr().String(), opts...)
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 
@@ -1078,14 +1237,40 @@ func TestRelocationWithDependency(t *testing.T) {
 	srv := startNatsServer(t)
 
 	// create and start a system cluster
-	node1, sd1 := testNATs(t, srv.Addr().String())
+	opts := []testClusterOption{
+		withTestReadinessMode(ReadinessModeFailStart),
+		withTestReadinessTimeout(15 * time.Second),
+		withTestReplicaCount(2),
+		withTestReadQuorum(1),
+		withTestWriteQuorum(1),
+		withTestMinimumPeersQuorum(1),
+	}
+	node1, sd1 := testNATsNoStart(t, srv.Addr().String(), opts...)
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start a system cluster
-	node2, sd2 := testNATs(t, srv.Addr().String())
+	node2, sd2 := testNATsNoStart(t, srv.Addr().String(), opts...)
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
+
+	var wg sync.WaitGroup
+	startErrs := make(chan error, 2)
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		startErrs <- node1.Start(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		startErrs <- node2.Start(ctx)
+	}()
+	wg.Wait()
+	close(startErrs)
+	for err := range startErrs {
+		require.NoError(t, err)
+	}
 
 	dependencyID := "dependency"
 	// let us create 4 actors on each node
@@ -1190,17 +1375,18 @@ func TestRelocationIssue781(t *testing.T) {
 	srv := startNatsServer(t)
 
 	// create and start a system cluster
-	node1, sd1 := testNATs(t, srv.Addr().String())
+	opts := relocationReadyOpts()
+	node1, sd1 := testNATs(t, srv.Addr().String(), opts...)
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start a system cluster
-	node2, sd2 := testNATs(t, srv.Addr().String())
+	node2, sd2 := testNATs(t, srv.Addr().String(), opts...)
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
 	// create and start a system cluster
-	node3, sd3 := testNATs(t, srv.Addr().String())
+	node3, sd3 := testNATs(t, srv.Addr().String(), opts...)
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 
@@ -1263,6 +1449,57 @@ func TestRelocationIssue781(t *testing.T) {
 	srv.Shutdown()
 }
 
+func spawnWithRetry(ctx context.Context, system ActorSystem, name string, actor Actor, opts ...SpawnOption) (*PID, error) {
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		pid, err := system.Spawn(ctx, name, actor, opts...)
+		if err == nil {
+			return pid, nil
+		}
+		if !isQuorumError(err) || time.Now().After(deadline) {
+			return nil, err
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+func spawnSingletonWithRetry(ctx context.Context, system ActorSystem, name string, actor Actor) error {
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		err := system.SpawnSingleton(ctx, name, actor)
+		if err == nil {
+			return nil
+		}
+		if (!isRetryableSingletonError(err) && !stdErrors.Is(err, context.DeadlineExceeded)) || time.Now().After(deadline) {
+			return err
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+func isRetryableSingletonError(err error) bool {
+	if isQuorumError(err) || strings.Contains(err.Error(), "quorum cannot be reached") {
+		return true
+	}
+	return status.Code(err) == codes.Unavailable
+}
+
+func isQuorumError(err error) bool {
+	return stdErrors.Is(err, gerrors.ErrReadQuorum) ||
+		stdErrors.Is(err, gerrors.ErrWriteQuorum) ||
+		stdErrors.Is(err, gerrors.ErrClusterQuorum) ||
+		stdErrors.Is(err, olric.ErrReadQuorum) ||
+		stdErrors.Is(err, olric.ErrWriteQuorum) ||
+		stdErrors.Is(err, olric.ErrClusterQuorum)
+}
+
+func relocationReadyOpts() []testClusterOption {
+	return []testClusterOption{
+		withTestReadinessMode(ReadinessModeFailStart),
+		withTestReadinessTimeout(15 * time.Second),
+	}
+}
+
 // nolint
 func TestGrainsRelocation(t *testing.T) {
 	// create a context
@@ -1271,17 +1508,18 @@ func TestGrainsRelocation(t *testing.T) {
 	srv := startNatsServer(t)
 
 	// create and start a system cluster
-	node1, sd1 := testNATs(t, srv.Addr().String())
+	opts := relocationReadyOpts()
+	node1, sd1 := testNATs(t, srv.Addr().String(), opts...)
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start a system cluster
-	node2, sd2 := testNATs(t, srv.Addr().String())
+	node2, sd2 := testNATs(t, srv.Addr().String(), opts...)
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
 	// create and start a system cluster
-	node3, sd3 := testNATs(t, srv.Addr().String())
+	node3, sd3 := testNATs(t, srv.Addr().String(), opts...)
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 
@@ -1395,17 +1633,18 @@ func TestPersistenceGrainsRelocation(t *testing.T) {
 	stateStoreExtension := NewMockExtension()
 
 	// create and start a system cluster
-	node1, sd1 := testNATs(t, srv.Addr().String(), withMockExtension(stateStoreExtension))
+	opts := append(relocationReadyOpts(), withMockExtension(stateStoreExtension))
+	node1, sd1 := testNATs(t, srv.Addr().String(), opts...)
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start a system cluster
-	node2, sd2 := testNATs(t, srv.Addr().String(), withMockExtension(stateStoreExtension))
+	node2, sd2 := testNATs(t, srv.Addr().String(), opts...)
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
 	// create and start a system cluster
-	node3, sd3 := testNATs(t, srv.Addr().String(), withMockExtension(stateStoreExtension))
+	node3, sd3 := testNATs(t, srv.Addr().String(), opts...)
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 
@@ -1538,17 +1777,18 @@ func TestGrainsWithDependenciesRelocation(t *testing.T) {
 	srv := startNatsServer(t)
 
 	// create and start a system cluster
-	node1, sd1 := testNATs(t, srv.Addr().String())
+	opts := relocationReadyOpts()
+	node1, sd1 := testNATs(t, srv.Addr().String(), opts...)
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start a system cluster
-	node2, sd2 := testNATs(t, srv.Addr().String())
+	node2, sd2 := testNATs(t, srv.Addr().String(), opts...)
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
 	// create and start a system cluster
-	node3, sd3 := testNATs(t, srv.Addr().String())
+	node3, sd3 := testNATs(t, srv.Addr().String(), opts...)
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 

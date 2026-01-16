@@ -27,6 +27,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -48,7 +49,9 @@ import (
 	"github.com/tochemey/goakt/v3/hash"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/locker"
+	"github.com/tochemey/goakt/v3/internal/mathx"
 	"github.com/tochemey/goakt/v3/internal/memberlist"
+	"github.com/tochemey/goakt/v3/internal/ticker"
 	"github.com/tochemey/goakt/v3/log"
 	gtls "github.com/tochemey/goakt/v3/tls"
 )
@@ -163,6 +166,8 @@ type cluster struct {
 	readTimeout             time.Duration
 	shutdownTimeout         time.Duration
 	bootstrapTimeout        time.Duration
+	readinessTimeout        time.Duration
+	readinessMode           ReadinessMode
 	routingTableInterval    time.Duration
 	triggerBalancerInterval time.Duration
 	tlsInfo                 *gtls.Info
@@ -176,9 +181,10 @@ type cluster struct {
 	subscriber *redis.PubSub
 	messages   <-chan *redis.Message
 
-	consumeCtx    context.Context
-	consumeCancel context.CancelFunc
-	consumeWg     sync.WaitGroup
+	consumeCtx     context.Context
+	consumeCancel  context.CancelFunc
+	consumeWg      sync.WaitGroup
+	consumeStarted *atomic.Bool
 
 	nodeJoinedEventsFilter   goset.Set[string]
 	nodeLeftEventsFilter     goset.Set[string]
@@ -194,6 +200,7 @@ type cluster struct {
 	rebalanceCompleteSeen    map[uint64]struct{}
 
 	running *atomic.Bool
+	ready   *atomic.Bool
 }
 
 var _ Cluster = (*cluster)(nil)
@@ -222,6 +229,8 @@ func New(name string, disco discovery.Provider, node *discovery.Node, opts ...Co
 		readTimeout:             config.readTimeout,
 		shutdownTimeout:         config.shutdownTimeout,
 		bootstrapTimeout:        config.bootstrapTimeout,
+		readinessTimeout:        config.readinessTimeout,
+		readinessMode:           config.readinessMode,
 		routingTableInterval:    config.routingTableInterval,
 		triggerBalancerInterval: config.triggerBalancerInterval,
 		tlsInfo:                 config.tlsInfo,
@@ -237,6 +246,8 @@ func New(name string, disco discovery.Provider, node *discovery.Node, opts ...Co
 		rebalanceStartSeen:      make(map[uint64]struct{}),
 		rebalanceCompleteSeen:   make(map[uint64]struct{}),
 		running:                 atomic.NewBool(false),
+		ready:                   atomic.NewBool(false),
+		consumeStarted:          atomic.NewBool(false),
 	}
 }
 
@@ -261,9 +272,6 @@ func (x *cluster) Start(ctx context.Context) error {
 
 	x.configureDiscovery(conf)
 
-	startCtx, cancel := context.WithCancel(ctx)
-	conf.Started = func() { defer cancel() }
-
 	cache, err := olric.New(conf)
 	if err != nil {
 		x.logger.Error(fmt.Errorf("failed to start cluster engine: %w", err))
@@ -271,29 +279,34 @@ func (x *cluster) Start(ctx context.Context) error {
 	}
 
 	x.server = cache
-	if err := x.startServer(startCtx, ctx); err != nil {
-		x.logger.Error(fmt.Errorf("failed to start cluster engine: %w", err))
-		return err
-	}
+	startErrCh := x.startServer(ctx)
 
 	x.client = x.server.NewEmbeddedClient()
-	if err := x.createDMap(); err != nil {
-		x.logger.Error(fmt.Errorf("failed to create cluster data map: %w", err))
-		se := x.server.Shutdown(ctx)
-		return errors.Join(err, se)
+
+	readyCtx := ctx
+	if x.readinessTimeout > 0 {
+		var cancel context.CancelFunc
+		readyCtx, cancel = context.WithTimeout(ctx, x.readinessTimeout)
+		defer cancel()
 	}
 
-	if err := x.createSubscription(ctx); err != nil {
-		x.logger.Error(fmt.Errorf("failed to create cluster subscription: %w", err))
+	x.consumeCtx, x.consumeCancel = context.WithCancel(ctx)
+
+	required := x.requiredMemberCount()
+	if x.readinessMode == ReadinessModeDegradedStart && required > 1 {
+		x.running.Store(true)
+		go x.handleReadiness(readyCtx, startErrCh, ctx)
+		return nil
+	}
+
+	if err := x.awaitReady(readyCtx, startErrCh, ctx); err != nil {
+		x.logger.Warnf("cluster readiness not achieved: %v", err)
+		x.running.Store(false)
 		se := x.server.Shutdown(ctx)
 		return errors.Join(err, se)
 	}
 
 	x.running.Store(true)
-	x.consumeCtx, x.consumeCancel = context.WithCancel(ctx)
-	x.consumeWg.Go(func() {
-		x.consume()
-	})
 	return nil
 }
 
@@ -308,6 +321,7 @@ func (x *cluster) Stop(ctx context.Context) error {
 	defer cancelFn()
 
 	defer x.running.Store(false)
+	x.ready.Store(false)
 
 	// Cancel consume context first to signal consume() to stop
 	if x.consumeCancel != nil {
@@ -422,6 +436,9 @@ func (x *cluster) ActorExists(ctx context.Context, actorName string) (bool, erro
 func (x *cluster) Actors(ctx context.Context, timeout time.Duration) ([]*internalpb.Actor, error) {
 	if !x.running.Load() {
 		return nil, ErrEngineNotRunning
+	}
+	if err := x.ensureReady(); err != nil {
+		return nil, err
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
@@ -616,6 +633,9 @@ func (x *cluster) Grains(ctx context.Context, timeout time.Duration) ([]*interna
 	if !x.running.Load() {
 		return nil, ErrEngineNotRunning
 	}
+	if err := x.ensureReady(); err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -668,6 +688,9 @@ func (x *cluster) Grains(ctx context.Context, timeout time.Duration) ([]*interna
 func (x *cluster) GetActorsByOwner(ctx context.Context, ownerNode string) ([]*internalpb.Actor, error) {
 	if !x.running.Load() {
 		return nil, ErrEngineNotRunning
+	}
+	if err := x.ensureReady(); err != nil {
+		return nil, err
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, x.readTimeout)
@@ -722,6 +745,9 @@ func (x *cluster) GetActorsByOwner(ctx context.Context, ownerNode string) ([]*in
 func (x *cluster) GetGrainsByOwner(ctx context.Context, ownerNode string) ([]*internalpb.Grain, error) {
 	if !x.running.Load() {
 		return nil, ErrEngineNotRunning
+	}
+	if err := x.ensureReady(); err != nil {
+		return nil, err
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, x.readTimeout)
@@ -917,6 +943,10 @@ func (x *cluster) GetPartition(actorName string) uint64 {
 		return 0
 	}
 
+	if err := x.ensureReady(); err != nil {
+		return 0
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), x.readTimeout)
 	defer cancel()
 
@@ -927,6 +957,7 @@ func (x *cluster) GetPartition(actorName string) uint64 {
 	if err != nil {
 		return 0
 	}
+
 	return resp.Partition()
 }
 
@@ -935,6 +966,10 @@ func (x *cluster) GetPartition(actorName string) uint64 {
 func (x *cluster) NextRoundRobinValue(ctx context.Context, key string) (int, error) {
 	if !x.running.Load() {
 		return -1, ErrEngineNotRunning
+	}
+
+	if err := x.ensureReady(); err != nil {
+		return -1, err
 	}
 
 	x.mu.Lock()
@@ -1001,6 +1036,73 @@ func (x *cluster) JobKey(ctx context.Context, jobID string) ([]byte, error) {
 	defer x.mu.RUnlock()
 
 	return x.getRecord(ctx, namespaceJobs, jobID)
+}
+
+// handleReadiness drives the readiness workflow in degraded-start mode and
+// transitions the cluster to ready once quorum and operability are achieved.
+func (x *cluster) handleReadiness(ctx context.Context, startErrCh <-chan error, shutdownCtx context.Context) {
+	err := x.awaitReady(ctx, startErrCh, shutdownCtx)
+	if err == nil {
+		return
+	}
+
+	x.logger.Warnf("cluster readiness not achieved: %v", err)
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return
+	}
+
+	x.running.Store(false)
+	_ = x.server.Shutdown(shutdownCtx)
+}
+
+// awaitReady blocks until the cluster is operable (quorum + DMap readiness) or
+// the context is canceled.
+func (x *cluster) awaitReady(ctx context.Context, startErrCh <-chan error, shutdownCtx context.Context) error {
+	if err := x.waitForQuorum(ctx, startErrCh); err != nil {
+		return err
+	}
+
+	if err := x.waitForClusterReady(ctx, x.createDMap); err != nil {
+		return err
+	}
+
+	if err := x.waitForClusterReady(ctx, func() error {
+		return x.createSubscription(shutdownCtx)
+	}); err != nil {
+		return err
+	}
+
+	x.ready.Store(true)
+	x.startConsume()
+	return nil
+}
+
+// startConsume ensures the cluster event consumer is started exactly once.
+func (x *cluster) startConsume() {
+	if x.consumeStarted == nil {
+		x.consumeStarted = atomic.NewBool(false)
+	}
+
+	if !x.consumeStarted.CompareAndSwap(false, true) {
+		return
+	}
+
+	x.consumeWg.Go(func() {
+		x.consume()
+	})
+}
+
+// ensureReady rejects operations until the cluster is fully ready.
+func (x *cluster) ensureReady() error {
+	if x.ready == nil {
+		return nil
+	}
+
+	if x.ready.Load() {
+		return nil
+	}
+
+	return olric.ErrClusterQuorum
 }
 
 // buildConfig creates the Olric configuration tailored to the current
@@ -1133,9 +1235,9 @@ func (x *cluster) configureDiscovery(conf *oconfig.Config) {
 	}
 }
 
-// startServer launches the embedded Olric server and waits for it to become
-// ready or return an error.
-func (x *cluster) startServer(startCtx, ctx context.Context) error {
+// startServer launches the embedded Olric server and returns a channel that
+// reports startup errors.
+func (x *cluster) startServer(ctx context.Context) <-chan error {
 	errCh := make(chan error, 1)
 	go func() {
 		defer close(errCh)
@@ -1143,17 +1245,122 @@ func (x *cluster) startServer(startCtx, ctx context.Context) error {
 			errCh <- errors.Join(err, x.server.Shutdown(ctx))
 			return
 		}
-		errCh <- nil
 	}()
+	return errCh
+}
 
-	select {
-	case <-startCtx.Done():
-	case err := <-errCh:
-		if err != nil {
-			return err
+// requiredMemberCount returns the minimum cluster member count needed to satisfy
+// replication and quorum constraints.
+func (x *cluster) requiredMemberCount() uint32 {
+	required := x.replicaCount
+	required = mathx.Max(required, x.readQuorum)
+	required = mathx.Max(required, x.writeQuorum)
+	required = mathx.Max(required, x.minimumPeersQuorum)
+
+	if required == 0 {
+		return 1
+	}
+
+	return required
+}
+
+// waitForQuorum blocks until the cluster reports enough members to satisfy
+// the required member count or the context is canceled.
+func (x *cluster) waitForQuorum(ctx context.Context, startErrCh <-chan error) error {
+	required := x.requiredMemberCount()
+	if required <= 1 {
+		return nil
+	}
+
+	clock := ticker.New(250 * time.Millisecond)
+	clock.Start()
+	defer clock.Stop()
+
+	lastCount := -1
+	x.logger.Infof("Waiting for cluster quorum: required=%d", required)
+	errCh := startErrCh
+
+	for {
+		peers, err := x.discoveryProvider.DiscoverPeers()
+		if err == nil {
+			count := int(x.countDiscoveredMembers(peers))
+			if count != lastCount {
+				lastCount = count
+				x.logger.Infof("Cluster quorum progress: members=%d required=%d", count, required)
+			}
+
+			if uint32(count) >= required {
+				x.logger.Infof("Cluster quorum reached: members=%d required=%d", count, required)
+				return nil
+			}
+		}
+
+		select {
+		case err, ok := <-errCh:
+			if !ok {
+				errCh = nil
+				break
+			}
+			if err != nil {
+				return err
+			}
+		case <-ctx.Done():
+			if lastCount < 0 {
+				lastCount = 0
+			}
+			err := fmt.Errorf("cluster quorum not reached (members=%d required=%d)", lastCount, required)
+			return errors.Join(err, olric.ErrClusterQuorum, ctx.Err())
+		case <-clock.Ticks:
 		}
 	}
-	return nil
+}
+
+// countDiscoveredMembers returns the total member count implied by the discovery
+// peer list. Providers usually return peers excluding the local node, so this
+// adds one for self unless the local discovery address is already present.
+func (x *cluster) countDiscoveredMembers(peers []string) uint32 {
+	if len(peers) == 0 {
+		return 1
+	}
+
+	self := x.node.DiscoveryAddress()
+	if slices.Contains(peers, self) {
+		return uint32(len(peers))
+	}
+
+	return uint32(len(peers) + 1)
+}
+
+// waitForClusterReady waits for the cluster to be ready by repeatedly executing
+// the provided function until it succeeds or the context is canceled.
+func (x *cluster) waitForClusterReady(ctx context.Context, fn func() error) error {
+	clock := ticker.New(200 * time.Millisecond)
+	clock.Start()
+	defer clock.Stop()
+
+	for {
+		if err := fn(); err != nil {
+			if !isRetryableClusterError(err) {
+				return err
+			}
+
+			select {
+			case <-ctx.Done():
+				return errors.Join(err, ctx.Err())
+			case <-clock.Ticks:
+				continue
+			}
+		}
+
+		return nil
+	}
+}
+
+// isRetryableClusterError returns true if the error is a retryable cluster error.
+func isRetryableClusterError(err error) bool {
+	return errors.Is(err, olric.ErrClusterQuorum) ||
+		errors.Is(err, olric.ErrOperationTimeout) ||
+		errors.Is(err, olric.ErrServerGone)
 }
 
 // createDMap provisions the unified map used to store cluster records.
@@ -1457,6 +1664,9 @@ func (x *cluster) sendEventLocked(e *Event) {
 
 // putRecord writes a namespaced record to the unified map applying timeouts.
 func (x *cluster) putRecord(ctx context.Context, namespace recordNamespace, key string, value []byte) error {
+	if err := x.ensureReady(); err != nil {
+		return err
+	}
 	ctx = context.WithoutCancel(ctx)
 	ctx, cancel := context.WithTimeout(ctx, x.writeTimeout)
 	defer cancel()
@@ -1464,6 +1674,7 @@ func (x *cluster) putRecord(ctx context.Context, namespace recordNamespace, key 
 	return x.dmap.Put(ctx, composeKey(namespace, key), value)
 }
 
+// putGrainIfAbsent stores grain metadata only if it does not already exist.
 func (x *cluster) putGrainIfAbsent(ctx context.Context, grain *internalpb.Grain) error {
 	if !x.running.Load() {
 		return ErrEngineNotRunning
@@ -1492,7 +1703,11 @@ func (x *cluster) putGrainIfAbsent(ctx context.Context, grain *internalpb.Grain)
 	return nil
 }
 
+// putRecordIfAbsent writes a namespaced record only if the key does not exist.
 func (x *cluster) putRecordIfAbsent(ctx context.Context, namespace recordNamespace, key string, value []byte) error {
+	if err := x.ensureReady(); err != nil {
+		return err
+	}
 	ctx = context.WithoutCancel(ctx)
 	ctx, cancel := context.WithTimeout(ctx, x.writeTimeout)
 	defer cancel()
@@ -1500,6 +1715,7 @@ func (x *cluster) putRecordIfAbsent(ctx context.Context, namespace recordNamespa
 	return x.dmap.Put(ctx, composeKey(namespace, key), value, olric.NX())
 }
 
+// putKindIfAbsent registers a kind only if it does not already exist.
 func (x *cluster) putKindIfAbsent(ctx context.Context, kind string) error {
 	if !x.running.Load() {
 		return ErrEngineNotRunning
@@ -1519,6 +1735,9 @@ func (x *cluster) putKindIfAbsent(ctx context.Context, kind string) error {
 
 // getRecord fetches a namespaced record from the unified map.
 func (x *cluster) getRecord(ctx context.Context, namespace recordNamespace, key string) ([]byte, error) {
+	if err := x.ensureReady(); err != nil {
+		return nil, err
+	}
 	ctx = context.WithoutCancel(ctx)
 	ctx, cancel := context.WithTimeout(ctx, x.readTimeout)
 	defer cancel()
@@ -1533,6 +1752,9 @@ func (x *cluster) getRecord(ctx context.Context, namespace recordNamespace, key 
 // deleteRecord removes a namespaced record from the unified map, tolerating
 // missing entries.
 func (x *cluster) deleteRecord(ctx context.Context, namespace recordNamespace, key string) error {
+	if err := x.ensureReady(); err != nil {
+		return err
+	}
 	ctx = context.WithoutCancel(ctx)
 	ctx, cancel := context.WithTimeout(ctx, x.writeTimeout)
 	defer cancel()

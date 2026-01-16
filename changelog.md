@@ -13,6 +13,8 @@
 - 🔌 Added `Dependencies()` and `Dependency(dependencyID string) ` to `GrainContext` to access the grain's dependency container.
 - ⚙️ Added `Extensions()` and `Extension(extensionID string)` to `GrainContext` to access grain extensions.
 - 🔌 Added ` Dependencies()` and `Dependency(dependencyID string)` to `ReceiveContext` to access the actor's dependency container.
+- 🚦 Introduced a start-vs-ready lifecycle for the cluster engine with readiness gating on cluster-backed operations.
+- ⏳ Added readiness controls (`ReadinessMode`, `ReadinessTimeout`) and exposed them via `ClusterConfig`/ActorSystem builder.
 
 ### ⚡ Performance Improvements
 
@@ -33,12 +35,14 @@
 
 
 ##### ⚙️ Replication Configuration Best Practices
-When enabling actor/grain relocation, proper replication configuration is critical to ensure **no data loss** and provide the **best relocation experience**. The following guidelines should be followed:
+When enabling actor/grain relocation, replication and readiness settings must align to preserve **data safety** and **predictable relocation**. The guidance below assumes a 3+ node cluster and quorum-based replication.
 
 **Minimum Configuration for Production:**
-- **`ReplicaCount`**: Should be set to at least **3** for proper fault tolerance. This ensures data survives the failure of at least one node.
-- **`WriteQuorum`**: Should be set to **majority of replicas** = `(ReplicaCount / 2) + 1`. For 3 replicas, this is **2**. This ensures writes are acknowledged by a majority, preventing data loss.
-- **`ReadQuorum`**: Should be set to **majority of replicas** = `(ReplicaCount / 2) + 1`. For 3 replicas, this is **2**. This ensures reads always see the latest written data.
+- **`ReplicaCount`**: At least **3** for fault tolerance (survives one node loss).
+- **`WriteQuorum`**: Majority of replicas `(ReplicaCount/2)+1` (for 3 replicas, **2**) to prevent lost writes.
+- **`ReadQuorum`**: Majority of replicas `(ReplicaCount/2)+1` (for 3 replicas, **2**) for consistent reads.
+- **`MinimumPeersQuorum`**: At least **2** (or majority) so the cluster remains operational after one node leaves.
+- **`ReadinessMode`/`ReadinessTimeout`**: Prefer `ReadinessModeFailStart` with a timeout that covers discovery and convergence to avoid operating before quorum is met.
 
 **Example Configuration:**
 ```go
@@ -50,17 +54,17 @@ cfg := actor.NewClusterConfig().
 ```
 
 **Why These Settings Matter:**
-- **No Data Loss**: With majority quorum (2 out of 3), data is safely replicated to at least 2 nodes. Even if one node fails, the data remains available on another node.
-- **Consistent Reads**: Majority read quorum ensures you always read from a node that has the latest data, preventing stale reads during rebalancing.
-- **Smooth Relocation**: When a node leaves, the remaining nodes (2 out of 3) still form a quorum, allowing relocation to complete without blocking.
-- **Network Partition Resilience**: Majority quorum prevents split-brain scenarios where isolated nodes could serve conflicting data.
+- **No Data Loss**: Majority write quorum ensures data is replicated beyond the failing node.
+- **Consistent Reads**: Majority read quorum avoids stale reads during rebalancing.
+- **Smooth Relocation**: With `MinimumPeersQuorum>=2`, the cluster can continue relocating after a single-node loss.
+- **Network Partition Resilience**: Majority quorum reduces split-brain risks.
 
 **Scaling Guidelines:**
-- **3-node cluster**: `ReplicaCount=3, WriteQuorum=2, ReadQuorum=2` (recommended minimum)
-- **5-node cluster**: `ReplicaCount=3, WriteQuorum=2, ReadQuorum=2` (can tolerate 1 node failure)
-- **7-node cluster**: `ReplicaCount=5, WriteQuorum=3, ReadQuorum=3` (can tolerate 2 node failures)
+- **3-node cluster**: `ReplicaCount=3, WriteQuorum=2, ReadQuorum=2, MinimumPeersQuorum=2`
+- **5-node cluster**: `ReplicaCount=3, WriteQuorum=2, ReadQuorum=2, MinimumPeersQuorum=2`
+- **7-node cluster**: `ReplicaCount=5, WriteQuorum=3, ReadQuorum=3, MinimumPeersQuorum=3`
 
-**Warning**: Using `WriteQuorum=1` or `ReadQuorum=1` with relocation enabled risks **data loss** if a node fails during or immediately after a write operation, as the data may not yet be replicated to other nodes.
+**Warning**: Using `WriteQuorum=1` or `ReadQuorum=1` with relocation enabled risks **data loss** if a node fails before replication completes, and may cause relocation to observe stale state.
 
 ## [v3.12.1] - 2026-06-01
 
