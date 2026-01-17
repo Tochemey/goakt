@@ -885,6 +885,10 @@ func (x *cluster) Members(ctx context.Context) ([]*Peer, error) {
 		return nil, ErrEngineNotRunning
 	}
 
+	if err := x.ensureReady(); err != nil {
+		return nil, err
+	}
+
 	x.mu.RLock()
 	defer x.mu.RUnlock()
 
@@ -914,6 +918,10 @@ func (x *cluster) Members(ctx context.Context) ([]*Peer, error) {
 // IsLeader reports whether the local node is the cluster coordinator.
 func (x *cluster) IsLeader(ctx context.Context) bool {
 	if !x.running.Load() {
+		return false
+	}
+
+	if err := x.ensureReady(); err != nil {
 		return false
 	}
 
