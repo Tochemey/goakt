@@ -23,6 +23,7 @@
 - 🗑️ **Zero network transfer during shutdown**: Eliminated shutdown-time RPC transfers to peers (0 bytes vs. MBs previously). State is now proactively maintained in Olric's distributed map throughout the node lifecycle.
 - 💾 **Reduced GC allocations**: GC allocations during shutdown reduced from 10s of MBs to < 1MB for typical scenarios (90%+ reduction), significantly reducing garbage collection pressure.
 - 🔍 **Query-based rebalancing**: Implemented efficient `GetActorsByOwner()` and `GetGrainsByOwner()` methods using Olric's distributed map queries, enabling fast rebalancing when nodes leave the cluster without requiring shutdown-time state transfers.
+- ✅ **Relocation completion event**: A `RelocationCompleted` event is now emitted when relocation succeeds.
 
 ##### 📊 Ownership Tracking
 - 📊 **Automatic ownership metadata**: Added `owner_node`, `created_at`, and `updated_at` fields to Actor and Grain protobuf messages. Ownership is automatically tracked and updated during actor/grain creation and migration, providing complete lifecycle visibility.

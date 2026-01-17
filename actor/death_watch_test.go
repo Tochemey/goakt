@@ -25,8 +25,6 @@ package actor
 import (
 	"context"
 	stdErrors "errors"
-	"net"
-	"strconv"
 	"testing"
 	"time"
 
@@ -43,7 +41,6 @@ import (
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/log"
 	mockscluster "github.com/tochemey/goakt/v3/mocks/cluster"
-	mocksdiscovery "github.com/tochemey/goakt/v3/mocks/discovery"
 	"github.com/tochemey/goakt/v3/remote"
 )
 
@@ -172,36 +169,15 @@ func TestDeathWatch(t *testing.T) {
 
 		host := "127.0.0.1"
 
-		// define discovered addresses
-		addrs := []string{
-			net.JoinHostPort(host, strconv.Itoa(discoveryPort)),
-		}
-
 		actorSys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 		require.NoError(t, err)
 		require.NotNil(t, actorSys)
 
 		clmock := mockscluster.NewCluster(t)
-		provider := mocksdiscovery.NewProvider(t)
-		provider.EXPECT().ID().Return("test")
-		provider.EXPECT().Initialize().Return(nil)
-		provider.EXPECT().Register().Return(nil)
-		provider.EXPECT().Deregister().Return(nil)
-		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
-		provider.EXPECT().Close().Return(nil)
 
 		sys := actorSys.(*actorSystem)
 		sys.cluster = clmock
-		sys.clusterEnabled.Store(true)
-		sys.remotingEnabled.Store(true)
 		sys.remoteConfig = remote.NewConfig(host, remotingPort)
-		sys.clusterNode = &discovery.Node{Host: host, PeersPort: peersPort, DiscoveryPort: discoveryPort}
-
-		clConfig := NewClusterConfig()
-		clConfig.discoveryPort = 9001
-		clConfig.discovery = provider
-
-		sys.clusterConfig = clConfig
 
 		err = actorSys.Start(ctx)
 		require.NoError(t, err)
@@ -209,6 +185,7 @@ func TestDeathWatch(t *testing.T) {
 		pause.For(500 * time.Millisecond)
 
 		t.Cleanup(func() {
+			sys.clusterEnabled.Store(false)
 			require.NoError(t, actorSys.Stop(ctx))
 		})
 
@@ -219,6 +196,10 @@ func TestDeathWatch(t *testing.T) {
 
 		// allow the spawned actor to register with the tree
 		pause.For(500 * time.Millisecond)
+
+		sys.cluster = clmock
+		sys.clusterEnabled.Store(true)
+		sys.clusterNode = &discovery.Node{Host: host, PeersPort: peersPort, DiscoveryPort: discoveryPort}
 
 		clusterErr := stdErrors.New("cluster failure")
 		clmock.EXPECT().RemoveActor(mock.Anything, actorName).Return(clusterErr)

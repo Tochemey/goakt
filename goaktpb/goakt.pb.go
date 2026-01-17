@@ -673,6 +673,73 @@ func (x *NodeLeft) GetPeersPort() int32 {
 	return 0
 }
 
+// RelocationCompleted defines the relocation completed event
+// One can subscribe to this event to be notified when the relocation is completed.
+// This event is only emitted on a successful relocation.
+// If the relocation fails, the event is not emitted.
+type RelocationCompleted struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the total number of actors relocated
+	ActorsCount uint64 `protobuf:"varint,1,opt,name=actors_count,json=actorsCount,proto3" json:"actors_count,omitempty"`
+	// Specifies the total number of grains relocated
+	GrainsCount uint64 `protobuf:"varint,2,opt,name=grains_count,json=grainsCount,proto3" json:"grains_count,omitempty"`
+	// Specifies the completion time
+	CompletedAt   *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=completed_at,json=completedAt,proto3" json:"completed_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RelocationCompleted) Reset() {
+	*x = RelocationCompleted{}
+	mi := &file_goakt_goakt_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RelocationCompleted) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RelocationCompleted) ProtoMessage() {}
+
+func (x *RelocationCompleted) ProtoReflect() protoreflect.Message {
+	mi := &file_goakt_goakt_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RelocationCompleted.ProtoReflect.Descriptor instead.
+func (*RelocationCompleted) Descriptor() ([]byte, []int) {
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *RelocationCompleted) GetActorsCount() uint64 {
+	if x != nil {
+		return x.ActorsCount
+	}
+	return 0
+}
+
+func (x *RelocationCompleted) GetGrainsCount() uint64 {
+	if x != nil {
+		return x.GrainsCount
+	}
+	return 0
+}
+
+func (x *RelocationCompleted) GetCompletedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CompletedAt
+	}
+	return nil
+}
+
 // Terminated is a lifecycle notification message sent to all actors
 // that are watching a given actor when it has stopped or been terminated.
 //
@@ -691,7 +758,7 @@ type Terminated struct {
 
 func (x *Terminated) Reset() {
 	*x = Terminated{}
-	mi := &file_goakt_goakt_proto_msgTypes[10]
+	mi := &file_goakt_goakt_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -703,7 +770,7 @@ func (x *Terminated) String() string {
 func (*Terminated) ProtoMessage() {}
 
 func (x *Terminated) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[10]
+	mi := &file_goakt_goakt_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -716,7 +783,7 @@ func (x *Terminated) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Terminated.ProtoReflect.Descriptor instead.
 func (*Terminated) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{10}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *Terminated) GetAddress() string {
@@ -750,7 +817,7 @@ type PoisonPill struct {
 
 func (x *PoisonPill) Reset() {
 	*x = PoisonPill{}
-	mi := &file_goakt_goakt_proto_msgTypes[11]
+	mi := &file_goakt_goakt_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -762,7 +829,7 @@ func (x *PoisonPill) String() string {
 func (*PoisonPill) ProtoMessage() {}
 
 func (x *PoisonPill) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[11]
+	mi := &file_goakt_goakt_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -775,7 +842,7 @@ func (x *PoisonPill) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PoisonPill.ProtoReflect.Descriptor instead.
 func (*PoisonPill) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{11}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{12}
 }
 
 // PostStart is used when an actor has successfully started
@@ -787,7 +854,7 @@ type PostStart struct {
 
 func (x *PostStart) Reset() {
 	*x = PostStart{}
-	mi := &file_goakt_goakt_proto_msgTypes[12]
+	mi := &file_goakt_goakt_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -799,7 +866,7 @@ func (x *PostStart) String() string {
 func (*PostStart) ProtoMessage() {}
 
 func (x *PostStart) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[12]
+	mi := &file_goakt_goakt_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -812,7 +879,7 @@ func (x *PostStart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PostStart.ProtoReflect.Descriptor instead.
 func (*PostStart) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{12}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{13}
 }
 
 // Broadcast is used to send message to a router via Tell
@@ -828,7 +895,7 @@ type Broadcast struct {
 
 func (x *Broadcast) Reset() {
 	*x = Broadcast{}
-	mi := &file_goakt_goakt_proto_msgTypes[13]
+	mi := &file_goakt_goakt_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -840,7 +907,7 @@ func (x *Broadcast) String() string {
 func (*Broadcast) ProtoMessage() {}
 
 func (x *Broadcast) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[13]
+	mi := &file_goakt_goakt_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -853,7 +920,7 @@ func (x *Broadcast) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Broadcast.ProtoReflect.Descriptor instead.
 func (*Broadcast) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{13}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *Broadcast) GetMessage() *anypb.Any {
@@ -876,7 +943,7 @@ type Subscribe struct {
 
 func (x *Subscribe) Reset() {
 	*x = Subscribe{}
-	mi := &file_goakt_goakt_proto_msgTypes[14]
+	mi := &file_goakt_goakt_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -888,7 +955,7 @@ func (x *Subscribe) String() string {
 func (*Subscribe) ProtoMessage() {}
 
 func (x *Subscribe) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[14]
+	mi := &file_goakt_goakt_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -901,7 +968,7 @@ func (x *Subscribe) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Subscribe.ProtoReflect.Descriptor instead.
 func (*Subscribe) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{14}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *Subscribe) GetTopic() string {
@@ -924,7 +991,7 @@ type Unsubscribe struct {
 
 func (x *Unsubscribe) Reset() {
 	*x = Unsubscribe{}
-	mi := &file_goakt_goakt_proto_msgTypes[15]
+	mi := &file_goakt_goakt_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -936,7 +1003,7 @@ func (x *Unsubscribe) String() string {
 func (*Unsubscribe) ProtoMessage() {}
 
 func (x *Unsubscribe) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[15]
+	mi := &file_goakt_goakt_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -949,7 +1016,7 @@ func (x *Unsubscribe) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Unsubscribe.ProtoReflect.Descriptor instead.
 func (*Unsubscribe) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{15}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *Unsubscribe) GetTopic() string {
@@ -971,7 +1038,7 @@ type SubscribeAck struct {
 
 func (x *SubscribeAck) Reset() {
 	*x = SubscribeAck{}
-	mi := &file_goakt_goakt_proto_msgTypes[16]
+	mi := &file_goakt_goakt_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -983,7 +1050,7 @@ func (x *SubscribeAck) String() string {
 func (*SubscribeAck) ProtoMessage() {}
 
 func (x *SubscribeAck) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[16]
+	mi := &file_goakt_goakt_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -996,7 +1063,7 @@ func (x *SubscribeAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubscribeAck.ProtoReflect.Descriptor instead.
 func (*SubscribeAck) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{16}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *SubscribeAck) GetTopic() string {
@@ -1018,7 +1085,7 @@ type UnsubscribeAck struct {
 
 func (x *UnsubscribeAck) Reset() {
 	*x = UnsubscribeAck{}
-	mi := &file_goakt_goakt_proto_msgTypes[17]
+	mi := &file_goakt_goakt_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1030,7 +1097,7 @@ func (x *UnsubscribeAck) String() string {
 func (*UnsubscribeAck) ProtoMessage() {}
 
 func (x *UnsubscribeAck) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[17]
+	mi := &file_goakt_goakt_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1043,7 +1110,7 @@ func (x *UnsubscribeAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnsubscribeAck.ProtoReflect.Descriptor instead.
 func (*UnsubscribeAck) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{17}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *UnsubscribeAck) GetTopic() string {
@@ -1071,7 +1138,7 @@ type Publish struct {
 
 func (x *Publish) Reset() {
 	*x = Publish{}
-	mi := &file_goakt_goakt_proto_msgTypes[18]
+	mi := &file_goakt_goakt_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1083,7 +1150,7 @@ func (x *Publish) String() string {
 func (*Publish) ProtoMessage() {}
 
 func (x *Publish) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[18]
+	mi := &file_goakt_goakt_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1096,7 +1163,7 @@ func (x *Publish) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Publish.ProtoReflect.Descriptor instead.
 func (*Publish) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{18}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *Publish) GetId() string {
@@ -1129,7 +1196,7 @@ type NoMessage struct {
 
 func (x *NoMessage) Reset() {
 	*x = NoMessage{}
-	mi := &file_goakt_goakt_proto_msgTypes[19]
+	mi := &file_goakt_goakt_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1141,7 +1208,7 @@ func (x *NoMessage) String() string {
 func (*NoMessage) ProtoMessage() {}
 
 func (x *NoMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[19]
+	mi := &file_goakt_goakt_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1154,7 +1221,7 @@ func (x *NoMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NoMessage.ProtoReflect.Descriptor instead.
 func (*NoMessage) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{19}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{20}
 }
 
 // PanicSignal is a system-level message used in actor-based systems to notify a parent actor
@@ -1182,7 +1249,7 @@ type PanicSignal struct {
 
 func (x *PanicSignal) Reset() {
 	*x = PanicSignal{}
-	mi := &file_goakt_goakt_proto_msgTypes[20]
+	mi := &file_goakt_goakt_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1194,7 +1261,7 @@ func (x *PanicSignal) String() string {
 func (*PanicSignal) ProtoMessage() {}
 
 func (x *PanicSignal) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[20]
+	mi := &file_goakt_goakt_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1207,7 +1274,7 @@ func (x *PanicSignal) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PanicSignal.ProtoReflect.Descriptor instead.
 func (*PanicSignal) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{20}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *PanicSignal) GetMessage() *anypb.Any {
@@ -1244,7 +1311,7 @@ type PausePassivation struct {
 
 func (x *PausePassivation) Reset() {
 	*x = PausePassivation{}
-	mi := &file_goakt_goakt_proto_msgTypes[21]
+	mi := &file_goakt_goakt_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1256,7 +1323,7 @@ func (x *PausePassivation) String() string {
 func (*PausePassivation) ProtoMessage() {}
 
 func (x *PausePassivation) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[21]
+	mi := &file_goakt_goakt_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1269,7 +1336,7 @@ func (x *PausePassivation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PausePassivation.ProtoReflect.Descriptor instead.
 func (*PausePassivation) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{21}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{22}
 }
 
 // ResumePassivation is a system-level message used to resume the passivation of an actor.
@@ -1288,7 +1355,7 @@ type ResumePassivation struct {
 
 func (x *ResumePassivation) Reset() {
 	*x = ResumePassivation{}
-	mi := &file_goakt_goakt_proto_msgTypes[22]
+	mi := &file_goakt_goakt_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1300,7 +1367,7 @@ func (x *ResumePassivation) String() string {
 func (*ResumePassivation) ProtoMessage() {}
 
 func (x *ResumePassivation) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[22]
+	mi := &file_goakt_goakt_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1313,7 +1380,7 @@ func (x *ResumePassivation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResumePassivation.ProtoReflect.Descriptor instead.
 func (*ResumePassivation) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{22}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{23}
 }
 
 // StatusFailure is used to indicate a failure status with an error message
@@ -1329,7 +1396,7 @@ type StatusFailure struct {
 
 func (x *StatusFailure) Reset() {
 	*x = StatusFailure{}
-	mi := &file_goakt_goakt_proto_msgTypes[23]
+	mi := &file_goakt_goakt_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1341,7 +1408,7 @@ func (x *StatusFailure) String() string {
 func (*StatusFailure) ProtoMessage() {}
 
 func (x *StatusFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[23]
+	mi := &file_goakt_goakt_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1354,7 +1421,7 @@ func (x *StatusFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatusFailure.ProtoReflect.Descriptor instead.
 func (*StatusFailure) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{23}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *StatusFailure) GetError() string {
@@ -1392,7 +1459,7 @@ type GetRoutees struct {
 
 func (x *GetRoutees) Reset() {
 	*x = GetRoutees{}
-	mi := &file_goakt_goakt_proto_msgTypes[24]
+	mi := &file_goakt_goakt_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1404,7 +1471,7 @@ func (x *GetRoutees) String() string {
 func (*GetRoutees) ProtoMessage() {}
 
 func (x *GetRoutees) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[24]
+	mi := &file_goakt_goakt_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1417,7 +1484,7 @@ func (x *GetRoutees) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetRoutees.ProtoReflect.Descriptor instead.
 func (*GetRoutees) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{24}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{25}
 }
 
 // Routees contains the set of routee names managed by a router at the time of the GetRoutees request.
@@ -1448,7 +1515,7 @@ type Routees struct {
 
 func (x *Routees) Reset() {
 	*x = Routees{}
-	mi := &file_goakt_goakt_proto_msgTypes[25]
+	mi := &file_goakt_goakt_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1460,7 +1527,7 @@ func (x *Routees) String() string {
 func (*Routees) ProtoMessage() {}
 
 func (x *Routees) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[25]
+	mi := &file_goakt_goakt_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1473,7 +1540,7 @@ func (x *Routees) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Routees.ProtoReflect.Descriptor instead.
 func (*Routees) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{25}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *Routees) GetNames() []string {
@@ -1524,7 +1591,7 @@ type AdjustRouterPoolSize struct {
 
 func (x *AdjustRouterPoolSize) Reset() {
 	*x = AdjustRouterPoolSize{}
-	mi := &file_goakt_goakt_proto_msgTypes[26]
+	mi := &file_goakt_goakt_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1536,7 +1603,7 @@ func (x *AdjustRouterPoolSize) String() string {
 func (*AdjustRouterPoolSize) ProtoMessage() {}
 
 func (x *AdjustRouterPoolSize) ProtoReflect() protoreflect.Message {
-	mi := &file_goakt_goakt_proto_msgTypes[26]
+	mi := &file_goakt_goakt_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1549,7 +1616,7 @@ func (x *AdjustRouterPoolSize) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AdjustRouterPoolSize.ProtoReflect.Descriptor instead.
 func (*AdjustRouterPoolSize) Descriptor() ([]byte, []int) {
-	return file_goakt_goakt_proto_rawDescGZIP(), []int{26}
+	return file_goakt_goakt_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *AdjustRouterPoolSize) GetPoolSize() int32 {
@@ -1611,7 +1678,11 @@ const file_goakt_goakt_proto_rawDesc = "" +
 	"\x04host\x18\x03 \x01(\tR\x04host\x12#\n" +
 	"\rremoting_port\x18\x04 \x01(\x05R\fremotingPort\x12\x1d\n" +
 	"\n" +
-	"peers_port\x18\x05 \x01(\x05R\tpeersPort\"g\n" +
+	"peers_port\x18\x05 \x01(\x05R\tpeersPort\"\x9a\x01\n" +
+	"\x13RelocationCompleted\x12!\n" +
+	"\factors_count\x18\x01 \x01(\x04R\vactorsCount\x12!\n" +
+	"\fgrains_count\x18\x02 \x01(\x04R\vgrainsCount\x12=\n" +
+	"\fcompleted_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\vcompletedAt\"g\n" +
 	"\n" +
 	"Terminated\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\x12?\n" +
@@ -1664,7 +1735,7 @@ func file_goakt_goakt_proto_rawDescGZIP() []byte {
 	return file_goakt_goakt_proto_rawDescData
 }
 
-var file_goakt_goakt_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
+var file_goakt_goakt_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
 var file_goakt_goakt_proto_goTypes = []any{
 	(*Deadletter)(nil),            // 0: goaktpb.Deadletter
 	(*ActorStarted)(nil),          // 1: goaktpb.ActorStarted
@@ -1676,49 +1747,51 @@ var file_goakt_goakt_proto_goTypes = []any{
 	(*ActorReinstated)(nil),       // 7: goaktpb.ActorReinstated
 	(*NodeJoined)(nil),            // 8: goaktpb.NodeJoined
 	(*NodeLeft)(nil),              // 9: goaktpb.NodeLeft
-	(*Terminated)(nil),            // 10: goaktpb.Terminated
-	(*PoisonPill)(nil),            // 11: goaktpb.PoisonPill
-	(*PostStart)(nil),             // 12: goaktpb.PostStart
-	(*Broadcast)(nil),             // 13: goaktpb.Broadcast
-	(*Subscribe)(nil),             // 14: goaktpb.Subscribe
-	(*Unsubscribe)(nil),           // 15: goaktpb.Unsubscribe
-	(*SubscribeAck)(nil),          // 16: goaktpb.SubscribeAck
-	(*UnsubscribeAck)(nil),        // 17: goaktpb.UnsubscribeAck
-	(*Publish)(nil),               // 18: goaktpb.Publish
-	(*NoMessage)(nil),             // 19: goaktpb.NoMessage
-	(*PanicSignal)(nil),           // 20: goaktpb.PanicSignal
-	(*PausePassivation)(nil),      // 21: goaktpb.PausePassivation
-	(*ResumePassivation)(nil),     // 22: goaktpb.ResumePassivation
-	(*StatusFailure)(nil),         // 23: goaktpb.StatusFailure
-	(*GetRoutees)(nil),            // 24: goaktpb.GetRoutees
-	(*Routees)(nil),               // 25: goaktpb.Routees
-	(*AdjustRouterPoolSize)(nil),  // 26: goaktpb.AdjustRouterPoolSize
-	(*anypb.Any)(nil),             // 27: google.protobuf.Any
-	(*timestamppb.Timestamp)(nil), // 28: google.protobuf.Timestamp
+	(*RelocationCompleted)(nil),   // 10: goaktpb.RelocationCompleted
+	(*Terminated)(nil),            // 11: goaktpb.Terminated
+	(*PoisonPill)(nil),            // 12: goaktpb.PoisonPill
+	(*PostStart)(nil),             // 13: goaktpb.PostStart
+	(*Broadcast)(nil),             // 14: goaktpb.Broadcast
+	(*Subscribe)(nil),             // 15: goaktpb.Subscribe
+	(*Unsubscribe)(nil),           // 16: goaktpb.Unsubscribe
+	(*SubscribeAck)(nil),          // 17: goaktpb.SubscribeAck
+	(*UnsubscribeAck)(nil),        // 18: goaktpb.UnsubscribeAck
+	(*Publish)(nil),               // 19: goaktpb.Publish
+	(*NoMessage)(nil),             // 20: goaktpb.NoMessage
+	(*PanicSignal)(nil),           // 21: goaktpb.PanicSignal
+	(*PausePassivation)(nil),      // 22: goaktpb.PausePassivation
+	(*ResumePassivation)(nil),     // 23: goaktpb.ResumePassivation
+	(*StatusFailure)(nil),         // 24: goaktpb.StatusFailure
+	(*GetRoutees)(nil),            // 25: goaktpb.GetRoutees
+	(*Routees)(nil),               // 26: goaktpb.Routees
+	(*AdjustRouterPoolSize)(nil),  // 27: goaktpb.AdjustRouterPoolSize
+	(*anypb.Any)(nil),             // 28: google.protobuf.Any
+	(*timestamppb.Timestamp)(nil), // 29: google.protobuf.Timestamp
 }
 var file_goakt_goakt_proto_depIdxs = []int32{
-	27, // 0: goaktpb.Deadletter.message:type_name -> google.protobuf.Any
-	28, // 1: goaktpb.Deadletter.send_time:type_name -> google.protobuf.Timestamp
-	28, // 2: goaktpb.ActorStarted.started_at:type_name -> google.protobuf.Timestamp
-	28, // 3: goaktpb.ActorStopped.stopped_at:type_name -> google.protobuf.Timestamp
-	28, // 4: goaktpb.ActorPassivated.passivated_at:type_name -> google.protobuf.Timestamp
-	28, // 5: goaktpb.ActorChildCreated.created_at:type_name -> google.protobuf.Timestamp
-	28, // 6: goaktpb.ActorRestarted.restarted_at:type_name -> google.protobuf.Timestamp
-	28, // 7: goaktpb.ActorSuspended.suspended_at:type_name -> google.protobuf.Timestamp
-	28, // 8: goaktpb.ActorReinstated.reinstated_at:type_name -> google.protobuf.Timestamp
-	28, // 9: goaktpb.NodeJoined.timestamp:type_name -> google.protobuf.Timestamp
-	28, // 10: goaktpb.NodeLeft.timestamp:type_name -> google.protobuf.Timestamp
-	28, // 11: goaktpb.Terminated.terminated_at:type_name -> google.protobuf.Timestamp
-	27, // 12: goaktpb.Broadcast.message:type_name -> google.protobuf.Any
-	27, // 13: goaktpb.Publish.message:type_name -> google.protobuf.Any
-	27, // 14: goaktpb.PanicSignal.message:type_name -> google.protobuf.Any
-	28, // 15: goaktpb.PanicSignal.timestamp:type_name -> google.protobuf.Timestamp
-	27, // 16: goaktpb.StatusFailure.message:type_name -> google.protobuf.Any
-	17, // [17:17] is the sub-list for method output_type
-	17, // [17:17] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	28, // 0: goaktpb.Deadletter.message:type_name -> google.protobuf.Any
+	29, // 1: goaktpb.Deadletter.send_time:type_name -> google.protobuf.Timestamp
+	29, // 2: goaktpb.ActorStarted.started_at:type_name -> google.protobuf.Timestamp
+	29, // 3: goaktpb.ActorStopped.stopped_at:type_name -> google.protobuf.Timestamp
+	29, // 4: goaktpb.ActorPassivated.passivated_at:type_name -> google.protobuf.Timestamp
+	29, // 5: goaktpb.ActorChildCreated.created_at:type_name -> google.protobuf.Timestamp
+	29, // 6: goaktpb.ActorRestarted.restarted_at:type_name -> google.protobuf.Timestamp
+	29, // 7: goaktpb.ActorSuspended.suspended_at:type_name -> google.protobuf.Timestamp
+	29, // 8: goaktpb.ActorReinstated.reinstated_at:type_name -> google.protobuf.Timestamp
+	29, // 9: goaktpb.NodeJoined.timestamp:type_name -> google.protobuf.Timestamp
+	29, // 10: goaktpb.NodeLeft.timestamp:type_name -> google.protobuf.Timestamp
+	29, // 11: goaktpb.RelocationCompleted.completed_at:type_name -> google.protobuf.Timestamp
+	29, // 12: goaktpb.Terminated.terminated_at:type_name -> google.protobuf.Timestamp
+	28, // 13: goaktpb.Broadcast.message:type_name -> google.protobuf.Any
+	28, // 14: goaktpb.Publish.message:type_name -> google.protobuf.Any
+	28, // 15: goaktpb.PanicSignal.message:type_name -> google.protobuf.Any
+	29, // 16: goaktpb.PanicSignal.timestamp:type_name -> google.protobuf.Timestamp
+	28, // 17: goaktpb.StatusFailure.message:type_name -> google.protobuf.Any
+	18, // [18:18] is the sub-list for method output_type
+	18, // [18:18] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_goakt_goakt_proto_init() }
@@ -1732,7 +1805,7 @@ func file_goakt_goakt_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_goakt_goakt_proto_rawDesc), len(file_goakt_goakt_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   27,
+			NumMessages:   28,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

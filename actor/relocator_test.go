@@ -48,6 +48,8 @@ import (
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/errors"
 	gerrors "github.com/tochemey/goakt/v3/errors"
+	"github.com/tochemey/goakt/v3/eventstream"
+	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
@@ -451,6 +453,10 @@ func TestRelocation(t *testing.T) {
 		targetAddress = node3Address
 		actorName = "Actor31"
 	}
+	survivorNode := node3
+	if targetNode == node3 {
+		survivorNode = node2
+	}
 
 	reentrantName := "Reentrant-Actor"
 	pid, err := spawnWithRetry(ctx, targetNode, reentrantName, NewMockActor(),
@@ -478,12 +484,16 @@ func TestRelocation(t *testing.T) {
 		return addr.HostPort() == targetAddress
 	}, 30*time.Second, 500*time.Millisecond, "Actor %s should be on target node before shutdown", actorName)
 
+	relocationWatch := newRelocationWatch(t, node1, survivorNode)
+
 	// take down the target node
 	require.NoError(t, targetNode.Stop(ctx))
 	require.NoError(t, targetSD.Close())
 
 	// Wait for the cluster to observe node2 leaving before relocation checks.
 	waitForClusterMembers(t, node1, 2, 60*time.Second)
+
+	relocationWatch.Wait(t, 2*time.Minute)
 
 	// Wait for cluster rebalancing - verify actor relocation actually occurred.
 	// The relocation process:
@@ -574,6 +584,8 @@ func TestRelocation(t *testing.T) {
 		require.Equal(t, 3, pid.reentrancy.maxInFlight)
 	}
 
+	relocationWatch.Close(t)
+
 	assert.NoError(t, node1.Stop(ctx))
 	if targetNode != node3 {
 		assert.NoError(t, node3.Stop(ctx))
@@ -656,11 +668,15 @@ func TestRelocationWithCustomSupervisor(t *testing.T) {
 	require.NotNil(t, addr)
 	require.Equal(t, node2Address, addr.HostPort(), "Actor %s should be on node2 before shutdown", actorName)
 
+	relocationWatch := newRelocationWatch(t, node1, node3)
+
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
 	// Allow time for the cluster to detect node2 leaving and start relocation
 	pause.For(2 * time.Second)
+
+	relocationWatch.Wait(t, 2*time.Minute)
 
 	// Wait for relocation - verify actor exists and is on a live node (not node2)
 	// The relocation process:
@@ -721,6 +737,8 @@ func TestRelocationWithCustomSupervisor(t *testing.T) {
 	directive, ok := relocated.supervisor.Directive(&errors.InternalError{})
 	require.True(t, ok)
 	require.Equal(t, supervisor.RestartDirective, directive)
+
+	relocationWatch.Close(t)
 
 	assert.NoError(t, node1.Stop(ctx))
 	assert.NoError(t, node3.Stop(ctx))
@@ -802,12 +820,14 @@ func TestRelocationWithTLS(t *testing.T) {
 
 	pause.For(time.Second)
 
+	relocationWatch := newRelocationWatch(t, node1, node2, node3)
+
 	// take down node2
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
-	// Wait for cluster rebalancing
-	pause.For(time.Minute)
+	waitForClusterMembers(t, node1, 2, 60*time.Second)
+	relocationWatch.WaitBestEffort(2 * time.Minute)
 
 	sender, err := node1.LocalActor("Node1-Actor-1")
 	require.NoError(t, err)
@@ -916,12 +936,24 @@ func TestRelocationWithSingletonActor(t *testing.T) {
 		require.Failf(t, "unexpected singleton location", "singleton %s is on %s", actorName, ownerAddr)
 	}
 
+	var relocationWatch *relocationWatch
+	switch ownerNode {
+	case node1:
+		relocationWatch = newRelocationWatch(t, node2, node3)
+	case node2:
+		relocationWatch = newRelocationWatch(t, node1, node3)
+	case node3:
+		relocationWatch = newRelocationWatch(t, node1, node2)
+	}
+
 	// take down the owner node
 	require.NoError(t, ownerNode.Stop(ctx))
 	require.NoError(t, ownerSD.Close())
 
 	// Allow time for the cluster to detect node1 leaving and start relocation
 	pause.For(2 * time.Second)
+
+	relocationWatch.Wait(t, 2*time.Minute)
 
 	// Wait for singleton relocation - verify it exists and is on a live node (not node1)
 	// The relocation process:
@@ -955,6 +987,8 @@ func TestRelocationWithSingletonActor(t *testing.T) {
 		// If it still has node1's address, relocation hasn't happened yet
 		return actorAddr != ownerAddr
 	}, 2*time.Minute, 500*time.Millisecond, "Singleton %s should be relocated from %s to a live node", actorName, ownerAddr)
+
+	relocationWatch.Close(t)
 
 	if ownerNode != node1 {
 		assert.NoError(t, node1.Stop(ctx))
@@ -1021,12 +1055,14 @@ func TestRelocationWithActorRelocationDisabled(t *testing.T) {
 
 	pause.For(time.Second)
 
+	relocationWatch := newRelocationWatch(t, node1, node2, node3)
+
 	// take down node2
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
-	// Wait for cluster rebalancing
-	pause.For(time.Minute)
+	waitForClusterMembers(t, node1, 2, 60*time.Second)
+	relocationWatch.WaitBestEffort(2 * time.Minute)
 
 	sender, err := node1.LocalActor("Node1-Actor-1")
 	require.NoError(t, err)
@@ -1198,12 +1234,16 @@ func TestRelocationWithExtension(t *testing.T) {
 	require.NotNil(t, addr)
 	require.Equal(t, node2Address, addr.HostPort(), "Entity %s should be on node2 before shutdown", entityID)
 
+	relocationWatch := newRelocationWatch(t, node1, node3)
+
 	// take down node2
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
 	// Allow time for the cluster to detect node2 leaving and start relocation
 	pause.For(2 * time.Second)
+
+	relocationWatch.Wait(t, 2*time.Minute)
 
 	// Wait for relocation - verify entity exists and is on a live node (not node2)
 	// The relocation process:
@@ -1261,6 +1301,7 @@ func TestRelocationWithExtension(t *testing.T) {
 	// the balance when creating that entity is 600
 	require.EqualValues(t, 600, account.GetAccountBalance())
 
+	relocationWatch.Close(t)
 	assert.NoError(t, node1.Stop(ctx))
 	assert.NoError(t, node3.Stop(ctx))
 	assert.NoError(t, sd1.Close())
@@ -1342,12 +1383,16 @@ func TestRelocationWithDependency(t *testing.T) {
 	require.NotNil(t, addr)
 	require.Equal(t, node2Address, addr.HostPort(), "Actor %s should be on node2 before shutdown", actorName)
 
+	relocationWatch := newRelocationWatch(t, node1)
+
 	// take down node2
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
 	// Allow time for the cluster to detect node2 leaving and start relocation
 	pause.For(2 * time.Second)
+
+	relocationWatch.Wait(t, 2*time.Minute)
 
 	// Wait for relocation - verify actor exists and is on a live node (not node2)
 	// The relocation process:
@@ -1399,6 +1444,8 @@ func TestRelocationWithDependency(t *testing.T) {
 	mockdep := dep.(*MockDependency)
 	require.Equal(t, actorName, mockdep.Username)
 	require.Equal(t, "email", mockdep.Email)
+
+	relocationWatch.Close(t)
 
 	assert.NoError(t, node1.Stop(ctx))
 	assert.NoError(t, sd1.Close())
@@ -1463,12 +1510,14 @@ func TestRelocationIssue781(t *testing.T) {
 
 	pause.For(time.Second)
 
+	relocationWatch := newRelocationWatch(t, node1, node2, node3)
+
 	// take down node2
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
-	// Wait for cluster rebalancing
-	pause.For(time.Minute)
+	waitForClusterMembers(t, node1, 2, 60*time.Second)
+	relocationWatch.WaitBestEffort(2 * time.Minute)
 
 	sender, err := node1.LocalActor("Actor-11")
 	require.NoError(t, err)
@@ -1562,6 +1611,84 @@ func waitForLeader(t *testing.T, system ActorSystem, timeout time.Duration) {
 	}, timeout, 500*time.Millisecond, "expected leader %s", expected)
 }
 
+func waitForGrainsOwned(t *testing.T, system ActorSystem, ownerAddress string, minCount int, timeout time.Duration) {
+	t.Helper()
+
+	sys, ok := system.(*actorSystem)
+	require.True(t, ok, "expected *actorSystem, got %T", system)
+
+	require.Eventually(t, func() bool {
+		grains, err := sys.getCluster().GetGrainsByOwner(context.TODO(), ownerAddress)
+		if err != nil {
+			return false
+		}
+		return len(grains) >= minCount
+	}, timeout, 500*time.Millisecond, "expected at least %d grains owned by %s", minCount, ownerAddress)
+}
+
+type relocationWatch struct {
+	systems     []ActorSystem
+	subscribers []eventstream.Subscriber
+}
+
+func newRelocationWatch(t *testing.T, systems ...ActorSystem) *relocationWatch {
+	t.Helper()
+
+	watch := &relocationWatch{
+		systems:     systems,
+		subscribers: make([]eventstream.Subscriber, 0, len(systems)),
+	}
+	for _, system := range systems {
+		subscriber, err := system.Subscribe()
+		require.NoError(t, err)
+		for range subscriber.Iterator() {
+		}
+		watch.subscribers = append(watch.subscribers, subscriber)
+	}
+	return watch
+}
+
+func (watch *relocationWatch) Wait(t *testing.T, timeout time.Duration) {
+	t.Helper()
+
+	require.Eventually(t, func() bool {
+		return watch.hasRelocationEvent()
+	}, timeout, 500*time.Millisecond, "expected relocation completion event")
+}
+
+func (watch *relocationWatch) Close(t *testing.T) {
+	t.Helper()
+
+	for i, subscriber := range watch.subscribers {
+		err := watch.systems[i].Unsubscribe(subscriber)
+		if err != nil && !stdErrors.Is(err, gerrors.ErrActorSystemNotStarted) {
+			assert.NoError(t, err)
+		}
+	}
+}
+
+func (watch *relocationWatch) WaitBestEffort(timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if watch.hasRelocationEvent() {
+			return true
+		}
+		pause.For(500 * time.Millisecond)
+	}
+	return false
+}
+
+func (watch *relocationWatch) hasRelocationEvent() bool {
+	for _, subscriber := range watch.subscribers {
+		for msg := range subscriber.Iterator() {
+			if _, ok := msg.Payload().(*goaktpb.RelocationCompleted); ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func relocationReadyOpts() []testClusterOption {
 	return []testClusterOption{
 		withTestReadinessMode(ReadinessModeFailStart),
@@ -1631,12 +1758,15 @@ func TestGrainsRelocation(t *testing.T) {
 
 	pause.For(time.Second)
 
+	waitForGrainsOwned(t, node1, node2.PeersAddress(), 1, 30*time.Second)
+
+	relocationWatch := newRelocationWatch(t, node1, node2, node3)
+
 	// take down node2
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
-	// Wait for cluster rebalancing
-	pause.For(time.Minute)
+	relocationWatch.WaitBestEffort(2 * time.Minute)
 
 	identity, err := node3.GrainIdentity(ctx, "Grain-20", func(ctx context.Context) (Grain, error) {
 		return NewMockGrain(), nil
@@ -1683,6 +1813,8 @@ func TestGrainsRelocation(t *testing.T) {
 	message = new(testpb.TestSend)
 	err = node1.TellGrain(ctx, identity, message)
 	require.NoError(t, err)
+
+	relocationWatch.Close(t)
 
 	assert.NoError(t, node1.Stop(ctx))
 	assert.NoError(t, node3.Stop(ctx))
@@ -1763,12 +1895,15 @@ func TestPersistenceGrainsRelocation(t *testing.T) {
 
 	pause.For(time.Second)
 
+	waitForGrainsOwned(t, node1, node2.PeersAddress(), 1, 30*time.Second)
+
+	relocationWatch := newRelocationWatch(t, node1, node2, node3)
+
 	// take down node2
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
-	// Wait for cluster rebalancing
-	pause.For(time.Minute)
+	relocationWatch.WaitBestEffort(2 * time.Minute)
 
 	message := &testpb.CreditAccount{
 		Balance: 500.00,
@@ -1830,6 +1965,8 @@ func TestPersistenceGrainsRelocation(t *testing.T) {
 	require.NotNil(t, response)
 	actual = response.(*testpb.Account)
 	require.EqualValues(t, 1000.00, actual.GetAccountBalance())
+
+	relocationWatch.Close(t)
 
 	assert.NoError(t, node1.Stop(ctx))
 	assert.NoError(t, node3.Stop(ctx))
@@ -1911,12 +2048,15 @@ func TestGrainsWithDependenciesRelocation(t *testing.T) {
 
 	pause.For(time.Second)
 
+	waitForGrainsOwned(t, node1, node2.PeersAddress(), 1, 30*time.Second)
+
+	relocationWatch := newRelocationWatch(t, node1, node2, node3)
+
 	// take down node2
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
-	// Wait for cluster rebalancing
-	pause.For(time.Minute)
+	relocationWatch.WaitBestEffort(2 * time.Minute)
 
 	identity, err := node3.GrainIdentity(ctx, "Grain-20", func(ctx context.Context) (Grain, error) {
 		return NewMockGrain(), nil
@@ -1963,6 +2103,8 @@ func TestGrainsWithDependenciesRelocation(t *testing.T) {
 	message = new(testpb.TestSend)
 	err = node1.TellGrain(ctx, identity, message)
 	require.NoError(t, err)
+
+	relocationWatch.Close(t)
 
 	assert.NoError(t, node1.Stop(ctx))
 	assert.NoError(t, node3.Stop(ctx))
@@ -2035,9 +2177,13 @@ func TestRelocationWithConsulProvider(t *testing.T) {
 	require.NotNil(t, addr)
 	require.Equal(t, node2Address, addr.HostPort(), "Actor %s should be on node2 before shutdown", actorName)
 
+	relocationWatch := newRelocationWatch(t, node1, node3)
+
 	// take down node2
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
+
+	relocationWatch.Wait(t, 2*time.Minute)
 
 	// Wait for relocation - verify actor exists and is on a live node (not node2)
 	require.Eventually(t, func() bool {
@@ -2059,6 +2205,8 @@ func TestRelocationWithConsulProvider(t *testing.T) {
 	// let us access some of the node2 actors from node 1 and  node 3
 	err = sender.SendAsync(ctx, actorName, new(testpb.TestSend))
 	require.NoError(t, err)
+
+	relocationWatch.Close(t)
 
 	require.NoError(t, node1.Stop(ctx))
 	require.NoError(t, node3.Stop(ctx))
@@ -2129,12 +2277,16 @@ func TestRelocationWithEtcdProvider(t *testing.T) {
 	require.NotNil(t, addr)
 	require.Equal(t, node2Address, addr.HostPort(), "Actor %s should be on node2 before shutdown", actorName)
 
+	relocationWatch := newRelocationWatch(t, node1, node3)
+
 	// take down node2
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
 	// Give the cluster time to detect the node failure and start relocation
 	pause.For(2 * time.Second)
+
+	relocationWatch.Wait(t, 2*time.Minute)
 
 	// Wait for cluster rebalancing - verify actor relocation actually occurred.
 	// The relocation process:
@@ -2176,6 +2328,8 @@ func TestRelocationWithEtcdProvider(t *testing.T) {
 	// let us access some of the node2 actors from node 1 and  node 3
 	err = sender.SendAsync(ctx, actorName, new(testpb.TestSend))
 	require.NoError(t, err)
+
+	relocationWatch.Close(t)
 
 	require.NoError(t, node1.Stop(ctx))
 	require.NoError(t, node3.Stop(ctx))

@@ -110,6 +110,19 @@ message NodeLeft {
   int32 peers_port = 5;
 }
 
+// RelocationCompleted defines the relocation completed event
+// One can subscribe to this event to be notified when the relocation is completed.
+// This event is only emitted on a successful relocation.
+// If the relocation fails, the event is not emitted.
+message RelocationCompleted {
+  // Specifies the total number of actors relocated
+  uint64 actors_count = 1;
+  // Specifies the total number of grains relocated
+  uint64 grains_count = 2;
+  // Specifies the completion time
+  google.protobuf.Timestamp completed_at = 3;
+}
+
 // Terminated is a lifecycle notification message sent to all actors
 // that are watching a given actor when it has stopped or been terminated.
 //

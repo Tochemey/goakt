@@ -29,6 +29,7 @@ import (
 
 	"connectrpc.com/connect"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/errors"
@@ -87,6 +88,9 @@ func (r *relocator) Relocate(ctx *ReceiveContext) {
 			return
 		}
 
+		totalActors := len(peerState.GetActors())
+		totalGrains := len(peerState.GetGrains())
+
 		leaderShares, peersShares := r.allocateActors(len(peers)+1, peerState)
 		eg, egCtx := errgroup.WithContext(rctx)
 		logger := r.pid.Logger()
@@ -105,6 +109,17 @@ func (r *relocator) Relocate(ctx *ReceiveContext) {
 				ctx.Err(err)
 				// TODO: let us add the supervisor to handle this error
 				return
+			}
+
+			// publish the relocation completed event
+			if r.pid.eventsStream != nil {
+				r.pid.eventsStream.Publish(
+					eventsTopic, &goaktpb.RelocationCompleted{
+						ActorsCount: uint64(totalActors),
+						GrainsCount: uint64(totalGrains),
+						CompletedAt: timestamppb.Now(),
+					},
+				)
 			}
 		}
 

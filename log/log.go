@@ -43,7 +43,7 @@ var (
 	// is directed to io.Discard. This effectively mutes all log messages,
 	// making it useful for disabling logging in tests or production environments
 	// where specific loggers are not needed.
-	DiscardLogger = New(DebugLevel, io.Discard)
+	DiscardLogger = New(WarningLevel, io.Discard)
 
 	// DefaultLogger is a global logger configured to output messages at InfoLevel
 	// and above to os.Stdout. It serves as the standard logger for general
