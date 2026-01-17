@@ -1113,7 +1113,7 @@ func (x *cluster) waitForMemberlistQuorum(ctx context.Context) error {
 	x.logger.Infof("Waiting for memberlist quorum: required=%d", required)
 
 	for {
-		members, err := x.client.Members(ctx)
+		members, err := x.safeMembers(ctx)
 		if err == nil {
 			count := x.countMemberlistMembers(members)
 			if count != lastCount {
@@ -1137,6 +1137,23 @@ func (x *cluster) waitForMemberlistQuorum(ctx context.Context) error {
 		case <-clock.Ticks:
 		}
 	}
+}
+
+// safeMembers reads memberlist state while guarding against nil client or
+// panics during early startup. It returns a non-nil error instead of crashing.
+func (x *cluster) safeMembers(ctx context.Context) (members []olric.Member, err error) {
+	if x.client == nil {
+		return nil, errors.New("cluster client is not initialized")
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("memberlist members unavailable: %v", r)
+			members = nil
+		}
+	}()
+
+	return x.client.Members(ctx)
 }
 
 // countMemberlistMembers returns the total member count implied by the

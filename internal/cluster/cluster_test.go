@@ -4509,3 +4509,51 @@ func newTestPubSub(t *testing.T) *olric.PubSub {
 	reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).Elem().Set(reflect.ValueOf(rc))
 	return ps
 }
+
+type membersClient struct {
+	*MockClient
+	members    []olric.Member
+	membersErr error
+}
+
+func (c *membersClient) Members(ctx context.Context) ([]olric.Member, error) {
+	if c.membersErr != nil {
+		return nil, c.membersErr
+	}
+	return c.members, nil
+}
+
+func TestSafeMembers(t *testing.T) {
+	t.Run("returns error when client nil", func(t *testing.T) {
+		cl := &cluster{}
+
+		members, err := cl.safeMembers(context.Background())
+
+		require.Error(t, err)
+		require.Nil(t, members)
+	})
+
+	t.Run("returns error when members panics", func(t *testing.T) {
+		cl := &cluster{client: &MockClient{}}
+
+		members, err := cl.safeMembers(context.Background())
+
+		require.Error(t, err)
+		require.Nil(t, members)
+	})
+
+	t.Run("returns members when available", func(t *testing.T) {
+		expected := []olric.Member{{Name: "node-1"}}
+		cl := &cluster{
+			client: &membersClient{
+				MockClient: &MockClient{},
+				members:    expected,
+			},
+		}
+
+		members, err := cl.safeMembers(context.Background())
+
+		require.NoError(t, err)
+		require.Equal(t, expected, members)
+	})
+}

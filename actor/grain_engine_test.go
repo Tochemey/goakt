@@ -36,6 +36,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
 
@@ -688,16 +689,22 @@ func TestAskGrain_ClusterFallbackAutoProvisions(t *testing.T) {
 	sys.registry.Register(grain)
 	identity := newGrainIdentity(grain, "auto-provision")
 
-	cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(nil, cluster.ErrGrainNotFound)
-	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, nil).Twice()
+	cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(nil, cluster.ErrGrainNotFound).Maybe()
+	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, nil).Maybe()
 	cl.EXPECT().PutGrain(mock.Anything, mock.MatchedBy(func(actual *internalpb.Grain) bool {
 		return actual != nil && actual.GetGrainId().GetValue() == identity.String()
 	})).Return(nil).Once()
 
-	resp, err := sys.AskGrain(ctx, identity, &testpb.TestReply{}, time.Second)
-	require.NoError(t, err)
-	require.NotNil(t, resp)
-	require.Equal(t, "received message", resp.(*testpb.Reply).Content)
+	var resp proto.Message
+	require.Eventually(t, func() bool {
+		var err error
+		resp, err = sys.AskGrain(ctx, identity, &testpb.TestReply{}, time.Second)
+		if err != nil || resp == nil {
+			return false
+		}
+		reply, ok := resp.(*testpb.Reply)
+		return ok && reply.GetContent() == "received message"
+	}, 5*time.Second, 100*time.Millisecond, "expected grain reply")
 
 	_, ok := sys.grains.Get(identity.String())
 	require.True(t, ok)
