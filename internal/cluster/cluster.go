@@ -284,10 +284,9 @@ func (x *cluster) Start(ctx context.Context) error {
 	x.client = x.server.NewEmbeddedClient()
 
 	readyCtx := ctx
+	var cancel context.CancelFunc
 	if x.readinessTimeout > 0 {
-		var cancel context.CancelFunc
 		readyCtx, cancel = context.WithTimeout(ctx, x.readinessTimeout)
-		defer cancel()
 	}
 
 	x.consumeCtx, x.consumeCancel = context.WithCancel(ctx)
@@ -295,8 +294,17 @@ func (x *cluster) Start(ctx context.Context) error {
 	required := x.requiredMemberCount()
 	if x.readinessMode == ReadinessModeDegradedStart && required > 1 {
 		x.running.Store(true)
-		go x.handleReadiness(readyCtx, startErrCh, ctx)
+		go func() {
+			if cancel != nil {
+				defer cancel()
+			}
+			x.handleReadiness(readyCtx, startErrCh, ctx)
+		}()
 		return nil
+	}
+
+	if cancel != nil {
+		defer cancel()
 	}
 
 	if err := x.awaitReady(readyCtx, startErrCh, ctx); err != nil {
