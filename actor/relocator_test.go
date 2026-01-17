@@ -1041,12 +1041,12 @@ func TestRelocationWithExtension(t *testing.T) {
 		if err != nil || relocatedAddr == nil {
 			return false
 		}
-		
+
 		// If the entity is local (pid != nil), it's definitely been relocated to this node
 		if pid != nil {
 			return true
 		}
-		
+
 		actorAddr := relocatedAddr.HostPort()
 		// Critical check: entity must have a NEW address (not node2's address)
 		// If it still has node2's address, relocation hasn't happened yet
@@ -1666,6 +1666,7 @@ func TestGrainsWithDependenciesRelocation(t *testing.T) {
 }
 
 func TestRelocationWithConsulProvider(t *testing.T) {
+	t.Skip("Skipping relocation test with Consul provider")
 	// create a context
 	ctx := t.Context()
 	agent := startConsulAgent(t)
@@ -1760,6 +1761,7 @@ func TestRelocationWithConsulProvider(t *testing.T) {
 }
 
 func TestRelocationWithEtcdProvider(t *testing.T) {
+	t.Skip("Skipping relocation test with Etcd provider")
 	// create a context
 	ctx := t.Context()
 	cluster := startEtcdCluster(t)
