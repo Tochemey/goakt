@@ -49,6 +49,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/locker"
 	"github.com/tochemey/goakt/v3/internal/memberlist"
+	"github.com/tochemey/goakt/v3/internal/types"
 	"github.com/tochemey/goakt/v3/log"
 	gtls "github.com/tochemey/goakt/v3/tls"
 )
@@ -307,7 +308,7 @@ func (x *cluster) Stop(ctx context.Context) error {
 	}
 
 	// Wait for consume to finish with timeout
-	done := make(chan struct{})
+	done := make(chan types.Unit)
 	go func() {
 		x.consumeWg.Wait()
 		close(done)
@@ -901,7 +902,7 @@ func (x *cluster) buildConfig() (*oconfig.Config, error) {
 	options := storage.NewConfig(nil)
 	options.Add("tableSize", x.tableSize)
 
-	cfg := &oconfig.Config{
+	config := &oconfig.Config{
 		BindAddr:          x.node.Host,
 		BindPort:          x.node.PeersPort,
 		ReadRepair:        true,
@@ -930,24 +931,26 @@ func (x *cluster) buildConfig() (*oconfig.Config, error) {
 		MemberMeta:                 meta,
 	}
 
+	// by default, disable redis-client logging
+	config.Client = &oconfig.Client{
+		DisableRedisLogging: true,
+	}
+
+	if x.logger.LogLevel() == log.DebugLevel {
+		config.LogVerbosity = oconfig.DefaultLogVerbosity
+		config.Client.DisableRedisLogging = false
+	}
+
 	if x.tlsInfo != nil {
-		cfg.TLS = &oconfig.TLS{
+		config.TLS = &oconfig.TLS{
 			Client: x.tlsInfo.ClientConfig,
 			Server: x.tlsInfo.ServerConfig,
 		}
 
-		client := &oconfig.Client{TLS: x.tlsInfo.ClientConfig}
-		if err := client.Sanitize(); err != nil {
-			return nil, fmt.Errorf("failed to sanitize client config: %v", err)
-		}
-		cfg.Client = client
+		config.Client.TLS = x.tlsInfo.ClientConfig
 	}
 
-	if x.logger.LogLevel() == log.DebugLevel {
-		cfg.LogVerbosity = oconfig.DefaultLogVerbosity
-	}
-
-	return cfg, nil
+	return config, config.Client.Sanitize()
 }
 
 // setupMemberlistConfig applies memberlist specific configuration to the
