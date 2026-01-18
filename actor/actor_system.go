@@ -2771,6 +2771,10 @@ func (x *actorSystem) startRemoting(ctx context.Context) error {
 			proto.MarshalOptions{},
 			proto.UnmarshalOptions{DiscardUnknown: true},
 		),
+		connect.WithRecover(func(_ context.Context, spec connect.Spec, _ stdhttp.Header, recovered any) error {
+			x.logger.Errorf("Remoting panic in %s: %v", spec.Procedure, recovered)
+			return connect.NewError(connect.CodeInternal, fmt.Errorf("internal server error"))
+		}),
 	}
 
 	if x.remoteConfig.MaxFrameSize() > 0 {

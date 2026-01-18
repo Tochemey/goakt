@@ -139,7 +139,7 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 			ipList[index] = ip.String()
 		}
 
-		return goset.NewSet[string](ipList...).ToSlice(), nil
+		return goset.NewSet(ipList...).ToSlice(), nil
 	}
 
 	// lookup the addresses based upon the dns name
@@ -153,7 +153,7 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 		ipList[index] = addr.IP.String()
 	}
 
-	return goset.NewSet[string](ipList...).ToSlice(), nil
+	return goset.NewSet(ipList...).ToSlice(), nil
 }
 
 // Close closes the provider

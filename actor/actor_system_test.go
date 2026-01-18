@@ -3046,6 +3046,37 @@ func TestRemoteContextPropagation(t *testing.T) {
 	})
 }
 
+func TestRemotingRecover(t *testing.T) {
+	t.Run("With remoting panic recovery returns a wire internal error", func(t *testing.T) {
+		ctx := context.Background()
+		host := "127.0.0.1"
+		remotingPort := dynaport.Get(1)[0]
+
+		sys, err := NewActorSystem(
+			"remoting-recover",
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig(host, remotingPort, remote.WithContextPropagator(&MockPanicContextPropagator{}))),
+		)
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		pause.For(200 * time.Millisecond)
+		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
+
+		remoting := remote.NewRemoting()
+		t.Cleanup(remoting.Close)
+
+		to := address.New("receiver", "remote-sys", host, remotingPort)
+		err = remoting.RemoteTell(ctx, address.NoSender(), to, new(testpb.TestSend))
+		require.Error(t, err)
+
+		var connectErr *connect.Error
+		require.ErrorAs(t, err, &connectErr)
+		require.True(t, connect.IsWireError(connectErr))
+		assert.Equal(t, connect.CodeInternal, connectErr.Code())
+		assert.Equal(t, "internal server error", connectErr.Message())
+	})
+}
+
 func TestRemoteTell(t *testing.T) {
 	t.Run("With happy path", func(t *testing.T) {
 		// create the context
