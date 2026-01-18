@@ -3046,6 +3046,37 @@ func TestRemoteContextPropagation(t *testing.T) {
 	})
 }
 
+func TestRemotingRecover(t *testing.T) {
+	t.Run("With remoting panic recovery returns a wire internal error", func(t *testing.T) {
+		ctx := context.Background()
+		host := "127.0.0.1"
+		remotingPort := dynaport.Get(1)[0]
+
+		sys, err := NewActorSystem(
+			"remoting-recover",
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig(host, remotingPort, remote.WithContextPropagator(&MockPanicContextPropagator{}))),
+		)
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		pause.For(200 * time.Millisecond)
+		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
+
+		remoting := remote.NewRemoting()
+		t.Cleanup(remoting.Close)
+
+		to := address.New("receiver", "remote-sys", host, remotingPort)
+		err = remoting.RemoteTell(ctx, address.NoSender(), to, new(testpb.TestSend))
+		require.Error(t, err)
+
+		var connectErr *connect.Error
+		require.ErrorAs(t, err, &connectErr)
+		require.True(t, connect.IsWireError(connectErr))
+		assert.Equal(t, connect.CodeInternal, connectErr.Code())
+		assert.Equal(t, "internal server error", connectErr.Message())
+	})
+}
+
 func TestRemoteTell(t *testing.T) {
 	t.Run("With happy path", func(t *testing.T) {
 		// create the context
@@ -8351,5 +8382,246 @@ func TestLeader(t *testing.T) {
 			require.NoError(t, cb(ctx, observer))
 		}
 		require.GreaterOrEqual(t, len(observer.records), 4)
+	})
+}
+
+func TestSelectOldestPeers(t *testing.T) {
+	t.Run("returns empty slice when no peers exist", func(t *testing.T) {
+		ctx := context.TODO()
+		clusterMock := mockscluster.NewCluster(t)
+		clusterMock.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{}, nil)
+
+		system := MockReplicationTestSystem(clusterMock)
+
+		peers, err := system.selectOldestPeers(ctx, 3)
+		require.NoError(t, err)
+		assert.Empty(t, peers)
+	})
+
+	t.Run("returns error when cluster.Peers fails", func(t *testing.T) {
+		ctx := context.TODO()
+		clusterMock := mockscluster.NewCluster(t)
+		expectedErr := errors.New("cluster unavailable")
+		clusterMock.EXPECT().Peers(mock.Anything).Return(nil, expectedErr)
+
+		system := MockReplicationTestSystem(clusterMock)
+
+		peers, err := system.selectOldestPeers(ctx, 3)
+		require.Error(t, err)
+		assert.Equal(t, expectedErr, err)
+		assert.Nil(t, peers)
+	})
+
+	t.Run("returns all peers when fewer than k exist", func(t *testing.T) {
+		ctx := context.TODO()
+		clusterMock := mockscluster.NewCluster(t)
+
+		// Two peers, but we request 3
+		inputPeers := []*cluster.Peer{
+			{Host: "host2", PeersPort: 9002, CreatedAt: 2000},
+			{Host: "host1", PeersPort: 9001, CreatedAt: 1000}, // Oldest
+		}
+		clusterMock.EXPECT().Peers(mock.Anything).Return(inputPeers, nil)
+
+		system := MockReplicationTestSystem(clusterMock)
+
+		peers, err := system.selectOldestPeers(ctx, 3)
+		require.NoError(t, err)
+		require.Len(t, peers, 2)
+
+		// Should be sorted by age (oldest first)
+		assert.Equal(t, "host1", peers[0].Host)
+		assert.Equal(t, "host2", peers[1].Host)
+	})
+
+	t.Run("returns k oldest peers when more than k exist", func(t *testing.T) {
+		ctx := context.TODO()
+		clusterMock := mockscluster.NewCluster(t)
+
+		// Five peers, request 3
+		inputPeers := []*cluster.Peer{
+			{Host: "host5", PeersPort: 9005, CreatedAt: 5000}, // Newest
+			{Host: "host2", PeersPort: 9002, CreatedAt: 2000},
+			{Host: "host4", PeersPort: 9004, CreatedAt: 4000},
+			{Host: "host1", PeersPort: 9001, CreatedAt: 1000}, // Oldest
+			{Host: "host3", PeersPort: 9003, CreatedAt: 3000},
+		}
+		clusterMock.EXPECT().Peers(mock.Anything).Return(inputPeers, nil)
+
+		system := MockReplicationTestSystem(clusterMock)
+
+		peers, err := system.selectOldestPeers(ctx, 3)
+		require.NoError(t, err)
+		require.Len(t, peers, 3)
+
+		// Should be the 3 oldest, sorted by age
+		assert.Equal(t, "host1", peers[0].Host) // CreatedAt: 1000
+		assert.Equal(t, "host2", peers[1].Host) // CreatedAt: 2000
+		assert.Equal(t, "host3", peers[2].Host) // CreatedAt: 3000
+	})
+
+	t.Run("returns exactly k peers when exactly k exist", func(t *testing.T) {
+		ctx := context.TODO()
+		clusterMock := mockscluster.NewCluster(t)
+
+		// Exactly 3 peers
+		inputPeers := []*cluster.Peer{
+			{Host: "host3", PeersPort: 9003, CreatedAt: 3000},
+			{Host: "host1", PeersPort: 9001, CreatedAt: 1000},
+			{Host: "host2", PeersPort: 9002, CreatedAt: 2000},
+		}
+		clusterMock.EXPECT().Peers(mock.Anything).Return(inputPeers, nil)
+
+		system := MockReplicationTestSystem(clusterMock)
+
+		peers, err := system.selectOldestPeers(ctx, 3)
+		require.NoError(t, err)
+		require.Len(t, peers, 3)
+
+		// Should be sorted by age
+		assert.Equal(t, "host1", peers[0].Host)
+		assert.Equal(t, "host2", peers[1].Host)
+		assert.Equal(t, "host3", peers[2].Host)
+	})
+
+	t.Run("handles single peer", func(t *testing.T) {
+		ctx := context.TODO()
+		clusterMock := mockscluster.NewCluster(t)
+
+		inputPeers := []*cluster.Peer{
+			{Host: "host1", PeersPort: 9001, CreatedAt: 1000},
+		}
+		clusterMock.EXPECT().Peers(mock.Anything).Return(inputPeers, nil)
+
+		system := MockReplicationTestSystem(clusterMock)
+
+		peers, err := system.selectOldestPeers(ctx, 3)
+		require.NoError(t, err)
+		require.Len(t, peers, 1)
+		assert.Equal(t, "host1", peers[0].Host)
+	})
+}
+
+func TestPersistPeerStateToPeers(t *testing.T) {
+	t.Run("returns nil when peerState is nil", func(t *testing.T) {
+		ctx := context.TODO()
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+
+		err := system.persistPeerStateToPeers(ctx, nil)
+		require.NoError(t, err)
+	})
+
+	t.Run("returns nil when no peers available", func(t *testing.T) {
+		ctx := context.TODO()
+		clusterMock := mockscluster.NewCluster(t)
+		clusterMock.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{}, nil)
+
+		system := MockReplicationTestSystem(clusterMock)
+		peerState := &internalpb.PeerState{
+			Host:      "127.0.0.1",
+			PeersPort: 9000,
+		}
+
+		err := system.persistPeerStateToPeers(ctx, peerState)
+		require.NoError(t, err)
+	})
+
+	t.Run("returns error when cluster.Peers fails", func(t *testing.T) {
+		ctx := context.TODO()
+		clusterMock := mockscluster.NewCluster(t)
+		expectedErr := errors.New("cluster unavailable")
+		clusterMock.EXPECT().Peers(mock.Anything).Return(nil, expectedErr)
+
+		system := MockReplicationTestSystem(clusterMock)
+		peerState := &internalpb.PeerState{
+			Host:      "127.0.0.1",
+			PeersPort: 9000,
+		}
+
+		err := system.persistPeerStateToPeers(ctx, peerState)
+		require.Error(t, err)
+		assert.Equal(t, expectedErr, err)
+	})
+
+	t.Run("successfully replicates to peers via HTTP server", func(t *testing.T) {
+		ctx := context.TODO()
+
+		// Track received requests
+		receivedRequests := make(chan *internalpb.PeerState, 3)
+
+		// Create test HTTP servers that accept PersistPeerState RPCs
+		createTestServer := func(port int) *httptest.Server {
+			mux := http.NewServeMux()
+			mux.HandleFunc(internalpbconnect.RemotingServicePersistPeerStateProcedure, func(w http.ResponseWriter, r *http.Request) {
+				// Simple success response
+				w.Header().Set("Content-Type", "application/proto")
+				w.WriteHeader(http.StatusOK)
+				resp := &internalpb.PersistPeerStateResponse{}
+				data, _ := proto.Marshal(resp)
+				_, _ = w.Write(data)
+
+				// Signal that we received a request
+				receivedRequests <- &internalpb.PeerState{}
+			})
+			server := httptest.NewServer(h2c.NewHandler(mux, &http2.Server{}))
+			return server
+		}
+
+		server1 := createTestServer(0)
+		defer server1.Close()
+		server2 := createTestServer(0)
+		defer server2.Close()
+		server3 := createTestServer(0)
+		defer server3.Close()
+
+		// Parse server URLs to get ports
+		getPort := func(server *httptest.Server) int {
+			u, _ := url.Parse(server.URL)
+			p, _ := strconv.Atoi(u.Port())
+			return p
+		}
+
+		clusterMock := mockscluster.NewCluster(t)
+		peers := []*cluster.Peer{
+			{Host: "127.0.0.1", RemotingPort: getPort(server1), PeersPort: 9001, CreatedAt: 1000},
+			{Host: "127.0.0.1", RemotingPort: getPort(server2), PeersPort: 9002, CreatedAt: 2000},
+			{Host: "127.0.0.1", RemotingPort: getPort(server3), PeersPort: 9003, CreatedAt: 3000},
+		}
+		clusterMock.EXPECT().Peers(mock.Anything).Return(peers, nil)
+
+		system := MockReplicationTestSystem(clusterMock)
+		peerState := &internalpb.PeerState{
+			Host:      "127.0.0.1",
+			PeersPort: 9000,
+			Actors: map[string]*internalpb.Actor{
+				"actor1": {Address: "actor1", Type: "TestActor"},
+			},
+		}
+
+		err := system.persistPeerStateToPeers(ctx, peerState)
+		require.NoError(t, err)
+	})
+
+	t.Run("handles context cancellation", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel() // Cancel immediately
+
+		clusterMock := mockscluster.NewCluster(t)
+		peers := []*cluster.Peer{
+			{Host: "127.0.0.1", RemotingPort: 8080, PeersPort: 9001, CreatedAt: 1000},
+		}
+		clusterMock.EXPECT().Peers(mock.Anything).Return(peers, nil)
+
+		system := MockReplicationTestSystem(clusterMock)
+		peerState := &internalpb.PeerState{
+			Host:      "127.0.0.1",
+			PeersPort: 9000,
+		}
+
+		err := system.persistPeerStateToPeers(ctx, peerState)
+		// Should handle gracefully - either succeed with partial or return context error
+		// The exact behavior depends on timing
+		_ = err // Error is acceptable here due to context cancellation
 	})
 }

@@ -139,8 +139,30 @@ func (x *ClusterConfig) WithPeersPort(peersPort int) *ClusterConfig {
 	return x
 }
 
-// WithReplicaCount sets the cluster replica count.
-// Note: set this field means you have some advanced knowledge on quorum-based replica control
+// WithReplicaCount sets the number of replicas maintained for each partition’s data.
+//
+// Replica count is the core durability/availability knob for quorum-based replication:
+// increasing it typically improves fault tolerance and read availability, but also
+// increases write fan-out and resource usage.
+//
+// Relationship to quorums:
+//
+//   - WithWriteQuorum(N) controls how many replicas must acknowledge a write.
+//   - WithReadQuorum(N) controls how many replicas are consulted to satisfy a read.
+//
+// To avoid stale reads, configure quorums so that read and write sets overlap:
+//
+//	readQuorum + writeQuorum > replicaCount
+//
+// Additional guidance:
+//
+//   - replicaCount must be >= 1
+//   - minimumPeersQuorum should generally be <= replicaCount (otherwise the cluster
+//     may have difficulty reaching the desired quorum during bootstrap or failures)
+//   - A common starting point is replicaCount=3 with writeQuorum=2 and readQuorum=2
+//
+// ⚠️ Note: changing this value should be done with care, as it affects consistency and
+// failure tolerance across the cluster.
 func (x *ClusterConfig) WithReplicaCount(count uint32) *ClusterConfig {
 	x.replicaCount = count
 	return x
@@ -268,17 +290,65 @@ func (x *ClusterConfig) WithGrainActivationBarrier(timeout time.Duration) *Clust
 	return x
 }
 
-// WithWriteQuorum sets the write quorum
-// Note: set this field means you have some advanced knowledge on quorum-based replica control
-// The default value should be sufficient for most use cases
+// WithWriteQuorum sets the write quorum for quorum-replicated cluster writes.
+//
+// Write quorum is the minimum number of replicas that must acknowledge a write
+// before the operation is considered successful. Higher values generally improve
+// consistency and fault tolerance, but increase write latency and fan-out.
+//
+// Relationship to replication:
+//
+//   - replicaCount controls how many replicas exist for each partition.
+//   - writeQuorum controls how many of those replicas must confirm a write.
+//
+// Consistency guidance (avoid stale reads):
+//
+//	readQuorum + writeQuorum > replicaCount
+//
+// Typical configurations:
+//
+//   - replicaCount=1: writeQuorum=1, readQuorum=1
+//   - replicaCount=3: writeQuorum=2, readQuorum=2 (common “majority” choice)
+//
+// Notes / constraints:
+//
+//   - writeQuorum must be >= 1 (validated)
+//   - writeQuorum should be <= replicaCount (not currently validated here; if
+//     larger, writes may never reach quorum)
+//
+// ⚠️ This is an advanced knob; the defaults are sufficient for most deployments.
 func (x *ClusterConfig) WithWriteQuorum(count uint32) *ClusterConfig {
 	x.writeQuorum = count
 	return x
 }
 
-// WithReadQuorum sets the read quorum
-// Note: set this field means you have some advanced knowledge on quorum-based replica control
-// The default value should be sufficient for most use cases
+// WithReadQuorum sets the read quorum for quorum-replicated cluster reads.
+//
+// Read quorum is the number of replicas consulted to satisfy a read. Increasing
+// it generally reduces the probability of observing stale data, but may increase
+// read latency and network fan-out.
+//
+// Relationship to replication:
+//
+//   - replicaCount controls how many replicas exist for each partition.
+//   - readQuorum controls how many of those replicas are consulted on reads.
+//
+// Consistency guidance (ensure read/write overlap):
+//
+//	readQuorum + writeQuorum > replicaCount
+//
+// Typical configurations:
+//
+//   - replicaCount=1: readQuorum=1, writeQuorum=1
+//   - replicaCount=3: readQuorum=2, writeQuorum=2 (common “majority” choice)
+//
+// Notes / constraints:
+//
+//   - readQuorum must be >= 1 (validated)
+//   - readQuorum should be <= replicaCount (not currently validated here; if
+//     larger, reads may never reach quorum)
+//
+// ⚠️ This is an advanced knob; the defaults are sufficient for most deployments.
 func (x *ClusterConfig) WithReadQuorum(count uint32) *ClusterConfig {
 	x.readQuorum = count
 	return x

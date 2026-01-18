@@ -40,6 +40,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tochemey/olric"
+	oconfig "github.com/tochemey/olric/config"
 	"github.com/tochemey/olric/events"
 	"github.com/travisjeffery/go-dynaport"
 	"go.uber.org/atomic"
@@ -2907,7 +2908,7 @@ func TestSendEventLockedNonBlocking(t *testing.T) {
 	duration := time.Since(start)
 
 	require.Less(t, duration, 50*time.Millisecond, "sendEventLocked should not block")
-	
+
 	// Verify event was dropped (channel still has first event)
 	select {
 	case evt := <-cl.events:
@@ -3350,4 +3351,43 @@ func TestPutKindIfAbsent(t *testing.T) {
 		err := PutKindIfAbsent(context.Background(), cl, kind)
 		require.ErrorIs(t, err, expectedErr)
 	})
+}
+
+func TestBuildConfigWithTLSAndDebug(t *testing.T) {
+	info := &gtls.Info{
+		ClientConfig: &tls.Config{},
+		ServerConfig: &tls.Config{},
+	}
+	cl := &cluster{
+		logger:  log.DebugLogger,
+		node:    &discovery.Node{Host: "127.0.0.1", PeersPort: 3322, DiscoveryPort: 3323},
+		tlsInfo: info,
+	}
+
+	cfg, err := cl.buildConfig()
+	require.NoError(t, err)
+	require.NotNil(t, cfg.TLS)
+	require.NotNil(t, cfg.Client.TLS)
+	require.False(t, cfg.Client.DisableRedisLogging)
+	require.EqualValues(t, oconfig.DefaultLogVerbosity, cfg.LogVerbosity)
+}
+
+func TestSetupMemberlistConfigWithTLS(t *testing.T) {
+	cert, err := tls.LoadX509KeyPair("../../test/data/certs/auto.pem", "../../test/data/certs/auto.key")
+	require.NoError(t, err)
+	info := &gtls.Info{
+		ClientConfig: &tls.Config{Certificates: []tls.Certificate{cert}},
+		ServerConfig: &tls.Config{Certificates: []tls.Certificate{cert}},
+	}
+	cl := &cluster{
+		logger:  log.DiscardLogger,
+		node:    &discovery.Node{Host: "127.0.0.1", PeersPort: 3322, DiscoveryPort: 3323},
+		tlsInfo: info,
+	}
+
+	cfg := &oconfig.Config{}
+	err = cl.setupMemberlistConfig(cfg)
+	require.NoError(t, err)
+	require.NotNil(t, cfg.MemberlistConfig)
+	require.NotNil(t, cfg.MemberlistConfig.Transport)
 }

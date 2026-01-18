@@ -86,6 +86,11 @@ import (
 	gtls "github.com/tochemey/goakt/v3/tls"
 )
 
+const (
+	defaultReplicationFactor = 3
+	defaultReplicationQuorum = 2 // Wait for 2-of-3 acks
+)
+
 // ActorSystem defines the contract of an actor system
 //
 //nolint:revive
@@ -2766,6 +2771,10 @@ func (x *actorSystem) startRemoting(ctx context.Context) error {
 			proto.MarshalOptions{},
 			proto.UnmarshalOptions{DiscardUnknown: true},
 		),
+		connect.WithRecover(func(_ context.Context, spec connect.Spec, _ stdhttp.Header, recovered any) error {
+			x.logger.Errorf("Remoting panic in %s: %v", spec.Procedure, recovered)
+			return connect.NewError(connect.CodeInternal, fmt.Errorf("internal server error"))
+		}),
 	}
 
 	if x.remoteConfig.MaxFrameSize() > 0 {
@@ -2904,7 +2913,7 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 
 	// Build peer state snapshot early in shutdown process.
 	// Actual persistence happens later in shutdownCluster before leaving membership.
-	peerState, preShutdownErr := x.preShutdown(ctx)
+	peerState, preShutdownErr := x.preShutdown()
 	if preShutdownErr != nil {
 		x.logger.Errorf("Failed to build peer state snapshot: %v", preShutdownErr)
 		// Continue with shutdown to free resources, but track error
@@ -3946,7 +3955,7 @@ func (x *actorSystem) registerMetrics() error {
 // This snapshot includes all actors and grains currently active on this node.
 // The actual persistence to remote peers happens later in shutdownCluster
 // to ensure proper ordering: persist state before leaving membership.
-func (x *actorSystem) preShutdown(ctx context.Context) (*internalpb.PeerState, error) {
+func (x *actorSystem) preShutdown() (*internalpb.PeerState, error) {
 	if !x.clusterEnabled.Load() || x.cluster == nil {
 		x.logger.Infof("Node (%s) is not part of a cluster; skipping peer state build", x.PeersAddress())
 		return nil, nil
@@ -3984,15 +3993,21 @@ func (x *actorSystem) preShutdown(ctx context.Context) (*internalpb.PeerState, e
 	return peerState, nil
 }
 
-// persistPeerStateToPeers sends the peer state to all cluster peers via RPC.
+// persistPeerStateToPeers sends the peer state to the oldest cluster peers via RPC.
 // This is called during shutdown before leaving membership to ensure state
-// is available for relocation. Failures are logged but do not block shutdown.
+// is available for relocation.
+//
+// The function implements quorum-based replication with early termination:
+//   - Sends state to the K oldest peers (most likely to become leader)
+//   - Returns successfully once quorum (majority) acknowledges
+//   - Cancels remaining RPCs after quorum to avoid unnecessary waiting
+//   - Accepts partial success if at least one peer receives the state
 func (x *actorSystem) persistPeerStateToPeers(ctx context.Context, peerState *internalpb.PeerState) error {
 	if peerState == nil {
 		return nil
 	}
 
-	peers, err := x.cluster.Peers(ctx)
+	peers, err := x.selectOldestPeers(ctx, defaultReplicationFactor)
 	if err != nil {
 		x.logger.Errorf("Node (%s) failed to get cluster peers: %v", x.PeersAddress(), err)
 		return err
@@ -4004,33 +4019,155 @@ func (x *actorSystem) persistPeerStateToPeers(ctx context.Context, peerState *in
 	}
 
 	peerAddr := x.PeersAddress()
-	remoting := x.getRemoting()
+	totalPeers := len(peers)
+	x.logger.Infof("Node (%s) replicating state to %d oldest peers", peerAddr, totalPeers)
 
-	eg, egCtx := errgroup.WithContext(ctx)
-	eg.SetLimit(len(peers))
+	// Create a cancellable context for early termination after quorum
+	rpcCtx, cancelRPCs := context.WithCancel(ctx)
+	defer cancelRPCs()
 
+	// Create a custom remoting client for replication with compression enabled
+	remotingOpts := []remote.RemotingOption{
+		remote.WithRemotingMaxReadFameSize(int(x.remoteConfig.MaxFrameSize())), // nolint
+		remote.WithRemotingCompression(x.remoteConfig.Compression()),
+		remote.WithRemotingContextPropagator(x.remoteConfig.ContextPropagator()),
+	}
+
+	if x.tlsInfo != nil {
+		remotingOpts = append(remotingOpts, remote.WithRemotingTLS(x.tlsInfo.ClientConfig))
+	}
+
+	remoting := remote.NewRemoting(remotingOpts...)
+	defer remoting.Close()
+
+	// Channel to collect results from all goroutines
+	// Each goroutine sends exactly one result (nil for success, error for failure)
+	results := make(chan error, totalPeers)
+
+	// Launch parallel RPCs to all selected peers
 	for _, peer := range peers {
 		peer := peer
-		eg.Go(func() error {
+		go func() {
 			remoteClient := remoting.RemotingServiceClient(peer.Host, peer.RemotingPort)
 			request := connect.NewRequest(&internalpb.PersistPeerStateRequest{
 				PeerState: peerState,
 			})
 
-			_, err := remoteClient.PersistPeerState(egCtx, request)
+			_, err := remoteClient.PersistPeerState(rpcCtx, request)
 			if err != nil {
 				x.logger.Errorf("Node (%s) failed to persist peer state to remote Peer (%s:%d): %v",
 					peerAddr, peer.Host, peer.RemotingPort, err)
-				return err
+				results <- err
+				return
 			}
 
 			x.logger.Infof("Node (%s) successfully persisted peer state to remote Peer (%s:%d)",
 				peerAddr, peer.Host, peer.RemotingPort)
-			return nil
-		})
+			results <- nil // Success
+		}()
 	}
 
-	return eg.Wait()
+	// Collect results with early termination on quorum
+	var (
+		successCount int
+		lastErr      error
+	)
+
+	for range totalPeers {
+		select {
+		case err := <-results:
+			if err == nil {
+				successCount++
+				if successCount >= defaultReplicationQuorum {
+					// Quorum reached - cancel remaining RPCs and return success
+					cancelRPCs()
+					x.logger.Infof("Node (%s) replication quorum reached (%d/%d peers)",
+						peerAddr, successCount, totalPeers)
+					return nil
+				}
+			} else if !errors.Is(err, context.Canceled) {
+				// Don't count context cancellation as a real failure
+				lastErr = err
+			}
+		case <-ctx.Done():
+			// Parent context cancelled (e.g., shutdown timeout)
+			x.logger.Warnf("Node (%s) replication interrupted: %v (successes: %d/%d)",
+				peerAddr, ctx.Err(), successCount, totalPeers)
+			if successCount > 0 {
+				return nil // Partial success is acceptable
+			}
+			return fmt.Errorf("replication interrupted: %w", ctx.Err())
+		}
+	}
+
+	// All RPCs completed without reaching quorum
+	if successCount > 0 {
+		x.logger.Warnf("Node (%s) partial replication: %d/%d peers acknowledged",
+			peerAddr, successCount, totalPeers)
+		return nil // Partial success is acceptable
+	}
+
+	// Complete failure
+	if lastErr != nil {
+		return fmt.Errorf("failed to replicate state to any peer: %w", lastErr)
+	}
+
+	return fmt.Errorf("failed to replicate state to any peer")
+}
+
+// selectOldestPeers returns up to k peers sorted by age (oldest first).
+//
+// This function is used during graceful shutdown to select peers for state
+// replication. The oldest peers are chosen because:
+//
+//   - Leadership in this cluster is determined by node age (oldest = coordinator)
+//   - The oldest peers are most likely to remain as leader or become leader
+//     after the current node leaves
+//   - Replicating to the oldest peers ensures the state is available to
+//     whichever node becomes leader after topology changes
+//
+// Parameters:
+//   - ctx: Context for the cluster membership query
+//   - k: Maximum number of peers to return (typically 3 for quorum-based replication)
+//
+// Returns:
+//   - Up to k peers sorted by CreatedAt ascending (oldest first)
+//   - nil slice if no peers exist (single-node cluster)
+//   - All available peers if fewer than k exist
+//   - Error if cluster membership query fails
+//
+// Complexity: O(n log n) where n is the cluster size, which is negligible
+// for typical cluster sizes (< 100 nodes).
+func (x *actorSystem) selectOldestPeers(ctx context.Context, k int) ([]*cluster.Peer, error) {
+	peers, err := x.cluster.Peers(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	n := len(peers)
+
+	// Edge case: No peers (single node cluster)
+	if n == 0 {
+		x.logger.Info("No peers available, skipping state replication")
+		return nil, nil
+	}
+
+	// Edge case: Fewer peers than k
+	if n < k {
+		x.logger.Infof("Only %d peers available, replicating to all", n)
+		// Still sort for consistency
+		sort.Slice(peers, func(i, j int) bool {
+			return peers[i].CreatedAt < peers[j].CreatedAt
+		})
+		return peers, nil
+	}
+
+	// Normal case: k or more peers
+	sort.Slice(peers, func(i, j int) bool {
+		return peers[i].CreatedAt < peers[j].CreatedAt
+	})
+
+	return peers[:k], nil
 }
 
 func computeEvictionCount(total, threshold uint64, totalEvictions, percentageToReturn int) int {

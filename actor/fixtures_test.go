@@ -1877,6 +1877,16 @@ func (f *MockFailingContextPropagator) Extract(ctx context.Context, _ http.Heade
 	return ctx, f.err
 }
 
+type MockPanicContextPropagator struct{}
+
+func (MockPanicContextPropagator) Inject(_ context.Context, _ http.Header) error {
+	return nil
+}
+
+func (MockPanicContextPropagator) Extract(context.Context, http.Header) (context.Context, error) {
+	panic("context propagation panic")
+}
+
 func MockClusterEnsureGrainSystem(t *testing.T, grain Grain, name string) (*actorSystem, *mockscluster.Cluster, *GrainIdentity) {
 	t.Helper()
 
