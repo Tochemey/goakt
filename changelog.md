@@ -18,6 +18,131 @@
 - 🛡️ Added remoting panic recovery that logs the procedure and returns a Connect internal error to callers.
 - ⬆️ Upgrade Go version to from 1.25.3 to 1.25.5 due to some dependencies upgrades requiring it.
 
+### ⚡ Performance Improvements
+
+#### 🔄 Relocation Process
+
+PR: https://github.com/Tochemey/goakt/pull/1079
+
+##### 🚀 Overview
+
+Improved the efficiency of actor/grain state replication when a node gracefully leaves the cluster. The new implementation reduces network overhead from O(N) to O(3) while maintaining reliability through quorum-based acknowledgment.
+
+##### 🧩 What Changed
+
+- **Targeted Replication**: State is now sent only to the 3 oldest peers instead of all cluster members
+- **Quorum-Based Acknowledgment**: Shutdown proceeds once 2-of-3 peers acknowledge, reducing latency
+- **Early Termination**: Remaining RPCs are cancelled after quorum is reached
+- **Compression Enabled**: Use Zstd compression when setting remoting for the actor system will reduce payload size by 4-6x
+- **Resource Cleanup**: Proper cleanup of remoting clients after replication
+
+##### 🧭 Why Oldest Peers?
+
+Leadership in the cluster is determined by node age (oldest = coordinator). By replicating to the 3 oldest peers:
+
+- The current leader always receives the state
+- If the leader fails, the next-oldest (who also has the state) becomes leader
+- State is guaranteed to be available for relocation regardless of topology changes
+
+##### 📈 Performance Improvement
+
+| Metric           | Before             | After            |
+| ---------------- | ------------------ | ---------------- |
+| Network calls    | O(N)               | O(3)             |
+| Data transferred | N × payload        | 3 × payload      |
+| Shutdown latency | Wait for all peers | Wait for 2 peers |
+
+##### 🛠️ Technical Details
+
+**Shutdown Flow**:
+
+1. Build PeerState snapshot (actors + grains)
+2. Select 3 oldest peers by CreatedAt timestamp
+3. Send compressed state via parallel RPCs
+4. Return success when 2-of-3 acknowledge
+5. Cancel remaining RPCs and proceed with membership leave
+
+```text
+                    ┌──────────────────────────────┐
+                    │  1. Build PeerState snapshot │
+                    │     (actors + grains)        │
+                    └──────────────────────────────┘
+                                   │
+                                   ▼
+                    ┌──────────────────────────────┐
+                    │  2. selectOldestPeers(3)     │
+                    │     - Query cluster members  │
+                    │     - Sort by CreatedAt      │
+                    │     - Return top 3 oldest    │
+                    └──────────────────────────────┘
+                                   │
+                                   ▼
+                    ┌──────────────────────────────┐
+                    │  3. Create cancellable ctx   │
+                    │     + compression remoting   │
+                    └──────────────────────────────┘
+                                   │
+            ┌──────────────────────┼──────────────────────┐
+            ▼                      ▼                      ▼
+     ┌────────────┐         ┌────────────┐         ┌────────────┐
+     │  RPC to    │         │  RPC to    │         │  RPC to    │
+     │  Peer 1    │         │  Peer 2    │         │  Peer 3    │
+     │ (#1 oldest)│         │ (#2 oldest)│         │ (#3 oldest)│
+     └─────┬──────┘         └─────┬──────┘         └─────┬──────┘
+           │                      │                      │
+           ▼                      ▼                      │
+     ┌──────────┐           ┌──────────┐                 │
+     │  ACK ✓   │           │  ACK ✓   │                 │
+     └─────┬────┘           └─────┬────┘                 │
+           │                      │                      │
+           └──────────┬───────────┘                      │
+                      ▼                                  │
+              ┌───────────────┐                          │
+              │ QUORUM (2/3)  │                          │
+              │   REACHED!    │                          │
+              └───────┬───────┘                          │
+                      │                                  │
+                      ▼                                  │
+              ┌───────────────┐                          │
+              │ cancelRPCs()  │─────────────────────────►X (cancelled)
+              └───────┬───────┘
+                      │
+                      ▼
+              ┌───────────────┐
+              │ Return nil    │
+              │ (success)     │
+              └───────┬───────┘
+                      │
+                      ▼
+              ┌───────────────┐
+              │ cluster.Stop()│
+              │ (leave member)│
+              └───────────────┘
+                      │
+                      ▼
+              ┌───────────────┐
+              │ NodeLeft event│
+              │ fires on peers│
+              └───────────────┘
+                      │
+                      ▼
+              ┌───────────────┐
+              │ Leader reads  │
+              │ from local    │
+              │ BoltDB store  │
+              └───────────────┘
+                      │
+                      ▼
+              ┌───────────────┐
+              │ Relocator     │
+              │ spawns actors │
+              └───────────────┘
+```
+
+##### 🔁 Backward Compatibility
+
+This is an internal optimization with no API changes. Existing applications require no modifications.
+
 ## [v3.12.1] - 2026-06-01
 
 ### ✨ Features
