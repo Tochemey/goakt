@@ -27,41 +27,100 @@ import (
 	golog "log"
 )
 
-// Logger represents an active logging object that generates lines of
-// output to an io.Writer.
+// Logger represents a leveled logger used by GoAkt.
+//
+// Implementations typically encode a severity level (debug/info/warn/error/fatal/panic),
+// attach optional metadata (e.g., timestamps), and write entries to one or more io.Writer
+// destinations.
+//
+// Methods come in two forms:
+//   - X(...any): log values (commonly formatted similarly to fmt.Sprint)
+//   - Xf(format string, ...any): log using a format string (commonly formatted similarly to fmt.Sprintf)
+//
+// Fatal/Fatalf terminate the process by calling os.Exit(1).
+// Panic/Panicf call panic with the constructed message.
+//
+// Flush may be used to force buffered implementations to write pending entries; for
+// unbuffered implementations it may be a no-op.
 type Logger interface {
-	// Info starts a new message with info level.
+	// Info logs a message at info level.
+	//
+	// The arguments are implementation-defined but typically formatted similarly to fmt.Sprint.
 	Info(...any)
-	// Infof starts a new message with info level.
+
+	// Infof logs a formatted message at info level.
+	//
+	// The format string and arguments are implementation-defined but typically follow fmt.Sprintf.
 	Infof(string, ...any)
-	// Warn starts a new message with warn level.
+
+	// Warn logs a message at warn level.
+	//
+	// The arguments are implementation-defined but typically formatted similarly to fmt.Sprint.
 	Warn(...any)
-	// Warnf starts a new message with warn level.
+
+	// Warnf logs a formatted message at warn level.
+	//
+	// The format string and arguments are implementation-defined but typically follow fmt.Sprintf.
 	Warnf(string, ...any)
-	// Error starts a new message with error level.
+
+	// Error logs a message at error level.
+	//
+	// The arguments are implementation-defined but typically formatted similarly to fmt.Sprint.
 	Error(...any)
-	// Errorf starts a new message with error level.
+
+	// Errorf logs a formatted message at error level.
+	//
+	// The format string and arguments are implementation-defined but typically follow fmt.Sprintf.
 	Errorf(string, ...any)
-	// Fatal starts a new message with fatal level. The os.Exit(1) function
-	// is called which terminates the program immediately.
+
+	// Fatal logs a message at fatal level and then terminates the process.
+	//
+	// Implementations must call os.Exit(1) after emitting the log entry.
 	Fatal(...any)
-	// Fatalf starts a new message with fatal level. The os.Exit(1) function
-	// is called which terminates the program immediately.
+
+	// Fatalf logs a formatted message at fatal level and then terminates the process.
+	//
+	// Implementations must call os.Exit(1) after emitting the log entry.
 	Fatalf(string, ...any)
-	// Panic starts a new message with panic level. The panic() function
-	// is called which stops the ordinary flow of a goroutine.
+
+	// Panic logs a message at panic level and then panics.
+	//
+	// Implementations must call panic after emitting the log entry.
 	Panic(...any)
-	// Panicf starts a new message with panic level. The panic() function
-	// is called which stops the ordinary flow of a goroutine.
+
+	// Panicf logs a formatted message at panic level and then panics.
+	//
+	// Implementations must call panic after emitting the log entry.
 	Panicf(string, ...any)
-	// Debug starts a new message with debug level.
+
+	// Debug logs a message at debug level.
+	//
+	// The arguments are implementation-defined but typically formatted similarly to fmt.Sprint.
 	Debug(...any)
-	// Debugf starts a new message with debug level.
+
+	// Debugf logs a formatted message at debug level.
+	//
+	// The format string and arguments are implementation-defined but typically follow fmt.Sprintf.
 	Debugf(string, ...any)
-	// LogLevel returns the log level being used
+
+	// LogLevel returns the configured minimum severity level used by the logger.
+	//
+	// Messages below this level are typically suppressed.
 	LogLevel() Level
-	// LogOutput returns the log output that is set
+
+	// LogOutput returns the configured output destinations for this logger.
+	//
+	// Implementations may write to all returned writers, one of them, or a wrapped writer.
 	LogOutput() []io.Writer
-	// StdLogger returns the standard logger associated to the logger
+
+	// Flush forces any buffered log entries to be written to their outputs.
+	//
+	// It should return a non-nil error if flushing fails. For non-buffered implementations,
+	// Flush may return nil without doing anything.
+	Flush() error
+
+	// StdLogger returns a *log.Logger compatible with the standard library's log package.
+	//
+	// This is useful for integrating dependencies that accept a *log.Logger.
 	StdLogger() *golog.Logger
 }

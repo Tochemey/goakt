@@ -55,7 +55,9 @@ func (f OptionFunc) Apply(c *actorSystem) {
 func WithLogger(logger log.Logger) Option {
 	return OptionFunc(
 		func(a *actorSystem) {
-			a.logger = logger
+			if logger != nil {
+				a.logger = logger
+			}
 		},
 	)
 }
@@ -64,7 +66,9 @@ func WithLogger(logger log.Logger) Option {
 func WithActorInitMaxRetries(value int) Option {
 	return OptionFunc(
 		func(a *actorSystem) {
-			a.actorInitMaxRetries = value
+			if value > 0 {
+				a.actorInitMaxRetries = value
+			}
 		},
 	)
 }
@@ -72,8 +76,10 @@ func WithActorInitMaxRetries(value int) Option {
 // WithRemote enables remoting on the actor system
 func WithRemote(config *remote.Config) Option {
 	return OptionFunc(func(a *actorSystem) {
-		a.remotingEnabled.Store(true)
-		a.remoteConfig = config
+		if config != nil {
+			a.remotingEnabled.Store(true)
+			a.remoteConfig = config
+		}
 	})
 }
 
@@ -81,8 +87,10 @@ func WithRemote(config *remote.Config) Option {
 func WithCluster(config *ClusterConfig) Option {
 	return OptionFunc(
 		func(a *actorSystem) {
-			a.clusterEnabled.Store(true)
-			a.clusterConfig = config
+			if config != nil {
+				a.clusterEnabled.Store(true)
+				a.clusterConfig = config
+			}
 		},
 	)
 }
@@ -94,7 +102,9 @@ func WithCluster(config *ClusterConfig) Option {
 func WithShutdownTimeout(timeout time.Duration) Option {
 	return OptionFunc(
 		func(a *actorSystem) {
-			a.shutdownTimeout = timeout
+			if timeout > 0 {
+				a.shutdownTimeout = timeout
+			}
 		},
 	)
 }
@@ -103,7 +113,9 @@ func WithShutdownTimeout(timeout time.Duration) Option {
 func WithPartitionHasher(hasher hash.Hasher) Option {
 	return OptionFunc(
 		func(a *actorSystem) {
-			a.partitionHasher = hasher
+			if hasher != nil {
+				a.partitionHasher = hasher
+			}
 		},
 	)
 }
@@ -112,7 +124,9 @@ func WithPartitionHasher(hasher hash.Hasher) Option {
 func WithActorInitTimeout(timeout time.Duration) Option {
 	return OptionFunc(
 		func(a *actorSystem) {
-			a.actorInitTimeout = timeout
+			if timeout > 0 {
+				a.actorInitTimeout = timeout
+			}
 		},
 	)
 }

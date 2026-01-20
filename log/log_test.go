@@ -47,6 +47,7 @@ func TestDefaultLogger(t *testing.T) {
 
 	// assert Debug log
 	logger.Debug("test debug")
+	flushLogger(t, logger)
 	expected := "test debug"
 	actual, err := extractMessage(buffer.Bytes())
 	require.NoError(t, err)
@@ -66,6 +67,7 @@ func TestDebug(t *testing.T) {
 		logger := New(DebugLevel, buffer)
 		// assert Debug log
 		logger.Debug("test debug")
+		flushLogger(t, logger)
 		expected := "test debug"
 		actual, err := extractMessage(buffer.Bytes())
 		require.NoError(t, err)
@@ -81,6 +83,7 @@ func TestDebug(t *testing.T) {
 		// assert Debug log
 		name := "world"
 		logger.Debugf("hello %s", name)
+		flushLogger(t, logger)
 		actual, err = extractMessage(buffer.Bytes())
 		require.NoError(t, err)
 		expected = "hello world"
@@ -98,6 +101,7 @@ func TestDebug(t *testing.T) {
 		logger := New(InfoLevel, buffer)
 		// assert Debug log
 		logger.Debug("test debug")
+		flushLogger(t, logger)
 		require.Empty(t, buffer.String())
 	})
 	t.Run("When error log is enabled show nothing", func(t *testing.T) {
@@ -107,6 +111,7 @@ func TestDebug(t *testing.T) {
 		logger := New(ErrorLevel, buffer)
 		// assert Debug log
 		logger.Debug("test debug")
+		flushLogger(t, logger)
 		require.Empty(t, buffer.String())
 	})
 	t.Run("When fatal log is enabled show nothing", func(t *testing.T) {
@@ -116,6 +121,7 @@ func TestDebug(t *testing.T) {
 		logger := New(FatalLevel, buffer)
 		// assert Debug log
 		logger.Debug("test debug")
+		flushLogger(t, logger)
 		require.Empty(t, buffer.String())
 	})
 }
@@ -128,6 +134,7 @@ func TestInfo(t *testing.T) {
 		logger := New(InfoLevel, buffer)
 		// assert Debug log
 		logger.Info("test debug")
+		flushLogger(t, logger)
 		expected := "test debug"
 		actual, err := extractMessage(buffer.Bytes())
 		require.NoError(t, err)
@@ -143,6 +150,7 @@ func TestInfo(t *testing.T) {
 		// assert Debug log
 		name := "world"
 		logger.Infof("hello %s", name)
+		flushLogger(t, logger)
 		actual, err = extractMessage(buffer.Bytes())
 		require.NoError(t, err)
 		expected = "hello world"
@@ -160,6 +168,7 @@ func TestInfo(t *testing.T) {
 		logger := New(DebugLevel, buffer)
 		// assert Debug log
 		logger.Info("test debug")
+		flushLogger(t, logger)
 		expected := "test debug"
 		actual, err := extractMessage(buffer.Bytes())
 		require.NoError(t, err)
@@ -174,6 +183,7 @@ func TestInfo(t *testing.T) {
 		// assert Debug log
 		name := "world"
 		logger.Infof("hello %s", name)
+		flushLogger(t, logger)
 		actual, err = extractMessage(buffer.Bytes())
 		require.NoError(t, err)
 		expected = "hello world"
@@ -190,6 +200,7 @@ func TestInfo(t *testing.T) {
 		logger := New(ErrorLevel, buffer)
 		// assert Debug log
 		logger.Info("test debug")
+		flushLogger(t, logger)
 		require.Empty(t, buffer.String())
 	})
 }
@@ -202,6 +213,7 @@ func TestWarn(t *testing.T) {
 		logger := New(WarningLevel, buffer)
 		// assert Debug log
 		logger.Warn("test debug")
+		flushLogger(t, logger)
 		expected := "test debug"
 		actual, err := extractMessage(buffer.Bytes())
 		require.NoError(t, err)
@@ -217,6 +229,7 @@ func TestWarn(t *testing.T) {
 		// assert Debug log
 		name := "world"
 		logger.Warnf("hello %s", name)
+		flushLogger(t, logger)
 		actual, err = extractMessage(buffer.Bytes())
 		require.NoError(t, err)
 		expected = "hello world"
@@ -234,6 +247,7 @@ func TestWarn(t *testing.T) {
 		logger := New(DebugLevel, buffer)
 		// assert Debug log
 		logger.Warn("test debug")
+		flushLogger(t, logger)
 		expected := "test debug"
 		actual, err := extractMessage(buffer.Bytes())
 		require.NoError(t, err)
@@ -248,6 +262,7 @@ func TestWarn(t *testing.T) {
 		// assert Debug log
 		name := "world"
 		logger.Warnf("hello %s", name)
+		flushLogger(t, logger)
 		actual, err = extractMessage(buffer.Bytes())
 		require.NoError(t, err)
 		expected = "hello world"
@@ -264,6 +279,7 @@ func TestWarn(t *testing.T) {
 		logger := New(ErrorLevel, buffer)
 		// assert Debug log
 		logger.Warn("test debug")
+		flushLogger(t, logger)
 		require.Empty(t, buffer.String())
 	})
 }
@@ -276,6 +292,7 @@ func TestError(t *testing.T) {
 		logger := New(ErrorLevel, buffer)
 		// assert Debug log
 		logger.Error("test debug")
+		flushLogger(t, logger)
 		expected := "test debug"
 		actual, err := extractMessage(buffer.Bytes())
 		require.NoError(t, err)
@@ -292,6 +309,7 @@ func TestError(t *testing.T) {
 		logger := New(DebugLevel, buffer)
 		// assert Debug log
 		logger.Error("test debug")
+		flushLogger(t, logger)
 		expected := "test debug"
 		actual, err := extractMessage(buffer.Bytes())
 		require.NoError(t, err)
@@ -307,6 +325,7 @@ func TestError(t *testing.T) {
 		// assert Debug log
 		name := "world"
 		logger.Errorf("hello %s", name)
+		flushLogger(t, logger)
 		actual, err = extractMessage(buffer.Bytes())
 		require.NoError(t, err)
 		expected = "hello world"
@@ -324,6 +343,7 @@ func TestError(t *testing.T) {
 		logger := New(InfoLevel, buffer)
 		// assert Debug log
 		logger.Error("test debug")
+		flushLogger(t, logger)
 		expected := "test debug"
 		actual, err := extractMessage(buffer.Bytes())
 		require.NoError(t, err)
@@ -339,6 +359,7 @@ func TestError(t *testing.T) {
 		// assert Debug log
 		name := "world"
 		logger.Errorf("hello %s", name)
+		flushLogger(t, logger)
 		actual, err = extractMessage(buffer.Bytes())
 		require.NoError(t, err)
 		expected = "hello world"
@@ -356,6 +377,7 @@ func TestError(t *testing.T) {
 		logger := New(WarningLevel, buffer)
 		// assert Debug log
 		logger.Error("test debug")
+		flushLogger(t, logger)
 		expected := "test debug"
 		actual, err := extractMessage(buffer.Bytes())
 		require.NoError(t, err)
@@ -371,6 +393,7 @@ func TestError(t *testing.T) {
 		// assert Debug log
 		name := "world"
 		logger.Errorf("hello %s", name)
+		flushLogger(t, logger)
 		actual, err = extractMessage(buffer.Bytes())
 		require.NoError(t, err)
 		expected = "hello world"
@@ -512,6 +535,7 @@ func TestStdLogger(t *testing.T) {
 
 	std := logger.StdLogger()
 	std.Print("std logger message")
+	flushLogger(t, logger)
 
 	line := buffer.Bytes()
 	require.NotEmpty(t, line)
@@ -523,6 +547,11 @@ func TestStdLogger(t *testing.T) {
 	lvl, err := extractLevel(line)
 	require.NoError(t, err)
 	assert.Equal(t, InfoLevel.String(), lvl)
+}
+
+func flushLogger(t *testing.T, logger *Log) {
+	t.Helper()
+	require.NoError(t, logger.logger.Sync())
 }
 
 func extractLogLine(out []byte) []byte {
