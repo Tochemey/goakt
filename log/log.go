@@ -28,6 +28,7 @@ import (
 	"os"
 	"time"
 
+	"go.uber.org/multierr"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -188,13 +189,28 @@ func (l *Log) LogOutput() []io.Writer {
 }
 
 // Flush flushes buffered log entries. Call this during a graceful shutdown
-// when no more log writes are expected.
+// when no more log writes are expected. If no buffered outputs are configured,
+// Flush is a no-op.
 func (l *Log) Flush() error {
 	if l.bufferedWriteSyncer != nil {
 		return l.bufferedWriteSyncer.Stop()
 	}
 
-	return l.logger.Sync()
+	return syncFileOutputs(l.outputs)
+}
+
+func syncFileOutputs(outputs []io.Writer) error {
+	var err error
+	for _, output := range outputs {
+		file, ok := output.(*os.File)
+		if !ok || isStdStream(file) {
+			continue
+		}
+		if syncErr := file.Sync(); syncErr != nil {
+			err = multierr.Combine(err, syncErr)
+		}
+	}
+	return err
 }
 
 // StdLogger returns the standard logger associated to the logger

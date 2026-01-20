@@ -108,6 +108,24 @@ func TestLogFlush(t *testing.T) {
 		logger.Info("msg")
 		require.NoError(t, logger.Flush())
 	})
+
+	t.Run("file sync", func(t *testing.T) {
+		file := createTempLogFile(t)
+		defer file.Close()
+
+		logger := New(ErrorLevel, file)
+		require.Nil(t, logger.bufferedWriteSyncer)
+		logger.Error("msg")
+		require.NoError(t, logger.Flush())
+	})
+}
+
+func TestSyncFileOutputs(t *testing.T) {
+	file := createTempLogFile(t)
+	require.NoError(t, file.Close())
+
+	err := syncFileOutputs([]io.Writer{os.Stdout, file, new(bytes.Buffer)})
+	require.Error(t, err)
 }
 
 func createTempLogFile(t *testing.T) *os.File {

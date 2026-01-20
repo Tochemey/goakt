@@ -26,6 +26,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -35,14 +36,14 @@ import (
 func TestDiscardLoggerBasics(t *testing.T) {
 	logger := DiscardLogger
 
-	logger.Debug("debug")
-	logger.Debugf("debug %s", "msg")
-	logger.Info("info")
-	logger.Infof("info %s", "msg")
-	logger.Warn("warn")
-	logger.Warnf("warn %s", "msg")
-	logger.Error("error")
-	logger.Errorf("error %s", "msg")
+	callDiscardMethod(t, "Debug", "debug")
+	callDiscardMethod(t, "Debugf", "debug %s", "msg")
+	callDiscardMethod(t, "Info", "info")
+	callDiscardMethod(t, "Infof", "info %s", "msg")
+	callDiscardMethod(t, "Warn", "warn")
+	callDiscardMethod(t, "Warnf", "warn %s", "msg")
+	callDiscardMethod(t, "Error", "error")
+	callDiscardMethod(t, "Errorf", "error %s", "msg")
 
 	require.Equal(t, InfoLevel, logger.LogLevel())
 
@@ -55,6 +56,19 @@ func TestDiscardLoggerBasics(t *testing.T) {
 	std.Print("discard")
 
 	require.NoError(t, logger.Flush())
+}
+
+func callDiscardMethod(t *testing.T, name string, args ...any) {
+	t.Helper()
+
+	method := reflect.ValueOf(DiscardLogger).MethodByName(name)
+	require.True(t, method.IsValid(), "method %s not found", name)
+
+	in := make([]reflect.Value, len(args))
+	for i, arg := range args {
+		in[i] = reflect.ValueOf(arg)
+	}
+	method.Call(in)
 }
 
 func TestDiscardLoggerPanic(t *testing.T) {
