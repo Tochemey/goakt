@@ -2875,7 +2875,7 @@ func (x *actorSystem) reset() {
 }
 
 // shutdown stops the actor system
-func (x *actorSystem) shutdown(ctx context.Context) error {
+func (x *actorSystem) shutdown(ctx context.Context) (err error) {
 	// we only shut down the actor system when it is starting or not yet started
 	if x.starting.Load() || !x.started.Load() {
 		return gerrors.ErrActorSystemNotStarted
@@ -2886,6 +2886,7 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 
 	defer func() {
 		x.reset()
+		err = multierr.Combine(err, x.logger.Flush())
 	}()
 
 	if x.evictionStrategy != nil {
@@ -2895,6 +2896,7 @@ func (x *actorSystem) shutdown(ctx context.Context) error {
 	if x.passivator != nil {
 		x.passivator.Stop(ctx)
 	}
+
 	if x.scheduler != nil {
 		x.scheduler.Stop(ctx)
 	}
