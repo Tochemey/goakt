@@ -198,6 +198,15 @@ var (
 
 	// ErrSystemShuttingDown is returned when a message is sent to an actor while the actor system is shutting down.
 	ErrSystemShuttingDown = errors.New("actor system is shutting down")
+
+	// ErrWatchNotSupported indicates the provider does not support watch in multi-DC control planes.
+	ErrWatchNotSupported = errors.New("multidc: watch not supported")
+
+	// ErrRecordNotFound indicates the requested control plane record is missing.
+	ErrRecordNotFound = errors.New("multidc: record not found")
+
+	// ErrRecordConflict indicates the record version does not match the current state.
+	ErrRecordConflict = errors.New("multidc: record version conflict")
 )
 
 // NewErrInvalidPassivationStrategy formats an error with ErrInvalidPassivationStrategy

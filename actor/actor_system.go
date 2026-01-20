@@ -67,6 +67,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/codec"
 	"github.com/tochemey/goakt/v3/internal/compression/brotli"
 	"github.com/tochemey/goakt/v3/internal/compression/zstd"
+	"github.com/tochemey/goakt/v3/internal/datacentercontroller"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v3/internal/locker"
@@ -842,6 +843,13 @@ type actorSystem struct {
 	metricProvider *metric.Provider
 
 	clusterStore cluster.Store
+
+	dataCenterController        *datacentercontroller.Controller
+	dataCenterControllerMutex   sync.Mutex
+	dataCenterLeaderTicker      *ticker.Ticker
+	dataCenterLeaderStopWatch   chan types.Unit
+	dataCenterLeaderMutex       sync.Mutex
+	dataCenterReconcileInFlight atomic.Bool
 }
 
 var (
@@ -1028,6 +1036,8 @@ func (x *actorSystem) Start(ctx context.Context) error {
 		AddContextRunner(x.spawnTopicActor).
 		AddContextRunner(x.startRemoting).
 		AddContextRunner(x.startClustering).
+		AddContextRunner(x.startDataCenterController).
+		AddContextRunner(x.startDataCenterLeaderWatch).
 		Run(); err != nil {
 		if stopErr := x.shutdown(ctx); stopErr != nil {
 			return errors.Join(err, stopErr)
@@ -2872,6 +2882,9 @@ func (x *actorSystem) reset() {
 	x.grains.Reset()
 	x.shuttingDown.Store(false)
 	x.clusterStore = nil
+	x.dataCenterController = nil
+	x.dataCenterLeaderTicker = nil
+	x.dataCenterReconcileInFlight.Store(false)
 }
 
 // shutdown stops the actor system
@@ -2912,6 +2925,11 @@ func (x *actorSystem) shutdown(ctx context.Context) (err error) {
 
 	// Run shutdown hooks and collect errors
 	hooksErr := x.runShutdownHooks(ctx)
+
+	// Stop data center leader watch and controller
+	x.stopDataCenterLeaderWatch()
+	stoperr := x.stopDataCenterController(ctx)
+	hooksErr = multierr.Combine(hooksErr, stoperr)
 
 	// Build peer state snapshot early in shutdown process.
 	// Actual persistence happens later in shutdownCluster before leaving membership.
