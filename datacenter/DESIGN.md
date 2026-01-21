@@ -83,7 +83,7 @@ Design Principles
 - Liveness is lease-based and time-bounded to prevent stale routing.
 
 Data Model
-~~~~~~~~~~
+----------
 - DataCenterRecord
   - ID: stable identifier (immutable); default is DataCenter.ID() (Zone+Region+Name) or Name if empty.
   - Name, Region, Zone, Labels.

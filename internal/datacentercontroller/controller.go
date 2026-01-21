@@ -123,71 +123,71 @@ func NewController(config *Config) (*Controller, error) {
 // Start is idempotent: repeated calls return nil after the manager is already started.
 // The caller must provide a non-nil context; it is used as the parent for all background
 // operations and cancellation.
-func (ctrl *Controller) Start(ctx context.Context) error {
-	ctrl.lifecycleMu.Lock()
-	defer ctrl.lifecycleMu.Unlock()
+func (x *Controller) Start(ctx context.Context) error {
+	x.lifecycleMu.Lock()
+	defer x.lifecycleMu.Unlock()
 
-	if ctrl.started.Load() {
+	if x.started.Load() {
 		return nil
 	}
 
-	ctrl.ctx, ctrl.cancel = context.WithCancel(ctx)
+	x.ctx, x.cancel = context.WithCancel(ctx)
 
-	if err := ctrl.register(ctrl.ctx); err != nil {
-		if ctrl.cancel != nil {
-			ctrl.cancel()
+	if err := x.register(x.ctx); err != nil {
+		if x.cancel != nil {
+			x.cancel()
 		}
-		ctrl.started.Store(false)
+		x.started.Store(false)
 		return err
 	}
 
-	if err := ctrl.refreshCache(ctrl.ctx); err != nil {
-		ctrl.logger.Warnf("multidc manager: initial cache refresh failed: %v", err)
+	if err := x.refreshCache(x.ctx); err != nil {
+		x.logger.Warnf("multidc manager: initial cache refresh failed: %v", err)
 	}
 
-	ctrl.wg.Add(1)
-	go ctrl.heartbeatLoop()
+	x.wg.Add(1)
+	go x.heartbeatLoop()
 
-	ctrl.wg.Add(1)
-	go ctrl.refreshLoop()
+	x.wg.Add(1)
+	go x.refreshLoop()
 
-	ctrl.watchSupported.Store(false)
-	if ctrl.config.WatchEnabled {
-		ctrl.wg.Add(1)
-		go ctrl.watchLoop()
+	x.watchSupported.Store(false)
+	if x.config.WatchEnabled {
+		x.wg.Add(1)
+		go x.watchLoop()
 	}
 
-	ctrl.started.Store(true)
+	x.started.Store(true)
 	return nil
 }
 
 // Stop stops background tasks and marks the local datacenter inactive.
 //
 // Stop is idempotent: repeated calls return nil after the manager is already stopped.
-func (ctrl *Controller) Stop(ctx context.Context) error {
-	ctrl.lifecycleMu.Lock()
-	defer ctrl.lifecycleMu.Unlock()
+func (x *Controller) Stop(ctx context.Context) error {
+	x.lifecycleMu.Lock()
+	defer x.lifecycleMu.Unlock()
 
-	if !ctrl.started.Load() {
+	if !x.started.Load() {
 		return nil
 	}
 
-	ctrl.started.Store(false)
+	x.started.Store(false)
 
-	if ctrl.cancel != nil {
-		ctrl.cancel()
+	if x.cancel != nil {
+		x.cancel()
 	}
 
-	ctrl.wg.Wait()
-	ctrl.watchSupported.Store(false)
+	x.wg.Wait()
+	x.watchSupported.Store(false)
 
-	id, version := ctrl.recordRef()
+	id, version := x.recordRef()
 	if id == "" {
 		return nil
 	}
 
-	opCtx, cancel := ctrl.withTimeout(ctx)
-	newVersion, err := ctrl.controlPlane.SetState(opCtx, id, datacenter.DataCenterDraining, version)
+	opCtx, cancel := x.withTimeout(ctx)
+	newVersion, err := x.controlPlane.SetState(opCtx, id, datacenter.DataCenterDraining, version)
 	cancel()
 	if err != nil {
 		if errors.Is(err, gerrors.ErrRecordNotFound) {
@@ -196,18 +196,18 @@ func (ctrl *Controller) Stop(ctx context.Context) error {
 		return err
 	}
 
-	opCtx, cancel = ctrl.withTimeout(ctx)
-	newVersion, err = ctrl.controlPlane.SetState(opCtx, id, datacenter.DataCenterInactive, newVersion)
+	opCtx, cancel = x.withTimeout(ctx)
+	newVersion, err = x.controlPlane.SetState(opCtx, id, datacenter.DataCenterInactive, newVersion)
 	cancel()
 	if err != nil && !errors.Is(err, gerrors.ErrRecordNotFound) {
 		return err
 	}
 
-	ctrl.mu.Lock()
-	ctrl.recordVer = newVersion
-	ctrl.mu.Unlock()
+	x.mu.Lock()
+	x.recordVer = newVersion
+	x.mu.Unlock()
 
-	ctrl.cache.reset()
+	x.cache.reset()
 	return nil
 }
 
@@ -215,232 +215,236 @@ func (ctrl *Controller) Stop(ctx context.Context) error {
 //
 // The stale flag is true if the cache has never been refreshed or if the last refresh
 // time exceeds MaxCacheStaleness.
-func (ctrl *Controller) ActiveRecords() ([]DataCenterRecord, bool) {
-	records, refreshedAt := ctrl.cache.snapshot()
+func (x *Controller) ActiveRecords() ([]DataCenterRecord, bool) {
+	records, refreshedAt := x.cache.snapshot()
 	if refreshedAt.IsZero() {
 		return records, true
 	}
-	return records, time.Since(refreshedAt) > ctrl.config.MaxCacheStaleness
+	return records, time.Since(refreshedAt) > x.config.MaxCacheStaleness
 }
 
 // heartbeatLoop periodically renews the local record lease while the manager is running.
-func (ctrl *Controller) heartbeatLoop() {
-	defer ctrl.wg.Done()
-	ctrl.runLoop("heartbeat", ctrl.config.HeartbeatInterval, ctrl.heartbeatOnce)
+func (x *Controller) heartbeatLoop() {
+	defer x.wg.Done()
+	x.runLoop("Heartbeat", x.config.HeartbeatInterval, x.heartbeatOnce)
 }
 
 // refreshLoop periodically refreshes the local cache of active records.
-func (ctrl *Controller) refreshLoop() {
-	defer ctrl.wg.Done()
-	ctrl.runLoop("cache refresh", ctrl.config.CacheRefreshInterval, ctrl.refreshCache)
+func (x *Controller) refreshLoop() {
+	defer x.wg.Done()
+	x.runLoop("Cache Refresh", x.config.CacheRefreshInterval, x.refreshCache)
 }
 
 // watchLoop applies control plane change events to the local cache and
 // re-establishes watches with backoff on failures.
-func (ctrl *Controller) watchLoop() {
-	defer ctrl.wg.Done()
+func (x *Controller) watchLoop() {
+	defer x.wg.Done()
 
 	failures := 0
 watchLoop:
 	for {
 		select {
-		case <-ctrl.ctx.Done():
+		case <-x.ctx.Done():
 			return
 		default:
 		}
 
-		events, err := ctrl.controlPlane.Watch(ctrl.ctx)
+		events, err := x.controlPlane.Watch(x.ctx)
 		if err != nil {
 			if errors.Is(err, gerrors.ErrWatchNotSupported) {
-				ctrl.logger.Infof("multidc manager: control plane watch not supported, polling enabled")
+				x.logger.Infof("Control plane watch not supported, polling enabled")
 				return
 			}
+
 			failures++
-			ctrl.logger.Warnf("multidc manager: watch setup failed: %v", err)
-			if !ctrl.sleepBackoff(ctrl.config.CacheRefreshInterval, failures) {
+			x.logger.Warnf("Watch setup failed: %v", err)
+			if !x.sleepBackoff(x.config.CacheRefreshInterval, failures) {
 				return
 			}
 			continue
 		}
 
-		ctrl.watchSupported.Store(true)
-		ctrl.watcher = events
+		x.watchSupported.Store(true)
+		x.watcher = events
 		failures = 0
 
 		for {
 			select {
-			case <-ctrl.ctx.Done():
+			case <-x.ctx.Done():
 				return
 			case event, ok := <-events:
 				if !ok {
-					if ctrl.ctx.Err() == nil {
-						ctrl.logger.Warn("multidc manager: control plane watch closed")
+					if x.ctx.Err() == nil {
+						x.logger.Warn("Control plane watch closed")
 					}
-					ctrl.watchSupported.Store(false)
+
+					x.watchSupported.Store(false)
 					failures++
-					if !ctrl.sleepBackoff(ctrl.config.CacheRefreshInterval, failures) {
+					if !x.sleepBackoff(x.config.CacheRefreshInterval, failures) {
 						return
 					}
 					continue watchLoop
 				}
+
 				if event.Record.ID == "" {
 					continue
 				}
-				ctrl.cache.apply(event)
+
+				x.cache.apply(event)
 			}
 		}
 	}
 }
 
 // heartbeatOnce executes a single heartbeat attempt and updates local lease metadata.
-func (ctrl *Controller) heartbeatOnce(ctx context.Context) error {
-	id, version := ctrl.recordRef()
+func (x *Controller) heartbeatOnce(ctx context.Context) error {
+	id, version := x.recordRef()
 	if id == "" {
 		return nil
 	}
 
-	opCtx, cancel := ctrl.withTimeout(ctx)
+	opCtx, cancel := x.withTimeout(ctx)
 	defer cancel()
 
-	newVersion, leaseExpiry, err := ctrl.controlPlane.Heartbeat(opCtx, id, version)
+	newVersion, leaseExpiry, err := x.controlPlane.Heartbeat(opCtx, id, version)
 	if err != nil {
 		if errors.Is(err, gerrors.ErrRecordNotFound) || errors.Is(err, gerrors.ErrRecordConflict) {
-			return ctrl.register(ctx)
+			return x.register(ctx)
 		}
 		return err
 	}
 
-	ctrl.mu.Lock()
-	ctrl.recordVer = newVersion
-	ctrl.leaseExpiry = leaseExpiry
-	ctrl.mu.Unlock()
+	x.mu.Lock()
+	x.recordVer = newVersion
+	x.leaseExpiry = leaseExpiry
+	x.mu.Unlock()
 	return nil
 }
 
 // refreshCache reloads the list of active records into the local cache.
-func (ctrl *Controller) refreshCache(ctx context.Context) error {
-	opCtx, cancel := ctrl.withTimeout(ctx)
+func (x *Controller) refreshCache(ctx context.Context) error {
+	opCtx, cancel := x.withTimeout(ctx)
 	defer cancel()
 
-	records, err := ctrl.controlPlane.ListActive(opCtx)
+	records, err := x.controlPlane.ListActive(opCtx)
 	if err != nil {
 		return err
 	}
 
-	if ctrl.watchSupported.Load() {
-		ctrl.cache.merge(records)
+	if x.watchSupported.Load() {
+		x.cache.merge(records)
 	} else {
-		ctrl.cache.replace(records)
+		x.cache.replace(records)
 	}
 	return nil
 }
 
 // register registers the local record and transitions it to ACTIVE.
-func (ctrl *Controller) register(ctx context.Context) error {
-	record := ctrl.record()
+func (x *Controller) register(ctx context.Context) error {
+	record := x.record()
 
-	id, version, err := ctrl.registerRecord(ctx, record)
+	id, version, err := x.registerRecord(ctx, record)
 	if err != nil {
 		return err
 	}
 
-	version, err = ctrl.setRecordState(ctx, id, datacenter.DataCenterActive, version)
+	version, err = x.setRecordState(ctx, id, datacenter.DataCenterActive, version)
 	if err != nil {
 		return err
 	}
 
-	ctrl.setRecordRef(id, version)
+	x.setRecordRef(id, version)
 	return nil
 }
 
-func (ctrl *Controller) registerRecord(ctx context.Context, record DataCenterRecord) (string, uint64, error) {
-	opCtx, cancel := ctrl.withTimeout(ctx)
+func (x *Controller) registerRecord(ctx context.Context, record DataCenterRecord) (string, uint64, error) {
+	opCtx, cancel := x.withTimeout(ctx)
 	defer cancel()
-	return ctrl.controlPlane.Register(opCtx, record)
+	return x.controlPlane.Register(opCtx, record)
 }
 
-func (ctrl *Controller) setRecordState(ctx context.Context, id string, state DataCenterState, version uint64) (uint64, error) {
-	opCtx, cancel := ctrl.withTimeout(ctx)
+func (x *Controller) setRecordState(ctx context.Context, id string, state DataCenterState, version uint64) (uint64, error) {
+	opCtx, cancel := x.withTimeout(ctx)
 	defer cancel()
-	return ctrl.controlPlane.SetState(opCtx, id, state, version)
+	return x.controlPlane.SetState(opCtx, id, state, version)
 }
 
-func (ctrl *Controller) setRecordRef(id string, version uint64) {
-	ctrl.mu.Lock()
-	ctrl.recordID = id
-	ctrl.recordVer = version
-	ctrl.mu.Unlock()
+func (x *Controller) setRecordRef(id string, version uint64) {
+	x.mu.Lock()
+	x.recordID = id
+	x.recordVer = version
+	x.mu.Unlock()
 }
 
 // record builds the current local DataCenterRecord for registration.
-func (ctrl *Controller) record() DataCenterRecord {
-	ctrl.mu.RLock()
-	recordID := ctrl.recordID
-	ctrl.mu.RUnlock()
+func (x *Controller) record() DataCenterRecord {
+	x.mu.RLock()
+	recordID := x.recordID
+	x.mu.RUnlock()
 
 	if recordID == "" {
-		recordID = ctrl.config.DataCenter.ID()
+		recordID = x.config.DataCenter.ID()
 		if recordID == "" {
-			recordID = ctrl.config.DataCenter.Name
+			recordID = x.config.DataCenter.Name
 		}
 	}
 
 	return DataCenterRecord{
 		ID:         recordID,
-		DataCenter: ctrl.config.DataCenter,
-		Endpoints:  ctrl.config.Endpoints,
+		DataCenter: x.config.DataCenter,
+		Endpoints:  x.config.Endpoints,
 		State:      datacenter.DataCenterRegistered,
 	}
 }
 
 // recordRef returns the current record ID and version under lock.
-func (ctrl *Controller) recordRef() (string, uint64) {
-	ctrl.mu.RLock()
-	defer ctrl.mu.RUnlock()
-	return ctrl.recordID, ctrl.recordVer
+func (x *Controller) recordRef() (string, uint64) {
+	x.mu.RLock()
+	defer x.mu.RUnlock()
+	return x.recordID, x.recordVer
 }
 
 // withTimeout scopes control plane calls to the configured RequestTimeout.
-func (ctrl *Controller) withTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(ctx, ctrl.config.RequestTimeout)
+func (x *Controller) withTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, x.config.RequestTimeout)
 }
 
 // runLoop executes fn on a jittered interval with bounded backoff on errors.
-func (ctrl *Controller) runLoop(name string, interval time.Duration, fn func(context.Context) error) {
+func (x *Controller) runLoop(name string, interval time.Duration, fn func(context.Context) error) {
 	failures := 0
-	timer := time.NewTimer(ctrl.nextDelay(interval, failures))
+	timer := time.NewTimer(x.nextDelay(interval, failures))
 	defer timer.Stop()
 
 	for {
 		select {
-		case <-ctrl.ctx.Done():
+		case <-x.ctx.Done():
 			return
 		case <-timer.C:
-			if err := fn(ctrl.ctx); err != nil {
+			if err := fn(x.ctx); err != nil {
 				failures++
-				ctrl.logger.Warnf("multidc manager: %s failed: %v", name, err)
+				x.logger.Warnf("DataCenter Controller: %s failed: %v", name, err)
 			} else {
 				failures = 0
 			}
-			timer.Reset(ctrl.nextDelay(interval, failures))
+			timer.Reset(x.nextDelay(interval, failures))
 		}
 	}
 }
 
-func (ctrl *Controller) nextDelay(interval time.Duration, failures int) time.Duration {
+func (x *Controller) nextDelay(interval time.Duration, failures int) time.Duration {
 	delay := interval
 	if failures > 0 {
-		delay = ctrl.backoffDelay(interval, failures)
+		delay = x.backoffDelay(interval, failures)
 	}
-	return jitterDuration(delay, ctrl.config.JitterRatio)
+	return jitterDuration(delay, x.config.JitterRatio)
 }
 
-func (ctrl *Controller) backoffDelay(base time.Duration, failures int) time.Duration {
+func (x *Controller) backoffDelay(base time.Duration, failures int) time.Duration {
 	delay := base
-	for i := 1; i < failures && delay < ctrl.config.MaxBackoff; i++ {
+	for i := 1; i < failures && delay < x.config.MaxBackoff; i++ {
 		delay *= 2
-		if delay > ctrl.config.MaxBackoff {
-			delay = ctrl.config.MaxBackoff
+		if delay > x.config.MaxBackoff {
+			delay = x.config.MaxBackoff
 			break
 		}
 	}
@@ -450,13 +454,13 @@ func (ctrl *Controller) backoffDelay(base time.Duration, failures int) time.Dura
 	return delay
 }
 
-func (ctrl *Controller) sleepBackoff(base time.Duration, failures int) bool {
-	delay := ctrl.nextDelay(base, failures)
+func (x *Controller) sleepBackoff(base time.Duration, failures int) bool {
+	delay := x.nextDelay(base, failures)
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
 
 	select {
-	case <-ctrl.ctx.Done():
+	case <-x.ctx.Done():
 		return false
 	case <-timer.C:
 		return true
