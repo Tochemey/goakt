@@ -30,7 +30,6 @@ import (
 
 	"github.com/tochemey/goakt/v3/internal/http"
 	"github.com/tochemey/goakt/v3/internal/locker"
-	"github.com/tochemey/goakt/v3/internal/size"
 	"github.com/tochemey/goakt/v3/internal/validation"
 	"github.com/tochemey/goakt/v3/remote"
 )
@@ -64,10 +63,9 @@ type Node struct {
 // NewNode creates an instance of Node
 // nolint
 func NewNode(address string, opts ...NodeOption) *Node {
-	remoting := remote.NewRemoting(remote.WithRemotingMaxReadFameSize(16 * size.MB))
 	node := &Node{
 		address:  address,
-		remoting: remoting,
+		remoting: remote.NewRemoting(),
 		weight:   0,
 	}
 

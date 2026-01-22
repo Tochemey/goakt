@@ -151,7 +151,7 @@ func TestClient(t *testing.T) {
 
 		nodes := make([]*Node, len(addresses))
 		for i, addr := range addresses {
-			nodes[i] = NewNode(addr)
+			nodes[i] = NewNode(addr, WithRemoting(remote.NewRemoting(remote.WithRemotingCompression(compression))))
 		}
 
 		client, err := New(ctx, nodes)
@@ -255,7 +255,7 @@ func TestClient(t *testing.T) {
 
 		nodes := make([]*Node, len(addresses))
 		for i, addr := range addresses {
-			nodes[i] = NewNode(addr)
+			nodes[i] = NewNode(addr, WithRemoting(remote.NewRemoting(remote.WithRemotingCompression(compression))))
 		}
 
 		client, err := New(
@@ -349,7 +349,7 @@ func TestClient(t *testing.T) {
 
 		nodes := make([]*Node, len(addresses))
 		for i, addr := range addresses {
-			nodes[i] = NewNode(addr)
+			nodes[i] = NewNode(addr, WithRemoting(remote.NewRemoting(remote.WithRemotingCompression(compression))))
 		}
 
 		client, err := New(
@@ -442,7 +442,7 @@ func TestClient(t *testing.T) {
 
 		nodes := make([]*Node, len(addresses))
 		for i, addr := range addresses {
-			nodes[i] = NewNode(addr)
+			nodes[i] = NewNode(addr, WithRemoting(remote.NewRemoting(remote.WithRemotingCompression(compression))))
 		}
 
 		client, err := New(ctx, nodes, WithRefresh(time.Minute))
@@ -531,7 +531,7 @@ func TestClient(t *testing.T) {
 
 		nodes := make([]*Node, len(addresses))
 		for i, addr := range addresses {
-			nodes[i] = NewNode(addr)
+			nodes[i] = NewNode(addr, WithRemoting(remote.NewRemoting(remote.WithRemotingCompression(compression))))
 		}
 
 		client, err := New(ctx, nodes)
@@ -620,7 +620,7 @@ func TestClient(t *testing.T) {
 
 		nodes := make([]*Node, len(addresses))
 		for i, addr := range addresses {
-			nodes[i] = NewNode(addr)
+			nodes[i] = NewNode(addr, WithRemoting(remote.NewRemoting(remote.WithRemotingCompression(compression))))
 		}
 
 		client, err := New(ctx, nodes)
@@ -718,7 +718,7 @@ func TestClient(t *testing.T) {
 
 		nodes := make([]*Node, len(addresses))
 		for i, addr := range addresses {
-			nodes[i] = NewNode(addr)
+			nodes[i] = NewNode(addr, WithRemoting(remote.NewRemoting(remote.WithRemotingCompression(remote.NoCompression))))
 		}
 
 		client, err := New(ctx, nodes)
@@ -871,7 +871,7 @@ func TestClient(t *testing.T) {
 
 		nodes := make([]*Node, len(addresses))
 		for i, addr := range addresses {
-			nodes[i] = NewNode(addr)
+			nodes[i] = NewNode(addr, WithRemoting(remote.NewRemoting(remote.WithRemotingCompression(remote.NoCompression))))
 		}
 
 		client, err := New(ctx, nodes)
@@ -950,7 +950,7 @@ func TestClient(t *testing.T) {
 
 		nodes := make([]*Node, len(addresses))
 		for i, addr := range addresses {
-			nodes[i] = NewNode(addr)
+			nodes[i] = NewNode(addr, WithRemoting(remote.NewRemoting(remote.WithRemotingCompression(remote.NoCompression))))
 		}
 
 		client, err := New(ctx, nodes)
@@ -1007,7 +1007,7 @@ func TestClient(t *testing.T) {
 
 		nodes := make([]*Node, len(addresses))
 		for i, addr := range addresses {
-			nodes[i] = NewNode(addr)
+			nodes[i] = NewNode(addr, WithRemoting(remote.NewRemoting(remote.WithRemotingCompression(remote.NoCompression))))
 		}
 
 		client, err := New(ctx, nodes)
@@ -1093,7 +1093,7 @@ func TestClient(t *testing.T) {
 
 		nodes := make([]*Node, len(addresses))
 		for i, addr := range addresses {
-			nodes[i] = NewNode(addr)
+			nodes[i] = NewNode(addr, WithRemoting(remote.NewRemoting(remote.WithRemotingCompression(compression))))
 		}
 
 		client, err := New(ctx, nodes)
@@ -1148,7 +1148,7 @@ func TestClient(t *testing.T) {
 
 		nodes := make([]*Node, len(addresses))
 		for i, addr := range addresses {
-			nodes[i] = NewNode(addr)
+			nodes[i] = NewNode(addr, WithRemoting(remote.NewRemoting(remote.WithRemotingCompression(compression))))
 		}
 
 		client, err := New(ctx, nodes)
@@ -1198,7 +1198,7 @@ func TestClient(t *testing.T) {
 
 		nodes := make([]*Node, len(addresses))
 		for i, addr := range addresses {
-			nodes[i] = NewNode(addr)
+			nodes[i] = NewNode(addr, WithRemoting(remote.NewRemoting(remote.WithRemotingCompression(compression))))
 		}
 
 		client, err := New(ctx, nodes)
@@ -1250,7 +1250,7 @@ func TestClient(t *testing.T) {
 
 		nodes := make([]*Node, len(addresses))
 		for i, addr := range addresses {
-			nodes[i] = NewNode(addr)
+			nodes[i] = NewNode(addr, WithRemoting(remote.NewRemoting(remote.WithRemotingCompression(remote.NoCompression))))
 		}
 
 		client, err := New(ctx, nodes)
@@ -1301,7 +1301,7 @@ func TestClient(t *testing.T) {
 
 		nodes := make([]*Node, len(addresses))
 		for i, addr := range addresses {
-			nodes[i] = NewNode(addr)
+			nodes[i] = NewNode(addr, WithRemoting(remote.NewRemoting(remote.WithRemotingCompression(remote.NoCompression))))
 		}
 
 		client, err := New(ctx, nodes)
