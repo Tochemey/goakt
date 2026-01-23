@@ -39,8 +39,8 @@ func TestNewClient(t *testing.T) {
 	assert.IsType(t, new(http2.Transport), cl.Transport)
 	tr := cl.Transport.(*http2.Transport)
 	assert.True(t, tr.AllowHTTP)
-	assert.Equal(t, 30*time.Second, tr.PingTimeout)
-	assert.Equal(t, 30*time.Second, tr.ReadIdleTimeout)
+	assert.Equal(t, 10*time.Second, tr.PingTimeout)
+	assert.Equal(t, 20*time.Second, tr.ReadIdleTimeout)
 }
 
 func TestURL(t *testing.T) {

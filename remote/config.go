@@ -69,7 +69,7 @@ func NewConfig(bindAddr string, bindPort int, opts ...Option) *Config {
 		idleTimeout:     1200 * time.Second,
 		bindAddr:        bindAddr,
 		bindPort:        bindPort,
-		compression:     NoCompression,
+		compression:     ZstdCompression,
 	}
 
 	// apply the options
@@ -89,7 +89,7 @@ func DefaultConfig() *Config {
 		idleTimeout:     1200 * time.Second,
 		bindAddr:        "127.0.0.1",
 		bindPort:        0,
-		compression:     NoCompression,
+		compression:     ZstdCompression,
 	}
 }
 

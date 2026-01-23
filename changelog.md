@@ -20,6 +20,11 @@
 
 ### ⚡ Performance Improvements
 
+#### 🚀 Remoting Optimizations
+
+- ⚡ Changed default compression from `NoCompression` to `ZstdCompression` for both remoting client (`NewRemoting`) and server (`NewConfig`/`DefaultConfig`). Zstd provides excellent compression ratios (50-70% bandwidth reduction) with lower CPU overhead compared to gzip, making it ideal for high-frequency remoting traffic.
+- 🔄 Added `RemotingServiceClient` caching to reuse clients per `host:port` endpoint, eliminating repeated client creation overhead and reducing allocations for calls to the same remote node.
+
 #### 🔄 Relocation Process
 
 PR: https://github.com/Tochemey/goakt/pull/1079

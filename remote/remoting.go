@@ -50,6 +50,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/quorum"
 	"github.com/tochemey/goakt/v3/internal/size"
 	"github.com/tochemey/goakt/v3/internal/strconvx"
+	"github.com/tochemey/goakt/v3/internal/xsync"
 )
 
 const DefaultMaxReadFrameSize = 16 * size.MB
@@ -369,6 +370,16 @@ func WithRemotingMaxReadFameSize(size int) RemotingOption {
 // WithRemotingCompression sets the compression algorithm applied to payloads
 // exchanged with remote actor systems. The provided Compression must be one of
 // the supported options for remoting traffic.
+//
+// Supported compression algorithms:
+//   - ZstdCompression (default): Optimal balance of compression ratio and CPU usage.
+//     Recommended for most use cases, especially high-frequency messaging.
+//   - BrotliCompression: Excellent compression ratio, good for web contexts.
+//   - GzipCompression: Widely supported, good compatibility but slower than Zstd.
+//   - NoCompression: Disables compression. Use only if CPU is extremely constrained
+//     or for debugging purposes.
+//
+// If not specified, ZstdCompression is used by default for optimal performance.
 func WithRemotingCompression(c Compression) RemotingOption {
 	return func(r *remoting) {
 		r.compression = c
@@ -389,27 +400,49 @@ func WithRemotingContextPropagator(propagator ContextPropagator) RemotingOption 
 // clients. It encapsulates transport setup, compression, and TLS configuration
 // required to reach remote actor systems.
 type remoting struct {
-	client            *nethttp.Client
+	httpClient        *nethttp.Client
 	tlsConfig         *tls.Config
 	maxReadFrameSize  int
 	compression       Compression
 	contextPropagator ContextPropagator
 	clientFactory     func(host string, port int) internalpbconnect.RemotingServiceClient
+
+	// clientCache provides thread-safe caching of RemotingServiceClient instances
+	// keyed by "host:port" to avoid repeated client creation overhead. This cache
+	// is populated lazily on first access and persists for the lifetime of the
+	// remoting instance, significantly improving performance for repeated calls
+	// to the same endpoint.
+	//
+	// Uses xsync.Map for type safety, deterministic behavior, and better testability.
+	// The RWMutex-based implementation provides predictable cache behavior while
+	// maintaining excellent performance for the typical cache size (small number of
+	// unique endpoints per remoting instance).
+	clientCache *xsync.Map[string, internalpbconnect.RemotingServiceClient]
 }
 
 var _ Remoting = (*remoting)(nil)
 
 // NewRemoting constructs a Remoting client configured with the supplied
 // options. By default, the returned client uses an insecure HTTP transport with
-// no compression and enforces the DefaultMaxReadFrameSize limit. Custom options
-// may enable TLS, change the frame size, or select a compression algorithm.
+// ZstdCompression enabled for optimal performance and enforces the DefaultMaxReadFrameSize
+// limit. Custom options may enable TLS, change the frame size, or select a different
+// compression algorithm.
+//
+// Default compression is set to ZstdCompression for optimal balance between
+// compression ratio and CPU overhead. This significantly reduces bandwidth usage
+// for typical actor message payloads while maintaining low latency.
 //
 // Call Close when the client is no longer needed to avoid leaking idle socket
 // connections.
 func NewRemoting(opts ...RemotingOption) Remoting {
 	r := &remoting{
 		maxReadFrameSize: DefaultMaxReadFrameSize,
-		compression:      NoCompression,
+		// Use ZstdCompression by default for optimal performance. Zstd provides
+		// excellent compression ratios with lower CPU overhead compared to gzip,
+		// making it ideal for high-frequency remoting traffic. Users can override
+		// this via WithRemotingCompression if needed.
+		compression: ZstdCompression,
+		clientCache: xsync.NewMap[string, internalpbconnect.RemotingServiceClient](),
 	}
 
 	// apply the options
@@ -418,14 +451,11 @@ func NewRemoting(opts ...RemotingOption) Remoting {
 	}
 
 	if r.tlsConfig != nil {
-		r.client = http.NewHTTPSClient(r.tlsConfig, uint32(r.maxReadFrameSize)) // nolint
+		r.httpClient = http.NewHTTPSClient(r.tlsConfig, uint32(r.maxReadFrameSize)) // nolint
 	} else {
-		r.client = http.NewHTTPClient(uint32(r.maxReadFrameSize))
+		r.httpClient = http.NewHTTPClient(uint32(r.maxReadFrameSize))
 	}
 
-	r.clientFactory = func(host string, port int) internalpbconnect.RemotingServiceClient {
-		return r.newRemotingServiceClient(host, port)
-	}
 	return r
 }
 
@@ -939,7 +969,7 @@ func (r *remoting) RemoteReinstate(ctx context.Context, host string, port int, n
 // to the remoting instance. Avoid mutating the client concurrently with active
 // requests; prefer configuring via options at creation time.
 func (r *remoting) HTTPClient() *nethttp.Client {
-	return r.client
+	return r.httpClient
 }
 
 // MaxReadFrameSize reports the maximum frame size enforced by the remoting
@@ -952,19 +982,65 @@ func (r *remoting) MaxReadFrameSize() int {
 // Close releases resources held by the remoting client, such as idle HTTP
 // connections. It does not cancel in-flight RPCs; use context cancellation to
 // stop ongoing operations.
+//
+// After calling Close, cached clients remain in the cache but will not be
+// used for new connections. The cache is cleared to prevent memory leaks
+// and ensure proper cleanup.
 func (r *remoting) Close() {
-	r.client.CloseIdleConnections()
+	// Close all idle connections in the underlying HTTP client to release
+	// network resources. This prevents connection leaks and ensures proper
+	// cleanup of TCP sockets and file descriptors.
+	r.httpClient.CloseIdleConnections()
+
+	// Clear the client cache to release references and allow garbage collection.
+	// While cached clients don't hold connections themselves (connections are
+	// managed by the shared HTTP client), clearing the cache prevents holding
+	// references unnecessarily and ensures a clean shutdown state.
+	// xsync.Map provides Reset() method for efficient cache clearing.
+	r.clientCache.Reset()
 }
 
 // RemotingServiceClient creates a typed RemotingService client for the target
 // endpoint, applying the remoting client's transport and compression settings.
 // This is primarily for advanced scenarios where direct RPC access is required.
+//
+// The returned client is cached per host:port combination to avoid repeated
+// allocation overhead. Cached clients are reused across all subsequent calls
+// to the same endpoint, significantly improving performance.
+//
+// Thread-safety: This method is safe for concurrent use by multiple goroutines.
+// The internal cache uses xsync.Map for type-safe, deterministic concurrent access.
 func (r *remoting) RemotingServiceClient(host string, port int) internalpbconnect.RemotingServiceClient {
+	// If a custom client factory is set (typically for testing), use it directly
+	// without caching to allow test injection behavior.
 	if r.clientFactory != nil {
 		return r.clientFactory(host, port)
 	}
 
-	return r.newRemotingServiceClient(host, port)
+	// Construct cache key from host and port to uniquely identify the endpoint.
+	// Format: "host:port" ensures proper isolation between different endpoints.
+	cacheKey := fmt.Sprintf("%s:%d", host, port)
+
+	// Attempt to load existing client from cache. xsync.Map.Get uses RWMutex
+	// for thread-safe access, providing deterministic behavior and excellent
+	// performance for the typical cache size (small number of unique endpoints).
+	if cached, ok := r.clientCache.Get(cacheKey); ok {
+		return cached
+	}
+
+	// Cache miss: create new client instance. This is the first call to this
+	// endpoint or the client was evicted from cache (shouldn't happen in normal
+	// operation since cache is never cleared, but safe to handle).
+	client := r.newRemotingServiceClient(host, port)
+
+	// Store client in cache for future reuse. xsync.Map.Set uses RWMutex for
+	// thread-safe writes. If multiple goroutines race to store, the last write
+	// wins, which is acceptable since all clients for the same endpoint are
+	// equivalent. The mutex-based approach provides deterministic behavior
+	// and makes testing straightforward.
+	r.clientCache.Set(cacheKey, client)
+
+	return client
 }
 
 func (r *remoting) setClientFactory(factory func(string, int) internalpbconnect.RemotingServiceClient) {
@@ -1008,7 +1084,7 @@ func (r *remoting) newRemotingServiceClient(host string, port int) internalpbcon
 	}
 
 	return internalpbconnect.NewRemotingServiceClient(
-		r.client,
+		r.httpClient,
 		endpoint,
 		opts...,
 	)

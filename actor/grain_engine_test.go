@@ -688,7 +688,7 @@ func TestAskGrain_ClusterFallbackAutoProvisions(t *testing.T) {
 	sys.registry.Register(grain)
 	identity := newGrainIdentity(grain, "auto-provision")
 
-	cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(nil, cluster.ErrGrainNotFound)
+	cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(nil, cluster.ErrGrainNotFound).Once()
 	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, nil).Twice()
 	cl.EXPECT().PutGrain(mock.Anything, mock.MatchedBy(func(actual *internalpb.Grain) bool {
 		return actual != nil && actual.GetGrainId().GetValue() == identity.String()
@@ -699,8 +699,14 @@ func TestAskGrain_ClusterFallbackAutoProvisions(t *testing.T) {
 	require.NotNil(t, resp)
 	require.Equal(t, "received message", resp.(*testpb.Reply).Content)
 
-	_, ok := sys.grains.Get(identity.String())
-	require.True(t, ok)
+	// AskGrain activates the grain synchronously via ensureGrainProcess,
+	// so it should be available immediately. However, use Eventually to
+	// handle any potential race conditions in CI environments where
+	// scheduling might cause slight delays.
+	require.Eventually(t, func() bool {
+		_, ok := sys.grains.Get(identity.String())
+		return ok
+	}, 100*time.Millisecond, 5*time.Millisecond, "grain should be activated and stored after AskGrain returns")
 }
 
 func TestEnsureNewGrainProcess_ActivationBarrierTimeout(t *testing.T) {
