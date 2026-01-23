@@ -64,6 +64,7 @@ import (
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
+	"github.com/tochemey/goakt/v3/internal/compression/zstd"
 	internalpb "github.com/tochemey/goakt/v3/internal/internalpb"
 	internalpbconnect "github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v3/internal/metric"
@@ -2830,7 +2831,7 @@ func TestRemoteContextPropagation(t *testing.T) {
 		headerVal := "actor-ask"
 
 		handler := &actorHandler{}
-		path, remotingHandler := internalpbconnect.NewRemotingServiceHandler(handler)
+		path, remotingHandler := internalpbconnect.NewRemotingServiceHandler(handler, zstd.WithCompression())
 		mux := http.NewServeMux()
 		mux.Handle(path, remotingHandler)
 		server := httptest.NewUnstartedServer(h2c.NewHandler(mux, &http2.Server{}))
@@ -2873,7 +2874,7 @@ func TestRemoteContextPropagation(t *testing.T) {
 		headerVal := "actor-tell"
 
 		handler := &actorHandler{}
-		path, remotingHandler := internalpbconnect.NewRemotingServiceHandler(handler)
+		path, remotingHandler := internalpbconnect.NewRemotingServiceHandler(handler, zstd.WithCompression())
 		mux := http.NewServeMux()
 		mux.Handle(path, remotingHandler)
 		server := httptest.NewUnstartedServer(h2c.NewHandler(mux, &http2.Server{}))
