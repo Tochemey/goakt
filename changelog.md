@@ -7,7 +7,7 @@
 - 🔧 Fix and simplify the implementation of the relocation engine.
 - 🛡️ Harden the cluster singleton implementation with well guided godoc
 - 📦 Exposed the eventstream package that was accidentally moved into the internal package
-- 🐛 Fix actor relocation race condition when nodes leave the cluster. Peer state is now persisted to all cluster peers via RPC before leaving membership, ensuring state is available for relocation when NodeLeft events are processed. BoltDB store now ensures immediate read-after-write visibility to prevent timing issues. All shutdown errors (preShutdown, persistence, cluster cleanup) are properly tracked and returned.
+- 🐛 Fix actor relocation race condition when nodes leave the cluster. Peer state is now persisted to selected cluster peers via RPC before leaving membership, ensuring state is available for relocation when NodeLeft events are processed. BoltDB store now ensures immediate read-after-write visibility to prevent timing issues. All shutdown errors (preShutdown, persistence, cluster cleanup) are properly tracked and returned. See the performance optimisation regarding the relocation further down.
 - Upgrade Go version to from 1.25.3 to 1.25.5 due to some dependencies upgrades requiring it.
 
 ### ✨ Features
