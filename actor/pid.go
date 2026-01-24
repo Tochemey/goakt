@@ -26,8 +26,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -44,6 +46,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/tochemey/goakt/v3/address"
+	"github.com/tochemey/goakt/v3/datacenter"
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/eventstream"
 	"github.com/tochemey/goakt/v3/extension"
@@ -1011,16 +1014,32 @@ func (pid *PID) SendAsync(ctx context.Context, actorName string, message proto.M
 		return gerrors.ErrDead
 	}
 
+	// try to find the actor in the local datacenter
 	addr, cid, err := pid.ActorSystem().ActorOf(ctx, actorName)
+	if err == nil {
+		// Actor found in local datacenter
+		if cid != nil {
+			// Actor is local to this node
+			return pid.Tell(ctx, cid, message)
+		}
+		// Actor is in local datacenter but on a remote node
+		return pid.RemoteTell(ctx, addr, message)
+	}
+
+	// Actor not found in local datacenter - check if it's a "not found" error
+	if !errors.Is(err, gerrors.ErrActorNotFound) {
+		// Some other error occurred (e.g., system not started, network error)
+		return err
+	}
+
+	// Try to find the actor in remote datacenters
+	foundAddr, err := pid.DiscoverActor(ctx, actorName, 5*time.Second)
 	if err != nil {
 		return err
 	}
 
-	if cid != nil {
-		return pid.Tell(ctx, cid, message)
-	}
-
-	return pid.RemoteTell(ctx, addr, message)
+	// Send message to the actor in the remote datacenter
+	return pid.RemoteTell(ctx, foundAddr, message)
 }
 
 // SendSync sends a synchronous message to another actor and expect a response.
@@ -1031,20 +1050,172 @@ func (pid *PID) SendSync(ctx context.Context, actorName string, message proto.Me
 		return nil, gerrors.ErrDead
 	}
 
+	// try to find the actor in the local datacenter
 	addr, cid, err := pid.ActorSystem().ActorOf(ctx, actorName)
+	if err == nil {
+		// Actor found in local datacenter
+		if cid != nil {
+			// Actor is local to this node
+			return pid.Ask(ctx, cid, message, timeout)
+		}
+		// Actor is in local datacenter but on a remote node
+		reply, err := pid.RemoteAsk(ctx, addr, message, timeout)
+		if err != nil {
+			return nil, err
+		}
+		return reply.UnmarshalNew()
+	}
+
+	// Actor not found in local datacenter - check if it's a "not found" error
+	if !errors.Is(err, gerrors.ErrActorNotFound) {
+		// Some other error occurred (e.g., system not started, network error)
+		return nil, err
+	}
+
+	// Cap lookup timeout at 5 seconds to ensure responsive discovery
+	lookupTimeout := 5 * time.Second
+	if timeout > 0 && timeout < lookupTimeout {
+		lookupTimeout = timeout
+	}
+
+	// Try to find the actor in remote datacenters
+	foundAddr, err := pid.DiscoverActor(ctx, actorName, lookupTimeout)
 	if err != nil {
 		return nil, err
 	}
 
-	if cid != nil {
-		return pid.Ask(ctx, cid, message, timeout)
-	}
-
-	reply, err := pid.RemoteAsk(ctx, addr, message, timeout)
+	// Send message to the actor in the remote datacenter
+	reply, err := pid.RemoteAsk(ctx, foundAddr, message, timeout)
 	if err != nil {
 		return nil, err
 	}
 	return reply.UnmarshalNew()
+}
+
+// DiscoverActor locates an actor across all active datacenters using parallel discovery.
+//
+// This method queries all endpoints in every active datacenter concurrently and returns
+// the address of the first datacenter that successfully resolves the actor. Once found,
+// remaining lookups are cancelled to minimize resource usage.
+//
+// The discovery is best-effort: it uses cached datacenter records and proceeds even if
+// the cache is stale (logging a warning in that case). This prioritizes availability
+// and speed over strict consistency.
+//
+// Algorithm:
+//  1. Fetch active datacenter records from the local DC controller cache
+//  2. Query all endpoints across all active DCs in parallel
+//  3. Return the first successful result, canceling remaining lookups
+//  4. If no DC contains the actor, return ErrActorNotFound
+//
+// Parameters:
+//   - ctx: Parent context for cancellation propagation
+//   - actorName: The name of the actor to discover
+//   - timeout: Maximum duration to wait for discovery (bounds the parallel queries)
+//
+// Returns:
+//   - *address.Address: The remote address of the actor if found
+//   - error: ErrActorNotFound if the actor doesn't exist in any active DC,
+//     or if the actor system / DC controller is not available
+func (pid *PID) DiscoverActor(ctx context.Context, actorName string, timeout time.Duration) (*address.Address, error) {
+	if !pid.IsRunning() {
+		return nil, gerrors.ErrDead
+	}
+
+	actorSystem := pid.actorSystem
+	if actorSystem == nil || actorSystem.getDataCenterController() == nil {
+		return nil, gerrors.ErrActorNotFound
+	}
+
+	dataCenterController := actorSystem.getDataCenterController()
+	dataCenterRecords, stale := dataCenterController.ActiveRecords()
+	if stale {
+		// Best-effort routing: proceed with stale cache but log warning
+		// Stale cache may miss newly registered DCs or include inactive ones
+		pid.logger.Warn("DC cache is stale, proceeding with best-effort cross-DC routing")
+	}
+
+	if len(dataCenterRecords) == 0 {
+		return nil, gerrors.ErrActorNotFound
+	}
+
+	// Count total endpoints for proper channel buffer sizing
+	endpointCount := 0
+	for _, dcRecord := range dataCenterRecords {
+		if dcRecord.State == datacenter.DataCenterActive {
+			endpointCount += len(dcRecord.Endpoints)
+		}
+	}
+
+	if endpointCount == 0 {
+		return nil, gerrors.ErrActorNotFound
+	}
+
+	// Query remote datacenters in parallel with timeout
+	queryCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	type result struct {
+		addr *address.Address
+		err  error
+	}
+
+	// Buffer sized for all endpoints to prevent goroutine blocking
+	results := make(chan result, endpointCount)
+	var wg sync.WaitGroup
+
+	// Query each active datacenter in parallel
+	for _, dcRecord := range dataCenterRecords {
+		if dcRecord.State != datacenter.DataCenterActive {
+			continue
+		}
+
+		// Query each endpoint in the datacenter
+		for _, endpoint := range dcRecord.Endpoints {
+			host, portStr, err := net.SplitHostPort(endpoint)
+			if err != nil {
+				continue
+			}
+
+			port, err := strconv.Atoi(portStr)
+			if err != nil {
+				continue
+			}
+
+			wg.Add(1)
+			go func(host string, port int) {
+				defer wg.Done()
+				addr, lookupErr := pid.RemoteLookup(queryCtx, host, port, actorName)
+				results <- result{
+					addr: addr,
+					err:  lookupErr,
+				}
+			}(host, port)
+		}
+	}
+
+	// Wait for all goroutines to complete and close the channel
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	// Collect first successful result
+	var addr *address.Address
+	for result := range results {
+		if result.err == nil && result.addr != nil && !result.addr.Equals(address.NoSender()) {
+			// Found the actor in this datacenter
+			addr = result.addr
+			cancel() // Cancel remaining lookups
+			break
+		}
+	}
+
+	if addr == nil {
+		return nil, gerrors.ErrActorNotFound
+	}
+
+	return addr, nil
 }
 
 // BatchTell sends an asynchronous bunch of messages to the given PID

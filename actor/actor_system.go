@@ -737,6 +737,7 @@ type ActorSystem interface {
 	passivationManager() *passivationManager
 	removeNodeLeft(address string)
 	getClusterStore() cluster.Store
+	getDataCenterController() *datacentercontroller.Controller
 }
 
 // ActorSystem represent a collection of actors on a given node
@@ -2551,6 +2552,14 @@ func (x *actorSystem) getRemoting() remote.Remoting {
 	remoting := x.remoting
 	x.locker.RUnlock()
 	return remoting
+}
+
+// getDataCenterController returns the data center controller
+func (x *actorSystem) getDataCenterController() *datacentercontroller.Controller {
+	x.locker.RLock()
+	dataCenterController := x.dataCenterController
+	x.locker.RUnlock()
+	return dataCenterController
 }
 
 func (x *actorSystem) getClusterStore() cluster.Store {

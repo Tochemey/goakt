@@ -26,6 +26,7 @@ efficient routing.
 - DC leader is the sole writer for its DataCenterRecord; followers do not run the manager.
 - Lease-based liveness and TTL expiry enforced by the control plane provider.
 - Leader-local cache of ACTIVE records with staleness reporting and watch/poll refresh.
+- DC-transparent message routing via discovery-based approach (SendAsync/SendSync methods).
 
 ## Key Concepts
 
@@ -219,30 +220,35 @@ Recommended practices (provider-specific, not enforced by the core runtime):
 - Audit log for state changes (REGISTER, DRAINING, INACTIVE).
 - Inter-DC communication is fully secured using HTTP/3 over quic-go.
 
-Routing and DC-Transparent Messaging (Planned)
-----------------------------------------------
-Status: planned. The current runtime does not yet use the control plane cache for routing.
+Routing and DC-Transparent Messaging
+------------------------------------
+Status: implemented. The runtime uses the control plane cache for discovery-based routing.
 
 DC-transparent messaging means callers address logical actor/grain identities without choosing a DC.
-The runtime resolves the target DC via a routing policy and the registry’s live DC list.
+The runtime discovers which DC contains the target actor by querying active DCs in parallel.
 
-Routing policy (example behaviors):
-- Consistent hashing across live DCs by actor/grain ID.
-- Label-based filtering (for example: route only to tier=prod).
-- Region preference with fallback order.
-
-Policy evaluation order (MVP):
-1) Filter to ACTIVE DCs with valid leases.
-2) Apply label constraints (hard filters).
-3) Apply region/zone preference (soft ranking).
-4) Select via consistent hashing for stability.
+Current Implementation (Discovery-Based Routing):
+-------------------------------------------------
+The current implementation uses a discovery-based approach that queries all active DCs to locate
+the target actor. This approach is well-suited for the current state where actors may exist in
+any DC and deterministic placement policies are not yet implemented.
 
 Routing flow:
-1) Local runtime uses the DC leader's cached view of active DCs (TTL-based),
-   which is refreshed periodically from the registry.
-2) The routing policy selects a target DC deterministically.
-3) The message is sent via remote messaging to the selected DC endpoint.
-4) The receiving DC resolves the actor/grain locally and delivers the message.
+1) Local runtime first attempts to find the actor in the local datacenter using ActorOf.
+2) If not found locally, the runtime retrieves the list of active DCs from the control plane cache.
+3) The runtime queries all active DC endpoints in parallel using RemoteLookup to discover
+   which DC contains the target actor.
+4) The first DC that responds with a valid actor address is selected.
+5) Remaining pending lookups are cancelled to avoid unnecessary network traffic.
+6) The message is sent via remote messaging to the discovered DC endpoint.
+7) The receiving DC resolves the actor locally and delivers the message.
+
+Implementation details:
+- Parallel queries: All active DCs are queried concurrently for low latency.
+- Early cancellation: Once a match is found, remaining lookups are cancelled.
+- Timeout protection: Lookups are bounded by a timeout (default 5 seconds) to avoid hanging.
+- Stale cache handling: The implementation uses cached DC records but may proceed with
+  stale data if the cache hasn't been refreshed recently (configurable behavior).
 
 Placement and Relocation (Planned)
 ----------------------------------
@@ -261,25 +267,27 @@ Liveness and Health Checks
 - Liveness uses TTL-based heartbeats; absence of heartbeat marks the DC as inactive.
 - Routing only considers active DCs. Inactive DCs are removed from routing tables.
 
-Sequence Flows (Planned)
-------------------------
-Status: planned. These flows describe the intended interactions.
-DC registration and heartbeat:
+Sequence Flows
+---------------
+DC registration and heartbeat (implemented):
 1) DC leader starts and registers DataCenter metadata and endpoints in the registry.
 2) DC leader sends heartbeats at a fixed interval (less than TTL).
 3) Registry expires the DC entry if heartbeats stop.
 
-DC-transparent message delivery:
-1) Actor A sends a message to Actor B (no DC specified).
-2) Runtime fetches live DCs from the registry (or uses cached view).
-3) Routing policy selects DC X for Actor B.
-4) Message is sent to DC X using remote messaging.
-5) DC X delivers the message to Actor B locally.
+DC-transparent message delivery (implemented):
+1) Actor A calls SendAsync/SendSync with Actor B's name (no DC specified).
+2) Runtime first attempts to find Actor B in the local datacenter using ActorOf.
+3) If not found locally, runtime retrieves active DCs from the control plane cache.
+4) Runtime queries all active DC endpoints in parallel using RemoteLookup.
+5) First DC that responds with Actor B's address is selected.
+6) Remaining lookups are cancelled.
+7) Message is sent to the discovered DC using remote messaging.
+8) Receiving DC resolves Actor B locally and delivers the message.
 
-Controlled relocation:
+Controlled relocation (planned):
 1) Operator or policy triggers relocation of Actor B to DC Y.
 2) Source DC (or placement group) is set to DRAINING.
 3) DC Y creates Actor B and becomes the new target per routing policy.
 4) Source DC stops Actor B after drain.
-5) Subsequent messages route to DC Y.
+5) Subsequent messages route to DC Y (via discovery or policy-based routing).
 ````

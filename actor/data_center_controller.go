@@ -46,7 +46,7 @@ func (x *actorSystem) stopControllerLocked(ctx context.Context) error {
 	}
 
 	if err := x.dataCenterController.Stop(ctx); err != nil {
-		x.logger.Errorf("failed to stop multi-dc manager: %v", err)
+		x.logger.Errorf("failed to stop data center controller: %v", err)
 		return err
 	}
 
