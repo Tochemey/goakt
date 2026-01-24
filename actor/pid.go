@@ -1032,6 +1032,7 @@ func (pid *PID) SendAsync(ctx context.Context, actorName string, message proto.M
 		return err
 	}
 
+	// TODO: make this configurable or set a reasonable default
 	// Try to find the actor in remote datacenters
 	foundAddr, err := pid.DiscoverActor(ctx, actorName, 5*time.Second)
 	if err != nil {
@@ -1073,6 +1074,7 @@ func (pid *PID) SendSync(ctx context.Context, actorName string, message proto.Me
 	}
 
 	// Cap lookup timeout at 5 seconds to ensure responsive discovery
+	// TODO: make this configurable or set a reasonable default
 	lookupTimeout := 5 * time.Second
 	if timeout > 0 && timeout < lookupTimeout {
 		lookupTimeout = timeout
@@ -1605,7 +1607,7 @@ func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
 	if system := pid.actorSystem; system != nil && system.isStopping() {
 		// slow path: only check message type if shutting down
 		// system messages must be allowed through for proper shutdown/supervision
-		if !pid.isSystemMessage(receiveCtx.Message()) {
+		if !isSystemMessage(receiveCtx.Message()) {
 			pid.handleReceivedError(receiveCtx, gerrors.ErrSystemShuttingDown)
 			return
 		}
@@ -1696,7 +1698,7 @@ func (pid *PID) handleReceived(received *ReceiveContext) {
 // through even during system shutdown (e.g., for proper shutdown, supervision, lifecycle).
 //
 // This is a zero-allocation type switch that identifies critical system messages.
-func (pid *PID) isSystemMessage(message proto.Message) bool {
+func isSystemMessage(message proto.Message) bool {
 	switch message.(type) {
 	case *internalpb.AsyncResponse,
 		*internalpb.AsyncRequest,

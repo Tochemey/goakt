@@ -27,6 +27,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -55,6 +56,16 @@ type (
 //   - Periodically refreshes the cache via polling (ListActive).
 //   - Optionally subscribes to change events (Watch) and incrementally applies them
 //     to the cache when supported by the control plane.
+//
+// Cache & Tombstones:
+//   - The cache maintains active records and uses tombstones to track deleted records
+//     with their version numbers. Tombstones prevent deleted records from being
+//     resurrected by out-of-order updates that arrive after a deletion event.
+//   - When a record is deleted, its version is stored in the tombstones map. Any
+//     subsequent update with a version less than the tombstone version is rejected.
+//   - Tombstones are cleared when a record is re-added or updated with a newer version.
+//   - This mechanism ensures eventual consistency in distributed scenarios where
+//     events may arrive out of order.
 //
 // Lifecycle & concurrency:
 //   - Start/Stop are idempotent and safe to call multiple times.
@@ -102,12 +113,12 @@ type Controller struct {
 // Returns an error if the config is nil or invalid.
 func NewController(config *Config) (*Controller, error) {
 	if config == nil {
-		return nil, errors.New("multidc: config is required")
+		return nil, errors.New("controller config is required")
 	}
 
 	config.Sanitize()
 	if err := config.Validate(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("controller config is invalid: %w", err)
 	}
 
 	return &Controller{
@@ -490,9 +501,19 @@ func secureFloat64() float64 {
 	return float64(raw) / (1 << 53)
 }
 
+// recordCache maintains an in-memory cache of active data center records with
+// version-based conflict resolution using tombstones.
+//
+// Tombstones track deleted records by storing their deletion version. This prevents
+// stale updates from resurrecting deleted records when events arrive out of order.
+// For example, if record "DC-1" is deleted at version 5, a tombstone entry
+// "DC-1": 5 is created. Any subsequent update for "DC-1" with version < 5 will
+// be rejected by shouldApplyLocked.
 type recordCache struct {
-	mu          sync.RWMutex
-	records     map[string]DataCenterRecord
+	mu      sync.RWMutex
+	records map[string]DataCenterRecord
+	// tombstones maps deleted record IDs to their deletion version.
+	// Used to reject stale updates that arrive after a deletion event.
 	tombstones  map[string]uint64
 	refreshedAt time.Time
 }
@@ -506,45 +527,50 @@ func newRecordCache() *recordCache {
 }
 
 // replace atomically replaces the cache contents and updates the refresh timestamp.
-func (c *recordCache) replace(records []DataCenterRecord) {
-	c.mu.Lock()
+func (x *recordCache) replace(records []DataCenterRecord) {
+	x.mu.Lock()
 	newRecords := make(map[string]DataCenterRecord, len(records))
 	for _, record := range records {
 		if record.ID == "" || record.State != datacenter.DataCenterActive {
 			continue
 		}
-		if !c.shouldApplyLocked(record.ID, record.Version) {
+
+		if !x.shouldApplyLocked(record.ID, record.Version) {
 			continue
 		}
+
 		newRecords[record.ID] = record
-		delete(c.tombstones, record.ID)
+		delete(x.tombstones, record.ID)
 	}
-	c.records = newRecords
-	c.refreshedAt = time.Now()
-	c.mu.Unlock()
+	x.records = newRecords
+	x.refreshedAt = time.Now()
+	x.mu.Unlock()
 }
 
 // merge applies a non-authoritative refresh without removing existing entries.
-func (c *recordCache) merge(records []DataCenterRecord) {
-	c.mu.Lock()
+func (x *recordCache) merge(records []DataCenterRecord) {
+	x.mu.Lock()
 	for _, record := range records {
 		if record.ID == "" || record.State != datacenter.DataCenterActive {
 			continue
 		}
-		if !c.shouldApplyLocked(record.ID, record.Version) {
+
+		if !x.shouldApplyLocked(record.ID, record.Version) {
 			continue
 		}
-		c.records[record.ID] = record
-		delete(c.tombstones, record.ID)
+
+		x.records[record.ID] = record
+		delete(x.tombstones, record.ID)
 	}
-	c.refreshedAt = time.Now()
-	c.mu.Unlock()
+
+	x.refreshedAt = time.Now()
+	x.mu.Unlock()
 }
 
 // apply updates the cache using a watch event.
-func (c *recordCache) apply(event ControlPlaneEvent) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+func (x *recordCache) apply(event ControlPlaneEvent) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
 
 	if event.Record.ID == "" {
 		return
@@ -555,57 +581,59 @@ func (c *recordCache) apply(event ControlPlaneEvent) {
 		eventType = datacenter.ControlPlaneEventDelete
 	}
 
-	if !c.shouldApplyLocked(event.Record.ID, event.Record.Version) {
+	if !x.shouldApplyLocked(event.Record.ID, event.Record.Version) {
 		return
 	}
 
 	switch eventType {
 	case datacenter.ControlPlaneEventDelete:
 		if event.Record.Version > 0 {
-			c.tombstones[event.Record.ID] = event.Record.Version
+			x.tombstones[event.Record.ID] = event.Record.Version
 		}
-		delete(c.records, event.Record.ID)
+		delete(x.records, event.Record.ID)
 	default:
-		c.records[event.Record.ID] = event.Record
-		delete(c.tombstones, event.Record.ID)
+		x.records[event.Record.ID] = event.Record
+		delete(x.tombstones, event.Record.ID)
 	}
-	c.refreshedAt = time.Now()
+	x.refreshedAt = time.Now()
 }
 
 // snapshot returns a copy of cached records and the last refresh timestamp.
-func (c *recordCache) snapshot() ([]DataCenterRecord, time.Time) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+func (x *recordCache) snapshot() ([]DataCenterRecord, time.Time) {
+	x.mu.RLock()
+	defer x.mu.RUnlock()
 
-	records := make([]DataCenterRecord, 0, len(c.records))
-	for _, record := range c.records {
+	records := make([]DataCenterRecord, 0, len(x.records))
+	for _, record := range x.records {
 		records = append(records, record)
 	}
-	return records, c.refreshedAt
+	return records, x.refreshedAt
 }
 
 // reset clears the cache and resets the refresh timestamp.
-func (c *recordCache) reset() {
-	c.mu.Lock()
-	c.records = make(map[string]DataCenterRecord)
-	c.tombstones = make(map[string]uint64)
-	c.refreshedAt = time.Time{}
-	c.mu.Unlock()
+func (x *recordCache) reset() {
+	x.mu.Lock()
+	x.records = make(map[string]DataCenterRecord)
+	x.tombstones = make(map[string]uint64)
+	x.refreshedAt = time.Time{}
+	x.mu.Unlock()
 }
 
-func (c *recordCache) shouldApplyLocked(id string, version uint64) bool {
+func (x *recordCache) shouldApplyLocked(id string, version uint64) bool {
 	if version == 0 {
-		current := c.currentVersionLocked(id)
+		current := x.currentVersionLocked(id)
 		return current == 0
 	}
-	return version >= c.currentVersionLocked(id)
+
+	return version >= x.currentVersionLocked(id)
 }
 
-func (c *recordCache) currentVersionLocked(id string) uint64 {
-	if record, ok := c.records[id]; ok {
+func (x *recordCache) currentVersionLocked(id string) uint64 {
+	if record, ok := x.records[id]; ok {
 		return record.Version
 	}
-	if version, ok := c.tombstones[id]; ok {
+
+	if version, ok := x.tombstones[id]; ok {
 		return version
 	}
 	return 0
