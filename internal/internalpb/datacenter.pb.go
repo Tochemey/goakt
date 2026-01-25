@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        (unknown)
-// source: internal/multidc.proto
+// source: internal/datacenter.proto
 
 package internalpb
 
@@ -67,11 +67,11 @@ func (x DataCenterState) String() string {
 }
 
 func (DataCenterState) Descriptor() protoreflect.EnumDescriptor {
-	return file_internal_multidc_proto_enumTypes[0].Descriptor()
+	return file_internal_datacenter_proto_enumTypes[0].Descriptor()
 }
 
 func (DataCenterState) Type() protoreflect.EnumType {
-	return &file_internal_multidc_proto_enumTypes[0]
+	return &file_internal_datacenter_proto_enumTypes[0]
 }
 
 func (x DataCenterState) Number() protoreflect.EnumNumber {
@@ -80,7 +80,7 @@ func (x DataCenterState) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use DataCenterState.Descriptor instead.
 func (DataCenterState) EnumDescriptor() ([]byte, []int) {
-	return file_internal_multidc_proto_rawDescGZIP(), []int{0}
+	return file_internal_datacenter_proto_rawDescGZIP(), []int{0}
 }
 
 // ControlPlaneEventType describes the kind of change for a watch event.
@@ -120,11 +120,11 @@ func (x ControlPlaneEventType) String() string {
 }
 
 func (ControlPlaneEventType) Descriptor() protoreflect.EnumDescriptor {
-	return file_internal_multidc_proto_enumTypes[1].Descriptor()
+	return file_internal_datacenter_proto_enumTypes[1].Descriptor()
 }
 
 func (ControlPlaneEventType) Type() protoreflect.EnumType {
-	return &file_internal_multidc_proto_enumTypes[1]
+	return &file_internal_datacenter_proto_enumTypes[1]
 }
 
 func (x ControlPlaneEventType) Number() protoreflect.EnumNumber {
@@ -133,7 +133,7 @@ func (x ControlPlaneEventType) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ControlPlaneEventType.Descriptor instead.
 func (ControlPlaneEventType) EnumDescriptor() ([]byte, []int) {
-	return file_internal_multidc_proto_rawDescGZIP(), []int{1}
+	return file_internal_datacenter_proto_rawDescGZIP(), []int{1}
 }
 
 // DataCenter defines metadata used for multi-DC routing and placement.
@@ -153,7 +153,7 @@ type DataCenter struct {
 
 func (x *DataCenter) Reset() {
 	*x = DataCenter{}
-	mi := &file_internal_multidc_proto_msgTypes[0]
+	mi := &file_internal_datacenter_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -165,7 +165,7 @@ func (x *DataCenter) String() string {
 func (*DataCenter) ProtoMessage() {}
 
 func (x *DataCenter) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_multidc_proto_msgTypes[0]
+	mi := &file_internal_datacenter_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -178,7 +178,7 @@ func (x *DataCenter) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DataCenter.ProtoReflect.Descriptor instead.
 func (*DataCenter) Descriptor() ([]byte, []int) {
-	return file_internal_multidc_proto_rawDescGZIP(), []int{0}
+	return file_internal_datacenter_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *DataCenter) GetName() string {
@@ -230,7 +230,7 @@ type DataCenterRecord struct {
 
 func (x *DataCenterRecord) Reset() {
 	*x = DataCenterRecord{}
-	mi := &file_internal_multidc_proto_msgTypes[1]
+	mi := &file_internal_datacenter_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -242,7 +242,7 @@ func (x *DataCenterRecord) String() string {
 func (*DataCenterRecord) ProtoMessage() {}
 
 func (x *DataCenterRecord) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_multidc_proto_msgTypes[1]
+	mi := &file_internal_datacenter_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -255,7 +255,7 @@ func (x *DataCenterRecord) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DataCenterRecord.ProtoReflect.Descriptor instead.
 func (*DataCenterRecord) Descriptor() ([]byte, []int) {
-	return file_internal_multidc_proto_rawDescGZIP(), []int{1}
+	return file_internal_datacenter_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *DataCenterRecord) GetId() string {
@@ -313,7 +313,7 @@ type ControlPlaneEvent struct {
 
 func (x *ControlPlaneEvent) Reset() {
 	*x = ControlPlaneEvent{}
-	mi := &file_internal_multidc_proto_msgTypes[2]
+	mi := &file_internal_datacenter_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -325,7 +325,7 @@ func (x *ControlPlaneEvent) String() string {
 func (*ControlPlaneEvent) ProtoMessage() {}
 
 func (x *ControlPlaneEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_multidc_proto_msgTypes[2]
+	mi := &file_internal_datacenter_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -338,7 +338,7 @@ func (x *ControlPlaneEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ControlPlaneEvent.ProtoReflect.Descriptor instead.
 func (*ControlPlaneEvent) Descriptor() ([]byte, []int) {
-	return file_internal_multidc_proto_rawDescGZIP(), []int{2}
+	return file_internal_datacenter_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *ControlPlaneEvent) GetType() ControlPlaneEventType {
@@ -355,11 +355,11 @@ func (x *ControlPlaneEvent) GetRecord() *DataCenterRecord {
 	return nil
 }
 
-var File_internal_multidc_proto protoreflect.FileDescriptor
+var File_internal_datacenter_proto protoreflect.FileDescriptor
 
-const file_internal_multidc_proto_rawDesc = "" +
+const file_internal_datacenter_proto_rawDesc = "" +
 	"\n" +
-	"\x16internal/multidc.proto\x12\n" +
+	"\x19internal/datacenter.proto\x12\n" +
 	"internalpb\x1a\x1fgoogle/protobuf/timestamp.proto\"\xc3\x01\n" +
 	"\n" +
 	"DataCenter\x12\x12\n" +
@@ -390,27 +390,27 @@ const file_internal_multidc_proto_rawDesc = "" +
 	"\x15ControlPlaneEventType\x12(\n" +
 	"$CONTROL_PLANE_EVENT_TYPE_UNSPECIFIED\x10\x00\x12#\n" +
 	"\x1fCONTROL_PLANE_EVENT_TYPE_UPSERT\x10\x01\x12#\n" +
-	"\x1fCONTROL_PLANE_EVENT_TYPE_DELETE\x10\x02B\xa5\x01\n" +
-	"\x0ecom.internalpbB\fMultidcProtoH\x02P\x01Z;github.com/tochemey/goakt/v3/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
+	"\x1fCONTROL_PLANE_EVENT_TYPE_DELETE\x10\x02B\xa8\x01\n" +
+	"\x0ecom.internalpbB\x0fDatacenterProtoH\x02P\x01Z;github.com/tochemey/goakt/v3/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
 	"Internalpb\xca\x02\n" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
 	"Internalpbb\x06proto3"
 
 var (
-	file_internal_multidc_proto_rawDescOnce sync.Once
-	file_internal_multidc_proto_rawDescData []byte
+	file_internal_datacenter_proto_rawDescOnce sync.Once
+	file_internal_datacenter_proto_rawDescData []byte
 )
 
-func file_internal_multidc_proto_rawDescGZIP() []byte {
-	file_internal_multidc_proto_rawDescOnce.Do(func() {
-		file_internal_multidc_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_multidc_proto_rawDesc), len(file_internal_multidc_proto_rawDesc)))
+func file_internal_datacenter_proto_rawDescGZIP() []byte {
+	file_internal_datacenter_proto_rawDescOnce.Do(func() {
+		file_internal_datacenter_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_datacenter_proto_rawDesc), len(file_internal_datacenter_proto_rawDesc)))
 	})
-	return file_internal_multidc_proto_rawDescData
+	return file_internal_datacenter_proto_rawDescData
 }
 
-var file_internal_multidc_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_internal_multidc_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
-var file_internal_multidc_proto_goTypes = []any{
+var file_internal_datacenter_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_internal_datacenter_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_internal_datacenter_proto_goTypes = []any{
 	(DataCenterState)(0),          // 0: internalpb.DataCenterState
 	(ControlPlaneEventType)(0),    // 1: internalpb.ControlPlaneEventType
 	(*DataCenter)(nil),            // 2: internalpb.DataCenter
@@ -419,7 +419,7 @@ var file_internal_multidc_proto_goTypes = []any{
 	nil,                           // 5: internalpb.DataCenter.LabelsEntry
 	(*timestamppb.Timestamp)(nil), // 6: google.protobuf.Timestamp
 }
-var file_internal_multidc_proto_depIdxs = []int32{
+var file_internal_datacenter_proto_depIdxs = []int32{
 	5, // 0: internalpb.DataCenter.labels:type_name -> internalpb.DataCenter.LabelsEntry
 	2, // 1: internalpb.DataCenterRecord.data_center:type_name -> internalpb.DataCenter
 	0, // 2: internalpb.DataCenterRecord.state:type_name -> internalpb.DataCenterState
@@ -433,27 +433,27 @@ var file_internal_multidc_proto_depIdxs = []int32{
 	0, // [0:6] is the sub-list for field type_name
 }
 
-func init() { file_internal_multidc_proto_init() }
-func file_internal_multidc_proto_init() {
-	if File_internal_multidc_proto != nil {
+func init() { file_internal_datacenter_proto_init() }
+func file_internal_datacenter_proto_init() {
+	if File_internal_datacenter_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_multidc_proto_rawDesc), len(file_internal_multidc_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_datacenter_proto_rawDesc), len(file_internal_datacenter_proto_rawDesc)),
 			NumEnums:      2,
 			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
-		GoTypes:           file_internal_multidc_proto_goTypes,
-		DependencyIndexes: file_internal_multidc_proto_depIdxs,
-		EnumInfos:         file_internal_multidc_proto_enumTypes,
-		MessageInfos:      file_internal_multidc_proto_msgTypes,
+		GoTypes:           file_internal_datacenter_proto_goTypes,
+		DependencyIndexes: file_internal_datacenter_proto_depIdxs,
+		EnumInfos:         file_internal_datacenter_proto_enumTypes,
+		MessageInfos:      file_internal_datacenter_proto_msgTypes,
 	}.Build()
-	File_internal_multidc_proto = out.File
-	file_internal_multidc_proto_goTypes = nil
-	file_internal_multidc_proto_depIdxs = nil
+	File_internal_datacenter_proto = out.File
+	file_internal_datacenter_proto_goTypes = nil
+	file_internal_datacenter_proto_depIdxs = nil
 }

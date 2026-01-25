@@ -60,6 +60,7 @@ type DataCenter struct {
 	Labels map[string]string
 }
 
+// ID returns the datacenter's ID composed of the zone, region and name.
 func (dc DataCenter) ID() string {
 	return fmt.Sprintf("%s%s%s", dc.Zone, dc.Region, dc.Name)
 }
@@ -73,6 +74,7 @@ func (dc DataCenter) ID() string {
 // conflicting updates (stale Version) and return an error.
 type DataCenterRecord struct {
 	// ID is the stable, immutable identifier for the record.
+	// It is the datacenter's ID composed of the zone, region and name.
 	ID string
 	// DataCenter holds the datacenter metadata.
 	DataCenter DataCenter

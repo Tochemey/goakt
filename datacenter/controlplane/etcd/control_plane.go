@@ -193,7 +193,7 @@ func (c *ControlPlane) Register(ctx context.Context, record datacenter.DataCente
 	}
 
 	if !txnResp.Succeeded {
-		return "", 0, gerrors.ErrRecordConflict
+		return "", 0, gerrors.ErrDataCenterRecordConflict
 	}
 
 	return record.ID, uint64(txnResp.Header.Revision), nil
@@ -219,7 +219,7 @@ func (c *ControlPlane) Heartbeat(ctx context.Context, id string, version uint64)
 	}
 
 	if uint64(kv.ModRevision) != version {
-		return 0, time.Time{}, gerrors.ErrRecordConflict
+		return 0, time.Time{}, gerrors.ErrDataCenterRecordConflict
 	}
 
 	if kv.Lease == 0 {
@@ -252,7 +252,7 @@ func (c *ControlPlane) Heartbeat(ctx context.Context, id string, version uint64)
 	}
 
 	if !txnResp.Succeeded {
-		return 0, time.Time{}, gerrors.ErrRecordConflict
+		return 0, time.Time{}, gerrors.ErrDataCenterRecordConflict
 	}
 
 	return uint64(txnResp.Header.Revision), record.LeaseExpiry, nil
@@ -281,7 +281,7 @@ func (c *ControlPlane) SetState(ctx context.Context, id string, state datacenter
 	}
 
 	if uint64(kv.ModRevision) != version {
-		return 0, gerrors.ErrRecordConflict
+		return 0, gerrors.ErrDataCenterRecordConflict
 	}
 
 	record, err := codec.DecodeDataCenterRecord(kv.Value)
@@ -310,7 +310,7 @@ func (c *ControlPlane) SetState(ctx context.Context, id string, state datacenter
 	}
 
 	if !txnResp.Succeeded {
-		return 0, gerrors.ErrRecordConflict
+		return 0, gerrors.ErrDataCenterRecordConflict
 	}
 
 	return uint64(txnResp.Header.Revision), nil
@@ -441,7 +441,7 @@ func (c *ControlPlane) toControlPlaneEvent(ctx context.Context, ev *clientv3.Eve
 	}
 }
 
-func (c *ControlPlane) validateRecord(record datacenter.DataCenterRecord) error {
+func (*ControlPlane) validateRecord(record datacenter.DataCenterRecord) error {
 	return validation.New(validation.FailFast()).
 		AddValidator(validation.NewEmptyStringValidator("ID", record.ID)).
 		AddValidator(validation.NewEmptyStringValidator("DataCenter.Name", record.DataCenter.Name)).
@@ -489,7 +489,7 @@ func (c *ControlPlane) getRecordKV(ctx context.Context, id string) (*mvccpb.KeyV
 		return nil, fmt.Errorf("multidc/etcd: failed to load record: %w", err)
 	}
 	if len(resp.Kvs) == 0 {
-		return nil, gerrors.ErrRecordNotFound
+		return nil, gerrors.ErrDataCenterRecordNotFound
 	}
 	return resp.Kvs[0], nil
 }

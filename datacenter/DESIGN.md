@@ -10,7 +10,7 @@ efficient routing.
 - Preserve isolation: each datacenter remains a standalone GoAkt cluster.
 - Provide DC-transparent messaging (callers do not select a DC explicitly).
 - Use the DC control plane registry as the source of truth for routing.
-- Support DC-aware placement and controlled relocation without global state.
+- Support DC-aware placement (e.g. SpawnOn with WithDataCenter) without global state.
 - Periodically report liveness to keep routing tables accurate.
 
 ## Non-goals
@@ -22,7 +22,7 @@ efficient routing.
 ## Current Implementation Scope
 
 - Control plane interface and manager lifecycle (register, heartbeat, cache refresh).
-- Etcd control plane provider with watch support.
+- NATS JetStream and Etcd control plane providers with watch support.
 - DC leader is the sole writer for its DataCenterRecord; followers do not run the manager.
 - Lease-based liveness and TTL expiry enforced by the control plane provider.
 - Leader-local cache of ACTIVE records with staleness reporting and watch/poll refresh.
@@ -32,13 +32,11 @@ efficient routing.
 
 - DataCenter metadata
   - Fields: Name, Region, Zone, Labels.
-  - Endpoints are configured separately for routing (multidatacenter.Config.Endpoints).
-  - Labels drive routing and placement policy (for example: tier=prod, latency=low).
-- Node association
-  - Each discovery.Node references a DataCenter and includes it in its String() output.
+  - Endpoints are configured in datacenter.Config.Endpoints and drive cross-DC messaging and spawning.
+  - Labels can drive routing and placement policy (for example: tier=prod, latency=low).
 - DC control plane (registry interface)
   - Pluggable interface, following the discovery engine pattern.
-  - Built-in implementation: Etcd (see `multidatacenter/controplane/etcd`); others are planned.
+  - Built-in implementations: NATS JetStream (see `datacenter/controlplane/nats`), Etcd (see `datacenter/controlplane/etcd`).
   - Stores DataCenter records, endpoints, and liveness TTLs/leases.
 
 ## Architecture
@@ -94,6 +92,7 @@ Data Model
   - Version: monotonic revision for conflict-free updates.
 
 Lifecycle State Machine
+-----------------------
 ```
 
 - REGISTERED: metadata accepted, waiting for first heartbeat.
@@ -108,9 +107,10 @@ Transitions:
 - ACTIVE -> INACTIVE: TTL expiry or explicit disable.
 - DRAINING -> INACTIVE: operator action or TTL expiry.
 
-Control Plane Interface (Minimal and Efficient)
+```
 
-````
+Control Plane Interface (Minimal and Efficient)
+-----------------------------------------------
 The runtime integrates with the control plane via a narrow interface, matching the discovery engine
 model so providers can be swapped via configuration without changing runtime code.
 
@@ -122,13 +122,14 @@ model so providers can be swapped via configuration without changing runtime cod
 
 Built-in Implementations
 -------------------------
-- Etcd (currently implemented).
+- NATS JetStream (datacenter/controlplane/nats).
+- Etcd (datacenter/controlplane/etcd).
 
 Recommended Providers (Current)
 --------------------------------
+- NATS JetStream.
 - Etcd.
 - Consul (planned).
-- NAS (planned).
 - PostgreSQL (planned).
 
 Control Plane Interface Shape
@@ -137,13 +138,15 @@ The control plane is exposed as a small interface, consistent with the discovery
 This keeps provider swaps configuration-only.
 
 ```
+
 type ControlPlane interface {
-    Register(ctx, record) (id, version, error)
-    Heartbeat(ctx, id, version) (newVersion, leaseExpiry, error)
-    SetState(ctx, id, state, version) (newVersion, error)
-    ListActive(ctx) ([]record, error)
-    Watch(ctx) (stream, error)
+Register(ctx, record) (id, version, error)
+Heartbeat(ctx, id, version) (newVersion, leaseExpiry, error)
+SetState(ctx, id, state, version) (newVersion, error)
+ListActive(ctx) ([]record, error)
+Watch(ctx) (stream, error)
 }
+
 ```
 
 Control Plane Contract Guarantees
@@ -155,22 +158,24 @@ Control Plane Contract Guarantees
 
 Configuration (Provider Selection)
 -----------------------------------
-The provider is wired by passing a ControlPlane implementation into `multidatacenter.Config`.
+The provider is wired by passing a ControlPlane implementation into `datacenter.Config`.
 
 Example (etcd):
 ```
-etcdConfig := &etcd.Config{
-    Endpoints: []string{"127.0.0.1:2379"},
-    TTL:       30 * time.Second,
-}
-cp, _ := etcd.NewControlPlane(etcdConfig)
 
-mdc := multidatacenter.NewConfig()
-mdc.ControlPlane = cp
+etcdConfig := &etcd.Config{
+Endpoints: []string{"127.0.0.1:2379"},
+TTL: 30 \* time.Second,
+}
+cp, \_ := etcd.NewControlPlane(etcdConfig)
+
+cfg := datacenter.NewConfig()
+cfg.ControlPlane = cp
+
 ```
 
 Provider-specific settings live in the provider's Config type (for example,
-`multidatacenter/controplane/etcd.Config`).
+`datacenter/controlplane/etcd.Config` or `datacenter/controlplane/nats.Config`).
 
 Consistency and Concurrency
 -----------------------------
@@ -191,7 +196,7 @@ Cache and Refresh Strategy
 --------------------------
 - The DC leader owns a local registry cache; followers do not run the manager.
 - Cache refresh uses jittered intervals to avoid thundering herds.
-- Callers can inspect cache staleness to decide fallback behavior; cross-DC routing is not yet wired.
+- Callers can inspect cache staleness to decide fallback behavior; cross-DC routing and placement use this cache.
 - Watch-based refresh is used when supported; polling still runs and merges when watch is active, otherwise it replaces the cache.
 
 Current Operational Defaults
@@ -199,7 +204,7 @@ Current Operational Defaults
 - Heartbeat interval: 10s with 10% jitter.
 - Cache refresh interval: 10s with 10% jitter.
 - Leader check interval: 5s.
-- Maximum cache staleness: 30s (stale flag only; no routing behavior yet).
+- Maximum cache staleness: 30s (stale flag may affect cross-DC routing and placement).
 - Control plane request timeout: 3s.
 - Watch enabled: true.
 - Max backoff: 30s.
@@ -250,16 +255,13 @@ Implementation details:
 - Stale cache handling: The implementation uses cached DC records but may proceed with
   stale data if the cache hasn't been refreshed recently (configurable behavior).
 
-Placement and Relocation (Planned)
-----------------------------------
-Status: planned. The current runtime does not yet relocate actors/grains across DCs.
-
-- Placement is DC-aware and derived from the same routing policy used for messaging.
-- Relocation is explicit and controlled:
-  - Mark source DC (or actor group) as DRAINING in the control plane.
-  - Create the actor/grain in the target DC.
-  - Drain or stop the source instance.
-  - Subsequent routing directs traffic to the new DC via the policy.
+DC-aware placement (implemented)
+--------------------------------
+- SpawnOn accepts WithDataCenter(target) to spawn an actor on a node in a different data center.
+- The runtime looks up the target DC in the control plane cache, then sends RemoteSpawn to one of
+  that DC's advertised Endpoints chosen at random. Which nodes are eligible is determined by
+  the target DC's datacenter.Config.Endpoints (leader-only vs all nodes).
+- There is no built-in relocation of actors/grains across DCs.
 
 Liveness and Health Checks
 --------------------------
@@ -269,25 +271,25 @@ Liveness and Health Checks
 
 Sequence Flows
 ---------------
+```
+
 DC registration and heartbeat (implemented):
-1) DC leader starts and registers DataCenter metadata and endpoints in the registry.
-2) DC leader sends heartbeats at a fixed interval (less than TTL).
-3) Registry expires the DC entry if heartbeats stop.
+
+1. DC leader starts and registers DataCenter metadata and endpoints in the registry.
+2. DC leader sends heartbeats at a fixed interval (less than TTL).
+3. Registry expires the DC entry if heartbeats stop.
 
 DC-transparent message delivery (implemented):
-1) Actor A calls SendAsync/SendSync with Actor B's name (no DC specified).
-2) Runtime first attempts to find Actor B in the local datacenter using ActorOf.
-3) If not found locally, runtime retrieves active DCs from the control plane cache.
-4) Runtime queries all active DC endpoints in parallel using RemoteLookup.
-5) First DC that responds with Actor B's address is selected.
-6) Remaining lookups are cancelled.
-7) Message is sent to the discovered DC using remote messaging.
-8) Receiving DC resolves Actor B locally and delivers the message.
 
-Controlled relocation (planned):
-1) Operator or policy triggers relocation of Actor B to DC Y.
-2) Source DC (or placement group) is set to DRAINING.
-3) DC Y creates Actor B and becomes the new target per routing policy.
-4) Source DC stops Actor B after drain.
-5) Subsequent messages route to DC Y (via discovery or policy-based routing).
-````
+1. Actor A calls SendAsync/SendSync with Actor B's name (no DC specified).
+2. Runtime first attempts to find Actor B in the local datacenter using ActorOf.
+3. If not found locally, runtime retrieves active DCs from the control plane cache.
+4. Runtime queries all active DC endpoints in parallel using RemoteLookup.
+5. First DC that responds with Actor B's address is selected.
+6. Remaining lookups are cancelled.
+7. Message is sent to the discovered DC using remote messaging.
+8. Receiving DC resolves Actor B locally and delivers the message.
+
+```
+
+```

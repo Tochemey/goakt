@@ -241,7 +241,7 @@ func TestControlPlaneRegisterConflict(t *testing.T) {
 
 	record.Version = version + 1
 	_, _, err = cp.Register(t.Context(), record)
-	require.ErrorIs(t, err, gerrors.ErrRecordConflict)
+	require.ErrorIs(t, err, gerrors.ErrDataCenterRecordConflict)
 }
 
 func TestControlPlaneRegisterValidation(t *testing.T) {
@@ -312,7 +312,7 @@ func TestControlPlaneRegisterErrorPaths(t *testing.T) {
 			},
 		}
 		_, _, err := cp.Register(context.Background(), record)
-		require.ErrorIs(t, err, gerrors.ErrRecordConflict)
+		require.ErrorIs(t, err, gerrors.ErrDataCenterRecordConflict)
 	})
 
 	t.Run("encode error", func(t *testing.T) {
@@ -365,10 +365,10 @@ func TestControlPlaneHeartbeat(t *testing.T) {
 	require.True(t, leaseExpiry.After(time.Now()))
 
 	_, _, err = cp.Heartbeat(t.Context(), record.ID, newVersion+1)
-	require.ErrorIs(t, err, gerrors.ErrRecordConflict)
+	require.ErrorIs(t, err, gerrors.ErrDataCenterRecordConflict)
 
 	_, _, err = cp.Heartbeat(t.Context(), "missing", 1)
-	require.ErrorIs(t, err, gerrors.ErrRecordNotFound)
+	require.ErrorIs(t, err, gerrors.ErrDataCenterRecordNotFound)
 
 	record = newRecord(nextID())
 	payload, err := codec.EncodeDataCenterRecord(record)
@@ -458,7 +458,7 @@ func TestControlPlaneHeartbeatErrorPaths(t *testing.T) {
 			lease: &fakeLease{keepAliveOnceResp: &clientv3.LeaseKeepAliveResponse{TTL: 5}},
 		}
 		_, _, err := cp.Heartbeat(context.Background(), record.ID, 3)
-		require.ErrorIs(t, err, gerrors.ErrRecordConflict)
+		require.ErrorIs(t, err, gerrors.ErrDataCenterRecordConflict)
 	})
 
 	t.Run("encode error", func(t *testing.T) {
@@ -499,10 +499,10 @@ func TestControlPlaneSetState(t *testing.T) {
 	require.Error(t, err)
 
 	_, err = cp.SetState(t.Context(), record.ID, datacenter.DataCenterActive, newVersion+1)
-	require.ErrorIs(t, err, gerrors.ErrRecordConflict)
+	require.ErrorIs(t, err, gerrors.ErrDataCenterRecordConflict)
 
 	_, err = cp.SetState(t.Context(), "missing", datacenter.DataCenterActive, 1)
-	require.ErrorIs(t, err, gerrors.ErrRecordNotFound)
+	require.ErrorIs(t, err, gerrors.ErrDataCenterRecordNotFound)
 
 	record = newRecord(nextID())
 	payload, err := codec.EncodeDataCenterRecord(record)
@@ -572,7 +572,7 @@ func TestControlPlaneSetStateErrorPaths(t *testing.T) {
 			},
 		}
 		_, err := cp.SetState(context.Background(), record.ID, datacenter.DataCenterActive, 3)
-		require.ErrorIs(t, err, gerrors.ErrRecordConflict)
+		require.ErrorIs(t, err, gerrors.ErrDataCenterRecordConflict)
 	})
 
 	t.Run("encode error", func(t *testing.T) {
@@ -945,7 +945,7 @@ func TestControlPlaneEventConversion(t *testing.T) {
 
 func TestControlPlaneErrors(t *testing.T) {
 	err := errors.New("base")
-	assert.ErrorIs(t, errors.Join(err, gerrors.ErrRecordConflict), gerrors.ErrRecordConflict)
+	assert.ErrorIs(t, errors.Join(err, gerrors.ErrDataCenterRecordConflict), gerrors.ErrDataCenterRecordConflict)
 }
 
 func newTestControlPlane(t *testing.T) *ControlPlane {

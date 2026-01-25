@@ -201,7 +201,7 @@ func (x *Controller) Stop(ctx context.Context) error {
 	newVersion, err := x.controlPlane.SetState(opCtx, id, datacenter.DataCenterDraining, version)
 	cancel()
 	if err != nil {
-		if errors.Is(err, gerrors.ErrRecordNotFound) {
+		if errors.Is(err, gerrors.ErrDataCenterRecordNotFound) {
 			return nil
 		}
 		return err
@@ -210,7 +210,7 @@ func (x *Controller) Stop(ctx context.Context) error {
 	opCtx, cancel = x.withTimeout(ctx)
 	newVersion, err = x.controlPlane.SetState(opCtx, id, datacenter.DataCenterInactive, newVersion)
 	cancel()
-	if err != nil && !errors.Is(err, gerrors.ErrRecordNotFound) {
+	if err != nil && !errors.Is(err, gerrors.ErrDataCenterRecordNotFound) {
 		return err
 	}
 
@@ -345,7 +345,7 @@ func (x *Controller) heartbeatOnce(ctx context.Context) error {
 
 	newVersion, leaseExpiry, err := x.controlPlane.Heartbeat(opCtx, id, version)
 	if err != nil {
-		if errors.Is(err, gerrors.ErrRecordNotFound) || errors.Is(err, gerrors.ErrRecordConflict) {
+		if errors.Is(err, gerrors.ErrDataCenterRecordNotFound) || errors.Is(err, gerrors.ErrDataCenterRecordConflict) {
 			return x.register(ctx)
 		}
 		return err

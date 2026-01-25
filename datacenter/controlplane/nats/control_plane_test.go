@@ -176,7 +176,7 @@ func TestControlPlaneRegisterConflict(t *testing.T) {
 
 	record.Version = version + 1
 	_, _, err = cp.Register(context.Background(), record)
-	require.ErrorIs(t, err, gerrors.ErrRecordConflict)
+	require.ErrorIs(t, err, gerrors.ErrDataCenterRecordConflict)
 }
 
 func TestControlPlaneHeartbeat(t *testing.T) {
@@ -201,10 +201,10 @@ func TestControlPlaneHeartbeat(t *testing.T) {
 	assert.True(t, leaseExpiry.After(time.Now()))
 
 	_, _, err = cp.Heartbeat(context.Background(), record.ID, newVersion+1)
-	require.ErrorIs(t, err, gerrors.ErrRecordConflict)
+	require.ErrorIs(t, err, gerrors.ErrDataCenterRecordConflict)
 
 	_, _, err = cp.Heartbeat(context.Background(), "missing-id", 1)
-	require.ErrorIs(t, err, gerrors.ErrRecordNotFound)
+	require.ErrorIs(t, err, gerrors.ErrDataCenterRecordNotFound)
 }
 
 func TestControlPlaneSetState(t *testing.T) {
@@ -225,10 +225,10 @@ func TestControlPlaneSetState(t *testing.T) {
 	require.Greater(t, newVersion, version)
 
 	_, err = cp.SetState(context.Background(), record.ID, datacenter.DataCenterDraining, version)
-	require.ErrorIs(t, err, gerrors.ErrRecordConflict)
+	require.ErrorIs(t, err, gerrors.ErrDataCenterRecordConflict)
 
 	_, err = cp.SetState(context.Background(), "missing-id", datacenter.DataCenterActive, 1)
-	require.ErrorIs(t, err, gerrors.ErrRecordNotFound)
+	require.ErrorIs(t, err, gerrors.ErrDataCenterRecordNotFound)
 }
 
 func TestControlPlaneWatch(t *testing.T) {
@@ -748,7 +748,7 @@ func TestControlPlaneHeartbeatVersionMismatch(t *testing.T) {
 
 	// Heartbeat with wrong version (less than current)
 	_, _, err = cp.Heartbeat(context.Background(), record.ID, version-1)
-	require.ErrorIs(t, err, gerrors.ErrRecordConflict)
+	require.ErrorIs(t, err, gerrors.ErrDataCenterRecordConflict)
 }
 
 func TestControlPlaneSetStateVersionMismatch(t *testing.T) {
@@ -765,7 +765,7 @@ func TestControlPlaneSetStateVersionMismatch(t *testing.T) {
 
 	// SetState with wrong version (less than current)
 	_, err = cp.SetState(context.Background(), record.ID, datacenter.DataCenterDraining, version-1)
-	require.ErrorIs(t, err, gerrors.ErrRecordConflict)
+	require.ErrorIs(t, err, gerrors.ErrDataCenterRecordConflict)
 }
 
 func TestControlPlaneListActiveSorting(t *testing.T) {
@@ -850,7 +850,7 @@ func TestControlPlaneGetRecordEntryNotFound(t *testing.T) {
 
 	// Try to get non-existent record
 	entry, err := cp.getRecordEntry("non-existent-id")
-	require.ErrorIs(t, err, gerrors.ErrRecordNotFound)
+	require.ErrorIs(t, err, gerrors.ErrDataCenterRecordNotFound)
 	require.Nil(t, entry)
 }
 
@@ -1007,7 +1007,7 @@ func TestControlPlaneGetRecordEntryDeleted(t *testing.T) {
 
 	// getRecordEntry should return ErrRecordNotFound for deleted key
 	entry, err := cp.getRecordEntry(record.ID)
-	require.ErrorIs(t, err, gerrors.ErrRecordNotFound)
+	require.ErrorIs(t, err, gerrors.ErrDataCenterRecordNotFound)
 	require.Nil(t, entry)
 }
 
@@ -1411,7 +1411,7 @@ func TestControlPlaneRegisterUpdateConflict(t *testing.T) {
 	// Update with incorrect version
 	record.Version = version + 100
 	_, _, err = cp.Register(context.Background(), record)
-	require.ErrorIs(t, err, gerrors.ErrRecordConflict)
+	require.ErrorIs(t, err, gerrors.ErrDataCenterRecordConflict)
 }
 
 func TestControlPlaneListActiveNoRecords(t *testing.T) {
@@ -1447,7 +1447,7 @@ func TestControlPlaneHeartbeatNotFound(t *testing.T) {
 
 	// Heartbeat for non-existent record
 	_, _, err := cp.Heartbeat(context.Background(), "non-existent-id", 1)
-	require.ErrorIs(t, err, gerrors.ErrRecordNotFound)
+	require.ErrorIs(t, err, gerrors.ErrDataCenterRecordNotFound)
 }
 
 func TestControlPlaneSetStateNotFound(t *testing.T) {
@@ -1459,7 +1459,7 @@ func TestControlPlaneSetStateNotFound(t *testing.T) {
 
 	// SetState for non-existent record
 	_, err := cp.SetState(context.Background(), "non-existent-id", datacenter.DataCenterActive, 1)
-	require.ErrorIs(t, err, gerrors.ErrRecordNotFound)
+	require.ErrorIs(t, err, gerrors.ErrDataCenterRecordNotFound)
 }
 
 func TestGetRecordEntrySuccess(t *testing.T) {

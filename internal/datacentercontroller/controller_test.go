@@ -71,10 +71,10 @@ func TestControllerNewManagerNilConfig(t *testing.T) {
 func TestControllerStartStopHappyPath(t *testing.T) {
 	states := make([]DataCenterState, 0, 3)
 	cp := &MockControlPlane{
-		registerFn: func(ctx context.Context, record DataCenterRecord) (string, uint64, error) {
+		registerFn: func(_ context.Context, _ DataCenterRecord) (string, uint64, error) {
 			return "dc-1", 1, nil
 		},
-		setStateFn: func(ctx context.Context, id string, state DataCenterState, version uint64) (uint64, error) {
+		setStateFn: func(_ context.Context, _ string, state DataCenterState, version uint64) (uint64, error) {
 			states = append(states, state)
 			return version + 1, nil
 		},
@@ -193,7 +193,7 @@ func TestControllerStopDrainingError(t *testing.T) {
 
 func TestControllerStopInactiveError(t *testing.T) {
 	cp := &MockControlPlane{
-		setStateFn: func(ctx context.Context, id string, state DataCenterState, version uint64) (uint64, error) {
+		setStateFn: func(_ context.Context, _ string, state DataCenterState, version uint64) (uint64, error) {
 			if state == datacenter.DataCenterInactive {
 				return version + 1, errors.New("inactive failed")
 			}
@@ -217,7 +217,7 @@ func TestControllerStopInactiveNotFound(t *testing.T) {
 			if call == 1 {
 				return 2, nil
 			}
-			return 0, gerrors.ErrRecordNotFound
+			return 0, gerrors.ErrDataCenterRecordNotFound
 		},
 	}
 	manager := newTestController(t, cp, nil)
@@ -261,7 +261,7 @@ func TestControllerHeartbeatOnce(t *testing.T) {
 		registered := false
 		cp := &MockControlPlane{
 			heartbeatFn: func(context.Context, string, uint64) (uint64, time.Time, error) {
-				return 0, time.Time{}, gerrors.ErrRecordNotFound
+				return 0, time.Time{}, gerrors.ErrDataCenterRecordNotFound
 			},
 			registerFn: func(context.Context, DataCenterRecord) (string, uint64, error) {
 				registered = true
@@ -574,7 +574,7 @@ func TestControllerRunLoopAndBackoff(t *testing.T) {
 	manager.ctx = ctx
 
 	var calls atomic.Int32
-	fn := func(ctx context.Context) error {
+	fn := func(_ context.Context) error {
 		count := calls.Add(1)
 		if count == 1 {
 			return errors.New("boom")

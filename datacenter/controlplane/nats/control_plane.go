@@ -174,7 +174,7 @@ func (c *ControlPlane) Register(_ context.Context, record datacenter.DataCenterR
 			rev, putErr := c.kv.Put(key, payload)
 			if putErr != nil {
 				if errors.Is(putErr, nats.ErrKeyExists) {
-					return "", 0, gerrors.ErrRecordConflict
+					return "", 0, gerrors.ErrDataCenterRecordConflict
 				}
 				return "", 0, fmt.Errorf("controlplane/nats: put: %w", putErr)
 			}
@@ -184,7 +184,7 @@ func (c *ControlPlane) Register(_ context.Context, record datacenter.DataCenterR
 		rev, err := c.kv.Update(key, payload, existing.Revision())
 		if err != nil {
 			if isRevisionConflict(err) {
-				return "", 0, gerrors.ErrRecordConflict
+				return "", 0, gerrors.ErrDataCenterRecordConflict
 			}
 			return "", 0, fmt.Errorf("controlplane/nats: update: %w", err)
 		}
@@ -194,11 +194,11 @@ func (c *ControlPlane) Register(_ context.Context, record datacenter.DataCenterR
 	rev, err := c.kv.Update(key, payload, record.Version)
 	if err != nil {
 		if errors.Is(err, nats.ErrKeyNotFound) {
-			return "", 0, gerrors.ErrRecordNotFound
+			return "", 0, gerrors.ErrDataCenterRecordNotFound
 		}
 
 		if isRevisionConflict(err) {
-			return "", 0, gerrors.ErrRecordConflict
+			return "", 0, gerrors.ErrDataCenterRecordConflict
 		}
 
 		return "", 0, fmt.Errorf("controlplane/nats: update: %w", err)
@@ -218,7 +218,7 @@ func (c *ControlPlane) Heartbeat(_ context.Context, id string, version uint64) (
 	}
 
 	if entry.Revision() != version {
-		return 0, time.Time{}, gerrors.ErrRecordConflict
+		return 0, time.Time{}, gerrors.ErrDataCenterRecordConflict
 	}
 
 	record, err := codec.DecodeDataCenterRecord(entry.Value())
@@ -236,7 +236,7 @@ func (c *ControlPlane) Heartbeat(_ context.Context, id string, version uint64) (
 	rev, err := c.kv.Update(key, payload, version)
 	if err != nil {
 		if isRevisionConflict(err) {
-			return 0, time.Time{}, gerrors.ErrRecordConflict
+			return 0, time.Time{}, gerrors.ErrDataCenterRecordConflict
 		}
 		return 0, time.Time{}, fmt.Errorf("controlplane/nats: heartbeat update: %w", err)
 	}
@@ -259,7 +259,7 @@ func (c *ControlPlane) SetState(_ context.Context, id string, state datacenter.D
 	}
 
 	if entry.Revision() != version {
-		return 0, gerrors.ErrRecordConflict
+		return 0, gerrors.ErrDataCenterRecordConflict
 	}
 
 	record, err := codec.DecodeDataCenterRecord(entry.Value())
@@ -277,7 +277,7 @@ func (c *ControlPlane) SetState(_ context.Context, id string, state datacenter.D
 	rev, err := c.kv.Update(key, payload, version)
 	if err != nil {
 		if isRevisionConflict(err) {
-			return 0, gerrors.ErrRecordConflict
+			return 0, gerrors.ErrDataCenterRecordConflict
 		}
 		return 0, fmt.Errorf("controlplane/nats: set state: %w", err)
 	}
@@ -433,7 +433,7 @@ func (c *ControlPlane) getRecordEntry(id string) (nats.KeyValueEntry, error) {
 	entry, err := c.kv.Get(key)
 	if err != nil {
 		if errors.Is(err, nats.ErrKeyNotFound) || errors.Is(err, nats.ErrKeyDeleted) {
-			return nil, gerrors.ErrRecordNotFound
+			return nil, gerrors.ErrDataCenterRecordNotFound
 		}
 		return nil, fmt.Errorf("controlplane/nats: get: %w", err)
 	}

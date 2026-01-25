@@ -152,42 +152,64 @@ type ActorSystem interface {
 	// Note: Actors spawned using this method are confined to the local actor system.
 	// For distributed scenarios, use a SpawnOn mechanism if available.
 	Spawn(ctx context.Context, name string, actor Actor, opts ...SpawnOption) (*PID, error)
-	// SpawnOn creates and starts an actor, either locally or on a remote node,
-	// depending on the configuration of the actor system.
+	// SpawnOn creates and starts an actor locally, on another node in the current cluster,
+	// or on a node in a different data center, depending on options and actor system configuration.
 	//
-	// In cluster mode, the actor may be spawned on any node in the cluster
-	// based on the specified placement strategy. Supported strategies include:
-	//   - RoundRobin: Distributes actors evenly across available nodes.
-	//   - Random: Choose a node at random.
-	//   - Local: Ensures that the actor is created on the local node.
-	//   - LeastLoad: Places the actor on the node with the fewest active actors.
+	// # Cross–data center placement
 	//
-	// In non-cluster mode, the actor is created on the local actor system
-	// just like with the standard `Spawn` function.
+	// When opts include WithDataCenter, the actor is spawned on a node in that data center.
+	// Placement is a random node among the target DC's advertised remoting endpoints: SpawnOn
+	// calls spawnOnDatacenter, which requires DataCenterReady(), looks up the target DC by the
+	// given datacenter.DataCenter's ID() in the controller's active records, then sends a
+	// RemoteSpawn to one of that record's Endpoints chosen at random. There is no leader
+	// selection—which node runs the actor depends entirely on which addresses the target DC
+	// registered (via datacenter.Config.Endpoints). If that DC advertises only its leader, every
+	// cross-DC spawn goes to the leader; if it advertises all nodes, the actor is placed on a
+	// random node in that DC. The actor kind must be registered on the target data center's
+	// actor systems. See WithDataCenter and spawnOnDatacenter for details and errors
+	// (e.g. ErrDataCenterNotReady, ErrDataCenterStaleRecords, ErrDataCenterRecordNotFound).
 	//
-	// Unlike `Spawn`, `SpawnOn` does not return a PID immediately. To interact with
-	// the spawned actor, use the `ActorOf` method to resolve its PID after it has been
-	// successfully created.
+	// # Same–data center placement
+	//
+	// When no target data center is specified, behavior depends on cluster mode:
+	//
+	//   - In cluster mode, the actor may be placed on any node in the local cluster according to
+	//     the placement strategy and role filter. Supported strategies:
+	//     RoundRobin, Random, Local, LeastLoad. Placement uses cluster.Members and thus stays
+	//     within the current data center when the architecture is one-cluster-per-DC.
+	//   - In non-cluster mode, the actor is created on the local actor system, like Spawn.
+	//
+	// Unlike Spawn, SpawnOn does not return a PID. Use ActorOf to resolve the actor's PID or
+	// Address after it has been successfully created.
 	//
 	// Parameters:
-	//   - ctx: A context used to control cancellation and timeouts during the spawn process.
-	//   - name: A globally unique name for the actor in the cluster.
+	//   - ctx: Context for cancellation and timeouts during the spawn process.
+	//   - name: A globally unique name for the actor in the cluster or across data centers.
 	//   - actor: An instance implementing the Actor interface.
-	//   - opts: Optional SpawnOptions, such as placement strategy or dependencies, mailbox, supervisor strategy.
+	//   - opts: Optional SpawnOptions: placement strategy, WithDataCenter for cross-DC spawn,
+	//     role, dependencies, mailbox, supervisor strategy, etc.
 	//
 	// Returns:
-	//   - error: An error if the actor could not be spawned (e.g., name conflict,
-	//     network failure, or misconfiguration).
+	//   - error: An error if the actor could not be spawned (e.g., name conflict, network or
+	//     remoting failure, misconfiguration; or, when using WithDataCenter, data center
+	//     not ready, stale records, or target DC not found).
 	//
-	// Example:
+	// Example (same-DC, cluster placement):
 	//
-	//	err := system.SpawnOn(ctx, "cart-service", NewCartActor(),
-	//	    WithPlacementStrategy(ConsistentHash))
+	//	err := system.SpawnOn(ctx, "actor-1", NewCartActor(), WithPlacement(Random))
 	//	if err != nil {
 	//	    log.Fatalf("Failed to spawn actor: %v", err)
 	//	}
 	//
-	// Note: The created actor used the default mailbox set during the creation of the actor system.
+	// Example (cross-DC):
+	//
+	//	dc := &datacenter.DataCenter{Name: "dc-west", Region: "us-west-2"}
+	//	err := system.SpawnOn(ctx, "actor-1", NewCartActor(), WithDataCenter(dc))
+	//	if err != nil {
+	//	    log.Fatalf("Failed to spawn actor in dc-west: %v", err)
+	//	}
+	//
+	// ⚠️ Note: The created actor uses the default mailbox from the actor system unless overridden in opts.
 	SpawnOn(ctx context.Context, name string, actor Actor, opts ...SpawnOption) error
 	// SpawnFromFunc creates an actor with the given receive function. One can set the PreStart and PostStop lifecycle hooks
 	// in the given optional options
