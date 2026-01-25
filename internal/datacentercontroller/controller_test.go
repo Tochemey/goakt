@@ -354,6 +354,107 @@ func TestControllerActiveRecords(t *testing.T) {
 	require.True(t, stale)
 }
 
+func TestControllerReady(t *testing.T) {
+	t.Run("not ready when not started", func(t *testing.T) {
+		manager := newTestController(t, &MockControlPlane{}, nil)
+		require.False(t, manager.Ready())
+	})
+
+	t.Run("not ready when started but cache never refreshed", func(t *testing.T) {
+		manager := newTestController(t, &MockControlPlane{}, nil)
+		manager.started.Store(true)
+		// Cache has never been refreshed (refreshedAt is zero)
+		require.False(t, manager.Ready())
+	})
+
+	t.Run("ready when started and cache refreshed", func(t *testing.T) {
+		manager := newTestController(t, &MockControlPlane{}, nil)
+		manager.started.Store(true)
+		manager.cache.replace([]DataCenterRecord{
+			{ID: "dc-1", State: datacenter.DataCenterActive, Version: 1},
+		})
+		require.True(t, manager.Ready())
+	})
+
+	t.Run("ready with empty cache after refresh", func(t *testing.T) {
+		manager := newTestController(t, &MockControlPlane{}, nil)
+		manager.started.Store(true)
+		// Replace with empty list still sets refreshedAt
+		manager.cache.replace([]DataCenterRecord{})
+		require.True(t, manager.Ready())
+	})
+
+	t.Run("not ready after stop", func(t *testing.T) {
+		cp := &MockControlPlane{
+			registerFn: func(context.Context, DataCenterRecord) (string, uint64, error) {
+				return "dc-1", 1, nil
+			},
+			setStateFn: func(context.Context, string, DataCenterState, uint64) (uint64, error) {
+				return 2, nil
+			},
+			listActiveFn: func(context.Context) ([]DataCenterRecord, error) {
+				return []DataCenterRecord{}, nil
+			},
+		}
+		manager := newTestController(t, cp, nil)
+
+		require.NoError(t, manager.Start(context.Background()))
+		require.True(t, manager.Ready())
+
+		require.NoError(t, manager.Stop(context.Background()))
+		require.False(t, manager.Ready())
+	})
+}
+
+func TestControllerLastRefresh(t *testing.T) {
+	t.Run("zero when cache never refreshed", func(t *testing.T) {
+		manager := newTestController(t, &MockControlPlane{}, nil)
+		require.True(t, manager.LastRefresh().IsZero())
+	})
+
+	t.Run("non-zero after cache refresh", func(t *testing.T) {
+		manager := newTestController(t, &MockControlPlane{}, nil)
+		before := time.Now()
+		manager.cache.replace([]DataCenterRecord{
+			{ID: "dc-1", State: datacenter.DataCenterActive, Version: 1},
+		})
+		after := time.Now()
+
+		lastRefresh := manager.LastRefresh()
+		require.False(t, lastRefresh.IsZero())
+		require.True(t, lastRefresh.After(before) || lastRefresh.Equal(before))
+		require.True(t, lastRefresh.Before(after) || lastRefresh.Equal(after))
+	})
+
+	t.Run("updates on subsequent refreshes", func(t *testing.T) {
+		manager := newTestController(t, &MockControlPlane{}, nil)
+		manager.cache.replace([]DataCenterRecord{
+			{ID: "dc-1", State: datacenter.DataCenterActive, Version: 1},
+		})
+		firstRefresh := manager.LastRefresh()
+
+		time.Sleep(time.Millisecond)
+
+		manager.cache.replace([]DataCenterRecord{
+			{ID: "dc-1", State: datacenter.DataCenterActive, Version: 2},
+		})
+		secondRefresh := manager.LastRefresh()
+
+		require.True(t, secondRefresh.After(firstRefresh))
+	})
+
+	t.Run("zero after reset", func(t *testing.T) {
+		manager := newTestController(t, &MockControlPlane{}, nil)
+		manager.cache.replace([]DataCenterRecord{
+			{ID: "dc-1", State: datacenter.DataCenterActive, Version: 1},
+		})
+		require.False(t, manager.LastRefresh().IsZero())
+
+		manager.cache.reset()
+		require.True(t, manager.LastRefresh().IsZero())
+	})
+}
+
 func TestControllerWatchLoopUnsupported(t *testing.T) {
 	cp := &MockControlPlane{
 		watchFn: func(context.Context) (<-chan ControlPlaneEvent, error) {

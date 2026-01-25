@@ -24,15 +24,46 @@ package actor
 
 import (
 	"context"
+	"time"
 
 	"github.com/tochemey/goakt/v3/internal/datacentercontroller"
 	"github.com/tochemey/goakt/v3/internal/ticker"
 	"github.com/tochemey/goakt/v3/internal/types"
 )
 
+// DataCenterReady reports whether the multi-datacenter controller is operational.
+func (x *actorSystem) DataCenterReady() bool {
+	if !x.isDataCenterEnabled() {
+		// Multi-DC not configured; nothing to wait for.
+		return true
+	}
+
+	controller := x.getDataCenterController()
+	if controller == nil {
+		return false
+	}
+
+	return controller.Ready()
+}
+
+// DataCenterLastRefresh returns the time of the last successful datacenter cache refresh.
+func (x *actorSystem) DataCenterLastRefresh() time.Time {
+	if !x.isDataCenterEnabled() {
+		return time.Time{}
+	}
+
+	controller := x.getDataCenterController()
+	if controller == nil {
+		return time.Time{}
+	}
+
+	return controller.LastRefresh()
+}
+
 // isDataCenterEnabled returns true if multi-data center support is configured and the cluster is ready.
 func (x *actorSystem) isDataCenterEnabled() bool {
-	return x.clusterConfig != nil &&
+	return x.Running() &&
+		x.clusterConfig != nil &&
 		x.clusterConfig.dataCenterConfig != nil &&
 		x.clusterEnabled.Load() &&
 		x.cluster != nil

@@ -8386,6 +8386,72 @@ func TestLeader(t *testing.T) {
 	})
 }
 
+func TestDataCenterReady(t *testing.T) {
+	t.Run("returns true when multi-DC is not enabled", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+
+		actorSystem, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+		)
+		require.NoError(t, err)
+
+		err = actorSystem.Start(ctx)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, actorSystem.Stop(ctx)) })
+
+		// Multi-DC not configured, should return true (nothing to wait for)
+		assert.True(t, actorSystem.DataCenterReady())
+	})
+
+	t.Run("returns true when actor system not started and multi-DC not enabled", func(t *testing.T) {
+		logger := log.DiscardLogger
+
+		actorSystem, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+		)
+		require.NoError(t, err)
+
+		// Multi-DC not configured, should return true even before start
+		assert.True(t, actorSystem.DataCenterReady())
+	})
+}
+
+func TestDataCenterLastRefresh(t *testing.T) {
+	t.Run("returns zero time when multi-DC is not enabled", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+
+		actorSystem, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+		)
+		require.NoError(t, err)
+
+		err = actorSystem.Start(ctx)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, actorSystem.Stop(ctx)) })
+
+		// Multi-DC not configured, should return zero time
+		assert.True(t, actorSystem.DataCenterLastRefresh().IsZero())
+	})
+
+	t.Run("returns zero time when actor system not started", func(t *testing.T) {
+		logger := log.DiscardLogger
+
+		actorSystem, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+		)
+		require.NoError(t, err)
+
+		// Multi-DC not configured, should return zero time
+		assert.True(t, actorSystem.DataCenterLastRefresh().IsZero())
+	})
+}
+
 func TestSelectOldestPeers(t *testing.T) {
 	t.Run("returns empty slice when no peers exist", func(t *testing.T) {
 		ctx := context.TODO()

@@ -688,6 +688,31 @@ type ActorSystem interface {
 	//       system.Logger().Info("no cluster leader is currently elected")
 	//   }
 	Leader(ctx context.Context) (leader *remote.Peer, err error)
+	// DataCenterReady reports whether the multi-datacenter controller is operational.
+	//
+	// The controller is considered ready when:
+	//   - Multi-DC mode is enabled (cluster mode with a datacenter config)
+	//   - The controller has started successfully
+	//   - The cache has been refreshed at least once
+	//
+	// Returns true immediately if multi-DC mode is not enabled, as there is no
+	// DC controller to wait for.
+	//
+	// This method is intended for use in readiness probes (e.g., Kubernetes readinessProbe)
+	// to gate traffic until the controller has a usable view of active data centers.
+	//
+	// Note: Ready does not guarantee the cache is fresh; the controller uses
+	// MaxCacheStaleness internally to determine routing behavior.
+	DataCenterReady() bool
+	// DataCenterLastRefresh returns the time of the last successful datacenter cache refresh.
+	//
+	// Returns the zero time if:
+	//   - Multi-DC mode is not enabled
+	//   - The cache has never been refreshed
+	//
+	// This can be used for debugging, monitoring, or custom readiness logic that
+	// requires more granular control than DataCenterReady provides.
+	DataCenterLastRefresh() time.Time
 	// RegisterGrainKind registers a Grain kind in the local registry.
 	//
 	// Registration associates the Grain's kind (as returned by the Grain implementation) with the
@@ -711,8 +736,6 @@ type ActorSystem interface {
 	handleRemoteTell(ctx context.Context, to *PID, message proto.Message) error
 	// putActorOnCluster sets actor in the actor system actors registry
 	putActorOnCluster(actor *PID) error
-	// reservedName returns reserved actor's name
-	reservedName(nameType nameType) string
 	// getCluster returns the cluster engine
 	getCluster() cluster.Cluster
 	// tree returns the actors tree
@@ -3380,11 +3403,6 @@ func (x *actorSystem) getCluster() cluster.Cluster {
 	return cluster
 }
 
-// reservedName returns the reserved actor's name
-func (x *actorSystem) reservedName(nameType nameType) string {
-	return reservedNames[nameType]
-}
-
 // actorAddress returns the actor path provided the actor name
 func (x *actorSystem) actorAddress(name string) *address.Address {
 	return address.New(name, x.name, x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
@@ -3436,7 +3454,7 @@ func (x *actorSystem) configureServer(ctx context.Context, mux *stdhttp.ServeMux
 
 // spawnRootGuardian creates the rootGuardian guardian
 func (x *actorSystem) spawnRootGuardian(ctx context.Context) error {
-	actorName := x.reservedName(rootGuardianType)
+	actorName := reservedName(rootGuardianType)
 	x.rootGuardian, _ = x.configPID(ctx, actorName, newRootGuardian(), asSystem(), WithLongLived())
 	// rootGuardian is the rootGuardian node of the actors tree
 	return x.actors.addRootNode(x.rootGuardian)
@@ -3444,7 +3462,7 @@ func (x *actorSystem) spawnRootGuardian(ctx context.Context) error {
 
 // spawnSystemGuardian creates the system guardian
 func (x *actorSystem) spawnSystemGuardian(ctx context.Context) error {
-	actorName := x.reservedName(systemGuardianType)
+	actorName := reservedName(systemGuardianType)
 	x.systemGuardian, _ = x.configPID(ctx,
 		actorName,
 		newSystemGuardian(),
@@ -3461,7 +3479,7 @@ func (x *actorSystem) spawnSystemGuardian(ctx context.Context) error {
 
 // spawnUserGuardian creates the user guardian
 func (x *actorSystem) spawnUserGuardian(ctx context.Context) error {
-	actorName := x.reservedName(userGuardianType)
+	actorName := reservedName(userGuardianType)
 	x.userGuardian, _ = x.configPID(ctx,
 		actorName,
 		newUserGuardian(),
@@ -3478,7 +3496,7 @@ func (x *actorSystem) spawnUserGuardian(ctx context.Context) error {
 
 // spawnDeathWatch creates the deathWatch actor
 func (x *actorSystem) spawnDeathWatch(ctx context.Context) error {
-	actorName := x.reservedName(deathWatchType)
+	actorName := reservedName(deathWatchType)
 	// define the supervisor strategy to use
 	supervisor := sup.NewSupervisor(
 		sup.WithStrategy(sup.OneForOneStrategy),
@@ -3500,7 +3518,7 @@ func (x *actorSystem) spawnDeathWatch(ctx context.Context) error {
 // spawnRelocator creates the actor responsible for re-deploying actors when a node leaves the cluster
 func (x *actorSystem) spawnRelocator(ctx context.Context) error {
 	if x.clusterEnabled.Load() && x.relocationEnabled.Load() {
-		actorName := x.reservedName(rebalancerType)
+		actorName := reservedName(rebalancerType)
 
 		// define the supervisor strategy to use
 		supervisor := sup.NewSupervisor(
@@ -3527,7 +3545,7 @@ func (x *actorSystem) spawnRelocator(ctx context.Context) error {
 
 // spawnDeadletter creates the deadletter synthetic actor
 func (x *actorSystem) spawnDeadletter(ctx context.Context) error {
-	actorName := x.reservedName(deadletterType)
+	actorName := reservedName(deadletterType)
 	x.deadletter, _ = x.configPID(ctx,
 		actorName,
 		newDeadLetter(),
@@ -3676,7 +3694,7 @@ func (x *actorSystem) shutdownCluster(ctx context.Context, actors []ActorRef, pe
 				AddContextRunnerIf(peerState != nil, func(cctx context.Context) error { return x.persistPeerStateToPeers(cctx, peerState) }).
 				AddContextRunner(func(cctx context.Context) error { return x.cleanupCluster(cctx, actors) }).
 				AddContextRunner(func(cctx context.Context) error { return x.cluster.Stop(cctx) }).
-				AddContextRunnerIf(x.clusterStore != nil, func(cctx context.Context) error { return x.clusterStore.Close() }).
+				AddContextRunnerIf(x.clusterStore != nil, func(_ context.Context) error { return x.clusterStore.Close() }).
 				Run(); err != nil {
 				x.logger.Errorf("Failed to shutdown cleanly: %w", err)
 				return err
@@ -4246,4 +4264,9 @@ func maxInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// reservedName returns the reserved actor's name
+func reservedName(nameType nameType) string {
+	return reservedNames[nameType]
 }

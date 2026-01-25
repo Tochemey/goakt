@@ -55,6 +55,7 @@ type Config struct {
 	// DataCenter describes the local DC metadata.
 	DataCenter DataCenter
 	// Endpoints are the advertised addresses used for cross-DC routing.
+	// The endpoints are in the format of "host:port".
 	Endpoints []string
 	// HeartbeatInterval controls how often the local DC renews its liveness.
 	HeartbeatInterval time.Duration
@@ -93,7 +94,7 @@ func NewConfig() *Config {
 
 // Validate implements validation.Validator.
 func (c *Config) Validate() error {
-	return validation.New(validation.FailFast()).
+	gerr := validation.New(validation.FailFast()).
 		AddAssertion(c.ControlPlane != nil, "ControlPlane is required").
 		AddValidator(validation.NewEmptyStringValidator("Name", c.DataCenter.Name)).
 		AddAssertion(len(c.Endpoints) > 0, "Endpoints must not be empty").
@@ -105,6 +106,19 @@ func (c *Config) Validate() error {
 		AddAssertion(c.MaxBackoff > 0, "MaxBackoff must be greater than 0").
 		AddAssertion(c.RequestTimeout > 0, "RequestTimeout must be greater than 0").
 		Validate()
+
+	if gerr != nil {
+		return gerr
+	}
+
+	// validate the endpoints
+	for _, endpoint := range c.Endpoints {
+		if err := validation.NewTCPAddressValidator(endpoint).Validate(); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // Sanitize fills zero-value fields with sensible defaults.

@@ -234,6 +234,32 @@ func (x *Controller) ActiveRecords() ([]DataCenterRecord, bool) {
 	return records, time.Since(refreshedAt) > x.config.MaxCacheStaleness
 }
 
+// Ready reports whether the controller is operational and safe for routing.
+//
+// The controller is considered ready when:
+//   - It has been started (Start returned successfully)
+//   - The cache has been refreshed at least once (initial or subsequent refresh succeeded)
+//
+// This method is intended for use in readiness probes (e.g., Kubernetes readinessProbe)
+// to gate traffic until the controller has a usable view of active data centers.
+//
+// Note: Ready does not guarantee the cache is fresh; use ActiveRecords to check staleness.
+func (x *Controller) Ready() bool {
+	if !x.started.Load() {
+		return false
+	}
+	return !x.cache.lastRefresh().IsZero()
+}
+
+// LastRefresh returns the time of the last successful cache refresh.
+//
+// Returns the zero time if the cache has never been refreshed. This can be used
+// for debugging, monitoring, or custom readiness logic that requires more granular
+// control than Ready provides.
+func (x *Controller) LastRefresh() time.Time {
+	return x.cache.lastRefresh()
+}
+
 // heartbeatLoop periodically renews the local record lease while the manager is running.
 func (x *Controller) heartbeatLoop() {
 	defer x.wg.Done()
@@ -608,6 +634,13 @@ func (x *recordCache) snapshot() ([]DataCenterRecord, time.Time) {
 		records = append(records, record)
 	}
 	return records, x.refreshedAt
+}
+
+// lastRefresh returns the time of the last successful cache refresh.
+func (x *recordCache) lastRefresh() time.Time {
+	x.mu.RLock()
+	defer x.mu.RUnlock()
+	return x.refreshedAt
 }
 
 // reset clears the cache and resets the refresh timestamp.

@@ -141,7 +141,7 @@ func (x *topicActor) handlePublish(ctx *ReceiveContext) {
 
 		cctx := context.WithoutCancel(ctx.Context())
 		var wg sync.WaitGroup
-		actorName := x.actorSystem.reservedName(topicActorType)
+		actorName := reservedName(topicActorType)
 
 		// this will be sent to the local subscribers
 		msg, _ := message.UnmarshalNew()
@@ -162,7 +162,7 @@ func (x *topicActor) handlePublish(ctx *ReceiveContext) {
 				return
 			}
 
-			remotePeers := x.buildRemotePeers(peers)
+			remotePeers := buildRemotePeers(peers)
 
 			wg.Add(1)
 			go func() {
@@ -176,7 +176,7 @@ func (x *topicActor) handlePublish(ctx *ReceiveContext) {
 	}
 }
 
-func (x *topicActor) buildRemotePeers(peers []*cluster.Peer) []remotePeer {
+func buildRemotePeers(peers []*cluster.Peer) []remotePeer {
 	var remotePeers []remotePeer
 	for _, peer := range peers {
 		remotePeers = append(remotePeers, remotePeer{
@@ -358,7 +358,7 @@ func (x *actorSystem) spawnTopicActor(ctx context.Context) error {
 		return nil
 	}
 
-	actorName := x.reservedName(topicActorType)
+	actorName := reservedName(topicActorType)
 	x.topicActor, _ = x.configPID(ctx,
 		actorName,
 		newTopicActor(x.remoting),
