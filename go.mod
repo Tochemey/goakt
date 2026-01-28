@@ -25,7 +25,7 @@ require (
 	github.com/testcontainers/testcontainers-go/modules/etcd v0.40.0
 	github.com/tochemey/olric v0.3.7
 	github.com/travisjeffery/go-dynaport v1.0.0
-	github.com/zeebo/xxh3 v1.0.2
+	github.com/zeebo/xxh3 v1.1.0
 	go.akshayshah.org/connectproto v0.6.0
 	go.etcd.io/bbolt v1.4.3
 	go.etcd.io/etcd/api/v3 v3.6.7
