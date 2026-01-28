@@ -59,20 +59,20 @@ func newNoSender() *noSender {
 	return &noSender{}
 }
 
-func (x *noSender) PreStart(*Context) error {
+func (*noSender) PreStart(*Context) error {
 	return nil
 }
 
-func (x *noSender) Receive(ctx *ReceiveContext) {
+func (*noSender) Receive(ctx *ReceiveContext) {
 	ctx.Unhandled()
 }
 
-func (x *noSender) PostStop(*Context) error {
+func (*noSender) PostStop(*Context) error {
 	return nil
 }
 
 func (x *actorSystem) spawnNoSender(ctx context.Context) error {
-	actorName := x.reservedName(noSenderType)
+	actorName := reservedName(noSenderType)
 
 	supervisor := sup.NewSupervisor(
 		sup.WithStrategy(sup.OneForOneStrategy),

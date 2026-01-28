@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/tochemey/goakt/v3/datacenter"
 	"github.com/tochemey/goakt/v3/internal/size"
 	testkit "github.com/tochemey/goakt/v3/mocks/discovery"
 )
@@ -58,6 +59,7 @@ func TestClusterConfig(t *testing.T) {
 			WithGrainActivationBarrier(5*time.Second).
 			WithClusterBalancerInterval(5*time.Second).
 			WithDiscovery(provider).
+			WithDataCenter(new(datacenter.Config)).
 			WithRoles("role1", "role2", "role1") // role1 is duplicated to test deduplication
 
 		require.NoError(t, config.Validate())
@@ -76,6 +78,7 @@ func TestClusterConfig(t *testing.T) {
 		assert.True(t, config.grainActivationBarrierEnabled())
 		assert.Equal(t, 5*time.Second, config.grainActivationBarrierTimeout())
 		assert.ElementsMatch(t, []string{"role1", "role2"}, config.getRoles())
+		assert.NotNil(t, config.dataCenterConfig)
 
 		assert.Exactly(t, uint64(10*size.MB), config.tableSize)
 		assert.True(t, provider == config.discovery)

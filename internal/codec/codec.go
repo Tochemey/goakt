@@ -23,12 +23,16 @@
 package codec
 
 import (
+	"fmt"
 	"math"
 	"sort"
 	"time"
 
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/tochemey/goakt/v3/datacenter"
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/registry"
@@ -292,5 +296,105 @@ func decodeSupervisorDirective(directive internalpb.SupervisorDirective) supervi
 		return supervisor.EscalateDirective
 	default:
 		return supervisor.StopDirective
+	}
+}
+
+func EncodeDataCenterRecord(record datacenter.DataCenterRecord) ([]byte, error) {
+	pbRecord, err := toProto(record)
+	if err != nil {
+		return nil, err
+	}
+	return proto.Marshal(pbRecord)
+}
+
+func DecodeDataCenterRecord(payload []byte) (datacenter.DataCenterRecord, error) {
+	pbRecord := &internalpb.DataCenterRecord{}
+	if err := proto.Unmarshal(payload, pbRecord); err != nil {
+		return datacenter.DataCenterRecord{}, fmt.Errorf("multidc/etcd: failed to decode record: %w", err)
+	}
+	return fromProto(pbRecord), nil
+}
+
+func toProto(record datacenter.DataCenterRecord) (*internalpb.DataCenterRecord, error) {
+	state, err := toProtoState(record.State)
+	if err != nil {
+		return nil, err
+	}
+
+	pbRecord := &internalpb.DataCenterRecord{
+		Id: record.ID,
+		DataCenter: &internalpb.DataCenter{
+			Name:   record.DataCenter.Name,
+			Region: record.DataCenter.Region,
+			Zone:   record.DataCenter.Zone,
+			Labels: record.DataCenter.Labels,
+		},
+		Endpoints: record.Endpoints,
+		State:     state,
+		Version:   record.Version,
+	}
+
+	if !record.LeaseExpiry.IsZero() {
+		pbRecord.LeaseExpiry = timestamppb.New(record.LeaseExpiry)
+	}
+
+	return pbRecord, nil
+}
+
+func fromProto(record *internalpb.DataCenterRecord) datacenter.DataCenterRecord {
+	var dataCenter datacenter.DataCenter
+	if record.GetDataCenter() != nil {
+		dataCenter = datacenter.DataCenter{
+			Name:   record.GetDataCenter().GetName(),
+			Region: record.GetDataCenter().GetRegion(),
+			Zone:   record.GetDataCenter().GetZone(),
+			Labels: record.GetDataCenter().GetLabels(),
+		}
+	}
+
+	mapped := datacenter.DataCenterRecord{
+		ID:         record.GetId(),
+		DataCenter: dataCenter,
+		Endpoints:  record.GetEndpoints(),
+		State:      fromProtoState(record.GetState()),
+		Version:    record.GetVersion(),
+	}
+
+	if record.LeaseExpiry != nil {
+		mapped.LeaseExpiry = record.LeaseExpiry.AsTime()
+	}
+
+	return mapped
+}
+
+func toProtoState(state datacenter.DataCenterState) (internalpb.DataCenterState, error) {
+	switch state {
+	case datacenter.DataCenterRegistered:
+		return internalpb.DataCenterState_DATA_CENTER_STATE_REGISTERED, nil
+	case datacenter.DataCenterActive:
+		return internalpb.DataCenterState_DATA_CENTER_STATE_ACTIVE, nil
+	case datacenter.DataCenterDraining:
+		return internalpb.DataCenterState_DATA_CENTER_STATE_DRAINING, nil
+	case datacenter.DataCenterInactive:
+		return internalpb.DataCenterState_DATA_CENTER_STATE_INACTIVE, nil
+	case "":
+		return internalpb.DataCenterState_DATA_CENTER_STATE_UNSPECIFIED, nil
+	default:
+		return internalpb.DataCenterState_DATA_CENTER_STATE_UNSPECIFIED, fmt.Errorf("unsupported state %q", state)
+	}
+}
+
+func fromProtoState(state internalpb.DataCenterState) datacenter.DataCenterState {
+	switch state {
+	case internalpb.DataCenterState_DATA_CENTER_STATE_REGISTERED:
+		return datacenter.DataCenterRegistered
+	case internalpb.DataCenterState_DATA_CENTER_STATE_ACTIVE:
+		return datacenter.DataCenterActive
+	case internalpb.DataCenterState_DATA_CENTER_STATE_DRAINING:
+		return datacenter.DataCenterDraining
+	case internalpb.DataCenterState_DATA_CENTER_STATE_INACTIVE:
+		return datacenter.DataCenterInactive
+	default:
+		return ""
 	}
 }

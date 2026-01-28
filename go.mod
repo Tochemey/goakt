@@ -28,6 +28,7 @@ require (
 	github.com/zeebo/xxh3 v1.1.0
 	go.akshayshah.org/connectproto v0.6.0
 	go.etcd.io/bbolt v1.4.3
+	go.etcd.io/etcd/api/v3 v3.6.7
 	go.etcd.io/etcd/client/v3 v3.6.7
 	go.opentelemetry.io/otel v1.39.0
 	go.opentelemetry.io/otel/metric v1.39.0
@@ -149,7 +150,6 @@ require (
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
-	go.etcd.io/etcd/api/v3 v3.6.7 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.6.7 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.64.0 // indirect

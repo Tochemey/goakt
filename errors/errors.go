@@ -198,6 +198,25 @@ var (
 
 	// ErrSystemShuttingDown is returned when a message is sent to an actor while the actor system is shutting down.
 	ErrSystemShuttingDown = errors.New("actor system is shutting down")
+
+	// ErrWatchNotSupported indicates the provider does not support watch in multi-DC control planes.
+	ErrWatchNotSupported = errors.New("multidc: watch not supported")
+
+	// ErrDataCenterNotFound indicates the requested datacenter is missing.
+	ErrDataCenterRecordNotFound = errors.New("datacenter record not found")
+
+	// ErrDataCenterRecordConflict indicates the record version does not match the current state.
+	ErrDataCenterRecordConflict = errors.New("datacenter record version conflict")
+
+	// ErrDataCenterNotReady indicates the datacenter is not ready to process requests.
+	// The controller is considered ready when:
+	//   - Multi-DC mode is enabled (cluster mode with a datacenter config)
+	//   - The controller has started successfully
+	//   - The cache has been refreshed at least once
+	ErrDataCenterNotReady = errors.New("datacenter is not ready")
+
+	// ErrDataCenterStaleRecords indicates the datacenter has stale records and cannot process requests.
+	ErrDataCenterStaleRecords = errors.New("datacenter has stale records")
 )
 
 // NewErrInvalidPassivationStrategy formats an error with ErrInvalidPassivationStrategy
@@ -362,6 +381,6 @@ type AnyError struct{}
 var _ error = (*AnyError)(nil)
 
 // Error implements error.
-func (a *AnyError) Error() string {
+func (*AnyError) Error() string {
 	return "*"
 }

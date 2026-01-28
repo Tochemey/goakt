@@ -25,6 +25,7 @@ package actor
 import (
 	"time"
 
+	"github.com/tochemey/goakt/v3/datacenter"
 	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/internal/pointer"
@@ -103,6 +104,9 @@ type spawnConfig struct {
 	role *string
 	// singletonSpec holds the singleton configuration if the actor is a singleton.
 	singletonSpec *singletonSpec
+	// dataCenter defines the datacenter to spawn the actor in.
+	// this is only used when using the SpawnOn function with a datacenter-aware control plane.
+	dataCenter *datacenter.DataCenter
 }
 
 var _ validation.Validator = (*spawnConfig)(nil)
@@ -302,7 +306,7 @@ func WithStashing() SpawnOption {
 // This option determines how the actor system selects a target node for spawning
 // the actor across the cluster. Valid strategies include RoundRobin, Random, and Local.
 //
-// Note: This option only has an effect when used with SpawnOn in a cluster-enabled
+// ⚠️ Note: This option only has an effect when used with SpawnOn in a cluster-enabled
 // actor system. If cluster mode is disabled, the placement strategy is ignored
 // and the actor will be spawned locally.
 //
@@ -393,6 +397,23 @@ func WithRole(role string) SpawnOption {
 func WithReentrancy(reentrancy *reentrancy.Reentrancy) SpawnOption {
 	return spawnOption(func(config *spawnConfig) {
 		config.reentrancy = reentrancy
+	})
+}
+
+// WithDataCenter returns a SpawnOption that sets the datacenter to spawn the actor in.
+//
+// This option is only used when using the SpawnOn function with a datacenter-aware control plane.
+//
+// Parameters:
+//   - dataCenter: The datacenter to spawn the actor in.
+//
+// Returns:
+//   - SpawnOption that sets the datacenter in the spawn configuration.
+func WithDataCenter(dataCenter *datacenter.DataCenter) SpawnOption {
+	return spawnOption(func(config *spawnConfig) {
+		if dataCenter != nil {
+			config.dataCenter = dataCenter
+		}
 	})
 }
 

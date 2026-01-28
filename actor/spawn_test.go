@@ -41,9 +41,11 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v3/address"
+	"github.com/tochemey/goakt/v3/datacenter"
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
+	"github.com/tochemey/goakt/v3/internal/datacentercontroller"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
 	mockcluster "github.com/tochemey/goakt/v3/mocks/cluster"
@@ -1570,5 +1572,252 @@ func TestSpawn(t *testing.T) {
 		err := system.SpawnOn(ctx, actorName, actor, WithPlacement(RoundRobin))
 		require.Error(t, err)
 		assert.ErrorIs(t, err, assert.AnError)
+	})
+}
+
+func TestSpawnOnDatacenter(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("returns ErrDataCenterNotReady when controller is nil", func(t *testing.T) {
+		dcConfig := datacenter.NewConfig()
+		dcConfig.ControlPlane = &MockControlPlane{}
+		dcConfig.DataCenter = datacenter.DataCenter{Name: "local"}
+		dcConfig.Endpoints = []string{"127.0.0.1:8080"}
+
+		sys := MockReplicationTestSystem(mockcluster.NewCluster(t))
+		sys.remoting = mocksremote.NewRemoting(t)
+		sys.remotingEnabled.Store(true)
+		sys.clusterConfig = NewClusterConfig().WithDataCenter(dcConfig)
+		sys.dataCenterController = nil
+
+		config := newSpawnConfig(WithDataCenter(&datacenter.DataCenter{Name: "dc-west", Region: "r", Zone: "z"}))
+		actor := NewMockActor()
+
+		err := sys.spawnOnDatacenter(ctx, "actor-1", actor, config)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, gerrors.ErrDataCenterNotReady)
+	})
+
+	t.Run("returns ErrDataCenterStaleRecords when cache is stale", func(t *testing.T) {
+		dcConfig := datacenter.NewConfig()
+		dcConfig.ControlPlane = &MockControlPlane{
+			listActive: func(context.Context) ([]datacenter.DataCenterRecord, error) {
+				return []datacenter.DataCenterRecord{{
+					ID:        "dc-west",
+					State:     datacenter.DataCenterActive,
+					Endpoints: []string{"127.0.0.1:9999"},
+				}}, nil
+			},
+		}
+		dcConfig.DataCenter = datacenter.DataCenter{Name: "local"}
+		dcConfig.Endpoints = []string{"127.0.0.1:8080"}
+		dcConfig.MaxCacheStaleness = 1 * time.Millisecond
+		dcConfig.CacheRefreshInterval = 5 * time.Millisecond
+
+		controller, err := datacentercontroller.NewController(dcConfig)
+		require.NoError(t, err)
+		startCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		err = controller.Start(startCtx)
+		cancel()
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
+			_ = controller.Stop(stopCtx)
+			stopCancel()
+		})
+
+		// Wait until cache is stale (past MaxCacheStaleness)
+		pause.For(5 * time.Millisecond)
+
+		sys := MockReplicationTestSystem(mockcluster.NewCluster(t))
+		sys.remoting = mocksremote.NewRemoting(t)
+		sys.remotingEnabled.Store(true)
+		sys.clusterConfig = NewClusterConfig().WithDataCenter(dcConfig)
+		sys.dataCenterController = controller
+
+		config := newSpawnConfig(WithDataCenter(&datacenter.DataCenter{Name: "dc-west", Region: "r", Zone: "z"}))
+		actor := NewMockActor()
+
+		err = sys.spawnOnDatacenter(ctx, "actor-1", actor, config)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, gerrors.ErrDataCenterStaleRecords)
+	})
+
+	t.Run("returns ErrDataCenterRecordNotFound when target DC not in active records", func(t *testing.T) {
+		remotingMock := mocksremote.NewRemoting(t)
+		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+			return []datacenter.DataCenterRecord{{
+				ID:        "dc-other",
+				State:     datacenter.DataCenterActive,
+				Endpoints: []string{"127.0.0.1:9999"},
+			}}, nil
+		}, remotingMock)
+
+		config := newSpawnConfig(WithDataCenter(&datacenter.DataCenter{Name: "dc-west", Region: "r", Zone: "z"}))
+		actor := NewMockActor()
+
+		err := sys.spawnOnDatacenter(ctx, "actor-1", actor, config)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, gerrors.ErrDataCenterRecordNotFound)
+	})
+
+	t.Run("returns ErrDataCenterRecordNotFound when no active records", func(t *testing.T) {
+		remotingMock := mocksremote.NewRemoting(t)
+		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+			return nil, nil
+		}, remotingMock)
+
+		config := newSpawnConfig(WithDataCenter(&datacenter.DataCenter{Name: "dc-west", Region: "r", Zone: "z"}))
+		actor := NewMockActor()
+
+		err := sys.spawnOnDatacenter(ctx, "actor-1", actor, config)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, gerrors.ErrDataCenterRecordNotFound)
+	})
+
+	t.Run("returns ErrDataCenterRecordNotFound when target DC record exists but state is not ACTIVE", func(t *testing.T) {
+		remotingMock := mocksremote.NewRemoting(t)
+		targetDC := datacenter.DataCenter{Name: "dc-west", Region: "r", Zone: "z"}
+		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+			return []datacenter.DataCenterRecord{{
+				ID:        targetDC.ID(),
+				State:     datacenter.DataCenterDraining,
+				Endpoints: []string{"127.0.0.1:9999"},
+			}}, nil
+		}, remotingMock)
+
+		config := newSpawnConfig(WithDataCenter(&targetDC))
+		actor := NewMockActor()
+
+		err := sys.spawnOnDatacenter(ctx, "actor-1", actor, config)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, gerrors.ErrDataCenterRecordNotFound)
+	})
+
+	t.Run("returns error when endpoint has invalid host:port format", func(t *testing.T) {
+		remotingMock := mocksremote.NewRemoting(t)
+		targetDC := datacenter.DataCenter{Name: "dc-west", Region: "r", Zone: "z"}
+		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+			return []datacenter.DataCenterRecord{{
+				ID:        targetDC.ID(),
+				State:     datacenter.DataCenterActive,
+				Endpoints: []string{"no-colon-invalid"},
+			}}, nil
+		}, remotingMock)
+
+		config := newSpawnConfig(WithDataCenter(&targetDC))
+		actor := NewMockActor()
+
+		err := sys.spawnOnDatacenter(ctx, "actor-1", actor, config)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "failed to split host and port from endpoint")
+	})
+
+	t.Run("returns error when endpoint port is not numeric", func(t *testing.T) {
+		remotingMock := mocksremote.NewRemoting(t)
+		targetDC := datacenter.DataCenter{Name: "dc-west", Region: "r", Zone: "z"}
+		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+			return []datacenter.DataCenterRecord{{
+				ID:        targetDC.ID(),
+				State:     datacenter.DataCenterActive,
+				Endpoints: []string{"127.0.0.1:notaport"},
+			}}, nil
+		}, remotingMock)
+
+		config := newSpawnConfig(WithDataCenter(&targetDC))
+		actor := NewMockActor()
+
+		err := sys.spawnOnDatacenter(ctx, "actor-1", actor, config)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "failed to convert port to int")
+	})
+
+	t.Run("returns RemoteSpawn error when remoting fails", func(t *testing.T) {
+		remotingMock := mocksremote.NewRemoting(t)
+		targetDC := datacenter.DataCenter{Name: "dc-west", Region: "r", Zone: "z"}
+		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+			return []datacenter.DataCenterRecord{{
+				ID:        targetDC.ID(),
+				State:     datacenter.DataCenterActive,
+				Endpoints: []string{"127.0.0.1:9999"},
+			}}, nil
+		}, remotingMock)
+
+		remotingMock.EXPECT().
+			RemoteSpawn(mock.Anything, "127.0.0.1", 9999, mock.MatchedBy(func(req *remote.SpawnRequest) bool {
+				return req.Name == "actor-1" && req.Kind != "" && !req.Relocatable
+			})).
+			Return(gerrors.ErrTypeNotRegistered).
+			Once()
+
+		config := newSpawnConfig(WithDataCenter(&targetDC), WithRelocationDisabled())
+		actor := NewMockActor()
+
+		err := sys.spawnOnDatacenter(ctx, "actor-1", actor, config)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, gerrors.ErrTypeNotRegistered)
+	})
+
+	t.Run("succeeds and calls RemoteSpawn with correct request", func(t *testing.T) {
+		remotingMock := mocksremote.NewRemoting(t)
+		targetDC := datacenter.DataCenter{Name: "dc-west", Region: "r", Zone: "z"}
+		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+			return []datacenter.DataCenterRecord{{
+				ID:        targetDC.ID(),
+				State:     datacenter.DataCenterActive,
+				Endpoints: []string{"127.0.0.1:9999"},
+			}}, nil
+		}, remotingMock)
+
+		remotingMock.EXPECT().
+			RemoteSpawn(mock.Anything, "127.0.0.1", 9999, mock.MatchedBy(func(req *remote.SpawnRequest) bool {
+				return req.Name == "actor-1" &&
+					req.Kind != "" &&
+					req.Relocatable == true &&
+					req.EnableStashing == false
+			})).
+			Return(nil).
+			Once()
+
+		config := newSpawnConfig(WithDataCenter(&targetDC))
+		actor := NewMockActor()
+
+		err := sys.spawnOnDatacenter(ctx, "actor-1", actor, config)
+		require.NoError(t, err)
+		remotingMock.AssertExpectations(t)
+	})
+
+	t.Run("passes relocatable and passivation from config to RemoteSpawn", func(t *testing.T) {
+		remotingMock := mocksremote.NewRemoting(t)
+		targetDC := datacenter.DataCenter{Name: "dc-west", Region: "r", Zone: "z"}
+		passivationStrategy := passivation.NewTimeBasedStrategy(30 * time.Second)
+		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+			return []datacenter.DataCenterRecord{{
+				ID:        targetDC.ID(),
+				State:     datacenter.DataCenterActive,
+				Endpoints: []string{"192.168.1.10:9000"},
+			}}, nil
+		}, remotingMock)
+
+		remotingMock.EXPECT().
+			RemoteSpawn(mock.Anything, "192.168.1.10", 9000, mock.MatchedBy(func(req *remote.SpawnRequest) bool {
+				return req.Relocatable == false &&
+					req.PassivationStrategy != nil &&
+					req.EnableStashing == true
+			})).
+			Return(nil).
+			Once()
+
+		config := newSpawnConfig(
+			WithDataCenter(&targetDC),
+			WithRelocationDisabled(),
+			WithPassivationStrategy(passivationStrategy),
+			WithStashing(),
+		)
+		actor := NewMockActor()
+
+		err := sys.spawnOnDatacenter(ctx, "actor-2", actor, config)
+		require.NoError(t, err)
+		remotingMock.AssertExpectations(t)
 	})
 }

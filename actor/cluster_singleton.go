@@ -54,7 +54,7 @@ func newClusterSingletonManager() Actor {
 }
 
 // PreStart implements the pre-start hook.
-func (x *clusterSingletonManager) PreStart(*Context) error {
+func (*clusterSingletonManager) PreStart(*Context) error {
 	return nil
 }
 
@@ -67,7 +67,7 @@ func (x *clusterSingletonManager) Receive(ctx *ReceiveContext) {
 }
 
 // PostStop implements the post-stop hook.
-func (x *clusterSingletonManager) PostStop(ctx *Context) error {
+func (*clusterSingletonManager) PostStop(ctx *Context) error {
 	ctx.ActorSystem().Logger().Infof("%s stopped successfully", ctx.ActorName())
 	return nil
 }
@@ -90,7 +90,7 @@ func (x *actorSystem) spawnSingletonManager(ctx context.Context) error {
 		return nil
 	}
 
-	actorName := x.reservedName(singletonManagerType)
+	actorName := reservedName(singletonManagerType)
 	x.singletonManager, _ = x.configPID(ctx,
 		actorName,
 		newClusterSingletonManager(),

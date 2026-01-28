@@ -50,6 +50,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/tochemey/goakt/v3/address"
+	"github.com/tochemey/goakt/v3/datacenter"
 	"github.com/tochemey/goakt/v3/discovery"
 	"github.com/tochemey/goakt/v3/discovery/consul"
 	"github.com/tochemey/goakt/v3/discovery/etcd"
@@ -59,6 +60,7 @@ import (
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
+	"github.com/tochemey/goakt/v3/internal/datacentercontroller"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v3/internal/pause"
@@ -66,6 +68,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/types"
 	"github.com/tochemey/goakt/v3/internal/xsync"
 	"github.com/tochemey/goakt/v3/log"
+	mockcluster "github.com/tochemey/goakt/v3/mocks/cluster"
 	mockscluster "github.com/tochemey/goakt/v3/mocks/cluster"
 	mocksremote "github.com/tochemey/goakt/v3/mocks/remote"
 	"github.com/tochemey/goakt/v3/passivation"
@@ -2193,4 +2196,68 @@ func (s *recordingPeerStateStore) DeletePeerState(_ context.Context, _ string) e
 
 func (s *recordingPeerStateStore) Close() error {
 	return nil
+}
+
+// MockControlPlane implements datacenter.ControlPlane for spawnOnDatacenter tests.
+type MockControlPlane struct {
+	listActive func(context.Context) ([]datacenter.DataCenterRecord, error)
+}
+
+func (*MockControlPlane) Register(_ context.Context, record datacenter.DataCenterRecord) (string, uint64, error) {
+	return record.ID, 1, nil
+}
+
+func (*MockControlPlane) Heartbeat(_ context.Context, _ string, version uint64) (uint64, time.Time, error) {
+	return version + 1, time.Now().Add(time.Hour), nil
+}
+
+func (*MockControlPlane) SetState(_ context.Context, _ string, _ datacenter.DataCenterState, version uint64) (uint64, error) {
+	return version + 1, nil
+}
+
+func (x *MockControlPlane) ListActive(ctx context.Context) ([]datacenter.DataCenterRecord, error) {
+	if x.listActive != nil {
+		return x.listActive(ctx)
+	}
+	return nil, nil
+}
+
+func (*MockControlPlane) Watch(_ context.Context) (<-chan datacenter.ControlPlaneEvent, error) {
+	return nil, gerrors.ErrWatchNotSupported
+}
+
+// MockDatacenterSystem returns an *actorSystem configured for datacenter tests.
+// The controller is started with the fake control plane; listActive is used to drive ActiveRecords().
+func MockDatacenterSystem(t *testing.T, listActive func(_ context.Context) ([]datacenter.DataCenterRecord, error), remoting *mocksremote.Remoting) *actorSystem {
+	t.Helper()
+	dcConfig := datacenter.NewConfig()
+	dcConfig.ControlPlane = &MockControlPlane{listActive: listActive}
+	dcConfig.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
+	dcConfig.Endpoints = []string{"127.0.0.1:8080"}
+	dcConfig.MaxCacheStaleness = 50 * time.Millisecond
+	dcConfig.CacheRefreshInterval = 10 * time.Millisecond
+
+	controller, err := datacentercontroller.NewController(dcConfig)
+	require.NoError(t, err)
+	startCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	err = controller.Start(startCtx)
+	cancel()
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
+		_ = controller.Stop(stopCtx)
+		stopCancel()
+	})
+
+	// Allow first cache refresh so ActiveRecords() returns non-stale data
+	pause.For(25 * time.Millisecond)
+
+	clusterMock := mockcluster.NewCluster(t)
+	sys := MockReplicationTestSystem(clusterMock)
+	sys.remoting = remoting
+	sys.remotingEnabled.Store(true)
+	sys.clusterConfig = NewClusterConfig().WithDataCenter(dcConfig)
+	sys.dataCenterController = controller
+
+	return sys
 }

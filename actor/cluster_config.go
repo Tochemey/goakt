@@ -28,6 +28,7 @@ import (
 
 	goset "github.com/deckarep/golang-set/v2"
 
+	"github.com/tochemey/goakt/v3/datacenter"
 	"github.com/tochemey/goakt/v3/discovery"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/internal/size"
@@ -56,6 +57,7 @@ type ClusterConfig struct {
 	grainActivationBarrier   *grainActivationBarrierConfig
 	roles                    goset.Set[string]
 	clusterBalancerInterval  time.Duration
+	dataCenterConfig         *datacenter.Config
 }
 
 type grainActivationBarrierConfig struct {
@@ -412,6 +414,33 @@ func (x *ClusterConfig) WithRoles(roles ...string) *ClusterConfig {
 func (x *ClusterConfig) WithClusterBalancerInterval(interval time.Duration) *ClusterConfig {
 	if interval > 0 {
 		x.clusterBalancerInterval = interval
+	}
+	return x
+}
+
+// WithDataCenter configures multi–data center (multi-DC) support for the cluster.
+//
+// This option is only meaningful when cluster mode is enabled. The supplied config
+// is stored on the cluster configuration and will be fully validated when the
+// actor system starts (not here).
+//
+// Expected minimum fields on config (see datacenter.Config for details):
+//   - ControlPlane: the control-plane implementation/driver to use
+//   - DataCenter.Name: the local datacenter identifier (e.g. "dc-1")
+//   - Endpoints: one or more reachable endpoints for multi-DC communication
+//
+// Example:
+//
+//	mdc := datacenter.NewConfig()
+//	mdc.ControlPlane = controlPlane
+//	mdc.DataCenter = datacenter.DataCenter{Name: "dc-1", Region: "us-east-1"}
+//	mdc.Endpoints = []string{"10.0.0.10:8443"}
+//	cfg := NewClusterConfig().WithDataCenter(mdc)
+//
+// Returns the updated ClusterConfig instance for chaining.
+func (x *ClusterConfig) WithDataCenter(config *datacenter.Config) *ClusterConfig {
+	if config != nil {
+		x.dataCenterConfig = config
 	}
 	return x
 }
