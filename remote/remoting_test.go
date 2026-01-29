@@ -48,6 +48,9 @@ import (
 	"github.com/tochemey/goakt/v3/reentrancy"
 )
 
+// remotingTestCtxKey is a custom type for context keys in remoting tests (avoids SA1029 empty struct key).
+type remotingTestCtxKey struct{}
+
 func TestRemotingOptionsAndDefaults(t *testing.T) {
 	r := NewRemoting().(*remoting)
 
@@ -424,7 +427,7 @@ func TestRemotingServiceClient_Caching(t *testing.T) {
 }
 
 func TestRemotingHeaderPropagation(t *testing.T) {
-	ctxKey := struct{}{}
+	ctxKey := remotingTestCtxKey{}
 	headerKey := "x-goakt-actor"
 	headerValAsk := "ask-context"
 	headerValTell := "tell-context"
@@ -479,7 +482,7 @@ func TestRemotingHeaderPropagation(t *testing.T) {
 }
 
 func TestRemoteBatchTell_FiltersNilMessagesAndInjectsHeader(t *testing.T) {
-	ctxKey := struct{}{}
+	ctxKey := remotingTestCtxKey{}
 	headerKey := "x-goakt-actor"
 	propagator := &testHeaderPropagator{key: ctxKey, header: headerKey}
 	r := NewRemoting(WithRemotingContextPropagator(propagator))
@@ -498,7 +501,7 @@ func TestRemoteBatchTell_FiltersNilMessagesAndInjectsHeader(t *testing.T) {
 }
 
 func TestRemoteBatchAsk_ReturnsResponses(t *testing.T) {
-	ctxKey := struct{}{}
+	ctxKey := remotingTestCtxKey{}
 	headerKey := "x-goakt-actor"
 	propagator := &testHeaderPropagator{key: ctxKey, header: headerKey}
 	r := NewRemoting(WithRemotingContextPropagator(propagator))
@@ -914,7 +917,7 @@ func TestRemoting_RemoteActivateGrain(t *testing.T) {
 	})
 
 	t.Run("sends sanitized request", func(t *testing.T) {
-		ctxKey := struct{}{}
+		ctxKey := remotingTestCtxKey{}
 		headerKey := "x-goakt-propagated"
 		headerVal := "activate-context"
 
@@ -981,7 +984,7 @@ func TestRemoting_RemoteTellGrain(t *testing.T) {
 	})
 
 	t.Run("injects headers and sends request", func(t *testing.T) {
-		ctxKey := struct{}{}
+		ctxKey := remotingTestCtxKey{}
 		headerKey := "x-goakt-propagated"
 		headerVal := "tell-context"
 
@@ -1032,7 +1035,7 @@ func TestRemoting_RemoteAskGrain(t *testing.T) {
 	})
 
 	t.Run("returns response and injects headers", func(t *testing.T) {
-		ctxKey := struct{}{}
+		ctxKey := remotingTestCtxKey{}
 		headerKey := "x-goakt-propagated"
 		headerVal := "ask-context"
 

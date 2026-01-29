@@ -3355,8 +3355,8 @@ func TestPutKindIfAbsent(t *testing.T) {
 
 func TestBuildConfigWithTLSAndDebug(t *testing.T) {
 	info := &gtls.Info{
-		ClientConfig: &tls.Config{},
-		ServerConfig: &tls.Config{},
+		ClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
+		ServerConfig: &tls.Config{MinVersion: tls.VersionTLS12},
 	}
 	cl := &cluster{
 		logger:  log.DebugLogger,
@@ -3376,8 +3376,8 @@ func TestSetupMemberlistConfigWithTLS(t *testing.T) {
 	cert, err := tls.LoadX509KeyPair("../../test/data/certs/auto.pem", "../../test/data/certs/auto.key")
 	require.NoError(t, err)
 	info := &gtls.Info{
-		ClientConfig: &tls.Config{Certificates: []tls.Certificate{cert}},
-		ServerConfig: &tls.Config{Certificates: []tls.Certificate{cert}},
+		ClientConfig: &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12},
+		ServerConfig: &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12},
 	}
 	cl := &cluster{
 		logger:  log.DiscardLogger,

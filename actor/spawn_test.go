@@ -664,13 +664,13 @@ func TestSpawn(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
-		receiveFn := func(ctx context.Context, message proto.Message) error {
+		receiveFn := func(_ context.Context, message proto.Message) error {
 			expected := &testpb.Reply{Content: "test spawn from func"}
 			assert.True(t, proto.Equal(expected, message))
 			return nil
 		}
 
-		preStart := func(ctx context.Context) error {
+		preStart := func(_ context.Context) error {
 			return errors.New("failed")
 		}
 
@@ -1572,6 +1572,34 @@ func TestSpawn(t *testing.T) {
 		err := system.SpawnOn(ctx, actorName, actor, WithPlacement(RoundRobin))
 		require.Error(t, err)
 		assert.ErrorIs(t, err, assert.AnError)
+	})
+
+	t.Run("SpawnOn with WithDataCenter delegates to spawnOnDatacenter", func(t *testing.T) {
+		ctx := context.Background()
+		remotingMock := mocksremote.NewRemoting(t)
+		targetDC := datacenter.DataCenter{Name: "dc-west", Region: "r", Zone: "z"}
+		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+			return []datacenter.DataCenterRecord{{
+				ID:        targetDC.ID(),
+				State:     datacenter.DataCenterActive,
+				Endpoints: []string{"127.0.0.1:9999"},
+			}}, nil
+		}, remotingMock)
+
+		remotingMock.EXPECT().
+			RemoteSpawn(mock.Anything, "127.0.0.1", 9999, mock.MatchedBy(func(req *remote.SpawnRequest) bool {
+				return req.Name == "actor-1" &&
+					req.Kind != "" &&
+					req.Relocatable == true &&
+					req.EnableStashing == false
+			})).
+			Return(nil).
+			Once()
+
+		actor := NewMockActor()
+		err := sys.SpawnOn(ctx, "actor-1", actor, WithDataCenter(&targetDC))
+		require.NoError(t, err)
+		remotingMock.AssertExpectations(t)
 	})
 }
 

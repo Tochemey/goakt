@@ -283,6 +283,7 @@ func TestDiscoverPeersFailures(t *testing.T) {
 
 	t.Run("kubernetes client failure", func(t *testing.T) {
 		config := newConfig()
+		//nolint:staticcheck // SA1019 - test uses fake client; NewClientset requires applyconfig
 		client := testclient.NewSimpleClientset()
 		client.PrependReactor("list", "pods", func(action k8stesting.Action) (handled bool, ret runtime.Object, err error) {
 			return true, nil, errors.New("list failure")

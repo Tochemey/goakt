@@ -776,13 +776,11 @@ func TestControlPlaneListActiveSorting(t *testing.T) {
 	defer func() { _ = cp.Close() }()
 
 	// Register multiple records and verify sorting
-	var ids []string
 	for i := 0; i < 3; i++ {
 		record := newRecord(nextID())
 		record.State = datacenter.DataCenterActive
-		id, _, err := cp.Register(context.Background(), record)
+		_, _, err := cp.Register(context.Background(), record)
 		require.NoError(t, err)
-		ids = append(ids, id)
 	}
 
 	records, err := cp.ListActive(context.Background())

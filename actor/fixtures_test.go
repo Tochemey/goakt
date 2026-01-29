@@ -69,7 +69,6 @@ import (
 	"github.com/tochemey/goakt/v3/internal/xsync"
 	"github.com/tochemey/goakt/v3/log"
 	mockcluster "github.com/tochemey/goakt/v3/mocks/cluster"
-	mockscluster "github.com/tochemey/goakt/v3/mocks/cluster"
 	mocksremote "github.com/tochemey/goakt/v3/mocks/remote"
 	"github.com/tochemey/goakt/v3/passivation"
 	"github.com/tochemey/goakt/v3/remote"
@@ -1511,7 +1510,7 @@ func (d *MockFailingDependency) UnmarshalBinary(_ []byte) error {
 	return nil
 }
 
-func MockReplicationTestSystem(clusterMock *mockscluster.Cluster) *actorSystem {
+func MockReplicationTestSystem(clusterMock *mockcluster.Cluster) *actorSystem {
 	topic := &PID{}
 	topic.setState(runningState, false)
 	noSender := &PID{}
@@ -1890,10 +1889,10 @@ func (MockPanicContextPropagator) Extract(context.Context, http.Header) (context
 	panic("context propagation panic")
 }
 
-func MockClusterEnsureGrainSystem(t *testing.T, grain Grain, name string) (*actorSystem, *mockscluster.Cluster, *GrainIdentity) {
+func MockClusterEnsureGrainSystem(t *testing.T, grain Grain, name string) (*actorSystem, *mockcluster.Cluster, *GrainIdentity) {
 	t.Helper()
 
-	clusterMock := mockscluster.NewCluster(t)
+	clusterMock := mockcluster.NewCluster(t)
 	remotingMock := mocksremote.NewRemoting(t)
 	node := &discovery.Node{
 		Host:          "127.0.0.1",

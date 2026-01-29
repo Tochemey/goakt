@@ -83,6 +83,9 @@ import (
 	gtls "github.com/tochemey/goakt/v3/tls"
 )
 
+// remoteTestCtxKey is a custom type for context keys in remote context propagation tests (avoids SA1029).
+type remoteTestCtxKey struct{}
+
 // nolint
 func TestActorSystem(t *testing.T) {
 	t.Run("New instance with Defaults", func(t *testing.T) {
@@ -2826,7 +2829,7 @@ func TestActorSystem(t *testing.T) {
 
 func TestRemoteContextPropagation(t *testing.T) {
 	t.Run("RemoteAsk injects context values", func(t *testing.T) {
-		ctxKey := struct{}{}
+		ctxKey := remoteTestCtxKey{}
 		headerKey := "x-goakt-propagated"
 		headerVal := "actor-ask"
 
@@ -2869,7 +2872,7 @@ func TestRemoteContextPropagation(t *testing.T) {
 	})
 
 	t.Run("RemoteTell injects context values", func(t *testing.T) {
-		ctxKey := struct{}{}
+		ctxKey := remoteTestCtxKey{}
 		headerKey := "x-goakt-propagated"
 		headerVal := "actor-tell"
 
@@ -2911,7 +2914,7 @@ func TestRemoteContextPropagation(t *testing.T) {
 	})
 
 	t.Run("RemoteAsk extracts context values", func(t *testing.T) {
-		ctxKey := struct{}{}
+		ctxKey := remoteTestCtxKey{}
 		headerKey := "x-goakt-propagated"
 		headerVal := "inbound-ask"
 		ctx := context.Background()
@@ -2950,7 +2953,7 @@ func TestRemoteContextPropagation(t *testing.T) {
 	})
 
 	t.Run("RemoteTell extracts context values", func(t *testing.T) {
-		ctxKey := struct{}{}
+		ctxKey := remoteTestCtxKey{}
 		headerKey := "x-goakt-propagated"
 		headerVal := "inbound-tell"
 		ctx := context.Background()
