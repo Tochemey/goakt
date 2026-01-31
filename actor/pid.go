@@ -1032,7 +1032,12 @@ func (pid *PID) SendAsync(ctx context.Context, actorName string, message proto.M
 		return err
 	}
 
-	timeout := pid.ActorSystem().getDataCenterConfig().RequestTimeout
+	dcConfig := pid.ActorSystem().getDataCenterConfig()
+	timeout := datacenter.DefaultRequestTimeout
+	if dcConfig != nil {
+		timeout = dcConfig.RequestTimeout
+	}
+
 	// Try to find the actor in remote datacenters
 	foundAddr, err := pid.DiscoverActor(ctx, actorName, timeout)
 	if err != nil {

@@ -796,7 +796,12 @@ func (x *actorSystem) tellGrainAcrossDataCenters(ctx context.Context, id *GrainI
 	}
 
 	// Query remote datacenters in parallel with timeout
-	requestTimeout := x.getDataCenterConfig().RequestTimeout
+	dcConfig := x.getDataCenterConfig()
+	requestTimeout := datacenter.DefaultRequestTimeout
+	if dcConfig != nil {
+		requestTimeout = dcConfig.RequestTimeout
+	}
+
 	if timeout > 0 && timeout < requestTimeout {
 		requestTimeout = timeout
 	}
@@ -906,7 +911,12 @@ func (x *actorSystem) askGrainAcrossDataCenters(ctx context.Context, id *GrainId
 	}
 
 	// Query remote datacenters in parallel with timeout
-	requestTimeout := x.getDataCenterConfig().RequestTimeout
+	dcConfig := x.getDataCenterConfig()
+	requestTimeout := datacenter.DefaultRequestTimeout
+	if dcConfig != nil {
+		requestTimeout = dcConfig.RequestTimeout
+	}
+
 	if timeout > 0 && timeout < requestTimeout {
 		requestTimeout = timeout
 	}
