@@ -59,7 +59,13 @@ func TestClusterConfig(t *testing.T) {
 			WithGrainActivationBarrier(5*time.Second).
 			WithClusterBalancerInterval(5*time.Second).
 			WithDiscovery(provider).
-			WithDataCenter(new(datacenter.Config)).
+			WithDataCenter(func() *datacenter.Config {
+				dc := datacenter.NewConfig()
+				dc.ControlPlane = &MockControlPlane{}
+				dc.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
+				dc.Endpoints = []string{"127.0.0.1:8080"}
+				return dc
+			}()).
 			WithRoles("role1", "role2", "role1") // role1 is duplicated to test deduplication
 
 		require.NoError(t, config.Validate())
