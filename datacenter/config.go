@@ -95,6 +95,19 @@ type Config struct {
 	WatchEnabled bool
 	// RequestTimeout bounds control plane API calls.
 	RequestTimeout time.Duration
+	// FailOnStaleCache controls whether cross-DC operations fail when the cache is stale.
+	//
+	// When true (default), operations like SpawnOn with WithDataCenter return ErrDataCenterStaleRecords
+	// if the cache hasn't been refreshed within MaxCacheStaleness. This provides strict consistency
+	// at the cost of availability.
+	//
+	// When false, operations log a warning and proceed with best-effort routing using the stale cache.
+	// This prioritizes availability over strict consistency, which may be acceptable for read-heavy
+	// workloads or when temporary inconsistency is tolerable.
+	//
+	// Note: Grain operations (Tell/Ask across DCs) and actor discovery historically used best-effort
+	// routing. This flag unifies the behavior across all cross-DC operations.
+	FailOnStaleCache bool
 }
 
 var _ validation.Validator = (*Config)(nil)
@@ -111,6 +124,7 @@ func NewConfig() *Config {
 		MaxBackoff:           DefaultMaxBackoff,
 		WatchEnabled:         true,
 		RequestTimeout:       DefaultRequestTimeout,
+		FailOnStaleCache:     true, // Default to strict consistency for backward compatibility
 	}
 }
 

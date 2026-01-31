@@ -405,6 +405,27 @@ func (c *ControlPlane) Watch(ctx context.Context) (<-chan datacenter.ControlPlan
 	return events, nil
 }
 
+// Deregister explicitly removes the datacenter record from the control plane.
+//
+// This method deletes the record from etcd immediately rather than waiting for
+// lease expiry. If the record does not exist, nil is returned (idempotent).
+func (c *ControlPlane) Deregister(ctx context.Context, id string) error {
+	if strings.TrimSpace(id) == "" {
+		return fmt.Errorf("multidc/etcd: id is required")
+	}
+
+	opCtx, cancel := c.withTimeout(ctx)
+	defer cancel()
+
+	key := recordKey(id)
+	_, err := c.kv.Delete(opCtx, key)
+	if err != nil {
+		return fmt.Errorf("multidc/etcd: failed to deregister record: %w", err)
+	}
+
+	return nil
+}
+
 func (c *ControlPlane) toControlPlaneEvent(ctx context.Context, ev *clientv3.Event) (datacenter.ControlPlaneEvent, bool) {
 	switch ev.Type {
 	case clientv3.EventTypePut:

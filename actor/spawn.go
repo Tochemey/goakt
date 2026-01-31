@@ -707,7 +707,11 @@ func (x *actorSystem) spawnOnDatacenter(ctx context.Context, name string, actor 
 	// grab the active datacenter using the controller
 	activeRecords, stale := controller.ActiveRecords()
 	if stale {
-		return gerrors.ErrDataCenterStaleRecords
+		if controller.FailOnStaleCache() {
+			return gerrors.ErrDataCenterStaleRecords
+		}
+		// Best-effort routing: proceed with stale cache but log warning
+		x.logger.Warn("DC cache is stale, proceeding with best-effort cross-DC spawn")
 	}
 
 	// locate the target datacenter

@@ -628,7 +628,7 @@ func (x *actorSystem) remoteTellGrain(ctx context.Context, id *GrainIdentity, me
 	}
 
 	// Try to find and send to grain in remote datacenters
-	if err := x.tellGrainAcrossDCs(ctx, id, message, timeout); err == nil {
+	if err := x.tellGrainAcrossDataCenters(ctx, id, message, timeout); err == nil {
 		return nil
 	}
 
@@ -663,7 +663,7 @@ func (x *actorSystem) remoteAskGrain(ctx context.Context, id *GrainIdentity, mes
 	}
 
 	// Try to find and send to grain in remote datacenters
-	resp, err := x.askGrainAcrossDCs(ctx, id, message, timeout)
+	resp, err := x.askGrainAcrossDataCenters(ctx, id, message, timeout)
 	if err == nil {
 		return resp, nil
 	}
@@ -747,7 +747,7 @@ func (x *actorSystem) localSend(ctx context.Context, id *GrainIdentity, message 
 	}
 }
 
-// tellGrainAcrossDCs sends a message to a Grain across all active datacenters.
+// tellGrainAcrossDataCenters sends a message to a Grain across all active datacenters.
 //
 // This method queries all endpoints in every active datacenter concurrently and
 // sends the message to the first DC that successfully handles it. Once sent,
@@ -764,7 +764,7 @@ func (x *actorSystem) localSend(ctx context.Context, id *GrainIdentity, message 
 //
 // Returns:
 //   - error: nil if message was sent successfully, error otherwise
-func (x *actorSystem) tellGrainAcrossDCs(ctx context.Context, id *GrainIdentity, message proto.Message, timeout time.Duration) error {
+func (x *actorSystem) tellGrainAcrossDataCenters(ctx context.Context, id *GrainIdentity, message proto.Message, timeout time.Duration) error {
 	dcController := x.getDataCenterController()
 	if dcController == nil {
 		return gerrors.ErrActorNotFound
@@ -772,6 +772,10 @@ func (x *actorSystem) tellGrainAcrossDCs(ctx context.Context, id *GrainIdentity,
 
 	dcRecords, stale := dcController.ActiveRecords()
 	if stale {
+		if dcController.FailOnStaleCache() {
+			return gerrors.ErrDataCenterStaleRecords
+		}
+		// Best-effort routing: proceed with stale cache but log warning
 		x.logger.Warn("DC cache is stale, proceeding with best-effort cross-DC grain routing")
 	}
 
@@ -852,7 +856,7 @@ func (x *actorSystem) tellGrainAcrossDCs(ctx context.Context, id *GrainIdentity,
 	return gerrors.ErrActorNotFound
 }
 
-// askGrainAcrossDCs sends a synchronous message to a Grain across all active datacenters.
+// askGrainAcrossDataCenters sends a synchronous message to a Grain across all active datacenters.
 //
 // This method queries all endpoints in every active datacenter concurrently and
 // returns the response from the first DC that successfully handles the request.
@@ -870,7 +874,7 @@ func (x *actorSystem) tellGrainAcrossDCs(ctx context.Context, id *GrainIdentity,
 // Returns:
 //   - proto.Message: The response from the Grain if found
 //   - error: nil if successful, ErrActorNotFound if grain not found in any DC
-func (x *actorSystem) askGrainAcrossDCs(ctx context.Context, id *GrainIdentity, message proto.Message, timeout time.Duration) (proto.Message, error) {
+func (x *actorSystem) askGrainAcrossDataCenters(ctx context.Context, id *GrainIdentity, message proto.Message, timeout time.Duration) (proto.Message, error) {
 	dcController := x.getDataCenterController()
 	if dcController == nil {
 		return nil, gerrors.ErrActorNotFound
@@ -878,6 +882,10 @@ func (x *actorSystem) askGrainAcrossDCs(ctx context.Context, id *GrainIdentity, 
 
 	dcRecords, stale := dcController.ActiveRecords()
 	if stale {
+		if dcController.FailOnStaleCache() {
+			return nil, gerrors.ErrDataCenterStaleRecords
+		}
+		// Best-effort routing: proceed with stale cache but log warning
 		x.logger.Warn("DC cache is stale, proceeding with best-effort cross-DC grain routing")
 	}
 

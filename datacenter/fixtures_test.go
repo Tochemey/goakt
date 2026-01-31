@@ -75,3 +75,7 @@ func (m *MockControlPlane) Watch(ctx context.Context) (<-chan ControlPlaneEvent,
 	}
 	return nil, errors.ErrWatchNotSupported
 }
+
+func (m *MockControlPlane) Deregister(_ context.Context, _ string) error {
+	return nil
+}

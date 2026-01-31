@@ -97,17 +97,19 @@ Lifecycle State Machine
 
 - REGISTERED: metadata accepted, waiting for first heartbeat.
 - ACTIVE: heartbeats are current, eligible for routing.
-- DRAINING: no new placements; used for planned maintenance or migration.
+- DRAINING: no new placements; used during graceful shutdown (actor system stop).
 - INACTIVE: lease expired or explicitly disabled; excluded from routing.
 
-Transitions:
+Transitions (all driven by actor system lifecycle or control plane TTL):
 
-- REGISTERED -> ACTIVE: first valid heartbeat.
-- ACTIVE -> DRAINING: operator action or policy.
-- ACTIVE -> INACTIVE: TTL expiry or explicit disable.
-- DRAINING -> INACTIVE: operator action or TTL expiry.
+- REGISTERED -> ACTIVE: first valid heartbeat (on actor system start).
+- ACTIVE -> DRAINING: on actor system shutdown (DC leader/controller stops).
+- ACTIVE -> INACTIVE: TTL expiry (heartbeats stopped) or explicit disable.
+- DRAINING -> INACTIVE: on actor system shutdown (controller transitions to INACTIVE after DRAINING) or TTL expiry.
 
-```
+DRAINING and INACTIVE are not exposed as separate operator APIs; they are controlled solely by actor system start and shutdown. This keeps lifecycle simple and avoids split control between runtime and external operators.
+
+````
 
 Control Plane Interface (Minimal and Efficient)
 -----------------------------------------------
@@ -137,8 +139,7 @@ Control Plane Interface Shape
 The control plane is exposed as a small interface, consistent with the discovery engine pattern.
 This keeps provider swaps configuration-only.
 
-```
-
+```go
 type ControlPlane interface {
 Register(ctx, record) (id, version, error)
 Heartbeat(ctx, id, version) (newVersion, leaseExpiry, error)
@@ -146,21 +147,22 @@ SetState(ctx, id, state, version) (newVersion, error)
 ListActive(ctx) ([]record, error)
 Watch(ctx) (stream, error)
 }
-
 ```
+````
 
-Control Plane Contract Guarantees
----------------------------------
+## Control Plane Contract Guarantees
+
 - Register, SetState, and Heartbeat are linearizable per record (CAS by Version).
 - Heartbeat extends the lease only when Version is current; stale versions are rejected.
 - ListActive returns only ACTIVE records with unexpired leases.
 - Watch emits ordered updates by Version and is at-least-once (clients de-dupe by Version).
 
-Configuration (Provider Selection)
------------------------------------
+## Configuration (Provider Selection)
+
 The provider is wired by passing a ControlPlane implementation into `datacenter.Config`.
 
 Example (etcd):
+
 ```
 
 etcdConfig := &etcd.Config{
@@ -177,14 +179,14 @@ cfg.ControlPlane = cp
 Provider-specific settings live in the provider's Config type (for example,
 `datacenter/controlplane/etcd.Config` or `datacenter/controlplane/nats.Config`).
 
-Consistency and Concurrency
------------------------------
+## Consistency and Concurrency
+
 - Versioned writes (compare-and-swap) prevent stale updates.
 - All state changes are idempotent; callers can retry safely.
 - Reads may be eventually consistent; clients cache with TTL and revalidate.
 
-Efficiency Considerations
--------------------------
+## Efficiency Considerations
+
 - Heartbeats are small, write-optimized (only lease + version update).
 - ListActive is optimized for routing (single query, no joins).
 - Watch reduces polling when supported; polling remains the fallback.
@@ -192,15 +194,15 @@ Efficiency Considerations
 - Each DC leader maintains a local cache of active DCs (TTL-based) and
   refreshes periodically to avoid registry calls on every request.
 
-Cache and Refresh Strategy
---------------------------
+## Cache and Refresh Strategy
+
 - The DC leader owns a local registry cache; followers do not run the manager.
 - Cache refresh uses jittered intervals to avoid thundering herds.
 - Callers can inspect cache staleness to decide fallback behavior; cross-DC routing and placement use this cache.
 - Watch-based refresh is used when supported; polling still runs and merges when watch is active, otherwise it replaces the cache.
 
-Current Operational Defaults
-----------------------------
+## Current Operational Defaults
+
 - Heartbeat interval: 10s with 10% jitter.
 - Cache refresh interval: 10s with 10% jitter.
 - Leader check interval: 5s.
@@ -210,67 +212,69 @@ Current Operational Defaults
 - Max backoff: 30s.
 - Lease TTL: provider-specific; must be set in the control plane config.
 
-Failure Handling
------------------
+## Failure Handling
+
 - Leader failover in a DC continues heartbeats from the new leader.
 - Temporary registry outages are tolerated via client-side caching.
 - Registry unavailability does not block local DC operations; it only
   affects control plane updates and any cross-DC routing built on the cache.
 
-Security and Governance
------------------------
+## Security and Governance
+
 Recommended practices (provider-specific, not enforced by the core runtime):
+
 - mTLS between DC leaders and registry.
 - Per-DC credentials scoped to its own record.
-- Audit log for state changes (REGISTER, DRAINING, INACTIVE).
 - Inter-DC communication is fully secured using HTTP/3 over quic-go.
 
-Routing and DC-Transparent Messaging
-------------------------------------
+## Routing and DC-Transparent Messaging
+
 Status: implemented. The runtime uses the control plane cache for discovery-based routing.
 
 DC-transparent messaging means callers address logical actor/grain identities without choosing a DC.
 The runtime discovers which DC contains the target actor by querying active DCs in parallel.
 
-Current Implementation (Discovery-Based Routing):
--------------------------------------------------
+## Current Implementation (Discovery-Based Routing):
+
 The current implementation uses a discovery-based approach that queries all active DCs to locate
 the target actor. This approach is well-suited for the current state where actors may exist in
 any DC and deterministic placement policies are not yet implemented.
 
 Routing flow:
-1) Local runtime first attempts to find the actor in the local datacenter using ActorOf.
-2) If not found locally, the runtime retrieves the list of active DCs from the control plane cache.
-3) The runtime queries all active DC endpoints in parallel using RemoteLookup to discover
+
+1. Local runtime first attempts to find the actor in the local datacenter using ActorOf.
+2. If not found locally, the runtime retrieves the list of active DCs from the control plane cache.
+3. The runtime queries all active DC endpoints in parallel using RemoteLookup to discover
    which DC contains the target actor.
-4) The first DC that responds with a valid actor address is selected.
-5) Remaining pending lookups are cancelled to avoid unnecessary network traffic.
-6) The message is sent via remote messaging to the discovered DC endpoint.
-7) The receiving DC resolves the actor locally and delivers the message.
+4. The first DC that responds with a valid actor address is selected.
+5. Remaining pending lookups are cancelled to avoid unnecessary network traffic.
+6. The message is sent via remote messaging to the discovered DC endpoint.
+7. The receiving DC resolves the actor locally and delivers the message.
 
 Implementation details:
+
 - Parallel queries: All active DCs are queried concurrently for low latency.
 - Early cancellation: Once a match is found, remaining lookups are cancelled.
 - Timeout protection: Lookups are bounded by a timeout (default 5 seconds) to avoid hanging.
 - Stale cache handling: The implementation uses cached DC records but may proceed with
   stale data if the cache hasn't been refreshed recently (configurable behavior).
 
-DC-aware placement (implemented)
---------------------------------
+## DC-aware placement (implemented)
+
 - SpawnOn accepts WithDataCenter(target) to spawn an actor on a node in a different data center.
 - The runtime looks up the target DC in the control plane cache, then sends RemoteSpawn to one of
   that DC's advertised Endpoints chosen at random. Which nodes are eligible is determined by
   the target DC's datacenter.Config.Endpoints (leader-only vs all nodes).
 - There is no built-in relocation of actors/grains across DCs.
 
-Liveness and Health Checks
---------------------------
+## Liveness and Health Checks
+
 - Each DC leader periodically updates its liveness in the registry.
 - Liveness uses TTL-based heartbeats; absence of heartbeat marks the DC as inactive.
 - Routing only considers active DCs. Inactive DCs are removed from routing tables.
 
-Sequence Flows
----------------
+## Sequence Flows
+
 ```
 
 DC registration and heartbeat (implemented):
@@ -289,7 +293,4 @@ DC-transparent message delivery (implemented):
 6. Remaining lookups are cancelled.
 7. Message is sent to the discovered DC using remote messaging.
 8. Receiving DC resolves Actor B locally and delivers the message.
-
-```
-
 ```

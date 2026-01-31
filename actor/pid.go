@@ -1132,6 +1132,9 @@ func (pid *PID) DiscoverActor(ctx context.Context, actorName string, timeout tim
 	dataCenterController := actorSystem.getDataCenterController()
 	dataCenterRecords, stale := dataCenterController.ActiveRecords()
 	if stale {
+		if dataCenterController.FailOnStaleCache() {
+			return nil, gerrors.ErrDataCenterStaleRecords
+		}
 		// Best-effort routing: proceed with stale cache but log warning
 		// Stale cache may miss newly registered DCs or include inactive ones
 		pid.logger.Warn("DC cache is stale, proceeding with best-effort cross-DC routing")

@@ -485,5 +485,6 @@ func (x *ClusterConfig) Validate() error {
 		AddAssertion(x.writeQuorum >= 1, "cluster writeQuorum is invalid").
 		AddAssertion(x.readQuorum >= 1, "cluster readQuorum is invalid").
 		AddAssertion(x.grainActivationBarrier == nil || x.grainActivationBarrier.timeout >= 0, "grain activation barrier timeout is invalid").
+		AddValidator(validation.NewConditionalValidator(x.dataCenterConfig != nil, x.dataCenterConfig)).
 		Validate()
 }

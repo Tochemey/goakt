@@ -42,6 +42,7 @@ func TestConfigDefaults(t *testing.T) {
 	require.Equal(t, DefaultMaxBackoff, config.MaxBackoff)
 	require.Equal(t, DefaultRequestTimeout, config.RequestTimeout)
 	require.True(t, config.WatchEnabled)
+	require.True(t, config.FailOnStaleCache) // default to strict consistency
 }
 
 func TestConfigSanitizeDefaults(t *testing.T) {

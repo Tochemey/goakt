@@ -383,6 +383,28 @@ func (c *ControlPlane) Watch(ctx context.Context) (<-chan datacenter.ControlPlan
 	return events, nil
 }
 
+// Deregister explicitly removes the datacenter record from the control plane.
+//
+// This method deletes the record from the NATS KV bucket immediately rather than
+// waiting for TTL expiry. If the record does not exist, nil is returned (idempotent).
+func (c *ControlPlane) Deregister(_ context.Context, id string) error {
+	if strings.TrimSpace(id) == "" {
+		return fmt.Errorf("controlplane/nats: id is required")
+	}
+
+	key := recordKey(id)
+	err := c.kv.Delete(key)
+	if err != nil {
+		// Treat not found as success (idempotent)
+		if errors.Is(err, nats.ErrKeyNotFound) || errors.Is(err, nats.ErrKeyDeleted) {
+			return nil
+		}
+		return fmt.Errorf("controlplane/nats: failed to deregister record: %w", err)
+	}
+
+	return nil
+}
+
 func (*ControlPlane) toControlPlaneEvent(entry nats.KeyValueEntry) (datacenter.ControlPlaneEvent, bool) {
 	switch entry.Operation() {
 	case nats.KeyValuePut:

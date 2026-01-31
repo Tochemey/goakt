@@ -2225,6 +2225,10 @@ func (*MockControlPlane) Watch(_ context.Context) (<-chan datacenter.ControlPlan
 	return nil, gerrors.ErrWatchNotSupported
 }
 
+func (*MockControlPlane) Deregister(_ context.Context, _ string) error {
+	return nil
+}
+
 // MockDatacenterSystem returns an *actorSystem configured for datacenter tests.
 // The controller is started with the fake control plane; listActive is used to drive ActiveRecords().
 func MockDatacenterSystem(t *testing.T, listActive func(_ context.Context) ([]datacenter.DataCenterRecord, error), remoting *mocksremote.Remoting) *actorSystem {

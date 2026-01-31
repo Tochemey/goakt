@@ -175,6 +175,14 @@ func (x *Controller) Start(ctx context.Context) error {
 // Stop stops background tasks and marks the local datacenter inactive.
 //
 // Stop is idempotent: repeated calls return nil after the manager is already stopped.
+// It performs a graceful shutdown by:
+//  1. Stopping background goroutines (heartbeat, refresh, watch)
+//  2. Transitioning the record state: DRAINING -> INACTIVE
+//  3. Explicitly deregistering the record from the control plane
+//
+// Deregistration provides a clean shutdown that removes the record immediately
+// rather than relying on lease expiry. This allows other datacenters to stop
+// routing to this DC as quickly as possible.
 func (x *Controller) Stop(ctx context.Context) error {
 	x.lifecycleMu.Lock()
 	defer x.lifecycleMu.Unlock()
@@ -202,6 +210,7 @@ func (x *Controller) Stop(ctx context.Context) error {
 	cancel()
 	if err != nil {
 		if errors.Is(err, gerrors.ErrDataCenterRecordNotFound) {
+			x.cache.reset()
 			return nil
 		}
 		return err
@@ -218,6 +227,15 @@ func (x *Controller) Stop(ctx context.Context) error {
 	x.recordVer = newVersion
 	x.mu.Unlock()
 
+	// Explicitly deregister to remove the record immediately rather than
+	// waiting for lease expiry. This provides faster cleanup for other DCs.
+	opCtx, cancel = x.withTimeout(ctx)
+	if deregErr := x.controlPlane.Deregister(opCtx, id); deregErr != nil {
+		x.logger.Warnf("multidc: failed to deregister record during shutdown: %v", deregErr)
+		// Don't fail the stop operation; the record will expire via lease anyway
+	}
+	cancel()
+
 	x.cache.reset()
 	return nil
 }
@@ -232,6 +250,15 @@ func (x *Controller) ActiveRecords() ([]DataCenterRecord, bool) {
 		return records, true
 	}
 	return records, time.Since(refreshedAt) > x.config.MaxCacheStaleness
+}
+
+// FailOnStaleCache returns whether cross-DC operations should fail when the cache is stale.
+//
+// When true, operations should return ErrDataCenterStaleRecords if ActiveRecords reports
+// a stale cache. When false, operations should log a warning and proceed with best-effort
+// routing using the potentially stale cache.
+func (x *Controller) FailOnStaleCache() bool {
+	return x.config.FailOnStaleCache
 }
 
 // Ready reports whether the controller is operational and safe for routing.

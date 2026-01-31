@@ -87,4 +87,13 @@ type ControlPlane interface {
 	// Implementations should close the returned channel when the watch terminates. Providers that
 	// do not support watch should return goakt/errors.ErrWatchNotSupported.
 	Watch(ctx context.Context) (<-chan ControlPlaneEvent, error)
+
+	// Deregister explicitly removes the datacenter record from the control plane.
+	//
+	// This method is intended for clean shutdowns where you want to immediately remove
+	// the record rather than waiting for lease expiry. It is safe to call multiple times
+	// or on non-existent records (implementations should return nil or ErrDataCenterRecordNotFound).
+	//
+	// If the record does not exist, implementations may return nil or ErrDataCenterRecordNotFound.
+	Deregister(ctx context.Context, id string) error
 }
