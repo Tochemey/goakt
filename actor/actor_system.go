@@ -2612,9 +2612,11 @@ func (x *actorSystem) getDataCenterController() *datacentercontroller.Controller
 // getDataCenterConfig returns the data center configuration.
 func (x *actorSystem) getDataCenterConfig() *datacenter.Config {
 	x.locker.RLock()
-	config := x.clusterConfig.dataCenterConfig
-	x.locker.RUnlock()
-	return config
+	defer x.locker.RUnlock()
+	if x.clusterConfig == nil {
+		return nil
+	}
+	return x.clusterConfig.dataCenterConfig
 }
 
 func (x *actorSystem) getClusterStore() cluster.Store {
