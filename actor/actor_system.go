@@ -56,6 +56,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/tochemey/goakt/v3/address"
+	"github.com/tochemey/goakt/v3/datacenter"
 	"github.com/tochemey/goakt/v3/discovery"
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/eventstream"
@@ -783,6 +784,7 @@ type ActorSystem interface {
 	removeNodeLeft(address string)
 	getClusterStore() cluster.Store
 	getDataCenterController() *datacentercontroller.Controller
+	getDataCenterConfig() *datacenter.Config
 }
 
 // ActorSystem represent a collection of actors on a given node
@@ -2605,6 +2607,14 @@ func (x *actorSystem) getDataCenterController() *datacentercontroller.Controller
 	dataCenterController := x.dataCenterController
 	x.locker.RUnlock()
 	return dataCenterController
+}
+
+// getDataCenterConfig returns the data center configuration.
+func (x *actorSystem) getDataCenterConfig() *datacenter.Config {
+	x.locker.RLock()
+	config := x.clusterConfig.dataCenterConfig
+	x.locker.RUnlock()
+	return config
 }
 
 func (x *actorSystem) getClusterStore() cluster.Store {

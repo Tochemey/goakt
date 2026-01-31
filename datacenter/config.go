@@ -39,7 +39,7 @@ const (
 	// DefaultLeaderCheckInterval defines how often leadership is rechecked for manager ownership.
 	DefaultLeaderCheckInterval = 5 * time.Second
 	// DefaultRequestTimeout defines the default timeout for control plane operations.
-	DefaultRequestTimeout = 3 * time.Second
+	DefaultRequestTimeout = 5 * time.Second
 	// DefaultJitterRatio defines the default jitter ratio applied to periodic loops.
 	DefaultJitterRatio = 0.1
 	// DefaultMaxBackoff defines the default cap for exponential backoff on errors.

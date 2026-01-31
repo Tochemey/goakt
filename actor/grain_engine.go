@@ -796,12 +796,12 @@ func (x *actorSystem) tellGrainAcrossDataCenters(ctx context.Context, id *GrainI
 	}
 
 	// Query remote datacenters in parallel with timeout
-	lookupTimeout := 5 * time.Second
-	if timeout > 0 && timeout < lookupTimeout {
-		lookupTimeout = timeout
+	requestTimeout := x.getDataCenterConfig().RequestTimeout
+	if timeout > 0 && timeout < requestTimeout {
+		requestTimeout = timeout
 	}
 
-	queryCtx, cancel := context.WithTimeout(ctx, lookupTimeout)
+	requestCtx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 
 	// Buffer sized for all endpoints to prevent goroutine blocking
@@ -833,7 +833,7 @@ func (x *actorSystem) tellGrainAcrossDataCenters(ctx context.Context, id *GrainI
 			wg.Add(1)
 			go func(host string, port int) {
 				defer wg.Done()
-				err := x.remoting.RemoteTellGrain(queryCtx, host, port, grainReq, message)
+				err := x.remoting.RemoteTellGrain(requestCtx, host, port, grainReq, message)
 				results <- err
 			}(host, port)
 		}
@@ -906,12 +906,12 @@ func (x *actorSystem) askGrainAcrossDataCenters(ctx context.Context, id *GrainId
 	}
 
 	// Query remote datacenters in parallel with timeout
-	lookupTimeout := 5 * time.Second
-	if timeout > 0 && timeout < lookupTimeout {
-		lookupTimeout = timeout
+	requestTimeout := x.getDataCenterConfig().RequestTimeout
+	if timeout > 0 && timeout < requestTimeout {
+		requestTimeout = timeout
 	}
 
-	queryCtx, cancel := context.WithTimeout(ctx, lookupTimeout)
+	requestCtx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 
 	type result struct {
@@ -948,7 +948,7 @@ func (x *actorSystem) askGrainAcrossDataCenters(ctx context.Context, id *GrainId
 			wg.Add(1)
 			go func(host string, port int) {
 				defer wg.Done()
-				resp, err := x.remoting.RemoteAskGrain(queryCtx, host, port, grainReq, message, timeout)
+				resp, err := x.remoting.RemoteAskGrain(requestCtx, host, port, grainReq, message, timeout)
 				results <- result{resp: resp, err: err}
 			}(host, port)
 		}
