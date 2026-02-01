@@ -1,5 +1,17 @@
 # Changelog
 
+
+## [Unreleased]
+
+### 🐛 Fixes
+
+- 🛡️ `preShutdown` now skips building and persisting peer state when relocation is disabled, avoiding unnecessary cluster operations and ensuring shutdown proceeds correctly when `WithoutRelocation` is configured.
+
+### ✨ Features
+
+- 🌐 Multi-datacenter support with DC-transparent messaging, pluggable control plane (NATS JetStream, Etcd), DC-aware placement via `SpawnOn` with `WithDataCenter`, and cross-DC actor/grain communication. See `datacenter` package and `WithDataCenter` option.
+
+
 ## [v3.13.0] - 2026-01-23
 
 ### 🐛 Fixes
