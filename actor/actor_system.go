@@ -4037,6 +4037,11 @@ func (x *actorSystem) registerMetrics() error {
 // The actual persistence to remote peers happens later in shutdownCluster
 // to ensure proper ordering: persist state before leaving membership.
 func (x *actorSystem) preShutdown() (*internalpb.PeerState, error) {
+	if !x.relocationEnabled.Load() {
+		x.logger.Infof("Relocation is disabled; skipping peer state build", x.PeersAddress())
+		return nil, nil
+	}
+
 	if !x.clusterEnabled.Load() || x.cluster == nil {
 		x.logger.Infof("Node (%s) is not part of a cluster; skipping peer state build", x.PeersAddress())
 		return nil, nil
@@ -4047,6 +4052,10 @@ func (x *actorSystem) preShutdown() (*internalpb.PeerState, error) {
 
 	wireActors := make(map[string]*internalpb.Actor, len(actors))
 	for _, actor := range actors {
+		if !actor.IsRelocatable() {
+			continue // actor is not relocatable, skip it
+		}
+
 		wireActor, err := actor.toWireActor()
 		if err != nil {
 			return nil, err

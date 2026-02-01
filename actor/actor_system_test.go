@@ -8506,6 +8506,40 @@ func TestSelectOldestPeers(t *testing.T) {
 	})
 }
 
+func TestPreShutdown(t *testing.T) {
+	t.Run("returns nil when relocation is disabled", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		system.relocationEnabled.Store(false)
+
+		peerState, err := system.preShutdown()
+		require.NoError(t, err)
+		assert.Nil(t, peerState)
+	})
+
+	t.Run("returns nil when cluster is not enabled", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		system.relocationEnabled.Store(true)
+		system.clusterEnabled.Store(false)
+
+		peerState, err := system.preShutdown()
+		require.NoError(t, err)
+		assert.Nil(t, peerState)
+	})
+
+	t.Run("returns nil when cluster is nil", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		system.relocationEnabled.Store(true)
+		system.cluster = nil
+
+		peerState, err := system.preShutdown()
+		require.NoError(t, err)
+		assert.Nil(t, peerState)
+	})
+}
+
 func TestPersistPeerStateToPeers(t *testing.T) {
 	t.Run("returns nil when peerState is nil", func(t *testing.T) {
 		ctx := context.TODO()
