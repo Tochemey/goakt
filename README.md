@@ -39,6 +39,7 @@ Also, check the reference section at the end of the post for more material regar
 - **Dependency Injection**: Attach runtime dependencies to actors at spawn time.
 - **Observability**: OpenTelemetry metrics, event stream, and dead letters.
 - **Extensions**: Pluggable APIs for cross-cutting capabilities.
+- **Data Center**: Multi-datacenter support with DC-transparent messaging, pluggable control plane (NATS JetStream, Etcd), DC-aware placement (SpawnOn with WithDataCenter), and cross-DC actor/grain communication.
 
 ## 💻 Installation
 ```shell
