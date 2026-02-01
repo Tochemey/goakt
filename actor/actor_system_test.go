@@ -83,6 +83,9 @@ import (
 	gtls "github.com/tochemey/goakt/v3/tls"
 )
 
+// remoteTestCtxKey is a custom type for context keys in remote context propagation tests (avoids SA1029).
+type remoteTestCtxKey struct{}
+
 // nolint
 func TestActorSystem(t *testing.T) {
 	t.Run("New instance with Defaults", func(t *testing.T) {
@@ -2826,7 +2829,7 @@ func TestActorSystem(t *testing.T) {
 
 func TestRemoteContextPropagation(t *testing.T) {
 	t.Run("RemoteAsk injects context values", func(t *testing.T) {
-		ctxKey := struct{}{}
+		ctxKey := remoteTestCtxKey{}
 		headerKey := "x-goakt-propagated"
 		headerVal := "actor-ask"
 
@@ -2869,7 +2872,7 @@ func TestRemoteContextPropagation(t *testing.T) {
 	})
 
 	t.Run("RemoteTell injects context values", func(t *testing.T) {
-		ctxKey := struct{}{}
+		ctxKey := remoteTestCtxKey{}
 		headerKey := "x-goakt-propagated"
 		headerVal := "actor-tell"
 
@@ -2911,7 +2914,7 @@ func TestRemoteContextPropagation(t *testing.T) {
 	})
 
 	t.Run("RemoteAsk extracts context values", func(t *testing.T) {
-		ctxKey := struct{}{}
+		ctxKey := remoteTestCtxKey{}
 		headerKey := "x-goakt-propagated"
 		headerVal := "inbound-ask"
 		ctx := context.Background()
@@ -2950,7 +2953,7 @@ func TestRemoteContextPropagation(t *testing.T) {
 	})
 
 	t.Run("RemoteTell extracts context values", func(t *testing.T) {
-		ctxKey := struct{}{}
+		ctxKey := remoteTestCtxKey{}
 		headerKey := "x-goakt-propagated"
 		headerVal := "inbound-tell"
 		ctx := context.Background()
@@ -7814,7 +7817,8 @@ func TestStopReturnsCleanupClusterError(t *testing.T) {
 	system.actors.counter.Inc()
 
 	clusterMock.EXPECT().IsLeader(mock.Anything).Return(false)
-	clusterMock.EXPECT().Peers(mock.Anything).Return(nil, nil)
+	// Peers is not called: relocation is disabled (MockReplicationTestSystem default), so preShutdown returns nil
+	// and persistPeerStateToPeers is skipped.
 	clusterMock.EXPECT().RemoveActor(mock.Anything, pid.Name()).Return(assert.AnError)
 	clusterMock.EXPECT().Stop(mock.Anything).Return(nil)
 	t.Cleanup(func() { clusterMock.AssertExpectations(t) })
@@ -8500,6 +8504,40 @@ func TestSelectOldestPeers(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, peers, 1)
 		assert.Equal(t, "host1", peers[0].Host)
+	})
+}
+
+func TestPreShutdown(t *testing.T) {
+	t.Run("returns nil when relocation is disabled", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		system.relocationEnabled.Store(false)
+
+		peerState, err := system.preShutdown()
+		require.NoError(t, err)
+		assert.Nil(t, peerState)
+	})
+
+	t.Run("returns nil when cluster is not enabled", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		system.relocationEnabled.Store(true)
+		system.clusterEnabled.Store(false)
+
+		peerState, err := system.preShutdown()
+		require.NoError(t, err)
+		assert.Nil(t, peerState)
+	})
+
+	t.Run("returns nil when cluster is nil", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		system.relocationEnabled.Store(true)
+		system.cluster = nil
+
+		peerState, err := system.preShutdown()
+		require.NoError(t, err)
+		assert.Nil(t, peerState)
 	})
 }
 

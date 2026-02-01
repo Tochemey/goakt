@@ -30,6 +30,7 @@ import (
 	"net"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,6 +38,7 @@ import (
 	"github.com/flowchartsman/retry"
 	"github.com/google/uuid"
 
+	"github.com/tochemey/goakt/v3/datacenter"
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/pointer"
@@ -142,44 +144,73 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 	return pid, x.putActorOnCluster(pid)
 }
 
-// SpawnOn creates and starts an actor, either locally or on a remote node,
-// depending on the configuration of the actor system.
+// SpawnOn creates and starts an actor locally, on another node in the current cluster,
+// or on a node in a different data center, depending on options and actor system configuration.
 //
-// In cluster mode, the actor may be spawned on any node in the cluster
-// based on the specified placement strategy. Supported strategies include:
-//   - RoundRobin: Distributes actors evenly across available nodes.
-//   - Random: Choose a node at random.
-//   - Local: Ensures that the actor is created on the local node.
-//   - LeastLoad: Places the actor on the node with the fewest active actors.
+// # Cross–data center placement
 //
-// In non-cluster mode, the actor is created on the local actor system
-// just like with the standard `Spawn` function.
+// When opts include WithDataCenter, the actor is spawned on a node in that data center.
+// Placement is a random node among the target DC's advertised remoting endpoints: SpawnOn
+// calls spawnOnDatacenter, which requires DataCenterReady(), looks up the target DC by the
+// given datacenter.DataCenter's ID() in the controller's active records, then sends a
+// RemoteSpawn to one of that record's Endpoints chosen at random. There is no leader
+// selection—which node runs the actor depends entirely on which addresses the target DC
+// registered (via datacenter.Config.Endpoints). If that DC advertises only its leader, every
+// cross-DC spawn goes to the leader; if it advertises all nodes, the actor is placed on a
+// random node in that DC. The actor kind must be registered on the target data center's
+// actor systems. See WithDataCenter and spawnOnDatacenter for details and errors
+// (e.g. ErrDataCenterNotReady, ErrDataCenterStaleRecords, ErrDataCenterRecordNotFound).
 //
-// Unlike `Spawn`, `SpawnOn` does not return a PID immediately. To interact with
-// the spawned actor, use the `ActorOf` method to resolve its PID or Address after it has been
-// successfully created.
+// # Same–data center placement
+//
+// When no target data center is specified, behavior depends on cluster mode:
+//
+//   - In cluster mode, the actor may be placed on any node in the local cluster according to
+//     the placement strategy and role filter. Supported strategies:
+//     RoundRobin, Random, Local, LeastLoad. Placement uses cluster.Members and thus stays
+//     within the current data center when the architecture is one-cluster-per-DC.
+//   - In non-cluster mode, the actor is created on the local actor system, like Spawn.
+//
+// Unlike Spawn, SpawnOn does not return a PID. Use ActorOf to resolve the actor's PID or
+// Address after it has been successfully created.
 //
 // Parameters:
-//   - ctx: A context used to control cancellation and timeouts during the spawn process.
-//   - name: A globally unique name for the actor in the cluster.
+//   - ctx: Context for cancellation and timeouts during the spawn process.
+//   - name: A globally unique name for the actor in the cluster or across data centers.
 //   - actor: An instance implementing the Actor interface.
-//   - opts: Optional SpawnOptions, such as placement strategy or dependencies, mailbox, supervisor strategy.
+//   - opts: Optional SpawnOptions: placement strategy, WithDataCenter for cross-DC spawn,
+//     role, dependencies, mailbox, supervisor strategy, etc.
 //
 // Returns:
-//   - error: An error if the actor could not be spawned (e.g., name conflict,
-//     network failure, or misconfiguration).
+//   - error: An error if the actor could not be spawned (e.g., name conflict, network or
+//     remoting failure, misconfiguration; or, when using WithDataCenter, data center
+//     not ready, stale records, or target DC not found).
 //
-// Example:
+// Example (same-DC, cluster placement):
 //
 //	err := system.SpawnOn(ctx, "actor-1", NewCartActor(), WithPlacement(Random))
 //	if err != nil {
 //	    log.Fatalf("Failed to spawn actor: %v", err)
 //	}
 //
-// Note: The created actor used the default mailbox set during the creation of the actor system.
+// Example (cross-DC):
+//
+//	dc := &datacenter.DataCenter{Name: "dc-west", Region: "us-west-2"}
+//	err := system.SpawnOn(ctx, "actor-1", NewCartActor(), WithDataCenter(dc))
+//	if err != nil {
+//	    log.Fatalf("Failed to spawn actor in dc-west: %v", err)
+//	}
+//
+// ⚠️ Note: The created actor uses the default mailbox from the actor system unless overridden in opts.
 func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opts ...SpawnOption) error {
 	if !x.Running() {
 		return gerrors.ErrActorSystemNotStarted
+	}
+
+	config := newSpawnConfig(opts...)
+	// here we are sending the message to a datacenter
+	if config.dataCenter != nil {
+		return x.spawnOnDatacenter(ctx, name, actor, config)
 	}
 
 	// check some preconditions
@@ -187,7 +218,6 @@ func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opt
 		return err
 	}
 
-	config := newSpawnConfig(opts...)
 	if !x.InCluster() {
 		_, err := x.Spawn(ctx, name, actor, opts...)
 		return err
@@ -628,6 +658,97 @@ func (x *actorSystem) spawnSingletonOnLocal(ctx context.Context, name string, ac
 
 	spawnSucceeded = true
 	return nil
+}
+
+// spawnOnDatacenter spawns an actor on a remote data center by sending a RemoteSpawn
+// request to one of that data center's advertised endpoints, chosen at random.
+//
+// It is used when SpawnOn is called with WithDataCenter; the target data center is
+// identified by config.dataCenter (see datacenter.DataCenter and its ID method).
+// The multi-DC control plane must be configured and the local data center controller
+// must have a non-stale view of active data centers.
+//
+// Placement: The target is one of the target DC's DataCenterRecord.Endpoints, selected
+// uniformly at random. There is no leader selection. Which node actually runs the actor
+// is determined by what that DC registered: DataCenterRecord.Endpoints come from the
+// target DC's datacenter.Config.Endpoints at registration time (typically by that DC's
+// leader). If the target DC registered a single endpoint (e.g. its leader only), every
+// spawn goes to that node; if it registered all nodes' remoting addresses, the actor
+// is placed on a random node in that DC.
+//
+// Behavior:
+//  1. Ensures the data center controller is ready (DataCenterReady); otherwise returns ErrDataCenterNotReady.
+//  2. Loads active data center records from the controller; if the cache is stale, returns ErrDataCenterStaleRecords.
+//  3. Looks up the target data center by config.dataCenter.ID() among records in DataCenterActive state.
+//  4. Selects one remoting endpoint at random from that record's Endpoints (each element is "host:port").
+//  5. Invokes RemoteSpawn to create the actor on the node listening at that endpoint.
+//
+// The actor kind must be registered on the target data center's actor systems; otherwise
+// the remote node will return ErrTypeNotRegistered. The target data center runs its own
+// cluster; this path performs cross-DC placement by design.
+//
+// Parameters:
+//   - ctx: Context for cancellation and timeouts during the spawn process.
+//   - name: Globally unique name for the actor (used both for placement and on the remote node).
+//   - actor: Instance implementing the Actor interface; its registered kind is sent to the remote node.
+//   - config: Spawn configuration; config.dataCenter must be set and used to resolve the target DC.
+//
+// Returns:
+//   - error: ErrDataCenterNotReady, ErrDataCenterStaleRecords, or ErrDataCenterRecordNotFound when
+//     the controller is unavailable, cache is stale, or the target DC is not active in the cache;
+//     or an error from RemoteSpawn (e.g. ErrTypeNotRegistered, transport failures).
+func (x *actorSystem) spawnOnDatacenter(ctx context.Context, name string, actor Actor, config *spawnConfig) error {
+	if !x.DataCenterReady() {
+		return gerrors.ErrDataCenterNotReady
+	}
+
+	// get the datacenter controller
+	controller := x.getDataCenterController()
+	// grab the active datacenter using the controller
+	activeRecords, stale := controller.ActiveRecords()
+	if stale {
+		if controller.FailOnStaleCache() {
+			return gerrors.ErrDataCenterStaleRecords
+		}
+		// Best-effort routing: proceed with stale cache but log warning
+		x.logger.Warn("DC cache is stale, proceeding with best-effort cross-DC spawn")
+	}
+
+	// locate the target datacenter
+	var dcRecord *datacenter.DataCenterRecord
+	for _, record := range activeRecords {
+		if record.State == datacenter.DataCenterActive && record.ID == config.dataCenter.ID() {
+			dcRecord = pointer.To(record)
+			break
+		}
+	}
+
+	if dcRecord == nil {
+		return gerrors.ErrDataCenterRecordNotFound
+	}
+
+	// let us pick a random endpoint from the datacenter record endpoints
+	// every datacenter record endpoints must be a valid TCP address
+	endpoint := dcRecord.Endpoints[rand.IntN(len(dcRecord.Endpoints))] //nolint:gosec
+	host, portStr, err := net.SplitHostPort(endpoint)
+	if err != nil {
+		return fmt.Errorf("failed to split host and port from endpoint: %w", err)
+	}
+
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return fmt.Errorf("failed to convert port to int: %w", err)
+	}
+
+	return x.remoting.RemoteSpawn(ctx, host, port, &remote.SpawnRequest{
+		Name:                name,
+		Kind:                registry.Name(actor),
+		Relocatable:         config.relocatable,
+		PassivationStrategy: config.passivationStrategy,
+		Dependencies:        config.dependencies,
+		EnableStashing:      config.enableStash,
+		Reentrancy:          config.reentrancy,
+	})
 }
 
 func (x *actorSystem) selectPlacementPeer(ctx context.Context, peers []*cluster.Peer, placement SpawnPlacement) (*cluster.Peer, error) {

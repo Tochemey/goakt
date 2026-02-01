@@ -38,7 +38,6 @@ import (
 	"github.com/tochemey/olric"
 	"github.com/travisjeffery/go-dynaport"
 
-	"github.com/tochemey/goakt/v3/errors"
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
@@ -81,7 +80,7 @@ func TestSingletonActor(t *testing.T) {
 		// attempt to create another singleton actor with the same kind is idempotent
 		err = cl2.SpawnSingleton(ctx, "actorName", actor)
 		require.Error(t, err)
-		require.ErrorIs(t, err, errors.ErrSingletonAlreadyExists)
+		require.ErrorIs(t, err, gerrors.ErrSingletonAlreadyExists)
 
 		// free resources
 		require.NoError(t, cl3.Stop(ctx))
@@ -136,7 +135,7 @@ func TestSingletonActor(t *testing.T) {
 		// create a singleton actor
 		err = newActorSystem.SpawnSingleton(ctx, actorName, actor)
 		require.Error(t, err)
-		require.ErrorIs(t, err, errors.ErrClusterDisabled)
+		require.ErrorIs(t, err, gerrors.ErrClusterDisabled)
 
 		err = newActorSystem.Stop(ctx)
 		require.NoError(t, err)
@@ -185,7 +184,7 @@ func TestSingletonActor(t *testing.T) {
 		// create a singleton actor
 		err = newActorSystem.SpawnSingleton(ctx, actorName, actor)
 		require.Error(t, err)
-		require.ErrorIs(t, err, errors.ErrActorSystemNotStarted)
+		require.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
 	})
 	t.Run("Returns error when fetching peers fails", func(t *testing.T) {
 		ctx := context.Background()
@@ -244,7 +243,7 @@ func TestSingletonActor(t *testing.T) {
 			singletonSpec.WaitInterval,
 			singletonSpec.MaxRetries)
 		require.Error(t, err)
-		require.ErrorIs(t, err, errors.ErrLeaderNotFound)
+		require.ErrorIs(t, err, gerrors.ErrLeaderNotFound)
 	})
 
 	t.Run("Returns error when remote spawn fails", func(t *testing.T) {
@@ -589,7 +588,7 @@ func TestSingletonActor(t *testing.T) {
 
 		err = cl3.SpawnSingleton(ctx, "actor2", actor, WithSingletonRole(role))
 		require.Error(t, err)
-		require.ErrorIs(t, err, errors.ErrSingletonAlreadyExists)
+		require.ErrorIs(t, err, gerrors.ErrSingletonAlreadyExists)
 
 		// free resources
 		require.NoError(t, cl3.Stop(ctx))
@@ -603,6 +602,9 @@ func TestSingletonActor(t *testing.T) {
 	})
 }
 
+// TestSpawnSingletonRetryBehavior exercises retry and error paths for SpawnSingleton.
+//
+//nolint:gocyclo // test function with many subtests; splitting would reduce clarity
 func TestSpawnSingletonRetryBehavior(t *testing.T) {
 	t.Run("retries on quorum errors", func(t *testing.T) {
 		ctx := context.Background()
@@ -635,7 +637,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 			WithSingletonSpawnWaitInterval(time.Millisecond),
 			WithSingletonSpawnTimeout(time.Second),
 		)
-		require.ErrorIs(t, err, errors.ErrWriteQuorum)
+		require.ErrorIs(t, err, gerrors.ErrWriteQuorum)
 	})
 
 	t.Run("already exists short-circuits retries", func(t *testing.T) {
@@ -737,7 +739,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 			WithSingletonSpawnWaitInterval(time.Millisecond),
 			WithSingletonSpawnTimeout(time.Second),
 		)
-		require.ErrorIs(t, err, errors.ErrActorAlreadyExists)
+		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
 	})
 
 	t.Run("fails when registry lookup returns non-retryable error", func(t *testing.T) {
@@ -894,7 +896,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 						req.Role == nil
 				}),
 			).
-			Return(errors.ErrActorAlreadyExists).
+			Return(gerrors.ErrActorAlreadyExists).
 			Once()
 
 		err := system.SpawnSingleton(
@@ -1066,7 +1068,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 			WithSingletonSpawnTimeout(time.Second),
 		)
 		// This should surface as an "actor already exists" name conflict.
-		require.ErrorContains(t, err, errors.ErrActorAlreadyExists.Error())
+		require.ErrorContains(t, err, gerrors.ErrActorAlreadyExists.Error())
 	})
 
 	t.Run("retries when cluster engine is not running", func(t *testing.T) {

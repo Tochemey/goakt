@@ -33,8 +33,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/encoding/prototext"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 
+	"github.com/tochemey/goakt/v3/datacenter"
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/extension"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
@@ -451,4 +453,115 @@ func setReentrancyMaxInFlight(cfg *reentrancy.Reentrancy, maxInFlight int) {
 	}
 	field := reflect.ValueOf(cfg).Elem().FieldByName("maxInFlight")
 	reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).Elem().SetInt(int64(maxInFlight))
+}
+
+func TestEncodeDecodeDataCenterRecordRoundTrip(t *testing.T) {
+	leaseExpiry := time.Date(2024, time.January, 2, 3, 4, 5, 0, time.UTC)
+	record := datacenter.DataCenterRecord{
+		ID: "dc-1",
+		DataCenter: datacenter.DataCenter{
+			Name:   "dc-1",
+			Region: "us-east",
+			Zone:   "us-east-1a",
+			Labels: map[string]string{
+				"tier": "primary",
+			},
+		},
+		Endpoints:   []string{"10.0.0.1:9000", "10.0.0.2:9000"},
+		State:       datacenter.DataCenterActive,
+		LeaseExpiry: leaseExpiry,
+		Version:     42,
+	}
+
+	payload, err := EncodeDataCenterRecord(record)
+	require.NoError(t, err)
+
+	decoded, err := DecodeDataCenterRecord(payload)
+	require.NoError(t, err)
+	require.Equal(t, record.ID, decoded.ID)
+	require.Equal(t, record.DataCenter, decoded.DataCenter)
+	require.Equal(t, record.Endpoints, decoded.Endpoints)
+	require.Equal(t, record.State, decoded.State)
+	require.Equal(t, record.Version, decoded.Version)
+	require.True(t, decoded.LeaseExpiry.Equal(record.LeaseExpiry))
+}
+
+func TestEncodeDecodeDataCenterRecordStateVariants(t *testing.T) {
+	tests := []struct {
+		name  string
+		state datacenter.DataCenterState
+	}{
+		{
+			name:  "registered",
+			state: datacenter.DataCenterRegistered,
+		},
+		{
+			name:  "draining",
+			state: datacenter.DataCenterDraining,
+		},
+		{
+			name:  "inactive",
+			state: datacenter.DataCenterInactive,
+		},
+		{
+			name:  "empty",
+			state: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			record := datacenter.DataCenterRecord{
+				ID:    "dc-state",
+				State: tt.state,
+				DataCenter: datacenter.DataCenter{
+					Name: "dc-state",
+				},
+			}
+
+			payload, err := EncodeDataCenterRecord(record)
+			require.NoError(t, err)
+
+			decoded, err := DecodeDataCenterRecord(payload)
+			require.NoError(t, err)
+			require.Equal(t, tt.state, decoded.State)
+			require.True(t, decoded.LeaseExpiry.IsZero())
+		})
+	}
+}
+
+func TestEncodeDataCenterRecordUnsupportedState(t *testing.T) {
+	record := datacenter.DataCenterRecord{
+		ID:    "dc-bad-state",
+		State: datacenter.DataCenterState("BAD"),
+	}
+
+	payload, err := EncodeDataCenterRecord(record)
+	require.Error(t, err)
+	require.Nil(t, payload)
+}
+
+func TestDecodeDataCenterRecordInvalidPayload(t *testing.T) {
+	_, err := DecodeDataCenterRecord([]byte{0xff, 0xff, 0xff})
+	require.Error(t, err)
+}
+
+func TestDecodeDataCenterRecordMissingFields(t *testing.T) {
+	pbRecord := &internalpb.DataCenterRecord{
+		Id:        "dc-missing",
+		Endpoints: []string{"127.0.0.1:8080"},
+		Version:   7,
+		State:     internalpb.DataCenterState_DATA_CENTER_STATE_UNSPECIFIED,
+	}
+	payload, err := proto.Marshal(pbRecord)
+	require.NoError(t, err)
+
+	decoded, err := DecodeDataCenterRecord(payload)
+	require.NoError(t, err)
+	require.Equal(t, "dc-missing", decoded.ID)
+	require.Equal(t, datacenter.DataCenter{}, decoded.DataCenter)
+	require.Equal(t, []string{"127.0.0.1:8080"}, decoded.Endpoints)
+	require.Equal(t, datacenter.DataCenterState(""), decoded.State)
+	require.True(t, decoded.LeaseExpiry.IsZero())
+	require.Equal(t, uint64(7), decoded.Version)
 }

@@ -45,7 +45,6 @@ import (
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/discovery"
 	"github.com/tochemey/goakt/v3/discovery/nats"
-	"github.com/tochemey/goakt/v3/errors"
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
@@ -1019,7 +1018,7 @@ func TestClient(t *testing.T) {
 		// send a message
 		reply, err := client.Ask(ctx, actorName, new(testpb.TestReply), time.Minute)
 		require.Error(t, err)
-		require.ErrorIs(t, err, errors.ErrActorNotFound)
+		require.ErrorIs(t, err, gerrors.ErrActorNotFound)
 		require.Nil(t, reply)
 
 		err = client.Stop(ctx, actorName)
@@ -1105,7 +1104,7 @@ func TestClient(t *testing.T) {
 		// send a message
 		err = client.Tell(ctx, actorName, new(testpb.TestReply))
 		require.Error(t, err)
-		require.ErrorIs(t, err, errors.ErrActorNotFound)
+		require.ErrorIs(t, err, gerrors.ErrActorNotFound)
 
 		err = client.Stop(ctx, actorName)
 		require.NoError(t, err)
@@ -1618,7 +1617,7 @@ func TestClient(t *testing.T) {
 		}
 		kinds, err := client.Kinds(ctx)
 		require.Error(t, err)
-		assert.ErrorContains(t, err, errors.ErrClusterDisabled.Error())
+		assert.ErrorContains(t, err, gerrors.ErrClusterDisabled.Error())
 		assert.Nil(t, kinds)
 		assert.Empty(t, kinds)
 
@@ -1653,7 +1652,7 @@ func TestClient(t *testing.T) {
 
 		metric, ok, err := getNodeMetric(ctx, node)
 		require.Error(t, err)
-		assert.ErrorContains(t, err, errors.ErrClusterDisabled.Error())
+		assert.ErrorContains(t, err, gerrors.ErrClusterDisabled.Error())
 		assert.False(t, ok)
 		assert.Zero(t, metric)
 

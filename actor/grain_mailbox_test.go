@@ -163,10 +163,7 @@ func TestGrainMailboxBounded_DoesNotOvershootCapacity_Concurrent(t *testing.T) {
 
 	// Drain and ensure we got exactly cap messages.
 	drained := 0
-	for {
-		if mailbox.Dequeue() == nil {
-			break
-		}
+	for mailbox.Dequeue() != nil {
 		drained++
 	}
 	require.Equal(t, cap, drained)

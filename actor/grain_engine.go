@@ -29,6 +29,7 @@ import (
 	"math/rand/v2"
 	"net"
 	"strconv"
+	"sync"
 	"time"
 
 	"connectrpc.com/connect"
@@ -39,6 +40,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
 
+	"github.com/tochemey/goakt/v3/datacenter"
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/compression/brotli"
@@ -604,55 +606,70 @@ func (x *actorSystem) validateRemoteHost(host string, port int32) error {
 // remoteTellGrain sends a message to a Grain in the cluster.
 //
 // It locates the Grain via the cluster, sends the message remotely, and returns the response.
-// Falls back to local delivery if the Grain is not found in the cluster.
+// Falls back to cross-DC discovery, then local delivery if not found.
 //
 // Parameters:
 //   - ctx: context for cancellation and timeout control.
 //   - id: identity of the target Grain.
 //   - message: protobuf message to send.
-//   - sender: identity of the sender (optional).
 //   - timeout: request timeout duration.
 //
 // Returns:
 //   - error: error if the request fails.
 func (x *actorSystem) remoteTellGrain(ctx context.Context, id *GrainIdentity, message proto.Message, timeout time.Duration) error {
+	// Try local cluster first
 	grain, err := x.getCluster().GetGrain(ctx, id.String())
-	if err != nil {
-		if errors.Is(err, cluster.ErrGrainNotFound) {
-			_, err := x.localSend(ctx, id, message, timeout, false)
-			return err
-		}
+	if err == nil {
+		return x.sendRemoteTellGrainRequest(ctx, grain, message)
+	}
+
+	if !errors.Is(err, cluster.ErrGrainNotFound) {
 		return err
 	}
 
-	return x.sendRemoteTellGrainRequest(ctx, grain, message)
+	// Try to find and send to grain in remote datacenters
+	if err := x.tellGrainAcrossDataCenters(ctx, id, message, timeout); err == nil {
+		return nil
+	}
+
+	// Not found anywhere - activate locally
+	_, err = x.localSend(ctx, id, message, timeout, false)
+	return err
 }
 
 // remoteAskGrain sends a message to a Grain in the cluster.
 //
 // It locates the Grain via the cluster, sends the message remotely, and returns the response.
-// Falls back to local delivery if the Grain is not found in the cluster.
+// Falls back to cross-DC discovery, then local delivery if not found.
 //
 // Parameters:
 //   - ctx: context for cancellation and timeout control.
 //   - id: identity of the target Grain.
 //   - message: protobuf message to send.
-//   - sender: identity of the sender (optional).
 //   - timeout: request timeout duration.
 //
 // Returns:
 //   - proto.Message: the response from the Grain.
 //   - error: error if the request fails.
 func (x *actorSystem) remoteAskGrain(ctx context.Context, id *GrainIdentity, message proto.Message, timeout time.Duration) (proto.Message, error) {
-	gw, err := x.getCluster().GetGrain(ctx, id.String())
-	if err != nil {
-		if errors.Is(err, cluster.ErrGrainNotFound) {
-			return x.localSend(ctx, id, message, timeout, true)
-		}
+	// Try local cluster first
+	grain, err := x.getCluster().GetGrain(ctx, id.String())
+	if err == nil {
+		return x.sendRemoteAskGrainRequest(ctx, grain, message, timeout)
+	}
+
+	if !errors.Is(err, cluster.ErrGrainNotFound) {
 		return nil, err
 	}
 
-	return x.sendRemoteAskGrainRequest(ctx, gw, message, timeout)
+	// Try to find and send to grain in remote datacenters
+	resp, err := x.askGrainAcrossDataCenters(ctx, id, message, timeout)
+	if err == nil {
+		return resp, nil
+	}
+
+	// Not found anywhere - activate locally
+	return x.localSend(ctx, id, message, timeout, true)
 }
 
 // localSend sends a message to a local Grain.
@@ -728,6 +745,240 @@ func (x *actorSystem) localSend(ctx context.Context, id *GrainIdentity, message 
 		timers.Put(timer)
 		return nil, errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
 	}
+}
+
+// tellGrainAcrossDataCenters sends a message to a Grain across all active datacenters.
+//
+// This method queries all endpoints in every active datacenter concurrently and
+// sends the message to the first DC that successfully handles it. Once sent,
+// remaining attempts are cancelled to minimize resource usage.
+//
+// The discovery is best-effort: it uses cached datacenter records and proceeds
+// even if the cache is stale (logging a warning in that case).
+//
+// Parameters:
+//   - ctx: Parent context for cancellation propagation
+//   - id: Identity of the target Grain
+//   - message: The protobuf message to send
+//   - timeout: Maximum duration to wait for the operation
+//
+// Returns:
+//   - error: nil if message was sent successfully, error otherwise
+func (x *actorSystem) tellGrainAcrossDataCenters(ctx context.Context, id *GrainIdentity, message proto.Message, timeout time.Duration) error {
+	dcController := x.getDataCenterController()
+	if dcController == nil {
+		return gerrors.ErrActorNotFound
+	}
+
+	dcRecords, stale := dcController.ActiveRecords()
+	if stale {
+		if dcController.FailOnStaleCache() {
+			return gerrors.ErrDataCenterStaleRecords
+		}
+		// Best-effort routing: proceed with stale cache but log warning
+		x.logger.Warn("DC cache is stale, proceeding with best-effort cross-DC grain routing")
+	}
+
+	if len(dcRecords) == 0 {
+		return gerrors.ErrActorNotFound
+	}
+
+	// Count total endpoints for proper channel buffer sizing
+	endpointCount := 0
+	for _, dcRecord := range dcRecords {
+		if dcRecord.State == datacenter.DataCenterActive {
+			endpointCount += len(dcRecord.Endpoints)
+		}
+	}
+
+	if endpointCount == 0 {
+		return gerrors.ErrActorNotFound
+	}
+
+	// Query remote datacenters in parallel with timeout
+	dcConfig := x.getDataCenterConfig()
+	requestTimeout := datacenter.DefaultRequestTimeout
+	if dcConfig != nil {
+		requestTimeout = dcConfig.RequestTimeout
+	}
+
+	if timeout > 0 && timeout < requestTimeout {
+		requestTimeout = timeout
+	}
+
+	requestCtx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+
+	// Buffer sized for all endpoints to prevent goroutine blocking
+	results := make(chan error, endpointCount)
+	var wg sync.WaitGroup
+
+	grainReq := &remote.GrainRequest{
+		Name: id.Name(),
+		Kind: id.Kind(),
+	}
+
+	// Query each active datacenter in parallel
+	for _, dcRecord := range dcRecords {
+		if dcRecord.State != datacenter.DataCenterActive {
+			continue
+		}
+
+		for _, endpoint := range dcRecord.Endpoints {
+			host, portStr, err := net.SplitHostPort(endpoint)
+			if err != nil {
+				continue
+			}
+
+			port, err := strconv.Atoi(portStr)
+			if err != nil {
+				continue
+			}
+
+			wg.Add(1)
+			go func(host string, port int) {
+				defer wg.Done()
+				err := x.remoting.RemoteTellGrain(requestCtx, host, port, grainReq, message)
+				results <- err
+			}(host, port)
+		}
+	}
+
+	// Wait for all goroutines to complete and close the channel
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	// Return on first success
+	for err := range results {
+		if err == nil {
+			cancel() // Cancel remaining attempts
+			return nil
+		}
+	}
+
+	return gerrors.ErrActorNotFound
+}
+
+// askGrainAcrossDataCenters sends a synchronous message to a Grain across all active datacenters.
+//
+// This method queries all endpoints in every active datacenter concurrently and
+// returns the response from the first DC that successfully handles the request.
+// Once a response is received, remaining attempts are cancelled.
+//
+// The discovery is best-effort: it uses cached datacenter records and proceeds
+// even if the cache is stale (logging a warning in that case).
+//
+// Parameters:
+//   - ctx: Parent context for cancellation propagation
+//   - id: Identity of the target Grain
+//   - message: The protobuf message to send
+//   - timeout: Maximum duration to wait for the operation
+//
+// Returns:
+//   - proto.Message: The response from the Grain if found
+//   - error: nil if successful, ErrActorNotFound if grain not found in any DC
+func (x *actorSystem) askGrainAcrossDataCenters(ctx context.Context, id *GrainIdentity, message proto.Message, timeout time.Duration) (proto.Message, error) {
+	dcController := x.getDataCenterController()
+	if dcController == nil {
+		return nil, gerrors.ErrActorNotFound
+	}
+
+	dcRecords, stale := dcController.ActiveRecords()
+	if stale {
+		if dcController.FailOnStaleCache() {
+			return nil, gerrors.ErrDataCenterStaleRecords
+		}
+		// Best-effort routing: proceed with stale cache but log warning
+		x.logger.Warn("DC cache is stale, proceeding with best-effort cross-DC grain routing")
+	}
+
+	if len(dcRecords) == 0 {
+		return nil, gerrors.ErrActorNotFound
+	}
+
+	// Count total endpoints for proper channel buffer sizing
+	endpointCount := 0
+	for _, dcRecord := range dcRecords {
+		if dcRecord.State == datacenter.DataCenterActive {
+			endpointCount += len(dcRecord.Endpoints)
+		}
+	}
+
+	if endpointCount == 0 {
+		return nil, gerrors.ErrActorNotFound
+	}
+
+	// Query remote datacenters in parallel with timeout
+	dcConfig := x.getDataCenterConfig()
+	requestTimeout := datacenter.DefaultRequestTimeout
+	if dcConfig != nil {
+		requestTimeout = dcConfig.RequestTimeout
+	}
+
+	if timeout > 0 && timeout < requestTimeout {
+		requestTimeout = timeout
+	}
+
+	requestCtx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+
+	type result struct {
+		resp *anypb.Any
+		err  error
+	}
+
+	// Buffer sized for all endpoints to prevent goroutine blocking
+	results := make(chan result, endpointCount)
+	var wg sync.WaitGroup
+
+	grainReq := &remote.GrainRequest{
+		Name: id.Name(),
+		Kind: id.Kind(),
+	}
+
+	// Query each active datacenter in parallel
+	for _, dcRecord := range dcRecords {
+		if dcRecord.State != datacenter.DataCenterActive {
+			continue
+		}
+
+		for _, endpoint := range dcRecord.Endpoints {
+			host, portStr, err := net.SplitHostPort(endpoint)
+			if err != nil {
+				continue
+			}
+
+			port, err := strconv.Atoi(portStr)
+			if err != nil {
+				continue
+			}
+
+			wg.Add(1)
+			go func(host string, port int) {
+				defer wg.Done()
+				resp, err := x.remoting.RemoteAskGrain(requestCtx, host, port, grainReq, message, timeout)
+				results <- result{resp: resp, err: err}
+			}(host, port)
+		}
+	}
+
+	// Wait for all goroutines to complete and close the channel
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	// Return first successful response
+	for res := range results {
+		if res.err == nil && res.resp != nil {
+			cancel() // Cancel remaining attempts
+			return res.resp.UnmarshalNew()
+		}
+	}
+
+	return nil, gerrors.ErrActorNotFound
 }
 
 // runGrainActivation ensures only one activation attempt per grain ID executes at a time.

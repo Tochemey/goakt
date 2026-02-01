@@ -56,6 +56,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/tochemey/goakt/v3/address"
+	"github.com/tochemey/goakt/v3/datacenter"
 	"github.com/tochemey/goakt/v3/discovery"
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/eventstream"
@@ -67,6 +68,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/codec"
 	"github.com/tochemey/goakt/v3/internal/compression/brotli"
 	"github.com/tochemey/goakt/v3/internal/compression/zstd"
+	"github.com/tochemey/goakt/v3/internal/datacentercontroller"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v3/internal/locker"
@@ -151,42 +153,64 @@ type ActorSystem interface {
 	// Note: Actors spawned using this method are confined to the local actor system.
 	// For distributed scenarios, use a SpawnOn mechanism if available.
 	Spawn(ctx context.Context, name string, actor Actor, opts ...SpawnOption) (*PID, error)
-	// SpawnOn creates and starts an actor, either locally or on a remote node,
-	// depending on the configuration of the actor system.
+	// SpawnOn creates and starts an actor locally, on another node in the current cluster,
+	// or on a node in a different data center, depending on options and actor system configuration.
 	//
-	// In cluster mode, the actor may be spawned on any node in the cluster
-	// based on the specified placement strategy. Supported strategies include:
-	//   - RoundRobin: Distributes actors evenly across available nodes.
-	//   - Random: Choose a node at random.
-	//   - Local: Ensures that the actor is created on the local node.
-	//   - LeastLoad: Places the actor on the node with the fewest active actors.
+	// # Cross–data center placement
 	//
-	// In non-cluster mode, the actor is created on the local actor system
-	// just like with the standard `Spawn` function.
+	// When opts include WithDataCenter, the actor is spawned on a node in that data center.
+	// Placement is a random node among the target DC's advertised remoting endpoints: SpawnOn
+	// calls spawnOnDatacenter, which requires DataCenterReady(), looks up the target DC by the
+	// given datacenter.DataCenter's ID() in the controller's active records, then sends a
+	// RemoteSpawn to one of that record's Endpoints chosen at random. There is no leader
+	// selection—which node runs the actor depends entirely on which addresses the target DC
+	// registered (via datacenter.Config.Endpoints). If that DC advertises only its leader, every
+	// cross-DC spawn goes to the leader; if it advertises all nodes, the actor is placed on a
+	// random node in that DC. The actor kind must be registered on the target data center's
+	// actor systems. See WithDataCenter and spawnOnDatacenter for details and errors
+	// (e.g. ErrDataCenterNotReady, ErrDataCenterStaleRecords, ErrDataCenterRecordNotFound).
 	//
-	// Unlike `Spawn`, `SpawnOn` does not return a PID immediately. To interact with
-	// the spawned actor, use the `ActorOf` method to resolve its PID after it has been
-	// successfully created.
+	// # Same–data center placement
+	//
+	// When no target data center is specified, behavior depends on cluster mode:
+	//
+	//   - In cluster mode, the actor may be placed on any node in the local cluster according to
+	//     the placement strategy and role filter. Supported strategies:
+	//     RoundRobin, Random, Local, LeastLoad. Placement uses cluster.Members and thus stays
+	//     within the current data center when the architecture is one-cluster-per-DC.
+	//   - In non-cluster mode, the actor is created on the local actor system, like Spawn.
+	//
+	// Unlike Spawn, SpawnOn does not return a PID. Use ActorOf to resolve the actor's PID or
+	// Address after it has been successfully created.
 	//
 	// Parameters:
-	//   - ctx: A context used to control cancellation and timeouts during the spawn process.
-	//   - name: A globally unique name for the actor in the cluster.
+	//   - ctx: Context for cancellation and timeouts during the spawn process.
+	//   - name: A globally unique name for the actor in the cluster or across data centers.
 	//   - actor: An instance implementing the Actor interface.
-	//   - opts: Optional SpawnOptions, such as placement strategy or dependencies, mailbox, supervisor strategy.
+	//   - opts: Optional SpawnOptions: placement strategy, WithDataCenter for cross-DC spawn,
+	//     role, dependencies, mailbox, supervisor strategy, etc.
 	//
 	// Returns:
-	//   - error: An error if the actor could not be spawned (e.g., name conflict,
-	//     network failure, or misconfiguration).
+	//   - error: An error if the actor could not be spawned (e.g., name conflict, network or
+	//     remoting failure, misconfiguration; or, when using WithDataCenter, data center
+	//     not ready, stale records, or target DC not found).
 	//
-	// Example:
+	// Example (same-DC, cluster placement):
 	//
-	//	err := system.SpawnOn(ctx, "cart-service", NewCartActor(),
-	//	    WithPlacementStrategy(ConsistentHash))
+	//	err := system.SpawnOn(ctx, "actor-1", NewCartActor(), WithPlacement(Random))
 	//	if err != nil {
 	//	    log.Fatalf("Failed to spawn actor: %v", err)
 	//	}
 	//
-	// Note: The created actor used the default mailbox set during the creation of the actor system.
+	// Example (cross-DC):
+	//
+	//	dc := &datacenter.DataCenter{Name: "dc-west", Region: "us-west-2"}
+	//	err := system.SpawnOn(ctx, "actor-1", NewCartActor(), WithDataCenter(dc))
+	//	if err != nil {
+	//	    log.Fatalf("Failed to spawn actor in dc-west: %v", err)
+	//	}
+	//
+	// ⚠️ Note: The created actor uses the default mailbox from the actor system unless overridden in opts.
 	SpawnOn(ctx context.Context, name string, actor Actor, opts ...SpawnOption) error
 	// SpawnFromFunc creates an actor with the given receive function. One can set the PreStart and PostStop lifecycle hooks
 	// in the given optional options
@@ -687,6 +711,31 @@ type ActorSystem interface {
 	//       system.Logger().Info("no cluster leader is currently elected")
 	//   }
 	Leader(ctx context.Context) (leader *remote.Peer, err error)
+	// DataCenterReady reports whether the multi-datacenter controller is operational.
+	//
+	// The controller is considered ready when:
+	//   - Multi-DC mode is enabled (cluster mode with a datacenter config)
+	//   - The controller has started successfully
+	//   - The cache has been refreshed at least once
+	//
+	// Returns true immediately if multi-DC mode is not enabled, as there is no
+	// DC controller to wait for.
+	//
+	// This method is intended for use in readiness probes (e.g., Kubernetes readinessProbe)
+	// to gate traffic until the controller has a usable view of active data centers.
+	//
+	// Note: Ready does not guarantee the cache is fresh; the controller uses
+	// MaxCacheStaleness internally to determine routing behavior.
+	DataCenterReady() bool
+	// DataCenterLastRefresh returns the time of the last successful datacenter cache refresh.
+	//
+	// Returns the zero time if:
+	//   - Multi-DC mode is not enabled
+	//   - The cache has never been refreshed
+	//
+	// This can be used for debugging, monitoring, or custom readiness logic that
+	// requires more granular control than DataCenterReady provides.
+	DataCenterLastRefresh() time.Time
 	// RegisterGrainKind registers a Grain kind in the local registry.
 	//
 	// Registration associates the Grain's kind (as returned by the Grain implementation) with the
@@ -710,8 +759,6 @@ type ActorSystem interface {
 	handleRemoteTell(ctx context.Context, to *PID, message proto.Message) error
 	// putActorOnCluster sets actor in the actor system actors registry
 	putActorOnCluster(actor *PID) error
-	// reservedName returns reserved actor's name
-	reservedName(nameType nameType) string
 	// getCluster returns the cluster engine
 	getCluster() cluster.Cluster
 	// tree returns the actors tree
@@ -736,6 +783,8 @@ type ActorSystem interface {
 	passivationManager() *passivationManager
 	removeNodeLeft(address string)
 	getClusterStore() cluster.Store
+	getDataCenterController() *datacentercontroller.Controller
+	getDataCenterConfig() *datacenter.Config
 }
 
 // ActorSystem represent a collection of actors on a given node
@@ -842,6 +891,13 @@ type actorSystem struct {
 	metricProvider *metric.Provider
 
 	clusterStore cluster.Store
+
+	dataCenterController        *datacentercontroller.Controller
+	dataCenterControllerMutex   sync.Mutex
+	dataCenterLeaderTicker      *ticker.Ticker
+	dataCenterLeaderStopWatch   chan types.Unit
+	dataCenterLeaderMutex       sync.Mutex
+	dataCenterReconcileInFlight atomic.Bool
 }
 
 var (
@@ -1028,6 +1084,8 @@ func (x *actorSystem) Start(ctx context.Context) error {
 		AddContextRunner(x.spawnTopicActor).
 		AddContextRunner(x.startRemoting).
 		AddContextRunner(x.startClustering).
+		AddContextRunner(x.startDataCenterController).
+		AddContextRunner(x.startDataCenterLeaderWatch).
 		Run(); err != nil {
 		if stopErr := x.shutdown(ctx); stopErr != nil {
 			return errors.Join(err, stopErr)
@@ -2543,6 +2601,24 @@ func (x *actorSystem) getRemoting() remote.Remoting {
 	return remoting
 }
 
+// getDataCenterController returns the data center controller
+func (x *actorSystem) getDataCenterController() *datacentercontroller.Controller {
+	x.locker.RLock()
+	dataCenterController := x.dataCenterController
+	x.locker.RUnlock()
+	return dataCenterController
+}
+
+// getDataCenterConfig returns the data center configuration.
+func (x *actorSystem) getDataCenterConfig() *datacenter.Config {
+	x.locker.RLock()
+	defer x.locker.RUnlock()
+	if x.clusterConfig == nil {
+		return nil
+	}
+	return x.clusterConfig.dataCenterConfig
+}
+
 func (x *actorSystem) getClusterStore() cluster.Store {
 	x.locker.RLock()
 	store := x.clusterStore
@@ -2872,6 +2948,9 @@ func (x *actorSystem) reset() {
 	x.grains.Reset()
 	x.shuttingDown.Store(false)
 	x.clusterStore = nil
+	x.dataCenterController = nil
+	x.dataCenterLeaderTicker = nil
+	x.dataCenterReconcileInFlight.Store(false)
 }
 
 // shutdown stops the actor system
@@ -2912,6 +2991,11 @@ func (x *actorSystem) shutdown(ctx context.Context) (err error) {
 
 	// Run shutdown hooks and collect errors
 	hooksErr := x.runShutdownHooks(ctx)
+
+	// Stop data center leader watch and controller
+	x.stopDataCenterLeaderWatch()
+	stoperr := x.stopDataCenterController(ctx)
+	hooksErr = multierr.Combine(hooksErr, stoperr)
 
 	// Build peer state snapshot early in shutdown process.
 	// Actual persistence happens later in shutdownCluster before leaving membership.
@@ -3353,11 +3437,6 @@ func (x *actorSystem) getCluster() cluster.Cluster {
 	return cluster
 }
 
-// reservedName returns the reserved actor's name
-func (x *actorSystem) reservedName(nameType nameType) string {
-	return reservedNames[nameType]
-}
-
 // actorAddress returns the actor path provided the actor name
 func (x *actorSystem) actorAddress(name string) *address.Address {
 	return address.New(name, x.name, x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
@@ -3409,7 +3488,7 @@ func (x *actorSystem) configureServer(ctx context.Context, mux *stdhttp.ServeMux
 
 // spawnRootGuardian creates the rootGuardian guardian
 func (x *actorSystem) spawnRootGuardian(ctx context.Context) error {
-	actorName := x.reservedName(rootGuardianType)
+	actorName := reservedName(rootGuardianType)
 	x.rootGuardian, _ = x.configPID(ctx, actorName, newRootGuardian(), asSystem(), WithLongLived())
 	// rootGuardian is the rootGuardian node of the actors tree
 	return x.actors.addRootNode(x.rootGuardian)
@@ -3417,7 +3496,7 @@ func (x *actorSystem) spawnRootGuardian(ctx context.Context) error {
 
 // spawnSystemGuardian creates the system guardian
 func (x *actorSystem) spawnSystemGuardian(ctx context.Context) error {
-	actorName := x.reservedName(systemGuardianType)
+	actorName := reservedName(systemGuardianType)
 	x.systemGuardian, _ = x.configPID(ctx,
 		actorName,
 		newSystemGuardian(),
@@ -3434,7 +3513,7 @@ func (x *actorSystem) spawnSystemGuardian(ctx context.Context) error {
 
 // spawnUserGuardian creates the user guardian
 func (x *actorSystem) spawnUserGuardian(ctx context.Context) error {
-	actorName := x.reservedName(userGuardianType)
+	actorName := reservedName(userGuardianType)
 	x.userGuardian, _ = x.configPID(ctx,
 		actorName,
 		newUserGuardian(),
@@ -3451,7 +3530,7 @@ func (x *actorSystem) spawnUserGuardian(ctx context.Context) error {
 
 // spawnDeathWatch creates the deathWatch actor
 func (x *actorSystem) spawnDeathWatch(ctx context.Context) error {
-	actorName := x.reservedName(deathWatchType)
+	actorName := reservedName(deathWatchType)
 	// define the supervisor strategy to use
 	supervisor := sup.NewSupervisor(
 		sup.WithStrategy(sup.OneForOneStrategy),
@@ -3473,7 +3552,7 @@ func (x *actorSystem) spawnDeathWatch(ctx context.Context) error {
 // spawnRelocator creates the actor responsible for re-deploying actors when a node leaves the cluster
 func (x *actorSystem) spawnRelocator(ctx context.Context) error {
 	if x.clusterEnabled.Load() && x.relocationEnabled.Load() {
-		actorName := x.reservedName(rebalancerType)
+		actorName := reservedName(rebalancerType)
 
 		// define the supervisor strategy to use
 		supervisor := sup.NewSupervisor(
@@ -3500,7 +3579,7 @@ func (x *actorSystem) spawnRelocator(ctx context.Context) error {
 
 // spawnDeadletter creates the deadletter synthetic actor
 func (x *actorSystem) spawnDeadletter(ctx context.Context) error {
-	actorName := x.reservedName(deadletterType)
+	actorName := reservedName(deadletterType)
 	x.deadletter, _ = x.configPID(ctx,
 		actorName,
 		newDeadLetter(),
@@ -3649,7 +3728,7 @@ func (x *actorSystem) shutdownCluster(ctx context.Context, actors []ActorRef, pe
 				AddContextRunnerIf(peerState != nil, func(cctx context.Context) error { return x.persistPeerStateToPeers(cctx, peerState) }).
 				AddContextRunner(func(cctx context.Context) error { return x.cleanupCluster(cctx, actors) }).
 				AddContextRunner(func(cctx context.Context) error { return x.cluster.Stop(cctx) }).
-				AddContextRunnerIf(x.clusterStore != nil, func(cctx context.Context) error { return x.clusterStore.Close() }).
+				AddContextRunnerIf(x.clusterStore != nil, func(_ context.Context) error { return x.clusterStore.Close() }).
 				Run(); err != nil {
 				x.logger.Errorf("Failed to shutdown cleanly: %w", err)
 				return err
@@ -3958,6 +4037,11 @@ func (x *actorSystem) registerMetrics() error {
 // The actual persistence to remote peers happens later in shutdownCluster
 // to ensure proper ordering: persist state before leaving membership.
 func (x *actorSystem) preShutdown() (*internalpb.PeerState, error) {
+	if !x.relocationEnabled.Load() {
+		x.logger.Infof("Relocation is disabled; skipping peer state build", x.PeersAddress())
+		return nil, nil
+	}
+
 	if !x.clusterEnabled.Load() || x.cluster == nil {
 		x.logger.Infof("Node (%s) is not part of a cluster; skipping peer state build", x.PeersAddress())
 		return nil, nil
@@ -3968,6 +4052,10 @@ func (x *actorSystem) preShutdown() (*internalpb.PeerState, error) {
 
 	wireActors := make(map[string]*internalpb.Actor, len(actors))
 	for _, actor := range actors {
+		if !actor.IsRelocatable() {
+			continue // actor is not relocatable, skip it
+		}
+
 		wireActor, err := actor.toWireActor()
 		if err != nil {
 			return nil, err
@@ -4219,4 +4307,9 @@ func maxInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// reservedName returns the reserved actor's name
+func reservedName(nameType nameType) string {
+	return reservedNames[nameType]
 }

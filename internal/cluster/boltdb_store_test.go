@@ -284,8 +284,7 @@ func TestHasNamespace(t *testing.T) {
 }
 
 func TestContextErr(t *testing.T) {
-	var mockContext *MockContext
-	mockContext = nil
+	var mockContext *MockContext = nil
 	require.Nil(t, contextErr(mockContext))
 
 	ctx, cancel := context.WithCancel(context.Background())

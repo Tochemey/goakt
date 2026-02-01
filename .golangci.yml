@@ -2,7 +2,7 @@ version: "2"
 run:
   concurrency: 4
   issues-exit-code: 2
-  tests: false
+  tests: true
   modules-download-mode: vendor
   relative-path-mode: gomod
 output:
@@ -60,7 +60,7 @@ linters:
           arguments:
             - [] # allowlist for initialisms
             - [] # blocklist for initialisms
-            - [ { skipPackageNameChecks: true } ]
+            - [{ skipPackageNameChecks: true }]
   exclusions:
     generated: lax
     presets:

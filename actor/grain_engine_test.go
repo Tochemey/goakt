@@ -51,6 +51,9 @@ import (
 	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
+// grainTestCtxKey is a custom type for context keys in grain tests (avoids SA1029 empty struct key).
+type grainTestCtxKey struct{}
+
 func newActivationTestSystem(t *testing.T, grain Grain, name string, register bool) (*actorSystem, *mockcluster.Cluster, *mockremote.Remoting, *GrainIdentity) {
 	t.Helper()
 
@@ -1015,7 +1018,7 @@ func TestRemoting_RemoteAskGrain_WithActorSystem(t *testing.T) {
 }
 
 func TestRemoteAskGrain_InjectsContextValues(t *testing.T) {
-	ctxKey := struct{}{}
+	ctxKey := grainTestCtxKey{}
 	headerKey := "x-goakt-propagated"
 	headerVal := "abc-123"
 
@@ -1048,7 +1051,7 @@ func TestRemoteAskGrain_InjectsContextValues(t *testing.T) {
 }
 
 func TestRemoteTellGrain_InjectsContextValues(t *testing.T) {
-	ctxKey := struct{}{}
+	ctxKey := grainTestCtxKey{}
 	headerKey := "x-goakt-propagated"
 	headerVal := "tell-abc"
 
@@ -1091,7 +1094,7 @@ func TestSendToGrainOwner_ErrorsWhenOwnerMissing(t *testing.T) {
 }
 
 func TestSendToGrainOwner_RemoteAsk(t *testing.T) {
-	ctxKey := struct{}{}
+	ctxKey := grainTestCtxKey{}
 	headerKey := "x-goakt-propagated"
 	headerVal := "owner-ask"
 
@@ -1119,7 +1122,7 @@ func TestSendToGrainOwner_RemoteAsk(t *testing.T) {
 }
 
 func TestSendToGrainOwner_RemoteTellError(t *testing.T) {
-	ctxKey := struct{}{}
+	ctxKey := grainTestCtxKey{}
 	headerKey := "x-goakt-propagated"
 	headerVal := "owner-tell"
 
