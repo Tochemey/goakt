@@ -7817,7 +7817,8 @@ func TestStopReturnsCleanupClusterError(t *testing.T) {
 	system.actors.counter.Inc()
 
 	clusterMock.EXPECT().IsLeader(mock.Anything).Return(false)
-	clusterMock.EXPECT().Peers(mock.Anything).Return(nil, nil)
+	// Peers is not called: relocation is disabled (MockReplicationTestSystem default), so preShutdown returns nil
+	// and persistPeerStateToPeers is skipped.
 	clusterMock.EXPECT().RemoveActor(mock.Anything, pid.Name()).Return(assert.AnError)
 	clusterMock.EXPECT().Stop(mock.Anything).Return(nil)
 	t.Cleanup(func() { clusterMock.AssertExpectations(t) })
