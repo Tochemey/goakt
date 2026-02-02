@@ -29,7 +29,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/atomic"
 
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/extension"
@@ -46,9 +45,9 @@ func TestGrainPIDPassivationIDEmptyWithoutIdentity(t *testing.T) {
 func TestGrainPIDPassivationTrySkipsWhenInactive(t *testing.T) {
 	pid := &grainPID{
 		logger:       log.DiscardLogger,
-		onPoisonPill: atomic.NewBool(false),
 		dependencies: xsync.NewMap[string, extension.Dependency](),
 	}
+	pid.onPoisonPill.Store(false)
 	pid.activated.Store(false)
 	pid.deactivateAfter.Store(time.Second)
 	require.False(t, pid.passivationTry("no-op"))
@@ -59,12 +58,12 @@ func TestGrainPIDPassivationTryFailsOnDeactivateError(t *testing.T) {
 		identity:           &GrainIdentity{kind: "Kind", name: "Name"},
 		logger:             log.DiscardLogger,
 		grain:              &MockGrainDeactivationFailure{},
-		onPoisonPill:       atomic.NewBool(false),
 		dependencies:       xsync.NewMap[string, extension.Dependency](),
 		passivationManager: nil,
 	}
 
 	pid.activated.Store(true)
+	pid.onPoisonPill.Store(false)
 	require.False(t, pid.passivationTry("deactivate failure"))
 }
 
@@ -197,9 +196,9 @@ func TestGrainPIDDeactivateReturnsPanicErrorOnDeactivatePanic(t *testing.T) {
 		identity:     &GrainIdentity{kind: "Kind", name: "Name"},
 		logger:       log.DiscardLogger,
 		grain:        &MockPanickingActivateDeactivateGrain{},
-		onPoisonPill: atomic.NewBool(false),
 		dependencies: xsync.NewMap[string, extension.Dependency](),
 	}
+	pid.onPoisonPill.Store(false)
 	pid.activated.Store(true)
 
 	var err error
@@ -218,9 +217,9 @@ func TestGrainPIDDeactivateReturnsPanicErrorOnDeactivateErrorPanic(t *testing.T)
 		identity:     &GrainIdentity{kind: "Kind", name: "Name"},
 		logger:       log.DiscardLogger,
 		grain:        &MockPanickingActivateDeactivateGrain{panicValue: panicErr},
-		onPoisonPill: atomic.NewBool(false),
 		dependencies: xsync.NewMap[string, extension.Dependency](),
 	}
+	pid.onPoisonPill.Store(false)
 	pid.activated.Store(true)
 
 	err := pid.deactivate(context.Background())
@@ -237,9 +236,9 @@ func TestGrainPIDDeactivateReturnsPanicErrorOnDeactivatePanicError(t *testing.T)
 		identity:     &GrainIdentity{kind: "Kind", name: "Name"},
 		logger:       log.DiscardLogger,
 		grain:        &MockPanickingActivateDeactivateGrain{panicValue: panicErr},
-		onPoisonPill: atomic.NewBool(false),
 		dependencies: xsync.NewMap[string, extension.Dependency](),
 	}
+	pid.onPoisonPill.Store(false)
 	pid.activated.Store(true)
 
 	err := pid.deactivate(context.Background())
@@ -256,9 +255,9 @@ func TestGrainPIDHandlePoisonPillRecoversDeactivatePanic(t *testing.T) {
 		identity:     &GrainIdentity{kind: "Kind", name: "Name"},
 		logger:       log.DiscardLogger,
 		grain:        &MockPanickingActivateDeactivateGrain{},
-		onPoisonPill: atomic.NewBool(false),
 		dependencies: xsync.NewMap[string, extension.Dependency](),
 	}
+	pid.onPoisonPill.Store(false)
 	pid.activated.Store(true)
 
 	grainContext := getGrainContext().build(

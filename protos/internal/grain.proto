@@ -22,4 +22,5 @@ message Grain {
   google.protobuf.Duration activation_timeout = 5;
   int32 activation_retries = 6;
   optional int64 mailbox_capacity = 7;
+  bool disable_relocation = 8;
 }

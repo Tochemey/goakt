@@ -74,7 +74,8 @@ type grainPID struct {
 	deactivateAfter    atomic.Duration
 	passivationManager *passivationManager
 
-	onPoisonPill *atomic.Bool
+	onPoisonPill      atomic.Bool
+	disableRelocation atomic.Bool
 }
 
 var _ passivationParticipant = (*grainPID)(nil)
@@ -90,12 +91,13 @@ func newGrainPID(identity *GrainIdentity, grain Grain, actorSystem ActorSystem, 
 		dependencies:       config.dependencies,
 		latestReceiveTime:  atomic.Time{},
 		config:             config,
-		onPoisonPill:       atomic.NewBool(false),
 		passivationManager: actorSystem.passivationManager(),
 	}
 
 	pid.processing.Store(idle)
 	pid.activated.Store(false)
+	pid.onPoisonPill.Store(false)
+	pid.disableRelocation.Store(false)
 	pid.processedCount.Store(0)
 	pid.activatedAt.Store(0)
 
@@ -202,6 +204,7 @@ func (pid *grainPID) deactivate(ctx context.Context) (err error) {
 		pid.activatedAt.Store(0)
 		pid.latestReceiveTime.Store(time.Time{})
 		pid.onPoisonPill.Store(false)
+		pid.disableRelocation.Store(false)
 	}()
 
 	logger.Infof("Deactivating Grain %s ...", pid.identity.String())
@@ -432,5 +435,6 @@ func (pid *grainPID) toWireGrain() (*internalpb.Grain, error) {
 		ActivationTimeout: durationpb.New(pid.config.initTimeout.Load()),
 		ActivationRetries: pid.config.initMaxRetries.Load(),
 		MailboxCapacity:   pointer.To(pid.mailbox.Capacity()),
+		DisableRelocation: pid.disableRelocation.Load(),
 	}, nil
 }

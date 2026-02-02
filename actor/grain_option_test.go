@@ -107,4 +107,10 @@ func TestGrainOptions(t *testing.T) {
 		option(config)
 		require.EqualValues(t, 10, config.capacity)
 	})
+	t.Run("With Relocation Disabled", func(t *testing.T) {
+		config := new(grainConfig)
+		option := WithGrainDisableRelocation()
+		option(config)
+		require.True(t, config.disableRelocation)
+	})
 }

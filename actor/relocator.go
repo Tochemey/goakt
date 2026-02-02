@@ -211,7 +211,7 @@ func (r *relocator) relocateGrains(ctx context.Context, eg *errgroup.Group, lead
 		leaderPort := int32(r.pid.ActorSystem().Port())
 		eg.Go(func() error {
 			for _, grain := range leaderGrains {
-				if !isSystemName(grain.GetGrainId().GetName()) {
+				if !isSystemName(grain.GetGrainId().GetName()) && !grain.GetDisableRelocation() {
 					grain.Host = leaderHost
 					grain.Port = leaderPort
 					if err := r.pid.ActorSystem().recreateGrain(ctx, grain); err != nil {
@@ -229,7 +229,7 @@ func (r *relocator) relocateGrains(ctx context.Context, eg *errgroup.Group, lead
 				grains := peersGrains[i]
 				peer := peers[i-1]
 				for _, grain := range grains {
-					if !isSystemName(grain.GetGrainId().GetName()) {
+					if !isSystemName(grain.GetGrainId().GetName()) && !grain.GetDisableRelocation() {
 						if err := r.activateRemoteGrain(ctx, grain, peer); err != nil {
 							return err
 						}

@@ -89,6 +89,8 @@ type grainConfig struct {
 	//   <= 0 : unbounded
 	//   >  0 : bounded to capacity
 	capacity int64
+	// this feature can be used to disable relocation of grains in cluster mode
+	disableRelocation bool
 }
 
 // newGrainConfig creates a new grainConfig instance and applies the provided GrainOption(s).
@@ -322,5 +324,33 @@ func WithGrainMailboxCapacity(capacity int64) GrainOption {
 		if capacity > 0 {
 			config.capacity = capacity
 		}
+	}
+}
+
+// WithGrainDisableRelocation returns a GrainOption that opts a Grain out of
+// relocation in cluster mode.
+//
+// In a clustered actor system, the runtime may relocate (rebalance) grains across
+// nodes as membership/topology changes. When this option is enabled, the grain is
+// pinned to its current host node and will not be moved automatically.
+//
+// Important implications:
+//   - If the hosting node leaves or crashes, the grain instance is lost and will
+//     not be migrated elsewhere.
+//   - The grain can be re-created on another node by addressing it by its Grain ID,
+//     but any in-memory state is gone.
+//   - To recover state after node loss, persist grain state externally (e.g. DB,
+//     key/value store, event log).
+//
+// Notes:
+//   - This option only has an effect when cluster mode is enabled.
+//   - Disabling relocation can be useful for grains that depend on node-local
+//     resources or require strict host affinity.
+//
+// Returns:
+//   - GrainOption: an option that sets disableRelocation to true in the grain configuration.
+func WithGrainDisableRelocation() GrainOption {
+	return func(config *grainConfig) {
+		config.disableRelocation = true
 	}
 }
