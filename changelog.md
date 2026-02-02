@@ -1,6 +1,5 @@
 # Changelog
 
-
 ## [Unreleased]
 
 ### 🐛 Fixes
@@ -10,7 +9,7 @@
 ### ✨ Features
 
 - 🌐 Multi-datacenter support with DC-transparent messaging, pluggable control plane (NATS JetStream, Etcd), DC-aware placement via `SpawnOn` with `WithDataCenter`, and cross-DC actor/grain communication. See `datacenter` package and `WithDataCenter` option.
-
+- 🛡️ Added `WithGrainDisableRelocation` option to disable actor/grain relocation for scenarios where relocation is not desired (e.g., stateless actors, short-lived grains).
 
 ## [v3.13.0] - 2026-01-23
 
