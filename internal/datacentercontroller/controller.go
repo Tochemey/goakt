@@ -128,6 +128,7 @@ func NewController(config *Config, endpoints []string) (*Controller, error) {
 
 	return &Controller{
 		config:       config,
+		endpoints:    endpoints,
 		controlPlane: config.ControlPlane,
 		cache:        newRecordCache(),
 		logger:       config.Logger,
@@ -290,6 +291,78 @@ func (x *Controller) Ready() bool {
 // control than Ready provides.
 func (x *Controller) LastRefresh() time.Time {
 	return x.cache.lastRefresh()
+}
+
+// Endpoints returns a copy of the currently registered endpoints for this data center.
+//
+// This can be used to check whether the endpoints need to be updated when cluster
+// membership changes.
+func (x *Controller) Endpoints() []string {
+	x.mu.RLock()
+	defer x.mu.RUnlock()
+	
+	// Return a copy to prevent external modification
+	result := make([]string, len(x.endpoints))
+	copy(result, x.endpoints)
+	return result
+}
+
+// UpdateEndpoints updates the registered endpoints for this data center and pushes
+// the change to the control plane.
+//
+// This method should be called when cluster membership changes and the leader needs
+// to advertise a new set of remoting addresses. It re-registers the record with the
+// current version, using optimistic concurrency control.
+//
+// Returns an error if:
+//   - The controller is not started.
+//   - The endpoints list is empty.
+//   - The control plane registration fails (e.g., version conflict, network error).
+//
+// On success, the controller's stored endpoints and version are updated atomically.
+func (x *Controller) UpdateEndpoints(ctx context.Context, endpoints []string) error {
+	if !x.started.Load() {
+		return errors.New("controller is not started")
+	}
+
+	if len(endpoints) == 0 {
+		return errors.New("endpoints must not be empty")
+	}
+
+	x.mu.Lock()
+	recordID := x.recordID
+	x.mu.Unlock()
+
+	if recordID == "" {
+		return errors.New("controller has no registered record")
+	}
+
+	// Build the record with updated endpoints
+	record := DataCenterRecord{
+		ID:         recordID,
+		DataCenter: x.config.DataCenter,
+		Endpoints:  endpoints,
+		State:      datacenter.DataCenterActive,
+	}
+
+	// Re-register with current version (optimistic concurrency control)
+	opCtx, cancel := x.withTimeout(ctx)
+	defer cancel()
+
+	newID, newVersion, err := x.controlPlane.Register(opCtx, record)
+	if err != nil {
+		return fmt.Errorf("failed to update endpoints: %w", err)
+	}
+
+	// Update stored endpoints and version atomically
+	x.mu.Lock()
+	x.endpoints = make([]string, len(endpoints))
+	copy(x.endpoints, endpoints)
+	x.recordID = newID
+	x.recordVer = newVersion
+	x.mu.Unlock()
+
+	return nil
 }
 
 // heartbeatLoop periodically renews the local record lease while the manager is running.
