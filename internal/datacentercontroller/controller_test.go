@@ -39,11 +39,11 @@ import (
 func newTestController(t *testing.T, cp ControlPlane, mutate func(*Config)) *Controller {
 	t.Helper()
 
+	endpoints := []string{"127.0.0.1:1"}
 	config := &Config{
 		Logger:               log.DiscardLogger,
 		ControlPlane:         cp,
 		DataCenter:           DataCenter{Name: "dc-1"},
-		Endpoints:            []string{"127.0.0.1:1"},
 		HeartbeatInterval:    time.Hour,
 		CacheRefreshInterval: time.Hour,
 		MaxCacheStaleness:    time.Second,
@@ -57,13 +57,25 @@ func newTestController(t *testing.T, cp ControlPlane, mutate func(*Config)) *Con
 		mutate(config)
 	}
 
-	manager, err := NewController(config)
+	manager, err := NewController(config, endpoints)
 	require.NoError(t, err)
 	return manager
 }
 
 func TestControllerNewManagerNilConfig(t *testing.T) {
-	manager, err := NewController(nil)
+	manager, err := NewController(nil, nil)
+	require.Error(t, err)
+	require.Nil(t, manager)
+}
+
+func TestControllerNewManagerNilEndpoints(t *testing.T) {
+	manager, err := NewController(new(Config), nil)
+	require.Error(t, err)
+	require.Nil(t, manager)
+}
+
+func TestControllerNewManagerWithIinvalidConfig(t *testing.T) {
+	manager, err := NewController(new(Config), []string{"127.0.0.1:1"})
 	require.Error(t, err)
 	require.Nil(t, manager)
 }

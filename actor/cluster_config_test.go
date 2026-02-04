@@ -63,7 +63,6 @@ func TestClusterConfig(t *testing.T) {
 				dc := datacenter.NewConfig()
 				dc.ControlPlane = &MockControlPlane{}
 				dc.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
-				dc.Endpoints = []string{"127.0.0.1:8080"}
 				return dc
 			}()).
 			WithRoles("role1", "role2", "role1") // role1 is duplicated to test deduplication

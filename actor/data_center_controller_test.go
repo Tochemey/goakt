@@ -33,6 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tochemey/goakt/v3/datacenter"
+	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/datacentercontroller"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/internal/ticker"
@@ -100,9 +101,8 @@ func TestDataCenterReady(t *testing.T) {
 			return nil, nil
 		}}
 		dcConfig.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
-		dcConfig.Endpoints = []string{"127.0.0.1:8080"}
 
-		controller, err := datacentercontroller.NewController(dcConfig)
+		controller, err := datacentercontroller.NewController(dcConfig, []string{"127.0.0.1:8080"})
 		require.NoError(t, err)
 		// Do NOT start the controller - Ready() will be false
 
@@ -183,10 +183,9 @@ func TestStopDataCenterController(t *testing.T) {
 			return nil, nil
 		}}
 		dcConfig.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
-		dcConfig.Endpoints = []string{"127.0.0.1:8080"}
 		dcConfig.CacheRefreshInterval = 10 * time.Millisecond
 
-		controller, err := datacentercontroller.NewController(dcConfig)
+		controller, err := datacentercontroller.NewController(dcConfig, []string{"127.0.0.1:8080"})
 		require.NoError(t, err)
 		startCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		err = controller.Start(startCtx)
@@ -206,9 +205,8 @@ func TestStopDataCenterController(t *testing.T) {
 		dcConfig := datacenter.NewConfig()
 		dcConfig.ControlPlane = &MockFailingSetStateControlPlane{}
 		dcConfig.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
-		dcConfig.Endpoints = []string{"127.0.0.1:8080"}
 
-		controller, err := datacentercontroller.NewController(dcConfig)
+		controller, err := datacentercontroller.NewController(dcConfig, []string{"127.0.0.1:8080"})
 		require.NoError(t, err)
 		startCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		err = controller.Start(startCtx)
@@ -232,7 +230,6 @@ func TestStartDataCenterController(t *testing.T) {
 			return nil, nil
 		}}
 		cfg.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
-		cfg.Endpoints = []string{"127.0.0.1:8080"}
 		cfg.CacheRefreshInterval = 10 * time.Millisecond
 		cfg.LeaderCheckInterval = 50 * time.Millisecond
 		return cfg
@@ -275,7 +272,7 @@ func TestStartDataCenterController(t *testing.T) {
 		clusterMock.EXPECT().IsLeader(mock.Anything).Return(false)
 
 		dcConfig := validDCConfig()
-		controller, err := datacentercontroller.NewController(dcConfig)
+		controller, err := datacentercontroller.NewController(dcConfig, []string{"127.0.0.1:8080"})
 		require.NoError(t, err)
 		startCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		err = controller.Start(startCtx)
@@ -302,7 +299,7 @@ func TestStartDataCenterController(t *testing.T) {
 		clusterMock.EXPECT().IsLeader(mock.Anything).Return(true)
 
 		dcConfig := validDCConfig()
-		controller, err := datacentercontroller.NewController(dcConfig)
+		controller, err := datacentercontroller.NewController(dcConfig, []string{"127.0.0.1:8080"})
 		require.NoError(t, err)
 		startCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		err = controller.Start(startCtx)
@@ -325,11 +322,11 @@ func TestStartDataCenterController(t *testing.T) {
 	t.Run("returns error when NewController fails", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
 		clusterMock.EXPECT().IsLeader(mock.Anything).Return(true)
+		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{}, nil) // empty endpoints -> NewController fails
 
 		invalidConfig := datacenter.NewConfig()
 		invalidConfig.ControlPlane = &MockControlPlane{}
-		invalidConfig.DataCenter = datacenter.DataCenter{Name: "local"}
-		invalidConfig.Endpoints = []string{} // invalid: empty endpoints
+		invalidConfig.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
 
 		sys := MockReplicationTestSystem(clusterMock)
 		sys.clusterConfig = NewClusterConfig().WithDataCenter(invalidConfig)
@@ -342,11 +339,11 @@ func TestStartDataCenterController(t *testing.T) {
 	t.Run("returns error when controller Start fails", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
 		clusterMock.EXPECT().IsLeader(mock.Anything).Return(true)
+		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{{Host: "127.0.0.1", RemotingPort: 8080}}, nil)
 
 		cfg := datacenter.NewConfig()
 		cfg.ControlPlane = &MockFailingRegisterControlPlane{}
 		cfg.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
-		cfg.Endpoints = []string{"127.0.0.1:8080"}
 
 		sys := MockReplicationTestSystem(clusterMock)
 		sys.clusterConfig = NewClusterConfig().WithDataCenter(cfg)
@@ -360,6 +357,7 @@ func TestStartDataCenterController(t *testing.T) {
 	t.Run("starts controller successfully when leader", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
 		clusterMock.EXPECT().IsLeader(mock.Anything).Return(true)
+		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{{Host: "127.0.0.1", RemotingPort: 8080}}, nil)
 
 		dcConfig := validDCConfig()
 		sys := MockReplicationTestSystem(clusterMock)
@@ -400,13 +398,13 @@ func TestTriggerDataCentersReconciliation(t *testing.T) {
 	t.Run("spawns goroutine and reconciles", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
 		clusterMock.EXPECT().IsLeader(mock.Anything).Return(true).Maybe()
+		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{{Host: "127.0.0.1", RemotingPort: 8080}}, nil).Maybe()
 
 		dcConfig := datacenter.NewConfig()
 		dcConfig.ControlPlane = &MockControlPlane{listActive: func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return nil, nil
 		}}
 		dcConfig.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
-		dcConfig.Endpoints = []string{"127.0.0.1:8080"}
 		dcConfig.CacheRefreshInterval = 10 * time.Millisecond
 		dcConfig.LeaderCheckInterval = 50 * time.Millisecond
 
@@ -421,11 +419,11 @@ func TestTriggerDataCentersReconciliation(t *testing.T) {
 	t.Run("logs error when reconcile fails", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
 		clusterMock.EXPECT().IsLeader(mock.Anything).Return(true).Maybe()
+		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{}, nil).Maybe() // empty -> NewController fails
 
 		invalidConfig := datacenter.NewConfig()
 		invalidConfig.ControlPlane = &MockControlPlane{}
-		invalidConfig.DataCenter = datacenter.DataCenter{Name: "local"}
-		invalidConfig.Endpoints = []string{} // invalid: NewController will fail
+		invalidConfig.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
 
 		sys := MockReplicationTestSystem(clusterMock)
 		sys.clusterConfig = NewClusterConfig().WithDataCenter(invalidConfig)
@@ -441,7 +439,6 @@ func TestStartDataCenterLeaderWatch(t *testing.T) {
 		cfg := datacenter.NewConfig()
 		cfg.ControlPlane = &MockControlPlane{}
 		cfg.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
-		cfg.Endpoints = []string{"127.0.0.1:8080"}
 		cfg.LeaderCheckInterval = 100 * time.Millisecond
 		return cfg
 	}
@@ -492,7 +489,6 @@ func TestStopDataCenterLeaderWatch(t *testing.T) {
 		cfg := datacenter.NewConfig()
 		cfg.ControlPlane = &MockControlPlane{}
 		cfg.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
-		cfg.Endpoints = []string{"127.0.0.1:8080"}
 		cfg.LeaderCheckInterval = 50 * time.Millisecond
 
 		sys := MockReplicationTestSystem(mockscluster.NewCluster(t))
@@ -558,13 +554,13 @@ func TestDataCenterLeaderWatchLoop(t *testing.T) {
 	t.Run("triggers reconciliation on tick", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
 		clusterMock.EXPECT().IsLeader(mock.Anything).Return(true).Maybe()
+		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{{Host: "127.0.0.1", RemotingPort: 8080}}, nil).Maybe()
 
 		cfg := datacenter.NewConfig()
 		cfg.ControlPlane = &MockControlPlane{listActive: func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return nil, nil
 		}}
 		cfg.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
-		cfg.Endpoints = []string{"127.0.0.1:8080"}
 		cfg.LeaderCheckInterval = 5 * time.Millisecond
 		cfg.CacheRefreshInterval = 10 * time.Millisecond
 

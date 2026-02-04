@@ -24,6 +24,7 @@ package actor
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/tochemey/goakt/v3/internal/datacentercontroller"
@@ -93,15 +94,15 @@ func (x *actorSystem) startDataCenterController(ctx context.Context) error {
 		return nil
 	}
 
+	if !x.isDataCenterEnabled() {
+		return nil
+	}
+
 	if !x.dataCenterReconcileInFlight.CompareAndSwap(false, true) {
 		return nil
 	}
 
 	defer x.dataCenterReconcileInFlight.Store(false)
-
-	if !x.isDataCenterEnabled() {
-		return nil
-	}
 
 	isLeader := x.cluster.IsLeader(ctx)
 
@@ -122,8 +123,19 @@ func (x *actorSystem) startDataCenterController(ctx context.Context) error {
 		return nil
 	}
 
+	// let us fetch the endpoints from the cluster
+	members, err := x.cluster.Members(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to fetch cluster members: %w", err)
+	}
+
+	endpoints := make([]string, len(members))
+	for i, member := range members {
+		endpoints[i] = member.RemotingAddress()
+	}
+
 	// Leader is responsible for owning the controller lifecycle; start it once.
-	controller, err := datacentercontroller.NewController(x.clusterConfig.dataCenterConfig)
+	controller, err := datacentercontroller.NewController(x.clusterConfig.dataCenterConfig, endpoints)
 	if err != nil {
 		return err
 	}

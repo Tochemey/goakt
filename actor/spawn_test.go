@@ -1609,8 +1609,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 	t.Run("returns ErrDataCenterNotReady when controller is nil", func(t *testing.T) {
 		dcConfig := datacenter.NewConfig()
 		dcConfig.ControlPlane = &MockControlPlane{}
-		dcConfig.DataCenter = datacenter.DataCenter{Name: "local"}
-		dcConfig.Endpoints = []string{"127.0.0.1:8080"}
+		dcConfig.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
 
 		sys := MockReplicationTestSystem(mockcluster.NewCluster(t))
 		sys.remoting = mocksremote.NewRemoting(t)
@@ -1637,12 +1636,11 @@ func TestSpawnOnDatacenter(t *testing.T) {
 				}}, nil
 			},
 		}
-		dcConfig.DataCenter = datacenter.DataCenter{Name: "local"}
-		dcConfig.Endpoints = []string{"127.0.0.1:8080"}
+		dcConfig.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
 		dcConfig.MaxCacheStaleness = 1 * time.Millisecond
 		dcConfig.CacheRefreshInterval = 5 * time.Millisecond
 
-		controller, err := datacentercontroller.NewController(dcConfig)
+		controller, err := datacentercontroller.NewController(dcConfig, []string{"127.0.0.1:8080"})
 		require.NoError(t, err)
 		startCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		err = controller.Start(startCtx)

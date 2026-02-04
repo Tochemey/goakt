@@ -79,6 +79,7 @@ type (
 //     logs the condition and continues operating with polling only.
 type Controller struct {
 	config       *Config
+	endpoints    []string
 	controlPlane ControlPlane
 	cache        *recordCache
 	watcher      <-chan ControlPlaneEvent
@@ -111,9 +112,13 @@ type Controller struct {
 // logger/control plane. Background work is started only by Start.
 //
 // Returns an error if the config is nil or invalid.
-func NewController(config *Config) (*Controller, error) {
+func NewController(config *Config, endpoints []string) (*Controller, error) {
 	if config == nil {
 		return nil, errors.New("controller config is required")
+	}
+
+	if len(endpoints) == 0 {
+		return nil, errors.New("endpoints are required")
 	}
 
 	config.Sanitize()
@@ -456,7 +461,7 @@ func (x *Controller) record() DataCenterRecord {
 	return DataCenterRecord{
 		ID:         recordID,
 		DataCenter: x.config.DataCenter,
-		Endpoints:  x.config.Endpoints,
+		Endpoints:  x.endpoints,
 		State:      datacenter.DataCenterRegistered,
 	}
 }

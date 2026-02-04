@@ -65,7 +65,6 @@ func TestConfigValidate(t *testing.T) {
 			Logger:               log.DiscardLogger,
 			ControlPlane:         &MockControlPlane{},
 			DataCenter:           DataCenter{Name: "dc-1"},
-			Endpoints:            []string{"127.0.0.1:1"},
 			HeartbeatInterval:    time.Second,
 			CacheRefreshInterval: time.Second,
 			MaxCacheStaleness:    time.Second,
@@ -90,12 +89,6 @@ func TestConfigValidate(t *testing.T) {
 	t.Run("missing data center name", func(t *testing.T) {
 		config := validConfig()
 		config.DataCenter = DataCenter{}
-		require.Error(t, config.Validate())
-	})
-
-	t.Run("missing endpoints", func(t *testing.T) {
-		config := validConfig()
-		config.Endpoints = nil
 		require.Error(t, config.Validate())
 	})
 
