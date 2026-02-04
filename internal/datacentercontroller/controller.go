@@ -300,7 +300,7 @@ func (x *Controller) LastRefresh() time.Time {
 func (x *Controller) Endpoints() []string {
 	x.mu.RLock()
 	defer x.mu.RUnlock()
-	
+
 	// Return a copy to prevent external modification
 	result := make([]string, len(x.endpoints))
 	copy(result, x.endpoints)

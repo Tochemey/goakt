@@ -784,14 +784,14 @@ func TestControllerEndpoints(t *testing.T) {
 		MaxBackoff:           time.Second,
 		RequestTimeout:       time.Second,
 	}
-	
+
 	controller, err := NewController(config, endpoints)
 	require.NoError(t, err)
-	
+
 	// Test that Endpoints returns a copy
 	result := controller.Endpoints()
 	require.Equal(t, endpoints, result)
-	
+
 	// Modify the returned slice; should not affect controller's internal state
 	result[0] = "192.168.1.1:9000"
 	require.Equal(t, endpoints, controller.Endpoints())
@@ -800,7 +800,7 @@ func TestControllerEndpoints(t *testing.T) {
 func TestControllerUpdateEndpointsNotStarted(t *testing.T) {
 	cp := &MockControlPlane{}
 	controller := newTestController(t, cp, nil)
-	
+
 	err := controller.UpdateEndpoints(context.Background(), []string{"127.0.0.1:9000"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "controller is not started")
@@ -811,7 +811,7 @@ func TestControllerUpdateEndpointsEmptyEndpoints(t *testing.T) {
 	controller := newTestController(t, cp, nil)
 	require.NoError(t, controller.Start(context.Background()))
 	defer func() { _ = controller.Stop(context.Background()) }()
-	
+
 	err := controller.UpdateEndpoints(context.Background(), []string{})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "endpoints must not be empty")
@@ -831,7 +831,7 @@ func TestControllerUpdateEndpointsHappyPath(t *testing.T) {
 			return []DataCenterRecord{{ID: "dc-1", State: datacenter.DataCenterActive, Version: 1}}, nil
 		},
 	}
-	
+
 	initialEndpoints := []string{"127.0.0.1:8080"}
 	config := &Config{
 		Logger:               log.DiscardLogger,
@@ -845,27 +845,27 @@ func TestControllerUpdateEndpointsHappyPath(t *testing.T) {
 		WatchEnabled:         false,
 		RequestTimeout:       time.Second,
 	}
-	
+
 	controller, err := NewController(config, initialEndpoints)
 	require.NoError(t, err)
-	
+
 	require.NoError(t, controller.Start(context.Background()))
 	defer func() { _ = controller.Stop(context.Background()) }()
-	
+
 	// Initial registration
 	require.Len(t, registeredRecords, 1)
 	require.Equal(t, initialEndpoints, registeredRecords[0].Endpoints)
-	
+
 	// Update endpoints
 	newEndpoints := []string{"127.0.0.1:8080", "127.0.0.2:8080", "127.0.0.3:8080"}
 	err = controller.UpdateEndpoints(context.Background(), newEndpoints)
 	require.NoError(t, err)
-	
+
 	// Verify re-registration happened
 	require.Len(t, registeredRecords, 2)
 	require.Equal(t, newEndpoints, registeredRecords[1].Endpoints)
 	require.Equal(t, datacenter.DataCenterActive, registeredRecords[1].State)
-	
+
 	// Verify controller's stored endpoints are updated
 	require.Equal(t, newEndpoints, controller.Endpoints())
 }
@@ -890,7 +890,7 @@ func TestControllerUpdateEndpointsRegisterError(t *testing.T) {
 			return []DataCenterRecord{{ID: "dc-1", State: datacenter.DataCenterActive, Version: 1}}, nil
 		},
 	}
-	
+
 	initialEndpoints := []string{"127.0.0.1:8080"}
 	config := &Config{
 		Logger:               log.DiscardLogger,
@@ -904,19 +904,19 @@ func TestControllerUpdateEndpointsRegisterError(t *testing.T) {
 		WatchEnabled:         false,
 		RequestTimeout:       time.Second,
 	}
-	
+
 	controller, err := NewController(config, initialEndpoints)
 	require.NoError(t, err)
-	
+
 	require.NoError(t, controller.Start(context.Background()))
 	defer func() { _ = controller.Stop(context.Background()) }()
-	
+
 	// Update endpoints should fail
 	newEndpoints := []string{"127.0.0.1:8080", "127.0.0.2:8080"}
 	err = controller.UpdateEndpoints(context.Background(), newEndpoints)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "failed to update endpoints")
-	
+
 	// Original endpoints should be unchanged
 	require.Equal(t, initialEndpoints, controller.Endpoints())
 }
