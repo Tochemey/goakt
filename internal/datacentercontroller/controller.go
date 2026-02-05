@@ -322,9 +322,11 @@ func (x *Controller) Endpoints() []string {
 //
 // On success, the controller's stored endpoints and version are updated atomically.
 //
-// Note: This method serializes concurrent calls since Register() doesn't support
-// version-based optimistic concurrency control. Concurrent calls will execute
-// sequentially to prevent overwriting each other's updates.
+// Note: This method serializes concurrent calls using a mutex to ensure we read
+// the current version atomically and prevent concurrent Register() calls from
+// overwriting each other. Register() supports optimistic concurrency control
+// through the DataCenterRecord.Version field, which is set from the current
+// recordVer before calling Register().
 func (x *Controller) UpdateEndpoints(ctx context.Context, endpoints []string) error {
 	if !x.started.Load() {
 		return errors.New("controller is not started")
@@ -334,31 +336,36 @@ func (x *Controller) UpdateEndpoints(ctx context.Context, endpoints []string) er
 		return errors.New("endpoints must not be empty")
 	}
 
-	// Serialize UpdateEndpoints calls to prevent concurrent Register() calls
-	// from overwriting each other, since Register() doesn't accept a version parameter
-	// for optimistic concurrency control.
+	// Serialize UpdateEndpoints calls to ensure we read the current version
+	// atomically and prevent concurrent Register() calls from overwriting each other.
+	// Register() supports optimistic concurrency control through the Version field
+	// in DataCenterRecord, but we need the mutex to serialize updates and ensure
+	// we use the correct current version.
 	x.updateMu.Lock()
 	defer x.updateMu.Unlock()
 
 	// Hold lock until after empty check to prevent race condition where
-	// recordID could be modified between read and check
+	// recordID could be modified between read and check. Also read recordVer
+	// atomically with recordID for use in the Register call.
 	x.mu.Lock()
 	recordID := x.recordID
+	recordVer := x.recordVer
 	if recordID == "" {
 		x.mu.Unlock()
 		return errors.New("controller has no registered record")
 	}
 	x.mu.Unlock()
 
-	// Build the record with updated endpoints
+	// Build the record with updated endpoints and current version for OCC
 	record := DataCenterRecord{
 		ID:         recordID,
 		DataCenter: x.config.DataCenter,
 		Endpoints:  endpoints,
 		State:      datacenter.DataCenterActive,
+		Version:    recordVer,
 	}
 
-	// Re-register with current version (optimistic concurrency control)
+	// Re-register with current version (optimistic concurrency control via Version field)
 	opCtx, cancel := x.withTimeout(ctx)
 	defer cancel()
 
