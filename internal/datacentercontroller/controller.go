@@ -87,6 +87,7 @@ type Controller struct {
 
 	lifecycleMu sync.Mutex
 	mu          sync.RWMutex
+	updateMu    sync.Mutex // Serializes UpdateEndpoints calls
 	recordID    string
 	recordVer   uint64
 	leaseExpiry time.Time
@@ -320,6 +321,10 @@ func (x *Controller) Endpoints() []string {
 //   - The control plane registration fails (e.g., version conflict, network error).
 //
 // On success, the controller's stored endpoints and version are updated atomically.
+//
+// Note: This method serializes concurrent calls since Register() doesn't support
+// version-based optimistic concurrency control. Concurrent calls will execute
+// sequentially to prevent overwriting each other's updates.
 func (x *Controller) UpdateEndpoints(ctx context.Context, endpoints []string) error {
 	if !x.started.Load() {
 		return errors.New("controller is not started")
@@ -329,13 +334,21 @@ func (x *Controller) UpdateEndpoints(ctx context.Context, endpoints []string) er
 		return errors.New("endpoints must not be empty")
 	}
 
+	// Serialize UpdateEndpoints calls to prevent concurrent Register() calls
+	// from overwriting each other, since Register() doesn't accept a version parameter
+	// for optimistic concurrency control.
+	x.updateMu.Lock()
+	defer x.updateMu.Unlock()
+
+	// Hold lock until after empty check to prevent race condition where
+	// recordID could be modified between read and check
 	x.mu.Lock()
 	recordID := x.recordID
-	x.mu.Unlock()
-
 	if recordID == "" {
+		x.mu.Unlock()
 		return errors.New("controller has no registered record")
 	}
+	x.mu.Unlock()
 
 	// Build the record with updated endpoints
 	record := DataCenterRecord{
@@ -522,6 +535,10 @@ func (x *Controller) setRecordRef(id string, version uint64) {
 func (x *Controller) record() DataCenterRecord {
 	x.mu.RLock()
 	recordID := x.recordID
+	// Make a copy of endpoints while holding the lock to prevent race condition
+	// with UpdateEndpoints() which can modify x.endpoints concurrently
+	endpoints := make([]string, len(x.endpoints))
+	copy(endpoints, x.endpoints)
 	x.mu.RUnlock()
 
 	if recordID == "" {
@@ -534,7 +551,7 @@ func (x *Controller) record() DataCenterRecord {
 	return DataCenterRecord{
 		ID:         recordID,
 		DataCenter: x.config.DataCenter,
-		Endpoints:  x.endpoints,
+		Endpoints:  endpoints,
 		State:      datacenter.DataCenterRegistered,
 	}
 }

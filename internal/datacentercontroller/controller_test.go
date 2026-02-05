@@ -74,7 +74,7 @@ func TestControllerNewManagerNilEndpoints(t *testing.T) {
 	require.Nil(t, manager)
 }
 
-func TestControllerNewManagerWithIinvalidConfig(t *testing.T) {
+func TestControllerNewManagerWithInvalidConfig(t *testing.T) {
 	manager, err := NewController(new(Config), []string{"127.0.0.1:1"})
 	require.Error(t, err)
 	require.Nil(t, manager)
