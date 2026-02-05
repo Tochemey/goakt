@@ -39,11 +39,11 @@ import (
 func newTestController(t *testing.T, cp ControlPlane, mutate func(*Config)) *Controller {
 	t.Helper()
 
+	endpoints := []string{"127.0.0.1:1"}
 	config := &Config{
 		Logger:               log.DiscardLogger,
 		ControlPlane:         cp,
 		DataCenter:           DataCenter{Name: "dc-1"},
-		Endpoints:            []string{"127.0.0.1:1"},
 		HeartbeatInterval:    time.Hour,
 		CacheRefreshInterval: time.Hour,
 		MaxCacheStaleness:    time.Second,
@@ -57,13 +57,25 @@ func newTestController(t *testing.T, cp ControlPlane, mutate func(*Config)) *Con
 		mutate(config)
 	}
 
-	manager, err := NewController(config)
+	manager, err := NewController(config, endpoints)
 	require.NoError(t, err)
 	return manager
 }
 
 func TestControllerNewManagerNilConfig(t *testing.T) {
-	manager, err := NewController(nil)
+	manager, err := NewController(nil, nil)
+	require.Error(t, err)
+	require.Nil(t, manager)
+}
+
+func TestControllerNewManagerNilEndpoints(t *testing.T) {
+	manager, err := NewController(new(Config), nil)
+	require.Error(t, err)
+	require.Nil(t, manager)
+}
+
+func TestControllerNewManagerWithInvalidConfig(t *testing.T) {
+	manager, err := NewController(new(Config), []string{"127.0.0.1:1"})
 	require.Error(t, err)
 	require.Nil(t, manager)
 }
@@ -757,4 +769,154 @@ func (m *MockControlPlane) Watch(ctx context.Context) (<-chan ControlPlaneEvent,
 
 func (m *MockControlPlane) Deregister(_ context.Context, _ string) error {
 	return nil
+}
+
+func TestControllerEndpoints(t *testing.T) {
+	endpoints := []string{"127.0.0.1:8080", "127.0.0.2:8080"}
+	config := &Config{
+		Logger:               log.DiscardLogger,
+		ControlPlane:         &MockControlPlane{},
+		DataCenter:           DataCenter{Name: "dc-1"},
+		HeartbeatInterval:    time.Hour,
+		CacheRefreshInterval: time.Hour,
+		MaxCacheStaleness:    time.Second,
+		JitterRatio:          0.1,
+		MaxBackoff:           time.Second,
+		RequestTimeout:       time.Second,
+	}
+
+	controller, err := NewController(config, endpoints)
+	require.NoError(t, err)
+
+	// Test that Endpoints returns a copy
+	result := controller.Endpoints()
+	require.Equal(t, endpoints, result)
+
+	// Modify the returned slice; should not affect controller's internal state
+	result[0] = "192.168.1.1:9000"
+	require.Equal(t, endpoints, controller.Endpoints())
+}
+
+func TestControllerUpdateEndpointsNotStarted(t *testing.T) {
+	cp := &MockControlPlane{}
+	controller := newTestController(t, cp, nil)
+
+	err := controller.UpdateEndpoints(context.Background(), []string{"127.0.0.1:9000"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "controller is not started")
+}
+
+func TestControllerUpdateEndpointsEmptyEndpoints(t *testing.T) {
+	cp := &MockControlPlane{}
+	controller := newTestController(t, cp, nil)
+	require.NoError(t, controller.Start(context.Background()))
+	defer func() { _ = controller.Stop(context.Background()) }()
+
+	err := controller.UpdateEndpoints(context.Background(), []string{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "endpoints must not be empty")
+}
+
+func TestControllerUpdateEndpointsHappyPath(t *testing.T) {
+	var registeredRecords []DataCenterRecord
+	cp := &MockControlPlane{
+		registerFn: func(_ context.Context, record DataCenterRecord) (string, uint64, error) {
+			registeredRecords = append(registeredRecords, record)
+			return "dc-1", uint64(len(registeredRecords)), nil
+		},
+		setStateFn: func(_ context.Context, _ string, _ DataCenterState, version uint64) (uint64, error) {
+			return version + 1, nil
+		},
+		listActiveFn: func(context.Context) ([]DataCenterRecord, error) {
+			return []DataCenterRecord{{ID: "dc-1", State: datacenter.DataCenterActive, Version: 1}}, nil
+		},
+	}
+
+	initialEndpoints := []string{"127.0.0.1:8080"}
+	config := &Config{
+		Logger:               log.DiscardLogger,
+		ControlPlane:         cp,
+		DataCenter:           DataCenter{Name: "dc-1"},
+		HeartbeatInterval:    time.Hour,
+		CacheRefreshInterval: time.Hour,
+		MaxCacheStaleness:    time.Second,
+		JitterRatio:          0.1,
+		MaxBackoff:           time.Second,
+		WatchEnabled:         false,
+		RequestTimeout:       time.Second,
+	}
+
+	controller, err := NewController(config, initialEndpoints)
+	require.NoError(t, err)
+
+	require.NoError(t, controller.Start(context.Background()))
+	defer func() { _ = controller.Stop(context.Background()) }()
+
+	// Initial registration
+	require.Len(t, registeredRecords, 1)
+	require.Equal(t, initialEndpoints, registeredRecords[0].Endpoints)
+
+	// Update endpoints
+	newEndpoints := []string{"127.0.0.1:8080", "127.0.0.2:8080", "127.0.0.3:8080"}
+	err = controller.UpdateEndpoints(context.Background(), newEndpoints)
+	require.NoError(t, err)
+
+	// Verify re-registration happened
+	require.Len(t, registeredRecords, 2)
+	require.Equal(t, newEndpoints, registeredRecords[1].Endpoints)
+	require.Equal(t, datacenter.DataCenterActive, registeredRecords[1].State)
+
+	// Verify controller's stored endpoints are updated
+	require.Equal(t, newEndpoints, controller.Endpoints())
+}
+
+func TestControllerUpdateEndpointsRegisterError(t *testing.T) {
+	registerErr := errors.New("control plane error")
+	var registerCallCount int
+	cp := &MockControlPlane{
+		registerFn: func(_ context.Context, record DataCenterRecord) (string, uint64, error) {
+			registerCallCount++
+			// First call (initial registration) succeeds
+			if registerCallCount == 1 {
+				return "dc-1", 1, nil
+			}
+			// Second call (update) fails
+			return "", 0, registerErr
+		},
+		setStateFn: func(_ context.Context, _ string, _ DataCenterState, version uint64) (uint64, error) {
+			return version + 1, nil
+		},
+		listActiveFn: func(context.Context) ([]DataCenterRecord, error) {
+			return []DataCenterRecord{{ID: "dc-1", State: datacenter.DataCenterActive, Version: 1}}, nil
+		},
+	}
+
+	initialEndpoints := []string{"127.0.0.1:8080"}
+	config := &Config{
+		Logger:               log.DiscardLogger,
+		ControlPlane:         cp,
+		DataCenter:           DataCenter{Name: "dc-1"},
+		HeartbeatInterval:    time.Hour,
+		CacheRefreshInterval: time.Hour,
+		MaxCacheStaleness:    time.Second,
+		JitterRatio:          0.1,
+		MaxBackoff:           time.Second,
+		WatchEnabled:         false,
+		RequestTimeout:       time.Second,
+	}
+
+	controller, err := NewController(config, initialEndpoints)
+	require.NoError(t, err)
+
+	require.NoError(t, controller.Start(context.Background()))
+	defer func() { _ = controller.Stop(context.Background()) }()
+
+	// Update endpoints should fail
+	newEndpoints := []string{"127.0.0.1:8080", "127.0.0.2:8080"}
+	err = controller.UpdateEndpoints(context.Background(), newEndpoints)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to update endpoints")
+
+	// Original endpoints should be unchanged
+	require.Equal(t, initialEndpoints, controller.Endpoints())
 }

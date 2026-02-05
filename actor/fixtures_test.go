@@ -2236,11 +2236,11 @@ func MockDatacenterSystem(t *testing.T, listActive func(_ context.Context) ([]da
 	dcConfig := datacenter.NewConfig()
 	dcConfig.ControlPlane = &MockControlPlane{listActive: listActive}
 	dcConfig.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
-	dcConfig.Endpoints = []string{"127.0.0.1:8080"}
+	endpoints := []string{"127.0.0.1:8080"}
 	dcConfig.MaxCacheStaleness = 50 * time.Millisecond
 	dcConfig.CacheRefreshInterval = 10 * time.Millisecond
 
-	controller, err := datacentercontroller.NewController(dcConfig)
+	controller, err := datacentercontroller.NewController(dcConfig, endpoints)
 	require.NoError(t, err)
 	startCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	err = controller.Start(startCtx)

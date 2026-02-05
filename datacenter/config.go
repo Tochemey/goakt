@@ -54,31 +54,6 @@ type Config struct {
 	ControlPlane ControlPlane
 	// DataCenter describes the local DC metadata.
 	DataCenter DataCenter
-	// Endpoints are the remoting addresses (host:port) that this data center advertises to
-	// the multi-DC control plane. They are the only way other data centers can reach this DC
-	// for cross-DC messaging and spawning. Each element must be a valid TCP address in "host:port"
-	// form, representing a node's remoting listen address.
-	//
-	// How they are used:
-	//
-	//   - Messaging: Other DCs use these addresses to discover and talk to actors and grains
-	//     in this DC. For example, PID.DiscoverActor and grain Tell/Ask iterate over the
-	//     target DC's Endpoints (from the cached DataCenterRecord), contact remoting at each
-	//     host:port to resolve or deliver messages, and use the first successful result.
-	//
-	//   - Spawning: When another DC spawns an actor in this DC via SpawnOn with WithDataCenter,
-	//     the runtime picks one of this DC's Endpoints at random and sends RemoteSpawn to that
-	//     node. So the list you configure here defines where cross-DC spawns land: a single
-	//     endpoint (e.g. the DC leader only) sends all such spawns to one node; multiple
-	//     endpoints spread them across nodes.
-	//
-	// This value is stored in the control plane as DataCenterRecord.Endpoints when the local DC
-	// registers (typically by the DC leader). Choose addresses that are reachable from other DCs
-	// and that correspond to nodes running the actor system with remoting enabled.
-	//
-	// Example with one node (leader only): []string{"192.168.1.1:8080"}.
-	// Example with three nodes: []string{"192.168.1.1:8080", "192.168.1.2:8080", "192.168.1.3:8080"}.
-	Endpoints []string
 	// HeartbeatInterval controls how often the local DC renews its liveness.
 	HeartbeatInterval time.Duration
 	// CacheRefreshInterval controls how often the DC registry cache is refreshed.
@@ -130,10 +105,9 @@ func NewConfig() *Config {
 
 // Validate implements validation.Validator.
 func (c *Config) Validate() error {
-	gerr := validation.New(validation.FailFast()).
+	return validation.New(validation.FailFast()).
 		AddAssertion(c.ControlPlane != nil, "ControlPlane is required").
 		AddValidator(validation.NewEmptyStringValidator("Name", c.DataCenter.Name)).
-		AddAssertion(len(c.Endpoints) > 0, "Endpoints must not be empty").
 		AddAssertion(c.HeartbeatInterval > 0, "HeartbeatInterval must be greater than 0").
 		AddAssertion(c.CacheRefreshInterval > 0, "CacheRefreshInterval must be greater than 0").
 		AddAssertion(c.MaxCacheStaleness > 0, "MaxCacheStaleness must be greater than 0").
@@ -142,19 +116,6 @@ func (c *Config) Validate() error {
 		AddAssertion(c.MaxBackoff > 0, "MaxBackoff must be greater than 0").
 		AddAssertion(c.RequestTimeout > 0, "RequestTimeout must be greater than 0").
 		Validate()
-
-	if gerr != nil {
-		return gerr
-	}
-
-	// validate the endpoints
-	for _, endpoint := range c.Endpoints {
-		if err := validation.NewTCPAddressValidator(endpoint).Validate(); err != nil {
-			return err
-		}
-	}
-
-	return nil
 }
 
 // Sanitize fills zero-value fields with sensible defaults.

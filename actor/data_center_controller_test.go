@@ -33,6 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tochemey/goakt/v3/datacenter"
+	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/datacentercontroller"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/internal/ticker"
@@ -100,9 +101,8 @@ func TestDataCenterReady(t *testing.T) {
 			return nil, nil
 		}}
 		dcConfig.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
-		dcConfig.Endpoints = []string{"127.0.0.1:8080"}
 
-		controller, err := datacentercontroller.NewController(dcConfig)
+		controller, err := datacentercontroller.NewController(dcConfig, []string{"127.0.0.1:8080"})
 		require.NoError(t, err)
 		// Do NOT start the controller - Ready() will be false
 
@@ -183,10 +183,9 @@ func TestStopDataCenterController(t *testing.T) {
 			return nil, nil
 		}}
 		dcConfig.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
-		dcConfig.Endpoints = []string{"127.0.0.1:8080"}
 		dcConfig.CacheRefreshInterval = 10 * time.Millisecond
 
-		controller, err := datacentercontroller.NewController(dcConfig)
+		controller, err := datacentercontroller.NewController(dcConfig, []string{"127.0.0.1:8080"})
 		require.NoError(t, err)
 		startCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		err = controller.Start(startCtx)
@@ -206,9 +205,8 @@ func TestStopDataCenterController(t *testing.T) {
 		dcConfig := datacenter.NewConfig()
 		dcConfig.ControlPlane = &MockFailingSetStateControlPlane{}
 		dcConfig.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
-		dcConfig.Endpoints = []string{"127.0.0.1:8080"}
 
-		controller, err := datacentercontroller.NewController(dcConfig)
+		controller, err := datacentercontroller.NewController(dcConfig, []string{"127.0.0.1:8080"})
 		require.NoError(t, err)
 		startCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		err = controller.Start(startCtx)
@@ -232,7 +230,6 @@ func TestStartDataCenterController(t *testing.T) {
 			return nil, nil
 		}}
 		cfg.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
-		cfg.Endpoints = []string{"127.0.0.1:8080"}
 		cfg.CacheRefreshInterval = 10 * time.Millisecond
 		cfg.LeaderCheckInterval = 50 * time.Millisecond
 		return cfg
@@ -275,7 +272,7 @@ func TestStartDataCenterController(t *testing.T) {
 		clusterMock.EXPECT().IsLeader(mock.Anything).Return(false)
 
 		dcConfig := validDCConfig()
-		controller, err := datacentercontroller.NewController(dcConfig)
+		controller, err := datacentercontroller.NewController(dcConfig, []string{"127.0.0.1:8080"})
 		require.NoError(t, err)
 		startCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		err = controller.Start(startCtx)
@@ -300,9 +297,13 @@ func TestStartDataCenterController(t *testing.T) {
 	t.Run("returns nil when controller already exists", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
 		clusterMock.EXPECT().IsLeader(mock.Anything).Return(true)
+		// Expect Members() call for endpoint check (returns same endpoints as controller has)
+		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{
+			{Host: "127.0.0.1", RemotingPort: 8080},
+		}, nil)
 
 		dcConfig := validDCConfig()
-		controller, err := datacentercontroller.NewController(dcConfig)
+		controller, err := datacentercontroller.NewController(dcConfig, []string{"127.0.0.1:8080"})
 		require.NoError(t, err)
 		startCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		err = controller.Start(startCtx)
@@ -325,11 +326,11 @@ func TestStartDataCenterController(t *testing.T) {
 	t.Run("returns error when NewController fails", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
 		clusterMock.EXPECT().IsLeader(mock.Anything).Return(true)
+		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{}, nil) // empty endpoints -> NewController fails
 
 		invalidConfig := datacenter.NewConfig()
 		invalidConfig.ControlPlane = &MockControlPlane{}
-		invalidConfig.DataCenter = datacenter.DataCenter{Name: "local"}
-		invalidConfig.Endpoints = []string{} // invalid: empty endpoints
+		invalidConfig.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
 
 		sys := MockReplicationTestSystem(clusterMock)
 		sys.clusterConfig = NewClusterConfig().WithDataCenter(invalidConfig)
@@ -342,11 +343,11 @@ func TestStartDataCenterController(t *testing.T) {
 	t.Run("returns error when controller Start fails", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
 		clusterMock.EXPECT().IsLeader(mock.Anything).Return(true)
+		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{{Host: "127.0.0.1", RemotingPort: 8080}}, nil)
 
 		cfg := datacenter.NewConfig()
 		cfg.ControlPlane = &MockFailingRegisterControlPlane{}
 		cfg.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
-		cfg.Endpoints = []string{"127.0.0.1:8080"}
 
 		sys := MockReplicationTestSystem(clusterMock)
 		sys.clusterConfig = NewClusterConfig().WithDataCenter(cfg)
@@ -360,6 +361,7 @@ func TestStartDataCenterController(t *testing.T) {
 	t.Run("starts controller successfully when leader", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
 		clusterMock.EXPECT().IsLeader(mock.Anything).Return(true)
+		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{{Host: "127.0.0.1", RemotingPort: 8080}}, nil)
 
 		dcConfig := validDCConfig()
 		sys := MockReplicationTestSystem(clusterMock)
@@ -400,13 +402,13 @@ func TestTriggerDataCentersReconciliation(t *testing.T) {
 	t.Run("spawns goroutine and reconciles", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
 		clusterMock.EXPECT().IsLeader(mock.Anything).Return(true).Maybe()
+		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{{Host: "127.0.0.1", RemotingPort: 8080}}, nil).Maybe()
 
 		dcConfig := datacenter.NewConfig()
 		dcConfig.ControlPlane = &MockControlPlane{listActive: func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return nil, nil
 		}}
 		dcConfig.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
-		dcConfig.Endpoints = []string{"127.0.0.1:8080"}
 		dcConfig.CacheRefreshInterval = 10 * time.Millisecond
 		dcConfig.LeaderCheckInterval = 50 * time.Millisecond
 
@@ -421,11 +423,11 @@ func TestTriggerDataCentersReconciliation(t *testing.T) {
 	t.Run("logs error when reconcile fails", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
 		clusterMock.EXPECT().IsLeader(mock.Anything).Return(true).Maybe()
+		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{}, nil).Maybe() // empty -> NewController fails
 
 		invalidConfig := datacenter.NewConfig()
 		invalidConfig.ControlPlane = &MockControlPlane{}
-		invalidConfig.DataCenter = datacenter.DataCenter{Name: "local"}
-		invalidConfig.Endpoints = []string{} // invalid: NewController will fail
+		invalidConfig.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
 
 		sys := MockReplicationTestSystem(clusterMock)
 		sys.clusterConfig = NewClusterConfig().WithDataCenter(invalidConfig)
@@ -441,7 +443,6 @@ func TestStartDataCenterLeaderWatch(t *testing.T) {
 		cfg := datacenter.NewConfig()
 		cfg.ControlPlane = &MockControlPlane{}
 		cfg.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
-		cfg.Endpoints = []string{"127.0.0.1:8080"}
 		cfg.LeaderCheckInterval = 100 * time.Millisecond
 		return cfg
 	}
@@ -492,7 +493,6 @@ func TestStopDataCenterLeaderWatch(t *testing.T) {
 		cfg := datacenter.NewConfig()
 		cfg.ControlPlane = &MockControlPlane{}
 		cfg.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
-		cfg.Endpoints = []string{"127.0.0.1:8080"}
 		cfg.LeaderCheckInterval = 50 * time.Millisecond
 
 		sys := MockReplicationTestSystem(mockscluster.NewCluster(t))
@@ -558,13 +558,13 @@ func TestDataCenterLeaderWatchLoop(t *testing.T) {
 	t.Run("triggers reconciliation on tick", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
 		clusterMock.EXPECT().IsLeader(mock.Anything).Return(true).Maybe()
+		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{{Host: "127.0.0.1", RemotingPort: 8080}}, nil).Maybe()
 
 		cfg := datacenter.NewConfig()
 		cfg.ControlPlane = &MockControlPlane{listActive: func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return nil, nil
 		}}
 		cfg.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
-		cfg.Endpoints = []string{"127.0.0.1:8080"}
 		cfg.LeaderCheckInterval = 5 * time.Millisecond
 		cfg.CacheRefreshInterval = 10 * time.Millisecond
 
@@ -582,6 +582,465 @@ func TestDataCenterLeaderWatchLoop(t *testing.T) {
 		pause.For(50 * time.Millisecond)
 		stopSig <- types.Unit{}
 	})
+}
+
+func TestMaybeUpdateEndpointsNoController(t *testing.T) {
+	clusterMock := mockscluster.NewCluster(t)
+	sys := MockReplicationTestSystem(clusterMock)
+	sys.dataCenterController = nil
+
+	err := sys.maybeUpdateEndpoints(context.Background())
+	require.NoError(t, err)
+}
+
+func TestMaybeUpdateEndpointsMembersFetchError(t *testing.T) {
+	clusterMock := mockscluster.NewCluster(t)
+	clusterMock.EXPECT().Members(mock.Anything).Return(nil, assert.AnError)
+
+	cfg := datacenter.NewConfig()
+	cfg.ControlPlane = &MockControlPlane{}
+	cfg.DataCenter = datacenter.DataCenter{Name: "dc1"}
+
+	sys := MockReplicationTestSystem(clusterMock)
+	sys.clusterConfig = NewClusterConfig().WithDataCenter(cfg)
+
+	// Create a controller
+	controller, err := datacentercontroller.NewController(cfg, []string{"127.0.0.1:8080"})
+	require.NoError(t, err)
+	sys.dataCenterController = controller
+
+	err = sys.maybeUpdateEndpoints(context.Background())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to fetch cluster members")
+}
+
+func TestMaybeUpdateEndpointsNoMembers(t *testing.T) {
+	clusterMock := mockscluster.NewCluster(t)
+	clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{}, nil)
+
+	cfg := datacenter.NewConfig()
+	cfg.ControlPlane = &MockControlPlane{}
+	cfg.DataCenter = datacenter.DataCenter{Name: "dc1"}
+
+	sys := MockReplicationTestSystem(clusterMock)
+	sys.clusterConfig = NewClusterConfig().WithDataCenter(cfg)
+
+	// Create a controller
+	controller, err := datacentercontroller.NewController(cfg, []string{"127.0.0.1:8080"})
+	require.NoError(t, err)
+	sys.dataCenterController = controller
+
+	// Should not fail with empty members
+	err = sys.maybeUpdateEndpoints(context.Background())
+	require.NoError(t, err)
+}
+
+func TestMaybeUpdateEndpointsUnchanged(t *testing.T) {
+	members := []*cluster.Peer{
+		{Host: "127.0.0.1", RemotingPort: 8080},
+		{Host: "127.0.0.2", RemotingPort: 8080},
+	}
+	clusterMock := mockscluster.NewCluster(t)
+	clusterMock.EXPECT().Members(mock.Anything).Return(members, nil)
+
+	cfg := datacenter.NewConfig()
+	cfg.ControlPlane = &MockControlPlane{}
+	cfg.DataCenter = datacenter.DataCenter{Name: "dc1"}
+
+	initialEndpoints := []string{"127.0.0.1:8080", "127.0.0.2:8080"}
+
+	sys := MockReplicationTestSystem(clusterMock)
+	sys.clusterConfig = NewClusterConfig().WithDataCenter(cfg)
+
+	// Create a controller with the same endpoints as current members
+	controller, err := datacentercontroller.NewController(cfg, initialEndpoints)
+	require.NoError(t, err)
+	sys.dataCenterController = controller
+
+	err = sys.maybeUpdateEndpoints(context.Background())
+	require.NoError(t, err)
+
+	// Endpoints should remain unchanged
+	require.Equal(t, initialEndpoints, controller.Endpoints())
+}
+
+func TestMaybeUpdateEndpointsChanged(t *testing.T) {
+	// Start with 2 members, then add a 3rd
+	newMembers := []*cluster.Peer{
+		{Host: "127.0.0.1", RemotingPort: 8080},
+		{Host: "127.0.0.2", RemotingPort: 8080},
+		{Host: "127.0.0.3", RemotingPort: 8080},
+	}
+	clusterMock := mockscluster.NewCluster(t)
+	clusterMock.EXPECT().Members(mock.Anything).Return(newMembers, nil)
+
+	var registeredRecords []datacenter.DataCenterRecord
+	cfg := datacenter.NewConfig()
+	cfg.ControlPlane = &testControlPlane{
+		registerFn: func(_ context.Context, record datacenter.DataCenterRecord) (string, uint64, error) {
+			registeredRecords = append(registeredRecords, record)
+			return "dc1", uint64(len(registeredRecords)), nil
+		},
+		setStateFn: func(_ context.Context, _ string, _ datacenter.DataCenterState, version uint64) (uint64, error) {
+			return version + 1, nil
+		},
+		listActiveFn: func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+			return nil, nil
+		},
+	}
+	cfg.DataCenter = datacenter.DataCenter{Name: "dc1"}
+
+	initialEndpoints := []string{"127.0.0.1:8080", "127.0.0.2:8080"}
+
+	sys := MockReplicationTestSystem(clusterMock)
+	sys.clusterConfig = NewClusterConfig().WithDataCenter(cfg)
+
+	// Create and start controller with initial endpoints
+	controller, err := datacentercontroller.NewController(cfg, initialEndpoints)
+	require.NoError(t, err)
+	require.NoError(t, controller.Start(context.Background()))
+	defer func() { _ = controller.Stop(context.Background()) }()
+
+	sys.dataCenterController = controller
+
+	// Trigger update
+	err = sys.maybeUpdateEndpoints(context.Background())
+	require.NoError(t, err)
+
+	// Verify endpoints were updated
+	expectedEndpoints := []string{"127.0.0.1:8080", "127.0.0.2:8080", "127.0.0.3:8080"}
+	require.Equal(t, expectedEndpoints, controller.Endpoints())
+
+	// Verify re-registration happened (initial register + setState to ACTIVE + update)
+	require.GreaterOrEqual(t, len(registeredRecords), 2)
+	lastRecord := registeredRecords[len(registeredRecords)-1]
+	require.Equal(t, expectedEndpoints, lastRecord.Endpoints)
+}
+
+func TestMaybeUpdateEndpointsUpdateFails(t *testing.T) {
+	// Scenario: endpoints differ, but UpdateEndpoints fails
+	newMembers := []*cluster.Peer{
+		{Host: "127.0.0.1", RemotingPort: 8080},
+		{Host: "127.0.0.2", RemotingPort: 8080},
+		{Host: "127.0.0.3", RemotingPort: 8080},
+	}
+	clusterMock := mockscluster.NewCluster(t)
+	clusterMock.EXPECT().Members(mock.Anything).Return(newMembers, nil)
+
+	updateErr := errors.New("control plane update failed")
+	var registerCallCount int
+	cfg := datacenter.NewConfig()
+	cfg.ControlPlane = &testControlPlane{
+		registerFn: func(_ context.Context, record datacenter.DataCenterRecord) (string, uint64, error) {
+			registerCallCount++
+			// First call (initial registration) succeeds
+			if registerCallCount == 1 {
+				return "dc1", 1, nil
+			}
+			// Second call (update) fails
+			return "", 0, updateErr
+		},
+		setStateFn: func(_ context.Context, _ string, _ datacenter.DataCenterState, version uint64) (uint64, error) {
+			return version + 1, nil
+		},
+		listActiveFn: func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+			return nil, nil
+		},
+	}
+	cfg.DataCenter = datacenter.DataCenter{Name: "dc1"}
+
+	initialEndpoints := []string{"127.0.0.1:8080", "127.0.0.2:8080"}
+
+	sys := MockReplicationTestSystem(clusterMock)
+	sys.clusterConfig = NewClusterConfig().WithDataCenter(cfg)
+
+	// Create and start controller with initial endpoints
+	controller, err := datacentercontroller.NewController(cfg, initialEndpoints)
+	require.NoError(t, err)
+	require.NoError(t, controller.Start(context.Background()))
+	defer func() { _ = controller.Stop(context.Background()) }()
+
+	sys.dataCenterController = controller
+
+	// Trigger update - should fail
+	err = sys.maybeUpdateEndpoints(context.Background())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to update data center endpoints")
+
+	// Original endpoints should be unchanged since update failed
+	require.Equal(t, initialEndpoints, controller.Endpoints())
+}
+
+func TestMaybeUpdateEndpointsOrderMatters(t *testing.T) {
+	// slices.Equal is order-sensitive; different order = different endpoints
+	// Controller has [A, B], cluster has [B, A] → should trigger update
+	clusterMembers := []*cluster.Peer{
+		{Host: "127.0.0.2", RemotingPort: 8080},
+		{Host: "127.0.0.1", RemotingPort: 8080},
+	}
+	clusterMock := mockscluster.NewCluster(t)
+	clusterMock.EXPECT().Members(mock.Anything).Return(clusterMembers, nil)
+
+	var registeredRecords []datacenter.DataCenterRecord
+	cfg := datacenter.NewConfig()
+	cfg.ControlPlane = &testControlPlane{
+		registerFn: func(_ context.Context, record datacenter.DataCenterRecord) (string, uint64, error) {
+			registeredRecords = append(registeredRecords, record)
+			return "dc1", uint64(len(registeredRecords)), nil
+		},
+		setStateFn: func(_ context.Context, _ string, _ datacenter.DataCenterState, version uint64) (uint64, error) {
+			return version + 1, nil
+		},
+		listActiveFn: func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+			return nil, nil
+		},
+	}
+	cfg.DataCenter = datacenter.DataCenter{Name: "dc1"}
+
+	// Initial endpoints in different order than cluster will report
+	initialEndpoints := []string{"127.0.0.1:8080", "127.0.0.2:8080"}
+
+	sys := MockReplicationTestSystem(clusterMock)
+	sys.clusterConfig = NewClusterConfig().WithDataCenter(cfg)
+
+	// Create and start controller
+	controller, err := datacentercontroller.NewController(cfg, initialEndpoints)
+	require.NoError(t, err)
+	require.NoError(t, controller.Start(context.Background()))
+	defer func() { _ = controller.Stop(context.Background()) }()
+
+	sys.dataCenterController = controller
+
+	// Trigger update
+	err = sys.maybeUpdateEndpoints(context.Background())
+	require.NoError(t, err)
+
+	// Endpoints should be updated to match cluster order
+	expectedEndpoints := []string{"127.0.0.2:8080", "127.0.0.1:8080"}
+	require.Equal(t, expectedEndpoints, controller.Endpoints())
+}
+
+func TestMaybeUpdateEndpointsSingleMember(t *testing.T) {
+	// Edge case: cluster with only one member
+	singleMember := []*cluster.Peer{
+		{Host: "127.0.0.1", RemotingPort: 8080},
+	}
+	clusterMock := mockscluster.NewCluster(t)
+	clusterMock.EXPECT().Members(mock.Anything).Return(singleMember, nil)
+
+	cfg := datacenter.NewConfig()
+	cfg.ControlPlane = &testControlPlane{}
+	cfg.DataCenter = datacenter.DataCenter{Name: "dc1"}
+
+	initialEndpoints := []string{"127.0.0.1:8080"}
+
+	sys := MockReplicationTestSystem(clusterMock)
+	sys.clusterConfig = NewClusterConfig().WithDataCenter(cfg)
+
+	controller, err := datacentercontroller.NewController(cfg, initialEndpoints)
+	require.NoError(t, err)
+	sys.dataCenterController = controller
+
+	// Should not update (same single endpoint)
+	err = sys.maybeUpdateEndpoints(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, initialEndpoints, controller.Endpoints())
+}
+
+func TestMaybeUpdateEndpointsDifferentPorts(t *testing.T) {
+	// Members with different remoting ports
+	members := []*cluster.Peer{
+		{Host: "127.0.0.1", RemotingPort: 8080},
+		{Host: "127.0.0.1", RemotingPort: 8081},
+		{Host: "127.0.0.1", RemotingPort: 8082},
+	}
+	clusterMock := mockscluster.NewCluster(t)
+	clusterMock.EXPECT().Members(mock.Anything).Return(members, nil)
+
+	var registeredRecords []datacenter.DataCenterRecord
+	cfg := datacenter.NewConfig()
+	cfg.ControlPlane = &testControlPlane{
+		registerFn: func(_ context.Context, record datacenter.DataCenterRecord) (string, uint64, error) {
+			registeredRecords = append(registeredRecords, record)
+			return "dc1", uint64(len(registeredRecords)), nil
+		},
+		setStateFn: func(_ context.Context, _ string, _ datacenter.DataCenterState, version uint64) (uint64, error) {
+			return version + 1, nil
+		},
+		listActiveFn: func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+			return nil, nil
+		},
+	}
+	cfg.DataCenter = datacenter.DataCenter{Name: "dc1"}
+
+	initialEndpoints := []string{"127.0.0.1:8080"}
+
+	sys := MockReplicationTestSystem(clusterMock)
+	sys.clusterConfig = NewClusterConfig().WithDataCenter(cfg)
+
+	controller, err := datacentercontroller.NewController(cfg, initialEndpoints)
+	require.NoError(t, err)
+	require.NoError(t, controller.Start(context.Background()))
+	defer func() { _ = controller.Stop(context.Background()) }()
+
+	sys.dataCenterController = controller
+
+	// Trigger update
+	err = sys.maybeUpdateEndpoints(context.Background())
+	require.NoError(t, err)
+
+	// Should include all three ports
+	expectedEndpoints := []string{"127.0.0.1:8080", "127.0.0.1:8081", "127.0.0.1:8082"}
+	require.Equal(t, expectedEndpoints, controller.Endpoints())
+}
+
+func TestMaybeUpdateEndpointsMemberRemoved(t *testing.T) {
+	// Scenario: member removed from cluster (scale down)
+	remainingMembers := []*cluster.Peer{
+		{Host: "127.0.0.1", RemotingPort: 8080},
+	}
+	clusterMock := mockscluster.NewCluster(t)
+	clusterMock.EXPECT().Members(mock.Anything).Return(remainingMembers, nil)
+
+	var registeredRecords []datacenter.DataCenterRecord
+	cfg := datacenter.NewConfig()
+	cfg.ControlPlane = &testControlPlane{
+		registerFn: func(_ context.Context, record datacenter.DataCenterRecord) (string, uint64, error) {
+			registeredRecords = append(registeredRecords, record)
+			return "dc1", uint64(len(registeredRecords)), nil
+		},
+		setStateFn: func(_ context.Context, _ string, _ datacenter.DataCenterState, version uint64) (uint64, error) {
+			return version + 1, nil
+		},
+		listActiveFn: func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+			return nil, nil
+		},
+	}
+	cfg.DataCenter = datacenter.DataCenter{Name: "dc1"}
+
+	// Initial endpoints include a member that will be removed
+	initialEndpoints := []string{"127.0.0.1:8080", "127.0.0.2:8080", "127.0.0.3:8080"}
+
+	sys := MockReplicationTestSystem(clusterMock)
+	sys.clusterConfig = NewClusterConfig().WithDataCenter(cfg)
+
+	controller, err := datacentercontroller.NewController(cfg, initialEndpoints)
+	require.NoError(t, err)
+	require.NoError(t, controller.Start(context.Background()))
+	defer func() { _ = controller.Stop(context.Background()) }()
+
+	sys.dataCenterController = controller
+
+	// Trigger update
+	err = sys.maybeUpdateEndpoints(context.Background())
+	require.NoError(t, err)
+
+	// Should only have the remaining member
+	expectedEndpoints := []string{"127.0.0.1:8080"}
+	require.Equal(t, expectedEndpoints, controller.Endpoints())
+
+	// Verify update was registered
+	require.GreaterOrEqual(t, len(registeredRecords), 2)
+	lastRecord := registeredRecords[len(registeredRecords)-1]
+	require.Equal(t, expectedEndpoints, lastRecord.Endpoints)
+}
+
+func TestStartDataCenterControllerUpdatesEndpoints(t *testing.T) {
+	// Scenario: controller exists, membership changes, reconciliation is triggered
+	newMembers := []*cluster.Peer{
+		{Host: "127.0.0.1", RemotingPort: 8080},
+		{Host: "127.0.0.2", RemotingPort: 8080},
+		{Host: "127.0.0.3", RemotingPort: 8080},
+	}
+
+	clusterMock := mockscluster.NewCluster(t)
+	clusterMock.EXPECT().IsLeader(mock.Anything).Return(true)
+	clusterMock.EXPECT().Members(mock.Anything).Return(newMembers, nil)
+
+	var registeredRecords []datacenter.DataCenterRecord
+	cfg := datacenter.NewConfig()
+	cfg.ControlPlane = &testControlPlane{
+		registerFn: func(_ context.Context, record datacenter.DataCenterRecord) (string, uint64, error) {
+			registeredRecords = append(registeredRecords, record)
+			return "dc1", uint64(len(registeredRecords)), nil
+		},
+		setStateFn: func(_ context.Context, _ string, _ datacenter.DataCenterState, version uint64) (uint64, error) {
+			return version + 1, nil
+		},
+		listActiveFn: func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+			return nil, nil
+		},
+	}
+	cfg.DataCenter = datacenter.DataCenter{Name: "dc1"}
+
+	initialEndpoints := []string{"127.0.0.1:8080", "127.0.0.2:8080"}
+
+	sys := MockReplicationTestSystem(clusterMock)
+	sys.clusterConfig = NewClusterConfig().WithDataCenter(cfg)
+	sys.shutdownTimeout = 5 * time.Second
+
+	// Create and start controller with initial endpoints
+	controller, err := datacentercontroller.NewController(cfg, initialEndpoints)
+	require.NoError(t, err)
+	require.NoError(t, controller.Start(context.Background()))
+	defer func() { _ = controller.Stop(context.Background()) }()
+
+	sys.dataCenterController = controller
+	sys.clusterEnabled.Store(true)
+
+	ctx := context.Background()
+
+	// Trigger reconciliation (simulates cluster event or periodic tick)
+	err = sys.startDataCenterController(ctx)
+	require.NoError(t, err)
+
+	// Verify endpoints were updated to include the new member
+	expectedEndpoints := []string{"127.0.0.1:8080", "127.0.0.2:8080", "127.0.0.3:8080"}
+	require.Equal(t, expectedEndpoints, controller.Endpoints())
+}
+
+// testControlPlane is a flexible mock control plane for testing endpoint updates.
+type testControlPlane struct {
+	registerFn   func(context.Context, datacenter.DataCenterRecord) (string, uint64, error)
+	heartbeatFn  func(context.Context, string, uint64) (uint64, time.Time, error)
+	setStateFn   func(context.Context, string, datacenter.DataCenterState, uint64) (uint64, error)
+	listActiveFn func(context.Context) ([]datacenter.DataCenterRecord, error)
+}
+
+func (m *testControlPlane) Register(ctx context.Context, record datacenter.DataCenterRecord) (string, uint64, error) {
+	if m.registerFn != nil {
+		return m.registerFn(ctx, record)
+	}
+	return record.ID, 1, nil
+}
+
+func (m *testControlPlane) Heartbeat(ctx context.Context, id string, version uint64) (uint64, time.Time, error) {
+	if m.heartbeatFn != nil {
+		return m.heartbeatFn(ctx, id, version)
+	}
+	return version + 1, time.Now().Add(time.Hour), nil
+}
+
+func (m *testControlPlane) SetState(ctx context.Context, id string, state datacenter.DataCenterState, version uint64) (uint64, error) {
+	if m.setStateFn != nil {
+		return m.setStateFn(ctx, id, state, version)
+	}
+	return version + 1, nil
+}
+
+func (m *testControlPlane) ListActive(ctx context.Context) ([]datacenter.DataCenterRecord, error) {
+	if m.listActiveFn != nil {
+		return m.listActiveFn(ctx)
+	}
+	return nil, nil
+}
+
+func (*testControlPlane) Watch(_ context.Context) (<-chan datacenter.ControlPlaneEvent, error) {
+	return nil, nil
+}
+
+func (*testControlPlane) Deregister(_ context.Context, _ string) error {
+	return nil
 }
 
 // MockFailingSetStateControlPlane makes Controller.Stop fail by returning error from SetState

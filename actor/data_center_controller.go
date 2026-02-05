@@ -24,6 +24,8 @@ package actor
 
 import (
 	"context"
+	"fmt"
+	"slices"
 	"time"
 
 	"github.com/tochemey/goakt/v3/internal/datacentercontroller"
@@ -93,15 +95,15 @@ func (x *actorSystem) startDataCenterController(ctx context.Context) error {
 		return nil
 	}
 
+	if !x.isDataCenterEnabled() {
+		return nil
+	}
+
 	if !x.dataCenterReconcileInFlight.CompareAndSwap(false, true) {
 		return nil
 	}
 
 	defer x.dataCenterReconcileInFlight.Store(false)
-
-	if !x.isDataCenterEnabled() {
-		return nil
-	}
 
 	isLeader := x.cluster.IsLeader(ctx)
 
@@ -118,12 +120,24 @@ func (x *actorSystem) startDataCenterController(ctx context.Context) error {
 		return x.stopControllerLocked(ctx)
 	}
 
+	// If controller already exists, check if endpoints need updating
 	if x.dataCenterController != nil {
-		return nil
+		return x.maybeUpdateEndpoints(ctx)
+	}
+
+	// let us fetch the endpoints from the cluster
+	members, err := x.cluster.Members(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to fetch cluster members: %w", err)
+	}
+
+	endpoints := make([]string, len(members))
+	for i, member := range members {
+		endpoints[i] = member.RemotingAddress()
 	}
 
 	// Leader is responsible for owning the controller lifecycle; start it once.
-	controller, err := datacentercontroller.NewController(x.clusterConfig.dataCenterConfig)
+	controller, err := datacentercontroller.NewController(x.clusterConfig.dataCenterConfig, endpoints)
 	if err != nil {
 		return err
 	}
@@ -133,6 +147,50 @@ func (x *actorSystem) startDataCenterController(ctx context.Context) error {
 	}
 
 	x.dataCenterController = controller
+	return nil
+}
+
+// maybeUpdateEndpoints checks if cluster membership has changed and updates
+// the data center controller's endpoints if needed.
+// Caller must hold dataCenterControllerMutex.
+func (x *actorSystem) maybeUpdateEndpoints(ctx context.Context) error {
+	if x.dataCenterController == nil {
+		return nil
+	}
+
+	// Get current cluster members
+	members, err := x.cluster.Members(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to fetch cluster members: %w", err)
+	}
+
+	if len(members) == 0 {
+		// No members available; keep existing endpoints
+		return nil
+	}
+
+	// Build current endpoints from members
+	currentEndpoints := make([]string, len(members))
+	for i, member := range members {
+		currentEndpoints[i] = member.RemotingAddress()
+	}
+
+	// Compare with registered endpoints
+	registeredEndpoints := x.dataCenterController.Endpoints()
+	if slices.Equal(currentEndpoints, registeredEndpoints) {
+		// Endpoints unchanged; nothing to do
+		return nil
+	}
+
+	// Endpoints changed; update the controller
+	x.logger.Infof("Data center endpoints changed from %v to %v; updating controller",
+		registeredEndpoints, currentEndpoints)
+
+	if err := x.dataCenterController.UpdateEndpoints(ctx, currentEndpoints); err != nil {
+		return fmt.Errorf("failed to update data center endpoints: %w", err)
+	}
+
+	x.logger.Infof("Data center endpoints updated successfully")
 	return nil
 }
 

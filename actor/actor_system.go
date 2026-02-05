@@ -3201,6 +3201,7 @@ func (x *actorSystem) handleNodeJoinedEvent(event *cluster.Event) {
 
 	x.tryOpenGrainActivationBarrier(context.Background())
 	x.resyncAfterClusterEvent("node joined", nodeJoined.GetAddress())
+	x.triggerDataCentersReconciliation()
 }
 
 // handleNodeLeftEvent processes a NodeLeft cluster event.
@@ -3213,6 +3214,7 @@ func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
 	)
 
 	x.resyncAfterClusterEvent("node left", nodeLeft.GetAddress())
+	x.triggerDataCentersReconciliation()
 
 	if !x.relocationEnabled.Load() {
 		return
