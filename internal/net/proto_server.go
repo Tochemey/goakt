@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package tcp
+package net
 
 import (
 	"context"
@@ -49,7 +49,7 @@ type ProtoHandler func(ctx context.Context, conn Connection, req proto.Message) 
 
 // ProtoServer is a high-performance, low-GC protobuf-over-TCP server.
 //
-// It layers a self-describing protobuf wire protocol on top of [Server],
+// It layers a self-describing protobuf wire protocol on top of [TCPServer],
 // providing:
 //
 //   - Automatic length-prefixed framing via [ProtoSerializer].
@@ -60,7 +60,7 @@ type ProtoHandler func(ctx context.Context, conn Connection, req proto.Message) 
 //     and reduce GC pressure under sustained load.
 //   - Optional per-message idle timeouts to reclaim stale connections.
 //   - Full TLS, [ConnWrapper] (compression), and multi-loop accept support
-//     inherited from the underlying [Server].
+//     inherited from the underlying [TCPServer].
 //
 // # Wire format
 //
@@ -105,13 +105,13 @@ type ProtoHandler func(ctx context.Context, conn Connection, req proto.Message) 
 //     per-message allocations for the common case.
 //   - The [ProtoSerializer] itself uses a pooled [bytes.Buffer] for
 //     marshaling response frames.
-//   - Connection structs are recycled via the underlying [Server]'s
+//   - Connection structs are recycled via the underlying [TCPServer]'s
 //     connStructPool ([sync.Pool]).
-//   - The underlying [Server] uses a sharded [WorkerPool] with per-shard
+//   - The underlying [TCPServer] uses a sharded [WorkerPool] with per-shard
 //     idle worker lists and a configurable GC ballast to further reduce
 //     garbage-collection frequency.
 type ProtoServer struct {
-	server     *Server
+	server     *TCPServer
 	handlers   map[protoreflect.FullName]ProtoHandler
 	fallback   ProtoHandler
 	serializer *ProtoSerializer
@@ -145,7 +145,7 @@ func NewProtoServer(listenAddr string, opts ...ProtoServerOption) (*ProtoServer,
 	// Always wire the proto read-loop as the underlying server's request handler.
 	ps.serverOpts = append(ps.serverOpts, WithRequestHandler(ps.handleConn))
 
-	srv, err := NewServer(listenAddr, ps.serverOpts...)
+	srv, err := NewTCPServer(listenAddr, ps.serverOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -187,7 +187,7 @@ func WithProtoServerIdleTimeout(duration time.Duration) ProtoServerOption {
 }
 
 // WithProtoServerContext sets a base [context.Context] on the underlying
-// [Server], propagated to every [ProtoHandler] invocation. Use this for
+// [TCPServer], propagated to every [ProtoHandler] invocation. Use this for
 // cancellation signals or request-scoped values.
 func WithProtoServerContext(ctx context.Context) ProtoServerOption {
 	return func(ps *ProtoServer) {
@@ -196,7 +196,7 @@ func WithProtoServerContext(ctx context.Context) ProtoServerOption {
 }
 
 // WithProtoServerTLSConfig sets the TLS configuration used by the underlying
-// [Server].
+// [TCPServer].
 //
 // Providing a non-nil config enables TLS for this ProtoServer when you call
 // [ProtoServer.ListenTLS]. If config is nil, TLS is not configured and
@@ -213,7 +213,7 @@ func WithProtoServerTLSConfig(config *tls.Config) ProtoServerOption {
 }
 
 // WithProtoServerListenConfig overrides the [ListenConfig] used by the
-// underlying [Server] when creating its listener.
+// underlying [TCPServer] when creating its listener.
 //
 // This option affects calls to [ProtoServer.Listen] and [ProtoServer.ListenTLS]
 // (i.e., the bind/listen step). It does not modify per-connection behavior
@@ -230,7 +230,7 @@ func WithProtoServerListenConfig(config *ListenConfig) ProtoServerOption {
 }
 
 // WithProtoServerLoops sets the number of concurrent accept loops used by the
-// underlying [Server].
+// underlying [TCPServer].
 //
 // An “accept loop” is a goroutine that repeatedly calls Accept on the listener
 // and hands accepted connections off to the server’s connection handling path.
@@ -254,7 +254,7 @@ func WithProtoServerLoops(loops int) ProtoServerOption {
 	}
 }
 
-// WithProtoServerAllowThreadLocking controls whether the underlying [Server]
+// WithProtoServerAllowThreadLocking controls whether the underlying [TCPServer]
 // is permitted to pin (lock) its accept-loop goroutines to their current OS
 // threads (i.e. the equivalent of calling runtime.LockOSThread).
 //
@@ -276,7 +276,7 @@ func WithProtoServerAllowThreadLocking(allow bool) ProtoServerOption {
 }
 
 // WithProtoServerConnWrapper appends a [ConnWrapper] (e.g. compression) to the
-// underlying [Server]'s wrapping pipeline.
+// underlying [TCPServer]'s wrapping pipeline.
 func WithProtoServerConnWrapper(w ConnWrapper) ProtoServerOption {
 	return func(ps *ProtoServer) {
 		ps.serverOpts = append(ps.serverOpts, WithConnWrapper(w))
@@ -284,7 +284,7 @@ func WithProtoServerConnWrapper(w ConnWrapper) ProtoServerOption {
 }
 
 // WithProtoServerMaxAcceptConnections sets the maximum total connections on the
-// underlying [Server].
+// underlying [TCPServer].
 func WithProtoServerMaxAcceptConnections(limit int32) ProtoServerOption {
 	return func(ps *ProtoServer) {
 		ps.serverOpts = append(ps.serverOpts, WithMaxAcceptConnections(limit))
@@ -292,7 +292,7 @@ func WithProtoServerMaxAcceptConnections(limit int32) ProtoServerOption {
 }
 
 // WithProtoServerBallast sets the GC ballast size (in MiB) on the underlying
-// [Server].
+// [TCPServer].
 //
 // A “GC ballast” is a deliberately retained heap allocation used to bias the
 // garbage collector toward running less frequently. This can improve tail
@@ -314,7 +314,7 @@ func WithProtoServerBallast(sizeInMiB int) ProtoServerOption {
 }
 
 // WithProtoServerConnectionCreator sets the factory used to create [Connection]
-// values for incoming connections on the underlying [Server].
+// values for incoming connections on the underlying [TCPServer].
 func WithProtoServerConnectionCreator(f ConnectionCreatorFunc) ProtoServerOption {
 	return func(ps *ProtoServer) {
 		ps.serverOpts = append(ps.serverOpts, WithConnectionCreator(f))
@@ -340,7 +340,7 @@ func (ps *ProtoServer) Serve() error {
 	return ps.server.Serve()
 }
 
-// Shutdown gracefully stops the server. See [Server.Shutdown] for the
+// Shutdown gracefully stops the server. See [TCPServer.Shutdown] for the
 // semantics of the timeout parameter d:
 //   - d > 0: wait up to d for in-flight connections to finish.
 //   - d == 0: wait indefinitely.
@@ -373,7 +373,7 @@ func (ps *ProtoServer) AcceptedConnections() int32 {
 	return ps.server.AcceptedConnections()
 }
 
-// handleConn is the [RequestHandlerFunc] wired into the underlying [Server].
+// handleConn is the [RequestHandlerFunc] wired into the underlying [TCPServer].
 // It runs a per-connection read loop: read frame -> deserialize -> dispatch
 // -> serialize response -> write frame. The loop exits on EOF, read error,
 // or idle timeout.

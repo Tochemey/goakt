@@ -23,7 +23,7 @@
 //go:build windows
 // +build windows
 
-package tcp
+package net
 
 import (
 	"fmt"

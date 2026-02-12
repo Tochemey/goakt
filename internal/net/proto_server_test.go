@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package tcp
+package net
 
 import (
 	"context"
@@ -251,7 +251,7 @@ func TestProtoServer_BatchRequestResponse(t *testing.T) {
 		&testpb.Reply{Content: "msg3"},
 	}
 
-	resps, err := client.SendProtoMany(context.Background(), reqs)
+	resps, err := client.SendBatchProto(context.Background(), reqs)
 	require.NoError(t, err)
 	require.Len(t, resps, 3)
 

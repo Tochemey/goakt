@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package tcp
+package net
 
 import (
 	"context"
@@ -43,20 +43,20 @@ type RequestHandlerFunc func(conn Connection)
 // incoming TCP connection. The default creates a plain [*TCPConn].
 type ConnectionCreatorFunc func() Connection
 
-// ServerOption configures a [Server] before it is started.
-type ServerOption func(*Server)
+// ServerOption configures a [TCPServer] before it is started.
+type ServerOption func(*TCPServer)
 
 var defaultListenConfig = &ListenConfig{
 	SocketReusePort: true,
 }
 
-// Server is a multi-loop TCP server. It listens on a single address and
+// TCPServer is a multi-loop TCP server. It listens on a single address and
 // dispatches accepted connections to a [WorkerPool]. Optional TLS and
 // [ConnWrapper] layers (e.g. compression) are applied transparently.
 //
-// Create a Server with [NewServer], configure it with [ServerOption] values,
-// then call [Server.Listen] (or [Server.ListenTLS]) followed by [Server.Serve].
-type Server struct {
+// Create a TCPServer with [NewTCPServer], configure it with [ServerOption] values,
+// then call [Server.Listen] (or [Server.ListenTLS]) followed by [TCPServer.Serve].
+type TCPServer struct {
 	listenAddr        *net.TCPAddr
 	listener          *net.TCPListener
 	requestHandler    RequestHandlerFunc
@@ -86,8 +86,8 @@ type Connection interface {
 
 	// NetConn returns the underlying [net.Conn].
 	NetConn() net.Conn
-	// Server returns the [Server] that accepted this connection.
-	Server() *Server
+	// Server returns the [TCPServer] that accepted this connection.
+	Server() *TCPServer
 	// ClientAddr returns the remote peer address as a [*net.TCPAddr].
 	ClientAddr() *net.TCPAddr
 	// ServerAddr returns the local listen address as a [*net.TCPAddr].
@@ -105,31 +105,31 @@ type Connection interface {
 	Start()
 	// Reset reinitialises the connection with a new underlying [net.Conn].
 	Reset(netConn net.Conn)
-	// SetServer associates this connection with its parent [Server].
-	SetServer(server *Server)
+	// SetServer associates this connection with its parent [TCPServer].
+	SetServer(server *TCPServer)
 }
 
 // TCPConn is the default [Connection] implementation backed by a [net.Conn].
 type TCPConn struct {
 	net.Conn
-	server *Server
+	server *TCPServer
 	ctx    context.Context
 	ts     int64
 	_      [16]byte // cache-line padding
 }
 
-// NewServer creates a [Server] bound to the given address (host:port).
+// NewTCPServer creates a [TCPServer] bound to the given address (host:port).
 //
 // Defaults: 8 accept loops, 20 MiB ballast, SO_REUSEPORT enabled,
 // plain [*TCPConn] connection struct, no TLS.
-func NewServer(listenAddr string, opts ...ServerOption) (*Server, error) {
+func NewTCPServer(listenAddr string, opts ...ServerOption) (*TCPServer, error) {
 	tcpAddr, err := net.ResolveTCPAddr("tcp", listenAddr)
 	if err != nil {
 		return nil, fmt.Errorf("resolving address %q: %w", listenAddr, err)
 	}
 
-	var s *Server
-	s = &Server{
+	var s *TCPServer
+	s = &TCPServer{
 		listenAddr:   tcpAddr,
 		listenConfig: defaultListenConfig,
 		loops:        8,
@@ -157,38 +157,38 @@ func NewServer(listenAddr string, opts ...ServerOption) (*Server, error) {
 
 // WithTLSConfig sets the TLS configuration used when TLS is enabled.
 func WithTLSConfig(config *tls.Config) ServerOption {
-	return func(s *Server) { s.tlsConfig = config }
+	return func(s *TCPServer) { s.tlsConfig = config }
 }
 
 // WithListenConfig overrides the default [ListenConfig] used to create
 // the listening socket.
 func WithListenConfig(config *ListenConfig) ServerOption {
-	return func(s *Server) { s.listenConfig = config }
+	return func(s *TCPServer) { s.listenConfig = config }
 }
 
 // WithConnectionCreator sets the factory used to create [Connection] values
 // for incoming connections. Use this to substitute a custom implementation
 // that embeds [TCPConn].
 func WithConnectionCreator(f ConnectionCreatorFunc) ServerOption {
-	return func(s *Server) { s.connectionCreator = f }
+	return func(s *TCPServer) { s.connectionCreator = f }
 }
 
 // WithRequestHandler sets the callback invoked for every accepted connection.
 func WithRequestHandler(f RequestHandlerFunc) ServerOption {
-	return func(s *Server) { s.requestHandler = f }
+	return func(s *TCPServer) { s.requestHandler = f }
 }
 
 // WithServerContext sets a base [context.Context] that is returned by
-// [Server.GetContext]. It can be used to propagate cancellation or
+// [TCPServer.GetContext]. It can be used to propagate cancellation or
 // request-scoped values.
 func WithServerContext(ctx context.Context) ServerOption {
-	return func(s *Server) { s.ctx = ctx }
+	return func(s *TCPServer) { s.ctx = ctx }
 }
 
 // WithLoops sets the number of concurrent accept loops. The default is 8.
 // Values less than 1 are clamped to 1.
 func WithLoops(loops int) ServerOption {
-	return func(s *Server) {
+	return func(s *TCPServer) {
 		if loops < 1 {
 			loops = 1
 		}
@@ -200,25 +200,25 @@ func WithLoops(loops int) ServerOption {
 // threads via [runtime.LockOSThread]. This can improve latency on systems
 // with many cores by reducing scheduler migration.
 func WithAllowThreadLocking(allow bool) ServerOption {
-	return func(s *Server) { s.allowThreadLock = allow }
+	return func(s *TCPServer) { s.allowThreadLock = allow }
 }
 
 // WithConnWrapper appends a [ConnWrapper] (e.g. compression) to the
 // server's wrapping pipeline, applied after TLS. Multiple wrappers
 // are applied in the order they were added.
 func WithConnWrapper(w ConnWrapper) ServerOption {
-	return func(s *Server) { s.connWrappers = append(s.connWrappers, w) }
+	return func(s *TCPServer) { s.connWrappers = append(s.connWrappers, w) }
 }
 
 // WithMaxAcceptConnections sets the maximum number of connections the
 // server will accept in total. Zero (the default) means unlimited.
 // Once the limit is reached the server initiates a graceful shutdown.
 func WithMaxAcceptConnections(limit int32) ServerOption {
-	return func(s *Server) { s.maxAcceptConns.Store(limit) }
+	return func(s *TCPServer) { s.maxAcceptConns.Store(limit) }
 }
 
 // WithBallast pre-allocates and retains a byte slice of the given size (in MiB)
-// on the [Server] to increase the baseline heap size.
+// on the [TCPServer] to increase the baseline heap size.
 //
 // Why this exists:
 //   - A larger baseline heap can reduce GC frequency and GC-induced latency
@@ -234,23 +234,23 @@ func WithMaxAcceptConnections(limit int32) ServerOption {
 //   - sizeInMiB must be >= 0. Use 0 to disable the ballast.
 //   - The default is 20 MiB.
 func WithBallast(sizeInMiB int) ServerOption {
-	return func(s *Server) { s.ballast = make([]byte, sizeInMiB*1024*1024) }
+	return func(s *TCPServer) { s.ballast = make([]byte, sizeInMiB*1024*1024) }
 }
 
 // TLSConfig returns the TLS configuration, or nil if none was set.
-func (s *Server) TLSConfig() *tls.Config {
+func (s *TCPServer) TLSConfig() *tls.Config {
 	return s.tlsConfig
 }
 
 // ListenConfig returns the [ListenConfig] used to create the
 // listening socket.
-func (s *Server) ListenConfig() *ListenConfig {
+func (s *TCPServer) ListenConfig() *ListenConfig {
 	return s.listenConfig
 }
 
 // Context returns the server's base context. If none was set via
 // [WithServerContext], [context.Background] is returned.
-func (s *Server) Context() context.Context {
+func (s *TCPServer) Context() context.Context {
 	if s.ctx == nil {
 		s.ctx = context.Background()
 	}
@@ -258,26 +258,26 @@ func (s *Server) Context() context.Context {
 }
 
 // Loops returns the number of accept loops configured for this server.
-func (s *Server) Loops() int {
+func (s *TCPServer) Loops() int {
 	return s.loops
 }
 
 // ActiveConnections returns the number of connections currently being
 // served.
-func (s *Server) ActiveConnections() int32 {
+func (s *TCPServer) ActiveConnections() int32 {
 	return s.activeConnections.Load()
 }
 
 // AcceptedConnections returns the total number of connections accepted
 // since the server started.
-func (s *Server) AcceptedConnections() int32 {
+func (s *TCPServer) AcceptedConnections() int32 {
 	return s.acceptedConns.Load()
 }
 
 // ListenAddr returns the actual [*net.TCPAddr] the server is listening
 // on, which is useful when the server was started on port 0. Returns nil
 // if the server has not started listening.
-func (s *Server) ListenAddr() *net.TCPAddr {
+func (s *TCPServer) ListenAddr() *net.TCPAddr {
 	if s.listener == nil {
 		return nil
 	}
@@ -288,7 +288,7 @@ func (s *Server) ListenAddr() *net.TCPAddr {
 // EnableTLS marks the server to wrap every accepted connection with TLS
 // using the previously configured TLS config. Returns [ErrNoTLSConfig] if
 // no TLS configuration has been set.
-func (s *Server) EnableTLS() error {
+func (s *TCPServer) EnableTLS() error {
 	if s.tlsConfig == nil {
 		return ErrNoTLSConfig
 	}
@@ -296,10 +296,10 @@ func (s *Server) EnableTLS() error {
 	return nil
 }
 
-// Listen creates the TCP listener. Call [Server.Serve] afterwards to start
+// Listen creates the TCP listener. Call [TCPServer.Serve] afterwards to start
 // accepting connections. The listener uses the address and [ListenConfig]
 // provided at construction time.
-func (s *Server) Listen() error {
+func (s *TCPServer) Listen() error {
 	network := "tcp4"
 	if IsIPv6Addr(s.listenAddr) {
 		network = "tcp6"
@@ -320,10 +320,10 @@ func (s *Server) Listen() error {
 	return nil
 }
 
-// ListenTLS is a convenience that calls [Server.EnableTLS] followed by
-// [Server.Listen]. Returns [ErrNoTLSConfig] if no TLS configuration has
+// ListenTLS is a convenience that calls [TCPServer.EnableTLS] followed by
+// [TCPServer.Listen]. Returns [ErrNoTLSConfig] if no TLS configuration has
 // been set.
-func (s *Server) ListenTLS() error {
+func (s *TCPServer) ListenTLS() error {
 	if err := s.EnableTLS(); err != nil {
 		return err
 	}
@@ -331,10 +331,10 @@ func (s *Server) ListenTLS() error {
 }
 
 // Serve starts the accept loops and blocks until all loops and in-flight
-// connections complete. Call [Server.Listen] (or [Server.ListenTLS]) before
-// calling Serve. Use [Server.Shutdown] or [Server.Halt] from another
+// connections complete. Call [TCPServer.Listen] (or [Server.ListenTLS]) before
+// calling Serve. Use [Server.Shutdown] or [TCPServer.Halt] from another
 // goroutine to stop the server.
-func (s *Server) Serve() error {
+func (s *TCPServer) Serve() error {
 	if s.listener == nil {
 		return ErrNoListener
 	}
@@ -377,7 +377,7 @@ func (s *Server) Serve() error {
 //   - d < 0: return immediately without waiting.
 //
 // Shutdown is idempotent — subsequent calls are no-ops.
-func (s *Server) Shutdown(d time.Duration) error {
+func (s *TCPServer) Shutdown(d time.Duration) error {
 	if !s.shutdown.CompareAndSwap(false, true) {
 		return nil
 	}
@@ -387,11 +387,11 @@ func (s *Server) Shutdown(d time.Duration) error {
 
 // Halt immediately stops the server without waiting for in-flight
 // connections. It is equivalent to Shutdown(-1).
-func (s *Server) Halt() error {
+func (s *TCPServer) Halt() error {
 	return s.Shutdown(-1 * time.Second)
 }
 
-func (s *Server) acceptLoop() error {
+func (s *TCPServer) acceptLoop() error {
 	for {
 		if s.shutdown.Load() {
 			return nil
@@ -435,7 +435,7 @@ func (s *Server) acceptLoop() error {
 	}
 }
 
-func (s *Server) serveConn(netConn net.Conn) {
+func (s *TCPServer) serveConn(netConn net.Conn) {
 	s.connWaitGroup.Add(1)
 	s.activeConnections.Add(1)
 
@@ -468,7 +468,7 @@ func (s *Server) serveConn(netConn net.Conn) {
 	s.connWaitGroup.Done()
 }
 
-func (s *Server) awaitConnections() error {
+func (s *TCPServer) awaitConnections() error {
 	if s.shutdownTimeout < 0 {
 		return nil
 	}
@@ -538,13 +538,13 @@ func (conn *TCPConn) GetNetTCPConn() *net.TCPConn {
 	return c
 }
 
-// SetServer associates this connection with its parent [Server].
-func (conn *TCPConn) SetServer(s *Server) {
+// SetServer associates this connection with its parent [TCPServer].
+func (conn *TCPConn) SetServer(s *TCPServer) {
 	conn.server = s
 }
 
-// Server returns the [Server] that accepted this connection.
-func (conn *TCPConn) Server() *Server {
+// TCPServer returns the [TCPServer] that accepted this connection.
+func (conn *TCPConn) Server() *TCPServer {
 	return conn.server
 }
 

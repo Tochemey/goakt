@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package tcp
+package net
 
 import (
 	"errors"
@@ -71,9 +71,9 @@ func (m *mockNetConn) Close() error {
 
 func (m *mockNetConn) LocalAddr() net.Addr                { return m.local }
 func (m *mockNetConn) RemoteAddr() net.Addr               { return m.remote }
-func (m *mockNetConn) SetDeadline(t time.Time) error      { return m.deadErr }
-func (m *mockNetConn) SetReadDeadline(t time.Time) error  { return m.deadErr }
-func (m *mockNetConn) SetWriteDeadline(t time.Time) error { return m.deadErr }
+func (m *mockNetConn) SetDeadline(_ time.Time) error      { return m.deadErr }
+func (m *mockNetConn) SetReadDeadline(_ time.Time) error  { return m.deadErr }
+func (m *mockNetConn) SetWriteDeadline(_ time.Time) error { return m.deadErr }
 
 type mockFW struct {
 	writeFunc func([]byte) (int, error)

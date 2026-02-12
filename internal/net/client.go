@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package tcp
+package net
 
 import (
 	"context"
@@ -234,10 +234,10 @@ func (c *Client) Discard(conn net.Conn) {
 	_ = conn.Close()
 }
 
-// Send is a convenience method that gets a connection, writes data, and
+// SendBytes is a convenience method that gets a connection, writes data, and
 // returns the connection to the pool. On write failure the connection is
 // discarded. If ctx carries a deadline it is applied as the write timeout.
-func (c *Client) Send(ctx context.Context, data []byte) error {
+func (c *Client) SendBytes(ctx context.Context, data []byte) error {
 	conn, err := c.Get(ctx)
 	if err != nil {
 		return err
@@ -263,55 +263,76 @@ func (c *Client) Send(ctx context.Context, data []byte) error {
 // SendProto marshals a protobuf request using [ProtoSerializer], sends it,
 // reads the response, and unmarshals it. Returns the unmarshaled response message.
 // The wire format includes message type information for dynamic deserialization.
+//
+// If the context contains metadata (via [ContextWithMetadata]), it is automatically
+// included in the request frame. The response is intelligently unmarshaled, handling
+// both metadata and non-metadata formats transparently.
+//
 // If ctx carries a deadline, it is applied to both read and write operations.
+//
+// Use [Client.SendProtoWithMetadata] if you need to inspect metadata from the response.
 func (c *Client) SendProto(ctx context.Context, req proto.Message) (proto.Message, error) {
+	resp, _, err := c.SendProtoWithMetadata(ctx, req)
+	return resp, err
+}
+
+// SendProtoWithMetadata is like [Client.SendProto] but also returns any metadata
+// received in the response. This is useful for extracting tracing information,
+// error details, or other context propagated by the server.
+//
+// The returned metadata will be nil if the server response did not include metadata.
+func (c *Client) SendProtoWithMetadata(ctx context.Context, req proto.Message) (proto.Message, *Metadata, error) {
 	conn, err := c.Get(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	if deadline, ok := ctx.Deadline(); ok {
 		if err := conn.SetDeadline(deadline); err != nil {
 			c.Discard(conn)
-			return nil, err
+			return nil, nil, err
 		}
 	}
 
-	// Marshal request using ProtoSerializer.
-	reqData, err := c.serializer.MarshalBinary(req)
+	// Marshal request with context-aware metadata handling.
+	reqData, err := c.marshalProtoWithContext(ctx, req)
 	if err != nil {
 		c.Discard(conn)
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Write serialized message.
 	if _, err := conn.Write(reqData); err != nil {
 		c.Discard(conn)
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Read the complete response frame from a pooled buffer.
 	respData, err := readProtoFrame(conn, c.framePool)
 	if err != nil {
 		c.Discard(conn)
-		return nil, err
+		return nil, nil, err
 	}
 
-	// Unmarshal response, then return the frame buffer to the pool.
-	resp, _, err := c.serializer.UnmarshalBinary(respData)
+	// Unmarshal response with automatic format detection.
+	resp, md, err := c.unmarshalProtoResponse(respData)
 	c.framePool.Put(respData)
 	if err != nil {
 		c.Discard(conn)
-		return nil, err
+		return nil, nil, err
 	}
 
 	c.Put(conn)
-	return resp, nil
+	return resp, md, nil
 }
 
 // SendProtoNoReply marshals a protobuf message using [ProtoSerializer] and
 // sends it without waiting for a response. The wire format includes message
 // type information for dynamic deserialization on the server.
+//
+// If the context contains metadata (via [ContextWithMetadata]), it is automatically
+// included in the request frame for context propagation (e.g., tracing, deadlines).
+//
 // If ctx carries a deadline, it is applied as the write timeout.
 func (c *Client) SendProtoNoReply(ctx context.Context, req proto.Message) error {
 	conn, err := c.Get(ctx)
@@ -326,8 +347,8 @@ func (c *Client) SendProtoNoReply(ctx context.Context, req proto.Message) error 
 		}
 	}
 
-	// Marshal request using ProtoSerializer.
-	reqData, err := c.serializer.MarshalBinary(req)
+	// Marshal request with context-aware metadata handling.
+	reqData, err := c.marshalProtoWithContext(ctx, req)
 	if err != nil {
 		c.Discard(conn)
 		return err
@@ -343,12 +364,17 @@ func (c *Client) SendProtoNoReply(ctx context.Context, req proto.Message) error 
 	return nil
 }
 
-// SendProtoMany sends multiple protobuf requests in sequence using
+// SendBatchProto sends multiple protobuf requests in sequence using
 // [ProtoSerializer] and reads the corresponding responses in the same order.
 // Returns a slice of unmarshaled response messages. All requests are sent
-// before reading any responses. If ctx carries a deadline, it is applied
-// to the entire operation.
-func (c *Client) SendProtoMany(ctx context.Context, reqs []proto.Message) ([]proto.Message, error) {
+// before reading any responses.
+//
+// If the context contains metadata (via [ContextWithMetadata]), it is automatically
+// included in each request frame. Responses are intelligently unmarshaled, handling
+// both metadata and non-metadata formats transparently.
+//
+// If ctx carries a deadline, it is applied to the entire operation.
+func (c *Client) SendBatchProto(ctx context.Context, reqs []proto.Message) ([]proto.Message, error) {
 	conn, err := c.Get(ctx)
 	if err != nil {
 		return nil, err
@@ -361,9 +387,9 @@ func (c *Client) SendProtoMany(ctx context.Context, reqs []proto.Message) ([]pro
 		}
 	}
 
-	// Send all requests.
+	// Send all requests with context-aware metadata handling.
 	for i, req := range reqs {
-		reqData, err := c.serializer.MarshalBinary(req)
+		reqData, err := c.marshalProtoWithContext(ctx, req)
 		if err != nil {
 			c.Discard(conn)
 			return nil, err
@@ -385,7 +411,7 @@ func (c *Client) SendProtoMany(ctx context.Context, reqs []proto.Message) ([]pro
 		}
 	}
 
-	// Read all responses in order.
+	// Read all responses in order with automatic format detection.
 	resps := make([]proto.Message, len(reqs))
 
 	for i := range resps {
@@ -396,8 +422,8 @@ func (c *Client) SendProtoMany(ctx context.Context, reqs []proto.Message) ([]pro
 			return nil, err
 		}
 
-		// Unmarshal response, then return the frame buffer to the pool.
-		resp, _, err := c.serializer.UnmarshalBinary(respData)
+		// Unmarshal response with automatic format detection.
+		resp, _, err := c.unmarshalProtoResponse(respData)
 		c.framePool.Put(respData)
 		if err != nil {
 			c.Discard(conn)
@@ -423,6 +449,10 @@ func (c *Client) SendProtoMany(ctx context.Context, reqs []proto.Message) ([]pro
 // SendProtoManyNoReply sends multiple protobuf messages in sequence using
 // [ProtoSerializer] without waiting for responses. The wire format includes
 // message type information for dynamic deserialization on the server.
+//
+// If the context contains metadata (via [ContextWithMetadata]), it is automatically
+// included in each request frame for context propagation (e.g., tracing, deadlines).
+//
 // If ctx carries a deadline, it is applied as the write timeout.
 func (c *Client) SendProtoManyNoReply(ctx context.Context, reqs []proto.Message) error {
 	conn, err := c.Get(ctx)
@@ -438,7 +468,8 @@ func (c *Client) SendProtoManyNoReply(ctx context.Context, reqs []proto.Message)
 	}
 
 	for i, req := range reqs {
-		reqData, err := c.serializer.MarshalBinary(req)
+		// Marshal request with context-aware metadata handling.
+		reqData, err := c.marshalProtoWithContext(ctx, req)
 		if err != nil {
 			c.Discard(conn)
 			return err
@@ -552,4 +583,64 @@ func readProtoFrame(r io.Reader, fp *framePool) ([]byte, error) {
 	}
 
 	return frame, nil
+}
+
+// marshalProtoWithContext marshals a protobuf message, automatically including
+// metadata from the context if present. This is a zero-allocation decision path
+// that checks the context once and delegates to the appropriate serializer method.
+//
+// Returns the serialized frame bytes ready for transmission.
+func (c *Client) marshalProtoWithContext(ctx context.Context, msg proto.Message) ([]byte, error) {
+	// Check once if metadata exists in the context.
+	md, hasMD := FromContext(ctx)
+	if hasMD && md != nil {
+		return c.serializer.MarshalBinaryWithMetadata(msg, md)
+	}
+	return c.serializer.MarshalBinary(msg)
+}
+
+// unmarshalProtoResponse unmarshals a protobuf response frame, automatically
+// detecting whether it includes metadata. The detection is performed by examining
+// the frame structure (checking if bytes 8:12 represent a valid metaLen field).
+//
+// This enables the client to handle both legacy responses (no metadata) and
+// modern responses (with metadata) transparently. Returns the unmarshaled message
+// and metadata (nil if not present in the frame).
+//
+// The frame buffer should be returned to the pool by the caller after this call.
+func (c *Client) unmarshalProtoResponse(frame []byte) (proto.Message, *Metadata, error) {
+	// Fast path: check frame length to determine format.
+	// Metadata format has minimum 12 bytes (totalLen + nameLen + metaLen).
+	// Non-metadata format has minimum 8 bytes (totalLen + nameLen).
+	if len(frame) < 12 {
+		// Must be non-metadata format (or invalid).
+		msg, _, err := c.serializer.UnmarshalBinary(frame)
+		return msg, nil, err
+	}
+
+	// Read the header fields to detect the format.
+	totalLen := int(binary.BigEndian.Uint32(frame[0:4]))
+	nameLen := int(binary.BigEndian.Uint32(frame[4:8]))
+	potentialMetaLen := int(binary.BigEndian.Uint32(frame[8:12]))
+
+	// Heuristic: if the frame structure is consistent with the metadata format,
+	// use UnmarshalBinaryWithMetadata. The metadata format has:
+	//   totalLen >= 12 + nameLen + metaLen
+	// The non-metadata format would have the proto bytes starting at position 8+nameLen,
+	// so the third uint32 (bytes 8:12) would be part of either the type name or proto data.
+	//
+	// If 12 + nameLen + potentialMetaLen <= totalLen, it's likely the metadata format.
+	// Also check that nameLen is reasonable (type names are typically < 256 bytes).
+	if nameLen > 0 && nameLen < 256 && potentialMetaLen >= 0 && (12+nameLen+potentialMetaLen) <= totalLen {
+		// Try metadata format first.
+		msg, md, _, err := c.serializer.UnmarshalBinaryWithMetadata(frame)
+		if err == nil {
+			return msg, md, nil
+		}
+		// If it fails, fall through to try non-metadata format.
+	}
+
+	// Fall back to non-metadata format.
+	msg, _, err := c.serializer.UnmarshalBinary(frame)
+	return msg, nil, err
 }

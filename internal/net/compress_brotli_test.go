@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package tcp
+package net
 
 import (
 	"net"
@@ -87,6 +87,9 @@ func TestBrotliConnWrapper_EndToEnd(t *testing.T) {
 		copy(data, buf[:n])
 		_, _ = serverConn.Write(buf[:n]) //nolint:errcheck // best-effort echo
 		serverReceived <- data
+		// Wait for client to finish reading before closing to ensure all
+		// compressed data is flushed through TCP.
+		pause.For(50 * time.Millisecond)
 		_ = serverConn.Close() // Close error intentionally ignored — test cleanup.
 	}()
 

@@ -23,7 +23,7 @@
 //go:build linux
 // +build linux
 
-package tcp
+package net
 
 import (
 	"fmt"

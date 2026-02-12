@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package tcp
+package net
 
 import (
 	"sync"
@@ -35,7 +35,7 @@ import (
 
 func TestWorkerPool_BasicLifecycle(t *testing.T) {
 	var count atomic.Int64
-	wp := NewWorkerPool(func(task int) {
+	wp := NewWorkerPool(func(_ int) {
 		count.Add(1)
 	})
 	wp.Start()
@@ -52,7 +52,7 @@ func TestWorkerPool_BasicLifecycle(t *testing.T) {
 }
 
 func TestWorkerPool_SetNumShards(t *testing.T) {
-	wp := NewWorkerPool(func(task int) {})
+	wp := NewWorkerPool(func(_ int) {})
 
 	t.Run("valid value", func(t *testing.T) {
 		wp.SetNumShards(4)
@@ -85,7 +85,7 @@ func TestWorkerPool_SetNumShards(t *testing.T) {
 }
 
 func TestWorkerPool_SetIdleWorkerLifetime(t *testing.T) {
-	wp := NewWorkerPool(func(task int) {})
+	wp := NewWorkerPool(func(_ int) {})
 
 	t.Run("before start", func(t *testing.T) {
 		wp.SetIdleWorkerLifetime(5 * time.Second)
@@ -102,7 +102,7 @@ func TestWorkerPool_SetIdleWorkerLifetime(t *testing.T) {
 
 func TestWorkerPool_GetSpawnedWorkers(t *testing.T) {
 	barrier := make(chan struct{})
-	wp := NewWorkerPool(func(task int) {
+	wp := NewWorkerPool(func(_ int) {
 		<-barrier
 	})
 	wp.SetNumShards(1)
@@ -127,13 +127,13 @@ func TestWorkerPool_GetSpawnedWorkers(t *testing.T) {
 
 func TestWorkerPool_AddTask_Errors(t *testing.T) {
 	t.Run("not started", func(t *testing.T) {
-		wp := NewWorkerPool(func(task int) {})
+		wp := NewWorkerPool(func(_ int) {})
 		err := wp.AddTask(1)
 		require.ErrorIs(t, err, ErrPoolNotStarted)
 	})
 
 	t.Run("stopped", func(t *testing.T) {
-		wp := NewWorkerPool(func(task int) {})
+		wp := NewWorkerPool(func(_ int) {})
 		wp.Start()
 		wp.Stop()
 		err := wp.AddTask(1)
@@ -143,7 +143,7 @@ func TestWorkerPool_AddTask_Errors(t *testing.T) {
 
 func TestWorkerPool_AddTaskForShard(t *testing.T) {
 	var count atomic.Int64
-	wp := NewWorkerPool(func(task int) {
+	wp := NewWorkerPool(func(_ int) {
 		count.Add(1)
 	})
 	wp.SetNumShards(4)
@@ -162,13 +162,13 @@ func TestWorkerPool_AddTaskForShard(t *testing.T) {
 
 func TestWorkerPool_AddTaskForShard_Errors(t *testing.T) {
 	t.Run("not started", func(t *testing.T) {
-		wp := NewWorkerPool(func(task int) {})
+		wp := NewWorkerPool(func(_ int) {})
 		err := wp.AddTaskForShard(1, 0)
 		require.ErrorIs(t, err, ErrPoolNotStarted)
 	})
 
 	t.Run("stopped", func(t *testing.T) {
-		wp := NewWorkerPool(func(task int) {})
+		wp := NewWorkerPool(func(_ int) {})
 		wp.Start()
 		wp.Stop()
 		err := wp.AddTaskForShard(1, 0)
@@ -177,20 +177,20 @@ func TestWorkerPool_AddTaskForShard_Errors(t *testing.T) {
 }
 
 func TestWorkerPool_Stop(t *testing.T) {
-	t.Run("stop without start", func(t *testing.T) {
-		wp := NewWorkerPool(func(task int) {})
+	t.Run("stop without start", func(*testing.T) {
+		wp := NewWorkerPool(func(_ int) {})
 		wp.Stop() // must not panic
 	})
 
-	t.Run("double stop", func(t *testing.T) {
-		wp := NewWorkerPool(func(task int) {})
+	t.Run("double stop", func(*testing.T) {
+		wp := NewWorkerPool(func(_ int) {})
 		wp.Start()
 		wp.Stop()
 		wp.Stop() // must not panic
 	})
 
-	t.Run("double start", func(t *testing.T) {
-		wp := NewWorkerPool(func(task int) {})
+	t.Run("double start", func(*testing.T) {
+		wp := NewWorkerPool(func(_ int) {})
 		wp.Start()
 		wp.Start() // must not panic (no-op)
 		wp.Stop()
@@ -199,7 +199,7 @@ func TestWorkerPool_Stop(t *testing.T) {
 
 func TestWorkerPool_Cleanup(t *testing.T) {
 	var count atomic.Int64
-	wp := NewWorkerPool(func(task int) {
+	wp := NewWorkerPool(func(_ int) {
 		count.Add(1)
 	})
 	wp.SetNumShards(1)
@@ -236,7 +236,7 @@ func TestWorkerPool_CleanupIdleWorkerSlots(t *testing.T) {
 	barrier := make(chan struct{})
 	var completed atomic.Int64
 
-	wp := NewWorkerPool(func(task int) {
+	wp := NewWorkerPool(func(_ int) {
 		<-barrier
 		completed.Add(1)
 	})
@@ -274,7 +274,7 @@ func TestWorkerPool_CleanupBinarySearch(t *testing.T) {
 	barrier := make(chan struct{})
 	var completed atomic.Int64
 
-	wp := NewWorkerPool(func(task int) {
+	wp := NewWorkerPool(func(_ int) {
 		<-barrier
 		completed.Add(1)
 	})
@@ -306,7 +306,7 @@ func TestWorkerPool_CleanupBinarySearch(t *testing.T) {
 
 func TestWorkerPool_HighConcurrency(t *testing.T) {
 	var count atomic.Int64
-	wp := NewWorkerPool(func(task int) {
+	wp := NewWorkerPool(func(_ int) {
 		count.Add(1)
 	})
 	wp.SetNumShards(4)
@@ -381,7 +381,7 @@ func TestWorkerPool_StopWhileProcessing(t *testing.T) {
 	// call returns false and they exit via the break path.
 	barrier := make(chan struct{})
 	var completed atomic.Int64
-	wp := NewWorkerPool(func(task int) {
+	wp := NewWorkerPool(func(_ int) {
 		<-barrier
 		completed.Add(1)
 	})
@@ -408,13 +408,13 @@ func TestWorkerPool_StopWhileProcessing(t *testing.T) {
 	}, 2*time.Second, 10*time.Millisecond)
 }
 
-func TestWorkerPool_ConcurrentStartStop(t *testing.T) {
-	wp := NewWorkerPool(func(task int) {})
+func TestWorkerPool_ConcurrentStartStop(_ *testing.T) {
+	wp := NewWorkerPool(func(_ int) {})
 	wp.SetNumShards(2)
 
 	// Rapid start/stop cycles to exercise lock contention.
 	for range 10 {
-		wp = NewWorkerPool(func(task int) {})
+		wp = NewWorkerPool(func(_ int) {})
 		wp.SetNumShards(2)
 		wp.Start()
 		_ = wp.AddTask(1)

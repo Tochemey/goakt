@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package tcp
+package net
 
 import "errors"
 
@@ -40,7 +40,7 @@ var (
 	ErrFrameTooLarge = errors.New("tcp: proto frame exceeds maximum size")
 )
 
-// Server errors.
+// TCPServer errors.
 var (
 	// ErrNoTLSConfig is returned when TLS is enabled without a TLS configuration.
 	ErrNoTLSConfig = errors.New("tcp: no TLS config set; call SetTLSConfig first")
@@ -100,4 +100,9 @@ var (
 	// This can mean the total length field, message name length field, or the
 	// overall data size does not conform to the expected binary message format.
 	ErrInvalidMessageLength = errors.New("invalid message length: must be greater than zero")
+
+	// ErrInvalidMetadata indicates that the provided metadata bytes are malformed
+	// or cannot be parsed correctly. This can happen if the binary format is
+	// corrupted, the expected fields are missing, or the data is truncated.
+	ErrInvalidMetadata = errors.New("invalid metadata: cannot parse or decode")
 )

@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package tcp
+package net
 
 import (
 	"context"
@@ -67,10 +67,10 @@ func init() {
 // single-shot (keep-alive OFF) or persistent (keep-alive ON). It returns
 // the server, the listening address, and a channel that receives the Serve
 // error on shutdown.
-func startBenchTCPServer(b *testing.B, handler RequestHandlerFunc) (*Server, string, <-chan error) {
+func startBenchTCPServer(b *testing.B, handler RequestHandlerFunc) (*TCPServer, string, <-chan error) {
 	b.Helper()
 
-	srv, err := NewServer("127.0.0.1:0", WithRequestHandler(handler))
+	srv, err := NewTCPServer("127.0.0.1:0", WithRequestHandler(handler))
 	if err != nil {
 		b.Fatal(err)
 	}

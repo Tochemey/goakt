@@ -20,11 +20,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package tcp
+package net
 
 import (
 	"context"
 	"crypto/tls"
+	"encoding/binary"
 	"errors"
 	"io"
 	"net"
@@ -234,7 +235,7 @@ func TestClient_Send(t *testing.T) {
 
 	t.Run("successful send", func(t *testing.T) {
 		ctx := context.Background()
-		err := client.Send(ctx, []byte("hello"))
+		err := client.SendBytes(ctx, []byte("hello"))
 		require.NoError(t, err)
 
 		client.mu.Lock()
@@ -247,7 +248,7 @@ func TestClient_Send(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		err := client.Send(ctx, []byte("hello"))
+		err := client.SendBytes(ctx, []byte("hello"))
 		require.NoError(t, err)
 	})
 }
@@ -527,7 +528,7 @@ func TestClient_SendToClosedServer(t *testing.T) {
 
 	// The pooled connection should be dead; Send may fail on write depending
 	// on timing — we only verify no panic.
-	_ = client.Send(context.Background(), []byte("test")) //nolint:errcheck // outcome is timing-dependent
+	_ = client.SendBytes(context.Background(), []byte("test")) //nolint:errcheck // outcome is timing-dependent
 }
 
 func TestClient_DialWithConnWrapperError(t *testing.T) {
@@ -607,7 +608,7 @@ func TestClient_SendWriteError_NoDeadline(t *testing.T) {
 	client.mu.Unlock()
 
 	// No deadline context — skips SetWriteDeadline, fails on Write.
-	err := client.Send(context.Background(), []byte("test"))
+	err := client.SendBytes(context.Background(), []byte("test"))
 	require.Error(t, err)
 }
 
@@ -623,7 +624,7 @@ func TestClient_SendWriteError_WithDeadline(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	err := client.Send(ctx, []byte("test"))
+	err := client.SendBytes(ctx, []byte("test"))
 	require.Error(t, err)
 }
 
@@ -816,7 +817,7 @@ func TestClient_SendProtoMany(t *testing.T) {
 			&testpb.Reply{Content: "msg3"},
 		}
 
-		resps, err := client.SendProtoMany(ctx, reqs)
+		resps, err := client.SendBatchProto(ctx, reqs)
 		require.NoError(t, err)
 		require.Len(t, resps, 3)
 
@@ -836,7 +837,7 @@ func TestClient_SendProtoMany(t *testing.T) {
 			&testpb.Reply{Content: "d2"},
 		}
 
-		resps, err := client.SendProtoMany(ctx, reqs)
+		resps, err := client.SendBatchProto(ctx, reqs)
 		require.NoError(t, err)
 		require.Len(t, resps, 2)
 	})
@@ -845,7 +846,7 @@ func TestClient_SendProtoMany(t *testing.T) {
 		c := NewClient(addr)
 		require.NoError(t, c.Close())
 
-		_, err := c.SendProtoMany(context.Background(), []proto.Message{&testpb.Reply{Content: "x"}})
+		_, err := c.SendBatchProto(context.Background(), []proto.Message{&testpb.Reply{Content: "x"}})
 		require.ErrorIs(t, err, ErrClientClosed)
 	})
 }
@@ -931,7 +932,7 @@ func TestClient_SendProto_ClosedConnNoDeadline(t *testing.T) {
 }
 
 func TestClient_SendProto_ReadError(t *testing.T) {
-	// Server that accepts, reads, but doesn't respond (closes connection).
+	// TCPServer that accepts, reads, but doesn't respond (closes connection).
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	defer func() { require.NoError(t, listener.Close()) }()
@@ -1008,7 +1009,7 @@ func TestClient_SendProtoMany_MarshalError(t *testing.T) {
 	client := NewClient(addr)
 	defer func() { _ = client.Close() }()
 
-	_, err := client.SendProtoMany(context.Background(), []proto.Message{nil})
+	_, err := client.SendBatchProto(context.Background(), []proto.Message{nil})
 	require.Error(t, err)
 }
 
@@ -1024,7 +1025,7 @@ func TestClient_SendProtoMany_ClosedConnWithDeadline(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	_, err := client.SendProtoMany(ctx, []proto.Message{&testpb.Reply{Content: "x"}})
+	_, err := client.SendBatchProto(ctx, []proto.Message{&testpb.Reply{Content: "x"}})
 	require.Error(t, err)
 }
 
@@ -1052,7 +1053,7 @@ func TestClient_SendProtoMany_ContextCancellation(t *testing.T) {
 	}
 	// Might succeed (server fast enough) or fail (context cancelled).
 	// Either outcome is valid — we only verify no panic.
-	_, _ = client.SendProtoMany(ctx, reqs) //nolint:errcheck // outcome is timing-dependent
+	_, _ = client.SendBatchProto(ctx, reqs) //nolint:errcheck // outcome is timing-dependent
 }
 
 func TestClient_SendProtoManyNoReply_MarshalError(t *testing.T) {
@@ -1107,7 +1108,7 @@ func TestClient_SendProtoManyNoReply_ContextCancellation(t *testing.T) {
 }
 
 func TestClient_SendProtoMany_ReadError(t *testing.T) {
-	// Server that reads requests then closes without sending responses.
+	// TCPServer that reads requests then closes without sending responses.
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	defer func() { require.NoError(t, listener.Close()) }()
@@ -1134,7 +1135,7 @@ func TestClient_SendProtoMany_ReadError(t *testing.T) {
 		&testpb.Reply{Content: "a"},
 		&testpb.Reply{Content: "b"},
 	}
-	_, err = client.SendProtoMany(context.Background(), reqs)
+	_, err = client.SendBatchProto(context.Background(), reqs)
 	require.Error(t, err)
 }
 
@@ -1147,7 +1148,7 @@ func TestClient_SendProtoMany_WriteError(t *testing.T) {
 	client.idle = append(client.idle, idleConn{conn: c1, since: time.Now().UnixNano()})
 	client.mu.Unlock()
 
-	_, err := client.SendProtoMany(context.Background(), []proto.Message{&testpb.Reply{Content: "x"}})
+	_, err := client.SendBatchProto(context.Background(), []proto.Message{&testpb.Reply{Content: "x"}})
 	require.Error(t, err)
 }
 
@@ -1165,7 +1166,7 @@ func TestClient_SendProtoManyNoReply_WriteError(t *testing.T) {
 }
 
 func TestClient_SendProto_UnmarshalError(t *testing.T) {
-	// Server that sends back invalid proto frame data.
+	// TCPServer that sends back invalid proto frame data.
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	defer func() { require.NoError(t, listener.Close()) }()
@@ -1220,4 +1221,251 @@ type failingWrapper struct{}
 
 func (w *failingWrapper) Wrap(net.Conn) (net.Conn, error) {
 	return nil, errors.New("wrapper failed")
+}
+
+// TestClient_SendProtoWithMetadata verifies that metadata is properly propagated
+// from context through request/response cycle.
+func TestClient_SendProtoWithMetadata(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer func() { require.NoError(t, listener.Close()) }()
+
+	serializer := NewProtoSerializer()
+
+	// TCPServer echoes the request and adds metadata to the response.
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer func() { _ = c.Close() }()
+				for {
+					// Read request frame.
+					reqFrame, err := readProtoFrame(c, nil)
+					if err != nil {
+						return
+					}
+
+					// Try to unmarshal with metadata first, fall back to non-metadata format.
+					msg, reqMD, _, err := serializer.UnmarshalBinaryWithMetadata(reqFrame)
+					if err != nil {
+						// Try non-metadata format.
+						msg, _, err = serializer.UnmarshalBinary(reqFrame)
+						if err != nil {
+							return
+						}
+						reqMD = nil
+					}
+
+					// Echo the message but add metadata to the response.
+					respMD := NewMetadata()
+					respMD.Set("echo", "true")
+					respMD.Set("server", "test")
+
+					// If request had metadata, copy a header to response.
+					if reqMD != nil {
+						if traceID, ok := reqMD.Get("trace-id"); ok {
+							respMD.Set("trace-id", traceID)
+						}
+					}
+
+					respFrame, err := serializer.MarshalBinaryWithMetadata(msg, respMD)
+					if err != nil {
+						return
+					}
+
+					if _, err := c.Write(respFrame); err != nil {
+						return
+					}
+				}
+			}(conn)
+		}
+	}()
+	pause.For(50 * time.Millisecond)
+
+	client := NewClient(listener.Addr().String())
+	defer func() { _ = client.Close() }()
+
+	t.Run("with metadata in context", func(t *testing.T) {
+		md := NewMetadata()
+		md.Set("trace-id", "abc123")
+		md.Set("user", "test-user")
+
+		ctx := ContextWithMetadata(context.Background(), md)
+
+		resp, respMD, err := client.SendProtoWithMetadata(ctx, &testpb.Reply{Content: "hello"})
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		require.NotNil(t, respMD)
+
+		// Verify response message.
+		reply, ok := resp.(*testpb.Reply)
+		require.True(t, ok)
+		require.Equal(t, "hello", reply.Content)
+
+		// Verify response metadata.
+		echo, ok := respMD.Get("echo")
+		require.True(t, ok)
+		require.Equal(t, "true", echo)
+
+		server, ok := respMD.Get("server")
+		require.True(t, ok)
+		require.Equal(t, "test", server)
+
+		// Verify trace-id was propagated.
+		traceID, ok := respMD.Get("trace-id")
+		require.True(t, ok)
+		require.Equal(t, "abc123", traceID)
+	})
+
+	t.Run("without metadata in context", func(t *testing.T) {
+		resp, respMD, err := client.SendProtoWithMetadata(context.Background(), &testpb.Reply{Content: "world"})
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		require.NotNil(t, respMD)
+
+		// Verify response message.
+		reply, ok := resp.(*testpb.Reply)
+		require.True(t, ok)
+		require.Equal(t, "world", reply.Content)
+
+		// Verify response metadata (should still have server-added metadata).
+		echo, ok := respMD.Get("echo")
+		require.True(t, ok)
+		require.Equal(t, "true", echo)
+
+		// But no trace-id since it wasn't in the request.
+		_, ok = respMD.Get("trace-id")
+		require.False(t, ok)
+	})
+
+	t.Run("SendProto delegates to SendProtoWithMetadata", func(t *testing.T) {
+		md := NewMetadata()
+		md.Set("trace-id", "xyz789")
+
+		ctx := ContextWithMetadata(context.Background(), md)
+
+		resp, err := client.SendProto(ctx, &testpb.Reply{Content: "test"})
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+
+		reply, ok := resp.(*testpb.Reply)
+		require.True(t, ok)
+		require.Equal(t, "test", reply.Content)
+	})
+}
+
+// TestClient_MarshalWithContext verifies the efficient metadata marshaling.
+func TestClient_MarshalWithContext(t *testing.T) {
+	client := NewClient("127.0.0.1:9999") // Address doesn't matter for this test.
+	defer func() { _ = client.Close() }()
+
+	msg := &testpb.Reply{Content: "test"}
+
+	t.Run("without metadata", func(t *testing.T) {
+		ctx := context.Background()
+		data, err := client.marshalProtoWithContext(ctx, msg)
+		require.NoError(t, err)
+		require.NotNil(t, data)
+
+		// Verify it's in non-metadata format (should have nameLen at position 4:8).
+		require.GreaterOrEqual(t, len(data), 8)
+		nameLen := binary.BigEndian.Uint32(data[4:8])
+		require.Greater(t, nameLen, uint32(0))
+	})
+
+	t.Run("with metadata", func(t *testing.T) {
+		md := NewMetadata()
+		md.Set("key", "value")
+		ctx := ContextWithMetadata(context.Background(), md)
+
+		data, err := client.marshalProtoWithContext(ctx, msg)
+		require.NoError(t, err)
+		require.NotNil(t, data)
+
+		// Verify it's in metadata format (should have metaLen at position 8:12).
+		require.GreaterOrEqual(t, len(data), 12)
+		nameLen := binary.BigEndian.Uint32(data[4:8])
+		metaLen := binary.BigEndian.Uint32(data[8:12])
+		require.Greater(t, nameLen, uint32(0))
+		require.Greater(t, metaLen, uint32(0))
+	})
+
+	t.Run("with nil metadata", func(t *testing.T) {
+		ctx := context.WithValue(context.Background(), metadataKey{}, (*Metadata)(nil))
+		data, err := client.marshalProtoWithContext(ctx, msg)
+		require.NoError(t, err)
+		require.NotNil(t, data)
+	})
+}
+
+// TestClient_UnmarshalProtoResponse verifies automatic format detection.
+func TestClient_UnmarshalProtoResponse(t *testing.T) {
+	client := NewClient("127.0.0.1:9999") // Address doesn't matter for this test.
+	defer func() { _ = client.Close() }()
+
+	serializer := NewProtoSerializer()
+	msg := &testpb.Reply{Content: "test"}
+
+	t.Run("non-metadata format", func(t *testing.T) {
+		frame, err := serializer.MarshalBinary(msg)
+		require.NoError(t, err)
+
+		resp, md, err := client.unmarshalProtoResponse(frame)
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		require.Nil(t, md)
+
+		reply, ok := resp.(*testpb.Reply)
+		require.True(t, ok)
+		require.Equal(t, "test", reply.Content)
+	})
+
+	t.Run("metadata format with metadata", func(t *testing.T) {
+		md := NewMetadata()
+		md.Set("key1", "value1")
+		md.Set("key2", "value2")
+
+		frame, err := serializer.MarshalBinaryWithMetadata(msg, md)
+		require.NoError(t, err)
+
+		resp, respMD, err := client.unmarshalProtoResponse(frame)
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		require.NotNil(t, respMD)
+
+		reply, ok := resp.(*testpb.Reply)
+		require.True(t, ok)
+		require.Equal(t, "test", reply.Content)
+
+		v1, ok := respMD.Get("key1")
+		require.True(t, ok)
+		require.Equal(t, "value1", v1)
+
+		v2, ok := respMD.Get("key2")
+		require.True(t, ok)
+		require.Equal(t, "value2", v2)
+	})
+
+	t.Run("metadata format with empty metadata", func(t *testing.T) {
+		frame, err := serializer.MarshalBinaryWithMetadata(msg, nil)
+		require.NoError(t, err)
+
+		resp, md, err := client.unmarshalProtoResponse(frame)
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		require.Nil(t, md)
+
+		reply, ok := resp.(*testpb.Reply)
+		require.True(t, ok)
+		require.Equal(t, "test", reply.Content)
+	})
+
+	t.Run("invalid frame", func(t *testing.T) {
+		frame := []byte{0, 0, 0, 4} // Too short
+		_, _, err := client.unmarshalProtoResponse(frame)
+		require.Error(t, err)
+	})
 }
