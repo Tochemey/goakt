@@ -28,7 +28,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	stdhttp "net/http"
+	nethttp "net/http"
 	"os"
 	"os/signal"
 	"regexp"
@@ -73,7 +73,7 @@ import (
 	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v3/internal/locker"
 	"github.com/tochemey/goakt/v3/internal/metric"
-	"github.com/tochemey/goakt/v3/internal/network"
+	internalnet "github.com/tochemey/goakt/v3/internal/net"
 	"github.com/tochemey/goakt/v3/internal/pointer"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/internal/ticker"
@@ -821,7 +821,7 @@ type actorSystem struct {
 	remoting        remote.Remoting
 
 	// Specifies the remoting server
-	server       *stdhttp.Server
+	server       *nethttp.Server
 	listener     net.Listener
 	remoteConfig *remote.Config
 
@@ -2847,7 +2847,7 @@ func (x *actorSystem) startRemoting(ctx context.Context) error {
 			proto.MarshalOptions{},
 			proto.UnmarshalOptions{DiscardUnknown: true},
 		),
-		connect.WithRecover(func(_ context.Context, spec connect.Spec, _ stdhttp.Header, recovered any) error {
+		connect.WithRecover(func(_ context.Context, spec connect.Spec, _ nethttp.Header, recovered any) error {
 			x.logger.Errorf("Remoting panic in %s: %v", spec.Procedure, recovered)
 			return connect.NewError(connect.CodeInternal, fmt.Errorf("internal server error"))
 		}),
@@ -2869,7 +2869,7 @@ func (x *actorSystem) startRemoting(ctx context.Context) error {
 	remotingServicePath, remotingServiceHandler := internalpbconnect.NewRemotingServiceHandler(x, opts...)
 	clusterServicePath, clusterServiceHandler := internalpbconnect.NewClusterServiceHandler(x, opts...)
 
-	mux := stdhttp.NewServeMux()
+	mux := nethttp.NewServeMux()
 	mux.Handle(remotingServicePath, remotingServiceHandler)
 	mux.Handle(clusterServicePath, clusterServiceHandler)
 
@@ -2881,7 +2881,7 @@ func (x *actorSystem) startRemoting(ctx context.Context) error {
 
 	go func() {
 		if err := x.startHTTPServer(); err != nil {
-			if !errors.Is(err, stdhttp.ErrServerClosed) {
+			if !errors.Is(err, nethttp.ErrServerClosed) {
 				x.logger.Panic(fmt.Errorf("failed to start remoting service: %w", err))
 			}
 		}
@@ -3455,10 +3455,10 @@ func (x *actorSystem) shutdownHTTPServer(ctx context.Context) error {
 }
 
 // configureServer configure the various http server and listeners based upon the various settings
-func (x *actorSystem) configureServer(ctx context.Context, mux *stdhttp.ServeMux) error {
+func (x *actorSystem) configureServer(ctx context.Context, mux *nethttp.ServeMux) error {
 	hostPort := net.JoinHostPort(x.remoteConfig.BindAddr(), strconv.Itoa(x.remoteConfig.BindPort()))
 	httpServer := getServer(ctx, hostPort)
-	listener, err := network.NewKeepAliveListener(httpServer.Addr)
+	listener, err := internalnet.NewKeepAliveListener(httpServer.Addr)
 	if err != nil {
 		return err
 	}
@@ -4289,8 +4289,8 @@ func runWithRetry(ctx context.Context, hook ShutdownHook, sys *actorSystem, reco
 }
 
 // getServer creates an instance of http server
-func getServer(ctx context.Context, address string) *stdhttp.Server {
-	return &stdhttp.Server{
+func getServer(ctx context.Context, address string) *nethttp.Server {
+	return &nethttp.Server{
 		Addr:              address,
 		ReadTimeout:       5 * time.Minute,
 		ReadHeaderTimeout: time.Second,
