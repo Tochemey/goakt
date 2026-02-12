@@ -69,7 +69,7 @@ type ProtoHandler func(ctx context.Context, conn Connection, req proto.Message) 
 //	┌──────────┬──────────┬────────────┬──────────────┐
 //	│ totalLen │ nameLen  │ type name  │ proto bytes  │
 //	│ 4 bytes  │ 4 bytes  │ N bytes    │ M bytes      │
-//	│ uint32BE │ uint32BE │ UTF-8      │ marshaled   │
+//	│ uint32BE │ uint32BE │ UTF-8      │ marshaled    │
 //	└──────────┴──────────┴────────────┴──────────────┘
 //
 // The totalLen field covers the entire frame (including itself). This
