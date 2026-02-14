@@ -110,15 +110,25 @@ type ProtoHandler func(ctx context.Context, conn Connection, req proto.Message) 
 //   - The underlying [TCPServer] uses a sharded [WorkerPool] with per-shard
 //     idle worker lists and a configurable GC ballast to further reduce
 //     garbage-collection frequency.
-type ProtoServer struct {
-	server     *TCPServer
-	handlers   map[protoreflect.FullName]ProtoHandler
-	fallback   ProtoHandler
-	serializer *ProtoSerializer
-	framePool  *framePool
-	serverOpts []ServerOption
+//
+// PanicHandlerFunc is called when a [ProtoHandler] panics during dispatch.
+// It receives the fully qualified protobuf type name of the message being
+// handled and the recovered value. The handler is invoked inside the
+// recover block, so it must not re-panic.
+type PanicHandlerFunc func(typeName protoreflect.FullName, recovered any)
 
-	idleTimeout time.Duration
+// ProtoServer is a high-performance, low-GC protobuf-over-TCP server.
+type ProtoServer struct {
+	server       *TCPServer
+	handlers     map[protoreflect.FullName]ProtoHandler
+	fallback     ProtoHandler
+	panicHandler PanicHandlerFunc
+	serializer   *ProtoSerializer
+	framePool    *framePool
+	serverOpts   []ServerOption
+
+	idleTimeout  time.Duration
+	maxFrameSize uint32
 }
 
 // ProtoServerOption configures a [ProtoServer] before it is started.
@@ -130,12 +140,14 @@ type ProtoServerOption func(*ProtoServer)
 // connections.
 //
 // Defaults: no idle timeout (connections live until closed by the peer),
-// no fallback handler (unregistered message types are silently skipped).
+// no fallback handler (unregistered message types are silently skipped),
+// max frame size of 16 MiB.
 func NewProtoServer(listenAddr string, opts ...ProtoServerOption) (*ProtoServer, error) {
 	ps := &ProtoServer{
-		handlers:   make(map[protoreflect.FullName]ProtoHandler),
-		serializer: NewProtoSerializer(),
-		framePool:  newFramePool(),
+		handlers:     make(map[protoreflect.FullName]ProtoHandler),
+		serializer:   NewProtoSerializer(),
+		framePool:    newFramePool(),
+		maxFrameSize: defaultMaxFrameSize, // Default: 16 MiB
 	}
 
 	for _, opt := range opts {
@@ -275,6 +287,26 @@ func WithProtoServerAllowThreadLocking(allow bool) ProtoServerOption {
 	}
 }
 
+// WithProtoServerMaxFrameSize sets the maximum allowed frame size (in bytes)
+// for incoming messages. Frames exceeding this limit cause the connection to
+// be closed. The default is 16 MiB ([defaultMaxFrameSize]).
+func WithProtoServerMaxFrameSize(size uint32) ProtoServerOption {
+	return func(ps *ProtoServer) {
+		ps.maxFrameSize = size
+	}
+}
+
+// WithProtoServerPanicHandler sets a [PanicHandlerFunc] that is called when a
+// [ProtoHandler] panics during dispatch. Without a panic handler, panics in
+// handlers will close the connection silently. With a handler set, panics are
+// recovered, the callback is invoked, and the read loop continues serving
+// subsequent messages on the same connection.
+func WithProtoServerPanicHandler(f PanicHandlerFunc) ProtoServerOption {
+	return func(ps *ProtoServer) {
+		ps.panicHandler = f
+	}
+}
+
 // WithProtoServerConnWrapper appends a [ConnWrapper] (e.g. compression) to the
 // underlying [TCPServer]'s wrapping pipeline.
 func WithProtoServerConnWrapper(w ConnWrapper) ProtoServerOption {
@@ -374,9 +406,16 @@ func (ps *ProtoServer) AcceptedConnections() int32 {
 }
 
 // handleConn is the [RequestHandlerFunc] wired into the underlying [TCPServer].
-// It runs a per-connection read loop: read frame -> deserialize -> dispatch
-// -> serialize response -> write frame. The loop exits on EOF, read error,
-// or idle timeout.
+// It runs a per-connection read loop: read frame -> deserialize (with metadata) ->
+// enrich context -> dispatch -> serialize response -> write frame. The loop exits
+// on EOF, read error, or idle timeout.
+//
+// Context Propagation:
+//   - Request frames are deserialized with [UnmarshalBinaryWithMetadata] to
+//     extract any metadata (headers, deadline) sent by the client.
+//   - If metadata is present, it is used to enrich the context passed to the
+//     handler via [Metadata.ToContext], enabling distributed tracing, auth
+//     tokens, and other context-aware features.
 //
 // Low-GC strategy:
 //   - The 4-byte frame header is read into a stack-allocated array.
@@ -406,7 +445,7 @@ func (ps *ProtoServer) handleConn(conn Connection) {
 		if totalLen < 8 {
 			return // Malformed frame — close connection.
 		}
-		if totalLen > maxProtoFrameSize {
+		if totalLen > ps.maxFrameSize {
 			return // Frame too large — close connection.
 		}
 
@@ -419,15 +458,43 @@ func (ps *ProtoServer) handleConn(conn Connection) {
 			return
 		}
 
-		// Deserialize the frame. The resulting proto.Message owns its own
-		// memory — the frame buffer can be returned to the pool immediately.
-		// UnmarshalBinary also returns the type name parsed from the frame
-		// header, so we can dispatch without a second proto.MessageName call.
-		msg, typeName, err := ps.serializer.UnmarshalBinary(frame)
+		// Deserialize the frame with metadata support. The frame may be in one
+		// of two formats:
+		//   - Legacy format: [totalLen|nameLen|typeName|protoBytes] (8+ bytes header)
+		//   - Metadata format: [totalLen|nameLen|metaLen|typeName|metadata|protoBytes] (12+ bytes header)
+		//
+		// We detect the format and use the appropriate unmarshaler for backward
+		// compatibility while supporting context propagation when metadata is present.
+		var msg proto.Message
+		var md *Metadata
+		var typeName protoreflect.FullName
+		var err error
+
+		// Metadata frames have at least 12 bytes header; legacy frames have 8 bytes.
+		// Try metadata format first if frame is long enough.
+		if len(frame) >= 12 {
+			msg, md, typeName, err = ps.serializer.UnmarshalBinaryWithMetadata(frame)
+			if err == ErrInvalidMessageLength {
+				// Might be a legacy frame where bytes 8:12 are part of the type name
+				// or proto payload. Fall back to legacy unmarshaler.
+				msg, typeName, err = ps.serializer.UnmarshalBinary(frame)
+			}
+		} else {
+			// Frame too short for metadata format — must be legacy.
+			msg, typeName, err = ps.serializer.UnmarshalBinary(frame)
+		}
+
 		ps.framePool.Put(frame)
 
 		if err != nil {
 			return // Corrupt frame — close connection.
+		}
+
+		// Enrich the context with metadata if present. This enables context
+		// propagation (tracing, auth, deadlines) across the proto TCP transport.
+		handlerCtx := ctx
+		if md != nil {
+			handlerCtx = md.ToContext(ctx)
 		}
 
 		// Dispatch to the registered handler.
@@ -440,7 +507,14 @@ func (ps *ProtoServer) handleConn(conn Connection) {
 			continue
 		}
 
-		resp, herr := handler(ctx, conn, msg)
+		resp, panicked, herr := ps.recover(handlerCtx, handler, conn, msg, typeName)
+		if panicked {
+			// Handler panicked — close the connection so the client receives an
+			// immediate EOF instead of blocking forever waiting for a response
+			// that will never arrive.
+			return
+		}
+
 		if herr != nil {
 			return // Handler signaled a fatal error — close connection.
 		}
@@ -467,6 +541,30 @@ func (ps *ProtoServer) handleConn(conn Connection) {
 			return // Write failure — close connection.
 		}
 	}
+}
+
+// recover invokes the handler inside a deferred recover. If the handler
+// panics and a [PanicHandlerFunc] is configured, the callback is invoked and
+// panicked is set to true so the caller can skip the current message without
+// tearing down the connection. When no panic handler is configured, the panic
+// propagates normally (closing the connection via the deferred close in
+// [TCPServer.serveConn]).
+func (ps *ProtoServer) recover(ctx context.Context, handler ProtoHandler, conn Connection, msg proto.Message, typeName protoreflect.FullName) (resp proto.Message, panicked bool, err error) {
+	if ps.panicHandler == nil {
+		// No recovery configured — let panics propagate.
+		resp, err = handler(ctx, conn, msg)
+		return resp, false, err
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			ps.panicHandler(typeName, r)
+			panicked = true
+		}
+	}()
+
+	resp, err = handler(ctx, conn, msg)
+	return resp, false, err
 }
 
 // framePool maintains a set of [sync.Pool] instances bucketed by power-of-two

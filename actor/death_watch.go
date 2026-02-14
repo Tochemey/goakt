@@ -29,21 +29,13 @@ import (
 
 	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/pointer"
 	"github.com/tochemey/goakt/v3/internal/registry"
-	"github.com/tochemey/goakt/v3/log"
 )
 
 // deathWatch removes dead actors from the system
 // that helps free non-utilized resources
-type deathWatch struct {
-	pid         *PID
-	logger      log.Logger
-	tree        *tree
-	cluster     cluster.Cluster
-	actorSystem ActorSystem
-}
+type deathWatch struct{}
 
 // enforce compilation error
 var _ Actor = (*deathWatch)(nil)
@@ -78,36 +70,36 @@ func (x *deathWatch) PostStop(ctx *Context) error {
 
 // handlePostStart handles PostStart message
 func (x *deathWatch) handlePostStart(ctx *ReceiveContext) {
-	x.actorSystem = ctx.ActorSystem()
-	x.pid = ctx.Self()
-	x.logger = ctx.Logger()
-	x.tree = x.actorSystem.tree()
-	x.cluster = x.actorSystem.getCluster()
-	x.logger.Infof("Actor %s started successfully", x.pid.Name())
+	ctx.Logger().Infof("Actor %s started successfully", ctx.Self().Name())
 }
 
 // handleTerminated handles Terminated message
 func (x *deathWatch) handleTerminated(ctx *ReceiveContext) error {
 	msg := ctx.Message().(*goaktpb.Terminated)
 
-	addr := msg.GetAddress()
-	x.logger.Infof("Removing dead Actor %s resource from system", addr)
+	logger := ctx.Logger()
+	actorSys := ctx.ActorSystem()
 
-	if node, ok := x.tree.node(addr); ok {
+	addr := msg.GetAddress()
+	logger.Infof("Removing dead Actor %s resource from system", addr)
+
+	actorTree := actorSys.tree()
+	if node, ok := actorTree.node(addr); ok {
 		pid := node.value()
 
 		if !pid.isStateSet(systemState) {
-			x.actorSystem.decreaseActorsCounter()
+			actorSys.decreaseActorsCounter()
 		}
 
 		actorName := pid.Name()
-		x.tree.deleteNode(pid)
-		removeFromCluster := x.actorSystem.InCluster() && !pid.isStateSet(systemState) && !x.actorSystem.isStopping()
+		actorTree.deleteNode(pid)
+		removeFromCluster := actorSys.InCluster() && !pid.isStateSet(systemState) && !actorSys.isStopping()
 
 		if removeFromCluster {
 			ctx := ctx.withoutCancel()
+			cl := actorSys.getCluster()
 			var err error
-			multierr.AppendInto(&err, x.cluster.RemoveActor(ctx, actorName))
+			multierr.AppendInto(&err, cl.RemoveActor(ctx, actorName))
 
 			// for singleton actors, we also need to remove the kind entry
 			if pid.IsSingleton() {
@@ -116,18 +108,18 @@ func (x *deathWatch) handleTerminated(ctx *ReceiveContext) error {
 				if singletonRole != "" {
 					singletonKind = kindRole(singletonKind, singletonRole)
 				}
-				multierr.AppendInto(&err, x.cluster.RemoveKind(ctx, singletonKind))
+				multierr.AppendInto(&err, cl.RemoveKind(ctx, singletonKind))
 			}
 
 			if err != nil {
-				x.logger.Errorf("Failed to remove dead Actor %s resource from cluster: %v", addr, err)
+				logger.Errorf("Failed to remove dead Actor %s resource from cluster: %v", addr, err)
 				return errors.NewInternalError(err)
 			}
 		}
 
-		x.logger.Infof("Successfully removed dead Actor %s resource from system", addr)
+		logger.Infof("Successfully removed dead Actor %s resource from system", addr)
 		return nil
 	}
-	x.logger.Infof("Unable to locate dead Actor %s resource in system. Maybe already freed.", x.pid.Name(), addr)
+	logger.Infof("Unable to locate dead Actor %s resource in system. Maybe already freed.", ctx.Self().Name(), addr)
 	return nil
 }

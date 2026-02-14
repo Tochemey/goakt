@@ -1337,8 +1337,8 @@ func TestGrainsRelocation(t *testing.T) {
 	identity, err := node3.GrainIdentity(ctx, "Grain-20", func(ctx context.Context) (Grain, error) {
 		return NewMockGrain(), nil
 	})
-	require.NotNil(t, identity)
 	require.NoError(t, err)
+	require.NotNil(t, identity)
 
 	message := new(testpb.TestSend)
 	err = node3.TellGrain(ctx, identity, message)
@@ -1347,8 +1347,8 @@ func TestGrainsRelocation(t *testing.T) {
 	identity, err = node1.GrainIdentity(ctx, "Grain-21", func(ctx context.Context) (Grain, error) {
 		return NewMockGrain(), nil
 	})
-	require.NotNil(t, identity)
 	require.NoError(t, err)
+	require.NotNil(t, identity)
 	message = new(testpb.TestSend)
 	err = node1.TellGrain(ctx, identity, message)
 	require.NoError(t, err)
@@ -1356,8 +1356,8 @@ func TestGrainsRelocation(t *testing.T) {
 	identity, err = node3.GrainIdentity(ctx, "Grain-22", func(ctx context.Context) (Grain, error) {
 		return NewMockGrain(), nil
 	})
-	require.NotNil(t, identity)
 	require.NoError(t, err)
+	require.NotNil(t, identity)
 	message = new(testpb.TestSend)
 	err = node3.TellGrain(ctx, identity, message)
 	require.NoError(t, err)
@@ -1365,8 +1365,8 @@ func TestGrainsRelocation(t *testing.T) {
 	identity, err = node1.GrainIdentity(ctx, "Grain-23", func(ctx context.Context) (Grain, error) {
 		return NewMockGrain(), nil
 	})
-	require.NotNil(t, identity)
 	require.NoError(t, err)
+	require.NotNil(t, identity)
 	message = new(testpb.TestSend)
 	err = node1.TellGrain(ctx, identity, message)
 	require.NoError(t, err)
@@ -1374,8 +1374,8 @@ func TestGrainsRelocation(t *testing.T) {
 	identity, err = node1.GrainIdentity(ctx, "Grain-24", func(ctx context.Context) (Grain, error) {
 		return NewMockGrain(), nil
 	})
-	require.NotNil(t, identity)
 	require.NoError(t, err)
+	require.NotNil(t, identity)
 	message = new(testpb.TestSend)
 	err = node1.TellGrain(ctx, identity, message)
 	require.NoError(t, err)

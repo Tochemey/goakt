@@ -57,6 +57,15 @@ func (m *Metadata) Get(key string) (string, bool) {
 	return v, ok
 }
 
+// IterateHeaders calls the provided function for each header key-value pair.
+// This enables converting Metadata to other header formats (e.g., http.Header)
+// without exposing the internal map structure.
+func (m *Metadata) IterateHeaders(fn func(key, value string)) {
+	for k, v := range m.headers {
+		fn(k, v)
+	}
+}
+
 // SetDeadline sets the deadline for this request.
 func (m *Metadata) SetDeadline(d time.Time) {
 	if d.IsZero() {

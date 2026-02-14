@@ -35,6 +35,10 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// defaultMaxFrameSize is the default maximum allowed size for a single proto frame (16 MiB).
+// This can be overridden per-client using [WithMaxFrameSize] or per-server using [WithProtoServerMaxFrameSize].
+const defaultMaxFrameSize uint32 = 16 << 20
+
 // Client is a thread-safe, connection-pooling TCP client. It dials the
 // target address, optionally wraps connections with TLS and [ConnWrapper]
 // layers (e.g. compression), and maintains a LIFO pool of idle connections
@@ -87,6 +91,7 @@ type Client struct {
 	connWrappers []ConnWrapper
 	maxIdle      int
 	idleTimeout  time.Duration
+	maxFrameSize uint32
 	serializer   *ProtoSerializer
 	framePool    *framePool
 
@@ -106,14 +111,15 @@ type ClientOption func(*Client)
 // NewClient creates a Client that connects to addr (host:port).
 //
 // Defaults: 8 max idle connections, 30 s idle timeout, 5 s dial timeout,
-// 15 s TCP keep-alive.
+// 15 s TCP keep-alive, 16 MiB max frame size.
 func NewClient(addr string, opts ...ClientOption) *Client {
 	c := &Client{
-		addr:        addr,
-		maxIdle:     8,
-		idleTimeout: 30 * time.Second,
-		serializer:  NewProtoSerializer(),
-		framePool:   newFramePool(),
+		addr:         addr,
+		maxIdle:      8,
+		idleTimeout:  30 * time.Second,
+		maxFrameSize: defaultMaxFrameSize,
+		serializer:   NewProtoSerializer(),
+		framePool:    newFramePool(),
 		dialer: net.Dialer{
 			Timeout:   5 * time.Second,
 			KeepAlive: 15 * time.Second,
@@ -155,13 +161,25 @@ func WithIdleTimeout(d time.Duration) ClientOption {
 }
 
 // WithKeepAlive sets the TCP keep-alive interval for new connections.
-func WithKeepAlive(d time.Duration) ClientOption {
-	return func(c *Client) { c.dialer.KeepAlive = d }
+func WithKeepAlive(duration time.Duration) ClientOption {
+	return func(c *Client) { c.dialer.KeepAlive = duration }
 }
 
 // WithDialTimeout sets the timeout for establishing new TCP connections.
 func WithDialTimeout(d time.Duration) ClientOption {
 	return func(c *Client) { c.dialer.Timeout = d }
+}
+
+// WithMaxFrameSize sets the maximum allowed size for a single proto frame.
+// Frames larger than this limit will be rejected with ErrFrameTooLarge.
+// The default is 16 MiB. Set to 0 to use a very large limit (4 GiB - 1).
+func WithMaxFrameSize(size uint32) ClientOption {
+	return func(c *Client) {
+		if size == 0 {
+			size = 1<<32 - 1 // Max uint32
+		}
+		c.maxFrameSize = size
+	}
 }
 
 // Get returns a pooled connection or dials a new one. Stale idle
@@ -308,7 +326,7 @@ func (c *Client) SendProtoWithMetadata(ctx context.Context, req proto.Message) (
 	}
 
 	// Read the complete response frame from a pooled buffer.
-	respData, err := readProtoFrame(conn, c.framePool)
+	respData, err := readProtoFrame(conn, c.framePool, c.maxFrameSize)
 	if err != nil {
 		c.Discard(conn)
 		return nil, nil, err
@@ -416,7 +434,7 @@ func (c *Client) SendBatchProto(ctx context.Context, reqs []proto.Message) ([]pr
 
 	for i := range resps {
 		// Read the complete response frame from a pooled buffer.
-		respData, err := readProtoFrame(conn, c.framePool)
+		respData, err := readProtoFrame(conn, c.framePool, c.maxFrameSize)
 		if err != nil {
 			c.Discard(conn)
 			return nil, err
@@ -541,18 +559,18 @@ func (c *Client) dial(ctx context.Context) (net.Conn, error) {
 	return conn, nil
 }
 
-// maxProtoFrameSize is the maximum allowed size for a single proto frame (16 MiB).
-const maxProtoFrameSize = 16 << 20
-
 // readProtoFrame reads a single [ProtoSerializer] frame from r.
 // It reads the 4-byte length prefix, validates it, then reads the remaining
 // bytes and returns the complete frame (including the prefix).
+//
+// The maxFrameSize parameter specifies the maximum allowed frame size in bytes.
+// Frames larger than this limit will be rejected with ErrFrameTooLarge.
 //
 // When fp is non-nil the frame buffer is drawn from the pool. The caller
 // must return it via fp.Put after the frame contents have been consumed
 // (typically right after [ProtoSerializer.UnmarshalBinary]).
 // When fp is nil a fresh []byte is allocated for each frame.
-func readProtoFrame(r io.Reader, fp *framePool) ([]byte, error) {
+func readProtoFrame(r io.Reader, fp *framePool, maxFrameSize uint32) ([]byte, error) {
 	var hdr [4]byte
 	if _, err := io.ReadFull(r, hdr[:]); err != nil {
 		return nil, err
@@ -563,7 +581,7 @@ func readProtoFrame(r io.Reader, fp *framePool) ([]byte, error) {
 		// Minimum valid frame: 4 (total len) + 4 (name len) + 0 + 0.
 		return nil, ErrInvalidMessageLength
 	}
-	if totalLen > maxProtoFrameSize {
+	if totalLen > maxFrameSize {
 		return nil, ErrFrameTooLarge
 	}
 

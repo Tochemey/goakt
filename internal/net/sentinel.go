@@ -66,6 +66,12 @@ var (
 	ErrBrotliWriterInit = errors.New("tcp: brotli writer initialization failed")
 	// ErrBrotliReaderInit is returned when the brotli reader cannot be obtained from the pool.
 	ErrBrotliReaderInit = errors.New("tcp: brotli reader initialization failed")
+	// ErrGzipWriterInit is returned when the gzip writer cannot be obtained from the pool.
+	ErrGzipWriterInit = errors.New("tcp: gzip writer initialization failed")
+	// ErrGzipReaderInit is returned when the gzip reader cannot be obtained from the pool.
+	ErrGzipReaderInit = errors.New("tcp: gzip reader initialization failed")
+	// ErrGzipInvalidLevel is returned when an invalid gzip compression level is provided.
+	ErrGzipInvalidLevel = errors.New("tcp: invalid gzip compression level")
 )
 
 // Serializer errors.

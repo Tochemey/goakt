@@ -1416,33 +1416,7 @@ func (pid *PID) Watch(cid *PID) {
 
 // UnWatch stops watching a given actor
 func (pid *PID) UnWatch(cid *PID) {
-	tree := pid.ActorSystem().tree()
-	pnode, ok := tree.node(pid.ID())
-	if !ok {
-		return
-	}
-
-	cnode, ok := tree.node(cid.ID())
-	if !ok {
-		return
-	}
-
-	pwatchees := tree.watchees(pid)
-	for _, watchee := range pwatchees {
-		if watchee.Equals(cid) {
-			pnode.watchees.Delete(watchee.ID())
-			break
-		}
-	}
-
-	// get the watchers of the child actor
-	cwatchers := tree.watchers(cid)
-	for _, watcher := range cwatchers {
-		if watcher.Equals(pid) {
-			cnode.watchers.Delete(watcher.ID())
-			break
-		}
-	}
+	pid.ActorSystem().tree().removeWatcher(cid, pid)
 }
 
 // Logger returns the logger sets when creating the PID
@@ -2233,7 +2207,7 @@ func (pid *PID) freeChildren(ctx context.Context) error {
 			eg.Go(func() error {
 				logger.Debugf("Parent %s disowning descendant %s", pid.Name(), child.Name())
 				pid.UnWatch(child)
-				node.descendants.Delete(child.ID())
+				tree.removeDescendant(node.id, child.ID())
 				if child.IsSuspended() || child.IsRunning() {
 					if err := child.Shutdown(ctx); err != nil {
 						// only return error when the actor is not dead

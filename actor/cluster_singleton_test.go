@@ -29,10 +29,10 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
-	"connectrpc.com/connect"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/tochemey/olric"
@@ -604,7 +604,7 @@ func TestSingletonActor(t *testing.T) {
 
 // TestSpawnSingletonRetryBehavior exercises retry and error paths for SpawnSingleton.
 //
-//nolint:gocyclo // test function with many subtests; splitting would reduce clarity
+//nolint:gocyclo
 func TestSpawnSingletonRetryBehavior(t *testing.T) {
 	t.Run("retries on quorum errors", func(t *testing.T) {
 		ctx := context.Background()
@@ -1277,11 +1277,11 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 		}{
 			{
 				name: "connection refused",
-				err:  connect.NewError(connect.CodeUnavailable, fmt.Errorf("connection refused")),
+				err:  fmt.Errorf("dial tcp 127.0.0.1:9090: %w", syscall.ECONNREFUSED),
 			},
 			{
 				name: "deadline exceeded",
-				err:  connect.NewError(connect.CodeDeadlineExceeded, context.DeadlineExceeded),
+				err:  context.DeadlineExceeded,
 			},
 		}
 

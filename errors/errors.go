@@ -26,8 +26,6 @@ import (
 	"errors"
 	"fmt"
 
-	"connectrpc.com/connect"
-
 	"github.com/tochemey/goakt/v3/passivation"
 )
 
@@ -256,12 +254,12 @@ func NewErrActorNotFound(actorPath string) error {
 
 // NewErrAddressNotFound formats an ErrAddressNotFound with the given actor address.
 func NewErrAddressNotFound(addr string) error {
-	return connect.NewError(connect.CodeNotFound, fmt.Errorf("(actor address=%s) %w", addr, ErrAddressNotFound))
+	return fmt.Errorf("(actor address=%s) %w", addr, ErrAddressNotFound)
 }
 
 // NewErrRemoteSendFailure wraps an error into an ErrRemoteSendFailure using internal server code.
 func NewErrRemoteSendFailure(err error) error {
-	return connect.NewError(connect.CodeInternal, errors.Join(ErrRemoteSendFailure, err))
+	return errors.Join(ErrRemoteSendFailure, err)
 }
 
 // NewErrActorAlreadyExists formats an ErrActorAlreadyExists for the given actor name.

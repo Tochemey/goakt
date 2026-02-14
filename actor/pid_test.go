@@ -740,12 +740,12 @@ func TestRestart(t *testing.T) {
 
 		parentNode, ok := tree.node(root.ID())
 		require.True(t, ok)
-		parentNode.descendants.Delete(child.ID())
-		parentNode.watchees.Delete(child.ID())
+		delete(parentNode.descendants, child.ID())
+		delete(parentNode.watchees, child.ID())
 
 		childNode, ok := tree.node(child.ID())
 		require.True(t, ok)
-		childNode.parent.Store(nil)
+		childNode.parentNode = nil
 
 		child.setState(runningState, false)
 
@@ -2390,12 +2390,11 @@ func TestRemoting(t *testing.T) {
 		})
 	})
 }
-
-type actorSystemWrapper struct {
-	*actorSystem
-}
-
 func TestPIDRemotingEnabledGuard(t *testing.T) {
+	type actorSystemWrapper struct {
+		*actorSystem
+	}
+
 	t.Run("Actor system nil", func(t *testing.T) {
 		remotingMock := mocksremote.NewRemoting(t)
 		pid := &PID{
@@ -5096,10 +5095,9 @@ func TestWatch(t *testing.T) {
 	pid.Watch(pid2)
 	pnode, ok := pid2.ActorSystem().tree().node(pid2.ID())
 	require.True(t, ok)
-	watchers := pnode.watchers
 
 	found := false
-	for _, watcher := range watchers.Values() {
+	for _, watcher := range pnode.watchers {
 		if watcher.Equals(pid) {
 			found = true
 			break

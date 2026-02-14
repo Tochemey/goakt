@@ -25,26 +25,20 @@ package actor
 import (
 	"context"
 	stdErrors "errors"
-	"net"
-	"strconv"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/tochemey/goakt/v3/address"
-	"github.com/tochemey/goakt/v3/discovery"
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/log"
 	mockscluster "github.com/tochemey/goakt/v3/mocks/cluster"
-	mocksdiscovery "github.com/tochemey/goakt/v3/mocks/discovery"
-	"github.com/tochemey/goakt/v3/remote"
 )
 
 func TestDeathWatch(t *testing.T) {
@@ -99,15 +93,24 @@ func TestDeathWatch(t *testing.T) {
 		clmock.EXPECT().ActorExists(mock.Anything, actorID).Return(false, nil)
 		clmock.EXPECT().RemoveActor(mock.Anything, actorID).Return(stdErrors.New("removal failed"))
 
+		// Set the cluster mock BEFORE Start so that handlePostStart (which runs
+		// asynchronously during Start) picks it up via getCluster() without racing.
+		// Leave clusterEnabled false so setupCluster is skipped during Start.
+		sys := actorSys.(*actorSystem)
+		sys.locker.Lock()
+		sys.cluster = clmock
+		sys.locker.Unlock()
+
 		err = actorSys.Start(ctx)
 		require.NoError(t, err)
 
 		// wait for the system to start properly
 		pause.For(500 * time.Millisecond)
-		actorSys.(*actorSystem).cluster = clmock
-		actorSys.(*actorSystem).clusterEnabled.Store(true)
-		actorSys.(*actorSystem).remotingEnabled.Store(true)
-		actorSys.(*actorSystem).relocationEnabled.Store(false)
+
+		// Now enable cluster flags — after Start and handlePostStart have completed.
+		sys.clusterEnabled.Store(true)
+		sys.remotingEnabled.Store(true)
+		sys.relocationEnabled.Store(false)
 
 		cid, err := actorSys.Spawn(ctx, actorID, NewMockActor())
 		require.NoError(t, err)
@@ -115,13 +118,14 @@ func TestDeathWatch(t *testing.T) {
 
 		pause.For(500 * time.Millisecond)
 
-		pid := actorSys.getDeathWatch()
-		pid.Actor().(*deathWatch).cluster = clmock
+		// No need to set deathWatch.cluster — handlePostStart already set it
+		// from getCluster() which returned clmock.
 
 		require.NoError(t, cid.Shutdown(ctx))
 
 		pause.For(time.Second)
 
+		pid := actorSys.getDeathWatch()
 		require.False(t, pid.IsRunning())
 		require.False(t, actorSys.Running())
 	})
@@ -151,55 +155,40 @@ func TestDeathWatch(t *testing.T) {
 	t.Run("With Terminated when cluster removal fails returns internal error", func(t *testing.T) {
 		ctx := context.Background()
 
-		ports := dynaport.Get(3)
-
-		discoveryPort := ports[0]
-		peersPort := ports[1]
-		remotingPort := ports[2]
-
-		host := "127.0.0.1"
-
-		// define discovered addresses
-		addrs := []string{
-			net.JoinHostPort(host, strconv.Itoa(discoveryPort)),
-		}
-
 		actorSys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 		require.NoError(t, err)
 		require.NotNil(t, actorSys)
 
 		clmock := mockscluster.NewCluster(t)
-		provider := mocksdiscovery.NewProvider(t)
-		provider.EXPECT().ID().Return("test")
-		provider.EXPECT().Initialize().Return(nil)
-		provider.EXPECT().Register().Return(nil)
-		provider.EXPECT().Deregister().Return(nil)
-		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
-		provider.EXPECT().Close().Return(nil)
 
+		// Set the cluster mock BEFORE Start so handlePostStart picks it up
+		// via getCluster() without racing. Leave clusterEnabled false so
+		// setupCluster is skipped during Start.
 		sys := actorSys.(*actorSystem)
+		sys.locker.Lock()
 		sys.cluster = clmock
-		sys.clusterEnabled.Store(true)
-		sys.remotingEnabled.Store(true)
-		sys.remoteConfig = remote.NewConfig(host, remotingPort)
-		sys.clusterNode = &discovery.Node{Host: host, PeersPort: peersPort, DiscoveryPort: discoveryPort}
-
-		clConfig := NewClusterConfig()
-		clConfig.discoveryPort = 9001
-		clConfig.discovery = provider
-
-		sys.clusterConfig = clConfig
+		sys.locker.Unlock()
 
 		err = actorSys.Start(ctx)
 		require.NoError(t, err)
 
 		pause.For(500 * time.Millisecond)
 
+		// Enable cluster flags after Start and handlePostStart have completed.
+		sys.clusterEnabled.Store(true)
+
 		t.Cleanup(func() {
+			sys.clusterEnabled.Store(false)
+			sys.locker.Lock()
+			sys.cluster = nil
+			sys.locker.Unlock()
 			require.NoError(t, actorSys.Stop(ctx))
 		})
 
 		const actorName = "actor-to-free"
+		// Spawn checks ActorExists on the cluster when InCluster() is true.
+		clmock.EXPECT().ActorExists(mock.Anything, actorName).Return(false, nil)
+
 		cid, err := actorSys.Spawn(ctx, actorName, NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, cid)
@@ -213,11 +202,6 @@ func TestDeathWatch(t *testing.T) {
 		deathWatchPID := actorSys.getDeathWatch()
 		require.NotNil(t, deathWatchPID)
 		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
-		deathWatchActor.cluster = clmock
-		deathWatchActor.actorSystem = actorSys
-		deathWatchActor.pid = deathWatchPID
-		deathWatchActor.logger = log.DiscardLogger
-		deathWatchActor.tree = sys.tree()
 
 		terminated := &goaktpb.Terminated{Address: cid.ID()}
 		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, terminated)
@@ -238,24 +222,34 @@ func TestDeathWatch(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, actorSys)
 
+		sys := actorSys.(*actorSystem)
+
+		// Mock cluster removal for both actor name and singleton kind.
+		clmock := mockscluster.NewCluster(t)
+
+		// Set the cluster mock BEFORE Start so that handlePostStart (which runs
+		// asynchronously during Start) picks it up via getCluster() without racing.
+		// Leave clusterEnabled false so setupCluster is skipped during Start.
+		sys.locker.Lock()
+		sys.cluster = clmock
+		sys.locker.Unlock()
+
 		err = actorSys.Start(ctx)
 		require.NoError(t, err)
 		pause.For(500 * time.Millisecond)
 
-		sys := actorSys.(*actorSystem)
+		// Now enable cluster flag — after Start and handlePostStart have completed.
+		sys.clusterEnabled.Store(true)
 
 		t.Cleanup(func() {
 			// Detach the mocked cluster before stopping the system to avoid background
 			// shutdown workflows (preShutdown) calling into unexpected mock methods.
 			sys.clusterEnabled.Store(false)
+			sys.locker.Lock()
 			sys.cluster = nil
+			sys.locker.Unlock()
 			require.NoError(t, actorSys.Stop(ctx))
 		})
-
-		// Mock cluster removal for both actor name and singleton kind.
-		clmock := mockscluster.NewCluster(t)
-		sys.cluster = clmock
-		sys.clusterEnabled.Store(true)
 
 		// Create a singleton actor PID and register it in the tree so deathWatch can find it.
 		const (
@@ -274,15 +268,11 @@ func TestDeathWatch(t *testing.T) {
 		// Register under the user guardian (any existing parent works).
 		require.NoError(t, sys.tree().addNode(sys.getUserGuardian(), singletonPID))
 
-		// Wire the deathWatch actor with our mocked cluster and tree.
+		// No need to manually wire deathWatch fields — handlePostStart already set
+		// them during Start (cluster, actorSystem, pid, logger, tree).
 		deathWatchPID := actorSys.getDeathWatch()
 		require.NotNil(t, deathWatchPID)
 		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
-		deathWatchActor.cluster = clmock
-		deathWatchActor.actorSystem = actorSys
-		deathWatchActor.pid = deathWatchPID
-		deathWatchActor.logger = log.DiscardLogger
-		deathWatchActor.tree = sys.tree()
 
 		expectedKind := kindRole(registry.Name(actor), role)
 		clmock.EXPECT().RemoveActor(mock.Anything, actorName).Return(nil).Once()

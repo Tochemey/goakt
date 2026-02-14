@@ -372,7 +372,7 @@ func TestReadProtoFrame(t *testing.T) {
 		copy(data[11:], "xx")
 
 		r := &mockReader{data: data}
-		frame, err := readProtoFrame(r, nil)
+		frame, err := readProtoFrame(r, nil, defaultMaxFrameSize)
 		require.NoError(t, err)
 		require.Equal(t, data, frame)
 	})
@@ -380,14 +380,14 @@ func TestReadProtoFrame(t *testing.T) {
 	t.Run("frame too small", func(t *testing.T) {
 		data := []byte{0, 0, 0, 4}
 		r := &mockReader{data: data}
-		_, err := readProtoFrame(r, nil)
+		_, err := readProtoFrame(r, nil, defaultMaxFrameSize)
 		require.ErrorIs(t, err, ErrInvalidMessageLength)
 	})
 
 	t.Run("frame too large", func(t *testing.T) {
 		data := []byte{0xFF, 0xFF, 0xFF, 0xFF}
 		r := &mockReader{data: data}
-		_, err := readProtoFrame(r, nil)
+		_, err := readProtoFrame(r, nil, defaultMaxFrameSize)
 		require.ErrorIs(t, err, ErrFrameTooLarge)
 	})
 
@@ -399,7 +399,7 @@ func TestReadProtoFrame(t *testing.T) {
 		data[2] = 0
 		data[3] = 20
 		r := &mockReader{data: data}
-		_, err := readProtoFrame(r, nil)
+		_, err := readProtoFrame(r, nil, defaultMaxFrameSize)
 		require.Error(t, err)
 	})
 }
@@ -685,7 +685,7 @@ func startProtoEchoServer(t *testing.T) (string, func()) {
 			go func(c net.Conn) {
 				defer func() { _ = c.Close() }()
 				for {
-					frame, err := readProtoFrame(c, nil)
+					frame, err := readProtoFrame(c, nil, defaultMaxFrameSize)
 					if err != nil {
 						return // client disconnected or read error
 					}
@@ -1180,7 +1180,7 @@ func TestClient_SendProto_UnmarshalError(t *testing.T) {
 			go func(c net.Conn) {
 				defer func() { _ = c.Close() }()
 				// Read the request frame.
-				_, _ = readProtoFrame(c, nil) // error expected when client disconnects
+				_, _ = readProtoFrame(c, nil, defaultMaxFrameSize) // error expected when client disconnects
 				// Send back a valid-length frame with garbage proto content.
 				// Frame: totalLen=16, nameLen=4, name="test", payload=garbage
 				frame := make([]byte, 16)
@@ -1243,7 +1243,7 @@ func TestClient_SendProtoWithMetadata(t *testing.T) {
 				defer func() { _ = c.Close() }()
 				for {
 					// Read request frame.
-					reqFrame, err := readProtoFrame(c, nil)
+					reqFrame, err := readProtoFrame(c, nil, defaultMaxFrameSize)
 					if err != nil {
 						return
 					}

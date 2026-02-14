@@ -26,6 +26,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -826,4 +827,388 @@ func TestBucketIndexExact(t *testing.T) {
 			require.Equal(t, tt.want, bucketIndexExact(tt.c))
 		})
 	}
+}
+
+func TestProtoServer_MetadataExtraction(t *testing.T) {
+	t.Run("extract metadata from request", func(t *testing.T) {
+		var receivedHeaders map[string]string
+		var receivedDeadline time.Time
+		var hasDeadline bool
+
+		handler := func(ctx context.Context, _ Connection, req proto.Message) (proto.Message, error) {
+			// Extract metadata from the context.
+			md, ok := FromContext(ctx)
+			require.True(t, ok, "metadata should be present in context")
+			require.NotNil(t, md, "metadata should not be nil")
+
+			// Capture headers for verification.
+			receivedHeaders = make(map[string]string)
+			md.IterateHeaders(func(key, value string) {
+				receivedHeaders[key] = value
+			})
+
+			// Capture deadline if present.
+			receivedDeadline, hasDeadline = md.GetDeadline()
+
+			return req, nil
+		}
+
+		ps, err := NewProtoServer("127.0.0.1:0",
+			WithProtoHandler("testpb.Reply", handler),
+		)
+		require.NoError(t, err)
+		require.NoError(t, ps.Listen())
+
+		done := make(chan error, 1)
+		go func() { done <- ps.Serve() }()
+		pause.For(100 * time.Millisecond)
+
+		client := NewClient(ps.ListenAddr().String())
+		defer func() { _ = client.Close() }()
+
+		// Create context with metadata.
+		md := NewMetadata()
+		md.Set("trace-id", "abc123")
+		md.Set("span-id", "xyz789")
+		md.Set("auth-token", "secret")
+		expectedDeadline := time.Now().Add(5 * time.Second).Truncate(time.Microsecond)
+		md.SetDeadline(expectedDeadline)
+
+		ctx := ContextWithMetadata(context.Background(), md)
+
+		// Send request with metadata.
+		req := &testpb.Reply{Content: "with metadata"}
+		resp, _, err := client.SendProtoWithMetadata(ctx, req)
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+
+		// Verify the handler received all headers.
+		require.Equal(t, "abc123", receivedHeaders["trace-id"])
+		require.Equal(t, "xyz789", receivedHeaders["span-id"])
+		require.Equal(t, "secret", receivedHeaders["auth-token"])
+
+		// Verify the handler received the deadline.
+		require.True(t, hasDeadline, "deadline should be present")
+		require.True(t, receivedDeadline.Equal(expectedDeadline), "deadline should match")
+
+		require.NoError(t, ps.Shutdown(time.Second))
+		<-done
+	})
+
+	t.Run("backward compatibility - no metadata", func(t *testing.T) {
+		var metadataPresent bool
+
+		handler := func(ctx context.Context, _ Connection, req proto.Message) (proto.Message, error) {
+			// Check if metadata is present.
+			_, ok := FromContext(ctx)
+			metadataPresent = ok
+			return req, nil
+		}
+
+		ps, err := NewProtoServer("127.0.0.1:0",
+			WithProtoHandler("testpb.Reply", handler),
+		)
+		require.NoError(t, err)
+		require.NoError(t, ps.Listen())
+
+		done := make(chan error, 1)
+		go func() { done <- ps.Serve() }()
+		pause.For(100 * time.Millisecond)
+
+		client := NewClient(ps.ListenAddr().String())
+		defer func() { _ = client.Close() }()
+
+		// Send request WITHOUT metadata (legacy format).
+		req := &testpb.Reply{Content: "no metadata"}
+		resp, err := client.SendProto(context.Background(), req)
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+
+		reply, ok := resp.(*testpb.Reply)
+		require.True(t, ok)
+		require.Equal(t, "no metadata", reply.Content)
+
+		// Verify no metadata was present (backward compatibility).
+		require.False(t, metadataPresent, "metadata should not be present for legacy frames")
+
+		require.NoError(t, ps.Shutdown(time.Second))
+		<-done
+	})
+
+	t.Run("empty metadata", func(t *testing.T) {
+		var receivedHeaders map[string]string
+
+		handler := func(ctx context.Context, _ Connection, req proto.Message) (proto.Message, error) {
+			md, ok := FromContext(ctx)
+			require.True(t, ok)
+			require.NotNil(t, md)
+
+			receivedHeaders = make(map[string]string)
+			md.IterateHeaders(func(key, value string) {
+				receivedHeaders[key] = value
+			})
+
+			return req, nil
+		}
+
+		ps, err := NewProtoServer("127.0.0.1:0",
+			WithProtoHandler("testpb.Reply", handler),
+		)
+		require.NoError(t, err)
+		require.NoError(t, ps.Listen())
+
+		done := make(chan error, 1)
+		go func() { done <- ps.Serve() }()
+		pause.For(100 * time.Millisecond)
+
+		client := NewClient(ps.ListenAddr().String())
+		defer func() { _ = client.Close() }()
+
+		// Create context with empty metadata (no headers, no deadline).
+		md := NewMetadata()
+		ctx := ContextWithMetadata(context.Background(), md)
+
+		req := &testpb.Reply{Content: "empty metadata"}
+		resp, _, err := client.SendProtoWithMetadata(ctx, req)
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+
+		// Verify handler received empty headers.
+		require.Empty(t, receivedHeaders)
+
+		require.NoError(t, ps.Shutdown(time.Second))
+		<-done
+	})
+
+	t.Run("metadata deadline propagation", func(t *testing.T) {
+		var ctxHadDeadline bool
+		var ctxDeadline time.Time
+
+		handler := func(ctx context.Context, _ Connection, req proto.Message) (proto.Message, error) {
+			// Check if the context has the propagated deadline.
+			ctxDeadline, ctxHadDeadline = ctx.Deadline()
+			return req, nil
+		}
+
+		ps, err := NewProtoServer("127.0.0.1:0",
+			WithProtoHandler("testpb.Reply", handler),
+		)
+		require.NoError(t, err)
+		require.NoError(t, ps.Listen())
+
+		done := make(chan error, 1)
+		go func() { done <- ps.Serve() }()
+		pause.For(100 * time.Millisecond)
+
+		client := NewClient(ps.ListenAddr().String())
+		defer func() { _ = client.Close() }()
+
+		// Create metadata with a deadline.
+		md := NewMetadata()
+		expectedDeadline := time.Now().Add(10 * time.Second).Truncate(time.Microsecond)
+		md.SetDeadline(expectedDeadline)
+
+		ctx := ContextWithMetadata(context.Background(), md)
+
+		req := &testpb.Reply{Content: "deadline test"}
+		resp, _, err := client.SendProtoWithMetadata(ctx, req)
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+
+		// Verify the handler's context had the deadline.
+		require.True(t, ctxHadDeadline, "context should have deadline")
+		require.True(t, ctxDeadline.Equal(expectedDeadline), "deadline should match")
+
+		require.NoError(t, ps.Shutdown(time.Second))
+		<-done
+	})
+
+	t.Run("multiple headers extraction", func(t *testing.T) {
+		var receivedHeaders map[string]string
+
+		handler := func(ctx context.Context, _ Connection, req proto.Message) (proto.Message, error) {
+			md, ok := FromContext(ctx)
+			require.True(t, ok)
+
+			receivedHeaders = make(map[string]string)
+			md.IterateHeaders(func(key, value string) {
+				receivedHeaders[key] = value
+			})
+
+			return req, nil
+		}
+
+		ps, err := NewProtoServer("127.0.0.1:0",
+			WithProtoHandler("testpb.Reply", handler),
+		)
+		require.NoError(t, err)
+		require.NoError(t, ps.Listen())
+
+		done := make(chan error, 1)
+		go func() { done <- ps.Serve() }()
+		pause.For(100 * time.Millisecond)
+
+		client := NewClient(ps.ListenAddr().String())
+		defer func() { _ = client.Close() }()
+
+		// Create metadata with many headers.
+		md := NewMetadata()
+		expectedHeaders := map[string]string{
+			"x-trace-id":      "trace-123",
+			"x-span-id":       "span-456",
+			"x-user-id":       "user-789",
+			"x-request-id":    "req-abc",
+			"x-correlation":   "corr-def",
+			"x-auth-token":    "token-xyz",
+			"x-custom-header": "custom-value",
+		}
+		for k, v := range expectedHeaders {
+			md.Set(k, v)
+		}
+
+		ctx := ContextWithMetadata(context.Background(), md)
+
+		req := &testpb.Reply{Content: "many headers"}
+		resp, _, err := client.SendProtoWithMetadata(ctx, req)
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+
+		// Verify all headers were received.
+		require.Equal(t, len(expectedHeaders), len(receivedHeaders))
+		for k, expectedVal := range expectedHeaders {
+			actualVal, ok := receivedHeaders[k]
+			require.True(t, ok, "header %s should be present", k)
+			require.Equal(t, expectedVal, actualVal, "header %s value should match", k)
+		}
+
+		require.NoError(t, ps.Shutdown(time.Second))
+		<-done
+	})
+
+	t.Run("concurrent requests with different metadata", func(t *testing.T) {
+		type capturedMD struct {
+			traceID string
+			spanID  string
+		}
+		var mu sync.Mutex
+		captured := make(map[string]capturedMD)
+
+		handler := func(ctx context.Context, _ Connection, req proto.Message) (proto.Message, error) {
+			md, ok := FromContext(ctx)
+			if !ok {
+				return req, nil
+			}
+
+			traceID, _ := md.Get("trace-id")
+			spanID, _ := md.Get("span-id")
+			content := req.(*testpb.Reply).Content
+
+			mu.Lock()
+			captured[content] = capturedMD{traceID: traceID, spanID: spanID}
+			mu.Unlock()
+
+			return req, nil
+		}
+
+		ps, err := NewProtoServer("127.0.0.1:0",
+			WithProtoHandler("testpb.Reply", handler),
+		)
+		require.NoError(t, err)
+		require.NoError(t, ps.Listen())
+
+		done := make(chan error, 1)
+		go func() { done <- ps.Serve() }()
+		pause.For(100 * time.Millisecond)
+
+		client := NewClient(ps.ListenAddr().String())
+		defer func() { _ = client.Close() }()
+
+		// Send concurrent requests with different metadata.
+		const numReqs = 50
+		var wg sync.WaitGroup
+
+		for i := range numReqs {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+
+				md := NewMetadata()
+				md.Set("trace-id", time.Now().String()+"-"+strconv.Itoa(idx))
+				md.Set("span-id", time.Now().String()+"-span-"+strconv.Itoa(idx))
+
+				ctx := ContextWithMetadata(context.Background(), md)
+				content := time.Now().String() + "-" + strconv.Itoa(idx)
+				req := &testpb.Reply{Content: content}
+
+				_, _, err := client.SendProtoWithMetadata(ctx, req)
+				require.NoError(t, err)
+			}(i)
+		}
+
+		wg.Wait()
+
+		// Verify each request's metadata was correctly extracted and isolated.
+		mu.Lock()
+		require.Equal(t, numReqs, len(captured), "all requests should have been captured")
+		mu.Unlock()
+
+		require.NoError(t, ps.Shutdown(time.Second))
+		<-done
+	})
+}
+
+func TestProtoServer_MetadataBackwardCompatibility(t *testing.T) {
+	t.Run("mixed metadata and non-metadata requests", func(t *testing.T) {
+		var withMetadataCount atomic.Int32
+		var withoutMetadataCount atomic.Int32
+
+		handler := func(ctx context.Context, _ Connection, req proto.Message) (proto.Message, error) {
+			if _, ok := FromContext(ctx); ok {
+				withMetadataCount.Add(1)
+			} else {
+				withoutMetadataCount.Add(1)
+			}
+			return req, nil
+		}
+
+		ps, err := NewProtoServer("127.0.0.1:0",
+			WithProtoHandler("testpb.Reply", handler),
+		)
+		require.NoError(t, err)
+		require.NoError(t, ps.Listen())
+
+		done := make(chan error, 1)
+		go func() { done <- ps.Serve() }()
+		pause.For(100 * time.Millisecond)
+
+		client := NewClient(ps.ListenAddr().String())
+		defer func() { _ = client.Close() }()
+
+		// Send some requests with metadata.
+		for i := range 5 {
+			md := NewMetadata()
+			md.Set("request-id", strconv.Itoa(i))
+			ctx := ContextWithMetadata(context.Background(), md)
+
+			req := &testpb.Reply{Content: "with-md"}
+			_, _, err := client.SendProtoWithMetadata(ctx, req)
+			require.NoError(t, err)
+		}
+
+		// Send some requests without metadata (legacy client).
+		for range 3 {
+			req := &testpb.Reply{Content: "no-md"}
+			_, err := client.SendProto(context.Background(), req)
+			require.NoError(t, err)
+		}
+
+		pause.For(100 * time.Millisecond)
+
+		// Verify counts.
+		require.Equal(t, int32(5), withMetadataCount.Load())
+		require.Equal(t, int32(3), withoutMetadataCount.Load())
+
+		require.NoError(t, ps.Shutdown(time.Second))
+		<-done
+	})
 }
