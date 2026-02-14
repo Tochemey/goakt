@@ -333,7 +333,7 @@ func TestTryRemoteGrainActivation(t *testing.T) {
 	t.Run("owner remote activation error", func(t *testing.T) {
 		ctx := t.Context()
 		grain := NewMockGrain()
-		sys, _, rem, identity := newActivationTestSystem(t, grain, "owner-remote-error", true)
+		sys, cl, rem, identity := newActivationTestSystem(t, grain, "owner-remote-error", true)
 		owner := &internalpb.Grain{
 			GrainId: &internalpb.GrainId{Value: identity.String()},
 			Host:    "192.0.2.51",
@@ -342,9 +342,10 @@ func TestTryRemoteGrainActivation(t *testing.T) {
 		expectedErr := errors.New("remote activate failed")
 
 		rem.EXPECT().RemoteActivateGrain(ctx, owner.Host, int(owner.Port), mock.Anything).Return(expectedErr)
+		cl.EXPECT().RemoveGrain(ctx, identity.String()).Return(nil).Once()
 
 		handled, err := sys.tryRemoteGrainActivation(ctx, identity, grain, newGrainConfig(), owner)
-		require.ErrorIs(t, err, expectedErr)
+		require.NoError(t, err)
 		require.False(t, handled)
 	})
 
