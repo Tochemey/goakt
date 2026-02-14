@@ -28,6 +28,7 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v3/errors"
@@ -71,14 +72,15 @@ func releaseGrainContext(ctx *GrainContext) {
 //	    }
 //	}
 type GrainContext struct {
-	ctx         context.Context
-	self        *GrainIdentity
-	actorSystem ActorSystem
-	message     proto.Message
-	response    chan proto.Message
-	err         chan error
-	synchronous bool
-	pid         *grainPID
+	ctx             context.Context
+	self            *GrainIdentity
+	actorSystem     ActorSystem
+	message         proto.Message
+	response        chan proto.Message
+	err             chan error
+	synchronous     bool
+	pid             *grainPID
+	responseClosed  atomic.Bool
 }
 
 // Context returns the underlying context associated with the GrainContext.
@@ -171,16 +173,34 @@ func (gctx *GrainContext) Err(err error) {
 //	    }
 //	}
 func (gctx *GrainContext) NoErr() {
+	// For Ask-based replies, guard against late responses after the caller timed out.
+	// This prevents pooled response channels from receiving stale replies that could
+	// be consumed by a later Ask call.
+	if gctx.synchronous && !gctx.responseClosed.CompareAndSwap(false, true) {
+		return
+	}
 	// No error to report
 	if gctx.synchronous {
-		gctx.response <- nil
+		select {
+		case gctx.response <- nil:
+		default:
+		}
 	}
 	gctx.err <- nil
 }
 
 // Response sets the message response
 func (gctx *GrainContext) Response(resp proto.Message) {
-	gctx.response <- resp
+	// For Ask-based replies, guard against late responses after the caller timed out.
+	// This prevents pooled response channels from receiving stale replies that could
+	// be consumed by a later Ask call.
+	if !gctx.responseClosed.CompareAndSwap(false, true) {
+		return
+	}
+	select {
+	case gctx.response <- resp:
+	default:
+	}
 }
 
 // Unhandled marks the currently received message as unhandled by the Grain.
@@ -518,4 +538,5 @@ func (gctx *GrainContext) reset() {
 	gctx.err = nil
 	gctx.response = nil
 	gctx.pid = nil
+	gctx.responseClosed.Store(false)
 }
