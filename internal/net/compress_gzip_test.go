@@ -130,7 +130,7 @@ func TestGzipConnWrapper_MultipleWrapReuse(t *testing.T) {
 	wrapper, err := NewGzipConnWrapper()
 	require.NoError(t, err)
 
-	for i := 0; i < 4; i++ {
+	for range 4 {
 		listener, err := net.Listen("tcp", "127.0.0.1:0")
 		require.NoError(t, err)
 
