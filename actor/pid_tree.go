@@ -25,36 +25,41 @@ package actor
 import (
 	"errors"
 	"sync"
+	syncatomic "sync/atomic"
 
 	"go.uber.org/atomic"
 )
 
 // pidNode represents a node in the PID tree.
-// Fields are protected by the owning tree's mutex; no per-node locking is needed.
+// Most fields are protected by the owning tree's mutex.
+// The pid field uses an atomic pointer because pidNode references may be
+// returned to callers outside the tree lock (e.g. via node()/nodeByName()),
+// and concurrent deleteNode() calls can set pid to nil.
 type pidNode struct {
-	pid         *PID                // PID associated with this node.
-	parentNode  *pidNode            // Parent node; nil if root.
-	id          string              // Cached pid.ID() — avoids repeated string building.
-	name        string              // Cached pid.Name().
-	watchers    map[string]*PID     // Actors watching this node (key = watcher ID).
-	watchees    map[string]*PID     // Actors this node is watching (key = watchee ID).
-	descendants map[string]*pidNode // Direct children (key = child ID).
+	pid         syncatomic.Pointer[PID] // PID associated with this node (atomic for safe lock-free reads).
+	parentNode  *pidNode                // Parent node; nil if root.
+	id          string                  // Cached pid.ID() — avoids repeated string building.
+	name        string                  // Cached pid.Name().
+	watchers    map[string]*PID         // Actors watching this node (key = watcher ID).
+	watchees    map[string]*PID         // Actors this node is watching (key = watchee ID).
+	descendants map[string]*pidNode     // Direct children (key = child ID).
 }
 
-// value returns the PID stored in the node, or nil if not set.
+// value returns the PID stored in the node, or nil if cleared by deleteNode.
+// Safe to call without holding the tree lock.
 func (n *pidNode) value() *PID {
-	return n.pid
+	return n.pid.Load()
 }
 
 // newPidNode creates a pidNode with cached id/name fields.
 // If pid is nil the cached strings remain empty (used for the initial root node).
 func newPidNode(pid *PID) *pidNode {
 	n := &pidNode{
-		pid:         pid,
 		watchers:    make(map[string]*PID),
 		watchees:    make(map[string]*PID),
 		descendants: make(map[string]*pidNode),
 	}
+	n.pid.Store(pid)
 	if pid != nil {
 		n.id = pid.ID()
 		n.name = pid.Name()
@@ -112,7 +117,7 @@ func (x *tree) addRootNode(pid *PID) error {
 	}
 
 	name := pid.Name()
-	x.rootNode.pid = pid
+	x.rootNode.pid.Store(pid)
 	x.rootNode.id = id
 	x.rootNode.name = name
 	x.pids[id] = x.rootNode
@@ -165,7 +170,6 @@ func (x *tree) addNodeLocked(parent, pid *PID) error {
 
 	name := pid.Name()
 	childNode := &pidNode{
-		pid:         pid,
 		parentNode:  parentNode,
 		id:          id,
 		name:        name,
@@ -173,6 +177,7 @@ func (x *tree) addNodeLocked(parent, pid *PID) error {
 		watchees:    make(map[string]*PID),
 		descendants: make(map[string]*pidNode),
 	}
+	childNode.pid.Store(pid)
 
 	parentNode.descendants[id] = childNode
 	parentNode.watchees[id] = pid
@@ -184,16 +189,9 @@ func (x *tree) addNodeLocked(parent, pid *PID) error {
 	return nil
 }
 
-// attachNode links an existing pid under the given parent.
+// attachNodeLocked links an existing pid under the given parent.
 // It reestablishes parent/child and watcher/watchee relationships without
 // creating a new node or changing the tree size.
-func (x *tree) attachNode(parent, pid *PID) error {
-	x.mu.Lock()
-	defer x.mu.Unlock()
-	return x.attachNodeLocked(parent, pid)
-}
-
-// attachNodeLocked is the lock-free core of attachNode.
 // The caller MUST hold x.mu (write).
 func (x *tree) attachNodeLocked(parent, pid *PID) error {
 	if pid == nil {
@@ -376,7 +374,7 @@ func (x *tree) deleteNode(pid *PID) {
 	// Process nodes in reverse order so children handled before parents.
 	for i := len(post) - 1; i >= 0; i-- {
 		n := post[i]
-		if n.pid == nil {
+		if n.pid.Load() == nil {
 			continue
 		}
 
@@ -408,7 +406,7 @@ func (x *tree) deleteNode(pid *PID) {
 			delete(x.names, n.name)
 		}
 		n.parentNode = nil
-		n.pid = nil
+		n.pid.Store(nil)
 		x.counter.Dec()
 	}
 }
@@ -477,7 +475,7 @@ func (x *tree) siblings(pid *PID) []*PID {
 	}
 	sibs := make([]*PID, 0, size-1)
 	for _, s := range parentNode.descendants {
-		if sp := s.pid; sp != nil && !sp.Equals(pid) {
+		if sp := s.pid.Load(); sp != nil && !sp.Equals(pid) {
 			sibs = append(sibs, sp)
 		}
 	}
@@ -507,7 +505,7 @@ func (x *tree) children(pid *PID) []*PID {
 
 	result := make([]*PID, 0, len(node.descendants))
 	for _, child := range node.descendants {
-		if cp := child.pid; cp != nil {
+		if cp := child.pid.Load(); cp != nil {
 			result = append(result, cp)
 		}
 	}
@@ -552,7 +550,7 @@ func (x *tree) descendants(pid *PID) []*PID {
 		if n == nil {
 			continue
 		}
-		if p := n.pid; p != nil {
+		if p := n.pid.Load(); p != nil {
 			result = append(result, p)
 		}
 		for _, c := range n.descendants {
@@ -592,7 +590,7 @@ func (x *tree) root() (*PID, bool) {
 	if x.rootNode == nil {
 		return nil, false
 	}
-	p := x.rootNode.pid
+	p := x.rootNode.pid.Load()
 	if p == nil {
 		return nil, false
 	}
@@ -622,7 +620,7 @@ func (x *tree) parent(pid *PID) (*PID, bool) {
 	if node.parentNode == nil {
 		return nil, false
 	}
-	pp := node.parentNode.pid
+	pp := node.parentNode.pid.Load()
 	if pp == nil {
 		return nil, false
 	}
