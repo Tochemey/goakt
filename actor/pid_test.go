@@ -5542,7 +5542,6 @@ func TestPIDDoReceiveDuringShutdown(t *testing.T) {
 		require.NotNil(t, sys)
 
 		require.NoError(t, sys.Start(ctx))
-		defer func() { _ = sys.Stop(ctx) }()
 
 		pause.For(time.Second)
 
@@ -5553,20 +5552,21 @@ func TestPIDDoReceiveDuringShutdown(t *testing.T) {
 
 		pause.For(time.Second)
 
-		// Create a mock actorSystem with shuttingDown set to true
-		mockSys := &actorSystem{}
-		mockSys.shuttingDown.Store(true)
-		mockSys.logger = log.DiscardLogger
+		// Simulate system shutdown by marking the real actor system as shutting down.
+		// Using the real system avoids data races: shuttingDown is an atomic.Bool,
+		// and all system internals (tree, mailbox, etc.) remain fully valid for
+		// background goroutines that process the enqueued messages.
+		realSys := sys.(*actorSystem)
+		realSys.shuttingDown.Store(true)
+		defer func() {
+			realSys.shuttingDown.Store(false)
+			_ = sys.Stop(ctx)
+		}()
 
-		// Set the mock system on the PID
-		pid.fieldsLocker.Lock()
-		originalSys := pid.actorSystem
-		pid.actorSystem = mockSys
-		pid.fieldsLocker.Unlock()
-
-		// Test various system messages that should be allowed
+		// Test various system messages that should be allowed through during shutdown.
+		// PoisonPill is excluded because it triggers actor shutdown as a side effect,
+		// which would affect subsequent iterations of this loop.
 		systemMessages := []proto.Message{
-			new(goaktpb.PoisonPill),
 			new(internalpb.HealthCheckRequest),
 			new(internalpb.Panicking),
 			new(goaktpb.PausePassivation),
@@ -5589,14 +5589,6 @@ func TestPIDDoReceiveDuringShutdown(t *testing.T) {
 				pid.doReceive(receiveContext)
 			}, "System message %T should be allowed during shutdown", sysMsg)
 		}
-
-		// Restore original system
-		pid.fieldsLocker.Lock()
-		pid.actorSystem = originalSys
-		pid.fieldsLocker.Unlock()
-
-		// Clean up
-		pause.For(100 * time.Millisecond)
 	})
 
 	t.Run("With no shutdown check when system not shutting down", func(t *testing.T) {

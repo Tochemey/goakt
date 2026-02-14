@@ -403,7 +403,6 @@ func (pid *PID) Parent() *PID {
 func (pid *PID) Children() []*PID {
 	pid.fieldsLocker.RLock()
 	tree := pid.ActorSystem().tree()
-
 	children := tree.children(pid)
 	cids := make([]*PID, 0, len(children))
 	for _, cid := range children {
@@ -2140,7 +2139,6 @@ func (pid *PID) freeWatchers(ctx context.Context) {
 	logger := pid.logger
 	logger.Debugf("Freeing all Actor %s's watchers...", pid.Name())
 	tree := pid.ActorSystem().tree()
-
 	watchers := tree.watchers(pid)
 	if len(watchers) > 0 {
 		// this call will be fast no need of parallel processing
