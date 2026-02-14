@@ -2900,7 +2900,7 @@ func (pid *PID) healthCheck(ctx context.Context) error {
 }
 
 func (pid *PID) remotingEnabled() bool {
-	if pid.remoting == nil {
+	if pid == nil || pid.remoting == nil {
 		return false
 	}
 

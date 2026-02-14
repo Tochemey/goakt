@@ -20,8 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-//go:build !linux && !windows
-// +build !linux,!windows
+//go:build !linux && !windows && !darwin
+// +build !linux,!windows,!darwin
 
 package net
 
