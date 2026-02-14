@@ -523,20 +523,29 @@ func (gctx *GrainContext) build(ctx context.Context, pid *grainPID, actorSystem 
 	gctx.synchronous = synchronous
 	gctx.pid = pid
 
+	// Reset CAS guard so Response()/NoErr() succeed for the new message.
+	gctx.responseClosed.Store(false)
+
 	if synchronous {
 		gctx.response = getResponseChannel()
+	} else {
+		gctx.response = nil
 	}
 
 	return gctx
 }
 
-// reset resets the fields of GrainContext.
+// reset clears all fields so the GrainContext can be returned to the pool.
+// Nil-ing pointer / interface fields breaks reference chains and lets the GC
+// collect the objects they pointed to while the context sits idle in the pool.
 func (gctx *GrainContext) reset() {
-	var id *GrainIdentity
+	gctx.ctx = nil
+	gctx.self = nil
+	gctx.actorSystem = nil
 	gctx.message = nil
-	gctx.self = id
-	gctx.err = nil
 	gctx.response = nil
+	gctx.err = nil
+	gctx.synchronous = false
 	gctx.pid = nil
 	gctx.responseClosed.Store(false)
 }

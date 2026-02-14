@@ -1654,6 +1654,12 @@ func (pid *PID) process() {
 			if !pid.mailbox.IsEmpty() && pid.processing.CompareAndSwap(idle, busy) {
 				continue
 			}
+
+			// Release the last processed context before exiting so it is
+			// returned to the pool instead of leaking until the next GC cycle.
+			if received != nil {
+				releaseContext(received)
+			}
 			return
 		}
 	}()

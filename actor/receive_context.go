@@ -824,13 +824,13 @@ func (rctx *ReceiveContext) build(ctx context.Context, from, to *PID, message pr
 //
 // This is an internal optimization to reduce allocations during message dispatch.
 func (rctx *ReceiveContext) reset() {
-	var pid *PID
-	rctx.message = nil
-	rctx.self = pid
-	rctx.sender = pid
-	rctx.err = nil
 	rctx.ctx = nil
+	rctx.message = nil
+	rctx.self = nil
+	rctx.sender = nil
+	rctx.remoteSender = nil
 	rctx.response = nil
+	rctx.err = nil
 	rctx.responseClosed.Store(false)
 	rctx.requestID = ""
 	rctx.requestReplyTo = ""
