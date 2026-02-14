@@ -23,6 +23,7 @@
 package net
 
 import (
+	"io"
 	"net"
 	"testing"
 	"time"
@@ -81,11 +82,11 @@ func TestBrotliConnWrapper_EndToEnd(t *testing.T) {
 			serverReceived <- nil
 			return
 		}
-		buf := make([]byte, 256)
-		n, _ := serverConn.Read(buf) //nolint:errcheck // reads until client disconnects
-		data := make([]byte, n)
-		copy(data, buf[:n])
-		_, _ = serverConn.Write(buf[:n]) //nolint:errcheck // best-effort echo
+		// A single Read on a compressed stream may return partial data;
+		// use ReadFull to collect all expected bytes.
+		data := make([]byte, len(payload))
+		_, _ = io.ReadFull(serverConn, data) //nolint:errcheck // test helper
+		_, _ = serverConn.Write(data)        //nolint:errcheck // best-effort echo
 		serverReceived <- data
 		// Wait for client to finish reading before closing to ensure all
 		// compressed data is flushed through TCP.
@@ -102,11 +103,13 @@ func TestBrotliConnWrapper_EndToEnd(t *testing.T) {
 	_, err = clientConn.Write(payload)
 	require.NoError(t, err)
 
-	buf := make([]byte, 256)
+	// Read the echo — compressed streams may return partial data per Read,
+	// so use ReadFull to collect all expected bytes.
+	echoBuf := make([]byte, len(payload))
 	require.NoError(t, clientConn.SetReadDeadline(time.Now().Add(2*time.Second)))
-	n, err := clientConn.Read(buf)
+	_, err = io.ReadFull(clientConn, echoBuf)
 	require.NoError(t, err)
-	require.Equal(t, payload, buf[:n])
+	require.Equal(t, payload, echoBuf)
 
 	require.NoError(t, clientConn.Close())
 
@@ -121,6 +124,7 @@ func TestBrotliConnWrapper_MultipleWrapReuse(t *testing.T) {
 		listener, err := net.Listen("tcp", "127.0.0.1:0")
 		require.NoError(t, err)
 
+		payload := []byte("brotli reuse test")
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
@@ -133,10 +137,11 @@ func TestBrotliConnWrapper_MultipleWrapReuse(t *testing.T) {
 				_ = conn.Close() // Close error intentionally ignored — wrapper setup already failed.
 				return
 			}
-			buf := make([]byte, 64)
-			n, _ := serverConn.Read(buf)     //nolint:errcheck // reads until client disconnects
-			_, _ = serverConn.Write(buf[:n]) //nolint:errcheck // best-effort echo
-			_ = serverConn.Close()           // Close error intentionally ignored — test cleanup.
+			data := make([]byte, len(payload))
+			_, _ = io.ReadFull(serverConn, data) //nolint:errcheck // test helper
+			_, _ = serverConn.Write(data)        //nolint:errcheck // best-effort echo
+			pause.For(50 * time.Millisecond)
+			_ = serverConn.Close() // Close error intentionally ignored — test cleanup.
 		}()
 
 		clientRaw, err := net.Dial("tcp", listener.Addr().String())
@@ -145,15 +150,14 @@ func TestBrotliConnWrapper_MultipleWrapReuse(t *testing.T) {
 		clientConn, err := wrapper.Wrap(clientRaw)
 		require.NoError(t, err)
 
-		payload := []byte("brotli reuse test")
 		_, err = clientConn.Write(payload)
 		require.NoError(t, err)
 
-		buf := make([]byte, 64)
+		echoBuf := make([]byte, len(payload))
 		require.NoError(t, clientConn.SetReadDeadline(time.Now().Add(2*time.Second)))
-		n, err := clientConn.Read(buf)
+		_, err = io.ReadFull(clientConn, echoBuf)
 		require.NoError(t, err)
-		require.Equal(t, payload, buf[:n])
+		require.Equal(t, payload, echoBuf)
 
 		require.NoError(t, clientConn.Close())
 		<-done
