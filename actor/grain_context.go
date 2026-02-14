@@ -72,15 +72,15 @@ func releaseGrainContext(ctx *GrainContext) {
 //	    }
 //	}
 type GrainContext struct {
-	ctx             context.Context
-	self            *GrainIdentity
-	actorSystem     ActorSystem
-	message         proto.Message
-	response        chan proto.Message
-	err             chan error
-	synchronous     bool
-	pid             *grainPID
-	responseClosed  atomic.Bool
+	ctx            context.Context
+	self           *GrainIdentity
+	actorSystem    ActorSystem
+	message        proto.Message
+	response       chan proto.Message
+	err            chan error
+	synchronous    bool
+	pid            *grainPID
+	responseClosed atomic.Bool
 }
 
 // Context returns the underlying context associated with the GrainContext.
