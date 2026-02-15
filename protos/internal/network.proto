@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package internalpb;
+
+import "google/protobuf/any.proto";
+
+option go_package = "github.com/tochemey/goakt/v3/internal/internalpb;internalpb";
+
+enum Code {
+  CODE_INTERNAL = 0;
+  CODE_NOT_FOUND = 1;
+  CODE_ALREADY_EXISTS = 2;
+  CODE_INVALID_ARGUMENT = 3;
+  CODE_UNAVAILABLE = 4;
+  CODE_FAILED_PRECONDITION = 5;
+  CODE_INTERNAL_ERROR = 6;
+  CODE_DEADLINE_EXCEEDED = 7;
+  CODE_RESOURCE_EXHAUSTED = 8;
+  CODE_CANCELED = 9;
+  CODE_UNKNOWN = 10;
+}
+
+message Error {
+  Code code = 1;
+  string message = 2;
+  string stack_trace = 3;
+  google.protobuf.Any details = 4;
+}

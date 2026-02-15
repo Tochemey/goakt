@@ -25,9 +25,9 @@ package actor
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
+	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v3/errors"
@@ -37,22 +37,30 @@ import (
 	"github.com/tochemey/goakt/v3/log"
 )
 
-// pool holds a pool of ReceiveContext
-var grainContextPool = sync.Pool{
-	New: func() any {
-		return new(GrainContext)
-	},
-}
+// grainContextCh is a channel-based bounded pool for GrainContext objects.
+// Unlike sync.Pool, items survive GC cycles, eliminating the cross-P
+// thrashing and GC-clearing cycle that dominates allocation overhead.
+var grainContextCh = make(chan *GrainContext, 512)
 
-// getContext retrieves a message from the pool
+// getGrainContext retrieves a GrainContext from the channel-based pool.
+// Falls back to heap allocation if the pool is empty.
 func getGrainContext() *GrainContext {
-	return grainContextPool.Get().(*GrainContext)
+	select {
+	case ctx := <-grainContextCh:
+		return ctx
+	default:
+		return new(GrainContext)
+	}
 }
 
-// releaseContext sends the message context back to the pool
+// releaseGrainContext returns a GrainContext to the channel-based pool.
+// If the pool is full, the context is dropped for GC collection.
 func releaseGrainContext(ctx *GrainContext) {
 	ctx.reset()
-	grainContextPool.Put(ctx)
+	select {
+	case grainContextCh <- ctx:
+	default:
+	}
 }
 
 // GrainContext provides contextual information and operations
@@ -71,14 +79,15 @@ func releaseGrainContext(ctx *GrainContext) {
 //	    }
 //	}
 type GrainContext struct {
-	ctx         context.Context
-	self        *GrainIdentity
-	actorSystem ActorSystem
-	message     proto.Message
-	response    chan proto.Message
-	err         chan error
-	synchronous bool
-	pid         *grainPID
+	ctx            context.Context
+	self           *GrainIdentity
+	actorSystem    ActorSystem
+	message        proto.Message
+	response       chan proto.Message
+	err            chan error
+	synchronous    bool
+	pid            *grainPID
+	responseClosed atomic.Bool
 }
 
 // Context returns the underlying context associated with the GrainContext.
@@ -171,16 +180,41 @@ func (gctx *GrainContext) Err(err error) {
 //	    }
 //	}
 func (gctx *GrainContext) NoErr() {
-	// No error to report
 	if gctx.synchronous {
-		gctx.response <- nil
+		// For Ask-based replies, guard against late responses after the caller timed out.
+		// This prevents pooled response channels from receiving stale replies that could
+		// be consumed by a later Ask call.
+		if !gctx.responseClosed.CompareAndSwap(false, true) {
+			return
+		}
+		// Signal success by sending nil on the response channel only.
+		// We must NOT also send on gctx.err because the caller (localSend)
+		// picks a single channel from its select and then drains+pools the
+		// other. If the scheduler preempts us between the two sends, the
+		// second value lands on a channel that is already back in the pool,
+		// poisoning the next caller with a stale nil.
+		select {
+		case gctx.response <- nil:
+		default:
+		}
+		return
 	}
+	// Asynchronous (Tell) path: only the error channel is used.
 	gctx.err <- nil
 }
 
 // Response sets the message response
 func (gctx *GrainContext) Response(resp proto.Message) {
-	gctx.response <- resp
+	// For Ask-based replies, guard against late responses after the caller timed out.
+	// This prevents pooled response channels from receiving stale replies that could
+	// be consumed by a later Ask call.
+	if !gctx.responseClosed.CompareAndSwap(false, true) {
+		return
+	}
+	select {
+	case gctx.response <- resp:
+	default:
+	}
 }
 
 // Unhandled marks the currently received message as unhandled by the Grain.
@@ -503,19 +537,31 @@ func (gctx *GrainContext) build(ctx context.Context, pid *grainPID, actorSystem 
 	gctx.synchronous = synchronous
 	gctx.pid = pid
 
+	// Reset CAS guard so Response()/NoErr() succeed for the new message.
+	gctx.responseClosed.Store(false)
+
 	if synchronous {
 		gctx.response = getResponseChannel()
+	} else {
+		gctx.response = nil
 	}
 
 	return gctx
 }
 
-// reset resets the fields of GrainContext.
+// reset clears all fields so the GrainContext can be returned to the pool.
+// Nil-ing pointer / interface fields breaks reference chains and lets the GC
+// collect the objects they pointed to while the context sits idle in the pool.
 func (gctx *GrainContext) reset() {
-	var id *GrainIdentity
+	gctx.ctx = nil
+	gctx.self = nil
+	gctx.actorSystem = nil
 	gctx.message = nil
-	gctx.self = id
-	gctx.err = nil
 	gctx.response = nil
+	gctx.err = nil
+	gctx.synchronous = false
 	gctx.pid = nil
+	// Note: responseClosed is not reset here because build() always sets it
+	// to false for the next message. Avoiding this atomic store saves ~5ns
+	// per message on the release path.
 }

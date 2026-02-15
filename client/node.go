@@ -24,11 +24,9 @@ package client
 
 import (
 	"net"
-	nethttp "net/http"
 	"strconv"
 	"sync"
 
-	"github.com/tochemey/goakt/v3/internal/http"
 	"github.com/tochemey/goakt/v3/internal/locker"
 	"github.com/tochemey/goakt/v3/internal/validation"
 	"github.com/tochemey/goakt/v3/remote"
@@ -107,14 +105,6 @@ func (n *Node) Validate() error {
 	return validation.NewTCPAddressValidator(address).Validate()
 }
 
-// HTTPClient returns the underlying http client for the given node
-func (n *Node) HTTPClient() *nethttp.Client {
-	n.mutex.RLock()
-	client := n.remoting.HTTPClient()
-	n.mutex.RUnlock()
-	return client
-}
-
 // Remoting returns the remoting instance
 func (n *Node) Remoting() remote.Remoting {
 	n.mutex.RLock()
@@ -123,22 +113,8 @@ func (n *Node) Remoting() remote.Remoting {
 	return remoting
 }
 
-// HTTPEndPoint returns the node remote endpoint
-func (n *Node) HTTPEndPoint() string {
-	n.mutex.RLock()
-	host, p, _ := net.SplitHostPort(n.address)
-	port, _ := strconv.Atoi(p)
-	tlsConfig := n.remoting.TLSConfig()
-	n.mutex.RUnlock()
-	if tlsConfig != nil {
-		return http.URLs(host, port)
-	}
-	return http.URL(host, port)
-}
-
-// Free closes the underlying http client connection of the given node
+// Free closes the underlying remoting client connections of the given node
 func (n *Node) Free() {
-	n.HTTPClient().CloseIdleConnections()
 	n.Remoting().Close()
 }
 

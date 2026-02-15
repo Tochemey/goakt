@@ -283,6 +283,12 @@ func (pid *grainPID) process() {
 				continue
 			}
 
+			// Release the last processed context before exiting so it is
+			// returned to the pool instead of leaking until the next GC cycle.
+			if grainContext != nil {
+				releaseGrainContext(grainContext)
+			}
+
 			return
 		}
 	}()

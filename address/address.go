@@ -79,11 +79,12 @@ var zeroAddress = &Address{}
 // protobuf Address. Validation treats the zero address as valid to allow it to be
 // used as a sentinel in message envelopes and internal signaling.
 type Address struct {
-	host   string
-	port   int
-	name   string
-	system string
-	parent *Address
+	host      string
+	port      int
+	name      string
+	system    string
+	parent    *Address
+	cachedStr string // lazily computed by String(); safe because fields are immutable after construction
 }
 
 var _ validation.Validator = (*Address)(nil)
@@ -226,6 +227,12 @@ func (x *Address) String() string {
 		return ""
 	}
 
+	// Return cached result if available. Address fields are immutable after
+	// construction, so the string never changes.
+	if x.cachedStr != "" {
+		return x.cachedStr
+	}
+
 	system := x.System()
 	host := x.Host()
 	name := x.Name()
@@ -259,7 +266,8 @@ func (x *Address) String() string {
 	}
 	_, _ = builder.WriteString(name)
 
-	return builder.String()
+	x.cachedStr = builder.String()
+	return x.cachedStr
 }
 
 // HostPort returns the "host:port" portion of the Address.

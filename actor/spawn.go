@@ -32,9 +32,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
-	"connectrpc.com/connect"
 	"github.com/flowchartsman/retry"
 	"github.com/google/uuid"
 
@@ -526,8 +526,12 @@ func shouldRetrySpawnSingleton(err error) bool {
 		return true
 	}
 
-	code := connect.CodeOf(err)
-	return code == connect.CodeUnavailable || code == connect.CodeDeadlineExceeded
+	// Retry on connection refused — the leader may be restarting.
+	if errors.Is(err, syscall.ECONNREFUSED) {
+		return true
+	}
+
+	return false
 }
 
 // isSingletonKeyRegistered reports whether singletonKey (kind or kind::role) is present in cluster state.

@@ -480,6 +480,7 @@ func TestControlPlaneWatchContextCancel(t *testing.T) {
 	case _, ok := <-ch:
 		if ok {
 			// May receive some events, drain them
+			// nolint: revive
 			for range ch {
 			}
 		}

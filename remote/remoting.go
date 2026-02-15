@@ -27,12 +27,13 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"net"
 	nethttp "net/http"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
-	"connectrpc.com/connect"
-	"go.akshayshah.org/connectproto"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -40,20 +41,15 @@ import (
 	"github.com/tochemey/goakt/v3/address"
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/internal/codec"
-	"github.com/tochemey/goakt/v3/internal/compression/brotli"
-	"github.com/tochemey/goakt/v3/internal/compression/zstd"
-	"github.com/tochemey/goakt/v3/internal/http"
 	"github.com/tochemey/goakt/v3/internal/id"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
+	inet "github.com/tochemey/goakt/v3/internal/net"
 	"github.com/tochemey/goakt/v3/internal/pointer"
-	"github.com/tochemey/goakt/v3/internal/quorum"
-	"github.com/tochemey/goakt/v3/internal/size"
 	"github.com/tochemey/goakt/v3/internal/strconvx"
 	"github.com/tochemey/goakt/v3/internal/xsync"
 )
 
-const DefaultMaxReadFrameSize = 16 * size.MB
+const DefaultMaxReadFrameSize = 16 * 1024 * 1024 // 16 MiB
 
 // Remoting provides the client-side API surface to interact with actors running
 // on remote nodes of a Go-Akt cluster. It encapsulates transport configuration
@@ -306,33 +302,21 @@ type Remoting interface {
 	// Note: The grain must already be activated, or the grain kind must be registered on the remote actor system using RegisterGrainKind.
 	RemoteAskGrain(ctx context.Context, host string, port int, grainRequest *GrainRequest, message proto.Message, timeout time.Duration) (response *anypb.Any, err error)
 
-	// HTTPClient returns the underlying net/http.Client used by this instance.
+	// NetClient returns a cached or newly created net client for the endpoint.
+	// The returned client maintains its own connection pool and should NOT be closed by
+	// callers — it lives for the lifetime of the Remoting instance.
 	//
-	// The returned client reflects the TLS, compression, and frame size
-	// configuration applied to the Remoting instance. Modifying the client while
-	// requests are in flight may have undefined effects; prefer configuring via
-	// RemotingOptions at construction time.
-	HTTPClient() *nethttp.Client
+	// This method is thread-safe and uses double-checked locking for initialization.
+	// Advanced use only: for custom net operations not covered by the standard interface.
+	NetClient(host string, port int) *inet.Client
 
-	// MaxReadFrameSize reports the maximum frame size (in bytes) enforced by the
-	// client for both reading responses and sending requests. Values are applied
-	// to the Connect client via WithReadMaxBytes and WithSendMaxBytes.
-	MaxReadFrameSize() int
-
-	// Close releases resources held by the client, such as idle HTTP
-	// connections. Close does not cancel in-flight RPCs; use context cancellation
-	// for that.
+	// Close releases resources held by the client, such as idle TCP connections
+	// and connection pools. Close does not cancel in-flight requests; use context
+	// cancellation for that.
 	Close()
 
-	// RemotingServiceClient constructs a typed Connect client for the target
-	// host and port, honoring the instance's TLS, compression, and framing
-	// configuration. This is primarily intended for advanced/extension scenarios
-	// where direct access to RPC methods is needed.
-	RemotingServiceClient(host string, port int) internalpbconnect.RemotingServiceClient
-
 	// Compression returns the payload compression strategy configured on this
-	// client. This governs both the content encoding offered for responses and,
-	// where supported, the encoding used for outbound requests.
+	// client. This governs the content encoding used for both requests and responses.
 	Compression() Compression
 
 	// TLSConfig returns the TLS configuration used by this client, if any. A
@@ -357,13 +341,45 @@ func WithRemotingTLS(tlsConfig *tls.Config) RemotingOption {
 	}
 }
 
-// WithRemotingMaxReadFameSize sets the maximum frame size, in bytes, used when
-// sending or receiving data over the remoting transport. The configured value is
-// applied symmetrically to both read and write limits and is passed through to
-// the underlying Connect client.
-func WithRemotingMaxReadFameSize(size int) RemotingOption {
+// WithRemotingMaxIdleConns sets the connection pool size per remote endpoint.
+// Higher values improve throughput under high concurrency at the cost of more
+// file descriptors. Default: 8 connections per endpoint.
+func WithRemotingMaxIdleConns(n int) RemotingOption {
 	return func(r *remoting) {
-		r.maxReadFrameSize = size
+		if n > 0 {
+			r.maxIdleConns = n
+		}
+	}
+}
+
+// WithRemotingIdleTimeout sets how long pooled connections remain idle before
+// eviction. Longer timeouts improve connection reuse but consume more resources.
+// Default: 30 seconds.
+func WithRemotingIdleTimeout(d time.Duration) RemotingOption {
+	return func(r *remoting) {
+		if d > 0 {
+			r.idleTimeout = d
+		}
+	}
+}
+
+// WithRemotingDialTimeout sets the timeout for establishing new TCP connections.
+// Default: 5 seconds.
+func WithRemotingDialTimeout(d time.Duration) RemotingOption {
+	return func(r *remoting) {
+		if d > 0 {
+			r.dialTimeout = d
+		}
+	}
+}
+
+// WithRemotingKeepAlive sets the TCP keep-alive interval for idle connections.
+// This helps detect broken connections earlier. Default: 15 seconds.
+func WithRemotingKeepAlive(d time.Duration) RemotingOption {
+	return func(r *remoting) {
+		if d > 0 {
+			r.keepAlive = d
+		}
 	}
 }
 
@@ -396,67 +412,221 @@ func WithRemotingContextPropagator(propagator ContextPropagator) RemotingOption 
 	}
 }
 
-// remoting is the default Remoting implementation backed by Connect RPC
-// clients. It encapsulates transport setup, compression, and TLS configuration
-// required to reach remote actor systems.
+// remoting is the default Remoting implementation backed by proto TCP
+// clients. It encapsulates transport setup, compression, connection pooling,
+// and TLS configuration required to reach remote actor systems.
 type remoting struct {
-	httpClient        *nethttp.Client
+	// Client configuration
 	tlsConfig         *tls.Config
-	maxReadFrameSize  int
 	compression       Compression
 	contextPropagator ContextPropagator
-	clientFactory     func(host string, port int) internalpbconnect.RemotingServiceClient
 
-	// clientCache provides thread-safe caching of RemotingServiceClient instances
-	// keyed by "host:port" to avoid repeated client creation overhead. This cache
-	// is populated lazily on first access and persists for the lifetime of the
-	// remoting instance, significantly improving performance for repeated calls
-	// to the same endpoint.
+	// Connection pool settings
+	maxIdleConns int           // Pool size per endpoint (default: 8)
+	idleTimeout  time.Duration // Connection idle timeout (default: 30s)
+	dialTimeout  time.Duration // Dial timeout (default: 5s)
+	keepAlive    time.Duration // TCP keep-alive (default: 15s)
+
+	// Client factory and cache
+	clientFactory func(host string, port int) *inet.Client
+	clientMu      sync.RWMutex // Protects clientCache during initialization
+
+	// clientCache provides thread-safe caching of inet.Client instances
+	// keyed by "host:port". Each client maintains its own connection pool
+	// for maximum performance. This cache is populated lazily on first access
+	// and persists for the lifetime of the remoting instance.
 	//
-	// Uses xsync.Map for type safety, deterministic behavior, and better testability.
-	// The RWMutex-based implementation provides predictable cache behavior while
-	// maintaining excellent performance for the typical cache size (small number of
-	// unique endpoints per remoting instance).
-	clientCache *xsync.Map[string, internalpbconnect.RemotingServiceClient]
+	// Uses xsync.Map for type safety and lock-free reads in the common path.
+	clientCache *xsync.Map[string, *inet.Client]
 }
 
 var _ Remoting = (*remoting)(nil)
 
 // NewRemoting constructs a Remoting client configured with the supplied
-// options. By default, the returned client uses an insecure HTTP transport with
-// ZstdCompression enabled for optimal performance and enforces the DefaultMaxReadFrameSize
-// limit. Custom options may enable TLS, change the frame size, or select a different
-// compression algorithm.
+// options. By default, the returned client uses an insecure TCP transport with
+// connection pooling (8 connections per endpoint) and Zstd compression.
+// Custom options may enable TLS, adjust pool sizes, or change compression.
 //
-// Default compression is set to ZstdCompression for optimal balance between
-// compression ratio and CPU overhead. This significantly reduces bandwidth usage
-// for typical actor message payloads while maintaining low latency.
+// Default settings are optimized for low-latency, high-throughput actor messaging:
+//   - 8 pooled connections per remote endpoint
+//   - 30s idle timeout before connection eviction
+//   - 5s dial timeout for new connections
+//   - 15s TCP keep-alive for detecting broken connections
+//   - Zstd compression (matches server default in remote.Config)
 //
-// Call Close when the client is no longer needed to avoid leaking idle socket
-// connections.
+// Call Close when the client is no longer needed to avoid leaking TCP connections.
 func NewRemoting(opts ...RemotingOption) Remoting {
 	r := &remoting{
-		maxReadFrameSize: DefaultMaxReadFrameSize,
-		// Use ZstdCompression by default for optimal performance. Zstd provides
-		// excellent compression ratios with lower CPU overhead compared to gzip,
-		// making it ideal for high-frequency remoting traffic. Users can override
-		// this via WithRemotingCompression if needed.
-		compression: ZstdCompression,
-		clientCache: xsync.NewMap[string, internalpbconnect.RemotingServiceClient](),
+		// Performance defaults based on benchmarks
+		maxIdleConns: 8,                // 8 pooled connections per endpoint
+		idleTimeout:  30 * time.Second, // 30s before eviction
+		dialTimeout:  5 * time.Second,  // 5s dial timeout
+		keepAlive:    15 * time.Second, // 15s TCP keep-alive
+		compression:  ZstdCompression,  // Zstd compression (matches server default in remote.Config)
+		clientCache:  xsync.NewMap[string, *inet.Client](),
 	}
 
-	// apply the options
+	// Apply options
 	for _, opt := range opts {
 		opt(r)
 	}
 
-	if r.tlsConfig != nil {
-		r.httpClient = http.NewHTTPSClient(r.tlsConfig, uint32(r.maxReadFrameSize)) // nolint
-	} else {
-		r.httpClient = http.NewHTTPClient(uint32(r.maxReadFrameSize))
+	// Set default factory if not overridden (for testing)
+	if r.clientFactory == nil {
+		r.clientFactory = r.newNetClient
 	}
 
 	return r
+}
+
+// NetClient returns a cached or newly created net client for the endpoint.
+// The returned client maintains its own connection pool and should NOT be closed by
+// callers — it lives for the lifetime of the Remoting instance.
+//
+// This method is thread-safe and uses double-checked locking for initialization.
+func (r *remoting) NetClient(host string, port int) *inet.Client {
+	cacheKey := fmt.Sprintf("%s:%d", host, port)
+
+	// Fast path: return cached client (lock-free read)
+	if cached, ok := r.clientCache.Get(cacheKey); ok {
+		return cached
+	}
+
+	// Slow path: create new client (rare, happens once per endpoint)
+	r.clientMu.Lock()
+	defer r.clientMu.Unlock()
+
+	// Double-check after acquiring lock
+	if cached, ok := r.clientCache.Get(cacheKey); ok {
+		return cached
+	}
+
+	client := r.clientFactory(host, port)
+	r.clientCache.Set(cacheKey, client)
+	return client
+}
+
+// newNetClient creates a new net client with connection pooling.
+// This is the default factory used by NetClient.
+func (r *remoting) newNetClient(host string, port int) *inet.Client {
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
+
+	opts := []inet.ClientOption{
+		inet.WithMaxIdleConns(r.maxIdleConns),
+		inet.WithIdleTimeout(r.idleTimeout),
+		inet.WithDialTimeout(r.dialTimeout),
+		inet.WithKeepAlive(r.keepAlive),
+	}
+
+	// Add TLS with session caching for connection reuse
+	if r.tlsConfig != nil {
+		tlsConfigClone := r.tlsConfig.Clone()
+		// Enable TLS session cache for faster reconnects
+		if tlsConfigClone.ClientSessionCache == nil {
+			tlsConfigClone.ClientSessionCache = tls.NewLRUClientSessionCache(32)
+		}
+		opts = append(opts, inet.WithTLS(tlsConfigClone))
+	}
+
+	// Add compression wrapper
+	switch r.compression {
+	case BrotliCompression:
+		opts = append(opts, inet.WithClientConnWrapper(inet.NewBrotliConnWrapper()))
+	case ZstdCompression:
+		if wrapper, err := inet.NewZstdConnWrapper(); err == nil {
+			opts = append(opts, inet.WithClientConnWrapper(wrapper))
+		}
+	case GzipCompression:
+		if wrapper, err := inet.NewGzipConnWrapper(); err == nil {
+			opts = append(opts, inet.WithClientConnWrapper(wrapper))
+		}
+	}
+
+	return inet.NewClient(addr, opts...)
+}
+
+// enrichContext adds metadata to context if propagator is configured.
+// This is called once per request and reuses the same context object.
+func (r *remoting) enrichContext(ctx context.Context) (context.Context, error) {
+	// Create proto metadata
+	md := inet.NewMetadata()
+
+	// Add context propagator headers if configured
+	if r.contextPropagator != nil {
+		headers := make(nethttp.Header, 4) // Pre-size for common case (tracing)
+		if err := r.contextPropagator.Inject(ctx, headers); err != nil {
+			return nil, err
+		}
+
+		// Convert headers to metadata
+		for key, values := range headers {
+			if len(values) > 0 {
+				md.Set(key, values[0])
+			}
+		}
+	}
+
+	// Apply deadline from context if present
+	if deadline, ok := ctx.Deadline(); ok {
+		md.SetDeadline(deadline)
+	}
+
+	// Always attach metadata (even if empty, it's a no-op on the wire)
+	return inet.ContextWithMetadata(ctx, md), nil
+}
+
+// checkProtoError examines response and converts proto errors to Go errors.
+// Returns nil if response is a success type.
+func checkProtoError(resp proto.Message) error {
+	errResp, isError := resp.(*internalpb.Error)
+	if !isError {
+		return nil
+	}
+
+	msg := errResp.GetMessage()
+
+	// Fast path: common errors
+	switch errResp.GetCode() {
+	case internalpb.Code_CODE_NOT_FOUND:
+		return gerrors.ErrAddressNotFound
+	case internalpb.Code_CODE_DEADLINE_EXCEEDED:
+		return gerrors.ErrRequestTimeout
+	case internalpb.Code_CODE_UNAVAILABLE:
+		return gerrors.ErrRemoteSendFailure
+	case internalpb.Code_CODE_FAILED_PRECONDITION:
+		return parseFailedPrecondition(msg)
+	case internalpb.Code_CODE_ALREADY_EXISTS:
+		return parseAlreadyExists(msg)
+	case internalpb.Code_CODE_INVALID_ARGUMENT:
+		return fmt.Errorf("invalid argument: %s", msg)
+	case internalpb.Code_CODE_INTERNAL_ERROR:
+		return errors.New(msg)
+	default:
+		return errors.New(msg)
+	}
+}
+
+// parseFailedPrecondition extracts specific errors from message string
+func parseFailedPrecondition(msg string) error {
+	// Use simple string checks to avoid allocations
+	if strings.Contains(msg, gerrors.ErrTypeNotRegistered.Error()) {
+		return gerrors.ErrTypeNotRegistered
+	}
+	if strings.Contains(msg, gerrors.ErrRemotingDisabled.Error()) {
+		return gerrors.ErrRemotingDisabled
+	}
+	if strings.Contains(msg, gerrors.ErrClusterDisabled.Error()) {
+		return gerrors.ErrClusterDisabled
+	}
+	return errors.New(msg)
+}
+
+// parseAlreadyExists determines the specific "already exists" error type
+func parseAlreadyExists(msg string) error {
+	if strings.Contains(msg, "singleton") {
+		return gerrors.ErrSingletonAlreadyExists
+	}
+	return gerrors.ErrActorAlreadyExists
 }
 
 // RemoteActivateGrain requests activation of a grain on the given remote node.
@@ -471,7 +641,7 @@ func NewRemoting(opts ...RemotingOption) Remoting {
 //
 // Errors:
 //   - Transport and context errors.
-//   - Server-side failures surfaced as connect errors (e.g., Unavailable, DeadlineExceeded).
+//   - Server-side failures surfaced as proto errors (e.g., Unavailable, DeadlineExceeded).
 //
 // Note: The grain kind must be registered on the remote actor system using RegisterGrainKind.
 func (r *remoting) RemoteActivateGrain(ctx context.Context, host string, port int, grainRequest *GrainRequest) error {
@@ -480,19 +650,25 @@ func (r *remoting) RemoteActivateGrain(ctx context.Context, host string, port in
 		return err
 	}
 
-	remoteClient := r.RemotingServiceClient(host, port)
-	request := connect.NewRequest(&internalpb.RemoteActivateGrainRequest{
-		Grain: grain,
-	})
-
-	if propagator := r.contextPropagator; propagator != nil {
-		if err := propagator.Inject(ctx, request.Header()); err != nil {
-			return err
-		}
+	// Enrich context with metadata
+	ctx, err = r.enrichContext(ctx)
+	if err != nil {
+		return err
 	}
 
-	_, err = remoteClient.RemoteActivateGrain(ctx, request)
-	return err
+	// Get pooled client
+	client := r.NetClient(host, port)
+	request := &internalpb.RemoteActivateGrainRequest{
+		Grain: grain,
+	}
+
+	// Send request
+	resp, err := client.SendProto(ctx, request)
+	if err != nil {
+		return err
+	}
+
+	return checkProtoError(resp)
 }
 
 // RemoteAskGrain sends a request message to a grain and waits for a reply, subject to the provided timeout and context.
@@ -523,29 +699,36 @@ func (r *remoting) RemoteAskGrain(ctx context.Context, host string, port int, gr
 		return nil, gerrors.NewErrInvalidMessage(err)
 	}
 
-	remoteClient := r.RemotingServiceClient(host, port)
-	request := connect.NewRequest(&internalpb.RemoteAskGrainRequest{
-		Grain:          grain,
-		Message:        marshaled,
-		RequestTimeout: durationpb.New(timeout),
-	})
-
-	if propagator := r.contextPropagator; propagator != nil {
-		if err := propagator.Inject(ctx, request.Header()); err != nil {
-			return nil, err
-		}
-	}
-
-	resp, err := remoteClient.RemoteAskGrain(ctx, request)
+	// Enrich context with metadata
+	ctx, err = r.enrichContext(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	if resp != nil {
-		response = resp.Msg.GetMessage()
+	// Get pooled client
+	client := r.NetClient(host, port)
+	request := &internalpb.RemoteAskGrainRequest{
+		Grain:          grain,
+		Message:        marshaled,
+		RequestTimeout: durationpb.New(timeout),
 	}
 
-	return
+	// Send request
+	resp, err := client.SendProto(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := checkProtoError(resp); err != nil {
+		return nil, err
+	}
+
+	askResp, ok := resp.(*internalpb.RemoteAskGrainResponse)
+	if !ok {
+		return nil, errors.New("invalid response type")
+	}
+
+	return askResp.GetMessage(), nil
 }
 
 // RemoteTellGrain sends a one-way (fire-and-forget) message to a grain.
@@ -575,20 +758,26 @@ func (r *remoting) RemoteTellGrain(ctx context.Context, host string, port int, g
 		return gerrors.NewErrInvalidMessage(err)
 	}
 
-	remoteClient := r.RemotingServiceClient(host, port)
-	request := connect.NewRequest(&internalpb.RemoteTellGrainRequest{
-		Grain:   grain,
-		Message: marshaled,
-	})
-
-	if propagator := r.contextPropagator; propagator != nil {
-		if err := propagator.Inject(ctx, request.Header()); err != nil {
-			return err
-		}
+	// Enrich context with metadata
+	ctx, err = r.enrichContext(ctx)
+	if err != nil {
+		return err
 	}
 
-	_, err = remoteClient.RemoteTellGrain(ctx, request)
-	return err
+	// Get pooled client
+	client := r.NetClient(host, port)
+	request := &internalpb.RemoteTellGrainRequest{
+		Grain:   grain,
+		Message: marshaled,
+	}
+
+	// Send request
+	resp, err := client.SendProto(ctx, request)
+	if err != nil {
+		return err
+	}
+
+	return checkProtoError(resp)
 }
 
 // RemoteTell sends a message to a remote actor without awaiting a reply. The
@@ -606,8 +795,15 @@ func (r *remoting) RemoteTell(ctx context.Context, from, to *address.Address, me
 		return gerrors.NewErrInvalidMessage(err)
 	}
 
-	remoteClient := r.RemotingServiceClient(to.Host(), to.Port())
-	request := connect.NewRequest(&internalpb.RemoteTellRequest{
+	// Enrich context with metadata
+	ctx, err = r.enrichContext(ctx)
+	if err != nil {
+		return err
+	}
+
+	// Get pooled client
+	client := r.NetClient(to.Host(), to.Port())
+	request := &internalpb.RemoteTellRequest{
 		RemoteMessages: []*internalpb.RemoteMessage{
 			{
 				Sender:   from.String(),
@@ -615,16 +811,15 @@ func (r *remoting) RemoteTell(ctx context.Context, from, to *address.Address, me
 				Message:  marshaled,
 			},
 		},
-	})
-
-	if propagator := r.contextPropagator; propagator != nil {
-		if err := propagator.Inject(ctx, request.Header()); err != nil {
-			return err
-		}
 	}
 
-	_, err = remoteClient.RemoteTell(ctx, request)
-	return err
+	// Send request
+	resp, err := client.SendProto(ctx, request)
+	if err != nil {
+		return err
+	}
+
+	return checkProtoError(resp)
 }
 
 // RemoteAsk delivers a request message to a remote actor and waits for the first
@@ -640,8 +835,15 @@ func (r *remoting) RemoteAsk(ctx context.Context, from, to *address.Address, mes
 		return nil, gerrors.NewErrInvalidMessage(err)
 	}
 
-	remoteClient := r.RemotingServiceClient(to.Host(), to.Port())
-	request := connect.NewRequest(&internalpb.RemoteAskRequest{
+	// Enrich context with metadata
+	ctx, err = r.enrichContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get pooled client
+	client := r.NetClient(to.Host(), to.Port())
+	request := &internalpb.RemoteAskRequest{
 		RemoteMessages: []*internalpb.RemoteMessage{
 			{
 				Sender:   from.String(),
@@ -650,27 +852,28 @@ func (r *remoting) RemoteAsk(ctx context.Context, from, to *address.Address, mes
 			},
 		},
 		Timeout: durationpb.New(timeout),
-	})
-
-	if propagator := r.contextPropagator; propagator != nil {
-		if err := propagator.Inject(ctx, request.Header()); err != nil {
-			return nil, err
-		}
 	}
 
-	resp, err := remoteClient.RemoteAsk(ctx, request)
+	// Send request
+	resp, err := client.SendProto(ctx, request)
 	if err != nil {
 		return nil, err
 	}
 
-	if resp != nil {
-		for _, msg := range resp.Msg.GetMessages() {
-			response = msg
-			break
-		}
+	if err := checkProtoError(resp); err != nil {
+		return nil, err
 	}
 
-	return
+	askResp, ok := resp.(*internalpb.RemoteAskResponse)
+	if !ok {
+		return nil, errors.New("invalid response type")
+	}
+
+	if len(askResp.Messages) == 0 {
+		return nil, nil
+	}
+
+	return askResp.Messages[0], nil
 }
 
 // RemoteLookup resolves the address of an actor hosted on a remote node. A
@@ -682,31 +885,41 @@ func (r *remoting) RemoteLookup(ctx context.Context, host string, port int, name
 	if err != nil {
 		return nil, err
 	}
-	remoteClient := r.RemotingServiceClient(host, port)
-	request := connect.NewRequest(
-		&internalpb.RemoteLookupRequest{
-			Host: host,
-			Port: port32,
-			Name: name,
-		},
-	)
 
-	if propagator := r.contextPropagator; propagator != nil {
-		if err := propagator.Inject(ctx, request.Header()); err != nil {
-			return nil, err
-		}
-	}
-
-	response, err := remoteClient.RemoteLookup(ctx, request)
+	// Enrich context with metadata
+	ctx, err = r.enrichContext(ctx)
 	if err != nil {
-		code := connect.CodeOf(err)
-		if code == connect.CodeNotFound {
-			return address.NoSender(), nil
-		}
 		return nil, err
 	}
 
-	return address.Parse(response.Msg.GetAddress())
+	// Get pooled client
+	client := r.NetClient(host, port)
+	request := &internalpb.RemoteLookupRequest{
+		Host: host,
+		Port: port32,
+		Name: name,
+	}
+
+	// Send request
+	resp, err := client.SendProto(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+
+	// Handle NOT_FOUND specially - return NoSender without error
+	if errResp, ok := resp.(*internalpb.Error); ok {
+		if errResp.GetCode() == internalpb.Code_CODE_NOT_FOUND {
+			return address.NoSender(), nil
+		}
+		return nil, checkProtoError(errResp)
+	}
+
+	lookupResp, ok := resp.(*internalpb.RemoteLookupResponse)
+	if !ok {
+		return nil, errors.New("invalid response type")
+	}
+
+	return address.Parse(lookupResp.GetAddress())
 }
 
 // RemoteBatchTell sends multiple asynchronous messages to the same remote actor
@@ -715,7 +928,6 @@ func (r *remoting) RemoteLookup(ctx context.Context, host string, port int, name
 // The call succeeds or fails as a whole at the transport layer; no per-message
 // acknowledgement is returned.
 func (r *remoting) RemoteBatchTell(ctx context.Context, from, to *address.Address, messages []proto.Message) error {
-	remoteClient := r.RemotingServiceClient(to.Host(), to.Port())
 	remoteMessages := make([]*internalpb.RemoteMessage, 0, len(messages))
 	for _, message := range messages {
 		if message != nil {
@@ -731,18 +943,25 @@ func (r *remoting) RemoteBatchTell(ctx context.Context, from, to *address.Addres
 		}
 	}
 
-	req := connect.NewRequest(&internalpb.RemoteTellRequest{
-		RemoteMessages: remoteMessages,
-	})
-
-	if propagator := r.contextPropagator; propagator != nil {
-		if err := propagator.Inject(ctx, req.Header()); err != nil {
-			return err
-		}
+	// Enrich context with metadata
+	ctx, err := r.enrichContext(ctx)
+	if err != nil {
+		return err
 	}
 
-	_, err := remoteClient.RemoteTell(ctx, req)
-	return err
+	// Get pooled client
+	client := r.NetClient(to.Host(), to.Port())
+	request := &internalpb.RemoteTellRequest{
+		RemoteMessages: remoteMessages,
+	}
+
+	// Send request
+	resp, err := client.SendProto(ctx, request)
+	if err != nil {
+		return err
+	}
+
+	return checkProtoError(resp)
 }
 
 // RemoteBatchAsk delivers multiple request messages to a remote actor and
@@ -751,8 +970,6 @@ func (r *remoting) RemoteBatchTell(ctx context.Context, from, to *address.Addres
 // The number and order of responses may not match the requests. If correlation
 // is required, include a correlation ID within your message payloads.
 func (r *remoting) RemoteBatchAsk(ctx context.Context, from, to *address.Address, messages []proto.Message, timeout time.Duration) (responses []*anypb.Any, err error) {
-	remoteClient := r.RemotingServiceClient(to.Host(), to.Port())
-
 	remoteMessages := make([]*internalpb.RemoteMessage, 0, len(messages))
 	for _, message := range messages {
 		if message != nil {
@@ -768,28 +985,35 @@ func (r *remoting) RemoteBatchAsk(ctx context.Context, from, to *address.Address
 		}
 	}
 
-	req := connect.NewRequest(&internalpb.RemoteAskRequest{
-		RemoteMessages: remoteMessages,
-		Timeout:        durationpb.New(timeout),
-	})
-
-	if propagator := r.contextPropagator; propagator != nil {
-		if err := propagator.Inject(ctx, req.Header()); err != nil {
-			return nil, err
-		}
-	}
-
-	resp, err := remoteClient.RemoteAsk(ctx, req)
-
+	// Enrich context with metadata
+	ctx, err = r.enrichContext(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	if resp != nil {
-		responses = append(responses, resp.Msg.GetMessages()...)
+	// Get pooled client
+	client := r.NetClient(to.Host(), to.Port())
+	request := &internalpb.RemoteAskRequest{
+		RemoteMessages: remoteMessages,
+		Timeout:        durationpb.New(timeout),
 	}
 
-	return
+	// Send request
+	resp, err := client.SendProto(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := checkProtoError(resp); err != nil {
+		return nil, err
+	}
+
+	askResp, ok := resp.(*internalpb.RemoteAskResponse)
+	if !ok {
+		return nil, errors.New("invalid response type")
+	}
+
+	return askResp.GetMessages(), nil
 }
 
 // RemoteSpawn creates an actor on a remote node using the provided spawn
@@ -836,34 +1060,36 @@ func (r *remoting) RemoteSpawn(ctx context.Context, host string, port int, spawn
 		reentrancy = codec.EncodeReentrancy(spawnRequest.Reentrancy)
 	}
 
-	remoteClient := r.RemotingServiceClient(host, port)
-	request := connect.NewRequest(
-		&internalpb.RemoteSpawnRequest{
-			Host:                host,
-			Port:                port32,
-			ActorName:           spawnRequest.Name,
-			ActorType:           spawnRequest.Kind,
-			Singleton:           singletonSpec,
-			Relocatable:         spawnRequest.Relocatable,
-			PassivationStrategy: codec.EncodePassivationStrategy(spawnRequest.PassivationStrategy),
-			Dependencies:        dependencies,
-			EnableStash:         spawnRequest.EnableStashing,
-			Role:                spawnRequest.Role,
-			Supervisor:          codec.EncodeSupervisor(spawnRequest.Supervisor),
-			Reentrancy:          reentrancy,
-		},
-	)
-
-	if propagator := r.contextPropagator; propagator != nil {
-		if err := propagator.Inject(ctx, request.Header()); err != nil {
-			return err
-		}
+	// Enrich context with metadata
+	ctx, err = r.enrichContext(ctx)
+	if err != nil {
+		return err
 	}
 
-	if _, err := remoteClient.RemoteSpawn(ctx, request); err != nil {
-		return mapRemoteSpawnError(err)
+	// Get pooled client
+	client := r.NetClient(host, port)
+	request := &internalpb.RemoteSpawnRequest{
+		Host:                host,
+		Port:                port32,
+		ActorName:           spawnRequest.Name,
+		ActorType:           spawnRequest.Kind,
+		Singleton:           singletonSpec,
+		Relocatable:         spawnRequest.Relocatable,
+		PassivationStrategy: codec.EncodePassivationStrategy(spawnRequest.PassivationStrategy),
+		Dependencies:        dependencies,
+		EnableStash:         spawnRequest.EnableStashing,
+		Role:                spawnRequest.Role,
+		Supervisor:          codec.EncodeSupervisor(spawnRequest.Supervisor),
+		Reentrancy:          reentrancy,
 	}
-	return nil
+
+	// Send request
+	resp, err := client.SendProto(ctx, request)
+	if err != nil {
+		return err
+	}
+
+	return checkProtoError(resp)
 }
 
 // RemoteReSpawn requests a restart of an existing actor on the remote node.
@@ -872,30 +1098,35 @@ func (r *remoting) RemoteReSpawn(ctx context.Context, host string, port int, nam
 	if err != nil {
 		return err
 	}
-	remoteClient := r.RemotingServiceClient(host, port)
-	request := connect.NewRequest(
-		&internalpb.RemoteReSpawnRequest{
-			Host: host,
-			Port: port32,
-			Name: name,
-		},
-	)
 
-	if propagator := r.contextPropagator; propagator != nil {
-		if err := propagator.Inject(ctx, request.Header()); err != nil {
-			return err
-		}
-	}
-
-	if _, err := remoteClient.RemoteReSpawn(ctx, request); err != nil {
-		code := connect.CodeOf(err)
-		if code == connect.CodeNotFound {
-			return nil
-		}
+	// Enrich context with metadata
+	ctx, err = r.enrichContext(ctx)
+	if err != nil {
 		return err
 	}
 
-	return nil
+	// Get pooled client
+	client := r.NetClient(host, port)
+	request := &internalpb.RemoteReSpawnRequest{
+		Host: host,
+		Port: port32,
+		Name: name,
+	}
+
+	// Send request
+	resp, err := client.SendProto(ctx, request)
+	if err != nil {
+		return err
+	}
+
+	// Ignore NOT_FOUND errors (actor doesn't exist)
+	if errResp, ok := resp.(*internalpb.Error); ok {
+		if errResp.GetCode() == internalpb.Code_CODE_NOT_FOUND {
+			return nil
+		}
+	}
+
+	return checkProtoError(resp)
 }
 
 // RemoteStop terminates the specified actor on the remote node. Missing actors
@@ -905,30 +1136,35 @@ func (r *remoting) RemoteStop(ctx context.Context, host string, port int, name s
 	if err != nil {
 		return err
 	}
-	remoteClient := r.RemotingServiceClient(host, port)
-	request := connect.NewRequest(
-		&internalpb.RemoteStopRequest{
-			Host: host,
-			Port: port32,
-			Name: name,
-		},
-	)
 
-	if propagator := r.contextPropagator; propagator != nil {
-		if err := propagator.Inject(ctx, request.Header()); err != nil {
-			return err
-		}
-	}
-
-	if _, err := remoteClient.RemoteStop(ctx, request); err != nil {
-		code := connect.CodeOf(err)
-		if code == connect.CodeNotFound {
-			return nil
-		}
+	// Enrich context with metadata
+	ctx, err = r.enrichContext(ctx)
+	if err != nil {
 		return err
 	}
 
-	return nil
+	// Get pooled client
+	client := r.NetClient(host, port)
+	request := &internalpb.RemoteStopRequest{
+		Host: host,
+		Port: port32,
+		Name: name,
+	}
+
+	// Send request
+	resp, err := client.SendProto(ctx, request)
+	if err != nil {
+		return err
+	}
+
+	// Ignore NOT_FOUND errors (actor doesn't exist)
+	if errResp, ok := resp.(*internalpb.Error); ok {
+		if errResp.GetCode() == internalpb.Code_CODE_NOT_FOUND {
+			return nil
+		}
+	}
+
+	return checkProtoError(resp)
 }
 
 // RemoteReinstate reactivates a previously passivated actor on the remote node.
@@ -938,156 +1174,50 @@ func (r *remoting) RemoteReinstate(ctx context.Context, host string, port int, n
 	if err != nil {
 		return err
 	}
-	remoteClient := r.RemotingServiceClient(host, port)
-	request := connect.NewRequest(
-		&internalpb.RemoteReinstateRequest{
-			Host: host,
-			Port: port32,
-			Name: name,
-		},
-	)
 
-	if propagator := r.contextPropagator; propagator != nil {
-		if err := propagator.Inject(ctx, request.Header()); err != nil {
-			return err
-		}
-	}
-
-	if _, err := remoteClient.RemoteReinstate(ctx, request); err != nil {
-		code := connect.CodeOf(err)
-		if code == connect.CodeNotFound {
-			return nil
-		}
+	// Enrich context with metadata
+	ctx, err = r.enrichContext(ctx)
+	if err != nil {
 		return err
 	}
 
-	return nil
+	// Get pooled client
+	client := r.NetClient(host, port)
+	request := &internalpb.RemoteReinstateRequest{
+		Host: host,
+		Port: port32,
+		Name: name,
+	}
+
+	// Send request
+	resp, err := client.SendProto(ctx, request)
+	if err != nil {
+		return err
+	}
+
+	// Ignore NOT_FOUND errors (actor doesn't exist)
+	if errResp, ok := resp.(*internalpb.Error); ok {
+		if errResp.GetCode() == internalpb.Code_CODE_NOT_FOUND {
+			return nil
+		}
+	}
+
+	return checkProtoError(resp)
 }
 
-// HTTPClient exposes the underlying HTTP client used for remoting requests. The
-// returned client reflects the TLS, compression, and frame size options applied
-// to the remoting instance. Avoid mutating the client concurrently with active
-// requests; prefer configuring via options at creation time.
-func (r *remoting) HTTPClient() *nethttp.Client {
-	return r.httpClient
-}
-
-// MaxReadFrameSize reports the maximum frame size enforced by the remoting
-// client for both reads and writes. This value is propagated to Connect via
-// WithReadMaxBytes and WithSendMaxBytes.
-func (r *remoting) MaxReadFrameSize() int {
-	return r.maxReadFrameSize
-}
-
-// Close releases resources held by the remoting client, such as idle HTTP
-// connections. It does not cancel in-flight RPCs; use context cancellation to
-// stop ongoing operations.
+// Close releases resources held by the remoting client, such as idle TCP
+// connections in the connection pools. It does not cancel in-flight requests;
+// use context cancellation to stop ongoing operations.
 //
-// After calling Close, cached clients remain in the cache but will not be
-// used for new connections. The cache is cleared to prevent memory leaks
-// and ensure proper cleanup.
+// After calling Close, the client should not be used for new requests.
 func (r *remoting) Close() {
-	// Close all idle connections in the underlying HTTP client to release
-	// network resources. This prevents connection leaks and ensures proper
-	// cleanup of TCP sockets and file descriptors.
-	r.httpClient.CloseIdleConnections()
+	// Close all pooled clients to release TCP connections and file descriptors
+	r.clientCache.Range(func(_ string, client *inet.Client) {
+		client.Close()
+	})
 
-	// Clear the client cache to release references and allow garbage collection.
-	// While cached clients don't hold connections themselves (connections are
-	// managed by the shared HTTP client), clearing the cache prevents holding
-	// references unnecessarily and ensures a clean shutdown state.
-	// xsync.Map provides Reset() method for efficient cache clearing.
+	// Clear the cache to release references
 	r.clientCache.Reset()
-}
-
-// RemotingServiceClient creates a typed RemotingService client for the target
-// endpoint, applying the remoting client's transport and compression settings.
-// This is primarily for advanced scenarios where direct RPC access is required.
-//
-// The returned client is cached per host:port combination to avoid repeated
-// allocation overhead. Cached clients are reused across all subsequent calls
-// to the same endpoint, significantly improving performance.
-//
-// Thread-safety: This method is safe for concurrent use by multiple goroutines.
-// The internal cache uses xsync.Map for type-safe, deterministic concurrent access.
-func (r *remoting) RemotingServiceClient(host string, port int) internalpbconnect.RemotingServiceClient {
-	// If a custom client factory is set (typically for testing), use it directly
-	// without caching to allow test injection behavior.
-	if r.clientFactory != nil {
-		return r.clientFactory(host, port)
-	}
-
-	// Construct cache key from host and port to uniquely identify the endpoint.
-	// Format: "host:port" ensures proper isolation between different endpoints.
-	cacheKey := fmt.Sprintf("%s:%d", host, port)
-
-	// Attempt to load existing client from cache. xsync.Map.Get uses RWMutex
-	// for thread-safe access, providing deterministic behavior and excellent
-	// performance for the typical cache size (small number of unique endpoints).
-	if cached, ok := r.clientCache.Get(cacheKey); ok {
-		return cached
-	}
-
-	// Cache miss: create new client instance. This is the first call to this
-	// endpoint or the client was evicted from cache (shouldn't happen in normal
-	// operation since cache is never cleared, but safe to handle).
-	client := r.newRemotingServiceClient(host, port)
-
-	// Store client in cache for future reuse. xsync.Map.Set uses RWMutex for
-	// thread-safe writes. If multiple goroutines race to store, the last write
-	// wins, which is acceptable since all clients for the same endpoint are
-	// equivalent. The mutex-based approach provides deterministic behavior
-	// and makes testing straightforward.
-	r.clientCache.Set(cacheKey, client)
-
-	return client
-}
-
-func (r *remoting) setClientFactory(factory func(string, int) internalpbconnect.RemotingServiceClient) {
-	if factory == nil {
-		return
-	}
-	r.clientFactory = factory
-}
-
-func (r *remoting) newRemotingServiceClient(host string, port int) internalpbconnect.RemotingServiceClient {
-	endpoint := http.URL(host, port)
-	if r.tlsConfig != nil {
-		endpoint = http.URLs(host, port)
-	}
-
-	opts := []connect.ClientOption{
-		connectproto.WithBinary(
-			proto.MarshalOptions{},
-			proto.UnmarshalOptions{DiscardUnknown: true},
-		),
-	}
-
-	if r.maxReadFrameSize > 0 {
-		opts = append(opts, connect.WithReadMaxBytes(r.maxReadFrameSize))
-		opts = append(opts, connect.WithSendMaxBytes(r.maxReadFrameSize))
-	}
-
-	switch r.compression {
-	case GzipCompression:
-		// Connect clients send uncompressed requests and ask for gzipped responses by default.
-		// Specifying gzip here enables gzipped requests as well.
-		opts = append(opts, connect.WithSendGzip())
-	case ZstdCompression:
-		opts = append(opts, zstd.WithCompression())
-		opts = append(opts, connect.WithSendCompression(zstd.Name))
-	case BrotliCompression:
-		opts = append(opts, brotli.WithCompression())
-		opts = append(opts, connect.WithSendCompression(brotli.Name))
-	default:
-		// No compression
-	}
-
-	return internalpbconnect.NewRemotingServiceClient(
-		r.httpClient,
-		endpoint,
-		opts...,
-	)
 }
 
 // Compression returns the compression algorithm configured on the remoting
@@ -1139,68 +1269,4 @@ func getGrainFromRequest(host string, port int, grainRequest *GrainRequest) (*in
 	}
 
 	return grain, nil
-}
-
-func mapRemoteSpawnError(err error) error {
-	var connectErr *connect.Error
-	if !errors.As(err, &connectErr) {
-		return err
-	}
-
-	if mapped := mapRemoteSpawnConnectError(connectErr); mapped != nil {
-		return mapped
-	}
-
-	return err
-}
-
-func mapRemoteSpawnConnectError(err *connect.Error) error {
-	switch err.Code() {
-	case connect.CodeFailedPrecondition:
-		return mapRemoteSpawnFailedPrecondition(err)
-	case connect.CodeAlreadyExists:
-		return mapRemoteSpawnAlreadyExists(err)
-	case connect.CodeUnavailable:
-		return mapRemoteSpawnUnavailable(err)
-	default:
-		return nil
-	}
-}
-
-func mapRemoteSpawnFailedPrecondition(err *connect.Error) error {
-	message := err.Message()
-	underlying := err.Unwrap()
-	if matchesConnectError(message, underlying, gerrors.ErrTypeNotRegistered) {
-		return gerrors.ErrTypeNotRegistered
-	}
-
-	if matchesConnectError(message, underlying, gerrors.ErrRemotingDisabled) {
-		return gerrors.ErrRemotingDisabled
-	}
-	return nil
-}
-
-func mapRemoteSpawnAlreadyExists(err *connect.Error) error {
-	message := err.Message()
-	underlying := err.Unwrap()
-	if matchesConnectError(message, underlying, gerrors.ErrSingletonAlreadyExists) {
-		return gerrors.ErrSingletonAlreadyExists
-	}
-
-	if matchesConnectError(message, underlying, gerrors.ErrActorAlreadyExists) {
-		return gerrors.ErrActorAlreadyExists
-	}
-	return nil
-}
-
-func mapRemoteSpawnUnavailable(err *connect.Error) error {
-	underlying := err.Unwrap()
-	if quorum.IsQuorumError(underlying) {
-		return quorum.NormalizeQuorumError(underlying)
-	}
-	return nil
-}
-
-func matchesConnectError(message string, underlying error, target error) bool {
-	return errors.Is(underlying, target) || strings.Contains(message, target.Error())
 }

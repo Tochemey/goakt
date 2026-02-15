@@ -8,8 +8,6 @@
 [![Awesome](https://awesome.re/badge.svg)](https://github.com/avelino/awesome-go)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/9248/badge)](https://www.bestpractices.dev/projects/9248)
 
-
-
 Distributed [Go](https://go.dev/) actor framework to build a reactive and distributed system in golang using
 _**protocol buffers**_ as actor messages.
 
@@ -21,11 +19,12 @@ If you are not familiar with the actor model, the blog post from Brian Storti [h
 Also, check the reference section at the end of the post for more material regarding the actor model.
 
 ## ✨ Features
+
 - **Actor Model**: Build concurrent and distributed systems using the actor model with typed protobuf messages.
 - **Messaging**: Tell/Ask APIs for fire-and-forget or request/response flows.
 - **Reentrancy**: Reentrancy-enabled async request messaging with configurable modes and per-call overrides.
 - **Supervision**: One-for-one/one-for-all strategies, directives, and retry windows for fault tolerance.
-- **Remoting**: Seamless communication between actors across nodes (Connect over HTTP/2).
+- **Remoting**: Seamless communication between actors across nodes over TCP.
 - **Context Propagation**: Pluggable context propagation for request-scoped metadata.
 - **Clustering**: Multiple discovery backends (Consul, etcd, Kubernetes, NATS, mDNS, static).
 - **Location Transparency**: Interact with actors without needing to know their physical location.
@@ -42,6 +41,7 @@ Also, check the reference section at the end of the post for more material regar
 - **Data Center**: Multi-datacenter support with DC-transparent messaging, pluggable control plane (NATS JetStream, Etcd), DC-aware placement (SpawnOn with WithDataCenter), and cross-DC actor/grain communication.
 
 ## 💻 Installation
+
 ```shell
 go get github.com/tochemey/goakt/v3
 ```
@@ -79,8 +79,8 @@ We use [Earthly](https://earthly.dev/get-earthly) for reproducible builds.
 
 Before you start, make sure you have these installed:
 
-* [Docker](https://docs.docker.com/get-started/get-docker/)
-* [Go](https://go.dev/doc/install)
+- [Docker](https://docs.docker.com/get-started/get-docker/)
+- [Go](https://go.dev/doc/install)
 
 ### Getting Started
 
@@ -118,7 +118,6 @@ This framework is used in production by the following projects/companies:
 
 - [Baki Money](https://www.baki.money/): AI-powered Expense Tracking platform that turns receipts into stories...
 - [Event Processor](https://www.v-app.io/iot-builder-3/): Clustered Complex Event Processor (CEP) for IoT data streams.
-
 
 ## 💬 Feedback
 

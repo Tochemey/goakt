@@ -31,9 +31,17 @@ import (
 // CacheLinePadding prevents false sharing between CPU cache lines
 type CacheLinePadding [64]byte
 
-// node returns the queue node
+// node is a queue node for the MPSC mailbox.
+//
+// The value field is a plain (non-atomic) pointer because all accesses are
+// ordered by the atomic operations on the queue's head and tail pointers:
+//   - Enqueue writes value before publishing the node via atomic.SwapPointer(tail).
+//   - Dequeue reads value after acquiring the node via atomic.LoadPointer(head.next).
+//
+// This eliminates two atomic operations per message (Store + Load) compared to
+// using atomic.Pointer.
 type node struct {
-	value atomic.Pointer[ReceiveContext]
+	value *ReceiveContext
 	next  unsafe.Pointer
 }
 
@@ -90,7 +98,13 @@ func NewUnboundedMailbox() *UnboundedMailbox {
 // nil; the error is present to satisfy the Mailbox interface.
 func (m *UnboundedMailbox) Enqueue(value *ReceiveContext) error {
 	tnode := nodePool.Get().(*node)
-	tnode.value.Store(value)
+
+	// Non-atomic store: the node is thread-local and invisible to other
+	// goroutines until the SwapPointer below publishes it.
+	tnode.value = value
+	// next must be an atomic store because other goroutines read this field
+	// atomically (e.g. IsEmpty, Len). Mixed atomic/non-atomic accesses on the
+	// same location are data races in Go's memory model.
 	atomic.StorePointer(&tnode.next, nil)
 
 	// Atomically swap the tail pointer and link the previous tail to this node
@@ -113,8 +127,11 @@ func (m *UnboundedMailbox) Dequeue() *ReceiveContext {
 	}
 
 	atomic.StorePointer(&m.head, unsafe.Pointer(next))
-	value := next.value.Load()
-	next.value.Store(nil) // avoid memory leaks
+
+	// Non-atomic read: visible because the LoadPointer(&head.next) above
+	// acquired the ordering established by the producer's StorePointer.
+	value := next.value
+	next.value = nil // avoid memory leaks; safe because node is now consumed
 
 	nodePool.Put(head)
 	return value

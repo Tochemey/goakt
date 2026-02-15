@@ -78,6 +78,12 @@ const (
 	busy
 )
 
+// passivationTouchInterval controls how frequently Touch is called on the
+// passivation manager. For a 2-minute default timeout, refreshing every
+// 100ms means the deadline is at most 0.08% stale — well within tolerance.
+// This avoids acquiring the passivation manager's mutex on every message.
+const passivationTouchInterval = int64(100 * time.Millisecond)
+
 // taskCompletion is used to track completions' taskCompletion
 // to pipe the result to the appropriate PID
 type taskCompletion struct {
@@ -101,7 +107,11 @@ type PID struct {
 	// specifies the actor address
 	address *address.Address
 
-	latestReceiveTime     atomic.Time
+	// latestReceiveTimeNano stores the latest receive timestamp as UnixNano (int64).
+	// Using atomic.Int64 instead of atomic.Time avoids the interface-boxing
+	// allocation that atomic.Time.Store incurs on every message (~24 bytes).
+	latestReceiveTimeNano atomic.Int64
+	lastPassivationTouch  atomic.Int64 // UnixNano of last passivation Touch call (for coalescing)
 	latestReceiveDuration atomic.Duration
 
 	// specifies the maximum of retries to attempt when the actor
@@ -162,6 +172,7 @@ type PID struct {
 
 	passivationStrategy passivation.Strategy
 	passivationManager  *passivationManager
+	msgCountPassivation atomic.Bool // true when passivationStrategy is MessagesCountBasedStrategy; set once at init
 
 	// this is used to specify a role the actor belongs to
 	// this field is optional and will be set when the actor is created with a given role
@@ -189,7 +200,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 
 	pid := &PID{
 		actor:                 actor,
-		latestReceiveTime:     atomic.Time{},
+		latestReceiveTimeNano: atomic.Int64{},
 		logger:                log.New(log.ErrorLevel, os.Stderr),
 		address:               address,
 		mailbox:               NewUnboundedMailbox(),
@@ -403,7 +414,6 @@ func (pid *PID) Parent() *PID {
 func (pid *PID) Children() []*PID {
 	pid.fieldsLocker.RLock()
 	tree := pid.ActorSystem().tree()
-
 	children := tree.children(pid)
 	cids := make([]*PID, 0, len(children))
 	for _, cid := range children {
@@ -585,7 +595,11 @@ func (pid *PID) ProcessedCount() int {
 
 // LatestProcessedDuration returns the duration of the latest message processed
 func (pid *PID) LatestProcessedDuration() time.Duration {
-	pid.latestReceiveDuration.Store(time.Since(pid.latestReceiveTime.Load()))
+	nanos := pid.latestReceiveTimeNano.Load()
+	if nanos == 0 {
+		return 0
+	}
+	pid.latestReceiveDuration.Store(time.Since(time.Unix(0, nanos)))
 	return pid.latestReceiveDuration.Load()
 }
 
@@ -961,18 +975,7 @@ func (pid *PID) Ask(ctx context.Context, to *PID, message proto.Message, timeout
 
 	receiveContext := getContext()
 	receiveContext.build(ctx, pid, to, message, false)
-	msg := receiveContext.Message()
-	sender := receiveContext.Sender()
 	responseCh := receiveContext.response
-
-	if responseCh != nil {
-		defer func() {
-			// Mark closed so a late Response won't write into a pooled channel that may
-			// be reused by another Ask call.
-			receiveContext.responseClosed.Store(true)
-			putResponseChannel(responseCh)
-		}()
-	}
 
 	to.doReceive(receiveContext)
 	timer := timers.Get(timeout)
@@ -980,16 +983,22 @@ func (pid *PID) Ask(ctx context.Context, to *PID, message proto.Message, timeout
 	select {
 	case result := <-responseCh:
 		timers.Put(timer)
+		receiveContext.responseClosed.Store(true)
+		putResponseChannel(responseCh)
 		return result, nil
 	case <-ctx.Done():
 		err = errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
-		pid.handleReceivedErrorWithMessage(sender, msg, err)
+		pid.handleReceivedErrorWithMessage(pid, message, err)
 		timers.Put(timer)
+		receiveContext.responseClosed.Store(true)
+		putResponseChannel(responseCh)
 		return nil, err
 	case <-timer.C:
 		err = gerrors.ErrRequestTimeout
-		pid.handleReceivedErrorWithMessage(sender, msg, err)
+		pid.handleReceivedErrorWithMessage(pid, message, err)
 		timers.Put(timer)
+		receiveContext.responseClosed.Store(true)
+		putResponseChannel(responseCh)
 		return nil, err
 	}
 }
@@ -1014,8 +1023,13 @@ func (pid *PID) SendAsync(ctx context.Context, actorName string, message proto.M
 		return gerrors.ErrDead
 	}
 
+	// Access actorSystem directly: it is immutable after PID construction,
+	// so the fieldsLocker read-lock in the public ActorSystem() accessor
+	// is unnecessary here and would add contention on the hot path.
+	system := pid.actorSystem
+
 	// try to find the actor in the local datacenter
-	addr, cid, err := pid.ActorSystem().ActorOf(ctx, actorName)
+	addr, cid, err := system.ActorOf(ctx, actorName)
 	if err == nil {
 		// Actor found in local datacenter
 		if cid != nil {
@@ -1032,7 +1046,7 @@ func (pid *PID) SendAsync(ctx context.Context, actorName string, message proto.M
 		return err
 	}
 
-	dcConfig := pid.ActorSystem().getDataCenterConfig()
+	dcConfig := system.getDataCenterConfig()
 	timeout := datacenter.DefaultRequestTimeout
 	if dcConfig != nil {
 		timeout = dcConfig.RequestTimeout
@@ -1056,8 +1070,11 @@ func (pid *PID) SendSync(ctx context.Context, actorName string, message proto.Me
 		return nil, gerrors.ErrDead
 	}
 
+	// Access actorSystem directly: immutable after PID construction.
+	system := pid.actorSystem
+
 	// try to find the actor in the local datacenter
-	addr, cid, err := pid.ActorSystem().ActorOf(ctx, actorName)
+	addr, cid, err := system.ActorOf(ctx, actorName)
 	if err == nil {
 		// Actor found in local datacenter
 		if cid != nil {
@@ -1416,33 +1433,7 @@ func (pid *PID) Watch(cid *PID) {
 
 // UnWatch stops watching a given actor
 func (pid *PID) UnWatch(cid *PID) {
-	tree := pid.ActorSystem().tree()
-	pnode, ok := tree.node(pid.ID())
-	if !ok {
-		return
-	}
-
-	cnode, ok := tree.node(cid.ID())
-	if !ok {
-		return
-	}
-
-	pwatchees := tree.watchees(pid)
-	for _, watchee := range pwatchees {
-		if watchee.Equals(cid) {
-			pnode.watchees.Delete(watchee.ID())
-			break
-		}
-	}
-
-	// get the watchers of the child actor
-	cwatchers := tree.watchers(cid)
-	for _, watcher := range cwatchers {
-		if watcher.Equals(pid) {
-			cnode.watchers.Delete(watcher.ID())
-			break
-		}
-	}
+	pid.ActorSystem().tree().removeWatcher(cid, pid)
 }
 
 // Logger returns the logger sets when creating the PID
@@ -1459,7 +1450,11 @@ func (pid *PID) Logger() log.Logger {
 //
 // Note: The timestamp is updated whenever the actor receives a message.
 func (pid *PID) LatestActivityTime() time.Time {
-	return pid.latestReceiveTime.Load()
+	nanos := pid.latestReceiveTimeNano.Load()
+	if nanos == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, nanos)
 }
 
 // request sends an asynchronous request to another PID and returns a RequestCall.
@@ -1680,6 +1675,12 @@ func (pid *PID) process() {
 			// Check if new messages were added in the meantime and restart processing
 			if !pid.mailbox.IsEmpty() && pid.processing.CompareAndSwap(idle, busy) {
 				continue
+			}
+
+			// Release the last processed context before exiting so it is
+			// returned to the pool instead of leaking until the next GC cycle.
+			if received != nil {
+				releaseContext(received)
 			}
 			return
 		}
@@ -2028,16 +2029,34 @@ func (pid *PID) cancelInFlightRequests(reason error) {
 
 // markActivity updates the last receive timestamp and notifies the shared passivation manager.
 func (pid *PID) markActivity(at time.Time) {
-	pid.latestReceiveTime.Store(at)
+	nanos := at.UnixNano()
+	pid.latestReceiveTimeNano.Store(nanos)
 	if pid.passivationManager != nil {
-		pid.passivationManager.Touch(pid)
+		// Coalesce Touch calls: only acquire the passivation manager's mutex
+		// when at least passivationTouchInterval has elapsed since the last
+		// Touch. The CAS ensures exactly one goroutine wins per interval.
+		last := pid.lastPassivationTouch.Load()
+		if nanos-last >= passivationTouchInterval {
+			if pid.lastPassivationTouch.CompareAndSwap(last, nanos) {
+				pid.passivationManager.Touch(pid)
+			}
+		}
 	}
 }
 
 // recordProcessedMessage increments the processed message count and notifies the passivation manager.
 func (pid *PID) recordProcessedMessage() {
 	pid.processedCount.Inc()
-	if pid.passivationManager != nil {
+	// Only call MessageProcessed for message-count-based strategies.
+	// For time-based strategies (the common case), MessageProcessed
+	// acquires the passivation manager's mutex only to check the strategy
+	// type and return immediately. Skipping it avoids one mutex lock
+	// per message on the hot path.
+	//
+	// We use the atomic flag (set once at init) instead of a type assertion
+	// on pid.passivationStrategy to avoid racing with any code that modifies
+	// the strategy field under fieldsLocker.
+	if pid.passivationManager != nil && pid.msgCountPassivation.Load() {
 		pid.passivationManager.MessageProcessed(pid)
 	}
 }
@@ -2049,7 +2068,11 @@ func (pid *PID) passivationID() string {
 
 // passivationLatestActivity returns the latest activity time of the actor for passivation tracking
 func (pid *PID) passivationLatestActivity() time.Time {
-	return pid.latestReceiveTime.Load()
+	nanos := pid.latestReceiveTimeNano.Load()
+	if nanos == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, nanos)
 }
 
 func (pid *PID) passivationTry(reason string) bool {
@@ -2129,7 +2152,7 @@ func (pid *PID) init(ctx context.Context) error {
 
 // reset re-initializes the actor PID
 func (pid *PID) reset() {
-	pid.latestReceiveTime.Store(time.Time{})
+	pid.latestReceiveTimeNano.Store(0)
 	pid.initMaxRetries.Store(DefaultInitMaxRetries)
 	pid.latestReceiveDuration.Store(0)
 	pid.initTimeout.Store(DefaultInitTimeout)
@@ -2166,7 +2189,6 @@ func (pid *PID) freeWatchers(ctx context.Context) {
 	logger := pid.logger
 	logger.Debugf("Freeing all Actor %s's watchers...", pid.Name())
 	tree := pid.ActorSystem().tree()
-
 	watchers := tree.watchers(pid)
 	if len(watchers) > 0 {
 		// this call will be fast no need of parallel processing
@@ -2233,7 +2255,7 @@ func (pid *PID) freeChildren(ctx context.Context) error {
 			eg.Go(func() error {
 				logger.Debugf("Parent %s disowning descendant %s", pid.Name(), child.Name())
 				pid.UnWatch(child)
-				node.descendants.Delete(child.ID())
+				tree.removeDescendant(node.id, child.ID())
 				if child.IsSuspended() || child.IsRunning() {
 					if err := child.Shutdown(ctx); err != nil {
 						// only return error when the actor is not dead
@@ -2922,7 +2944,7 @@ func (pid *PID) healthCheck(ctx context.Context) error {
 }
 
 func (pid *PID) remotingEnabled() bool {
-	if pid.remoting == nil {
+	if pid == nil || pid.remoting == nil {
 		return false
 	}
 
