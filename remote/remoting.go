@@ -53,15 +53,15 @@ const DefaultMaxReadFrameSize = 16 * 1024 * 1024 // 16 MiB
 
 // Remoting provides the client-side API surface to interact with actors running
 // on remote nodes of a Go-Akt cluster. It encapsulates transport configuration
-// (HTTP/TLS), payload compression, and Connect RPC client construction, and
+// (TCP/TLS), payload compression, and TCP client construction, and
 // offers convenience methods for one-way messaging, request/response, batched
 // delivery, lifecycle management, and discovery.
 //
 // General semantics:
 //
-//   - Transport: Remoting is implemented on top of Connect RPC over HTTP. TLS can
-//     be enabled via WithRemotingTLS. The configured MaxReadFrameSize applies to
-//     both read and send limits for all RPCs.
+//   - Transport: Remoting is implemented on top of a custom proto-based TCP protocol.
+//     TLS can be enabled via WithRemotingTLS. The configured MaxReadFrameSize applies
+//     to both read and send limits for all RPCs.
 //   - Payloads: Messages are serialized as google.protobuf.Any. The caller is
 //     responsible for using message types known to both peers.
 //   - Addresses: All remote operations identify actors by address.Address.
@@ -70,7 +70,7 @@ const DefaultMaxReadFrameSize = 16 * 1024 * 1024 // 16 MiB
 //     per-call timeout (where applicable) and a context deadline are provided,
 //     the effective deadline is the earliest of the two.
 //   - Errors: Errors are returned as standard Go errors. When originating from
-//     Connect RPC, they carry a code (connect.Code*). Notable codes include
+//     the remote system, they carry a code (internalpb.Code). Notable codes include
 //     NotFound, DeadlineExceeded, Unavailable, and ResourceExhausted.
 //   - Ordering & delivery: Fire-and-forget methods provide best-effort delivery
 //     with at-most-once semantics at the RPC layer. Delivery to the target actor
@@ -80,7 +80,7 @@ const DefaultMaxReadFrameSize = 16 * 1024 * 1024 // 16 MiB
 //     should attach their own correlation identifiers when needed.
 //
 // Use NewRemoting to construct an instance. Call Close to release underlying
-// resources (e.g., idle HTTP connections).
+// resources (e.g., idle TCP connections).
 type Remoting interface {
 	// RemoteTell sends a one-way (fire-and-forget) message to a remote actor.
 	//
@@ -99,8 +99,8 @@ type Remoting interface {
 	//   - Honors compression and frame size limits configured on the client.
 	//
 	// Errors:
-	//   - Transport or server errors (connect.Error) with codes such as
-	//     Unavailable or ResourceExhausted.
+	//   - Transport or server errors with codes such as Unavailable or
+	//     ResourceExhausted.
 	//   - Context cancellation/deadline errors.
 	RemoteTell(ctx context.Context, from, to *address.Address, message proto.Message) error
 
@@ -142,7 +142,7 @@ type Remoting interface {
 	//
 	// Errors:
 	//   - Transport and context errors.
-	//   - Other server-side failures surfaced as connect errors.
+	//   - Other server-side failures surfaced as proto errors.
 	RemoteLookup(ctx context.Context, host string, port int, name string) (addr *address.Address, err error)
 
 	// RemoteBatchTell sends multiple fire-and-forget messages to the same remote
@@ -260,7 +260,7 @@ type Remoting interface {
 	//
 	// Errors:
 	//   - Transport and context errors.
-	//   - Server-side failures surfaced as connect errors (e.g., Unavailable, DeadlineExceeded).
+	//   - Server-side failures surfaced as proto errors (e.g., Unavailable, DeadlineExceeded).
 	//
 	// Note: The grain kind must be registered on the remote actor system using RegisterGrainKind.
 	RemoteActivateGrain(ctx context.Context, host string, port int, grainRequest *GrainRequest) error

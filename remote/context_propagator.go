@@ -28,25 +28,28 @@ import (
 )
 
 // ContextPropagator defines how Go context values travel across remoting and cluster
-// boundaries by injecting them into outbound HTTP headers and extracting them on the
+// boundaries by injecting them into outbound metadata and extracting them on the
 // receiving side (trace IDs, auth tokens, correlation IDs, and similar metadata).
 //
-// Implementations should be stateless, safe for concurrent use, favor stable header keys,
+// The carrier type is [net/http.Header], used as a convenient string-keyed,
+// multi-valued map — the underlying transport is TCP, not HTTP.
+//
+// Implementations should be stateless, safe for concurrent use, favor stable keys,
 // and avoid leaking sensitive data unless explicitly required. Validate inputs to guard
-// against header injection or oversized header sets. Go-Akt relies on a ContextPropagator
+// against injection or oversized metadata sets. Go-Akt relies on a ContextPropagator
 // so that context-derived metadata survives hops to remote actors or cluster peers and
-// can be read safely during messages handling via ReceiveContext.Context() or GrainContext.Context().
+// can be read safely during message handling via ReceiveContext.Context() or GrainContext.Context().
 //
 // Error handling:
-//   - Inject should fail only when headers cannot be written.
+//   - Inject should fail only when metadata cannot be written.
 //   - Extract should return a derived context and report parse issues via the error,
 //     letting callers choose log-and-continue vs fail-fast policies.
 type ContextPropagator interface {
-	// Inject writes context values into headers for an outgoing request.
+	// Inject writes context values into the metadata carrier for an outgoing request.
 	// Implementations should not mutate ctx and must be safe for concurrent use.
 	Inject(ctx context.Context, headers nethttp.Header) error
 
-	// Extract reads headers from an incoming request and returns a new context
+	// Extract reads metadata from an incoming request and returns a new context
 	// containing any propagated values. The returned context should derive from
 	// the provided ctx to preserve cancellations and deadlines.
 	Extract(ctx context.Context, headers nethttp.Header) (context.Context, error)
