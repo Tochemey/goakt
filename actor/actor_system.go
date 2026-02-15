@@ -2026,22 +2026,13 @@ func (x *actorSystem) validate() error {
 // handleRemoteAsk handles a synchronous message to another actor and expect a response.
 // This block until a response is received or timed out.
 func (x *actorSystem) handleRemoteAsk(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error) {
-	receiveContext, err := toReceiveContext(ctx, x.NoSender(), to, message, false)
+	noSender := x.NoSender()
+	receiveContext, err := toReceiveContext(ctx, noSender, to, message, false)
 	if err != nil {
 		return nil, err
 	}
-	msg := receiveContext.Message()
-	sender := receiveContext.Sender()
 
 	responseCh := receiveContext.response
-	if responseCh != nil {
-		defer func() {
-			// Mark closed so a late Response won't write into a pooled channel that may
-			// be reused by another Ask call.
-			receiveContext.responseClosed.Store(true)
-			putResponseChannel(responseCh)
-		}()
-	}
 	to.doReceive(receiveContext)
 	timer := timers.Get(timeout)
 
@@ -2050,16 +2041,22 @@ func (x *actorSystem) handleRemoteAsk(ctx context.Context, to *PID, message prot
 	select {
 	case response = <-responseCh:
 		timers.Put(timer)
+		receiveContext.responseClosed.Store(true)
+		putResponseChannel(responseCh)
 		return
 	case <-ctx.Done():
 		err = errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
-		to.handleReceivedErrorWithMessage(sender, msg, err)
+		to.handleReceivedErrorWithMessage(noSender, message, err)
 		timers.Put(timer)
+		receiveContext.responseClosed.Store(true)
+		putResponseChannel(responseCh)
 		return nil, err
 	case <-timer.C:
 		err = gerrors.ErrRequestTimeout
-		to.handleReceivedErrorWithMessage(sender, msg, err)
+		to.handleReceivedErrorWithMessage(noSender, message, err)
 		timers.Put(timer)
+		receiveContext.responseClosed.Store(true)
+		putResponseChannel(responseCh)
 		return
 	}
 }

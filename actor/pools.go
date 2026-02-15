@@ -23,8 +23,6 @@
 package actor
 
 import (
-	"sync"
-
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v3/internal/timer"
@@ -42,20 +40,16 @@ const contextPoolSize = 512
 // the cross-P thrashing inherent to sync.Pool.
 var contextCh = make(chan *ReceiveContext, contextPoolSize)
 
-var (
-	timers = timer.NewPool()
+// responseCh is a channel-based bounded pool for response channels.
+// Survives GC cycles unlike sync.Pool, eliminating cross-P thrashing
+// for synchronous (Ask) message paths.
+var responseCh = make(chan chan proto.Message, contextPoolSize)
 
-	responsePool = sync.Pool{
-		New: func() any {
-			return make(chan proto.Message, 1)
-		},
-	}
-	errorPool = sync.Pool{
-		New: func() any {
-			return make(chan error, 1)
-		},
-	}
-)
+// errorCh is a channel-based bounded pool for error channels.
+// Survives GC cycles unlike sync.Pool.
+var errorCh = make(chan chan error, contextPoolSize)
+
+var timers = timer.NewPool()
 
 // getContext retrieves a ReceiveContext from the channel-based pool.
 // Falls back to heap allocation if the pool is empty.
@@ -85,33 +79,52 @@ func releaseContext(receiveContext *ReceiveContext) {
 }
 
 func getResponseChannel() chan proto.Message {
-	return responsePool.Get().(chan proto.Message)
+	select {
+	case ch := <-responseCh:
+		return ch
+	default:
+		return make(chan proto.Message, 1)
+	}
 }
 
 func putResponseChannel(ch chan proto.Message) {
+	// Drain any stale response (e.g. from a timed-out Ask where the actor
+	// replied after the caller gave up).
 	for {
 		select {
 		case <-ch:
 			continue
 		default:
-			responsePool.Put(ch)
-			return
 		}
+		break
+	}
+	select {
+	case responseCh <- ch:
+	default:
 	}
 }
 
 func getErrorChannel() chan error {
-	return errorPool.Get().(chan error)
+	select {
+	case ch := <-errorCh:
+		return ch
+	default:
+		return make(chan error, 1)
+	}
 }
 
 func putErrorChannel(ch chan error) {
+	// Drain any stale error.
 	for {
 		select {
 		case <-ch:
 			continue
 		default:
-			errorPool.Put(ch)
-			return
 		}
+		break
+	}
+	select {
+	case errorCh <- ch:
+	default:
 	}
 }

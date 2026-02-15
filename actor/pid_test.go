@@ -5361,7 +5361,7 @@ func TestReinstateAvoidsPassivationRace(t *testing.T) {
 	pid.passivationStrategy = passivation.NewTimeBasedStrategy(passiveAfter)
 	pid.fieldsLocker.Unlock()
 
-	pid.latestReceiveTime.Store(time.Now().Add(-time.Minute))
+	pid.latestReceiveTimeNano.Store(time.Now().Add(-time.Minute).UnixNano())
 	pid.setState(passivationSkipNextState, false)
 	pid.setState(passivatingState, false)
 	pid.setState(suspendedState, false)

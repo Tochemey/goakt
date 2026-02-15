@@ -41,23 +41,13 @@ func Ask(ctx context.Context, to *PID, message proto.Message, timeout time.Durat
 		return nil, gerrors.ErrDead
 	}
 
-	receiveContext, err := toReceiveContext(ctx, to.ActorSystem().NoSender(), to, message, false)
+	noSender := to.ActorSystem().NoSender()
+	receiveContext, err := toReceiveContext(ctx, noSender, to, message, false)
 	if err != nil {
 		return nil, err
 	}
 
-	msg := receiveContext.Message()
-	sender := receiveContext.Sender()
-
 	responseCh := receiveContext.response
-	if responseCh != nil {
-		defer func() {
-			// Mark closed so a late Response won't write into a pooled channel that may
-			// be reused by another Ask call.
-			receiveContext.responseClosed.Store(true)
-			putResponseChannel(responseCh)
-		}()
-	}
 	to.doReceive(receiveContext)
 	timer := timers.Get(timeout)
 
@@ -66,16 +56,22 @@ func Ask(ctx context.Context, to *PID, message proto.Message, timeout time.Durat
 	select {
 	case response = <-responseCh:
 		timers.Put(timer)
+		receiveContext.responseClosed.Store(true)
+		putResponseChannel(responseCh)
 		return
 	case <-ctx.Done():
 		err = errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
-		to.handleReceivedErrorWithMessage(sender, msg, err)
+		to.handleReceivedErrorWithMessage(noSender, message, err)
 		timers.Put(timer)
+		receiveContext.responseClosed.Store(true)
+		putResponseChannel(responseCh)
 		return nil, err
 	case <-timer.C:
 		err = gerrors.ErrRequestTimeout
-		to.handleReceivedErrorWithMessage(sender, msg, err)
+		to.handleReceivedErrorWithMessage(noSender, message, err)
 		timers.Put(timer)
+		receiveContext.responseClosed.Store(true)
+		putResponseChannel(responseCh)
 		return
 	}
 }

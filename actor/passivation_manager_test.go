@@ -53,7 +53,7 @@ func TestPassivationManager_TimeBasedTrigger(t *testing.T) {
 	timeout := 25 * time.Millisecond
 	strategy := passivation.NewTimeBasedStrategy(timeout)
 	pid := MockPassivationPID(t, "time-based", strategy)
-	pid.latestReceiveTime.Store(time.Now().Add(-time.Minute))
+	pid.latestReceiveTimeNano.Store(time.Now().Add(-time.Minute).UnixNano())
 
 	manager.Register(pid, strategy)
 
@@ -287,7 +287,7 @@ func TestPassivationManager_RegisterStrategies(t *testing.T) {
 
 		strategy := passivation.NewTimeBasedStrategy(time.Minute)
 		pid := MockPassivationPID(t, "time-entry", strategy)
-		pid.latestReceiveTime.Store(time.Now())
+		pid.latestReceiveTimeNano.Store(time.Now().UnixNano())
 
 		manager.Register(pid, strategy)
 
@@ -297,7 +297,7 @@ func TestPassivationManager_RegisterStrategies(t *testing.T) {
 		require.Equal(t, 0, entry.index)
 		manager.mu.Unlock()
 
-		pid.latestReceiveTime.Store(time.Now().Add(time.Second))
+		pid.latestReceiveTimeNano.Store(time.Now().Add(time.Second).UnixNano())
 		manager.Register(pid, strategy)
 
 		manager.mu.Lock()
@@ -556,7 +556,7 @@ func TestPassivationManager_RunHandlesChannels(t *testing.T) {
 
 	timeStrategy := passivation.NewTimeBasedStrategy(2 * time.Second)
 	timePID := MockPassivationPID(t, "timer", timeStrategy)
-	timePID.latestReceiveTime.Store(time.Now())
+	timePID.latestReceiveTimeNano.Store(time.Now().UnixNano())
 	manager.Register(timePID, timeStrategy)
 
 	msgStrategy := passivation.NewMessageCountBasedStrategy(1)

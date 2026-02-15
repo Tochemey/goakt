@@ -101,7 +101,10 @@ type PID struct {
 	// specifies the actor address
 	address *address.Address
 
-	latestReceiveTime     atomic.Time
+	// latestReceiveTimeNano stores the latest receive timestamp as UnixNano (int64).
+	// Using atomic.Int64 instead of atomic.Time avoids the interface-boxing
+	// allocation that atomic.Time.Store incurs on every message (~24 bytes).
+	latestReceiveTimeNano atomic.Int64
 	latestReceiveDuration atomic.Duration
 
 	// specifies the maximum of retries to attempt when the actor
@@ -189,7 +192,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 
 	pid := &PID{
 		actor:                 actor,
-		latestReceiveTime:     atomic.Time{},
+		latestReceiveTimeNano: atomic.Int64{},
 		logger:                log.New(log.ErrorLevel, os.Stderr),
 		address:               address,
 		mailbox:               NewUnboundedMailbox(),
@@ -584,7 +587,11 @@ func (pid *PID) ProcessedCount() int {
 
 // LatestProcessedDuration returns the duration of the latest message processed
 func (pid *PID) LatestProcessedDuration() time.Duration {
-	pid.latestReceiveDuration.Store(time.Since(pid.latestReceiveTime.Load()))
+	nanos := pid.latestReceiveTimeNano.Load()
+	if nanos == 0 {
+		return 0
+	}
+	pid.latestReceiveDuration.Store(time.Since(time.Unix(0, nanos)))
 	return pid.latestReceiveDuration.Load()
 }
 
@@ -960,18 +967,7 @@ func (pid *PID) Ask(ctx context.Context, to *PID, message proto.Message, timeout
 
 	receiveContext := getContext()
 	receiveContext.build(ctx, pid, to, message, false)
-	msg := receiveContext.Message()
-	sender := receiveContext.Sender()
 	responseCh := receiveContext.response
-
-	if responseCh != nil {
-		defer func() {
-			// Mark closed so a late Response won't write into a pooled channel that may
-			// be reused by another Ask call.
-			receiveContext.responseClosed.Store(true)
-			putResponseChannel(responseCh)
-		}()
-	}
 
 	to.doReceive(receiveContext)
 	timer := timers.Get(timeout)
@@ -979,16 +975,22 @@ func (pid *PID) Ask(ctx context.Context, to *PID, message proto.Message, timeout
 	select {
 	case result := <-responseCh:
 		timers.Put(timer)
+		receiveContext.responseClosed.Store(true)
+		putResponseChannel(responseCh)
 		return result, nil
 	case <-ctx.Done():
 		err = errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
-		pid.handleReceivedErrorWithMessage(sender, msg, err)
+		pid.handleReceivedErrorWithMessage(pid, message, err)
 		timers.Put(timer)
+		receiveContext.responseClosed.Store(true)
+		putResponseChannel(responseCh)
 		return nil, err
 	case <-timer.C:
 		err = gerrors.ErrRequestTimeout
-		pid.handleReceivedErrorWithMessage(sender, msg, err)
+		pid.handleReceivedErrorWithMessage(pid, message, err)
 		timers.Put(timer)
+		receiveContext.responseClosed.Store(true)
+		putResponseChannel(responseCh)
 		return nil, err
 	}
 }
@@ -1432,7 +1434,11 @@ func (pid *PID) Logger() log.Logger {
 //
 // Note: The timestamp is updated whenever the actor receives a message.
 func (pid *PID) LatestActivityTime() time.Time {
-	return pid.latestReceiveTime.Load()
+	nanos := pid.latestReceiveTimeNano.Load()
+	if nanos == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, nanos)
 }
 
 // request sends an asynchronous request to another PID and returns a RequestCall.
@@ -2007,7 +2013,7 @@ func (pid *PID) cancelInFlightRequests(reason error) {
 
 // markActivity updates the last receive timestamp and notifies the shared passivation manager.
 func (pid *PID) markActivity(at time.Time) {
-	pid.latestReceiveTime.Store(at)
+	pid.latestReceiveTimeNano.Store(at.UnixNano())
 	if pid.passivationManager != nil {
 		pid.passivationManager.Touch(pid)
 	}
@@ -2028,7 +2034,11 @@ func (pid *PID) passivationID() string {
 
 // passivationLatestActivity returns the latest activity time of the actor for passivation tracking
 func (pid *PID) passivationLatestActivity() time.Time {
-	return pid.latestReceiveTime.Load()
+	nanos := pid.latestReceiveTimeNano.Load()
+	if nanos == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, nanos)
 }
 
 func (pid *PID) passivationTry(reason string) bool {
@@ -2108,7 +2118,7 @@ func (pid *PID) init(ctx context.Context) error {
 
 // reset re-initializes the actor PID
 func (pid *PID) reset() {
-	pid.latestReceiveTime.Store(time.Time{})
+	pid.latestReceiveTimeNano.Store(0)
 	pid.initMaxRetries.Store(DefaultInitMaxRetries)
 	pid.latestReceiveDuration.Store(0)
 	pid.initTimeout.Store(DefaultInitTimeout)
