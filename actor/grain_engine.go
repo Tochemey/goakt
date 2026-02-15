@@ -566,14 +566,16 @@ func (x *actorSystem) localSend(ctx context.Context, id *GrainIdentity, message 
 			putErrorChannel(errCh)
 			return nil, err
 		case <-ctx.Done():
+			// The grain goroutine may still be processing and could send
+			// on the channels later. Mark response as closed so
+			// Response()/NoErr() CAS guards prevent late sends, and do
+			// NOT return channels to the pool -- let them be GC'd.
+			grainContext.responseClosed.Store(true)
 			timers.Put(timer)
-			putResponseChannel(responseCh)
-			putErrorChannel(errCh)
 			return nil, errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
 		case <-timer.C:
+			grainContext.responseClosed.Store(true)
 			timers.Put(timer)
-			putResponseChannel(responseCh)
-			putErrorChannel(errCh)
 			return nil, gerrors.ErrRequestTimeout
 		}
 	}
@@ -586,12 +588,12 @@ func (x *actorSystem) localSend(ctx context.Context, id *GrainIdentity, message 
 		putErrorChannel(errCh)
 		return nil, err
 	case <-timer.C:
+		// The grain goroutine may still be processing and could send on
+		// errCh later. Do NOT return it to the pool -- let it be GC'd.
 		timers.Put(timer)
-		putErrorChannel(errCh)
 		return nil, gerrors.ErrRequestTimeout
 	case <-ctx.Done():
 		timers.Put(timer)
-		putErrorChannel(errCh)
 		return nil, errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
 	}
 }
