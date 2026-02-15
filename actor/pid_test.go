@@ -70,13 +70,6 @@ const (
 	passivateAfter = 200 * time.Millisecond
 )
 
-func newBareSupervisor(strategy supervisor.Strategy) *supervisor.Supervisor {
-	supv := supervisor.NewSupervisor()
-	supv.Reset()
-	supervisor.WithStrategy(strategy)(supv)
-	return supv
-}
-
 func TestReceive(t *testing.T) {
 	t.Run("With happy path", func(t *testing.T) {
 		ctx := context.TODO()
@@ -740,12 +733,12 @@ func TestRestart(t *testing.T) {
 
 		parentNode, ok := tree.node(root.ID())
 		require.True(t, ok)
-		parentNode.descendants.Delete(child.ID())
-		parentNode.watchees.Delete(child.ID())
+		delete(parentNode.descendants, child.ID())
+		delete(parentNode.watchees, child.ID())
 
 		childNode, ok := tree.node(child.ID())
 		require.True(t, ok)
-		childNode.parent.Store(nil)
+		childNode.parentNode = nil
 
 		child.setState(runningState, false)
 
@@ -2390,12 +2383,11 @@ func TestRemoting(t *testing.T) {
 		})
 	})
 }
-
-type actorSystemWrapper struct {
-	*actorSystem
-}
-
 func TestPIDRemotingEnabledGuard(t *testing.T) {
+	type actorSystemWrapper struct {
+		*actorSystem
+	}
+
 	t.Run("Actor system nil", func(t *testing.T) {
 		remotingMock := mocksremote.NewRemoting(t)
 		pid := &PID{
@@ -4918,96 +4910,6 @@ func TestNewPID(t *testing.T) {
 	})
 }
 
-type registerCallbackFailingMeter struct {
-	otelmetric.Meter
-	err error
-}
-
-func (m registerCallbackFailingMeter) RegisterCallback(_ otelmetric.Callback, _ ...otelmetric.Observable) (otelmetric.Registration, error) {
-	return nil, m.err
-}
-
-type instrumentFailingMeter struct {
-	otelmetric.Meter
-	failures map[string]error
-}
-
-func (m instrumentFailingMeter) Int64ObservableCounter(
-	name string,
-	options ...otelmetric.Int64ObservableCounterOption,
-) (otelmetric.Int64ObservableCounter, error) {
-	if err, ok := m.failures[name]; ok {
-		return nil, err
-	}
-	return m.Meter.Int64ObservableCounter(name, options...)
-}
-
-type manualMeterProvider struct {
-	otelmetric.MeterProvider
-	meter otelmetric.Meter
-}
-
-func newManualMeterProvider() *manualMeterProvider {
-	delegate := noopmetric.NewMeterProvider()
-	return &manualMeterProvider{
-		MeterProvider: delegate,
-		meter: &manualMeter{
-			Meter: delegate.Meter("test"),
-		},
-	}
-}
-
-func (m *manualMeterProvider) Meter(_ string, _ ...otelmetric.MeterOption) otelmetric.Meter {
-	return m.meter
-}
-
-type manualMeter struct {
-	otelmetric.Meter
-	callbacks []otelmetric.Callback
-}
-
-func (m *manualMeter) RegisterCallback(cb otelmetric.Callback, _ ...otelmetric.Observable) (otelmetric.Registration, error) {
-	m.callbacks = append(m.callbacks, cb)
-	return noopmetric.Registration{}, nil
-}
-
-// immediateMeter triggers the callback at registration time.
-// It is useful to surface errors that occur inside the callback, such as
-// cluster membership lookups during metrics observation.
-type immediateMeter struct {
-	*manualMeter
-	system  *actorSystem
-	cluster cluster.Cluster
-}
-
-func (m *immediateMeter) RegisterCallback(cb otelmetric.Callback, _ ...otelmetric.Observable) (otelmetric.Registration, error) {
-	// enable cluster path for the callback
-	if m.system != nil {
-		m.system.clusterEnabled.Store(true)
-		m.system.cluster = m.cluster
-	}
-	observer := &manualObserver{}
-	err := cb(context.Background(), observer)
-	return noopmetric.Registration{}, err
-}
-
-type manualObserver struct {
-	noopmetric.Observer
-	records []observeRecord
-}
-
-type observeRecord struct {
-	instrument string
-	value      int64
-}
-
-func (o *manualObserver) ObserveInt64(obsrv otelmetric.Int64Observable, value int64, _ ...otelmetric.ObserveOption) {
-	o.records = append(o.records, observeRecord{
-		instrument: fmt.Sprintf("%T", obsrv),
-		value:      value,
-	})
-}
-
 func TestLogger(t *testing.T) {
 	buffer := new(bytes.Buffer)
 
@@ -5096,10 +4998,9 @@ func TestWatch(t *testing.T) {
 	pid.Watch(pid2)
 	pnode, ok := pid2.ActorSystem().tree().node(pid2.ID())
 	require.True(t, ok)
-	watchers := pnode.watchers
 
 	found := false
-	for _, watcher := range watchers.Values() {
+	for _, watcher := range pnode.watchers {
 		if watcher.Equals(pid) {
 			found = true
 			break
@@ -5361,9 +5262,10 @@ func TestReinstateAvoidsPassivationRace(t *testing.T) {
 	// loop we trigger below uses it.
 	pid.fieldsLocker.Lock()
 	pid.passivationStrategy = passivation.NewTimeBasedStrategy(passiveAfter)
+	pid.msgCountPassivation.Store(false)
 	pid.fieldsLocker.Unlock()
 
-	pid.latestReceiveTime.Store(time.Now().Add(-time.Minute))
+	pid.latestReceiveTimeNano.Store(time.Now().Add(-time.Minute).UnixNano())
 	pid.setState(passivationSkipNextState, false)
 	pid.setState(passivatingState, false)
 	pid.setState(suspendedState, false)
@@ -5544,7 +5446,6 @@ func TestPIDDoReceiveDuringShutdown(t *testing.T) {
 		require.NotNil(t, sys)
 
 		require.NoError(t, sys.Start(ctx))
-		defer func() { _ = sys.Stop(ctx) }()
 
 		pause.For(time.Second)
 
@@ -5555,20 +5456,21 @@ func TestPIDDoReceiveDuringShutdown(t *testing.T) {
 
 		pause.For(time.Second)
 
-		// Create a mock actorSystem with shuttingDown set to true
-		mockSys := &actorSystem{}
-		mockSys.shuttingDown.Store(true)
-		mockSys.logger = log.DiscardLogger
+		// Simulate system shutdown by marking the real actor system as shutting down.
+		// Using the real system avoids data races: shuttingDown is an atomic.Bool,
+		// and all system internals (tree, mailbox, etc.) remain fully valid for
+		// background goroutines that process the enqueued messages.
+		realSys := sys.(*actorSystem)
+		realSys.shuttingDown.Store(true)
+		defer func() {
+			realSys.shuttingDown.Store(false)
+			_ = sys.Stop(ctx)
+		}()
 
-		// Set the mock system on the PID
-		pid.fieldsLocker.Lock()
-		originalSys := pid.actorSystem
-		pid.actorSystem = mockSys
-		pid.fieldsLocker.Unlock()
-
-		// Test various system messages that should be allowed
+		// Test various system messages that should be allowed through during shutdown.
+		// PoisonPill is excluded because it triggers actor shutdown as a side effect,
+		// which would affect subsequent iterations of this loop.
 		systemMessages := []proto.Message{
-			new(goaktpb.PoisonPill),
 			new(internalpb.HealthCheckRequest),
 			new(internalpb.Panicking),
 			new(goaktpb.PausePassivation),
@@ -5591,14 +5493,6 @@ func TestPIDDoReceiveDuringShutdown(t *testing.T) {
 				pid.doReceive(receiveContext)
 			}, "System message %T should be allowed during shutdown", sysMsg)
 		}
-
-		// Restore original system
-		pid.fieldsLocker.Lock()
-		pid.actorSystem = originalSys
-		pid.fieldsLocker.Unlock()
-
-		// Clean up
-		pause.For(100 * time.Millisecond)
 	})
 
 	t.Run("With no shutdown check when system not shutting down", func(t *testing.T) {
@@ -6536,4 +6430,105 @@ func TestToWireActorIncludesSingletonSpecWhenSingleton(t *testing.T) {
 	assert.Equal(t, spec.MaxRetries, wire.GetSingleton().GetMaxRetries())
 	assert.Equal(t, spec.SpawnTimeout, wire.GetSingleton().GetSpawnTimeout().AsDuration())
 	assert.Equal(t, spec.WaitInterval, wire.GetSingleton().GetWaitInterval().AsDuration())
+}
+
+// ---------------------------------------------------------------------------
+// Helper structs, methods and functions
+// ---------------------------------------------------------------------------
+
+func newBareSupervisor(strategy supervisor.Strategy) *supervisor.Supervisor {
+	supv := supervisor.NewSupervisor()
+	supv.Reset()
+	supervisor.WithStrategy(strategy)(supv)
+	return supv
+}
+
+type registerCallbackFailingMeter struct {
+	otelmetric.Meter
+	err error
+}
+
+func (m registerCallbackFailingMeter) RegisterCallback(_ otelmetric.Callback, _ ...otelmetric.Observable) (otelmetric.Registration, error) {
+	return nil, m.err
+}
+
+type instrumentFailingMeter struct {
+	otelmetric.Meter
+	failures map[string]error
+}
+
+func (m instrumentFailingMeter) Int64ObservableCounter(
+	name string,
+	options ...otelmetric.Int64ObservableCounterOption,
+) (otelmetric.Int64ObservableCounter, error) {
+	if err, ok := m.failures[name]; ok {
+		return nil, err
+	}
+	return m.Meter.Int64ObservableCounter(name, options...)
+}
+
+type manualMeterProvider struct {
+	otelmetric.MeterProvider
+	meter otelmetric.Meter
+}
+
+func newManualMeterProvider() *manualMeterProvider {
+	delegate := noopmetric.NewMeterProvider()
+	return &manualMeterProvider{
+		MeterProvider: delegate,
+		meter: &manualMeter{
+			Meter: delegate.Meter("test"),
+		},
+	}
+}
+
+func (m *manualMeterProvider) Meter(_ string, _ ...otelmetric.MeterOption) otelmetric.Meter {
+	return m.meter
+}
+
+type manualMeter struct {
+	otelmetric.Meter
+	callbacks []otelmetric.Callback
+}
+
+func (m *manualMeter) RegisterCallback(cb otelmetric.Callback, _ ...otelmetric.Observable) (otelmetric.Registration, error) {
+	m.callbacks = append(m.callbacks, cb)
+	return noopmetric.Registration{}, nil
+}
+
+// immediateMeter triggers the callback at registration time.
+// It is useful to surface errors that occur inside the callback, such as
+// cluster membership lookups during metrics observation.
+type immediateMeter struct {
+	*manualMeter
+	system  *actorSystem
+	cluster cluster.Cluster
+}
+
+func (m *immediateMeter) RegisterCallback(cb otelmetric.Callback, _ ...otelmetric.Observable) (otelmetric.Registration, error) {
+	// enable cluster path for the callback
+	if m.system != nil {
+		m.system.clusterEnabled.Store(true)
+		m.system.cluster = m.cluster
+	}
+	observer := &manualObserver{}
+	err := cb(context.Background(), observer)
+	return noopmetric.Registration{}, err
+}
+
+type manualObserver struct {
+	noopmetric.Observer
+	records []observeRecord
+}
+
+type observeRecord struct {
+	instrument string
+	value      int64
+}
+
+func (o *manualObserver) ObserveInt64(obsrv otelmetric.Int64Observable, value int64, _ ...otelmetric.ObserveOption) {
+	o.records = append(o.records, observeRecord{
+		instrument: fmt.Sprintf("%T", obsrv),
+		value:      value,
+	})
 }

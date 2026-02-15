@@ -148,6 +148,8 @@ func withDependencies(dependencies ...extension.Dependency) pidOption {
 func withPassivationStrategy(strategy passivation.Strategy) pidOption {
 	return func(pid *PID) {
 		pid.passivationStrategy = strategy
+		_, isMsgCount := strategy.(*passivation.MessagesCountBasedStrategy)
+		pid.msgCountPassivation.Store(isMsgCount)
 	}
 }
 

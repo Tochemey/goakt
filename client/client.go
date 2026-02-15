@@ -24,20 +24,16 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
-	"connectrpc.com/connect"
-	"go.akshayshah.org/connectproto"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v3/address"
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/internal/chain"
-	"github.com/tochemey/goakt/v3/internal/compression/brotli"
-	"github.com/tochemey/goakt/v3/internal/compression/zstd"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v3/internal/locker"
 	"github.com/tochemey/goakt/v3/internal/ticker"
 	"github.com/tochemey/goakt/v3/internal/types"
@@ -147,19 +143,29 @@ func (x *Client) Kinds(ctx context.Context) ([]string, error) {
 	defer x.locker.Unlock()
 
 	node := nextNode(x.balancer)
-	service := clusterClient(node)
+	host, port := node.HostAndPort()
+	client := node.Remoting().NetClient(host, port)
 
-	response, err := service.GetKinds(
-		ctx, connect.NewRequest(
-			&internalpb.GetKindsRequest{
-				NodeAddress: node.Address(),
-			},
-		),
-	)
+	request := &internalpb.GetKindsRequest{
+		NodeAddress: node.Address(),
+	}
+
+	resp, err := client.SendProto(ctx, request)
 	if err != nil {
 		return nil, err
 	}
-	return response.Msg.GetKinds(), nil
+
+	// Check for proto errors
+	if errResp, ok := resp.(*internalpb.Error); ok {
+		return nil, fmt.Errorf("proto error: code=%s, msg=%s", errResp.GetCode(), errResp.GetMessage())
+	}
+
+	kindsResp, ok := resp.(*internalpb.GetKindsResponse)
+	if !ok {
+		return nil, fmt.Errorf("invalid response type")
+	}
+
+	return kindsResp.GetKinds(), nil
 }
 
 // Spawn creates and starts an actor using the default balancing strategy.
@@ -537,39 +543,6 @@ func (x *Client) refreshNodesLoop() {
 }
 
 // clusterClient returns the cluster service client
-func clusterClient(node *Node) internalpbconnect.ClusterServiceClient {
-	opts := []connect.ClientOption{
-		connectproto.WithBinary(
-			proto.MarshalOptions{},
-			proto.UnmarshalOptions{DiscardUnknown: true},
-		),
-	}
-
-	if node.Remoting().MaxReadFrameSize() > 0 {
-		opts = append(opts,
-			connect.WithSendMaxBytes(node.Remoting().MaxReadFrameSize()),
-			connect.WithReadMaxBytes(node.Remoting().MaxReadFrameSize()),
-		)
-	}
-
-	switch node.Remoting().Compression() {
-	case remote.GzipCompression:
-		opts = append(opts, connect.WithSendGzip())
-	case remote.ZstdCompression:
-		opts = append(opts, zstd.WithCompression())
-		opts = append(opts, connect.WithSendCompression(zstd.Name))
-	case remote.BrotliCompression:
-		opts = append(opts, brotli.WithCompression())
-		opts = append(opts, connect.WithSendCompression(brotli.Name))
-	}
-
-	return internalpbconnect.NewClusterServiceClient(
-		node.HTTPClient(),
-		node.HTTPEndPoint(),
-		opts...,
-	)
-}
-
 // getBalancer returns the balancer based upon the strategy
 func getBalancer(strategy BalancerStrategy) Balancer {
 	var balancer Balancer
@@ -587,21 +560,35 @@ func getBalancer(strategy BalancerStrategy) Balancer {
 
 // getNodeMetric pings a given node and get the node metric info and
 func getNodeMetric(ctx context.Context, node *Node) (int, bool, error) {
-	service := clusterClient(node)
+	host, port := node.HostAndPort()
+	client := node.Remoting().NetClient(host, port)
 
-	response, err := service.GetNodeMetric(ctx, connect.NewRequest(&internalpb.GetNodeMetricRequest{NodeAddress: node.Address()}))
+	request := &internalpb.GetNodeMetricRequest{NodeAddress: node.Address()}
+
+	resp, err := client.SendProto(ctx, request)
 	if err != nil {
-		code := connect.CodeOf(err)
+		// Node may not be available
+		return 0, false, nil
+	}
+
+	// Check for proto errors
+	if errResp, ok := resp.(*internalpb.Error); ok {
+		code := errResp.GetCode()
 		// here node may not be available
-		if code == connect.CodeUnavailable ||
-			code == connect.CodeCanceled ||
-			code == connect.CodeDeadlineExceeded {
+		if code == internalpb.Code_CODE_UNAVAILABLE ||
+			code == internalpb.Code_CODE_DEADLINE_EXCEEDED {
 			return 0, false, nil
 		}
 
-		return 0, false, err
+		return 0, false, fmt.Errorf("proto error: code=%s, msg=%s", code, errResp.GetMessage())
 	}
-	return int(response.Msg.GetLoad()), true, nil
+
+	metricResp, ok := resp.(*internalpb.GetNodeMetricResponse)
+	if !ok {
+		return 0, false, fmt.Errorf("invalid response type")
+	}
+
+	return int(metricResp.GetLoad()), true, nil
 }
 
 // validateNodes validate the incoming nodes

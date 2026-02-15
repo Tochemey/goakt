@@ -27,7 +27,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"net/http"
 	"strconv"
 	"strings"
 	"sync"
@@ -897,38 +896,48 @@ func TestSpawn(t *testing.T) {
 		require.Len(t, actors, 1)
 		assert.Equal(t, actorName, actors[0].Name())
 	})
-	t.Run("SpawnOn when node metric fetch fails", func(t *testing.T) {
+	t.Run("SpawnOn with least load placement and no peers spawns locally", func(t *testing.T) {
 		ctx := context.TODO()
-		clusterMock := new(mockcluster.Cluster)
+		sys, err := NewActorSystem("spawn-least-load", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
 
-		system := MockReplicationTestSystem(clusterMock)
-		system.remoting = remote.NewRemoting()
-		system.remotingEnabled.Store(true)
+		actorSystem := sys.(*actorSystem)
+		err = actorSystem.Start(ctx)
+		require.NoError(t, err)
 
-		client := system.remoting.HTTPClient()
-		client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
-			return nil, assert.AnError
+		pause.For(time.Second)
+
+		clusterMock := mockcluster.NewCluster(t)
+
+		actorSystem.locker.Lock()
+		actorSystem.cluster = clusterMock
+		actorSystem.locker.Unlock()
+		actorSystem.clusterEnabled.Store(true)
+
+		t.Cleanup(func() {
+			actorSystem.clusterEnabled.Store(false)
+			actorSystem.locker.Lock()
+			actorSystem.cluster = nil
+			actorSystem.locker.Unlock()
+			assert.NoError(t, actorSystem.Stop(ctx))
 		})
 
 		actor := NewMockActor()
 		actorName := "actorID"
-		peers := []*cluster.Peer{
-			{Host: "127.0.0.1", RemotingPort: 10001},
-			{Host: "127.0.0.1", RemotingPort: 10002},
-		}
 
-		clusterMock.EXPECT().ActorExists(mock.Anything, actorName).Return(false, nil)
-		clusterMock.EXPECT().Members(mock.Anything).Return(peers, nil)
+		// Return empty peers list, so LeastLoad should default to local spawn
+		clusterMock.EXPECT().ActorExists(mock.Anything, actorName).Return(false, nil).Twice()
+		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{}, nil)
 
-		t.Cleanup(func() {
-			system.remoting.Close()
-			clusterMock.AssertExpectations(t)
-		})
+		err = actorSystem.SpawnOn(ctx, actorName, actor, WithPlacement(LeastLoad))
+		require.NoError(t, err)
 
-		err := system.SpawnOn(ctx, actorName, actor, WithPlacement(LeastLoad))
-		require.Error(t, err)
-		assert.ErrorContains(t, err, "failed to fetch node metrics")
-		assert.ErrorIs(t, err, assert.AnError)
+		pause.For(200 * time.Millisecond)
+
+		// Verify actor was spawned locally
+		actors := actorSystem.Actors()
+		require.Len(t, actors, 1)
+		assert.Equal(t, actorName, actors[0].Name())
 	})
 	t.Run("SpawnOn with random placement", func(t *testing.T) {
 		// create a context

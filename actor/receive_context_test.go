@@ -2818,10 +2818,9 @@ func TestReceiveContext(t *testing.T) {
 
 		pnode, ok := pid2.ActorSystem().tree().node(pid2.ID())
 		require.True(t, ok)
-		watchers := pnode.watchers
 
 		found := false
-		for _, watcher := range watchers.Values() {
+		for _, watcher := range pnode.watchers {
 			if watcher.Equals(pid1) {
 				found = true
 				break
@@ -2834,7 +2833,7 @@ func TestReceiveContext(t *testing.T) {
 		found = false
 		// unwatch actor2
 		context.UnWatch(pid2)
-		for _, watcher := range watchers.Values() {
+		for _, watcher := range pnode.watchers {
 			if watcher.Equals(pid1) {
 				found = true
 				break

@@ -25,19 +25,15 @@ package actor
 import (
 	"context"
 	"errors"
-	"net/http"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"connectrpc.com/connect"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
-	"google.golang.org/protobuf/types/known/anypb"
-	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/tochemey/goakt/v3/discovery"
 	gerrors "github.com/tochemey/goakt/v3/errors"
@@ -110,7 +106,6 @@ func TestGrainIdentity_RemoteActivationOnDifferentPeer(t *testing.T) {
 
 	cl := mockcluster.NewCluster(t)
 	rem := mockremote.NewRemoting(t)
-	client := &MockRemotingServiceClient{}
 	node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
 	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
 
@@ -122,7 +117,9 @@ func TestGrainIdentity_RemoteActivationOnDifferentPeer(t *testing.T) {
 	cl.EXPECT().PutGrain(mock.Anything, mock.MatchedBy(func(actual *internalpb.Grain) bool {
 		return actual != nil && actual.GetGrainId().GetValue() == identity.String()
 	})).Return(nil).Once()
-	rem.EXPECT().RemotingServiceClient(remotePeer.Host, remotePeer.RemotingPort).Return(client)
+	rem.EXPECT().RemoteActivateGrain(ctx, remotePeer.Host, remotePeer.RemotingPort, mock.MatchedBy(func(req *remote.GrainRequest) bool {
+		return req != nil && req.Name == identity.String()
+	})).Return(nil)
 
 	got, err := sys.GrainIdentity(ctx, name, func(context.Context) (Grain, error) {
 		return grain, nil
@@ -131,9 +128,6 @@ func TestGrainIdentity_RemoteActivationOnDifferentPeer(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	require.Equal(t, identity.String(), got.String())
-	require.True(t, client.called)
-	require.NotNil(t, client.lastRequest)
-	require.Equal(t, identity.String(), client.lastRequest.GetGrain().GetGrainId().GetValue())
 }
 
 func TestGrainIdentity_RemoteActivationOnDifferentPeer_WithBrotliCompression(t *testing.T) {
@@ -142,16 +136,17 @@ func TestGrainIdentity_RemoteActivationOnDifferentPeer_WithBrotliCompression(t *
 	name := "remote-grain-brotli"
 	identity := newGrainIdentity(grain, name)
 
-	httpClient := &http.Client{}
 	remotePeer := &cluster.Peer{Host: "192.0.2.40", PeersPort: 15010, RemotingPort: 16010}
 	alternatePeer := &cluster.Peer{Host: "192.0.2.41", PeersPort: 15011, RemotingPort: 16011}
 	localPeer := &cluster.Peer{Host: "127.0.0.1", PeersPort: 14010, RemotingPort: 8085}
 
 	cl := mockcluster.NewCluster(t)
 	rem := mockremote.NewRemoting(t)
-	client := &MockRemotingServiceClient{}
 	node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
-	actorSystem := MockSimpleClusterReadyActorSystem(rem, cl, node)
+	actorSystem := MockSimpleClusterReadyActorSystem(rem, cl, node, remote.WithCompression(remote.BrotliCompression))
+
+	// Assert the system's remote config has the expected compression.
+	require.Equal(t, remote.BrotliCompression, actorSystem.remoteConfig.Compression())
 
 	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
 	cl.EXPECT().GetGrain(ctx, identity.String()).Return(nil, cluster.ErrGrainNotFound)
@@ -161,10 +156,9 @@ func TestGrainIdentity_RemoteActivationOnDifferentPeer_WithBrotliCompression(t *
 	cl.EXPECT().PutGrain(mock.Anything, mock.MatchedBy(func(actual *internalpb.Grain) bool {
 		return actual != nil && actual.GetGrainId().GetValue() == identity.String()
 	})).Return(nil).Once()
-	rem.EXPECT().RemotingServiceClient(remotePeer.Host, remotePeer.RemotingPort).Return(client)
-	rem.EXPECT().MaxReadFrameSize().Return(0)
-	rem.EXPECT().Compression().Return(remote.BrotliCompression)
-	rem.EXPECT().HTTPClient().Return(httpClient)
+	rem.EXPECT().RemoteActivateGrain(ctx, remotePeer.Host, remotePeer.RemotingPort, mock.MatchedBy(func(req *remote.GrainRequest) bool {
+		return req != nil && req.Name == identity.String()
+	})).Return(nil)
 
 	got, err := actorSystem.GrainIdentity(ctx, name, func(context.Context) (Grain, error) {
 		return grain, nil
@@ -173,30 +167,25 @@ func TestGrainIdentity_RemoteActivationOnDifferentPeer_WithBrotliCompression(t *
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	require.Equal(t, identity.String(), got.String())
-	require.True(t, client.called)
-	require.NotNil(t, client.lastRequest)
-	require.Equal(t, identity.String(), client.lastRequest.GetGrain().GetGrainId().GetValue())
-
-	clusterSvc := actorSystem.clusterClient(remotePeer)
-	require.NotNil(t, clusterSvc)
 }
 
 func TestGrainIdentity_RemoteActivationOnDifferentPeer_WithZstandardCompression(t *testing.T) {
 	ctx := t.Context()
 	grain := NewMockGrain()
-	name := "remote-grain-brotli"
+	name := "remote-grain-zstd"
 	identity := newGrainIdentity(grain, name)
 
-	httpClient := &http.Client{}
 	remotePeer := &cluster.Peer{Host: "192.0.2.40", PeersPort: 15010, RemotingPort: 16010}
 	alternatePeer := &cluster.Peer{Host: "192.0.2.41", PeersPort: 15011, RemotingPort: 16011}
 	localPeer := &cluster.Peer{Host: "127.0.0.1", PeersPort: 14010, RemotingPort: 8085}
 
 	cl := mockcluster.NewCluster(t)
 	rem := mockremote.NewRemoting(t)
-	client := &MockRemotingServiceClient{}
 	node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
-	actorSystem := MockSimpleClusterReadyActorSystem(rem, cl, node)
+	actorSystem := MockSimpleClusterReadyActorSystem(rem, cl, node, remote.WithCompression(remote.ZstdCompression))
+
+	// Assert the system's remote config has the expected compression.
+	require.Equal(t, remote.ZstdCompression, actorSystem.remoteConfig.Compression())
 
 	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
 	cl.EXPECT().GetGrain(ctx, identity.String()).Return(nil, cluster.ErrGrainNotFound)
@@ -206,10 +195,9 @@ func TestGrainIdentity_RemoteActivationOnDifferentPeer_WithZstandardCompression(
 	cl.EXPECT().PutGrain(mock.Anything, mock.MatchedBy(func(actual *internalpb.Grain) bool {
 		return actual != nil && actual.GetGrainId().GetValue() == identity.String()
 	})).Return(nil).Once()
-	rem.EXPECT().RemotingServiceClient(remotePeer.Host, remotePeer.RemotingPort).Return(client)
-	rem.EXPECT().MaxReadFrameSize().Return(0)
-	rem.EXPECT().Compression().Return(remote.ZstdCompression)
-	rem.EXPECT().HTTPClient().Return(httpClient)
+	rem.EXPECT().RemoteActivateGrain(ctx, remotePeer.Host, remotePeer.RemotingPort, mock.MatchedBy(func(req *remote.GrainRequest) bool {
+		return req != nil && req.Name == identity.String()
+	})).Return(nil)
 
 	got, err := actorSystem.GrainIdentity(ctx, name, func(context.Context) (Grain, error) {
 		return grain, nil
@@ -218,30 +206,25 @@ func TestGrainIdentity_RemoteActivationOnDifferentPeer_WithZstandardCompression(
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	require.Equal(t, identity.String(), got.String())
-	require.True(t, client.called)
-	require.NotNil(t, client.lastRequest)
-	require.Equal(t, identity.String(), client.lastRequest.GetGrain().GetGrainId().GetValue())
-
-	clusterSvc := actorSystem.clusterClient(remotePeer)
-	require.NotNil(t, clusterSvc)
 }
 
 func TestGrainIdentity_RemoteActivationOnDifferentPeer_WithGzipCompression(t *testing.T) {
 	ctx := t.Context()
 	grain := NewMockGrain()
-	name := "remote-grain-brotli"
+	name := "remote-grain-gzip"
 	identity := newGrainIdentity(grain, name)
 
-	httpClient := &http.Client{}
 	remotePeer := &cluster.Peer{Host: "192.0.2.40", PeersPort: 15010, RemotingPort: 16010}
 	alternatePeer := &cluster.Peer{Host: "192.0.2.41", PeersPort: 15011, RemotingPort: 16011}
 	localPeer := &cluster.Peer{Host: "127.0.0.1", PeersPort: 14010, RemotingPort: 8085}
 
 	cl := mockcluster.NewCluster(t)
 	rem := mockremote.NewRemoting(t)
-	client := &MockRemotingServiceClient{}
 	node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
-	actorSystem := MockSimpleClusterReadyActorSystem(rem, cl, node)
+	actorSystem := MockSimpleClusterReadyActorSystem(rem, cl, node, remote.WithCompression(remote.GzipCompression))
+
+	// Assert the system's remote config has the expected compression.
+	require.Equal(t, remote.GzipCompression, actorSystem.remoteConfig.Compression())
 
 	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
 	cl.EXPECT().GetGrain(ctx, identity.String()).Return(nil, cluster.ErrGrainNotFound)
@@ -251,10 +234,9 @@ func TestGrainIdentity_RemoteActivationOnDifferentPeer_WithGzipCompression(t *te
 	cl.EXPECT().PutGrain(mock.Anything, mock.MatchedBy(func(actual *internalpb.Grain) bool {
 		return actual != nil && actual.GetGrainId().GetValue() == identity.String()
 	})).Return(nil).Once()
-	rem.EXPECT().RemotingServiceClient(remotePeer.Host, remotePeer.RemotingPort).Return(client)
-	rem.EXPECT().MaxReadFrameSize().Return(0)
-	rem.EXPECT().Compression().Return(remote.GzipCompression)
-	rem.EXPECT().HTTPClient().Return(httpClient)
+	rem.EXPECT().RemoteActivateGrain(ctx, remotePeer.Host, remotePeer.RemotingPort, mock.MatchedBy(func(req *remote.GrainRequest) bool {
+		return req != nil && req.Name == identity.String()
+	})).Return(nil)
 
 	got, err := actorSystem.GrainIdentity(ctx, name, func(context.Context) (Grain, error) {
 		return grain, nil
@@ -263,12 +245,6 @@ func TestGrainIdentity_RemoteActivationOnDifferentPeer_WithGzipCompression(t *te
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	require.Equal(t, identity.String(), got.String())
-	require.True(t, client.called)
-	require.NotNil(t, client.lastRequest)
-	require.Equal(t, identity.String(), client.lastRequest.GetGrain().GetGrainId().GetValue())
-
-	clusterSvc := actorSystem.clusterClient(remotePeer)
-	require.NotNil(t, clusterSvc)
 }
 
 func TestGrainIdentity_RemoteActivationErrorPropagates(t *testing.T) {
@@ -283,7 +259,6 @@ func TestGrainIdentity_RemoteActivationErrorPropagates(t *testing.T) {
 	cl := mockcluster.NewCluster(t)
 	rem := mockremote.NewRemoting(t)
 	clientErr := errors.New("remote activate failed")
-	client := &MockRemotingServiceClient{activateErr: clientErr}
 	node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
 	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
 
@@ -296,7 +271,7 @@ func TestGrainIdentity_RemoteActivationErrorPropagates(t *testing.T) {
 		return actual != nil && actual.GetGrainId().GetValue() == identity.String()
 	})).Return(nil).Once()
 	cl.EXPECT().RemoveGrain(mock.Anything, identity.String()).Return(nil).Once()
-	rem.EXPECT().RemotingServiceClient(remotePeer.Host, remotePeer.RemotingPort).Return(client)
+	rem.EXPECT().RemoteActivateGrain(ctx, remotePeer.Host, remotePeer.RemotingPort, mock.Anything).Return(clientErr)
 
 	got, err := sys.GrainIdentity(ctx, name, func(context.Context) (Grain, error) {
 		return grain, nil
@@ -305,7 +280,6 @@ func TestGrainIdentity_RemoteActivationErrorPropagates(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorIs(t, err, clientErr)
 	require.Nil(t, got)
-	require.True(t, client.called)
 }
 
 func TestGrainIdentity_RemoteActivationWireEncodingError(t *testing.T) {
@@ -335,7 +309,7 @@ func TestGrainIdentity_RemoteActivationWireEncodingError(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorIs(t, err, failErr)
 	require.Nil(t, got)
-	rem.AssertNotCalled(t, "RemotingServiceClient", mock.Anything, mock.Anything)
+	rem.AssertNotCalled(t, "RemoteActivateGrain", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 }
 
 func TestTryRemoteGrainActivation(t *testing.T) {
@@ -348,32 +322,30 @@ func TestTryRemoteGrainActivation(t *testing.T) {
 			Host:    "192.0.2.50",
 			Port:    16050,
 		}
-		client := &MockRemotingServiceClient{}
 
-		rem.EXPECT().RemotingServiceClient(owner.Host, int(owner.Port)).Return(client)
+		rem.EXPECT().RemoteActivateGrain(ctx, owner.Host, int(owner.Port), mock.Anything).Return(nil)
 
 		handled, err := sys.tryRemoteGrainActivation(ctx, identity, grain, newGrainConfig(), owner)
 		require.NoError(t, err)
 		require.True(t, handled)
-		require.True(t, client.called)
 	})
 
 	t.Run("owner remote activation error", func(t *testing.T) {
 		ctx := t.Context()
 		grain := NewMockGrain()
-		sys, _, rem, identity := newActivationTestSystem(t, grain, "owner-remote-error", true)
+		sys, cl, rem, identity := newActivationTestSystem(t, grain, "owner-remote-error", true)
 		owner := &internalpb.Grain{
 			GrainId: &internalpb.GrainId{Value: identity.String()},
 			Host:    "192.0.2.51",
 			Port:    16051,
 		}
 		expectedErr := errors.New("remote activate failed")
-		client := &MockRemotingServiceClient{activateErr: expectedErr}
 
-		rem.EXPECT().RemotingServiceClient(owner.Host, int(owner.Port)).Return(client)
+		rem.EXPECT().RemoteActivateGrain(ctx, owner.Host, int(owner.Port), mock.Anything).Return(expectedErr)
+		cl.EXPECT().RemoveGrain(ctx, identity.String()).Return(nil).Once()
 
 		handled, err := sys.tryRemoteGrainActivation(ctx, identity, grain, newGrainConfig(), owner)
-		require.ErrorIs(t, err, expectedErr)
+		require.NoError(t, err)
 		require.False(t, handled)
 	})
 
@@ -390,7 +362,7 @@ func TestTryRemoteGrainActivation(t *testing.T) {
 		handled, err := sys.tryRemoteGrainActivation(ctx, identity, grain, newGrainConfig(), owner)
 		require.NoError(t, err)
 		require.False(t, handled)
-		rem.AssertNotCalled(t, "RemotingServiceClient", mock.Anything, mock.Anything)
+		rem.AssertNotCalled(t, "RemoteActivateGrain", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 	})
 
 	t.Run("owner empty returns false", func(t *testing.T) {
@@ -402,7 +374,7 @@ func TestTryRemoteGrainActivation(t *testing.T) {
 		handled, err := sys.tryRemoteGrainActivation(ctx, identity, grain, newGrainConfig(), owner)
 		require.NoError(t, err)
 		require.False(t, handled)
-		rem.AssertNotCalled(t, "RemotingServiceClient", mock.Anything, mock.Anything)
+		rem.AssertNotCalled(t, "RemoteActivateGrain", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 	})
 
 	t.Run("activation peer selection error", func(t *testing.T) {
@@ -464,7 +436,7 @@ func TestTryPeerActivation(t *testing.T) {
 		handled, err := sys.tryPeerActivation(ctx, identity, grain, newGrainConfig(), peer)
 		require.ErrorIs(t, err, expectedErr)
 		require.False(t, handled)
-		rem.AssertNotCalled(t, "RemotingServiceClient", mock.Anything, mock.Anything)
+		rem.AssertNotCalled(t, "RemoteActivateGrain", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 	})
 
 	t.Run("returns handled when claim not acquired", func(t *testing.T) {
@@ -479,7 +451,7 @@ func TestTryPeerActivation(t *testing.T) {
 		handled, err := sys.tryPeerActivation(ctx, identity, grain, newGrainConfig(), peer)
 		require.NoError(t, err)
 		require.True(t, handled)
-		rem.AssertNotCalled(t, "RemotingServiceClient", mock.Anything, mock.Anything)
+		rem.AssertNotCalled(t, "RemoteActivateGrain", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 	})
 
 	t.Run("returns error when put grain fails", func(t *testing.T) {
@@ -497,7 +469,7 @@ func TestTryPeerActivation(t *testing.T) {
 		handled, err := sys.tryPeerActivation(ctx, identity, grain, newGrainConfig(), peer)
 		require.ErrorIs(t, err, expectedErr)
 		require.False(t, handled)
-		rem.AssertNotCalled(t, "RemotingServiceClient", mock.Anything, mock.Anything)
+		rem.AssertNotCalled(t, "RemoteActivateGrain", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 	})
 
 	t.Run("returns handled when owner already exists", func(t *testing.T) {
@@ -517,7 +489,7 @@ func TestTryPeerActivation(t *testing.T) {
 		handled, err := sys.tryPeerActivation(ctx, identity, grain, newGrainConfig(), peer)
 		require.NoError(t, err)
 		require.True(t, handled)
-		rem.AssertNotCalled(t, "RemotingServiceClient", mock.Anything, mock.Anything)
+		rem.AssertNotCalled(t, "RemoteActivateGrain", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 	})
 }
 
@@ -1017,69 +989,6 @@ func TestRemoting_RemoteAskGrain_WithActorSystem(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestRemoteAskGrain_InjectsContextValues(t *testing.T) {
-	ctxKey := grainTestCtxKey{}
-	headerKey := "x-goakt-propagated"
-	headerVal := "abc-123"
-
-	ctx := context.WithValue(context.Background(), ctxKey, headerVal)
-	cl := mockcluster.NewCluster(t)
-	rem := mockremote.NewRemoting(t)
-	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 9000, RemotingPort: 9100}
-	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
-	sys.remoteConfig = remote.NewConfig(node.Host, node.RemotingPort, remote.WithContextPropagator(&headerPropagator{headerKey: headerKey, ctxKey: ctxKey}))
-
-	grain := NewMockGrain()
-	identity := newGrainIdentity(grain, "remote-grain")
-
-	grainInfo := &internalpb.Grain{
-		GrainId: &internalpb.GrainId{Value: identity.String()},
-		Host:    "192.0.2.10",
-		Port:    16010,
-	}
-
-	client := &MockRemotingServiceClient{
-		askResponse: &testpb.Reply{Content: "ok"},
-	}
-
-	cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(grainInfo, nil)
-	rem.EXPECT().RemotingServiceClient(grainInfo.Host, int(grainInfo.Port)).Return(client)
-
-	_, err := sys.AskGrain(ctx, identity, &testpb.TestReply{}, time.Second)
-	require.NoError(t, err)
-	require.Equal(t, headerVal, client.askHeaders.Get(headerKey))
-}
-
-func TestRemoteTellGrain_InjectsContextValues(t *testing.T) {
-	ctxKey := grainTestCtxKey{}
-	headerKey := "x-goakt-propagated"
-	headerVal := "tell-abc"
-
-	ctx := context.WithValue(context.Background(), ctxKey, headerVal)
-	cl := mockcluster.NewCluster(t)
-	rem := mockremote.NewRemoting(t)
-	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 9001, RemotingPort: 9101}
-	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
-	sys.remoteConfig = remote.NewConfig(node.Host, node.RemotingPort, remote.WithContextPropagator(&headerPropagator{headerKey: headerKey, ctxKey: ctxKey}))
-
-	grain := NewMockGrain()
-	identity := newGrainIdentity(grain, "remote-grain-tell")
-
-	grainInfo := &internalpb.Grain{
-		GrainId: &internalpb.GrainId{Value: identity.String()},
-		Host:    "192.0.2.11",
-		Port:    16011,
-	}
-
-	client := &MockRemotingServiceClient{}
-
-	cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(grainInfo, nil)
-	rem.EXPECT().RemotingServiceClient(grainInfo.Host, int(grainInfo.Port)).Return(client)
-
-	require.NoError(t, sys.TellGrain(ctx, identity, &testpb.TestSend{}))
-	require.Equal(t, headerVal, client.tellHeaders.Get(headerKey))
-}
-
 func TestSendToGrainOwner_ErrorsWhenOwnerMissing(t *testing.T) {
 	ctx := t.Context()
 	cl := mockcluster.NewCluster(t)
@@ -1091,343 +1000,6 @@ func TestSendToGrainOwner_ErrorsWhenOwnerMissing(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorContains(t, err, "grain owner is unknown")
 	require.Nil(t, resp)
-}
-
-func TestSendToGrainOwner_RemoteAsk(t *testing.T) {
-	ctxKey := grainTestCtxKey{}
-	headerKey := "x-goakt-propagated"
-	headerVal := "owner-ask"
-
-	ctx := context.WithValue(context.Background(), ctxKey, headerVal)
-	cl := mockcluster.NewCluster(t)
-	rem := mockremote.NewRemoting(t)
-	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 9013, RemotingPort: 9113}
-	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
-	sys.remoteConfig = remote.NewConfig(node.Host, node.RemotingPort, remote.WithContextPropagator(&headerPropagator{headerKey: headerKey, ctxKey: ctxKey}))
-
-	owner := &internalpb.Grain{
-		GrainId: &internalpb.GrainId{Value: "actor.mockgrain/owner-ask"},
-		Host:    "192.0.2.55",
-		Port:    16055,
-	}
-
-	client := &MockRemotingServiceClient{askResponse: &testpb.Reply{Content: "ok"}}
-	rem.EXPECT().RemotingServiceClient(owner.Host, int(owner.Port)).Return(client)
-
-	resp, err := sys.sendToGrainOwner(ctx, owner, &testpb.TestReply{}, time.Second, true)
-	require.NoError(t, err)
-	require.NotNil(t, resp)
-	require.Equal(t, "ok", resp.(*testpb.Reply).Content)
-	require.Equal(t, headerVal, client.askHeaders.Get(headerKey))
-}
-
-func TestSendToGrainOwner_RemoteTellError(t *testing.T) {
-	ctxKey := grainTestCtxKey{}
-	headerKey := "x-goakt-propagated"
-	headerVal := "owner-tell"
-
-	ctx := context.WithValue(context.Background(), ctxKey, headerVal)
-	cl := mockcluster.NewCluster(t)
-	rem := mockremote.NewRemoting(t)
-	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 9014, RemotingPort: 9114}
-	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
-	sys.remoteConfig = remote.NewConfig(node.Host, node.RemotingPort, remote.WithContextPropagator(&headerPropagator{headerKey: headerKey, ctxKey: ctxKey}))
-
-	owner := &internalpb.Grain{
-		GrainId: &internalpb.GrainId{Value: "actor.mockgrain/owner-tell"},
-		Host:    "192.0.2.56",
-		Port:    16056,
-	}
-
-	expectedErr := errors.New("tell failed")
-	client := &MockRemotingServiceClient{tellErr: expectedErr}
-	rem.EXPECT().RemotingServiceClient(owner.Host, int(owner.Port)).Return(client)
-
-	resp, err := sys.sendToGrainOwner(ctx, owner, &testpb.TestSend{}, time.Second, false)
-	require.Error(t, err)
-	require.ErrorIs(t, err, expectedErr)
-	require.Nil(t, resp)
-	require.Equal(t, headerVal, client.tellHeaders.Get(headerKey))
-}
-
-func TestRemoteAskGrain_ExtractsContextValues(t *testing.T) {
-	ctxKey := struct{}{}
-	headerKey := "x-goakt-propagated"
-	headerVal := "inbound-ask"
-	host := "127.0.0.1"
-	port := 9102
-
-	cl := mockcluster.NewCluster(t)
-	rem := mockremote.NewRemoting(t)
-	node := &discovery.Node{Host: host, PeersPort: 9002, RemotingPort: port}
-	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
-	sys.remoteConfig = remote.NewConfig(node.Host, node.RemotingPort, remote.WithContextPropagator(&headerPropagator{headerKey: headerKey, ctxKey: ctxKey}))
-	sys.remotingEnabled.Store(true)
-
-	grain := &contextEchoGrain{key: ctxKey}
-	sys.registry.Register(grain)
-	identity := newGrainIdentity(grain, "local-grain")
-	pid := newGrainPID(identity, grain, sys, newGrainConfig())
-	pid.activated.Store(true)
-	sys.grains.Set(identity.String(), pid)
-
-	msg, _ := anypb.New(&testpb.TestReply{})
-	req := connect.NewRequest(&internalpb.RemoteAskGrainRequest{
-		Grain: &internalpb.Grain{
-			GrainId: &internalpb.GrainId{Value: identity.String()},
-			Host:    host,
-			Port:    int32(port),
-		},
-		Message:        msg,
-		RequestTimeout: durationpb.New(2 * time.Second),
-	})
-	req.Header().Set(headerKey, headerVal)
-
-	_, err := sys.RemoteAskGrain(context.Background(), req)
-	require.NoError(t, err)
-	require.Equal(t, headerVal, grain.Seen())
-}
-
-func TestRemoteAskGrain_ContextExtractionError(t *testing.T) {
-	extractErr := errors.New("extract failed")
-	host := "127.0.0.1"
-	port := 9104
-
-	cl := mockcluster.NewCluster(t)
-	rem := mockremote.NewRemoting(t)
-	node := &discovery.Node{Host: host, PeersPort: 9004, RemotingPort: port}
-	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
-	sys.remoteConfig = remote.NewConfig(node.Host, node.RemotingPort, remote.WithContextPropagator(&MockFailingContextPropagator{err: extractErr}))
-	sys.remotingEnabled.Store(true)
-
-	identity := newGrainIdentity(NewMockGrain(), "extract-error-grain")
-	msg, _ := anypb.New(&testpb.TestReply{})
-	req := connect.NewRequest(&internalpb.RemoteAskGrainRequest{
-		Grain: &internalpb.Grain{
-			GrainId: &internalpb.GrainId{Value: identity.String()},
-			Host:    host,
-			Port:    int32(port),
-		},
-		Message:        msg,
-		RequestTimeout: durationpb.New(time.Second),
-	})
-
-	_, err := sys.RemoteAskGrain(context.Background(), req)
-	require.Error(t, err)
-
-	var connectErr *connect.Error
-	require.ErrorAs(t, err, &connectErr)
-	require.Equal(t, connect.CodeInvalidArgument, connectErr.Code())
-	require.ErrorIs(t, connectErr, extractErr)
-}
-
-func TestRemoteAskGrain_InvalidGrainIdentity(t *testing.T) {
-	host := "127.0.0.1"
-	port := 9200
-
-	cl := mockcluster.NewCluster(t)
-	rem := mockremote.NewRemoting(t)
-	node := &discovery.Node{Host: host, PeersPort: 9020, RemotingPort: port}
-	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
-	sys.remotingEnabled.Store(true)
-
-	invalidIdentity := "actor.MockGrain/invalid name"
-	msg, _ := anypb.New(&testpb.TestReply{})
-	req := connect.NewRequest(&internalpb.RemoteAskGrainRequest{
-		Grain: &internalpb.Grain{
-			GrainId: &internalpb.GrainId{Value: invalidIdentity},
-			Host:    host,
-			Port:    int32(port),
-		},
-		Message:        msg,
-		RequestTimeout: durationpb.New(time.Second),
-	})
-
-	_, err := sys.RemoteAskGrain(context.Background(), req)
-	require.Error(t, err)
-
-	var connectErr *connect.Error
-	require.ErrorAs(t, err, &connectErr)
-	require.Equal(t, connect.CodeInvalidArgument, connectErr.Code())
-	require.ErrorIs(t, connectErr, gerrors.ErrInvalidGrainIdentity)
-}
-
-func TestRemoteAskGrain_LocalSendError(t *testing.T) {
-	host := "127.0.0.1"
-	port := 9201
-
-	cl := mockcluster.NewCluster(t)
-	rem := mockremote.NewRemoting(t)
-	node := &discovery.Node{Host: host, PeersPort: 9021, RemotingPort: port}
-	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
-	sys.remotingEnabled.Store(true)
-
-	grain := NewMockGrainReceiveFailure()
-	sys.registry.Register(grain)
-	identity := newGrainIdentity(grain, "receive-failure")
-	pid := newGrainPID(identity, grain, sys, newGrainConfig())
-	pid.activated.Store(true)
-	sys.grains.Set(identity.String(), pid)
-
-	msg, _ := anypb.New(&testpb.TestSend{})
-	req := connect.NewRequest(&internalpb.RemoteAskGrainRequest{
-		Grain: &internalpb.Grain{
-			GrainId: &internalpb.GrainId{Value: identity.String()},
-			Host:    host,
-			Port:    int32(port),
-		},
-		Message:        msg,
-		RequestTimeout: durationpb.New(time.Second),
-	})
-
-	_, err := sys.RemoteAskGrain(context.Background(), req)
-	require.Error(t, err)
-
-	var connectErr *connect.Error
-	require.ErrorAs(t, err, &connectErr)
-	require.Equal(t, connect.CodeInternal, connectErr.Code())
-	require.Contains(t, connectErr.Message(), "failed to process message")
-}
-
-func TestRemoteTellGrain_ExtractsContextValues(t *testing.T) {
-	ctxKey := struct{}{}
-	headerKey := "x-goakt-propagated"
-	headerVal := "inbound-tell"
-	host := "127.0.0.1"
-	port := 9103
-
-	cl := mockcluster.NewCluster(t)
-	rem := mockremote.NewRemoting(t)
-	node := &discovery.Node{Host: host, PeersPort: 9003, RemotingPort: port}
-	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
-	sys.remoteConfig = remote.NewConfig(node.Host, node.RemotingPort, remote.WithContextPropagator(&headerPropagator{headerKey: headerKey, ctxKey: ctxKey}))
-	sys.remotingEnabled.Store(true)
-
-	grain := &contextEchoGrain{key: ctxKey}
-	sys.registry.Register(grain)
-	identity := newGrainIdentity(grain, "local-grain-tell")
-	pid := newGrainPID(identity, grain, sys, newGrainConfig())
-	pid.activated.Store(true)
-	sys.grains.Set(identity.String(), pid)
-
-	msg, _ := anypb.New(&testpb.TestSend{})
-	req := connect.NewRequest(&internalpb.RemoteTellGrainRequest{
-		Grain: &internalpb.Grain{
-			GrainId: &internalpb.GrainId{Value: identity.String()},
-			Host:    host,
-			Port:    int32(port),
-		},
-		Message: msg,
-	})
-	req.Header().Set(headerKey, headerVal)
-
-	_, err := sys.RemoteTellGrain(context.Background(), req)
-	require.NoError(t, err)
-	require.Equal(t, headerVal, grain.Seen())
-}
-
-func TestRemoteTellGrain_ContextExtractionError(t *testing.T) {
-	extractErr := errors.New("extract failed")
-	host := "127.0.0.1"
-	port := 9202
-
-	cl := mockcluster.NewCluster(t)
-	rem := mockremote.NewRemoting(t)
-	node := &discovery.Node{Host: host, PeersPort: 9022, RemotingPort: port}
-	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
-	sys.remoteConfig = remote.NewConfig(node.Host, node.RemotingPort, remote.WithContextPropagator(&MockFailingContextPropagator{err: extractErr}))
-	sys.remotingEnabled.Store(true)
-
-	grain := NewMockGrain()
-	identity := newGrainIdentity(grain, "tell-extract-error")
-	pid := newGrainPID(identity, grain, sys, newGrainConfig())
-	pid.activated.Store(true)
-	sys.registry.Register(grain)
-	sys.grains.Set(identity.String(), pid)
-
-	msg, _ := anypb.New(&testpb.TestSend{})
-	req := connect.NewRequest(&internalpb.RemoteTellGrainRequest{
-		Grain: &internalpb.Grain{
-			GrainId: &internalpb.GrainId{Value: identity.String()},
-			Host:    host,
-			Port:    int32(port),
-		},
-		Message: msg,
-	})
-
-	_, err := sys.RemoteTellGrain(context.Background(), req)
-	require.Error(t, err)
-
-	var connectErr *connect.Error
-	require.ErrorAs(t, err, &connectErr)
-	require.Equal(t, connect.CodeInvalidArgument, connectErr.Code())
-	require.ErrorIs(t, connectErr, extractErr)
-}
-
-func TestRemoteTellGrain_InvalidGrainIdentity(t *testing.T) {
-	host := "127.0.0.1"
-	port := 9203
-
-	cl := mockcluster.NewCluster(t)
-	rem := mockremote.NewRemoting(t)
-	node := &discovery.Node{Host: host, PeersPort: 9023, RemotingPort: port}
-	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
-	sys.remotingEnabled.Store(true)
-
-	invalidIdentity := "actor.MockGrain/invalid name"
-	msg, _ := anypb.New(&testpb.TestSend{})
-	req := connect.NewRequest(&internalpb.RemoteTellGrainRequest{
-		Grain: &internalpb.Grain{
-			GrainId: &internalpb.GrainId{Value: invalidIdentity},
-			Host:    host,
-			Port:    int32(port),
-		},
-		Message: msg,
-	})
-
-	_, err := sys.RemoteTellGrain(context.Background(), req)
-	require.Error(t, err)
-
-	var connectErr *connect.Error
-	require.ErrorAs(t, err, &connectErr)
-	require.Equal(t, connect.CodeInvalidArgument, connectErr.Code())
-	require.ErrorIs(t, connectErr, gerrors.ErrInvalidGrainIdentity)
-}
-
-func TestRemoteTellGrain_LocalSendError(t *testing.T) {
-	host := "127.0.0.1"
-	port := 9204
-
-	cl := mockcluster.NewCluster(t)
-	rem := mockremote.NewRemoting(t)
-	node := &discovery.Node{Host: host, PeersPort: 9024, RemotingPort: port}
-	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
-	sys.remotingEnabled.Store(true)
-
-	grain := NewMockGrainReceiveFailure()
-	sys.registry.Register(grain)
-	identity := newGrainIdentity(grain, "tell-receive-failure")
-	pid := newGrainPID(identity, grain, sys, newGrainConfig())
-	pid.activated.Store(true)
-	sys.grains.Set(identity.String(), pid)
-
-	msg, _ := anypb.New(&testpb.TestSend{})
-	req := connect.NewRequest(&internalpb.RemoteTellGrainRequest{
-		Grain: &internalpb.Grain{
-			GrainId: &internalpb.GrainId{Value: identity.String()},
-			Host:    host,
-			Port:    int32(port),
-		},
-		Message: msg,
-	})
-
-	_, err := sys.RemoteTellGrain(context.Background(), req)
-	require.Error(t, err)
-
-	var connectErr *connect.Error
-	require.ErrorAs(t, err, &connectErr)
-	require.Equal(t, connect.CodeInternal, connectErr.Code())
-	require.Contains(t, connectErr.Message(), "failed to process message")
 }
 
 func TestGrainRegistrationAndDeregistration(t *testing.T) {

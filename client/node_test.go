@@ -24,7 +24,6 @@ package client
 
 import (
 	"crypto/tls"
-	"fmt"
 	"net"
 	"strconv"
 	"testing"
@@ -52,8 +51,6 @@ func TestNode(t *testing.T) {
 	require.Equal(t, address, node.Address())
 	require.Exactly(t, float64(10), node.Weight())
 	require.NoError(t, node.Validate())
-	require.NotNil(t, node.HTTPClient())
-	require.Equal(t, fmt.Sprintf("https://%s", address), node.HTTPEndPoint())
 	require.NotNil(t, node.Remoting())
 	host, port := node.HostAndPort()
 	require.Equal(t, "127.0.0.1", host)

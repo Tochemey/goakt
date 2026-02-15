@@ -77,6 +77,12 @@ linters:
           - revive
         path: _test\.go
         text: exported func.*returns unexported type.*which can be annoying to use
+      - linters:
+          - revive
+        text: ".*stutters.*"
+      - linters:
+          - revive
+        text: "unused-parameter:"
     paths:
       - mocks
       - third_party$

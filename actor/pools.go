@@ -23,72 +23,108 @@
 package actor
 
 import (
-	"sync"
-
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v3/internal/timer"
 )
 
-var (
-	timers = timer.NewPool()
-	// pool holds a pool of ReceiveContext
-	pool = sync.Pool{
-		New: func() any {
-			return new(ReceiveContext)
-		},
-	}
-	responsePool = sync.Pool{
-		New: func() any {
-			return make(chan proto.Message, 1)
-		},
-	}
-	errorPool = sync.Pool{
-		New: func() any {
-			return make(chan error, 1)
-		},
-	}
-)
+// contextPoolSize controls the bounded channel-based pool for ReceiveContext.
+// Unlike sync.Pool, items in a channel survive GC cycles, which eliminates
+// the "pool thrashing" pattern that dominates CPU time (56% madvise + 23%
+// pool overhead in profiling). The size should be large enough to absorb
+// burst traffic without overflowing to heap allocation.
+const contextPoolSize = 512
 
-// getContext retrieves a message from the pool
+// contextCh is a channel-based bounded pool for ReceiveContext objects.
+// It survives GC cycles and provides stable allocation behavior without
+// the cross-P thrashing inherent to sync.Pool.
+var contextCh = make(chan *ReceiveContext, contextPoolSize)
+
+// responseCh is a channel-based bounded pool for response channels.
+// Survives GC cycles unlike sync.Pool, eliminating cross-P thrashing
+// for synchronous (Ask) message paths.
+var responseCh = make(chan chan proto.Message, contextPoolSize)
+
+// errorCh is a channel-based bounded pool for error channels.
+// Survives GC cycles unlike sync.Pool.
+var errorCh = make(chan chan error, contextPoolSize)
+
+var timers = timer.NewPool()
+
+// getContext retrieves a ReceiveContext from the channel-based pool.
+// Falls back to heap allocation if the pool is empty.
 func getContext() *ReceiveContext {
-	return pool.Get().(*ReceiveContext)
+	select {
+	case ctx := <-contextCh:
+		return ctx
+	default:
+		return new(ReceiveContext)
+	}
 }
 
-// releaseContext sends the message context back to the pool
+// releaseContext sends the message context back to the channel-based pool.
+// If the context was stashed by the user's behavior (ctx.Stash()),
+// it is still owned by the stash and must not be returned to the pool.
+// If the pool is full, the context is dropped for GC collection.
 func releaseContext(receiveContext *ReceiveContext) {
+	if receiveContext.stashed.Load() {
+		return
+	}
 	receiveContext.reset()
-	pool.Put(receiveContext)
+	select {
+	case contextCh <- receiveContext:
+	default:
+		// Pool is full; let GC collect the excess context.
+	}
 }
 
 func getResponseChannel() chan proto.Message {
-	return responsePool.Get().(chan proto.Message)
+	select {
+	case ch := <-responseCh:
+		return ch
+	default:
+		return make(chan proto.Message, 1)
+	}
 }
 
 func putResponseChannel(ch chan proto.Message) {
+	// Drain any stale response (e.g. from a timed-out Ask where the actor
+	// replied after the caller gave up).
 	for {
 		select {
 		case <-ch:
 			continue
 		default:
-			responsePool.Put(ch)
-			return
 		}
+		break
+	}
+	select {
+	case responseCh <- ch:
+	default:
 	}
 }
 
 func getErrorChannel() chan error {
-	return errorPool.Get().(chan error)
+	select {
+	case ch := <-errorCh:
+		return ch
+	default:
+		return make(chan error, 1)
+	}
 }
 
 func putErrorChannel(ch chan error) {
+	// Drain any stale error.
 	for {
 		select {
 		case <-ch:
 			continue
 		default:
-			errorPool.Put(ch)
-			return
 		}
+		break
+	}
+	select {
+	case errorCh <- ch:
+	default:
 	}
 }

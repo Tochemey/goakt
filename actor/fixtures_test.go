@@ -28,16 +28,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
-	"net/http/httptest"
-	"net/url"
 	"strconv"
 	"sync"
 	"testing"
 	"time"
 
-	"connectrpc.com/connect"
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -46,8 +42,6 @@ import (
 	"github.com/travisjeffery/go-dynaport"
 	otelmetric "go.opentelemetry.io/otel/metric"
 	"go.uber.org/atomic"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/datacenter"
@@ -62,7 +56,6 @@ import (
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/datacentercontroller"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/internal/types"
@@ -1519,6 +1512,7 @@ func MockReplicationTestSystem(clusterMock *mockcluster.Cluster) *actorSystem {
 	sys := &actorSystem{
 		name:         "test-replication",
 		logger:       log.DiscardLogger,
+		actors:       newTree(),
 		actorsQueue:  make(chan *internalpb.Actor, 4),
 		grainsQueue:  make(chan *internalpb.Grain, 4),
 		remoteConfig: remote.NewConfig("127.0.0.1", 8080),
@@ -1543,7 +1537,7 @@ func MockReplicationTestSystem(clusterMock *mockcluster.Cluster) *actorSystem {
 	return sys
 }
 
-func MockSimpleClusterReadyActorSystem(rem remote.Remoting, cl cluster.Cluster, node *discovery.Node) *actorSystem {
+func MockSimpleClusterReadyActorSystem(rem remote.Remoting, cl cluster.Cluster, node *discovery.Node, opts ...remote.Option) *actorSystem {
 	sys := &actorSystem{
 		logger:      log.DiscardLogger,
 		cluster:     cl,
@@ -1552,6 +1546,7 @@ func MockSimpleClusterReadyActorSystem(rem remote.Remoting, cl cluster.Cluster, 
 		remoteConfig: remote.NewConfig(
 			node.Host,
 			node.RemotingPort,
+			opts...,
 		),
 	}
 
@@ -1627,29 +1622,6 @@ func (MockNopMailbox) IsEmpty() bool                 { return true }
 func (MockNopMailbox) Len() int64                    { return 0 }
 func (MockNopMailbox) Dispose()                      {}
 
-func MockClusterPeer(t *testing.T, load uint64, metricErr error, opts ...connect.HandlerOption) *cluster.Peer {
-	t.Helper()
-	service := &MockClusterService{Load: load, Err: metricErr}
-	path, handler := internalpbconnect.NewClusterServiceHandler(service, opts...)
-	mux := http.NewServeMux()
-	mux.Handle(path, handler)
-	server := httptest.NewServer(mux)
-	t.Cleanup(server.Close)
-
-	u, err := url.Parse(server.URL)
-	require.NoError(t, err)
-	host, portStr, err := net.SplitHostPort(u.Host)
-	require.NoError(t, err)
-	port, err := strconv.Atoi(portStr)
-	require.NoError(t, err)
-
-	return &cluster.Peer{
-		Host:         host,
-		PeersPort:    port,
-		RemotingPort: port,
-	}
-}
-
 func MockSingletonClusterReadyActorSystem(t *testing.T) *actorSystem {
 	t.Helper()
 	ports := dynaport.Get(3)
@@ -1676,114 +1648,6 @@ func MockSingletonClusterReadyActorSystem(t *testing.T) *actorSystem {
 
 // //////////////////////////////////////// CLUSTER PROVIDERS MOCKS //////////////////////////////////////
 type providerFactory func(t *testing.T, host string, discoveryPort int) discovery.Provider
-
-type MockClusterService struct {
-	Load uint64
-	Err  error
-}
-
-func (x *MockClusterService) GetNodeMetric(_ context.Context, _ *connect.Request[internalpb.GetNodeMetricRequest]) (*connect.Response[internalpb.GetNodeMetricResponse], error) {
-	if x.Err != nil {
-		return nil, x.Err
-	}
-	return connect.NewResponse(&internalpb.GetNodeMetricResponse{Load: x.Load}), nil
-}
-
-func (x *MockClusterService) GetKinds(_ context.Context, _ *connect.Request[internalpb.GetKindsRequest]) (*connect.Response[internalpb.GetKindsResponse], error) {
-	return connect.NewResponse(&internalpb.GetKindsResponse{}), nil
-}
-
-type MockRemotingServiceClient struct {
-	called      bool
-	lastRequest *internalpb.RemoteActivateGrainRequest
-	activateErr error
-
-	askHeaders  http.Header
-	tellHeaders http.Header
-	askResponse proto.Message
-	askErr      error
-	tellErr     error
-}
-
-var _ internalpbconnect.RemotingServiceClient = (*MockRemotingServiceClient)(nil)
-
-func (x *MockRemotingServiceClient) RemoteActivateGrain(_ context.Context, req *connect.Request[internalpb.RemoteActivateGrainRequest]) (*connect.Response[internalpb.RemoteActivateGrainResponse], error) {
-	x.called = true
-	x.lastRequest = req.Msg
-	if x.activateErr != nil {
-		return nil, x.activateErr
-	}
-	return connect.NewResponse(&internalpb.RemoteActivateGrainResponse{}), nil
-}
-
-func (x *MockRemotingServiceClient) RemoteAsk(context.Context, *connect.Request[internalpb.RemoteAskRequest]) (*connect.Response[internalpb.RemoteAskResponse], error) {
-	return nil, errors.New("not implemented")
-}
-
-func (x *MockRemotingServiceClient) RemoteTell(context.Context, *connect.Request[internalpb.RemoteTellRequest]) (*connect.Response[internalpb.RemoteTellResponse], error) {
-	return nil, errors.New("not implemented")
-}
-
-func (x *MockRemotingServiceClient) RemoteLookup(context.Context, *connect.Request[internalpb.RemoteLookupRequest]) (*connect.Response[internalpb.RemoteLookupResponse], error) {
-	return nil, errors.New("not implemented")
-}
-
-func (x *MockRemotingServiceClient) RemoteReSpawn(context.Context, *connect.Request[internalpb.RemoteReSpawnRequest]) (*connect.Response[internalpb.RemoteReSpawnResponse], error) {
-	return nil, errors.New("not implemented")
-}
-
-func (x *MockRemotingServiceClient) RemoteStop(context.Context, *connect.Request[internalpb.RemoteStopRequest]) (*connect.Response[internalpb.RemoteStopResponse], error) {
-	return nil, errors.New("not implemented")
-}
-
-func (x *MockRemotingServiceClient) RemoteSpawn(context.Context, *connect.Request[internalpb.RemoteSpawnRequest]) (*connect.Response[internalpb.RemoteSpawnResponse], error) {
-	return nil, errors.New("not implemented")
-}
-
-func (x *MockRemotingServiceClient) RemoteReinstate(context.Context, *connect.Request[internalpb.RemoteReinstateRequest]) (*connect.Response[internalpb.RemoteReinstateResponse], error) {
-	return nil, errors.New("not implemented")
-}
-
-func (x *MockRemotingServiceClient) RemoteAskGrain(_ context.Context, req *connect.Request[internalpb.RemoteAskGrainRequest]) (*connect.Response[internalpb.RemoteAskGrainResponse], error) {
-	x.askHeaders = req.Header().Clone()
-	if x.askErr != nil {
-		return nil, x.askErr
-	}
-	if x.askResponse == nil {
-		return nil, errors.New("not implemented")
-	}
-	response, _ := anypb.New(x.askResponse)
-	return connect.NewResponse(&internalpb.RemoteAskGrainResponse{Message: response}), nil
-}
-
-func (x *MockRemotingServiceClient) RemoteTellGrain(_ context.Context, req *connect.Request[internalpb.RemoteTellGrainRequest]) (*connect.Response[internalpb.RemoteTellGrainResponse], error) {
-	x.tellHeaders = req.Header().Clone()
-	if x.tellErr != nil {
-		return nil, x.tellErr
-	}
-	return connect.NewResponse(&internalpb.RemoteTellGrainResponse{}), nil
-}
-
-func (x *MockRemotingServiceClient) PersistPeerState(context.Context, *connect.Request[internalpb.PersistPeerStateRequest]) (*connect.Response[internalpb.PersistPeerStateResponse], error) {
-	panic("unimplemented")
-}
-
-type actorHandler struct {
-	internalpbconnect.UnimplementedRemotingServiceHandler
-	askHeader  http.Header
-	tellHeader http.Header
-}
-
-func (h *actorHandler) RemoteAsk(_ context.Context, req *connect.Request[internalpb.RemoteAskRequest]) (*connect.Response[internalpb.RemoteAskResponse], error) {
-	h.askHeader = req.Header().Clone()
-	msg, _ := anypb.New(&testpb.Reply{Content: "ok"})
-	return connect.NewResponse(&internalpb.RemoteAskResponse{Messages: []*anypb.Any{msg}}), nil
-}
-
-func (h *actorHandler) RemoteTell(_ context.Context, req *connect.Request[internalpb.RemoteTellRequest]) (*connect.Response[internalpb.RemoteTellResponse], error) {
-	h.tellHeader = req.Header().Clone()
-	return connect.NewResponse(new(internalpb.RemoteTellResponse)), nil
-}
 
 type headerPropagator struct {
 	headerKey string

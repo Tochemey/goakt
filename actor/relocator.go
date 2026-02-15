@@ -24,10 +24,10 @@ package actor
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"strconv"
 
-	"connectrpc.com/connect"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/tochemey/goakt/v3/address"
@@ -245,7 +245,6 @@ func (r *relocator) activateRemoteGrain(ctx context.Context, grain *internalpb.G
 	remoteHost := peer.Host
 	remotingPort := peer.RemotingPort
 	remoting := r.pid.ActorSystem().getRemoting()
-	remoteClient := remoting.RemotingServiceClient(remoteHost, remotingPort)
 
 	exist, err := r.pid.ActorSystem().getCluster().GrainExists(ctx, grain.GetGrainId().GetName())
 	if err != nil {
@@ -259,14 +258,26 @@ func (r *relocator) activateRemoteGrain(ctx context.Context, grain *internalpb.G
 
 	grain.Host = remoteHost
 	grain.Port = int32(remotingPort)
-	request := connect.NewRequest(&internalpb.RemoteActivateGrainRequest{
-		Grain: grain,
-	})
 
-	if _, err := remoteClient.RemoteActivateGrain(ctx, request); err != nil {
+	// Use proto TCP client
+	client := remoting.NetClient(remoteHost, remotingPort)
+	request := &internalpb.RemoteActivateGrainRequest{
+		Grain: grain,
+	}
+
+	resp, err := client.SendProto(ctx, request)
+	if err != nil {
 		r.logger.Error(err)
 		return errors.NewSpawnError(err)
 	}
+
+	// Check for proto errors
+	if errResp, ok := resp.(*internalpb.Error); ok {
+		err := fmt.Errorf("proto error: code=%s, msg=%s", errResp.GetCode(), errResp.GetMessage())
+		r.logger.Error(err)
+		return errors.NewSpawnError(err)
+	}
+
 	return nil
 }
 

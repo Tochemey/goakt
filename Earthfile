@@ -1,6 +1,6 @@
 VERSION 0.8
 
-FROM golang:1.25.5-alpine
+FROM golang:1.26.0-alpine
 
 # install gcc dependencies into alpine for CGO
 RUN apk --no-cache add git ca-certificates gcc musl-dev libc-dev binutils-gold curl openssh
@@ -23,7 +23,7 @@ RUN go install connectrpc.com/connect/cmd/protoc-gen-connect-go@latest
 
 # install linter
 # binary will be $(go env GOPATH)/bin/golangci-lint
-RUN curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.8.0
+RUN curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.9.0
 RUN golangci-lint --version
 
 # install vektra/mockery

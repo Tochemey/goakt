@@ -24,7 +24,6 @@ package actor
 
 import (
 	"errors"
-	"fmt"
 	"strings"
 
 	gerrors "github.com/tochemey/goakt/v3/errors"
@@ -43,8 +42,9 @@ import (
 // GrainIdentity enables location-transparent routing, lifecycle management, and stable grain identity
 // across distributed systems and restarts. They are immutable and safe for concurrent use.
 type GrainIdentity struct {
-	kind string // Fully qualified type name of the grain
-	name string // Unique instance identifier within the grain type
+	kind      string // Fully qualified type name of the grain
+	name      string // Unique instance identifier within the grain type
+	cachedStr string // lazily computed by String(); safe because fields are immutable after construction
 }
 
 // ensure GrainIdentity implements the validation.Validator interface
@@ -95,7 +95,13 @@ func (g *GrainIdentity) String() string {
 	if g == nil {
 		return ""
 	}
-	return fmt.Sprintf("%s%s%s", g.kind, id.GrainIdentitySeparator, g.name)
+	// Return cached result if available. GrainIdentity fields are immutable
+	// after construction, so the string never changes.
+	if g.cachedStr != "" {
+		return g.cachedStr
+	}
+	g.cachedStr = g.kind + id.GrainIdentitySeparator + g.name
+	return g.cachedStr
 }
 
 // Equal checks whether this GrainIdentity is equal to another.

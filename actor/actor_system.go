@@ -24,11 +24,9 @@ package actor
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
-	stdhttp "net/http"
 	"os"
 	"os/signal"
 	"regexp"
@@ -40,20 +38,15 @@ import (
 	"syscall"
 	"time"
 
-	"connectrpc.com/connect"
 	goset "github.com/deckarep/golang-set/v2"
 	"github.com/flowchartsman/retry"
-	"go.akshayshah.org/connectproto"
 	"go.opentelemetry.io/otel/attribute"
 	otelmetric "go.opentelemetry.io/otel/metric"
 	"go.uber.org/atomic"
 	"go.uber.org/multierr"
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/datacenter"
@@ -65,15 +58,11 @@ import (
 	"github.com/tochemey/goakt/v3/hash"
 	"github.com/tochemey/goakt/v3/internal/chain"
 	"github.com/tochemey/goakt/v3/internal/cluster"
-	"github.com/tochemey/goakt/v3/internal/codec"
-	"github.com/tochemey/goakt/v3/internal/compression/brotli"
-	"github.com/tochemey/goakt/v3/internal/compression/zstd"
 	"github.com/tochemey/goakt/v3/internal/datacentercontroller"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/internalpb/internalpbconnect"
 	"github.com/tochemey/goakt/v3/internal/locker"
 	"github.com/tochemey/goakt/v3/internal/metric"
-	"github.com/tochemey/goakt/v3/internal/network"
+	inet "github.com/tochemey/goakt/v3/internal/net"
 	"github.com/tochemey/goakt/v3/internal/pointer"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/internal/ticker"
@@ -821,8 +810,7 @@ type actorSystem struct {
 	remoting        remote.Remoting
 
 	// Specifies the remoting server
-	server       *stdhttp.Server
-	listener     net.Listener
+	remoteServer *inet.ProtoServer // Proto TCP server
 	remoteConfig *remote.Config
 
 	// cluster settings
@@ -903,9 +891,7 @@ type actorSystem struct {
 var (
 	// enforce compilation error when all methods of the ActorSystem interface are not implemented
 	// by the struct actorSystem
-	_ ActorSystem                              = (*actorSystem)(nil)
-	_ internalpbconnect.RemotingServiceHandler = (*actorSystem)(nil)
-	_ internalpbconnect.ClusterServiceHandler  = (*actorSystem)(nil)
+	_ ActorSystem = (*actorSystem)(nil)
 )
 
 // NewActorSystem creates and configures a new ActorSystem instance.
@@ -1082,8 +1068,8 @@ func (x *actorSystem) Start(ctx context.Context) error {
 		AddContextRunner(x.spawnSingletonManager).
 		AddContextRunner(x.spawnRelocator).
 		AddContextRunner(x.spawnTopicActor).
-		AddContextRunner(x.startRemoting).
-		AddContextRunner(x.startClustering).
+		AddContextRunner(x.startRemoteServer).
+		AddContextRunner(x.startCluster).
 		AddContextRunner(x.startDataCenterController).
 		AddContextRunner(x.startDataCenterLeaderWatch).
 		Run(); err != nil {
@@ -1705,6 +1691,9 @@ func (x *actorSystem) Actors() []*PID {
 	var actors []*PID
 	for _, node := range nodes {
 		pid := node.value()
+		if pid == nil {
+			continue
+		}
 		if !isSystemName(pid.Name()) {
 			actors = append(actors, pid)
 		}
@@ -1765,22 +1754,26 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *addr
 		return nil, nil, gerrors.ErrActorSystemNotStarted
 	}
 
-	x.locker.RLock()
 	// user should not query system actors
 	if isSystemName(actorName) {
-		x.locker.RUnlock()
 		return nil, nil, gerrors.NewErrActorNotFound(actorName)
 	}
 
-	// first check whether the actor exist locally
+	// Fast path: local actor lookup uses only the tree's internal RWMutex.
+	// The tree reference (x.actors) is immutable after construction, so no
+	// system lock is needed. This avoids the double-lock contention that
+	// dominated SendAsync/SendSync throughput under high parallelism.
 	if pidnode, ok := x.actors.nodeByName(actorName); ok {
 		pid := pidnode.value()
-		x.locker.RUnlock()
 		if pid.IsStopping() {
 			return nil, nil, gerrors.NewErrActorNotFound(actorName)
 		}
-		return pid.Address(), pid, nil
+		return pid.address, pid, nil
 	}
+
+	// Slow path: actor not found locally. Acquire the system lock for
+	// cluster and remote lookups which access mutable system state.
+	x.locker.RLock()
 
 	// check in the cluster
 	if x.clusterEnabled.Load() {
@@ -1897,438 +1890,6 @@ func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *
 
 	x.locker.RUnlock()
 	return address.Parse(actor.GetAddress())
-}
-
-// RemoteLookup for an actor on a remote host.
-func (x *actorSystem) RemoteLookup(ctx context.Context, request *connect.Request[internalpb.RemoteLookupRequest]) (*connect.Response[internalpb.RemoteLookupResponse], error) {
-	logger := x.logger
-	msg := request.Msg
-
-	if !x.remotingEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrRemotingDisabled)
-	}
-
-	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
-	if remoteAddr != net.JoinHostPort(msg.GetHost(), strconv.Itoa(int(msg.GetPort()))) {
-		return nil, connect.NewError(connect.CodeInvalidArgument, gerrors.ErrInvalidHost)
-	}
-
-	actorName := msg.GetName()
-	if !isSystemName(actorName) && x.clusterEnabled.Load() {
-		actor, err := x.cluster.GetActor(ctx, actorName)
-		if err != nil {
-			if errors.Is(err, cluster.ErrActorNotFound) {
-				err := gerrors.NewErrAddressNotFound(actorName)
-				logger.Error(err.Error())
-				return nil, err
-			}
-
-			return nil, connect.NewError(connect.CodeInternal, err)
-		}
-		return connect.NewResponse(&internalpb.RemoteLookupResponse{Address: actor.GetAddress()}), nil
-	}
-
-	addr := address.New(actorName, x.Name(), msg.GetHost(), int(msg.GetPort()))
-	pidNode, exist := x.actors.node(addr.String())
-	if !exist {
-		err := gerrors.NewErrAddressNotFound(addr.String())
-		logger.Error(err.Error())
-		return nil, err
-	}
-
-	pid := pidNode.value()
-	return connect.NewResponse(&internalpb.RemoteLookupResponse{Address: pid.ID()}), nil
-}
-
-// RemoteAsk is used to send a message to an actor remotely and expect a response
-// immediately. With this type of message the receiver cannot communicate back to Sender
-// except reply the message with a response. This one-way communication
-func (x *actorSystem) RemoteAsk(ctx context.Context, request *connect.Request[internalpb.RemoteAskRequest]) (*connect.Response[internalpb.RemoteAskResponse], error) {
-	logger := x.logger
-
-	if !x.remotingEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrRemotingDisabled)
-	}
-
-	req := request.Msg
-	timeout := x.askTimeout
-	if req.GetTimeout() != nil {
-		timeout = req.GetTimeout().AsDuration()
-	}
-
-	if propagator := x.remoteConfig.ContextPropagator(); propagator != nil {
-		var err error
-		ctx, err = propagator.Extract(ctx, request.Header())
-		if err != nil {
-			return nil, connect.NewError(connect.CodeInvalidArgument, err)
-		}
-	}
-
-	responses := make([]*anypb.Any, 0, len(req.GetRemoteMessages()))
-	for _, message := range req.GetRemoteMessages() {
-		receiver := message.GetReceiver()
-		addr, err := address.Parse(receiver)
-		if err != nil {
-			return nil, connect.NewError(connect.CodeInvalidArgument, err)
-		}
-
-		remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
-		if remoteAddr != net.JoinHostPort(addr.Host(), strconv.Itoa(addr.Port())) {
-			return nil, connect.NewError(connect.CodeInvalidArgument, gerrors.ErrInvalidHost)
-		}
-
-		node, exist := x.actors.node(addr.String())
-		if !exist {
-			err := gerrors.NewErrAddressNotFound(addr.String())
-			logger.Error(err.Error())
-			return nil, err
-		}
-
-		pid := node.value()
-		if !pid.IsRunning() {
-			err := gerrors.NewErrRemoteSendFailure(gerrors.ErrDead)
-			logger.Error(err.Error())
-			return nil, err
-		}
-
-		reply, err := x.handleRemoteAsk(ctx, pid, message, timeout)
-		if err != nil {
-			err := gerrors.NewErrRemoteSendFailure(err)
-			logger.Error(err.Error())
-			return nil, err
-		}
-
-		marshaled, _ := anypb.New(reply)
-		responses = append(responses, marshaled)
-	}
-
-	return connect.NewResponse(&internalpb.RemoteAskResponse{Messages: responses}), nil
-}
-
-// RemoteTell is used to send a message to an actor remotely by another actor
-func (x *actorSystem) RemoteTell(ctx context.Context, request *connect.Request[internalpb.RemoteTellRequest]) (*connect.Response[internalpb.RemoteTellResponse], error) {
-	logger := x.logger
-
-	if !x.remotingEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrRemotingDisabled)
-	}
-
-	req := request.Msg
-
-	if propagator := x.remoteConfig.ContextPropagator(); propagator != nil {
-		var err error
-		ctx, err = propagator.Extract(ctx, request.Header())
-		if err != nil {
-			return nil, connect.NewError(connect.CodeInvalidArgument, err)
-		}
-	}
-
-	for _, message := range req.GetRemoteMessages() {
-		receiver := message.GetReceiver()
-		addr, err := address.Parse(receiver)
-		if err != nil {
-			return nil, connect.NewError(connect.CodeInvalidArgument, err)
-		}
-
-		node, exist := x.actors.node(addr.String())
-		if !exist {
-			err := gerrors.NewErrAddressNotFound(addr.String())
-			logger.Error(err)
-			return nil, err
-		}
-
-		pid := node.value()
-		if !pid.IsRunning() {
-			err := gerrors.NewErrRemoteSendFailure(gerrors.ErrDead)
-			logger.Error(err.Error())
-			return nil, err
-		}
-
-		if err := x.handleRemoteTell(ctx, pid, message); err != nil {
-			err := gerrors.NewErrRemoteSendFailure(err)
-			logger.Error(err)
-			return nil, err
-		}
-	}
-
-	return connect.NewResponse(new(internalpb.RemoteTellResponse)), nil
-}
-
-// RemoteReSpawn is used the handle the re-creation of an actor from a remote host or from an api call
-func (x *actorSystem) RemoteReSpawn(ctx context.Context, request *connect.Request[internalpb.RemoteReSpawnRequest]) (*connect.Response[internalpb.RemoteReSpawnResponse], error) {
-	logger := x.logger
-
-	msg := request.Msg
-
-	if !x.remotingEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrRemotingDisabled)
-	}
-
-	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
-	if remoteAddr != net.JoinHostPort(msg.GetHost(), strconv.Itoa(int(msg.GetPort()))) {
-		return nil, connect.NewError(connect.CodeInvalidArgument, gerrors.ErrInvalidHost)
-	}
-
-	// make sure we don't interfere with system actors.
-	if isSystemName(msg.GetName()) {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.NewErrActorNotFound(msg.GetName()))
-	}
-
-	actorAddress := address.New(msg.GetName(), x.Name(), msg.GetHost(), int(msg.GetPort()))
-	node, exist := x.actors.node(actorAddress.String())
-	if !exist {
-		err := gerrors.NewErrAddressNotFound(actorAddress.String())
-		logger.Error(err)
-		return nil, err
-	}
-
-	pid := node.value()
-	if err := pid.Restart(ctx); err != nil {
-		return nil, fmt.Errorf("failed to restart actor=%s: %w", actorAddress.String(), err)
-	}
-
-	return connect.NewResponse(new(internalpb.RemoteReSpawnResponse)), nil
-}
-
-// RemoteStop stops an actor on a remote machine
-func (x *actorSystem) RemoteStop(ctx context.Context, request *connect.Request[internalpb.RemoteStopRequest]) (*connect.Response[internalpb.RemoteStopResponse], error) {
-	logger := x.logger
-
-	msg := request.Msg
-
-	if !x.remotingEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrRemotingDisabled)
-	}
-
-	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
-	if remoteAddr != net.JoinHostPort(msg.GetHost(), strconv.Itoa(int(msg.GetPort()))) {
-		return nil, connect.NewError(connect.CodeInvalidArgument, gerrors.ErrInvalidHost)
-	}
-
-	// make sure we don't interfere with system actors.
-	if isSystemName(msg.GetName()) {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.NewErrActorNotFound(msg.GetName()))
-	}
-
-	actorAddress := address.New(msg.GetName(), x.Name(), msg.GetHost(), int(msg.GetPort()))
-	pidNode, exist := x.actors.node(actorAddress.String())
-	if !exist {
-		err := gerrors.NewErrAddressNotFound(actorAddress.String())
-		logger.Error(err.Error())
-		return nil, err
-	}
-
-	pid := pidNode.value()
-	if err := pid.Shutdown(ctx); err != nil {
-		return nil, fmt.Errorf("failed to stop actor=%s: %w", actorAddress.String(), err)
-	}
-
-	return connect.NewResponse(new(internalpb.RemoteStopResponse)), nil
-}
-
-// RemoteSpawn handles the remoteSpawn call
-func (x *actorSystem) RemoteSpawn(ctx context.Context, request *connect.Request[internalpb.RemoteSpawnRequest]) (*connect.Response[internalpb.RemoteSpawnResponse], error) {
-	logger := x.logger
-
-	msg := request.Msg
-	if !x.remotingEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrRemotingDisabled)
-	}
-
-	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
-	if remoteAddr != net.JoinHostPort(msg.GetHost(), strconv.Itoa(int(msg.GetPort()))) {
-		return nil, connect.NewError(connect.CodeInvalidArgument, gerrors.ErrInvalidHost)
-	}
-
-	// make sure we don't interfere with system actors.
-	if isSystemName(msg.GetActorName()) {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.NewErrActorNotFound(msg.GetActorName()))
-	}
-
-	actor, err := x.reflection.instantiateActor(msg.GetActorType())
-	if err != nil {
-		logger.Errorf(
-			"Failed to create Actor [(%s) of type (%s)] on [host=%s, port=%d]: reason: (%v)",
-			msg.GetActorName(), msg.GetActorType(), msg.GetHost(), msg.GetPort(), err,
-		)
-
-		if errors.Is(err, gerrors.ErrTypeNotRegistered) {
-			return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrTypeNotRegistered)
-		}
-
-		return nil, connect.NewError(connect.CodeInternal, err)
-	}
-
-	wrapSpawnErr := func(err error) error {
-		if errors.Is(err, gerrors.ErrActorAlreadyExists) || errors.Is(err, gerrors.ErrSingletonAlreadyExists) {
-			return connect.NewError(connect.CodeAlreadyExists, err)
-		}
-		if cluster.IsQuorumError(err) {
-			return connect.NewError(connect.CodeUnavailable, cluster.NormalizeQuorumError(err))
-		}
-		return connect.NewError(connect.CodeInternal, err)
-	}
-
-	if msg.GetSingleton() != nil {
-		// define singleton options
-		singletonOpts := []ClusterSingletonOption{
-			WithSingletonSpawnTimeout(msg.GetSingleton().GetSpawnTimeout().AsDuration()),
-			WithSingletonSpawnWaitInterval(msg.GetSingleton().GetWaitInterval().AsDuration()),
-			WithSingletonSpawnRetries(int(msg.GetSingleton().GetMaxRetries())),
-		}
-
-		if msg.GetRole() != "" {
-			singletonOpts = append(singletonOpts, WithSingletonRole(msg.GetRole()))
-		}
-
-		if err := x.SpawnSingleton(ctx, msg.GetActorName(), actor, singletonOpts...); err != nil {
-			logger.Errorf("Failed to create Actor (%s) on [host=%s, port=%d]: reason: (%v)", msg.GetActorName(), msg.GetHost(), msg.GetPort(), err)
-			return nil, wrapSpawnErr(err)
-		}
-
-		logger.Infof("Actor (%s) successfully created on [host=%s, port=%d]", msg.GetActorName(), msg.GetHost(), msg.GetPort())
-		return connect.NewResponse(new(internalpb.RemoteSpawnResponse)), nil
-	}
-
-	opts := []SpawnOption{
-		WithPassivationStrategy(codec.DecodePassivationStrategy(msg.GetPassivationStrategy())),
-	}
-
-	if !msg.GetRelocatable() {
-		opts = append(opts, WithRelocationDisabled())
-	}
-
-	if msg.GetEnableStash() {
-		opts = append(opts, WithStashing())
-	}
-
-	if msg.GetReentrancy() != nil {
-		reentrancy := codec.DecodeReentrancy(msg.GetReentrancy())
-		opts = append(opts, WithReentrancy(reentrancy))
-	}
-
-	if msg.GetRole() != "" {
-		opts = append(opts, WithRole(msg.GetRole()))
-	}
-
-	if msg.GetSupervisor() != nil {
-		if decoded := codec.DecodeSupervisor(msg.GetSupervisor()); decoded != nil {
-			opts = append(opts, WithSupervisor(decoded))
-		}
-	}
-
-	// set the dependencies if any
-	if len(msg.GetDependencies()) > 0 {
-		dependencies, err := x.reflection.dependenciesFromProto(msg.GetDependencies()...)
-		if err != nil {
-			logger.Errorf("Failed to create Actor (%s) on [host=%s, port=%d]: reason: (%v)", msg.GetActorName(), msg.GetHost(), msg.GetPort(), err)
-			return nil, connect.NewError(connect.CodeInternal, err)
-		}
-		opts = append(opts, WithDependencies(dependencies...))
-	}
-
-	if _, err = x.Spawn(ctx, msg.GetActorName(), actor, opts...); err != nil {
-		logger.Errorf("Failed to create Actor (%s) on [host=%s, port=%d]: reason: (%v)", msg.GetActorName(), msg.GetHost(), msg.GetPort(), err)
-		return nil, wrapSpawnErr(err)
-	}
-
-	logger.Infof("Actor (%s) successfully created on [host=%s, port=%d]", msg.GetActorName(), msg.GetHost(), msg.GetPort())
-	return connect.NewResponse(new(internalpb.RemoteSpawnResponse)), nil
-}
-
-// RemoteReinstate handles the remoteReinstate call
-func (x *actorSystem) RemoteReinstate(_ context.Context, request *connect.Request[internalpb.RemoteReinstateRequest]) (*connect.Response[internalpb.RemoteReinstateResponse], error) {
-	logger := x.logger
-
-	msg := request.Msg
-
-	if !x.remotingEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrRemotingDisabled)
-	}
-
-	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
-	if remoteAddr != net.JoinHostPort(msg.GetHost(), strconv.Itoa(int(msg.GetPort()))) {
-		return nil, connect.NewError(connect.CodeInvalidArgument, gerrors.ErrInvalidHost)
-	}
-
-	// make sure we don't interfere with system actors.
-	if isSystemName(msg.GetName()) {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.NewErrActorNotFound(msg.GetName()))
-	}
-
-	actorAddress := address.New(msg.GetName(), x.Name(), msg.GetHost(), int(msg.GetPort()))
-	node, exist := x.actors.node(actorAddress.String())
-	if !exist {
-		err := gerrors.NewErrAddressNotFound(actorAddress.String())
-		logger.Error(err.Error())
-		return nil, err
-	}
-
-	pid := node.value()
-	pid.doReinstate()
-
-	return connect.NewResponse(new(internalpb.RemoteReinstateResponse)), nil
-}
-
-// GetNodeMetric handles the GetNodeMetric request send the given node
-func (x *actorSystem) GetNodeMetric(_ context.Context, request *connect.Request[internalpb.GetNodeMetricRequest]) (*connect.Response[internalpb.GetNodeMetricResponse], error) {
-	if !x.clusterEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrClusterDisabled)
-	}
-
-	req := request.Msg
-
-	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
-	if remoteAddr != req.GetNodeAddress() {
-		return nil, connect.NewError(connect.CodeInvalidArgument, gerrors.ErrInvalidHost)
-	}
-
-	load := x.actorsCounter.Load() + uint64(x.grains.Len())
-	return connect.NewResponse(
-		&internalpb.GetNodeMetricResponse{
-			NodeAddress: remoteAddr,
-			Load:        load,
-		},
-	), nil
-}
-
-// GetKinds returns the cluster kinds
-func (x *actorSystem) GetKinds(_ context.Context, request *connect.Request[internalpb.GetKindsRequest]) (*connect.Response[internalpb.GetKindsResponse], error) {
-	if !x.clusterEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrClusterDisabled)
-	}
-
-	req := request.Msg
-	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
-
-	// routine check
-	if remoteAddr != req.GetNodeAddress() {
-		return nil, connect.NewError(connect.CodeInvalidArgument, gerrors.ErrInvalidHost)
-	}
-
-	kinds := make([]string, len(x.clusterConfig.kinds.Values()))
-	for i, kind := range x.clusterConfig.kinds.Values() {
-		kinds[i] = registry.Name(kind)
-	}
-
-	return connect.NewResponse(&internalpb.GetKindsResponse{Kinds: kinds}), nil
-}
-
-// PersistPeerState persists the peer state for a given node that is gracefully leaving the cluster
-func (x *actorSystem) PersistPeerState(ctx context.Context, request *connect.Request[internalpb.PersistPeerStateRequest]) (*connect.Response[internalpb.PersistPeerStateResponse], error) {
-	if !x.clusterEnabled.Load() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, gerrors.ErrClusterDisabled)
-	}
-
-	peerAddr := fmt.Sprintf("%s:%d", request.Msg.GetPeerState().GetHost(), request.Msg.GetPeerState().GetPeersPort())
-	x.logger.Infof("Node (%s) is persisting its Peer (%s) state", x.PeersAddress(), peerAddr)
-
-	if err := x.clusterStore.PersistPeerState(ctx, request.Msg.GetPeerState()); err != nil {
-		x.logger.Errorf("Node (%s) failed to persist Peer (%s) state: %v", x.PeersAddress(), peerAddr, err)
-		return nil, connect.NewError(connect.CodeInternal, err)
-	}
-
-	return connect.NewResponse(new(internalpb.PersistPeerStateResponse)), nil
 }
 
 // TopicActor returns the topic actor, a system-managed actor responsible for handling
@@ -2469,22 +2030,13 @@ func (x *actorSystem) validate() error {
 // handleRemoteAsk handles a synchronous message to another actor and expect a response.
 // This block until a response is received or timed out.
 func (x *actorSystem) handleRemoteAsk(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error) {
-	receiveContext, err := toReceiveContext(ctx, x.NoSender(), to, message, false)
+	noSender := x.NoSender()
+	receiveContext, err := toReceiveContext(ctx, noSender, to, message, false)
 	if err != nil {
 		return nil, err
 	}
-	msg := receiveContext.Message()
-	sender := receiveContext.Sender()
 
 	responseCh := receiveContext.response
-	if responseCh != nil {
-		defer func() {
-			// Mark closed so a late Response won't write into a pooled channel that may
-			// be reused by another Ask call.
-			receiveContext.responseClosed.Store(true)
-			putResponseChannel(responseCh)
-		}()
-	}
 	to.doReceive(receiveContext)
 	timer := timers.Get(timeout)
 
@@ -2493,16 +2045,22 @@ func (x *actorSystem) handleRemoteAsk(ctx context.Context, to *PID, message prot
 	select {
 	case response = <-responseCh:
 		timers.Put(timer)
+		receiveContext.responseClosed.Store(true)
+		putResponseChannel(responseCh)
 		return
 	case <-ctx.Done():
 		err = errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
-		to.handleReceivedErrorWithMessage(sender, msg, err)
+		to.handleReceivedErrorWithMessage(noSender, message, err)
 		timers.Put(timer)
+		receiveContext.responseClosed.Store(true)
+		putResponseChannel(responseCh)
 		return nil, err
 	case <-timer.C:
 		err = gerrors.ErrRequestTimeout
-		to.handleReceivedErrorWithMessage(sender, msg, err)
+		to.handleReceivedErrorWithMessage(noSender, message, err)
 		timers.Put(timer)
+		receiveContext.responseClosed.Store(true)
+		putResponseChannel(responseCh)
 		return
 	}
 }
@@ -2746,9 +2304,9 @@ func (x *actorSystem) setupCluster() error {
 	return nil
 }
 
-// startClustering enables clustering. When clustering is enabled remoting is also enabled to facilitate remote
+// startCluster enables clustering. When clustering is enabled remoting is also enabled to facilitate remote
 // communication
-func (x *actorSystem) startClustering(ctx context.Context) error {
+func (x *actorSystem) startCluster(ctx context.Context) error {
 	if !x.clusterEnabled.Load() {
 		return nil
 	}
@@ -2834,67 +2392,9 @@ func (x *actorSystem) cleanupStaleLocalActors(ctx context.Context) error {
 	return nil
 }
 
-// startRemoting enables the remoting service to handle remote messaging
-func (x *actorSystem) startRemoting(ctx context.Context) error {
-	if !x.remotingEnabled.Load() {
-		return nil
-	}
-
-	x.logger.Info("Starting remoting...")
-
-	opts := []connect.HandlerOption{
-		connectproto.WithBinary(
-			proto.MarshalOptions{},
-			proto.UnmarshalOptions{DiscardUnknown: true},
-		),
-		connect.WithRecover(func(_ context.Context, spec connect.Spec, _ stdhttp.Header, recovered any) error {
-			x.logger.Errorf("Remoting panic in %s: %v", spec.Procedure, recovered)
-			return connect.NewError(connect.CodeInternal, fmt.Errorf("internal server error"))
-		}),
-	}
-
-	if x.remoteConfig.MaxFrameSize() > 0 {
-		opts = append(opts, connect.WithReadMaxBytes(int(x.remoteConfig.MaxFrameSize()))) // nolint
-	}
-
-	switch x.remoteConfig.Compression() {
-	case remote.BrotliCompression:
-		opts = append(opts, brotli.WithCompression())
-	case remote.ZstdCompression:
-		opts = append(opts, zstd.WithCompression())
-	default:
-		// no op
-	}
-
-	remotingServicePath, remotingServiceHandler := internalpbconnect.NewRemotingServiceHandler(x, opts...)
-	clusterServicePath, clusterServiceHandler := internalpbconnect.NewClusterServiceHandler(x, opts...)
-
-	mux := stdhttp.NewServeMux()
-	mux.Handle(remotingServicePath, remotingServiceHandler)
-	mux.Handle(clusterServicePath, clusterServiceHandler)
-
-	// configure the appropriate server
-	if err := x.configureServer(ctx, mux); err != nil {
-		x.logger.Error(fmt.Errorf("failed enable remoting: %w", err))
-		return err
-	}
-
-	go func() {
-		if err := x.startHTTPServer(); err != nil {
-			if !errors.Is(err, stdhttp.ErrServerClosed) {
-				x.logger.Panic(fmt.Errorf("failed to start remoting service: %w", err))
-			}
-		}
-	}()
-
-	x.logger.Info("Remoting started...:)")
-	return nil
-}
-
 // setupRemoting sets the remoting service
 func (x *actorSystem) setupRemoting() error {
 	opts := []remote.RemotingOption{
-		remote.WithRemotingMaxReadFameSize(int(x.remoteConfig.MaxFrameSize())), // nolint
 		remote.WithRemotingCompression(x.remoteConfig.Compression()),
 	}
 
@@ -3444,50 +2944,6 @@ func (x *actorSystem) actorAddress(name string) *address.Address {
 	return address.New(name, x.name, x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
 }
 
-// startHTTPServer starts the appropriate http server
-func (x *actorSystem) startHTTPServer() error {
-	return x.server.Serve(x.listener)
-}
-
-// shutdownHTTPServer stops the appropriate http server
-func (x *actorSystem) shutdownHTTPServer(ctx context.Context) error {
-	return x.server.Shutdown(ctx)
-}
-
-// configureServer configure the various http server and listeners based upon the various settings
-func (x *actorSystem) configureServer(ctx context.Context, mux *stdhttp.ServeMux) error {
-	hostPort := net.JoinHostPort(x.remoteConfig.BindAddr(), strconv.Itoa(x.remoteConfig.BindPort()))
-	httpServer := getServer(ctx, hostPort)
-	listener, err := network.NewKeepAliveListener(httpServer.Addr)
-	if err != nil {
-		return err
-	}
-
-	// Configure HTTP/2 with performance tuning
-	http2Server := &http2.Server{
-		MaxConcurrentStreams: 1000, // Allow up to 1000 concurrent streams
-		MaxReadFrameSize:     x.remoteConfig.MaxFrameSize(),
-		IdleTimeout:          x.remoteConfig.IdleTimeout(),
-		WriteByteTimeout:     x.remoteConfig.WriteTimeout(),
-		ReadIdleTimeout:      x.remoteConfig.ReadIdleTimeout(),
-	}
-
-	// set the http TLS server
-	if x.tlsInfo != nil {
-		x.server = httpServer
-		x.server.TLSConfig = x.tlsInfo.ServerConfig
-		x.server.Handler = mux
-		x.listener = tls.NewListener(listener, x.tlsInfo.ServerConfig)
-		return http2.ConfigureServer(x.server, http2Server)
-	}
-
-	// http/2 server with h2c (HTTP/2 Cleartext).
-	x.server = httpServer
-	x.server.Handler = h2c.NewHandler(mux, http2Server)
-	x.listener = listener
-	return nil
-}
-
 // spawnRootGuardian creates the rootGuardian guardian
 func (x *actorSystem) spawnRootGuardian(ctx context.Context) error {
 	actorName := reservedName(rootGuardianType)
@@ -3765,14 +3221,20 @@ func (x *actorSystem) shutdownRemoting(ctx context.Context) error {
 			x.remoting.Close()
 		}
 
-		if x.server != nil {
-			if err := x.shutdownHTTPServer(ctx); err != nil {
-				x.logger.Errorf("Failed to shutdown server: %w", err)
+		if x.remoteServer != nil {
+			timeout, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+
+			// Extract deadline from context as duration
+			deadline, _ := timeout.Deadline()
+			shutdownTimeout := time.Until(deadline)
+
+			if err := x.stopRemoteServer(shutdownTimeout); err != nil {
+				x.logger.Errorf("Failed to shutdown remote server: %w", err)
 				return err
 			}
 			x.remotingEnabled.Store(false)
-			x.server = nil
-			x.listener = nil
+			x.remoteServer = nil
 		}
 	}
 	return nil
@@ -4120,7 +3582,6 @@ func (x *actorSystem) persistPeerStateToPeers(ctx context.Context, peerState *in
 
 	// Create a custom remoting client for replication with compression enabled
 	remotingOpts := []remote.RemotingOption{
-		remote.WithRemotingMaxReadFameSize(int(x.remoteConfig.MaxFrameSize())), // nolint
 		remote.WithRemotingCompression(x.remoteConfig.Compression()),
 		remote.WithRemotingContextPropagator(x.remoteConfig.ContextPropagator()),
 	}
@@ -4140,13 +3601,24 @@ func (x *actorSystem) persistPeerStateToPeers(ctx context.Context, peerState *in
 	for _, peer := range peers {
 		peer := peer
 		go func() {
-			remoteClient := remoting.RemotingServiceClient(peer.Host, peer.RemotingPort)
-			request := connect.NewRequest(&internalpb.PersistPeerStateRequest{
+			// Get pooled proto TCP client
+			client := remoting.NetClient(peer.Host, peer.RemotingPort)
+			request := &internalpb.PersistPeerStateRequest{
 				PeerState: peerState,
-			})
+			}
 
-			_, err := remoteClient.PersistPeerState(rpcCtx, request)
+			// Send request using proto TCP
+			resp, err := client.SendProto(rpcCtx, request)
 			if err != nil {
+				x.logger.Errorf("Node (%s) failed to persist peer state to remote Peer (%s:%d): %v",
+					peerAddr, peer.Host, peer.RemotingPort, err)
+				results <- err
+				return
+			}
+
+			// Check for proto errors
+			if errResp, ok := resp.(*internalpb.Error); ok {
+				err := fmt.Errorf("proto error: code=%s, msg=%s", errResp.GetCode(), errResp.GetMessage())
 				x.logger.Errorf("Node (%s) failed to persist peer state to remote Peer (%s:%d): %v",
 					peerAddr, peer.Host, peer.RemotingPort, err)
 				results <- err
@@ -4289,20 +3761,6 @@ func runWithRetry(ctx context.Context, hook ShutdownHook, sys *actorSystem, reco
 }
 
 // getServer creates an instance of http server
-func getServer(ctx context.Context, address string) *stdhttp.Server {
-	return &stdhttp.Server{
-		Addr:              address,
-		ReadTimeout:       5 * time.Minute,
-		ReadHeaderTimeout: time.Second,
-		WriteTimeout:      5 * time.Minute,
-		IdleTimeout:       1200 * time.Second,
-		MaxHeaderBytes:    8 * 1024, // 8KiB
-		BaseContext: func(_ net.Listener) context.Context {
-			return ctx
-		},
-	}
-}
-
 // maxInt returns the maximum of two integers. Helper for calculation.
 func maxInt(a, b int) int {
 	if a > b {

@@ -20,39 +20,15 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package zstd
+//go:build !linux && !windows && !darwin
+// +build !linux,!windows,!darwin
 
-import "io"
+package net
 
-// Error wrappers for failed initialization
-type errorDecompressor struct {
-	err error
-}
+import "syscall"
 
-func (e *errorDecompressor) Read([]byte) (int, error) {
-	return 0, e.err
-}
+type controlFunc func(network, address string, c syscall.RawConn) error
 
-func (e *errorDecompressor) Reset(io.Reader) error {
-	return e.err
-}
-
-func (e *errorDecompressor) Close() error {
-	return nil
-}
-
-type errorCompressor struct {
-	err error
-}
-
-func (e *errorCompressor) Write([]byte) (int, error) {
-	return 0, e.err
-}
-
-func (e *errorCompressor) Reset(io.Writer) {
-	// no-op
-}
-
-func (e *errorCompressor) Close() error {
+func applyListenSocketOptions(_ *ListenConfig) controlFunc {
 	return nil
 }

@@ -27,10 +27,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
-	"go.uber.org/atomic"
 
 	"github.com/tochemey/goakt/v3/address"
-	"github.com/tochemey/goakt/v3/internal/xsync"
 )
 
 func TestTree(t *testing.T) {
@@ -112,7 +110,7 @@ func TestTree(t *testing.T) {
 	expected = []string{"a", "b", "c", "d", "e", "f"}
 	actual = make([]string, len(nodes))
 	for i, node := range nodes {
-		actual[i] = node.pid.Load().Name()
+		actual[i] = node.name
 	}
 	require.ElementsMatch(t, expected, actual)
 
@@ -184,7 +182,7 @@ func TestTree(t *testing.T) {
 	expected = []string{"a", "e", "f"}
 	actual = make([]string, len(nodes))
 	for i, node := range nodes {
-		actual[i] = node.pid.Load().Name()
+		actual[i] = node.name
 	}
 	require.ElementsMatch(t, expected, actual)
 
@@ -196,7 +194,7 @@ func TestTree(t *testing.T) {
 	eid := e.ID()
 	node, ok := tree.node(eid)
 	require.True(t, ok)
-	require.Equal(t, e.Name(), node.pid.Load().Name())
+	require.Equal(t, e.Name(), node.name)
 
 	// get root node
 	root, ok := tree.root()
@@ -393,15 +391,9 @@ func TestSiblings(t *testing.T) {
 	// add test for pid has no parent
 	t.Run("pid has no parent", func(t *testing.T) {
 		pid := &PID{address: address.New("no_parent", "TestSys", "host", 0), actorSystem: actorSystem}
-		pidnode := &pidNode{
-			pid:         atomic.Pointer[PID]{},
-			watchers:    xsync.NewMap[string, *PID](),
-			watchees:    xsync.NewMap[string, *PID](),
-			descendants: xsync.NewMap[string, *pidNode](),
-		}
-		pidnode.pid.Store(pid)
+		pidnode := newPidNode(pid)
 
-		tree.pids.Set(pid.ID(), pidnode)
+		tree.pids[pid.ID()] = pidnode
 		siblings := tree.siblings(pid)
 		require.Empty(t, siblings)
 	})
@@ -719,7 +711,7 @@ func TestNodeByName(t *testing.T) {
 		node, ok := tree.nodeByName(root.Name())
 		require.True(t, ok)
 		require.NotNil(t, node)
-		require.Equal(t, root.ID(), node.pid.Load().ID())
+		require.Equal(t, root.ID(), node.id)
 	})
 
 	t.Run("child name", func(t *testing.T) {
@@ -727,7 +719,7 @@ func TestNodeByName(t *testing.T) {
 		node, ok := tree.nodeByName(child.Name())
 		require.True(t, ok)
 		require.NotNil(t, node)
-		require.Equal(t, child.ID(), node.pid.Load().ID())
+		require.Equal(t, child.ID(), node.id)
 	})
 
 	t.Run("deleted name", func(t *testing.T) {

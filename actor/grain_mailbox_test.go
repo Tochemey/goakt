@@ -122,11 +122,11 @@ func TestGrainMailboxBounded_FullReturnsError(t *testing.T) {
 }
 
 func TestGrainMailboxBounded_DoesNotOvershootCapacity_Concurrent(t *testing.T) {
-	const cap = 64
+	const capacity = 64
 	const producers = 16
 	const attemptsPerProducer = 64 // 1024 attempts > cap
 
-	mailbox := newGrainMailbox(cap)
+	mailbox := newGrainMailbox(capacity)
 
 	var wg sync.WaitGroup
 	wg.Add(producers)
@@ -155,18 +155,18 @@ func TestGrainMailboxBounded_DoesNotOvershootCapacity_Concurrent(t *testing.T) {
 	wg.Wait()
 
 	// Exactly 'cap' successful enqueues, rest should be full.
-	require.EqualValues(t, cap, okCount.Load())
-	require.EqualValues(t, producers*attemptsPerProducer-cap, fullCount.Load())
+	require.EqualValues(t, capacity, okCount.Load())
+	require.EqualValues(t, producers*attemptsPerProducer-capacity, fullCount.Load())
 
 	// Length must never exceed capacity; by the end it should be exactly cap.
-	require.EqualValues(t, cap, mailbox.Len())
+	require.EqualValues(t, capacity, mailbox.Len())
 
 	// Drain and ensure we got exactly cap messages.
 	drained := 0
 	for mailbox.Dequeue() != nil {
 		drained++
 	}
-	require.Equal(t, cap, drained)
+	require.Equal(t, capacity, drained)
 	require.True(t, mailbox.IsEmpty())
 	require.EqualValues(t, 0, mailbox.Len())
 }
@@ -191,7 +191,7 @@ func TestGrainMailboxDequeue_WaitsForLinkAfterTailSwap(t *testing.T) {
 	// Arrange: create the node we will "half-enqueue"
 	ctx := &GrainContext{}
 	n := grainNodePool.Get().(*grainNode)
-	n.value.Store(ctx)
+	n.value = ctx
 	n.next.Store(nil)
 
 	// Step 1 of enqueue: advance tail, but DO NOT link prev.next yet.

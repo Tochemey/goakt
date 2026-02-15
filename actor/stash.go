@@ -54,6 +54,9 @@ func (pid *PID) unstash() error {
 	if received == nil {
 		return errors.New("stash buffer may be closed")
 	}
+	// Clear the stashed flag so the context can be released normally
+	// after it is processed through the mailbox.
+	received.stashed.Store(false)
 	pid.doReceive(received)
 	return nil
 }
@@ -69,6 +72,9 @@ func (pid *PID) unstashAll() error {
 	state.locker.Lock()
 	for !state.box.IsEmpty() {
 		if received := state.box.Dequeue(); received != nil {
+			// Clear the stashed flag so the context can be released normally
+			// after it is processed through the mailbox.
+			received.stashed.Store(false)
 			pid.doReceive(received)
 		}
 	}

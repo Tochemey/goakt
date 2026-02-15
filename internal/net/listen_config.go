@@ -20,40 +20,24 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package network
+package net
 
-import (
-	"testing"
+import "net"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-)
-
-func TestGetHostPort(t *testing.T) {
-	t.Run("Happy Path", func(t *testing.T) {
-		address := "localhost:8080"
-		host, port, err := GetHostPort(address)
-		require.NoError(t, err)
-		assert.Equal(t, "127.0.0.1", host)
-		assert.Exactly(t, 8080, port)
-	})
-	t.Run("Invalid address", func(t *testing.T) {
-		_, _, err := GetHostPort("127.0.0.1.1.1.1.1.2:8080")
-		require.Error(t, err)
-	})
-}
-
-func TestGetBindIP(t *testing.T) {
-	t.Run("Happy Path", func(t *testing.T) {
-		address := "localhost:8080"
-		bindIP, err := GetBindIP(address)
-		require.NoError(t, err)
-		assert.Equal(t, "127.0.0.1", bindIP)
-	})
-	t.Run("With Zero address", func(t *testing.T) {
-		address := "0.0.0.0:8080"
-		bindIP, err := GetBindIP(address)
-		require.NoError(t, err)
-		assert.NotEqual(t, "127.0.0.1", bindIP)
-	})
+// Listener config struct
+type ListenConfig struct {
+	underlying net.ListenConfig
+	// Enable/disable SO_REUSEPORT (requires Linux >=2.4)
+	SocketReusePort bool
+	// Enable/disable TCP_FASTOPEN (requires Linux >=3.7 or Windows 10, version 1607)
+	// For Linux:
+	// - see https://lwn.net/Articles/508865/
+	// - enable with "echo 3 >/proc/sys/net/ipv4/tcp_fastopen" for client and server
+	// For Windows:
+	// - enable with "netsh int tcp set global fastopen=enabled"
+	SocketFastOpen bool
+	// Queue length for TCP_FASTOPEN (default 256)
+	SocketFastOpenQueueLen int
+	// Enable/disable TCP_DEFER_ACCEPT (requires Linux >=2.4)
+	SocketDeferAccept bool
 }
