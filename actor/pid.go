@@ -172,6 +172,7 @@ type PID struct {
 
 	passivationStrategy passivation.Strategy
 	passivationManager  *passivationManager
+	msgCountPassivation atomic.Bool // true when passivationStrategy is MessagesCountBasedStrategy; set once at init
 
 	// this is used to specify a role the actor belongs to
 	// this field is optional and will be set when the actor is created with a given role
@@ -2051,10 +2052,12 @@ func (pid *PID) recordProcessedMessage() {
 	// acquires the passivation manager's mutex only to check the strategy
 	// type and return immediately. Skipping it avoids one mutex lock
 	// per message on the hot path.
-	if pid.passivationManager != nil {
-		if _, ok := pid.passivationStrategy.(*passivation.MessagesCountBasedStrategy); ok {
-			pid.passivationManager.MessageProcessed(pid)
-		}
+	//
+	// We use the atomic flag (set once at init) instead of a type assertion
+	// on pid.passivationStrategy to avoid racing with any code that modifies
+	// the strategy field under fieldsLocker.
+	if pid.passivationManager != nil && pid.msgCountPassivation.Load() {
+		pid.passivationManager.MessageProcessed(pid)
 	}
 }
 
