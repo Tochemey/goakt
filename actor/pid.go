@@ -78,6 +78,12 @@ const (
 	busy
 )
 
+// passivationTouchInterval controls how frequently Touch is called on the
+// passivation manager. For a 2-minute default timeout, refreshing every
+// 100ms means the deadline is at most 0.08% stale — well within tolerance.
+// This avoids acquiring the passivation manager's mutex on every message.
+const passivationTouchInterval = int64(100 * time.Millisecond)
+
 // taskCompletion is used to track completions' taskCompletion
 // to pipe the result to the appropriate PID
 type taskCompletion struct {
@@ -105,6 +111,7 @@ type PID struct {
 	// Using atomic.Int64 instead of atomic.Time avoids the interface-boxing
 	// allocation that atomic.Time.Store incurs on every message (~24 bytes).
 	latestReceiveTimeNano atomic.Int64
+	lastPassivationTouch  atomic.Int64 // UnixNano of last passivation Touch call (for coalescing)
 	latestReceiveDuration atomic.Duration
 
 	// specifies the maximum of retries to attempt when the actor
@@ -1015,8 +1022,13 @@ func (pid *PID) SendAsync(ctx context.Context, actorName string, message proto.M
 		return gerrors.ErrDead
 	}
 
+	// Access actorSystem directly: it is immutable after PID construction,
+	// so the fieldsLocker read-lock in the public ActorSystem() accessor
+	// is unnecessary here and would add contention on the hot path.
+	system := pid.actorSystem
+
 	// try to find the actor in the local datacenter
-	addr, cid, err := pid.ActorSystem().ActorOf(ctx, actorName)
+	addr, cid, err := system.ActorOf(ctx, actorName)
 	if err == nil {
 		// Actor found in local datacenter
 		if cid != nil {
@@ -1033,7 +1045,7 @@ func (pid *PID) SendAsync(ctx context.Context, actorName string, message proto.M
 		return err
 	}
 
-	dcConfig := pid.ActorSystem().getDataCenterConfig()
+	dcConfig := system.getDataCenterConfig()
 	timeout := datacenter.DefaultRequestTimeout
 	if dcConfig != nil {
 		timeout = dcConfig.RequestTimeout
@@ -1057,8 +1069,11 @@ func (pid *PID) SendSync(ctx context.Context, actorName string, message proto.Me
 		return nil, gerrors.ErrDead
 	}
 
+	// Access actorSystem directly: immutable after PID construction.
+	system := pid.actorSystem
+
 	// try to find the actor in the local datacenter
-	addr, cid, err := pid.ActorSystem().ActorOf(ctx, actorName)
+	addr, cid, err := system.ActorOf(ctx, actorName)
 	if err == nil {
 		// Actor found in local datacenter
 		if cid != nil {
@@ -2013,17 +2028,33 @@ func (pid *PID) cancelInFlightRequests(reason error) {
 
 // markActivity updates the last receive timestamp and notifies the shared passivation manager.
 func (pid *PID) markActivity(at time.Time) {
-	pid.latestReceiveTimeNano.Store(at.UnixNano())
+	nanos := at.UnixNano()
+	pid.latestReceiveTimeNano.Store(nanos)
 	if pid.passivationManager != nil {
-		pid.passivationManager.Touch(pid)
+		// Coalesce Touch calls: only acquire the passivation manager's mutex
+		// when at least passivationTouchInterval has elapsed since the last
+		// Touch. The CAS ensures exactly one goroutine wins per interval.
+		last := pid.lastPassivationTouch.Load()
+		if nanos-last >= passivationTouchInterval {
+			if pid.lastPassivationTouch.CompareAndSwap(last, nanos) {
+				pid.passivationManager.Touch(pid)
+			}
+		}
 	}
 }
 
 // recordProcessedMessage increments the processed message count and notifies the passivation manager.
 func (pid *PID) recordProcessedMessage() {
 	pid.processedCount.Inc()
+	// Only call MessageProcessed for message-count-based strategies.
+	// For time-based strategies (the common case), MessageProcessed
+	// acquires the passivation manager's mutex only to check the strategy
+	// type and return immediately. Skipping it avoids one mutex lock
+	// per message on the hot path.
 	if pid.passivationManager != nil {
-		pid.passivationManager.MessageProcessed(pid)
+		if _, ok := pid.passivationStrategy.(*passivation.MessagesCountBasedStrategy); ok {
+			pid.passivationManager.MessageProcessed(pid)
+		}
 	}
 }
 

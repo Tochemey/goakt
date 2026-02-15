@@ -1754,22 +1754,26 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *addr
 		return nil, nil, gerrors.ErrActorSystemNotStarted
 	}
 
-	x.locker.RLock()
 	// user should not query system actors
 	if isSystemName(actorName) {
-		x.locker.RUnlock()
 		return nil, nil, gerrors.NewErrActorNotFound(actorName)
 	}
 
-	// first check whether the actor exist locally
+	// Fast path: local actor lookup uses only the tree's internal RWMutex.
+	// The tree reference (x.actors) is immutable after construction, so no
+	// system lock is needed. This avoids the double-lock contention that
+	// dominated SendAsync/SendSync throughput under high parallelism.
 	if pidnode, ok := x.actors.nodeByName(actorName); ok {
 		pid := pidnode.value()
-		x.locker.RUnlock()
 		if pid.IsStopping() {
 			return nil, nil, gerrors.NewErrActorNotFound(actorName)
 		}
-		return pid.Address(), pid, nil
+		return pid.address, pid, nil
 	}
+
+	// Slow path: actor not found locally. Acquire the system lock for
+	// cluster and remote lookups which access mutable system state.
+	x.locker.RLock()
 
 	// check in the cluster
 	if x.clusterEnabled.Load() {
