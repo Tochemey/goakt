@@ -180,19 +180,26 @@ func (gctx *GrainContext) Err(err error) {
 //	    }
 //	}
 func (gctx *GrainContext) NoErr() {
-	// For Ask-based replies, guard against late responses after the caller timed out.
-	// This prevents pooled response channels from receiving stale replies that could
-	// be consumed by a later Ask call.
-	if gctx.synchronous && !gctx.responseClosed.CompareAndSwap(false, true) {
-		return
-	}
-	// No error to report
 	if gctx.synchronous {
+		// For Ask-based replies, guard against late responses after the caller timed out.
+		// This prevents pooled response channels from receiving stale replies that could
+		// be consumed by a later Ask call.
+		if !gctx.responseClosed.CompareAndSwap(false, true) {
+			return
+		}
+		// Signal success by sending nil on the response channel only.
+		// We must NOT also send on gctx.err because the caller (localSend)
+		// picks a single channel from its select and then drains+pools the
+		// other. If the scheduler preempts us between the two sends, the
+		// second value lands on a channel that is already back in the pool,
+		// poisoning the next caller with a stale nil.
 		select {
 		case gctx.response <- nil:
 		default:
 		}
+		return
 	}
+	// Asynchronous (Tell) path: only the error channel is used.
 	gctx.err <- nil
 }
 
