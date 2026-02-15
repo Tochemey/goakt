@@ -5,9 +5,9 @@
 ### 🐛 Fixes
 
 - 🛡️ `preShutdown` now skips building and persisting peer state when relocation is disabled, avoiding unnecessary cluster operations and ensuring shutdown proceeds correctly when `WithoutRelocation` is configured.
-- 🐛 Fix channel-pool poisoning in `GrainContext.NoErr()` where sending on both the response and error channels for synchronous calls created a scheduling race — if preempted between the two sends, the second value landed on a channel already returned to the pool, corrupting subsequent callers.
-- 🐛 Fix `localSend` timeout/cancel paths returning channels to the pool while the grain goroutine could still write to them, causing stale values to leak into later requests.
-- 🐛 Fix data race in `PID.recordProcessedMessage()` reading `passivationStrategy` without a lock by replacing the runtime type assertion with an `atomic.Bool` flag set once at init.
+- 🔀 Fix channel-pool poisoning in `GrainContext.NoErr()` where sending on both the response and error channels for synchronous calls created a scheduling race — if preempted between the two sends, the second value landed on a channel already returned to the pool, corrupting subsequent callers.
+- ⏱️ Fix `localSend` timeout/cancel paths returning channels to the pool while the grain goroutine could still write to them, causing stale values to leak into later requests.
+- 🔒 Fix data race in `PID.recordProcessedMessage()` reading `passivationStrategy` without a lock by replacing the runtime type assertion with an `atomic.Bool` flag set once at init.
 
 ### ✨ Features
 
@@ -16,20 +16,20 @@
 
 ### ⚡ Performance Improvements
 
-- 🚀 Replace ConnectRPC/HTTP-based remoting with a high-performance protobuf-over-TCP server and connection-pooling client, eliminating HTTP/2 framing, header parsing, and middleware overhead on every remote call:
+- 🌐 Replace ConnectRPC/HTTP-based remoting with a high-performance protobuf-over-TCP server and connection-pooling client, eliminating HTTP/2 framing, header parsing, and middleware overhead on every remote call:
   - Multi-loop TCP accept with `SO_REUSEPORT`, `TCP_FASTOPEN`, and `TCP_DEFER_ACCEPT` socket options for lower connection-setup latency and kernel-level load balancing across accept loops.
   - Sharded `WorkerPool` for connection dispatch, avoiding single-channel contention when dispatching accepted connections under high concurrency.
   - Self-describing length-prefixed wire protocol with dynamic protobuf type dispatch via the global registry, removing the need for per-service generated stubs and HTTP path routing.
   - `FramePool` with power-of-two bucketed `sync.Pool` instances (256 B – 4 MiB) for read buffers and frame byte slices, minimising per-message heap allocations and GC pressure.
   - LIFO connection pool in the TCP client with lazy stale-connection eviction, enabling connection reuse without background goroutines.
   - Pluggable `ConnWrapper` compression layer supporting Zstandard, Brotli, and Gzip applied transparently on both client and server sides.
-- 🚀 Replace `sync.Pool` with GC-resistant channel-based bounded pools for `ReceiveContext`, `GrainContext`, response channels, and error channels, eliminating cross-P pool thrashing and madvise overhead on the `Tell`, `Ask`, `SendAsync`, and `SendSync` hot paths.
-- 🚀 Switch `PID.latestReceiveTimeNano` from `atomic.Time` to `atomic.Int64` (Unix nanoseconds) to avoid the ~24-byte interface-boxing allocation per message incurred by `atomic.Time.Store`.
-- 🚀 Cache `Address.String()` and `GrainIdentity.String()` results lazily, removing repeated `fmt.Sprintf` allocations on every message.
-- 🚀 Optimise mailbox node value fields from `atomic.Pointer` to plain pointers in both `UnboundedMailbox` and `grainMailbox`, reducing atomic overhead on enqueue/dequeue.
-- 🚀 Inline `defer` closures in Ask-path functions (`PID.Ask`, `actor.Ask`, `handleRemoteAsk`, grain `localSend`) to eliminate per-call closure heap allocations.
-- 🚀 Restructure `ActorOf` to perform local actor lookup before acquiring the system-wide `RWMutex`, and bypass `PID.ActorSystem()` getter lock in `SendAsync`/`SendSync`, reducing read-lock acquisitions from three to one on the local hot path.
-- 🚀 Coalesce `passivationManager.Touch` calls via an atomic timestamp guard (`lastPassivationTouch`), reducing mutex contention from once-per-message to at most once per 100 ms.
+- ♻️ Replace `sync.Pool` with GC-resistant channel-based bounded pools for `ReceiveContext`, `GrainContext`, response channels, and error channels, eliminating cross-P pool thrashing and madvise overhead on the `Tell`, `Ask`, `SendAsync`, and `SendSync` hot paths.
+- 🧮 Switch `PID.latestReceiveTimeNano` from `atomic.Time` to `atomic.Int64` (Unix nanoseconds) to avoid the ~24-byte interface-boxing allocation per message incurred by `atomic.Time.Store`.
+- 💾 Cache `Address.String()` and `GrainIdentity.String()` results lazily, removing repeated `fmt.Sprintf` allocations on every message.
+- 📬 Optimise mailbox node value fields from `atomic.Pointer` to plain pointers in both `UnboundedMailbox` and `grainMailbox`, reducing atomic overhead on enqueue/dequeue.
+- 🗜️ Inline `defer` closures in Ask-path functions (`PID.Ask`, `actor.Ask`, `handleRemoteAsk`, grain `localSend`) to eliminate per-call closure heap allocations.
+- 🔓 Restructure `ActorOf` to perform local actor lookup before acquiring the system-wide `RWMutex`, and bypass `PID.ActorSystem()` getter lock in `SendAsync`/`SendSync`, reducing read-lock acquisitions from three to one on the local hot path.
+- ⏳ Coalesce `passivationManager.Touch` calls via an atomic timestamp guard (`lastPassivationTouch`), reducing mutex contention from once-per-message to at most once per 100 ms.
 
 ## [v3.13.0] - 2026-01-23
 
