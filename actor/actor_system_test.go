@@ -3866,7 +3866,7 @@ func TestActorSystemStartClusterErrors(t *testing.T) {
 		actorSys.clusterEnabled.Store(true)
 		actorSys.cluster = clusterMock
 
-		err = actorSys.startClustering(ctx)
+		err = actorSys.startCluster(ctx)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, assert.AnError)
 
@@ -5306,7 +5306,7 @@ func TestResyncActors_ErrorPaths(t *testing.T) {
 
 	node := newPidNode(pid)
 	system.actors.pids[node.id] = node
-	system.actors.counter.Inc()
+	system.actors.counter.Add(1)
 
 	err := system.resyncActors()
 	defer dependency.AssertExpectations(t)
@@ -5441,7 +5441,7 @@ func TestStopReturnsCleanupClusterError(t *testing.T) {
 	pid.setState(runningState, true)
 	node := newPidNode(pid)
 	system.actors.pids[node.id] = node
-	system.actors.counter.Inc()
+	system.actors.counter.Add(1)
 
 	clusterMock.EXPECT().IsLeader(mock.Anything).Return(false)
 	// Peers is not called: relocation is disabled (MockReplicationTestSystem default), so preShutdown returns nil

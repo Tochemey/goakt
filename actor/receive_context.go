@@ -24,7 +24,6 @@ package actor
 
 import (
 	"context"
-	"runtime"
 	"sync/atomic"
 	"time"
 
@@ -82,10 +81,6 @@ import (
 //	    }
 //	}
 type ReceiveContext struct {
-	// inUse is an atomic flag to prevent concurrent build/reset operations
-	// This protects against sync.Pool races when a context is returned to the pool
-	// while another goroutine is retrieving it. Only build() and reset() need to check this.
-	inUse          atomic.Bool
 	ctx            context.Context
 	message        proto.Message
 	sender         *PID
@@ -810,12 +805,6 @@ func newReceiveContext(ctx context.Context, from, to *PID, message proto.Message
 // If async is true, the context is derived with context.WithoutCancel to prevent
 // premature cancellation during asynchronous forwarding and dispatch.
 func (rctx *ReceiveContext) build(ctx context.Context, from, to *PID, message proto.Message, async bool) *ReceiveContext {
-	// Mark context as in-use to prevent concurrent reset()
-	// This protects against sync.Pool races
-	for !rctx.inUse.CompareAndSwap(false, true) {
-		runtime.Gosched()
-	}
-
 	rctx.sender = from
 	rctx.self = to
 	rctx.message = message
@@ -845,10 +834,6 @@ func (rctx *ReceiveContext) reset() {
 	rctx.responseClosed.Store(false)
 	rctx.requestID = ""
 	rctx.requestReplyTo = ""
-
-	// Mark context as available for reuse
-	// This must be the last operation to ensure all fields are reset
-	rctx.inUse.Store(false)
 }
 
 // withoutCancel safely derives a non-cancelable context from the current context.

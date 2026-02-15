@@ -722,14 +722,14 @@ func (x *actorSystem) validateRemoteHost(host string, port int32) error {
 	return nil
 }
 
-// ProtoServerOptions returns ProtoServer options with all RemotingService and ClusterService
+// protoServerOptions returns ProtoServer options with all RemotingService and ClusterService
 // handlers registered. This enables the actor system to handle remoting and cluster operations
 // over the proto TCP transport.
 // This enables the actor system to handle remoting operations over the proto TCP transport.
 //
 // The returned options should be passed to internalnet.NewProtoServer during actor system
 // initialization to configure the proto TCP server with all necessary handlers.
-func (x *actorSystem) ProtoServerOptions() []inet.ProtoServerOption {
+func (x *actorSystem) protoServerOptions() []inet.ProtoServerOption {
 	return []inet.ProtoServerOption{
 		inet.WithProtoHandler("internalpb.RemoteLookupRequest", x.remoteLookupHandler),
 		inet.WithProtoHandler("internalpb.RemoteAskRequest", x.remoteAskHandler),
@@ -766,7 +766,7 @@ func (x *actorSystem) startRemoteServer(ctx context.Context) error {
 	hostPort := net.JoinHostPort(x.remoteConfig.BindAddr(), strconv.Itoa(x.remoteConfig.BindPort()))
 
 	// Create proto server options based on the remote config.
-	serverOpts := x.ProtoServerOptions()
+	serverOpts := x.protoServerOptions()
 
 	// Add max frame size from config if specified.
 	if x.remoteConfig.MaxFrameSize() > 0 {

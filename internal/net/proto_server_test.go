@@ -745,7 +745,7 @@ func TestProtoServer_ListenTLS_NoConfig(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestFramePool_GetPut(t *testing.T) {
-	fp := newFramePool()
+	fp := NewFramePool()
 
 	t.Run("small buffer", func(t *testing.T) {
 		buf := fp.Get(100)

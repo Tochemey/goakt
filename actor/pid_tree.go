@@ -25,9 +25,7 @@ package actor
 import (
 	"errors"
 	"sync"
-	syncatomic "sync/atomic"
-
-	"go.uber.org/atomic"
+	"sync/atomic"
 )
 
 // pidNode represents a node in the PID tree.
@@ -36,13 +34,13 @@ import (
 // returned to callers outside the tree lock (e.g. via node()/nodeByName()),
 // and concurrent deleteNode() calls can set pid to nil.
 type pidNode struct {
-	pid         syncatomic.Pointer[PID] // PID associated with this node (atomic for safe lock-free reads).
-	parentNode  *pidNode                // Parent node; nil if root.
-	id          string                  // Cached pid.ID() — avoids repeated string building.
-	name        string                  // Cached pid.Name().
-	watchers    map[string]*PID         // Actors watching this node (key = watcher ID).
-	watchees    map[string]*PID         // Actors this node is watching (key = watchee ID).
-	descendants map[string]*pidNode     // Direct children (key = child ID).
+	pid         atomic.Pointer[PID] // PID associated with this node (atomic for safe lock-free reads).
+	parentNode  *pidNode            // Parent node; nil if root.
+	id          string              // Cached pid.ID() — avoids repeated string building.
+	name        string              // Cached pid.Name().
+	watchers    map[string]*PID     // Actors watching this node (key = watcher ID).
+	watchees    map[string]*PID     // Actors this node is watching (key = watchee ID).
+	descendants map[string]*pidNode // Direct children (key = child ID).
 }
 
 // value returns the PID stored in the node, or nil if cleared by deleteNode.
@@ -75,7 +73,7 @@ type tree struct {
 	rootNode *pidNode            // Logical root node (its pid may be nil if cleared).
 	pids     map[string]*pidNode // Index: PID.ID() -> pidNode.
 	names    map[string]*pidNode // Index: PID.Name() -> pidNode.
-	counter  *atomic.Int64       // Number of nodes currently registered.
+	counter  atomic.Int64        // Number of nodes currently registered.
 	noSender *PID                // Cached NoSender (set on first root add).
 }
 
@@ -86,7 +84,6 @@ func newTree() *tree {
 	return &tree{
 		pids:     make(map[string]*pidNode),
 		names:    make(map[string]*pidNode),
-		counter:  atomic.NewInt64(0),
 		rootNode: newPidNode(nil),
 	}
 }
@@ -122,7 +119,7 @@ func (x *tree) addRootNode(pid *PID) error {
 	x.rootNode.name = name
 	x.pids[id] = x.rootNode
 	x.names[name] = x.rootNode
-	x.counter.Inc()
+	x.counter.Add(1)
 	return nil
 }
 
@@ -185,7 +182,7 @@ func (x *tree) addNodeLocked(parent, pid *PID) error {
 
 	x.pids[id] = childNode
 	x.names[name] = childNode
-	x.counter.Inc()
+	x.counter.Add(1)
 	return nil
 }
 
@@ -407,7 +404,7 @@ func (x *tree) deleteNode(pid *PID) {
 		}
 		n.parentNode = nil
 		n.pid.Store(nil)
-		x.counter.Dec()
+		x.counter.Add(-1)
 	}
 }
 

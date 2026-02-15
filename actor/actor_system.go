@@ -1069,7 +1069,7 @@ func (x *actorSystem) Start(ctx context.Context) error {
 		AddContextRunner(x.spawnRelocator).
 		AddContextRunner(x.spawnTopicActor).
 		AddContextRunner(x.startRemoteServer).
-		AddContextRunner(x.startClustering).
+		AddContextRunner(x.startCluster).
 		AddContextRunner(x.startDataCenterController).
 		AddContextRunner(x.startDataCenterLeaderWatch).
 		Run(); err != nil {
@@ -2303,9 +2303,9 @@ func (x *actorSystem) setupCluster() error {
 	return nil
 }
 
-// startClustering enables clustering. When clustering is enabled remoting is also enabled to facilitate remote
+// startCluster enables clustering. When clustering is enabled remoting is also enabled to facilitate remote
 // communication
-func (x *actorSystem) startClustering(ctx context.Context) error {
+func (x *actorSystem) startCluster(ctx context.Context) error {
 	if !x.clusterEnabled.Load() {
 		return nil
 	}

@@ -93,7 +93,7 @@ type Client struct {
 	idleTimeout  time.Duration
 	maxFrameSize uint32
 	serializer   *ProtoSerializer
-	framePool    *framePool
+	framePool    *FramePool
 
 	mu     sync.Mutex
 	idle   []idleConn
@@ -119,7 +119,7 @@ func NewClient(addr string, opts ...ClientOption) *Client {
 		idleTimeout:  30 * time.Second,
 		maxFrameSize: defaultMaxFrameSize,
 		serializer:   NewProtoSerializer(),
-		framePool:    newFramePool(),
+		framePool:    NewFramePool(),
 		dialer: net.Dialer{
 			Timeout:   5 * time.Second,
 			KeepAlive: 15 * time.Second,
@@ -566,13 +566,13 @@ func (c *Client) dial(ctx context.Context) (net.Conn, error) {
 // The maxFrameSize parameter specifies the maximum allowed frame size in bytes.
 // Frames larger than this limit will be rejected with ErrFrameTooLarge.
 //
-// When fp is non-nil the frame buffer is drawn from the pool. The caller
-// must return it via fp.Put after the frame contents have been consumed
+// When framePool is non-nil the frame buffer is drawn from the pool. The caller
+// must return it via framePool.Put after the frame contents have been consumed
 // (typically right after [ProtoSerializer.UnmarshalBinary]).
-// When fp is nil a fresh []byte is allocated for each frame.
-func readProtoFrame(r io.Reader, fp *framePool, maxFrameSize uint32) ([]byte, error) {
+// When framePool is nil a fresh []byte is allocated for each frame.
+func readProtoFrame(reader io.Reader, framePool *FramePool, maxFrameSize uint32) ([]byte, error) {
 	var hdr [4]byte
-	if _, err := io.ReadFull(r, hdr[:]); err != nil {
+	if _, err := io.ReadFull(reader, hdr[:]); err != nil {
 		return nil, err
 	}
 
@@ -586,16 +586,16 @@ func readProtoFrame(r io.Reader, fp *framePool, maxFrameSize uint32) ([]byte, er
 	}
 
 	var frame []byte
-	if fp != nil {
-		frame = fp.Get(int(totalLen))
+	if framePool != nil {
+		frame = framePool.Get(int(totalLen))
 	} else {
 		frame = make([]byte, totalLen)
 	}
 
 	copy(frame[:4], hdr[:])
-	if _, err := io.ReadFull(r, frame[4:]); err != nil {
-		if fp != nil {
-			fp.Put(frame)
+	if _, err := io.ReadFull(reader, frame[4:]); err != nil {
+		if framePool != nil {
+			framePool.Put(frame)
 		}
 		return nil, err
 	}

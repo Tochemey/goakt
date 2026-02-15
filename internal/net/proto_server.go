@@ -28,7 +28,6 @@ import (
 	"encoding/binary"
 	"io"
 	"net"
-	"sync"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -124,7 +123,7 @@ type ProtoServer struct {
 	fallback     ProtoHandler
 	panicHandler PanicHandlerFunc
 	serializer   *ProtoSerializer
-	framePool    *framePool
+	framePool    *FramePool
 	serverOpts   []ServerOption
 
 	idleTimeout  time.Duration
@@ -146,7 +145,7 @@ func NewProtoServer(listenAddr string, opts ...ProtoServerOption) (*ProtoServer,
 	ps := &ProtoServer{
 		handlers:     make(map[protoreflect.FullName]ProtoHandler),
 		serializer:   NewProtoSerializer(),
-		framePool:    newFramePool(),
+		framePool:    NewFramePool(),
 		maxFrameSize: defaultMaxFrameSize, // Default: 16 MiB
 	}
 
@@ -565,98 +564,4 @@ func (ps *ProtoServer) recover(ctx context.Context, handler ProtoHandler, conn C
 
 	resp, err = handler(ctx, conn, msg)
 	return resp, false, err
-}
-
-// framePool maintains a set of [sync.Pool] instances bucketed by power-of-two
-// size. This avoids allocating a new []byte for every incoming frame and
-// significantly reduces GC pressure under high message rates.
-//
-// Bucket boundaries (powers of two from 256 B to 4 MiB) cover the vast
-// majority of protobuf messages while keeping internal fragmentation below 2x.
-type framePool struct {
-	pools [numBuckets]sync.Pool
-}
-
-const (
-	minBucketShift = 8  // 256 B
-	maxBucketShift = 22 // 4 MiB
-	numBuckets     = maxBucketShift - minBucketShift + 1
-)
-
-func newFramePool() *framePool {
-	fp := &framePool{}
-	for i := range fp.pools {
-		size := 1 << (minBucketShift + i)
-		fp.pools[i] = sync.Pool{
-			New: func() any {
-				buf := make([]byte, size)
-				return &buf
-			},
-		}
-	}
-	return fp
-}
-
-// Get returns a []byte of exactly n bytes, drawn from the smallest pool
-// bucket that can satisfy the request. For sizes larger than the biggest
-// bucket a fresh slice is allocated (and will be collected by the GC).
-func (fp *framePool) Get(n int) []byte {
-	idx := bucketIndex(n)
-	if idx >= numBuckets {
-		// Oversized frame — allocate directly.
-		return make([]byte, n)
-	}
-	bp := fp.pools[idx].Get().(*[]byte)
-	return (*bp)[:n]
-}
-
-// Put returns a buffer to the appropriate pool bucket. Buffers that do not
-// match any bucket (oversized or misaligned capacity) are simply dropped
-// for GC collection.
-func (fp *framePool) Put(buf []byte) {
-	c := cap(buf)
-	idx := bucketIndexExact(c)
-	if idx < 0 || idx >= numBuckets {
-		return // oversized or misaligned — let GC collect it
-	}
-	buf = buf[:c]
-	fp.pools[idx].Put(&buf)
-}
-
-// bucketIndex returns the pool index for a buffer of size n.
-func bucketIndex(n int) int {
-	if n <= 1<<minBucketShift {
-		return 0
-	}
-	// Find the smallest power-of-two >= n by counting the bit-width of (n-1).
-	shift := 0
-	v := n - 1
-	for v > 0 {
-		v >>= 1
-		shift++
-	}
-	idx := shift - minBucketShift
-	if idx >= numBuckets {
-		return numBuckets // signals "oversized"
-	}
-	return idx
-}
-
-// bucketIndexExact returns the pool index only if cap is an exact
-// power-of-two matching a bucket boundary. Returns -1 otherwise.
-func bucketIndexExact(c int) int {
-	if c == 0 || c&(c-1) != 0 {
-		return -1 // not a power of two
-	}
-	shift := 0
-	v := c
-	for v > 1 {
-		v >>= 1
-		shift++
-	}
-	idx := shift - minBucketShift
-	if idx < 0 || idx >= numBuckets {
-		return -1
-	}
-	return idx
 }
