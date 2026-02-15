@@ -191,7 +191,7 @@ func TestGrainMailboxDequeue_WaitsForLinkAfterTailSwap(t *testing.T) {
 	// Arrange: create the node we will "half-enqueue"
 	ctx := &GrainContext{}
 	n := grainNodePool.Get().(*grainNode)
-	n.value.Store(ctx)
+	n.value = ctx
 	n.next.Store(nil)
 
 	// Step 1 of enqueue: advance tail, but DO NOT link prev.next yet.

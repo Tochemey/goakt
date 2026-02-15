@@ -25,7 +25,6 @@ package actor
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	"go.uber.org/atomic"
@@ -38,22 +37,30 @@ import (
 	"github.com/tochemey/goakt/v3/log"
 )
 
-// pool holds a pool of ReceiveContext
-var grainContextPool = sync.Pool{
-	New: func() any {
-		return new(GrainContext)
-	},
-}
+// grainContextCh is a channel-based bounded pool for GrainContext objects.
+// Unlike sync.Pool, items survive GC cycles, eliminating the cross-P
+// thrashing and GC-clearing cycle that dominates allocation overhead.
+var grainContextCh = make(chan *GrainContext, 512)
 
-// getContext retrieves a message from the pool
+// getGrainContext retrieves a GrainContext from the channel-based pool.
+// Falls back to heap allocation if the pool is empty.
 func getGrainContext() *GrainContext {
-	return grainContextPool.Get().(*GrainContext)
+	select {
+	case ctx := <-grainContextCh:
+		return ctx
+	default:
+		return new(GrainContext)
+	}
 }
 
-// releaseContext sends the message context back to the pool
+// releaseGrainContext returns a GrainContext to the channel-based pool.
+// If the pool is full, the context is dropped for GC collection.
 func releaseGrainContext(ctx *GrainContext) {
 	ctx.reset()
-	grainContextPool.Put(ctx)
+	select {
+	case grainContextCh <- ctx:
+	default:
+	}
 }
 
 // GrainContext provides contextual information and operations
@@ -547,5 +554,7 @@ func (gctx *GrainContext) reset() {
 	gctx.err = nil
 	gctx.synchronous = false
 	gctx.pid = nil
-	gctx.responseClosed.Store(false)
+	// Note: responseClosed is not reset here because build() always sets it
+	// to false for the next message. Avoiding this atomic store saves ~5ns
+	// per message on the release path.
 }

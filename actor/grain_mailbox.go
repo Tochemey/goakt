@@ -30,8 +30,14 @@ import (
 	gerrors "github.com/tochemey/goakt/v3/errors"
 )
 
+// grainNode is a queue node for the grain MPSC mailbox.
+//
+// The value field is a plain (non-atomic) pointer because all accesses are
+// ordered by the atomic operations on the queue's head and tail pointers:
+//   - Enqueue writes value before publishing the node via tail.Swap.
+//   - Dequeue reads value after acquiring the node via head.next.Load.
 type grainNode struct {
-	value atomic.Pointer[GrainContext]
+	value *GrainContext
 	next  atomic.Pointer[grainNode]
 }
 
@@ -92,15 +98,17 @@ func (m *grainMailbox) Dequeue() *GrainContext {
 
 	m.head.Store(next)
 
-	value := next.value.Load()
-	next.value.Store(nil)
+	// Non-atomic read: visible because the head.next.Load above acquired
+	// the ordering established by the producer's prev.next.Store.
+	value := next.value
+	next.value = nil // safe: node is consumed, not reachable from head
 
 	// Decrement for both modes (bounded producers pre-incremented).
 	m.len.Add(-1)
 
 	// Recycle old head.
 	head.next.Store(nil)
-	head.value.Store(nil)
+	head.value = nil
 	grainNodePool.Put(head)
 
 	return value
@@ -136,7 +144,9 @@ func (m *grainMailbox) tryEnqueue(value *GrainContext) bool {
 	}
 
 	n := grainNodePool.Get().(*grainNode)
-	n.value.Store(value)
+	// Non-atomic store: the node is thread-local and invisible to other
+	// goroutines until the tail.Swap below publishes it.
+	n.value = value
 	n.next.Store(nil)
 
 	// swap tail, then link prev.next.
