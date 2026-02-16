@@ -7,7 +7,7 @@ GoAkt is designed for systems where concurrency, distribution, and fault toleran
 GoAkt is used in production today:
 
 | Product                                                | Domain                      | How GoAkt is used                                                   |
-| ------------------------------------------------------ | --------------------------- | ------------------------------------------------------------------- |
+|--------------------------------------------------------|-----------------------------|---------------------------------------------------------------------|
 | [Baki Money](https://www.baki.money/)                  | AI-powered expense tracking | Financial data processing, receipt analysis pipelines               |
 | [Event Processor](https://www.v-app.io/iot-builder-3/) | IoT platform                | Clustered Complex Event Processing (CEP) for real-time data streams |
 
@@ -141,7 +141,7 @@ Running exactly-once logic across a cluster -- leader election, rate limiting, c
 ## Choosing the Right Pattern
 
 | Problem                            | Primary Pattern         | Start Here                                                                            |
-| ---------------------------------- | ----------------------- | ------------------------------------------------------------------------------------- |
+|------------------------------------|-------------------------|---------------------------------------------------------------------------------------|
 | High-volume event ingestion        | Routers + Pub/Sub       | [Routers](../actors/routers.md), [Pub/Sub](../pubsub/overview.md)                     |
 | Per-entity state (users, orders)   | Grains                  | [Grains](../grains/overview.md)                                                       |
 | Multi-step workflows / sagas       | Behaviors + Reentrancy  | [Behaviors](../actors/behaviours.md), [Reentrancy](../actors/reentrancy.md)           |

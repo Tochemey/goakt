@@ -105,9 +105,10 @@ import (
 
 // Create NATS discovery provider
 disco := nats.NewDiscovery(&nats.Config{
-    Server:         "nats://localhost:4222",
-    ApplicationName: "my-app",
-    ActorSystemName: "my-system",
+    NatsServer:    "nats://localhost:4222",
+    NatsSubject:   "my-cluster",
+    Host:          "localhost",
+    DiscoveryPort: 3320,
 })
 
 // Configure the cluster
@@ -340,9 +341,9 @@ if pid != nil {
     // Actor is local - you have a PID reference
     pid.Tell(message)
 } else {
-    // Actor is remote - you have an address
-    // Use RemoteTell or RemoteAsk
-    system.RemoteTell(ctx, addr, message)
+    // Actor is remote: from inside an actor use ctx.RemoteTell(addr, message) or
+    // response := ctx.RemoteAsk(addr, message, timeout); from outside use the cluster client:
+    // cl.Ask(ctx, "actor-name", message, timeout) or cl.Tell(ctx, "actor-name", message)
 }
 ```
 
@@ -424,7 +425,7 @@ import (
 type WorkerActor struct{}
 
 func (w *WorkerActor) PreStart(ctx *actor.Context) error {
-    ctx.Logger().Info("Worker started")
+    ctx.ActorSystem().Logger().Info("Worker started")
     return nil
 }
 
@@ -433,7 +434,7 @@ func (w *WorkerActor) Receive(ctx *actor.ReceiveContext) {
 }
 
 func (w *WorkerActor) PostStop(ctx *actor.Context) error {
-    ctx.Logger().Info("Worker stopped")
+    ctx.ActorSystem().Logger().Info("Worker stopped")
     return nil
 }
 
@@ -442,9 +443,10 @@ func main() {
 
     // Configure NATS discovery
     disco := nats.NewDiscovery(&nats.Config{
-        Server:          "nats://localhost:4222",
-        ApplicationName: "my-cluster-app",
-        ActorSystemName: "worker-system",
+        NatsServer:    "nats://localhost:4222",
+        NatsSubject:   "my-cluster",
+        Host:          "localhost",
+        DiscoveryPort: 3320,
     })
 
     // Configure the cluster

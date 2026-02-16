@@ -105,8 +105,7 @@ func main() {
     ctx := context.Background()
 
     // Create actor system
-    actorSystem, _ := actors.NewActorSystem("MySystem",
-        actors.WithPassivationDisabled())
+    actorSystem, _ := actors.NewActorSystem("MySystem")
 
     // Start actor system
     _ = actorSystem.Start(ctx)

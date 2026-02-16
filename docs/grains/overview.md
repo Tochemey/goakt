@@ -213,11 +213,11 @@ grainRequest := &remote.GrainRequest{
     Name: "user-123",
 }
 
-// Send message
-err = c.TellGrain(ctx, "localhost", 3321, grainRequest, &UpdateName{})
+// Send message (client picks a node)
+err = c.TellGrain(ctx, grainRequest, &UpdateName{})
 
 // Request-response
-response, err := c.AskGrain(ctx, "localhost", 3321, grainRequest, &GetUser{}, 5*time.Second)
+response, err := c.AskGrain(ctx, grainRequest, &GetUser{}, 5*time.Second)
 ```
 
 ### Remote Activation

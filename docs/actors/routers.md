@@ -362,7 +362,7 @@ type WorkerActor struct {
 
 func (a *WorkerActor) PreStart(ctx *actor.Context) error {
     a.processed = 0
-    ctx.Logger().Info("Worker started", "name", ctx.ActorName())
+    ctx.ActorSystem().Logger().Info("Worker started", "name", ctx.ActorName())
     return nil
 }
 
@@ -392,7 +392,7 @@ func (a *WorkerActor) processWork(item *WorkItem) string {
 }
 
 func (a *WorkerActor) PostStop(ctx *actor.Context) error {
-    ctx.Logger().Info("Worker stopped",
+    ctx.ActorSystem().Logger().Info("Worker stopped",
         "name", ctx.ActorName(),
         "processed", a.processed)
     return nil
@@ -401,9 +401,8 @@ func (a *WorkerActor) PostStop(ctx *actor.Context) error {
 func main() {
     ctx := context.Background()
     
-    // Create actor system
-    actorSystem, _ := actor.NewActorSystem("RouterSystem",
-        actor.WithPassivationDisabled())
+    // Create actor system (use WithPassivationStrategy(passivation.NewLongLivedStrategy()) to disable passivation per-actor)
+    actorSystem, _ := actor.NewActorSystem("RouterSystem")
     actorSystem.Start(ctx)
     defer actorSystem.Stop(ctx)
     
@@ -619,7 +618,7 @@ func (a *CircuitBreakerRouter) Receive(ctx *actor.ReceiveContext) {
             ctx.Logger().Warn("Circuit breaker opened")
             
             // Schedule reset
-            ctx.ScheduleOnce(30*time.Second, ctx.Self(), &ResetCircuit{})
+            _ = ctx.ActorSystem().ScheduleOnce(ctx.Context(), &ResetCircuit{}, ctx.Self(), 30*time.Second)
         }
         
     case *ResetCircuit:
@@ -710,7 +709,7 @@ Very heavy:        100+ routees (monitor carefully)
 func TestRouter(t *testing.T) {
     ctx := context.Background()
     system, _ := actor.NewActorSystem("test",
-        actor.WithPassivationDisabled())
+        actor.WithPassivationStrategy(passivation.NewLongLivedStrategy()))
     system.Start(ctx)
     defer system.Stop(ctx)
     

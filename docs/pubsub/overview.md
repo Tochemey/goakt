@@ -93,17 +93,15 @@ import (
 type SubscriberActor struct{}
 
 func (a *SubscriberActor) PreStart(ctx *actor.Context) error {
-    // Get the topic actor
-    topicActor := ctx.ActorSystem().TopicActor()
-
-    // Subscribe to topic
-    return ctx.Self().Tell(ctx.Context(), topicActor, &goaktpb.Subscribe{
-        Topic: "notifications",
-    })
+    return nil
 }
 
 func (a *SubscriberActor) Receive(ctx *actor.ReceiveContext) {
     switch msg := ctx.Message().(type) {
+    case *goaktpb.PostStart:
+        // Subscribe when actor has started (PreStart has no Self())
+        topicActor := ctx.ActorSystem().TopicActor()
+        ctx.Tell(topicActor, &goaktpb.Subscribe{Topic: "notifications"})
     case *goaktpb.SubscribeAck:
         ctx.Logger().Infof("Subscribed to topic: %s", msg.Topic)
 
@@ -149,16 +147,11 @@ func (a *PublisherActor) Receive(ctx *actor.ReceiveContext) {
         }
 
         // Publish to topic
-        err = ctx.Self().Tell(ctx.Context(), topicActor, &goaktpb.Publish{
+        ctx.Tell(topicActor, &goaktpb.Publish{
             Id:      generateMessageID(),
             Topic:   "notifications",
             Message: payload,
         })
-        if err != nil {
-            ctx.Err(err)
-            return
-        }
-
         ctx.Response(&PublishSuccess{})
 
     default:
@@ -185,13 +178,7 @@ func (a *SubscriberActor) Receive(ctx *actor.ReceiveContext) {
     case *StopListening:
         topicActor := ctx.ActorSystem().TopicActor()
 
-        err := ctx.Self().Tell(ctx.Context(), topicActor, &goaktpb.Unsubscribe{
-            Topic: "notifications",
-        })
-        if err != nil {
-            ctx.Err(err)
-            return
-        }
+        ctx.Tell(topicActor, &goaktpb.Unsubscribe{Topic: "notifications"})
 
     case *goaktpb.UnsubscribeAck:
         ctx.Logger().Infof("Unsubscribed from topic: %s", msg.Topic)
@@ -284,14 +271,14 @@ type EmailSubscriber struct {
 }
 
 func (a *EmailSubscriber) PreStart(ctx *actor.Context) error {
-    topicActor := ctx.ActorSystem().TopicActor()
-    return ctx.Self().Tell(ctx.Context(), topicActor, &goaktpb.Subscribe{
-        Topic: "notifications",
-    })
+    return nil
 }
 
 func (a *EmailSubscriber) Receive(ctx *actor.ReceiveContext) {
     switch msg := ctx.Message().(type) {
+    case *goaktpb.PostStart:
+        topicActor := ctx.ActorSystem().TopicActor()
+        ctx.Tell(topicActor, &goaktpb.Subscribe{Topic: "notifications"})
     case *goaktpb.SubscribeAck:
         ctx.Logger().Infof("Email subscriber ready for topic: %s", msg.Topic)
 
@@ -323,14 +310,14 @@ type PushNotificationSubscriber struct {
 }
 
 func (a *PushNotificationSubscriber) PreStart(ctx *actor.Context) error {
-    topicActor := ctx.ActorSystem().TopicActor()
-    return ctx.Self().Tell(ctx.Context(), topicActor, &goaktpb.Subscribe{
-        Topic: "notifications",
-    })
+    return nil
 }
 
 func (a *PushNotificationSubscriber) Receive(ctx *actor.ReceiveContext) {
     switch msg := ctx.Message().(type) {
+    case *goaktpb.PostStart:
+        topicActor := ctx.ActorSystem().TopicActor()
+        ctx.Tell(topicActor, &goaktpb.Subscribe{Topic: "notifications"})
     case *goaktpb.SubscribeAck:
         ctx.Logger().Infof("Push subscriber ready for topic: %s", msg.Topic)
 
@@ -384,16 +371,11 @@ func (a *NotificationPublisher) Receive(ctx *actor.ReceiveContext) {
         }
 
         // Publish to topic
-        err = ctx.Self().Tell(ctx.Context(), topicActor, &goaktpb.Publish{
+        ctx.Tell(topicActor, &goaktpb.Publish{
             Id:      generateMessageID(),
             Topic:   "notifications",
             Message: payload,
         })
-        if err != nil {
-            ctx.Err(err)
-            return
-        }
-
         ctx.Response(&NotificationSent{})
 
     default:
@@ -539,12 +521,21 @@ type GenericEvent struct {
 ### Subscription Management
 
 ```go
-// Subscribe in PreStart
+// Subscribe in Receive on PostStart (PreStart has no Self())
 func (a *MyActor) PreStart(ctx *actor.Context) error {
-    topicActor := ctx.ActorSystem().TopicActor()
-    return ctx.Self().Tell(ctx.Context(), topicActor, &goaktpb.Subscribe{
-        Topic: "my-topic",
-    })
+    return nil
+}
+
+func (a *MyActor) Receive(ctx *actor.ReceiveContext) {
+    switch msg := ctx.Message().(type) {
+    case *goaktpb.PostStart:
+        topicActor := ctx.ActorSystem().TopicActor()
+        ctx.Tell(topicActor, &goaktpb.Subscribe{Topic: "my-topic"})
+    case *goaktpb.SubscribeAck:
+        // subscribed
+    default:
+        ctx.Unhandled()
+    }
 }
 
 // Unsubscribe before shutdown (optional, handled automatically)

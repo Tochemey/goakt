@@ -67,7 +67,7 @@ Every message in GoAkt -- whether local, remote, or across a cluster -- must be 
 
 **Schema evolution** -- Protobuf's field-numbering scheme gives you forward and backward compatibility out of the box. You can add new fields to a message without breaking actors that have not been updated yet -- critical in rolling deployments where nodes may run different versions.
 
-**Performance** -- Protobuf's binary encoding is compact and fast to marshal/unmarshal. In a high-throughput actor system, serialization overhead matters. Protocol Buffers consistently outperform JSON and most text-based formats in both size and speed.
+**Performance** -- Protobuf's binary encoding is compact and fast to marshal/unmarshal. In a high-throughput actor system, serialization overhead matters. Protocol Buffers typically offer better size and speed than JSON and other text-based formats.
 
 **Cross-language potential** -- Because `.proto` files generate code in many languages, message definitions serve as a language-neutral contract. Even though GoAkt is a Go framework, its messages are inherently portable.
 
@@ -114,11 +114,11 @@ The same message types work unchanged for local sends, remote calls, cluster-wid
 GoAkt builds on existing, proven libraries within the Go ecosystem rather than reimplementing common infrastructure:
 
 | Concern            | Library                                                                                                                          |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+|--------------------|----------------------------------------------------------------------------------------------------------------------------------|
 | Logging            | [Zap](https://github.com/uber-go/zap)                                                                                            |
 | Metrics            | [OpenTelemetry Go SDK](https://opentelemetry.io/docs/languages/go/)                                                              |
 | Discovery          | [NATS](https://nats.io/), [Consul](https://www.consul.io/), [etcd](https://etcd.io/), [Kubernetes](https://kubernetes.io/), mDNS |
-| Cluster membership | [Olric](https://github.com/tochemey/olric)                                                                                     |
+| Cluster membership | [Olric](https://github.com/tochemey/olric)                                                                                       |
 | Serialization      | [Protocol Buffers](https://protobuf.dev/)                                                                                        |
 
 This approach accelerates development, reduces maintenance burden, and inherits production-hardened reliability. When a dependency releases a performance improvement or security fix, GoAkt benefits immediately.
@@ -142,7 +142,7 @@ GoAkt exposes well-defined interfaces at every integration point. Rather than sh
 ### Key Extension Points
 
 | Interface                  | Purpose                                                 |
-| -------------------------- | ------------------------------------------------------- |
+|----------------------------|---------------------------------------------------------|
 | `actor.Actor`              | Define actor behavior (three methods)                   |
 | `actor.Mailbox`            | Custom message queuing strategies                       |
 | `log.Logger`               | Plug in any logging backend                             |
@@ -173,7 +173,7 @@ You pay for only the features you enable. An actor system that does not need clu
 ## Summary
 
 | Principle                     | How GoAkt delivers                                             |
-| ----------------------------- | -------------------------------------------------------------- |
+|-------------------------------|----------------------------------------------------------------|
 | **Simplicity**                | Three-method `Actor` interface; no magic                       |
 | **Ease of use**               | Small API, progressive complexity, composable options          |
 | **Clear contracts**           | Protocol Buffers for all messages -- typed, versioned, fast    |

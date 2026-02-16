@@ -153,19 +153,22 @@ See [Context Propagation](context_propagation.md) for details.
 
 ### Remote Messaging
 
-Send messages to actors on remote nodes using the actor system's remoting methods:
+Send messages to actors on remote nodes. **From inside an actor** use the receive context; **from outside** (e.g. main) use the system's `NoSender()` PID:
 
 #### RemoteTell (Fire-and-Forget)
 
+**From inside an actor:**
+```go
+ctx.RemoteTell(addr, message)
+```
+
+**From outside (e.g. main):**
 ```go
 import "github.com/tochemey/goakt/v3/address"
 
-// Create actor address
 addr := address.New("actor-name", "remote-system", "remote-host", 3321)
-
-// Send message
 message := &MyRequest{Data: "payload"}
-err := system.RemoteTell(ctx, addr, message)
+err := system.NoSender().RemoteTell(ctx, addr, message)
 if err != nil {
     log.Fatal(err)
 }
@@ -180,21 +183,17 @@ if err != nil {
 
 #### RemoteAsk (Request-Response)
 
+**From inside an actor:** `response := ctx.RemoteAsk(addr, message, timeout)` (returns `*anypb.Any`; check for nil and `ctx.Err()`).
+
+**From outside:**
 ```go
 addr := address.New("actor-name", "remote-system", "remote-host", 3321)
-
-response, err := system.RemoteAsk(
-    ctx,
-    addr,
-    &MyRequest{Data: "query"},
-    5 * time.Second, // Timeout
-)
+response, err := system.NoSender().RemoteAsk(ctx, addr, &MyRequest{Data: "query"}, 5*time.Second)
 if err != nil {
     log.Fatal(err)
 }
-
-// Type assert the response
-myResponse := response.(*MyResponse)
+// response is *anypb.Any; use response.UnmarshalNew() or type assert after unpacking
+myResponse, err := response.UnmarshalNew()
 ```
 
 **Characteristics:**
@@ -204,51 +203,21 @@ myResponse := response.(*MyResponse)
 - Timeout controls server-side processing window
 - Context cancellation/deadline also applies
 
-#### RemoteBatchTell
+#### RemoteBatchTell / RemoteBatchAsk
 
-Send multiple messages in a single RPC:
-
-```go
-messages := []proto.Message{
-    &Message1{},
-    &Message2{},
-    &Message3{},
-}
-
-err := system.RemoteBatchTell(ctx, from, to, messages)
-```
-
-**Use case:** Reduce network overhead when sending multiple messages to the same actor.
-
-#### RemoteBatchAsk
-
-Send multiple requests and collect responses:
-
-```go
-messages := []proto.Message{
-    &Query1{},
-    &Query2{},
-    &Query3{},
-}
-
-responses, err := system.RemoteBatchAsk(ctx, from, to, messages, 5*time.Second)
-```
-
-**Note:** Response count and order may not match requests. Use correlation IDs if needed.
+Batch operations are available on **PID**: `pid.RemoteBatchTell(ctx, to, messages)` and `pid.RemoteBatchAsk(ctx, to, messages, timeout)`. Use `system.NoSender()` when calling from outside an actor. From inside an actor use `ctx.RemoteBatchTell(addr, messages)` and `ctx.RemoteBatchAsk(addr, messages, timeout)`.
 
 ### Remote Actor Management
 
 #### RemoteLookup
 
-Find an actor on a remote node:
-
+Find an actor on a remote node. **From inside an actor:** `addr := ctx.RemoteLookup("remote-host", 3321, "actor-name")` (check for nil). **From outside:**
 ```go
-addr, err := system.RemoteLookup(ctx, "remote-host", 3321, "actor-name")
+addr, err := system.NoSender().RemoteLookup(ctx, "remote-host", 3321, "actor-name")
 if err != nil {
     log.Fatal(err)
 }
-
-if addr.Equals(address.NoSender()) {
+if addr == nil || addr.Equals(address.NoSender()) {
     log.Println("Actor not found")
 } else {
     log.Printf("Actor found at: %s\n", addr.String())
@@ -257,17 +226,10 @@ if addr.Equals(address.NoSender()) {
 
 #### RemoteSpawn
 
-Create an actor on a remote node:
+Create an actor on a remote node. Use a **PID** (e.g. `system.NoSender()` when outside an actor):
 
 ```go
-import "github.com/tochemey/goakt/v3/remote"
-
-spawnRequest := &remote.SpawnRequest{
-    Name: "remote-worker",
-    Kind: "WorkerActor",
-}
-
-err := system.RemoteSpawn(ctx, "remote-host", 3321, spawnRequest)
+err := system.NoSender().RemoteSpawn(ctx, "remote-host", 3321, "remote-worker", "WorkerActor")
 ```
 
 **Note:** The actor kind must be registered on the remote node.
@@ -277,63 +239,26 @@ err := system.RemoteSpawn(ctx, "remote-host", 3321, spawnRequest)
 Stop an actor on a remote node:
 
 ```go
-err := system.RemoteStop(ctx, "remote-host", 3321, "actor-name")
+err := system.NoSender().RemoteStop(ctx, "remote-host", 3321, "actor-name")
 ```
 
-#### RemoteReSpawn
-
-Restart an actor on a remote node:
-
-```go
-err := system.RemoteReSpawn(ctx, "remote-host", 3321, "actor-name")
-```
-
-#### RemoteReinstate
-
-Resume a passivated actor on a remote node:
-
-```go
-err := system.RemoteReinstate(ctx, "remote-host", 3321, "actor-name")
-```
+**ReSpawn** and **Reinstate** are also available on PID when needed.
 
 ### Remote Grain Operations
 
-#### RemoteActivateGrain
+#### Activating grains
 
-Activate a grain on a remote node:
+Grains are activated on demand when you call `system.AskGrain` or `system.TellGrain` with a `GrainIdentity`; no separate "RemoteActivateGrain" call is needed from application code.
 
-```go
-grainRequest := &remote.GrainRequest{
-    Kind: "UserGrain",
-    Name: "user-123",
-}
+#### TellGrain / AskGrain
 
-err := system.RemoteActivateGrain(ctx, "remote-host", 3321, grainRequest)
-```
-
-#### RemoteTellGrain
-
-Send a fire-and-forget message to a grain:
+For grains, use the actor system with a **GrainIdentity** (works across cluster; no host/port needed):
 
 ```go
-message := &UpdateUserRequest{Name: "John"}
-err := system.RemoteTellGrain(ctx, "remote-host", 3321, grainRequest, message)
-```
-
-#### RemoteAskGrain
-
-Send a request to a grain and wait for response:
-
-```go
-request := &GetUserRequest{}
-response, err := system.RemoteAskGrain(
-    ctx,
-    "remote-host",
-    3321,
-    grainRequest,
-    request,
-    5 * time.Second,
-)
+identity := actor.NewGrainIdentity(&UserGrain{}, "user-123")
+err := system.TellGrain(ctx, identity, &UpdateUserRequest{Name: "John"})
+// request-response:
+response, err := system.AskGrain(ctx, identity, &GetUserRequest{}, 5*time.Second)
 ```
 
 ## Complete Example
@@ -356,7 +281,7 @@ import (
 type WorkerActor struct{}
 
 func (w *WorkerActor) PreStart(ctx *actor.Context) error {
-    ctx.Logger().Info("Worker started on Node 1")
+    ctx.ActorSystem().Logger().Info("Worker started on Node 1")
     return nil
 }
 
@@ -436,23 +361,18 @@ func main() {
     // Create address for remote actor on Node 1
     remoteAddr := address.New("worker-1", "system-1", "localhost", 3321)
 
-    // Send message to remote actor
-    err = system.RemoteTell(ctx, remoteAddr, &WorkRequest{Job: "task-1"})
+    // Send message to remote actor (use NoSender() when outside an actor)
+    err = system.NoSender().RemoteTell(ctx, remoteAddr, &WorkRequest{Job: "task-1"})
     if err != nil {
         log.Fatal(err)
     }
 
     // Request-response with remote actor
-    response, err := system.RemoteAsk(
-        ctx,
-        remoteAddr,
-        &WorkRequest{Job: "task-2"},
-        5*time.Second,
-    )
+    response, err := system.NoSender().RemoteAsk(ctx, remoteAddr, &WorkRequest{Job: "task-2"}, 5*time.Second)
     if err != nil {
         log.Fatal(err)
     }
-
+    // response is *anypb.Any; unpack as needed
     log.Printf("Response from remote actor: %v\n", response)
 }
 ```
@@ -573,7 +493,7 @@ remotingConfig := remote.NewConfig(
 ### Remote Operation Errors
 
 ```go
-err := system.RemoteTell(ctx, addr, message)
+err := system.NoSender().RemoteTell(ctx, addr, message)
 if err != nil {
     switch {
     case errors.Is(err, gerrors.ErrInvalidMessage):
@@ -705,7 +625,7 @@ func (s *RemoteService) Call(ctx context.Context, host string, port int, actorNa
 
 // Notify sends a fire-and-forget message to a remote actor
 func (s *RemoteService) Notify(ctx context.Context, addr *address.Address, message proto.Message) error {
-    return s.system.RemoteTell(ctx, addr, message)
+    return s.system.NoSender().RemoteTell(ctx, addr, message)
 }
 
 func main() {

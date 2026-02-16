@@ -163,7 +163,7 @@ func (w *StatefulWorker) PreStart(ctx *actor.Context) error {
         return err
     }
     w.state = state
-    ctx.Logger().Info("State restored after relocation")
+    ctx.ActorSystem().Logger().Info("State restored after relocation")
     return nil
 }
 
@@ -172,7 +172,7 @@ func (w *StatefulWorker) Receive(ctx *actor.ReceiveContext) {
     case *UpdateState:
         w.state.Update(msg)
         // Persist immediately
-        if err := w.db.Save(ctx.Self().Name(), w.state); err != nil {
+        if err := w.db.Save(ctx.ActorName(), w.state); err != nil {
             ctx.Err(err)
             return
         }

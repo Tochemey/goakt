@@ -258,16 +258,13 @@ func (a *Coordinator) Receive(ctx *actor.ReceiveContext) {
 func (a *Manager) Receive(ctx *actor.ReceiveContext) {
     switch msg := ctx.Message().(type) {
     case *ProcessOrder:
-        // Query inventory actor
-        response, err := ctx.Ask(a.inventoryPID, 
-            &CheckStock{ProductId: msg.GetProductId()}, 
+        // Query inventory actor (Ask returns only response; check for nil on error)
+        response := ctx.Ask(a.inventoryPID,
+            &CheckStock{ProductId: msg.GetProductId()},
             2*time.Second)
-        
-        if err != nil {
-            ctx.Err(err)
+        if response == nil {
             return
         }
-        
         stock := response.(*StockLevel)
         if stock.GetQuantity() > 0 {
             // Process order
@@ -287,32 +284,40 @@ GoAkt supports transparent remote messaging across nodes:
 ### Remote Tell
 
 ```go
-// Send message to actor on remote node
-err := ctx.RemoteTell(ctx.Context(), "remote-node:3000", "remote-actor", &Message{})
+// Resolve remote actor address, then send (from inside an actor)
+addr := ctx.RemoteLookup("remote-host", 3000, "remote-actor")
+if addr != nil {
+    ctx.RemoteTell(addr, &Message{})
+}
 ```
 
 ### Remote Ask
 
 ```go
-// Query actor on remote node
-response, err := ctx.RemoteAsk(ctx.Context(), 
-    "remote-node:3000", 
-    "remote-actor", 
-    &Query{},
-    5*time.Second)
+// Query actor on remote node (returns *anypb.Any; unmarshal to your type)
+addr := ctx.RemoteLookup("remote-host", 3000, "remote-actor")
+if addr != nil {
+    response := ctx.RemoteAsk(addr, &Query{}, 5*time.Second)
+    if response != nil {
+        // Unmarshal response to your proto type
+    }
+}
 ```
 
 ### Remote Lookup
 
 ```go
-// Get PID of remote actor
-remotePID, err := actorSystem.RemoteLookup(ctx, "remote-node", 3000, "actor-name")
-if err != nil {
-    log.Fatal(err)
+// From inside an actor: get address of remote actor by host, port, name
+addr := ctx.RemoteLookup("remote-host", 3000, "actor-name")
+if addr != nil {
+    ctx.RemoteTell(addr, &Message{})
 }
 
-// Use like local PID
-actor.Tell(ctx, remotePID, &Message{})
+// From outside: use PID.RemoteLookup or system for discovery
+addr, err := pid.RemoteLookup(ctx, "remote-host", 3000, "actor-name")
+if err == nil && addr != nil {
+    _ = pid.RemoteTell(ctx, addr, &Message{})
+}
 ```
 
 ## Forwarding Messages
@@ -334,13 +339,14 @@ func (a *Router) Receive(ctx *actor.ReceiveContext) {
 
 ### ForwardTo
 
-Forward to a specific PID:
+Forward to an actor by name (location-transparent in cluster):
 
 ```go
 func (a *Proxy) Receive(ctx *actor.ReceiveContext) {
-    // Forward all messages to backend
-    ctx.ForwardTo(a.backendPID)
+    // Forward to backend by name
+    ctx.ForwardTo("backend-actor")
 }
+// To forward to a specific PID (local), use ctx.Forward(a.backendPID)
 ```
 
 ## Message Scheduling
@@ -350,23 +356,19 @@ Schedule messages for future delivery:
 ### One-time Scheduled Message
 
 ```go
-// Schedule a message to be sent after delay
-err := ctx.ScheduleOnce(
-    5*time.Second,
-    targetPID,
+// Scheduling is on the actor system; from inside Receive:
+err := ctx.ActorSystem().ScheduleOnce(ctx.Context(),
     &ReminderMessage{Text: "Don't forget!"},
+    targetPID,
+    5*time.Second,
 )
 ```
 
 ### Repeated Scheduled Messages
 
 ```go
-// Schedule periodic messages
-err := actorSystem.ScheduleWithCron(ctx, 
-    "*/5 * * * *",  // Every 5 minutes
-    targetPID,
-    &HealthCheck{},
-)
+// Parameter order: ctx, message, pid, cronExpression
+err := system.ScheduleWithCron(ctx, &HealthCheck{}, targetPID, "*/5 * * * * *")
 ```
 
 See [Message Scheduling](message_scheduling.md) for more details.
@@ -591,13 +593,11 @@ func (a *OrderProcessor) Receive(ctx *actor.ReceiveContext) {
 }
 
 func (a *OrderProcessor) handleCreateOrder(ctx *actor.ReceiveContext, msg *CreateOrder) {
-    // 1. Check inventory (Ask pattern)
-    response, err := ctx.Ask(a.inventoryPID, 
+    // 1. Check inventory (Ask pattern; returns only response, nil on error)
+    response := ctx.Ask(a.inventoryPID,
         &CheckStock{ProductId: msg.GetProductId()},
         2*time.Second)
-    
-    if err != nil {
-        ctx.Err(err)
+    if response == nil {
         ctx.Response(&OrderResult{Success: false})
         return
     }

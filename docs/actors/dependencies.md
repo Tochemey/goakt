@@ -176,7 +176,7 @@ func main() {
     
     // Create actor system
     actorSystem, _ := actor.NewActorSystem("MySystem",
-        actor.WithPassivationDisabled())
+        actor.WithPassivationStrategy(passivation.NewLongLivedStrategy()))
     actorSystem.Start(ctx)
     defer actorSystem.Stop(ctx)
     
@@ -243,7 +243,7 @@ func (m *MockDB) Exec(query string, args ...interface{}) (sql.Result, error) {
 func TestUserActor(t *testing.T) {
     ctx := context.Background()
     system, _ := actor.NewActorSystem("test",
-        actor.WithPassivationDisabled())
+        actor.WithPassivationStrategy(passivation.NewLongLivedStrategy()))
     system.Start(ctx)
     defer system.Stop(ctx)
     
@@ -290,7 +290,7 @@ func (f *FakePaymentService) ProcessPayment(amount float64) error {
 func TestPaymentActor(t *testing.T) {
     ctx := context.Background()
     system, _ := actor.NewActorSystem("test",
-        actor.WithPassivationDisabled())
+        actor.WithPassivationStrategy(passivation.NewLongLivedStrategy()))
     system.Start(ctx)
     defer system.Stop(ctx)
     

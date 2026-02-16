@@ -435,20 +435,20 @@ if pid != nil {
     // Actor is local
     pid.Tell(message)
 } else {
-    // Actor is remote (possibly in another DC)
-    system.RemoteTell(ctx, addr, message)
+    // Actor is remote (possibly in another DC): from inside an actor use ctx.RemoteTell(addr, message);
+    // from outside use the cluster client: cl.Tell(ctx, "user-data-processor", message)
 }
 ```
 
 ### Request-Response Across Datacenters
 
+From inside an actor: `response := ctx.RemoteAsk(addr, &ProcessDataRequest{UserID: "user-123"}, 10*time.Second)` (check `response == nil` and `ctx.Err()`). From outside use the cluster client:
+
 ```go
-response, err := system.RemoteAsk(
-    ctx,
-    addr,
-    &ProcessDataRequest{UserID: "user-123"},
-    10 * time.Second,  // Increase timeout for cross-DC latency
-)
+response, err := cl.Ask(ctx, "user-data-processor", &ProcessDataRequest{UserID: "user-123"}, 10*time.Second)
+if err != nil {
+    log.Fatal(err)
+}
 ```
 
 ## Datacenter Lifecycle States

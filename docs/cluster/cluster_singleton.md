@@ -73,7 +73,7 @@ import (
 type CoordinatorActor struct{}
 
 func (c *CoordinatorActor) PreStart(ctx *actor.Context) error {
-    ctx.Logger().Info("Coordinator singleton started")
+    ctx.ActorSystem().Logger().Info("Coordinator singleton started")
     return nil
 }
 
@@ -87,7 +87,7 @@ func (c *CoordinatorActor) Receive(ctx *actor.ReceiveContext) {
 }
 
 func (c *CoordinatorActor) PostStop(ctx *actor.Context) error {
-    ctx.Logger().Info("Coordinator singleton stopped")
+    ctx.ActorSystem().Logger().Info("Coordinator singleton stopped")
     return nil
 }
 
@@ -323,21 +323,28 @@ if pid != nil {
     // Singleton is local
     pid.Tell(message)
 } else {
-    // Singleton is remote
-    system.RemoteTell(ctx, addr, message)
+    // Singleton is remote: from inside an actor use ctx.RemoteTell(addr, message);
+    // from outside use the cluster client: cl.Tell(ctx, "coordinator", message)
 }
 ```
 
 ### Direct Communication
 
-Since singletons have cluster-wide unique names, you can use remote messaging:
+Since singletons have cluster-wide unique names, you can message them as follows:
+
+**From outside (e.g. main):** use the [cluster client](../cluster_client.md): `cl.Ask(ctx, "coordinator", message, timeout)` or `cl.Tell(ctx, "coordinator", message)`.
+
+**From within an actor:** use the context's remoting helpers (response is `*anypb.Any`; check for nil on failure):
 
 ```go
 // Tell (fire-and-forget)
-err := system.RemoteTell(ctx, addr, message)
+ctx.RemoteTell(addr, message)
 
 // Ask (request-response)
-response, err := system.RemoteAsk(ctx, addr, message, timeout)
+response := ctx.RemoteAsk(addr, message, timeout)
+if response == nil {
+    // check ctx.Err() for error
+}
 ```
 
 ### From Within an Actor
@@ -351,7 +358,7 @@ func (a *MyActor) Receive(ctx *actor.ReceiveContext) {
         return
     }
 
-    // Send message
+    // Send message: local PID or remote address
     if pid != nil {
         pid.Tell(message)
     } else {
@@ -359,6 +366,8 @@ func (a *MyActor) Receive(ctx *actor.ReceiveContext) {
     }
 }
 ```
+
+To perform request-response from inside an actor, use `response := ctx.RemoteAsk(addr, message, timeout)` and check `response == nil` / `ctx.Err()`.
 
 ## Idempotent Spawning
 
@@ -411,7 +420,7 @@ func (s *StatefulCoordinator) PreStart(ctx *actor.Context) error {
         return err
     }
     s.state = state
-    ctx.Logger().Info("State restored")
+    ctx.ActorSystem().Logger().Info("State restored")
     return nil
 }
 
@@ -427,10 +436,10 @@ func (s *StatefulCoordinator) Receive(ctx *actor.ReceiveContext) {
 func (s *StatefulCoordinator) PostStop(ctx *actor.Context) error {
     // Persist state to durable storage
     if err := saveStateToDB(ctx, s.state); err != nil {
-        ctx.Logger().Errorf("Failed to persist state: %v", err)
+        ctx.ActorSystem().Logger().Errorf("Failed to persist state: %v", err)
         return err
     }
-    ctx.Logger().Info("State persisted")
+    ctx.ActorSystem().Logger().Info("State persisted")
     return nil
 }
 ```
@@ -586,7 +595,10 @@ func (s *ServiceRegistry) Receive(ctx *actor.ReceiveContext) {
 
 // Other actors look up services via the singleton
 addr, pid, _ := system.ActorOf(ctx, "service-registry")
-response, _ := actor.Ask(pid, &LookupService{Name: "payment-service"}, timeout)
+if pid != nil {
+    response, _ := actor.Ask(ctx, pid, &LookupService{Name: "payment-service"}, timeout)
+    _ = response
+}
 ```
 
 ### Scheduled Work Coordinator
@@ -595,14 +607,16 @@ response, _ := actor.Ask(pid, &LookupService{Name: "payment-service"}, timeout)
 type SchedulerActor struct{}
 
 func (s *SchedulerActor) PreStart(ctx *actor.Context) error {
-    // Schedule periodic work
-    ctx.ScheduleWithCron("0 * * * *", ctx.Self(), &HourlyJob{})
-    ctx.ScheduleOnce(5*time.Minute, ctx.Self(), &HealthCheck{})
     return nil
 }
 
 func (s *SchedulerActor) Receive(ctx *actor.ReceiveContext) {
     switch msg := ctx.Message().(type) {
+    case *goaktpb.PostStart:
+        // Schedule periodic work from Receive (scheduler is on the system)
+        sys := ctx.ActorSystem()
+        _ = sys.ScheduleWithCron(ctx.Context(), &HourlyJob{}, ctx.Self(), "0 * * * *")
+        _ = sys.ScheduleOnce(ctx.Context(), &HealthCheck{}, ctx.Self(), 5*time.Minute)
     case *HourlyJob:
         // Dispatch work to other actors
         s.dispatchWork(ctx)
@@ -610,7 +624,7 @@ func (s *SchedulerActor) Receive(ctx *actor.ReceiveContext) {
         // Check cluster health
         s.checkHealth(ctx)
         // Reschedule
-        ctx.ScheduleOnce(5*time.Minute, ctx.Self(), &HealthCheck{})
+        _ = ctx.ActorSystem().ScheduleOnce(ctx.Context(), &HealthCheck{}, ctx.Self(), 5*time.Minute)
     }
 }
 ```
@@ -629,10 +643,11 @@ func TestCoordinatorActor(t *testing.T) {
     defer system.Stop(ctx)
 
     // Spawn locally for testing (no clustering required)
-    pid, _ := system.Spawn(ctx, "coordinator", new(CoordinatorActor))
+    pid, err := system.Spawn(ctx, "coordinator", new(CoordinatorActor))
+    require.NoError(t, err)
 
     // Test behavior
-    response, _ := actor.Ask(pid, &CoordinateRequest{}, time.Second)
+    response, _ := actor.Ask(ctx, pid, &CoordinateRequest{}, time.Second)
     assert.NotNil(t, response)
 }
 ```

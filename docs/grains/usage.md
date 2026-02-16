@@ -583,15 +583,13 @@ func (p *OrderProcessor) Start(ctx context.Context) error {
 ```go
 type ReminderGrain struct {
     reminders []Reminder
-    scheduler *actor.Scheduler
 }
 
 func (g *ReminderGrain) OnActivate(ctx context.Context, props *actor.GrainProps) error {
     // Load reminders from storage
-    // Schedule pending reminders
     for _, reminder := range g.reminders {
         if reminder.Status == ReminderStatusPending {
-            g.scheduleReminder(ctx, reminder)
+            g.scheduleReminder(ctx, props.ActorSystem(), props.Identity(), reminder)
         }
     }
     return nil
@@ -607,7 +605,7 @@ func (g *ReminderGrain) OnReceive(ctx *actor.GrainContext) {
             Status:    ReminderStatusPending,
         }
         g.reminders = append(g.reminders, reminder)
-        g.scheduleReminder(ctx.Context(), reminder)
+        g.scheduleReminder(ctx.Context(), ctx.ActorSystem(), ctx.Self(), reminder)
         ctx.Response(&ReminderAdded{ID: reminder.ID})
 
     case *ReminderTriggered:
@@ -627,14 +625,21 @@ func (g *ReminderGrain) OnReceive(ctx *actor.GrainContext) {
     }
 }
 
-func (g *ReminderGrain) scheduleReminder(ctx context.Context, reminder Reminder) {
+func (g *ReminderGrain) scheduleReminder(ctx context.Context, sys actor.ActorSystem, identity *actor.GrainIdentity, reminder Reminder) {
     delay := time.Until(reminder.ScheduleAt)
     if delay < 0 {
         delay = 0
     }
-
-    // Use actor scheduler
-    g.scheduler.ScheduleOnce(ctx, delay, ctx.Self(), &ReminderTriggered{ID: reminder.ID})
+    go func() {
+        timer := time.NewTimer(delay)
+        defer timer.Stop()
+        select {
+        case <-ctx.Done():
+            return
+        case <-timer.C:
+            _ = sys.TellGrain(ctx, identity, &ReminderTriggered{ID: reminder.ID})
+        }
+    }()
 }
 
 func (g *ReminderGrain) OnDeactivate(ctx context.Context, props *actor.GrainProps) error {

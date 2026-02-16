@@ -202,7 +202,7 @@ func main() {
 
     // Create actor system
     actorSystem, _ := actor.NewActorSystem("MySystem",
-        actor.WithPassivationDisabled())
+        actor.WithPassivationStrategy(passivation.NewLongLivedStrategy()))
     actorSystem.Start(ctx)
     defer actorSystem.Stop(ctx)
 
@@ -370,7 +370,7 @@ func (a *DatabaseActor) PreStart(ctx *actor.Context) error {
 
     a.conn = conn
     a.retryCount = 0
-    ctx.Logger().Info("Database connection established")
+    ctx.ActorSystem().Logger().Info("Database connection established")
     return nil
 }
 
@@ -407,7 +407,7 @@ func (a *DatabaseActor) Receive(ctx *actor.ReceiveContext) {
 
 func (a *DatabaseActor) PostStop(ctx *actor.Context) error {
     if a.conn != nil {
-        ctx.Logger().Info("Closing database connection")
+        ctx.ActorSystem().Logger().Info("Closing database connection")
         return a.conn.Close()
     }
     return nil
@@ -425,7 +425,7 @@ func main() {
 
     // Create actor system
     actorSystem, err := actor.NewActorSystem("DBSystem",
-        actor.WithPassivationDisabled())
+        actor.WithPassivationStrategy(passivation.NewLongLivedStrategy()))
     if err != nil {
         panic(err)
     }
@@ -644,7 +644,7 @@ GoAkt exposes supervision metrics via OpenTelemetry:
 func TestSupervision(t *testing.T) {
     ctx := context.Background()
     system, _ := actor.NewActorSystem("test",
-        actor.WithPassivationDisabled())
+        actor.WithPassivationStrategy(passivation.NewLongLivedStrategy()))
     system.Start(ctx)
     defer system.Stop(ctx)
 

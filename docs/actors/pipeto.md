@@ -228,7 +228,7 @@ func (a *UserServiceActor) PostStop(ctx *actor.Context) error {
 func main() {
     ctx := context.Background()
     actorSystem, _ := actor.NewActorSystem("UserSystem",
-        actor.WithPassivationDisabled())
+        actor.WithPassivationStrategy(passivation.NewLongLivedStrategy()))
     actorSystem.Start(ctx)
     defer actorSystem.Stop(ctx)
 
@@ -443,10 +443,10 @@ func (a *RetryActor) attemptFetch(ctx *actor.ReceiveContext,
             if attempt < 3 {
                 // Schedule retry
                 delay := time.Duration(1<<attempt) * time.Second
-                ctx.ScheduleOnce(delay, ctx.Self(), &RetryAttempt{
-                    Original: msg,
-                    Attempt:  attempt + 1,
-                })
+                _ = ctx.ActorSystem().ScheduleOnce(ctx.Context(),
+                    &RetryAttempt{Original: msg, Attempt: attempt + 1},
+                    ctx.Self(),
+                    delay)
                 return nil, nil // Don't treat as error
             }
             return nil, err
@@ -547,7 +547,7 @@ request.Then(func(response proto.Message, err error) {
 func TestPipeTo(t *testing.T) {
     ctx := context.Background()
     system, _ := actor.NewActorSystem("test",
-        actor.WithPassivationDisabled())
+        actor.WithPassivationStrategy(passivation.NewLongLivedStrategy()))
     system.Start(ctx)
     defer system.Stop(ctx)
 

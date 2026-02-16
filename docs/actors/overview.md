@@ -137,7 +137,7 @@ Actors are spawned within an `ActorSystem`:
 ```go
 // Create actor system
 actorSystem, err := actor.NewActorSystem("MySystem",
-    actor.WithPassivationDisabled())
+    actor.WithPassivationStrategy(passivation.NewLongLivedStrategy()))
 if err != nil {
     panic(err)
 }
@@ -160,7 +160,7 @@ You can customize actor behavior with spawn options:
 
 ```go
 pid, err := actorSystem.Spawn(ctx, "greeter", &GreeterActor{},
-    actor.WithPassivationAfter(5*time.Minute),
+    actor.WithPassivationStrategy(passivation.NewTimeBasedStrategy(5*time.Minute)),
     actor.WithMailbox(actor.NewBoundedMailbox(1000)),
     actor.WithSupervisorDirective(actor.NewStopDirective()),
 )
@@ -403,7 +403,7 @@ type BankAccountActor struct {
 func (a *BankAccountActor) PreStart(ctx *actor.Context) error {
     a.balance = 0
     a.transactions = make([]string, 0)
-    ctx.Logger().Info("Bank account opened")
+    ctx.ActorSystem().Logger().Info("Bank account opened")
     return nil
 }
 
@@ -437,7 +437,7 @@ func (a *BankAccountActor) Receive(ctx *actor.ReceiveContext) {
 }
 
 func (a *BankAccountActor) PostStop(ctx *actor.Context) error {
-    ctx.Logger().Info("Bank account closed",
+    ctx.ActorSystem().Logger().Info("Bank account closed",
         "final_balance", a.balance,
         "transactions", len(a.transactions))
     return nil

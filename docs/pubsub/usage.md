@@ -83,7 +83,7 @@ func (a *OrderServiceActor) publishEvent(ctx *actor.ReceiveContext, topic string
         return
     }
 
-    ctx.Self().Tell(ctx.Context(), topicActor, &goaktpb.Publish{
+    ctx.Tell(topicActor, &goaktpb.Publish{
         Id:      uuid.New().String(),
         Topic:   topic,
         Message: payload,
@@ -98,14 +98,14 @@ func (a *OrderServiceActor) PostStop(ctx *actor.Context) error {
 type InventoryActor struct{}
 
 func (a *InventoryActor) PreStart(ctx *actor.Context) error {
-    topicActor := ctx.ActorSystem().TopicActor()
-    return ctx.Self().Tell(ctx.Context(), topicActor, &goaktpb.Subscribe{
-        Topic: "order.events",
-    })
+    return nil
 }
 
 func (a *InventoryActor) Receive(ctx *actor.ReceiveContext) {
     switch msg := ctx.Message().(type) {
+    case *goaktpb.PostStart:
+        topicActor := ctx.ActorSystem().TopicActor()
+        ctx.Tell(topicActor, &goaktpb.Subscribe{Topic: "order.events"})
     case *goaktpb.SubscribeAck:
         ctx.Logger().Info("Inventory service subscribed to order events")
 
@@ -132,14 +132,14 @@ func (a *InventoryActor) PostStop(ctx *actor.Context) error {
 type AnalyticsActor struct{}
 
 func (a *AnalyticsActor) PreStart(ctx *actor.Context) error {
-    topicActor := ctx.ActorSystem().TopicActor()
-    return ctx.Self().Tell(ctx.Context(), topicActor, &goaktpb.Subscribe{
-        Topic: "order.events",
-    })
+    return nil
 }
 
 func (a *AnalyticsActor) Receive(ctx *actor.ReceiveContext) {
     switch msg := ctx.Message().(type) {
+    case *goaktpb.PostStart:
+        topicActor := ctx.ActorSystem().TopicActor()
+        ctx.Tell(topicActor, &goaktpb.Subscribe{Topic: "order.events"})
     case *goaktpb.SubscribeAck:
         ctx.Logger().Info("Analytics service subscribed to order events")
 
@@ -174,24 +174,16 @@ type MultiTopicActor struct {
 
 func (a *MultiTopicActor) PreStart(ctx *actor.Context) error {
     a.subscribed = make(map[string]bool)
-
-    topicActor := ctx.ActorSystem().TopicActor()
-    topics := []string{"orders", "payments", "shipments"}
-
-    for _, topic := range topics {
-        err := ctx.Self().Tell(ctx.Context(), topicActor, &goaktpb.Subscribe{
-            Topic: topic,
-        })
-        if err != nil {
-            return err
-        }
-    }
-
     return nil
 }
 
 func (a *MultiTopicActor) Receive(ctx *actor.ReceiveContext) {
     switch msg := ctx.Message().(type) {
+    case *goaktpb.PostStart:
+        topicActor := ctx.ActorSystem().TopicActor()
+        for _, topic := range []string{"orders", "payments", "shipments"} {
+            ctx.Tell(topicActor, &goaktpb.Subscribe{Topic: topic})
+        }
     case *goaktpb.SubscribeAck:
         a.subscribed[msg.Topic] = true
         ctx.Logger().Infof("Subscribed to topic: %s", msg.Topic)
@@ -245,7 +237,7 @@ func (a *JobQueueActor) Receive(ctx *actor.ReceiveContext) {
         payload, _ := anypb.New(job)
 
         // Publish to workers topic
-        ctx.Self().Tell(ctx.Context(), topicActor, &goaktpb.Publish{
+        ctx.Tell(topicActor, &goaktpb.Publish{
             Id:      msg.JobID,
             Topic:   "jobs.pending",
             Message: payload,
@@ -261,16 +253,15 @@ type WorkerActor struct {
 }
 
 func (a *WorkerActor) PreStart(ctx *actor.Context) error {
-    a.workerID = ctx.ActorName()
-
-    topicActor := ctx.ActorSystem().TopicActor()
-    return ctx.Self().Tell(ctx.Context(), topicActor, &goaktpb.Subscribe{
-        Topic: "jobs.pending",
-    })
+    return nil
 }
 
 func (a *WorkerActor) Receive(ctx *actor.ReceiveContext) {
     switch msg := ctx.Message().(type) {
+    case *goaktpb.PostStart:
+        a.workerID = ctx.ActorName()
+        topicActor := ctx.ActorSystem().TopicActor()
+        ctx.Tell(topicActor, &goaktpb.Subscribe{Topic: "jobs.pending"})
     case *goaktpb.SubscribeAck:
         ctx.Logger().Infof("Worker %s ready", a.workerID)
 
@@ -309,27 +300,16 @@ type EventAggregatorActor struct {
 func (a *EventAggregatorActor) PreStart(ctx *actor.Context) error {
     a.events = make([]Event, 0)
     a.buffer = 100
-
-    topicActor := ctx.ActorSystem().TopicActor()
-
-    // Subscribe to multiple event topics
-    topics := []string{
-        "user.events",
-        "order.events",
-        "payment.events",
-    }
-
-    for _, topic := range topics {
-        ctx.Self().Tell(ctx.Context(), topicActor, &goaktpb.Subscribe{
-            Topic: topic,
-        })
-    }
-
     return nil
 }
 
 func (a *EventAggregatorActor) Receive(ctx *actor.ReceiveContext) {
     switch msg := ctx.Message().(type) {
+    case *goaktpb.PostStart:
+        topicActor := ctx.ActorSystem().TopicActor()
+        for _, topic := range []string{"user.events", "order.events", "payment.events"} {
+            ctx.Tell(topicActor, &goaktpb.Subscribe{Topic: topic})
+        }
     case *goaktpb.SubscribeAck:
         ctx.Logger().Infof("Subscribed to: %s", msg.Topic)
 
@@ -399,14 +379,14 @@ type CacheReplicator struct {
 }
 
 func (a *CacheReplicator) PreStart(ctx *actor.Context) error {
-    topicActor := ctx.ActorSystem().TopicActor()
-    return ctx.Self().Tell(ctx.Context(), topicActor, &goaktpb.Subscribe{
-        Topic: "cache.updates",
-    })
+    return nil
 }
 
 func (a *CacheReplicator) Receive(ctx *actor.ReceiveContext) {
     switch msg := ctx.Message().(type) {
+    case *goaktpb.PostStart:
+        topicActor := ctx.ActorSystem().TopicActor()
+        ctx.Tell(topicActor, &goaktpb.Subscribe{Topic: "cache.updates"})
     case *goaktpb.SubscribeAck:
         ctx.Logger().Info("Cache replicator subscribed")
 
@@ -440,7 +420,7 @@ func (a *CacheReplicator) Receive(ctx *actor.ReceiveContext) {
 
         payload, _ := anypb.New(event)
 
-        ctx.Self().Tell(ctx.Context(), topicActor, &goaktpb.Publish{
+        ctx.Tell(topicActor, &goaktpb.Publish{
             Id:      uuid.New().String(),
             Topic:   "cache.updates",
             Message: payload,
@@ -471,21 +451,16 @@ type WebhookDispatcher struct {
 func (a *WebhookDispatcher) PreStart(ctx *actor.Context) error {
     a.httpClient = &http.Client{Timeout: 10 * time.Second}
     a.webhooks = loadWebhookConfig()
-
-    topicActor := ctx.ActorSystem().TopicActor()
-
-    // Subscribe to all event topics
-    for topic := range a.webhooks {
-        ctx.Self().Tell(ctx.Context(), topicActor, &goaktpb.Subscribe{
-            Topic: topic,
-        })
-    }
-
     return nil
 }
 
 func (a *WebhookDispatcher) Receive(ctx *actor.ReceiveContext) {
     switch msg := ctx.Message().(type) {
+    case *goaktpb.PostStart:
+        topicActor := ctx.ActorSystem().TopicActor()
+        for topic := range a.webhooks {
+            ctx.Tell(topicActor, &goaktpb.Subscribe{Topic: topic})
+        }
     case *goaktpb.SubscribeAck:
         ctx.Logger().Infof("Subscribed to topic: %s", msg.Topic)
 
@@ -557,31 +532,17 @@ type AuditLoggerActor struct {
 
 func (a *AuditLoggerActor) PreStart(ctx *actor.Context) error {
     a.buffer = make([]AuditEntry, 0, 1000)
-
-    topicActor := ctx.ActorSystem().TopicActor()
-
-    // Subscribe to all audit-relevant topics
-    auditTopics := []string{
-        "user.events",
-        "order.events",
-        "payment.events",
-        "auth.events",
-    }
-
-    for _, topic := range auditTopics {
-        ctx.Self().Tell(ctx.Context(), topicActor, &goaktpb.Subscribe{
-            Topic: topic,
-        })
-    }
-
-    // Schedule periodic flush
-    ctx.ScheduleOnce(ctx.Context(), 30*time.Second, ctx.Self(), &FlushAuditLog{})
-
     return nil
 }
 
 func (a *AuditLoggerActor) Receive(ctx *actor.ReceiveContext) {
     switch msg := ctx.Message().(type) {
+    case *goaktpb.PostStart:
+        topicActor := ctx.ActorSystem().TopicActor()
+        for _, topic := range []string{"user.events", "order.events", "payment.events", "auth.events"} {
+            ctx.Tell(topicActor, &goaktpb.Subscribe{Topic: topic})
+        }
+        _ = ctx.ActorSystem().ScheduleOnce(ctx.Context(), &FlushAuditLog{}, ctx.Self(), 30*time.Second)
     case *goaktpb.SubscribeAck:
         ctx.Logger().Infof("Audit logger subscribed to: %s", msg.Topic)
 
@@ -607,7 +568,7 @@ func (a *AuditLoggerActor) Receive(ctx *actor.ReceiveContext) {
         a.flushToStorage(ctx)
 
         // Schedule next flush
-        ctx.ScheduleOnce(ctx.Context(), 30*time.Second, ctx.Self(), &FlushAuditLog{})
+        _ = ctx.ActorSystem().ScheduleOnce(ctx.Context(), &FlushAuditLog{}, ctx.Self(), 30*time.Second)
 
     default:
         ctx.Unhandled()
@@ -664,14 +625,14 @@ func (a *DynamicSubscriberActor) Receive(ctx *actor.ReceiveContext) {
 
         // Subscribe to new topics
         for _, topic := range toSubscribe {
-            ctx.Self().Tell(ctx.Context(), topicActor, &goaktpb.Subscribe{
+            ctx.Tell(topicActor, &goaktpb.Subscribe{
                 Topic: topic,
             })
         }
 
         // Unsubscribe from old topics
         for _, topic := range toUnsubscribe {
-            ctx.Self().Tell(ctx.Context(), topicActor, &goaktpb.Unsubscribe{
+            ctx.Tell(topicActor, &goaktpb.Unsubscribe{
                 Topic: topic,
             })
         }
@@ -753,14 +714,14 @@ func (a *OrderCommandHandler) Receive(ctx *actor.ReceiveContext) {
 type EmailNotifier struct{}
 
 func (a *EmailNotifier) PreStart(ctx *actor.Context) error {
-    topicActor := ctx.ActorSystem().TopicActor()
-    return ctx.Self().Tell(ctx.Context(), topicActor, &goaktpb.Subscribe{
-        Topic: "order.events",
-    })
+    return nil
 }
 
 func (a *EmailNotifier) Receive(ctx *actor.ReceiveContext) {
     switch msg := ctx.Message().(type) {
+    case *goaktpb.PostStart:
+        topicActor := ctx.ActorSystem().TopicActor()
+        ctx.Tell(topicActor, &goaktpb.Subscribe{Topic: "order.events"})
     case *OrderCreatedEvent:
         // Send order confirmation email
         a.sendOrderConfirmation(msg)
@@ -779,15 +740,14 @@ type QuoteAggregator struct {
 
 func (a *QuoteAggregator) PreStart(ctx *actor.Context) error {
     a.pendingQuotes = make(map[string]*QuoteRequest)
-
-    topicActor := ctx.ActorSystem().TopicActor()
-    return ctx.Self().Tell(ctx.Context(), topicActor, &goaktpb.Subscribe{
-        Topic: "quotes.responses",
-    })
+    return nil
 }
 
 func (a *QuoteAggregator) Receive(ctx *actor.ReceiveContext) {
     switch msg := ctx.Message().(type) {
+    case *goaktpb.PostStart:
+        topicActor := ctx.ActorSystem().TopicActor()
+        ctx.Tell(topicActor, &goaktpb.Subscribe{Topic: "quotes.responses"})
     case *RequestQuote:
         requestID := uuid.New().String()
 
@@ -808,16 +768,14 @@ func (a *QuoteAggregator) Receive(ctx *actor.ReceiveContext) {
 
         payload, _ := anypb.New(event)
 
-        ctx.Self().Tell(ctx.Context(), topicActor, &goaktpb.Publish{
+        ctx.Tell(topicActor, &goaktpb.Publish{
             Id:      requestID,
             Topic:   "quotes.requests",
             Message: payload,
         })
 
         // Schedule timeout
-        ctx.ScheduleOnce(ctx.Context(), 5*time.Second, ctx.Self(), &QuoteTimeout{
-            RequestID: requestID,
-        })
+        _ = ctx.ActorSystem().ScheduleOnce(ctx.Context(), &QuoteTimeout{RequestID: requestID}, ctx.Self(), 5*time.Second)
 
     case *QuoteResponseEvent:
         // Aggregate responses
@@ -850,14 +808,14 @@ type VendorActor struct {
 }
 
 func (a *VendorActor) PreStart(ctx *actor.Context) error {
-    topicActor := ctx.ActorSystem().TopicActor()
-    return ctx.Self().Tell(ctx.Context(), topicActor, &goaktpb.Subscribe{
-        Topic: "quotes.requests",
-    })
+    return nil
 }
 
 func (a *VendorActor) Receive(ctx *actor.ReceiveContext) {
     switch msg := ctx.Message().(type) {
+    case *goaktpb.PostStart:
+        topicActor := ctx.ActorSystem().TopicActor()
+        ctx.Tell(topicActor, &goaktpb.Subscribe{Topic: "quotes.requests"})
     case *QuoteRequestEvent:
         // Calculate quote
         price := a.calculatePrice(msg.Item)
@@ -873,7 +831,7 @@ func (a *VendorActor) Receive(ctx *actor.ReceiveContext) {
 
         payload, _ := anypb.New(response)
 
-        ctx.Self().Tell(ctx.Context(), topicActor, &goaktpb.Publish{
+        ctx.Tell(topicActor, &goaktpb.Publish{
             Id:      uuid.New().String(),
             Topic:   "quotes.responses",
             Message: payload,
@@ -919,7 +877,7 @@ func publishEvent(ctx *actor.ReceiveContext, topic string, event proto.Message) 
 
     payload, _ := anypb.New(event)
 
-    ctx.Self().Tell(ctx.Context(), topicActor, &goaktpb.Publish{
+    ctx.Tell(topicActor, &goaktpb.Publish{
         Id:      uuid.New().String(), // Unique ID prevents duplicates
         Topic:   topic,
         Message: payload,
@@ -981,7 +939,7 @@ func publishSafely(ctx *actor.ReceiveContext, topic string, event proto.Message)
         return err
     }
 
-    return ctx.Self().Tell(ctx.Context(), topicActor, &goaktpb.Publish{
+    ctx.Tell(topicActor, &goaktpb.Publish{
         Id:      uuid.New().String(),
         Topic:   topic,
         Message: payload,

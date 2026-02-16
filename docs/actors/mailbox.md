@@ -248,7 +248,7 @@ pid, err := actorSystem.Spawn(ctx, "high-throughput", &MyActor{},
 ### Decision Matrix
 
 | Requirement                       | Recommended Mailbox         |
-| --------------------------------- | --------------------------- |
+|-----------------------------------|-----------------------------|
 | Default/general purpose           | `UnboundedMailbox`          |
 | Need backpressure                 | `BoundedMailbox`            |
 | Priority-based processing         | `UnboundedPriorityMailbox`  |

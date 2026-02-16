@@ -136,14 +136,13 @@ ctx = context.WithValue(ctx, "request-id", "req-12345")
 ctx = context.WithValue(ctx, "user-id", "user-789")
 
 // Send message (context values automatically propagated)
-err := system.RemoteTell(ctx, remoteAddr, &MyMessage{})
+err := system.NoSender().RemoteTell(ctx, remoteAddr, &MyMessage{})
 
-// Or from within an actor
+// Or from within an actor (context from ReceiveContext is propagated)
 func (a *MyActor) Receive(ctx *actor.ReceiveContext) {
     switch ctx.Message().(type) {
     case *SendRemote:
-        // Context from ReceiveContext is propagated
-        system.RemoteTell(ctx.Context(), remoteAddr, &MyMessage{})
+        ctx.RemoteTell(remoteAddr, &MyMessage{})
     }
 }
 ```
@@ -295,7 +294,7 @@ func NewTracedActor() *TracedActor {
 }
 
 func (a *TracedActor) PreStart(ctx *actor.Context) error {
-    ctx.Logger().Info("Traced actor started")
+    ctx.ActorSystem().Logger().Info("Traced actor started")
     return nil
 }
 
@@ -393,7 +392,7 @@ ctx, span := tracer.Start(context.Background(), "send-work-request")
 defer span.End()
 
 // Send message (trace context is propagated)
-err := system.RemoteTell(ctx, remoteAddr, &WorkRequest{ID: "work-1"})
+err := system.NoSender().RemoteTell(ctx, remoteAddr, &WorkRequest{ID: "work-1"})
 if err != nil {
     span.RecordError(err)
     log.Fatal(err)
@@ -576,17 +575,12 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
     // Send to actor with propagated context
     actorAddr := address.New("processor", "system", "localhost", 3321)
 
-    response, err := h.system.RemoteAsk(
-        ctx,
-        actorAddr,
-        &ProcessRequest{Data: readBody(r)},
-        30*time.Second,
-    )
+    response, err := h.system.NoSender().RemoteAsk(ctx, actorAddr, &ProcessRequest{Data: readBody(r)}, 30*time.Second)
     if err != nil {
         http.Error(w, err.Error(), http.StatusInternalServerError)
         return
     }
-
+    // response is *anypb.Any; unpack as needed before writeResponse
     writeResponse(w, response)
 }
 ```

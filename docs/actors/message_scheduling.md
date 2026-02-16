@@ -15,14 +15,14 @@ Message scheduling enables you to:
 
 ### ScheduleOnce
 
-Send a message once after a delay:
+Send a message once after a delay. Scheduling is done on the **actor system**, not on the receive context. Parameter order: `(ctx, message, pid, delay, opts)`.
 
 ```go
-err := ctx.ScheduleOnce(
-    5*time.Second,        // Delay
-    targetPID,            // Recipient
-    &ReminderMessage{},   // Message
-)
+// From outside an actor (e.g. main or another component)
+err := system.ScheduleOnce(ctx, &ReminderMessage{}, targetPID, 5*time.Second)
+
+// From inside an actor's Receive
+err := ctx.ActorSystem().ScheduleOnce(ctx.Context(), &ReminderMessage{}, ctx.Self(), 5*time.Second)
 ```
 
 **Use for:**
@@ -34,14 +34,14 @@ err := ctx.ScheduleOnce(
 
 ### ScheduleWithCron
 
-Send messages on a recurring schedule using cron expressions:
+Send messages on a recurring schedule using cron expressions. Parameter order: `(ctx, message, pid, cronExpression, opts)`.
 
 ```go
-err := actorSystem.ScheduleWithCron(ctx,
-    "0 */5 * * * *",      // Every 5 minutes
-    targetPID,            // Recipient
-    &HealthCheck{},       // Message
-)
+// From outside an actor
+err := system.ScheduleWithCron(ctx, &HealthCheck{}, targetPID, "0 */5 * * * *")
+
+// From inside an actor's Receive
+err := ctx.ActorSystem().ScheduleWithCron(ctx.Context(), &HealthCheck{}, ctx.Self(), "0 */5 * * * *")
 ```
 
 **Use for:**
@@ -60,10 +60,10 @@ func (a *RequestActor) Receive(ctx *actor.ReceiveContext) {
     switch msg := ctx.Message().(type) {
     case *StartRequest:
         // Send timeout message after 30 seconds
-        ctx.ScheduleOnce(
-            30*time.Second,
-            ctx.Self(),
+        _ = ctx.ActorSystem().ScheduleOnce(ctx.Context(),
             &RequestTimeout{RequestId: msg.GetId()},
+            ctx.Self(),
+            30*time.Second,
         )
 
         // Make external request
@@ -90,13 +90,10 @@ func (a *RetryActor) Receive(ctx *actor.ReceiveContext) {
         err := a.processTask(msg)
         if err != nil {
             // Retry after 5 seconds
-            ctx.ScheduleOnce(
-                5*time.Second,
+            _ = ctx.ActorSystem().ScheduleOnce(ctx.Context(),
+                &RetryTask{Task: msg, Attempt: msg.GetAttempt() + 1},
                 ctx.Self(),
-                &RetryTask{
-                    Task:     msg,
-                    Attempt:  msg.GetAttempt() + 1,
-                },
+                5*time.Second,
             )
         }
 
@@ -111,10 +108,11 @@ func (a *RetryActor) Receive(ctx *actor.ReceiveContext) {
         if err != nil {
             // Exponential backoff
             delay := time.Duration(msg.GetAttempt()) * 5 * time.Second
-            ctx.ScheduleOnce(delay, ctx.Self(), &RetryTask{
-                Task:    msg.GetTask(),
-                Attempt: msg.GetAttempt() + 1,
-            })
+            _ = ctx.ActorSystem().ScheduleOnce(ctx.Context(),
+                &RetryTask{Task: msg.GetTask(), Attempt: msg.GetAttempt() + 1},
+                ctx.Self(),
+                delay,
+            )
         }
     }
 }
@@ -127,13 +125,10 @@ func (a *ReminderActor) Receive(ctx *actor.ReceiveContext) {
     switch msg := ctx.Message().(type) {
     case *SetReminder:
         // Schedule reminder
-        ctx.ScheduleOnce(
-            msg.GetDelay(),
+        _ = ctx.ActorSystem().ScheduleOnce(ctx.Context(),
+            &Reminder{Id: msg.GetId(), Message: msg.GetMessage()},
             ctx.Self(),
-            &Reminder{
-                Id:      msg.GetId(),
-                Message: msg.GetMessage(),
-            },
+            msg.GetDelay(),
         )
         ctx.Response(&ReminderSet{Id: msg.GetId()})
 
@@ -163,10 +158,10 @@ func (a *SessionActor) Receive(ctx *actor.ReceiveContext) {
         }
 
         // Schedule shutdown after inactivity
-        ctx.ScheduleOnce(
-            30*time.Minute,
-            ctx.Self(),
+        _ = ctx.ActorSystem().ScheduleOnce(ctx.Context(),
             &InactivityTimeout{},
+            ctx.Self(),
+            30*time.Minute,
         )
         a.shutdownScheduled = true
         a.handleActivity(msg)
@@ -208,29 +203,24 @@ type MonitorActor struct {
     targets []*actor.PID
 }
 
-func (a *MonitorActor) PreStart(ctx *actor.Context) error {
-    // Schedule health checks every 5 minutes
-    return ctx.ActorSystem().ScheduleWithCron(ctx.Context(),
-        "0 */5 * * * *",
-        ctx.Self(),
-        &PerformHealthCheck{},
-    )
-}
-
 func (a *MonitorActor) Receive(ctx *actor.ReceiveContext) {
     switch msg := ctx.Message().(type) {
+    case *goaktpb.PostStart:
+        // Schedule health checks every 5 minutes (must be in Receive; PreStart has no Self())
+        _ = ctx.ActorSystem().ScheduleWithCron(ctx.Context(),
+            &PerformHealthCheck{},
+            ctx.Self(),
+            "0 */5 * * * *",
+        )
     case *PerformHealthCheck:
         ctx.Logger().Debug("Performing health check")
 
         for _, target := range a.targets {
-            response, err := ctx.Ask(target, &HealthCheck{}, 5*time.Second)
-            if err != nil {
-                ctx.Logger().Warn("Health check failed",
-                    "target", target.Name(),
-                    "error", err)
+            response := ctx.Ask(target, &HealthCheck{}, 5*time.Second)
+            if response == nil {
+                ctx.Logger().Warn("Health check failed", "target", target.Name())
                 continue
             }
-
             status := response.(*HealthStatus)
             if !status.GetHealthy() {
                 ctx.Logger().Error("Target unhealthy",
@@ -251,17 +241,15 @@ type ReportActor struct {
     reportRecipients []*actor.PID
 }
 
-func (a *ReportActor) PreStart(ctx *actor.Context) error {
-    // Schedule daily reports at 9 AM
-    return ctx.ActorSystem().ScheduleWithCron(ctx.Context(),
-        "0 0 9 * * *",
-        ctx.Self(),
-        &GenerateReport{},
-    )
-}
-
 func (a *ReportActor) Receive(ctx *actor.ReceiveContext) {
     switch msg := ctx.Message().(type) {
+    case *goaktpb.PostStart:
+        // Schedule daily reports at 9 AM (must be in Receive; PreStart has no Self())
+        _ = ctx.ActorSystem().ScheduleWithCron(ctx.Context(),
+            &GenerateReport{},
+            ctx.Self(),
+            "0 0 9 * * *",
+        )
     case *GenerateReport:
         ctx.Logger().Info("Generating daily report")
 
@@ -287,17 +275,18 @@ type CacheActor struct {
 
 func (a *CacheActor) PreStart(ctx *actor.Context) error {
     a.cache = make(map[string]*CacheEntry)
-
-    // Schedule cleanup every hour
-    return ctx.ActorSystem().ScheduleWithCron(ctx.Context(),
-        "0 0 */1 * * *",
-        ctx.Self(),
-        &CleanupExpired{},
-    )
+    return nil
 }
 
 func (a *CacheActor) Receive(ctx *actor.ReceiveContext) {
     switch msg := ctx.Message().(type) {
+    case *goaktpb.PostStart:
+        // Schedule cleanup every hour (must be in Receive; PreStart has no Self())
+        _ = ctx.ActorSystem().ScheduleWithCron(ctx.Context(),
+            &CleanupExpired{},
+            ctx.Self(),
+            "0 0 */1 * * *",
+        )
     case *CleanupExpired:
         ctx.Logger().Info("Running cache cleanup")
 
@@ -325,17 +314,15 @@ type MetricsActor struct {
     metricsDB *MetricsDatabase
 }
 
-func (a *MetricsActor) PreStart(ctx *actor.Context) error {
-    // Collect metrics every 30 seconds
-    return ctx.ActorSystem().ScheduleWithCron(ctx.Context(),
-        "*/30 * * * * *",
-        ctx.Self(),
-        &CollectMetrics{},
-    )
-}
-
 func (a *MetricsActor) Receive(ctx *actor.ReceiveContext) {
     switch msg := ctx.Message().(type) {
+    case *goaktpb.PostStart:
+        // Collect metrics every 30 seconds (must be in Receive; PreStart has no Self())
+        _ = ctx.ActorSystem().ScheduleWithCron(ctx.Context(),
+            &CollectMetrics{},
+            ctx.Self(),
+            "*/30 * * * * *",
+        )
     case *CollectMetrics:
         metrics := a.gatherSystemMetrics()
 
@@ -350,15 +337,13 @@ func (a *MetricsActor) Receive(ctx *actor.ReceiveContext) {
 
 ### WithReference
 
-Provide a reference ID to manage scheduled messages:
+Provide a reference ID to cancel, pause, or resume scheduled messages:
 
 ```go
-err := ctx.ScheduleOnce(
-    10*time.Second,
-    targetPID,
-    &Message{},
+err := system.ScheduleOnce(ctx, &Message{}, targetPID, 10*time.Second,
     actor.WithReference("my-schedule-id"),
 )
+// Later: cancel with system.CancelSchedule("my-schedule-id")
 ```
 
 **Use for:**
@@ -383,11 +368,11 @@ func (a *SessionActor) Receive(ctx *actor.ReceiveContext) {
         a.lastActivity = time.Now()
         a.timeoutRef = fmt.Sprintf("timeout-%d", time.Now().Unix())
 
-        // Reset timeout on activity
-        ctx.ScheduleOnce(
-            15*time.Minute,
-            ctx.Self(),
+        // Reset timeout on activity (cancel previous with ActorSystem.CancelSchedule(a.timeoutRef))
+        _ = ctx.ActorSystem().ScheduleOnce(ctx.Context(),
             &SessionTimeout{},
+            ctx.Self(),
+            15*time.Minute,
             actor.WithReference(a.timeoutRef),
         )
 
@@ -405,17 +390,15 @@ type HeartbeatActor struct {
     serverPID *actor.PID
 }
 
-func (a *HeartbeatActor) PreStart(ctx *actor.Context) error {
-    // Send heartbeat every 10 seconds
-    return ctx.ActorSystem().ScheduleWithCron(ctx.Context(),
-        "*/10 * * * * *",
-        ctx.Self(),
-        &SendHeartbeat{},
-    )
-}
-
 func (a *HeartbeatActor) Receive(ctx *actor.ReceiveContext) {
     switch msg := ctx.Message().(type) {
+    case *goaktpb.PostStart:
+        // Send heartbeat every 10 seconds
+        _ = ctx.ActorSystem().ScheduleWithCron(ctx.Context(),
+            &SendHeartbeat{},
+            ctx.Self(),
+            "*/10 * * * * *",
+        )
     case *SendHeartbeat:
         ctx.Tell(a.serverPID, &Heartbeat{
             Timestamp: time.Now(),
@@ -431,17 +414,15 @@ type BatchActor struct {
     pending []*WorkItem
 }
 
-func (a *BatchActor) PreStart(ctx *actor.Context) error {
-    // Process batch every 5 seconds
-    return ctx.ActorSystem().ScheduleWithCron(ctx.Context(),
-        "*/5 * * * * *",
-        ctx.Self(),
-        &ProcessBatch{},
-    )
-}
-
 func (a *BatchActor) Receive(ctx *actor.ReceiveContext) {
     switch msg := ctx.Message().(type) {
+    case *goaktpb.PostStart:
+        // Process batch every 5 seconds
+        _ = ctx.ActorSystem().ScheduleWithCron(ctx.Context(),
+            &ProcessBatch{},
+            ctx.Self(),
+            "*/5 * * * * *",
+        )
     case *WorkItem:
         a.pending = append(a.pending, msg)
 
@@ -471,10 +452,11 @@ func (a *RetryActor) scheduleRetry(ctx *actor.ReceiveContext, task *Task, attemp
         delay = time.Minute
     }
 
-    ctx.ScheduleOnce(delay, ctx.Self(), &RetryTask{
-        Task:    task,
-        Attempt: attempt + 1,
-    })
+    _ = ctx.ActorSystem().ScheduleOnce(ctx.Context(),
+        &RetryTask{Task: task, Attempt: attempt + 1},
+        ctx.Self(),
+        delay,
+    )
 
     ctx.Logger().Info("Retry scheduled",
         "attempt", attempt+1,
@@ -506,14 +488,14 @@ func (a *RetryActor) scheduleRetry(ctx *actor.ReceiveContext, task *Task, attemp
 func TestScheduling(t *testing.T) {
     ctx := context.Background()
     system, _ := actor.NewActorSystem("test",
-        actor.WithPassivationDisabled())
+        actor.WithPassivationStrategy(passivation.NewLongLivedStrategy()))
     system.Start(ctx)
     defer system.Stop(ctx)
 
     pid, _ := system.Spawn(ctx, "test", &TestActor{})
 
-    // Schedule message
-    err := system.ScheduleOnce(ctx, 100*time.Millisecond, pid, &TestMessage{})
+    // Schedule message (order: ctx, message, pid, delay)
+    err := system.ScheduleOnce(ctx, &TestMessage{}, pid, 100*time.Millisecond)
     assert.NoError(t, err)
 
     // Wait for message to be delivered
@@ -537,7 +519,7 @@ func TestScheduling(t *testing.T) {
 
 - **Minimum delay**: Practical minimum is ~10ms
 - **Cron granularity**: Second-level granularity
-- **No cancellation API**: Can't cancel scheduled messages (use references + logic)
+- **Cancellation**: Use `system.CancelSchedule(reference)` to cancel; schedule with `actor.WithReference("id")` to get a reference. `PauseSchedule` and `ResumeSchedule` are also available.
 - **No persistence**: Schedules lost on restart
 
 ## Summary

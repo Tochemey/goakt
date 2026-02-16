@@ -416,7 +416,7 @@ type GreeterActor struct {
 
 func (a *GreeterActor) PreStart(ctx *actor.Context) error {
     a.greetings = 0
-    ctx.Logger().Info("Greeter started")
+    ctx.ActorSystem().Logger().Info("Greeter started")
     return nil
 }
 
@@ -432,7 +432,7 @@ func (a *GreeterActor) Receive(ctx *actor.ReceiveContext) {
 }
 
 func (a *GreeterActor) PostStop(ctx *actor.Context) error {
-    ctx.Logger().Info("Greeter stopped", "greetings", a.greetings)
+    ctx.ActorSystem().Logger().Info("Greeter stopped", "greetings", a.greetings)
     return nil
 }
 
@@ -441,7 +441,7 @@ func main() {
 
     // Create actor system
     actorSystem, _ := actor.NewActorSystem("GreeterSystem",
-        actor.WithPassivationDisabled())
+        actor.WithPassivationStrategy(passivation.NewLongLivedStrategy()))
 
     actorSystem.Start(ctx)
     defer actorSystem.Stop(ctx)
@@ -799,7 +799,7 @@ if err != nil {
 func TestActorSpawn(t *testing.T) {
     ctx := context.Background()
     system, _ := actor.NewActorSystem("test",
-        actor.WithPassivationDisabled())
+        actor.WithPassivationStrategy(passivation.NewLongLivedStrategy()))
     system.Start(ctx)
     defer system.Stop(ctx)
 

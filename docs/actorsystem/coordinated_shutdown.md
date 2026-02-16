@@ -783,7 +783,6 @@ func TestShutdownHook(t *testing.T) {
     hook := &FlushMetricsHook{metricsWriter: newMockWriter()}
 
     system, _ := actor.NewActorSystem("test",
-        actor.WithPassivationDisabled(),
         actor.WithCoordinatedShutdown(hook))
 
     system.Start(ctx)

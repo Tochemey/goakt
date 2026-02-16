@@ -25,36 +25,24 @@ Passivation is beneficial for:
 
 ## Configuration
 
-### Global Passivation
-
-Set passivation timeout for all actors in the system:
-
-```go
-actorSystem, err := actor.NewActorSystem("MySystem",
-    actor.WithPassivationAfter(5*time.Minute))
-```
-
 ### Per-Actor Passivation
 
-Override passivation timeout for specific actors:
+Configure passivation when spawning an actor. Use a **strategy** (time-based, message-count, or long-lived):
 
 ```go
+import "github.com/tochemey/goakt/v3/passivation"
+
+// Time-based: passivate after 5 minutes of inactivity
 pid, err := actorSystem.Spawn(ctx, "my-actor", &MyActor{},
-    actor.WithPassivationAfter(10*time.Minute))
-```
+    actor.WithPassivationStrategy(passivation.NewTimeBasedStrategy(5*time.Minute)))
 
-### Disable Passivation
-
-Disable passivation for specific actors:
-
-```go
-// Globally disabled
-actorSystem, err := actor.NewActorSystem("MySystem",
-    actor.WithPassivationDisabled())
-
-// Per-actor disabled
+// Message-count: passivate after processing N messages
 pid, err := actorSystem.Spawn(ctx, "my-actor", &MyActor{},
-    actor.WithPassivationDisabled())
+    actor.WithPassivationStrategy(passivation.NewMessageCountBasedStrategy(100)))
+
+// Long-lived: never passivate (effective "disable")
+pid, err := actorSystem.Spawn(ctx, "my-actor", &MyActor{},
+    actor.WithPassivationStrategy(passivation.NewLongLivedStrategy()))
 ```
 
 ## How Passivation Works
@@ -88,7 +76,7 @@ type SessionActor struct {
 }
 
 func (a *SessionActor) PreStart(ctx *actor.Context) error {
-    ctx.Logger().Info("Session started",
+    ctx.ActorSystem().Logger().Info("Session started",
         "user_id", a.userId,
         "session_id", a.sessionId)
 
@@ -109,13 +97,13 @@ func (a *SessionActor) Receive(ctx *actor.ReceiveContext) {
 }
 
 func (a *SessionActor) PostStop(ctx *actor.Context) error {
-    ctx.Logger().Info("Session ended (passivated)",
+    ctx.ActorSystem().Logger().Info("Session ended (passivated)",
         "user_id", a.userId,
         "session_id", a.sessionId)
 
     // Save session data before passivation
     if err := a.saveSessionData(); err != nil {
-        ctx.Logger().Error("Failed to save session data", "error", err)
+        ctx.ActorSystem().Logger().Error("Failed to save session data", "error", err)
         return err
     }
 
@@ -125,16 +113,15 @@ func (a *SessionActor) PostStop(ctx *actor.Context) error {
 // Usage
 func main() {
     ctx := context.Background()
-    actorSystem, _ := actor.NewActorSystem("SessionSystem",
-        actor.WithPassivationAfter(5*time.Minute))
+    actorSystem, _ := actor.NewActorSystem("SessionSystem")
     actorSystem.Start(ctx)
     defer actorSystem.Stop(ctx)
 
-    // Spawn session actor with passivation
+    // Spawn session actor with time-based passivation (5 min inactivity)
     pid, _ := actorSystem.Spawn(ctx, "session-123", &SessionActor{
         userId:    "user-456",
         sessionId: "session-123",
-    })
+    }, actor.WithPassivationStrategy(passivation.NewTimeBasedStrategy(5*time.Minute)))
 
     // Actor will be automatically passivated after 5 minutes of inactivity
 }
@@ -187,7 +174,7 @@ func (a *UserSessionActor) PostStop(ctx *actor.Context) error {
 // Spawn with 30-minute session timeout
 pid, _ := actorSystem.Spawn(ctx, fmt.Sprintf("session-%s", userId),
     &UserSessionActor{userId: userId},
-    actor.WithPassivationAfter(30*time.Minute))
+    actor.WithPassivationStrategy(passivation.NewTimeBasedStrategy(30*time.Minute)))
 ```
 
 ### 2. Cache Entries
@@ -200,7 +187,7 @@ type CacheEntryActor struct {
 }
 
 func (a *CacheEntryActor) PreStart(ctx *actor.Context) error {
-    ctx.Logger().Debug("Cache entry loaded", "key", a.key)
+    ctx.ActorSystem().Logger().Debug("Cache entry loaded", "key", a.key)
     a.hits = 0
     return nil
 }
@@ -218,7 +205,7 @@ func (a *CacheEntryActor) Receive(ctx *actor.ReceiveContext) {
 }
 
 func (a *CacheEntryActor) PostStop(ctx *actor.Context) error {
-    ctx.Logger().Debug("Cache entry evicted",
+    ctx.ActorSystem().Logger().Debug("Cache entry evicted",
         "key", a.key,
         "hits", a.hits)
     return nil
@@ -227,7 +214,7 @@ func (a *CacheEntryActor) PostStop(ctx *actor.Context) error {
 // Spawn with LRU-style passivation
 pid, _ := actorSystem.Spawn(ctx, fmt.Sprintf("cache-%s", key),
     &CacheEntryActor{key: key, value: value},
-    actor.WithPassivationAfter(5*time.Minute))
+    actor.WithPassivationStrategy(passivation.NewTimeBasedStrategy(5*time.Minute)))
 ```
 
 ### 3. Connection Actors
@@ -246,7 +233,7 @@ func (a *ConnectionActor) PreStart(ctx *actor.Context) error {
     }
 
     a.connection = conn
-    ctx.Logger().Info("Connection established", "client_id", a.clientId)
+    ctx.ActorSystem().Logger().Info("Connection established", "client_id", a.clientId)
     return nil
 }
 
@@ -262,7 +249,7 @@ func (a *ConnectionActor) Receive(ctx *actor.ReceiveContext) {
 }
 
 func (a *ConnectionActor) PostStop(ctx *actor.Context) error {
-    ctx.Logger().Info("Connection closing", "client_id", a.clientId)
+    ctx.ActorSystem().Logger().Info("Connection closing", "client_id", a.clientId)
 
     if a.connection != nil {
         return a.connection.Close()
@@ -273,7 +260,7 @@ func (a *ConnectionActor) PostStop(ctx *actor.Context) error {
 // Passivate idle connections after 2 minutes
 pid, _ := actorSystem.Spawn(ctx, fmt.Sprintf("conn-%s", clientId),
     &ConnectionActor{clientId: clientId},
-    actor.WithPassivationAfter(2*time.Minute))
+    actor.WithPassivationStrategy(passivation.NewTimeBasedStrategy(2*time.Minute)))
 ```
 
 ### 4. Virtual Actors (Grain-like Pattern)
@@ -325,20 +312,20 @@ func (a *OrderActor) PostStop(ctx *actor.Context) error {
 }
 
 // Get or create order actor (virtual actor pattern)
-func getOrCreateOrderActor(ctx context.Context, system *actor.ActorSystem,
+func getOrCreateOrderActor(ctx context.Context, system actor.ActorSystem,
     orderId string) (*actor.PID, error) {
 
     actorName := fmt.Sprintf("order-%s", orderId)
 
-    // Try to get existing actor
-    pid := system.ActorOf(actorName)
-    if pid != nil {
+    // Try to get existing actor (returns addr, pid, err)
+    _, pid, err := system.ActorOf(ctx, actorName)
+    if err == nil && pid != nil {
         return pid, nil
     }
 
     // Spawn new actor with passivation
     return system.Spawn(ctx, actorName, &OrderActor{orderId: orderId},
-        actor.WithPassivationAfter(10*time.Minute))
+        actor.WithPassivationStrategy(passivation.NewTimeBasedStrategy(10*time.Minute)))
 }
 ```
 
@@ -389,11 +376,11 @@ func (a *StatefulActor) Receive(ctx *actor.ReceiveContext) {
 }
 
 func (a *StatefulActor) PostStop(ctx *actor.Context) error {
-    ctx.Logger().Info("Persisting state before passivation", "id", a.id)
+    ctx.ActorSystem().Logger().Info("Persisting state before passivation", "id", a.id)
 
     // Persist state to database
     if err := a.db.SaveState(a.id, a.state); err != nil {
-        ctx.Logger().Error("Failed to persist state", "error", err)
+        ctx.ActorSystem().Logger().Error("Failed to persist state", "error", err)
         return err
     }
 
@@ -412,8 +399,8 @@ func (a *StatefulActor) PostStop(ctx *actor.Context) error {
 
 ```go
 func (a *MyActor) PostStop(ctx *actor.Context) error {
-    ctx.Logger().Info("Actor passivated",
-        "actor_name", ctx.Self().Name(),
+    ctx.ActorSystem().Logger().Info("Actor passivated",
+        "actor_name", ctx.ActorName(),
         "uptime", time.Since(a.startTime))
     return nil
 }
@@ -421,10 +408,7 @@ func (a *MyActor) PostStop(ctx *actor.Context) error {
 
 ### Metrics
 
-GoAkt exposes passivation metrics via OpenTelemetry:
-
-- `actor_passivated_total`: Total actors passivated
-- `actor_lifetime_seconds`: Actor lifetime distribution
+For system and per-actor metrics (including lifecycle), see [Observability — Metrics](../observability/metrics.md). Use the events stream to observe actor stopped/passivated events; see [Events Stream](../events_stream/overview.md).
 
 ## Best Practices
 
@@ -440,12 +424,12 @@ GoAkt exposes passivation metrics via OpenTelemetry:
 func (a *MyActor) PostStop(ctx *actor.Context) error {
     // Clean up all resources
     if err := a.connection.Close(); err != nil {
-        ctx.Logger().Error("Failed to close connection", "error", err)
+        ctx.ActorSystem().Logger().Error("Failed to close connection", "error", err)
     }
 
     // Persist state
     if err := a.saveState(); err != nil {
-        ctx.Logger().Error("Failed to save state", "error", err)
+        ctx.ActorSystem().Logger().Error("Failed to save state", "error", err)
         return err
     }
 
@@ -492,7 +476,7 @@ pid.Shutdown(ctx) // External
 func TestPassivation(t *testing.T) {
     ctx := context.Background()
     system, _ := actor.NewActorSystem("test",
-        actor.WithPassivationAfter(100*time.Millisecond))
+        actor.WithPassivationStrategy(passivation.NewTimeBasedStrategy(100*time.Millisecond)))
     system.Start(ctx)
     defer system.Stop(ctx)
 
@@ -542,7 +526,7 @@ Long timeout (> 30 minutes):
 ## Summary
 
 - **Passivation** automatically stops idle actors
-- **Configure** with `WithPassivationAfter()` or `WithPassivationDisabled()`
+- **Configure** with `WithPassivationStrategy()` (e.g. `passivation.NewTimeBasedStrategy(d)` or `passivation.NewLongLivedStrategy()`)
 - **PostStop** is called for cleanup
 - **Persist state** before passivation
 - **Use for** sessions, caches, connections, virtual actors

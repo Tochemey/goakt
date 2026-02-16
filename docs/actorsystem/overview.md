@@ -36,8 +36,8 @@ if err != nil {
 ```go
 actorSystem, err := actor.NewActorSystem("MySystem",
     actor.WithLogger(logger),
-    actor.WithPassivationDisabled(),
     actor.WithShutdownTimeout(30*time.Second))
+// To disable passivation per-actor, use actor.WithPassivationStrategy(passivation.NewLongLivedStrategy()) when spawning
 ```
 
 ## Actor System Lifecycle
@@ -159,20 +159,24 @@ actorSystem, _ := actor.NewActorSystem("MySystem",
 
 **Default:** Uses GoAkt's default logger
 
-### WithPassivationDisabled
+### Passivation
 
-Disable passivation globally:
+Passivation is configured **per actor** at spawn time, not globally. To keep an actor from being passivated, use the long-lived strategy when spawning:
 
 ```go
-actorSystem, _ := actor.NewActorSystem("MySystem",
-    actor.WithPassivationDisabled())
+import "github.com/tochemey/goakt/v3/passivation"
+
+pid, _ := actorSystem.Spawn(ctx, "my-actor", &MyActor{},
+    actor.WithPassivationStrategy(passivation.NewLongLivedStrategy()))
 ```
 
 **Use when:**
 
-- All actors should live forever
+- Actor should never be passivated
 - Testing/development
 - Memory is not constrained
+
+See [Passivation](../actors/passivation.md) for time-based and message-count strategies.
 
 ### WithShutdownTimeout
 
@@ -367,20 +371,18 @@ actorSystem, _ := actor.NewActorSystem("MySystem",
 
 ### WithEvictionStrategy
 
-Configure actor eviction when memory limits reached:
+Configure actor eviction when memory limits are reached:
 
 ```go
-strategy := actor.NewEvictionStrategy(1000, actor.LRU)
-
+strategy, err := actor.NewEvictionStrategy(1000, actor.LRU, 10) // limit, policy, percentage
+if err != nil {
+    log.Fatal(err)
+}
 actorSystem, _ := actor.NewActorSystem("MySystem",
     actor.WithEvictionStrategy(strategy, 5*time.Second))
 ```
 
-**Strategies:**
-
-- `LRU` - Least Recently Used
-- `LFU` - Least Frequently Used
-- `MRU` - Most Recently Used
+**Policies:** `actor.LRU`, `actor.LFU`, `actor.MRU`. **Percentage** (0–100) controls how many actors to evict per run.
 
 ## Actor System Methods
 
@@ -406,12 +408,12 @@ err := actorSystem.SpawnOn(ctx, "distributed-actor", &MyActor{},
 
 ### SpawnRouter
 
-Create router for load balancing:
+Create router for load balancing (pool size, routee kind, then router options):
 
 ```go
 routerPID, err := actorSystem.SpawnRouter(ctx, "worker-pool",
-    10,
-    &WorkerActor{},
+    10,                    // pool size
+    &WorkerActor{},        // routee kind
     actor.WithRoutingStrategy(actor.RoundRobinRouting))
 ```
 
@@ -429,16 +431,17 @@ See [Cluster Singleton documentation](../cluster/cluster_singleton.md) for detai
 
 ### ActorOf
 
-Lookup actor by name:
+Lookup actor by name (local or cluster). Returns address, PID, and error:
 
 ```go
-pid := actorSystem.ActorOf("my-actor")
-if pid != nil {
+addr, pid, err := actorSystem.ActorOf(ctx, "my-actor")
+if err == nil && pid != nil {
     actor.Tell(ctx, pid, &Message{})
 }
+// If actor is on a remote node, addr is set and pid may be nil; use remoting to send to addr
 ```
 
-**Returns:** PID if exists, nil otherwise
+**Returns:** `(addr *address.Address, pid *PID, err error)` — PID if found locally, address if on another node
 
 ### Actors
 
@@ -470,29 +473,31 @@ for _, ref := range refs {
 
 **Returns:** ActorRefs from local and cluster nodes
 
-### Subscribe/Unsubscribe
+### Pub/Sub (Topic messaging)
 
-Topic-based messaging (requires `WithPubSub()`):
+Topic-based publish-subscribe is **not** done via system methods. With `WithPubSub()` enabled, you send `Subscribe`, `Publish`, and `Unsubscribe` messages to the **Topic Actor**:
 
 ```go
-// Subscribe
-actorSystem.Subscribe(topic, subscriberPID)
-
-// Publish
-actorSystem.Publish(ctx, topic, &Event{})
-
-// Unsubscribe
-actorSystem.Unsubscribe(topic, subscriberPID)
+topicActor := actorSystem.TopicActor()
+// Subscribe: actor.Tell(ctx, topicActor, &goaktpb.Subscribe{Topic: "orders", Subscriber: subscriberPID})
+// Publish:   actor.Tell(ctx, topicActor, &goaktpb.Publish{Topic: "orders", Message: ...})
+// Unsubscribe: actor.Tell(ctx, topicActor, &goaktpb.Unsubscribe{Topic: "orders", Subscriber: subscriberPID})
 ```
+
+See [PubSub](../pubsub/overview.md) for full usage.  
+**Note:** `actorSystem.Subscribe()` / `Unsubscribe()` are for the **events stream** (internal system events), not for topic pub/sub.
 
 ### Metric
 
-Get runtime metrics:
+Get runtime metrics (methods, not fields):
 
 ```go
 metrics := actorSystem.Metric(ctx)
-fmt.Printf("Actors: %d\n", metrics.ActorsCount)
-fmt.Printf("Dead letters: %d\n", metrics.DeadlettersCount)
+if metrics != nil {
+    fmt.Printf("Actors: %d\n", metrics.ActorsCount())
+    fmt.Printf("Dead letters: %d\n", metrics.DeadlettersCount())
+    fmt.Printf("Uptime: %d s\n", metrics.Uptime())
+}
 ```
 
 ### Name
@@ -574,8 +579,7 @@ func main() {
         actor.WithActorInitMaxRetries(3),
         actor.WithDefaultSupervisor(defaultSupervisor),
 
-        // Passivation
-        actor.WithPassivationDisabled(), // Or custom strategy
+        // Passivation is per-actor at spawn; no global "disable"
 
         // Distributed features
         actor.WithRemote(remoteConfig),
@@ -670,8 +674,7 @@ func TestActorSystem(t *testing.T) {
     ctx := context.Background()
 
     // Create test system
-    system, err := actor.NewActorSystem("test",
-        actor.WithPassivationDisabled())
+    system, err := actor.NewActorSystem("test")
 
     assert.NoError(t, err)
     assert.NotNil(t, system)
@@ -693,8 +696,7 @@ func TestActorSystem(t *testing.T) {
 ```go
 func TestSystemWithActors(t *testing.T) {
     ctx := context.Background()
-    system, _ := actor.NewActorSystem("test",
-        actor.WithPassivationDisabled())
+    system, _ := actor.NewActorSystem("test")
 
     system.Start(ctx)
     defer system.Stop(ctx)
@@ -713,7 +715,6 @@ func TestSystemWithActors(t *testing.T) {
 
 ## Performance Considerations
 
-- **System name**: Short names reduce overhead
 - **Passivation**: Balance memory vs. startup cost
 - **Shutdown timeout**: Longer = more graceful, shorter = faster
 - **Metrics**: Small overhead when enabled

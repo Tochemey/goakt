@@ -398,10 +398,8 @@ Send a fire-and-forget message to a grain:
 import "github.com/tochemey/goakt/v3/remote"
 
 grainRequest := &remote.GrainRequest{
-    GrainId: &remote.GrainId{
-        Name: "user-grain-123",
-        Kind: "UserGrain",
-    },
+    Name: "user-grain-123",
+    Kind: "UserGrain",
 }
 
 message := &UpdateUserRequest{Name: "John Doe"}
@@ -418,10 +416,8 @@ Send a request to a grain and wait for response:
 
 ```go
 grainRequest := &remote.GrainRequest{
-    GrainId: &remote.GrainId{
-        Name: "user-grain-123",
-        Kind: "UserGrain",
-    },
+    Name: "user-grain-123",
+    Kind: "UserGrain",
 }
 
 request := &GetUserRequest{}

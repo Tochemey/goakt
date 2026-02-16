@@ -260,7 +260,7 @@ func (a *OrderActor) PostStop(ctx *actor.Context) error {
 func main() {
     ctx := context.Background()
     actorSystem, _ := actor.NewActorSystem("OrderSystem",
-        actor.WithPassivationDisabled())
+        actor.WithPassivationStrategy(passivation.NewLongLivedStrategy()))
     actorSystem.Start(ctx)
     defer actorSystem.Stop(ctx)
 
@@ -480,11 +480,10 @@ func (a *RetryActor) sendWithRetry(ctx *actor.ReceiveContext,
                 "attempts_left", attempts)
 
             // Retry after delay
-            ctx.ScheduleOnce(time.Second, ctx.Self(), &RetryMessage{
-                TargetPID: targetPID,
-                Message:   msg,
-                Attempts:  attempts - 1,
-            })
+            _ = ctx.ActorSystem().ScheduleOnce(ctx.Context(),
+                &RetryMessage{TargetPID: targetPID, Message: msg, Attempts: attempts - 1},
+                ctx.Self(),
+                time.Second)
             return
         }
 
@@ -589,7 +588,7 @@ request.Then(func(response proto.Message, err error) {
 func TestReentrantActor(t *testing.T) {
     ctx := context.Background()
     system, _ := actor.NewActorSystem("test",
-        actor.WithPassivationDisabled())
+        actor.WithPassivationStrategy(passivation.NewLongLivedStrategy()))
     system.Start(ctx)
     defer system.Stop(ctx)
 

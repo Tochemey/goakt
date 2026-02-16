@@ -442,7 +442,7 @@ func (a *RetryActor) Receive(ctx *actor.ReceiveContext) {
             a.attempts = 1
             ctx.BecomeStacked(a.retryBehavior)
             // Schedule retry
-            ctx.ScheduleOnce(time.Second, ctx.Self(), &RetryTask{})
+            _ = ctx.ActorSystem().ScheduleOnce(ctx.Context(), &RetryTask{}, ctx.Self(), time.Second)
         } else {
             ctx.Response(&TaskComplete{})
         }
@@ -463,7 +463,7 @@ func (a *RetryActor) retryBehavior(ctx *actor.ReceiveContext) {
             a.attempts++
             // Schedule next retry
             backoff := time.Duration(a.attempts) * time.Second
-            ctx.ScheduleOnce(backoff, ctx.Self(), &RetryTask{})
+            _ = ctx.ActorSystem().ScheduleOnce(ctx.Context(), &RetryTask{}, ctx.Self(), backoff)
         } else {
             a.attempts = 0
             ctx.UnBecomeStacked()
@@ -490,7 +490,7 @@ func (a *ThrottledActor) Receive(ctx *actor.ReceiveContext) {
             // Switch to throttled behavior
             ctx.Become(a.throttledBehavior)
             // Schedule reset
-            ctx.ScheduleOnce(time.Minute, ctx.Self(), &ResetThrottle{})
+            _ = ctx.ActorSystem().ScheduleOnce(ctx.Context(), &ResetThrottle{}, ctx.Self(), time.Minute)
         }
 
         a.handleRequest(msg)
@@ -619,7 +619,7 @@ func (a *StatefulActor) popBehavior(ctx *actor.ReceiveContext) {
 func TestStateMachine(t *testing.T) {
     ctx := context.Background()
     system, _ := actor.NewActorSystem("test",
-        actor.WithPassivationDisabled())
+        actor.WithPassivationStrategy(passivation.NewLongLivedStrategy()))
     system.Start(ctx)
     defer system.Stop(ctx)
 
@@ -650,7 +650,7 @@ func TestStateMachine(t *testing.T) {
 - **Behavior switching is fast**: O(1) operation
 - **Stacked behaviors use memory**: Be mindful of stack depth
 - **Behaviors are not serialized**: State must be managed separately
-- **No overhead when not used**: Default behavior has no penalty
+- **Default (single) behavior**: Negligible overhead compared to a plain actor
 
 ## Summary
 

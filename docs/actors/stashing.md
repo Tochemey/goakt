@@ -543,7 +543,7 @@ func (a *PoolActor) Receive(ctx *actor.ReceiveContext) {
 
 - **Memory**: Stash buffer is unbounded by default
 - **Order**: Stashed messages maintain FIFO order
-- **No overhead**: No performance cost when not used
+- **Low overhead when unused**: Negligible cost when the stash is empty
 - **Unstashing**: O(1) for single unstash, O(n) for unstash all
 
 ## Limitations
@@ -575,7 +575,7 @@ pid, err := actorSystem.Spawn(ctx, "actor", &MyActor{},
 func TestStashing(t *testing.T) {
     ctx := context.Background()
     system, _ := actor.NewActorSystem("test",
-        actor.WithPassivationDisabled())
+        actor.WithPassivationStrategy(passivation.NewLongLivedStrategy()))
     system.Start(ctx)
     defer system.Stop(ctx)
 
