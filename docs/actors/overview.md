@@ -7,13 +7,13 @@
 - 🔌 [Actor Interface](#actor-interface)
 - 🏗️ [Creating Actors](#creating-actors)
 - 🚀 [Spawning Actors](#spawning-actors)
-- 🆔 [Actor Identity and References](#actor-identity-and-references)
-- 🌳 [Actor Hierarchy](#actor-hierarchy)
-- 💾 [Actor State Management](#actor-state-management)
+- 🆔 [Identity and References](#identity-and-references)
+- 🌳 [Hierarchy](#hierarchy)
+- 💾 [State Management](#state-management)
 - 🔒 [Immutability Requirement](#immutability-requirement)
 - 📨 [Message Processing](#message-processing)
 - 🌍 [Location Transparency](#location-transparency)
-- ✅ [Actor Best Practices](#actor-best-practices)
+- ✅ [Best Practices](#actor-best-practices)
 - ⚠️ [Error Handling](#error-handling)
 - ➡️ [Next Steps](#next-steps)
 - 💡 [Example: Complete Actor](#example-complete-actor)
@@ -114,55 +114,19 @@ func (a *MyActor) PostStop(ctx *Context) error {
 }
 ```
 
-## Creating Actors
-
-### Basic Actor
-
-```go
-package main
-
-import (
-    "github.com/tochemey/goakt/v3/actor"
-)
-
-type GreeterActor struct {
-    greetings int
-}
-
-func (a *GreeterActor) PreStart(ctx *actor.Context) error {
-    a.greetings = 0
-    return nil
-}
-
-func (a *GreeterActor) Receive(ctx *actor.ReceiveContext) {
-    switch msg := ctx.Message().(type) {
-    case *Greet:
-        a.greetings++
-        ctx.Response(&Greeting{
-            Message: "Hello, " + msg.GetName(),
-            Count:   int32(a.greetings),
-        })
-    }
-}
-
-func (a *GreeterActor) PostStop(ctx *actor.Context) error {
-    return nil
-}
-```
-
 ## Spawning Actors
 
 Actors are spawned within an `ActorSystem`. GoAkt supports several ways to create actors:
 
-| Method                                                            | Where          | Returns         | Use when                                                                                                                                                         |
-|-------------------------------------------------------------------|----------------|-----------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **system.Spawn**(ctx, name, actor, opts...)                       | Actor system   | `(*PID, error)` | Spawn locally on this node (default).                                                                                                                            |
-| **system.SpawnOn**(ctx, name, actor, opts...)                     | Actor system   | `error`         | Spawn in cluster (local or remote/datacenter). Use **ActorOf** to get PID or address. [Cluster](../cluster/overview.md), [Relocation](../cluster/relocation.md). |
-| **ctx.Spawn**(name, actor, opts...)                               | Inside Receive | `*PID`          | Spawn a **child** of the current actor; check `ctx.Err()` and nil PID on failure.                                                                                |
-| **pid.SpawnChild**(ctx, name, actor, opts...)                     | From a PID     | `(*PID, error)` | Spawn a **child** of the given actor.                                                                                                                            |
-| **system.SpawnFromFunc**(ctx, receiveFunc, opts...)               | Actor system   | `(*PID, error)` | Spawn from a **receive function**. **SpawnNamedFromFunc**(ctx, name, ...) for a fixed name.                                                                      |
-| **system.SpawnRouter**(ctx, name, poolSize, routeesKind, opts...) | Actor system   | `(*PID, error)` | Spawn a **router** (pool of routees). [Routers](routers.md).                                                                                                     |
-| **system.SpawnSingleton**(ctx, name, actor, opts...)              | Actor system   | `error`         | **Cluster singleton** (one instance in cluster). [Cluster Singleton](../cluster/cluster_singleton.md).                                                           |
+| Method                                                     | Where          | Use when                                                                                                                                                         |
+| ---------------------------------------------------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Spawn**(ctx, name, actor, opts...)                       | Actor system   | Spawn locally on this node (default).                                                                                                                            |
+| **SpawnOn**(ctx, name, actor, opts...)                     | Actor system   | Spawn in cluster (local or remote/datacenter). Use **ActorOf** to get PID or address. [Cluster](../cluster/overview.md), [Relocation](../cluster/relocation.md). |
+| **Spawn**(name, actor, opts...)                            | Inside Receive | Spawn a **child** of the current actor; check `ctx.Err()` and nil PID on failure.                                                                                |
+| **SpawnChild**(ctx, name, actor, opts...)                  | From a PID     | Spawn a **child** of the given actor.                                                                                                                            |
+| **SpawnFromFunc**(ctx, receiveFunc, opts...)               | Actor system   | Spawn from a **receive function**. **SpawnNamedFromFunc**(ctx, name, ...) for a fixed name.                                                                      |
+| **SpawnRouter**(ctx, name, poolSize, routeesKind, opts...) | Actor system   | Spawn a **router** (pool of routees). [Routers](routers.md).                                                                                                     |
+| **SpawnSingleton**(ctx, name, actor, opts...)              | Actor system   | **Cluster singleton** (one instance in cluster). [Cluster Singleton](../cluster/cluster_singleton.md).                                                           |
 
 All spawn options (mailbox, supervisor, passivation, reentrancy, etc.) apply to `Spawn`, `SpawnOn`, and `ctx.Spawn` / `SpawnChild` where relevant.
 
@@ -193,7 +157,7 @@ if err != nil {
 You can customize actor behavior with spawn options.
 
 | Option                                | Description                                                                                   | See                                                                       |
-|---------------------------------------|-----------------------------------------------------------------------------------------------|---------------------------------------------------------------------------|
+| ------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
 | **WithMailbox**(mailbox)              | Mailbox implementation (unbounded, bounded, priority, etc.).                                  | [Mailbox](mailbox.md)                                                     |
 | **WithSupervisor**(supervisor)        | Failure-handling strategy (restart, stop, resume).                                            | [Supervision](supervision.md)                                             |
 | **WithPassivationStrategy**(strategy) | When to passivate idle actors (time-based, long-lived, message-count).                        | [Passivation](passivation.md)                                             |
@@ -225,7 +189,7 @@ pid, err := actorSystem.Spawn(ctx, "greeter", &GreeterActor{},
 )
 ```
 
-## Actor Identity and References
+## Identity and References
 
 When you spawn an actor, you receive a **PID** (Process ID) — a unique reference to that actor. For messaging, an actor can be referred to in two ways:
 
@@ -258,7 +222,7 @@ addr := pid.Address()
 err := pid.Shutdown(ctx)
 ```
 
-## Actor Hierarchy
+## Hierarchy
 
 Actors in GoAkt are organized in a hierarchy:
 
@@ -277,7 +241,7 @@ ActorSystem
 
 - **Parents supervise children**: If a child fails, the parent decides how to handle it
 - **Children are stopped when parent stops**: Ensures clean shutdown
-- **Hierarchical naming**: Children inherit their parent's path
+- **Hierarchical path**: Children inherit their parent's path
 
 ### Spawning Child Actors
 
@@ -296,7 +260,7 @@ func (a *MyActor) Receive(ctx *ReceiveContext) {
 }
 ```
 
-## Actor State Management
+## State Management
 
 Actors encapsulate state that is:
 
@@ -393,7 +357,7 @@ actor.Tell(ctx, local, &Message{})
 actor.Tell(ctx, remote, &Message{})
 ```
 
-## Actor Best Practices
+## Best Practices
 
 ### Do's ✅
 
@@ -419,7 +383,7 @@ Actors handle errors through:
 1. **Returning errors from PreStart**: Prevents actor from starting
 2. **Supervision**: Parent actors handle child failures
 3. **ctx.Err()**: Report non-fatal errors during message processing
-4. **Panic recovery**: Runtime catches panics and restarts actors
+4. **Panic recovery**: Faulty actors are handled via the supervisor strategy. See [Supervision Documentation](./supervision.md) for details.
 
 ```go
 func (a *MyActor) Receive(ctx *ReceiveContext) {
@@ -438,6 +402,7 @@ func (a *MyActor) Receive(ctx *ReceiveContext) {
 
 Now that you understand the actor fundamentals, explore:
 
+- **[Spawning](spawn.md)**: Learn how to spawn actors
 - **[Messaging](messaging.md)**: Learn about Tell, Ask, and communication patterns
 - **[Mailbox](mailbox.md)**: Understand message queuing and mailbox types
 - **[Behaviors](behaviours.md)**: Dynamic behavior changes for state machines
