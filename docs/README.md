@@ -146,8 +146,9 @@ This documentation is organized into the following sections:
 - **Remoting**: Node-to-node communication
 - **Clustering**: Discovery, membership, and distributed coordination
 - **Grains**: Virtual actor patterns and usage
-- **Events Stream**: Event streaming and observability
 - **PubSub**: Publish-subscribe messaging patterns
+- **Events Stream**: Event streaming and observability
+- **Observability**: Observability
 - **Testing**: Testing actors and distributed systems
 
 ## Who Uses GoAkt?
