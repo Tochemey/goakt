@@ -16,7 +16,6 @@ Routers are specialized actors that distribute messages across a pool of worker 
 - 📊 [Strategy Comparison](#strategy-comparison)
 - ⚡ [Performance Considerations](#performance-considerations)
 - ⚠️ [Router Limitations](#router-limitations)
-- 🧪 [Testing](#testing)
 - 📋 [Summary](#summary)
 - ➡️ [Next Steps](#next-steps)
 
@@ -25,6 +24,7 @@ Routers are specialized actors that distribute messages across a pool of worker 
 ## What is a Router?
 
 A **router** is an actor that:
+
 - Manages a pool of worker actors (routees)
 - Routes incoming messages to routees based on a strategy
 - Supervises routee lifecycle (restart, stop, resume on failure)
@@ -36,6 +36,7 @@ Think of a router as a smart dispatcher that distributes work across multiple wo
 ## Why Use Routers?
 
 **Benefits:**
+
 - **Parallel processing**: Multiple workers process messages concurrently
 - **Load balancing**: Even distribution of work across workers
 - **Fault isolation**: Worker failures don't affect others
@@ -43,6 +44,7 @@ Think of a router as a smart dispatcher that distributes work across multiple wo
 - **Simplified architecture**: Single entry point for work distribution
 
 **Use cases:**
+
 - Worker pools for parallel task processing
 - Load balancing across identical services
 - Fan-out patterns for broadcasting
@@ -54,13 +56,14 @@ Think of a router as a smart dispatcher that distributes work across multiple wo
 ### SpawnRouter
 
 ```go
-routerPID, err := actorSystem.SpawnRouter(ctx, "worker-pool",
+pid, err := actorSystem.SpawnRouter(ctx, "worker-pool",
     10,              // Pool size (number of routees)
     &WorkerActor{},  // Routee type
     actor.WithRoutingStrategy(actor.RoundRobinRouting))
 ```
 
 **Parameters:**
+
 - `name` - Unique router name
 - `poolSize` - Number of routees to spawn
 - `routeesKind` - Actor type for routees (all routees are same type)
@@ -73,13 +76,14 @@ routerPID, err := actorSystem.SpawnRouter(ctx, "worker-pool",
 Distributes messages evenly to routees in sequence.
 
 ```go
-routerPID, err := actorSystem.SpawnRouter(ctx, "rr-pool",
+pid, err := actorSystem.SpawnRouter(ctx, "rr-pool",
     5,
     &WorkerActor{},
     actor.WithRoutingStrategy(actor.RoundRobinRouting))
 ```
 
 **Distribution pattern:**
+
 ```
 Message 1 → Routee 0
 Message 2 → Routee 1
@@ -90,12 +94,14 @@ Message 6 → Routee 0 (cycles back)
 ```
 
 **Best for:**
+
 - Uniform workload distribution
 - Stateless workers
 - Predictable load balancing
 - When order doesn't matter
 
 **Characteristics:**
+
 - ✅ Even distribution
 - ✅ Predictable
 - ✅ Low overhead
@@ -106,13 +112,14 @@ Message 6 → Routee 0 (cycles back)
 Randomly selects a routee for each message.
 
 ```go
-routerPID, err := actorSystem.SpawnRouter(ctx, "random-pool",
+pid, err := actorSystem.SpawnRouter(ctx, "random-pool",
     10,
     &WorkerActor{},
     actor.WithRoutingStrategy(actor.RandomRouting))
 ```
 
 **Distribution pattern:**
+
 ```
 Message 1 → Routee 3 (random)
 Message 2 → Routee 7 (random)
@@ -121,12 +128,14 @@ Message 4 → Routee 3 (random)
 ```
 
 **Best for:**
+
 - Simple load distribution
 - When exact balance doesn't matter
 - Stateless workers
 - Quick setup
 
 **Characteristics:**
+
 - ✅ Simple implementation
 - ✅ Low overhead
 - ⚠️ Uneven distribution possible
@@ -137,18 +146,20 @@ Message 4 → Routee 3 (random)
 Sends each message to **all** routees concurrently.
 
 ```go
-routerPID, err := actorSystem.SpawnRouter(ctx, "fanout-pool",
+pid, err := actorSystem.SpawnRouter(ctx, "fanout-pool",
     5,
     &EventHandlerActor{},
     actor.WithRoutingStrategy(actor.FanOutRouting))
 ```
 
 **Distribution pattern:**
+
 ```
 Message 1 → All routees (0, 1, 2, 3, 4) in parallel
 ```
 
 **Best for:**
+
 - Event broadcasting
 - Cache invalidation
 - Multi-sink processing
@@ -156,6 +167,7 @@ Message 1 → All routees (0, 1, 2, 3, 4) in parallel
 - When all routees need the message
 
 **Characteristics:**
+
 - ✅ All routees receive message
 - ✅ Parallel execution
 - ⚠️ Higher resource usage
@@ -166,13 +178,14 @@ Message 1 → All routees (0, 1, 2, 3, 4) in parallel
 Sends message to all routees and returns the **first successful response**.
 
 ```go
-routerPID, err := actorSystem.SpawnRouter(ctx, "scatter-gather",
+pid, err := actorSystem.SpawnRouter(ctx, "scatter-gather",
     10,
     &SearchActor{},
     actor.AsScatterGatherFirst(500*time.Millisecond))
 ```
 
 **Flow:**
+
 1. Broadcast message to all routees
 2. Wait for first response
 3. Return first response to sender
@@ -180,13 +193,15 @@ routerPID, err := actorSystem.SpawnRouter(ctx, "scatter-gather",
 5. Timeout after specified duration
 
 **Best for:**
-- Getting fastest result
+
+- Getting the fastest result
 - Redundant computing
 - Racing multiple services
 - Latency optimization
 - Failover patterns
 
 **Characteristics:**
+
 - ✅ Returns fastest response
 - ✅ Built-in timeout
 - ⚠️ Duplicate work
@@ -196,14 +211,14 @@ routerPID, err := actorSystem.SpawnRouter(ctx, "scatter-gather",
 
 ```go
 // Create scatter-gather router
-routerPID, _ := actorSystem.SpawnRouter(ctx, "search-pool",
+pid, _ := actorSystem.SpawnRouter(ctx, "search-pool",
     5,
     &SearchActor{},
     actor.AsScatterGatherFirst(1*time.Second))
 
 // Send query - gets fastest response
 query, _ := anypb.New(&SearchQuery{Term: "golang"})
-actor.Tell(ctx, routerPID, &goaktpb.Broadcast{Message: query})
+actor.Tell(ctx, pid, &goaktpb.Broadcast{Message: query})
 
 // First response arrives as message
 ```
@@ -213,7 +228,7 @@ actor.Tell(ctx, routerPID, &goaktpb.Broadcast{Message: query})
 Probes routees **sequentially** with delays, returning first response.
 
 ```go
-routerPID, err := actorSystem.SpawnRouter(ctx, "tail-chopping",
+pid, err := actorSystem.SpawnRouter(ctx, "tail-chopping",
     5,
     &QueryActor{},
     actor.AsTailChopping(
@@ -222,6 +237,7 @@ routerPID, err := actorSystem.SpawnRouter(ctx, "tail-chopping",
 ```
 
 **Flow:**
+
 1. Send to first routee
 2. Wait `interval` duration
 3. If no response, send to next routee
@@ -229,6 +245,7 @@ routerPID, err := actorSystem.SpawnRouter(ctx, "tail-chopping",
 5. Return first successful response
 
 **Best for:**
+
 - Controlled sequential probing
 - Avoiding thundering herd
 - Predictable latency
@@ -236,6 +253,7 @@ routerPID, err := actorSystem.SpawnRouter(ctx, "tail-chopping",
 - When full scatter is too expensive
 
 **Characteristics:**
+
 - ✅ Controlled fan-out
 - ✅ Avoids overwhelming routees
 - ✅ Bounded latency
@@ -247,34 +265,34 @@ routerPID, err := actorSystem.SpawnRouter(ctx, "tail-chopping",
 ```go
 // Try routees sequentially
 // Total budget: 2s, probe every 200ms
-routerPID, _ := actorSystem.SpawnRouter(ctx, "cautious-pool",
+pid, _ := actorSystem.SpawnRouter(ctx, "cautious-pool",
     10,
     &DatabaseActor{},
     actor.AsTailChopping(2*time.Second, 200*time.Millisecond))
 
 query, _ := anypb.New(&DatabaseQuery{SQL: "SELECT ..."})
-actor.Tell(ctx, routerPID, &goaktpb.Broadcast{Message: query})
+actor.Tell(ctx, pid, &goaktpb.Broadcast{Message: query})
 ```
 
 ## Router Options
 
 Options are passed to `SpawnRouter`. Routing-strategy options (`WithRoutingStrategy`, `AsScatterGatherFirst`, `AsTailChopping`) are mutually exclusive; the last applied wins. Routee-supervision options (`WithStopRouteeOnFailure`, `WithRestartRouteeOnFailure`, `WithResumeRouteeOnFailure`) are also mutually exclusive.
 
-| Option                                              | Summary                                                                                                                                                                                                                                                         |
-|-----------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **WithRoutingStrategy**(strategy)                   | Sets routing strategy (e.g. RoundRobin, Random, FanOut). Default is FanOut. Fire-and-forget; no reply waiting. For reply-based routing use Scatter-Gather or Tail-Chopping.                                                                                     |
-| **AsScatterGatherFirst**(within)                    | Sends to all live routees concurrently; first successful reply within `within` is forwarded to sender. Late replies dropped. No reply → StatusFailure. `within` must be > 0.                                                                                    |
-| **AsTailChopping**(within, interval)                | Probes routees one at a time (shuffled). Sends to next after `interval` if no response. Stops when one replies, all tried, or `within` elapsed. First success wins; else StatusFailure. Require `interval` > 0 and `interval` < `within` for multiple attempts. |
-| **WithStopRouteeOnFailure**()                       | **(Default.)** Failing routee is terminated and removed from the pool. Failing message not retried. Use when routee cannot continue safely.                                                                                                                     |
-| **WithRestartRouteeOnFailure**(maxRetries, timeout) | Failing routee is restarted (state reset). Failing message not retried. Use when state may be corrupted or needs re-init.                                                                                                                                       |
-| **WithResumeRouteeOnFailure**()                     | Failing routee keeps state and continues; failing message not retried. Use for transient failures (e.g. timeouts).                                                                                                                                              |
+| Option                                            | Summary                                                                                                                                                                                                                                                                |
+| :------------------------------------------------ | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WithRoutingStrategy(strategy)`                   | Sets routing strategy (e.g. RoundRobin, Random, FanOut). Default is RoundRobin.<br>Fire-and-forget; no reply waiting. For reply-based routing use Scatter-Gather or Tail-Chopping.                                                                                     |
+| `AsScatterGatherFirst(within)`                    | Sends to all live routees concurrently; first successful reply within `within` is forwarded to sender.<br>Late replies dropped. No reply → StatusFailure. `within` must be > 0.                                                                                        |
+| `AsTailChopping(within, interval)`                | Probes routees one at a time (shuffled). Sends to next after `interval` if no response.<br>Stops when one replies, all tried, or `within` elapsed. First success wins; else StatusFailure.<br>Requires `interval` > 0 and `interval` < `within` for multiple attempts. |
+| `WithStopRouteeOnFailure()`                       | **(Default.)** Failing routee is terminated and removed from the pool.<br>Failing message not retried. Use when routee cannot continue safely.                                                                                                                         |
+| `WithRestartRouteeOnFailure(maxRetries, timeout)` | Failing routee is restarted (state reset). Failing message not retried.<br>Use when state may be corrupted or needs re-init.                                                                                                                                           |
+| `WithResumeRouteeOnFailure()`                     | Failing routee keeps state and continues; failing message not retried.<br>Use for transient failures (e.g. timeouts).                                                                                                                                                  |
 
 ### WithRoutingStrategy
 
 Sets the routing strategy for standard (non–scatter-gather, non–tail-chopping) routers. Fan-out, round-robin, and random are fire-and-forget and never wait for replies. For reply-based behavior use `AsScatterGatherFirst` or `AsTailChopping`.
 
 ```go
-routerPID, _ := actorSystem.SpawnRouter(ctx, "pool", 10, &Worker{},
+pid, _ := actorSystem.SpawnRouter(ctx, "pool", 10, &Worker{},
     actor.WithRoutingStrategy(actor.RoundRobinRouting))
 ```
 
@@ -283,7 +301,7 @@ routerPID, _ := actorSystem.SpawnRouter(ctx, "pool", 10, &Worker{},
 Sends the same request to all live routees concurrently; the first successful reply within `within` is forwarded to the sender. Late replies are ignored. If no routee replies before `within`, the sender gets a StatusFailure. Replies are delivered asynchronously; the router does not block.
 
 ```go
-routerPID, _ := actorSystem.SpawnRouter(ctx, "pool", 10, &Worker{},
+pid, _ := actorSystem.SpawnRouter(ctx, "pool", 10, &Worker{},
     actor.AsScatterGatherFirst(500*time.Millisecond))
 ```
 
@@ -292,7 +310,7 @@ routerPID, _ := actorSystem.SpawnRouter(ctx, "pool", 10, &Worker{},
 Probes one routee at a time (in random order). If no response before `interval`, sends to the next. Stops when one replies, all have been tried, or total time exceeds `within`. First success is forwarded; otherwise the sender gets StatusFailure. Use when you want bounded latency and to avoid thundering herds. Tune `interval` ≈ p95 response time; `within` ≥ number of routees × interval or your SLO.
 
 ```go
-routerPID, _ := actorSystem.SpawnRouter(ctx, "pool", 10, &Worker{},
+pid, _ := actorSystem.SpawnRouter(ctx, "pool", 10, &Worker{},
     actor.AsTailChopping(2*time.Second, 200*time.Millisecond))
 ```
 
@@ -327,7 +345,7 @@ package main
 import (
     "context"
     "fmt"
-    
+
     "google.golang.org/protobuf/types/known/anypb"
     "github.com/tochemey/goakt/v3/actor"
     "github.com/tochemey/goakt/v3/goaktpb"
@@ -349,12 +367,12 @@ func (a *WorkerActor) Receive(ctx *actor.ReceiveContext) {
         // Process work
         a.processed++
         result := a.processWork(msg)
-        
+
         ctx.Logger().Info("Work processed",
             "worker", ctx.Self().Name(),
             "work_id", msg.GetId(),
             "total_processed", a.processed)
-        
+
         // Send result back to sender
         ctx.Response(&WorkResult{
             WorkId: msg.GetId(),
@@ -377,36 +395,36 @@ func (a *WorkerActor) PostStop(ctx *actor.Context) error {
 
 func main() {
     ctx := context.Background()
-    
+
     // Create actor system (use WithPassivationStrategy(passivation.NewLongLivedStrategy()) to disable passivation per-actor)
     actorSystem, _ := actor.NewActorSystem("RouterSystem")
     actorSystem.Start(ctx)
     defer actorSystem.Stop(ctx)
-    
+
     // Create router with 5 workers
     routerPID, err := actorSystem.SpawnRouter(ctx, "worker-pool",
         5,
         &WorkerActor{},
         actor.WithRoutingStrategy(actor.RoundRobinRouting),
         actor.WithRestartRouteeOnFailure(3, 30*time.Second))
-    
+
     if err != nil {
         panic(err)
     }
-    
+
     // Send work items to router
     for i := 0; i < 20; i++ {
         workItem := &WorkItem{
             Id:   int32(i),
             Data: fmt.Sprintf("task-%d", i),
         }
-        
+
         payload, _ := anypb.New(workItem)
         broadcastMsg := &goaktpb.Broadcast{Message: payload}
-        
+
         actor.Tell(ctx, routerPID, broadcastMsg)
     }
-    
+
     // Wait for processing
     time.Sleep(2 * time.Second)
 }
@@ -423,7 +441,7 @@ Add more routees to the pool:
 ```go
 // Increase pool by 5 routees
 adjustMsg := &goaktpb.AdjustRouterPoolSize{PoolSize: 5}
-actor.Tell(ctx, routerPID, adjustMsg)
+actor.Tell(ctx, pid, adjustMsg)
 ```
 
 ### Scaling Down
@@ -433,7 +451,7 @@ Remove routees from the pool:
 ```go
 // Decrease pool by 3 routees
 adjustMsg := &goaktpb.AdjustRouterPoolSize{PoolSize: -3}
-actor.Tell(ctx, routerPID, adjustMsg)
+actor.Tell(ctx, pid, adjustMsg)
 ```
 
 ### Query Routees
@@ -441,7 +459,7 @@ actor.Tell(ctx, routerPID, adjustMsg)
 Get list of active routees:
 
 ```go
-response, _ := actor.Ask(ctx, routerPID, &goaktpb.GetRoutees{}, time.Second)
+response, _ := actor.Ask(ctx, pid, &goaktpb.GetRoutees{}, time.Second)
 routees := response.(*goaktpb.Routees)
 fmt.Printf("Active routees: %v\n", routees.GetNames())
 ```
@@ -461,11 +479,11 @@ func (a *LoadMonitor) Receive(ctx *actor.ReceiveContext) {
         resp, _ := ctx.Ask(a.routerPID, &goaktpb.GetRoutees{}, time.Second)
         routees := resp.(*goaktpb.Routees)
         currentSize := len(routees.GetNames())
-        
+
         // Calculate required size
         load := a.getCurrentLoad()
         requiredSize := load / a.threshold
-        
+
         if requiredSize > currentSize {
             // Scale up
             delta := requiredSize - currentSize
@@ -491,7 +509,7 @@ func (a *LoadMonitor) Receive(ctx *actor.ReceiveContext) {
 
 ```go
 // Create worker pool for parallel processing
-routerPID, _ := actorSystem.SpawnRouter(ctx, "task-workers",
+pid, _ := actorSystem.SpawnRouter(ctx, "task-workers",
     10,
     &TaskWorker{},
     actor.WithRoutingStrategy(actor.RoundRobinRouting),
@@ -500,7 +518,7 @@ routerPID, _ := actorSystem.SpawnRouter(ctx, "task-workers",
 // Submit tasks
 for _, task := range tasks {
     payload, _ := anypb.New(task)
-    actor.Tell(ctx, routerPID, &goaktpb.Broadcast{Message: payload})
+    actor.Tell(ctx, pid, &goaktpb.Broadcast{Message: payload})
 }
 ```
 
@@ -508,28 +526,28 @@ for _, task := range tasks {
 
 ```go
 // Broadcast events to all listeners
-routerPID, _ := actorSystem.SpawnRouter(ctx, "event-listeners",
+pid, _ := actorSystem.SpawnRouter(ctx, "event-listeners",
     5,
     &EventListener{},
     actor.WithRoutingStrategy(actor.FanOutRouting))
 
 // Broadcast event
 event, _ := anypb.New(&SystemEvent{Type: "shutdown"})
-actor.Tell(ctx, routerPID, &goaktpb.Broadcast{Message: event})
+actor.Tell(ctx, pid, &goaktpb.Broadcast{Message: event})
 ```
 
 ### Pattern 3: Redundant Computing
 
 ```go
 // Get fastest result from multiple workers
-routerPID, _ := actorSystem.SpawnRouter(ctx, "compute-cluster",
+pid, _ := actorSystem.SpawnRouter(ctx, "compute-cluster",
     10,
     &ComputeWorker{},
     actor.AsScatterGatherFirst(500*time.Millisecond))
 
 // Send computation - get fastest result
 query, _ := anypb.New(&ComputeTask{Data: complexData})
-actor.Tell(ctx, routerPID, &goaktpb.Broadcast{Message: query})
+actor.Tell(ctx, pid, &goaktpb.Broadcast{Message: query})
 ```
 
 ### Pattern 4: Adaptive Load Balancing
@@ -546,11 +564,11 @@ func (a *AdaptiveRouter) Receive(ctx *actor.ReceiveContext) {
     switch msg := ctx.Message().(type) {
     case *MonitorPerformance:
         metrics := a.getMetrics()
-        
+
         resp, _ := ctx.Ask(a.routerPID, &goaktpb.GetRoutees{}, time.Second)
         routees := resp.(*goaktpb.Routees)
         currentSize := len(routees.GetNames())
-        
+
         if metrics.AvgLatency > a.targetLatency && currentSize < a.maxWorkers {
             // Scale up
             ctx.Tell(a.routerPID, &goaktpb.AdjustRouterPoolSize{
@@ -583,21 +601,21 @@ func (a *CircuitBreakerRouter) Receive(ctx *actor.ReceiveContext) {
             ctx.Response(&RequestRejected{Reason: "Circuit open"})
             return
         }
-        
+
         // Forward to router
         payload, _ := anypb.New(msg)
         ctx.Tell(a.routerPID, &goaktpb.Broadcast{Message: payload})
-        
+
     case *WorkerFailure:
         a.failureCount++
         if a.failureCount >= a.failureThreshold {
             a.circuitOpen = true
             ctx.Logger().Warn("Circuit breaker opened")
-            
+
             // Schedule reset
             _ = ctx.ActorSystem().ScheduleOnce(ctx.Context(), &ResetCircuit{}, ctx.Self(), 30*time.Second)
         }
-        
+
     case *ResetCircuit:
         a.circuitOpen = false
         a.failureCount = 0
@@ -647,7 +665,7 @@ actor.Tell(ctx, routerPID, &goaktpb.Broadcast{Message: payload}) // ✅
 ## Strategy Comparison
 
 | Strategy          | Distribution | Response   | Use Case            | Overhead |
-|-------------------|--------------|------------|---------------------|----------|
+| ----------------- | ------------ | ---------- | ------------------- | -------- |
 | **RoundRobin**    | Sequential   | No wait    | Load balancing      | Low      |
 | **Random**        | Random       | No wait    | Simple distribution | Low      |
 | **FanOut**        | All routees  | No wait    | Broadcasting        | High     |
@@ -679,42 +697,6 @@ Very heavy:        100+ routees (monitor carefully)
 3. **Homogeneous routees**: All routees must be same type
 4. **No direct routee access**: Must go through router
 5. **Fire-and-forget**: Standard strategies don't wait for responses
-
-## Testing
-
-```go
-func TestRouter(t *testing.T) {
-    ctx := context.Background()
-    system, _ := actor.NewActorSystem("test",
-        actor.WithPassivationStrategy(passivation.NewLongLivedStrategy()))
-    system.Start(ctx)
-    defer system.Stop(ctx)
-    
-    // Create router
-    routerPID, err := system.SpawnRouter(ctx, "test-router",
-        3,
-        &TestWorker{},
-        actor.WithRoutingStrategy(actor.RoundRobinRouting))
-    
-    assert.NoError(t, err)
-    assert.NotNil(t, routerPID)
-    
-    // Send messages
-    for i := 0; i < 10; i++ {
-        msg := &TestMessage{Id: i}
-        payload, _ := anypb.New(msg)
-        actor.Tell(ctx, routerPID, &goaktpb.Broadcast{Message: payload})
-    }
-    
-    // Wait and verify
-    time.Sleep(500 * time.Millisecond)
-    
-    // Check routees
-    resp, _ := actor.Ask(ctx, routerPID, &goaktpb.GetRoutees{}, time.Second)
-    routees := resp.(*goaktpb.Routees)
-    assert.Equal(t, 3, len(routees.GetNames()))
-}
-```
 
 ## Summary
 

@@ -427,14 +427,16 @@ func (x *ClusterConfig) WithClusterBalancerInterval(interval time.Duration) *Clu
 // Expected minimum fields on config (see datacenter.Config for details):
 //   - ControlPlane: the control-plane implementation/driver to use
 //   - DataCenter.Name: the local datacenter identifier (e.g. "dc-1")
-//   - Endpoints: one or more reachable endpoints for multi-DC communication
+//
+// Endpoints for cross-DC routing are not set in config; the cluster leader
+// registers the local DC with the control plane using cluster members'
+// remoting addresses.
 //
 // Example:
 //
 //	mdc := datacenter.NewConfig()
 //	mdc.ControlPlane = controlPlane
 //	mdc.DataCenter = datacenter.DataCenter{Name: "dc-1", Region: "us-east-1"}
-//	mdc.Endpoints = []string{"10.0.0.10:8443"}
 //	cfg := NewClusterConfig().WithDataCenter(mdc)
 //
 // Returns the updated ClusterConfig instance for chaining.

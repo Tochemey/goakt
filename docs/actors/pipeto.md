@@ -5,7 +5,7 @@ The PipeTo pattern allows actors to execute expensive or blocking operations in 
 ## Table of Contents
 
 - 🤔 [What is PipeTo?](#what-is-pipeto)
-- 💡 [When to Use PipeTo](#when-to-use-pipeto)
+- 💡 [When to Use PipeTo?](#when-to-use-pipeto)
 - 🚀 [Basic Usage](#basic-usage)
 - 💡 [Complete Example](#complete-example)
 - ⚠️ [Error Handling](#error-handling)
@@ -51,7 +51,7 @@ ctx.PipeToName("result-processor", func() (proto.Message, error) { ... })
 - **Actor model preserved**: Result delivered as message
 - **Error handling**: Errors delivered as messages
 
-## When to Use PipeTo
+## When to Use PipeTo?
 
 Use PipeTo for:
 

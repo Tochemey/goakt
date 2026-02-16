@@ -11,7 +11,6 @@ Passivation is an automatic resource management feature that stops idle actors t
 - 💡 [Basic Example](#basic-example)
 - 📋 [Use Cases](#use-cases)
 - 💾 [Passivation with State Persistence](#passivation-with-state-persistence)
-- 📊 [Monitoring Passivation](#monitoring-passivation)
 - ✅ [Best Practices](#best-practices)
 - 🔀 [Passivation vs. Shutdown](#passivation-vs-shutdown)
 - 🧪 [Testing Passivation](#testing-passivation)
@@ -408,19 +407,6 @@ func (a *StatefulActor) PostStop(ctx *actor.Context) error {
         return err
     }
 
-    return nil
-}
-```
-
-## Monitoring Passivation
-
-### Logging
-
-```go
-func (a *MyActor) PostStop(ctx *actor.Context) error {
-    ctx.ActorSystem().Logger().Info("Actor passivated",
-        "actor_name", ctx.ActorName(),
-        "uptime", time.Since(a.startTime))
     return nil
 }
 ```

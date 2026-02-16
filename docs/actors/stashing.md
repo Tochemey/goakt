@@ -157,7 +157,7 @@ func (a *WorkerActor) PreStart(ctx *actor.Context) error {
 
 func (a *WorkerActor) Receive(ctx *actor.ReceiveContext) {
     switch msg := ctx.Message().(type) {
-    case *Initialize:
+    case *goaktpb.PostStart:
         a.config = msg.GetConfig()
         a.initialized = true
         ctx.Logger().Info("Initialized, processing stashed messages")
