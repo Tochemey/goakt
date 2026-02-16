@@ -2,6 +2,22 @@
 
 Message scheduling allows you to send messages to actors at a specific time in the future or on a recurring schedule. This is built into the GoAkt runtime and provides a reliable way to implement time-based behaviors.
 
+## Table of Contents
+
+- 🤔 [What is Message Scheduling?](#what-is-message-scheduling)
+- 🛠️ [Scheduling Methods](#scheduling-methods)
+- ⏰ [ScheduleOnce Examples](#scheduleonce-examples)
+- 📅 [ScheduleWithCron Examples](#schedulewithcron-examples)
+- ⚙️ [Scheduling Options](#scheduling-options)
+- 🧩 [Common Patterns](#common-patterns)
+- ✅ [Best Practices](#best-practices)
+- ⚡ [Performance Considerations](#performance-considerations)
+- ⚠️ [Limitations](#limitations)
+- 📋 [Summary](#summary)
+- ➡️ [Next Steps](#next-steps)
+
+---
+
 ## What is Message Scheduling?
 
 Message scheduling enables you to:
@@ -177,24 +193,38 @@ func (a *SessionActor) Receive(ctx *actor.ReceiveContext) {
 
 ### Cron Expression Format
 
-```
-┌─────────── second (0 - 59)
-│ ┌───────── minute (0 - 59)
-│ │ ┌─────── hour (0 - 23)
-│ │ │ ┌───── day of month (1 - 31)
-│ │ │ │ ┌─── month (1 - 12)
-│ │ │ │ │ ┌─ day of week (0 - 6) (Sunday to Saturday)
-│ │ │ │ │ │
-* * * * * *
-```
+Cron expressions follow the **Quartz cron format** (as implemented by [go-quartz](https://github.com/reugn/go-quartz?tab=readme-ov-file#cron-expression-format)): six fields (seconds, minutes, hours, day of month, month, day of week), with an optional seventh field for year.
+
+| Field Name   | Mandatory | Allowed Values  | Allowed Special Characters  |
+|--------------|-----------|-----------------|-----------------------------|
+| Seconds      | YES       | 0-59            | `,` `-` `*` `/`             |
+| Minutes      | YES       | 0-59            | `,` `-` `*` `/`             |
+| Hours        | YES       | 0-23            | `,` `-` `*` `/`             |
+| Day of month | YES       | 1-31            | `,` `-` `*` `?` `/` `L` `W` |
+| Month        | YES       | 1-12 or JAN-DEC | `,` `-` `*` `/`             |
+| Day of week  | YES       | 1-7 or SUN-SAT  | `,` `-` `*` `?` `/` `L` `#` |
+| Year         | NO        | empty, 1970-    | `,` `-` `*` `/`             |
+
+**Special characters:**
+
+- `*` — All values in a field (e.g. every minute).
+- `?` — No specific value; use when one of two related fields is specified (e.g. day-of-month **or** day-of-week).
+- `-` — Range (e.g. `10-12` in hour = 10, 11, 12).
+- `,` — List (e.g. `MON,WED,FRI` in day-of-week).
+- `/` — Increments (e.g. `0/15` in seconds = 0, 15, 30, 45; `1/3` in day-of-month = every 3 days from the 1st).
+- `L` — Last; meaning depends on field. Day-of-month: last day of month (e.g. `L-3` = third to last). Day-of-week: last weekday (e.g. `6L` = last Friday).
+- `W` — Nearest weekday to the given day (e.g. `15W` = nearest weekday to the 15th). Day-of-month only.
+- `#` — Nth weekday of month (e.g. `6#3` = third Friday; `2#1` = first Monday). Day-of-week only.
+
+Month and day-of-week names are case-insensitive (e.g. `MON` = `mon`).
 
 **Common expressions:**
 
-- `"0 */5 * * * *"` - Every 5 minutes
-- `"0 0 */1 * * *"` - Every hour
-- `"0 0 0 * * *"` - Daily at midnight
-- `"0 0 9 * * MON-FRI"` - Weekdays at 9 AM
-- `"0 30 14 * * *"` - Daily at 2:30 PM
+- `"0 */5 * * * *"` — Every 5 minutes
+- `"0 0 */1 * * *"` — Every hour
+- `"0 0 0 * * *"` — Daily at midnight
+- `"0 0 9 * * MON-FRI"` — Weekdays at 9 AM
+- `"0 30 14 * * *"` — Daily at 2:30 PM
 
 ### Health Check
 
@@ -337,20 +367,86 @@ func (a *MetricsActor) Receive(ctx *actor.ReceiveContext) {
 
 ### WithReference
 
-Provide a reference ID to cancel, pause, or resume scheduled messages:
+Provide a reference ID so you can later **cancel**, **pause**, or **resume** the scheduled message. Without a reference, the scheduler assigns an internal ID that you cannot use for these operations.
 
 ```go
 err := system.ScheduleOnce(ctx, &Message{}, targetPID, 10*time.Second,
     actor.WithReference("my-schedule-id"),
 )
-// Later: cancel with system.CancelSchedule("my-schedule-id")
+// Later: system.CancelSchedule("my-schedule-id")
+// Or:   system.PauseSchedule("my-schedule-id") / system.ResumeSchedule("my-schedule-id")
 ```
 
 **Use for:**
 
-- Canceling scheduled messages
-- Tracking scheduled messages
-- Preventing duplicates
+- Canceling scheduled messages when they are no longer needed
+- Pausing and resuming recurring schedules (e.g. maintenance window)
+- Tracking scheduled messages (e.g. resetting a session timeout by reference)
+- Avoiding duplicate schedules by reusing the same reference
+
+The same option applies to `ScheduleOnce`, `Schedule`, `ScheduleWithCron`, and their `Remote*` variants.
+
+### Cancel, Pause, and Resume
+
+You can manage a scheduled message by the **reference** you passed with `WithReference`. All three methods are on the **actor system** and take only the reference string.
+
+| Method                                   | Description                                                                                                                                                   |
+|------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `CancelSchedule(reference string) error` | Permanently removes the schedule. The message will not be delivered. Use when the schedule is no longer needed (e.g. session ended, task cancelled).          |
+| `PauseSchedule(reference string) error`  | Temporarily stops the schedule. No further deliveries until `ResumeSchedule` is called. Use for maintenance windows or temporarily disabling a recurring job. |
+| `ResumeSchedule(reference string) error` | Restarts a previously paused schedule. Only valid for a schedule that was paused with `PauseSchedule`.                                                        |
+
+**Requirements:**
+
+- The schedule must have been created with `actor.WithReference("your-id")`.
+- The actor system must be started (scheduler is started with the system). Calling these before `Start` or after `Stop` returns an error.
+
+**Errors:**
+
+- `ErrScheduledReferenceNotFound` — No schedule exists for the given reference (never scheduled, already cancelled, or already delivered for one-shot).
+- `ErrSchedulerNotStarted` — The actor system (and thus the scheduler) is not running.
+
+**Example: Cancel a one-shot**
+
+```go
+ref := "timeout-123"
+err := system.ScheduleOnce(ctx, &SessionTimeout{}, pid, 15*time.Minute, actor.WithReference(ref))
+if err != nil {
+    return err
+}
+// ... later, user activity: cancel the timeout
+if err := system.CancelSchedule(ref); err != nil {
+    // handle: not found or scheduler not started
+}
+```
+
+**Example: Pause and resume a recurring schedule**
+
+```go
+ref := "health-check"
+err := system.ScheduleWithCron(ctx, &HealthCheck{}, pid, "0 */5 * * * *", actor.WithReference(ref))
+if err != nil {
+    return err
+}
+// Pause during maintenance
+_ = system.PauseSchedule(ref)
+// ... maintenance ...
+_ = system.ResumeSchedule(ref)
+```
+
+**Example: From inside an actor**
+
+```go
+sys := ctx.ActorSystem()
+err := sys.CancelSchedule(a.scheduleRef)
+if err != nil {
+    if errors.Is(err, errors.ErrScheduledReferenceNotFound) {
+        // already cancelled or never existed
+        return
+    }
+    ctx.Logger().Error("failed to cancel schedule", "error", err)
+}
+```
 
 ## Common Patterns
 
@@ -482,32 +578,6 @@ func (a *RetryActor) scheduleRetry(ctx *actor.ReceiveContext, task *Task, attemp
 4. **Don't use for precise timing**: Scheduling has some delay tolerance
 5. **Don't schedule during shutdown**: Check actor state before scheduling
 
-## Testing Scheduled Messages
-
-```go
-func TestScheduling(t *testing.T) {
-    ctx := context.Background()
-    system, _ := actor.NewActorSystem("test",
-        actor.WithPassivationStrategy(passivation.NewLongLivedStrategy()))
-    system.Start(ctx)
-    defer system.Stop(ctx)
-
-    pid, _ := system.Spawn(ctx, "test", &TestActor{})
-
-    // Schedule message (order: ctx, message, pid, delay)
-    err := system.ScheduleOnce(ctx, &TestMessage{}, pid, 100*time.Millisecond)
-    assert.NoError(t, err)
-
-    // Wait for message to be delivered
-    time.Sleep(200 * time.Millisecond)
-
-    // Verify message was received
-    response, _ := actor.Ask(ctx, pid, &GetReceivedCount{}, time.Second)
-    count := response.(*ReceivedCount)
-    assert.Equal(t, 1, count.Value)
-}
-```
-
 ## Performance Considerations
 
 - **Scheduling overhead**: Minimal overhead for scheduling
@@ -519,7 +589,6 @@ func TestScheduling(t *testing.T) {
 
 - **Minimum delay**: Practical minimum is ~10ms
 - **Cron granularity**: Second-level granularity
-- **Cancellation**: Use `system.CancelSchedule(reference)` to cancel; schedule with `actor.WithReference("id")` to get a reference. `PauseSchedule` and `ResumeSchedule` are also available.
 - **No persistence**: Schedules lost on restart
 
 ## Summary

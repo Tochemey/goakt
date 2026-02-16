@@ -2,6 +2,25 @@
 
 GoAkt provides a built-in publish-subscribe (pub/sub) messaging system that enables actors to communicate through topics. This decouples message producers from consumers, allowing dynamic and scalable message distribution patterns.
 
+## Table of Contents
+
+- 🤔 [What is Pub/Sub?](#what-is-pubsub)
+- 🏗️ [Architecture](#architecture)
+- ⚡ [Quick reference](#quick-reference)
+- ⚙️ [Enabling Pub/Sub](#enabling-pubsub)
+- 📤 [Basic Operations](#basic-operations)
+- 📨 [Message Flow](#message-flow)
+- 💡 [Complete Example](#complete-example)
+- 🌐 [Cluster Pub/Sub](#cluster-pubsub)
+- ✅ [Best Practices](#best-practices)
+- ⚡ [Performance Considerations](#performance-considerations)
+- 🔧 [Troubleshooting](#troubleshooting)
+- ⚠️ [Limitations](#limitations)
+- 🔀 [Alternatives](#alternatives)
+- ➡️ [Next Steps](#next-steps)
+
+---
+
 ## What is Pub/Sub?
 
 Pub/Sub in GoAkt is:
@@ -46,6 +65,17 @@ Pub/Sub in GoAkt is:
 3. **Publishers**: Actors that send messages to topics
 4. **Subscribers**: Actors that receive messages from topics
 5. **Cluster Propagation**: Automatic message forwarding across nodes
+
+## Quick reference
+
+| What you need       | API                                                                                                                                     |
+|---------------------|-----------------------------------------------------------------------------------------------------------------------------------------|
+| Enable pub/sub      | `actor.WithPubSub()` when creating the actor system                                                                                     |
+| Get topic actor     | `ctx.ActorSystem().TopicActor()` (in `Receive`)                                                                                         |
+| Subscribe           | `ctx.Tell(topicActor, &goaktpb.Subscribe{Topic: "name"})` (e.g. in `Receive` on `*goaktpb.PostStart`)                                   |
+| Unsubscribe         | `ctx.Tell(topicActor, &goaktpb.Unsubscribe{Topic: "name"})`                                                                             |
+| Publish             | `ctx.Tell(topicActor, &goaktpb.Publish{Id: id, Topic: "name", Message: anypb.New(msg)})` (msg must be `proto.Message`)                  |
+| System event stream | `subscriber, err := system.Subscribe()` then `system.Unsubscribe(subscriber)` when done (for actor lifecycle events, not topic pub/sub) |
 
 ## Enabling Pub/Sub
 
@@ -121,7 +151,7 @@ func (a *SubscriberActor) PostStop(ctx *actor.Context) error {
 
 ### Publish to a Topic
 
-Actors publish messages by sending a `Publish` message to the topic actor:
+Actors publish messages by sending a `Publish` message to the topic actor. The payload must be a **protobuf message** (implement `proto.Message`) so it can be packed into `anypb.Any` and delivered to subscribers:
 
 ```go
 type PublisherActor struct{}

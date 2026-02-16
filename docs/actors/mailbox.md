@@ -2,6 +2,24 @@
 
 A mailbox is the message queue that stores incoming messages for an actor. Every actor has exactly one mailbox that buffers messages until the actor is ready to process them.
 
+## Table of Contents
+
+- 🤔 [What is a Mailbox?](#what-is-a-mailbox)
+- 🔌 [Mailbox Interface](#mailbox-interface)
+- 📬 [Mailbox Types](#mailbox-types)
+- 🎯 [Choosing a Mailbox](#choosing-a-mailbox)
+- ⚙️ [Configuring Mailboxes](#configuring-mailboxes)
+- 🔄 [Mailbox Behavior](#mailbox-behavior)
+- 📊 [Monitoring Mailbox](#monitoring-mailbox)
+- ✅ [Best Practices](#best-practices)
+- ☠️ [Dead Letters](#dead-letters)
+- 🧩 [Common Patterns](#common-patterns)
+- 🔧 [Advanced Topics](#advanced-topics)
+- 📋 [Summary](#summary)
+- ➡️ [Next Steps](#next-steps)
+
+---
+
 ## What is a Mailbox?
 
 The mailbox is a critical component of the actor model. It provides:
@@ -451,12 +469,26 @@ err := actor.Tell(ctx, pid, &Message{})
 // err == actor.ErrDead
 ```
 
-The dead letter queue can be monitored for debugging:
+The dead letter queue can be monitored by subscribing to the actor system’s **events stream**. Dead letters are published as events with payload type `*goaktpb.Deadletter`:
 
 ```go
-// Subscribe to dead letters
-actorSystem.Subscribe(actor.DeadLetterTopic, handlerPID)
+// Subscribe to the events stream (includes dead letters)
+subscriber, err := actorSystem.Subscribe()
+if err != nil {
+    return err
+}
+defer actorSystem.Unsubscribe(subscriber)
+
+// Consume events and handle dead letters
+for event := range subscriber.Iterator() {
+    if dl, ok := event.Payload().(*goaktpb.Deadletter); ok {
+        log.Printf("Deadletter: from=%s to=%s reason=%s",
+            dl.GetSender(), dl.GetReceiver(), dl.GetReason())
+    }
+}
 ```
+
+For the full list of event types and usage, see [Events Stream](../events_stream/overview.md).
 
 ## Common Patterns
 

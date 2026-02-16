@@ -2,6 +2,22 @@
 
 GoAkt is designed for systems where concurrency, distribution, and fault tolerance are first-class concerns. This page describes the categories of problems the framework solves well, the GoAkt features that apply to each, and pointers to the relevant documentation.
 
+## Table of Contents
+
+- 🏭 [Production Deployments](#production-deployments)
+- 📡 [Real-Time Event & Stream Processing](#real-time-event--stream-processing)
+- 🏛️ [Entity Management & Domain Modeling](#entity-management--domain-modeling)
+- 🔄 [Distributed Transaction Coordination](#distributed-transaction-coordination)
+- 🎫 [Session Management](#session-management)
+- 👷 [Worker Pools & Job Processing](#worker-pools--job-processing)
+- 📢 [Event-Driven Architecture](#event-driven-architecture)
+- 📊 [Monitoring, Audit & Compliance](#monitoring-audit--compliance)
+- 🌐 [Cluster-Wide Coordination](#cluster-wide-coordination)
+- 🗺️ [Choosing the Right Pattern](#choosing-the-right-pattern)
+- 📖 [Further Resources](#further-resources)
+
+---
+
 ## Production Deployments
 
 GoAkt is used in production today:

@@ -2,6 +2,22 @@
 
 Dependency injection allows you to attach runtime dependencies to actors at spawn time. This is particularly useful for testing, configuration, and resource management.
 
+## Table of Contents
+
+- 🤔 [What are Dependencies?](#what-are-dependencies)
+- 💡 [Why Use Dependency Injection?](#why-use-dependency-injection)
+- 🚀 [Basic Usage](#basic-usage)
+- 💡 [Comprehensive Example](#comprehensive-example)
+- 📦 [Multiple Dependencies](#multiple-dependencies)
+- 🧪 [Testing with Dependencies](#testing-with-dependencies)
+- 🧩 [Patterns](#patterns)
+- ✅ [Best Practices](#best-practices)
+- 🔧 [Advanced: Builder Pattern](#advanced-builder-pattern)
+- 📋 [Summary](#summary)
+- ➡️ [Next Steps](#next-steps)
+
+---
+
 ## What are Dependencies?
 
 **Dependencies** are runtime values that actors need to function:
@@ -273,6 +289,8 @@ func TestUserActor(t *testing.T) {
 
 ### Test Doubles
 
+Test doubles are fake implementations of dependencies that you inject in tests so you can exercise your actor in isolation, control success and failure behavior, and avoid calling real external services.
+
 ```go
 // Test double for external service
 type FakePaymentService struct {
@@ -313,7 +331,11 @@ func TestPaymentActor(t *testing.T) {
 
 ## Patterns
 
+The following patterns show common ways to use dependency injection with actors. Each can be combined with `WithDependencies()` when spawning.
+
 ### Pattern 1: Shared Resource Pool
+
+Inject a single shared instance (e.g. a connection pool, cache, or client) into multiple actors so they reuse the same resource instead of each creating their own. This reduces memory and connection usage and keeps resource limits in one place.
 
 ```go
 type ConnectionPool struct {
@@ -344,6 +366,8 @@ worker2, _ := actorSystem.Spawn(ctx, "worker2", &WorkerActor{},
 ```
 
 ### Pattern 2: Configuration Injection
+
+Inject a configuration struct or settings object so the same actor type can run with different parameters per environment (e.g. dev vs prod) or per role. The actor reads config from dependencies in `PreStart` instead of from globals or env at startup.
 
 ```go
 type Config struct {
@@ -378,6 +402,8 @@ prodWorker, _ := actorSystem.Spawn(ctx, "prod-worker", &WorkerActor{},
 ```
 
 ### Pattern 3: Service Locator
+
+Inject a single dependency that holds a registry of named services (e.g. database, cache, logger). Actors resolve the services they need by name at runtime. Use this when an actor needs several optional or rarely used dependencies and you want to avoid passing each one explicitly.
 
 ```go
 type ServiceLocator struct {
@@ -422,6 +448,8 @@ pid, _ := actorSystem.Spawn(ctx, "actor", &MyActor{},
 ```
 
 ### Pattern 4: Factory Pattern
+
+Inject a factory that creates actor instances pre-wired with shared resources (e.g. DB, cache). The factory encapsulates how actors are built, so callers pass the factory into `Spawn` and the factory returns the concrete actor. Use this when multiple actor types share the same dependencies and you want a single place to construct them.
 
 ```go
 type ActorFactory struct {

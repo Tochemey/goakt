@@ -2,6 +2,28 @@
 
 Stashing is a message deferral mechanism that allows actors to temporarily set aside messages for later processing. This is particularly useful when an actor is not ready to handle certain messages in its current state.
 
+## Table of Contents
+
+- 🤔 [What is Stashing?](#what-is-stashing)
+- 💡 [When to Use Stashing](#when-to-use-stashing)
+- 🚀 [Basic Usage](#basic-usage)
+- 🛠️ [Stashing Operations](#stashing-operations)
+- 💡 [Example: Initialization](#example-initialization)
+- 💡 [Example: State Transitions with Behaviors](#example-state-transitions-with-behaviors)
+- 💡 [Example: Resource Acquisition](#example-resource-acquisition)
+- 💡 [Example: Batch Processing](#example-batch-processing)
+- 💡 [Example: Conditional Processing](#example-conditional-processing)
+- ✅ [Stashing Best Practices](#stashing-best-practices)
+- 🧩 [Common Patterns](#common-patterns)
+- ⚡ [Performance Considerations](#performance-considerations)
+- ⚠️ [Limitations](#limitations)
+- ⚠️ [Error Handling](#error-handling)
+- 🧪 [Testing Stashing](#testing-stashing)
+- 📋 [Summary](#summary)
+- ➡️ [Next Steps](#next-steps)
+
+---
+
 ## What is Stashing?
 
 **Stashing** allows an actor to:
@@ -31,7 +53,7 @@ Stashing must be enabled when spawning an actor:
 
 ```go
 pid, err := actorSystem.Spawn(ctx, "my-actor", &MyActor{},
-    actor.WithStashEnabled())
+    actor.WithStashing())
 ```
 
 ### Stash a Message
@@ -432,7 +454,7 @@ func (a *ThrottledActor) Receive(ctx *actor.ReceiveContext) {
 
 ### Do's ✅
 
-1. **Enable stashing**: Use `WithStashEnabled()` when spawning
+1. **Enable stashing**: Use `WithStashing()` when spawning
 2. **Unstash after state change**: Process stashed messages when ready
 3. **Use with behaviors**: Combine stashing with `Become`/`UnBecome`
 4. **Limit stash size**: Be mindful of memory
@@ -548,7 +570,7 @@ func (a *PoolActor) Receive(ctx *actor.ReceiveContext) {
 
 ## Limitations
 
-- **Must enable**: Stashing requires `WithStashEnabled()`
+- **Must enable**: Stashing requires `WithStashing()`
 - **Unbounded**: Stash buffer has no size limit
 - **Memory**: Large stashes consume memory
 - **No persistence**: Stashed messages lost on actor restart
@@ -566,7 +588,7 @@ Always enable stashing when spawning:
 
 ```go
 pid, err := actorSystem.Spawn(ctx, "actor", &MyActor{},
-    actor.WithStashEnabled()) // Required!
+    actor.WithStashing()) // Required!
 ```
 
 ## Testing Stashing
@@ -581,7 +603,7 @@ func TestStashing(t *testing.T) {
 
     // Spawn with stashing enabled
     pid, _ := system.Spawn(ctx, "test", &TestActor{},
-        actor.WithStashEnabled())
+        actor.WithStashing())
 
     // Send work before initialization
     actor.Tell(ctx, pid, &Work{Id: 1})
@@ -603,7 +625,7 @@ func TestStashing(t *testing.T) {
 ## Summary
 
 - **Stashing** defers messages for later processing
-- **Enable** with `WithStashEnabled()` when spawning
+- **Enable** with `WithStashing()` when spawning
 - **Stash** with `ctx.Stash()` to defer current message
 - **Unstash** with `ctx.Unstash()` or `ctx.UnstashAll()`
 - **Use** during initialization, state transitions, or resource acquisition

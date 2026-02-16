@@ -2,6 +2,24 @@
 
 Coordinated shutdown enables graceful cleanup of resources when the actor system stops. It allows you to register shutdown hooks that execute in order, with configurable retry and error handling strategies.
 
+## Table of Contents
+
+- 🤔 [What is Coordinated Shutdown?](#what-is-coordinated-shutdown)
+- 🔌 [ShutdownHook Interface](#shutdownhook-interface)
+- 🛡️ [Recovery Strategies](#recovery-strategies)
+- 🏗️ [Creating Shutdown Hooks](#creating-shutdown-hooks)
+- 📝 [Registering Shutdown Hooks](#registering-shutdown-hooks)
+- 💡 [Complete Example](#complete-example)
+- 📋 [Hook Execution Order](#hook-execution-order)
+- ⚙️ [Recovery Configuration](#recovery-configuration)
+- 🧩 [Common Patterns](#common-patterns)
+- ✅ [Best Practices](#best-practices)
+- 🧪 [Testing Shutdown Hooks](#testing-shutdown-hooks)
+- 📋 [Summary](#summary)
+- ➡️ [Next Steps](#next-steps)
+
+---
+
 ## What is Coordinated Shutdown?
 
 **Coordinated shutdown** provides:

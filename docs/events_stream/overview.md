@@ -2,6 +2,23 @@
 
 The Events Stream is GoAkt's built-in system for broadcasting internal actor lifecycle events to external consumers. It enables observability, monitoring, and reactive system integration without intrusive instrumentation.
 
+## Table of Contents
+
+- 🤔 [What is Events Stream?](#what-is-events-stream)
+- 🔀 [Events Stream vs Pub/Sub](#events-stream-vs-pubsub)
+- 📢 [System Events](#system-events)
+- 🚀 [Basic Usage](#basic-usage)
+- 💡 [Complete Monitoring Example](#complete-monitoring-example)
+- 🔌 [Subscriber API](#subscriber-api)
+- 💡 [Use Cases](#use-cases)
+- ✅ [Best Practices](#best-practices)
+- 💡 [Complete Integration Example](#complete-integration-example)
+- 🔧 [Troubleshooting](#troubleshooting)
+- ⚠️ [Limitations](#limitations)
+- ➡️ [Next Steps](#next-steps)
+
+---
+
 ## What is Events Stream?
 
 The Events Stream:

@@ -2,6 +2,26 @@
 
 Transport Layer Security (TLS) provides encryption and authentication for remoting communication in GoAkt. This guide covers how to configure and use TLS for secure actor-to-actor communication across networks.
 
+## Table of Contents
+
+- 📖 [Overview](#overview)
+- 💡 [When to Use TLS](#when-to-use-tls)
+- ⚙️ [TLS Configuration](#tls-configuration)
+- 🔐 [Creating TLS Certificates](#creating-tls-certificates)
+- 🔧 [Configuring TLS in GoAkt](#configuring-tls-in-goakt)
+- 💡 [Complete TLS Example](#complete-tls-example)
+- 🔒 [Mutual TLS (mTLS)](#mutual-tls-mtls)
+- ✅ [TLS Best Practices](#tls-best-practices)
+- ☸️ [Using cert-manager (Kubernetes)](#using-cert-manager-kubernetes)
+- 🧪 [Testing TLS Configuration](#testing-tls-configuration)
+- 🔧 [Advanced TLS Scenarios](#advanced-tls-scenarios)
+- 🔧 [Troubleshooting](#troubleshooting)
+- ⚡ [TLS and Performance](#tls-and-performance)
+- 🛡️ [Security Considerations](#security-considerations)
+- ➡️ [Next Steps](#next-steps)
+
+---
+
 ## Overview
 
 TLS in GoAkt:
@@ -33,7 +53,7 @@ Use TLS when:
 ```go
 system, _ := actor.NewActorSystem(
     "dev-system",
-    actor.WithRemote("localhost", 3321), // No TLS
+    actor.WithRemote(remote.NewConfig("localhost", 3321)), // No TLS
 )
 ```
 

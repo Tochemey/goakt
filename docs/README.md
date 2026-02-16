@@ -7,6 +7,20 @@
 
 GoAkt is a distributed [Go](https://go.dev/) actor framework designed to build reactive and distributed systems using **protocol buffers** as actor messages.
 
+## Table of Contents
+
+- 🤔 [What is GoAkt?](#what-is-goakt)
+- 📐 [Why the Actor Model?](#why-the-actor-model)
+- ✨ [Key Features](#key-features)
+- 🚀 [Getting Started](#getting-started)
+- 📚 [Documentation Structure](#documentation-structure)
+- 🏭 [Who Uses GoAkt?](#who-uses-goakt)
+- 💬 [Community & Support](#community--support)
+- 🤝 [Contributing](#contributing)
+- 📄 [License](#license)
+
+---
+
 ## What is GoAkt?
 
 GoAkt provides a robust foundation for building concurrent, distributed, and fault-tolerant applications using the actor model. It's highly scalable and available when running in cluster mode, offering all the features necessary to build production-ready distributed systems without sacrificing performance or reliability.

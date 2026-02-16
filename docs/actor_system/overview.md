@@ -2,6 +2,22 @@
 
 The Actor System is the foundation of GoAkt - it manages actor lifecycle, provides infrastructure services, and coordinates distributed operations.
 
+## Table of Contents
+
+- 🤔 [What is an Actor System?](#what-is-an-actor-system)
+- 🏗️ [Creating an Actor System](#creating-an-actor-system)
+- 🔄 [Actor System Lifecycle](#actor-system-lifecycle)
+- ⚙️ [Configuration Options](#configuration-options)
+- 📋 [Actor System Methods](#actor-system-methods)
+- 💡 [Complete Configuration Example](#complete-configuration-example)
+- ✅ [Best Practices](#best-practices)
+- 🧪 [Testing](#testing)
+- ⚡ [Performance Considerations](#performance-considerations)
+- 📋 [Summary](#summary)
+- ➡️ [Next Steps](#next-steps)
+
+---
+
 ## What is an Actor System?
 
 An **Actor System** is a container and runtime environment for actors that provides:
@@ -61,9 +77,10 @@ if err != nil {
 3. Start scheduler
 4. Enable remoting (if configured)
 5. Join cluster (if configured)
-6. Start system actors (guardians)
-7. Initialize pub/sub (if enabled)
-8. Start metric collection (if enabled)
+6. **Start data center control plane** (if multi-DC is configured): leader watch runs on all nodes; the **data center controller** is started only on the **cluster leader** and registers this data center with the control plane. Required for `SpawnOn` with `WithDataCenter` and for cross–data center grain messaging.
+7. Start system actors (guardians)
+8. Initialize pub/sub (if enabled)
+9. Start metric collection (if enabled)
 
 ### Stop
 
@@ -79,12 +96,13 @@ if err != nil {
 **What happens on Stop:**
 
 1. Execute shutdown hooks (coordinated shutdown)
-2. Stop all actors gracefully
-3. Leave cluster (if in cluster mode)
-4. Stop remoting
-5. Stop scheduler
-6. Stop event stream
-7. Clean up resources
+2. **Stop data center control plane** (if multi-DC configured): stop leader watch and data center controller
+3. Stop all actors gracefully
+4. Leave cluster (if in cluster mode)
+5. Stop remoting
+6. Stop scheduler
+7. Stop event stream
+8. Clean up resources
 
 **Note:** `Stop` does not call `os.Exit()` - you must handle that explicitly.
 

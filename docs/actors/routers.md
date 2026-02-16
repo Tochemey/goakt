@@ -2,6 +2,26 @@
 
 Routers are specialized actors that distribute messages across a pool of worker actors (routees). They enable parallel processing, load balancing, and various message distribution patterns.
 
+## Table of Contents
+
+- 🤔 [What is a Router?](#what-is-a-router)
+- 💡 [Why Use Routers?](#why-use-routers)
+- 🏗️ [Creating a Router](#creating-a-router)
+- 🎯 [Routing Strategies](#routing-strategies)
+- ⚙️ [Router Options](#router-options)
+- 📤 [Sending Messages to Routers](#sending-messages-to-routers)
+- 📐 [Dynamic Pool Sizing](#dynamic-pool-sizing)
+- 🧩 [Routing Patterns](#routing-patterns)
+- ✅ [Best Practices](#best-practices)
+- 📊 [Strategy Comparison](#strategy-comparison)
+- ⚡ [Performance Considerations](#performance-considerations)
+- ⚠️ [Router Limitations](#router-limitations)
+- 🧪 [Testing](#testing)
+- 📋 [Summary](#summary)
+- ➡️ [Next Steps](#next-steps)
+
+---
+
 ## What is a Router?
 
 A **router** is an actor that:
@@ -238,94 +258,51 @@ actor.Tell(ctx, routerPID, &goaktpb.Broadcast{Message: query})
 
 ## Router Options
 
+Options are passed to `SpawnRouter`. Routing-strategy options (`WithRoutingStrategy`, `AsScatterGatherFirst`, `AsTailChopping`) are mutually exclusive; the last applied wins. Routee-supervision options (`WithStopRouteeOnFailure`, `WithRestartRouteeOnFailure`, `WithResumeRouteeOnFailure`) are also mutually exclusive.
+
+| Option                                              | Summary                                                                                                                                                                                                                                                         |
+|-----------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **WithRoutingStrategy**(strategy)                   | Sets routing strategy (e.g. RoundRobin, Random, FanOut). Default is FanOut. Fire-and-forget; no reply waiting. For reply-based routing use Scatter-Gather or Tail-Chopping.                                                                                     |
+| **AsScatterGatherFirst**(within)                    | Sends to all live routees concurrently; first successful reply within `within` is forwarded to sender. Late replies dropped. No reply → StatusFailure. `within` must be > 0.                                                                                    |
+| **AsTailChopping**(within, interval)                | Probes routees one at a time (shuffled). Sends to next after `interval` if no response. Stops when one replies, all tried, or `within` elapsed. First success wins; else StatusFailure. Require `interval` > 0 and `interval` < `within` for multiple attempts. |
+| **WithStopRouteeOnFailure**()                       | **(Default.)** Failing routee is terminated and removed from the pool. Failing message not retried. Use when routee cannot continue safely.                                                                                                                     |
+| **WithRestartRouteeOnFailure**(maxRetries, timeout) | Failing routee is restarted (state reset). Failing message not retried. Use when state may be corrupted or needs re-init.                                                                                                                                       |
+| **WithResumeRouteeOnFailure**()                     | Failing routee keeps state and continues; failing message not retried. Use for transient failures (e.g. timeouts).                                                                                                                                              |
+
 ### WithRoutingStrategy
 
-Set the routing strategy for standard routers.
+Sets the routing strategy for standard (non–scatter-gather, non–tail-chopping) routers. Fan-out, round-robin, and random are fire-and-forget and never wait for replies. For reply-based behavior use `AsScatterGatherFirst` or `AsTailChopping`.
 
 ```go
 routerPID, _ := actorSystem.SpawnRouter(ctx, "pool", 10, &Worker{},
     actor.WithRoutingStrategy(actor.RoundRobinRouting))
 ```
 
-**Note:** Mutually exclusive with `AsScatterGatherFirst` and `AsTailChopping`.
-
 ### AsScatterGatherFirst
 
-Configure scatter-gather-first pattern.
+Sends the same request to all live routees concurrently; the first successful reply within `within` is forwarded to the sender. Late replies are ignored. If no routee replies before `within`, the sender gets a StatusFailure. Replies are delivered asynchronously; the router does not block.
 
 ```go
 routerPID, _ := actorSystem.SpawnRouter(ctx, "pool", 10, &Worker{},
     actor.AsScatterGatherFirst(500*time.Millisecond))
 ```
 
-**Parameter:**
-- `within` - Maximum time to wait for any response
-
 ### AsTailChopping
 
-Configure tail-chopping pattern.
+Probes one routee at a time (in random order). If no response before `interval`, sends to the next. Stops when one replies, all have been tried, or total time exceeds `within`. First success is forwarded; otherwise the sender gets StatusFailure. Use when you want bounded latency and to avoid thundering herds. Tune `interval` ≈ p95 response time; `within` ≥ number of routees × interval or your SLO.
 
 ```go
 routerPID, _ := actorSystem.SpawnRouter(ctx, "pool", 10, &Worker{},
     actor.AsTailChopping(2*time.Second, 200*time.Millisecond))
 ```
 
-**Parameters:**
-- `within` - Total time budget for any response
-- `interval` - Delay between successive attempts
+### Routee supervision
 
-### Routee Supervision
+One of the following applies; the last one passed wins. Default is **Stop** if none is set.
 
-Control how the router handles routee failures.
-
-#### WithStopRouteeOnFailure (Default)
-
-Stop and remove failing routees.
-
-```go
-routerPID, _ := actorSystem.SpawnRouter(ctx, "pool", 10, &Worker{},
-    actor.WithStopRouteeOnFailure())
-```
-
-**Behavior:**
-- Failing routee is terminated
-- Removed from routing pool
-- Not automatically replaced
-- Use for unrecoverable failures
-
-#### WithRestartRouteeOnFailure
-
-Restart failing routees with retry logic.
-
-```go
-routerPID, _ := actorSystem.SpawnRouter(ctx, "pool", 10, &Worker{},
-    actor.WithRestartRouteeOnFailure(3, 30*time.Second))
-```
-
-**Parameters:**
-- `maxRetries` - Maximum restart attempts
-- `timeout` - Time window for retries
-
-**Behavior:**
-- Routee is restarted (state reset)
-- Retries within time window
-- If max retries exceeded, routee is stopped
-- Use for corrupted state
-
-#### WithResumeRouteeOnFailure
-
-Continue routee without restart.
-
-```go
-routerPID, _ := actorSystem.SpawnRouter(ctx, "pool", 10, &Worker{},
-    actor.WithResumeRouteeOnFailure())
-```
-
-**Behavior:**
-- Routee keeps current state
-- Continues processing next message
-- Failing message not retried
-- Use for transient failures
+- **WithStopRouteeOnFailure**() — Terminate and remove the routee from the pool. Not replaced by this option.
+- **WithRestartRouteeOnFailure**(maxRetries, timeout) — Restart the routee (state reset); retries within the given window.
+- **WithResumeRouteeOnFailure**() — Routee keeps state and continues; use for transient failures.
 
 ## Sending Messages to Routers
 

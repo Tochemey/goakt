@@ -2,6 +2,18 @@
 
 Practical patterns for using the events stream for monitoring, observability, and system integration.
 
+## Table of Contents
+
+- 📊 [Monitoring Patterns](#monitoring-patterns)
+- 📈 [Metrics and Analytics](#metrics-and-analytics)
+- 🔗 [Integration Examples](#integration-examples)
+- 🚨 [Alerting Patterns](#alerting-patterns)
+- 🧪 [Testing Support](#testing-support)
+- ✅ [Best Practices](#best-practices)
+- ➡️ [Next Steps](#next-steps)
+
+---
+
 ## Monitoring Patterns
 
 ### Simple Event Logger

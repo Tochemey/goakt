@@ -2,6 +2,20 @@
 
 Stateful grains are grains that maintain persistent state across activations and deactivations. This guide covers patterns, strategies, and best practices for managing state in GoAkt grains.
 
+## Table of Contents
+
+- 📖 [Overview](#overview)
+- 🔄 [State Lifecycle](#state-lifecycle)
+- 🛠️ [State Management Strategies](#state-management-strategies)
+- 🔒 [Concurrency Control](#concurrency-control)
+- ✅ [State Validation](#state-validation)
+- ✅ [Best Practices](#best-practices)
+- 🧪 [Testing Stateful Grains](#testing-stateful-grains)
+- 🔧 [Troubleshooting](#troubleshooting)
+- ➡️ [Next Steps](#next-steps)
+
+---
+
 ## Overview
 
 Stateful grains persist their state to external storage and restore it when reactivated. This enables:
@@ -964,9 +978,10 @@ func TestUserGrain_StatePersi stence(t *testing.T) {
         repository: mockRepo,
     }
 
-    // Setup props
-    identity := &actor.GrainIdentity{} // simplified
-    props := &actor.GrainProps{}
+    // Note: GrainProps and GrainIdentity have unexported fields. In real tests use testkit or the actor system to obtain them.
+    // Simplified for illustration:
+    identity := &actor.GrainIdentity{} // use system.GrainIdentity(...) or testkit in real tests
+    props := &actor.GrainProps{}       // obtained from system when grain is activated
 
     // Test activation
     err := grain.OnActivate(ctx, props)
@@ -996,33 +1011,29 @@ func TestOrderGrain_EventSourcing(t *testing.T) {
 
     system.RegisterGrainKind(ctx, &OrderGrain{})
 
-    identity := actor.NewGrainIdentity(&OrderGrain{}, "order-123")
-
-    // Activate with event store
-    err := system.ActivateGrain(
-        ctx,
-        identity,
-        actor.WithGrainDependencies(eventStore),
-    )
+    identity, err := system.GrainIdentity(ctx, "order-123", func(ctx context.Context) (actor.Grain, error) {
+        return &OrderGrain{}, nil
+    }, actor.WithGrainDependencies(eventStore), actor.WithGrainDeactivateAfter(50*time.Millisecond))
     require.NoError(t, err)
 
     // Perform operations
     system.TellGrain(ctx, identity, &CreateOrder{})
     system.TellGrain(ctx, identity, &AddItem{ItemID: "item-1"})
 
-    // Force deactivation to persist events
-    system.DeactivateGrain(ctx, identity)
+    // Wait for passivation so OnDeactivate persists events
+    time.Sleep(100 * time.Millisecond)
 
-    // Verify events were persisted
+    // Reactivate and verify state (GrainIdentity triggers activation again)
+    identity2, err := system.GrainIdentity(ctx, "order-123", func(ctx context.Context) (actor.Grain, error) {
+        return &OrderGrain{}, nil
+    }, actor.WithGrainDependencies(eventStore))
+    require.NoError(t, err)
+
     events, err := eventStore.LoadEvents(ctx, "order-123")
     require.NoError(t, err)
     assert.Len(t, events, 2)
 
-    // Reactivate and verify state
-    err = system.ActivateGrain(ctx, identity, actor.WithGrainDependencies(eventStore))
-    require.NoError(t, err)
-
-    response, _ := system.AskGrain(ctx, identity, &GetOrder{}, time.Second)
+    response, _ := system.AskGrain(ctx, identity2, &GetOrder{}, time.Second)
     order := response.(*OrderResponse)
     assert.Len(t, order.Items, 1)
 }

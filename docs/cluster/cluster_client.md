@@ -2,6 +2,24 @@
 
 The GoAkt client package provides a lightweight library for external applications to interact with GoAkt actor system clusters without running a full actor system themselves. It enables remote actor communication, spawning, and management through a simple, load-balanced interface.
 
+## Table of Contents
+
+- 📖 [Overview](#overview)
+- 📥 [Installation](#installation)
+- ⚡ [Quick Start](#quick-start)
+- 🏗️ [Creating a Client](#creating-a-client)
+- 📍 [Node Configuration](#node-configuration)
+- ⚙️ [Configuration Options](#configuration-options)
+- 📤 [Client Operations](#client-operations)
+- 🌾 [Grain Operations](#grain-operations)
+- ⚖️ [Load Balancing Strategies](#load-balancing-strategies)
+- 💡 [Complete Examples](#complete-examples)
+- ✅ [Best Practices](#best-practices)
+- 🔧 [Troubleshooting](#troubleshooting)
+- ➡️ [Next Steps](#next-steps)
+
+---
+
 ## Overview
 
 The cluster client is designed for scenarios where you need to communicate with actors in a GoAkt cluster from:

@@ -2,6 +2,27 @@
 
 Messaging is the foundation of actor communication in GoAkt. Actors interact exclusively through asynchronous message passing using **protocol buffers** as the message format.
 
+## Table of Contents
+
+- 📦 [Message Types](#message-types)
+- 📨 [Messaging Patterns](#messaging-patterns)
+- ↩️ [Responding to Messages](#responding-to-messages)
+- 📤 [Batch Messaging](#batch-messaging)
+- 📋 [Message Context](#message-context)
+- 🔀 [Actor-to-Actor Messaging](#actor-to-actor-messaging)
+- 🌐 [Remote Messaging](#remote-messaging)
+- ➡️ [Forwarding Messages](#forwarding-messages)
+- ⏰ [Message Scheduling](#message-scheduling)
+- 📬 [Request Pattern](#request-pattern)
+- 🔗 [PipeTo Pattern](#pipeto-pattern)
+- 📊 [Message Ordering Guarantees](#message-ordering-guarantees)
+- ⚠️ [Error Handling](#error-handling)
+- ✅ [Best Practices](#best-practices)
+- 💡 [Complete Example](#complete-example)
+- ➡️ [Next Steps](#next-steps)
+
+---
+
 ## Message Types
 
 All messages in GoAkt must be protocol buffer messages (`proto.Message`). This ensures:
@@ -320,6 +341,26 @@ if err == nil && addr != nil {
 }
 ```
 
+### SendSync and SendAsync
+
+These methods send to an actor **by name**; the system resolves the target (local or remote). They are the **name-based** counterparts of **Tell** and **Ask**.
+
+| Method                                    | Behavior                                                                                              | Use when                                                                   |
+|-------------------------------------------|-------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------|
+| **SendAsync**(actorName, message)         | Fire-and-forget; does not block or expect a reply.                                                    | Like Tell, but target is an actor **name** (e.g. in cluster).              |
+| **SendSync**(actorName, message, timeout) | Blocks until response or timeout; returns response (or nil). From Receive, errors are in `ctx.Err()`. | Like Ask, but target is an actor **name**. Receiver uses `ctx.Response()`. |
+
+**From inside an actor (ReceiveContext):**
+
+```go
+ctx.SendAsync("worker-pool", &Job{Id: 1})           // no reply; check ctx.Err() for send failure
+response := ctx.SendSync("service", &Query{}, 5*time.Second)  // blocks; check ctx.Err() and response == nil on failure
+```
+
+**From outside (PID as sender):** `pid.SendAsync(ctx, actorName, message)` returns `error`; `pid.SendSync(ctx, actorName, message, timeout)` returns `(proto.Message, error)`.
+
+For PID-based Tell/Ask and error handling, see [Tell and Ask](#1-tell-fire-and-forget) and [Ask Errors](#ask-errors). For async request-response without blocking the sender, see [Request Pattern](#request-pattern) and [Reentrancy](reentrancy.md).
+
 ## Forwarding Messages
 
 Forward a message to another actor while preserving the original sender:
@@ -375,33 +416,65 @@ See [Message Scheduling](message_scheduling.md) for more details.
 
 ## Request Pattern
 
-The request pattern enables async request-response without blocking:
+The **request pattern** provides **async request-response**: the sender sends a request and gets the response later via a **continuation** (callback), without blocking the actor’s mailbox. This allows the actor to keep processing other messages while the request is in flight.
+
+**Requirements:**
+
+- The **sender actor** must be spawned with **reentrancy enabled**. Otherwise `Request` / `RequestName` fail (return `nil` and set `ctx.Err()`). See [Reentrancy](reentrancy.md) for modes, configuration, and behavior.
+- The **receiver** responds with `ctx.Response(...)` just as for Ask; the runtime routes that response back to the sender and invokes the sender’s continuation.
+
+**When to use:**
+
+- You need a **reply** from another actor but do not want to **block** (unlike Ask).
+- You want the actor to handle **other messages** while waiting (e.g. multiple pending requests, or queries while a long-running request is outstanding).
 
 ### Request
 
-Send a request that expects a response routed back asynchronously:
+Send a request to a PID and handle the response in a continuation via the returned `RequestCall`:
 
 ```go
 func (a *Client) Receive(ctx *actor.ReceiveContext) {
     switch msg := ctx.Message().(type) {
     case *FetchData:
-        // Send async request with correlation ID
-        ctx.Request(a.serverPID, &DataQuery{Id: msg.GetId()})
-        
-    case *DataResponse:
-        // Response arrives as regular message
-        a.handleData(msg)
+        call := ctx.Request(a.serverPID, &DataQuery{Id: msg.GetId()})
+        if call == nil {
+            // Request failed (e.g. reentrancy disabled); check ctx.Err()
+            return
+        }
+        call.Then(func(response proto.Message, err error) {
+            if err != nil {
+                ctx.Logger().Error("Request failed", "error", err)
+                return
+            }
+            dataResp := response.(*DataResponse)
+            a.handleData(dataResp)
+        })
+        // Actor can process more messages; response is handled in Then()
     }
 }
 ```
 
-### RequestName
-
-Request from an actor by name:
+The receiver uses `ctx.Response()` as with Ask:
 
 ```go
-ctx.RequestName("data-server", &DataQuery{Id: 123})
+case *DataQuery:
+    ctx.Response(&DataResponse{Data: a.loadData(msg.GetId())})
 ```
+
+### RequestName
+
+Same as `Request`, but the target is identified by **actor name** (resolved at call time; works with cluster/remoting):
+
+```go
+call := ctx.RequestName("data-server", &DataQuery{Id: 123})
+if call != nil {
+    call.Then(func(response proto.Message, err error) {
+        // handle response or err
+    })
+}
+```
+
+For reentrancy modes (AllowReentrant, StashNonReentrant), timeouts, and full examples, see **[Reentrancy](reentrancy.md)**.
 
 ## PipeTo Pattern
 
@@ -511,7 +584,7 @@ if err != nil {
 
 ❌ **Don't:**
 - Share mutable state via messages
-- Send large payloads (consider streaming)
+- Send large payloads (consider batching)
 - Reuse message instances
 - Use generic "Any" messages
 

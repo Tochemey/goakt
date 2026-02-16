@@ -2,6 +2,21 @@
 
 GoAkt integrates with [OpenTelemetry](https://opentelemetry.io/) to expose runtime metrics for both the actor system and individual actors. Metrics are collected via observable counters and reported through the standard OpenTelemetry pipeline.
 
+## Table of Contents
+
+- ⚙️ [Enabling Metrics](#enabling-metrics)
+- 📡 [Setting Up OpenTelemetry](#setting-up-opentelemetry)
+- 📊 [Instrumentation](#instrumentation)
+- 🏗️ [Actor System Metrics](#actor-system-metrics)
+- 🎭 [Actor Metrics](#actor-metrics)
+- 🔌 [Programmatic Metrics Access](#programmatic-metrics-access)
+- 💡 [Complete Example](#complete-example)
+- 📈 [Grafana Dashboard](#grafana-dashboard)
+- ✅ [Best Practices](#best-practices)
+- ➡️ [Next Steps](#next-steps)
+
+---
+
 ## Enabling Metrics
 
 Enable metrics collection with the `WithMetrics()` option when creating the actor system:

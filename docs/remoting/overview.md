@@ -2,6 +2,36 @@
 
 Remoting enables actors on different actor systems to communicate across network boundaries. It provides the foundation for distributed actor systems and is a prerequisite for clustering.
 
+## Table of Contents
+
+- ⚡ [Quick reference](#quick-reference)
+- 🤔 [What is Remoting?](#what-is-remoting)
+- 🏗️ [Architecture](#architecture)
+- ⚙️ [Enabling Remoting](#enabling-remoting)
+- 📤 [Remote Operations](#remote-operations)
+- 💡 [Complete Example](#complete-example)
+- 🔀 [Remoting vs Clustering](#remoting-vs-clustering)
+- ⚡ [Performance Tuning](#performance-tuning)
+- ⚠️ [Error Handling](#error-handling)
+- ✅ [Best Practices](#best-practices)
+- 💡 [Complete Example: Service Integration](#complete-example-service-integration)
+- 🔧 [Troubleshooting](#troubleshooting)
+- ➡️ [Next Steps](#next-steps)
+
+---
+
+## Quick reference
+
+| Goal                             | API                                                                                                                                                                  |
+|----------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Enable remoting                  | `actor.WithRemote(remote.NewConfig("host", port))` or `actor.WithRemote(remote.NewConfig("host", port, opts...))`                                                    |
+| Remote Tell (from outside actor) | `system.NoSender().RemoteTell(ctx, addr, message)`                                                                                                                   |
+| Remote Ask (from outside)        | `response, err := system.NoSender().RemoteAsk(ctx, addr, message, timeout)` — returns `*anypb.Any`; use `response.UnmarshalNew()` or type assertion to get your type |
+| From inside actor                | `ctx.RemoteTell(addr, message)` / `response := ctx.RemoteAsk(addr, message, timeout)`                                                                                |
+| Build remote address             | `address.New("actor-name", "remote-system-name", "host", port)`                                                                                                      |
+| Lookup remote actor              | `addr, err := system.NoSender().RemoteLookup(ctx, "host", port, "actor-name")`                                                                                       |
+| Grains (cluster)                 | `identity, err := system.GrainIdentity(ctx, name, factory, opts...)` then `TellGrain` / `AskGrain` (no host/port; works across cluster)                              |
+
 ## What is Remoting?
 
 Remoting in GoAkt allows:
@@ -40,14 +70,18 @@ Actor System A (Node 1)              Actor System B (Node 2)
 
 ### Basic Configuration
 
-Enable remoting by providing a host and port when creating the actor system:
+Enable remoting by creating a config with host and port, then passing it to the actor system:
 
 ```go
-import "github.com/tochemey/goakt/v3/actor"
+import (
+    "github.com/tochemey/goakt/v3/actor"
+    "github.com/tochemey/goakt/v3/remote"
+)
 
+remotingConfig := remote.NewConfig("localhost", 3321)
 system, err := actor.NewActorSystem(
     "my-system",
-    actor.WithRemote("localhost", 3321), // Enable remoting on port 3321
+    actor.WithRemote(remotingConfig),
 )
 if err != nil {
     log.Fatal(err)
@@ -252,11 +286,16 @@ Grains are activated on demand when you call `system.AskGrain` or `system.TellGr
 
 #### TellGrain / AskGrain
 
-For grains, use the actor system with a **GrainIdentity** (works across cluster; no host/port needed):
+For grains, use the actor system with a **GrainIdentity** (works across cluster; no host/port needed). Obtain the identity via `GrainIdentity` with a factory; activation happens on demand when you send:
 
 ```go
-identity := actor.NewGrainIdentity(&UserGrain{}, "user-123")
-err := system.TellGrain(ctx, identity, &UpdateUserRequest{Name: "John"})
+identity, err := system.GrainIdentity(ctx, "user-123", func(ctx context.Context) (actor.Grain, error) {
+    return &UserGrain{}, nil
+})
+if err != nil {
+    log.Fatal(err)
+}
+err = system.TellGrain(ctx, identity, &UpdateUserRequest{Name: "John"})
 // request-response:
 response, err := system.AskGrain(ctx, identity, &GetUserRequest{}, 5*time.Second)
 ```
@@ -303,7 +342,7 @@ func main() {
     // Enable remoting
     system, err := actor.NewActorSystem(
         "system-1",
-        actor.WithRemote("localhost", 3321),
+        actor.WithRemote(remote.NewConfig("localhost", 3321)),
     )
     if err != nil {
         log.Fatal(err)
@@ -337,6 +376,7 @@ import (
 
     "github.com/tochemey/goakt/v3/actor"
     "github.com/tochemey/goakt/v3/address"
+    "github.com/tochemey/goakt/v3/remote"
 )
 
 func main() {
@@ -345,7 +385,7 @@ func main() {
     // Enable remoting
     system, err := actor.NewActorSystem(
         "system-2",
-        actor.WithRemote("localhost", 3322),
+        actor.WithRemote(remote.NewConfig("localhost", 3322)),
     )
     if err != nil {
         log.Fatal(err)
@@ -546,9 +586,10 @@ When errors originate from the remote system, they carry error codes:
 **Development:**
 
 ```go
+// import "github.com/tochemey/goakt/v3/remote"
 system, err := actor.NewActorSystem(
     "dev-system",
-    actor.WithRemote("localhost", 3321),
+    actor.WithRemote(remote.NewConfig("localhost", 3321)),
 )
 ```
 
@@ -634,7 +675,7 @@ func main() {
     // Create actor system with remoting
     system, err := actor.NewActorSystem(
         "service-system",
-        actor.WithRemote("localhost", 3323),
+        actor.WithRemote(remote.NewConfig("localhost", 3323)),
     )
     if err != nil {
         log.Fatal(err)

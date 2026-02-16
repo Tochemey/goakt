@@ -2,6 +2,25 @@
 
 Discovery providers enable cluster nodes to automatically find and connect to each other without manual configuration. GoAkt supports multiple discovery mechanisms for different deployment environments.
 
+## Table of Contents
+
+- 📖 [Overview](#overview)
+- 📋 [Available Providers](#available-providers)
+- ⚙️ [Configuration](#configuration)
+- 📍 [Static Discovery](#static-discovery)
+- 📡 [NATS Discovery](#nats-discovery)
+- 🔧 [Consul Discovery](#consul-discovery)
+- 📦 [etcd Discovery](#etcd-discovery)
+- ☸️ [Kubernetes Discovery](#kubernetes-discovery)
+- 📶 [mDNS Discovery](#mdns-discovery)
+- 🌐 [DNS-SD Discovery](#dns-sd-discovery)
+- 🎯 [Choosing a Discovery Provider](#choosing-a-discovery-provider)
+- ✅ [Best Practices](#best-practices)
+- 🔧 [Troubleshooting](#troubleshooting)
+- ➡️ [Next Steps](#next-steps)
+
+---
+
 ## Overview
 
 When a clustered actor system starts, it needs to discover other nodes in the cluster. The discovery provider is responsible for:

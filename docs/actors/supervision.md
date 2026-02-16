@@ -2,6 +2,24 @@
 
 Supervision is a core fault-tolerance mechanism in GoAkt that enables actors to handle failures gracefully. Supervisors monitor child actors and decide how to respond when they fail, creating self-healing systems.
 
+## Table of Contents
+
+- 🤔 [What is Supervision?](#what-is-supervision)
+- 🌳 [Actor Hierarchy](#actor-hierarchy)
+- 🛡️ [Supervision Strategies](#supervision-strategies)
+- 📋 [Supervision Directives](#supervision-directives)
+- ⚙️ [Configuring Supervision](#configuring-supervision)
+- 📢 [How Failures are Reported](#how-failures-are-reported)
+- 💡 [Complete Example](#complete-example)
+- 🧩 [Supervision Patterns](#supervision-patterns)
+- ✅ [Best Practices](#best-practices)
+- 📊 [Monitoring Failures](#monitoring-failures)
+- 🧪 [Testing Supervision](#testing-supervision)
+- 📋 [Summary](#summary)
+- ➡️ [Next Steps](#next-steps)
+
+---
+
 ## What is Supervision?
 
 In the actor model, actors form a hierarchy where **parent actors supervise child actors**. When a child fails, the parent (supervisor) decides how to handle the failure based on configured rules.
@@ -621,14 +639,7 @@ func (a *MyActor) Receive(ctx *actor.ReceiveContext) {
 
 ### Dead Letter Monitoring
 
-Failed messages may end up in dead letters:
-
-```go
-// Subscribe to dead letters
-deadLetterHandler, _ := actorSystem.Spawn(ctx, "dead-letter-handler",
-    &DeadLetterHandler{})
-actorSystem.Subscribe(actor.DeadLetterTopic, deadLetterHandler)
-```
+Failed messages may end up in dead letters. Subscribe to the events stream and handle `*goaktpb.Deadletter` payloads (see [Events Stream](../events_stream/overview.md) and [Mailbox](mailbox.md#dead-letters)).
 
 ### Metrics
 

@@ -2,6 +2,22 @@
 
 Context propagation allows cross-cutting metadata (trace IDs, correlation IDs, authentication tokens, custom headers) to travel across remoting boundaries. This is essential for distributed tracing, request tracking, and maintaining context in distributed actor systems.
 
+## Table of Contents
+
+- 📖 [Overview](#overview)
+- 🔄 [How It Works](#how-it-works)
+- 🔌 [ContextPropagator Interface](#contextpropagator-interface)
+- 🚀 [Basic Implementation](#basic-implementation)
+- 📡 [OpenTelemetry Integration](#opentelemetry-integration)
+- 🔧 [Advanced Propagation Patterns](#advanced-propagation-patterns)
+- 🔗 [Integration Patterns](#integration-patterns)
+- ✅ [Best Practices](#best-practices)
+- 🐛 [Debugging](#debugging)
+- 🔧 [Troubleshooting](#troubleshooting)
+- ➡️ [Next Steps](#next-steps)
+
+---
+
 ## Overview
 
 Context propagation in GoAkt:

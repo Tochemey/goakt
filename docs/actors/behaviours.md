@@ -2,6 +2,25 @@
 
 Behaviors enable actors to dynamically change their message processing logic at runtime. This is a powerful pattern for implementing state machines, workflows, and context-aware message handling.
 
+## Table of Contents
+
+- 🤔 [What are Behaviors?](#what-are-behaviors)
+- 💡 [Why Use Behaviors?](#why-use-behaviors)
+- 🛠️ [Behavior Operations](#behavior-operations)
+- 🔐 [Basic Example: Authentication](#basic-example-authentication)
+- 🔀 [State Machine Pattern](#state-machine-pattern)
+- 📚 [Stacked Behaviors](#stacked-behaviors)
+- 🔄 [Behavior with State Transitions](#behavior-with-state-transitions)
+- ✅ [Behavior Best Practices](#behavior-best-practices)
+- 🧩 [Common Patterns](#common-patterns)
+- 🐛 [Debugging Behaviors](#debugging-behaviors)
+- 🧪 [Testing Behaviors](#testing-behaviors)
+- ⚡ [Performance Considerations](#performance-considerations)
+- 📋 [Summary](#summary)
+- ➡️ [Next Steps](#next-steps)
+
+---
+
 ## What are Behaviors?
 
 A **behavior** is a function that defines how an actor processes messages:

@@ -2,6 +2,23 @@
 
 GoAkt provides a powerful clustering capability that allows multiple actor systems to form a distributed network, enabling actors to communicate across nodes and providing automatic actor management, load distribution, and fault tolerance.
 
+## Table of Contents
+
+- 🤔 [What is Clustering?](#what-is-clustering)
+- 📐 [Core Concepts](#core-concepts)
+- ⚙️ [Cluster Configuration](#cluster-configuration)
+- 🚀 [Starting a Cluster](#starting-a-cluster)
+- 🎭 [Spawning Actors in a Cluster](#spawning-actors-in-a-cluster)
+- 🔍 [Actor Lookup](#actor-lookup)
+- 📢 [Cluster Events](#cluster-events)
+- 🛑 [Cluster Shutdown](#cluster-shutdown)
+- 💡 [Complete Example](#complete-example)
+- ✅ [Best Practices](#best-practices)
+- 🔧 [Troubleshooting](#troubleshooting)
+- ➡️ [Next Steps](#next-steps)
+
+---
+
 ## What is Clustering?
 
 Clustering in GoAkt allows you to:
@@ -26,7 +43,7 @@ A cluster node is an actor system instance that has joined a cluster. Each node:
 
 ### Distributed Routing Table
 
-The cluster uses [Olric](https://github.com/buraksezer/olric), a distributed in-memory key-value store built on consistent hashing, to maintain:
+The cluster uses [Olric](https://github.com/tochemey/olric), a distributed in-memory key-value store built on consistent hashing, to maintain:
 
 - **Actor metadata**: Name, type, address, configuration, and location
 - **Grain metadata**: Identity, type, host, and state
@@ -94,6 +111,8 @@ err := system.SpawnOn(ctx, "user-123", userActor, actor.WithRole("entity"))
 ```
 
 ## Cluster Configuration
+
+**Default settings are sufficient for most use cases.** You typically only need to provide discovery (and, if required, host/ports). Quorum, timeouts, partition count, and other options have sensible defaults; override them only when you have specific requirements (e.g. larger clusters, stricter consistency, or multi-datacenter).
 
 Create a cluster configuration using `NewClusterConfig()`:
 

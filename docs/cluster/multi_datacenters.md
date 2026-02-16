@@ -2,6 +2,24 @@
 
 GoAkt supports deploying actor systems across multiple datacenters (DCs), enabling globally distributed applications with location-aware actor placement and cross-DC communication.
 
+## Table of Contents
+
+- 📖 [Overview](#overview)
+- 🏗️ [Architecture](#architecture)
+- ⚙️ [Configuration](#configuration)
+- 💡 [Complete Example](#complete-example)
+- 📍 [Cross-Datacenter Actor Placement](#cross-datacenter-actor-placement)
+- 📤 [Cross-Datacenter Communication](#cross-datacenter-communication)
+- 🔄 [Datacenter Lifecycle States](#datacenter-lifecycle-states)
+- 💾 [Cache and Consistency](#cache-and-consistency)
+- ✅ [Best Practices](#best-practices)
+- ⚠️ [Error Handling](#error-handling)
+- 🔧 [Advanced Topics](#advanced-topics)
+- 🔧 [Troubleshooting](#troubleshooting)
+- ➡️ [Next Steps](#next-steps)
+
+---
+
 ## Overview
 
 Multi-datacenter support allows you to:

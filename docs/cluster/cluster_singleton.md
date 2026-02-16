@@ -2,6 +2,27 @@
 
 A cluster singleton is an actor that has exactly one instance across the entire cluster. This is useful for coordinating tasks, managing global state, or ensuring sequential processing of certain operations.
 
+## Table of Contents
+
+- 📖 [Overview](#overview)
+- 💡 [Use Cases](#use-cases)
+- 🏗️ [Creating a Singleton](#creating-a-singleton)
+- 💡 [Basic Example](#basic-example)
+- ⚙️ [Configuration Options](#configuration-options)
+- 📍 [Singleton Placement](#singleton-placement)
+- 🔄 [Relocation](#relocation)
+- 📤 [Communicating with Singletons](#communicating-with-singletons)
+- 🔁 [Idempotent Spawning](#idempotent-spawning)
+- 💾 [State Management](#state-management)
+- ⚠️ [Error Handling](#error-handling)
+- 🔧 [Advanced Patterns](#advanced-patterns)
+- 🧪 [Testing Singletons](#testing-singletons)
+- ✅ [Best Practices](#best-practices)
+- 🔧 [Troubleshooting](#troubleshooting)
+- ➡️ [Next Steps](#next-steps)
+
+---
+
 ## Overview
 
 In a clustered environment, you may need to ensure that only one instance of a particular actor exists across all nodes. GoAkt provides cluster singletons to address this need:

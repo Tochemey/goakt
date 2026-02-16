@@ -2,6 +2,19 @@
 
 This guide demonstrates practical patterns for using grains in real-world applications.
 
+## Table of Contents
+
+- 🚀 [Basic Patterns](#basic-patterns)
+- 🔧 [Advanced Patterns](#advanced-patterns)
+- 🔗 [Integration Patterns](#integration-patterns)
+- 🧪 [Testing Patterns](#testing-patterns)
+- ⚡ [Performance Optimization](#performance-optimization)
+- ✅ [Best Practices Summary](#best-practices-summary)
+- ⚠️ [Common Pitfalls](#common-pitfalls)
+- ➡️ [Next Steps](#next-steps)
+
+---
+
 ## Basic Patterns
 
 ### Simple Entity Grain
@@ -94,11 +107,16 @@ func (g *ProductGrain) OnDeactivate(ctx context.Context, props *actor.GrainProps
 // Register grain
 system.RegisterGrainKind(ctx, &ProductGrain{})
 
-// Access product
-identity := actor.NewGrainIdentity(&ProductGrain{}, "product-123")
+// Resolve grain identity (activation on first message)
+identity, err := system.GrainIdentity(ctx, "product-123", func(ctx context.Context) (actor.Grain, error) {
+    return &ProductGrain{}, nil
+})
+if err != nil {
+    log.Fatal(err)
+}
 
 // Update price
-err := system.TellGrain(ctx, identity, &UpdatePrice{NewPrice: 29.99})
+err = system.TellGrain(ctx, identity, &UpdatePrice{NewPrice: 29.99})
 
 // Get product
 response, err := system.AskGrain(ctx, identity, &GetProduct{}, time.Second)
@@ -471,8 +489,14 @@ func (api *UserAPI) GetUser(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    // Create grain identity
-    identity := actor.NewGrainIdentity(&UserGrain{}, userID)
+    // Resolve grain identity (activation on demand)
+    identity, err := api.system.GrainIdentity(r.Context(), userID, func(ctx context.Context) (actor.Grain, error) {
+        return &UserGrain{}, nil
+    })
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
 
     // Query grain
     response, err := api.system.AskGrain(
@@ -497,9 +521,15 @@ func (api *UserAPI) UpdateUser(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    identity := actor.NewGrainIdentity(&UserGrain{}, req.UserID)
+    identity, err := api.system.GrainIdentity(r.Context(), req.UserID, func(ctx context.Context) (actor.Grain, error) {
+        return &UserGrain{}, nil
+    })
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
 
-    err := api.system.TellGrain(
+    err = api.system.TellGrain(
         r.Context(),
         identity,
         &UpdateName{NewName: req.Name},
@@ -570,8 +600,13 @@ func (p *OrderProcessor) Start(ctx context.Context) error {
                 continue
             }
 
-            // Route to order grain
-            identity := actor.NewGrainIdentity(&OrderGrain{}, orderEvent.OrderID)
+            // Route to order grain (resolve identity; activation on demand)
+            identity, err := p.system.GrainIdentity(ctx, orderEvent.OrderID, func(ctx context.Context) (actor.Grain, error) {
+                return &OrderGrain{}, nil
+            })
+            if err != nil {
+                continue
+            }
             p.system.TellGrain(ctx, identity, &orderEvent)
         }
     }
@@ -684,12 +719,10 @@ func TestUserGrain_UpdateName(t *testing.T) {
     err = system.RegisterGrainKind(ctx, &UserGrain{})
     require.NoError(t, err)
 
-    // Create grain probe
-    probe := testkit.NewGrainProbe(t)
-    identity := actor.NewGrainIdentity(&UserGrain{}, "test-user")
-
-    // Activate grain
-    err = system.ActivateGrain(ctx, identity)
+    // Resolve grain identity (activation on first use)
+    identity, err := system.GrainIdentity(ctx, "test-user", func(ctx context.Context) (actor.Grain, error) {
+        return &UserGrain{}, nil
+    })
     require.NoError(t, err)
 
     // Send message
@@ -713,8 +746,9 @@ func TestUserGrain_InvalidEmail(t *testing.T) {
 
     system.RegisterGrainKind(ctx, &UserGrain{})
 
-    identity := actor.NewGrainIdentity(&UserGrain{}, "test-user")
-    system.ActivateGrain(ctx, identity)
+    identity, _ := system.GrainIdentity(ctx, "test-user", func(ctx context.Context) (actor.Grain, error) {
+        return &UserGrain{}, nil
+    })
 
     // Send invalid email
     _, err := system.AskGrain(
@@ -746,14 +780,9 @@ func TestOrderGrain_CompleteFlow(t *testing.T) {
     // Register grain with dependencies
     system.RegisterGrainKind(ctx, &OrderGrain{})
 
-    identity := actor.NewGrainIdentity(&OrderGrain{}, "order-123")
-
-    // Activate with dependencies
-    err := system.ActivateGrain(
-        ctx,
-        identity,
-        actor.WithGrainDependencies(eventStore),
-    )
+    identity, err := system.GrainIdentity(ctx, "order-123", func(ctx context.Context) (actor.Grain, error) {
+        return &OrderGrain{}, nil
+    }, actor.WithGrainDependencies(eventStore))
     require.NoError(t, err)
 
     // Add items

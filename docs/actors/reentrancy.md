@@ -2,6 +2,23 @@
 
 Reentrancy allows actors to process new messages while waiting for async responses from other actors. This enables concurrent request handling without blocking the actor's mailbox.
 
+## Table of Contents
+
+- 🤔 [What is Reentrancy?](#what-is-reentrancy)
+- 💡 [Why Use Reentrancy?](#why-use-reentrancy)
+- 🔀 [Reentrancy Modes](#reentrancy-modes)
+- 🚀 [Basic Usage](#basic-usage)
+- 💡 [Complete Example](#complete-example)
+- ⚙️ [Request Options](#request-options)
+- ❌ [Request Cancellation](#request-cancellation)
+- 🔄 [AllowAll vs. StashNonReentrant](#allowall-vs-stashnonreentrant)
+- ✅ [Best Practices](#best-practices)
+- 🧪 [Testing](#testing)
+- 📋 [Summary](#summary)
+- ➡️ [Next Steps](#next-steps)
+
+---
+
 ## What is Reentrancy?
 
 **Reentrancy** is the ability of an actor to:
@@ -54,13 +71,13 @@ pid, _ := actorSystem.Spawn(ctx, "actor", &MyActor{})
 // Reentrancy is OFF by default
 ```
 
-### AllowReentrant
+### AllowAll
 
 Allow concurrent request handling. New messages processed while requests pending.
 
 ```go
 pid, _ := actorSystem.Spawn(ctx, "actor", &MyActor{},
-    actor.WithReentrancyEnabled(reentrancy.AllowReentrant))
+    actor.WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
 ```
 
 **Behavior:**
@@ -76,7 +93,7 @@ Process requests sequentially. Stash new messages until current request complete
 
 ```go
 pid, _ := actorSystem.Spawn(ctx, "actor", &MyActor{},
-    actor.WithReentrancyEnabled(reentrancy.StashNonReentrant))
+    actor.WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.StashNonReentrant))))
 ```
 
 **Behavior:**
@@ -92,7 +109,7 @@ pid, _ := actorSystem.Spawn(ctx, "actor", &MyActor{},
 
 ```go
 pid, err := actorSystem.Spawn(ctx, "my-actor", &MyActor{},
-    actor.WithReentrancyEnabled(reentrancy.AllowReentrant))
+    actor.WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
 ```
 
 ### Send Async Request
@@ -133,9 +150,11 @@ package main
 
 import (
     "context"
+    "fmt"
     "time"
 
     "github.com/tochemey/goakt/v3/actor"
+    "github.com/tochemey/goakt/v3/passivation"
     "github.com/tochemey/goakt/v3/reentrancy"
 )
 
@@ -272,7 +291,7 @@ func main() {
 
     // Spawn order actor with reentrancy
     orderPID, _ := actorSystem.Spawn(ctx, "orders", &OrderActor{},
-        actor.WithReentrancyEnabled(reentrancy.AllowReentrant))
+        actor.WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
 
     // Create multiple orders concurrently
     actor.Tell(ctx, orderPID, &CreateOrder{
@@ -307,11 +326,13 @@ func main() {
 Set timeout for individual requests:
 
 ```go
+import "github.com/tochemey/goakt/v3/errors"
+
 request := ctx.Request(targetPID, &Query{},
     actor.WithRequestTimeout(5*time.Second))
 
 request.Then(func(response proto.Message, err error) {
-    if err == actor.ErrRequestTimeout {
+    if errors.Is(err, errors.ErrRequestTimeout) {
         ctx.Logger().Warn("Request timed out")
         return
     }
@@ -324,7 +345,7 @@ request.Then(func(response proto.Message, err error) {
 Override reentrancy mode for specific requests:
 
 ```go
-// Actor configured with AllowReentrant
+// Actor configured with AllowAll
 // But this specific request should stash
 request := ctx.Request(targetPID, &CriticalQuery{},
     actor.WithReentrancyMode(reentrancy.StashNonReentrant))
@@ -348,7 +369,7 @@ func (a *MyActor) Receive(ctx *actor.ReceiveContext) {
         a.pendingRequest = request
 
         request.Then(func(response proto.Message, err error) {
-            if err == context.Canceled {
+            if errors.Is(err, context.Canceled) {
                 ctx.Logger().Info("Request was cancelled")
                 return
             }
@@ -364,148 +385,14 @@ func (a *MyActor) Receive(ctx *actor.ReceiveContext) {
 }
 ```
 
-## Patterns
+## AllowAll vs. StashNonReentrant
 
-### Pattern 1: Parallel Requests
-
-Send multiple requests in parallel:
-
-```go
-func (a *AggregatorActor) Receive(ctx *actor.ReceiveContext) {
-    switch msg := ctx.Message().(type) {
-    case *AggregateData:
-        results := make(map[string]*Result)
-        pending := 3
-
-        // Request from service 1
-        req1 := ctx.Request(a.service1PID, &Query{})
-        req1.Then(func(response proto.Message, err error) {
-            if err == nil {
-                results["service1"] = response.(*Result)
-            }
-            pending--
-            if pending == 0 {
-                a.sendAggregatedResults(ctx, results)
-            }
-        })
-
-        // Request from service 2
-        req2 := ctx.Request(a.service2PID, &Query{})
-        req2.Then(func(response proto.Message, err error) {
-            if err == nil {
-                results["service2"] = response.(*Result)
-            }
-            pending--
-            if pending == 0 {
-                a.sendAggregatedResults(ctx, results)
-            }
-        })
-
-        // Request from service 3
-        req3 := ctx.Request(a.service3PID, &Query{})
-        req3.Then(func(response proto.Message, err error) {
-            if err == nil {
-                results["service3"] = response.(*Result)
-            }
-            pending--
-            if pending == 0 {
-                a.sendAggregatedResults(ctx, results)
-            }
-        })
-    }
-}
-```
-
-### Pattern 2: Sequential Chain
-
-Chain requests sequentially:
-
-```go
-func (a *ChainActor) Receive(ctx *actor.ReceiveContext) {
-    switch msg := ctx.Message().(type) {
-    case *ProcessWorkflow:
-        // Step 1
-        req1 := ctx.Request(a.step1PID, &Step1{Data: msg.GetData()})
-        req1.Then(func(response proto.Message, err error) {
-            if err != nil {
-                ctx.Logger().Error("Step 1 failed", "error", err)
-                return
-            }
-
-            result1 := response.(*Step1Result)
-
-            // Step 2
-            req2 := ctx.Request(a.step2PID, &Step2{
-                Data: result1.GetData(),
-            })
-            req2.Then(func(response proto.Message, err error) {
-                if err != nil {
-                    ctx.Logger().Error("Step 2 failed", "error", err)
-                    return
-                }
-
-                result2 := response.(*Step2Result)
-
-                // Step 3
-                req3 := ctx.Request(a.step3PID, &Step3{
-                    Data: result2.GetData(),
-                })
-                req3.Then(func(response proto.Message, err error) {
-                    if err != nil {
-                        ctx.Logger().Error("Step 3 failed", "error", err)
-                        return
-                    }
-
-                    ctx.Logger().Info("Workflow completed")
-                })
-            })
-        })
-    }
-}
-```
-
-### Pattern 3: Request with Retry
-
-Implement retry logic with reentrancy:
-
-```go
-func (a *RetryActor) sendWithRetry(ctx *actor.ReceiveContext,
-    targetPID *actor.PID, msg proto.Message, attempts int) {
-
-    request := ctx.Request(targetPID, msg)
-
-    request.Then(func(response proto.Message, err error) {
-        if err != nil && attempts > 0 {
-            ctx.Logger().Warn("Request failed, retrying",
-                "attempts_left", attempts)
-
-            // Retry after delay
-            _ = ctx.ActorSystem().ScheduleOnce(ctx.Context(),
-                &RetryMessage{TargetPID: targetPID, Message: msg, Attempts: attempts - 1},
-                ctx.Self(),
-                time.Second)
-            return
-        }
-
-        if err != nil {
-            ctx.Logger().Error("Request failed after retries")
-            return
-        }
-
-        // Success
-        a.handleResponse(response)
-    })
-}
-```
-
-## AllowReentrant vs. StashNonReentrant
-
-### AllowReentrant
+### AllowAll
 
 ```go
 // Multiple concurrent requests
 pid, _ := actorSystem.Spawn(ctx, "actor", &MyActor{},
-    actor.WithReentrancyEnabled(reentrancy.AllowReentrant))
+    actor.WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
 
 // Send 3 requests - all processed concurrently
 // Responses may arrive in any order
@@ -523,7 +410,7 @@ pid, _ := actorSystem.Spawn(ctx, "actor", &MyActor{},
 ```go
 // Sequential request processing
 pid, _ := actorSystem.Spawn(ctx, "actor", &MyActor{},
-    actor.WithReentrancyEnabled(reentrancy.StashNonReentrant))
+    actor.WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.StashNonReentrant))))
 
 // Send 3 requests - processed one at a time
 // Requests 2 and 3 stashed until request 1 completes
@@ -547,13 +434,15 @@ pid, _ := actorSystem.Spawn(ctx, "actor", &MyActor{},
 5. **Keep continuations short**
 
 ```go
+import "github.com/tochemey/goakt/v3/errors"
+
 // Good: Error handling and timeout
 request := ctx.Request(targetPID, &Query{},
     actor.WithRequestTimeout(5*time.Second))
 
 request.Then(func(response proto.Message, err error) {
     if err != nil {
-        if err == actor.ErrRequestTimeout {
+        if errors.Is(err, errors.ErrRequestTimeout) {
             ctx.Logger().Warn("Timeout")
         } else {
             ctx.Logger().Error("Request failed", "error", err)
@@ -594,7 +483,7 @@ func TestReentrantActor(t *testing.T) {
 
     // Spawn with reentrancy
     pid, _ := system.Spawn(ctx, "test", &TestActor{},
-        actor.WithReentrancyEnabled(reentrancy.AllowReentrant))
+        actor.WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
 
     // Send multiple requests
     for i := 0; i < 5; i++ {
@@ -614,7 +503,7 @@ func TestReentrantActor(t *testing.T) {
 ## Summary
 
 - **Reentrancy** enables async request handling
-- **AllowReentrant**: Concurrent requests
+- **AllowAll**: Concurrent requests
 - **StashNonReentrant**: Sequential requests
 - **Request/RequestName**: Send async requests
 - **Then**: Register continuations

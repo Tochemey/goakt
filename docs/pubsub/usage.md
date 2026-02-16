@@ -2,6 +2,21 @@
 
 This guide demonstrates practical patterns and real-world use cases for the pub/sub system in GoAkt.
 
+## Table of Contents
+
+- 📢 [Event Broadcasting Patterns](#event-broadcasting-patterns)
+- 🔧 [Advanced Patterns](#advanced-patterns)
+- 🔗 [Integration Patterns](#integration-patterns)
+- 📨 [Message Patterns](#message-patterns)
+- ✅ [Best Practices](#best-practices)
+- 🧪 [Testing](#testing)
+- 🔧 [Troubleshooting](#troubleshooting)
+- ⚠️ [Limitations](#limitations)
+- 🎯 [When to Use](#when-to-use)
+- ➡️ [Next Steps](#next-steps)
+
+---
+
 ## Event Broadcasting Patterns
 
 ### Event Notification System
@@ -20,7 +35,8 @@ import (
     "google.golang.org/protobuf/types/known/anypb"
 )
 
-// Domain events
+// Domain events: use protobuf-defined types (or types implementing proto.Message) so they can be packed with anypb.New for Publish.
+// Define these in a .proto file and generate Go code, or implement proto.Message on your structs.
 type OrderCreatedEvent struct {
     OrderID    string
     CustomerID string
@@ -74,6 +90,7 @@ func (a *OrderServiceActor) Receive(ctx *actor.ReceiveContext) {
     }
 }
 
+// publishEvent sends an event to a topic. event must implement proto.Message (e.g. protobuf-generated types).
 func (a *OrderServiceActor) publishEvent(ctx *actor.ReceiveContext, topic string, event proto.Message) {
     topicActor := ctx.ActorSystem().TopicActor()
 

@@ -2,6 +2,18 @@
 
 GoAkt is purpose-built to offer a robust, efficient, and straightforward actor framework for building distributed systems in Go. The design decisions behind GoAkt reflect a commitment to simplicity, performance, and seamless integration.
 
+## Table of Contents
+
+- 🎯 [Simplicity at Its Core](#simplicity-at-its-core)
+- 💡 [Ease of Use](#ease-of-use)
+- 📦 [Protocol Buffers as the Message Contract](#protocol-buffers-as-the-message-contract)
+- 📚 [Leverage Battle-Tested Libraries](#leverage-battle-tested-libraries)
+- ⚡ [High Performance](#high-performance)
+- 🔌 [Extensibility Through Interfaces](#extensibility-through-interfaces)
+- 📋 [Summary](#summary)
+
+---
+
 ## Simplicity at Its Core
 
 GoAkt targets the fundamental components of an actor framework as originally envisioned by the pioneers of the actor model. An actor is a computational entity that, in response to a message:

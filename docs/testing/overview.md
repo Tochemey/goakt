@@ -1,6 +1,29 @@
 # Testing Actors
 
-GoAkt ships with a dedicated testing package (`github.com/tochemey/goakt/v3/testkit`) that provides a structured way to test actors and grains. The testkit creates a lightweight actor system behind the scenes and offers **Probes** -- special test actors that can send messages, receive responses, and make assertions.
+GoAkt ships with a dedicated testing package (`github.com/tochemey/goakt/v3/testkit`) that provides a structured way to test actors and grains. The testkit creates a lightweight actor system behind the scenes and offers **Probes** — special test actors that can send messages, receive responses, and make assertions.
+
+## Table of Contents
+
+- ⚡ [Quick reference](#quick-reference)
+- 🧪 [TestKit](#testkit)
+- 🔍 [Probe](#probe)
+- 🌾 [GrainProbe](#grainprobe)
+- 🌐 [Multi-Node Testing](#multi-node-testing)
+- 💡 [Complete Examples](#complete-examples)
+- ➡️ [Next Steps](#next-steps)
+
+---
+
+## Quick reference
+
+| Goal            | API                                                                                                                                                                                                 |
+|-----------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Create test env | `kit := testkit.New(ctx, t)` then `t.Cleanup(func() { kit.Shutdown(ctx) })`                                                                                                                         |
+| Spawn actor     | `kit.Spawn(ctx, "name", &MyActor{})` (no return; use `kit.ActorSystem().LocalActor("name")` if you need the PID)                                                                                    |
+| Probe (actors)  | `probe := kit.NewProbe(ctx)` then `defer probe.Stop()`; `probe.Send("name", msg)` / `probe.SendSync("name", msg, timeout)`; `probe.ExpectMessage(msg)` / `probe.ExpectMessageWithin(duration, msg)` |
+| Grain identity  | `identity := kit.GrainIdentity(ctx, "id", func(ctx context.Context) (actor.Grain, error) { return &MyGrain{}, nil })`                                                                               |
+| Grain probe     | `probe := kit.NewGrainProbe(ctx)`; `probe.Send(identity, msg)` / `probe.SendSync(identity, msg, timeout)`; `probe.ExpectResponse(msg)` / `probe.ExpectTerminated(identity, duration)`               |
+| Event stream    | `sub := kit.Subscribe()` (auto-unsubscribed on test end)                                                                                                                                            |
 
 ## TestKit
 

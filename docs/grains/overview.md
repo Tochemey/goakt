@@ -2,6 +2,23 @@
 
 Grains are GoAkt's implementation of the **Virtual Actor pattern**, providing lightweight, stateful, single-threaded compute units that are automatically activated, deactivated, and distributed across the cluster.
 
+## Table of Contents
+
+- 🤔 [What are Grains?](#what-are-grains)
+- 📐 [Core Concepts](#core-concepts)
+- 📝 [Registration](#registration)
+- 🚀 [Grain Activation](#grain-activation)
+- ⚙️ [Configuration Options](#configuration-options)
+- 🌐 [Cluster Activation Strategies](#cluster-activation-strategies)
+- 💡 [Complete Example](#complete-example)
+- 💾 [State Management](#state-management)
+- ✅ [Best Practices](#best-practices)
+- 🔌 [GrainContext API](#graincontext-api)
+- 🔧 [Troubleshooting](#troubleshooting)
+- ➡️ [Next Steps](#next-steps)
+
+---
+
 ## What are Grains?
 
 Grains in GoAkt are:
@@ -183,10 +200,16 @@ Grains are activated automatically when first accessed:
 
 ### Using Actor System
 
+Obtain a grain identity with `GrainIdentity` (activation happens on demand when you send messages). Pass a factory that returns the grain instance and optional `GrainOption`s:
+
 ```go
-// Activate grain
-identity := actor.NewGrainIdentity(&UserGrain{}, "user-123")
-err := system.ActivateGrain(ctx, identity)
+// Resolve or activate grain; options apply when the grain is first activated
+identity, err := system.GrainIdentity(ctx, "user-123", func(ctx context.Context) (actor.Grain, error) {
+    return &UserGrain{}, nil
+}, actor.WithGrainDeactivateAfter(5*time.Minute))
+if err != nil {
+    log.Fatal(err)
+}
 
 // Send message (activates grain if not already active)
 err = system.TellGrain(ctx, identity, &UpdateName{NewName: "Alice"})
@@ -207,7 +230,7 @@ nodes := []client.Node{
 c, err := client.New(ctx, nodes)
 defer c.Close()
 
-// Activate grain
+// Build grain request (activation happens on the server when you send)
 grainRequest := &remote.GrainRequest{
     Kind: "main.UserGrain",
     Name: "user-123",
@@ -522,15 +545,10 @@ func main() {
         log.Fatal(err)
     }
 
-    // Activate grain with configuration
-    identity := actor.NewGrainIdentity(&UserGrain{}, "user-123")
-    err = system.ActivateGrain(
-        ctx,
-        identity,
-        actor.WithGrainDeactivateAfter(5*time.Minute),
-        actor.WithGrainDependencies(db, cache),
-        actor.WithGrainInitMaxRetries(3),
-    )
+    // Resolve grain identity (activation happens on first use; options apply then)
+    identity, err := system.GrainIdentity(ctx, "user-123", func(ctx context.Context) (actor.Grain, error) {
+        return &UserGrain{}, nil
+    }, actor.WithGrainDeactivateAfter(5*time.Minute), actor.WithGrainDependencies(db, cache), actor.WithGrainInitMaxRetries(3))
     if err != nil {
         log.Fatal(err)
     }

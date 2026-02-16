@@ -2,6 +2,20 @@
 
 GoAkt provides a structured logging system through the `github.com/tochemey/goakt/v3/log` package. The default implementation uses [Zap](https://github.com/uber-go/zap) with JSON encoding.
 
+## Table of Contents
+
+- 🔌 [Logger Interface](#logger-interface)
+- 📊 [Log Levels](#log-levels)
+- 📦 [Pre-Built Loggers](#pre-built-loggers)
+- 🛠️ [Creating a Custom Logger](#creating-a-custom-logger)
+- ⚙️ [Configuring the Actor System Logger](#configuring-the-actor-system-logger)
+- 📝 [Logging Inside Actors](#logging-inside-actors)
+- 🔧 [Custom Logger Implementation](#custom-logger-implementation)
+- ✅ [Best Practices](#best-practices)
+- ➡️ [Next Steps](#next-steps)
+
+---
+
 ## Logger Interface
 
 The `log.Logger` interface defines the contract for all loggers in GoAkt:

@@ -2,6 +2,25 @@
 
 Passivation is an automatic resource management feature that stops idle actors to free up memory and resources. This is particularly useful for systems with many actors where only a subset is actively processing messages at any given time.
 
+## Table of Contents
+
+- 🤔 [What is Passivation?](#what-is-passivation)
+- 💡 [Why Use Passivation?](#why-use-passivation)
+- ⚙️ [Configuration](#configuration)
+- 🔄 [How Passivation Works](#how-passivation-works)
+- 💡 [Basic Example](#basic-example)
+- 📋 [Use Cases](#use-cases)
+- 💾 [Passivation with State Persistence](#passivation-with-state-persistence)
+- 📊 [Monitoring Passivation](#monitoring-passivation)
+- ✅ [Best Practices](#best-practices)
+- 🔀 [Passivation vs. Shutdown](#passivation-vs-shutdown)
+- 🧪 [Testing Passivation](#testing-passivation)
+- ⚡ [Performance Considerations](#performance-considerations)
+- 📋 [Summary](#summary)
+- ➡️ [Next Steps](#next-steps)
+
+---
+
 ## What is Passivation?
 
 **Passivation** automatically stops actors that have been idle for a configured period. When an actor is passivated:

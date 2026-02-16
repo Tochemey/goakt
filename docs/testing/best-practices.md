@@ -2,6 +2,19 @@
 
 Best practices for writing reliable tests using the GoAkt `testkit` package.
 
+## Table of Contents
+
+- 🔄 [TestKit Lifecycle](#testkit-lifecycle)
+- 🔍 [Probe Patterns](#probe-patterns)
+- 🌾 [Grain Testing Patterns](#grain-testing-patterns)
+- 🌐 [Multi-Node Testing Patterns](#multi-node-testing-patterns)
+- 📁 [Test Organization](#test-organization)
+- ⚠️ [Common Mistakes](#common-mistakes)
+- 📋 [Summary](#summary)
+- ➡️ [Next Steps](#next-steps)
+
+---
+
 ## TestKit Lifecycle
 
 ### Always Clean Up
@@ -135,7 +148,7 @@ identity := kit.GrainIdentity(ctx, "my-grain",
 
 ### Test Grain Passivation
 
-Use `WithGrainDeactivateAfter` and `ExpectTerminated`:
+Use `WithGrainDeactivateAfter` and `ExpectTerminated`. Activate the grain first (e.g. send a message), then assert it terminates after the passivation timeout:
 
 ```go
 identity := kit.GrainIdentity(ctx, "temp-grain",
@@ -146,6 +159,11 @@ identity := kit.GrainIdentity(ctx, "temp-grain",
 )
 
 probe := kit.NewGrainProbe(ctx)
+defer probe.Stop()
+
+// Activate grain, then wait for passivation
+probe.Send(identity, new(testpb.TestPing))
+probe.ExpectNoResponse()
 probe.ExpectTerminated(identity, time.Second)
 ```
 
@@ -352,16 +370,16 @@ probe.ExpectNoMessage()
 
 ## Summary
 
-| Do                                         | Don't                                |
-|--------------------------------------------|--------------------------------------|
-| Use `t.Cleanup` for shutdown               | Forget to shut down TestKit          |
-| Stop probes with `defer probe.Stop()`      | Leave probes running                 |
-| Use `ExpectNoMessage()` after assertions   | Skip trailing message checks         |
-| Use `SendSync` for `ctx.Response()` actors | Mix up Send and SendSync             |
-| Use `WithIn` variants for slow actors      | Use fixed `time.Sleep`               |
-| Create fresh TestKit per test              | Share TestKit across tests           |
-| Use table-driven tests for multiple cases  | Duplicate boilerplate                |
-| Use `SenderAddress()` in cluster tests     | Rely on `Sender()` for remote actors |
+| Do                                             | Don't                                |
+|------------------------------------------------|--------------------------------------|
+| Use `t.Cleanup` for shutdown                   | Forget to shut down TestKit          |
+| Stop probes with `defer probe.Stop()`          | Leave probes running                 |
+| Use `ExpectNoMessage()` after assertions       | Skip trailing message checks         |
+| Use `SendSync` for `ctx.Response()` actors     | Mix up Send and SendSync             |
+| Use `ExpectMessageWithin` etc. for slow actors | Use fixed `time.Sleep`               |
+| Create fresh TestKit per test                  | Share TestKit across tests           |
+| Use table-driven tests for multiple cases      | Duplicate boilerplate                |
+| Use `SenderAddress()` in cluster tests         | Rely on `Sender()` for remote actors |
 
 ## Next Steps
 

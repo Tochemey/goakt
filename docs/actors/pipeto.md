@@ -2,16 +2,46 @@
 
 The PipeTo pattern allows actors to execute expensive or blocking operations in the background and receive the result as a regular message. This prevents blocking the actor's mailbox while maintaining the actor model's single-threaded message processing.
 
+## Table of Contents
+
+- 🤔 [What is PipeTo?](#what-is-pipeto)
+- 💡 [When to Use PipeTo](#when-to-use-pipeto)
+- 🚀 [Basic Usage](#basic-usage)
+- 💡 [Complete Example](#complete-example)
+- ⚠️ [Error Handling](#error-handling)
+- 🧩 [Common Patterns](#common-patterns)
+- ✅ [Best Practices](#best-practices)
+- 🔀 [PipeTo vs. Reentrancy](#pipeto-vs-reentrancy)
+- ⚡ [Performance Considerations](#performance-considerations)
+- 🧪 [Testing](#testing)
+- 📋 [Summary](#summary)
+- ➡️ [Next Steps](#next-steps)
+
+---
+
 ## What is PipeTo?
 
 **PipeTo** executes a function asynchronously and pipes the result back to an actor as a message. The function runs in a separate goroutine, and the actor continues processing other messages.
 
+**Where it runs:** PipeTo is used from **message handling** — inside an actor’s `Receive`, on the `ReceiveContext` (`ctx`). You call `ctx.PipeTo(...)` or `ctx.PipeToName(...)` when processing a message.
+
+**Target by PID or by name:**
+
+- **PipeTo**(targetPID, func) — sends the result to an actor identified by **PID** (e.g. `ctx.Self()` or another actor’s PID).
+- **PipeToName**(actorName, func) — sends the result to an actor identified by **name** (string); useful when you don’t have a PID or for location-transparent delivery in a cluster.
+
 ```go
-ctx.PipeTo(targetActor, func() (proto.Message, error) {
-    // Long-running operation
+// In Receive: target by PID
+ctx.PipeTo(ctx.Self(), func() (proto.Message, error) {
     result := doExpensiveComputation()
     return &Result{Data: result}, nil
 })
+
+// Or another actor's PID
+ctx.PipeTo(a.coordinatorPID, func() (proto.Message, error) { ... })
+
+// In Receive: target by name
+ctx.PipeToName("result-processor", func() (proto.Message, error) { ... })
 ```
 
 **Key benefits:**

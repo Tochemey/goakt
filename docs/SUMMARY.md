@@ -8,6 +8,10 @@
 
 * [Design Principles](design/principle.md)
 
+## Use Cases
+
+* [Overview](usecases/overview.md)
+
 ## Actors
 
 * [Overview](actors/overview.md)
@@ -26,8 +30,14 @@
 
 ## Actor System
 
-* [Overview](actorsystem/overview.md)
-* [Coordinated Shutdown](actorsystem/coordinated_shutdown.md)
+* [Overview](actor_system/overview.md)
+* [Coordinated Shutdown](actor_system/coordinated_shutdown.md)
+
+## Grains
+
+* [Overview](grains/overview.md)
+* [Stateful Grains](grains/stateful_grains.md)
+* [Usage](grains/usage.md)
 
 ## Remoting
 
@@ -35,7 +45,7 @@
 * [TLS Configuration](remoting/tls.md)
 * [Context Propagation](remoting/context_propagation.md)
 
-## Clustering
+## Cluster
 
 * [Overview](cluster/overview.md)
 * [Discovery](cluster/discovery.md)
@@ -44,21 +54,15 @@
 * [Actor Relocation](cluster/relocation.md)
 * [Multi-Datacenter](cluster/multi_datacenters.md)
 
-## Grains
+## PubSub
 
-* [Overview](grains/overview.md)
-* [Stateful Grains](grains/stateful_grains.md)
-* [Usage](grains/usage.md)
+* [Overview](pubsub/overview.md)
+* [Usage](pubsub/usage.md)
 
 ## Events Stream
 
 * [Overview](events_stream/overview.md)
 * [Usage](events_stream/usage.md)
-
-## PubSub
-
-* [Overview](pubsub/overview.md)
-* [Usage](pubsub/usage.md)
 
 ## Observability
 
@@ -70,9 +74,6 @@
 * [Testing Actors](testing/overview.md)
 * [Best Practices](testing/best-practices.md)
 
-## Use Cases
-
-* [Overview](usecases/overview.md)
 
 ## Additional Resources
 

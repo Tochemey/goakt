@@ -2,6 +2,25 @@
 
 Actor relocation is GoAkt's automatic mechanism for moving actors to healthy nodes when their host node fails or leaves the cluster. This ensures high availability and continuous operation of distributed actors.
 
+## Table of Contents
+
+- 📖 [Overview](#overview)
+- 🔄 [How Relocation Works](#how-relocation-works)
+- ⚙️ [Relocation Configuration](#relocation-configuration)
+- 🎯 [Relocation Strategies](#relocation-strategies)
+- 💾 [Relocation and Actor State](#relocation-and-actor-state)
+- 📋 [Relocation Behavior by Actor Type](#relocation-behavior-by-actor-type)
+- 🔗 [Relocation and Dependencies](#relocation-and-dependencies)
+- 🛡️ [Relocation and Supervision](#relocation-and-supervision)
+- 📊 [Monitoring Relocation](#monitoring-relocation)
+- ⚠️ [Edge Cases and Failure Scenarios](#edge-cases-and-failure-scenarios)
+- ✅ [Best Practices](#best-practices)
+- 🚫 [Disabling Relocation (Advanced)](#disabling-relocation-advanced)
+- 🔧 [Troubleshooting](#troubleshooting)
+- ➡️ [Next Steps](#next-steps)
+
+---
+
 ## Overview
 
 When a node leaves the cluster (gracefully or due to failure), actors hosted on that node need to be recreated elsewhere. GoAkt's relocation system:
@@ -116,15 +135,6 @@ Actors from the failed node are distributed evenly across remaining nodes:
 ```
 
 This is the default and only built-in strategy.
-
-### Considerations for Custom Strategies
-
-While GoAkt uses round-robin by default, you can implement custom allocation logic by:
-
-1. Creating a custom relocator actor
-2. Subscribing to `NodeLeft` events
-3. Implementing your own allocation algorithm
-4. Spawning actors according to your policy
 
 ## Relocation and Actor State
 
@@ -252,12 +262,20 @@ When the leader hosting a singleton fails:
 
 ### Grains (Virtual Actors)
 
-Grains are designed for automatic relocation:
+Grains are designed for automatic relocation. You get a grain identity (activation is on-demand when you send messages):
 
 ```go
-// Grains are activated on-demand and relocated automatically
-grain, err := system.ActivateGrain(ctx, "user-123", new(UserGrain))
+// GrainIdentity resolves or activates the grain; TellGrain/AskGrain trigger activation if needed
+identity, err := system.GrainIdentity(ctx, "user-123", func(ctx context.Context) (actor.Grain, error) {
+    return new(UserGrain), nil
+})
+if err != nil {
+    return err
+}
+_ = system.TellGrain(ctx, identity, &SomeMessage{})
 ```
+
+To disable relocation for a specific grain kind, use `actor.WithGrainDisableRelocation()` when configuring the grain (e.g. in cluster config or at activation).
 
 Grains handle relocation via:
 
@@ -274,8 +292,8 @@ Router actors are not directly relocated. Instead:
 3. The router discovers new routee locations via the routing table
 
 ```go
-// Router and its routees are relocated independently
-err := system.SpawnRouter(ctx, "worker-pool", routerConfig)
+// Router and its routees are relocated independently. Signature: (ctx, name, poolSize, routeesKind, opts...)
+pid, err := system.SpawnRouter(ctx, "worker-pool", 5, &Worker{}, actor.WithRoutingStrategy(actor.RoundRobinRouting))
 ```
 
 ## Relocation and Dependencies
@@ -426,7 +444,7 @@ Monitor relocation metrics (if using `WithMetrics()`):
 
 **Mitigation**:
 
-- Register all actor kinds on all nodes with `WithKinds()`
+- Register all actor kinds on all nodes (e.g. `clusterConfig.WithKinds(MyActor{}, ...)` when building the cluster config)
 - Use role-based placement if only specific nodes should host certain actors
 
 ## Best Practices
@@ -441,7 +459,7 @@ Monitor relocation metrics (if using `WithMetrics()`):
 ### Configuration
 
 1. **Enable relocation by default**: Only disable when absolutely necessary
-2. **Register all kinds**: Use `WithKinds()` to register actor types cluster-wide
+2. **Register all kinds**: Use `WithKinds(kinds...)` on your cluster config to register actor types cluster-wide
 3. **Set appropriate quorums**: Prevent false node-left events due to transient issues
 4. **Use roles for dedicated actors**: Pin critical actors to specific node roles
 
@@ -495,6 +513,15 @@ pid, err := system.Spawn(
 - Actor is lost if its node fails
 - Useful for actors with non-transferable local state or resources
 
+### Per-Grain Disable
+
+Use `actor.WithGrainDisableRelocation()` when configuring a grain (e.g. in cluster config `WithGrains()` or at activation) to opt that grain kind out of relocation.
+
+**Implications:**
+
+- Grains of that kind are not relocated when their node leaves
+- Useful for stateless or short-lived grains where relocation is not desired
+
 ## Troubleshooting
 
 ### Actors Not Relocating
@@ -514,7 +541,7 @@ pid, err := system.Spawn(
 **Solutions:**
 
 - Verify relocation is enabled
-- Check that actor kinds are registered with `WithKinds()`
+- Check that actor kinds are registered (e.g. `clusterConfig.WithKinds(...)`)
 - Ensure sufficient healthy nodes in cluster
 - Review minimum quorum settings
 
@@ -572,7 +599,7 @@ pid, err := system.Spawn(
 
 **Solutions:**
 
-- Reduce number of actors per node
+- Check the number of actors per node
 - Optimize actor spawn time
 - Increase cluster size for better distribution
 - Monitor and scale cluster resources
