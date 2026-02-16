@@ -248,7 +248,7 @@ pid, err := actorSystem.Spawn(ctx, "high-throughput", &MyActor{},
 ### Decision Matrix
 
 | Requirement                       | Recommended Mailbox         |
-|-----------------------------------|-----------------------------|
+| --------------------------------- | --------------------------- |
 | Default/general purpose           | `UnboundedMailbox`          |
 | Need backpressure                 | `BoundedMailbox`            |
 | Priority-based processing         | `UnboundedPriorityMailbox`  |
@@ -349,29 +349,21 @@ pid.Shutdown(ctx)
 
 ## Monitoring Mailbox
 
-### Mailbox Size
+### Mailbox length (interface only)
 
-Check the current mailbox size:
+The `Mailbox` interface defines `Len() int64`, which returns the current number of messages in the queue. This is available only when you hold a reference to the mailbox (for example in tests or custom code that constructs the mailbox). The `PID` does **not** expose mailbox length to actors at runtime — there is no `MailboxSize()` or similar method on `PID`.
 
-```go
-func (a *MyActor) Receive(ctx *actor.ReceiveContext) {
-    switch msg := ctx.Message().(type) {
-    case *CheckLoad:
-        size := ctx.Self().MailboxSize()
-        ctx.Response(&LoadInfo{
-            MailboxSize: size,
-        })
-    }
-}
-```
+To observe actor load from inside an actor, use `pid.Metric(ctx)` (see [Metrics](../observability/metrics.md)): it provides `ProcessedCount()`, `StashSize()`, and other counters. When using a bounded mailbox, handle `errors.ErrMailboxFull` from `Tell` to detect backpressure.
 
-### Mailbox Metrics
+### Actor metrics (OpenTelemetry)
 
-GoAkt exposes mailbox metrics via OpenTelemetry:
+When metrics are enabled with `WithMetrics()`, GoAkt registers per-actor instruments. None of them are mailbox enqueue/dequeue counters. The ones relevant to message flow are:
 
-- `actor_mailbox_size`: Current mailbox size
-- `actor_mailbox_enqueued_total`: Total messages enqueued
-- `actor_mailbox_dequeued_total`: Total messages dequeued
+- `actor.stash.size` — number of messages currently stashed
+- `actor.processed.count` — total messages processed
+- `actor.deadletters.count` — messages dropped to dead letters
+
+For the full list of system and actor metrics, see [Metrics](../observability/metrics.md).
 
 ## Best Practices
 
@@ -441,33 +433,10 @@ priorityFunc := func(msg1, msg2 proto.Message) bool {
 
 When using bounded mailboxes:
 
-1. **Graceful degradation**: Handle full mailbox errors
-2. **Circuit breaker**: Stop sending when consistently full
-3. **Alternative routing**: Route to different actor
-4. **Load shedding**: Drop low-priority messages
-
-```go
-func sendWithBackpressure(ctx context.Context, pid *actor.PID, msg proto.Message) error {
-    err := actor.Tell(ctx, pid, msg)
-    if err != nil {
-        // Mailbox full - apply backpressure strategy
-        if errors.Is(err, actor.ErrMailboxFull) {
-            // Strategy 1: Retry after delay
-            time.Sleep(100 * time.Millisecond)
-            return actor.Tell(ctx, pid, msg)
-
-            // Or Strategy 2: Route to backup actor
-            // return actor.Tell(ctx, backupPID, msg)
-
-            // Or Strategy 3: Drop message
-            // log.Warn("Message dropped due to backpressure")
-            // return nil
-        }
-        return err
-    }
-    return nil
-}
-```
+1. **No sender feedback for Tell**: When a bounded mailbox is full, `Enqueue` fails inside the PID; the error is handled internally (e.g. dead-letter). **`Tell` does not return `ErrMailboxFull` to the caller** — the sender gets `nil` even when the message was not enqueued.
+2. **Observe load**: Use `pid.Metric(ctx)` or OpenTelemetry (e.g. `actor.processed.count`, `actor.stash.size`) to detect slow consumers and apply backpressure upstream — throttle sends, use a circuit breaker, or route to backup actors.
+3. **Alternative routing**: Route to a backup actor or queue when metrics or timeouts indicate high load.
+4. **Grain mailboxes**: For grains with a bounded mailbox, `TellGrain` returns `gerrors.ErrMailboxFull` when full, so callers can retry or route elsewhere (see [Grains](../grains/overview.md)).
 
 ## Dead Letters
 
