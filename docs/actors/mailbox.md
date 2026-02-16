@@ -8,7 +8,7 @@ The mailbox is a critical component of the actor model. It provides:
 
 - **Message buffering**: Stores messages until the actor can process them
 - **Asynchronous communication**: Senders don't block waiting for the actor
-- **Ordering guarantees**: Messages from the same sender arrive in order
+- **FIFO ordering**: Messages are processed in the order they are enqueued
 - **Backpressure control**: Bounded mailboxes can apply backpressure
 - **Thread safety**: Safe for concurrent message producers
 
@@ -302,16 +302,18 @@ pid, err := actorSystem.Spawn(ctx, "my-actor", &MyActor{})
 
 ### Message Ordering
 
-Messages from the **same sender** to the **same actor** maintain order:
+The mailbox is a **thread-safe FIFO queue**: messages are processed in the order they are enqueued. There is no per-sender ordering guarantee.
+
+When a single goroutine sends messages in sequence, they are enqueued (and thus processed) in that order:
 
 ```go
-// These messages arrive in order: Msg1 → Msg2 → Msg3
+// Enqueued in order: Msg1 → Msg2 → Msg3
 actor.Tell(ctx, pid, &Msg1{})
 actor.Tell(ctx, pid, &Msg2{})
 actor.Tell(ctx, pid, &Msg3{})
 ```
 
-Messages from **different senders** have no ordering guarantee:
+When **multiple senders** (or goroutines) send to the same actor concurrently, messages are interleaved in the order they reach the mailbox; ordering between different senders is non-deterministic:
 
 ```go
 // Goroutine 1
