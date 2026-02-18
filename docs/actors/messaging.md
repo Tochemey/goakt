@@ -39,24 +39,24 @@ GoAkt provides two primary messaging patterns:
 
 ### 1. Tell (Fire-and-Forget)
 
-**actor.Tell(ctx, pid, message)** — Sends asynchronously and returns immediately. Non-blocking; no response. Use for commands, notifications, events. Check the returned error (e.g. actor dead).
+*Tell(ctx, pid, message)* — Sends asynchronously and returns immediately. Non-blocking; no response. Use for commands, notifications, events. Check the returned error (e.g. actor dead).
 
 ### 2. Ask (Request-Response)
 
-**actor.Ask(ctx, pid, message, timeout)** — Sends and blocks until the actor replies or timeout. Returns `proto.Message` (type-assert) or an error.
-- Receiver must call **ctx.Response(reply)** in `Receive` for the request to complete.
+*Ask(ctx, pid, message, timeout)* — Sends and blocks until the actor replies or timeout. Returns `proto.Message` (type-assert) or an error.
+- Receiver must call *ctx.Response(reply)* in `Receive` for the request to complete.
 - Use for queries and request-reply. From inside another actor’s `Receive`, prefer [PipeTo](pipeto.md) or [Request pattern](#request-pattern) to avoid blocking.
 
 ## Responding to Messages
 
-- **Ask** completes when the receiver calls **ctx.Response(reply)** once with a proto message; the caller gets it as the return value of `Ask`.
+- *Ask* completes when the receiver calls *ctx.Response(reply)* once with a proto message; the caller gets it as the return value of `Ask`.
 - You can call `Response` from a goroutine or after async work if you keep the `ReceiveContext`.
 - Do not call `Response` twice for the same request.
 
 ## Batch Messaging
 
-- **BatchTell** — Sends multiple messages in one call; the actor processes them one at a time in order.
-- **BatchAsk** — Sends multiple requests and returns a channel of responses (same order as requests). Consume the channel until closed or timeout.
+- *BatchTell* — Sends multiple messages in one call; the actor processes them one at a time in order.
+- *BatchAsk* — Sends multiple requests and returns a channel of responses (same order as requests). Consume the channel until closed or timeout.
 
 ## Message Context
 
@@ -78,9 +78,9 @@ GoAkt provides two primary messaging patterns:
 
 ## Remote Messaging
 
-- **Resolve:** **ctx.RemoteLookup(host, port, actorName)** or **pid.RemoteLookup(ctx, host, port, actorName)** to get an address.
-- **From inside Receive:** **ctx.RemoteTell(addr, message)** and **ctx.RemoteAsk(addr, message, timeout)**. `RemoteAsk` returns `*anypb.Any`; unmarshal to your type.
-- **From outside an actor:** **pid.RemoteTell(ctx, addr, message)** (and corresponding Ask variants).
+- Get the remote actor address using either *RemoteLookup(host, port, actorName)*.
+- From inside Receive: *ctx.RemoteTell(addr, message)* and *ctx.RemoteAsk(addr, message, timeout)*. `RemoteAsk` returns `*anypb.Any`; unmarshal to your type.
+- Given a local actor reference PID you can also *pid.RemoteTell(ctx, addr, message)* (and corresponding Ask variants).
 
 ### SendSync and SendAsync
 
@@ -88,23 +88,24 @@ These methods send to an actor **by name**; the system resolves the target (loca
 
 | Method                                    | Behavior                                                                                              | Use when                                                                   |
 |-------------------------------------------|-------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------|
-| **SendAsync**(actorName, message)         | Fire-and-forget; does not block or expect a reply.                                                    | Like Tell, but target is an actor **name** (e.g. in cluster).              |
-| **SendSync**(actorName, message, timeout) | Blocks until response or timeout; returns response (or nil). From Receive, errors are in `ctx.Err()`. | Like Ask, but target is an actor **name**. Receiver uses `ctx.Response()`. |
+| `SendAsync`         | Fire-and-forget; does not block or expect a reply.                                                    | Like Tell, but target is an actor **name** (e.g. in cluster).              |
+| `SendSync` | Blocks until response or timeout; returns response (or nil). From Receive, errors are in `ctx.Err()`. | Like Ask, but target is an actor **name**. Receiver uses `ctx.Response()`. |
 
-- **From inside Receive:** `ctx.SendAsync(actorName, message)` (fire-and-forget; check `ctx.Err()` on failure) and `ctx.SendSync(actorName, message, timeout)` (blocks; check `ctx.Err()` and nil response).
-- **From outside an actor:** `pid.SendAsync(ctx, actorName, message)` and `pid.SendSync(ctx, actorName, message, timeout)`.
+- From inside Receive: `ctx.SendAsync(actorName, message)` (fire-and-forget; check `ctx.Err()` on failure) and `ctx.SendSync(actorName, message, timeout)` (blocks; check `ctx.Err()` and nil response).
+- From outside an actor: `pid.SendAsync(ctx, actorName, message)` and `pid.SendSync(ctx, actorName, message, timeout)`.
 - **See also:** [Tell and Ask](#1-tell-fire-and-forget), [Ask Errors](#ask-errors); [Request Pattern](#request-pattern) and [Reentrancy](reentrancy.md) for non-blocking request-response.
 
 ## Forwarding Messages
 
-- **ctx.Forward(pid)** — Forwards the current message to another actor; original sender is preserved so the recipient sees the real sender.
-- **ctx.ForwardTo(actorName)** — Forwards by actor name (cluster-aware).
+- *ctx.Forward(pid)* — Forwards the current message to another actor; original sender is preserved so the recipient sees the real sender.
+- *ctx.ForwardTo(actorName)* — Forwards by actor name (cluster-aware).
 - Use when routing or proxying messages.
 
 ## Message Scheduling
 
-- **ScheduleOnce** — One-shot delivery after a delay.
-- **ScheduleWithCron** — Recurring delivery by cron expression.
+- *ScheduleOnce/RemoteScheduleOnce* — One-shot delivery after a delay.
+- *ScheduleWithCron/RemoteScheduleWithCron* — Recurring delivery by cron expression.
+- *Schedule/RemoteSchedule*  — Recurring delivery at a given interval.
 - See [Message Scheduling](message_scheduling.md) for details.
 
 ## Request Pattern
