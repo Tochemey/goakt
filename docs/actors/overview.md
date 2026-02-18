@@ -49,7 +49,15 @@ This simple set of rules enables powerful patterns for building scalable, fault-
 
 ## Actor Interface
 
-Every actor implements the `Actor` interface: `PreStart(ctx *Context) error`, `Receive(ctx *ReceiveContext)`, and `PostStop(ctx *Context) error`.
+Every actor implements the `Actor` interface:
+
+```go
+type Actor interface {
+	PreStart(ctx *Context) error
+	Receive(ctx *ReceiveContext)
+	PostStop(ctx *Context) error
+}
+```
 
 ### Lifecycle Hooks
 
