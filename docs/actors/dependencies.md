@@ -7,8 +7,6 @@ Dependency injection allows you to attach runtime dependencies to actors at spaw
 - 🤔 [What are Dependencies?](#what-are-dependencies)
 - 💡 [Why Use Dependency Injection?](#why-use-dependency-injection)
 - 🚀 [Basic Usage](#basic-usage)
-- 💡 [Example](#comprehensive-example)
-- 📦 [Multiple Dependencies](#multiple-dependencies)
 - ✅ [Best Practices](#best-practices)
 - 📋 [Summary](#summary)
 
@@ -29,20 +27,9 @@ Benefits include:
 
 ## Basic Usage
 
-- **At spawn:** Pass dependencies with **actor.WithDependencies(dep1, dep2, ...)**.
-- **In PreStart:** Call **ctx.Dependencies()** (returns a slice of `interface{}`); type-assert to your types (e.g. `deps[0].(*sql.DB)`) and store in the actor.
+- During the actor creation via `spawn` Pass dependencies with `WithDependencies(dep1, dep2, ...)` option.
+- *In PreStart:* Call `ctx.Dependencies()`. This function will return the all the list of the actor's dependencies.
 - Keeps initialization out of constructors and makes testing easy (inject mocks).
-
-## Example (concept)
-
-- Create a struct (e.g. `AppDependencies`) holding DB, HTTP client, config, cache; construct it in main or a setup function.
-- Spawn with **WithDependencies(deps)**. In PreStart, **ctx.Dependencies()[0].(*AppDependencies)** and store; use deps in Receive.
-- Do not close shared resources in PostStop. For tests, spawn with **WithDependencies(mockDB, mockCache)**.
-
-## Multiple Dependencies
-
-- Pass several deps: **WithDependencies(db, cache, logger)**.
-- **ctx.Dependencies()** returns the slice in the same order; type-assert each (e.g. `deps[0].(*sql.DB)`) and assign to actor fields.
 
 ## Best Practices
 
