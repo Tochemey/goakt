@@ -56,15 +56,15 @@ system, err := actor.NewActorSystem("my-system",
 )
 ```
 
-| Area | Options |
-|------|--------|
-| Discovery | `WithDiscovery`, `WithDiscoveryPort`, `WithPeersPort` |
-| Quorum | `WithMinimumPeersQuorum`, `WithReplicaCount`, `WithWriteQuorum`, `WithReadQuorum` |
-| Registration | `WithKinds`, `WithGrains` |
-| Partitioning | `WithPartitionCount` (default 271) |
-| Timeouts | `WithBootstrapTimeout`, `WithShutdownTimeout`, `WithWriteTimeout`, `WithReadTimeout` |
-| Sync | `WithClusterStateSyncInterval`, `WithClusterBalancerInterval` |
-| Other | `WithRoles`, `WithGrainActivationBarrier`, `WithDataCenter`, `WithTableSize` |
+| Area         | Options                                                                              |
+|--------------|--------------------------------------------------------------------------------------|
+| Discovery    | `WithDiscovery`, `WithDiscoveryPort`, `WithPeersPort`                                |
+| Quorum       | `WithMinimumPeersQuorum`, `WithReplicaCount`, `WithWriteQuorum`, `WithReadQuorum`    |
+| Registration | `WithKinds`, `WithGrains`                                                            |
+| Partitioning | `WithPartitionCount` (default 271)                                                   |
+| Timeouts     | `WithBootstrapTimeout`, `WithShutdownTimeout`, `WithWriteTimeout`, `WithReadTimeout` |
+| Sync         | `WithClusterStateSyncInterval`, `WithClusterBalancerInterval`                        |
+| Other        | `WithRoles`, `WithGrainActivationBarrier`, `WithDataCenter`, `WithTableSize`         |
 
 ## Starting a Cluster
 
