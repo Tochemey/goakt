@@ -13,10 +13,8 @@ Passivation is an automatic resource management feature that stops idle actors t
 - 💾 [Passivation with State Persistence](#passivation-with-state-persistence)
 - ✅ [Best Practices](#best-practices)
 - 🔀 [Passivation vs. Shutdown](#passivation-vs-shutdown)
-- 🧪 [Testing Passivation](#testing-passivation)
-- ⚡ [Performance Considerations](#performance-considerations)
+- 🎯 [System-Level Eviction](#system-level-eviction)
 - 📋 [Summary](#summary)
-- ➡️ [Next Steps](#next-steps)
 
 ---
 
@@ -84,66 +82,9 @@ Message → Process → Idle Start → Timer → Passivate
          Reset Timer
 ```
 
-## Basic Example
+## Basic Example (concept)
 
-```go
-type SessionActor struct {
-    userId    string
-    sessionId string
-    data      map[string]interface{}
-}
-
-func (a *SessionActor) PreStart(ctx *actor.Context) error {
-    ctx.ActorSystem().Logger().Info("Session started",
-        "user_id", a.userId,
-        "session_id", a.sessionId)
-
-    // Initialize session data
-    a.data = make(map[string]interface{})
-    return nil
-}
-
-func (a *SessionActor) Receive(ctx *actor.ReceiveContext) {
-    switch msg := ctx.Message().(type) {
-    case *UpdateSession:
-        a.data[msg.GetKey()] = msg.GetValue()
-        ctx.Response(&SessionUpdated{})
-
-    case *GetSession:
-        ctx.Response(&SessionData{Data: a.data})
-    }
-}
-
-func (a *SessionActor) PostStop(ctx *actor.Context) error {
-    ctx.ActorSystem().Logger().Info("Session ended (passivated)",
-        "user_id", a.userId,
-        "session_id", a.sessionId)
-
-    // Save session data before passivation
-    if err := a.saveSessionData(); err != nil {
-        ctx.ActorSystem().Logger().Error("Failed to save session data", "error", err)
-        return err
-    }
-
-    return nil
-}
-
-// Usage
-func main() {
-    ctx := context.Background()
-    actorSystem, _ := actor.NewActorSystem("SessionSystem")
-    actorSystem.Start(ctx)
-    defer actorSystem.Stop(ctx)
-
-    // Spawn session actor with time-based passivation (5 min inactivity)
-    pid, _ := actorSystem.Spawn(ctx, "session-123", &SessionActor{
-        userId:    "user-456",
-        sessionId: "session-123",
-    }, actor.WithPassivationStrategy(passivation.NewTimeBasedStrategy(5*time.Minute)))
-
-    // Actor will be automatically passivated after 5 minutes of inactivity
-}
-```
+Use a **session-style actor**: in PreStart init state; in Receive handle UpdateSession/GetSession and respond; in **PostStop** persist or flush state before the actor is removed. Spawn with **WithPassivationStrategy(passivation.NewTimeBasedStrategy(5*time.Minute))** so idle sessions are stopped after 5 minutes. Messages to a passivated actor are dead-lettered; re-create the actor (e.g. by name) when a new request arrives if you need reactivation. Do any "save session data" or flush in PostStop before returning.
 
 ## Use Cases
 
@@ -475,71 +416,123 @@ ctx.Shutdown() // In Receive
 pid.Shutdown(ctx) // External
 ```
 
-## Testing Passivation
+## System-Level Eviction
 
-```go
-func TestPassivation(t *testing.T) {
-    ctx := context.Background()
-    system, _ := actor.NewActorSystem("test",
-        actor.WithPassivationStrategy(passivation.NewTimeBasedStrategy(100*time.Millisecond)))
-    system.Start(ctx)
-    defer system.Stop(ctx)
+While per-actor passivation strategies manage individual actor lifecycles based on idle time or message count, GoAkt also provides a **system-level eviction mechanism** that controls the total number of active actors across the entire actor system. This is particularly useful for managing memory pressure when dealing with large numbers of actors.
 
-    // Spawn actor
-    pid, _ := system.Spawn(ctx, "test", &TestActor{})
+### What is System Eviction?
 
-    // Send message
-    actor.Tell(ctx, pid, &TestMessage{})
+System eviction is a global memory management strategy that monitors the total number of active actors and automatically passivates actors when the count exceeds a configured limit. Unlike per-actor passivation which is based on individual actor inactivity, system eviction makes decisions based on the overall system state and actor usage patterns.
 
-    // Verify actor is running
-    assert.True(t, pid.IsRunning())
+### How System Eviction Works
 
-    // Wait for passivation
-    time.Sleep(200 * time.Millisecond)
+The eviction mechanism operates on a periodic interval and follows these steps:
 
-    // Verify actor was passivated
-    assert.False(t, pid.IsRunning())
-}
-```
+1. **Monitoring**: The system periodically checks the total number of active actors
+2. **Threshold Detection**: When the count exceeds the configured limit, eviction is triggered
+3. **Actor Selection**: Actors are selected for passivation based on the chosen eviction policy
+4. **Passivation**: Selected actors are gracefully shut down (PostStop is called)
+5. **Resource Release**: Memory and resources are freed as actors are removed
 
-## Performance Considerations
+### Eviction Policies
 
-- **Memory savings**: Passivation frees memory for inactive actors
-- **CPU overhead**: Minimal passivation overhead
-- **Startup cost**: Re-spawning has PreStart overhead
-- **Thrashing**: Too short timeout causes frequent passivation/spawn
+The system supports three eviction policies that determine which actors to passivate when the limit is exceeded:
 
-### Optimal Timeout Selection
+**LRU (Least Recently Used)**
+- Passivates actors that have not been accessed for the longest time
+- Suitable for scenarios where recently active actors are more likely to be needed again
+- Prioritizes keeping "hot" actors in memory
+- Effective for caching patterns and session management
 
-```
-Short timeout (< 1 minute):
-- High memory savings
-- Higher CPU overhead
-- Suitable for: caches, temporary sessions
+**LFU (Least Frequently Used)**
+- Passivates actors that have been used the least number of times
+- Retains actors that are consistently accessed, even if not recently
+- Good for scenarios where usage frequency indicates importance
+- Useful when popular actors should remain active
 
-Medium timeout (5-15 minutes):
-- Balanced approach
-- Good for most use cases
-- Suitable for: user sessions, connections
+**MRU (Most Recently Used)**
+- Passivates actors that were accessed most recently
+- Less common but useful in specific scenarios
+- Effective when fresh data should be cycled out quickly
+- Can be useful for certain cache invalidation patterns
 
-Long timeout (> 30 minutes):
-- Low CPU overhead
-- Lower memory savings
-- Suitable for: critical actors, frequently accessed
-```
+### Key Concepts
+
+**Limit**: The maximum number of active actors allowed before eviction begins. This acts as a memory ceiling for the system.
+
+**Interval**: How frequently the eviction engine evaluates actor counts and triggers passivation. Shorter intervals provide more aggressive memory management but consume more system resources for evaluation.
+
+**Percentage**: When the limit is exceeded, this determines what percentage of actors to passivate. For example, with a 50% setting and 1000 actors exceeding a limit of 700, approximately 150 actors would be passivated (50% of the 300 actors over the limit).
+
+### System Eviction vs. Per-Actor Passivation
+
+These two mechanisms can work together complementarily:
+
+**System Eviction**:
+- **Global scope**: Manages total actor count across the system
+- **Memory-driven**: Triggered by overall system memory concerns
+- **Policy-based**: Uses usage patterns (LRU, LFU, MRU) to select victims
+- **System-level**: Configured at actor system creation
+- **Periodic**: Runs at configured intervals
+
+**Per-Actor Passivation**:
+- **Individual scope**: Each actor manages its own lifecycle
+- **Time or message-driven**: Based on inactivity period or message count
+- **Idle detection**: Triggers on individual actor inactivity
+- **Actor-level**: Configured per actor at spawn time
+- **Event-driven**: Triggers when individual conditions are met
+
+**When to Use What**:
+- Use **system eviction** when you need to control overall memory usage and have a large number of actors
+- Use **per-actor passivation** when actors have natural lifecycle boundaries (sessions, connections, cache entries)
+- Use **both together** for comprehensive resource management: per-actor passivation handles idle actors while system eviction provides a safety net for overall memory pressure
+
+### Best Practices for System Eviction
+
+**Choose the Right Policy**:
+- Use LRU for session-like actors where recent activity indicates future use
+- Use LFU for actors that serve popular resources or frequently accessed data
+- Use MRU sparingly and only when your access patterns justify it
+
+**Set Appropriate Limits**:
+- Consider available memory and average actor memory footprint
+- Leave headroom for actor creation bursts
+- Monitor actual actor counts in production to tune the limit
+
+**Balance Interval Timing**:
+- Shorter intervals (1-5 seconds) provide tighter memory control but increase overhead
+- Longer intervals (10-60 seconds) reduce overhead but allow temporary memory spikes
+- Adjust based on actor creation rate and memory constraints
+
+**Configure Appropriate Percentages**:
+- Higher percentages (50-70%) provide more aggressive cleanup but may evict actors that will be needed soon
+- Lower percentages (10-30%) provide gentler cleanup but may require multiple eviction cycles
+- Consider the cost of actor recreation when setting this value
+
+**Combine with Per-Actor Strategies**:
+- Use system eviction as a global safety net
+- Use per-actor passivation for predictable lifecycle management
+- Ensure actors properly persist state in PostStop for both mechanisms
+
+### Monitoring System Eviction
+
+When system eviction is active, you should monitor:
+- **Actor count trends**: Watch for patterns that indicate the limit needs adjustment
+- **Eviction frequency**: How often the eviction mechanism triggers
+- **Actor recreation patterns**: Actors that are repeatedly evicted and recreated may need different handling
+- **Memory usage**: Ensure eviction is effectively managing memory pressure
+- **System performance**: Balance between memory management and actor recreation overhead
+
+For system and per-actor metrics (including lifecycle), see [Observability — Metrics](../observability/metrics.md). Use the events stream to observe actor stopped/passivated events; see [Events Stream](../events_stream/overview.md).
 
 ## Summary
 
-- **Passivation** automatically stops idle actors
-- **Configure** with `WithPassivationStrategy()` (e.g. `passivation.NewTimeBasedStrategy(d)` or `passivation.NewLongLivedStrategy()`)
-- **PostStop** is called for cleanup
-- **Persist state** before passivation
-- **Use for** sessions, caches, connections, virtual actors
-- **Monitor** with logging and metrics
-
-## Next Steps
-
-- **[Supervision](supervision.md)**: Fault tolerance with passivation
-- **[Behaviors](behaviours.md)**: State machines with passivation
-- **[Dependencies](dependencies.md)**: Inject dependencies for testing
-- **[Overview](overview.md)**: Actor lifecycle and fundamentals
+- **Passivation** automatically stops idle actors based on inactivity or message count
+- **Configure per-actor** with `WithPassivationStrategy()` (e.g. `passivation.NewTimeBasedStrategy(d)` or `passivation.NewLongLivedStrategy()`)
+- **System-level eviction** manages total actor count with policies (LRU, LFU, MRU) when limit is exceeded
+- **PostStop** is called for cleanup in both passivation and eviction
+- **Persist state** before passivation to avoid data loss
+- **Use per-actor passivation for** sessions, caches, connections, virtual actors
+- **Use system eviction for** global memory management and actor count control
+- **Combine both mechanisms** for comprehensive resource management
+- **Monitor** with logging and metrics to tune behavior

@@ -10,7 +10,6 @@ GoAkt ships with a dedicated testing package (`github.com/tochemey/goakt/v3/test
 - 🌾 [GrainProbe](#grainprobe)
 - 🌐 [Multi-Node Testing](#multi-node-testing)
 - 💡 [Complete Examples](#complete-examples)
-- ➡️ [Next Steps](#next-steps)
 
 ---
 
@@ -698,9 +697,3 @@ func TestEventStream(t *testing.T) {
     }
 }
 ```
-
-## Next Steps
-
-- [Best Practices](best-practices.md): Testing conventions and tips
-- [Actors Overview](../actors/overview.md): Understanding actor fundamentals
-- [Grains Overview](../grains/overview.md): Understanding virtual actors

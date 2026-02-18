@@ -68,7 +68,7 @@ Orchestrating multi-step workflows that span multiple services or actors -- orde
 - [Behaviors](../actors/behaviours.md) let an actor change its message handler at each stage of a workflow, modeling the saga as a state machine
 - [Reentrancy](../actors/reentrancy.md) enables non-blocking request/response chains across actors without deadlocks
 - [Stashing](../actors/stashing.md) buffers messages that arrive during an in-progress step, replaying them once the step completes
-- [Supervision](../actors/supervision.md) handles failures at any stage with configurable restart or stop strategies
+- [Supervisor](../actors/supervisor.md) handles failures at any stage with configurable restart or stop strategies
 
 **Example flow:**
 

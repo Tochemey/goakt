@@ -15,22 +15,24 @@
 ## Actors
 
 * [Overview](actors/overview.md)
-* [Spawning Actors](actors/spawn.md)
-* [Messaging](actors/messaging.md)
 * [Mailbox](actors/mailbox.md)
 * [Behaviors](actors/behaviours.md)
-* [Supervision](actors/supervision.md)
+* [Spawning Actors](actors/spawn.md)
+* [Passivation](actors/passivation.md)
+* [Messaging](actors/messaging.md)
+* [Message Scheduling](actors/message_scheduling.md)
+* [Supervisor](actors/supervisor.md)
+* [Watch and Unwatch](actors/watch.md)
 * [Routers](actors/routers.md)
 * [Stashing](actors/stashing.md)
-* [Message Scheduling](actors/message_scheduling.md)
-* [Passivation](actors/passivation.md)
 * [Reentrancy](actors/reentrancy.md)
-* [Dependencies](actors/dependencies.md)
 * [PipeTo Pattern](actors/pipeto.md)
+* [Dependencies](actors/dependencies.md)
 
 ## Actor System
 
 * [Overview](actor_system/overview.md)
+* [Extensions](actor_system/extensions.md)
 * [Coordinated Shutdown](actor_system/coordinated_shutdown.md)
 
 ## Grains
@@ -74,6 +76,9 @@
 * [Testing Actors](testing/overview.md)
 * [Best Practices](testing/best-practices.md)
 
+## Meta Framework
+
+* [eGo — Event Sourcing / CQRS](https://github.com/Tochemey/ego)
 
 ## Additional Resources
 

@@ -8,32 +8,19 @@ Stashing is a message deferral mechanism that allows actors to temporarily set a
 - 💡 [When to Use Stashing](#when-to-use-stashing)
 - 🚀 [Basic Usage](#basic-usage)
 - 🛠️ [Stashing Operations](#stashing-operations)
-- 💡 [Example: Initialization](#example-initialization)
-- 💡 [Example: State Transitions with Behaviors](#example-state-transitions-with-behaviors)
-- 💡 [Example: Resource Acquisition](#example-resource-acquisition)
-- 💡 [Example: Batch Processing](#example-batch-processing)
-- 💡 [Example: Conditional Processing](#example-conditional-processing)
+- 💡 [Example & Other Use Cases](#example--other-use-cases)
 - ✅ [Stashing Best Practices](#stashing-best-practices)
 - 🧩 [Common Patterns](#common-patterns)
 - ⚡ [Performance Considerations](#performance-considerations)
 - ⚠️ [Limitations](#limitations)
 - ⚠️ [Error Handling](#error-handling)
-- 🧪 [Testing Stashing](#testing-stashing)
 - 📋 [Summary](#summary)
-- ➡️ [Next Steps](#next-steps)
 
 ---
 
 ## What is Stashing?
 
-**Stashing** allows an actor to:
-
-- Temporarily **buffer messages** for later processing
-- **Defer** messages that can't be handled in the current state
-- **Replay** stashed messages when ready
-- Maintain **message order** when transitioning between states
-
-Think of it as a temporary parking lot for messages that will be processed later.
+Stashing is a mechanism you can enable in your actors, so they can temporarily stash away messages they cannot or should not handle at the moment. Another way to see it is that stashing allows you to keep processing messages you can handle while saving for later messages you can't. Stashing is handled by GoAkt out of the actor instance just like the mailbox, so if the actor dies while processing a message, all messages in the stash are deleted. This feature is usually used together with `Become/UnBecome`, as they fit together very well, but this is not a requirement.
 
 ## When to Use Stashing
 
@@ -47,404 +34,103 @@ Stashing is useful when:
 
 ## Basic Usage
 
-### Enable Stashing
+Enable stashing at spawn with `actor.WithStashing()`. In `Receive`, call `ctx.Stash()` to defer the current message (it goes to a stash queue and will not be processed until you unstash). When ready, call `ctx.Unstash()` to replay one stashed message, or `ctx.UnstashAll()` to replay all. Stashed messages are re-enqueued to the mailbox in stash order. Use when the actor is not ready (e.g. initializing, waiting for a resource, or in a state that can't handle the message yet). Works well with `Become`/`UnBecome` (see [Behaviours](behaviours.md)). Stash is per-actor and cleared when the actor stops.
 
-Stashing must be enabled when spawning an actor:
-
-```go
-pid, err := actorSystem.Spawn(ctx, "my-actor", &MyActor{},
-    actor.WithStashing())
-```
-
-### Stash a Message
-
-Use `ctx.Stash()` to defer the current message:
-
-```go
-func (a *MyActor) Receive(ctx *actor.ReceiveContext) {
-    switch msg := ctx.Message().(type) {
-    case *ProcessData:
-        if !a.ready {
-            // Not ready, stash for later
-            ctx.Stash()
-            return
-        }
-        // Process normally
-        a.processData(msg)
-    }
-}
-```
-
-### Unstash Messages
-
-Use `ctx.Unstash()` or `ctx.UnstashAll()` to process stashed messages:
-
-```go
-func (a *MyActor) Receive(ctx *actor.ReceiveContext) {
-    switch msg := ctx.Message().(type) {
-    case *Initialize:
-        a.initialize(msg)
-        a.ready = true
-
-        // Process all stashed messages
-        ctx.UnstashAll()
-
-    case *ProcessData:
-        if !a.ready {
-            ctx.Stash()
-            return
-        }
-        a.processData(msg)
-    }
-}
-```
+When you become ready (e.g. after handling an init message), set your ready flag and call `ctx.UnstashAll()` so previously stashed messages are replayed.
 
 ## Stashing Operations
 
-### Stash
+| Operation          | Effect                                                                               |
+|--------------------|--------------------------------------------------------------------------------------|
+| `ctx.Stash()`      | Defer current message for later; adds to stash (FIFO). Message is not processed now. |
+| `ctx.Unstash()`    | Replay oldest stashed message (prepends to mailbox). No-op if stash is empty.        |
+| `ctx.UnstashAll()` | Replay all stashed messages in order; efficient for bulk replay when ready.          |
 
-Defer the current message for later processing:
+## Example & Other Use Cases
 
-```go
-ctx.Stash()
-```
-
-- **Adds** current message to stash buffer
-- Message is **not processed** now
-- Will be processed when unstashed
-- **Maintains order**: FIFO
-
-### Unstash
-
-Process the oldest stashed message:
+**Initialization:** Wait for setup before processing work. Stash work messages until an init message sets a ready flag, then call `ctx.UnstashAll()`.
 
 ```go
-ctx.Unstash()
-```
-
-- **Removes** oldest message from stash
-- **Prepends** to mailbox (processed next)
-- Maintains FIFO order
-- Does nothing if stash is empty
-
-### UnstashAll
-
-Process all stashed messages at once:
-
-```go
-ctx.UnstashAll()
-```
-
-- **Removes all** messages from stash
-- **Prepends** to mailbox in order
-- Maintains original order
-- Efficient for bulk unstashing
-
-## Example: Initialization
-
-Wait for initialization before processing work:
-
-```go
-type WorkerActor struct {
-    initialized bool
-    config      *Config
-}
-
-func (a *WorkerActor) PreStart(ctx *actor.Context) error {
-    a.initialized = false
-    return nil
-}
-
 func (a *WorkerActor) Receive(ctx *actor.ReceiveContext) {
     switch msg := ctx.Message().(type) {
-    case *goaktpb.PostStart:
-        a.config = msg.GetConfig()
+    case *Initialize:
         a.initialized = true
-        ctx.Logger().Info("Initialized, processing stashed messages")
-
-        // Process all messages that arrived during initialization
         ctx.UnstashAll()
-        ctx.Response(&InitializeComplete{})
 
     case *WorkItem:
         if !a.initialized {
-            // Not ready yet, stash for later
             ctx.Stash()
             return
         }
-
-        // Process work item normally
-        result := a.processWork(msg, a.config)
-        ctx.Response(&WorkResult{Data: result})
+        a.processWork(msg)
     }
 }
-
-func (a *WorkerActor) PostStop(ctx *actor.Context) error {
-    return nil
-}
 ```
 
-**Flow:**
-
-```
-1. WorkItem arrives → stashed (not initialized)
-2. WorkItem arrives → stashed (not initialized)
-3. Initialize arrives → process, set initialized=true
-4. UnstashAll() → process stashed WorkItems
-5. WorkItem arrives → process immediately
-```
-
-## Example: State Transitions with Behaviors
-
-Combine stashing with behaviors for state machines:
+**State transitions:** In the waiting behavior, stash messages you can’t handle yet; when transitioning to the active behavior, call `ctx.UnstashAll()`. (Use `ctx.Become(a.waitingBehavior)` from `Receive` to enter this behavior.)
 
 ```go
-type ConnectionActor struct {
-    state      string
-    connection *Connection
-}
-
-func (a *ConnectionActor) PreStart(ctx *actor.Context) error {
-    a.state = "Disconnected"
-    return nil
-}
-
-// Initial state: Disconnected
-func (a *ConnectionActor) Receive(ctx *actor.ReceiveContext) {
+func (a *Actor) waitingBehavior(ctx *actor.ReceiveContext) {
     switch msg := ctx.Message().(type) {
-    case *Connect:
-        ctx.Logger().Info("Connecting...")
-
-        // Start async connection
-        ctx.PipeTo(ctx.Self(), func() (proto.Message, error) {
-            conn, err := dialServer(msg.GetAddress())
-            if err != nil {
-                return &ConnectFailed{Reason: err.Error()}, nil
-            }
-            return &ConnectionEstablished{Conn: conn}, nil
-        })
-
-        // Switch to connecting state
-        ctx.Become(a.connectingBehavior)
-
-    case *SendData:
-        ctx.Response(&Error{Message: "Not connected"})
-    }
-}
-
-// Connecting state
-func (a *ConnectionActor) connectingBehavior(ctx *actor.ReceiveContext) {
-    switch msg := ctx.Message().(type) {
-    case *ConnectionEstablished:
-        a.connection = msg.Conn
-        a.state = "Connected"
-        ctx.Logger().Info("Connected, unstashing messages")
-
-        // Switch to connected state
-        ctx.Become(a.connectedBehavior)
-
-        // Process messages that arrived during connection
+    case *Ready:
+        ctx.Become(a.activeBehavior)
         ctx.UnstashAll()
-
-    case *ConnectFailed:
-        ctx.Logger().Error("Connection failed", "reason", msg.Reason)
-        ctx.UnBecome() // Back to disconnected
-
-    case *SendData:
-        // Can't send yet, stash until connected
+    default:
         ctx.Stash()
-
-    case *Disconnect:
-        // Cancel connection and go back
-        ctx.UnBecome()
     }
-}
-
-// Connected state
-func (a *ConnectionActor) connectedBehavior(ctx *actor.ReceiveContext) {
-    switch msg := ctx.Message().(type) {
-    case *SendData:
-        if err := a.connection.Send(msg.GetData()); err != nil {
-            ctx.Response(&SendFailed{Reason: err.Error()})
-            return
-        }
-        ctx.Response(&SendSuccess{})
-
-    case *Disconnect:
-        a.connection.Close()
-        ctx.UnBecome() // Back to disconnected
-    }
-}
-
-func (a *ConnectionActor) PostStop(ctx *actor.Context) error {
-    if a.connection != nil {
-        return a.connection.Close()
-    }
-    return nil
 }
 ```
 
-## Example: Resource Acquisition
-
-Wait for a resource before processing:
+**Resource acquisition:** Stash requests until a “ready” message (e.g. DB connected) arrives, then set the flag and `ctx.UnstashAll()`.
 
 ```go
-type DatabaseActor struct {
-    db     *sql.DB
-    hasDB  bool
-}
-
-func (a *DatabaseActor) PreStart(ctx *actor.Context) error {
-    // Start async DB connection
-    ctx.PipeTo(ctx.Self(), func() (proto.Message, error) {
-        db, err := sql.Open("postgres", connectionString)
-        if err != nil {
-            return nil, err
-        }
-        return &DatabaseReady{DB: db}, nil
-    })
-
-    a.hasDB = false
-    return nil
-}
-
-func (a *DatabaseActor) Receive(ctx *actor.ReceiveContext) {
+func (a *Actor) Receive(ctx *actor.ReceiveContext) {
     switch msg := ctx.Message().(type) {
-    case *DatabaseReady:
-        a.db = msg.DB
-        a.hasDB = true
-        ctx.Logger().Info("Database ready, unstashing queries")
-
-        // Process queued queries
+    case *ResourceReady:
+        a.hasResource = true
         ctx.UnstashAll()
-
-    case *Query:
-        if !a.hasDB {
-            // Database not ready, stash query
+    case *Request:
+        if !a.hasResource {
             ctx.Stash()
             return
         }
-
-        // Execute query
-        result, err := a.executeQuery(msg)
-        if err != nil {
-            ctx.Response(&QueryError{Reason: err.Error()})
-            return
-        }
-        ctx.Response(&QueryResult{Data: result})
+        a.handle(msg)
     }
-}
-
-func (a *DatabaseActor) PostStop(ctx *actor.Context) error {
-    if a.db != nil {
-        return a.db.Close()
-    }
-    return nil
 }
 ```
 
-## Example: Batch Processing
-
-Collect messages and process in batches:
+**Batch processing:** Stash until the batch is full; process batch then `ctx.Unstash()` to pull the next item into the batch.
 
 ```go
-type BatchProcessor struct {
-    batch     []*WorkItem
-    batchSize int
-}
-
-func (a *BatchProcessor) PreStart(ctx *actor.Context) error {
-    a.batch = make([]*WorkItem, 0, 100)
-    a.batchSize = 10
-    return nil
-}
-
-func (a *BatchProcessor) Receive(ctx *actor.ReceiveContext) {
+func (a *BatchActor) Receive(ctx *actor.ReceiveContext) {
     switch msg := ctx.Message().(type) {
     case *WorkItem:
-        // Add to batch
         a.batch = append(a.batch, msg)
-
         if len(a.batch) < a.batchSize {
-            // Not enough for a batch yet, stash
             ctx.Stash()
             return
         }
-
-        // Batch is full, process it
         a.processBatch(a.batch)
-        a.batch = make([]*WorkItem, 0, 100)
-
-        // Unstash one message to start next batch
+        a.batch = nil
         ctx.Unstash()
-
-    case *Flush:
-        // Process whatever we have
-        if len(a.batch) > 0 {
-            a.processBatch(a.batch)
-            a.batch = make([]*WorkItem, 0, 100)
-        }
-        ctx.Response(&FlushComplete{})
     }
-}
-
-func (a *BatchProcessor) processBatch(batch []*WorkItem) {
-    // Process batch
-    for _, item := range batch {
-        // Process item
-    }
-}
-
-func (a *BatchProcessor) PostStop(ctx *actor.Context) error {
-    // Flush remaining items
-    if len(a.batch) > 0 {
-        a.processBatch(a.batch)
-    }
-    return nil
 }
 ```
 
-## Example: Conditional Processing
-
-Process messages only when a condition is met:
+**Conditional processing:** Stash when over limit; when the condition resets (e.g. new window), call `ctx.UnstashAll()`.
 
 ```go
-type ThrottledActor struct {
-    requestCount int
-    limit        int
-    resetTime    time.Time
-}
-
 func (a *ThrottledActor) Receive(ctx *actor.ReceiveContext) {
     switch msg := ctx.Message().(type) {
     case *Request:
-        now := time.Now()
-
-        // Reset counter if window expired
-        if now.After(a.resetTime) {
-            a.requestCount = 0
-            a.resetTime = now.Add(time.Minute)
-
-            // Unstash pending requests
-            ctx.UnstashAll()
-        }
-
-        // Check if we're over the limit
-        if a.requestCount >= a.limit {
-            // Over limit, stash for next window
+        if a.count >= a.limit {
             ctx.Stash()
             return
         }
-
-        // Process request
-        a.requestCount++
-        a.handleRequest(msg)
-        ctx.Response(&RequestHandled{})
-
-    case *ResetThrottle:
-        // Manual reset
-        a.requestCount = 0
-        a.resetTime = time.Now().Add(time.Minute)
+        a.count++
+        a.handle(msg)
+    case *WindowReset:
+        a.count = 0
         ctx.UnstashAll()
     }
 }
@@ -454,112 +140,24 @@ func (a *ThrottledActor) Receive(ctx *actor.ReceiveContext) {
 
 ### Do's ✅
 
-1. **Enable stashing**: Use `WithStashing()` when spawning
-2. **Unstash after state change**: Process stashed messages when ready
-3. **Use with behaviors**: Combine stashing with `Become`/`UnBecome`
-4. **Limit stash size**: Be mindful of memory
-5. **Document stashing logic**: Make it clear why messages are stashed
-
-```go
-// Good: Clear stashing logic
-func (a *MyActor) Receive(ctx *actor.ReceiveContext) {
-    switch msg := ctx.Message().(type) {
-    case *Initialize:
-        a.ready = true
-        ctx.UnstashAll() // Process pending messages
-
-    case *Work:
-        if !a.ready {
-            ctx.Stash() // Wait for initialization
-            return
-        }
-        a.process(msg)
-    }
-}
-```
+1. **Enable stashing**: Use `WithStashing()` when spawning.
+2. **Unstash when ready**: Call `ctx.UnstashAll()` (or `ctx.Unstash()`) after the condition is met; stashed messages are not processed automatically.
+3. **Use with behaviors**: Combine with `Become`/`UnBecome` for state machines (stash in waiting state, unstash when transitioning).
+4. **Limit stash size**: Be mindful of memory; the stash is unbounded.
+5. **Document stashing logic**: Make it clear why messages are stashed.
 
 ### Don'ts ❌
 
-1. **Don't forget to unstash**: Stashed messages won't process automatically
-2. **Don't stash indefinitely**: Unstash when condition is met
-3. **Don't use without enabling**: Will result in error
-4. **Don't stash everything**: Only stash what's necessary
-5. **Don't ignore stash overflow**: Monitor stash size
-
-```go
-// Bad: Stashing without unstashing
-func (a *BadActor) Receive(ctx *actor.ReceiveContext) {
-    switch msg := ctx.Message().(type) {
-    case *Initialize:
-        a.ready = true
-        // ❌ Forgot to unstash!
-
-    case *Work:
-        if !a.ready {
-            ctx.Stash() // Messages pile up forever
-            return
-        }
-        a.process(msg)
-    }
-}
-```
+1. **Don't forget to unstash**: Stashed messages stay in the stash until you call `Unstash`/`UnstashAll`.
+2. **Don't use without enabling**: Stashing requires `WithStashing()` at spawn or you get an error.
+3. **Don't stash everything**: Only stash messages you truly can't handle yet.
+4. **Don't ignore stash growth**: Monitor and reason about stash size in production.
 
 ## Common Patterns
 
-### Pattern 1: Initialization Gate
-
-```go
-func (a *Actor) Receive(ctx *actor.ReceiveContext) {
-    switch msg := ctx.Message().(type) {
-    case *Init:
-        a.initialize()
-        ctx.UnstashAll()
-    default:
-        if !a.initialized {
-            ctx.Stash()
-            return
-        }
-        a.handleMessage(msg)
-    }
-}
-```
-
-### Pattern 2: State Machine with Stashing
-
-```go
-func (a *Actor) waitingState(ctx *actor.ReceiveContext) {
-    switch msg := ctx.Message().(type) {
-    case *Ready:
-        ctx.Become(a.activeState)
-        ctx.UnstashAll()
-    default:
-        ctx.Stash()
-    }
-}
-
-func (a *Actor) activeState(ctx *actor.ReceiveContext) {
-    // Process normally
-    a.handleMessage(ctx.Message())
-}
-```
-
-### Pattern 3: Resource Pooling
-
-```go
-func (a *PoolActor) Receive(ctx *actor.ReceiveContext) {
-    switch msg := ctx.Message().(type) {
-    case *Work:
-        if a.hasAvailableWorker() {
-            a.assignWork(msg)
-        } else {
-            ctx.Stash() // Wait for worker
-        }
-
-    case *WorkerAvailable:
-        ctx.Unstash() // Process next stashed work
-    }
-}
-```
+- **Initialization gate:** On init message → set ready, `ctx.UnstashAll()`. On work message → if not ready, `ctx.Stash()`; else process.
+- **State machine:** In waiting behavior → stash unknown messages; on “ready” message → `ctx.Become(activeBehavior)` and `ctx.UnstashAll()`. In active behavior → handle normally.
+- **Resource / pool:** Stash work when resource (or worker) unavailable; when “available” message arrives → `ctx.Unstash()` or `ctx.UnstashAll()`.
 
 ## Performance Considerations
 
@@ -577,64 +175,15 @@ func (a *PoolActor) Receive(ctx *actor.ReceiveContext) {
 
 ## Error Handling
 
-If stashing is not enabled:
+If stashing is not enabled, `ctx.Stash()` (and unstash) will error. Always pass `WithStashing()` when spawning:
 
 ```go
-// This will return an error
-ctx.Stash() // Error: stash buffer not set
-```
-
-Always enable stashing when spawning:
-
-```go
-pid, err := actorSystem.Spawn(ctx, "actor", &MyActor{},
-    actor.WithStashing()) // Required!
-```
-
-## Testing Stashing
-
-```go
-func TestStashing(t *testing.T) {
-    ctx := context.Background()
-    system, _ := actor.NewActorSystem("test",
-        actor.WithPassivationStrategy(passivation.NewLongLivedStrategy()))
-    system.Start(ctx)
-    defer system.Stop(ctx)
-
-    // Spawn with stashing enabled
-    pid, _ := system.Spawn(ctx, "test", &TestActor{},
-        actor.WithStashing())
-
-    // Send work before initialization
-    actor.Tell(ctx, pid, &Work{Id: 1})
-    actor.Tell(ctx, pid, &Work{Id: 2})
-
-    // Initialize
-    actor.Tell(ctx, pid, &Initialize{})
-
-    // Wait for processing
-    time.Sleep(100 * time.Millisecond)
-
-    // Verify all work was processed
-    response, _ := actor.Ask(ctx, pid, &GetProcessedCount{}, time.Second)
-    count := response.(*ProcessedCount)
-    assert.Equal(t, 2, count.Value)
-}
+pid, err := actorSystem.Spawn(ctx, "actor", &MyActor{}, actor.WithStashing())
 ```
 
 ## Summary
 
-- **Stashing** defers messages for later processing
-- **Enable** with `WithStashing()` when spawning
-- **Stash** with `ctx.Stash()` to defer current message
-- **Unstash** with `ctx.Unstash()` or `ctx.UnstashAll()`
-- **Use** during initialization, state transitions, or resource acquisition
-- **Combine** with behaviors for state machines
-- **Remember** to unstash when ready!
-
-## Next Steps
-
-- **[Behaviors](behaviours.md)**: Combine stashing with dynamic behaviors
-- **[Message Scheduling](message_scheduling.md)**: Schedule messages for future delivery
-- **[Passivation](passivation.md)**: Automatic actor lifecycle management
-- **[Reentrancy](reentrancy.md)**: Handle concurrent requests
+- Stashing defers messages for later processing.
+- Enable with `WithStashing()` when spawning; use `ctx.Stash()`, `ctx.Unstash()`, and `ctx.UnstashAll()` in `Receive`.
+- Use during initialization, state transitions, or resource acquisition; combine with `Become`/`UnBecome` for state machines.
+- Remember to unstash when the actor is ready.

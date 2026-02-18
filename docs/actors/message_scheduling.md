@@ -14,7 +14,6 @@ Message scheduling allows you to send messages to actors at a specific time in t
 - ⚡ [Performance Considerations](#performance-considerations)
 - ⚠️ [Limitations](#limitations)
 - 📋 [Summary](#summary)
-- ➡️ [Next Steps](#next-steps)
 
 ---
 
@@ -599,10 +598,3 @@ func (a *RetryActor) scheduleRetry(ctx *actor.ReceiveContext, task *Task, attemp
 - **Cron expressions** provide flexible scheduling
 - **References** help track scheduled messages
 - Built into the **runtime** for reliability
-
-## Next Steps
-
-- **[Messaging](messaging.md)**: Learn about message patterns
-- **[PipeTo Pattern](pipeto.md)**: Execute async work
-- **[Passivation](passivation.md)**: Automatic actor lifecycle
-- **[Behaviors](behaviours.md)**: Combine scheduling with state machines

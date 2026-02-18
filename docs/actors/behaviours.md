@@ -13,11 +13,6 @@ Behaviors enable actors to dynamically change their message processing logic at 
 - 🔄 [Behavior with State Transitions](#behavior-with-state-transitions)
 - ✅ [Behavior Best Practices](#behavior-best-practices)
 - 🧩 [Common Patterns](#common-patterns)
-- 🐛 [Debugging Behaviors](#debugging-behaviors)
-- 🧪 [Testing Behaviors](#testing-behaviors)
-- ⚡ [Performance Considerations](#performance-considerations)
-- 📋 [Summary](#summary)
-- ➡️ [Next Steps](#next-steps)
 
 ---
 
@@ -95,75 +90,9 @@ ctx.UnBecomeStacked()
 - Use to **exit** temporary state
 - Does nothing if stack is empty
 
-## Basic Example: Authentication
+## Basic Example: Authentication (concept)
 
-```go
-type AuthActor struct {
-    authenticated bool
-    username      string
-}
-
-func (a *AuthActor) PreStart(ctx *actor.Context) error {
-    return nil
-}
-
-// Initial behavior: waiting for login
-func (a *AuthActor) Receive(ctx *actor.ReceiveContext) {
-    switch msg := ctx.Message().(type) {
-    case *Login:
-        if a.validateCredentials(msg) {
-            a.authenticated = true
-            a.username = msg.GetUsername()
-
-            // Switch to authenticated behavior
-            ctx.Become(a.authenticatedBehavior)
-
-            ctx.Response(&LoginSuccess{
-                Username: msg.GetUsername(),
-            })
-        } else {
-            ctx.Response(&LoginFailed{
-                Reason: "Invalid credentials",
-            })
-        }
-
-    default:
-        ctx.Response(&Error{
-            Message: "Please login first",
-        })
-    }
-}
-
-// Behavior when authenticated
-func (a *AuthActor) authenticatedBehavior(ctx *actor.ReceiveContext) {
-    switch msg := ctx.Message().(type) {
-    case *GetProfile:
-        ctx.Response(&Profile{
-            Username: a.username,
-        })
-
-    case *UpdateProfile:
-        // Handle profile update
-        ctx.Response(&ProfileUpdated{})
-
-    case *Logout:
-        a.authenticated = false
-        a.username = ""
-
-        // Return to unauthenticated behavior
-        ctx.UnBecome()
-
-        ctx.Response(&LogoutSuccess{})
-
-    default:
-        ctx.Unhandled()
-    }
-}
-
-func (a *AuthActor) PostStop(ctx *actor.Context) error {
-    return nil
-}
-```
+Use two behaviors: initial `Receive` handles **Login** (on success call **ctx.Become(authenticatedBehavior)** and respond; on failure respond with error). The **authenticatedBehavior** function handles **GetProfile**, **UpdateProfile**, and **Logout**; on **Logout** call **ctx.UnBecome()** to return to the default Receive. Store auth state (e.g. username) in the actor struct.
 
 ## State Machine Pattern
 
@@ -588,8 +517,6 @@ func (a *WorkflowActor) finalizationStep(ctx *actor.ReceiveContext) {
 }
 ```
 
-## Debugging Behaviors
-
 ### Logging State Transitions
 
 ```go
@@ -603,86 +530,3 @@ func (a *MyActor) transitionTo(ctx *actor.ReceiveContext,
     ctx.Become(behavior)
 }
 ```
-
-### Tracking Behavior Stack
-
-```go
-type StatefulActor struct {
-    behaviorStack []string
-}
-
-func (a *StatefulActor) pushBehavior(ctx *actor.ReceiveContext,
-    name string, behavior actor.Behavior) {
-    a.behaviorStack = append(a.behaviorStack, name)
-    ctx.Logger().Debug("Pushed behavior",
-        "name", name,
-        "stack_depth", len(a.behaviorStack))
-    ctx.BecomeStacked(behavior)
-}
-
-func (a *StatefulActor) popBehavior(ctx *actor.ReceiveContext) {
-    if len(a.behaviorStack) > 0 {
-        popped := a.behaviorStack[len(a.behaviorStack)-1]
-        a.behaviorStack = a.behaviorStack[:len(a.behaviorStack)-1]
-        ctx.Logger().Debug("Popped behavior",
-            "name", popped,
-            "stack_depth", len(a.behaviorStack))
-    }
-    ctx.UnBecomeStacked()
-}
-```
-
-## Testing Behaviors
-
-```go
-func TestStateMachine(t *testing.T) {
-    ctx := context.Background()
-    system, _ := actor.NewActorSystem("test",
-        actor.WithPassivationStrategy(passivation.NewLongLivedStrategy()))
-    system.Start(ctx)
-    defer system.Stop(ctx)
-
-    // Spawn actor
-    pid, _ := system.Spawn(ctx, "order", &OrderActor{})
-
-    // Test state transitions
-    // State: Created
-    resp, _ := actor.Ask(ctx, pid, &AddItem{Item: "item1"}, time.Second)
-    assert.IsType(t, &ItemAdded{}, resp)
-
-    // Transition to PendingPayment
-    resp, _ = actor.Ask(ctx, pid, &Checkout{}, time.Second)
-    assert.IsType(t, &CheckoutStarted{}, resp)
-
-    // Transition to Paid
-    resp, _ = actor.Ask(ctx, pid, &PaymentReceived{Amount: 100}, time.Second)
-    assert.IsType(t, &PaymentAccepted{}, resp)
-
-    // Transition to Shipped
-    resp, _ = actor.Ask(ctx, pid, &Ship{}, time.Second)
-    assert.IsType(t, &OrderShipped{}, resp)
-}
-```
-
-## Performance Considerations
-
-- **Behavior switching is fast**: O(1) operation
-- **Stacked behaviors use memory**: Be mindful of stack depth
-- **Behaviors are not serialized**: State must be managed separately
-- **Default (single) behavior**: Negligible overhead compared to a plain actor
-
-## Summary
-
-- **Behaviors** enable dynamic message handling
-- **Become** replaces behavior (permanent transition)
-- **BecomeStacked** pushes behavior (temporary transition)
-- **UnBecome** resets to default behavior
-- **UnBecomeStacked** pops behavior from stack
-- Use for **state machines**, **workflows**, and **protocols**
-
-## Next Steps
-
-- **[Stashing](stashing.md)**: Defer messages while changing behavior
-- **[Supervision](supervision.md)**: Fault tolerance with behaviors
-- **[Messaging](messaging.md)**: Message patterns with behaviors
-- **[Reentrancy](reentrancy.md)**: Handle concurrent requests with behaviors

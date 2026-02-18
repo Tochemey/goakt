@@ -11,7 +11,6 @@ Best practices for writing reliable tests using the GoAkt `testkit` package.
 - 📁 [Test Organization](#test-organization)
 - ⚠️ [Common Mistakes](#common-mistakes)
 - 📋 [Summary](#summary)
-- ➡️ [Next Steps](#next-steps)
 
 ---
 
@@ -380,9 +379,3 @@ probe.ExpectNoMessage()
 | Create fresh TestKit per test                  | Share TestKit across tests           |
 | Use table-driven tests for multiple cases      | Duplicate boilerplate                |
 | Use `SenderAddress()` in cluster tests         | Rely on `Sender()` for remote actors |
-
-## Next Steps
-
-- [Testing Overview](overview.md): TestKit fundamentals and API reference
-- [Actors Overview](../actors/overview.md): Understanding actor fundamentals
-- [Grains Overview](../grains/overview.md): Understanding virtual actors

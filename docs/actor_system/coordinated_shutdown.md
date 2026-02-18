@@ -7,20 +7,20 @@ Coordinated shutdown enables graceful cleanup of resources when the actor system
 - 🤔 [What is Coordinated Shutdown?](#what-is-coordinated-shutdown)
 - 🔌 [ShutdownHook Interface](#shutdownhook-interface)
 - 🛡️ [Recovery Strategies](#recovery-strategies)
-- 🏗️ [Creating Shutdown Hooks](#creating-shutdown-hooks)
+- 🏗️ [Examples](#examples)
 - 📝 [Registering Shutdown Hooks](#registering-shutdown-hooks)
 - 💡 [Complete Example](#complete-example)
 - 📋 [Hook Execution Order](#hook-execution-order)
 - ⚙️ [Recovery Configuration](#recovery-configuration)
 - 🧩 [Common Patterns](#common-patterns)
 - ✅ [Best Practices](#best-practices)
-- 🧪 [Testing Shutdown Hooks](#testing-shutdown-hooks)
 - 📋 [Summary](#summary)
-- ➡️ [Next Steps](#next-steps)
 
 ---
 
 ## What is Coordinated Shutdown?
+
+GoAkt provides a mechanism to execute user-defined tasks during the shutdown of the actor system.
 
 **Coordinated shutdown** provides:
 
@@ -38,7 +38,9 @@ Implement the `ShutdownHook` interface to define custom cleanup logic:
 
 ```go
 type ShutdownHook interface {
+    // Execute runs the shutdown logic for this hook that performs the cleanup
     Execute(ctx context.Context, actorSystem ActorSystem) error
+    // Recovery returns the ShutdownHookRecovery configuration for this hook.
     Recovery() *ShutdownHookRecovery
 }
 ```
@@ -167,7 +169,7 @@ Hook2: FAIL → Retry (2x) → Still failing → Log → Continue
 Hook3: Executed
 ```
 
-## Creating Shutdown Hooks
+## Examples
 
 ### Basic Hook
 
@@ -792,56 +794,6 @@ func (h *GoodHook) Execute(ctx context.Context, system actor.ActorSystem) error 
 }
 ```
 
-## Testing Shutdown Hooks
-
-```go
-func TestShutdownHook(t *testing.T) {
-    ctx := context.Background()
-
-    hook := &FlushMetricsHook{metricsWriter: newMockWriter()}
-
-    system, _ := actor.NewActorSystem("test",
-        actor.WithCoordinatedShutdown(hook))
-
-    system.Start(ctx)
-
-    // Test hook execution
-    err := system.Stop(ctx)
-    assert.NoError(t, err)
-
-    // Verify hook was executed
-    assert.True(t, hook.executed)
-}
-
-func TestHookRetry(t *testing.T) {
-    ctx := context.Background()
-
-    // Hook that fails first 2 times
-    failCount := 0
-    hook := &TestHook{
-        executeFunc: func() error {
-            failCount++
-            if failCount < 3 {
-                return errors.New("transient error")
-            }
-            return nil
-        },
-        recovery: actor.NewShutdownHookRecovery(
-            actor.WithShutdownHookRetry(3, 100*time.Millisecond),
-            actor.WithShutdownHookRecoveryStrategy(actor.ShouldRetryAndSkip)),
-    }
-
-    system, _ := actor.NewActorSystem("test",
-        actor.WithCoordinatedShutdown(hook))
-
-    system.Start(ctx)
-    err := system.Stop(ctx)
-
-    assert.NoError(t, err)
-    assert.Equal(t, 3, failCount) // Verified retry happened
-}
-```
-
 ## Summary
 
 - **Coordinated shutdown** ensures graceful cleanup
@@ -850,9 +802,3 @@ func TestHookRetry(t *testing.T) {
 - **Execution order** follows registration order
 - **Retry logic** handles transient failures
 - **Best practices** ensure reliable shutdown
-
-## Next Steps
-
-- **[Actor System Overview](overview.md)**: System creation and configuration
-- **[Spawning Actors](../actors/spawn.md)**: Creating actors
-- **[Supervision](../actors/supervision.md)**: Fault tolerance

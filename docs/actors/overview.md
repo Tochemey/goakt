@@ -14,8 +14,6 @@
 - 📨 [Message Processing](#message-processing)
 - ✅ [Best Practices](#actor-best-practices)
 - ⚠️ [Error Handling](#error-handling)
-- ➡️ [Next Steps](#next-steps)
-- 💡 [Example: Complete Actor](#example-complete-actor)
 
 ---
 
@@ -28,8 +26,14 @@ In GoAkt, actors are the fundamental building blocks for creating reactive, faul
 - Processes one message at a time (ensuring thread safety)
 - Maintains its own private state
 - Communicates only via messages
-- Has a unique identity: a **PID** when local, or an **address** when referenced from another node (e.g. in a cluster)
+- Has a unique identity: a **PID** when local, or an **Address** when referenced from another node (e.g. in a cluster)
 - Can be supervised for fault tolerance
+- Has a lifecycle (short-lived or long-lived)
+- Is thread-safe
+- Can be stateful or stateless
+- Can have children and supervise them
+- Can watch/unwatch other actors for their termination to take some business decisions - see [watch and unwatch](watch.md)
+- Can adopt various forms using behaviours - see [behaviours](behaviours.md)
 
 ## The Actor Model
 
@@ -38,89 +42,29 @@ The actor model is a conceptual model for handling concurrent computation. When 
 1. **Send messages** to other actors
 2. **Create new actors** (spawn child actors)
 3. **Designate behavior** for the next message (change state/behavior)
+4. **Watch/Unwatch** another actor
+5. **Persist** state if it is a stateful actor
 
 This simple set of rules enables powerful patterns for building scalable, fault-tolerant systems.
 
 ## Actor Interface
 
-Every actor in GoAkt must implement the `Actor` interface:
-
-```go
-type Actor interface {
-    PreStart(ctx *Context) error
-    Receive(ctx *ReceiveContext)
-    PostStop(ctx *Context) error
-}
-```
+Every actor implements the `Actor` interface: `PreStart(ctx *Context) error`, `Receive(ctx *ReceiveContext)`, and `PostStop(ctx *Context) error`.
 
 ### Lifecycle Hooks
 
-#### PreStart
+**PreStart** — Called once before the actor processes messages. Use it to initialize dependencies (DB, caches, connections), recover persistent state, or set up resources. Return an error to prevent the actor from starting (the supervisor will handle it). On success, a `goaktpb.PostStart` system message is sent to `Receive` as the first message. Do setup that needs `ctx.Self()` (subscriptions, registration) in `Receive` when handling `PostStart`, since `Self()` is not available in `PreStart`.
 
-Called once before the actor starts processing messages. Use this to:
+**Receive** — Where all messages are handled. Use a type switch on `ctx.Message()` and handle `*goaktpb.PostStart` first for one-time setup. Use `ctx.Response(...)` to reply to requesters and `ctx.Unhandled()` for unhandled types.
 
-- Initialize dependencies (database clients, caches, connections)
-- Recover persistent state
-- Set up resources
-
-If `PreStart` returns an error, the actor won't start and the supervisor will handle the failure. On success, a `goaktpb.PostStart` system message is sent to `Receive`, making it the first message the actor processes. Use `PostStart` in `Receive` for setup that requires `ctx.Self()` (e.g. subscribing, registering), since `Self()` is not available in `PreStart`.
-
-```go
-func (a *MyActor) PreStart(ctx *Context) error {
-    // Initialize database connection
-    db, err := connectDB()
-    if err != nil {
-        return err
-    }
-    a.db = db
-    return nil
-}
-```
-
-#### Receive
-
-The heart of the actor's behavior. All messages sent to the actor are processed here. The first message an actor receives is typically `goaktpb.PostStart` (sent after `PreStart` succeeds).
-
-```go
-func (a *MyActor) Receive(ctx *ReceiveContext) {
-    switch msg := ctx.Message().(type) {
-    case *goaktpb.PostStart:
-        // First message; use ctx.Self() for subscriptions, registration, etc.
-    case *Ping:
-        ctx.Response(&Pong{})
-    case *DoWork:
-        result := a.doWork(msg)
-        ctx.Response(result)
-    default:
-        ctx.Unhandled()
-    }
-}
-```
-
-#### PostStop
-
-Called when the actor is shutting down. Use this to:
-
-- Release resources (connections, files, goroutines)
-- Flush logs or metrics
-- Notify other systems of termination
-
-```go
-func (a *MyActor) PostStop(ctx *Context) error {
-    // Close database connection
-    if a.db != nil {
-        return a.db.Close()
-    }
-    return nil
-}
-```
+**PostStop** — Called on shutdown. Release resources (connections, files, goroutines), flush logs or metrics, and notify other systems. Return an error to log shutdown failures.
 
 ## Spawning Actors
 
 Actors are spawned within an `ActorSystem`. GoAkt supports several ways to create actors:
 
 | Method                                                   | Where          | Use when                                                                                                                                                         |
-| -------------------------------------------------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|----------------------------------------------------------|----------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `Spawn(ctx, name, actor, opts...)`                       | Actor system   | Spawn locally on this node (default).                                                                                                                            |
 | `SpawnOn(ctx, name, actor, opts...)`                     | Actor system   | Spawn in cluster (local or remote/datacenter). Use **ActorOf** to get PID or address. [Cluster](../cluster/overview.md), [Relocation](../cluster/relocation.md). |
 | `Spawn(name, actor, opts...)`                            | Inside Receive | Spawn a **child** of the current actor; check `ctx.Err()` and nil PID on failure.                                                                                |
@@ -129,38 +73,16 @@ Actors are spawned within an `ActorSystem`. GoAkt supports several ways to creat
 | `SpawnRouter(ctx, name, poolSize, routeesKind, opts...)` | Actor system   | Spawn a **router** (pool of routees). [Routers](routers.md).                                                                                                     |
 | `SpawnSingleton(ctx, name, actor, opts...)`              | Actor system   | **Cluster singleton** (one instance in cluster). [Cluster Singleton](../cluster/cluster_singleton.md).                                                           |
 
-All spawn options (mailbox, supervisor, passivation, reentrancy, etc.) apply to `Spawn`, `SpawnOn`, and `ctx.Spawn` / `SpawnChild` where relevant.
-
-**Basic example (local spawn):**
-
-```go
-// Create actor system
-actorSystem, err := actor.NewActorSystem("MySystem",
-    actor.WithPassivationStrategy(passivation.NewLongLivedStrategy()))
-if err != nil {
-    panic(err)
-}
-
-// Start the system
-if err := actorSystem.Start(ctx); err != nil {
-    panic(err)
-}
-
-// Spawn an actor
-pid, err := actorSystem.Spawn(ctx, "greeter", &GreeterActor{})
-if err != nil {
-    panic(err)
-}
-```
+All spawn options (mailbox, supervisor, passivation, reentrancy, etc.) apply to `Spawn`, `SpawnOn`, and `ctx.Spawn` / `SpawnChild` where relevant. Create an actor system with `NewActorSystem`, call `Start(ctx)`, then spawn with `actorSystem.Spawn(ctx, "name", &MyActor{}, opts...)` to get a PID.
 
 ### Spawn Options
 
 You can customize actor behavior with spawn options.
 
 | Option                              | Description                                                                                   | See                                                                       |
-| ----------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+|-------------------------------------|-----------------------------------------------------------------------------------------------|---------------------------------------------------------------------------|
 | `WithMailbox(mailbox)`              | Mailbox implementation (unbounded, bounded, priority, etc.).                                  | [Mailbox](mailbox.md)                                                     |
-| `WithSupervisor(supervisor)`        | Failure-handling strategy (restart, stop, resume).                                            | [Supervision](supervision.md)                                             |
+| `WithSupervisor(supervisor)`        | Failure-handling strategy (restart, stop, resume).                                            | [Supervisor](supervisor.md)                                               |
 | `WithPassivationStrategy(strategy)` | When to passivate idle actors (time-based, long-lived, message-count).                        | [Passivation](passivation.md)                                             |
 | `WithPassivateAfter(duration)`      | _(Deprecated)_ Use `WithPassivationStrategy` with `TimeBasedStrategy` instead.                | [Passivation](passivation.md)                                             |
 | `WithLongLived()`                   | Actor is never passivated; lives until system shutdown.                                       | [Passivation](passivation.md)                                             |
@@ -172,23 +94,7 @@ You can customize actor behavior with spawn options.
 | `WithRelocationDisabled()`          | Do not relocate actor to another node on failure (cluster).                                   | [Relocation](../cluster/relocation.md)                                    |
 | `WithDataCenter(dc)`                | Spawn in a specific datacenter. Only with `SpawnOn` and datacenter-aware cluster.             | [Cluster](../cluster/overview.md)                                         |
 
-**Example:**
-
-```go
-import (
-    "github.com/tochemey/goakt/v3/actor"
-    "github.com/tochemey/goakt/v3/passivation"
-    "github.com/tochemey/goakt/v3/reentrancy"
-    "github.com/tochemey/goakt/v3/supervisor"
-)
-
-pid, err := actorSystem.Spawn(ctx, "greeter", &GreeterActor{},
-    actor.WithPassivationStrategy(passivation.NewTimeBasedStrategy(5*time.Minute)),
-    actor.WithMailbox(actor.NewBoundedMailbox(1000)),
-    actor.WithSupervisor(supervisor.NewSupervisor(supervisor.WithAnyErrorDirective(supervisor.StopDirective))),
-    actor.WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowReentrant))),
-)
-```
+Combine options as needed: `WithPassivationStrategy`, `WithMailbox`, `WithSupervisor`, `WithReentrancy`, etc. See the linked docs for each.
 
 ## Identity and References
 
@@ -197,31 +103,7 @@ When you spawn an actor, you receive a **PID** (Process ID) — a unique referen
 - **PID**: The full local reference (actor system, address, metadata). Use it for local actors and for any API that accepts a PID (e.g. `Tell`, `Ask`, `ctx.Forward(pid)`).
 - **Address**: The network identity of the actor (host, port, name). When the actor is **not local** (e.g. on another node in a cluster), you often use its **address** to send messages — for example via `RemoteTell(ctx, addr, message)` or `RemoteAsk(ctx, addr, message, timeout)`. A PID’s address is obtained with `pid.Address()`.
 
-So aside from a PID, an **address** is also an actor reference when the actor is remote; many remote messaging APIs take an `*address.Address` rather than a PID.
-
-```go
-type PID struct {
-    // Contains actor system reference, address, and metadata
-}
-```
-
-### PID Operations
-
-```go
-// Check if actor is running
-if pid.IsRunning() {
-    // Actor is alive and can receive messages
-}
-
-// Get actor's name
-name := pid.Name()
-
-// Get actor's address
-addr := pid.Address()
-
-// Stop the actor
-err := pid.Shutdown(ctx)
-```
+So aside from a PID, an **address** is also an actor reference when the actor is remote; many remote messaging APIs take an `*address.Address` rather than a PID. Use `pid.IsRunning()`, `pid.Name()`, `pid.Address()`, and `pid.Shutdown(ctx)` as needed.
 
 ## Hierarchy
 
@@ -246,20 +128,7 @@ ActorSystem
 
 ### Spawning Child Actors
 
-```go
-func (a *MyActor) Receive(ctx *ReceiveContext) {
-    switch msg := ctx.Message().(type) {
-    case *CreateChild:
-        // Spawn a child actor
-        child, err := ctx.Spawn("child-worker", &ChildActor{})
-        if err != nil {
-            ctx.Err(err)
-            return
-        }
-        // Child is supervised by this actor
-    }
-}
-```
+From inside `Receive`, call `ctx.Spawn("child-name", &ChildActor{}, opts...)` to create a child supervised by the current actor. Check the returned error and PID; on failure report with `ctx.Err(err)` if appropriate. See [Spawning](spawn.md) for options.
 
 ## State Management
 
@@ -271,64 +140,11 @@ Actors encapsulate state that is:
 
 ### Best Practices
 
-1. **Keep fields private** (unexported)
-2. **Initialize in PreStart**
-3. **Modify only in Receive**
-4. **Clean up in PostStop**
-
-```go
-type CounterActor struct {
-    // Private state
-    count int
-    history []int
-}
-
-func (a *CounterActor) Receive(ctx *ReceiveContext) {
-    switch msg := ctx.Message().(type) {
-    case *Increment:
-        a.count += int(msg.GetValue())
-        a.history = append(a.history, a.count)
-        ctx.Response(&Count{Value: int32(a.count)})
-    case *GetHistory:
-        ctx.Response(&History{Values: a.history})
-    }
-}
-```
+Keep fields private (unexported), initialize in `PreStart`, modify only in `Receive`, and clean up in `PostStop`. State is only accessed inside the actor, so no locks are needed.
 
 ## Immutability Requirement
 
-Actor structs **must be immutable** from the outside:
-
-- All fields should be unexported (private)
-- Initialization occurs in `PreStart`, not via constructors
-- This ensures thread safety and proper supervision
-
-❌ **Bad**:
-
-```go
-type Actor struct {
-    DB *sql.DB  // Exported field
-}
-
-actor := &Actor{DB: myDB}  // External initialization
-```
-
-✅ **Good**:
-
-```go
-type Actor struct {
-    db *sql.DB  // Unexported field
-}
-
-func (a *Actor) PreStart(ctx *Context) error {
-    db, err := connectDB()
-    if err != nil {
-        return err
-    }
-    a.db = db
-    return nil
-}
-```
+Actor structs must be **immutable from the outside**: use unexported fields and initialize in `PreStart`, not via constructors. Avoid passing in dependencies (e.g. DB) in a struct literal; open or inject them in `PreStart` (or via `WithDependencies`). This keeps supervision and lifecycle consistent.
 
 ## Message Processing
 
@@ -363,106 +179,9 @@ This sequential processing eliminates the need for locks and makes actors thread
 
 ## Error Handling
 
-Actors handle errors through:
+Actors handle errors in four ways: 
+- (1) return an error from **PreStart** so the actor does not start and the supervisor handles it; 
+- (2) **supervision** so parents handle child failures; 
+- (3) **ctx.Err(err)** in `Receive` to report non-fatal errors (prefer this over panic when you know the error type); 
+- (4) **panic recovery** — panics are turned into supervision signals. See [Supervisor](supervisor.md) for directives and configuration.
 
-1. **Returning errors from PreStart**: Prevents actor from starting
-2. **Supervision**: Parent actors handle child failures
-3. **ctx.Err()**: Report non-fatal errors during message processing
-4. **Panic recovery**: Faulty actors are handled via the supervisor strategy. See [Supervision Documentation](./supervision.md) for details.
-
-```go
-func (a *MyActor) Receive(ctx *ReceiveContext) {
-    switch msg := ctx.Message().(type) {
-    case *ProcessData:
-        if err := a.validateData(msg.Data); err != nil {
-            ctx.Err(err)
-            return
-        }
-        // Process valid data
-    }
-}
-```
-
-## Next Steps
-
-Now that you understand the actor fundamentals, explore:
-
-- **[Spawning](spawn.md)**: Learn how to spawn actors
-- **[Messaging](messaging.md)**: Learn about Tell, Ask, and communication patterns
-- **[Mailbox](mailbox.md)**: Understand message queuing and mailbox types
-- **[Behaviors](behaviours.md)**: Dynamic behavior changes for state machines
-- **[Supervision](supervision.md)**: Fault tolerance and error handling
-- **[Stashing](stashing.md)**: Defer message processing
-- **[Passivation](passivation.md)**: Automatic resource management
-
-## Example: Complete Actor
-
-```go
-package main
-
-import (
-    "context"
-    "fmt"
-
-    "github.com/tochemey/goakt/v3/actor"
-)
-
-// BankAccountActor manages a bank account
-type BankAccountActor struct {
-    balance  int64
-    holder   string
-    transactions []string
-}
-
-func (a *BankAccountActor) PreStart(ctx *actor.Context) error {
-    a.balance = 0
-    a.transactions = make([]string, 0)
-    ctx.ActorSystem().Logger().Info("Bank account opened")
-    return nil
-}
-
-func (a *BankAccountActor) Receive(ctx *actor.ReceiveContext) {
-    switch msg := ctx.Message().(type) {
-    case *Deposit:
-        a.balance += msg.GetAmount()
-        a.transactions = append(a.transactions,
-            fmt.Sprintf("Deposit: %d", msg.GetAmount()))
-        ctx.Response(&Balance{Amount: a.balance})
-
-    case *Withdraw:
-        if msg.GetAmount() > a.balance {
-            ctx.Err(fmt.Errorf("insufficient funds"))
-            return
-        }
-        a.balance -= msg.GetAmount()
-        a.transactions = append(a.transactions,
-            fmt.Sprintf("Withdrawal: %d", msg.GetAmount()))
-        ctx.Response(&Balance{Amount: a.balance})
-
-    case *GetBalance:
-        ctx.Response(&Balance{Amount: a.balance})
-
-    case *GetTransactions:
-        ctx.Response(&Transactions{Items: a.transactions})
-
-    default:
-        ctx.Unhandled()
-    }
-}
-
-func (a *BankAccountActor) PostStop(ctx *actor.Context) error {
-    ctx.ActorSystem().Logger().Info("Bank account closed",
-        "final_balance", a.balance,
-        "transactions", len(a.transactions))
-    return nil
-}
-```
-
-This example demonstrates:
-
-- Private state management (`balance`, `holder`, `transactions`)
-- Initialization in `PreStart`
-- Message pattern matching in `Receive`
-- Error handling with `ctx.Err()`
-- Resource cleanup in `PostStop`
-- Responding to requests with `ctx.Response()`

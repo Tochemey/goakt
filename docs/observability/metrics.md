@@ -11,9 +11,7 @@ GoAkt integrates with [OpenTelemetry](https://opentelemetry.io/) to expose runti
 - 🎭 [Actor Metrics](#actor-metrics)
 - 🔌 [Programmatic Metrics Access](#programmatic-metrics-access)
 - 💡 [Complete Example](#complete-example)
-- 📈 [Grafana Dashboard](#grafana-dashboard)
 - ✅ [Best Practices](#best-practices)
-- ➡️ [Next Steps](#next-steps)
 
 ---
 
@@ -303,30 +301,6 @@ func main() {
 }
 ```
 
-## Grafana Dashboard
-
-When exporting to Prometheus, you can build Grafana dashboards using PromQL queries:
-
-```
-# Actor system uptime
-actorsystem_uptime{actor_system="orders"}
-
-# Total live actors
-actorsystem_actors_count{actor_system="orders"}
-
-# Dead letters rate (increase per minute)
-rate(actorsystem_deadletters_count{actor_system="orders"}[1m])
-
-# Messages processed by a specific actor
-actor_processed_count{actor_name="order-processor"}
-
-# Actor restart rate
-rate(actor_restart_count{actor_system="orders"}[5m])
-
-# Failure count by actor kind
-actor_failure_count{actor_system="orders"}
-```
-
 ## Best Practices
 
 1. **Initialize OTel SDK before starting the actor system** -- `WithMetrics()` uses `otel.GetMeterProvider()` which reads the global provider at construction time
@@ -342,8 +316,3 @@ actor_failure_count{actor_system="orders"}
 6. **Watch failure and restart counts** -- High `actor.failure.count` or `actor.restart.count` values signal supervision issues worth investigating
 
 7. **Use actor attributes for filtering** -- The `actor.kind` attribute allows grouping metrics by actor type across all instances
-
-## Next Steps
-
-- [Logging](logging.md): Structured logging configuration
-- [Events Stream](../events_stream/overview.md): System event monitoring

@@ -12,7 +12,6 @@ GoAkt provides a structured logging system through the `github.com/tochemey/goak
 - 📝 [Logging Inside Actors](#logging-inside-actors)
 - 🔧 [Custom Logger Implementation](#custom-logger-implementation)
 - ✅ [Best Practices](#best-practices)
-- ➡️ [Next Steps](#next-steps)
 
 ---
 
@@ -251,8 +250,3 @@ system, _ := actor.NewActorSystem("dev-system",
     actor.WithLogger(log.DebugLogger),
 )
 ```
-
-## Next Steps
-
-- [Metrics](metrics.md): OpenTelemetry metrics integration
-- [Events Stream](../events_stream/overview.md): System event monitoring

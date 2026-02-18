@@ -15,7 +15,6 @@ Grains are GoAkt's implementation of the **Virtual Actor pattern**, providing li
 - ✅ [Best Practices](#best-practices)
 - 🔌 [GrainContext API](#graincontext-api)
 - 🔧 [Troubleshooting](#troubleshooting)
-- ➡️ [Next Steps](#next-steps)
 
 ---
 
@@ -802,9 +801,3 @@ func (gctx *GrainContext) Unhandled()
 - Check role configuration matches
 - Review activation strategy selection
 - Ensure cluster is healthy and nodes are connected
-
-## Next Steps
-
-- [Usage Examples](usage.md): Practical grain usage patterns
-- [Cluster Overview](../cluster/overview.md): Distributed grain activation
-- [Testing](../testing/overview.md): Testing grains effectively

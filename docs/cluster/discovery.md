@@ -17,7 +17,6 @@ Discovery providers enable cluster nodes to automatically find and connect to ea
 - 🎯 [Choosing a Discovery Provider](#choosing-a-discovery-provider)
 - ✅ [Best Practices](#best-practices)
 - 🔧 [Troubleshooting](#troubleshooting)
-- ➡️ [Next Steps](#next-steps)
 
 ---
 
@@ -870,9 +869,3 @@ func main() {
 - **Review TTL settings**: etcd TTL may be too short
 - **Network stability**: Intermittent connectivity causes churn
 - **Resource constraints**: Node may be restarting due to OOM or CPU throttling
-
-## Next Steps
-
-- [Cluster Overview](overview.md): Learn about clustering fundamentals
-- [Cluster Singleton](cluster_singleton.md): Create singleton actors across the cluster
-- [Actor Relocation](relocation.md): Understanding automatic actor migration

@@ -14,252 +14,41 @@ A mailbox is the message queue that stores incoming messages for an actor. Every
 - ✅ [Best Practices](#best-practices)
 - ☠️ [Dead Letters](#dead-letters)
 - 🧩 [Common Patterns](#common-patterns)
-- 🔧 [Advanced Topics](#advanced-topics)
 - 📋 [Summary](#summary)
-- ➡️ [Next Steps](#next-steps)
 
 ---
 
 ## What is a Mailbox?
 
-The mailbox is a critical component of the actor model. It provides:
+In the GoAkt actor framework, the mailbox is a fundamental component that functions as the queue for messages sent to an actor. Every actor has its own mailbox that collects incoming messages until the actor is ready to process them. 
 
-- **Message buffering**: Stores messages until the actor can process them
-- **Asynchronous communication**: Senders don't block waiting for the actor
-- **FIFO ordering**: Messages are processed in the order they are enqueued
-- **Backpressure control**: Bounded mailboxes can apply backpressure
-- **Thread safety**: Safe for concurrent message producers
+This design is central to the actor model: rather than sharing state or locking resources, actors communicate solely by exchanging messages via their mailboxes, ensuring isolation and concurrency while maintaining a sequential processing order.
+The mailbox in GoAkt plays a crucial role in decoupling message senders and receivers by buffering messages until the recipient actor is ready to process them. It not only ensures that messages are handled in a controlled, sequential manner but also integrates with the actor’s supervision and lifecycle management. 
+
+By isolating each actor’s message flow, the mailbox enables robust fault tolerance and scalability, allowing the system to support both local and distributed messaging patterns seamlessly while optimising resource usage and throughput.
 
 ## Mailbox Interface
 
-All mailboxes implement the `Mailbox` interface:
-
-```go
-type Mailbox interface {
-    // Enqueue pushes a message into the mailbox
-    Enqueue(msg *ReceiveContext) error
-
-    // Dequeue fetches a message from the mailbox
-    Dequeue() (msg *ReceiveContext)
-
-    // IsEmpty returns true when the mailbox is empty
-    IsEmpty() bool
-
-    // Len returns the size of the mailbox
-    Len() int64
-
-    // Dispose closes the mailbox and releases resources
-    Dispose()
-}
-```
+Mailboxes implement **Enqueue**, **Dequeue**, **IsEmpty**, **Len**, **Dispose**. You can implement a custom mailbox against this interface.
 
 ## Mailbox Types
 
-GoAkt provides several mailbox implementations, each with different characteristics:
+| Type                           | Constructor                                 | Use when                                                                                                     |
+|--------------------------------|---------------------------------------------|--------------------------------------------------------------------------------------------------------------|
+| **UnboundedMailbox** (default) | `NewUnboundedMailbox()`                     | Default; high throughput; no backpressure needed. Lock-free FIFO.                                            |
+| **BoundedMailbox**             | `NewBoundedMailbox(capacity)`               | You need backpressure; Tell blocks when full. Prevents unbounded growth.                                     |
+| **UnboundedPriorityMailbox**   | `NewUnboundedPriorityMailBox(priorityFunc)` | Messages must be processed by priority. `priorityFunc(msg1, msg2)` returns true if msg1 has higher priority. |
+| **UnboundedFairMailbox**       | `NewUnboundedFairMailbox()`                 | Multiple producers; you want fairness so no single producer starves others.                                  |
+| **UnboundedSegmentedMailbox**  | `NewUnboundedSegmentedMailbox()`            | High-throughput, segmented queue.                                                                            |
 
-### 1. UnboundedMailbox (Default)
+Pass the mailbox at spawn: **actor.WithMailbox(actor.NewBoundedMailbox(500))**. Bounded mailboxes apply backpressure: when full, **Tell** blocks until space is available.
 
-A lock-free, multi-producer single-consumer (MPSC) FIFO queue with no size limit.
+### When to use which
 
-```go
-mailbox := actor.NewUnboundedMailbox()
-```
-
-**Characteristics:**
-
-- **Unbounded**: No size limit (can grow indefinitely)
-- **Lock-free**: Uses atomic operations for high performance
-- **FIFO**: Messages processed in arrival order
-- **Non-blocking**: Enqueue never blocks
-- **Fast**: Optimized for throughput
-
-**When to use:**
-
-- Default choice for most actors
-- High-throughput scenarios
-- When you trust message producers
-- Memory is not constrained
-
-**When NOT to use:**
-
-- Need backpressure control
-- Memory is constrained
-- Unbounded growth is a concern
-
-**Example:**
-
-```go
-pid, err := actorSystem.Spawn(ctx, "processor", &MyActor{},
-    actor.WithMailbox(actor.NewUnboundedMailbox()))
-```
-
-### 2. BoundedMailbox
-
-A bounded, blocking mailbox with fixed capacity backed by a ring buffer.
-
-```go
-mailbox := actor.NewBoundedMailbox(1000) // Capacity of 1000 messages
-```
-
-**Characteristics:**
-
-- **Bounded**: Fixed maximum capacity
-- **Blocking**: Enqueue blocks when full
-- **FIFO**: Messages processed in arrival order
-- **Backpressure**: Naturally applies backpressure to producers
-- **Resource-safe**: Prevents unbounded memory growth
-
-**When to use:**
-
-- Need strict backpressure control
-- Protect against memory exhaustion
-- Rate limiting message processing
-- Resource-constrained environments
-
-**When NOT to use:**
-
-- Need non-blocking sends
-- Very high throughput required
-- Blocking senders is unacceptable
-
-**Example:**
-
-```go
-// Actor with bounded mailbox of 500 messages
-pid, err := actorSystem.Spawn(ctx, "worker", &WorkerActor{},
-    actor.WithMailbox(actor.NewBoundedMailbox(500)))
-```
-
-**Backpressure behavior:**
-
-```go
-// If mailbox is full, Tell will block until space is available
-err := actor.Tell(ctx, pid, &Message{})
-// This blocks when mailbox capacity is reached
-```
-
-### 3. UnboundedPriorityMailbox
-
-A priority queue where messages are processed based on priority rather than arrival order.
-
-```go
-// Define priority function
-priorityFunc := func(msg1, msg2 proto.Message) bool {
-    // Return true if msg1 has higher priority than msg2
-    p1 := getPriority(msg1)
-    p2 := getPriority(msg2)
-    return p1 > p2
-}
-
-mailbox := actor.NewUnboundedPriorityMailBox(priorityFunc)
-```
-
-**Characteristics:**
-
-- **Unbounded**: No size limit
-- **Priority-based**: Messages processed by priority, not order
-- **Custom ordering**: Define your own priority function
-- **Flexible**: Different message types can have different priorities
-
-**When to use:**
-
-- Critical messages need faster processing
-- Different message types have different priorities
-- Need to handle urgent messages first
-- Implementing priority-based workflows
-
-**When NOT to use:**
-
-- FIFO order is important
-- All messages have equal priority
-- Need bounded capacity
-
-**Example:**
-
-```go
-// Priority function: higher numerical priority first
-priorityFunc := func(msg1, msg2 proto.Message) bool {
-    // System messages have highest priority
-    if _, ok := msg1.(*goaktpb.PostStart); ok {
-        return true
-    }
-    if _, ok := msg2.(*goaktpb.PostStart); ok {
-        return false
-    }
-
-    // Then urgent messages
-    if m1, ok := msg1.(*UrgentMessage); ok {
-        if m2, ok := msg2.(*UrgentMessage); ok {
-            return m1.GetPriority() > m2.GetPriority()
-        }
-        return true
-    }
-
-    // Regular messages last
-    return false
-}
-
-pid, err := actorSystem.Spawn(ctx, "priority-worker", &MyActor{},
-    actor.WithMailbox(actor.NewUnboundedPriorityMailBox(priorityFunc)))
-```
-
-### 4. UnboundedFairMailbox
-
-A fair, unbounded mailbox that ensures no single producer dominates.
-
-```go
-mailbox := actor.NewUnboundedFairMailbox()
-```
-
-**Characteristics:**
-
-- **Unbounded**: No size limit
-- **Fair**: Ensures fairness across producers
-- **Lock-free**: High performance
-- **FIFO**: Within each producer's messages
-
-**When to use:**
-
-- Multiple producers sending to same actor
-- Need fairness guarantees
-- Prevent producer starvation
-- Load balancing across sources
-
-**Example:**
-
-```go
-pid, err := actorSystem.Spawn(ctx, "fair-processor", &MyActor{},
-    actor.WithMailbox(actor.NewUnboundedFairMailbox()))
-```
-
-### 5. UnboundedSegmentedMailbox
-
-A segmented, unbounded mailbox optimized for high-throughput scenarios.
-
-```go
-mailbox := actor.NewUnboundedSegmentedMailbox()
-```
-
-**Characteristics:**
-
-- **Unbounded**: No size limit
-- **Segmented**: Uses linked segments for memory efficiency
-- **High throughput**: Optimized for bulk message processing
-- **Cache-friendly**: Better cache locality
-
-**When to use:**
-
-- Very high message rates
-- Need optimal performance
-- Large message volumes
-- Throughput is critical
-
-**Example:**
-
-```go
-pid, err := actorSystem.Spawn(ctx, "high-throughput", &MyActor{},
-    actor.WithMailbox(actor.NewUnboundedSegmentedMailbox()))
-```
+- **Unbounded** — Most actors; memory not a concern.
+- **Bounded** — Resource limits, backpressure, or many actors.
+- **Priority** — Urgent vs normal messages; custom `priorityFunc` (e.g. system messages first).
+- **Fair** — Many producers to one actor; avoid starvation.
 
 ## Choosing a Mailbox
 
@@ -299,46 +88,13 @@ pid, err := actorSystem.Spawn(ctx, "high-throughput", &MyActor{},
 
 ## Configuring Mailboxes
 
-### At Spawn Time
-
-```go
-// Spawn actor with specific mailbox
-pid, err := actorSystem.Spawn(ctx, "my-actor", &MyActor{},
-    actor.WithMailbox(actor.NewBoundedMailbox(1000)))
-```
-
-### Default Mailbox
-
-If no mailbox is specified, actors use `UnboundedMailbox` by default:
-
-```go
-// Uses UnboundedMailbox by default
-pid, err := actorSystem.Spawn(ctx, "my-actor", &MyActor{})
-```
+Pass the mailbox at spawn with **WithMailbox(mailbox)**. If omitted, **UnboundedMailbox** is used.
 
 ## Mailbox Behavior
 
 ### Message Ordering
 
-The mailbox is a **thread-safe FIFO queue**: messages are processed in the order they are enqueued. There is no per-sender ordering guarantee.
-
-When a single goroutine sends messages in sequence, they are enqueued (and thus processed) in that order:
-
-```go
-// Enqueued in order: Msg1 → Msg2 → Msg3
-actor.Tell(ctx, pid, &Msg1{})
-actor.Tell(ctx, pid, &Msg2{})
-actor.Tell(ctx, pid, &Msg3{})
-```
-
-When **multiple senders** (or goroutines) send to the same actor concurrently, messages are interleaved in the order they reach the mailbox; ordering between different senders is non-deterministic:
-
-```go
-// Goroutine 1
-actor.Tell(ctx, pid, &MsgA{})
-
-// Goroutine 2 (concurrent)
-actor.Tell(ctx, pid, &MsgB{})
+Mailboxes are **thread-safe FIFO**: messages are processed in enqueue order. A single sender’s messages stay in order; with multiple senders, interleaving is non-deterministic. Priority mailboxes order by your priority function instead of FIFO.
 
 // Order is non-deterministic: could be A→B or B→A
 ```
@@ -387,32 +143,7 @@ For the full list of system and actor metrics, see [Metrics](../observability/me
 
 ### Choosing Mailbox Size
 
-For bounded mailboxes, consider:
-
-```go
-// Too small: frequent blocking
-actor.WithMailbox(actor.NewBoundedMailbox(10)) // ❌ May block often
-
-// Too large: defeats purpose of backpressure
-actor.WithMailbox(actor.NewBoundedMailbox(1000000)) // ❌ Too large
-
-// Reasonable: 100-10000 based on message rate
-actor.WithMailbox(actor.NewBoundedMailbox(1000)) // ✅ Good balance
-```
-
-### Mailbox Sizing Formula
-
-```
-Mailbox Size = Message Rate × Processing Time × Safety Factor
-
-Example:
-- 1000 msgs/sec
-- 10ms avg processing time
-- 2x safety factor
-= 1000 × 0.01 × 2 = 20 messages
-
-Use 50-100 for safety margin
-```
+For bounded mailboxes, pick a capacity that matches your message rate: too small causes frequent blocking; too large weakens backpressure. Typical range 100–10000.
 
 ### Priority Function Guidelines
 
@@ -537,62 +268,6 @@ for i := 0; i < 10; i++ {
 }
 ```
 
-## Advanced Topics
-
-### Custom Mailbox Implementation
-
-You can implement custom mailboxes by implementing the `Mailbox` interface:
-
-```go
-type CustomMailbox struct {
-    // Your implementation
-}
-
-func (m *CustomMailbox) Enqueue(msg *ReceiveContext) error {
-    // Your enqueue logic
-}
-
-func (m *CustomMailbox) Dequeue() *ReceiveContext {
-    // Your dequeue logic
-}
-
-func (m *CustomMailbox) IsEmpty() bool {
-    // Your empty check
-}
-
-func (m *CustomMailbox) Len() int64 {
-    // Your length calculation
-}
-
-func (m *CustomMailbox) Dispose() {
-    // Your cleanup logic
-}
-```
-
-### Mailbox Selection Strategy
-
-```go
-func selectMailbox(actorType string, expectedLoad int) actor.Mailbox {
-    switch {
-    case expectedLoad > 10000:
-        // High throughput
-        return actor.NewUnboundedSegmentedMailbox()
-
-    case expectedLoad > 1000:
-        // Medium throughput with backpressure
-        return actor.NewBoundedMailbox(expectedLoad)
-
-    default:
-        // Default for normal load
-        return actor.NewUnboundedMailbox()
-    }
-}
-
-mailbox := selectMailbox("worker", 5000)
-pid, _ := actorSystem.Spawn(ctx, "worker", &Worker{},
-    actor.WithMailbox(mailbox))
-```
-
 ## Summary
 
 - **Mailboxes** buffer messages for actors
@@ -601,10 +276,3 @@ pid, _ := actorSystem.Spawn(ctx, "worker", &Worker{},
 - **Priority** mailboxes enable priority-based processing
 - **Fair** mailboxes ensure fairness across producers
 - Choose mailbox type based on your requirements
-
-## Next Steps
-
-- **[Messaging](messaging.md)**: Learn about message sending patterns
-- **[Stashing](stashing.md)**: Temporarily defer message processing
-- **[Behaviors](behaviours.md)**: Change actor behavior dynamically
-- **[Passivation](passivation.md)**: Automatic actor lifecycle management

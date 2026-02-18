@@ -16,10 +16,8 @@ A cluster singleton is an actor that has exactly one instance across the entire 
 - 💾 [State Management](#state-management)
 - ⚠️ [Error Handling](#error-handling)
 - 🔧 [Advanced Patterns](#advanced-patterns)
-- 🧪 [Testing Singletons](#testing-singletons)
 - ✅ [Best Practices](#best-practices)
 - 🔧 [Troubleshooting](#troubleshooting)
-- ➡️ [Next Steps](#next-steps)
 
 ---
 
@@ -650,58 +648,6 @@ func (s *SchedulerActor) Receive(ctx *actor.ReceiveContext) {
 }
 ```
 
-## Testing Singletons
-
-### Unit Testing
-
-Test singleton actors like regular actors:
-
-```go
-func TestCoordinatorActor(t *testing.T) {
-    ctx := context.Background()
-    system, _ := actor.NewActorSystem("test")
-    system.Start(ctx)
-    defer system.Stop(ctx)
-
-    // Spawn locally for testing (no clustering required)
-    pid, err := system.Spawn(ctx, "coordinator", new(CoordinatorActor))
-    require.NoError(t, err)
-
-    // Test behavior
-    response, _ := actor.Ask(ctx, pid, &CoordinateRequest{}, time.Second)
-    assert.NotNil(t, response)
-}
-```
-
-### Integration Testing
-
-Test singleton behavior in a cluster:
-
-```go
-func TestSingletonInCluster(t *testing.T) {
-    ctx := context.Background()
-
-    // Start multiple cluster nodes
-    node1, _ := startClusterNode(ctx, "node1", 3320, 3321, 3322)
-    node2, _ := startClusterNode(ctx, "node2", 3323, 3324, 3325)
-    defer node1.Stop(ctx)
-    defer node2.Stop(ctx)
-
-    // Spawn singleton from node1
-    err := node1.SpawnSingleton(ctx, "coordinator", new(CoordinatorActor))
-    assert.NoError(t, err)
-
-    // Try spawning from node2 (should be idempotent)
-    err = node2.SpawnSingleton(ctx, "coordinator", new(CoordinatorActor))
-    assert.NoError(t, err)
-
-    // Verify only one instance exists
-    addr1, _, _ := node1.ActorOf(ctx, "coordinator")
-    addr2, _, _ := node2.ActorOf(ctx, "coordinator")
-    assert.Equal(t, addr1.String(), addr2.String())
-}
-```
-
 ## Best Practices
 
 ### Design
@@ -767,9 +713,3 @@ func TestSingletonInCluster(t *testing.T) {
 - **Remote calls**: Singleton on remote node adds latency; consider caching
 - **Heavy processing**: Move computation out of singleton to worker actors
 - **Slow network**: Increase timeouts or improve network infrastructure
-
-## Next Steps
-
-- [Cluster Overview](overview.md): Learn about clustering fundamentals
-- [Actor Relocation](relocation.md): Deep dive into automatic actor migration
-- [Multi-Datacenter](multi_datacenters.md): Deploy singletons across datacenters

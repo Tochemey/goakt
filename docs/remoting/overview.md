@@ -9,28 +9,25 @@ Remoting enables actors on different actor systems to communicate across network
 - 🏗️ [Architecture](#architecture)
 - ⚙️ [Enabling Remoting](#enabling-remoting)
 - 📤 [Remote Operations](#remote-operations)
-- 💡 [Complete Example](#complete-example)
 - 🔀 [Remoting vs Clustering](#remoting-vs-clustering)
 - ⚡ [Performance Tuning](#performance-tuning)
 - ⚠️ [Error Handling](#error-handling)
 - ✅ [Best Practices](#best-practices)
-- 💡 [Complete Example: Service Integration](#complete-example-service-integration)
 - 🔧 [Troubleshooting](#troubleshooting)
-- ➡️ [Next Steps](#next-steps)
 
 ---
 
 ## Quick reference
 
-| Goal                             | API                                                                                                                                                                  |
-|----------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Enable remoting                  | `actor.WithRemote(remote.NewConfig("host", port))` or `actor.WithRemote(remote.NewConfig("host", port, opts...))`                                                    |
-| Remote Tell (from outside actor) | `system.NoSender().RemoteTell(ctx, addr, message)`                                                                                                                   |
-| Remote Ask (from outside)        | `response, err := system.NoSender().RemoteAsk(ctx, addr, message, timeout)` — returns `*anypb.Any`; use `response.UnmarshalNew()` or type assertion to get your type |
-| From inside actor                | `ctx.RemoteTell(addr, message)` / `response := ctx.RemoteAsk(addr, message, timeout)`                                                                                |
-| Build remote address             | `address.New("actor-name", "remote-system-name", "host", port)`                                                                                                      |
-| Lookup remote actor              | `addr, err := system.NoSender().RemoteLookup(ctx, "host", port, "actor-name")`                                                                                       |
-| Grains (cluster)                 | `identity, err := system.GrainIdentity(ctx, name, factory, opts...)` then `TellGrain` / `AskGrain` (no host/port; works across cluster)                              |
+| Goal                             | API                                                                                       |
+|----------------------------------|-------------------------------------------------------------------------------------------|
+| Enable remoting                  | `actor.WithRemote`                                                                        |
+| Remote Tell (from outside actor) | `system.NoSender().RemoteTell`                                                            |
+| Remote Ask (from outside)        | `system.NoSender().RemoteAsk`                                                             |
+| From inside actor                | `ctx.RemoteTell` / `ctx.RemoteAsk`                                                        |
+| Build remote address             | `address.New`                                                                             |
+| Lookup remote actor              | `system.NoSender().RemoteLookup`                                                          |
+| Grains (cluster)                 | `system.GrainIdentity` then `TellGrain` / `AskGrain` (no host/port; works across cluster) |
 
 ## What is Remoting?
 
@@ -300,123 +297,6 @@ err = system.TellGrain(ctx, identity, &UpdateUserRequest{Name: "John"})
 response, err := system.AskGrain(ctx, identity, &GetUserRequest{}, 5*time.Second)
 ```
 
-## Complete Example
-
-### Two-Node Setup
-
-**Node 1:**
-
-```go
-package main
-
-import (
-    "context"
-    "log"
-
-    "github.com/tochemey/goakt/v3/actor"
-    "github.com/tochemey/goakt/v3/remote"
-)
-
-type WorkerActor struct{}
-
-func (w *WorkerActor) PreStart(ctx *actor.Context) error {
-    ctx.ActorSystem().Logger().Info("Worker started on Node 1")
-    return nil
-}
-
-func (w *WorkerActor) Receive(ctx *actor.ReceiveContext) {
-    switch msg := ctx.Message().(type) {
-    case *WorkRequest:
-        ctx.Logger().Infof("Processing work: %v", msg)
-        ctx.Response(&WorkResponse{Result: "done"})
-    }
-}
-
-func (w *WorkerActor) PostStop(ctx *actor.Context) error {
-    return nil
-}
-
-func main() {
-    ctx := context.Background()
-
-    // Enable remoting
-    system, err := actor.NewActorSystem(
-        "system-1",
-        actor.WithRemote(remote.NewConfig("localhost", 3321)),
-    )
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    if err := system.Start(ctx); err != nil {
-        log.Fatal(err)
-    }
-    defer system.Stop(ctx)
-
-    // Spawn local actor
-    pid, err := system.Spawn(ctx, "worker-1", new(WorkerActor))
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    log.Printf("Node 1 started with worker: %s\n", pid.Name())
-    select {} // Keep running
-}
-```
-
-**Node 2:**
-
-```go
-package main
-
-import (
-    "context"
-    "log"
-    "time"
-
-    "github.com/tochemey/goakt/v3/actor"
-    "github.com/tochemey/goakt/v3/address"
-    "github.com/tochemey/goakt/v3/remote"
-)
-
-func main() {
-    ctx := context.Background()
-
-    // Enable remoting
-    system, err := actor.NewActorSystem(
-        "system-2",
-        actor.WithRemote(remote.NewConfig("localhost", 3322)),
-    )
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    if err := system.Start(ctx); err != nil {
-        log.Fatal(err)
-    }
-    defer system.Stop(ctx)
-
-    log.Println("Node 2 started")
-
-    // Create address for remote actor on Node 1
-    remoteAddr := address.New("worker-1", "system-1", "localhost", 3321)
-
-    // Send message to remote actor (use NoSender() when outside an actor)
-    err = system.NoSender().RemoteTell(ctx, remoteAddr, &WorkRequest{Job: "task-1"})
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    // Request-response with remote actor
-    response, err := system.NoSender().RemoteAsk(ctx, remoteAddr, &WorkRequest{Job: "task-2"}, 5*time.Second)
-    if err != nil {
-        log.Fatal(err)
-    }
-    // response is *anypb.Any; unpack as needed
-    log.Printf("Response from remote actor: %v\n", response)
-}
-```
-
 ## Remoting vs Clustering
 
 | Feature              | Remoting                           | Clustering                          |
@@ -615,104 +495,6 @@ system, err := actor.NewActorSystem(
 )
 ```
 
-## Complete Example: Service Integration
-
-```go
-package main
-
-import (
-    "context"
-    "log"
-    "time"
-
-    "github.com/tochemey/goakt/v3/actor"
-    "github.com/tochemey/goakt/v3/address"
-    "github.com/tochemey/goakt/v3/remote"
-)
-
-// Service that communicates with remote actors
-type RemoteService struct {
-    system actor.ActorSystem
-}
-
-func NewRemoteService(system actor.ActorSystem) *RemoteService {
-    return &RemoteService{system: system}
-}
-
-// Call sends a request to a remote actor
-func (s *RemoteService) Call(ctx context.Context, host string, port int, actorName string, request proto.Message, timeout time.Duration) (proto.Message, error) {
-    // Look up the actor
-    remoting := remote.NewRemoting()
-    defer remoting.Close()
-
-    addr, err := remoting.RemoteLookup(ctx, host, port, actorName)
-    if err != nil {
-        return nil, err
-    }
-
-    if addr.Equals(address.NoSender()) {
-        return nil, errors.New("actor not found")
-    }
-
-    // Send request
-    from := address.NoSender()
-    response, err := remoting.RemoteAsk(ctx, from, addr, request, timeout)
-    if err != nil {
-        return nil, err
-    }
-
-    return response.UnmarshalNew()
-}
-
-// Notify sends a fire-and-forget message to a remote actor
-func (s *RemoteService) Notify(ctx context.Context, addr *address.Address, message proto.Message) error {
-    return s.system.NoSender().RemoteTell(ctx, addr, message)
-}
-
-func main() {
-    ctx := context.Background()
-
-    // Create actor system with remoting
-    system, err := actor.NewActorSystem(
-        "service-system",
-        actor.WithRemote(remote.NewConfig("localhost", 3323)),
-    )
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    if err := system.Start(ctx); err != nil {
-        log.Fatal(err)
-    }
-    defer system.Stop(ctx)
-
-    // Create service
-    service := NewRemoteService(system)
-
-    // Call remote actor
-    response, err := service.Call(
-        ctx,
-        "localhost",
-        3321,
-        "worker-1",
-        &WorkRequest{Job: "process-data"},
-        5*time.Second,
-    )
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    log.Printf("Got response: %v\n", response)
-
-    // Notify remote actor
-    addr := address.New("logger", "log-system", "localhost", 3322)
-    err = service.Notify(ctx, addr, &LogEvent{Message: "Service started"})
-    if err != nil {
-        log.Printf("Failed to notify: %v\n", err)
-    }
-}
-```
-
 ## Troubleshooting
 
 ### Connection Refused
@@ -786,9 +568,3 @@ func main() {
 - Review TLS version compatibility
 
 See [TLS Configuration](tls.md) for detailed TLS setup.
-
-## Next Steps
-
-- [TLS Configuration](tls.md): Secure remoting with TLS
-- [Context Propagation](context_propagation.md): Distributed tracing and metadata propagation
-- [Clustering Overview](../cluster/overview.md): Build on remoting with automatic discovery

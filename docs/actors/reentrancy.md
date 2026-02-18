@@ -8,27 +8,41 @@ Reentrancy allows actors to process new messages while waiting for async respons
 - 💡 [Why Use Reentrancy?](#why-use-reentrancy)
 - 🔀 [Reentrancy Modes](#reentrancy-modes)
 - 🚀 [Basic Usage](#basic-usage)
-- 💡 [Complete Example](#complete-example)
+- 💡 [Example](#example)
 - ⚙️ [Request Options](#request-options)
 - ❌ [Request Cancellation](#request-cancellation)
 - 🔄 [AllowAll vs. StashNonReentrant](#allowall-vs-stashnonreentrant)
 - ✅ [Best Practices](#best-practices)
-- 🧪 [Testing](#testing)
 - 📋 [Summary](#summary)
-- ➡️ [Next Steps](#next-steps)
 
 ---
 
 ## What is Reentrancy?
 
-**Reentrancy** is the ability of an actor to:
+**Reentrancy** is the ability of an actor to process new messages while it is waiting for a response from another actor. In the default, non-reentrant model, an actor handles one message at a time: if it sends a request and waits for a reply, its mailbox is effectively blocked until that reply arrives. With reentrancy enabled, the actor can keep processing other messages and handle the reply later via a **continuation** (callback), so the mailbox stays responsive.
 
-- Send async requests to other actors
-- Continue processing new messages while waiting for responses
-- Handle responses via continuations (callbacks)
-- Avoid blocking the mailbox
+### The default: one message at a time
 
-Without reentrancy, actors process messages **one at a time** sequentially. With reentrancy, actors can have **multiple pending requests** and continue processing while waiting for responses.
+In the actor model, each actor has a mailbox and processes messages **sequentially**. That gives you a simple mental model and avoids races on the actor’s state. As long as the handler runs to completion without waiting on external replies, this works well. The problem appears when an actor needs to **ask another actor** for something: if it blocks until the response comes back, it cannot process any other message in the meantime. The actor (and its mailbox) is stuck until the response arrives or times out.
+
+### What reentrancy changes
+
+When reentrancy is **enabled**, the actor can issue an **async request** to another actor and register a **continuation**. The runtime does not block the actor’s message loop: as soon as the request is sent, the actor can move on to the next message. When the response (or error) arrives, the runtime invokes the continuation with that result. So the actor can have **multiple requests in flight** and still process new messages; responses are handled by their continuations, not by blocking in the middle of a handler.
+
+### In other words
+
+With reentrancy, an actor can:
+
+- **Send async requests** to other actors (Request or RequestName)
+- **Continue processing** new messages while waiting for responses
+- **Handle responses** via continuations (callbacks) when they arrive
+- **Avoid blocking** the mailbox on request–response round-trips
+
+Without reentrancy, the actor processes messages strictly one at a time; if it waits for a reply, nothing else is processed until that reply (or timeout). With reentrancy, multiple pending requests can be outstanding and the actor remains responsive to new work.
+
+### Trade-off
+
+Reentrancy trades **strict single-threaded-by-message** safety for **better concurrency and responsiveness**. While a continuation is running, the actor’s state may have changed because other messages were processed in between. You must design your continuations with that in mind (e.g. avoid assuming state that might be stale, or use request correlation ids to match responses to the right logical operation). When used carefully, reentrancy lets you build responsive actors that coordinate with others without blocking the mailbox.
 
 ## Why Use Reentrancy?
 
@@ -143,7 +157,7 @@ func (a *MyActor) Receive(ctx *actor.ReceiveContext) {
 }
 ```
 
-## Complete Example
+## Example
 
 ```go
 package main
@@ -328,7 +342,7 @@ Set timeout for individual requests:
 ```go
 import "github.com/tochemey/goakt/v3/errors"
 
-request := ctx.Request(targetPID, &Query{},
+request := ctx.Request(pid, &Query{},
     actor.WithRequestTimeout(5*time.Second))
 
 request.Then(func(response proto.Message, err error) {
@@ -347,7 +361,7 @@ Override reentrancy mode for specific requests:
 ```go
 // Actor configured with AllowAll
 // But this specific request should stash
-request := ctx.Request(targetPID, &CriticalQuery{},
+request := ctx.Request(pid, &CriticalQuery{},
     actor.WithReentrancyMode(reentrancy.StashNonReentrant))
 
 request.Then(func(response proto.Message, err error) {
@@ -363,7 +377,8 @@ Cancel pending requests:
 func (a *MyActor) Receive(ctx *actor.ReceiveContext) {
     switch msg := ctx.Message().(type) {
     case *StartQuery:
-        request := ctx.Request(a.dbPID, &Query{})
+        // send a query to the db actor using its pid
+        request := ctx.Request(a.pid, &Query{})
 
         // Store request for cancellation
         a.pendingRequest = request
@@ -437,7 +452,7 @@ pid, _ := actorSystem.Spawn(ctx, "actor", &MyActor{},
 import "github.com/tochemey/goakt/v3/errors"
 
 // Good: Error handling and timeout
-request := ctx.Request(targetPID, &Query{},
+request := ctx.Request(pid, &Query{},
     actor.WithRequestTimeout(5*time.Second))
 
 request.Then(func(response proto.Message, err error) {
@@ -463,41 +478,12 @@ request.Then(func(response proto.Message, err error) {
 
 ```go
 // Bad: No error handling, no timeout
-request := ctx.Request(targetPID, &Query{})
+request := ctx.Request(pid, &Query{})
 request.Then(func(response proto.Message, err error) {
     // ❌ No error check
     result := response.(*Result)
     a.process(result)
 })
-```
-
-## Testing
-
-```go
-func TestReentrantActor(t *testing.T) {
-    ctx := context.Background()
-    system, _ := actor.NewActorSystem("test",
-        actor.WithPassivationStrategy(passivation.NewLongLivedStrategy()))
-    system.Start(ctx)
-    defer system.Stop(ctx)
-
-    // Spawn with reentrancy
-    pid, _ := system.Spawn(ctx, "test", &TestActor{},
-        actor.WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
-
-    // Send multiple requests
-    for i := 0; i < 5; i++ {
-        actor.Tell(ctx, pid, &ProcessRequest{Id: i})
-    }
-
-    // Wait for processing
-    time.Sleep(time.Second)
-
-    // Verify all requests processed
-    response, _ := actor.Ask(ctx, pid, &GetProcessedCount{}, time.Second)
-    count := response.(*ProcessedCount)
-    assert.Equal(t, 5, count.Value)
-}
 ```
 
 ## Summary
@@ -510,10 +496,3 @@ func TestReentrantActor(t *testing.T) {
 - **Cancel**: Cancel pending requests
 - **WithRequestTimeout**: Set timeout per request
 - **WithReentrancyMode**: Override mode per request
-
-## Next Steps
-
-- **[PipeTo Pattern](pipeto.md)**: Execute background work
-- **[Messaging](messaging.md)**: Synchronous vs. asynchronous
-- **[Behaviors](behaviours.md)**: State machines with reentrancy
-- **[Stashing](stashing.md)**: Message deferral patterns

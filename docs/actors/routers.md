@@ -17,7 +17,6 @@ Routers are specialized actors that distribute messages across a pool of worker 
 - ⚡ [Performance Considerations](#performance-considerations)
 - ⚠️ [Router Limitations](#router-limitations)
 - 📋 [Summary](#summary)
-- ➡️ [Next Steps](#next-steps)
 
 ---
 
@@ -279,7 +278,7 @@ actor.Tell(ctx, pid, &goaktpb.Broadcast{Message: query})
 Options are passed to `SpawnRouter`. Routing-strategy options (`WithRoutingStrategy`, `AsScatterGatherFirst`, `AsTailChopping`) are mutually exclusive; the last applied wins. Routee-supervision options (`WithStopRouteeOnFailure`, `WithRestartRouteeOnFailure`, `WithResumeRouteeOnFailure`) are also mutually exclusive.
 
 | Option                                            | Summary                                                                                                                                                                                                                                                                |
-| :------------------------------------------------ | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|:--------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `WithRoutingStrategy(strategy)`                   | Sets routing strategy (e.g. RoundRobin, Random, FanOut). Default is RoundRobin.<br>Fire-and-forget; no reply waiting. For reply-based routing use Scatter-Gather or Tail-Chopping.                                                                                     |
 | `AsScatterGatherFirst(within)`                    | Sends to all live routees concurrently; first successful reply within `within` is forwarded to sender.<br>Late replies dropped. No reply → StatusFailure. `within` must be > 0.                                                                                        |
 | `AsTailChopping(within, interval)`                | Probes routees one at a time (shuffled). Sends to next after `interval` if no response.<br>Stops when one replies, all tried, or `within` elapsed. First success wins; else StatusFailure.<br>Requires `interval` > 0 and `interval` < `within` for multiple attempts. |
@@ -638,7 +637,7 @@ func (a *CircuitBreakerRouter) Receive(ctx *actor.ReceiveContext) {
 
 ```go
 // Good: Comprehensive router configuration
-routerPID, _ := actorSystem.SpawnRouter(ctx, "api-workers",
+router, _ := actorSystem.SpawnRouter(ctx, "api-workers",
     10,
     &APIWorker{},
     actor.WithRoutingStrategy(actor.RoundRobinRouting),
@@ -655,17 +654,17 @@ routerPID, _ := actorSystem.SpawnRouter(ctx, "api-workers",
 
 ```go
 // Bad: Sending unwrapped message
-actor.Tell(ctx, routerPID, &WorkItem{}) // ❌ Won't be routed
+actor.Tell(ctx, router, &WorkItem{}) // ❌ Won't be routed
 
 // Good: Wrapped in Broadcast
 payload, _ := anypb.New(&WorkItem{})
-actor.Tell(ctx, routerPID, &goaktpb.Broadcast{Message: payload}) // ✅
+actor.Tell(ctx, router, &goaktpb.Broadcast{Message: payload}) // ✅
 ```
 
 ## Strategy Comparison
 
 | Strategy          | Distribution | Response   | Use Case            | Overhead |
-| ----------------- | ------------ | ---------- | ------------------- | -------- |
+|-------------------|--------------|------------|---------------------|----------|
 | **RoundRobin**    | Sequential   | No wait    | Load balancing      | Low      |
 | **Random**        | Random       | No wait    | Simple distribution | Low      |
 | **FanOut**        | All routees  | No wait    | Broadcasting        | High     |
@@ -707,10 +706,3 @@ Very heavy:        100+ routees (monitor carefully)
 - **Messages** must be wrapped in `Broadcast`
 - **Choose strategy** based on your use case
 - **Monitor and scale** based on load
-
-## Next Steps
-
-- **[Spawning Actors](spawn.md)**: Learn about SpawnRouter
-- **[Supervision](supervision.md)**: Fault tolerance strategies
-- **[Messaging](messaging.md)**: Message patterns
-- **[Overview](overview.md)**: Actor fundamentals

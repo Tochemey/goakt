@@ -9,12 +9,9 @@ The Actor System is the foundation of GoAkt - it manages actor lifecycle, provid
 - 🔄 [Actor System Lifecycle](#actor-system-lifecycle)
 - ⚙️ [Configuration Options](#configuration-options)
 - 📋 [Actor System Methods](#actor-system-methods)
-- 💡 [Complete Configuration Example](#complete-configuration-example)
 - ✅ [Best Practices](#best-practices)
-- 🧪 [Testing](#testing)
 - ⚡ [Performance Considerations](#performance-considerations)
 - 📋 [Summary](#summary)
-- ➡️ [Next Steps](#next-steps)
 
 ---
 
@@ -22,11 +19,20 @@ The Actor System is the foundation of GoAkt - it manages actor lifecycle, provid
 
 An **Actor System** is a container and runtime environment for actors that provides:
 
-- **Actor lifecycle management**: Creation, supervision, and termination
+- **Actors lifecycle management**: Creation, supervision, termination and relocation (if clustering enabled)
 - **Infrastructure services**: Remoting, clustering, pub/sub
 - **Resource management**: Mailboxes, schedulers, event streams
 - **Configuration**: Logging, metrics, extensions
 - **Coordination**: Distributed operations and shutdown
+- **Location transparency**: When clustering (or remoting) is enabled, the physical location of actors is abstracted away. You interact with actors solely through their unique addresses, regardless of whether they are local or remote.
+- **Fault tolerance**: Supervision and restart strategies for resilient systems
+- **Addressing**: Unique addresses for actors, enabling message routing and discovery
+- **Event stream**: Publish/subscribe for system events to monitor the health and status of the actor system
+- **Scheduling**: Timers and delayed messages for time-based operations
+- **Extensions**: Pluggable components for additional functionality (e.g., event sourcing, tracing) - see [Extensions](extensions.md)
+- **Coordinated shutdown**: Hooks for graceful cleanup during shutdown
+- **Multi-data center support**: Control plane for managing actors across multiple data centers (if enabled)
+- **Actors Tree**: Hierarchical organization of actors under guardians for structured supervision and lifecycle management
 
 Think of it as the operating system for your actors.
 
@@ -36,9 +42,6 @@ Think of it as the operating system for your actors.
 
 ```go
 actorSystem, err := actor.NewActorSystem("MySystem")
-if err != nil {
-    log.Fatal(err)
-}
 ```
 
 **Requirements:**
@@ -65,9 +68,6 @@ Initialize and start the actor system:
 ```go
 ctx := context.Background()
 err := actorSystem.Start(ctx)
-if err != nil {
-    log.Fatalf("Failed to start: %v", err)
-}
 ```
 
 **What happens on Start:**
@@ -88,9 +88,6 @@ Gracefully shutdown the actor system:
 
 ```go
 err := actorSystem.Stop(ctx)
-if err != nil {
-    log.Fatalf("Failed to stop: %v", err)
-}
 ```
 
 **What happens on Stop:**
@@ -104,9 +101,9 @@ if err != nil {
 7. Stop event stream
 8. Clean up resources
 
-**Note:** `Stop` does not call `os.Exit()` - you must handle that explicitly.
+> `Stop` does not call `os.Exit()` - you must handle that explicitly.
 
-### Complete Lifecycle Example
+### Example
 
 ```go
 package main
@@ -170,9 +167,7 @@ Set custom logger for the actor system:
 
 ```go
 logger := log.New(log.DebugLevel, os.Stdout)
-
-actorSystem, _ := actor.NewActorSystem("MySystem",
-    actor.WithLogger(logger))
+actorSystem, _ := actor.NewActorSystem("MySystem", actor.WithLogger(logger))
 ```
 
 **Default:** Uses GoAkt's default logger
@@ -332,6 +327,8 @@ actorSystem, _ := actor.NewActorSystem("MySystem",
 
 **Extensions** provide pluggable functionality accessible from actors.
 
+See [Extensions documentation](extensions.md) for details.
+
 ### WithTLS
 
 Enable TLS for secure communication:
@@ -453,9 +450,6 @@ Lookup actor by name (local or cluster). Returns address, PID, and error:
 
 ```go
 addr, pid, err := actorSystem.ActorOf(ctx, "my-actor")
-if err == nil && pid != nil {
-    actor.Tell(ctx, pid, &Message{})
-}
 // If actor is on a remote node, addr is set and pid may be nil; use remoting to send to addr
 ```
 
@@ -467,9 +461,6 @@ Get all local actors:
 
 ```go
 actors := actorSystem.Actors()
-for _, pid := range actors {
-    fmt.Printf("Actor: %s\n", pid.Name())
-}
 ```
 
 **Returns:** Slice of local actor PIDs
@@ -480,13 +471,6 @@ Get all actors (including cluster):
 
 ```go
 refs, err := actorSystem.ActorRefs(ctx, 5*time.Second)
-if err != nil {
-    log.Printf("Failed to get refs: %v", err)
-}
-
-for _, ref := range refs {
-    fmt.Printf("Actor: %s at %s\n", ref.Name(), ref.Address())
-}
 ```
 
 **Returns:** ActorRefs from local and cluster nodes
@@ -511,11 +495,6 @@ Get runtime metrics (methods, not fields):
 
 ```go
 metrics := actorSystem.Metric(ctx)
-if metrics != nil {
-    fmt.Printf("Actors: %d\n", metrics.ActorsCount())
-    fmt.Printf("Dead letters: %d\n", metrics.DeadlettersCount())
-    fmt.Printf("Uptime: %d s\n", metrics.Uptime())
-}
 ```
 
 ### Name
@@ -532,9 +511,7 @@ fmt.Printf("System: %s\n", name)
 Check if system is running:
 
 ```go
-if actorSystem.Running() {
-    fmt.Println("System is running")
-}
+isRunning := actorSystem.Running()
 ```
 
 ### InCluster
@@ -542,109 +519,21 @@ if actorSystem.Running() {
 Check if in cluster mode:
 
 ```go
-if actorSystem.InCluster() {
-    fmt.Println("Running in cluster")
-}
-```
-
-## Complete Configuration Example
-
-```go
-package main
-
-import (
-    "context"
-    "time"
-
-    "github.com/tochemey/goakt/v3/actor"
-    "github.com/tochemey/goakt/v3/discovery"
-    "github.com/tochemey/goakt/v3/log"
-    "github.com/tochemey/goakt/v3/remote"
-    "github.com/tochemey/goakt/v3/supervisor"
-)
-
-func main() {
-    ctx := context.Background()
-
-    // Setup logger
-    logger := log.New(log.InfoLevel, os.Stdout)
-
-    // Setup supervisor
-    defaultSupervisor := supervisor.NewSupervisor(
-        supervisor.WithStrategy(supervisor.OneForOneStrategy),
-        supervisor.WithDirective(&TransientError{}, supervisor.RestartDirective),
-        supervisor.WithRetry(3, 30*time.Second))
-
-    // Setup remoting
-    remoteConfig := &remote.Config{
-        Host: "localhost",
-        Port: 3000,
-    }
-
-    // Setup clustering
-    clusterConfig := &actor.ClusterConfig{
-        Discovery:     consulDiscovery,
-        ReplicaCount:  3,
-    }
-
-    // Create actor system with full configuration
-    actorSystem, err := actor.NewActorSystem("ProductionSystem",
-        // Logging
-        actor.WithLogger(logger),
-
-        // Actor lifecycle
-        actor.WithActorInitTimeout(10*time.Second),
-        actor.WithActorInitMaxRetries(3),
-        actor.WithDefaultSupervisor(defaultSupervisor),
-
-        // Passivation is per-actor at spawn; no global "disable"
-
-        // Distributed features
-        actor.WithRemote(remoteConfig),
-        actor.WithCluster(clusterConfig),
-
-        // Features
-        actor.WithPubSub(),
-        actor.WithMetrics(),
-
-        // Shutdown
-        actor.WithShutdownTimeout(30*time.Second),
-        actor.WithCoordinatedShutdown(
-            &FlushMetricsHook{},
-            &SaveStateHook{},
-        ))
-
-    if err != nil {
-        logger.Fatal("Failed to create system", "error", err)
-    }
-
-    // Start system
-    if err := actorSystem.Start(ctx); err != nil {
-        logger.Fatal("Failed to start", "error", err)
-    }
-
-    defer func() {
-        if err := actorSystem.Stop(ctx); err != nil {
-            logger.Error("Failed to stop", "error", err)
-        }
-    }()
-
-    // System is ready - spawn actors and run application
-    logger.Info("Actor system ready")
-}
+inCluster := actorSystem.InCluster()
 ```
 
 ## Best Practices
 
 ### Do's ✅
 
-1. **Handle signals** for graceful shutdown
-2. **Set appropriate timeouts** based on system size
-3. **Use coordinated shutdown** for cleanup
-4. **Configure default supervisor** for consistency
-5. **Enable metrics** for monitoring
-6. **Use TLS in production** for security
-7. **Test shutdown sequence** thoroughly
+1. **Single Instance** per application per node
+2. **Handle signals** for graceful shutdown
+3. **Set appropriate timeouts** based on system size
+4. **Use coordinated shutdown** for cleanup
+5. **Configure default supervisor** for consistency
+6. **Enable metrics** for monitoring
+7. **Use TLS in production** for security
+8. **Test shutdown sequence** thoroughly
 
 ```go
 // Good: Comprehensive configuration
@@ -683,54 +572,6 @@ if err := system.Start(ctx); err != nil {
 defer system.Stop(ctx)
 ```
 
-## Testing
-
-### Test Actor System Setup
-
-```go
-func TestActorSystem(t *testing.T) {
-    ctx := context.Background()
-
-    // Create test system
-    system, err := actor.NewActorSystem("test")
-
-    assert.NoError(t, err)
-    assert.NotNil(t, system)
-
-    // Start
-    err = system.Start(ctx)
-    assert.NoError(t, err)
-    assert.True(t, system.Running())
-
-    // Stop
-    err = system.Stop(ctx)
-    assert.NoError(t, err)
-    assert.False(t, system.Running())
-}
-```
-
-### Test with Actors
-
-```go
-func TestSystemWithActors(t *testing.T) {
-    ctx := context.Background()
-    system, _ := actor.NewActorSystem("test")
-
-    system.Start(ctx)
-    defer system.Stop(ctx)
-
-    // Spawn actors
-    pid, err := system.Spawn(ctx, "test-actor", &TestActor{})
-    assert.NoError(t, err)
-    assert.NotNil(t, pid)
-
-    // Use actor
-    response, err := actor.Ask(ctx, pid, &TestMessage{}, time.Second)
-    assert.NoError(t, err)
-    assert.NotNil(t, response)
-}
-```
-
 ## Performance Considerations
 
 - **Passivation**: Balance memory vs. startup cost
@@ -747,10 +588,3 @@ func TestSystemWithActors(t *testing.T) {
 - **Configure** logging, clustering, remoting, metrics, etc.
 - **Methods** provide actor management and system operations
 - **Best practices** ensure reliable operation
-
-## Next Steps
-
-- **[Coordinated Shutdown](coordinated_shutdown.md)**: Graceful shutdown with hooks
-- **[Spawning Actors](../actors/spawn.md)**: Creating actors
-- **[Remoting](../remoting/overview.md)**: Remote communication
-- **[Clustering](../cluster/overview.md)**: Distributed systems

@@ -17,7 +17,6 @@ Actor relocation is GoAkt's automatic mechanism for moving actors to healthy nod
 - ✅ [Best Practices](#best-practices)
 - 🚫 [Disabling Relocation (Advanced)](#disabling-relocation-advanced)
 - 🔧 [Troubleshooting](#troubleshooting)
-- ➡️ [Next Steps](#next-steps)
 
 ---
 
@@ -603,10 +602,3 @@ Use `actor.WithGrainDisableRelocation()` when configuring a grain (e.g. in clust
 - Optimize actor spawn time
 - Increase cluster size for better distribution
 - Monitor and scale cluster resources
-
-## Next Steps
-
-- [Cluster Overview](overview.md): Learn about clustering fundamentals
-- [Cluster Singleton](cluster_singleton.md): Understand singleton relocation behavior
-- [Discovery Providers](discovery.md): Configure cluster discovery
-- [Actor Lifecycle](../actors/overview.md): Learn about PreStart and PostStop hooks
