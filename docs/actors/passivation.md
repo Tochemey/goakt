@@ -8,7 +8,6 @@ Passivation is an automatic resource management feature that stops idle actors t
 - 💡 [Why Use Passivation?](#why-use-passivation)
 - ⚙️ [Configuration](#configuration)
 - 🔄 [How Passivation Works](#how-passivation-works)
-- 💡 [Basic Example](#basic-example)
 - 📋 [Use Cases](#use-cases)
 - 💾 [Passivation with State Persistence](#passivation-with-state-persistence)
 - ✅ [Best Practices](#best-practices)
@@ -81,10 +80,6 @@ The passivation timer:
 Message → Process → Idle Start → Timer → Passivate
          Reset Timer
 ```
-
-## Basic Example (concept)
-
-Use a **session-style actor**: in PreStart init state; in Receive handle UpdateSession/GetSession and respond; in **PostStop** persist or flush state before the actor is removed. Spawn with **WithPassivationStrategy(passivation.NewTimeBasedStrategy(5*time.Minute))** so idle sessions are stopped after 5 minutes. Messages to a passivated actor are dead-lettered; re-create the actor (e.g. by name) when a new request arrives if you need reactivation. Do any "save session data" or flush in PostStop before returning.
 
 ## Use Cases
 

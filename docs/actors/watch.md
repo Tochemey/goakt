@@ -42,9 +42,11 @@ Use watch when you need to:
 
 ## Watching Actors
 
-From inside `Receive`, call `ctx.Watch(pid)` to watch another actor; when that actor terminates, the watcher receives a `Terminated` message (with the watched actor's address). You can watch multiple actors; each termination sends one `Terminated`. To stop watching, call `ctx.UnWatch(pid)`. Watch is local only (no remote actors). From outside `Receive` you can use `watcherPID.Watch(workerPID)` so that `watcherPID` will get `Terminated` when `workerPID` stops.
+- **From inside Receive:** Call **ctx.Watch(pid)** to watch another actor. When that actor terminates, you receive a **Terminated** message (with the watched actor’s address). Call **ctx.UnWatch(pid)** to stop watching.
+- **From outside Receive:** Use **watcherPID.Watch(workerPID)** so the watcher gets **Terminated** when the worker stops.
+- **Multiple actors:** You can watch multiple actors; each termination sends one **Terminated**. Watch is **local only** (no remote actors).
 
-**Essential pattern:** Spawn workers, call `ctx.Watch(workerPID)` for each, and handle `*goaktpb.Terminated` to remove the PID from your list and optionally restart.
+**Essential pattern:** Spawn workers, call **ctx.Watch(workerPID)** for each, and handle `*goaktpb.Terminated` to remove the PID from your list and optionally restart.
 
 ```go
 func (c *Coordinator) Receive(ctx *actor.ReceiveContext) {

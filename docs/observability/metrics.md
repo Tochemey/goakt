@@ -27,7 +27,9 @@ system, _ := actor.NewActorSystem("my-system",
 )
 ```
 
-**Important:** `WithMetrics()` registers GoAkt instruments with the OpenTelemetry global `MeterProvider`. Metrics are only exported if you initialize the OpenTelemetry SDK with a configured exporter **before** starting the actor system.
+**Important:**
+- **WithMetrics()** registers GoAkt instruments with the OpenTelemetry global `MeterProvider`.
+- Metrics are only exported if you initialize the OpenTelemetry SDK with a configured exporter **before** starting the actor system.
 
 ## Setting Up OpenTelemetry
 

@@ -30,7 +30,7 @@ GoAkt provides a mechanism to execute user-defined tasks during the shutdown of 
 - **Graceful termination**: Ensures clean shutdown
 - **Flexibility**: Skip or retry failed hooks
 
-Without coordinated shutdown, you'd need to manually manage cleanup sequences, handle failures, and ensure proper ordering.
+Without it, you would need to manually manage cleanup order, handle failures, and ensure hooks run in the right sequence.
 
 ## ShutdownHook Interface
 

@@ -83,4 +83,3 @@ func (a *OrderService) Receive(ctx *actor.ReceiveContext) {
 - **Use pub/sub for:** Decoupling producers and consumers, broadcasting to many listeners, event notification, fan-out, audit/monitoring.
 - **Use something else when:** You need guaranteed delivery, persistence, replay, or request–response (use Ask/Tell or a queue).
 
-**Next:** [Overview](overview.md) · [Events Stream](../events_stream/overview.md) · [Cluster Overview](../cluster/overview.md)

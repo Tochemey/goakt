@@ -97,7 +97,14 @@ Options are passed as variadic args when calling a spawn method.
 
 ## Spawn Placement Strategies
 
-When using `SpawnOn`, pass `WithPlacement`: `RoundRobin` (default) distributes evenly; `Random` picks a random node; `Local` forces the local node; `LeastLoad` uses the node with lowest load (higher overhead). Combine with `WithRole` to restrict to nodes that advertise a role.
+When using **SpawnOn**, pass **WithPlacement**:
+
+- **RoundRobin** (default) — Distributes actors evenly across nodes.
+- **Random** — Picks a random node.
+- **Local** — Forces the actor onto the current node.
+- **LeastLoad** — Places on the node with lowest load (higher overhead).
+
+Combine with **WithRole** to restrict placement to nodes that advertise that role.
 
 **Spawn with options:**
 

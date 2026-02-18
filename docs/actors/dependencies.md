@@ -29,15 +29,20 @@ Benefits include:
 
 ## Basic Usage
 
-Pass dependencies at spawn with **actor.WithDependencies(dep1, dep2, ...)**. In the actor’s **PreStart**, read them with **ctx.Dependencies()** (returns a slice of `interface{}`); type-assert to your types (e.g. `deps[0].(*sql.DB)`) and store in the actor. This keeps initialization out of constructors and makes testing easy (inject mocks).
+- **At spawn:** Pass dependencies with **actor.WithDependencies(dep1, dep2, ...)**.
+- **In PreStart:** Call **ctx.Dependencies()** (returns a slice of `interface{}`); type-assert to your types (e.g. `deps[0].(*sql.DB)`) and store in the actor.
+- Keeps initialization out of constructors and makes testing easy (inject mocks).
 
 ## Example (concept)
 
-Create a struct (e.g. `AppDependencies`) holding DB, HTTP client, config, cache; construct it in main or a setup function. Spawn with **WithDependencies(deps)**. In the actor’s PreStart, **ctx.Dependencies()[0].(*AppDependencies)** and store. Use the deps in Receive; do not close shared resources in PostStop. For tests, spawn with **WithDependencies(mockDB, mockCache)**.
+- Create a struct (e.g. `AppDependencies`) holding DB, HTTP client, config, cache; construct it in main or a setup function.
+- Spawn with **WithDependencies(deps)**. In PreStart, **ctx.Dependencies()[0].(*AppDependencies)** and store; use deps in Receive.
+- Do not close shared resources in PostStop. For tests, spawn with **WithDependencies(mockDB, mockCache)**.
 
 ## Multiple Dependencies
 
-Pass several deps: **WithDependencies(db, cache, logger)**. In PreStart, **ctx.Dependencies()** returns the slice in order; type-assert each (e.g. `deps[0].(*sql.DB)`) and assign to actor fields.
+- Pass several deps: **WithDependencies(db, cache, logger)**.
+- **ctx.Dependencies()** returns the slice in the same order; type-assert each (e.g. `deps[0].(*sql.DB)`) and assign to actor fields.
 
 ## Best Practices
 

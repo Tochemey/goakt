@@ -7,7 +7,6 @@ Behaviors enable actors to dynamically change their message processing logic at 
 - 🤔 [What are Behaviors?](#what-are-behaviors)
 - 💡 [Why Use Behaviors?](#why-use-behaviors)
 - 🛠️ [Behavior Operations](#behavior-operations)
-- 🔐 [Basic Example: Authentication](#basic-example-authentication)
 - 🔀 [State Machine Pattern](#state-machine-pattern)
 - 📚 [Stacked Behaviors](#stacked-behaviors)
 - 🔄 [Behavior with State Transitions](#behavior-with-state-transitions)
@@ -89,10 +88,6 @@ ctx.UnBecomeStacked()
 - Returns to **previous** behavior
 - Use to **exit** temporary state
 - Does nothing if stack is empty
-
-## Basic Example: Authentication (concept)
-
-Use two behaviors: initial `Receive` handles **Login** (on success call **ctx.Become(authenticatedBehavior)** and respond; on failure respond with error). The **authenticatedBehavior** function handles **GetProfile**, **UpdateProfile**, and **Logout**; on **Logout** call **ctx.UnBecome()** to return to the default Receive. Store auth state (e.g. username) in the actor struct.
 
 ## State Machine Pattern
 

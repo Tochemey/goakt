@@ -17,22 +17,20 @@ The Actor System is the foundation of GoAkt - it manages actor lifecycle, provid
 
 ## What is an Actor System?
 
-An **Actor System** is a container and runtime environment for actors that provides:
+An **Actor System** is the container and runtime for actors. It provides:
 
-- **Actors lifecycle management**: Creation, supervision, termination and relocation (if clustering enabled)
-- **Infrastructure services**: Remoting, clustering, pub/sub
-- **Resource management**: Mailboxes, schedulers, event streams
-- **Configuration**: Logging, metrics, extensions
-- **Coordination**: Distributed operations and shutdown
-- **Location transparency**: When clustering (or remoting) is enabled, the physical location of actors is abstracted away. You interact with actors solely through their unique addresses, regardless of whether they are local or remote.
-- **Fault tolerance**: Supervision and restart strategies for resilient systems
-- **Addressing**: Unique addresses for actors, enabling message routing and discovery
-- **Event stream**: Publish/subscribe for system events to monitor the health and status of the actor system
-- **Scheduling**: Timers and delayed messages for time-based operations
-- **Extensions**: Pluggable components for additional functionality (e.g., event sourcing, tracing) - see [Extensions](extensions.md)
-- **Coordinated shutdown**: Hooks for graceful cleanup during shutdown
-- **Multi-data center support**: Control plane for managing actors across multiple data centers (if enabled)
-- **Actors Tree**: Hierarchical organization of actors under guardians for structured supervision and lifecycle management
+- **Lifecycle** — Creation, supervision, termination, relocation (when clustering is enabled)
+- **Infrastructure** — Remoting, clustering, pub/sub
+- **Resources** — Mailboxes, schedulers, event streams
+- **Configuration** — Logging, metrics, [extensions](extensions.md)
+- **Coordination** — Distributed operations, [coordinated shutdown](coordinated_shutdown.md)
+- **Location transparency** — With remoting/clustering, you address actors by identity; local vs remote is abstracted
+- **Fault tolerance** — Supervision and restart strategies
+- **Addressing** — Unique addresses for routing and discovery
+- **Event stream** — System events for health and status
+- **Scheduling** — Timers and delayed messages
+- **Multi-datacenter** — Control plane for cross-DC actor management (if enabled)
+- **Actor tree** — Hierarchical organization under guardians for supervision and lifecycle
 
 Think of it as the operating system for your actors.
 

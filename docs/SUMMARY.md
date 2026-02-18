@@ -1,8 +1,7 @@
 # Table of Contents
 
-## Getting Started
 
-* [Introduction](README.md)
+* [Overview](README.md)
 
 ## Design
 

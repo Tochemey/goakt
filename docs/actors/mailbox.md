@@ -29,7 +29,27 @@ By isolating each actor’s message flow, the mailbox enables robust fault toler
 
 ## Mailbox Interface
 
-Mailboxes implement **Enqueue**, **Dequeue**, **IsEmpty**, **Len**, **Dispose**. You can implement a custom mailbox against this interface.
+Mailboxes implement the following interface. Custom mailbox implementations must be thread-safe.
+
+```go
+package actor
+
+// Mailbox defines the actor mailbox. Implementations should be thread-safe.
+type Mailbox interface {
+	// Enqueue pushes a message into the mailbox. Returns an error when full (e.g. bounded).
+	Enqueue(msg *ReceiveContext) error
+	// Dequeue fetches the next message from the mailbox.
+	Dequeue() (msg *ReceiveContext)
+	// IsEmpty returns true when the mailbox has no messages.
+	IsEmpty() bool
+	// Len returns the number of messages in the mailbox.
+	Len() int64
+	// Dispose releases the mailbox and unblocks any goroutines waiting on Enqueue/Dequeue.
+	Dispose()
+}
+```
+
+> You can implement a custom mailbox against this interface.
 
 ## Mailbox Types
 
@@ -88,16 +108,17 @@ Pass the mailbox at spawn: **actor.WithMailbox(actor.NewBoundedMailbox(500))**. 
 
 ## Configuring Mailboxes
 
-Pass the mailbox at spawn with **WithMailbox(mailbox)**. If omitted, **UnboundedMailbox** is used.
+- **At spawn**: Pass the mailbox with `WithMailbox` (e.g. `WithMailbox(NewBoundedMailbox(500))`).
+- **Default**: If omitted, the actor uses **UnboundedMailbox**.
 
 ## Mailbox Behavior
 
 ### Message Ordering
 
-Mailboxes are **thread-safe FIFO**: messages are processed in enqueue order. A single sender’s messages stay in order; with multiple senders, interleaving is non-deterministic. Priority mailboxes order by your priority function instead of FIFO.
-
-// Order is non-deterministic: could be A→B or B→A
-```
+- **FIFO**: Messages are processed in enqueue order; mailboxes are thread-safe.
+- **Single sender**: Messages from one sender stay in order.
+- **Multiple senders**: Interleaving is non-deterministic (e.g. A then B vs B then A).
+- **Priority mailbox**: Order is determined by your priority function, not FIFO.
 
 ### Mailbox Lifecycle
 

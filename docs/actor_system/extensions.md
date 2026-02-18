@@ -221,6 +221,9 @@ func (g *GoodExtension) ID() string {
 
 ## Accessing Extensions
 
+- **From PreStart / PostStop:** Use **ctx.Extension(id)** or **ctx.Extensions()** on the actor context to read extensions during initialization or cleanup.
+- **From Receive:** Use **ctx.Extension(id)** on the receive context to get an extension while handling messages. Type-assert to your concrete type (e.g. `*MetricsCollector`).
+
 ### From Actor Context (`PreStart`, `PostStop`)
 
 Access extensions during actor initialization:

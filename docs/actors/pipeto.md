@@ -52,13 +52,12 @@ Use PipeTo for:
 
 ## Basic Usage
 
-Call **PipeTo** or **PipeToName** from inside **Receive**. You pass a target (PID or name) and a function that returns **(proto.Message, error)**. **On success, the return value must be a proto message** (e.g. a generated protobuf type); that value is sent to the target as a normal message. The function runs in a **separate goroutine**; when it returns, the result is delivered to the target in a later **Receive** call. If the function returns an error, that error is handled by the **target** actor’s supervisor.
+- **From inside Receive:** Call **PipeTo(targetPID, fn)** or **PipeToName(actorName, fn)**. The function returns **(proto.Message, error)** and runs in a **separate goroutine**. On success, the proto message is sent to the target as a normal message; the target handles it in a later **Receive**. On error, the **target** actor’s supervisor is invoked.
+- **PipeTo Self** — Pass the current actor’s PID; the same actor receives the result. Handle the result type in a later message and respond to the original requester or update state.
+- **PipeTo another actor** — Pass another PID to send the result to a coordinator, worker, etc.
+- **PipeToName** — Pass the actor’s name when you don’t have a PID (e.g. in a cluster).
 
-- **PipeTo Self:** Pass the current actor’s PID so the **current** actor gets the result. In a later message, handle the result type (e.g. *DataResult) and respond to the original requester or update state.
-- **PipeTo another actor:** Pass another actor’s PID to send the result to a coordinator, worker, or any other actor.
-- **PipeToName:** Pass the actor’s name when you don’t have a PID (e.g. in a cluster).
-
-**Important:** Do not read or write actor state inside the function you pass—it runs in another goroutine. Capture what you need in local variables and use those inside the function. **On success return a proto message** (your generated protobuf type); on failure return an error so the **target**’s supervision is triggered.
+**Important:** Do not read or write actor state inside the function—it runs in another goroutine. Capture what you need in locals. On success return a proto message; on failure return an error so the target’s supervision is triggered.
 
 ## Complete Example (concept)
 

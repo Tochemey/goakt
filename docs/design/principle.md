@@ -73,15 +73,11 @@ Every message in GoAkt -- whether local, remote, or across a cluster -- must be 
 
 ### Why Protocol Buffers?
 
-**Type safety** -- Messages are defined as concrete protobuf types. The compiler catches type mismatches at build time rather than at runtime. There is no `interface{}` or `any` smuggling untyped payloads through the system.
-
-**Explicit serialization** -- GoAkt does not hide serialization behind reflection, custom codecs, or runtime type registries. Protocol Buffers provide a well-documented, deterministic binary format. When a message crosses a network boundary, both sender and receiver agree on the exact wire format because it is derived from the same `.proto` file.
-
-**Schema evolution** -- Protobuf's field-numbering scheme gives you forward and backward compatibility out of the box. You can add new fields to a message without breaking actors that have not been updated yet -- critical in rolling deployments where nodes may run different versions.
-
-**Performance** -- Protobuf's binary encoding is compact and fast to marshal/unmarshal. In a high-throughput actor system, serialization overhead matters. Protocol Buffers typically offer better size and speed than JSON and other text-based formats.
-
-**Cross-language potential** -- Because `.proto` files generate code in many languages, message definitions serve as a language-neutral contract. Even though GoAkt is a Go framework, its messages are inherently portable.
+- **Type safety** — Concrete protobuf types; the compiler catches mismatches at build time. No untyped `interface{}` or `any` payloads.
+- **Explicit serialization** — No reflection or runtime codecs; protobuf gives a deterministic binary format. Sender and receiver share the same `.proto`, so the wire format is agreed.
+- **Schema evolution** — Field numbering gives forward and backward compatibility. Add fields without breaking older actors; important for rolling deployments.
+- **Performance** — Compact, fast marshal/unmarshal. Better size and speed than JSON for high-throughput systems.
+- **Cross-language** — `.proto` files generate code in many languages; messages are a language-neutral contract and portable.
 
 ### In Practice
 

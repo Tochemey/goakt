@@ -23,15 +23,15 @@ Messaging is the foundation of actor communication in GoAkt. Actors interact exc
 
 ## Introduction
 
-Communication between actors is achieved exclusively through message passing. In GoAkt Google Protocol Buffers are used to define messages. The choice of protobuf is due to easy serialisation over wire and strong schema definition.
+Communication between actors is exclusively message passing. GoAkt uses **protocol buffers** for messages (schema, serialization, versioning).
 
- This ensures:
-- **Type safety**: Compile-time type checking
-- **Serialization**: Efficient wire format for remote communication
-- **Versioning**: Forward and backward compatibility
-- **Language interoperability**: Protocol buffers work across languages
+**Benefits:**
+- **Type safety** — Compile-time type checking
+- **Serialization** — Efficient wire format for remoting
+- **Versioning** — Forward and backward compatibility
+- **Interoperability** — Protobuf works across languages
 
-Define messages in `.proto` files (syntax `proto3`); generate Go with `protoc`. Use packages and message names that match your app. Messages are serialized for local and remote use.
+Define messages in `.proto` files (proto3); generate Go with `protoc`. Messages are serialized for both local and remote use.
 
 ## Messaging Patterns
 
@@ -43,35 +43,44 @@ GoAkt provides two primary messaging patterns:
 
 ### 2. Ask (Request-Response)
 
-**actor.Ask(ctx, pid, message, timeout)** — Sends and blocks until the actor replies or the timeout. Returns the response as `proto.Message` (type-assert to your type) or an error. The receiver must call **ctx.Response(reply)** in `Receive` for the request to complete. Use for queries and request-reply. Prefer not blocking from inside another actor's `Receive`; use [PipeTo](pipeto.md) or async patterns instead.
+**actor.Ask(ctx, pid, message, timeout)** — Sends and blocks until the actor replies or timeout. Returns `proto.Message` (type-assert) or an error.
+- Receiver must call **ctx.Response(reply)** in `Receive` for the request to complete.
+- Use for queries and request-reply. From inside another actor’s `Receive`, prefer [PipeTo](pipeto.md) or [Request pattern](#request-pattern) to avoid blocking.
 
 ## Responding to Messages
 
-For **Ask** to complete, the actor must call **ctx.Response(reply)** (once) with a proto message. The caller receives it as the return value of `Ask`. You can respond from inside a goroutine or after async work if you keep the `ReceiveContext` and call `Response` later. Don't call `Response` twice for the same request.
+- **Ask** completes when the receiver calls **ctx.Response(reply)** once with a proto message; the caller gets it as the return value of `Ask`.
+- You can call `Response` from a goroutine or after async work if you keep the `ReceiveContext`.
+- Do not call `Response` twice for the same request.
 
 ## Batch Messaging
 
-For sending multiple messages efficiently:
-
-**BatchTell(ctx, pid, messages...)** — Sends multiple messages in one call; the actor still processes them one at a time in order.
-
-**BatchAsk(ctx, pid, timeout, messages...)** — Sends multiple requests and returns a channel of responses in the same order as the requests. Consume the channel until closed or timeout.
+- **BatchTell** — Sends multiple messages in one call; the actor processes them one at a time in order.
+- **BatchAsk** — Sends multiple requests and returns a channel of responses (same order as requests). Consume the channel until closed or timeout.
 
 ## Message Context
 
-**ReceiveContext** gives you: **Message()** (the current message), **Sender()** (PID of sender, may be nil), **SenderAddress()**, **RemoteSender()** for remote senders, **Context()** for cancellation/timeout, **Logger()**. Use **ctx.Tell(ctx.Sender(), reply)** to reply to the sender when you have a PID. For Ask, use **ctx.Response(reply)** so the Ask caller receives it.
+**ReceiveContext** provides:
 
-### Sender and reply
+- **Message()** — The current message being processed.
+- **Sender()** — PID of the sender (may be nil, e.g. for system messages).
+- **SenderAddress()** / **RemoteSender()** — Sender identity; use **RemoteSender()** when the sender is remote.
+- **Context()** — Request context (cancellation, timeout).
+- **Logger()** — Actor logger.
 
-When the sender is present, reply with **ctx.Tell(ctx.Sender(), reply)** for fire-and-forget, or **ctx.Response(reply)** when handling an Ask so the caller receives the response.
+**Replying:** When the sender is present, use **ctx.Tell(ctx.Sender(), reply)** for fire-and-forget, or **ctx.Response(reply)** when handling an **Ask** so the caller receives the response.
 
 ## Actor-to-Actor Messaging
 
-From inside `Receive`, use **ctx.Tell(pid, message)** and **ctx.Ask(pid, message, timeout)** to talk to other actors. Store PIDs in actor state (e.g. from `PreStart` or lookups). For Ask from inside an actor, check the response for nil on error and type-assert to your proto type. Prefer Tell where possible; use Ask only when you need a reply in this handler, or use the [Request pattern](#request-pattern) / [PipeTo](pipeto.md) for non-blocking request-response.
+- **From inside Receive:** Use **ctx.Tell(pid, message)** and **ctx.Ask(pid, message, timeout)**. Store PIDs in actor state (e.g. from `PreStart` or lookups).
+- **Ask:** Check for nil response on error; type-assert to your proto type.
+- Prefer **Tell**; use **Ask** only when you need a reply in this handler. For non-blocking request-response, use [Request pattern](#request-pattern) or [PipeTo](pipeto.md).
 
 ## Remote Messaging
 
-Resolve a remote actor with **ctx.RemoteLookup(host, port, actorName)** or **pid.RemoteLookup(ctx, host, port, actorName)** to get an address. Then use **ctx.RemoteTell(addr, message)** or **ctx.RemoteAsk(addr, message, timeout)** (RemoteAsk returns `*anypb.Any`; unmarshal to your type). From outside an actor, use **pid.RemoteTell(ctx, addr, message)**.
+- **Resolve:** **ctx.RemoteLookup(host, port, actorName)** or **pid.RemoteLookup(ctx, host, port, actorName)** to get an address.
+- **From inside Receive:** **ctx.RemoteTell(addr, message)** and **ctx.RemoteAsk(addr, message, timeout)**. `RemoteAsk` returns `*anypb.Any`; unmarshal to your type.
+- **From outside an actor:** **pid.RemoteTell(ctx, addr, message)** (and corresponding Ask variants).
 
 ### SendSync and SendAsync
 
@@ -82,17 +91,21 @@ These methods send to an actor **by name**; the system resolves the target (loca
 | **SendAsync**(actorName, message)         | Fire-and-forget; does not block or expect a reply.                                                    | Like Tell, but target is an actor **name** (e.g. in cluster).              |
 | **SendSync**(actorName, message, timeout) | Blocks until response or timeout; returns response (or nil). From Receive, errors are in `ctx.Err()`. | Like Ask, but target is an actor **name**. Receiver uses `ctx.Response()`. |
 
-From inside Receive: **ctx.SendAsync(actorName, message)** (fire-and-forget; check **ctx.Err()** for failure) and **ctx.SendSync(actorName, message, timeout)** (blocks; check **ctx.Err()** and nil response). From outside: **pid.SendAsync(ctx, actorName, message)** and **pid.SendSync(ctx, actorName, message, timeout)**.
-
-For PID-based Tell/Ask and error handling, see [Tell and Ask](#1-tell-fire-and-forget) and [Ask Errors](#ask-errors). For async request-response without blocking the sender, see [Request Pattern](#request-pattern) and [Reentrancy](reentrancy.md).
+- **From inside Receive:** `ctx.SendAsync(actorName, message)` (fire-and-forget; check `ctx.Err()` on failure) and `ctx.SendSync(actorName, message, timeout)` (blocks; check `ctx.Err()` and nil response).
+- **From outside an actor:** `pid.SendAsync(ctx, actorName, message)` and `pid.SendSync(ctx, actorName, message, timeout)`.
+- **See also:** [Tell and Ask](#1-tell-fire-and-forget), [Ask Errors](#ask-errors); [Request Pattern](#request-pattern) and [Reentrancy](reentrancy.md) for non-blocking request-response.
 
 ## Forwarding Messages
 
-**ctx.Forward(pid)** forwards the current message to another actor while keeping the original sender, so the recipient sees the real sender. **ctx.ForwardTo(actorName)** forwards by name (cluster-aware). Use when routing or proxying.
+- **ctx.Forward(pid)** — Forwards the current message to another actor; original sender is preserved so the recipient sees the real sender.
+- **ctx.ForwardTo(actorName)** — Forwards by actor name (cluster-aware).
+- Use when routing or proxying messages.
 
 ## Message Scheduling
 
-Use **ctx.ActorSystem().ScheduleOnce(ctx, message, targetPID, delay)** for one-shot delivery and **ScheduleWithCron(ctx, message, targetPID, cronExpr)** for recurring messages. See [Message Scheduling](message_scheduling.md).
+- **ScheduleOnce** — One-shot delivery after a delay.
+- **ScheduleWithCron** — Recurring delivery by cron expression.
+- See [Message Scheduling](message_scheduling.md) for details.
 
 ## Request Pattern
 
@@ -219,7 +232,9 @@ ctx.Tell(actorB, &Msg2{})
 
 ## Error Handling
 
-**Tell** can return **ErrDead** (actor not running), mailbox full (bounded), or system shutting down. **Ask** can return **ErrRequestTimeout** or **ErrDead**. Use **errors.Is(err, actor.ErrDead)** and **errors.Is(err, actor.ErrRequestTimeout)** to handle them. From inside Receive, **ctx.Ask** returns nil on error; check **ctx.Err()** for the cause.
+- **Tell** can return **ErrDead** (actor not running), mailbox full (bounded), or system shutting down. **Ask** can return **ErrRequestTimeout** or **ErrDead**.
+- Use **errors.Is(err, actor.ErrDead)** and **errors.Is(err, actor.ErrRequestTimeout)** to detect and handle.
+- **From inside Receive:** `ctx.Ask` returns nil on error; check **ctx.Err()** for the cause.
 
 ## Best Practices
 

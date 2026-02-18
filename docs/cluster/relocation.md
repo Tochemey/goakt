@@ -137,6 +137,10 @@ This is the default and only built-in strategy.
 
 ## Relocation and Actor State
 
+- **Stateless actors** — Relocate with no extra work; no in-memory state to preserve.
+- **Stateful with persistence** — Persist state externally (e.g. in PreStart/PostStop or via dependencies); restore in PreStart after relocation.
+- **Stateful without persistence** — In-memory state is lost on relocation; use **WithRelocationDisabled()**, external persistence, or grains with rehydration if that is unacceptable.
+
 ### Stateless Actors
 
 Stateless actors relocate seamlessly:

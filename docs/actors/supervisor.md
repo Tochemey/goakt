@@ -10,7 +10,7 @@ Supervision is a core fault-tolerance mechanism in GoAkt that enables actors to 
 - 📋 [Supervision Directives](#supervision-directives)
 - ⚙️ [Configuring Supervision](#configuring-supervision)
 - 📢 [How Failures are Reported](#how-failures-are-reported)
-- 💡 [Complete Example (concept)](#complete-example-concept)
+- 💡 [Complete Example](#complete-example)
 - 🧩 [Supervision Patterns](#supervision-patterns)
 - ✅ [Best Practices](#best-practices)
 - 📊 [Monitoring Failures](#monitoring-failures)
@@ -102,13 +102,22 @@ Do not handle the failure at this level: the runtime sends a **PanicSignal** to 
 
 ## Configuring Supervision
 
-Create a supervisor with `supervisor.NewSupervisor(...)` and pass it when spawning: `actorSystem.Spawn(ctx, "name", &MyActor{}, actor.WithSupervisorDirective(supervisorSpec))`. The spec combines strategy, error-to-directive mapping, and optional retry limits.
+**At spawn:** Create a supervisor with `supervisor.NewSupervisor(...)` and pass it when spawning: `actor.WithSupervisorDirective(supervisorSpec)`. The spec holds strategy, error-to-directive mapping, and optional retry limits.
 
-**Error-specific directives:** Map each error type to a directive with `WithDirective(&YourError{}, supervisor.RestartDirective)` (and similarly for Stop, Resume, Escalate). Use custom error types (e.g. `type ValidationError struct{ error }`) so the supervisor can match them. You can combine several `WithDirective` calls for different errors (e.g. Resume for validation, Restart for DB errors, Stop for fatal).
+### Error-specific directives
 
-**Any-error directive:** `WithAnyErrorDirective(supervisor.RestartDirective)` applies one directive to all errors. It overrides any error-specific directives you set.
+- Map each error type to a directive: `WithDirective(&YourError{}, supervisor.RestartDirective)` (and similarly for Stop, Resume, Escalate).
+- Use **custom error types** (e.g. `type ValidationError struct{ error }`) so the supervisor can match them.
+- Combine several `WithDirective` calls (e.g. Resume for validation, Restart for DB errors, Stop for fatal).
 
-**Retry limits:** `WithRetry(maxRetries, timeout)` limits how many restarts are allowed within the given time window. Restarts are counted in that window; if the limit is exceeded, the actor is stopped. After the timeout elapses, the window resets. Use this to avoid infinite restart loops (e.g. `WithRetry(5, time.Minute)`).
+### Any-error directive
+
+- **WithAnyErrorDirective(supervisor.RestartDirective)** applies one directive to **all** errors. It overrides any error-specific directives.
+
+### Retry limits
+
+- **WithRetry(maxRetries, timeout)** — Limits how many restarts are allowed within the given time window. If the limit is exceeded, the actor is stopped. The window resets after the timeout.
+- Use to avoid infinite restart loops (e.g. `WithRetry(5, time.Minute)`).
 
 ## How Failures are Reported
 
@@ -120,27 +129,50 @@ The supervisor only runs when the actor **reports a failure**. Three ways to do 
 
 Use custom error types that match the directives you configured (e.g. `ValidationError` → Resume, `DatabaseError` → Restart).
 
-## Complete Example (concept)
+## Complete Example
 
-A typical use case is a **database actor**: in `PreStart` you open a connection and return an error on failure so the supervisor can Restart. In `Receive`, on validation failure call `ctx.Err(&ValidationError{err})` (Resume), on DB failure call `ctx.Err(&DatabaseError{err})` (Restart), and in `PostStop` close the connection. Spawn the actor with a supervisor that maps those error types to Resume, Restart, and optionally Restart with `WithRetry(5, time.Minute)`. The Configuring section and the patterns below give you everything needed to wire this up; for full runnable code, see the GoAkt examples or tests.
+Database actor: report failures so the supervisor can Resume (validation) or Restart (DB). Custom error types are mapped to directives; optional retry limits avoid infinite restarts.
+
+```go
+// Custom errors for directive matching
+type ValidationError struct{ Err error }
+func (e *ValidationError) Error() string { return e.Err.Error() }
+
+type DatabaseError struct{ Err error }
+func (e *DatabaseError) Error() string { return e.Err.Error() }
+
+// Supervisor: map errors to directives, cap restarts
+spec := supervisor.NewSupervisor(supervisor.OneForOneStrategy).
+    WithDirective(&ValidationError{}, supervisor.ResumeDirective).
+    WithDirective(&DatabaseError{}, supervisor.RestartDirective).
+    WithRetry(5, time.Minute)
+
+// Spawn with supervisor
+pid, _ := system.Spawn(ctx, "db-actor", &DatabaseActor{}, actor.WithSupervisorDirective(spec))
+```
+
+**In the actor:** In `PreStart`, open the connection and `return &DatabaseError{err}` on failure. In `Receive`, on validation failure call `ctx.Err(&ValidationError{err})` and return; on DB failure call `ctx.Err(&DatabaseError{err})`. In `PostStop`, close the connection.
 
 ## Supervision Patterns
 
 ### Pattern 1: Worker Pool with One-For-One
 
-Use **OneForOne** so that when one worker fails, only that worker is restarted and the rest keep processing. In the parent's `PreStart`, create a single supervisor spec (e.g. Restart with retry) and spawn each worker with `ctx.Spawn(..., actor.WithSupervisorDirective(supervisorSpec))`. Store the child PIDs if you need to route work. No code changes are needed in the workers beyond reporting failures (e.g. `ctx.Err`) or panicking; the parent's supervisor handles them per child.
+- **Goal:** When one worker fails, only that worker is restarted; others keep processing.
+- **Setup:** In the parent’s `PreStart`, create one supervisor spec (e.g. Restart with retry) and spawn each worker with **ctx.Spawn(..., actor.WithSupervisorDirective(supervisorSpec))**.
+- Store child PIDs if you need to route work. Workers only need to report failures (`ctx.Err`) or panic; the parent’s supervisor handles each child independently.
 
 ### Pattern 2: Coordinated Services with One-For-All
 
-Use **OneForAll** when several actors (e.g. auth, cache, database) must stay in sync: if one fails, all are restarted so state is consistent. In the coordinator's `PreStart`, create one supervisor spec with `OneForAllStrategy` and a suitable directive (e.g. Restart), then spawn each service with the same spec via `WithSupervisorDirective`. If any child fails, the supervisor applies the directive to all siblings. Good for small, tightly coupled service groups.
+- **Goal:** Several actors (e.g. auth, cache, database) stay in sync; if one fails, all are restarted so state is consistent.
+- **Setup:** In the coordinator’s `PreStart`, create one spec with **OneForAllStrategy** and a directive (e.g. Restart); spawn each service with the same spec via **WithSupervisorDirective**.
+- If any child fails, the directive is applied to all siblings. Best for small, tightly coupled groups.
 
 ### Pattern 3: Escalation Chain
 
-Use a **parent–child hierarchy** so that some failures are handled at the level where they occur and others are escalated to the parent's supervisor. Each level has its own supervisor spec; when a child's directive for an error is **Escalate**, the runtime does not apply that directive itself. Instead, it sends a **PanicSignal** to the parent. The parent then decides what to do: either handle the signal in `Receive` (e.g. stop the child) or **report a failure** so that the parent's own supervisor is consulted. Reporting a failure is what makes the escalation chain work: the parent's supervisor chooses a directive (Restart, Stop, etc.), and the *grandparent* executes it on the parent (e.g. restarts or stops the parent actor).
-
-**Recommendation:** Prefer **`ctx.Err(err)`** over panic to report that failure. Both cause the parent's supervisor to run, but `ctx.Err` is explicit, easier to reason about, and avoids stack unwinding. In `Receive`, when you handle `*goaktpb.PanicSignal`, call `ctx.Err(yourTypedError)` with an error type that matches one of the parent's directive rules so the right action (Restart, Stop, Escalate again, etc.) is chosen.
-
-**How to implement it:** Build a chain of actors (e.g. Level1 → Level2 → Level3). Each actor gets its own supervisor via `WithSupervisorDirective` when spawned; the leaf handles minor errors with Resume and escalates others, the middle tier restarts on some errors and escalates critical ones, and the root might stop on any error. In each parent's `Receive`, handle `*goaktpb.PanicSignal` by calling `ctx.Err(...)` with the appropriate error type (or panic as a fallback). The error type must match the parent's supervisor so the correct directive is applied. When the parent is restarted by its parent, its `PreStart` runs again and can recreate child actors, so the subtree is rebuilt.
+- **Goal:** Some failures handled locally; others escalated to the parent’s supervisor. Each level has its own supervisor spec.
+- **Escalate:** When a child’s directive for an error is **Escalate**, the runtime does not apply it; it sends a **PanicSignal** to the parent. The parent then handles the signal in `Receive` or **reports a failure** so its own supervisor is consulted. The parent’s supervisor chooses a directive; the *grandparent* executes it on the parent (e.g. restart or stop).
+- **Recommendation:** Prefer **ctx.Err(err)** over panic when reporting. In `Receive`, when handling `*goaktpb.PanicSignal`, call **ctx.Err(yourTypedError)** with an error type that matches the parent’s directive rules.
+- **Implementation:** Build a chain (e.g. Level1 → Level2 → Level3). Each actor gets **WithSupervisorDirective** when spawned. Leaf: Resume for minor errors, Escalate others. Middle: Restart some, Escalate critical. Root: e.g. Stop on any. In each parent’s `Receive`, handle **PanicSignal** by calling **ctx.Err(...)** with the right error type. When the parent is restarted, its `PreStart` runs again and can recreate children.
 
 **Summary of flow:**
 

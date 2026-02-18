@@ -63,47 +63,53 @@ Every actor implements the `Actor` interface: `PreStart(ctx *Context) error`, `R
 
 Actors are spawned within an `ActorSystem`. GoAkt supports several ways to create actors:
 
-| Method                                                   | Where          | Use when                                                                                                                                                         |
-|----------------------------------------------------------|----------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `Spawn(ctx, name, actor, opts...)`                       | Actor system   | Spawn locally on this node (default).                                                                                                                            |
-| `SpawnOn(ctx, name, actor, opts...)`                     | Actor system   | Spawn in cluster (local or remote/datacenter). Use **ActorOf** to get PID or address. [Cluster](../cluster/overview.md), [Relocation](../cluster/relocation.md). |
-| `Spawn(name, actor, opts...)`                            | Inside Receive | Spawn a **child** of the current actor; check `ctx.Err()` and nil PID on failure.                                                                                |
-| `SpawnChild(ctx, name, actor, opts...)`                  | From a PID     | Spawn a **child** of the given actor.                                                                                                                            |
-| `SpawnFromFunc(ctx, receiveFunc, opts...)`               | Actor system   | Spawn from a **receive function**. **SpawnNamedFromFunc**(ctx, name, ...) for a fixed name.                                                                      |
-| `SpawnRouter(ctx, name, poolSize, routeesKind, opts...)` | Actor system   | Spawn a **router** (pool of routees). [Routers](routers.md).                                                                                                     |
-| `SpawnSingleton(ctx, name, actor, opts...)`              | Actor system   | **Cluster singleton** (one instance in cluster). [Cluster Singleton](../cluster/cluster_singleton.md).                                                           |
+| Method           | Where          | Use when                                                                                                                                                         |
+|------------------|----------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `Spawn`          | Actor system   | Spawn locally on this node (default).                                                                                                                            |
+| `SpawnOn`        | Actor system   | Spawn in cluster (local or remote/datacenter). Use **ActorOf** to get PID or address. [Cluster](../cluster/overview.md), [Relocation](../cluster/relocation.md). |
+| `ctx.Spawn`      | Inside Receive | Spawn a **child** of the current actor; check `ctx.Err()` and nil PID on failure.                                                                                |
+| `SpawnChild`     | From a PID     | Spawn a **child** of the given actor.                                                                                                                            |
+| `SpawnFromFunc`  | Actor system   | Spawn from a **receive function**. **SpawnNamedFromFunc** for a fixed name.                                                                                      |
+| `SpawnRouter`    | Actor system   | Spawn a **router** (pool of routees). [Routers](routers.md).                                                                                                     |
+| `SpawnSingleton` | Actor system   | **Cluster singleton** (one instance in cluster). [Cluster Singleton](../cluster/cluster_singleton.md).                                                           |
 
-All spawn options (mailbox, supervisor, passivation, reentrancy, etc.) apply to `Spawn`, `SpawnOn`, and `ctx.Spawn` / `SpawnChild` where relevant. Create an actor system with `NewActorSystem`, call `Start(ctx)`, then spawn with `actorSystem.Spawn(ctx, "name", &MyActor{}, opts...)` to get a PID.
+All spawn options (mailbox, supervisor, passivation, reentrancy, etc.) apply to `Spawn`, `SpawnOn`, and `ctx.Spawn` / `SpawnChild` where relevant. Create an actor system with `NewActorSystem`, call `Start`, then spawn with `Spawn` to get a PID.
 
 ### Spawn Options
 
 You can customize actor behavior with spawn options.
 
-| Option                              | Description                                                                                   | See                                                                       |
-|-------------------------------------|-----------------------------------------------------------------------------------------------|---------------------------------------------------------------------------|
-| `WithMailbox(mailbox)`              | Mailbox implementation (unbounded, bounded, priority, etc.).                                  | [Mailbox](mailbox.md)                                                     |
-| `WithSupervisor(supervisor)`        | Failure-handling strategy (restart, stop, resume).                                            | [Supervisor](supervisor.md)                                               |
-| `WithPassivationStrategy(strategy)` | When to passivate idle actors (time-based, long-lived, message-count).                        | [Passivation](passivation.md)                                             |
-| `WithPassivateAfter(duration)`      | _(Deprecated)_ Use `WithPassivationStrategy` with `TimeBasedStrategy` instead.                | [Passivation](passivation.md)                                             |
-| `WithLongLived()`                   | Actor is never passivated; lives until system shutdown.                                       | [Passivation](passivation.md)                                             |
-| `WithStashing()`                    | Enable a stash for messages the actor cannot process yet.                                     | [Mailbox](mailbox.md#stashing)                                            |
-| `WithReentrancy(reentrancy)`        | Enable async Request/RequestName and set policy (e.g. AllowReentrant).                        | [Reentrancy](reentrancy.md)                                               |
-| `WithDependencies(deps...)`         | Inject dependencies into the actor at spawn.                                                  | [Dependencies](dependencies.md)                                           |
-| `WithPlacement(strategy)`           | Where to spawn in cluster: `RoundRobin`, `Random`, `Local`, `LeastLoad`. Only with `SpawnOn`. | [Cluster](../cluster/overview.md), [Relocation](../cluster/relocation.md) |
-| `WithRole(role)`                    | Spawn only on nodes that advertise this role. Only with `SpawnOn`.                            | [Cluster](../cluster/overview.md)                                         |
-| `WithRelocationDisabled()`          | Do not relocate actor to another node on failure (cluster).                                   | [Relocation](../cluster/relocation.md)                                    |
-| `WithDataCenter(dc)`                | Spawn in a specific datacenter. Only with `SpawnOn` and datacenter-aware cluster.             | [Cluster](../cluster/overview.md)                                         |
+| Option                    | Description                                                                                   | See                                                                       |
+|---------------------------|-----------------------------------------------------------------------------------------------|---------------------------------------------------------------------------|
+| `WithMailbox`             | Mailbox implementation (unbounded, bounded, priority, etc.).                                  | [Mailbox](mailbox.md)                                                     |
+| `WithSupervisor`          | Failure-handling strategy (restart, stop, resume).                                            | [Supervisor](supervisor.md)                                               |
+| `WithPassivationStrategy` | When to passivate idle actors (time-based, long-lived, message-count).                        | [Passivation](passivation.md)                                             |
+| `WithPassivateAfter`      | _(Deprecated)_ Use `WithPassivationStrategy` with `TimeBasedStrategy` instead.                | [Passivation](passivation.md)                                             |
+| `WithLongLived`           | Actor is never passivated; lives until system shutdown.                                       | [Passivation](passivation.md)                                             |
+| `WithStashing`            | Enable a stash for messages the actor cannot process yet.                                     | [Mailbox](mailbox.md#stashing)                                            |
+| `WithReentrancy`          | Enable async Request/RequestName and set policy (e.g. AllowReentrant).                        | [Reentrancy](reentrancy.md)                                               |
+| `WithDependencies`        | Inject dependencies into the actor at spawn.                                                  | [Dependencies](dependencies.md)                                           |
+| `WithPlacement`           | Where to spawn in cluster: `RoundRobin`, `Random`, `Local`, `LeastLoad`. Only with `SpawnOn`. | [Cluster](../cluster/overview.md), [Relocation](../cluster/relocation.md) |
+| `WithRole`                | Spawn only on nodes that advertise this role. Only with `SpawnOn`.                            | [Cluster](../cluster/overview.md)                                         |
+| `WithRelocationDisabled`  | Do not relocate actor to another node on failure (cluster).                                   | [Relocation](../cluster/relocation.md)                                    |
+| `WithDataCenter`          | Spawn in a specific datacenter. Only with `SpawnOn` and datacenter-aware cluster.             | [Cluster](../cluster/overview.md)                                         |
 
 Combine options as needed: `WithPassivationStrategy`, `WithMailbox`, `WithSupervisor`, `WithReentrancy`, etc. See the linked docs for each.
 
 ## Identity and References
 
-When you spawn an actor, you receive a **PID** (Process ID) — a unique reference to that actor. For messaging, an actor can be referred to in two ways:
+Spawning an actor returns a unique reference. There are two ways to refer to an actor for messaging:
 
-- **PID**: The full local reference (actor system, address, metadata). Use it for local actors and for any API that accepts a PID (e.g. `Tell`, `Ask`, `ctx.Forward(pid)`).
-- **Address**: The network identity of the actor (host, port, name). When the actor is **not local** (e.g. on another node in a cluster), you often use its **address** to send messages — for example via `RemoteTell(ctx, addr, message)` or `RemoteAsk(ctx, addr, message, timeout)`. A PID’s address is obtained with `pid.Address()`.
+### PID (Process ID)
 
-So aside from a PID, an **address** is also an actor reference when the actor is remote; many remote messaging APIs take an `*address.Address` rather than a PID. Use `pid.IsRunning()`, `pid.Name()`, `pid.Address()`, and `pid.Shutdown(ctx)` as needed.
+- Full local reference (system, address, metadata).
+- Use for **local** actors and any API that takes a PID: `Tell`, `Ask`, `ctx.Forward`.
+- Useful methods: `IsRunning`, `Name`, `Address`, `Shutdown`.
+
+### Address
+
+- Network identity (host, port, name). Use when the actor is **remote** (e.g. on another cluster node).
+- Remote APIs take an address: `RemoteTell`, `RemoteAsk`. Get the address from a PID with `Address`.
 
 ## Hierarchy
 
@@ -128,7 +134,7 @@ ActorSystem
 
 ### Spawning Child Actors
 
-From inside `Receive`, call `ctx.Spawn("child-name", &ChildActor{}, opts...)` to create a child supervised by the current actor. Check the returned error and PID; on failure report with `ctx.Err(err)` if appropriate. See [Spawning](spawn.md) for options.
+From inside `Receive`, call `ctx.Spawn` to create a child supervised by the current actor. Check the returned error and PID; on failure report with `ctx.Err(err)` if appropriate. See [Spawning](spawn.md) for options.
 
 ## State Management
 
