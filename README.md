@@ -72,6 +72,7 @@ You can join these groups and chat to discuss and ask GoAkt related questions on
 ## 🤝 Contribution
 
 We welcome contributions! Whether you're fixing a bug, adding a new feature, or improving documentation, your help is appreciated.
+Before diving in, please read the [Architecture Document](./ARCHITECTURE.md) to understand the codebase structure, design decisions, and how the components fit together.
 This project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) to standardize commit messages and help automate releases.
 We use [Earthly](https://earthly.dev/get-earthly) for reproducible builds.
 
