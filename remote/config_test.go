@@ -28,8 +28,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v3/internal/size"
+	"github.com/tochemey/goakt/v3/test/data/testpb"
 )
 
 func TestConfig(t *testing.T) {
@@ -65,5 +67,65 @@ func TestConfig(t *testing.T) {
 		config := NewConfig("256.256.256.256", 8080, WithMaxFrameSize(20*size.MB))
 		err := config.Sanitize()
 		require.Error(t, err)
+	})
+	t.Run("With_default_serializer_resolves_proto_message", func(t *testing.T) {
+		config := DefaultConfig()
+		msg := &testpb.Reply{Content: "hello"}
+		s := config.Serializer(msg)
+		require.NotNil(t, s, "expected default ProtoSerializer for proto.Message")
+		_, ok := s.(*ProtoSerializer)
+		assert.True(t, ok)
+	})
+	t.Run("With_custom_concrete_type_serializer", func(t *testing.T) {
+		custom := NewProtoSerializer()
+		msg := &testpb.Reply{}
+		config := NewConfig("127.0.0.1", 0, WithSerializers(msg, custom))
+		s := config.Serializer(msg)
+		require.NotNil(t, s)
+		assert.Same(t, custom, s)
+	})
+	t.Run("With_interface_serializer_overrides_default", func(t *testing.T) {
+		custom := NewProtoSerializer()
+		config := NewConfig("127.0.0.1", 0, WithSerializers((*proto.Message)(nil), custom))
+		msg := &testpb.Reply{}
+		s := config.Serializer(msg)
+		require.NotNil(t, s)
+	})
+	t.Run("With_nil_message_returns_nil_serializer", func(t *testing.T) {
+		config := DefaultConfig()
+		assert.Nil(t, config.Serializer(nil))
+	})
+	t.Run("With_nil_serializer_option_is_ignored", func(t *testing.T) {
+		config := DefaultConfig()
+		// Applying a nil serializer must not remove the default.
+		WithSerializers((*proto.Message)(nil), nil).Apply(config)
+		require.NotNil(t, config.Serializer(&testpb.Reply{}))
+	})
+}
+
+func TestConfigCompression(t *testing.T) {
+	t.Run("default is zstd", func(t *testing.T) {
+		config := DefaultConfig()
+		assert.Equal(t, ZstdCompression, config.Compression())
+	})
+	t.Run("custom compression applied", func(t *testing.T) {
+		config := NewConfig("127.0.0.1", 0, WithCompression(GzipCompression))
+		assert.Equal(t, GzipCompression, config.Compression())
+	})
+	t.Run("no compression", func(t *testing.T) {
+		config := NewConfig("127.0.0.1", 0, WithCompression(NoCompression))
+		assert.Equal(t, NoCompression, config.Compression())
+	})
+}
+
+func TestConfigContextPropagator(t *testing.T) {
+	t.Run("nil by default", func(t *testing.T) {
+		config := DefaultConfig()
+		assert.Nil(t, config.ContextPropagator())
+	})
+	t.Run("non-nil after WithContextPropagator", func(t *testing.T) {
+		prop := mockPropagator{}
+		config := NewConfig("127.0.0.1", 0, WithContextPropagator(prop))
+		assert.Equal(t, prop, config.ContextPropagator())
 	})
 }

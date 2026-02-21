@@ -36,7 +36,6 @@ import (
 
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/extension"
-	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/codec"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/pointer"
@@ -268,7 +267,7 @@ func (pid *grainPID) process() {
 
 			if grainContext = pid.mailbox.Dequeue(); grainContext != nil {
 				switch grainContext.Message().(type) {
-				case *goaktpb.PoisonPill:
+				case *PoisonPill:
 					pid.handlePoisonPill(grainContext)
 				default:
 					pid.handleGrainContext(grainContext)

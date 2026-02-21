@@ -23,36 +23,121 @@
 package xsync
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestList(t *testing.T) {
-	// create a concurrent slice of integer
-	sl := NewList[int]()
+	t.Run("With_basic_operations", func(t *testing.T) {
+		sl := NewList[int]()
 
-	// add some items
-	sl.Append(2)
-	sl.Append(4)
-	sl.Append(5)
+		sl.Append(2)
+		sl.Append(4)
+		sl.Append(5)
 
-	// assert the length
-	assert.EqualValues(t, 3, sl.Len())
-	assert.NotEmpty(t, sl.Items())
-	assert.Len(t, sl.Items(), 3)
-	// get the element at index 2
-	assert.EqualValues(t, 5, sl.Get(2))
-	// remove the element at index 1
-	sl.Delete(1)
-	// assert the length
-	assert.EqualValues(t, 2, sl.Len())
-	assert.Zero(t, sl.Get(4))
-	sl.Reset()
-	assert.Zero(t, sl.Len())
-	sl.AppendMany(1, 2, 3, 4, 5)
-	assert.EqualValues(t, 5, sl.Len())
+		assert.EqualValues(t, 3, sl.Len())
+		assert.NotEmpty(t, sl.Items())
+		assert.Len(t, sl.Items(), 3)
 
-	// deleting an item that does not exist should not panic
-	sl.Delete(10)
+		assert.EqualValues(t, 5, sl.Get(2))
+		sl.Delete(1)
+		assert.EqualValues(t, 2, sl.Len())
+		assert.Zero(t, sl.Get(4))
+
+		sl.Reset()
+		assert.Zero(t, sl.Len())
+
+		sl.AppendMany(1, 2, 3, 4, 5)
+		assert.EqualValues(t, 5, sl.Len())
+
+		sl.Delete(10)
+	})
+
+	t.Run("With_deduplication_on_Append", func(t *testing.T) {
+		sl := NewList[int]()
+		sl.Append(1)
+		sl.Append(1)
+		sl.Append(2)
+		sl.Append(2)
+		sl.Append(3)
+
+		require.EqualValues(t, 3, sl.Len())
+		assert.Equal(t, []int{1, 2, 3}, sl.Items())
+	})
+
+	t.Run("With_deduplication_on_AppendMany", func(t *testing.T) {
+		sl := NewList[int]()
+		sl.AppendMany(1, 2, 2, 3, 1, 4)
+
+		require.EqualValues(t, 4, sl.Len())
+		assert.Equal(t, []int{1, 2, 3, 4}, sl.Items())
+	})
+
+	t.Run("With_Contains", func(t *testing.T) {
+		sl := NewList[string]()
+		sl.Append("foo")
+		sl.Append("bar")
+
+		assert.True(t, sl.Contains("foo"))
+		assert.True(t, sl.Contains("bar"))
+		assert.False(t, sl.Contains("baz"))
+	})
+
+	t.Run("With_Get_bounds", func(t *testing.T) {
+		sl := NewList[int]()
+		assert.Zero(t, sl.Get(0))
+		assert.Zero(t, sl.Get(-1))
+
+		sl.Append(42)
+		assert.EqualValues(t, 42, sl.Get(0))
+		assert.Zero(t, sl.Get(1))
+	})
+
+	t.Run("With_Reset_reuses_backing_array", func(t *testing.T) {
+		sl := NewList[int]()
+		sl.AppendMany(1, 2, 3, 4, 5, 6, 7, 8)
+		sl.Reset()
+
+		assert.Zero(t, sl.Len())
+		assert.Empty(t, sl.Items())
+
+		sl.Append(99)
+		assert.EqualValues(t, 1, sl.Len())
+		assert.EqualValues(t, 99, sl.Get(0))
+	})
+
+	t.Run("With_concurrent_Append_no_duplicates", func(t *testing.T) {
+		sl := NewList[int]()
+		var wg sync.WaitGroup
+
+		for i := range 100 {
+			wg.Add(1)
+			go func(v int) {
+				defer wg.Done()
+				sl.Append(v % 10)
+			}(i)
+		}
+		wg.Wait()
+
+		assert.LessOrEqual(t, sl.Len(), 10)
+		items := sl.Items()
+		seen := make(map[int]int)
+		for _, v := range items {
+			seen[v]++
+		}
+		for k, count := range seen {
+			assert.EqualValues(t, 1, count, "duplicate found for value %d", k)
+		}
+	})
+
+	t.Run("With_Delete_out_of_range_is_noop", func(t *testing.T) {
+		sl := NewList[int]()
+		sl.Append(10)
+		sl.Delete(-1)
+		sl.Delete(5)
+		assert.EqualValues(t, 1, sl.Len())
+	})
 }

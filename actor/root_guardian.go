@@ -25,7 +25,6 @@ package actor
 import (
 	"context"
 
-	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/log"
 )
 
@@ -53,14 +52,14 @@ func (x *rootGuardian) PreStart(*Context) error {
 // Receive handles message
 func (x *rootGuardian) Receive(ctx *ReceiveContext) {
 	switch msg := ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *PostStart:
 		x.pid = ctx.Self()
 		x.logger = ctx.Logger()
 		x.logger.Infof("%s started successfully", x.pid.Name())
-	case *goaktpb.PanicSignal:
+	case *PanicSignal:
 		x.handlePanicSignal(ctx)
-	case *goaktpb.Terminated:
-		actorID := msg.GetAddress()
+	case *Terminated:
+		actorID := msg.Address
 		x.pid.logger.Debugf("%s terminated", actorID)
 		// TODO: decide what to do the actor
 	default:

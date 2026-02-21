@@ -32,7 +32,6 @@ import (
 
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/chunk"
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/codec"
@@ -67,7 +66,7 @@ func (r *relocator) PreStart(*Context) error {
 
 // Receive handles messages sent to the relocator
 func (r *relocator) Receive(ctx *ReceiveContext) {
-	if _, ok := ctx.Message().(*goaktpb.PostStart); ok {
+	if _, ok := ctx.Message().(*PostStart); ok {
 		r.pid = ctx.Self()
 		r.logger = ctx.Logger()
 		r.logger.Infof("%s started successfully", r.pid.Name())

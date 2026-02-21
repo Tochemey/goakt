@@ -31,7 +31,6 @@ import (
 	"time"
 
 	"github.com/tochemey/goakt/v3/actor"
-	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/log"
 )
 
@@ -64,8 +63,6 @@ func main() {
 
 	<-ch
 
-	_ = actorSystem.Stop(ctx)
-
 	fmt.Println("\nStopping actor system...")
 	_ = actorSystem.Stop(ctx)
 }
@@ -80,7 +77,7 @@ func (x *MyActor) PreStart(*actor.Context) error {
 
 func (x *MyActor) Receive(ctx *actor.ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *actor.PostStart:
 		ctx.Spawn("child", &MyActor{})
 		_, err := ctx.Self().SpawnChild(ctx.Context(), "child2", &MyActor{})
 		if err != nil {

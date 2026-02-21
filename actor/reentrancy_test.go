@@ -32,12 +32,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/tochemey/goakt/v3/address"
 	gerrors "github.com/tochemey/goakt/v3/errors"
+	"github.com/tochemey/goakt/v3/internal/commands"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
@@ -95,7 +94,7 @@ func TestReentrancyCycleAllowAll(t *testing.T) {
 				return
 			}
 			self := rctx.Self()
-			call.Then(func(resp proto.Message, err error) {
+			call.Then(func(resp any, err error) {
 				if err != nil {
 					reportScenarioError(errCh, err)
 					return
@@ -149,7 +148,7 @@ func TestRequestAllowAllProcessesOtherMessages(t *testing.T) {
 	target := spawnReentrancyActor(t, sys, ctx, "allow-target", responderWithDelay(reentrancyDelay, corrCh))
 
 	processedCh := make(chan struct{}, 1)
-	replyCh := make(chan proto.Message, 1)
+	replyCh := make(chan any, 1)
 	errCh := make(chan error, 1)
 
 	requester := spawnReentrancyActor(t, sys, ctx, "allow-requester", func(rctx *ReceiveContext) {
@@ -160,7 +159,7 @@ func TestRequestAllowAllProcessesOtherMessages(t *testing.T) {
 				errCh <- rctx.getError()
 				return
 			}
-			call.Then(func(resp proto.Message, err error) {
+			call.Then(func(resp any, err error) {
 				if err != nil {
 					errCh <- err
 					return
@@ -185,7 +184,7 @@ func TestRequestStashNonReentrant(t *testing.T) {
 	target := spawnReentrancyActor(t, sys, ctx, "stash-target", responderWithDelay(reentrancyDelay, nil))
 
 	processedCh := make(chan struct{}, 1)
-	replyCh := make(chan proto.Message, 1)
+	replyCh := make(chan any, 1)
 	errCh := make(chan error, 1)
 
 	requester := spawnReentrancyActor(t, sys, ctx, "stash-requester", func(rctx *ReceiveContext) {
@@ -196,7 +195,7 @@ func TestRequestStashNonReentrant(t *testing.T) {
 				errCh <- rctx.getError()
 				return
 			}
-			call.Then(func(resp proto.Message, err error) {
+			call.Then(func(resp any, err error) {
 				if err != nil {
 					errCh <- err
 					return
@@ -221,7 +220,7 @@ func TestRequestStashOverride(t *testing.T) {
 	target := spawnReentrancyActor(t, sys, ctx, "override-target", responderWithDelay(reentrancyDelay, nil))
 
 	processedCh := make(chan struct{}, 1)
-	replyCh := make(chan proto.Message, 1)
+	replyCh := make(chan any, 1)
 	errCh := make(chan error, 1)
 
 	requester := spawnReentrancyActor(t, sys, ctx, "override-requester", func(rctx *ReceiveContext) {
@@ -232,7 +231,7 @@ func TestRequestStashOverride(t *testing.T) {
 				errCh <- rctx.getError()
 				return
 			}
-			call.Then(func(resp proto.Message, err error) {
+			call.Then(func(resp any, err error) {
 				if err != nil {
 					errCh <- err
 					return
@@ -257,7 +256,7 @@ func TestRequestName(t *testing.T) {
 	targetName := "name-target"
 	_ = spawnReentrancyActor(t, sys, ctx, targetName, responderWithDelay(0, nil))
 
-	replyCh := make(chan proto.Message, 1)
+	replyCh := make(chan any, 1)
 	errCh := make(chan error, 1)
 
 	requester := spawnReentrancyActor(t, sys, ctx, "name-requester", func(rctx *ReceiveContext) {
@@ -268,7 +267,7 @@ func TestRequestName(t *testing.T) {
 				errCh <- rctx.getError()
 				return
 			}
-			call.Then(func(resp proto.Message, err error) {
+			call.Then(func(resp any, err error) {
 				if err != nil {
 					errCh <- err
 					return
@@ -295,7 +294,7 @@ func TestRequestTimeout(t *testing.T) {
 				errCh <- rctx.getError()
 				return
 			}
-			call.Then(func(_ proto.Message, err error) {
+			call.Then(func(_ any, err error) {
 				errCh <- err
 			})
 		}
@@ -320,7 +319,7 @@ func TestRequestCallCancel(t *testing.T) {
 				errCh <- rctx.getError()
 				return
 			}
-			call.Then(func(_ proto.Message, err error) {
+			call.Then(func(_ any, err error) {
 				errCh <- err
 			})
 		case *testpb.TestSend:
@@ -348,7 +347,7 @@ func TestRequestCallThenAfterCompletion(t *testing.T) {
 	sys, ctx := newReentrancySystem(t)
 	target := spawnReentrancyActor(t, sys, ctx, "after-target", responderWithDelay(0, nil))
 
-	replyCh := make(chan proto.Message, 1)
+	replyCh := make(chan any, 1)
 	errCh := make(chan error, 1)
 	var call RequestCall
 
@@ -363,7 +362,7 @@ func TestRequestCallThenAfterCompletion(t *testing.T) {
 			if call == nil {
 				return
 			}
-			call.Then(func(resp proto.Message, err error) {
+			call.Then(func(resp any, err error) {
 				if err == nil {
 					replyCh <- resp
 					return
@@ -527,49 +526,14 @@ func TestRequestValidationFailures(t *testing.T) {
 	})
 }
 
-func TestRequestBuildAsyncRequestErrorDeregisters(t *testing.T) {
-	ctx := context.Background()
-	pid := newRunningPIDWithReentrancy(reentrancy.AllowAll, 0)
-	target := &PID{}
-	target.setState(runningState, true)
-
-	invalid := &testpb.Reply{Content: invalidUTF8String()}
-	_, err := pid.request(ctx, target, invalid)
-	require.Error(t, err)
-	require.Zero(t, pid.reentrancy.inFlightCount.Load())
-	require.Zero(t, pid.reentrancy.requestStates.Len())
-}
-
 func TestRequestTellErrorDeregisters(t *testing.T) {
 	ctx := context.Background()
 	pid := newRunningPIDWithReentrancy(reentrancy.AllowAll, 0)
-	target := &PID{mailbox: NewUnboundedMailbox(), logger: log.DiscardLogger}
-	target.setState(runningState, true)
-
-	msg := &blockingProto{ready: make(chan struct{}), release: make(chan struct{})}
-	errCh := make(chan error, 1)
-	go func() {
-		_, err := pid.request(ctx, target, msg)
-		errCh <- err
-	}()
-
-	select {
-	case <-msg.ready:
-	case <-time.After(reentrancyReplyTimeout):
-		close(msg.release)
-		t.Fatal("expected request to reach buildAsyncRequest")
-	}
-
+	target := &PID{}
 	target.setState(runningState, false)
-	close(msg.release)
 
-	select {
-	case err := <-errCh:
-		require.ErrorIs(t, err, gerrors.ErrDead)
-	case <-time.After(reentrancyReplyTimeout):
-		t.Fatal("expected request to return")
-	}
-
+	_, err := pid.request(ctx, target, new(testpb.TestSend))
+	require.ErrorIs(t, err, gerrors.ErrDead)
 	require.Zero(t, pid.reentrancy.inFlightCount.Load())
 	require.Zero(t, pid.reentrancy.requestStates.Len())
 }
@@ -649,46 +613,16 @@ func TestRequestNameTimeoutStarts(t *testing.T) {
 	requester.deregisterRequestState(state)
 }
 
-func TestRequestNameBuildAsyncRequestError(t *testing.T) {
-	sys, ctx := newReentrancySystem(t)
-	_ = spawnReentrancyActor(t, sys, ctx, "build-target", func(*ReceiveContext) {})
-	requester := spawnReentrancyActor(t, sys, ctx, "build-requester", func(*ReceiveContext) {}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
-
-	_, err := requester.requestName(ctx, "build-target", &testpb.Reply{Content: invalidUTF8String()})
-	require.Error(t, err)
-	require.Zero(t, requester.reentrancy.inFlightCount.Load())
-	require.Zero(t, requester.reentrancy.requestStates.Len())
-}
-
 func TestRequestNameTellErrorOnStoppedTarget(t *testing.T) {
 	sys, ctx := newReentrancySystem(t)
 	target := spawnReentrancyActor(t, sys, ctx, "tell-stop-target", func(*ReceiveContext) {})
 	requester := spawnReentrancyActor(t, sys, ctx, "tell-stop-requester", func(*ReceiveContext) {}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
 
-	msg := &blockingProto{ready: make(chan struct{}), release: make(chan struct{})}
-	errCh := make(chan error, 1)
-	go func() {
-		_, err := requester.requestName(ctx, "tell-stop-target", msg)
-		errCh <- err
-	}()
-
-	select {
-	case <-msg.ready:
-	case <-time.After(reentrancyReplyTimeout):
-		close(msg.release)
-		t.Fatal("expected requestName to reach buildAsyncRequest")
-	}
-
 	require.NoError(t, target.Shutdown(ctx))
-	close(msg.release)
+	pause.For(500 * time.Millisecond)
 
-	select {
-	case err := <-errCh:
-		require.ErrorIs(t, err, gerrors.ErrDead)
-	case <-time.After(reentrancyReplyTimeout):
-		t.Fatal("expected requestName to return")
-	}
-
+	_, err := requester.requestName(ctx, "tell-stop-target", new(testpb.TestSend))
+	require.Error(t, err)
 	require.Zero(t, requester.reentrancy.inFlightCount.Load())
 	require.Zero(t, requester.reentrancy.requestStates.Len())
 }
@@ -738,17 +672,7 @@ func TestHandleAsyncRequestValidationErrors(t *testing.T) {
 
 	t.Run("missing fields", func(t *testing.T) {
 		received := newReceiveContext(context.Background(), pid, pid, new(testpb.TestSend))
-		pid.handleAsyncRequest(received, &internalpb.AsyncRequest{})
-	})
-
-	t.Run("invalid payload", func(t *testing.T) {
-		received := newReceiveContext(context.Background(), pid, pid, new(testpb.TestSend))
-		req := &internalpb.AsyncRequest{
-			CorrelationId: "corr",
-			ReplyTo:       "reply",
-			Message:       &anypb.Any{TypeUrl: "type.googleapis.com/nope.Nope", Value: []byte("bad")},
-		}
-		pid.handleAsyncRequest(received, req)
+		pid.handleAsyncRequest(received, &commands.AsyncRequest{})
 	})
 }
 
@@ -760,7 +684,7 @@ func TestHandleAsyncResponsePaths(t *testing.T) {
 
 	t.Run("empty correlation", func(t *testing.T) {
 		pid := &PID{logger: log.DiscardLogger}
-		pid.handleAsyncResponse(nil, &internalpb.AsyncResponse{CorrelationId: "  "})
+		pid.handleAsyncResponse(nil, &commands.AsyncResponse{CorrelationID: "  "})
 	})
 
 	t.Run("error response completes", func(t *testing.T) {
@@ -769,12 +693,12 @@ func TestHandleAsyncResponsePaths(t *testing.T) {
 		require.NoError(t, pid.registerRequestState(state))
 
 		errCh := make(chan error, 1)
-		state.setCallback(func(_ proto.Message, err error) {
+		state.setCallback(func(_ any, err error) {
 			errCh <- err
 		})
 
-		resp := &internalpb.AsyncResponse{
-			CorrelationId: state.id,
+		resp := &commands.AsyncResponse{
+			CorrelationID: state.id,
 			Error:         gerrors.ErrRequestTimeout.Error(),
 		}
 		pid.handleAsyncResponse(nil, resp)
@@ -790,8 +714,8 @@ func TestHandleAsyncResponsePaths(t *testing.T) {
 
 	t.Run("error response unknown", func(t *testing.T) {
 		pid := newRunningPIDWithReentrancy(reentrancy.AllowAll, 0)
-		pid.handleAsyncResponse(nil, &internalpb.AsyncResponse{
-			CorrelationId: "missing",
+		pid.handleAsyncResponse(nil, &commands.AsyncResponse{
+			CorrelationID: "missing",
 			Error:         "boom",
 		})
 	})
@@ -802,11 +726,11 @@ func TestHandleAsyncResponsePaths(t *testing.T) {
 		require.NoError(t, pid.registerRequestState(state))
 
 		errCh := make(chan error, 1)
-		state.setCallback(func(_ proto.Message, err error) {
+		state.setCallback(func(_ any, err error) {
 			errCh <- err
 		})
 
-		pid.handleAsyncResponse(nil, &internalpb.AsyncResponse{CorrelationId: state.id})
+		pid.handleAsyncResponse(nil, &commands.AsyncResponse{CorrelationID: state.id})
 
 		select {
 		case err := <-errCh:
@@ -819,37 +743,41 @@ func TestHandleAsyncResponsePaths(t *testing.T) {
 
 	t.Run("nil message unknown", func(t *testing.T) {
 		pid := newRunningPIDWithReentrancy(reentrancy.AllowAll, 0)
-		pid.handleAsyncResponse(nil, &internalpb.AsyncResponse{CorrelationId: "missing"})
+		pid.handleAsyncResponse(nil, &commands.AsyncResponse{CorrelationID: "missing"})
 	})
 
-	t.Run("invalid any completes", func(t *testing.T) {
+	t.Run("any message passes through", func(t *testing.T) {
 		pid := newRunningPIDWithReentrancy(reentrancy.AllowAll, 0)
-		state := newRequestState("bad-any", reentrancy.AllowAll, pid)
+		state := newRequestState("any-msg", reentrancy.AllowAll, pid)
 		require.NoError(t, pid.registerRequestState(state))
 
-		errCh := make(chan error, 1)
-		state.setCallback(func(_ proto.Message, err error) {
-			errCh <- err
+		respCh := make(chan any, 1)
+		state.setCallback(func(msg any, err error) {
+			if err == nil {
+				respCh <- msg
+			}
 		})
 
-		pid.handleAsyncResponse(nil, &internalpb.AsyncResponse{
-			CorrelationId: state.id,
-			Message:       &anypb.Any{TypeUrl: "type.googleapis.com/nope.Nope", Value: []byte("bad")},
+		anyMsg := &anypb.Any{TypeUrl: "type.googleapis.com/nope.Nope", Value: []byte("bad")}
+		pid.handleAsyncResponse(nil, &commands.AsyncResponse{
+			CorrelationID: state.id,
+			Message:       anyMsg,
 		})
 
 		select {
-		case err := <-errCh:
-			require.Error(t, err)
+		case msg := <-respCh:
+			_, ok := msg.(*anypb.Any)
+			require.True(t, ok)
 		case <-time.After(reentrancyReplyTimeout):
-			t.Fatal("expected invalid any callback")
+			t.Fatal("expected callback with passthrough message")
 		}
 		require.Zero(t, pid.reentrancy.requestStates.Len())
 	})
 
 	t.Run("invalid any unknown", func(t *testing.T) {
 		pid := newRunningPIDWithReentrancy(reentrancy.AllowAll, 0)
-		pid.handleAsyncResponse(nil, &internalpb.AsyncResponse{
-			CorrelationId: "missing",
+		pid.handleAsyncResponse(nil, &commands.AsyncResponse{
+			CorrelationID: "missing",
 			Message:       &anypb.Any{TypeUrl: "type.googleapis.com/nope.Nope", Value: []byte("bad")},
 		})
 	})
@@ -859,8 +787,8 @@ func TestHandleAsyncResponsePaths(t *testing.T) {
 		state := newRequestState("ok", reentrancy.AllowAll, pid)
 		require.NoError(t, pid.registerRequestState(state))
 
-		respCh := make(chan proto.Message, 1)
-		state.setCallback(func(msg proto.Message, err error) {
+		respCh := make(chan any, 1)
+		state.setCallback(func(msg any, err error) {
 			if err == nil {
 				respCh <- msg
 			}
@@ -868,15 +796,17 @@ func TestHandleAsyncResponsePaths(t *testing.T) {
 
 		payload, err := anypb.New(&testpb.Reply{Content: "ok"})
 		require.NoError(t, err)
-		pid.handleAsyncResponse(nil, &internalpb.AsyncResponse{
-			CorrelationId: state.id,
+		pid.handleAsyncResponse(nil, &commands.AsyncResponse{
+			CorrelationID: state.id,
 			Message:       payload,
 		})
 
 		select {
 		case msg := <-respCh:
-			reply, ok := msg.(*testpb.Reply)
+			anyMsg, ok := msg.(*anypb.Any)
 			require.True(t, ok)
+			reply := new(testpb.Reply)
+			require.NoError(t, anyMsg.UnmarshalTo(reply))
 			require.Equal(t, "ok", reply.GetContent())
 		case <-time.After(reentrancyReplyTimeout):
 			t.Fatal("expected success callback")
@@ -888,8 +818,8 @@ func TestHandleAsyncResponsePaths(t *testing.T) {
 		pid := newRunningPIDWithReentrancy(reentrancy.AllowAll, 0)
 		payload, err := anypb.New(&testpb.Reply{Content: "ok"})
 		require.NoError(t, err)
-		pid.handleAsyncResponse(nil, &internalpb.AsyncResponse{
-			CorrelationId: "missing",
+		pid.handleAsyncResponse(nil, &commands.AsyncResponse{
+			CorrelationID: "missing",
 			Message:       payload,
 		})
 	})
@@ -1008,8 +938,8 @@ func TestCompleteRequest(t *testing.T) {
 		state := newRequestState("done", reentrancy.AllowAll, pid)
 		require.NoError(t, pid.registerRequestState(state))
 
-		respCh := make(chan proto.Message, 1)
-		state.setCallback(func(msg proto.Message, err error) {
+		respCh := make(chan any, 1)
+		state.setCallback(func(msg any, err error) {
 			if err == nil {
 				respCh <- msg
 			}
@@ -1041,7 +971,7 @@ func TestEnqueueAsyncError(t *testing.T) {
 	require.NoError(t, pid.registerRequestState(state))
 
 	errCh := make(chan error, 1)
-	state.setCallback(func(_ proto.Message, err error) {
+	state.setCallback(func(_ any, err error) {
 		errCh <- err
 	})
 
@@ -1102,8 +1032,8 @@ func TestSendAsyncResponsePaths(t *testing.T) {
 		require.NoError(t, receiver.registerRequestState(okState))
 		t.Cleanup(func() { receiver.deregisterRequestState(okState) })
 
-		okCh := make(chan proto.Message, 1)
-		okState.setCallback(func(msg proto.Message, err error) {
+		okCh := make(chan any, 1)
+		okState.setCallback(func(msg any, err error) {
 			if err == nil {
 				okCh <- msg
 			}
@@ -1124,7 +1054,7 @@ func TestSendAsyncResponsePaths(t *testing.T) {
 		t.Cleanup(func() { receiver.deregisterRequestState(errState) })
 
 		errCh := make(chan error, 1)
-		errState.setCallback(func(_ proto.Message, err error) {
+		errState.setCallback(func(_ any, err error) {
 			if err != nil {
 				errCh <- err
 			}
@@ -1193,18 +1123,6 @@ func reportScenarioError(errCh chan<- error, err error) {
 
 func invalidUTF8String() string {
 	return string([]byte{0xff})
-}
-
-type blockingProto struct {
-	ready   chan struct{}
-	release chan struct{}
-	once    sync.Once
-}
-
-func (b *blockingProto) ProtoReflect() protoreflect.Message {
-	b.once.Do(func() { close(b.ready) })
-	<-b.release
-	return (&testpb.TestWait{}).ProtoReflect()
 }
 
 func newRunningPIDWithReentrancy(mode reentrancy.Mode, maxInFlight int) *PID {
@@ -1288,7 +1206,7 @@ func waitForError(t *testing.T, errCh <-chan error, expected error, timeout time
 	}
 }
 
-func waitForReply(t *testing.T, replyCh <-chan proto.Message, errCh <-chan error, timeout time.Duration) {
+func waitForReply(t *testing.T, replyCh <-chan any, errCh <-chan error, timeout time.Duration) {
 	t.Helper()
 	select {
 	case <-replyCh:
@@ -1322,7 +1240,7 @@ func assertNoSignal(t *testing.T, sigCh <-chan struct{}, errCh <-chan error, tim
 	}
 }
 
-func waitForProcessedBeforeReply(t *testing.T, processedCh <-chan struct{}, replyCh <-chan proto.Message, errCh <-chan error, timeout time.Duration) {
+func waitForProcessedBeforeReply(t *testing.T, processedCh <-chan struct{}, replyCh <-chan any, errCh <-chan error, timeout time.Duration) {
 	t.Helper()
 	select {
 	case <-processedCh:

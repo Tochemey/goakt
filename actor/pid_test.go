@@ -48,8 +48,8 @@ import (
 	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/eventstream"
 	"github.com/tochemey/goakt/v3/extension"
-	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
+	"github.com/tochemey/goakt/v3/internal/commands"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/metric"
 	"github.com/tochemey/goakt/v3/internal/pause"
@@ -161,11 +161,11 @@ func TestReceive(t *testing.T) {
 
 		pause.For(time.Second)
 
-		var items []*goaktpb.Deadletter
+		var items []*Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
 			// only listening to deadletter
-			deadletter, ok := payload.(*goaktpb.Deadletter)
+			deadletter, ok := payload.(*Deadletter)
 			if ok {
 				items = append(items, deadletter)
 			}
@@ -176,7 +176,9 @@ func TestReceive(t *testing.T) {
 		require.NoError(t, err)
 		require.NotEmpty(t, items)
 		deadletter := items[0]
-		require.True(t, deadletter.Message.MessageIs(&internalpb.HealthCheckRequest{}))
+		actual, ok := deadletter.Message().(*commands.HealthCheckRequest)
+		require.True(t, ok)
+		require.NotNil(t, actual)
 
 		assert.NoError(t, err)
 		assert.NoError(t, actorSystem.Stop(ctx))
@@ -279,7 +281,7 @@ func TestPassivation(t *testing.T) {
 		pause.For(100 * time.Millisecond)
 
 		// Pause the passivation
-		err = Tell(ctx, pid, new(goaktpb.PausePassivation))
+		err = Tell(ctx, pid, new(PausePassivation))
 		require.NoError(t, err)
 
 		// let us sleep for some time to make the actor idle
@@ -292,7 +294,7 @@ func TestPassivation(t *testing.T) {
 		require.True(t, pid.IsRunning())
 
 		// Resume passivation
-		err = Tell(ctx, pid, new(goaktpb.ResumePassivation))
+		err = Tell(ctx, pid, new(ResumePassivation))
 		require.NoError(t, err)
 
 		wg = sync.WaitGroup{}
@@ -401,7 +403,7 @@ func TestPassivation(t *testing.T) {
 		require.NoError(t, Tell(ctx, pid, new(testpb.TestSend)))
 		require.True(t, pid.IsRunning())
 
-		require.NoError(t, Tell(ctx, pid, new(goaktpb.PausePassivation)))
+		require.NoError(t, Tell(ctx, pid, new(PausePassivation)))
 
 		require.Eventually(t, func() bool {
 			return pid.passivationManager != nil &&
@@ -1196,8 +1198,9 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, parent)
 
-		// create the child actor
-		fakeStrategy := supervisor.NewSupervisor(supervisor.WithDirective(&errors.PanicError{}, 4)) // undefined directive
+		// Directive(4) is beyond the known constants (Stop=0, Resume=1, Restart=2, Escalate=3),
+		// so handlePanicking falls through to the default case which suspends the actor.
+		fakeStrategy := supervisor.NewSupervisor(supervisor.WithDirective(&errors.PanicError{}, 4))
 		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(fakeStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
@@ -1205,21 +1208,16 @@ func TestSupervisorStrategy(t *testing.T) {
 		pause.For(time.Second)
 
 		require.Len(t, parent.Children(), 1)
-		// send a test panic message to the actor
 		require.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
 
-		// wait for the child to properly shutdown
 		pause.For(time.Second)
 
-		// assert the actor state
 		require.False(t, child.IsRunning())
 		require.True(t, child.IsSuspended())
 		require.Len(t, parent.Children(), 0)
 
-		// trying sending a message to the actor will return an error
 		require.Error(t, Tell(ctx, child, new(testpb.TestSend)))
 
-		//stop the actor
 		err = parent.Shutdown(ctx)
 		require.NoError(t, err)
 		assert.NoError(t, actorSystem.Stop(ctx))
@@ -1502,7 +1500,9 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expected := new(testpb.Reply)
-		assert.True(t, proto.Equal(expected, reply))
+		actual, ok := reply.(*testpb.Reply)
+		require.True(t, ok)
+		assert.True(t, proto.Equal(expected, actual))
 
 		//stop the actor
 		err = parent.Shutdown(ctx)
@@ -1601,11 +1601,11 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.True(t, child.IsSuspended())
 		require.Len(t, parent.Children(), 0)
 
-		var suspendedEvent *goaktpb.ActorSuspended
+		var suspendedEvent *ActorSuspended
 		for message := range subscriber.Iterator() {
 			payload := message.Payload()
 			// only listening to suspended actors
-			event, ok := payload.(*goaktpb.ActorSuspended)
+			event, ok := payload.(*ActorSuspended)
 			if ok {
 				suspendedEvent = event
 				break
@@ -1613,8 +1613,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		}
 
 		require.NotNil(t, suspendedEvent)
-		require.False(t, proto.Equal(suspendedEvent, new(goaktpb.ActorSuspended)))
-		require.Equal(t, child.ID(), suspendedEvent.GetAddress())
+		require.Equal(t, child.ID(), suspendedEvent.Address())
 
 		// unsubscribe the consumer
 		err = actorSystem.Unsubscribe(subscriber)
@@ -1950,8 +1949,8 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		require.Eventually(t, func() bool {
 			for message := range consumer.Iterator() {
-				if event, ok := message.Payload().(*goaktpb.ActorSuspended); ok {
-					if event.GetAddress() == child.ID() {
+				if event, ok := message.Payload().(*ActorSuspended); ok {
+					if event.Address() == child.ID() {
 						return true
 					}
 				}
@@ -2005,7 +2004,9 @@ func TestMessaging(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expected := new(testpb.Reply)
-		assert.True(t, proto.Equal(expected, reply))
+		actual, ok := reply.(*testpb.Reply)
+		require.True(t, ok)
+		assert.True(t, proto.Equal(expected, actual))
 
 		// wait a while because exchange is ongoing
 		pause.For(time.Second)
@@ -2302,12 +2303,9 @@ func TestRemoting(t *testing.T) {
 		// perform some assertions
 		require.NoError(t, err)
 		require.NotNil(t, reply)
-		require.True(t, reply.MessageIs(new(testpb.Reply)))
 
-		actual := new(testpb.Reply)
-		err = reply.UnmarshalTo(actual)
-		require.NoError(t, err)
-
+		actual, ok := reply.(*testpb.Reply)
+		require.True(t, ok)
 		expected := new(testpb.Reply)
 		assert.True(t, proto.Equal(expected, actual))
 
@@ -2766,12 +2764,12 @@ func TestSpawnChild(t *testing.T) {
 
 		pause.For(time.Second)
 
-		var events []*goaktpb.ActorChildCreated
+		var events []*ActorChildCreated
 		for message := range subsriber.Iterator() {
 			// get the event payload
 			payload := message.Payload()
 			switch msg := payload.(type) {
-			case *goaktpb.ActorChildCreated:
+			case *ActorChildCreated:
 				events = append(events, msg)
 			}
 		}
@@ -2780,7 +2778,7 @@ func TestSpawnChild(t *testing.T) {
 		require.Len(t, events, 1)
 
 		event := events[0]
-		assert.Equal(t, parent.ID(), event.GetParent())
+		assert.Equal(t, parent.ID(), event.Parent())
 
 		//stop the actor
 		err = parent.Shutdown(ctx)
@@ -2917,7 +2915,7 @@ func TestPoisonPill(t *testing.T) {
 
 	assert.True(t, pid.IsRunning())
 	// send a poison pill to the actor
-	err = Tell(ctx, pid, new(goaktpb.PoisonPill))
+	err = Tell(ctx, pid, new(PoisonPill))
 	assert.NoError(t, err)
 
 	// wait for the graceful shutdown
@@ -3257,13 +3255,15 @@ func TestBatchAsk(t *testing.T) {
 		require.NotNil(t, pid)
 
 		// batch ask
-		responses, err := pid.BatchAsk(ctx, pid, []proto.Message{new(testpb.TestReply), new(testpb.TestReply)}, replyTimeout)
+		responses, err := pid.BatchAsk(ctx, pid, []any{new(testpb.TestReply), new(testpb.TestReply)}, replyTimeout)
 		require.NoError(t, err)
 		for reply := range responses {
 			require.NoError(t, err)
 			require.NotNil(t, reply)
 			expected := new(testpb.Reply)
-			assert.True(t, proto.Equal(expected, reply))
+			actual, ok := reply.(*testpb.Reply)
+			require.True(t, ok)
+			assert.True(t, proto.Equal(expected, actual))
 		}
 
 		// wait a while because exchange is ongoing
@@ -3300,7 +3300,7 @@ func TestBatchAsk(t *testing.T) {
 		pause.For(time.Second)
 
 		// batch ask
-		responses, err := pid.BatchAsk(ctx, pid, []proto.Message{new(testpb.TestReply), new(testpb.TestReply)}, replyTimeout)
+		responses, err := pid.BatchAsk(ctx, pid, []any{new(testpb.TestReply), new(testpb.TestReply)}, replyTimeout)
 		require.Error(t, err)
 		require.Nil(t, responses)
 		assert.NoError(t, actorSystem.Stop(ctx))
@@ -3329,7 +3329,7 @@ func TestBatchAsk(t *testing.T) {
 		require.NotNil(t, pid)
 
 		// batch ask
-		responses, err := pid.BatchAsk(ctx, pid, []proto.Message{new(testpb.TestTimeout), new(testpb.TestReply)}, replyTimeout)
+		responses, err := pid.BatchAsk(ctx, pid, []any{new(testpb.TestTimeout), new(testpb.TestReply)}, replyTimeout)
 		require.Error(t, err)
 		require.Empty(t, responses)
 
@@ -3689,15 +3689,10 @@ func TestRemoteSpawn(t *testing.T) {
 
 		// send the message to exchanger actor one using remote messaging
 		reply, err := pid.RemoteAsk(ctx, addr, new(testpb.TestReply), replyTimeout)
-
 		require.NoError(t, err)
 		require.NotNil(t, reply)
-		require.True(t, reply.MessageIs(new(testpb.Reply)))
-
-		actual := new(testpb.Reply)
-		err = reply.UnmarshalTo(actual)
-		require.NoError(t, err)
-
+		actual, ok := reply.(*testpb.Reply)
+		require.True(t, ok)
 		expected := new(testpb.Reply)
 		assert.True(t, proto.Equal(expected, actual))
 
@@ -3959,7 +3954,7 @@ func TestPipeTo(t *testing.T) {
 		require.Zero(t, pid1.ProcessedCount()-1)
 		require.Zero(t, pid2.ProcessedCount()-1)
 
-		task := func() (proto.Message, error) {
+		task := func() (any, error) {
 			// simulate a long-running task
 			pause.For(time.Second)
 			return new(testpb.TaskComplete), nil
@@ -4022,7 +4017,7 @@ func TestPipeTo(t *testing.T) {
 		pause.For(time.Second)
 		require.NoError(t, pid2.Shutdown(ctx))
 
-		task := func() (proto.Message, error) {
+		task := func() (any, error) {
 			// simulate a long-running task
 			pause.For(time.Second)
 			return new(testpb.TaskComplete), nil
@@ -4117,7 +4112,7 @@ func TestPipeTo(t *testing.T) {
 		require.Zero(t, pid1.ProcessedCount()-1)
 		require.Zero(t, pid2.ProcessedCount()-1)
 
-		task := func() (proto.Message, error) {
+		task := func() (any, error) {
 			// simulate a long-running task
 			pause.For(time.Second)
 			return nil, assert.AnError
@@ -4149,11 +4144,11 @@ func TestPipeTo(t *testing.T) {
 		// no message piped to the actor
 		require.Zero(t, pid2.ProcessedCount()-1)
 
-		var items []*goaktpb.Deadletter
+		var items []*Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
 			// only listening to deadletter
-			deadletter, ok := payload.(*goaktpb.Deadletter)
+			deadletter, ok := payload.(*Deadletter)
 			if ok {
 				items = append(items, deadletter)
 			}
@@ -4202,7 +4197,7 @@ func TestPipeTo(t *testing.T) {
 		require.Zero(t, pid1.ProcessedCount()-1)
 		require.Zero(t, pid2.ProcessedCount()-1)
 
-		task := func() (proto.Message, error) {
+		task := func() (any, error) {
 			// simulate a long-running task
 			pause.For(time.Second)
 			return new(testpb.TaskComplete), nil
@@ -4215,11 +4210,11 @@ func TestPipeTo(t *testing.T) {
 		// no message piped to the actor
 		require.Zero(t, pid2.ProcessedCount()-1)
 
-		var items []*goaktpb.Deadletter
+		var items []*Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
 			// only listening to deadletter
-			deadletter, ok := payload.(*goaktpb.Deadletter)
+			deadletter, ok := payload.(*Deadletter)
 			if ok {
 				items = append(items, deadletter)
 			}
@@ -4268,7 +4263,7 @@ func TestPipeTo(t *testing.T) {
 		require.Zero(t, pid1.ProcessedCount()-1)
 		require.Zero(t, pid2.ProcessedCount()-1)
 
-		task := func() (proto.Message, error) {
+		task := func() (any, error) {
 			// simulate a long-running task
 			pause.For(time.Second)
 			return new(testpb.TaskComplete), nil
@@ -4345,7 +4340,7 @@ func TestPipeTo(t *testing.T) {
 		require.Zero(t, pid1.ProcessedCount()-1)
 		require.Zero(t, pid2.ProcessedCount()-1)
 
-		task := func() (proto.Message, error) {
+		task := func() (any, error) {
 			// simulate a long-running task
 			pause.For(time.Second)
 			return nil, assert.AnError
@@ -4365,11 +4360,11 @@ func TestPipeTo(t *testing.T) {
 
 		pause.For(time.Second)
 
-		var items []*goaktpb.Deadletter
+		var items []*Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
 			// only listening to deadletter
-			deadletter, ok := payload.(*goaktpb.Deadletter)
+			deadletter, ok := payload.(*Deadletter)
 			if ok {
 				items = append(items, deadletter)
 			}
@@ -4420,7 +4415,7 @@ func TestPipeTo(t *testing.T) {
 		require.Zero(t, pid1.ProcessedCount()-1)
 		require.Zero(t, pid2.ProcessedCount()-1)
 
-		task := func() (proto.Message, error) {
+		task := func() (any, error) {
 			// simulate a long-running task
 			pause.For(time.Second)
 			return new(testpb.TaskComplete), nil
@@ -4448,20 +4443,22 @@ func TestPipeTo(t *testing.T) {
 
 		require.EqualValues(t, 3, pid1.ProcessedCount()-1)
 
-		var items []*goaktpb.Deadletter
+		var items []*Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
 			// only listening to deadletter
-			deadletter, ok := payload.(*goaktpb.Deadletter)
+			deadletter, ok := payload.(*Deadletter)
 			if ok {
 				items = append(items, deadletter)
 			}
 		}
 
 		require.Len(t, items, 1)
-		msg := items[0].GetMessage()
+		msg := items[0].Message()
 		require.NotNil(t, msg)
-		require.True(t, msg.MessageIs(new(testpb.TaskComplete)))
+		actual, ok := msg.(*testpb.TaskComplete)
+		require.True(t, ok)
+		require.True(t, proto.Equal(new(testpb.TaskComplete), actual))
 
 		pause.For(time.Second)
 		require.NoError(t, pid1.Shutdown(ctx))
@@ -4635,7 +4632,10 @@ func TestSendSync(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, response)
 		expected := &testpb.Reply{Content: "received message"}
-		assert.True(t, proto.Equal(expected, response))
+
+		actual, ok := response.(*testpb.Reply)
+		require.True(t, ok)
+		assert.True(t, proto.Equal(expected, actual))
 
 		t.Cleanup(func() {
 			assert.NoError(t, actorSystem.Stop(ctx))
@@ -4706,7 +4706,9 @@ func TestSendSync(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, response)
 		expected := &testpb.Reply{Content: "received message"}
-		assert.True(t, proto.Equal(expected, response))
+		actual, ok := response.(*testpb.Reply)
+		require.True(t, ok)
+		assert.True(t, proto.Equal(expected, actual))
 
 		t.Cleanup(func() {
 			assert.NoError(t, node1.Stop(ctx))
@@ -5417,15 +5419,17 @@ func TestPIDDoReceiveDuringShutdown(t *testing.T) {
 		pause.For(500 * time.Millisecond)
 
 		// Verify message was sent to deadletter
-		var deadletterItems []*goaktpb.Deadletter
+		var deadletterItems []*Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
-			if deadletter, ok := payload.(*goaktpb.Deadletter); ok {
+			if deadletter, ok := payload.(*Deadletter); ok {
 				deadletterItems = append(deadletterItems, deadletter)
 				// Check that the deadletter contains our user message
-				var testSend testpb.TestSend
-				if err := deadletter.GetMessage().UnmarshalTo(&testSend); err == nil {
-					require.Equal(t, errors.ErrSystemShuttingDown.Error(), deadletter.GetReason())
+				actual, ok := deadletter.Message().(*testpb.TestSend)
+				require.True(t, ok)
+				if ok {
+					require.NotNil(t, actual)
+					require.Equal(t, errors.ErrSystemShuttingDown.Error(), deadletter.Reason())
 					break
 				}
 			}
@@ -5470,14 +5474,14 @@ func TestPIDDoReceiveDuringShutdown(t *testing.T) {
 		// Test various system messages that should be allowed through during shutdown.
 		// PoisonPill is excluded because it triggers actor shutdown as a side effect,
 		// which would affect subsequent iterations of this loop.
-		systemMessages := []proto.Message{
-			new(internalpb.HealthCheckRequest),
-			new(internalpb.Panicking),
-			new(goaktpb.PausePassivation),
-			new(goaktpb.ResumePassivation),
-			new(goaktpb.PostStart),
-			new(goaktpb.Terminated),
-			new(goaktpb.PanicSignal),
+		systemMessages := []any{
+			new(commands.HealthCheckRequest),
+			new(commands.Panicking),
+			new(PausePassivation),
+			new(ResumePassivation),
+			new(PostStart),
+			new(Terminated),
+			new(PanicSignal),
 		}
 
 		for _, sysMsg := range systemMessages {
@@ -5841,7 +5845,7 @@ func TestPipeToName(t *testing.T) {
 		require.Zero(t, pid1.ProcessedCount()-1)
 		require.Zero(t, pid2.ProcessedCount()-1)
 
-		task := func() (proto.Message, error) {
+		task := func() (any, error) {
 			// simulate a long-running task
 			pause.For(time.Second)
 			return new(testpb.TaskComplete), nil
@@ -5909,7 +5913,7 @@ func TestPipeToName(t *testing.T) {
 		// wait for the actor to be completely stopped
 		pause.For(time.Second)
 
-		task := func() (proto.Message, error) {
+		task := func() (any, error) {
 			// simulate a long-running task
 			pause.For(time.Second)
 			return new(testpb.TaskComplete), nil
@@ -6004,7 +6008,7 @@ func TestPipeToName(t *testing.T) {
 		require.Zero(t, pid1.ProcessedCount()-1)
 		require.Zero(t, pid2.ProcessedCount()-1)
 
-		task := func() (proto.Message, error) {
+		task := func() (any, error) {
 			// simulate a long-running task
 			pause.For(time.Second)
 			return nil, assert.AnError
@@ -6036,11 +6040,11 @@ func TestPipeToName(t *testing.T) {
 		// no message piped to the actor
 		require.Zero(t, pid2.ProcessedCount()-1)
 
-		var items []*goaktpb.Deadletter
+		var items []*Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
 			// only listening to deadletter
-			deadletter, ok := payload.(*goaktpb.Deadletter)
+			deadletter, ok := payload.(*Deadletter)
 			if ok {
 				items = append(items, deadletter)
 			}
@@ -6095,7 +6099,7 @@ func TestPipeToName(t *testing.T) {
 		require.Zero(t, pid1.ProcessedCount()-1)
 		require.Zero(t, pid2.ProcessedCount()-1)
 
-		task := func() (proto.Message, error) {
+		task := func() (any, error) {
 			// simulate a long-running task
 			pause.For(time.Second)
 			return new(testpb.TaskComplete), nil
@@ -6108,11 +6112,11 @@ func TestPipeToName(t *testing.T) {
 		// no message piped to the actor
 		require.Zero(t, pid2.ProcessedCount()-1)
 
-		var items []*goaktpb.Deadletter
+		var items []*Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
 			// only listening to deadletter
-			deadletter, ok := payload.(*goaktpb.Deadletter)
+			deadletter, ok := payload.(*Deadletter)
 			if ok {
 				items = append(items, deadletter)
 			}
@@ -6168,7 +6172,7 @@ func TestPipeToName(t *testing.T) {
 		require.Zero(t, pid1.ProcessedCount()-1)
 		require.Zero(t, pid2.ProcessedCount()-1)
 
-		task := func() (proto.Message, error) {
+		task := func() (any, error) {
 			// simulate a long-running task
 			pause.For(time.Second)
 			return new(testpb.TaskComplete), nil
@@ -6246,7 +6250,7 @@ func TestPipeToName(t *testing.T) {
 		require.Zero(t, pid1.ProcessedCount()-1)
 		require.Zero(t, pid2.ProcessedCount()-1)
 
-		task := func() (proto.Message, error) {
+		task := func() (any, error) {
 			// simulate a long-running task
 			pause.For(time.Second)
 			return nil, assert.AnError
@@ -6266,11 +6270,11 @@ func TestPipeToName(t *testing.T) {
 
 		pause.For(time.Second)
 
-		var items []*goaktpb.Deadletter
+		var items []*Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
 			// only listening to deadletter
-			deadletter, ok := payload.(*goaktpb.Deadletter)
+			deadletter, ok := payload.(*Deadletter)
 			if ok {
 				items = append(items, deadletter)
 			}
@@ -6321,7 +6325,7 @@ func TestPipeToName(t *testing.T) {
 		require.Zero(t, pid1.ProcessedCount()-1)
 		require.Zero(t, pid2.ProcessedCount()-1)
 
-		task := func() (proto.Message, error) {
+		task := func() (any, error) {
 			// simulate a long-running task
 			pause.For(time.Second)
 			return new(testpb.TaskComplete), nil
@@ -6347,20 +6351,23 @@ func TestPipeToName(t *testing.T) {
 
 		require.EqualValues(t, 3, pid1.ProcessedCount()-1)
 
-		var items []*goaktpb.Deadletter
+		var items []*Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
 			// only listening to deadletter
-			deadletter, ok := payload.(*goaktpb.Deadletter)
+			deadletter, ok := payload.(*Deadletter)
 			if ok {
 				items = append(items, deadletter)
 			}
 		}
 
 		require.Len(t, items, 1)
-		msg := items[0].GetMessage()
+		msg := items[0].Message()
 		require.NotNil(t, msg)
-		require.True(t, msg.MessageIs(new(testpb.TaskComplete)))
+
+		actual, ok := msg.(*testpb.TaskComplete)
+		require.True(t, ok)
+		require.True(t, proto.Equal(new(testpb.TaskComplete), actual))
 
 		pause.For(time.Second)
 		require.NoError(t, pid1.Shutdown(ctx))

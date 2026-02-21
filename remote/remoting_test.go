@@ -32,11 +32,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/tochemey/goakt/v3/address"
 	gerrors "github.com/tochemey/goakt/v3/errors"
+	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/reentrancy"
 )
 
@@ -379,7 +379,7 @@ func TestRemoteBatchTell_FiltersNilMessages(t *testing.T) {
 	to := address.New("to", "sys", "host", 1000)
 
 	// Pass a mix of valid and nil messages
-	messages := []proto.Message{
+	messages := []any{
 		durationpb.New(time.Second),
 		nil, // should be filtered out
 		durationpb.New(2 * time.Second),
@@ -399,7 +399,7 @@ func TestRemoteBatchAsk_FiltersNilMessages(t *testing.T) {
 	to := address.New("to", "sys", "host", 1000)
 
 	// Pass a mix of valid and nil messages
-	messages := []proto.Message{
+	messages := []any{
 		durationpb.New(time.Second),
 		nil, // should be filtered out
 		durationpb.New(2 * time.Second),
@@ -412,20 +412,385 @@ func TestRemoteBatchAsk_FiltersNilMessages(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// TODO: Integration tests
-// The following tests require a running proto TCP server and should be
-// rewritten as integration tests:
-// - TestRemotingHeaderPropagation
-// - TestRemoteSpawn_Success
-// - TestRemoteLookup_Success
-// - TestRemoteAsk_Success
-// - TestRemoteTell_Success
-// - TestRemoteReSpawn_Success
-// - TestRemoteStop_Success
-// - TestRemoteReinstate_Success
-// - TestRemoteActivateGrain_Success
-// - TestRemoteTellGrain_Success
-// - TestRemoteAskGrain_Success
-//
-// These tests should be implemented in a separate integration test file
-// that starts an actual actor system with proto TCP server enabled.
+// ---------------------------------------------------------------------------
+// Serializer / resolveSerializer
+// ---------------------------------------------------------------------------
+
+func TestRemotingSerializer(t *testing.T) {
+	t.Run("nil message returns the pre-built dispatcher", func(t *testing.T) {
+		r := NewRemoting().(*remoting)
+		s := r.Serializer(nil)
+		require.NotNil(t, s, "Serializer(nil) must return the composite dispatcher, not nil")
+		_, ok := s.(*serializerDispatch)
+		assert.True(t, ok)
+	})
+
+	t.Run("proto message matches the interface entry", func(t *testing.T) {
+		r := NewRemoting().(*remoting)
+		s := r.Serializer(durationpb.New(time.Second))
+		require.NotNil(t, s)
+		_, ok := s.(*ProtoSerializer)
+		assert.True(t, ok)
+	})
+
+	t.Run("concrete type registered with WithRemotingSerializers", func(t *testing.T) {
+		custom := &stubSerializer{}
+		r := NewRemoting(WithRemotingSerializers(new(nonProtoMsg), custom)).(*remoting)
+		s := r.Serializer(&nonProtoMsg{"x"})
+		require.NotNil(t, s)
+		assert.Same(t, custom, s)
+	})
+
+	t.Run("unknown type returns nil", func(t *testing.T) {
+		r := NewRemoting().(*remoting)
+		s := r.Serializer(&nonProtoMsg{"x"})
+		assert.Nil(t, s)
+	})
+}
+
+// ---------------------------------------------------------------------------
+// WithRemotingContextPropagator / WithRemotingSerializers
+// ---------------------------------------------------------------------------
+
+func TestWithRemotingContextPropagator(t *testing.T) {
+	t.Run("nil propagator is ignored", func(t *testing.T) {
+		r := NewRemoting(WithRemotingContextPropagator(nil)).(*remoting)
+		assert.Nil(t, r.contextPropagator)
+	})
+
+	t.Run("non-nil propagator is applied", func(t *testing.T) {
+		prop := mockPropagator{}
+		r := NewRemoting(WithRemotingContextPropagator(prop)).(*remoting)
+		assert.Equal(t, prop, r.contextPropagator)
+	})
+}
+
+func TestWithRemotingSerializers(t *testing.T) {
+	t.Run("concrete type registration", func(t *testing.T) {
+		custom := &stubSerializer{}
+		r := NewRemoting(WithRemotingSerializers(new(nonProtoMsg), custom)).(*remoting)
+		s := r.Serializer(&nonProtoMsg{"x"})
+		require.NotNil(t, s)
+		assert.Same(t, custom, s)
+	})
+
+	t.Run("nil serializer is silently ignored", func(t *testing.T) {
+		// Applying a nil serializer must not panic and must not add an entry.
+		before := NewRemoting().(*remoting)
+		after := NewRemoting(WithRemotingSerializers(new(nonProtoMsg), nil)).(*remoting)
+		assert.Equal(t, len(before.serializers), len(after.serializers))
+	})
+}
+
+// ---------------------------------------------------------------------------
+// enrichContext
+// ---------------------------------------------------------------------------
+
+func TestEnrichContext(t *testing.T) {
+	t.Run("no propagator no deadline", func(t *testing.T) {
+		r := NewRemoting().(*remoting)
+		enriched, err := r.enrichContext(context.Background())
+		require.NoError(t, err)
+		assert.NotNil(t, enriched)
+	})
+
+	t.Run("propagator inject error is propagated", func(t *testing.T) {
+		r := NewRemoting(WithRemotingContextPropagator(errInjectPropagator{})).(*remoting)
+		_, err := r.enrichContext(context.Background())
+		require.Error(t, err)
+		assert.EqualError(t, err, "inject error")
+	})
+
+	t.Run("propagator with headers is applied", func(t *testing.T) {
+		r := NewRemoting(WithRemotingContextPropagator(headerPropagator{"X-Trace-Id", "abc"})).(*remoting)
+		enriched, err := r.enrichContext(context.Background())
+		require.NoError(t, err)
+		assert.NotNil(t, enriched)
+	})
+
+	t.Run("context with deadline sets metadata deadline", func(t *testing.T) {
+		r := NewRemoting().(*remoting)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		enriched, err := r.enrichContext(ctx)
+		require.NoError(t, err)
+		assert.NotNil(t, enriched)
+	})
+}
+
+// ---------------------------------------------------------------------------
+// checkProtoError
+// ---------------------------------------------------------------------------
+
+func TestCheckProtoError(t *testing.T) {
+	t.Run("non-error response returns nil", func(t *testing.T) {
+		resp := &internalpb.RemoteLookupResponse{}
+		assert.NoError(t, checkProtoError(resp))
+	})
+
+	t.Run("CODE_NOT_FOUND returns ErrAddressNotFound", func(t *testing.T) {
+		resp := &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "gone"}
+		err := checkProtoError(resp)
+		require.ErrorIs(t, err, gerrors.ErrAddressNotFound)
+	})
+
+	t.Run("CODE_DEADLINE_EXCEEDED returns ErrRequestTimeout", func(t *testing.T) {
+		resp := &internalpb.Error{Code: internalpb.Code_CODE_DEADLINE_EXCEEDED}
+		err := checkProtoError(resp)
+		require.ErrorIs(t, err, gerrors.ErrRequestTimeout)
+	})
+
+	t.Run("CODE_UNAVAILABLE returns ErrRemoteSendFailure", func(t *testing.T) {
+		resp := &internalpb.Error{Code: internalpb.Code_CODE_UNAVAILABLE}
+		err := checkProtoError(resp)
+		require.ErrorIs(t, err, gerrors.ErrRemoteSendFailure)
+	})
+
+	t.Run("CODE_FAILED_PRECONDITION delegates to parseFailedPrecondition", func(t *testing.T) {
+		resp := &internalpb.Error{Code: internalpb.Code_CODE_FAILED_PRECONDITION, Message: gerrors.ErrRemotingDisabled.Error()}
+		err := checkProtoError(resp)
+		require.ErrorIs(t, err, gerrors.ErrRemotingDisabled)
+	})
+
+	t.Run("CODE_ALREADY_EXISTS delegates to parseAlreadyExists", func(t *testing.T) {
+		resp := &internalpb.Error{Code: internalpb.Code_CODE_ALREADY_EXISTS, Message: "actor conflict"}
+		err := checkProtoError(resp)
+		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
+	})
+
+	t.Run("CODE_INVALID_ARGUMENT returns formatted error", func(t *testing.T) {
+		resp := &internalpb.Error{Code: internalpb.Code_CODE_INVALID_ARGUMENT, Message: "bad field"}
+		err := checkProtoError(resp)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "bad field")
+	})
+
+	t.Run("CODE_INTERNAL_ERROR returns plain error with message", func(t *testing.T) {
+		resp := &internalpb.Error{Code: internalpb.Code_CODE_INTERNAL_ERROR, Message: "oops"}
+		err := checkProtoError(resp)
+		require.Error(t, err)
+		assert.EqualError(t, err, "oops")
+	})
+
+	t.Run("unrecognized code falls through to default", func(t *testing.T) {
+		resp := &internalpb.Error{Code: internalpb.Code_CODE_RESOURCE_EXHAUSTED, Message: "quota"}
+		err := checkProtoError(resp)
+		require.Error(t, err)
+		assert.EqualError(t, err, "quota")
+	})
+}
+
+// ---------------------------------------------------------------------------
+// parseFailedPrecondition
+// ---------------------------------------------------------------------------
+
+func TestParseFailedPrecondition(t *testing.T) {
+	t.Run("ErrTypeNotRegistered substring", func(t *testing.T) {
+		err := parseFailedPrecondition(gerrors.ErrTypeNotRegistered.Error())
+		assert.ErrorIs(t, err, gerrors.ErrTypeNotRegistered)
+	})
+
+	t.Run("ErrRemotingDisabled substring", func(t *testing.T) {
+		err := parseFailedPrecondition(gerrors.ErrRemotingDisabled.Error())
+		assert.ErrorIs(t, err, gerrors.ErrRemotingDisabled)
+	})
+
+	t.Run("ErrClusterDisabled substring", func(t *testing.T) {
+		err := parseFailedPrecondition(gerrors.ErrClusterDisabled.Error())
+		assert.ErrorIs(t, err, gerrors.ErrClusterDisabled)
+	})
+
+	t.Run("unknown message returns generic error", func(t *testing.T) {
+		err := parseFailedPrecondition("something unexpected")
+		require.Error(t, err)
+		assert.EqualError(t, err, "something unexpected")
+	})
+}
+
+// ---------------------------------------------------------------------------
+// parseAlreadyExists
+// ---------------------------------------------------------------------------
+
+func TestParseAlreadyExists(t *testing.T) {
+	t.Run("singleton in message returns ErrSingletonAlreadyExists", func(t *testing.T) {
+		err := parseAlreadyExists("singleton conflict")
+		assert.ErrorIs(t, err, gerrors.ErrSingletonAlreadyExists)
+	})
+
+	t.Run("other message returns ErrActorAlreadyExists", func(t *testing.T) {
+		err := parseAlreadyExists("actor conflict")
+		assert.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
+	})
+}
+
+// ---------------------------------------------------------------------------
+// No-serializer paths for send methods
+// ---------------------------------------------------------------------------
+
+func TestRemoteTell_NoSerializerForType(t *testing.T) {
+	r := NewRemoting()
+	from := address.New("from", "sys", "127.0.0.1", 1000)
+	to := address.New("to", "sys", "127.0.0.1", 1000)
+
+	err := r.RemoteTell(context.Background(), from, to, &nonProtoMsg{"x"})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, gerrors.ErrInvalidMessage)
+}
+
+func TestRemoteAsk_NoSerializerForType(t *testing.T) {
+	r := NewRemoting()
+	from := address.New("from", "sys", "127.0.0.1", 1000)
+	to := address.New("to", "sys", "127.0.0.1", 1000)
+
+	_, err := r.RemoteAsk(context.Background(), from, to, &nonProtoMsg{"x"}, time.Second)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, gerrors.ErrInvalidMessage)
+}
+
+func TestRemoteTellGrain_InvalidPort(t *testing.T) {
+	r := NewRemoting()
+	port := int(math.MaxInt32) + 1
+	grainReq := &GrainRequest{Kind: "kind", Name: "name"}
+
+	err := r.RemoteTellGrain(context.Background(), "host", port, grainReq, durationpb.New(time.Second))
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "out of range")
+}
+
+func TestRemoteTellGrain_NoSerializerForType(t *testing.T) {
+	r := NewRemoting()
+	grainReq := &GrainRequest{Kind: "kind", Name: "name"}
+
+	err := r.RemoteTellGrain(context.Background(), "host", 1000, grainReq, &nonProtoMsg{"x"})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, gerrors.ErrInvalidMessage)
+}
+
+func TestRemoteActivateGrain_InvalidRequest(t *testing.T) {
+	r := NewRemoting()
+	// Empty Kind and Name should fail validation inside getGrainFromRequest.
+	err := r.RemoteActivateGrain(context.Background(), "host", 1000, &GrainRequest{})
+	require.Error(t, err)
+}
+
+func TestRemoteBatchTell_NoSerializer(t *testing.T) {
+	r := NewRemoting()
+	from := address.New("from", "sys", "127.0.0.1", 1000)
+	to := address.New("to", "sys", "127.0.0.1", 1000)
+
+	err := r.RemoteBatchTell(context.Background(), from, to, []any{&nonProtoMsg{"x"}})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, gerrors.ErrInvalidMessage)
+}
+
+func TestRemoteBatchAsk_NoSerializer(t *testing.T) {
+	r := NewRemoting()
+	from := address.New("from", "sys", "127.0.0.1", 1000)
+	to := address.New("to", "sys", "127.0.0.1", 1000)
+
+	_, err := r.RemoteBatchAsk(context.Background(), from, to, []any{&nonProtoMsg{"x"}}, time.Second)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, gerrors.ErrInvalidMessage)
+}
+
+// ---------------------------------------------------------------------------
+// Network-failure paths: covers enrichContext, NetClient, SendProto failure.
+// All tests use an unreachable host so the send fails at dial time.
+// ---------------------------------------------------------------------------
+
+func TestRemoteTell_ConnectionRefused(t *testing.T) {
+	r := NewRemoting()
+	from := address.New("from", "sys", "host", 1000)
+	to := address.New("to", "sys", "host", 1000)
+
+	err := r.RemoteTell(context.Background(), from, to, durationpb.New(time.Second))
+	assert.Error(t, err)
+}
+
+func TestRemoteAsk_ConnectionRefused(t *testing.T) {
+	r := NewRemoting()
+	from := address.New("from", "sys", "host", 1000)
+	to := address.New("to", "sys", "host", 1000)
+
+	_, err := r.RemoteAsk(context.Background(), from, to, durationpb.New(time.Second), time.Second)
+	assert.Error(t, err)
+}
+
+func TestRemoteLookup_ConnectionRefused(t *testing.T) {
+	r := NewRemoting()
+
+	_, err := r.RemoteLookup(context.Background(), "host", 1000, "some-actor")
+	assert.Error(t, err)
+}
+
+func TestRemoteActivateGrain_ConnectionRefused(t *testing.T) {
+	r := NewRemoting()
+	grainReq := &GrainRequest{Kind: "kind", Name: "name"}
+
+	err := r.RemoteActivateGrain(context.Background(), "host", 1000, grainReq)
+	assert.Error(t, err)
+}
+
+func TestRemoteAskGrain_ConnectionRefused(t *testing.T) {
+	r := NewRemoting()
+	grainReq := &GrainRequest{Kind: "kind", Name: "name"}
+
+	_, err := r.RemoteAskGrain(context.Background(), "host", 1000, grainReq, durationpb.New(time.Second), time.Second)
+	assert.Error(t, err)
+}
+
+func TestRemoteTellGrain_ConnectionRefused(t *testing.T) {
+	r := NewRemoting()
+	grainReq := &GrainRequest{Kind: "kind", Name: "name"}
+
+	err := r.RemoteTellGrain(context.Background(), "host", 1000, grainReq, durationpb.New(time.Second))
+	assert.Error(t, err)
+}
+
+func TestRemoteReSpawn_ConnectionRefused(t *testing.T) {
+	r := NewRemoting()
+
+	err := r.RemoteReSpawn(context.Background(), "host", 1000, "actor")
+	assert.Error(t, err)
+}
+
+func TestRemoteStop_ConnectionRefused(t *testing.T) {
+	r := NewRemoting()
+
+	err := r.RemoteStop(context.Background(), "host", 1000, "actor")
+	assert.Error(t, err)
+}
+
+func TestRemoteReinstate_ConnectionRefused(t *testing.T) {
+	r := NewRemoting()
+
+	err := r.RemoteReinstate(context.Background(), "host", 1000, "actor")
+	assert.Error(t, err)
+}
+
+func TestRemoteBatchAsk_ConnectionRefused(t *testing.T) {
+	r := NewRemoting()
+	from := address.New("from", "sys", "host", 1000)
+	to := address.New("to", "sys", "host", 1000)
+
+	_, err := r.RemoteBatchAsk(context.Background(), from, to, []any{durationpb.New(time.Second)}, time.Second)
+	assert.Error(t, err)
+}
+
+func TestRemoteSpawn_ConnectionRefused(t *testing.T) {
+	r := NewRemoting()
+
+	err := r.RemoteSpawn(context.Background(), "host", 1000, &SpawnRequest{Name: "actor", Kind: "kind"})
+	assert.Error(t, err)
+}
+
+func TestWithRemotingContextPropagator_EnrichesRequests(t *testing.T) {
+	// Ensure the propagator is carried through to enrichContext on real send paths.
+	r := NewRemoting(WithRemotingContextPropagator(headerPropagator{"X-ID", "42"}))
+	from := address.New("from", "sys", "host", 1000)
+	to := address.New("to", "sys", "host", 1000)
+
+	// The send will fail at dial time, but enrichContext is still exercised.
+	err := r.RemoteTell(context.Background(), from, to, durationpb.New(time.Second))
+	assert.Error(t, err)
+}

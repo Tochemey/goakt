@@ -24,14 +24,10 @@ package actor
 
 import (
 	"context"
-
-	"google.golang.org/protobuf/proto"
-
-	"github.com/tochemey/goakt/v3/goaktpb"
 )
 
 // ReceiveFunc is a message handling placeholder
-type ReceiveFunc = func(ctx context.Context, message proto.Message) error
+type ReceiveFunc = func(ctx context.Context, message any) error
 
 // PreStartFunc defines the PreStartFunc hook for an actor creation
 type PreStartFunc = func(ctx context.Context) error
@@ -125,7 +121,7 @@ func (x *FuncActor) PreStart(ctx *Context) error {
 // Receive processes any message dropped into the actor mailbox.
 func (x *FuncActor) Receive(ctx *ReceiveContext) {
 	switch m := ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *PostStart:
 		x.pid = ctx.Self()
 	default:
 		// handle the message and return the error

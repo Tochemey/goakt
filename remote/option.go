@@ -22,7 +22,10 @@
 
 package remote
 
-import "time"
+import (
+	"reflect"
+	"time"
+)
 
 // Option is the interface that applies a configuration option.
 type Option interface {
@@ -96,5 +99,57 @@ func WithContextPropagator(propagator ContextPropagator) Option {
 		if propagator != nil {
 			config.contextPropagator = propagator
 		}
+	})
+}
+
+// WithSerializers registers a [Serializer] for a specific message type or for
+// all messages that satisfy a given interface.
+//
+// # Concrete type registration
+//
+// Pass any value of the target type to bind a serializer to that exact type:
+//
+//	WithSerializers(new(MyMessage), mySerializer)
+//
+// # Interface registration
+//
+// Pass a typed nil pointer to an interface to bind a serializer to every
+// message that implements that interface:
+//
+//	WithSerializers((*proto.Message)(nil), remote.NewProtoSerializer())
+//
+// # Dispatch order
+//
+// When [Config.Serializer] resolves a serializer for a message it checks, in order:
+//  1. Exact concrete type — the entry registered with the message's dynamic type.
+//  2. Interface match — the first registered interface the message implements.
+//
+// Registration order within each category determines priority.
+// If serializer is nil the option is silently ignored.
+//
+// The default configuration registers [ProtoSerializer] for all [proto.Message]
+// implementations. Calling this option with a typed nil pointer to
+// [proto.Message] overrides that default for proto messages.
+func WithSerializers(msg any, serializer Serializer) Option {
+	return OptionFunc(func(config *Config) {
+		if serializer == nil {
+			return
+		}
+
+		typ := reflect.TypeOf(msg)
+		// A typed nil pointer whose element is an interface (e.g. (*proto.Message)(nil))
+		// registers the serializer for all values that implement that interface.
+		if typ != nil && typ.Kind() == reflect.Ptr && typ.Elem().Kind() == reflect.Interface {
+			config.serializers = append(config.serializers, ifaceEntry{
+				iface:      typ.Elem(),
+				serializer: serializer,
+			})
+			return
+		}
+
+		config.serializers = append(config.serializers, ifaceEntry{
+			iface:      reflect.TypeOf(msg),
+			serializer: serializer,
+		})
 	})
 }

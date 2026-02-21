@@ -2,37 +2,11 @@ syntax = "proto3";
 
 package internalpb;
 
-import "google/protobuf/any.proto";
-import "google/protobuf/timestamp.proto";
-
 option go_package = "github.com/tochemey/goakt/v3/internal/internalpb;internalpb";
 
 enum Strategy {
   STRATEGY_ONE_FOR_ONE = 0;
   STRATEGY_ONE_FOR_ALL = 1;
-}
-
-// Panicking message is sent by a child
-// actor to its parent when it is panicking or returning an error
-// while processing messages
-message Panicking {
-  // Specifies the actor id
-  string actor_id = 1;
-  // Specifies the error message
-  string error_message = 2;
-  // Specifies the directive
-  oneof directive {
-    StopDirective stop = 3;
-    ResumeDirective resume = 4;
-    RestartDirective restart = 5;
-    EscalateDirective escalate = 6;
-  }
-  // Specifies the strategy
-  Strategy strategy = 7;
-  // Specifies the message that triggered the failure
-  google.protobuf.Any message = 8;
-  // Specifies when the error occurred
-  google.protobuf.Timestamp timestamp = 9;
 }
 
 // StopDirective defines the supervisor stop directive

@@ -31,7 +31,6 @@ import (
 
 	"github.com/tochemey/goakt/v3/actor"
 	errors2 "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/goaktpb"
 )
 
 var _actorSystem actor.ActorSystem
@@ -64,7 +63,6 @@ func main() {
 	fmt.Printf("Actor system running: %v\n", actorSystemIsRunning())
 
 	fmt.Println("Actor system stopped successfully")
-	actorSystem.Host()
 }
 
 func actorSystemIsRunning() bool {
@@ -90,7 +88,7 @@ func (x *MyActor) PreStart(*actor.Context) error {
 
 func (x *MyActor) Receive(ctx *actor.ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *actor.PostStart:
 		fmt.Println("Actor PostStart")
 	default:
 		ctx.Unhandled()

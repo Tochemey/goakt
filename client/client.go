@@ -306,7 +306,7 @@ func (x *Client) Tell(ctx context.Context, actorName string, message proto.Messa
 //   - If the actor does not exist or is unreachable, a NOT_FOUND error is returned.
 //   - Ensure the actor is designed to handle the incoming message and reply appropriately.
 //   - For fire-and-forget messaging, use `Tell` instead of `Ask`.
-func (x *Client) Ask(ctx context.Context, actorName string, message proto.Message, timeout time.Duration) (reply proto.Message, err error) {
+func (x *Client) Ask(ctx context.Context, actorName string, message any, timeout time.Duration) (reply any, err error) {
 	x.locker.Lock()
 	node := nextNode(x.balancer)
 	x.locker.Unlock()
@@ -327,7 +327,7 @@ func (x *Client) Ask(ctx context.Context, actorName string, message proto.Messag
 	if err != nil {
 		return nil, err
 	}
-	return response.UnmarshalNew()
+	return response, nil
 }
 
 // AskGrain sends a message to a Grain and waits for a response.
@@ -351,7 +351,7 @@ func (x *Client) Ask(ctx context.Context, actorName string, message proto.Messag
 //   - If the Grain does not exist or is unreachable, an error is returned.
 //   - Ensure the Grain is designed to handle the incoming message and reply appropriately.
 //   - The grain kind must be registered on the remote actor system using RegisterGrainKind.
-func (x *Client) AskGrain(ctx context.Context, grainRequest *remote.GrainRequest, message proto.Message, timeout time.Duration) (reply proto.Message, err error) {
+func (x *Client) AskGrain(ctx context.Context, grainRequest *remote.GrainRequest, message any, timeout time.Duration) (reply any, err error) {
 	x.locker.Lock()
 	node := nextNode(x.balancer)
 	remoteHost, remotePort := node.HostAndPort()
@@ -362,7 +362,7 @@ func (x *Client) AskGrain(ctx context.Context, grainRequest *remote.GrainRequest
 	if err != nil {
 		return nil, err
 	}
-	return response.UnmarshalNew()
+	return response, nil
 }
 
 // TellGrain sends a message to the specified Grain.

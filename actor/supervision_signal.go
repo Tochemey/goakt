@@ -24,22 +24,20 @@ package actor
 
 import (
 	"reflect"
-
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/timestamppb"
+	"time"
 )
 
 type supervisionSignal struct {
 	err       error
-	msg       proto.Message
-	timestamp *timestamppb.Timestamp
+	msg       any
+	timestamp time.Time
 }
 
-func newSupervisionSignal(err error, msg proto.Message) *supervisionSignal {
+func newSupervisionSignal(err error, msg any) *supervisionSignal {
 	return &supervisionSignal{
 		err:       err,
 		msg:       msg,
-		timestamp: timestamppb.Now(),
+		timestamp: time.Now().UTC(),
 	}
 }
 
@@ -47,11 +45,11 @@ func (s *supervisionSignal) Err() error {
 	return s.err
 }
 
-func (s *supervisionSignal) Msg() proto.Message {
+func (s *supervisionSignal) Msg() any {
 	return s.msg
 }
 
-func (s *supervisionSignal) Timestamp() *timestamppb.Timestamp {
+func (s *supervisionSignal) Timestamp() time.Time {
 	return s.timestamp
 }
 

@@ -32,7 +32,6 @@ import (
 	quartzlogger "github.com/reugn/go-quartz/logger"
 	"github.com/reugn/go-quartz/quartz"
 	"go.uber.org/atomic"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/errors"
@@ -153,7 +152,7 @@ func (x *scheduler) Stop(ctx context.Context) {
 // Note:
 //   - It's strongly recommended to set a unique reference ID using WithReference if you intend to cancel, pause, or resume the message later.
 //   - If no reference is set, an automatic one will be generated, which may not be easily retrievable.
-func (x *scheduler) ScheduleOnce(message proto.Message, pid *PID, delay time.Duration, opts ...ScheduleOption) error {
+func (x *scheduler) ScheduleOnce(message any, pid *PID, delay time.Duration, opts ...ScheduleOption) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
@@ -203,7 +202,7 @@ func (x *scheduler) ScheduleOnce(message proto.Message, pid *PID, delay time.Dur
 //   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the scheduled message.
 //   - If no reference is set, an automatic one will be generated internally, which may not be easily retrievable for later operations.
 //   - This function does not provide built-in delivery guarantees such as at-least-once or exactly-once semantics; ensure idempotency where needed.
-func (x *scheduler) Schedule(message proto.Message, pid *PID, interval time.Duration, opts ...ScheduleOption) error {
+func (x *scheduler) Schedule(message any, pid *PID, interval time.Duration, opts ...ScheduleOption) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
@@ -253,7 +252,7 @@ func (x *scheduler) Schedule(message proto.Message, pid *PID, interval time.Dura
 //   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the scheduled message.
 //   - If no reference is set, an automatic one will be generated internally, which may not be easily retrievable for future operations.
 //   - The cron expression must follow the format supported by the scheduler (typically 6 or 5 fields depending on implementation).
-func (x *scheduler) ScheduleWithCron(message proto.Message, pid *PID, cronExpression string, opts ...ScheduleOption) error {
+func (x *scheduler) ScheduleWithCron(message any, pid *PID, cronExpression string, opts ...ScheduleOption) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 	if !x.started.Load() {
@@ -309,7 +308,7 @@ func (x *scheduler) ScheduleWithCron(message proto.Message, pid *PID, cronExpres
 //   - Remoting must be enabled in the actor system for this function to work.
 //   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the message later.
 //   - If no reference is set, an automatic one will be generated internally, which may not be easily retrievable.
-func (x *scheduler) RemoteScheduleOnce(message proto.Message, to *address.Address, delay time.Duration, opts ...ScheduleOption) error {
+func (x *scheduler) RemoteScheduleOnce(message any, to *address.Address, delay time.Duration, opts ...ScheduleOption) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
@@ -358,7 +357,7 @@ func (x *scheduler) RemoteScheduleOnce(message proto.Message, to *address.Addres
 //   - Remoting must be enabled in the actor system for this method to function correctly.
 //   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the scheduled message.
 //   - If no reference is set, an automatic one will be generated internally, which may not be easily retrievable for later operations.
-func (x *scheduler) RemoteSchedule(message proto.Message, to *address.Address, interval time.Duration, opts ...ScheduleOption) error {
+func (x *scheduler) RemoteSchedule(message any, to *address.Address, interval time.Duration, opts ...ScheduleOption) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
@@ -408,7 +407,7 @@ func (x *scheduler) RemoteSchedule(message proto.Message, to *address.Address, i
 //   - It's strongly recommended to set a unique reference ID using WithReference if you intend to cancel, pause, or resume the scheduled message.
 //   - If no reference is set, an automatic one will be generated internally and may not be easily retrievable.
 //   - The cron expression must conform to the scheduler’s supported format (usually 5 or 6 fields).
-func (x *scheduler) RemoteScheduleWithCron(message proto.Message, to *address.Address, cronExpression string, opts ...ScheduleOption) error {
+func (x *scheduler) RemoteScheduleWithCron(message any, to *address.Address, cronExpression string, opts ...ScheduleOption) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 

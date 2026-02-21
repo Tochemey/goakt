@@ -54,10 +54,10 @@ import (
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/eventstream"
 	"github.com/tochemey/goakt/v3/extension"
-	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/hash"
 	"github.com/tochemey/goakt/v3/internal/chain"
 	"github.com/tochemey/goakt/v3/internal/cluster"
+	"github.com/tochemey/goakt/v3/internal/commands"
 	"github.com/tochemey/goakt/v3/internal/datacentercontroller"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/locker"
@@ -286,7 +286,7 @@ type ActorSystem interface {
 	// Note:
 	//   - It's strongly recommended to set a unique reference ID using WithReference if you intend to cancel, pause, or resume the message later.
 	//   - If no reference is set, an automatic one will be generated, which may not be easily retrievable.
-	ScheduleOnce(ctx context.Context, message proto.Message, pid *PID, delay time.Duration, opts ...ScheduleOption) error
+	ScheduleOnce(ctx context.Context, message any, pid *PID, delay time.Duration, opts ...ScheduleOption) error
 	// Schedule schedules a recurring message to be delivered to the specified actor (PID) at a fixed interval.
 	//
 	// This function sets up a message to be sent repeatedly to the target actor, with each delivery occurring
@@ -306,7 +306,7 @@ type ActorSystem interface {
 	//   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the scheduled message.
 	//   - If no reference is set, an automatic one will be generated internally, which may not be easily retrievable for later operations.
 	//   - This function does not provide built-in delivery guarantees such as at-least-once or exactly-once semantics; ensure idempotency where needed.
-	Schedule(ctx context.Context, message proto.Message, pid *PID, interval time.Duration, opts ...ScheduleOption) error
+	Schedule(ctx context.Context, message any, pid *PID, interval time.Duration, opts ...ScheduleOption) error
 	// RemoteScheduleOnce schedules a one-time delivery of a message to a remote actor after a specified delay.
 	//
 	// This method schedules a message to be sent to an actor located at a remote address once the given interval has elapsed.
@@ -326,7 +326,7 @@ type ActorSystem interface {
 	//   - Remoting must be enabled in the actor system for this function to work.
 	//   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the message later.
 	//   - If no reference is set, an automatic one will be generated internally, which may not be retrievable.
-	RemoteScheduleOnce(ctx context.Context, message proto.Message, receiver *address.Address, delay time.Duration, opts ...ScheduleOption) error
+	RemoteScheduleOnce(ctx context.Context, message any, receiver *address.Address, delay time.Duration, opts ...ScheduleOption) error
 	// RemoteSchedule schedules a recurring message to be sent to a remote actor at a specified interval.
 	//
 	// This method sends the given message repeatedly to the remote actor located at the specified address,
@@ -347,7 +347,7 @@ type ActorSystem interface {
 	//   - Remoting must be enabled in the actor system for this method to function correctly.
 	//   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the scheduled message.
 	//   - If no reference is set, an automatic one will be generated internally, which may not be easily retrievable for later operations.
-	RemoteSchedule(ctx context.Context, message proto.Message, receiver *address.Address, interval time.Duration, opts ...ScheduleOption) error
+	RemoteSchedule(ctx context.Context, message any, receiver *address.Address, interval time.Duration, opts ...ScheduleOption) error
 	// ScheduleWithCron schedules a message to be delivered to the specified actor (PID) using a cron expression.
 	//
 	// This method enables flexible time-based scheduling using standard cron syntax, allowing you to specify complex recurring schedules.
@@ -367,7 +367,7 @@ type ActorSystem interface {
 	//   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the scheduled message.
 	//   - If no reference is set, an automatic one will be generated internally, which may not be easily retrievable for future operations.
 	//   - The cron expression must follow the format supported by the scheduler (typically 6 or 5 fields depending on implementation).
-	ScheduleWithCron(ctx context.Context, message proto.Message, pid *PID, cronExpression string, opts ...ScheduleOption) error
+	ScheduleWithCron(ctx context.Context, message any, pid *PID, cronExpression string, opts ...ScheduleOption) error
 	// RemoteScheduleWithCron schedules a message to be sent to a remote actor according to a cron expression.
 	//
 	// This method allows scheduling messages to remote actors using flexible cron-based timing,
@@ -389,7 +389,7 @@ type ActorSystem interface {
 	//   - It's strongly recommended to set a unique reference ID using WithReference if you intend to cancel, pause, or resume the scheduled message.
 	//   - If no reference is set, an automatic one will be generated internally and may not be easily retrievable.
 	//   - The cron expression must conform to the scheduler’s supported format (usually 5 or 6 fields).
-	RemoteScheduleWithCron(ctx context.Context, message proto.Message, receiver *address.Address, cronExpression string, opts ...ScheduleOption) error
+	RemoteScheduleWithCron(ctx context.Context, message any, receiver *address.Address, cronExpression string, opts ...ScheduleOption) error
 	// CancelSchedule cancels a previously scheduled message intended for delivery to a target actor (PID).
 	//
 	// It attempts to locate and cancel the scheduled task associated with the specified message reference.
@@ -536,7 +536,7 @@ type ActorSystem interface {
 	// Returns:
 	//   - response: The response message from the Grain, if successful.
 	//   - error: An error if the request fails, times out, or the system is not started.
-	AskGrain(ctx context.Context, identity *GrainIdentity, message proto.Message, timeout time.Duration) (response proto.Message, err error)
+	AskGrain(ctx context.Context, identity *GrainIdentity, message any, timeout time.Duration) (response any, err error)
 	// TellGrain sends an asynchronous message to a Grain (virtual actor) identified by the given identity.
 	//
 	// This method locates or activates the target Grain (locally or in the cluster) and delivers the provided
@@ -549,7 +549,7 @@ type ActorSystem interface {
 	//
 	// Returns:
 	//   - error: An error if the message could not be delivered or the system is not started.
-	TellGrain(ctx context.Context, identity *GrainIdentity, message proto.Message) error
+	TellGrain(ctx context.Context, identity *GrainIdentity, message any) error
 	// Grains retrieves a list of all active Grains (virtual actors) in the system.
 	//
 	// Grains are virtual actors that are automatically managed by the actor system. This method returns a slice of
@@ -743,9 +743,9 @@ type ActorSystem interface {
 	DeregisterGrainKind(ctx context.Context, kind Grain) error
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
-	handleRemoteAsk(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error)
+	handleRemoteAsk(ctx context.Context, to *PID, message any, timeout time.Duration) (response any, err error)
 	// handleRemoteTell handles an asynchronous message to an actor
-	handleRemoteTell(ctx context.Context, to *PID, message proto.Message) error
+	handleRemoteTell(ctx context.Context, to *PID, message any) error
 	// putActorOnCluster sets actor in the actor system actors registry
 	putActorOnCluster(actor *PID) error
 	// getCluster returns the cluster engine
@@ -1400,7 +1400,7 @@ func (x *actorSystem) Register(_ context.Context, actor Actor) error {
 //   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the scheduled message.
 //   - If no reference is set, an automatic one will be generated internally, which may not be easily retrievable for later operations.
 //   - This function does not provide built-in delivery guarantees such as at-least-once or exactly-once semantics; ensure idempotency where needed.
-func (x *actorSystem) Schedule(_ context.Context, message proto.Message, pid *PID, interval time.Duration, opts ...ScheduleOption) error {
+func (x *actorSystem) Schedule(_ context.Context, message any, pid *PID, interval time.Duration, opts ...ScheduleOption) error {
 	return x.scheduler.Schedule(message, pid, interval, opts...)
 }
 
@@ -1424,7 +1424,7 @@ func (x *actorSystem) Schedule(_ context.Context, message proto.Message, pid *PI
 //   - Remoting must be enabled in the actor system for this method to function correctly.
 //   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the scheduled message.
 //   - If no reference is set, an automatic one will be generated internally, which may not be easily retrievable for later operations.
-func (x *actorSystem) RemoteSchedule(_ context.Context, message proto.Message, receiver *address.Address, interval time.Duration, opts ...ScheduleOption) error {
+func (x *actorSystem) RemoteSchedule(_ context.Context, message any, receiver *address.Address, interval time.Duration, opts ...ScheduleOption) error {
 	return x.scheduler.RemoteSchedule(message, receiver, interval, opts...)
 }
 
@@ -1446,7 +1446,7 @@ func (x *actorSystem) RemoteSchedule(_ context.Context, message proto.Message, r
 // Note:
 //   - It's strongly recommended to set a unique reference ID using WithReference if you intend to cancel, pause, or resume the message later.
 //   - If no reference is set, an automatic one will be generated, which may not be easily retrievable.
-func (x *actorSystem) ScheduleOnce(_ context.Context, message proto.Message, pid *PID, interval time.Duration, opts ...ScheduleOption) error {
+func (x *actorSystem) ScheduleOnce(_ context.Context, message any, pid *PID, interval time.Duration, opts ...ScheduleOption) error {
 	return x.scheduler.ScheduleOnce(message, pid, interval, opts...)
 }
 
@@ -1469,7 +1469,7 @@ func (x *actorSystem) ScheduleOnce(_ context.Context, message proto.Message, pid
 //   - Remoting must be enabled in the actor system for this function to work.
 //   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the message later.
 //   - If no reference is set, an automatic one will be generated internally, which may not be retrievable.
-func (x *actorSystem) RemoteScheduleOnce(_ context.Context, message proto.Message, receiver *address.Address, interval time.Duration, opts ...ScheduleOption) error {
+func (x *actorSystem) RemoteScheduleOnce(_ context.Context, message any, receiver *address.Address, interval time.Duration, opts ...ScheduleOption) error {
 	return x.scheduler.RemoteScheduleOnce(message, receiver, interval, opts...)
 }
 
@@ -1492,7 +1492,7 @@ func (x *actorSystem) RemoteScheduleOnce(_ context.Context, message proto.Messag
 //   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the scheduled message.
 //   - If no reference is set, an automatic one will be generated internally, which may not be easily retrievable for future operations.
 //   - The cron expression must follow the format supported by the scheduler (typically 6 or 5 fields depending on implementation).
-func (x *actorSystem) ScheduleWithCron(_ context.Context, message proto.Message, pid *PID, cronExpression string, opts ...ScheduleOption) error {
+func (x *actorSystem) ScheduleWithCron(_ context.Context, message any, pid *PID, cronExpression string, opts ...ScheduleOption) error {
 	return x.scheduler.ScheduleWithCron(message, pid, cronExpression, opts...)
 }
 
@@ -1517,7 +1517,7 @@ func (x *actorSystem) ScheduleWithCron(_ context.Context, message proto.Message,
 //   - It's strongly recommended to set a unique reference ID using WithReference if you intend to cancel, pause, or resume the scheduled message.
 //   - If no reference is set, an automatic one will be generated internally and may not be easily retrievable.
 //   - The cron expression must conform to the scheduler’s supported format (usually 5 or 6 fields).
-func (x *actorSystem) RemoteScheduleWithCron(_ context.Context, message proto.Message, receiver *address.Address, cronExpression string, opts ...ScheduleOption) error {
+func (x *actorSystem) RemoteScheduleWithCron(_ context.Context, message any, receiver *address.Address, cronExpression string, opts ...ScheduleOption) error {
 	return x.scheduler.RemoteScheduleWithCron(message, receiver, cronExpression, opts...)
 }
 
@@ -2029,7 +2029,7 @@ func (x *actorSystem) validate() error {
 
 // handleRemoteAsk handles a synchronous message to another actor and expect a response.
 // This block until a response is received or timed out.
-func (x *actorSystem) handleRemoteAsk(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error) {
+func (x *actorSystem) handleRemoteAsk(ctx context.Context, to *PID, message any, timeout time.Duration) (response any, err error) {
 	noSender := x.NoSender()
 	receiveContext, err := toReceiveContext(ctx, noSender, to, message, false)
 	if err != nil {
@@ -2066,7 +2066,7 @@ func (x *actorSystem) handleRemoteAsk(ctx context.Context, to *PID, message prot
 }
 
 // handleRemoteTell handles an asynchronous message to an actor
-func (x *actorSystem) handleRemoteTell(ctx context.Context, to *PID, message proto.Message) error {
+func (x *actorSystem) handleRemoteTell(ctx context.Context, to *PID, message any) error {
 	receiveContext, err := toReceiveContext(ctx, x.NoSender(), to, message, true)
 	if err != nil {
 		return err
@@ -2396,6 +2396,9 @@ func (x *actorSystem) cleanupStaleLocalActors(ctx context.Context) error {
 func (x *actorSystem) setupRemoting() error {
 	opts := []remote.RemotingOption{
 		remote.WithRemotingCompression(x.remoteConfig.Compression()),
+		// Register built-in serializers for native actor message types.
+		// These are internal and not visible to application code.
+		remote.WithRemotingSerializers(new(PoisonPill), &poisonPillSerializer{}),
 	}
 
 	if propagator := x.remoteConfig.ContextPropagator(); propagator != nil {
@@ -2674,7 +2677,16 @@ func (x *actorSystem) clusterEventsLoop() {
 			continue
 		}
 
-		message, _ := event.Payload.UnmarshalNew()
+		var message any
+		switch evt := event.Payload.(type) {
+		case *cluster.NodeJoinedEvent:
+			message = NewNodeJoined(evt.Address, evt.Timestamp)
+		case *cluster.NodeLeftEvent:
+			message = NewNodeLeft(evt.Address, evt.Timestamp)
+		default:
+			x.logger.Warnf("Node (%s) received unknown cluster event: %T", x.String(), evt)
+			continue
+		}
 
 		if x.eventsStream != nil {
 			x.logger.Debugf("Node (%s) publishing cluster event=(%s)....", x.String(), event.Type)
@@ -2693,27 +2705,25 @@ func (x *actorSystem) clusterEventsLoop() {
 
 // handleNodeJoinedEvent processes a NodeJoined cluster event.
 func (x *actorSystem) handleNodeJoinedEvent(event *cluster.Event) {
-	nodeJoined := new(goaktpb.NodeJoined)
-	_ = event.Payload.UnmarshalTo(nodeJoined)
+	nodeJoined := event.Payload.(*cluster.NodeJoinedEvent)
 	x.logger.Infof("Node %s detected node joined event: Node (%s)",
 		x.String(),
-		nodeJoined.GetAddress())
+		nodeJoined.Address)
 
 	x.tryOpenGrainActivationBarrier(context.Background())
-	x.resyncAfterClusterEvent("node joined", nodeJoined.GetAddress())
+	x.resyncAfterClusterEvent("node joined", nodeJoined.Address)
 	x.triggerDataCentersReconciliation()
 }
 
 // handleNodeLeftEvent processes a NodeLeft cluster event.
 func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
-	nodeLeft := new(goaktpb.NodeLeft)
-	_ = event.Payload.UnmarshalTo(nodeLeft)
+	nodeLeft := event.Payload.(*cluster.NodeLeftEvent)
 	x.logger.Infof(
 		"Node (%s) detected node left event: Node (%s)",
-		x.String(), nodeLeft.GetAddress(),
+		x.String(), nodeLeft.Address,
 	)
 
-	x.resyncAfterClusterEvent("node left", nodeLeft.GetAddress())
+	x.resyncAfterClusterEvent("node left", nodeLeft.Address)
 	x.triggerDataCentersReconciliation()
 
 	if !x.relocationEnabled.Load() {
@@ -2725,18 +2735,18 @@ func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
 	if x.cluster.IsLeader(ctx) {
 		x.logger.Infof(
 			"Leader (%s) initiating Node (%s)'s state rebalancing",
-			x.String(), nodeLeft.GetAddress(),
+			x.String(), nodeLeft.Address,
 		)
 
-		if !x.rebalancedNodes.Contains(nodeLeft.GetAddress()) {
-			x.rebalancedNodes.Add(nodeLeft.GetAddress())
+		if !x.rebalancedNodes.Contains(nodeLeft.Address) {
+			x.rebalancedNodes.Add(nodeLeft.Address)
 
 			// fetch the peer state of the node that left from the cluster store
 			// and enqueue it for rebalancing
-			peerState, ok := x.clusterStore.GetPeerState(ctx, nodeLeft.GetAddress())
+			peerState, ok := x.clusterStore.GetPeerState(ctx, nodeLeft.Address)
 			if !ok {
 				x.logger.Warnf("Leader (%s) could not find Node (%s)'s state in cluster store",
-					x.String(), nodeLeft.GetAddress())
+					x.String(), nodeLeft.Address)
 				return
 			}
 
@@ -2750,14 +2760,14 @@ func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
 	// clean up the peer state of the node that left from the cluster store
 	x.logger.Debugf(
 		"Node (%s) is not the cluster leader; cleaning up Node (%s) left from state cache",
-		x.String(), nodeLeft.GetAddress(),
+		x.String(), nodeLeft.Address,
 	)
 
-	if err := x.clusterStore.DeletePeerState(ctx, nodeLeft.GetAddress()); err != nil {
-		x.logger.Errorf("Node (%s) failed to remove left Node (%s) from cluster store: %w", x.String(), nodeLeft.GetAddress(), err)
+	if err := x.clusterStore.DeletePeerState(ctx, nodeLeft.Address); err != nil {
+		x.logger.Errorf("Node (%s) failed to remove left Node (%s) from cluster store: %w", x.String(), nodeLeft.Address, err)
 	}
 
-	x.logger.Debugf("Node (%s) successfully cleaned up Node (%s) left from state cache", x.String(), nodeLeft.GetAddress())
+	x.logger.Debugf("Node (%s) successfully cleaned up Node (%s) left from state cache", x.String(), nodeLeft.Address)
 }
 
 // resyncAfterClusterEvent handles resyncing actors and grains after a cluster event.
@@ -3159,7 +3169,7 @@ func (x *actorSystem) getSetDeadlettersCount(ctx context.Context) {
 	var (
 		to      = x.getDeadletter()
 		from    = x.getSystemGuardian()
-		message = new(internalpb.DeadlettersCountRequest)
+		message = new(commands.DeadlettersCountRequest)
 	)
 	if to.IsRunning() {
 		// ask the deadletter actor for the count
@@ -3168,8 +3178,8 @@ func (x *actorSystem) getSetDeadlettersCount(ctx context.Context) {
 		reply, _ := from.Ask(ctx, to, message, DefaultAskTimeout)
 		// Be defensive: if the actor is shutting down or a call was timed out and a late
 		// response got dropped, reply can be nil or an unexpected type.
-		if deadlettersCount, ok := reply.(*internalpb.DeadlettersCountResponse); ok && deadlettersCount != nil {
-			x.deadlettersCounter.Store(uint64(deadlettersCount.GetTotalCount()))
+		if deadlettersCount, ok := reply.(*commands.DeadlettersCountResponse); ok && deadlettersCount != nil {
+			x.deadlettersCounter.Store(uint64(deadlettersCount.TotalCount))
 		}
 	}
 }

@@ -29,9 +29,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/anypb"
-	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
@@ -57,11 +55,7 @@ func TestSystemGuardian(t *testing.T) {
 		require.True(t, deathWatch.IsRunning())
 
 		message, _ := anypb.New(new(testpb.TestSend))
-		err = deathWatch.Tell(ctx, actorSystem.getRootGuardian(), &goaktpb.PanicSignal{
-			Message:   message,
-			Reason:    "test panic signal",
-			Timestamp: timestamppb.Now(),
-		})
+		err = deathWatch.Tell(ctx, actorSystem.getRootGuardian(), NewPanicSignal(message, "test panic signal", time.Now().UTC()))
 
 		require.NoError(t, err)
 
@@ -94,11 +88,11 @@ func TestSystemGuardian(t *testing.T) {
 
 		pause.For(time.Second)
 
-		var items []*goaktpb.Deadletter
+		var items []*Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
 			// only listening to deadletter
-			deadletter, ok := payload.(*goaktpb.Deadletter)
+			deadletter, ok := payload.(*Deadletter)
 			if ok {
 				items = append(items, deadletter)
 			}

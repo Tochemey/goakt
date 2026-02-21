@@ -40,7 +40,6 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/id"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
@@ -142,7 +141,7 @@ func TestGrain(t *testing.T) {
 		require.True(t, identity.Equal(actual))
 
 		// deactivate the grain
-		err = testSystem.TellGrain(ctx, identity, new(goaktpb.PoisonPill))
+		err = testSystem.TellGrain(ctx, identity, new(PoisonPill))
 		require.NoError(t, err)
 
 		require.NoError(t, testSystem.Stop(ctx))
@@ -197,7 +196,7 @@ func TestGrain(t *testing.T) {
 		pause.For(time.Second)
 
 		// let us shutdown the grain by sending PoisonPill
-		err = node3.TellGrain(ctx, identity, new(goaktpb.PoisonPill))
+		err = node3.TellGrain(ctx, identity, new(PoisonPill))
 		require.NoError(t, err)
 
 		pause.For(time.Second)
@@ -235,7 +234,7 @@ func TestGrain(t *testing.T) {
 		require.True(t, gp.isActive())
 
 		// let us shutdown the grain by sending PoisonPill
-		err = node3.TellGrain(ctx, identity, new(goaktpb.PoisonPill))
+		err = node3.TellGrain(ctx, identity, new(PoisonPill))
 		require.NoError(t, err)
 
 		// check if the grain is activated
@@ -407,7 +406,7 @@ func TestGrain(t *testing.T) {
 		require.True(t, gp.isActive())
 
 		// let us shutdown the grain by sending PoisonPill
-		err = testSystem.TellGrain(ctx, identity, new(goaktpb.PoisonPill))
+		err = testSystem.TellGrain(ctx, identity, new(PoisonPill))
 		require.Error(t, err)
 		require.ErrorIs(t, err, gerrors.ErrGrainDeactivationFailure)
 
@@ -772,7 +771,7 @@ func TestGrain(t *testing.T) {
 		require.EqualValues(t, 1000.00, actual.GetAccountBalance())
 
 		// let us shutdown the grain by sending PoisonPill
-		err = testSystem.TellGrain(ctx, identity, new(goaktpb.PoisonPill))
+		err = testSystem.TellGrain(ctx, identity, new(PoisonPill))
 		require.NoError(t, err)
 
 		// check if the grain is activated
@@ -856,7 +855,7 @@ func TestGrain(t *testing.T) {
 		require.True(t, gp.isActive())
 
 		// deactivate the grain
-		err = testSystem.TellGrain(ctx, identity, new(goaktpb.PoisonPill))
+		err = testSystem.TellGrain(ctx, identity, new(PoisonPill))
 		require.NoError(t, err)
 
 		// check if the grain is activated

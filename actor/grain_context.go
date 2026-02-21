@@ -28,11 +28,9 @@ import (
 	"time"
 
 	"go.uber.org/atomic"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/extension"
-	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/future"
 	"github.com/tochemey/goakt/v3/log"
 )
@@ -82,8 +80,8 @@ type GrainContext struct {
 	ctx            context.Context
 	self           *GrainIdentity
 	actorSystem    ActorSystem
-	message        proto.Message
-	response       chan proto.Message
+	message        any
+	response       chan any
 	err            chan error
 	synchronous    bool
 	pid            *grainPID
@@ -126,7 +124,7 @@ func (gctx *GrainContext) ActorSystem() ActorSystem {
 //	        ctx.Unhandled()
 //	    }
 //	}
-func (gctx *GrainContext) Message() proto.Message {
+func (gctx *GrainContext) Message() any {
 	return gctx.message
 }
 
@@ -204,7 +202,7 @@ func (gctx *GrainContext) NoErr() {
 }
 
 // Response sets the message response
-func (gctx *GrainContext) Response(resp proto.Message) {
+func (gctx *GrainContext) Response(resp any) {
 	// For Ask-based replies, guard against late responses after the caller timed out.
 	// This prevents pooled response channels from receiving stale replies that could
 	// be consumed by a later Ask call.
@@ -243,7 +241,7 @@ func (gctx *GrainContext) Response(resp proto.Message) {
 //	}
 func (gctx *GrainContext) Unhandled() {
 	msg := gctx.Message()
-	gctx.err <- errors.NewErrUnhandledMessage(fmt.Errorf("unhandled message type %s", msg.ProtoReflect().Descriptor().FullName()))
+	gctx.err <- errors.NewErrUnhandledMessage(fmt.Errorf("unhandled message type %T", msg))
 }
 
 // AskActor sends a message to another actor by name and waits for a response.
@@ -258,7 +256,7 @@ func (gctx *GrainContext) Unhandled() {
 //	if err != nil {
 //	    // handle error
 //	}
-func (gctx *GrainContext) AskActor(actorName string, message proto.Message, timeout time.Duration) (proto.Message, error) {
+func (gctx *GrainContext) AskActor(actorName string, message any, timeout time.Duration) (any, error) {
 	ctx := context.WithoutCancel(gctx.Context())
 	return gctx.actorSystem.NoSender().SendSync(ctx, actorName, message, timeout)
 }
@@ -274,7 +272,7 @@ func (gctx *GrainContext) AskActor(actorName string, message proto.Message, time
 //	if err != nil {
 //	    // handle error
 //	}
-func (gctx *GrainContext) TellActor(actorName string, message proto.Message) error {
+func (gctx *GrainContext) TellActor(actorName string, message any) error {
 	ctx := context.WithoutCancel(gctx.Context())
 	return gctx.actorSystem.NoSender().SendAsync(ctx, actorName, message)
 }
@@ -291,7 +289,7 @@ func (gctx *GrainContext) TellActor(actorName string, message proto.Message) err
 //	if err != nil {
 //	    // handle error
 //	}
-func (gctx *GrainContext) AskGrain(to *GrainIdentity, message proto.Message, timeout time.Duration) (proto.Message, error) {
+func (gctx *GrainContext) AskGrain(to *GrainIdentity, message any, timeout time.Duration) (any, error) {
 	ctx := context.WithoutCancel(gctx.Context())
 	return gctx.actorSystem.AskGrain(ctx, to, message, timeout)
 }
@@ -307,7 +305,7 @@ func (gctx *GrainContext) AskGrain(to *GrainIdentity, message proto.Message, tim
 //	if err != nil {
 //	    // handle error
 //	}
-func (gctx *GrainContext) TellGrain(to *GrainIdentity, message proto.Message) error {
+func (gctx *GrainContext) TellGrain(to *GrainIdentity, message any) error {
 	ctx := context.WithoutCancel(gctx.Context())
 	return gctx.actorSystem.TellGrain(ctx, to, message)
 }
@@ -324,7 +322,7 @@ func (gctx *GrainContext) TellGrain(to *GrainIdentity, message proto.Message) er
 // Use PipeOptions (e.g., WithTimeout, WithCircuitBreaker) to control execution.
 //
 // Returns an error when the task is nil or the target identity is invalid.
-func (gctx *GrainContext) PipeToGrain(to *GrainIdentity, task func() (proto.Message, error), opts ...PipeOption) error {
+func (gctx *GrainContext) PipeToGrain(to *GrainIdentity, task func() (any, error), opts ...PipeOption) error {
 	if task == nil {
 		return errors.ErrUndefinedTask
 	}
@@ -361,7 +359,7 @@ func (gctx *GrainContext) PipeToGrain(to *GrainIdentity, task func() (proto.Mess
 // the task; communicate results via the returned message instead.
 //
 // Use PipeOptions (e.g., WithTimeout, WithCircuitBreaker) to control execution.
-func (gctx *GrainContext) PipeToActor(actorName string, task func() (proto.Message, error), opts ...PipeOption) error {
+func (gctx *GrainContext) PipeToActor(actorName string, task func() (any, error), opts ...PipeOption) error {
 	ctx := context.WithoutCancel(gctx.Context())
 	return gctx.actorSystem.NoSender().PipeToName(ctx, actorName, task, opts...)
 }
@@ -376,7 +374,7 @@ func (gctx *GrainContext) PipeToActor(actorName string, task func() (proto.Messa
 // the task; communicate results via the returned message instead.
 //
 // Use PipeOptions (e.g., WithTimeout, WithCircuitBreaker) to control execution.
-func (gctx *GrainContext) PipeToSelf(task func() (proto.Message, error), opts ...PipeOption) error {
+func (gctx *GrainContext) PipeToSelf(task func() (any, error), opts ...PipeOption) error {
 	return gctx.PipeToGrain(gctx.Self(), task, opts...)
 }
 
@@ -472,13 +470,13 @@ func (gctx *GrainContext) Extension(extensionID string) extension.Extension {
 }
 
 type grainPipeSystem interface {
-	TellGrain(ctx context.Context, identity *GrainIdentity, message proto.Message) error
+	TellGrain(ctx context.Context, identity *GrainIdentity, message any) error
 	Logger() log.Logger
 }
 
 type grainTaskCompletion struct {
 	Target *GrainIdentity
-	Task   func() (proto.Message, error)
+	Task   func() (any, error)
 }
 
 // handleGrainCompletion processes a long-running task and delivers its result to a Grain.
@@ -494,7 +492,7 @@ func handleGrainCompletion(ctx context.Context, system grainPipeSystem, config *
 	fut := future.New(completion.Task)
 
 	// execute the task, optionally via circuit breaker
-	runTask := func() (proto.Message, error) {
+	runTask := func() (any, error) {
 		if config != nil && config.circuitBreaker != nil {
 			outcome, err := config.circuitBreaker.Execute(ctx, func(ctx context.Context) (any, error) {
 				return fut.Await(ctx)
@@ -504,14 +502,14 @@ func handleGrainCompletion(ctx context.Context, system grainPipeSystem, config *
 			}
 			// no need to check the type since the future.Await returns proto.Message
 			// if there is no error
-			return outcome.(proto.Message), nil
+			return outcome, nil
 		}
 		return fut.Await(ctx)
 	}
 
 	result, err := runTask()
 	if err != nil {
-		failure := &goaktpb.StatusFailure{Error: err.Error()}
+		failure := NewStatusFailure(err.Error(), nil)
 		if sendErr := system.TellGrain(ctx, completion.Target, failure); sendErr != nil {
 			system.Logger().Error(sendErr)
 			return sendErr
@@ -528,7 +526,7 @@ func handleGrainCompletion(ctx context.Context, system grainPipeSystem, config *
 }
 
 // build sets the necessary fields of GrainContext.
-func (gctx *GrainContext) build(ctx context.Context, pid *grainPID, actorSystem ActorSystem, to *GrainIdentity, message proto.Message, synchronous bool) *GrainContext {
+func (gctx *GrainContext) build(ctx context.Context, pid *grainPID, actorSystem ActorSystem, to *GrainIdentity, message any, synchronous bool) *GrainContext {
 	gctx.self = to
 	gctx.message = message
 	gctx.ctx = ctx

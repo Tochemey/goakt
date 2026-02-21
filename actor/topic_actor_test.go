@@ -29,10 +29,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/types/known/anypb"
 
 	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
@@ -75,7 +73,7 @@ func TestTopicActor(t *testing.T) {
 
 		topic := "test-topic"
 		// subscribe to the topic
-		err = actor1.Tell(ctx, cl1.TopicActor(), &goaktpb.Subscribe{Topic: topic})
+		err = actor1.Tell(ctx, cl1.TopicActor(), NewSubscribe(topic))
 		require.NoError(t, err)
 
 		pause.For(time.Second)
@@ -83,7 +81,7 @@ func TestTopicActor(t *testing.T) {
 		// make sure we receive the subscribe ack message
 		require.EqualValues(t, 1, actor1.Metric(ctx).ProcessedCount())
 
-		err = actor2.Tell(ctx, cl2.TopicActor(), &goaktpb.Subscribe{Topic: topic})
+		err = actor2.Tell(ctx, cl2.TopicActor(), NewSubscribe(topic))
 		require.NoError(t, err)
 
 		pause.For(time.Second)
@@ -91,7 +89,7 @@ func TestTopicActor(t *testing.T) {
 		// make sure we receive the subscribe ack message
 		require.EqualValues(t, 1, actor2.Metric(ctx).ProcessedCount())
 
-		err = actor3.Tell(ctx, cl3.TopicActor(), &goaktpb.Subscribe{Topic: topic})
+		err = actor3.Tell(ctx, cl3.TopicActor(), NewSubscribe(topic))
 		require.NoError(t, err)
 
 		pause.For(time.Second)
@@ -100,7 +98,7 @@ func TestTopicActor(t *testing.T) {
 		require.EqualValues(t, 1, actor3.Metric(ctx).ProcessedCount())
 
 		// subscribe to the topic
-		err = actor1.Tell(ctx, cl1.TopicActor(), &goaktpb.Unsubscribe{Topic: topic})
+		err = actor1.Tell(ctx, cl1.TopicActor(), NewUnsubscribe(topic))
 		require.NoError(t, err)
 
 		pause.For(time.Second)
@@ -153,7 +151,7 @@ func TestTopicActor(t *testing.T) {
 
 		topic := "test-topic"
 		// subscribe to the topic
-		err = actor1.Tell(ctx, cl1.TopicActor(), &goaktpb.Subscribe{Topic: topic})
+		err = actor1.Tell(ctx, cl1.TopicActor(), NewSubscribe(topic))
 		require.NoError(t, err)
 
 		pause.For(time.Second)
@@ -162,7 +160,7 @@ func TestTopicActor(t *testing.T) {
 		require.EqualValues(t, 1, actor1.Metric(ctx).ProcessedCount())
 		require.EqualValues(t, 1, actor1.Actor().(*MockSubscriber).counter.Load())
 
-		err = actor2.Tell(ctx, cl2.TopicActor(), &goaktpb.Subscribe{Topic: topic})
+		err = actor2.Tell(ctx, cl2.TopicActor(), NewSubscribe(topic))
 		require.NoError(t, err)
 
 		pause.For(time.Second)
@@ -171,7 +169,7 @@ func TestTopicActor(t *testing.T) {
 		require.EqualValues(t, 1, actor2.Metric(ctx).ProcessedCount())
 		require.EqualValues(t, 1, actor2.Actor().(*MockSubscriber).counter.Load())
 
-		err = actor3.Tell(ctx, cl3.TopicActor(), &goaktpb.Subscribe{Topic: topic})
+		err = actor3.Tell(ctx, cl3.TopicActor(), NewSubscribe(topic))
 		require.NoError(t, err)
 
 		pause.For(time.Second)
@@ -180,9 +178,6 @@ func TestTopicActor(t *testing.T) {
 		require.EqualValues(t, 1, actor3.Metric(ctx).ProcessedCount())
 		require.EqualValues(t, 1, actor3.Actor().(*MockSubscriber).counter.Load())
 
-		actual := new(testpb.TestCount)
-		transformed, _ := anypb.New(actual)
-
 		// publish a message
 		publisher, err := cl1.Spawn(ctx, "publisher", NewMockSubscriber())
 		require.NoError(t, err)
@@ -190,11 +185,7 @@ func TestTopicActor(t *testing.T) {
 
 		pause.For(time.Second)
 
-		message := &goaktpb.Publish{
-			Id:      "messsage1",
-			Topic:   topic,
-			Message: transformed,
-		}
+		message := NewPublish("messsage1", topic, new(testpb.TestCount))
 		err = publisher.Tell(ctx, cl1.TopicActor(), message)
 		require.NoError(t, err)
 
@@ -249,11 +240,11 @@ func TestTopicActor(t *testing.T) {
 
 		pause.For(time.Second)
 
-		var items []*goaktpb.Deadletter
+		var items []*Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
 			// only listening to deadletter
-			deadletter, ok := payload.(*goaktpb.Deadletter)
+			deadletter, ok := payload.(*Deadletter)
 			if ok {
 				items = append(items, deadletter)
 			}
@@ -300,7 +291,7 @@ func TestTopicActor(t *testing.T) {
 		topic := "test-topic"
 
 		// let the various actors subscribe to the topic
-		err = actor1.Tell(ctx, actorSystem.TopicActor(), &goaktpb.Subscribe{Topic: topic})
+		err = actor1.Tell(ctx, actorSystem.TopicActor(), NewSubscribe(topic))
 		require.NoError(t, err)
 		pause.For(500 * time.Millisecond)
 
@@ -308,7 +299,7 @@ func TestTopicActor(t *testing.T) {
 		require.EqualValues(t, 1, actor1.Metric(ctx).ProcessedCount())
 		require.EqualValues(t, 1, actor1.Actor().(*MockSubscriber).counter.Load())
 
-		err = actor2.Tell(ctx, actorSystem.TopicActor(), &goaktpb.Subscribe{Topic: topic})
+		err = actor2.Tell(ctx, actorSystem.TopicActor(), NewSubscribe(topic))
 		require.NoError(t, err)
 		pause.For(500 * time.Millisecond)
 
@@ -316,7 +307,7 @@ func TestTopicActor(t *testing.T) {
 		require.EqualValues(t, 1, actor2.Metric(ctx).ProcessedCount())
 		require.EqualValues(t, 1, actor2.Actor().(*MockSubscriber).counter.Load())
 
-		err = actor3.Tell(ctx, actorSystem.TopicActor(), &goaktpb.Subscribe{Topic: topic})
+		err = actor3.Tell(ctx, actorSystem.TopicActor(), NewSubscribe(topic))
 		require.NoError(t, err)
 		pause.For(500 * time.Millisecond)
 
@@ -332,13 +323,7 @@ func TestTopicActor(t *testing.T) {
 		pause.For(time.Second)
 
 		// publish a message
-		actual := new(testpb.TestCount)
-		transformed, _ := anypb.New(actual)
-		message := &goaktpb.Publish{
-			Id:      "messsage1",
-			Topic:   topic,
-			Message: transformed,
-		}
+		message := NewPublish("messsage1", topic, new(testpb.TestCount))
 		err = publisher.Tell(ctx, actorSystem.TopicActor(), message)
 		require.NoError(t, err)
 
@@ -385,7 +370,7 @@ func TestTopicActor(t *testing.T) {
 		topic := "test-topic"
 
 		// let the various actors subscribe to the topic
-		err = actor1.Tell(ctx, actorSystem.TopicActor(), &goaktpb.Subscribe{Topic: topic})
+		err = actor1.Tell(ctx, actorSystem.TopicActor(), NewSubscribe(topic))
 		require.NoError(t, err)
 		pause.For(500 * time.Millisecond)
 
@@ -393,7 +378,7 @@ func TestTopicActor(t *testing.T) {
 		require.EqualValues(t, 1, actor1.Metric(ctx).ProcessedCount())
 		require.EqualValues(t, 1, actor1.Actor().(*MockSubscriber).counter.Load())
 
-		err = actor2.Tell(ctx, actorSystem.TopicActor(), &goaktpb.Subscribe{Topic: topic})
+		err = actor2.Tell(ctx, actorSystem.TopicActor(), NewSubscribe(topic))
 		require.NoError(t, err)
 		pause.For(500 * time.Millisecond)
 
@@ -401,7 +386,7 @@ func TestTopicActor(t *testing.T) {
 		require.EqualValues(t, 1, actor2.Metric(ctx).ProcessedCount())
 		require.EqualValues(t, 1, actor2.Actor().(*MockSubscriber).counter.Load())
 
-		err = actor3.Tell(ctx, actorSystem.TopicActor(), &goaktpb.Subscribe{Topic: topic})
+		err = actor3.Tell(ctx, actorSystem.TopicActor(), NewSubscribe(topic))
 		require.NoError(t, err)
 		pause.For(500 * time.Millisecond)
 
@@ -410,13 +395,7 @@ func TestTopicActor(t *testing.T) {
 		require.EqualValues(t, 1, actor3.Actor().(*MockSubscriber).counter.Load())
 
 		// publish a message without a sender
-		actual := new(testpb.TestCount)
-		transformed, _ := anypb.New(actual)
-		message := &goaktpb.Publish{
-			Id:      "messsage1",
-			Topic:   topic,
-			Message: transformed,
-		}
+		message := NewPublish("messsage1", topic, new(testpb.TestCount))
 		err = Tell(ctx, actorSystem.TopicActor(), message) // no sender
 		require.NoError(t, err)
 
@@ -462,7 +441,7 @@ func TestTopicActor(t *testing.T) {
 		topic := "test-topic"
 
 		// let the various actors subscribe to the topic
-		err = actor1.Tell(ctx, actorSystem.TopicActor(), &goaktpb.Subscribe{Topic: topic})
+		err = actor1.Tell(ctx, actorSystem.TopicActor(), NewSubscribe(topic))
 		require.NoError(t, err)
 		pause.For(500 * time.Millisecond)
 
@@ -470,7 +449,7 @@ func TestTopicActor(t *testing.T) {
 		require.EqualValues(t, 1, actor1.Metric(ctx).ProcessedCount())
 		require.EqualValues(t, 1, actor1.Actor().(*MockSubscriber).counter.Load())
 
-		err = actor2.Tell(ctx, actorSystem.TopicActor(), &goaktpb.Subscribe{Topic: topic})
+		err = actor2.Tell(ctx, actorSystem.TopicActor(), NewSubscribe(topic))
 		require.NoError(t, err)
 		pause.For(500 * time.Millisecond)
 
@@ -478,7 +457,7 @@ func TestTopicActor(t *testing.T) {
 		require.EqualValues(t, 1, actor2.Metric(ctx).ProcessedCount())
 		require.EqualValues(t, 1, actor2.Actor().(*MockSubscriber).counter.Load())
 
-		err = actor3.Tell(ctx, actorSystem.TopicActor(), &goaktpb.Subscribe{Topic: topic})
+		err = actor3.Tell(ctx, actorSystem.TopicActor(), NewSubscribe(topic))
 		require.NoError(t, err)
 		pause.For(500 * time.Millisecond)
 
@@ -494,13 +473,7 @@ func TestTopicActor(t *testing.T) {
 		pause.For(time.Second)
 
 		// publish a message
-		actual := new(testpb.TestCount)
-		transformed, _ := anypb.New(actual)
-		message := &goaktpb.Publish{
-			Id:      "messsage1",
-			Topic:   topic,
-			Message: transformed,
-		}
+		message := NewPublish("messsage1", topic, new(testpb.TestCount))
 		err = publisher.Tell(ctx, actorSystem.TopicActor(), message)
 		require.NoError(t, err)
 

@@ -30,10 +30,7 @@ import (
 	"syscall"
 	"time"
 
-	"google.golang.org/protobuf/proto"
-
 	"github.com/tochemey/goakt/v3/actor"
-	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/reentrancy"
 	"github.com/tochemey/goakt/v3/test/data/testpb"
@@ -108,7 +105,7 @@ func (c *Client) PreStart(*actor.Context) error { return nil }
 
 func (c *Client) Receive(ctx *actor.ReceiveContext) {
 	switch msg := ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *actor.PostStart:
 		ctx.Tell(c.target, new(testpb.TestPing))
 	case *testpb.TestCount:
 		fmt.Printf("Client received count=%d\n", msg.GetValue())
@@ -142,7 +139,7 @@ func (a *ActorA) Receive(ctx *actor.ReceiveContext) {
 			fmt.Println("ActorA request failed")
 			return
 		}
-		call.Then(func(resp proto.Message, err error) {
+		call.Then(func(resp any, err error) {
 			// Then runs without a ReceiveContext; log or message yourself to record errors.
 			if err != nil {
 				fmt.Printf("ActorA request error: %v\n", err)

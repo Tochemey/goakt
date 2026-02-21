@@ -37,7 +37,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/tochemey/goakt/v3/address"
@@ -1058,7 +1057,7 @@ func TestRelocationWithExtension(t *testing.T) {
 	require.NotNil(t, sender)
 
 	// let us access some of the node2 actors from node 1
-	var response proto.Message
+	var response any
 	response, err = sender.SendSync(ctx, entityID, new(testpb.GetAccount), time.Minute)
 	require.NoError(t, err)
 	account, ok := response.(*testpb.Account)

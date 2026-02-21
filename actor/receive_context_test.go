@@ -35,7 +35,6 @@ import (
 
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/remote"
@@ -68,35 +67,45 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, success)
 		expected = &testpb.TestLoginSuccess{}
-		require.True(t, proto.Equal(expected, success))
+		actual, ok := success.(*testpb.TestLoginSuccess)
+		require.True(t, ok)
+		require.True(t, proto.Equal(expected, actual))
 
 		// ask for readiness
 		ready, err := Ask(ctx, pid, new(testpb.TestReadiness), replyTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, ready)
 		expected = &testpb.TestReady{}
-		require.True(t, proto.Equal(expected, ready))
+		actualReady, ok := ready.(*testpb.TestReady)
+		require.True(t, ok)
+		require.True(t, proto.Equal(expected, actualReady))
 
 		// send a message to create account
 		created, err := Ask(ctx, pid, new(testpb.CreateAccount), replyTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, created)
 		expected = &testpb.AccountCreated{}
-		require.True(t, proto.Equal(expected, created))
+		actualCreated, ok := created.(*testpb.AccountCreated)
+		require.True(t, ok)
+		require.True(t, proto.Equal(expected, actualCreated))
 
 		// credit account
 		credited, err := Ask(ctx, pid, new(testpb.CreditAccount), replyTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, credited)
 		expected = &testpb.AccountCredited{}
-		require.True(t, proto.Equal(expected, credited))
+		actualCredited, ok := credited.(*testpb.AccountCredited)
+		require.True(t, ok)
+		require.True(t, proto.Equal(expected, actualCredited))
 
 		// debit account
 		debited, err := Ask(ctx, pid, new(testpb.DebitAccount), replyTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, debited)
 		expected = &testpb.AccountDebited{}
-		require.True(t, proto.Equal(expected, debited))
+		actualDebited, ok := debited.(*testpb.AccountDebited)
+		require.True(t, ok)
+		require.True(t, proto.Equal(expected, actualDebited))
 
 		// send bye
 		err = Tell(ctx, pid, new(testpb.TestBye))
@@ -222,7 +231,9 @@ func TestReceiveContext(t *testing.T) {
 		reply := context.Ask(pid2, new(testpb.TestReply), time.Minute)
 		require.NotNil(t, reply)
 		expected := new(testpb.Reply)
-		assert.True(t, proto.Equal(expected, reply))
+		actual, ok := reply.(*testpb.Reply)
+		require.True(t, ok)
+		assert.True(t, proto.Equal(expected, actual))
 
 		pause.For(time.Second)
 		assert.NoError(t, actorSystem.Stop(ctx))
@@ -318,7 +329,10 @@ func TestReceiveContext(t *testing.T) {
 		reply := context.RemoteAsk(addr1, new(testpb.TestReply), time.Minute)
 		// perform some assertions
 		require.NotNil(t, reply)
-		require.True(t, reply.MessageIs(new(testpb.Reply)))
+		actual, ok := reply.(*testpb.Reply)
+		require.True(t, ok)
+		expected := new(testpb.Reply)
+		assert.True(t, proto.Equal(expected, actual))
 
 		pause.For(time.Second)
 
@@ -1210,11 +1224,11 @@ func TestReceiveContext(t *testing.T) {
 		// wait for messages to be published
 		pause.For(time.Second)
 
-		var items []*goaktpb.Deadletter
+		var items []*Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
 			assert.Equal(t, eventsTopic, message.Topic())
-			deadletter, ok := payload.(*goaktpb.Deadletter)
+			deadletter, ok := payload.(*Deadletter)
 			if ok {
 				items = append(items, deadletter)
 			}
@@ -1223,12 +1237,15 @@ func TestReceiveContext(t *testing.T) {
 		noSender := actorSystem.NoSender()
 		require.Len(t, items, 1)
 		deadletter := items[0]
-		msg := deadletter.GetMessage()
+		msg := deadletter.Message()
 		actual := new(testpb.TestSend)
-		require.NoError(t, msg.UnmarshalTo(actual))
+		actualMsg, ok := msg.(*testpb.TestSend)
+		require.True(t, ok)
+
+		require.True(t, proto.Equal(send, actualMsg))
 		require.True(t, proto.Equal(send, actual))
-		require.Equal(t, deadletter.GetReason(), errors.ErrUnhandled.Error())
-		addr := deadletter.GetSender()
+		require.Equal(t, deadletter.Reason(), errors.ErrUnhandled.Error())
+		addr := deadletter.Sender()
 		parsed, err := address.Parse(addr)
 		require.NoError(t, err)
 		require.True(t, noSender.Address().Equals(parsed))
@@ -1287,10 +1304,10 @@ func TestReceiveContext(t *testing.T) {
 		// wait for messages to be published
 		pause.For(time.Second)
 
-		var items []*goaktpb.Deadletter
+		var items []*Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
-			deadletter, ok := payload.(*goaktpb.Deadletter)
+			deadletter, ok := payload.(*Deadletter)
 			if ok {
 				items = append(items, deadletter)
 			}
@@ -1298,12 +1315,13 @@ func TestReceiveContext(t *testing.T) {
 
 		require.Len(t, items, 1)
 		deadletter := items[0]
-		msg := deadletter.GetMessage()
+		msg := deadletter.Message()
+		actualMsg, ok := msg.(*testpb.TestSend)
+		require.True(t, ok)
 		actual := new(testpb.TestSend)
-		require.NoError(t, msg.UnmarshalTo(actual))
-		require.True(t, proto.Equal(send, actual))
-		require.Equal(t, deadletter.GetReason(), errors.ErrUnhandled.Error())
-		assert.Equal(t, deadletter.GetSender(), pid2.Address().String())
+		require.True(t, proto.Equal(actual, actualMsg))
+		require.Equal(t, deadletter.Reason(), errors.ErrUnhandled.Error())
+		assert.Equal(t, deadletter.Sender(), pid2.Address().String())
 
 		assert.EqualValues(t, 1, len(consumer.Topics()))
 
@@ -1340,7 +1358,7 @@ func TestReceiveContext(t *testing.T) {
 		// create an instance of receive context
 		context := &ReceiveContext{
 			ctx:     ctx,
-			message: new(goaktpb.PostStart),
+			message: new(PostStart),
 			sender:  actorSystem.NoSender(),
 			self:    pid1,
 		}
@@ -1351,11 +1369,11 @@ func TestReceiveContext(t *testing.T) {
 		// wait for messages to be published
 		pause.For(time.Second)
 
-		var items []*goaktpb.Deadletter
+		var items []*Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
 			assert.Equal(t, eventsTopic, message.Topic())
-			deadletter, ok := payload.(*goaktpb.Deadletter)
+			deadletter, ok := payload.(*Deadletter)
 			if ok {
 				items = append(items, deadletter)
 			}
@@ -1534,12 +1552,14 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
-		replies := context.BatchAsk(pid2, []proto.Message{new(testpb.TestReply), new(testpb.TestReply)}, time.Minute)
+		replies := context.BatchAsk(pid2, []any{new(testpb.TestReply), new(testpb.TestReply)}, time.Minute)
 		require.NotNil(t, replies)
 		require.Len(t, replies, 2)
 		for reply := range replies {
 			expected := new(testpb.Reply)
-			assert.True(t, proto.Equal(expected, reply))
+			actual, ok := reply.(*testpb.Reply)
+			require.True(t, ok)
+			assert.True(t, proto.Equal(expected, actual))
 		}
 
 		pause.For(time.Second)
@@ -1585,7 +1605,7 @@ func TestReceiveContext(t *testing.T) {
 		pause.For(time.Second)
 		assert.NoError(t, pid2.Shutdown(ctx))
 
-		context.BatchAsk(pid2, []proto.Message{new(testpb.TestReply), new(testpb.TestReply)}, time.Minute)
+		context.BatchAsk(pid2, []any{new(testpb.TestReply), new(testpb.TestReply)}, time.Minute)
 		require.Error(t, context.getError())
 
 		pause.For(time.Second)
@@ -1632,7 +1652,7 @@ func TestReceiveContext(t *testing.T) {
 		// get the address of the exchanger actor one
 		testerAddr := context.RemoteLookup(host, remotingPort, tester)
 		// send the message to t exchanger actor one using remote messaging
-		messages := []proto.Message{new(testpb.TestSend), new(testpb.TestSend), new(testpb.TestSend)}
+		messages := []any{new(testpb.TestSend), new(testpb.TestSend), new(testpb.TestSend)}
 		context.RemoteBatchTell(testerAddr, messages)
 		require.NoError(t, context.getError())
 		// wait for processing to complete on the actor side
@@ -1688,7 +1708,7 @@ func TestReceiveContext(t *testing.T) {
 		// get the address of the exchanger actor one
 		testerAddr := context.RemoteLookup(host, remotingPort, tester)
 		// send the message to t exchanger actor one using remote messaging
-		messages := []proto.Message{new(testpb.TestReply), new(testpb.TestReply), new(testpb.TestReply)}
+		messages := []any{new(testpb.TestReply), new(testpb.TestReply), new(testpb.TestReply)}
 		replies := context.RemoteBatchAsk(testerAddr, messages, time.Minute)
 		require.NoError(t, context.getError())
 		require.Len(t, replies, 3)
@@ -1742,7 +1762,7 @@ func TestReceiveContext(t *testing.T) {
 		// get the address of the exchanger actor one
 		testerAddr := context.RemoteLookup(host, remotingPort, tester)
 		// send the message to t exchanger actor one using remote messaging
-		messages := []proto.Message{new(testpb.TestReply), new(testpb.TestReply), new(testpb.TestReply)}
+		messages := []any{new(testpb.TestReply), new(testpb.TestReply), new(testpb.TestReply)}
 		replies := context.RemoteBatchAsk(testerAddr, messages, time.Minute)
 		err = context.getError()
 		require.Error(t, err)
@@ -1799,7 +1819,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// send the message to the exchanger actor one using remote messaging
 		addr := address.New(actorName2, sys.Name(), "127.0.0.1", remotingPort)
-		context.RemoteBatchTell(addr, []proto.Message{new(testpb.TestRemoteSend)})
+		context.RemoteBatchTell(addr, []any{new(testpb.TestRemoteSend)})
 		require.Error(t, context.getError())
 		pause.For(time.Second)
 
@@ -1853,7 +1873,7 @@ func TestReceiveContext(t *testing.T) {
 		testerRef.remoting = nil
 
 		// send the message to t exchanger actor one using remote messaging
-		messages := []proto.Message{new(testpb.TestSend), new(testpb.TestSend), new(testpb.TestSend)}
+		messages := []any{new(testpb.TestSend), new(testpb.TestSend), new(testpb.TestSend)}
 		context.RemoteBatchTell(testerAddr, messages)
 		err = context.getError()
 		require.Error(t, err)
@@ -1909,7 +1929,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		addr := address.New(actorName2, sys.Name(), "127.0.0.1", remotingPort)
-		context.RemoteBatchAsk(addr, []proto.Message{new(testpb.TestReply)}, time.Minute)
+		context.RemoteBatchAsk(addr, []any{new(testpb.TestReply)}, time.Minute)
 		require.Error(t, context.getError())
 		pause.For(time.Second)
 
@@ -2064,7 +2084,7 @@ func TestReceiveContext(t *testing.T) {
 			self:    pid1,
 		}
 
-		task := func() (proto.Message, error) {
+		task := func() (any, error) {
 			// simulate a long-running task
 			pause.For(500 * time.Millisecond)
 			return new(testpb.TaskComplete), nil
@@ -2178,7 +2198,7 @@ func TestReceiveContext(t *testing.T) {
 		require.Zero(t, pid1.ProcessedCount()-1)
 		require.Zero(t, pid2.ProcessedCount()-1)
 
-		task := func() (proto.Message, error) {
+		task := func() (any, error) {
 			// simulate a long-running task
 			pause.For(500 * time.Millisecond)
 			return nil, assert.AnError
@@ -2196,11 +2216,11 @@ func TestReceiveContext(t *testing.T) {
 
 		pause.For(time.Second)
 
-		var items []*goaktpb.Deadletter
+		var items []*Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
 			// only listening to deadletter
-			deadletter, ok := payload.(*goaktpb.Deadletter)
+			deadletter, ok := payload.(*Deadletter)
 			if ok {
 				items = append(items, deadletter)
 			}
@@ -2326,7 +2346,9 @@ func TestReceiveContext(t *testing.T) {
 		reply := context.SendSync(pid2.Name(), new(testpb.TestReply), time.Minute)
 		require.NotNil(t, reply)
 		expected := new(testpb.Reply)
-		assert.True(t, proto.Equal(expected, reply))
+		actual, ok := reply.(*testpb.Reply)
+		require.True(t, ok)
+		assert.True(t, proto.Equal(expected, actual))
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With failed SendSync", func(t *testing.T) {
@@ -3065,7 +3087,7 @@ func TestReceiveContext(t *testing.T) {
 			self:    pid1,
 		}
 
-		task := func() (proto.Message, error) {
+		task := func() (any, error) {
 			// simulate a long-running task
 			pause.For(500 * time.Millisecond)
 			return new(testpb.TaskComplete), nil
@@ -3179,7 +3201,7 @@ func TestReceiveContext(t *testing.T) {
 		require.Zero(t, pid1.ProcessedCount()-1)
 		require.Zero(t, pid2.ProcessedCount()-1)
 
-		task := func() (proto.Message, error) {
+		task := func() (any, error) {
 			// simulate a long-running task
 			pause.For(500 * time.Millisecond)
 			return nil, assert.AnError
@@ -3197,11 +3219,11 @@ func TestReceiveContext(t *testing.T) {
 
 		pause.For(time.Second)
 
-		var items []*goaktpb.Deadletter
+		var items []*Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
 			// only listening to deadletter
-			deadletter, ok := payload.(*goaktpb.Deadletter)
+			deadletter, ok := payload.(*Deadletter)
 			if ok {
 				items = append(items, deadletter)
 			}

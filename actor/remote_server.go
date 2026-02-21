@@ -33,7 +33,6 @@ import (
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
-	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/tochemey/goakt/v3/address"
 	gerrors "github.com/tochemey/goakt/v3/errors"
@@ -161,7 +160,7 @@ func (x *actorSystem) remoteAskHandler(ctx context.Context, conn inet.Connection
 		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
 	}
 
-	responses := make([]*anypb.Any, 0, len(request.GetRemoteMessages()))
+	responses := make([][]byte, 0, len(request.GetRemoteMessages()))
 	for _, message := range request.GetRemoteMessages() {
 		receiver := message.GetReceiver()
 		addr, err := address.Parse(receiver)
@@ -198,7 +197,10 @@ func (x *actorSystem) remoteAskHandler(ctx context.Context, conn inet.Connection
 			return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
 		}
 
-		marshaled, _ := anypb.New(reply)
+		marshaled, err := x.remoting.Serializer(reply).Serialize(reply)
+		if err != nil {
+			return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
+		}
 		responses = append(responses, marshaled)
 	}
 
@@ -526,7 +528,12 @@ func (x *actorSystem) remoteAskGrainHandler(ctx context.Context, conn inet.Conne
 		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
 	}
 
-	message, _ := request.GetMessage().UnmarshalNew()
+	serializer := x.remoting.Serializer(nil)
+	message, err := serializer.Deserialize(request.GetMessage())
+	if err != nil {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
+	}
+
 	timeout := request.GetRequestTimeout()
 
 	identity, err := toIdentity(request.GetGrain().GetGrainId().GetValue())
@@ -547,7 +554,10 @@ func (x *actorSystem) remoteAskGrainHandler(ctx context.Context, conn inet.Conne
 		return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
 	}
 
-	response, _ := anypb.New(reply)
+	response, err := x.remoting.Serializer(reply).Serialize(reply)
+	if err != nil {
+		return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
+	}
 	return &internalpb.RemoteAskGrainResponse{Message: response}, nil
 }
 
@@ -579,7 +589,11 @@ func (x *actorSystem) remoteTellGrainHandler(ctx context.Context, conn inet.Conn
 		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
 	}
 
-	message, _ := request.GetMessage().UnmarshalNew()
+	serializer := x.remoting.Serializer(nil)
+	message, err := serializer.Deserialize(request.GetMessage())
+	if err != nil {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
+	}
 
 	identity, err := toIdentity(request.GetGrain().GetGrainId().GetValue())
 	if err != nil {

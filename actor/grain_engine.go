@@ -35,7 +35,6 @@ import (
 	goset "github.com/deckarep/golang-set/v2"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/tochemey/goakt/v3/datacenter"
@@ -180,7 +179,7 @@ func (x *actorSystem) GrainIdentity(ctx context.Context, name string, factory Gr
 //
 // Returns:
 //   - error: An error if the message could not be delivered or the system is not started.
-func (x *actorSystem) TellGrain(ctx context.Context, identity *GrainIdentity, message proto.Message) error {
+func (x *actorSystem) TellGrain(ctx context.Context, identity *GrainIdentity, message any) error {
 	if !x.started.Load() || x.isStopping() {
 		return gerrors.ErrActorSystemNotStarted
 	}
@@ -212,7 +211,7 @@ func (x *actorSystem) TellGrain(ctx context.Context, identity *GrainIdentity, me
 // Returns:
 //   - response: The response message from the Grain, if successful.
 //   - error: An error if the request fails, times out, or the system is not started.
-func (x *actorSystem) AskGrain(ctx context.Context, identity *GrainIdentity, message proto.Message, timeout time.Duration) (response proto.Message, err error) {
+func (x *actorSystem) AskGrain(ctx context.Context, identity *GrainIdentity, message any, timeout time.Duration) (response any, err error) {
 	if !x.started.Load() || x.isStopping() {
 		return nil, gerrors.ErrActorSystemNotStarted
 	}
@@ -460,7 +459,7 @@ func (x *actorSystem) sendRemoteActivateGrain(ctx context.Context, grain *intern
 //
 // Returns:
 //   - error: error if the request fails.
-func (x *actorSystem) remoteTellGrain(ctx context.Context, id *GrainIdentity, message proto.Message, timeout time.Duration) error {
+func (x *actorSystem) remoteTellGrain(ctx context.Context, id *GrainIdentity, message any, timeout time.Duration) error {
 	// Try local cluster first
 	grain, err := x.getCluster().GetGrain(ctx, id.String())
 	if err == nil {
@@ -495,7 +494,7 @@ func (x *actorSystem) remoteTellGrain(ctx context.Context, id *GrainIdentity, me
 // Returns:
 //   - proto.Message: the response from the Grain.
 //   - error: error if the request fails.
-func (x *actorSystem) remoteAskGrain(ctx context.Context, id *GrainIdentity, message proto.Message, timeout time.Duration) (proto.Message, error) {
+func (x *actorSystem) remoteAskGrain(ctx context.Context, id *GrainIdentity, message any, timeout time.Duration) (any, error) {
 	// Try local cluster first
 	grain, err := x.getCluster().GetGrain(ctx, id.String())
 	if err == nil {
@@ -531,7 +530,7 @@ func (x *actorSystem) remoteAskGrain(ctx context.Context, id *GrainIdentity, mes
 // Returns:
 //   - proto.Message: the response from the Grain (if synchronous).
 //   - error: error if the request fails.
-func (x *actorSystem) localSend(ctx context.Context, id *GrainIdentity, message proto.Message, timeout time.Duration, synchronous bool) (proto.Message, error) {
+func (x *actorSystem) localSend(ctx context.Context, id *GrainIdentity, message any, timeout time.Duration, synchronous bool) (any, error) {
 	// Ensure the grain process exists and is activated if needed.
 	pid, err := x.ensureGrainProcess(ctx, id)
 	if err != nil {
@@ -615,7 +614,7 @@ func (x *actorSystem) localSend(ctx context.Context, id *GrainIdentity, message 
 //
 // Returns:
 //   - error: nil if message was sent successfully, error otherwise
-func (x *actorSystem) tellGrainAcrossDataCenters(ctx context.Context, id *GrainIdentity, message proto.Message, timeout time.Duration) error {
+func (x *actorSystem) tellGrainAcrossDataCenters(ctx context.Context, id *GrainIdentity, message any, timeout time.Duration) error {
 	dcController := x.getDataCenterController()
 	if dcController == nil {
 		return gerrors.ErrActorNotFound
@@ -730,7 +729,7 @@ func (x *actorSystem) tellGrainAcrossDataCenters(ctx context.Context, id *GrainI
 // Returns:
 //   - proto.Message: The response from the Grain if found
 //   - error: nil if successful, ErrActorNotFound if grain not found in any DC
-func (x *actorSystem) askGrainAcrossDataCenters(ctx context.Context, id *GrainIdentity, message proto.Message, timeout time.Duration) (proto.Message, error) {
+func (x *actorSystem) askGrainAcrossDataCenters(ctx context.Context, id *GrainIdentity, message any, timeout time.Duration) (any, error) {
 	dcController := x.getDataCenterController()
 	if dcController == nil {
 		return nil, gerrors.ErrActorNotFound
@@ -776,7 +775,7 @@ func (x *actorSystem) askGrainAcrossDataCenters(ctx context.Context, id *GrainId
 	defer cancel()
 
 	type result struct {
-		resp *anypb.Any
+		resp any
 		err  error
 	}
 
@@ -825,7 +824,7 @@ func (x *actorSystem) askGrainAcrossDataCenters(ctx context.Context, id *GrainId
 	for res := range results {
 		if res.err == nil && res.resp != nil {
 			cancel() // Cancel remaining attempts
-			return res.resp.UnmarshalNew()
+			return res.resp, nil
 		}
 	}
 
@@ -1023,7 +1022,7 @@ func (x *actorSystem) tryClaimGrain(ctx context.Context, grain *internalpb.Grain
 }
 
 // sendToGrainOwner forwards a message to the owning node using Ask/Tell semantics.
-func (x *actorSystem) sendToGrainOwner(ctx context.Context, owner *internalpb.Grain, message proto.Message, timeout time.Duration, synchronous bool) (proto.Message, error) {
+func (x *actorSystem) sendToGrainOwner(ctx context.Context, owner *internalpb.Grain, message any, timeout time.Duration, synchronous bool) (any, error) {
 	if owner == nil {
 		return nil, errors.New("grain owner is unknown")
 	}
@@ -1037,8 +1036,13 @@ func (x *actorSystem) sendToGrainOwner(ctx context.Context, owner *internalpb.Gr
 
 // sendRemoteAskGrainRequest sends a request to a known Grain endpoint and returns the decoded reply.
 // It handles protobuf serialization, context propagation headers, and response decoding.
-func (x *actorSystem) sendRemoteAskGrainRequest(ctx context.Context, grain *internalpb.Grain, message proto.Message, timeout time.Duration) (proto.Message, error) {
-	serialized, err := anypb.New(message)
+func (x *actorSystem) sendRemoteAskGrainRequest(ctx context.Context, grain *internalpb.Grain, message any, timeout time.Duration) (any, error) {
+	serializer := x.remoting.Serializer(message)
+	if serializer == nil {
+		return nil, gerrors.NewErrInvalidMessage(fmt.Errorf("no serializer found for message type %T", message))
+	}
+
+	serialized, err := serializer.Serialize(message)
 	if err != nil {
 		return nil, err
 	}
@@ -1065,13 +1069,18 @@ func (x *actorSystem) sendRemoteAskGrainRequest(ctx context.Context, grain *inte
 		return nil, fmt.Errorf("invalid response type")
 	}
 
-	return askResp.GetMessage().UnmarshalNew()
+	return x.remoting.Serializer(nil).Deserialize(askResp.GetMessage())
 }
 
 // sendRemoteTellGrainRequest sends a fire-and-forget message to a known Grain endpoint.
 // It handles protobuf serialization and context propagation headers.
-func (x *actorSystem) sendRemoteTellGrainRequest(ctx context.Context, grain *internalpb.Grain, message proto.Message) error {
-	serialized, err := anypb.New(message)
+func (x *actorSystem) sendRemoteTellGrainRequest(ctx context.Context, grain *internalpb.Grain, message any) error {
+	serializer := x.remoting.Serializer(message)
+	if serializer == nil {
+		return gerrors.NewErrInvalidMessage(fmt.Errorf("no serializer found for message type %T", message))
+	}
+
+	serialized, err := serializer.Serialize(message)
 	if err != nil {
 		return err
 	}

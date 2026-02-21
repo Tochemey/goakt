@@ -107,7 +107,7 @@ func reflectType(v any) reflect.Type {
 	return rtype
 }
 
-// Name returns the name of a given object
+// Name returns the type name of a given object
 func Name(v any) string {
 	return lowTrim(reflectType(v).String())
 }

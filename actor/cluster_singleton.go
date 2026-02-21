@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/log"
@@ -61,7 +60,7 @@ func (*clusterSingletonManager) PreStart(*Context) error {
 // Receive handles messages received by the cluster singleton.
 func (x *clusterSingletonManager) Receive(ctx *ReceiveContext) {
 	// handle PostStart message
-	if _, ok := ctx.Message().(*goaktpb.PostStart); ok {
+	if _, ok := ctx.Message().(*PostStart); ok {
 		x.handlePostStart(ctx)
 	}
 }

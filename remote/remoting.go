@@ -29,13 +29,13 @@ import (
 	"fmt"
 	"net"
 	nethttp "net/http"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/tochemey/goakt/v3/address"
@@ -89,12 +89,12 @@ type Remoting interface {
 	//   - from: The sender's actor address. Used for correlation and routing on
 	//     the remote system.
 	//   - to: The target actor's address on the remote node.
-	//   - message: A protobuf message that will be packed into an Any.
+	//   - message: A message that will be serialized into a byte slice.
 	//
 	// Behavior:
 	//   - Returns when the RPC completes; no application-level acknowledgement
 	//     from the target actor is awaited.
-	//   - Message is serialized into google.protobuf.Any. If packing fails,
+	//   - Message is serialized into a byte slice. If packing fails,
 	//     gerrors.NewErrInvalidMessage is returned.
 	//   - Honors compression and frame size limits configured on the client.
 	//
@@ -102,7 +102,7 @@ type Remoting interface {
 	//   - Transport or server errors with codes such as Unavailable or
 	//     ResourceExhausted.
 	//   - Context cancellation/deadline errors.
-	RemoteTell(ctx context.Context, from, to *address.Address, message proto.Message) error
+	RemoteTell(ctx context.Context, from, to *address.Address, message any) error
 
 	// RemoteAsk sends a request message to a remote actor and waits for a reply,
 	// subject to the provided timeout and context.
@@ -111,23 +111,23 @@ type Remoting interface {
 	//   - ctx: Governs cancellation and deadlines for the outbound RPC.
 	//   - from: The sender's actor address.
 	//   - to: The target actor's address.
-	//   - message: A protobuf message to send; packed into an Any.
+	//   - message: A message to send; serialized into a byte slice.
 	//   - timeout: A server-side processing window for collecting responses. If
 	//     zero, the server may apply a default policy; ctx still applies.
 	//
 	// Returns:
 	//   - response: The first response returned by the remote actor, if any,
-	//     wrapped in Any. Nil if no response was produced before deadlines.
+	//     serialized into a byte slice. Nil if no response was produced before deadlines.
 	//
 	// Behavior:
 	//   - If multiple responses arrive, only the first one is returned.
-	//   - Packing failures yield gerrors.NewErrInvalidMessage.
+	//   - Serialization failures yield gerrors.NewErrInvalidMessage.
 	//
 	// Errors:
 	//   - NotFound if the receiver does not exist (server-dependent).
 	//   - DeadlineExceeded when neither a reply nor completion occurs in time.
 	//   - Transport, resource limits, or context errors.
-	RemoteAsk(ctx context.Context, from, to *address.Address, message proto.Message, timeout time.Duration) (response *anypb.Any, err error)
+	RemoteAsk(ctx context.Context, from, to *address.Address, message any, timeout time.Duration) (response any, err error)
 
 	// RemoteLookup resolves the address of a named actor on a remote node.
 	//
@@ -152,17 +152,17 @@ type Remoting interface {
 	//   - ctx: Cancellation and deadlines.
 	//   - from: Sender address.
 	//   - to: Target actor address.
-	//   - messages: Slice of protobuf messages; nil entries are ignored.
+	//   - messages: Slice of messages; nil entries are ignored.
 	//
 	// Behavior:
-	//   - Serializes each message into Any; packing failures abort and return
+	//   - Serializes each message into a byte slice; serialization failures abort and return
 	//     gerrors.NewErrInvalidMessage.
 	//   - Entire RPC succeeds or fails as a unit at the transport layer (no
 	//     per-message delivery status is returned).
 	//
 	// Errors:
 	//   - Transport, resource limits (e.g., frame size), and context errors.
-	RemoteBatchTell(ctx context.Context, from, to *address.Address, messages []proto.Message) error
+	RemoteBatchTell(ctx context.Context, from, to *address.Address, messages []any) error
 
 	// RemoteBatchAsk sends multiple request messages to a remote actor and
 	// returns all responses collected before the provided timeout elapses.
@@ -181,9 +181,9 @@ type Remoting interface {
 	//     messages if you need to match responses to requests.
 	//
 	// Errors:
-	//   - Packing failures (gerrors.NewErrInvalidMessage).
+	//   - Serialization failures (gerrors.NewErrInvalidMessage).
 	//   - Transport, resource limits, and context errors.
-	RemoteBatchAsk(ctx context.Context, from, to *address.Address, messages []proto.Message, timeout time.Duration) (responses []*anypb.Any, err error)
+	RemoteBatchAsk(ctx context.Context, from, to *address.Address, messages []any, timeout time.Duration) (responses []any, err error)
 
 	// RemoteSpawn requests creation of a new actor on the remote node.
 	//
@@ -271,17 +271,17 @@ type Remoting interface {
 	//   - ctx: Governs cancellation and deadlines for the outbound RPC.
 	//   - host, port: Location of the remote actor system where the grain is hosted.
 	//   - grainRequest: Grain activation details (identity, kind, and any activation metadata).
-	//   - message: A protobuf message that will be packed into a google.protobuf.Any.
+	//   - message: A message that will be serialized into a byte slice.
 	//
 	// Behavior:
 	//   - Returns when the RPC completes; no application-level acknowledgement is awaited.
-	//   - Message packing failures return gerrors.NewErrInvalidMessage.
+	//   - Message serialization failures return gerrors.NewErrInvalidMessage.
 	//
 	// Errors:
 	//   - Transport and context errors.
 	//
 	// Note: The grain must already be activated, or the grain kind must be registered on the remote actor system using RegisterGrainKind.
-	RemoteTellGrain(ctx context.Context, host string, port int, grainRequest *GrainRequest, message proto.Message) error
+	RemoteTellGrain(ctx context.Context, host string, port int, grainRequest *GrainRequest, message any) error
 
 	// RemoteAskGrain sends a request message to a grain and waits for a reply, subject to the provided timeout and context.
 	//
@@ -300,7 +300,7 @@ type Remoting interface {
 	//   - Transport and context errors.
 	//
 	// Note: The grain must already be activated, or the grain kind must be registered on the remote actor system using RegisterGrainKind.
-	RemoteAskGrain(ctx context.Context, host string, port int, grainRequest *GrainRequest, message proto.Message, timeout time.Duration) (response *anypb.Any, err error)
+	RemoteAskGrain(ctx context.Context, host string, port int, grainRequest *GrainRequest, message any, timeout time.Duration) (response any, err error)
 
 	// NetClient returns a cached or newly created net client for the endpoint.
 	// The returned client maintains its own connection pool and should NOT be closed by
@@ -322,6 +322,20 @@ type Remoting interface {
 	// TLSConfig returns the TLS configuration used by this client, if any. A
 	// nil return value indicates that the client is using an insecure transport.
 	TLSConfig() *tls.Config
+
+	// Serializer returns a [Serializer] for the given message.
+	//
+	// Send path — pass the outgoing message to obtain the most-specific
+	// registered serializer for its dynamic type:
+	//
+	//	r.Serializer(message).Serialize(message)
+	//
+	// Receive path — pass nil to obtain a composite serializer that tries each
+	// registered serializer in registration order; the first successful
+	// [Serializer.Deserialize] result is returned:
+	//
+	//	r.Serializer(nil).Deserialize(rawBytes)
+	Serializer(msg any) Serializer
 }
 
 // RemotingOption configures a remoting client instance during construction.
@@ -412,6 +426,63 @@ func WithRemotingContextPropagator(propagator ContextPropagator) RemotingOption 
 	}
 }
 
+// WithRemotingSerializers registers a [Serializer] for a specific message type
+// or for all messages that satisfy a given interface.
+//
+// # Concrete type registration
+//
+// Pass any value of the target type to bind a serializer to that exact type:
+//
+//	WithRemotingSerializers(new(MyMessage), mySerializer)
+//
+// # Interface registration
+//
+// Pass a typed nil pointer to an interface to bind a serializer to every
+// message that implements that interface:
+//
+//	WithRemotingSerializers((*proto.Message)(nil), remote.NewProtoSerializer())
+//
+// # Dispatch order
+//
+// When [Remoting] serializes a message it checks, in order:
+//  1. Exact concrete type — the entry registered with the message's dynamic type.
+//  2. Interface match — the first registered interface the message implements.
+//  3. Default — the [Serializer] configured via [WithRemotingSerializer].
+//
+// If serializer is nil the option is silently ignored.
+func WithRemotingSerializers(msg any, serializer Serializer) RemotingOption {
+	return func(r *remoting) {
+		if serializer == nil {
+			return
+		}
+
+		typ := reflect.TypeOf(msg)
+		// A typed nil pointer whose element is an interface (e.g. (*proto.Message)(nil))
+		// registers the serializer for all values that implement that interface.
+		if typ != nil && typ.Kind() == reflect.Ptr && typ.Elem().Kind() == reflect.Interface {
+			r.serializers = append(r.serializers, ifaceEntry{
+				iface:      typ.Elem(),
+				serializer: serializer,
+			})
+			return
+		}
+
+		r.serializers = append(r.serializers, ifaceEntry{
+			iface:      reflect.TypeOf(msg),
+			serializer: serializer,
+		})
+	}
+}
+
+// ifaceEntry pairs a reflect.Type that represents an interface with the
+// [Serializer] to use for any message that implements that interface.
+// Entries are appended via [WithRemotingSerializers] and evaluated in
+// registration order inside [remoting.resolveSerializer].
+type ifaceEntry struct {
+	iface      reflect.Type
+	serializer Serializer
+}
+
 // remoting is the default Remoting implementation backed by proto TCP
 // clients. It encapsulates transport setup, compression, connection pooling,
 // and TLS configuration required to reach remote actor systems.
@@ -438,6 +509,23 @@ type remoting struct {
 	//
 	// Uses xsync.Map for type safety and lock-free reads in the common path.
 	clientCache *xsync.Map[string, *inet.Client]
+
+	// serializers holds all per-type and per-interface serializer entries
+	// evaluated in registration order by [resolveSerializer].
+	// Concrete-type entries are stored with iface == reflect.TypeOf(msg);
+	// interface entries are stored with iface == reflect.TypeOf((*I)(nil)).Elem().
+	//
+	// The slice is populated exclusively during NewRemoting (option application
+	// is single-threaded) and is never mutated afterwards. resolveSerializer
+	// therefore reads it without any lock, eliminating mutex overhead on the
+	// hot message-send path.
+	serializers []ifaceEntry
+
+	// dispatcher is the pre-built composite serializer returned by
+	// Serializer(nil) on the receive path. It is constructed once after all
+	// options are applied and reused for every inbound message, avoiding a
+	// per-call heap allocation.
+	dispatcher Serializer
 }
 
 var _ Remoting = (*remoting)(nil)
@@ -464,12 +552,25 @@ func NewRemoting(opts ...RemotingOption) Remoting {
 		keepAlive:    15 * time.Second, // 15s TCP keep-alive
 		compression:  ZstdCompression,  // Zstd compression (matches server default in remote.Config)
 		clientCache:  xsync.NewMap[string, *inet.Client](),
+		// Pre-allocate with capacity for the default entry plus a few custom ones.
+		serializers: make([]ifaceEntry, 0, 4),
 	}
+
+	// Register the default proto serializer for all proto.Message implementations.
+	r.serializers = append(r.serializers, ifaceEntry{
+		iface:      reflect.TypeOf((*proto.Message)(nil)).Elem(),
+		serializer: NewProtoSerializer(),
+	})
 
 	// Apply options
 	for _, opt := range opts {
 		opt(r)
 	}
+
+	// Build the composite dispatcher once; it references the now-frozen
+	// serializers slice and is returned by Serializer(nil) on every
+	// inbound message without allocation.
+	r.dispatcher = &serializerDispatch{entries: r.serializers}
 
 	// Set default factory if not overridden (for testing)
 	if r.clientFactory == nil {
@@ -485,7 +586,7 @@ func NewRemoting(opts ...RemotingOption) Remoting {
 //
 // This method is thread-safe and uses double-checked locking for initialization.
 func (r *remoting) NetClient(host string, port int) *inet.Client {
-	cacheKey := fmt.Sprintf("%s:%d", host, port)
+	cacheKey := net.JoinHostPort(host, strconv.Itoa(port))
 
 	// Fast path: return cached client (lock-free read)
 	if cached, ok := r.clientCache.Get(cacheKey); ok {
@@ -504,129 +605,6 @@ func (r *remoting) NetClient(host string, port int) *inet.Client {
 	client := r.clientFactory(host, port)
 	r.clientCache.Set(cacheKey, client)
 	return client
-}
-
-// newNetClient creates a new net client with connection pooling.
-// This is the default factory used by NetClient.
-func (r *remoting) newNetClient(host string, port int) *inet.Client {
-	addr := net.JoinHostPort(host, strconv.Itoa(port))
-
-	opts := []inet.ClientOption{
-		inet.WithMaxIdleConns(r.maxIdleConns),
-		inet.WithIdleTimeout(r.idleTimeout),
-		inet.WithDialTimeout(r.dialTimeout),
-		inet.WithKeepAlive(r.keepAlive),
-	}
-
-	// Add TLS with session caching for connection reuse
-	if r.tlsConfig != nil {
-		tlsConfigClone := r.tlsConfig.Clone()
-		// Enable TLS session cache for faster reconnects
-		if tlsConfigClone.ClientSessionCache == nil {
-			tlsConfigClone.ClientSessionCache = tls.NewLRUClientSessionCache(32)
-		}
-		opts = append(opts, inet.WithTLS(tlsConfigClone))
-	}
-
-	// Add compression wrapper
-	switch r.compression {
-	case BrotliCompression:
-		opts = append(opts, inet.WithClientConnWrapper(inet.NewBrotliConnWrapper()))
-	case ZstdCompression:
-		if wrapper, err := inet.NewZstdConnWrapper(); err == nil {
-			opts = append(opts, inet.WithClientConnWrapper(wrapper))
-		}
-	case GzipCompression:
-		if wrapper, err := inet.NewGzipConnWrapper(); err == nil {
-			opts = append(opts, inet.WithClientConnWrapper(wrapper))
-		}
-	}
-
-	return inet.NewClient(addr, opts...)
-}
-
-// enrichContext adds metadata to context if propagator is configured.
-// This is called once per request and reuses the same context object.
-func (r *remoting) enrichContext(ctx context.Context) (context.Context, error) {
-	// Create proto metadata
-	md := inet.NewMetadata()
-
-	// Add context propagator headers if configured
-	if r.contextPropagator != nil {
-		headers := make(nethttp.Header, 4) // Pre-size for common case (tracing)
-		if err := r.contextPropagator.Inject(ctx, headers); err != nil {
-			return nil, err
-		}
-
-		// Convert headers to metadata
-		for key, values := range headers {
-			if len(values) > 0 {
-				md.Set(key, values[0])
-			}
-		}
-	}
-
-	// Apply deadline from context if present
-	if deadline, ok := ctx.Deadline(); ok {
-		md.SetDeadline(deadline)
-	}
-
-	// Always attach metadata (even if empty, it's a no-op on the wire)
-	return inet.ContextWithMetadata(ctx, md), nil
-}
-
-// checkProtoError examines response and converts proto errors to Go errors.
-// Returns nil if response is a success type.
-func checkProtoError(resp proto.Message) error {
-	errResp, isError := resp.(*internalpb.Error)
-	if !isError {
-		return nil
-	}
-
-	msg := errResp.GetMessage()
-
-	// Fast path: common errors
-	switch errResp.GetCode() {
-	case internalpb.Code_CODE_NOT_FOUND:
-		return gerrors.ErrAddressNotFound
-	case internalpb.Code_CODE_DEADLINE_EXCEEDED:
-		return gerrors.ErrRequestTimeout
-	case internalpb.Code_CODE_UNAVAILABLE:
-		return gerrors.ErrRemoteSendFailure
-	case internalpb.Code_CODE_FAILED_PRECONDITION:
-		return parseFailedPrecondition(msg)
-	case internalpb.Code_CODE_ALREADY_EXISTS:
-		return parseAlreadyExists(msg)
-	case internalpb.Code_CODE_INVALID_ARGUMENT:
-		return fmt.Errorf("invalid argument: %s", msg)
-	case internalpb.Code_CODE_INTERNAL_ERROR:
-		return errors.New(msg)
-	default:
-		return errors.New(msg)
-	}
-}
-
-// parseFailedPrecondition extracts specific errors from message string
-func parseFailedPrecondition(msg string) error {
-	// Use simple string checks to avoid allocations
-	if strings.Contains(msg, gerrors.ErrTypeNotRegistered.Error()) {
-		return gerrors.ErrTypeNotRegistered
-	}
-	if strings.Contains(msg, gerrors.ErrRemotingDisabled.Error()) {
-		return gerrors.ErrRemotingDisabled
-	}
-	if strings.Contains(msg, gerrors.ErrClusterDisabled.Error()) {
-		return gerrors.ErrClusterDisabled
-	}
-	return errors.New(msg)
-}
-
-// parseAlreadyExists determines the specific "already exists" error type
-func parseAlreadyExists(msg string) error {
-	if strings.Contains(msg, "singleton") {
-		return gerrors.ErrSingletonAlreadyExists
-	}
-	return gerrors.ErrActorAlreadyExists
 }
 
 // RemoteActivateGrain requests activation of a grain on the given remote node.
@@ -688,13 +666,18 @@ func (r *remoting) RemoteActivateGrain(ctx context.Context, host string, port in
 //   - Transport and context errors.
 //
 // Note: The grain must already be activated, or the grain kind must be registered on the remote actor system using RegisterGrainKind.
-func (r *remoting) RemoteAskGrain(ctx context.Context, host string, port int, grainRequest *GrainRequest, message proto.Message, timeout time.Duration) (response *anypb.Any, err error) {
+func (r *remoting) RemoteAskGrain(ctx context.Context, host string, port int, grainRequest *GrainRequest, message any, timeout time.Duration) (response any, err error) {
 	grain, err := getGrainFromRequest(host, port, grainRequest)
 	if err != nil {
 		return nil, err
 	}
 
-	marshaled, err := anypb.New(message)
+	serializer := r.resolveSerializer(message)
+	if serializer == nil {
+		return nil, gerrors.NewErrInvalidMessage(errors.New("no serializer found for message type"))
+	}
+
+	marshaled, err := serializer.Serialize(message)
 	if err != nil {
 		return nil, gerrors.NewErrInvalidMessage(err)
 	}
@@ -728,7 +711,11 @@ func (r *remoting) RemoteAskGrain(ctx context.Context, host string, port int, gr
 		return nil, errors.New("invalid response type")
 	}
 
-	return askResp.GetMessage(), nil
+	deserialized, err := serializer.Deserialize(askResp.GetMessage())
+	if err != nil {
+		return nil, gerrors.NewErrInvalidMessage(err)
+	}
+	return deserialized, nil
 }
 
 // RemoteTellGrain sends a one-way (fire-and-forget) message to a grain.
@@ -747,13 +734,18 @@ func (r *remoting) RemoteAskGrain(ctx context.Context, host string, port int, gr
 //   - Transport and context errors.
 //
 // Note: The grain must already be activated, or the grain kind must be registered on the remote actor system using RegisterGrainKind.
-func (r *remoting) RemoteTellGrain(ctx context.Context, host string, port int, grainRequest *GrainRequest, message proto.Message) error {
+func (r *remoting) RemoteTellGrain(ctx context.Context, host string, port int, grainRequest *GrainRequest, message any) error {
 	grain, err := getGrainFromRequest(host, port, grainRequest)
 	if err != nil {
 		return err
 	}
 
-	marshaled, err := anypb.New(message)
+	serializer := r.resolveSerializer(message)
+	if serializer == nil {
+		return gerrors.NewErrInvalidMessage(fmt.Errorf("no serializer found for message type %T", message))
+	}
+
+	marshaled, err := serializer.Serialize(message)
 	if err != nil {
 		return gerrors.NewErrInvalidMessage(err)
 	}
@@ -789,8 +781,13 @@ func (r *remoting) RemoteTellGrain(ctx context.Context, host string, port int, g
 //     RPC completed, not that the actor processed the message.
 //   - Context cancellation and client/server frame limits are enforced.
 //   - Packing failures return gerrors.NewErrInvalidMessage.
-func (r *remoting) RemoteTell(ctx context.Context, from, to *address.Address, message proto.Message) error {
-	marshaled, err := anypb.New(message)
+func (r *remoting) RemoteTell(ctx context.Context, from, to *address.Address, message any) error {
+	serializer := r.resolveSerializer(message)
+	if serializer == nil {
+		return gerrors.NewErrInvalidMessage(fmt.Errorf("no serializer found for message type %T", message))
+	}
+
+	marshaled, err := serializer.Serialize(message)
 	if err != nil {
 		return gerrors.NewErrInvalidMessage(err)
 	}
@@ -829,8 +826,13 @@ func (r *remoting) RemoteTell(ctx context.Context, from, to *address.Address, me
 //   - If multiple responses are produced, the first one is returned.
 //   - A zero timeout defers to server policy; ctx still governs cancellation.
 //   - Errors may include NotFound, DeadlineExceeded, Unavailable, etc.
-func (r *remoting) RemoteAsk(ctx context.Context, from, to *address.Address, message proto.Message, timeout time.Duration) (response *anypb.Any, err error) {
-	marshaled, err := anypb.New(message)
+func (r *remoting) RemoteAsk(ctx context.Context, from, to *address.Address, message any, timeout time.Duration) (response any, err error) {
+	serializer := r.resolveSerializer(message)
+	if serializer == nil {
+		return nil, gerrors.NewErrInvalidMessage(fmt.Errorf("no serializer found for message type %T", message))
+	}
+
+	marshaled, err := serializer.Serialize(message)
 	if err != nil {
 		return nil, gerrors.NewErrInvalidMessage(err)
 	}
@@ -873,7 +875,11 @@ func (r *remoting) RemoteAsk(ctx context.Context, from, to *address.Address, mes
 		return nil, nil
 	}
 
-	return askResp.Messages[0], nil
+	deserialized, err := serializer.Deserialize(askResp.Messages[0])
+	if err != nil {
+		return nil, gerrors.NewErrInvalidMessage(err)
+	}
+	return deserialized, nil
 }
 
 // RemoteLookup resolves the address of an actor hosted on a remote node. A
@@ -927,17 +933,26 @@ func (r *remoting) RemoteLookup(ctx context.Context, host string, port int, name
 //
 // The call succeeds or fails as a whole at the transport layer; no per-message
 // acknowledgement is returned.
-func (r *remoting) RemoteBatchTell(ctx context.Context, from, to *address.Address, messages []proto.Message) error {
+func (r *remoting) RemoteBatchTell(ctx context.Context, from, to *address.Address, messages []any) error {
 	remoteMessages := make([]*internalpb.RemoteMessage, 0, len(messages))
+	// Pre-compute address strings once; they are constant across the whole batch.
+	fromStr := from.String()
+	toStr := to.String()
 	for _, message := range messages {
 		if message != nil {
-			packed, err := anypb.New(message)
+			serializer := r.resolveSerializer(message)
+			if serializer == nil {
+				return gerrors.NewErrInvalidMessage(fmt.Errorf("no serializer found for message type %T", message))
+			}
+
+			packed, err := serializer.Serialize(message)
 			if err != nil {
 				return gerrors.NewErrInvalidMessage(err)
 			}
+
 			remoteMessages = append(remoteMessages, &internalpb.RemoteMessage{
-				Sender:   from.String(),
-				Receiver: to.String(),
+				Sender:   fromStr,
+				Receiver: toStr,
 				Message:  packed,
 			})
 		}
@@ -969,17 +984,29 @@ func (r *remoting) RemoteBatchTell(ctx context.Context, from, to *address.Addres
 //
 // The number and order of responses may not match the requests. If correlation
 // is required, include a correlation ID within your message payloads.
-func (r *remoting) RemoteBatchAsk(ctx context.Context, from, to *address.Address, messages []proto.Message, timeout time.Duration) (responses []*anypb.Any, err error) {
+func (r *remoting) RemoteBatchAsk(ctx context.Context, from, to *address.Address, messages []any, timeout time.Duration) (responses []any, err error) {
 	remoteMessages := make([]*internalpb.RemoteMessage, 0, len(messages))
+	serializers := make([]Serializer, 0, len(messages))
+	// Pre-compute address strings once; they are constant across the whole batch.
+	fromStr := from.String()
+	toStr := to.String()
+
 	for _, message := range messages {
 		if message != nil {
-			packed, err := anypb.New(message)
+			serializer := r.resolveSerializer(message)
+			if serializer == nil {
+				return nil, gerrors.NewErrInvalidMessage(fmt.Errorf("no serializer found for message type %T", message))
+			}
+
+			packed, err := serializer.Serialize(message)
 			if err != nil {
 				return nil, gerrors.NewErrInvalidMessage(err)
 			}
+
+			serializers = append(serializers, serializer)
 			remoteMessages = append(remoteMessages, &internalpb.RemoteMessage{
-				Sender:   from.String(),
-				Receiver: to.String(),
+				Sender:   fromStr,
+				Receiver: toStr,
 				Message:  packed,
 			})
 		}
@@ -1013,7 +1040,16 @@ func (r *remoting) RemoteBatchAsk(ctx context.Context, from, to *address.Address
 		return nil, errors.New("invalid response type")
 	}
 
-	return askResp.GetMessages(), nil
+	responses = make([]any, 0, len(askResp.GetMessages()))
+	for index, message := range askResp.GetMessages() {
+		deserialized, err := serializers[index].Deserialize(message)
+		if err != nil {
+			return nil, gerrors.NewErrInvalidMessage(err)
+		}
+		responses = append(responses, deserialized)
+	}
+
+	return responses, nil
 }
 
 // RemoteSpawn creates an actor on a remote node using the provided spawn
@@ -1231,6 +1267,166 @@ func (r *remoting) Compression() Compression {
 // nil return value indicates that the client is using an insecure transport.
 func (r *remoting) TLSConfig() *tls.Config {
 	return r.tlsConfig
+}
+
+// Serializer implements [Remoting]. Pass nil to get the composite
+// dispatching serializer for the receive path, or pass the outgoing message
+// to get the most-specific serializer registered for its dynamic type.
+func (r *remoting) Serializer(msg any) Serializer {
+	return r.resolveSerializer(msg)
+}
+
+// resolveSerializer returns the [Serializer] to use for the given message.
+//
+// When message is nil the receive path is assumed: a composite
+// [dispatchingSerializer] is returned that tries every registered serializer
+// in order during [Serializer.Deserialize] and returns the first success.
+//
+// When message is non-nil the send path is assumed: the first entry whose
+// type matches the message's dynamic type wins (exact concrete type, then
+// interface match). If no entry matches, nil is returned.
+//
+// The slice r.serializers is immutable after [NewRemoting] returns, so no
+// lock is needed.
+func (r *remoting) resolveSerializer(message any) Serializer {
+	msgType := reflect.TypeOf(message)
+	if msgType == nil {
+		return r.dispatcher
+	}
+	for i := range r.serializers {
+		entry := &r.serializers[i]
+		if entry.iface.Kind() == reflect.Interface {
+			if msgType.Implements(entry.iface) {
+				return entry.serializer
+			}
+		} else if msgType == entry.iface {
+			return entry.serializer
+		}
+	}
+	return nil
+}
+
+// newNetClient creates a new net client with connection pooling.
+// This is the default factory used by NetClient.
+func (r *remoting) newNetClient(host string, port int) *inet.Client {
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
+
+	opts := []inet.ClientOption{
+		inet.WithMaxIdleConns(r.maxIdleConns),
+		inet.WithIdleTimeout(r.idleTimeout),
+		inet.WithDialTimeout(r.dialTimeout),
+		inet.WithKeepAlive(r.keepAlive),
+	}
+
+	// Add TLS with session caching for connection reuse
+	if r.tlsConfig != nil {
+		tlsConfigClone := r.tlsConfig.Clone()
+		// Enable TLS session cache for faster reconnects
+		if tlsConfigClone.ClientSessionCache == nil {
+			tlsConfigClone.ClientSessionCache = tls.NewLRUClientSessionCache(32)
+		}
+		opts = append(opts, inet.WithTLS(tlsConfigClone))
+	}
+
+	// Add compression wrapper
+	switch r.compression {
+	case BrotliCompression:
+		opts = append(opts, inet.WithClientConnWrapper(inet.NewBrotliConnWrapper()))
+	case ZstdCompression:
+		if wrapper, err := inet.NewZstdConnWrapper(); err == nil {
+			opts = append(opts, inet.WithClientConnWrapper(wrapper))
+		}
+	case GzipCompression:
+		if wrapper, err := inet.NewGzipConnWrapper(); err == nil {
+			opts = append(opts, inet.WithClientConnWrapper(wrapper))
+		}
+	}
+
+	return inet.NewClient(addr, opts...)
+}
+
+// enrichContext adds metadata to context if propagator is configured.
+// This is called once per request and reuses the same context object.
+func (r *remoting) enrichContext(ctx context.Context) (context.Context, error) {
+	// Create proto metadata
+	md := inet.NewMetadata()
+
+	// Add context propagator headers if configured
+	if r.contextPropagator != nil {
+		headers := make(nethttp.Header, 4) // Pre-size for common case (tracing)
+		if err := r.contextPropagator.Inject(ctx, headers); err != nil {
+			return nil, err
+		}
+
+		// Convert headers to metadata
+		for key, values := range headers {
+			if len(values) > 0 {
+				md.Set(key, values[0])
+			}
+		}
+	}
+
+	// Apply deadline from context if present
+	if deadline, ok := ctx.Deadline(); ok {
+		md.SetDeadline(deadline)
+	}
+
+	// Always attach metadata (even if empty, it's a no-op on the wire)
+	return inet.ContextWithMetadata(ctx, md), nil
+}
+
+// checkProtoError examines response and converts proto errors to Go errors.
+// Returns nil if response is a success type.
+func checkProtoError(resp proto.Message) error {
+	errResp, isError := resp.(*internalpb.Error)
+	if !isError {
+		return nil
+	}
+
+	msg := errResp.GetMessage()
+
+	// Fast path: common errors
+	switch errResp.GetCode() {
+	case internalpb.Code_CODE_NOT_FOUND:
+		return gerrors.ErrAddressNotFound
+	case internalpb.Code_CODE_DEADLINE_EXCEEDED:
+		return gerrors.ErrRequestTimeout
+	case internalpb.Code_CODE_UNAVAILABLE:
+		return gerrors.ErrRemoteSendFailure
+	case internalpb.Code_CODE_FAILED_PRECONDITION:
+		return parseFailedPrecondition(msg)
+	case internalpb.Code_CODE_ALREADY_EXISTS:
+		return parseAlreadyExists(msg)
+	case internalpb.Code_CODE_INVALID_ARGUMENT:
+		return fmt.Errorf("invalid argument: %s", msg)
+	case internalpb.Code_CODE_INTERNAL_ERROR:
+		return errors.New(msg)
+	default:
+		return errors.New(msg)
+	}
+}
+
+// parseFailedPrecondition extracts specific errors from message string
+func parseFailedPrecondition(msg string) error {
+	// Use simple string checks to avoid allocations
+	if strings.Contains(msg, gerrors.ErrTypeNotRegistered.Error()) {
+		return gerrors.ErrTypeNotRegistered
+	}
+	if strings.Contains(msg, gerrors.ErrRemotingDisabled.Error()) {
+		return gerrors.ErrRemotingDisabled
+	}
+	if strings.Contains(msg, gerrors.ErrClusterDisabled.Error()) {
+		return gerrors.ErrClusterDisabled
+	}
+	return errors.New(msg)
+}
+
+// parseAlreadyExists determines the specific "already exists" error type
+func parseAlreadyExists(msg string) error {
+	if strings.Contains(msg, "singleton") {
+		return gerrors.ErrSingletonAlreadyExists
+	}
+	return gerrors.ErrActorAlreadyExists
 }
 
 func getGrainFromRequest(host string, port int, grainRequest *GrainRequest) (*internalpb.Grain, error) {

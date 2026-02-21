@@ -25,13 +25,11 @@ package testkit
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/encoding/prototext"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/reflect/protoreflect"
 
 	goakt "github.com/tochemey/goakt/v3/actor"
 	"github.com/tochemey/goakt/v3/internal/pause"
@@ -45,11 +43,11 @@ type GrainProbe interface {
 	// ExpectResponse asserts that the next message received by the probe
 	// exactly matches the given protobuf message.
 	// It fails the test if no message is received or the message does not match.
-	ExpectResponse(message proto.Message)
+	ExpectResponse(message any)
 
 	// ExpectResponseWithin asserts that the expected message is received within the given duration.
 	// It fails the test if the timeout is reached or the message differs.
-	ExpectResponseWithin(duration time.Duration, message proto.Message)
+	ExpectResponseWithin(duration time.Duration, message any)
 
 	// ExpectNoResponse asserts that no message is received within a short, default time window.
 	// This is useful for asserting inactivity or idle grains.
@@ -57,19 +55,19 @@ type GrainProbe interface {
 
 	// ExpectAnyResponse waits for and returns the next message received by the probe.
 	// It fails the test if no message is received in a reasonable default timeout.
-	ExpectAnyResponse() proto.Message
+	ExpectAnyResponse() any
 
 	// ExpectAnyResponseWithin waits for and returns the next message received within the specified duration.
 	// It fails the test if no message is received in the given time window.
-	ExpectAnyResponseWithin(duration time.Duration) proto.Message
+	ExpectAnyResponseWithin(duration time.Duration) any
 
 	// ExpectResponseOfType asserts that the next received message matches the given message type.
 	// It fails the test if no message is received or the type does not match.
-	ExpectResponseOfType(message proto.Message)
+	ExpectResponseOfType(message any)
 
 	// ExpectResponseOfTypeWithin asserts that a message of the given type is received within the specified duration.
 	// It fails the test if the type does not match or if the timeout is reached.
-	ExpectResponseOfTypeWithin(duration time.Duration, message proto.Message)
+	ExpectResponseOfTypeWithin(duration time.Duration, message any)
 
 	// ExpectTerminated asserts that the grain with the specified identity has terminated.
 	// This is useful when verifying grain shutdown behavior.
@@ -85,7 +83,7 @@ type GrainProbe interface {
 	// Parameters:
 	//   - identity: the identity of the target grain registered within the actor system.
 	//   - message: the message to send to the grain.
-	Send(identity *goakt.GrainIdentity, message proto.Message)
+	Send(identity *goakt.GrainIdentity, message any)
 
 	// SendSync sends a message to the specified grain and waits for a synchronous response within the given timeout duration.
 	// This method simulates the "Ask" pattern (request-response) and is primarily used in test scenarios to
@@ -102,19 +100,17 @@ type GrainProbe interface {
 	// Notes:
 	//   - This method is intended for use within testing frameworks via a test probe.
 	//   - Should not be used in production code as it couples testing and actor system internals.
-	SendSync(identity *goakt.GrainIdentity, message proto.Message, timeout time.Duration)
+	SendSync(identity *goakt.GrainIdentity, message any, timeout time.Duration)
 }
 
 type grainProbe struct {
 	testingT *testing.T
 
 	testCtx        context.Context
-	lastMessage    proto.Message
-	messageQueue   chan proto.Message
+	messageQueue   chan any
 	defaultTimeout time.Duration
 	timers         *timer.Pool
 	actorSystem    goakt.ActorSystem
-	identity       *goakt.GrainIdentity
 }
 
 var _ GrainProbe = (*grainProbe)(nil)
@@ -122,27 +118,27 @@ var _ GrainProbe = (*grainProbe)(nil)
 // newGrainProbe creates a new grain probe for testing grain interactions.
 func newGrainProbe(ctx context.Context, t *testing.T, actorSystem goakt.ActorSystem) (*grainProbe, error) {
 	// create the message queue
-	msgQueue := make(chan proto.Message, MessagesQueueMax)
+	msgQueue := make(chan any, MessagesQueueMax)
 	return &grainProbe{
 		testingT:       t,
 		testCtx:        ctx,
 		messageQueue:   msgQueue,
 		actorSystem:    actorSystem,
 		timers:         timer.NewPool(),
-		defaultTimeout: 500 * time.Millisecond,
+		defaultTimeout: GrainDefaultTimeout,
 	}, nil
 }
 
 // ExpectResponse asserts that the next message received by the probe
 // exactly matches the given protobuf message.
 // It fails the test if no message is received or the message does not match.
-func (x *grainProbe) ExpectResponse(message proto.Message) {
+func (x *grainProbe) ExpectResponse(message any) {
 	x.expectMessage(x.defaultTimeout, message)
 }
 
 // ExpectResponseWithin asserts that the expected message is received within the given duration.
 // It fails the test if the timeout is reached or the message differs.
-func (x *grainProbe) ExpectResponseWithin(duration time.Duration, message proto.Message) {
+func (x *grainProbe) ExpectResponseWithin(duration time.Duration, message any) {
 	x.expectMessage(duration, message)
 }
 
@@ -154,26 +150,26 @@ func (x *grainProbe) ExpectNoResponse() {
 
 // ExpectAnyResponse waits for and returns the next message received by the probe.
 // It fails the test if no message is received in a reasonable default timeout.
-func (x *grainProbe) ExpectAnyResponse() proto.Message {
+func (x *grainProbe) ExpectAnyResponse() any {
 	return x.expectAnyMessage(x.defaultTimeout)
 }
 
 // ExpectAnyResponseWithin waits for and returns the next message received within the specified duration.
 // It fails the test if no message is received in the given time window.
-func (x *grainProbe) ExpectAnyResponseWithin(duration time.Duration) proto.Message {
+func (x *grainProbe) ExpectAnyResponseWithin(duration time.Duration) any {
 	return x.expectAnyMessage(duration)
 }
 
 // ExpectResponseOfType asserts that the next received message matches the given message type.
 // It fails the test if no message is received or the type does not match.
-func (x *grainProbe) ExpectResponseOfType(message proto.Message) {
-	x.expectMessageOfType(x.defaultTimeout, message.ProtoReflect().Type())
+func (x *grainProbe) ExpectResponseOfType(message any) {
+	x.expectMessageOfType(x.defaultTimeout, reflect.TypeOf(message))
 }
 
 // ExpectResponseOfTypeWithin asserts that a message of the given type is received within the specified duration.
 // It fails the test if the type does not match or if the timeout is reached.
-func (x *grainProbe) ExpectResponseOfTypeWithin(duration time.Duration, message proto.Message) {
-	x.expectMessageOfType(duration, message.ProtoReflect().Type())
+func (x *grainProbe) ExpectResponseOfTypeWithin(duration time.Duration, message any) {
+	x.expectMessageOfType(duration, reflect.TypeOf(message))
 }
 
 // ExpectTerminated asserts that the grain with the specified identity has terminated.
@@ -221,7 +217,7 @@ func (x *grainProbe) ExpectTerminated(identity *goakt.GrainIdentity, duration ti
 // Parameters:
 //   - identity: the identity of the target grain registered within the actor system.
 //   - message: the message to send to the grain.
-func (x *grainProbe) Send(identity *goakt.GrainIdentity, message proto.Message) {
+func (x *grainProbe) Send(identity *goakt.GrainIdentity, message any) {
 	err := x.actorSystem.TellGrain(x.testCtx, identity, message)
 	require.NoError(x.testingT, err)
 }
@@ -241,29 +237,23 @@ func (x *grainProbe) Send(identity *goakt.GrainIdentity, message proto.Message) 
 // Notes:
 //   - This method is intended for use within testing frameworks via a test probe.
 //   - Should not be used in production code as it couples testing and actor system internals.
-func (x *grainProbe) SendSync(identity *goakt.GrainIdentity, message proto.Message, timeout time.Duration) {
+func (x *grainProbe) SendSync(identity *goakt.GrainIdentity, message any, timeout time.Duration) {
 	reply, err := x.actorSystem.AskGrain(x.testCtx, identity, message, timeout)
 	require.NoError(x.testingT, err)
 	x.messageQueue <- reply
 }
 
 // receiveOne receives one message within a maximum time duration
-func (x *grainProbe) receiveOne(duration time.Duration) proto.Message {
+func (x *grainProbe) receiveOne(duration time.Duration) any {
 	t := x.timers.Get(duration)
 
 	select {
 	// attempt to read some message from the message queue
 	case message, ok := <-x.messageQueue:
 		x.timers.Put(t)
-		// nothing found
 		if !ok {
 			return nil
 		}
-
-		if message != nil {
-			x.lastMessage = message
-		}
-
 		return message
 	case <-t.C:
 		x.timers.Put(t)
@@ -272,12 +262,12 @@ func (x *grainProbe) receiveOne(duration time.Duration) proto.Message {
 }
 
 // expectMessage assert the expectation of a message within a maximum time duration
-func (x *grainProbe) expectMessage(duration time.Duration, message proto.Message) {
+func (x *grainProbe) expectMessage(duration time.Duration, message any) {
 	// receive one message
 	received := x.receiveOne(duration)
-	// let us assert the received message
-	require.NotNil(x.testingT, received, fmt.Sprintf("timeout (%v) during expectMessage while waiting for %v", duration, message.ProtoReflect().Descriptor().FullName()))
-	require.Equal(x.testingT, prototext.Format(message), prototext.Format(received), fmt.Sprintf("expected %v, found %v", message, received))
+	require.NotNil(x.testingT, received, fmt.Sprintf("timeout (%v) during expectMessage while waiting for %T", duration, message))
+	require.IsType(x.testingT, message, received)
+	require.True(x.testingT, reflect.DeepEqual(message, received), fmt.Sprintf("expected %v, found %v", message, received))
 }
 
 // expectNoMessage asserts that no message is expected
@@ -288,7 +278,7 @@ func (x *grainProbe) expectNoMessage(duration time.Duration) {
 }
 
 // expectedAnyMessage asserts that any message is expected
-func (x *grainProbe) expectAnyMessage(duration time.Duration) proto.Message {
+func (x *grainProbe) expectAnyMessage(duration time.Duration) any {
 	// receive one message
 	received := x.receiveOne(duration)
 	require.NotNil(x.testingT, received, fmt.Sprintf("timeout (%v) during expectAnyMessage while waiting", duration))
@@ -296,13 +286,9 @@ func (x *grainProbe) expectAnyMessage(duration time.Duration) proto.Message {
 }
 
 // expectMessageOfType asserts that a message of a given type is expected within a maximum time duration
-func (x *grainProbe) expectMessageOfType(duration time.Duration, messageType protoreflect.MessageType) proto.Message {
-	// receive one message
+func (x *grainProbe) expectMessageOfType(duration time.Duration, messageType any) {
 	received := x.receiveOne(duration)
-	require.NotNil(x.testingT, received, fmt.Sprintf("timeout (%v) , during expectAnyMessage while waiting", duration))
-
-	// assert the message type
-	expectedType := received.ProtoReflect().Type() == messageType
-	require.True(x.testingT, expectedType, fmt.Sprintf("expected %v, found %v", messageType, received.ProtoReflect().Type()))
-	return received
+	require.NotNil(x.testingT, received, fmt.Sprintf("timeout (%v) during expectAnyMessage while waiting", duration))
+	expectedType := reflect.TypeOf(received) == messageType
+	require.True(x.testingT, expectedType, fmt.Sprintf("expected %v, found %v", messageType, reflect.TypeOf(received)))
 }

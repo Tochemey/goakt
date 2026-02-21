@@ -29,46 +29,45 @@ import (
 	"os"
 	"os/signal"
 
-	goakt "github.com/tochemey/goakt/v3/actor"
-	"github.com/tochemey/goakt/v3/goaktpb"
+	"github.com/tochemey/goakt/v3/actor"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/supervisor"
 )
 
 type Foo struct{}
 
-var _ goakt.Actor = (*Foo)(nil)
+var _ actor.Actor = (*Foo)(nil)
 
-func (c *Foo) PreStart(*goakt.Context) error { return nil }
-func (c *Foo) PostStop(*goakt.Context) error { return nil }
+func (c *Foo) PreStart(*actor.Context) error { return nil }
+func (c *Foo) PostStop(*actor.Context) error { return nil }
 
-func (c *Foo) Receive(ctx *goakt.ReceiveContext) {
+func (c *Foo) Receive(ctx *actor.ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *actor.PostStart:
 		ctx.Spawn("bar", &Bar{},
-			goakt.WithSupervisor(supervisor.NewSupervisor(
+			actor.WithSupervisor(supervisor.NewSupervisor(
 				supervisor.WithAnyErrorDirective(supervisor.EscalateDirective),
 			)),
 		)
-	case *goaktpb.PanicSignal:
+	case *actor.PanicSignal:
 		ctx.Stop(ctx.Sender())
 	}
 }
 
 type Bar struct{}
 
-var _ goakt.Actor = (*Bar)(nil)
+var _ actor.Actor = (*Bar)(nil)
 
-func (c *Bar) PreStart(*goakt.Context) error { return nil }
-func (c *Bar) PostStop(*goakt.Context) error {
+func (c *Bar) PreStart(*actor.Context) error { return nil }
+func (c *Bar) PostStop(*actor.Context) error {
 	// this is unreachable
 	fmt.Println("bar stop")
 	return nil
 }
 
-func (c *Bar) Receive(ctx *goakt.ReceiveContext) {
+func (c *Bar) Receive(ctx *actor.ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *actor.PostStart:
 		ctx.Err(errors.New("test"))
 	}
 }
@@ -76,9 +75,9 @@ func (c *Bar) Receive(ctx *goakt.ReceiveContext) {
 func main() {
 	ctx := context.Background()
 
-	system, err := goakt.NewActorSystem(
+	system, err := actor.NewActorSystem(
 		"TestSystem",
-		goakt.WithLogger(log.DiscardLogger),
+		actor.WithLogger(log.DiscardLogger),
 	)
 	if err != nil {
 		panic(err)
@@ -89,7 +88,7 @@ func main() {
 		panic(err)
 	}
 
-	_, err = system.Spawn(ctx, "foo", &Foo{}, goakt.WithLongLived())
+	_, err = system.Spawn(ctx, "foo", &Foo{}, actor.WithLongLived())
 	if err != nil {
 		system.Logger().Fatal(err)
 		return

@@ -28,7 +28,6 @@ import (
 	"os"
 
 	"github.com/tochemey/goakt/v3/actor"
-	"github.com/tochemey/goakt/v3/goaktpb"
 )
 
 const numActors = 5
@@ -81,7 +80,7 @@ func (x *MyActor) PreStart(ctx *actor.Context) error {
 
 func (x *MyActor) Receive(ctx *actor.ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *actor.PostStart:
 		fmt.Printf("%s PostStart\n", ctx.Self().Name())
 	default:
 		ctx.Unhandled()

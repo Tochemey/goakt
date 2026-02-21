@@ -34,7 +34,6 @@ import (
 
 	"github.com/tochemey/goakt/v3/address"
 	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/internal/registry"
 	"github.com/tochemey/goakt/v3/log"
@@ -66,11 +65,11 @@ func TestDeathWatch(t *testing.T) {
 
 		pause.For(time.Second)
 
-		var items []*goaktpb.Deadletter
+		var items []*Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
 			// only listening to deadletter
-			deadletter, ok := payload.(*goaktpb.Deadletter)
+			deadletter, ok := payload.(*Deadletter)
 			if ok {
 				items = append(items, deadletter)
 			}
@@ -146,7 +145,7 @@ func TestDeathWatch(t *testing.T) {
 
 		addr := address.New(actorID, actorSystem.Name(), actorSystem.Host(), actorSystem.Port())
 
-		err = Tell(ctx, pid, &goaktpb.Terminated{Address: addr.String()})
+		err = Tell(ctx, pid, NewTerminated(addr.String()))
 		require.NoError(t, err)
 
 		pause.For(time.Second)
@@ -203,7 +202,7 @@ func TestDeathWatch(t *testing.T) {
 		require.NotNil(t, deathWatchPID)
 		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
 
-		terminated := &goaktpb.Terminated{Address: cid.ID()}
+		terminated := NewTerminated(cid.ID())
 		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, terminated)
 
 		err = deathWatchActor.handleTerminated(receiveCtx)
@@ -278,7 +277,7 @@ func TestDeathWatch(t *testing.T) {
 		clmock.EXPECT().RemoveActor(mock.Anything, actorName).Return(nil).Once()
 		clmock.EXPECT().RemoveKind(mock.Anything, expectedKind).Return(nil).Once()
 
-		terminated := &goaktpb.Terminated{Address: singletonPID.ID()}
+		terminated := NewTerminated(singletonPID.ID())
 		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, terminated)
 
 		require.NoError(t, deathWatchActor.handleTerminated(receiveCtx))

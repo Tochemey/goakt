@@ -27,7 +27,6 @@ import (
 	"fmt"
 
 	"github.com/tochemey/goakt/v3/actor"
-	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/log"
 )
 
@@ -59,7 +58,7 @@ func (x *MyActor) PreStart(*actor.Context) error {
 
 func (x *MyActor) Receive(ctx *actor.ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *actor.PostStart:
 		fmt.Println("PostStart")
 	default:
 		ctx.Unhandled()

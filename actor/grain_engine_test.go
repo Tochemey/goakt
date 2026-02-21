@@ -968,9 +968,9 @@ func TestRemoting_RemoteAskGrain_WithActorSystem(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
-	actual := new(testpb.Reply)
-	require.NoError(t, resp.UnmarshalTo(actual))
-	assert.Equal(t, "received message", actual.Content)
+	actual, ok := resp.(*testpb.Reply)
+	require.True(t, ok)
+	assert.Equal(t, "received message", actual.GetContent())
 
 	grains := sys.Grains(ctx, time.Second)
 	found := false

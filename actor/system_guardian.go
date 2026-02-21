@@ -25,7 +25,6 @@ package actor
 import (
 	"context"
 
-	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/log"
 )
@@ -56,14 +55,14 @@ func (x *systemGuardian) PreStart(*Context) error {
 // Receive handle message
 func (x *systemGuardian) Receive(ctx *ReceiveContext) {
 	switch msg := ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *PostStart:
 		x.handlePostStart(ctx)
 	case *internalpb.RebalanceComplete:
 		// TODO: TBD with the error
 		_ = x.completeRebalancing(msg)
-	case *goaktpb.Terminated:
+	case *Terminated:
 		// pass
-	case *goaktpb.PanicSignal:
+	case *PanicSignal:
 		x.handlePanicSignal(ctx)
 	default:
 		ctx.Unhandled()

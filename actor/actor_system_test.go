@@ -53,9 +53,8 @@ import (
 	"github.com/tochemey/goakt/v3/address"
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/extension"
-	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
-	internalpb "github.com/tochemey/goakt/v3/internal/internalpb"
+	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/metric"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/internal/registry"
@@ -566,10 +565,12 @@ func TestActorSystem(t *testing.T) {
 		pause.For(500 * time.Millisecond)
 
 		// send a message to the actor
-		reply, err := Ask(ctx, actorRef, new(testpb.TestReply), replyTimeout)
+		actual, err := Ask(ctx, actorRef, new(testpb.TestReply), replyTimeout)
 		require.NoError(t, err)
-		require.NotNil(t, reply)
+		require.NotNil(t, actual)
 		expected := new(testpb.Reply)
+		reply, ok := actual.(*testpb.Reply)
+		require.True(t, ok)
 		require.True(t, proto.Equal(expected, reply))
 		require.True(t, actorRef.IsRunning())
 
@@ -584,10 +585,10 @@ func TestActorSystem(t *testing.T) {
 		pause.For(time.Second)
 		require.True(t, actorRef.IsRunning())
 
-		var items []*goaktpb.ActorRestarted
+		var items []*ActorRestarted
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
-			restarted, ok := payload.(*goaktpb.ActorRestarted)
+			restarted, ok := payload.(*ActorRestarted)
 			if ok {
 				items = append(items, restarted)
 			}
@@ -596,9 +597,9 @@ func TestActorSystem(t *testing.T) {
 		require.Len(t, items, 1)
 
 		// send a message to the actor
-		reply, err = Ask(ctx, actorRef, new(testpb.TestReply), replyTimeout)
+		actual, err = Ask(ctx, actorRef, new(testpb.TestReply), replyTimeout)
 		require.NoError(t, err)
-		require.NotNil(t, reply)
+		require.NotNil(t, actual)
 
 		t.Cleanup(
 			func() {
@@ -656,9 +657,11 @@ func TestActorSystem(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// send a message to the actor
-		reply, err := Ask(ctx, actorRef, new(testpb.TestReply), replyTimeout)
+		actual, err := Ask(ctx, actorRef, new(testpb.TestReply), replyTimeout)
 		require.NoError(t, err)
-		require.NotNil(t, reply)
+		require.NotNil(t, actual)
+		reply, ok := actual.(*testpb.Reply)
+		require.True(t, ok)
 		expected := new(testpb.Reply)
 		require.True(t, proto.Equal(expected, reply))
 		require.True(t, actorRef.IsRunning())
@@ -712,10 +715,12 @@ func TestActorSystem(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// send a message to the actor
-		reply, err := Ask(ctx, actorRef, new(testpb.TestReply), replyTimeout)
+		actual, err := Ask(ctx, actorRef, new(testpb.TestReply), replyTimeout)
 		require.NoError(t, err)
-		require.NotNil(t, reply)
+		require.NotNil(t, actual)
 		expected := new(testpb.Reply)
+		reply, ok := actual.(*testpb.Reply)
+		require.True(t, ok)
 		require.True(t, proto.Equal(expected, reply))
 		require.True(t, actorRef.IsRunning())
 		// stop the actor after some time
@@ -1371,11 +1376,11 @@ func TestActorSystem(t *testing.T) {
 
 		pause.For(time.Second)
 
-		var items []*goaktpb.Deadletter
+		var items []*Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
 			// only listening to deadletter
-			deadletter, ok := payload.(*goaktpb.Deadletter)
+			deadletter, ok := payload.(*Deadletter)
 			if ok {
 				items = append(items, deadletter)
 			}
@@ -1535,12 +1540,12 @@ func TestActorSystem(t *testing.T) {
 		pause.For(time.Second)
 
 		// capture the joins
-		var joins []*goaktpb.NodeJoined
+		var joins []*NodeJoined
 		for event := range subscriber1.Iterator() {
 			// get the event payload
 			payload := event.Payload()
 			// only listening to cluster event
-			if nodeJoined, ok := payload.(*goaktpb.NodeJoined); ok {
+			if nodeJoined, ok := payload.(*NodeJoined); ok {
 				joins = append(joins, nodeJoined)
 			}
 		}
@@ -1548,7 +1553,7 @@ func TestActorSystem(t *testing.T) {
 		// assert the joins list
 		require.NotEmpty(t, joins)
 		require.Len(t, joins, 1)
-		require.Equal(t, peerAddress2, joins[0].GetAddress())
+		require.Equal(t, peerAddress2, joins[0].Address())
 
 		// wait for some time
 		pause.For(time.Second)
@@ -1561,12 +1566,12 @@ func TestActorSystem(t *testing.T) {
 		// wait for some time
 		pause.For(time.Second)
 
-		var lefts []*goaktpb.NodeLeft
+		var lefts []*NodeLeft
 		for event := range subscriber2.Iterator() {
 			payload := event.Payload()
 
 			// only listening to cluster event
-			nodeLeft, ok := payload.(*goaktpb.NodeLeft)
+			nodeLeft, ok := payload.(*NodeLeft)
 			if ok {
 				lefts = append(lefts, nodeLeft)
 			}
@@ -1574,7 +1579,7 @@ func TestActorSystem(t *testing.T) {
 
 		require.NotEmpty(t, lefts)
 		require.Len(t, lefts, 1)
-		require.Equal(t, peerAddress1, lefts[0].GetAddress())
+		require.Equal(t, peerAddress1, lefts[0].Address())
 
 		require.NoError(t, cl2.Unsubscribe(subscriber2))
 
@@ -1764,18 +1769,14 @@ func TestActorSystem(t *testing.T) {
 
 		// send the message to exchanger actor one using remote messaging
 		from := address.NoSender()
-		reply, err := remoting.RemoteAsk(ctx, from, addr, new(testpb.TestReply), 20*time.Second)
+		actual, err := remoting.RemoteAsk(ctx, from, addr, new(testpb.TestReply), 20*time.Second)
 
 		require.NoError(t, err)
-		require.NotNil(t, reply)
-		require.True(t, reply.MessageIs(new(testpb.Reply)))
-
-		actual := new(testpb.Reply)
-		err = reply.UnmarshalTo(actual)
-		require.NoError(t, err)
-
+		require.NotNil(t, actual)
+		reply, ok := actual.(*testpb.Reply)
+		require.True(t, ok)
 		expected := new(testpb.Reply)
-		assert.True(t, proto.Equal(expected, actual))
+		assert.True(t, proto.Equal(expected, reply))
 
 		t.Cleanup(
 			func() {
@@ -2235,11 +2236,11 @@ func TestActorSystem(t *testing.T) {
 
 		pause.For(time.Second)
 
-		var items []*goaktpb.Deadletter
+		var items []*Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
 			// only listening to deadletter
-			deadletter, ok := payload.(*goaktpb.Deadletter)
+			deadletter, ok := payload.(*Deadletter)
 			if ok {
 				items = append(items, deadletter)
 			}
@@ -2703,12 +2704,13 @@ func TestRemoteContextPropagation(t *testing.T) {
 		require.NoError(t, err)
 
 		requestCtx := context.WithValue(context.Background(), ctxKey, headerVal)
-		reply, err := rem.RemoteAsk(requestCtx, address.NoSender(), addr, new(testpb.TestReply), time.Second)
+		actual, err := rem.RemoteAsk(requestCtx, address.NoSender(), addr, new(testpb.TestReply), time.Second)
 		require.NoError(t, err)
+		require.NotNil(t, actual)
+		reply, ok := actual.(*testpb.Reply)
+		require.True(t, ok)
 
-		actual := new(testpb.Reply)
-		require.NoError(t, reply.UnmarshalTo(actual))
-		require.Equal(t, headerVal, actual.GetContent())
+		require.Equal(t, headerVal, reply.GetContent())
 		require.Equal(t, headerVal, actor.Seen())
 	})
 
@@ -3960,18 +3962,15 @@ func TestRemotingSpawn(t *testing.T) {
 
 		from := address.NoSender()
 		// send the message to exchanger actor one using remote messaging
-		reply, err := remoting.RemoteAsk(ctx, from, addr, new(testpb.TestReply), time.Minute)
+		actual, err := remoting.RemoteAsk(ctx, from, addr, new(testpb.TestReply), time.Minute)
 
 		require.NoError(t, err)
-		require.NotNil(t, reply)
-		require.True(t, reply.MessageIs(new(testpb.Reply)))
-
-		actual := new(testpb.Reply)
-		err = reply.UnmarshalTo(actual)
-		require.NoError(t, err)
+		require.NotNil(t, actual)
+		reply, ok := actual.(*testpb.Reply)
+		require.True(t, ok)
 
 		expected := new(testpb.Reply)
-		assert.True(t, proto.Equal(expected, actual))
+		assert.True(t, proto.Equal(expected, reply))
 
 		remoting.Close()
 		t.Cleanup(
@@ -4473,18 +4472,15 @@ func TestRemotingSpawn(t *testing.T) {
 
 		from := address.NoSender()
 		// send the message to exchanger actor one using remote messaging
-		reply, err := remoting.RemoteAsk(ctx, from, addr, new(testpb.TestReply), time.Minute)
+		actual, err := remoting.RemoteAsk(ctx, from, addr, new(testpb.TestReply), time.Minute)
 
 		require.NoError(t, err)
-		require.NotNil(t, reply)
-		require.True(t, reply.MessageIs(new(testpb.Reply)))
-
-		actual := new(testpb.Reply)
-		err = reply.UnmarshalTo(actual)
-		require.NoError(t, err)
+		require.NotNil(t, actual)
+		reply, ok := actual.(*testpb.Reply)
+		require.True(t, ok)
 
 		expected := new(testpb.Reply)
-		assert.True(t, proto.Equal(expected, actual))
+		assert.True(t, proto.Equal(expected, reply))
 
 		remoting.Close()
 		t.Cleanup(
@@ -4658,11 +4654,8 @@ func TestRemotingSpawn(t *testing.T) {
 
 		require.NoError(t, err)
 		require.NotNil(t, reply)
-		require.True(t, reply.MessageIs(new(testpb.Reply)))
-
-		actual := new(testpb.Reply)
-		err = reply.UnmarshalTo(actual)
-		require.NoError(t, err)
+		actual, ok := reply.(*testpb.Reply)
+		require.True(t, ok)
 
 		expected := new(testpb.Reply)
 		assert.True(t, proto.Equal(expected, actual))
@@ -4741,11 +4734,8 @@ func TestRemotingSpawn(t *testing.T) {
 
 		require.NoError(t, err)
 		require.NotNil(t, reply)
-		require.True(t, reply.MessageIs(new(testpb.Reply)))
-
-		actual := new(testpb.Reply)
-		err = reply.UnmarshalTo(actual)
-		require.NoError(t, err)
+		actual, ok := reply.(*testpb.Reply)
+		require.True(t, ok)
 
 		expected := new(testpb.Reply)
 		assert.True(t, proto.Equal(expected, actual))
@@ -4824,11 +4814,8 @@ func TestRemotingSpawn(t *testing.T) {
 
 		require.NoError(t, err)
 		require.NotNil(t, reply)
-		require.True(t, reply.MessageIs(new(testpb.Reply)))
-
-		actual := new(testpb.Reply)
-		err = reply.UnmarshalTo(actual)
-		require.NoError(t, err)
+		actual, ok := reply.(*testpb.Reply)
+		require.True(t, ok)
 
 		expected := new(testpb.Reply)
 		assert.True(t, proto.Equal(expected, actual))

@@ -39,12 +39,9 @@ import (
 	"github.com/tochemey/olric/hasher"
 	"github.com/tochemey/olric/pkg/storage"
 	"go.uber.org/atomic"
-	"google.golang.org/protobuf/types/known/anypb"
-	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/discovery"
-	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/hash"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/locker"
@@ -1272,12 +1269,12 @@ func (x *cluster) emitNodeLeftLocked(node string, timestamp int64) {
 	x.nodeLeftEventsFilter.Add(node)
 
 	timeMilli := timestamp / int64(time.Millisecond)
-	evt := &goaktpb.NodeLeft{
+	evt := &NodeLeftEvent{
 		Address:   node,
-		Timestamp: timestamppb.New(time.UnixMilli(timeMilli)),
+		Timestamp: time.UnixMilli(timeMilli),
 	}
-	payload, _ := anypb.New(evt)
-	x.sendEventLocked(&Event{Payload: payload, Type: NodeLeft})
+
+	x.sendEventLocked(&Event{Payload: evt, Type: NodeLeft})
 }
 
 func (x *cluster) emitNodeJoinedLocked(node string, timestamp int64) {
@@ -1287,12 +1284,12 @@ func (x *cluster) emitNodeJoinedLocked(node string, timestamp int64) {
 	x.nodeJoinedEventsFilter.Add(node)
 
 	timeMilli := timestamp / int64(time.Millisecond)
-	evt := &goaktpb.NodeJoined{
+	evt := &NodeJoinedEvent{
 		Address:   node,
-		Timestamp: timestamppb.New(time.UnixMilli(timeMilli)),
+		Timestamp: time.UnixMilli(timeMilli),
 	}
-	payload, _ := anypb.New(evt)
-	x.sendEventLocked(&Event{Payload: payload, Type: NodeJoined})
+
+	x.sendEventLocked(&Event{Payload: evt, Type: NodeJoined})
 }
 
 // sendEventLocked pushes an event if the channel is active, using non-blocking send.

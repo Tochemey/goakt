@@ -50,7 +50,6 @@ import (
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/discovery"
 	"github.com/tochemey/goakt/v3/discovery/nats"
-	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
@@ -1298,12 +1297,10 @@ func TestMultipleNodes(t *testing.T) {
 		require.NotEmpty(t, events)
 		require.Len(t, events, 2)
 		event := events[0]
-		msg, err := event.Payload.UnmarshalNew()
-		require.NoError(t, err)
-		nodeJoined, ok := msg.(*goaktpb.NodeJoined)
+		nodeJoined, ok := event.Payload.(*NodeJoinedEvent)
 		require.True(t, ok)
 		require.NotNil(t, nodeJoined)
-		require.Equal(t, node2Addr, nodeJoined.GetAddress())
+		require.Equal(t, node2Addr, nodeJoined.Address)
 		peers, err := node1.Peers(ctx)
 		require.NoError(t, err)
 		require.Len(t, peers, 2)
@@ -1420,12 +1417,10 @@ func TestMultipleNodes(t *testing.T) {
 		require.NotEmpty(t, events)
 		require.Len(t, events, 1)
 		event = events[0]
-		msg, err = event.Payload.UnmarshalNew()
-		require.NoError(t, err)
-		nodeLeft, ok := msg.(*goaktpb.NodeLeft)
+		nodeLeft, ok := event.Payload.(*NodeLeftEvent)
 		require.True(t, ok)
 		require.NotNil(t, nodeLeft)
-		require.Equal(t, node2Addr, nodeLeft.GetAddress())
+		require.Equal(t, node2Addr, nodeLeft.Address)
 
 		require.NoError(t, node1.Stop(ctx))
 		require.NoError(t, node3.Stop(ctx))
@@ -1498,12 +1493,10 @@ func TestMultipleNodes(t *testing.T) {
 		require.NotEmpty(t, events)
 		require.Len(t, events, 2)
 		event := events[0]
-		msg, err := event.Payload.UnmarshalNew()
-		require.NoError(t, err)
-		nodeJoined, ok := msg.(*goaktpb.NodeJoined)
+		nodeJoined, ok := event.Payload.(*NodeJoinedEvent)
 		require.True(t, ok)
 		require.NotNil(t, nodeJoined)
-		require.Equal(t, node2Addr, nodeJoined.GetAddress())
+		require.Equal(t, node2Addr, nodeJoined.Address)
 		peers, err := node1.Peers(ctx)
 		require.NoError(t, err)
 		require.Len(t, peers, 2)
@@ -1628,12 +1621,10 @@ func TestMultipleNodes(t *testing.T) {
 		require.NotEmpty(t, events)
 		require.Len(t, events, 1)
 		event = events[0]
-		msg, err = event.Payload.UnmarshalNew()
-		require.NoError(t, err)
-		nodeLeft, ok := msg.(*goaktpb.NodeLeft)
+		nodeLeft, ok := event.Payload.(*NodeLeftEvent)
 		require.True(t, ok)
 		require.NotNil(t, nodeLeft)
-		require.Equal(t, node2Addr, nodeLeft.GetAddress())
+		require.Equal(t, node2Addr, nodeLeft.Address)
 
 		require.NoError(t, node1.Stop(ctx))
 		require.NoError(t, node3.Stop(ctx))
@@ -2557,12 +2548,11 @@ func TestTrackNodeJoinEvent(t *testing.T) {
 		select {
 		case evt := <-cl.events:
 			require.Equal(t, NodeJoined, evt.Type)
-			msg, err := evt.Payload.UnmarshalNew()
-			require.NoError(t, err)
-			joined, ok := msg.(*goaktpb.NodeJoined)
+
+			joined, ok := evt.Payload.(*NodeJoinedEvent)
 			require.True(t, ok)
-			require.Equal(t, node, joined.GetAddress())
-			require.Equal(t, now/int64(time.Millisecond), joined.GetTimestamp().AsTime().UnixMilli())
+			require.Equal(t, node, joined.Address)
+			require.Equal(t, now/int64(time.Millisecond), joined.Timestamp.UnixMilli())
 		default:
 			t.Fatalf("expected event")
 		}
@@ -2598,11 +2588,9 @@ func TestTrackNodeJoinEvent(t *testing.T) {
 		select {
 		case evt := <-cl.events:
 			require.Equal(t, NodeJoined, evt.Type)
-			msg, err := evt.Payload.UnmarshalNew()
-			require.NoError(t, err)
-			joined, ok := msg.(*goaktpb.NodeJoined)
+			joined, ok := evt.Payload.(*NodeJoinedEvent)
 			require.True(t, ok)
-			require.Equal(t, now/int64(time.Millisecond), joined.GetTimestamp().AsTime().UnixMilli())
+			require.Equal(t, now/int64(time.Millisecond), joined.Timestamp.UnixMilli())
 		default:
 			t.Fatalf("expected event")
 		}
@@ -2648,12 +2636,10 @@ func TestTrackNodeLeftEvent(t *testing.T) {
 		select {
 		case evt := <-cl.events:
 			require.Equal(t, NodeLeft, evt.Type)
-			msg, err := evt.Payload.UnmarshalNew()
-			require.NoError(t, err)
-			left, ok := msg.(*goaktpb.NodeLeft)
+			left, ok := evt.Payload.(*NodeLeftEvent)
 			require.True(t, ok)
-			require.Equal(t, node, left.GetAddress())
-			require.Equal(t, now/int64(time.Millisecond), left.GetTimestamp().AsTime().UnixMilli())
+			require.Equal(t, node, left.Address)
+			require.Equal(t, now/int64(time.Millisecond), left.Timestamp.UnixMilli())
 		default:
 			t.Fatalf("expected event")
 		}
@@ -2676,11 +2662,9 @@ func TestTrackNodeLeftEvent(t *testing.T) {
 		select {
 		case evt := <-cl.events:
 			require.Equal(t, NodeLeft, evt.Type)
-			msg, err := evt.Payload.UnmarshalNew()
-			require.NoError(t, err)
-			left, ok := msg.(*goaktpb.NodeLeft)
+			left, ok := evt.Payload.(*NodeLeftEvent)
 			require.True(t, ok)
-			require.Equal(t, now/int64(time.Millisecond), left.GetTimestamp().AsTime().UnixMilli())
+			require.Equal(t, now/int64(time.Millisecond), left.Timestamp.UnixMilli())
 		default:
 			t.Fatalf("expected event")
 		}
@@ -2765,12 +2749,11 @@ func TestHandleClusterEventSuccessCases(t *testing.T) {
 		select {
 		case evt := <-cl.events:
 			require.Equal(t, NodeJoined, evt.Type)
-			msg, err := evt.Payload.UnmarshalNew()
+			joined, ok := evt.Payload.(*NodeJoinedEvent)
 			require.NoError(t, err)
-			joined, ok := msg.(*goaktpb.NodeJoined)
 			require.True(t, ok)
-			require.Equal(t, node, joined.GetAddress())
-			require.Equal(t, now/int64(time.Millisecond), joined.GetTimestamp().AsTime().UnixMilli())
+			require.Equal(t, node, joined.Address)
+			require.Equal(t, now/int64(time.Millisecond), joined.Timestamp.UnixMilli())
 		default:
 			t.Fatalf("expected node join event")
 		}
@@ -2810,12 +2793,10 @@ func TestHandleClusterEventSuccessCases(t *testing.T) {
 		select {
 		case evt := <-cl.events:
 			require.Equal(t, NodeLeft, evt.Type)
-			msg, err := evt.Payload.UnmarshalNew()
-			require.NoError(t, err)
-			left, ok := msg.(*goaktpb.NodeLeft)
+			left, ok := evt.Payload.(*NodeLeftEvent)
 			require.True(t, ok)
-			require.Equal(t, node, left.GetAddress())
-			require.Equal(t, now/int64(time.Millisecond), left.GetTimestamp().AsTime().UnixMilli())
+			require.Equal(t, node, left.Address)
+			require.Equal(t, now/int64(time.Millisecond), left.Timestamp.UnixMilli())
 		default:
 			t.Fatalf("expected node left event")
 		}

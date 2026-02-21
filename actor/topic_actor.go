@@ -26,11 +26,7 @@ import (
 	"context"
 	"sync"
 
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
-
 	"github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/types"
@@ -88,17 +84,17 @@ func (x *topicActor) PreStart(*Context) error {
 // Receive is called to process the message
 func (x *topicActor) Receive(ctx *ReceiveContext) {
 	switch msg := ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *PostStart:
 		x.handlePostStart(ctx)
-	case *goaktpb.Subscribe:
+	case *Subscribe:
 		x.handleSubscribe(ctx)
-	case *goaktpb.Unsubscribe:
+	case *Unsubscribe:
 		x.handleUnsubscribe(ctx)
-	case *goaktpb.Publish:
+	case *Publish:
 		x.handlePublish(ctx)
 	case *internalpb.TopicMessage:
 		x.handleTopicMessage(ctx)
-	case *goaktpb.Terminated:
+	case *Terminated:
 		x.handleTerminated(msg)
 	default:
 		ctx.Unhandled()
@@ -115,10 +111,10 @@ func (x *topicActor) PostStop(ctx *Context) error {
 
 // handlePublish handles Publish message
 func (x *topicActor) handlePublish(ctx *ReceiveContext) {
-	if publish, ok := ctx.Message().(*goaktpb.Publish); ok {
-		topic := publish.GetTopic()
-		message := publish.GetMessage()
-		messageID := publish.GetId()
+	if publish, ok := ctx.Message().(*Publish); ok {
+		topic := publish.Topic()
+		message := publish.Message()
+		messageID := publish.ID()
 
 		var senderID string
 		if sender := ctx.Sender(); sender != nil {
@@ -144,7 +140,7 @@ func (x *topicActor) handlePublish(ctx *ReceiveContext) {
 		actorName := reservedName(topicActorType)
 
 		// this will be sent to the local subscribers
-		msg, _ := message.UnmarshalNew()
+		msg := message
 
 		// send the message to all local subscribers in a separate goroutine
 		wg.Add(1)
@@ -187,7 +183,7 @@ func buildRemotePeers(peers []*cluster.Peer) []remotePeer {
 	return remotePeers
 }
 
-func (x *topicActor) sendToLocalSubscribers(cctx context.Context, topic string, msg proto.Message, wg *sync.WaitGroup) {
+func (x *topicActor) sendToLocalSubscribers(cctx context.Context, topic string, msg any, wg *sync.WaitGroup) {
 	if subscribers, ok := x.topics.Get(topic); ok && subscribers.Len() != 0 {
 		for _, subscriber := range subscribers.Values() {
 			subscriber := subscriber
@@ -210,7 +206,7 @@ func (x *topicActor) sendToLocalSubscribers(cctx context.Context, topic string, 
 	}
 }
 
-func (x *topicActor) sendToRemoteTopicActors(cctx context.Context, remotePeers []remotePeer, actorName, messageID, topic string, message *anypb.Any, wg *sync.WaitGroup) {
+func (x *topicActor) sendToRemoteTopicActors(cctx context.Context, remotePeers []remotePeer, actorName, messageID, topic string, message any, wg *sync.WaitGroup) {
 	if len(remotePeers) > 0 {
 		for _, peer := range remotePeers {
 			peer := peer
@@ -224,10 +220,22 @@ func (x *topicActor) sendToRemoteTopicActors(cctx context.Context, remotePeers [
 					return
 				}
 
+				serializer := x.remoting.Serializer(message)
+				if serializer == nil {
+					x.logger.Warnf("failed to get serializer for message type %T", message)
+					return
+				}
+
+				marshaled, err := serializer.Serialize(message)
+				if err != nil {
+					x.logger.Warnf("failed to serialize message: %s", err.Error())
+					return
+				}
+
 				toSend := &internalpb.TopicMessage{
 					Id:      messageID,
 					Topic:   topic,
-					Message: message,
+					Message: marshaled,
 				}
 
 				from := x.pid.Address()
@@ -248,10 +256,10 @@ func (x *topicActor) sendToRemoteTopicActors(cctx context.Context, remotePeers [
 // This is called when a subscriber actor is terminated.
 // We remove the subscriber from all topics it is subscribed to.
 // This is important to avoid memory leaks and ensure that we do not send messages to terminated actors.
-func (x *topicActor) handleTerminated(msg *goaktpb.Terminated) {
+func (x *topicActor) handleTerminated(msg *Terminated) {
 	for topic, subscribers := range x.topics.Values() {
 		// remove the subscriber from the topics
-		actorID := msg.GetAddress()
+		actorID := msg.Address()
 		if subscriber, ok := subscribers.Get(actorID); ok {
 			subscribers.Delete(subscriber.ID())
 			x.logger.Debugf("removed actor %s from topic %s", subscriber.Name(), topic)
@@ -262,11 +270,11 @@ func (x *topicActor) handleTerminated(msg *goaktpb.Terminated) {
 // handleUnsubscribe handles Unsubscribe message
 func (x *topicActor) handleUnsubscribe(ctx *ReceiveContext) {
 	sender := ctx.Sender()
-	if message, ok := ctx.Message().(*goaktpb.Unsubscribe); ok {
-		topic := message.GetTopic()
+	if message, ok := ctx.Message().(*Unsubscribe); ok {
+		topic := message.Topic()
 		if subscribers, ok := x.topics.Get(topic); ok {
 			subscribers.Delete(sender.ID())
-			ctx.Tell(sender, &goaktpb.UnsubscribeAck{Topic: topic})
+			ctx.Tell(sender, NewUnsubscribeAck(topic))
 		}
 	}
 }
@@ -274,13 +282,13 @@ func (x *topicActor) handleUnsubscribe(ctx *ReceiveContext) {
 // handleSubscribe handles Subscribe message
 func (x *topicActor) handleSubscribe(ctx *ReceiveContext) {
 	sender := ctx.Sender()
-	if message, ok := ctx.Message().(*goaktpb.Subscribe); ok && sender.IsRunning() {
-		topic := message.GetTopic()
+	if message, ok := ctx.Message().(*Subscribe); ok && sender.IsRunning() {
+		topic := message.Topic()
 		// check if the topic exists
 		if subscribers, ok := x.topics.Get(topic); ok && subscribers.Len() != 0 {
 			subscribers.Set(sender.ID(), sender)
 			ctx.Watch(sender)
-			ctx.Tell(sender, &goaktpb.SubscribeAck{Topic: topic})
+			ctx.Tell(sender, NewSubscribeAck(topic))
 			return
 		}
 
@@ -289,7 +297,7 @@ func (x *topicActor) handleSubscribe(ctx *ReceiveContext) {
 		subscribers.Set(sender.ID(), sender)
 		x.topics.Set(topic, subscribers)
 		ctx.Watch(sender)
-		ctx.Tell(sender, &goaktpb.SubscribeAck{Topic: topic})
+		ctx.Tell(sender, NewSubscribeAck(topic))
 	}
 }
 
@@ -308,8 +316,20 @@ func (x *topicActor) handlePostStart(ctx *ReceiveContext) {
 // If we already processed the message we discard it.
 func (x *topicActor) handleTopicMessage(ctx *ReceiveContext) {
 	if topicMessage, ok := ctx.Message().(*internalpb.TopicMessage); ok {
-		topic := topicMessage.GetTopic()
-		message, _ := topicMessage.GetMessage().UnmarshalNew()
+		topic := topicMessage.Topic
+
+		serializer := x.remoting.Serializer(nil)
+		if serializer == nil {
+			x.logger.Warnf("failed to get deserializer for topic message")
+			return
+		}
+
+		message, err := serializer.Deserialize(topicMessage.Message)
+		if err != nil {
+			x.logger.Warnf("failed to deserialize message: %s", err.Error())
+			return
+		}
+
 		messageID := topicMessage.GetId()
 		senderID := ctx.RemoteSender().String()
 

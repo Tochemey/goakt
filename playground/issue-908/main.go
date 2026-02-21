@@ -28,7 +28,6 @@ import (
 	"time"
 
 	goakt "github.com/tochemey/goakt/v3/actor"
-	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/pause"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/supervisor"
@@ -45,7 +44,7 @@ func (x *A) PreStart(*goakt.Context) error { return nil }
 func (x *A) PostStop(*goakt.Context) error { return nil }
 func (x *A) Receive(ctx *goakt.ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *goakt.PostStart:
 	case *testpb.TestSend:
 		pause.For(1 * time.Second)
 		ctx.Context().Value("test")
@@ -58,14 +57,14 @@ func (x *B) PreStart(*goakt.Context) error { return nil }
 func (x *B) PostStop(*goakt.Context) error { return nil }
 func (x *B) Receive(ctx *goakt.ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *goakt.PostStart:
 		pid := ctx.Spawn(
 			"a", &A{},
 			goakt.WithLongLived(),
 		)
 		ctx.Tell(pid, &testpb.TestSend{})
 		ctx.Tell(ctx.Self(), &testpb.TestSend{})
-	case *goaktpb.PanicSignal:
+	case *goakt.PanicSignal:
 		ctx.Stop(ctx.Sender())
 		ctx.Stop(ctx.Self())
 	default:

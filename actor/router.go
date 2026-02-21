@@ -31,10 +31,8 @@ import (
 	"time"
 
 	"github.com/flowchartsman/retry"
-	"google.golang.org/protobuf/proto"
 
 	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/ticker"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/supervisor"
@@ -114,7 +112,7 @@ func (x *router) PreStart(ctx *Context) error {
 func (x *router) Receive(ctx *ReceiveContext) {
 	message := ctx.Message()
 	switch message.(type) {
-	case *goaktpb.PostStart:
+	case *PostStart:
 		x.postStart(ctx)
 	default:
 		ctx.Unhandled()
@@ -138,13 +136,13 @@ func (x *router) postStart(ctx *ReceiveContext) {
 // broadcast send message to all the routeesMap
 func (x *router) broadcast(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.Broadcast:
+	case *Broadcast:
 		x.handleBroadcast(ctx)
-	case *goaktpb.PanicSignal:
+	case *PanicSignal:
 		x.handlePanicSignal(ctx)
-	case *goaktpb.GetRoutees:
+	case *GetRoutees:
 		x.handleGetRoutees(ctx)
-	case *goaktpb.AdjustRouterPoolSize:
+	case *AdjustRouterPoolSize:
 		x.handleAjustRouterPoolSize(ctx)
 	default:
 		ctx.Unhandled()
@@ -152,8 +150,8 @@ func (x *router) broadcast(ctx *ReceiveContext) {
 }
 
 func (x *router) handleAjustRouterPoolSize(ctx *ReceiveContext) {
-	message := ctx.Message().(*goaktpb.AdjustRouterPoolSize)
-	delta := int(message.GetPoolSize())
+	message := ctx.Message().(*AdjustRouterPoolSize)
+	delta := int(message.PoolSize())
 	if delta == 0 {
 		// nothing to do
 		return
@@ -219,9 +217,7 @@ func (x *router) handleGetRoutees(ctx *ReceiveContext) {
 	for _, routee := range routees {
 		names = append(names, routee.Name())
 	}
-	ctx.Response(&goaktpb.Routees{
-		Names: names,
-	})
+	ctx.Response(NewRoutees(names))
 }
 
 func (x *router) handlePanicSignal(ctx *ReceiveContext) {
@@ -289,14 +285,8 @@ func (x *router) handleBroadcast(ctx *ReceiveContext) {
 		return
 	}
 
-	message := ctx.Message().(*goaktpb.Broadcast)
-	payload, err := message.GetMessage().UnmarshalNew()
-	if err != nil {
-		ctx.Err(err)
-		return
-	}
-
-	x.dispatchToRoutees(ctx, payload, routees)
+	message := ctx.Message().(*Broadcast)
+	x.dispatchToRoutees(ctx, message.Message(), routees)
 }
 
 func (x *router) handleNoRoutees(ctx *ReceiveContext) {
@@ -318,7 +308,7 @@ func (x *router) handleNoRoutees(ctx *ReceiveContext) {
 //
 // The method keeps the router non-blocking: every Tell happens asynchronously and
 // specialized strategies offload long-running work into goroutines.
-func (x *router) dispatchToRoutees(ctx *ReceiveContext, msg proto.Message, routees []*PID) {
+func (x *router) dispatchToRoutees(ctx *ReceiveContext, msg any, routees []*PID) {
 	switch x.kind {
 	case tailChoppingRouter:
 		x.tailChopping(ctx, msg, routees)
@@ -329,7 +319,7 @@ func (x *router) dispatchToRoutees(ctx *ReceiveContext, msg proto.Message, route
 	}
 }
 
-func (x *router) routeByStrategy(ctx *ReceiveContext, msg proto.Message, routees []*PID) {
+func (x *router) routeByStrategy(ctx *ReceiveContext, msg any, routees []*PID) {
 	switch x.routingStrategy {
 	case RoundRobinRouting:
 		n := atomic.AddUint32(&x.roundRobinNext, 1)
@@ -367,17 +357,14 @@ func (x *router) routeByStrategy(ctx *ReceiveContext, msg proto.Message, routees
 //
 // The method never blocks the router actor: all IO happens in goroutines and outcomes are pushed
 // asynchronously back to the sender, preserving the router's fire-and-forget contract.
-func (x *router) scatterGatherFirst(ctx *ReceiveContext, msg proto.Message, routees []*PID) {
+func (x *router) scatterGatherFirst(ctx *ReceiveContext, msg any, routees []*PID) {
 	logger := ctx.Logger()
 	sender := ctx.Sender()
-	broadcast := ctx.Message().(*goaktpb.Broadcast)
+	broadcast := ctx.Message().(*Broadcast)
 	within := x.within
 
 	sendTimeout := func() {
-		ctx.Tell(sender, &goaktpb.StatusFailure{
-			Error:   gerrors.ErrRequestTimeout.Error(),
-			Message: broadcast.GetMessage(),
-		})
+		ctx.Tell(sender, NewStatusFailure(gerrors.ErrRequestTimeout.Error(), broadcast.Message()))
 	}
 
 	noSender := ctx.ActorSystem().NoSender()
@@ -385,18 +372,17 @@ func (x *router) scatterGatherFirst(ctx *ReceiveContext, msg proto.Message, rout
 	deadlineCtx, cancel := context.WithTimeout(ctx.Context(), within)
 	defer cancel()
 	type askResult struct {
-		resp proto.Message
+		resp any
 		err  error
 	}
 
 	results := make(chan askResult, len(routees))
 
 	for _, routee := range routees {
-		payload := proto.Clone(msg)
-		go func(to *PID, payload proto.Message) {
+		go func(to *PID, payload any) {
 			resp, err := noSender.Ask(deadlineCtx, to, payload, within)
 			results <- askResult{resp: resp, err: err}
-		}(routee, payload)
+		}(routee, msg)
 	}
 
 	pending := len(routees)
@@ -442,17 +428,14 @@ func (x *router) scatterGatherFirst(ctx *ReceiveContext, msg proto.Message, rout
 //
 // This keeps router behavior asynchronous: the router never blocks, and replies arrive to the
 // sender as ordinary messages rather than Ask responses.
-func (x *router) tailChopping(ctx *ReceiveContext, msg proto.Message, routees []*PID) {
+func (x *router) tailChopping(ctx *ReceiveContext, msg any, routees []*PID) {
 	sender := ctx.Sender()
-	broadcast := ctx.Message().(*goaktpb.Broadcast)
+	broadcast := ctx.Message().(*Broadcast)
 	interval := x.interval
 	within := x.within
 
 	sendTimeout := func() {
-		ctx.Tell(sender, &goaktpb.StatusFailure{
-			Error:   gerrors.ErrRequestTimeout.Error(),
-			Message: broadcast.GetMessage(),
-		})
+		ctx.Tell(sender, NewStatusFailure(gerrors.ErrRequestTimeout.Error(), broadcast.Message()))
 	}
 
 	shuffled := reshuffleRoutees(routees)
@@ -462,7 +445,7 @@ func (x *router) tailChopping(ctx *ReceiveContext, msg proto.Message, routees []
 	defer cancel()
 
 	type askResult struct {
-		resp proto.Message
+		resp any
 		err  error
 	}
 
@@ -479,9 +462,8 @@ func (x *router) tailChopping(ctx *ReceiveContext, msg proto.Message, routees []
 			return
 		}
 
-		payload := proto.Clone(msg)
 		go func(to *PID, timeout time.Duration) {
-			resp, err := noSender.Ask(deadlineCtx, to, payload, timeout)
+			resp, err := noSender.Ask(deadlineCtx, to, msg, timeout)
 			results <- askResult{resp: resp, err: err}
 		}(routee, remaining)
 	}

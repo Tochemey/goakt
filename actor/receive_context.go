@@ -27,9 +27,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
-
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/extension"
@@ -91,10 +88,10 @@ type ReceiveContext struct {
 	// a live reference. The flag is cleared when the context is unstashed.
 	stashed        atomic.Bool
 	ctx            context.Context
-	message        proto.Message
+	message        any
 	sender         *PID
 	remoteSender   *address.Address
-	response       chan proto.Message
+	response       chan any
 	responseClosed atomic.Bool
 	requestID      string
 	requestReplyTo string
@@ -137,7 +134,7 @@ func (rctx *ReceiveContext) Err(err error) {
 //
 // Use Respond/Response exactly once per Ask-initiated message. Multiple calls may
 // be ignored or override each other depending on the underlying channel semantics.
-func (rctx *ReceiveContext) Response(resp proto.Message) {
+func (rctx *ReceiveContext) Response(resp any) {
 	if rctx.response == nil {
 		if rctx.requestID == "" {
 			return
@@ -194,7 +191,7 @@ func (rctx *ReceiveContext) RemoteSender() *address.Address {
 //
 // Treat the returned message as immutable. Use type assertions or pattern matching
 // on the message type to implement your actor behavior.
-func (rctx *ReceiveContext) Message() proto.Message {
+func (rctx *ReceiveContext) Message() any {
 	return rctx.message
 }
 
@@ -290,7 +287,7 @@ func (rctx *ReceiveContext) UnstashAll() {
 //
 // Delivery preserves ordering per-sender. This method does not block.
 // Use Ask when a reply is needed.
-func (rctx *ReceiveContext) Tell(to *PID, message proto.Message) {
+func (rctx *ReceiveContext) Tell(to *PID, message any) {
 	recipient := rctx.self
 	ctx := rctx.withoutCancel()
 	if err := recipient.Tell(ctx, to, message); err != nil {
@@ -303,7 +300,7 @@ func (rctx *ReceiveContext) Tell(to *PID, message proto.Message) {
 // Messages are enqueued and processed one at a time in the order provided.
 // This preserves the actor model's single-threaded processing guarantee.
 // For a single message, this is equivalent to Tell.
-func (rctx *ReceiveContext) BatchTell(to *PID, messages ...proto.Message) {
+func (rctx *ReceiveContext) BatchTell(to *PID, messages ...any) {
 	recipient := rctx.self
 	ctx := rctx.withoutCancel()
 	if err := recipient.BatchTell(ctx, to, messages...); err != nil {
@@ -319,7 +316,7 @@ func (rctx *ReceiveContext) BatchTell(to *PID, messages ...proto.Message) {
 //
 // Prefer small timeouts and design protocols so that timeouts are treated as
 // expected failures.
-func (rctx *ReceiveContext) Ask(to *PID, message proto.Message, timeout time.Duration) (response proto.Message) {
+func (rctx *ReceiveContext) Ask(to *PID, message any, timeout time.Duration) (response any) {
 	self := rctx.self
 	ctx := rctx.withoutCancel()
 	reply, err := self.Ask(ctx, to, message, timeout)
@@ -351,7 +348,7 @@ func (rctx *ReceiveContext) Ask(to *PID, message proto.Message, timeout time.Dur
 //     Defaults may be configured at actor/system level.
 //
 // On failure to initiate the request, Err is set and the returned call is nil.
-func (rctx *ReceiveContext) Request(to *PID, message proto.Message, opts ...RequestOption) RequestCall {
+func (rctx *ReceiveContext) Request(to *PID, message any, opts ...RequestOption) RequestCall {
 	self := rctx.self
 	ctx := rctx.withoutCancel()
 	call, err := self.request(ctx, to, message, opts...)
@@ -383,7 +380,7 @@ func (rctx *ReceiveContext) Request(to *PID, message proto.Message, opts ...Requ
 //     Defaults may be configured at actor/system level.
 //
 // On failure to initiate the request, Err is set and the returned call is nil.
-func (rctx *ReceiveContext) RequestName(actorName string, message proto.Message, opts ...RequestOption) RequestCall {
+func (rctx *ReceiveContext) RequestName(actorName string, message any, opts ...RequestOption) RequestCall {
 	self := rctx.self
 	ctx := rctx.withoutCancel()
 	call, err := self.requestName(ctx, actorName, message, opts...)
@@ -398,7 +395,7 @@ func (rctx *ReceiveContext) RequestName(actorName string, message proto.Message,
 //
 // The actor name is resolved within the system (local or cluster), if supported.
 // This call does not block and does not expect a reply.
-func (rctx *ReceiveContext) SendAsync(actorName string, message proto.Message) {
+func (rctx *ReceiveContext) SendAsync(actorName string, message any) {
 	self := rctx.self
 	ctx := rctx.withoutCancel()
 	if err := self.SendAsync(ctx, actorName, message); err != nil {
@@ -411,7 +408,7 @@ func (rctx *ReceiveContext) SendAsync(actorName string, message proto.Message) {
 // The actor may be local or remote, depending on system configuration. Blocks until
 // a response is received or the timeout expires. On error or timeout, the error is
 // recorded via Err and the returned response may be nil.
-func (rctx *ReceiveContext) SendSync(actorName string, message proto.Message, timeout time.Duration) (response proto.Message) {
+func (rctx *ReceiveContext) SendSync(actorName string, message any, timeout time.Duration) (response any) {
 	self := rctx.self
 	ctx := rctx.withoutCancel()
 	reply, err := self.SendSync(ctx, actorName, message, timeout)
@@ -425,7 +422,7 @@ func (rctx *ReceiveContext) SendSync(actorName string, message proto.Message, ti
 //
 // Replies are returned on a channel in the same order as the input messages.
 // Use the provided timeout to bound the overall wait. Errors are recorded via Err.
-func (rctx *ReceiveContext) BatchAsk(to *PID, messages []proto.Message, timeout time.Duration) (responses chan proto.Message) {
+func (rctx *ReceiveContext) BatchAsk(to *PID, messages []any, timeout time.Duration) (responses chan any) {
 	recipient := rctx.self
 	ctx := rctx.withoutCancel()
 	reply, err := recipient.BatchAsk(ctx, to, messages, timeout)
@@ -438,7 +435,7 @@ func (rctx *ReceiveContext) BatchAsk(to *PID, messages []proto.Message, timeout 
 // RemoteTell sends a fire-and-forget message to a remote actor address.
 //
 // Requires remoting to be enabled and properly configured. This call does not block.
-func (rctx *ReceiveContext) RemoteTell(to *address.Address, message proto.Message) {
+func (rctx *ReceiveContext) RemoteTell(to *address.Address, message any) {
 	recipient := rctx.self
 	ctx := rctx.withoutCancel()
 	if err := recipient.RemoteTell(ctx, to, message); err != nil {
@@ -451,7 +448,7 @@ func (rctx *ReceiveContext) RemoteTell(to *address.Address, message proto.Messag
 // The response is returned as a protobuf Any. On error or timeout, the error is
 // recorded via Err and the returned value may be nil. Ensure both sides agree
 // on message types and serialization.
-func (rctx *ReceiveContext) RemoteAsk(to *address.Address, message proto.Message, timeout time.Duration) (response *anypb.Any) {
+func (rctx *ReceiveContext) RemoteAsk(to *address.Address, message any, timeout time.Duration) (response any) {
 	recipient := rctx.self
 	ctx := rctx.withoutCancel()
 	reply, err := recipient.RemoteAsk(ctx, to, message, timeout)
@@ -464,7 +461,7 @@ func (rctx *ReceiveContext) RemoteAsk(to *address.Address, message proto.Message
 // RemoteBatchTell sends multiple messages to a remote actor in a fire-and-forget manner.
 //
 // Messages are processed one-by-one in order by the recipient.
-func (rctx *ReceiveContext) RemoteBatchTell(to *address.Address, messages []proto.Message) {
+func (rctx *ReceiveContext) RemoteBatchTell(to *address.Address, messages []any) {
 	recipient := rctx.self
 	ctx := rctx.withoutCancel()
 	if err := recipient.RemoteBatchTell(ctx, to, messages); err != nil {
@@ -476,7 +473,7 @@ func (rctx *ReceiveContext) RemoteBatchTell(to *address.Address, messages []prot
 //
 // Replies are returned as a slice of Any in the same order as the input messages.
 // Use the timeout to bound the overall wait. Errors are recorded via Err.
-func (rctx *ReceiveContext) RemoteBatchAsk(to *address.Address, messages []proto.Message, timeout time.Duration) (responses []*anypb.Any) {
+func (rctx *ReceiveContext) RemoteBatchAsk(to *address.Address, messages []any, timeout time.Duration) (responses []any) {
 	recipient := rctx.self
 	ctx := rctx.withoutCancel()
 	replies, err := recipient.RemoteBatchAsk(ctx, to, messages, timeout)
@@ -648,7 +645,7 @@ func (rctx *ReceiveContext) RemoteReSpawn(host string, port int, name string) {
 //
 // The task runs outside the actor's mailbox thread. Avoid mutating the actor's
 // internal state inside the task. Communicate results via the returned message.
-func (rctx *ReceiveContext) PipeTo(to *PID, task func() (proto.Message, error), opts ...PipeOption) {
+func (rctx *ReceiveContext) PipeTo(to *PID, task func() (any, error), opts ...PipeOption) {
 	recipient := rctx.self
 	ctx := rctx.withoutCancel()
 	if err := recipient.PipeTo(ctx, to, task, opts...); err != nil {
@@ -660,7 +657,7 @@ func (rctx *ReceiveContext) PipeTo(to *PID, task func() (proto.Message, error), 
 //
 // Unlike PipeTo, the target is resolved by name (location transparent).
 // Semantics otherwise match PipeTo. Use this to decouple background work from a specific PID.
-func (rctx *ReceiveContext) PipeToName(actorName string, task func() (proto.Message, error), opts ...PipeOption) {
+func (rctx *ReceiveContext) PipeToName(actorName string, task func() (any, error), opts ...PipeOption) {
 	recipient := rctx.self
 	ctx := rctx.withoutCancel()
 	if err := recipient.PipeToName(ctx, actorName, task, opts...); err != nil {
@@ -800,7 +797,7 @@ func (rctx *ReceiveContext) getError() error {
 // newReceiveContext constructs a ReceiveContext for internal use by the runtime.
 //
 // Callers should prefer the context provided by the framework during message delivery.
-func newReceiveContext(ctx context.Context, from, to *PID, message proto.Message) *ReceiveContext {
+func newReceiveContext(ctx context.Context, from, to *PID, message any) *ReceiveContext {
 	// create a message receiveContext
 	rc := &ReceiveContext{
 		ctx:      ctx,
@@ -817,7 +814,7 @@ func newReceiveContext(ctx context.Context, from, to *PID, message proto.Message
 //
 // If async is true, the context is derived with context.WithoutCancel to prevent
 // premature cancellation during asynchronous forwarding and dispatch.
-func (rctx *ReceiveContext) build(ctx context.Context, from, to *PID, message proto.Message, async bool) *ReceiveContext {
+func (rctx *ReceiveContext) build(ctx context.Context, from, to *PID, message any, async bool) *ReceiveContext {
 	// Mark context as in-use to prevent concurrent reset().
 	// This protects against sync.Pool races where a context is returned
 	// to the pool while another goroutine is retrieving and building it.

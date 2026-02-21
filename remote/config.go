@@ -24,8 +24,11 @@ package remote
 
 import (
 	"net"
+	"reflect"
 	"strconv"
 	"time"
+
+	"google.golang.org/protobuf/proto"
 
 	inet "github.com/tochemey/goakt/v3/internal/net"
 	"github.com/tochemey/goakt/v3/internal/size"
@@ -51,6 +54,10 @@ type Config struct {
 	bindPort          int
 	compression       Compression
 	contextPropagator ContextPropagator
+	// serializers holds all per-type and per-interface serializer entries
+	// evaluated in registration order by [Config.Serializer].
+	// Populated only during construction; never mutated afterwards.
+	serializers []ifaceEntry
 }
 
 var _ validation.Validator = (*Config)(nil)
@@ -70,7 +77,14 @@ func NewConfig(bindAddr string, bindPort int, opts ...Option) *Config {
 		bindAddr:        bindAddr,
 		bindPort:        bindPort,
 		compression:     ZstdCompression,
+		serializers:     make([]ifaceEntry, 0, 4),
 	}
+
+	// Register the default proto serializer for all proto.Message implementations.
+	cfg.serializers = append(cfg.serializers, ifaceEntry{
+		iface:      reflect.TypeOf((*proto.Message)(nil)).Elem(),
+		serializer: NewProtoSerializer(),
+	})
 
 	// apply the options
 	for _, opt := range opts {
@@ -82,7 +96,7 @@ func NewConfig(bindAddr string, bindPort int, opts ...Option) *Config {
 
 // DefaultConfig returns the default remote config
 func DefaultConfig() *Config {
-	return &Config{
+	cfg := &Config{
 		maxFrameSize:    16 * size.MB,
 		writeTimeout:    10 * time.Second,
 		readIdleTimeout: 10 * time.Second,
@@ -90,7 +104,16 @@ func DefaultConfig() *Config {
 		bindAddr:        "127.0.0.1",
 		bindPort:        0,
 		compression:     ZstdCompression,
+		serializers:     make([]ifaceEntry, 0, 4),
 	}
+
+	// Register the default proto serializer for all proto.Message implementations.
+	cfg.serializers = append(cfg.serializers, ifaceEntry{
+		iface:      reflect.TypeOf((*proto.Message)(nil)).Elem(),
+		serializer: NewProtoSerializer(),
+	})
+
+	return cfg
 }
 
 // IdleTimeout specifies how long until idle clients should be
@@ -143,6 +166,34 @@ func (x *Config) ContextPropagator() ContextPropagator {
 	return x.contextPropagator
 }
 
+// Serializer returns the [Serializer] registered for the given message, using
+// the same dispatch order as [Remoting.Serializer]:
+//
+//  1. Exact concrete type — the entry registered with the message's dynamic type.
+//  2. Interface match — the first registered interface the message implements.
+//
+// Returns nil when message is nil or no entry matches.
+func (x *Config) Serializer(msg any) Serializer {
+	if msg == nil {
+		return nil
+	}
+	msgType := reflect.TypeOf(msg)
+	if msgType == nil {
+		return nil
+	}
+	for i := range x.serializers {
+		entry := &x.serializers[i]
+		if entry.iface.Kind() == reflect.Interface {
+			if msgType.Implements(entry.iface) {
+				return entry.serializer
+			}
+		} else if msgType == entry.iface {
+			return entry.serializer
+		}
+	}
+	return nil
+}
+
 // Sanitize the configuration
 func (x *Config) Sanitize() error {
 	var err error
@@ -163,5 +214,6 @@ func (x *Config) Validate() error {
 		AddAssertion(x.bindPort >= 0 && x.bindPort <= 65535, "invalid bindPort").
 		AddAssertion(x.readIdleTimeout >= 0, "invalid server read idle timeout").
 		AddAssertion(x.writeTimeout >= 0, "invalid server write timeout").
+		AddAssertion(len(x.serializers) > 0, "at least one serializer is required").
 		Validate()
 }

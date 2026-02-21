@@ -30,7 +30,6 @@ import (
 	"time"
 
 	"github.com/tochemey/goakt/v3/actor"
-	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/log"
 	"github.com/tochemey/goakt/v3/passivation"
 	"github.com/tochemey/goakt/v3/supervisor"
@@ -93,7 +92,7 @@ func (p *Parent) PreStart(ctx *actor.Context) error {
 
 func (p *Parent) Receive(ctx *actor.ReceiveContext) {
 	switch msg := ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *actor.PostStart:
 		ctx.Logger().Infof("%s successfully started", ctx.Self().Name())
 		// Spawn a child actor
 		pid := ctx.Spawn("child", &Child{},
@@ -106,9 +105,9 @@ func (p *Parent) Receive(ctx *actor.ReceiveContext) {
 			ctx.Logger().Infof("Child actor %s successfully spawned", pid.Name())
 			p.child = pid
 		}
-	case *goaktpb.Terminated:
+	case *actor.Terminated:
 		// Handle termination of child actors
-		actorID := msg.GetAddress()
+		actorID := msg.Address()
 		ctx.Logger().Infof("Child actor %s has been terminated", actorID)
 	default:
 		ctx.Unhandled()
@@ -131,7 +130,7 @@ func (x *Child) PreStart(ctx *actor.Context) error {
 
 func (x *Child) Receive(ctx *actor.ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *actor.PostStart:
 		ctx.Logger().Infof("%s successfully started", ctx.Self().Name())
 	case *testpb.TestBye:
 		ctx.Logger().Infof("Received bye message, stopping Child actor %s", ctx.Self().Name())

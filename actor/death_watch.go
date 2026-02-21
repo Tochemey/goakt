@@ -28,7 +28,6 @@ import (
 	"go.uber.org/multierr"
 
 	"github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/pointer"
 	"github.com/tochemey/goakt/v3/internal/registry"
 )
@@ -53,9 +52,9 @@ func (x *deathWatch) PreStart(*Context) error {
 // Receive a handle message received
 func (x *deathWatch) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *PostStart:
 		x.handlePostStart(ctx)
-	case *goaktpb.Terminated:
+	case *Terminated:
 		ctx.Err(x.handleTerminated(ctx))
 	default:
 		ctx.Unhandled()
@@ -75,12 +74,12 @@ func (x *deathWatch) handlePostStart(ctx *ReceiveContext) {
 
 // handleTerminated handles Terminated message
 func (x *deathWatch) handleTerminated(ctx *ReceiveContext) error {
-	msg := ctx.Message().(*goaktpb.Terminated)
+	msg := ctx.Message().(*Terminated)
 
 	logger := ctx.Logger()
 	actorSys := ctx.ActorSystem()
 
-	addr := msg.GetAddress()
+	addr := msg.Address()
 	logger.Infof("Removing dead Actor %s resource from system", addr)
 
 	actorTree := actorSys.tree()

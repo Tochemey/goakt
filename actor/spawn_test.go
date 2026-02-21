@@ -42,7 +42,6 @@ import (
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/datacenter"
 	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/datacentercontroller"
 	"github.com/tochemey/goakt/v3/internal/pause"
@@ -337,9 +336,11 @@ func TestSpawn(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		require.NoError(t, err)
 
-		receiveFn := func(_ context.Context, message proto.Message) error {
+		receiveFn := func(_ context.Context, message any) error {
 			expected := &testpb.Reply{Content: "test spawn from func"}
-			assert.True(t, proto.Equal(expected, message))
+			actual, ok := message.(*testpb.Reply)
+			require.True(t, ok)
+			assert.True(t, proto.Equal(expected, actual))
 			return nil
 		}
 
@@ -380,9 +381,11 @@ func TestSpawn(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		require.NoError(t, err)
 
-		receiveFn := func(_ context.Context, message proto.Message) error {
+		receiveFn := func(_ context.Context, message any) error {
 			expected := &testpb.Reply{Content: "test spawn from func"}
-			assert.True(t, proto.Equal(expected, message))
+			actual, ok := message.(*testpb.Reply)
+			require.True(t, ok)
+			assert.True(t, proto.Equal(expected, actual))
 			return nil
 		}
 
@@ -438,9 +441,11 @@ func TestSpawn(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		require.NoError(t, err)
 
-		receiveFn := func(_ context.Context, message proto.Message) error {
+		receiveFn := func(_ context.Context, message any) error {
 			expected := &testpb.Reply{Content: "test spawn from func"}
-			assert.True(t, proto.Equal(expected, message))
+			actual, ok := message.(*testpb.Reply)
+			require.True(t, ok)
+			assert.True(t, proto.Equal(expected, actual))
 			return nil
 		}
 
@@ -507,9 +512,11 @@ func TestSpawn(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		require.NoError(t, err)
 
-		receiveFn := func(_ context.Context, message proto.Message) error {
+		receiveFn := func(_ context.Context, message any) error {
 			expected := &testpb.Reply{Content: "test spawn from func"}
-			assert.True(t, proto.Equal(expected, message))
+			actual, ok := message.(*testpb.Reply)
+			require.True(t, ok)
+			assert.True(t, proto.Equal(expected, actual))
 			return nil
 		}
 
@@ -546,9 +553,11 @@ func TestSpawn(t *testing.T) {
 		err := sys.Start(ctx)
 		assert.NoError(t, err)
 
-		receiveFn := func(_ context.Context, message proto.Message) error {
+		receiveFn := func(_ context.Context, message any) error {
 			expected := &testpb.Reply{Content: "test spawn from func"}
-			assert.True(t, proto.Equal(expected, message))
+			actual, ok := message.(*testpb.Reply)
+			require.True(t, ok)
+			assert.True(t, proto.Equal(expected, actual))
 			return nil
 		}
 
@@ -575,9 +584,11 @@ func TestSpawn(t *testing.T) {
 		err := sys.Start(ctx)
 		assert.NoError(t, err)
 
-		receiveFn := func(ctx context.Context, message proto.Message) error {
+		receiveFn := func(ctx context.Context, message any) error {
 			expected := &testpb.Reply{Content: "test spawn from func"}
-			assert.True(t, proto.Equal(expected, message))
+			actual, ok := message.(*testpb.Reply)
+			require.True(t, ok)
+			assert.True(t, proto.Equal(expected, actual))
 			return nil
 		}
 
@@ -618,7 +629,7 @@ func TestSpawn(t *testing.T) {
 		require.NotNil(t, consumer)
 
 		mockErr := errors.New("failed to process message")
-		receiveFn := func(ctx context.Context, message proto.Message) error { // nolint
+		receiveFn := func(ctx context.Context, message any) error { // nolint
 			return mockErr
 		}
 
@@ -637,10 +648,10 @@ func TestSpawn(t *testing.T) {
 		// the actor will be suspended because there is no supervisor strategy
 		require.True(t, pid.IsSuspended())
 
-		var items []*goaktpb.ActorSuspended
+		var items []*ActorSuspended
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
-			suspended, ok := payload.(*goaktpb.ActorSuspended)
+			suspended, ok := payload.(*ActorSuspended)
 			if ok {
 				items = append(items, suspended)
 			}
@@ -648,10 +659,10 @@ func TestSpawn(t *testing.T) {
 
 		require.Len(t, items, 1)
 		item := items[0]
-		addr, err := address.Parse(item.GetAddress())
+		addr, err := address.Parse(item.Address())
 		require.NoError(t, err)
 		assert.True(t, pid.Address().Equals(addr))
-		assert.Equal(t, mockErr.Error(), item.GetReason())
+		assert.Equal(t, mockErr.Error(), item.Reason())
 
 		// unsubscribe the consumer
 		err = actorSystem.Unsubscribe(consumer)
@@ -663,9 +674,11 @@ func TestSpawn(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
-		receiveFn := func(_ context.Context, message proto.Message) error {
+		receiveFn := func(_ context.Context, message any) error {
 			expected := &testpb.Reply{Content: "test spawn from func"}
-			assert.True(t, proto.Equal(expected, message))
+			actual, ok := message.(*testpb.Reply)
+			require.True(t, ok)
+			assert.True(t, proto.Equal(expected, actual))
 			return nil
 		}
 

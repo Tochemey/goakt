@@ -24,8 +24,7 @@ package cluster
 
 import (
 	"fmt"
-
-	"google.golang.org/protobuf/types/known/anypb"
+	"time"
 )
 
 type EventType int
@@ -48,6 +47,22 @@ func (x EventType) String() string {
 
 // Event defines the cluster event
 type Event struct {
-	Payload *anypb.Any
+	Payload any
 	Type    EventType
+}
+
+// NodeJoined defines the node joined event
+type NodeJoinedEvent struct {
+	// Specifies the node address
+	Address string
+	// Specifies the timestamp
+	Timestamp time.Time
+}
+
+// NodeLeft defines the node left event
+type NodeLeftEvent struct {
+	// Specifies the node address
+	Address string
+	// Specifies the timestamp
+	Timestamp time.Time
 }

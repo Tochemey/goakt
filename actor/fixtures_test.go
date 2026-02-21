@@ -52,7 +52,6 @@ import (
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/eventstream"
 	"github.com/tochemey/goakt/v3/extension"
-	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/cluster"
 	"github.com/tochemey/goakt/v3/internal/datacentercontroller"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
@@ -87,11 +86,11 @@ func (x *MockSubscriber) PreStart(*Context) error {
 
 func (x *MockSubscriber) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.SubscribeAck:
+	case *SubscribeAck:
 		x.counter.Inc()
 	case *testpb.TestCount:
 		x.counter.Inc()
-	case *goaktpb.UnsubscribeAck:
+	case *UnsubscribeAck:
 		x.counter.Dec()
 	}
 }
@@ -125,7 +124,7 @@ func (p *MockActor) PostStop(*Context) error {
 // Receive processes any message dropped into the actor mailbox without a reply
 func (p *MockActor) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *PostStart:
 		ctx.Logger().Info("MockActor started")
 	case *testpb.TestSend:
 	case *testpb.TestPanic:
@@ -173,9 +172,9 @@ func (p *MockSupervisor) PreStart(*Context) error {
 
 func (p *MockSupervisor) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *PostStart:
 	case *testpb.TestSend:
-	case *goaktpb.Terminated:
+	case *Terminated:
 		// pass
 	default:
 		panic(gerrors.ErrUnhandled)
@@ -203,7 +202,7 @@ func (x *MockSupervised) PreStart(*Context) error {
 
 func (x *MockSupervised) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *PostStart:
 	case *testpb.TestSend:
 	case *testpb.TestReply:
 		ctx.Response(new(testpb.Reply))
@@ -236,7 +235,7 @@ func (x *MockBehavior) PostStop(*Context) error {
 
 func (x *MockBehavior) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *PostStart:
 	case *testpb.TestLogin:
 		ctx.Response(new(testpb.TestLoginSuccess))
 		ctx.Become(x.Authenticated)
@@ -284,7 +283,7 @@ func (e *exchanger) PreStart(*Context) error {
 func (e *exchanger) Receive(ctx *ReceiveContext) {
 	message := ctx.Message()
 	switch message.(type) {
-	case *goaktpb.PostStart:
+	case *PostStart:
 		e.id = ctx.Self().ID()
 	case *testpb.TestSend:
 		ctx.Tell(ctx.Sender(), new(testpb.TestSend))
@@ -312,7 +311,7 @@ func (x *MockStash) PreStart(*Context) error {
 
 func (x *MockStash) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *PostStart:
 	case *testpb.TestStash:
 		ctx.Become(x.Ready)
 		ctx.Stash()
@@ -324,7 +323,7 @@ func (x *MockStash) Receive(ctx *ReceiveContext) {
 
 func (x *MockStash) Ready(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *PostStart:
 	case *testpb.TestStash:
 	case *testpb.TestLogin:
 		ctx.Stash()
@@ -366,7 +365,7 @@ func (x *MockPostStop) PreStart(*Context) error {
 
 func (x *MockPostStop) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *PostStart:
 	case *testpb.TestSend:
 	case *testpb.TestPanic:
 		panic("panicked")
@@ -417,7 +416,7 @@ func (x *MockForward) PreStart(*Context) error {
 
 func (x *MockForward) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *PostStart:
 	case *testpb.TestBye:
 		ctx.Forward(x.actorRef)
 	case *testpb.TestRemoteForward:
@@ -457,7 +456,7 @@ func (d *MockUnhandled) PreStart(*Context) error {
 
 func (d *MockUnhandled) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *PostStart:
 		// pass
 	default:
 		ctx.Unhandled()
@@ -583,7 +582,7 @@ func (m *MockSum) Receive(ctx *ReceiveContext) {
 		m.sum = msg.GetResult()
 	case *testpb.TestGetSumResult:
 		ctx.Response(&testpb.TestSumResult{Result: m.sum})
-	case *goaktpb.StatusFailure:
+	case *StatusFailure:
 		m.failureCount++
 	case *testpb.TestGetCount:
 		ctx.Response(&testpb.TestCount{Value: m.failureCount})
@@ -616,7 +615,7 @@ func (x *TailChopProbe) Receive(ctx *ReceiveContext) {
 	switch msg := ctx.Message().(type) {
 	case *testpb.TestSumResult:
 		x.sum.Store(msg.GetResult())
-	case *goaktpb.StatusFailure:
+	case *StatusFailure:
 		x.failures.Inc()
 		select {
 		case x.failureNotifs <- struct{}{}:
@@ -660,7 +659,7 @@ func (x *MockFaultyRoutee) PreStart(*Context) error {
 
 func (x *MockFaultyRoutee) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *PostStart:
 		// pass
 	default:
 		ctx.Err(errors.New("routee failure"))
@@ -749,7 +748,7 @@ func (m *MockEntity) PostStop(*Context) error {
 // Receive implements Actor.
 func (m *MockEntity) Receive(ctx *ReceiveContext) {
 	switch received := ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *PostStart:
 		// pass
 	case *testpb.CreateAccount:
 		// TODO: in production extra validation will be needed.
@@ -873,8 +872,8 @@ func (e *MockEscalation) PreStart(*Context) error {
 // Receive implements Actor.
 func (e *MockEscalation) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
-	case *goaktpb.PanicSignal:
+	case *PostStart:
+	case *PanicSignal:
 		ctx.Stop(ctx.Sender())
 	default:
 		ctx.Unhandled()
@@ -907,8 +906,8 @@ func (r *MockReinstate) PreStart(*Context) error {
 // Receive implements Actor.
 func (r *MockReinstate) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
-	case *goaktpb.PanicSignal:
+	case *PostStart:
+	case *PanicSignal:
 		actorName := ctx.Sender().Name()
 
 		if actorName == "reinstate" {
@@ -953,7 +952,7 @@ func (p *MockPostStart) PostStop(*Context) error {
 // Receive processes any message dropped into the actor mailbox without a reply
 func (p *MockPostStart) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *PostStart:
 		postStarCount.Inc()
 	default:
 		ctx.Unhandled()
@@ -1288,7 +1287,7 @@ func (p *MockGrainActor) PostStop(*Context) error {
 // Receive processes any message dropped into the actor mailbox without a reply
 func (p *MockGrainActor) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *PostStart:
 	case *testpb.TestSend:
 	case *testpb.TestPing:
 		ctx.Response(new(testpb.TestPong))

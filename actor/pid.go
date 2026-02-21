@@ -40,19 +40,16 @@ import (
 	otelmetric "go.opentelemetry.io/otel/metric"
 	"go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
-	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/tochemey/goakt/v3/address"
 	"github.com/tochemey/goakt/v3/datacenter"
 	gerrors "github.com/tochemey/goakt/v3/errors"
 	"github.com/tochemey/goakt/v3/eventstream"
 	"github.com/tochemey/goakt/v3/extension"
-	"github.com/tochemey/goakt/v3/goaktpb"
 	"github.com/tochemey/goakt/v3/internal/chain"
 	"github.com/tochemey/goakt/v3/internal/codec"
+	"github.com/tochemey/goakt/v3/internal/commands"
 	"github.com/tochemey/goakt/v3/internal/future"
 	"github.com/tochemey/goakt/v3/internal/internalpb"
 	"github.com/tochemey/goakt/v3/internal/locker"
@@ -88,7 +85,7 @@ const passivationTouchInterval = int64(100 * time.Millisecond)
 // to pipe the result to the appropriate PID
 type taskCompletion struct {
 	Receiver *PID
-	Task     func() (proto.Message, error)
+	Task     func() (any, error)
 }
 
 type restartNode struct {
@@ -249,7 +246,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		return nil, err
 	}
 
-	pid.fireSystemMessage(ctx, new(goaktpb.PostStart))
+	pid.fireSystemMessage(ctx, new(PostStart))
 
 	pid.startedAt.Store(time.Now().Unix())
 	return pid, nil
@@ -690,13 +687,7 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 
 	eventsStream := pid.eventsStream
 	if eventsStream != nil {
-		eventsStream.Publish(
-			eventsTopic, &goaktpb.ActorChildCreated{
-				Address:   cid.ID(),
-				CreatedAt: timestamppb.Now(),
-				Parent:    pid.ID(),
-			},
-		)
+		eventsStream.Publish(eventsTopic, NewActorChildCreated(cid.ID(), pid.ID()))
 	}
 
 	// set the actor in the given actor system registry
@@ -847,7 +838,7 @@ func (pid *PID) StashSize() uint64 {
 //	    }
 //	    return &ApiResponse{Data: resp}, nil
 //	})
-func (pid *PID) PipeTo(ctx context.Context, to *PID, task func() (proto.Message, error), opts ...PipeOption) error {
+func (pid *PID) PipeTo(ctx context.Context, to *PID, task func() (any, error), opts ...PipeOption) error {
 	if task == nil {
 		return gerrors.ErrUndefinedTask
 	}
@@ -898,7 +889,7 @@ func (pid *PID) PipeTo(ctx context.Context, to *PID, task func() (proto.Message,
 //	    }
 //	    return &MyResult{Value: result}, nil
 //	})
-func (pid *PID) PipeToName(ctx context.Context, actorName string, task func() (proto.Message, error), opts ...PipeOption) error {
+func (pid *PID) PipeToName(ctx context.Context, actorName string, task func() (any, error), opts ...PipeOption) error {
 	if task == nil {
 		return gerrors.ErrUndefinedTask
 	}
@@ -926,7 +917,7 @@ func (pid *PID) PipeToName(ctx context.Context, actorName string, task func() (p
 		fut := future.New(task)
 
 		// execute the task, optionally via circuit breaker
-		runTask := func() (proto.Message, error) {
+		runTask := func() (any, error) {
 			if config != nil && config.circuitBreaker != nil {
 				outcome, oerr := config.circuitBreaker.Execute(ctx, func(ctx context.Context) (any, error) {
 					return fut.Await(ctx)
@@ -938,7 +929,7 @@ func (pid *PID) PipeToName(ctx context.Context, actorName string, task func() (p
 
 				// no need to check the type since the future.Await returns proto.Message
 				// if there is no error
-				return outcome.(proto.Message), nil
+				return outcome, nil
 			}
 			return fut.Await(ctx)
 		}
@@ -946,7 +937,7 @@ func (pid *PID) PipeToName(ctx context.Context, actorName string, task func() (p
 		result, err := runTask()
 		if err != nil {
 			pid.logger.Error(err)
-			pid.toDeadletter(ctx, pid.Address(), pid.Address(), new(goaktpb.NoMessage), err)
+			pid.toDeadletter(ctx, pid.Address(), pid.Address(), new(NoMessage), err)
 			return
 		}
 
@@ -964,7 +955,7 @@ func (pid *PID) PipeToName(ctx context.Context, actorName string, task func() (p
 
 // Ask sends a synchronous message to another actor and expect a response.
 // This block until a response is received or timed out.
-func (pid *PID) Ask(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error) {
+func (pid *PID) Ask(ctx context.Context, to *PID, message any, timeout time.Duration) (response any, err error) {
 	if !to.IsRunning() {
 		return nil, gerrors.ErrDead
 	}
@@ -1004,7 +995,7 @@ func (pid *PID) Ask(ctx context.Context, to *PID, message proto.Message, timeout
 }
 
 // Tell sends an asynchronous message to another PID
-func (pid *PID) Tell(ctx context.Context, to *PID, message proto.Message) error {
+func (pid *PID) Tell(ctx context.Context, to *PID, message any) error {
 	if !to.IsRunning() {
 		return gerrors.ErrDead
 	}
@@ -1018,7 +1009,7 @@ func (pid *PID) Tell(ctx context.Context, to *PID, message proto.Message) error 
 
 // SendAsync sends an asynchronous message to a given actor.
 // The location of the given actor is transparent to the caller.
-func (pid *PID) SendAsync(ctx context.Context, actorName string, message proto.Message) error {
+func (pid *PID) SendAsync(ctx context.Context, actorName string, message any) error {
 	if !pid.IsRunning() {
 		return gerrors.ErrDead
 	}
@@ -1065,7 +1056,7 @@ func (pid *PID) SendAsync(ctx context.Context, actorName string, message proto.M
 // SendSync sends a synchronous message to another actor and expect a response.
 // The location of the given actor is transparent to the caller.
 // This block until a response is received or timed out.
-func (pid *PID) SendSync(ctx context.Context, actorName string, message proto.Message, timeout time.Duration) (response proto.Message, err error) {
+func (pid *PID) SendSync(ctx context.Context, actorName string, message any, timeout time.Duration) (response any, err error) {
 	if !pid.IsRunning() {
 		return nil, gerrors.ErrDead
 	}
@@ -1086,7 +1077,7 @@ func (pid *PID) SendSync(ctx context.Context, actorName string, message proto.Me
 		if err != nil {
 			return nil, err
 		}
-		return reply.UnmarshalNew()
+		return reply, nil
 	}
 
 	// Actor not found in local datacenter - check if it's a "not found" error
@@ -1113,7 +1104,7 @@ func (pid *PID) SendSync(ctx context.Context, actorName string, message proto.Me
 	if err != nil {
 		return nil, err
 	}
-	return reply.UnmarshalNew()
+	return reply, nil
 }
 
 // DiscoverActor locates an actor across all active datacenters using parallel discovery.
@@ -1249,7 +1240,7 @@ func (pid *PID) DiscoverActor(ctx context.Context, actorName string, timeout tim
 // The messages will be processed one after the other in the order they are sent.
 // This is a design choice to follow the simple principle of one message at a time processing by actors.
 // When BatchTell encounter a single message it will fall back to a Tell call.
-func (pid *PID) BatchTell(ctx context.Context, to *PID, messages ...proto.Message) error {
+func (pid *PID) BatchTell(ctx context.Context, to *PID, messages ...any) error {
 	for _, message := range messages {
 		if err := pid.Tell(ctx, to, message); err != nil {
 			return err
@@ -1261,8 +1252,8 @@ func (pid *PID) BatchTell(ctx context.Context, to *PID, messages ...proto.Messag
 // BatchAsk sends a synchronous bunch of messages to the given PID and expect responses in the same order as the messages.
 // The messages will be processed one after the other in the order they are sent.
 // This is a design choice to follow the simple principle of one message at a time processing by actors.
-func (pid *PID) BatchAsk(ctx context.Context, to *PID, messages []proto.Message, timeout time.Duration) (responses chan proto.Message, err error) {
-	responses = make(chan proto.Message, len(messages))
+func (pid *PID) BatchAsk(ctx context.Context, to *PID, messages []any, timeout time.Duration) (responses chan any, err error) {
+	responses = make(chan any, len(messages))
 	defer close(responses)
 
 	for i := range messages {
@@ -1285,7 +1276,7 @@ func (pid *PID) RemoteLookup(ctx context.Context, host string, port int, name st
 }
 
 // RemoteTell sends a message to an actor remotely without expecting any reply
-func (pid *PID) RemoteTell(ctx context.Context, to *address.Address, message proto.Message) error {
+func (pid *PID) RemoteTell(ctx context.Context, to *address.Address, message any) error {
 	if !pid.remotingEnabled() {
 		return gerrors.ErrRemotingDisabled
 	}
@@ -1294,7 +1285,7 @@ func (pid *PID) RemoteTell(ctx context.Context, to *address.Address, message pro
 }
 
 // RemoteAsk sends a synchronous message to another actor remotely and expect a response.
-func (pid *PID) RemoteAsk(ctx context.Context, to *address.Address, message proto.Message, timeout time.Duration) (response *anypb.Any, err error) {
+func (pid *PID) RemoteAsk(ctx context.Context, to *address.Address, message any, timeout time.Duration) (response any, err error) {
 	if !pid.remotingEnabled() {
 		return nil, gerrors.ErrRemotingDisabled
 	}
@@ -1308,7 +1299,7 @@ func (pid *PID) RemoteAsk(ctx context.Context, to *address.Address, message prot
 
 // RemoteBatchTell sends a batch of messages to a remote actor in a way fire-and-forget manner
 // Messages are processed one after the other in the order they are sent.
-func (pid *PID) RemoteBatchTell(ctx context.Context, to *address.Address, messages []proto.Message) error {
+func (pid *PID) RemoteBatchTell(ctx context.Context, to *address.Address, messages []any) error {
 	if !pid.remotingEnabled() {
 		return gerrors.ErrRemotingDisabled
 	}
@@ -1319,7 +1310,7 @@ func (pid *PID) RemoteBatchTell(ctx context.Context, to *address.Address, messag
 // RemoteBatchAsk sends a synchronous bunch of messages to a remote actor and expect responses in the same order as the messages.
 // Messages are processed one after the other in the order they are sent.
 // This can hinder performance if it is not properly used.
-func (pid *PID) RemoteBatchAsk(ctx context.Context, to *address.Address, messages []proto.Message, timeout time.Duration) (responses []*anypb.Any, err error) {
+func (pid *PID) RemoteBatchAsk(ctx context.Context, to *address.Address, messages []any, timeout time.Duration) (responses []any, err error) {
 	if !pid.remotingEnabled() {
 		return nil, gerrors.ErrRemotingDisabled
 	}
@@ -1413,12 +1404,7 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 	}
 
 	if pid.eventsStream != nil {
-		pid.eventsStream.Publish(
-			eventsTopic, &goaktpb.ActorStopped{
-				Address:   pid.ID(),
-				StoppedAt: timestamppb.Now(),
-			},
-		)
+		pid.eventsStream.Publish(eventsTopic, NewActorStopped(pid.ID()))
 	}
 
 	pid.stopLocker.Unlock()
@@ -1461,7 +1447,7 @@ func (pid *PID) LatestActivityTime() time.Time {
 //
 // Design decision: async requests are opt-in per actor to preserve legacy semantics.
 // The caller must have reentrancy enabled; otherwise ErrReentrancyDisabled is returned.
-func (pid *PID) request(ctx context.Context, to *PID, message proto.Message, opts ...RequestOption) (RequestCall, error) {
+func (pid *PID) request(ctx context.Context, to *PID, message any, opts ...RequestOption) (RequestCall, error) {
 	if !pid.IsRunning() {
 		return nil, gerrors.ErrDead
 	}
@@ -1521,7 +1507,7 @@ func (pid *PID) request(ctx context.Context, to *PID, message proto.Message, opt
 // Design decision: name resolution is performed once to avoid an extra lookup and
 // to keep control of the async envelope before sending. The caller must have
 // reentrancy enabled; otherwise ErrReentrancyDisabled is returned.
-func (pid *PID) requestName(ctx context.Context, actorName string, message proto.Message, opts ...RequestOption) (RequestCall, error) {
+func (pid *PID) requestName(ctx context.Context, actorName string, message any, opts ...RequestOption) (RequestCall, error) {
 	if !pid.IsRunning() {
 		return nil, gerrors.ErrDead
 	}
@@ -1586,20 +1572,15 @@ func (pid *PID) requestName(ctx context.Context, actorName string, message proto
 //
 // Design decision: AsyncRequest uses Any to preserve the protobuf-only message
 // contract while keeping the async envelope stable across message types.
-func (pid *PID) buildAsyncRequest(message proto.Message, correlationID string) (*internalpb.AsyncRequest, error) {
+func (pid *PID) buildAsyncRequest(message any, correlationID string) (*commands.AsyncRequest, error) {
 	if message == nil {
 		return nil, gerrors.ErrInvalidMessage
 	}
 
-	payload, err := anypb.New(message)
-	if err != nil {
-		return nil, err
-	}
-
-	return &internalpb.AsyncRequest{
-		CorrelationId: correlationID,
+	return &commands.AsyncRequest{
+		CorrelationID: correlationID,
 		ReplyTo:       pid.Address().String(),
-		Message:       payload,
+		Message:       message,
 	}, nil
 }
 
@@ -1650,19 +1631,19 @@ func (pid *PID) process() {
 				}
 				// Process the message
 				switch msg := received.Message().(type) {
-				case *goaktpb.PoisonPill:
+				case *PoisonPill:
 					_ = pid.Shutdown(received.Context())
-				case *internalpb.HealthCheckRequest:
+				case *commands.HealthCheckRequest:
 					pid.handleHealthcheck(received)
-				case *internalpb.Panicking:
+				case *commands.Panicking:
 					pid.handlePanicking(received.Sender(), msg)
-				case *goaktpb.PausePassivation:
+				case *PausePassivation:
 					pid.pausePassivation()
-				case *goaktpb.ResumePassivation:
+				case *ResumePassivation:
 					pid.resumePassivation()
-				case *internalpb.AsyncRequest:
+				case *commands.AsyncRequest:
 					pid.handleAsyncRequest(received, msg)
-				case *internalpb.AsyncResponse:
+				case *commands.AsyncResponse:
 					pid.handleAsyncResponse(received, msg)
 				default:
 					pid.handleReceived(received)
@@ -1690,7 +1671,7 @@ func (pid *PID) process() {
 // handleHealthcheck is used to handle the readiness probe messages
 func (pid *PID) handleHealthcheck(received *ReceiveContext) {
 	pid.markActivity(time.Now())
-	received.Response(new(internalpb.HealthCheckResponse))
+	received.Response(new(commands.HealthCheckResponse))
 }
 
 // handleReceived picks the right behavior and processes the message
@@ -1707,18 +1688,19 @@ func (pid *PID) handleReceived(received *ReceiveContext) {
 // through even during system shutdown (e.g., for proper shutdown, supervision, lifecycle).
 //
 // This is a zero-allocation type switch that identifies critical system messages.
-func isSystemMessage(message proto.Message) bool {
+func isSystemMessage(message any) bool {
 	switch message.(type) {
-	case *internalpb.AsyncResponse,
-		*internalpb.AsyncRequest,
-		*goaktpb.PoisonPill,
-		*internalpb.HealthCheckRequest,
-		*internalpb.Panicking,
-		*goaktpb.PausePassivation,
-		*goaktpb.ResumePassivation,
-		*goaktpb.PostStart,
-		*goaktpb.Terminated,
-		*goaktpb.PanicSignal:
+	case *commands.AsyncResponse,
+		*commands.AsyncRequest,
+		*PoisonPill,
+		*commands.HealthCheckRequest,
+		*commands.Panicking,
+		*commands.SendDeadletter,
+		*PausePassivation,
+		*ResumePassivation,
+		*PostStart,
+		*Terminated,
+		*PanicSignal:
 		return true
 	default:
 		return false
@@ -1736,12 +1718,12 @@ func (pid *PID) enableReentrancyStash(received *ReceiveContext) bool {
 	}
 
 	switch received.Message().(type) {
-	case *internalpb.AsyncResponse,
-		*goaktpb.PoisonPill,
-		*internalpb.HealthCheckRequest,
-		*internalpb.Panicking,
-		*goaktpb.PausePassivation,
-		*goaktpb.ResumePassivation:
+	case *commands.AsyncResponse,
+		*PoisonPill,
+		*commands.HealthCheckRequest,
+		*commands.Panicking,
+		*PausePassivation,
+		*ResumePassivation:
 		return false
 	default:
 		return true
@@ -1752,26 +1734,20 @@ func (pid *PID) enableReentrancyStash(received *ReceiveContext) bool {
 //
 // Design decision: async metadata is carried on ReceiveContext to enable Response
 // to send AsyncResponse without changing the user-facing API.
-func (pid *PID) handleAsyncRequest(received *ReceiveContext, req *internalpb.AsyncRequest) {
+func (pid *PID) handleAsyncRequest(received *ReceiveContext, req *commands.AsyncRequest) {
 	if received == nil || req == nil {
 		pid.handleReceivedError(received, gerrors.ErrInvalidMessage)
 		return
 	}
 
-	if req.GetCorrelationId() == "" || req.GetReplyTo() == "" || req.GetMessage() == nil {
+	if req.CorrelationID == "" || req.ReplyTo == "" || req.Message == nil {
 		pid.handleReceivedError(received, gerrors.ErrInvalidMessage)
 		return
 	}
 
-	msg, err := req.GetMessage().UnmarshalNew()
-	if err != nil {
-		pid.handleReceivedError(received, fmt.Errorf("invalid async request: %w", err))
-		return
-	}
-
-	received.message = msg
+	received.message = req.Message
 	received.response = nil
-	received.withRequestMeta(req.GetCorrelationId(), req.GetReplyTo())
+	received.withRequestMeta(req.CorrelationID, req.ReplyTo)
 	pid.handleReceived(received)
 }
 
@@ -1779,41 +1755,33 @@ func (pid *PID) handleAsyncRequest(received *ReceiveContext, req *internalpb.Asy
 //
 // Design decision: errors are encoded as strings on the wire to keep the response
 // envelope stable and avoid cross-version type coupling.
-func (pid *PID) handleAsyncResponse(received *ReceiveContext, resp *internalpb.AsyncResponse) {
+func (pid *PID) handleAsyncResponse(received *ReceiveContext, resp *commands.AsyncResponse) {
 	if resp == nil {
 		pid.handleReceivedError(received, gerrors.ErrInvalidMessage)
 		return
 	}
 
-	correlationID := strings.TrimSpace(resp.GetCorrelationId())
+	correlationID := strings.TrimSpace(resp.CorrelationID)
 	if correlationID == "" {
 		pid.handleReceivedError(received, gerrors.ErrInvalidMessage)
 		return
 	}
 
-	if resp.GetError() != "" {
-		if !pid.completeRequest(correlationID, nil, asyncErrorFromString(resp.GetError())) {
+	if resp.Error != "" {
+		if !pid.completeRequest(correlationID, nil, asyncErrorFromString(resp.Error)) {
 			pid.logger.Warnf("Async response dropped: unknown correlation id=%s", correlationID)
 		}
 		return
 	}
 
-	if resp.GetMessage() == nil {
+	if resp.Message == nil {
 		if !pid.completeRequest(correlationID, nil, gerrors.ErrInvalidMessage) {
 			pid.logger.Warnf("Async response dropped: unknown correlation id=%s", correlationID)
 		}
 		return
 	}
 
-	message, err := resp.GetMessage().UnmarshalNew()
-	if err != nil {
-		if !pid.completeRequest(correlationID, nil, fmt.Errorf("invalid async response: %w", err)) {
-			pid.logger.Warnf("Async response dropped: unknown correlation id=%s", correlationID)
-		}
-		return
-	}
-
-	if !pid.completeRequest(correlationID, message, nil) {
+	if !pid.completeRequest(correlationID, resp.Message, nil) {
 		pid.logger.Warnf("Async response dropped: unknown correlation id=%s", correlationID)
 	}
 }
@@ -1903,7 +1871,7 @@ func (pid *PID) deregisterRequestState(state *requestState) {
 // completeRequest marks an async request as completed and runs its callback.
 //
 // Design decision: completion is idempotent; only the first result wins.
-func (pid *PID) completeRequest(correlationID string, result proto.Message, err error) bool {
+func (pid *PID) completeRequest(correlationID string, result any, err error) bool {
 	if pid.reentrancy == nil {
 		return false
 	}
@@ -1938,8 +1906,8 @@ func (pid *PID) enqueueAsyncError(ctx context.Context, correlationID string, err
 		return nil
 	}
 
-	response := &internalpb.AsyncResponse{
-		CorrelationId: correlationID,
+	response := &commands.AsyncResponse{
+		CorrelationID: correlationID,
 		Error:         err.Error(),
 	}
 
@@ -1953,13 +1921,13 @@ func (pid *PID) enqueueAsyncError(ctx context.Context, correlationID string, err
 //
 // Design decision: reply routing uses the string address embedded in AsyncRequest
 // to support local and remote responders with the same flow.
-func (pid *PID) sendAsyncResponse(ctx context.Context, replyTo, correlationID string, message proto.Message, err error) error {
+func (pid *PID) sendAsyncResponse(ctx context.Context, replyTo, correlationID string, message any, err error) error {
 	if correlationID == "" || replyTo == "" {
 		return gerrors.ErrInvalidMessage
 	}
 
-	response := &internalpb.AsyncResponse{
-		CorrelationId: correlationID,
+	response := &commands.AsyncResponse{
+		CorrelationID: correlationID,
 	}
 
 	if err != nil {
@@ -1968,11 +1936,7 @@ func (pid *PID) sendAsyncResponse(ctx context.Context, replyTo, correlationID st
 		if message == nil {
 			return gerrors.ErrInvalidMessage
 		}
-		payload, err := anypb.New(message)
-		if err != nil {
-			return err
-		}
-		response.Message = payload
+		response.Message = message
 	}
 
 	addr, err := address.Parse(replyTo)
@@ -2138,12 +2102,7 @@ func (pid *PID) init(ctx context.Context) error {
 	pid.logger.Infof("Actor %s initialization is successful.", pid.Name())
 
 	if pid.eventsStream != nil {
-		pid.eventsStream.Publish(
-			eventsTopic, &goaktpb.ActorStarted{
-				Address:   pid.ID(),
-				StartedAt: timestamppb.Now(),
-			},
-		)
+		pid.eventsStream.Publish(eventsTopic, NewActorStarted(pid.ID()))
 	}
 
 	cancel()
@@ -2194,10 +2153,7 @@ func (pid *PID) freeWatchers(ctx context.Context) {
 		// this call will be fast no need of parallel processing
 		for _, watcher := range watchers {
 			watcher := watcher
-			terminated := &goaktpb.Terminated{
-				Address:      pid.ID(),
-				TerminatedAt: timestamppb.Now(),
-			}
+			terminated := NewTerminated(pid.ID())
 
 			if watcher.IsRunning() {
 				logger.Debugf("Watcher %s releasing watched %s", watcher.Name(), pid.Name())
@@ -2332,11 +2288,7 @@ func (pid *PID) tryPassivation(reason string) bool {
 	}
 
 	if pid.eventsStream != nil {
-		event := &goaktpb.ActorPassivated{
-			Address:      pid.ID(),
-			PassivatedAt: timestamppb.Now(),
-		}
-		pid.eventsStream.Publish(eventsTopic, event)
+		pid.eventsStream.Publish(eventsTopic, NewActorPassivated(pid.ID()))
 	}
 
 	pid.logger.Infof("Actor %s successfully passivated", pid.Name())
@@ -2472,51 +2424,18 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 	pid.logger.Debugf("Actor %s supervisor directive %s", pid.Name(), directive.String())
 
 	// create the message to send to the parent
-	actual, _ := anypb.New(signal.Msg())
-	msg := &internalpb.Panicking{
-		ActorId:      pid.ID(),
-		ErrorMessage: signal.Err().Error(),
-		Message:      actual,
-		Timestamp:    signal.Timestamp(),
-	}
-
-	switch directive {
-	case supervisor.StopDirective:
-		msg.Directive = &internalpb.Panicking_Stop{
-			Stop: new(internalpb.StopDirective),
-		}
-	case supervisor.RestartDirective:
-		msg.Directive = &internalpb.Panicking_Restart{
-			Restart: &internalpb.RestartDirective{
-				MaxRetries: pid.supervisor.MaxRetries(),
-				Timeout:    int64(pid.supervisor.Timeout()),
-			},
-		}
-	case supervisor.ResumeDirective:
-		msg.Directive = &internalpb.Panicking_Resume{
-			Resume: &internalpb.ResumeDirective{},
-		}
-	case supervisor.EscalateDirective:
-		msg.Directive = &internalpb.Panicking_Escalate{
-			Escalate: &internalpb.EscalateDirective{},
-		}
-	default:
-		pid.logger.Debugf("Unknown directive: %T found for error: %s", directive, errorType(signal.Err()))
-		pid.suspend(signal.Err().Error())
-		return
-	}
-
-	switch pid.supervisor.Strategy() {
-	case supervisor.OneForOneStrategy:
-		msg.Strategy = internalpb.Strategy_STRATEGY_ONE_FOR_ONE
-	case supervisor.OneForAllStrategy:
-		msg.Strategy = internalpb.Strategy_STRATEGY_ONE_FOR_ALL
-	default:
-		msg.Strategy = internalpb.Strategy_STRATEGY_ONE_FOR_ONE
+	msg := &commands.Panicking{
+		ActorID:    pid.ID(),
+		Err:        signal.Err(),
+		Message:    signal.Msg(),
+		Timestamp:  signal.Timestamp(),
+		Strategy:   pid.supervisor.Strategy(),
+		Directive:  directive,
+		Supervisor: pid.supervisor,
 	}
 
 	if parent := pid.Parent(); parent != nil && !parent.Equals(pid.ActorSystem().NoSender()) {
-		pid.logger.Warnf("Actor %s's child Actor (%s) is failing: Err=%s", parent.Name(), pid.Name(), msg.GetErrorMessage())
+		pid.logger.Warnf("Actor %s's child Actor (%s) is failing: Err=%s", parent.Name(), pid.Name(), msg.Err.Error())
 		pid.logger.Infof("Actor %s activates [strategy=%s, directive=%s] for failing child actor=(%s)",
 			parent.Name(),
 			pid.supervisor.Strategy(),
@@ -2536,7 +2455,7 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 		}
 
 		// suspend the actor until the parent takes an action based on strategy/directive
-		pid.suspend(msg.GetErrorMessage())
+		pid.suspend(msg.Err.Error())
 
 		// notify parent about the failure
 		_ = pid.Tell(context.Background(), parent, msg)
@@ -2544,8 +2463,8 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 	}
 
 	// no parent found, just suspend the actor
-	pid.logger.Warnf("Actor %s has no parent to notify about its failure: Err=%s", pid.Name(), msg.GetErrorMessage())
-	pid.suspend(msg.GetErrorMessage())
+	pid.logger.Warnf("Actor %s has no parent to notify about its failure: Err=%s", pid.Name(), msg.Err.Error())
+	pid.suspend(msg.Err.Error())
 }
 
 // handleReceivedError sends message to deadletter synthetic actor
@@ -2556,15 +2475,15 @@ func (pid *PID) handleReceivedError(receiveCtx *ReceiveContext, err error) {
 	pid.handleReceivedErrorWithMessage(receiveCtx.Sender(), receiveCtx.Message(), err)
 }
 
-func (pid *PID) handleReceivedErrorWithMessage(senderPID *PID, message proto.Message, err error) {
+func (pid *PID) handleReceivedErrorWithMessage(senderPID *PID, message any, err error) {
 	// the message is lost
 	if pid.eventsStream == nil {
 		return
 	}
 
-	// skip system messages
+	// skip system messages and deadletter commands to prevent infinite recursion
 	switch message.(type) {
-	case *goaktpb.PostStart, *goaktpb.Terminated:
+	case *PostStart, *Terminated, *commands.SendDeadletter:
 		return
 	default:
 		// pass through
@@ -2592,21 +2511,24 @@ func (pid *PID) handleReceivedErrorWithMessage(senderPID *PID, message proto.Mes
 }
 
 // toDeadletter sends a message to the deadletter actor
-func (pid *PID) toDeadletter(ctx context.Context, from, to *address.Address, message proto.Message, err error) {
-	deadletter := pid.ActorSystem().getDeadletter()
-	msg, _ := anypb.New(message)
+func (pid *PID) toDeadletter(ctx context.Context, from, to *address.Address, message any, err error) {
+	system := pid.ActorSystem()
+	if system == nil {
+		return
+	}
+	deadletter := system.getDeadletter()
+	command := &commands.SendDeadletter{
+		Deadletter: commands.Deadletter{
+			Sender:   from.String(),
+			Receiver: to.String(),
+			Message:  message,
+			SendTime: time.Now().UTC(),
+			Reason:   err.Error(),
+		},
+	}
 
 	// send the message to the deadletter actor
-	_ = pid.Tell(ctx,
-		deadletter,
-		&internalpb.SendDeadletter{
-			Deadletter: &goaktpb.Deadletter{
-				Sender:   from.String(),
-				Receiver: to.String(),
-				Message:  msg,
-				SendTime: timestamppb.Now(),
-				Reason:   err.Error(),
-			}})
+	_ = pid.Tell(ctx, deadletter, command)
 }
 
 // handleCompletion processes a long-started task and pipe the result to
@@ -2632,7 +2554,7 @@ func (pid *PID) handleCompletion(ctx context.Context, config *pipeConfig, comple
 	fut := future.New(completion.Task)
 
 	// execute the task, optionally via circuit breaker
-	runTask := func() (proto.Message, error) {
+	runTask := func() (any, error) {
 		if config != nil && config.circuitBreaker != nil {
 			outcome, oerr := config.circuitBreaker.Execute(ctx, func(ctx context.Context) (any, error) {
 				return fut.Await(ctx)
@@ -2644,7 +2566,7 @@ func (pid *PID) handleCompletion(ctx context.Context, config *pipeConfig, comple
 
 			// no need to check the type since the future.Await returns proto.Message
 			// if there is no error
-			return outcome.(proto.Message), nil
+			return outcome, nil
 		}
 		return fut.Await(ctx)
 	}
@@ -2652,7 +2574,7 @@ func (pid *PID) handleCompletion(ctx context.Context, config *pipeConfig, comple
 	result, err := runTask()
 	if err != nil {
 		pid.logger.Error(err)
-		pid.toDeadletter(ctx, pid.Address(), pid.Address(), new(goaktpb.NoMessage), err)
+		pid.toDeadletter(ctx, pid.Address(), pid.Address(), new(NoMessage), err)
 		return
 	}
 
@@ -2669,31 +2591,27 @@ func (pid *PID) handleCompletion(ctx context.Context, config *pipeConfig, comple
 }
 
 // handlePanicking watches for child actor's failure and act based upon the supervisory strategy
-func (pid *PID) handlePanicking(cid *PID, msg *internalpb.Panicking) {
-	if cid.ID() == msg.GetActorId() {
-		directive := msg.GetDirective()
-		includeSiblings := msg.GetStrategy() == internalpb.Strategy_STRATEGY_ONE_FOR_ALL
+func (pid *PID) handlePanicking(cid *PID, msg *commands.Panicking) {
+	if cid.ID() == msg.ActorID {
+		directive := msg.Directive
+		includeSiblings := msg.Strategy == supervisor.OneForAllStrategy
 
-		switch d := directive.(type) {
-		case *internalpb.Panicking_Stop:
+		switch directive {
+		case supervisor.StopDirective:
 			pid.handleStopDirective(cid, includeSiblings)
-		case *internalpb.Panicking_Restart:
+		case supervisor.RestartDirective:
 			pid.handleRestartDirective(cid,
-				d.Restart.GetMaxRetries(),
-				time.Duration(d.Restart.GetTimeout()),
+				msg.Supervisor.MaxRetries(),
+				msg.Supervisor.Timeout(),
 				includeSiblings)
-		case *internalpb.Panicking_Resume:
+		case supervisor.ResumeDirective:
 			// simply reinstate the actor
 			cid.doReinstate()
-		case *internalpb.Panicking_Escalate:
+		case supervisor.EscalateDirective:
 			// forward the message to the parent and suspend the actor
-			_ = cid.Tell(context.Background(), pid, &goaktpb.PanicSignal{
-				Reason:    msg.GetErrorMessage(),
-				Message:   msg.GetMessage(),
-				Timestamp: msg.GetTimestamp(),
-			})
+			_ = cid.Tell(context.Background(), pid, NewPanicSignal(msg.Message, msg.Err.Error(), msg.Timestamp))
 		default:
-			pid.handleStopDirective(cid, includeSiblings)
+			cid.suspend(msg.Err.Error())
 		}
 		return
 	}
@@ -2795,11 +2713,7 @@ func (pid *PID) suspend(reason string) {
 	// stop the supervisor loop
 	pid.stopSupervisionLoop()
 	// publish an event to the events stream
-	pid.eventsStream.Publish(eventsTopic, &goaktpb.ActorSuspended{
-		Address:     pid.ID(),
-		SuspendedAt: timestamppb.Now(),
-		Reason:      reason,
-	})
+	pid.eventsStream.Publish(eventsTopic, NewActorSuspended(pid.ID(), reason))
 }
 
 // getDeadlettersCount gets deadletter
@@ -2808,8 +2722,8 @@ func (pid *PID) getDeadlettersCount(ctx context.Context) int64 {
 		name    = pid.ID()
 		to      = pid.ActorSystem().getDeadletter()
 		from    = pid.ActorSystem().getSystemGuardian()
-		message = &internalpb.DeadlettersCountRequest{
-			ActorId: &name,
+		message = &commands.DeadlettersCountRequest{
+			ActorID: &name,
 		}
 	)
 	if to.IsRunning() {
@@ -2818,14 +2732,14 @@ func (pid *PID) getDeadlettersCount(ctx context.Context) int64 {
 		// note: no need to check for error because this call is internal
 		message, _ := from.Ask(ctx, to, message, DefaultAskTimeout)
 		// cast the response received from the deadletter
-		deadlettersCount := message.(*internalpb.DeadlettersCountResponse)
-		return deadlettersCount.GetTotalCount()
+		deadlettersCount := message.(*commands.DeadlettersCountResponse)
+		return deadlettersCount.TotalCount
 	}
 	return 0
 }
 
 // fireSystemMessage sends a system-level message to the specified PID by creating a receive context and invoking the message handling logic.
-func (pid *PID) fireSystemMessage(ctx context.Context, message proto.Message) {
+func (pid *PID) fireSystemMessage(ctx context.Context, message any) {
 	receiveContext := getContext()
 	noSender := pid.ActorSystem().NoSender()
 	receiveContext.build(ctx, noSender, pid, message, true)
@@ -2854,10 +2768,7 @@ func (pid *PID) doReinstate() {
 	pid.resumePassivation()
 
 	// publish an event to the events stream
-	pid.eventsStream.Publish(eventsTopic, &goaktpb.ActorReinstated{
-		Address:      pid.ID(),
-		ReinstatedAt: timestamppb.Now(),
-	})
+	pid.eventsStream.Publish(eventsTopic, NewActorReinstated(pid.ID()))
 }
 
 func (pid *PID) shouldAutoPassivate() bool {
@@ -2922,7 +2833,7 @@ func (pid *PID) healthCheck(ctx context.Context) error {
 		return nil
 	}
 
-	message := new(internalpb.HealthCheckRequest)
+	message := new(commands.HealthCheckRequest)
 	timeout := pid.initTimeout.Load()
 	numretries := pid.initMaxRetries.Load()
 	noSender := pid.ActorSystem().NoSender()
@@ -3104,6 +3015,13 @@ func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *t
 		tk.Stop()
 	}
 
+	// Wait for any in-flight processing goroutine to fully drain before
+	// reinitializing. The MPSC mailbox is single-consumer; starting a new
+	// consumer while the old one is still calling Dequeue is a data race.
+	for pid.processing.Load() != idle {
+		runtime.Gosched()
+	}
+
 	pid.resetBehavior()
 	if err := pid.init(ctx); err != nil {
 		return err
@@ -3144,14 +3062,9 @@ func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *t
 	}
 
 	pid.restartCount.Inc()
-	pid.fireSystemMessage(ctx, new(goaktpb.PostStart))
+	pid.fireSystemMessage(ctx, new(PostStart))
 	if pid.eventsStream != nil {
-		pid.eventsStream.Publish(
-			eventsTopic, &goaktpb.ActorRestarted{
-				Address:     pid.ID(),
-				RestartedAt: timestamppb.Now(),
-			},
-		)
+		pid.eventsStream.Publish(eventsTopic, NewActorRestarted(pid.ID()))
 	}
 
 	if actorSystem != nil && !pid.isStateSet(systemState) && (didShutdown || !wasInTree) {
