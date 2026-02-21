@@ -2100,8 +2100,11 @@ func MockDatacenterSystem(t *testing.T, listActive func(_ context.Context) ([]da
 	dcConfig.ControlPlane = &MockControlPlane{listActive: listActive}
 	dcConfig.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
 	endpoints := []string{"127.0.0.1:8080"}
-	dcConfig.MaxCacheStaleness = 50 * time.Millisecond
-	dcConfig.CacheRefreshInterval = 10 * time.Millisecond
+	// Use a generous staleness window so that slow CI runners do not hit the stale-cache
+	// path during normal test execution. The separate "stale records" sub-test creates its
+	// own controller with a 1 ms window, so this value does not affect that path.
+	dcConfig.MaxCacheStaleness = 5 * time.Second
+	dcConfig.CacheRefreshInterval = 500 * time.Millisecond
 
 	controller, err := datacentercontroller.NewController(dcConfig, endpoints)
 	require.NoError(t, err)
@@ -2115,8 +2118,9 @@ func MockDatacenterSystem(t *testing.T, listActive func(_ context.Context) ([]da
 		stopCancel()
 	})
 
-	// Allow first cache refresh so ActiveRecords() returns non-stale data
-	pause.For(25 * time.Millisecond)
+	// No pause needed: controller.Start() performs a synchronous cache refresh before
+	// launching background goroutines, so the cache is already populated when Start()
+	// returns. A time.Sleep here would only burn into the staleness budget on slow runners.
 
 	clusterMock := mockcluster.NewCluster(t)
 	sys := MockReplicationTestSystem(clusterMock)
