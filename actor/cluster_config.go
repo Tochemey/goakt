@@ -28,12 +28,12 @@ import (
 
 	goset "github.com/deckarep/golang-set/v2"
 
-	"github.com/tochemey/goakt/v3/datacenter"
-	"github.com/tochemey/goakt/v3/discovery"
-	"github.com/tochemey/goakt/v3/internal/registry"
-	"github.com/tochemey/goakt/v3/internal/size"
-	"github.com/tochemey/goakt/v3/internal/validation"
-	"github.com/tochemey/goakt/v3/internal/xsync"
+	"github.com/tochemey/goakt/v4/datacenter"
+	"github.com/tochemey/goakt/v4/discovery"
+	"github.com/tochemey/goakt/v4/internal/registry"
+	"github.com/tochemey/goakt/v4/internal/size"
+	"github.com/tochemey/goakt/v4/internal/validation"
+	"github.com/tochemey/goakt/v4/internal/xsync"
 )
 
 // ClusterConfig defines the cluster mode settings

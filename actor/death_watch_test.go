@@ -32,12 +32,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	"github.com/tochemey/goakt/v3/address"
-	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/internal/pause"
-	"github.com/tochemey/goakt/v3/internal/registry"
-	"github.com/tochemey/goakt/v3/log"
-	mockscluster "github.com/tochemey/goakt/v3/mocks/cluster"
+	"github.com/tochemey/goakt/v4/address"
+	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/registry"
+	"github.com/tochemey/goakt/v4/log"
+	mockscluster "github.com/tochemey/goakt/v4/mocks/cluster"
 )
 
 func TestDeathWatch(t *testing.T) {

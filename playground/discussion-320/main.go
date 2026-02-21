@@ -30,10 +30,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/tochemey/goakt/v3/actor"
-	"github.com/tochemey/goakt/v3/log"
-	"github.com/tochemey/goakt/v3/reentrancy"
-	"github.com/tochemey/goakt/v3/test/data/testpb"
+	"github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/log"
+	"github.com/tochemey/goakt/v4/reentrancy"
+	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
 const (

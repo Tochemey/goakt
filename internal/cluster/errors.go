@@ -25,7 +25,7 @@ package cluster
 import (
 	"errors"
 
-	"github.com/tochemey/goakt/v3/internal/quorum"
+	"github.com/tochemey/goakt/v4/internal/quorum"
 )
 
 var (

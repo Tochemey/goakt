@@ -26,7 +26,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/tochemey/goakt/v3/passivation"
+	"github.com/tochemey/goakt/v4/passivation"
 )
 
 var (

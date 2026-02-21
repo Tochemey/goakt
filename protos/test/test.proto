@@ -8,7 +8,7 @@ package testpb;
 import "google/protobuf/any.proto";
 import "google/protobuf/duration.proto";
 
-option go_package = "github.com/tochemey/goakt/v3/test/data;testpb";
+option go_package = "github.com/tochemey/goakt/v4/test/data;testpb";
 
 // TestReply is a simple acknowledgement payload with no fields.
 message TestReply {}

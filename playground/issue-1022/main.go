@@ -31,10 +31,10 @@ import (
 
 	natsserver "github.com/nats-io/nats-server/v2/server"
 
-	"github.com/tochemey/goakt/v3/actor"
-	"github.com/tochemey/goakt/v3/discovery/nats"
-	"github.com/tochemey/goakt/v3/remote"
-	"github.com/tochemey/goakt/v3/test/data/testpb"
+	"github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/discovery/nats"
+	"github.com/tochemey/goakt/v4/remote"
+	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
 type Grain struct {

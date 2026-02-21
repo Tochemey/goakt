@@ -25,7 +25,7 @@ package actor
 import (
 	"context"
 
-	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v4/log"
 )
 
 // rootGuardian defines the system root actor

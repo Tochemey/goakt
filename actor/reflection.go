@@ -25,10 +25,10 @@ package actor
 import (
 	"reflect"
 
-	"github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/extension"
-	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/registry"
+	"github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/extension"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
+	"github.com/tochemey/goakt/v4/internal/registry"
 )
 
 // reflection helps create an instance dynamically

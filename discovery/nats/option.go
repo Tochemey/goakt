@@ -22,7 +22,7 @@
 
 package nats
 
-import "github.com/tochemey/goakt/v3/log"
+import "github.com/tochemey/goakt/v4/log"
 
 // Option is the interface that applies a configuration option.
 type Option interface {

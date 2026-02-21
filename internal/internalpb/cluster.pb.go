@@ -225,7 +225,7 @@ const file_internal_cluster_proto_rawDesc = "" +
 	"\fnode_address\x18\x01 \x01(\tR\vnodeAddress\"(\n" +
 	"\x10GetKindsResponse\x12\x14\n" +
 	"\x05kinds\x18\x01 \x03(\tR\x05kindsB\xa5\x01\n" +
-	"\x0ecom.internalpbB\fClusterProtoH\x02P\x01Z;github.com/tochemey/goakt/v3/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
+	"\x0ecom.internalpbB\fClusterProtoH\x02P\x01Z;github.com/tochemey/goakt/v4/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
 	"Internalpb\xca\x02\n" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
 	"Internalpbb\x06proto3"

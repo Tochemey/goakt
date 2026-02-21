@@ -30,9 +30,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/extension"
-	"github.com/tochemey/goakt/v3/reentrancy"
+	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/extension"
+	"github.com/tochemey/goakt/v4/reentrancy"
 )
 
 type mockDependency struct {

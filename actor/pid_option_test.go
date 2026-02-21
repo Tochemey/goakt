@@ -30,11 +30,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tochemey/goakt/v3/eventstream"
-	"github.com/tochemey/goakt/v3/internal/metric"
-	"github.com/tochemey/goakt/v3/log"
-	"github.com/tochemey/goakt/v3/passivation"
-	"github.com/tochemey/goakt/v3/supervisor"
+	"github.com/tochemey/goakt/v4/eventstream"
+	"github.com/tochemey/goakt/v4/internal/metric"
+	"github.com/tochemey/goakt/v4/log"
+	"github.com/tochemey/goakt/v4/passivation"
+	"github.com/tochemey/goakt/v4/supervisor"
 )
 
 func TestPIDOptions(t *testing.T) {

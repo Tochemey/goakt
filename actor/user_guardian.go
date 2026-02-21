@@ -23,7 +23,7 @@
 package actor
 
 import (
-	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v4/log"
 )
 
 // userGuardian defines the main system actor that is the ancestor

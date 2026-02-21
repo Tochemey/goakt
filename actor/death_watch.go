@@ -27,9 +27,9 @@ import (
 
 	"go.uber.org/multierr"
 
-	"github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/internal/pointer"
-	"github.com/tochemey/goakt/v3/internal/registry"
+	"github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/pointer"
+	"github.com/tochemey/goakt/v4/internal/registry"
 )
 
 // deathWatch removes dead actors from the system

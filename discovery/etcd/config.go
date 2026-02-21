@@ -27,7 +27,7 @@ import (
 	"crypto/tls"
 	"time"
 
-	"github.com/tochemey/goakt/v3/internal/validation"
+	"github.com/tochemey/goakt/v4/internal/validation"
 )
 
 // Config holds configuration for etcd service discovery

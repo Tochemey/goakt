@@ -38,15 +38,15 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 
-	"github.com/tochemey/goakt/v3/address"
-	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/internal/codec"
-	"github.com/tochemey/goakt/v3/internal/id"
-	"github.com/tochemey/goakt/v3/internal/internalpb"
-	inet "github.com/tochemey/goakt/v3/internal/net"
-	"github.com/tochemey/goakt/v3/internal/pointer"
-	"github.com/tochemey/goakt/v3/internal/strconvx"
-	"github.com/tochemey/goakt/v3/internal/xsync"
+	"github.com/tochemey/goakt/v4/address"
+	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/codec"
+	"github.com/tochemey/goakt/v4/internal/id"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
+	inet "github.com/tochemey/goakt/v4/internal/net"
+	"github.com/tochemey/goakt/v4/internal/pointer"
+	"github.com/tochemey/goakt/v4/internal/strconvx"
+	"github.com/tochemey/goakt/v4/internal/xsync"
 )
 
 const DefaultMaxReadFrameSize = 16 * 1024 * 1024 // 16 MiB

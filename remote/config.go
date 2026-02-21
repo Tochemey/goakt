@@ -30,9 +30,9 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	inet "github.com/tochemey/goakt/v3/internal/net"
-	"github.com/tochemey/goakt/v3/internal/size"
-	"github.com/tochemey/goakt/v3/internal/validation"
+	inet "github.com/tochemey/goakt/v4/internal/net"
+	"github.com/tochemey/goakt/v4/internal/size"
+	"github.com/tochemey/goakt/v4/internal/validation"
 )
 
 // Config defines the remote config.

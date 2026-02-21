@@ -38,15 +38,15 @@ import (
 	"github.com/tochemey/olric"
 	"github.com/travisjeffery/go-dynaport"
 
-	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/internal/cluster"
-	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/pause"
-	"github.com/tochemey/goakt/v3/internal/registry"
-	"github.com/tochemey/goakt/v3/log"
-	mockcluster "github.com/tochemey/goakt/v3/mocks/cluster"
-	mockremote "github.com/tochemey/goakt/v3/mocks/remote"
-	"github.com/tochemey/goakt/v3/remote"
+	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/cluster"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
+	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/registry"
+	"github.com/tochemey/goakt/v4/log"
+	mockcluster "github.com/tochemey/goakt/v4/mocks/cluster"
+	mockremote "github.com/tochemey/goakt/v4/mocks/remote"
+	"github.com/tochemey/goakt/v4/remote"
 )
 
 func TestSingletonActor(t *testing.T) {

@@ -27,12 +27,12 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/internal/cluster"
-	"github.com/tochemey/goakt/v3/internal/registry"
-	"github.com/tochemey/goakt/v3/log"
-	"github.com/tochemey/goakt/v3/remote"
-	sup "github.com/tochemey/goakt/v3/supervisor"
+	"github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/cluster"
+	"github.com/tochemey/goakt/v4/internal/registry"
+	"github.com/tochemey/goakt/v4/log"
+	"github.com/tochemey/goakt/v4/remote"
+	sup "github.com/tochemey/goakt/v4/supervisor"
 )
 
 // clusterSingletonManager is a system actor that manages the lifecycle of singleton actors

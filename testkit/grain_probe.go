@@ -31,9 +31,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	goakt "github.com/tochemey/goakt/v3/actor"
-	"github.com/tochemey/goakt/v3/internal/pause"
-	"github.com/tochemey/goakt/v3/internal/timer"
+	goakt "github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/timer"
 )
 
 // GrainProbe defines a test helper for validating grain message handling.

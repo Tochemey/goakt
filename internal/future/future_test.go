@@ -32,8 +32,8 @@ import (
 	"go.uber.org/goleak"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/tochemey/goakt/v3/internal/pause"
-	"github.com/tochemey/goakt/v3/test/data/testpb"
+	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
 func TestMain(m *testing.M) {

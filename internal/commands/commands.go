@@ -25,7 +25,7 @@ package commands
 import (
 	"time"
 
-	"github.com/tochemey/goakt/v3/supervisor"
+	"github.com/tochemey/goakt/v4/supervisor"
 )
 
 // Deadletter defines the deadletter event.

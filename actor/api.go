@@ -27,9 +27,9 @@ import (
 	"errors"
 	"time"
 
-	"github.com/tochemey/goakt/v3/address"
-	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/internal/internalpb"
+	"github.com/tochemey/goakt/v4/address"
+	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
 )
 
 // Ask sends a synchronous message to another actor and expect a response.

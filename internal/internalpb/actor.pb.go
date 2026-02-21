@@ -500,7 +500,7 @@ const file_internal_actor_proto_rawDesc = "" +
 	"\x1cSUPERVISOR_DIRECTIVE_RESTART\x10\x02\x12!\n" +
 	"\x1dSUPERVISOR_DIRECTIVE_ESCALATE\x10\x03B\xa3\x01\n" +
 	"\x0ecom.internalpbB\n" +
-	"ActorProtoH\x02P\x01Z;github.com/tochemey/goakt/v3/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
+	"ActorProtoH\x02P\x01Z;github.com/tochemey/goakt/v4/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
 	"Internalpb\xca\x02\n" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
 	"Internalpbb\x06proto3"

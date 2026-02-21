@@ -35,8 +35,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tochemey/goakt/v3/datacenter"
-	gerrors "github.com/tochemey/goakt/v3/errors"
+	"github.com/tochemey/goakt/v4/datacenter"
+	gerrors "github.com/tochemey/goakt/v4/errors"
 )
 
 var bucketNameSanitizer = regexp.MustCompile(`[^a-zA-Z0-9_-]+`)

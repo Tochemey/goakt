@@ -29,9 +29,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/internal/id"
-	"github.com/tochemey/goakt/v3/internal/registry"
+	"github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/id"
+	"github.com/tochemey/goakt/v4/internal/registry"
 )
 
 func TestIdentity(t *testing.T) {

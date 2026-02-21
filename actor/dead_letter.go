@@ -25,10 +25,10 @@ package actor
 import (
 	"go.uber.org/atomic"
 
-	"github.com/tochemey/goakt/v3/eventstream"
-	"github.com/tochemey/goakt/v3/internal/commands"
-	"github.com/tochemey/goakt/v3/internal/xsync"
-	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v4/eventstream"
+	"github.com/tochemey/goakt/v4/internal/commands"
+	"github.com/tochemey/goakt/v4/internal/xsync"
+	"github.com/tochemey/goakt/v4/log"
 )
 
 // deadletter is a synthetic actor that houses all deadletter

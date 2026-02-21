@@ -50,8 +50,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tochemey/goakt/v3/internal/strconvx"
-	"github.com/tochemey/goakt/v3/internal/validation"
+	"github.com/tochemey/goakt/v4/internal/strconvx"
+	"github.com/tochemey/goakt/v4/internal/validation"
 )
 
 // scheme defines the Go-Akt addressing scheme

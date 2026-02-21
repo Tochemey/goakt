@@ -31,8 +31,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/internal/locker"
+	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/locker"
 )
 
 // executionResult holds the result of a function execution

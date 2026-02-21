@@ -26,7 +26,7 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/tochemey/goakt/v3/internal/xsync"
+	"github.com/tochemey/goakt/v4/internal/xsync"
 )
 
 // Registry defines the types registry interface

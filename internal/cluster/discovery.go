@@ -29,7 +29,7 @@ import (
 
 	"github.com/tochemey/olric/pkg/service_discovery"
 
-	"github.com/tochemey/goakt/v3/discovery"
+	"github.com/tochemey/goakt/v4/discovery"
 )
 
 // discoveryProvider wraps the Cluster engine discovery and implements

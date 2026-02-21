@@ -26,11 +26,11 @@ import (
 	"errors"
 	"strings"
 
-	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/internal/id"
-	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/registry"
-	"github.com/tochemey/goakt/v3/internal/validation"
+	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/id"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
+	"github.com/tochemey/goakt/v4/internal/registry"
+	"github.com/tochemey/goakt/v4/internal/validation"
 )
 
 // GrainIdentity uniquely identifies a grain (virtual actor) instance within the actor system.

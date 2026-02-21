@@ -33,11 +33,11 @@ import (
 	"github.com/reugn/go-quartz/quartz"
 	"go.uber.org/atomic"
 
-	"github.com/tochemey/goakt/v3/address"
-	"github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/internal/xsync"
-	"github.com/tochemey/goakt/v3/log"
-	"github.com/tochemey/goakt/v3/remote"
+	"github.com/tochemey/goakt/v4/address"
+	"github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/xsync"
+	"github.com/tochemey/goakt/v4/log"
+	"github.com/tochemey/goakt/v4/remote"
 )
 
 // schedulerOption represents the scheduler option

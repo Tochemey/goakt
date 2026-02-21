@@ -25,8 +25,8 @@ package actor
 import (
 	"context"
 
-	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
+	"github.com/tochemey/goakt/v4/log"
 )
 
 // systemGuardian defines the main system actor that is the ancestor

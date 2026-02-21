@@ -31,9 +31,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/tochemey/goakt/v3/datacenter"
-	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v4/datacenter"
+	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/log"
 )
 
 func newTestController(t *testing.T, cp ControlPlane, mutate func(*Config)) *Controller {

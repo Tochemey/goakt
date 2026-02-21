@@ -30,7 +30,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/net/http2"
 
-	"github.com/tochemey/goakt/v3/internal/size"
+	"github.com/tochemey/goakt/v4/internal/size"
 )
 
 func TestNewClient(t *testing.T) {

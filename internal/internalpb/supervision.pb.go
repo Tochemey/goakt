@@ -252,7 +252,7 @@ const file_internal_supervision_proto_rawDesc = "" +
 	"\bStrategy\x12\x18\n" +
 	"\x14STRATEGY_ONE_FOR_ONE\x10\x00\x12\x18\n" +
 	"\x14STRATEGY_ONE_FOR_ALL\x10\x01B\xa9\x01\n" +
-	"\x0ecom.internalpbB\x10SupervisionProtoH\x02P\x01Z;github.com/tochemey/goakt/v3/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
+	"\x0ecom.internalpbB\x10SupervisionProtoH\x02P\x01Z;github.com/tochemey/goakt/v4/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
 	"Internalpb\xca\x02\n" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
 	"Internalpbb\x06proto3"

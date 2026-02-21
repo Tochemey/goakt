@@ -204,7 +204,7 @@ const file_internal_grain_proto_rawDesc = "" +
 	"\x12disable_relocation\x18\b \x01(\bR\x11disableRelocationB\x13\n" +
 	"\x11_mailbox_capacityB\xa3\x01\n" +
 	"\x0ecom.internalpbB\n" +
-	"GrainProtoH\x02P\x01Z;github.com/tochemey/goakt/v3/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
+	"GrainProtoH\x02P\x01Z;github.com/tochemey/goakt/v4/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
 	"Internalpb\xca\x02\n" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
 	"Internalpbb\x06proto3"

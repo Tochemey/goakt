@@ -32,15 +32,15 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tochemey/goakt/v3/datacenter"
-	"github.com/tochemey/goakt/v3/internal/cluster"
-	"github.com/tochemey/goakt/v3/internal/datacentercontroller"
-	"github.com/tochemey/goakt/v3/internal/pause"
-	"github.com/tochemey/goakt/v3/internal/ticker"
-	"github.com/tochemey/goakt/v3/internal/types"
-	"github.com/tochemey/goakt/v3/log"
-	mockscluster "github.com/tochemey/goakt/v3/mocks/cluster"
-	mocksremote "github.com/tochemey/goakt/v3/mocks/remote"
+	"github.com/tochemey/goakt/v4/datacenter"
+	"github.com/tochemey/goakt/v4/internal/cluster"
+	"github.com/tochemey/goakt/v4/internal/datacentercontroller"
+	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/ticker"
+	"github.com/tochemey/goakt/v4/internal/types"
+	"github.com/tochemey/goakt/v4/log"
+	mockscluster "github.com/tochemey/goakt/v4/mocks/cluster"
+	mocksremote "github.com/tochemey/goakt/v4/mocks/remote"
 )
 
 func TestDataCenterReady(t *testing.T) {

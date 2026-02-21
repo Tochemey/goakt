@@ -34,10 +34,10 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/client/v3/namespace"
 
-	"github.com/tochemey/goakt/v3/datacenter"
-	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/internal/codec"
-	"github.com/tochemey/goakt/v3/internal/validation"
+	"github.com/tochemey/goakt/v4/datacenter"
+	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/codec"
+	"github.com/tochemey/goakt/v4/internal/validation"
 )
 
 const recordSuffix = "/datacenterrecord"

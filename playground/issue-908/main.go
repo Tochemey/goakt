@@ -27,11 +27,11 @@ import (
 	"os"
 	"time"
 
-	goakt "github.com/tochemey/goakt/v3/actor"
-	"github.com/tochemey/goakt/v3/internal/pause"
-	"github.com/tochemey/goakt/v3/log"
-	"github.com/tochemey/goakt/v3/supervisor"
-	"github.com/tochemey/goakt/v3/test/data/testpb"
+	goakt "github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/log"
+	"github.com/tochemey/goakt/v4/supervisor"
+	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
 type A struct{}

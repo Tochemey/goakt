@@ -27,7 +27,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/tochemey/goakt/v3/actor"
+	"github.com/tochemey/goakt/v4/actor"
 )
 
 const numActors = 5

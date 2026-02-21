@@ -29,8 +29,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/tochemey/goakt/v3/actor"
-	errors2 "github.com/tochemey/goakt/v3/errors"
+	"github.com/tochemey/goakt/v4/actor"
+	errors2 "github.com/tochemey/goakt/v4/errors"
 )
 
 var _actorSystem actor.ActorSystem

@@ -33,7 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	"github.com/tochemey/goakt/v3/address"
+	"github.com/tochemey/goakt/v4/address"
 )
 
 func TestUnboundedFairMailboxNoStarvation(t *testing.T) {

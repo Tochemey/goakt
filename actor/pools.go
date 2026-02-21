@@ -23,7 +23,7 @@
 package actor
 
 import (
-	"github.com/tochemey/goakt/v3/internal/timer"
+	"github.com/tochemey/goakt/v4/internal/timer"
 )
 
 // contextPoolSize controls the bounded channel-based pool for ReceiveContext.

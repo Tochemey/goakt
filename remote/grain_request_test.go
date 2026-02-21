@@ -29,7 +29,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tochemey/goakt/v3/extension"
+	"github.com/tochemey/goakt/v4/extension"
 )
 
 func TestGrainActivationRequestValidateAndSanitize(t *testing.T) {

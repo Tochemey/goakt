@@ -34,10 +34,10 @@ import (
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/tochemey/goakt/v3/discovery"
-	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/locker"
-	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v4/discovery"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
+	"github.com/tochemey/goakt/v4/internal/locker"
+	"github.com/tochemey/goakt/v4/log"
 )
 
 // Discovery represents the kubernetes discovery

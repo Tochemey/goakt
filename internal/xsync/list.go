@@ -26,7 +26,7 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/tochemey/goakt/v3/internal/locker"
+	"github.com/tochemey/goakt/v4/internal/locker"
 )
 
 // List is a thread-safe, duplicate-free ordered collection for comparable

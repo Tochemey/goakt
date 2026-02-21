@@ -31,9 +31,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/tochemey/goakt/v3/actor"
-	"github.com/tochemey/goakt/v3/address"
-	"github.com/tochemey/goakt/v3/internal/timer"
+	"github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/address"
+	"github.com/tochemey/goakt/v4/internal/timer"
 )
 
 const (

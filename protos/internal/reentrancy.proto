@@ -4,7 +4,7 @@ package internalpb;
 
 import "google/protobuf/any.proto";
 
-option go_package = "github.com/tochemey/goakt/v3/internal/internalpb;internalpb";
+option go_package = "github.com/tochemey/goakt/v4/internal/internalpb;internalpb";
 
 // ReentrancyMode defines how an actor processes other messages while awaiting
 // an async request response.

@@ -30,8 +30,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/tochemey/goakt/v3/actor"
-	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/log"
 )
 
 func main() {

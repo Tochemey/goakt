@@ -40,15 +40,15 @@ import (
 	"github.com/tochemey/olric/pkg/storage"
 	"go.uber.org/atomic"
 
-	"github.com/tochemey/goakt/v3/address"
-	"github.com/tochemey/goakt/v3/discovery"
-	"github.com/tochemey/goakt/v3/hash"
-	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/locker"
-	"github.com/tochemey/goakt/v3/internal/memberlist"
-	"github.com/tochemey/goakt/v3/internal/types"
-	"github.com/tochemey/goakt/v3/log"
-	gtls "github.com/tochemey/goakt/v3/tls"
+	"github.com/tochemey/goakt/v4/address"
+	"github.com/tochemey/goakt/v4/discovery"
+	"github.com/tochemey/goakt/v4/hash"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
+	"github.com/tochemey/goakt/v4/internal/locker"
+	"github.com/tochemey/goakt/v4/internal/memberlist"
+	"github.com/tochemey/goakt/v4/internal/types"
+	"github.com/tochemey/goakt/v4/log"
+	gtls "github.com/tochemey/goakt/v4/tls"
 )
 
 const (

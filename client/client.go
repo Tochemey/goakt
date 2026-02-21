@@ -30,15 +30,15 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/tochemey/goakt/v3/address"
-	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/internal/chain"
-	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/locker"
-	"github.com/tochemey/goakt/v3/internal/ticker"
-	"github.com/tochemey/goakt/v3/internal/types"
-	"github.com/tochemey/goakt/v3/internal/validation"
-	"github.com/tochemey/goakt/v3/remote"
+	"github.com/tochemey/goakt/v4/address"
+	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/chain"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
+	"github.com/tochemey/goakt/v4/internal/locker"
+	"github.com/tochemey/goakt/v4/internal/ticker"
+	"github.com/tochemey/goakt/v4/internal/types"
+	"github.com/tochemey/goakt/v4/internal/validation"
+	"github.com/tochemey/goakt/v4/remote"
 )
 
 // Client provides connectivity to Go-Akt actor system nodes within a cluster.

@@ -25,7 +25,7 @@ package actor
 import (
 	"context"
 
-	"github.com/tochemey/goakt/v3/extension"
+	"github.com/tochemey/goakt/v4/extension"
 )
 
 // Context provides an environment for an actor when it is about to start.

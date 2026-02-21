@@ -27,7 +27,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/tochemey/goakt/v3/test/data/testpb"
+	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
 func TestUnboundedPriorityMailBox(t *testing.T) {

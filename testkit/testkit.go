@@ -30,10 +30,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 
-	goakt "github.com/tochemey/goakt/v3/actor"
-	"github.com/tochemey/goakt/v3/eventstream"
-	"github.com/tochemey/goakt/v3/extension"
-	"github.com/tochemey/goakt/v3/log"
+	goakt "github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/eventstream"
+	"github.com/tochemey/goakt/v4/extension"
+	"github.com/tochemey/goakt/v4/log"
 )
 
 // TestKit defines actor test kit

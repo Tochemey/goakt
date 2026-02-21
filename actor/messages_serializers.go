@@ -25,7 +25,7 @@ package actor
 import (
 	"errors"
 
-	"github.com/tochemey/goakt/v3/remote"
+	"github.com/tochemey/goakt/v4/remote"
 )
 
 // poisonPillMagic is the fixed 8-byte sentinel written on the wire for every

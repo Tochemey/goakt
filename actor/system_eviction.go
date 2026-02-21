@@ -25,7 +25,7 @@ package actor
 import (
 	"fmt"
 
-	"github.com/tochemey/goakt/v3/errors"
+	"github.com/tochemey/goakt/v4/errors"
 )
 
 // EvictionPolicy defines a strategy for passivating (deactivating) actors

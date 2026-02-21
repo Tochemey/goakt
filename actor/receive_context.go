@@ -27,10 +27,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/tochemey/goakt/v3/address"
-	"github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/extension"
-	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v4/address"
+	"github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/extension"
+	"github.com/tochemey/goakt/v4/log"
 )
 
 // ReceiveContext carries per-message context and operations available to an actor

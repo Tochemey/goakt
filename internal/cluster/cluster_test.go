@@ -47,14 +47,14 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 
-	"github.com/tochemey/goakt/v3/address"
-	"github.com/tochemey/goakt/v3/discovery"
-	"github.com/tochemey/goakt/v3/discovery/nats"
-	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/pause"
-	"github.com/tochemey/goakt/v3/log"
-	mocksdiscovery "github.com/tochemey/goakt/v3/mocks/discovery"
-	gtls "github.com/tochemey/goakt/v3/tls"
+	"github.com/tochemey/goakt/v4/address"
+	"github.com/tochemey/goakt/v4/discovery"
+	"github.com/tochemey/goakt/v4/discovery/nats"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
+	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/log"
+	mocksdiscovery "github.com/tochemey/goakt/v4/mocks/discovery"
+	gtls "github.com/tochemey/goakt/v4/tls"
 )
 
 func TestNotRunningReturnsErrEngineNotRunning(t *testing.T) {
