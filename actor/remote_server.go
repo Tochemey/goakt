@@ -40,7 +40,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/codec"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	inet "github.com/tochemey/goakt/v4/internal/net"
-	"github.com/tochemey/goakt/v4/internal/registry"
+	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/remote"
 )
 
@@ -720,7 +720,7 @@ func (x *actorSystem) getKindsHandler(_ context.Context, _ inet.Connection, req 
 
 	kinds := make([]string, len(x.clusterConfig.kinds.Values()))
 	for i, kind := range x.clusterConfig.kinds.Values() {
-		kinds[i] = registry.Name(kind)
+		kinds[i] = types.Name(kind)
 	}
 
 	return &internalpb.GetKindsResponse{Kinds: kinds}, nil

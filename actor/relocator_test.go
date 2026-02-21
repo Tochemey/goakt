@@ -45,7 +45,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/internal/pointer"
-	"github.com/tochemey/goakt/v4/internal/registry"
+	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/log"
 	mockscluster "github.com/tochemey/goakt/v4/mocks/cluster"
 	mocksremote "github.com/tochemey/goakt/v4/mocks/remote"
@@ -318,7 +318,7 @@ func TestRelocatorRecreateLocallyUsesSingletonSpec(t *testing.T) {
 	}
 	props := &internalpb.Actor{
 		Address: address.New("singleton", system.Name(), "127.0.0.1", 8080).String(),
-		Type:    registry.Name(new(MockActor)),
+		Type:    types.Name(new(MockActor)),
 		Singleton: &internalpb.SingletonSpec{
 			SpawnTimeout: singletonSpec.SpawnTimeout,
 			WaitInterval: singletonSpec.WaitInterval,
@@ -336,7 +336,7 @@ func TestRelocatorRecreateLocallyUsesSingletonSpec(t *testing.T) {
 
 	require.True(t, spy.called)
 	require.Equal(t, "singleton", spy.actorName)
-	require.Equal(t, props.GetType(), registry.Name(spy.actor))
+	require.Equal(t, props.GetType(), types.Name(spy.actor))
 	require.NotNil(t, spy.config)
 	require.Equal(t, singletonSpec.SpawnTimeout.AsDuration(), spy.config.spawnTimeout)
 	require.Equal(t, singletonSpec.WaitInterval.AsDuration(), spy.config.waitInterval)

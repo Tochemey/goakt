@@ -456,7 +456,7 @@ func TestToWireActorIncludesReentrancy(t *testing.T) {
 		reentrancy:   newReentrancyState(reentrancy.AllowAll, 3),
 	}
 
-	wire, err := pid.toWireActor()
+	wire, err := pid.toSerialize()
 	require.NoError(t, err)
 	require.NotNil(t, wire.GetReentrancy())
 	require.Equal(t, internalpb.ReentrancyMode_REENTRANCY_MODE_ALLOW_ALL, wire.GetReentrancy().GetMode())

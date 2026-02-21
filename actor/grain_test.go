@@ -44,7 +44,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/id"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/pause"
-	"github.com/tochemey/goakt/v4/internal/registry"
+	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/log"
 	mocks "github.com/tochemey/goakt/v4/mocks/cluster"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
@@ -361,7 +361,7 @@ func TestGrain(t *testing.T) {
 		// create a grain instance
 		grain := NewMockGrainActivationFailure()
 		name := "testGrain"
-		kind := registry.Name(grain)
+		kind := types.Name(grain)
 		identityStr := fmt.Sprintf("%s%s%s", kind, id.GrainIdentitySeparator, name)
 
 		clmock.EXPECT().GrainExists(ctx, identityStr).Return(true, nil)
@@ -1139,7 +1139,7 @@ func TestRecreateGrain(t *testing.T) {
 		sys.(*actorSystem).registry.Register(NewMockGrain())
 
 		idName := "MyGrain"
-		kind := registry.Name(NewMockGrain()) // e.g., actor.mockgrain
+		kind := types.Name(NewMockGrain()) // e.g., actor.mockgrain
 		// Use cased kind in Value as recreateGrain accepts any case
 		value := "actor.MockGrain/" + idName
 		grain := &internalpb.Grain{
@@ -1222,7 +1222,7 @@ func TestRecreateGrain(t *testing.T) {
 			Bytea:    []byte("noop"),
 		}
 		grain := &internalpb.Grain{
-			GrainId:           &internalpb.GrainId{Kind: registry.Name(NewMockGrain()), Name: idName, Value: value},
+			GrainId:           &internalpb.GrainId{Kind: types.Name(NewMockGrain()), Name: idName, Value: value},
 			Dependencies:      []*internalpb.Dependency{dep},
 			ActivationTimeout: durationpb.New(1 * time.Second),
 			ActivationRetries: 1,
@@ -1255,11 +1255,11 @@ func TestRecreateGrain(t *testing.T) {
 		value := "actor.MockGrain/" + idName
 		dep := &internalpb.Dependency{
 			Id:       bad.ID(),
-			TypeName: registry.Name(bad),
+			TypeName: types.Name(bad),
 			Bytea:    bytea,
 		}
 		grain := &internalpb.Grain{
-			GrainId:           &internalpb.GrainId{Kind: registry.Name(NewMockGrain()), Name: idName, Value: value},
+			GrainId:           &internalpb.GrainId{Kind: types.Name(NewMockGrain()), Name: idName, Value: value},
 			Dependencies:      []*internalpb.Dependency{dep},
 			ActivationTimeout: durationpb.New(1 * time.Second),
 			ActivationRetries: 1,

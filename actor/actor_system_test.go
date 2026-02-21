@@ -57,7 +57,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/metric"
 	"github.com/tochemey/goakt/v4/internal/pause"
-	"github.com/tochemey/goakt/v4/internal/registry"
+	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/internal/xsync"
 	"github.com/tochemey/goakt/v4/log"
 	mockscluster "github.com/tochemey/goakt/v4/mocks/cluster"
@@ -4061,7 +4061,7 @@ func TestRemotingSpawn(t *testing.T) {
 		// spawn the remote actor
 		request := &remote.SpawnRequest{
 			Name:           actorName,
-			Kind:           registry.Name(actor),
+			Kind:           types.Name(actor),
 			Singleton:      nil,
 			Relocatable:    false,
 			EnableStashing: true,
@@ -4212,7 +4212,7 @@ func TestRemotingSpawn(t *testing.T) {
 
 		request := &remote.SpawnRequest{
 			Name: uuid.NewString(),
-			Kind: registry.Name(new(MockUnimplementedActor)),
+			Kind: types.Name(new(MockUnimplementedActor)),
 		}
 
 		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
@@ -4252,7 +4252,7 @@ func TestRemotingSpawn(t *testing.T) {
 
 		request := &remote.SpawnRequest{
 			Name: uuid.NewString(),
-			Kind: registry.Name(new(MockActor)),
+			Kind: types.Name(new(MockActor)),
 			Dependencies: []extension.Dependency{
 				dependency,
 			},
@@ -5692,8 +5692,8 @@ func TestGetKinds(t *testing.T) {
 		require.True(t, ok)
 		// NewClusterConfig auto-registers FuncActor, so we expect 2 kinds.
 		require.Len(t, kindsResp.GetKinds(), 2)
-		assert.Contains(t, kindsResp.GetKinds(), registry.Name(new(MockActor)))
-		assert.Contains(t, kindsResp.GetKinds(), registry.Name(new(FuncActor)))
+		assert.Contains(t, kindsResp.GetKinds(), types.Name(new(MockActor)))
+		assert.Contains(t, kindsResp.GetKinds(), types.Name(new(FuncActor)))
 	})
 	t.Run("With remoting integration", func(t *testing.T) {
 		ctx := context.TODO()
@@ -5750,8 +5750,8 @@ func TestGetKinds(t *testing.T) {
 		require.True(t, ok)
 		// NewClusterConfig auto-registers FuncActor + the explicit MockActor.
 		require.Len(t, kindsResp.GetKinds(), 2)
-		assert.Contains(t, kindsResp.GetKinds(), registry.Name(new(MockActor)))
-		assert.Contains(t, kindsResp.GetKinds(), registry.Name(new(FuncActor)))
+		assert.Contains(t, kindsResp.GetKinds(), types.Name(new(MockActor)))
+		assert.Contains(t, kindsResp.GetKinds(), types.Name(new(FuncActor)))
 
 		remoting.Close()
 		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })

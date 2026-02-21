@@ -40,7 +40,7 @@ import (
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
-	"github.com/tochemey/goakt/v4/internal/registry"
+	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/internal/xsync"
 	mocks "github.com/tochemey/goakt/v4/mocks/extension"
 	"github.com/tochemey/goakt/v4/passivation"
@@ -267,7 +267,7 @@ func TestEncodeDependencies(t *testing.T) {
 
 		dependencies := []extension.Dependency{mockDependency}
 		expected := []*internalpb.Dependency{
-			{Id: "dep1", TypeName: registry.Name(mockDependency), Bytea: []byte("mock data")},
+			{Id: "dep1", TypeName: types.Name(mockDependency), Bytea: []byte("mock data")},
 		}
 		result, err := EncodeDependencies(dependencies...)
 		require.NoError(t, err)

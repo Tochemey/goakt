@@ -31,7 +31,7 @@ import (
 
 	"github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/id"
-	"github.com/tochemey/goakt/v4/internal/registry"
+	"github.com/tochemey/goakt/v4/internal/types"
 )
 
 func TestIdentity(t *testing.T) {
@@ -40,7 +40,7 @@ func TestIdentity(t *testing.T) {
 		name := "testGrain"
 		identity := newGrainIdentity(grain, name)
 		require.NotNil(t, identity)
-		expectedKind := registry.Name(grain)
+		expectedKind := types.Name(grain)
 		expectedStr := fmt.Sprintf("%s%s%s", expectedKind, id.GrainIdentitySeparator, name)
 		require.Equal(t, expectedKind, identity.Kind(), "expected kind to match grain type name")
 		require.Equal(t, "testGrain", identity.Name(), "expected name to match provided name")

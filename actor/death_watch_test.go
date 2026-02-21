@@ -35,7 +35,7 @@ import (
 	"github.com/tochemey/goakt/v4/address"
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/pause"
-	"github.com/tochemey/goakt/v4/internal/registry"
+	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/log"
 	mockscluster "github.com/tochemey/goakt/v4/mocks/cluster"
 )
@@ -273,7 +273,7 @@ func TestDeathWatch(t *testing.T) {
 		require.NotNil(t, deathWatchPID)
 		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
 
-		expectedKind := kindRole(registry.Name(actor), role)
+		expectedKind := kindRole(types.Name(actor), role)
 		clmock.EXPECT().RemoveActor(mock.Anything, actorName).Return(nil).Once()
 		clmock.EXPECT().RemoveKind(mock.Anything, expectedKind).Return(nil).Once()
 

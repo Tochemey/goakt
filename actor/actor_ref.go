@@ -25,7 +25,6 @@ package actor
 import (
 	"github.com/tochemey/goakt/v4/address"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
-	"github.com/tochemey/goakt/v4/internal/registry"
 )
 
 // ActorRef defines the information about a given actor.
@@ -52,7 +51,12 @@ type ActorRef struct { //nolint:revive
 	address *address.Address
 	// isSingleton defines if the actor is a singleton
 	isSingleton bool
-	relocatable bool
+	// isRelocatable defines if the actor is relocatable
+	isRelocatable bool
+	// stashEnabled defines if the actor has stash enabled
+	stashEnabled bool
+	// role defines the role associated with the actor, if any
+	role *string
 }
 
 // Name represents the actor given name
@@ -82,7 +86,7 @@ func (x ActorRef) IsSingleton() bool {
 //
 // Returns true if relocation is allowed, and false if relocation is disabled.
 func (x ActorRef) IsRelocatable() bool {
-	return x.relocatable
+	return x.isRelocatable
 }
 
 // Equals is a convenient method to compare two ActorRef
@@ -90,23 +94,25 @@ func (x ActorRef) Equals(actor ActorRef) bool {
 	return x.address.Equals(actor.address)
 }
 
+// CanStash returns true if the actor has stash enabled, otherwise it returns false
+func (x ActorRef) CanStash() bool {
+	return x.stashEnabled
+}
+
+// Role returns the role associated with the actor, if any.
+func (x ActorRef) Role() *string {
+	return x.role
+}
+
 func toActorRef(actorRef *internalpb.Actor) ActorRef {
 	addr, _ := address.Parse(actorRef.GetAddress())
 	return ActorRef{
-		name:        addr.Name(),
-		kind:        actorRef.GetType(),
-		address:     addr,
-		isSingleton: actorRef.Singleton != nil,
-		relocatable: actorRef.GetRelocatable(),
-	}
-}
-
-func fromPID(pid *PID) ActorRef {
-	return ActorRef{
-		name:        pid.Name(),
-		kind:        registry.Name(pid.Actor()),
-		address:     pid.Address(),
-		isSingleton: pid.IsSingleton(),
-		relocatable: pid.IsRelocatable(),
+		name:          addr.Name(),
+		kind:          actorRef.GetType(),
+		address:       addr,
+		isSingleton:   actorRef.Singleton != nil,
+		isRelocatable: actorRef.GetRelocatable(),
+		stashEnabled:  actorRef.GetEnableStash(),
+		role:          actorRef.Role,
 	}
 }

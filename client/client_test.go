@@ -44,7 +44,7 @@ import (
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	inet "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
-	"github.com/tochemey/goakt/v4/internal/registry"
+	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/log"
 	mockremote "github.com/tochemey/goakt/v4/mocks/remote"
 	"github.com/tochemey/goakt/v4/remote"
@@ -194,7 +194,7 @@ func TestClient(t *testing.T) {
 
 		grainRequest := &remote.GrainRequest{
 			Name:              "grain",
-			Kind:              registry.Name(&MockGrain{}),
+			Kind:              types.Name(&MockGrain{}),
 			ActivationTimeout: 0,
 			ActivationRetries: 0,
 		}
@@ -972,7 +972,7 @@ func TestClient(t *testing.T) {
 
 		grainRequest := &remote.GrainRequest{
 			Name:              "grain",
-			Kind:              registry.Name(&MockGrain{}),
+			Kind:              types.Name(&MockGrain{}),
 			ActivationTimeout: 0,
 			ActivationRetries: 0,
 		}

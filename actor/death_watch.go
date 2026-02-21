@@ -29,7 +29,7 @@ import (
 
 	"github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/pointer"
-	"github.com/tochemey/goakt/v4/internal/registry"
+	"github.com/tochemey/goakt/v4/internal/types"
 )
 
 // deathWatch removes dead actors from the system
@@ -103,7 +103,7 @@ func (x *deathWatch) handleTerminated(ctx *ReceiveContext) error {
 			// for singleton actors, we also need to remove the kind entry
 			if pid.IsSingleton() {
 				singletonRole := strings.TrimSpace(pointer.Deref(pid.role, ""))
-				singletonKind := registry.Name(pid.Actor())
+				singletonKind := types.Name(pid.Actor())
 				if singletonRole != "" {
 					singletonKind = kindRole(singletonKind, singletonRole)
 				}

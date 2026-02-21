@@ -28,14 +28,15 @@ import (
 	"github.com/tochemey/goakt/v4/remote"
 )
 
-// poisonPillMagic is the fixed 8-byte sentinel written on the wire for every
-// *PoisonPill message. The value is intentionally distinct from any valid
-// framing used by other serializers so that the remoting layer can dispatch
-// it unambiguously.
-var poisonPillMagic = [8]byte{0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xBA, 0xBE}
-
-// errNotPoisonPillFrame is returned when a frame is not a valid PoisonPill sentinel.
-var errNotPoisonPillFrame = errors.New("remote: not a PoisonPill frame")
+var (
+	// poisonPillMagic is the fixed 8-byte sentinel written on the wire for every
+	// *PoisonPill message. The value is intentionally distinct from any valid
+	// framing used by other serializers so that the remoting layer can dispatch
+	// it unambiguously.
+	poisonPillMagic = [8]byte{0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xBA, 0xBE}
+	// errNotPoisonPillFrame is returned when a frame is not a valid PoisonPill sentinel.
+	errNotPoisonPillFrame = errors.New("remote: not a PoisonPill frame")
+)
 
 // poisonPillSerializer is an unexported [remote.Serializer] implementation for
 // the [PoisonPill] message. Because PoisonPill carries no payload, its entire

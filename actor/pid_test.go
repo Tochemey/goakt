@@ -6387,7 +6387,7 @@ func TestToWireActorDependencyError(t *testing.T) {
 	expectedErr := assert.AnError
 	pid.dependencies.Set("failing", &MockFailingDependency{err: expectedErr})
 
-	wire, err := pid.toWireActor()
+	wire, err := pid.toSerialize()
 	require.ErrorIs(t, err, expectedErr)
 	require.Nil(t, wire)
 }
@@ -6399,7 +6399,7 @@ func TestToWireActorSupervisorSpec(t *testing.T) {
 		fieldsLocker: sync.RWMutex{},
 	}
 
-	wire, err := noSupervisorPID.toWireActor()
+	wire, err := noSupervisorPID.toSerialize()
 	require.NoError(t, err)
 	require.Nil(t, wire.GetSupervisor())
 
@@ -6410,7 +6410,7 @@ func TestToWireActorSupervisorSpec(t *testing.T) {
 		supervisor:   supervisor.NewSupervisor(supervisor.WithStrategy(supervisor.OneForAllStrategy)),
 	}
 
-	wire, err = withSupervisorPID.toWireActor()
+	wire, err = withSupervisorPID.toSerialize()
 	require.NoError(t, err)
 	require.NotNil(t, wire.GetSupervisor())
 	require.Equal(t, internalpb.SupervisorStrategy_SUPERVISOR_STRATEGY_ONE_FOR_ALL, wire.GetSupervisor().GetStrategy())
@@ -6430,7 +6430,7 @@ func TestToWireActorIncludesSingletonSpecWhenSingleton(t *testing.T) {
 	pid.setState(singletonState, true)
 	pid.singletonSpec = spec
 
-	wire, err := pid.toWireActor()
+	wire, err := pid.toSerialize()
 	require.NoError(t, err)
 
 	require.NotNil(t, wire.GetSingleton())

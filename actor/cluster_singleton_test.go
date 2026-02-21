@@ -42,7 +42,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/pause"
-	"github.com/tochemey/goakt/v4/internal/registry"
+	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/log"
 	mockcluster "github.com/tochemey/goakt/v4/mocks/cluster"
 	mockremote "github.com/tochemey/goakt/v4/mocks/remote"
@@ -272,7 +272,7 @@ func TestSingletonActor(t *testing.T) {
 
 		name := "singleton"
 		actor := NewMockActor()
-		expectedKind := registry.Name(actor)
+		expectedKind := types.Name(actor)
 		expectedErr := fmt.Errorf("remote spawn failure")
 		singletonSpec := &remote.SingletonSpec{
 			SpawnTimeout: 5 * time.Second,

@@ -64,7 +64,6 @@ import (
 	"github.com/tochemey/goakt/v4/internal/metric"
 	inet "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pointer"
-	"github.com/tochemey/goakt/v4/internal/registry"
 	"github.com/tochemey/goakt/v4/internal/ticker"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/internal/validation"
@@ -836,7 +835,7 @@ type actorSystem struct {
 	defaultSupervisor          *sup.Supervisor
 	defaultPassivationStrategy passivation.Strategy
 
-	registry   registry.Registry
+	registry   types.Registry
 	reflection *reflection
 
 	clusterConfig    *ClusterConfig
@@ -942,7 +941,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		partitionHasher:     hash.DefaultHasher(),
 		actorInitTimeout:    DefaultInitTimeout,
 		eventsQueue:         make(chan *cluster.Event, 1),
-		registry:            registry.NewRegistry(),
+		registry:            types.NewRegistry(),
 		remoteConfig:        remote.DefaultConfig(),
 		actors:              newTree(),
 		shutdownHooks:       make([]ShutdownHook, 0),
@@ -1712,7 +1711,7 @@ func (x *actorSystem) ActorRefs(ctx context.Context, timeout time.Duration) ([]A
 	actorRefs := make([]ActorRef, len(pids))
 	uniques := make(map[string]types.Unit)
 	for index, pid := range pids {
-		actorRefs[index] = fromPID(pid)
+		actorRefs[index] = pid.actorRef()
 		uniques[pid.Address().String()] = types.Unit{}
 	}
 
@@ -2215,7 +2214,7 @@ func (x *actorSystem) completeRelocation() {
 // putActorOnCluster broadcast the newly (re)spawned actor into the cluster
 func (x *actorSystem) putActorOnCluster(pid *PID) error {
 	if x.clusterEnabled.Load() {
-		actor, err := pid.toWireActor()
+		actor, err := pid.toSerialize()
 		if err != nil {
 			return err
 		}
@@ -2289,14 +2288,14 @@ func (x *actorSystem) setupCluster() error {
 
 	for _, kind := range x.clusterConfig.kinds.Values() {
 		x.registry.Register(kind)
-		x.logger.Infof("Kind (%s) registered", registry.Name(kind))
+		x.logger.Infof("Kind (%s) registered", types.Name(kind))
 	}
 
 	grains := x.clusterConfig.grains.Values()
 	if len(grains) > 0 {
 		for _, grain := range grains {
 			x.registry.Register(grain)
-			x.logger.Infof("Grain (%s) registered", registry.Name(grain))
+			x.logger.Infof("Grain (%s) registered", types.Name(grain))
 		}
 	}
 
@@ -2485,7 +2484,7 @@ func (x *actorSystem) shutdown(ctx context.Context) (err error) {
 
 	actorRefs := make([]ActorRef, 0, len(x.Actors()))
 	for _, actor := range x.Actors() {
-		actorRefs = append(actorRefs, fromPID(actor))
+		actorRefs = append(actorRefs, actor.actorRef())
 	}
 
 	// create a context with timeout to avoid blocking shutdown indefinitely
@@ -3072,7 +3071,7 @@ func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName str
 		// a singleton actor must only have one instance at a given time of its kind
 		// in the whole cluster
 		if singleton {
-			kind := registry.Name(actor)
+			kind := types.Name(actor)
 			role := strings.TrimSpace(pointer.Deref(singletonRole, ""))
 			if role != "" {
 				kind = kindRole(kind, role)
@@ -3530,7 +3529,7 @@ func (x *actorSystem) preShutdown() (*internalpb.PeerState, error) {
 			continue // actor is not relocatable, skip it
 		}
 
-		wireActor, err := actor.toWireActor()
+		wireActor, err := actor.toSerialize()
 		if err != nil {
 			return nil, err
 		}

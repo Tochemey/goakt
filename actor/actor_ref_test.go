@@ -29,7 +29,7 @@ import (
 
 	"github.com/tochemey/goakt/v4/address"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
-	"github.com/tochemey/goakt/v4/internal/registry"
+	"github.com/tochemey/goakt/v4/internal/types"
 )
 
 func TestActorRef(t *testing.T) {
@@ -50,6 +50,8 @@ func TestActorRef(t *testing.T) {
 		require.True(t, addr.Equals(actorRef.Address()))
 		require.True(t, newActorRef.Equals(actorRef))
 		require.False(t, newActorRef.IsRelocatable())
+		require.False(t, newActorRef.CanStash())
+		require.Nil(t, newActorRef.Role())
 	})
 	t.Run("From PID", func(t *testing.T) {
 		addr := address.New("name", "system", "host", 1234)
@@ -58,9 +60,9 @@ func TestActorRef(t *testing.T) {
 			address: addr,
 			actor:   actor,
 		}
-		actorRef := fromPID(pid)
+		actorRef := pid.actorRef()
 		require.Equal(t, "name", actorRef.Name())
-		require.Equal(t, registry.Name(actor), actorRef.Kind())
+		require.Equal(t, types.Name(actor), actorRef.Kind())
 		require.False(t, actorRef.IsRelocatable())
 	})
 }

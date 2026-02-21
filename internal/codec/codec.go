@@ -35,7 +35,7 @@ import (
 	"github.com/tochemey/goakt/v4/datacenter"
 	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
-	"github.com/tochemey/goakt/v4/internal/registry"
+	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/passivation"
 	"github.com/tochemey/goakt/v4/reentrancy"
 	"github.com/tochemey/goakt/v4/supervisor"
@@ -53,7 +53,7 @@ func EncodeDependencies(dependencies ...extension.Dependency) ([]*internalpb.Dep
 
 		output = append(output, &internalpb.Dependency{
 			Id:       dependency.ID(),
-			TypeName: registry.Name(dependency),
+			TypeName: types.Name(dependency),
 			Bytea:    bytea,
 		})
 	}

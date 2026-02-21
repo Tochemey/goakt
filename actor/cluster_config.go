@@ -30,8 +30,8 @@ import (
 
 	"github.com/tochemey/goakt/v4/datacenter"
 	"github.com/tochemey/goakt/v4/discovery"
-	"github.com/tochemey/goakt/v4/internal/registry"
 	"github.com/tochemey/goakt/v4/internal/size"
+	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/internal/validation"
 	"github.com/tochemey/goakt/v4/internal/xsync"
 )
@@ -89,7 +89,7 @@ func NewClusterConfig() *ClusterConfig {
 	}
 
 	fnActor := new(FuncActor)
-	config.kinds.Set(registry.Name(fnActor), fnActor)
+	config.kinds.Set(types.Name(fnActor), fnActor)
 	return config
 }
 
@@ -116,7 +116,7 @@ func (x *ClusterConfig) WithDiscovery(discovery discovery.Provider) *ClusterConf
 // WithKinds sets the cluster actor kinds
 func (x *ClusterConfig) WithKinds(kinds ...Actor) *ClusterConfig {
 	for _, kind := range kinds {
-		x.kinds.Set(registry.Name(kind), kind)
+		x.kinds.Set(types.Name(kind), kind)
 	}
 	return x
 }
@@ -124,7 +124,7 @@ func (x *ClusterConfig) WithKinds(kinds ...Actor) *ClusterConfig {
 // WithGrains sets the cluster grains
 func (x *ClusterConfig) WithGrains(grains ...Grain) *ClusterConfig {
 	for _, grain := range grains {
-		x.grains.Set(registry.Name(grain), grain)
+		x.grains.Set(types.Name(grain), grain)
 	}
 	return x
 }

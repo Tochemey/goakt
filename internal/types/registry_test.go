@@ -20,41 +20,42 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package http
+package types
 
 import (
-	"net/http"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
-	"golang.org/x/net/http2"
-
-	"github.com/tochemey/goakt/v4/internal/size"
 )
 
-func TestNewClient(t *testing.T) {
-	cl := NewHTTPClient(16 * size.KB)
-	assert.IsType(t, new(http.Client), cl)
-	assert.IsType(t, new(http2.Transport), cl.Transport)
-	tr := cl.Transport.(*http2.Transport)
-	assert.True(t, tr.AllowHTTP)
-	assert.Equal(t, 10*time.Second, tr.PingTimeout)
-	assert.Equal(t, 20*time.Second, tr.ReadIdleTimeout)
+type testStruct struct {
 }
 
-func TestURL(t *testing.T) {
-	host := "127.0.0.1"
-	port := 123
+func TestRegistry(t *testing.T) {
+	t.Run("With new instance", func(t *testing.T) {
+		newRegistry := NewRegistry()
+		var p any = newRegistry
+		_, ok := p.(Registry)
+		assert.True(t, ok)
+	})
 
-	url := URL(host, port)
-	assert.Equal(t, "http://127.0.0.1:123", url)
-}
+	t.Run("With registration", func(t *testing.T) {
+		registry := NewRegistry()
+		// create an instance of an object
+		obj := new(testStruct)
 
-func TestURLs(t *testing.T) {
-	host := "127.0.0.1"
-	port := 123
+		// register that actor
+		registry.Register(obj)
+		_, ok := registry.Type(obj)
+		assert.True(t, ok)
 
-	url := URLs(host, port)
-	assert.Equal(t, "https://127.0.0.1:123", url)
+		_, ok = registry.TypeOf("types.testStruct")
+		assert.True(t, ok)
+		assert.Len(t, registry.TypesMap(), 1)
+
+		assert.True(t, registry.Exists(obj))
+
+		registry.Deregister(obj)
+		assert.Len(t, registry.TypesMap(), 0)
+	})
 }

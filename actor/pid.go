@@ -54,7 +54,6 @@ import (
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/locker"
 	"github.com/tochemey/goakt/v4/internal/metric"
-	"github.com/tochemey/goakt/v4/internal/registry"
 	"github.com/tochemey/goakt/v4/internal/ticker"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/internal/xsync"
@@ -1087,8 +1086,12 @@ func (pid *PID) SendSync(ctx context.Context, actorName string, message any, tim
 	}
 
 	// Cap lookup timeout at 5 seconds to ensure responsive discovery
-	// TODO: make this configurable or set a reasonable default
-	lookupTimeout := 5 * time.Second
+	dcConfig := system.getDataCenterConfig()
+	lookupTimeout := datacenter.DefaultRequestTimeout
+	if dcConfig != nil {
+		lookupTimeout = dcConfig.RequestTimeout
+	}
+
 	if timeout > 0 && timeout < lookupTimeout {
 		lookupTimeout = timeout
 	}
@@ -2871,7 +2874,7 @@ func (pid *PID) remotingEnabled() bool {
 	return true
 }
 
-func (pid *PID) toWireActor() (*internalpb.Actor, error) {
+func (pid *PID) toSerialize() (*internalpb.Actor, error) {
 	dependencies, err := codec.EncodeDependencies(pid.Dependencies()...)
 	if err != nil {
 		return nil, err
@@ -2898,7 +2901,7 @@ func (pid *PID) toWireActor() (*internalpb.Actor, error) {
 
 	return &internalpb.Actor{
 		Address:             pid.ID(),
-		Type:                registry.Name(pid.Actor()),
+		Type:                types.Name(pid.Actor()),
 		Singleton:           singletonSpec,
 		Relocatable:         pid.IsRelocatable(),
 		PassivationStrategy: codec.EncodePassivationStrategy(pid.PassivationStrategy()),
@@ -2908,6 +2911,19 @@ func (pid *PID) toWireActor() (*internalpb.Actor, error) {
 		Supervisor:          supervisorSpec,
 		Reentrancy:          reentrancy,
 	}, nil
+}
+
+// actorRef returns an ActorRef for the given PID
+func (pid *PID) actorRef() ActorRef {
+	return ActorRef{
+		name:          pid.Name(),
+		kind:          types.Name(pid.Actor()),
+		address:       pid.Address(),
+		isSingleton:   pid.IsSingleton(),
+		isRelocatable: pid.IsRelocatable(),
+		stashEnabled:  pid.stashState != nil && pid.stashState.box != nil,
+		role:          pid.role,
+	}
 }
 
 func (pid *PID) registerMetrics() error {
@@ -2921,7 +2937,7 @@ func (pid *PID) registerMetrics() error {
 		observeOptions := []otelmetric.ObserveOption{
 			otelmetric.WithAttributes(attribute.String("actor.system", pid.actorSystem.Name())),
 			otelmetric.WithAttributes(attribute.String("actor.name", pid.Name())),
-			otelmetric.WithAttributes(attribute.String("actor.kind", registry.Name(pid.Actor()))),
+			otelmetric.WithAttributes(attribute.String("actor.kind", types.Name(pid.Actor()))),
 			otelmetric.WithAttributes(attribute.String("actor.address", pid.ID())),
 		}
 

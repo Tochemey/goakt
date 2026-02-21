@@ -42,8 +42,8 @@ import (
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/pointer"
-	"github.com/tochemey/goakt/v4/internal/registry"
 	"github.com/tochemey/goakt/v4/internal/strconvx"
+	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/supervisor"
 )
@@ -251,7 +251,7 @@ func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opt
 
 	request := &remote.SpawnRequest{
 		Name:                name,
-		Kind:                registry.Name(actor),
+		Kind:                types.Name(actor),
 		Singleton:           nil,
 		Relocatable:         config.relocatable,
 		PassivationStrategy: config.passivationStrategy,
@@ -354,7 +354,7 @@ func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Act
 	}
 
 	// singletonKey is the cluster registration key: kind or kind::role.
-	singletonKey := registry.Name(actor)
+	singletonKey := types.Name(actor)
 	if role != "" {
 		singletonKey = kindRole(singletonKey, role)
 	}
@@ -582,7 +582,7 @@ func (x *actorSystem) spawnSingletonWithRole(ctx context.Context, cl cluster.Clu
 	leader := filtered[0]
 	if leader.PeerAddress() != x.clusterNode.PeersAddress() {
 		var (
-			actorType = registry.Name(actor)
+			actorType = types.Name(actor)
 			host      = leader.Host
 			port      = leader.RemotingPort
 		)
@@ -607,7 +607,7 @@ func (x *actorSystem) spawnSingletonOnLocal(ctx context.Context, name string, ac
 	singletonRole := strings.TrimSpace(pointer.Deref(role, ""))
 
 	// Compute singleton kind once (used for cleanup)
-	singletonKind := registry.Name(actor)
+	singletonKind := types.Name(actor)
 	if singletonRole != "" {
 		singletonKind = kindRole(singletonKind, singletonRole)
 	}
@@ -746,7 +746,7 @@ func (x *actorSystem) spawnOnDatacenter(ctx context.Context, name string, actor 
 
 	return x.remoting.RemoteSpawn(ctx, host, port, &remote.SpawnRequest{
 		Name:                name,
-		Kind:                registry.Name(actor),
+		Kind:                types.Name(actor),
 		Relocatable:         config.relocatable,
 		PassivationStrategy: config.passivationStrategy,
 		Dependencies:        config.dependencies,

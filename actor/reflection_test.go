@@ -31,12 +31,12 @@ import (
 
 	"github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
-	"github.com/tochemey/goakt/v4/internal/registry"
+	"github.com/tochemey/goakt/v4/internal/types"
 )
 
 func TestReflection(t *testing.T) {
 	t.Run("With NewActor happy path", func(t *testing.T) {
-		newRegistry := registry.NewRegistry()
+		newRegistry := types.NewRegistry()
 		actor := NewMockActor()
 		newRegistry.Register(actor)
 		reflection := newReflection(newRegistry)
@@ -46,14 +46,14 @@ func TestReflection(t *testing.T) {
 		assert.IsType(t, new(MockActor), actual)
 	})
 	t.Run("With NewActor actor not found", func(t *testing.T) {
-		newRegistry := registry.NewRegistry()
+		newRegistry := types.NewRegistry()
 		reflection := newReflection(newRegistry)
 		actual, err := reflection.instantiateActor("actor.fakeActor")
 		assert.Error(t, err)
 		assert.Nil(t, actual)
 	})
 	t.Run("With unregistered actor", func(t *testing.T) {
-		tl := registry.NewRegistry()
+		tl := types.NewRegistry()
 		reflection := newReflection(tl)
 		actual, err := reflection.instantiateActor("actor.fakeActor")
 		assert.Error(t, err)
@@ -61,7 +61,7 @@ func TestReflection(t *testing.T) {
 		assert.Nil(t, actual)
 	})
 	t.Run("With NewActor actor interface not implemented", func(t *testing.T) {
-		newRegistry := registry.NewRegistry()
+		newRegistry := types.NewRegistry()
 		type normalStruct struct{}
 		newRegistry.Register(new(normalStruct))
 		reflection := newReflection(newRegistry)
@@ -71,11 +71,11 @@ func TestReflection(t *testing.T) {
 		assert.Nil(t, actual)
 	})
 	t.Run("With NewDependency happy path", func(t *testing.T) {
-		newRegistry := registry.NewRegistry()
+		newRegistry := types.NewRegistry()
 		dependency := NewMockDependency("1", "userName", "email")
 		newRegistry.Register(dependency)
 		reflection := newReflection(newRegistry)
-		typeName := registry.Name(dependency)
+		typeName := types.Name(dependency)
 		bytea, err := dependency.MarshalBinary()
 		require.NoError(t, err)
 		require.NotNil(t, bytea)
@@ -88,7 +88,7 @@ func TestReflection(t *testing.T) {
 		require.True(t, reflect.DeepEqual(dependency, actual))
 	})
 	t.Run("With NewDependency Dependency interface not implemented", func(t *testing.T) {
-		newRegistry := registry.NewRegistry()
+		newRegistry := types.NewRegistry()
 		type normalStruct struct{}
 		newRegistry.Register(new(normalStruct))
 		reflection := newReflection(newRegistry)
@@ -98,7 +98,7 @@ func TestReflection(t *testing.T) {
 		assert.Nil(t, actual)
 	})
 	t.Run("With unregistered dependency", func(t *testing.T) {
-		tl := registry.NewRegistry()
+		tl := types.NewRegistry()
 		reflection := newReflection(tl)
 		actual, err := reflection.dependencyFromBytes("actor.fakeDependency", []byte{})
 		assert.Error(t, err)
@@ -106,22 +106,22 @@ func TestReflection(t *testing.T) {
 		assert.Nil(t, actual)
 	})
 	t.Run("With NewDependency UnmarshalBinary failure", func(t *testing.T) {
-		newRegistry := registry.NewRegistry()
+		newRegistry := types.NewRegistry()
 		dependency := NewMockDependency("1", "userName", "email")
 		newRegistry.Register(dependency)
 		reflection := newReflection(newRegistry)
-		typeName := registry.Name(dependency)
+		typeName := types.Name(dependency)
 
 		actual, err := reflection.dependencyFromBytes(typeName, []byte("invalid"))
 		require.Error(t, err)
 		require.Nil(t, actual)
 	})
 	t.Run("With DependenciesFromProtobuf happy path", func(t *testing.T) {
-		newRegistry := registry.NewRegistry()
+		newRegistry := types.NewRegistry()
 		dependency := NewMockDependency("1", "userName", "email")
 		newRegistry.Register(dependency)
 		reflection := newReflection(newRegistry)
-		typeName := registry.Name(dependency)
+		typeName := types.Name(dependency)
 		bytea, err := dependency.MarshalBinary()
 		require.NoError(t, err)
 		require.NotNil(t, bytea)
@@ -142,11 +142,11 @@ func TestReflection(t *testing.T) {
 		require.True(t, reflect.DeepEqual(dependency, actual))
 	})
 	t.Run("With DependenciesFromProtobuf UnmarshalBinary failure", func(t *testing.T) {
-		newRegistry := registry.NewRegistry()
+		newRegistry := types.NewRegistry()
 		dependency := NewMockDependency("1", "userName", "email")
 		newRegistry.Register(dependency)
 		reflection := newReflection(newRegistry)
-		typeName := registry.Name(dependency)
+		typeName := types.Name(dependency)
 
 		pb := &internalpb.Dependency{
 			Id:       dependency.ID(),
@@ -160,7 +160,7 @@ func TestReflection(t *testing.T) {
 		require.Empty(t, dependencies)
 	})
 	t.Run("With NewGrain happy path", func(t *testing.T) {
-		newRegistry := registry.NewRegistry()
+		newRegistry := types.NewRegistry()
 		grain := NewMockGrain()
 		newRegistry.Register(grain)
 		reflection := newReflection(newRegistry)
@@ -170,14 +170,14 @@ func TestReflection(t *testing.T) {
 		assert.IsType(t, new(MockGrain), actual)
 	})
 	t.Run("With NewGrain grain not found", func(t *testing.T) {
-		newRegistry := registry.NewRegistry()
+		newRegistry := types.NewRegistry()
 		reflection := newReflection(newRegistry)
 		actual, err := reflection.instantiateGrain("actor.fakeGrain")
 		assert.Error(t, err)
 		assert.Nil(t, actual)
 	})
 	t.Run("With unregistered grain", func(t *testing.T) {
-		tl := registry.NewRegistry()
+		tl := types.NewRegistry()
 		reflection := newReflection(tl)
 		actual, err := reflection.instantiateGrain("actor.fakeGrain")
 		assert.Error(t, err)
@@ -185,7 +185,7 @@ func TestReflection(t *testing.T) {
 		assert.Nil(t, actual)
 	})
 	t.Run("With NewGrain Grain interface not implemented", func(t *testing.T) {
-		newRegistry := registry.NewRegistry()
+		newRegistry := types.NewRegistry()
 		type normalStruct struct{}
 		newRegistry.Register(new(normalStruct))
 		reflection := newReflection(newRegistry)
