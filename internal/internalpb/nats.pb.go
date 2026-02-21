@@ -164,7 +164,7 @@ const file_internal_nats_proto_rawDesc = "" +
 	"\x1cNATS_MESSAGE_TYPE_DEREGISTER\x10\x01\x12\x1d\n" +
 	"\x19NATS_MESSAGE_TYPE_REQUEST\x10\x02\x12\x1e\n" +
 	"\x1aNATS_MESSAGE_TYPE_RESPONSE\x10\x03B\xa2\x01\n" +
-	"\x0ecom.internalpbB\tNatsProtoH\x02P\x01Z;github.com/tochemey/goakt/v3/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
+	"\x0ecom.internalpbB\tNatsProtoH\x02P\x01Z;github.com/tochemey/goakt/v4/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
 	"Internalpb\xca\x02\n" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
 	"Internalpbb\x06proto3"

@@ -27,7 +27,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v4/log"
 )
 
 func TestOptions(t *testing.T) {

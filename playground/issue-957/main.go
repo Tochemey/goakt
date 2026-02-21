@@ -29,11 +29,11 @@ import (
 	"os/signal"
 	"syscall"
 
-	goakt "github.com/tochemey/goakt/v3/actor"
-	"github.com/tochemey/goakt/v3/discovery/dnssd"
-	goakterrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/log"
-	"github.com/tochemey/goakt/v3/remote"
+	goakt "github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/discovery/dnssd"
+	goakterrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/log"
+	"github.com/tochemey/goakt/v4/remote"
 )
 
 type MySingleton struct{}

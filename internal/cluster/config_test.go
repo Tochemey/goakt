@@ -29,10 +29,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/tochemey/goakt/v3/internal/size"
-	"github.com/tochemey/goakt/v3/log"
-	hashmock "github.com/tochemey/goakt/v3/mocks/hash"
-	gtls "github.com/tochemey/goakt/v3/tls"
+	"github.com/tochemey/goakt/v4/internal/size"
+	"github.com/tochemey/goakt/v4/log"
+	hashmock "github.com/tochemey/goakt/v4/mocks/hash"
+	gtls "github.com/tochemey/goakt/v4/tls"
 )
 
 // nolint

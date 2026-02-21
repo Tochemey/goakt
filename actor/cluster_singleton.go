@@ -27,13 +27,12 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/internal/cluster"
-	"github.com/tochemey/goakt/v3/internal/registry"
-	"github.com/tochemey/goakt/v3/log"
-	"github.com/tochemey/goakt/v3/remote"
-	sup "github.com/tochemey/goakt/v3/supervisor"
+	"github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/cluster"
+	"github.com/tochemey/goakt/v4/internal/types"
+	"github.com/tochemey/goakt/v4/log"
+	"github.com/tochemey/goakt/v4/remote"
+	sup "github.com/tochemey/goakt/v4/supervisor"
 )
 
 // clusterSingletonManager is a system actor that manages the lifecycle of singleton actors
@@ -61,7 +60,7 @@ func (*clusterSingletonManager) PreStart(*Context) error {
 // Receive handles messages received by the cluster singleton.
 func (x *clusterSingletonManager) Receive(ctx *ReceiveContext) {
 	// handle PostStart message
-	if _, ok := ctx.Message().(*goaktpb.PostStart); ok {
+	if _, ok := ctx.Message().(*PostStart); ok {
 		x.handlePostStart(ctx)
 	}
 }
@@ -144,7 +143,7 @@ func (x *actorSystem) spawnSingletonOnLeader(ctx context.Context, cl cluster.Clu
 	}
 
 	var (
-		actorType = registry.Name(actor)
+		actorType = types.Name(actor)
 		host      = leader.Host
 		port      = leader.RemotingPort
 	)

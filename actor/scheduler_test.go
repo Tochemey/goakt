@@ -33,13 +33,13 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
 
-	"github.com/tochemey/goakt/v3/address"
-	"github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/internal/pause"
-	"github.com/tochemey/goakt/v3/log"
-	testkit "github.com/tochemey/goakt/v3/mocks/discovery"
-	"github.com/tochemey/goakt/v3/remote"
-	"github.com/tochemey/goakt/v3/test/data/testpb"
+	"github.com/tochemey/goakt/v4/address"
+	"github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/log"
+	testkit "github.com/tochemey/goakt/v4/mocks/discovery"
+	"github.com/tochemey/goakt/v4/remote"
+	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
 func TestScheduler(t *testing.T) {

@@ -32,7 +32,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
 
-	"github.com/tochemey/goakt/v3/remote"
+	"github.com/tochemey/goakt/v4/remote"
 )
 
 func TestNode(t *testing.T) {

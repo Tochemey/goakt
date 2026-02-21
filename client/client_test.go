@@ -37,19 +37,18 @@ import (
 	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/proto"
 
-	actors "github.com/tochemey/goakt/v3/actor"
-	"github.com/tochemey/goakt/v3/address"
-	"github.com/tochemey/goakt/v3/discovery"
-	"github.com/tochemey/goakt/v3/discovery/nats"
-	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/goaktpb"
-	inet "github.com/tochemey/goakt/v3/internal/net"
-	"github.com/tochemey/goakt/v3/internal/pause"
-	"github.com/tochemey/goakt/v3/internal/registry"
-	"github.com/tochemey/goakt/v3/log"
-	mockremote "github.com/tochemey/goakt/v3/mocks/remote"
-	"github.com/tochemey/goakt/v3/remote"
-	"github.com/tochemey/goakt/v3/test/data/testpb"
+	actors "github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/address"
+	"github.com/tochemey/goakt/v4/discovery"
+	"github.com/tochemey/goakt/v4/discovery/nats"
+	gerrors "github.com/tochemey/goakt/v4/errors"
+	inet "github.com/tochemey/goakt/v4/internal/net"
+	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/types"
+	"github.com/tochemey/goakt/v4/log"
+	mockremote "github.com/tochemey/goakt/v4/mocks/remote"
+	"github.com/tochemey/goakt/v4/remote"
+	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
 func TestNewReturnsErrorWithNoNodes(t *testing.T) {
@@ -186,13 +185,16 @@ func TestClient(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expectedReply := &testpb.Reply{Content: "received message"}
-		assert.True(t, proto.Equal(expectedReply, reply))
+
+		actualReply, ok := reply.(*testpb.Reply)
+		require.True(t, ok)
+		assert.True(t, proto.Equal(expectedReply, actualReply))
 
 		pause.For(500 * time.Millisecond)
 
 		grainRequest := &remote.GrainRequest{
 			Name:              "grain",
-			Kind:              registry.Name(&MockGrain{}),
+			Kind:              types.Name(&MockGrain{}),
 			ActivationTimeout: 0,
 			ActivationRetries: 0,
 		}
@@ -200,7 +202,9 @@ func TestClient(t *testing.T) {
 		reply, err = client.AskGrain(ctx, grainRequest, new(testpb.TestReply), time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
-		assert.True(t, proto.Equal(expectedReply, reply))
+		actualReply, ok = reply.(*testpb.Reply)
+		require.True(t, ok)
+		assert.True(t, proto.Equal(expectedReply, actualReply))
 
 		pause.For(500 * time.Millisecond)
 
@@ -296,7 +300,10 @@ func TestClient(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expectedReply := &testpb.Reply{Content: "received message"}
-		assert.True(t, proto.Equal(expectedReply, reply))
+
+		actualReply, ok := reply.(*testpb.Reply)
+		require.True(t, ok)
+		assert.True(t, proto.Equal(expectedReply, actualReply))
 
 		pause.For(time.Second)
 
@@ -389,7 +396,10 @@ func TestClient(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expectedReply := &testpb.Reply{Content: "received message"}
-		assert.True(t, proto.Equal(expectedReply, reply))
+
+		actualReply, ok := reply.(*testpb.Reply)
+		require.True(t, ok)
+		assert.True(t, proto.Equal(expectedReply, actualReply))
 
 		pause.For(time.Second)
 
@@ -477,7 +487,9 @@ func TestClient(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expectedReply := &testpb.Reply{Content: "received message"}
-		assert.True(t, proto.Equal(expectedReply, reply))
+		actualReply, ok := reply.(*testpb.Reply)
+		require.True(t, ok)
+		assert.True(t, proto.Equal(expectedReply, actualReply))
 
 		pause.For(time.Second)
 
@@ -567,7 +579,9 @@ func TestClient(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expectedReply := &testpb.Reply{Content: "received message"}
-		assert.True(t, proto.Equal(expectedReply, reply))
+		actualReply, ok := reply.(*testpb.Reply)
+		require.True(t, ok)
+		assert.True(t, proto.Equal(expectedReply, actualReply))
 
 		pause.For(time.Second)
 
@@ -655,7 +669,9 @@ func TestClient(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expectedReply := &testpb.Reply{Content: "received message"}
-		assert.True(t, proto.Equal(expectedReply, reply))
+		actualReply, ok := reply.(*testpb.Reply)
+		require.True(t, ok)
+		assert.True(t, proto.Equal(expectedReply, actualReply))
 
 		pause.For(time.Second)
 
@@ -671,7 +687,9 @@ func TestClient(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expectedReply = &testpb.Reply{Content: "received message"}
-		assert.True(t, proto.Equal(expectedReply, reply))
+		actualReply, ok = reply.(*testpb.Reply)
+		require.True(t, ok)
+		assert.True(t, proto.Equal(expectedReply, actualReply))
 
 		err = client.Stop(ctx, actorName)
 		require.NoError(t, err)
@@ -753,7 +771,9 @@ func TestClient(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expectedReply := &testpb.Reply{Content: "received message"}
-		assert.True(t, proto.Equal(expectedReply, reply))
+		actualReply, ok := reply.(*testpb.Reply)
+		require.True(t, ok)
+		assert.True(t, proto.Equal(expectedReply, actualReply))
 
 		pause.For(time.Second)
 
@@ -952,7 +972,7 @@ func TestClient(t *testing.T) {
 
 		grainRequest := &remote.GrainRequest{
 			Name:              "grain",
-			Kind:              registry.Name(&MockGrain{}),
+			Kind:              types.Name(&MockGrain{}),
 			ActivationTimeout: 0,
 			ActivationRetries: 0,
 		}
@@ -1774,7 +1794,7 @@ func (x *testActor) PostStop(*actors.Context) error {
 // Receive processes any message dropped into the actor mailbox without a reply
 func (x *testActor) Receive(ctx *actors.ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *actors.PostStart:
 		x.logger.Info("post start")
 	case *testpb.TestSend:
 	case *testpb.TestReply:

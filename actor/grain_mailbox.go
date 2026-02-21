@@ -27,7 +27,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	gerrors "github.com/tochemey/goakt/v3/errors"
+	gerrors "github.com/tochemey/goakt/v4/errors"
 )
 
 // grainNode is a queue node for the grain MPSC mailbox.

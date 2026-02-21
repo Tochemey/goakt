@@ -30,8 +30,8 @@ import (
 	goset "github.com/deckarep/golang-set/v2"
 	"go.uber.org/atomic"
 
-	"github.com/tochemey/goakt/v3/discovery"
-	"github.com/tochemey/goakt/v3/internal/locker"
+	"github.com/tochemey/goakt/v4/discovery"
+	"github.com/tochemey/goakt/v4/internal/locker"
 )
 
 const (

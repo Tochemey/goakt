@@ -28,7 +28,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/tochemey/goakt/v3/remote"
+	"github.com/tochemey/goakt/v4/remote"
 )
 
 func TestPeer(t *testing.T) {

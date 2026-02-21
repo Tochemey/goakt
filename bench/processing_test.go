@@ -29,12 +29,10 @@ import (
 	"testing"
 	"time"
 
-	"google.golang.org/protobuf/proto"
-
-	"github.com/tochemey/goakt/v3/actor"
-	"github.com/tochemey/goakt/v3/log"
-	"github.com/tochemey/goakt/v3/reentrancy"
-	"github.com/tochemey/goakt/v3/test/data/testpb"
+	"github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/log"
+	"github.com/tochemey/goakt/v4/reentrancy"
+	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
 type Actor struct{}
@@ -77,7 +75,7 @@ func (a *requestBenchActor) Receive(ctx *actor.ReceiveContext) {
 			a.signalDone()
 			return
 		}
-		call.Then(func(_ proto.Message, err error) {
+		call.Then(func(_ any, err error) {
 			if err != nil {
 				a.signalError(err)
 			}

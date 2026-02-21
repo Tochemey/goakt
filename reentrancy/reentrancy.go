@@ -23,8 +23,8 @@
 package reentrancy
 
 import (
-	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/internal/validation"
+	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/validation"
 )
 
 // Mode determines how an actor processes other messages while waiting

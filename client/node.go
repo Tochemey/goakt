@@ -27,9 +27,9 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/tochemey/goakt/v3/internal/locker"
-	"github.com/tochemey/goakt/v3/internal/validation"
-	"github.com/tochemey/goakt/v3/remote"
+	"github.com/tochemey/goakt/v4/internal/locker"
+	"github.com/tochemey/goakt/v4/internal/validation"
+	"github.com/tochemey/goakt/v4/remote"
 )
 
 type NodeOption func(*Node)

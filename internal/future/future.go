@@ -25,8 +25,6 @@ package future
 import (
 	"context"
 	"sync"
-
-	"google.golang.org/protobuf/proto"
 )
 
 // Future represents a value which may or may not currently be available,
@@ -67,11 +65,11 @@ import (
 type Future interface {
 	// Await blocks until the Future is completed or context is canceled and
 	// returns either a result or an error.
-	Await(context.Context) (proto.Message, error)
+	Await(context.Context) (any, error)
 
 	// complete completes the Future with either a value or an error.
 	// It is used by [completable] internally.
-	complete(proto.Message, error)
+	complete(any, error)
 }
 
 // New creates a new Future that executes the given long-running task.
@@ -101,7 +99,7 @@ type Future interface {
 //	}
 //
 //	log.Printf("Received result: %v", result)
-func New(task func() (proto.Message, error)) Future {
+func New(task func() (any, error)) Future {
 	comp := newCompletable()
 	go func() {
 		result, err := task()
@@ -119,7 +117,7 @@ type future struct {
 	acceptOnce   sync.Once
 	completeOnce sync.Once
 	done         chan any
-	value        proto.Message
+	value        any
 	err          error
 }
 
@@ -152,19 +150,19 @@ func (x *future) setResult(result any) {
 	case error:
 		x.err = value
 	default:
-		x.value = value.(proto.Message)
+		x.value = value
 	}
 }
 
 // Await blocks until the Future is completed or context is canceled and
 // returns either a result or an error.
-func (x *future) Await(ctx context.Context) (proto.Message, error) {
+func (x *future) Await(ctx context.Context) (any, error) {
 	x.wait(ctx)
 	return x.value, x.err
 }
 
 // complete completes the Future with either a value or an error.
-func (x *future) complete(value proto.Message, err error) {
+func (x *future) complete(value any, err error) {
 	x.completeOnce.Do(func() {
 		if err != nil {
 			x.done <- err
@@ -178,7 +176,7 @@ func (x *future) complete(value proto.Message, err error) {
 // which completes a Future.
 type completable interface {
 	// Success completes the underlying Future with a value.
-	Success(proto.Message)
+	Success(any)
 
 	// Failure fails the underlying Future with an error.
 	Failure(error)
@@ -204,7 +202,7 @@ func newCompletable() completable {
 }
 
 // Success completes the underlying Future with a given value.
-func (p *completer) Success(value proto.Message) {
+func (p *completer) Success(value any) {
 	p.once.Do(func() {
 		p.future.complete(value, nil)
 	})
@@ -213,7 +211,7 @@ func (p *completer) Success(value proto.Message) {
 // Failure fails the underlying Future with a given error.
 func (p *completer) Failure(err error) {
 	p.once.Do(func() {
-		var zero proto.Message
+		var zero any
 		p.future.complete(zero, err)
 	})
 }

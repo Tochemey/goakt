@@ -31,7 +31,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	"github.com/tochemey/goakt/v3/test/data/testpb"
+	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
 func TestProtoSerializer_MarshalUnmarshalBinary_Success(t *testing.T) {

@@ -9,7 +9,6 @@ package internalpb
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
-	anypb "google.golang.org/protobuf/types/known/anypb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -211,75 +210,12 @@ func (x *GetKindsResponse) GetKinds() []string {
 	return nil
 }
 
-type TopicMessage struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the message unique id
-	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	// Specifies the topic
-	Topic string `protobuf:"bytes,2,opt,name=topic,proto3" json:"topic,omitempty"`
-	// Specifies the message
-	Message       *anypb.Any `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *TopicMessage) Reset() {
-	*x = TopicMessage{}
-	mi := &file_internal_cluster_proto_msgTypes[4]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *TopicMessage) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*TopicMessage) ProtoMessage() {}
-
-func (x *TopicMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_cluster_proto_msgTypes[4]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use TopicMessage.ProtoReflect.Descriptor instead.
-func (*TopicMessage) Descriptor() ([]byte, []int) {
-	return file_internal_cluster_proto_rawDescGZIP(), []int{4}
-}
-
-func (x *TopicMessage) GetId() string {
-	if x != nil {
-		return x.Id
-	}
-	return ""
-}
-
-func (x *TopicMessage) GetTopic() string {
-	if x != nil {
-		return x.Topic
-	}
-	return ""
-}
-
-func (x *TopicMessage) GetMessage() *anypb.Any {
-	if x != nil {
-		return x.Message
-	}
-	return nil
-}
-
 var File_internal_cluster_proto protoreflect.FileDescriptor
 
 const file_internal_cluster_proto_rawDesc = "" +
 	"\n" +
 	"\x16internal/cluster.proto\x12\n" +
-	"internalpb\x1a\x19google/protobuf/any.proto\"9\n" +
+	"internalpb\"9\n" +
 	"\x14GetNodeMetricRequest\x12!\n" +
 	"\fnode_address\x18\x01 \x01(\tR\vnodeAddress\"N\n" +
 	"\x15GetNodeMetricResponse\x12!\n" +
@@ -288,15 +224,8 @@ const file_internal_cluster_proto_rawDesc = "" +
 	"\x0fGetKindsRequest\x12!\n" +
 	"\fnode_address\x18\x01 \x01(\tR\vnodeAddress\"(\n" +
 	"\x10GetKindsResponse\x12\x14\n" +
-	"\x05kinds\x18\x01 \x03(\tR\x05kinds\"d\n" +
-	"\fTopicMessage\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
-	"\x05topic\x18\x02 \x01(\tR\x05topic\x12.\n" +
-	"\amessage\x18\x03 \x01(\v2\x14.google.protobuf.AnyR\amessage2\xad\x01\n" +
-	"\x0eClusterService\x12T\n" +
-	"\rGetNodeMetric\x12 .internalpb.GetNodeMetricRequest\x1a!.internalpb.GetNodeMetricResponse\x12E\n" +
-	"\bGetKinds\x12\x1b.internalpb.GetKindsRequest\x1a\x1c.internalpb.GetKindsResponseB\xa5\x01\n" +
-	"\x0ecom.internalpbB\fClusterProtoH\x02P\x01Z;github.com/tochemey/goakt/v3/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
+	"\x05kinds\x18\x01 \x03(\tR\x05kindsB\xa5\x01\n" +
+	"\x0ecom.internalpbB\fClusterProtoH\x02P\x01Z;github.com/tochemey/goakt/v4/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
 	"Internalpb\xca\x02\n" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
 	"Internalpbb\x06proto3"
@@ -313,26 +242,19 @@ func file_internal_cluster_proto_rawDescGZIP() []byte {
 	return file_internal_cluster_proto_rawDescData
 }
 
-var file_internal_cluster_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_internal_cluster_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_internal_cluster_proto_goTypes = []any{
 	(*GetNodeMetricRequest)(nil),  // 0: internalpb.GetNodeMetricRequest
 	(*GetNodeMetricResponse)(nil), // 1: internalpb.GetNodeMetricResponse
 	(*GetKindsRequest)(nil),       // 2: internalpb.GetKindsRequest
 	(*GetKindsResponse)(nil),      // 3: internalpb.GetKindsResponse
-	(*TopicMessage)(nil),          // 4: internalpb.TopicMessage
-	(*anypb.Any)(nil),             // 5: google.protobuf.Any
 }
 var file_internal_cluster_proto_depIdxs = []int32{
-	5, // 0: internalpb.TopicMessage.message:type_name -> google.protobuf.Any
-	0, // 1: internalpb.ClusterService.GetNodeMetric:input_type -> internalpb.GetNodeMetricRequest
-	2, // 2: internalpb.ClusterService.GetKinds:input_type -> internalpb.GetKindsRequest
-	1, // 3: internalpb.ClusterService.GetNodeMetric:output_type -> internalpb.GetNodeMetricResponse
-	3, // 4: internalpb.ClusterService.GetKinds:output_type -> internalpb.GetKindsResponse
-	3, // [3:5] is the sub-list for method output_type
-	1, // [1:3] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	0, // [0:0] is the sub-list for method output_type
+	0, // [0:0] is the sub-list for method input_type
+	0, // [0:0] is the sub-list for extension type_name
+	0, // [0:0] is the sub-list for extension extendee
+	0, // [0:0] is the sub-list for field type_name
 }
 
 func init() { file_internal_cluster_proto_init() }
@@ -346,9 +268,9 @@ func file_internal_cluster_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_cluster_proto_rawDesc), len(file_internal_cluster_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   4,
 			NumExtensions: 0,
-			NumServices:   1,
+			NumServices:   0,
 		},
 		GoTypes:           file_internal_cluster_proto_goTypes,
 		DependencyIndexes: file_internal_cluster_proto_depIdxs,

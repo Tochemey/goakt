@@ -32,8 +32,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 
-	"github.com/tochemey/goakt/v3/discovery"
-	"github.com/tochemey/goakt/v3/internal/pause"
+	"github.com/tochemey/goakt/v4/discovery"
+	"github.com/tochemey/goakt/v4/internal/pause"
 )
 
 func TestDiscovery(t *testing.T) {

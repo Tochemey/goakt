@@ -29,7 +29,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/tochemey/goakt/v3/internal/duration"
+	"github.com/tochemey/goakt/v4/internal/duration"
 )
 
 func TestStrategy(t *testing.T) {

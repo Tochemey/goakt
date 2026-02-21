@@ -25,7 +25,7 @@ package cluster
 import (
 	"context"
 
-	"github.com/tochemey/goakt/v3/internal/internalpb"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
 )
 
 // Store persists and retrieves peer state metadata for the local node.

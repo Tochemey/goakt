@@ -30,9 +30,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/internal/pause"
-	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/log"
 )
 
 func TestUserGuardian(t *testing.T) {
@@ -60,11 +59,11 @@ func TestUserGuardian(t *testing.T) {
 
 		pause.For(time.Second)
 
-		var items []*goaktpb.Deadletter
+		var items []*Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
 			// only listening to deadletter
-			deadletter, ok := payload.(*goaktpb.Deadletter)
+			deadletter, ok := payload.(*Deadletter)
 			if ok {
 				items = append(items, deadletter)
 			}

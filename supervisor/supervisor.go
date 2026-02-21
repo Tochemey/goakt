@@ -28,8 +28,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/internal/xsync"
+	"github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/xsync"
 )
 
 // Strategy represents the type of supervision strategy used by an actor's supervisor.

@@ -99,7 +99,7 @@ const file_internal_dependency_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1b\n" +
 	"\ttype_name\x18\x02 \x01(\tR\btypeName\x12\x14\n" +
 	"\x05bytea\x18\x03 \x01(\fR\x05byteaB\xa8\x01\n" +
-	"\x0ecom.internalpbB\x0fDependencyProtoH\x02P\x01Z;github.com/tochemey/goakt/v3/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
+	"\x0ecom.internalpbB\x0fDependencyProtoH\x02P\x01Z;github.com/tochemey/goakt/v4/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
 	"Internalpb\xca\x02\n" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
 	"Internalpbb\x06proto3"

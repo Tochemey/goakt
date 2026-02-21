@@ -26,7 +26,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/tochemey/goakt/v3/errors"
+	"github.com/tochemey/goakt/v4/errors"
 )
 
 type MockControlPlane struct {

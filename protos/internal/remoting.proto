@@ -2,7 +2,6 @@ syntax = "proto3";
 
 package internalpb;
 
-import "google/protobuf/any.proto";
 import "google/protobuf/duration.proto";
 import "internal/actor.proto";
 import "internal/dependency.proto";
@@ -11,40 +10,7 @@ import "internal/passivation.proto";
 import "internal/peers.proto";
 import "internal/reentrancy.proto";
 
-option go_package = "github.com/tochemey/goakt/v3/internal/internalpb;internalpb";
-
-// RemotingService defines the remoting service
-// With remoting one can:
-// - send messages to actors
-// - lookup actor remotely
-// - spawn actor remotely
-// - re-spawn actor remotely
-// - stop actor remotely
-service RemotingService {
-  // RemoteAsk is used to send a message to an actor remotely and expect a response immediately.
-  rpc RemoteAsk(RemoteAskRequest) returns (RemoteAskResponse);
-  // RemoteTell is used to send a message to a remote actor
-  // The actor on the other line can reply to the sender by using the Sender in the message
-  rpc RemoteTell(RemoteTellRequest) returns (RemoteTellResponse);
-  // Lookup for an actor on a remote host.
-  rpc RemoteLookup(RemoteLookupRequest) returns (RemoteLookupResponse);
-  // RemoteReSpawn restarts an actor on a remote machine
-  rpc RemoteReSpawn(RemoteReSpawnRequest) returns (RemoteReSpawnResponse);
-  // RemoteStop stops an actor on a remote machine
-  rpc RemoteStop(RemoteStopRequest) returns (RemoteStopResponse);
-  // RemoteSpawn starts an actor on a remote machine
-  rpc RemoteSpawn(RemoteSpawnRequest) returns (RemoteSpawnResponse);
-  // RemoteReinstate reinstates an actor on a remote machine
-  rpc RemoteReinstate(RemoteReinstateRequest) returns (RemoteReinstateResponse);
-  // RemoteAskGrain is used to send a message to Grain on a remote node
-  rpc RemoteAskGrain(RemoteAskGrainRequest) returns (RemoteAskGrainResponse);
-  // RemoteTellGrain is used to send a message to Grain on a remote node
-  rpc RemoteTellGrain(RemoteTellGrainRequest) returns (RemoteTellGrainResponse);
-  // RemoteActivateGrain is used to activate a Grain on a remote node
-  rpc RemoteActivateGrain(RemoteActivateGrainRequest) returns (RemoteActivateGrainResponse);
-  // PersistPeerState is used to persist the peer state on a remote node
-  rpc PersistPeerState(PersistPeerStateRequest) returns (PersistPeerStateResponse);
-}
+option go_package = "github.com/tochemey/goakt/v4/internal/internalpb;internalpb";
 
 // RemoteAsk is used to send a message to an actor remotely and expect a response
 // immediately.
@@ -58,7 +24,7 @@ message RemoteAskRequest {
 message RemoteAskResponse {
   // Specifies the message to send to the actor
   // Any proto message is allowed to be sent
-  repeated google.protobuf.Any messages = 1;
+  repeated bytes messages = 1;
 }
 
 // RemoteTell is used to send a message to an actor remotely
@@ -92,7 +58,7 @@ message RemoteMessage {
   string receiver = 2;
   // Specifies the message to send to the actor
   // Any proto message is allowed to be sent
-  google.protobuf.Any message = 3;
+  bytes message = 3;
 }
 
 message RemoteReSpawnRequest {
@@ -159,17 +125,17 @@ message RemoteReinstateResponse {}
 
 message RemoteAskGrainRequest {
   Grain grain = 1;
-  google.protobuf.Any message = 2;
+  bytes message = 2;
   google.protobuf.Duration request_timeout = 3;
 }
 
 message RemoteAskGrainResponse {
-  google.protobuf.Any message = 1;
+  bytes message = 1;
 }
 
 message RemoteTellGrainRequest {
   Grain grain = 1;
-  google.protobuf.Any message = 2;
+  bytes message = 2;
 }
 
 message RemoteTellGrainResponse {}
@@ -186,3 +152,12 @@ message PersistPeerStateRequest {
 }
 
 message PersistPeerStateResponse {}
+
+message TopicMessage {
+  // Specifies the message unique id
+  string id = 1;
+  // Specifies the topic
+  string topic = 2;
+  // Specifies the message
+  bytes message = 3;
+}

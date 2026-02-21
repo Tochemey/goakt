@@ -29,9 +29,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 
-	goakt "github.com/tochemey/goakt/v3/actor"
-	"github.com/tochemey/goakt/v3/discovery"
-	"github.com/tochemey/goakt/v3/eventstream"
+	goakt "github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/discovery"
+	"github.com/tochemey/goakt/v4/eventstream"
 )
 
 // TestNode represents a test instance of an actor system cluster node.

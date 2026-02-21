@@ -29,7 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tochemey/olric"
 
-	gerrors "github.com/tochemey/goakt/v3/errors"
+	gerrors "github.com/tochemey/goakt/v4/errors"
 )
 
 func TestIsQuorumError(t *testing.T) {

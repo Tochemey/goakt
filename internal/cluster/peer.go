@@ -27,7 +27,7 @@ import (
 	"slices"
 	"strconv"
 
-	"github.com/tochemey/goakt/v3/remote"
+	"github.com/tochemey/goakt/v4/remote"
 )
 
 // Peer defines the peer info

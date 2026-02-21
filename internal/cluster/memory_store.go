@@ -30,7 +30,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/tochemey/goakt/v3/internal/internalpb"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
 )
 
 // MemoryStore is an in-memory implementation of Store that keeps cluster

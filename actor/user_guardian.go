@@ -23,8 +23,7 @@
 package actor
 
 import (
-	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v4/log"
 )
 
 // userGuardian defines the main system actor that is the ancestor
@@ -52,12 +51,12 @@ func (x *userGuardian) PreStart(*Context) error {
 // Receive handles messages
 func (x *userGuardian) Receive(ctx *ReceiveContext) {
 	switch msg := ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *PostStart:
 		x.pid = ctx.Self()
 		x.logger = ctx.Logger()
 		x.logger.Infof("%s started successfully", x.pid.Name())
-	case *goaktpb.Terminated:
-		actorID := msg.GetAddress()
+	case *Terminated:
+		actorID := msg.Address
 		x.logger.Debugf("%s received a terminated actor=(%s)", x.pid.Name(), actorID)
 		// pass
 	default:

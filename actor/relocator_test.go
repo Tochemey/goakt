@@ -37,23 +37,22 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 
-	"github.com/tochemey/goakt/v3/address"
-	"github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/internal/cluster"
-	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/pause"
-	"github.com/tochemey/goakt/v3/internal/pointer"
-	"github.com/tochemey/goakt/v3/internal/registry"
-	"github.com/tochemey/goakt/v3/log"
-	mockscluster "github.com/tochemey/goakt/v3/mocks/cluster"
-	mocksremote "github.com/tochemey/goakt/v3/mocks/remote"
-	"github.com/tochemey/goakt/v3/reentrancy"
-	"github.com/tochemey/goakt/v3/remote"
-	"github.com/tochemey/goakt/v3/supervisor"
-	"github.com/tochemey/goakt/v3/test/data/testpb"
+	"github.com/tochemey/goakt/v4/address"
+	"github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/cluster"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
+	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/pointer"
+	"github.com/tochemey/goakt/v4/internal/types"
+	"github.com/tochemey/goakt/v4/log"
+	mockscluster "github.com/tochemey/goakt/v4/mocks/cluster"
+	mocksremote "github.com/tochemey/goakt/v4/mocks/remote"
+	"github.com/tochemey/goakt/v4/reentrancy"
+	"github.com/tochemey/goakt/v4/remote"
+	"github.com/tochemey/goakt/v4/supervisor"
+	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
 type spawnSingletonSpy struct {
@@ -319,7 +318,7 @@ func TestRelocatorRecreateLocallyUsesSingletonSpec(t *testing.T) {
 	}
 	props := &internalpb.Actor{
 		Address: address.New("singleton", system.Name(), "127.0.0.1", 8080).String(),
-		Type:    registry.Name(new(MockActor)),
+		Type:    types.Name(new(MockActor)),
 		Singleton: &internalpb.SingletonSpec{
 			SpawnTimeout: singletonSpec.SpawnTimeout,
 			WaitInterval: singletonSpec.WaitInterval,
@@ -337,7 +336,7 @@ func TestRelocatorRecreateLocallyUsesSingletonSpec(t *testing.T) {
 
 	require.True(t, spy.called)
 	require.Equal(t, "singleton", spy.actorName)
-	require.Equal(t, props.GetType(), registry.Name(spy.actor))
+	require.Equal(t, props.GetType(), types.Name(spy.actor))
 	require.NotNil(t, spy.config)
 	require.Equal(t, singletonSpec.SpawnTimeout.AsDuration(), spy.config.spawnTimeout)
 	require.Equal(t, singletonSpec.WaitInterval.AsDuration(), spy.config.waitInterval)
@@ -481,7 +480,7 @@ func TestRelocation(t *testing.T) {
 		actorAddr := reentrantAddr.HostPort()
 		// Actor should be on node1 or node3, not on node2 (which is down)
 		return actorAddr != node2Address
-	}, 30*time.Second, 500*time.Millisecond, "Reentrant actor %s should be relocated from node2 (was %s) to a live node", reentrantName, node2Address)
+	}, 2*time.Minute, 500*time.Millisecond, "Reentrant actor %s should be relocated from node2 (was %s) to a live node", reentrantName, node2Address)
 
 	reentrantAddr, pid, err := node1.ActorOf(ctx, reentrantName)
 	require.NoError(t, err)
@@ -1058,7 +1057,7 @@ func TestRelocationWithExtension(t *testing.T) {
 	require.NotNil(t, sender)
 
 	// let us access some of the node2 actors from node 1
-	var response proto.Message
+	var response any
 	response, err = sender.SendSync(ctx, entityID, new(testpb.GetAccount), time.Minute)
 	require.NoError(t, err)
 	account, ok := response.(*testpb.Account)
@@ -1331,54 +1330,32 @@ func TestGrainsRelocation(t *testing.T) {
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
-	// Wait for cluster rebalancing
-	pause.For(time.Minute)
-
-	identity, err := node3.GrainIdentity(ctx, "Grain-20", func(ctx context.Context) (Grain, error) {
-		return NewMockGrain(), nil
-	})
-	require.NoError(t, err)
-	require.NotNil(t, identity)
-
-	message := new(testpb.TestSend)
-	err = node3.TellGrain(ctx, identity, message)
-	require.NoError(t, err)
-
-	identity, err = node1.GrainIdentity(ctx, "Grain-21", func(ctx context.Context) (Grain, error) {
-		return NewMockGrain(), nil
-	})
-	require.NoError(t, err)
-	require.NotNil(t, identity)
-	message = new(testpb.TestSend)
-	err = node1.TellGrain(ctx, identity, message)
-	require.NoError(t, err)
-
-	identity, err = node3.GrainIdentity(ctx, "Grain-22", func(ctx context.Context) (Grain, error) {
-		return NewMockGrain(), nil
-	})
-	require.NoError(t, err)
-	require.NotNil(t, identity)
-	message = new(testpb.TestSend)
-	err = node3.TellGrain(ctx, identity, message)
-	require.NoError(t, err)
-
-	identity, err = node1.GrainIdentity(ctx, "Grain-23", func(ctx context.Context) (Grain, error) {
-		return NewMockGrain(), nil
-	})
-	require.NoError(t, err)
-	require.NotNil(t, identity)
-	message = new(testpb.TestSend)
-	err = node1.TellGrain(ctx, identity, message)
-	require.NoError(t, err)
-
-	identity, err = node1.GrainIdentity(ctx, "Grain-24", func(ctx context.Context) (Grain, error) {
-		return NewMockGrain(), nil
-	})
-	require.NoError(t, err)
-	require.NotNil(t, identity)
-	message = new(testpb.TestSend)
-	err = node1.TellGrain(ctx, identity, message)
-	require.NoError(t, err)
+	// Wait for each relocated grain to become reachable on a surviving node.
+	// On CI, relocation can take considerably longer than 1 minute, so we
+	// poll with require.Eventually instead of a fixed sleep.
+	type grainCase struct {
+		node ActorSystem
+		name string
+	}
+	grainCases := []grainCase{
+		{node3, "Grain-20"},
+		{node1, "Grain-21"},
+		{node3, "Grain-22"},
+		{node1, "Grain-23"},
+		{node1, "Grain-24"},
+	}
+	for _, gc := range grainCases {
+		gc := gc
+		require.Eventually(t, func() bool {
+			identity, err := gc.node.GrainIdentity(ctx, gc.name, func(ctx context.Context) (Grain, error) {
+				return NewMockGrain(), nil
+			})
+			if err != nil {
+				return false
+			}
+			return gc.node.TellGrain(ctx, identity, new(testpb.TestSend)) == nil
+		}, 2*time.Minute, time.Second, "grain %s should be accessible after relocation", gc.name)
+	}
 
 	assert.NoError(t, node1.Stop(ctx))
 	assert.NoError(t, node3.Stop(ctx))
@@ -1462,69 +1439,53 @@ func TestPersistenceGrainsRelocation(t *testing.T) {
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
-	// Wait for cluster rebalancing
-	pause.For(time.Minute)
-
-	message := &testpb.CreditAccount{
-		Balance: 500.00,
+	// For each persistence grain that was on node2, we:
+	//   1. Poll with require.Eventually until the grain is reachable and shows the
+	//      pre-relocation balance (500). CreditAccount is not idempotent, so we must
+	//      not send it until we are sure the grain is live on a surviving node.
+	//   2. Then credit once with a generous timeout to account for grain activation
+	//      latency on CI.
+	type pgCase struct {
+		node ActorSystem
+		name string
 	}
+	pgCases := []pgCase{
+		{node3, "Grain-20"},
+		{node1, "Grain-21"},
+		{node3, "Grain-22"},
+		{node1, "Grain-23"},
+		{node1, "Grain-24"},
+	}
+	for _, gc := range pgCases {
+		gc := gc
+		// Step 1: wait until grain is accessible with its pre-relocation balance.
+		require.Eventually(t, func() bool {
+			identity, err := gc.node.GrainIdentity(ctx, gc.name, func(ctx context.Context) (Grain, error) {
+				return NewMockPersistenceGrain(), nil
+			})
+			if err != nil {
+				return false
+			}
+			resp, err := gc.node.AskGrain(ctx, identity, new(testpb.GetAccount), 5*time.Second)
+			if err != nil {
+				return false
+			}
+			account, ok := resp.(*testpb.Account)
+			return ok && account.GetAccountBalance() == 500
+		}, 2*time.Minute, time.Second, "grain %s should be relocated and readable with balance 500", gc.name)
 
-	identity, err := node3.GrainIdentity(ctx, "Grain-20", func(ctx context.Context) (Grain, error) {
-		return NewMockPersistenceGrain(), nil
-	})
-	require.NotNil(t, identity)
-	require.NoError(t, err)
-
-	response, err := node3.AskGrain(ctx, identity, message, time.Second)
-	require.NoError(t, err)
-	require.NotNil(t, response)
-	actual := response.(*testpb.Account)
-	require.EqualValues(t, 1000.00, actual.GetAccountBalance())
-
-	identity, err = node1.GrainIdentity(ctx, "Grain-21", func(ctx context.Context) (Grain, error) {
-		return NewMockPersistenceGrain(), nil
-	})
-	require.NotNil(t, identity)
-	require.NoError(t, err)
-
-	response, err = node1.AskGrain(ctx, identity, message, time.Second)
-	require.NoError(t, err)
-	require.NotNil(t, response)
-	actual = response.(*testpb.Account)
-	require.EqualValues(t, 1000.00, actual.GetAccountBalance())
-
-	identity, err = node3.GrainIdentity(ctx, "Grain-22", func(ctx context.Context) (Grain, error) {
-		return NewMockPersistenceGrain(), nil
-	})
-	require.NotNil(t, identity)
-	require.NoError(t, err)
-	response, err = node3.AskGrain(ctx, identity, message, time.Second)
-	require.NoError(t, err)
-	require.NotNil(t, response)
-	actual = response.(*testpb.Account)
-	require.EqualValues(t, 1000.00, actual.GetAccountBalance())
-
-	identity, err = node1.GrainIdentity(ctx, "Grain-23", func(ctx context.Context) (Grain, error) {
-		return NewMockPersistenceGrain(), nil
-	})
-	require.NotNil(t, identity)
-	require.NoError(t, err)
-	response, err = node1.AskGrain(ctx, identity, message, time.Second)
-	require.NoError(t, err)
-	require.NotNil(t, response)
-	actual = response.(*testpb.Account)
-	require.EqualValues(t, 1000.00, actual.GetAccountBalance())
-
-	identity, err = node1.GrainIdentity(ctx, "Grain-24", func(ctx context.Context) (Grain, error) {
-		return NewMockPersistenceGrain(), nil
-	})
-	require.NotNil(t, identity)
-	require.NoError(t, err)
-	response, err = node1.AskGrain(ctx, identity, message, time.Second)
-	require.NoError(t, err)
-	require.NotNil(t, response)
-	actual = response.(*testpb.Account)
-	require.EqualValues(t, 1000.00, actual.GetAccountBalance())
+		// Step 2: credit exactly once and verify the final balance.
+		identity, err := gc.node.GrainIdentity(ctx, gc.name, func(ctx context.Context) (Grain, error) {
+			return NewMockPersistenceGrain(), nil
+		})
+		require.NotNil(t, identity)
+		require.NoError(t, err)
+		response, err := gc.node.AskGrain(ctx, identity, &testpb.CreditAccount{Balance: 500.00}, time.Minute)
+		require.NoError(t, err)
+		require.NotNil(t, response)
+		actual := response.(*testpb.Account)
+		require.EqualValues(t, 1000.00, actual.GetAccountBalance())
+	}
 
 	assert.NoError(t, node1.Stop(ctx))
 	assert.NoError(t, node3.Stop(ctx))
@@ -1609,54 +1570,33 @@ func TestGrainsWithDependenciesRelocation(t *testing.T) {
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
-	// Wait for cluster rebalancing
-	pause.For(time.Minute)
-
-	identity, err := node3.GrainIdentity(ctx, "Grain-20", func(ctx context.Context) (Grain, error) {
-		return NewMockGrain(), nil
-	}, WithGrainDependencies(NewMockDependency(dependencyID, "Grain-20", "email20")))
-	require.NotNil(t, identity)
-	require.NoError(t, err)
-
-	message := new(testpb.TestSend)
-	err = node3.TellGrain(ctx, identity, message)
-	require.NoError(t, err)
-
-	identity, err = node1.GrainIdentity(ctx, "Grain-21", func(ctx context.Context) (Grain, error) {
-		return NewMockGrain(), nil
-	}, WithGrainDependencies(NewMockDependency(dependencyID, "Grain-21", "email21")))
-	require.NotNil(t, identity)
-	require.NoError(t, err)
-	message = new(testpb.TestSend)
-	err = node1.TellGrain(ctx, identity, message)
-	require.NoError(t, err)
-
-	identity, err = node3.GrainIdentity(ctx, "Grain-22", func(ctx context.Context) (Grain, error) {
-		return NewMockGrain(), nil
-	}, WithGrainDependencies(NewMockDependency(dependencyID, "Grain-22", "email22")))
-	require.NotNil(t, identity)
-	require.NoError(t, err)
-	message = new(testpb.TestSend)
-	err = node3.TellGrain(ctx, identity, message)
-	require.NoError(t, err)
-
-	identity, err = node1.GrainIdentity(ctx, "Grain-23", func(ctx context.Context) (Grain, error) {
-		return NewMockGrain(), nil
-	}, WithGrainDependencies(NewMockDependency(dependencyID, "Grain-23", "email23")))
-	require.NotNil(t, identity)
-	require.NoError(t, err)
-	message = new(testpb.TestSend)
-	err = node1.TellGrain(ctx, identity, message)
-	require.NoError(t, err)
-
-	identity, err = node1.GrainIdentity(ctx, "Grain-24", func(ctx context.Context) (Grain, error) {
-		return NewMockGrain(), nil
-	}, WithGrainDependencies(NewMockDependency(dependencyID, "Grain-24", "email24")))
-	require.NotNil(t, identity)
-	require.NoError(t, err)
-	message = new(testpb.TestSend)
-	err = node1.TellGrain(ctx, identity, message)
-	require.NoError(t, err)
+	// Wait for each relocated grain (with dependencies) to become reachable on a
+	// surviving node. A fixed sleep is unreliable on CI, so we poll instead.
+	type gdCase struct {
+		node       ActorSystem
+		name       string
+		email      string
+		dependency string
+	}
+	gdCases := []gdCase{
+		{node3, "Grain-20", "email20", dependencyID},
+		{node1, "Grain-21", "email21", dependencyID},
+		{node3, "Grain-22", "email22", dependencyID},
+		{node1, "Grain-23", "email23", dependencyID},
+		{node1, "Grain-24", "email24", dependencyID},
+	}
+	for _, gc := range gdCases {
+		gc := gc
+		require.Eventually(t, func() bool {
+			identity, err := gc.node.GrainIdentity(ctx, gc.name, func(ctx context.Context) (Grain, error) {
+				return NewMockGrain(), nil
+			}, WithGrainDependencies(NewMockDependency(gc.dependency, gc.name, gc.email)))
+			if err != nil {
+				return false
+			}
+			return gc.node.TellGrain(ctx, identity, new(testpb.TestSend)) == nil
+		}, 2*time.Minute, time.Second, "grain %s should be accessible after relocation", gc.name)
+	}
 
 	assert.NoError(t, node1.Stop(ctx))
 	assert.NoError(t, node3.Stop(ctx))

@@ -25,8 +25,8 @@ package testkit
 import (
 	"os"
 
-	"github.com/tochemey/goakt/v3/extension"
-	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v4/extension"
+	"github.com/tochemey/goakt/v4/log"
 )
 
 // Option is the interface that applies a Testkit option.

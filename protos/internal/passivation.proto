@@ -4,7 +4,7 @@ package internalpb;
 
 import "google/protobuf/duration.proto";
 
-option go_package = "github.com/tochemey/goakt/v3/internal/internalpb;internalpb";
+option go_package = "github.com/tochemey/goakt/v4/internal/internalpb;internalpb";
 
 // TimeBasedPassivation defines a strategy where an actor is passivated
 // after a specified period of inactivity.

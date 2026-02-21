@@ -30,11 +30,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/pause"
-	"github.com/tochemey/goakt/v3/log"
-	"github.com/tochemey/goakt/v3/test/data/testpb"
+	"github.com/tochemey/goakt/v4/internal/commands"
+	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/log"
+	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
 func TestDeadletter(t *testing.T) {
@@ -70,23 +69,23 @@ func TestDeadletter(t *testing.T) {
 
 		pause.For(time.Second)
 
-		var items []*goaktpb.Deadletter
+		var items []*Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
 			// only listening to deadletter
-			deadletter, ok := payload.(*goaktpb.Deadletter)
+			deadletter, ok := payload.(*Deadletter)
 			if ok {
 				items = append(items, deadletter)
 			}
 		}
 
 		require.Len(t, items, 5)
-		reply, err := Ask(ctx, sys.getDeadletter(), &internalpb.DeadlettersCountRequest{}, 500*time.Millisecond)
+		reply, err := Ask(ctx, sys.getDeadletter(), &commands.DeadlettersCountRequest{}, 500*time.Millisecond)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
-		response, ok := reply.(*internalpb.DeadlettersCountResponse)
+		response, ok := reply.(*commands.DeadlettersCountResponse)
 		require.True(t, ok)
-		require.EqualValues(t, 5, response.GetTotalCount())
+		require.EqualValues(t, 5, response.TotalCount)
 
 		// unsubscribe the consumer
 		err = sys.Unsubscribe(consumer)
@@ -124,14 +123,14 @@ func TestDeadletter(t *testing.T) {
 		pause.For(time.Second)
 
 		actorID := actorRef.ID()
-		reply, err := Ask(ctx, sys.getDeadletter(), &internalpb.DeadlettersCountRequest{
-			ActorId: &actorID,
+		reply, err := Ask(ctx, sys.getDeadletter(), &commands.DeadlettersCountRequest{
+			ActorID: &actorID,
 		}, 500*time.Millisecond)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
-		response, ok := reply.(*internalpb.DeadlettersCountResponse)
+		response, ok := reply.(*commands.DeadlettersCountResponse)
 		require.True(t, ok)
-		require.EqualValues(t, 5, response.GetTotalCount())
+		require.EqualValues(t, 5, response.TotalCount)
 
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
@@ -168,11 +167,11 @@ func TestDeadletter(t *testing.T) {
 
 		pause.For(time.Second)
 
-		var items []*goaktpb.Deadletter
+		var items []*Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
 			// only listening to deadletter
-			deadletter, ok := payload.(*goaktpb.Deadletter)
+			deadletter, ok := payload.(*Deadletter)
 			if ok {
 				items = append(items, deadletter)
 			}
@@ -180,9 +179,9 @@ func TestDeadletter(t *testing.T) {
 
 		require.Len(t, items, 5)
 		// let us empty the item list
-		items = []*goaktpb.Deadletter{}
+		items = []*Deadletter{}
 
-		err = Tell(ctx, sys.getDeadletter(), &internalpb.PublishDeadletters{})
+		err = Tell(ctx, sys.getDeadletter(), &commands.PublishDeadletters{})
 		require.NoError(t, err)
 
 		pause.For(time.Second)
@@ -190,7 +189,7 @@ func TestDeadletter(t *testing.T) {
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
 			// only listening to deadletter
-			deadletter, ok := payload.(*goaktpb.Deadletter)
+			deadletter, ok := payload.(*Deadletter)
 			if ok {
 				items = append(items, deadletter)
 			}

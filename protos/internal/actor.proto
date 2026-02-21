@@ -7,7 +7,7 @@ import "internal/dependency.proto";
 import "internal/passivation.proto";
 import "internal/reentrancy.proto";
 
-option go_package = "github.com/tochemey/goakt/v3/internal/internalpb;internalpb";
+option go_package = "github.com/tochemey/goakt/v4/internal/internalpb;internalpb";
 
 // SupervisorStrategy defines how directives apply across failing actors.
 enum SupervisorStrategy {

@@ -32,11 +32,11 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tochemey/goakt/v3/address"
-	"github.com/tochemey/goakt/v3/datacenter"
-	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/log"
-	mocksremote "github.com/tochemey/goakt/v3/mocks/remote"
+	"github.com/tochemey/goakt/v4/address"
+	"github.com/tochemey/goakt/v4/datacenter"
+	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/log"
+	mocksremote "github.com/tochemey/goakt/v4/mocks/remote"
 )
 
 func TestDiscoverActor(t *testing.T) {

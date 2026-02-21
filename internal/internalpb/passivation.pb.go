@@ -291,7 +291,7 @@ const file_internal_passivation_proto_rawDesc = "" +
 	"long_lived\x18\x03 \x01(\v2 .internalpb.LongLivedPassivationH\x00R\tlongLivedB\n" +
 	"\n" +
 	"\bstrategyB\xa9\x01\n" +
-	"\x0ecom.internalpbB\x10PassivationProtoH\x02P\x01Z;github.com/tochemey/goakt/v3/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
+	"\x0ecom.internalpbB\x10PassivationProtoH\x02P\x01Z;github.com/tochemey/goakt/v4/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
 	"Internalpb\xca\x02\n" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
 	"Internalpbb\x06proto3"

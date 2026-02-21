@@ -28,14 +28,13 @@ import (
 	"time"
 
 	"go.uber.org/atomic"
-	"google.golang.org/protobuf/proto"
 
-	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/internal/codec"
-	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/types"
-	"github.com/tochemey/goakt/v3/internal/xsync"
-	"github.com/tochemey/goakt/v3/reentrancy"
+	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/codec"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
+	"github.com/tochemey/goakt/v4/internal/types"
+	"github.com/tochemey/goakt/v4/internal/xsync"
+	"github.com/tochemey/goakt/v4/reentrancy"
 )
 
 // RequestCall represents a handle to a pending asynchronous request started via
@@ -83,7 +82,7 @@ type RequestCall interface {
 	//     synchronously in the caller's goroutine.
 	//
 	// Only the first call to Then is honored; subsequent calls are ignored.
-	Then(func(proto.Message, error))
+	Then(func(any, error))
 
 	// Cancel requests cancellation of the pending request.
 	//
@@ -168,7 +167,7 @@ type requestHandle struct {
 //
 // Design decision: if the call already completed, the callback executes immediately
 // to avoid forcing callers to handle a separate "already done" state.
-func (x *requestHandle) Then(callback func(proto.Message, error)) {
+func (x *requestHandle) Then(callback func(any, error)) {
 	if x == nil || x.state == nil || callback == nil {
 		return
 	}
@@ -213,9 +212,9 @@ type requestState struct {
 
 	mu              sync.Mutex
 	completed       bool
-	result          proto.Message
+	result          any
 	err             error
-	callback        func(proto.Message, error)
+	callback        func(any, error)
 	cancelRequested bool
 	stopTimeout     func()
 }
@@ -234,7 +233,7 @@ func newRequestState(id string, mode reentrancy.Mode, pid *PID) *requestState {
 // setCallback installs the continuation, or runs it immediately if already completed.
 //
 // Design decision: immediate execution avoids extra scheduling for completed calls.
-func (s *requestState) setCallback(callback func(proto.Message, error)) {
+func (s *requestState) setCallback(callback func(any, error)) {
 	s.mu.Lock()
 	if s.callback != nil {
 		s.mu.Unlock()
@@ -257,7 +256,7 @@ func (s *requestState) setCallback(callback func(proto.Message, error)) {
 // complete marks the call as done; returns the callback to execute if any.
 //
 // Design decision: completion is idempotent to tolerate duplicate responses.
-func (s *requestState) complete(result proto.Message, err error) (func(proto.Message, error), bool) {
+func (s *requestState) complete(result any, err error) (func(any, error), bool) {
 	s.mu.Lock()
 	if s.completed {
 		s.mu.Unlock()

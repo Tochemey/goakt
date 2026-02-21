@@ -27,8 +27,8 @@ import (
 	"sync"
 	"time"
 
-	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/internal/types"
+	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/types"
 )
 
 // grainActivationBarrier is a startup coordination gate that delays grain activation

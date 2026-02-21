@@ -28,12 +28,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/extension"
-	"github.com/tochemey/goakt/v3/internal/pointer"
-	"github.com/tochemey/goakt/v3/passivation"
-	"github.com/tochemey/goakt/v3/reentrancy"
-	"github.com/tochemey/goakt/v3/supervisor"
+	"github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/extension"
+	"github.com/tochemey/goakt/v4/internal/pointer"
+	"github.com/tochemey/goakt/v4/passivation"
+	"github.com/tochemey/goakt/v4/reentrancy"
+	"github.com/tochemey/goakt/v4/supervisor"
 )
 
 func TestSpawnOption(t *testing.T) {

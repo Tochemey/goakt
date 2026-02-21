@@ -28,24 +28,23 @@ import (
 	"os"
 	"time"
 
-	goakt "github.com/tochemey/goakt/v3/actor"
-	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/log"
-	"github.com/tochemey/goakt/v3/supervisor"
-	"github.com/tochemey/goakt/v3/test/data/testpb"
+	"github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/log"
+	"github.com/tochemey/goakt/v4/supervisor"
+	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
 type A struct{}
 type B struct{}
 
-var _ goakt.Actor = (*A)(nil)
-var _ goakt.Actor = (*B)(nil)
+var _ actor.Actor = (*A)(nil)
+var _ actor.Actor = (*B)(nil)
 
-func (x *A) PreStart(*goakt.Context) error { return nil }
-func (x *A) PostStop(*goakt.Context) error { return nil }
-func (x *A) Receive(ctx *goakt.ReceiveContext) {
+func (x *A) PreStart(*actor.Context) error { return nil }
+func (x *A) PostStop(*actor.Context) error { return nil }
+func (x *A) Receive(ctx *actor.ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *actor.PostStart:
 		// here we schedule a message to self after 1 second
 		// this will cause the actor to fail and the supervisor
 		// strategy will be applied
@@ -61,20 +60,20 @@ func (x *A) Receive(ctx *goakt.ReceiveContext) {
 	}
 }
 
-func (x *B) PreStart(*goakt.Context) error { return nil }
-func (x *B) PostStop(*goakt.Context) error { return nil }
-func (x *B) Receive(ctx *goakt.ReceiveContext) {
+func (x *B) PreStart(*actor.Context) error { return nil }
+func (x *B) PostStop(*actor.Context) error { return nil }
+func (x *B) Receive(ctx *actor.ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *actor.PostStart:
 		ctx.Spawn(
 			"a", &A{},
-			goakt.WithLongLived(),
-			goakt.WithSupervisor(supervisor.NewSupervisor(
+			actor.WithLongLived(),
+			actor.WithSupervisor(supervisor.NewSupervisor(
 				supervisor.WithAnyErrorDirective(supervisor.EscalateDirective),
 			)),
 		)
 		time.Sleep(5 * time.Second)
-	case *goaktpb.PanicSignal:
+	case *actor.PanicSignal:
 		ctx.Stop(ctx.Sender())
 		ctx.Stop(ctx.Self())
 	default:
@@ -83,9 +82,9 @@ func (x *B) Receive(ctx *goakt.ReceiveContext) {
 }
 
 func main() {
-	system, err := goakt.NewActorSystem(
+	system, err := actor.NewActorSystem(
 		"issue-906",
-		goakt.WithLogger(log.New(log.DebugLevel, os.Stderr)),
+		actor.WithLogger(log.New(log.DebugLevel, os.Stderr)),
 	)
 	if err != nil {
 		panic(err)
@@ -98,8 +97,8 @@ func main() {
 
 	_, err = system.Spawn(
 		context.Background(), "b", &B{},
-		goakt.WithLongLived(),
-		goakt.WithSupervisor(supervisor.NewSupervisor(
+		actor.WithLongLived(),
+		actor.WithSupervisor(supervisor.NewSupervisor(
 			supervisor.WithAnyErrorDirective(supervisor.ResumeDirective),
 		)),
 	)

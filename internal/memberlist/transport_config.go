@@ -26,7 +26,7 @@ import (
 	"crypto/tls"
 	"time"
 
-	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v4/log"
 )
 
 // TransportConfig is used to configure a net transport.

@@ -37,7 +37,7 @@ import (
 	"github.com/stretchr/testify/require"
 	bbolt "go.etcd.io/bbolt"
 
-	"github.com/tochemey/goakt/v3/internal/internalpb"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
 )
 
 func TestBoltDBStoreLifecycle(t *testing.T) {

@@ -30,8 +30,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/tochemey/goakt/v3/log"
-	"github.com/tochemey/goakt/v3/passivation"
+	"github.com/tochemey/goakt/v4/log"
+	"github.com/tochemey/goakt/v4/passivation"
 )
 
 // nolint

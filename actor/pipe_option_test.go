@@ -28,7 +28,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/tochemey/goakt/v3/breaker"
+	"github.com/tochemey/goakt/v4/breaker"
 )
 
 func TestPipeToWithTimeout(t *testing.T) {

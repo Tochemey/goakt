@@ -33,8 +33,8 @@ import (
 	"github.com/hashicorp/consul/api"
 	"go.uber.org/atomic"
 
-	"github.com/tochemey/goakt/v3/discovery"
-	"github.com/tochemey/goakt/v3/internal/locker"
+	"github.com/tochemey/goakt/v4/discovery"
+	"github.com/tochemey/goakt/v4/internal/locker"
 )
 
 // Discovery represents the Consul discovery provider.

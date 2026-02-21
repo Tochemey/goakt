@@ -26,7 +26,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/tochemey/goakt/v3/internal/duration"
+	"github.com/tochemey/goakt/v4/internal/duration"
 )
 
 // Strategy defines the contract for passivation strategies in the actor model.

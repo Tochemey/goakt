@@ -32,9 +32,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/tochemey/goakt/v3/datacenter"
-	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v4/datacenter"
+	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/log"
 )
 
 type (

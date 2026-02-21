@@ -20,42 +20,36 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package registry
+package remote
 
 import (
-	"testing"
-
-	"github.com/stretchr/testify/assert"
+	"context"
+	"errors"
+	nethttp "net/http"
 )
 
-type testStruct struct {
+// nonProtoMsg is an arbitrary type with no registered serializer.
+type nonProtoMsg struct{ value string }
+
+// errInjectPropagator is a ContextPropagator whose Inject always returns an error.
+type errInjectPropagator struct{}
+
+func (errInjectPropagator) Inject(context.Context, nethttp.Header) error {
+	return errors.New("inject error")
 }
 
-func TestRegistry(t *testing.T) {
-	t.Run("With new instance", func(t *testing.T) {
-		newRegistry := NewRegistry()
-		var p any = newRegistry
-		_, ok := p.(Registry)
-		assert.True(t, ok)
-	})
+func (errInjectPropagator) Extract(ctx context.Context, _ nethttp.Header) (context.Context, error) {
+	return ctx, nil
+}
 
-	t.Run("With registration", func(t *testing.T) {
-		registry := NewRegistry()
-		// create an instance of an object
-		obj := new(testStruct)
+// headerPropagator injects a fixed header so the header-copy loop in enrichContext is exercised.
+type headerPropagator struct{ key, value string }
 
-		// register that actor
-		registry.Register(obj)
-		_, ok := registry.Type(obj)
-		assert.True(t, ok)
+func (h headerPropagator) Inject(_ context.Context, headers nethttp.Header) error {
+	headers.Set(h.key, h.value)
+	return nil
+}
 
-		_, ok = registry.TypeOf("registry.testStruct")
-		assert.True(t, ok)
-		assert.Len(t, registry.TypesMap(), 1)
-
-		assert.True(t, registry.Exists(obj))
-
-		registry.Deregister(obj)
-		assert.Len(t, registry.TypesMap(), 0)
-	})
+func (h headerPropagator) Extract(ctx context.Context, _ nethttp.Header) (context.Context, error) {
+	return ctx, nil
 }

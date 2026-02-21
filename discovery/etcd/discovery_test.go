@@ -32,7 +32,7 @@ import (
 	testcontainer "github.com/testcontainers/testcontainers-go/modules/etcd"
 	"github.com/travisjeffery/go-dynaport"
 
-	"github.com/tochemey/goakt/v3/discovery"
+	"github.com/tochemey/goakt/v4/discovery"
 )
 
 func TestDiscovery(t *testing.T) {

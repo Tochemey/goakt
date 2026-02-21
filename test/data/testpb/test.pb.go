@@ -1654,7 +1654,7 @@ const file_test_test_proto_rawDesc = "" +
 	"\x06result\x18\x01 \x01(\x03R\x06result\"\x12\n" +
 	"\x10TestGetSumResultB\x80\x01\n" +
 	"\n" +
-	"com.testpbB\tTestProtoH\x02P\x01Z-github.com/tochemey/goakt/v3/test/data;testpb\xa2\x02\x03TXX\xaa\x02\x06Testpb\xca\x02\x06Testpb\xe2\x02\x12Testpb\\GPBMetadata\xea\x02\x06Testpbb\x06proto3"
+	"com.testpbB\tTestProtoH\x02P\x01Z-github.com/tochemey/goakt/v4/test/data;testpb\xa2\x02\x03TXX\xaa\x02\x06Testpb\xca\x02\x06Testpb\xe2\x02\x12Testpb\\GPBMetadata\xea\x02\x06Testpbb\x06proto3"
 
 var (
 	file_test_test_proto_rawDescOnce sync.Once

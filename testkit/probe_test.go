@@ -29,13 +29,11 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/encoding/prototext"
 
-	actors "github.com/tochemey/goakt/v3/actor"
-	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/internal/pause"
-	"github.com/tochemey/goakt/v3/log"
-	"github.com/tochemey/goakt/v3/test/data/testpb"
+	"github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/log"
+	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
 func TestTestProbe(t *testing.T) {
@@ -78,7 +76,10 @@ func TestTestProbe(t *testing.T) {
 		probe.Send("pinger", new(testpb.TestPing))
 
 		actual := probe.ExpectAnyMessage()
-		require.Equal(t, prototext.Format(msg), prototext.Format(actual))
+		require.IsType(t, msg, actual)
+		actualMsg, ok := actual.(*testpb.TestPong)
+		require.True(t, ok)
+		require.Equal(t, msg, actualMsg)
 		probe.ExpectNoMessage()
 
 		probe.Stop()
@@ -207,7 +208,7 @@ func TestTestProbe(t *testing.T) {
 		probe.WatchNamed("pinger")
 
 		// kill the actor
-		probe.Send("pinger", new(goaktpb.PoisonPill))
+		probe.Send("pinger", new(actor.PoisonPill))
 		probe.ExpectTerminated("pinger")
 		probe.ExpectNoMessage()
 
@@ -271,13 +272,13 @@ func TestTestProbe(t *testing.T) {
 
 type pinger struct{}
 
-var _ actors.Actor = &pinger{}
+var _ actor.Actor = &pinger{}
 
-func (x pinger) PreStart(_ *actors.Context) error {
+func (x pinger) PreStart(_ *actor.Context) error {
 	return nil
 }
 
-func (x pinger) Receive(ctx *actors.ReceiveContext) {
+func (x pinger) Receive(ctx *actor.ReceiveContext) {
 	switch x := ctx.Message().(type) {
 	case *testpb.TestPing:
 		ctx.Tell(ctx.Sender(), new(testpb.TestPong))
@@ -296,6 +297,6 @@ func (x pinger) Receive(ctx *actors.ReceiveContext) {
 	}
 }
 
-func (x pinger) PostStop(_ *actors.Context) error {
+func (x pinger) PostStop(_ *actor.Context) error {
 	return nil
 }

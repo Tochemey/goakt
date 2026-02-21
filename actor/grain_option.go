@@ -27,10 +27,10 @@ import (
 
 	"go.uber.org/atomic"
 
-	"github.com/tochemey/goakt/v3/extension"
-	"github.com/tochemey/goakt/v3/internal/pointer"
-	"github.com/tochemey/goakt/v3/internal/validation"
-	"github.com/tochemey/goakt/v3/internal/xsync"
+	"github.com/tochemey/goakt/v4/extension"
+	"github.com/tochemey/goakt/v4/internal/pointer"
+	"github.com/tochemey/goakt/v4/internal/validation"
+	"github.com/tochemey/goakt/v4/internal/xsync"
 )
 
 // ActivationStrategy defines the algorithm used by the actor system to determine

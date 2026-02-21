@@ -31,13 +31,12 @@ import (
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/travisjeffery/go-dynaport"
 
-	"github.com/tochemey/goakt/v3/actor"
-	"github.com/tochemey/goakt/v3/discovery/nats"
-	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/internal/pause"
-	"github.com/tochemey/goakt/v3/log"
-	"github.com/tochemey/goakt/v3/remote"
-	"github.com/tochemey/goakt/v3/supervisor"
+	"github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/discovery/nats"
+	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/log"
+	"github.com/tochemey/goakt/v4/remote"
+	"github.com/tochemey/goakt/v4/supervisor"
 )
 
 func main() {
@@ -185,7 +184,7 @@ func (x *MyActor) PreStart(ctx *actor.Context) error {
 
 func (x *MyActor) Receive(ctx *actor.ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *actor.PostStart:
 		fmt.Printf("%s PostStart on %s\n", ctx.Self().Name(), ctx.ActorSystem().Name())
 	default:
 		ctx.Unhandled()

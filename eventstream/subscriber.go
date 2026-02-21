@@ -28,7 +28,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/tochemey/goakt/v3/internal/queue"
+	"github.com/tochemey/goakt/v4/internal/queue"
 )
 
 // Subscriber defines the subscriber interface.

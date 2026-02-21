@@ -27,8 +27,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-
-	"github.com/tochemey/goakt/v3/goaktpb"
 )
 
 type supervisionSignalTestError struct{}
@@ -37,14 +35,14 @@ func (supervisionSignalTestError) Error() string { return "supervision-signal" }
 
 func TestSupervisionSignalAccessors(t *testing.T) {
 	expectedErr := errors.New("boom")
-	expectedMsg := new(goaktpb.PostStart)
+	expectedMsg := new(PostStart)
 
 	signal := newSupervisionSignal(expectedErr, expectedMsg)
 
 	require.Equal(t, expectedErr, signal.Err())
 	require.Equal(t, expectedMsg, signal.Msg())
 	require.NotNil(t, signal.Timestamp())
-	require.False(t, signal.Timestamp().AsTime().IsZero())
+	require.False(t, signal.Timestamp().IsZero())
 }
 
 func TestErrorTypeNil(t *testing.T) {

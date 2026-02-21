@@ -92,12 +92,10 @@ protogen:
     # generate the pbs
     RUN buf generate \
             --template buf.gen.yaml \
-            --path protos/goakt \
             --path protos/internal \
             --path protos/test
 
     # save artifact to
-    SAVE ARTIFACT gen/goakt AS LOCAL goaktpb
     SAVE ARTIFACT gen/test AS LOCAL  test/data/testpb
     SAVE ARTIFACT gen/internal AS LOCAL internal/internalpb
 

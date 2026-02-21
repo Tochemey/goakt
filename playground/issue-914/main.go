@@ -31,12 +31,11 @@ import (
 	"os/signal"
 	"syscall"
 
-	goakt "github.com/tochemey/goakt/v3/actor"
-	"github.com/tochemey/goakt/v3/discovery/static"
-	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/log"
-	"github.com/tochemey/goakt/v3/remote"
-	"github.com/tochemey/goakt/v3/supervisor"
+	goakt "github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/discovery/static"
+	"github.com/tochemey/goakt/v4/log"
+	"github.com/tochemey/goakt/v4/remote"
+	"github.com/tochemey/goakt/v4/supervisor"
 )
 
 const (
@@ -67,7 +66,7 @@ func (n *Actor1) PreStart(_ *goakt.Context) (err error) {
 
 func (n *Actor1) Receive(ctx *goakt.ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *goakt.PostStart:
 	default:
 		ctx.Unhandled()
 	}

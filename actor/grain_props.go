@@ -22,7 +22,7 @@
 
 package actor
 
-import "github.com/tochemey/goakt/v3/extension"
+import "github.com/tochemey/goakt/v4/extension"
 
 // GrainProps encapsulates configuration and metadata for a Grain (virtual actor) in the goakt actor system.
 //

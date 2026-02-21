@@ -25,7 +25,7 @@ package xsync
 import (
 	"sync"
 
-	"github.com/tochemey/goakt/v3/internal/locker"
+	"github.com/tochemey/goakt/v4/internal/locker"
 )
 
 // Map is a generic, concurrency-safe map that allows storing key-value pairs

@@ -26,7 +26,7 @@ import (
 	"errors"
 	"sync"
 
-	gerrors "github.com/tochemey/goakt/v3/errors"
+	gerrors "github.com/tochemey/goakt/v4/errors"
 )
 
 type stashState struct {

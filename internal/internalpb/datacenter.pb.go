@@ -391,7 +391,7 @@ const file_internal_datacenter_proto_rawDesc = "" +
 	"$CONTROL_PLANE_EVENT_TYPE_UNSPECIFIED\x10\x00\x12#\n" +
 	"\x1fCONTROL_PLANE_EVENT_TYPE_UPSERT\x10\x01\x12#\n" +
 	"\x1fCONTROL_PLANE_EVENT_TYPE_DELETE\x10\x02B\xa8\x01\n" +
-	"\x0ecom.internalpbB\x0fDatacenterProtoH\x02P\x01Z;github.com/tochemey/goakt/v3/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
+	"\x0ecom.internalpbB\x0fDatacenterProtoH\x02P\x01Z;github.com/tochemey/goakt/v4/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
 	"Internalpb\xca\x02\n" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
 	"Internalpbb\x06proto3"

@@ -28,7 +28,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v4/log"
 )
 
 func TestContext(t *testing.T) {
@@ -46,6 +46,8 @@ func TestContext(t *testing.T) {
 	require.Empty(t, c.Extensions())
 	require.Nil(t, c.Extension("extensionID"))
 	require.Empty(t, c.Dependencies())
+	require.Nil(t, c.Dependency("extensionID"))
+	require.NotNil(t, c.Logger())
 
 	dl, ok := c.Context().Deadline()
 	require.False(t, ok)

@@ -22,7 +22,7 @@
 
 package dnssd
 
-import "github.com/tochemey/goakt/v3/internal/validation"
+import "github.com/tochemey/goakt/v4/internal/validation"
 
 // Config defines the discovery configuration
 type Config struct {

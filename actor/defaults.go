@@ -25,8 +25,8 @@ package actor
 import (
 	"time"
 
-	"github.com/tochemey/goakt/v3/internal/size"
-	"github.com/tochemey/goakt/v3/supervisor"
+	"github.com/tochemey/goakt/v4/internal/size"
+	"github.com/tochemey/goakt/v4/supervisor"
 )
 
 const (
