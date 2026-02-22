@@ -5227,9 +5227,10 @@ func TestCleanupCluster_RemoveKindFailure(t *testing.T) {
 	system.grains = xsync.NewMap[string, *grainPID]()
 
 	pid := &PID{
-		address:     address.New("singleton-actor", system.name, "127.0.0.1", 8080),
-		actor:       new(MockActor),
-		actorSystem: system,
+		address:      address.New("singleton-actor", system.name, "127.0.0.1", 8080),
+		actor:        new(MockActor),
+		actorSystem:  system,
+		singletonSpec: &singletonSpec{},
 	}
 	pid.setState(singletonState, true)
 
