@@ -27,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/tochemey/goakt/v4/log"
@@ -60,4 +61,63 @@ func TestContext(t *testing.T) {
 	done := c.Context().Done()
 	require.Nil(t, done)
 	require.NoError(t, c.Context().Err())
+}
+
+func TestContextWithDependencies(t *testing.T) {
+	ctx := context.Background()
+
+	actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	dep1 := NewMockDependency("dep-1", "alice", "alice@example.com")
+	dep2 := NewMockDependency("dep-2", "bob", "bob@example.com")
+
+	c := newContext(ctx, "myActor", actorSystem, dep1, dep2)
+
+	t.Run("Dependencies returns all injected dependencies", func(t *testing.T) {
+		deps := c.Dependencies()
+		require.Len(t, deps, 2)
+	})
+
+	t.Run("Dependency returns the matching dependency by ID", func(t *testing.T) {
+		got := c.Dependency("dep-1")
+		require.NotNil(t, got)
+		assert.Equal(t, "dep-1", got.ID())
+
+		got2 := c.Dependency("dep-2")
+		require.NotNil(t, got2)
+		assert.Equal(t, "dep-2", got2.ID())
+	})
+
+	t.Run("Dependency returns nil for an unknown ID", func(t *testing.T) {
+		assert.Nil(t, c.Dependency("unknown"))
+	})
+}
+
+func TestContextWithExtension(t *testing.T) {
+	ctx := context.Background()
+
+	ext := NewMockExtension()
+	actorSystem, err := NewActorSystem("testSys",
+		WithLogger(log.DiscardLogger),
+		WithExtensions(ext),
+	)
+	require.NoError(t, err)
+
+	c := newContext(ctx, "myActor", actorSystem)
+
+	t.Run("Extensions returns all registered extensions", func(t *testing.T) {
+		exts := c.Extensions()
+		require.Len(t, exts, 1)
+	})
+
+	t.Run("Extension returns the matching extension by ID", func(t *testing.T) {
+		got := c.Extension("MockStateStore")
+		require.NotNil(t, got)
+		assert.Equal(t, "MockStateStore", got.ID())
+	})
+
+	t.Run("Extension returns nil for an unknown ID", func(t *testing.T) {
+		assert.Nil(t, c.Extension("unknown-ext"))
+	})
 }

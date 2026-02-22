@@ -38,7 +38,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
 	"go.opentelemetry.io/otel"
-	otelmetric "go.opentelemetry.io/otel/metric"
 	noopmetric "go.opentelemetry.io/otel/metric/noop"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
@@ -48,7 +47,6 @@ import (
 	"github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/eventstream"
 	"github.com/tochemey/goakt/v4/extension"
-	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/commands"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/metric"
@@ -6441,103 +6439,114 @@ func TestToWireActorIncludesSingletonSpecWhenSingleton(t *testing.T) {
 	assert.Equal(t, spec.WaitInterval, wire.GetSingleton().GetWaitInterval().AsDuration())
 }
 
-// ---------------------------------------------------------------------------
-// Helper structs, methods and functions
-// ---------------------------------------------------------------------------
+// TestAssertLocal verifies that every public method guarded by assertLocal
+// returns errors.ErrNotLocal when invoked on a remote PID.
+func TestAssertLocal(t *testing.T) {
+	ctx := context.Background()
+	// Build a minimal remote PID: address is set and the remoteState flag is set.
+	addr := address.New("remote-actor", "remoteSystem", "10.0.0.1", 8080)
+	remotePID := newRemotePID(addr, nil)
+	require.True(t, remotePID.IsRemote(), "sanity: newRemotePID must be remote")
+
+	t.Run("Child", func(t *testing.T) {
+		_, err := remotePID.Child("child")
+		require.ErrorIs(t, err, errors.ErrNotLocal)
+	})
+
+	t.Run("Stop", func(t *testing.T) {
+		other := newRemotePID(addr, nil)
+		err := remotePID.Stop(ctx, other)
+		require.ErrorIs(t, err, errors.ErrNotLocal)
+	})
+
+	t.Run("Restart", func(t *testing.T) {
+		err := remotePID.Restart(ctx)
+		require.ErrorIs(t, err, errors.ErrNotLocal)
+	})
+
+	t.Run("SpawnChild", func(t *testing.T) {
+		_, err := remotePID.SpawnChild(ctx, "child", NewMockActor())
+		require.ErrorIs(t, err, errors.ErrNotLocal)
+	})
+
+	t.Run("Reinstate", func(t *testing.T) {
+		other := newRemotePID(addr, nil)
+		err := remotePID.Reinstate(other)
+		require.ErrorIs(t, err, errors.ErrNotLocal)
+	})
+
+	t.Run("ReinstateNamed", func(t *testing.T) {
+		err := remotePID.ReinstateNamed(ctx, "some-actor")
+		require.ErrorIs(t, err, errors.ErrNotLocal)
+	})
+
+	t.Run("PipeTo", func(t *testing.T) {
+		other := newRemotePID(addr, nil)
+		err := remotePID.PipeTo(ctx, other, func() (any, error) { return nil, nil })
+		require.ErrorIs(t, err, errors.ErrNotLocal)
+	})
+
+	t.Run("PipeToName", func(t *testing.T) {
+		err := remotePID.PipeToName(ctx, "some-actor", func() (any, error) { return nil, nil })
+		require.ErrorIs(t, err, errors.ErrNotLocal)
+	})
+
+	t.Run("SendAsync", func(t *testing.T) {
+		err := remotePID.SendAsync(ctx, "some-actor", new(testpb.TestSend))
+		require.ErrorIs(t, err, errors.ErrNotLocal)
+	})
+
+	t.Run("SendSync", func(t *testing.T) {
+		_, err := remotePID.SendSync(ctx, "some-actor", new(testpb.TestReply), time.Second)
+		require.ErrorIs(t, err, errors.ErrNotLocal)
+	})
+
+	t.Run("DiscoverActor", func(t *testing.T) {
+		_, err := remotePID.DiscoverActor(ctx, "some-actor", time.Second)
+		require.ErrorIs(t, err, errors.ErrNotLocal)
+	})
+
+	t.Run("Shutdown", func(t *testing.T) {
+		err := remotePID.Shutdown(ctx)
+		require.ErrorIs(t, err, errors.ErrNotLocal)
+	})
+}
+
+// TestIsSystemMessage verifies that isSystemMessage correctly classifies each
+// known system-message type as true and non-system messages as false.
+func TestIsSystemMessage(t *testing.T) {
+	systemMessages := []struct {
+		name string
+		msg  any
+	}{
+		{"AsyncResponse", new(commands.AsyncResponse)},
+		{"AsyncRequest", new(commands.AsyncRequest)},
+		{"PoisonPill", new(PoisonPill)},
+		{"HealthCheckRequest", new(commands.HealthCheckRequest)},
+		{"Panicking", new(commands.Panicking)},
+		{"SendDeadletter", new(commands.SendDeadletter)},
+		{"PausePassivation", new(PausePassivation)},
+		{"ResumePassivation", new(ResumePassivation)},
+		{"PostStart", new(PostStart)},
+		{"Terminated", new(Terminated)},
+		{"PanicSignal", new(PanicSignal)},
+	}
+	for _, tc := range systemMessages {
+		t.Run(tc.name+" is a system message", func(t *testing.T) {
+			assert.True(t, isSystemMessage(tc.msg))
+		})
+	}
+	t.Run("user message is not a system message", func(t *testing.T) {
+		assert.False(t, isSystemMessage(new(testpb.TestSend)))
+	})
+	t.Run("nil is not a system message", func(t *testing.T) {
+		assert.False(t, isSystemMessage(nil))
+	})
+}
 
 func newBareSupervisor(strategy supervisor.Strategy) *supervisor.Supervisor {
 	supv := supervisor.NewSupervisor()
 	supv.Reset()
 	supervisor.WithStrategy(strategy)(supv)
 	return supv
-}
-
-type registerCallbackFailingMeter struct {
-	otelmetric.Meter
-	err error
-}
-
-func (m registerCallbackFailingMeter) RegisterCallback(_ otelmetric.Callback, _ ...otelmetric.Observable) (otelmetric.Registration, error) {
-	return nil, m.err
-}
-
-type instrumentFailingMeter struct {
-	otelmetric.Meter
-	failures map[string]error
-}
-
-func (m instrumentFailingMeter) Int64ObservableCounter(
-	name string,
-	options ...otelmetric.Int64ObservableCounterOption,
-) (otelmetric.Int64ObservableCounter, error) {
-	if err, ok := m.failures[name]; ok {
-		return nil, err
-	}
-	return m.Meter.Int64ObservableCounter(name, options...)
-}
-
-type manualMeterProvider struct {
-	otelmetric.MeterProvider
-	meter otelmetric.Meter
-}
-
-func newManualMeterProvider() *manualMeterProvider {
-	delegate := noopmetric.NewMeterProvider()
-	return &manualMeterProvider{
-		MeterProvider: delegate,
-		meter: &manualMeter{
-			Meter: delegate.Meter("test"),
-		},
-	}
-}
-
-func (m *manualMeterProvider) Meter(_ string, _ ...otelmetric.MeterOption) otelmetric.Meter {
-	return m.meter
-}
-
-type manualMeter struct {
-	otelmetric.Meter
-	callbacks []otelmetric.Callback
-}
-
-func (m *manualMeter) RegisterCallback(cb otelmetric.Callback, _ ...otelmetric.Observable) (otelmetric.Registration, error) {
-	m.callbacks = append(m.callbacks, cb)
-	return noopmetric.Registration{}, nil
-}
-
-// immediateMeter triggers the callback at registration time.
-// It is useful to surface errors that occur inside the callback, such as
-// cluster membership lookups during metrics observation.
-type immediateMeter struct {
-	*manualMeter
-	system  *actorSystem
-	cluster cluster.Cluster
-}
-
-func (m *immediateMeter) RegisterCallback(cb otelmetric.Callback, _ ...otelmetric.Observable) (otelmetric.Registration, error) {
-	// enable cluster path for the callback
-	if m.system != nil {
-		m.system.clusterEnabled.Store(true)
-		m.system.cluster = m.cluster
-	}
-	observer := &manualObserver{}
-	err := cb(context.Background(), observer)
-	return noopmetric.Registration{}, err
-}
-
-type manualObserver struct {
-	noopmetric.Observer
-	records []observeRecord
-}
-
-type observeRecord struct {
-	instrument string
-	value      int64
-}
-
-func (o *manualObserver) ObserveInt64(obsrv otelmetric.Int64Observable, value int64, _ ...otelmetric.ObserveOption) {
-	o.records = append(o.records, observeRecord{
-		instrument: fmt.Sprintf("%T", obsrv),
-		value:      value,
-	})
 }
