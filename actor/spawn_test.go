@@ -899,6 +899,7 @@ func TestSpawn(t *testing.T) {
 
 		clusterMock.EXPECT().ActorExists(mock.Anything, actorName).Return(false, nil).Twice()
 		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{}, nil).Once()
+		clusterMock.EXPECT().Actors(mock.Anything, mock.Anything).Return(nil, nil).Once()
 
 		err = actorSystem.SpawnOn(ctx, actorName, actor)
 		require.NoError(t, err)
@@ -942,6 +943,7 @@ func TestSpawn(t *testing.T) {
 		// Return empty peers list, so LeastLoad should default to local spawn
 		clusterMock.EXPECT().ActorExists(mock.Anything, actorName).Return(false, nil).Twice()
 		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{}, nil)
+		clusterMock.EXPECT().Actors(mock.Anything, mock.Anything).Return(nil, nil).Once()
 
 		err = actorSystem.SpawnOn(ctx, actorName, actor, WithPlacement(LeastLoad))
 		require.NoError(t, err)
