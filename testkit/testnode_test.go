@@ -51,7 +51,7 @@ func TestTestNode(t *testing.T) {
 		node.Spawn(ctx, name, &pinger{})
 
 		require.Eventually(t, func() bool {
-			pid, err := node.actorSystem.LocalActor(name)
+			pid, err := node.actorSystem.ActorOf(ctx, name)
 			return err == nil && pid != nil
 		}, time.Second, 10*time.Millisecond)
 	})
@@ -61,7 +61,7 @@ func TestTestNode(t *testing.T) {
 		node.SpawnSingleton(ctx, name, &pinger{})
 
 		require.Eventually(t, func() bool {
-			pid, err := node.actorSystem.LocalActor(name)
+			pid, err := node.actorSystem.ActorOf(ctx, name)
 			return err == nil && pid != nil
 		}, 2*time.Second, 10*time.Millisecond)
 	})
@@ -101,7 +101,7 @@ func TestTestNode(t *testing.T) {
 		node.Kill(ctx, name)
 
 		require.Eventually(t, func() bool {
-			_, err := node.actorSystem.LocalActor(name)
+			_, err := node.actorSystem.ActorOf(ctx, name)
 			return err != nil
 		}, 2*time.Second, 10*time.Millisecond)
 	})

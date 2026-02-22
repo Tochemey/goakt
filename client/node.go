@@ -42,7 +42,7 @@ func WithWeight(weight float64) NodeOption {
 }
 
 // WithRemoting sets the remoting instance to be used by the node
-func WithRemoting(remoting remote.Remoting) NodeOption {
+func WithRemoting(remoting remote.Client) NodeOption {
 	return func(n *Node) {
 		n.remoting = remoting
 	}
@@ -55,7 +55,7 @@ type Node struct {
 	weight  float64
 	mutex   sync.RWMutex
 
-	remoting remote.Remoting
+	remoting remote.Client
 }
 
 // NewNode creates an instance of Node
@@ -63,7 +63,7 @@ type Node struct {
 func NewNode(address string, opts ...NodeOption) *Node {
 	node := &Node{
 		address:  address,
-		remoting: remote.NewRemoting(),
+		remoting: remote.NewClient(),
 		weight:   0,
 	}
 
@@ -106,7 +106,7 @@ func (n *Node) Validate() error {
 }
 
 // Remoting returns the remoting instance
-func (n *Node) Remoting() remote.Remoting {
+func (n *Node) Remoting() remote.Client {
 	n.mutex.RLock()
 	remoting := n.remoting
 	n.mutex.RUnlock()

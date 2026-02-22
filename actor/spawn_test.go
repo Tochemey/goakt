@@ -817,7 +817,7 @@ func TestSpawn(t *testing.T) {
 		clusterMock := new(mockcluster.Cluster)
 
 		system := MockReplicationTestSystem(clusterMock)
-		system.remoting = remote.NewRemoting()
+		system.remoting = remote.NewClient()
 		system.remotingEnabled.Store(true)
 
 		actor := NewMockActor()
@@ -839,7 +839,7 @@ func TestSpawn(t *testing.T) {
 	t.Run("SpawnOn remote includes reentrancy config", func(t *testing.T) {
 		ctx := context.TODO()
 		clusterMock := mockcluster.NewCluster(t)
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 
 		system := MockReplicationTestSystem(clusterMock)
 		system.remoting = remotingMock
@@ -905,7 +905,8 @@ func TestSpawn(t *testing.T) {
 
 		pause.For(200 * time.Millisecond)
 
-		actors := actorSystem.Actors()
+		actors, err := actorSystem.Actors(ctx, time.Second)
+		require.NoError(t, err)
 		require.Len(t, actors, 1)
 		assert.Equal(t, actorName, actors[0].Name())
 	})
@@ -948,7 +949,8 @@ func TestSpawn(t *testing.T) {
 		pause.For(200 * time.Millisecond)
 
 		// Verify actor was spawned locally
-		actors := actorSystem.Actors()
+		actors, err := actorSystem.Actors(ctx, time.Second)
+		require.NoError(t, err)
 		require.Len(t, actors, 1)
 		assert.Equal(t, actorName, actors[0].Name())
 	})
@@ -1496,7 +1498,8 @@ func TestSpawn(t *testing.T) {
 		require.NoError(t, err)
 
 		pause.For(200 * time.Millisecond)
-		actors := node1.Actors()
+		actors, err := node1.Actors(ctx, time.Second)
+		require.NoError(t, err)
 		assert.Len(t, actors, 1)
 		got := actors[0]
 		assert.Equal(t, actorName, got.Name())
@@ -1576,7 +1579,7 @@ func TestSpawn(t *testing.T) {
 		ctx := t.Context()
 		clmock := mockcluster.NewCluster(t)
 		system := MockReplicationTestSystem(clmock)
-		system.remoting = remote.NewRemoting()
+		system.remoting = remote.NewClient()
 		system.remotingEnabled.Store(true)
 		system.clusterEnabled.Store(true)
 
@@ -1598,7 +1601,7 @@ func TestSpawn(t *testing.T) {
 
 	t.Run("SpawnOn with WithDataCenter delegates to spawnOnDatacenter", func(t *testing.T) {
 		ctx := context.Background()
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		targetDC := datacenter.DataCenter{Name: "dc-west", Region: "r", Zone: "z"}
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{{
@@ -1634,7 +1637,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 		dcConfig.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
 
 		sys := MockReplicationTestSystem(mockcluster.NewCluster(t))
-		sys.remoting = mocksremote.NewRemoting(t)
+		sys.remoting = mocksremote.NewClient(t)
 		sys.remotingEnabled.Store(true)
 		sys.clusterConfig = NewClusterConfig().WithDataCenter(dcConfig)
 		sys.dataCenterController = nil
@@ -1678,7 +1681,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 		pause.For(5 * time.Millisecond)
 
 		sys := MockReplicationTestSystem(mockcluster.NewCluster(t))
-		sys.remoting = mocksremote.NewRemoting(t)
+		sys.remoting = mocksremote.NewClient(t)
 		sys.remotingEnabled.Store(true)
 		sys.clusterConfig = NewClusterConfig().WithDataCenter(dcConfig)
 		sys.dataCenterController = controller
@@ -1692,7 +1695,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 	})
 
 	t.Run("returns ErrDataCenterRecordNotFound when target DC not in active records", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{{
 				ID:        "dc-other",
@@ -1710,7 +1713,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 	})
 
 	t.Run("returns ErrDataCenterRecordNotFound when no active records", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return nil, nil
 		}, remotingMock)
@@ -1724,7 +1727,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 	})
 
 	t.Run("returns ErrDataCenterRecordNotFound when target DC record exists but state is not ACTIVE", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		targetDC := datacenter.DataCenter{Name: "dc-west", Region: "r", Zone: "z"}
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{{
@@ -1743,7 +1746,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 	})
 
 	t.Run("returns error when endpoint has invalid host:port format", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		targetDC := datacenter.DataCenter{Name: "dc-west", Region: "r", Zone: "z"}
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{{
@@ -1762,7 +1765,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 	})
 
 	t.Run("returns error when endpoint port is not numeric", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		targetDC := datacenter.DataCenter{Name: "dc-west", Region: "r", Zone: "z"}
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{{
@@ -1781,7 +1784,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 	})
 
 	t.Run("returns RemoteSpawn error when remoting fails", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		targetDC := datacenter.DataCenter{Name: "dc-west", Region: "r", Zone: "z"}
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{{
@@ -1807,7 +1810,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 	})
 
 	t.Run("succeeds and calls RemoteSpawn with correct request", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		targetDC := datacenter.DataCenter{Name: "dc-west", Region: "r", Zone: "z"}
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{{
@@ -1836,7 +1839,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 	})
 
 	t.Run("passes relocatable and passivation from config to RemoteSpawn", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		targetDC := datacenter.DataCenter{Name: "dc-west", Region: "r", Zone: "z"}
 		passivationStrategy := passivation.NewTimeBasedStrategy(30 * time.Second)
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {

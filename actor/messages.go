@@ -429,7 +429,7 @@ func (s *StatusFailure) Message() any { return s.message }
 //   - The returned list is a point-in-time snapshot.
 //
 // Resolving names:
-//   - Use ActorSystem.LocalActor (or LocalActor) to resolve a returned name to a local PID/reference.
+//   - Use ActorSystem.ActorOf to resolve a returned name to a local PID/reference.
 //   - Names are unique within the router's namespace.
 type GetRoutees struct{}
 
@@ -437,7 +437,7 @@ type GetRoutees struct{}
 //
 // Semantics:
 //   - Names represents the router's best-effort snapshot when the request was handled.
-//   - A name can be resolved to a local PID/reference via ActorSystem.LocalActor (or LocalActor).
+//   - A name can be resolved to a local PID/reference via ActorSystem.ActorOf.
 //   - Since routers are locally scoped, these names are not valid across different actor systems or nodes.
 //
 // Example (Go):
@@ -446,7 +446,7 @@ type GetRoutees struct{}
 //	if err == nil {
 //	    r := resp.(*actor.Routees)
 //	    for _, name := range r.Names() {
-//	        if pid := ctx.ActorSystem().LocalActor(name); pid != nil {
+//	        if pid := ctx.ActorSystem().ActorOf(ctx, name); pid != nil {
 //	            ctx.Tell(pid, &MyMessage{})
 //	        }
 //	    }

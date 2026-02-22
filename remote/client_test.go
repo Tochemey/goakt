@@ -41,7 +41,7 @@ import (
 )
 
 func TestRemotingOptionsAndDefaults(t *testing.T) {
-	r := NewRemoting().(*remoting)
+	r := NewClient().(*client)
 
 	// Default compression is Zstd (matches server default in remote.Config)
 	assert.Equal(t, ZstdCompression, r.Compression())
@@ -59,14 +59,14 @@ func TestRemotingOptionsAndDefaults(t *testing.T) {
 
 func TestRemotingOptionApplication(t *testing.T) {
 	tlsCfg := &tls.Config{} //nolint:gosec
-	r := NewRemoting(
-		WithRemotingTLS(tlsCfg),
-		WithRemotingCompression(GzipCompression),
-		WithRemotingMaxIdleConns(50),
-		WithRemotingIdleTimeout(60*time.Second),
-		WithRemotingDialTimeout(3*time.Second),
-		WithRemotingKeepAlive(10*time.Second),
-	).(*remoting)
+	r := NewClient(
+		WithClientTLS(tlsCfg),
+		WithClientCompression(GzipCompression),
+		WithClientMaxIdleConns(50),
+		WithClientIdleTimeout(60*time.Second),
+		WithClientDialTimeout(3*time.Second),
+		WithClientKeepAlive(10*time.Second),
+	).(*client)
 
 	assert.Equal(t, tlsCfg, r.TLSConfig())
 	assert.Equal(t, GzipCompression, r.Compression())
@@ -85,7 +85,7 @@ func TestRemotingOptionApplication(t *testing.T) {
 // to ensure only one client is created per endpoint.
 func TestNetClient_Caching(t *testing.T) {
 	t.Run("cache key generation", func(t *testing.T) {
-		r := NewRemoting().(*remoting)
+		r := NewClient().(*client)
 
 		// Test that cache key is generated correctly using fmt.Sprintf
 		host := "test-host"
@@ -107,7 +107,7 @@ func TestNetClient_Caching(t *testing.T) {
 	})
 
 	t.Run("cache hit path returns same client instance", func(t *testing.T) {
-		r := NewRemoting().(*remoting)
+		r := NewClient().(*client)
 
 		host := "cache-hit.example.com"
 		port := 9999
@@ -129,7 +129,7 @@ func TestNetClient_Caching(t *testing.T) {
 	})
 
 	t.Run("cache miss path creates and stores client", func(t *testing.T) {
-		r := NewRemoting().(*remoting)
+		r := NewClient().(*client)
 
 		host := "cache-miss.example.com"
 		port := 8888
@@ -152,7 +152,7 @@ func TestNetClient_Caching(t *testing.T) {
 	})
 
 	t.Run("full sequence: cache miss then hit", func(t *testing.T) {
-		r := NewRemoting().(*remoting)
+		r := NewClient().(*client)
 
 		host := "sequence.example.com"
 		port := 7777
@@ -188,7 +188,7 @@ func TestNetClient_Caching(t *testing.T) {
 	})
 
 	t.Run("caches client for same endpoint", func(t *testing.T) {
-		r := NewRemoting().(*remoting)
+		r := NewClient().(*client)
 
 		host := "example.com"
 		port := 9090
@@ -215,7 +215,7 @@ func TestNetClient_Caching(t *testing.T) {
 	})
 
 	t.Run("different endpoints get different clients", func(t *testing.T) {
-		r := NewRemoting().(*remoting)
+		r := NewClient().(*client)
 
 		// Create clients for different endpoints
 		client1 := r.NetClient("host1", 8080)
@@ -234,7 +234,7 @@ func TestNetClient_Caching(t *testing.T) {
 }
 
 func TestRemoteAsk_InvalidMessage(t *testing.T) {
-	r := NewRemoting()
+	r := NewClient()
 	from := address.New("from", "sys", "host", 1000)
 	to := address.New("to", "sys", "host", 1000)
 
@@ -244,7 +244,7 @@ func TestRemoteAsk_InvalidMessage(t *testing.T) {
 }
 
 func TestRemoteTell_InvalidMessage(t *testing.T) {
-	r := NewRemoting()
+	r := NewClient()
 	from := address.New("from", "sys", "host", 1000)
 	to := address.New("to", "sys", "host", 1000)
 
@@ -254,13 +254,13 @@ func TestRemoteTell_InvalidMessage(t *testing.T) {
 }
 
 func TestRemoteSpawn_InvalidRequest(t *testing.T) {
-	r := NewRemoting()
+	r := NewClient()
 	err := r.RemoteSpawn(context.Background(), "host", 1000, &SpawnRequest{})
 	assert.Error(t, err)
 }
 
 func TestRemoteSpawn_InvalidPort(t *testing.T) {
-	r := NewRemoting()
+	r := NewClient()
 	port := int(math.MaxInt32) + 1
 
 	err := r.RemoteSpawn(context.Background(), "host", port, &SpawnRequest{Name: "actor", Kind: "kind"})
@@ -270,7 +270,7 @@ func TestRemoteSpawn_InvalidPort(t *testing.T) {
 
 func TestRemoteSpawn_WithReentrancy(t *testing.T) {
 	// Test that spawn request with reentrancy config does not panic
-	r := NewRemoting()
+	r := NewClient()
 
 	req := &SpawnRequest{
 		Name: "actor",
@@ -288,7 +288,7 @@ func TestRemoteSpawn_WithReentrancy(t *testing.T) {
 }
 
 func TestRemoteLookup_InvalidPort(t *testing.T) {
-	r := NewRemoting()
+	r := NewClient()
 	port := int(math.MaxInt32) + 1
 
 	_, err := r.RemoteLookup(context.Background(), "host", port, "actor")
@@ -297,7 +297,7 @@ func TestRemoteLookup_InvalidPort(t *testing.T) {
 }
 
 func TestRemoteReSpawn_InvalidPort(t *testing.T) {
-	r := NewRemoting()
+	r := NewClient()
 	port := int(math.MaxInt32) + 1
 
 	err := r.RemoteReSpawn(context.Background(), "host", port, "actor")
@@ -306,7 +306,7 @@ func TestRemoteReSpawn_InvalidPort(t *testing.T) {
 }
 
 func TestRemoteStop_InvalidPort(t *testing.T) {
-	r := NewRemoting()
+	r := NewClient()
 	port := int(math.MaxInt32) + 1
 
 	err := r.RemoteStop(context.Background(), "host", port, "actor")
@@ -315,7 +315,7 @@ func TestRemoteStop_InvalidPort(t *testing.T) {
 }
 
 func TestRemoteReinstate_InvalidPort(t *testing.T) {
-	r := NewRemoting()
+	r := NewClient()
 	port := int(math.MaxInt32) + 1
 
 	err := r.RemoteReinstate(context.Background(), "host", port, "actor")
@@ -324,7 +324,7 @@ func TestRemoteReinstate_InvalidPort(t *testing.T) {
 }
 
 func TestRemoteActivateGrain_InvalidPort(t *testing.T) {
-	r := NewRemoting()
+	r := NewClient()
 	port := int(math.MaxInt32) + 1
 	grainReq := &GrainRequest{
 		Kind: "kind",
@@ -337,7 +337,7 @@ func TestRemoteActivateGrain_InvalidPort(t *testing.T) {
 }
 
 func TestRemoteTellGrain_InvalidMessage(t *testing.T) {
-	r := NewRemoting()
+	r := NewClient()
 	grainReq := &GrainRequest{
 		Kind: "kind",
 		Name: "name",
@@ -349,7 +349,7 @@ func TestRemoteTellGrain_InvalidMessage(t *testing.T) {
 }
 
 func TestRemoteAskGrain_InvalidMessage(t *testing.T) {
-	r := NewRemoting()
+	r := NewClient()
 	grainReq := &GrainRequest{
 		Kind: "kind",
 		Name: "name",
@@ -361,7 +361,7 @@ func TestRemoteAskGrain_InvalidMessage(t *testing.T) {
 }
 
 func TestRemoteAskGrain_InvalidPort(t *testing.T) {
-	r := NewRemoting()
+	r := NewClient()
 	port := int(math.MaxInt32) + 1
 	grainReq := &GrainRequest{
 		Kind: "kind",
@@ -374,7 +374,7 @@ func TestRemoteAskGrain_InvalidPort(t *testing.T) {
 }
 
 func TestRemoteBatchTell_FiltersNilMessages(t *testing.T) {
-	r := NewRemoting()
+	r := NewClient()
 	from := address.New("from", "sys", "host", 1000)
 	to := address.New("to", "sys", "host", 1000)
 
@@ -394,7 +394,7 @@ func TestRemoteBatchTell_FiltersNilMessages(t *testing.T) {
 }
 
 func TestRemoteBatchAsk_FiltersNilMessages(t *testing.T) {
-	r := NewRemoting()
+	r := NewClient()
 	from := address.New("from", "sys", "host", 1000)
 	to := address.New("to", "sys", "host", 1000)
 
@@ -418,7 +418,7 @@ func TestRemoteBatchAsk_FiltersNilMessages(t *testing.T) {
 
 func TestRemotingSerializer(t *testing.T) {
 	t.Run("nil message returns the pre-built dispatcher", func(t *testing.T) {
-		r := NewRemoting().(*remoting)
+		r := NewClient().(*client)
 		s := r.Serializer(nil)
 		require.NotNil(t, s, "Serializer(nil) must return the composite dispatcher, not nil")
 		_, ok := s.(*serializerDispatch)
@@ -426,7 +426,7 @@ func TestRemotingSerializer(t *testing.T) {
 	})
 
 	t.Run("proto message matches the interface entry", func(t *testing.T) {
-		r := NewRemoting().(*remoting)
+		r := NewClient().(*client)
 		s := r.Serializer(durationpb.New(time.Second))
 		require.NotNil(t, s)
 		_, ok := s.(*ProtoSerializer)
@@ -435,14 +435,14 @@ func TestRemotingSerializer(t *testing.T) {
 
 	t.Run("concrete type registered with WithRemotingSerializers", func(t *testing.T) {
 		custom := &stubSerializer{}
-		r := NewRemoting(WithRemotingSerializers(new(nonProtoMsg), custom)).(*remoting)
+		r := NewClient(WithClientSerializers(new(nonProtoMsg), custom)).(*client)
 		s := r.Serializer(&nonProtoMsg{"x"})
 		require.NotNil(t, s)
 		assert.Same(t, custom, s)
 	})
 
 	t.Run("unknown type returns nil", func(t *testing.T) {
-		r := NewRemoting().(*remoting)
+		r := NewClient().(*client)
 		s := r.Serializer(&nonProtoMsg{"x"})
 		assert.Nil(t, s)
 	})
@@ -454,13 +454,13 @@ func TestRemotingSerializer(t *testing.T) {
 
 func TestWithRemotingContextPropagator(t *testing.T) {
 	t.Run("nil propagator is ignored", func(t *testing.T) {
-		r := NewRemoting(WithRemotingContextPropagator(nil)).(*remoting)
+		r := NewClient(WithClientContextPropagator(nil)).(*client)
 		assert.Nil(t, r.contextPropagator)
 	})
 
 	t.Run("non-nil propagator is applied", func(t *testing.T) {
 		prop := mockPropagator{}
-		r := NewRemoting(WithRemotingContextPropagator(prop)).(*remoting)
+		r := NewClient(WithClientContextPropagator(prop)).(*client)
 		assert.Equal(t, prop, r.contextPropagator)
 	})
 }
@@ -468,7 +468,7 @@ func TestWithRemotingContextPropagator(t *testing.T) {
 func TestWithRemotingSerializers(t *testing.T) {
 	t.Run("concrete type registration", func(t *testing.T) {
 		custom := &stubSerializer{}
-		r := NewRemoting(WithRemotingSerializers(new(nonProtoMsg), custom)).(*remoting)
+		r := NewClient(WithClientSerializers(new(nonProtoMsg), custom)).(*client)
 		s := r.Serializer(&nonProtoMsg{"x"})
 		require.NotNil(t, s)
 		assert.Same(t, custom, s)
@@ -476,8 +476,8 @@ func TestWithRemotingSerializers(t *testing.T) {
 
 	t.Run("nil serializer is silently ignored", func(t *testing.T) {
 		// Applying a nil serializer must not panic and must not add an entry.
-		before := NewRemoting().(*remoting)
-		after := NewRemoting(WithRemotingSerializers(new(nonProtoMsg), nil)).(*remoting)
+		before := NewClient().(*client)
+		after := NewClient(WithClientSerializers(new(nonProtoMsg), nil)).(*client)
 		assert.Equal(t, len(before.serializers), len(after.serializers))
 	})
 }
@@ -488,28 +488,28 @@ func TestWithRemotingSerializers(t *testing.T) {
 
 func TestEnrichContext(t *testing.T) {
 	t.Run("no propagator no deadline", func(t *testing.T) {
-		r := NewRemoting().(*remoting)
+		r := NewClient().(*client)
 		enriched, err := r.enrichContext(context.Background())
 		require.NoError(t, err)
 		assert.NotNil(t, enriched)
 	})
 
 	t.Run("propagator inject error is propagated", func(t *testing.T) {
-		r := NewRemoting(WithRemotingContextPropagator(errInjectPropagator{})).(*remoting)
+		r := NewClient(WithClientContextPropagator(errInjectPropagator{})).(*client)
 		_, err := r.enrichContext(context.Background())
 		require.Error(t, err)
 		assert.EqualError(t, err, "inject error")
 	})
 
 	t.Run("propagator with headers is applied", func(t *testing.T) {
-		r := NewRemoting(WithRemotingContextPropagator(headerPropagator{"X-Trace-Id", "abc"})).(*remoting)
+		r := NewClient(WithClientContextPropagator(headerPropagator{"X-Trace-Id", "abc"})).(*client)
 		enriched, err := r.enrichContext(context.Background())
 		require.NoError(t, err)
 		assert.NotNil(t, enriched)
 	})
 
 	t.Run("context with deadline sets metadata deadline", func(t *testing.T) {
-		r := NewRemoting().(*remoting)
+		r := NewClient().(*client)
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 		enriched, err := r.enrichContext(ctx)
@@ -628,7 +628,7 @@ func TestParseAlreadyExists(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestRemoteTell_NoSerializerForType(t *testing.T) {
-	r := NewRemoting()
+	r := NewClient()
 	from := address.New("from", "sys", "127.0.0.1", 1000)
 	to := address.New("to", "sys", "127.0.0.1", 1000)
 
@@ -638,7 +638,7 @@ func TestRemoteTell_NoSerializerForType(t *testing.T) {
 }
 
 func TestRemoteAsk_NoSerializerForType(t *testing.T) {
-	r := NewRemoting()
+	r := NewClient()
 	from := address.New("from", "sys", "127.0.0.1", 1000)
 	to := address.New("to", "sys", "127.0.0.1", 1000)
 
@@ -648,7 +648,7 @@ func TestRemoteAsk_NoSerializerForType(t *testing.T) {
 }
 
 func TestRemoteTellGrain_InvalidPort(t *testing.T) {
-	r := NewRemoting()
+	r := NewClient()
 	port := int(math.MaxInt32) + 1
 	grainReq := &GrainRequest{Kind: "kind", Name: "name"}
 
@@ -658,7 +658,7 @@ func TestRemoteTellGrain_InvalidPort(t *testing.T) {
 }
 
 func TestRemoteTellGrain_NoSerializerForType(t *testing.T) {
-	r := NewRemoting()
+	r := NewClient()
 	grainReq := &GrainRequest{Kind: "kind", Name: "name"}
 
 	err := r.RemoteTellGrain(context.Background(), "host", 1000, grainReq, &nonProtoMsg{"x"})
@@ -667,14 +667,14 @@ func TestRemoteTellGrain_NoSerializerForType(t *testing.T) {
 }
 
 func TestRemoteActivateGrain_InvalidRequest(t *testing.T) {
-	r := NewRemoting()
+	r := NewClient()
 	// Empty Kind and Name should fail validation inside getGrainFromRequest.
 	err := r.RemoteActivateGrain(context.Background(), "host", 1000, &GrainRequest{})
 	require.Error(t, err)
 }
 
 func TestRemoteBatchTell_NoSerializer(t *testing.T) {
-	r := NewRemoting()
+	r := NewClient()
 	from := address.New("from", "sys", "127.0.0.1", 1000)
 	to := address.New("to", "sys", "127.0.0.1", 1000)
 
@@ -684,7 +684,7 @@ func TestRemoteBatchTell_NoSerializer(t *testing.T) {
 }
 
 func TestRemoteBatchAsk_NoSerializer(t *testing.T) {
-	r := NewRemoting()
+	r := NewClient()
 	from := address.New("from", "sys", "127.0.0.1", 1000)
 	to := address.New("to", "sys", "127.0.0.1", 1000)
 
@@ -699,7 +699,7 @@ func TestRemoteBatchAsk_NoSerializer(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestRemoteTell_ConnectionRefused(t *testing.T) {
-	r := NewRemoting()
+	r := NewClient()
 	from := address.New("from", "sys", "host", 1000)
 	to := address.New("to", "sys", "host", 1000)
 
@@ -708,7 +708,7 @@ func TestRemoteTell_ConnectionRefused(t *testing.T) {
 }
 
 func TestRemoteAsk_ConnectionRefused(t *testing.T) {
-	r := NewRemoting()
+	r := NewClient()
 	from := address.New("from", "sys", "host", 1000)
 	to := address.New("to", "sys", "host", 1000)
 
@@ -717,14 +717,14 @@ func TestRemoteAsk_ConnectionRefused(t *testing.T) {
 }
 
 func TestRemoteLookup_ConnectionRefused(t *testing.T) {
-	r := NewRemoting()
+	r := NewClient()
 
 	_, err := r.RemoteLookup(context.Background(), "host", 1000, "some-actor")
 	assert.Error(t, err)
 }
 
 func TestRemoteActivateGrain_ConnectionRefused(t *testing.T) {
-	r := NewRemoting()
+	r := NewClient()
 	grainReq := &GrainRequest{Kind: "kind", Name: "name"}
 
 	err := r.RemoteActivateGrain(context.Background(), "host", 1000, grainReq)
@@ -732,7 +732,7 @@ func TestRemoteActivateGrain_ConnectionRefused(t *testing.T) {
 }
 
 func TestRemoteAskGrain_ConnectionRefused(t *testing.T) {
-	r := NewRemoting()
+	r := NewClient()
 	grainReq := &GrainRequest{Kind: "kind", Name: "name"}
 
 	_, err := r.RemoteAskGrain(context.Background(), "host", 1000, grainReq, durationpb.New(time.Second), time.Second)
@@ -740,7 +740,7 @@ func TestRemoteAskGrain_ConnectionRefused(t *testing.T) {
 }
 
 func TestRemoteTellGrain_ConnectionRefused(t *testing.T) {
-	r := NewRemoting()
+	r := NewClient()
 	grainReq := &GrainRequest{Kind: "kind", Name: "name"}
 
 	err := r.RemoteTellGrain(context.Background(), "host", 1000, grainReq, durationpb.New(time.Second))
@@ -748,28 +748,28 @@ func TestRemoteTellGrain_ConnectionRefused(t *testing.T) {
 }
 
 func TestRemoteReSpawn_ConnectionRefused(t *testing.T) {
-	r := NewRemoting()
+	r := NewClient()
 
 	err := r.RemoteReSpawn(context.Background(), "host", 1000, "actor")
 	assert.Error(t, err)
 }
 
 func TestRemoteStop_ConnectionRefused(t *testing.T) {
-	r := NewRemoting()
+	r := NewClient()
 
 	err := r.RemoteStop(context.Background(), "host", 1000, "actor")
 	assert.Error(t, err)
 }
 
 func TestRemoteReinstate_ConnectionRefused(t *testing.T) {
-	r := NewRemoting()
+	r := NewClient()
 
 	err := r.RemoteReinstate(context.Background(), "host", 1000, "actor")
 	assert.Error(t, err)
 }
 
 func TestRemoteBatchAsk_ConnectionRefused(t *testing.T) {
-	r := NewRemoting()
+	r := NewClient()
 	from := address.New("from", "sys", "host", 1000)
 	to := address.New("to", "sys", "host", 1000)
 
@@ -778,7 +778,7 @@ func TestRemoteBatchAsk_ConnectionRefused(t *testing.T) {
 }
 
 func TestRemoteSpawn_ConnectionRefused(t *testing.T) {
-	r := NewRemoting()
+	r := NewClient()
 
 	err := r.RemoteSpawn(context.Background(), "host", 1000, &SpawnRequest{Name: "actor", Kind: "kind"})
 	assert.Error(t, err)
@@ -786,7 +786,7 @@ func TestRemoteSpawn_ConnectionRefused(t *testing.T) {
 
 func TestWithRemotingContextPropagator_EnrichesRequests(t *testing.T) {
 	// Ensure the propagator is carried through to enrichContext on real send paths.
-	r := NewRemoting(WithRemotingContextPropagator(headerPropagator{"X-ID", "42"}))
+	r := NewClient(WithClientContextPropagator(headerPropagator{"X-ID", "42"}))
 	from := address.New("from", "sys", "host", 1000)
 	to := address.New("to", "sys", "host", 1000)
 

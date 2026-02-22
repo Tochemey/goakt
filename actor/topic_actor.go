@@ -59,14 +59,14 @@ type topicActor struct {
 
 	cluster     cluster.Cluster
 	actorSystem ActorSystem
-	remoting    remote.Remoting
+	remoting    remote.Client
 }
 
 // ensure topic actor implements the Actor interface
 var _ Actor = (*topicActor)(nil)
 
 // newTopicActor creates a new cluster pubsub mediator.
-func newTopicActor(remoting remote.Remoting) Actor {
+func newTopicActor(remoting remote.Client) Actor {
 	return &topicActor{
 		topics:    xsync.NewMap[string, *xsync.Map[string, *PID]](),
 		processed: xsync.NewMap[key, types.Unit](),
@@ -331,7 +331,7 @@ func (x *topicActor) handleTopicMessage(ctx *ReceiveContext) {
 		}
 
 		messageID := topicMessage.GetId()
-		senderID := ctx.RemoteSender().String()
+		senderID := ctx.SenderAddress().String()
 
 		id := key{
 			senderID:  senderID,

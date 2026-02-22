@@ -391,7 +391,7 @@ func makeReceiveContextWithPayload(sender, payload string) *ReceiveContext {
 }
 
 func makeReceiveContextFromAddress(addr *address.Address, payload string) *ReceiveContext {
-	ctx := &ReceiveContext{remoteSender: addr}
+	ctx := &ReceiveContext{sender: newRemotePID(addr, nil)}
 	if payload != "" {
 		ctx.message = &anypb.Any{TypeUrl: "test/payload", Value: []byte(payload)}
 	}

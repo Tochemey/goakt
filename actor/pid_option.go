@@ -97,7 +97,7 @@ func withInitTimeout(duration time.Duration) pidOption {
 }
 
 // withRemoting set the remoting feature
-func withRemoting(remoting remote.Remoting) pidOption {
+func withRemoting(remoting remote.Client) pidOption {
 	return func(pid *PID) {
 		pid.remoting = remoting
 	}

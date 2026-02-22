@@ -95,7 +95,7 @@ func (x *TestKit) Spawn(ctx context.Context, name string, actor goakt.Actor, opt
 // SpawnChild creates a child actor for an existing actor that is the parent
 func (x *TestKit) SpawnChild(ctx context.Context, childName, parentName string, actor goakt.Actor, opts ...goakt.SpawnOption) {
 	require.True(x.testingT, x.started.Load(), "require testkit to be started")
-	parent, err := x.actorSystem.LocalActor(parentName)
+	parent, err := x.actorSystem.ActorOf(ctx, parentName)
 	require.NoError(x.testingT, err)
 	_, err = parent.SpawnChild(ctx, childName, actor, opts...)
 	require.NoError(x.testingT, err)
@@ -118,7 +118,7 @@ func (x *TestKit) Subscribe() eventstream.Subscriber {
 // Kill stops a given actor in the local actor system.
 func (x *TestKit) Kill(ctx context.Context, name string) {
 	require.True(x.testingT, x.started.Load(), "require testkit to be started")
-	pid, err := x.actorSystem.LocalActor(name)
+	pid, err := x.actorSystem.ActorOf(ctx, name)
 	require.NoError(x.testingT, err)
 	require.NotNil(x.testingT, pid)
 	require.False(x.testingT, pid.Equals(x.actorSystem.NoSender()), "cannot kill actor with no address")

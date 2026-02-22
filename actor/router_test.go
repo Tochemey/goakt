@@ -145,7 +145,7 @@ func TestRouter(t *testing.T) {
 
 		pause.For(time.Second)
 
-		ref, err := system.LocalActor(routerName)
+		ref, err := system.ActorOf(ctx, routerName)
 		require.Error(t, err)
 		require.Nil(t, ref)
 		assert.ErrorIs(t, err, errors.ErrActorNotFound)

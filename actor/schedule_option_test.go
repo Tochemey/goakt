@@ -65,13 +65,11 @@ func TestScheduleOption(t *testing.T) {
 	referenceID := "reference"
 	opts := []ScheduleOption{
 		WithSender(actorRef),
-		WithSenderAddress(actorRef.Address()),
 		WithReference(referenceID),
 	}
 
 	config := newScheduleConfig(opts...)
 	require.Equal(t, referenceID, config.Reference())
-	require.True(t, actorRef.Address().Equals(config.SenderAddr()))
 	require.True(t, actorRef.Equals(config.Sender()))
 
 	// stop the actor

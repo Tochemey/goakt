@@ -57,7 +57,7 @@ func TestTestKit(t *testing.T) {
 		kit, ctx := newTestKit(t)
 
 		kit.Spawn(ctx, "spawn-actor", &pinger{})
-		pid, err := kit.ActorSystem().LocalActor("spawn-actor")
+		pid, err := kit.ActorSystem().ActorOf(ctx, "spawn-actor")
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 	})
@@ -68,7 +68,7 @@ func TestTestKit(t *testing.T) {
 		kit.Spawn(ctx, "parent-actor", &pinger{})
 		kit.SpawnChild(ctx, "child-actor", "parent-actor", &pinger{})
 
-		pid, err := kit.ActorSystem().LocalActor("child-actor")
+		pid, err := kit.ActorSystem().ActorOf(ctx, "child-actor")
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 	})
@@ -111,7 +111,7 @@ func TestTestKit(t *testing.T) {
 		kit.Kill(ctx, "kill-actor")
 
 		require.Eventually(t, func() bool {
-			_, err := kit.ActorSystem().LocalActor("kill-actor")
+			_, err := kit.ActorSystem().ActorOf(ctx, "kill-actor")
 			return err != nil
 		}, 2*time.Second, 10*time.Millisecond)
 	})

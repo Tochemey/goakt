@@ -326,7 +326,7 @@ func TestReceiveContext(t *testing.T) {
 		// get the address of the exchanger actor one
 		addr1 := context.RemoteLookup(host, remotingPort, actorName2)
 		// send the message to t exchanger actor one using remote messaging
-		reply := context.RemoteAsk(addr1, new(testpb.TestReply), time.Minute)
+		reply := context.Ask(addr1, new(testpb.TestReply), time.Minute)
 		// perform some assertions
 		require.NotNil(t, reply)
 		actual, ok := reply.(*testpb.Reply)
@@ -385,7 +385,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		addr := address.New(actorName2, sys.Name(), "127.0.0.1", remotingPort)
-		context.RemoteAsk(addr, new(testpb.TestReply), time.Minute)
+		context.Ask(newRemotePID(addr, pid1.remoting), new(testpb.TestReply), time.Minute)
 		require.Error(t, context.getError())
 		pause.For(time.Second)
 
@@ -451,7 +451,7 @@ func TestReceiveContext(t *testing.T) {
 		// get the address of the exchanger actor one
 		addr1 := context.RemoteLookup(host, remotingPort, actorName2)
 		// send the message to t exchanger actor one using remote messaging
-		context.RemoteTell(addr1, new(testpb.TestRemoteSend))
+		context.Tell(addr1, new(testpb.TestRemoteSend))
 		require.NoError(t, context.getError())
 		pause.For(time.Second)
 
@@ -512,7 +512,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// send the message to the exchanger actor one using remote messaging
 		addr := address.New(actorName2, sys.Name(), "127.0.0.1", remotingPort)
-		context.RemoteTell(addr, new(testpb.TestRemoteSend))
+		context.Tell(newRemotePID(addr, pid1.remoting), new(testpb.TestRemoteSend))
 		require.Error(t, context.getError())
 		pause.For(time.Second)
 
@@ -571,9 +571,11 @@ func TestReceiveContext(t *testing.T) {
 			self:    pid1,
 		}
 
-		addr := context.RemoteLookup(host, remotingPort, actorName2)
-		require.NotNil(t, addr)
-		require.True(t, addr.Equals(address.NoSender()))
+		// actor not found — RemoteLookup returns nil and records ErrActorNotFound
+		remotePID := context.RemoteLookup(host, remotingPort, actorName2)
+		require.Nil(t, remotePID)
+		require.Error(t, context.getError())
+		require.ErrorIs(t, context.getError(), errors.ErrActorNotFound)
 
 		pause.For(time.Second)
 
@@ -1653,7 +1655,7 @@ func TestReceiveContext(t *testing.T) {
 		testerAddr := context.RemoteLookup(host, remotingPort, tester)
 		// send the message to t exchanger actor one using remote messaging
 		messages := []any{new(testpb.TestSend), new(testpb.TestSend), new(testpb.TestSend)}
-		context.RemoteBatchTell(testerAddr, messages)
+		context.BatchTell(testerAddr, messages...)
 		require.NoError(t, context.getError())
 		// wait for processing to complete on the actor side
 		pause.For(500 * time.Millisecond)
@@ -1709,7 +1711,7 @@ func TestReceiveContext(t *testing.T) {
 		testerAddr := context.RemoteLookup(host, remotingPort, tester)
 		// send the message to t exchanger actor one using remote messaging
 		messages := []any{new(testpb.TestReply), new(testpb.TestReply), new(testpb.TestReply)}
-		replies := context.RemoteBatchAsk(testerAddr, messages, time.Minute)
+		replies := context.BatchAsk(testerAddr, messages, time.Minute)
 		require.NoError(t, context.getError())
 		require.Len(t, replies, 3)
 		pause.For(time.Second)
@@ -1759,14 +1761,13 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		testerRef.remoting = nil
-		// get the address of the exchanger actor one
-		testerAddr := context.RemoteLookup(host, remotingPort, tester)
-		// send the message to t exchanger actor one using remote messaging
+		// Use a remote PID so BatchAsk takes the remote path; sender has no remoting so we get ErrRemotingDisabled
+		remoteTarget := newRemotePID(testerRef.Address(), nil)
 		messages := []any{new(testpb.TestReply), new(testpb.TestReply), new(testpb.TestReply)}
-		replies := context.RemoteBatchAsk(testerAddr, messages, time.Minute)
+		replies := context.BatchAsk(remoteTarget, messages, time.Minute)
 		err = context.getError()
 		require.Error(t, err)
-		require.Empty(t, replies)
+		require.Nil(t, replies)
 		assert.ErrorIs(t, err, errors.ErrRemotingDisabled)
 
 		t.Cleanup(
@@ -1819,7 +1820,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// send the message to the exchanger actor one using remote messaging
 		addr := address.New(actorName2, sys.Name(), "127.0.0.1", remotingPort)
-		context.RemoteBatchTell(addr, []any{new(testpb.TestRemoteSend)})
+		context.BatchTell(newRemotePID(addr, pid1.remoting), new(testpb.TestRemoteSend))
 		require.Error(t, context.getError())
 		pause.For(time.Second)
 
@@ -1874,7 +1875,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// send the message to t exchanger actor one using remote messaging
 		messages := []any{new(testpb.TestSend), new(testpb.TestSend), new(testpb.TestSend)}
-		context.RemoteBatchTell(testerAddr, messages)
+		context.BatchTell(testerAddr, messages...)
 		err = context.getError()
 		require.Error(t, err)
 		assert.ErrorIs(t, err, errors.ErrRemotingDisabled)
@@ -1929,7 +1930,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		addr := address.New(actorName2, sys.Name(), "127.0.0.1", remotingPort)
-		context.RemoteBatchAsk(addr, []any{new(testpb.TestReply)}, time.Minute)
+		context.BatchAsk(newRemotePID(addr, pid1.remoting), []any{new(testpb.TestReply)}, time.Minute)
 		require.Error(t, context.getError())
 		pause.For(time.Second)
 
@@ -2510,7 +2511,7 @@ func TestReceiveContext(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
-	t.Run("With successful RemoteForward", func(t *testing.T) {
+	t.Run("With successful Forward", func(t *testing.T) {
 		ctx := context.TODO()
 		ports := dynaport.Get(2)
 		host := "127.0.0.1"
@@ -2565,7 +2566,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, pidA.Shutdown(ctx))
 		require.NoError(t, pidB.Shutdown(ctx))
 	})
-	t.Run("With failed RemoteForward", func(t *testing.T) {
+	t.Run("With failed Forward to stopped actor", func(t *testing.T) {
 		ctx := context.TODO()
 		ports := dynaport.Get(2)
 		host := "127.0.0.1"
@@ -2617,7 +2618,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// actor A is killing actor C using a forward pattern
 		// actorA tell actorB forward actorC
-		context.RemoteForward(pidC.Address())
+		context.Forward(pidC)
 		require.Error(t, context.getError())
 
 		// let us shutdown the rest
@@ -2627,7 +2628,7 @@ func TestReceiveContext(t *testing.T) {
 		assert.NoError(t, actorSystem.Stop(ctx))
 		assert.NoError(t, actorSystem2.Stop(ctx))
 	})
-	t.Run("With successful RemoteForward case 2", func(t *testing.T) {
+	t.Run("With successful Forward case 2", func(t *testing.T) {
 		ctx := context.TODO()
 		ports := dynaport.Get(2)
 		host := "127.0.0.1"
@@ -2669,7 +2670,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// actor A is killing actor C using a forward pattern
 		// actorA tell actorB forward actorC
-		err = pidA.RemoteTell(ctx, pidB.Address(), new(testpb.TestRemoteForward))
+		err = pidA.remoteTell(ctx, pidB.Address(), new(testpb.TestRemoteForward))
 		require.NoError(t, err)
 
 		// wait for the async call to properly complete
@@ -3256,11 +3257,10 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an instance of receive context
 		context := &ReceiveContext{
-			ctx:          ctx,
-			message:      new(testpb.TestSend),
-			sender:       actorSystem.NoSender(),
-			remoteSender: nil,
-			self:         pid1,
+			ctx:     ctx,
+			message: new(testpb.TestSend),
+			sender:  actorSystem.NoSender(),
+			self:    pid1,
 		}
 
 		senderAddr := context.SenderAddress()
@@ -3277,12 +3277,12 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
+		// simulate a remote sender: materialise pid2's address as a remote PID
 		context = &ReceiveContext{
-			ctx:          ctx,
-			message:      new(testpb.TestSend),
-			sender:       nil,
-			remoteSender: pid2.Address(),
-			self:         pid1,
+			ctx:     ctx,
+			message: new(testpb.TestSend),
+			sender:  newRemotePID(pid2.Address(), pid2.remoting),
+			self:    pid1,
 		}
 
 		senderAddr = context.SenderAddress()
@@ -3290,11 +3290,10 @@ func TestReceiveContext(t *testing.T) {
 		require.True(t, senderAddr.Equals(pid2.Address()))
 
 		context = &ReceiveContext{
-			ctx:          ctx,
-			message:      new(testpb.TestSend),
-			sender:       nil,
-			remoteSender: nil,
-			self:         nil, // may never happen but for test sake
+			ctx:     ctx,
+			message: new(testpb.TestSend),
+			sender:  nil,
+			self:    nil, // may never happen but for test sake
 		}
 
 		senderAddr = context.SenderAddress()
@@ -3332,11 +3331,10 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an instance of receive context
 		context := &ReceiveContext{
-			ctx:          ctx,
-			message:      new(testpb.TestSend),
-			sender:       actorSystem.NoSender(),
-			remoteSender: nil,
-			self:         pid,
+			ctx:     ctx,
+			message: new(testpb.TestSend),
+			sender:  actorSystem.NoSender(),
+			self:    pid,
 		}
 
 		deps := context.Dependencies()

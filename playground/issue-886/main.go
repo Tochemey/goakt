@@ -74,7 +74,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	addr, pid, err := actorSystem.ActorOf(ctx, "actor1")
+	pid, err = actorSystem.ActorOf(ctx, "actor1")
 	if err != nil {
 		if !errors.Is(err, gerrors.ErrActorNotFound) {
 			fmt.Println("failed to get actor:", err)
@@ -82,7 +82,7 @@ func main() {
 		}
 	}
 
-	if addr != nil || pid != nil {
+	if pid != nil {
 		fmt.Println("actor should be stopped but still exists")
 		os.Exit(1)
 	}

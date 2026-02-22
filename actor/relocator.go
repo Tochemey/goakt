@@ -44,7 +44,7 @@ import (
 // relocator is a system actor that helps rebalance cluster
 // when the cluster topology changes
 type relocator struct {
-	remoting remote.Remoting
+	remoting remote.Client
 	pid      *PID
 	logger   log.Logger
 }
@@ -53,7 +53,7 @@ type relocator struct {
 var _ Actor = (*relocator)(nil)
 
 // newRelocator creates an instance of relocator
-func newRelocator(remoting remote.Remoting) *relocator {
+func newRelocator(remoting remote.Client) *relocator {
 	return &relocator{
 		remoting: remoting,
 	}
@@ -88,7 +88,7 @@ func (r *relocator) Relocate(ctx *ReceiveContext) {
 
 		leaderShares, peersShares := r.allocateActors(len(peers)+1, peerState)
 		eg, egCtx := errgroup.WithContext(rctx)
-		logger := r.pid.Logger()
+		logger := r.pid.getLogger()
 
 		r.relocateActors(egCtx, eg, leaderShares, peersShares, peers)
 

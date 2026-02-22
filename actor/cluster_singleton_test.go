@@ -189,7 +189,7 @@ func TestSingletonActor(t *testing.T) {
 	t.Run("Returns error when fetching peers fails", func(t *testing.T) {
 		ctx := context.Background()
 		cl := mockcluster.NewCluster(t)
-		rem := mockremote.NewRemoting(t)
+		rem := mockremote.NewClient(t)
 
 		system := &actorSystem{remoting: rem}
 
@@ -213,7 +213,7 @@ func TestSingletonActor(t *testing.T) {
 	t.Run("Returns error when leader is not found", func(t *testing.T) {
 		ctx := context.Background()
 		cl := mockcluster.NewCluster(t)
-		rem := mockremote.NewRemoting(t)
+		rem := mockremote.NewClient(t)
 
 		system := &actorSystem{remoting: rem}
 
@@ -249,7 +249,7 @@ func TestSingletonActor(t *testing.T) {
 	t.Run("Returns error when remote spawn fails", func(t *testing.T) {
 		ctx := context.Background()
 		cl := mockcluster.NewCluster(t)
-		rem := mockremote.NewRemoting(t)
+		rem := mockremote.NewClient(t)
 
 		system := &actorSystem{remoting: rem}
 
@@ -306,7 +306,7 @@ func TestSingletonActor(t *testing.T) {
 		ports := dynaport.Get(3)
 
 		clusterMock := mockcluster.NewCluster(t)
-		remotingMock := mockremote.NewRemoting(t)
+		remotingMock := mockremote.NewClient(t)
 		system := MockSingletonClusterReadyActorSystem(t)
 		system.remoting = remotingMock
 
@@ -355,7 +355,7 @@ func TestSingletonActor(t *testing.T) {
 	t.Run("With role and member error returns error", func(t *testing.T) {
 		ctx := context.Background()
 		clusterMock := mockcluster.NewCluster(t)
-		remotingMock := mockremote.NewRemoting(t)
+		remotingMock := mockremote.NewClient(t)
 		system := MockSingletonClusterReadyActorSystem(t)
 		system.remoting = remotingMock
 
@@ -384,7 +384,7 @@ func TestSingletonActor(t *testing.T) {
 		ports := dynaport.Get(3)
 
 		clusterMock := mockcluster.NewCluster(t)
-		remotingMock := mockremote.NewRemoting(t)
+		remotingMock := mockremote.NewClient(t)
 		system := MockSingletonClusterReadyActorSystem(t)
 		system.remoting = remotingMock
 
@@ -425,7 +425,7 @@ func TestSingletonActor(t *testing.T) {
 		ports := dynaport.Get(3)
 
 		clusterMock := mockcluster.NewCluster(t)
-		remotingMock := mockremote.NewRemoting(t)
+		remotingMock := mockremote.NewClient(t)
 		system := MockSingletonClusterReadyActorSystem(t)
 		system.remoting = remotingMock
 
@@ -492,7 +492,7 @@ func TestSingletonActor(t *testing.T) {
 		ctx := context.Background()
 		ports := dynaport.Get(3)
 		clusterMock := mockcluster.NewCluster(t)
-		remotingMock := mockremote.NewRemoting(t)
+		remotingMock := mockremote.NewClient(t)
 		system := MockSingletonClusterReadyActorSystem(t)
 		system.remoting = remotingMock
 
@@ -856,7 +856,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 		ports := dynaport.Get(3)
 
 		clusterMock := mockcluster.NewCluster(t)
-		remotingMock := mockremote.NewRemoting(t)
+		remotingMock := mockremote.NewClient(t)
 		system := MockSingletonClusterReadyActorSystem(t)
 		system.remoting = remotingMock
 
@@ -1137,7 +1137,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 		ports := dynaport.Get(6)
 
 		clusterMock := mockcluster.NewCluster(t)
-		remotingMock := mockremote.NewRemoting(t)
+		remotingMock := mockremote.NewClient(t)
 		system := MockSingletonClusterReadyActorSystem(t)
 		system.remoting = remotingMock
 
@@ -1217,7 +1217,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 		ports := dynaport.Get(3)
 
 		clusterMock := mockcluster.NewCluster(t)
-		remotingMock := mockremote.NewRemoting(t)
+		remotingMock := mockremote.NewClient(t)
 		system := MockSingletonClusterReadyActorSystem(t)
 		system.remoting = remotingMock
 
@@ -1291,7 +1291,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 				ports := dynaport.Get(3)
 
 				clusterMock := mockcluster.NewCluster(t)
-				remotingMock := mockremote.NewRemoting(t)
+				remotingMock := mockremote.NewClient(t)
 				system := MockSingletonClusterReadyActorSystem(t)
 				system.remoting = remotingMock
 

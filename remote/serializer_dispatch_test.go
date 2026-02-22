@@ -141,7 +141,7 @@ func TestSerializerDispatch_Deserialize(t *testing.T) {
 
 	t.Run("round-trip via default remoting dispatcher", func(t *testing.T) {
 		// Verify the dispatcher wired into NewRemoting can decode a valid proto frame.
-		r := NewRemoting().(*remoting)
+		r := NewClient().(*client)
 		dispatcher := r.Serializer(nil)
 		require.NotNil(t, dispatcher)
 

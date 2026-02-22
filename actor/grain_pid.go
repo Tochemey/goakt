@@ -61,7 +61,7 @@ type grainPID struct {
 
 	// atomic flag indicating whether the grain is processing messages
 	processing atomic.Int32
-	remoting   remote.Remoting
+	remoting   remote.Client
 
 	// the list of dependencies
 	dependencies *xsync.Map[string, extension.Dependency]

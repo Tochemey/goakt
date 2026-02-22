@@ -86,7 +86,7 @@ func TestDataCenterReady(t *testing.T) {
 	})
 
 	t.Run("returns true when multi-DC enabled and controller is ready", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{{ID: "dc-1", State: datacenter.DataCenterActive}}, nil
 		}, remotingMock)
@@ -157,7 +157,7 @@ func TestDataCenterLastRefresh(t *testing.T) {
 	})
 
 	t.Run("returns non-zero when multi-DC enabled and controller has refreshed", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{{ID: "dc-1", State: datacenter.DataCenterActive}}, nil
 		}, remotingMock)

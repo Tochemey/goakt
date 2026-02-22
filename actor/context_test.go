@@ -25,6 +25,7 @@ package actor
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -41,7 +42,9 @@ func TestContext(t *testing.T) {
 	c := newContext(ctx, "name", actorSystem)
 	require.NotNil(t, c.ActorSystem())
 	require.Equal(t, "testSys", c.ActorSystem().Name())
-	require.Empty(t, c.ActorSystem().Actors())
+	pids, err := c.ActorSystem().Actors(ctx, time.Second)
+	require.NoError(t, err)
+	require.Empty(t, pids)
 	require.NotNil(t, c.ActorSystem().Logger())
 	require.Empty(t, c.Extensions())
 	require.Nil(t, c.Extension("extensionID"))

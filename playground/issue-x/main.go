@@ -86,20 +86,32 @@ func main() {
 
 func checkLocalActor(system actor.ActorSystem, actorName string) {
 	fmt.Printf("Checking if local actor %s exists on %s ...\n", actorName, system.Name())
-	_, err := system.LocalActor(actorName)
+	pid, err := system.ActorOf(context.Background(), actorName)
 	if err != nil {
 		fmt.Printf("Error checking local actor %s: %v\n", actorName, err)
 		os.Exit(1)
 	}
+
+	if pid == nil || pid.IsRemote() {
+		fmt.Printf("actor should not be remote at this point")
+		os.Exit(1)
+	}
+
 	fmt.Printf("Local actor %s exists on %s.\n", actorName, system.Name())
 }
 
 func checkRemoteActor(system actor.ActorSystem, actorName string) {
-	_, err := system.RemoteActor(context.Background(), actorName)
+	pid, err := system.ActorOf(context.Background(), actorName)
 	if err != nil {
 		fmt.Printf("Error checking remote actor %s: %v\n", actorName, err)
 		os.Exit(1)
 	}
+
+	if pid == nil || pid.IsLocal() {
+		fmt.Printf("actor should not be local at this point")
+		os.Exit(1)
+	}
+
 	fmt.Printf("Remote actor %s exists on %s.\n", actorName, system.Name())
 }
 

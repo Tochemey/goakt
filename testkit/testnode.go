@@ -118,7 +118,7 @@ func (x TestNode) Subscribe() eventstream.Subscriber {
 // Kill stops a given actor in the local actor system.
 func (x TestNode) Kill(ctx context.Context, name string) {
 	require.True(x.testingT, x.created.Load(), "cannot kill actor before the test node is created")
-	pid, err := x.actorSystem.LocalActor(name)
+	pid, err := x.actorSystem.ActorOf(ctx, name)
 	require.NoError(x.testingT, err)
 	require.NotNil(x.testingT, pid)
 	require.False(x.testingT, pid.Equals(x.actorSystem.NoSender()), "cannot kill actor with no address")

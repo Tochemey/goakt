@@ -98,16 +98,14 @@ type ActorSystem interface {
 	Metric(ctx context.Context) *Metric
 	// Name returns the actor system name
 	Name() string
-	// Actors returns the list of Actors that are alive on a given running node.
-	// This does not account for the total number of actors in the cluster
-	Actors() []*PID
-	// ActorRefs retrieves a list of active actors, including both local actors
-	// and, when cluster mode is enabled, actors across the cluster. Use this
-	// method cautiously, as the scanning process may impact system performance.
-	// If the cluster request fails, an error will be returned.
-	// The timeout parameter defines the maximum duration for cluster-based requests
-	// before they are terminated.
-	ActorRefs(ctx context.Context, timeout time.Duration) ([]ActorRef, error)
+	// Actors retrieves all active actors visible to this node.
+	// Local actors are returned as live PIDs. When cluster mode is enabled,
+	// actors on peer nodes are returned as lightweight remote PIDs that carry
+	// only the address and a remoting handle, routing all messaging through
+	// the remoting layer. Use pid.IsLocal() / pid.IsRemote() to distinguish them.
+	// The timeout bounds the cluster scan; it is ignored when not in cluster mode.
+	// Use this method cautiously as the cluster scan may impact system performance.
+	Actors(ctx context.Context, timeout time.Duration) ([]*PID, error)
 	// Start initializes the actor system.
 	// To guarantee a clean shutdown during unexpected system terminations,
 	// developers must handle SIGTERM and SIGINT signals appropriately and invoke Stop.
@@ -243,25 +241,22 @@ type ActorSystem interface {
 	// NumActors returns the total number of active actors on a given running node.
 	// This does not account for the total number of actors in the cluster
 	NumActors() uint64
-	// LocalActor returns the reference of a local actor.
-	// A local actor is an actor that reside on the same node where the given actor system has started
-	LocalActor(actorName string) (*PID, error)
-	// RemoteActor returns the address of a remote actor when cluster is enabled
-	// When the cluster mode is not enabled an actor not found error will be returned
-	// One can always check whether cluster is enabled before calling this method or just use the ActorOf method.
-	RemoteActor(ctx context.Context, actorName string) (addr *address.Address, err error)
 	// ActorOf retrieves an existing actor within the local system or across the cluster if clustering is enabled.
 	//
-	// If the actor is found locally, its PID is returned. If the actor resides on a remote host, its address is returned.
-	// If the actor is not found, an error of type "actor not found" is returned.
-	ActorOf(ctx context.Context, actorName string) (addr *address.Address, pid *PID, err error)
+	// If the actor is found locally, its live PID is returned. If the actor resides on a remote node (cluster
+	// mode enabled), a lightweight remote PID is returned; it carries only the actor's address and a remoting
+	// handle, and routes all messaging operations through the remoting layer. If the actor is not found, an
+	// error of type "actor not found" is returned.
+	//
+	// Use pid.IsLocal() / pid.IsRemote() to distinguish the two cases when location matters.
+	ActorOf(ctx context.Context, actorName string) (*PID, error)
 	// ActorExists checks whether an actor with the given name exists in the system,
 	// either locally, or on another node in the cluster if clustering is enabled.
 	ActorExists(ctx context.Context, actorName string) (exists bool, err error)
 	// InCluster states whether the actor system has started within a cluster of nodes
 	InCluster() bool
-	// GetPartition returns the partition where a given actor is located
-	GetPartition(actorName string) uint64
+	// Partition returns the partition where a given actor is located
+	Partition(actorName string) uint64
 	// Subscribe creates an event subscriber to consume events from the actor system.
 	// Remember to use the Unsubscribe method to avoid resource leakage.
 	Subscribe() (eventstream.Subscriber, error)
@@ -306,47 +301,6 @@ type ActorSystem interface {
 	//   - If no reference is set, an automatic one will be generated internally, which may not be easily retrievable for later operations.
 	//   - This function does not provide built-in delivery guarantees such as at-least-once or exactly-once semantics; ensure idempotency where needed.
 	Schedule(ctx context.Context, message any, pid *PID, interval time.Duration, opts ...ScheduleOption) error
-	// RemoteScheduleOnce schedules a one-time delivery of a message to a remote actor after a specified delay.
-	//
-	// This method schedules a message to be sent to an actor located at a remote address once the given interval has elapsed.
-	// It requires that remoting is enabled in the actor system configuration.
-	//
-	// Parameters:
-	//	  - ctx: The context for managing cancellation and deadlines.
-	//   - message: The proto.Message to be delivered.
-	//   - receiver: The address.Address of the remote actor that will receive the message.
-	//   - delay: The time duration to wait before delivering the message.
-	//   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
-	//
-	// Returns:
-	//   - error: An error is returned if remoting is not enabled, the target address is invalid, or scheduling fails.
-	//
-	// Note:
-	//   - Remoting must be enabled in the actor system for this function to work.
-	//   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the message later.
-	//   - If no reference is set, an automatic one will be generated internally, which may not be retrievable.
-	RemoteScheduleOnce(ctx context.Context, message any, receiver *address.Address, delay time.Duration, opts ...ScheduleOption) error
-	// RemoteSchedule schedules a recurring message to be sent to a remote actor at a specified interval.
-	//
-	// This method sends the given message repeatedly to the remote actor located at the specified address,
-	// with each delivery occurring after the configured time interval.
-	// Remoting must be enabled in the actor system for this functionality to work.
-	//
-	// Parameters:
-	//	  - ctx: The context for managing cancellation and deadlines.
-	//   - message: The proto.Message to be delivered periodically.
-	//   - receiver: The address.Address of the remote actor that will receive the message.
-	//   - interval: The time duration between each message delivery.
-	//   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
-	//
-	// Returns:
-	//   - error: An error is returned if remoting is not enabled, the target address is invalid, or scheduling fails.
-	//
-	// Note:
-	//   - Remoting must be enabled in the actor system for this method to function correctly.
-	//   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the scheduled message.
-	//   - If no reference is set, an automatic one will be generated internally, which may not be easily retrievable for later operations.
-	RemoteSchedule(ctx context.Context, message any, receiver *address.Address, interval time.Duration, opts ...ScheduleOption) error
 	// ScheduleWithCron schedules a message to be delivered to the specified actor (PID) using a cron expression.
 	//
 	// This method enables flexible time-based scheduling using standard cron syntax, allowing you to specify complex recurring schedules.
@@ -388,7 +342,6 @@ type ActorSystem interface {
 	//   - It's strongly recommended to set a unique reference ID using WithReference if you intend to cancel, pause, or resume the scheduled message.
 	//   - If no reference is set, an automatic one will be generated internally and may not be easily retrievable.
 	//   - The cron expression must conform to the scheduler’s supported format (usually 5 or 6 fields).
-	RemoteScheduleWithCron(ctx context.Context, message any, receiver *address.Address, cronExpression string, opts ...ScheduleOption) error
 	// CancelSchedule cancels a previously scheduled message intended for delivery to a target actor (PID).
 	//
 	// It attempts to locate and cancel the scheduled task associated with the specified message reference.
@@ -763,7 +716,7 @@ type ActorSystem interface {
 	getReflection() *reflection
 	findRoutee(routeeName string) (*PID, bool)
 	isStopping() bool
-	getRemoting() remote.Remoting
+	getRemoting() remote.Client
 	getGrains() *xsync.Map[string, *grainPID]
 	recreateGrain(ctx context.Context, props *internalpb.Grain) error
 	decreaseActorsCounter()
@@ -806,7 +759,7 @@ type actorSystem struct {
 	// Specifies whether remoting is enabled.
 	// This allows to handle remote messaging
 	remotingEnabled atomic.Bool
-	remoting        remote.Remoting
+	remoting        remote.Client
 
 	// Specifies the remoting server
 	remoteServer *inet.ProtoServer // Proto TCP server
@@ -1403,30 +1356,6 @@ func (x *actorSystem) Schedule(_ context.Context, message any, pid *PID, interva
 	return x.scheduler.Schedule(message, pid, interval, opts...)
 }
 
-// RemoteSchedule schedules a recurring message to be sent to a remote actor at a specified interval.
-//
-// This method sends the given message repeatedly to the remote actor located at the specified address,
-// with each delivery occurring after the configured time interval.
-// Remoting must be enabled in the actor system for this functionality to work.
-//
-// Parameters:
-//   - ctx: The context for managing cancellation and deadlines.
-//   - message: The proto.Message to be delivered periodically.
-//   - to: The address.Address of the remote actor that will receive the message.
-//   - interval: The time duration between each message delivery.
-//   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
-//
-// Returns:
-//   - error: An error is returned if remoting is not enabled, the target address is invalid, or scheduling fails.
-//
-// Note:
-//   - Remoting must be enabled in the actor system for this method to function correctly.
-//   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the scheduled message.
-//   - If no reference is set, an automatic one will be generated internally, which may not be easily retrievable for later operations.
-func (x *actorSystem) RemoteSchedule(_ context.Context, message any, receiver *address.Address, interval time.Duration, opts ...ScheduleOption) error {
-	return x.scheduler.RemoteSchedule(message, receiver, interval, opts...)
-}
-
 // ScheduleOnce schedules a one-time delivery of a message to the specified actor (PID) after a given delay.
 //
 // The message will be sent exactly once to the target actor after the specified duration has elapsed.
@@ -1447,29 +1376,6 @@ func (x *actorSystem) RemoteSchedule(_ context.Context, message any, receiver *a
 //   - If no reference is set, an automatic one will be generated, which may not be easily retrievable.
 func (x *actorSystem) ScheduleOnce(_ context.Context, message any, pid *PID, interval time.Duration, opts ...ScheduleOption) error {
 	return x.scheduler.ScheduleOnce(message, pid, interval, opts...)
-}
-
-// RemoteScheduleOnce schedules a one-time delivery of a message to a remote actor after a specified delay.
-//
-// This method schedules a message to be sent to an actor located at a remote address once the given interval has elapsed.
-// It requires that remoting is enabled in the actor system configuration.
-//
-// Parameters:
-//   - ctx: The context for managing cancellation and deadlines.
-//   - message: The proto.Message to be delivered.
-//   - to: The address.Address of the remote actor that will receive the message.
-//   - delay: The time duration to wait before delivering the message.
-//   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
-//
-// Returns:
-//   - error: An error is returned if remoting is not enabled, the target address is invalid, or scheduling fails.
-//
-// Note:
-//   - Remoting must be enabled in the actor system for this function to work.
-//   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the message later.
-//   - If no reference is set, an automatic one will be generated internally, which may not be retrievable.
-func (x *actorSystem) RemoteScheduleOnce(_ context.Context, message any, receiver *address.Address, interval time.Duration, opts ...ScheduleOption) error {
-	return x.scheduler.RemoteScheduleOnce(message, receiver, interval, opts...)
 }
 
 // ScheduleWithCron schedules a message to be delivered to the specified actor (PID) using a cron expression.
@@ -1516,10 +1422,7 @@ func (x *actorSystem) ScheduleWithCron(_ context.Context, message any, pid *PID,
 //   - It's strongly recommended to set a unique reference ID using WithReference if you intend to cancel, pause, or resume the scheduled message.
 //   - If no reference is set, an automatic one will be generated internally and may not be easily retrievable.
 //   - The cron expression must conform to the scheduler’s supported format (usually 5 or 6 fields).
-func (x *actorSystem) RemoteScheduleWithCron(_ context.Context, message any, receiver *address.Address, cronExpression string, opts ...ScheduleOption) error {
-	return x.scheduler.RemoteScheduleWithCron(message, receiver, cronExpression, opts...)
-}
-
+//
 // CancelSchedule cancels a previously scheduled message intended for delivery to a target actor.
 //
 // It attempts to locate and cancel the scheduled task associated with the specified message reference.
@@ -1587,8 +1490,8 @@ func (x *actorSystem) Unsubscribe(subscriber eventstream.Subscriber) error {
 	return nil
 }
 
-// GetPartition returns the partition where a given actor is located
-func (x *actorSystem) GetPartition(actorName string) uint64 {
+// Partition returns the partition where a given actor is located
+func (x *actorSystem) Partition(actorName string) uint64 {
 	if x.InCluster() {
 		return x.cluster.GetPartition(actorName)
 	}
@@ -1683,7 +1586,10 @@ func (x *actorSystem) Name() string {
 
 // Actors returns the list of Actors that are alive on a given running node.
 // This does not account for the total number of actors in the cluster
-func (x *actorSystem) Actors() []*PID {
+// localActors returns the list of user actors that are alive on this node.
+// System actors (those with reserved names) are excluded.
+// This is an internal helper; use Actors for the full cluster-aware view.
+func (x *actorSystem) localActors() []*PID {
 	x.locker.RLock()
 	nodes := x.actors.nodes()
 	x.locker.RUnlock()
@@ -1700,19 +1606,21 @@ func (x *actorSystem) Actors() []*PID {
 	return actors
 }
 
-// ActorRefs retrieves a list of active actors, including both local actors
-// and, when cluster mode is enabled, actors across the cluster. Use this
-// method cautiously, as the scanning process may impact system performance.
-// If the cluster request fails, an error is returned.
-// The timeout parameter defines the maximum duration for cluster-based requests
-// before they are terminated.
-func (x *actorSystem) ActorRefs(ctx context.Context, timeout time.Duration) ([]ActorRef, error) {
-	pids := x.Actors()
-	actorRefs := make([]ActorRef, len(pids))
-	uniques := make(map[string]types.Unit)
-	for index, pid := range pids {
-		actorRefs[index] = pid.actorRef()
-		uniques[pid.Address().String()] = types.Unit{}
+// Actors retrieves all active actors visible to this node.
+// Local actors are returned as live PIDs. When cluster mode is enabled,
+// actors on peer nodes are returned as lightweight remote PIDs that carry
+// only the address and a remoting handle, routing all messaging through
+// the remoting layer. Use pid.IsLocal() / pid.IsRemote() to distinguish them.
+// The timeout bounds the cluster scan; it is ignored when not in cluster mode.
+// Use this method cautiously as the cluster scan may impact system performance.
+func (x *actorSystem) Actors(ctx context.Context, timeout time.Duration) ([]*PID, error) {
+	local := x.localActors()
+	pids := make([]*PID, len(local))
+	copy(pids, local)
+
+	seen := make(map[string]types.Unit, len(local))
+	for _, pid := range local {
+		seen[pid.Address().String()] = types.Unit{}
 	}
 
 	if x.InCluster() {
@@ -1722,14 +1630,18 @@ func (x *actorSystem) ActorRefs(ctx context.Context, timeout time.Duration) ([]A
 		}
 
 		for _, actor := range actors {
-			actorRef := toActorRef(actor)
-			if _, ok := uniques[actorRef.Address().String()]; !ok {
-				actorRefs = append(actorRefs, actorRef)
+			addr, err := address.Parse(actor.GetAddress())
+			if err != nil {
+				continue
+			}
+			if _, ok := seen[addr.String()]; !ok {
+				pids = append(pids, newRemotePID(addr, x.remoting))
+				seen[addr.String()] = types.Unit{}
 			}
 		}
 	}
 
-	return actorRefs, nil
+	return pids, nil
 }
 
 // PeerAddress returns the actor system address known in the cluster. That address is used by other nodesMap to communicate with the actor system.
@@ -1746,16 +1658,20 @@ func (x *actorSystem) PeersAddress() string {
 
 // ActorOf retrieves an existing actor within the local system or across the cluster if clustering is enabled.
 //
-// If the actor is found locally, its PID is returned. If the actor resides on a remote host, its address is returned.
-// If the actor is not found, an error of type "actor not found" is returned.
-func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *address.Address, pid *PID, err error) {
+// If the actor is found locally, its live PID is returned. If the actor resides on a remote node (cluster mode
+// enabled), a lightweight remote PID is returned; it carries only the actor's address and a remoting handle,
+// and routes all messaging operations through the remoting layer. If the actor is not found, an error of type
+// "actor not found" is returned.
+//
+// Use pid.IsLocal() / pid.IsRemote() to distinguish the two cases when location matters.
+func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (*PID, error) {
 	if !x.Running() {
-		return nil, nil, gerrors.ErrActorSystemNotStarted
+		return nil, gerrors.ErrActorSystemNotStarted
 	}
 
 	// user should not query system actors
 	if isSystemName(actorName) {
-		return nil, nil, gerrors.NewErrActorNotFound(actorName)
+		return nil, gerrors.NewErrActorNotFound(actorName)
 	}
 
 	// Fast path: local actor lookup uses only the tree's internal RWMutex.
@@ -1765,9 +1681,9 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *addr
 	if pidnode, ok := x.actors.nodeByName(actorName); ok {
 		pid := pidnode.value()
 		if pid.IsStopping() {
-			return nil, nil, gerrors.NewErrActorNotFound(actorName)
+			return nil, gerrors.NewErrActorNotFound(actorName)
 		}
-		return pid.address, pid, nil
+		return pid, nil
 	}
 
 	// Slow path: actor not found locally. Acquire the system lock for
@@ -1781,26 +1697,32 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (addr *addr
 			if errors.Is(err, cluster.ErrActorNotFound) {
 				x.logger.Warnf("Actor %s not found", actorName)
 				x.locker.RUnlock()
-				return nil, nil, gerrors.NewErrActorNotFound(actorName)
+				return nil, gerrors.NewErrActorNotFound(actorName)
 			}
 
 			x.locker.RUnlock()
-			return nil, nil, fmt.Errorf("failed to fetch remote actor=%s: %w", actorName, err)
+			return nil, fmt.Errorf("failed to fetch remote actor=%s: %w", actorName, err)
 		}
 
+		// Capture remoting before releasing the lock.
+		remoting := x.remoting
 		x.locker.RUnlock()
+
 		addr, err := address.Parse(actor.GetAddress())
-		return addr, nil, err
+		if err != nil {
+			return nil, err
+		}
+		return newRemotePID(addr, remoting), nil
 	}
 
 	if x.remotingEnabled.Load() {
 		x.locker.RUnlock()
-		return nil, nil, gerrors.ErrMethodCallNotAllowed
+		return nil, gerrors.ErrMethodCallNotAllowed
 	}
 
 	x.logger.Warnf("Actor %s not found", actorName)
 	x.locker.RUnlock()
-	return nil, nil, gerrors.NewErrActorNotFound(actorName)
+	return nil, gerrors.NewErrActorNotFound(actorName)
 }
 
 // ActorExists checks whether an actor with the given name exists in the system,
@@ -1828,67 +1750,6 @@ func (x *actorSystem) ActorExists(ctx context.Context, actorName string) (bool, 
 	}
 
 	return false, nil
-}
-
-// LocalActor returns the reference of a local actor.
-// A local actor is an actor that reside on the same node where the given actor system has started
-func (x *actorSystem) LocalActor(actorName string) (*PID, error) {
-	if !x.Running() {
-		return nil, gerrors.ErrActorSystemNotStarted
-	}
-
-	x.locker.RLock()
-	// user should not query system actors
-	if isSystemName(actorName) {
-		x.locker.RUnlock()
-		return nil, gerrors.NewErrActorNotFound(actorName)
-	}
-
-	if pidnode, ok := x.actors.nodeByName(actorName); ok {
-		pid := pidnode.value()
-		x.locker.RUnlock()
-		return pid, nil
-	}
-
-	x.logger.Warnf("Actor %s not found", actorName)
-	x.locker.RUnlock()
-	return nil, gerrors.NewErrActorNotFound(actorName)
-}
-
-// RemoteActor returns the address of a remote actor when cluster is enabled
-// When the cluster mode is not enabled an actor not found error will be returned
-// One can always check whether cluster is enabled before calling this method or just use the ActorOf method.
-func (x *actorSystem) RemoteActor(ctx context.Context, actorName string) (addr *address.Address, err error) {
-	if !x.Running() {
-		return nil, gerrors.ErrActorSystemNotStarted
-	}
-
-	x.locker.RLock()
-	// user should not query system actors
-	if isSystemName(actorName) {
-		x.locker.RUnlock()
-		return nil, gerrors.NewErrActorNotFound(actorName)
-	}
-
-	if x.cluster == nil {
-		x.locker.RUnlock()
-		return nil, gerrors.ErrClusterDisabled
-	}
-
-	actor, err := x.cluster.GetActor(ctx, actorName)
-	if err != nil {
-		if errors.Is(err, cluster.ErrActorNotFound) {
-			x.logger.Warnf("Actor %s not found", actorName)
-			x.locker.RUnlock()
-			return nil, gerrors.NewErrActorNotFound(actorName)
-		}
-
-		x.locker.RUnlock()
-		return nil, fmt.Errorf("failed to fetch remote actor=%s: %w", actorName, err)
-	}
-
-	x.locker.RUnlock()
-	return address.Parse(actor.GetAddress())
 }
 
 // TopicActor returns the topic actor, a system-managed actor responsible for handling
@@ -2151,7 +2012,7 @@ func (x *actorSystem) increaseActorsCounter() {
 // getRemoting returns the remoting instance of the actor system
 // This method is used internally to access the remoting functionality
 // and is not intended for external use.
-func (x *actorSystem) getRemoting() remote.Remoting {
+func (x *actorSystem) getRemoting() remote.Client {
 	x.locker.RLock()
 	remoting := x.remoting
 	x.locker.RUnlock()
@@ -2393,31 +2254,29 @@ func (x *actorSystem) cleanupStaleLocalActors(ctx context.Context) error {
 
 // setupRemoting sets the remoting service
 func (x *actorSystem) setupRemoting() error {
-	opts := []remote.RemotingOption{
-		remote.WithRemotingCompression(x.remoteConfig.Compression()),
+	opts := []remote.ClientOption{
+		remote.WithClientCompression(x.remoteConfig.Compression()),
 		// Register built-in serializers for native actor message types.
 		// These are internal and not visible to application code.
-		remote.WithRemotingSerializers(new(PoisonPill), &poisonPillSerializer{}),
+		remote.WithClientSerializers(new(PoisonPill), &poisonPillSerializer{}),
 	}
 
 	if propagator := x.remoteConfig.ContextPropagator(); propagator != nil {
-		opts = append(opts, remote.WithRemotingContextPropagator(propagator))
+		opts = append(opts, remote.WithClientContextPropagator(propagator))
 	}
 
 	if x.tlsInfo != nil {
-		opts = append(opts, remote.WithRemotingTLS(x.tlsInfo.ClientConfig))
+		opts = append(opts, remote.WithClientTLS(x.tlsInfo.ClientConfig))
 	}
 
-	x.remoting = remote.NewRemoting(opts...)
+	x.remoting = remote.NewClient(opts...)
 	return nil
 }
 
 // startMessagesScheduler starts the messages scheduler
 func (x *actorSystem) startMessagesScheduler(ctx context.Context) {
 	// set the scheduler
-	x.scheduler = newScheduler(x.logger,
-		x.shutdownTimeout,
-		withSchedulerRemoting(x.remoting))
+	x.scheduler = newScheduler(x.logger, x.shutdownTimeout, x)
 	// start the scheduler
 	x.scheduler.Start(ctx)
 }
@@ -2482,10 +2341,7 @@ func (x *actorSystem) shutdown(ctx context.Context) (err error) {
 		x.scheduler.Stop(ctx)
 	}
 
-	actorRefs := make([]ActorRef, 0, len(x.Actors()))
-	for _, actor := range x.Actors() {
-		actorRefs = append(actorRefs, actor.actorRef())
-	}
+	actorRefs := x.localActors()
 
 	// create a context with timeout to avoid blocking shutdown indefinitely
 	ctx, cancel := context.WithTimeout(ctx, x.shutdownTimeout)
@@ -2645,7 +2501,7 @@ func (x *actorSystem) replicateGrains() {
 // This is only called during cluster events like NodeLeft or NodeJoined
 // to ensure that all actors are properly synchronized across the cluster.
 func (x *actorSystem) resyncActors() error {
-	actors := x.Actors()
+	actors := x.localActors()
 	for _, actor := range actors {
 		if err := x.putActorOnCluster(actor); err != nil {
 			x.logger.Errorf("Failed to resync Actor (%s): %v", actor.Address().String(), err)
@@ -3110,16 +2966,21 @@ func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName str
 }
 
 // cleanupCluster cleans up the cluster
-func (x *actorSystem) cleanupCluster(ctx context.Context, actorRefs []ActorRef) error {
+func (x *actorSystem) cleanupCluster(ctx context.Context, pids []*PID) error {
 	eg, ctx := errgroup.WithContext(ctx)
 
-	// Remove singleton actors from the cluster
+	// Remove singleton actors from the cluster.
+	// We check pid.singletonSpec != nil rather than pid.IsSingleton() because
+	// pid.reset() clears singletonState during actor shutdown. By the time
+	// cleanupCluster runs the actors have already been stopped, so IsSingleton()
+	// would always return false and RemoveKind would never be called, leaving
+	// the kind registered in the cluster and blocking relocation on the new leader.
 	if x.cluster.IsLeader(ctx) {
-		for _, actorRef := range actorRefs {
-			if actorRef.IsSingleton() {
-				actorRef := actorRef
+		for _, pid := range pids {
+			if pid.singletonSpec != nil {
+				pid := pid
 				eg.Go(func() error {
-					kind := actorRef.Kind()
+					kind := pid.Kind()
 					if err := x.cluster.RemoveKind(ctx, kind); err != nil {
 						x.logger.Errorf("Failed to remove Kind (%s) from cluster: %v", kind, err)
 						return err
@@ -3132,10 +2993,10 @@ func (x *actorSystem) cleanupCluster(ctx context.Context, actorRefs []ActorRef) 
 	}
 
 	// Remove all actors from the cluster
-	for _, actorRef := range actorRefs {
-		actorRef := actorRef
+	for _, pid := range pids {
+		pid := pid
 		eg.Go(func() error {
-			actorName := actorRef.Name()
+			actorName := pid.Name()
 			if err := x.cluster.RemoveActor(ctx, actorName); err != nil {
 				x.logger.Errorf("Failed to Actor (%s) from cluster: %v", actorName, err)
 				return err
@@ -3183,7 +3044,7 @@ func (x *actorSystem) getSetDeadlettersCount(ctx context.Context) {
 	}
 }
 
-func (x *actorSystem) shutdownCluster(ctx context.Context, actors []ActorRef, peerState *internalpb.PeerState) error {
+func (x *actorSystem) shutdownCluster(ctx context.Context, actors []*PID, peerState *internalpb.PeerState) error {
 	if x.clusterEnabled.Load() {
 		if x.cluster != nil {
 			// Persist peer state to all cluster peers before leaving membership.
@@ -3382,7 +3243,7 @@ func (x *actorSystem) getLRUActors(threshold uint64, percentageToReturn int) []*
 		return nil
 	}
 
-	actors := x.Actors()
+	actors := x.localActors()
 	evictions := make([]*PID, len(actors))
 	copy(evictions, actors)
 
@@ -3409,7 +3270,7 @@ func (x *actorSystem) getLFUActors(threshold uint64, percentageToReturn int) []*
 		return nil
 	}
 
-	actors := x.Actors()
+	actors := x.localActors()
 	evictions := make([]*PID, len(actors))
 	copy(evictions, actors)
 
@@ -3436,7 +3297,7 @@ func (x *actorSystem) getMRUActors(threshold uint64, percentageToReturn int) []*
 		return nil
 	}
 
-	actors := x.Actors()
+	actors := x.localActors()
 	evictions := make([]*PID, len(actors))
 	copy(evictions, actors)
 
@@ -3520,7 +3381,7 @@ func (x *actorSystem) preShutdown() (*internalpb.PeerState, error) {
 		return nil, nil
 	}
 
-	actors := x.Actors()
+	actors := x.localActors()
 	grains := x.grains.Values()
 
 	wireActors := make(map[string]*internalpb.Actor, len(actors))
@@ -3590,16 +3451,16 @@ func (x *actorSystem) persistPeerStateToPeers(ctx context.Context, peerState *in
 	defer cancelRPCs()
 
 	// Create a custom remoting client for replication with compression enabled
-	remotingOpts := []remote.RemotingOption{
-		remote.WithRemotingCompression(x.remoteConfig.Compression()),
-		remote.WithRemotingContextPropagator(x.remoteConfig.ContextPropagator()),
+	remotingOpts := []remote.ClientOption{
+		remote.WithClientCompression(x.remoteConfig.Compression()),
+		remote.WithClientContextPropagator(x.remoteConfig.ContextPropagator()),
 	}
 
 	if x.tlsInfo != nil {
-		remotingOpts = append(remotingOpts, remote.WithRemotingTLS(x.tlsInfo.ClientConfig))
+		remotingOpts = append(remotingOpts, remote.WithClientTLS(x.tlsInfo.ClientConfig))
 	}
 
-	remoting := remote.NewRemoting(remotingOpts...)
+	remoting := remote.NewClient(remotingOpts...)
 	defer remoting.Close()
 
 	// Channel to collect results from all goroutines

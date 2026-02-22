@@ -33,23 +33,10 @@ import (
 	"github.com/reugn/go-quartz/quartz"
 	"go.uber.org/atomic"
 
-	"github.com/tochemey/goakt/v4/address"
 	"github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/xsync"
 	"github.com/tochemey/goakt/v4/log"
-	"github.com/tochemey/goakt/v4/remote"
 )
-
-// schedulerOption represents the scheduler option
-// to set custom settings
-type schedulerOption func(scheduler *scheduler)
-
-// withSchedulerRemoting sets the scheduler remoting
-func withSchedulerRemoting(remoting remote.Remoting) schedulerOption {
-	return func(scheduler *scheduler) {
-		scheduler.remoting = remoting
-	}
-}
 
 // scheduler defines the Go-Akt scheduler.
 // Its job is to help stack messages that will be delivered in the future to actors.
@@ -64,14 +51,15 @@ type scheduler struct {
 	logger log.Logger
 	// define the shutdown timeout
 	shutdownTimeout time.Duration
-	// remoting engine
-	remoting remote.Remoting
 	// specifies the job keys mapping
 	scheduledKeys *xsync.Map[string, *quartz.JobKey]
+	// actorSystem is needed to resolve NoSender() for remote-PID schedules,
+	// since remote PIDs carry no actor-system reference.
+	actorSystem ActorSystem
 }
 
 // newScheduler creates an instance of scheduler
-func newScheduler(logger log.Logger, shutdownTimeout time.Duration, opts ...schedulerOption) *scheduler {
+func newScheduler(logger log.Logger, shutdownTimeout time.Duration, system ActorSystem) *scheduler {
 	// create an instance of quartz scheduler with logger off
 	// Set a high OutdatedThreshold to prevent RunOnceTrigger jobs from being
 	// silently dropped when they become "outdated" (scheduled time passed).
@@ -93,11 +81,7 @@ func newScheduler(logger log.Logger, shutdownTimeout time.Duration, opts ...sche
 		logger:          logger,
 		shutdownTimeout: shutdownTimeout,
 		scheduledKeys:   xsync.NewMap[string, *quartz.JobKey](),
-	}
-
-	// set the custom options to override the default values
-	for _, opt := range opts {
-		opt(scheduler)
+		actorSystem:     system,
 	}
 
 	// return the instance of the scheduler
@@ -152,7 +136,7 @@ func (x *scheduler) Stop(ctx context.Context) {
 // Note:
 //   - It's strongly recommended to set a unique reference ID using WithReference if you intend to cancel, pause, or resume the message later.
 //   - If no reference is set, an automatic one will be generated, which may not be easily retrievable.
-func (x *scheduler) ScheduleOnce(message any, pid *PID, delay time.Duration, opts ...ScheduleOption) error {
+func (x *scheduler) ScheduleOnce(message any, to *PID, delay time.Duration, opts ...ScheduleOption) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
@@ -160,27 +144,18 @@ func (x *scheduler) ScheduleOnce(message any, pid *PID, delay time.Duration, opt
 		return errors.ErrSchedulerNotStarted
 	}
 
-	senderConfig := newScheduleConfig(opts...)
-	sender := senderConfig.Sender()
-	noSender := pid.ActorSystem().NoSender()
+	if to.IsRemote() && !to.remotingEnabled() {
+		return errors.ErrRemotingDisabled
+	}
 
-	job := job.NewFunctionJob(
-		func(ctx context.Context) (bool, error) {
-			var err error
-			if sender != nil && !sender.Equals(noSender) {
-				err = sender.Tell(ctx, pid, message)
-			} else {
-				err = Tell(ctx, pid, message)
-			}
-			return err == nil, err
-		},
-	)
+	senderConfig := newScheduleConfig(opts...)
+	jobFn := x.makeJobFn(to, message, senderConfig)
 
 	reference := senderConfig.Reference()
 	jobKey := quartz.NewJobKey(reference)
 	x.scheduledKeys.Set(reference, jobKey)
 
-	detail := quartz.NewJobDetail(job, jobKey)
+	detail := quartz.NewJobDetail(job.NewFunctionJob(jobFn), jobKey)
 	return x.quartzScheduler.ScheduleJob(detail, quartz.NewRunOnceTrigger(delay))
 }
 
@@ -202,7 +177,7 @@ func (x *scheduler) ScheduleOnce(message any, pid *PID, delay time.Duration, opt
 //   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the scheduled message.
 //   - If no reference is set, an automatic one will be generated internally, which may not be easily retrievable for later operations.
 //   - This function does not provide built-in delivery guarantees such as at-least-once or exactly-once semantics; ensure idempotency where needed.
-func (x *scheduler) Schedule(message any, pid *PID, interval time.Duration, opts ...ScheduleOption) error {
+func (x *scheduler) Schedule(message any, to *PID, interval time.Duration, opts ...ScheduleOption) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
@@ -210,27 +185,18 @@ func (x *scheduler) Schedule(message any, pid *PID, interval time.Duration, opts
 		return errors.ErrSchedulerNotStarted
 	}
 
-	senderConfig := newScheduleConfig(opts...)
-	sender := senderConfig.Sender()
-	noSender := pid.ActorSystem().NoSender()
+	if to.IsRemote() && !to.remotingEnabled() {
+		return errors.ErrRemotingDisabled
+	}
 
-	job := job.NewFunctionJob(
-		func(ctx context.Context) (bool, error) {
-			var err error
-			if sender != nil && !sender.Equals(noSender) {
-				err = sender.Tell(ctx, pid, message)
-			} else {
-				err = Tell(ctx, pid, message)
-			}
-			return err == nil, err
-		},
-	)
+	senderConfig := newScheduleConfig(opts...)
+	jobFn := x.makeJobFn(to, message, senderConfig)
 
 	reference := senderConfig.Reference()
 	jobKey := quartz.NewJobKey(reference)
 	x.scheduledKeys.Set(reference, jobKey)
 
-	detail := quartz.NewJobDetail(job, jobKey)
+	detail := quartz.NewJobDetail(job.NewFunctionJob(jobFn), jobKey)
 	return x.quartzScheduler.ScheduleJob(detail, quartz.NewSimpleTrigger(interval))
 }
 
@@ -252,63 +218,7 @@ func (x *scheduler) Schedule(message any, pid *PID, interval time.Duration, opts
 //   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the scheduled message.
 //   - If no reference is set, an automatic one will be generated internally, which may not be easily retrievable for future operations.
 //   - The cron expression must follow the format supported by the scheduler (typically 6 or 5 fields depending on implementation).
-func (x *scheduler) ScheduleWithCron(message any, pid *PID, cronExpression string, opts ...ScheduleOption) error {
-	x.mu.Lock()
-	defer x.mu.Unlock()
-	if !x.started.Load() {
-		return errors.ErrSchedulerNotStarted
-	}
-
-	senderConfig := newScheduleConfig(opts...)
-	sender := senderConfig.Sender()
-	noSender := pid.ActorSystem().NoSender()
-
-	job := job.NewFunctionJob(
-		func(ctx context.Context) (bool, error) {
-			var err error
-			if sender != nil && !sender.Equals(noSender) {
-				err = sender.Tell(ctx, pid, message)
-			} else {
-				err = Tell(ctx, pid, message)
-			}
-			return err == nil, err
-		},
-	)
-
-	reference := senderConfig.Reference()
-	jobKey := quartz.NewJobKey(reference)
-	x.scheduledKeys.Set(reference, jobKey)
-
-	detail := quartz.NewJobDetail(job, jobKey)
-	location := time.Now().Location()
-	trigger, err := quartz.NewCronTriggerWithLoc(cronExpression, location)
-	if err != nil {
-		x.logger.Error(fmt.Errorf("failed to schedule message: %w", err))
-		return err
-	}
-
-	return x.quartzScheduler.ScheduleJob(detail, trigger)
-}
-
-// RemoteScheduleOnce schedules a one-time delivery of a message to a remote actor after a specified delay.
-//
-// This method schedules a message to be sent to an actor located at a remote address once the given interval has elapsed.
-// It requires that remoting is enabled in the actor system configuration.
-//
-// Parameters:
-//   - message: The proto.Message to be delivered.
-//   - to: The address.Address of the remote actor that will receive the message.
-//   - delay: The time duration to wait before delivering the message.
-//   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
-//
-// Returns:
-//   - error: An error is returned if remoting is not enabled, the target address is invalid, or scheduling fails.
-//
-// Note:
-//   - Remoting must be enabled in the actor system for this function to work.
-//   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the message later.
-//   - If no reference is set, an automatic one will be generated internally, which may not be easily retrievable.
-func (x *scheduler) RemoteScheduleOnce(message any, to *address.Address, delay time.Duration, opts ...ScheduleOption) error {
+func (x *scheduler) ScheduleWithCron(message any, to *PID, cronExpression string, opts ...ScheduleOption) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
@@ -316,124 +226,18 @@ func (x *scheduler) RemoteScheduleOnce(message any, to *address.Address, delay t
 		return errors.ErrSchedulerNotStarted
 	}
 
-	if x.remoting == nil {
+	if to.IsRemote() && !to.remotingEnabled() {
 		return errors.ErrRemotingDisabled
 	}
 
 	senderConfig := newScheduleConfig(opts...)
-	from := senderConfig.SenderAddr()
-	job := job.NewFunctionJob(
-		func(ctx context.Context) (bool, error) {
-			err := x.remoting.RemoteTell(ctx, from, to, message)
-			return err == nil, err
-		},
-	)
+	jobFn := x.makeJobFn(to, message, senderConfig)
 
 	reference := senderConfig.Reference()
 	jobKey := quartz.NewJobKey(reference)
 	x.scheduledKeys.Set(reference, jobKey)
 
-	detail := quartz.NewJobDetail(job, jobKey)
-	// schedule the job
-	return x.quartzScheduler.ScheduleJob(detail, quartz.NewRunOnceTrigger(delay))
-}
-
-// RemoteSchedule schedules a recurring message to be sent to a remote actor at a specified interval.
-//
-// This method sends the given message repeatedly to the remote actor located at the specified address,
-// with each delivery occurring after the configured time interval.
-// Remoting must be enabled in the actor system for this functionality to work.
-//
-// Parameters:
-//   - message: The proto.Message to be delivered periodically.
-//   - to: The address.Address of the remote actor that will receive the message.
-//   - interval: The time duration between each message delivery.
-//   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
-//
-// Returns:
-//   - error: An error is returned if remoting is not enabled, the target address is invalid, or scheduling fails.
-//
-// Note:
-//   - Remoting must be enabled in the actor system for this method to function correctly.
-//   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the scheduled message.
-//   - If no reference is set, an automatic one will be generated internally, which may not be easily retrievable for later operations.
-func (x *scheduler) RemoteSchedule(message any, to *address.Address, interval time.Duration, opts ...ScheduleOption) error {
-	x.mu.Lock()
-	defer x.mu.Unlock()
-
-	if !x.started.Load() {
-		return errors.ErrSchedulerNotStarted
-	}
-
-	if x.remoting == nil {
-		return errors.ErrRemotingDisabled
-	}
-
-	senderConfig := newScheduleConfig(opts...)
-	from := senderConfig.SenderAddr()
-	job := job.NewFunctionJob(
-		func(ctx context.Context) (bool, error) {
-			err := x.remoting.RemoteTell(ctx, from, to, message)
-			return err == nil, err
-		},
-	)
-
-	reference := senderConfig.Reference()
-	jobKey := quartz.NewJobKey(reference)
-	x.scheduledKeys.Set(reference, jobKey)
-
-	detail := quartz.NewJobDetail(job, jobKey)
-	// schedule the job
-	return x.quartzScheduler.ScheduleJob(detail, quartz.NewSimpleTrigger(interval))
-}
-
-// RemoteScheduleWithCron schedules a message to be sent to a remote actor according to a cron expression.
-//
-// This method allows scheduling messages to remote actors using flexible cron-based timing,
-// enabling complex recurring schedules for message delivery.
-// Remoting must be enabled in the actor system for this method to work.
-//
-// Parameters:
-//   - message: The proto.Message to be delivered according to the cron schedule.
-//   - to: The address.Address of the remote actor that will receive the message.
-//   - cronExpression: A standard cron-formatted string defining the schedule (e.g., "0 0 * * *").
-//   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
-//
-// Returns:
-//   - error: An error is returned if the cron expression is invalid, remoting is disabled, or scheduling fails.
-//
-// Note:
-//   - Remoting must be enabled in the actor system for this functionality.
-//   - It's strongly recommended to set a unique reference ID using WithReference if you intend to cancel, pause, or resume the scheduled message.
-//   - If no reference is set, an automatic one will be generated internally and may not be easily retrievable.
-//   - The cron expression must conform to the scheduler’s supported format (usually 5 or 6 fields).
-func (x *scheduler) RemoteScheduleWithCron(message any, to *address.Address, cronExpression string, opts ...ScheduleOption) error {
-	x.mu.Lock()
-	defer x.mu.Unlock()
-
-	if !x.started.Load() {
-		return errors.ErrSchedulerNotStarted
-	}
-
-	if x.remoting == nil {
-		return errors.ErrRemotingDisabled
-	}
-
-	senderConfig := newScheduleConfig(opts...)
-	from := senderConfig.SenderAddr()
-	job := job.NewFunctionJob(
-		func(ctx context.Context) (bool, error) {
-			err := x.remoting.RemoteTell(ctx, from, to, message)
-			return err == nil, err
-		},
-	)
-
-	reference := senderConfig.Reference()
-	jobKey := quartz.NewJobKey(reference)
-	x.scheduledKeys.Set(reference, jobKey)
-
-	detail := quartz.NewJobDetail(job, jobKey)
-
+	detail := quartz.NewJobDetail(job.NewFunctionJob(jobFn), jobKey)
 	location := time.Now().Location()
 	trigger, err := quartz.NewCronTriggerWithLoc(cronExpression, location)
 	if err != nil {
@@ -522,4 +326,20 @@ func (x *scheduler) ResumeSchedule(reference string) error {
 	}
 
 	return x.quartzScheduler.ResumeJob(jobKey)
+}
+
+// makeJobFn returns the job function for a scheduled delivery.
+// PID.Tell is already location-transparent (local and remote), so no IsRemote check is needed here.
+// The scheduler holds its own actorSystem reference so that NoSender() can be resolved even
+// when `to` is a remote PID (remote PIDs carry no ActorSystem reference).
+func (x *scheduler) makeJobFn(to *PID, message any, cfg *scheduleConfig) func(ctx context.Context) (bool, error) {
+	noSender := x.actorSystem.NoSender()
+	sender := cfg.Sender()
+	if sender == nil || sender.Equals(noSender) {
+		sender = noSender
+	}
+	return func(ctx context.Context) (bool, error) {
+		err := sender.Tell(ctx, to, message)
+		return err == nil, err
+	}
 }

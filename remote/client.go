@@ -49,9 +49,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/xsync"
 )
 
-const DefaultMaxReadFrameSize = 16 * 1024 * 1024 // 16 MiB
-
-// Remoting provides the client-side API surface to interact with actors running
+// Client provides the client-side API surface to interact with actors running
 // on remote nodes of a Go-Akt cluster. It encapsulates transport configuration
 // (TCP/TLS), payload compression, and TCP client construction, and
 // offers convenience methods for one-way messaging, request/response, batched
@@ -59,7 +57,7 @@ const DefaultMaxReadFrameSize = 16 * 1024 * 1024 // 16 MiB
 //
 // General semantics:
 //
-//   - Transport: Remoting is implemented on top of a custom proto-based TCP protocol.
+//   - Transport: Client is implemented on top of a custom proto-based TCP protocol.
 //     TLS can be enabled via WithRemotingTLS. The configured MaxReadFrameSize applies
 //     to both read and send limits for all RPCs.
 //   - Payloads: Messages are serialized as google.protobuf.Any. The caller is
@@ -79,9 +77,9 @@ const DefaultMaxReadFrameSize = 16 * 1024 * 1024 // 16 MiB
 //     efficiency. Partial responses are possible for ask-style batching; callers
 //     should attach their own correlation identifiers when needed.
 //
-// Use NewRemoting to construct an instance. Call Close to release underlying
+// Use NewClient to construct an instance. Call Close to release underlying
 // resources (e.g., idle TCP connections).
-type Remoting interface {
+type Client interface {
 	// RemoteTell sends a one-way (fire-and-forget) message to a remote actor.
 	//
 	// Parameters:
@@ -338,10 +336,10 @@ type Remoting interface {
 	Serializer(msg any) Serializer
 }
 
-// RemotingOption configures a remoting client instance during construction.
-type RemotingOption func(*remoting)
+// ClientOption configures a remoting client instance during construction.
+type ClientOption func(*client)
 
-// WithRemotingTLS configures the remoting system to use a secure connection
+// WithClientTLS configures the remoting system to use a secure connection
 // for communication with the specified remote node. This requires a TLS
 // client configuration to enable secure interactions with the remote actor system.
 //
@@ -349,55 +347,55 @@ type RemotingOption func(*remoting)
 // capable of completing a successful handshake. It is recommended that both
 // systems share the same root Certificate Authority (CA) for mutual trust and
 // secure communication.
-func WithRemotingTLS(tlsConfig *tls.Config) RemotingOption {
-	return func(r *remoting) {
+func WithClientTLS(tlsConfig *tls.Config) ClientOption {
+	return func(r *client) {
 		r.tlsConfig = tlsConfig
 	}
 }
 
-// WithRemotingMaxIdleConns sets the connection pool size per remote endpoint.
+// WithClientMaxIdleConns sets the connection pool size per remote endpoint.
 // Higher values improve throughput under high concurrency at the cost of more
 // file descriptors. Default: 8 connections per endpoint.
-func WithRemotingMaxIdleConns(n int) RemotingOption {
-	return func(r *remoting) {
+func WithClientMaxIdleConns(n int) ClientOption {
+	return func(r *client) {
 		if n > 0 {
 			r.maxIdleConns = n
 		}
 	}
 }
 
-// WithRemotingIdleTimeout sets how long pooled connections remain idle before
+// WithClientIdleTimeout sets how long pooled connections remain idle before
 // eviction. Longer timeouts improve connection reuse but consume more resources.
 // Default: 30 seconds.
-func WithRemotingIdleTimeout(d time.Duration) RemotingOption {
-	return func(r *remoting) {
+func WithClientIdleTimeout(d time.Duration) ClientOption {
+	return func(r *client) {
 		if d > 0 {
 			r.idleTimeout = d
 		}
 	}
 }
 
-// WithRemotingDialTimeout sets the timeout for establishing new TCP connections.
+// WithClientDialTimeout sets the timeout for establishing new TCP connections.
 // Default: 5 seconds.
-func WithRemotingDialTimeout(d time.Duration) RemotingOption {
-	return func(r *remoting) {
+func WithClientDialTimeout(d time.Duration) ClientOption {
+	return func(r *client) {
 		if d > 0 {
 			r.dialTimeout = d
 		}
 	}
 }
 
-// WithRemotingKeepAlive sets the TCP keep-alive interval for idle connections.
+// WithClientKeepAlive sets the TCP keep-alive interval for idle connections.
 // This helps detect broken connections earlier. Default: 15 seconds.
-func WithRemotingKeepAlive(d time.Duration) RemotingOption {
-	return func(r *remoting) {
+func WithClientKeepAlive(d time.Duration) ClientOption {
+	return func(r *client) {
 		if d > 0 {
 			r.keepAlive = d
 		}
 	}
 }
 
-// WithRemotingCompression sets the compression algorithm applied to payloads
+// WithClientCompression sets the compression algorithm applied to payloads
 // exchanged with remote actor systems. The provided Compression must be one of
 // the supported options for remoting traffic.
 //
@@ -410,48 +408,48 @@ func WithRemotingKeepAlive(d time.Duration) RemotingOption {
 //     or for debugging purposes.
 //
 // If not specified, ZstdCompression is used by default for optimal performance.
-func WithRemotingCompression(c Compression) RemotingOption {
-	return func(r *remoting) {
+func WithClientCompression(c Compression) ClientOption {
+	return func(r *client) {
 		r.compression = c
 	}
 }
 
-// WithRemotingContextPropagator sets a propagator used to inject context values into outbound remoting calls.
+// WithClientContextPropagator sets a propagator used to inject context values into outbound remoting calls.
 // If nil, no propagation occurs.
-func WithRemotingContextPropagator(propagator ContextPropagator) RemotingOption {
-	return func(r *remoting) {
+func WithClientContextPropagator(propagator ContextPropagator) ClientOption {
+	return func(r *client) {
 		if propagator != nil {
 			r.contextPropagator = propagator
 		}
 	}
 }
 
-// WithRemotingSerializers registers a [Serializer] for a specific message type
+// WithClientSerializers registers a [Serializer] for a specific message type
 // or for all messages that satisfy a given interface.
 //
 // # Concrete type registration
 //
 // Pass any value of the target type to bind a serializer to that exact type:
 //
-//	WithRemotingSerializers(new(MyMessage), mySerializer)
+//	WithClientSerializers(new(MyMessage), mySerializer)
 //
 // # Interface registration
 //
 // Pass a typed nil pointer to an interface to bind a serializer to every
 // message that implements that interface:
 //
-//	WithRemotingSerializers((*proto.Message)(nil), remote.NewProtoSerializer())
+//	WithClientSerializers((*proto.Message)(nil), remote.NewProtoSerializer())
 //
 // # Dispatch order
 //
-// When [Remoting] serializes a message it checks, in order:
+// When [Client] serializes a message it checks, in order:
 //  1. Exact concrete type — the entry registered with the message's dynamic type.
 //  2. Interface match — the first registered interface the message implements.
 //  3. Default — the [Serializer] configured via [WithRemotingSerializer].
 //
 // If serializer is nil the option is silently ignored.
-func WithRemotingSerializers(msg any, serializer Serializer) RemotingOption {
-	return func(r *remoting) {
+func WithClientSerializers(msg any, serializer Serializer) ClientOption {
+	return func(r *client) {
 		if serializer == nil {
 			return
 		}
@@ -476,17 +474,17 @@ func WithRemotingSerializers(msg any, serializer Serializer) RemotingOption {
 
 // ifaceEntry pairs a reflect.Type that represents an interface with the
 // [Serializer] to use for any message that implements that interface.
-// Entries are appended via [WithRemotingSerializers] and evaluated in
+// Entries are appended via [WithClientSerializers] and evaluated in
 // registration order inside [remoting.resolveSerializer].
 type ifaceEntry struct {
 	iface      reflect.Type
 	serializer Serializer
 }
 
-// remoting is the default Remoting implementation backed by proto TCP
+// client is the default Remoting implementation backed by proto TCP
 // clients. It encapsulates transport setup, compression, connection pooling,
 // and TLS configuration required to reach remote actor systems.
-type remoting struct {
+type client struct {
 	// Client configuration
 	tlsConfig         *tls.Config
 	compression       Compression
@@ -528,9 +526,9 @@ type remoting struct {
 	dispatcher Serializer
 }
 
-var _ Remoting = (*remoting)(nil)
+var _ Client = (*client)(nil)
 
-// NewRemoting constructs a Remoting client configured with the supplied
+// NewClient constructs a Remoting client configured with the supplied
 // options. By default, the returned client uses an insecure TCP transport with
 // connection pooling (8 connections per endpoint) and Zstd compression.
 // Custom options may enable TLS, adjust pool sizes, or change compression.
@@ -543,8 +541,8 @@ var _ Remoting = (*remoting)(nil)
 //   - Zstd compression (matches server default in remote.Config)
 //
 // Call Close when the client is no longer needed to avoid leaking TCP connections.
-func NewRemoting(opts ...RemotingOption) Remoting {
-	r := &remoting{
+func NewClient(opts ...ClientOption) Client {
+	r := &client{
 		// Performance defaults based on benchmarks
 		maxIdleConns: 8,                // 8 pooled connections per endpoint
 		idleTimeout:  30 * time.Second, // 30s before eviction
@@ -585,7 +583,7 @@ func NewRemoting(opts ...RemotingOption) Remoting {
 // callers — it lives for the lifetime of the Remoting instance.
 //
 // This method is thread-safe and uses double-checked locking for initialization.
-func (r *remoting) NetClient(host string, port int) *inet.Client {
+func (r *client) NetClient(host string, port int) *inet.Client {
 	cacheKey := net.JoinHostPort(host, strconv.Itoa(port))
 
 	// Fast path: return cached client (lock-free read)
@@ -622,7 +620,7 @@ func (r *remoting) NetClient(host string, port int) *inet.Client {
 //   - Server-side failures surfaced as proto errors (e.g., Unavailable, DeadlineExceeded).
 //
 // Note: The grain kind must be registered on the remote actor system using RegisterGrainKind.
-func (r *remoting) RemoteActivateGrain(ctx context.Context, host string, port int, grainRequest *GrainRequest) error {
+func (r *client) RemoteActivateGrain(ctx context.Context, host string, port int, grainRequest *GrainRequest) error {
 	grain, err := getGrainFromRequest(host, port, grainRequest)
 	if err != nil {
 		return err
@@ -666,7 +664,7 @@ func (r *remoting) RemoteActivateGrain(ctx context.Context, host string, port in
 //   - Transport and context errors.
 //
 // Note: The grain must already be activated, or the grain kind must be registered on the remote actor system using RegisterGrainKind.
-func (r *remoting) RemoteAskGrain(ctx context.Context, host string, port int, grainRequest *GrainRequest, message any, timeout time.Duration) (response any, err error) {
+func (r *client) RemoteAskGrain(ctx context.Context, host string, port int, grainRequest *GrainRequest, message any, timeout time.Duration) (response any, err error) {
 	grain, err := getGrainFromRequest(host, port, grainRequest)
 	if err != nil {
 		return nil, err
@@ -734,7 +732,7 @@ func (r *remoting) RemoteAskGrain(ctx context.Context, host string, port int, gr
 //   - Transport and context errors.
 //
 // Note: The grain must already be activated, or the grain kind must be registered on the remote actor system using RegisterGrainKind.
-func (r *remoting) RemoteTellGrain(ctx context.Context, host string, port int, grainRequest *GrainRequest, message any) error {
+func (r *client) RemoteTellGrain(ctx context.Context, host string, port int, grainRequest *GrainRequest, message any) error {
 	grain, err := getGrainFromRequest(host, port, grainRequest)
 	if err != nil {
 		return err
@@ -781,7 +779,7 @@ func (r *remoting) RemoteTellGrain(ctx context.Context, host string, port int, g
 //     RPC completed, not that the actor processed the message.
 //   - Context cancellation and client/server frame limits are enforced.
 //   - Packing failures return gerrors.NewErrInvalidMessage.
-func (r *remoting) RemoteTell(ctx context.Context, from, to *address.Address, message any) error {
+func (r *client) RemoteTell(ctx context.Context, from, to *address.Address, message any) error {
 	serializer := r.resolveSerializer(message)
 	if serializer == nil {
 		return gerrors.NewErrInvalidMessage(fmt.Errorf("no serializer found for message type %T", message))
@@ -826,7 +824,7 @@ func (r *remoting) RemoteTell(ctx context.Context, from, to *address.Address, me
 //   - If multiple responses are produced, the first one is returned.
 //   - A zero timeout defers to server policy; ctx still governs cancellation.
 //   - Errors may include NotFound, DeadlineExceeded, Unavailable, etc.
-func (r *remoting) RemoteAsk(ctx context.Context, from, to *address.Address, message any, timeout time.Duration) (response any, err error) {
+func (r *client) RemoteAsk(ctx context.Context, from, to *address.Address, message any, timeout time.Duration) (response any, err error) {
 	serializer := r.resolveSerializer(message)
 	if serializer == nil {
 		return nil, gerrors.NewErrInvalidMessage(fmt.Errorf("no serializer found for message type %T", message))
@@ -886,7 +884,7 @@ func (r *remoting) RemoteAsk(ctx context.Context, from, to *address.Address, mes
 // NoSender address is returned when the target actor cannot be found.
 //
 // Errors are returned for transport problems or other server-side failures.
-func (r *remoting) RemoteLookup(ctx context.Context, host string, port int, name string) (addr *address.Address, err error) {
+func (r *client) RemoteLookup(ctx context.Context, host string, port int, name string) (addr *address.Address, err error) {
 	port32, err := strconvx.Int2Int32(port)
 	if err != nil {
 		return nil, err
@@ -933,7 +931,7 @@ func (r *remoting) RemoteLookup(ctx context.Context, host string, port int, name
 //
 // The call succeeds or fails as a whole at the transport layer; no per-message
 // acknowledgement is returned.
-func (r *remoting) RemoteBatchTell(ctx context.Context, from, to *address.Address, messages []any) error {
+func (r *client) RemoteBatchTell(ctx context.Context, from, to *address.Address, messages []any) error {
 	remoteMessages := make([]*internalpb.RemoteMessage, 0, len(messages))
 	// Pre-compute address strings once; they are constant across the whole batch.
 	fromStr := from.String()
@@ -984,7 +982,7 @@ func (r *remoting) RemoteBatchTell(ctx context.Context, from, to *address.Addres
 //
 // The number and order of responses may not match the requests. If correlation
 // is required, include a correlation ID within your message payloads.
-func (r *remoting) RemoteBatchAsk(ctx context.Context, from, to *address.Address, messages []any, timeout time.Duration) (responses []any, err error) {
+func (r *client) RemoteBatchAsk(ctx context.Context, from, to *address.Address, messages []any, timeout time.Duration) (responses []any, err error) {
 	remoteMessages := make([]*internalpb.RemoteMessage, 0, len(messages))
 	serializers := make([]Serializer, 0, len(messages))
 	// Pre-compute address strings once; they are constant across the whole batch.
@@ -1058,7 +1056,7 @@ func (r *remoting) RemoteBatchAsk(ctx context.Context, from, to *address.Address
 //
 // Returns ErrTypeNotRegistered if the remote node does not recognize the actor
 // type (kind). Other failures may include name conflicts or transport errors.
-func (r *remoting) RemoteSpawn(ctx context.Context, host string, port int, spawnRequest *SpawnRequest) error {
+func (r *client) RemoteSpawn(ctx context.Context, host string, port int, spawnRequest *SpawnRequest) error {
 	if err := spawnRequest.Validate(); err != nil {
 		return fmt.Errorf("invalid spawn option: %w", err)
 	}
@@ -1129,7 +1127,7 @@ func (r *remoting) RemoteSpawn(ctx context.Context, host string, port int, spawn
 }
 
 // RemoteReSpawn requests a restart of an existing actor on the remote node.
-func (r *remoting) RemoteReSpawn(ctx context.Context, host string, port int, name string) error {
+func (r *client) RemoteReSpawn(ctx context.Context, host string, port int, name string) error {
 	port32, err := strconvx.Int2Int32(port)
 	if err != nil {
 		return err
@@ -1167,7 +1165,7 @@ func (r *remoting) RemoteReSpawn(ctx context.Context, host string, port int, nam
 
 // RemoteStop terminates the specified actor on the remote node. Missing actors
 // are ignored and return nil.
-func (r *remoting) RemoteStop(ctx context.Context, host string, port int, name string) error {
+func (r *client) RemoteStop(ctx context.Context, host string, port int, name string) error {
 	port32, err := strconvx.Int2Int32(port)
 	if err != nil {
 		return err
@@ -1205,7 +1203,7 @@ func (r *remoting) RemoteStop(ctx context.Context, host string, port int, name s
 
 // RemoteReinstate reactivates a previously passivated actor on the remote node.
 // Missing actors are treated as a no-op and return nil.
-func (r *remoting) RemoteReinstate(ctx context.Context, host string, port int, name string) error {
+func (r *client) RemoteReinstate(ctx context.Context, host string, port int, name string) error {
 	port32, err := strconvx.Int2Int32(port)
 	if err != nil {
 		return err
@@ -1246,7 +1244,7 @@ func (r *remoting) RemoteReinstate(ctx context.Context, host string, port int, n
 // use context cancellation to stop ongoing operations.
 //
 // After calling Close, the client should not be used for new requests.
-func (r *remoting) Close() {
+func (r *client) Close() {
 	// Close all pooled clients to release TCP connections and file descriptors
 	r.clientCache.Range(func(_ string, client *inet.Client) {
 		client.Close()
@@ -1259,20 +1257,20 @@ func (r *remoting) Close() {
 // Compression returns the compression algorithm configured on the remoting
 // client. It determines the encodings offered for responses and, where
 // supported, the encoding used for outbound requests.
-func (r *remoting) Compression() Compression {
+func (r *client) Compression() Compression {
 	return r.compression
 }
 
 // TLSConfig returns the TLS configuration used by this client, if any. A
 // nil return value indicates that the client is using an insecure transport.
-func (r *remoting) TLSConfig() *tls.Config {
+func (r *client) TLSConfig() *tls.Config {
 	return r.tlsConfig
 }
 
-// Serializer implements [Remoting]. Pass nil to get the composite
+// Serializer implements [Client]. Pass nil to get the composite
 // dispatching serializer for the receive path, or pass the outgoing message
 // to get the most-specific serializer registered for its dynamic type.
-func (r *remoting) Serializer(msg any) Serializer {
+func (r *client) Serializer(msg any) Serializer {
 	return r.resolveSerializer(msg)
 }
 
@@ -1286,9 +1284,9 @@ func (r *remoting) Serializer(msg any) Serializer {
 // type matches the message's dynamic type wins (exact concrete type, then
 // interface match). If no entry matches, nil is returned.
 //
-// The slice r.serializers is immutable after [NewRemoting] returns, so no
+// The slice r.serializers is immutable after [NewClient] returns, so no
 // lock is needed.
-func (r *remoting) resolveSerializer(message any) Serializer {
+func (r *client) resolveSerializer(message any) Serializer {
 	msgType := reflect.TypeOf(message)
 	if msgType == nil {
 		return r.dispatcher
@@ -1308,7 +1306,7 @@ func (r *remoting) resolveSerializer(message any) Serializer {
 
 // newNetClient creates a new net client with connection pooling.
 // This is the default factory used by NetClient.
-func (r *remoting) newNetClient(host string, port int) *inet.Client {
+func (r *client) newNetClient(host string, port int) *inet.Client {
 	addr := net.JoinHostPort(host, strconv.Itoa(port))
 
 	opts := []inet.ClientOption{
@@ -1347,7 +1345,7 @@ func (r *remoting) newNetClient(host string, port int) *inet.Client {
 
 // enrichContext adds metadata to context if propagator is configured.
 // This is called once per request and reuses the same context object.
-func (r *remoting) enrichContext(ctx context.Context) (context.Context, error) {
+func (r *client) enrichContext(ctx context.Context) (context.Context, error) {
 	// Create proto metadata
 	md := inet.NewMetadata()
 

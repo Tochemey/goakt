@@ -179,6 +179,11 @@ var (
 	// ErrShutdownForbidden is returned when an attempt is made to shutdown a system actor while the actor system is running.
 	ErrShutdownForbidden = errors.New("shutdown forbidden for this actor")
 
+	// ErrNotLocal is returned when a lifecycle or tree-navigation operation is called on a remote PID.
+	// These operations require a live local actor mailbox and actor-system reference, which remote
+	// PIDs do not carry. Use pid.IsLocal() to guard before calling such methods.
+	ErrNotLocal = errors.New("operation requires a local actor PID")
+
 	// ErrInvalidRouterPoolSize is returned when a router is configured with a pool size less than or equal to zero.
 	ErrInvalidRouterPoolSize = errors.New("invalid router pool size, must be greater than zero")
 

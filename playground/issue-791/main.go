@@ -55,11 +55,18 @@ func main() {
 
 	// system 2 should be able to retrieve the remote actor from system 1
 	fmt.Println("\nRetrieving remote actor from system 1...")
-	if _, err := sys2.RemoteActor(ctx, "actor1"); err != nil {
+	pid, err := sys2.ActorOf(ctx, "actor1")
+	if err != nil {
 		fmt.Printf("Error retrieving remote actor: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Println("Remote actor retrieved successfully.")
+
+	if pid.IsRemote() {
+		fmt.Println("Remote actor retrieved successfully.")
+	} else {
+		fmt.Println("Local actor retrieved successfully. This should not happen.")
+		os.Exit(1)
+	}
 
 	// stopping system 1 should relocate the actor to system 2
 	stopActorSystem(ctx, sys1)
@@ -69,11 +76,18 @@ func main() {
 
 	// system 2 should now be able to retrieve the local actor - but it fails to do so
 	fmt.Println("\nRetrieving local actor from system 2...")
-	if _, err := sys2.LocalActor("actor1"); err != nil {
+	pid, err = sys2.ActorOf(ctx, "actor1")
+	if err != nil {
 		fmt.Printf("Error retrieving local actor: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Println("Local actor retrieved successfully.")
+
+	if pid.IsLocal() {
+		fmt.Println("Local actor retrieved successfully.")
+	} else {
+		fmt.Println("Remote actor retrieved successfully. This should not happen.")
+		os.Exit(1)
+	}
 
 	stopActorSystem(ctx, sys2)
 }

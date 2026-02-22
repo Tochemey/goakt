@@ -32,7 +32,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tochemey/goakt/v4/actor"
-	"github.com/tochemey/goakt/v4/address"
 	"github.com/tochemey/goakt/v4/internal/timer"
 )
 
@@ -117,15 +116,9 @@ type Probe interface {
 	//   - Should not be used in production code as it couples testing and actor system internals.
 	SendSync(actorName string, message any, timeout time.Duration)
 
-	// Sender returns the PID (Process Identifier) of the sender of the last received message.
-	// This is useful when testing interactions involving message origins.
-	// When running the multi-node test, this will return a nil PID if the message was sent from a remote actor.
-	// In that case the remote sender can be retrieved using the SenderAddress() method.
+	// Sender returns the PID of the sender of the last received message.
+	// For remote senders, use pid.IsRemote() / pid.Address() on the returned PID.
 	Sender() *actor.PID
-
-	// SenderAddress returns the address of the sender of the last received message.
-	// This is useful when testing interactions involving message origins, especially in multi-node scenarios.
-	SenderAddress() *address.Address
 
 	// PID returns the PID of the probe itself, which can be used as the sender
 	// in test scenarios where the tested actor expects a sender reference.
@@ -161,9 +154,8 @@ type Probe interface {
 }
 
 type message struct {
-	sender        *actor.PID
-	senderAddress *address.Address
-	payload       any
+	sender  *actor.PID
+	payload any
 }
 
 type probeActor struct {
@@ -187,9 +179,8 @@ func (x *probeActor) Receive(ctx *actor.ReceiveContext) {
 	default:
 		// any message received is pushed to the queue
 		x.messageQueue <- message{
-			sender:        ctx.Sender(),
-			payload:       ctx.Message(),
-			senderAddress: ctx.RemoteSender(),
+			sender:  ctx.Sender(),
+			payload: ctx.Message(),
 		}
 	}
 }
@@ -203,13 +194,12 @@ func (x *probeActor) PostStop(_ *actor.Context) error {
 type probe struct {
 	testingT *testing.T
 
-	testCtx           context.Context
-	pid               *actor.PID
-	lastSender        *actor.PID
-	lastSenderAddress *address.Address
-	messageQueue      chan message
-	defaultTimeout    time.Duration
-	timers            *timer.Pool
+	testCtx        context.Context
+	pid            *actor.PID
+	lastSender     *actor.PID
+	messageQueue   chan message
+	defaultTimeout time.Duration
+	timers         *timer.Pool
 }
 
 // ensure that probe implements Probe
@@ -315,7 +305,7 @@ func (x *probe) Send(actorName string, message any) {
 		return
 	}
 
-	to, err := x.pid.ActorSystem().LocalActor(actorName)
+	to, err := x.pid.ActorSystem().ActorOf(x.testCtx, actorName)
 	require.NoError(x.testingT, err)
 	require.NoError(x.testingT, x.pid.Tell(x.testCtx, to, message))
 }
@@ -337,44 +327,31 @@ func (x *probe) Send(actorName string, message any) {
 //   - Should not be used in production code as it couples testing and actor system internals.
 func (x *probe) SendSync(actorName string, msg any, timeout time.Duration) {
 	var (
-		received  any
-		err       error
-		to        *actor.PID
-		toAddress *address.Address
+		received any
+		err      error
+		to       *actor.PID
 	)
 
+	to, err = x.pid.ActorSystem().ActorOf(x.testCtx, actorName)
+	require.NoError(x.testingT, err)
 	if x.pid.ActorSystem().InCluster() {
-		toAddress, err = x.pid.ActorSystem().RemoteActor(x.testCtx, actorName)
-		require.NoError(x.testingT, err)
-		require.NotNil(x.testingT, toAddress)
-		require.False(x.testingT, toAddress.Equals(address.NoSender()))
 		received, err = x.pid.SendSync(x.testCtx, actorName, msg, timeout)
 		require.NoError(x.testingT, err)
 	} else {
-		to, err = x.pid.ActorSystem().LocalActor(actorName)
-		require.NoError(x.testingT, err)
 		received, err = x.pid.Ask(x.testCtx, to, msg, timeout)
 		require.NoError(x.testingT, err)
-		toAddress = to.Address()
 	}
 
 	x.messageQueue <- message{
-		sender:        to,
-		senderAddress: toAddress,
-		payload:       received,
+		sender:  to,
+		payload: received,
 	}
 }
 
-// Sender returns the PID (Process Identifier) of the sender of the last received message.
-// This is useful when testing interactions involving message origins.
+// Sender returns the PID of the sender of the last received message.
+// For remote senders, use pid.IsRemote() / pid.Address() on the returned PID.
 func (x *probe) Sender() *actor.PID {
 	return x.lastSender
-}
-
-// SenderAddress returns the address of the sender of the last received message.
-// This is useful when testing interactions involving message origins, especially in multi-node scenarios.
-func (x *probe) SenderAddress() *address.Address {
-	return x.lastSenderAddress
 }
 
 // PID returns the PID of the probe itself, which can be used as the sender
@@ -394,7 +371,7 @@ func (x *probe) PID() *actor.PID {
 //	// perform actions that should lead to actor termination
 //	probe.ExpectTerminated("worker-actor")
 func (x *probe) WatchNamed(actorName string) {
-	to, err := x.pid.ActorSystem().LocalActor(actorName)
+	to, err := x.pid.ActorSystem().ActorOf(x.testCtx, actorName)
 	require.NoError(x.testingT, err)
 	x.pid.Watch(to)
 }
@@ -437,7 +414,6 @@ func (x *probe) receiveOne(duration time.Duration) any {
 
 		if m.payload != nil {
 			x.lastSender = m.sender
-			x.lastSenderAddress = m.senderAddress
 		}
 		return m.payload
 	case <-t.C:

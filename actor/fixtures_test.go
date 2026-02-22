@@ -290,7 +290,7 @@ func (e *exchanger) Receive(ctx *ReceiveContext) {
 	case *testpb.TestReply:
 		ctx.Response(new(testpb.Reply))
 	case *testpb.TestRemoteSend:
-		ctx.RemoteTell(ctx.RemoteSender(), new(testpb.TestBye))
+		ctx.Tell(ctx.Sender(), new(testpb.TestBye))
 	case *testpb.TestBye:
 		ctx.Shutdown()
 	}
@@ -419,7 +419,7 @@ func (x *MockForward) Receive(ctx *ReceiveContext) {
 	case *testpb.TestBye:
 		ctx.Forward(x.actorRef)
 	case *testpb.TestRemoteForward:
-		ctx.RemoteForward(x.remoteRef.Address())
+		ctx.Forward(x.remoteRef)
 	}
 }
 
@@ -1535,7 +1535,7 @@ func MockReplicationTestSystem(clusterMock *mockcluster.Cluster) *actorSystem {
 	return sys
 }
 
-func MockSimpleClusterReadyActorSystem(rem remote.Remoting, cl cluster.Cluster, node *discovery.Node, opts ...remote.Option) *actorSystem {
+func MockSimpleClusterReadyActorSystem(rem remote.Client, cl cluster.Cluster, node *discovery.Node, opts ...remote.Option) *actorSystem {
 	sys := &actorSystem{
 		logger:      log.DiscardLogger,
 		cluster:     cl,
@@ -1755,7 +1755,7 @@ func MockClusterEnsureGrainSystem(t *testing.T, grain Grain, name string) (*acto
 	t.Helper()
 
 	clusterMock := mockcluster.NewCluster(t)
-	remotingMock := mocksremote.NewRemoting(t)
+	remotingMock := mocksremote.NewClient(t)
 	node := &discovery.Node{
 		Host:          "127.0.0.1",
 		PeersPort:     14000,
@@ -2093,7 +2093,7 @@ func (*MockControlPlane) Deregister(_ context.Context, _ string) error {
 
 // MockDatacenterSystem returns an *actorSystem configured for datacenter tests.
 // The controller is started with the fake control plane; listActive is used to drive ActiveRecords().
-func MockDatacenterSystem(t *testing.T, listActive func(_ context.Context) ([]datacenter.DataCenterRecord, error), remoting *mocksremote.Remoting) *actorSystem {
+func MockDatacenterSystem(t *testing.T, listActive func(_ context.Context) ([]datacenter.DataCenterRecord, error), remoting *mocksremote.Client) *actorSystem {
 	t.Helper()
 	dcConfig := datacenter.NewConfig()
 	dcConfig.ControlPlane = &MockControlPlane{listActive: listActive}

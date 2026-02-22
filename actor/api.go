@@ -121,28 +121,29 @@ func BatchAsk(ctx context.Context, to *PID, timeout time.Duration, messages ...a
 // toReceiveContext creates a ReceiveContext provided a message and a receiver
 func toReceiveContext(ctx context.Context, from, to *PID, message any, async bool) (*ReceiveContext, error) {
 	receiveContext := getContext()
-	switch msg := message.(type) {
-	case *internalpb.RemoteMessage:
+
+	if msg, ok := message.(*internalpb.RemoteMessage); ok {
 		serializer := to.remoting.Serializer(nil)
 		actual, err := serializer.Deserialize(msg.GetMessage())
 		if err != nil {
 			return nil, gerrors.NewErrInvalidRemoteMessage(err)
 		}
 
-		receiveContext.build(ctx, from, to, actual, async)
-
-		remoteSender := address.NoSender()
-		if sender := msg.GetSender(); sender != "" {
-			addr, err := address.Parse(sender)
+		// Build the sender PID from the wire address. Remote messages carry the
+		// sender identity as a string; we materialise it as a lightweight remote PID
+		// so that ctx.Sender() is always a unified *PID, never a raw *address.Address.
+		from = to.ActorSystem().NoSender()
+		if rawSender := msg.GetSender(); rawSender != "" {
+			addr, err := address.Parse(rawSender)
 			if err != nil {
 				return nil, gerrors.NewErrInvalidRemoteMessage(err)
 			}
-			remoteSender = addr
+			from = newRemotePID(addr, to.remoting)
 		}
 
-		return receiveContext.withRemoteSender(remoteSender), nil
-	default:
-		receiveContext.build(ctx, from, to, message, async)
-		return receiveContext.withRemoteSender(address.NoSender()), nil
+		message = actual
 	}
+
+	receiveContext.build(ctx, from, to, message, async)
+	return receiveContext, nil
 }

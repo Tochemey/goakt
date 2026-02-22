@@ -285,7 +285,7 @@ func TestScheduler(t *testing.T) {
 		err = pid.Shutdown(ctx)
 		assert.NoError(t, err)
 	})
-	t.Run("With RemoteScheduleOnce", func(t *testing.T) {
+	t.Run("With ScheduleOnce for remote actor", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// define the logger to use
@@ -317,14 +317,14 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		// get the address of the actor
 		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
 
 		// send a message to the actor after 100 ms
 		message := new(testpb.TestSend)
-		err = newActorSystem.RemoteScheduleOnce(ctx, message, addr, 100*time.Millisecond)
+		err = newActorSystem.ScheduleOnce(ctx, message, newRemotePID(addr, remoting), 100*time.Millisecond)
 		require.NoError(t, err)
 
 		pause.For(time.Second)
@@ -340,7 +340,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Stop(ctx)
 		assert.NoError(t, err)
 	})
-	t.Run("With RemoteScheduleOnce when cluster is enabled", func(t *testing.T) {
+	t.Run("With ScheduleOnce for remote actor when cluster is enabled", func(t *testing.T) {
 		ctx := context.TODO()
 		nodePorts := dynaport.Get(3)
 		discoveryPort := nodePorts[0]
@@ -393,14 +393,14 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		// get the address of the actor
 		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
 
 		// send a message to the actor after 100 ms
 		message := new(testpb.TestSend)
-		err = newActorSystem.RemoteScheduleOnce(ctx, message, addr, 100*time.Millisecond)
+		err = newActorSystem.ScheduleOnce(ctx, message, newRemotePID(addr, remoting), 100*time.Millisecond)
 		require.NoError(t, err)
 
 		pause.For(time.Second)
@@ -417,7 +417,7 @@ func TestScheduler(t *testing.T) {
 		assert.NoError(t, err)
 		provider.AssertExpectations(t)
 	})
-	t.Run("With RemoteScheduleOnce with scheduler not started", func(t *testing.T) {
+	t.Run("With ScheduleOnce for remote actor with scheduler not started", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// define the logger to use
@@ -453,14 +453,14 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		// get the address of the actor
 		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
 
 		// send a message to the actor after 100 ms
 		message := new(testpb.TestSend)
-		err = newActorSystem.RemoteScheduleOnce(ctx, message, addr, 100*time.Millisecond)
+		err = newActorSystem.ScheduleOnce(ctx, message, newRemotePID(addr, remoting), 100*time.Millisecond)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, errors.ErrSchedulerNotStarted)
 
@@ -667,7 +667,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Stop(ctx)
 		assert.NoError(t, err)
 	})
-	t.Run("With RemoteScheduleWithCron", func(t *testing.T) {
+	t.Run("With ScheduleWithCron for remote actor", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// define the logger to use
@@ -699,7 +699,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		// get the address of the actor
 		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
@@ -708,7 +708,7 @@ func TestScheduler(t *testing.T) {
 		message := new(testpb.TestSend)
 		// set cron expression to run every second
 		const expr = "* * * ? * *"
-		err = newActorSystem.RemoteScheduleWithCron(ctx, message, addr, expr)
+		err = newActorSystem.ScheduleWithCron(ctx, message, newRemotePID(addr, remoting), expr)
 		require.NoError(t, err)
 
 		require.Eventually(t, func() bool {
@@ -721,7 +721,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Stop(ctx)
 		assert.NoError(t, err)
 	})
-	t.Run("With RemoteScheduleWithCron when cluster is enabled", func(t *testing.T) {
+	t.Run("With ScheduleWithCron for remote actor when cluster is enabled", func(t *testing.T) {
 		ctx := context.TODO()
 		nodePorts := dynaport.Get(3)
 		discoveryPort := nodePorts[0]
@@ -774,7 +774,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		// get the address of the actor
 		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
@@ -783,7 +783,7 @@ func TestScheduler(t *testing.T) {
 		message := new(testpb.TestSend)
 		// set cron expression to run every second
 		const expr = "* * * ? * *"
-		err = newActorSystem.RemoteScheduleWithCron(ctx, message, addr, expr)
+		err = newActorSystem.ScheduleWithCron(ctx, message, newRemotePID(addr, remoting), expr)
 		require.NoError(t, err)
 
 		require.Eventually(t, func() bool {
@@ -797,7 +797,7 @@ func TestScheduler(t *testing.T) {
 		assert.NoError(t, err)
 		provider.AssertExpectations(t)
 	})
-	t.Run("With RemoteScheduleWithCron with invalid cron expression", func(t *testing.T) {
+	t.Run("With ScheduleWithCron for remote actor with invalid cron expression", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// define the logger to use
@@ -829,7 +829,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		// get the address of the actor
 		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
@@ -838,14 +838,14 @@ func TestScheduler(t *testing.T) {
 		message := new(testpb.TestSend)
 		// set cron expression
 		const expr = "* * * * *"
-		err = newActorSystem.RemoteScheduleWithCron(ctx, message, addr, expr)
+		err = newActorSystem.ScheduleWithCron(ctx, message, newRemotePID(addr, remoting), expr)
 		require.Error(t, err)
 
 		// stop the actor
 		err = newActorSystem.Stop(ctx)
 		assert.NoError(t, err)
 	})
-	t.Run("With RemoteScheduleWithCron with scheduler not started", func(t *testing.T) {
+	t.Run("With ScheduleWithCron for remote actor with scheduler not started", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// define the logger to use
@@ -880,7 +880,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		// get the address of the actor
 		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
@@ -889,7 +889,7 @@ func TestScheduler(t *testing.T) {
 		message := new(testpb.TestSend)
 		// set cron expression to run every second
 		const expr = "* * * ? * *"
-		err = newActorSystem.RemoteScheduleWithCron(ctx, message, addr, expr)
+		err = newActorSystem.ScheduleWithCron(ctx, message, newRemotePID(addr, remoting), expr)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, errors.ErrSchedulerNotStarted)
 
@@ -1111,7 +1111,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Stop(ctx)
 		assert.NoError(t, err)
 	})
-	t.Run("With RemoteSchedule", func(t *testing.T) {
+	t.Run("With Schedule for remote actor", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// define the logger to use
@@ -1143,14 +1143,14 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		// get the address of the actor
 		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
 
 		// send a message to the actor after 100 ms
 		message := new(testpb.TestSend)
-		err = newActorSystem.RemoteSchedule(ctx, message, addr, time.Second)
+		err = newActorSystem.Schedule(ctx, message, newRemotePID(addr, remoting), time.Second)
 		require.NoError(t, err)
 
 		pause.For(time.Second)
@@ -1170,7 +1170,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Stop(ctx)
 		assert.NoError(t, err)
 	})
-	t.Run("With RemoteSchedule with scheduler not started", func(t *testing.T) {
+	t.Run("With Schedule for remote actor with scheduler not started", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// define the logger to use
@@ -1206,14 +1206,14 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		// get the address of the actor
 		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
 
 		// send a message to the actor after 100 ms
 		message := new(testpb.TestSend)
-		err = newActorSystem.RemoteSchedule(ctx, message, addr, 100*time.Millisecond)
+		err = newActorSystem.Schedule(ctx, message, newRemotePID(addr, remoting), 100*time.Millisecond)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, errors.ErrSchedulerNotStarted)
 
@@ -1221,7 +1221,7 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Stop(ctx)
 		assert.NoError(t, err)
 	})
-	t.Run("With RemoteSchedule when actor not started", func(t *testing.T) {
+	t.Run("With Schedule for remote actor when actor not started", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 		// define the logger to use
@@ -1253,7 +1253,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		// get the address of the actor
 		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
@@ -1263,7 +1263,7 @@ func TestScheduler(t *testing.T) {
 
 		// send a message to the actor after 100 ms
 		message := new(testpb.TestSend)
-		err = newActorSystem.RemoteSchedule(ctx, message, addr, time.Second)
+		err = newActorSystem.Schedule(ctx, message, newRemotePID(addr, remoting), time.Second)
 		require.NoError(t, err)
 
 		pause.For(time.Second)
@@ -1281,76 +1281,67 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Stop(ctx)
 		assert.NoError(t, err)
 	})
-	t.Run("With RemoteScheduleWithCron with cron expression when remoting not enabled", func(t *testing.T) {
-		// create the context
+	t.Run("With ScheduleWithCron for remote actor when remoting not enabled", func(t *testing.T) {
 		ctx := context.TODO()
-		// define the logger to use
 		logger := log.DiscardLogger
-		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
 		host := "0.0.0.0"
 
-		scheduler := newScheduler(logger, time.Second)
+		scheduler := newScheduler(logger, time.Second, nil)
 		scheduler.Start(ctx)
 
 		addr := address.New("test", "test", host, remotingPort)
+		remotePID := newRemotePID(addr, nil)
 
-		// send a message to the actor after 100 ms
 		message := new(testpb.TestSend)
-		// set cron expression to run every second
 		const expr = "* * * ? * *"
-		err := scheduler.RemoteScheduleWithCron(message, addr, expr)
+		err := scheduler.ScheduleWithCron(message, remotePID, expr)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, errors.ErrRemotingDisabled)
 
 		scheduler.Stop(ctx)
 	})
-	t.Run("With RemoteSchedule when remoting not enabled", func(t *testing.T) {
-		// create the context
+	t.Run("With Schedule for remote actor when remoting not enabled", func(t *testing.T) {
 		ctx := context.TODO()
-		// define the logger to use
 		logger := log.DiscardLogger
-		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
 		host := "0.0.0.0"
 
-		scheduler := newScheduler(logger, time.Second)
+		scheduler := newScheduler(logger, time.Second, nil)
 		scheduler.Start(ctx)
 
 		addr := address.New("test", "test", host, remotingPort)
+		remotePID := newRemotePID(addr, nil)
 
-		// send a message to the actor after 100 ms
 		message := new(testpb.TestSend)
-		err := scheduler.RemoteSchedule(message, addr, time.Second)
+		err := scheduler.Schedule(message, remotePID, time.Second)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, errors.ErrRemotingDisabled)
 
 		scheduler.Stop(ctx)
 	})
-	t.Run("With RemoteScheduleOnce when remoting not enabled", func(t *testing.T) {
-		// create the context
+	t.Run("With ScheduleOnce for remote actor when remoting not enabled", func(t *testing.T) {
 		ctx := context.TODO()
-		// define the logger to use
 		logger := log.DiscardLogger
-		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
 		host := "0.0.0.0"
 
-		scheduler := newScheduler(logger, time.Second)
+		scheduler := newScheduler(logger, time.Second, nil)
 		scheduler.Start(ctx)
 
 		addr := address.New("test", "test", host, remotingPort)
-		// send a message to the actor after 100 ms
+		remotePID := newRemotePID(addr, nil)
+
 		message := new(testpb.TestSend)
-		err := scheduler.RemoteScheduleOnce(message, addr, time.Second)
+		err := scheduler.ScheduleOnce(message, remotePID, time.Second)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, errors.ErrRemotingDisabled)
 		scheduler.Stop(ctx)
 	})
-	t.Run("With RemoteSchedule when cluster is enabled", func(t *testing.T) {
+	t.Run("With Schedule for remote actor when cluster is enabled", func(t *testing.T) {
 		ctx := context.TODO()
 		nodePorts := dynaport.Get(3)
 		discoveryPort := nodePorts[0]
@@ -1403,14 +1394,14 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		// get the address of the actor
 		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
 
 		// send a message to the actor after 100 ms
 		message := new(testpb.TestSend)
-		err = newActorSystem.RemoteSchedule(ctx, message, addr, time.Second)
+		err = newActorSystem.Schedule(ctx, message, newRemotePID(addr, remoting), time.Second)
 		require.NoError(t, err)
 
 		pause.For(time.Second)

@@ -24,22 +24,18 @@ package actor
 
 import (
 	"github.com/google/uuid"
-
-	"github.com/tochemey/goakt/v4/address"
 )
 
 type scheduleConfig struct {
-	sender     *PID
-	senderAddr *address.Address
-	reference  string
+	sender    *PID
+	reference string
 }
 
 // newScheduleConfig creates and returns a new scheduleConfig instance using the provided ScheduleOption arguments.
 // Options are applied sequentially to configure the instance.
 func newScheduleConfig(opts ...ScheduleOption) *scheduleConfig {
 	config := &scheduleConfig{
-		senderAddr: address.NoSender(),
-		reference:  uuid.NewString(),
+		reference: uuid.NewString(),
 	}
 
 	for _, opt := range opts {
@@ -51,11 +47,6 @@ func newScheduleConfig(opts ...ScheduleOption) *scheduleConfig {
 // Sender retrieves and returns the associated sender PID from the scheduleConfig instance.
 func (s *scheduleConfig) Sender() *PID {
 	return s.sender
-}
-
-// SenderAddr retrieves and returns the sender's address from the scheduleConfig instance.
-func (s *scheduleConfig) SenderAddr() *address.Address {
-	return s.senderAddr
 }
 
 // Reference returns the scheduled message reference.
@@ -93,23 +84,6 @@ func (f ScheduleOptionFunc) Apply(c *scheduleConfig) {
 func WithSender(sender *PID) ScheduleOption {
 	return ScheduleOptionFunc(func(c *scheduleConfig) {
 		c.sender = sender
-	})
-}
-
-// WithSenderAddress returns a ScheduleOption that explicitly sets the sender address for a scheduled message.
-//
-// This is typically used for remote scheduling scenarios where the sender is identified by an address
-// rather than a local PID. Setting the sender address ensures accurate tracking of the scheduled message,
-// especially when multiple distributed nodes are involved.
-//
-// Parameters:
-//   - addr: The address.Address of the remote sender.
-//
-// Returns:
-//   - ScheduleOption: An option that can be passed to the scheduler.
-func WithSenderAddress(addr *address.Address) ScheduleOption {
-	return ScheduleOptionFunc(func(c *scheduleConfig) {
-		c.senderAddr = addr
 	})
 }
 

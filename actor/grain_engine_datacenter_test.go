@@ -58,7 +58,7 @@ func TestTellGrainAcrossDataCenters(t *testing.T) {
 	})
 
 	t.Run("returns ErrActorNotFound when no datacenter records", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return nil, nil
 		}, remotingMock)
@@ -69,7 +69,7 @@ func TestTellGrainAcrossDataCenters(t *testing.T) {
 	})
 
 	t.Run("returns ErrActorNotFound when no active endpoints", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{
 				{
@@ -86,7 +86,7 @@ func TestTellGrainAcrossDataCenters(t *testing.T) {
 	})
 
 	t.Run("returns ErrActorNotFound when all remote calls fail", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{
 				{
@@ -110,7 +110,7 @@ func TestTellGrainAcrossDataCenters(t *testing.T) {
 	})
 
 	t.Run("succeeds when one endpoint responds successfully", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{
 				{
@@ -133,7 +133,7 @@ func TestTellGrainAcrossDataCenters(t *testing.T) {
 	})
 
 	t.Run("succeeds with first successful response from multiple endpoints", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{
 				{
@@ -160,7 +160,7 @@ func TestTellGrainAcrossDataCenters(t *testing.T) {
 	})
 
 	t.Run("queries multiple datacenters", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{
 				{
@@ -191,7 +191,7 @@ func TestTellGrainAcrossDataCenters(t *testing.T) {
 	})
 
 	t.Run("skips non-active datacenter records", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{
 				{
@@ -218,7 +218,7 @@ func TestTellGrainAcrossDataCenters(t *testing.T) {
 	})
 
 	t.Run("skips invalid endpoint formats", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{
 				{
@@ -240,7 +240,7 @@ func TestTellGrainAcrossDataCenters(t *testing.T) {
 	})
 
 	t.Run("uses provided timeout when smaller than default", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{
 				{
@@ -280,7 +280,7 @@ func TestAskGrainAcrossDataCenters(t *testing.T) {
 	})
 
 	t.Run("returns ErrActorNotFound when no datacenter records", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return nil, nil
 		}, remotingMock)
@@ -292,7 +292,7 @@ func TestAskGrainAcrossDataCenters(t *testing.T) {
 	})
 
 	t.Run("returns ErrActorNotFound when no active endpoints", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{
 				{
@@ -310,7 +310,7 @@ func TestAskGrainAcrossDataCenters(t *testing.T) {
 	})
 
 	t.Run("returns ErrActorNotFound when all remote calls fail", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{
 				{
@@ -335,7 +335,7 @@ func TestAskGrainAcrossDataCenters(t *testing.T) {
 	})
 
 	t.Run("returns ErrActorNotFound when remote returns nil response", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{
 				{
@@ -358,7 +358,7 @@ func TestAskGrainAcrossDataCenters(t *testing.T) {
 	})
 
 	t.Run("succeeds when one endpoint responds successfully", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{
 				{
@@ -385,7 +385,7 @@ func TestAskGrainAcrossDataCenters(t *testing.T) {
 	})
 
 	t.Run("succeeds with first successful response from multiple endpoints", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{
 				{
@@ -416,7 +416,7 @@ func TestAskGrainAcrossDataCenters(t *testing.T) {
 	})
 
 	t.Run("queries multiple datacenters", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{
 				{
@@ -451,7 +451,7 @@ func TestAskGrainAcrossDataCenters(t *testing.T) {
 	})
 
 	t.Run("skips non-active datacenter records", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{
 				{
@@ -482,7 +482,7 @@ func TestAskGrainAcrossDataCenters(t *testing.T) {
 	})
 
 	t.Run("skips invalid endpoint formats", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{
 				{
@@ -508,7 +508,7 @@ func TestAskGrainAcrossDataCenters(t *testing.T) {
 	})
 
 	t.Run("uses provided timeout when smaller than default", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{
 				{
@@ -534,7 +534,7 @@ func TestAskGrainAcrossDataCenters(t *testing.T) {
 	})
 
 	t.Run("returns ErrActorNotFound when all endpoints have invalid format", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{
 				{
