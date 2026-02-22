@@ -66,7 +66,7 @@ func requireProtoError(t *testing.T, msg interface{}, code internalpb.Code) {
 }
 
 // nullConn is a no-op Connection implementation used where the handler ignores conn.
-var nullConn inet.Connection = nil
+var nullConn inet.Connection
 
 func TestToProtoError(t *testing.T) {
 	err := gerrors.ErrRemotingDisabled
