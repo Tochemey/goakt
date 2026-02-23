@@ -25,7 +25,7 @@ package actor
 import (
 	"time"
 
-	"github.com/tochemey/goakt/v3/internal/pointer"
+	"github.com/tochemey/goakt/v4/internal/pointer"
 )
 
 // clusterSingletonConfig holds configuration options for cluster singleton actors.

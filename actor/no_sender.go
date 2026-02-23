@@ -25,7 +25,7 @@ package actor
 import (
 	"context"
 
-	sup "github.com/tochemey/goakt/v3/supervisor"
+	sup "github.com/tochemey/goakt/v4/supervisor"
 )
 
 // NoSender returns a special PID that represents an anonymous / absent sender.

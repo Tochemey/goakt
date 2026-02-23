@@ -26,10 +26,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/tochemey/goakt/v3/hash"
-	"github.com/tochemey/goakt/v3/internal/size"
-	"github.com/tochemey/goakt/v3/log"
-	gtls "github.com/tochemey/goakt/v3/tls"
+	"github.com/tochemey/goakt/v4/hash"
+	"github.com/tochemey/goakt/v4/internal/size"
+	"github.com/tochemey/goakt/v4/log"
+	gtls "github.com/tochemey/goakt/v4/tls"
 )
 
 type config struct {

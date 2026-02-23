@@ -29,10 +29,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/tochemey/goakt/v3/actor"
-	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v4/actor"
+	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/log"
 )
 
 func main() {
@@ -75,7 +74,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	addr, pid, err := actorSystem.ActorOf(ctx, "actor1")
+	pid, err = actorSystem.ActorOf(ctx, "actor1")
 	if err != nil {
 		if !errors.Is(err, gerrors.ErrActorNotFound) {
 			fmt.Println("failed to get actor:", err)
@@ -83,7 +82,7 @@ func main() {
 		}
 	}
 
-	if addr != nil || pid != nil {
+	if pid != nil {
 		fmt.Println("actor should be stopped but still exists")
 		os.Exit(1)
 	}
@@ -105,7 +104,7 @@ func (x *MyActor) PreStart(*actor.Context) error {
 
 func (x *MyActor) Receive(ctx *actor.ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *actor.PostStart:
 		fmt.Println("PostStart")
 	default:
 		ctx.Unhandled()

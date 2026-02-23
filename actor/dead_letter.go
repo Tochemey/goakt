@@ -25,11 +25,10 @@ package actor
 import (
 	"go.uber.org/atomic"
 
-	"github.com/tochemey/goakt/v3/eventstream"
-	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/xsync"
-	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v4/eventstream"
+	"github.com/tochemey/goakt/v4/internal/commands"
+	"github.com/tochemey/goakt/v4/internal/xsync"
+	"github.com/tochemey/goakt/v4/log"
 )
 
 // deadletter is a synthetic actor that houses all deadletter
@@ -39,7 +38,7 @@ type deadLetter struct {
 	pid          *PID
 	logger       log.Logger
 	counter      *atomic.Int64
-	letters      *xsync.Map[string, *goaktpb.Deadletter]
+	letters      *xsync.Map[string, *Deadletter]
 	counters     *xsync.Map[string, *atomic.Int64]
 }
 
@@ -50,7 +49,7 @@ var _ Actor = (*deadLetter)(nil)
 func newDeadLetter() *deadLetter {
 	counter := atomic.NewInt64(0)
 	return &deadLetter{
-		letters:  xsync.NewMap[string, *goaktpb.Deadletter](),
+		letters:  xsync.NewMap[string, *Deadletter](),
 		counters: xsync.NewMap[string, *atomic.Int64](),
 		counter:  counter,
 	}
@@ -64,15 +63,15 @@ func (x *deadLetter) PreStart(*Context) error {
 // Receive handles messages
 func (x *deadLetter) Receive(ctx *ReceiveContext) {
 	switch msg := ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *PostStart:
 		x.handlePostStart(ctx)
-	case *internalpb.SendDeadletter:
-		x.handleDeadletter(msg.GetDeadletter())
-	case *internalpb.PublishDeadletters:
+	case *commands.SendDeadletter:
+		x.handleDeadletter(&msg.Deadletter)
+	case *commands.PublishDeadletters:
 		x.handlePublishDeadletters()
-	case *internalpb.DeadlettersCountRequest:
+	case *commands.DeadlettersCountRequest:
 		count := x.count(msg)
-		ctx.Response(&internalpb.DeadlettersCountResponse{TotalCount: count})
+		ctx.Response(&commands.DeadlettersCountResponse{TotalCount: count})
 	default:
 		// simply ignore anyhing else
 	}
@@ -88,21 +87,23 @@ func (x *deadLetter) handlePostStart(ctx *ReceiveContext) {
 	x.eventsStream = ctx.Self().eventsStream
 	x.logger = ctx.Logger()
 	x.pid = ctx.Self()
-	x.letters = xsync.NewMap[string, *goaktpb.Deadletter]()
+	x.letters = xsync.NewMap[string, *Deadletter]()
 	x.counters = xsync.NewMap[string, *atomic.Int64]()
 	x.counter.Store(0)
 	x.logger.Infof("%s started successfully", x.pid.Name())
 }
 
-func (x *deadLetter) handleDeadletter(msg *goaktpb.Deadletter) {
+func (x *deadLetter) handleDeadletter(msg *commands.Deadletter) {
 	// increment the counter
 	x.counter.Inc()
 	// publish the deadletter message to the event stream
-	x.eventsStream.Publish(eventsTopic, msg)
+	deadLetter := NewDeadletter(msg.Sender, msg.Receiver, msg.Message, msg.SendTime, msg.Reason)
+
+	x.eventsStream.Publish(eventsTopic, deadLetter)
 
 	// letters the message for future query
-	id := msg.GetReceiver()
-	x.letters.Set(id, msg)
+	id := msg.Receiver
+	x.letters.Set(id, deadLetter)
 	if counter, ok := x.counters.Get(id); ok {
 		counter.Inc()
 		return
@@ -114,15 +115,15 @@ func (x *deadLetter) handleDeadletter(msg *goaktpb.Deadletter) {
 
 // handlePublishDeadletters pushes the actor state back to the stream
 func (x *deadLetter) handlePublishDeadletters() {
-	x.letters.Range(func(_ string, deadletter *goaktpb.Deadletter) {
+	x.letters.Range(func(_ string, deadletter *Deadletter) {
 		x.eventsStream.Publish(eventsTopic, deadletter)
 	})
 }
 
 // count returns the deadletter count
-func (x *deadLetter) count(msg *internalpb.DeadlettersCountRequest) int64 {
-	if msg.ActorId != nil {
-		if counter, ok := x.counters.Get(msg.GetActorId()); ok {
+func (x *deadLetter) count(msg *commands.DeadlettersCountRequest) int64 {
+	if msg.ActorID != nil {
+		if counter, ok := x.counters.Get(*msg.ActorID); ok {
 			return counter.Load()
 		}
 		return 0

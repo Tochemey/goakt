@@ -188,7 +188,7 @@ const file_internal_network_proto_rawDesc = "" +
 	"\rCODE_CANCELED\x10\t\x12\x10\n" +
 	"\fCODE_UNKNOWN\x10\n" +
 	"B\xa5\x01\n" +
-	"\x0ecom.internalpbB\fNetworkProtoH\x02P\x01Z;github.com/tochemey/goakt/v3/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
+	"\x0ecom.internalpbB\fNetworkProtoH\x02P\x01Z;github.com/tochemey/goakt/v4/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
 	"Internalpb\xca\x02\n" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
 	"Internalpbb\x06proto3"

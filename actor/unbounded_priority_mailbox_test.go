@@ -26,16 +26,17 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/proto"
 
-	"github.com/tochemey/goakt/v3/test/data/testpb"
+	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
 func TestUnboundedPriorityMailBox(t *testing.T) {
 	t.Run("With highest priority mailbox", func(t *testing.T) {
-		priorityFunc := func(msg1, msg2 proto.Message) bool {
-			p1 := msg1.(*testpb.TestMessage)
-			p2 := msg2.(*testpb.TestMessage)
+		priorityFunc := func(msg1, msg2 any) bool {
+			p1, ok := msg1.(*testpb.TestMessage)
+			require.True(t, ok)
+			p2, ok := msg2.(*testpb.TestMessage)
+			require.True(t, ok)
 			return p1.Priority > p2.Priority
 		}
 
@@ -70,9 +71,11 @@ func TestUnboundedPriorityMailBox(t *testing.T) {
 		mailbox.Dispose()
 	})
 	t.Run("With lowest priority mailbox", func(t *testing.T) {
-		priorityFunc := func(msg1, msg2 proto.Message) bool {
-			p1 := msg1.(*testpb.TestMessage)
-			p2 := msg2.(*testpb.TestMessage)
+		priorityFunc := func(msg1, msg2 any) bool {
+			p1, ok := msg1.(*testpb.TestMessage)
+			require.True(t, ok)
+			p2, ok := msg2.(*testpb.TestMessage)
+			require.True(t, ok)
 			return p1.Priority <= p2.Priority
 		}
 
@@ -106,9 +109,11 @@ func TestUnboundedPriorityMailBox(t *testing.T) {
 		require.True(t, mailbox.IsEmpty())
 	})
 	t.Run("With dequeue when queue is empty", func(t *testing.T) {
-		priorityFunc := func(msg1, msg2 proto.Message) bool {
-			p1 := msg1.(*testpb.TestMessage)
-			p2 := msg2.(*testpb.TestMessage)
+		priorityFunc := func(msg1, msg2 any) bool {
+			p1, ok := msg1.(*testpb.TestMessage)
+			require.True(t, ok)
+			p2, ok := msg2.(*testpb.TestMessage)
+			require.True(t, ok)
 			return p1.Priority <= p2.Priority
 		}
 

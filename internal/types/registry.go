@@ -20,13 +20,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package registry
+package types
 
 import (
 	"reflect"
 	"strings"
 
-	"github.com/tochemey/goakt/v3/internal/xsync"
+	"github.com/tochemey/goakt/v4/internal/xsync"
 )
 
 // Registry defines the types registry interface
@@ -107,7 +107,7 @@ func reflectType(v any) reflect.Type {
 	return rtype
 }
 
-// Name returns the name of a given object
+// Name returns the type name of a given object
 func Name(v any) string {
 	return lowTrim(reflectType(v).String())
 }

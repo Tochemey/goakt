@@ -2,17 +2,7 @@ syntax = "proto3";
 
 package internalpb;
 
-import "google/protobuf/any.proto";
-
-option go_package = "github.com/tochemey/goakt/v3/internal/internalpb;internalpb";
-
-// ClusterService is used to interact with the cluster internal
-service ClusterService {
-  // GetNodeMetric returns the node metric
-  rpc GetNodeMetric(GetNodeMetricRequest) returns (GetNodeMetricResponse);
-  // GetKinds returns the list of cluster kinds
-  rpc GetKinds(GetKindsRequest) returns (GetKindsResponse);
-}
+option go_package = "github.com/tochemey/goakt/v4/internal/internalpb;internalpb";
 
 message GetNodeMetricRequest {
   // Specifies the node address
@@ -34,13 +24,4 @@ message GetKindsRequest {
 message GetKindsResponse {
   // Specifies the list of kinds
   repeated string kinds = 1;
-}
-
-message TopicMessage {
-  // Specifies the message unique id
-  string id = 1;
-  // Specifies the topic
-  string topic = 2;
-  // Specifies the message
-  google.protobuf.Any message = 3;
 }

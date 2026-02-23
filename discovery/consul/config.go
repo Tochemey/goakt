@@ -26,7 +26,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/tochemey/goakt/v3/internal/validation"
+	"github.com/tochemey/goakt/v4/internal/validation"
 )
 
 // Config defines the configuration options for the Consul provider.

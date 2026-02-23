@@ -50,8 +50,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tochemey/goakt/v3/internal/strconvx"
-	"github.com/tochemey/goakt/v3/internal/validation"
+	"github.com/tochemey/goakt/v4/internal/strconvx"
+	"github.com/tochemey/goakt/v4/internal/validation"
 )
 
 // scheme defines the Go-Akt addressing scheme
@@ -84,7 +84,7 @@ type Address struct {
 	name      string
 	system    string
 	parent    *Address
-	cachedStr string // lazily computed by String(); safe because fields are immutable after construction
+	cachedStr string // eagerly computed at construction; String() is a pure read
 }
 
 var _ validation.Validator = (*Address)(nil)
@@ -105,12 +105,14 @@ var _ validation.Validator = (*Address)(nil)
 //
 //	goakt://system@127.0.0.1:9000/actorName
 func New(name, system string, host string, port int) *Address {
-	return &Address{
+	a := &Address{
 		host:   host,
 		port:   port,
 		name:   name,
 		system: system,
 	}
+	a.cachedStr = a.buildString()
+	return a
 }
 
 // NewWithParent creates a new Address and optionally sets its parent.
@@ -140,11 +142,17 @@ func New(name, system string, host string, port int) *Address {
 //	  // handle invalid address
 //	}
 func NewWithParent(name, system, host string, port int, parent *Address) *Address {
-	addr := New(name, system, host, port)
-	if parent != nil {
-		addr.parent = parent
+	a := &Address{
+		host:   host,
+		port:   port,
+		name:   name,
+		system: system,
 	}
-	return addr
+	if parent != nil {
+		a.parent = parent
+	}
+	a.cachedStr = a.buildString()
+	return a
 }
 
 // NoSender returns a sentinel Address that represents the absence of a sender.
@@ -226,13 +234,12 @@ func (x *Address) String() string {
 	if x == nil {
 		return ""
 	}
+	return x.cachedStr
+}
 
-	// Return cached result if available. Address fields are immutable after
-	// construction, so the string never changes.
-	if x.cachedStr != "" {
-		return x.cachedStr
-	}
-
+// buildString computes the canonical string representation.
+// Called once at construction time so that String() is safe for concurrent use.
+func (x *Address) buildString() string {
 	system := x.System()
 	host := x.Host()
 	name := x.Name()
@@ -266,8 +273,7 @@ func (x *Address) String() string {
 	}
 	_, _ = builder.WriteString(name)
 
-	x.cachedStr = builder.String()
-	return x.cachedStr
+	return builder.String()
 }
 
 // HostPort returns the "host:port" portion of the Address.

@@ -25,23 +25,20 @@ package testkit
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/encoding/prototext"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/reflect/protoreflect"
 
-	actors "github.com/tochemey/goakt/v3/actor"
-	"github.com/tochemey/goakt/v3/address"
-	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/internal/timer"
+	"github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/internal/timer"
 )
 
 const (
-	MessagesQueueMax int           = 1000
-	DefaultTimeout   time.Duration = 3 * time.Second
+	MessagesQueueMax    int           = 1000
+	DefaultTimeout      time.Duration = 3 * time.Second
+	GrainDefaultTimeout time.Duration = 500 * time.Millisecond
 )
 
 // Probe defines the interface for a test probe used in actor-based unit testing.
@@ -51,11 +48,11 @@ type Probe interface {
 	// ExpectMessage asserts that the next message received by the probe
 	// exactly matches the given protobuf message.
 	// It fails the test if no message is received or the message does not match.
-	ExpectMessage(message proto.Message)
+	ExpectMessage(message any)
 
 	// ExpectMessageWithin asserts that the expected message is received within the given duration.
 	// It fails the test if the timeout is reached or the message differs.
-	ExpectMessageWithin(duration time.Duration, message proto.Message)
+	ExpectMessageWithin(duration time.Duration, message any)
 
 	// ExpectNoMessage asserts that no message is received within a short, default time window.
 	// This is useful for asserting inactivity or idle actors.
@@ -63,19 +60,19 @@ type Probe interface {
 
 	// ExpectAnyMessage waits for and returns the next message received by the probe.
 	// It fails the test if no message is received in a reasonable default timeout.
-	ExpectAnyMessage() proto.Message
+	ExpectAnyMessage() any
 
 	// ExpectAnyMessageWithin waits for and returns the next message received within the specified duration.
 	// It fails the test if no message is received in the given time window.
-	ExpectAnyMessageWithin(duration time.Duration) proto.Message
+	ExpectAnyMessageWithin(duration time.Duration) any
 
 	// ExpectMessageOfType asserts that the next received message matches the given message type.
 	// It fails the test if no message is received or the type does not match.
-	ExpectMessageOfType(message proto.Message)
+	ExpectMessageOfType(message any)
 
 	// ExpectMessageOfTypeWithin asserts that a message of the given type is received within the specified duration.
 	// It fails the test if the type does not match or if the timeout is reached.
-	ExpectMessageOfTypeWithin(duration time.Duration, message proto.Message)
+	ExpectMessageOfTypeWithin(duration time.Duration, message any)
 
 	// ExpectTerminated asserts that the actor with the specified name has terminated.
 	// This is useful when verifying actor shutdown behavior.
@@ -100,7 +97,7 @@ type Probe interface {
 	// Notes:
 	//   - This is a convenience method for testing fire-and-forget scenarios.
 	//   - For request-response testing, consider using SendSync or SendSyncContext instead.
-	Send(actorName string, message proto.Message)
+	Send(actorName string, message any)
 
 	// SendSync sends a message to the specified actor and waits for a synchronous response within the given timeout duration.
 	// This method simulates the "Ask" pattern (request-response) and is primarily used in test scenarios to
@@ -117,21 +114,15 @@ type Probe interface {
 	// Notes:
 	//   - This method is intended for use within testing frameworks via a test probe.
 	//   - Should not be used in production code as it couples testing and actor system internals.
-	SendSync(actorName string, message proto.Message, timeout time.Duration)
+	SendSync(actorName string, message any, timeout time.Duration)
 
-	// Sender returns the PID (Process Identifier) of the sender of the last received message.
-	// This is useful when testing interactions involving message origins.
-	// When running the multi-node test, this will return a nil PID if the message was sent from a remote actor.
-	// In that case the remote sender can be retrieved using the SenderAddress() method.
-	Sender() *actors.PID
-
-	// SenderAddress returns the address of the sender of the last received message.
-	// This is useful when testing interactions involving message origins, especially in multi-node scenarios.
-	SenderAddress() *address.Address
+	// Sender returns the PID of the sender of the last received message.
+	// For remote senders, use pid.IsRemote() / pid.Address() on the returned PID.
+	Sender() *actor.PID
 
 	// PID returns the PID of the probe itself, which can be used as the sender
 	// in test scenarios where the tested actor expects a sender reference.
-	PID() *actors.PID
+	PID() *actor.PID
 
 	// WatchNamed subscribes the probe to termination notifications for the specified actor given its name.
 	// Once the watched actor stops or crashes, the probe will receive a Terminated message.
@@ -155,7 +146,7 @@ type Probe interface {
 	//   probe.Watch(workerPID)
 	//   // trigger actor shutdown
 	//   probe.ExpectTerminated(workerPID.Name())
-	Watch(pid *actors.PID)
+	Watch(pid *actor.PID)
 
 	// Stop stops the probe actor and releases any associated resources.
 	// This should be called at the end of a test to clean up the probe.
@@ -163,9 +154,8 @@ type Probe interface {
 }
 
 type message struct {
-	sender        *actors.PID
-	senderAddress *address.Address
-	payload       proto.Message
+	sender  *actor.PID
+	payload any
 }
 
 type probeActor struct {
@@ -173,31 +163,30 @@ type probeActor struct {
 }
 
 // ensure that probeActor implements the Actor interface
-var _ actors.Actor = &probeActor{}
+var _ actor.Actor = &probeActor{}
 
 // PreStart is called before the actor starts
-func (x *probeActor) PreStart(_ *actors.Context) error {
+func (x *probeActor) PreStart(_ *actor.Context) error {
 	return nil
 }
 
 // Receive handles received messages for the probe actor.
-func (x *probeActor) Receive(ctx *actors.ReceiveContext) {
+func (x *probeActor) Receive(ctx *actor.ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PoisonPill,
-		*goaktpb.PostStart:
+	case *actor.PoisonPill,
+		*actor.PostStart:
 	// pass
 	default:
 		// any message received is pushed to the queue
 		x.messageQueue <- message{
-			sender:        ctx.Sender(),
-			payload:       ctx.Message(),
-			senderAddress: ctx.RemoteSender(),
+			sender:  ctx.Sender(),
+			payload: ctx.Message(),
 		}
 	}
 }
 
 // PostStop handles stop routines
-func (x *probeActor) PostStop(_ *actors.Context) error {
+func (x *probeActor) PostStop(_ *actor.Context) error {
 	return nil
 }
 
@@ -205,27 +194,23 @@ func (x *probeActor) PostStop(_ *actors.Context) error {
 type probe struct {
 	testingT *testing.T
 
-	testCtx           context.Context
-	pid               *actors.PID
-	lastMessage       proto.Message
-	lastSender        *actors.PID
-	lastSenderAddress *address.Address
-	messageQueue      chan message
-	defaultTimeout    time.Duration
-	timers            *timer.Pool
+	testCtx        context.Context
+	pid            *actor.PID
+	lastSender     *actor.PID
+	messageQueue   chan message
+	defaultTimeout time.Duration
+	timers         *timer.Pool
 }
 
 // ensure that probe implements Probe
 var _ Probe = (*probe)(nil)
 
 // newProbe creates an instance of probe
-func newProbe(ctx context.Context, actorSystem actors.ActorSystem, t *testing.T) (*probe, error) {
+func newProbe(ctx context.Context, actorSystem actor.ActorSystem, t *testing.T) (*probe, error) {
 	// create the message queue
 	msgQueue := make(chan message, MessagesQueueMax)
-	// create the test probe actor
-	actor := &probeActor{messageQueue: msgQueue}
-	// spawn the probe actor
-	pid, err := actorSystem.Spawn(ctx, "probeActor", actor)
+	pa := &probeActor{messageQueue: msgQueue}
+	pid, err := actorSystem.Spawn(ctx, "probeActor", pa)
 	if err != nil {
 		return nil, err
 	}
@@ -242,14 +227,14 @@ func newProbe(ctx context.Context, actorSystem actors.ActorSystem, t *testing.T)
 
 // ExpectMessageOfType asserts that the next received message matches the given message type.
 // It fails the test if no message is received or the type does not match.
-func (x *probe) ExpectMessageOfType(message proto.Message) {
-	x.expectMessageOfType(x.defaultTimeout, message.ProtoReflect().Type())
+func (x *probe) ExpectMessageOfType(message any) {
+	x.expectMessageOfType(x.defaultTimeout, reflect.TypeOf(message))
 }
 
 // ExpectMessageOfTypeWithin asserts that a message of the given type is received within the specified duration.
 // It fails the test if the type does not match or if the timeout is reached.
-func (x *probe) ExpectMessageOfTypeWithin(duration time.Duration, message proto.Message) {
-	x.expectMessageOfType(duration, message.ProtoReflect().Type())
+func (x *probe) ExpectMessageOfTypeWithin(duration time.Duration, message any) {
+	x.expectMessageOfType(duration, reflect.TypeOf(message))
 }
 
 // ExpectTerminated asserts that the actor with the specified name has terminated.
@@ -258,7 +243,7 @@ func (x *probe) ExpectTerminated(actorName string) {
 	// receive one message
 	received := x.receiveOne(x.defaultTimeout)
 	require.NotNil(x.testingT, received, fmt.Sprintf("timeout (%v) during expectAnyMessage while waiting", x.defaultTimeout))
-	require.IsType(x.testingT, &goaktpb.Terminated{}, received)
+	require.IsType(x.testingT, &actor.Terminated{}, received)
 	lastSenderName := x.lastSender.Name()
 	require.Equal(x.testingT, actorName, lastSenderName, fmt.Sprintf("expected Terminated from %v", actorName))
 }
@@ -266,13 +251,13 @@ func (x *probe) ExpectTerminated(actorName string) {
 // ExpectMessage asserts that the next message received by the probe
 // exactly matches the given protobuf message.
 // It fails the test if no message is received or the message does not match.
-func (x *probe) ExpectMessage(message proto.Message) {
+func (x *probe) ExpectMessage(message any) {
 	x.expectMessage(x.defaultTimeout, message)
 }
 
 // ExpectMessageWithin asserts that the expected message is received within the given duration.
 // It fails the test if the timeout is reached or the message differs.
-func (x *probe) ExpectMessageWithin(duration time.Duration, message proto.Message) {
+func (x *probe) ExpectMessageWithin(duration time.Duration, message any) {
 	x.expectMessage(duration, message)
 }
 
@@ -284,13 +269,13 @@ func (x *probe) ExpectNoMessage() {
 
 // ExpectAnyMessage waits for and returns the next message received by the probe.
 // It fails the test if no message is received in a reasonable default timeout.
-func (x *probe) ExpectAnyMessage() proto.Message {
+func (x *probe) ExpectAnyMessage() any {
 	return x.expectAnyMessage(x.defaultTimeout)
 }
 
 // ExpectAnyMessageWithin waits for and returns the next message received within the specified duration.
 // It fails the test if no message is received in the given time window.
-func (x *probe) ExpectAnyMessageWithin(duration time.Duration) proto.Message {
+func (x *probe) ExpectAnyMessageWithin(duration time.Duration) any {
 	return x.expectAnyMessage(duration)
 }
 
@@ -313,14 +298,14 @@ func (x *probe) ExpectAnyMessageWithin(duration time.Duration) proto.Message {
 // Notes:
 //   - This is a convenience method for testing fire-and-forget scenarios.
 //   - For request-response testing, consider using SendSync or SendSyncContext instead.
-func (x *probe) Send(actorName string, message proto.Message) {
+func (x *probe) Send(actorName string, message any) {
 	if x.pid.ActorSystem().InCluster() {
 		err := x.pid.SendAsync(x.testCtx, actorName, message)
 		require.NoError(x.testingT, err)
 		return
 	}
 
-	to, err := x.pid.ActorSystem().LocalActor(actorName)
+	to, err := x.pid.ActorSystem().ActorOf(x.testCtx, actorName)
 	require.NoError(x.testingT, err)
 	require.NoError(x.testingT, x.pid.Tell(x.testCtx, to, message))
 }
@@ -340,51 +325,38 @@ func (x *probe) Send(actorName string, message proto.Message) {
 // Notes:
 //   - This method is intended for use within testing frameworks via a test probe.
 //   - Should not be used in production code as it couples testing and actor system internals.
-func (x *probe) SendSync(actorName string, msg proto.Message, timeout time.Duration) {
+func (x *probe) SendSync(actorName string, msg any, timeout time.Duration) {
 	var (
-		received  proto.Message
-		err       error
-		to        *actors.PID
-		toAddress *address.Address
+		received any
+		err      error
+		to       *actor.PID
 	)
 
+	to, err = x.pid.ActorSystem().ActorOf(x.testCtx, actorName)
+	require.NoError(x.testingT, err)
 	if x.pid.ActorSystem().InCluster() {
-		toAddress, err = x.pid.ActorSystem().RemoteActor(x.testCtx, actorName)
-		require.NoError(x.testingT, err)
-		require.NotNil(x.testingT, toAddress)
-		require.False(x.testingT, toAddress.Equals(address.NoSender()))
 		received, err = x.pid.SendSync(x.testCtx, actorName, msg, timeout)
 		require.NoError(x.testingT, err)
 	} else {
-		to, err = x.pid.ActorSystem().LocalActor(actorName)
-		require.NoError(x.testingT, err)
 		received, err = x.pid.Ask(x.testCtx, to, msg, timeout)
 		require.NoError(x.testingT, err)
-		toAddress = to.Address()
 	}
 
 	x.messageQueue <- message{
-		sender:        to,
-		senderAddress: toAddress,
-		payload:       received,
+		sender:  to,
+		payload: received,
 	}
 }
 
-// Sender returns the PID (Process Identifier) of the sender of the last received message.
-// This is useful when testing interactions involving message origins.
-func (x *probe) Sender() *actors.PID {
+// Sender returns the PID of the sender of the last received message.
+// For remote senders, use pid.IsRemote() / pid.Address() on the returned PID.
+func (x *probe) Sender() *actor.PID {
 	return x.lastSender
-}
-
-// SenderAddress returns the address of the sender of the last received message.
-// This is useful when testing interactions involving message origins, especially in multi-node scenarios.
-func (x *probe) SenderAddress() *address.Address {
-	return x.lastSenderAddress
 }
 
 // PID returns the PID of the probe itself, which can be used as the sender
 // in test scenarios where the tested actor expects a sender reference.
-func (x *probe) PID() *actors.PID {
+func (x *probe) PID() *actor.PID {
 	return x.pid
 }
 
@@ -399,7 +371,7 @@ func (x *probe) PID() *actors.PID {
 //	// perform actions that should lead to actor termination
 //	probe.ExpectTerminated("worker-actor")
 func (x *probe) WatchNamed(actorName string) {
-	to, err := x.pid.ActorSystem().LocalActor(actorName)
+	to, err := x.pid.ActorSystem().ActorOf(x.testCtx, actorName)
 	require.NoError(x.testingT, err)
 	x.pid.Watch(to)
 }
@@ -416,21 +388,19 @@ func (x *probe) WatchNamed(actorName string) {
 //	probe.Watch(workerPID)
 //	// trigger actor shutdown
 //	probe.ExpectTerminated(workerPID.Name())
-func (x *probe) Watch(pid *actors.PID) {
+func (x *probe) Watch(pid *actor.PID) {
 	x.pid.Watch(pid)
 }
 
 // Stop stops the probe actor and releases any associated resources.
 // This should be called at the end of a test to clean up the probe.
 func (x *probe) Stop() {
-	// stop the prob
 	err := x.pid.Shutdown(x.testCtx)
-	// TODO: add some graceful context cancellation
 	require.NoError(x.testingT, err)
 }
 
 // receiveOne receives one message within a maximum time duration
-func (x *probe) receiveOne(duration time.Duration) proto.Message {
+func (x *probe) receiveOne(duration time.Duration) any {
 	t := x.timers.Get(duration)
 
 	select {
@@ -442,11 +412,8 @@ func (x *probe) receiveOne(duration time.Duration) proto.Message {
 			return nil
 		}
 
-		// found some message then set the lastMessage and lastSender
 		if m.payload != nil {
-			x.lastMessage = m.payload
 			x.lastSender = m.sender
-			x.lastSenderAddress = m.senderAddress
 		}
 		return m.payload
 	case <-t.C:
@@ -456,12 +423,13 @@ func (x *probe) receiveOne(duration time.Duration) proto.Message {
 }
 
 // expectMessage assert the expectation of a message within a maximum time duration
-func (x *probe) expectMessage(duration time.Duration, message proto.Message) {
+func (x *probe) expectMessage(duration time.Duration, message any) {
 	// receive one message
 	received := x.receiveOne(duration)
 	// let us assert the received message
-	require.NotNil(x.testingT, received, fmt.Sprintf("timeout (%v) during expectMessage while waiting for %v", duration, message.ProtoReflect().Descriptor().FullName()))
-	require.Equal(x.testingT, prototext.Format(message), prototext.Format(received), fmt.Sprintf("expected %v, found %v", message, received))
+	require.NotNil(x.testingT, received, fmt.Sprintf("timeout (%v) during expectMessage while waiting for %T", duration, message))
+	require.IsType(x.testingT, message, received)
+	require.True(x.testingT, reflect.DeepEqual(message, received), fmt.Sprintf("expected %v, found %v", message, received))
 }
 
 // expectNoMessage asserts that no message is expected
@@ -472,7 +440,7 @@ func (x *probe) expectNoMessage(duration time.Duration) {
 }
 
 // expectedAnyMessage asserts that any message is expected
-func (x *probe) expectAnyMessage(duration time.Duration) proto.Message {
+func (x *probe) expectAnyMessage(duration time.Duration) any {
 	// receive one message
 	received := x.receiveOne(duration)
 	require.NotNil(x.testingT, received, fmt.Sprintf("timeout (%v) during expectAnyMessage while waiting", duration))
@@ -480,13 +448,9 @@ func (x *probe) expectAnyMessage(duration time.Duration) proto.Message {
 }
 
 // expectMessageOfType asserts that a message of a given type is expected within a maximum time duration
-func (x *probe) expectMessageOfType(duration time.Duration, messageType protoreflect.MessageType) proto.Message {
-	// receive one message
+func (x *probe) expectMessageOfType(duration time.Duration, messageType any) {
 	received := x.receiveOne(duration)
-	require.NotNil(x.testingT, received, fmt.Sprintf("timeout (%v) , during expectAnyMessage while waiting", duration))
-
-	// assert the message type
-	expectedType := received.ProtoReflect().Type() == messageType
-	require.True(x.testingT, expectedType, fmt.Sprintf("expected %v, found %v", messageType, received.ProtoReflect().Type()))
-	return received
+	require.NotNil(x.testingT, received, fmt.Sprintf("timeout (%v) during expectAnyMessage while waiting", duration))
+	expectedType := reflect.TypeOf(received) == messageType
+	require.True(x.testingT, expectedType, fmt.Sprintf("expected %v, found %v", messageType, reflect.TypeOf(received)))
 }

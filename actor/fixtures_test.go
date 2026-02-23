@@ -41,32 +41,31 @@ import (
 	etcdContainer "github.com/testcontainers/testcontainers-go/modules/etcd"
 	"github.com/travisjeffery/go-dynaport"
 	otelmetric "go.opentelemetry.io/otel/metric"
+	noopmetric "go.opentelemetry.io/otel/metric/noop"
 	"go.uber.org/atomic"
 
-	"github.com/tochemey/goakt/v3/address"
-	"github.com/tochemey/goakt/v3/datacenter"
-	"github.com/tochemey/goakt/v3/discovery"
-	"github.com/tochemey/goakt/v3/discovery/consul"
-	"github.com/tochemey/goakt/v3/discovery/etcd"
-	"github.com/tochemey/goakt/v3/discovery/nats"
-	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/eventstream"
-	"github.com/tochemey/goakt/v3/extension"
-	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/internal/cluster"
-	"github.com/tochemey/goakt/v3/internal/datacentercontroller"
-	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/pause"
-	"github.com/tochemey/goakt/v3/internal/registry"
-	"github.com/tochemey/goakt/v3/internal/types"
-	"github.com/tochemey/goakt/v3/internal/xsync"
-	"github.com/tochemey/goakt/v3/log"
-	mockcluster "github.com/tochemey/goakt/v3/mocks/cluster"
-	mocksremote "github.com/tochemey/goakt/v3/mocks/remote"
-	"github.com/tochemey/goakt/v3/passivation"
-	"github.com/tochemey/goakt/v3/remote"
-	"github.com/tochemey/goakt/v3/test/data/testpb"
-	"github.com/tochemey/goakt/v3/tls"
+	"github.com/tochemey/goakt/v4/address"
+	"github.com/tochemey/goakt/v4/datacenter"
+	"github.com/tochemey/goakt/v4/discovery"
+	"github.com/tochemey/goakt/v4/discovery/consul"
+	"github.com/tochemey/goakt/v4/discovery/etcd"
+	"github.com/tochemey/goakt/v4/discovery/nats"
+	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/eventstream"
+	"github.com/tochemey/goakt/v4/extension"
+	"github.com/tochemey/goakt/v4/internal/cluster"
+	"github.com/tochemey/goakt/v4/internal/datacentercontroller"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
+	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/types"
+	"github.com/tochemey/goakt/v4/internal/xsync"
+	"github.com/tochemey/goakt/v4/log"
+	mockcluster "github.com/tochemey/goakt/v4/mocks/cluster"
+	mocksremote "github.com/tochemey/goakt/v4/mocks/remote"
+	"github.com/tochemey/goakt/v4/passivation"
+	"github.com/tochemey/goakt/v4/remote"
+	"github.com/tochemey/goakt/v4/test/data/testpb"
+	"github.com/tochemey/goakt/v4/tls"
 )
 
 type MockSubscriber struct {
@@ -87,11 +86,11 @@ func (x *MockSubscriber) PreStart(*Context) error {
 
 func (x *MockSubscriber) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.SubscribeAck:
+	case *SubscribeAck:
 		x.counter.Inc()
 	case *testpb.TestCount:
 		x.counter.Inc()
-	case *goaktpb.UnsubscribeAck:
+	case *UnsubscribeAck:
 		x.counter.Dec()
 	}
 }
@@ -125,7 +124,7 @@ func (p *MockActor) PostStop(*Context) error {
 // Receive processes any message dropped into the actor mailbox without a reply
 func (p *MockActor) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *PostStart:
 		ctx.Logger().Info("MockActor started")
 	case *testpb.TestSend:
 	case *testpb.TestPanic:
@@ -173,9 +172,9 @@ func (p *MockSupervisor) PreStart(*Context) error {
 
 func (p *MockSupervisor) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *PostStart:
 	case *testpb.TestSend:
-	case *goaktpb.Terminated:
+	case *Terminated:
 		// pass
 	default:
 		panic(gerrors.ErrUnhandled)
@@ -203,7 +202,7 @@ func (x *MockSupervised) PreStart(*Context) error {
 
 func (x *MockSupervised) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *PostStart:
 	case *testpb.TestSend:
 	case *testpb.TestReply:
 		ctx.Response(new(testpb.Reply))
@@ -236,7 +235,7 @@ func (x *MockBehavior) PostStop(*Context) error {
 
 func (x *MockBehavior) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *PostStart:
 	case *testpb.TestLogin:
 		ctx.Response(new(testpb.TestLoginSuccess))
 		ctx.Become(x.Authenticated)
@@ -284,7 +283,7 @@ func (e *exchanger) PreStart(*Context) error {
 func (e *exchanger) Receive(ctx *ReceiveContext) {
 	message := ctx.Message()
 	switch message.(type) {
-	case *goaktpb.PostStart:
+	case *PostStart:
 		e.id = ctx.Self().ID()
 	case *testpb.TestSend:
 		ctx.Tell(ctx.Sender(), new(testpb.TestSend))
@@ -292,7 +291,7 @@ func (e *exchanger) Receive(ctx *ReceiveContext) {
 	case *testpb.TestReply:
 		ctx.Response(new(testpb.Reply))
 	case *testpb.TestRemoteSend:
-		ctx.RemoteTell(ctx.RemoteSender(), new(testpb.TestBye))
+		ctx.Tell(ctx.Sender(), new(testpb.TestBye))
 	case *testpb.TestBye:
 		ctx.Shutdown()
 	}
@@ -312,7 +311,7 @@ func (x *MockStash) PreStart(*Context) error {
 
 func (x *MockStash) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *PostStart:
 	case *testpb.TestStash:
 		ctx.Become(x.Ready)
 		ctx.Stash()
@@ -324,7 +323,7 @@ func (x *MockStash) Receive(ctx *ReceiveContext) {
 
 func (x *MockStash) Ready(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *PostStart:
 	case *testpb.TestStash:
 	case *testpb.TestLogin:
 		ctx.Stash()
@@ -366,7 +365,7 @@ func (x *MockPostStop) PreStart(*Context) error {
 
 func (x *MockPostStop) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *PostStart:
 	case *testpb.TestSend:
 	case *testpb.TestPanic:
 		panic("panicked")
@@ -417,11 +416,11 @@ func (x *MockForward) PreStart(*Context) error {
 
 func (x *MockForward) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *PostStart:
 	case *testpb.TestBye:
 		ctx.Forward(x.actorRef)
 	case *testpb.TestRemoteForward:
-		ctx.RemoteForward(x.remoteRef.Address())
+		ctx.Forward(x.remoteRef)
 	}
 }
 
@@ -457,7 +456,7 @@ func (d *MockUnhandled) PreStart(*Context) error {
 
 func (d *MockUnhandled) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *PostStart:
 		// pass
 	default:
 		ctx.Unhandled()
@@ -583,7 +582,7 @@ func (m *MockSum) Receive(ctx *ReceiveContext) {
 		m.sum = msg.GetResult()
 	case *testpb.TestGetSumResult:
 		ctx.Response(&testpb.TestSumResult{Result: m.sum})
-	case *goaktpb.StatusFailure:
+	case *StatusFailure:
 		m.failureCount++
 	case *testpb.TestGetCount:
 		ctx.Response(&testpb.TestCount{Value: m.failureCount})
@@ -616,7 +615,7 @@ func (x *TailChopProbe) Receive(ctx *ReceiveContext) {
 	switch msg := ctx.Message().(type) {
 	case *testpb.TestSumResult:
 		x.sum.Store(msg.GetResult())
-	case *goaktpb.StatusFailure:
+	case *StatusFailure:
 		x.failures.Inc()
 		select {
 		case x.failureNotifs <- struct{}{}:
@@ -660,7 +659,7 @@ func (x *MockFaultyRoutee) PreStart(*Context) error {
 
 func (x *MockFaultyRoutee) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *PostStart:
 		// pass
 	default:
 		ctx.Err(errors.New("routee failure"))
@@ -749,7 +748,7 @@ func (m *MockEntity) PostStop(*Context) error {
 // Receive implements Actor.
 func (m *MockEntity) Receive(ctx *ReceiveContext) {
 	switch received := ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *PostStart:
 		// pass
 	case *testpb.CreateAccount:
 		// TODO: in production extra validation will be needed.
@@ -873,8 +872,8 @@ func (e *MockEscalation) PreStart(*Context) error {
 // Receive implements Actor.
 func (e *MockEscalation) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
-	case *goaktpb.PanicSignal:
+	case *PostStart:
+	case *PanicSignal:
 		ctx.Stop(ctx.Sender())
 	default:
 		ctx.Unhandled()
@@ -907,8 +906,8 @@ func (r *MockReinstate) PreStart(*Context) error {
 // Receive implements Actor.
 func (r *MockReinstate) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
-	case *goaktpb.PanicSignal:
+	case *PostStart:
+	case *PanicSignal:
 		actorName := ctx.Sender().Name()
 
 		if actorName == "reinstate" {
@@ -953,7 +952,7 @@ func (p *MockPostStart) PostStop(*Context) error {
 // Receive processes any message dropped into the actor mailbox without a reply
 func (p *MockPostStart) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *PostStart:
 		postStarCount.Inc()
 	default:
 		ctx.Unhandled()
@@ -1288,7 +1287,7 @@ func (p *MockGrainActor) PostStop(*Context) error {
 // Receive processes any message dropped into the actor mailbox without a reply
 func (p *MockGrainActor) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *PostStart:
 	case *testpb.TestSend:
 	case *testpb.TestPing:
 		ctx.Response(new(testpb.TestPong))
@@ -1537,7 +1536,7 @@ func MockReplicationTestSystem(clusterMock *mockcluster.Cluster) *actorSystem {
 	return sys
 }
 
-func MockSimpleClusterReadyActorSystem(rem remote.Remoting, cl cluster.Cluster, node *discovery.Node, opts ...remote.Option) *actorSystem {
+func MockSimpleClusterReadyActorSystem(rem remote.Client, cl cluster.Cluster, node *discovery.Node, opts ...remote.Option) *actorSystem {
 	sys := &actorSystem{
 		logger:      log.DiscardLogger,
 		cluster:     cl,
@@ -1554,7 +1553,7 @@ func MockSimpleClusterReadyActorSystem(rem remote.Remoting, cl cluster.Cluster, 
 	sys.clusterEnabled.Store(true)
 	sys.shuttingDown.Store(false)
 	sys.grains = xsync.NewMap[string, *grainPID]()
-	sys.registry = registry.NewRegistry()
+	sys.registry = types.NewRegistry()
 	sys.reflection = newReflection(sys.registry)
 	sys.grainsQueue = make(chan *internalpb.Grain, 1)
 
@@ -1757,7 +1756,7 @@ func MockClusterEnsureGrainSystem(t *testing.T, grain Grain, name string) (*acto
 	t.Helper()
 
 	clusterMock := mockcluster.NewCluster(t)
-	remotingMock := mocksremote.NewRemoting(t)
+	remotingMock := mocksremote.NewClient(t)
 	node := &discovery.Node{
 		Host:          "127.0.0.1",
 		PeersPort:     14000,
@@ -2095,14 +2094,17 @@ func (*MockControlPlane) Deregister(_ context.Context, _ string) error {
 
 // MockDatacenterSystem returns an *actorSystem configured for datacenter tests.
 // The controller is started with the fake control plane; listActive is used to drive ActiveRecords().
-func MockDatacenterSystem(t *testing.T, listActive func(_ context.Context) ([]datacenter.DataCenterRecord, error), remoting *mocksremote.Remoting) *actorSystem {
+func MockDatacenterSystem(t *testing.T, listActive func(_ context.Context) ([]datacenter.DataCenterRecord, error), remoting *mocksremote.Client) *actorSystem {
 	t.Helper()
 	dcConfig := datacenter.NewConfig()
 	dcConfig.ControlPlane = &MockControlPlane{listActive: listActive}
 	dcConfig.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
 	endpoints := []string{"127.0.0.1:8080"}
-	dcConfig.MaxCacheStaleness = 50 * time.Millisecond
-	dcConfig.CacheRefreshInterval = 10 * time.Millisecond
+	// Use a generous staleness window so that slow CI runners do not hit the stale-cache
+	// path during normal test execution. The separate "stale records" sub-test creates its
+	// own controller with a 1 ms window, so this value does not affect that path.
+	dcConfig.MaxCacheStaleness = 5 * time.Second
+	dcConfig.CacheRefreshInterval = 500 * time.Millisecond
 
 	controller, err := datacentercontroller.NewController(dcConfig, endpoints)
 	require.NoError(t, err)
@@ -2116,8 +2118,9 @@ func MockDatacenterSystem(t *testing.T, listActive func(_ context.Context) ([]da
 		stopCancel()
 	})
 
-	// Allow first cache refresh so ActiveRecords() returns non-stale data
-	pause.For(25 * time.Millisecond)
+	// No pause needed: controller.Start() performs a synchronous cache refresh before
+	// launching background goroutines, so the cache is already populated when Start()
+	// returns. A time.Sleep here would only burn into the staleness budget on slow runners.
 
 	clusterMock := mockcluster.NewCluster(t)
 	sys := MockReplicationTestSystem(clusterMock)
@@ -2127,4 +2130,94 @@ func MockDatacenterSystem(t *testing.T, listActive func(_ context.Context) ([]da
 	sys.dataCenterController = controller
 
 	return sys
+}
+
+type registerCallbackFailingMeter struct {
+	otelmetric.Meter
+	err error
+}
+
+func (m registerCallbackFailingMeter) RegisterCallback(_ otelmetric.Callback, _ ...otelmetric.Observable) (otelmetric.Registration, error) {
+	return nil, m.err
+}
+
+type instrumentFailingMeter struct {
+	otelmetric.Meter
+	failures map[string]error
+}
+
+func (m instrumentFailingMeter) Int64ObservableCounter(
+	name string,
+	options ...otelmetric.Int64ObservableCounterOption,
+) (otelmetric.Int64ObservableCounter, error) {
+	if err, ok := m.failures[name]; ok {
+		return nil, err
+	}
+	return m.Meter.Int64ObservableCounter(name, options...)
+}
+
+type manualMeterProvider struct {
+	otelmetric.MeterProvider
+	meter otelmetric.Meter
+}
+
+func newManualMeterProvider() *manualMeterProvider {
+	delegate := noopmetric.NewMeterProvider()
+	return &manualMeterProvider{
+		MeterProvider: delegate,
+		meter: &manualMeter{
+			Meter: delegate.Meter("test"),
+		},
+	}
+}
+
+func (m *manualMeterProvider) Meter(_ string, _ ...otelmetric.MeterOption) otelmetric.Meter {
+	return m.meter
+}
+
+type manualMeter struct {
+	otelmetric.Meter
+	callbacks []otelmetric.Callback
+}
+
+func (m *manualMeter) RegisterCallback(cb otelmetric.Callback, _ ...otelmetric.Observable) (otelmetric.Registration, error) {
+	m.callbacks = append(m.callbacks, cb)
+	return noopmetric.Registration{}, nil
+}
+
+// immediateMeter triggers the callback at registration time.
+// It is useful to surface errors that occur inside the callback, such as
+// cluster membership lookups during metrics observation.
+type immediateMeter struct {
+	*manualMeter
+	system  *actorSystem
+	cluster cluster.Cluster
+}
+
+func (m *immediateMeter) RegisterCallback(cb otelmetric.Callback, _ ...otelmetric.Observable) (otelmetric.Registration, error) {
+	// enable cluster path for the callback
+	if m.system != nil {
+		m.system.clusterEnabled.Store(true)
+		m.system.cluster = m.cluster
+	}
+	observer := &manualObserver{}
+	err := cb(context.Background(), observer)
+	return noopmetric.Registration{}, err
+}
+
+type manualObserver struct {
+	noopmetric.Observer
+	records []observeRecord
+}
+
+type observeRecord struct {
+	instrument string
+	value      int64
+}
+
+func (o *manualObserver) ObserveInt64(obsrv otelmetric.Int64Observable, value int64, _ ...otelmetric.ObserveOption) {
+	o.records = append(o.records, observeRecord{
+		instrument: fmt.Sprintf("%T", obsrv),
+		value:      value,
+	})
 }

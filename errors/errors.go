@@ -26,7 +26,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/tochemey/goakt/v3/passivation"
+	"github.com/tochemey/goakt/v4/passivation"
 )
 
 var (
@@ -52,10 +52,13 @@ var (
 	ErrRequestTimeout = errors.New("request timed out")
 	// ErrRequestCanceled indicates that an async request was canceled before completion.
 	ErrRequestCanceled = errors.New("request canceled")
+
 	// ErrReentrancyDisabled indicates async requests are disabled for the actor.
 	ErrReentrancyDisabled = errors.New("reentrancy is disabled")
+
 	// ErrInvalidReentrancyMode indicates a reentrancy mode is not supported.
 	ErrInvalidReentrancyMode = errors.New("invalid reentrancy mode")
+
 	// ErrReentrancyInFlightLimit indicates an actor has reached its async in-flight limit.
 	ErrReentrancyInFlightLimit = errors.New("reentrancy in-flight limit reached")
 
@@ -130,10 +133,13 @@ var (
 
 	// ErrLeaderNotFound is returned when the cluster leader (oldest node) cannot be found.
 	ErrLeaderNotFound = errors.New("leader is not found")
+
 	// ErrWriteQuorum is returned when the cluster cannot reach the configured write quorum.
 	ErrWriteQuorum = errors.New("write quorum cannot be reached")
+
 	// ErrReadQuorum is returned when the cluster cannot reach the configured read quorum.
 	ErrReadQuorum = errors.New("read quorum cannot be reached")
+
 	// ErrClusterQuorum is returned when the cluster cannot reach the minimum member quorum.
 	ErrClusterQuorum = errors.New("cluster quorum cannot be reached")
 
@@ -178,6 +184,11 @@ var (
 
 	// ErrShutdownForbidden is returned when an attempt is made to shutdown a system actor while the actor system is running.
 	ErrShutdownForbidden = errors.New("shutdown forbidden for this actor")
+
+	// ErrNotLocal is returned when a lifecycle or tree-navigation operation is called on a remote PID.
+	// These operations require a live local actor mailbox and actor-system reference, which remote
+	// PIDs do not carry. Use pid.IsLocal() to guard before calling such methods.
+	ErrNotLocal = errors.New("operation requires a local actor PID")
 
 	// ErrInvalidRouterPoolSize is returned when a router is configured with a pool size less than or equal to zero.
 	ErrInvalidRouterPoolSize = errors.New("invalid router pool size, must be greater than zero")

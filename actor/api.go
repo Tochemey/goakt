@@ -27,16 +27,14 @@ import (
 	"errors"
 	"time"
 
-	"google.golang.org/protobuf/proto"
-
-	"github.com/tochemey/goakt/v3/address"
-	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/internal/internalpb"
+	"github.com/tochemey/goakt/v4/address"
+	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
 )
 
 // Ask sends a synchronous message to another actor and expect a response.
 // This block until a response is received or timed out.
-func Ask(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error) {
+func Ask(ctx context.Context, to *PID, message any, timeout time.Duration) (response any, err error) {
 	if !to.IsRunning() {
 		return nil, gerrors.ErrDead
 	}
@@ -77,7 +75,7 @@ func Ask(ctx context.Context, to *PID, message proto.Message, timeout time.Durat
 }
 
 // Tell sends an asynchronous message to an actor
-func Tell(ctx context.Context, to *PID, message proto.Message) error {
+func Tell(ctx context.Context, to *PID, message any) error {
 	if !to.IsRunning() {
 		return gerrors.ErrDead
 	}
@@ -94,7 +92,7 @@ func Tell(ctx context.Context, to *PID, message proto.Message) error {
 // BatchTell sends bulk asynchronous messages to an actor
 // The messages will be processed one after the other in the order they are sent
 // This is a design choice to follow the simple principle of one message at a time processing by actors.
-func BatchTell(ctx context.Context, to *PID, messages ...proto.Message) error {
+func BatchTell(ctx context.Context, to *PID, messages ...any) error {
 	// messages are processed one after the other
 	for _, mesage := range messages {
 		if err := Tell(ctx, to, mesage); err != nil {
@@ -107,8 +105,8 @@ func BatchTell(ctx context.Context, to *PID, messages ...proto.Message) error {
 // BatchAsk sends a synchronous bunch of messages to the given PID and expect responses in the same order as the messages.
 // The messages will be processed one after the other in the order they are sent
 // This is a design choice to follow the simple principle of one message at a time processing by actors.
-func BatchAsk(ctx context.Context, to *PID, timeout time.Duration, messages ...proto.Message) (responses chan proto.Message, err error) {
-	responses = make(chan proto.Message, len(messages))
+func BatchAsk(ctx context.Context, to *PID, timeout time.Duration, messages ...any) (responses chan any, err error) {
+	responses = make(chan any, len(messages))
 	defer close(responses)
 	for _, mesage := range messages {
 		response, err := Ask(ctx, to, mesage, timeout)
@@ -121,24 +119,31 @@ func BatchAsk(ctx context.Context, to *PID, timeout time.Duration, messages ...p
 }
 
 // toReceiveContext creates a ReceiveContext provided a message and a receiver
-func toReceiveContext(ctx context.Context, from, to *PID, message proto.Message, async bool) (*ReceiveContext, error) {
+func toReceiveContext(ctx context.Context, from, to *PID, message any, async bool) (*ReceiveContext, error) {
 	receiveContext := getContext()
-	switch msg := message.(type) {
-	case *internalpb.RemoteMessage:
-		actual, err := msg.GetMessage().UnmarshalNew()
+
+	if msg, ok := message.(*internalpb.RemoteMessage); ok {
+		serializer := to.remoting.Serializer(nil)
+		actual, err := serializer.Deserialize(msg.GetMessage())
 		if err != nil {
 			return nil, gerrors.NewErrInvalidRemoteMessage(err)
 		}
 
-		receiveContext.build(ctx, from, to, actual, async)
-		addr, err := address.Parse(msg.GetSender())
-		if err != nil {
-			return nil, gerrors.NewErrInvalidRemoteMessage(err)
+		// Build the sender PID from the wire address. Remote messages carry the
+		// sender identity as a string; we materialise it as a lightweight remote PID
+		// so that ctx.Sender() is always a unified *PID, never a raw *address.Address.
+		from = to.ActorSystem().NoSender()
+		if rawSender := msg.GetSender(); rawSender != "" {
+			addr, err := address.Parse(rawSender)
+			if err != nil {
+				return nil, gerrors.NewErrInvalidRemoteMessage(err)
+			}
+			from = newRemotePID(addr, to.remoting)
 		}
 
-		return receiveContext.withRemoteSender(addr), nil
-	default:
-		receiveContext.build(ctx, from, to, message, async)
-		return receiveContext.withRemoteSender(address.NoSender()), nil
+		message = actual
 	}
+
+	receiveContext.build(ctx, from, to, message, async)
+	return receiveContext, nil
 }

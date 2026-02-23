@@ -9,8 +9,6 @@ package internalpb
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
-	anypb "google.golang.org/protobuf/types/known/anypb"
-	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -69,170 +67,6 @@ func (Strategy) EnumDescriptor() ([]byte, []int) {
 	return file_internal_supervision_proto_rawDescGZIP(), []int{0}
 }
 
-// Panicking message is sent by a child
-// actor to its parent when it is panicking or returning an error
-// while processing messages
-type Panicking struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the actor id
-	ActorId string `protobuf:"bytes,1,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
-	// Specifies the error message
-	ErrorMessage string `protobuf:"bytes,2,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
-	// Specifies the directive
-	//
-	// Types that are valid to be assigned to Directive:
-	//
-	//	*Panicking_Stop
-	//	*Panicking_Resume
-	//	*Panicking_Restart
-	//	*Panicking_Escalate
-	Directive isPanicking_Directive `protobuf_oneof:"directive"`
-	// Specifies the strategy
-	Strategy Strategy `protobuf:"varint,7,opt,name=strategy,proto3,enum=internalpb.Strategy" json:"strategy,omitempty"`
-	// Specifies the message that triggered the failure
-	Message *anypb.Any `protobuf:"bytes,8,opt,name=message,proto3" json:"message,omitempty"`
-	// Specifies when the error occurred
-	Timestamp     *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *Panicking) Reset() {
-	*x = Panicking{}
-	mi := &file_internal_supervision_proto_msgTypes[0]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *Panicking) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*Panicking) ProtoMessage() {}
-
-func (x *Panicking) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_supervision_proto_msgTypes[0]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use Panicking.ProtoReflect.Descriptor instead.
-func (*Panicking) Descriptor() ([]byte, []int) {
-	return file_internal_supervision_proto_rawDescGZIP(), []int{0}
-}
-
-func (x *Panicking) GetActorId() string {
-	if x != nil {
-		return x.ActorId
-	}
-	return ""
-}
-
-func (x *Panicking) GetErrorMessage() string {
-	if x != nil {
-		return x.ErrorMessage
-	}
-	return ""
-}
-
-func (x *Panicking) GetDirective() isPanicking_Directive {
-	if x != nil {
-		return x.Directive
-	}
-	return nil
-}
-
-func (x *Panicking) GetStop() *StopDirective {
-	if x != nil {
-		if x, ok := x.Directive.(*Panicking_Stop); ok {
-			return x.Stop
-		}
-	}
-	return nil
-}
-
-func (x *Panicking) GetResume() *ResumeDirective {
-	if x != nil {
-		if x, ok := x.Directive.(*Panicking_Resume); ok {
-			return x.Resume
-		}
-	}
-	return nil
-}
-
-func (x *Panicking) GetRestart() *RestartDirective {
-	if x != nil {
-		if x, ok := x.Directive.(*Panicking_Restart); ok {
-			return x.Restart
-		}
-	}
-	return nil
-}
-
-func (x *Panicking) GetEscalate() *EscalateDirective {
-	if x != nil {
-		if x, ok := x.Directive.(*Panicking_Escalate); ok {
-			return x.Escalate
-		}
-	}
-	return nil
-}
-
-func (x *Panicking) GetStrategy() Strategy {
-	if x != nil {
-		return x.Strategy
-	}
-	return Strategy_STRATEGY_ONE_FOR_ONE
-}
-
-func (x *Panicking) GetMessage() *anypb.Any {
-	if x != nil {
-		return x.Message
-	}
-	return nil
-}
-
-func (x *Panicking) GetTimestamp() *timestamppb.Timestamp {
-	if x != nil {
-		return x.Timestamp
-	}
-	return nil
-}
-
-type isPanicking_Directive interface {
-	isPanicking_Directive()
-}
-
-type Panicking_Stop struct {
-	Stop *StopDirective `protobuf:"bytes,3,opt,name=stop,proto3,oneof"`
-}
-
-type Panicking_Resume struct {
-	Resume *ResumeDirective `protobuf:"bytes,4,opt,name=resume,proto3,oneof"`
-}
-
-type Panicking_Restart struct {
-	Restart *RestartDirective `protobuf:"bytes,5,opt,name=restart,proto3,oneof"`
-}
-
-type Panicking_Escalate struct {
-	Escalate *EscalateDirective `protobuf:"bytes,6,opt,name=escalate,proto3,oneof"`
-}
-
-func (*Panicking_Stop) isPanicking_Directive() {}
-
-func (*Panicking_Resume) isPanicking_Directive() {}
-
-func (*Panicking_Restart) isPanicking_Directive() {}
-
-func (*Panicking_Escalate) isPanicking_Directive() {}
-
 // StopDirective defines the supervisor stop directive
 type StopDirective struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -242,7 +76,7 @@ type StopDirective struct {
 
 func (x *StopDirective) Reset() {
 	*x = StopDirective{}
-	mi := &file_internal_supervision_proto_msgTypes[1]
+	mi := &file_internal_supervision_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -254,7 +88,7 @@ func (x *StopDirective) String() string {
 func (*StopDirective) ProtoMessage() {}
 
 func (x *StopDirective) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_supervision_proto_msgTypes[1]
+	mi := &file_internal_supervision_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -267,7 +101,7 @@ func (x *StopDirective) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StopDirective.ProtoReflect.Descriptor instead.
 func (*StopDirective) Descriptor() ([]byte, []int) {
-	return file_internal_supervision_proto_rawDescGZIP(), []int{1}
+	return file_internal_supervision_proto_rawDescGZIP(), []int{0}
 }
 
 // ResumeDirective defines the supervisor resume directive
@@ -280,7 +114,7 @@ type ResumeDirective struct {
 
 func (x *ResumeDirective) Reset() {
 	*x = ResumeDirective{}
-	mi := &file_internal_supervision_proto_msgTypes[2]
+	mi := &file_internal_supervision_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -292,7 +126,7 @@ func (x *ResumeDirective) String() string {
 func (*ResumeDirective) ProtoMessage() {}
 
 func (x *ResumeDirective) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_supervision_proto_msgTypes[2]
+	mi := &file_internal_supervision_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -305,7 +139,7 @@ func (x *ResumeDirective) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResumeDirective.ProtoReflect.Descriptor instead.
 func (*ResumeDirective) Descriptor() ([]byte, []int) {
-	return file_internal_supervision_proto_rawDescGZIP(), []int{2}
+	return file_internal_supervision_proto_rawDescGZIP(), []int{1}
 }
 
 // EscalateDirective defines the supervisor escalation directive
@@ -318,7 +152,7 @@ type EscalateDirective struct {
 
 func (x *EscalateDirective) Reset() {
 	*x = EscalateDirective{}
-	mi := &file_internal_supervision_proto_msgTypes[3]
+	mi := &file_internal_supervision_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -330,7 +164,7 @@ func (x *EscalateDirective) String() string {
 func (*EscalateDirective) ProtoMessage() {}
 
 func (x *EscalateDirective) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_supervision_proto_msgTypes[3]
+	mi := &file_internal_supervision_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -343,7 +177,7 @@ func (x *EscalateDirective) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EscalateDirective.ProtoReflect.Descriptor instead.
 func (*EscalateDirective) Descriptor() ([]byte, []int) {
-	return file_internal_supervision_proto_rawDescGZIP(), []int{3}
+	return file_internal_supervision_proto_rawDescGZIP(), []int{2}
 }
 
 // RestartDirective defines supervisor restart directive
@@ -360,7 +194,7 @@ type RestartDirective struct {
 
 func (x *RestartDirective) Reset() {
 	*x = RestartDirective{}
-	mi := &file_internal_supervision_proto_msgTypes[4]
+	mi := &file_internal_supervision_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -372,7 +206,7 @@ func (x *RestartDirective) String() string {
 func (*RestartDirective) ProtoMessage() {}
 
 func (x *RestartDirective) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_supervision_proto_msgTypes[4]
+	mi := &file_internal_supervision_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -385,7 +219,7 @@ func (x *RestartDirective) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestartDirective.ProtoReflect.Descriptor instead.
 func (*RestartDirective) Descriptor() ([]byte, []int) {
-	return file_internal_supervision_proto_rawDescGZIP(), []int{4}
+	return file_internal_supervision_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *RestartDirective) GetMaxRetries() uint32 {
@@ -407,18 +241,7 @@ var File_internal_supervision_proto protoreflect.FileDescriptor
 const file_internal_supervision_proto_rawDesc = "" +
 	"\n" +
 	"\x1ainternal/supervision.proto\x12\n" +
-	"internalpb\x1a\x19google/protobuf/any.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xd3\x03\n" +
-	"\tPanicking\x12\x19\n" +
-	"\bactor_id\x18\x01 \x01(\tR\aactorId\x12#\n" +
-	"\rerror_message\x18\x02 \x01(\tR\ferrorMessage\x12/\n" +
-	"\x04stop\x18\x03 \x01(\v2\x19.internalpb.StopDirectiveH\x00R\x04stop\x125\n" +
-	"\x06resume\x18\x04 \x01(\v2\x1b.internalpb.ResumeDirectiveH\x00R\x06resume\x128\n" +
-	"\arestart\x18\x05 \x01(\v2\x1c.internalpb.RestartDirectiveH\x00R\arestart\x12;\n" +
-	"\bescalate\x18\x06 \x01(\v2\x1d.internalpb.EscalateDirectiveH\x00R\bescalate\x120\n" +
-	"\bstrategy\x18\a \x01(\x0e2\x14.internalpb.StrategyR\bstrategy\x12.\n" +
-	"\amessage\x18\b \x01(\v2\x14.google.protobuf.AnyR\amessage\x128\n" +
-	"\ttimestamp\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\ttimestampB\v\n" +
-	"\tdirective\"\x0f\n" +
+	"internalpb\"\x0f\n" +
 	"\rStopDirective\"\x11\n" +
 	"\x0fResumeDirective\"\x13\n" +
 	"\x11EscalateDirective\"M\n" +
@@ -429,7 +252,7 @@ const file_internal_supervision_proto_rawDesc = "" +
 	"\bStrategy\x12\x18\n" +
 	"\x14STRATEGY_ONE_FOR_ONE\x10\x00\x12\x18\n" +
 	"\x14STRATEGY_ONE_FOR_ALL\x10\x01B\xa9\x01\n" +
-	"\x0ecom.internalpbB\x10SupervisionProtoH\x02P\x01Z;github.com/tochemey/goakt/v3/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
+	"\x0ecom.internalpbB\x10SupervisionProtoH\x02P\x01Z;github.com/tochemey/goakt/v4/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
 	"Internalpb\xca\x02\n" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
 	"Internalpbb\x06proto3"
@@ -447,30 +270,20 @@ func file_internal_supervision_proto_rawDescGZIP() []byte {
 }
 
 var file_internal_supervision_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_internal_supervision_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_internal_supervision_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_internal_supervision_proto_goTypes = []any{
-	(Strategy)(0),                 // 0: internalpb.Strategy
-	(*Panicking)(nil),             // 1: internalpb.Panicking
-	(*StopDirective)(nil),         // 2: internalpb.StopDirective
-	(*ResumeDirective)(nil),       // 3: internalpb.ResumeDirective
-	(*EscalateDirective)(nil),     // 4: internalpb.EscalateDirective
-	(*RestartDirective)(nil),      // 5: internalpb.RestartDirective
-	(*anypb.Any)(nil),             // 6: google.protobuf.Any
-	(*timestamppb.Timestamp)(nil), // 7: google.protobuf.Timestamp
+	(Strategy)(0),             // 0: internalpb.Strategy
+	(*StopDirective)(nil),     // 1: internalpb.StopDirective
+	(*ResumeDirective)(nil),   // 2: internalpb.ResumeDirective
+	(*EscalateDirective)(nil), // 3: internalpb.EscalateDirective
+	(*RestartDirective)(nil),  // 4: internalpb.RestartDirective
 }
 var file_internal_supervision_proto_depIdxs = []int32{
-	2, // 0: internalpb.Panicking.stop:type_name -> internalpb.StopDirective
-	3, // 1: internalpb.Panicking.resume:type_name -> internalpb.ResumeDirective
-	5, // 2: internalpb.Panicking.restart:type_name -> internalpb.RestartDirective
-	4, // 3: internalpb.Panicking.escalate:type_name -> internalpb.EscalateDirective
-	0, // 4: internalpb.Panicking.strategy:type_name -> internalpb.Strategy
-	6, // 5: internalpb.Panicking.message:type_name -> google.protobuf.Any
-	7, // 6: internalpb.Panicking.timestamp:type_name -> google.protobuf.Timestamp
-	7, // [7:7] is the sub-list for method output_type
-	7, // [7:7] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	0, // [0:0] is the sub-list for method output_type
+	0, // [0:0] is the sub-list for method input_type
+	0, // [0:0] is the sub-list for extension type_name
+	0, // [0:0] is the sub-list for extension extendee
+	0, // [0:0] is the sub-list for field type_name
 }
 
 func init() { file_internal_supervision_proto_init() }
@@ -478,19 +291,13 @@ func file_internal_supervision_proto_init() {
 	if File_internal_supervision_proto != nil {
 		return
 	}
-	file_internal_supervision_proto_msgTypes[0].OneofWrappers = []any{
-		(*Panicking_Stop)(nil),
-		(*Panicking_Resume)(nil),
-		(*Panicking_Restart)(nil),
-		(*Panicking_Escalate)(nil),
-	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_supervision_proto_rawDesc), len(file_internal_supervision_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   5,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -33,7 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	"github.com/tochemey/goakt/v3/address"
+	"github.com/tochemey/goakt/v4/address"
 )
 
 func TestUnboundedFairMailboxNoStarvation(t *testing.T) {
@@ -391,7 +391,7 @@ func makeReceiveContextWithPayload(sender, payload string) *ReceiveContext {
 }
 
 func makeReceiveContextFromAddress(addr *address.Address, payload string) *ReceiveContext {
-	ctx := &ReceiveContext{remoteSender: addr}
+	ctx := &ReceiveContext{sender: newRemotePID(addr, nil)}
 	if payload != "" {
 		ctx.message = &anypb.Any{TypeUrl: "test/payload", Value: []byte(payload)}
 	}

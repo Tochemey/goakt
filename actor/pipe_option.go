@@ -25,7 +25,7 @@ package actor
 import (
 	"time"
 
-	"github.com/tochemey/goakt/v3/breaker"
+	"github.com/tochemey/goakt/v4/breaker"
 )
 
 // pipeConfig defines how the outcome of a long-running task should be delivered

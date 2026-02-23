@@ -6,7 +6,7 @@ Thumbs.db
 .vscode/
 *.iml
 *.so
-coverage.*
+*coverage.*
 vendor
 gen.env
 .env

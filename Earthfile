@@ -63,7 +63,7 @@ mock:
     RUN mockery  --dir internal/cluster --name Cluster --keeptree --exported=true --with-expecter=true --inpackage=true --disable-version-string=true --output ./mocks/cluster --case snake
     RUN mockery  --dir extension --name Dependency --keeptree --exported=true --with-expecter=true --inpackage=true --disable-version-string=true --output ./mocks/extension --case snake
     RUN mockery  --dir extension --name Extension --keeptree --exported=true --with-expecter=true --inpackage=true --disable-version-string=true --output ./mocks/extension --case snake
-    RUN mockery --dir remote --name Remoting --keeptree --exported=true --with-expecter=true --inpackage=true --disable-version-string=true --output ./mocks/remote --case snake
+    RUN mockery --dir remote --name Client --keeptree --exported=true --with-expecter=true --inpackage=true --disable-version-string=true --output ./mocks/remote --case snake
 
     SAVE ARTIFACT ./mocks mocks AS LOCAL mocks
 
@@ -92,12 +92,10 @@ protogen:
     # generate the pbs
     RUN buf generate \
             --template buf.gen.yaml \
-            --path protos/goakt \
             --path protos/internal \
             --path protos/test
 
     # save artifact to
-    SAVE ARTIFACT gen/goakt AS LOCAL goaktpb
     SAVE ARTIFACT gen/test AS LOCAL  test/data/testpb
     SAVE ARTIFACT gen/internal AS LOCAL internal/internalpb
 

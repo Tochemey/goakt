@@ -41,6 +41,7 @@ type pidState uint32
 //   - singletonState: PID represents a cluster singleton.
 //   - relocationState: PID may be relocated to another node (cluster mode).
 //   - systemState:    PID is a system actor (guardian, topic actor, etc.).
+//   - remoteState:    PID is a lightweight handle for an actor on a remote node.
 const (
 	runningState pidState = 1 << iota
 	stoppingState
@@ -51,6 +52,7 @@ const (
 	singletonState
 	relocationState
 	systemState
+	remoteState
 )
 
 func (pid *PID) isStateSet(state pidState) bool {

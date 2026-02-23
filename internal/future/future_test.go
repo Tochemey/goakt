@@ -32,8 +32,8 @@ import (
 	"go.uber.org/goleak"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/tochemey/goakt/v3/internal/pause"
-	"github.com/tochemey/goakt/v3/test/data/testpb"
+	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
 func TestMain(m *testing.M) {
@@ -42,7 +42,7 @@ func TestMain(m *testing.M) {
 
 func TestFuture(t *testing.T) {
 	t.Run("With timeout", func(t *testing.T) {
-		future := New(func() (proto.Message, error) {
+		future := New(func() (any, error) {
 			// simulate a long-running task
 			pause.For(100 * time.Millisecond)
 			return nil, nil
@@ -58,7 +58,7 @@ func TestFuture(t *testing.T) {
 	})
 	t.Run("With success", func(t *testing.T) {
 		expected := new(testpb.TestPing)
-		future := New(func() (proto.Message, error) {
+		future := New(func() (any, error) {
 			// simulate a long-running task
 			pause.For(10 * time.Millisecond)
 			return expected, nil
@@ -69,10 +69,12 @@ func TestFuture(t *testing.T) {
 
 		result, err := future.Await(ctx)
 		require.NoError(t, err)
-		require.True(t, proto.Equal(expected, result))
+		actual, ok := result.(*testpb.TestPing)
+		require.True(t, ok)
+		assert.True(t, proto.Equal(expected, actual))
 	})
 	t.Run("With failure", func(t *testing.T) {
-		future := New(func() (proto.Message, error) {
+		future := New(func() (any, error) {
 			// simulate a long-running task
 			pause.For(10 * time.Millisecond)
 			return nil, assert.AnError

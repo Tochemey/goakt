@@ -29,12 +29,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/anypb"
-	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/internal/pause"
-	"github.com/tochemey/goakt/v3/log"
-	"github.com/tochemey/goakt/v3/test/data/testpb"
+	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/log"
+	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
 func TestRootGuardian(t *testing.T) {
@@ -56,11 +54,7 @@ func TestRootGuardian(t *testing.T) {
 		// using the userGuardian
 		userGuardian := actorSystem.getUserGuardian()
 		require.NotNil(t, userGuardian)
-		err = userGuardian.Tell(ctx, actorSystem.getRootGuardian(), &goaktpb.PanicSignal{
-			Message:   message,
-			Reason:    "test panic signal",
-			Timestamp: timestamppb.Now(),
-		})
+		err = userGuardian.Tell(ctx, actorSystem.getRootGuardian(), NewPanicSignal(message, "test panic signal", time.Now().UTC()))
 		require.NoError(t, err)
 		// wait for a while to allow the message to be processed
 		pause.For(500 * time.Millisecond)

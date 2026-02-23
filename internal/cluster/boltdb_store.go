@@ -37,7 +37,7 @@ import (
 	bbolt "go.etcd.io/bbolt"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/tochemey/goakt/v3/internal/internalpb"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
 )
 
 const (

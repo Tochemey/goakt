@@ -31,11 +31,10 @@ import (
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/travisjeffery/go-dynaport"
 
-	"github.com/tochemey/goakt/v3/actor"
-	"github.com/tochemey/goakt/v3/discovery/nats"
-	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/log"
-	"github.com/tochemey/goakt/v3/remote"
+	"github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/discovery/nats"
+	"github.com/tochemey/goakt/v4/log"
+	"github.com/tochemey/goakt/v4/remote"
 )
 
 var systemName = "test"
@@ -56,11 +55,18 @@ func main() {
 
 	// system 2 should be able to retrieve the remote actor from system 1
 	fmt.Println("\nRetrieving remote actor from system 1...")
-	if _, err := sys2.RemoteActor(ctx, "actor1"); err != nil {
+	pid, err := sys2.ActorOf(ctx, "actor1")
+	if err != nil {
 		fmt.Printf("Error retrieving remote actor: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Println("Remote actor retrieved successfully.")
+
+	if pid.IsRemote() {
+		fmt.Println("Remote actor retrieved successfully.")
+	} else {
+		fmt.Println("Local actor retrieved successfully. This should not happen.")
+		os.Exit(1)
+	}
 
 	// stopping system 1 should relocate the actor to system 2
 	stopActorSystem(ctx, sys1)
@@ -70,11 +76,18 @@ func main() {
 
 	// system 2 should now be able to retrieve the local actor - but it fails to do so
 	fmt.Println("\nRetrieving local actor from system 2...")
-	if _, err := sys2.LocalActor("actor1"); err != nil {
+	pid, err = sys2.ActorOf(ctx, "actor1")
+	if err != nil {
 		fmt.Printf("Error retrieving local actor: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Println("Local actor retrieved successfully.")
+
+	if pid.IsLocal() {
+		fmt.Println("Local actor retrieved successfully.")
+	} else {
+		fmt.Println("Remote actor retrieved successfully. This should not happen.")
+		os.Exit(1)
+	}
 
 	stopActorSystem(ctx, sys2)
 }
@@ -151,7 +164,7 @@ func (x *MyActor) PreStart(ctx *actor.Context) error {
 
 func (x *MyActor) Receive(ctx *actor.ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *actor.PostStart:
 		fmt.Printf("%s PostStart on %s\n", ctx.Self().Name(), ctx.ActorSystem().Name())
 	default:
 		ctx.Unhandled()

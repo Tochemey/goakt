@@ -30,11 +30,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/extension"
-	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/internal/xsync"
-	"github.com/tochemey/goakt/v3/log"
+	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/extension"
+	"github.com/tochemey/goakt/v4/internal/xsync"
+	"github.com/tochemey/goakt/v4/log"
 )
 
 func TestGrainPIDPassivationIDEmptyWithoutIdentity(t *testing.T) {
@@ -265,7 +264,7 @@ func TestGrainPIDHandlePoisonPillRecoversDeactivatePanic(t *testing.T) {
 		pid,
 		nil,
 		pid.identity,
-		&goaktpb.PoisonPill{},
+		&PoisonPill{},
 		false,
 	)
 	t.Cleanup(func() {

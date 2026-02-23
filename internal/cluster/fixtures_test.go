@@ -34,9 +34,9 @@ import (
 	"github.com/tochemey/olric/stats"
 	"go.uber.org/atomic"
 
-	"github.com/tochemey/goakt/v3/discovery"
-	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v4/discovery"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
+	"github.com/tochemey/goakt/v4/log"
 )
 
 type MockFailingGetDMap struct {

@@ -20,41 +20,36 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package http
+package remote
 
 import (
-	"net/http"
-	"testing"
-	"time"
-
-	"github.com/stretchr/testify/assert"
-	"golang.org/x/net/http2"
-
-	"github.com/tochemey/goakt/v3/internal/size"
+	"context"
+	"errors"
+	nethttp "net/http"
 )
 
-func TestNewClient(t *testing.T) {
-	cl := NewHTTPClient(16 * size.KB)
-	assert.IsType(t, new(http.Client), cl)
-	assert.IsType(t, new(http2.Transport), cl.Transport)
-	tr := cl.Transport.(*http2.Transport)
-	assert.True(t, tr.AllowHTTP)
-	assert.Equal(t, 10*time.Second, tr.PingTimeout)
-	assert.Equal(t, 20*time.Second, tr.ReadIdleTimeout)
+// nonProtoMsg is an arbitrary type with no registered serializer.
+type nonProtoMsg struct{ value string }
+
+// errInjectPropagator is a ContextPropagator whose Inject always returns an error.
+type errInjectPropagator struct{}
+
+func (errInjectPropagator) Inject(context.Context, nethttp.Header) error {
+	return errors.New("inject error")
 }
 
-func TestURL(t *testing.T) {
-	host := "127.0.0.1"
-	port := 123
-
-	url := URL(host, port)
-	assert.Equal(t, "http://127.0.0.1:123", url)
+func (errInjectPropagator) Extract(ctx context.Context, _ nethttp.Header) (context.Context, error) {
+	return ctx, nil
 }
 
-func TestURLs(t *testing.T) {
-	host := "127.0.0.1"
-	port := 123
+// headerPropagator injects a fixed header so the header-copy loop in enrichContext is exercised.
+type headerPropagator struct{ key, value string }
 
-	url := URLs(host, port)
-	assert.Equal(t, "https://127.0.0.1:123", url)
+func (h headerPropagator) Inject(_ context.Context, headers nethttp.Header) error {
+	headers.Set(h.key, h.value)
+	return nil
+}
+
+func (h headerPropagator) Extract(ctx context.Context, _ nethttp.Header) (context.Context, error) {
+	return ctx, nil
 }

@@ -38,30 +38,28 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
 	"go.opentelemetry.io/otel"
-	otelmetric "go.opentelemetry.io/otel/metric"
 	noopmetric "go.opentelemetry.io/otel/metric/noop"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/tochemey/goakt/v3/address"
-	"github.com/tochemey/goakt/v3/breaker"
-	"github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/eventstream"
-	"github.com/tochemey/goakt/v3/extension"
-	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/internal/cluster"
-	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/metric"
-	"github.com/tochemey/goakt/v3/internal/pause"
-	"github.com/tochemey/goakt/v3/internal/types"
-	"github.com/tochemey/goakt/v3/internal/xsync"
-	"github.com/tochemey/goakt/v3/log"
-	testkit "github.com/tochemey/goakt/v3/mocks/discovery"
-	mocksremote "github.com/tochemey/goakt/v3/mocks/remote"
-	"github.com/tochemey/goakt/v3/passivation"
-	"github.com/tochemey/goakt/v3/remote"
-	"github.com/tochemey/goakt/v3/supervisor"
-	"github.com/tochemey/goakt/v3/test/data/testpb"
+	"github.com/tochemey/goakt/v4/address"
+	"github.com/tochemey/goakt/v4/breaker"
+	"github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/eventstream"
+	"github.com/tochemey/goakt/v4/extension"
+	"github.com/tochemey/goakt/v4/internal/commands"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
+	"github.com/tochemey/goakt/v4/internal/metric"
+	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/types"
+	"github.com/tochemey/goakt/v4/internal/xsync"
+	"github.com/tochemey/goakt/v4/log"
+	testkit "github.com/tochemey/goakt/v4/mocks/discovery"
+	mocksremote "github.com/tochemey/goakt/v4/mocks/remote"
+	"github.com/tochemey/goakt/v4/passivation"
+	"github.com/tochemey/goakt/v4/remote"
+	"github.com/tochemey/goakt/v4/supervisor"
+	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
 const (
@@ -161,11 +159,11 @@ func TestReceive(t *testing.T) {
 
 		pause.For(time.Second)
 
-		var items []*goaktpb.Deadletter
+		var items []*Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
 			// only listening to deadletter
-			deadletter, ok := payload.(*goaktpb.Deadletter)
+			deadletter, ok := payload.(*Deadletter)
 			if ok {
 				items = append(items, deadletter)
 			}
@@ -176,7 +174,9 @@ func TestReceive(t *testing.T) {
 		require.NoError(t, err)
 		require.NotEmpty(t, items)
 		deadletter := items[0]
-		require.True(t, deadletter.Message.MessageIs(&internalpb.HealthCheckRequest{}))
+		actual, ok := deadletter.Message().(*commands.HealthCheckRequest)
+		require.True(t, ok)
+		require.NotNil(t, actual)
 
 		assert.NoError(t, err)
 		assert.NoError(t, actorSystem.Stop(ctx))
@@ -279,7 +279,7 @@ func TestPassivation(t *testing.T) {
 		pause.For(100 * time.Millisecond)
 
 		// Pause the passivation
-		err = Tell(ctx, pid, new(goaktpb.PausePassivation))
+		err = Tell(ctx, pid, new(PausePassivation))
 		require.NoError(t, err)
 
 		// let us sleep for some time to make the actor idle
@@ -292,7 +292,7 @@ func TestPassivation(t *testing.T) {
 		require.True(t, pid.IsRunning())
 
 		// Resume passivation
-		err = Tell(ctx, pid, new(goaktpb.ResumePassivation))
+		err = Tell(ctx, pid, new(ResumePassivation))
 		require.NoError(t, err)
 
 		wg = sync.WaitGroup{}
@@ -401,7 +401,7 @@ func TestPassivation(t *testing.T) {
 		require.NoError(t, Tell(ctx, pid, new(testpb.TestSend)))
 		require.True(t, pid.IsRunning())
 
-		require.NoError(t, Tell(ctx, pid, new(goaktpb.PausePassivation)))
+		require.NoError(t, Tell(ctx, pid, new(PausePassivation)))
 
 		require.Eventually(t, func() bool {
 			return pid.passivationManager != nil &&
@@ -1196,8 +1196,9 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, parent)
 
-		// create the child actor
-		fakeStrategy := supervisor.NewSupervisor(supervisor.WithDirective(&errors.PanicError{}, 4)) // undefined directive
+		// Directive(4) is beyond the known constants (Stop=0, Resume=1, Restart=2, Escalate=3),
+		// so handlePanicking falls through to the default case which suspends the actor.
+		fakeStrategy := supervisor.NewSupervisor(supervisor.WithDirective(&errors.PanicError{}, 4))
 		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(fakeStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
@@ -1205,21 +1206,16 @@ func TestSupervisorStrategy(t *testing.T) {
 		pause.For(time.Second)
 
 		require.Len(t, parent.Children(), 1)
-		// send a test panic message to the actor
 		require.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
 
-		// wait for the child to properly shutdown
 		pause.For(time.Second)
 
-		// assert the actor state
 		require.False(t, child.IsRunning())
 		require.True(t, child.IsSuspended())
 		require.Len(t, parent.Children(), 0)
 
-		// trying sending a message to the actor will return an error
 		require.Error(t, Tell(ctx, child, new(testpb.TestSend)))
 
-		//stop the actor
 		err = parent.Shutdown(ctx)
 		require.NoError(t, err)
 		assert.NoError(t, actorSystem.Stop(ctx))
@@ -1502,7 +1498,9 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expected := new(testpb.Reply)
-		assert.True(t, proto.Equal(expected, reply))
+		actual, ok := reply.(*testpb.Reply)
+		require.True(t, ok)
+		assert.True(t, proto.Equal(expected, actual))
 
 		//stop the actor
 		err = parent.Shutdown(ctx)
@@ -1601,11 +1599,11 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.True(t, child.IsSuspended())
 		require.Len(t, parent.Children(), 0)
 
-		var suspendedEvent *goaktpb.ActorSuspended
+		var suspendedEvent *ActorSuspended
 		for message := range subscriber.Iterator() {
 			payload := message.Payload()
 			// only listening to suspended actors
-			event, ok := payload.(*goaktpb.ActorSuspended)
+			event, ok := payload.(*ActorSuspended)
 			if ok {
 				suspendedEvent = event
 				break
@@ -1613,8 +1611,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		}
 
 		require.NotNil(t, suspendedEvent)
-		require.False(t, proto.Equal(suspendedEvent, new(goaktpb.ActorSuspended)))
-		require.Equal(t, child.ID(), suspendedEvent.GetAddress())
+		require.Equal(t, child.ID(), suspendedEvent.Address())
 
 		// unsubscribe the consumer
 		err = actorSystem.Unsubscribe(subscriber)
@@ -1950,8 +1947,8 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		require.Eventually(t, func() bool {
 			for message := range consumer.Iterator() {
-				if event, ok := message.Payload().(*goaktpb.ActorSuspended); ok {
-					if event.GetAddress() == child.ID() {
+				if event, ok := message.Payload().(*ActorSuspended); ok {
+					if event.Address() == child.ID() {
 						return true
 					}
 				}
@@ -2005,7 +2002,9 @@ func TestMessaging(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		expected := new(testpb.Reply)
-		assert.True(t, proto.Equal(expected, reply))
+		actual, ok := reply.(*testpb.Reply)
+		require.True(t, ok)
+		assert.True(t, proto.Equal(expected, actual))
 
 		// wait a while because exchange is ongoing
 		pause.For(time.Second)
@@ -2294,25 +2293,23 @@ func TestRemoting(t *testing.T) {
 		assert.NotNil(t, actorRef2)
 
 		// get the address of the exchanger actor one
-		addr1, err := actorRef2.RemoteLookup(ctx, host, remotingPort, actorName1)
+		remotePID1, err := actorRef2.RemoteLookup(ctx, host, remotingPort, actorName1)
 		require.NoError(t, err)
+		require.NotNil(t, remotePID1)
 
 		// send the message to exchanger actor one using remote messaging
-		reply, err := actorRef2.RemoteAsk(ctx, addr1, new(testpb.TestReply), replyTimeout)
+		reply, err := actorRef2.Ask(ctx, remotePID1, new(testpb.TestReply), replyTimeout)
 		// perform some assertions
 		require.NoError(t, err)
 		require.NotNil(t, reply)
-		require.True(t, reply.MessageIs(new(testpb.Reply)))
 
-		actual := new(testpb.Reply)
-		err = reply.UnmarshalTo(actual)
-		require.NoError(t, err)
-
+		actual, ok := reply.(*testpb.Reply)
+		require.True(t, ok)
 		expected := new(testpb.Reply)
 		assert.True(t, proto.Equal(expected, actual))
 
 		// send a message to stop the first exchange actor
-		err = actorRef2.RemoteTell(ctx, addr1, new(testpb.TestRemoteSend))
+		err = actorRef2.Tell(ctx, remotePID1, new(testpb.TestRemoteSend))
 		require.NoError(t, err)
 
 		// stop the actor after some time
@@ -2358,19 +2355,20 @@ func TestRemoting(t *testing.T) {
 		assert.NotNil(t, actorRef2)
 
 		// get the address of the exchanger actor one
-		addr1, err := actorRef2.RemoteLookup(ctx, host, remotingPort, actorName1)
+		remotePID1, err := actorRef2.RemoteLookup(ctx, host, remotingPort, actorName1)
 		require.NoError(t, err)
+		require.NotNil(t, remotePID1)
 
 		actorRef2.remoting = nil
 		// send the message to exchanger actor one using remote messaging
-		reply, err := actorRef2.RemoteAsk(ctx, addr1, new(testpb.TestReply), replyTimeout)
+		reply, err := actorRef2.Ask(ctx, remotePID1, new(testpb.TestReply), replyTimeout)
 		// perform some assertions
 		require.Error(t, err)
 		require.Nil(t, reply)
 		assert.ErrorIs(t, err, errors.ErrRemotingDisabled)
 
 		// send a message to stop the first exchange actor
-		err = actorRef2.RemoteTell(ctx, addr1, new(testpb.TestRemoteSend))
+		err = actorRef2.Tell(ctx, remotePID1, new(testpb.TestRemoteSend))
 		require.Error(t, err)
 		assert.ErrorIs(t, err, errors.ErrRemotingDisabled)
 
@@ -2389,14 +2387,14 @@ func TestPIDRemotingEnabledGuard(t *testing.T) {
 	}
 
 	t.Run("Actor system nil", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		pid := &PID{
 			logger:   log.DiscardLogger,
 			remoting: remotingMock,
 			address:  address.New("pid", "sys", "127.0.0.1", 9000),
 		}
 
-		err := pid.RemoteTell(context.Background(), address.New("target", "sys", "127.0.0.1", 9001), new(testpb.TestSend))
+		err := pid.remoteTell(context.Background(), address.New("target", "sys", "127.0.0.1", 9001), new(testpb.TestSend))
 		require.ErrorIs(t, err, errors.ErrRemotingDisabled)
 		remotingMock.AssertNotCalled(t, "RemoteTell", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 	})
@@ -2405,7 +2403,7 @@ func TestPIDRemotingEnabledGuard(t *testing.T) {
 		sys, err := NewActorSystem("wrapper-sys", WithLogger(log.DiscardLogger))
 		require.NoError(t, err)
 
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		remotingMock.EXPECT().RemoteTell(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 
 		pid := &PID{
@@ -2415,7 +2413,7 @@ func TestPIDRemotingEnabledGuard(t *testing.T) {
 			address:     address.New("pid", "sys", "127.0.0.1", 9000),
 		}
 
-		err = pid.RemoteTell(context.Background(), address.New("target", "sys", "127.0.0.1", 9001), new(testpb.TestSend))
+		err = pid.remoteTell(context.Background(), address.New("target", "sys", "127.0.0.1", 9001), new(testpb.TestSend))
 		require.NoError(t, err)
 	})
 }
@@ -2766,12 +2764,12 @@ func TestSpawnChild(t *testing.T) {
 
 		pause.For(time.Second)
 
-		var events []*goaktpb.ActorChildCreated
+		var events []*ActorChildCreated
 		for message := range subsriber.Iterator() {
 			// get the event payload
 			payload := message.Payload()
 			switch msg := payload.(type) {
-			case *goaktpb.ActorChildCreated:
+			case *ActorChildCreated:
 				events = append(events, msg)
 			}
 		}
@@ -2780,7 +2778,7 @@ func TestSpawnChild(t *testing.T) {
 		require.Len(t, events, 1)
 
 		event := events[0]
-		assert.Equal(t, parent.ID(), event.GetParent())
+		assert.Equal(t, parent.ID(), event.Parent())
 
 		//stop the actor
 		err = parent.Shutdown(ctx)
@@ -2917,7 +2915,7 @@ func TestPoisonPill(t *testing.T) {
 
 	assert.True(t, pid.IsRunning())
 	// send a poison pill to the actor
-	err = Tell(ctx, pid, new(goaktpb.PoisonPill))
+	err = Tell(ctx, pid, new(PoisonPill))
 	assert.NoError(t, err)
 
 	// wait for the graceful shutdown
@@ -2956,12 +2954,12 @@ func TestRemoteLookup(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef1)
 
-		// let us lookup actor two
+		// let us lookup actor two — it does not exist, expect ErrActorNotFound
 		actorName2 := "Exchange2"
-		addr, err := actorRef1.RemoteLookup(ctx, host, remotingPort, actorName2)
-		require.NoError(t, err)
-		require.NotNil(t, addr)
-		require.True(t, addr.Equals(address.NoSender()))
+		remotePID, err := actorRef1.RemoteLookup(ctx, host, remotingPort, actorName2)
+		require.Error(t, err)
+		require.Nil(t, remotePID)
+		require.ErrorIs(t, err, errors.ErrActorNotFound)
 
 		t.Cleanup(func() {
 			assert.NoError(t, sys.Stop(ctx))
@@ -3257,13 +3255,15 @@ func TestBatchAsk(t *testing.T) {
 		require.NotNil(t, pid)
 
 		// batch ask
-		responses, err := pid.BatchAsk(ctx, pid, []proto.Message{new(testpb.TestReply), new(testpb.TestReply)}, replyTimeout)
+		responses, err := pid.BatchAsk(ctx, pid, []any{new(testpb.TestReply), new(testpb.TestReply)}, replyTimeout)
 		require.NoError(t, err)
 		for reply := range responses {
 			require.NoError(t, err)
 			require.NotNil(t, reply)
 			expected := new(testpb.Reply)
-			assert.True(t, proto.Equal(expected, reply))
+			actual, ok := reply.(*testpb.Reply)
+			require.True(t, ok)
+			assert.True(t, proto.Equal(expected, actual))
 		}
 
 		// wait a while because exchange is ongoing
@@ -3300,7 +3300,7 @@ func TestBatchAsk(t *testing.T) {
 		pause.For(time.Second)
 
 		// batch ask
-		responses, err := pid.BatchAsk(ctx, pid, []proto.Message{new(testpb.TestReply), new(testpb.TestReply)}, replyTimeout)
+		responses, err := pid.BatchAsk(ctx, pid, []any{new(testpb.TestReply), new(testpb.TestReply)}, replyTimeout)
 		require.Error(t, err)
 		require.Nil(t, responses)
 		assert.NoError(t, actorSystem.Stop(ctx))
@@ -3329,7 +3329,7 @@ func TestBatchAsk(t *testing.T) {
 		require.NotNil(t, pid)
 
 		// batch ask
-		responses, err := pid.BatchAsk(ctx, pid, []proto.Message{new(testpb.TestTimeout), new(testpb.TestReply)}, replyTimeout)
+		responses, err := pid.BatchAsk(ctx, pid, []any{new(testpb.TestTimeout), new(testpb.TestReply)}, replyTimeout)
 		require.Error(t, err)
 		require.Empty(t, responses)
 
@@ -3668,11 +3668,11 @@ func TestRemoteSpawn(t *testing.T) {
 		actor := &exchanger{}
 		actorName := uuid.NewString()
 
-		// fetching the address of the that actor should return address.NoSender
-		addr, err := pid.RemoteLookup(ctx, host, remotingPort, actorName)
-		require.NoError(t, err)
-		require.NotNil(t, addr)
-		require.True(t, addr.Equals(address.NoSender()))
+		// actor not spawned yet — expect ErrActorNotFound
+		remotePID, err := pid.RemoteLookup(ctx, host, remotingPort, actorName)
+		require.Error(t, err)
+		require.Nil(t, remotePID)
+		require.ErrorIs(t, err, errors.ErrActorNotFound)
 
 		// register the actor
 		err = sys.Register(ctx, actor)
@@ -3682,22 +3682,17 @@ func TestRemoteSpawn(t *testing.T) {
 		err = pid.RemoteSpawn(ctx, host, remotingPort, actorName, "actor.exchanger")
 		require.NoError(t, err)
 
-		// re-fetching the address of the actor should return not nil address after start
-		addr, err = pid.RemoteLookup(ctx, host, remotingPort, actorName)
+		// re-fetching the address of the actor should now succeed
+		remotePID, err = pid.RemoteLookup(ctx, host, remotingPort, actorName)
 		require.NoError(t, err)
-		require.NotNil(t, addr)
+		require.NotNil(t, remotePID)
 
 		// send the message to exchanger actor one using remote messaging
-		reply, err := pid.RemoteAsk(ctx, addr, new(testpb.TestReply), replyTimeout)
-
+		reply, err := pid.Ask(ctx, remotePID, new(testpb.TestReply), replyTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
-		require.True(t, reply.MessageIs(new(testpb.Reply)))
-
-		actual := new(testpb.Reply)
-		err = reply.UnmarshalTo(actual)
-		require.NoError(t, err)
-
+		actual, ok := reply.(*testpb.Reply)
+		require.True(t, ok)
 		expected := new(testpb.Reply)
 		assert.True(t, proto.Equal(expected, actual))
 
@@ -3734,11 +3729,11 @@ func TestRemoteSpawn(t *testing.T) {
 		assert.NotNil(t, pid)
 
 		actorName := uuid.NewString()
-		// fetching the address of the that actor should return NoSender address
-		addr, err := pid.RemoteLookup(ctx, host, remotingPort, actorName)
-		require.NoError(t, err)
-		require.NotNil(t, addr)
-		require.True(t, addr.Equals(address.NoSender()))
+		// actor not registered — expect ErrActorNotFound
+		remotePID, err := pid.RemoteLookup(ctx, host, remotingPort, actorName)
+		require.Error(t, err)
+		require.Nil(t, remotePID)
+		require.ErrorIs(t, err, errors.ErrActorNotFound)
 
 		// for the sake of the test
 		require.NoError(t, sys.Deregister(ctx, &exchanger{}))
@@ -3822,11 +3817,11 @@ func TestRemoteSpawn(t *testing.T) {
 		actor := &exchanger{}
 		actorName := uuid.NewString()
 
-		// fetching the address of the that actor should return NoSender address
-		addr, err := pid.RemoteLookup(ctx, host, remotingPort, actorName)
-		require.NoError(t, err)
-		require.NotNil(t, addr)
-		require.True(t, addr.Equals(address.NoSender()))
+		// actor not spawned yet — expect ErrActorNotFound
+		remotePID, err := pid.RemoteLookup(ctx, host, remotingPort, actorName)
+		require.Error(t, err)
+		require.Nil(t, remotePID)
+		require.ErrorIs(t, err, errors.ErrActorNotFound)
 
 		// register the actor
 		err = sys.Register(ctx, actor)
@@ -3877,11 +3872,11 @@ func TestRemoteSpawn(t *testing.T) {
 		actor := &exchanger{}
 		actorName := uuid.NewString()
 
-		// fetching the address of the that actor should return address.NoSender
-		addr, err := pid.RemoteLookup(ctx, host, remotingPort, actorName)
-		require.NoError(t, err)
-		require.NotNil(t, addr)
-		require.True(t, addr.Equals(address.NoSender()))
+		// actor not spawned yet — expect ErrActorNotFound
+		remotePID, err := pid.RemoteLookup(ctx, host, remotingPort, actorName)
+		require.Error(t, err)
+		require.Nil(t, remotePID)
+		require.ErrorIs(t, err, errors.ErrActorNotFound)
 
 		// register the actor
 		err = sys.Register(ctx, actor)
@@ -3959,7 +3954,7 @@ func TestPipeTo(t *testing.T) {
 		require.Zero(t, pid1.ProcessedCount()-1)
 		require.Zero(t, pid2.ProcessedCount()-1)
 
-		task := func() (proto.Message, error) {
+		task := func() (any, error) {
 			// simulate a long-running task
 			pause.For(time.Second)
 			return new(testpb.TaskComplete), nil
@@ -4022,7 +4017,7 @@ func TestPipeTo(t *testing.T) {
 		pause.For(time.Second)
 		require.NoError(t, pid2.Shutdown(ctx))
 
-		task := func() (proto.Message, error) {
+		task := func() (any, error) {
 			// simulate a long-running task
 			pause.For(time.Second)
 			return new(testpb.TaskComplete), nil
@@ -4117,7 +4112,7 @@ func TestPipeTo(t *testing.T) {
 		require.Zero(t, pid1.ProcessedCount()-1)
 		require.Zero(t, pid2.ProcessedCount()-1)
 
-		task := func() (proto.Message, error) {
+		task := func() (any, error) {
 			// simulate a long-running task
 			pause.For(time.Second)
 			return nil, assert.AnError
@@ -4149,11 +4144,11 @@ func TestPipeTo(t *testing.T) {
 		// no message piped to the actor
 		require.Zero(t, pid2.ProcessedCount()-1)
 
-		var items []*goaktpb.Deadletter
+		var items []*Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
 			// only listening to deadletter
-			deadletter, ok := payload.(*goaktpb.Deadletter)
+			deadletter, ok := payload.(*Deadletter)
 			if ok {
 				items = append(items, deadletter)
 			}
@@ -4202,7 +4197,7 @@ func TestPipeTo(t *testing.T) {
 		require.Zero(t, pid1.ProcessedCount()-1)
 		require.Zero(t, pid2.ProcessedCount()-1)
 
-		task := func() (proto.Message, error) {
+		task := func() (any, error) {
 			// simulate a long-running task
 			pause.For(time.Second)
 			return new(testpb.TaskComplete), nil
@@ -4215,11 +4210,11 @@ func TestPipeTo(t *testing.T) {
 		// no message piped to the actor
 		require.Zero(t, pid2.ProcessedCount()-1)
 
-		var items []*goaktpb.Deadletter
+		var items []*Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
 			// only listening to deadletter
-			deadletter, ok := payload.(*goaktpb.Deadletter)
+			deadletter, ok := payload.(*Deadletter)
 			if ok {
 				items = append(items, deadletter)
 			}
@@ -4268,7 +4263,7 @@ func TestPipeTo(t *testing.T) {
 		require.Zero(t, pid1.ProcessedCount()-1)
 		require.Zero(t, pid2.ProcessedCount()-1)
 
-		task := func() (proto.Message, error) {
+		task := func() (any, error) {
 			// simulate a long-running task
 			pause.For(time.Second)
 			return new(testpb.TaskComplete), nil
@@ -4345,7 +4340,7 @@ func TestPipeTo(t *testing.T) {
 		require.Zero(t, pid1.ProcessedCount()-1)
 		require.Zero(t, pid2.ProcessedCount()-1)
 
-		task := func() (proto.Message, error) {
+		task := func() (any, error) {
 			// simulate a long-running task
 			pause.For(time.Second)
 			return nil, assert.AnError
@@ -4365,11 +4360,11 @@ func TestPipeTo(t *testing.T) {
 
 		pause.For(time.Second)
 
-		var items []*goaktpb.Deadletter
+		var items []*Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
 			// only listening to deadletter
-			deadletter, ok := payload.(*goaktpb.Deadletter)
+			deadletter, ok := payload.(*Deadletter)
 			if ok {
 				items = append(items, deadletter)
 			}
@@ -4420,7 +4415,7 @@ func TestPipeTo(t *testing.T) {
 		require.Zero(t, pid1.ProcessedCount()-1)
 		require.Zero(t, pid2.ProcessedCount()-1)
 
-		task := func() (proto.Message, error) {
+		task := func() (any, error) {
 			// simulate a long-running task
 			pause.For(time.Second)
 			return new(testpb.TaskComplete), nil
@@ -4448,20 +4443,22 @@ func TestPipeTo(t *testing.T) {
 
 		require.EqualValues(t, 3, pid1.ProcessedCount()-1)
 
-		var items []*goaktpb.Deadletter
+		var items []*Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
 			// only listening to deadletter
-			deadletter, ok := payload.(*goaktpb.Deadletter)
+			deadletter, ok := payload.(*Deadletter)
 			if ok {
 				items = append(items, deadletter)
 			}
 		}
 
 		require.Len(t, items, 1)
-		msg := items[0].GetMessage()
+		msg := items[0].Message()
 		require.NotNil(t, msg)
-		require.True(t, msg.MessageIs(new(testpb.TaskComplete)))
+		actual, ok := msg.(*testpb.TaskComplete)
+		require.True(t, ok)
+		require.True(t, proto.Equal(new(testpb.TaskComplete), actual))
 
 		pause.For(time.Second)
 		require.NoError(t, pid1.Shutdown(ctx))
@@ -4635,7 +4632,10 @@ func TestSendSync(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, response)
 		expected := &testpb.Reply{Content: "received message"}
-		assert.True(t, proto.Equal(expected, response))
+
+		actual, ok := response.(*testpb.Reply)
+		require.True(t, ok)
+		assert.True(t, proto.Equal(expected, actual))
 
 		t.Cleanup(func() {
 			assert.NoError(t, actorSystem.Stop(ctx))
@@ -4706,7 +4706,9 @@ func TestSendSync(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, response)
 		expected := &testpb.Reply{Content: "received message"}
-		assert.True(t, proto.Equal(expected, response))
+		actual, ok := response.(*testpb.Reply)
+		require.True(t, ok)
+		assert.True(t, proto.Equal(expected, actual))
 
 		t.Cleanup(func() {
 			assert.NoError(t, node1.Stop(ctx))
@@ -4918,7 +4920,7 @@ func TestLogger(t *testing.T) {
 		fieldsLocker: sync.RWMutex{},
 	}
 
-	pid.Logger().Info("test debug")
+	pid.getLogger().Info("test debug")
 	actual, err := extractMessage(buffer.Bytes())
 	require.NoError(t, err)
 
@@ -5417,15 +5419,17 @@ func TestPIDDoReceiveDuringShutdown(t *testing.T) {
 		pause.For(500 * time.Millisecond)
 
 		// Verify message was sent to deadletter
-		var deadletterItems []*goaktpb.Deadletter
+		var deadletterItems []*Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
-			if deadletter, ok := payload.(*goaktpb.Deadletter); ok {
+			if deadletter, ok := payload.(*Deadletter); ok {
 				deadletterItems = append(deadletterItems, deadletter)
 				// Check that the deadletter contains our user message
-				var testSend testpb.TestSend
-				if err := deadletter.GetMessage().UnmarshalTo(&testSend); err == nil {
-					require.Equal(t, errors.ErrSystemShuttingDown.Error(), deadletter.GetReason())
+				actual, ok := deadletter.Message().(*testpb.TestSend)
+				require.True(t, ok)
+				if ok {
+					require.NotNil(t, actual)
+					require.Equal(t, errors.ErrSystemShuttingDown.Error(), deadletter.Reason())
 					break
 				}
 			}
@@ -5470,14 +5474,14 @@ func TestPIDDoReceiveDuringShutdown(t *testing.T) {
 		// Test various system messages that should be allowed through during shutdown.
 		// PoisonPill is excluded because it triggers actor shutdown as a side effect,
 		// which would affect subsequent iterations of this loop.
-		systemMessages := []proto.Message{
-			new(internalpb.HealthCheckRequest),
-			new(internalpb.Panicking),
-			new(goaktpb.PausePassivation),
-			new(goaktpb.ResumePassivation),
-			new(goaktpb.PostStart),
-			new(goaktpb.Terminated),
-			new(goaktpb.PanicSignal),
+		systemMessages := []any{
+			new(commands.HealthCheckRequest),
+			new(commands.Panicking),
+			new(PausePassivation),
+			new(ResumePassivation),
+			new(PostStart),
+			new(Terminated),
+			new(PanicSignal),
 		}
 
 		for _, sysMsg := range systemMessages {
@@ -5841,7 +5845,7 @@ func TestPipeToName(t *testing.T) {
 		require.Zero(t, pid1.ProcessedCount()-1)
 		require.Zero(t, pid2.ProcessedCount()-1)
 
-		task := func() (proto.Message, error) {
+		task := func() (any, error) {
 			// simulate a long-running task
 			pause.For(time.Second)
 			return new(testpb.TaskComplete), nil
@@ -5909,7 +5913,7 @@ func TestPipeToName(t *testing.T) {
 		// wait for the actor to be completely stopped
 		pause.For(time.Second)
 
-		task := func() (proto.Message, error) {
+		task := func() (any, error) {
 			// simulate a long-running task
 			pause.For(time.Second)
 			return new(testpb.TaskComplete), nil
@@ -6004,7 +6008,7 @@ func TestPipeToName(t *testing.T) {
 		require.Zero(t, pid1.ProcessedCount()-1)
 		require.Zero(t, pid2.ProcessedCount()-1)
 
-		task := func() (proto.Message, error) {
+		task := func() (any, error) {
 			// simulate a long-running task
 			pause.For(time.Second)
 			return nil, assert.AnError
@@ -6036,11 +6040,11 @@ func TestPipeToName(t *testing.T) {
 		// no message piped to the actor
 		require.Zero(t, pid2.ProcessedCount()-1)
 
-		var items []*goaktpb.Deadletter
+		var items []*Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
 			// only listening to deadletter
-			deadletter, ok := payload.(*goaktpb.Deadletter)
+			deadletter, ok := payload.(*Deadletter)
 			if ok {
 				items = append(items, deadletter)
 			}
@@ -6095,7 +6099,7 @@ func TestPipeToName(t *testing.T) {
 		require.Zero(t, pid1.ProcessedCount()-1)
 		require.Zero(t, pid2.ProcessedCount()-1)
 
-		task := func() (proto.Message, error) {
+		task := func() (any, error) {
 			// simulate a long-running task
 			pause.For(time.Second)
 			return new(testpb.TaskComplete), nil
@@ -6108,11 +6112,11 @@ func TestPipeToName(t *testing.T) {
 		// no message piped to the actor
 		require.Zero(t, pid2.ProcessedCount()-1)
 
-		var items []*goaktpb.Deadletter
+		var items []*Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
 			// only listening to deadletter
-			deadletter, ok := payload.(*goaktpb.Deadletter)
+			deadletter, ok := payload.(*Deadletter)
 			if ok {
 				items = append(items, deadletter)
 			}
@@ -6168,7 +6172,7 @@ func TestPipeToName(t *testing.T) {
 		require.Zero(t, pid1.ProcessedCount()-1)
 		require.Zero(t, pid2.ProcessedCount()-1)
 
-		task := func() (proto.Message, error) {
+		task := func() (any, error) {
 			// simulate a long-running task
 			pause.For(time.Second)
 			return new(testpb.TaskComplete), nil
@@ -6246,7 +6250,7 @@ func TestPipeToName(t *testing.T) {
 		require.Zero(t, pid1.ProcessedCount()-1)
 		require.Zero(t, pid2.ProcessedCount()-1)
 
-		task := func() (proto.Message, error) {
+		task := func() (any, error) {
 			// simulate a long-running task
 			pause.For(time.Second)
 			return nil, assert.AnError
@@ -6266,11 +6270,11 @@ func TestPipeToName(t *testing.T) {
 
 		pause.For(time.Second)
 
-		var items []*goaktpb.Deadletter
+		var items []*Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
 			// only listening to deadletter
-			deadletter, ok := payload.(*goaktpb.Deadletter)
+			deadletter, ok := payload.(*Deadletter)
 			if ok {
 				items = append(items, deadletter)
 			}
@@ -6321,7 +6325,7 @@ func TestPipeToName(t *testing.T) {
 		require.Zero(t, pid1.ProcessedCount()-1)
 		require.Zero(t, pid2.ProcessedCount()-1)
 
-		task := func() (proto.Message, error) {
+		task := func() (any, error) {
 			// simulate a long-running task
 			pause.For(time.Second)
 			return new(testpb.TaskComplete), nil
@@ -6347,20 +6351,23 @@ func TestPipeToName(t *testing.T) {
 
 		require.EqualValues(t, 3, pid1.ProcessedCount()-1)
 
-		var items []*goaktpb.Deadletter
+		var items []*Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
 			// only listening to deadletter
-			deadletter, ok := payload.(*goaktpb.Deadletter)
+			deadletter, ok := payload.(*Deadletter)
 			if ok {
 				items = append(items, deadletter)
 			}
 		}
 
 		require.Len(t, items, 1)
-		msg := items[0].GetMessage()
+		msg := items[0].Message()
 		require.NotNil(t, msg)
-		require.True(t, msg.MessageIs(new(testpb.TaskComplete)))
+
+		actual, ok := msg.(*testpb.TaskComplete)
+		require.True(t, ok)
+		require.True(t, proto.Equal(new(testpb.TaskComplete), actual))
 
 		pause.For(time.Second)
 		require.NoError(t, pid1.Shutdown(ctx))
@@ -6380,7 +6387,7 @@ func TestToWireActorDependencyError(t *testing.T) {
 	expectedErr := assert.AnError
 	pid.dependencies.Set("failing", &MockFailingDependency{err: expectedErr})
 
-	wire, err := pid.toWireActor()
+	wire, err := pid.toSerialize()
 	require.ErrorIs(t, err, expectedErr)
 	require.Nil(t, wire)
 }
@@ -6392,7 +6399,7 @@ func TestToWireActorSupervisorSpec(t *testing.T) {
 		fieldsLocker: sync.RWMutex{},
 	}
 
-	wire, err := noSupervisorPID.toWireActor()
+	wire, err := noSupervisorPID.toSerialize()
 	require.NoError(t, err)
 	require.Nil(t, wire.GetSupervisor())
 
@@ -6403,7 +6410,7 @@ func TestToWireActorSupervisorSpec(t *testing.T) {
 		supervisor:   supervisor.NewSupervisor(supervisor.WithStrategy(supervisor.OneForAllStrategy)),
 	}
 
-	wire, err = withSupervisorPID.toWireActor()
+	wire, err = withSupervisorPID.toSerialize()
 	require.NoError(t, err)
 	require.NotNil(t, wire.GetSupervisor())
 	require.Equal(t, internalpb.SupervisorStrategy_SUPERVISOR_STRATEGY_ONE_FOR_ALL, wire.GetSupervisor().GetStrategy())
@@ -6423,7 +6430,7 @@ func TestToWireActorIncludesSingletonSpecWhenSingleton(t *testing.T) {
 	pid.setState(singletonState, true)
 	pid.singletonSpec = spec
 
-	wire, err := pid.toWireActor()
+	wire, err := pid.toSerialize()
 	require.NoError(t, err)
 
 	require.NotNil(t, wire.GetSingleton())
@@ -6432,103 +6439,114 @@ func TestToWireActorIncludesSingletonSpecWhenSingleton(t *testing.T) {
 	assert.Equal(t, spec.WaitInterval, wire.GetSingleton().GetWaitInterval().AsDuration())
 }
 
-// ---------------------------------------------------------------------------
-// Helper structs, methods and functions
-// ---------------------------------------------------------------------------
+// TestAssertLocal verifies that every public method guarded by assertLocal
+// returns errors.ErrNotLocal when invoked on a remote PID.
+func TestAssertLocal(t *testing.T) {
+	ctx := context.Background()
+	// Build a minimal remote PID: address is set and the remoteState flag is set.
+	addr := address.New("remote-actor", "remoteSystem", "10.0.0.1", 8080)
+	remotePID := newRemotePID(addr, nil)
+	require.True(t, remotePID.IsRemote(), "sanity: newRemotePID must be remote")
+
+	t.Run("Child", func(t *testing.T) {
+		_, err := remotePID.Child("child")
+		require.ErrorIs(t, err, errors.ErrNotLocal)
+	})
+
+	t.Run("Stop", func(t *testing.T) {
+		other := newRemotePID(addr, nil)
+		err := remotePID.Stop(ctx, other)
+		require.ErrorIs(t, err, errors.ErrNotLocal)
+	})
+
+	t.Run("Restart", func(t *testing.T) {
+		err := remotePID.Restart(ctx)
+		require.ErrorIs(t, err, errors.ErrNotLocal)
+	})
+
+	t.Run("SpawnChild", func(t *testing.T) {
+		_, err := remotePID.SpawnChild(ctx, "child", NewMockActor())
+		require.ErrorIs(t, err, errors.ErrNotLocal)
+	})
+
+	t.Run("Reinstate", func(t *testing.T) {
+		other := newRemotePID(addr, nil)
+		err := remotePID.Reinstate(other)
+		require.ErrorIs(t, err, errors.ErrNotLocal)
+	})
+
+	t.Run("ReinstateNamed", func(t *testing.T) {
+		err := remotePID.ReinstateNamed(ctx, "some-actor")
+		require.ErrorIs(t, err, errors.ErrNotLocal)
+	})
+
+	t.Run("PipeTo", func(t *testing.T) {
+		other := newRemotePID(addr, nil)
+		err := remotePID.PipeTo(ctx, other, func() (any, error) { return nil, nil })
+		require.ErrorIs(t, err, errors.ErrNotLocal)
+	})
+
+	t.Run("PipeToName", func(t *testing.T) {
+		err := remotePID.PipeToName(ctx, "some-actor", func() (any, error) { return nil, nil })
+		require.ErrorIs(t, err, errors.ErrNotLocal)
+	})
+
+	t.Run("SendAsync", func(t *testing.T) {
+		err := remotePID.SendAsync(ctx, "some-actor", new(testpb.TestSend))
+		require.ErrorIs(t, err, errors.ErrNotLocal)
+	})
+
+	t.Run("SendSync", func(t *testing.T) {
+		_, err := remotePID.SendSync(ctx, "some-actor", new(testpb.TestReply), time.Second)
+		require.ErrorIs(t, err, errors.ErrNotLocal)
+	})
+
+	t.Run("DiscoverActor", func(t *testing.T) {
+		_, err := remotePID.DiscoverActor(ctx, "some-actor", time.Second)
+		require.ErrorIs(t, err, errors.ErrNotLocal)
+	})
+
+	t.Run("Shutdown", func(t *testing.T) {
+		err := remotePID.Shutdown(ctx)
+		require.ErrorIs(t, err, errors.ErrNotLocal)
+	})
+}
+
+// TestIsSystemMessage verifies that isSystemMessage correctly classifies each
+// known system-message type as true and non-system messages as false.
+func TestIsSystemMessage(t *testing.T) {
+	systemMessages := []struct {
+		name string
+		msg  any
+	}{
+		{"AsyncResponse", new(commands.AsyncResponse)},
+		{"AsyncRequest", new(commands.AsyncRequest)},
+		{"PoisonPill", new(PoisonPill)},
+		{"HealthCheckRequest", new(commands.HealthCheckRequest)},
+		{"Panicking", new(commands.Panicking)},
+		{"SendDeadletter", new(commands.SendDeadletter)},
+		{"PausePassivation", new(PausePassivation)},
+		{"ResumePassivation", new(ResumePassivation)},
+		{"PostStart", new(PostStart)},
+		{"Terminated", new(Terminated)},
+		{"PanicSignal", new(PanicSignal)},
+	}
+	for _, tc := range systemMessages {
+		t.Run(tc.name+" is a system message", func(t *testing.T) {
+			assert.True(t, isSystemMessage(tc.msg))
+		})
+	}
+	t.Run("user message is not a system message", func(t *testing.T) {
+		assert.False(t, isSystemMessage(new(testpb.TestSend)))
+	})
+	t.Run("nil is not a system message", func(t *testing.T) {
+		assert.False(t, isSystemMessage(nil))
+	})
+}
 
 func newBareSupervisor(strategy supervisor.Strategy) *supervisor.Supervisor {
 	supv := supervisor.NewSupervisor()
 	supv.Reset()
 	supervisor.WithStrategy(strategy)(supv)
 	return supv
-}
-
-type registerCallbackFailingMeter struct {
-	otelmetric.Meter
-	err error
-}
-
-func (m registerCallbackFailingMeter) RegisterCallback(_ otelmetric.Callback, _ ...otelmetric.Observable) (otelmetric.Registration, error) {
-	return nil, m.err
-}
-
-type instrumentFailingMeter struct {
-	otelmetric.Meter
-	failures map[string]error
-}
-
-func (m instrumentFailingMeter) Int64ObservableCounter(
-	name string,
-	options ...otelmetric.Int64ObservableCounterOption,
-) (otelmetric.Int64ObservableCounter, error) {
-	if err, ok := m.failures[name]; ok {
-		return nil, err
-	}
-	return m.Meter.Int64ObservableCounter(name, options...)
-}
-
-type manualMeterProvider struct {
-	otelmetric.MeterProvider
-	meter otelmetric.Meter
-}
-
-func newManualMeterProvider() *manualMeterProvider {
-	delegate := noopmetric.NewMeterProvider()
-	return &manualMeterProvider{
-		MeterProvider: delegate,
-		meter: &manualMeter{
-			Meter: delegate.Meter("test"),
-		},
-	}
-}
-
-func (m *manualMeterProvider) Meter(_ string, _ ...otelmetric.MeterOption) otelmetric.Meter {
-	return m.meter
-}
-
-type manualMeter struct {
-	otelmetric.Meter
-	callbacks []otelmetric.Callback
-}
-
-func (m *manualMeter) RegisterCallback(cb otelmetric.Callback, _ ...otelmetric.Observable) (otelmetric.Registration, error) {
-	m.callbacks = append(m.callbacks, cb)
-	return noopmetric.Registration{}, nil
-}
-
-// immediateMeter triggers the callback at registration time.
-// It is useful to surface errors that occur inside the callback, such as
-// cluster membership lookups during metrics observation.
-type immediateMeter struct {
-	*manualMeter
-	system  *actorSystem
-	cluster cluster.Cluster
-}
-
-func (m *immediateMeter) RegisterCallback(cb otelmetric.Callback, _ ...otelmetric.Observable) (otelmetric.Registration, error) {
-	// enable cluster path for the callback
-	if m.system != nil {
-		m.system.clusterEnabled.Store(true)
-		m.system.cluster = m.cluster
-	}
-	observer := &manualObserver{}
-	err := cb(context.Background(), observer)
-	return noopmetric.Registration{}, err
-}
-
-type manualObserver struct {
-	noopmetric.Observer
-	records []observeRecord
-}
-
-type observeRecord struct {
-	instrument string
-	value      int64
-}
-
-func (o *manualObserver) ObserveInt64(obsrv otelmetric.Int64Observable, value int64, _ ...otelmetric.ObserveOption) {
-	o.records = append(o.records, observeRecord{
-		instrument: fmt.Sprintf("%T", obsrv),
-		value:      value,
-	})
 }

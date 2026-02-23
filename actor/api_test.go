@@ -31,14 +31,13 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
 
-	"github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/pause"
-	"github.com/tochemey/goakt/v3/log"
-	"github.com/tochemey/goakt/v3/remote"
-	"github.com/tochemey/goakt/v3/test/data/testpb"
+	"github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
+	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/log"
+	"github.com/tochemey/goakt/v4/remote"
+	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
 func TestAsk(t *testing.T) {
@@ -75,8 +74,11 @@ func TestAsk(t *testing.T) {
 		// perform some assertions
 		require.NoError(t, err)
 		assert.NotNil(t, reply)
+
+		actual, ok := reply.(*testpb.Reply)
+		require.True(t, ok)
 		expected := &testpb.Reply{Content: "received message"}
-		assert.True(t, proto.Equal(expected, reply))
+		assert.True(t, proto.Equal(expected, actual))
 
 		err = sys.Stop(ctx)
 		require.NoError(t, err)
@@ -230,9 +232,7 @@ func TestAsk(t *testing.T) {
 		pause.For(time.Second)
 
 		// create a message to send to the test actor
-		message := &internalpb.RemoteMessage{
-			Message: &anypb.Any{},
-		}
+		message := &internalpb.RemoteMessage{}
 		// send the message to the actor
 		reply, err := Ask(ctx, actorRef, message, replyTimeout)
 		// perform some assertions
@@ -270,14 +270,14 @@ func TestAsk(t *testing.T) {
 
 		pause.For(time.Second)
 
-		anyMessage, err := anypb.New(new(testpb.TestSend))
+		bytea, err := proto.Marshal(new(testpb.TestSend))
 		require.NoError(t, err)
 
 		// create a message to send to the test actor
 		message := &internalpb.RemoteMessage{
 			Sender:   "invalid-address",
 			Receiver: actorRef.Address().String(),
-			Message:  anyMessage,
+			Message:  bytea,
 		}
 		// send the message to the actor
 		reply, err := Ask(ctx, actorRef, message, replyTimeout)
@@ -325,8 +325,10 @@ func TestAsk(t *testing.T) {
 		assert.Len(t, replies, 2)
 
 		for reply := range replies {
+			actual, ok := reply.(*testpb.Reply)
+			require.True(t, ok)
 			expected := &testpb.Reply{Content: "received message"}
-			assert.True(t, proto.Equal(expected, reply))
+			assert.True(t, proto.Equal(expected, actual))
 		}
 
 		err = sys.Stop(ctx)
@@ -558,9 +560,7 @@ func TestTell(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// create a message to send to the test actor
-		message := &internalpb.RemoteMessage{
-			Message: &anypb.Any{},
-		}
+		message := &internalpb.RemoteMessage{}
 		// send the message to the actor
 		err = Tell(ctx, actorRef, message)
 		require.Error(t, err)

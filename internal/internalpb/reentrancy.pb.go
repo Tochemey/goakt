@@ -280,7 +280,7 @@ const file_internal_reentrancy_proto_rawDesc = "" +
 	"\x13REENTRANCY_MODE_OFF\x10\x00\x12\x1d\n" +
 	"\x19REENTRANCY_MODE_ALLOW_ALL\x10\x01\x12'\n" +
 	"#REENTRANCY_MODE_STASH_NON_REENTRANT\x10\x02B\xa8\x01\n" +
-	"\x0ecom.internalpbB\x0fReentrancyProtoH\x02P\x01Z;github.com/tochemey/goakt/v3/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
+	"\x0ecom.internalpbB\x0fReentrancyProtoH\x02P\x01Z;github.com/tochemey/goakt/v4/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
 	"Internalpb\xca\x02\n" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
 	"Internalpbb\x06proto3"

@@ -36,7 +36,7 @@ import (
 	testclient "k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 
-	"github.com/tochemey/goakt/v3/discovery"
+	"github.com/tochemey/goakt/v4/discovery"
 )
 
 const (

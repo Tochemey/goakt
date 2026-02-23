@@ -39,21 +39,20 @@ import (
 	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/tochemey/goakt/v3/address"
-	"github.com/tochemey/goakt/v3/datacenter"
-	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/internal/cluster"
-	"github.com/tochemey/goakt/v3/internal/datacentercontroller"
-	"github.com/tochemey/goakt/v3/internal/pause"
-	"github.com/tochemey/goakt/v3/log"
-	mockcluster "github.com/tochemey/goakt/v3/mocks/cluster"
-	mocks "github.com/tochemey/goakt/v3/mocks/discovery"
-	mocksremote "github.com/tochemey/goakt/v3/mocks/remote"
-	"github.com/tochemey/goakt/v3/passivation"
-	"github.com/tochemey/goakt/v3/reentrancy"
-	"github.com/tochemey/goakt/v3/remote"
-	"github.com/tochemey/goakt/v3/test/data/testpb"
+	"github.com/tochemey/goakt/v4/address"
+	"github.com/tochemey/goakt/v4/datacenter"
+	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/cluster"
+	"github.com/tochemey/goakt/v4/internal/datacentercontroller"
+	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/log"
+	mockcluster "github.com/tochemey/goakt/v4/mocks/cluster"
+	mocks "github.com/tochemey/goakt/v4/mocks/discovery"
+	mocksremote "github.com/tochemey/goakt/v4/mocks/remote"
+	"github.com/tochemey/goakt/v4/passivation"
+	"github.com/tochemey/goakt/v4/reentrancy"
+	"github.com/tochemey/goakt/v4/remote"
+	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
 // nolint
@@ -337,9 +336,11 @@ func TestSpawn(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		require.NoError(t, err)
 
-		receiveFn := func(_ context.Context, message proto.Message) error {
+		receiveFn := func(_ context.Context, message any) error {
 			expected := &testpb.Reply{Content: "test spawn from func"}
-			assert.True(t, proto.Equal(expected, message))
+			actual, ok := message.(*testpb.Reply)
+			require.True(t, ok)
+			assert.True(t, proto.Equal(expected, actual))
 			return nil
 		}
 
@@ -380,9 +381,11 @@ func TestSpawn(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		require.NoError(t, err)
 
-		receiveFn := func(_ context.Context, message proto.Message) error {
+		receiveFn := func(_ context.Context, message any) error {
 			expected := &testpb.Reply{Content: "test spawn from func"}
-			assert.True(t, proto.Equal(expected, message))
+			actual, ok := message.(*testpb.Reply)
+			require.True(t, ok)
+			assert.True(t, proto.Equal(expected, actual))
 			return nil
 		}
 
@@ -438,9 +441,11 @@ func TestSpawn(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		require.NoError(t, err)
 
-		receiveFn := func(_ context.Context, message proto.Message) error {
+		receiveFn := func(_ context.Context, message any) error {
 			expected := &testpb.Reply{Content: "test spawn from func"}
-			assert.True(t, proto.Equal(expected, message))
+			actual, ok := message.(*testpb.Reply)
+			require.True(t, ok)
+			assert.True(t, proto.Equal(expected, actual))
 			return nil
 		}
 
@@ -507,9 +512,11 @@ func TestSpawn(t *testing.T) {
 		err = newActorSystem.Start(ctx)
 		require.NoError(t, err)
 
-		receiveFn := func(_ context.Context, message proto.Message) error {
+		receiveFn := func(_ context.Context, message any) error {
 			expected := &testpb.Reply{Content: "test spawn from func"}
-			assert.True(t, proto.Equal(expected, message))
+			actual, ok := message.(*testpb.Reply)
+			require.True(t, ok)
+			assert.True(t, proto.Equal(expected, actual))
 			return nil
 		}
 
@@ -546,9 +553,11 @@ func TestSpawn(t *testing.T) {
 		err := sys.Start(ctx)
 		assert.NoError(t, err)
 
-		receiveFn := func(_ context.Context, message proto.Message) error {
+		receiveFn := func(_ context.Context, message any) error {
 			expected := &testpb.Reply{Content: "test spawn from func"}
-			assert.True(t, proto.Equal(expected, message))
+			actual, ok := message.(*testpb.Reply)
+			require.True(t, ok)
+			assert.True(t, proto.Equal(expected, actual))
 			return nil
 		}
 
@@ -575,9 +584,11 @@ func TestSpawn(t *testing.T) {
 		err := sys.Start(ctx)
 		assert.NoError(t, err)
 
-		receiveFn := func(ctx context.Context, message proto.Message) error {
+		receiveFn := func(ctx context.Context, message any) error {
 			expected := &testpb.Reply{Content: "test spawn from func"}
-			assert.True(t, proto.Equal(expected, message))
+			actual, ok := message.(*testpb.Reply)
+			require.True(t, ok)
+			assert.True(t, proto.Equal(expected, actual))
 			return nil
 		}
 
@@ -618,7 +629,7 @@ func TestSpawn(t *testing.T) {
 		require.NotNil(t, consumer)
 
 		mockErr := errors.New("failed to process message")
-		receiveFn := func(ctx context.Context, message proto.Message) error { // nolint
+		receiveFn := func(ctx context.Context, message any) error { // nolint
 			return mockErr
 		}
 
@@ -637,10 +648,10 @@ func TestSpawn(t *testing.T) {
 		// the actor will be suspended because there is no supervisor strategy
 		require.True(t, pid.IsSuspended())
 
-		var items []*goaktpb.ActorSuspended
+		var items []*ActorSuspended
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
-			suspended, ok := payload.(*goaktpb.ActorSuspended)
+			suspended, ok := payload.(*ActorSuspended)
 			if ok {
 				items = append(items, suspended)
 			}
@@ -648,10 +659,10 @@ func TestSpawn(t *testing.T) {
 
 		require.Len(t, items, 1)
 		item := items[0]
-		addr, err := address.Parse(item.GetAddress())
+		addr, err := address.Parse(item.Address())
 		require.NoError(t, err)
 		assert.True(t, pid.Address().Equals(addr))
-		assert.Equal(t, mockErr.Error(), item.GetReason())
+		assert.Equal(t, mockErr.Error(), item.Reason())
 
 		// unsubscribe the consumer
 		err = actorSystem.Unsubscribe(consumer)
@@ -663,9 +674,11 @@ func TestSpawn(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
-		receiveFn := func(_ context.Context, message proto.Message) error {
+		receiveFn := func(_ context.Context, message any) error {
 			expected := &testpb.Reply{Content: "test spawn from func"}
-			assert.True(t, proto.Equal(expected, message))
+			actual, ok := message.(*testpb.Reply)
+			require.True(t, ok)
+			assert.True(t, proto.Equal(expected, actual))
 			return nil
 		}
 
@@ -804,7 +817,7 @@ func TestSpawn(t *testing.T) {
 		clusterMock := new(mockcluster.Cluster)
 
 		system := MockReplicationTestSystem(clusterMock)
-		system.remoting = remote.NewRemoting()
+		system.remoting = remote.NewClient()
 		system.remotingEnabled.Store(true)
 
 		actor := NewMockActor()
@@ -826,7 +839,7 @@ func TestSpawn(t *testing.T) {
 	t.Run("SpawnOn remote includes reentrancy config", func(t *testing.T) {
 		ctx := context.TODO()
 		clusterMock := mockcluster.NewCluster(t)
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 
 		system := MockReplicationTestSystem(clusterMock)
 		system.remoting = remotingMock
@@ -886,13 +899,15 @@ func TestSpawn(t *testing.T) {
 
 		clusterMock.EXPECT().ActorExists(mock.Anything, actorName).Return(false, nil).Twice()
 		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{}, nil).Once()
+		clusterMock.EXPECT().Actors(mock.Anything, mock.Anything).Return(nil, nil).Once()
 
 		err = actorSystem.SpawnOn(ctx, actorName, actor)
 		require.NoError(t, err)
 
 		pause.For(200 * time.Millisecond)
 
-		actors := actorSystem.Actors()
+		actors, err := actorSystem.Actors(ctx, time.Second)
+		require.NoError(t, err)
 		require.Len(t, actors, 1)
 		assert.Equal(t, actorName, actors[0].Name())
 	})
@@ -928,6 +943,7 @@ func TestSpawn(t *testing.T) {
 		// Return empty peers list, so LeastLoad should default to local spawn
 		clusterMock.EXPECT().ActorExists(mock.Anything, actorName).Return(false, nil).Twice()
 		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{}, nil)
+		clusterMock.EXPECT().Actors(mock.Anything, mock.Anything).Return(nil, nil).Once()
 
 		err = actorSystem.SpawnOn(ctx, actorName, actor, WithPlacement(LeastLoad))
 		require.NoError(t, err)
@@ -935,7 +951,8 @@ func TestSpawn(t *testing.T) {
 		pause.For(200 * time.Millisecond)
 
 		// Verify actor was spawned locally
-		actors := actorSystem.Actors()
+		actors, err := actorSystem.Actors(ctx, time.Second)
+		require.NoError(t, err)
 		require.Len(t, actors, 1)
 		assert.Equal(t, actorName, actors[0].Name())
 	})
@@ -1483,7 +1500,8 @@ func TestSpawn(t *testing.T) {
 		require.NoError(t, err)
 
 		pause.For(200 * time.Millisecond)
-		actors := node1.Actors()
+		actors, err := node1.Actors(ctx, time.Second)
+		require.NoError(t, err)
 		assert.Len(t, actors, 1)
 		got := actors[0]
 		assert.Equal(t, actorName, got.Name())
@@ -1563,7 +1581,7 @@ func TestSpawn(t *testing.T) {
 		ctx := t.Context()
 		clmock := mockcluster.NewCluster(t)
 		system := MockReplicationTestSystem(clmock)
-		system.remoting = remote.NewRemoting()
+		system.remoting = remote.NewClient()
 		system.remotingEnabled.Store(true)
 		system.clusterEnabled.Store(true)
 
@@ -1585,7 +1603,7 @@ func TestSpawn(t *testing.T) {
 
 	t.Run("SpawnOn with WithDataCenter delegates to spawnOnDatacenter", func(t *testing.T) {
 		ctx := context.Background()
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		targetDC := datacenter.DataCenter{Name: "dc-west", Region: "r", Zone: "z"}
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{{
@@ -1621,7 +1639,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 		dcConfig.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
 
 		sys := MockReplicationTestSystem(mockcluster.NewCluster(t))
-		sys.remoting = mocksremote.NewRemoting(t)
+		sys.remoting = mocksremote.NewClient(t)
 		sys.remotingEnabled.Store(true)
 		sys.clusterConfig = NewClusterConfig().WithDataCenter(dcConfig)
 		sys.dataCenterController = nil
@@ -1665,7 +1683,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 		pause.For(5 * time.Millisecond)
 
 		sys := MockReplicationTestSystem(mockcluster.NewCluster(t))
-		sys.remoting = mocksremote.NewRemoting(t)
+		sys.remoting = mocksremote.NewClient(t)
 		sys.remotingEnabled.Store(true)
 		sys.clusterConfig = NewClusterConfig().WithDataCenter(dcConfig)
 		sys.dataCenterController = controller
@@ -1679,7 +1697,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 	})
 
 	t.Run("returns ErrDataCenterRecordNotFound when target DC not in active records", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{{
 				ID:        "dc-other",
@@ -1697,7 +1715,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 	})
 
 	t.Run("returns ErrDataCenterRecordNotFound when no active records", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return nil, nil
 		}, remotingMock)
@@ -1711,7 +1729,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 	})
 
 	t.Run("returns ErrDataCenterRecordNotFound when target DC record exists but state is not ACTIVE", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		targetDC := datacenter.DataCenter{Name: "dc-west", Region: "r", Zone: "z"}
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{{
@@ -1730,7 +1748,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 	})
 
 	t.Run("returns error when endpoint has invalid host:port format", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		targetDC := datacenter.DataCenter{Name: "dc-west", Region: "r", Zone: "z"}
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{{
@@ -1749,7 +1767,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 	})
 
 	t.Run("returns error when endpoint port is not numeric", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		targetDC := datacenter.DataCenter{Name: "dc-west", Region: "r", Zone: "z"}
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{{
@@ -1768,7 +1786,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 	})
 
 	t.Run("returns RemoteSpawn error when remoting fails", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		targetDC := datacenter.DataCenter{Name: "dc-west", Region: "r", Zone: "z"}
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{{
@@ -1794,7 +1812,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 	})
 
 	t.Run("succeeds and calls RemoteSpawn with correct request", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		targetDC := datacenter.DataCenter{Name: "dc-west", Region: "r", Zone: "z"}
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{{
@@ -1823,7 +1841,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 	})
 
 	t.Run("passes relocatable and passivation from config to RemoteSpawn", func(t *testing.T) {
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		targetDC := datacenter.DataCenter{Name: "dc-west", Region: "r", Zone: "z"}
 		passivationStrategy := passivation.NewTimeBasedStrategy(30 * time.Second)
 		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {

@@ -52,6 +52,7 @@ linters:
         - cancelled
         - behaviour
         - initialised
+        - materialise
     revive:
       enable-all-rules: false
       enable-default-rules: true

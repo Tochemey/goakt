@@ -25,7 +25,8 @@ package actor
 import (
 	"context"
 
-	"github.com/tochemey/goakt/v3/extension"
+	"github.com/tochemey/goakt/v4/extension"
+	"github.com/tochemey/goakt/v4/log"
 )
 
 // Context provides an environment for an actor when it is about to start.
@@ -84,7 +85,7 @@ func (x *Context) ActorSystem() ActorSystem {
 // Returns:
 //   - []extension.Extension: All registered extensions in the ActorSystem.
 func (x *Context) Extensions() []extension.Extension {
-	return x.ActorSystem().Extensions()
+	return x.actorSystem.Extensions()
 }
 
 // Extension retrieves a specific extension registered in the ActorSystem by its unique ID.
@@ -102,7 +103,7 @@ func (x *Context) Extensions() []extension.Extension {
 // Returns:
 //   - extension.Extension: The corresponding extension if found, or nil otherwise.
 func (x *Context) Extension(extensionID string) extension.Extension {
-	return x.ActorSystem().Extension(extensionID)
+	return x.actorSystem.Extension(extensionID)
 }
 
 // ActorName returns the name of the actor associated with this Context.
@@ -126,4 +127,41 @@ func (x *Context) ActorName() string {
 // Returns: A slice of Dependency instances associated with this PID.
 func (x *Context) Dependencies() []extension.Dependency {
 	return x.dependencies
+}
+
+// Dependency retrieves a specific dependency from the PID's local context by its unique ID.
+//
+// This allows actors to access resources or services that were injected at initialization
+// directly from the Context. Dependencies are typically registered via SpawnOptions when
+// spawning an actor.
+//
+// Example:
+//
+//	dbClient := x.Dependency("database").(DatabaseClient)
+//
+// Parameters:
+//   - dependencyID: A unique string identifier used when the dependency was registered.
+//
+// Returns:
+//   - extension.Dependency: The corresponding dependency if found, or nil otherwise.
+func (x *Context) Dependency(dependencyID string) extension.Dependency {
+	for _, dependency := range x.dependencies {
+		if dependency.ID() == dependencyID {
+			return dependency
+		}
+	}
+	return nil
+}
+
+// Logger returns the logger associated with the ActorSystem.
+//
+// This logger is typically configured at the system level and can be used for
+// structured logging, diagnostics, and monitoring throughout the actor's lifecycle.
+//
+// Example:
+//
+//	logger := x.Logger()
+//	logger.Info("Actor started", "actorName", x.ActorName())
+func (x *Context) Logger() log.Logger {
+	return x.actorSystem.Logger()
 }

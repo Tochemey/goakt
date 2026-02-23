@@ -23,9 +23,7 @@
 package actor
 
 import (
-	"google.golang.org/protobuf/proto"
-
-	"github.com/tochemey/goakt/v3/internal/timer"
+	"github.com/tochemey/goakt/v4/internal/timer"
 )
 
 // contextPoolSize controls the bounded channel-based pool for ReceiveContext.
@@ -43,7 +41,7 @@ var contextCh = make(chan *ReceiveContext, contextPoolSize)
 // responseCh is a channel-based bounded pool for response channels.
 // Survives GC cycles unlike sync.Pool, eliminating cross-P thrashing
 // for synchronous (Ask) message paths.
-var responseCh = make(chan chan proto.Message, contextPoolSize)
+var responseCh = make(chan chan any, contextPoolSize)
 
 // errorCh is a channel-based bounded pool for error channels.
 // Survives GC cycles unlike sync.Pool.
@@ -78,16 +76,16 @@ func releaseContext(receiveContext *ReceiveContext) {
 	}
 }
 
-func getResponseChannel() chan proto.Message {
+func getResponseChannel() chan any {
 	select {
 	case ch := <-responseCh:
 		return ch
 	default:
-		return make(chan proto.Message, 1)
+		return make(chan any, 1)
 	}
 }
 
-func putResponseChannel(ch chan proto.Message) {
+func putResponseChannel(ch chan any) {
 	// Drain any stale response (e.g. from a timed-out Ask where the actor
 	// replied after the caller gave up).
 	for {

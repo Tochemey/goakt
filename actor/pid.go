@@ -40,32 +40,28 @@ import (
 	otelmetric "go.opentelemetry.io/otel/metric"
 	"go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
-	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/tochemey/goakt/v3/address"
-	"github.com/tochemey/goakt/v3/datacenter"
-	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/eventstream"
-	"github.com/tochemey/goakt/v3/extension"
-	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/internal/chain"
-	"github.com/tochemey/goakt/v3/internal/codec"
-	"github.com/tochemey/goakt/v3/internal/future"
-	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/locker"
-	"github.com/tochemey/goakt/v3/internal/metric"
-	"github.com/tochemey/goakt/v3/internal/registry"
-	"github.com/tochemey/goakt/v3/internal/ticker"
-	"github.com/tochemey/goakt/v3/internal/types"
-	"github.com/tochemey/goakt/v3/internal/xsync"
-	"github.com/tochemey/goakt/v3/log"
-	"github.com/tochemey/goakt/v3/passivation"
-	"github.com/tochemey/goakt/v3/reentrancy"
-	"github.com/tochemey/goakt/v3/remote"
-	"github.com/tochemey/goakt/v3/supervisor"
+	"github.com/tochemey/goakt/v4/address"
+	"github.com/tochemey/goakt/v4/datacenter"
+	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/eventstream"
+	"github.com/tochemey/goakt/v4/extension"
+	"github.com/tochemey/goakt/v4/internal/chain"
+	"github.com/tochemey/goakt/v4/internal/codec"
+	"github.com/tochemey/goakt/v4/internal/commands"
+	"github.com/tochemey/goakt/v4/internal/future"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
+	"github.com/tochemey/goakt/v4/internal/locker"
+	"github.com/tochemey/goakt/v4/internal/metric"
+	"github.com/tochemey/goakt/v4/internal/ticker"
+	"github.com/tochemey/goakt/v4/internal/types"
+	"github.com/tochemey/goakt/v4/internal/xsync"
+	"github.com/tochemey/goakt/v4/log"
+	"github.com/tochemey/goakt/v4/passivation"
+	"github.com/tochemey/goakt/v4/reentrancy"
+	"github.com/tochemey/goakt/v4/remote"
+	"github.com/tochemey/goakt/v4/supervisor"
 )
 
 // specifies the state in which the PID is
@@ -88,7 +84,7 @@ const passivationTouchInterval = int64(100 * time.Millisecond)
 // to pipe the result to the appropriate PID
 type taskCompletion struct {
 	Receiver *PID
-	Task     func() (proto.Message, error)
+	Task     func() (any, error)
 }
 
 type restartNode struct {
@@ -96,9 +92,32 @@ type restartNode struct {
 	children []*restartNode
 }
 
-// PID specifies an actor unique process
-// With the PID one can send a ReceiveContext to the actor
-// PID helps to identify the actor in the local actor system
+// PID is the sole actor reference in GoAkt. It is location-transparent:
+// a PID may represent either a live local actor or a lightweight handle
+// for an actor on a remote node. Use IsLocal / IsRemote to distinguish.
+//
+// # Location-transparent operations (work for both local and remote PIDs)
+//
+//   - Identity: Name, ID, Address, Kind, Role, Equals
+//   - State queries: IsLocal, IsRunning, IsSuspended, IsSingleton, IsRelocatable, IsStopping
+//   - Messaging: Tell, Ask, BatchTell, BatchAsk
+//   - Remote helpers: RemoteLookup, RemoteStop, RemoteSpawn, RemoteReSpawn
+//
+// # Local-only operations (return ErrNotLocal for remote PIDs)
+//
+// Lifecycle: Stop, Restart, Shutdown, SpawnChild, Reinstate, ReinstateNamed
+// Tree navigation: Child, Children, ChildrenCount, Parent
+// Watch: Watch, UnWatch
+// Name-based messaging: SendAsync, SendSync, PipeTo, PipeToName, DiscoverActor
+//
+// # Query methods (safe for remote, return zero values)
+//
+// Actor, ProcessedCount, RestartCount, LatestProcessedDuration, LatestActivityTime,
+// StashSize, PassivationStrategy, Dependencies, Dependency, Uptime, Metric
+//
+// # Nil for remote PIDs
+//
+// ActorSystem returns nil for remote PIDs — always guard with IsLocal before use.
 type PID struct {
 	_ locker.NoCopy
 	// specifies the message processor
@@ -162,7 +181,7 @@ type PID struct {
 	// atomic flag indicating whether the actor is processing messages
 	processing atomic.Int32
 
-	remoting remote.Remoting
+	remoting remote.Client
 
 	startedAt atomic.Int64
 	state     atomic.Uint32
@@ -249,38 +268,57 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		return nil, err
 	}
 
-	pid.fireSystemMessage(ctx, new(goaktpb.PostStart))
+	pid.fireSystemMessage(ctx, new(PostStart))
 
 	pid.startedAt.Store(time.Now().Unix())
 	return pid, nil
 }
 
-// Role narrows placement to cluster members that advertise the given role.
+// newRemotePID creates a lightweight PID that represents an actor on a remote node.
 //
-// In a clustered deployment, GoAkt uses placement roles to constrain where actors may be
-// started or relocated. When `Role` is non-nil the actor will only be considered for nodes
-// that list the same role; clearing the field makes the actor eligible on any node.
+// A remote PID holds only the actor address and a handle to the remoting layer.
+// It carries no mailbox, no supervision state, no behavior stack, and no
+// actor-system reference. All messaging operations on a remote PID must be
+// dispatched through the remoting layer rather than the local mailbox.
 //
-// ⚠️ Note: This setting has effect only for `SpawnOn` and `SpawnSingleton` requests. Local-only
-// spawns ignore it.
+// This constructor is intentionally lean: it performs no allocations beyond the
+// PID struct itself and sets exactly the fields required for identity and routing.
+func newRemotePID(addr *address.Address, remoting remote.Client) *PID {
+	pid := &PID{
+		address:  addr,
+		remoting: remoting,
+	}
+	pid.setState(remoteState, true)
+	return pid
+}
+
+// IsLocal reports whether this PID represents an actor running in the local actor system.
 //
-// Returns:
-//   - *string: a pointer to the role name if one was assigned when the actor
-//     was spawned; nil if the actor is not bound to any role.
+// Local PIDs have a live mailbox, a behavior stack, and a full actor-system reference.
+// Use IsLocal to distinguish in-process actors from remote handles before performing
+// operations that are only meaningful locally (e.g. inspecting children, passivation, etc.).
+func (pid *PID) IsLocal() bool {
+	if pid == nil {
+		return false
+	}
+	return !pid.isStateSet(remoteState)
+}
+
+// IsRemote reports whether this PID is a lightweight handle for an actor on a remote node.
 //
-// Notes:
-//   - The value may be nil; callers should check for nil before dereferencing.
-//   - Roles are typically provided via spawn options at creation time.
-//   - The returned pointer should be treated as read-only; copy the value if you
-//     need to store it elsewhere.
-//
-// Example:
-//
-//	if r := pid.Role(); r != nil {
-//	    fmt.Printf("actor pinned to role %q\n", *r)
-//	} else {
-//	    fmt.Println("actor has no role")
-//	}
+// Remote PIDs hold only the actor's address and a remoting handle; they carry no
+// mailbox, supervisor, or actor-system reference. Messaging through a remote PID
+// is routed via the remoting layer rather than a local mailbox enqueue.
+func (pid *PID) IsRemote() bool {
+	if pid == nil {
+		return false
+	}
+	return pid.isStateSet(remoteState)
+}
+
+// Role returns the cluster placement role assigned to this actor, or nil if none was set.
+// Placement roles constrain on which nodes an actor may be started or relocated.
+// This setting only affects SpawnOn and SpawnSingleton; local-only spawns ignore it.
 func (pid *PID) Role() *string {
 	pid.fieldsLocker.RLock()
 	role := pid.role
@@ -288,17 +326,9 @@ func (pid *PID) Role() *string {
 	return role
 }
 
-// Dependencies returns a slice containing all dependencies currently registered
-// within the PID's local context.
-//
-// These dependencies are typically injected at actor initialization (via SpawnOptions)
-// and made accessible during the actor's lifecycle. They can include services, clients,
-// or any resources that the actor requires to operate.
-//
-// This method is useful for diagnostic tools, dynamic inspection, or cases where
-// an actor needs to introspect its environment.
-//
-// Returns: A slice of Dependency instances associated with this PID.
+// Dependencies returns all dependencies registered with this actor.
+// Dependencies are injected at spawn time via SpawnOptions and remain accessible
+// for the lifetime of the actor.
 func (pid *PID) Dependencies() []extension.Dependency {
 	if pid.dependencies == nil {
 		return nil
@@ -306,8 +336,7 @@ func (pid *PID) Dependencies() []extension.Dependency {
 	return pid.dependencies.Values()
 }
 
-// Dependency retrieves a single dependency by its unique identifier from the PID's
-// registered dependencies.
+// Dependency returns the registered dependency with the given identifier, or nil if not found.
 func (pid *PID) Dependency(dependencyID string) extension.Dependency {
 	if pid.dependencies == nil {
 		return nil
@@ -318,8 +347,8 @@ func (pid *PID) Dependency(dependencyID string) extension.Dependency {
 	return nil
 }
 
-// Metric returns the actor system metrics.
-// The metric does not include any cluster data
+// Metric returns a snapshot of the actor's runtime metrics.
+// Returns nil when the actor is not running. Cluster data is not included.
 func (pid *PID) Metric(ctx context.Context) *ActorMetric {
 	if pid.IsRunning() {
 		var (
@@ -346,7 +375,8 @@ func (pid *PID) Metric(ctx context.Context) *ActorMetric {
 	return nil
 }
 
-// Uptime returns the number of seconds since the actor started
+// Uptime returns the number of seconds elapsed since the actor started.
+// Returns zero when the actor is not running.
 func (pid *PID) Uptime() int64 {
 	if pid.IsRunning() {
 		return time.Now().Unix() - pid.startedAt.Load()
@@ -354,18 +384,17 @@ func (pid *PID) Uptime() int64 {
 	return 0
 }
 
-// ID is a convenient method that returns the actor unique identifier
-// An actor unique identifier is its address in the actor system.
+// ID returns the actor unique identifier, which is its canonical address string.
 func (pid *PID) ID() string {
 	return pid.Address().String()
 }
 
-// Name returns the actor given name
+// Name returns the actor name.
 func (pid *PID) Name() string {
 	return pid.Address().Name()
 }
 
-// Equals is a convenient method to compare two PIDs
+// Equals reports whether pid and to refer to the same actor.
 func (pid *PID) Equals(to *PID) bool {
 	if pid == nil && to == nil {
 		return true
@@ -378,13 +407,28 @@ func (pid *PID) Equals(to *PID) bool {
 	return strings.EqualFold(pid.ID(), to.ID())
 }
 
-// Actor returns the underlying Actor
+// Actor returns the underlying Actor implementation.
+// Returns nil for remote PIDs.
 func (pid *PID) Actor() Actor {
 	return pid.actor
 }
 
-// Child returns the named child actor if it is alive
+// Kind returns the reflected type name of the underlying Actor implementation.
+// Returns an empty string for remote PIDs.
+func (pid *PID) Kind() string {
+	if pid.actor == nil {
+		return ""
+	}
+	return types.Name(pid.actor)
+}
+
+// Child returns the running child PID with the given name.
+// Returns ErrNotLocal for remote PIDs, ErrDead if this actor is not running,
+// or ErrActorNotFound when no such child exists or the child is stopped.
 func (pid *PID) Child(name string) (*PID, error) {
+	if err := pid.assertLocal(); err != nil {
+		return nil, err
+	}
 	if !pid.IsRunning() {
 		return nil, gerrors.ErrDead
 	}
@@ -399,8 +443,12 @@ func (pid *PID) Child(name string) (*PID, error) {
 	return nil, gerrors.NewErrActorNotFound(childAddress.String())
 }
 
-// Parent returns the parent of this PID
+// Parent returns the parent PID in the actor tree.
+// Returns nil for root actors and remote PIDs.
 func (pid *PID) Parent() *PID {
+	if pid.IsRemote() {
+		return nil
+	}
 	tree := pid.ActorSystem().tree()
 	parent, ok := tree.parent(pid)
 	if !ok {
@@ -409,9 +457,12 @@ func (pid *PID) Parent() *PID {
 	return parent
 }
 
-// Children returns the list of all the direct descendants of the given actor
-// Only alive actors are included in the list or an empty list is returned
+// Children returns all direct child PIDs that are currently running.
+// Returns nil for remote PIDs.
 func (pid *PID) Children() []*PID {
+	if pid.IsRemote() {
+		return nil
+	}
 	pid.fieldsLocker.RLock()
 	tree := pid.ActorSystem().tree()
 	children := tree.children(pid)
@@ -421,14 +472,17 @@ func (pid *PID) Children() []*PID {
 			cids = append(cids, cid)
 		}
 	}
-
 	pid.fieldsLocker.RUnlock()
 	return cids
 }
 
-// Stop forces the child Actor under the given name to terminate after it finishes processing its current message.
-// Nothing happens if child is already stopped.
+// Stop signals the given child PID to shut down after it finishes processing its current message.
+// Returns ErrNotLocal for remote PIDs, ErrDead if this actor is not running,
+// and ErrActorNotFound when cid is not a child of this actor. It is a no-op when cid is already stopped.
 func (pid *PID) Stop(ctx context.Context, cid *PID) error {
+	if err := pid.assertLocal(); err != nil {
+		return err
+	}
 	if !pid.IsRunning() {
 		return gerrors.ErrDead
 	}
@@ -459,11 +513,8 @@ func (pid *PID) Stop(ctx context.Context, cid *PID) error {
 	return nil
 }
 
-// IsRunning returns true when the actor is alive ready to process messages and false
-// when the actor is stopped or not started at all
-//
-// Optimized to use a single atomic load instead of multiple calls to isStateSet(),
-// reducing from 4 atomic loads to 1 atomic load + 4 bitwise operations.
+// IsRunning reports whether the actor is alive and ready to process messages.
+// Returns false when the actor has not started, is stopping, passivating, or suspended.
 func (pid *PID) IsRunning() bool {
 	if pid == nil {
 		return false
@@ -476,42 +527,30 @@ func (pid *PID) IsRunning() bool {
 		state&uint32(suspendedState) == 0
 }
 
-// IsSuspended returns true when the actor is suspended
-// A suspended actor is a faulty actor
+// IsSuspended reports whether the actor is suspended due to a fault.
 func (pid *PID) IsSuspended() bool {
 	return pid.isStateSet(suspendedState)
 }
 
-// IsSingleton returns true when the actor is a singleton.
-//
-// A singleton actor is instantiated when cluster mode is enabled.
-// A singleton actor like any other actor is created only once within the system and in the cluster.
-// A singleton actor is created with the default supervisor strategy and directive.
-// A singleton actor once created lives throughout the lifetime of the given actor system.
-//
-// The singleton actor is created on the oldest node in the cluster.
-// When the oldest node leaves the cluster unexpectedly, the singleton is restarted on the new oldest node.
-// This is useful for managing shared resources or coordinating tasks that should be handled by a single actor.
+// IsSingleton reports whether the actor was spawned as a cluster singleton.
+// A singleton exists at most once across the entire cluster and is always hosted on the oldest node.
+// When that node leaves unexpectedly the singleton is restarted on the new oldest node.
 func (pid *PID) IsSingleton() bool {
 	return pid.isStateSet(singletonState)
 }
 
-// IsRelocatable determines whether the actor can be relocated to another node when its host node shuts down unexpectedly.
-// By default, actors are relocatable to ensure system resilience and high availability.
-// However, this behavior can be disabled during the actor's creation using the WithRelocationDisabled option.
-//
-// Returns true if relocation is allowed, and false if relocation is disabled.
+// IsRelocatable reports whether the actor may be relocated to another node if its host node shuts down unexpectedly.
+// Actors are relocatable by default; pass WithRelocationDisabled at spawn time to opt out.
 func (pid *PID) IsRelocatable() bool {
 	return pid.isStateSet(relocationState)
 }
 
-// IsStopping reports whether the actor is in the process of stopping.
-// It returns true once a stop has been initiated—explicitly or via passivation—and false otherwise.
+// IsStopping reports whether the actor has begun stopping, either explicitly or via passivation.
 func (pid *PID) IsStopping() bool {
 	return pid.isStateSet(stoppingState) || pid.isStateSet(passivatingState)
 }
 
-// PassivationStrategy returns the given actor's passivation strategy.
+// PassivationStrategy returns the passivation strategy configured for this actor.
 func (pid *PID) PassivationStrategy() passivation.Strategy {
 	pid.fieldsLocker.RLock()
 	strategy := pid.passivationStrategy
@@ -519,7 +558,8 @@ func (pid *PID) PassivationStrategy() passivation.Strategy {
 	return strategy
 }
 
-// ActorSystem returns the actor system
+// ActorSystem returns the actor system this PID belongs to.
+// Returns nil for remote PIDs — check pid.IsLocal() before use.
 func (pid *PID) ActorSystem() ActorSystem {
 	pid.fieldsLocker.RLock()
 	sys := pid.actorSystem
@@ -527,7 +567,7 @@ func (pid *PID) ActorSystem() ActorSystem {
 	return sys
 }
 
-// Address returns address of the actor
+// Address returns the actor address.
 func (pid *PID) Address() *address.Address {
 	pid.fieldsLocker.RLock()
 	path := pid.address
@@ -535,27 +575,23 @@ func (pid *PID) Address() *address.Address {
 	return path
 }
 
-// Restart restarts this actor and all *running or suspended* descendants.
+// Restart restarts this actor and all running or suspended descendants.
 //
-// The operation snapshots the current subtree (running/suspended only), rebuilds the same
-// parent/child topology, and re-initializes the actor by re-running its startup hook
-// (`PreStart`). A `PostStart` system message is emitted on success.
+// The subtree is snapshotted, the same parent/child topology is rebuilt, and each
+// actor is re-initialized via its PreStart hook. Suspended actors are reinitialized
+// without a prior shutdown step; non-running descendants are skipped entirely.
+// Mailboxes are not preserved — queued or in-flight messages may be dropped.
 //
-// Runtime effects:
-//   - Only running actors are shut down; suspended actors are reinitialized without a shutdown step.
-//   - Non-running descendants are skipped and not restarted.
-//   - Mailboxes are not preserved; queued or in-flight messages may be dropped.
-//   - Death-watch and tree bookkeeping are updated to keep watchers and cluster state consistent.
+// If any descendant fails to restart, Restart returns that error and the subtree
+// may be only partially recovered. The target actor is left non-running on failure.
 //
-// Failure behavior:
-//   - If restarting any descendant fails, Restart returns that error and the subtree may
-//     be only partially restarted.
-//   - On failure, the target actor remains non-running to avoid serving in an inconsistent state.
-//
-// Use Restart for administrative recovery or supervision; it is disruptive and best-effort.
+// Returns ErrNotLocal for remote PIDs and ErrUndefinedActor for nil receivers.
 func (pid *PID) Restart(ctx context.Context) error {
 	if pid == nil || pid.Address() == nil {
 		return gerrors.ErrUndefinedActor
+	}
+	if err := pid.assertLocal(); err != nil {
+		return err
 	}
 
 	pid.logger.Debugf("Restarting Actor (%s)", pid.Name())
@@ -575,25 +611,25 @@ func (pid *PID) Restart(ctx context.Context) error {
 	return restartSubtree(ctx, subtree, parent, tree, deathWatch, actorSystem)
 }
 
-// RestartCount returns the total number of re-starts by the given PID
+// RestartCount returns the total number of times this actor has been restarted.
 func (pid *PID) RestartCount() int {
 	count := pid.restartCount.Load()
 	return int(count)
 }
 
-// ChildrenCount returns the total number of children for the given PID
+// ChildrenCount returns the number of direct children currently running.
 func (pid *PID) ChildrenCount() int {
 	descendants := pid.Children()
 	return len(descendants)
 }
 
-// ProcessedCount returns the total number of messages processed at a given time
+// ProcessedCount returns the total number of messages this actor has processed.
 func (pid *PID) ProcessedCount() int {
 	count := pid.processedCount.Load()
 	return int(count)
 }
 
-// LatestProcessedDuration returns the duration of the latest message processed
+// LatestProcessedDuration returns the elapsed time since the most recent message was processed.
 func (pid *PID) LatestProcessedDuration() time.Duration {
 	nanos := pid.latestReceiveTimeNano.Load()
 	if nanos == 0 {
@@ -603,9 +639,13 @@ func (pid *PID) LatestProcessedDuration() time.Duration {
 	return pid.latestReceiveDuration.Load()
 }
 
-// SpawnChild creates a child actor and start watching it for error
-// When the given child actor already exists its PID will only be returned
+// SpawnChild creates, starts, and supervises a child actor with the given name.
+// If a running child with the same name already exists, its PID is returned without creating a new one.
+// Returns ErrNotLocal for remote PIDs and ErrDead if this actor is not running.
 func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts ...SpawnOption) (*PID, error) {
+	if err := pid.assertLocal(); err != nil {
+		return nil, err
+	}
 	if !pid.IsRunning() {
 		return nil, gerrors.ErrDead
 	}
@@ -690,44 +730,24 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 
 	eventsStream := pid.eventsStream
 	if eventsStream != nil {
-		eventsStream.Publish(
-			eventsTopic, &goaktpb.ActorChildCreated{
-				Address:   cid.ID(),
-				CreatedAt: timestamppb.Now(),
-				Parent:    pid.ID(),
-			},
-		)
+		eventsStream.Publish(eventsTopic, NewActorChildCreated(cid.ID(), pid.ID()))
 	}
 
 	// set the actor in the given actor system registry
 	return cid, pid.ActorSystem().putActorOnCluster(cid)
 }
 
-// Reinstate brings a previously suspended actor back into an active state.
+// Reinstate resumes a suspended actor, allowing it to process messages again.
+// The actor's internal state is preserved across the suspension. It is a no-op when cid
+// is already running or not suspended.
+// Returns ErrNotLocal for remote PIDs, ErrDead if this actor is not running,
+// and ErrActorNotFound when cid is not known to the actor system.
 //
-// This method is used to reinstate an actor identified by its PID (`cid`)—for example,
-// one that was suspended due to a fault, error, or supervision policy. Once reinstated,
-// the actor resumes processing messages from its mailbox, retaining its internal state
-// as it was prior to suspension.
-//
-// This can be invoked by a supervisor, system actor, or administrative service to
-// recover from transient failures or to manually resume paused actors.
-//
-// Parameters:
-//   - cid: The PID of the actor to be reinstated.
-//
-// Returns:
-//   - error: If the actor does not exist, or cannot be reinstated due to internal errors.
-//
-// Example usage:
-//
-//	err := supervisorPID.Reinstate(suspendedActorPID)
-//	if err != nil {
-//	    log.Printf("Reinstate failed: %v", err)
-//	}
-//
-// See also: PID.ReinstateNamed for name-based reinstatement.
+// See also: ReinstateNamed for name-based reinstatement.
 func (pid *PID) Reinstate(cid *PID) error {
+	if err := pid.assertLocal(); err != nil {
+		return err
+	}
 	if !pid.IsRunning() {
 		return gerrors.ErrDead
 	}
@@ -738,7 +758,7 @@ func (pid *PID) Reinstate(cid *PID) error {
 
 	// this call is necessary because the reference to the actor may have been
 	// kept elsewhere and the actor may have been stopped and removed from the system
-	actual, err := pid.ActorSystem().LocalActor(cid.Name())
+	actual, err := pid.ActorSystem().ActorOf(context.Background(), cid.Name())
 	if err != nil {
 		return err
 	}
@@ -756,47 +776,32 @@ func (pid *PID) Reinstate(cid *PID) error {
 	return nil
 }
 
-// ReinstateNamed attempts to reinstate a previously suspended actor by its registered name.
+// ReinstateNamed resumes a suspended actor identified by name.
+// Unlike Reinstate, the actor is looked up by name, making this method suitable for
+// cluster-wide recovery where the PID may not be available locally. It is a no-op when
+// the actor is already running or not suspended.
+// Returns ErrNotLocal for remote PIDs, ErrDead if this actor is not running,
+// ErrActorNotFound when no actor with that name exists, and ErrRemotingDisabled
+// when the actor is remote but remoting has not been configured.
 //
-// This is useful when the actor is addressed through a global or system-wide registry
-// and its PID is not directly available. The method looks up the actor by name and,
-// if found in a suspended state, transitions it back to active, allowing it to resume
-// processing messages from its mailbox as if it had never been suspended. This method should be used
-// when cluster mode is enabled.
-//
-// Typical use cases include supervisory systems, administrative tooling, or
-// health-check-driven recovery mechanisms.
-//
-// Parameters:
-//   - ctx: Standard context for cancellation, timeout, or deadlines.
-//   - actorName: The globally or locally registered name of the actor to reinstate.
-//
-// Returns:
-//   - error: If the actor does not exist, or cannot be reinstated due to internal errors.
-//
-// Example usage:
-//
-//	err := supervisorPID.ReinstateNamed(ctx, "payment-processor-42")
-//	if err != nil {
-//	    log.Printf("Failed to reinstate actor: %v", err)
-//	}
-//
-// See also: PID.Reinstate for direct PID-based reinstatement.
+// See also: Reinstate for direct PID-based reinstatement.
 func (pid *PID) ReinstateNamed(ctx context.Context, actorName string) error {
+	if err := pid.assertLocal(); err != nil {
+		return err
+	}
 	if !pid.IsRunning() {
 		return gerrors.ErrDead
 	}
 
-	addr, cid, err := pid.ActorSystem().ActorOf(ctx, actorName)
+	cid, err := pid.ActorSystem().ActorOf(ctx, actorName)
 	if err != nil {
 		return err
 	}
 
-	if cid != nil && !cid.Equals(pid.ActorSystem().NoSender()) {
+	if cid.IsLocal() {
 		if !cid.IsSuspended() || cid.IsRunning() {
 			return nil
 		}
-
 		cid.doReinstate()
 		return nil
 	}
@@ -805,10 +810,10 @@ func (pid *PID) ReinstateNamed(ctx context.Context, actorName string) error {
 		return gerrors.ErrRemotingDisabled
 	}
 
-	return pid.remoting.RemoteReinstate(ctx, addr.Host(), addr.Port(), actorName)
+	return pid.remoting.RemoteReinstate(ctx, cid.Address().Host(), cid.Address().Port(), actorName)
 }
 
-// StashSize returns the stash buffer size
+// StashSize returns the number of messages currently held in the stash buffer.
 func (pid *PID) StashSize() uint64 {
 	if pid.stashState == nil || pid.stashState.box == nil {
 		return 0
@@ -816,38 +821,14 @@ func (pid *PID) StashSize() uint64 {
 	return uint64(pid.stashState.box.Len())
 }
 
-// PipeTo executes a long-running task asynchronously and delivers its result
-// to the mailbox of the specified actor.
-//
-// While the task is executing, the calling actor is not blocked and can continue
-// processing other messages. This enables efficient interaction with external
-// services or computations without stalling the actor’s message loop.
-//
-// Once the task completes successfully, its result is sent as a message to the
-// target actor’s mailbox. If the task fails, the failure is sent to the dead letter queue.
-//
-// This pattern is useful when:
-//   - Calling external services (e.g., databases, APIs) from an actor.
-//   - Performing background computations whose results are needed later.
-//   - Offloading long tasks while keeping the actor responsive.
-//
-// Parameters:
-//   - ctx: context for cancellation and timeouts.
-//   - to: the target actor PID that will receive the result.
-//   - task: a function that performs the work and returns a proto.Message
-//     or an error.
-//   - opts: optional PipeOptions. Check PipeOption to see the available options.
-//
-// Example:
-//
-//	pid.PipeTo(ctx, targetPID, func() (proto.Message, error) {
-//	    resp, err := callExternalAPI()
-//	    if err != nil {
-//	        return nil, err
-//	    }
-//	    return &ApiResponse{Data: resp}, nil
-//	})
-func (pid *PID) PipeTo(ctx context.Context, to *PID, task func() (proto.Message, error), opts ...PipeOption) error {
+// PipeTo runs task asynchronously and, on success, delivers the result to to's mailbox.
+// The calling actor is not blocked; it continues processing other messages while the task runs.
+// On task failure the error is forwarded to the dead-letter queue.
+// Returns ErrNotLocal for remote PIDs and ErrUndefinedTask when task is nil.
+func (pid *PID) PipeTo(ctx context.Context, to *PID, task func() (any, error), opts ...PipeOption) error {
+	if err := pid.assertLocal(); err != nil {
+		return err
+	}
 	if task == nil {
 		return gerrors.ErrUndefinedTask
 	}
@@ -869,36 +850,14 @@ func (pid *PID) PipeTo(ctx context.Context, to *PID, task func() (proto.Message,
 	return nil
 }
 
-// PipeToName executes a long-running task asynchronously and delivers its result
-// to the mailbox of the actor identified by its name.
-//
-// While the task is executing, the calling actor remains free to continue
-// processing other messages without being blocked.
-//
-// Once the task completes successfully, its result is sent as a message
-// to the target actor’s mailbox. If the task fails, the failure is sent to the dead letter queue.
-//
-// Compared to PipeTo, PipeToName provides location transparency: the destination
-// actor is resolved by name, allowing messages to be delivered regardless of
-// where the actor is running (e.g., local or remote).
-//
-// Parameters:
-//   - ctx: context for cancellation and timeouts.
-//   - actorName: the logical name of the target actor.
-//   - task: a function that performs the work and returns a proto.Message
-//     or an error.
-//   - opts: optional PipeOptions. Check PipeOption to see the available options.
-//
-// Example:
-//
-//	pid.PipeToName(ctx, "worker-1", func() (proto.Message, error) {
-//	    result, err := doWork()
-//	    if err != nil {
-//	        return nil, err
-//	    }
-//	    return &MyResult{Value: result}, nil
-//	})
-func (pid *PID) PipeToName(ctx context.Context, actorName string, task func() (proto.Message, error), opts ...PipeOption) error {
+// PipeToName runs task asynchronously and, on success, delivers the result to the named actor's mailbox.
+// The actor is resolved by name, providing location transparency: the caller does not need a PID.
+// On task failure the error is forwarded to the dead-letter queue.
+// Returns ErrNotLocal for remote PIDs and ErrUndefinedTask when task is nil.
+func (pid *PID) PipeToName(ctx context.Context, actorName string, task func() (any, error), opts ...PipeOption) error {
+	if err := pid.assertLocal(); err != nil {
+		return err
+	}
 	if task == nil {
 		return gerrors.ErrUndefinedTask
 	}
@@ -926,7 +885,7 @@ func (pid *PID) PipeToName(ctx context.Context, actorName string, task func() (p
 		fut := future.New(task)
 
 		// execute the task, optionally via circuit breaker
-		runTask := func() (proto.Message, error) {
+		runTask := func() (any, error) {
 			if config != nil && config.circuitBreaker != nil {
 				outcome, oerr := config.circuitBreaker.Execute(ctx, func(ctx context.Context) (any, error) {
 					return fut.Await(ctx)
@@ -938,7 +897,7 @@ func (pid *PID) PipeToName(ctx context.Context, actorName string, task func() (p
 
 				// no need to check the type since the future.Await returns proto.Message
 				// if there is no error
-				return outcome.(proto.Message), nil
+				return outcome, nil
 			}
 			return fut.Await(ctx)
 		}
@@ -946,7 +905,7 @@ func (pid *PID) PipeToName(ctx context.Context, actorName string, task func() (p
 		result, err := runTask()
 		if err != nil {
 			pid.logger.Error(err)
-			pid.toDeadletter(ctx, pid.Address(), pid.Address(), new(goaktpb.NoMessage), err)
+			pid.toDeadletter(ctx, pid.Address(), pid.Address(), new(NoMessage), err)
 			return
 		}
 
@@ -962,9 +921,13 @@ func (pid *PID) PipeToName(ctx context.Context, actorName string, task func() (p
 	return nil
 }
 
-// Ask sends a synchronous message to another actor and expect a response.
-// This block until a response is received or timed out.
-func (pid *PID) Ask(ctx context.Context, to *PID, message proto.Message, timeout time.Duration) (response proto.Message, err error) {
+// Ask sends a synchronous message to to and waits for a response.
+// It blocks until a response is received, the context is cancelled, or timeout elapses.
+func (pid *PID) Ask(ctx context.Context, to *PID, message any, timeout time.Duration) (response any, err error) {
+	if to.IsRemote() {
+		return pid.remoteAsk(ctx, to.Address(), message, timeout)
+	}
+
 	if !to.IsRunning() {
 		return nil, gerrors.ErrDead
 	}
@@ -1003,8 +966,13 @@ func (pid *PID) Ask(ctx context.Context, to *PID, message proto.Message, timeout
 	}
 }
 
-// Tell sends an asynchronous message to another PID
-func (pid *PID) Tell(ctx context.Context, to *PID, message proto.Message) error {
+// Tell sends a message asynchronously to the target PID.
+// Routing is location-transparent: remote PIDs are handled via the remoting layer.
+func (pid *PID) Tell(ctx context.Context, to *PID, message any) error {
+	if to.IsRemote() {
+		return pid.remoteTell(ctx, to.Address(), message)
+	}
+
 	if !to.IsRunning() {
 		return gerrors.ErrDead
 	}
@@ -1016,9 +984,12 @@ func (pid *PID) Tell(ctx context.Context, to *PID, message proto.Message) error 
 	return nil
 }
 
-// SendAsync sends an asynchronous message to a given actor.
-// The location of the given actor is transparent to the caller.
-func (pid *PID) SendAsync(ctx context.Context, actorName string, message proto.Message) error {
+// SendAsync sends a message asynchronously to the named actor.
+// The actor is resolved locally first; if not found, all active datacenters are queried.
+func (pid *PID) SendAsync(ctx context.Context, actorName string, message any) error {
+	if err := pid.assertLocal(); err != nil {
+		return err
+	}
 	if !pid.IsRunning() {
 		return gerrors.ErrDead
 	}
@@ -1029,15 +1000,9 @@ func (pid *PID) SendAsync(ctx context.Context, actorName string, message proto.M
 	system := pid.actorSystem
 
 	// try to find the actor in the local datacenter
-	addr, cid, err := system.ActorOf(ctx, actorName)
+	cid, err := system.ActorOf(ctx, actorName)
 	if err == nil {
-		// Actor found in local datacenter
-		if cid != nil {
-			// Actor is local to this node
-			return pid.Tell(ctx, cid, message)
-		}
-		// Actor is in local datacenter but on a remote node
-		return pid.RemoteTell(ctx, addr, message)
+		return pid.Tell(ctx, cid, message)
 	}
 
 	// Actor not found in local datacenter - check if it's a "not found" error
@@ -1053,19 +1018,22 @@ func (pid *PID) SendAsync(ctx context.Context, actorName string, message proto.M
 	}
 
 	// Try to find the actor in remote datacenters
-	foundAddr, err := pid.DiscoverActor(ctx, actorName, timeout)
+	cid, err = pid.DiscoverActor(ctx, actorName, timeout)
 	if err != nil {
 		return err
 	}
 
 	// Send message to the actor in the remote datacenter
-	return pid.RemoteTell(ctx, foundAddr, message)
+	return pid.Tell(ctx, cid, message)
 }
 
-// SendSync sends a synchronous message to another actor and expect a response.
-// The location of the given actor is transparent to the caller.
-// This block until a response is received or timed out.
-func (pid *PID) SendSync(ctx context.Context, actorName string, message proto.Message, timeout time.Duration) (response proto.Message, err error) {
+// SendSync sends a synchronous message to the named actor and waits for a response.
+// The actor is resolved locally first; if not found, all active datacenters are queried.
+// It blocks until a response is received, the context is cancelled, or timeout elapses.
+func (pid *PID) SendSync(ctx context.Context, actorName string, message any, timeout time.Duration) (response any, err error) {
+	if err := pid.assertLocal(); err != nil {
+		return nil, err
+	}
 	if !pid.IsRunning() {
 		return nil, gerrors.ErrDead
 	}
@@ -1074,19 +1042,9 @@ func (pid *PID) SendSync(ctx context.Context, actorName string, message proto.Me
 	system := pid.actorSystem
 
 	// try to find the actor in the local datacenter
-	addr, cid, err := system.ActorOf(ctx, actorName)
+	cid, err := system.ActorOf(ctx, actorName)
 	if err == nil {
-		// Actor found in local datacenter
-		if cid != nil {
-			// Actor is local to this node
-			return pid.Ask(ctx, cid, message, timeout)
-		}
-		// Actor is in local datacenter but on a remote node
-		reply, err := pid.RemoteAsk(ctx, addr, message, timeout)
-		if err != nil {
-			return nil, err
-		}
-		return reply.UnmarshalNew()
+		return pid.Ask(ctx, cid, message, timeout)
 	}
 
 	// Actor not found in local datacenter - check if it's a "not found" error
@@ -1096,52 +1054,36 @@ func (pid *PID) SendSync(ctx context.Context, actorName string, message proto.Me
 	}
 
 	// Cap lookup timeout at 5 seconds to ensure responsive discovery
-	// TODO: make this configurable or set a reasonable default
-	lookupTimeout := 5 * time.Second
+	dcConfig := system.getDataCenterConfig()
+	lookupTimeout := datacenter.DefaultRequestTimeout
+	if dcConfig != nil {
+		lookupTimeout = dcConfig.RequestTimeout
+	}
+
 	if timeout > 0 && timeout < lookupTimeout {
 		lookupTimeout = timeout
 	}
 
 	// Try to find the actor in remote datacenters
-	foundAddr, err := pid.DiscoverActor(ctx, actorName, lookupTimeout)
+	cid, err = pid.DiscoverActor(ctx, actorName, lookupTimeout)
 	if err != nil {
 		return nil, err
 	}
 
 	// Send message to the actor in the remote datacenter
-	reply, err := pid.RemoteAsk(ctx, foundAddr, message, timeout)
-	if err != nil {
-		return nil, err
-	}
-	return reply.UnmarshalNew()
+	return pid.Ask(ctx, cid, message, timeout)
 }
 
-// DiscoverActor locates an actor across all active datacenters using parallel discovery.
-//
-// This method queries all endpoints in every active datacenter concurrently and returns
-// the address of the first datacenter that successfully resolves the actor. Once found,
-// remaining lookups are cancelled to minimize resource usage.
-//
-// The discovery is best-effort: it uses cached datacenter records and proceeds even if
-// the cache is stale (logging a warning in that case). This prioritizes availability
-// and speed over strict consistency.
-//
-// Algorithm:
-//  1. Fetch active datacenter records from the local DC controller cache
-//  2. Query all endpoints across all active DCs in parallel
-//  3. Return the first successful result, canceling remaining lookups
-//  4. If no DC contains the actor, return ErrActorNotFound
-//
-// Parameters:
-//   - ctx: Parent context for cancellation propagation
-//   - actorName: The name of the actor to discover
-//   - timeout: Maximum duration to wait for discovery (bounds the parallel queries)
-//
-// Returns:
-//   - *address.Address: The remote address of the actor if found
-//   - error: ErrActorNotFound if the actor doesn't exist in any active DC,
-//     or if the actor system / DC controller is not available
-func (pid *PID) DiscoverActor(ctx context.Context, actorName string, timeout time.Duration) (*address.Address, error) {
+// DiscoverActor locates a named actor across all active datacenters using parallel discovery.
+// All datacenter endpoints are queried concurrently; the first successful result is returned
+// and remaining queries are cancelled. Discovery is best-effort: a stale cache is used with
+// a warning rather than failing hard.
+// Returns ErrNotLocal for remote PIDs, ErrDead if not running, and ErrActorNotFound when
+// the actor does not exist in any active datacenter.
+func (pid *PID) DiscoverActor(ctx context.Context, actorName string, timeout time.Duration) (*PID, error) {
+	if err := pid.assertLocal(); err != nil {
+		return nil, err
+	}
 	if !pid.IsRunning() {
 		return nil, gerrors.ErrDead
 	}
@@ -1183,8 +1125,8 @@ func (pid *PID) DiscoverActor(ctx context.Context, actorName string, timeout tim
 	defer cancel()
 
 	type result struct {
-		addr *address.Address
-		err  error
+		cid *PID
+		err error
 	}
 
 	// Buffer sized for all endpoints to prevent goroutine blocking
@@ -1212,10 +1154,10 @@ func (pid *PID) DiscoverActor(ctx context.Context, actorName string, timeout tim
 			wg.Add(1)
 			go func(host string, port int) {
 				defer wg.Done()
-				addr, lookupErr := pid.RemoteLookup(queryCtx, host, port, actorName)
+				cid, lookupErr := pid.RemoteLookup(queryCtx, host, port, actorName)
 				results <- result{
-					addr: addr,
-					err:  lookupErr,
+					cid: cid,
+					err: lookupErr,
 				}
 			}(host, port)
 		}
@@ -1228,28 +1170,25 @@ func (pid *PID) DiscoverActor(ctx context.Context, actorName string, timeout tim
 	}()
 
 	// Collect first successful result
-	var addr *address.Address
+	var cid *PID
 	for result := range results {
-		if result.err == nil && result.addr != nil && !result.addr.Equals(address.NoSender()) {
-			// Found the actor in this datacenter
-			addr = result.addr
+		if result.err == nil && result.cid != nil {
+			cid = result.cid
 			cancel() // Cancel remaining lookups
 			break
 		}
 	}
 
-	if addr == nil {
+	if cid == nil {
 		return nil, gerrors.ErrActorNotFound
 	}
 
-	return addr, nil
+	return cid, nil
 }
 
-// BatchTell sends an asynchronous bunch of messages to the given PID
-// The messages will be processed one after the other in the order they are sent.
-// This is a design choice to follow the simple principle of one message at a time processing by actors.
-// When BatchTell encounter a single message it will fall back to a Tell call.
-func (pid *PID) BatchTell(ctx context.Context, to *PID, messages ...proto.Message) error {
+// BatchTell sends multiple messages asynchronously to the given PID, in order.
+// Each message is delivered via Tell; processing order is guaranteed.
+func (pid *PID) BatchTell(ctx context.Context, to *PID, messages ...any) error {
 	for _, message := range messages {
 		if err := pid.Tell(ctx, to, message); err != nil {
 			return err
@@ -1258,11 +1197,10 @@ func (pid *PID) BatchTell(ctx context.Context, to *PID, messages ...proto.Messag
 	return nil
 }
 
-// BatchAsk sends a synchronous bunch of messages to the given PID and expect responses in the same order as the messages.
-// The messages will be processed one after the other in the order they are sent.
-// This is a design choice to follow the simple principle of one message at a time processing by actors.
-func (pid *PID) BatchAsk(ctx context.Context, to *PID, messages []proto.Message, timeout time.Duration) (responses chan proto.Message, err error) {
-	responses = make(chan proto.Message, len(messages))
+// BatchAsk sends multiple messages synchronously to the given PID and returns responses in the same order.
+// Each message is delivered via Ask; the call blocks until all responses are received or any Ask fails.
+func (pid *PID) BatchAsk(ctx context.Context, to *PID, messages []any, timeout time.Duration) (responses chan any, err error) {
+	responses = make(chan any, len(messages))
 	defer close(responses)
 
 	for i := range messages {
@@ -1275,59 +1213,28 @@ func (pid *PID) BatchAsk(ctx context.Context, to *PID, messages []proto.Message,
 	return
 }
 
-// RemoteLookup look for an actor address on a remote node.
-func (pid *PID) RemoteLookup(ctx context.Context, host string, port int, name string) (addr *address.Address, err error) {
+// RemoteLookup resolves a named actor on a specific remote node and returns it as a PID.
+// Returns ErrRemotingDisabled when remoting is not configured, and ErrActorNotFound
+// when no actor with that name exists on the target node.
+func (pid *PID) RemoteLookup(ctx context.Context, host string, port int, name string) (*PID, error) {
 	if !pid.remotingEnabled() {
 		return nil, gerrors.ErrRemotingDisabled
 	}
 
-	return pid.remoting.RemoteLookup(ctx, host, port, name)
-}
-
-// RemoteTell sends a message to an actor remotely without expecting any reply
-func (pid *PID) RemoteTell(ctx context.Context, to *address.Address, message proto.Message) error {
-	if !pid.remotingEnabled() {
-		return gerrors.ErrRemotingDisabled
+	addr, err := pid.remoting.RemoteLookup(ctx, host, port, name)
+	if err != nil {
+		return nil, err
 	}
 
-	return pid.remoting.RemoteTell(ctx, pid.Address(), to, message)
-}
-
-// RemoteAsk sends a synchronous message to another actor remotely and expect a response.
-func (pid *PID) RemoteAsk(ctx context.Context, to *address.Address, message proto.Message, timeout time.Duration) (response *anypb.Any, err error) {
-	if !pid.remotingEnabled() {
-		return nil, gerrors.ErrRemotingDisabled
+	if addr == nil || addr.Equals(address.NoSender()) {
+		return nil, gerrors.NewErrActorNotFound(name)
 	}
 
-	if timeout <= 0 {
-		return nil, gerrors.ErrInvalidTimeout
-	}
-
-	return pid.remoting.RemoteAsk(ctx, pid.Address(), to, message, timeout)
+	return newRemotePID(addr, pid.remoting), nil
 }
 
-// RemoteBatchTell sends a batch of messages to a remote actor in a way fire-and-forget manner
-// Messages are processed one after the other in the order they are sent.
-func (pid *PID) RemoteBatchTell(ctx context.Context, to *address.Address, messages []proto.Message) error {
-	if !pid.remotingEnabled() {
-		return gerrors.ErrRemotingDisabled
-	}
-
-	return pid.remoting.RemoteBatchTell(ctx, pid.Address(), to, messages)
-}
-
-// RemoteBatchAsk sends a synchronous bunch of messages to a remote actor and expect responses in the same order as the messages.
-// Messages are processed one after the other in the order they are sent.
-// This can hinder performance if it is not properly used.
-func (pid *PID) RemoteBatchAsk(ctx context.Context, to *address.Address, messages []proto.Message, timeout time.Duration) (responses []*anypb.Any, err error) {
-	if !pid.remotingEnabled() {
-		return nil, gerrors.ErrRemotingDisabled
-	}
-
-	return pid.remoting.RemoteBatchAsk(ctx, pid.Address(), to, messages, timeout)
-}
-
-// RemoteStop stops an actor on a remote node
+// RemoteStop stops a named actor on the specified remote node.
+// Returns ErrRemotingDisabled when remoting is not configured.
 func (pid *PID) RemoteStop(ctx context.Context, host string, port int, name string) error {
 	if !pid.remotingEnabled() {
 		return gerrors.ErrRemotingDisabled
@@ -1336,7 +1243,9 @@ func (pid *PID) RemoteStop(ctx context.Context, host string, port int, name stri
 	return pid.remoting.RemoteStop(ctx, host, port, name)
 }
 
-// RemoteSpawn creates an actor on a remote node. The given actor needs to be registered on the remote node using the Register method of ActorSystem
+// RemoteSpawn creates a named actor on the specified remote node.
+// The actor type must be registered on the target node via ActorSystem.Register before this call.
+// Returns ErrRemotingDisabled when remoting is not configured.
 func (pid *PID) RemoteSpawn(ctx context.Context, host string, port int, actorName, actorType string, opts ...SpawnOption) error {
 	if !pid.remotingEnabled() {
 		return gerrors.ErrRemotingDisabled
@@ -1373,7 +1282,8 @@ func (pid *PID) RemoteSpawn(ctx context.Context, host string, port int, actorNam
 	return pid.remoting.RemoteSpawn(ctx, host, port, request)
 }
 
-// RemoteReSpawn restarts an actor on a remote node.
+// RemoteReSpawn restarts a named actor on the specified remote node.
+// Returns ErrRemotingDisabled when remoting is not configured.
 func (pid *PID) RemoteReSpawn(ctx context.Context, host string, port int, name string) error {
 	if !pid.remotingEnabled() {
 		return gerrors.ErrRemotingDisabled
@@ -1382,10 +1292,14 @@ func (pid *PID) RemoteReSpawn(ctx context.Context, host string, port int, name s
 	return pid.remoting.RemoteReSpawn(ctx, host, port, name)
 }
 
-// Shutdown gracefully shuts down the given actor
-// All current messages in the mailbox will be processed before the actor shutdown after a period of time
-// that can be configured. All child actors will be gracefully shutdown.
+// Shutdown gracefully stops this actor and all its children.
+// Pending mailbox messages are processed before the actor terminates.
+// Returns ErrNotLocal for remote PIDs and ErrShutdownForbidden when called on a system actor
+// while the actor system is still running.
 func (pid *PID) Shutdown(ctx context.Context) error {
+	if err := pid.assertLocal(); err != nil {
+		return err
+	}
 	// we should never shutdown system actors unless the whole system is terminating
 	if actoryStem := pid.ActorSystem(); actoryStem != nil {
 		if !actoryStem.isStopping() && isSystemName(pid.Name()) {
@@ -1413,12 +1327,7 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 	}
 
 	if pid.eventsStream != nil {
-		pid.eventsStream.Publish(
-			eventsTopic, &goaktpb.ActorStopped{
-				Address:   pid.ID(),
-				StoppedAt: timestamppb.Now(),
-			},
-		)
+		pid.eventsStream.Publish(eventsTopic, NewActorStopped(pid.ID()))
 	}
 
 	pid.stopLocker.Unlock()
@@ -1426,29 +1335,34 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-// Watch watches a given actor for a Terminated message when the watched actor shutdown
+// Watch registers pid to receive a Terminated message when cid shuts down.
+// It is a no-op for remote PIDs.
 func (pid *PID) Watch(cid *PID) {
+	if pid.IsRemote() {
+		return
+	}
 	pid.ActorSystem().tree().addWatcher(cid, pid)
 }
 
-// UnWatch stops watching a given actor
+// UnWatch cancels the watch previously registered by Watch for cid.
+// It is a no-op for remote PIDs.
 func (pid *PID) UnWatch(cid *PID) {
+	if pid.IsRemote() {
+		return
+	}
 	pid.ActorSystem().tree().removeWatcher(cid, pid)
 }
 
-// Logger returns the logger sets when creating the PID
-func (pid *PID) Logger() log.Logger {
+// logger returns the logger set when creating the PID.
+func (pid *PID) getLogger() log.Logger {
 	pid.fieldsLocker.RLock()
-	logger := pid.logger
+	l := pid.logger
 	pid.fieldsLocker.RUnlock()
-	return logger
+	return l
 }
 
-// LatestActivityTime returns the timestamp of the last message received by the actor.
-// This value can be used for monitoring and health-check purposes to determine
-// if the actor is still active or has become idle.
-//
-// Note: The timestamp is updated whenever the actor receives a message.
+// LatestActivityTime returns the timestamp of the last message received by this actor.
+// Returns the zero time when no message has been processed yet.
 func (pid *PID) LatestActivityTime() time.Time {
 	nanos := pid.latestReceiveTimeNano.Load()
 	if nanos == 0 {
@@ -1461,7 +1375,7 @@ func (pid *PID) LatestActivityTime() time.Time {
 //
 // Design decision: async requests are opt-in per actor to preserve legacy semantics.
 // The caller must have reentrancy enabled; otherwise ErrReentrancyDisabled is returned.
-func (pid *PID) request(ctx context.Context, to *PID, message proto.Message, opts ...RequestOption) (RequestCall, error) {
+func (pid *PID) request(ctx context.Context, to *PID, message any, opts ...RequestOption) (RequestCall, error) {
 	if !pid.IsRunning() {
 		return nil, gerrors.ErrDead
 	}
@@ -1521,7 +1435,7 @@ func (pid *PID) request(ctx context.Context, to *PID, message proto.Message, opt
 // Design decision: name resolution is performed once to avoid an extra lookup and
 // to keep control of the async envelope before sending. The caller must have
 // reentrancy enabled; otherwise ErrReentrancyDisabled is returned.
-func (pid *PID) requestName(ctx context.Context, actorName string, message proto.Message, opts ...RequestOption) (RequestCall, error) {
+func (pid *PID) requestName(ctx context.Context, actorName string, message any, opts ...RequestOption) (RequestCall, error) {
 	if !pid.IsRunning() {
 		return nil, gerrors.ErrDead
 	}
@@ -1548,7 +1462,7 @@ func (pid *PID) requestName(ctx context.Context, actorName string, message proto
 		return nil, gerrors.ErrInvalidReentrancyMode
 	}
 
-	addr, cid, err := pid.ActorSystem().ActorOf(ctx, actorName)
+	cid, err := pid.ActorSystem().ActorOf(ctx, actorName)
 	if err != nil {
 		return nil, err
 	}
@@ -1569,12 +1483,12 @@ func (pid *PID) requestName(ctx context.Context, actorName string, message proto
 		return nil, err
 	}
 
-	if cid != nil {
+	if cid.IsLocal() {
 		if err := pid.Tell(ctx, cid, req); err != nil {
 			pid.deregisterRequestState(state)
 			return nil, err
 		}
-	} else if err := pid.RemoteTell(ctx, addr, req); err != nil {
+	} else if err := pid.remoteTell(ctx, cid.Address(), req); err != nil {
 		pid.deregisterRequestState(state)
 		return nil, err
 	}
@@ -1586,20 +1500,15 @@ func (pid *PID) requestName(ctx context.Context, actorName string, message proto
 //
 // Design decision: AsyncRequest uses Any to preserve the protobuf-only message
 // contract while keeping the async envelope stable across message types.
-func (pid *PID) buildAsyncRequest(message proto.Message, correlationID string) (*internalpb.AsyncRequest, error) {
+func (pid *PID) buildAsyncRequest(message any, correlationID string) (*commands.AsyncRequest, error) {
 	if message == nil {
 		return nil, gerrors.ErrInvalidMessage
 	}
 
-	payload, err := anypb.New(message)
-	if err != nil {
-		return nil, err
-	}
-
-	return &internalpb.AsyncRequest{
-		CorrelationId: correlationID,
+	return &commands.AsyncRequest{
+		CorrelationID: correlationID,
 		ReplyTo:       pid.Address().String(),
-		Message:       payload,
+		Message:       message,
 	}, nil
 }
 
@@ -1650,19 +1559,19 @@ func (pid *PID) process() {
 				}
 				// Process the message
 				switch msg := received.Message().(type) {
-				case *goaktpb.PoisonPill:
+				case *PoisonPill:
 					_ = pid.Shutdown(received.Context())
-				case *internalpb.HealthCheckRequest:
+				case *commands.HealthCheckRequest:
 					pid.handleHealthcheck(received)
-				case *internalpb.Panicking:
+				case *commands.Panicking:
 					pid.handlePanicking(received.Sender(), msg)
-				case *goaktpb.PausePassivation:
+				case *PausePassivation:
 					pid.pausePassivation()
-				case *goaktpb.ResumePassivation:
+				case *ResumePassivation:
 					pid.resumePassivation()
-				case *internalpb.AsyncRequest:
+				case *commands.AsyncRequest:
 					pid.handleAsyncRequest(received, msg)
-				case *internalpb.AsyncResponse:
+				case *commands.AsyncResponse:
 					pid.handleAsyncResponse(received, msg)
 				default:
 					pid.handleReceived(received)
@@ -1690,7 +1599,7 @@ func (pid *PID) process() {
 // handleHealthcheck is used to handle the readiness probe messages
 func (pid *PID) handleHealthcheck(received *ReceiveContext) {
 	pid.markActivity(time.Now())
-	received.Response(new(internalpb.HealthCheckResponse))
+	received.Response(new(commands.HealthCheckResponse))
 }
 
 // handleReceived picks the right behavior and processes the message
@@ -1700,28 +1609,6 @@ func (pid *PID) handleReceived(received *ReceiveContext) {
 		pid.markActivity(time.Now().UTC())
 		pid.recordProcessedMessage()
 		behavior(received)
-	}
-}
-
-// isSystemMessage checks if a message is a system message that must be allowed
-// through even during system shutdown (e.g., for proper shutdown, supervision, lifecycle).
-//
-// This is a zero-allocation type switch that identifies critical system messages.
-func isSystemMessage(message proto.Message) bool {
-	switch message.(type) {
-	case *internalpb.AsyncResponse,
-		*internalpb.AsyncRequest,
-		*goaktpb.PoisonPill,
-		*internalpb.HealthCheckRequest,
-		*internalpb.Panicking,
-		*goaktpb.PausePassivation,
-		*goaktpb.ResumePassivation,
-		*goaktpb.PostStart,
-		*goaktpb.Terminated,
-		*goaktpb.PanicSignal:
-		return true
-	default:
-		return false
 	}
 }
 
@@ -1736,12 +1623,12 @@ func (pid *PID) enableReentrancyStash(received *ReceiveContext) bool {
 	}
 
 	switch received.Message().(type) {
-	case *internalpb.AsyncResponse,
-		*goaktpb.PoisonPill,
-		*internalpb.HealthCheckRequest,
-		*internalpb.Panicking,
-		*goaktpb.PausePassivation,
-		*goaktpb.ResumePassivation:
+	case *commands.AsyncResponse,
+		*PoisonPill,
+		*commands.HealthCheckRequest,
+		*commands.Panicking,
+		*PausePassivation,
+		*ResumePassivation:
 		return false
 	default:
 		return true
@@ -1752,26 +1639,20 @@ func (pid *PID) enableReentrancyStash(received *ReceiveContext) bool {
 //
 // Design decision: async metadata is carried on ReceiveContext to enable Response
 // to send AsyncResponse without changing the user-facing API.
-func (pid *PID) handleAsyncRequest(received *ReceiveContext, req *internalpb.AsyncRequest) {
+func (pid *PID) handleAsyncRequest(received *ReceiveContext, req *commands.AsyncRequest) {
 	if received == nil || req == nil {
 		pid.handleReceivedError(received, gerrors.ErrInvalidMessage)
 		return
 	}
 
-	if req.GetCorrelationId() == "" || req.GetReplyTo() == "" || req.GetMessage() == nil {
+	if req.CorrelationID == "" || req.ReplyTo == "" || req.Message == nil {
 		pid.handleReceivedError(received, gerrors.ErrInvalidMessage)
 		return
 	}
 
-	msg, err := req.GetMessage().UnmarshalNew()
-	if err != nil {
-		pid.handleReceivedError(received, fmt.Errorf("invalid async request: %w", err))
-		return
-	}
-
-	received.message = msg
+	received.message = req.Message
 	received.response = nil
-	received.withRequestMeta(req.GetCorrelationId(), req.GetReplyTo())
+	received.withRequestMeta(req.CorrelationID, req.ReplyTo)
 	pid.handleReceived(received)
 }
 
@@ -1779,57 +1660,34 @@ func (pid *PID) handleAsyncRequest(received *ReceiveContext, req *internalpb.Asy
 //
 // Design decision: errors are encoded as strings on the wire to keep the response
 // envelope stable and avoid cross-version type coupling.
-func (pid *PID) handleAsyncResponse(received *ReceiveContext, resp *internalpb.AsyncResponse) {
+func (pid *PID) handleAsyncResponse(received *ReceiveContext, resp *commands.AsyncResponse) {
 	if resp == nil {
 		pid.handleReceivedError(received, gerrors.ErrInvalidMessage)
 		return
 	}
 
-	correlationID := strings.TrimSpace(resp.GetCorrelationId())
+	correlationID := strings.TrimSpace(resp.CorrelationID)
 	if correlationID == "" {
 		pid.handleReceivedError(received, gerrors.ErrInvalidMessage)
 		return
 	}
 
-	if resp.GetError() != "" {
-		if !pid.completeRequest(correlationID, nil, asyncErrorFromString(resp.GetError())) {
+	if resp.Error != "" {
+		if !pid.completeRequest(correlationID, nil, asyncErrorFromString(resp.Error)) {
 			pid.logger.Warnf("Async response dropped: unknown correlation id=%s", correlationID)
 		}
 		return
 	}
 
-	if resp.GetMessage() == nil {
+	if resp.Message == nil {
 		if !pid.completeRequest(correlationID, nil, gerrors.ErrInvalidMessage) {
 			pid.logger.Warnf("Async response dropped: unknown correlation id=%s", correlationID)
 		}
 		return
 	}
 
-	message, err := resp.GetMessage().UnmarshalNew()
-	if err != nil {
-		if !pid.completeRequest(correlationID, nil, fmt.Errorf("invalid async response: %w", err)) {
-			pid.logger.Warnf("Async response dropped: unknown correlation id=%s", correlationID)
-		}
-		return
-	}
-
-	if !pid.completeRequest(correlationID, message, nil) {
+	if !pid.completeRequest(correlationID, resp.Message, nil) {
 		pid.logger.Warnf("Async response dropped: unknown correlation id=%s", correlationID)
-	}
-}
-
-// asyncErrorFromString maps well-known async error strings back to typed errors.
-//
-// Design decision: preserve known error identities when possible while tolerating
-// opaque error strings from other nodes or versions.
-func asyncErrorFromString(err string) error {
-	switch err {
-	case gerrors.ErrRequestTimeout.Error():
-		return gerrors.ErrRequestTimeout
-	case gerrors.ErrRequestCanceled.Error():
-		return gerrors.ErrRequestCanceled
-	default:
-		return errors.New(err)
 	}
 }
 
@@ -1903,7 +1761,7 @@ func (pid *PID) deregisterRequestState(state *requestState) {
 // completeRequest marks an async request as completed and runs its callback.
 //
 // Design decision: completion is idempotent; only the first result wins.
-func (pid *PID) completeRequest(correlationID string, result proto.Message, err error) bool {
+func (pid *PID) completeRequest(correlationID string, result any, err error) bool {
 	if pid.reentrancy == nil {
 		return false
 	}
@@ -1938,8 +1796,8 @@ func (pid *PID) enqueueAsyncError(ctx context.Context, correlationID string, err
 		return nil
 	}
 
-	response := &internalpb.AsyncResponse{
-		CorrelationId: correlationID,
+	response := &commands.AsyncResponse{
+		CorrelationID: correlationID,
 		Error:         err.Error(),
 	}
 
@@ -1953,13 +1811,13 @@ func (pid *PID) enqueueAsyncError(ctx context.Context, correlationID string, err
 //
 // Design decision: reply routing uses the string address embedded in AsyncRequest
 // to support local and remote responders with the same flow.
-func (pid *PID) sendAsyncResponse(ctx context.Context, replyTo, correlationID string, message proto.Message, err error) error {
+func (pid *PID) sendAsyncResponse(ctx context.Context, replyTo, correlationID string, message any, err error) error {
 	if correlationID == "" || replyTo == "" {
 		return gerrors.ErrInvalidMessage
 	}
 
-	response := &internalpb.AsyncResponse{
-		CorrelationId: correlationID,
+	response := &commands.AsyncResponse{
+		CorrelationID: correlationID,
 	}
 
 	if err != nil {
@@ -1968,11 +1826,7 @@ func (pid *PID) sendAsyncResponse(ctx context.Context, replyTo, correlationID st
 		if message == nil {
 			return gerrors.ErrInvalidMessage
 		}
-		payload, err := anypb.New(message)
-		if err != nil {
-			return err
-		}
-		response.Message = payload
+		response.Message = message
 	}
 
 	addr, err := address.Parse(replyTo)
@@ -1987,14 +1841,14 @@ func (pid *PID) sendAsyncResponse(ctx context.Context, replyTo, correlationID st
 
 	isLocal := addr.System() == system.Name() && addr.Host() == system.Host() && addr.Port() == system.Port()
 	if isLocal {
-		target, err := system.LocalActor(addr.Name())
+		target, err := system.ActorOf(ctx, addr.Name())
 		if err != nil {
 			return err
 		}
 		return pid.Tell(ctx, target, response)
 	}
 
-	return pid.RemoteTell(ctx, addr, response)
+	return pid.remoteTell(ctx, addr, response)
 }
 
 // cancelInFlightRequests completes all in-flight async calls with the given reason.
@@ -2138,12 +1992,7 @@ func (pid *PID) init(ctx context.Context) error {
 	pid.logger.Infof("Actor %s initialization is successful.", pid.Name())
 
 	if pid.eventsStream != nil {
-		pid.eventsStream.Publish(
-			eventsTopic, &goaktpb.ActorStarted{
-				Address:   pid.ID(),
-				StartedAt: timestamppb.Now(),
-			},
-		)
+		pid.eventsStream.Publish(eventsTopic, NewActorStarted(pid.ID()))
 	}
 
 	cancel()
@@ -2194,10 +2043,7 @@ func (pid *PID) freeWatchers(ctx context.Context) {
 		// this call will be fast no need of parallel processing
 		for _, watcher := range watchers {
 			watcher := watcher
-			terminated := &goaktpb.Terminated{
-				Address:      pid.ID(),
-				TerminatedAt: timestamppb.Now(),
-			}
+			terminated := NewTerminated(pid.ID())
 
 			if watcher.IsRunning() {
 				logger.Debugf("Watcher %s releasing watched %s", watcher.Name(), pid.Name())
@@ -2332,11 +2178,7 @@ func (pid *PID) tryPassivation(reason string) bool {
 	}
 
 	if pid.eventsStream != nil {
-		event := &goaktpb.ActorPassivated{
-			Address:      pid.ID(),
-			PassivatedAt: timestamppb.Now(),
-		}
-		pid.eventsStream.Publish(eventsTopic, event)
+		pid.eventsStream.Publish(eventsTopic, NewActorPassivated(pid.ID()))
 	}
 
 	pid.logger.Infof("Actor %s successfully passivated", pid.Name())
@@ -2472,51 +2314,18 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 	pid.logger.Debugf("Actor %s supervisor directive %s", pid.Name(), directive.String())
 
 	// create the message to send to the parent
-	actual, _ := anypb.New(signal.Msg())
-	msg := &internalpb.Panicking{
-		ActorId:      pid.ID(),
-		ErrorMessage: signal.Err().Error(),
-		Message:      actual,
-		Timestamp:    signal.Timestamp(),
-	}
-
-	switch directive {
-	case supervisor.StopDirective:
-		msg.Directive = &internalpb.Panicking_Stop{
-			Stop: new(internalpb.StopDirective),
-		}
-	case supervisor.RestartDirective:
-		msg.Directive = &internalpb.Panicking_Restart{
-			Restart: &internalpb.RestartDirective{
-				MaxRetries: pid.supervisor.MaxRetries(),
-				Timeout:    int64(pid.supervisor.Timeout()),
-			},
-		}
-	case supervisor.ResumeDirective:
-		msg.Directive = &internalpb.Panicking_Resume{
-			Resume: &internalpb.ResumeDirective{},
-		}
-	case supervisor.EscalateDirective:
-		msg.Directive = &internalpb.Panicking_Escalate{
-			Escalate: &internalpb.EscalateDirective{},
-		}
-	default:
-		pid.logger.Debugf("Unknown directive: %T found for error: %s", directive, errorType(signal.Err()))
-		pid.suspend(signal.Err().Error())
-		return
-	}
-
-	switch pid.supervisor.Strategy() {
-	case supervisor.OneForOneStrategy:
-		msg.Strategy = internalpb.Strategy_STRATEGY_ONE_FOR_ONE
-	case supervisor.OneForAllStrategy:
-		msg.Strategy = internalpb.Strategy_STRATEGY_ONE_FOR_ALL
-	default:
-		msg.Strategy = internalpb.Strategy_STRATEGY_ONE_FOR_ONE
+	msg := &commands.Panicking{
+		ActorID:    pid.ID(),
+		Err:        signal.Err(),
+		Message:    signal.Msg(),
+		Timestamp:  signal.Timestamp(),
+		Strategy:   pid.supervisor.Strategy(),
+		Directive:  directive,
+		Supervisor: pid.supervisor,
 	}
 
 	if parent := pid.Parent(); parent != nil && !parent.Equals(pid.ActorSystem().NoSender()) {
-		pid.logger.Warnf("Actor %s's child Actor (%s) is failing: Err=%s", parent.Name(), pid.Name(), msg.GetErrorMessage())
+		pid.logger.Warnf("Actor %s's child Actor (%s) is failing: Err=%s", parent.Name(), pid.Name(), msg.Err.Error())
 		pid.logger.Infof("Actor %s activates [strategy=%s, directive=%s] for failing child actor=(%s)",
 			parent.Name(),
 			pid.supervisor.Strategy(),
@@ -2536,7 +2345,7 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 		}
 
 		// suspend the actor until the parent takes an action based on strategy/directive
-		pid.suspend(msg.GetErrorMessage())
+		pid.suspend(msg.Err.Error())
 
 		// notify parent about the failure
 		_ = pid.Tell(context.Background(), parent, msg)
@@ -2544,8 +2353,8 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 	}
 
 	// no parent found, just suspend the actor
-	pid.logger.Warnf("Actor %s has no parent to notify about its failure: Err=%s", pid.Name(), msg.GetErrorMessage())
-	pid.suspend(msg.GetErrorMessage())
+	pid.logger.Warnf("Actor %s has no parent to notify about its failure: Err=%s", pid.Name(), msg.Err.Error())
+	pid.suspend(msg.Err.Error())
 }
 
 // handleReceivedError sends message to deadletter synthetic actor
@@ -2556,15 +2365,15 @@ func (pid *PID) handleReceivedError(receiveCtx *ReceiveContext, err error) {
 	pid.handleReceivedErrorWithMessage(receiveCtx.Sender(), receiveCtx.Message(), err)
 }
 
-func (pid *PID) handleReceivedErrorWithMessage(senderPID *PID, message proto.Message, err error) {
+func (pid *PID) handleReceivedErrorWithMessage(senderPID *PID, message any, err error) {
 	// the message is lost
 	if pid.eventsStream == nil {
 		return
 	}
 
-	// skip system messages
+	// skip system messages and deadletter commands to prevent infinite recursion
 	switch message.(type) {
-	case *goaktpb.PostStart, *goaktpb.Terminated:
+	case *PostStart, *Terminated, *commands.SendDeadletter:
 		return
 	default:
 		// pass through
@@ -2592,21 +2401,24 @@ func (pid *PID) handleReceivedErrorWithMessage(senderPID *PID, message proto.Mes
 }
 
 // toDeadletter sends a message to the deadletter actor
-func (pid *PID) toDeadletter(ctx context.Context, from, to *address.Address, message proto.Message, err error) {
-	deadletter := pid.ActorSystem().getDeadletter()
-	msg, _ := anypb.New(message)
+func (pid *PID) toDeadletter(ctx context.Context, from, to *address.Address, message any, err error) {
+	system := pid.ActorSystem()
+	if system == nil {
+		return
+	}
+	deadletter := system.getDeadletter()
+	command := &commands.SendDeadletter{
+		Deadletter: commands.Deadletter{
+			Sender:   from.String(),
+			Receiver: to.String(),
+			Message:  message,
+			SendTime: time.Now().UTC(),
+			Reason:   err.Error(),
+		},
+	}
 
 	// send the message to the deadletter actor
-	_ = pid.Tell(ctx,
-		deadletter,
-		&internalpb.SendDeadletter{
-			Deadletter: &goaktpb.Deadletter{
-				Sender:   from.String(),
-				Receiver: to.String(),
-				Message:  msg,
-				SendTime: timestamppb.Now(),
-				Reason:   err.Error(),
-			}})
+	_ = pid.Tell(ctx, deadletter, command)
 }
 
 // handleCompletion processes a long-started task and pipe the result to
@@ -2632,7 +2444,7 @@ func (pid *PID) handleCompletion(ctx context.Context, config *pipeConfig, comple
 	fut := future.New(completion.Task)
 
 	// execute the task, optionally via circuit breaker
-	runTask := func() (proto.Message, error) {
+	runTask := func() (any, error) {
 		if config != nil && config.circuitBreaker != nil {
 			outcome, oerr := config.circuitBreaker.Execute(ctx, func(ctx context.Context) (any, error) {
 				return fut.Await(ctx)
@@ -2644,7 +2456,7 @@ func (pid *PID) handleCompletion(ctx context.Context, config *pipeConfig, comple
 
 			// no need to check the type since the future.Await returns proto.Message
 			// if there is no error
-			return outcome.(proto.Message), nil
+			return outcome, nil
 		}
 		return fut.Await(ctx)
 	}
@@ -2652,7 +2464,7 @@ func (pid *PID) handleCompletion(ctx context.Context, config *pipeConfig, comple
 	result, err := runTask()
 	if err != nil {
 		pid.logger.Error(err)
-		pid.toDeadletter(ctx, pid.Address(), pid.Address(), new(goaktpb.NoMessage), err)
+		pid.toDeadletter(ctx, pid.Address(), pid.Address(), new(NoMessage), err)
 		return
 	}
 
@@ -2669,31 +2481,27 @@ func (pid *PID) handleCompletion(ctx context.Context, config *pipeConfig, comple
 }
 
 // handlePanicking watches for child actor's failure and act based upon the supervisory strategy
-func (pid *PID) handlePanicking(cid *PID, msg *internalpb.Panicking) {
-	if cid.ID() == msg.GetActorId() {
-		directive := msg.GetDirective()
-		includeSiblings := msg.GetStrategy() == internalpb.Strategy_STRATEGY_ONE_FOR_ALL
+func (pid *PID) handlePanicking(cid *PID, msg *commands.Panicking) {
+	if cid.ID() == msg.ActorID {
+		directive := msg.Directive
+		includeSiblings := msg.Strategy == supervisor.OneForAllStrategy
 
-		switch d := directive.(type) {
-		case *internalpb.Panicking_Stop:
+		switch directive {
+		case supervisor.StopDirective:
 			pid.handleStopDirective(cid, includeSiblings)
-		case *internalpb.Panicking_Restart:
+		case supervisor.RestartDirective:
 			pid.handleRestartDirective(cid,
-				d.Restart.GetMaxRetries(),
-				time.Duration(d.Restart.GetTimeout()),
+				msg.Supervisor.MaxRetries(),
+				msg.Supervisor.Timeout(),
 				includeSiblings)
-		case *internalpb.Panicking_Resume:
+		case supervisor.ResumeDirective:
 			// simply reinstate the actor
 			cid.doReinstate()
-		case *internalpb.Panicking_Escalate:
+		case supervisor.EscalateDirective:
 			// forward the message to the parent and suspend the actor
-			_ = cid.Tell(context.Background(), pid, &goaktpb.PanicSignal{
-				Reason:    msg.GetErrorMessage(),
-				Message:   msg.GetMessage(),
-				Timestamp: msg.GetTimestamp(),
-			})
+			_ = cid.Tell(context.Background(), pid, NewPanicSignal(msg.Message, msg.Err.Error(), msg.Timestamp))
 		default:
-			pid.handleStopDirective(cid, includeSiblings)
+			cid.suspend(msg.Err.Error())
 		}
 		return
 	}
@@ -2795,11 +2603,7 @@ func (pid *PID) suspend(reason string) {
 	// stop the supervisor loop
 	pid.stopSupervisionLoop()
 	// publish an event to the events stream
-	pid.eventsStream.Publish(eventsTopic, &goaktpb.ActorSuspended{
-		Address:     pid.ID(),
-		SuspendedAt: timestamppb.Now(),
-		Reason:      reason,
-	})
+	pid.eventsStream.Publish(eventsTopic, NewActorSuspended(pid.ID(), reason))
 }
 
 // getDeadlettersCount gets deadletter
@@ -2808,8 +2612,8 @@ func (pid *PID) getDeadlettersCount(ctx context.Context) int64 {
 		name    = pid.ID()
 		to      = pid.ActorSystem().getDeadletter()
 		from    = pid.ActorSystem().getSystemGuardian()
-		message = &internalpb.DeadlettersCountRequest{
-			ActorId: &name,
+		message = &commands.DeadlettersCountRequest{
+			ActorID: &name,
 		}
 	)
 	if to.IsRunning() {
@@ -2818,14 +2622,14 @@ func (pid *PID) getDeadlettersCount(ctx context.Context) int64 {
 		// note: no need to check for error because this call is internal
 		message, _ := from.Ask(ctx, to, message, DefaultAskTimeout)
 		// cast the response received from the deadletter
-		deadlettersCount := message.(*internalpb.DeadlettersCountResponse)
-		return deadlettersCount.GetTotalCount()
+		deadlettersCount := message.(*commands.DeadlettersCountResponse)
+		return deadlettersCount.TotalCount
 	}
 	return 0
 }
 
 // fireSystemMessage sends a system-level message to the specified PID by creating a receive context and invoking the message handling logic.
-func (pid *PID) fireSystemMessage(ctx context.Context, message proto.Message) {
+func (pid *PID) fireSystemMessage(ctx context.Context, message any) {
 	receiveContext := getContext()
 	noSender := pid.ActorSystem().NoSender()
 	receiveContext.build(ctx, noSender, pid, message, true)
@@ -2854,10 +2658,7 @@ func (pid *PID) doReinstate() {
 	pid.resumePassivation()
 
 	// publish an event to the events stream
-	pid.eventsStream.Publish(eventsTopic, &goaktpb.ActorReinstated{
-		Address:      pid.ID(),
-		ReinstatedAt: timestamppb.Now(),
-	})
+	pid.eventsStream.Publish(eventsTopic, NewActorReinstated(pid.ID()))
 }
 
 func (pid *PID) shouldAutoPassivate() bool {
@@ -2922,7 +2723,7 @@ func (pid *PID) healthCheck(ctx context.Context) error {
 		return nil
 	}
 
-	message := new(internalpb.HealthCheckRequest)
+	message := new(commands.HealthCheckRequest)
 	timeout := pid.initTimeout.Load()
 	numretries := pid.initMaxRetries.Load()
 	noSender := pid.ActorSystem().NoSender()
@@ -2948,6 +2749,10 @@ func (pid *PID) remotingEnabled() bool {
 		return false
 	}
 
+	if pid.IsRemote() {
+		return true
+	}
+
 	system := pid.ActorSystem()
 	if system == nil {
 		return false
@@ -2960,7 +2765,7 @@ func (pid *PID) remotingEnabled() bool {
 	return true
 }
 
-func (pid *PID) toWireActor() (*internalpb.Actor, error) {
+func (pid *PID) toSerialize() (*internalpb.Actor, error) {
 	dependencies, err := codec.EncodeDependencies(pid.Dependencies()...)
 	if err != nil {
 		return nil, err
@@ -2987,7 +2792,7 @@ func (pid *PID) toWireActor() (*internalpb.Actor, error) {
 
 	return &internalpb.Actor{
 		Address:             pid.ID(),
-		Type:                registry.Name(pid.Actor()),
+		Type:                types.Name(pid.Actor()),
 		Singleton:           singletonSpec,
 		Relocatable:         pid.IsRelocatable(),
 		PassivationStrategy: codec.EncodePassivationStrategy(pid.PassivationStrategy()),
@@ -3010,7 +2815,7 @@ func (pid *PID) registerMetrics() error {
 		observeOptions := []otelmetric.ObserveOption{
 			otelmetric.WithAttributes(attribute.String("actor.system", pid.actorSystem.Name())),
 			otelmetric.WithAttributes(attribute.String("actor.name", pid.Name())),
-			otelmetric.WithAttributes(attribute.String("actor.kind", registry.Name(pid.Actor()))),
+			otelmetric.WithAttributes(attribute.String("actor.kind", types.Name(pid.Actor()))),
 			otelmetric.WithAttributes(attribute.String("actor.address", pid.ID())),
 		}
 
@@ -3037,6 +2842,38 @@ func (pid *PID) registerMetrics() error {
 		)
 
 		return err
+	}
+	return nil
+}
+
+// remoteTell sends a message to an actor remotely without expecting any reply
+func (pid *PID) remoteTell(ctx context.Context, to *address.Address, message any) error {
+	if !pid.remotingEnabled() {
+		return gerrors.ErrRemotingDisabled
+	}
+
+	return pid.remoting.RemoteTell(ctx, pid.Address(), to, message)
+}
+
+// remoteAsk sends a synchronous message to another actor remotely and expect a response.
+func (pid *PID) remoteAsk(ctx context.Context, to *address.Address, message any, timeout time.Duration) (response any, err error) {
+	if !pid.remotingEnabled() {
+		return nil, gerrors.ErrRemotingDisabled
+	}
+
+	if timeout <= 0 {
+		return nil, gerrors.ErrInvalidTimeout
+	}
+
+	return pid.remoting.RemoteAsk(ctx, pid.Address(), to, message, timeout)
+}
+
+// assertLocal returns ErrNotLocal when called on a remote PID.
+// Used as a zero-allocation first-line guard in every method that requires
+// a live local actor (lifecycle ops, tree navigation, etc.).
+func (pid *PID) assertLocal() error {
+	if pid.IsRemote() {
+		return gerrors.ErrNotLocal
 	}
 	return nil
 }
@@ -3104,6 +2941,13 @@ func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *t
 		tk.Stop()
 	}
 
+	// Wait for any in-flight processing goroutine to fully drain before
+	// reinitializing. The MPSC mailbox is single-consumer; starting a new
+	// consumer while the old one is still calling Dequeue is a data race.
+	for pid.processing.Load() != idle {
+		runtime.Gosched()
+	}
+
 	pid.resetBehavior()
 	if err := pid.init(ctx); err != nil {
 		return err
@@ -3144,14 +2988,9 @@ func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *t
 	}
 
 	pid.restartCount.Inc()
-	pid.fireSystemMessage(ctx, new(goaktpb.PostStart))
+	pid.fireSystemMessage(ctx, new(PostStart))
 	if pid.eventsStream != nil {
-		pid.eventsStream.Publish(
-			eventsTopic, &goaktpb.ActorRestarted{
-				Address:     pid.ID(),
-				RestartedAt: timestamppb.Now(),
-			},
-		)
+		pid.eventsStream.Publish(eventsTopic, NewActorRestarted(pid.ID()))
 	}
 
 	if actorSystem != nil && !pid.isStateSet(systemState) && (didShutdown || !wasInTree) {
@@ -3172,4 +3011,42 @@ func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *t
 func isLongLivedPassivationStrategy(strategy passivation.Strategy) bool {
 	_, ok := strategy.(*passivation.LongLivedStrategy)
 	return ok
+}
+
+// isSystemMessage checks if a message is a system message that must be allowed
+// through even during system shutdown (e.g., for proper shutdown, supervision, lifecycle).
+//
+// This is a zero-allocation type switch that identifies critical system messages.
+func isSystemMessage(message any) bool {
+	switch message.(type) {
+	case *commands.AsyncResponse,
+		*commands.AsyncRequest,
+		*PoisonPill,
+		*commands.HealthCheckRequest,
+		*commands.Panicking,
+		*commands.SendDeadletter,
+		*PausePassivation,
+		*ResumePassivation,
+		*PostStart,
+		*Terminated,
+		*PanicSignal:
+		return true
+	default:
+		return false
+	}
+}
+
+// asyncErrorFromString maps well-known async error strings back to typed errors.
+//
+// Design decision: preserve known error identities when possible while tolerating
+// opaque error strings from other nodes or versions.
+func asyncErrorFromString(err string) error {
+	switch err {
+	case gerrors.ErrRequestTimeout.Error():
+		return gerrors.ErrRequestTimeout
+	case gerrors.ErrRequestCanceled.Error():
+		return gerrors.ErrRequestCanceled
+	default:
+		return errors.New(err)
+	}
 }

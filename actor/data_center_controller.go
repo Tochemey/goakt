@@ -28,9 +28,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/tochemey/goakt/v3/internal/datacentercontroller"
-	"github.com/tochemey/goakt/v3/internal/ticker"
-	"github.com/tochemey/goakt/v3/internal/types"
+	"github.com/tochemey/goakt/v4/internal/datacentercontroller"
+	"github.com/tochemey/goakt/v4/internal/ticker"
+	"github.com/tochemey/goakt/v4/internal/types"
 )
 
 // DataCenterReady reports whether the multi-datacenter controller is operational.

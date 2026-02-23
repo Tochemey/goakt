@@ -32,13 +32,13 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/tochemey/goakt/v3/datacenter"
-	"github.com/tochemey/goakt/v3/extension"
-	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/registry"
-	"github.com/tochemey/goakt/v3/passivation"
-	"github.com/tochemey/goakt/v3/reentrancy"
-	"github.com/tochemey/goakt/v3/supervisor"
+	"github.com/tochemey/goakt/v4/datacenter"
+	"github.com/tochemey/goakt/v4/extension"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
+	"github.com/tochemey/goakt/v4/internal/types"
+	"github.com/tochemey/goakt/v4/passivation"
+	"github.com/tochemey/goakt/v4/reentrancy"
+	"github.com/tochemey/goakt/v4/supervisor"
 )
 
 // EncodeDependencies transforms a list of dependencies into their serialized protobuf representations.
@@ -53,7 +53,7 @@ func EncodeDependencies(dependencies ...extension.Dependency) ([]*internalpb.Dep
 
 		output = append(output, &internalpb.Dependency{
 			Id:       dependency.ID(),
-			TypeName: registry.Name(dependency),
+			TypeName: types.Name(dependency),
 			Bytea:    bytea,
 		})
 	}

@@ -26,13 +26,11 @@ import (
 	hp "container/heap"
 	"sync"
 	"sync/atomic"
-
-	"google.golang.org/protobuf/proto"
 )
 
 // PriorityFunc defines the priority function that will help
 // determines the priority of two messages
-type PriorityFunc func(msg1, msg2 proto.Message) bool
+type PriorityFunc func(msg1, msg2 any) bool
 
 // heap implements the standard heap.Interface
 type heap struct {

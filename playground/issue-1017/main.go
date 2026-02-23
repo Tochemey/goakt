@@ -31,13 +31,12 @@ import (
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/travisjeffery/go-dynaport"
 
-	"github.com/tochemey/goakt/v3/actor"
-	"github.com/tochemey/goakt/v3/discovery/nats"
-	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/internal/pause"
-	"github.com/tochemey/goakt/v3/log"
-	"github.com/tochemey/goakt/v3/remote"
-	"github.com/tochemey/goakt/v3/supervisor"
+	"github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/discovery/nats"
+	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/log"
+	"github.com/tochemey/goakt/v4/remote"
+	"github.com/tochemey/goakt/v4/supervisor"
 )
 
 func main() {
@@ -54,16 +53,33 @@ func main() {
 	// ideally this sleep should not be needed, but omitting it will fail the next step
 	pause.For(1 * time.Second)
 
-	pid, _ := sys1.LocalActor("actor1")
+	pid, err := sys1.ActorOf(ctx, "actor1")
+	if err != nil {
+		fmt.Printf("Error retrieving remote actor: %v\n", err)
+		os.Exit(1)
+	}
+
+	if pid.IsRemote() {
+		fmt.Println("Actor should not be remote at this point")
+		os.Exit(1)
+	}
+
 	children := pid.Children()
 	fmt.Printf("Actor has %d children before relocation\n", len(children))
 
 	// system 2 should be able to retrieve the remote actor from system 1
 	fmt.Println("\nRetrieving remote actor from system 1...")
-	if _, err := sys2.RemoteActor(ctx, "actor1"); err != nil {
+	pid, err = sys2.ActorOf(ctx, "actor1")
+	if err != nil {
 		fmt.Printf("Error retrieving remote actor: %v\n", err)
 		os.Exit(1)
 	}
+
+	if pid.IsLocal() {
+		fmt.Println("Actor should not be local at this point")
+		os.Exit(1)
+	}
+
 	fmt.Println("Remote actor retrieved successfully.")
 
 	// stopping system 1 should relocate the actor to system 2
@@ -74,9 +90,14 @@ func main() {
 
 	// system 2 should now be able to retrieve the local actor - but it fails to do so
 	fmt.Println("\nRetrieving local actor from system 2...")
-	pid, err := sys2.LocalActor("actor1")
+	pid, err = sys2.ActorOf(ctx, "actor1")
 	if err != nil {
 		fmt.Printf("Error retrieving local actor: %v\n", err)
+		os.Exit(1)
+	}
+
+	if pid.IsRemote() {
+		fmt.Println("Actor should not be remote at this point")
 		os.Exit(1)
 	}
 
@@ -185,7 +206,7 @@ func (x *MyActor) PreStart(ctx *actor.Context) error {
 
 func (x *MyActor) Receive(ctx *actor.ReceiveContext) {
 	switch ctx.Message().(type) {
-	case *goaktpb.PostStart:
+	case *actor.PostStart:
 		fmt.Printf("%s PostStart on %s\n", ctx.Self().Name(), ctx.ActorSystem().Name())
 	default:
 		ctx.Unhandled()

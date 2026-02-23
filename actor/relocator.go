@@ -30,22 +30,21 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/tochemey/goakt/v3/address"
-	"github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/internal/chunk"
-	"github.com/tochemey/goakt/v3/internal/cluster"
-	"github.com/tochemey/goakt/v3/internal/codec"
-	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/slices"
-	"github.com/tochemey/goakt/v3/log"
-	"github.com/tochemey/goakt/v3/remote"
+	"github.com/tochemey/goakt/v4/address"
+	"github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/chunk"
+	"github.com/tochemey/goakt/v4/internal/cluster"
+	"github.com/tochemey/goakt/v4/internal/codec"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
+	"github.com/tochemey/goakt/v4/internal/slices"
+	"github.com/tochemey/goakt/v4/log"
+	"github.com/tochemey/goakt/v4/remote"
 )
 
 // relocator is a system actor that helps rebalance cluster
 // when the cluster topology changes
 type relocator struct {
-	remoting remote.Remoting
+	remoting remote.Client
 	pid      *PID
 	logger   log.Logger
 }
@@ -54,7 +53,7 @@ type relocator struct {
 var _ Actor = (*relocator)(nil)
 
 // newRelocator creates an instance of relocator
-func newRelocator(remoting remote.Remoting) *relocator {
+func newRelocator(remoting remote.Client) *relocator {
 	return &relocator{
 		remoting: remoting,
 	}
@@ -67,7 +66,7 @@ func (r *relocator) PreStart(*Context) error {
 
 // Receive handles messages sent to the relocator
 func (r *relocator) Receive(ctx *ReceiveContext) {
-	if _, ok := ctx.Message().(*goaktpb.PostStart); ok {
+	if _, ok := ctx.Message().(*PostStart); ok {
 		r.pid = ctx.Self()
 		r.logger = ctx.Logger()
 		r.logger.Infof("%s started successfully", r.pid.Name())
@@ -89,7 +88,7 @@ func (r *relocator) Relocate(ctx *ReceiveContext) {
 
 		leaderShares, peersShares := r.allocateActors(len(peers)+1, peerState)
 		eg, egCtx := errgroup.WithContext(rctx)
-		logger := r.pid.Logger()
+		logger := r.pid.getLogger()
 
 		r.relocateActors(egCtx, eg, leaderShares, peersShares, peers)
 

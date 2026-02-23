@@ -20,47 +20,42 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package actor
+package types
 
 import (
 	"testing"
 
-	"github.com/stretchr/testify/require"
-
-	"github.com/tochemey/goakt/v3/address"
-	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/registry"
+	"github.com/stretchr/testify/assert"
 )
 
-func TestActorRef(t *testing.T) {
-	t.Run("With Equals", func(t *testing.T) {
-		addr := address.New("name", "system", "host", 1234)
-		actorRef := toActorRef(&internalpb.Actor{
-			Address: addr.String(),
-			Type:    "kind",
-		})
+type testStruct struct {
+}
 
-		newActorRef := toActorRef(&internalpb.Actor{
-			Address: addr.String(),
-			Type:    "kind",
-		})
-
-		require.Equal(t, "name", actorRef.Name())
-		require.Equal(t, "kind", actorRef.Kind())
-		require.True(t, addr.Equals(actorRef.Address()))
-		require.True(t, newActorRef.Equals(actorRef))
-		require.False(t, newActorRef.IsRelocatable())
+func TestRegistry(t *testing.T) {
+	t.Run("With new instance", func(t *testing.T) {
+		newRegistry := NewRegistry()
+		var p any = newRegistry
+		_, ok := p.(Registry)
+		assert.True(t, ok)
 	})
-	t.Run("From PID", func(t *testing.T) {
-		addr := address.New("name", "system", "host", 1234)
-		actor := NewMockActor()
-		pid := &PID{
-			address: addr,
-			actor:   actor,
-		}
-		actorRef := fromPID(pid)
-		require.Equal(t, "name", actorRef.Name())
-		require.Equal(t, registry.Name(actor), actorRef.Kind())
-		require.False(t, actorRef.IsRelocatable())
+
+	t.Run("With registration", func(t *testing.T) {
+		registry := NewRegistry()
+		// create an instance of an object
+		obj := new(testStruct)
+
+		// register that actor
+		registry.Register(obj)
+		_, ok := registry.Type(obj)
+		assert.True(t, ok)
+
+		_, ok = registry.TypeOf("types.testStruct")
+		assert.True(t, ok)
+		assert.Len(t, registry.TypesMap(), 1)
+
+		assert.True(t, registry.Exists(obj))
+
+		registry.Deregister(obj)
+		assert.Len(t, registry.TypesMap(), 0)
 	})
 }

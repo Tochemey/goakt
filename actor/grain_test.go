@@ -39,16 +39,15 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 
-	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/internal/cluster"
-	"github.com/tochemey/goakt/v3/internal/id"
-	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/pause"
-	"github.com/tochemey/goakt/v3/internal/registry"
-	"github.com/tochemey/goakt/v3/log"
-	mocks "github.com/tochemey/goakt/v3/mocks/cluster"
-	"github.com/tochemey/goakt/v3/test/data/testpb"
+	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/cluster"
+	"github.com/tochemey/goakt/v4/internal/id"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
+	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/types"
+	"github.com/tochemey/goakt/v4/log"
+	mocks "github.com/tochemey/goakt/v4/mocks/cluster"
+	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
 // nolint
@@ -142,7 +141,7 @@ func TestGrain(t *testing.T) {
 		require.True(t, identity.Equal(actual))
 
 		// deactivate the grain
-		err = testSystem.TellGrain(ctx, identity, new(goaktpb.PoisonPill))
+		err = testSystem.TellGrain(ctx, identity, new(PoisonPill))
 		require.NoError(t, err)
 
 		require.NoError(t, testSystem.Stop(ctx))
@@ -197,7 +196,7 @@ func TestGrain(t *testing.T) {
 		pause.For(time.Second)
 
 		// let us shutdown the grain by sending PoisonPill
-		err = node3.TellGrain(ctx, identity, new(goaktpb.PoisonPill))
+		err = node3.TellGrain(ctx, identity, new(PoisonPill))
 		require.NoError(t, err)
 
 		pause.For(time.Second)
@@ -235,7 +234,7 @@ func TestGrain(t *testing.T) {
 		require.True(t, gp.isActive())
 
 		// let us shutdown the grain by sending PoisonPill
-		err = node3.TellGrain(ctx, identity, new(goaktpb.PoisonPill))
+		err = node3.TellGrain(ctx, identity, new(PoisonPill))
 		require.NoError(t, err)
 
 		// check if the grain is activated
@@ -362,7 +361,7 @@ func TestGrain(t *testing.T) {
 		// create a grain instance
 		grain := NewMockGrainActivationFailure()
 		name := "testGrain"
-		kind := registry.Name(grain)
+		kind := types.Name(grain)
 		identityStr := fmt.Sprintf("%s%s%s", kind, id.GrainIdentitySeparator, name)
 
 		clmock.EXPECT().GrainExists(ctx, identityStr).Return(true, nil)
@@ -407,7 +406,7 @@ func TestGrain(t *testing.T) {
 		require.True(t, gp.isActive())
 
 		// let us shutdown the grain by sending PoisonPill
-		err = testSystem.TellGrain(ctx, identity, new(goaktpb.PoisonPill))
+		err = testSystem.TellGrain(ctx, identity, new(PoisonPill))
 		require.Error(t, err)
 		require.ErrorIs(t, err, gerrors.ErrGrainDeactivationFailure)
 
@@ -772,7 +771,7 @@ func TestGrain(t *testing.T) {
 		require.EqualValues(t, 1000.00, actual.GetAccountBalance())
 
 		// let us shutdown the grain by sending PoisonPill
-		err = testSystem.TellGrain(ctx, identity, new(goaktpb.PoisonPill))
+		err = testSystem.TellGrain(ctx, identity, new(PoisonPill))
 		require.NoError(t, err)
 
 		// check if the grain is activated
@@ -856,7 +855,7 @@ func TestGrain(t *testing.T) {
 		require.True(t, gp.isActive())
 
 		// deactivate the grain
-		err = testSystem.TellGrain(ctx, identity, new(goaktpb.PoisonPill))
+		err = testSystem.TellGrain(ctx, identity, new(PoisonPill))
 		require.NoError(t, err)
 
 		// check if the grain is activated
@@ -1140,7 +1139,7 @@ func TestRecreateGrain(t *testing.T) {
 		sys.(*actorSystem).registry.Register(NewMockGrain())
 
 		idName := "MyGrain"
-		kind := registry.Name(NewMockGrain()) // e.g., actor.mockgrain
+		kind := types.Name(NewMockGrain()) // e.g., actor.mockgrain
 		// Use cased kind in Value as recreateGrain accepts any case
 		value := "actor.MockGrain/" + idName
 		grain := &internalpb.Grain{
@@ -1223,7 +1222,7 @@ func TestRecreateGrain(t *testing.T) {
 			Bytea:    []byte("noop"),
 		}
 		grain := &internalpb.Grain{
-			GrainId:           &internalpb.GrainId{Kind: registry.Name(NewMockGrain()), Name: idName, Value: value},
+			GrainId:           &internalpb.GrainId{Kind: types.Name(NewMockGrain()), Name: idName, Value: value},
 			Dependencies:      []*internalpb.Dependency{dep},
 			ActivationTimeout: durationpb.New(1 * time.Second),
 			ActivationRetries: 1,
@@ -1256,11 +1255,11 @@ func TestRecreateGrain(t *testing.T) {
 		value := "actor.MockGrain/" + idName
 		dep := &internalpb.Dependency{
 			Id:       bad.ID(),
-			TypeName: registry.Name(bad),
+			TypeName: types.Name(bad),
 			Bytea:    bytea,
 		}
 		grain := &internalpb.Grain{
-			GrainId:           &internalpb.GrainId{Kind: registry.Name(NewMockGrain()), Name: idName, Value: value},
+			GrainId:           &internalpb.GrainId{Kind: types.Name(NewMockGrain()), Name: idName, Value: value},
 			Dependencies:      []*internalpb.Dependency{dep},
 			ActivationTimeout: durationpb.New(1 * time.Second),
 			ActivationRetries: 1,

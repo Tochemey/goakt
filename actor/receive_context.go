@@ -27,13 +27,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
-
-	"github.com/tochemey/goakt/v3/address"
-	"github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/extension"
-	"github.com/tochemey/goakt/v3/log"
+	"github.com/tochemey/goakt/v4/address"
+	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/extension"
+	"github.com/tochemey/goakt/v4/log"
 )
 
 // ReceiveContext carries per-message context and operations available to an actor
@@ -62,9 +59,10 @@ import (
 //   - Message returns a proto.Message. Treat it as immutable; copy before mutation.
 //
 // Sender semantics:
-//   - Sender() returns the local PID when known; otherwise it is NoSender.
-//   - RemoteSender() is set when the message originates from a remote node.
-//   - Prefer SenderAddress() to get a location-transparent sender address.
+//   - Sender() returns the PID of the message sender — local or remote.
+//   - For remote messages, Sender() holds a lightweight remote PID created from
+//     the sender address embedded in the wire message.
+//   - Prefer SenderAddress() to get a location-transparent address abstraction.
 //
 // Examples:
 //
@@ -91,10 +89,9 @@ type ReceiveContext struct {
 	// a live reference. The flag is cleared when the context is unstashed.
 	stashed        atomic.Bool
 	ctx            context.Context
-	message        proto.Message
+	message        any
 	sender         *PID
-	remoteSender   *address.Address
-	response       chan proto.Message
+	response       chan any
 	responseClosed atomic.Bool
 	requestID      string
 	requestReplyTo string
@@ -137,7 +134,7 @@ func (rctx *ReceiveContext) Err(err error) {
 //
 // Use Respond/Response exactly once per Ask-initiated message. Multiple calls may
 // be ignored or override each other depending on the underlying channel semantics.
-func (rctx *ReceiveContext) Response(resp proto.Message) {
+func (rctx *ReceiveContext) Response(resp any) {
 	if rctx.response == nil {
 		if rctx.requestID == "" {
 			return
@@ -172,29 +169,21 @@ func (rctx *ReceiveContext) Context() context.Context {
 	return rctx.ctx
 }
 
-// Sender returns the local PID of the message sender when known.
+// Sender returns the PID of the message sender.
 //
-// Returns NoSender when the sender is unknown, when the message originated remotely,
-// or when the message was system-generated. For remote messages, use RemoteSender()
-// or SenderAddress() for a location-transparent address.
+// For local messages this is the sending actor's PID. For messages that
+// originated from a remote node, this is a lightweight remote PID constructed
+// from the wire sender address. Returns NoSender when the sender is unknown
+// or the message was system-generated.
 func (rctx *ReceiveContext) Sender() *PID {
 	return rctx.sender
-}
-
-// RemoteSender returns the remote address of the sender when the message originated
-// from another node.
-//
-// For local messages this returns address.NoSender(). Prefer SenderAddress() when you
-// need a unified view across local and remote messages.
-func (rctx *ReceiveContext) RemoteSender() *address.Address {
-	return rctx.remoteSender
 }
 
 // Message returns the protobuf message being processed.
 //
 // Treat the returned message as immutable. Use type assertions or pattern matching
 // on the message type to implement your actor behavior.
-func (rctx *ReceiveContext) Message() proto.Message {
+func (rctx *ReceiveContext) Message() any {
 	return rctx.message
 }
 
@@ -290,7 +279,7 @@ func (rctx *ReceiveContext) UnstashAll() {
 //
 // Delivery preserves ordering per-sender. This method does not block.
 // Use Ask when a reply is needed.
-func (rctx *ReceiveContext) Tell(to *PID, message proto.Message) {
+func (rctx *ReceiveContext) Tell(to *PID, message any) {
 	recipient := rctx.self
 	ctx := rctx.withoutCancel()
 	if err := recipient.Tell(ctx, to, message); err != nil {
@@ -303,7 +292,7 @@ func (rctx *ReceiveContext) Tell(to *PID, message proto.Message) {
 // Messages are enqueued and processed one at a time in the order provided.
 // This preserves the actor model's single-threaded processing guarantee.
 // For a single message, this is equivalent to Tell.
-func (rctx *ReceiveContext) BatchTell(to *PID, messages ...proto.Message) {
+func (rctx *ReceiveContext) BatchTell(to *PID, messages ...any) {
 	recipient := rctx.self
 	ctx := rctx.withoutCancel()
 	if err := recipient.BatchTell(ctx, to, messages...); err != nil {
@@ -319,7 +308,7 @@ func (rctx *ReceiveContext) BatchTell(to *PID, messages ...proto.Message) {
 //
 // Prefer small timeouts and design protocols so that timeouts are treated as
 // expected failures.
-func (rctx *ReceiveContext) Ask(to *PID, message proto.Message, timeout time.Duration) (response proto.Message) {
+func (rctx *ReceiveContext) Ask(to *PID, message any, timeout time.Duration) (response any) {
 	self := rctx.self
 	ctx := rctx.withoutCancel()
 	reply, err := self.Ask(ctx, to, message, timeout)
@@ -351,7 +340,7 @@ func (rctx *ReceiveContext) Ask(to *PID, message proto.Message, timeout time.Dur
 //     Defaults may be configured at actor/system level.
 //
 // On failure to initiate the request, Err is set and the returned call is nil.
-func (rctx *ReceiveContext) Request(to *PID, message proto.Message, opts ...RequestOption) RequestCall {
+func (rctx *ReceiveContext) Request(to *PID, message any, opts ...RequestOption) RequestCall {
 	self := rctx.self
 	ctx := rctx.withoutCancel()
 	call, err := self.request(ctx, to, message, opts...)
@@ -383,7 +372,7 @@ func (rctx *ReceiveContext) Request(to *PID, message proto.Message, opts ...Requ
 //     Defaults may be configured at actor/system level.
 //
 // On failure to initiate the request, Err is set and the returned call is nil.
-func (rctx *ReceiveContext) RequestName(actorName string, message proto.Message, opts ...RequestOption) RequestCall {
+func (rctx *ReceiveContext) RequestName(actorName string, message any, opts ...RequestOption) RequestCall {
 	self := rctx.self
 	ctx := rctx.withoutCancel()
 	call, err := self.requestName(ctx, actorName, message, opts...)
@@ -398,7 +387,7 @@ func (rctx *ReceiveContext) RequestName(actorName string, message proto.Message,
 //
 // The actor name is resolved within the system (local or cluster), if supported.
 // This call does not block and does not expect a reply.
-func (rctx *ReceiveContext) SendAsync(actorName string, message proto.Message) {
+func (rctx *ReceiveContext) SendAsync(actorName string, message any) {
 	self := rctx.self
 	ctx := rctx.withoutCancel()
 	if err := self.SendAsync(ctx, actorName, message); err != nil {
@@ -411,7 +400,7 @@ func (rctx *ReceiveContext) SendAsync(actorName string, message proto.Message) {
 // The actor may be local or remote, depending on system configuration. Blocks until
 // a response is received or the timeout expires. On error or timeout, the error is
 // recorded via Err and the returned response may be nil.
-func (rctx *ReceiveContext) SendSync(actorName string, message proto.Message, timeout time.Duration) (response proto.Message) {
+func (rctx *ReceiveContext) SendSync(actorName string, message any, timeout time.Duration) (response any) {
 	self := rctx.self
 	ctx := rctx.withoutCancel()
 	reply, err := self.SendSync(ctx, actorName, message, timeout)
@@ -425,7 +414,7 @@ func (rctx *ReceiveContext) SendSync(actorName string, message proto.Message, ti
 //
 // Replies are returned on a channel in the same order as the input messages.
 // Use the provided timeout to bound the overall wait. Errors are recorded via Err.
-func (rctx *ReceiveContext) BatchAsk(to *PID, messages []proto.Message, timeout time.Duration) (responses chan proto.Message) {
+func (rctx *ReceiveContext) BatchAsk(to *PID, messages []any, timeout time.Duration) (responses chan any) {
 	recipient := rctx.self
 	ctx := rctx.withoutCancel()
 	reply, err := recipient.BatchAsk(ctx, to, messages, timeout)
@@ -435,69 +424,18 @@ func (rctx *ReceiveContext) BatchAsk(to *PID, messages []proto.Message, timeout 
 	return reply
 }
 
-// RemoteTell sends a fire-and-forget message to a remote actor address.
-//
-// Requires remoting to be enabled and properly configured. This call does not block.
-func (rctx *ReceiveContext) RemoteTell(to *address.Address, message proto.Message) {
-	recipient := rctx.self
-	ctx := rctx.withoutCancel()
-	if err := recipient.RemoteTell(ctx, to, message); err != nil {
-		rctx.Err(err)
-	}
-}
-
-// RemoteAsk sends a synchronous request to a remote actor and waits for a reply.
-//
-// The response is returned as a protobuf Any. On error or timeout, the error is
-// recorded via Err and the returned value may be nil. Ensure both sides agree
-// on message types and serialization.
-func (rctx *ReceiveContext) RemoteAsk(to *address.Address, message proto.Message, timeout time.Duration) (response *anypb.Any) {
-	recipient := rctx.self
-	ctx := rctx.withoutCancel()
-	reply, err := recipient.RemoteAsk(ctx, to, message, timeout)
-	if err != nil {
-		rctx.Err(err)
-	}
-	return reply
-}
-
-// RemoteBatchTell sends multiple messages to a remote actor in a fire-and-forget manner.
-//
-// Messages are processed one-by-one in order by the recipient.
-func (rctx *ReceiveContext) RemoteBatchTell(to *address.Address, messages []proto.Message) {
-	recipient := rctx.self
-	ctx := rctx.withoutCancel()
-	if err := recipient.RemoteBatchTell(ctx, to, messages); err != nil {
-		rctx.Err(err)
-	}
-}
-
-// RemoteBatchAsk sends multiple synchronous requests to a remote actor and waits for replies.
-//
-// Replies are returned as a slice of Any in the same order as the input messages.
-// Use the timeout to bound the overall wait. Errors are recorded via Err.
-func (rctx *ReceiveContext) RemoteBatchAsk(to *address.Address, messages []proto.Message, timeout time.Duration) (responses []*anypb.Any) {
-	recipient := rctx.self
-	ctx := rctx.withoutCancel()
-	replies, err := recipient.RemoteBatchAsk(ctx, to, messages, timeout)
-	if err != nil {
-		rctx.Err(err)
-	}
-	return replies
-}
-
 // RemoteLookup resolves an actor name on a remote node to an address.
 //
 // If the provided actor system is nil, the lookup uses the current actor's system.
 // On failure, the error is recorded via Err and the returned address may be nil.
-func (rctx *ReceiveContext) RemoteLookup(host string, port int, name string) (addr *address.Address) {
+func (rctx *ReceiveContext) RemoteLookup(host string, port int, name string) *PID {
 	recipient := rctx.self
 	ctx := rctx.withoutCancel()
-	remoteAddr, err := recipient.RemoteLookup(ctx, host, port, name)
+	cid, err := recipient.RemoteLookup(ctx, host, port, name)
 	if err != nil {
 		rctx.Err(err)
 	}
-	return remoteAddr
+	return cid
 }
 
 // Shutdown gracefully stops the current actor.
@@ -560,19 +498,33 @@ func (rctx *ReceiveContext) Stop(child *PID) {
 
 // Forward forwards the current message to another local PID, preserving the original sender.
 //
-// The receiver of the forwarded message sees the original Sender/RemoteSender.
+// The receiver of the forwarded message sees the original Sender.
 // This is only valid within a single-node system where the target PID is known and running.
 // No action is taken if the target is not running.
 func (rctx *ReceiveContext) Forward(to *PID) {
 	message := rctx.Message()
 	sender := rctx.Sender()
+	ctx := rctx.withoutCancel()
 
-	if to.IsRunning() {
-		ctx := rctx.withoutCancel()
-		receiveContext := getContext()
-		receiveContext.build(ctx, sender, to, message, true)
-		to.doReceive(receiveContext)
+	if to.IsRemote() {
+		noSender := rctx.Self().ActorSystem().NoSender()
+		if sender.Equals(noSender) {
+			return
+		}
+		if err := sender.Tell(ctx, to, message); err != nil {
+			rctx.Err(err)
+		}
+		return
 	}
+
+	if !to.IsRunning() {
+		rctx.Err(gerrors.ErrDead)
+		return
+	}
+
+	receiveContext := getContext()
+	receiveContext.build(ctx, sender, to, message, true)
+	to.doReceive(receiveContext)
 }
 
 // ForwardTo forwards the current message to a named actor, preserving the original sender.
@@ -590,42 +542,13 @@ func (rctx *ReceiveContext) ForwardTo(actorName string) {
 	}
 }
 
-// RemoteForward forwards the current message to a remote address, preserving the original sender.
-//
-// If the original sender is local, the message is sent from that sender to the remote address.
-// If the original sender is remote and remoting is enabled, the system bridges the forward to
-// preserve sender identity across nodes. No action is taken if neither case applies.
-func (rctx *ReceiveContext) RemoteForward(to *address.Address) {
-	sender := rctx.Sender()
-	remoteSender := rctx.RemoteSender()
-	remoting := rctx.Self().remoting
-	noSender := rctx.Self().ActorSystem().NoSender()
-
-	if !sender.Equals(noSender) {
-		message := rctx.Message()
-		ctx := rctx.withoutCancel()
-		if err := sender.RemoteTell(ctx, to, message); err != nil {
-			rctx.Err(err)
-		}
-		return
-	}
-
-	if !remoteSender.Equals(address.NoSender()) && remoting != nil {
-		message := rctx.Message()
-		ctx := rctx.withoutCancel()
-		if err := remoting.RemoteTell(ctx, remoteSender, to, message); err != nil {
-			rctx.Err(err)
-		}
-	}
-}
-
 // Unhandled marks the current message as unhandled without raising a panic.
 //
 // The system may log or route this condition depending on configuration and
 // supervision strategy. Prefer Unhandled when unknown messages are expected.
 func (rctx *ReceiveContext) Unhandled() {
 	me := rctx.self
-	me.handleReceivedError(rctx, errors.ErrUnhandled)
+	me.handleReceivedError(rctx, gerrors.ErrUnhandled)
 }
 
 // RemoteReSpawn restarts (re-spawns) a named actor on a remote node.
@@ -648,7 +571,7 @@ func (rctx *ReceiveContext) RemoteReSpawn(host string, port int, name string) {
 //
 // The task runs outside the actor's mailbox thread. Avoid mutating the actor's
 // internal state inside the task. Communicate results via the returned message.
-func (rctx *ReceiveContext) PipeTo(to *PID, task func() (proto.Message, error), opts ...PipeOption) {
+func (rctx *ReceiveContext) PipeTo(to *PID, task func() (any, error), opts ...PipeOption) {
 	recipient := rctx.self
 	ctx := rctx.withoutCancel()
 	if err := recipient.PipeTo(ctx, to, task, opts...); err != nil {
@@ -660,7 +583,7 @@ func (rctx *ReceiveContext) PipeTo(to *PID, task func() (proto.Message, error), 
 //
 // Unlike PipeTo, the target is resolved by name (location transparent).
 // Semantics otherwise match PipeTo. Use this to decouple background work from a specific PID.
-func (rctx *ReceiveContext) PipeToName(actorName string, task func() (proto.Message, error), opts ...PipeOption) {
+func (rctx *ReceiveContext) PipeToName(actorName string, task func() (any, error), opts ...PipeOption) {
 	recipient := rctx.self
 	ctx := rctx.withoutCancel()
 	if err := recipient.PipeToName(ctx, actorName, task, opts...); err != nil {
@@ -672,7 +595,7 @@ func (rctx *ReceiveContext) PipeToName(actorName string, task func() (proto.Mess
 //
 // Use this for structured logging tied to the actor system's logging configuration.
 func (rctx *ReceiveContext) Logger() log.Logger {
-	return rctx.self.Logger()
+	return rctx.self.getLogger()
 }
 
 // Watch subscribes the current actor to termination notifications for the given PID.
@@ -736,18 +659,15 @@ func (rctx *ReceiveContext) ReinstateNamed(actorName string) {
 	}
 }
 
-// SenderAddress returns the location-transparent address of the sender of the current message.
+// SenderAddress returns the location-transparent address of the message sender.
 //
-// If the sender is unknown, address.NoSender() is returned. Prefer this method over
-// Sender/RemoteSender when you only need an address abstraction.
+// Works for both local and remote senders. Returns address.NoSender() when
+// the sender is unknown or system-generated.
 func (rctx *ReceiveContext) SenderAddress() *address.Address {
-	from := address.NoSender()
-	if rctx.Sender() != nil {
-		from = rctx.Sender().Address()
-	} else if rctx.RemoteSender() != nil {
-		from = rctx.RemoteSender()
+	if rctx.sender == nil {
+		return address.NoSender()
 	}
-	return from
+	return rctx.sender.Address()
 }
 
 // ReceiverAddress returns the address of the current (receiver) actor.
@@ -800,7 +720,7 @@ func (rctx *ReceiveContext) getError() error {
 // newReceiveContext constructs a ReceiveContext for internal use by the runtime.
 //
 // Callers should prefer the context provided by the framework during message delivery.
-func newReceiveContext(ctx context.Context, from, to *PID, message proto.Message) *ReceiveContext {
+func newReceiveContext(ctx context.Context, from, to *PID, message any) *ReceiveContext {
 	// create a message receiveContext
 	rc := &ReceiveContext{
 		ctx:      ctx,
@@ -817,7 +737,7 @@ func newReceiveContext(ctx context.Context, from, to *PID, message proto.Message
 //
 // If async is true, the context is derived with context.WithoutCancel to prevent
 // premature cancellation during asynchronous forwarding and dispatch.
-func (rctx *ReceiveContext) build(ctx context.Context, from, to *PID, message proto.Message, async bool) *ReceiveContext {
+func (rctx *ReceiveContext) build(ctx context.Context, from, to *PID, message any, async bool) *ReceiveContext {
 	// Mark context as in-use to prevent concurrent reset().
 	// This protects against sync.Pool races where a context is returned
 	// to the pool while another goroutine is retrieving and building it.
@@ -854,7 +774,6 @@ func (rctx *ReceiveContext) reset() {
 	rctx.message = nil
 	rctx.self = nil
 	rctx.sender = nil
-	rctx.remoteSender = nil
 	rctx.response = nil
 	rctx.err = nil
 	rctx.requestID = ""
@@ -887,14 +806,6 @@ func (rctx *ReceiveContext) withoutCancel() context.Context {
 	}
 
 	return context.WithoutCancel(rctx.ctx)
-}
-
-// withRemoteSender sets the remote sender address for this context.
-//
-// This is used by the runtime to attach remote sender information during dispatch.
-func (rctx *ReceiveContext) withRemoteSender(remoteSender *address.Address) *ReceiveContext {
-	rctx.remoteSender = remoteSender
-	return rctx
 }
 
 // withRequestMeta sets async request metadata for internal dispatch.

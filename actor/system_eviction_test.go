@@ -28,7 +28,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tochemey/goakt/v3/errors"
+	"github.com/tochemey/goakt/v4/errors"
 )
 
 func TestEvictionPolicy(t *testing.T) {

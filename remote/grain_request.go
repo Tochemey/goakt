@@ -26,8 +26,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tochemey/goakt/v3/extension"
-	"github.com/tochemey/goakt/v3/internal/validation"
+	"github.com/tochemey/goakt/v4/extension"
+	"github.com/tochemey/goakt/v4/internal/validation"
 )
 
 // GrainRequest describes the parameters used to activate (spawn) a Grain on a remote node.

@@ -50,25 +50,24 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 
-	"github.com/tochemey/goakt/v3/address"
-	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/extension"
-	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/internal/cluster"
-	internalpb "github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/metric"
-	"github.com/tochemey/goakt/v3/internal/pause"
-	"github.com/tochemey/goakt/v3/internal/registry"
-	"github.com/tochemey/goakt/v3/internal/xsync"
-	"github.com/tochemey/goakt/v3/log"
-	mockscluster "github.com/tochemey/goakt/v3/mocks/cluster"
-	mocksdiscovery "github.com/tochemey/goakt/v3/mocks/discovery"
-	mocksextension "github.com/tochemey/goakt/v3/mocks/extension"
-	mocksremote "github.com/tochemey/goakt/v3/mocks/remote"
-	"github.com/tochemey/goakt/v3/passivation"
-	"github.com/tochemey/goakt/v3/remote"
-	"github.com/tochemey/goakt/v3/test/data/testpb"
-	gtls "github.com/tochemey/goakt/v3/tls"
+	"github.com/tochemey/goakt/v4/address"
+	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/extension"
+	"github.com/tochemey/goakt/v4/internal/cluster"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
+	"github.com/tochemey/goakt/v4/internal/metric"
+	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/types"
+	"github.com/tochemey/goakt/v4/internal/xsync"
+	"github.com/tochemey/goakt/v4/log"
+	mockscluster "github.com/tochemey/goakt/v4/mocks/cluster"
+	mocksdiscovery "github.com/tochemey/goakt/v4/mocks/discovery"
+	mocksextension "github.com/tochemey/goakt/v4/mocks/extension"
+	mocksremote "github.com/tochemey/goakt/v4/mocks/remote"
+	"github.com/tochemey/goakt/v4/passivation"
+	"github.com/tochemey/goakt/v4/remote"
+	"github.com/tochemey/goakt/v4/test/data/testpb"
+	gtls "github.com/tochemey/goakt/v4/tls"
 )
 
 // remoteTestCtxKey is a custom type for context keys in remote context propagation tests (avoids SA1029).
@@ -84,7 +83,9 @@ func TestActorSystem(t *testing.T) {
 		_, ok := iface.(ActorSystem)
 		assert.True(t, ok)
 		assert.Equal(t, "testSys", actorSystem.Name())
-		assert.Empty(t, actorSystem.Actors())
+		pids, err := actorSystem.Actors(context.Background(), time.Second)
+		require.NoError(t, err)
+		assert.Empty(t, pids)
 		assert.NotNil(t, actorSystem.Logger())
 	})
 	t.Run("New instance with Defaults and TLS", func(t *testing.T) {
@@ -339,19 +340,13 @@ func TestActorSystem(t *testing.T) {
 		require.True(t, exists)
 
 		// get the actor
-		addr, _, err := newActorSystem.ActorOf(ctx, actorName)
+		pid, err := newActorSystem.ActorOf(ctx, actorName)
 		require.NoError(t, err)
-		require.NotNil(t, addr)
+		require.NotNil(t, pid)
 
-		// use RemoteActor method and compare the results
-		remoteAddr, err := newActorSystem.RemoteActor(ctx, actorName)
-		require.NoError(t, err)
-		require.NotNil(t, remoteAddr)
-		require.True(t, remoteAddr.Equals(addr))
-
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		from := address.NoSender()
-		reply, err := remoting.RemoteAsk(ctx, from, addr, new(testpb.TestReply), 20*time.Second)
+		reply, err := remoting.RemoteAsk(ctx, from, pid.Address(), new(testpb.TestReply), 20*time.Second)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 
@@ -361,16 +356,10 @@ func TestActorSystem(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, exists)
 
-		addr, pid, err := newActorSystem.ActorOf(ctx, actorName)
+		pid, err = newActorSystem.ActorOf(ctx, actorName)
 		require.Error(t, err)
 		require.ErrorIs(t, err, gerrors.ErrActorNotFound)
-		require.Nil(t, addr)
 		require.Nil(t, pid)
-
-		remoteAddr, err = newActorSystem.RemoteActor(ctx, actorName)
-		require.Error(t, err)
-		require.ErrorIs(t, err, gerrors.ErrActorNotFound)
-		require.Nil(t, remoteAddr)
 
 		// stop the actor after some time
 		pause.For(time.Second)
@@ -404,10 +393,9 @@ func TestActorSystem(t *testing.T) {
 		// create an actor
 		actorName := uuid.NewString()
 
-		addr, pid, err := newActorSystem.ActorOf(ctx, actorName)
+		pid, err := newActorSystem.ActorOf(ctx, actorName)
 		require.Error(t, err)
 		require.ErrorIs(t, err, gerrors.ErrMethodCallNotAllowed)
-		require.Nil(t, addr)
 		require.Nil(t, pid)
 
 		err = newActorSystem.Stop(ctx)
@@ -427,10 +415,9 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		addr, pid, err := sys.ActorOf(ctx, actorName)
+		pid, err := sys.ActorOf(ctx, actorName)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
-		require.NotNil(t, addr)
 
 		// stop the actor after some time
 		pause.For(time.Second)
@@ -452,11 +439,10 @@ func TestActorSystem(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, exists)
 
-		addr, pid, err := sys.ActorOf(ctx, actorName)
+		pid, err := sys.ActorOf(ctx, actorName)
 		require.Error(t, err)
 		require.ErrorIs(t, err, gerrors.ErrActorNotFound)
 		require.Nil(t, pid)
-		require.Nil(t, addr)
 
 		// stop the actor after some time
 		pause.For(time.Second)
@@ -483,11 +469,10 @@ func TestActorSystem(t *testing.T) {
 		clusterMock.EXPECT().GetActor(mock.Anything, actorName).Return(nil, assert.AnError)
 		t.Cleanup(func() { clusterMock.AssertExpectations(t) })
 
-		addr, pid, err := system.ActorOf(ctx, actorName)
+		pid, err := system.ActorOf(ctx, actorName)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, assert.AnError)
 		assert.ErrorContains(t, err, "failed to fetch remote actor")
-		require.Nil(t, addr)
 		require.Nil(t, pid)
 	})
 	t.Run("With ActorOf actor system started", func(t *testing.T) {
@@ -507,10 +492,9 @@ func TestActorSystem(t *testing.T) {
 		// create an actor
 		actorName := uuid.NewString()
 
-		addr, pid, err := newActorSystem.ActorOf(ctx, actorName)
+		pid, err := newActorSystem.ActorOf(ctx, actorName)
 		require.Error(t, err)
 		require.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
-		require.Nil(t, addr)
 		require.Nil(t, pid)
 	})
 	t.Run("ActorOf returns error when actor is stopping", func(t *testing.T) {
@@ -530,11 +514,10 @@ func TestActorSystem(t *testing.T) {
 		// initiate stopping of the actor
 		actorRef.setState(stoppingState, true)
 
-		addr, pid, err := actorSystem.ActorOf(ctx, actorName)
+		pid, err := actorSystem.ActorOf(ctx, actorName)
 		require.Error(t, err)
 		require.ErrorIs(t, err, gerrors.ErrActorNotFound)
 		require.Nil(t, pid)
-		require.Nil(t, addr)
 
 		// reset the stopping flag for cleanup
 		actorRef.setState(stoppingState, false)
@@ -566,10 +549,12 @@ func TestActorSystem(t *testing.T) {
 		pause.For(500 * time.Millisecond)
 
 		// send a message to the actor
-		reply, err := Ask(ctx, actorRef, new(testpb.TestReply), replyTimeout)
+		actual, err := Ask(ctx, actorRef, new(testpb.TestReply), replyTimeout)
 		require.NoError(t, err)
-		require.NotNil(t, reply)
+		require.NotNil(t, actual)
 		expected := new(testpb.Reply)
+		reply, ok := actual.(*testpb.Reply)
+		require.True(t, ok)
 		require.True(t, proto.Equal(expected, reply))
 		require.True(t, actorRef.IsRunning())
 
@@ -584,10 +569,10 @@ func TestActorSystem(t *testing.T) {
 		pause.For(time.Second)
 		require.True(t, actorRef.IsRunning())
 
-		var items []*goaktpb.ActorRestarted
+		var items []*ActorRestarted
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
-			restarted, ok := payload.(*goaktpb.ActorRestarted)
+			restarted, ok := payload.(*ActorRestarted)
 			if ok {
 				items = append(items, restarted)
 			}
@@ -596,9 +581,9 @@ func TestActorSystem(t *testing.T) {
 		require.Len(t, items, 1)
 
 		// send a message to the actor
-		reply, err = Ask(ctx, actorRef, new(testpb.TestReply), replyTimeout)
+		actual, err = Ask(ctx, actorRef, new(testpb.TestReply), replyTimeout)
 		require.NoError(t, err)
-		require.NotNil(t, reply)
+		require.NotNil(t, actual)
 
 		t.Cleanup(
 			func() {
@@ -656,9 +641,11 @@ func TestActorSystem(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// send a message to the actor
-		reply, err := Ask(ctx, actorRef, new(testpb.TestReply), replyTimeout)
+		actual, err := Ask(ctx, actorRef, new(testpb.TestReply), replyTimeout)
 		require.NoError(t, err)
-		require.NotNil(t, reply)
+		require.NotNil(t, actual)
+		reply, ok := actual.(*testpb.Reply)
+		require.True(t, ok)
 		expected := new(testpb.Reply)
 		require.True(t, proto.Equal(expected, reply))
 		require.True(t, actorRef.IsRunning())
@@ -712,10 +699,12 @@ func TestActorSystem(t *testing.T) {
 		assert.NotNil(t, actorRef)
 
 		// send a message to the actor
-		reply, err := Ask(ctx, actorRef, new(testpb.TestReply), replyTimeout)
+		actual, err := Ask(ctx, actorRef, new(testpb.TestReply), replyTimeout)
 		require.NoError(t, err)
-		require.NotNil(t, reply)
+		require.NotNil(t, actual)
 		expected := new(testpb.Reply)
+		reply, ok := actual.(*testpb.Reply)
+		require.True(t, ok)
 		require.True(t, proto.Equal(expected, reply))
 		require.True(t, actorRef.IsRunning())
 		// stop the actor after some time
@@ -782,7 +771,7 @@ func TestActorSystem(t *testing.T) {
 
 		pause.For(time.Second)
 
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		actorName := "some-actor"
 		addr, err := remoting.RemoteLookup(ctx, host, remotingPort, actorName)
 		require.NoError(t, err)
@@ -806,27 +795,7 @@ func TestActorSystem(t *testing.T) {
 			},
 		)
 	})
-	t.Run("With RemoteActor failure when system not started", func(t *testing.T) {
-		ctx := context.TODO()
-		remotingPort := dynaport.Get(1)[0]
-
-		logger := log.DiscardLogger
-		host := "127.0.0.1"
-
-		newActorSystem, err := NewActorSystem(
-			"test",
-			WithLogger(logger),
-			WithRemote(remote.NewConfig(host, remotingPort)),
-		)
-		require.NoError(t, err)
-
-		actorName := "some-actor"
-		remoteAddr, err := newActorSystem.RemoteActor(ctx, actorName)
-		require.Error(t, err)
-		require.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
-		require.Nil(t, remoteAddr)
-	})
-	t.Run("With RemoteActor failure when system not started", func(t *testing.T) {
+	t.Run("With Stop failure when system not started", func(t *testing.T) {
 		ctx := context.TODO()
 		remotingPort := dynaport.Get(1)[0]
 
@@ -844,38 +813,7 @@ func TestActorSystem(t *testing.T) {
 		require.Error(t, err)
 		require.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
 	})
-	t.Run("With RemoteActor failure when cluster is not enabled", func(t *testing.T) {
-		ctx := context.TODO()
-		remotingPort := dynaport.Get(1)[0]
-
-		logger := log.DiscardLogger
-		host := "127.0.0.1"
-
-		newActorSystem, err := NewActorSystem(
-			"test",
-			WithLogger(logger),
-			WithRemote(remote.NewConfig(host, remotingPort)),
-		)
-		require.NoError(t, err)
-
-		// start the actor system
-		err = newActorSystem.Start(ctx)
-		require.NoError(t, err)
-
-		// wait for the system to properly start
-		actorName := "some-actor"
-		remoteAddr, err := newActorSystem.RemoteActor(ctx, actorName)
-		require.Error(t, err)
-		require.ErrorIs(t, err, gerrors.ErrClusterDisabled)
-		require.Nil(t, remoteAddr)
-
-		// stop the actor after some time
-		pause.For(time.Second)
-
-		err = newActorSystem.Stop(ctx)
-		require.NoError(t, err)
-	})
-	t.Run("With RemoteActor failure when cluster lookup fails", func(t *testing.T) {
+	t.Run("With ActorOf failure when cluster lookup fails", func(t *testing.T) {
 		ctx := context.TODO()
 		actorName := uuid.NewString()
 
@@ -885,11 +823,11 @@ func TestActorSystem(t *testing.T) {
 		clusterMock.EXPECT().GetActor(mock.Anything, actorName).Return(nil, assert.AnError)
 		t.Cleanup(func() { clusterMock.AssertExpectations(t) })
 
-		addr, err := system.RemoteActor(ctx, actorName)
+		pid, err := system.ActorOf(ctx, actorName)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, assert.AnError)
 		assert.ErrorContains(t, err, "failed to fetch remote actor")
-		require.Nil(t, addr)
+		require.Nil(t, pid)
 	})
 	t.Run("With ActorOf failure when cluster address is invalid", func(t *testing.T) {
 		ctx := context.TODO()
@@ -907,30 +845,12 @@ func TestActorSystem(t *testing.T) {
 		}, nil)
 		t.Cleanup(func() { clusterMock.AssertExpectations(t) })
 
-		addr, pid, err := system.ActorOf(ctx, actorName)
+		pid, err := system.ActorOf(ctx, actorName)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "address format is invalid")
-		require.Nil(t, addr)
 		require.Nil(t, pid)
 	})
-	t.Run("With RemoteActor failure when cluster address is invalid", func(t *testing.T) {
-		ctx := context.TODO()
-		actorName := "remoteActor"
-
-		clusterMock := new(mockscluster.Cluster)
-		system := MockReplicationTestSystem(clusterMock)
-
-		clusterMock.EXPECT().GetActor(mock.Anything, actorName).Return(&internalpb.Actor{
-			Address: "invalid-address",
-		}, nil)
-		t.Cleanup(func() { clusterMock.AssertExpectations(t) })
-
-		addr, err := system.RemoteActor(ctx, actorName)
-		require.Error(t, err)
-		assert.ErrorContains(t, err, "address format is invalid")
-		require.Nil(t, addr)
-	})
-	t.Run("With LocalActor", func(t *testing.T) {
+	t.Run("With ActorOf local", func(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
@@ -945,7 +865,7 @@ func TestActorSystem(t *testing.T) {
 		require.NotNil(t, ref)
 
 		// locate the actor
-		local, err := sys.LocalActor(actorName)
+		local, err := sys.ActorOf(ctx, actorName)
 		require.NoError(t, err)
 		require.NotNil(t, local)
 
@@ -961,7 +881,7 @@ func TestActorSystem(t *testing.T) {
 			},
 		)
 	})
-	t.Run("With LocalActor: Actor not found", func(t *testing.T) {
+	t.Run("With ActorOf: Actor not found", func(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
@@ -970,7 +890,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, err)
 
 		// locate the actor
-		ref, err := sys.LocalActor("some-name")
+		ref, err := sys.ActorOf(ctx, "some-name")
 		require.Error(t, err)
 		require.Nil(t, ref)
 		require.ErrorIs(t, err, gerrors.ErrActorNotFound)
@@ -985,14 +905,15 @@ func TestActorSystem(t *testing.T) {
 			},
 		)
 	})
-	t.Run("With LocalActor when system not started", func(t *testing.T) {
+	t.Run("With ActorOf when system not started", func(t *testing.T) {
+		ctx := context.Background()
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
 		// create an actor
 		actorName := "exchanger"
 
 		// locate the actor
-		local, err := sys.LocalActor(actorName)
+		local, err := sys.ActorOf(ctx, actorName)
 		require.Error(t, err)
 		require.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
 		require.Nil(t, local)
@@ -1083,7 +1004,7 @@ func TestActorSystem(t *testing.T) {
 		remotePort := 9090
 
 		clusterMock := mockscluster.NewCluster(t)
-		remotingMock := mocksremote.NewRemoting(t)
+		remotingMock := mocksremote.NewClient(t)
 		system := MockReplicationTestSystem(clusterMock)
 
 		system.locker.Lock()
@@ -1149,7 +1070,7 @@ func TestActorSystem(t *testing.T) {
 
 		pause.For(time.Second)
 
-		sender, err := node1.LocalActor("Actor1-1")
+		sender, err := node1.ActorOf(ctx, "Actor1-1")
 		require.NoError(t, err)
 		require.NotNil(t, sender)
 
@@ -1202,7 +1123,7 @@ func TestActorSystem(t *testing.T) {
 		pause.For(time.Second)
 
 		// locate the actor
-		ref, err := sys.LocalActor(actorName)
+		ref, err := sys.ActorOf(ctx, actorName)
 		require.Error(t, err)
 		require.Nil(t, ref)
 		require.ErrorIs(t, err, gerrors.ErrActorNotFound)
@@ -1253,7 +1174,7 @@ func TestActorSystem(t *testing.T) {
 		// wait for the system to properly start
 		pause.For(time.Second)
 
-		partition := sys.GetPartition("some-actor")
+		partition := sys.Partition("some-actor")
 		assert.Zero(t, partition)
 
 		err = sys.Stop(ctx)
@@ -1284,30 +1205,30 @@ func TestActorSystem(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 		pause.For(time.Second)
-		part1 := node1.GetPartition("actor11")
+		part1 := node1.Partition("actor11")
 
 		pid, err = node2.Spawn(ctx, "actor21", NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 		pause.For(time.Second)
-		part2 := node2.GetPartition("actor21")
+		part2 := node2.Partition("actor21")
 
 		pid, err = node3.Spawn(ctx, "actor31", NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 		pause.For(time.Second)
-		part3 := node3.GetPartition("actor31")
+		part3 := node3.Partition("actor31")
 
 		// get the partition of the actor actor11
-		partition := node2.GetPartition("actor11")
+		partition := node2.Partition("actor11")
 		require.Exactly(t, part1, partition)
 
 		// get the partition of the actor21
-		partition = node3.GetPartition("actor21")
+		partition = node3.Partition("actor21")
 		require.Exactly(t, part2, partition)
 
 		// get the partition of the actor31
-		partition = node1.GetPartition("actor31")
+		partition = node1.Partition("actor31")
 		require.Exactly(t, part3, partition)
 
 		assert.NoError(t, node1.Stop(ctx))
@@ -1371,11 +1292,11 @@ func TestActorSystem(t *testing.T) {
 
 		pause.For(time.Second)
 
-		var items []*goaktpb.Deadletter
+		var items []*Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
 			// only listening to deadletter
-			deadletter, ok := payload.(*goaktpb.Deadletter)
+			deadletter, ok := payload.(*Deadletter)
 			if ok {
 				items = append(items, deadletter)
 			}
@@ -1487,17 +1408,10 @@ func TestActorSystem(t *testing.T) {
 		pause.For(time.Second)
 
 		// get the actor
-		addr, pid, err := newActorSystem.ActorOf(ctx, actorName)
+		pid, err := newActorSystem.ActorOf(ctx, actorName)
 		require.Error(t, err)
 		require.ErrorIs(t, err, gerrors.ErrActorNotFound)
-		require.Nil(t, addr)
 		require.Nil(t, pid)
-
-		// use RemoteActor method and compare the results
-		remoteAddr, err := newActorSystem.RemoteActor(ctx, actorName)
-		require.Error(t, err)
-		require.ErrorIs(t, err, gerrors.ErrActorNotFound)
-		require.Nil(t, remoteAddr)
 
 		// stop the actor after some time
 		pause.For(time.Second)
@@ -1535,12 +1449,12 @@ func TestActorSystem(t *testing.T) {
 		pause.For(time.Second)
 
 		// capture the joins
-		var joins []*goaktpb.NodeJoined
+		var joins []*NodeJoined
 		for event := range subscriber1.Iterator() {
 			// get the event payload
 			payload := event.Payload()
 			// only listening to cluster event
-			if nodeJoined, ok := payload.(*goaktpb.NodeJoined); ok {
+			if nodeJoined, ok := payload.(*NodeJoined); ok {
 				joins = append(joins, nodeJoined)
 			}
 		}
@@ -1548,7 +1462,7 @@ func TestActorSystem(t *testing.T) {
 		// assert the joins list
 		require.NotEmpty(t, joins)
 		require.Len(t, joins, 1)
-		require.Equal(t, peerAddress2, joins[0].GetAddress())
+		require.Equal(t, peerAddress2, joins[0].Address())
 
 		// wait for some time
 		pause.For(time.Second)
@@ -1561,12 +1475,12 @@ func TestActorSystem(t *testing.T) {
 		// wait for some time
 		pause.For(time.Second)
 
-		var lefts []*goaktpb.NodeLeft
+		var lefts []*NodeLeft
 		for event := range subscriber2.Iterator() {
 			payload := event.Payload()
 
 			// only listening to cluster event
-			nodeLeft, ok := payload.(*goaktpb.NodeLeft)
+			nodeLeft, ok := payload.(*NodeLeft)
 			if ok {
 				lefts = append(lefts, nodeLeft)
 			}
@@ -1574,7 +1488,7 @@ func TestActorSystem(t *testing.T) {
 
 		require.NotEmpty(t, lefts)
 		require.Len(t, lefts, 1)
-		require.Equal(t, peerAddress1, lefts[0].GetAddress())
+		require.Equal(t, peerAddress1, lefts[0].Address())
 
 		require.NoError(t, cl2.Unsubscribe(subscriber2))
 
@@ -1739,7 +1653,7 @@ func TestActorSystem(t *testing.T) {
 		// wait for the cluster to start
 		pause.For(time.Second)
 
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		// create an actor
 		actorName := "actorID"
 		// fetching the address of the that actor should return nil address
@@ -1764,18 +1678,14 @@ func TestActorSystem(t *testing.T) {
 
 		// send the message to exchanger actor one using remote messaging
 		from := address.NoSender()
-		reply, err := remoting.RemoteAsk(ctx, from, addr, new(testpb.TestReply), 20*time.Second)
+		actual, err := remoting.RemoteAsk(ctx, from, addr, new(testpb.TestReply), 20*time.Second)
 
 		require.NoError(t, err)
-		require.NotNil(t, reply)
-		require.True(t, reply.MessageIs(new(testpb.Reply)))
-
-		actual := new(testpb.Reply)
-		err = reply.UnmarshalTo(actual)
-		require.NoError(t, err)
-
+		require.NotNil(t, actual)
+		reply, ok := actual.(*testpb.Reply)
+		require.True(t, ok)
 		expected := new(testpb.Reply)
-		assert.True(t, proto.Equal(expected, actual))
+		assert.True(t, proto.Equal(expected, reply))
 
 		t.Cleanup(
 			func() {
@@ -2079,7 +1989,7 @@ func TestActorSystem(t *testing.T) {
 		assert.Zero(t, sys.Uptime())
 		require.EqualValues(t, 2, counter.Load())
 	})
-	t.Run("With ActorRefs", func(t *testing.T) {
+	t.Run("With Actors", func(t *testing.T) {
 		// create a context
 		ctx := context.TODO()
 		// start the NATS server
@@ -2114,11 +2024,11 @@ func TestActorSystem(t *testing.T) {
 		require.Error(t, err)
 		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
 
-		actors, err := node3.ActorRefs(ctx, time.Second)
+		actors, err := node3.Actors(ctx, time.Second)
 		require.NoError(t, err)
 		require.Len(t, actors, 1)
 
-		actors, err = node1.ActorRefs(ctx, time.Second)
+		actors, err = node1.Actors(ctx, time.Second)
 		require.NoError(t, err)
 		require.Len(t, actors, 1)
 
@@ -2132,7 +2042,7 @@ func TestActorSystem(t *testing.T) {
 		// shutdown the nats server gracefully
 		srv.Shutdown()
 	})
-	t.Run("ActorRefs returns error when cluster scan fails", func(t *testing.T) {
+	t.Run("Actors returns error when cluster scan fails", func(t *testing.T) {
 		ctx := context.TODO()
 		clusterMock := new(mockscluster.Cluster)
 		system := MockReplicationTestSystem(clusterMock)
@@ -2144,10 +2054,10 @@ func TestActorSystem(t *testing.T) {
 		clusterMock.EXPECT().Actors(mock.Anything, mock.Anything).Return(nil, assert.AnError)
 		t.Cleanup(func() { clusterMock.AssertExpectations(t) })
 
-		actorRefs, err := system.ActorRefs(ctx, time.Second)
+		pids, err := system.Actors(ctx, time.Second)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, assert.AnError)
-		require.Nil(t, actorRefs)
+		require.Nil(t, pids)
 	})
 	t.Run("With invalid remote config address", func(t *testing.T) {
 		remotingPort := dynaport.Get(1)[0]
@@ -2235,11 +2145,11 @@ func TestActorSystem(t *testing.T) {
 
 		pause.For(time.Second)
 
-		var items []*goaktpb.Deadletter
+		var items []*Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
 			// only listening to deadletter
-			deadletter, ok := payload.(*goaktpb.Deadletter)
+			deadletter, ok := payload.(*Deadletter)
 			if ok {
 				items = append(items, deadletter)
 			}
@@ -2352,10 +2262,9 @@ func TestActorSystem(t *testing.T) {
 		pause.For(time.Second)
 
 		name := "GoAktXYZ"
-		addr, pid, err := sys.ActorOf(ctx, name)
+		pid, err := sys.ActorOf(ctx, name)
 		require.Error(t, err)
 		require.ErrorIs(t, err, gerrors.ErrActorNotFound)
-		require.Nil(t, addr)
 		require.Nil(t, pid)
 
 		err = sys.Stop(ctx)
@@ -2414,7 +2323,7 @@ func TestActorSystem(t *testing.T) {
 		err = sys.Stop(ctx)
 		require.NoError(t, err)
 	})
-	t.Run("With LocalActor failure when it is a reserved name", func(t *testing.T) {
+	t.Run("With ActorOf failure when it is a reserved name", func(t *testing.T) {
 		ctx := context.TODO()
 		logger := log.DiscardLogger
 
@@ -2433,37 +2342,10 @@ func TestActorSystem(t *testing.T) {
 		pause.For(time.Second)
 
 		name := "GoAktXYZ"
-		pid, err := sys.LocalActor(name)
+		pid, err := sys.ActorOf(ctx, name)
 		require.Error(t, err)
 		require.ErrorIs(t, err, gerrors.ErrActorNotFound)
 		require.Nil(t, pid)
-
-		err = sys.Stop(ctx)
-		require.NoError(t, err)
-	})
-	t.Run("With RemoteActor failure when it is a reserved name", func(t *testing.T) {
-		ctx := context.TODO()
-		logger := log.DiscardLogger
-
-		// create the actor system
-		sys, err := NewActorSystem(
-			"test",
-			WithLogger(logger),
-		)
-		// assert there are no error
-		require.NoError(t, err)
-
-		// start the actor system
-		err = sys.Start(ctx)
-		assert.NoError(t, err)
-
-		pause.For(time.Second)
-
-		name := "GoAktXYZ"
-		addr, err := sys.RemoteActor(ctx, name)
-		require.Error(t, err)
-		require.ErrorIs(t, err, gerrors.ErrActorNotFound)
-		require.Nil(t, addr)
 
 		err = sys.Stop(ctx)
 		require.NoError(t, err)
@@ -2489,7 +2371,7 @@ func TestActorSystem(t *testing.T) {
 
 		// let us send a message to the last actor
 		actorName := "actor-3"
-		pid, err := actorSystem.LocalActor(actorName)
+		pid, err := actorSystem.ActorOf(ctx, actorName)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 		err = Tell(ctx, pid, new(testpb.TestSend))
@@ -2521,7 +2403,7 @@ func TestActorSystem(t *testing.T) {
 
 		// let us send a message to the last actor
 		actorName := "actor-3"
-		pid, err := actorSystem.LocalActor(actorName)
+		pid, err := actorSystem.ActorOf(ctx, actorName)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 		err = Tell(ctx, pid, new(testpb.TestSend))
@@ -2553,7 +2435,7 @@ func TestActorSystem(t *testing.T) {
 
 		// let us send a message to the last actor
 		actorName := "actor-3"
-		pid, err := actorSystem.LocalActor(actorName)
+		pid, err := actorSystem.ActorOf(ctx, actorName)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 		err = Tell(ctx, pid, new(testpb.TestSend))
@@ -2586,7 +2468,7 @@ func TestActorSystem(t *testing.T) {
 
 		// let us send a message to the last actor
 		actorName := "actor-3"
-		pid, err := actorSystem.LocalActor(actorName)
+		pid, err := actorSystem.ActorOf(ctx, actorName)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 		err = Tell(ctx, pid, new(testpb.TestSend))
@@ -2619,7 +2501,7 @@ func TestActorSystem(t *testing.T) {
 
 		// let us send a message to the last actor
 		actorName := "actor-3"
-		pid, err := actorSystem.LocalActor(actorName)
+		pid, err := actorSystem.ActorOf(ctx, actorName)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 		err = Tell(ctx, pid, new(testpb.TestSend))
@@ -2696,19 +2578,20 @@ func TestRemoteContextPropagation(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
-		rem := remote.NewRemoting(remote.WithRemotingContextPropagator(&headerPropagator{headerKey: headerKey, ctxKey: ctxKey}))
+		rem := remote.NewClient(remote.WithClientContextPropagator(&headerPropagator{headerKey: headerKey, ctxKey: ctxKey}))
 		t.Cleanup(rem.Close)
 
 		addr, err := rem.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.NoError(t, err)
 
 		requestCtx := context.WithValue(context.Background(), ctxKey, headerVal)
-		reply, err := rem.RemoteAsk(requestCtx, address.NoSender(), addr, new(testpb.TestReply), time.Second)
+		actual, err := rem.RemoteAsk(requestCtx, address.NoSender(), addr, new(testpb.TestReply), time.Second)
 		require.NoError(t, err)
+		require.NotNil(t, actual)
+		reply, ok := actual.(*testpb.Reply)
+		require.True(t, ok)
 
-		actual := new(testpb.Reply)
-		require.NoError(t, reply.UnmarshalTo(actual))
-		require.Equal(t, headerVal, actual.GetContent())
+		require.Equal(t, headerVal, reply.GetContent())
 		require.Equal(t, headerVal, actor.Seen())
 	})
 
@@ -2735,7 +2618,7 @@ func TestRemoteContextPropagation(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
-		rem := remote.NewRemoting(remote.WithRemotingContextPropagator(&headerPropagator{headerKey: headerKey, ctxKey: ctxKey}))
+		rem := remote.NewClient(remote.WithClientContextPropagator(&headerPropagator{headerKey: headerKey, ctxKey: ctxKey}))
 		t.Cleanup(rem.Close)
 
 		addr, err := rem.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
@@ -2766,7 +2649,7 @@ func TestRemotingRecover(t *testing.T) {
 		pause.For(200 * time.Millisecond)
 		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
 
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		t.Cleanup(remoting.Close)
 
 		to := address.New("receiver", "remote-sys", host, remotingPort)
@@ -2804,7 +2687,7 @@ func TestRemotingLookup(t *testing.T) {
 		// let us disable remoting
 		actorsSystem := sys.(*actorSystem)
 		actorsSystem.remotingEnabled.Store(false)
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		// create a test actor
 		actorName := "test"
 		// get the address of the actor
@@ -2840,7 +2723,7 @@ func TestRemotingLookup(t *testing.T) {
 		actualPort := int(sys.Port())
 		sys.(*actorSystem).remoteConfig = remote.NewConfig(actualHost, actualPort+1)
 
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		t.Cleanup(remoting.Close)
 
 		addr, err := remoting.RemoteLookup(ctx, actualHost, actualPort, actorName)
@@ -2904,7 +2787,7 @@ func TestRemotingLookup(t *testing.T) {
 		// let us disable remoting
 		actorsSystem := sys.(*actorSystem)
 		actorsSystem.remotingEnabled.Store(false)
-		remoting := remote.NewRemoting(remote.WithRemotingTLS(clientConfig))
+		remoting := remote.NewClient(remote.WithClientTLS(clientConfig))
 		// create a test actor
 		actorName := "test"
 		// get the address of the actor
@@ -2949,7 +2832,7 @@ func TestRemotingReSpawn(t *testing.T) {
 		// let us disable remoting
 		actorsSystem := sys.(*actorSystem)
 		actorsSystem.remotingEnabled.Store(false)
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		// create a test actor
 		actorName := "test"
 		// get the address of the actor
@@ -2989,7 +2872,7 @@ func TestRemotingReSpawn(t *testing.T) {
 		actualPort := int(sys.Port())
 		sys.(*actorSystem).remoteConfig = remote.NewConfig(actualHost, actualPort+1)
 
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		t.Cleanup(remoting.Close)
 
 		err = remoting.RemoteReSpawn(ctx, actualHost, actualPort, actorName)
@@ -3033,7 +2916,7 @@ func TestRemotingReSpawn(t *testing.T) {
 		// assert the actor restart count
 		pid := actorRef
 		assert.Zero(t, pid.restartCount.Load())
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		// get the address of the actor
 		err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.NoError(t, err)
@@ -3069,7 +2952,7 @@ func TestRemotingReSpawn(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, actorRef)
 
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		t.Cleanup(remoting.Close)
 
 		err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
@@ -3135,7 +3018,7 @@ func TestRemotingReSpawn(t *testing.T) {
 		// let us disable remoting
 		actorsSystem := sys.(*actorSystem)
 		actorsSystem.remotingEnabled.Store(false)
-		remoting := remote.NewRemoting(remote.WithRemotingTLS(clientConfig))
+		remoting := remote.NewClient(remote.WithClientTLS(clientConfig))
 		// create a test actor
 		actorName := "test"
 		// get the address of the actor
@@ -3176,7 +3059,7 @@ func TestRemotingReSpawn(t *testing.T) {
 
 		// create a test actor
 		actorName := "GoAktXYZ"
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		// get the address of the actor
 		err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.Error(t, err)
@@ -3212,7 +3095,7 @@ func TestRemotingReSpawn(t *testing.T) {
 
 		// create a test actor
 		actorName := "actorName"
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		// get the address of the actor
 		err = remoting.RemoteReSpawn(ctx, actorSystem.Host(), int(actorSystem.Port()), actorName)
 		require.NoError(t, err)
@@ -3257,7 +3140,7 @@ func TestRemotingReSpawn(t *testing.T) {
 		// assert the actor restart count
 		pid := actorRef
 		assert.Zero(t, pid.restartCount.Load())
-		remoting := remote.NewRemoting(remote.WithRemotingCompression(remote.BrotliCompression))
+		remoting := remote.NewClient(remote.WithClientCompression(remote.BrotliCompression))
 		// get the address of the actor
 		err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.NoError(t, err)
@@ -3307,7 +3190,7 @@ func TestRemotingReSpawn(t *testing.T) {
 		// assert the actor restart count
 		pid := actorRef
 		assert.Zero(t, pid.restartCount.Load())
-		remoting := remote.NewRemoting(remote.WithRemotingCompression(remote.ZstdCompression))
+		remoting := remote.NewClient(remote.WithClientCompression(remote.ZstdCompression))
 		// get the address of the actor
 		err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.NoError(t, err)
@@ -3357,7 +3240,7 @@ func TestRemotingReSpawn(t *testing.T) {
 		// assert the actor restart count
 		pid := actorRef
 		assert.Zero(t, pid.restartCount.Load())
-		remoting := remote.NewRemoting(remote.WithRemotingCompression(remote.GzipCompression))
+		remoting := remote.NewClient(remote.WithClientCompression(remote.GzipCompression))
 		// get the address of the actor
 		err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.NoError(t, err)
@@ -3403,7 +3286,7 @@ func TestRemotingStop(t *testing.T) {
 		actorsSystem := sys.(*actorSystem)
 		actorsSystem.remotingEnabled.Store(false)
 
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		// create a test actor
 		actorName := "test"
 		// get the address of the actor
@@ -3443,7 +3326,7 @@ func TestRemotingStop(t *testing.T) {
 		actualPort := int(sys.Port())
 		sys.(*actorSystem).remoteConfig = remote.NewConfig(actualHost, actualPort+1)
 
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		t.Cleanup(remoting.Close)
 
 		err = remoting.RemoteStop(ctx, actualHost, actualPort, actorName)
@@ -3488,7 +3371,7 @@ func TestRemotingStop(t *testing.T) {
 		pid := actorRef
 		assert.Zero(t, pid.restartCount.Load())
 
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 
 		// get the address of the actor
 		err = remoting.RemoteStop(ctx, sys.Host(), int(sys.Port()), actorName)
@@ -3496,7 +3379,9 @@ func TestRemotingStop(t *testing.T) {
 
 		pause.For(time.Second)
 
-		assert.Empty(t, sys.Actors())
+		pids, err := sys.Actors(ctx, time.Second)
+		require.NoError(t, err)
+		assert.Empty(t, pids)
 
 		// stop the actor after some time
 		pause.For(time.Second)
@@ -3527,7 +3412,7 @@ func TestRemotingStop(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, actorRef)
 
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		t.Cleanup(remoting.Close)
 
 		err = remoting.RemoteStop(ctx, sys.Host(), int(sys.Port()), actorName)
@@ -3595,7 +3480,7 @@ func TestRemotingStop(t *testing.T) {
 		actorsSystem := sys.(*actorSystem)
 		actorsSystem.remotingEnabled.Store(false)
 
-		remoting := remote.NewRemoting(remote.WithRemotingTLS(clientConfig))
+		remoting := remote.NewClient(remote.WithClientTLS(clientConfig))
 		// create a test actor
 		actorName := "test"
 		// get the address of the actor
@@ -3636,7 +3521,7 @@ func TestRemotingStop(t *testing.T) {
 
 		// create a test actor
 		actorName := "GoAktXYZ"
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 
 		// get the address of the actor
 		err = remoting.RemoteStop(ctx, sys.Host(), int(sys.Port()), actorName)
@@ -3674,7 +3559,7 @@ func TestRemotingStop(t *testing.T) {
 
 		// create a test actor
 		actorName := "actorName"
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 
 		// get the address of the actor
 		err = remoting.RemoteStop(ctx, sys.Host(), int(sys.Port()), actorName)
@@ -3722,7 +3607,7 @@ func TestRemotingStop(t *testing.T) {
 		pid := actorRef
 		assert.Zero(t, pid.restartCount.Load())
 
-		remoting := remote.NewRemoting(remote.WithRemotingCompression(remote.BrotliCompression))
+		remoting := remote.NewClient(remote.WithClientCompression(remote.BrotliCompression))
 
 		// get the address of the actor
 		err = remoting.RemoteStop(ctx, sys.Host(), int(sys.Port()), actorName)
@@ -3730,7 +3615,9 @@ func TestRemotingStop(t *testing.T) {
 
 		pause.For(time.Second)
 
-		assert.Empty(t, sys.Actors())
+		pids, err := sys.Actors(ctx, time.Second)
+		require.NoError(t, err)
+		assert.Empty(t, pids)
 
 		// stop the actor after some time
 		pause.For(time.Second)
@@ -3776,7 +3663,7 @@ func TestRemotingStop(t *testing.T) {
 		pid := actorRef
 		assert.Zero(t, pid.restartCount.Load())
 
-		remoting := remote.NewRemoting(remote.WithRemotingCompression(remote.ZstdCompression))
+		remoting := remote.NewClient(remote.WithClientCompression(remote.ZstdCompression))
 
 		// get the address of the actor
 		err = remoting.RemoteStop(ctx, sys.Host(), int(sys.Port()), actorName)
@@ -3784,7 +3671,9 @@ func TestRemotingStop(t *testing.T) {
 
 		pause.For(time.Second)
 
-		assert.Empty(t, sys.Actors())
+		pids, err := sys.Actors(ctx, time.Second)
+		require.NoError(t, err)
+		assert.Empty(t, pids)
 
 		// stop the actor after some time
 		pause.For(time.Second)
@@ -3830,7 +3719,7 @@ func TestRemotingStop(t *testing.T) {
 		pid := actorRef
 		assert.Zero(t, pid.restartCount.Load())
 
-		remoting := remote.NewRemoting(remote.WithRemotingCompression(remote.GzipCompression))
+		remoting := remote.NewClient(remote.WithClientCompression(remote.GzipCompression))
 
 		// get the address of the actor
 		err = remoting.RemoteStop(ctx, sys.Host(), int(sys.Port()), actorName)
@@ -3838,7 +3727,9 @@ func TestRemotingStop(t *testing.T) {
 
 		pause.For(time.Second)
 
-		assert.Empty(t, sys.Actors())
+		pids, err := sys.Actors(ctx, time.Second)
+		require.NoError(t, err)
+		assert.Empty(t, pids)
 
 		// stop the actor after some time
 		pause.For(time.Second)
@@ -3931,7 +3822,7 @@ func TestRemotingSpawn(t *testing.T) {
 		actor := &exchanger{}
 		actorName := uuid.NewString()
 
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		// fetching the address of the that actor should return nil address
 		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.NoError(t, err)
@@ -3960,18 +3851,15 @@ func TestRemotingSpawn(t *testing.T) {
 
 		from := address.NoSender()
 		// send the message to exchanger actor one using remote messaging
-		reply, err := remoting.RemoteAsk(ctx, from, addr, new(testpb.TestReply), time.Minute)
+		actual, err := remoting.RemoteAsk(ctx, from, addr, new(testpb.TestReply), time.Minute)
 
 		require.NoError(t, err)
-		require.NotNil(t, reply)
-		require.True(t, reply.MessageIs(new(testpb.Reply)))
-
-		actual := new(testpb.Reply)
-		err = reply.UnmarshalTo(actual)
-		require.NoError(t, err)
+		require.NotNil(t, actual)
+		reply, ok := actual.(*testpb.Reply)
+		require.True(t, ok)
 
 		expected := new(testpb.Reply)
-		assert.True(t, proto.Equal(expected, actual))
+		assert.True(t, proto.Equal(expected, reply))
 
 		remoting.Close()
 		t.Cleanup(
@@ -4004,7 +3892,7 @@ func TestRemotingSpawn(t *testing.T) {
 		actualPort := int(sys.Port())
 		sys.(*actorSystem).remoteConfig = remote.NewConfig(actualHost, actualPort+1)
 
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		t.Cleanup(remoting.Close)
 
 		request := &remote.SpawnRequest{
@@ -4049,7 +3937,7 @@ func TestRemotingSpawn(t *testing.T) {
 		actor := &MockPreStart{}
 		actorName := uuid.NewString()
 
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		// fetching the address of the that actor should return nil address
 		addr, err := remoting.RemoteLookup(ctx, sys.Host(), sys.Port(), actorName)
 		require.NoError(t, err)
@@ -4062,7 +3950,7 @@ func TestRemotingSpawn(t *testing.T) {
 		// spawn the remote actor
 		request := &remote.SpawnRequest{
 			Name:           actorName,
-			Kind:           registry.Name(actor),
+			Kind:           types.Name(actor),
 			Singleton:      nil,
 			Relocatable:    false,
 			EnableStashing: true,
@@ -4111,7 +3999,7 @@ func TestRemotingSpawn(t *testing.T) {
 		actor := &exchanger{}
 		actorName := uuid.NewString()
 
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		// fetching the address of the that actor should return nil address
 		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.NoError(t, err)
@@ -4163,7 +4051,7 @@ func TestRemotingSpawn(t *testing.T) {
 		// create an actor implementation and register it
 		actorName := uuid.NewString()
 
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		// fetching the address of the that actor should return nil address
 		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.NoError(t, err)
@@ -4208,12 +4096,12 @@ func TestRemotingSpawn(t *testing.T) {
 		actual.registry.Register(new(MockUnimplementedActor))
 		actual.locker.Unlock()
 
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		t.Cleanup(remoting.Close)
 
 		request := &remote.SpawnRequest{
 			Name: uuid.NewString(),
-			Kind: registry.Name(new(MockUnimplementedActor)),
+			Kind: types.Name(new(MockUnimplementedActor)),
 		}
 
 		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
@@ -4243,7 +4131,7 @@ func TestRemotingSpawn(t *testing.T) {
 		actual.registry.Register(new(MockActor))
 		actual.locker.Unlock()
 
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		t.Cleanup(remoting.Close)
 
 		mockedErr := errors.New("failed to marshal dependency")
@@ -4253,7 +4141,7 @@ func TestRemotingSpawn(t *testing.T) {
 
 		request := &remote.SpawnRequest{
 			Name: uuid.NewString(),
-			Kind: registry.Name(new(MockActor)),
+			Kind: types.Name(new(MockActor)),
 			Dependencies: []extension.Dependency{
 				dependency,
 			},
@@ -4284,7 +4172,7 @@ func TestRemotingSpawn(t *testing.T) {
 
 		require.NoError(t, sys.Register(ctx, &exchanger{}))
 
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		t.Cleanup(remoting.Close)
 		role := "role"
 
@@ -4325,7 +4213,7 @@ func TestRemotingSpawn(t *testing.T) {
 
 		// create an actor implementation and register it
 		actorName := uuid.NewString()
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		// spawn the remote actor
 		request := &remote.SpawnRequest{
 			Name:        actorName,
@@ -4372,7 +4260,7 @@ func TestRemotingSpawn(t *testing.T) {
 
 		// create an actor implementation and register it
 		actorName := uuid.NewString()
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		// spawn the remote actor
 		request := &remote.SpawnRequest{
 			Name:        actorName,
@@ -4445,7 +4333,7 @@ func TestRemotingSpawn(t *testing.T) {
 		actor := &exchanger{}
 		actorName := uuid.NewString()
 
-		remoting := remote.NewRemoting(remote.WithRemotingTLS(clientConfig))
+		remoting := remote.NewClient(remote.WithClientTLS(clientConfig))
 		// fetching the address of the that actor should return nil address
 		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.NoError(t, err)
@@ -4473,18 +4361,15 @@ func TestRemotingSpawn(t *testing.T) {
 
 		from := address.NoSender()
 		// send the message to exchanger actor one using remote messaging
-		reply, err := remoting.RemoteAsk(ctx, from, addr, new(testpb.TestReply), time.Minute)
+		actual, err := remoting.RemoteAsk(ctx, from, addr, new(testpb.TestReply), time.Minute)
 
 		require.NoError(t, err)
-		require.NotNil(t, reply)
-		require.True(t, reply.MessageIs(new(testpb.Reply)))
-
-		actual := new(testpb.Reply)
-		err = reply.UnmarshalTo(actual)
-		require.NoError(t, err)
+		require.NotNil(t, actual)
+		reply, ok := actual.(*testpb.Reply)
+		require.True(t, ok)
 
 		expected := new(testpb.Reply)
-		assert.True(t, proto.Equal(expected, actual))
+		assert.True(t, proto.Equal(expected, reply))
 
 		remoting.Close()
 		t.Cleanup(
@@ -4521,7 +4406,7 @@ func TestRemotingSpawn(t *testing.T) {
 		actor := &exchanger{}
 		actorName := uuid.NewString()
 
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		// fetching the address of the that actor should return nil address
 		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.NoError(t, err)
@@ -4575,7 +4460,7 @@ func TestRemotingSpawn(t *testing.T) {
 
 		actorName := "GoAktXYZ"
 
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		// spawn the remote actor
 		request := &remote.SpawnRequest{
 			Name:           actorName,
@@ -4625,7 +4510,7 @@ func TestRemotingSpawn(t *testing.T) {
 		actor := &exchanger{}
 		actorName := uuid.NewString()
 
-		remoting := remote.NewRemoting(remote.WithRemotingCompression(remote.BrotliCompression))
+		remoting := remote.NewClient(remote.WithClientCompression(remote.BrotliCompression))
 		// fetching the address of the that actor should return nil address
 		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.NoError(t, err)
@@ -4658,11 +4543,8 @@ func TestRemotingSpawn(t *testing.T) {
 
 		require.NoError(t, err)
 		require.NotNil(t, reply)
-		require.True(t, reply.MessageIs(new(testpb.Reply)))
-
-		actual := new(testpb.Reply)
-		err = reply.UnmarshalTo(actual)
-		require.NoError(t, err)
+		actual, ok := reply.(*testpb.Reply)
+		require.True(t, ok)
 
 		expected := new(testpb.Reply)
 		assert.True(t, proto.Equal(expected, actual))
@@ -4708,7 +4590,7 @@ func TestRemotingSpawn(t *testing.T) {
 		actor := &exchanger{}
 		actorName := uuid.NewString()
 
-		remoting := remote.NewRemoting(remote.WithRemotingCompression(remote.ZstdCompression))
+		remoting := remote.NewClient(remote.WithClientCompression(remote.ZstdCompression))
 		// fetching the address of the that actor should return nil address
 		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.NoError(t, err)
@@ -4741,11 +4623,8 @@ func TestRemotingSpawn(t *testing.T) {
 
 		require.NoError(t, err)
 		require.NotNil(t, reply)
-		require.True(t, reply.MessageIs(new(testpb.Reply)))
-
-		actual := new(testpb.Reply)
-		err = reply.UnmarshalTo(actual)
-		require.NoError(t, err)
+		actual, ok := reply.(*testpb.Reply)
+		require.True(t, ok)
 
 		expected := new(testpb.Reply)
 		assert.True(t, proto.Equal(expected, actual))
@@ -4791,7 +4670,7 @@ func TestRemotingSpawn(t *testing.T) {
 		actor := &exchanger{}
 		actorName := uuid.NewString()
 
-		remoting := remote.NewRemoting(remote.WithRemotingCompression(remote.GzipCompression))
+		remoting := remote.NewClient(remote.WithClientCompression(remote.GzipCompression))
 		// fetching the address of the that actor should return nil address
 		addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.NoError(t, err)
@@ -4824,11 +4703,8 @@ func TestRemotingSpawn(t *testing.T) {
 
 		require.NoError(t, err)
 		require.NotNil(t, reply)
-		require.True(t, reply.MessageIs(new(testpb.Reply)))
-
-		actual := new(testpb.Reply)
-		err = reply.UnmarshalTo(actual)
-		require.NoError(t, err)
+		actual, ok := reply.(*testpb.Reply)
+		require.True(t, ok)
 
 		expected := new(testpb.Reply)
 		assert.True(t, proto.Equal(expected, actual))
@@ -4873,7 +4749,7 @@ func TestRemotingReinstate(t *testing.T) {
 		actorsSystem := sys.(*actorSystem)
 		actorsSystem.remotingEnabled.Store(false)
 
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		// create a test actor
 		actorName := "test"
 
@@ -4909,7 +4785,7 @@ func TestRemotingReinstate(t *testing.T) {
 		actualPort := int(sys.Port())
 		sys.(*actorSystem).remoteConfig = remote.NewConfig(actualHost, actualPort+1)
 
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		t.Cleanup(remoting.Close)
 
 		err = remoting.RemoteReinstate(ctx, actualHost, actualPort, actorName)
@@ -4958,7 +4834,7 @@ func TestRemotingReinstate(t *testing.T) {
 		require.False(t, pid.IsRunning())
 		require.True(t, pid.IsSuspended())
 
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 
 		err = remoting.RemoteReinstate(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.NoError(t, err)
@@ -4999,7 +4875,7 @@ func TestRemotingReinstate(t *testing.T) {
 
 		// create a test actor
 		actorName := "GoAktXYZ"
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 
 		err = remoting.RemoteReinstate(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.Error(t, err)
@@ -5035,7 +4911,7 @@ func TestRemotingReinstate(t *testing.T) {
 
 		// create a test actor
 		actorName := "actorName"
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 
 		err = remoting.RemoteReinstate(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.NoError(t, err)
@@ -5074,7 +4950,7 @@ func TestRemotingReinstate(t *testing.T) {
 		actorsSystem := sys.(*actorSystem)
 		actorsSystem.remotingEnabled.Store(false)
 
-		remoting := remote.NewRemoting(remote.WithRemotingCompression(remote.BrotliCompression))
+		remoting := remote.NewClient(remote.WithClientCompression(remote.BrotliCompression))
 		// create a test actor
 		actorName := "test"
 
@@ -5114,7 +4990,7 @@ func TestRemotingReinstate(t *testing.T) {
 		actorsSystem := sys.(*actorSystem)
 		actorsSystem.remotingEnabled.Store(false)
 
-		remoting := remote.NewRemoting(remote.WithRemotingCompression(remote.ZstdCompression))
+		remoting := remote.NewClient(remote.WithClientCompression(remote.ZstdCompression))
 		// create a test actor
 		actorName := "test"
 
@@ -5350,19 +5226,20 @@ func TestCleanupCluster_RemoveKindFailure(t *testing.T) {
 	system := MockReplicationTestSystem(clusterMock)
 	system.grains = xsync.NewMap[string, *grainPID]()
 
-	actorRef := ActorRef{
-		name:        "singleton-actor",
-		kind:        "singleton-kind",
-		address:     address.New("singleton-actor", system.name, "127.0.0.1", 8080),
-		isSingleton: true,
+	pid := &PID{
+		address:       address.New("singleton-actor", system.name, "127.0.0.1", 8080),
+		actor:         new(MockActor),
+		actorSystem:   system,
+		singletonSpec: &singletonSpec{},
 	}
+	pid.setState(singletonState, true)
 
 	clusterMock.EXPECT().IsLeader(mock.Anything).Return(true)
-	clusterMock.EXPECT().RemoveKind(mock.Anything, actorRef.Kind()).Return(assert.AnError)
-	clusterMock.EXPECT().RemoveActor(mock.Anything, actorRef.Name()).Return(nil)
+	clusterMock.EXPECT().RemoveKind(mock.Anything, pid.Kind()).Return(assert.AnError)
+	clusterMock.EXPECT().RemoveActor(mock.Anything, pid.Name()).Return(nil)
 	t.Cleanup(func() { clusterMock.AssertExpectations(t) })
 
-	err := system.cleanupCluster(context.Background(), []ActorRef{actorRef})
+	err := system.cleanupCluster(context.Background(), []*PID{pid})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, assert.AnError)
 }
@@ -5372,17 +5249,16 @@ func TestCleanupCluster_RemoveActorFailure(t *testing.T) {
 	system := MockReplicationTestSystem(clusterMock)
 	system.grains = xsync.NewMap[string, *grainPID]()
 
-	actorRef := ActorRef{
-		name:    "actor",
-		kind:    "actor.kind",
-		address: address.New("actor", system.name, "127.0.0.1", 8080),
+	pid := &PID{
+		address:     address.New("actor", system.name, "127.0.0.1", 8080),
+		actorSystem: system,
 	}
 
 	clusterMock.EXPECT().IsLeader(mock.Anything).Return(false)
-	clusterMock.EXPECT().RemoveActor(mock.Anything, actorRef.Name()).Return(assert.AnError)
+	clusterMock.EXPECT().RemoveActor(mock.Anything, pid.Name()).Return(assert.AnError)
 	t.Cleanup(func() { clusterMock.AssertExpectations(t) })
 
-	err := system.cleanupCluster(context.Background(), []ActorRef{actorRef})
+	err := system.cleanupCluster(context.Background(), []*PID{pid})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, assert.AnError)
 }
@@ -5392,21 +5268,20 @@ func TestCleanupCluster_RemoveGrainFailure(t *testing.T) {
 	system := MockReplicationTestSystem(clusterMock)
 	system.grains = xsync.NewMap[string, *grainPID]()
 
-	actorRef := ActorRef{
-		name:    "actor",
-		kind:    "actor.kind",
-		address: address.New("actor", system.name, "127.0.0.1", 8080),
+	pid := &PID{
+		address:     address.New("actor", system.name, "127.0.0.1", 8080),
+		actorSystem: system,
 	}
 	grainID := &GrainIdentity{kind: "grain.kind", name: "grain"}
 	grain := &grainPID{identity: grainID, actorSystem: system, logger: log.DiscardLogger}
 	system.grains.Set(grainID.String(), grain)
 
 	clusterMock.EXPECT().IsLeader(mock.Anything).Return(false)
-	clusterMock.EXPECT().RemoveActor(mock.Anything, actorRef.Name()).Return(nil)
+	clusterMock.EXPECT().RemoveActor(mock.Anything, pid.Name()).Return(nil)
 	clusterMock.EXPECT().RemoveGrain(mock.Anything, grainID.String()).Return(assert.AnError)
 	t.Cleanup(func() { clusterMock.AssertExpectations(t) })
 
-	err := system.cleanupCluster(context.Background(), []ActorRef{actorRef})
+	err := system.cleanupCluster(context.Background(), []*PID{pid})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, assert.AnError)
 }
@@ -5631,7 +5506,7 @@ func TestGetNodeMetric(t *testing.T) {
 		require.NoError(t, err)
 
 		// Send GetNodeMetric over the wire
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		client := remoting.NetClient(host, remotingPort)
 
 		nodeAddr := fmt.Sprintf("%s:%d", host, remotingPort)
@@ -5705,8 +5580,8 @@ func TestGetKinds(t *testing.T) {
 		require.True(t, ok)
 		// NewClusterConfig auto-registers FuncActor, so we expect 2 kinds.
 		require.Len(t, kindsResp.GetKinds(), 2)
-		assert.Contains(t, kindsResp.GetKinds(), registry.Name(new(MockActor)))
-		assert.Contains(t, kindsResp.GetKinds(), registry.Name(new(FuncActor)))
+		assert.Contains(t, kindsResp.GetKinds(), types.Name(new(MockActor)))
+		assert.Contains(t, kindsResp.GetKinds(), types.Name(new(FuncActor)))
 	})
 	t.Run("With remoting integration", func(t *testing.T) {
 		ctx := context.TODO()
@@ -5751,7 +5626,7 @@ func TestGetKinds(t *testing.T) {
 		pause.For(time.Second)
 
 		// Send GetKinds over the wire
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		client := remoting.NetClient(host, remotingPort)
 
 		nodeAddr := fmt.Sprintf("%s:%d", host, remotingPort)
@@ -5763,8 +5638,8 @@ func TestGetKinds(t *testing.T) {
 		require.True(t, ok)
 		// NewClusterConfig auto-registers FuncActor + the explicit MockActor.
 		require.Len(t, kindsResp.GetKinds(), 2)
-		assert.Contains(t, kindsResp.GetKinds(), registry.Name(new(MockActor)))
-		assert.Contains(t, kindsResp.GetKinds(), registry.Name(new(FuncActor)))
+		assert.Contains(t, kindsResp.GetKinds(), types.Name(new(MockActor)))
+		assert.Contains(t, kindsResp.GetKinds(), types.Name(new(FuncActor)))
 
 		remoting.Close()
 		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
@@ -5890,7 +5765,7 @@ func TestPersistPeerState(t *testing.T) {
 		pause.For(time.Second)
 
 		// Send PersistPeerState over the wire
-		remoting := remote.NewRemoting()
+		remoting := remote.NewClient()
 		client := remoting.NetClient(host, remotingPort)
 
 		peerState := &internalpb.PeerState{

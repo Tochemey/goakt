@@ -29,14 +29,12 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/proto"
 
-	"github.com/tochemey/goakt/v3/breaker"
-	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/internal/pause"
-	"github.com/tochemey/goakt/v3/log"
-	"github.com/tochemey/goakt/v3/test/data/testpb"
+	"github.com/tochemey/goakt/v4/breaker"
+	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/log"
+	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
 // nolint
@@ -47,7 +45,7 @@ func TestReleaseGrainContextResetsFields(t *testing.T) {
 	ctx.self = identity
 	ctx.message = &testpb.TestMessage{}
 	ctx.err = make(chan error, 1)
-	ctx.response = make(chan proto.Message, 1)
+	ctx.response = make(chan any, 1)
 	ctx.pid = &grainPID{}
 
 	releaseGrainContext(ctx)
@@ -296,7 +294,7 @@ func TestGrainContextPipeToGrain(t *testing.T) {
 		require.NoError(t, err)
 
 		gctx := &GrainContext{ctx: ctx, actorSystem: sys}
-		err = gctx.PipeToGrain(identity, func() (proto.Message, error) {
+		err = gctx.PipeToGrain(identity, func() (any, error) {
 			return &testpb.Reply{Content: "ok"}, nil
 		})
 		require.NoError(t, err)
@@ -322,14 +320,14 @@ func TestGrainContextPipeToGrain(t *testing.T) {
 		require.NoError(t, err)
 
 		gctx := &GrainContext{ctx: ctx, actorSystem: sys}
-		err = gctx.PipeToGrain(identity, func() (proto.Message, error) {
+		err = gctx.PipeToGrain(identity, func() (any, error) {
 			return nil, errors.New("boom")
 		})
 		require.NoError(t, err)
 
 		select {
 		case failure := <-target.failures:
-			require.Contains(t, failure.GetError(), "boom")
+			require.Contains(t, failure.Error(), "boom")
 		case <-time.After(time.Second):
 			t.Fatal("timed out waiting for piped grain failure")
 		}
@@ -346,7 +344,7 @@ func TestGrainContextPipeToGrain(t *testing.T) {
 		require.NoError(t, err)
 
 		gctx := &GrainContext{ctx: ctx, actorSystem: sys}
-		err = gctx.PipeToGrain(identity, func() (proto.Message, error) {
+		err = gctx.PipeToGrain(identity, func() (any, error) {
 			time.Sleep(150 * time.Millisecond)
 			return &testpb.Reply{Content: "late"}, nil
 		}, WithTimeout(50*time.Millisecond))
@@ -354,7 +352,7 @@ func TestGrainContextPipeToGrain(t *testing.T) {
 
 		select {
 		case failure := <-target.failures:
-			require.Contains(t, failure.GetError(), context.DeadlineExceeded.Error())
+			require.Contains(t, failure.Error(), context.DeadlineExceeded.Error())
 		case <-time.After(time.Second):
 			t.Fatal("timed out waiting for piped grain timeout")
 		}
@@ -372,7 +370,7 @@ func TestGrainContextPipeToGrain(t *testing.T) {
 
 		cb := breaker.NewCircuitBreaker(breaker.WithMinRequests(1))
 		gctx := &GrainContext{ctx: ctx, actorSystem: sys}
-		err = gctx.PipeToGrain(identity, func() (proto.Message, error) {
+		err = gctx.PipeToGrain(identity, func() (any, error) {
 			return &testpb.Reply{Content: "ok"}, nil
 		}, WithCircuitBreaker(cb))
 		require.NoError(t, err)
@@ -396,7 +394,7 @@ func TestGrainContextPipeToGrainInvalidInput(t *testing.T) {
 	})
 
 	t.Run("nil identity", func(t *testing.T) {
-		err := gctx.PipeToGrain(nil, func() (proto.Message, error) {
+		err := gctx.PipeToGrain(nil, func() (any, error) {
 			return &testpb.Reply{Content: "ok"}, nil
 		})
 		require.ErrorIs(t, err, gerrors.ErrInvalidGrainIdentity)
@@ -404,7 +402,7 @@ func TestGrainContextPipeToGrainInvalidInput(t *testing.T) {
 
 	t.Run("invalid identity", func(t *testing.T) {
 		invalid := &GrainIdentity{kind: "bad", name: ""}
-		err := gctx.PipeToGrain(invalid, func() (proto.Message, error) {
+		err := gctx.PipeToGrain(invalid, func() (any, error) {
 			return &testpb.Reply{Content: "ok"}, nil
 		})
 		require.ErrorIs(t, err, gerrors.ErrInvalidGrainIdentity)
@@ -421,7 +419,7 @@ func TestGrainContextPipeToActor(t *testing.T) {
 		require.NoError(t, err)
 
 		gctx := &GrainContext{ctx: ctx, actorSystem: sys}
-		err = gctx.PipeToActor("pipe-target-actor", func() (proto.Message, error) {
+		err = gctx.PipeToActor("pipe-target-actor", func() (any, error) {
 			return &testpb.Reply{Content: "ok"}, nil
 		})
 		require.NoError(t, err)
@@ -458,7 +456,7 @@ func TestGrainContextPipeToSelf(t *testing.T) {
 		require.NoError(t, err)
 
 		gctx := &GrainContext{ctx: ctx, actorSystem: sys, self: identity}
-		err = gctx.PipeToSelf(func() (proto.Message, error) {
+		err = gctx.PipeToSelf(func() (any, error) {
 			return &testpb.Reply{Content: "ok"}, nil
 		})
 		require.NoError(t, err)
@@ -475,7 +473,7 @@ func TestGrainContextPipeToSelf(t *testing.T) {
 
 	t.Run("nil self", func(t *testing.T) {
 		gctx := &GrainContext{ctx: context.Background()}
-		err := gctx.PipeToSelf(func() (proto.Message, error) {
+		err := gctx.PipeToSelf(func() (any, error) {
 			return &testpb.Reply{Content: "ok"}, nil
 		})
 		require.ErrorIs(t, err, gerrors.ErrInvalidGrainIdentity)
@@ -488,14 +486,14 @@ func TestHandleGrainCompletionSendError(t *testing.T) {
 		system := &stubGrainPipeSystem{err: sendErr}
 		completion := &grainTaskCompletion{
 			Target: &GrainIdentity{kind: "grain", name: "id"},
-			Task: func() (proto.Message, error) {
+			Task: func() (any, error) {
 				return nil, errors.New("boom")
 			},
 		}
 
 		err := handleGrainCompletion(context.Background(), system, nil, completion)
 		require.ErrorIs(t, err, sendErr)
-		require.IsType(t, &goaktpb.StatusFailure{}, system.lastMessage)
+		require.IsType(t, &StatusFailure{}, system.lastMessage)
 	})
 
 	t.Run("success message send error", func(t *testing.T) {
@@ -503,7 +501,7 @@ func TestHandleGrainCompletionSendError(t *testing.T) {
 		system := &stubGrainPipeSystem{err: sendErr}
 		completion := &grainTaskCompletion{
 			Target: &GrainIdentity{kind: "grain", name: "id"},
-			Task: func() (proto.Message, error) {
+			Task: func() (any, error) {
 				return &testpb.Reply{Content: "ok"}, nil
 			},
 		}
@@ -515,14 +513,14 @@ func TestHandleGrainCompletionSendError(t *testing.T) {
 }
 
 type pipeTargetGrain struct {
-	received chan proto.Message
-	failures chan *goaktpb.StatusFailure
+	received chan any
+	failures chan *StatusFailure
 }
 
 func newPipeTargetGrain() *pipeTargetGrain {
 	return &pipeTargetGrain{
-		received: make(chan proto.Message, 1),
-		failures: make(chan *goaktpb.StatusFailure, 1),
+		received: make(chan any, 1),
+		failures: make(chan *StatusFailure, 1),
 	}
 }
 
@@ -536,7 +534,7 @@ func (p *pipeTargetGrain) OnDeactivate(context.Context, *GrainProps) error {
 
 func (p *pipeTargetGrain) OnReceive(ctx *GrainContext) {
 	switch msg := ctx.Message().(type) {
-	case *goaktpb.StatusFailure:
+	case *StatusFailure:
 		select {
 		case p.failures <- msg:
 		default:
@@ -551,12 +549,12 @@ func (p *pipeTargetGrain) OnReceive(ctx *GrainContext) {
 }
 
 type pipeTargetActor struct {
-	received chan proto.Message
+	received chan any
 }
 
 func newPipeTargetActor() *pipeTargetActor {
 	return &pipeTargetActor{
-		received: make(chan proto.Message, 1),
+		received: make(chan any, 1),
 	}
 }
 
@@ -580,10 +578,10 @@ func (p *pipeTargetActor) Receive(ctx *ReceiveContext) {
 
 type stubGrainPipeSystem struct {
 	err         error
-	lastMessage proto.Message
+	lastMessage any
 }
 
-func (s *stubGrainPipeSystem) TellGrain(ctx context.Context, identity *GrainIdentity, message proto.Message) error {
+func (s *stubGrainPipeSystem) TellGrain(ctx context.Context, identity *GrainIdentity, message any) error {
 	s.lastMessage = message
 	return s.err
 }

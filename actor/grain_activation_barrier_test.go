@@ -29,7 +29,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	gerrors "github.com/tochemey/goakt/v3/errors"
+	gerrors "github.com/tochemey/goakt/v4/errors"
 )
 
 func TestNewGrainActivationBarrier(t *testing.T) {

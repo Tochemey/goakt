@@ -36,16 +36,16 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 
-	"github.com/tochemey/goakt/v3/datacenter"
-	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/extension"
-	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/registry"
-	"github.com/tochemey/goakt/v3/internal/xsync"
-	mocks "github.com/tochemey/goakt/v3/mocks/extension"
-	"github.com/tochemey/goakt/v3/passivation"
-	"github.com/tochemey/goakt/v3/reentrancy"
-	"github.com/tochemey/goakt/v3/supervisor"
+	"github.com/tochemey/goakt/v4/datacenter"
+	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/extension"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
+	"github.com/tochemey/goakt/v4/internal/types"
+	"github.com/tochemey/goakt/v4/internal/xsync"
+	mocks "github.com/tochemey/goakt/v4/mocks/extension"
+	"github.com/tochemey/goakt/v4/passivation"
+	"github.com/tochemey/goakt/v4/reentrancy"
+	"github.com/tochemey/goakt/v4/supervisor"
 )
 
 type decodeDirectiveError struct{}
@@ -267,7 +267,7 @@ func TestEncodeDependencies(t *testing.T) {
 
 		dependencies := []extension.Dependency{mockDependency}
 		expected := []*internalpb.Dependency{
-			{Id: "dep1", TypeName: registry.Name(mockDependency), Bytea: []byte("mock data")},
+			{Id: "dep1", TypeName: types.Name(mockDependency), Bytea: []byte("mock data")},
 		}
 		result, err := EncodeDependencies(dependencies...)
 		require.NoError(t, err)

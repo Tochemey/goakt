@@ -23,7 +23,7 @@
 package static
 
 import (
-	"github.com/tochemey/goakt/v3/discovery"
+	"github.com/tochemey/goakt/v4/discovery"
 )
 
 // Discovery represents the static discovery provider

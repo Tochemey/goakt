@@ -39,7 +39,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
 
-	"github.com/tochemey/goakt/v3/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/pause"
 )
 
 func TestTCPTransport(t *testing.T) {

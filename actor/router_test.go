@@ -32,13 +32,11 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
-	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/goaktpb"
-	"github.com/tochemey/goakt/v3/internal/pause"
-	"github.com/tochemey/goakt/v3/log"
-	"github.com/tochemey/goakt/v3/test/data/testpb"
+	"github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/log"
+	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
 func TestRouter(t *testing.T) {
@@ -67,8 +65,7 @@ func TestRouter(t *testing.T) {
 		pause.For(time.Second)
 
 		// send a broadcast message to the router
-		message, _ := anypb.New(&testpb.TestLog{Text: "msg"})
-		err = Tell(ctx, router, &goaktpb.Broadcast{Message: message})
+		err = Tell(ctx, router, NewBroadcast(&testpb.TestLog{Text: "msg"}))
 		require.NoError(t, err)
 
 		pause.For(time.Second)
@@ -90,11 +87,15 @@ func TestRouter(t *testing.T) {
 		reply, err := Ask(ctx, workerOneRef, new(testpb.TestGetCount), time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
-		require.True(t, proto.Equal(expected, reply))
+		actual, ok := reply.(*testpb.TestCount)
+		require.True(t, ok)
+		assert.True(t, proto.Equal(expected, actual))
 		reply, err = Ask(ctx, workerTwoRef, new(testpb.TestGetCount), time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
-		assert.True(t, proto.Equal(expected, reply))
+		actual, ok = reply.(*testpb.TestCount)
+		require.True(t, ok)
+		assert.True(t, proto.Equal(expected, actual))
 
 		assert.NoError(t, system.Stop(ctx))
 	})
@@ -134,26 +135,17 @@ func TestRouter(t *testing.T) {
 		require.True(t, ok)
 		require.NotNil(t, workerTwoRef)
 
-		require.NoError(t, workerOneRef.Tell(ctx, router, &goaktpb.PanicSignal{
-			Message:   &anypb.Any{},
-			Reason:    "test panic signal",
-			Timestamp: timestamppb.Now(),
-		}))
+		require.NoError(t, workerOneRef.Tell(ctx, router, NewPanicSignal(&anypb.Any{}, "test panic signal", time.Now())))
 
-		require.NoError(t, workerTwoRef.Tell(ctx, router, &goaktpb.PanicSignal{
-			Message:   &anypb.Any{},
-			Reason:    "test panic signal",
-			Timestamp: timestamppb.Now(),
-		}))
+		require.NoError(t, workerTwoRef.Tell(ctx, router, NewPanicSignal(&anypb.Any{}, "test panic signal", time.Now())))
 
 		// send a broadcast message to the router
-		message, _ := anypb.New(&testpb.TestLog{Text: "msg"})
-		err = Tell(ctx, router, &goaktpb.Broadcast{Message: message})
+		err = Tell(ctx, router, NewBroadcast(&testpb.TestLog{Text: "msg"}))
 		require.NoError(t, err)
 
 		pause.For(time.Second)
 
-		ref, err := system.LocalActor(routerName)
+		ref, err := system.ActorOf(ctx, routerName)
 		require.Error(t, err)
 		require.Nil(t, ref)
 		assert.ErrorIs(t, err, errors.ErrActorNotFound)
@@ -185,8 +177,7 @@ func TestRouter(t *testing.T) {
 		pause.For(time.Second)
 
 		// send a broadcast message to the router
-		message, _ := anypb.New(&testpb.TestLog{Text: "msg"})
-		err = Tell(ctx, router, &goaktpb.Broadcast{Message: message})
+		err = Tell(ctx, router, NewBroadcast(&testpb.TestLog{Text: "msg"}))
 		require.NoError(t, err)
 
 		pause.For(time.Second)
@@ -203,7 +194,9 @@ func TestRouter(t *testing.T) {
 		reply, err := Ask(ctx, workerOneRef, new(testpb.TestGetCount), time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
-		assert.True(t, proto.Equal(expected, reply))
+		actual, ok := reply.(*testpb.TestCount)
+		require.True(t, ok)
+		assert.True(t, proto.Equal(expected, actual))
 
 		assert.NoError(t, system.Stop(ctx))
 	})
@@ -244,27 +237,22 @@ func TestRouter(t *testing.T) {
 		require.True(t, ok)
 		require.NotNil(t, workerOneRef)
 
-		require.NoError(t, workerOneRef.Tell(ctx, router, &goaktpb.PanicSignal{
-			Message:   &anypb.Any{},
-			Reason:    "test panic signal",
-			Timestamp: timestamppb.Now(),
-		}))
+		require.NoError(t, workerOneRef.Tell(ctx, router, NewPanicSignal(&anypb.Any{}, "test panic signal", time.Now())))
 
 		pause.For(time.Second)
 
 		// send a broadcast message to the router
-		message, _ := anypb.New(&testpb.TestLog{Text: "msg"})
-		err = Tell(ctx, router, &goaktpb.Broadcast{Message: message})
+		err = Tell(ctx, router, NewBroadcast(&testpb.TestLog{Text: "msg"}))
 		require.NoError(t, err)
 
 		pause.For(time.Second)
 		require.False(t, router.IsRunning())
 
-		var items []*goaktpb.Deadletter
+		var items []*Deadletter
 		for message := range consumer.Iterator() {
 			payload := message.Payload()
 			// only listening to deadletter
-			deadletter, ok := payload.(*goaktpb.Deadletter)
+			deadletter, ok := payload.(*Deadletter)
 			if ok {
 				items = append(items, deadletter)
 			}
@@ -301,8 +289,7 @@ func TestRouter(t *testing.T) {
 		pause.For(time.Second)
 
 		// send a broadcast message to the router
-		message, _ := anypb.New(&testpb.TestLog{Text: "msg"})
-		err = Tell(ctx, router, &goaktpb.Broadcast{Message: message})
+		err = Tell(ctx, router, NewBroadcast(&testpb.TestLog{Text: "msg"}))
 		require.NoError(t, err)
 
 		pause.For(time.Second)
@@ -319,7 +306,9 @@ func TestRouter(t *testing.T) {
 		reply, err := Ask(ctx, workerOneRef, new(testpb.TestGetCount), time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
-		assert.True(t, proto.Equal(expected, reply))
+		actual, ok := reply.(*testpb.TestCount)
+		require.True(t, ok)
+		assert.True(t, proto.Equal(expected, actual))
 
 		assert.NoError(t, system.Stop(ctx))
 	})
@@ -352,8 +341,7 @@ func TestRouter(t *testing.T) {
 
 		// send a broadcast message to the router
 		summation := &testpb.TestSum{A: 10, B: 20}
-		message, _ := anypb.New(summation)
-		err = summationActor.Tell(ctx, router, &goaktpb.Broadcast{Message: message})
+		err = summationActor.Tell(ctx, router, NewBroadcast(summation))
 		require.NoError(t, err)
 
 		expected := &testpb.TestSumResult{Result: 30}
@@ -401,8 +389,7 @@ func TestRouter(t *testing.T) {
 
 		// send a broadcast message to the router
 		summation := &testpb.TestSum{A: 10, B: 20}
-		message, _ := anypb.New(summation)
-		err = summationActor.Tell(ctx, router, &goaktpb.Broadcast{Message: message})
+		err = summationActor.Tell(ctx, router, NewBroadcast(summation))
 		require.NoError(t, err)
 
 		pause.For(3 * time.Second)
@@ -411,7 +398,9 @@ func TestRouter(t *testing.T) {
 		reply, err := Ask(ctx, summationActor, new(testpb.TestGetSumResult), time.Second)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
-		assert.True(t, proto.Equal(expected, reply))
+		actual, ok := reply.(*testpb.TestSumResult)
+		require.True(t, ok)
+		assert.True(t, proto.Equal(expected, actual))
 
 		assert.NoError(t, system.Stop(ctx))
 	})
@@ -444,8 +433,7 @@ func TestRouter(t *testing.T) {
 
 		// send a broadcast message to the router
 		summation := &testpb.TestSum{A: 10, B: 20}
-		message, _ := anypb.New(summation)
-		err = summationActor.Tell(ctx, router, &goaktpb.Broadcast{Message: message})
+		err = summationActor.Tell(ctx, router, NewBroadcast(summation))
 		require.NoError(t, err)
 
 		require.True(t, probe.WaitForFailure(5*time.Second), "expected status failure")
@@ -481,8 +469,7 @@ func TestRouter(t *testing.T) {
 		pause.For(time.Second)
 
 		summation := &testpb.TestSum{A: 5, B: 7}
-		message, _ := anypb.New(summation)
-		err = summationActor.Tell(ctx, router, &goaktpb.Broadcast{Message: message})
+		err = summationActor.Tell(ctx, router, NewBroadcast(summation))
 		require.NoError(t, err)
 
 		require.True(t, probe.WaitForFailure(5*time.Second), "expected status failure due to routee errors")
@@ -519,8 +506,7 @@ func TestRouter(t *testing.T) {
 
 		// send a broadcast message to the router
 		summation := &testpb.TestSum{A: 10, B: 20, Delay: durationpb.New(3 * time.Second)}
-		message, _ := anypb.New(summation)
-		err = pid.Tell(ctx, router, &goaktpb.Broadcast{Message: message})
+		err = pid.Tell(ctx, router, NewBroadcast(summation))
 		require.NoError(t, err)
 
 		pause.For(3 * time.Second)
@@ -556,8 +542,7 @@ func TestRouter(t *testing.T) {
 
 		pause.For(time.Second)
 
-		message, _ := anypb.New(&testpb.TestSum{A: 1, B: 2})
-		err = pid.Tell(ctx, router, &goaktpb.Broadcast{Message: message})
+		err = pid.Tell(ctx, router, NewBroadcast(&testpb.TestSum{A: 1, B: 2}))
 		require.NoError(t, err)
 
 		require.True(t, probe.WaitForFailure(5*time.Second), "expected status failure due to exhausted deadline")
@@ -658,8 +643,7 @@ func TestRouter(t *testing.T) {
 		pause.For(time.Second)
 
 		// send a broadcast message to the router
-		message, _ := anypb.New(&testpb.TestLog{Text: "msg"})
-		err = Tell(ctx, router, &goaktpb.Broadcast{Message: message})
+		err = Tell(ctx, router, NewBroadcast(&testpb.TestLog{Text: "msg"}))
 		require.NoError(t, err)
 
 		pause.For(2 * time.Second)
@@ -701,8 +685,7 @@ func TestRouter(t *testing.T) {
 		pause.For(time.Second)
 
 		// send a broadcast message to the router
-		message, _ := anypb.New(&testpb.TestLog{Text: "msg"})
-		err = Tell(ctx, router, &goaktpb.Broadcast{Message: message})
+		err = Tell(ctx, router, NewBroadcast(&testpb.TestLog{Text: "msg"}))
 		require.NoError(t, err)
 
 		pause.For(2 * time.Second)
@@ -744,8 +727,7 @@ func TestRouter(t *testing.T) {
 		pause.For(time.Second)
 
 		// send a broadcast message to the router
-		message, _ := anypb.New(&testpb.TestLog{Text: "msg"})
-		err = Tell(ctx, router, &goaktpb.Broadcast{Message: message})
+		err = Tell(ctx, router, NewBroadcast(&testpb.TestLog{Text: "msg"}))
 		require.NoError(t, err)
 
 		pause.For(2 * time.Second)
@@ -787,8 +769,7 @@ func TestRouter(t *testing.T) {
 		pause.For(time.Second)
 
 		// send a broadcast message to the router
-		message, _ := anypb.New(&testpb.TestLog{Text: "msg"})
-		err = Tell(ctx, router, &goaktpb.Broadcast{Message: message})
+		err = Tell(ctx, router, NewBroadcast(&testpb.TestLog{Text: "msg"}))
 		require.NoError(t, err)
 
 		waitForRouteeCount(t, ctx, router, 0)
@@ -829,25 +810,19 @@ func TestRouter(t *testing.T) {
 		pause.For(time.Second)
 
 		// scale up the router by 3 (delta)
-		err = system.NoSender().Tell(ctx, router, &goaktpb.AdjustRouterPoolSize{
-			PoolSize: 3,
-		})
+		err = system.NoSender().Tell(ctx, router, NewAdjustRouterPoolSize(3))
 		require.NoError(t, err)
 
 		waitForRouteeCount(t, ctx, router, 4)
 
 		// scale down the router by 2 (delta)
-		err = system.NoSender().Tell(ctx, router, &goaktpb.AdjustRouterPoolSize{
-			PoolSize: -2,
-		})
+		err = system.NoSender().Tell(ctx, router, NewAdjustRouterPoolSize(-2))
 		require.NoError(t, err)
 
 		waitForRouteeCount(t, ctx, router, 2)
 
 		// scale down the router by 3 (delta)
-		err = system.NoSender().Tell(ctx, router, &goaktpb.AdjustRouterPoolSize{
-			PoolSize: -3,
-		})
+		err = system.NoSender().Tell(ctx, router, NewAdjustRouterPoolSize(-3))
 		require.NoError(t, err)
 
 		waitForRouteeCount(t, ctx, router, 0)
@@ -859,14 +834,14 @@ func TestRouter(t *testing.T) {
 func waitForRouteeCount(t *testing.T, ctx context.Context, router *PID, expected int) {
 	t.Helper()
 	require.Eventually(t, func() bool {
-		response, err := Ask(ctx, router, new(goaktpb.GetRoutees), time.Second)
+		response, err := Ask(ctx, router, new(GetRoutees), time.Second)
 		if err != nil || response == nil {
 			return false
 		}
-		routeesResponse, ok := response.(*goaktpb.Routees)
+		routeesResponse, ok := response.(*Routees)
 		if !ok || routeesResponse == nil {
 			return false
 		}
-		return len(routeesResponse.GetNames()) == expected
+		return len(routeesResponse.Names()) == expected
 	}, 5*time.Second, 100*time.Millisecond, "expected %d routees", expected)
 }

@@ -35,26 +35,26 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
 
-	"github.com/tochemey/goakt/v3/discovery"
-	gerrors "github.com/tochemey/goakt/v3/errors"
-	"github.com/tochemey/goakt/v3/internal/cluster"
-	"github.com/tochemey/goakt/v3/internal/internalpb"
-	"github.com/tochemey/goakt/v3/internal/pause"
-	"github.com/tochemey/goakt/v3/log"
-	mockcluster "github.com/tochemey/goakt/v3/mocks/cluster"
-	mockremote "github.com/tochemey/goakt/v3/mocks/remote"
-	"github.com/tochemey/goakt/v3/remote"
-	"github.com/tochemey/goakt/v3/test/data/testpb"
+	"github.com/tochemey/goakt/v4/discovery"
+	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/cluster"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
+	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/log"
+	mockcluster "github.com/tochemey/goakt/v4/mocks/cluster"
+	mockremote "github.com/tochemey/goakt/v4/mocks/remote"
+	"github.com/tochemey/goakt/v4/remote"
+	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
 // grainTestCtxKey is a custom type for context keys in grain tests (avoids SA1029 empty struct key).
 type grainTestCtxKey struct{}
 
-func newActivationTestSystem(t *testing.T, grain Grain, name string, register bool) (*actorSystem, *mockcluster.Cluster, *mockremote.Remoting, *GrainIdentity) {
+func newActivationTestSystem(t *testing.T, grain Grain, name string, register bool) (*actorSystem, *mockcluster.Cluster, *mockremote.Client, *GrainIdentity) {
 	t.Helper()
 
 	cl := mockcluster.NewCluster(t)
-	rem := mockremote.NewRemoting(t)
+	rem := mockremote.NewClient(t)
 	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 14000, RemotingPort: 15000}
 	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
 	if register {
@@ -105,7 +105,7 @@ func TestGrainIdentity_RemoteActivationOnDifferentPeer(t *testing.T) {
 	localPeer := &cluster.Peer{Host: "127.0.0.1", PeersPort: 14000, RemotingPort: 8080}
 
 	cl := mockcluster.NewCluster(t)
-	rem := mockremote.NewRemoting(t)
+	rem := mockremote.NewClient(t)
 	node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
 	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
 
@@ -141,7 +141,7 @@ func TestGrainIdentity_RemoteActivationOnDifferentPeer_WithBrotliCompression(t *
 	localPeer := &cluster.Peer{Host: "127.0.0.1", PeersPort: 14010, RemotingPort: 8085}
 
 	cl := mockcluster.NewCluster(t)
-	rem := mockremote.NewRemoting(t)
+	rem := mockremote.NewClient(t)
 	node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
 	actorSystem := MockSimpleClusterReadyActorSystem(rem, cl, node, remote.WithCompression(remote.BrotliCompression))
 
@@ -180,7 +180,7 @@ func TestGrainIdentity_RemoteActivationOnDifferentPeer_WithZstandardCompression(
 	localPeer := &cluster.Peer{Host: "127.0.0.1", PeersPort: 14010, RemotingPort: 8085}
 
 	cl := mockcluster.NewCluster(t)
-	rem := mockremote.NewRemoting(t)
+	rem := mockremote.NewClient(t)
 	node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
 	actorSystem := MockSimpleClusterReadyActorSystem(rem, cl, node, remote.WithCompression(remote.ZstdCompression))
 
@@ -219,7 +219,7 @@ func TestGrainIdentity_RemoteActivationOnDifferentPeer_WithGzipCompression(t *te
 	localPeer := &cluster.Peer{Host: "127.0.0.1", PeersPort: 14010, RemotingPort: 8085}
 
 	cl := mockcluster.NewCluster(t)
-	rem := mockremote.NewRemoting(t)
+	rem := mockremote.NewClient(t)
 	node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
 	actorSystem := MockSimpleClusterReadyActorSystem(rem, cl, node, remote.WithCompression(remote.GzipCompression))
 
@@ -257,7 +257,7 @@ func TestGrainIdentity_RemoteActivationErrorPropagates(t *testing.T) {
 	localPeer := &cluster.Peer{Host: "127.0.0.1", PeersPort: 16500, RemotingPort: 8181}
 
 	cl := mockcluster.NewCluster(t)
-	rem := mockremote.NewRemoting(t)
+	rem := mockremote.NewClient(t)
 	clientErr := errors.New("remote activate failed")
 	node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
 	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
@@ -293,7 +293,7 @@ func TestGrainIdentity_RemoteActivationWireEncodingError(t *testing.T) {
 	failErr := errors.New("dependency encode failure")
 
 	cl := mockcluster.NewCluster(t)
-	rem := mockremote.NewRemoting(t)
+	rem := mockremote.NewClient(t)
 	node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
 	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
 
@@ -639,7 +639,7 @@ func TestActivateGrainLocally(t *testing.T) {
 func TestFindActivationPeer_ErrorsWhenRoleMissingEverywhere(t *testing.T) {
 	ctx := t.Context()
 	cl := mockcluster.NewCluster(t)
-	rem := mockremote.NewRemoting(t)
+	rem := mockremote.NewClient(t)
 	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 14000, RemotingPort: 8080, Roles: []string{"api"}}
 	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
 
@@ -655,7 +655,7 @@ func TestFindActivationPeer_ErrorsWhenRoleMissingEverywhere(t *testing.T) {
 func TestAskGrain_ClusterFallbackAutoProvisions(t *testing.T) {
 	ctx := t.Context()
 	cl := mockcluster.NewCluster(t)
-	rem := mockremote.NewRemoting(t)
+	rem := mockremote.NewClient(t)
 	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 9003, RemotingPort: 9103}
 	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
 
@@ -860,7 +860,7 @@ func TestRemoting_RemoteActivateGrain_WithActorSystem(t *testing.T) {
 	err = sys.RegisterGrainKind(ctx, &MockGrain{})
 	require.NoError(t, err)
 
-	remoting := remote.NewRemoting()
+	remoting := remote.NewClient()
 
 	identity := newGrainIdentity(NewMockGrain(), "grain-activate")
 	err = remoting.RemoteActivateGrain(ctx, sys.Host(), sys.Port(), &remote.GrainRequest{
@@ -908,7 +908,7 @@ func TestRemoting_RemoteTellGrain_WithActorSystem(t *testing.T) {
 	err = sys.RegisterGrainKind(ctx, &MockGrain{})
 	require.NoError(t, err)
 
-	remoting := remote.NewRemoting()
+	remoting := remote.NewClient()
 
 	identity := newGrainIdentity(NewMockGrain(), "grain-tell")
 	for range 10 {
@@ -958,7 +958,7 @@ func TestRemoting_RemoteAskGrain_WithActorSystem(t *testing.T) {
 	err = sys.RegisterGrainKind(ctx, &MockGrain{})
 	require.NoError(t, err)
 
-	remoting := remote.NewRemoting()
+	remoting := remote.NewClient()
 
 	identity := newGrainIdentity(NewMockGrain(), "grain-ask")
 	resp, err := remoting.RemoteAskGrain(ctx, sys.Host(), sys.Port(), &remote.GrainRequest{
@@ -968,9 +968,9 @@ func TestRemoting_RemoteAskGrain_WithActorSystem(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
-	actual := new(testpb.Reply)
-	require.NoError(t, resp.UnmarshalTo(actual))
-	assert.Equal(t, "received message", actual.Content)
+	actual, ok := resp.(*testpb.Reply)
+	require.True(t, ok)
+	assert.Equal(t, "received message", actual.GetContent())
 
 	grains := sys.Grains(ctx, time.Second)
 	found := false
@@ -992,7 +992,7 @@ func TestRemoting_RemoteAskGrain_WithActorSystem(t *testing.T) {
 func TestSendToGrainOwner_ErrorsWhenOwnerMissing(t *testing.T) {
 	ctx := t.Context()
 	cl := mockcluster.NewCluster(t)
-	rem := mockremote.NewRemoting(t)
+	rem := mockremote.NewClient(t)
 	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 9012, RemotingPort: 9112}
 	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
 

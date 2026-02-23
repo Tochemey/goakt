@@ -29,9 +29,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 
-	goakt "github.com/tochemey/goakt/v3/actor"
-	"github.com/tochemey/goakt/v3/discovery"
-	"github.com/tochemey/goakt/v3/eventstream"
+	goakt "github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/discovery"
+	"github.com/tochemey/goakt/v4/eventstream"
 )
 
 // TestNode represents a test instance of an actor system cluster node.
@@ -118,7 +118,7 @@ func (x TestNode) Subscribe() eventstream.Subscriber {
 // Kill stops a given actor in the local actor system.
 func (x TestNode) Kill(ctx context.Context, name string) {
 	require.True(x.testingT, x.created.Load(), "cannot kill actor before the test node is created")
-	pid, err := x.actorSystem.LocalActor(name)
+	pid, err := x.actorSystem.ActorOf(ctx, name)
 	require.NoError(x.testingT, err)
 	require.NotNil(x.testingT, pid)
 	require.False(x.testingT, pid.Equals(x.actorSystem.NoSender()), "cannot kill actor with no address")

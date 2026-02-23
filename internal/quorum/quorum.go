@@ -25,7 +25,7 @@ package quorum
 import (
 	"errors"
 
-	gerrors "github.com/tochemey/goakt/v3/errors"
+	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/olric"
 )
 
