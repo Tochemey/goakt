@@ -331,7 +331,7 @@ func (x *topicActor) handleTopicMessage(ctx *ReceiveContext) {
 		}
 
 		messageID := topicMessage.GetId()
-		senderID := ctx.SenderAddress().String()
+		senderID := ctx.Sender().ID()
 
 		id := key{
 			senderID:  senderID,

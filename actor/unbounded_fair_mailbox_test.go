@@ -51,7 +51,7 @@ func TestUnboundedFairMailboxNoStarvation(t *testing.T) {
 	for range 51 {
 		msg := mailbox.Dequeue()
 		require.NotNil(t, msg)
-		sender := msg.SenderAddress()
+		sender := msg.Sender().Address()
 		if sender.Equals(quiet) {
 			seenQuiet = true
 			break
@@ -182,7 +182,7 @@ func TestUnboundedFairMailboxPreservesPerSenderOrdering(t *testing.T) {
 	for range enqueueSeq {
 		msg := mailbox.Dequeue()
 		require.NotNil(t, msg)
-		sender := msg.SenderAddress().String()
+		sender := msg.Sender().Address().String()
 		payload := string(msg.Message().(*anypb.Any).Value)
 		got[sender] = append(got[sender], payload)
 	}

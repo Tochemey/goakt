@@ -27,7 +27,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/tochemey/goakt/v4/address"
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/log"
@@ -657,27 +656,6 @@ func (rctx *ReceiveContext) ReinstateNamed(actorName string) {
 	if err := recipient.ReinstateNamed(ctx, actorName); err != nil {
 		rctx.Err(err)
 	}
-}
-
-// SenderAddress returns the location-transparent address of the message sender.
-//
-// Works for both local and remote senders. Returns address.NoSender() when
-// the sender is unknown or system-generated.
-func (rctx *ReceiveContext) SenderAddress() *address.Address {
-	if rctx.sender == nil {
-		return address.NoSender()
-	}
-	return rctx.sender.Address()
-}
-
-// ReceiverAddress returns the address of the current (receiver) actor.
-//
-// Returns address.NoSender() only in rare internal states where Self is nil.
-func (rctx *ReceiveContext) ReceiverAddress() *address.Address {
-	if rctx.self == nil {
-		return address.NoSender()
-	}
-	return rctx.self.Address()
 }
 
 // Dependencies returns a slice containing all dependencies currently registered
