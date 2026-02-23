@@ -8,8 +8,7 @@
 [![Awesome](https://awesome.re/badge.svg)](https://github.com/avelino/awesome-go)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/9248/badge)](https://www.bestpractices.dev/projects/9248)
 
-Distributed [Go](https://go.dev/) actor framework to build a reactive and distributed system in golang using
-_**protocol buffers**_ as actor messages.
+Distributed [Go](https://go.dev/) actor framework to build a reactive and distributed system in Go with typed actor messages. From **v4.0.0** onward, any type can be used as actor messages—see [V400.md](./V400.md) for details. The current stable release (v3.x) uses protocol buffers.
 
 GoAkt is highly scalable and available when running in cluster mode. It comes with the necessary features require to
 build a distributed actor-based system without sacrificing performance and reliability. With GoAkt, you can instantly create a fast, scalable, distributed system
@@ -18,9 +17,11 @@ across a cluster of computers.
 If you are not familiar with the actor model, the blog post from Brian Storti [here](https://www.brianstorti.com/the-actor-model/) is an excellent and short introduction to the actor model.
 Also, check the reference section at the end of the post for more material regarding the actor model.
 
+> **Note:** The `main` branch is currently the development branch for ongoing work toward **v4.0.0**. See [V400.md](./V400.md) for the roadmap and planned changes. Bug fixes for **v3.x** are carried in the `release/v3.14` branch.
+
 ## ✨ Features
 
-- **Actor Model**: Build concurrent and distributed systems using the actor model with typed protobuf messages.
+- **Actor Model**: Build concurrent and distributed systems using the actor model with typed messages (any type from v4.0.0—see [V400.md](./V400.md); v3.x uses protocol buffers).
 - **Messaging**: Tell/Ask APIs for fire-and-forget or request/response flows.
 - **Reentrancy**: Reentrancy-enabled async request messaging with configurable modes and per-call overrides.
 - **Supervision**: One-for-one/one-for-all strategies, directives, and retry windows for fault tolerance.
