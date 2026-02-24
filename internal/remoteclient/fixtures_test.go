@@ -20,13 +20,34 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package remote
+package remoteclient
 
 import (
 	"context"
 	"errors"
 	nethttp "net/http"
 )
+
+// nonProtoMsg is an arbitrary type with no registered serializer.
+type nonProtoMsg struct{ value string }
+
+// testInterface and nonProtoImpl are used to verify interface-based serializer
+// registration and forwarding via ClientSerializerOptions.
+type testInterface interface{ testMarker() }
+
+type nonProtoImpl struct{}
+
+func (nonProtoImpl) testMarker() {}
+
+type mockPropagator struct{}
+
+func (mockPropagator) Inject(context.Context, nethttp.Header) error {
+	return nil
+}
+
+func (mockPropagator) Extract(ctx context.Context, _ nethttp.Header) (context.Context, error) {
+	return ctx, nil
+}
 
 // errInjectPropagator is a ContextPropagator whose Inject always returns an error.
 type errInjectPropagator struct{}
@@ -48,15 +69,5 @@ func (h headerPropagator) Inject(_ context.Context, headers nethttp.Header) erro
 }
 
 func (h headerPropagator) Extract(ctx context.Context, _ nethttp.Header) (context.Context, error) {
-	return ctx, nil
-}
-
-type mockPropagator struct{}
-
-func (mockPropagator) Inject(context.Context, nethttp.Header) error {
-	return nil
-}
-
-func (mockPropagator) Extract(ctx context.Context, _ nethttp.Header) (context.Context, error) {
 	return ctx, nil
 }

@@ -23,8 +23,6 @@
 package remote
 
 import (
-	"context"
-	nethttp "net/http"
 	"testing"
 	"time"
 
@@ -68,16 +66,6 @@ func TestOption(t *testing.T) {
 			assert.Equal(t, tc.expected, config)
 		})
 	}
-}
-
-type mockPropagator struct{}
-
-func (mockPropagator) Inject(context.Context, nethttp.Header) error {
-	return nil
-}
-
-func (mockPropagator) Extract(ctx context.Context, _ nethttp.Header) (context.Context, error) {
-	return ctx, nil
 }
 
 func TestWithContextPropagator(t *testing.T) {

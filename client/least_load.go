@@ -57,7 +57,7 @@ func (x *LeastLoad) Next() *Node {
 	x.locker.Lock()
 	defer x.locker.Unlock()
 	slices.SortStableFunc(x.nodes, func(a, b *Node) int {
-		return cmp.Compare(a.Weight(), b.Weight())
+		return cmp.Compare(a.getWeight(), b.getWeight())
 	})
 	return x.nodes[0]
 }

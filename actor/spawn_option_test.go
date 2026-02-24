@@ -30,7 +30,6 @@ import (
 
 	"github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/extension"
-	"github.com/tochemey/goakt/v4/internal/pointer"
 	"github.com/tochemey/goakt/v4/passivation"
 	"github.com/tochemey/goakt/v4/reentrancy"
 	"github.com/tochemey/goakt/v4/supervisor"
@@ -99,7 +98,23 @@ func TestSpawnOption(t *testing.T) {
 		config := &spawnConfig{}
 		option := WithRole("api")
 		option.Apply(config)
-		require.Equal(t, &spawnConfig{role: pointer.To("api")}, config)
+		require.Equal(t, &spawnConfig{role: new("api")}, config)
+	})
+
+	t.Run("spawn option with host and port", func(t *testing.T) {
+		config := &spawnConfig{}
+		option := WithHostAndPort("localhost", 8080)
+		option.Apply(config)
+		require.Equal(t, &spawnConfig{host: new("localhost"), port: new(8080)}, config)
+	})
+
+	t.Run("spawn option with host and port validation", func(t *testing.T) {
+		config := &spawnConfig{}
+		option := WithHostAndPort("localhost", -1)
+		option.Apply(config)
+		err := config.Validate()
+		require.Error(t, err)
+		require.ErrorIs(t, err, errors.ErrInvalidTCPAddress)
 	})
 }
 

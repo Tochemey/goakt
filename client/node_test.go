@@ -23,12 +23,10 @@
 package client
 
 import (
-	"crypto/tls"
 	"net"
 	"strconv"
 	"testing"
 
-	"github.com/kapetan-io/tackle/autotls"
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
 
@@ -38,22 +36,51 @@ import (
 func TestNode(t *testing.T) {
 	ports := dynaport.Get(1)
 	address := net.JoinHostPort("127.0.0.1", strconv.Itoa(ports[0]))
-	// AutoGenerate TLS certs
-	conf := autotls.Config{
-		AutoTLS:            true,
-		ClientAuth:         tls.RequireAndVerifyClientCert,
-		InsecureSkipVerify: false,
-	}
-	require.NoError(t, autotls.Setup(&conf))
 
-	node := NewNode(address, WithWeight(10), WithRemoting(remote.NewClient(remote.WithClientTLS(conf.ClientTLS))))
+	node := NewNode(address, WithWeight(10), WithRemoteConfig(remote.NewConfig("127.0.0.1", ports[0])))
 	require.NotNil(t, node)
-	require.Equal(t, address, node.Address())
-	require.Exactly(t, float64(10), node.Weight())
+	require.Equal(t, address, node.getAddress())
+	require.Exactly(t, float64(10), node.getWeight())
 	require.NoError(t, node.Validate())
-	require.NotNil(t, node.Remoting())
-	host, port := node.HostAndPort()
+	require.NotNil(t, node.remoteClient())
+	host, port := node.hostAndPort()
 	require.Equal(t, "127.0.0.1", host)
 	require.Equal(t, ports[0], port)
-	node.Free()
+	node.close()
 }
+
+func TestWithRemoteConfigForwardsSerializers(t *testing.T) {
+	t.Run("user-defined serializer is available on the node remoting client", func(t *testing.T) {
+		custom := &nodeTestSerializer{}
+		config := remote.NewConfig("127.0.0.1", 0,
+			remote.WithSerializers(new(nodeTestMsg), custom),
+		)
+
+		ports := dynaport.Get(1)
+		address := net.JoinHostPort("127.0.0.1", strconv.Itoa(ports[0]))
+		node := NewNode(address, WithRemoteConfig(config))
+
+		s := node.remoteClient().Serializer(&nodeTestMsg{})
+		require.NotNil(t, s, "expected user-registered serializer to be forwarded to the node client")
+		require.Same(t, custom, s)
+	})
+	t.Run("no user serializers leaves client with proto default only", func(t *testing.T) {
+		config := remote.NewConfig("127.0.0.1", 0)
+		ports := dynaport.Get(1)
+		address := net.JoinHostPort("127.0.0.1", strconv.Itoa(ports[0]))
+		node := NewNode(address, WithRemoteConfig(config))
+
+		// Unknown type returns nil — only the proto.Message default is registered.
+		s := node.remoteClient().Serializer(&nodeTestMsg{})
+		require.Nil(t, s)
+	})
+}
+
+// nodeTestMsg is a local concrete type used to verify serializer forwarding.
+type nodeTestMsg struct{}
+
+// nodeTestSerializer is a minimal no-op Serializer for test assertions.
+type nodeTestSerializer struct{}
+
+func (nodeTestSerializer) Serialize(any) ([]byte, error)   { return nil, nil }
+func (nodeTestSerializer) Deserialize([]byte) (any, error) { return nil, nil }

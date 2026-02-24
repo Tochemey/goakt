@@ -38,6 +38,7 @@ import (
 	"github.com/flowchartsman/retry"
 	"github.com/google/uuid"
 
+	"github.com/tochemey/goakt/v4/address"
 	"github.com/tochemey/goakt/v4/datacenter"
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/cluster"
@@ -76,6 +77,38 @@ import (
 func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts ...SpawnOption) (*PID, error) {
 	if !x.Running() {
 		return nil, gerrors.ErrActorSystemNotStarted
+	}
+
+	// first we need to create the spawn configuration
+	config := newSpawnConfig(opts...)
+	// TODO: should we validate the spawn configuration here because configPID does it as well?
+	if err := config.Validate(); err != nil {
+		return nil, err
+	}
+
+	if config.host != nil || config.port != nil {
+		// check whether remoting is enabled
+		if !x.remotingEnabled.Load() {
+			return nil, gerrors.ErrRemotingDisabled
+		}
+
+		// we are spawning the actor on a remote node
+		if err := x.remoting.RemoteSpawn(ctx, *config.host, *config.port, &remote.SpawnRequest{
+			Name:                name,
+			Kind:                types.Name(actor),
+			Relocatable:         config.relocatable,
+			PassivationStrategy: config.passivationStrategy,
+			Dependencies:        config.dependencies,
+			EnableStashing:      config.enableStash,
+			Reentrancy:          config.reentrancy,
+			Supervisor:          config.supervisor,
+			Role:                config.role,
+		}); err != nil {
+			return nil, err
+		}
+
+		addr := address.New(name, x.name, *config.host, *config.port)
+		return newRemotePID(addr, x.remoting), nil
 	}
 
 	// check some preconditions
@@ -258,10 +291,7 @@ func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opt
 		Dependencies:        config.dependencies,
 		EnableStashing:      config.enableStash,
 		Reentrancy:          config.reentrancy,
-	}
-
-	if config.supervisor != nil {
-		request.Supervisor = config.supervisor
+		Supervisor:          config.supervisor,
 	}
 
 	return x.remoting.RemoteSpawn(ctx, peer.Host, peer.RemotingPort, request)

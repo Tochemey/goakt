@@ -57,7 +57,10 @@ type Config struct {
 	// serializers holds all per-type and per-interface serializer entries
 	// evaluated in registration order by [Config.Serializer].
 	// Populated only during construction; never mutated afterwards.
-	serializers []ifaceEntry
+	serializers  map[reflect.Type]Serializer
+	maxIdleConns int
+	dialTimeout  time.Duration
+	keepAlive    time.Duration
 }
 
 var _ validation.Validator = (*Config)(nil)
@@ -77,14 +80,14 @@ func NewConfig(bindAddr string, bindPort int, opts ...Option) *Config {
 		bindAddr:        bindAddr,
 		bindPort:        bindPort,
 		compression:     ZstdCompression,
-		serializers:     make([]ifaceEntry, 0, 4),
+		serializers:     make(map[reflect.Type]Serializer, 10),
+		maxIdleConns:    8,                // 8 pooled connections per endpoint
+		dialTimeout:     5 * time.Second,  // 5s dial timeout
+		keepAlive:       15 * time.Second, // 15s TCP keep-alive
 	}
 
 	// Register the default proto serializer for all proto.Message implementations.
-	cfg.serializers = append(cfg.serializers, ifaceEntry{
-		iface:      reflect.TypeOf((*proto.Message)(nil)).Elem(),
-		serializer: NewProtoSerializer(),
-	})
+	cfg.serializers[reflect.TypeOf((*proto.Message)(nil)).Elem()] = NewProtoSerializer()
 
 	// apply the options
 	for _, opt := range opts {
@@ -104,14 +107,14 @@ func DefaultConfig() *Config {
 		bindAddr:        "127.0.0.1",
 		bindPort:        0,
 		compression:     ZstdCompression,
-		serializers:     make([]ifaceEntry, 0, 4),
+		serializers:     make(map[reflect.Type]Serializer, 10),
+		maxIdleConns:    8,                // 8 pooled connections per endpoint
+		dialTimeout:     5 * time.Second,  // 5s dial timeout
+		keepAlive:       15 * time.Second, // 15s TCP keep-alive
 	}
 
 	// Register the default proto serializer for all proto.Message implementations.
-	cfg.serializers = append(cfg.serializers, ifaceEntry{
-		iface:      reflect.TypeOf((*proto.Message)(nil)).Elem(),
-		serializer: NewProtoSerializer(),
-	})
+	cfg.serializers[reflect.TypeOf((*proto.Message)(nil)).Elem()] = NewProtoSerializer()
 
 	return cfg
 }
@@ -177,21 +180,38 @@ func (x *Config) Serializer(msg any) Serializer {
 	if msg == nil {
 		return nil
 	}
+
 	msgType := reflect.TypeOf(msg)
 	if msgType == nil {
 		return nil
 	}
-	for i := range x.serializers {
-		entry := &x.serializers[i]
-		if entry.iface.Kind() == reflect.Interface {
-			if msgType.Implements(entry.iface) {
-				return entry.serializer
+
+	for typ, serializer := range x.serializers {
+		if typ.Kind() == reflect.Interface {
+			if msgType.Implements(typ) {
+				return serializer
 			}
-		} else if msgType == entry.iface {
-			return entry.serializer
+		} else if msgType == typ {
+			return serializer
 		}
 	}
+
 	return nil
+}
+
+// Serializers returns a copy of the registered serializer map keyed by
+// reflect.Type. The map contains all entries added via [WithSerializers],
+// including the default [proto.Message] entry registered by [NewConfig] and
+// [DefaultConfig].
+//
+// The returned map is a defensive copy; callers may iterate or read it freely
+// without affecting the Config.
+func (x *Config) Serializers() map[reflect.Type]Serializer {
+	result := make(map[reflect.Type]Serializer, len(x.serializers))
+	for k, v := range x.serializers {
+		result[k] = v
+	}
+	return result
 }
 
 // Sanitize the configuration
@@ -206,6 +226,21 @@ func (x *Config) Sanitize() error {
 	return nil
 }
 
+// MaxIdleConns returns the max idle connections
+func (x *Config) MaxIdleConns() int {
+	return x.maxIdleConns
+}
+
+// DialTimeout returns the dial timeout
+func (x *Config) DialTimeout() time.Duration {
+	return x.dialTimeout
+}
+
+// KeepAlive returns the keep alive
+func (x *Config) KeepAlive() time.Duration {
+	return x.keepAlive
+}
+
 func (x *Config) Validate() error {
 	return validation.
 		New(validation.FailFast()).
@@ -215,5 +250,8 @@ func (x *Config) Validate() error {
 		AddAssertion(x.readIdleTimeout >= 0, "invalid server read idle timeout").
 		AddAssertion(x.writeTimeout >= 0, "invalid server write timeout").
 		AddAssertion(len(x.serializers) > 0, "at least one serializer is required").
+		AddAssertion(x.maxIdleConns > 0, "maxIdleConns must be greater than 0").
+		AddAssertion(x.dialTimeout > 0, "dialTimeout must be greater than 0").
+		AddAssertion(x.keepAlive > 0, "keepAlive must be greater than 0").
 		Validate()
 }

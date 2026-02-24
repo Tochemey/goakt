@@ -28,6 +28,7 @@ import (
 	"sync"
 
 	"github.com/tochemey/goakt/v4/internal/locker"
+	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/internal/validation"
 	"github.com/tochemey/goakt/v4/remote"
 )
@@ -41,10 +42,20 @@ func WithWeight(weight float64) NodeOption {
 	}
 }
 
-// WithRemoting sets the remoting instance to be used by the node
-func WithRemoting(remoting remote.Client) NodeOption {
+// WithRemoteConfig sets the remote config to be used by the node
+func WithRemoteConfig(config *remote.Config) NodeOption {
 	return func(n *Node) {
-		n.remoting = remoting
+		opts := []remoteclient.ClientOption{
+			remoteclient.WithClientCompression(config.Compression()),
+			remoteclient.WithClientIdleTimeout(config.IdleTimeout()),
+			remoteclient.WithClientMaxIdleConns(config.MaxIdleConns()),
+			remoteclient.WithClientDialTimeout(config.DialTimeout()),
+			remoteclient.WithClientKeepAlive(config.KeepAlive()),
+		}
+		// Forward user-defined serializers so the node's outbound client uses
+		// the same serializers as the server-side Config.
+		opts = append(opts, remoteclient.ClientSerializerOptions(config)...)
+		n.remoting = remoteclient.NewClient(opts...)
 	}
 }
 
@@ -55,7 +66,7 @@ type Node struct {
 	weight  float64
 	mutex   sync.RWMutex
 
-	remoting remote.Client
+	remoting remoteclient.Client
 }
 
 // NewNode creates an instance of Node
@@ -63,7 +74,7 @@ type Node struct {
 func NewNode(address string, opts ...NodeOption) *Node {
 	node := &Node{
 		address:  address,
-		remoting: remote.NewClient(),
+		remoting: remoteclient.NewClient(),
 		weight:   0,
 	}
 
@@ -84,16 +95,16 @@ func (n *Node) SetWeight(weight float64) {
 	n.mutex.Unlock()
 }
 
-// Address returns the node address
-func (n *Node) Address() string {
+// getAddress returns the node address
+func (n *Node) getAddress() string {
 	n.mutex.RLock()
 	address := n.address
 	n.mutex.RUnlock()
 	return address
 }
 
-// Weight returns the node weight
-func (n *Node) Weight() float64 {
+// getWeight returns the node weight
+func (n *Node) getWeight() float64 {
 	n.mutex.RLock()
 	load := n.weight
 	n.mutex.RUnlock()
@@ -101,25 +112,25 @@ func (n *Node) Weight() float64 {
 }
 
 func (n *Node) Validate() error {
-	address := n.Address()
+	address := n.getAddress()
 	return validation.NewTCPAddressValidator(address).Validate()
 }
 
-// Remoting returns the remoting instance
-func (n *Node) Remoting() remote.Client {
+// remoteClient returns the remoting instance
+func (n *Node) remoteClient() remoteclient.Client {
 	n.mutex.RLock()
 	remoting := n.remoting
 	n.mutex.RUnlock()
 	return remoting
 }
 
-// Free closes the underlying remoting client connections of the given node
-func (n *Node) Free() {
-	n.Remoting().Close()
+// close closes the underlying remoting client connections of the given node
+func (n *Node) close() {
+	n.remoteClient().Close()
 }
 
-// HostAndPort returns the node host and port
-func (n *Node) HostAndPort() (string, int) {
+// hostAndPort returns the node host and port
+func (n *Node) hostAndPort() (string, int) {
 	n.mutex.RLock()
 	host, p, _ := net.SplitHostPort(n.address)
 	port, _ := strconv.Atoi(p)

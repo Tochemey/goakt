@@ -36,6 +36,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/codec"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
+	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/internal/slices"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/remote"
@@ -44,7 +45,7 @@ import (
 // relocator is a system actor that helps rebalance cluster
 // when the cluster topology changes
 type relocator struct {
-	remoting remote.Client
+	remoting remoteclient.Client
 	pid      *PID
 	logger   log.Logger
 }
@@ -53,7 +54,7 @@ type relocator struct {
 var _ Actor = (*relocator)(nil)
 
 // newRelocator creates an instance of relocator
-func newRelocator(remoting remote.Client) *relocator {
+func newRelocator(remoting remoteclient.Client) *relocator {
 	return &relocator{
 		remoting: remoting,
 	}

@@ -118,7 +118,7 @@ func New(ctx context.Context, nodes []*Node, opts ...Option) (*Client, error) {
 func (x *Client) Close() {
 	x.locker.Lock()
 	for _, node := range x.nodes {
-		node.Free()
+		node.close()
 	}
 	x.nodes = make([]*Node, 0)
 	if x.refreshInterval > 0 {
@@ -143,11 +143,11 @@ func (x *Client) Kinds(ctx context.Context) ([]string, error) {
 	defer x.locker.Unlock()
 
 	node := nextNode(x.balancer)
-	host, port := node.HostAndPort()
-	client := node.Remoting().NetClient(host, port)
+	host, port := node.hostAndPort()
+	client := node.remoteClient().NetClient(host, port)
 
 	request := &internalpb.GetKindsRequest{
-		NodeAddress: node.Address(),
+		NodeAddress: node.getAddress(),
 	}
 
 	resp, err := client.SendProto(ctx, request)
@@ -187,8 +187,8 @@ func (x *Client) Spawn(ctx context.Context, spawnRequest *remote.SpawnRequest) (
 	x.locker.Lock()
 	node := nextNode(x.balancer)
 	x.locker.Unlock()
-	remoteHost, remotePort := node.HostAndPort()
-	return node.Remoting().RemoteSpawn(ctx, remoteHost, remotePort, spawnRequest)
+	remoteHost, remotePort := node.hostAndPort()
+	return node.remoteClient().RemoteSpawn(ctx, remoteHost, remotePort, spawnRequest)
 }
 
 // SpawnBalanced creates and starts an actor with the specified balancing strategy.
@@ -210,9 +210,9 @@ func (x *Client) SpawnBalanced(ctx context.Context, spawnRequest *remote.SpawnRe
 	balancer := getBalancer(strategy)
 	balancer.Set(x.nodes...)
 	node := nextNode(balancer)
-	remoteHost, remotePort := node.HostAndPort()
+	remoteHost, remotePort := node.hostAndPort()
 	x.locker.Unlock()
-	return node.Remoting().RemoteSpawn(ctx, remoteHost, remotePort, spawnRequest)
+	return node.remoteClient().RemoteSpawn(ctx, remoteHost, remotePort, spawnRequest)
 }
 
 // ReSpawn restarts a previously spawned actor.
@@ -235,8 +235,8 @@ func (x *Client) ReSpawn(ctx context.Context, actorName string) (err error) {
 	x.locker.Lock()
 	node := nextNode(x.balancer)
 	x.locker.Unlock()
-	remoteHost, remotePort := node.HostAndPort()
-	remoting := node.Remoting()
+	remoteHost, remotePort := node.hostAndPort()
+	remoting := node.remoteClient()
 
 	addr, err := remoting.RemoteLookup(ctx, remoteHost, remotePort, actorName)
 	if err != nil {
@@ -270,8 +270,8 @@ func (x *Client) Tell(ctx context.Context, actorName string, message proto.Messa
 	x.locker.Lock()
 	node := nextNode(x.balancer)
 	x.locker.Unlock()
-	remoteHost, remotePort := node.HostAndPort()
-	remoting := node.Remoting()
+	remoteHost, remotePort := node.hostAndPort()
+	remoting := node.remoteClient()
 
 	to, err := remoting.RemoteLookup(ctx, remoteHost, remotePort, actorName)
 	if err != nil {
@@ -310,8 +310,8 @@ func (x *Client) Ask(ctx context.Context, actorName string, message any, timeout
 	x.locker.Lock()
 	node := nextNode(x.balancer)
 	x.locker.Unlock()
-	remoteHost, remotePort := node.HostAndPort()
-	remoting := node.Remoting()
+	remoteHost, remotePort := node.hostAndPort()
+	remoting := node.remoteClient()
 
 	to, err := remoting.RemoteLookup(ctx, remoteHost, remotePort, actorName)
 	if err != nil {
@@ -354,8 +354,8 @@ func (x *Client) Ask(ctx context.Context, actorName string, message any, timeout
 func (x *Client) AskGrain(ctx context.Context, grainRequest *remote.GrainRequest, message any, timeout time.Duration) (reply any, err error) {
 	x.locker.Lock()
 	node := nextNode(x.balancer)
-	remoteHost, remotePort := node.HostAndPort()
-	remoting := node.Remoting()
+	remoteHost, remotePort := node.hostAndPort()
+	remoting := node.remoteClient()
 	x.locker.Unlock()
 
 	response, err := remoting.RemoteAskGrain(ctx, remoteHost, remotePort, grainRequest, message, timeout)
@@ -384,8 +384,8 @@ func (x *Client) AskGrain(ctx context.Context, grainRequest *remote.GrainRequest
 func (x *Client) TellGrain(ctx context.Context, grainRequest *remote.GrainRequest, message proto.Message) error {
 	x.locker.Lock()
 	node := nextNode(x.balancer)
-	remoteHost, remotePort := node.HostAndPort()
-	remoting := node.Remoting()
+	remoteHost, remotePort := node.hostAndPort()
+	remoting := node.remoteClient()
 	x.locker.Unlock()
 	return remoting.RemoteTellGrain(ctx, remoteHost, remotePort, grainRequest, message)
 }
@@ -410,8 +410,8 @@ func (x *Client) Stop(ctx context.Context, actorName string) error {
 	x.locker.Lock()
 	node := nextNode(x.balancer)
 	x.locker.Unlock()
-	remoteHost, remotePort := node.HostAndPort()
-	remoting := node.Remoting()
+	remoteHost, remotePort := node.hostAndPort()
+	remoting := node.remoteClient()
 
 	addr, err := remoting.RemoteLookup(ctx, remoteHost, remotePort, actorName)
 	if err != nil {
@@ -445,8 +445,8 @@ func (x *Client) Whereis(ctx context.Context, actorName string) (*address.Addres
 	x.locker.Lock()
 	node := nextNode(x.balancer)
 	x.locker.Unlock()
-	remoteHost, remotePort := node.HostAndPort()
-	addr, err := node.Remoting().RemoteLookup(ctx, remoteHost, remotePort, actorName)
+	remoteHost, remotePort := node.hostAndPort()
+	addr, err := node.remoteClient().RemoteLookup(ctx, remoteHost, remotePort, actorName)
 	if err != nil {
 		return nil, err
 	}
@@ -481,8 +481,8 @@ func (x *Client) Reinstate(ctx context.Context, actorName string) error {
 	x.locker.Lock()
 	node := nextNode(x.balancer)
 	x.locker.Unlock()
-	remoteHost, remotePort := node.HostAndPort()
-	remoting := node.Remoting()
+	remoteHost, remotePort := node.hostAndPort()
+	remoting := node.remoteClient()
 
 	addr, err := remoting.RemoteLookup(ctx, remoteHost, remotePort, actorName)
 	if err != nil {
@@ -560,10 +560,10 @@ func getBalancer(strategy BalancerStrategy) Balancer {
 
 // getNodeMetric pings a given node and get the node metric info and
 func getNodeMetric(ctx context.Context, node *Node) (int, bool, error) {
-	host, port := node.HostAndPort()
-	client := node.Remoting().NetClient(host, port)
+	host, port := node.hostAndPort()
+	client := node.remoteClient().NetClient(host, port)
 
-	request := &internalpb.GetNodeMetricRequest{NodeAddress: node.Address()}
+	request := &internalpb.GetNodeMetricRequest{NodeAddress: node.getAddress()}
 
 	resp, err := client.SendProto(ctx, request)
 	if err != nil {

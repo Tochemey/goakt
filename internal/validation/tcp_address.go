@@ -24,13 +24,12 @@ package validation
 
 import (
 	"errors"
-	"fmt"
 	"net"
 	"strconv"
 	"strings"
-)
 
-var errFmt = "invalid address=(%s): %w"
+	gerrors "github.com/tochemey/goakt/v4/errors"
+)
 
 // TCPAddressValidator helps validate a TCP address
 type TCPAddressValidator struct {
@@ -49,18 +48,18 @@ func NewTCPAddressValidator(address string) *TCPAddressValidator {
 func (a *TCPAddressValidator) Validate() error {
 	host, port, err := net.SplitHostPort(strings.TrimSpace(a.address))
 	if err != nil {
-		return fmt.Errorf(errFmt, a.address, err)
+		return errors.Join(gerrors.NewErrInvalidTCPAddress(a.address), err)
 	}
 
 	// let us validate the port number
 	portNum, err := strconv.Atoi(port)
 	if err != nil {
-		return fmt.Errorf(errFmt, a.address, err)
+		return errors.Join(gerrors.NewErrInvalidTCPAddress(a.address), err)
 	}
 
 	// TODO: maybe we only need to check port number not to be negative
 	if host == "" || portNum > 65535 || portNum < 0 {
-		return fmt.Errorf(errFmt, a.address, errors.New("invalid address"))
+		return gerrors.NewErrInvalidTCPAddress(a.address)
 	}
 
 	return nil

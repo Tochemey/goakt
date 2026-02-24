@@ -23,12 +23,13 @@
 package actor
 
 import (
+	"net"
+	"strconv"
 	"time"
 
 	"github.com/tochemey/goakt/v4/datacenter"
 	"github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/extension"
-	"github.com/tochemey/goakt/v4/internal/pointer"
 	"github.com/tochemey/goakt/v4/internal/validation"
 	"github.com/tochemey/goakt/v4/passivation"
 	"github.com/tochemey/goakt/v4/reentrancy"
@@ -107,6 +108,14 @@ type spawnConfig struct {
 	// dataCenter defines the datacenter to spawn the actor in.
 	// this is only used when using the SpawnOn function with a datacenter-aware control plane.
 	dataCenter *datacenter.DataCenter
+	// host defines the host to spawn the actor on.
+	// This will be used when remoting is enabled and the actor type must be registered
+	// on the remote node.
+	host *string
+	// port defines the port to spawn the actor on.
+	// This will be used when remoting is enabled and the actor type must be registered
+	// on the remote node.
+	port *int
 }
 
 var _ validation.Validator = (*spawnConfig)(nil)
@@ -135,6 +144,15 @@ func (s *spawnConfig) Validate() error {
 			}
 		}
 	}
+
+	// validate the host and port if any of them is set
+	if s.host != nil || s.port != nil {
+		address := net.JoinHostPort(*s.host, strconv.Itoa(*s.port))
+		if err := validation.NewTCPAddressValidator(address).Validate(); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -376,7 +394,7 @@ func WithPassivationStrategy(strategy passivation.Strategy) SpawnOption {
 //   - SpawnOption that sets the role in the spawn configuration.
 func WithRole(role string) SpawnOption {
 	return spawnOption(func(config *spawnConfig) {
-		config.role = pointer.To(role)
+		config.role = new(role)
 	})
 }
 
@@ -414,6 +432,25 @@ func WithDataCenter(dataCenter *datacenter.DataCenter) SpawnOption {
 		if dataCenter != nil {
 			config.dataCenter = dataCenter
 		}
+	})
+}
+
+// WithHostAndPort returns a SpawnOption that sets the host and port to spawn the actor on.
+//
+// This option is only used when using the SpawnOn function with a datacenter-aware control plane.
+// It will be used when remoting is enabled and the actor type must be registered
+// on the remote node.
+//
+// Parameters:
+//   - host: The host to spawn the actor on.
+//   - port: The port to spawn the actor on.
+//
+// Returns:
+//   - SpawnOption that sets the host and port in the spawn configuration.
+func WithHostAndPort(host string, port int) SpawnOption {
+	return spawnOption(func(config *spawnConfig) {
+		config.host = new(host)
+		config.port = new(port)
 	})
 }
 

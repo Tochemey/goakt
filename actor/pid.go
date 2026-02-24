@@ -54,6 +54,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/locker"
 	"github.com/tochemey/goakt/v4/internal/metric"
+	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/internal/ticker"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/internal/xsync"
@@ -181,7 +182,7 @@ type PID struct {
 	// atomic flag indicating whether the actor is processing messages
 	processing atomic.Int32
 
-	remoting remote.Client
+	remoting remoteclient.Client
 
 	startedAt atomic.Int64
 	state     atomic.Uint32
@@ -283,7 +284,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 //
 // This constructor is intentionally lean: it performs no allocations beyond the
 // PID struct itself and sets exactly the fields required for identity and routing.
-func newRemotePID(addr *address.Address, remoting remote.Client) *PID {
+func newRemotePID(addr *address.Address, remoting remoteclient.Client) *PID {
 	pid := &PID{
 		address:  addr,
 		remoting: remoting,

@@ -34,6 +34,7 @@ import (
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	inet "github.com/tochemey/goakt/v4/internal/net"
+	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/internal/xsync"
 	"github.com/tochemey/goakt/v4/log"
@@ -840,8 +841,8 @@ func (s *testSerializer) Deserialize(_ []byte) (any, error) {
 // testRemoteClient is a minimal remote.Client test double that returns a
 // configured testSerializer from Serializer(). All other methods are no-ops.
 type testRemoteClient struct {
-	remote.Client // embed to avoid implementing all interface methods
-	serializer    remote.Serializer
+	remoteclient.Client // embed to avoid implementing all interface methods
+	serializer          remote.Serializer
 }
 
 func (c *testRemoteClient) Serializer(_ any) remote.Serializer {

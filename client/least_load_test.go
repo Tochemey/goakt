@@ -36,5 +36,5 @@ func TestLeadLoad(t *testing.T) {
 		NewNode("192.168.34.12:3322", WithWeight(1)),
 	)
 	actual := balancer.Next()
-	assert.Equal(t, "192.168.34.11:3322", actual.Address())
+	assert.Equal(t, "192.168.34.11:3322", actual.getAddress())
 }
