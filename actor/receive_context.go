@@ -34,7 +34,7 @@ import (
 
 // ReceiveContext carries per-message context and operations available to an actor
 // while handling a single message. It exposes:
-//   - Message metadata (Message, Sender, RemoteSender, SenderAddress, ReceiverAddress)
+//   - Message metadata (Message, Sender, RemoteSender)
 //   - Actor lifecycle and behavior management (Become, BecomeStacked, UnBecome, UnBecomeStacked,
 //     Stash, Unstash, UnstashAll, Stop, Shutdown, Watch, UnWatch, Reinstate, ReinstateNamed)
 //   - Messaging operations (Tell, Ask, Request/RequestName, BatchTell, BatchAsk, SendAsync, SendSync,
@@ -55,13 +55,13 @@ import (
 //     work is not inadvertently canceled by the caller context. Use timeouts on synchronous calls.
 //
 // Message immutability:
-//   - Message returns a proto.Message. Treat it as immutable; copy before mutation.
+//   - Message returns an any. Treat it as immutable; copy before mutation.
 //
 // Sender semantics:
 //   - Sender() returns the PID of the message sender — local or remote.
 //   - For remote messages, Sender() holds a lightweight remote PID created from
 //     the sender address embedded in the wire message.
-//   - Prefer SenderAddress() to get a location-transparent address abstraction.
+//   - Use Sender().Address() for the sender's address and Self().Address() for the receiver's address (handle nil PIDs with address.NoSender() as needed).
 //
 // Examples:
 //
@@ -70,7 +70,7 @@ import (
 //	    case *Ping:
 //	        ctx.Respond(&Pong{}) // Ask reply
 //	    case *Work:
-//	        ctx.PipeToName("worker", func() (proto.Message, error) {
+//	        ctx.PipeToName("worker", func() (any, error) {
 //	            return doWork(msg), nil
 //	        })
 //	    default:
