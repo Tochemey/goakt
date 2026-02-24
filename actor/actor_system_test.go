@@ -1303,6 +1303,12 @@ func TestActorSystem(t *testing.T) {
 		}
 
 		require.Len(t, items, 5)
+		item := items[0]
+		require.Equal(t, actorRef.ID(), item.Receiver())
+		msg := item.Message()
+		require.NotNil(t, msg)
+		require.IsType(t, &testpb.TestSend{}, msg)
+		require.NotZero(t, item.SendTime())
 
 		// unsubscribe the consumer
 		err = sys.Unsubscribe(consumer)
@@ -1463,6 +1469,7 @@ func TestActorSystem(t *testing.T) {
 		require.NotEmpty(t, joins)
 		require.Len(t, joins, 1)
 		require.Equal(t, peerAddress2, joins[0].Address())
+		require.NotZero(t, joins[0].Timestamp())
 
 		// wait for some time
 		pause.For(time.Second)
@@ -1489,6 +1496,7 @@ func TestActorSystem(t *testing.T) {
 		require.NotEmpty(t, lefts)
 		require.Len(t, lefts, 1)
 		require.Equal(t, peerAddress1, lefts[0].Address())
+		require.NotZero(t, lefts[0].Timestamp())
 
 		require.NoError(t, cl2.Unsubscribe(subscriber2))
 

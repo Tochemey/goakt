@@ -2913,7 +2913,9 @@ func TestReceiveContext(t *testing.T) {
 		err := actorSystem.Start(ctx)
 		assert.NoError(t, err)
 
-		pause.For(time.Second)
+		consumer, err := actorSystem.Subscribe()
+		require.NoError(t, err)
+		require.NotNil(t, consumer)
 
 		// create actor1
 		actor1 := &exchanger{}
@@ -2945,6 +2947,20 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, context.getError())
 		require.True(t, pid2.IsRunning())
 		require.False(t, pid2.IsSuspended())
+
+		var items []*ActorReinstated
+		for message := range consumer.Iterator() {
+			payload := message.Payload()
+			reinstated, ok := payload.(*ActorReinstated)
+			if ok {
+				items = append(items, reinstated)
+			}
+		}
+
+		require.Len(t, items, 1)
+		item := items[0]
+		require.Equal(t, pid2.ID(), item.Address())
+		require.NotZero(t, item.ReinstatedAt())
 
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
@@ -3008,6 +3024,10 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, actorSystem2)
 		require.NotNil(t, provider2)
 
+		consumer, err := actorSystem2.Subscribe()
+		require.NoError(t, err)
+		require.NotNil(t, consumer)
+
 		// create actorA
 		pidA, err := actorSystem.Spawn(ctx, "ExchangeA", &exchanger{})
 		require.NoError(t, err)
@@ -3041,6 +3061,20 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, context.getError())
 		require.True(t, pidB.IsRunning())
 		require.False(t, pidB.IsSuspended())
+
+		var items []*ActorReinstated
+		for message := range consumer.Iterator() {
+			payload := message.Payload()
+			reinstated, ok := payload.(*ActorReinstated)
+			if ok {
+				items = append(items, reinstated)
+			}
+		}
+
+		require.Len(t, items, 1)
+		item := items[0]
+		require.Equal(t, pidB.ID(), item.Address())
+		require.NotZero(t, item.ReinstatedAt())
 
 		// let us shutdown the rest
 		require.NoError(t, actorSystem.Stop(ctx))

@@ -247,10 +247,12 @@ func TestPassivation(t *testing.T) {
 		})
 		// block until timer is up
 		wg.Wait()
+
 		// let us send a message to the actor
 		err = Tell(ctx, pid, new(testpb.TestSend))
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, errors.ErrDead)
+
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With Pause/Resume path", func(t *testing.T) {
@@ -423,7 +425,10 @@ func TestPassivation(t *testing.T) {
 
 		require.NoError(t, actorSystem.Start(ctx))
 
-		pause.For(time.Second)
+		// create a subscriber
+		consumer, err := actorSystem.Subscribe()
+		require.NoError(t, err)
+		require.NotNil(t, consumer)
 
 		// create the actor path
 		pid, err := actorSystem.Spawn(ctx, "test", NewMockActor(),
@@ -438,6 +443,20 @@ func TestPassivation(t *testing.T) {
 		})
 		// block until timer is up
 		wg.Wait()
+
+		var passivated []*ActorPassivated
+		for event := range consumer.Iterator() {
+			payload := event.Payload()
+			if actorPassivated, ok := payload.(*ActorPassivated); ok {
+				passivated = append(passivated, actorPassivated)
+			}
+		}
+
+		require.NotEmpty(t, passivated)
+		require.Len(t, passivated, 1)
+		require.Equal(t, pid.ID(), passivated[0].Address())
+		require.NotZero(t, passivated[0].PassivatedAt())
+
 		// let us send a message to the actor
 		err = Tell(ctx, pid, new(testpb.TestSend))
 		assert.Error(t, err)

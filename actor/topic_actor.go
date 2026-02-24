@@ -349,7 +349,6 @@ func (x *topicActor) handleTopicMessage(ctx *ReceiveContext) {
 		if subscribers, ok := x.topics.Get(topic); ok && subscribers.Len() != 0 {
 			var wg sync.WaitGroup
 			for _, subscriber := range subscribers.Values() {
-				subscriber := subscriber
 				// make sure subcriber does exist
 				_, ok := x.actorSystem.tree().node(subscriber.ID())
 				if ok && subscriber.IsRunning() {
