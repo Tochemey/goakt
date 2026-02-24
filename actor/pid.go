@@ -568,7 +568,11 @@ func (pid *PID) ActorSystem() ActorSystem {
 }
 
 // Address returns the actor address.
+// Returns address.NoSender() when called on a nil PID.
 func (pid *PID) Address() *address.Address {
+	if pid == nil {
+		return address.NoSender()
+	}
 	pid.fieldsLocker.RLock()
 	path := pid.address
 	pid.fieldsLocker.RUnlock()

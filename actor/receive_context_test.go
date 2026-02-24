@@ -3263,11 +3263,11 @@ func TestReceiveContext(t *testing.T) {
 			self:    pid1,
 		}
 
-		senderAddr := context.SenderAddress()
+		senderAddr := context.Sender().Address()
 		require.NotNil(t, senderAddr)
 		require.True(t, senderAddr.Equals(actorSystem.NoSender().Address()))
 
-		receiverAddr := context.ReceiverAddress()
+		receiverAddr := context.Self().Address()
 		require.NotNil(t, receiverAddr)
 		require.True(t, receiverAddr.Equals(pid1.Address()))
 
@@ -3285,7 +3285,7 @@ func TestReceiveContext(t *testing.T) {
 			self:    pid1,
 		}
 
-		senderAddr = context.SenderAddress()
+		senderAddr = context.Sender().Address()
 		require.NotNil(t, senderAddr)
 		require.True(t, senderAddr.Equals(pid2.Address()))
 
@@ -3296,11 +3296,11 @@ func TestReceiveContext(t *testing.T) {
 			self:    nil, // may never happen but for test sake
 		}
 
-		senderAddr = context.SenderAddress()
+		senderAddr = context.Sender().Address()
 		require.NotNil(t, senderAddr)
 		require.True(t, senderAddr.Equals(address.NoSender()))
 
-		receiverAddr = context.ReceiverAddress()
+		receiverAddr = context.Self().Address()
 		require.NotNil(t, receiverAddr)
 		require.True(t, receiverAddr.Equals(address.NoSender()))
 

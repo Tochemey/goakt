@@ -241,5 +241,5 @@ func (m *UnboundedFairMailbox) Len() int64 {
 func (m *UnboundedFairMailbox) Dispose() {}
 
 func deriveSenderKey(rc *ReceiveContext) string {
-	return rc.SenderAddress().String()
+	return rc.Sender().ID()
 }
