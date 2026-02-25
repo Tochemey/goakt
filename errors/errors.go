@@ -226,7 +226,15 @@ var (
 
 	// ErrDataCenterStaleRecords indicates the datacenter has stale records and cannot process requests.
 	ErrDataCenterStaleRecords = errors.New("datacenter has stale records")
+
+	// ErrInvalidTCPAddress is returned when a TCP address is invalid or cannot be resolved.
+	ErrInvalidTCPAddress = errors.New("invalid TCP address")
 )
+
+// NewErrInvalidTCPAddress formats an ErrInvalidTCPAddress with the given address.
+func NewErrInvalidTCPAddress(address string) error {
+	return fmt.Errorf("address=(%s) %w", address, ErrInvalidTCPAddress)
+}
 
 // NewErrInvalidPassivationStrategy formats an error with ErrInvalidPassivationStrategy
 func NewErrInvalidPassivationStrategy(strategy passivation.Strategy) error {

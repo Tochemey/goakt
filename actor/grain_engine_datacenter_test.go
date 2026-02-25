@@ -37,7 +37,7 @@ import (
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/log"
-	mocksremote "github.com/tochemey/goakt/v4/mocks/remote"
+	mocksremote "github.com/tochemey/goakt/v4/mocks/remoteclient"
 	"github.com/tochemey/goakt/v4/remote"
 )
 

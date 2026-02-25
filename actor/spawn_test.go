@@ -45,10 +45,11 @@ import (
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/datacentercontroller"
 	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/log"
 	mockcluster "github.com/tochemey/goakt/v4/mocks/cluster"
 	mocks "github.com/tochemey/goakt/v4/mocks/discovery"
-	mocksremote "github.com/tochemey/goakt/v4/mocks/remote"
+	mocksremote "github.com/tochemey/goakt/v4/mocks/remoteclient"
 	"github.com/tochemey/goakt/v4/passivation"
 	"github.com/tochemey/goakt/v4/reentrancy"
 	"github.com/tochemey/goakt/v4/remote"
@@ -296,8 +297,6 @@ func TestSpawn(t *testing.T) {
 
 		require.NoError(t, actorSystem.Start(ctx))
 
-		pause.For(time.Second)
-
 		// create the actor path
 		pid, err := actorSystem.Spawn(ctx, "test", NewMockActor(),
 			WithLongLived())
@@ -316,6 +315,87 @@ func TestSpawn(t *testing.T) {
 		assert.NoError(t, err)
 		assert.True(t, pid.IsRunning())
 		assert.NoError(t, actorSystem.Stop(ctx))
+	})
+
+	t.Run("With Spawn on remote node", func(t *testing.T) {
+		// create a context
+		ctx := context.TODO()
+		// start the NATS server
+		srv := startNatsServer(t)
+
+		// create and start a system cluster
+		node1, sd1 := testNATs(t, srv.Addr().String())
+		require.NotNil(t, node1)
+		require.NotNil(t, sd1)
+
+		// create and start a system cluster
+		node2, sd2 := testNATs(t, srv.Addr().String())
+		require.NotNil(t, node2)
+		require.NotNil(t, sd2)
+
+		// create and start a system cluster
+		node3, sd3 := testNATs(t, srv.Addr().String())
+		require.NotNil(t, node3)
+		require.NotNil(t, sd3)
+
+		actorName := "actorName"
+		actor := newExchanger()
+
+		// define the spawn options
+		opts := []SpawnOption{
+			WithHostAndPort(node2.Host(), node2.Port()),
+			WithRelocationDisabled(),
+		}
+
+		pid, err := node1.Spawn(ctx, actorName, actor, opts...)
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+		require.True(t, pid.IsRemote())
+
+		local, err := node1.Spawn(ctx, "localActor", actor)
+		require.NoError(t, err)
+		require.NotNil(t, local)
+		require.True(t, local.IsLocal())
+
+		message := new(testpb.TestReply)
+		response, err := local.Ask(ctx, pid, message, time.Minute)
+		require.NoError(t, err)
+		require.NotNil(t, response)
+
+		reply, ok := response.(*testpb.Reply)
+		require.True(t, ok)
+		expected := new(testpb.Reply)
+		assert.True(t, proto.Equal(expected, reply))
+
+		require.NoError(t, node2.Stop(ctx))
+		require.NoError(t, node1.Stop(ctx))
+		require.NoError(t, node3.Stop(ctx))
+		require.NoError(t, sd1.Close())
+		require.NoError(t, sd3.Close())
+		require.NoError(t, sd2.Close())
+		srv.Shutdown()
+	})
+
+	t.Run("With Spawn on remote node with remoting disabled", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+		// start the actor system
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
+
+		actorName := "actorName"
+		actor := newExchanger()
+		opts := []SpawnOption{
+			WithHostAndPort(sys.Host(), sys.Port()),
+		}
+		pid, err := sys.Spawn(ctx, actorName, actor, opts...)
+		require.Error(t, err)
+		require.ErrorIs(t, err, gerrors.ErrRemotingDisabled)
+		require.Nil(t, pid)
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
 	})
 
 	t.Run("With SpawnNamedFromFunc when actor already exist", func(t *testing.T) {
@@ -817,7 +897,7 @@ func TestSpawn(t *testing.T) {
 		clusterMock := new(mockcluster.Cluster)
 
 		system := MockReplicationTestSystem(clusterMock)
-		system.remoting = remote.NewClient()
+		system.remoting = remoteclient.NewClient()
 		system.remotingEnabled.Store(true)
 
 		actor := NewMockActor()
@@ -1581,7 +1661,7 @@ func TestSpawn(t *testing.T) {
 		ctx := t.Context()
 		clmock := mockcluster.NewCluster(t)
 		system := MockReplicationTestSystem(clmock)
-		system.remoting = remote.NewClient()
+		system.remoting = remoteclient.NewClient()
 		system.remotingEnabled.Store(true)
 		system.clusterEnabled.Store(true)
 
@@ -1627,6 +1707,32 @@ func TestSpawn(t *testing.T) {
 		err := sys.SpawnOn(ctx, "actor-1", actor, WithDataCenter(&targetDC))
 		require.NoError(t, err)
 		remotingMock.AssertExpectations(t)
+	})
+	t.Run("With Spawn when RemoteSpawn fails", func(t *testing.T) {
+		ctx := context.TODO()
+		remotingMock := mocksremote.NewClient(t)
+		clusterMock := mockcluster.NewCluster(t)
+
+		system := MockReplicationTestSystem(clusterMock)
+		system.remoting = remotingMock
+		system.remotingEnabled.Store(true)
+
+		host := "127.0.0.1"
+		port := 9000
+		actorName := "actorID"
+		actor := NewMockActor()
+
+		remotingMock.EXPECT().
+			RemoteSpawn(mock.Anything, host, port, mock.MatchedBy(func(req *remote.SpawnRequest) bool {
+				return req.Name == actorName && req.Kind != ""
+			})).
+			Return(assert.AnError).
+			Once()
+
+		pid, err := system.Spawn(ctx, actorName, actor, WithHostAndPort(host, port))
+		require.Error(t, err)
+		assert.ErrorIs(t, err, assert.AnError)
+		assert.Nil(t, pid)
 	})
 }
 

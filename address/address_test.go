@@ -27,6 +27,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	gerrors "github.com/tochemey/goakt/v4/errors"
 )
 
 func TestAddressValidate(t *testing.T) {
@@ -44,7 +46,7 @@ func TestAddressValidate(t *testing.T) {
 		addr := New("name", "system", "", 1234)
 		err := addr.Validate()
 		assert.Error(t, err)
-		assert.ErrorContains(t, err, "invalid address")
+		assert.ErrorIs(t, err, gerrors.ErrInvalidTCPAddress)
 	})
 
 	t.Run("Missing system", func(t *testing.T) {

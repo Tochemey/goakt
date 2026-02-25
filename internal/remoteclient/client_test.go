@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package remote
+package remoteclient
 
 import (
 	"context"
@@ -38,13 +38,14 @@ import (
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/reentrancy"
+	"github.com/tochemey/goakt/v4/remote"
 )
 
 func TestRemotingOptionsAndDefaults(t *testing.T) {
 	r := NewClient().(*client)
 
 	// Default compression is Zstd (matches server default in remote.Config)
-	assert.Equal(t, ZstdCompression, r.Compression())
+	assert.Equal(t, remote.ZstdCompression, r.Compression())
 	assert.Nil(t, r.TLSConfig())
 
 	// Verify connection pooling defaults based on benchmarks
@@ -61,7 +62,7 @@ func TestRemotingOptionApplication(t *testing.T) {
 	tlsCfg := &tls.Config{} //nolint:gosec
 	r := NewClient(
 		WithClientTLS(tlsCfg),
-		WithClientCompression(GzipCompression),
+		WithClientCompression(remote.GzipCompression),
 		WithClientMaxIdleConns(50),
 		WithClientIdleTimeout(60*time.Second),
 		WithClientDialTimeout(3*time.Second),
@@ -69,7 +70,7 @@ func TestRemotingOptionApplication(t *testing.T) {
 	).(*client)
 
 	assert.Equal(t, tlsCfg, r.TLSConfig())
-	assert.Equal(t, GzipCompression, r.Compression())
+	assert.Equal(t, remote.GzipCompression, r.Compression())
 	assert.Equal(t, 50, r.maxIdleConns)
 	assert.Equal(t, 60*time.Second, r.idleTimeout)
 	assert.Equal(t, 3*time.Second, r.dialTimeout)
@@ -255,7 +256,7 @@ func TestRemoteTell_InvalidMessage(t *testing.T) {
 
 func TestRemoteSpawn_InvalidRequest(t *testing.T) {
 	r := NewClient()
-	err := r.RemoteSpawn(context.Background(), "host", 1000, &SpawnRequest{})
+	err := r.RemoteSpawn(context.Background(), "host", 1000, &remote.SpawnRequest{})
 	assert.Error(t, err)
 }
 
@@ -263,7 +264,7 @@ func TestRemoteSpawn_InvalidPort(t *testing.T) {
 	r := NewClient()
 	port := int(math.MaxInt32) + 1
 
-	err := r.RemoteSpawn(context.Background(), "host", port, &SpawnRequest{Name: "actor", Kind: "kind"})
+	err := r.RemoteSpawn(context.Background(), "host", port, &remote.SpawnRequest{Name: "actor", Kind: "kind"})
 	assert.Error(t, err)
 	assert.ErrorContains(t, err, "out of range")
 }
@@ -272,7 +273,7 @@ func TestRemoteSpawn_WithReentrancy(t *testing.T) {
 	// Test that spawn request with reentrancy config does not panic
 	r := NewClient()
 
-	req := &SpawnRequest{
+	req := &remote.SpawnRequest{
 		Name: "actor",
 		Kind: "kind",
 		Reentrancy: reentrancy.New(
@@ -326,7 +327,7 @@ func TestRemoteReinstate_InvalidPort(t *testing.T) {
 func TestRemoteActivateGrain_InvalidPort(t *testing.T) {
 	r := NewClient()
 	port := int(math.MaxInt32) + 1
-	grainReq := &GrainRequest{
+	grainReq := &remote.GrainRequest{
 		Kind: "kind",
 		Name: "name",
 	}
@@ -338,7 +339,7 @@ func TestRemoteActivateGrain_InvalidPort(t *testing.T) {
 
 func TestRemoteTellGrain_InvalidMessage(t *testing.T) {
 	r := NewClient()
-	grainReq := &GrainRequest{
+	grainReq := &remote.GrainRequest{
 		Kind: "kind",
 		Name: "name",
 	}
@@ -350,7 +351,7 @@ func TestRemoteTellGrain_InvalidMessage(t *testing.T) {
 
 func TestRemoteAskGrain_InvalidMessage(t *testing.T) {
 	r := NewClient()
-	grainReq := &GrainRequest{
+	grainReq := &remote.GrainRequest{
 		Kind: "kind",
 		Name: "name",
 	}
@@ -363,7 +364,7 @@ func TestRemoteAskGrain_InvalidMessage(t *testing.T) {
 func TestRemoteAskGrain_InvalidPort(t *testing.T) {
 	r := NewClient()
 	port := int(math.MaxInt32) + 1
-	grainReq := &GrainRequest{
+	grainReq := &remote.GrainRequest{
 		Kind: "kind",
 		Name: "name",
 	}
@@ -412,10 +413,6 @@ func TestRemoteBatchAsk_FiltersNilMessages(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// ---------------------------------------------------------------------------
-// Serializer / resolveSerializer
-// ---------------------------------------------------------------------------
-
 func TestRemotingSerializer(t *testing.T) {
 	t.Run("nil message returns the pre-built dispatcher", func(t *testing.T) {
 		r := NewClient().(*client)
@@ -429,7 +426,7 @@ func TestRemotingSerializer(t *testing.T) {
 		r := NewClient().(*client)
 		s := r.Serializer(durationpb.New(time.Second))
 		require.NotNil(t, s)
-		_, ok := s.(*ProtoSerializer)
+		_, ok := s.(*remote.ProtoSerializer)
 		assert.True(t, ok)
 	})
 
@@ -447,10 +444,6 @@ func TestRemotingSerializer(t *testing.T) {
 		assert.Nil(t, s)
 	})
 }
-
-// ---------------------------------------------------------------------------
-// WithRemotingContextPropagator / WithRemotingSerializers
-// ---------------------------------------------------------------------------
 
 func TestWithRemotingContextPropagator(t *testing.T) {
 	t.Run("nil propagator is ignored", func(t *testing.T) {
@@ -481,10 +474,6 @@ func TestWithRemotingSerializers(t *testing.T) {
 		assert.Equal(t, len(before.serializers), len(after.serializers))
 	})
 }
-
-// ---------------------------------------------------------------------------
-// enrichContext
-// ---------------------------------------------------------------------------
 
 func TestEnrichContext(t *testing.T) {
 	t.Run("no propagator no deadline", func(t *testing.T) {
@@ -517,10 +506,6 @@ func TestEnrichContext(t *testing.T) {
 		assert.NotNil(t, enriched)
 	})
 }
-
-// ---------------------------------------------------------------------------
-// checkProtoError
-// ---------------------------------------------------------------------------
 
 func TestCheckProtoError(t *testing.T) {
 	t.Run("non-error response returns nil", func(t *testing.T) {
@@ -580,10 +565,6 @@ func TestCheckProtoError(t *testing.T) {
 	})
 }
 
-// ---------------------------------------------------------------------------
-// parseFailedPrecondition
-// ---------------------------------------------------------------------------
-
 func TestParseFailedPrecondition(t *testing.T) {
 	t.Run("ErrTypeNotRegistered substring", func(t *testing.T) {
 		err := parseFailedPrecondition(gerrors.ErrTypeNotRegistered.Error())
@@ -607,10 +588,6 @@ func TestParseFailedPrecondition(t *testing.T) {
 	})
 }
 
-// ---------------------------------------------------------------------------
-// parseAlreadyExists
-// ---------------------------------------------------------------------------
-
 func TestParseAlreadyExists(t *testing.T) {
 	t.Run("singleton in message returns ErrSingletonAlreadyExists", func(t *testing.T) {
 		err := parseAlreadyExists("singleton conflict")
@@ -622,10 +599,6 @@ func TestParseAlreadyExists(t *testing.T) {
 		assert.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
 	})
 }
-
-// ---------------------------------------------------------------------------
-// No-serializer paths for send methods
-// ---------------------------------------------------------------------------
 
 func TestRemoteTell_NoSerializerForType(t *testing.T) {
 	r := NewClient()
@@ -650,7 +623,7 @@ func TestRemoteAsk_NoSerializerForType(t *testing.T) {
 func TestRemoteTellGrain_InvalidPort(t *testing.T) {
 	r := NewClient()
 	port := int(math.MaxInt32) + 1
-	grainReq := &GrainRequest{Kind: "kind", Name: "name"}
+	grainReq := &remote.GrainRequest{Kind: "kind", Name: "name"}
 
 	err := r.RemoteTellGrain(context.Background(), "host", port, grainReq, durationpb.New(time.Second))
 	require.Error(t, err)
@@ -659,7 +632,7 @@ func TestRemoteTellGrain_InvalidPort(t *testing.T) {
 
 func TestRemoteTellGrain_NoSerializerForType(t *testing.T) {
 	r := NewClient()
-	grainReq := &GrainRequest{Kind: "kind", Name: "name"}
+	grainReq := &remote.GrainRequest{Kind: "kind", Name: "name"}
 
 	err := r.RemoteTellGrain(context.Background(), "host", 1000, grainReq, &nonProtoMsg{"x"})
 	require.Error(t, err)
@@ -669,7 +642,7 @@ func TestRemoteTellGrain_NoSerializerForType(t *testing.T) {
 func TestRemoteActivateGrain_InvalidRequest(t *testing.T) {
 	r := NewClient()
 	// Empty Kind and Name should fail validation inside getGrainFromRequest.
-	err := r.RemoteActivateGrain(context.Background(), "host", 1000, &GrainRequest{})
+	err := r.RemoteActivateGrain(context.Background(), "host", 1000, &remote.GrainRequest{})
 	require.Error(t, err)
 }
 
@@ -692,11 +665,6 @@ func TestRemoteBatchAsk_NoSerializer(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, gerrors.ErrInvalidMessage)
 }
-
-// ---------------------------------------------------------------------------
-// Network-failure paths: covers enrichContext, NetClient, SendProto failure.
-// All tests use an unreachable host so the send fails at dial time.
-// ---------------------------------------------------------------------------
 
 func TestRemoteTell_ConnectionRefused(t *testing.T) {
 	r := NewClient()
@@ -725,7 +693,7 @@ func TestRemoteLookup_ConnectionRefused(t *testing.T) {
 
 func TestRemoteActivateGrain_ConnectionRefused(t *testing.T) {
 	r := NewClient()
-	grainReq := &GrainRequest{Kind: "kind", Name: "name"}
+	grainReq := &remote.GrainRequest{Kind: "kind", Name: "name"}
 
 	err := r.RemoteActivateGrain(context.Background(), "host", 1000, grainReq)
 	assert.Error(t, err)
@@ -733,7 +701,7 @@ func TestRemoteActivateGrain_ConnectionRefused(t *testing.T) {
 
 func TestRemoteAskGrain_ConnectionRefused(t *testing.T) {
 	r := NewClient()
-	grainReq := &GrainRequest{Kind: "kind", Name: "name"}
+	grainReq := &remote.GrainRequest{Kind: "kind", Name: "name"}
 
 	_, err := r.RemoteAskGrain(context.Background(), "host", 1000, grainReq, durationpb.New(time.Second), time.Second)
 	assert.Error(t, err)
@@ -741,7 +709,7 @@ func TestRemoteAskGrain_ConnectionRefused(t *testing.T) {
 
 func TestRemoteTellGrain_ConnectionRefused(t *testing.T) {
 	r := NewClient()
-	grainReq := &GrainRequest{Kind: "kind", Name: "name"}
+	grainReq := &remote.GrainRequest{Kind: "kind", Name: "name"}
 
 	err := r.RemoteTellGrain(context.Background(), "host", 1000, grainReq, durationpb.New(time.Second))
 	assert.Error(t, err)
@@ -780,7 +748,7 @@ func TestRemoteBatchAsk_ConnectionRefused(t *testing.T) {
 func TestRemoteSpawn_ConnectionRefused(t *testing.T) {
 	r := NewClient()
 
-	err := r.RemoteSpawn(context.Background(), "host", 1000, &SpawnRequest{Name: "actor", Kind: "kind"})
+	err := r.RemoteSpawn(context.Background(), "host", 1000, &remote.SpawnRequest{Name: "actor", Kind: "kind"})
 	assert.Error(t, err)
 }
 

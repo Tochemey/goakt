@@ -45,7 +45,7 @@ func TestRoundRobin(t *testing.T) {
 
 	actual := make([]string, 4)
 	for i := 0; i < 4; i++ {
-		actual[i] = balancer.Next().Address()
+		actual[i] = balancer.Next().getAddress()
 	}
 
 	assert.ElementsMatch(t, expected, actual)

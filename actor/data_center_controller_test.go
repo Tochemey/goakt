@@ -40,7 +40,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/log"
 	mockscluster "github.com/tochemey/goakt/v4/mocks/cluster"
-	mocksremote "github.com/tochemey/goakt/v4/mocks/remote"
+	mocksremote "github.com/tochemey/goakt/v4/mocks/remoteclient"
 )
 
 func TestDataCenterReady(t *testing.T) {

@@ -140,16 +140,10 @@ func WithSerializers(msg any, serializer Serializer) Option {
 		// A typed nil pointer whose element is an interface (e.g. (*proto.Message)(nil))
 		// registers the serializer for all values that implement that interface.
 		if typ != nil && typ.Kind() == reflect.Ptr && typ.Elem().Kind() == reflect.Interface {
-			config.serializers = append(config.serializers, ifaceEntry{
-				iface:      typ.Elem(),
-				serializer: serializer,
-			})
+			config.serializers[typ.Elem()] = serializer
 			return
 		}
 
-		config.serializers = append(config.serializers, ifaceEntry{
-			iface:      reflect.TypeOf(msg),
-			serializer: serializer,
-		})
+		config.serializers[reflect.TypeOf(msg)] = serializer
 	})
 }

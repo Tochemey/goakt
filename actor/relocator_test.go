@@ -45,10 +45,11 @@ import (
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/internal/pointer"
+	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/log"
 	mockscluster "github.com/tochemey/goakt/v4/mocks/cluster"
-	mocksremote "github.com/tochemey/goakt/v4/mocks/remote"
+	mocksremote "github.com/tochemey/goakt/v4/mocks/remoteclient"
 	"github.com/tochemey/goakt/v4/reentrancy"
 	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/supervisor"
@@ -88,7 +89,7 @@ func TestRelocatorPeersError(t *testing.T) {
 	sys.relocationEnabled.Store(true)
 
 	actor := &relocator{
-		remoting: remote.NewClient(),
+		remoting: remoteclient.NewClient(),
 		pid: &PID{
 			actorSystem: system,
 		},
@@ -124,7 +125,7 @@ func TestRelocatorSpawnRemoteActorActorExistsError(t *testing.T) {
 	sys.cluster = clusterMock
 
 	actor := &relocator{
-		remoting: remote.NewClient(),
+		remoting: remoteclient.NewClient(),
 		pid: &PID{
 			actorSystem: system,
 		},
@@ -166,7 +167,7 @@ func TestRelocatorSpawnRemoteActorRemoveActorError(t *testing.T) {
 	sys.cluster = clusterMock
 
 	actor := &relocator{
-		remoting: remote.NewClient(),
+		remoting: remoteclient.NewClient(),
 		pid: &PID{
 			actorSystem: system,
 		},
@@ -194,7 +195,7 @@ func TestRelocatorSpawnRemoteActorInvalidAddress(t *testing.T) {
 	system := MockReplicationTestSystem(mockscluster.NewCluster(t))
 
 	actor := &relocator{
-		remoting: remote.NewClient(),
+		remoting: remoteclient.NewClient(),
 		pid: &PID{
 			actorSystem: system,
 		},

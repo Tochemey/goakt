@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package remote
+package remoteclient
 
 import (
 	"errors"
@@ -30,6 +30,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/durationpb"
+
+	"github.com/tochemey/goakt/v4/remote"
 )
 
 // stubSerializer is a test-only Serializer with configurable outcomes.
@@ -146,7 +148,7 @@ func TestSerializerDispatch_Deserialize(t *testing.T) {
 		require.NotNil(t, dispatcher)
 
 		// Produce a valid wire frame with the ProtoSerializer send path.
-		ps := NewProtoSerializer()
+		ps := remote.NewProtoSerializer()
 		msg := durationpb.New(5 * time.Second)
 		raw, err := ps.Serialize(msg)
 		require.NoError(t, err)

@@ -40,9 +40,10 @@ import (
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/log"
 	mockcluster "github.com/tochemey/goakt/v4/mocks/cluster"
-	mockremote "github.com/tochemey/goakt/v4/mocks/remote"
+	mockremote "github.com/tochemey/goakt/v4/mocks/remoteclient"
 	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
@@ -860,7 +861,7 @@ func TestRemoting_RemoteActivateGrain_WithActorSystem(t *testing.T) {
 	err = sys.RegisterGrainKind(ctx, &MockGrain{})
 	require.NoError(t, err)
 
-	remoting := remote.NewClient()
+	remoting := remoteclient.NewClient()
 
 	identity := newGrainIdentity(NewMockGrain(), "grain-activate")
 	err = remoting.RemoteActivateGrain(ctx, sys.Host(), sys.Port(), &remote.GrainRequest{
@@ -908,7 +909,7 @@ func TestRemoting_RemoteTellGrain_WithActorSystem(t *testing.T) {
 	err = sys.RegisterGrainKind(ctx, &MockGrain{})
 	require.NoError(t, err)
 
-	remoting := remote.NewClient()
+	remoting := remoteclient.NewClient()
 
 	identity := newGrainIdentity(NewMockGrain(), "grain-tell")
 	for range 10 {
@@ -958,7 +959,7 @@ func TestRemoting_RemoteAskGrain_WithActorSystem(t *testing.T) {
 	err = sys.RegisterGrainKind(ctx, &MockGrain{})
 	require.NoError(t, err)
 
-	remoting := remote.NewClient()
+	remoting := remoteclient.NewClient()
 
 	identity := newGrainIdentity(NewMockGrain(), "grain-ask")
 	resp, err := remoting.RemoteAskGrain(ctx, sys.Host(), sys.Port(), &remote.GrainRequest{

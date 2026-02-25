@@ -64,6 +64,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/metric"
 	inet "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pointer"
+	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/internal/ticker"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/internal/validation"
@@ -716,7 +717,7 @@ type ActorSystem interface {
 	getReflection() *reflection
 	findRoutee(routeeName string) (*PID, bool)
 	isStopping() bool
-	getRemoting() remote.Client
+	getRemoting() remoteclient.Client
 	getGrains() *xsync.Map[string, *grainPID]
 	recreateGrain(ctx context.Context, props *internalpb.Grain) error
 	decreaseActorsCounter()
@@ -759,7 +760,7 @@ type actorSystem struct {
 	// Specifies whether remoting is enabled.
 	// This allows to handle remote messaging
 	remotingEnabled atomic.Bool
-	remoting        remote.Client
+	remoting        remoteclient.Client
 
 	// Specifies the remoting server
 	remoteServer *inet.ProtoServer // Proto TCP server
@@ -2012,7 +2013,7 @@ func (x *actorSystem) increaseActorsCounter() {
 // getRemoting returns the remoting instance of the actor system
 // This method is used internally to access the remoting functionality
 // and is not intended for external use.
-func (x *actorSystem) getRemoting() remote.Client {
+func (x *actorSystem) getRemoting() remoteclient.Client {
 	x.locker.RLock()
 	remoting := x.remoting
 	x.locker.RUnlock()
@@ -2254,22 +2255,36 @@ func (x *actorSystem) cleanupStaleLocalActors(ctx context.Context) error {
 
 // setupRemoting sets the remoting service
 func (x *actorSystem) setupRemoting() error {
-	opts := []remote.ClientOption{
-		remote.WithClientCompression(x.remoteConfig.Compression()),
+	opts := []remoteclient.ClientOption{
+		// set the compression algorithm to use by the remoting client
+		remoteclient.WithClientCompression(x.remoteConfig.Compression()),
+		// set the idle timeout for the remoting client
+		remoteclient.WithClientIdleTimeout(x.remoteConfig.IdleTimeout()),
+		// set the max idle connections for the remoting client
+		remoteclient.WithClientMaxIdleConns(x.remoteConfig.MaxIdleConns()),
+		// set the dial timeout for the remoting client
+		remoteclient.WithClientDialTimeout(x.remoteConfig.DialTimeout()),
+		// set the keep alive interval for the remoting client
+		remoteclient.WithClientKeepAlive(x.remoteConfig.KeepAlive()),
 		// Register built-in serializers for native actor message types.
 		// These are internal and not visible to application code.
-		remote.WithClientSerializers(new(PoisonPill), &poisonPillSerializer{}),
+		remoteclient.WithClientSerializers(new(PoisonPill), &poisonPillSerializer{}),
 	}
 
+	// Forward user-defined serializers from the remote config so that both the
+	// server (inbound deserialization) and the client (outbound serialization)
+	// use the same set of serializers.
+	opts = append(opts, remoteclient.ClientSerializerOptions(x.remoteConfig)...)
+
 	if propagator := x.remoteConfig.ContextPropagator(); propagator != nil {
-		opts = append(opts, remote.WithClientContextPropagator(propagator))
+		opts = append(opts, remoteclient.WithClientContextPropagator(propagator))
 	}
 
 	if x.tlsInfo != nil {
-		opts = append(opts, remote.WithClientTLS(x.tlsInfo.ClientConfig))
+		opts = append(opts, remoteclient.WithClientTLS(x.tlsInfo.ClientConfig))
 	}
 
-	x.remoting = remote.NewClient(opts...)
+	x.remoting = remoteclient.NewClient(opts...)
 	return nil
 }
 
@@ -3451,16 +3466,16 @@ func (x *actorSystem) persistPeerStateToPeers(ctx context.Context, peerState *in
 	defer cancelRPCs()
 
 	// Create a custom remoting client for replication with compression enabled
-	remotingOpts := []remote.ClientOption{
-		remote.WithClientCompression(x.remoteConfig.Compression()),
-		remote.WithClientContextPropagator(x.remoteConfig.ContextPropagator()),
+	remotingOpts := []remoteclient.ClientOption{
+		remoteclient.WithClientCompression(x.remoteConfig.Compression()),
+		remoteclient.WithClientContextPropagator(x.remoteConfig.ContextPropagator()),
 	}
 
 	if x.tlsInfo != nil {
-		remotingOpts = append(remotingOpts, remote.WithClientTLS(x.tlsInfo.ClientConfig))
+		remotingOpts = append(remotingOpts, remoteclient.WithClientTLS(x.tlsInfo.ClientConfig))
 	}
 
-	remoting := remote.NewClient(remotingOpts...)
+	remoting := remoteclient.NewClient(remotingOpts...)
 	defer remoting.Close()
 
 	// Channel to collect results from all goroutines

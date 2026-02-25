@@ -45,7 +45,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/log"
 	mockcluster "github.com/tochemey/goakt/v4/mocks/cluster"
-	mockremote "github.com/tochemey/goakt/v4/mocks/remote"
+	mockremote "github.com/tochemey/goakt/v4/mocks/remoteclient"
 	"github.com/tochemey/goakt/v4/remote"
 )
 

@@ -29,10 +29,10 @@ import (
 	"github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
+	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/internal/xsync"
 	"github.com/tochemey/goakt/v4/log"
-	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/supervisor"
 )
 
@@ -59,14 +59,14 @@ type topicActor struct {
 
 	cluster     cluster.Cluster
 	actorSystem ActorSystem
-	remoting    remote.Client
+	remoting    remoteclient.Client
 }
 
 // ensure topic actor implements the Actor interface
 var _ Actor = (*topicActor)(nil)
 
 // newTopicActor creates a new cluster pubsub mediator.
-func newTopicActor(remoting remote.Client) Actor {
+func newTopicActor(remoting remoteclient.Client) Actor {
 	return &topicActor{
 		topics:    xsync.NewMap[string, *xsync.Map[string, *PID]](),
 		processed: xsync.NewMap[key, types.Unit](),

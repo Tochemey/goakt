@@ -57,11 +57,12 @@ import (
 	"github.com/tochemey/goakt/v4/internal/datacentercontroller"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/internal/xsync"
 	"github.com/tochemey/goakt/v4/log"
 	mockcluster "github.com/tochemey/goakt/v4/mocks/cluster"
-	mocksremote "github.com/tochemey/goakt/v4/mocks/remote"
+	mocksremote "github.com/tochemey/goakt/v4/mocks/remoteclient"
 	"github.com/tochemey/goakt/v4/passivation"
 	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
@@ -274,6 +275,10 @@ func (x *MockBehavior) DebitAccount(ctx *ReceiveContext) {
 
 type exchanger struct {
 	id string
+}
+
+func newExchanger() *exchanger {
+	return &exchanger{}
 }
 
 func (e *exchanger) PreStart(*Context) error {
@@ -1536,7 +1541,7 @@ func MockReplicationTestSystem(clusterMock *mockcluster.Cluster) *actorSystem {
 	return sys
 }
 
-func MockSimpleClusterReadyActorSystem(rem remote.Client, cl cluster.Cluster, node *discovery.Node, opts ...remote.Option) *actorSystem {
+func MockSimpleClusterReadyActorSystem(rem remoteclient.Client, cl cluster.Cluster, node *discovery.Node, opts ...remote.Option) *actorSystem {
 	sys := &actorSystem{
 		logger:      log.DiscardLogger,
 		cluster:     cl,
@@ -1959,7 +1964,10 @@ func testSystem(t *testing.T, providerFactory providerFactory, opts ...testClust
 		WithShutdownTimeout(3 * time.Minute),
 		WithCluster(
 			NewClusterConfig().
-				WithKinds(new(MockActor), new(MockEntity), new(MockGrainActor)).
+				WithKinds(new(MockActor),
+					new(MockEntity),
+					new(exchanger),
+					new(MockGrainActor)).
 				WithGrains(new(MockGrain)).
 				WithPartitionCount(7).
 				WithReplicaCount(1).

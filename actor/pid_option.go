@@ -29,11 +29,11 @@ import (
 	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/internal/metric"
 	"github.com/tochemey/goakt/v4/internal/pointer"
+	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/internal/xsync"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/passivation"
 	"github.com/tochemey/goakt/v4/reentrancy"
-	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/supervisor"
 )
 
@@ -97,7 +97,7 @@ func withInitTimeout(duration time.Duration) pidOption {
 }
 
 // withRemoting set the remoting feature
-func withRemoting(remoting remote.Client) pidOption {
+func withRemoting(remoting remoteclient.Client) pidOption {
 	return func(pid *PID) {
 		pid.remoting = remoting
 	}

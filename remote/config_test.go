@@ -45,6 +45,9 @@ func TestConfig(t *testing.T) {
 		assert.Exactly(t, 1200*time.Second, config.IdleTimeout())
 		assert.Exactly(t, "127.0.0.1", config.BindAddr())
 		assert.Exactly(t, 0, config.BindPort())
+		assert.Exactly(t, 8, config.MaxIdleConns())
+		assert.Exactly(t, 5*time.Second, config.DialTimeout())
+		assert.Exactly(t, 15*time.Second, config.KeepAlive())
 	})
 	t.Run("With config", func(t *testing.T) {
 		config := NewConfig("127.0.0.1", 8080, WithReadIdleTimeout(10*time.Second), WithWriteTimeout(10*time.Second))

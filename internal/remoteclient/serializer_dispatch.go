@@ -20,9 +20,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package remote
+package remoteclient
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/tochemey/goakt/v4/remote"
+)
 
 var (
 	errNoSerializerEncode = errors.New("remote: no serializer could encode the message")
@@ -38,7 +42,7 @@ type serializerDispatch struct {
 	entries []ifaceEntry
 }
 
-var _ Serializer = (*serializerDispatch)(nil)
+var _ remote.Serializer = (*serializerDispatch)(nil)
 
 // Serialize tries each registered serializer in order and returns the first
 // successful encoding.

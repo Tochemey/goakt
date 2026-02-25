@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package remote
+package remoteclient
 
 import (
 	"context"
@@ -47,6 +47,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/pointer"
 	"github.com/tochemey/goakt/v4/internal/strconvx"
 	"github.com/tochemey/goakt/v4/internal/xsync"
+	"github.com/tochemey/goakt/v4/remote"
 )
 
 // Client provides the client-side API surface to interact with actors running
@@ -201,7 +202,7 @@ type Client interface {
 	//   - AlreadyExists or FailedPrecondition (server-dependent) if the name
 	//     conflicts with an existing actor.
 	//   - Transport and context errors.
-	RemoteSpawn(ctx context.Context, host string, port int, spawnRequest *SpawnRequest) error
+	RemoteSpawn(ctx context.Context, host string, port int, spawnRequest *remote.SpawnRequest) error
 
 	// RemoteReSpawn requests a restart of an existing actor on the remote node.
 	//
@@ -261,7 +262,7 @@ type Client interface {
 	//   - Server-side failures surfaced as proto errors (e.g., Unavailable, DeadlineExceeded).
 	//
 	// Note: The grain kind must be registered on the remote actor system using RegisterGrainKind.
-	RemoteActivateGrain(ctx context.Context, host string, port int, grainRequest *GrainRequest) error
+	RemoteActivateGrain(ctx context.Context, host string, port int, grainRequest *remote.GrainRequest) error
 
 	// RemoteTellGrain sends a one-way (fire-and-forget) message to a grain.
 	//
@@ -279,7 +280,7 @@ type Client interface {
 	//   - Transport and context errors.
 	//
 	// Note: The grain must already be activated, or the grain kind must be registered on the remote actor system using RegisterGrainKind.
-	RemoteTellGrain(ctx context.Context, host string, port int, grainRequest *GrainRequest, message any) error
+	RemoteTellGrain(ctx context.Context, host string, port int, grainRequest *remote.GrainRequest, message any) error
 
 	// RemoteAskGrain sends a request message to a grain and waits for a reply, subject to the provided timeout and context.
 	//
@@ -298,7 +299,7 @@ type Client interface {
 	//   - Transport and context errors.
 	//
 	// Note: The grain must already be activated, or the grain kind must be registered on the remote actor system using RegisterGrainKind.
-	RemoteAskGrain(ctx context.Context, host string, port int, grainRequest *GrainRequest, message any, timeout time.Duration) (response any, err error)
+	RemoteAskGrain(ctx context.Context, host string, port int, grainRequest *remote.GrainRequest, message any, timeout time.Duration) (response any, err error)
 
 	// NetClient returns a cached or newly created net client for the endpoint.
 	// The returned client maintains its own connection pool and should NOT be closed by
@@ -315,7 +316,7 @@ type Client interface {
 
 	// Compression returns the payload compression strategy configured on this
 	// client. This governs the content encoding used for both requests and responses.
-	Compression() Compression
+	Compression() remote.Compression
 
 	// TLSConfig returns the TLS configuration used by this client, if any. A
 	// nil return value indicates that the client is using an insecure transport.
@@ -333,7 +334,7 @@ type Client interface {
 	// [Serializer.Deserialize] result is returned:
 	//
 	//	r.Serializer(nil).Deserialize(rawBytes)
-	Serializer(msg any) Serializer
+	Serializer(msg any) remote.Serializer
 }
 
 // ClientOption configures a remoting client instance during construction.
@@ -408,7 +409,7 @@ func WithClientKeepAlive(d time.Duration) ClientOption {
 //     or for debugging purposes.
 //
 // If not specified, ZstdCompression is used by default for optimal performance.
-func WithClientCompression(c Compression) ClientOption {
+func WithClientCompression(c remote.Compression) ClientOption {
 	return func(r *client) {
 		r.compression = c
 	}
@@ -416,7 +417,7 @@ func WithClientCompression(c Compression) ClientOption {
 
 // WithClientContextPropagator sets a propagator used to inject context values into outbound remoting calls.
 // If nil, no propagation occurs.
-func WithClientContextPropagator(propagator ContextPropagator) ClientOption {
+func WithClientContextPropagator(propagator remote.ContextPropagator) ClientOption {
 	return func(r *client) {
 		if propagator != nil {
 			r.contextPropagator = propagator
@@ -448,7 +449,7 @@ func WithClientContextPropagator(propagator ContextPropagator) ClientOption {
 //  3. Default — the [Serializer] configured via [WithRemotingSerializer].
 //
 // If serializer is nil the option is silently ignored.
-func WithClientSerializers(msg any, serializer Serializer) ClientOption {
+func WithClientSerializers(msg any, serializer remote.Serializer) ClientOption {
 	return func(r *client) {
 		if serializer == nil {
 			return
@@ -478,7 +479,7 @@ func WithClientSerializers(msg any, serializer Serializer) ClientOption {
 // registration order inside [remoting.resolveSerializer].
 type ifaceEntry struct {
 	iface      reflect.Type
-	serializer Serializer
+	serializer remote.Serializer
 }
 
 // client is the default Remoting implementation backed by proto TCP
@@ -487,8 +488,8 @@ type ifaceEntry struct {
 type client struct {
 	// Client configuration
 	tlsConfig         *tls.Config
-	compression       Compression
-	contextPropagator ContextPropagator
+	compression       remote.Compression
+	contextPropagator remote.ContextPropagator
 
 	// Connection pool settings
 	maxIdleConns int           // Pool size per endpoint (default: 8)
@@ -523,7 +524,7 @@ type client struct {
 	// Serializer(nil) on the receive path. It is constructed once after all
 	// options are applied and reused for every inbound message, avoiding a
 	// per-call heap allocation.
-	dispatcher Serializer
+	dispatcher remote.Serializer
 }
 
 var _ Client = (*client)(nil)
@@ -544,11 +545,11 @@ var _ Client = (*client)(nil)
 func NewClient(opts ...ClientOption) Client {
 	r := &client{
 		// Performance defaults based on benchmarks
-		maxIdleConns: 8,                // 8 pooled connections per endpoint
-		idleTimeout:  30 * time.Second, // 30s before eviction
-		dialTimeout:  5 * time.Second,  // 5s dial timeout
-		keepAlive:    15 * time.Second, // 15s TCP keep-alive
-		compression:  ZstdCompression,  // Zstd compression (matches server default in remote.Config)
+		maxIdleConns: 8,                      // 8 pooled connections per endpoint
+		idleTimeout:  30 * time.Second,       // 30s before eviction
+		dialTimeout:  5 * time.Second,        // 5s dial timeout
+		keepAlive:    15 * time.Second,       // 15s TCP keep-alive
+		compression:  remote.ZstdCompression, // Zstd compression (matches server default in remote.Config)
 		clientCache:  xsync.NewMap[string, *inet.Client](),
 		// Pre-allocate with capacity for the default entry plus a few custom ones.
 		serializers: make([]ifaceEntry, 0, 4),
@@ -557,7 +558,7 @@ func NewClient(opts ...ClientOption) Client {
 	// Register the default proto serializer for all proto.Message implementations.
 	r.serializers = append(r.serializers, ifaceEntry{
 		iface:      reflect.TypeOf((*proto.Message)(nil)).Elem(),
-		serializer: NewProtoSerializer(),
+		serializer: remote.NewProtoSerializer(),
 	})
 
 	// Apply options
@@ -620,7 +621,7 @@ func (r *client) NetClient(host string, port int) *inet.Client {
 //   - Server-side failures surfaced as proto errors (e.g., Unavailable, DeadlineExceeded).
 //
 // Note: The grain kind must be registered on the remote actor system using RegisterGrainKind.
-func (r *client) RemoteActivateGrain(ctx context.Context, host string, port int, grainRequest *GrainRequest) error {
+func (r *client) RemoteActivateGrain(ctx context.Context, host string, port int, grainRequest *remote.GrainRequest) error {
 	grain, err := getGrainFromRequest(host, port, grainRequest)
 	if err != nil {
 		return err
@@ -664,7 +665,7 @@ func (r *client) RemoteActivateGrain(ctx context.Context, host string, port int,
 //   - Transport and context errors.
 //
 // Note: The grain must already be activated, or the grain kind must be registered on the remote actor system using RegisterGrainKind.
-func (r *client) RemoteAskGrain(ctx context.Context, host string, port int, grainRequest *GrainRequest, message any, timeout time.Duration) (response any, err error) {
+func (r *client) RemoteAskGrain(ctx context.Context, host string, port int, grainRequest *remote.GrainRequest, message any, timeout time.Duration) (response any, err error) {
 	grain, err := getGrainFromRequest(host, port, grainRequest)
 	if err != nil {
 		return nil, err
@@ -732,7 +733,7 @@ func (r *client) RemoteAskGrain(ctx context.Context, host string, port int, grai
 //   - Transport and context errors.
 //
 // Note: The grain must already be activated, or the grain kind must be registered on the remote actor system using RegisterGrainKind.
-func (r *client) RemoteTellGrain(ctx context.Context, host string, port int, grainRequest *GrainRequest, message any) error {
+func (r *client) RemoteTellGrain(ctx context.Context, host string, port int, grainRequest *remote.GrainRequest, message any) error {
 	grain, err := getGrainFromRequest(host, port, grainRequest)
 	if err != nil {
 		return err
@@ -984,7 +985,7 @@ func (r *client) RemoteBatchTell(ctx context.Context, from, to *address.Address,
 // is required, include a correlation ID within your message payloads.
 func (r *client) RemoteBatchAsk(ctx context.Context, from, to *address.Address, messages []any, timeout time.Duration) (responses []any, err error) {
 	remoteMessages := make([]*internalpb.RemoteMessage, 0, len(messages))
-	serializers := make([]Serializer, 0, len(messages))
+	serializers := make([]remote.Serializer, 0, len(messages))
 	// Pre-compute address strings once; they are constant across the whole batch.
 	fromStr := from.String()
 	toStr := to.String()
@@ -1056,7 +1057,7 @@ func (r *client) RemoteBatchAsk(ctx context.Context, from, to *address.Address, 
 //
 // Returns ErrTypeNotRegistered if the remote node does not recognize the actor
 // type (kind). Other failures may include name conflicts or transport errors.
-func (r *client) RemoteSpawn(ctx context.Context, host string, port int, spawnRequest *SpawnRequest) error {
+func (r *client) RemoteSpawn(ctx context.Context, host string, port int, spawnRequest *remote.SpawnRequest) error {
 	if err := spawnRequest.Validate(); err != nil {
 		return fmt.Errorf("invalid spawn option: %w", err)
 	}
@@ -1257,7 +1258,7 @@ func (r *client) Close() {
 // Compression returns the compression algorithm configured on the remoting
 // client. It determines the encodings offered for responses and, where
 // supported, the encoding used for outbound requests.
-func (r *client) Compression() Compression {
+func (r *client) Compression() remote.Compression {
 	return r.compression
 }
 
@@ -1270,7 +1271,7 @@ func (r *client) TLSConfig() *tls.Config {
 // Serializer implements [Client]. Pass nil to get the composite
 // dispatching serializer for the receive path, or pass the outgoing message
 // to get the most-specific serializer registered for its dynamic type.
-func (r *client) Serializer(msg any) Serializer {
+func (r *client) Serializer(msg any) remote.Serializer {
 	return r.resolveSerializer(msg)
 }
 
@@ -1286,7 +1287,7 @@ func (r *client) Serializer(msg any) Serializer {
 //
 // The slice r.serializers is immutable after [NewClient] returns, so no
 // lock is needed.
-func (r *client) resolveSerializer(message any) Serializer {
+func (r *client) resolveSerializer(message any) remote.Serializer {
 	msgType := reflect.TypeOf(message)
 	if msgType == nil {
 		return r.dispatcher
@@ -1328,13 +1329,13 @@ func (r *client) newNetClient(host string, port int) *inet.Client {
 
 	// Add compression wrapper
 	switch r.compression {
-	case BrotliCompression:
+	case remote.BrotliCompression:
 		opts = append(opts, inet.WithClientConnWrapper(inet.NewBrotliConnWrapper()))
-	case ZstdCompression:
+	case remote.ZstdCompression:
 		if wrapper, err := inet.NewZstdConnWrapper(); err == nil {
 			opts = append(opts, inet.WithClientConnWrapper(wrapper))
 		}
-	case GzipCompression:
+	case remote.GzipCompression:
 		if wrapper, err := inet.NewGzipConnWrapper(); err == nil {
 			opts = append(opts, inet.WithClientConnWrapper(wrapper))
 		}
@@ -1427,7 +1428,7 @@ func parseAlreadyExists(msg string) error {
 	return gerrors.ErrActorAlreadyExists
 }
 
-func getGrainFromRequest(host string, port int, grainRequest *GrainRequest) (*internalpb.Grain, error) {
+func getGrainFromRequest(host string, port int, grainRequest *remote.GrainRequest) (*internalpb.Grain, error) {
 	if err := grainRequest.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid grain request: %w", err)
 	}

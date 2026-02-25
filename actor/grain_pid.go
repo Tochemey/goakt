@@ -39,10 +39,10 @@ import (
 	"github.com/tochemey/goakt/v4/internal/codec"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/pointer"
+	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/internal/xsync"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/passivation"
-	"github.com/tochemey/goakt/v4/remote"
 )
 
 type grainPID struct {
@@ -61,7 +61,7 @@ type grainPID struct {
 
 	// atomic flag indicating whether the grain is processing messages
 	processing atomic.Int32
-	remoting   remote.Client
+	remoting   remoteclient.Client
 
 	// the list of dependencies
 	dependencies *xsync.Map[string, extension.Dependency]

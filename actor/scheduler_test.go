@@ -36,6 +36,7 @@ import (
 	"github.com/tochemey/goakt/v4/address"
 	"github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/log"
 	testkit "github.com/tochemey/goakt/v4/mocks/discovery"
 	"github.com/tochemey/goakt/v4/remote"
@@ -317,7 +318,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		remoting := remote.NewClient()
+		remoting := remoteclient.NewClient()
 		// get the address of the actor
 		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
@@ -393,7 +394,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		remoting := remote.NewClient()
+		remoting := remoteclient.NewClient()
 		// get the address of the actor
 		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
@@ -453,7 +454,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		remoting := remote.NewClient()
+		remoting := remoteclient.NewClient()
 		// get the address of the actor
 		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
@@ -699,7 +700,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		remoting := remote.NewClient()
+		remoting := remoteclient.NewClient()
 		// get the address of the actor
 		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
@@ -774,7 +775,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		remoting := remote.NewClient()
+		remoting := remoteclient.NewClient()
 		// get the address of the actor
 		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
@@ -829,7 +830,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		remoting := remote.NewClient()
+		remoting := remoteclient.NewClient()
 		// get the address of the actor
 		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
@@ -880,7 +881,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		remoting := remote.NewClient()
+		remoting := remoteclient.NewClient()
 		// get the address of the actor
 		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
@@ -1143,7 +1144,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		remoting := remote.NewClient()
+		remoting := remoteclient.NewClient()
 		// get the address of the actor
 		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
@@ -1206,7 +1207,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		remoting := remote.NewClient()
+		remoting := remoteclient.NewClient()
 		// get the address of the actor
 		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
@@ -1253,7 +1254,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		remoting := remote.NewClient()
+		remoting := remoteclient.NewClient()
 		// get the address of the actor
 		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
@@ -1394,7 +1395,7 @@ func TestScheduler(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
-		remoting := remote.NewClient()
+		remoting := remoteclient.NewClient()
 		// get the address of the actor
 		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
