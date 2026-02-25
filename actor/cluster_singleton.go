@@ -118,7 +118,7 @@ func (x *actorSystem) spawnSingletonOnLeader(ctx context.Context, cl cluster.Clu
 	//   - If the coordinator is the local node, we spawn locally to avoid a needless RemoteSpawn round-trip.
 	peers, err := cl.Members(ctx)
 	if err != nil {
-		return nil,  fmt.Errorf("failed to spawn singleton actor: %w", err)
+		return nil, fmt.Errorf("failed to spawn singleton actor: %w", err)
 	}
 
 	// find the coordinator (leader) node in the cluster

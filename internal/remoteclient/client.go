@@ -1130,7 +1130,7 @@ func (r *client) RemoteSpawn(ctx context.Context, host string, port int, spawnRe
 
 	if res, ok := resp.(*internalpb.RemoteSpawnResponse); ok && res.GetAddress() != "" {
 		addr := res.GetAddress()
-		return new(addr), nil
+		return pointer.To(addr), nil
 	}
 
 	return nil, gerrors.ErrInvalidResponse
@@ -1177,7 +1177,7 @@ func (r *client) RemoteReSpawn(ctx context.Context, host string, port int, name 
 	// Extract address from successful response
 	if res, ok := resp.(*internalpb.RemoteReSpawnResponse); ok && res.GetAddress() != "" {
 		addr := res.GetAddress()
-		return new(addr), nil
+		return pointer.To(addr), nil
 	}
 
 	return nil, gerrors.ErrInvalidResponse
