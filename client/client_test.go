@@ -1266,9 +1266,9 @@ func TestClient(t *testing.T) {
 		require.NotNil(t, client)
 
 		actorName := "actorName"
-		whereis, err := client.Exists(ctx, actorName)
-		require.Error(t, err)
-		require.Nil(t, whereis)
+		exists, err := client.Exists(ctx, actorName)
+		require.NoError(t, err)
+		require.False(t, exists, "actor should not exist when not spawned")
 
 		err = client.Stop(ctx, actorName)
 		require.NoError(t, err)
