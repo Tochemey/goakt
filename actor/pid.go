@@ -61,7 +61,6 @@ import (
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/passivation"
 	"github.com/tochemey/goakt/v4/reentrancy"
-	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/supervisor"
 )
 
@@ -102,7 +101,7 @@ type restartNode struct {
 //   - Identity: Name, ID, Address, Kind, Role, Equals
 //   - State queries: IsLocal, IsRunning, IsSuspended, IsSingleton, IsRelocatable, IsStopping
 //   - Messaging: Tell, Ask, BatchTell, BatchAsk
-//   - Remote helpers: RemoteLookup, RemoteStop, RemoteSpawn, RemoteReSpawn
+//   - Remote helpers: RemoteLookup, RemoteStop, RemoteReSpawn
 //
 // # Local-only operations (return ErrNotLocal for remote PIDs)
 //
@@ -1248,53 +1247,29 @@ func (pid *PID) RemoteStop(ctx context.Context, host string, port int, name stri
 	return pid.remoting.RemoteStop(ctx, host, port, name)
 }
 
-// RemoteSpawn creates a named actor on the specified remote node.
-// The actor type must be registered on the target node via ActorSystem.Register before this call.
-// Returns ErrRemotingDisabled when remoting is not configured.
-func (pid *PID) RemoteSpawn(ctx context.Context, host string, port int, actorName, actorType string, opts ...SpawnOption) error {
-	if !pid.remotingEnabled() {
-		return gerrors.ErrRemotingDisabled
-	}
-
-	config := newSpawnConfig(opts...)
-	if err := config.Validate(); err != nil {
-		return err
-	}
-
-	var singletonSpec *remote.SingletonSpec
-	if config.asSingleton && pid.singletonSpec != nil {
-		singletonSpec = &remote.SingletonSpec{
-			SpawnTimeout: pid.singletonSpec.SpawnTimeout,
-			WaitInterval: pid.singletonSpec.WaitInterval,
-			MaxRetries:   int32(pid.singletonSpec.MaxRetries),
-		}
-	}
-
-	request := &remote.SpawnRequest{
-		Name:                actorName,
-		Kind:                actorType,
-		Singleton:           singletonSpec,
-		Relocatable:         config.relocatable,
-		PassivationStrategy: config.passivationStrategy,
-		Dependencies:        config.dependencies,
-		EnableStashing:      config.enableStash,
-	}
-
-	if config.supervisor != nil {
-		request.Supervisor = config.supervisor
-	}
-
-	return pid.remoting.RemoteSpawn(ctx, host, port, request)
-}
-
 // RemoteReSpawn restarts a named actor on the specified remote node.
 // Returns ErrRemotingDisabled when remoting is not configured.
-func (pid *PID) RemoteReSpawn(ctx context.Context, host string, port int, name string) error {
+func (pid *PID) RemoteReSpawn(ctx context.Context, host string, port int, name string) (*PID, error) {
 	if !pid.remotingEnabled() {
-		return gerrors.ErrRemotingDisabled
+		return nil, gerrors.ErrRemotingDisabled
 	}
 
-	return pid.remoting.RemoteReSpawn(ctx, host, port, name)
+	addr, err := pid.remoting.RemoteReSpawn(ctx, host, port, name)
+	if err != nil {
+		return nil, err
+	}
+
+	if addr == nil {
+		return nil, gerrors.NewErrActorNotFound(name)
+	}
+
+	// parse the address string from the response
+	address, err := address.Parse(*addr)
+	if err != nil {
+		return nil, err
+	}
+
+	return newRemotePID(address, pid.remoting), nil
 }
 
 // Shutdown gracefully stops this actor and all its children.

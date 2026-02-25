@@ -1941,108 +1941,108 @@ func TestReceiveContext(t *testing.T) {
 			},
 		)
 	})
-	t.Run("With no panics RemoteReSpawn when actor not found", func(t *testing.T) {
-		// create the context
+	t.Run("With RemoteReSpawn when actor not found returns ErrActorNotFound", func(t *testing.T) {
 		ctx := context.TODO()
-		// define the logger to use
 		logger := log.DiscardLogger
-		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
 		host := "127.0.0.1"
 
-		// create the actor system
-		sys, err := NewActorSystem(
-			"test",
+		sys, err := NewActorSystem("test",
 			WithLogger(logger),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
-		// assert there are no error
 		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
 
-		// start the actor system
-		err = sys.Start(ctx)
-		assert.NoError(t, err)
-
-		// create an exchanger two
-		actorName2 := "Exchange2"
-
-		// create actor1
-		actor1 := &exchanger{}
-		pid1, err := sys.Spawn(ctx, "Exchange1", actor1)
-		require.NoError(t, err)
-		require.NotNil(t, pid1)
+		pid1, err := sys.Spawn(ctx, "Exchange1", &exchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
-		// create an instance of receive context
-		context := &ReceiveContext{
+		rctx := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
 			sender:  sys.NoSender(),
 			self:    pid1,
 		}
 
-		context.RemoteReSpawn(host, remotingPort, actorName2)
-		require.NoError(t, context.getError())
-		pause.For(time.Second)
+		remotePID := rctx.RemoteReSpawn(host, remotingPort, "nonexistent")
+		require.Nil(t, remotePID)
+		require.Error(t, rctx.getError())
+		assert.ErrorIs(t, rctx.getError(), errors.ErrActorNotFound)
 
-		t.Cleanup(
-			func() {
-				assert.NoError(t, pid1.Shutdown(ctx))
-				assert.NoError(t, sys.Stop(ctx))
-			},
-		)
+		t.Cleanup(func() {
+			assert.NoError(t, pid1.Shutdown(ctx))
+			assert.NoError(t, sys.Stop(ctx))
+		})
 	})
-	t.Run("With failed RemoteReSpawn", func(t *testing.T) {
-		// create the context
+
+	t.Run("With RemoteReSpawn when actor found returns PID", func(t *testing.T) {
 		ctx := context.TODO()
-		// define the logger to use
 		logger := log.DiscardLogger
-		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
 		host := "127.0.0.1"
 
-		// create the actor system
-		sys, err := NewActorSystem(
-			"test",
+		sys, err := NewActorSystem("test",
 			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
-		// assert there are no error
 		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
 
-		// start the actor system
-		err = sys.Start(ctx)
-		assert.NoError(t, err)
-
-		// create an exchanger 2
-		actorName2 := "Exchange2"
-
-		// create actor1
-		actor1 := &exchanger{}
-		pid1, err := sys.Spawn(ctx, "Exchange1", actor1)
+		pid1, err := sys.Spawn(ctx, "Exchange1", &exchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
-		// create an instance of receive context
-		context := &ReceiveContext{
+		rctx := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
 			sender:  sys.NoSender(),
 			self:    pid1,
 		}
 
-		context.RemoteReSpawn(host, remotingPort, actorName2)
-		require.Error(t, context.getError())
-		pause.For(time.Second)
+		remotePID := rctx.RemoteReSpawn(host, remotingPort, "Exchange1")
+		require.NotNil(t, remotePID)
+		assert.True(t, remotePID.IsRemote())
+		require.NoError(t, rctx.getError())
 
-		t.Cleanup(
-			func() {
-				assert.NoError(t, pid1.Shutdown(ctx))
-				assert.NoError(t, sys.Stop(ctx))
-			},
-		)
+		t.Cleanup(func() {
+			assert.NoError(t, pid1.Shutdown(ctx))
+			assert.NoError(t, sys.Stop(ctx))
+		})
+	})
+
+	t.Run("With RemoteReSpawn when remoting unreachable returns error", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "127.0.0.1"
+
+		sys, err := NewActorSystem("test", WithLogger(logger))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+
+		pid1, err := sys.Spawn(ctx, "Exchange1", &exchanger{})
+		require.NoError(t, err)
+		require.NotNil(t, pid1)
+
+		rctx := &ReceiveContext{
+			ctx:     ctx,
+			message: new(testpb.TestSend),
+			sender:  sys.NoSender(),
+			self:    pid1,
+		}
+
+		remotePID := rctx.RemoteReSpawn(host, remotingPort, "Exchange2")
+		require.Nil(t, remotePID)
+		require.Error(t, rctx.getError())
+
+		t.Cleanup(func() {
+			assert.NoError(t, pid1.Shutdown(ctx))
+			assert.NoError(t, sys.Stop(ctx))
+		})
 	})
 	t.Run("With successful PipeTo", func(t *testing.T) {
 		askTimeout := time.Minute

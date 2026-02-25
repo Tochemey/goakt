@@ -45,6 +45,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/datacentercontroller"
 	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/pointer"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/log"
 	mockcluster "github.com/tochemey/goakt/v4/mocks/cluster"
@@ -786,7 +787,7 @@ func TestSpawn(t *testing.T) {
 		// create an actor on node1
 		actor := NewMockActor()
 		actorName := "actorID"
-		err := node.SpawnOn(ctx, actorName, actor)
+		_, err := node.SpawnOn(ctx, actorName, actor)
 		require.NoError(t, err)
 
 		// free resources
@@ -825,7 +826,7 @@ func TestSpawn(t *testing.T) {
 		// create an actor on node1
 		actor := NewMockActor()
 		actorName := "actorID"
-		err := node1.SpawnOn(ctx, actorName, actor)
+		_, err := node1.SpawnOn(ctx, actorName, actor)
 		require.NoError(t, err)
 
 		pause.For(200 * time.Millisecond)
@@ -835,7 +836,7 @@ func TestSpawn(t *testing.T) {
 		require.Error(t, err)
 		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
 
-		err = node1.SpawnOn(ctx, actorName, actor)
+		_, err = node1.SpawnOn(ctx, actorName, actor)
 		require.Error(t, err)
 		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
 
@@ -861,7 +862,7 @@ func TestSpawn(t *testing.T) {
 		// create an actor on node1
 		actor := NewMockActor()
 		actorName := "actorID"
-		err := actorSystem.SpawnOn(ctx, actorName, actor)
+		_, err := actorSystem.SpawnOn(ctx, actorName, actor)
 		require.Error(t, err)
 		require.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
 	})
@@ -886,7 +887,7 @@ func TestSpawn(t *testing.T) {
 		// create an actor on node1
 		actor := NewMockActor()
 		actorName := strings.Repeat("a", 256)
-		err = actorSystem.SpawnOn(ctx, actorName, actor)
+		_, err = actorSystem.SpawnOn(ctx, actorName, actor)
 		require.Error(t, err)
 
 		err = actorSystem.Stop(ctx)
@@ -911,7 +912,7 @@ func TestSpawn(t *testing.T) {
 			clusterMock.AssertExpectations(t)
 		})
 
-		err := system.SpawnOn(ctx, actorName, actor)
+		_, err := system.SpawnOn(ctx, actorName, actor)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, assert.AnError)
 		assert.ErrorContains(t, err, "failed to fetch cluster nodes")
@@ -936,10 +937,10 @@ func TestSpawn(t *testing.T) {
 				require.Equal(t, reentrancy.AllowAll, request.Reentrancy.Mode())
 				require.Equal(t, 7, request.Reentrancy.MaxInFlight())
 			}).
-			Return(nil).
+			Return(pointer.To("goakt://test@127.0.0.1:9000/actor"), nil).
 			Once()
 
-		err := system.SpawnOn(ctx, actorName, actor,
+		_, err := system.SpawnOn(ctx, actorName, actor,
 			WithPlacement(Random),
 			WithReentrancy(reentrancy.New(
 				reentrancy.WithMode(reentrancy.AllowAll),
@@ -981,7 +982,7 @@ func TestSpawn(t *testing.T) {
 		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{}, nil).Once()
 		clusterMock.EXPECT().Actors(mock.Anything, mock.Anything).Return(nil, nil).Once()
 
-		err = actorSystem.SpawnOn(ctx, actorName, actor)
+		_, err = actorSystem.SpawnOn(ctx, actorName, actor)
 		require.NoError(t, err)
 
 		pause.For(200 * time.Millisecond)
@@ -1025,7 +1026,7 @@ func TestSpawn(t *testing.T) {
 		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{}, nil)
 		clusterMock.EXPECT().Actors(mock.Anything, mock.Anything).Return(nil, nil).Once()
 
-		err = actorSystem.SpawnOn(ctx, actorName, actor, WithPlacement(LeastLoad))
+		_, err = actorSystem.SpawnOn(ctx, actorName, actor, WithPlacement(LeastLoad))
 		require.NoError(t, err)
 
 		pause.For(200 * time.Millisecond)
@@ -1065,7 +1066,7 @@ func TestSpawn(t *testing.T) {
 		// create an actor on node1
 		actor := NewMockActor()
 		actorName := "actorID"
-		err := node1.SpawnOn(ctx, actorName, actor, WithPlacement(Random))
+		_, err := node1.SpawnOn(ctx, actorName, actor, WithPlacement(Random))
 		require.NoError(t, err)
 
 		pause.For(200 * time.Millisecond)
@@ -1116,7 +1117,7 @@ func TestSpawn(t *testing.T) {
 		// create an actor on node1
 		actor := NewMockActor()
 		actorName := "actorID"
-		err := node1.SpawnOn(ctx, actorName, actor, WithPlacement(Local))
+		_, err := node1.SpawnOn(ctx, actorName, actor, WithPlacement(Local))
 		require.NoError(t, err)
 
 		pause.For(200 * time.Millisecond)
@@ -1191,7 +1192,7 @@ func TestSpawn(t *testing.T) {
 		// try creating an actor on node1 and it will be placed on node2
 		actor := NewMockActor()
 		actorName := "actorID"
-		err := node1.SpawnOn(ctx, actorName, actor, WithPlacement(LeastLoad))
+		_, err := node1.SpawnOn(ctx, actorName, actor, WithPlacement(LeastLoad))
 		require.NoError(t, err)
 
 		pause.For(time.Second)
@@ -1264,7 +1265,7 @@ func TestSpawn(t *testing.T) {
 		// try creating an actor on node1 and it will be placed on node2
 		actor := NewMockActor()
 		actorName := "actorID"
-		err := node1.SpawnOn(ctx, actorName, actor, WithPlacement(LeastLoad))
+		_, err := node1.SpawnOn(ctx, actorName, actor, WithPlacement(LeastLoad))
 		require.NoError(t, err)
 
 		pause.For(200 * time.Millisecond)
@@ -1337,7 +1338,7 @@ func TestSpawn(t *testing.T) {
 		// try creating an actor on node1 and it will be placed on node2
 		actor := NewMockActor()
 		actorName := "actorID"
-		err := node1.SpawnOn(ctx, actorName, actor, WithPlacement(LeastLoad))
+		_, err := node1.SpawnOn(ctx, actorName, actor, WithPlacement(LeastLoad))
 		require.NoError(t, err)
 
 		pause.For(200 * time.Millisecond)
@@ -1410,7 +1411,7 @@ func TestSpawn(t *testing.T) {
 		// try creating an actor on node1 and it will be placed on node2
 		actor := NewMockActor()
 		actorName := "actorID"
-		err := node1.SpawnOn(ctx, actorName, actor, WithPlacement(LeastLoad))
+		_, err := node1.SpawnOn(ctx, actorName, actor, WithPlacement(LeastLoad))
 		require.NoError(t, err)
 
 		pause.For(200 * time.Millisecond)
@@ -1466,7 +1467,7 @@ func TestSpawn(t *testing.T) {
 		actor := NewMockActor()
 		actorName := "actorID"
 		role := "api"
-		err := node1.SpawnOn(ctx, actorName, actor, WithRole(role))
+		_, err := node1.SpawnOn(ctx, actorName, actor, WithRole(role))
 		require.NoError(t, err)
 
 		pause.For(200 * time.Millisecond)
@@ -1475,7 +1476,7 @@ func TestSpawn(t *testing.T) {
 		require.Error(t, err)
 		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
 
-		err = node1.SpawnOn(ctx, actorName, actor, WithRole(role))
+		_, err = node1.SpawnOn(ctx, actorName, actor, WithRole(role))
 		require.Error(t, err)
 		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
 
@@ -1523,11 +1524,11 @@ func TestSpawn(t *testing.T) {
 		actor := NewMockActor()
 		actorName := "actorID"
 		role := "frontend"
-		err := node1.SpawnOn(ctx, actorName, actor, WithRole(role))
+		_, err := node1.SpawnOn(ctx, actorName, actor, WithRole(role))
 		require.Error(t, err)
 		assert.ErrorContains(t, err, fmt.Sprintf("no nodes with role %s found in the cluster", role))
 
-		err = node3.SpawnOn(ctx, actorName, actor, WithRole(role))
+		_, err = node3.SpawnOn(ctx, actorName, actor, WithRole(role))
 		require.Error(t, err)
 		assert.ErrorContains(t, err, fmt.Sprintf("no nodes with role %s found in the cluster", role))
 
@@ -1576,7 +1577,7 @@ func TestSpawn(t *testing.T) {
 		actor := NewMockActor()
 		actorName := "actorID"
 		role := "api"
-		err := node1.SpawnOn(ctx, actorName, actor, WithRole(role), WithPlacement(Local))
+		_, err := node1.SpawnOn(ctx, actorName, actor, WithRole(role), WithPlacement(Local))
 		require.NoError(t, err)
 
 		pause.For(200 * time.Millisecond)
@@ -1590,7 +1591,7 @@ func TestSpawn(t *testing.T) {
 		require.Error(t, err)
 		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
 
-		err = node1.SpawnOn(ctx, actorName, actor, WithRole(role))
+		_, err = node1.SpawnOn(ctx, actorName, actor, WithRole(role))
 		require.Error(t, err)
 		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
 
@@ -1635,7 +1636,7 @@ func TestSpawn(t *testing.T) {
 		// create an actor on node1
 		actor := NewMockActor()
 		actorName := "actorID"
-		err := node1.SpawnOn(ctx, actorName, actor, WithPlacement(RoundRobin))
+		_, err := node1.SpawnOn(ctx, actorName, actor, WithPlacement(RoundRobin))
 		require.NoError(t, err)
 
 		pause.For(200 * time.Millisecond)
@@ -1676,7 +1677,7 @@ func TestSpawn(t *testing.T) {
 		clmock.EXPECT().NextRoundRobinValue(ctx, cluster.ActorsRoundRobinKey).Return(-1, assert.AnError).Once()
 
 		actor := NewMockActor()
-		err := system.SpawnOn(ctx, actorName, actor, WithPlacement(RoundRobin))
+		_, err := system.SpawnOn(ctx, actorName, actor, WithPlacement(RoundRobin))
 		require.Error(t, err)
 		assert.ErrorIs(t, err, assert.AnError)
 	})
@@ -1700,11 +1701,11 @@ func TestSpawn(t *testing.T) {
 					req.Relocatable == true &&
 					req.EnableStashing == false
 			})).
-			Return(nil).
+			Return(pointer.To("goakt://test@127.0.0.1:9000/actor"), nil).
 			Once()
 
 		actor := NewMockActor()
-		err := sys.SpawnOn(ctx, "actor-1", actor, WithDataCenter(&targetDC))
+		_, err := sys.SpawnOn(ctx, "actor-1", actor, WithDataCenter(&targetDC))
 		require.NoError(t, err)
 		remotingMock.AssertExpectations(t)
 	})
@@ -1726,7 +1727,7 @@ func TestSpawn(t *testing.T) {
 			RemoteSpawn(mock.Anything, host, port, mock.MatchedBy(func(req *remote.SpawnRequest) bool {
 				return req.Name == actorName && req.Kind != ""
 			})).
-			Return(assert.AnError).
+			Return(nil, assert.AnError).
 			Once()
 
 		pid, err := system.Spawn(ctx, actorName, actor, WithHostAndPort(host, port))
@@ -1753,7 +1754,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 		config := newSpawnConfig(WithDataCenter(&datacenter.DataCenter{Name: "dc-west", Region: "r", Zone: "z"}))
 		actor := NewMockActor()
 
-		err := sys.spawnOnDatacenter(ctx, "actor-1", actor, config)
+		_, err := sys.spawnOnDatacenter(ctx, "actor-1", actor, config)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, gerrors.ErrDataCenterNotReady)
 	})
@@ -1797,7 +1798,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 		config := newSpawnConfig(WithDataCenter(&datacenter.DataCenter{Name: "dc-west", Region: "r", Zone: "z"}))
 		actor := NewMockActor()
 
-		err = sys.spawnOnDatacenter(ctx, "actor-1", actor, config)
+		_, err = sys.spawnOnDatacenter(ctx, "actor-1", actor, config)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, gerrors.ErrDataCenterStaleRecords)
 	})
@@ -1815,7 +1816,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 		config := newSpawnConfig(WithDataCenter(&datacenter.DataCenter{Name: "dc-west", Region: "r", Zone: "z"}))
 		actor := NewMockActor()
 
-		err := sys.spawnOnDatacenter(ctx, "actor-1", actor, config)
+		_, err := sys.spawnOnDatacenter(ctx, "actor-1", actor, config)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, gerrors.ErrDataCenterRecordNotFound)
 	})
@@ -1829,7 +1830,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 		config := newSpawnConfig(WithDataCenter(&datacenter.DataCenter{Name: "dc-west", Region: "r", Zone: "z"}))
 		actor := NewMockActor()
 
-		err := sys.spawnOnDatacenter(ctx, "actor-1", actor, config)
+		_, err := sys.spawnOnDatacenter(ctx, "actor-1", actor, config)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, gerrors.ErrDataCenterRecordNotFound)
 	})
@@ -1848,7 +1849,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 		config := newSpawnConfig(WithDataCenter(&targetDC))
 		actor := NewMockActor()
 
-		err := sys.spawnOnDatacenter(ctx, "actor-1", actor, config)
+		_, err := sys.spawnOnDatacenter(ctx, "actor-1", actor, config)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, gerrors.ErrDataCenterRecordNotFound)
 	})
@@ -1867,7 +1868,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 		config := newSpawnConfig(WithDataCenter(&targetDC))
 		actor := NewMockActor()
 
-		err := sys.spawnOnDatacenter(ctx, "actor-1", actor, config)
+		_, err := sys.spawnOnDatacenter(ctx, "actor-1", actor, config)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "failed to split host and port from endpoint")
 	})
@@ -1886,7 +1887,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 		config := newSpawnConfig(WithDataCenter(&targetDC))
 		actor := NewMockActor()
 
-		err := sys.spawnOnDatacenter(ctx, "actor-1", actor, config)
+		_, err := sys.spawnOnDatacenter(ctx, "actor-1", actor, config)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "failed to convert port to int")
 	})
@@ -1906,13 +1907,13 @@ func TestSpawnOnDatacenter(t *testing.T) {
 			RemoteSpawn(mock.Anything, "127.0.0.1", 9999, mock.MatchedBy(func(req *remote.SpawnRequest) bool {
 				return req.Name == "actor-1" && req.Kind != "" && !req.Relocatable
 			})).
-			Return(gerrors.ErrTypeNotRegistered).
+			Return(nil, gerrors.ErrTypeNotRegistered).
 			Once()
 
 		config := newSpawnConfig(WithDataCenter(&targetDC), WithRelocationDisabled())
 		actor := NewMockActor()
 
-		err := sys.spawnOnDatacenter(ctx, "actor-1", actor, config)
+		_, err := sys.spawnOnDatacenter(ctx, "actor-1", actor, config)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, gerrors.ErrTypeNotRegistered)
 	})
@@ -1935,13 +1936,13 @@ func TestSpawnOnDatacenter(t *testing.T) {
 					req.Relocatable == true &&
 					req.EnableStashing == false
 			})).
-			Return(nil).
+			Return(pointer.To("goakt://test@127.0.0.1:9000/actor"), nil).
 			Once()
 
 		config := newSpawnConfig(WithDataCenter(&targetDC))
 		actor := NewMockActor()
 
-		err := sys.spawnOnDatacenter(ctx, "actor-1", actor, config)
+		_, err := sys.spawnOnDatacenter(ctx, "actor-1", actor, config)
 		require.NoError(t, err)
 		remotingMock.AssertExpectations(t)
 	})
@@ -1964,7 +1965,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 					req.PassivationStrategy != nil &&
 					req.EnableStashing == true
 			})).
-			Return(nil).
+			Return(pointer.To("goakt://test@127.0.0.1:9000/actor"), nil).
 			Once()
 
 		config := newSpawnConfig(
@@ -1975,7 +1976,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 		)
 		actor := NewMockActor()
 
-		err := sys.spawnOnDatacenter(ctx, "actor-2", actor, config)
+		_, err := sys.spawnOnDatacenter(ctx, "actor-2", actor, config)
 		require.NoError(t, err)
 		remotingMock.AssertExpectations(t)
 	})

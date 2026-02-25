@@ -64,12 +64,12 @@ type spawnSingletonSpy struct {
 	config    *clusterSingletonConfig
 }
 
-func (s *spawnSingletonSpy) SpawnSingleton(ctx context.Context, name string, actor Actor, opts ...ClusterSingletonOption) error {
+func (s *spawnSingletonSpy) SpawnSingleton(ctx context.Context, name string, actor Actor, opts ...ClusterSingletonOption) (*PID, error) {
 	s.called = true
 	s.actorName = name
 	s.actor = actor
 	s.config = newClusterSingletonConfig(opts...)
-	return nil
+	return nil, nil
 }
 
 func TestRelocatorPeersError(t *testing.T) {
@@ -235,7 +235,7 @@ func TestRelocatorSpawnRemoteActorSetsReentrancyConfig(t *testing.T) {
 			require.Equal(t, reentrancy.StashNonReentrant, req.Reentrancy.Mode())
 			require.Equal(t, 5, req.Reentrancy.MaxInFlight())
 		}).
-		Return(nil).
+		Return(pointer.To("goakt://test@127.0.0.1:9000/actor"), nil).
 		Once()
 
 	actor := &relocator{
@@ -741,7 +741,7 @@ func TestRelocationWithSingletonActor(t *testing.T) {
 
 	// create a singleton actor
 	actorName := "actorName"
-	err := node1.SpawnSingleton(ctx, actorName, NewMockActor())
+	_, err := node1.SpawnSingleton(ctx, actorName, NewMockActor())
 	require.NoError(t, err)
 
 	pause.For(time.Second)

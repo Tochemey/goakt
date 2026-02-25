@@ -84,7 +84,7 @@ func main() {
 		panic(err)
 	}
 
-	err = actorSystem.SpawnSingleton(context.Background(), "MySingleton", NewSingleton())
+	_, err = actorSystem.SpawnSingleton(context.Background(), "MySingleton", NewSingleton())
 	if err != nil {
 		if !errors.Is(err, goakterrors.ErrSingletonAlreadyExists) {
 			panic(err)

@@ -157,7 +157,7 @@ func main() {
 
 	fmt.Println("Cluster started")
 
-	err = actorSystem.SpawnSingleton(ctx, "hello-world", NewHelloWorld())
+	_, err = actorSystem.SpawnSingleton(ctx, "hello-world", NewHelloWorld())
 	if err != nil {
 		fmt.Printf("Error spawning singleton actor: %v\n", err)
 	}

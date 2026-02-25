@@ -41,6 +41,7 @@ import (
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
+	"github.com/tochemey/goakt/v4/internal/pointer"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/log"
@@ -74,11 +75,11 @@ func TestSingletonActor(t *testing.T) {
 		actor := NewMockActor()
 		actorName := "actorID"
 		// create a singleton actor
-		err := cl1.SpawnSingleton(ctx, actorName, actor)
+		_, err := cl1.SpawnSingleton(ctx, actorName, actor)
 		require.NoError(t, err)
 
 		// attempt to create another singleton actor with the same kind is idempotent
-		err = cl2.SpawnSingleton(ctx, "actorName", actor)
+		_, err = cl2.SpawnSingleton(ctx, "actorName", actor)
 		require.Error(t, err)
 		require.ErrorIs(t, err, gerrors.ErrSingletonAlreadyExists)
 
@@ -105,7 +106,7 @@ func TestSingletonActor(t *testing.T) {
 		system.locker.Unlock()
 
 		retries := int(math.MaxInt32) + 1
-		err := system.SpawnSingleton(ctx, "singleton", NewMockActor(), WithSingletonSpawnRetries(retries))
+		_, err := system.SpawnSingleton(ctx, "singleton", NewMockActor(), WithSingletonSpawnRetries(retries))
 		require.Error(t, err)
 		require.ErrorContains(t, err, "out of range for int32")
 	})
@@ -133,7 +134,7 @@ func TestSingletonActor(t *testing.T) {
 		actor := NewMockActor()
 		actorName := "actorID"
 		// create a singleton actor
-		err = newActorSystem.SpawnSingleton(ctx, actorName, actor)
+		_, err = newActorSystem.SpawnSingleton(ctx, actorName, actor)
 		require.Error(t, err)
 		require.ErrorIs(t, err, gerrors.ErrClusterDisabled)
 
@@ -153,7 +154,7 @@ func TestSingletonActor(t *testing.T) {
 		// create a singleton actor
 		actor := NewMockActor()
 		actorName := strings.Repeat("a", 256)
-		err := cl1.SpawnSingleton(ctx, actorName, actor)
+		_, err := cl1.SpawnSingleton(ctx, actorName, actor)
 		require.Error(t, err)
 
 		// free resources
@@ -182,7 +183,7 @@ func TestSingletonActor(t *testing.T) {
 		actor := NewMockActor()
 		actorName := "actorID"
 		// create a singleton actor
-		err = newActorSystem.SpawnSingleton(ctx, actorName, actor)
+		_, err = newActorSystem.SpawnSingleton(ctx, actorName, actor)
 		require.Error(t, err)
 		require.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
 	})
@@ -202,7 +203,7 @@ func TestSingletonActor(t *testing.T) {
 		expectedErr := fmt.Errorf("cluster unreachable")
 		cl.EXPECT().Members(mock.Anything).Return(nil, expectedErr).Once()
 
-		err := system.spawnSingletonOnLeader(ctx, cl, "singleton", NewMockActor(),
+		_, err := system.spawnSingletonOnLeader(ctx, cl, "singleton", NewMockActor(),
 			singletonSpec.SpawnTimeout,
 			singletonSpec.WaitInterval,
 			singletonSpec.MaxRetries)
@@ -238,7 +239,7 @@ func TestSingletonActor(t *testing.T) {
 			},
 		}, nil).Once()
 
-		err := system.spawnSingletonOnLeader(ctx, cl, "singleton", NewMockActor(),
+		_, err := system.spawnSingletonOnLeader(ctx, cl, "singleton", NewMockActor(),
 			singletonSpec.SpawnTimeout,
 			singletonSpec.WaitInterval,
 			singletonSpec.MaxRetries)
@@ -291,10 +292,10 @@ func TestSingletonActor(t *testing.T) {
 						req.Singleton.MaxRetries == singletonSpec.MaxRetries
 				}),
 			).
-			Return(expectedErr).
+			Return(nil, expectedErr).
 			Once()
 
-		err := system.spawnSingletonOnLeader(ctx, cl, name, actor,
+		_, err := system.spawnSingletonOnLeader(ctx, cl, name, actor,
 			singletonSpec.SpawnTimeout,
 			singletonSpec.WaitInterval,
 			singletonSpec.MaxRetries)
@@ -344,9 +345,9 @@ func TestSingletonActor(t *testing.T) {
 						req.Singleton.MaxRetries == singletonSpec.MaxRetries &&
 						req.Role == nil
 				}),
-			).Return(nil).Once()
+			).Return(pointer.To("goakt://test@127.0.0.1:9000/actor"), nil).Once()
 
-		err := system.SpawnSingleton(ctx, "singleton", NewMockActor(),
+		_, err := system.SpawnSingleton(ctx, "singleton", NewMockActor(),
 			WithSingletonSpawnRetries(int(singletonSpec.MaxRetries)),
 			WithSingletonSpawnWaitInterval(singletonSpec.WaitInterval),
 			WithSingletonSpawnTimeout(singletonSpec.SpawnTimeout))
@@ -372,7 +373,7 @@ func TestSingletonActor(t *testing.T) {
 		expectedErr := fmt.Errorf("cluster unavailable")
 		clusterMock.EXPECT().Members(mock.Anything).Return(nil, expectedErr).Once()
 
-		err := system.spawnSingletonWithRole(ctx, clusterMock, "singleton", NewMockActor(), "blue",
+		_, err := system.spawnSingletonWithRole(ctx, clusterMock, "singleton", NewMockActor(), "blue",
 			singletonSpec.SpawnTimeout,
 			singletonSpec.WaitInterval,
 			singletonSpec.MaxRetries)
@@ -413,7 +414,7 @@ func TestSingletonActor(t *testing.T) {
 			}, nil).
 			Once()
 
-		err := system.spawnSingletonWithRole(ctx, clusterMock, "singleton", NewMockActor(), role,
+		_, err := system.spawnSingletonWithRole(ctx, clusterMock, "singleton", NewMockActor(), role,
 			singletonSpec.SpawnTimeout,
 			singletonSpec.WaitInterval,
 			singletonSpec.MaxRetries)
@@ -480,9 +481,9 @@ func TestSingletonActor(t *testing.T) {
 						req.Role != nil &&
 						*req.Role == role
 				}),
-			).Return(nil).Once()
+			).Return(pointer.To("goakt://test@127.0.0.1:9000/actor"), nil).Once()
 
-		err := system.spawnSingletonWithRole(ctx, clusterMock, "singleton", NewMockActor(), role,
+		_, err := system.spawnSingletonWithRole(ctx, clusterMock, "singleton", NewMockActor(), role,
 			singletonSpec.SpawnTimeout,
 			singletonSpec.WaitInterval,
 			singletonSpec.MaxRetries)
@@ -545,7 +546,7 @@ func TestSingletonActor(t *testing.T) {
 			MaxRetries:   2,
 		}
 
-		err := system.spawnSingletonWithRole(ctx, clusterMock, "singleton", NewMockActor(), role,
+		_, err := system.spawnSingletonWithRole(ctx, clusterMock, "singleton", NewMockActor(), role,
 			singletonSpec.SpawnTimeout,
 			singletonSpec.WaitInterval,
 			singletonSpec.MaxRetries)
@@ -579,14 +580,14 @@ func TestSingletonActor(t *testing.T) {
 		actorName := "actorID"
 		role := "api"
 		// create a singleton actor
-		err := cl1.SpawnSingleton(ctx, actorName, actor, WithSingletonRole(role))
+		_, err := cl1.SpawnSingleton(ctx, actorName, actor, WithSingletonRole(role))
 		require.NoError(t, err)
 
 		// attempt to create another singleton actor with the same actor
-		err = cl2.SpawnSingleton(ctx, "actorName", actor)
+		_, err = cl2.SpawnSingleton(ctx, "actorName", actor)
 		require.NoError(t, err)
 
-		err = cl3.SpawnSingleton(ctx, "actor2", actor, WithSingletonRole(role))
+		_, err = cl3.SpawnSingleton(ctx, "actor2", actor, WithSingletonRole(role))
 		require.Error(t, err)
 		require.ErrorIs(t, err, gerrors.ErrSingletonAlreadyExists)
 
@@ -599,6 +600,122 @@ func TestSingletonActor(t *testing.T) {
 		require.NoError(t, sd2.Close())
 		// shutdown the nats server gracefully
 		srv.Shutdown()
+	})
+}
+
+// TestSpawnSingletonReturnsPID verifies that retrySpawnSingleton returns a non-nil PID
+// when SpawnSingleton succeeds, covering the fix for the bug where the PID was discarded.
+func TestSpawnSingletonReturnsPID(t *testing.T) {
+	t.Run("returns non-nil remote PID when delegating to leader", func(t *testing.T) {
+		ctx := context.Background()
+		ports := dynaport.Get(3)
+
+		clusterMock := mockcluster.NewCluster(t)
+		remotingMock := mockremote.NewClient(t)
+		system := MockSingletonClusterReadyActorSystem(t)
+		system.remoting = remotingMock
+
+		system.locker.Lock()
+		system.cluster = clusterMock
+		system.locker.Unlock()
+
+		// Leader is a different node (different remoting port) so we delegate via RemoteSpawn
+		leader := &cluster.Peer{
+			Host:          "127.0.0.1",
+			DiscoveryPort: ports[0],
+			PeersPort:     ports[1],
+			RemotingPort:  ports[2] + 100, // Different port so we're not the leader
+			Coordinator:   true,
+		}
+
+		expectedAddr := "goakt://test@127.0.0.1:9000/singleton"
+		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{leader}, nil).Once()
+		remotingMock.EXPECT().
+			RemoteSpawn(mock.Anything, leader.Host, leader.RemotingPort, mock.MatchedBy(func(req *remote.SpawnRequest) bool {
+				return req != nil && req.Name == "singleton" && req.Kind == "actor.mockactor"
+			})).
+			Return(pointer.To(expectedAddr), nil).Once()
+
+		pid, err := system.SpawnSingleton(ctx, "singleton", NewMockActor(),
+			WithSingletonSpawnRetries(2),
+			WithSingletonSpawnWaitInterval(time.Millisecond),
+			WithSingletonSpawnTimeout(time.Second))
+		require.NoError(t, err)
+		require.NotNil(t, pid, "retrySpawnSingleton must return non-nil PID on success")
+		require.True(t, pid.IsRemote(), "delegated spawn must return remote PID")
+		require.Equal(t, expectedAddr, pid.Address().String())
+	})
+
+	t.Run("returns non-nil local PID when spawning locally as coordinator", func(t *testing.T) {
+		ctx := context.Background()
+		clusterMock := mockcluster.NewCluster(t)
+		system := MockSingletonClusterReadyActorSystem(t)
+
+		system.locker.Lock()
+		system.cluster = clusterMock
+		system.locker.Unlock()
+
+		// Leader is local node - we spawn locally
+		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{
+			{
+				Host:         system.clusterNode.Host,
+				PeersPort:    system.clusterNode.PeersPort,
+				RemotingPort: system.clusterNode.RemotingPort,
+				Coordinator:  true,
+			},
+		}, nil).Once()
+		clusterMock.EXPECT().LookupKind(mock.Anything, "actor.mockactor").Return("", nil).Once()
+		clusterMock.EXPECT().PutKind(mock.Anything, "actor.mockactor").Return(nil).Once()
+		clusterMock.EXPECT().ActorExists(mock.Anything, "singleton").Return(false, nil).Once()
+
+		pid, err := system.SpawnSingleton(ctx, "singleton", NewMockActor(),
+			WithSingletonSpawnRetries(2),
+			WithSingletonSpawnWaitInterval(time.Millisecond),
+			WithSingletonSpawnTimeout(time.Second))
+		require.NoError(t, err)
+		require.NotNil(t, pid, "retrySpawnSingleton must return non-nil PID on success")
+		require.False(t, pid.IsRemote(), "local spawn must return local PID")
+		require.Equal(t, "singleton", pid.Name())
+	})
+
+	t.Run("returns non-nil remote PID after retry succeeds", func(t *testing.T) {
+		ctx := context.Background()
+		ports := dynaport.Get(3)
+
+		clusterMock := mockcluster.NewCluster(t)
+		remotingMock := mockremote.NewClient(t)
+		system := MockSingletonClusterReadyActorSystem(t)
+		system.remoting = remotingMock
+
+		system.locker.Lock()
+		system.cluster = clusterMock
+		system.locker.Unlock()
+
+		leader := &cluster.Peer{
+			Host:          "127.0.0.1",
+			DiscoveryPort: ports[0],
+			PeersPort:     ports[1],
+			RemotingPort:  ports[2] + 100,
+			Coordinator:   true,
+		}
+
+		expectedAddr := "goakt://test@127.0.0.1:9000/singleton"
+		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{leader}, nil).Times(2)
+		remotingMock.EXPECT().
+			RemoteSpawn(mock.Anything, leader.Host, leader.RemotingPort, mock.Anything).
+			Return(nil, olric.ErrReadQuorum).Once()
+		remotingMock.EXPECT().
+			RemoteSpawn(mock.Anything, leader.Host, leader.RemotingPort, mock.Anything).
+			Return(pointer.To(expectedAddr), nil).Once()
+
+		pid, err := system.SpawnSingleton(ctx, "singleton", NewMockActor(),
+			WithSingletonSpawnRetries(3),
+			WithSingletonSpawnWaitInterval(time.Millisecond),
+			WithSingletonSpawnTimeout(time.Second))
+		require.NoError(t, err)
+		require.NotNil(t, pid, "retrySpawnSingleton must return non-nil PID after retry succeeds")
+		require.True(t, pid.IsRemote())
+		require.Equal(t, expectedAddr, pid.Address().String())
 	})
 }
 
@@ -629,7 +746,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 		// Kind reservation is released on ActorExists errors.
 		clusterMock.EXPECT().RemoveKind(mock.Anything, "actor.mockactor").Return(nil).Times(3)
 
-		err := system.SpawnSingleton(
+		_, err := system.SpawnSingleton(
 			ctx,
 			"singleton",
 			NewMockActor(),
@@ -659,7 +776,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 		}, nil).Once()
 		clusterMock.EXPECT().LookupKind(mock.Anything, "actor.mockactor").Return("actor.mockactor", nil).Once()
 
-		err := system.SpawnSingleton(
+		_, err := system.SpawnSingleton(
 			ctx,
 			"singleton",
 			NewMockActor(),
@@ -692,7 +809,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 		}, nil).Once()
 		clusterMock.EXPECT().LookupKind(mock.Anything, "actor.mockactor").Return("", context.Canceled).Once()
 
-		err := system.SpawnSingleton(
+		_, err := system.SpawnSingleton(
 			ctx,
 			"singleton",
 			NewMockActor(),
@@ -731,7 +848,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 			Singleton: nil,
 		}, nil).Once()
 
-		err := system.SpawnSingleton(
+		_, err := system.SpawnSingleton(
 			ctx,
 			"singleton",
 			NewMockActor(),
@@ -769,7 +886,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(nil, cluster.ErrActorNotFound).Once()
 		clusterMock.EXPECT().LookupKind(mock.Anything, "actor.mockactor").Return("", lookupErr).Once()
 
-		err := system.SpawnSingleton(
+		_, err := system.SpawnSingleton(
 			ctx,
 			"singleton",
 			NewMockActor(),
@@ -803,7 +920,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 		clusterMock.EXPECT().LookupKind(mock.Anything, "actor.mockactor").Return("", nil).Once()
 		clusterMock.EXPECT().PutKind(mock.Anything, "actor.mockactor").Return(putErr).Once()
 
-		err := system.SpawnSingleton(
+		_, err := system.SpawnSingleton(
 			ctx,
 			"singleton",
 			NewMockActor(),
@@ -840,7 +957,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 		// checkSpawnPreconditions must release the reserved kind on ActorExists errors.
 		clusterMock.EXPECT().RemoveKind(mock.Anything, "actor.mockactor").Return(nil).Once()
 
-		err := system.SpawnSingleton(
+		_, err := system.SpawnSingleton(
 			ctx,
 			"singleton",
 			NewMockActor(),
@@ -896,10 +1013,10 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 						req.Role == nil
 				}),
 			).
-			Return(gerrors.ErrActorAlreadyExists).
+			Return(nil, gerrors.ErrActorAlreadyExists).
 			Once()
 
-		err := system.SpawnSingleton(
+		_, err := system.SpawnSingleton(
 			ctx,
 			"singleton",
 			NewMockActor(),
@@ -939,7 +1056,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 			Singleton: &internalpb.SingletonSpec{},
 		}, nil).Once()
 
-		err := system.SpawnSingleton(
+		_, err := system.SpawnSingleton(
 			ctx,
 			"singleton",
 			NewMockActor(),
@@ -983,7 +1100,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 			Singleton: &internalpb.SingletonSpec{},
 		}, nil).Once()
 
-		err := system.SpawnSingleton(
+		_, err := system.SpawnSingleton(
 			ctx,
 			"singleton",
 			NewMockActor(),
@@ -1019,7 +1136,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 		clusterMock.EXPECT().RemoveKind(mock.Anything, "actor.mockactor").Return(nil).Once()
 		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(nil, getErr).Once()
 
-		err := system.SpawnSingleton(
+		_, err := system.SpawnSingleton(
 			ctx,
 			"singleton",
 			NewMockActor(),
@@ -1059,7 +1176,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 			Singleton: &internalpb.SingletonSpec{},
 		}, nil).Once()
 
-		err := system.SpawnSingleton(
+		_, err := system.SpawnSingleton(
 			ctx,
 			"singleton",
 			NewMockActor(),
@@ -1082,7 +1199,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 
 		clusterMock.EXPECT().Members(mock.Anything).Return(nil, cluster.ErrEngineNotRunning).Times(2)
 
-		err := system.SpawnSingleton(
+		_, err := system.SpawnSingleton(
 			ctx,
 			"singleton",
 			NewMockActor(),
@@ -1119,7 +1236,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 			}, nil).
 			Times(2)
 
-		err := system.SpawnSingleton(
+		_, err := system.SpawnSingleton(
 			ctx,
 			"singleton",
 			NewMockActor(),
@@ -1197,10 +1314,10 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 						*req.Role == role
 				}),
 			).
-			Return(nil).
+			Return(pointer.To("goakt://test@127.0.0.1:9000/actor"), nil).
 			Once()
 
-		err := system.SpawnSingleton(
+		_, err := system.SpawnSingleton(
 			ctx,
 			"singleton",
 			NewMockActor(),
@@ -1256,10 +1373,10 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 						req.Role == nil
 				}),
 			).
-			Return(nil).
+			Return(pointer.To("goakt://test@127.0.0.1:9000/actor"), nil).
 			Once()
 
-		err := system.SpawnSingleton(
+		_, err := system.SpawnSingleton(
 			ctx,
 			"singleton",
 			NewMockActor(),
@@ -1329,7 +1446,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 								req.Role == nil
 						}),
 					).
-					Return(tc.err).
+					Return(nil, tc.err).
 					Once()
 
 				remotingMock.EXPECT().
@@ -1348,10 +1465,10 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 								req.Role == nil
 						}),
 					).
-					Return(nil).
+					Return(pointer.To("goakt://test@127.0.0.1:9000/actor"), nil).
 					Once()
 
-				err := system.SpawnSingleton(
+				_, err := system.SpawnSingleton(
 					ctx,
 					"singleton",
 					NewMockActor(),

@@ -188,7 +188,8 @@ func (x *Client) Spawn(ctx context.Context, spawnRequest *remote.SpawnRequest) (
 	node := nextNode(x.balancer)
 	x.locker.Unlock()
 	remoteHost, remotePort := node.hostAndPort()
-	return node.remoteClient().RemoteSpawn(ctx, remoteHost, remotePort, spawnRequest)
+	_, err = node.remoteClient().RemoteSpawn(ctx, remoteHost, remotePort, spawnRequest)
+	return err
 }
 
 // SpawnBalanced creates and starts an actor with the specified balancing strategy.
@@ -212,7 +213,8 @@ func (x *Client) SpawnBalanced(ctx context.Context, spawnRequest *remote.SpawnRe
 	node := nextNode(balancer)
 	remoteHost, remotePort := node.hostAndPort()
 	x.locker.Unlock()
-	return node.remoteClient().RemoteSpawn(ctx, remoteHost, remotePort, spawnRequest)
+	_, err = node.remoteClient().RemoteSpawn(ctx, remoteHost, remotePort, spawnRequest)
+	return err
 }
 
 // ReSpawn restarts a previously spawned actor.
@@ -247,7 +249,8 @@ func (x *Client) ReSpawn(ctx context.Context, actorName string) (err error) {
 		return nil
 	}
 
-	return remoting.RemoteReSpawn(ctx, addr.Host(), addr.Port(), actorName)
+	_, err = remoting.RemoteReSpawn(ctx, addr.Host(), addr.Port(), actorName)
+	return err
 }
 
 // Tell sends a message to the specified actor.

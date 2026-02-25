@@ -229,6 +229,9 @@ var (
 
 	// ErrInvalidTCPAddress is returned when a TCP address is invalid or cannot be resolved.
 	ErrInvalidTCPAddress = errors.New("invalid TCP address")
+
+	// ErrInvalidResponse is returned when a response is invalid or cannot be parsed.
+	ErrInvalidResponse = errors.New("invalid response")
 )
 
 // NewErrInvalidTCPAddress formats an ErrInvalidTCPAddress with the given address.

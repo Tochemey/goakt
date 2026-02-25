@@ -822,7 +822,7 @@ func TestClient(t *testing.T) {
 
 		err = client.ReSpawn(ctx, actorName)
 		require.NoError(t, err)
-		mockRemoting.AssertNotCalled(t, "RemoteReSpawn", mock.Anything, mock.Anything, mock.Anything)
+		mockRemoting.AssertNotCalled(t, "RemoteReSpawn", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 
 		client.Close()
 	})
@@ -850,7 +850,63 @@ func TestClient(t *testing.T) {
 		err = client.ReSpawn(ctx, actorName)
 		require.Error(t, err)
 		require.ErrorIs(t, err, expectedErr)
-		mockRemoting.AssertNotCalled(t, "RemoteReSpawn", mock.Anything, mock.Anything, mock.Anything)
+		mockRemoting.AssertNotCalled(t, "RemoteReSpawn", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+
+		client.Close()
+	})
+
+	t.Run("With ReSpawn succeeds when lookup returns valid address", func(t *testing.T) {
+		ctx := context.TODO()
+		actorName := "actorName"
+
+		mockRemoting := mockremote.NewClient(t)
+		node := &Node{
+			remoting: mockRemoting,
+			address:  "127.0.0.1:12345",
+		}
+
+		remoteHost, remotePort := node.hostAndPort()
+		addr := address.New(actorName, "sys", remoteHost, remotePort)
+		mockRemoting.EXPECT().NetClient(remoteHost, remotePort).Return(inet.NewClient(net.JoinHostPort(remoteHost, strconv.Itoa(remotePort))))
+		mockRemoting.EXPECT().RemoteLookup(ctx, remoteHost, remotePort, actorName).Return(addr, nil)
+		mockRemoting.EXPECT().RemoteReSpawn(ctx, addr.Host(), addr.Port(), actorName).Return(nil, nil)
+		mockRemoting.EXPECT().Close()
+
+		client, err := New(ctx, []*Node{node})
+		require.NoError(t, err)
+		require.NotNil(t, client)
+
+		err = client.ReSpawn(ctx, actorName)
+		require.NoError(t, err)
+
+		client.Close()
+	})
+
+	t.Run("With ReSpawn returns error when RemoteReSpawn fails", func(t *testing.T) {
+		ctx := context.TODO()
+		actorName := "actorName"
+
+		mockRemoting := mockremote.NewClient(t)
+		node := &Node{
+			remoting: mockRemoting,
+			address:  "127.0.0.1:12345",
+		}
+
+		remoteHost, remotePort := node.hostAndPort()
+		addr := address.New(actorName, "sys", remoteHost, remotePort)
+		expectedErr := fmt.Errorf("remote respawn failed")
+		mockRemoting.EXPECT().NetClient(remoteHost, remotePort).Return(inet.NewClient(net.JoinHostPort(remoteHost, strconv.Itoa(remotePort))))
+		mockRemoting.EXPECT().RemoteLookup(ctx, remoteHost, remotePort, actorName).Return(addr, nil)
+		mockRemoting.EXPECT().RemoteReSpawn(ctx, addr.Host(), addr.Port(), actorName).Return(nil, expectedErr)
+		mockRemoting.EXPECT().Close()
+
+		client, err := New(ctx, []*Node{node})
+		require.NoError(t, err)
+		require.NotNil(t, client)
+
+		err = client.ReSpawn(ctx, actorName)
+		require.Error(t, err)
+		require.ErrorIs(t, err, expectedErr)
 
 		client.Close()
 	})

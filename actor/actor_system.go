@@ -198,7 +198,7 @@ type ActorSystem interface {
 	//	}
 	//
 	// ⚠️ Note: The created actor uses the default mailbox from the actor system unless overridden in opts.
-	SpawnOn(ctx context.Context, name string, actor Actor, opts ...SpawnOption) error
+	SpawnOn(ctx context.Context, name string, actor Actor, opts ...SpawnOption) (*PID, error)
 	// SpawnFromFunc creates an actor with the given receive function. One can set the PreStart and PostStop lifecycle hooks
 	// in the given optional options
 	SpawnFromFunc(ctx context.Context, receiveFunc ReceiveFunc, opts ...FuncOption) (*PID, error)
@@ -230,7 +230,7 @@ type ActorSystem interface {
 	// The cluster singleton is automatically started on the oldest node in the cluster.
 	// If the oldest node leaves the cluster, the singleton is restarted on the new oldest node.
 	// This is useful for managing shared resources or coordinating tasks that should be handled by a single actor.
-	SpawnSingleton(ctx context.Context, name string, actor Actor, opts ...ClusterSingletonOption) error
+	SpawnSingleton(ctx context.Context, name string, actor Actor, opts ...ClusterSingletonOption) (*PID, error)
 	// Kill stops a given actor in the system either locally or on a remote node(when clustering is enabled)
 	Kill(ctx context.Context, name string) error
 	// ReSpawn recreates a given actor in the system

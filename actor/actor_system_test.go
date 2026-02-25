@@ -1677,7 +1677,7 @@ func TestActorSystem(t *testing.T) {
 			Singleton:   nil,
 			Relocatable: true,
 		}
-		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
+		_, err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
 		require.NoError(t, err)
 
 		// re-fetching the address of the actor should return not nil address after start
@@ -2845,7 +2845,7 @@ func TestRemotingReSpawn(t *testing.T) {
 		// create a test actor
 		actorName := "test"
 		// get the address of the actor
-		err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
+		_, err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.Error(t, err)
 
 		remoting.Close()
@@ -2884,7 +2884,7 @@ func TestRemotingReSpawn(t *testing.T) {
 		remoting := remoteclient.NewClient()
 		t.Cleanup(remoting.Close)
 
-		err = remoting.RemoteReSpawn(ctx, actualHost, actualPort, actorName)
+		_, err = remoting.RemoteReSpawn(ctx, actualHost, actualPort, actorName)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, gerrors.ErrInvalidHost.Error())
 
@@ -2927,7 +2927,7 @@ func TestRemotingReSpawn(t *testing.T) {
 		assert.Zero(t, pid.restartCount.Load())
 		remoting := remoteclient.NewClient()
 		// get the address of the actor
-		err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
+		_, err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.NoError(t, err)
 
 		assert.EqualValues(t, 1, pid.restartCount.Load())
@@ -2964,7 +2964,7 @@ func TestRemotingReSpawn(t *testing.T) {
 		remoting := remoteclient.NewClient()
 		t.Cleanup(remoting.Close)
 
-		err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
+		_, err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "failed to restart actor")
 		assert.Zero(t, actorRef.RestartCount())
@@ -3031,7 +3031,7 @@ func TestRemotingReSpawn(t *testing.T) {
 		// create a test actor
 		actorName := "test"
 		// get the address of the actor
-		err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
+		_, err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.Error(t, err)
 
 		remoting.Close()
@@ -3070,7 +3070,7 @@ func TestRemotingReSpawn(t *testing.T) {
 		actorName := "GoAktXYZ"
 		remoting := remoteclient.NewClient()
 		// get the address of the actor
-		err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
+		_, err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.Error(t, err)
 
 		remoting.Close()
@@ -3102,12 +3102,12 @@ func TestRemotingReSpawn(t *testing.T) {
 
 		pause.For(time.Second)
 
-		// create a test actor
+		// RemoteReSpawn for a non-existent actor: server returns NOT_FOUND, client treats as no-op
 		actorName := "actorName"
 		remoting := remoteclient.NewClient()
-		// get the address of the actor
-		err = remoting.RemoteReSpawn(ctx, actorSystem.Host(), int(actorSystem.Port()), actorName)
+		addr, err := remoting.RemoteReSpawn(ctx, actorSystem.Host(), int(actorSystem.Port()), actorName)
 		require.NoError(t, err)
+		require.Nil(t, addr) // no address when actor doesn't exist
 
 		remoting.Close()
 		err = actorSystem.Stop(ctx)
@@ -3151,7 +3151,7 @@ func TestRemotingReSpawn(t *testing.T) {
 		assert.Zero(t, pid.restartCount.Load())
 		remoting := remoteclient.NewClient(remoteclient.WithClientCompression(remote.BrotliCompression))
 		// get the address of the actor
-		err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
+		_, err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.NoError(t, err)
 
 		assert.EqualValues(t, 1, pid.restartCount.Load())
@@ -3201,7 +3201,7 @@ func TestRemotingReSpawn(t *testing.T) {
 		assert.Zero(t, pid.restartCount.Load())
 		remoting := remoteclient.NewClient(remoteclient.WithClientCompression(remote.ZstdCompression))
 		// get the address of the actor
-		err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
+		_, err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.NoError(t, err)
 
 		assert.EqualValues(t, 1, pid.restartCount.Load())
@@ -3251,7 +3251,7 @@ func TestRemotingReSpawn(t *testing.T) {
 		assert.Zero(t, pid.restartCount.Load())
 		remoting := remoteclient.NewClient(remoteclient.WithClientCompression(remote.GzipCompression))
 		// get the address of the actor
-		err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
+		_, err = remoting.RemoteReSpawn(ctx, sys.Host(), int(sys.Port()), actorName)
 		require.NoError(t, err)
 
 		assert.EqualValues(t, 1, pid.restartCount.Load())
@@ -3850,7 +3850,7 @@ func TestRemotingSpawn(t *testing.T) {
 			EnableStashing: false,
 			Dependencies:   []extension.Dependency{dependency},
 		}
-		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
+		_, err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
 		require.NoError(t, err)
 
 		// re-fetching the address of the actor should return not nil address after start
@@ -3908,7 +3908,7 @@ func TestRemotingSpawn(t *testing.T) {
 			Name: uuid.NewString(),
 			Kind: "actor.exchanger",
 		}
-		err = remoting.RemoteSpawn(ctx, actualHost, actualPort, request)
+		_, err = remoting.RemoteSpawn(ctx, actualHost, actualPort, request)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, gerrors.ErrInvalidHost.Error())
 
@@ -3965,7 +3965,7 @@ func TestRemotingSpawn(t *testing.T) {
 			EnableStashing: true,
 			Dependencies:   []extension.Dependency{dependency},
 		}
-		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
+		_, err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
 		require.Error(t, err)
 
 		remoting.Close()
@@ -4027,7 +4027,7 @@ func TestRemotingSpawn(t *testing.T) {
 			EnableStashing: false,
 			Dependencies:   []extension.Dependency{new(MockDependency)},
 		}
-		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
+		_, err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
 		require.Error(t, err)
 
 		remoting.Close()
@@ -4073,7 +4073,7 @@ func TestRemotingSpawn(t *testing.T) {
 			Singleton:   nil,
 			Relocatable: false,
 		}
-		err = remoting.RemoteSpawn(ctx, sys.Host(), int(sys.Port()), request)
+		_, err = remoting.RemoteSpawn(ctx, sys.Host(), int(sys.Port()), request)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, gerrors.ErrTypeNotRegistered)
 
@@ -4113,7 +4113,7 @@ func TestRemotingSpawn(t *testing.T) {
 			Kind: types.Name(new(MockUnimplementedActor)),
 		}
 
-		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
+		_, err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, gerrors.ErrInstanceNotAnActor.Error())
 
@@ -4156,7 +4156,7 @@ func TestRemotingSpawn(t *testing.T) {
 			},
 		}
 
-		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
+		_, err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, mockedErr)
 
@@ -4194,7 +4194,7 @@ func TestRemotingSpawn(t *testing.T) {
 			},
 		}
 
-		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
+		_, err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, gerrors.ErrDependencyTypeNotRegistered.Error())
 	})
@@ -4230,7 +4230,7 @@ func TestRemotingSpawn(t *testing.T) {
 			Singleton:   nil,
 			Relocatable: false,
 		}
-		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
+		_, err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
 		require.Error(t, err)
 
 		t.Cleanup(
@@ -4277,7 +4277,7 @@ func TestRemotingSpawn(t *testing.T) {
 			Singleton:   nil,
 			Relocatable: false,
 		}
-		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
+		_, err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, gerrors.ErrRemotingDisabled)
 
@@ -4360,7 +4360,7 @@ func TestRemotingSpawn(t *testing.T) {
 			Singleton:   nil,
 			Relocatable: false,
 		}
-		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
+		_, err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
 		require.NoError(t, err)
 
 		// re-fetching the address of the actor should return not nil address after start
@@ -4432,7 +4432,7 @@ func TestRemotingSpawn(t *testing.T) {
 			Singleton:   nil,
 			Relocatable: false,
 		}
-		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
+		_, err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
 		require.Error(t, err)
 
 		remoting.Close()
@@ -4479,7 +4479,7 @@ func TestRemotingSpawn(t *testing.T) {
 			EnableStashing: false,
 			Dependencies:   []extension.Dependency{dependency},
 		}
-		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
+		_, err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
 		require.Error(t, err)
 
 		remoting.Close()
@@ -4538,7 +4538,7 @@ func TestRemotingSpawn(t *testing.T) {
 			EnableStashing: false,
 			Dependencies:   []extension.Dependency{dependency},
 		}
-		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
+		_, err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
 		require.NoError(t, err)
 
 		// re-fetching the address of the actor should return not nil address after start
@@ -4618,7 +4618,7 @@ func TestRemotingSpawn(t *testing.T) {
 			EnableStashing: false,
 			Dependencies:   []extension.Dependency{dependency},
 		}
-		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
+		_, err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
 		require.NoError(t, err)
 
 		// re-fetching the address of the actor should return not nil address after start
@@ -4698,7 +4698,7 @@ func TestRemotingSpawn(t *testing.T) {
 			EnableStashing: false,
 			Dependencies:   []extension.Dependency{dependency},
 		}
-		err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
+		_, err = remoting.RemoteSpawn(ctx, host, remotingPort, request)
 		require.NoError(t, err)
 
 		// re-fetching the address of the actor should return not nil address after start
