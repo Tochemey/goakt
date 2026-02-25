@@ -61,7 +61,7 @@ import (
 //   - Sender() returns the PID of the message sender — local or remote.
 //   - For remote messages, Sender() holds a lightweight remote PID created from
 //     the sender address embedded in the wire message.
-//   - Use Sender().Address() for the sender's address and Self().Address() for the receiver's address (handle nil PIDs with address.NoSender() as needed).
+//   - Use Sender().Path() for the sender's path and Self().Path() for the receiver's path (handle nil PIDs; use PathToAddress when *address.Address is needed).
 //
 // Examples:
 //

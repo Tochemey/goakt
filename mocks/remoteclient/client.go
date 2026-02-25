@@ -5,7 +5,7 @@ package remoteclient
 import (
 	context "context"
 
-	address "github.com/tochemey/goakt/v4/address"
+	address "github.com/tochemey/goakt/v4/internal/address"
 
 	tls "crypto/tls"
 	time "time"

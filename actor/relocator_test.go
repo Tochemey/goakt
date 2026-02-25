@@ -39,8 +39,8 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/types/known/durationpb"
 
-	"github.com/tochemey/goakt/v4/address"
 	"github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/pause"
@@ -410,7 +410,7 @@ func TestRelocation(t *testing.T) {
 	actorPID, err := node1.ActorOf(ctx, actorName)
 	require.NoError(t, err)
 	require.NotNil(t, actorPID)
-	require.Equal(t, node2Address, actorPID.Address().HostPort(), "Actor %s should be on node2 before shutdown", actorName)
+	require.Equal(t, node2Address, actorPID.Path().HostPort(), "Actor %s should be on node2 before shutdown", actorName)
 
 	// take down node2
 	require.NoError(t, node2.Stop(ctx))
@@ -448,7 +448,7 @@ func TestRelocation(t *testing.T) {
 		}
 		// Critical check: actor must have a NEW address (not node2's address)
 		// If it still has node2's address, relocation hasn't happened yet
-		return relocatedPID.Address().HostPort() != node2Address
+		return relocatedPID.Path().HostPort() != node2Address
 	}, 2*time.Minute, 500*time.Millisecond, "Actor %s should be relocated from node2 (was %s) to a live node", actorName, node2Address)
 
 	// Verify the relocated actor is reachable by sending a message.
@@ -480,7 +480,7 @@ func TestRelocation(t *testing.T) {
 			return false
 		}
 		// Actor should be on node1 or node3, not on node2 (which is down)
-		return reentrantPID.Address().HostPort() != node2Address
+		return reentrantPID.Path().HostPort() != node2Address
 	}, 2*time.Minute, 500*time.Millisecond, "Reentrant actor %s should be relocated from node2 (was %s) to a live node", reentrantName, node2Address)
 
 	reentrantPID, err := node1.ActorOf(ctx, reentrantName)
@@ -491,7 +491,7 @@ func TestRelocation(t *testing.T) {
 		require.Equal(t, 3, reentrantPID.reentrancy.maxInFlight)
 	}
 
-	reentrantAddr := reentrantPID.Address()
+	reentrantAddr := reentrantPID.Path()
 	if reentrantAddr.HostPort() == net.JoinHostPort(node1.Host(), strconv.Itoa(node1.Port())) {
 		localPID, err := node1.ActorOf(ctx, reentrantName)
 		require.NoError(t, err)
@@ -545,7 +545,7 @@ func TestRelocationWithCustomSupervisor(t *testing.T) {
 	actorPID, err := node1.ActorOf(ctx, actorName)
 	require.NoError(t, err)
 	require.NotNil(t, actorPID)
-	require.Equal(t, node2Address, actorPID.Address().HostPort(), "Actor %s should be on node2 before shutdown", actorName)
+	require.Equal(t, node2Address, actorPID.Path().HostPort(), "Actor %s should be on node2 before shutdown", actorName)
 
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
@@ -582,7 +582,7 @@ func TestRelocationWithCustomSupervisor(t *testing.T) {
 		}
 		// Critical check: actor must have a NEW address (not node2's address)
 		// If it still has node2's address, relocation hasn't happened yet
-		return relocatedPID.Address().HostPort() != node2Address
+		return relocatedPID.Path().HostPort() != node2Address
 	}, 2*time.Minute, 500*time.Millisecond, "Actor %s should be relocated from node2 (was %s) to a live node", actorName, node2Address)
 
 	// Verify the relocated actor has the correct supervisor configuration.
@@ -700,7 +700,7 @@ func TestRelocationWithTLS(t *testing.T) {
 		if err != nil || relocatedPID == nil {
 			return false
 		}
-		return relocatedPID.Address().HostPort() != node2Address
+		return relocatedPID.Path().HostPort() != node2Address
 	}, 2*time.Minute, 500*time.Millisecond, "Actor %s should be relocated from node2 to a live node", actorName)
 
 	require.Eventually(t, func() bool {
@@ -751,7 +751,7 @@ func TestRelocationWithSingletonActor(t *testing.T) {
 	singletonPID, err := node2.ActorOf(ctx, actorName)
 	require.NoError(t, err)
 	require.NotNil(t, singletonPID)
-	require.Equal(t, node1Address, singletonPID.Address().HostPort(), "Singleton %s should be on node1 before shutdown", actorName)
+	require.Equal(t, node1Address, singletonPID.Path().HostPort(), "Singleton %s should be on node1 before shutdown", actorName)
 
 	// take down node1 since it is the first node created in the cluster
 	require.NoError(t, node1.Stop(ctx))
@@ -789,7 +789,7 @@ func TestRelocationWithSingletonActor(t *testing.T) {
 		}
 		// Critical check: singleton must have a NEW address (not node1's address)
 		// If it still has node1's address, relocation hasn't happened yet
-		return relocatedPID.Address().HostPort() != node1Address
+		return relocatedPID.Path().HostPort() != node1Address
 	}, 2*time.Minute, 500*time.Millisecond, "Singleton %s should be relocated from node1 (was %s) to a live node", actorName, node1Address)
 
 	assert.NoError(t, node2.Stop(ctx))
@@ -1037,7 +1037,7 @@ func TestRelocationWithExtension(t *testing.T) {
 	entityPID, err := node1.ActorOf(ctx, entityID)
 	require.NoError(t, err)
 	require.NotNil(t, entityPID)
-	require.Equal(t, node2Address, entityPID.Address().HostPort(), "Entity %s should be on node2 before shutdown", entityID)
+	require.Equal(t, node2Address, entityPID.Path().HostPort(), "Entity %s should be on node2 before shutdown", entityID)
 
 	// take down node2
 	require.NoError(t, node2.Stop(ctx))
@@ -1084,7 +1084,7 @@ func TestRelocationWithExtension(t *testing.T) {
 
 		// Critical check: entity must have a NEW address (not node2's address)
 		// If it still has node2's address, relocation hasn't happened yet
-		return relocatedPID.Address().HostPort() != node2Address
+		return relocatedPID.Path().HostPort() != node2Address
 	}, 2*time.Minute, time.Second, "Entity %s should be relocated from node2 (was %s) to a live node", entityID, node2Address)
 
 	// Verify the relocated entity is reachable and has the expected state.
@@ -1155,7 +1155,7 @@ func TestRelocationWithDependency(t *testing.T) {
 	actorPID, err := node1.ActorOf(ctx, actorName)
 	require.NoError(t, err)
 	require.NotNil(t, actorPID)
-	require.Equal(t, node2Address, actorPID.Address().HostPort(), "Actor %s should be on node2 before shutdown", actorName)
+	require.Equal(t, node2Address, actorPID.Path().HostPort(), "Actor %s should be on node2 before shutdown", actorName)
 
 	// take down node2
 	require.NoError(t, node2.Stop(ctx))
@@ -1193,7 +1193,7 @@ func TestRelocationWithDependency(t *testing.T) {
 		}
 		// Critical check: actor must have a NEW address (not node2's address)
 		// If it still has node2's address, relocation hasn't happened yet
-		return relocatedPID.Address().HostPort() != node2Address
+		return relocatedPID.Path().HostPort() != node2Address
 	}, 2*time.Minute, 500*time.Millisecond, "Actor %s should be relocated from node2 (was %s) to a live node", actorName, node2Address)
 
 	// Verify the relocated actor is reachable and has the correct dependencies.
@@ -1710,7 +1710,7 @@ func TestRelocationWithConsulProvider(t *testing.T) {
 	actorPID, err := node1.ActorOf(ctx, actorName)
 	require.NoError(t, err)
 	require.NotNil(t, actorPID)
-	require.Equal(t, node2Address, actorPID.Address().HostPort(), "Actor %s should be on node2 before shutdown", actorName)
+	require.Equal(t, node2Address, actorPID.Path().HostPort(), "Actor %s should be on node2 before shutdown", actorName)
 
 	// take down node2
 	require.NoError(t, node2.Stop(ctx))
@@ -1726,7 +1726,7 @@ func TestRelocationWithConsulProvider(t *testing.T) {
 		if err != nil || relocatedPID == nil {
 			return false
 		}
-		return relocatedPID.Address().HostPort() != node2Address
+		return relocatedPID.Path().HostPort() != node2Address
 	}, 2*time.Minute, time.Second, "Actor %s should be relocated from node2 to a live node", actorName)
 
 	sender, err := node1.ActorOf(ctx, "Actor11")
@@ -1804,7 +1804,7 @@ func TestRelocationWithEtcdProvider(t *testing.T) {
 	actorPID, err := node1.ActorOf(ctx, actorName)
 	require.NoError(t, err)
 	require.NotNil(t, actorPID)
-	require.Equal(t, node2Address, actorPID.Address().HostPort(), "Actor %s should be on node2 before shutdown", actorName)
+	require.Equal(t, node2Address, actorPID.Path().HostPort(), "Actor %s should be on node2 before shutdown", actorName)
 
 	// take down node2
 	require.NoError(t, node2.Stop(ctx))
@@ -1842,7 +1842,7 @@ func TestRelocationWithEtcdProvider(t *testing.T) {
 		}
 		// Critical check: actor must have a NEW address (not node2's address)
 		// If it still has node2's address, relocation hasn't happened yet
-		return relocatedPID.Address().HostPort() != node2Address
+		return relocatedPID.Path().HostPort() != node2Address
 	}, 2*time.Minute, time.Second, "Actor %s should be relocated from node2 (was %s) to a live node", actorName, node2Address)
 
 	sender, err := node1.ActorOf(ctx, "Actor11")

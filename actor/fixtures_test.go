@@ -44,7 +44,6 @@ import (
 	noopmetric "go.opentelemetry.io/otel/metric/noop"
 	"go.uber.org/atomic"
 
-	"github.com/tochemey/goakt/v4/address"
 	"github.com/tochemey/goakt/v4/datacenter"
 	"github.com/tochemey/goakt/v4/discovery"
 	"github.com/tochemey/goakt/v4/discovery/consul"
@@ -53,6 +52,7 @@ import (
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/eventstream"
 	"github.com/tochemey/goakt/v4/extension"
+	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/datacentercontroller"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
@@ -68,6 +68,20 @@ import (
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 	"github.com/tochemey/goakt/v4/tls"
 )
+
+// setupReSpawnClusterTest creates a cluster-enabled actor system with mocked cluster and remoting
+// for testing ReSpawn's remote actor path. The actors tree is empty so ReSpawn will use ActorOf.
+func setupReSpawnClusterTest(t *testing.T) (*mockcluster.Cluster, *mocksremote.Client, *actorSystem) {
+	t.Helper()
+	clusterMock := mockcluster.NewCluster(t)
+	remotingMock := mocksremote.NewClient(t)
+	system := MockReplicationTestSystem(clusterMock)
+	system.locker.Lock()
+	system.actors = newTree()
+	system.remoting = remotingMock
+	system.locker.Unlock()
+	return clusterMock, remotingMock, system
+}
 
 type MockSubscriber struct {
 	counter *atomic.Int64
@@ -1391,8 +1405,10 @@ func (x *MockFakePassivationStrategy) String() string {
 
 func MockPassivationPID(t *testing.T, name string, strategy passivation.Strategy) *PID {
 	t.Helper()
+	addr := address.New(name, "test-system", "127.0.0.1", 0)
 	pid := &PID{
-		address:             address.New(name, "test-system", "127.0.0.1", 0),
+		address:             addr,
+		path:                newPath(addr),
 		passivationStrategy: strategy,
 		logger:              log.DiscardLogger,
 	}
@@ -1573,8 +1589,10 @@ func MockSimpleClusterReadyActorSystem(rem remoteclient.Client, cl cluster.Clust
 }
 
 func MockPID(system ActorSystem, name string, port int) *PID {
+	addr := address.New(name, system.Name(), "host", port)
 	return &PID{
-		address:     address.New(name, system.Name(), "host", port),
+		address:     addr,
+		path:        newPath(addr),
 		actorSystem: system,
 	}
 }

@@ -276,7 +276,7 @@ func TestAsk(t *testing.T) {
 		// create a message to send to the test actor
 		message := &internalpb.RemoteMessage{
 			Sender:   "invalid-address",
-			Receiver: actorRef.Address().String(),
+			Receiver: actorRef.Path().String(),
 			Message:  bytea,
 		}
 		// send the message to the actor

@@ -38,9 +38,9 @@ import (
 	"github.com/flowchartsman/retry"
 	"github.com/google/uuid"
 
-	"github.com/tochemey/goakt/v4/address"
 	"github.com/tochemey/goakt/v4/datacenter"
 	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/pointer"
 	"github.com/tochemey/goakt/v4/internal/strconvx"
@@ -54,6 +54,9 @@ import (
 // The actor will be registered under the given `name`, allowing other actors
 // or components to send messages to it using the returned *PID. If an actor
 // with the same name already exists in the local system, an error will be returned.
+//
+// This method is location-transparent: with options such as WithHostAndPort, the actor
+// may be spawned on a remote node when remoting is enabled; otherwise it is created locally.
 //
 // Parameters:
 //   - ctx: A context used to control cancellation and timeouts during the spawn process.
@@ -72,8 +75,7 @@ import (
 //	    log.Fatalf("Failed to spawn actor: %v", err)
 //	}
 //
-// Note: Actors spawned using this method are confined to the local actor system.
-// For distributed scenarios, use a SpawnOn method.
+// Note: For cluster placement strategies (e.g., Random, LeastLoad), use SpawnOn instead.
 func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts ...SpawnOption) (*PID, error) {
 	if !x.Running() {
 		return nil, gerrors.ErrActorSystemNotStarted

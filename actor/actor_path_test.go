@@ -28,7 +28,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tochemey/goakt/v4/address"
+	"github.com/tochemey/goakt/v4/internal/address"
 )
 
 func TestNewPath(t *testing.T) {

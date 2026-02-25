@@ -643,7 +643,7 @@ func TestSpawnSingletonReturnsPID(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, pid, "retrySpawnSingleton must return non-nil PID on success")
 		require.True(t, pid.IsRemote(), "delegated spawn must return remote PID")
-		require.Equal(t, expectedAddr, pid.Address().String())
+		require.Equal(t, expectedAddr, pid.Path().String())
 	})
 
 	t.Run("returns non-nil local PID when spawning locally as coordinator", func(t *testing.T) {
@@ -715,7 +715,7 @@ func TestSpawnSingletonReturnsPID(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, pid, "retrySpawnSingleton must return non-nil PID after retry succeeds")
 		require.True(t, pid.IsRemote())
-		require.Equal(t, expectedAddr, pid.Address().String())
+		require.Equal(t, expectedAddr, pid.Path().String())
 	})
 }
 

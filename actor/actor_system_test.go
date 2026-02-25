@@ -50,9 +50,9 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 
-	"github.com/tochemey/goakt/v4/address"
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/extension"
+	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/metric"
@@ -347,7 +347,7 @@ func TestActorSystem(t *testing.T) {
 
 		remoting := remoteclient.NewClient()
 		from := address.NoSender()
-		reply, err := remoting.RemoteAsk(ctx, from, pid.Address(), new(testpb.TestReply), 20*time.Second)
+		reply, err := remoting.RemoteAsk(ctx, from, pathToAddress(pid.Path()), new(testpb.TestReply), 20*time.Second)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 
@@ -676,6 +676,61 @@ func TestActorSystem(t *testing.T) {
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
 	})
+	t.Run("With ReSpawn: remote actor in cluster - success", func(t *testing.T) {
+		ctx := context.TODO()
+		actorName := "remoteActor"
+		remoteHost := "10.0.0.1"
+		remotePort := 9090
+
+		clusterMock, remotingMock, system := setupReSpawnClusterTest(t)
+
+		addr := address.New(actorName, "test-replication", remoteHost, remotePort)
+		clusterMock.EXPECT().GetActor(mock.Anything, actorName).Return(&internalpb.Actor{
+			Address: addr.String(),
+		}, nil)
+		remotingMock.EXPECT().RemoteReSpawn(mock.Anything, remoteHost, remotePort, actorName).Return(nil, nil)
+
+		pid, err := system.ReSpawn(ctx, actorName)
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+		assert.True(t, pid.IsRemote())
+		assert.Equal(t, actorName, pid.Name())
+	})
+	t.Run("With ReSpawn: remote actor - ActorOf fails", func(t *testing.T) {
+		ctx := context.TODO()
+		actorName := "remoteActor"
+
+		clusterMock, _, system := setupReSpawnClusterTest(t)
+
+		clusterMock.EXPECT().GetActor(mock.Anything, actorName).Return(nil, cluster.ErrActorNotFound)
+
+		pid, err := system.ReSpawn(ctx, actorName)
+		require.Error(t, err)
+		require.Nil(t, pid)
+		assert.ErrorContains(t, err, "failed to fetch remote actor")
+		assert.ErrorIs(t, err, gerrors.ErrActorNotFound)
+	})
+	t.Run("With ReSpawn: remote actor - RemoteReSpawn fails", func(t *testing.T) {
+		ctx := context.TODO()
+		actorName := "remoteActor"
+		remoteHost := "10.0.0.1"
+		remotePort := 9090
+
+		clusterMock, remotingMock, system := setupReSpawnClusterTest(t)
+
+		addr := address.New(actorName, "test-replication", remoteHost, remotePort)
+		clusterMock.EXPECT().GetActor(mock.Anything, actorName).Return(&internalpb.Actor{
+			Address: addr.String(),
+		}, nil)
+		remotingMock.EXPECT().RemoteReSpawn(mock.Anything, remoteHost, remotePort, actorName).
+			Return(nil, assert.AnError)
+
+		pid, err := system.ReSpawn(ctx, actorName)
+		require.Error(t, err)
+		require.Nil(t, pid)
+		assert.ErrorContains(t, err, "failed to re-spawn remote actor")
+		assert.ErrorIs(t, err, assert.AnError)
+	})
 	t.Run("ReSpawn with remoting enabled", func(t *testing.T) {
 		ctx := context.TODO()
 		remotingPort := dynaport.Get(1)[0]
@@ -870,7 +925,7 @@ func TestActorSystem(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, local)
 
-		require.Equal(t, ref.Address().String(), local.Address().String())
+		require.Equal(t, ref.Path().String(), local.Path().String())
 
 		// stop the actor after some time
 		pause.For(time.Second)
@@ -5131,7 +5186,7 @@ func TestCleanupStaleLocalActors(t *testing.T) {
 		}
 
 		localAddr := address.New("local", system.name, "127.0.0.1", 8080)
-		localPID := &PID{address: localAddr, actorSystem: system}
+		localPID := &PID{address: localAddr, path: newPath(localAddr), actorSystem: system}
 		addPIDNode(localPID)
 
 		staleAddr := address.New("stale", system.name, "127.0.0.1", 8080)

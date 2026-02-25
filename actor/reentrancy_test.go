@@ -34,8 +34,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	"github.com/tochemey/goakt/v4/address"
 	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/commands"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/pause"
@@ -1039,7 +1039,7 @@ func TestSendAsyncResponsePaths(t *testing.T) {
 			}
 		})
 
-		require.NoError(t, sender.sendAsyncResponse(ctx, receiver.Address().String(), "corr-ok", &testpb.Reply{Content: "ok"}, nil))
+		require.NoError(t, sender.sendAsyncResponse(ctx, receiver.Path().String(), "corr-ok", &testpb.Reply{Content: "ok"}, nil))
 		select {
 		case msg := <-okCh:
 			reply, ok := msg.(*testpb.Reply)
@@ -1060,7 +1060,7 @@ func TestSendAsyncResponsePaths(t *testing.T) {
 			}
 		})
 
-		require.NoError(t, sender.sendAsyncResponse(ctx, receiver.Address().String(), "corr-err", nil, errors.New("boom")))
+		require.NoError(t, sender.sendAsyncResponse(ctx, receiver.Path().String(), "corr-err", nil, errors.New("boom")))
 		select {
 		case err := <-errCh:
 			require.EqualError(t, err, "boom")

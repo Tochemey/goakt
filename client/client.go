@@ -30,8 +30,8 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/tochemey/goakt/v4/address"
 	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/chain"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/locker"
@@ -428,37 +428,37 @@ func (x *Client) Stop(ctx context.Context, actorName string) error {
 	return remoting.RemoteStop(ctx, addr.Host(), addr.Port(), actorName)
 }
 
-// Whereis looks up the location of the specified actor and returns its address.
+// Exists checks whether the specified actor is registered and reachable in the cluster.
 //
-// This method queries the system to find the current network or logical address
-// of the given actor. It can be used to inspect actor placement or route messages manually.
+// This method performs a lookup against the remote actor system to determine if the
+// actor exists. It does not send a message to the actor or otherwise interact with it.
 //
 // Parameters:
 //   - ctx: Context used for cancellation and timeout control.
 //   - actorName: The actor name.
 //
 // Returns:
-//   - *address.Address: The resolved address of the actor if found.
-//   - error: Returns a NOT_FOUND error if the actor does not exist or is not currently registered.
+//   - bool: True if the actor exists and is registered, false otherwise.
+//   - error: Returns an error only on lookup failure (e.g., network or transport errors).
+//     If the actor does not exist, (false, nil) is returned.
 //
 // Note:
-//   - This method does not send a message or interact with the actor directly.
 //   - Use this for diagnostic, routing, or debugging purposes.
-func (x *Client) Whereis(ctx context.Context, actorName string) (*address.Address, error) {
+func (x *Client) Exists(ctx context.Context, actorName string) (bool, error) {
 	x.locker.Lock()
 	node := nextNode(x.balancer)
 	x.locker.Unlock()
 	remoteHost, remotePort := node.hostAndPort()
 	addr, err := node.remoteClient().RemoteLookup(ctx, remoteHost, remotePort, actorName)
 	if err != nil {
-		return nil, err
+		return false, err
 	}
 
 	if addr.Equals(address.NoSender()) {
-		return nil, gerrors.NewErrActorNotFound(actorName)
+		return false, nil
 	}
 
-	return addr, nil
+	return true, nil
 }
 
 // Reinstate transitions a previously suspended actor back to an active state.

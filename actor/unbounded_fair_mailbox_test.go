@@ -33,7 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	"github.com/tochemey/goakt/v4/address"
+	"github.com/tochemey/goakt/v4/internal/address"
 )
 
 func TestUnboundedFairMailboxNoStarvation(t *testing.T) {
@@ -51,7 +51,7 @@ func TestUnboundedFairMailboxNoStarvation(t *testing.T) {
 	for range 51 {
 		msg := mailbox.Dequeue()
 		require.NotNil(t, msg)
-		sender := msg.Sender().Address()
+		sender := pathToAddress(msg.Sender().Path())
 		if sender.Equals(quiet) {
 			seenQuiet = true
 			break
@@ -182,7 +182,7 @@ func TestUnboundedFairMailboxPreservesPerSenderOrdering(t *testing.T) {
 	for range enqueueSeq {
 		msg := mailbox.Dequeue()
 		require.NotNil(t, msg)
-		sender := msg.Sender().Address().String()
+		sender := msg.Sender().Path().String()
 		payload := string(msg.Message().(*anypb.Any).Value)
 		got[sender] = append(got[sender], payload)
 	}

@@ -39,9 +39,9 @@ import (
 	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/tochemey/goakt/v4/address"
 	"github.com/tochemey/goakt/v4/datacenter"
 	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/datacentercontroller"
 	"github.com/tochemey/goakt/v4/internal/pause"
@@ -742,7 +742,7 @@ func TestSpawn(t *testing.T) {
 		item := items[0]
 		addr, err := address.Parse(item.Address())
 		require.NoError(t, err)
-		assert.True(t, pid.Address().Equals(addr))
+		assert.True(t, pathToAddress(pid.Path()).Equals(addr))
 		assert.Equal(t, mockErr.Error(), item.Reason())
 
 		// unsubscribe the consumer

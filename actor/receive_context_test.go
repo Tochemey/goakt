@@ -33,8 +33,8 @@ import (
 	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/tochemey/goakt/v4/address"
 	"github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/remote"
@@ -714,7 +714,7 @@ func TestReceiveContext(t *testing.T) {
 
 		actual := receiveCtx.Child(name)
 		require.NotNil(t, actual)
-		assert.Equal(t, child.Address().String(), actual.Address().String())
+		assert.Equal(t, child.Path().String(), actual.Path().String())
 
 		t.Cleanup(
 			func() {
@@ -1250,7 +1250,7 @@ func TestReceiveContext(t *testing.T) {
 		addr := deadletter.Sender()
 		parsed, err := address.Parse(addr)
 		require.NoError(t, err)
-		require.True(t, noSender.Address().Equals(parsed))
+		require.True(t, pathToAddress(noSender.Path()).Equals(parsed))
 
 		assert.EqualValues(t, 1, len(consumer.Topics()))
 
@@ -1323,7 +1323,7 @@ func TestReceiveContext(t *testing.T) {
 		actual := new(testpb.TestSend)
 		require.True(t, proto.Equal(actual, actualMsg))
 		require.Equal(t, deadletter.Reason(), errors.ErrUnhandled.Error())
-		assert.Equal(t, deadletter.Sender(), pid2.Address().String())
+		assert.Equal(t, deadletter.Sender(), pid2.Path().String())
 
 		assert.EqualValues(t, 1, len(consumer.Topics()))
 
@@ -1762,7 +1762,7 @@ func TestReceiveContext(t *testing.T) {
 
 		testerRef.remoting = nil
 		// Use a remote PID so BatchAsk takes the remote path; sender has no remoting so we get ErrRemotingDisabled
-		remoteTarget := newRemotePID(testerRef.Address(), nil)
+		remoteTarget := newRemotePID(pathToAddress(testerRef.Path()), nil)
 		messages := []any{new(testpb.TestReply), new(testpb.TestReply), new(testpb.TestReply)}
 		replies := context.BatchAsk(remoteTarget, messages, time.Minute)
 		err = context.getError()
@@ -2670,7 +2670,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// actor A is killing actor C using a forward pattern
 		// actorA tell actorB forward actorC
-		err = pidA.remoteTell(ctx, pidB.Address(), new(testpb.TestRemoteForward))
+		err = pidA.remoteTell(ctx, pathToAddress(pidB.Path()), new(testpb.TestRemoteForward))
 		require.NoError(t, err)
 
 		// wait for the async call to properly complete
@@ -3297,13 +3297,13 @@ func TestReceiveContext(t *testing.T) {
 			self:    pid1,
 		}
 
-		senderAddr := context.Sender().Address()
+		senderAddr := pathToAddress(context.Sender().Path())
 		require.NotNil(t, senderAddr)
-		require.True(t, senderAddr.Equals(actorSystem.NoSender().Address()))
+		require.True(t, senderAddr.Equals(pathToAddress(actorSystem.NoSender().Path())))
 
-		receiverAddr := context.Self().Address()
+		receiverAddr := pathToAddress(context.Self().Path())
 		require.NotNil(t, receiverAddr)
-		require.True(t, receiverAddr.Equals(pid1.Address()))
+		require.True(t, receiverAddr.Equals(pathToAddress(pid1.Path())))
 
 		// create actor2
 		actor2 := &exchanger{}
@@ -3315,13 +3315,13 @@ func TestReceiveContext(t *testing.T) {
 		context = &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestSend),
-			sender:  newRemotePID(pid2.Address(), pid2.remoting),
+			sender:  newRemotePID(pathToAddress(pid2.Path()), pid2.remoting),
 			self:    pid1,
 		}
 
-		senderAddr = context.Sender().Address()
+		senderAddr = pathToAddress(context.Sender().Path())
 		require.NotNil(t, senderAddr)
-		require.True(t, senderAddr.Equals(pid2.Address()))
+		require.True(t, senderAddr.Equals(pathToAddress(pid2.Path())))
 
 		context = &ReceiveContext{
 			ctx:     ctx,
@@ -3330,11 +3330,11 @@ func TestReceiveContext(t *testing.T) {
 			self:    nil, // may never happen but for test sake
 		}
 
-		senderAddr = context.Sender().Address()
+		senderAddr = pathToAddress(context.Sender().Path())
 		require.NotNil(t, senderAddr)
 		require.True(t, senderAddr.Equals(address.NoSender()))
 
-		receiverAddr = context.Self().Address()
+		receiverAddr = pathToAddress(context.Self().Path())
 		require.NotNil(t, receiverAddr)
 		require.True(t, receiverAddr.Equals(address.NoSender()))
 

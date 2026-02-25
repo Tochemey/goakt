@@ -38,10 +38,10 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	actors "github.com/tochemey/goakt/v4/actor"
-	"github.com/tochemey/goakt/v4/address"
 	"github.com/tochemey/goakt/v4/discovery"
 	"github.com/tochemey/goakt/v4/discovery/nats"
 	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/address"
 	inet "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/internal/types"
@@ -966,10 +966,9 @@ func TestClient(t *testing.T) {
 
 		pause.For(time.Second)
 
-		whereis, err := client.Whereis(ctx, actorName)
+		exists, err := client.Exists(ctx, actorName)
 		require.NoError(t, err)
-		require.NotNil(t, whereis)
-		assert.Equal(t, actorName, whereis.Name())
+		assert.True(t, exists, "actor should exist after spawn")
 
 		err = client.Stop(ctx, actorName)
 		require.NoError(t, err)
@@ -1267,7 +1266,7 @@ func TestClient(t *testing.T) {
 		require.NotNil(t, client)
 
 		actorName := "actorName"
-		whereis, err := client.Whereis(ctx, actorName)
+		whereis, err := client.Exists(ctx, actorName)
 		require.Error(t, err)
 		require.Nil(t, whereis)
 
@@ -1432,7 +1431,7 @@ func TestClient(t *testing.T) {
 		require.Error(t, err)
 		require.ErrorIs(t, err, expectedErr)
 
-		_, err = client.Whereis(ctx, actorName)
+		_, err = client.Exists(ctx, actorName)
 		require.Error(t, err)
 		require.ErrorIs(t, err, expectedErr)
 

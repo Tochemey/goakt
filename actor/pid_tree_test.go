@@ -28,7 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
 
-	"github.com/tochemey/goakt/v4/address"
+	"github.com/tochemey/goakt/v4/internal/address"
 )
 
 func TestTree(t *testing.T) {
@@ -297,7 +297,8 @@ func TestWatchers(t *testing.T) {
 	})
 	t.Run("pid not in tree", func(t *testing.T) {
 		actorSystem, _ := NewActorSystem("TestSys")
-		pid := &PID{address: address.New("not_in_tree", "TestSys", "host", 0), actorSystem: actorSystem}
+		addr := address.New("not_in_tree", "TestSys", "host", 0)
+		pid := &PID{address: addr, path: newPath(addr), actorSystem: actorSystem}
 		watchers := tree.watchers(pid)
 		require.Empty(t, watchers)
 	})
@@ -313,7 +314,8 @@ func TestWatchees(t *testing.T) {
 		require.Empty(t, watchees)
 	})
 	t.Run("pid not in tree", func(t *testing.T) {
-		pid := &PID{address: address.New("not_in_tree", "TestSys", "host", 0), actorSystem: actorSystem}
+		addr := address.New("not_in_tree", "TestSys", "host", 0)
+		pid := &PID{address: addr, path: newPath(addr), actorSystem: actorSystem}
 		watchees := tree.watchees(pid)
 		require.Empty(t, watchees)
 	})
@@ -330,7 +332,8 @@ func TestParent(t *testing.T) {
 		require.Nil(t, parent)
 	})
 	t.Run("pid not in tree", func(t *testing.T) {
-		pid := &PID{address: address.New("not_in_tree", "TestSys", "host", 0), actorSystem: actorSystem}
+		addr := address.New("not_in_tree", "TestSys", "host", 0)
+		pid := &PID{address: addr, path: newPath(addr), actorSystem: actorSystem}
 		parent, ok := tree.parent(pid)
 		require.False(t, ok)
 		require.Nil(t, parent)
@@ -349,7 +352,8 @@ func TestRoot(t *testing.T) {
 	})
 
 	t.Run("tree with root", func(t *testing.T) {
-		pid := &PID{address: address.New("root", "TestSys", "host", 0), actorSystem: actorSystem}
+		addr := address.New("root", "TestSys", "host", 0)
+		pid := &PID{address: addr, path: newPath(addr), actorSystem: actorSystem}
 		require.NoError(t, tree.addRootNode(pid))
 		root, ok := tree.root()
 		require.True(t, ok)
@@ -363,7 +367,8 @@ func TestDeleteRootNodeClearsRoot(t *testing.T) {
 	ports := dynaport.Get(1)
 	actorSystem, _ := NewActorSystem("TestSys")
 	tree := newTree()
-	pid := &PID{address: address.New("root-delete", "TestSys", "host", ports[0]), actorSystem: actorSystem}
+	addr := address.New("root-delete", "TestSys", "host", ports[0])
+	pid := &PID{address: addr, path: newPath(addr), actorSystem: actorSystem}
 	require.NoError(t, tree.addRootNode(pid))
 
 	tree.deleteNode(pid)
@@ -383,14 +388,16 @@ func TestSiblings(t *testing.T) {
 	})
 
 	t.Run("pid not in tree", func(t *testing.T) {
-		pid := &PID{address: address.New("not_in_tree", "TestSys", "host", 0), actorSystem: actorSystem}
+		addr := address.New("not_in_tree", "TestSys", "host", 0)
+		pid := &PID{address: addr, path: newPath(addr), actorSystem: actorSystem}
 		siblings := tree.siblings(pid)
 		require.Empty(t, siblings)
 	})
 
 	// add test for pid has no parent
 	t.Run("pid has no parent", func(t *testing.T) {
-		pid := &PID{address: address.New("no_parent", "TestSys", "host", 0), actorSystem: actorSystem}
+		addr := address.New("no_parent", "TestSys", "host", 0)
+		pid := &PID{address: addr, path: newPath(addr), actorSystem: actorSystem}
 		pidnode := newPidNode(pid)
 
 		tree.pids[pid.ID()] = pidnode
@@ -409,7 +416,8 @@ func TestDescendants(t *testing.T) {
 	})
 
 	t.Run("pid not in tree", func(t *testing.T) {
-		pid := &PID{address: address.New("not_in_tree", "TestSys", "host", 0), actorSystem: actorSystem}
+		addr := address.New("not_in_tree", "TestSys", "host", 0)
+		pid := &PID{address: addr, path: newPath(addr), actorSystem: actorSystem}
 		descendants := tree.descendants(pid)
 		require.Empty(t, descendants)
 	})
@@ -427,7 +435,8 @@ func TestDeleteNode(t *testing.T) {
 	})
 
 	t.Run("pid not in tree", func(t *testing.T) {
-		pid := &PID{address: address.New("not_in_tree", "TestSys", "host", 0), actorSystem: actorSystem}
+		addr := address.New("not_in_tree", "TestSys", "host", 0)
+		pid := &PID{address: addr, path: newPath(addr), actorSystem: actorSystem}
 		require.NotPanics(t, func() {
 			tree.deleteNode(pid)
 		})
@@ -445,7 +454,8 @@ func TestChildren(t *testing.T) {
 	})
 
 	t.Run("pid not in tree", func(t *testing.T) {
-		pid := &PID{address: address.New("not_in_tree", "TestSys", "host", 0), actorSystem: actorSystem}
+		addr := address.New("not_in_tree", "TestSys", "host", 0)
+		pid := &PID{address: addr, path: newPath(addr), actorSystem: actorSystem}
 		children := tree.children(pid)
 		require.Empty(t, children)
 	})
