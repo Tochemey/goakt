@@ -32,9 +32,9 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tochemey/goakt/v4/address"
 	"github.com/tochemey/goakt/v4/datacenter"
 	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/log"
 	mocksremote "github.com/tochemey/goakt/v4/mocks/remoteclient"
 )
@@ -222,7 +222,7 @@ func TestDiscoverActor(t *testing.T) {
 		addr, err := pid.DiscoverActor(ctx, "actor-1", time.Second)
 		require.NoError(t, err)
 		assert.NotNil(t, addr)
-		assert.Equal(t, foundAddr.String(), addr.Address().String())
+		assert.Equal(t, foundAddr.String(), addr.Path().String())
 	})
 
 	t.Run("returns first successful result from multiple datacenters", func(t *testing.T) {

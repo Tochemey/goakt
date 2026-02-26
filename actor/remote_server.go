@@ -34,8 +34,8 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	"github.com/tochemey/goakt/v4/address"
 	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/codec"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
@@ -298,7 +298,7 @@ func (x *actorSystem) remoteReSpawnHandler(ctx context.Context, conn inet.Connec
 		return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
 	}
 
-	return new(internalpb.RemoteReSpawnResponse), nil
+	return &internalpb.RemoteReSpawnResponse{Address: actorAddress.String()}, nil
 }
 
 // remoteStopHandler handles RemoteStop requests over the proto TCP transport.
@@ -404,13 +404,14 @@ func (x *actorSystem) remoteSpawnHandler(ctx context.Context, conn inet.Connecti
 			singletonOpts = append(singletonOpts, WithSingletonRole(request.GetRole()))
 		}
 
-		if err := x.SpawnSingleton(ctx, request.GetActorName(), actor, singletonOpts...); err != nil {
+		pid, err := x.SpawnSingleton(ctx, request.GetActorName(), actor, singletonOpts...)
+		if err != nil {
 			logger.Errorf("Failed to create Actor (%s) on [host=%s, port=%d]: reason: (%v)", request.GetActorName(), request.GetHost(), request.GetPort(), err)
 			return wrapSpawnErr(err), nil
 		}
 
 		logger.Infof("Actor (%s) successfully created on [host=%s, port=%d]", request.GetActorName(), request.GetHost(), request.GetPort())
-		return new(internalpb.RemoteSpawnResponse), nil
+		return &internalpb.RemoteSpawnResponse{Address: pid.ID()}, nil
 	}
 
 	opts := []SpawnOption{
@@ -450,13 +451,14 @@ func (x *actorSystem) remoteSpawnHandler(ctx context.Context, conn inet.Connecti
 		opts = append(opts, WithDependencies(dependencies...))
 	}
 
-	if _, err = x.Spawn(ctx, request.GetActorName(), actor, opts...); err != nil {
+	pid, err := x.Spawn(ctx, request.GetActorName(), actor, opts...)
+	if err != nil {
 		logger.Errorf("Failed to create Actor (%s) on [host=%s, port=%d]: reason: (%v)", request.GetActorName(), request.GetHost(), request.GetPort(), err)
 		return wrapSpawnErr(err), nil
 	}
 
 	logger.Infof("Actor (%s) successfully created on [host=%s, port=%d]", request.GetActorName(), request.GetHost(), request.GetPort())
-	return new(internalpb.RemoteSpawnResponse), nil
+	return &internalpb.RemoteSpawnResponse{Address: pid.ID()}, nil
 }
 
 // remoteReinstateHandler handles RemoteReinstate requests over the proto TCP transport.

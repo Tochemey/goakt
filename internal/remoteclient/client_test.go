@@ -27,16 +27,22 @@ import (
 	"crypto/tls"
 	"fmt"
 	"math"
+	"net"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 
-	"github.com/tochemey/goakt/v4/address"
 	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/extension"
+	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
+	inet "github.com/tochemey/goakt/v4/internal/net"
+	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/reentrancy"
 	"github.com/tochemey/goakt/v4/remote"
 )
@@ -256,7 +262,7 @@ func TestRemoteTell_InvalidMessage(t *testing.T) {
 
 func TestRemoteSpawn_InvalidRequest(t *testing.T) {
 	r := NewClient()
-	err := r.RemoteSpawn(context.Background(), "host", 1000, &remote.SpawnRequest{})
+	_, err := r.RemoteSpawn(context.Background(), "host", 1000, &remote.SpawnRequest{})
 	assert.Error(t, err)
 }
 
@@ -264,7 +270,7 @@ func TestRemoteSpawn_InvalidPort(t *testing.T) {
 	r := NewClient()
 	port := int(math.MaxInt32) + 1
 
-	err := r.RemoteSpawn(context.Background(), "host", port, &remote.SpawnRequest{Name: "actor", Kind: "kind"})
+	_, err := r.RemoteSpawn(context.Background(), "host", port, &remote.SpawnRequest{Name: "actor", Kind: "kind"})
 	assert.Error(t, err)
 	assert.ErrorContains(t, err, "out of range")
 }
@@ -283,7 +289,7 @@ func TestRemoteSpawn_WithReentrancy(t *testing.T) {
 	}
 
 	// This will fail to connect but should not panic with reentrancy config
-	err := r.RemoteSpawn(context.Background(), "host", 1000, req)
+	_, err := r.RemoteSpawn(context.Background(), "host", 1000, req)
 	// Error is expected since we're not actually connecting to a server
 	assert.Error(t, err)
 }
@@ -301,9 +307,389 @@ func TestRemoteReSpawn_InvalidPort(t *testing.T) {
 	r := NewClient()
 	port := int(math.MaxInt32) + 1
 
-	err := r.RemoteReSpawn(context.Background(), "host", port, "actor")
+	_, err := r.RemoteReSpawn(context.Background(), "host", port, "actor")
 	assert.Error(t, err)
 	assert.ErrorContains(t, err, "out of range")
+}
+
+// TestRemoteReSpawn_EmptyAddressResponse covers the path where the server returns
+// a RemoteReSpawnResponse with an empty address (line 1174: ErrInvalidResponse).
+func TestRemoteReSpawn_EmptyAddressResponse(t *testing.T) {
+	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
+		return &internalpb.RemoteReSpawnResponse{Address: ""}, nil
+	}
+
+	ps, err := inet.NewProtoServer("127.0.0.1:0",
+		inet.WithProtoHandler("internalpb.RemoteReSpawnRequest", handler),
+	)
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+
+	done := make(chan error, 1)
+	go func() { done <- ps.Serve() }()
+	pause.For(100 * time.Millisecond)
+
+	host, portStr, err := net.SplitHostPort(ps.ListenAddr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	r := NewClient(WithClientCompression(remote.NoCompression))
+	defer r.Close()
+
+	addr, err := r.RemoteReSpawn(context.Background(), host, port, "actor")
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, gerrors.ErrInvalidResponse)
+	assert.Nil(t, addr)
+
+	require.NoError(t, ps.Shutdown(time.Second))
+	<-done
+}
+
+func TestRemoteAsk_InvalidResponseType(t *testing.T) {
+	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
+		return &internalpb.RemoteLookupResponse{}, nil // wrong type
+	}
+	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteAskRequest", handler))
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+	done := make(chan error, 1)
+	go func() { done <- ps.Serve() }()
+	pause.For(100 * time.Millisecond)
+	host, portStr, err := net.SplitHostPort(ps.ListenAddr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	r := NewClient(WithClientCompression(remote.NoCompression))
+	defer r.Close()
+
+	from := address.New("from", "sys", host, port)
+	to := address.New("to", "sys", host, port)
+	_, err = r.RemoteAsk(context.Background(), from, to, durationpb.New(time.Second), time.Second)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid response type")
+
+	require.NoError(t, ps.Shutdown(time.Second))
+	<-done
+}
+
+func TestRemoteAsk_EmptyMessagesReturnsNil(t *testing.T) {
+	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
+		return &internalpb.RemoteAskResponse{Messages: nil}, nil
+	}
+	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteAskRequest", handler))
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+	done := make(chan error, 1)
+	go func() { done <- ps.Serve() }()
+	pause.For(100 * time.Millisecond)
+	host, portStr, err := net.SplitHostPort(ps.ListenAddr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	r := NewClient(WithClientCompression(remote.NoCompression))
+	defer r.Close()
+
+	from := address.New("from", "sys", host, port)
+	to := address.New("to", "sys", host, port)
+	resp, err := r.RemoteAsk(context.Background(), from, to, durationpb.New(time.Second), time.Second)
+	require.NoError(t, err)
+	assert.Nil(t, resp)
+
+	require.NoError(t, ps.Shutdown(time.Second))
+	<-done
+}
+
+func TestRemoteAsk_ProtoError(t *testing.T) {
+	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
+		return &internalpb.Error{Code: internalpb.Code_CODE_DEADLINE_EXCEEDED, Message: "timeout"}, nil
+	}
+	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteAskRequest", handler))
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+	done := make(chan error, 1)
+	go func() { done <- ps.Serve() }()
+	pause.For(100 * time.Millisecond)
+	host, portStr, err := net.SplitHostPort(ps.ListenAddr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	r := NewClient(WithClientCompression(remote.NoCompression))
+	defer r.Close()
+
+	from := address.New("from", "sys", host, port)
+	to := address.New("to", "sys", host, port)
+	_, err = r.RemoteAsk(context.Background(), from, to, durationpb.New(time.Second), time.Second)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, gerrors.ErrRequestTimeout)
+
+	require.NoError(t, ps.Shutdown(time.Second))
+	<-done
+}
+
+func TestRemoteLookup_NotFoundReturnsNoSender(t *testing.T) {
+	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
+		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "actor not found"}, nil
+	}
+	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteLookupRequest", handler))
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+	done := make(chan error, 1)
+	go func() { done <- ps.Serve() }()
+	pause.For(100 * time.Millisecond)
+	host, portStr, err := net.SplitHostPort(ps.ListenAddr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	r := NewClient(WithClientCompression(remote.NoCompression))
+	defer r.Close()
+
+	addr, err := r.RemoteLookup(context.Background(), host, port, "missing-actor")
+	require.NoError(t, err)
+	require.NotNil(t, addr)
+	assert.True(t, addr.Equals(address.NoSender()))
+
+	require.NoError(t, ps.Shutdown(time.Second))
+	<-done
+}
+
+func TestRemoteLookup_ProtoError(t *testing.T) {
+	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
+		return &internalpb.Error{Code: internalpb.Code_CODE_UNAVAILABLE, Message: "unavailable"}, nil
+	}
+	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteLookupRequest", handler))
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+	done := make(chan error, 1)
+	go func() { done <- ps.Serve() }()
+	pause.For(100 * time.Millisecond)
+	host, portStr, err := net.SplitHostPort(ps.ListenAddr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	r := NewClient(WithClientCompression(remote.NoCompression))
+	defer r.Close()
+
+	_, err = r.RemoteLookup(context.Background(), host, port, "actor")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, gerrors.ErrRemoteSendFailure)
+
+	require.NoError(t, ps.Shutdown(time.Second))
+	<-done
+}
+
+func TestRemoteLookup_InvalidResponseType(t *testing.T) {
+	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
+		return &internalpb.RemoteAskResponse{}, nil // wrong type
+	}
+	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteLookupRequest", handler))
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+	done := make(chan error, 1)
+	go func() { done <- ps.Serve() }()
+	pause.For(100 * time.Millisecond)
+	host, portStr, err := net.SplitHostPort(ps.ListenAddr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	r := NewClient(WithClientCompression(remote.NoCompression))
+	defer r.Close()
+
+	_, err = r.RemoteLookup(context.Background(), host, port, "actor")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid response type")
+
+	require.NoError(t, ps.Shutdown(time.Second))
+	<-done
+}
+
+func TestRemoteStop_NotFoundReturnsNoError(t *testing.T) {
+	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
+		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "actor not found"}, nil
+	}
+	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteStopRequest", handler))
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+	done := make(chan error, 1)
+	go func() { done <- ps.Serve() }()
+	pause.For(100 * time.Millisecond)
+	host, portStr, err := net.SplitHostPort(ps.ListenAddr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	r := NewClient(WithClientCompression(remote.NoCompression))
+	defer r.Close()
+
+	err = r.RemoteStop(context.Background(), host, port, "missing-actor")
+	require.NoError(t, err)
+
+	require.NoError(t, ps.Shutdown(time.Second))
+	<-done
+}
+
+func TestRemoteReinstate_NotFoundReturnsNoError(t *testing.T) {
+	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
+		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "actor not found"}, nil
+	}
+	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteReinstateRequest", handler))
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+	done := make(chan error, 1)
+	go func() { done <- ps.Serve() }()
+	pause.For(100 * time.Millisecond)
+	host, portStr, err := net.SplitHostPort(ps.ListenAddr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	r := NewClient(WithClientCompression(remote.NoCompression))
+	defer r.Close()
+
+	err = r.RemoteReinstate(context.Background(), host, port, "missing-actor")
+	require.NoError(t, err)
+
+	require.NoError(t, ps.Shutdown(time.Second))
+	<-done
+}
+
+func TestRemoteReSpawn_NotFoundReturnsNil(t *testing.T) {
+	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
+		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "actor not found"}, nil
+	}
+	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteReSpawnRequest", handler))
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+	done := make(chan error, 1)
+	go func() { done <- ps.Serve() }()
+	pause.For(100 * time.Millisecond)
+	host, portStr, err := net.SplitHostPort(ps.ListenAddr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	r := NewClient(WithClientCompression(remote.NoCompression))
+	defer r.Close()
+
+	addr, err := r.RemoteReSpawn(context.Background(), host, port, "missing-actor")
+	require.NoError(t, err)
+	assert.Nil(t, addr)
+
+	require.NoError(t, ps.Shutdown(time.Second))
+	<-done
+}
+
+func TestRemoteActivateGrain_DependenciesEncodeError(t *testing.T) {
+	r := NewClient()
+	port := 1000
+	grainReq := &remote.GrainRequest{
+		Kind:         "kind",
+		Name:         "name",
+		Dependencies: []extension.Dependency{&failingDependency{}},
+	}
+
+	err := r.RemoteActivateGrain(context.Background(), "host", port, grainReq)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "marshal failed")
+}
+
+func TestRemoteAskGrain_InvalidResponseType(t *testing.T) {
+	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
+		return &internalpb.RemoteLookupResponse{}, nil // wrong type
+	}
+	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteAskGrainRequest", handler))
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+	done := make(chan error, 1)
+	go func() { done <- ps.Serve() }()
+	pause.For(100 * time.Millisecond)
+	host, portStr, err := net.SplitHostPort(ps.ListenAddr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	r := NewClient(WithClientCompression(remote.NoCompression))
+	defer r.Close()
+
+	grainReq := &remote.GrainRequest{Kind: "kind", Name: "name"}
+	_, err = r.RemoteAskGrain(context.Background(), host, port, grainReq, durationpb.New(time.Second), time.Second)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid response type")
+
+	require.NoError(t, ps.Shutdown(time.Second))
+	<-done
+}
+
+func TestRemoteAskGrain_DeserializeError(t *testing.T) {
+	// Return valid RemoteAskGrainResponse but with message that will fail deserialization
+	handler := func(_ context.Context, _ inet.Connection, req proto.Message) (proto.Message, error) {
+		return &internalpb.RemoteAskGrainResponse{Message: []byte("invalid-proto-bytes")}, nil
+	}
+	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteAskGrainRequest", handler))
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+	done := make(chan error, 1)
+	go func() { done <- ps.Serve() }()
+	pause.For(100 * time.Millisecond)
+	host, portStr, err := net.SplitHostPort(ps.ListenAddr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	r := NewClient(WithClientCompression(remote.NoCompression))
+	defer r.Close()
+
+	grainReq := &remote.GrainRequest{Kind: "kind", Name: "name"}
+	_, err = r.RemoteAskGrain(context.Background(), host, port, grainReq, durationpb.New(time.Second), time.Second)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, gerrors.ErrInvalidMessage)
+
+	require.NoError(t, ps.Shutdown(time.Second))
+	<-done
+}
+
+func TestRemoteBatchAsk_ProtoError(t *testing.T) {
+	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
+		return &internalpb.Error{Code: internalpb.Code_CODE_DEADLINE_EXCEEDED, Message: "timeout"}, nil
+	}
+	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteAskRequest", handler))
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+	done := make(chan error, 1)
+	go func() { done <- ps.Serve() }()
+	pause.For(100 * time.Millisecond)
+	host, portStr, err := net.SplitHostPort(ps.ListenAddr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	r := NewClient(WithClientCompression(remote.NoCompression))
+	defer r.Close()
+
+	from := address.New("from", "sys", host, port)
+	to := address.New("to", "sys", host, port)
+	_, err = r.RemoteBatchAsk(context.Background(), from, to, []any{durationpb.New(time.Second)}, time.Second)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, gerrors.ErrRequestTimeout)
+
+	require.NoError(t, ps.Shutdown(time.Second))
+	<-done
+}
+
+func TestWithClientSerializers_InterfaceRegistration(t *testing.T) {
+	// Register serializer for (*testInterface)(nil) - exercises the interface branch in WithClientSerializers
+	// (typ.Kind() == reflect.Ptr && typ.Elem().Kind() == reflect.Interface)
+	custom := &stubSerializer{serializeData: []byte("ok"), deserializeMsg: &nonProtoImpl{}}
+	r := NewClient(WithClientSerializers((*testInterface)(nil), custom)).(*client)
+	s := r.Serializer(&nonProtoImpl{})
+	require.NotNil(t, s)
+	assert.Same(t, custom, s)
 }
 
 func TestRemoteStop_InvalidPort(t *testing.T) {
@@ -718,7 +1104,7 @@ func TestRemoteTellGrain_ConnectionRefused(t *testing.T) {
 func TestRemoteReSpawn_ConnectionRefused(t *testing.T) {
 	r := NewClient()
 
-	err := r.RemoteReSpawn(context.Background(), "host", 1000, "actor")
+	_, err := r.RemoteReSpawn(context.Background(), "host", 1000, "actor")
 	assert.Error(t, err)
 }
 
@@ -748,7 +1134,7 @@ func TestRemoteBatchAsk_ConnectionRefused(t *testing.T) {
 func TestRemoteSpawn_ConnectionRefused(t *testing.T) {
 	r := NewClient()
 
-	err := r.RemoteSpawn(context.Background(), "host", 1000, &remote.SpawnRequest{Name: "actor", Kind: "kind"})
+	_, err := r.RemoteSpawn(context.Background(), "host", 1000, &remote.SpawnRequest{Name: "actor", Kind: "kind"})
 	assert.Error(t, err)
 }
 

@@ -42,11 +42,11 @@ import (
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/tochemey/goakt/v4/address"
 	"github.com/tochemey/goakt/v4/breaker"
 	"github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/eventstream"
 	"github.com/tochemey/goakt/v4/extension"
+	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/commands"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/metric"
@@ -3360,117 +3360,105 @@ func TestBatchAsk(t *testing.T) {
 	})
 }
 func TestRemoteReSpawn(t *testing.T) {
-	t.Run("With actor address not found", func(t *testing.T) {
-		// create the context
+	t.Run("With actor not found returns ErrActorNotFound", func(t *testing.T) {
 		ctx := context.TODO()
-		// define the logger to use
 		logger := log.DiscardLogger
-		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
 		host := "127.0.0.1"
 
-		// create the actor system
 		sys, err := NewActorSystem("test",
 			WithLogger(logger),
 			WithRemote(remote.NewConfig(host, remotingPort)),
 		)
-		// assert there are no error
 		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
 
-		// start the actor system
-		err = sys.Start(ctx)
-		assert.NoError(t, err)
-
-		// create an exchanger 1
-		actorName1 := "Exchange1"
-		actorRef1, err := sys.Spawn(ctx, actorName1, &exchanger{})
-
+		actorRef, err := sys.Spawn(ctx, "Exchange1", &exchanger{})
 		require.NoError(t, err)
-		assert.NotNil(t, actorRef1)
+		require.NotNil(t, actorRef)
 
-		actorName2 := "Exchange2"
-		err = actorRef1.RemoteReSpawn(ctx, host, remotingPort, actorName2)
-		require.NoError(t, err)
+		// RemoteReSpawn for non-existent actor: addr is nil, returns not found
+		remotePID, err := actorRef.RemoteReSpawn(ctx, host, remotingPort, "nonexistent")
+		require.Error(t, err)
+		require.Nil(t, remotePID)
+		assert.ErrorIs(t, err, errors.ErrActorNotFound)
 
-		t.Cleanup(func() {
-			assert.NoError(t, sys.Stop(ctx))
-		})
+		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
 	})
-	t.Run("With remoting is not enabled", func(t *testing.T) {
-		// create the context
+
+	t.Run("With actor found returns remote PID", func(t *testing.T) {
 		ctx := context.TODO()
-		// define the logger to use
 		logger := log.DiscardLogger
-		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
 		host := "127.0.0.1"
 
-		// create the actor system
 		sys, err := NewActorSystem("test",
 			WithLogger(logger),
-			WithRemote(remote.NewConfig(host, remotingPort)))
-		// assert there are no error
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
 		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
 
-		// start the actor system
-		err = sys.Start(ctx)
-		assert.NoError(t, err)
-
-		// create an exchanger 1
-		actorName1 := "Exchange1"
-		actorRef1, err := sys.Spawn(ctx, actorName1, &exchanger{})
-
+		actorRef, err := sys.Spawn(ctx, "Exchange1", &exchanger{})
 		require.NoError(t, err)
-		assert.NotNil(t, actorRef1)
+		require.NotNil(t, actorRef)
 
-		// for the sake of the test we set the remoting field of actorRef1
-		actorRef1.remoting = nil
+		remotePID, err := actorRef.RemoteReSpawn(ctx, host, remotingPort, "Exchange1")
+		require.NoError(t, err)
+		require.NotNil(t, remotePID)
+		assert.True(t, remotePID.IsRemote())
+		assert.Equal(t, "Exchange1", remotePID.Name())
 
-		actorName2 := "Exchange2"
-		err = actorRef1.RemoteReSpawn(ctx, host, remotingPort, actorName2)
-		require.Error(t, err)
-		assert.ErrorIs(t, err, errors.ErrRemotingDisabled)
-
-		t.Cleanup(func() {
-			assert.NoError(t, sys.Stop(ctx))
-		})
+		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
 	})
-	t.Run("With remoting server is unreachable", func(t *testing.T) {
-		// create the context
+
+	t.Run("With remoting not enabled returns ErrRemotingDisabled", func(t *testing.T) {
 		ctx := context.TODO()
-		// define the logger to use
 		logger := log.DiscardLogger
-		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
 		host := "127.0.0.1"
 
-		// create the actor system
 		sys, err := NewActorSystem("test",
-			WithLogger(logger))
-		// assert there are no error
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+		)
 		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
 
-		// start the actor system
-		err = sys.Start(ctx)
-		assert.NoError(t, err)
-
-		// create an exchanger 1
-		actorName1 := "Exchange1"
-		actorRef1, err := sys.Spawn(ctx, actorName1, &exchanger{})
-
+		actorRef, err := sys.Spawn(ctx, "Exchange1", &exchanger{})
 		require.NoError(t, err)
-		assert.NotNil(t, actorRef1)
+		actorRef.remoting = nil
 
-		actorName2 := "Exchange2"
-		err = actorRef1.RemoteReSpawn(ctx, host, remotingPort, actorName2)
+		remotePID, err := actorRef.RemoteReSpawn(ctx, host, remotingPort, "Exchange2")
 		require.Error(t, err)
+		require.Nil(t, remotePID)
+		assert.ErrorIs(t, err, errors.ErrRemotingDisabled)
 
-		t.Cleanup(func() {
-			assert.NoError(t, sys.Stop(ctx))
-		})
+		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
+	})
+
+	t.Run("With remoting server unreachable returns error", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		nodePorts := dynaport.Get(1)
+		remotingPort := nodePorts[0]
+		host := "127.0.0.1"
+
+		sys, err := NewActorSystem("test", WithLogger(logger))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+
+		actorRef, err := sys.Spawn(ctx, "Exchange1", &exchanger{})
+		require.NoError(t, err)
+
+		remotePID, err := actorRef.RemoteReSpawn(ctx, host, remotingPort, "Exchange2")
+		require.Error(t, err)
+		require.Nil(t, remotePID)
+
+		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
 	})
 }
 func TestRemoteStop(t *testing.T) {
@@ -3654,260 +3642,6 @@ func TestEquals(t *testing.T) {
 
 	err = sys.Stop(ctx)
 	assert.NoError(t, err)
-}
-func TestRemoteSpawn(t *testing.T) {
-	t.Run("When remoting is enabled", func(t *testing.T) {
-		// create the context
-		ctx := context.TODO()
-		// define the logger to use
-		logger := log.DiscardLogger
-		// generate the remoting port
-		ports := dynaport.Get(1)
-		remotingPort := ports[0]
-		host := "127.0.0.1"
-
-		// create the actor system
-		sys, err := NewActorSystem("test",
-			WithLogger(logger),
-			WithRemote(remote.NewConfig(host, remotingPort)),
-		)
-		// assert there are no error
-		require.NoError(t, err)
-
-		// start the actor system
-		err = sys.Start(ctx)
-		assert.NoError(t, err)
-
-		// create an actor
-		pid, err := sys.Spawn(ctx, "Exchange1", &exchanger{})
-		require.NoError(t, err)
-		assert.NotNil(t, pid)
-
-		// create an actor implementation and register it
-		actor := &exchanger{}
-		actorName := uuid.NewString()
-
-		// actor not spawned yet — expect ErrActorNotFound
-		remotePID, err := pid.RemoteLookup(ctx, host, remotingPort, actorName)
-		require.Error(t, err)
-		require.Nil(t, remotePID)
-		require.ErrorIs(t, err, errors.ErrActorNotFound)
-
-		// register the actor
-		err = sys.Register(ctx, actor)
-		require.NoError(t, err)
-
-		// spawn the remote actor
-		err = pid.RemoteSpawn(ctx, host, remotingPort, actorName, "actor.exchanger")
-		require.NoError(t, err)
-
-		// re-fetching the address of the actor should now succeed
-		remotePID, err = pid.RemoteLookup(ctx, host, remotingPort, actorName)
-		require.NoError(t, err)
-		require.NotNil(t, remotePID)
-
-		// send the message to exchanger actor one using remote messaging
-		reply, err := pid.Ask(ctx, remotePID, new(testpb.TestReply), replyTimeout)
-		require.NoError(t, err)
-		require.NotNil(t, reply)
-		actual, ok := reply.(*testpb.Reply)
-		require.True(t, ok)
-		expected := new(testpb.Reply)
-		assert.True(t, proto.Equal(expected, actual))
-
-		t.Cleanup(func() {
-			err = sys.Stop(ctx)
-			assert.NoError(t, err)
-		})
-	})
-	t.Run("When actor not registered", func(t *testing.T) {
-		// create the context
-		ctx := context.TODO()
-		// define the logger to use
-		logger := log.DiscardLogger
-		// generate the remoting port
-		ports := dynaport.Get(1)
-		remotingPort := ports[0]
-		host := "127.0.0.1"
-
-		// create the actor system
-		sys, err := NewActorSystem("test",
-			WithLogger(logger),
-			WithRemote(remote.NewConfig(host, remotingPort)),
-		)
-		// assert there are no error
-		require.NoError(t, err)
-
-		// start the actor system
-		err = sys.Start(ctx)
-		assert.NoError(t, err)
-
-		// create an actor
-		pid, err := sys.Spawn(ctx, "Exchange1", &exchanger{})
-		require.NoError(t, err)
-		assert.NotNil(t, pid)
-
-		actorName := uuid.NewString()
-		// actor not registered — expect ErrActorNotFound
-		remotePID, err := pid.RemoteLookup(ctx, host, remotingPort, actorName)
-		require.Error(t, err)
-		require.Nil(t, remotePID)
-		require.ErrorIs(t, err, errors.ErrActorNotFound)
-
-		// for the sake of the test
-		require.NoError(t, sys.Deregister(ctx, &exchanger{}))
-
-		// spawn the remote actor
-		err = pid.RemoteSpawn(ctx, host, remotingPort, actorName, "exchanger")
-		require.Error(t, err)
-		assert.ErrorIs(t, err, errors.ErrTypeNotRegistered)
-
-		t.Cleanup(func() {
-			err = sys.Stop(ctx)
-			assert.NoError(t, err)
-		})
-	})
-	t.Run("When remote server unreachable", func(t *testing.T) {
-		// create the context
-		ctx := context.TODO()
-		// define the logger to use
-		logger := log.DiscardLogger
-		// generate the remoting port
-		ports := dynaport.Get(1)
-		remotingPort := ports[0]
-		host := "127.0.0.1"
-
-		// create the actor system
-		sys, err := NewActorSystem("test",
-			WithLogger(logger),
-		)
-		// assert there are no error
-		require.NoError(t, err)
-
-		// start the actor system
-		err = sys.Start(ctx)
-		assert.NoError(t, err)
-
-		// create an actor
-		pid, err := sys.Spawn(ctx, "Exchange1", &exchanger{})
-		require.NoError(t, err)
-		assert.NotNil(t, pid)
-
-		// create an actor implementation and register it
-		actorName := uuid.NewString()
-
-		// spawn the remote actor
-		err = pid.RemoteSpawn(ctx, host, remotingPort, actorName, "exchanger")
-		require.Error(t, err)
-
-		t.Cleanup(func() {
-			err = sys.Stop(ctx)
-			assert.NoError(t, err)
-		})
-	})
-	t.Run("When remoting is not enabled", func(t *testing.T) {
-		// create the context
-		ctx := context.TODO()
-		// define the logger to use
-		logger := log.DiscardLogger
-		// generate the remoting port
-		ports := dynaport.Get(1)
-		remotingPort := ports[0]
-		host := "127.0.0.1"
-
-		// create the actor system
-		sys, err := NewActorSystem("test",
-			WithLogger(logger),
-			WithRemote(remote.NewConfig(host, remotingPort)),
-		)
-		// assert there are no error
-		require.NoError(t, err)
-
-		// start the actor system
-		err = sys.Start(ctx)
-		assert.NoError(t, err)
-
-		// create an actor
-		pid, err := sys.Spawn(ctx, "Exchange1", &exchanger{})
-		require.NoError(t, err)
-		assert.NotNil(t, pid)
-
-		// create an actor implementation and register it
-		actor := &exchanger{}
-		actorName := uuid.NewString()
-
-		// actor not spawned yet — expect ErrActorNotFound
-		remotePID, err := pid.RemoteLookup(ctx, host, remotingPort, actorName)
-		require.Error(t, err)
-		require.Nil(t, remotePID)
-		require.ErrorIs(t, err, errors.ErrActorNotFound)
-
-		// register the actor
-		err = sys.Register(ctx, actor)
-		require.NoError(t, err)
-
-		// disable remoting on pid
-		pid.remoting = nil
-
-		// spawn the remote actor
-		err = pid.RemoteSpawn(ctx, host, remotingPort, actorName, "actor.exchanger")
-		require.Error(t, err)
-		assert.ErrorIs(t, err, errors.ErrRemotingDisabled)
-
-		t.Cleanup(func() {
-			err = sys.Stop(ctx)
-			assert.NoError(t, err)
-		})
-	})
-
-	t.Run("With invalid Spawn Option", func(t *testing.T) {
-		// create the context
-		ctx := context.TODO()
-		// define the logger to use
-		logger := log.DiscardLogger
-		// generate the remoting port
-		ports := dynaport.Get(1)
-		remotingPort := ports[0]
-		host := "127.0.0.1"
-
-		// create the actor system
-		sys, err := NewActorSystem("test",
-			WithLogger(logger),
-			WithRemote(remote.NewConfig(host, remotingPort)),
-		)
-		// assert there are no error
-		require.NoError(t, err)
-
-		// start the actor system
-		err = sys.Start(ctx)
-		assert.NoError(t, err)
-
-		// create an actor
-		pid, err := sys.Spawn(ctx, "Exchange1", &exchanger{})
-		require.NoError(t, err)
-		assert.NotNil(t, pid)
-
-		// create an actor implementation and register it
-		actor := &exchanger{}
-		actorName := uuid.NewString()
-
-		// actor not spawned yet — expect ErrActorNotFound
-		remotePID, err := pid.RemoteLookup(ctx, host, remotingPort, actorName)
-		require.Error(t, err)
-		require.Nil(t, remotePID)
-		require.ErrorIs(t, err, errors.ErrActorNotFound)
-
-		// register the actor
-		err = sys.Register(ctx, actor)
-		require.NoError(t, err)
-
-		// spawn the remote actor
-		err = pid.RemoteSpawn(ctx, host, remotingPort, actorName, "actor.exchanger", WithPassivationStrategy(&MockFakePassivationStrategy{}))
-		require.Error(t, err)
-
-		err = sys.Stop(ctx)
-		require.NoError(t, err)
-	})
 }
 func TestName(t *testing.T) {
 	ctx := context.TODO()

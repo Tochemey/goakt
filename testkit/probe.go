@@ -117,7 +117,7 @@ type Probe interface {
 	SendSync(actorName string, message any, timeout time.Duration)
 
 	// Sender returns the PID of the sender of the last received message.
-	// For remote senders, use pid.IsRemote() / pid.Address() on the returned PID.
+	// For remote senders, use pid.IsRemote() / pid.Path() on the returned PID.
 	Sender() *actor.PID
 
 	// PID returns the PID of the probe itself, which can be used as the sender
@@ -349,7 +349,7 @@ func (x *probe) SendSync(actorName string, msg any, timeout time.Duration) {
 }
 
 // Sender returns the PID of the sender of the last received message.
-// For remote senders, use pid.IsRemote() / pid.Address() on the returned PID.
+// For remote senders, use pid.IsRemote() / pid.Path() on the returned PID.
 func (x *probe) Sender() *actor.PID {
 	return x.lastSender
 }

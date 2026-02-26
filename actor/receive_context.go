@@ -61,7 +61,7 @@ import (
 //   - Sender() returns the PID of the message sender — local or remote.
 //   - For remote messages, Sender() holds a lightweight remote PID created from
 //     the sender address embedded in the wire message.
-//   - Use Sender().Address() for the sender's address and Self().Address() for the receiver's address (handle nil PIDs with address.NoSender() as needed).
+//   - Use Sender().Path() for the sender's path and Self().Path() for the receiver's path (handle nil PIDs; use PathToAddress when *address.Address is needed).
 //
 // Examples:
 //
@@ -552,14 +552,17 @@ func (rctx *ReceiveContext) Unhandled() {
 
 // RemoteReSpawn restarts (re-spawns) a named actor on a remote node.
 //
-// Useful for administrative recovery or orchestration scenarios. Errors are
-// recorded via Err.
-func (rctx *ReceiveContext) RemoteReSpawn(host string, port int, name string) {
+// Returns the restarted actor's PID when successful, or nil and an error when
+// the actor is not found or the operation fails. Errors are also recorded via Err.
+func (rctx *ReceiveContext) RemoteReSpawn(host string, port int, name string) *PID {
 	recipient := rctx.self
 	ctx := rctx.withoutCancel()
-	if err := recipient.RemoteReSpawn(ctx, host, port, name); err != nil {
+	pid, err := recipient.RemoteReSpawn(ctx, host, port, name)
+	if err != nil {
 		rctx.Err(err)
+		return nil
 	}
+	return pid
 }
 
 // PipeTo runs a task asynchronously and sends its successful result to the target PID.

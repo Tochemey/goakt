@@ -444,7 +444,9 @@ func (x *RemoteReSpawnRequest) GetName() string {
 }
 
 type RemoteReSpawnResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the actor address
+	Address       string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -477,6 +479,13 @@ func (x *RemoteReSpawnResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use RemoteReSpawnResponse.ProtoReflect.Descriptor instead.
 func (*RemoteReSpawnResponse) Descriptor() ([]byte, []int) {
 	return file_internal_remoting_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *RemoteReSpawnResponse) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
 }
 
 type RemoteStopRequest struct {
@@ -723,7 +732,9 @@ func (x *RemoteSpawnRequest) GetReentrancy() *ReentrancyConfig {
 }
 
 type RemoteSpawnResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the actor address
+	Address       string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -756,6 +767,13 @@ func (x *RemoteSpawnResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use RemoteSpawnResponse.ProtoReflect.Descriptor instead.
 func (*RemoteSpawnResponse) Descriptor() ([]byte, []int) {
 	return file_internal_remoting_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *RemoteSpawnResponse) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
 }
 
 type RemoteReinstateRequest struct {
@@ -1300,8 +1318,9 @@ const file_internal_remoting_proto_rawDesc = "" +
 	"\x14RemoteReSpawnRequest\x12\x12\n" +
 	"\x04host\x18\x01 \x01(\tR\x04host\x12\x12\n" +
 	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x12\n" +
-	"\x04name\x18\x03 \x01(\tR\x04name\"\x17\n" +
-	"\x15RemoteReSpawnResponse\"O\n" +
+	"\x04name\x18\x03 \x01(\tR\x04name\"1\n" +
+	"\x15RemoteReSpawnResponse\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"O\n" +
 	"\x11RemoteStopRequest\x12\x12\n" +
 	"\x04host\x18\x01 \x01(\tR\x04host\x12\x12\n" +
 	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x12\n" +
@@ -1327,8 +1346,9 @@ const file_internal_remoting_proto_rawDesc = "" +
 	"\n" +
 	"reentrancy\x18\f \x01(\v2\x1c.internalpb.ReentrancyConfigR\n" +
 	"reentrancyB\a\n" +
-	"\x05_role\"\x15\n" +
-	"\x13RemoteSpawnResponse\"T\n" +
+	"\x05_role\"/\n" +
+	"\x13RemoteSpawnResponse\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"T\n" +
 	"\x16RemoteReinstateRequest\x12\x12\n" +
 	"\x04host\x18\x01 \x01(\tR\x04host\x12\x12\n" +
 	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x12\n" +

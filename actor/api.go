@@ -27,8 +27,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/tochemey/goakt/v4/address"
 	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 )
 

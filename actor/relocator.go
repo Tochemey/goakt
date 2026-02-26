@@ -30,8 +30,8 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/tochemey/goakt/v4/address"
 	"github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/chunk"
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/codec"
@@ -198,7 +198,7 @@ func (r *relocator) spawnRemoteActor(ctx context.Context, actor *internalpb.Acto
 		spawnRequest.Supervisor = codec.DecodeSupervisor(actor.GetSupervisor())
 	}
 
-	if err := r.remoting.RemoteSpawn(ctx, remoteHost, remotingPort, spawnRequest); err != nil {
+	if _, err := r.remoting.RemoteSpawn(ctx, remoteHost, remotingPort, spawnRequest); err != nil {
 		r.logger.Error(err)
 		return errors.NewSpawnError(err)
 	}
@@ -360,7 +360,8 @@ func (r *relocator) recreateLocally(ctx context.Context, props *internalpb.Actor
 		}
 
 		// spawn the singleton actor
-		return r.pid.ActorSystem().SpawnSingleton(ctx, addr.Name(), actor, singletonOpts...)
+		_, err := r.pid.ActorSystem().SpawnSingleton(ctx, addr.Name(), actor, singletonOpts...)
+		return err
 	}
 
 	if !props.GetRelocatable() {

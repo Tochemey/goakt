@@ -238,7 +238,7 @@ func (x *topicActor) sendToRemoteTopicActors(cctx context.Context, remotePeers [
 					Message: marshaled,
 				}
 
-				from := x.pid.Address()
+				from := pathToAddress(x.pid.Path())
 				if err := x.remoting.RemoteTell(cctx, from, to, toSend); err != nil {
 					x.logger.Warnf("failed to publish message to actor %s on remote=[host=%s, port=%d]: %s",
 						actorName, peer.host, peer.port, err.Error())

@@ -5,7 +5,7 @@ package remoteclient
 import (
 	context "context"
 
-	address "github.com/tochemey/goakt/v4/address"
+	address "github.com/tochemey/goakt/v4/internal/address"
 
 	tls "crypto/tls"
 	time "time"
@@ -501,21 +501,33 @@ func (_c *Client_RemoteLookup_Call) RunAndReturn(run func(context.Context, strin
 }
 
 // RemoteReSpawn provides a mock function with given fields: ctx, host, port, name
-func (_m *Client) RemoteReSpawn(ctx context.Context, host string, port int, name string) error {
+func (_m *Client) RemoteReSpawn(ctx context.Context, host string, port int, name string) (*string, error) {
 	ret := _m.Called(ctx, host, port, name)
 
 	if len(ret) == 0 {
 		panic("no return value specified for RemoteReSpawn")
 	}
 
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, int, string) error); ok {
+	var r0 *string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, int, string) (*string, error)); ok {
+		return rf(ctx, host, port, name)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, int, string) *string); ok {
 		r0 = rf(ctx, host, port, name)
 	} else {
-		r0 = ret.Error(0)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*string)
+		}
 	}
 
-	return r0
+	if rf, ok := ret.Get(1).(func(context.Context, string, int, string) error); ok {
+		r1 = rf(ctx, host, port, name)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // Client_RemoteReSpawn_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoteReSpawn'
@@ -539,12 +551,12 @@ func (_c *Client_RemoteReSpawn_Call) Run(run func(ctx context.Context, host stri
 	return _c
 }
 
-func (_c *Client_RemoteReSpawn_Call) Return(_a0 error) *Client_RemoteReSpawn_Call {
-	_c.Call.Return(_a0)
+func (_c *Client_RemoteReSpawn_Call) Return(_a0 *string, _a1 error) *Client_RemoteReSpawn_Call {
+	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *Client_RemoteReSpawn_Call) RunAndReturn(run func(context.Context, string, int, string) error) *Client_RemoteReSpawn_Call {
+func (_c *Client_RemoteReSpawn_Call) RunAndReturn(run func(context.Context, string, int, string) (*string, error)) *Client_RemoteReSpawn_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -599,21 +611,33 @@ func (_c *Client_RemoteReinstate_Call) RunAndReturn(run func(context.Context, st
 }
 
 // RemoteSpawn provides a mock function with given fields: ctx, host, port, spawnRequest
-func (_m *Client) RemoteSpawn(ctx context.Context, host string, port int, spawnRequest *remote.SpawnRequest) error {
+func (_m *Client) RemoteSpawn(ctx context.Context, host string, port int, spawnRequest *remote.SpawnRequest) (*string, error) {
 	ret := _m.Called(ctx, host, port, spawnRequest)
 
 	if len(ret) == 0 {
 		panic("no return value specified for RemoteSpawn")
 	}
 
-	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, int, *remote.SpawnRequest) error); ok {
+	var r0 *string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, int, *remote.SpawnRequest) (*string, error)); ok {
+		return rf(ctx, host, port, spawnRequest)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, int, *remote.SpawnRequest) *string); ok {
 		r0 = rf(ctx, host, port, spawnRequest)
 	} else {
-		r0 = ret.Error(0)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*string)
+		}
 	}
 
-	return r0
+	if rf, ok := ret.Get(1).(func(context.Context, string, int, *remote.SpawnRequest) error); ok {
+		r1 = rf(ctx, host, port, spawnRequest)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // Client_RemoteSpawn_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoteSpawn'
@@ -637,12 +661,12 @@ func (_c *Client_RemoteSpawn_Call) Run(run func(ctx context.Context, host string
 	return _c
 }
 
-func (_c *Client_RemoteSpawn_Call) Return(_a0 error) *Client_RemoteSpawn_Call {
-	_c.Call.Return(_a0)
+func (_c *Client_RemoteSpawn_Call) Return(_a0 *string, _a1 error) *Client_RemoteSpawn_Call {
+	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *Client_RemoteSpawn_Call) RunAndReturn(run func(context.Context, string, int, *remote.SpawnRequest) error) *Client_RemoteSpawn_Call {
+func (_c *Client_RemoteSpawn_Call) RunAndReturn(run func(context.Context, string, int, *remote.SpawnRequest) (*string, error)) *Client_RemoteSpawn_Call {
 	_c.Call.Return(run)
 	return _c
 }

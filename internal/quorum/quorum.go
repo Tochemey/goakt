@@ -25,8 +25,9 @@ package quorum
 import (
 	"errors"
 
-	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/olric"
+
+	gerrors "github.com/tochemey/goakt/v4/errors"
 )
 
 // IsQuorumError returns true when the error indicates a quorum-related failure.

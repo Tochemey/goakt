@@ -38,8 +38,8 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 
-	"github.com/tochemey/goakt/v4/address"
 	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/codec"
 	"github.com/tochemey/goakt/v4/internal/id"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
@@ -202,7 +202,7 @@ type Client interface {
 	//   - AlreadyExists or FailedPrecondition (server-dependent) if the name
 	//     conflicts with an existing actor.
 	//   - Transport and context errors.
-	RemoteSpawn(ctx context.Context, host string, port int, spawnRequest *remote.SpawnRequest) error
+	RemoteSpawn(ctx context.Context, host string, port int, spawnRequest *remote.SpawnRequest) (*string, error)
 
 	// RemoteReSpawn requests a restart of an existing actor on the remote node.
 	//
@@ -216,7 +216,7 @@ type Client interface {
 	//
 	// Errors:
 	//   - Transport and context errors.
-	RemoteReSpawn(ctx context.Context, host string, port int, name string) error
+	RemoteReSpawn(ctx context.Context, host string, port int, name string) (*string, error)
 
 	// RemoteStop requests termination of an actor on the remote node.
 	//
@@ -1057,9 +1057,9 @@ func (r *client) RemoteBatchAsk(ctx context.Context, from, to *address.Address, 
 //
 // Returns ErrTypeNotRegistered if the remote node does not recognize the actor
 // type (kind). Other failures may include name conflicts or transport errors.
-func (r *client) RemoteSpawn(ctx context.Context, host string, port int, spawnRequest *remote.SpawnRequest) error {
+func (r *client) RemoteSpawn(ctx context.Context, host string, port int, spawnRequest *remote.SpawnRequest) (*string, error) {
 	if err := spawnRequest.Validate(); err != nil {
-		return fmt.Errorf("invalid spawn option: %w", err)
+		return nil, fmt.Errorf("invalid spawn option: %w", err)
 	}
 
 	spawnRequest.Sanitize()
@@ -1072,13 +1072,13 @@ func (r *client) RemoteSpawn(ctx context.Context, host string, port int, spawnRe
 	if len(spawnRequest.Dependencies) > 0 {
 		dependencies, err = codec.EncodeDependencies(spawnRequest.Dependencies...)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 
 	port32, err := strconvx.Int2Int32(port)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	var singletonSpec *internalpb.SingletonSpec
@@ -1098,7 +1098,7 @@ func (r *client) RemoteSpawn(ctx context.Context, host string, port int, spawnRe
 	// Enrich context with metadata
 	ctx, err = r.enrichContext(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Get pooled client
@@ -1121,23 +1121,32 @@ func (r *client) RemoteSpawn(ctx context.Context, host string, port int, spawnRe
 	// Send request
 	resp, err := client.SendProto(ctx, request)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	return checkProtoError(resp)
+	if err := checkProtoError(resp); err != nil {
+		return nil, err
+	}
+
+	if res, ok := resp.(*internalpb.RemoteSpawnResponse); ok && res.GetAddress() != "" {
+		addr := res.GetAddress()
+		return pointer.To(addr), nil
+	}
+
+	return nil, gerrors.ErrInvalidResponse
 }
 
 // RemoteReSpawn requests a restart of an existing actor on the remote node.
-func (r *client) RemoteReSpawn(ctx context.Context, host string, port int, name string) error {
+func (r *client) RemoteReSpawn(ctx context.Context, host string, port int, name string) (*string, error) {
 	port32, err := strconvx.Int2Int32(port)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Enrich context with metadata
 	ctx, err = r.enrichContext(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Get pooled client
@@ -1151,17 +1160,27 @@ func (r *client) RemoteReSpawn(ctx context.Context, host string, port int, name 
 	// Send request
 	resp, err := client.SendProto(ctx, request)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Ignore NOT_FOUND errors (actor doesn't exist)
 	if errResp, ok := resp.(*internalpb.Error); ok {
 		if errResp.GetCode() == internalpb.Code_CODE_NOT_FOUND {
-			return nil
+			return nil, nil
 		}
 	}
 
-	return checkProtoError(resp)
+	if err := checkProtoError(resp); err != nil {
+		return nil, err
+	}
+
+	// Extract address from successful response
+	if res, ok := resp.(*internalpb.RemoteReSpawnResponse); ok && res.GetAddress() != "" {
+		addr := res.GetAddress()
+		return pointer.To(addr), nil
+	}
+
+	return nil, gerrors.ErrInvalidResponse
 }
 
 // RemoteStop terminates the specified actor on the remote node. Missing actors

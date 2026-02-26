@@ -35,7 +35,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	bbolt "go.etcd.io/bbolt"
+	"go.etcd.io/bbolt"
 
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 )

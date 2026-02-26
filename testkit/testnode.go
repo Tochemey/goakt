@@ -82,7 +82,7 @@ func (x TestNode) Spawn(ctx context.Context, name string, actor goakt.Actor, opt
 // This is useful for managing shared resources or coordinating tasks that should be handled by a single actor.
 func (x TestNode) SpawnSingleton(ctx context.Context, name string, actor goakt.Actor) {
 	require.True(x.testingT, x.created.Load(), "cannot spawn singleton actor before the test node is created")
-	err := x.actorSystem.SpawnSingleton(ctx, name, actor)
+	_, err := x.actorSystem.SpawnSingleton(ctx, name, actor)
 	require.NoError(x.testingT, err)
 }
 

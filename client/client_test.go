@@ -38,10 +38,10 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	actors "github.com/tochemey/goakt/v4/actor"
-	"github.com/tochemey/goakt/v4/address"
 	"github.com/tochemey/goakt/v4/discovery"
 	"github.com/tochemey/goakt/v4/discovery/nats"
 	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/address"
 	inet "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/internal/types"
@@ -822,7 +822,7 @@ func TestClient(t *testing.T) {
 
 		err = client.ReSpawn(ctx, actorName)
 		require.NoError(t, err)
-		mockRemoting.AssertNotCalled(t, "RemoteReSpawn", mock.Anything, mock.Anything, mock.Anything)
+		mockRemoting.AssertNotCalled(t, "RemoteReSpawn", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 
 		client.Close()
 	})
@@ -850,7 +850,63 @@ func TestClient(t *testing.T) {
 		err = client.ReSpawn(ctx, actorName)
 		require.Error(t, err)
 		require.ErrorIs(t, err, expectedErr)
-		mockRemoting.AssertNotCalled(t, "RemoteReSpawn", mock.Anything, mock.Anything, mock.Anything)
+		mockRemoting.AssertNotCalled(t, "RemoteReSpawn", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+
+		client.Close()
+	})
+
+	t.Run("With ReSpawn succeeds when lookup returns valid address", func(t *testing.T) {
+		ctx := context.TODO()
+		actorName := "actorName"
+
+		mockRemoting := mockremote.NewClient(t)
+		node := &Node{
+			remoting: mockRemoting,
+			address:  "127.0.0.1:12345",
+		}
+
+		remoteHost, remotePort := node.hostAndPort()
+		addr := address.New(actorName, "sys", remoteHost, remotePort)
+		mockRemoting.EXPECT().NetClient(remoteHost, remotePort).Return(inet.NewClient(net.JoinHostPort(remoteHost, strconv.Itoa(remotePort))))
+		mockRemoting.EXPECT().RemoteLookup(ctx, remoteHost, remotePort, actorName).Return(addr, nil)
+		mockRemoting.EXPECT().RemoteReSpawn(ctx, addr.Host(), addr.Port(), actorName).Return(nil, nil)
+		mockRemoting.EXPECT().Close()
+
+		client, err := New(ctx, []*Node{node})
+		require.NoError(t, err)
+		require.NotNil(t, client)
+
+		err = client.ReSpawn(ctx, actorName)
+		require.NoError(t, err)
+
+		client.Close()
+	})
+
+	t.Run("With ReSpawn returns error when RemoteReSpawn fails", func(t *testing.T) {
+		ctx := context.TODO()
+		actorName := "actorName"
+
+		mockRemoting := mockremote.NewClient(t)
+		node := &Node{
+			remoting: mockRemoting,
+			address:  "127.0.0.1:12345",
+		}
+
+		remoteHost, remotePort := node.hostAndPort()
+		addr := address.New(actorName, "sys", remoteHost, remotePort)
+		expectedErr := fmt.Errorf("remote respawn failed")
+		mockRemoting.EXPECT().NetClient(remoteHost, remotePort).Return(inet.NewClient(net.JoinHostPort(remoteHost, strconv.Itoa(remotePort))))
+		mockRemoting.EXPECT().RemoteLookup(ctx, remoteHost, remotePort, actorName).Return(addr, nil)
+		mockRemoting.EXPECT().RemoteReSpawn(ctx, addr.Host(), addr.Port(), actorName).Return(nil, expectedErr)
+		mockRemoting.EXPECT().Close()
+
+		client, err := New(ctx, []*Node{node})
+		require.NoError(t, err)
+		require.NotNil(t, client)
+
+		err = client.ReSpawn(ctx, actorName)
+		require.Error(t, err)
+		require.ErrorIs(t, err, expectedErr)
 
 		client.Close()
 	})
@@ -910,10 +966,9 @@ func TestClient(t *testing.T) {
 
 		pause.For(time.Second)
 
-		whereis, err := client.Whereis(ctx, actorName)
+		exists, err := client.Exists(ctx, actorName)
 		require.NoError(t, err)
-		require.NotNil(t, whereis)
-		assert.Equal(t, actorName, whereis.Name())
+		assert.True(t, exists, "actor should exist after spawn")
 
 		err = client.Stop(ctx, actorName)
 		require.NoError(t, err)
@@ -1211,9 +1266,9 @@ func TestClient(t *testing.T) {
 		require.NotNil(t, client)
 
 		actorName := "actorName"
-		whereis, err := client.Whereis(ctx, actorName)
-		require.Error(t, err)
-		require.Nil(t, whereis)
+		exists, err := client.Exists(ctx, actorName)
+		require.NoError(t, err)
+		require.False(t, exists, "actor should not exist when not spawned")
 
 		err = client.Stop(ctx, actorName)
 		require.NoError(t, err)
@@ -1376,7 +1431,7 @@ func TestClient(t *testing.T) {
 		require.Error(t, err)
 		require.ErrorIs(t, err, expectedErr)
 
-		_, err = client.Whereis(ctx, actorName)
+		_, err = client.Exists(ctx, actorName)
 		require.Error(t, err)
 		require.ErrorIs(t, err, expectedErr)
 

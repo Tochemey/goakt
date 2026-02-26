@@ -70,7 +70,10 @@ message RemoteReSpawnRequest {
   string name = 3;
 }
 
-message RemoteReSpawnResponse {}
+message RemoteReSpawnResponse {
+  // Specifies the actor address
+  string address = 1;
+}
 
 message RemoteStopRequest {
   // Specifies the remote host address
@@ -110,7 +113,10 @@ message RemoteSpawnRequest {
   ReentrancyConfig reentrancy = 12;
 }
 
-message RemoteSpawnResponse {}
+message RemoteSpawnResponse {
+  // Specifies the actor address
+  string address = 1;
+}
 
 message RemoteReinstateRequest {
   // Specifies the remote host address

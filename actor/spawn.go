@@ -38,9 +38,9 @@ import (
 	"github.com/flowchartsman/retry"
 	"github.com/google/uuid"
 
-	"github.com/tochemey/goakt/v4/address"
 	"github.com/tochemey/goakt/v4/datacenter"
 	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/pointer"
 	"github.com/tochemey/goakt/v4/internal/strconvx"
@@ -54,6 +54,9 @@ import (
 // The actor will be registered under the given `name`, allowing other actors
 // or components to send messages to it using the returned *PID. If an actor
 // with the same name already exists in the local system, an error will be returned.
+//
+// This method is location-transparent: with options such as WithHostAndPort, the actor
+// may be spawned on a remote node when remoting is enabled; otherwise it is created locally.
 //
 // Parameters:
 //   - ctx: A context used to control cancellation and timeouts during the spawn process.
@@ -72,8 +75,7 @@ import (
 //	    log.Fatalf("Failed to spawn actor: %v", err)
 //	}
 //
-// Note: Actors spawned using this method are confined to the local actor system.
-// For distributed scenarios, use a SpawnOn method.
+// Note: For cluster placement strategies (e.g., Random, LeastLoad), use SpawnOn instead.
 func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts ...SpawnOption) (*PID, error) {
 	if !x.Running() {
 		return nil, gerrors.ErrActorSystemNotStarted
@@ -93,7 +95,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 		}
 
 		// we are spawning the actor on a remote node
-		if err := x.remoting.RemoteSpawn(ctx, *config.host, *config.port, &remote.SpawnRequest{
+		addr, err := x.remoting.RemoteSpawn(ctx, *config.host, *config.port, &remote.SpawnRequest{
 			Name:                name,
 			Kind:                types.Name(actor),
 			Relocatable:         config.relocatable,
@@ -103,12 +105,17 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 			Reentrancy:          config.reentrancy,
 			Supervisor:          config.supervisor,
 			Role:                config.role,
-		}); err != nil {
+		})
+		if err != nil {
 			return nil, err
 		}
 
-		addr := address.New(name, x.name, *config.host, *config.port)
-		return newRemotePID(addr, x.remoting), nil
+		address, err := address.Parse(pointer.Deref(addr, ""))
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse address: %w", err)
+		}
+
+		return newRemotePID(address, x.remoting), nil
 	}
 
 	// check some preconditions
@@ -235,9 +242,9 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 //	}
 //
 // ⚠️ Note: The created actor uses the default mailbox from the actor system unless overridden in opts.
-func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opts ...SpawnOption) error {
+func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opts ...SpawnOption) (*PID, error) {
 	if !x.Running() {
-		return gerrors.ErrActorSystemNotStarted
+		return nil, gerrors.ErrActorSystemNotStarted
 	}
 
 	config := newSpawnConfig(opts...)
@@ -248,38 +255,35 @@ func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opt
 
 	// check some preconditions
 	if err := x.checkSpawnPreconditions(ctx, name, actor, false, nil); err != nil {
-		return err
+		return nil, err
 	}
 
 	if !x.InCluster() {
-		_, err := x.Spawn(ctx, name, actor, opts...)
-		return err
+		return x.Spawn(ctx, name, actor, opts...)
 	}
 
 	peers, err := x.cluster.Members(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to fetch cluster nodes: %w", err)
+		return nil, fmt.Errorf("failed to fetch cluster nodes: %w", err)
 	}
 
 	if len(peers) == 0 {
-		_, err := x.Spawn(ctx, name, actor, opts...)
-		return err
+		return x.Spawn(ctx, name, actor, opts...)
 	}
 
 	peers, err = x.filterPeersByRole(peers, config.role)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	peer, err := x.selectPlacementPeer(ctx, peers, config.placement)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// spawn the actor on the local node
 	if peer == nil {
-		_, err := x.Spawn(ctx, name, actor, opts...)
-		return err
+		return x.Spawn(ctx, name, actor, opts...)
 	}
 
 	request := &remote.SpawnRequest{
@@ -294,7 +298,17 @@ func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opt
 		Supervisor:          config.supervisor,
 	}
 
-	return x.remoting.RemoteSpawn(ctx, peer.Host, peer.RemotingPort, request)
+	addr, err := x.remoting.RemoteSpawn(ctx, peer.Host, peer.RemotingPort, request)
+	if err != nil {
+		return nil, err
+	}
+
+	address, err := address.Parse(pointer.Deref(addr, ""))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse address: %w", err)
+	}
+
+	return newRemotePID(address, x.remoting), nil
 }
 
 // SpawnFromFunc creates an actor with the given receive function.
@@ -366,13 +380,13 @@ func (x *actorSystem) SpawnRouter(ctx context.Context, name string, poolSize int
 //   - ErrActorAlreadyExists when the requested name is already used by another actor.
 //   - ErrWriteQuorum, ErrReadQuorum, ErrClusterQuorum when a quorum-related failure occurs.
 //   - Other errors are returned as-is (e.g., no eligible members for a role, remoting failures).
-func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Actor, opts ...ClusterSingletonOption) error {
+func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Actor, opts ...ClusterSingletonOption) (*PID, error) {
 	if !x.Running() {
-		return gerrors.ErrActorSystemNotStarted
+		return nil, gerrors.ErrActorSystemNotStarted
 	}
 
 	if !x.InCluster() {
-		return gerrors.ErrClusterDisabled
+		return nil, gerrors.ErrClusterDisabled
 	}
 
 	cl := x.getCluster()
@@ -380,7 +394,7 @@ func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Act
 	role := strings.TrimSpace(pointer.Deref(cfg.Role(), ""))
 	retries, err := strconvx.Int2Int32(cfg.numberOfRetries)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// singletonKey is the cluster registration key: kind or kind::role.
@@ -389,7 +403,7 @@ func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Act
 		singletonKey = kindRole(singletonKey, role)
 	}
 
-	return x.retrySpawnSingleton(ctx, cfg, singletonKey, name, func(ctx context.Context) error {
+	return x.retrySpawnSingleton(ctx, cfg, singletonKey, name, func(ctx context.Context) (*PID, error) {
 		if role != "" {
 			return x.spawnSingletonWithRole(ctx, cl, name, actor, role, cfg.spawnTimeout, cfg.waitInterval, retries)
 		}
@@ -403,7 +417,7 @@ func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Act
 //
 // SpawnSingleton always builds a non-nil cfg via newClusterSingletonConfig, so cfg is assumed non-nil.
 // This helper exists to keep the SpawnSingleton happy-path readable and to centralize retry semantics.
-func (x *actorSystem) retrySpawnSingleton(ctx context.Context, cfg *clusterSingletonConfig, singletonKey, actorName string, spawnFn func(context.Context) error) error {
+func (x *actorSystem) retrySpawnSingleton(ctx context.Context, cfg *clusterSingletonConfig, singletonKey, actorName string, spawnFn func(context.Context) (*PID, error)) (*PID, error) {
 	retryCtx := ctx
 	if cfg.spawnTimeout > 0 {
 		var cancel context.CancelFunc
@@ -411,16 +425,19 @@ func (x *actorSystem) retrySpawnSingleton(ctx context.Context, cfg *clusterSingl
 		defer cancel()
 	}
 
+	var pid *PID
 	retrier := retry.NewRetrier(cfg.numberOfRetries, cfg.waitInterval, cfg.spawnTimeout)
 	if err := retrier.RunContext(retryCtx, func(ctx context.Context) error {
-		if err := spawnFn(ctx); err != nil {
+		var err error
+		pid, err = spawnFn(ctx)
+		if err != nil {
 			return x.spawnSingletonRetryError(ctx, err, singletonKey, actorName)
 		}
 		return nil
 	}); err != nil {
-		return cluster.NormalizeQuorumError(err)
+		return nil, cluster.NormalizeQuorumError(err)
 	}
-	return nil
+	return pid, nil
 }
 
 // spawnSingletonRetryError decides how a singleton spawn failure should be handled by the retrier.
@@ -586,11 +603,11 @@ func isNoRoleMembersError(err error) bool {
 	return errors.As(err, &noRole)
 }
 
-func (x *actorSystem) spawnSingletonWithRole(ctx context.Context, cl cluster.Cluster, name string, actor Actor, role string, spawnTimeout, waitInterval time.Duration, retries int32) error {
+func (x *actorSystem) spawnSingletonWithRole(ctx context.Context, cl cluster.Cluster, name string, actor Actor, role string, spawnTimeout, waitInterval time.Duration, retries int32) (*PID, error) {
 	// fetch all cluster members
 	members, err := cl.Members(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to fetch cluster members: %w", err)
+		return nil, fmt.Errorf("failed to fetch cluster members: %w", err)
 	}
 
 	filtered := make([]*cluster.Peer, 0, len(members))
@@ -601,7 +618,7 @@ func (x *actorSystem) spawnSingletonWithRole(ctx context.Context, cl cluster.Clu
 	}
 
 	if len(filtered) == 0 {
-		return errNoRoleMembers{role: role}
+		return nil, errNoRoleMembers{role: role}
 	}
 
 	// find the oldest node in the filtered peers
@@ -617,7 +634,7 @@ func (x *actorSystem) spawnSingletonWithRole(ctx context.Context, cl cluster.Clu
 			port      = leader.RemotingPort
 		)
 
-		return x.remoting.RemoteSpawn(ctx, host, port, &remote.SpawnRequest{
+		addr, err := x.remoting.RemoteSpawn(ctx, host, port, &remote.SpawnRequest{
 			Name: name,
 			Kind: actorType,
 			Singleton: &remote.SingletonSpec{
@@ -627,12 +644,28 @@ func (x *actorSystem) spawnSingletonWithRole(ctx context.Context, cl cluster.Clu
 			},
 			Role: pointer.To(role),
 		})
+
+		if err != nil {
+			return nil, err
+		}
+
+		address, err := address.Parse(pointer.Deref(addr, ""))
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse address: %w", err)
+		}
+
+		return newRemotePID(address, x.remoting), nil
 	}
 
-	return x.spawnSingletonOnLocal(ctx, name, actor, pointer.To(role), spawnTimeout, waitInterval, retries)
+	pid, err := x.spawnSingletonOnLocal(ctx, name, actor, pointer.To(role), spawnTimeout, waitInterval, retries)
+	if err != nil {
+		return nil, err
+	}
+
+	return pid, nil
 }
 
-func (x *actorSystem) spawnSingletonOnLocal(ctx context.Context, name string, actor Actor, role *string, spawnTimeout, waitInterval time.Duration, retries int32) (err error) {
+func (x *actorSystem) spawnSingletonOnLocal(ctx context.Context, name string, actor Actor, role *string, spawnTimeout, waitInterval time.Duration, retries int32) (pid *PID, err error) {
 	// Normalize role once
 	singletonRole := strings.TrimSpace(pointer.Deref(role, ""))
 
@@ -644,7 +677,7 @@ func (x *actorSystem) spawnSingletonOnLocal(ctx context.Context, name string, ac
 
 	// check some preconditions
 	if err := x.checkSpawnPreconditions(ctx, name, actor, true, pointer.To(singletonRole)); err != nil {
-		return err
+		return nil, err
 	}
 
 	// If we fail after preconditions, cleanup kind registration best-effort.
@@ -657,7 +690,7 @@ func (x *actorSystem) spawnSingletonOnLocal(ctx context.Context, name string, ac
 		_ = x.cluster.RemoveKind(ctx, singletonKind)
 	}()
 
-	pid, err := x.configPID(ctx, name, actor,
+	pid, err = x.configPID(ctx, name, actor,
 		WithLongLived(),
 		withSingleton(&singletonSpec{
 			SpawnTimeout: spawnTimeout,
@@ -675,7 +708,7 @@ func (x *actorSystem) spawnSingletonOnLocal(ctx context.Context, name string, ac
 		),
 	)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if !pid.isStateSet(systemState) {
@@ -687,11 +720,11 @@ func (x *actorSystem) spawnSingletonOnLocal(ctx context.Context, name string, ac
 	x.actors.addWatcher(pid, x.deathWatch)
 
 	if err := x.putActorOnCluster(pid); err != nil {
-		return err
+		return nil, err
 	}
 
 	spawnSucceeded = true
-	return nil
+	return pid, nil
 }
 
 // spawnOnDatacenter spawns an actor on a remote data center by sending a RemoteSpawn
@@ -731,9 +764,9 @@ func (x *actorSystem) spawnSingletonOnLocal(ctx context.Context, name string, ac
 //   - error: ErrDataCenterNotReady, ErrDataCenterStaleRecords, or ErrDataCenterRecordNotFound when
 //     the controller is unavailable, cache is stale, or the target DC is not active in the cache;
 //     or an error from RemoteSpawn (e.g. ErrTypeNotRegistered, transport failures).
-func (x *actorSystem) spawnOnDatacenter(ctx context.Context, name string, actor Actor, config *spawnConfig) error {
+func (x *actorSystem) spawnOnDatacenter(ctx context.Context, name string, actor Actor, config *spawnConfig) (*PID, error) {
 	if !x.DataCenterReady() {
-		return gerrors.ErrDataCenterNotReady
+		return nil, gerrors.ErrDataCenterNotReady
 	}
 
 	// get the datacenter controller
@@ -742,7 +775,7 @@ func (x *actorSystem) spawnOnDatacenter(ctx context.Context, name string, actor 
 	activeRecords, stale := controller.ActiveRecords()
 	if stale {
 		if controller.FailOnStaleCache() {
-			return gerrors.ErrDataCenterStaleRecords
+			return nil, gerrors.ErrDataCenterStaleRecords
 		}
 		// Best-effort routing: proceed with stale cache but log warning
 		x.logger.Warn("DC cache is stale, proceeding with best-effort cross-DC spawn")
@@ -758,7 +791,7 @@ func (x *actorSystem) spawnOnDatacenter(ctx context.Context, name string, actor 
 	}
 
 	if dcRecord == nil {
-		return gerrors.ErrDataCenterRecordNotFound
+		return nil, gerrors.ErrDataCenterRecordNotFound
 	}
 
 	// let us pick a random endpoint from the datacenter record endpoints
@@ -766,15 +799,15 @@ func (x *actorSystem) spawnOnDatacenter(ctx context.Context, name string, actor 
 	endpoint := dcRecord.Endpoints[rand.IntN(len(dcRecord.Endpoints))] //nolint:gosec
 	host, portStr, err := net.SplitHostPort(endpoint)
 	if err != nil {
-		return fmt.Errorf("failed to split host and port from endpoint: %w", err)
+		return nil, fmt.Errorf("failed to split host and port from endpoint: %w", err)
 	}
 
 	port, err := strconv.Atoi(portStr)
 	if err != nil {
-		return fmt.Errorf("failed to convert port to int: %w", err)
+		return nil, fmt.Errorf("failed to convert port to int: %w", err)
 	}
 
-	return x.remoting.RemoteSpawn(ctx, host, port, &remote.SpawnRequest{
+	addr, err := x.remoting.RemoteSpawn(ctx, host, port, &remote.SpawnRequest{
 		Name:                name,
 		Kind:                types.Name(actor),
 		Relocatable:         config.relocatable,
@@ -783,6 +816,17 @@ func (x *actorSystem) spawnOnDatacenter(ctx context.Context, name string, actor 
 		EnableStashing:      config.enableStash,
 		Reentrancy:          config.reentrancy,
 	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	address, err := address.Parse(pointer.Deref(addr, ""))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse address: %w", err)
+	}
+
+	return newRemotePID(address, x.remoting), nil
 }
 
 func (x *actorSystem) selectPlacementPeer(ctx context.Context, peers []*cluster.Peer, placement SpawnPlacement) (*cluster.Peer, error) {

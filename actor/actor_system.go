@@ -48,13 +48,13 @@ import (
 	"golang.org/x/sync/singleflight"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/tochemey/goakt/v4/address"
 	"github.com/tochemey/goakt/v4/datacenter"
 	"github.com/tochemey/goakt/v4/discovery"
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/eventstream"
 	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/hash"
+	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/chain"
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/commands"
@@ -120,6 +120,9 @@ type ActorSystem interface {
 	// or components to send messages to it using the returned *PID. If an actor
 	// with the same name already exists in the local system, an error will be returned.
 	//
+	// This method is location-transparent: with options such as WithHostAndPort, the actor
+	// may be spawned on a remote node when remoting is enabled; otherwise it is created locally.
+	//
 	// Parameters:
 	//   - ctx: A context used to control cancellation and timeouts during the spawn process.
 	//   - name: A unique identifier for the actor within the local actor system.
@@ -137,8 +140,7 @@ type ActorSystem interface {
 	//       log.Fatalf("Failed to spawn actor: %v", err)
 	//   }
 	//
-	// Note: Actors spawned using this method are confined to the local actor system.
-	// For distributed scenarios, use a SpawnOn mechanism if available.
+	// Note: For cluster placement strategies (e.g., Random, LeastLoad), use SpawnOn instead.
 	Spawn(ctx context.Context, name string, actor Actor, opts ...SpawnOption) (*PID, error)
 	// SpawnOn creates and starts an actor locally, on another node in the current cluster,
 	// or on a node in a different data center, depending on options and actor system configuration.
@@ -198,7 +200,7 @@ type ActorSystem interface {
 	//	}
 	//
 	// ⚠️ Note: The created actor uses the default mailbox from the actor system unless overridden in opts.
-	SpawnOn(ctx context.Context, name string, actor Actor, opts ...SpawnOption) error
+	SpawnOn(ctx context.Context, name string, actor Actor, opts ...SpawnOption) (*PID, error)
 	// SpawnFromFunc creates an actor with the given receive function. One can set the PreStart and PostStop lifecycle hooks
 	// in the given optional options
 	SpawnFromFunc(ctx context.Context, receiveFunc ReceiveFunc, opts ...FuncOption) (*PID, error)
@@ -230,14 +232,18 @@ type ActorSystem interface {
 	// The cluster singleton is automatically started on the oldest node in the cluster.
 	// If the oldest node leaves the cluster, the singleton is restarted on the new oldest node.
 	// This is useful for managing shared resources or coordinating tasks that should be handled by a single actor.
-	SpawnSingleton(ctx context.Context, name string, actor Actor, opts ...ClusterSingletonOption) error
+	SpawnSingleton(ctx context.Context, name string, actor Actor, opts ...ClusterSingletonOption) (*PID, error)
 	// Kill stops a given actor in the system either locally or on a remote node(when clustering is enabled)
 	Kill(ctx context.Context, name string) error
-	// ReSpawn recreates a given actor in the system
+	// ReSpawn recreates a given actor in the system.
+	//
 	// During restart all messages that are in the mailbox and not yet processed will be ignored.
-	// Only the direct alive children of the given actor will be shudown and respawned with their initial state.
+	// Only the direct alive children of the given actor will be shutdown and respawned with their initial state.
 	// Bear in mind that restarting an actor will reinitialize the actor to initial state.
 	// In case any of the direct child restart fails the given actor will not be started at all.
+	//
+	// This method is location-transparent: it works identically whether the actor is local or on a
+	// remote node (when clustering/remoting is enabled).
 	ReSpawn(ctx context.Context, name string) (*PID, error)
 	// NumActors returns the total number of active actors on a given running node.
 	// This does not account for the total number of actors in the cluster
@@ -268,6 +274,9 @@ type ActorSystem interface {
 	// The message will be sent exactly once to the target actor after the specified duration has elapsed.
 	// This is a fire-and-forget scheduling mechanism — once delivered, the message will not be retried or repeated.
 	//
+	// This method is location-transparent: it works identically whether the target actor is local or on a
+	// remote node (when clustering/remoting is enabled).
+	//
 	// Parameters:
 	//	  - ctx: The context for managing cancellation and deadlines.
 	//   - message: The proto.Message to be sent.
@@ -286,6 +295,9 @@ type ActorSystem interface {
 	//
 	// This function sets up a message to be sent repeatedly to the target actor, with each delivery occurring
 	// after the specified interval. The scheduling continues until explicitly canceled or if the actor is no longer available.
+	//
+	// This method is location-transparent: it works identically whether the target actor is local or on a
+	// remote node (when clustering/remoting is enabled).
 	//
 	// Parameters:
 	//	  - ctx: The context for managing cancellation and deadlines.
@@ -306,6 +318,9 @@ type ActorSystem interface {
 	//
 	// This method enables flexible time-based scheduling using standard cron syntax, allowing you to specify complex recurring schedules.
 	// The message will be sent to the target actor according to the schedule defined by the cron expression.
+	//
+	// This method is location-transparent: it works identically whether the target actor is local or on a
+	// remote node (when clustering/remoting is enabled).
 	//
 	// Parameters:
 	//	  - ctx: The context for managing cancellation and deadlines.
@@ -583,7 +598,7 @@ type ActorSystem interface {
 	//       system.Logger().Warnf("peer lookup returned an error: %v", err)
 	//   }
 	//   for _, p := range peers {
-	//       // Use p (e.g., p.Address(), p.Host(), p.Port(), etc.)
+	//       // Use p (e.g., p.Path(), p.Host(), p.Port(), etc.)
 	//   }
 	Peers(ctx context.Context, timeout time.Duration) ([]*remote.Peer, error)
 	// IsLeader returns true if the current node is the cluster leader.
@@ -648,7 +663,7 @@ type ActorSystem interface {
 	//   if err != nil {
 	//       system.Logger().Errorf("failed to retrieve cluster leader: %v", err)
 	//   } else if leader != nil {
-	//       system.Logger().Infof("current cluster leader is at %s", leader.Address())
+	//       system.Logger().Infof("current cluster leader is at %s", leader.RemotingAddress())
 	//   } else {
 	//       system.Logger().Info("no cluster leader is currently elected")
 	//   }
@@ -1339,6 +1354,9 @@ func (x *actorSystem) Register(_ context.Context, actor Actor) error {
 // This function sets up a message to be sent repeatedly to the target actor, with each delivery occurring
 // after the specified interval. The scheduling continues until explicitly canceled or if the actor is no longer available.
 //
+// This method is location-transparent: it works identically whether the target actor is local or on a
+// remote node (when clustering/remoting is enabled).
+//
 // Parameters:
 //   - ctx: The context for managing cancellation and deadlines.
 //   - message: The proto.Message to be delivered at regular intervals.
@@ -1362,6 +1380,9 @@ func (x *actorSystem) Schedule(_ context.Context, message any, pid *PID, interva
 // The message will be sent exactly once to the target actor after the specified duration has elapsed.
 // This is a fire-and-forget scheduling mechanism — once delivered, the message will not be retried or repeated.
 //
+// This method is location-transparent: it works identically whether the target actor is local or on a
+// remote node (when clustering/remoting is enabled).
+//
 // Parameters:
 //   - ctx: The context for managing cancellation and deadlines.
 //   - message: The proto.Message to be sent.
@@ -1383,6 +1404,9 @@ func (x *actorSystem) ScheduleOnce(_ context.Context, message any, pid *PID, int
 //
 // This method enables flexible time-based scheduling using standard cron syntax, allowing you to specify complex recurring schedules.
 // The message will be sent to the target actor according to the schedule defined by the cron expression.
+//
+// This method is location-transparent: it works identically whether the target actor is local or on a
+// remote node (when clustering/remoting is enabled).
 //
 // Parameters:
 //   - ctx: The context for managing cancellation and deadlines.
@@ -1550,11 +1574,15 @@ func (x *actorSystem) Kill(ctx context.Context, name string) error {
 	return gerrors.NewErrActorNotFound(name)
 }
 
-// ReSpawn recreates a given actor in the system
+// ReSpawn recreates a given actor in the system.
+//
 // During restart all messages that are in the mailbox and not yet processed will be ignored.
-// Only the direct alive children of the given actor will be shudown and respawned with their initial state.
+// Only the direct alive children of the given actor will be shutdown and respawned with their initial state.
 // Bear in mind that restarting an actor will reinitialize the actor to initial state.
 // In case any of the direct child restart fails the given actor will not be started at all.
+//
+// This method is location-transparent: it works identically whether the actor is local or on a
+// remote node (when clustering/remoting is enabled).
 func (x *actorSystem) ReSpawn(ctx context.Context, name string) (*PID, error) {
 	if !x.Running() {
 		return nil, gerrors.ErrActorSystemNotStarted
@@ -1571,6 +1599,20 @@ func (x *actorSystem) ReSpawn(ctx context.Context, name string) (*PID, error) {
 		if err := pid.Restart(ctx); err != nil {
 			return nil, fmt.Errorf("failed to restart actor=%s: %w", pid.ID(), err)
 		}
+		return pid, nil
+	}
+
+	if x.InCluster() {
+		pid, err := x.ActorOf(ctx, name)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch remote actor=%s: %w", name, err)
+		}
+
+		p := pid.Path()
+		if _, err := x.remoting.RemoteReSpawn(ctx, p.Host(), p.Port(), name); err != nil {
+			return nil, fmt.Errorf("failed to re-spawn remote actor=%s: %w", name, err)
+		}
+
 		return pid, nil
 	}
 
@@ -1621,7 +1663,7 @@ func (x *actorSystem) Actors(ctx context.Context, timeout time.Duration) ([]*PID
 
 	seen := make(map[string]types.Unit, len(local))
 	for _, pid := range local {
-		seen[pid.Address().String()] = types.Unit{}
+		seen[pathString(pid.Path())] = types.Unit{}
 	}
 
 	if x.InCluster() {
@@ -2519,8 +2561,8 @@ func (x *actorSystem) resyncActors() error {
 	actors := x.localActors()
 	for _, actor := range actors {
 		if err := x.putActorOnCluster(actor); err != nil {
-			x.logger.Errorf("Failed to resync Actor (%s): %v", actor.Address().String(), err)
-			return fmt.Errorf("failed to resync Actor (%s): %w", actor.Address().String(), err)
+			x.logger.Errorf("Failed to resync Actor (%s): %v", pathString(actor.Path()), err)
+			return fmt.Errorf("failed to resync Actor (%s): %w", pathString(actor.Path()), err)
 		}
 	}
 	return nil

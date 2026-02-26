@@ -34,7 +34,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	bbolt "go.etcd.io/bbolt"
+	"go.etcd.io/bbolt"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v4/internal/internalpb"

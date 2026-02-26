@@ -28,7 +28,9 @@ import (
 	"time"
 
 	"github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/cluster"
+	"github.com/tochemey/goakt/v4/internal/pointer"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/remote"
@@ -107,7 +109,7 @@ func (x *actorSystem) spawnSingletonManager(ctx context.Context) error {
 	return x.actors.addNode(x.systemGuardian, x.singletonManager)
 }
 
-func (x *actorSystem) spawnSingletonOnLeader(ctx context.Context, cl cluster.Cluster, name string, actor Actor, spawnTimeout, waitInterval time.Duration, retries int32) error {
+func (x *actorSystem) spawnSingletonOnLeader(ctx context.Context, cl cluster.Cluster, name string, actor Actor, spawnTimeout, waitInterval time.Duration, retries int32) (*PID, error) {
 	// spawnSingletonOnLeader resolves the cluster coordinator and ensures the singleton is spawned on it.
 	//
 	// Implementation notes:
@@ -116,7 +118,7 @@ func (x *actorSystem) spawnSingletonOnLeader(ctx context.Context, cl cluster.Clu
 	//   - If the coordinator is the local node, we spawn locally to avoid a needless RemoteSpawn round-trip.
 	peers, err := cl.Members(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to spawn singleton actor: %w", err)
+		return nil, fmt.Errorf("failed to spawn singleton actor: %w", err)
 	}
 
 	// find the coordinator (leader) node in the cluster
@@ -129,7 +131,7 @@ func (x *actorSystem) spawnSingletonOnLeader(ctx context.Context, cl cluster.Clu
 	}
 
 	if leader == nil {
-		return errors.ErrLeaderNotFound
+		return nil, errors.ErrLeaderNotFound
 	}
 
 	// If the leader is the local node, spawn locally.
@@ -148,7 +150,7 @@ func (x *actorSystem) spawnSingletonOnLeader(ctx context.Context, cl cluster.Clu
 		port      = leader.RemotingPort
 	)
 
-	return x.remoting.RemoteSpawn(ctx, host, port, &remote.SpawnRequest{
+	addr, err := x.remoting.RemoteSpawn(ctx, host, port, &remote.SpawnRequest{
 		Name: name,
 		Kind: actorType,
 		Singleton: &remote.SingletonSpec{
@@ -157,4 +159,14 @@ func (x *actorSystem) spawnSingletonOnLeader(ctx context.Context, cl cluster.Clu
 			MaxRetries:   retries,
 		},
 	})
+	if err != nil {
+		return nil, err
+	}
+
+	parsedAddr, err := address.Parse(pointer.Deref(addr, ""))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse address: %w", err)
+	}
+
+	return newRemotePID(parsedAddr, x.remoting), nil
 }

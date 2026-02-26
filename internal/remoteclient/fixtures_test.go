@@ -26,7 +26,26 @@ import (
 	"context"
 	"errors"
 	nethttp "net/http"
+
+	"github.com/tochemey/goakt/v4/extension"
 )
+
+// failingDependency implements extension.Dependency but MarshalBinary always fails.
+// Used to exercise getGrainFromRequest's codec.EncodeDependencies error path.
+type failingDependency struct{ err error }
+
+func (f *failingDependency) ID() string { return "failing-dep" }
+
+func (f *failingDependency) MarshalBinary() ([]byte, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return nil, errors.New("marshal failed")
+}
+
+func (f *failingDependency) UnmarshalBinary([]byte) error { return nil }
+
+var _ extension.Dependency = (*failingDependency)(nil)
 
 // nonProtoMsg is an arbitrary type with no registered serializer.
 type nonProtoMsg struct{ value string }
