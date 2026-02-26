@@ -167,3 +167,17 @@ message TopicMessage {
   // Specifies the message
   bytes message = 3;
 }
+
+message RemoteChildRequest {
+  // Specifies the remote host address
+  string host = 1;
+  // Specifies the remote port
+  int32 port = 2;
+  // Specifies the actor name
+  string name = 3;
+}
+
+message RemoteChildResponse {
+  // Specifies the actor address
+  string address = 1;
+}

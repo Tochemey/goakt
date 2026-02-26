@@ -4989,6 +4989,34 @@ func TestReinstate(t *testing.T) {
 		pause.For(time.Second)
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
+	t.Run("When remote caller without remoting returns ErrRemotingDisabled", func(t *testing.T) {
+		addr := address.New("remote-actor", "remoteSystem", "10.0.0.1", 8080)
+		remotePID := newRemotePID(addr, nil)
+		other := newRemotePID(addr, nil)
+		err := remotePID.Reinstate(other)
+		require.ErrorIs(t, err, errors.ErrRemotingDisabled)
+	})
+	t.Run("When remote caller with remoting delegates to RemoteReinstate", func(t *testing.T) {
+		host, port, name := "10.0.0.1", 8080, "remote-actor"
+		addr := address.New(name, "remoteSystem", host, port)
+		remotingMock := mocksremote.NewClient(t)
+		remotingMock.EXPECT().RemoteReinstate(mock.Anything, host, port, name).Return(nil).Once()
+
+		remoteCaller := newRemotePID(addr, remotingMock)
+		remoteTarget := newRemotePID(addr, remotingMock)
+		err := remoteCaller.Reinstate(remoteTarget)
+		require.NoError(t, err)
+		remotingMock.AssertExpectations(t)
+	})
+	t.Run("When remote caller with nil cid returns ErrUndefinedActor", func(t *testing.T) {
+		host, port, name := "10.0.0.1", 8080, "remote-actor"
+		addr := address.New(name, "remoteSystem", host, port)
+		remotingMock := mocksremote.NewClient(t)
+		remoteCaller := newRemotePID(addr, remotingMock)
+		err := remoteCaller.Reinstate(nil)
+		require.Error(t, err)
+		require.ErrorIs(t, err, errors.ErrUndefinedActor)
+	})
 }
 
 func TestReinstateAvoidsPassivationRace(t *testing.T) {
@@ -6206,25 +6234,8 @@ func TestAssertLocal(t *testing.T) {
 		require.ErrorIs(t, err, errors.ErrNotLocal)
 	})
 
-	t.Run("Stop", func(t *testing.T) {
-		other := newRemotePID(addr, nil)
-		err := remotePID.Stop(ctx, other)
-		require.ErrorIs(t, err, errors.ErrNotLocal)
-	})
-
-	t.Run("Restart", func(t *testing.T) {
-		err := remotePID.Restart(ctx)
-		require.ErrorIs(t, err, errors.ErrNotLocal)
-	})
-
 	t.Run("SpawnChild", func(t *testing.T) {
 		_, err := remotePID.SpawnChild(ctx, "child", NewMockActor())
-		require.ErrorIs(t, err, errors.ErrNotLocal)
-	})
-
-	t.Run("Reinstate", func(t *testing.T) {
-		other := newRemotePID(addr, nil)
-		err := remotePID.Reinstate(other)
 		require.ErrorIs(t, err, errors.ErrNotLocal)
 	})
 
@@ -6258,10 +6269,180 @@ func TestAssertLocal(t *testing.T) {
 		_, err := remotePID.DiscoverActor(ctx, "some-actor", time.Second)
 		require.ErrorIs(t, err, errors.ErrNotLocal)
 	})
+}
 
-	t.Run("Shutdown", func(t *testing.T) {
+// TestRemoteStopRestartShutdownWithoutRemoting verifies that Stop, Restart, and Shutdown
+// return ErrRemotingDisabled when invoked on or targeting remote PIDs without remoting configured.
+func TestRemoteStopRestartShutdownWithoutRemoting(t *testing.T) {
+	ctx := context.Background()
+	addr := address.New("remote-actor", "remoteSystem", "10.0.0.1", 8080)
+	remotePID := newRemotePID(addr, nil)
+	require.True(t, remotePID.IsRemote(), "sanity: newRemotePID must be remote")
+
+	t.Run("Stop remote child without remoting", func(t *testing.T) {
+		other := newRemotePID(addr, nil)
+		err := remotePID.Stop(ctx, other)
+		require.ErrorIs(t, err, errors.ErrRemotingDisabled)
+	})
+
+	t.Run("Restart remote PID without remoting", func(t *testing.T) {
+		err := remotePID.Restart(ctx)
+		require.ErrorIs(t, err, errors.ErrRemotingDisabled)
+	})
+
+	t.Run("Shutdown remote PID without remoting", func(t *testing.T) {
 		err := remotePID.Shutdown(ctx)
-		require.ErrorIs(t, err, errors.ErrNotLocal)
+		require.ErrorIs(t, err, errors.ErrRemotingDisabled)
+	})
+}
+
+// TestRemoteStopRestartShutdownWithRemoting verifies that Stop, Restart, and Shutdown
+// delegate to the remoting layer when invoked on or targeting remote PIDs with remoting configured.
+func TestRemoteStopRestartShutdownWithRemoting(t *testing.T) {
+	ctx := context.Background()
+	host, port, name := "10.0.0.1", 8080, "remote-actor"
+	addr := address.New(name, "remoteSystem", host, port)
+
+	t.Run("Stop remote child with remoting", func(t *testing.T) {
+		remotingMock := mocksremote.NewClient(t)
+		remotingMock.EXPECT().RemoteStop(ctx, host, port, name).Return(nil).Once()
+
+		remoteChild := newRemotePID(addr, remotingMock)
+		localParent := &PID{
+			remoting: remotingMock,
+			address:  address.New("parent", "sys", "127.0.0.1", 9000),
+		}
+		localParent.setState(runningState, true)
+
+		err := localParent.Stop(ctx, remoteChild)
+		require.NoError(t, err)
+		remotingMock.AssertExpectations(t)
+	})
+
+	t.Run("Restart remote PID with remoting", func(t *testing.T) {
+		remotingMock := mocksremote.NewClient(t)
+		respAddr := addr.String()
+		remotingMock.EXPECT().RemoteReSpawn(ctx, host, port, name).Return(&respAddr, nil).Once()
+
+		remotePID := newRemotePID(addr, remotingMock)
+		err := remotePID.Restart(ctx)
+		require.NoError(t, err)
+		remotingMock.AssertExpectations(t)
+	})
+
+	t.Run("Shutdown remote PID with remoting", func(t *testing.T) {
+		remotingMock := mocksremote.NewClient(t)
+		remotingMock.EXPECT().RemoteStop(ctx, host, port, name).Return(nil).Once()
+
+		remotePID := newRemotePID(addr, remotingMock)
+		err := remotePID.Shutdown(ctx)
+		require.NoError(t, err)
+		remotingMock.AssertExpectations(t)
+	})
+}
+
+// TestBatchTellBatchAskRemote verifies that BatchTell and BatchAsk use RemoteBatchTell
+// and RemoteBatchAsk when the target is remote, for efficiency.
+func TestBatchTellBatchAskRemote(t *testing.T) {
+	ctx := context.Background()
+	host, port, name := "10.0.0.1", 8080, "remote-actor"
+	addr := address.New(name, "remoteSystem", host, port)
+
+	type actorSystemWrapper struct {
+		*actorSystem
+	}
+
+	t.Run("BatchTell remote uses RemoteBatchTell", func(t *testing.T) {
+		sys, err := NewActorSystem("batch-sys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+
+		remotingMock := mocksremote.NewClient(t)
+		messages := []any{new(testpb.TestSend), new(testpb.TestSend)}
+		remotingMock.EXPECT().RemoteBatchTell(mock.Anything, mock.Anything, mock.Anything, messages).Return(nil).Once()
+
+		sender := &PID{
+			actorSystem: &actorSystemWrapper{actorSystem: sys.(*actorSystem)},
+			remoting:    remotingMock,
+			address:     address.New("sender", "sys", "127.0.0.1", 9000),
+		}
+		sender.setState(runningState, true)
+		remoteTarget := newRemotePID(addr, remotingMock)
+
+		err = sender.BatchTell(ctx, remoteTarget, messages...)
+		require.NoError(t, err)
+		remotingMock.AssertExpectations(t)
+	})
+
+	t.Run("BatchTell returns ErrDead when caller is not running", func(t *testing.T) {
+		sys, err := NewActorSystem("batch-sys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+
+		caller, err := sys.Spawn(ctx, "caller", NewMockActor())
+		require.NoError(t, err)
+		target, err := sys.Spawn(ctx, "target", NewMockActor())
+		require.NoError(t, err)
+
+		require.NoError(t, caller.Shutdown(ctx))
+		pause.For(time.Second)
+
+		err = caller.BatchTell(ctx, target, new(testpb.TestSend))
+		require.Error(t, err)
+		require.ErrorIs(t, err, errors.ErrDead)
+
+		require.NoError(t, target.Shutdown(ctx))
+		require.NoError(t, sys.Stop(ctx))
+	})
+
+	t.Run("BatchAsk returns ErrDead when caller is not running", func(t *testing.T) {
+		sys, err := NewActorSystem("batch-sys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+
+		caller, err := sys.Spawn(ctx, "caller", NewMockActor())
+		require.NoError(t, err)
+		target, err := sys.Spawn(ctx, "target", NewMockActor())
+		require.NoError(t, err)
+
+		require.NoError(t, caller.Shutdown(ctx))
+		pause.For(time.Second)
+
+		ch, errAsk := caller.BatchAsk(ctx, target, []any{new(testpb.TestReply)}, time.Second)
+		require.Error(t, errAsk)
+		require.ErrorIs(t, errAsk, errors.ErrDead)
+		require.Nil(t, ch)
+
+		require.NoError(t, target.Shutdown(ctx))
+		require.NoError(t, sys.Stop(ctx))
+	})
+
+	t.Run("BatchAsk remote uses RemoteBatchAsk", func(t *testing.T) {
+		sys, err := NewActorSystem("batch-sys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+
+		remotingMock := mocksremote.NewClient(t)
+		messages := []any{new(testpb.TestReply), new(testpb.TestReply)}
+		responses := []any{new(testpb.TestReply), new(testpb.TestReply)}
+		remotingMock.EXPECT().RemoteBatchAsk(mock.Anything, mock.Anything, mock.Anything, messages, time.Minute).
+			Return(responses, nil).Once()
+
+		sender := &PID{
+			actorSystem: &actorSystemWrapper{actorSystem: sys.(*actorSystem)},
+			remoting:    remotingMock,
+			address:     address.New("sender", "sys", "127.0.0.1", 9000),
+		}
+		sender.setState(runningState, true)
+		remoteTarget := newRemotePID(addr, remotingMock)
+
+		ch, errAsk := sender.BatchAsk(ctx, remoteTarget, messages, time.Minute)
+		require.NoError(t, errAsk)
+		require.NotNil(t, ch)
+		var count int
+		for range ch {
+			count++
+		}
+		require.Equal(t, 2, count)
+		remotingMock.AssertExpectations(t)
 	})
 }
 

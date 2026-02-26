@@ -49,6 +49,9 @@ var errorCh = make(chan chan error, contextPoolSize)
 
 var timers = timer.NewPool()
 
+// emptyAnyCh is a pre-closed channel returned by BatchAsk for empty message slices.
+var emptyAnyCh = func() chan any { ch := make(chan any); close(ch); return ch }()
+
 // getContext retrieves a ReceiveContext from the channel-based pool.
 // Falls back to heap allocation if the pool is empty.
 func getContext() *ReceiveContext {

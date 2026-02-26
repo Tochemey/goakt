@@ -486,12 +486,22 @@ func (pid *PID) Children() []*PID {
 }
 
 // Stop signals the given child PID to shut down after it finishes processing its current message.
-// Returns ErrNotLocal for remote PIDs, ErrDead if this actor is not running,
-// and ErrActorNotFound when cid is not a child of this actor. It is a no-op when cid is already stopped.
+// When cid is remote, Stop delegates to RemoteStop via the remoting layer.
+// Returns ErrRemotingDisabled when cid is remote but remoting is not configured,
+// ErrDead if this actor is not running, and ErrActorNotFound when cid is not a child of this actor.
+// It is a no-op when cid is already stopped.
 func (pid *PID) Stop(ctx context.Context, cid *PID) error {
-	if err := pid.assertLocal(); err != nil {
-		return err
+	if cid.IsRemote() {
+		r := cid.remoting
+		if r == nil {
+			r = pid.remoting
+		}
+		if r == nil {
+			return gerrors.ErrRemotingDisabled
+		}
+		return r.RemoteStop(ctx, cid.getAddress().Host(), cid.getAddress().Port(), cid.Name())
 	}
+
 	if !pid.IsRunning() {
 		return gerrors.ErrDead
 	}
@@ -598,13 +608,22 @@ func (pid *PID) Path() Path {
 // If any descendant fails to restart, Restart returns that error and the subtree
 // may be only partially recovered. The target actor is left non-running on failure.
 //
-// Returns ErrNotLocal for remote PIDs and ErrUndefinedActor for nil receivers.
+// When pid is remote, Restart delegates to RemoteReSpawn via the remoting layer.
+// Returns ErrRemotingDisabled when pid is remote but remoting is not configured,
+// and ErrUndefinedActor for nil receivers.
 func (pid *PID) Restart(ctx context.Context) error {
 	if pid == nil || pid.Path() == nil {
 		return gerrors.ErrUndefinedActor
 	}
-	if err := pid.assertLocal(); err != nil {
-		return err
+
+	if pid.IsRemote() {
+		if pid.remoting == nil {
+			return gerrors.ErrRemotingDisabled
+		}
+		if _, err := pid.remoting.RemoteReSpawn(ctx, pid.Path().Host(), pid.Path().Port(), pid.Name()); err != nil {
+			return err
+		}
+		return nil
 	}
 
 	pid.logger.Debugf("Restarting Actor (%s)", pid.Name())
@@ -758,9 +777,21 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 //
 // See also: ReinstateNamed for name-based reinstatement.
 func (pid *PID) Reinstate(cid *PID) error {
-	if err := pid.assertLocal(); err != nil {
-		return err
+	ctx := context.Background()
+
+	// When the caller is remote, delegate to RemoteReinstate via the remoting layer.
+	if pid.IsRemote() {
+		if pid.remoting == nil {
+			return gerrors.ErrRemotingDisabled
+		}
+
+		if cid == nil || cid.Path() == nil {
+			return gerrors.ErrUndefinedActor
+		}
+
+		return pid.remoting.RemoteReinstate(ctx, cid.Path().Host(), cid.Path().Port(), cid.Name())
 	}
+
 	if !pid.IsRunning() {
 		return gerrors.ErrDead
 	}
@@ -771,7 +802,7 @@ func (pid *PID) Reinstate(cid *PID) error {
 
 	// this call is necessary because the reference to the actor may have been
 	// kept elsewhere and the actor may have been stopped and removed from the system
-	actual, err := pid.ActorSystem().ActorOf(context.Background(), cid.Name())
+	actual, err := pid.ActorSystem().ActorOf(ctx, cid.Name())
 	if err != nil {
 		return err
 	}
@@ -802,6 +833,7 @@ func (pid *PID) ReinstateNamed(ctx context.Context, actorName string) error {
 	if err := pid.assertLocal(); err != nil {
 		return err
 	}
+
 	if !pid.IsRunning() {
 		return gerrors.ErrDead
 	}
@@ -1201,8 +1233,21 @@ func (pid *PID) DiscoverActor(ctx context.Context, actorName string, timeout tim
 }
 
 // BatchTell sends multiple messages asynchronously to the given PID, in order.
-// Each message is delivered via Tell; processing order is guaranteed.
+// When to is remote, a single RemoteBatchTell RPC is used for efficiency.
+// When to is local, each message is delivered via Tell; processing order is guaranteed.
 func (pid *PID) BatchTell(ctx context.Context, to *PID, messages ...any) error {
+	if !pid.IsRunning() {
+		return gerrors.ErrDead
+	}
+	if len(messages) == 0 {
+		return nil
+	}
+	if to.IsRemote() {
+		if !pid.remotingEnabled() {
+			return gerrors.ErrRemotingDisabled
+		}
+		return pid.remoting.RemoteBatchTell(ctx, pid.getAddress(), to.getAddress(), messages)
+	}
 	for _, message := range messages {
 		if err := pid.Tell(ctx, to, message); err != nil {
 			return err
@@ -1212,11 +1257,36 @@ func (pid *PID) BatchTell(ctx context.Context, to *PID, messages ...any) error {
 }
 
 // BatchAsk sends multiple messages synchronously to the given PID and returns responses in the same order.
-// Each message is delivered via Ask; the call blocks until all responses are received or any Ask fails.
+// When to is remote, a single RemoteBatchAsk RPC is used for efficiency.
+// When to is local, each message is delivered via Ask; the call blocks until all responses are received or any Ask fails.
 func (pid *PID) BatchAsk(ctx context.Context, to *PID, messages []any, timeout time.Duration) (responses chan any, err error) {
-	responses = make(chan any, len(messages))
-	defer close(responses)
+	if !pid.IsRunning() {
+		return nil, gerrors.ErrDead
+	}
 
+	if len(messages) == 0 {
+		return emptyAnyCh, nil
+	}
+
+	if to.IsRemote() {
+		if !pid.remotingEnabled() {
+			return nil, gerrors.ErrRemotingDisabled
+		}
+
+		resp, err := pid.remoting.RemoteBatchAsk(ctx, pid.getAddress(), to.getAddress(), messages, timeout)
+		if err != nil {
+			return nil, err
+		}
+
+		ch := make(chan any, len(resp))
+		for _, v := range resp {
+			ch <- v
+		}
+		close(ch)
+		return ch, nil
+	}
+
+	responses = make(chan any, len(messages))
 	for i := range messages {
 		response, err := pid.Ask(ctx, to, messages[i], timeout)
 		if err != nil {
@@ -1224,6 +1294,7 @@ func (pid *PID) BatchAsk(ctx context.Context, to *PID, messages []any, timeout t
 		}
 		responses <- response
 	}
+	close(responses)
 	return
 }
 
@@ -1283,13 +1354,18 @@ func (pid *PID) RemoteReSpawn(ctx context.Context, host string, port int, name s
 }
 
 // Shutdown gracefully stops this actor and all its children.
+// When pid is remote, Shutdown delegates to RemoteStop via the remoting layer.
 // Pending mailbox messages are processed before the actor terminates.
-// Returns ErrNotLocal for remote PIDs and ErrShutdownForbidden when called on a system actor
-// while the actor system is still running.
+// Returns ErrRemotingDisabled when pid is remote but remoting is not configured,
+// and ErrShutdownForbidden when called on a system actor while the actor system is still running.
 func (pid *PID) Shutdown(ctx context.Context) error {
-	if err := pid.assertLocal(); err != nil {
-		return err
+	if pid.IsRemote() {
+		if pid.remoting == nil {
+			return gerrors.ErrRemotingDisabled
+		}
+		return pid.remoting.RemoteStop(ctx, pid.Path().Host(), pid.Path().Port(), pid.Name())
 	}
+
 	// we should never shutdown system actors unless the whole system is terminating
 	if actoryStem := pid.ActorSystem(); actoryStem != nil {
 		if !actoryStem.isStopping() && isSystemName(pid.Name()) {
