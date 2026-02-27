@@ -1,0 +1,144 @@
+# Actor System
+
+The **ActorSystem** is the top-level runtime that hosts actors and orchestrates messaging, clustering, remoting, and lifecycle. There is one ActorSystem per process. All actors, grains, and system services run within it.
+
+## Role and responsibilities
+
+| Responsibility           | Description                                                                                                                                         |
+|--------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Actor hosting**        | Spawns and supervises actors under the `/user` guardian. Manages the actor tree and parent-child relationships.                                     |
+| **Messaging**            | Routes messages locally or remotely. Serializes and deserializes when crossing node boundaries.                                                     |
+| **Clustering**           | When enabled, joins a cluster, discovers peers, and provides location-transparent actor resolution.                                                 |
+| **Remoting**             | When enabled, exposes a TCP server and client for cross-node communication.                                                                         |
+| **Event stream**         | Publishes system and cluster events (ActorStarted, NodeJoined, Deadletter, etc.) to subscribers. See [Event Streams](../advanced/event-streams.md). |
+| **PubSub**               | When `WithPubSub()` or cluster is enabled, a topic actor manages application-level topics. See [PubSub](../advanced/pubsub.md).                     |
+| **Scheduling**           | Delivers one-time, recurring, and cron-scheduled messages to actors.                                                                                |
+| **Coordinated shutdown** | Runs shutdown hooks, stops actors depth-first, and leaves the cluster gracefully.                                                                   |
+
+See [Architecture Overview](../architecture/overview.md) for the component diagram.
+
+## Lifecycle
+
+```
+NewActorSystem(opts...) → Start(ctx) → [running] → Stop(ctx) → [stopped]
+```
+
+- **NewActorSystem** — Applies options; does not start services.
+- **Start** — Initializes remoting (if enabled), cluster (if enabled), scheduler, eviction, passivation, and system actors. Handle SIGTERM/SIGINT and call `Stop` for clean shutdown.
+- **Stop** — Runs coordinated shutdown hooks, stops user actors, deactivates grains, shuts down system actors, leaves cluster, stops remoting. Does not exit the process; call `os.Exit` if needed.
+
+Details: [Coordinated Shutdown](../advanced/coordinated-shutdown.md), [First Actor](../getting-started/first-actor.md).
+
+## API surface
+
+### Spawning
+
+| Method                                                   | Returns       | Use case                                                                                                                       |
+|----------------------------------------------------------|---------------|--------------------------------------------------------------------------------------------------------------------------------|
+| `Spawn(ctx, name, actor, opts...)`                       | `*PID`, error | Create a named actor locally (or on a specific host with `WithHostAndPort`).                                                   |
+| `SpawnOn(ctx, name, actor, opts...)`                     | `*PID`, error | Create actor on a cluster node (placement: RoundRobin, Random, Local, LeastLoad) or in another data center (`WithDataCenter`). |
+| `SpawnFromFunc(ctx, receiveFunc, opts...)`               | `*PID`, error | Functional actor; no `Actor` implementation.                                                                                   |
+| `SpawnNamedFromFunc(ctx, name, receiveFunc, opts...)`    | `*PID`, error | Named functional actor.                                                                                                        |
+| `SpawnRouter(ctx, name, poolSize, routeesKind, opts...)` | `*PID`, error | Router with a pool of routees. Not cluster-relocatable.                                                                        |
+| `SpawnSingleton(ctx, name, actor, opts...)`              | `*PID`, error | Cluster singleton; one instance across the cluster, hosted on the oldest node.                                                 |
+
+See [Actor Lifecycle](actor-lifecycle.md), [Routers](../advanced/routers.md), [Clustering](../clustering/clustered.md).
+
+### Resolution and inspection
+
+| Method                   | Purpose                                                                                         |
+|--------------------------|-------------------------------------------------------------------------------------------------|
+| `ActorOf(ctx, name)`     | Resolve a PID by name. Local or remote; use `pid.IsLocal()` / `pid.IsRemote()` when it matters. |
+| `ActorExists(ctx, name)` | Check if an actor exists locally or in the cluster.                                             |
+| `Actors(ctx, timeout)`   | Enumerate all actors visible to this node. Use sparingly; cluster scan is costly.               |
+| `NumActors()`            | Count of local actors only.                                                                     |
+| `Partition(name)`        | Partition ID for a given actor name (cluster hashing).                                          |
+| `InCluster()`            | Whether the system is running in cluster mode.                                                  |
+
+See [PID](pid.md), [Location Transparency](location-transparency.md).
+
+### Messaging from outside
+
+From outside the actor system (e.g. `main`), use `system.NoSender()`:
+
+- `NoSender().Tell(pid, msg)` — Fire-and-forget.
+- `NoSender().Ask(ctx, pid, msg, timeout)` — Request-response; actor must call `ctx.Response(resp)`.
+
+See [Messaging](messaging.md).
+
+### Scheduling
+
+| Method                                                   | Purpose                           |
+|----------------------------------------------------------|-----------------------------------|
+| `ScheduleOnce(ctx, msg, pid, delay, opts...)`            | One-time delivery after `delay`.  |
+| `Schedule(ctx, msg, pid, interval, opts...)`             | Recurring delivery at `interval`. |
+| `ScheduleWithCron(ctx, msg, pid, cronExpr, opts...)`     | Cron-based delivery.              |
+| `CancelSchedule(reference)`                              | Cancel by reference.              |
+| `PauseSchedule(reference)` / `ResumeSchedule(reference)` | Pause or resume a scheduled task. |
+
+Use `WithReference(id)` when scheduling if you need to cancel, pause, or resume. See [Scheduling](../advanced/scheduling.md).
+
+### Events and observability
+
+| Method                    | Purpose                                                                                                                  |
+|---------------------------|--------------------------------------------------------------------------------------------------------------------------|
+| `Subscribe()`             | Create an event-stream subscriber for system/cluster events. Returns `eventstream.Subscriber`; iterate via `Iterator()`. |
+| `Unsubscribe(subscriber)` | Release subscriber; call to avoid leaks.                                                                                 |
+| `TopicActor()`            | Topic actor PID for PubSub (when `WithPubSub()` or cluster is enabled). Send Subscribe, Unsubscribe, Publish.            |
+| `Metric(ctx)`             | Node-level metrics (actor count, mailbox sizes, throughput, uptime).                                                     |
+
+See [Event Streams](../advanced/event-streams.md), [PubSub](../advanced/pubsub.md), [Observability](../advanced/observability.md).
+
+### Cluster and lifecycle control
+
+| Method               | Purpose                                                      |
+|----------------------|--------------------------------------------------------------|
+| `Kill(ctx, name)`    | Stop an actor by name (local or remote).                     |
+| `ReSpawn(ctx, name)` | Restart an actor; children are recreated with initial state. |
+| `Name()`             | Actor system name.                                           |
+
+## Configuration options
+
+Options are passed to `NewActorSystem(name, opts...)`. Each option is documented in the source; this table groups them by concern.
+
+| Option                                     | Purpose                                                                                                |
+|--------------------------------------------|--------------------------------------------------------------------------------------------------------|
+| **Core**                                   |                                                                                                        |
+| `WithLogger(logger)`                       | Custom logger. `WithLoggingDisabled()` for no-op.                                                      |
+| `WithActorInitTimeout(d)`                  | Actor startup timeout.                                                                                 |
+| `WithActorInitMaxRetries(n)`               | Retries for actor init.                                                                                |
+| `WithShutdownTimeout(d)`                   | Total shutdown timeout (default: 3 min).                                                               |
+| `WithDefaultSupervisor(supervisor)`        | Fallback supervisor for actors without explicit config.                                                |
+| **Remoting & cluster**                     |                                                                                                        |
+| `WithRemote(config)`                       | Enable remoting. See [Remoting](../advanced/remoting.md).                                              |
+| `WithCluster(config)`                      | Enable clustering. See [Clustered](../clustering/clustered.md).                                        |
+| `WithTLS(info)`                            | TLS for remoting.                                                                                      |
+| `WithoutRelocation()`                      | Disable actor relocation on node departure.                                                            |
+| **Extensions & capabilities**              |                                                                                                        |
+| `WithExtensions(ext...)`                   | System-wide extensions. See [Extensions and Dependencies](../advanced/extensions-and-dependencies.md). |
+| `WithPubSub()`                             | Enable topic-based pub/sub.                                                                            |
+| `WithMetrics()`                            | OpenTelemetry metrics. See [Observability](../advanced/observability.md).                              |
+| **Shutdown & eviction**                    |                                                                                                        |
+| `WithCoordinatedShutdown(hooks...)`        | Shutdown hooks. See [Coordinated Shutdown](../advanced/coordinated-shutdown.md).                       |
+| `WithEvictionStrategy(strategy, interval)` | Passivation when actor count exceeds limit.                                                            |
+| **Advanced**                               |                                                                                                        |
+| `WithPartitionHasher(hasher)`              | Custom partition hasher for cluster placement.                                                         |
+
+## Component relationships
+
+The ActorSystem composes:
+
+- **Remoting** — TCP server/client; used when `WithRemote` is set.
+- **Cluster** — Membership, discovery, Olric DMap; used when `WithCluster` is set.
+- **Event stream** — In-process pub/sub; always present; topic actors when `WithPubSub` is set.
+- **Scheduler** — For `ScheduleOnce`, `Schedule`, `ScheduleWithCron`.
+- **Extensions** — Accessed via `ctx.Extension(id)` from actors.
+
+Actors obtain the system via `ctx.ActorSystem()` (or `ReceiveContext`, `GrainContext`). Use it to spawn children, resolve actors, schedule, or access extensions. Do not store the ActorSystem in actor state; always obtain it from context.
+
+## Further reading
+
+- [First Actor](../getting-started/first-actor.md) — Minimal flow
+- [Actor Model](actor-model.md) — Actor interface and hierarchy
+- [Clustering](../clustering/standalone.md) — Standalone vs clustered vs multi-DC
+- [Reference: Interfaces](../reference/interfaces.md) — Interface definitions

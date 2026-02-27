@@ -1,0 +1,153 @@
+# Observability
+
+GoAkt provides built-in observability through metrics (system and per-actor), event streams, and dead letters. Metrics
+are available as programmatic snapshots and, when configured, as OpenTelemetry instruments for integration with
+dashboards and exporters.
+
+## Overview
+
+| Mechanism             | Purpose                                                         |
+|-----------------------|-----------------------------------------------------------------|
+| **System metrics**    | Node-level statistics via `ActorSystem.Metric(ctx)`             |
+| **Per-actor metrics** | Actor-level statistics via `pid.Metric(ctx)`                    |
+| **Event stream**      | System and cluster events (lifecycle, membership, dead letters) |
+| **OpenTelemetry**     | Metrics exported when `WithMetrics()` is used                   |
+
+All metrics are local—they reflect the current node only. Metrics are point-in-time snapshots; values do not update
+after the struct is returned.
+
+---
+
+## System metrics
+
+`ActorSystem.Metric(ctx)` returns a `*Metric` struct with node-level statistics. Returns `nil` when the actor system is
+not started.
+
+| Field                | Type     | Description                                         |
+|----------------------|----------|-----------------------------------------------------|
+| `DeadlettersCount()` | `int64`  | Total messages dropped to dead letters on this node |
+| `ActorsCount()`      | `int64`  | Total number of live actors on this node            |
+| `Uptime()`           | `int64`  | Seconds since the actor system started              |
+| `MemoryUsed()`       | `uint64` | Used memory in bytes (host)                         |
+| `MemorySize()`       | `uint64` | Total memory in bytes (host)                        |
+| `MemoryAvailable()`  | `uint64` | Available memory in bytes (host)                    |
+
+```go
+m := sys.Metric(ctx)
+if m != nil {
+    log.Printf("actors=%d deadletters=%d uptime=%ds",
+    m.ActorsCount(), m.DeadlettersCount(), m.Uptime())
+}
+```
+
+---
+
+## Per-actor metrics
+
+`pid.Metric(ctx)` returns an `*ActorMetric` struct with actor-level statistics. Returns `nil` when the actor is not
+running. For remote actors, metrics are fetched via remoting; the same fields are available.
+
+| Field                       | Type            | Description                                                                  |
+|-----------------------------|-----------------|------------------------------------------------------------------------------|
+| `ProcessedCount()`          | `uint64`        | Cumulative messages processed (excludes PostStart; excludes stashed/dropped) |
+| `ChidrenCount()`            | `uint64`        | Number of direct child actors                                                |
+| `RestartCount()`            | `uint64`        | Cumulative restarts (supervision)                                            |
+| `Uptime()`                  | `int64`         | Seconds since actor started (resets on restart)                              |
+| `LatestProcessedDuration()` | `time.Duration` | Duration of the most recent message processing                               |
+| `StashSize()`               | `uint64`        | Current number of stashed messages                                           |
+| `DeadlettersCount()`        | `uint64`        | Messages sent to dead letters by this actor                                  |
+| `FailureCount()`            | `uint64`        | Cumulative failures (panics, errors triggering supervision)                  |
+| `ReinstateCount()`          | `uint64`        | Cumulative reinstatements (suspended → resumed)                              |
+
+```go
+m := pid.Metric(ctx)
+if m != nil {
+    log.Printf("actors=%s processed=%d restarts=%d stash=%d",
+    pid.Name(), m.ProcessedCount(), m.RestartCount(), m.StashSize())
+}
+```
+
+---
+
+## Event stream
+
+The event stream publishes **system and cluster events** (lifecycle, membership, dead letters). It is separate from
+application-level PubSub. See [Event Streams](event-streams.md) for full documentation.
+
+```go
+subscriber, err := sys.Subscribe()
+if err != nil {
+    return err
+}
+defer sys.Unsubscribe(subscriber)
+
+for msg := range subscriber.Iterator() {
+    switch e := msg.Payload().(type) {
+        case *actor.ActorStarted:
+        // ...
+        case *actor.Deadletter:
+        // ...
+    }
+}
+```
+
+Event types: `ActorStarted`, `ActorStopped`, `ActorChildCreated`, `ActorPassivated`, `ActorRestarted`, `ActorSuspended`,
+`ActorReinstated`, `Deadletter`, `NodeJoined`, `NodeLeft`.
+
+---
+
+## Dead letters
+
+Messages sent to stopped or non-existent actors are captured by the dead-letter actor and published to the event stream.
+The `Deadletter` payload includes sender, receiver, message, and reason. Subscribe to the event stream to observe or log
+dead letters.
+
+---
+
+## OpenTelemetry
+
+When `WithMetrics()` is passed at actor system creation, the framework registers OpenTelemetry observable counters. You
+must initialize the OpenTelemetry SDK (MeterProvider, exporter) before starting the actor system; otherwise metrics are
+not exported.
+
+### System-level instruments
+
+| Instrument                      | Type                       | Description                     |
+|---------------------------------|----------------------------|---------------------------------|
+| `actorsystem.deadletters.count` | Int64ObservableCounter     | Total dead letters on this node |
+| `actorsystem.actors.count`      | Int64ObservableCounter     | Total live actors on this node  |
+| `actorsystem.uptime`            | Int64ObservableCounter (s) | Actor system uptime in seconds  |
+| `actorsystem.peers.count`       | Int64ObservableCounter     | Connected peers (cluster mode)  |
+
+### Per-actor instruments
+
+Attributes: `actor.system`, `actor.name`, `actor.kind`, `actor.address`.
+
+| Instrument                     | Type                        | Description                         |
+|--------------------------------|-----------------------------|-------------------------------------|
+| `actor.children.count`         | Int64ObservableCounter      | Total child actors                  |
+| `actor.stash.size`             | Int64ObservableCounter      | Messages stashed                    |
+| `actor.deadletters.count`      | Int64ObservableCounter      | Dead letters sent by this actor     |
+| `actor.restart.count`          | Int64ObservableCounter      | Restarts                            |
+| `actor.last.received.duration` | Int64ObservableCounter (ms) | Duration of last message processing |
+| `actor.processed.count`        | Int64ObservableCounter      | Messages processed                  |
+| `actor.uptime`                 | Int64ObservableCounter (s)  | Actor uptime in seconds             |
+| `actor.failure.count`          | Int64ObservableCounter      | Failures                            |
+| `actor.reinstate.count`        | Int64ObservableCounter      | Reinstatements                      |
+
+### Example
+
+```go
+import (
+"go.opentelemetry.io/otel"
+"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
+"go.opentelemetry.io/otel/sdk/metric"
+)
+
+// Initialize SDK before creating actor system
+exporter, _ := otlpmetrichttp.New(context.Background(), otlpmetrichttp.WithInsecure())
+provider := metric.NewMeterProvider(metric.WithReader(metric.NewPeriodicReader(exporter)))
+otel.SetMeterProvider(provider)
+
+sys, _ := actor.NewActorSystem("app", actor.WithMetrics())
+```

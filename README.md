@@ -49,7 +49,8 @@ go get github.com/tochemey/goakt/v3
 
 ## 📚 Documentation
 
-The complete Documentation can be found [here](https://tochemey.gitbook.io/goakt)
+- **v4.0.0** (development): See the [docs](./docs/) folder for GitBook-format documentation. Covers concepts, architecture, and contributing.
+- **v3.x** (stable): [tochemey.gitbook.io/goakt](https://tochemey.gitbook.io/goakt)
 
 ## 📝 Examples
 

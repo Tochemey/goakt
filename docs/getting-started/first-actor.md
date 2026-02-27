@@ -1,0 +1,44 @@
+# First Actor
+
+This guide walks through the flow of creating an actor system, spawning an actor, and sending messages. For the full ActorSystem API and configuration, see [Actor System](../concepts/actor-system.md).
+
+## Flow
+
+1. **Create** an actor system with `NewActorSystem` and `Start`
+2. **Spawn** an actor with `Spawn(ctx, name, actor)` → receive a `*PID`
+3. **Send** messages with `NoSender().Tell` (fire-and-forget) or `NoSender().Ask` (request-response)
+4. **Shutdown** with `Stop` when the application exits
+
+## Actor interface
+
+Implement the `Actor` interface to define your actor. See [Actor Model](../concepts/actor-model.md#the-actor-interface)
+for the full interface and method explanations.
+
+## Messaging from outside
+
+From outside the actor system (e.g., `main`), use `NoSender()` to send:
+
+- **Tell** — Fire-and-forget. No response expected.
+- **Ask** — Request-response. Blocks until reply or timeout. The actor must call `ctx.Response(resp)` to complete the
+  request.
+
+## Replying from an actor
+
+When handling a message sent via `Ask`, call `ctx.Response(resp)` exactly once. The caller receives that value. For
+`Tell`, no reply is expected.
+
+## ReceiveContext
+
+Inside `Receive`, `ctx` provides:
+
+| Method                  | Purpose                                                  |
+|-------------------------|----------------------------------------------------------|
+| `Message()`             | The message being processed                              |
+| `Sender()`              | PID of the sender (nil for scheduled or system messages) |
+| `Self()`                | PID of the current actor                                 |
+| `Tell(to, msg)`         | Send fire-and-forget to another actor                    |
+| `Ask(to, msg, timeout)` | Send request-response                                    |
+| `Response(resp)`        | Reply to an Ask                                          |
+| `Unhandled()`           | Mark message as unhandled                                |
+
+For more examples, see the [goakt-examples](https://github.com/Tochemey/goakt-examples) repository.

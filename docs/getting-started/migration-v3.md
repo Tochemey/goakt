@@ -1,0 +1,280 @@
+# Migration from v3.x to v4.0.0
+
+This guide covers all breaking changes and migration steps when moving from GoAkt v3.x to v4.0.0.
+
+---
+
+## Executive Summary
+
+v4.0.0 delivers **simplification** and **performance**:
+
+| Theme                | Key Changes                                                                   |
+|----------------------|-------------------------------------------------------------------------------|
+| **Unified APIs**     | Single actor reference (`*PID`), single lookup (`ActorOf`), unified scheduler |
+| **Type flexibility** | `any` replaces `proto.Message`; CBOR supports arbitrary Go types              |
+| **Remoting**         | Config-only public API; client is internal                                    |
+| **Identity**         | `Path` interface replaces `*address.Address`                                  |
+| **Performance**      | Low-GC serialization, lock-free type registry, single-allocation frames       |
+
+---
+
+## Quick Reference Table
+
+| From                                   | To                                                         |
+|----------------------------------------|------------------------------------------------------------|
+| `proto.Message` in handlers/call sites | `any`                                                      |
+| `goaktpb.*` types                      | `actor.*` (e.g. `actor.PostStart`, `actor.PoisonPill`)     |
+| `ActorRef`                             | `*PID`                                                     |
+| `ActorOf` → `(addr, pid, err)`         | `ActorOf` → `(*PID, error)`                                |
+| `Actors()` / `ActorRefs(ctx, timeout)` | `Actors(ctx, timeout) ([]*PID, error)`                     |
+| `LocalActor(name)`                     | `ActorOf(ctx, name)`                                       |
+| `RemoteActor(ctx, name)`               | `ActorOf(ctx, name)`                                       |
+| `RemoteSchedule*` methods              | `Schedule*` with remote PID from `ActorOf`                 |
+| `GetPartition(name)`                   | `Partition(name)`                                          |
+| `pid.Address()`                        | `pid.Path()`                                               |
+| `ctx.SenderAddress()`                  | `ctx.Sender().Path()`                                      |
+| `ctx.ReceiverAddress()`                | `ctx.Self().Path()`                                        |
+| `remote.Remoting` / `remote.Client`    | Actor system APIs; configure via `WithRemote(config)`      |
+| `WithRemoting`                         | `WithRemote(config)`                                       |
+| `address` package                      | `internal/address`; use `Path` interface from `pid.Path()` |
+| `testkit.Probe.SenderAddress()`        | `Sender()` then `pid.Path()` or `pid.IsRemote()`           |
+
+---
+
+## Breaking Changes
+
+### 1. Message types: `proto.Message` → `any`
+
+All message-passing APIs now accept `any` instead of `proto.Message`:
+
+| Surface                                          | Old                             | New                   |
+|--------------------------------------------------|---------------------------------|-----------------------|
+| `PID.Tell` / `PID.Ask`                           | `message proto.Message`         | `message any`         |
+| `PipeTo` / `PipeToName`                          | `func() (proto.Message, error)` | `func() (any, error)` |
+| `Schedule` / `ScheduleOnce` / `ScheduleWithCron` | `message proto.Message`         | `message any`         |
+| `AskGrain` / `TellGrain`                         | `message proto.Message`         | `message any`         |
+
+**Migration:** Replace `proto.Message` in `Receive` handlers and call sites with `any`. Serialization is handled by the
+`remote.Serializer` layer.
+
+---
+
+### 2. System messages: `goaktpb` → `actor`
+
+The `goaktpb` package has been removed. System message types are plain Go structs in `actor`:
+
+| Old (`goaktpb`)             | New (`actor`)             |
+|-----------------------------|---------------------------|
+| `goaktpb.PostStart`         | `actor.PostStart`         |
+| `goaktpb.PoisonPill`        | `actor.PoisonPill`        |
+| `goaktpb.Terminated`        | `actor.Terminated`        |
+| `goaktpb.Deadletter`        | `actor.Deadletter`        |
+| `goaktpb.NoMessage`         | `actor.NoMessage`         |
+| `goaktpb.ActorStarted`      | `actor.ActorStarted`      |
+| `goaktpb.ActorStopped`      | `actor.ActorStopped`      |
+| `goaktpb.ActorPassivated`   | `actor.ActorPassivated`   |
+| `goaktpb.ActorChildCreated` | `actor.ActorChildCreated` |
+| `goaktpb.ActorRestarted`    | `actor.ActorRestarted`    |
+| `goaktpb.ActorSuspended`    | `actor.ActorSuspended`    |
+| `goaktpb.ActorReinstated`   | `actor.ActorReinstated`   |
+| `goaktpb.NodeJoined`        | `actor.NodeJoined`        |
+| `goaktpb.NodeLeft`          | `actor.NodeLeft`          |
+
+Use constructors (e.g. `actor.NewDeadletter(...)`) instead of protobuf struct literals. Timestamps are `time.Time`
+instead of `*timestamppb.Timestamp`.
+
+---
+
+### 3. Actor reference: `ActorRef` → `*PID`
+
+`ActorRef` has been removed. `*PID` is the sole actor reference for both local and remote actors. Use `pid.IsLocal()` or
+`pid.IsRemote()` when location matters.
+
+**Migration:** Replace `ActorRef` with `*PID`; methods returning `ActorRef` slices now return `[]*PID`.
+
+---
+
+### 4. Lookup: unified `ActorOf`
+
+`LocalActor`, `RemoteActor`, and `ActorRefs` are replaced by a single `ActorOf(ctx, name)`:
+
+| Case                   | Old                | New                       |
+|------------------------|--------------------|---------------------------|
+| Actor found locally    | `(addr, pid, nil)` | `(pid, nil)` — local PID  |
+| Actor found in cluster | `(addr, nil, nil)` | `(pid, nil)` — remote PID |
+| Not found              | `(nil, nil, err)`  | `(nil, err)`              |
+
+**Migration:** Use `pid.Path()` for host/port/name/system; `pid.IsLocal()` / `pid.IsRemote()` for location.
+
+---
+
+### 5. `Actors` merged with `ActorRefs`
+
+```go
+// Before
+Actors() []*PID
+ActorRefs(ctx, timeout) ([]ActorRef, error)
+
+// After
+Actors(ctx context.Context, timeout time.Duration) ([]*PID, error)
+```
+
+`timeout` bounds cluster scan and is ignored when not in cluster mode.
+
+---
+
+### 6. Remote scheduler methods removed
+
+`RemoteScheduleOnce`, `RemoteSchedule`, `RemoteScheduleWithCron` are removed.
+
+**Migration:** Obtain remote PID via `ActorOf` and use unified `ScheduleOnce`, `Schedule`, or `ScheduleWithCron`.
+
+---
+
+### 7. `GetPartition` renamed to `Partition`
+
+**Migration:** `sys.GetPartition(name)` → `sys.Partition(name)`.
+
+---
+
+### 8. Address → Path
+
+`pid.Address()` is replaced by `pid.Path()`, which returns a `Path` interface. The `address` package is now internal.
+
+| Old                           | New                            |
+|-------------------------------|--------------------------------|
+| `pid.Address().String()`      | `pid.Path().String()`          |
+| `pid.Address().Name()`        | `pid.Path().Name()`            |
+| `pid.Address().Host()`        | `pid.Path().Host()`            |
+| `pid.Address().Port()`        | `pid.Path().Port()`            |
+| `pid.Address().HostPort()`    | `pid.Path().HostPort()`        |
+| `pid.Address().System()`      | `pid.Path().System()`          |
+| `pid.Address().Equals(other)` | `pid.Path().Equals(otherPath)` |
+
+`Path()` returns `nil` for nil PID. Guard accordingly (e.g. for `NoSender`).
+
+---
+
+### 9. Remoting configuration
+
+The remoting client is internal. The `remote` package exposes only configuration and protocol types (`Config`,
+`Serializer`, `Compression`, `ContextPropagator`, etc.).
+
+**Migration:** Replace `remote.Remoting` / `remote.Client` — use actor system and `client.Node` APIs. Replace
+`remote.NewRemoting()` / `remote.NewClient()` — use `WithRemote(config)` when creating the actor system. For tests:
+`mockremote.NewClient(t)` for mock injection.
+
+---
+
+### 10. Log package
+
+Custom `Logger` implementations must implement additional methods:
+
+| Method                                                                                                                         | Purpose                                      |
+|--------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------|
+| `InfoContext`, `InfofContext`, `WarnContext`, `WarnfContext`, `ErrorContext`, `ErrorfContext`, `DebugContext`, `DebugfContext` | Context-aware logging for trace propagation  |
+| `LogLevel() Level`                                                                                                             | Returns configured minimum severity level    |
+| `Enabled(level Level) bool`                                                                                                    | Check before expensive work                  |
+| `With(keyValues ...any) Logger`                                                                                                | Structured fields; keys and values alternate |
+| `LogOutput() []io.Writer`                                                                                                      | Returns configured output destinations       |
+| `Flush() error`                                                                                                                | Drain buffered output                        |
+| `StdLogger() *log.Logger`                                                                                                      | Compatibility with stdlib `*log.Logger`      |
+
+**Migration:** Use `log.DiscardLogger` in tests if you need a no-op.
+
+---
+
+### 11. Testkit & ReceiveContext
+
+| Removed                         | Replacement                                      |
+|---------------------------------|--------------------------------------------------|
+| `testkit.Probe.SenderAddress()` | `Sender()` then `pid.Path()` or `pid.IsRemote()` |
+| `ctx.SenderAddress()`           | `ctx.Sender().Path()` (guard for nil sender)     |
+| `ctx.ReceiverAddress()`         | `ctx.Self().Path()`                              |
+
+---
+
+## New Additions
+
+### Pluggable serialization
+
+- **ProtoSerializer** — Default for `proto.Message`. No change for protobuf users.
+- **CBORSerializer** — For arbitrary Go types. Register via `remote.RegisterSerializableTypes(new(MyMessage), ...)` or
+  `remote.WithSerializers(new(MyMessage), remote.NewCBORSerializer())`.
+- **Custom** — Implement `remote.Serializer`; register via `WithSerializers` on `remote.Config`.
+
+### Path interface
+
+`pid.Path()` returns a `Path` interface—location-transparent actor identity.
+See [Location Transparency](../concepts/location-transparency.md#the-path-interface).
+
+### New sentinel errors
+
+- `errors.ErrRemotingDisabled` — Remote operation attempted but remoting not configured
+- `errors.ErrNotLocal` — Operation requires local PID but remote PID provided
+
+### PID.Kind()
+
+`pid.Kind()` returns the reflected type name of the actor backing the PID. Empty string for remote PIDs.
+
+### Log implementations
+
+- `log.NewSlog(level, writers...)` — stdlib slog with low-GC optimizations
+- `log.NewZap(level, writers...)` — Zap with buffered file output
+- `log.DiscardLogger` — No-op for tests
+
+---
+
+## Remoting Capabilities
+
+Remoting is configured via `remote.NewConfig(bindAddr, bindPort, opts...)` and passed to `WithRemote(config)`.
+
+### Transport
+
+- Length-prefixed TCP frames; pooled connections
+- Optional TLS
+- Compression: `NoCompression`, `GzipCompression`, `ZstdCompression` (default), `BrotliCompression`
+
+### Server options
+
+| Option                  | Purpose                                  |
+|-------------------------|------------------------------------------|
+| `WithWriteTimeout`      | Connection close if no data written      |
+| `WithReadIdleTimeout`   | Health check / ping                      |
+| `WithMaxFrameSize`      | 16KB–16MB                                |
+| `WithCompression`       | Must match client                        |
+| `WithContextPropagator` | Trace IDs, auth tokens across boundaries |
+| `WithSerializers`       | Per-type or per-interface serializers    |
+
+### Remote spawn options
+
+When spawning on a remote node via `WithHostAndPort(host, port)`:
+
+| Option                              | Purpose                       |
+|-------------------------------------|-------------------------------|
+| `WithHostAndPort(host, port)`       | Target remote node            |
+| `WithRelocationDisabled()`          | No relocation on host failure |
+| `WithDependencies(...)`             | Injected on remote node       |
+| `WithStashing()`                    | Enable stashing               |
+| `WithPassivationStrategy(strategy)` | Passivation behavior          |
+| `WithReentrancy(reentrancy)`        | Async request policy          |
+| `WithSupervisor(supervisor)`        | Failure handling              |
+| `WithRole(role)`                    | Require remote node role      |
+
+---
+
+## Migration Checklist
+
+1. [ ] Update import path: `goakt/v3` → `goakt/v4`
+2. [ ] Replace `proto.Message` with `any` in handlers and call sites
+3. [ ] Replace `goaktpb.*` with `actor.*`; use constructors for structs
+4. [ ] Replace `ActorRef` with `*PID`
+5. [ ] Replace `LocalActor` / `RemoteActor` with `ActorOf(ctx, name)`
+6. [ ] Replace `pid.Address()` with `pid.Path()`
+7. [ ] Replace `ctx.SenderAddress()` / `ctx.ReceiverAddress()` with `ctx.Sender().Path()` / `ctx.Self().Path()`
+8. [ ] Replace `GetPartition` with `Partition`
+9. [ ] Replace `WithRemoting` with `WithRemote(config)`
+10. [ ] Remove `address` package imports; use `Path` interface
+11. [ ] Update custom `Logger` implementations with new methods
+12. [ ] Update tests: `Probe.SenderAddress()` → `Sender()` + `Path()`
+13. [ ] Remove `RemoteSchedule*` usage; use `Schedule*` with `ActorOf` PID

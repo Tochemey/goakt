@@ -1,0 +1,87 @@
+# Event Streams
+
+The **event stream** is an internal in-process mechanism that publishes **system and cluster events** to subscribers. It is separate from application-level pub/sub (see [PubSub](pubsub.md)). The event stream uses a fixed internal topic; you cannot create custom topics or publish application messages to it.
+
+## Purpose
+
+The framework publishes lifecycle and cluster events so that external components (monitoring, logging, dashboards) can observe the actor system without coupling to internal implementation. Subscribers receive events as they occur—actor started, actor stopped, node joined, dead letter, and so on.
+
+## API
+
+| Method                                | Purpose                                                                                         |
+|---------------------------------------|-------------------------------------------------------------------------------------------------|
+| `ActorSystem.Subscribe()`             | Create a subscriber. Subscribes to the internal events topic. Returns `eventstream.Subscriber`. |
+| `ActorSystem.Unsubscribe(subscriber)` | Release the subscriber. Call to avoid leaks.                                                    |
+
+The `eventstream.Subscriber` interface:
+
+| Method       | Purpose                                                                               |
+|--------------|---------------------------------------------------------------------------------------|
+| `ID()`       | Unique subscriber identifier                                                          |
+| `Topics()`   | Topics this subscriber is subscribed to (includes the internal topic)                 |
+| `Iterator()` | Channel of buffered messages; drains and closes. Messages are `*eventstream.Message`. |
+| `Shutdown()` | Mark subscriber inactive                                                              |
+
+
+## Message structure
+
+Each message has:
+
+- **Topic** — `msg.Topic()` returns the topic (e.g. `topic.events`, the internal topic).
+- **Payload** — `msg.Payload()` returns the event. Use a type assertion to handle specific events.
+
+## Event types
+
+The system publishes these events to the event stream:
+
+| Event               | When                                                           |
+|---------------------|----------------------------------------------------------------|
+| `ActorStarted`      | Actor has started                                              |
+| `ActorStopped`      | Actor has stopped                                              |
+| `ActorChildCreated` | A child actor was spawned                                      |
+| `ActorPassivated`   | Actor was passivated (idle timeout)                            |
+| `ActorRestarted`    | Actor was restarted by supervisor                              |
+| `ActorSuspended`    | Actor was suspended after a failure                            |
+| `ActorReinstated`   | Actor was reinstated by supervisor                             |
+| `Deadletter`        | Message could not be delivered (non-existent or stopped actor) |
+| `NodeJoined`        | A node joined the cluster (cluster mode only)                  |
+| `NodeLeft`          | A node left the cluster (cluster mode only)                    |
+
+## Usage
+
+```go
+subscriber, err := sys.Subscribe()
+if err != nil {
+    return err
+}
+defer sys.Unsubscribe(subscriber)
+
+for msg := range subscriber.Iterator() {
+    switch e := msg.Payload().(type) {
+    case *actor.ActorStarted:
+        log.Printf("actor started: %s", e.Address())
+    case *actor.ActorStopped:
+        log.Printf("actor stopped: %s", e.Address())
+    case *actor.Deadletter:
+        log.Printf("dead letter: sender=%s receiver=%s reason=%s", e.Sender(), e.Receiver(), e.Reason())
+    case *actor.NodeJoined:
+        log.Printf("node joined: %s", e.Address())
+    case *actor.NodeLeft:
+        log.Printf("node left: %s", e.Address())
+    }
+}
+```
+
+`Iterator()` returns a channel that drains buffered messages and then closes. Messages enqueued concurrently with (or after) the call may not be included. For continuous observation, loop over `Iterator()` or use a dedicated goroutine that reads from the channel.
+
+## Implementation notes
+
+- The event stream is backed by the `eventstream` package. The actor system creates an `EventsStream` at startup and subscribes callers to the internal topic `topic.events`.
+- Lifecycle events (ActorStarted, ActorStopped, etc.) are published by the PID and death-watch logic. Cluster events (NodeJoined, NodeLeft) are published by the cluster events loop when membership changes.
+- Dead letters are published by the dead-letter actor when messages cannot be delivered.
+- The event stream is always present; no option is required. It is independent of `WithPubSub()` and cluster mode.
+
+## Related
+
+- [Observability](observability.md) — Metrics and dead letters
+- [PubSub](pubsub.md) — Application-level topic-based pub/sub (separate mechanism)

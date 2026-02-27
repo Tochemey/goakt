@@ -1,0 +1,38 @@
+# API Changes (v4.0.0)
+
+A quick summary of v4.0.0 changes. For the complete migration guide, see [Migration from v3.x](../getting-started/migration-v3.md).
+
+## Executive summary
+
+v4.0.0 delivers **simplification** and **performance**:
+
+| Theme                | Key changes                                                                   |
+|----------------------|-------------------------------------------------------------------------------|
+| **Unified APIs**     | Single actor reference (`*PID`), single lookup (`ActorOf`), unified scheduler |
+| **Type flexibility** | `any` replaces `proto.Message`; CBOR for arbitrary Go types                   |
+| **Remoting**         | Config-only public API; client is internal                                    |
+| **Identity**         | `Path` interface replaces `*address.Address`                                  |
+| **Performance**      | Low-GC serialization, lock-free type registry, single-allocation frames       |
+
+## Quick migration reference
+
+| From                           | To                                                      |
+|--------------------------------|---------------------------------------------------------|
+| `proto.Message` in handlers    | `any`                                                   |
+| `goaktpb.*` types              | `actor.*` (e.g., `actor.PostStart`, `actor.PoisonPill`) |
+| `ActorRef`                     | `*PID`                                                  |
+| `ActorOf` → `(addr, pid, err)` | `ActorOf` → `(*PID, error)`                             |
+| `LocalActor(name)`             | `ActorOf(ctx, name)`                                    |
+| `RemoteActor(ctx, name)`       | `ActorOf(ctx, name)`                                    |
+| `pid.Address()`                | `pid.Path()`                                            |
+| `ctx.SenderAddress()`          | `ctx.Sender().Path()`                                   |
+| `WithRemoting`                 | `WithRemote(config)`                                    |
+| `address` package              | `internal/address`; use `Path` interface                |
+
+## New additions
+
+- **Pluggable serializers** — ProtoSerializer (default), CBORSerializer for any Go type
+- **Path interface** — Location-transparent actor identity
+- **Extended Logger** — Context-aware logging, `Enabled`, `With`, `Flush`, etc.
+- **Slog and Zap implementations** — Low-GC logging options
+

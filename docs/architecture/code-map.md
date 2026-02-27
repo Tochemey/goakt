@@ -1,0 +1,167 @@
+# Code Map
+
+A guided tour of the codebase. Start with `actor/`—everything flows from there.
+
+## Top-level layout
+
+| Package        | Purpose                                                                       |
+|----------------|-------------------------------------------------------------------------------|
+| `actor/`       | Core: ActorSystem, PID, Actor interface, spawn, mailbox, supervision          |
+| `remote/`      | Remoting config, serializers, wire protocol                                   |
+| `client/`      | Standalone cluster client for external callers (Tell, Ask, Spawn)             |
+| `discovery/`   | Pluggable discovery providers (Consul, etcd, K8s, NATS, mDNS, DNS-SD, static) |
+| `datacenter/`  | Multi-DC support, control plane (NATS JetStream, etcd)                        |
+| `supervisor/`  | Supervision strategies and directives                                         |
+| `passivation/` | Passivation strategy types                                                    |
+| `reentrancy/`  | Reentrancy configuration for async Request/RequestName                        |
+| `extension/`   | Extension (system-wide) and Dependency (per-actor) interfaces                 |
+| `eventstream/` | In-process event bus for system and cluster events                            |
+| `hash/`        | Consistent hashing for partition-based placement                              |
+| `breaker/`     | Circuit breaker for async outbound calls (e.g. PipeTo)                        |
+| `memory/`      | Memory size helpers                                                           |
+| `tls/`         | TLS configuration for remoting                                                |
+| `log/`         | Logging abstraction                                                           |
+| `errors/`      | Sentinel errors                                                               |
+| `testkit/`     | Testing helpers: Probe, GrainProbe, TestKit                                   |
+| `mocks/`       | Generated mocks                                                               |
+| `protos/`      | Protobuf source definitions (.proto files)                                    |
+
+## Key files in `actor/`
+
+| File                             | Purpose                                                         |
+|----------------------------------|-----------------------------------------------------------------|
+| `actor.go`                       | Actor interface: PreStart, Receive, PostStop                    |
+| `actor_system.go`                | ActorSystem implementation; wires cluster, remoting, scheduling |
+| `pid.go`                         | PID—live reference to an actor; mailbox dispatch loop, metrics  |
+| `receive_context.go`             | ReceiveContext passed to Receive; messaging, stash, behaviors   |
+| `context.go`                     | Context passed to PreStart/PostStop                             |
+| `spawn.go`                       | Spawn logic for local, remote, and cross-DC actors              |
+| `spawn_option.go`                | SpawnOption: mailbox, supervisor, passivation, reentrancy, role |
+| `option.go`                      | Option for NewActorSystem                                       |
+| `cluster_config.go`              | Cluster configuration                                           |
+| `cluster_singleton.go`           | Cluster singleton: single instance across all nodes             |
+| `mailbox.go`                     | Mailbox interface                                               |
+| `unbounded_mailbox.go`           | Default FIFO mailbox                                            |
+| `bounded_mailbox.go`             | Capacity-capped mailbox; backpressure when full                 |
+| `unbounded_priority_mailbox.go`  | Priority-ordered mailbox                                        |
+| `unbounded_fair_mailbox.go`      | Fair-scheduled mailbox; prevents starvation                     |
+| `unbounded_segmented_mailbox.go` | Segmented mailbox for throughput partitioning                   |
+| `grain.go`                       | Grain interface and virtual actor machinery                     |
+| `grain_engine.go`                | Grain activation, routing, passivation                          |
+| `grain_pid.go`                   | GrainPID—PID variant for virtual actors                         |
+| `grain_context.go`               | GrainContext for grain OnReceive                                |
+| `router.go`                      | Router actor; fans out to routees                               |
+| `routing_strategy.go`            | Round-robin, random, fan-out strategies                         |
+| `scheduler.go`                   | Scheduled / recurring message delivery                          |
+| `dead_letter.go`                 | Captures messages to stopped/non-existent actors                |
+| `death_watch.go`                 | Cleans up terminated actors; removes from tree and cluster      |
+| `relocator.go`                   | Relocates actors/grains when a cluster node departs             |
+| `remote_server.go`               | TCP server for remoting; handles RemoteTell, RemoteSpawn, etc.  |
+| `root_guardian.go`               | Root of the actor hierarchy                                     |
+| `system_guardian.go`             | Parent of system actors (dead letter, relocator, etc.)          |
+| `user_guardian.go`               | Parent of user-spawned actors                                   |
+| `passivation_manager.go`         | Tracks idle actors; triggers passivation                        |
+| `stash.go`                       | Stash buffer for deferred messages                              |
+| `behavior_stack.go`              | Become/UnBecome stack for behavior switching                    |
+| `reentrancy.go`                  | RequestCall, RequestOption; async request handling              |
+| `reflection.go`                  | Runtime type helpers; instantiate actor/grain from type name    |
+| `data_center_controller.go`      | Multi-DC controller; registers DC with control plane            |
+| `grain_activation_barrier.go`    | Barrier for grain activation during cluster events              |
+| `metric.go`                      | OpenTelemetry actor metrics                                     |
+| `func_actor.go`                  | FuncActor—create actor from a plain function                    |
+| `api.go`                         | Tell, Ask, BatchTell, BatchAsk (top-level API)                  |
+
+## `remote/`
+
+| File                 | Purpose                                                              |
+|----------------------|----------------------------------------------------------------------|
+| `remoting.go`        | Remoting interface; RemoteTell, RemoteAsk, RemoteLookup, RemoteSpawn |
+| `config.go`          | Config for host, port, TLS, compression                              |
+| `spawn_request.go`   | SpawnRequest for remote actor creation                               |
+| `compression.go`     | Message compression (gzip, brotli, zstd)                             |
+| `cbor_serializer.go` | CBOR serializer for non-proto messages                               |
+
+## `discovery/`
+
+Pluggable service discovery. Each sub-package implements `discovery.Provider`:
+
+| Provider      | Backend                                        |
+|---------------|------------------------------------------------|
+| `consul/`     | HashiCorp Consul                               |
+| `etcd/`       | etcd v3                                        |
+| `kubernetes/` | Kubernetes API (headless services, pod labels) |
+| `nats/`       | NATS                                           |
+| `mdns/`       | Multicast DNS (local network)                  |
+| `dnssd/`      | DNS Service Discovery                          |
+| `static/`     | Hard-coded peer list                           |
+
+## `datacenter/`
+
+| File                 | Purpose                               |
+|----------------------|---------------------------------------|
+| `data_center.go`     | DataCenter metadata; DataCenterRecord |
+| `config.go`          | Datacenter configuration              |
+| `control_plane.go`   | ControlPlane interface                |
+| `controlplane/nats/` | NATS JetStream control plane          |
+| `controlplane/etcd/` | etcd control plane                    |
+
+## `client/`
+
+Standalone cluster client for callers outside the actor system:
+
+| File             | Purpose                     |
+|------------------|-----------------------------|
+| `client.go`      | Client: Tell, Ask, Spawn    |
+| `balancer.go`    | Balancer interface          |
+| `round_robin.go` | Round-robin node selection  |
+| `random.go`      | Random node selection       |
+| `least_load.go`  | Least-loaded node selection |
+
+## Internal packages
+
+| Package                          | Purpose                                                           |
+|----------------------------------|-------------------------------------------------------------------|
+| `internal/address/`              | Address type; parsing, formatting, path operations                |
+| `internal/cluster/`              | Cluster membership, Olric, actor/grain registry, peer state store |
+| `internal/remoteclient/`         | TCP client for remoting; connection pooling, proto frames         |
+| `internal/net/`                  | TCP server, client, frame protocol, compression                   |
+| `internal/codec/`                | Protobuf marshal/unmarshal; encode/decode cluster types           |
+| `internal/commands/`             | Command types for lifecycle (AsyncRequest, AsyncResponse, etc.)   |
+| `internal/datacentercontroller/` | DC controller; registers DC, heartbeats, cache refresh            |
+| `internal/types/`                | Registry interface; type name → factory for remote spawn          |
+| `internal/memberlist/`           | Hashicorp Memberlist wrapper (TLS transport)                      |
+| `internal/chain/`                | Middleware-style chain execution                                  |
+| `internal/future/`               | Future/promise for Ask async delivery                             |
+| `internal/timer/`                | Timer pool for timeouts                                           |
+| `internal/ticker/`               | Ticker abstraction                                                |
+| `internal/xsync/`                | Atomic maps, extended sync primitives                             |
+| `internal/validation/`           | Fluent validation helpers                                         |
+| `internal/pointer/`              | Generic pointer utilities                                         |
+| `internal/metric/`               | OpenTelemetry metric registration                                 |
+| `internal/chunk/`                | Chunking utilities (e.g. for relocation allocation)               |
+| `internal/slices/`               | Slice utilities (Filter, etc.)                                    |
+| `internal/internalpb/`           | Generated protobuf Go code (wire types)                           |
+
+## `protos/`
+
+```
+protos/
+├── internal/   ← Wire types (cluster, remoting, actor, grain, datacenter)
+└── test/      ← Test fixture proto messages
+```
+
+## Dependency summary
+
+| Package            | Depends on                                                                                                                                                      |
+|--------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `actor`            | `remote`, `internal/cluster`, `discovery/*`, `datacenter`, `supervisor`, `passivation`, `reentrancy`, `eventstream`, `extension`, `log`, `errors`, `internal/*` |
+| `remote`           | `internal/net`, `internal/codec`                                                                                                                                |
+| `internal/cluster` | `discovery`, `internal/memberlist`, `hash`                                                                                                                      |
+| `client`           | `remote`, `internal/address`                                                                                                                                    |
+
+`log`, `errors`, `extension`, `eventstream`, `supervisor`, `passivation`, `reentrancy`, `hash`, `breaker`, `memory`, `tls` are **leaf packages**—they depend on nothing else in this repository.
+
+## See also
+
+- [Architecture Overview](overview.md)
+- [Architecture Document](../../ARCHITECTURE.md) in the repository root for full details, data flows, and design decisions
