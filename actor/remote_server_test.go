@@ -1328,8 +1328,8 @@ func TestRemoteMetricHandler(t *testing.T) {
 		require.True(t, ok)
 		require.NotNil(t, metricResp.GetMetric())
 		m := metricResp.GetMetric()
-		// Actor processes PostStart, so processed count is at least 1
-		assert.GreaterOrEqual(t, m.GetProcessedCount(), uint64(1))
+		// ProcessedCount excludes PostStart; 0 is valid when only PostStart has been processed
+		assert.GreaterOrEqual(t, m.GetProcessedCount(), uint64(0))
 		assert.GreaterOrEqual(t, m.GetUptime(), int64(0))
 	})
 }

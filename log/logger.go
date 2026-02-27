@@ -23,6 +23,7 @@
 package log
 
 import (
+	"context"
 	"io"
 	golog "log"
 )
@@ -53,6 +54,12 @@ type Logger interface {
 	// The format string and arguments are implementation-defined but typically follow fmt.Sprintf.
 	Infof(string, ...any)
 
+	// InfoContext logs a message at info level with the given context.
+	InfoContext(context.Context, ...any)
+
+	// InfofContext logs a formatted message at info level with the given context.
+	InfofContext(context.Context, string, ...any)
+
 	// Warn logs a message at warn level.
 	//
 	// The arguments are implementation-defined but typically formatted similarly to fmt.Sprint.
@@ -63,6 +70,12 @@ type Logger interface {
 	// The format string and arguments are implementation-defined but typically follow fmt.Sprintf.
 	Warnf(string, ...any)
 
+	// WarnContext logs a message at warn level with the given context.
+	WarnContext(context.Context, ...any)
+
+	// WarnfContext logs a formatted message at warn level with the given context.
+	WarnfContext(context.Context, string, ...any)
+
 	// Error logs a message at error level.
 	//
 	// The arguments are implementation-defined but typically formatted similarly to fmt.Sprint.
@@ -72,6 +85,12 @@ type Logger interface {
 	//
 	// The format string and arguments are implementation-defined but typically follow fmt.Sprintf.
 	Errorf(string, ...any)
+
+	// ErrorContext logs a message at error level with the given context.
+	ErrorContext(context.Context, ...any)
+
+	// ErrorfContext logs a formatted message at error level with the given context.
+	ErrorfContext(context.Context, string, ...any)
 
 	// Fatal logs a message at fatal level and then terminates the process.
 	//
@@ -102,6 +121,12 @@ type Logger interface {
 	//
 	// The format string and arguments are implementation-defined but typically follow fmt.Sprintf.
 	Debugf(string, ...any)
+
+	// DebugContext logs a message at debug level with the given context.
+	DebugContext(context.Context, ...any)
+
+	// DebugfContext logs a formatted message at debug level with the given context.
+	DebugfContext(context.Context, string, ...any)
 
 	// LogLevel returns the configured minimum severity level used by the logger.
 	//

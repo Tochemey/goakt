@@ -23,6 +23,7 @@
 package log
 
 import (
+	"context"
 	"fmt"
 	"io"
 	golog "log"
@@ -34,14 +35,30 @@ var discardStdLogger = golog.New(io.Discard, "", 0)
 
 type discardLogger struct{}
 
-func (discardLogger) Debug(v ...any)                 { _ = v }
-func (discardLogger) Debugf(format string, v ...any) { _, _ = format, v }
-func (discardLogger) Info(v ...any)                  { _ = v }
-func (discardLogger) Infof(format string, v ...any)  { _, _ = format, v }
-func (discardLogger) Warn(v ...any)                  { _ = v }
-func (discardLogger) Warnf(format string, v ...any)  { _, _ = format, v }
-func (discardLogger) Error(v ...any)                 { _ = v }
-func (discardLogger) Errorf(format string, v ...any) { _, _ = format, v }
+func (discardLogger) Debug(v ...any)                             { _ = v }
+func (discardLogger) Debugf(format string, v ...any)             { _, _ = format, v }
+func (discardLogger) DebugContext(ctx context.Context, v ...any) { _ = ctx; _ = v }
+func (discardLogger) DebugfContext(ctx context.Context, format string, v ...any) {
+	_, _, _ = ctx, format, v
+}
+func (discardLogger) Info(v ...any)                             { _ = v }
+func (discardLogger) Infof(format string, v ...any)             { _, _ = format, v }
+func (discardLogger) InfoContext(ctx context.Context, v ...any) { _, _ = ctx, v }
+func (discardLogger) InfofContext(ctx context.Context, format string, v ...any) {
+	_, _, _ = ctx, format, v
+}
+func (discardLogger) Warn(v ...any)                             { _ = v }
+func (discardLogger) Warnf(format string, v ...any)             { _, _ = format, v }
+func (discardLogger) WarnContext(ctx context.Context, v ...any) { _, _ = ctx, v }
+func (discardLogger) WarnfContext(ctx context.Context, format string, v ...any) {
+	_, _, _ = ctx, format, v
+}
+func (discardLogger) Error(v ...any)                             { _ = v }
+func (discardLogger) Errorf(format string, v ...any)             { _, _ = format, v }
+func (discardLogger) ErrorContext(ctx context.Context, v ...any) { _, _ = ctx, v }
+func (discardLogger) ErrorfContext(ctx context.Context, format string, v ...any) {
+	_, _, _ = ctx, format, v
+}
 
 func (discardLogger) Fatal(v ...any) {
 	_ = fmt.Sprint(v...)

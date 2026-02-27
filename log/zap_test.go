@@ -24,6 +24,7 @@ package log
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"os"
@@ -159,16 +160,45 @@ func TestLogWith(t *testing.T) {
 	})
 }
 
+func TestZapContextMethods(t *testing.T) {
+	ctx := context.Background()
+	buffer := new(bytes.Buffer)
+	logger := NewZap(DebugLevel, buffer)
+
+	// Zap context methods - context is accepted but ignored (zap has no context API)
+	logger.DebugContext(ctx, "debug ctx")
+	logger.DebugfContext(ctx, "debugf ctx %s", "val")
+	logger.InfoContext(ctx, "info ctx")
+	logger.InfofContext(ctx, "infof ctx %s", "val")
+	logger.WarnContext(ctx, "warn ctx")
+	logger.WarnfContext(ctx, "warnf ctx %s", "val")
+	logger.ErrorContext(ctx, "error ctx")
+	logger.ErrorfContext(ctx, "errorf ctx %s", "val")
+
+	flushLogger(t, logger)
+	require.NotEmpty(t, buffer.String())
+}
+
 func TestDiscardLoggerNoOps(t *testing.T) {
+	ctx := context.Background()
+
 	// DiscardLogger no-op methods (Debug, Info, Warn, Error) - call for coverage
 	DiscardLogger.Debug("discarded")
 	DiscardLogger.Debugf("discarded %s", "msg")
+	DiscardLogger.DebugContext(ctx, "discarded")
+	DiscardLogger.DebugfContext(ctx, "discarded %s", "msg")
 	DiscardLogger.Info("discarded")
 	DiscardLogger.Infof("discarded %s", "msg")
+	DiscardLogger.InfoContext(ctx, "discarded")
+	DiscardLogger.InfofContext(ctx, "discarded %s", "msg")
 	DiscardLogger.Warn("discarded")
 	DiscardLogger.Warnf("discarded %s", "msg")
+	DiscardLogger.WarnContext(ctx, "discarded")
+	DiscardLogger.WarnfContext(ctx, "discarded %s", "msg")
 	DiscardLogger.Error("discarded")
 	DiscardLogger.Errorf("discarded %s", "msg")
+	DiscardLogger.ErrorContext(ctx, "discarded")
+	DiscardLogger.ErrorfContext(ctx, "discarded %s", "msg")
 
 	assert.Equal(t, InfoLevel, DiscardLogger.LogLevel())
 	assert.False(t, DiscardLogger.Enabled(DebugLevel))

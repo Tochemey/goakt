@@ -25,6 +25,8 @@ package log
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strconv"
@@ -36,18 +38,19 @@ import (
 )
 
 // expectedSlogLevel returns the slog JSON output level string for a given Level.
+// Matches zap format: lowercase ("info", "debug", "warn", "error").
 func expectedSlogLevel(l Level) string {
 	switch l {
 	case DebugLevel:
-		return "DEBUG"
+		return "debug"
 	case InfoLevel:
-		return "INFO"
+		return "info"
 	case WarningLevel:
-		return "WARN"
+		return "warn"
 	case ErrorLevel, FatalLevel, PanicLevel:
-		return "ERROR"
+		return "error"
 	default:
-		return "INFO"
+		return "info"
 	}
 }
 
@@ -131,7 +134,7 @@ func TestSlogAddSourceOutputsCaller(t *testing.T) {
 	require.True(t, ok, "expected caller field in log output")
 	callerStr, ok := caller.(string)
 	require.True(t, ok)
-	require.Contains(t, callerStr, "slog_test.go", "caller should reference actual call site (slog_test.go), not slog.go wrapper")
+	require.Contains(t, callerStr, "slog_test.go", "caller should reference actual call site (e.g. log/slog_test.go), not slog.go wrapper")
 	require.Regexp(t, `:\d+$`, callerStr, "caller should end with :line")
 }
 
@@ -529,7 +532,116 @@ func TestSlogTimestampFormat(t *testing.T) {
 
 	var m map[string]any
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &m))
-	ts, ok := m["time"].(string)
+	ts, ok := m["ts"].(string)
 	require.True(t, ok)
-	require.Regexp(t, `^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z`, ts, "time should match zap-style format")
+	require.Regexp(t, `^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z`, ts, "ts should match zap-style format")
+}
+
+func TestSlogFieldOrder(t *testing.T) {
+	buf := new(bytes.Buffer)
+	logger := NewSlog(InfoLevel, buf)
+	logger.Infof("actor system=Remoting started")
+
+	raw := buf.String()
+	// Output order must be: level, ts, caller, msg (matching zap)
+	require.Regexp(t, `^\{"level":`, raw, "level must be first")
+	require.Regexp(t, `"ts":"[^"]*"`, raw, "ts must be present")
+	require.Regexp(t, `"caller":"[^"]*"`, raw, "caller must be present")
+	require.Regexp(t, `"msg":"[^"]*"\}`, raw, "msg must be last of fixed fields")
+	// Verify order: level before ts before caller before msg
+	levelPos := bytes.Index(buf.Bytes(), []byte(`"level":`))
+	tsPos := bytes.Index(buf.Bytes(), []byte(`"ts":`))
+	callerPos := bytes.Index(buf.Bytes(), []byte(`"caller":`))
+	msgPos := bytes.Index(buf.Bytes(), []byte(`"msg":`))
+	require.True(t, levelPos < tsPos && tsPos < callerPos && callerPos < msgPos,
+		"field order must be level < ts < caller < msg, got level=%d ts=%d caller=%d msg=%d",
+		levelPos, tsPos, callerPos, msgPos)
+}
+
+// TestSlogJSONEscaping exercises appendJSONEscaped paths: quotes, backslash, newline, tab, control chars, unicode.
+func TestSlogJSONEscaping(t *testing.T) {
+	buf := new(bytes.Buffer)
+	logger := NewSlog(InfoLevel, buf)
+
+	// Message with special chars that need JSON escaping
+	logger.Infof("msg with \"quotes\" and \\backslash and \nnewline and \ttab")
+	flushSlogLogger(t, logger)
+
+	var m map[string]any
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &m))
+	msg, ok := m["msg"].(string)
+	require.True(t, ok)
+	require.Contains(t, msg, "quotes")
+	require.Contains(t, msg, "backslash")
+	require.Contains(t, msg, "newline")
+	require.Contains(t, msg, "tab")
+
+	// Field value with special chars
+	buf.Reset()
+	logger.With("key", "val\"ue\nwith\tescapes").Info("plain")
+	flushSlogLogger(t, logger)
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &m))
+	require.Contains(t, buf.String(), `"key":`)
+
+	// Control chars (c < ' ') - triggers \u00XX escape
+	buf.Reset()
+	logger.With("ctrl", "a\x00b\x01").Info("control")
+	flushSlogLogger(t, logger)
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &m))
+
+	// Unicode line/paragraph separators (U+2028, U+2029)
+	buf.Reset()
+	logger.With("unicode", "\u2028x\u2029").Info("separators")
+	flushSlogLogger(t, logger)
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &m))
+}
+
+// TestSlogAppendSlogValueError exercises KindAny with error type in appendSlogValue.
+func TestSlogAppendSlogValueError(t *testing.T) {
+	buf := new(bytes.Buffer)
+	logger := NewSlog(InfoLevel, buf)
+
+	err := errors.New("test error message")
+	logger.With("err", err).Info("with error field")
+	flushSlogLogger(t, logger)
+
+	var m map[string]any
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &m))
+	errVal, ok := m["err"].(string)
+	require.True(t, ok)
+	require.Equal(t, "test error message", errVal)
+}
+
+// TestSlogHandlerWithGroup exercises slogOrderedHandler.WithGroup.
+func TestSlogHandlerWithGroup(t *testing.T) {
+	buf := new(bytes.Buffer)
+	levelVar := new(slog.LevelVar)
+	levelVar.Set(slog.LevelInfo)
+
+	base := newSlogOrderedHandler(buf, levelVar, nil)
+	withGroup := base.WithGroup("group")
+	require.NotNil(t, withGroup)
+
+	logger := slog.New(withGroup)
+	logger.Info("msg", "k", "v")
+	require.NotEmpty(t, buf.String())
+	require.Contains(t, buf.String(), "msg")
+}
+
+func BenchmarkSlogInfof(b *testing.B) {
+	var buf bytes.Buffer
+	logger := NewSlog(InfoLevel, &buf)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		logger.Infof("actor system=Remoting started")
+	}
+}
+
+func BenchmarkSlogInfofWithFields(b *testing.B) {
+	var buf bytes.Buffer
+	logger := NewSlog(InfoLevel, &buf).With("actor", "Pong", "host", "127.0.0.1")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		logger.Infof("actor=Pong readiness probe completed")
+	}
 }

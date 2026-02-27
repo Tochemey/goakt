@@ -23,6 +23,7 @@
 package log
 
 import (
+	"context"
 	"io"
 	golog "log"
 	"os"
@@ -112,6 +113,18 @@ func (z *Zap) Debugf(format string, v ...any) {
 	z.sugar.Debugf(format, v...)
 }
 
+// DebugContext logs at debug level with the given context.
+func (z *Zap) DebugContext(ctx context.Context, v ...any) {
+	_ = ctx
+	z.sugar.Debug(v...)
+}
+
+// DebugfContext logs a formatted message at debug level with the given context.
+func (z *Zap) DebugfContext(ctx context.Context, format string, v ...any) {
+	_ = ctx
+	z.sugar.Debugf(format, v...)
+}
+
 // Panic starts a new message with panic level. The panic() function
 // is called which stops the ordinary flow of a goroutine.
 func (z *Zap) Panic(v ...any) {
@@ -146,6 +159,18 @@ func (z *Zap) Errorf(format string, v ...any) {
 	z.sugar.Errorf(format, v...)
 }
 
+// ErrorContext logs at error level with the given context.
+func (z *Zap) ErrorContext(ctx context.Context, v ...any) {
+	_ = ctx
+	z.sugar.Error(v...)
+}
+
+// ErrorfContext logs a formatted message at error level with the given context.
+func (z *Zap) ErrorfContext(ctx context.Context, format string, v ...any) {
+	_ = ctx
+	z.sugar.Errorf(format, v...)
+}
+
 // Warn starts a new message with warn level
 func (z *Zap) Warn(v ...any) {
 	z.sugar.Warn(v...)
@@ -156,6 +181,18 @@ func (z *Zap) Warnf(format string, v ...any) {
 	z.sugar.Warnf(format, v...)
 }
 
+// WarnContext logs at warn level with the given context.
+func (z *Zap) WarnContext(ctx context.Context, v ...any) {
+	_ = ctx
+	z.sugar.Warn(v...)
+}
+
+// WarnfContext logs a formatted message at warn level with the given context.
+func (z *Zap) WarnfContext(ctx context.Context, format string, v ...any) {
+	_ = ctx
+	z.sugar.Warnf(format, v...)
+}
+
 // Info starts a message with info level
 func (z *Zap) Info(v ...any) {
 	z.sugar.Info(v...)
@@ -163,6 +200,18 @@ func (z *Zap) Info(v ...any) {
 
 // Infof starts a message with info level
 func (z *Zap) Infof(format string, v ...any) {
+	z.sugar.Infof(format, v...)
+}
+
+// InfoContext logs at info level with the given context.
+func (z *Zap) InfoContext(ctx context.Context, v ...any) {
+	_ = ctx
+	z.sugar.Info(v...)
+}
+
+// InfofContext logs a formatted message at info level with the given context.
+func (z *Zap) InfofContext(ctx context.Context, format string, v ...any) {
+	_ = ctx
 	z.sugar.Infof(format, v...)
 }
 
