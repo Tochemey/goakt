@@ -35,9 +35,6 @@ A **cluster singleton** is an actor with exactly one instance across the entire 
 
 ```go
 pid, err := system.SpawnSingleton(ctx, "scheduler", NewSchedulerActor())
-if err != nil {
-    return err
-}
 ```
 
 Use `ActorOf(ctx, name)` to resolve the singleton from any node. Messaging is location-transparent: `Tell` and `Ask` work the same whether the singleton is local or remote. From inside `Receive`, use `ctx.Request(pid, msg, opts...)` for non-blocking request-response.
@@ -45,7 +42,7 @@ Use `ActorOf(ctx, name)` to resolve the singleton from any node. Messaging is lo
 ## Placement
 
 - **Default** — The singleton runs on the cluster coordinator (oldest node by membership).
-- **With role** — Use `WithSingletonRole(role)` to pin the singleton to nodes that advertise that role. The oldest node with the role hosts it. If no node has the role, `SpawnSingleton` returns an error.
+- **With role** — Use `WithSingletonRole(role)` to pin the singleton to nodes that advertise that role. The oldest node with the role (by `CreatedAt`) hosts it. If no node has the role, `SpawnSingleton` retries according to the spawn options; it returns an error only after retries are exhausted or the spawn timeout elapses.
 
 ## Configuration options
 

@@ -40,15 +40,6 @@ pid, err := system.Spawn(ctx, "service", actor, actor.WithLongLived())
 - Long-lived services that must stay up
 - Actors that handle infrequent but critical messages
 
-### Strategy interface
-
-```go
-type Strategy interface {
-    fmt.Stringer
-    Name() string
-}
-```
-
 ---
 
 ## System eviction
