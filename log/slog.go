@@ -30,6 +30,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 )
 
@@ -60,19 +61,12 @@ func NewSlog(level Level, writers ...io.Writer) *Slog {
 	w := io.MultiWriter(writers...)
 	opts := &slog.HandlerOptions{
 		Level:     toSlogLevel(level),
-		AddSource: true,
+		AddSource: false, // We add caller ourselves via runtime.Caller so it shows the actual call site, not this wrapper
 		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
 			if a.Key == slog.TimeKey {
 				// Match zap-style timestamp format for consistency
 				if t, ok := a.Value.Any().(time.Time); ok {
 					a.Value = slog.StringValue(t.Format("2006-01-02T15:04:05.000000Z0700"))
-				}
-			}
-			if a.Key == slog.SourceKey {
-				// Format as zap-style "file:line" (ShortCallerEncoder) and use "caller" key
-				if src, ok := a.Value.Any().(*slog.Source); ok && src != nil {
-					file := filepath.Base(src.File)
-					a = slog.Attr{Key: "caller", Value: slog.StringValue(fmt.Sprintf("%s:%d", file, src.Line))}
 				}
 			}
 			return a
@@ -86,85 +80,95 @@ func NewSlog(level Level, writers ...io.Writer) *Slog {
 	}
 }
 
+// callerAttr returns a slog.Attr with the caller's file:line. skip is the number
+// of stack frames to skip (2 = caller of our wrapper method, e.g. remote_server.go).
+func callerAttr(skip int) slog.Attr {
+	_, file, line, ok := runtime.Caller(skip)
+	if !ok {
+		return slog.String("caller", "???")
+	}
+	return slog.String("caller", fmt.Sprintf("%s:%d", filepath.Base(file), line))
+}
+
 // Debug logs at debug level.
 func (l *Slog) Debug(v ...any) {
 	if l.Enabled(DebugLevel) {
-		l.logger.Debug(fmt.Sprint(v...))
+		l.logger.LogAttrs(context.Background(), slog.LevelDebug, fmt.Sprint(v...), callerAttr(2))
 	}
 }
 
 // Debugf logs a formatted message at debug level.
 func (l *Slog) Debugf(format string, v ...any) {
 	if l.Enabled(DebugLevel) {
-		l.logger.Debug(fmt.Sprintf(format, v...))
+		l.logger.LogAttrs(context.Background(), slog.LevelDebug, fmt.Sprintf(format, v...), callerAttr(2))
 	}
 }
 
 // Info logs at info level.
 func (l *Slog) Info(v ...any) {
 	if l.Enabled(InfoLevel) {
-		l.logger.Info(fmt.Sprint(v...))
+		l.logger.LogAttrs(context.Background(), slog.LevelInfo, fmt.Sprint(v...), callerAttr(2))
 	}
 }
 
 // Infof logs a formatted message at info level.
 func (l *Slog) Infof(format string, v ...any) {
 	if l.Enabled(InfoLevel) {
-		l.logger.Info(fmt.Sprintf(format, v...))
+		l.logger.LogAttrs(context.Background(), slog.LevelInfo, fmt.Sprintf(format, v...), callerAttr(2))
 	}
 }
 
 // Warn logs at warn level.
 func (l *Slog) Warn(v ...any) {
 	if l.Enabled(WarningLevel) {
-		l.logger.Warn(fmt.Sprint(v...))
+		l.logger.LogAttrs(context.Background(), slog.LevelWarn, fmt.Sprint(v...), callerAttr(2))
 	}
 }
 
 // Warnf logs a formatted message at warn level.
 func (l *Slog) Warnf(format string, v ...any) {
 	if l.Enabled(WarningLevel) {
-		l.logger.Warn(fmt.Sprintf(format, v...))
+		l.logger.LogAttrs(context.Background(), slog.LevelWarn, fmt.Sprintf(format, v...), callerAttr(2))
 	}
 }
 
 // Error logs at error level.
 func (l *Slog) Error(v ...any) {
 	if l.Enabled(ErrorLevel) {
-		l.logger.Error(fmt.Sprint(v...))
+		l.logger.LogAttrs(context.Background(), slog.LevelError, fmt.Sprint(v...), callerAttr(2))
 	}
 }
 
 // Errorf logs a formatted message at error level.
 func (l *Slog) Errorf(format string, v ...any) {
 	if l.Enabled(ErrorLevel) {
-		l.logger.Error(fmt.Sprintf(format, v...))
+		l.logger.LogAttrs(context.Background(), slog.LevelError, fmt.Sprintf(format, v...), callerAttr(2))
 	}
 }
 
 // Fatal logs at error level and exits.
 func (l *Slog) Fatal(v ...any) {
-	l.logger.Error(fmt.Sprint(v...))
+	l.logger.LogAttrs(context.Background(), slog.LevelError, fmt.Sprint(v...), callerAttr(2))
 	os.Exit(1)
 }
 
 // Fatalf logs a formatted message at error level and exits.
 func (l *Slog) Fatalf(format string, v ...any) {
-	l.logger.Error(fmt.Sprintf(format, v...))
+	l.logger.LogAttrs(context.Background(), slog.LevelError, fmt.Sprintf(format, v...), callerAttr(2))
 	os.Exit(1)
 }
 
 // Panic logs at error level and panics.
 func (l *Slog) Panic(v ...any) {
 	msg := fmt.Sprint(v...)
-	l.logger.Error(msg)
+	l.logger.LogAttrs(context.Background(), slog.LevelError, msg, callerAttr(2))
 	panic(msg)
 }
 
 // Panicf logs a formatted message at error level and panics.
 func (l *Slog) Panicf(format string, v ...any) {
 	msg := fmt.Sprintf(format, v...)
-	l.logger.Error(msg)
+	l.logger.LogAttrs(context.Background(), slog.LevelError, msg, callerAttr(2))
 	panic(msg)
 }
 

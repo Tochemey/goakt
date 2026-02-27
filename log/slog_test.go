@@ -131,7 +131,7 @@ func TestSlogAddSourceOutputsCaller(t *testing.T) {
 	require.True(t, ok, "expected caller field in log output")
 	callerStr, ok := caller.(string)
 	require.True(t, ok)
-	require.Contains(t, callerStr, "slog.go", "caller should reference slog.go (wrapper)")
+	require.Contains(t, callerStr, "slog_test.go", "caller should reference actual call site (slog_test.go), not slog.go wrapper")
 	require.Regexp(t, `:\d+$`, callerStr, "caller should end with :line")
 }
 
