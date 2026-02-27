@@ -23,6 +23,7 @@
 package log
 
 import (
+	"context"
 	"io"
 	"os"
 	"os/exec"
@@ -38,14 +39,30 @@ func TestDiscardLoggerBasics(t *testing.T) {
 
 	callDiscardMethod(t, "Debug", "debug")
 	callDiscardMethod(t, "Debugf", "debug %s", "msg")
+	callDiscardMethod(t, "DebugContext", context.Background(), "debug")
+	callDiscardMethod(t, "DebugfContext", context.Background(), "debug %s", "msg")
 	callDiscardMethod(t, "Info", "info")
 	callDiscardMethod(t, "Infof", "info %s", "msg")
+	callDiscardMethod(t, "InfoContext", context.Background(), "info")
+	callDiscardMethod(t, "InfofContext", context.Background(), "info %s", "msg")
 	callDiscardMethod(t, "Warn", "warn")
 	callDiscardMethod(t, "Warnf", "warn %s", "msg")
+	callDiscardMethod(t, "WarnContext", context.Background(), "warn")
+	callDiscardMethod(t, "WarnfContext", context.Background(), "warn %s", "msg")
 	callDiscardMethod(t, "Error", "error")
 	callDiscardMethod(t, "Errorf", "error %s", "msg")
+	callDiscardMethod(t, "ErrorContext", context.Background(), "error")
+	callDiscardMethod(t, "ErrorfContext", context.Background(), "error %s", "msg")
 
 	require.Equal(t, InfoLevel, logger.LogLevel())
+
+	// Enabled returns false for all levels except Fatal and Panic
+	assert.False(t, logger.Enabled(DebugLevel))
+	assert.False(t, logger.Enabled(InfoLevel))
+	assert.False(t, logger.Enabled(WarningLevel))
+	assert.False(t, logger.Enabled(ErrorLevel))
+	assert.True(t, logger.Enabled(FatalLevel))
+	assert.True(t, logger.Enabled(PanicLevel))
 
 	outputs := logger.LogOutput()
 	require.Len(t, outputs, 1)

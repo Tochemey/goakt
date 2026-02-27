@@ -20,41 +20,40 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package testkit
+package remote
 
 import (
-	"os"
+	"testing"
 
-	"github.com/tochemey/goakt/v4/extension"
-	"github.com/tochemey/goakt/v4/log"
+	"github.com/stretchr/testify/assert"
 )
 
-// Option is the interface that applies a Testkit option.
-type Option interface {
-	// Apply sets the Option value of a config.
-	Apply(kit *TestKit)
+func TestActorState_String(t *testing.T) {
+	tests := []struct {
+		state    ActorState
+		expected string
+	}{
+		{ActorStateUnknown, "unknown"},
+		{ActorStateRunning, "running"},
+		{ActorStateSuspended, "suspended"},
+		{ActorStateStopping, "stopping"},
+		{ActorStateRelocatable, "relocatable"},
+		{ActorStateSingleton, "singleton"},
+		{ActorState(99), "unknown"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.expected, func(t *testing.T) {
+			assert.Equal(t, tt.expected, tt.state.String())
+		})
+	}
 }
 
-// enforce compilation error
-var _ Option = OptionFunc(nil)
-
-// OptionFunc implements the Option interface.
-type OptionFunc func(kit *TestKit)
-
-func (f OptionFunc) Apply(kit *TestKit) {
-	f(kit)
-}
-
-// WithLogging sets the Testkit logger
-func WithLogging(level log.Level) Option {
-	return OptionFunc(func(kit *TestKit) {
-		kit.logger = log.NewZap(level, os.Stderr)
-	})
-}
-
-// WithExtensions adds extensions to the TestKit.
-func WithExtensions(extensions ...extension.Extension) Option {
-	return OptionFunc(func(kit *TestKit) {
-		kit.extensions = append(kit.extensions, extensions...)
-	})
+func TestActorState_ValuesMatchProto(t *testing.T) {
+	// Ensure values align with internalpb.State enum (0-5)
+	assert.Equal(t, uint32(0), uint32(ActorStateUnknown))
+	assert.Equal(t, uint32(1), uint32(ActorStateRunning))
+	assert.Equal(t, uint32(2), uint32(ActorStateSuspended))
+	assert.Equal(t, uint32(3), uint32(ActorStateStopping))
+	assert.Equal(t, uint32(4), uint32(ActorStateRelocatable))
+	assert.Equal(t, uint32(5), uint32(ActorStateSingleton))
 }

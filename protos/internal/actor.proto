@@ -77,3 +77,12 @@ message SingletonSpec {
   // Specifies the maximum number of spawn retries
   int32 max_retries = 3;
 }
+
+enum State {
+  STATE_UNKNOWN = 0;
+  STATE_RUNNING = 1;
+  STATE_SUSPENDED = 2;
+  STATE_STOPPING = 3;
+  STATE_RELOCATABLE = 4;
+  STATE_SINGLETON = 5;
+}

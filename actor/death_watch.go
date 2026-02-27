@@ -30,6 +30,7 @@ import (
 	"github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/pointer"
 	"github.com/tochemey/goakt/v4/internal/types"
+	"github.com/tochemey/goakt/v4/log"
 )
 
 // deathWatch removes dead actors from the system
@@ -63,13 +64,19 @@ func (x *deathWatch) Receive(ctx *ReceiveContext) {
 
 // PostStop is executed when the actor is shutting down.
 func (x *deathWatch) PostStop(ctx *Context) error {
-	ctx.ActorSystem().Logger().Infof("%s stopped successfully", ctx.ActorName())
+	logger := ctx.ActorSystem().Logger()
+	if logger.Enabled(log.InfoLevel) {
+		logger.Infof("actor=%s stopped successfully", ctx.ActorName())
+	}
 	return nil
 }
 
 // handlePostStart handles PostStart message
 func (x *deathWatch) handlePostStart(ctx *ReceiveContext) {
-	ctx.Logger().Infof("Actor %s started successfully", ctx.Self().Name())
+	logger := ctx.Logger()
+	if logger.Enabled(log.InfoLevel) {
+		logger.Infof("actor=%s started successfully", ctx.Self().Name())
+	}
 }
 
 // handleTerminated handles Terminated message
@@ -80,7 +87,9 @@ func (x *deathWatch) handleTerminated(ctx *ReceiveContext) error {
 	actorSys := ctx.ActorSystem()
 
 	addr := msg.Address()
-	logger.Infof("Removing dead Actor %s resource from system", addr)
+	if logger.Enabled(log.InfoLevel) {
+		logger.Infof("actor=%s removing dead actor resource from system", addr)
+	}
 
 	actorTree := actorSys.tree()
 	if node, ok := actorTree.node(addr); ok {
@@ -111,14 +120,20 @@ func (x *deathWatch) handleTerminated(ctx *ReceiveContext) error {
 			}
 
 			if err != nil {
-				logger.Errorf("Failed to remove dead Actor %s resource from cluster: %v", addr, err)
+				if logger.Enabled(log.ErrorLevel) {
+					logger.Errorf("actor=%s failed to remove dead actor from cluster: %v", addr, err)
+				}
 				return errors.NewInternalError(err)
 			}
 		}
 
-		logger.Infof("Successfully removed dead Actor %s resource from system", addr)
+		if logger.Enabled(log.InfoLevel) {
+			logger.Infof("actor=%s removed dead actor resource from system", addr)
+		}
 		return nil
 	}
-	logger.Infof("Unable to locate dead Actor %s resource in system. Maybe already freed.", ctx.Self().Name(), addr)
+	if logger.Enabled(log.InfoLevel) {
+		logger.Infof("actor=%s addr=%s unable to locate dead actor resource, maybe already freed", ctx.Self().Name(), addr)
+	}
 	return nil
 }

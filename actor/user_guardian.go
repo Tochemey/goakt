@@ -54,10 +54,14 @@ func (x *userGuardian) Receive(ctx *ReceiveContext) {
 	case *PostStart:
 		x.pid = ctx.Self()
 		x.logger = ctx.Logger()
-		x.logger.Infof("%s started successfully", x.pid.Name())
+		if x.logger.Enabled(log.InfoLevel) {
+			x.logger.Infof("actor=%s started successfully", x.pid.Name())
+		}
 	case *Terminated:
-		actorID := msg.Address
-		x.logger.Debugf("%s received a terminated actor=(%s)", x.pid.Name(), actorID)
+		actorID := msg.Address()
+		if x.logger.Enabled(log.DebugLevel) {
+			x.logger.Debugf("actor=%s received terminated actor=%s", x.pid.Name(), actorID)
+		}
 		// pass
 	default:
 		ctx.Unhandled()
@@ -66,6 +70,9 @@ func (x *userGuardian) Receive(ctx *ReceiveContext) {
 
 // PostStop is the post-stop hook
 func (x *userGuardian) PostStop(ctx *Context) error {
-	ctx.ActorSystem().Logger().Infof("%s stopped successfully", ctx.ActorName())
+	logger := ctx.ActorSystem().Logger()
+	if logger.Enabled(log.InfoLevel) {
+		logger.Infof("actor=%s stopped successfully", ctx.ActorName())
+	}
 	return nil
 }

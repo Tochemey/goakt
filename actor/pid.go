@@ -54,6 +54,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/locker"
 	"github.com/tochemey/goakt/v4/internal/metric"
+	"github.com/tochemey/goakt/v4/internal/pointer"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/internal/ticker"
 	"github.com/tochemey/goakt/v4/internal/types"
@@ -61,6 +62,7 @@ import (
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/passivation"
 	"github.com/tochemey/goakt/v4/reentrancy"
+	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/supervisor"
 )
 
@@ -221,7 +223,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	pid := &PID{
 		actor:                 actor,
 		latestReceiveTimeNano: atomic.Int64{},
-		logger:                log.New(log.ErrorLevel, os.Stderr),
+		logger:                log.NewZap(log.ErrorLevel, os.Stderr),
 		address:               address,
 		mailbox:               NewUnboundedMailbox(),
 		supervisionChan:       make(chan *supervisionSignal, 1),
@@ -323,6 +325,14 @@ func (pid *PID) IsRemote() bool {
 // Placement roles constrain on which nodes an actor may be started or relocated.
 // This setting only affects SpawnOn and SpawnSingleton; local-only spawns ignore it.
 func (pid *PID) Role() *string {
+	if pid.IsRemote() {
+		role, err := pid.remoting.RemoteRole(context.Background(), pid.address.Host(), pid.address.Port(), pid.Name())
+		if err == nil {
+			return pointer.To(role)
+		}
+		return nil
+	}
+
 	pid.fieldsLocker.RLock()
 	role := pid.role
 	pid.fieldsLocker.RUnlock()
@@ -333,6 +343,13 @@ func (pid *PID) Role() *string {
 // Dependencies are injected at spawn time via SpawnOptions and remain accessible
 // for the lifetime of the actor.
 func (pid *PID) Dependencies() []extension.Dependency {
+	if pid.IsRemote() {
+		if dependencies, err := pid.remoting.RemoteDependencies(context.Background(), pid.address.Host(), pid.address.Port(), pid.Name()); err == nil {
+			return dependencies
+		}
+		return nil
+	}
+
 	if pid.dependencies == nil {
 		return nil
 	}
@@ -341,11 +358,11 @@ func (pid *PID) Dependencies() []extension.Dependency {
 
 // Dependency returns the registered dependency with the given identifier, or nil if not found.
 func (pid *PID) Dependency(dependencyID string) extension.Dependency {
-	if pid.dependencies == nil {
-		return nil
-	}
-	if dependency, ok := pid.dependencies.Get(dependencyID); ok {
-		return dependency
+	dependencies := pid.Dependencies()
+	for _, dep := range dependencies {
+		if dep.ID() == dependencyID {
+			return dep
+		}
 	}
 	return nil
 }
@@ -353,6 +370,25 @@ func (pid *PID) Dependency(dependencyID string) extension.Dependency {
 // Metric returns a snapshot of the actor's runtime metrics.
 // Returns nil when the actor is not running. Cluster data is not included.
 func (pid *PID) Metric(ctx context.Context) *ActorMetric {
+	if pid.IsRemote() {
+		metric, err := pid.remoting.RemoteMetric(ctx, pid.address.Host(), pid.address.Port(), pid.Name())
+		if err != nil {
+			return nil
+		}
+
+		return &ActorMetric{
+			deadlettersCount:        metric.GetDeadlettersCount(),
+			childrenCount:           metric.GetChildrenCount(),
+			uptime:                  metric.GetUptime(),
+			latestProcessedDuration: metric.GetLatestProcessedDuration().AsDuration(),
+			restartCount:            metric.GetRestartCount(),
+			processedCount:          metric.GetProcessedCount(),
+			stashSize:               metric.GetStashSize(),
+			failureCount:            metric.GetFailureCount(),
+			reinstateCount:          metric.GetReinstateCount(),
+		}
+	}
+
 	if pid.IsRunning() {
 		var (
 			uptime                  = pid.Uptime()
@@ -381,6 +417,17 @@ func (pid *PID) Metric(ctx context.Context) *ActorMetric {
 // Uptime returns the number of seconds elapsed since the actor started.
 // Returns zero when the actor is not running.
 func (pid *PID) Uptime() int64 {
+	if pid.IsRemote() {
+		if metric, err := pid.remoting.RemoteMetric(
+			context.Background(),
+			pid.address.Host(),
+			pid.address.Port(),
+			pid.Name()); err == nil {
+			return metric.GetUptime()
+		}
+		return 0
+	}
+
 	if pid.IsRunning() {
 		return time.Now().Unix() - pid.startedAt.Load()
 	}
@@ -419,12 +466,22 @@ func (pid *PID) Equals(to *PID) bool {
 // Actor returns the underlying Actor implementation.
 // Returns nil for remote PIDs.
 func (pid *PID) Actor() Actor {
+	if pid.IsRemote() {
+		return nil
+	}
 	return pid.actor
 }
 
 // Kind returns the reflected type name of the underlying Actor implementation.
 // Returns an empty string for remote PIDs.
 func (pid *PID) Kind() string {
+	if pid.IsRemote() {
+		if kind, err := pid.remoting.RemoteKind(context.Background(), pid.address.Host(), pid.address.Port(), pid.Name()); err == nil {
+			return kind
+		}
+		return ""
+	}
+
 	if pid.actor == nil {
 		return ""
 	}
@@ -432,12 +489,24 @@ func (pid *PID) Kind() string {
 }
 
 // Child returns the running child PID with the given name.
-// Returns ErrNotLocal for remote PIDs, ErrDead if this actor is not running,
+// Returns ErrNotLocal for remote PIDs (or when remoting is nil), ErrDead if this actor is not running,
 // or ErrActorNotFound when no such child exists or the child is stopped.
 func (pid *PID) Child(name string) (*PID, error) {
-	if err := pid.assertLocal(); err != nil {
-		return nil, err
+	if pid.IsRemote() {
+		addresses, err := pid.remoting.RemoteChildren(context.Background(), pid.address.Host(), pid.address.Port(), pid.Name())
+		if err != nil {
+			return nil, err
+		}
+
+		for _, address := range addresses {
+			if address.Name() == name {
+				return newRemotePID(address, pid.remoting), nil
+			}
+		}
+
+		return nil, gerrors.NewErrActorNotFound(name)
 	}
+
 	if !pid.IsRunning() {
 		return nil, gerrors.ErrDead
 	}
@@ -456,7 +525,11 @@ func (pid *PID) Child(name string) (*PID, error) {
 // Returns nil for root actors and remote PIDs.
 func (pid *PID) Parent() *PID {
 	if pid.IsRemote() {
-		return nil
+		address, err := pid.remoting.RemoteParent(context.Background(), pid.address.Host(), pid.address.Port(), pid.Name())
+		if err != nil {
+			return nil
+		}
+		return newRemotePID(address, pid.remoting)
 	}
 	tree := pid.ActorSystem().tree()
 	parent, ok := tree.parent(pid)
@@ -467,11 +540,19 @@ func (pid *PID) Parent() *PID {
 }
 
 // Children returns all direct child PIDs that are currently running.
-// Returns nil for remote PIDs.
 func (pid *PID) Children() []*PID {
 	if pid.IsRemote() {
-		return nil
+		addresses, err := pid.remoting.RemoteChildren(context.Background(), pid.address.Host(), pid.address.Port(), pid.Name())
+		if err != nil {
+			return nil
+		}
+		children := make([]*PID, 0, len(addresses))
+		for _, address := range addresses {
+			children = append(children, newRemotePID(address, pid.remoting))
+		}
+		return children
 	}
+
 	pid.fieldsLocker.RLock()
 	tree := pid.ActorSystem().tree()
 	children := tree.children(pid)
@@ -535,9 +616,17 @@ func (pid *PID) Stop(ctx context.Context, cid *PID) error {
 // IsRunning reports whether the actor is alive and ready to process messages.
 // Returns false when the actor has not started, is stopping, passivating, or suspended.
 func (pid *PID) IsRunning() bool {
-	if pid == nil {
+	if pid.IsRemote() {
+		if state, err := pid.remoting.RemoteState(context.Background(),
+			pid.address.Host(),
+			pid.address.Port(),
+			pid.Name(),
+			remote.ActorStateRunning); err == nil {
+			return state
+		}
 		return false
 	}
+
 	// Single atomic load, then check all flags with bitwise operations
 	state := pid.state.Load()
 	return state&uint32(runningState) != 0 &&
@@ -548,6 +637,18 @@ func (pid *PID) IsRunning() bool {
 
 // IsSuspended reports whether the actor is suspended due to a fault.
 func (pid *PID) IsSuspended() bool {
+	if pid.IsRemote() {
+		if state, err := pid.remoting.RemoteState(
+			context.Background(),
+			pid.address.Host(),
+			pid.address.Port(),
+			pid.Name(),
+			remote.ActorStateSuspended); err == nil {
+			return state
+		}
+		return false
+	}
+
 	return pid.isStateSet(suspendedState)
 }
 
@@ -555,22 +656,67 @@ func (pid *PID) IsSuspended() bool {
 // A singleton exists at most once across the entire cluster and is always hosted on the oldest node.
 // When that node leaves unexpectedly the singleton is restarted on the new oldest node.
 func (pid *PID) IsSingleton() bool {
+	if pid.IsRemote() {
+		if state, err := pid.remoting.RemoteState(
+			context.Background(),
+			pid.address.Host(),
+			pid.address.Port(),
+			pid.Name(),
+			remote.ActorStateSingleton); err == nil {
+			return state
+		}
+		return false
+	}
+
 	return pid.isStateSet(singletonState)
 }
 
 // IsRelocatable reports whether the actor may be relocated to another node if its host node shuts down unexpectedly.
 // Actors are relocatable by default; pass WithRelocationDisabled at spawn time to opt out.
 func (pid *PID) IsRelocatable() bool {
+	if pid.IsRemote() {
+		if state, err := pid.remoting.RemoteState(
+			context.Background(),
+			pid.address.Host(),
+			pid.address.Port(),
+			pid.Name(),
+			remote.ActorStateRelocatable); err == nil {
+			return state
+		}
+		return false
+	}
 	return pid.isStateSet(relocationState)
 }
 
 // IsStopping reports whether the actor has begun stopping, either explicitly or via passivation.
 func (pid *PID) IsStopping() bool {
+	if pid.IsRemote() {
+		if state, err := pid.remoting.RemoteState(
+			context.Background(),
+			pid.address.Host(),
+			pid.address.Port(),
+			pid.Name(),
+			remote.ActorStateStopping); err == nil {
+			return state
+		}
+		return false
+	}
 	return pid.isStateSet(stoppingState) || pid.isStateSet(passivatingState)
 }
 
 // PassivationStrategy returns the passivation strategy configured for this actor.
 func (pid *PID) PassivationStrategy() passivation.Strategy {
+	if pid.IsRemote() {
+		if strategy, err := pid.remoting.RemotePassivationStrategy(
+			context.Background(),
+			pid.address.Host(),
+			pid.address.Port(),
+			pid.Name()); err == nil {
+			return strategy
+		}
+		return nil
+	}
+
 	pid.fieldsLocker.RLock()
 	strategy := pid.passivationStrategy
 	pid.fieldsLocker.RUnlock()
@@ -580,6 +726,9 @@ func (pid *PID) PassivationStrategy() passivation.Strategy {
 // ActorSystem returns the actor system this PID belongs to.
 // Returns nil for remote PIDs — check pid.IsLocal() before use.
 func (pid *PID) ActorSystem() ActorSystem {
+	if pid.IsRemote() {
+		return nil
+	}
 	pid.fieldsLocker.RLock()
 	sys := pid.actorSystem
 	pid.fieldsLocker.RUnlock()
@@ -626,7 +775,7 @@ func (pid *PID) Restart(ctx context.Context) error {
 		return nil
 	}
 
-	pid.logger.Debugf("Restarting Actor (%s)", pid.Name())
+	pid.logger.Debugf("restarting actor=%s", pid.Name())
 	actorSystem := pid.ActorSystem()
 	tree := actorSystem.tree()
 	deathWatch := actorSystem.getDeathWatch()
@@ -645,6 +794,16 @@ func (pid *PID) Restart(ctx context.Context) error {
 
 // RestartCount returns the total number of times this actor has been restarted.
 func (pid *PID) RestartCount() int {
+	if pid.IsRemote() {
+		if metric, err := pid.remoting.RemoteMetric(
+			context.Background(),
+			pid.address.Host(),
+			pid.address.Port(),
+			pid.Name()); err == nil {
+			return int(metric.RestartCount)
+		}
+		return 0
+	}
 	count := pid.restartCount.Load()
 	return int(count)
 }
@@ -657,12 +816,34 @@ func (pid *PID) ChildrenCount() int {
 
 // ProcessedCount returns the total number of messages this actor has processed.
 func (pid *PID) ProcessedCount() int {
+	if pid.IsRemote() {
+		if metric, err := pid.remoting.RemoteMetric(
+			context.Background(),
+			pid.address.Host(),
+			pid.address.Port(),
+			pid.Name()); err == nil {
+			return int(metric.ProcessedCount)
+		}
+		return 0
+	}
+
 	count := pid.processedCount.Load()
 	return int(count)
 }
 
 // LatestProcessedDuration returns the elapsed time since the most recent message was processed.
 func (pid *PID) LatestProcessedDuration() time.Duration {
+	if pid.IsRemote() {
+		if metric, err := pid.remoting.RemoteMetric(
+			context.Background(),
+			pid.address.Host(),
+			pid.address.Port(),
+			pid.Name()); err == nil {
+			return metric.LatestProcessedDuration.AsDuration()
+		}
+		return 0
+	}
+
 	nanos := pid.latestReceiveTimeNano.Load()
 	if nanos == 0 {
 		return 0
@@ -675,16 +856,31 @@ func (pid *PID) LatestProcessedDuration() time.Duration {
 // If a running child with the same name already exists, its PID is returned without creating a new one.
 // Returns ErrNotLocal for remote PIDs and ErrDead if this actor is not running.
 func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts ...SpawnOption) (*PID, error) {
-	if err := pid.assertLocal(); err != nil {
-		return nil, err
-	}
-	if !pid.IsRunning() {
-		return nil, gerrors.ErrDead
-	}
-
 	spawnConfig := newSpawnConfig(opts...)
 	if err := spawnConfig.Validate(); err != nil {
 		return nil, err
+	}
+
+	if pid.IsRemote() {
+		address, err := pid.remoting.RemoteSpawnChild(ctx, pid.address.Host(), pid.address.Port(), &remote.SpawnChildRequest{
+			Name:                name,
+			Kind:                types.Name(actor),
+			Parent:              pid.Name(),
+			Relocatable:         spawnConfig.relocatable,
+			PassivationStrategy: spawnConfig.passivationStrategy,
+			Supervisor:          spawnConfig.supervisor,
+			Dependencies:        spawnConfig.dependencies,
+			EnableStashing:      spawnConfig.enableStash,
+			Reentrancy:          spawnConfig.reentrancy,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return newRemotePID(address, pid.remoting), nil
+	}
+
+	if !pid.IsRunning() {
+		return nil, gerrors.ErrDead
 	}
 
 	if !spawnConfig.isSystem {
@@ -950,7 +1146,7 @@ func (pid *PID) PipeToName(ctx context.Context, actorName string, task func() (a
 
 		result, err := runTask()
 		if err != nil {
-			pid.logger.Error(err)
+			pid.logger.Errorf("request/request-name task failed: %v", err)
 			pid.toDeadletter(ctx, pid.Path(), pid.Path(), new(NoMessage), err)
 			return
 		}
@@ -958,7 +1154,7 @@ func (pid *PID) PipeToName(ctx context.Context, actorName string, task func() (a
 		// send the result to the actor identified by its name
 		actorSystem := pid.ActorSystem()
 		if err := actorSystem.NoSender().SendAsync(ctx, actorName, result); err != nil {
-			pid.logger.Error(err)
+			pid.logger.Errorf("request/request-name send async failed: %v", err)
 			pid.toDeadletter(ctx, pid.Path(), pid.Path(), result, err)
 			return
 		}
@@ -1369,16 +1565,16 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 	// we should never shutdown system actors unless the whole system is terminating
 	if actoryStem := pid.ActorSystem(); actoryStem != nil {
 		if !actoryStem.isStopping() && isSystemName(pid.Name()) {
-			pid.logger.Warnf("Attempt to shutdown a System Actor (%s)", pid.Name())
+			pid.logger.Warnf("attempt to shutdown system actor=%s", pid.Name())
 			return gerrors.ErrShutdownForbidden
 		}
 	}
 
 	pid.stopLocker.Lock()
-	pid.logger.Infof("Shutdown process has started for Actor (%s)...", pid.Name())
+	pid.logger.Infof("shutdown started for actor=%s", pid.Name())
 
 	if !pid.isStateSet(runningState) {
-		pid.logger.Infof("Actor %s is offline. Maybe it has been passivated or stopped already", pid.Name())
+		pid.logger.Infof("actor=%s is offline, maybe passivated or stopped already", pid.Name())
 		pid.stopLocker.Unlock()
 		return nil
 	}
@@ -1387,7 +1583,7 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 	pid.unregisterPassivation()
 
 	if err := pid.doStop(ctx); err != nil {
-		pid.logger.Errorf("Actor (%s) failed to cleanly stop", pid.Name())
+		pid.logger.Errorf("actor=%s failed to cleanly stop (hint: check PostStop cleanup)", pid.Name())
 		pid.stopLocker.Unlock()
 		return err
 	}
@@ -1397,7 +1593,7 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 	}
 
 	pid.stopLocker.Unlock()
-	pid.logger.Infof("Actor %s successfully shutdown", pid.Name())
+	pid.logger.Infof("actor=%s successfully shutdown", pid.Name())
 	return nil
 }
 
@@ -1740,14 +1936,14 @@ func (pid *PID) handleAsyncResponse(received *ReceiveContext, resp *commands.Asy
 
 	if resp.Error != "" {
 		if !pid.completeRequest(correlationID, nil, asyncErrorFromString(resp.Error)) {
-			pid.logger.Warnf("Async response dropped: unknown correlation id=%s", correlationID)
+			pid.logger.Warnf("async response dropped: unknown correlation id=%s", correlationID)
 		}
 		return
 	}
 
 	if resp.Message == nil {
 		if !pid.completeRequest(correlationID, nil, gerrors.ErrInvalidMessage) {
-			pid.logger.Warnf("Async response dropped: unknown correlation id=%s", correlationID)
+			pid.logger.Warnf("async response dropped: unknown correlation id=%s", correlationID)
 		}
 		return
 	}
@@ -2051,7 +2247,7 @@ func (pid *PID) getAddress() *address.Address {
 // init initializes the given actor and init processing messages
 // when the initialization failed the actor will not be started
 func (pid *PID) init(ctx context.Context) error {
-	pid.logger.Infof("Initialization process started for Actor %s ...", pid.Name())
+	pid.logger.Infof("initialization process started for actor %s", pid.Name())
 
 	initContext := newContext(ctx, pid.Name(), pid.actorSystem, pid.Dependencies()...)
 
@@ -2063,12 +2259,12 @@ func (pid *PID) init(ctx context.Context) error {
 	}); err != nil {
 		e := gerrors.NewErrInitFailure(err)
 		cancel()
-		pid.logger.Errorf("Failed to initialize Actor %s: %v", pid.Name(), err)
+		pid.logger.Errorf("failed to initialize actor %s: %v (hint: check PreStart, verify dependencies)", pid.Name(), err)
 		return e
 	}
 
 	pid.setState(runningState, true)
-	pid.logger.Infof("Actor %s initialization is successful.", pid.Name())
+	pid.logger.Infof("actor=%s initialization successful", pid.Name())
 
 	if pid.eventsStream != nil {
 		pid.eventsStream.Publish(eventsTopic, NewActorStarted(pid.ID()))
@@ -2115,7 +2311,7 @@ func (pid *PID) reset() {
 // freeWatchers releases all the actors watching this actor
 func (pid *PID) freeWatchers(ctx context.Context) {
 	logger := pid.logger
-	logger.Debugf("Freeing all Actor %s's watchers...", pid.Name())
+	logger.Debugf("freeing all actor %s's watchers", pid.Name())
 	tree := pid.ActorSystem().tree()
 	watchers := tree.watchers(pid)
 	if len(watchers) > 0 {
@@ -2125,51 +2321,51 @@ func (pid *PID) freeWatchers(ctx context.Context) {
 			terminated := NewTerminated(pid.ID())
 
 			if watcher.IsRunning() {
-				logger.Debugf("Watcher %s releasing watched %s", watcher.Name(), pid.Name())
+				logger.Debugf("watcher %s releasing watched %s", watcher.Name(), pid.Name())
 				// ignore error here because the watcher is running
 				_ = pid.Tell(ctx, watcher, terminated)
 				watcher.UnWatch(pid)
-				logger.Debugf("Watcher %s released watched %s", watcher.Name(), pid.Name())
+				logger.Debugf("watcher %s released watched %s", watcher.Name(), pid.Name())
 			}
 		}
 
-		logger.Debugf("All Actor %s's watchers freed...", pid.Name())
+		logger.Debugf("all actor %s's watchers freed", pid.Name())
 		return
 	}
-	logger.Debugf("Actor %s does not have any watchers. Maybe already freed.", pid.Name())
+	logger.Debugf("actor=%s has no watchers, maybe already freed", pid.Name())
 }
 
 // freeWatchees releases all actors that have been watched by this actor
 func (pid *PID) freeWatchees() error {
 	logger := pid.logger
-	logger.Debugf("Freeing all Actor %s's watched actors...", pid.Name())
+	logger.Debugf("freeing all actor %s's watched actors", pid.Name())
 
 	tree := pid.ActorSystem().tree()
 	watchees := tree.watchees(pid)
 	if len(watchees) > 0 {
 		// this call will be fast no need of parallel processing
 		for _, watched := range watchees {
-			logger.Debugf("Watcher %s unwatching Actor %s", pid.Name(), watched.Name())
+			logger.Debugf("watcher %s unwatching actor %s", pid.Name(), watched.Name())
 			pid.UnWatch(watched)
-			logger.Debugf("Watcher %s successfully unwatch Actor %s", pid.Name(), watched.Name())
+			logger.Debugf("watcher=%s unwatch actor=%s", pid.Name(), watched.Name())
 		}
 
-		logger.Debugf("Actor %s successfully unwatch all watched actors...", pid.Name())
+		logger.Debugf("actor=%s successfully unwatch all watched actors", pid.Name())
 		return nil
 	}
-	logger.Debugf("Actor %s does not have any watched actors. Maybe already freed.", pid.Name())
+	logger.Debugf("actor=%s has no watched actors, maybe already freed", pid.Name())
 	return nil
 }
 
 // freeChildren releases all child actors
 func (pid *PID) freeChildren(ctx context.Context) error {
 	logger := pid.logger
-	logger.Debugf("Actor %s freeing all descendant actors...", pid.Name())
+	logger.Debugf("actor=%s freeing all descendant actors", pid.Name())
 
 	tree := pid.ActorSystem().tree()
 	node, ok := tree.node(pid.ID())
 	if !ok {
-		pid.logger.Debugf("Actor %s node not found in the actors tree", pid.Name())
+		pid.logger.Debugf("actor=%s node not found in actors tree", pid.Name())
 		return nil
 	}
 
@@ -2178,7 +2374,7 @@ func (pid *PID) freeChildren(ctx context.Context) error {
 		eg, ctx := errgroup.WithContext(ctx)
 		for _, child := range children {
 			eg.Go(func() error {
-				logger.Debugf("Parent %s disowning descendant %s", pid.Name(), child.Name())
+				logger.Debugf("parent %s disowning descendant %s", pid.Name(), child.Name())
 				pid.UnWatch(child)
 				tree.removeDescendant(node.id, child.ID())
 				if child.IsSuspended() || child.IsRunning() {
@@ -2191,21 +2387,21 @@ func (pid *PID) freeChildren(ctx context.Context) error {
 							return fmt.Errorf("Parent %s failed to disown descendant %s: %w", pid.Name(), child.Name(), err)
 						}
 					}
-					logger.Debugf("Parent %s successfully disown descendant %s", pid.Name(), child.Name())
+					logger.Debugf("parent %s successfully disown descendant %s", pid.Name(), child.Name())
 				}
 				return nil
 			})
 		}
 
 		if err := eg.Wait(); err != nil {
-			logger.Errorf("Parent (%s) failed to free all descendant actors: %v", pid.Name(), err)
+			logger.Errorf("parent=%s failed to free all descendant actors: %v (hint: check child supervision, shutdown order)", pid.Name(), err)
 			return err
 		}
 
-		logger.Debugf("Actor %s successfully free all descendant actors...", pid.Name())
+		logger.Debugf("actor=%s successfully freed all descendant actors", pid.Name())
 		return nil
 	}
-	pid.logger.Debugf("Actor %s does not have any children. Maybe already freed.", pid.Name())
+	pid.logger.Debugf("actor=%s has no children, maybe already freed", pid.Name())
 	return nil
 }
 
@@ -2225,18 +2421,18 @@ func (pid *PID) tryPassivation(reason string) bool {
 	}
 
 	if pid.compareAndSwapState(passivationSkipNextState, true, false) {
-		pid.logger.Debugf("Passivation decision skipped once for Actor %s due to recent reinstate", pid.Name())
+		pid.logger.Debugf("passivation decision skipped once for actor %s due to recent reinstate", pid.Name())
 		return false
 	}
 
 	if pid.isStateSet(stoppingState) ||
 		pid.isStateSet(suspendedState) ||
 		pid.isStateSet(passivationPausedState) {
-		pid.logger.Infof("No need to passivate actor=%s", pid.Name())
+		pid.logger.Debugf("no need to passivate actor=%s", pid.Name())
 		return false
 	}
 
-	pid.logger.Infof("Passivation mode has been triggered for Actor %s (%s)...", pid.Name(), reason)
+	pid.logger.Infof("passivation mode triggered for actor=%s reason=%s", pid.Name(), reason)
 	pid.setState(passivatingState, true)
 	defer pid.setState(passivatingState, false)
 
@@ -2244,7 +2440,7 @@ func (pid *PID) tryPassivation(reason string) bool {
 	defer pid.stopLocker.Unlock()
 
 	if pid.compareAndSwapState(passivationSkipNextState, true, false) {
-		pid.logger.Debugf("Passivation decision aborted for %s due to reinstate observed during critical section", pid.Name())
+		pid.logger.Debugf("passivation decision aborted for %s due to reinstate observed during critical section", pid.Name())
 		return false
 	}
 
@@ -2252,7 +2448,7 @@ func (pid *PID) tryPassivation(reason string) bool {
 
 	ctx := context.Background()
 	if err := pid.doStop(ctx); err != nil {
-		pid.logger.Errorf("Failed to passivate Actor (%s): Reason=(%v)", pid.Name(), err)
+		pid.logger.Errorf("failed to passivate actor=%s: %v (hint: check OnPassivate implementation)", pid.Name(), err)
 		return false
 	}
 
@@ -2260,7 +2456,7 @@ func (pid *PID) tryPassivation(reason string) bool {
 		pid.eventsStream.Publish(eventsTopic, NewActorPassivated(pid.ID()))
 	}
 
-	pid.logger.Infof("Actor %s successfully passivated", pid.Name())
+	pid.logger.Infof("actor=%s successfully passivated", pid.Name())
 	return true
 }
 
@@ -2330,7 +2526,7 @@ func (pid *PID) doStop(ctx context.Context) error {
 		return err
 	}
 
-	pid.logger.Infof("Shutdown process completed for Actor %s...", pid.Name())
+	pid.logger.Infof("shutdown process completed for actor %s", pid.Name())
 	return nil
 }
 
@@ -2384,13 +2580,13 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 		// let us check whether we have all errors directive
 		directive, ok = pid.supervisor.Directive(new(gerrors.AnyError))
 		if !ok {
-			pid.logger.Debugf("No supervisor directive found for error: %s", errorType(signal.Err()))
+			pid.logger.Debugf("no supervisor directive found for error: %s", errorType(signal.Err()))
 			pid.suspend(signal.Err().Error())
 			return
 		}
 	}
 
-	pid.logger.Debugf("Actor %s supervisor directive %s", pid.Name(), directive.String())
+	pid.logger.Debugf("actor=%s supervisor directive=%s", pid.Name(), directive.String())
 
 	// create the message to send to the parent
 	msg := &commands.Panicking{
@@ -2404,8 +2600,8 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 	}
 
 	if parent := pid.Parent(); parent != nil && !parent.Equals(pid.ActorSystem().NoSender()) {
-		pid.logger.Warnf("Actor %s's child Actor (%s) is failing: Err=%s", parent.Name(), pid.Name(), msg.Err.Error())
-		pid.logger.Infof("Actor %s activates [strategy=%s, directive=%s] for failing child actor=(%s)",
+		pid.logger.Warnf("actor=%s child=%s failing: err=%s", parent.Name(), pid.Name(), msg.Err.Error())
+		pid.logger.Infof("actor=%s activates strategy=%s directive=%s for failing child actor=%s",
 			parent.Name(),
 			pid.supervisor.Strategy(),
 			directive,
@@ -2432,7 +2628,7 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 	}
 
 	// no parent found, just suspend the actor
-	pid.logger.Warnf("Actor %s has no parent to notify about its failure: Err=%s", pid.Name(), msg.Err.Error())
+	pid.logger.Warnf("actor=%s has no parent to notify about failure: err=%s", pid.Name(), msg.Err.Error())
 	pid.suspend(msg.Err.Error())
 }
 
@@ -2508,7 +2704,7 @@ func (pid *PID) handleCompletion(ctx context.Context, config *pipeConfig, comple
 		completion.Receiver == nil ||
 		completion.Receiver == pid.ActorSystem().NoSender() ||
 		completion.Task == nil {
-		pid.logger.Error(gerrors.ErrUndefinedTask)
+		pid.logger.Errorf("undefined task: %v", gerrors.ErrUndefinedTask)
 		return
 	}
 
@@ -2542,7 +2738,7 @@ func (pid *PID) handleCompletion(ctx context.Context, config *pipeConfig, comple
 
 	result, err := runTask()
 	if err != nil {
-		pid.logger.Error(err)
+		pid.logger.Errorf("pipe task failed: %v", err)
 		pid.toDeadletter(ctx, pid.Path(), pid.Path(), new(NoMessage), err)
 		return
 	}
@@ -2550,7 +2746,7 @@ func (pid *PID) handleCompletion(ctx context.Context, config *pipeConfig, comple
 	// make sure that the receiver is still alive
 	to := completion.Receiver
 	if !to.IsRunning() {
-		pid.logger.Errorf("Unable to pipe message to Actor (%s): not started", to.Name())
+		pid.logger.Errorf("unable to pipe message to actor=%s: not started", to.Name())
 		pid.toDeadletter(ctx, pid.Path(), pid.Path(), result, gerrors.ErrDead)
 		return
 	}
@@ -2650,9 +2846,9 @@ func (pid *PID) handleRestartDirective(cid *PID, maxRetries uint32, timeout time
 			}
 
 			if err != nil {
-				pid.logger.Error(err)
+				pid.logger.Errorf("restart directive failed for actor=%s: %v (hint: check PreStart/Receive for panics)", cid.Name(), err)
 				if err := spid.Shutdown(ctx); err != nil {
-					pid.logger.Error(err)
+					pid.logger.Errorf("shutdown after restart failure: %v", err)
 					// we need to suspend the actor since it is faulty
 					spid.suspend(err.Error())
 				}
@@ -2673,7 +2869,7 @@ func (pid *PID) childAddress(name string) *address.Address {
 
 // suspend puts the actor in a suspension mode.
 func (pid *PID) suspend(reason string) {
-	pid.logger.Infof("Actor %s going into suspension mode", pid.Name())
+	pid.logger.Infof("actor=%s going into suspension mode", pid.Name())
 	pid.setState(suspendedState, true)
 	// increment suspension count
 	pid.failureCount.Inc()
@@ -2716,7 +2912,7 @@ func (pid *PID) fireSystemMessage(ctx context.Context, message any) {
 }
 
 func (pid *PID) doReinstate() {
-	pid.logger.Infof("Actor %s has been reinstated", pid.Name())
+	pid.logger.Infof("actor=%s reinstated", pid.Name())
 	// if we're already running and not suspended, nothing to do
 	if pid.IsRunning() && !pid.IsSuspended() {
 		return
@@ -2795,10 +2991,10 @@ func (pid *PID) startPassivation() {
 // It has to be very fast for a smooth operation.
 func (pid *PID) healthCheck(ctx context.Context) error {
 	logger := pid.logger
-	logger.Infof("Actor %s readiness probe...", pid.Name())
+	logger.Debugf("actor=%s readiness probe", pid.Name())
 
 	if pid.isStateSet(systemState) {
-		logger.Debugf("Actor %s is a system actor. No need for readiness probe.", pid.Name())
+		logger.Debugf("actor=%s is system actor, skipping readiness probe", pid.Name())
 		return nil
 	}
 
@@ -2814,12 +3010,12 @@ func (pid *PID) healthCheck(ctx context.Context) error {
 	})
 
 	if err != nil {
-		logger.Errorf("Actor %s readiness probe failed: %v", pid.Name(), err)
+		logger.Errorf("Actor %s readiness probe failed: %v (hint: check PreStart/initialization)", pid.Name(), err)
 		// attempt to shut down the actor to free pre-allocated resources
 		return errors.Join(err, pid.Shutdown(ctx))
 	}
 
-	logger.Infof("Actor %s readiness probe successfully completed.", pid.Name())
+	logger.Infof("actor=%s readiness probe completed", pid.Name())
 	return nil
 }
 
@@ -3080,7 +3276,7 @@ func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *t
 		return err
 	}
 
-	pid.logger.Debugf("Actor (%s) successfully restarted..:)", pid.Name())
+	pid.logger.Debugf("actor=%s restarted", pid.Name())
 	return nil
 }
 

@@ -71,7 +71,10 @@ func (x *systemGuardian) Receive(ctx *ReceiveContext) {
 
 // PostStop is the post-stop hook
 func (x *systemGuardian) PostStop(ctx *Context) error {
-	ctx.ActorSystem().Logger().Infof("Actor %s stopped successfully", ctx.ActorName())
+	logger := ctx.ActorSystem().Logger()
+	if logger.Enabled(log.InfoLevel) {
+		logger.Infof("actor=%s stopped successfully", ctx.ActorName())
+	}
 	return nil
 }
 
@@ -80,17 +83,18 @@ func (x *systemGuardian) handlePostStart(ctx *ReceiveContext) {
 	x.pid = ctx.Self()
 	x.logger = ctx.Logger()
 	x.system = ctx.ActorSystem()
-	x.logger.Infof("Actor %s started successfully", x.pid.Name())
+	if x.logger.Enabled(log.InfoLevel) {
+		x.logger.Infof("actor=%s started successfully", x.pid.Name())
+	}
 }
 
 func (x *systemGuardian) handlePanicSignal(ctx *ReceiveContext) {
 	systemName := x.system.Name()
 	actorName := ctx.Sender().Name()
 	if !x.system.isStopping() && isSystemName(actorName) {
-		// log a message error and stop the actor system
-		x.logger.Warnf("Actor %s is down. System %s is going to shutdown. Kindly check logs and fix any potential issue with the system",
-			actorName,
-			systemName)
+		if x.logger.Enabled(log.WarningLevel) {
+			x.logger.Warnf("actor=%s system=%s is down, going to shutdown. Check logs and fix any potential issue", actorName, systemName)
+		}
 
 		// blindly shutdown the actor system. No need to check any error
 		_ = x.system.Stop(context.WithoutCancel(ctx.Context()))
@@ -99,20 +103,27 @@ func (x *systemGuardian) handlePanicSignal(ctx *ReceiveContext) {
 
 // completeRebalancing wraps up the rebalancing of left node in the cluster
 func (x *systemGuardian) completeRebalancing(msg *internalpb.RebalanceComplete) error {
-	x.logger.Info("Completing rebalancing...")
+	if x.logger.Enabled(log.InfoLevel) {
+		x.logger.Info("completing rebalancing...")
+	}
 	x.pid.ActorSystem().completeRelocation()
 
-	x.logger.Infof("Removing left Node (%s) from cluster store", msg.GetPeerAddress())
+	if x.logger.Enabled(log.InfoLevel) {
+		x.logger.Infof("removing left node=%s from cluster store", msg.GetPeerAddress())
+	}
 
 	ctx := context.Background()
 	clusterStore := x.pid.ActorSystem().getClusterStore()
 	if err := clusterStore.DeletePeerState(ctx, msg.GetPeerAddress()); err != nil {
-		x.logger.Errorf("Failed to remove left Node (%s) from cluster store: %v", msg.GetPeerAddress(), err)
+		if x.logger.Enabled(log.ErrorLevel) {
+			x.logger.Errorf("failed to remove left node=%s from cluster store: %v (hint: check cluster store permissions)", msg.GetPeerAddress(), err)
+		}
 		return err
 	}
 
-	x.logger.Infof("Left Node (%s) successfully removed from cache", msg.GetPeerAddress())
-
-	x.logger.Info("Rebalancing completed successfully")
+	if x.logger.Enabled(log.InfoLevel) {
+		x.logger.Infof("left node=%s removed from cache", msg.GetPeerAddress())
+		x.logger.Info("rebalancing completed successfully")
+	}
 	return nil
 }

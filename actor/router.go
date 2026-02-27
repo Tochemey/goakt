@@ -104,7 +104,9 @@ func newRouter(poolSize int, routeesKind Actor, logger log.Logger, opts ...Route
 // PreStart pre-starts the actor.
 func (x *router) PreStart(ctx *Context) error {
 	x.name = ctx.ActorName()
-	x.logger.Infof("starting the router (%s)...", x.name)
+	if x.logger.Enabled(log.InfoLevel) {
+		x.logger.Infof("starting router=%s", x.name)
+	}
 	return x.validate()
 }
 
@@ -121,14 +123,18 @@ func (x *router) Receive(ctx *ReceiveContext) {
 
 // PostStop is executed when the actor is shutting down.
 func (x *router) PostStop(*Context) error {
-	x.logger.Infof("router (%s) stopped", x.name)
+	if x.logger.Enabled(log.InfoLevel) {
+		x.logger.Infof("router=%s stopped", x.name)
+	}
 	return nil
 }
 
 // postStart spawns routeesMap
 func (x *router) postStart(ctx *ReceiveContext) {
-	x.logger.Infof("router (%s) successfully started", x.name)
-	x.logger.Infof("router (%s) spawning (%d) routees...", x.name, x.poolSize)
+	if x.logger.Enabled(log.InfoLevel) {
+		x.logger.Infof("router=%s started", x.name)
+		x.logger.Debugf("router=%s spawning routees=%d", x.name, x.poolSize)
+	}
 	x.spawnRoutees(ctx, 0, x.poolSize)
 	ctx.Become(x.broadcast)
 }
@@ -168,7 +174,9 @@ func (x *router) handleAjustRouterPoolSize(ctx *ReceiveContext) {
 func (x *router) scaleUp(ctx *ReceiveContext, delta int) {
 	currentSize := len(x.routeesMap)
 	targetSize := currentSize + delta
-	x.logger.Infof("scaling up router (%s) pool size from %d to %d", x.name, currentSize, targetSize)
+	if x.logger.Enabled(log.InfoLevel) {
+		x.logger.Debugf("router=%s scaling up pool=%d to %d", x.name, currentSize, targetSize)
+	}
 	x.poolSize = targetSize
 	x.spawnRoutees(ctx, currentSize, targetSize)
 }
@@ -185,12 +193,16 @@ func (x *router) scaleDown(ctx *ReceiveContext, delta int) {
 	}
 
 	targetSize := currentSize - delta
-	x.logger.Infof("scaling down router (%s) pool size from %d to %d", x.name, currentSize, targetSize)
+	if x.logger.Enabled(log.InfoLevel) {
+		x.logger.Debugf("router=%s scaling down pool=%d to %d", x.name, currentSize, targetSize)
+	}
 	x.poolSize = targetSize
 
 	for i := 0; i < delta; i++ {
 		routee := routees[i]
-		x.logger.Infof("stopping routee (%s)...", routee.ID())
+		if x.logger.Enabled(log.InfoLevel) {
+			x.logger.Debugf("stopping routee=%s", routee.ID())
+		}
 		ctx.Stop(routee)
 		delete(x.routeesMap, routee.ID())
 	}
@@ -236,7 +248,9 @@ func (x *router) handlePanicSignal(ctx *ReceiveContext) {
 func (x *router) handleRestartRoutee(ctx *ReceiveContext) {
 	goCtx := ctx.withoutCancel()
 	sender := ctx.Sender()
-	x.logger.Infof("restarting routee (%s)...", sender.ID())
+	if x.logger.Enabled(log.InfoLevel) {
+		x.logger.Infof("restarting routee (%s)...", sender.ID())
+	}
 
 	var err error
 
@@ -249,24 +263,32 @@ func (x *router) handleRestartRoutee(ctx *ReceiveContext) {
 	}
 
 	if err != nil {
-		x.logger.Errorf("failed to restart routee (%s): %v", sender.ID(), err)
+		if x.logger.Enabled(log.ErrorLevel) {
+			x.logger.Errorf("failed to restart routee (%s): %v", sender.ID(), err)
+		}
 		x.handleStopRoutee(ctx)
 		return
 	}
 
-	x.logger.Infof("routee (%s) restarted successfully", sender.ID())
+	if x.logger.Enabled(log.InfoLevel) {
+		x.logger.Infof("routee=%s restarted", sender.ID())
+	}
 	x.routeesMap[sender.ID()] = sender
 }
 
 func (x *router) handleResumeRoutee(ctx *ReceiveContext) {
 	sender := ctx.Sender()
-	x.logger.Infof("resuming routee (%s)...", sender.ID())
+	if x.logger.Enabled(log.InfoLevel) {
+		x.logger.Infof("resuming routee (%s)...", sender.ID())
+	}
 	ctx.Reinstate(sender)
 }
 
 func (x *router) handleStopRoutee(ctx *ReceiveContext) {
 	sender := ctx.Sender()
-	x.logger.Infof("stopping routee (%s)...", sender.ID())
+	if x.logger.Enabled(log.InfoLevel) {
+		x.logger.Debugf("stopping routee=%s", sender.ID())
+	}
 	ctx.Stop(sender)
 	delete(x.routeesMap, sender.ID())
 }
@@ -290,7 +312,9 @@ func (x *router) handleBroadcast(ctx *ReceiveContext) {
 }
 
 func (x *router) handleNoRoutees(ctx *ReceiveContext) {
-	x.logger.Warn("no routees available. stopping.... Bye")
+	if x.logger.Enabled(log.WarningLevel) {
+		x.logger.Warn("no routees available. stopping.... Bye")
+	}
 	// push message to deadletter
 	ctx.Unhandled()
 	// shutdown
@@ -335,7 +359,9 @@ func (x *router) routeByStrategy(ctx *ReceiveContext, msg any, routees []*PID) {
 			routee := routee
 			go func() {
 				if err := sender.Tell(sendCtx, routee, msg); err != nil {
-					x.logger.Warn(err)
+					if x.logger.Enabled(log.WarningLevel) {
+						x.logger.Warn(err)
+					}
 				}
 			}()
 		}
@@ -403,7 +429,9 @@ func (x *router) scatterGatherFirst(ctx *ReceiveContext, msg any, routees []*PID
 				return
 			}
 
-			logger.Warnf("scatter-gather-first: attempt failed: %v", r.err)
+			if logger.Enabled(log.WarningLevel) {
+				logger.Warnf("scatter-gather-first: attempt failed: %v", r.err)
+			}
 			if pending == 0 {
 				sendTimeout()
 				return
@@ -496,7 +524,9 @@ func (x *router) tailChopping(ctx *ReceiveContext, msg any, routees []*PID) {
 				return
 			}
 
-			x.logger.Warnf("tail-chopping: attempt failed: %v", r.err)
+			if x.logger.Enabled(log.WarningLevel) {
+				x.logger.Warnf("tail-chopping: attempt failed: %v", r.err)
+			}
 			if pending == 0 && next >= len(shuffled) {
 				sendTimeout()
 				return

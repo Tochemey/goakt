@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -4669,7 +4670,7 @@ func TestLogger(t *testing.T) {
 	buffer := new(bytes.Buffer)
 
 	pid := &PID{
-		logger:       log.New(log.InfoLevel, buffer),
+		logger:       log.NewZap(log.InfoLevel, buffer),
 		fieldsLocker: sync.RWMutex{},
 	}
 
@@ -4990,9 +4991,12 @@ func TestReinstate(t *testing.T) {
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("When remote caller without remoting returns ErrRemotingDisabled", func(t *testing.T) {
-		addr := address.New("remote-actor", "remoteSystem", "10.0.0.1", 8080)
-		remotePID := newRemotePID(addr, nil)
-		other := newRemotePID(addr, nil)
+		host, port, name := "10.0.0.1", 8080, "remote-actor"
+		addr := address.New(name, "remoteSystem", host, port)
+		remotingMock := mocksremote.NewClient(t)
+		remotingMock.EXPECT().RemoteReinstate(mock.Anything, host, port, name).Return(errors.ErrRemotingDisabled).Maybe()
+		remotePID := newRemotePID(addr, remotingMock)
+		other := newRemotePID(addr, remotingMock)
 		err := remotePID.Reinstate(other)
 		require.ErrorIs(t, err, errors.ErrRemotingDisabled)
 	})
@@ -6224,10 +6228,13 @@ func TestToWireActorIncludesSingletonSpecWhenSingleton(t *testing.T) {
 // returns errors.ErrNotLocal when invoked on a remote PID.
 func TestAssertLocal(t *testing.T) {
 	ctx := context.Background()
-	// Build a minimal remote PID: address is set and the remoteState flag is set.
 	addr := address.New("remote-actor", "remoteSystem", "10.0.0.1", 8080)
-	remotePID := newRemotePID(addr, nil)
-	require.True(t, remotePID.IsRemote(), "sanity: newRemotePID must be remote")
+	// Use a mock remoting that returns ErrNotLocal for Child/SpawnChild remote operations.
+	remotingMock := mocksremote.NewClient(t)
+	remotingMock.EXPECT().RemoteChildren(mock.Anything, "10.0.0.1", 8080, "remote-actor").Return(nil, errors.ErrNotLocal).Maybe()
+	remotingMock.EXPECT().RemoteSpawnChild(mock.Anything, "10.0.0.1", 8080, mock.Anything).Return(nil, errors.ErrNotLocal).Maybe()
+	remotePID := newRemotePID(addr, remotingMock)
+	require.True(t, remotePID.IsRemote(), "sanity: newRemotePID with remoting must be remote")
 
 	t.Run("Child", func(t *testing.T) {
 		_, err := remotePID.Child("child")
@@ -6245,7 +6252,7 @@ func TestAssertLocal(t *testing.T) {
 	})
 
 	t.Run("PipeTo", func(t *testing.T) {
-		other := newRemotePID(addr, nil)
+		other := newRemotePID(addr, remotingMock)
 		err := remotePID.PipeTo(ctx, other, func() (any, error) { return nil, nil })
 		require.ErrorIs(t, err, errors.ErrNotLocal)
 	})
@@ -6272,15 +6279,20 @@ func TestAssertLocal(t *testing.T) {
 }
 
 // TestRemoteStopRestartShutdownWithoutRemoting verifies that Stop, Restart, and Shutdown
-// return ErrRemotingDisabled when invoked on or targeting remote PIDs without remoting configured.
+// return ErrRemotingDisabled when the remoting layer returns that error (e.g. remoting not configured).
 func TestRemoteStopRestartShutdownWithoutRemoting(t *testing.T) {
 	ctx := context.Background()
-	addr := address.New("remote-actor", "remoteSystem", "10.0.0.1", 8080)
-	remotePID := newRemotePID(addr, nil)
-	require.True(t, remotePID.IsRemote(), "sanity: newRemotePID must be remote")
+	host, port, name := "10.0.0.1", 8080, "remote-actor"
+	addr := address.New(name, "remoteSystem", host, port)
+	// Use a mock remoting that returns ErrRemotingDisabled to simulate remoting not configured.
+	remotingMock := mocksremote.NewClient(t)
+	remotingMock.EXPECT().RemoteStop(ctx, host, port, name).Return(errors.ErrRemotingDisabled).Maybe()
+	remotingMock.EXPECT().RemoteReSpawn(ctx, host, port, name).Return(nil, errors.ErrRemotingDisabled).Maybe()
+	remotePID := newRemotePID(addr, remotingMock)
+	require.True(t, remotePID.IsRemote(), "sanity: newRemotePID with remoting must be remote")
 
 	t.Run("Stop remote child without remoting", func(t *testing.T) {
-		other := newRemotePID(addr, nil)
+		other := newRemotePID(addr, remotingMock)
 		err := remotePID.Stop(ctx, other)
 		require.ErrorIs(t, err, errors.ErrRemotingDisabled)
 	})
@@ -6475,6 +6487,306 @@ func TestIsSystemMessage(t *testing.T) {
 	})
 	t.Run("nil is not a system message", func(t *testing.T) {
 		assert.False(t, isSystemMessage(nil))
+	})
+}
+
+// TestPIDMethodsWithTwoActorSystems runs unit tests for PID methods using two actor
+// systems with the same name on different remoting ports, mimicking production.
+func TestPIDMethodsWithTwoActorSystems(t *testing.T) {
+	ctx := context.Background()
+	ports := dynaport.Get(2)
+	port1, port2 := ports[0], ports[1]
+	host := "127.0.0.1"
+	sysName := "testSys"
+
+	sys1, err := NewActorSystem(sysName,
+		WithRemote(remote.NewConfig(host, port1)),
+		WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	sys2, err := NewActorSystem(sysName,
+		WithRemote(remote.NewConfig(host, port2)),
+		WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	impl1 := sys1.(*actorSystem)
+
+	require.NoError(t, sys1.Start(ctx))
+	require.NoError(t, sys2.Start(ctx))
+	t.Cleanup(func() { _ = sys1.Stop(ctx) })
+	t.Cleanup(func() { _ = sys2.Stop(ctx) })
+
+	pause.For(300 * time.Millisecond)
+
+	t.Run("Kind", func(t *testing.T) {
+		localPID, err := sys1.Spawn(ctx, "kindLocal", NewMockActor())
+		require.NoError(t, err)
+		_, err = sys2.Spawn(ctx, "kindRemote", NewMockActor())
+		require.NoError(t, err)
+
+		kind := localPID.Kind()
+		assert.NotEmpty(t, kind)
+		assert.True(t, strings.Contains(strings.ToLower(kind), "mockactor"))
+
+		remoteAddr := address.New("kindRemote", sysName, host, port2)
+		remotePID := newRemotePID(remoteAddr, impl1.remoting)
+		remoteKind := remotePID.Kind()
+		assert.True(t, strings.Contains(strings.ToLower(remoteKind), "mockactor"))
+	})
+
+	t.Run("Child", func(t *testing.T) {
+		parent, err := sys1.Spawn(ctx, "childParent", NewMockActor())
+		require.NoError(t, err)
+		_, err = parent.SpawnChild(ctx, "childA", NewMockActor())
+		require.NoError(t, err)
+
+		child, err := parent.Child("childA")
+		require.NoError(t, err)
+		require.NotNil(t, child)
+		assert.True(t, strings.Contains(child.Name(), "childA"))
+
+		remoteParentLocal, err := sys2.Spawn(ctx, "remoteChildParent", NewMockActor())
+		require.NoError(t, err)
+		_, err = remoteParentLocal.SpawnChild(ctx, "remoteChildA", NewMockActor())
+		require.NoError(t, err)
+		remoteParentAddr := address.New("remoteChildParent", sysName, host, port2)
+		remoteParentPID := newRemotePID(remoteParentAddr, impl1.remoting)
+		remoteChild, err := remoteParentPID.Child("remoteChildA")
+		require.NoError(t, err)
+		require.NotNil(t, remoteChild)
+		assert.True(t, strings.Contains(remoteChild.Name(), "remoteChildA"))
+	})
+
+	t.Run("Parent", func(t *testing.T) {
+		parent, err := sys1.Spawn(ctx, "parentParent", NewMockActor())
+		require.NoError(t, err)
+		child, err := parent.SpawnChild(ctx, "parentChild", NewMockActor())
+		require.NoError(t, err)
+
+		p := child.Parent()
+		require.NotNil(t, p)
+		assert.True(t, strings.Contains(p.Name(), "parentParent"))
+
+		remoteParent, err := sys2.Spawn(ctx, "remoteParentParent", NewMockActor())
+		require.NoError(t, err)
+		_, err = remoteParent.SpawnChild(ctx, "remoteParentChild", NewMockActor())
+		require.NoError(t, err)
+		remoteChildAddr := address.New("remoteParentParent/remoteParentChild", sysName, host, port2)
+		remoteChild := newRemotePID(remoteChildAddr, impl1.remoting)
+		remoteParentPID := remoteChild.Parent()
+		require.NotNil(t, remoteParentPID)
+		assert.True(t, strings.Contains(remoteParentPID.Name(), "remoteParentParent"))
+	})
+
+	t.Run("Children", func(t *testing.T) {
+		parent, err := sys1.Spawn(ctx, "childrenParent", NewMockActor())
+		require.NoError(t, err)
+		_, err = parent.SpawnChild(ctx, "childrenA", NewMockActor())
+		require.NoError(t, err)
+		_, err = parent.SpawnChild(ctx, "childrenB", NewMockActor())
+		require.NoError(t, err)
+
+		children := parent.Children()
+		require.Len(t, children, 2)
+
+		remoteParent, err := sys2.Spawn(ctx, "remoteChildrenParent", NewMockActor())
+		require.NoError(t, err)
+		_, err = remoteParent.SpawnChild(ctx, "remoteChildrenA", NewMockActor())
+		require.NoError(t, err)
+		_, err = remoteParent.SpawnChild(ctx, "remoteChildrenB", NewMockActor())
+		require.NoError(t, err)
+
+		remoteParentAddr := address.New("remoteChildrenParent", sysName, host, port2)
+		remoteParentPID := newRemotePID(remoteParentAddr, impl1.remoting)
+		remoteChildren := remoteParentPID.Children()
+		require.Len(t, remoteChildren, 2)
+	})
+
+	t.Run("IsRunning", func(t *testing.T) {
+		localPID, err := sys1.Spawn(ctx, "runningLocal", NewMockActor())
+		require.NoError(t, err)
+		assert.True(t, localPID.IsRunning())
+
+		_, err = sys2.Spawn(ctx, "runningRemote", NewMockActor())
+		require.NoError(t, err)
+		remoteAddr := address.New("runningRemote", sysName, host, port2)
+		remotePID := newRemotePID(remoteAddr, impl1.remoting)
+		assert.True(t, remotePID.IsRunning())
+	})
+
+	t.Run("IsSuspended", func(t *testing.T) {
+		localPID, err := sys1.Spawn(ctx, "suspendedLocal", NewMockActor())
+		require.NoError(t, err)
+		assert.False(t, localPID.IsSuspended())
+
+		_, err = sys2.Spawn(ctx, "suspendedRemote", NewMockActor())
+		require.NoError(t, err)
+		remoteAddr := address.New("suspendedRemote", sysName, host, port2)
+		remotePID := newRemotePID(remoteAddr, impl1.remoting)
+		assert.False(t, remotePID.IsSuspended())
+	})
+
+	t.Run("IsSingleton", func(t *testing.T) {
+		localPID, err := sys1.Spawn(ctx, "singletonLocal", NewMockActor())
+		require.NoError(t, err)
+		assert.False(t, localPID.IsSingleton())
+
+		_, err = sys2.Spawn(ctx, "singletonRemote", NewMockActor())
+		require.NoError(t, err)
+		remoteAddr := address.New("singletonRemote", sysName, host, port2)
+		remotePID := newRemotePID(remoteAddr, impl1.remoting)
+		assert.False(t, remotePID.IsSingleton())
+	})
+
+	t.Run("IsRelocatable", func(t *testing.T) {
+		localPID, err := sys1.Spawn(ctx, "relocatableLocal", NewMockActor())
+		require.NoError(t, err)
+		assert.True(t, localPID.IsRelocatable())
+
+		localPIDDisabled, err := sys1.Spawn(ctx, "relocatableDisabled", NewMockActor(), WithRelocationDisabled())
+		require.NoError(t, err)
+		assert.False(t, localPIDDisabled.IsRelocatable())
+
+		_, err = sys2.Spawn(ctx, "relocatableRemote", NewMockActor())
+		require.NoError(t, err)
+		remoteAddr := address.New("relocatableRemote", sysName, host, port2)
+		remotePID := newRemotePID(remoteAddr, impl1.remoting)
+		assert.True(t, remotePID.IsRelocatable())
+	})
+
+	t.Run("IsStopping", func(t *testing.T) {
+		localPID, err := sys1.Spawn(ctx, "stoppingLocal", NewMockActor())
+		require.NoError(t, err)
+		assert.False(t, localPID.IsStopping())
+
+		_, err = sys2.Spawn(ctx, "stoppingRemote", NewMockActor())
+		require.NoError(t, err)
+		remoteAddr := address.New("stoppingRemote", sysName, host, port2)
+		remotePID := newRemotePID(remoteAddr, impl1.remoting)
+		assert.False(t, remotePID.IsStopping())
+	})
+
+	t.Run("PassivationStrategy", func(t *testing.T) {
+		strategy := passivation.NewTimeBasedStrategy(30 * time.Second)
+		localPID, err := sys1.Spawn(ctx, "passivationLocal", NewMockActor(), WithPassivationStrategy(strategy))
+		require.NoError(t, err)
+		got := localPID.PassivationStrategy()
+		require.NotNil(t, got)
+		assert.Equal(t, 30*time.Second, got.(*passivation.TimeBasedStrategy).Timeout())
+
+		_, err = sys2.Spawn(ctx, "passivationRemote", NewMockActor(), WithPassivationStrategy(strategy))
+		require.NoError(t, err)
+		remoteAddr := address.New("passivationRemote", sysName, host, port2)
+		remotePID := newRemotePID(remoteAddr, impl1.remoting)
+		remoteStrategy := remotePID.PassivationStrategy()
+		require.NotNil(t, remoteStrategy)
+		assert.Equal(t, 30*time.Second, remoteStrategy.(*passivation.TimeBasedStrategy).Timeout())
+	})
+
+	t.Run("Actor", func(t *testing.T) {
+		localPID, err := sys1.Spawn(ctx, "actorLocal", NewMockActor())
+		require.NoError(t, err)
+		actor := localPID.Actor()
+		require.NotNil(t, actor)
+		assert.IsType(t, (*MockActor)(nil), actor)
+
+		_, err = sys2.Spawn(ctx, "actorRemote", NewMockActor())
+		require.NoError(t, err)
+		remoteAddr := address.New("actorRemote", sysName, host, port2)
+		remotePID := newRemotePID(remoteAddr, impl1.remoting)
+		assert.Nil(t, remotePID.Actor(), "remote PID must return nil for Actor()")
+	})
+
+	t.Run("ActorSystem", func(t *testing.T) {
+		localPID, err := sys1.Spawn(ctx, "actorSysLocal", NewMockActor())
+		require.NoError(t, err)
+		sys := localPID.ActorSystem()
+		require.NotNil(t, sys)
+		assert.Equal(t, sysName, sys.Name())
+
+		_, err = sys2.Spawn(ctx, "actorSysRemote", NewMockActor())
+		require.NoError(t, err)
+		remoteAddr := address.New("actorSysRemote", sysName, host, port2)
+		remotePID := newRemotePID(remoteAddr, impl1.remoting)
+		assert.Nil(t, remotePID.ActorSystem())
+	})
+
+	t.Run("RestartCount", func(t *testing.T) {
+		localPID, err := sys1.Spawn(ctx, "restartLocal", NewMockActor())
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, localPID.RestartCount(), 0)
+
+		_, err = sys2.Spawn(ctx, "restartRemote", NewMockActor())
+		require.NoError(t, err)
+		remoteAddr := address.New("restartRemote", sysName, host, port2)
+		remotePID := newRemotePID(remoteAddr, impl1.remoting)
+		assert.GreaterOrEqual(t, remotePID.RestartCount(), 0)
+	})
+
+	t.Run("Uptime", func(t *testing.T) {
+		localPID, err := sys1.Spawn(ctx, "uptimeLocal", NewMockActor())
+		require.NoError(t, err)
+		pause.For(100 * time.Millisecond)
+		assert.GreaterOrEqual(t, localPID.Uptime(), int64(0))
+
+		r1, err := sys2.Spawn(ctx, "uptimeRemote", NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, r1)
+		remoteAddr := address.New(r1.Name(), r1.ActorSystem().Name(), r1.Path().Host(), int(r1.Path().Port()))
+		remotePID := newRemotePID(remoteAddr, impl1.remoting)
+		remoteUptime := remotePID.Uptime()
+		assert.GreaterOrEqual(t, remoteUptime, int64(0), "remote PID uptime should be non-negative")
+	})
+
+	t.Run("ProcessedCount", func(t *testing.T) {
+		localPID, err := sys1.Spawn(ctx, "processedLocal", NewMockActor())
+		require.NoError(t, err)
+		pause.For(100 * time.Millisecond)
+		assert.GreaterOrEqual(t, localPID.ProcessedCount(), 0)
+
+		_, err = sys2.Spawn(ctx, "processedRemote", NewMockActor())
+		require.NoError(t, err)
+		remoteAddr := address.New("processedRemote", sysName, host, port2)
+		remotePID := newRemotePID(remoteAddr, impl1.remoting)
+		assert.GreaterOrEqual(t, remotePID.ProcessedCount(), 0)
+	})
+
+	t.Run("LatestProcessedDuration", func(t *testing.T) {
+		localPID, err := sys1.Spawn(ctx, "durationLocal", NewMockActor())
+		require.NoError(t, err)
+		pause.For(100 * time.Millisecond)
+		d := localPID.LatestProcessedDuration()
+		assert.GreaterOrEqual(t, d, time.Duration(0))
+
+		_, err = sys2.Spawn(ctx, "durationRemote", NewMockActor())
+		require.NoError(t, err)
+		remoteAddr := address.New("durationRemote", sysName, host, port2)
+		remotePID := newRemotePID(remoteAddr, impl1.remoting)
+		rd := remotePID.LatestProcessedDuration()
+		assert.GreaterOrEqual(t, rd, time.Duration(0))
+	})
+
+	t.Run("SpawnChild", func(t *testing.T) {
+		parent, err := sys1.Spawn(ctx, "spawnParent", NewMockActor())
+		require.NoError(t, err)
+
+		child, err := parent.SpawnChild(ctx, "spawnChild", NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, child)
+		assert.True(t, strings.Contains(child.Name(), "spawnChild"))
+
+		children := parent.Children()
+		require.Len(t, children, 1)
+		assert.True(t, strings.Contains(children[0].Name(), "spawnChild"))
+
+		_, err = sys2.Spawn(ctx, "remoteSpawnParent", NewMockActor())
+		require.NoError(t, err)
+		remoteParentAddr := address.New("remoteSpawnParent", sysName, host, port2)
+		remoteParentPID := newRemotePID(remoteParentAddr, impl1.remoting)
+		remoteChild, err := remoteParentPID.SpawnChild(ctx, "remoteSpawnChild", NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, remoteChild)
+		assert.True(t, remoteChild.IsRemote())
+		assert.True(t, strings.Contains(remoteChild.Name(), "remoteSpawnChild"))
 	})
 }
 

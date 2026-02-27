@@ -232,6 +232,12 @@ var (
 
 	// ErrInvalidResponse is returned when a response is invalid or cannot be parsed.
 	ErrInvalidResponse = errors.New("invalid response")
+
+	// ErrDependencyNotFound is returned when a dependency is not found.
+	ErrDependencyNotFound = errors.New("dependency not found")
+
+	// ErrInvalidKinds is returned when the child and parent kinds are different.
+	ErrInvalidKinds = errors.New("child and parent kinds must be the same")
 )
 
 // NewErrInvalidTCPAddress formats an ErrInvalidTCPAddress with the given address.

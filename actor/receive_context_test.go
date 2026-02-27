@@ -37,6 +37,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/log"
+	mocksremote "github.com/tochemey/goakt/v4/mocks/remoteclient"
 	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
@@ -1761,8 +1762,9 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		testerRef.remoting = nil
-		// Use a remote PID so BatchAsk takes the remote path; sender has no remoting so we get ErrRemotingDisabled
-		remoteTarget := newRemotePID(pathToAddress(testerRef.Path()), nil)
+		// Use a remote PID so BatchAsk takes the remote path; caller has no remoting so we get ErrRemotingDisabled
+		remotingMock := mocksremote.NewClient(t)
+		remoteTarget := newRemotePID(pathToAddress(testerRef.Path()), remotingMock)
 		messages := []any{new(testpb.TestReply), new(testpb.TestReply), new(testpb.TestReply)}
 		replies := context.BatchAsk(remoteTarget, messages, time.Minute)
 		err = context.getError()

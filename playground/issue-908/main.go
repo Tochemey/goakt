@@ -75,7 +75,7 @@ func (x *B) Receive(ctx *goakt.ReceiveContext) {
 func main() {
 	system, err := goakt.NewActorSystem(
 		"issue-908",
-		goakt.WithLogger(log.New(log.DebugLevel, os.Stderr)),
+		goakt.WithLogger(log.NewZap(log.DebugLevel, os.Stderr)),
 	)
 	if err != nil {
 		panic(err)

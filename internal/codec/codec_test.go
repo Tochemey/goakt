@@ -45,6 +45,7 @@ import (
 	mocks "github.com/tochemey/goakt/v4/mocks/extension"
 	"github.com/tochemey/goakt/v4/passivation"
 	"github.com/tochemey/goakt/v4/reentrancy"
+	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/supervisor"
 )
 
@@ -117,6 +118,15 @@ func TestDecodePassivationStrategyNil(t *testing.T) {
 
 func TestDecodePassivationStrategyUnknown(t *testing.T) {
 	require.Nil(t, DecodePassivationStrategy(&internalpb.PassivationStrategy{}))
+}
+
+func TestEncodeActorState(t *testing.T) {
+	require.Equal(t, internalpb.State_STATE_UNKNOWN, EncodeActorState(remote.ActorStateUnknown))
+	require.Equal(t, internalpb.State_STATE_RUNNING, EncodeActorState(remote.ActorStateRunning))
+	require.Equal(t, internalpb.State_STATE_SUSPENDED, EncodeActorState(remote.ActorStateSuspended))
+	require.Equal(t, internalpb.State_STATE_STOPPING, EncodeActorState(remote.ActorStateStopping))
+	require.Equal(t, internalpb.State_STATE_RELOCATABLE, EncodeActorState(remote.ActorStateRelocatable))
+	require.Equal(t, internalpb.State_STATE_SINGLETON, EncodeActorState(remote.ActorStateSingleton))
 }
 
 func TestEncodeReentrancy(t *testing.T) {

@@ -79,7 +79,10 @@ func (x *deadLetter) Receive(ctx *ReceiveContext) {
 
 // PostStop handles post procedures
 func (x *deadLetter) PostStop(ctx *Context) error {
-	ctx.ActorSystem().Logger().Infof("%s stopped successfully", ctx.ActorName())
+	logger := ctx.ActorSystem().Logger()
+	if logger.Enabled(log.InfoLevel) {
+		logger.Infof("actor=%s stopped successfully", ctx.ActorName())
+	}
 	return nil
 }
 
@@ -90,7 +93,9 @@ func (x *deadLetter) handlePostStart(ctx *ReceiveContext) {
 	x.letters = xsync.NewMap[string, *Deadletter]()
 	x.counters = xsync.NewMap[string, *atomic.Int64]()
 	x.counter.Store(0)
-	x.logger.Infof("%s started successfully", x.pid.Name())
+	if x.logger.Enabled(log.InfoLevel) {
+		x.logger.Infof("actor=%s started successfully", x.pid.Name())
+	}
 }
 
 func (x *deadLetter) handleDeadletter(msg *commands.Deadletter) {

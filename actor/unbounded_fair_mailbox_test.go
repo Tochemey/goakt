@@ -34,6 +34,12 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/tochemey/goakt/v4/internal/address"
+	"github.com/tochemey/goakt/v4/internal/remoteclient"
+)
+
+var (
+	// sharedRemotingForTests is used by makeReceiveContextFromAddress so remote PIDs have non-nil remoting.
+	sharedRemotingForTests = remoteclient.NewClient()
 )
 
 func TestUnboundedFairMailboxNoStarvation(t *testing.T) {
@@ -391,7 +397,7 @@ func makeReceiveContextWithPayload(sender, payload string) *ReceiveContext {
 }
 
 func makeReceiveContextFromAddress(addr *address.Address, payload string) *ReceiveContext {
-	ctx := &ReceiveContext{sender: newRemotePID(addr, nil)}
+	ctx := &ReceiveContext{sender: newRemotePID(addr, sharedRemotingForTests)}
 	if payload != "" {
 		ctx.message = &anypb.Any{TypeUrl: "test/payload", Value: []byte(payload)}
 	}

@@ -84,7 +84,7 @@ func (x *B) Receive(ctx *actor.ReceiveContext) {
 func main() {
 	system, err := actor.NewActorSystem(
 		"issue-906",
-		actor.WithLogger(log.New(log.DebugLevel, os.Stderr)),
+		actor.WithLogger(log.NewZap(log.DebugLevel, os.Stderr)),
 	)
 	if err != nil {
 		panic(err)

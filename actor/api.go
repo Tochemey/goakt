@@ -35,7 +35,7 @@ import (
 // Ask sends a synchronous message to another actor and expect a response.
 // This block until a response is received or timed out.
 func Ask(ctx context.Context, to *PID, message any, timeout time.Duration) (response any, err error) {
-	if !to.IsRunning() {
+	if to == nil || !to.IsRunning() {
 		return nil, gerrors.ErrDead
 	}
 
@@ -76,7 +76,7 @@ func Ask(ctx context.Context, to *PID, message any, timeout time.Duration) (resp
 
 // Tell sends an asynchronous message to an actor
 func Tell(ctx context.Context, to *PID, message any) error {
-	if !to.IsRunning() {
+	if to == nil || !to.IsRunning() {
 		return gerrors.ErrDead
 	}
 

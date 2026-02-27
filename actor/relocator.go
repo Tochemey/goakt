@@ -101,7 +101,7 @@ func (r *relocator) Relocate(ctx *ReceiveContext) {
 		// only block when there are go routines running
 		if len(leaderShares) > 0 || len(peersShares) > 0 || len(peerState.GetGrains()) > 0 {
 			if err := eg.Wait(); err != nil {
-				logger.Errorf("cluster rebalancing failed: %v", err)
+				logger.Errorf("cluster rebalancing failed: %v (hint: check cluster quorum, peer connectivity)", err)
 				ctx.Err(err)
 				// TODO: let us add the supervisor to handle this error
 				return
@@ -199,7 +199,7 @@ func (r *relocator) spawnRemoteActor(ctx context.Context, actor *internalpb.Acto
 	}
 
 	if _, err := r.remoting.RemoteSpawn(ctx, remoteHost, remotingPort, spawnRequest); err != nil {
-		r.logger.Error(err)
+		r.logger.Errorf("remote spawn failed: %v (hint: check target node reachable, actor type registered)", err)
 		return errors.NewSpawnError(err)
 	}
 	return nil
@@ -267,14 +267,14 @@ func (r *relocator) activateRemoteGrain(ctx context.Context, grain *internalpb.G
 
 	resp, err := client.SendProto(ctx, request)
 	if err != nil {
-		r.logger.Error(err)
+		r.logger.Errorf("activate remote grain failed: %v (hint: check grain OnActivate, target node reachable)", err)
 		return errors.NewSpawnError(err)
 	}
 
 	// Check for proto errors
 	if errResp, ok := resp.(*internalpb.Error); ok {
 		err := fmt.Errorf("proto error: code=%s, msg=%s", errResp.GetCode(), errResp.GetMessage())
-		r.logger.Error(err)
+		r.logger.Errorf("activate remote grain proto error: %v (hint: check target node, grain registration)", err)
 		return errors.NewSpawnError(err)
 	}
 
@@ -286,7 +286,7 @@ func (r *relocator) PostStop(ctx *Context) error {
 	if r.remoting != nil {
 		r.remoting.Close()
 	}
-	ctx.ActorSystem().Logger().Infof("%s stopped successfully", ctx.ActorName())
+	ctx.ActorSystem().Logger().Infof("actor=%s stopped successfully", ctx.ActorName())
 	return nil
 }
 
