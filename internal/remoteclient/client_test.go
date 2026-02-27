@@ -1133,11 +1133,238 @@ func TestRemoteBatchAsk_ConnectionRefused(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestRemoteBatchAsk_Success(t *testing.T) {
+	msg := durationpb.New(time.Second)
+	serializer := remote.NewProtoSerializer()
+	packed, err := serializer.Serialize(msg)
+	require.NoError(t, err)
+
+	handler := func(_ context.Context, _ inet.Connection, req proto.Message) (proto.Message, error) {
+		return &internalpb.RemoteAskResponse{Messages: [][]byte{packed}}, nil
+	}
+	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteAskRequest", handler))
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+	done := make(chan error, 1)
+	go func() { done <- ps.Serve() }()
+	pause.For(100 * time.Millisecond)
+
+	host, portStr, err := net.SplitHostPort(ps.ListenAddr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	r := NewClient(WithClientCompression(remote.NoCompression))
+	defer r.Close()
+
+	from := address.New("from", "sys", host, port)
+	to := address.New("to", "sys", host, port)
+	responses, err := r.RemoteBatchAsk(context.Background(), from, to, []any{msg}, time.Second)
+	require.NoError(t, err)
+	require.Len(t, responses, 1)
+	assert.True(t, proto.Equal(msg, responses[0].(*durationpb.Duration)))
+
+	require.NoError(t, ps.Shutdown(time.Second))
+	<-done
+}
+
+func TestRemoteBatchAsk_InvalidResponseType(t *testing.T) {
+	msg := durationpb.New(time.Second)
+	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
+		return &internalpb.RemoteLookupResponse{}, nil
+	}
+	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteAskRequest", handler))
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+	done := make(chan error, 1)
+	go func() { done <- ps.Serve() }()
+	pause.For(100 * time.Millisecond)
+
+	host, portStr, err := net.SplitHostPort(ps.ListenAddr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	r := NewClient(WithClientCompression(remote.NoCompression))
+	defer r.Close()
+
+	from := address.New("from", "sys", host, port)
+	to := address.New("to", "sys", host, port)
+	_, err = r.RemoteBatchAsk(context.Background(), from, to, []any{msg}, time.Second)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid response type")
+
+	require.NoError(t, ps.Shutdown(time.Second))
+	<-done
+}
+
 func TestRemoteSpawn_ConnectionRefused(t *testing.T) {
 	r := NewClient()
 
 	_, err := r.RemoteSpawn(context.Background(), "host", 1000, &remote.SpawnRequest{Name: "actor", Kind: "kind"})
 	assert.Error(t, err)
+}
+
+func TestRemoteSpawn_Success(t *testing.T) {
+	childAddr := "goakt://sys@127.0.0.1:9000/actor"
+	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
+		return &internalpb.RemoteSpawnResponse{Address: childAddr}, nil
+	}
+	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteSpawnRequest", handler))
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+	done := make(chan error, 1)
+	go func() { done <- ps.Serve() }()
+	pause.For(100 * time.Millisecond)
+
+	host, portStr, err := net.SplitHostPort(ps.ListenAddr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	r := NewClient(WithClientCompression(remote.NoCompression))
+	defer r.Close()
+
+	addr, err := r.RemoteSpawn(context.Background(), host, port, &remote.SpawnRequest{Name: "actor", Kind: "kind"})
+	require.NoError(t, err)
+	require.NotNil(t, addr)
+	assert.Equal(t, childAddr, *addr)
+
+	require.NoError(t, ps.Shutdown(time.Second))
+	<-done
+}
+
+func TestRemoteSpawn_ProtoError(t *testing.T) {
+	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
+		return &internalpb.Error{Code: internalpb.Code_CODE_FAILED_PRECONDITION, Message: gerrors.ErrTypeNotRegistered.Error()}, nil
+	}
+	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteSpawnRequest", handler))
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+	done := make(chan error, 1)
+	go func() { done <- ps.Serve() }()
+	pause.For(100 * time.Millisecond)
+
+	host, portStr, err := net.SplitHostPort(ps.ListenAddr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	r := NewClient(WithClientCompression(remote.NoCompression))
+	defer r.Close()
+
+	_, err = r.RemoteSpawn(context.Background(), host, port, &remote.SpawnRequest{Name: "actor", Kind: "kind"})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, gerrors.ErrTypeNotRegistered)
+
+	require.NoError(t, ps.Shutdown(time.Second))
+	<-done
+}
+
+func TestRemoteSpawn_InvalidResponse(t *testing.T) {
+	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
+		return &internalpb.RemoteSpawnResponse{Address: ""}, nil
+	}
+	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteSpawnRequest", handler))
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+	done := make(chan error, 1)
+	go func() { done <- ps.Serve() }()
+	pause.For(100 * time.Millisecond)
+
+	host, portStr, err := net.SplitHostPort(ps.ListenAddr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	r := NewClient(WithClientCompression(remote.NoCompression))
+	defer r.Close()
+
+	_, err = r.RemoteSpawn(context.Background(), host, port, &remote.SpawnRequest{Name: "actor", Kind: "kind"})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, gerrors.ErrInvalidResponse)
+
+	require.NoError(t, ps.Shutdown(time.Second))
+	<-done
+}
+
+func TestRemoteSpawn_DependenciesEncodeError(t *testing.T) {
+	r := NewClient()
+	req := &remote.SpawnRequest{
+		Name:         "actor",
+		Kind:         "kind",
+		Dependencies: []extension.Dependency{&failingDependency{}},
+	}
+	_, err := r.RemoteSpawn(context.Background(), "host", 1000, req)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "marshal failed")
+}
+
+func TestRemoteSpawn_WithSingleton(t *testing.T) {
+	childAddr := "goakt://sys@127.0.0.1:9000/singleton"
+	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
+		return &internalpb.RemoteSpawnResponse{Address: childAddr}, nil
+	}
+	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteSpawnRequest", handler))
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+	done := make(chan error, 1)
+	go func() { done <- ps.Serve() }()
+	pause.For(100 * time.Millisecond)
+
+	host, portStr, err := net.SplitHostPort(ps.ListenAddr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	r := NewClient(WithClientCompression(remote.NoCompression))
+	defer r.Close()
+
+	req := &remote.SpawnRequest{
+		Name: "actor",
+		Kind: "kind",
+		Singleton: &remote.SingletonSpec{
+			SpawnTimeout: 5 * time.Second,
+			WaitInterval: 100 * time.Millisecond,
+			MaxRetries:   10,
+		},
+	}
+	addr, err := r.RemoteSpawn(context.Background(), host, port, req)
+	require.NoError(t, err)
+	require.NotNil(t, addr)
+	assert.Equal(t, childAddr, *addr)
+
+	require.NoError(t, ps.Shutdown(time.Second))
+	<-done
+}
+
+func TestRemoteReSpawn_Success(t *testing.T) {
+	childAddr := "goakt://sys@127.0.0.1:9000/actor"
+	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
+		return &internalpb.RemoteReSpawnResponse{Address: childAddr}, nil
+	}
+	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteReSpawnRequest", handler))
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+	done := make(chan error, 1)
+	go func() { done <- ps.Serve() }()
+	pause.For(100 * time.Millisecond)
+
+	host, portStr, err := net.SplitHostPort(ps.ListenAddr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	r := NewClient(WithClientCompression(remote.NoCompression))
+	defer r.Close()
+
+	addr, err := r.RemoteReSpawn(context.Background(), host, port, "actor")
+	require.NoError(t, err)
+	require.NotNil(t, addr)
+	assert.Equal(t, childAddr, *addr)
+
+	require.NoError(t, ps.Shutdown(time.Second))
+	<-done
 }
 
 func TestRemoteChildren_ConnectionRefused(t *testing.T) {
@@ -1196,8 +1423,8 @@ func TestRemoteDependencies_ConnectionRefused(t *testing.T) {
 
 func TestRemoteSpawnChild_ConnectionRefused(t *testing.T) {
 	r := NewClient()
-	req := &remote.SpawnChildRequest{Name: "child", Kind: "kind"}
-	_, err := r.RemoteSpawnChild(context.Background(), "host", 1000, "parent", req)
+	req := &remote.SpawnChildRequest{Name: "child", Kind: "kind", Parent: "parent"}
+	_, err := r.RemoteSpawnChild(context.Background(), "host", 1000, req)
 	assert.Error(t, err)
 }
 
@@ -1979,7 +2206,7 @@ func TestRemoteDependencies_SuccessWithRegistry(t *testing.T) {
 
 func TestRemoteSpawnChild_InvalidRequest(t *testing.T) {
 	r := NewClient()
-	_, err := r.RemoteSpawnChild(context.Background(), "host", 1000, "parent", &remote.SpawnChildRequest{})
+	_, err := r.RemoteSpawnChild(context.Background(), "host", 1000, &remote.SpawnChildRequest{})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid spawn")
 }
@@ -1987,8 +2214,8 @@ func TestRemoteSpawnChild_InvalidRequest(t *testing.T) {
 func TestRemoteSpawnChild_InvalidPort(t *testing.T) {
 	r := NewClient()
 	port := int(math.MaxInt32) + 1
-	req := &remote.SpawnChildRequest{Name: "child", Kind: "kind"}
-	_, err := r.RemoteSpawnChild(context.Background(), "host", port, "parent", req)
+	req := &remote.SpawnChildRequest{Name: "child", Kind: "kind", Parent: "parent"}
+	_, err := r.RemoteSpawnChild(context.Background(), "host", port, req)
 	assert.Error(t, err)
 	assert.ErrorContains(t, err, "out of range")
 }
@@ -2011,8 +2238,8 @@ func TestRemoteSpawnChild_ProtoError(t *testing.T) {
 	r := NewClient(WithClientCompression(remote.NoCompression))
 	defer r.Close()
 
-	req := &remote.SpawnChildRequest{Name: "child", Kind: "kind"}
-	_, err = r.RemoteSpawnChild(context.Background(), host, port, "parent", req)
+	req := &remote.SpawnChildRequest{Name: "child", Kind: "kind", Parent: "parent"}
+	_, err = r.RemoteSpawnChild(context.Background(), host, port, req)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, gerrors.ErrAddressNotFound)
 
@@ -2039,8 +2266,8 @@ func TestRemoteSpawnChild_Success(t *testing.T) {
 	r := NewClient(WithClientCompression(remote.NoCompression))
 	defer r.Close()
 
-	req := &remote.SpawnChildRequest{Name: "child", Kind: "kind"}
-	addr, err := r.RemoteSpawnChild(context.Background(), host, port, "parent", req)
+	req := &remote.SpawnChildRequest{Name: "child", Kind: "kind", Parent: "parent"}
+	addr, err := r.RemoteSpawnChild(context.Background(), host, port, req)
 	require.NoError(t, err)
 	parsed, err := address.Parse(childAddr)
 	require.NoError(t, err)
@@ -2068,8 +2295,8 @@ func TestRemoteSpawnChild_EmptyAddressReturnsError(t *testing.T) {
 	r := NewClient(WithClientCompression(remote.NoCompression))
 	defer r.Close()
 
-	req := &remote.SpawnChildRequest{Name: "child", Kind: "kind"}
-	_, err = r.RemoteSpawnChild(context.Background(), host, port, "parent", req)
+	req := &remote.SpawnChildRequest{Name: "child", Kind: "kind", Parent: "parent"}
+	_, err = r.RemoteSpawnChild(context.Background(), host, port, req)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, gerrors.ErrInvalidResponse)
 

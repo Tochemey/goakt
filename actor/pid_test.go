@@ -6232,7 +6232,7 @@ func TestAssertLocal(t *testing.T) {
 	// Use a mock remoting that returns ErrNotLocal for Child/SpawnChild remote operations.
 	remotingMock := mocksremote.NewClient(t)
 	remotingMock.EXPECT().RemoteChildren(mock.Anything, "10.0.0.1", 8080, "remote-actor").Return(nil, errors.ErrNotLocal).Maybe()
-	remotingMock.EXPECT().RemoteSpawnChild(mock.Anything, "10.0.0.1", 8080, "remote-actor", mock.Anything).Return(nil, errors.ErrNotLocal).Maybe()
+	remotingMock.EXPECT().RemoteSpawnChild(mock.Anything, "10.0.0.1", 8080, mock.Anything).Return(nil, errors.ErrNotLocal).Maybe()
 	remotePID := newRemotePID(addr, remotingMock)
 	require.True(t, remotePID.IsRemote(), "sanity: newRemotePID with remoting must be remote")
 

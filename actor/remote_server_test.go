@@ -1985,7 +1985,7 @@ func TestRemoteServerHandlersIntegration(t *testing.T) {
 			Kind:   types.Name(NewMockActor()),
 			Parent: "spawnParent",
 		}
-		childAddr, err := client.RemoteSpawnChild(ctx, host, port, "spawnParent", childReq)
+		childAddr, err := client.RemoteSpawnChild(ctx, host, port, childReq)
 		require.NoError(t, err)
 		require.NotNil(t, childAddr)
 		assert.True(t, strings.Contains(childAddr.String(), "spawnedChild"))

@@ -862,16 +862,16 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 	}
 
 	if pid.IsRemote() {
-		address, err := pid.remoting.RemoteSpawnChild(ctx, pid.address.Host(), pid.address.Port(), pid.Name(), &remote.SpawnChildRequest{
+		address, err := pid.remoting.RemoteSpawnChild(ctx, pid.address.Host(), pid.address.Port(), &remote.SpawnChildRequest{
 			Name:                name,
 			Kind:                types.Name(actor),
+			Parent:              pid.Name(),
 			Relocatable:         spawnConfig.relocatable,
 			PassivationStrategy: spawnConfig.passivationStrategy,
 			Supervisor:          spawnConfig.supervisor,
 			Dependencies:        spawnConfig.dependencies,
 			EnableStashing:      spawnConfig.enableStash,
 			Reentrancy:          spawnConfig.reentrancy,
-			Parent:              pid.Name(),
 		})
 		if err != nil {
 			return nil, err

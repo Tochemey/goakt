@@ -1097,9 +1097,9 @@ func (_c *Client_RemoteSpawn_Call) RunAndReturn(run func(context.Context, string
 	return _c
 }
 
-// RemoteSpawnChild provides a mock function with given fields: ctx, host, port, name, childRequest
-func (_m *Client) RemoteSpawnChild(ctx context.Context, host string, port int, name string, childRequest *remote.SpawnChildRequest) (*address.Address, error) {
-	ret := _m.Called(ctx, host, port, name, childRequest)
+// RemoteSpawnChild provides a mock function with given fields: ctx, host, port, childRequest
+func (_m *Client) RemoteSpawnChild(ctx context.Context, host string, port int, childRequest *remote.SpawnChildRequest) (*address.Address, error) {
+	ret := _m.Called(ctx, host, port, childRequest)
 
 	if len(ret) == 0 {
 		panic("no return value specified for RemoteSpawnChild")
@@ -1107,19 +1107,19 @@ func (_m *Client) RemoteSpawnChild(ctx context.Context, host string, port int, n
 
 	var r0 *address.Address
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, int, string, *remote.SpawnChildRequest) (*address.Address, error)); ok {
-		return rf(ctx, host, port, name, childRequest)
+	if rf, ok := ret.Get(0).(func(context.Context, string, int, *remote.SpawnChildRequest) (*address.Address, error)); ok {
+		return rf(ctx, host, port, childRequest)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string, int, string, *remote.SpawnChildRequest) *address.Address); ok {
-		r0 = rf(ctx, host, port, name, childRequest)
+	if rf, ok := ret.Get(0).(func(context.Context, string, int, *remote.SpawnChildRequest) *address.Address); ok {
+		r0 = rf(ctx, host, port, childRequest)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*address.Address)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, string, int, string, *remote.SpawnChildRequest) error); ok {
-		r1 = rf(ctx, host, port, name, childRequest)
+	if rf, ok := ret.Get(1).(func(context.Context, string, int, *remote.SpawnChildRequest) error); ok {
+		r1 = rf(ctx, host, port, childRequest)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1136,15 +1136,14 @@ type Client_RemoteSpawnChild_Call struct {
 //   - ctx context.Context
 //   - host string
 //   - port int
-//   - name string
 //   - childRequest *remote.SpawnChildRequest
-func (_e *Client_Expecter) RemoteSpawnChild(ctx interface{}, host interface{}, port interface{}, name interface{}, childRequest interface{}) *Client_RemoteSpawnChild_Call {
-	return &Client_RemoteSpawnChild_Call{Call: _e.mock.On("RemoteSpawnChild", ctx, host, port, name, childRequest)}
+func (_e *Client_Expecter) RemoteSpawnChild(ctx interface{}, host interface{}, port interface{}, childRequest interface{}) *Client_RemoteSpawnChild_Call {
+	return &Client_RemoteSpawnChild_Call{Call: _e.mock.On("RemoteSpawnChild", ctx, host, port, childRequest)}
 }
 
-func (_c *Client_RemoteSpawnChild_Call) Run(run func(ctx context.Context, host string, port int, name string, childRequest *remote.SpawnChildRequest)) *Client_RemoteSpawnChild_Call {
+func (_c *Client_RemoteSpawnChild_Call) Run(run func(ctx context.Context, host string, port int, childRequest *remote.SpawnChildRequest)) *Client_RemoteSpawnChild_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].(int), args[3].(string), args[4].(*remote.SpawnChildRequest))
+		run(args[0].(context.Context), args[1].(string), args[2].(int), args[3].(*remote.SpawnChildRequest))
 	})
 	return _c
 }
@@ -1154,7 +1153,7 @@ func (_c *Client_RemoteSpawnChild_Call) Return(_a0 *address.Address, _a1 error) 
 	return _c
 }
 
-func (_c *Client_RemoteSpawnChild_Call) RunAndReturn(run func(context.Context, string, int, string, *remote.SpawnChildRequest) (*address.Address, error)) *Client_RemoteSpawnChild_Call {
+func (_c *Client_RemoteSpawnChild_Call) RunAndReturn(run func(context.Context, string, int, *remote.SpawnChildRequest) (*address.Address, error)) *Client_RemoteSpawnChild_Call {
 	_c.Call.Return(run)
 	return _c
 }

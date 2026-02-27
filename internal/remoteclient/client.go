@@ -396,9 +396,9 @@ type Client interface {
 	// Parameters:
 	//   - ctx: Cancellation and deadlines.
 	//   - host, port: Location of the remote actor system.
-	//   - name: Actor name.
-	//   - childRequest: Desired child name, type (kind), singleton/relocatable
+	//   - childRequest: Desired child name, type (kind), parent, singleton/relocatable
 	//     flags, passivation strategy, dependencies, and stash behavior.
+	//     Parent must be set to the parent actor name.
 	//
 	// Behavior:
 	//   - Validates and sanitizes childRequest before sending.
@@ -410,7 +410,7 @@ type Client interface {
 	//   - AlreadyExists or FailedPrecondition (server-dependent) if the name
 	//     conflicts with an existing actor.
 	//   - Transport and context errors.
-	RemoteSpawnChild(ctx context.Context, host string, port int, name string, childRequest *remote.SpawnChildRequest) (*address.Address, error)
+	RemoteSpawnChild(ctx context.Context, host string, port int, childRequest *remote.SpawnChildRequest) (*address.Address, error)
 
 	// RemoteDependencies returns the dependencies of an actor on the remote node.
 	//
@@ -1141,8 +1141,8 @@ func (r *client) RemoteRole(ctx context.Context, host string, port int, name str
 // Parameters:
 //   - ctx: Governs cancellation and deadlines.
 //   - host, port: Location of the remote actor system.
-//   - name: Parent actor name.
-//   - childRequest: Desired child name, type (kind), passivation strategy, dependencies, and stash behavior.
+//   - childRequest: Desired child name, type (kind), parent, passivation strategy, dependencies, and stash behavior.
+//     Parent must be set to the parent actor name.
 //
 // Returns:
 //   - address: The address of the newly spawned child actor.
@@ -1151,7 +1151,7 @@ func (r *client) RemoteRole(ctx context.Context, host string, port int, name str
 //   - ErrTypeNotRegistered when the remote system does not recognize the actor type (kind).
 //   - AlreadyExists or FailedPrecondition if the child name conflicts with an existing actor.
 //   - Transport and context errors.
-func (r *client) RemoteSpawnChild(ctx context.Context, host string, port int, name string, childRequest *remote.SpawnChildRequest) (*address.Address, error) {
+func (r *client) RemoteSpawnChild(ctx context.Context, host string, port int, childRequest *remote.SpawnChildRequest) (*address.Address, error) {
 	if err := childRequest.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid spawn request: %w", err)
 	}
@@ -1187,7 +1187,7 @@ func (r *client) RemoteSpawnChild(ctx context.Context, host string, port int, na
 		Port:                port32,
 		ActorName:           childRequest.Name,
 		ActorType:           childRequest.Kind,
-		Parent:              name,
+		Parent:              childRequest.Parent,
 		Relocatable:         childRequest.Relocatable,
 		PassivationStrategy: codec.EncodePassivationStrategy(childRequest.PassivationStrategy),
 		Dependencies:        dependencies,
