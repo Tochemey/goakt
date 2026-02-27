@@ -24,6 +24,7 @@ package remote
 
 import (
 	"encoding/binary"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -62,14 +63,27 @@ type cborTestUnmarshalable struct {
 	Ch chan int `cbor:"ch"`
 }
 
+// applySerializerRegistration triggers auto-registration via WithSerializers.
+func applySerializerRegistration(msgs ...any) {
+	cfg := &Config{serializers: make(map[reflect.Type]Serializer)}
+	for _, msg := range msgs {
+		WithSerializers(msg, NewCBORSerializer()).Apply(cfg)
+	}
+}
+
 func TestNewCBORSerializer(t *testing.T) {
 	s := NewCBORSerializer()
 	require.NotNil(t, s)
 	var _ Serializer = s
 }
 
+func TestCBORSerializer_RegistryRequired(t *testing.T) {
+	s := NewCBORSerializer()
+	s.RegistryRequired() // exercises UsesRegistry interface; no-op but ensures coverage
+}
+
 func TestCBORSerializer_SerializeDeserialize_RoundTrip(t *testing.T) {
-	RegisterSerializableTypes(new(cborTestMsg))
+	applySerializerRegistration(new(cborTestMsg))
 	t.Cleanup(func() { typesRegistry.Deregister(new(cborTestMsg)) })
 
 	serializer := NewCBORSerializer()
@@ -90,7 +104,7 @@ func TestCBORSerializer_SerializeDeserialize_RoundTrip(t *testing.T) {
 }
 
 func TestCBORSerializer_SerializeDeserialize_ValueType(t *testing.T) {
-	RegisterSerializableTypes(new(cborTestMsg))
+	applySerializerRegistration(new(cborTestMsg))
 	t.Cleanup(func() { typesRegistry.Deregister(new(cborTestMsg)) })
 
 	serializer := NewCBORSerializer()
@@ -111,7 +125,7 @@ func TestCBORSerializer_SerializeDeserialize_ValueType(t *testing.T) {
 }
 
 func TestCBORSerializer_SerializeDeserialize_NestedStruct(t *testing.T) {
-	RegisterSerializableTypes(new(cborTestNested))
+	applySerializerRegistration(new(cborTestNested))
 	t.Cleanup(func() { typesRegistry.Deregister(new(cborTestNested)) })
 
 	serializer := NewCBORSerializer()
@@ -136,7 +150,7 @@ func TestCBORSerializer_SerializeDeserialize_NestedStruct(t *testing.T) {
 }
 
 func TestCBORSerializer_SerializeDeserialize_Slice(t *testing.T) {
-	RegisterSerializableTypes(new(cborTestWithSlice))
+	applySerializerRegistration(new(cborTestWithSlice))
 	t.Cleanup(func() { typesRegistry.Deregister(new(cborTestWithSlice)) })
 
 	serializer := NewCBORSerializer()
@@ -156,7 +170,7 @@ func TestCBORSerializer_SerializeDeserialize_Slice(t *testing.T) {
 }
 
 func TestCBORSerializer_SerializeDeserialize_Map(t *testing.T) {
-	RegisterSerializableTypes(new(cborTestWithMap))
+	applySerializerRegistration(new(cborTestWithMap))
 	t.Cleanup(func() { typesRegistry.Deregister(new(cborTestWithMap)) })
 
 	serializer := NewCBORSerializer()
@@ -176,7 +190,7 @@ func TestCBORSerializer_SerializeDeserialize_Map(t *testing.T) {
 }
 
 func TestCBORSerializer_SerializeDeserialize_Time(t *testing.T) {
-	RegisterSerializableTypes(new(cborTestWithTime))
+	applySerializerRegistration(new(cborTestWithTime))
 	t.Cleanup(func() { typesRegistry.Deregister(new(cborTestWithTime)) })
 
 	serializer := NewCBORSerializer()
@@ -213,7 +227,7 @@ func TestCBORSerializer_Serialize_Errors(t *testing.T) {
 	})
 
 	t.Run("registered type but CBOR marshal fails", func(t *testing.T) {
-		RegisterSerializableTypes(new(cborTestUnmarshalable))
+		applySerializerRegistration(new(cborTestUnmarshalable))
 		t.Cleanup(func() { typesRegistry.Deregister(new(cborTestUnmarshalable)) })
 
 		_, err := serializer.Serialize(&cborTestUnmarshalable{Ch: make(chan int)})
@@ -285,7 +299,7 @@ func TestCBORSerializer_Deserialize_UnknownType(t *testing.T) {
 }
 
 func TestCBORSerializer_Deserialize_InvalidCBORPayload(t *testing.T) {
-	RegisterSerializableTypes(new(cborTestMsg))
+	applySerializerRegistration(new(cborTestMsg))
 	t.Cleanup(func() { typesRegistry.Deregister(new(cborTestMsg)) })
 
 	// Valid frame header, garbage CBOR payload.
@@ -306,10 +320,10 @@ func TestCBORSerializer_Deserialize_InvalidCBORPayload(t *testing.T) {
 	require.Nil(t, actual)
 }
 
-func TestRegisterSerializableTypes(t *testing.T) {
+func TestWithSerializers_AutoRegistersTypes(t *testing.T) {
 	type localType struct{ V int }
 
-	RegisterSerializableTypes(new(localType))
+	applySerializerRegistration(new(localType))
 	t.Cleanup(func() { typesRegistry.Deregister(new(localType)) })
 
 	require.True(t, typesRegistry.Exists(new(localType)))
@@ -326,9 +340,9 @@ func TestRegisterSerializableTypes(t *testing.T) {
 	require.Equal(t, 99, decoded.V)
 }
 
-func TestRegisterSerializableTypes_Idempotent(t *testing.T) {
-	RegisterSerializableTypes(new(cborTestMsg))
-	RegisterSerializableTypes(new(cborTestMsg))
+func TestWithSerializers_AutoRegistersTypes_Idempotent(t *testing.T) {
+	applySerializerRegistration(new(cborTestMsg))
+	applySerializerRegistration(new(cborTestMsg))
 	t.Cleanup(func() { typesRegistry.Deregister(new(cborTestMsg)) })
 
 	serializer := NewCBORSerializer()
@@ -340,8 +354,8 @@ func TestRegisterSerializableTypes_Idempotent(t *testing.T) {
 	require.NotNil(t, actual)
 }
 
-func TestRegisterSerializableTypes_MultipleTypes(t *testing.T) {
-	RegisterSerializableTypes(new(cborTestMsg), new(cborTestWithSlice))
+func TestWithSerializers_AutoRegistersTypes_Multiple(t *testing.T) {
+	applySerializerRegistration(new(cborTestMsg), new(cborTestWithSlice))
 	t.Cleanup(func() {
 		typesRegistry.Deregister(new(cborTestMsg))
 		typesRegistry.Deregister(new(cborTestWithSlice))
@@ -364,7 +378,7 @@ func TestRegisterSerializableTypes_MultipleTypes(t *testing.T) {
 }
 
 func TestCBORSerializer_ConcurrentUse(t *testing.T) {
-	RegisterSerializableTypes(new(cborTestMsg))
+	applySerializerRegistration(new(cborTestMsg))
 	t.Cleanup(func() { typesRegistry.Deregister(new(cborTestMsg)) })
 
 	serializer := NewCBORSerializer()
@@ -389,7 +403,7 @@ func TestCBORSerializer_ConcurrentUse(t *testing.T) {
 }
 
 func TestCBORSerializer_FrameLayout(t *testing.T) {
-	RegisterSerializableTypes(new(cborTestMsg))
+	applySerializerRegistration(new(cborTestMsg))
 	t.Cleanup(func() { typesRegistry.Deregister(new(cborTestMsg)) })
 
 	serializer := NewCBORSerializer()

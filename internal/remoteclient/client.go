@@ -622,6 +622,7 @@ func WithClientSerializers(msg any, serializer remote.Serializer) ClientOption {
 			return
 		}
 
+		types.RegisterSerializerType(msg, serializer)
 		r.serializers = append(r.serializers, ifaceEntry{
 			iface:      reflect.TypeOf(msg),
 			serializer: serializer,

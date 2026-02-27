@@ -104,6 +104,24 @@ func TestConfig(t *testing.T) {
 		WithSerializers((*proto.Message)(nil), nil).Apply(config)
 		require.NotNil(t, config.Serializer(&testpb.Reply{}))
 	})
+	t.Run("With_unregistered_type_returns_nil_serializer", func(t *testing.T) {
+		config := DefaultConfig()
+		type unregistered struct{ X int }
+		assert.Nil(t, config.Serializer(&unregistered{X: 1}))
+	})
+	t.Run("With_Serializers_returns_defensive_copy", func(t *testing.T) {
+		config := DefaultConfig()
+		serializers := config.Serializers()
+		require.NotNil(t, serializers)
+		require.NotEmpty(t, serializers, "default config has proto serializer")
+		// Modifying the returned map must not affect the config
+		for k := range serializers {
+			delete(serializers, k)
+			break
+		}
+		// Config should still resolve proto messages
+		require.NotNil(t, config.Serializer(&testpb.Reply{}))
+	})
 }
 
 func TestConfigCompression(t *testing.T) {

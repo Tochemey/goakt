@@ -35,12 +35,9 @@ import (
 	"github.com/tochemey/goakt/v4/internal/types"
 )
 
-// typesRegistry is the global type registry used by all [CBORSerializer] instances
-// to resolve Go types from their wire names on the receive path. Types are
-// registered automatically when [WithSerializers] or [WithClientSerializers] is
-// called with a [CBORSerializer] and a concrete message type; receive-only types
-// may be registered explicitly via [RegisterSerializableTypes].
-var typesRegistry = types.NewRegistry()
+// typesRegistry is an alias for the global type registry. Used for test
+// cleanup via Deregister; production code uses types.GlobalRegistry directly.
+var typesRegistry = types.GlobalRegistry
 
 // CBORSerializer errors.
 var (
@@ -57,7 +54,7 @@ var (
 	ErrCBORDeserializeFailed = errors.New("remote: failed to deserialize CBOR message")
 
 	// ErrCBORTypeNotRegistered is returned when the message type is not in the
-	// global types registry. Register types via [RegisterSerializableTypes].
+	// global types registry. Register types via [WithSerializers] or [WithClientSerializers].
 	ErrCBORTypeNotRegistered = errors.New("remote: CBOR type not registered")
 
 	// ErrCBORInvalidFrame is returned by [CBORSerializer.Deserialize] when the
@@ -109,16 +106,16 @@ var (
 //	    remote.WithSerializers(new(MyMessage), remote.NewCBORSerializer()),
 //	)
 //
-// For types that are only received (never sent from this node), register
-// explicitly:
+// For types that are only received (never sent from this node), register them
+// the same way — the type is auto-registered for deserialization:
 //
-//	remote.RegisterSerializableTypes(new(MyMessage))
+//	remote.WithSerializers(new(MyMessage), remote.NewCBORSerializer())
 //
 // # Constraints
 //
 // Both [Serialize] and [Deserialize] require that the message type is
-// registered in the global types registry. Registration happens
-// automatically when using a concrete type with [RegisterSerializableTypes]
+// registered in the global types registry. Registration happens automatically
+// when using [WithSerializers] or [WithClientSerializers] with a concrete type.
 type CBORSerializer struct {
 	encMode cbor.EncMode // immutable after construction, thread-safe
 	decMode cbor.DecMode // immutable after construction, thread-safe
@@ -127,26 +124,17 @@ type CBORSerializer struct {
 // enforce the Serializer interface at compile time.
 var _ Serializer = (*CBORSerializer)(nil)
 
+// RegistryRequired implements types.UsesRegistry so CBORSerializer
+// is recognized by types.RegisterSerializerType.
+func (*CBORSerializer) RegistryRequired() {}
+
 // NewCBORSerializer returns a ready-to-use [CBORSerializer] that uses the
-// package-level global type registry. Types must be registered before use via [RegisterSerializableTypes].
+// package-level global type registry. Register types via [WithSerializers] or
+// [WithClientSerializers]; they are added to the registry automatically.
 func NewCBORSerializer() *CBORSerializer {
 	encMode, _ := cborEncOpts.EncMode()
 	decMode, _ := cborDecOpts.DecMode()
 	return &CBORSerializer{encMode: encMode, decMode: decMode}
-}
-
-// RegisterSerializableTypes registers one or more Go types in the global types
-// registry. Pass a value of each type (typically a pointer to the zero value):
-//
-//	remote.RegisterSerializableTypes(new(MyMessage), new(OrderEvent))
-//
-// Use this for types that are only received on this node and never passed to
-// [WithSerializers] or [WithClientSerializers]. Types that are registered via
-// those options are added to the registry automatically.
-func RegisterSerializableTypes(values ...any) {
-	for _, v := range values {
-		typesRegistry.Register(v)
-	}
 }
 
 // Deserialize implements [Serializer]. It decodes a frame produced by
@@ -206,7 +194,7 @@ func (s *CBORSerializer) Deserialize(data []byte) (any, error) {
 // and CBOR bytes in place — no intermediate buffers.
 //
 // Returns [ErrCBORNilMessage] if message is nil.
-// Returns an error for unregistered types (register via [RegisterSerializableTypes]).
+// Returns an error for unregistered types (register via [WithSerializers] or [WithClientSerializers]).
 // Returns [ErrCBORSerializeFailed] wrapping the CBOR error on marshal failure.
 func (s *CBORSerializer) Serialize(message any) ([]byte, error) {
 	// 1. Derive the wire name — same formula as types.Name but handles

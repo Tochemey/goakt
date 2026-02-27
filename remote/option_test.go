@@ -23,10 +23,15 @@
 package remote
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
+
+	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
 func TestOption(t *testing.T) {
@@ -80,5 +85,32 @@ func TestWithContextPropagator(t *testing.T) {
 		prop := mockPropagator{}
 		WithContextPropagator(prop).Apply(config)
 		assert.Equal(t, prop, config.contextPropagator)
+	})
+}
+
+func TestWithSerializers(t *testing.T) {
+	t.Run("interface registration", func(t *testing.T) {
+		custom := NewProtoSerializer()
+		config := NewConfig("127.0.0.1", 0, WithSerializers((*proto.Message)(nil), custom))
+		s := config.Serializer(&testpb.Reply{})
+		require.NotNil(t, s)
+		assert.Same(t, custom, s)
+	})
+
+	t.Run("concrete type registration", func(t *testing.T) {
+		config := &Config{serializers: make(map[reflect.Type]Serializer)}
+		msg := &testpb.Reply{}
+		ser := NewProtoSerializer()
+		WithSerializers(msg, ser).Apply(config)
+		s := config.Serializer(msg)
+		require.NotNil(t, s)
+		assert.Same(t, ser, s)
+	})
+
+	t.Run("nil serializer is ignored", func(t *testing.T) {
+		config := DefaultConfig()
+		WithSerializers(&testpb.Reply{}, nil).Apply(config)
+		// Default proto serializer should still be present
+		require.NotNil(t, config.Serializer(&testpb.Reply{}))
 	})
 }

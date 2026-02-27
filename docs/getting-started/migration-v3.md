@@ -199,8 +199,8 @@ Custom `Logger` implementations must implement additional methods:
 ### Pluggable serialization
 
 - **ProtoSerializer** — Default for `proto.Message`. No change for protobuf users.
-- **CBORSerializer** — For arbitrary Go types. Register via `remote.RegisterSerializableTypes(new(MyMessage), ...)` or
-  `remote.WithSerializers(new(MyMessage), remote.NewCBORSerializer())`.
+- **CBORSerializer** — For arbitrary Go types. Register via
+  `remote.WithSerializers(new(MyMessage), remote.NewCBORSerializer())`; types are auto-registered.
 - **Custom** — Implement `remote.Serializer`; register via `WithSerializers` on `remote.Config`.
 
 ### Path interface

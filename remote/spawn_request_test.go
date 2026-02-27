@@ -105,3 +105,62 @@ func TestSpawnRequestValidateAndSanitize(t *testing.T) {
 		assert.Equal(t, 0, req.Reentrancy.MaxInFlight())
 	})
 }
+
+func TestSpawnChildRequestValidateAndSanitize(t *testing.T) {
+	t.Run("valid request", func(t *testing.T) {
+		req := &SpawnChildRequest{
+			Name:   " child ",
+			Kind:   " kind ",
+			Parent: " parent ",
+		}
+		require.NoError(t, req.Validate())
+		req.Sanitize()
+		assert.Equal(t, "child", req.Name)
+		assert.Equal(t, "kind", req.Kind)
+		assert.Equal(t, "parent", req.Parent)
+	})
+
+	t.Run("empty name", func(t *testing.T) {
+		req := &SpawnChildRequest{Name: "", Kind: "kind", Parent: "parent"}
+		err := req.Validate()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "Name")
+	})
+
+	t.Run("empty kind", func(t *testing.T) {
+		req := &SpawnChildRequest{Name: "child", Kind: "", Parent: "parent"}
+		err := req.Validate()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "Kind")
+	})
+
+	t.Run("empty parent", func(t *testing.T) {
+		req := &SpawnChildRequest{Name: "child", Kind: "kind", Parent: ""}
+		err := req.Validate()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "Parent")
+	})
+
+	t.Run("invalid dependency id", func(t *testing.T) {
+		req := &SpawnChildRequest{
+			Name:         "child",
+			Kind:         "kind",
+			Parent:       "parent",
+			Dependencies: []extension.Dependency{mockDependency{id: ""}},
+		}
+		err := req.Validate()
+		require.Error(t, err)
+	})
+
+	t.Run("invalid reentrancy mode", func(t *testing.T) {
+		req := &SpawnChildRequest{
+			Name:       "child",
+			Kind:       "kind",
+			Parent:     "parent",
+			Reentrancy: reentrancy.New(reentrancy.WithMode(99)),
+		}
+		err := req.Validate()
+		require.Error(t, err)
+		require.ErrorIs(t, err, gerrors.ErrInvalidReentrancyMode)
+	})
+}

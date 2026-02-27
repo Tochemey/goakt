@@ -58,4 +58,18 @@ func TestGrainActivationRequestValidateAndSanitize(t *testing.T) {
 		err := req.Validate()
 		require.Error(t, err)
 	})
+
+	t.Run("empty name", func(t *testing.T) {
+		req := &GrainRequest{Name: "", Kind: "kind"}
+		err := req.Validate()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "Name")
+	})
+
+	t.Run("empty kind", func(t *testing.T) {
+		req := &GrainRequest{Name: "grain", Kind: ""}
+		err := req.Validate()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "Kind")
+	})
 }

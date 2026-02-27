@@ -25,6 +25,8 @@ package remote
 import (
 	"reflect"
 	"time"
+
+	"github.com/tochemey/goakt/v4/internal/types"
 )
 
 // Option is the interface that applies a configuration option.
@@ -111,6 +113,10 @@ func WithContextPropagator(propagator ContextPropagator) Option {
 //
 //	WithSerializers(new(MyMessage), mySerializer)
 //
+// When the serializer is [CBORSerializer] and the type is not a [proto.Message],
+// the type is automatically registered in the global type registry used for
+// CBOR serialization. No separate registration step is required.
+//
 // # Interface registration
 //
 // Pass a typed nil pointer to an interface to bind a serializer to every
@@ -144,6 +150,7 @@ func WithSerializers(msg any, serializer Serializer) Option {
 			return
 		}
 
+		types.RegisterSerializerType(msg, serializer)
 		config.serializers[reflect.TypeOf(msg)] = serializer
 	})
 }
