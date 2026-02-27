@@ -34,14 +34,14 @@ var discardStdLogger = golog.New(io.Discard, "", 0)
 
 type discardLogger struct{}
 
-func (discardLogger) Debug(...any)          {}
-func (discardLogger) Debugf(string, ...any) {}
-func (discardLogger) Info(...any)           {}
-func (discardLogger) Infof(string, ...any)  {}
-func (discardLogger) Warn(...any)           {}
-func (discardLogger) Warnf(string, ...any)  {}
-func (discardLogger) Error(...any)          {}
-func (discardLogger) Errorf(string, ...any) {}
+func (discardLogger) Debug(v ...any)                 { _ = v }
+func (discardLogger) Debugf(format string, v ...any) { _, _ = format, v }
+func (discardLogger) Info(v ...any)                  { _ = v }
+func (discardLogger) Infof(format string, v ...any)  { _, _ = format, v }
+func (discardLogger) Warn(v ...any)                  { _ = v }
+func (discardLogger) Warnf(format string, v ...any)  { _, _ = format, v }
+func (discardLogger) Error(v ...any)                 { _ = v }
+func (discardLogger) Errorf(format string, v ...any) { _, _ = format, v }
 
 func (discardLogger) Fatal(v ...any) {
 	_ = fmt.Sprint(v...)
@@ -63,6 +63,16 @@ func (discardLogger) Panicf(format string, v ...any) {
 
 func (discardLogger) LogLevel() Level {
 	return InfoLevel
+}
+
+// Enabled returns false for all levels except Fatal and Panic, which always execute.
+func (discardLogger) Enabled(level Level) bool {
+	return level == FatalLevel || level == PanicLevel
+}
+
+// With returns the receiver unchanged; DiscardLogger ignores structured fields.
+func (discardLogger) With(keyValues ...any) Logger {
+	return DiscardLogger
 }
 
 func (discardLogger) LogOutput() []io.Writer {

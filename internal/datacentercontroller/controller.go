@@ -414,12 +414,12 @@ watchLoop:
 		events, err := x.controlPlane.Watch(x.ctx)
 		if err != nil {
 			if errors.Is(err, gerrors.ErrWatchNotSupported) {
-				x.logger.Infof("Control plane watch not supported, polling enabled")
+				x.logger.Infof("control plane watch not supported, polling enabled")
 				return
 			}
 
 			failures++
-			x.logger.Warnf("Watch setup failed: %v", err)
+			x.logger.Warnf("watch setup failed: %v", err)
 			if !x.sleepBackoff(x.config.CacheRefreshInterval, failures) {
 				return
 			}
@@ -437,7 +437,7 @@ watchLoop:
 			case event, ok := <-events:
 				if !ok {
 					if x.ctx.Err() == nil {
-						x.logger.Warn("Control plane watch closed")
+						x.logger.Warn("control plane watch closed")
 					}
 
 					x.watchSupported.Store(false)
@@ -588,7 +588,7 @@ func (x *Controller) runLoop(name string, interval time.Duration, fn func(contex
 		case <-timer.C:
 			if err := fn(x.ctx); err != nil {
 				failures++
-				x.logger.Warnf("DataCenter Controller: %s failed: %v", name, err)
+				x.logger.Warnf("datacenter controller %s failed: %v", name, err)
 			} else {
 				failures = 0
 			}

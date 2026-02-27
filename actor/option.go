@@ -51,13 +51,27 @@ func (f OptionFunc) Apply(c *actorSystem) {
 	f(c)
 }
 
-// WithLogger sets the actor system custom log
+// WithLogger sets the actor system custom logger.
+// Pass nil to disable logging (equivalent to WithLoggingDisabled).
 func WithLogger(logger log.Logger) Option {
 	return OptionFunc(
 		func(a *actorSystem) {
 			if logger != nil {
 				a.logger = logger
+			} else {
+				a.logger = log.DiscardLogger
 			}
+		},
+	)
+}
+
+// WithLoggingDisabled disables all logging for the actor system.
+// Uses a no-op logger that discards all messages with minimal overhead.
+// Recommended for production when logging is not needed, or for benchmarks.
+func WithLoggingDisabled() Option {
+	return OptionFunc(
+		func(a *actorSystem) {
+			a.logger = log.DiscardLogger
 		},
 	)
 }

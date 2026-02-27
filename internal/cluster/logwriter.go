@@ -95,13 +95,21 @@ func (l *logWriter) Write(message []byte) (n int, err error) {
 	case !ok:
 		// message does not have a known prefix; ignore
 	case msg.level == infoLevel:
-		l.logger.Info(msg.text)
+		if l.logger.Enabled(log.InfoLevel) {
+			l.logger.Info(msg.text)
+		}
 	case msg.level == debugLevel:
-		l.logger.Debug(msg.text)
+		if l.logger.Enabled(log.DebugLevel) {
+			l.logger.Debug(msg.text)
+		}
 	case msg.level == warnLevel:
-		l.logger.Warn(msg.text)
+		if l.logger.Enabled(log.WarningLevel) {
+			l.logger.Warn(msg.text)
+		}
 	case msg.level == errorLevel:
-		l.logger.Error(msg.text)
+		if l.logger.Enabled(log.ErrorLevel) {
+			l.logger.Error(msg.text)
+		}
 	}
 
 	return len(message), nil

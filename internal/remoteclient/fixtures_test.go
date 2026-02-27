@@ -90,3 +90,22 @@ func (h headerPropagator) Inject(_ context.Context, headers nethttp.Header) erro
 func (h headerPropagator) Extract(ctx context.Context, _ nethttp.Header) (context.Context, error) {
 	return ctx, nil
 }
+
+// mockDependencyForRemote is a minimal Dependency for RemoteDependencies tests.
+// It can be registered with types.Registry and decoded from internalpb.Dependency.
+type mockDependencyForRemote struct {
+	id string
+}
+
+func (m *mockDependencyForRemote) MarshalBinary() ([]byte, error) {
+	return []byte(m.id), nil
+}
+
+func (m *mockDependencyForRemote) UnmarshalBinary(data []byte) error {
+	m.id = string(data)
+	return nil
+}
+
+func (m *mockDependencyForRemote) ID() string { return m.id }
+
+var _ extension.Dependency = (*mockDependencyForRemote)(nil)

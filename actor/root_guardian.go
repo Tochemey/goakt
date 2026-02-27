@@ -55,12 +55,16 @@ func (x *rootGuardian) Receive(ctx *ReceiveContext) {
 	case *PostStart:
 		x.pid = ctx.Self()
 		x.logger = ctx.Logger()
-		x.logger.Infof("%s started successfully", x.pid.Name())
+		if x.logger.Enabled(log.InfoLevel) {
+			x.logger.Infof("actor=%s started successfully", x.pid.Name())
+		}
 	case *PanicSignal:
 		x.handlePanicSignal(ctx)
 	case *Terminated:
-		actorID := msg.Address
-		x.pid.logger.Debugf("%s terminated", actorID)
+		actorID := msg.Address()
+		if x.pid.logger.Enabled(log.DebugLevel) {
+			x.pid.logger.Debugf("actor=%s terminated", actorID)
+		}
 		// TODO: decide what to do the actor
 	default:
 		// pass
@@ -69,7 +73,10 @@ func (x *rootGuardian) Receive(ctx *ReceiveContext) {
 
 // PostStop is executed when the actor is shutting down.
 func (x *rootGuardian) PostStop(ctx *Context) error {
-	ctx.ActorSystem().Logger().Infof("%s stopped successfully", ctx.ActorName())
+	logger := ctx.ActorSystem().Logger()
+	if logger.Enabled(log.InfoLevel) {
+		logger.Infof("actor=%s stopped successfully", ctx.ActorName())
+	}
 	return nil
 }
 
@@ -77,10 +84,9 @@ func (x *rootGuardian) handlePanicSignal(ctx *ReceiveContext) {
 	systemName := ctx.ActorSystem().Name()
 	actorName := ctx.Sender().Name()
 	if !ctx.ActorSystem().isStopping() && isSystemName(actorName) {
-		// log a message error and stop the actor system
-		x.logger.Warnf("%s is down. %s is going to shutdown. Kindly check logs and fix any potential issue with the system",
-			actorName,
-			systemName)
+		if x.logger.Enabled(log.WarningLevel) {
+			x.logger.Warnf("actor=%s system=%s is down, going to shutdown. Check logs and fix any potential issue", actorName, systemName)
+		}
 
 		// blindly shutdown the actor system. No need to check any error
 		_ = ctx.ActorSystem().Stop(context.WithoutCancel(ctx.Context()))

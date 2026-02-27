@@ -108,6 +108,20 @@ type Logger interface {
 	// Messages below this level are typically suppressed.
 	LogLevel() Level
 
+	// Enabled reports whether the given level is enabled.
+	// Use this to avoid evaluating expensive arguments when logging is disabled:
+	//
+	//	if logger.Enabled(log.DebugLevel) {
+	//	    logger.Debugf("expensive: %v", expensiveFunc())
+	//	}
+	Enabled(level Level) bool
+
+	// With returns a Logger that includes the given key-value pairs in all
+	// subsequent log entries. Keys and values alternate; keys must be strings.
+	// Implementations that do not support structured fields may ignore the
+	// pairs and return the receiver unchanged.
+	With(keyValues ...any) Logger
+
 	// LogOutput returns the configured output destinations for this logger.
 	//
 	// Implementations may write to all returned writers, one of them, or a wrapped writer.

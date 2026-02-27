@@ -37,7 +37,7 @@ var (
 	// DebugLogger is a global logger configured to output messages at DebugLevel
 	// and above to os.Stdout. It is typically used for detailed development and
 	// debugging output.
-	DebugLogger = New(DebugLevel, os.Stdout)
+	DebugLogger = NewZap(DebugLevel, os.Stdout)
 
 	// DiscardLogger is a no-op logger that discards all log messages.
 	DiscardLogger Logger = discardLogger{}
@@ -45,20 +45,23 @@ var (
 	// DefaultLogger is a global logger configured to output messages at InfoLevel
 	// and above to os.Stdout. It serves as the standard logger for general
 	// informational messages in the application.
-	DefaultLogger = New(InfoLevel, os.Stdout)
+	DefaultLogger = NewZap(InfoLevel, os.Stdout)
 )
 
 const (
 	bufferedWriteSize     = 256 * 1024
 	bufferedFlushInterval = 30 * time.Second
+	// maxInlineFields is the maximum number of key-value pairs for stack-allocated fields.
+	// With() uses a stack array for small N to avoid heap allocation.
+	maxInlineFields = 6
 )
 
-// Log implements Logger interface with zap as the underlying logging library.
+// Zap implements Logger interface with zap as the underlying logging library.
 // It is optimized for low overhead: message formatting is skipped when levels
 // are disabled, and file outputs are buffered for Info/Warn/Debug to reduce
 // syscalls. Stdout/stderr remain unbuffered for immediate visibility. Call
 // Flush during graceful shutdown to drain buffered file output.
-type Log struct {
+type Zap struct {
 	logger              *zap.Logger
 	sugar               *zap.SugaredLogger
 	outputs             []io.Writer
@@ -66,15 +69,15 @@ type Log struct {
 }
 
 // enforce compilation and linter error
-var _ Logger = &Log{}
+var _ Logger = &Zap{}
 
-// New creates an instance of Log.
+// NewZap creates an instance of Log.
 // Performance notes:
 // - Debug/Info/Warn logs are buffered only for file outputs to reduce syscalls.
 // - Stdout/stderr and non-file writers are unbuffered for immediate visibility.
 // - Error and above are unbuffered for all outputs.
 // Call Flush during graceful shutdown to ensure buffered file logs are written.
-func New(level Level, writers ...io.Writer) *Log {
+func NewZap(level Level, writers ...io.Writer) *Zap {
 	config := newZapConfig()
 	logLevel := toZapLevel(level)
 	immediateSyncers, bufferedSyncers := splitWriteSyncers(writers...)
@@ -91,7 +94,7 @@ func New(level Level, writers ...io.Writer) *Log {
 	// set the global logger
 	zap.ReplaceGlobals(zapLogger)
 	// create the instance of Log and returns it
-	return &Log{
+	return &Zap{
 		logger:              zapLogger,
 		sugar:               zapLogger.Sugar(),
 		outputs:             writers,
@@ -100,72 +103,145 @@ func New(level Level, writers ...io.Writer) *Log {
 }
 
 // Debug starts a message with debug level
-func (l *Log) Debug(v ...any) {
-	l.sugar.Debug(v...)
+func (z *Zap) Debug(v ...any) {
+	z.sugar.Debug(v...)
 }
 
 // Debugf starts a message with debug level
-func (l *Log) Debugf(format string, v ...any) {
-	l.sugar.Debugf(format, v...)
+func (z *Zap) Debugf(format string, v ...any) {
+	z.sugar.Debugf(format, v...)
 }
 
 // Panic starts a new message with panic level. The panic() function
 // is called which stops the ordinary flow of a goroutine.
-func (l *Log) Panic(v ...any) {
-	l.sugar.Panic(v...)
+func (z *Zap) Panic(v ...any) {
+	z.sugar.Panic(v...)
 }
 
 // Panicf starts a new message with panic level. The panic() function
 // is called which stops the ordinary flow of a goroutine.
-func (l *Log) Panicf(format string, v ...any) {
-	l.sugar.Panicf(format, v...)
+func (z *Zap) Panicf(format string, v ...any) {
+	z.sugar.Panicf(format, v...)
 }
 
 // Fatal starts a new message with fatal level. The os.Exit(1) function
 // is called which terminates the program immediately.
-func (l *Log) Fatal(v ...any) {
-	l.sugar.Fatal(v...)
+func (z *Zap) Fatal(v ...any) {
+	z.sugar.Fatal(v...)
 }
 
 // Fatalf starts a new message with fatal level. The os.Exit(1) function
 // is called which terminates the program immediately.
-func (l *Log) Fatalf(format string, v ...any) {
-	l.sugar.Fatalf(format, v...)
+func (z *Zap) Fatalf(format string, v ...any) {
+	z.sugar.Fatalf(format, v...)
 }
 
 // Error starts a new message with error level.
-func (l *Log) Error(v ...any) {
-	l.sugar.Error(v...)
+func (z *Zap) Error(v ...any) {
+	z.sugar.Error(v...)
 }
 
 // Errorf starts a new message with error level.
-func (l *Log) Errorf(format string, v ...any) {
-	l.sugar.Errorf(format, v...)
+func (z *Zap) Errorf(format string, v ...any) {
+	z.sugar.Errorf(format, v...)
 }
 
 // Warn starts a new message with warn level
-func (l *Log) Warn(v ...any) {
-	l.sugar.Warn(v...)
+func (z *Zap) Warn(v ...any) {
+	z.sugar.Warn(v...)
 }
 
 // Warnf starts a new message with warn level
-func (l *Log) Warnf(format string, v ...any) {
-	l.sugar.Warnf(format, v...)
+func (z *Zap) Warnf(format string, v ...any) {
+	z.sugar.Warnf(format, v...)
 }
 
 // Info starts a message with info level
-func (l *Log) Info(v ...any) {
-	l.sugar.Info(v...)
+func (z *Zap) Info(v ...any) {
+	z.sugar.Info(v...)
 }
 
 // Infof starts a message with info level
-func (l *Log) Infof(format string, v ...any) {
-	l.sugar.Infof(format, v...)
+func (z *Zap) Infof(format string, v ...any) {
+	z.sugar.Infof(format, v...)
+}
+
+// Enabled reports whether the given level is enabled.
+func (z *Zap) Enabled(level Level) bool {
+	return z.logger.Core().Enabled(toZapLevel(level))
+}
+
+// With returns a Logger that includes the given key-value pairs in all subsequent log entries.
+// Optimized for low GC: uses zap.String/zap.Int64 for common types (avoids zap.Any reflection),
+// and stack-allocated fields for up to maxInlineFields pairs.
+func (z *Zap) With(keyValues ...any) Logger {
+	n := (len(keyValues) + 1) / 2 // pairs, including odd last value as ("_", val)
+	if n == 0 {
+		return z
+	}
+
+	var buf [maxInlineFields]zap.Field
+	var fields []zap.Field
+	if n <= maxInlineFields {
+		fields = buf[:0:n]
+	} else {
+		fields = make([]zap.Field, 0, n)
+	}
+
+	for i := 0; i < len(keyValues); i += 2 {
+		if i+1 >= len(keyValues) {
+			fields = append(fields, toZapField("_", keyValues[i]))
+			break
+		}
+		k, ok := keyValues[i].(string)
+		if !ok {
+			continue
+		}
+		fields = append(fields, toZapField(k, keyValues[i+1]))
+	}
+	if len(fields) == 0 {
+		return z
+	}
+
+	newLogger := z.logger.With(fields...)
+	return &Zap{
+		logger:              newLogger,
+		sugar:               newLogger.Sugar(),
+		outputs:             z.outputs,
+		bufferedWriteSyncer: z.bufferedWriteSyncer,
+	}
+}
+
+// toZapField converts a key-value pair to zap.Field using typed accessors where possible
+// to avoid zap.Any reflection and reduce allocations.
+func toZapField(key string, val any) zap.Field {
+	switch v := val.(type) {
+	case string:
+		return zap.String(key, v)
+	case int:
+		return zap.Int(key, v)
+	case int32:
+		return zap.Int32(key, v)
+	case int64:
+		return zap.Int64(key, v)
+	case uint:
+		return zap.Uint(key, v)
+	case uint32:
+		return zap.Uint32(key, v)
+	case uint64:
+		return zap.Uint64(key, v)
+	case bool:
+		return zap.Bool(key, v)
+	case float64:
+		return zap.Float64(key, v)
+	default:
+		return zap.Any(key, val)
+	}
 }
 
 // LogLevel returns the log level that is used
-func (l *Log) LogLevel() Level {
-	switch l.logger.Level() {
+func (z *Zap) LogLevel() Level {
+	switch z.logger.Level() {
 	case zapcore.FatalLevel:
 		return FatalLevel
 	case zapcore.PanicLevel:
@@ -184,19 +260,19 @@ func (l *Log) LogLevel() Level {
 }
 
 // LogOutput returns the log output that is set
-func (l *Log) LogOutput() []io.Writer {
-	return l.outputs
+func (z *Zap) LogOutput() []io.Writer {
+	return z.outputs
 }
 
 // Flush flushes buffered log entries. Call this during a graceful shutdown
 // when no more log writes are expected. If no buffered outputs are configured,
 // Flush is a no-op.
-func (l *Log) Flush() error {
-	if l.bufferedWriteSyncer != nil {
-		return l.bufferedWriteSyncer.Stop()
+func (z *Zap) Flush() error {
+	if z.bufferedWriteSyncer != nil {
+		return z.bufferedWriteSyncer.Stop()
 	}
 
-	return syncFileOutputs(l.outputs)
+	return syncFileOutputs(z.outputs)
 }
 
 func syncFileOutputs(outputs []io.Writer) error {
@@ -214,9 +290,9 @@ func syncFileOutputs(outputs []io.Writer) error {
 }
 
 // StdLogger returns the standard logger associated to the logger
-func (l *Log) StdLogger() *golog.Logger {
-	stdlogger, _ := zap.NewStdLogAt(l.logger, l.logger.Level())
-	redirect, _ := zap.RedirectStdLogAt(l.logger, l.logger.Level())
+func (z *Zap) StdLogger() *golog.Logger {
+	stdlogger, _ := zap.NewStdLogAt(z.logger, z.logger.Level())
+	redirect, _ := zap.RedirectStdLogAt(z.logger, z.logger.Level())
 	defer redirect()
 	return stdlogger
 }

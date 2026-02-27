@@ -6,6 +6,7 @@ import "google/protobuf/duration.proto";
 import "internal/actor.proto";
 import "internal/dependency.proto";
 import "internal/grain.proto";
+import "internal/metric.proto";
 import "internal/passivation.proto";
 import "internal/peers.proto";
 import "internal/reentrancy.proto";
@@ -168,7 +169,7 @@ message TopicMessage {
   bytes message = 3;
 }
 
-message RemoteChildRequest {
+message RemoteStashSizeRequest {
   // Specifies the remote host address
   string host = 1;
   // Specifies the remote port
@@ -177,7 +178,151 @@ message RemoteChildRequest {
   string name = 3;
 }
 
-message RemoteChildResponse {
+message RemoteStashSizeResponse {
+  // Specifies the stash size
+  uint64 size = 1;
+}
+
+message RemoteRoleRequest {
+  // Specifies the remote host address
+  string host = 1;
+  // Specifies the remote port
+  int32 port = 2;
+  // Specifies the actor name
+  string name = 3;
+}
+
+message RemoteRoleResponse {
+  // Specifies the role
+  string role = 1;
+}
+
+message RemoteDependenciesRequest {
+  // Specifies the remote host address
+  string host = 1;
+  // Specifies the remote port
+  int32 port = 2;
+  // Specifies the actor name
+  string name = 3;
+}
+
+message RemoteDependenciesResponse {
+  // Specifies the dependencies
+  repeated internalpb.Dependency dependencies = 1;
+}
+
+message RemoteMetricRequest {
+  // Specifies the remote host address
+  string host = 1;
+  // Specifies the remote port
+  int32 port = 2;
+  // Specifies the actor name
+  string name = 3;
+}
+
+message RemoteMetricResponse {
+  // Specifies the metric
+  Metric metric = 1;
+}
+
+message RemoteKindRequest {
+  // Specifies the remote host address
+  string host = 1;
+  // Specifies the remote port
+  int32 port = 2;
+  // Specifies the actor name
+  string name = 3;
+}
+
+message RemoteKindResponse {
+  // Specifies the kind
+  string kind = 1;
+}
+
+message RemoteParentRequest {
+  // Specifies the remote host address
+  string host = 1;
+  // Specifies the remote port
+  int32 port = 2;
+  // Specifies the actor name
+  string name = 3;
+}
+
+message RemoteParentResponse {
+  // Specifies the parent
+  string address = 1;
+}
+
+message RemoteChildrenRequest {
+  // Specifies the remote host address
+  string host = 1;
+  // Specifies the remote port
+  int32 port = 2;
+  // Specifies the actor name
+  string name = 3;
+}
+
+message RemoteChildrenResponse {
+  // Specifies the children
+  repeated string addresses = 1;
+}
+
+message RemoteStateRequest {
+  // Specifies the remote host address
+  string host = 1;
+  // Specifies the remote port
+  int32 port = 2;
+  // Specifies the actor name
+  string name = 3;
+  // Specifies the state to check
+  State state = 4;
+}
+
+message RemoteStateResponse {
+  // Specifies whether the state is true or false
+  bool state = 1;
+}
+
+message RemotePassivationStrategyRequest {
+  // Specifies the remote host address
+  string host = 1;
+  // Specifies the remote port
+  int32 port = 2;
+  // Specifies the actor name
+  string name = 3;
+}
+
+message RemotePassivationStrategyResponse {
+  // Specifies the passivation strategy
+  PassivationStrategy passivation_strategy = 1;
+}
+
+message RemoteSpawnChildRequest {
+  // Specifies the remote host address
+  string host = 1;
+  // Specifies the remote port
+  int32 port = 2;
+  // Specifies the actor name.
+  string actor_name = 3;
+  // Specifies the actor type
+  string actor_type = 4;
+  // Specifies if the actor is relocatable
+  bool relocatable = 5;
+  // Specifies the passivation strategy
+  PassivationStrategy passivation_strategy = 6;
+  // Specifies the dependencies
+  repeated internalpb.Dependency dependencies = 7;
+  //  States whether the actor will require a stash buffer
+  bool enable_stash = 8;
+  // Specifies the reentrancy configuration when explicitly set
+  ReentrancyConfig reentrancy = 9;
+  // Specifies the parent actor name
+  string parent = 10;
+  // Specifies the supervisor configuration when explicitly set
+  SupervisorSpec supervisor = 11;
+}
+
+message RemoteSpawnChildResponse {
   // Specifies the actor address
   string address = 1;
 }

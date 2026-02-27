@@ -94,7 +94,7 @@ func TestNewZapCoreBufferedFile(t *testing.T) {
 func TestLogFlush(t *testing.T) {
 	t.Run("unbuffered", func(t *testing.T) {
 		buffer := new(bytes.Buffer)
-		logger := New(InfoLevel, buffer)
+		logger := NewZap(InfoLevel, buffer)
 		logger.Info("msg")
 		require.NoError(t, logger.Flush())
 	})
@@ -103,7 +103,7 @@ func TestLogFlush(t *testing.T) {
 		file := createTempLogFile(t)
 		defer file.Close()
 
-		logger := New(InfoLevel, file)
+		logger := NewZap(InfoLevel, file)
 		require.NotNil(t, logger.bufferedWriteSyncer)
 		logger.Info("msg")
 		require.NoError(t, logger.Flush())
@@ -113,7 +113,7 @@ func TestLogFlush(t *testing.T) {
 		file := createTempLogFile(t)
 		defer file.Close()
 
-		logger := New(ErrorLevel, file)
+		logger := NewZap(ErrorLevel, file)
 		require.Nil(t, logger.bufferedWriteSyncer)
 		logger.Error("msg")
 		require.NoError(t, logger.Flush())

@@ -105,7 +105,7 @@ func (x *topicActor) Receive(ctx *ReceiveContext) {
 func (x *topicActor) PostStop(ctx *Context) error {
 	x.topics.Reset()
 	x.processed.Reset()
-	ctx.ActorSystem().Logger().Infof("%s stopped successfully", ctx.ActorName())
+	ctx.ActorSystem().Logger().Infof("actor=%s stopped successfully", ctx.ActorName())
 	return nil
 }
 
@@ -257,14 +257,13 @@ func (x *topicActor) sendToRemoteTopicActors(cctx context.Context, remotePeers [
 // We remove the subscriber from all topics it is subscribed to.
 // This is important to avoid memory leaks and ensure that we do not send messages to terminated actors.
 func (x *topicActor) handleTerminated(msg *Terminated) {
-	for topic, subscribers := range x.topics.Values() {
-		// remove the subscriber from the topics
-		actorID := msg.Address()
+	actorID := msg.Address()
+	x.topics.Range(func(topic string, subscribers *xsync.Map[string, *PID]) {
 		if subscriber, ok := subscribers.Get(actorID); ok {
 			subscribers.Delete(subscriber.ID())
-			x.logger.Debugf("removed actor %s from topic %s", subscriber.Name(), topic)
+			x.logger.Debugf("removed actor=%s from topic=%s", subscriber.Name(), topic)
 		}
-	}
+	})
 }
 
 // handleUnsubscribe handles Unsubscribe message
@@ -307,7 +306,7 @@ func (x *topicActor) handlePostStart(ctx *ReceiveContext) {
 	x.logger = ctx.Logger()
 	x.cluster = ctx.ActorSystem().getCluster()
 	x.actorSystem = ctx.ActorSystem()
-	x.logger.Infof("%s started successfully", x.pid.Name())
+	x.logger.Infof("actor=%s started successfully", x.pid.Name())
 }
 
 // handleTopicMessage sends a cluster pubsub message to the local

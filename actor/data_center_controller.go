@@ -31,6 +31,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/datacentercontroller"
 	"github.com/tochemey/goakt/v4/internal/ticker"
 	"github.com/tochemey/goakt/v4/internal/types"
+	"github.com/tochemey/goakt/v4/log"
 )
 
 // DataCenterReady reports whether the multi-datacenter controller is operational.
@@ -79,7 +80,9 @@ func (x *actorSystem) stopControllerLocked(ctx context.Context) error {
 	}
 
 	if err := x.dataCenterController.Stop(ctx); err != nil {
-		x.logger.Errorf("failed to stop data center controller: %v", err)
+		if x.logger.Enabled(log.ErrorLevel) {
+			x.logger.Errorf("failed to stop data center controller: %v", err)
+		}
 		return err
 	}
 
@@ -183,14 +186,18 @@ func (x *actorSystem) maybeUpdateEndpoints(ctx context.Context) error {
 	}
 
 	// Endpoints changed; update the controller
-	x.logger.Infof("Data center endpoints changed from %v to %v; updating controller",
-		registeredEndpoints, currentEndpoints)
+	if x.logger.Enabled(log.InfoLevel) {
+		x.logger.Infof("data center endpoints changed from %v to %v; updating controller",
+			registeredEndpoints, currentEndpoints)
+	}
 
 	if err := x.dataCenterController.UpdateEndpoints(ctx, currentEndpoints); err != nil {
 		return fmt.Errorf("failed to update data center endpoints: %w", err)
 	}
 
-	x.logger.Infof("Data center endpoints updated successfully")
+	if x.logger.Enabled(log.InfoLevel) {
+		x.logger.Infof("data center endpoints updated successfully")
+	}
 	return nil
 }
 
@@ -207,7 +214,9 @@ func (x *actorSystem) triggerDataCentersReconciliation() {
 		ctx, cancel := context.WithTimeout(context.Background(), x.shutdownTimeout)
 		defer cancel()
 		if err := x.startDataCenterController(ctx); err != nil {
-			x.logger.Errorf("failed to reconcile data centers: %v", err)
+			if x.logger.Enabled(log.ErrorLevel) {
+				x.logger.Errorf("failed to reconcile data centers: %v", err)
+			}
 		}
 	}()
 }

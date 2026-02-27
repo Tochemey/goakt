@@ -68,6 +68,20 @@ func TestOption(t *testing.T) {
 			},
 		},
 		{
+			name:   "WithLogger_nil_uses_discard",
+			option: WithLogger(nil),
+			check: func(t *testing.T, sys *actorSystem) {
+				assert.Equal(t, log.DiscardLogger, sys.logger)
+			},
+		},
+		{
+			name:   "WithLoggingDisabled",
+			option: WithLoggingDisabled(),
+			check: func(t *testing.T, sys *actorSystem) {
+				assert.Equal(t, log.DiscardLogger, sys.logger)
+			},
+		},
+		{
 			name:   "WithShutdownTimeout",
 			option: WithShutdownTimeout(2 * time.Second),
 			check: func(t *testing.T, sys *actorSystem) {

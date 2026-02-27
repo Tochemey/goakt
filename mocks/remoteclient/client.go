@@ -5,13 +5,16 @@ package remoteclient
 import (
 	context "context"
 
+	extension "github.com/tochemey/goakt/v4/extension"
 	address "github.com/tochemey/goakt/v4/internal/address"
+	internalpb "github.com/tochemey/goakt/v4/internal/internalpb"
 
 	tls "crypto/tls"
 	time "time"
 
 	mock "github.com/stretchr/testify/mock"
 	net "github.com/tochemey/goakt/v4/internal/net"
+	passivation "github.com/tochemey/goakt/v4/passivation"
 	remote "github.com/tochemey/goakt/v4/remote"
 )
 
@@ -439,6 +442,187 @@ func (_c *Client_RemoteBatchTell_Call) RunAndReturn(run func(context.Context, *a
 	return _c
 }
 
+// RemoteChildren provides a mock function with given fields: ctx, host, port, name
+func (_m *Client) RemoteChildren(ctx context.Context, host string, port int, name string) ([]*address.Address, error) {
+	ret := _m.Called(ctx, host, port, name)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RemoteChildren")
+	}
+
+	var r0 []*address.Address
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, int, string) ([]*address.Address, error)); ok {
+		return rf(ctx, host, port, name)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, int, string) []*address.Address); ok {
+		r0 = rf(ctx, host, port, name)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*address.Address)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, int, string) error); ok {
+		r1 = rf(ctx, host, port, name)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// Client_RemoteChildren_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoteChildren'
+type Client_RemoteChildren_Call struct {
+	*mock.Call
+}
+
+// RemoteChildren is a helper method to define mock.On call
+//   - ctx context.Context
+//   - host string
+//   - port int
+//   - name string
+func (_e *Client_Expecter) RemoteChildren(ctx interface{}, host interface{}, port interface{}, name interface{}) *Client_RemoteChildren_Call {
+	return &Client_RemoteChildren_Call{Call: _e.mock.On("RemoteChildren", ctx, host, port, name)}
+}
+
+func (_c *Client_RemoteChildren_Call) Run(run func(ctx context.Context, host string, port int, name string)) *Client_RemoteChildren_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(int), args[3].(string))
+	})
+	return _c
+}
+
+func (_c *Client_RemoteChildren_Call) Return(addresses []*address.Address, err error) *Client_RemoteChildren_Call {
+	_c.Call.Return(addresses, err)
+	return _c
+}
+
+func (_c *Client_RemoteChildren_Call) RunAndReturn(run func(context.Context, string, int, string) ([]*address.Address, error)) *Client_RemoteChildren_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RemoteDependencies provides a mock function with given fields: ctx, host, port, name
+func (_m *Client) RemoteDependencies(ctx context.Context, host string, port int, name string) ([]extension.Dependency, error) {
+	ret := _m.Called(ctx, host, port, name)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RemoteDependencies")
+	}
+
+	var r0 []extension.Dependency
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, int, string) ([]extension.Dependency, error)); ok {
+		return rf(ctx, host, port, name)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, int, string) []extension.Dependency); ok {
+		r0 = rf(ctx, host, port, name)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]extension.Dependency)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, int, string) error); ok {
+		r1 = rf(ctx, host, port, name)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// Client_RemoteDependencies_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoteDependencies'
+type Client_RemoteDependencies_Call struct {
+	*mock.Call
+}
+
+// RemoteDependencies is a helper method to define mock.On call
+//   - ctx context.Context
+//   - host string
+//   - port int
+//   - name string
+func (_e *Client_Expecter) RemoteDependencies(ctx interface{}, host interface{}, port interface{}, name interface{}) *Client_RemoteDependencies_Call {
+	return &Client_RemoteDependencies_Call{Call: _e.mock.On("RemoteDependencies", ctx, host, port, name)}
+}
+
+func (_c *Client_RemoteDependencies_Call) Run(run func(ctx context.Context, host string, port int, name string)) *Client_RemoteDependencies_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(int), args[3].(string))
+	})
+	return _c
+}
+
+func (_c *Client_RemoteDependencies_Call) Return(dependencies []extension.Dependency, err error) *Client_RemoteDependencies_Call {
+	_c.Call.Return(dependencies, err)
+	return _c
+}
+
+func (_c *Client_RemoteDependencies_Call) RunAndReturn(run func(context.Context, string, int, string) ([]extension.Dependency, error)) *Client_RemoteDependencies_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RemoteKind provides a mock function with given fields: ctx, host, port, name
+func (_m *Client) RemoteKind(ctx context.Context, host string, port int, name string) (string, error) {
+	ret := _m.Called(ctx, host, port, name)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RemoteKind")
+	}
+
+	var r0 string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, int, string) (string, error)); ok {
+		return rf(ctx, host, port, name)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, int, string) string); ok {
+		r0 = rf(ctx, host, port, name)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, int, string) error); ok {
+		r1 = rf(ctx, host, port, name)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// Client_RemoteKind_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoteKind'
+type Client_RemoteKind_Call struct {
+	*mock.Call
+}
+
+// RemoteKind is a helper method to define mock.On call
+//   - ctx context.Context
+//   - host string
+//   - port int
+//   - name string
+func (_e *Client_Expecter) RemoteKind(ctx interface{}, host interface{}, port interface{}, name interface{}) *Client_RemoteKind_Call {
+	return &Client_RemoteKind_Call{Call: _e.mock.On("RemoteKind", ctx, host, port, name)}
+}
+
+func (_c *Client_RemoteKind_Call) Run(run func(ctx context.Context, host string, port int, name string)) *Client_RemoteKind_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(int), args[3].(string))
+	})
+	return _c
+}
+
+func (_c *Client_RemoteKind_Call) Return(kind string, err error) *Client_RemoteKind_Call {
+	_c.Call.Return(kind, err)
+	return _c
+}
+
+func (_c *Client_RemoteKind_Call) RunAndReturn(run func(context.Context, string, int, string) (string, error)) *Client_RemoteKind_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RemoteLookup provides a mock function with given fields: ctx, host, port, name
 func (_m *Client) RemoteLookup(ctx context.Context, host string, port int, name string) (*address.Address, error) {
 	ret := _m.Called(ctx, host, port, name)
@@ -496,6 +680,189 @@ func (_c *Client_RemoteLookup_Call) Return(addr *address.Address, err error) *Cl
 }
 
 func (_c *Client_RemoteLookup_Call) RunAndReturn(run func(context.Context, string, int, string) (*address.Address, error)) *Client_RemoteLookup_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RemoteMetric provides a mock function with given fields: ctx, host, port, name
+func (_m *Client) RemoteMetric(ctx context.Context, host string, port int, name string) (*internalpb.Metric, error) {
+	ret := _m.Called(ctx, host, port, name)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RemoteMetric")
+	}
+
+	var r0 *internalpb.Metric
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, int, string) (*internalpb.Metric, error)); ok {
+		return rf(ctx, host, port, name)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, int, string) *internalpb.Metric); ok {
+		r0 = rf(ctx, host, port, name)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*internalpb.Metric)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, int, string) error); ok {
+		r1 = rf(ctx, host, port, name)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// Client_RemoteMetric_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoteMetric'
+type Client_RemoteMetric_Call struct {
+	*mock.Call
+}
+
+// RemoteMetric is a helper method to define mock.On call
+//   - ctx context.Context
+//   - host string
+//   - port int
+//   - name string
+func (_e *Client_Expecter) RemoteMetric(ctx interface{}, host interface{}, port interface{}, name interface{}) *Client_RemoteMetric_Call {
+	return &Client_RemoteMetric_Call{Call: _e.mock.On("RemoteMetric", ctx, host, port, name)}
+}
+
+func (_c *Client_RemoteMetric_Call) Run(run func(ctx context.Context, host string, port int, name string)) *Client_RemoteMetric_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(int), args[3].(string))
+	})
+	return _c
+}
+
+func (_c *Client_RemoteMetric_Call) Return(metric *internalpb.Metric, err error) *Client_RemoteMetric_Call {
+	_c.Call.Return(metric, err)
+	return _c
+}
+
+func (_c *Client_RemoteMetric_Call) RunAndReturn(run func(context.Context, string, int, string) (*internalpb.Metric, error)) *Client_RemoteMetric_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RemoteParent provides a mock function with given fields: ctx, host, port, name
+func (_m *Client) RemoteParent(ctx context.Context, host string, port int, name string) (*address.Address, error) {
+	ret := _m.Called(ctx, host, port, name)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RemoteParent")
+	}
+
+	var r0 *address.Address
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, int, string) (*address.Address, error)); ok {
+		return rf(ctx, host, port, name)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, int, string) *address.Address); ok {
+		r0 = rf(ctx, host, port, name)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*address.Address)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, int, string) error); ok {
+		r1 = rf(ctx, host, port, name)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// Client_RemoteParent_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoteParent'
+type Client_RemoteParent_Call struct {
+	*mock.Call
+}
+
+// RemoteParent is a helper method to define mock.On call
+//   - ctx context.Context
+//   - host string
+//   - port int
+//   - name string
+func (_e *Client_Expecter) RemoteParent(ctx interface{}, host interface{}, port interface{}, name interface{}) *Client_RemoteParent_Call {
+	return &Client_RemoteParent_Call{Call: _e.mock.On("RemoteParent", ctx, host, port, name)}
+}
+
+func (_c *Client_RemoteParent_Call) Run(run func(ctx context.Context, host string, port int, name string)) *Client_RemoteParent_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(int), args[3].(string))
+	})
+	return _c
+}
+
+func (_c *Client_RemoteParent_Call) Return(parent *address.Address, err error) *Client_RemoteParent_Call {
+	_c.Call.Return(parent, err)
+	return _c
+}
+
+func (_c *Client_RemoteParent_Call) RunAndReturn(run func(context.Context, string, int, string) (*address.Address, error)) *Client_RemoteParent_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RemotePassivationStrategy provides a mock function with given fields: ctx, host, port, name
+func (_m *Client) RemotePassivationStrategy(ctx context.Context, host string, port int, name string) (passivation.Strategy, error) {
+	ret := _m.Called(ctx, host, port, name)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RemotePassivationStrategy")
+	}
+
+	var r0 passivation.Strategy
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, int, string) (passivation.Strategy, error)); ok {
+		return rf(ctx, host, port, name)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, int, string) passivation.Strategy); ok {
+		r0 = rf(ctx, host, port, name)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(passivation.Strategy)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, int, string) error); ok {
+		r1 = rf(ctx, host, port, name)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// Client_RemotePassivationStrategy_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemotePassivationStrategy'
+type Client_RemotePassivationStrategy_Call struct {
+	*mock.Call
+}
+
+// RemotePassivationStrategy is a helper method to define mock.On call
+//   - ctx context.Context
+//   - host string
+//   - port int
+//   - name string
+func (_e *Client_Expecter) RemotePassivationStrategy(ctx interface{}, host interface{}, port interface{}, name interface{}) *Client_RemotePassivationStrategy_Call {
+	return &Client_RemotePassivationStrategy_Call{Call: _e.mock.On("RemotePassivationStrategy", ctx, host, port, name)}
+}
+
+func (_c *Client_RemotePassivationStrategy_Call) Run(run func(ctx context.Context, host string, port int, name string)) *Client_RemotePassivationStrategy_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(int), args[3].(string))
+	})
+	return _c
+}
+
+func (_c *Client_RemotePassivationStrategy_Call) Return(strategy passivation.Strategy, err error) *Client_RemotePassivationStrategy_Call {
+	_c.Call.Return(strategy, err)
+	return _c
+}
+
+func (_c *Client_RemotePassivationStrategy_Call) RunAndReturn(run func(context.Context, string, int, string) (passivation.Strategy, error)) *Client_RemotePassivationStrategy_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -610,6 +977,65 @@ func (_c *Client_RemoteReinstate_Call) RunAndReturn(run func(context.Context, st
 	return _c
 }
 
+// RemoteRole provides a mock function with given fields: ctx, host, port, name
+func (_m *Client) RemoteRole(ctx context.Context, host string, port int, name string) (string, error) {
+	ret := _m.Called(ctx, host, port, name)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RemoteRole")
+	}
+
+	var r0 string
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, int, string) (string, error)); ok {
+		return rf(ctx, host, port, name)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, int, string) string); ok {
+		r0 = rf(ctx, host, port, name)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, int, string) error); ok {
+		r1 = rf(ctx, host, port, name)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// Client_RemoteRole_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoteRole'
+type Client_RemoteRole_Call struct {
+	*mock.Call
+}
+
+// RemoteRole is a helper method to define mock.On call
+//   - ctx context.Context
+//   - host string
+//   - port int
+//   - name string
+func (_e *Client_Expecter) RemoteRole(ctx interface{}, host interface{}, port interface{}, name interface{}) *Client_RemoteRole_Call {
+	return &Client_RemoteRole_Call{Call: _e.mock.On("RemoteRole", ctx, host, port, name)}
+}
+
+func (_c *Client_RemoteRole_Call) Run(run func(ctx context.Context, host string, port int, name string)) *Client_RemoteRole_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(int), args[3].(string))
+	})
+	return _c
+}
+
+func (_c *Client_RemoteRole_Call) Return(role string, err error) *Client_RemoteRole_Call {
+	_c.Call.Return(role, err)
+	return _c
+}
+
+func (_c *Client_RemoteRole_Call) RunAndReturn(run func(context.Context, string, int, string) (string, error)) *Client_RemoteRole_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RemoteSpawn provides a mock function with given fields: ctx, host, port, spawnRequest
 func (_m *Client) RemoteSpawn(ctx context.Context, host string, port int, spawnRequest *remote.SpawnRequest) (*string, error) {
 	ret := _m.Called(ctx, host, port, spawnRequest)
@@ -667,6 +1093,187 @@ func (_c *Client_RemoteSpawn_Call) Return(_a0 *string, _a1 error) *Client_Remote
 }
 
 func (_c *Client_RemoteSpawn_Call) RunAndReturn(run func(context.Context, string, int, *remote.SpawnRequest) (*string, error)) *Client_RemoteSpawn_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RemoteSpawnChild provides a mock function with given fields: ctx, host, port, name, childRequest
+func (_m *Client) RemoteSpawnChild(ctx context.Context, host string, port int, name string, childRequest *remote.SpawnChildRequest) (*address.Address, error) {
+	ret := _m.Called(ctx, host, port, name, childRequest)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RemoteSpawnChild")
+	}
+
+	var r0 *address.Address
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, int, string, *remote.SpawnChildRequest) (*address.Address, error)); ok {
+		return rf(ctx, host, port, name, childRequest)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, int, string, *remote.SpawnChildRequest) *address.Address); ok {
+		r0 = rf(ctx, host, port, name, childRequest)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*address.Address)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, int, string, *remote.SpawnChildRequest) error); ok {
+		r1 = rf(ctx, host, port, name, childRequest)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// Client_RemoteSpawnChild_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoteSpawnChild'
+type Client_RemoteSpawnChild_Call struct {
+	*mock.Call
+}
+
+// RemoteSpawnChild is a helper method to define mock.On call
+//   - ctx context.Context
+//   - host string
+//   - port int
+//   - name string
+//   - childRequest *remote.SpawnChildRequest
+func (_e *Client_Expecter) RemoteSpawnChild(ctx interface{}, host interface{}, port interface{}, name interface{}, childRequest interface{}) *Client_RemoteSpawnChild_Call {
+	return &Client_RemoteSpawnChild_Call{Call: _e.mock.On("RemoteSpawnChild", ctx, host, port, name, childRequest)}
+}
+
+func (_c *Client_RemoteSpawnChild_Call) Run(run func(ctx context.Context, host string, port int, name string, childRequest *remote.SpawnChildRequest)) *Client_RemoteSpawnChild_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(int), args[3].(string), args[4].(*remote.SpawnChildRequest))
+	})
+	return _c
+}
+
+func (_c *Client_RemoteSpawnChild_Call) Return(_a0 *address.Address, _a1 error) *Client_RemoteSpawnChild_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *Client_RemoteSpawnChild_Call) RunAndReturn(run func(context.Context, string, int, string, *remote.SpawnChildRequest) (*address.Address, error)) *Client_RemoteSpawnChild_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RemoteStashSize provides a mock function with given fields: ctx, host, port, name
+func (_m *Client) RemoteStashSize(ctx context.Context, host string, port int, name string) (uint64, error) {
+	ret := _m.Called(ctx, host, port, name)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RemoteStashSize")
+	}
+
+	var r0 uint64
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, int, string) (uint64, error)); ok {
+		return rf(ctx, host, port, name)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, int, string) uint64); ok {
+		r0 = rf(ctx, host, port, name)
+	} else {
+		r0 = ret.Get(0).(uint64)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, int, string) error); ok {
+		r1 = rf(ctx, host, port, name)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// Client_RemoteStashSize_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoteStashSize'
+type Client_RemoteStashSize_Call struct {
+	*mock.Call
+}
+
+// RemoteStashSize is a helper method to define mock.On call
+//   - ctx context.Context
+//   - host string
+//   - port int
+//   - name string
+func (_e *Client_Expecter) RemoteStashSize(ctx interface{}, host interface{}, port interface{}, name interface{}) *Client_RemoteStashSize_Call {
+	return &Client_RemoteStashSize_Call{Call: _e.mock.On("RemoteStashSize", ctx, host, port, name)}
+}
+
+func (_c *Client_RemoteStashSize_Call) Run(run func(ctx context.Context, host string, port int, name string)) *Client_RemoteStashSize_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(int), args[3].(string))
+	})
+	return _c
+}
+
+func (_c *Client_RemoteStashSize_Call) Return(size uint64, err error) *Client_RemoteStashSize_Call {
+	_c.Call.Return(size, err)
+	return _c
+}
+
+func (_c *Client_RemoteStashSize_Call) RunAndReturn(run func(context.Context, string, int, string) (uint64, error)) *Client_RemoteStashSize_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RemoteState provides a mock function with given fields: ctx, host, port, name, state
+func (_m *Client) RemoteState(ctx context.Context, host string, port int, name string, state remote.ActorState) (bool, error) {
+	ret := _m.Called(ctx, host, port, name, state)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RemoteState")
+	}
+
+	var r0 bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, int, string, remote.ActorState) (bool, error)); ok {
+		return rf(ctx, host, port, name, state)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, int, string, remote.ActorState) bool); ok {
+		r0 = rf(ctx, host, port, name, state)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, int, string, remote.ActorState) error); ok {
+		r1 = rf(ctx, host, port, name, state)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// Client_RemoteState_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoteState'
+type Client_RemoteState_Call struct {
+	*mock.Call
+}
+
+// RemoteState is a helper method to define mock.On call
+//   - ctx context.Context
+//   - host string
+//   - port int
+//   - name string
+//   - state remote.ActorState
+func (_e *Client_Expecter) RemoteState(ctx interface{}, host interface{}, port interface{}, name interface{}, state interface{}) *Client_RemoteState_Call {
+	return &Client_RemoteState_Call{Call: _e.mock.On("RemoteState", ctx, host, port, name, state)}
+}
+
+func (_c *Client_RemoteState_Call) Run(run func(ctx context.Context, host string, port int, name string, state remote.ActorState)) *Client_RemoteState_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(int), args[3].(string), args[4].(remote.ActorState))
+	})
+	return _c
+}
+
+func (_c *Client_RemoteState_Call) Return(ok bool, err error) *Client_RemoteState_Call {
+	_c.Call.Return(ok, err)
+	return _c
+}
+
+func (_c *Client_RemoteState_Call) RunAndReturn(run func(context.Context, string, int, string, remote.ActorState) (bool, error)) *Client_RemoteState_Call {
 	_c.Call.Return(run)
 	return _c
 }

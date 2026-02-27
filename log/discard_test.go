@@ -47,6 +47,14 @@ func TestDiscardLoggerBasics(t *testing.T) {
 
 	require.Equal(t, InfoLevel, logger.LogLevel())
 
+	// Enabled returns false for all levels except Fatal and Panic
+	assert.False(t, logger.Enabled(DebugLevel))
+	assert.False(t, logger.Enabled(InfoLevel))
+	assert.False(t, logger.Enabled(WarningLevel))
+	assert.False(t, logger.Enabled(ErrorLevel))
+	assert.True(t, logger.Enabled(FatalLevel))
+	assert.True(t, logger.Enabled(PanicLevel))
+
 	outputs := logger.LogOutput()
 	require.Len(t, outputs, 1)
 	require.Equal(t, io.Discard, outputs[0])

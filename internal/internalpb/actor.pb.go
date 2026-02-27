@@ -122,6 +122,64 @@ func (SupervisorDirective) EnumDescriptor() ([]byte, []int) {
 	return file_internal_actor_proto_rawDescGZIP(), []int{1}
 }
 
+type State int32
+
+const (
+	State_STATE_UNKNOWN     State = 0
+	State_STATE_RUNNING     State = 1
+	State_STATE_SUSPENDED   State = 2
+	State_STATE_STOPPING    State = 3
+	State_STATE_RELOCATABLE State = 4
+	State_STATE_SINGLETON   State = 5
+)
+
+// Enum value maps for State.
+var (
+	State_name = map[int32]string{
+		0: "STATE_UNKNOWN",
+		1: "STATE_RUNNING",
+		2: "STATE_SUSPENDED",
+		3: "STATE_STOPPING",
+		4: "STATE_RELOCATABLE",
+		5: "STATE_SINGLETON",
+	}
+	State_value = map[string]int32{
+		"STATE_UNKNOWN":     0,
+		"STATE_RUNNING":     1,
+		"STATE_SUSPENDED":   2,
+		"STATE_STOPPING":    3,
+		"STATE_RELOCATABLE": 4,
+		"STATE_SINGLETON":   5,
+	}
+)
+
+func (x State) Enum() *State {
+	p := new(State)
+	*p = x
+	return p
+}
+
+func (x State) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (State) Descriptor() protoreflect.EnumDescriptor {
+	return file_internal_actor_proto_enumTypes[2].Descriptor()
+}
+
+func (State) Type() protoreflect.EnumType {
+	return &file_internal_actor_proto_enumTypes[2]
+}
+
+func (x State) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use State.Descriptor instead.
+func (State) EnumDescriptor() ([]byte, []int) {
+	return file_internal_actor_proto_rawDescGZIP(), []int{2}
+}
+
 // SupervisorDirectiveRule binds an error type to a directive.
 type SupervisorDirectiveRule struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -498,7 +556,14 @@ const file_internal_actor_proto_rawDesc = "" +
 	"\x19SUPERVISOR_DIRECTIVE_STOP\x10\x00\x12\x1f\n" +
 	"\x1bSUPERVISOR_DIRECTIVE_RESUME\x10\x01\x12 \n" +
 	"\x1cSUPERVISOR_DIRECTIVE_RESTART\x10\x02\x12!\n" +
-	"\x1dSUPERVISOR_DIRECTIVE_ESCALATE\x10\x03B\xa3\x01\n" +
+	"\x1dSUPERVISOR_DIRECTIVE_ESCALATE\x10\x03*\x82\x01\n" +
+	"\x05State\x12\x11\n" +
+	"\rSTATE_UNKNOWN\x10\x00\x12\x11\n" +
+	"\rSTATE_RUNNING\x10\x01\x12\x13\n" +
+	"\x0fSTATE_SUSPENDED\x10\x02\x12\x12\n" +
+	"\x0eSTATE_STOPPING\x10\x03\x12\x15\n" +
+	"\x11STATE_RELOCATABLE\x10\x04\x12\x13\n" +
+	"\x0fSTATE_SINGLETON\x10\x05B\xa3\x01\n" +
 	"\x0ecom.internalpbB\n" +
 	"ActorProtoH\x02P\x01Z;github.com/tochemey/goakt/v4/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
 	"Internalpb\xca\x02\n" +
@@ -517,33 +582,34 @@ func file_internal_actor_proto_rawDescGZIP() []byte {
 	return file_internal_actor_proto_rawDescData
 }
 
-var file_internal_actor_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_internal_actor_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
 var file_internal_actor_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_internal_actor_proto_goTypes = []any{
 	(SupervisorStrategy)(0),         // 0: internalpb.SupervisorStrategy
 	(SupervisorDirective)(0),        // 1: internalpb.SupervisorDirective
-	(*SupervisorDirectiveRule)(nil), // 2: internalpb.SupervisorDirectiveRule
-	(*SupervisorSpec)(nil),          // 3: internalpb.SupervisorSpec
-	(*Actor)(nil),                   // 4: internalpb.Actor
-	(*SingletonSpec)(nil),           // 5: internalpb.SingletonSpec
-	(*durationpb.Duration)(nil),     // 6: google.protobuf.Duration
-	(*PassivationStrategy)(nil),     // 7: internalpb.PassivationStrategy
-	(*Dependency)(nil),              // 8: internalpb.Dependency
-	(*ReentrancyConfig)(nil),        // 9: internalpb.ReentrancyConfig
+	(State)(0),                      // 2: internalpb.State
+	(*SupervisorDirectiveRule)(nil), // 3: internalpb.SupervisorDirectiveRule
+	(*SupervisorSpec)(nil),          // 4: internalpb.SupervisorSpec
+	(*Actor)(nil),                   // 5: internalpb.Actor
+	(*SingletonSpec)(nil),           // 6: internalpb.SingletonSpec
+	(*durationpb.Duration)(nil),     // 7: google.protobuf.Duration
+	(*PassivationStrategy)(nil),     // 8: internalpb.PassivationStrategy
+	(*Dependency)(nil),              // 9: internalpb.Dependency
+	(*ReentrancyConfig)(nil),        // 10: internalpb.ReentrancyConfig
 }
 var file_internal_actor_proto_depIdxs = []int32{
 	1,  // 0: internalpb.SupervisorDirectiveRule.directive:type_name -> internalpb.SupervisorDirective
 	0,  // 1: internalpb.SupervisorSpec.strategy:type_name -> internalpb.SupervisorStrategy
-	6,  // 2: internalpb.SupervisorSpec.timeout:type_name -> google.protobuf.Duration
-	2,  // 3: internalpb.SupervisorSpec.directives:type_name -> internalpb.SupervisorDirectiveRule
+	7,  // 2: internalpb.SupervisorSpec.timeout:type_name -> google.protobuf.Duration
+	3,  // 3: internalpb.SupervisorSpec.directives:type_name -> internalpb.SupervisorDirectiveRule
 	1,  // 4: internalpb.SupervisorSpec.any_error_directive:type_name -> internalpb.SupervisorDirective
-	5,  // 5: internalpb.Actor.singleton:type_name -> internalpb.SingletonSpec
-	7,  // 6: internalpb.Actor.passivation_strategy:type_name -> internalpb.PassivationStrategy
-	8,  // 7: internalpb.Actor.dependencies:type_name -> internalpb.Dependency
-	3,  // 8: internalpb.Actor.supervisor:type_name -> internalpb.SupervisorSpec
-	9,  // 9: internalpb.Actor.reentrancy:type_name -> internalpb.ReentrancyConfig
-	6,  // 10: internalpb.SingletonSpec.spawn_timeout:type_name -> google.protobuf.Duration
-	6,  // 11: internalpb.SingletonSpec.wait_interval:type_name -> google.protobuf.Duration
+	6,  // 5: internalpb.Actor.singleton:type_name -> internalpb.SingletonSpec
+	8,  // 6: internalpb.Actor.passivation_strategy:type_name -> internalpb.PassivationStrategy
+	9,  // 7: internalpb.Actor.dependencies:type_name -> internalpb.Dependency
+	4,  // 8: internalpb.Actor.supervisor:type_name -> internalpb.SupervisorSpec
+	10, // 9: internalpb.Actor.reentrancy:type_name -> internalpb.ReentrancyConfig
+	7,  // 10: internalpb.SingletonSpec.spawn_timeout:type_name -> google.protobuf.Duration
+	7,  // 11: internalpb.SingletonSpec.wait_interval:type_name -> google.protobuf.Duration
 	12, // [12:12] is the sub-list for method output_type
 	12, // [12:12] is the sub-list for method input_type
 	12, // [12:12] is the sub-list for extension type_name
@@ -566,7 +632,7 @@ func file_internal_actor_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_actor_proto_rawDesc), len(file_internal_actor_proto_rawDesc)),
-			NumEnums:      2,
+			NumEnums:      3,
 			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   0,

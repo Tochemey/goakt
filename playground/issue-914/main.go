@@ -78,7 +78,7 @@ func (n *Actor1) PostStop(*goakt.Context) error {
 
 func main() {
 	ctx := context.Background()
-	logger := log.New(log.InfoLevel, os.Stdout)
+	logger := log.NewZap(log.InfoLevel, os.Stdout)
 
 	var actorSystem goakt.ActorSystem
 	var err error

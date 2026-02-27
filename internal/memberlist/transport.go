@@ -72,7 +72,7 @@ func NewTransport(config TransportConfig) (*Transport, error) {
 	var ok bool
 	t := Transport{
 		config:   config,
-		logger:   log.New(log.InfoLevel, os.Stdout),
+		logger:   log.NewZap(log.InfoLevel, os.Stdout),
 		packetCh: make(chan *memberlist.Packet),
 		connCh:   make(chan net.Conn),
 	}

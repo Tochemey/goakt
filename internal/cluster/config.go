@@ -64,7 +64,7 @@ func defaultConfig() *config {
 		bootstrapTimeout:        10 * time.Second,
 		routingTableInterval:    time.Minute,
 		triggerBalancerInterval: time.Second,
-		logger:                  log.New(log.ErrorLevel, os.Stderr),
+		logger:                  log.NewZap(log.ErrorLevel, os.Stderr),
 		shardHasher:             hash.DefaultHasher(),
 		tlsInfo:                 nil,
 	}

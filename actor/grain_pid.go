@@ -106,7 +106,9 @@ func newGrainPID(identity *GrainIdentity, grain Grain, actorSystem ActorSystem, 
 // activate activates the Grain
 func (pid *grainPID) activate(ctx context.Context) (err error) {
 	logger := pid.logger
-	logger.Infof("Activating Grain %s ...", pid.identity.String())
+	if logger.Enabled(log.InfoLevel) {
+		logger.Infof("grain=%s activating", pid.identity.String())
+	}
 
 	retries := pid.config.initMaxRetries.Load()
 	timeout := pid.config.initTimeout.Load()
@@ -146,14 +148,18 @@ func (pid *grainPID) activate(ctx context.Context) (err error) {
 		return pid.grain.OnActivate(ctx, newGrainProps(pid.identity, pid.actorSystem, pid.dependencies.Values()))
 	}); err != nil {
 		cancel()
-		pid.logger.Errorf("Grain %s activation failed.", pid.identity.String())
+		if pid.logger.Enabled(log.ErrorLevel) {
+			pid.logger.Errorf("grain=%s activation failed (hint: check OnActivate implementation)", pid.identity.String())
+		}
 		return gerrors.NewErrGrainActivationFailure(err)
 	}
 
 	pid.activated.Store(true)
 	pid.activatedAt.Store(time.Now().Unix())
 	pid.deactivateAfter.Store(pid.config.deactivateAfter)
-	pid.logger.Infof("Grain %s successfully activated.", pid.identity.String())
+	if pid.logger.Enabled(log.InfoLevel) {
+		pid.logger.Infof("grain=%s activated successfully", pid.identity.String())
+	}
 	cancel()
 
 	pid.markActivity(time.Now())
@@ -206,13 +212,17 @@ func (pid *grainPID) deactivate(ctx context.Context) (err error) {
 		pid.disableRelocation.Store(false)
 	}()
 
-	logger.Infof("Deactivating Grain %s ...", pid.identity.String())
+	if logger.Enabled(log.InfoLevel) {
+		logger.Infof("grain=%s deactivating", pid.identity.String())
+	}
 	if pid.remoting != nil {
 		pid.remoting.Close()
 	}
 
 	if err := pid.grain.OnDeactivate(ctx, newGrainProps(pid.identity, pid.actorSystem, pid.dependencies.Values())); err != nil {
-		pid.logger.Errorf("Grain %s deactivation failed.", pid.identity.String())
+		if pid.logger.Enabled(log.ErrorLevel) {
+			pid.logger.Errorf("grain=%s deactivation failed (hint: check OnDeactivate implementation)", pid.identity.String())
+		}
 		return gerrors.NewErrGrainDeactivationFailure(err)
 	}
 
@@ -222,12 +232,16 @@ func (pid *grainPID) deactivate(ctx context.Context) (err error) {
 	actorSystem.getGrains().Delete(identity.String())
 	if actorSystem.InCluster() {
 		if err := actorSystem.getCluster().RemoveGrain(ctx, pid.identity.String()); err != nil {
-			pid.logger.Errorf("Failed to remove grain %s from cluster: %v", pid.identity.String(), err)
+			if pid.logger.Enabled(log.ErrorLevel) {
+				pid.logger.Errorf("failed to remove grain=%s from cluster: %v (hint: check cluster connectivity)", pid.identity.String(), err)
+			}
 			return gerrors.NewErrGrainDeactivationFailure(err)
 		}
 	}
 
-	pid.logger.Infof("Grain %s successfully deactivated.", pid.identity.String())
+	if pid.logger.Enabled(log.InfoLevel) {
+		pid.logger.Infof("grain=%s deactivated successfully", pid.identity.String())
+	}
 	return nil
 }
 
@@ -381,9 +395,13 @@ func (pid *grainPID) passivationTry(reason string) bool {
 		return false
 	}
 
-	pid.logger.Infof("Passivation triggered for Grain %s (%s)", pid.identity.String(), reason)
+	if pid.logger.Enabled(log.InfoLevel) {
+		pid.logger.Infof("grain=%s reason=%s passivation triggered", pid.identity.String(), reason)
+	}
 	if err := pid.deactivate(context.Background()); err != nil {
-		pid.logger.Errorf("Dailed to passivate Grain %s: %v", pid.identity.String(), err)
+		if pid.logger.Enabled(log.ErrorLevel) {
+			pid.logger.Errorf("failed to passivate grain=%s: %v (hint: check OnPassivate implementation)", pid.identity.String(), err)
+		}
 		return false
 	}
 	return true

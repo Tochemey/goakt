@@ -33,6 +33,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/address"
@@ -40,6 +41,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/codec"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	inet "github.com/tochemey/goakt/v4/internal/net"
+	"github.com/tochemey/goakt/v4/internal/pointer"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/remote"
 )
@@ -113,7 +115,7 @@ func (x *actorSystem) remoteLookupHandler(ctx context.Context, conn inet.Connect
 		if err != nil {
 			if errors.Is(err, cluster.ErrActorNotFound) {
 				err := gerrors.NewErrAddressNotFound(actorName)
-				logger.Error(err.Error())
+				logger.Errorf("remote lookup: actor=%s not found: %v (hint: verify actor exists on target node)", actorName, err)
 				return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 			}
 
@@ -126,7 +128,7 @@ func (x *actorSystem) remoteLookupHandler(ctx context.Context, conn inet.Connect
 	pidNode, exist := x.actors.node(addr.String())
 	if !exist {
 		err := gerrors.NewErrAddressNotFound(addr.String())
-		logger.Error(err.Error())
+		logger.Errorf("remote lookup: address=%s not found: %v (hint: verify address, check remoting config)", addr.String(), err)
 		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 	}
 
@@ -176,21 +178,21 @@ func (x *actorSystem) remoteAskHandler(ctx context.Context, conn inet.Connection
 		node, exist := x.actors.node(addr.String())
 		if !exist {
 			err := gerrors.NewErrAddressNotFound(addr.String())
-			logger.Error(err.Error())
+			logger.Errorf("remote ask: address=%s not found: %v (hint: verify actor exists on target node)", addr.String(), err)
 			return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 		}
 
 		pid := node.value()
 		if !pid.IsRunning() {
 			err := gerrors.NewErrRemoteSendFailure(gerrors.ErrDead)
-			logger.Error(err.Error())
+			logger.Errorf("remote ask: actor=%s not running: %v (hint: actor may have stopped, retry or check target)", addr.String(), err)
 			return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
 		}
 
 		reply, err := x.handleRemoteAsk(ctx, pid, message, timeout)
 		if err != nil {
 			err := gerrors.NewErrRemoteSendFailure(err)
-			logger.Error(err.Error())
+			logger.Errorf("remote ask failed: %v", err)
 			if errors.Is(err, gerrors.ErrRequestTimeout) {
 				return toProtoError(internalpb.Code_CODE_DEADLINE_EXCEEDED, err), nil
 			}
@@ -238,19 +240,19 @@ func (x *actorSystem) remoteTellHandler(ctx context.Context, conn inet.Connectio
 		node, exist := x.actors.node(addr.String())
 		if !exist {
 			err := gerrors.NewErrAddressNotFound(addr.String())
-			logger.Error(err)
+			logger.Errorf("remote tell: address=%s not found: %v (hint: verify actor exists on target node)", addr.String(), err)
 			return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 		}
 
 		pid := node.value()
 		if !pid.IsRunning() {
 			err := gerrors.NewErrRemoteSendFailure(gerrors.ErrDead)
-			logger.Error(err.Error())
+			logger.Errorf("remote tell: actor=%s not running: %v (hint: actor may have stopped)", addr.String(), err)
 			return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
 		}
 
 		if err := x.handleRemoteTell(ctx, pid, message); err != nil {
-			logger.Error(err.Error())
+			logger.Errorf("remote tell failed: %v", err)
 			return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
 		}
 	}
@@ -287,14 +289,14 @@ func (x *actorSystem) remoteReSpawnHandler(ctx context.Context, conn inet.Connec
 	node, exist := x.actors.node(actorAddress.String())
 	if !exist {
 		err := gerrors.NewErrAddressNotFound(actorAddress.String())
-		logger.Error(err)
+		logger.Errorf("remote respawn: address=%s not found: %v", actorAddress.String(), err)
 		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 	}
 
 	pid := node.value()
 	if err := pid.Restart(ctx); err != nil {
 		err := fmt.Errorf("failed to restart actor=%s: %w", actorAddress.String(), err)
-		logger.Error(err.Error())
+		logger.Errorf("remote respawn failed: %v", err)
 		return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
 	}
 
@@ -330,14 +332,14 @@ func (x *actorSystem) remoteStopHandler(ctx context.Context, conn inet.Connectio
 	pidNode, exist := x.actors.node(actorAddress.String())
 	if !exist {
 		err := gerrors.NewErrAddressNotFound(actorAddress.String())
-		logger.Error(err.Error())
+		logger.Errorf("remote stop: address=%s not found: %v", actorAddress.String(), err)
 		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 	}
 
 	pid := pidNode.value()
 	if err := pid.Shutdown(ctx); err != nil {
 		err := fmt.Errorf("failed to stop actor=%s: %w", actorAddress.String(), err)
-		logger.Error(err.Error())
+		logger.Errorf("remote stop failed: %v", err)
 		return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
 	}
 
@@ -371,7 +373,7 @@ func (x *actorSystem) remoteSpawnHandler(ctx context.Context, conn inet.Connecti
 	actor, err := x.reflection.instantiateActor(request.GetActorType())
 	if err != nil {
 		logger.Errorf(
-			"Failed to create Actor [(%s) of type (%s)] on [host=%s, port=%d]: reason: (%v)",
+			"failed to create actor (%s) of type (%s) on host=%s port=%d: %v (hint: verify actor type registered with WithTypes)",
 			request.GetActorName(), request.GetActorType(), request.GetHost(), request.GetPort(), err,
 		)
 
@@ -406,11 +408,11 @@ func (x *actorSystem) remoteSpawnHandler(ctx context.Context, conn inet.Connecti
 
 		pid, err := x.SpawnSingleton(ctx, request.GetActorName(), actor, singletonOpts...)
 		if err != nil {
-			logger.Errorf("Failed to create Actor (%s) on [host=%s, port=%d]: reason: (%v)", request.GetActorName(), request.GetHost(), request.GetPort(), err)
+			logger.Errorf("failed to create actor (%s) on host=%s port=%d: %v (hint: check cluster quorum, singleton config)", request.GetActorName(), request.GetHost(), request.GetPort(), err)
 			return wrapSpawnErr(err), nil
 		}
 
-		logger.Infof("Actor (%s) successfully created on [host=%s, port=%d]", request.GetActorName(), request.GetHost(), request.GetPort())
+		logger.Infof("actor=%s host=%s port=%d actor created successfully", request.GetActorName(), request.GetHost(), request.GetPort())
 		return &internalpb.RemoteSpawnResponse{Address: pid.ID()}, nil
 	}
 
@@ -445,7 +447,7 @@ func (x *actorSystem) remoteSpawnHandler(ctx context.Context, conn inet.Connecti
 	if len(request.GetDependencies()) > 0 {
 		dependencies, err := x.reflection.dependenciesFromProto(request.GetDependencies()...)
 		if err != nil {
-			logger.Errorf("Failed to create Actor (%s) on [host=%s, port=%d]: reason: (%v)", request.GetActorName(), request.GetHost(), request.GetPort(), err)
+			logger.Errorf("failed to create actor (%s) on host=%s port=%d: %v (hint: verify actor type registered, check dependencies)", request.GetActorName(), request.GetHost(), request.GetPort(), err)
 			return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
 		}
 		opts = append(opts, WithDependencies(dependencies...))
@@ -453,12 +455,496 @@ func (x *actorSystem) remoteSpawnHandler(ctx context.Context, conn inet.Connecti
 
 	pid, err := x.Spawn(ctx, request.GetActorName(), actor, opts...)
 	if err != nil {
-		logger.Errorf("Failed to create Actor (%s) on [host=%s, port=%d]: reason: (%v)", request.GetActorName(), request.GetHost(), request.GetPort(), err)
+		logger.Errorf("failed to create actor (%s) on host=%s port=%d: %v (hint: verify actor type registered, check dependencies)", request.GetActorName(), request.GetHost(), request.GetPort(), err)
 		return wrapSpawnErr(err), nil
 	}
 
-	logger.Infof("Actor (%s) successfully created on [host=%s, port=%d]", request.GetActorName(), request.GetHost(), request.GetPort())
+	logger.Infof("actor=%s created on host=%s port=%d", request.GetActorName(), request.GetHost(), request.GetPort())
 	return &internalpb.RemoteSpawnResponse{Address: pid.ID()}, nil
+}
+
+// remoteSpawnChildHandler handles RemoteSpawnChild requests over the proto TCP transport.
+// It spawns a child actor on this node under an existing parent actor.
+func (x *actorSystem) remoteSpawnChildHandler(ctx context.Context, conn inet.Connection, req proto.Message) (proto.Message, error) {
+	request, ok := req.(*internalpb.RemoteSpawnChildRequest)
+	if !ok {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, errors.New("invalid request type")), nil
+	}
+
+	if !x.remotingEnabled.Load() {
+		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrRemotingDisabled), nil
+	}
+
+	host := request.GetHost()
+	port := request.GetPort()
+	childName := request.GetActorName()
+	parentName := request.GetParent()
+
+	// Validate host and port
+	if err := x.validateRemoteHost(host, port); err != nil {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
+	}
+
+	if isSystemName(childName) || isSystemName(parentName) {
+		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.NewErrActorNotFound(childName)), nil
+	}
+
+	parentAddress := address.New(parentName, x.Name(), host, int(port))
+	parentAddrStr := parentAddress.String()
+	parentNode, exist := x.actors.node(parentAddrStr)
+	if !exist {
+		err := gerrors.NewErrAddressNotFound(parentAddrStr)
+		x.logger.Errorf("spawn child: parent=%s not found: %v", parentAddrStr, err)
+		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
+	}
+
+	pid := parentNode.value()
+	if !pid.IsRunning() {
+		err := gerrors.NewErrActorNotFound(parentAddrStr)
+		x.logger.Errorf("spawn child: parent=%s not running: %v", parentAddrStr, err)
+		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
+	}
+
+	if pid.Kind() != request.GetActorType() {
+		x.logger.Errorf("spawn child: invalid actor kind: %v", gerrors.ErrInvalidKinds)
+		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrInvalidKinds), nil
+	}
+
+	opts := make([]SpawnOption, 0, 6)
+	opts = append(opts, WithPassivationStrategy(codec.DecodePassivationStrategy(request.GetPassivationStrategy())))
+	if !request.GetRelocatable() {
+		opts = append(opts, WithRelocationDisabled())
+	}
+
+	if request.GetEnableStash() {
+		opts = append(opts, WithStashing())
+	}
+
+	if reent := request.GetReentrancy(); reent != nil {
+		opts = append(opts, WithReentrancy(codec.DecodeReentrancy(reent)))
+	}
+
+	if sup := request.GetSupervisor(); sup != nil {
+		if decoded := codec.DecodeSupervisor(sup); decoded != nil {
+			opts = append(opts, WithSupervisor(decoded))
+		}
+	}
+
+	if deps := request.GetDependencies(); len(deps) > 0 {
+		dependencies, err := x.reflection.dependenciesFromProto(deps...)
+		if err != nil {
+			x.logger.Errorf("failed to create child actor=%s of parent=%s on host=%s port=%d: %v", childName, parentName, host, port, err)
+			return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
+		}
+		opts = append(opts, WithDependencies(dependencies...))
+	}
+
+	cid, err := pid.SpawnChild(ctx, childName, pid.Actor(), opts...)
+	if err != nil {
+		x.logger.Errorf("Failed to create child Actor (%s) of parent (%s) on [host=%s, port=%d]: reason: (%v)", childName, parentName, host, port, err)
+		if errors.Is(err, gerrors.ErrActorAlreadyExists) {
+			return toProtoError(internalpb.Code_CODE_ALREADY_EXISTS, err), nil
+		}
+
+		return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
+	}
+
+	x.logger.Infof("actor=%s parent=%s host=%s port=%d child actor created successfully", childName, parentName, host, port)
+	return &internalpb.RemoteSpawnChildResponse{Address: cid.ID()}, nil
+}
+
+// remotePassivationStrategyHandler handles RemotePassivationStrategy requests over the proto TCP transport.
+// It returns the passivation strategy of an actor on this node.
+func (x *actorSystem) remotePassivationStrategyHandler(ctx context.Context, conn inet.Connection, req proto.Message) (proto.Message, error) {
+	request, ok := req.(*internalpb.RemotePassivationStrategyRequest)
+	if !ok {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, errors.New("invalid request type")), nil
+	}
+
+	logger := x.logger
+
+	if !x.remotingEnabled.Load() {
+		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrRemotingDisabled), nil
+	}
+
+	host := request.GetHost()
+	port := request.GetPort()
+	name := request.GetName()
+
+	if err := x.validateRemoteHost(host, port); err != nil {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
+	}
+
+	addr := address.New(name, x.Name(), host, int(port))
+	pidNode, exist := x.actors.node(addr.String())
+	if !exist {
+		err := gerrors.NewErrAddressNotFound(addr.String())
+		logger.Errorf("passivation strategy: address=%s not found: %v", addr.String(), err)
+		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
+	}
+
+	pid := pidNode.value()
+	if !pid.IsRunning() {
+		err := gerrors.NewErrActorNotFound(addr.String())
+		logger.Errorf("passivation strategy: actor=%s not running: %v", addr.String(), err)
+		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
+	}
+
+	return &internalpb.RemotePassivationStrategyResponse{PassivationStrategy: codec.EncodePassivationStrategy(pid.PassivationStrategy())}, nil
+}
+
+// remoteStateHandler handles RemoteState requests over the proto TCP transport.
+// It returns the state of an actor on this node.
+func (x *actorSystem) remoteStateHandler(ctx context.Context, conn inet.Connection, req proto.Message) (proto.Message, error) {
+	request, ok := req.(*internalpb.RemoteStateRequest)
+	if !ok {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, errors.New("invalid request type")), nil
+	}
+
+	logger := x.logger
+
+	if !x.remotingEnabled.Load() {
+		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrRemotingDisabled), nil
+	}
+
+	host := request.GetHost()
+	port := request.GetPort()
+	name := request.GetName()
+	state := request.GetState()
+
+	if err := x.validateRemoteHost(host, port); err != nil {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
+	}
+
+	addr := address.New(name, x.Name(), host, int(port))
+	pidNode, exist := x.actors.node(addr.String())
+	if !exist {
+		err := gerrors.NewErrAddressNotFound(addr.String())
+		logger.Errorf("remote state: address=%s not found: %v", addr.String(), err)
+		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
+	}
+
+	pid := pidNode.value()
+	switch state {
+	case internalpb.State_STATE_RUNNING:
+		return &internalpb.RemoteStateResponse{State: pid.IsRunning()}, nil
+	case internalpb.State_STATE_STOPPING:
+		return &internalpb.RemoteStateResponse{State: pid.IsStopping()}, nil
+	case internalpb.State_STATE_SUSPENDED:
+		return &internalpb.RemoteStateResponse{State: pid.IsSuspended()}, nil
+	case internalpb.State_STATE_RELOCATABLE:
+		return &internalpb.RemoteStateResponse{State: pid.IsRelocatable()}, nil
+	case internalpb.State_STATE_SINGLETON:
+		return &internalpb.RemoteStateResponse{State: pid.IsSingleton()}, nil
+	}
+
+	return &internalpb.RemoteStateResponse{State: false}, nil
+}
+
+// remoteChildrenHandler handles RemoteChildren requests over the proto TCP transport.
+// It returns the children of an actor on this node.
+func (x *actorSystem) remoteChildrenHandler(ctx context.Context, conn inet.Connection, req proto.Message) (proto.Message, error) {
+	request, ok := req.(*internalpb.RemoteChildrenRequest)
+	if !ok {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, errors.New("invalid request type")), nil
+	}
+
+	logger := x.logger
+
+	if !x.remotingEnabled.Load() {
+		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrRemotingDisabled), nil
+	}
+
+	host := request.GetHost()
+	port := request.GetPort()
+	name := request.GetName()
+
+	if err := x.validateRemoteHost(host, port); err != nil {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
+	}
+
+	addr := address.New(name, x.Name(), host, int(port))
+	pidNode, exist := x.actors.node(addr.String())
+	if !exist {
+		err := gerrors.NewErrAddressNotFound(addr.String())
+		logger.Errorf("remote children: address=%s not found: %v", addr.String(), err)
+		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
+	}
+
+	pid := pidNode.value()
+	if !pid.IsRunning() {
+		err := gerrors.NewErrActorNotFound(addr.String())
+		logger.Errorf("remote children: actor=%s not running: %v", addr.String(), err)
+		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
+	}
+
+	children := pid.Children()
+	addresses := make([]string, 0, len(children))
+	for _, child := range children {
+		addresses = append(addresses, child.ID())
+	}
+	return &internalpb.RemoteChildrenResponse{Addresses: addresses}, nil
+}
+
+// remoteParentHandler handles RemoteParent requests over the proto TCP transport.
+// It returns the parent of an actor on this node.
+func (x *actorSystem) remoteParentHandler(ctx context.Context, conn inet.Connection, req proto.Message) (proto.Message, error) {
+	request, ok := req.(*internalpb.RemoteParentRequest)
+	if !ok {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, errors.New("invalid request type")), nil
+	}
+
+	logger := x.logger
+
+	if !x.remotingEnabled.Load() {
+		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrRemotingDisabled), nil
+	}
+
+	host := request.GetHost()
+	port := request.GetPort()
+	name := request.GetName()
+
+	if err := x.validateRemoteHost(host, port); err != nil {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
+	}
+
+	addr := address.New(name, x.Name(), host, int(port))
+	pidNode, exist := x.actors.node(addr.String())
+	if !exist {
+		err := gerrors.NewErrAddressNotFound(addr.String())
+		logger.Errorf("remote parent: address=%s not found: %v", addr.String(), err)
+		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
+	}
+
+	pid := pidNode.value()
+	if !pid.IsRunning() || pid.Parent() == nil {
+		err := gerrors.NewErrActorNotFound(addr.String())
+		logger.Errorf("remote parent: actor=%s not running or has no parent: %v", addr.String(), err)
+		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
+	}
+
+	return &internalpb.RemoteParentResponse{Address: pid.Parent().ID()}, nil
+}
+
+// remoteKindHandler handles RemoteKind requests over the proto TCP transport.
+// It returns the kind of an actor on this node.
+func (x *actorSystem) remoteKindHandler(ctx context.Context, conn inet.Connection, req proto.Message) (proto.Message, error) {
+	request, ok := req.(*internalpb.RemoteKindRequest)
+	if !ok {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, errors.New("invalid request type")), nil
+	}
+
+	logger := x.logger
+
+	if !x.remotingEnabled.Load() {
+		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrRemotingDisabled), nil
+	}
+
+	host := request.GetHost()
+	port := request.GetPort()
+	name := request.GetName()
+
+	if err := x.validateRemoteHost(host, port); err != nil {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
+	}
+
+	addr := address.New(name, x.Name(), host, int(port))
+	pidNode, exist := x.actors.node(addr.String())
+	if !exist {
+		err := gerrors.NewErrAddressNotFound(addr.String())
+		logger.Errorf("passivation strategy: address=%s not found: %v", addr.String(), err)
+		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
+	}
+
+	pid := pidNode.value()
+	if !pid.IsRunning() {
+		err := gerrors.NewErrActorNotFound(addr.String())
+		logger.Errorf("passivation strategy: actor=%s not running: %v", addr.String(), err)
+		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
+	}
+
+	return &internalpb.RemoteKindResponse{Kind: pid.Kind()}, nil
+}
+
+// remoteDependenciesHandler handles RemoteDependencies requests over the proto TCP transport.
+// It returns the dependencies of an actor on this node.
+func (x *actorSystem) remoteDependenciesHandler(ctx context.Context, conn inet.Connection, req proto.Message) (proto.Message, error) {
+	request, ok := req.(*internalpb.RemoteDependenciesRequest)
+	if !ok {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, errors.New("invalid request type")), nil
+	}
+
+	logger := x.logger
+
+	if !x.remotingEnabled.Load() {
+		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrRemotingDisabled), nil
+	}
+
+	host := request.GetHost()
+	port := request.GetPort()
+	name := request.GetName()
+
+	if err := x.validateRemoteHost(host, port); err != nil {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
+	}
+
+	addr := address.New(name, x.Name(), host, int(port))
+	pidNode, exist := x.actors.node(addr.String())
+	if !exist {
+		err := gerrors.NewErrAddressNotFound(addr.String())
+		logger.Errorf("passivation strategy: address=%s not found: %v", addr.String(), err)
+		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
+	}
+
+	pid := pidNode.value()
+	if !pid.IsRunning() {
+		err := gerrors.NewErrActorNotFound(addr.String())
+		logger.Errorf("passivation strategy: actor=%s not running: %v", addr.String(), err)
+		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
+	}
+
+	dependencies, err := codec.EncodeDependencies(pid.Dependencies()...)
+	if err != nil {
+		logger.Errorf("failed to encode dependencies for actor=%s on host=%s port=%d: %v", name, host, port, err)
+		return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
+	}
+
+	return &internalpb.RemoteDependenciesResponse{Dependencies: dependencies}, nil
+}
+
+// remoteMetricHandler handles RemoteMetric requests over the proto TCP transport.
+// It returns the metric of an actor on this node.
+func (x *actorSystem) remoteMetricHandler(ctx context.Context, conn inet.Connection, req proto.Message) (proto.Message, error) {
+	request, ok := req.(*internalpb.RemoteMetricRequest)
+	if !ok {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, errors.New("invalid request type")), nil
+	}
+
+	logger := x.logger
+
+	if !x.remotingEnabled.Load() {
+		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrRemotingDisabled), nil
+	}
+
+	host := request.GetHost()
+	port := request.GetPort()
+	name := request.GetName()
+
+	if err := x.validateRemoteHost(host, port); err != nil {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
+	}
+
+	addr := address.New(name, x.Name(), host, int(port))
+	pidNode, exist := x.actors.node(addr.String())
+	if !exist {
+		err := gerrors.NewErrAddressNotFound(addr.String())
+		logger.Errorf("passivation strategy: address=%s not found: %v", addr.String(), err)
+		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
+	}
+
+	pid := pidNode.value()
+	if !pid.IsRunning() {
+		err := gerrors.NewErrActorNotFound(addr.String())
+		logger.Errorf("passivation strategy: actor=%s not running: %v", addr.String(), err)
+		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
+	}
+
+	metric := pid.Metric(ctx)
+	if metric == nil {
+		return new(internalpb.RemoteMetricResponse), nil
+	}
+
+	return &internalpb.RemoteMetricResponse{Metric: &internalpb.Metric{
+		DeadlettersCount:        metric.DeadlettersCount(),
+		ChildrenCount:           metric.ChidrenCount(),
+		Uptime:                  metric.Uptime(),
+		LatestProcessedDuration: durationpb.New(metric.LatestProcessedDuration()),
+		RestartCount:            metric.RestartCount(),
+		ProcessedCount:          metric.ProcessedCount(),
+		StashSize:               metric.StashSize(),
+		FailureCount:            metric.FailureCount(),
+		ReinstateCount:          metric.ReinstateCount(),
+	}}, nil
+}
+
+// remoteRoleHandler handles RemoteRole requests over the proto TCP transport.
+// It returns the role of an actor on this node.
+func (x *actorSystem) remoteRoleHandler(ctx context.Context, conn inet.Connection, req proto.Message) (proto.Message, error) {
+	request, ok := req.(*internalpb.RemoteRoleRequest)
+	if !ok {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, errors.New("invalid request type")), nil
+	}
+
+	logger := x.logger
+
+	if !x.remotingEnabled.Load() {
+		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrRemotingDisabled), nil
+	}
+
+	host := request.GetHost()
+	port := request.GetPort()
+	name := request.GetName()
+
+	if err := x.validateRemoteHost(host, port); err != nil {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
+	}
+
+	addr := address.New(name, x.Name(), host, int(port))
+	pidNode, exist := x.actors.node(addr.String())
+	if !exist {
+		err := gerrors.NewErrAddressNotFound(addr.String())
+		logger.Errorf("passivation strategy: address=%s not found: %v", addr.String(), err)
+		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
+	}
+
+	pid := pidNode.value()
+	if !pid.IsRunning() {
+		err := gerrors.NewErrActorNotFound(addr.String())
+		logger.Errorf("passivation strategy: actor=%s not running: %v", addr.String(), err)
+		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
+	}
+
+	return &internalpb.RemoteRoleResponse{Role: pointer.Deref(pid.Role(), "")}, nil
+}
+
+// remoteStashSizeHandler handles RemoteStashSize requests over the proto TCP transport.
+// It returns the stash size of an actor on this node.
+func (x *actorSystem) remoteStashSizeHandler(ctx context.Context, conn inet.Connection, req proto.Message) (proto.Message, error) {
+	request, ok := req.(*internalpb.RemoteStashSizeRequest)
+	if !ok {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, errors.New("invalid request type")), nil
+	}
+
+	logger := x.logger
+
+	if !x.remotingEnabled.Load() {
+		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrRemotingDisabled), nil
+	}
+
+	host := request.GetHost()
+	port := request.GetPort()
+	name := request.GetName()
+
+	if err := x.validateRemoteHost(host, port); err != nil {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
+	}
+
+	addr := address.New(name, x.Name(), host, int(port))
+	pidNode, exist := x.actors.node(addr.String())
+	if !exist {
+		err := gerrors.NewErrAddressNotFound(addr.String())
+		logger.Errorf("passivation strategy: address=%s not found: %v", addr.String(), err)
+		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
+	}
+
+	pid := pidNode.value()
+	if !pid.IsRunning() {
+		err := gerrors.NewErrActorNotFound(addr.String())
+		logger.Errorf("passivation strategy: actor=%s not running: %v", addr.String(), err)
+		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
+	}
+
+	return &internalpb.RemoteStashSizeResponse{Size: pid.StashSize()}, nil
 }
 
 // remoteReinstateHandler handles RemoteReinstate requests over the proto TCP transport.
@@ -491,7 +977,7 @@ func (x *actorSystem) remoteReinstateHandler(ctx context.Context, conn inet.Conn
 	pidNode, exist := x.actors.node(addr.String())
 	if !exist {
 		err := gerrors.NewErrAddressNotFound(addr.String())
-		logger.Error(err.Error())
+		logger.Errorf("remote reinstate: address=%s not found: %v", addr.String(), err)
 		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 	}
 
@@ -552,7 +1038,7 @@ func (x *actorSystem) remoteAskGrainHandler(ctx context.Context, conn inet.Conne
 
 	reply, err := x.localSend(ctx, identity, message, timeout.AsDuration(), true)
 	if err != nil {
-		logger.Errorf("Failed to send to Grain (%s) on [host=%s, port=%d]: reason: (%v)", identity.String(), request.GetGrain().GetHost(), request.GetGrain().GetPort(), err)
+		logger.Errorf("failed to send to grain=%s on host=%s port=%d: %v", identity.String(), request.GetGrain().GetHost(), request.GetGrain().GetPort(), err)
 		return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
 	}
 
@@ -611,7 +1097,7 @@ func (x *actorSystem) remoteTellGrainHandler(ctx context.Context, conn inet.Conn
 
 	_, err = x.localSend(ctx, identity, message, DefaultGrainRequestTimeout, false)
 	if err != nil {
-		logger.Errorf("Failed to send message to Grain (%s) on [host=%s, port=%d]: reason: (%v)", identity.String(), request.GetGrain().GetHost(), request.GetGrain().GetPort(), err)
+		logger.Errorf("failed to send message to grain=%s on host=%s port=%d: %v", identity.String(), request.GetGrain().GetHost(), request.GetGrain().GetPort(), err)
 		return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
 	}
 
@@ -642,11 +1128,11 @@ func (x *actorSystem) remoteActivateGrainHandler(ctx context.Context, conn inet.
 	}
 
 	if err := x.recreateGrain(ctx, grain); err != nil {
-		logger.Errorf("Failed to recreate Grain (%s) on [host=%s, port=%d]: reason: (%v)", grain.GetGrainId().GetValue(), host, port, err)
+		logger.Errorf("failed to recreate grain=%s on host=%s port=%d: %v", grain.GetGrainId().GetValue(), host, port, err)
 		return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
 	}
 
-	logger.Infof("Recreated Grain (%s) on [host=%s, port=%d]", grain.GetGrainId().GetValue(), host, port)
+	logger.Infof("recreated grain=%s on host=%s port=%d", grain.GetGrainId().GetValue(), host, port)
 	return new(internalpb.RemoteActivateGrainResponse), nil
 }
 
@@ -669,10 +1155,10 @@ func (x *actorSystem) persistPeerStateHandler(ctx context.Context, conn inet.Con
 	}
 
 	peerAddr := fmt.Sprintf("%s:%d", request.GetPeerState().GetHost(), request.GetPeerState().GetPeersPort())
-	logger.Infof("Node (%s) is persisting its Peer (%s) state", x.PeersAddress(), peerAddr)
+	logger.Infof("node=%s persisting peer=%s state", x.PeersAddress(), peerAddr)
 
 	if err := x.clusterStore.PersistPeerState(ctx, request.GetPeerState()); err != nil {
-		logger.Errorf("Node (%s) failed to persist Peer (%s) state: %v", x.PeersAddress(), peerAddr, err)
+		logger.Errorf("node=%s failed to persist peer=%s state: %v", x.PeersAddress(), peerAddr, err)
 		return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
 	}
 
@@ -753,6 +1239,16 @@ func (x *actorSystem) protoServerOptions() []inet.ProtoServerOption {
 		inet.WithProtoHandler("internalpb.RemoteReSpawnRequest", x.remoteReSpawnHandler),
 		inet.WithProtoHandler("internalpb.RemoteStopRequest", x.remoteStopHandler),
 		inet.WithProtoHandler("internalpb.RemoteSpawnRequest", x.remoteSpawnHandler),
+		inet.WithProtoHandler("internalpb.RemoteSpawnChildRequest", x.remoteSpawnChildHandler),
+		inet.WithProtoHandler("internalpb.RemotePassivationStrategyRequest", x.remotePassivationStrategyHandler),
+		inet.WithProtoHandler("internalpb.RemoteStateRequest", x.remoteStateHandler),
+		inet.WithProtoHandler("internalpb.RemoteChildrenRequest", x.remoteChildrenHandler),
+		inet.WithProtoHandler("internalpb.RemoteParentRequest", x.remoteParentHandler),
+		inet.WithProtoHandler("internalpb.RemoteKindRequest", x.remoteKindHandler),
+		inet.WithProtoHandler("internalpb.RemoteDependenciesRequest", x.remoteDependenciesHandler),
+		inet.WithProtoHandler("internalpb.RemoteMetricRequest", x.remoteMetricHandler),
+		inet.WithProtoHandler("internalpb.RemoteRoleRequest", x.remoteRoleHandler),
+		inet.WithProtoHandler("internalpb.RemoteStashSizeRequest", x.remoteStashSizeHandler),
 		inet.WithProtoHandler("internalpb.RemoteReinstateRequest", x.remoteReinstateHandler),
 		inet.WithProtoHandler("internalpb.RemoteAskGrainRequest", x.remoteAskGrainHandler),
 		inet.WithProtoHandler("internalpb.RemoteTellGrainRequest", x.remoteTellGrainHandler),

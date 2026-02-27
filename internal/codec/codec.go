@@ -25,6 +25,7 @@ package codec
 import (
 	"fmt"
 	"math"
+	"reflect"
 	"sort"
 	"time"
 
@@ -38,6 +39,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/passivation"
 	"github.com/tochemey/goakt/v4/reentrancy"
+	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/supervisor"
 )
 
@@ -58,6 +60,57 @@ func EncodeDependencies(dependencies ...extension.Dependency) ([]*internalpb.Dep
 		})
 	}
 	return output, nil
+}
+
+// DecodeDependencies decodes protobuf dependencies into extension.Dependency instances
+// using the provided registry to resolve types by name.
+//
+// Parameters:
+//   - registry: Type registry containing registered dependency implementations.
+//   - dependencies: Protobuf dependency messages from a remote response.
+//
+// Returns:
+//   - A slice of decoded extension.Dependency instances.
+//
+// Errors:
+//   - When registry is nil.
+//   - When a dependency type is not registered in the registry.
+//   - When UnmarshalBinary fails for a dependency.
+func DecodeDependencies(registry types.Registry, dependencies ...*internalpb.Dependency) ([]extension.Dependency, error) {
+	if registry == nil {
+		return nil, fmt.Errorf("registry required to decode dependencies")
+	}
+	deps := make([]extension.Dependency, 0, len(dependencies))
+	for _, dep := range dependencies {
+		if dep == nil {
+			continue
+		}
+		dependency, err := decodeDependencyFromBytes(registry, dep.GetTypeName(), dep.GetBytea())
+		if err != nil {
+			return nil, err
+		}
+		deps = append(deps, dependency)
+	}
+	return deps, nil
+}
+
+func decodeDependencyFromBytes(registry types.Registry, typeName string, bytea []byte) (extension.Dependency, error) {
+	dept, ok := registry.TypeOf(typeName)
+	if !ok {
+		return nil, fmt.Errorf("dependency type %q not registered", typeName)
+	}
+	elem := reflect.TypeOf((*extension.Dependency)(nil)).Elem()
+	if !dept.Implements(elem) && !reflect.PointerTo(dept).Implements(elem) {
+		return nil, fmt.Errorf("type %q does not implement extension.Dependency", typeName)
+	}
+	instance := reflect.New(dept)
+	if dependency, ok := instance.Interface().(extension.Dependency); ok {
+		if err := dependency.UnmarshalBinary(bytea); err != nil {
+			return nil, err
+		}
+		return dependency, nil
+	}
+	return nil, fmt.Errorf("failed to instantiate dependency %q", typeName)
 }
 
 // EncodePassivationStrategy encodes a passivation strategy into its protobuf representation.
@@ -397,4 +450,10 @@ func fromProtoState(state internalpb.DataCenterState) datacenter.DataCenterState
 	default:
 		return ""
 	}
+}
+
+// EncodeActorState converts remote.ActorState to internalpb.State for wire transmission.
+// The remote.ActorState values align 1:1 with the proto enum (0-5).
+func EncodeActorState(state remote.ActorState) internalpb.State {
+	return internalpb.State(state)
 }

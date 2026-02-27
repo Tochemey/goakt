@@ -39,6 +39,7 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/codec"
 	"github.com/tochemey/goakt/v4/internal/id"
@@ -46,7 +47,9 @@ import (
 	inet "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pointer"
 	"github.com/tochemey/goakt/v4/internal/strconvx"
+	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/internal/xsync"
+	"github.com/tochemey/goakt/v4/passivation"
 	"github.com/tochemey/goakt/v4/remote"
 )
 
@@ -301,6 +304,159 @@ type Client interface {
 	// Note: The grain must already be activated, or the grain kind must be registered on the remote actor system using RegisterGrainKind.
 	RemoteAskGrain(ctx context.Context, host string, port int, grainRequest *remote.GrainRequest, message any, timeout time.Duration) (response any, err error)
 
+	// RemoteRole returns the role of an actor on the remote node.
+	//
+	// Parameters:
+	//   - ctx: Cancellation and deadlines.
+	//   - host, port: Location of the remote actor system.
+	//   - name: Actor name.
+	//
+	// Returns:
+	//   - role: The role of the actor.
+	//
+	// Errors:
+	//   - Transport and context errors.
+	RemoteRole(ctx context.Context, host string, port int, name string) (role string, err error)
+
+	// RemoteStashSize returns the stash size of an actor on the remote node.
+	//
+	// Parameters:
+	//   - ctx: Cancellation and deadlines.
+	//   - host, port: Location of the remote actor system.
+	//   - name: Actor name.
+	//
+	// Returns:
+	//   - size: The stash size of the actor.
+	//
+	// Errors:
+	//   - Transport and context errors.
+	RemoteStashSize(ctx context.Context, host string, port int, name string) (size uint64, err error)
+
+	// RemoteMetric returns the metric of an actor on the remote node.
+	//
+	// Parameters:
+	//   - ctx: Cancellation and deadlines.
+	//   - host, port: Location of the remote actor system.
+	//   - name: Actor name.
+	//
+	// Returns:
+	//   - metric: The metric of the actor.
+	// Errors:
+	//   - Transport and context errors.
+	RemoteMetric(ctx context.Context, host string, port int, name string) (metric *internalpb.Metric, err error)
+
+	// RemoteChildren returns the children of an actor on the remote node.
+	//
+	// Parameters:
+	//   - ctx: Cancellation and deadlines.
+	//   - host, port: Location of the remote actor system.
+	//   - name: Actor name.
+	//
+	// Returns:
+	//   - children: The children of the actor.	Addresses of the children.
+	//   - err: The error, if any.
+	//
+	// Errors:
+	//   - Transport and context errors.
+	RemoteChildren(ctx context.Context, host string, port int, name string) (addresses []*address.Address, err error)
+
+	// RemoteState returns whether the actor satisfies the given state predicate on the remote node.
+	//
+	// Parameters:
+	//   - ctx: Cancellation and deadlines.
+	//   - host, port: Location of the remote actor system.
+	//   - name: Actor name.
+	//   - state: The state to check (e.g., remote.ActorStateRunning, remote.ActorStateSuspended).
+	//
+	// Returns:
+	//   - ok: True if the actor satisfies the predicate (e.g., IsRunning when state is ActorStateRunning).
+	//
+	// Errors:
+	//   - Transport and context errors.
+	//   - NotFound if the actor does not exist.
+	RemoteState(ctx context.Context, host string, port int, name string, state remote.ActorState) (ok bool, err error)
+
+	// RemotePassivationStrategy returns the passivation strategy of an actor on the remote node.
+
+	// Parameters:
+	//   - ctx: Cancellation and deadlines.
+	//   - host, port: Location of the remote actor system.
+	//   - name: Actor name.
+	//
+	// Returns:
+	//   - strategy: The passivation strategy of the actor.
+	//   - err: The error, if any.
+	//
+	// Errors:
+	//   - Transport and context errors.
+	RemotePassivationStrategy(ctx context.Context, host string, port int, name string) (strategy passivation.Strategy, err error)
+
+	// RemoteSpawnChild requests creation of a new child actor on the remote node.
+	//
+	// Parameters:
+	//   - ctx: Cancellation and deadlines.
+	//   - host, port: Location of the remote actor system.
+	//   - name: Actor name.
+	//   - childRequest: Desired child name, type (kind), singleton/relocatable
+	//     flags, passivation strategy, dependencies, and stash behavior.
+	//
+	// Behavior:
+	//   - Validates and sanitizes childRequest before sending.
+	//   - Dependencies and passivation strategy are encoded for transport.
+	//
+	// Errors:
+	//   - ErrTypeNotRegistered when the remote system does not recognize the
+	//     actor type (kind).
+	//   - AlreadyExists or FailedPrecondition (server-dependent) if the name
+	//     conflicts with an existing actor.
+	//   - Transport and context errors.
+	RemoteSpawnChild(ctx context.Context, host string, port int, name string, childRequest *remote.SpawnChildRequest) (*address.Address, error)
+
+	// RemoteDependencies returns the dependencies of an actor on the remote node.
+	//
+	// Parameters:
+	//   - ctx: Cancellation and deadlines.
+	//   - host, port: Location of the remote actor system.
+	//   - name: Actor name.
+	//
+	// Returns:
+	//   - dependencies: The dependencies of the actor.
+	//   - err: The error, if any.
+
+	// Errors:
+	//   - Transport and context errors.
+	RemoteDependencies(ctx context.Context, host string, port int, name string) (dependencies []extension.Dependency, err error)
+
+	// RemoteParent returns the parent of an actor on the remote node.
+	//
+	// Parameters:
+	//   - ctx: Cancellation and deadlines.
+	//   - host, port: Location of the remote actor system.
+	//   - name: Actor name.
+	//
+	// Returns:
+	//   - parent: The parent of the actor.
+	//   - err: The error, if any.
+	//
+	// Errors:
+	//   - Transport and context errors.
+	RemoteParent(ctx context.Context, host string, port int, name string) (parent *address.Address, err error)
+
+	// RemoteKind returns the kind of an actor on the remote node.
+	//
+	// Parameters:
+	//   - ctx: Cancellation and deadlines.
+	//   - host, port: Location of the remote actor system.
+	//   - name: Actor name.
+	//
+	// Returns:
+	//   - kind: The kind of the actor.
+	//   - err: The error, if any.
+	//
+	// Errors:
+	//   - Transport and context errors.
+	RemoteKind(ctx context.Context, host string, port int, name string) (kind string, err error)
+
 	// NetClient returns a cached or newly created net client for the endpoint.
 	// The returned client maintains its own connection pool and should NOT be closed by
 	// callers — it lives for the lifetime of the Remoting instance.
@@ -473,6 +629,17 @@ func WithClientSerializers(msg any, serializer remote.Serializer) ClientOption {
 	}
 }
 
+// WithDependencyRegistry sets the registry used to decode remote dependencies into
+// extension.Dependency instances. Required for RemoteDependencies when the response
+// contains dependencies; without it, decoding returns an error.
+func WithDependencyRegistry(registry types.Registry) ClientOption {
+	return func(r *client) {
+		if registry != nil {
+			r.dependencyRegistry = registry
+		}
+	}
+}
+
 // ifaceEntry pairs a reflect.Type that represents an interface with the
 // [Serializer] to use for any message that implements that interface.
 // Entries are appended via [WithClientSerializers] and evaluated in
@@ -525,6 +692,10 @@ type client struct {
 	// options are applied and reused for every inbound message, avoiding a
 	// per-call heap allocation.
 	dispatcher remote.Serializer
+
+	// dependencyRegistry is used to decode remote dependencies into extension.Dependency.
+	// Required for RemoteDependencies when the response contains dependencies.
+	dependencyRegistry types.Registry
 }
 
 var _ Client = (*client)(nil)
@@ -604,6 +775,545 @@ func (r *client) NetClient(host string, port int) *inet.Client {
 	client := r.clientFactory(host, port)
 	r.clientCache.Set(cacheKey, client)
 	return client
+}
+
+// RemoteChildren returns the addresses of child actors of the given actor on the remote node.
+//
+// Parameters:
+//   - ctx: Governs cancellation and deadlines.
+//   - host, port: Location of the remote actor system.
+//   - name: Actor name.
+//
+// Returns:
+//   - addresses: The child actor addresses. Empty if the actor has no children.
+//
+// Errors:
+//   - Transport and context errors.
+//   - NotFound if the actor does not exist or is not running.
+func (r *client) RemoteChildren(ctx context.Context, host string, port int, name string) (addresses []*address.Address, err error) {
+	port32, err := strconvx.Int2Int32(port)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, err = r.enrichContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	client := r.NetClient(host, port)
+	request := &internalpb.RemoteChildrenRequest{
+		Host: host,
+		Port: port32,
+		Name: name,
+	}
+
+	resp, err := client.SendProto(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := checkProtoError(resp); err != nil {
+		return nil, err
+	}
+
+	childrenResp, ok := resp.(*internalpb.RemoteChildrenResponse)
+	if !ok {
+		return nil, errors.New("invalid response type")
+	}
+
+	addrs := make([]*address.Address, 0, len(childrenResp.GetAddresses()))
+	for _, addrStr := range childrenResp.GetAddresses() {
+		addr, parseErr := address.Parse(addrStr)
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		addrs = append(addrs, addr)
+	}
+	return addrs, nil
+}
+
+// RemoteDependencies returns the dependencies of an actor on the remote node.
+//
+// Parameters:
+//   - ctx: Governs cancellation and deadlines.
+//   - host, port: Location of the remote actor system.
+//   - name: Actor name.
+//
+// Returns:
+//   - dependencies: The actor's dependencies. Empty if the actor has none.
+//
+// Errors:
+//   - Transport and context errors.
+//   - An error when WithDependencyRegistry was not set and the response contains dependencies.
+//   - ErrDependencyTypeNotRegistered (or similar) when a dependency type is not in the registry.
+func (r *client) RemoteDependencies(ctx context.Context, host string, port int, name string) (dependencies []extension.Dependency, err error) {
+	port32, err := strconvx.Int2Int32(port)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, err = r.enrichContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	client := r.NetClient(host, port)
+	request := &internalpb.RemoteDependenciesRequest{
+		Host: host,
+		Port: port32,
+		Name: name,
+	}
+
+	resp, err := client.SendProto(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := checkProtoError(resp); err != nil {
+		return nil, err
+	}
+
+	depsResp, ok := resp.(*internalpb.RemoteDependenciesResponse)
+	if !ok {
+		return nil, errors.New("invalid response type")
+	}
+
+	pbDeps := depsResp.GetDependencies()
+	if len(pbDeps) == 0 {
+		return nil, nil
+	}
+
+	if r.dependencyRegistry == nil {
+		return nil, fmt.Errorf("dependency registry required to decode remote dependencies: use WithDependencyRegistry")
+	}
+
+	return codec.DecodeDependencies(r.dependencyRegistry, pbDeps...)
+}
+
+// RemoteKind returns the kind (type name) of an actor on the remote node.
+//
+// Parameters:
+//   - ctx: Governs cancellation and deadlines.
+//   - host, port: Location of the remote actor system.
+//   - name: Actor name.
+//
+// Returns:
+//   - kind: The reflected type name of the actor implementation.
+//
+// Errors:
+//   - Transport and context errors.
+//   - NotFound if the actor does not exist or is not running.
+func (r *client) RemoteKind(ctx context.Context, host string, port int, name string) (kind string, err error) {
+	port32, err := strconvx.Int2Int32(port)
+	if err != nil {
+		return "", err
+	}
+
+	ctx, err = r.enrichContext(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	client := r.NetClient(host, port)
+	request := &internalpb.RemoteKindRequest{
+		Host: host,
+		Port: port32,
+		Name: name,
+	}
+
+	resp, err := client.SendProto(ctx, request)
+	if err != nil {
+		return "", err
+	}
+
+	if err := checkProtoError(resp); err != nil {
+		return "", err
+	}
+
+	kindResp, ok := resp.(*internalpb.RemoteKindResponse)
+	if !ok {
+		return "", errors.New("invalid response type")
+	}
+
+	return kindResp.GetKind(), nil
+}
+
+// RemoteMetric returns the metric of an actor on the remote node.
+//
+// Parameters:
+//   - ctx: Governs cancellation and deadlines.
+//   - host, port: Location of the remote actor system.
+//   - name: Actor name.
+//
+// Returns:
+//   - metric: A point-in-time snapshot of the actor's counters and timings. Nil if the actor has no metric.
+//
+// Errors:
+//   - Transport and context errors.
+//   - NotFound if the actor does not exist or is not running.
+func (r *client) RemoteMetric(ctx context.Context, host string, port int, name string) (metric *internalpb.Metric, err error) {
+	port32, err := strconvx.Int2Int32(port)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, err = r.enrichContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	client := r.NetClient(host, port)
+	request := &internalpb.RemoteMetricRequest{
+		Host: host,
+		Port: port32,
+		Name: name,
+	}
+
+	resp, err := client.SendProto(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := checkProtoError(resp); err != nil {
+		return nil, err
+	}
+
+	metricResp, ok := resp.(*internalpb.RemoteMetricResponse)
+	if !ok {
+		return nil, errors.New("invalid response type")
+	}
+
+	return metricResp.GetMetric(), nil
+}
+
+// RemoteParent returns the parent address of an actor on the remote node.
+//
+// Parameters:
+//   - ctx: Governs cancellation and deadlines.
+//   - host, port: Location of the remote actor system.
+//   - name: Actor name.
+//
+// Returns:
+//   - parent: The parent actor's address. NoSender if the actor has no parent.
+//
+// Errors:
+//   - Transport and context errors.
+//   - NotFound if the actor does not exist, is not running, or has no parent.
+func (r *client) RemoteParent(ctx context.Context, host string, port int, name string) (parent *address.Address, err error) {
+	port32, err := strconvx.Int2Int32(port)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, err = r.enrichContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	client := r.NetClient(host, port)
+	request := &internalpb.RemoteParentRequest{
+		Host: host,
+		Port: port32,
+		Name: name,
+	}
+
+	resp, err := client.SendProto(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := checkProtoError(resp); err != nil {
+		return nil, err
+	}
+
+	parentResp, ok := resp.(*internalpb.RemoteParentResponse)
+	if !ok {
+		return nil, errors.New("invalid response type")
+	}
+
+	addrStr := parentResp.GetAddress()
+	if addrStr == "" {
+		return address.NoSender(), nil
+	}
+
+	return address.Parse(addrStr)
+}
+
+// RemotePassivationStrategy returns the passivation strategy of an actor on the remote node.
+//
+// Parameters:
+//   - ctx: Governs cancellation and deadlines.
+//   - host, port: Location of the remote actor system.
+//   - name: Actor name.
+//
+// Returns:
+//   - strategy: The passivation strategy (e.g., time-based, message-count-based, long-lived). Nil if none is set.
+//
+// Errors:
+//   - Transport and context errors.
+//   - NotFound if the actor does not exist or is not running.
+func (r *client) RemotePassivationStrategy(ctx context.Context, host string, port int, name string) (strategy passivation.Strategy, err error) {
+	port32, err := strconvx.Int2Int32(port)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, err = r.enrichContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	client := r.NetClient(host, port)
+	request := &internalpb.RemotePassivationStrategyRequest{
+		Host: host,
+		Port: port32,
+		Name: name,
+	}
+
+	resp, err := client.SendProto(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := checkProtoError(resp); err != nil {
+		return nil, err
+	}
+
+	strategyResp, ok := resp.(*internalpb.RemotePassivationStrategyResponse)
+	if !ok {
+		return nil, errors.New("invalid response type")
+	}
+
+	return codec.DecodePassivationStrategy(strategyResp.GetPassivationStrategy()), nil
+}
+
+// RemoteRole returns the cluster placement role of an actor on the remote node.
+//
+// Parameters:
+//   - ctx: Governs cancellation and deadlines.
+//   - host, port: Location of the remote actor system.
+//   - name: Actor name.
+//
+// Returns:
+//   - role: The role the actor was spawned with (e.g., "api", "projection"). Empty if none was set.
+//
+// Errors:
+//   - Transport and context errors.
+//   - NotFound if the actor does not exist or is not running.
+func (r *client) RemoteRole(ctx context.Context, host string, port int, name string) (role string, err error) {
+	port32, err := strconvx.Int2Int32(port)
+	if err != nil {
+		return "", err
+	}
+
+	ctx, err = r.enrichContext(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	client := r.NetClient(host, port)
+	request := &internalpb.RemoteRoleRequest{
+		Host: host,
+		Port: port32,
+		Name: name,
+	}
+
+	resp, err := client.SendProto(ctx, request)
+	if err != nil {
+		return "", err
+	}
+
+	if err := checkProtoError(resp); err != nil {
+		return "", err
+	}
+
+	roleResp, ok := resp.(*internalpb.RemoteRoleResponse)
+	if !ok {
+		return "", errors.New("invalid response type")
+	}
+
+	return roleResp.GetRole(), nil
+}
+
+// RemoteSpawnChild requests creation of a new child actor under the given parent on the remote node.
+//
+// Parameters:
+//   - ctx: Governs cancellation and deadlines.
+//   - host, port: Location of the remote actor system.
+//   - name: Parent actor name.
+//   - childRequest: Desired child name, type (kind), passivation strategy, dependencies, and stash behavior.
+//
+// Returns:
+//   - address: The address of the newly spawned child actor.
+//
+// Errors:
+//   - ErrTypeNotRegistered when the remote system does not recognize the actor type (kind).
+//   - AlreadyExists or FailedPrecondition if the child name conflicts with an existing actor.
+//   - Transport and context errors.
+func (r *client) RemoteSpawnChild(ctx context.Context, host string, port int, name string, childRequest *remote.SpawnChildRequest) (*address.Address, error) {
+	if err := childRequest.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid spawn request: %w", err)
+	}
+
+	childRequest.Sanitize()
+
+	port32, err := strconvx.Int2Int32(port)
+	if err != nil {
+		return nil, err
+	}
+
+	var dependencies []*internalpb.Dependency
+	if len(childRequest.Dependencies) > 0 {
+		dependencies, err = codec.EncodeDependencies(childRequest.Dependencies...)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	var reentrancy *internalpb.ReentrancyConfig
+	if childRequest.Reentrancy != nil {
+		reentrancy = codec.EncodeReentrancy(childRequest.Reentrancy)
+	}
+
+	ctx, err = r.enrichContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	client := r.NetClient(host, port)
+	request := &internalpb.RemoteSpawnChildRequest{
+		Host:                host,
+		Port:                port32,
+		ActorName:           childRequest.Name,
+		ActorType:           childRequest.Kind,
+		Parent:              name,
+		Relocatable:         childRequest.Relocatable,
+		PassivationStrategy: codec.EncodePassivationStrategy(childRequest.PassivationStrategy),
+		Dependencies:        dependencies,
+		EnableStash:         childRequest.EnableStashing,
+		Reentrancy:          reentrancy,
+		Supervisor:          codec.EncodeSupervisor(childRequest.Supervisor),
+	}
+
+	resp, err := client.SendProto(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := checkProtoError(resp); err != nil {
+		return nil, err
+	}
+
+	spawnResp, ok := resp.(*internalpb.RemoteSpawnChildResponse)
+	if !ok {
+		return nil, errors.New("invalid response type")
+	}
+
+	addrStr := spawnResp.GetAddress()
+	if addrStr == "" {
+		return nil, gerrors.ErrInvalidResponse
+	}
+
+	return address.Parse(addrStr)
+}
+
+// RemoteStashSize returns the stash size of an actor on the remote node.
+//
+// Parameters:
+//   - ctx: Governs cancellation and deadlines.
+//   - host, port: Location of the remote actor system.
+//   - name: Actor name.
+//
+// Returns:
+//   - size: The number of messages currently stashed by the actor.
+//
+// Errors:
+//   - Transport and context errors.
+//   - NotFound if the actor does not exist or is not running.
+func (r *client) RemoteStashSize(ctx context.Context, host string, port int, name string) (size uint64, err error) {
+	port32, err := strconvx.Int2Int32(port)
+	if err != nil {
+		return 0, err
+	}
+
+	ctx, err = r.enrichContext(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	client := r.NetClient(host, port)
+	request := &internalpb.RemoteStashSizeRequest{
+		Host: host,
+		Port: port32,
+		Name: name,
+	}
+
+	resp, err := client.SendProto(ctx, request)
+	if err != nil {
+		return 0, err
+	}
+
+	if err := checkProtoError(resp); err != nil {
+		return 0, err
+	}
+
+	stashResp, ok := resp.(*internalpb.RemoteStashSizeResponse)
+	if !ok {
+		return 0, errors.New("invalid response type")
+	}
+
+	return stashResp.GetSize(), nil
+}
+
+// RemoteState returns whether the actor satisfies the given state predicate on the remote node.
+//
+// Parameters:
+//   - ctx: Governs cancellation and deadlines.
+//   - host, port: Location of the remote actor system.
+//   - name: Actor name.
+//   - state: The state to check (e.g., remote.ActorStateRunning, remote.ActorStateSuspended).
+//
+// Returns:
+//   - ok: True if the actor satisfies the predicate; false otherwise.
+//
+// Errors:
+//   - Transport and context errors.
+//   - NotFound if the actor does not exist.
+func (r *client) RemoteState(ctx context.Context, host string, port int, name string, state remote.ActorState) (ok bool, err error) {
+	port32, err := strconvx.Int2Int32(port)
+	if err != nil {
+		return false, err
+	}
+
+	ctx, err = r.enrichContext(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	client := r.NetClient(host, port)
+	request := &internalpb.RemoteStateRequest{
+		Host:  host,
+		Port:  port32,
+		Name:  name,
+		State: codec.EncodeActorState(state),
+	}
+
+	resp, err := client.SendProto(ctx, request)
+	if err != nil {
+		return false, err
+	}
+
+	if err := checkProtoError(resp); err != nil {
+		return false, err
+	}
+
+	stateResp, ok := resp.(*internalpb.RemoteStateResponse)
+	if !ok {
+		return false, errors.New("invalid response type")
+	}
+
+	return stateResp.GetState(), nil
 }
 
 // RemoteActivateGrain requests activation of a grain on the given remote node.

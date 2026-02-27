@@ -1291,12 +1291,1173 @@ func (x *TopicMessage) GetMessage() []byte {
 	return nil
 }
 
+type RemoteStashSizeRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the remote host address
+	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
+	// Specifies the remote port
+	Port int32 `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
+	// Specifies the actor name
+	Name          string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoteStashSizeRequest) Reset() {
+	*x = RemoteStashSizeRequest{}
+	mi := &file_internal_remoting_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoteStashSizeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoteStashSizeRequest) ProtoMessage() {}
+
+func (x *RemoteStashSizeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_remoting_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoteStashSizeRequest.ProtoReflect.Descriptor instead.
+func (*RemoteStashSizeRequest) Descriptor() ([]byte, []int) {
+	return file_internal_remoting_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *RemoteStashSizeRequest) GetHost() string {
+	if x != nil {
+		return x.Host
+	}
+	return ""
+}
+
+func (x *RemoteStashSizeRequest) GetPort() int32 {
+	if x != nil {
+		return x.Port
+	}
+	return 0
+}
+
+func (x *RemoteStashSizeRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+type RemoteStashSizeResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the stash size
+	Size          uint64 `protobuf:"varint,1,opt,name=size,proto3" json:"size,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoteStashSizeResponse) Reset() {
+	*x = RemoteStashSizeResponse{}
+	mi := &file_internal_remoting_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoteStashSizeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoteStashSizeResponse) ProtoMessage() {}
+
+func (x *RemoteStashSizeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_remoting_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoteStashSizeResponse.ProtoReflect.Descriptor instead.
+func (*RemoteStashSizeResponse) Descriptor() ([]byte, []int) {
+	return file_internal_remoting_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *RemoteStashSizeResponse) GetSize() uint64 {
+	if x != nil {
+		return x.Size
+	}
+	return 0
+}
+
+type RemoteRoleRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the remote host address
+	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
+	// Specifies the remote port
+	Port int32 `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
+	// Specifies the actor name
+	Name          string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoteRoleRequest) Reset() {
+	*x = RemoteRoleRequest{}
+	mi := &file_internal_remoting_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoteRoleRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoteRoleRequest) ProtoMessage() {}
+
+func (x *RemoteRoleRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_remoting_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoteRoleRequest.ProtoReflect.Descriptor instead.
+func (*RemoteRoleRequest) Descriptor() ([]byte, []int) {
+	return file_internal_remoting_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *RemoteRoleRequest) GetHost() string {
+	if x != nil {
+		return x.Host
+	}
+	return ""
+}
+
+func (x *RemoteRoleRequest) GetPort() int32 {
+	if x != nil {
+		return x.Port
+	}
+	return 0
+}
+
+func (x *RemoteRoleRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+type RemoteRoleResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the role
+	Role          string `protobuf:"bytes,1,opt,name=role,proto3" json:"role,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoteRoleResponse) Reset() {
+	*x = RemoteRoleResponse{}
+	mi := &file_internal_remoting_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoteRoleResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoteRoleResponse) ProtoMessage() {}
+
+func (x *RemoteRoleResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_remoting_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoteRoleResponse.ProtoReflect.Descriptor instead.
+func (*RemoteRoleResponse) Descriptor() ([]byte, []int) {
+	return file_internal_remoting_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *RemoteRoleResponse) GetRole() string {
+	if x != nil {
+		return x.Role
+	}
+	return ""
+}
+
+type RemoteDependenciesRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the remote host address
+	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
+	// Specifies the remote port
+	Port int32 `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
+	// Specifies the actor name
+	Name          string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoteDependenciesRequest) Reset() {
+	*x = RemoteDependenciesRequest{}
+	mi := &file_internal_remoting_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoteDependenciesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoteDependenciesRequest) ProtoMessage() {}
+
+func (x *RemoteDependenciesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_remoting_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoteDependenciesRequest.ProtoReflect.Descriptor instead.
+func (*RemoteDependenciesRequest) Descriptor() ([]byte, []int) {
+	return file_internal_remoting_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *RemoteDependenciesRequest) GetHost() string {
+	if x != nil {
+		return x.Host
+	}
+	return ""
+}
+
+func (x *RemoteDependenciesRequest) GetPort() int32 {
+	if x != nil {
+		return x.Port
+	}
+	return 0
+}
+
+func (x *RemoteDependenciesRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+type RemoteDependenciesResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the dependencies
+	Dependencies  []*Dependency `protobuf:"bytes,1,rep,name=dependencies,proto3" json:"dependencies,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoteDependenciesResponse) Reset() {
+	*x = RemoteDependenciesResponse{}
+	mi := &file_internal_remoting_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoteDependenciesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoteDependenciesResponse) ProtoMessage() {}
+
+func (x *RemoteDependenciesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_remoting_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoteDependenciesResponse.ProtoReflect.Descriptor instead.
+func (*RemoteDependenciesResponse) Descriptor() ([]byte, []int) {
+	return file_internal_remoting_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *RemoteDependenciesResponse) GetDependencies() []*Dependency {
+	if x != nil {
+		return x.Dependencies
+	}
+	return nil
+}
+
+type RemoteMetricRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the remote host address
+	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
+	// Specifies the remote port
+	Port int32 `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
+	// Specifies the actor name
+	Name          string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoteMetricRequest) Reset() {
+	*x = RemoteMetricRequest{}
+	mi := &file_internal_remoting_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoteMetricRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoteMetricRequest) ProtoMessage() {}
+
+func (x *RemoteMetricRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_remoting_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoteMetricRequest.ProtoReflect.Descriptor instead.
+func (*RemoteMetricRequest) Descriptor() ([]byte, []int) {
+	return file_internal_remoting_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *RemoteMetricRequest) GetHost() string {
+	if x != nil {
+		return x.Host
+	}
+	return ""
+}
+
+func (x *RemoteMetricRequest) GetPort() int32 {
+	if x != nil {
+		return x.Port
+	}
+	return 0
+}
+
+func (x *RemoteMetricRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+type RemoteMetricResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the metric
+	Metric        *Metric `protobuf:"bytes,1,opt,name=metric,proto3" json:"metric,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoteMetricResponse) Reset() {
+	*x = RemoteMetricResponse{}
+	mi := &file_internal_remoting_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoteMetricResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoteMetricResponse) ProtoMessage() {}
+
+func (x *RemoteMetricResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_remoting_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoteMetricResponse.ProtoReflect.Descriptor instead.
+func (*RemoteMetricResponse) Descriptor() ([]byte, []int) {
+	return file_internal_remoting_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *RemoteMetricResponse) GetMetric() *Metric {
+	if x != nil {
+		return x.Metric
+	}
+	return nil
+}
+
+type RemoteKindRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the remote host address
+	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
+	// Specifies the remote port
+	Port int32 `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
+	// Specifies the actor name
+	Name          string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoteKindRequest) Reset() {
+	*x = RemoteKindRequest{}
+	mi := &file_internal_remoting_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoteKindRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoteKindRequest) ProtoMessage() {}
+
+func (x *RemoteKindRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_remoting_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoteKindRequest.ProtoReflect.Descriptor instead.
+func (*RemoteKindRequest) Descriptor() ([]byte, []int) {
+	return file_internal_remoting_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *RemoteKindRequest) GetHost() string {
+	if x != nil {
+		return x.Host
+	}
+	return ""
+}
+
+func (x *RemoteKindRequest) GetPort() int32 {
+	if x != nil {
+		return x.Port
+	}
+	return 0
+}
+
+func (x *RemoteKindRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+type RemoteKindResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the kind
+	Kind          string `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoteKindResponse) Reset() {
+	*x = RemoteKindResponse{}
+	mi := &file_internal_remoting_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoteKindResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoteKindResponse) ProtoMessage() {}
+
+func (x *RemoteKindResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_remoting_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoteKindResponse.ProtoReflect.Descriptor instead.
+func (*RemoteKindResponse) Descriptor() ([]byte, []int) {
+	return file_internal_remoting_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *RemoteKindResponse) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+type RemoteParentRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the remote host address
+	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
+	// Specifies the remote port
+	Port int32 `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
+	// Specifies the actor name
+	Name          string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoteParentRequest) Reset() {
+	*x = RemoteParentRequest{}
+	mi := &file_internal_remoting_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoteParentRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoteParentRequest) ProtoMessage() {}
+
+func (x *RemoteParentRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_remoting_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoteParentRequest.ProtoReflect.Descriptor instead.
+func (*RemoteParentRequest) Descriptor() ([]byte, []int) {
+	return file_internal_remoting_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *RemoteParentRequest) GetHost() string {
+	if x != nil {
+		return x.Host
+	}
+	return ""
+}
+
+func (x *RemoteParentRequest) GetPort() int32 {
+	if x != nil {
+		return x.Port
+	}
+	return 0
+}
+
+func (x *RemoteParentRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+type RemoteParentResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the parent
+	Address       string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoteParentResponse) Reset() {
+	*x = RemoteParentResponse{}
+	mi := &file_internal_remoting_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoteParentResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoteParentResponse) ProtoMessage() {}
+
+func (x *RemoteParentResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_remoting_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoteParentResponse.ProtoReflect.Descriptor instead.
+func (*RemoteParentResponse) Descriptor() ([]byte, []int) {
+	return file_internal_remoting_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *RemoteParentResponse) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+type RemoteChildrenRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the remote host address
+	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
+	// Specifies the remote port
+	Port int32 `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
+	// Specifies the actor name
+	Name          string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoteChildrenRequest) Reset() {
+	*x = RemoteChildrenRequest{}
+	mi := &file_internal_remoting_proto_msgTypes[36]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoteChildrenRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoteChildrenRequest) ProtoMessage() {}
+
+func (x *RemoteChildrenRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_remoting_proto_msgTypes[36]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoteChildrenRequest.ProtoReflect.Descriptor instead.
+func (*RemoteChildrenRequest) Descriptor() ([]byte, []int) {
+	return file_internal_remoting_proto_rawDescGZIP(), []int{36}
+}
+
+func (x *RemoteChildrenRequest) GetHost() string {
+	if x != nil {
+		return x.Host
+	}
+	return ""
+}
+
+func (x *RemoteChildrenRequest) GetPort() int32 {
+	if x != nil {
+		return x.Port
+	}
+	return 0
+}
+
+func (x *RemoteChildrenRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+type RemoteChildrenResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the children
+	Addresses     []string `protobuf:"bytes,1,rep,name=addresses,proto3" json:"addresses,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoteChildrenResponse) Reset() {
+	*x = RemoteChildrenResponse{}
+	mi := &file_internal_remoting_proto_msgTypes[37]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoteChildrenResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoteChildrenResponse) ProtoMessage() {}
+
+func (x *RemoteChildrenResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_remoting_proto_msgTypes[37]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoteChildrenResponse.ProtoReflect.Descriptor instead.
+func (*RemoteChildrenResponse) Descriptor() ([]byte, []int) {
+	return file_internal_remoting_proto_rawDescGZIP(), []int{37}
+}
+
+func (x *RemoteChildrenResponse) GetAddresses() []string {
+	if x != nil {
+		return x.Addresses
+	}
+	return nil
+}
+
+type RemoteStateRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the remote host address
+	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
+	// Specifies the remote port
+	Port int32 `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
+	// Specifies the actor name
+	Name string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	// Specifies the state to check
+	State         State `protobuf:"varint,4,opt,name=state,proto3,enum=internalpb.State" json:"state,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoteStateRequest) Reset() {
+	*x = RemoteStateRequest{}
+	mi := &file_internal_remoting_proto_msgTypes[38]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoteStateRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoteStateRequest) ProtoMessage() {}
+
+func (x *RemoteStateRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_remoting_proto_msgTypes[38]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoteStateRequest.ProtoReflect.Descriptor instead.
+func (*RemoteStateRequest) Descriptor() ([]byte, []int) {
+	return file_internal_remoting_proto_rawDescGZIP(), []int{38}
+}
+
+func (x *RemoteStateRequest) GetHost() string {
+	if x != nil {
+		return x.Host
+	}
+	return ""
+}
+
+func (x *RemoteStateRequest) GetPort() int32 {
+	if x != nil {
+		return x.Port
+	}
+	return 0
+}
+
+func (x *RemoteStateRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *RemoteStateRequest) GetState() State {
+	if x != nil {
+		return x.State
+	}
+	return State_STATE_UNKNOWN
+}
+
+type RemoteStateResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies whether the state is true or false
+	State         bool `protobuf:"varint,1,opt,name=state,proto3" json:"state,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoteStateResponse) Reset() {
+	*x = RemoteStateResponse{}
+	mi := &file_internal_remoting_proto_msgTypes[39]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoteStateResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoteStateResponse) ProtoMessage() {}
+
+func (x *RemoteStateResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_remoting_proto_msgTypes[39]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoteStateResponse.ProtoReflect.Descriptor instead.
+func (*RemoteStateResponse) Descriptor() ([]byte, []int) {
+	return file_internal_remoting_proto_rawDescGZIP(), []int{39}
+}
+
+func (x *RemoteStateResponse) GetState() bool {
+	if x != nil {
+		return x.State
+	}
+	return false
+}
+
+type RemotePassivationStrategyRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the remote host address
+	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
+	// Specifies the remote port
+	Port int32 `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
+	// Specifies the actor name
+	Name          string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemotePassivationStrategyRequest) Reset() {
+	*x = RemotePassivationStrategyRequest{}
+	mi := &file_internal_remoting_proto_msgTypes[40]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemotePassivationStrategyRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemotePassivationStrategyRequest) ProtoMessage() {}
+
+func (x *RemotePassivationStrategyRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_remoting_proto_msgTypes[40]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemotePassivationStrategyRequest.ProtoReflect.Descriptor instead.
+func (*RemotePassivationStrategyRequest) Descriptor() ([]byte, []int) {
+	return file_internal_remoting_proto_rawDescGZIP(), []int{40}
+}
+
+func (x *RemotePassivationStrategyRequest) GetHost() string {
+	if x != nil {
+		return x.Host
+	}
+	return ""
+}
+
+func (x *RemotePassivationStrategyRequest) GetPort() int32 {
+	if x != nil {
+		return x.Port
+	}
+	return 0
+}
+
+func (x *RemotePassivationStrategyRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+type RemotePassivationStrategyResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the passivation strategy
+	PassivationStrategy *PassivationStrategy `protobuf:"bytes,1,opt,name=passivation_strategy,json=passivationStrategy,proto3" json:"passivation_strategy,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *RemotePassivationStrategyResponse) Reset() {
+	*x = RemotePassivationStrategyResponse{}
+	mi := &file_internal_remoting_proto_msgTypes[41]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemotePassivationStrategyResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemotePassivationStrategyResponse) ProtoMessage() {}
+
+func (x *RemotePassivationStrategyResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_remoting_proto_msgTypes[41]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemotePassivationStrategyResponse.ProtoReflect.Descriptor instead.
+func (*RemotePassivationStrategyResponse) Descriptor() ([]byte, []int) {
+	return file_internal_remoting_proto_rawDescGZIP(), []int{41}
+}
+
+func (x *RemotePassivationStrategyResponse) GetPassivationStrategy() *PassivationStrategy {
+	if x != nil {
+		return x.PassivationStrategy
+	}
+	return nil
+}
+
+type RemoteSpawnChildRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the remote host address
+	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
+	// Specifies the remote port
+	Port int32 `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
+	// Specifies the actor name.
+	ActorName string `protobuf:"bytes,3,opt,name=actor_name,json=actorName,proto3" json:"actor_name,omitempty"`
+	// Specifies the actor type
+	ActorType string `protobuf:"bytes,4,opt,name=actor_type,json=actorType,proto3" json:"actor_type,omitempty"`
+	// Specifies if the actor is relocatable
+	Relocatable bool `protobuf:"varint,5,opt,name=relocatable,proto3" json:"relocatable,omitempty"`
+	// Specifies the passivation strategy
+	PassivationStrategy *PassivationStrategy `protobuf:"bytes,6,opt,name=passivation_strategy,json=passivationStrategy,proto3" json:"passivation_strategy,omitempty"`
+	// Specifies the dependencies
+	Dependencies []*Dependency `protobuf:"bytes,7,rep,name=dependencies,proto3" json:"dependencies,omitempty"`
+	// States whether the actor will require a stash buffer
+	EnableStash bool `protobuf:"varint,8,opt,name=enable_stash,json=enableStash,proto3" json:"enable_stash,omitempty"`
+	// Specifies the reentrancy configuration when explicitly set
+	Reentrancy *ReentrancyConfig `protobuf:"bytes,9,opt,name=reentrancy,proto3" json:"reentrancy,omitempty"`
+	// Specifies the parent actor name
+	Parent string `protobuf:"bytes,10,opt,name=parent,proto3" json:"parent,omitempty"`
+	// Specifies the supervisor configuration when explicitly set
+	Supervisor    *SupervisorSpec `protobuf:"bytes,11,opt,name=supervisor,proto3" json:"supervisor,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoteSpawnChildRequest) Reset() {
+	*x = RemoteSpawnChildRequest{}
+	mi := &file_internal_remoting_proto_msgTypes[42]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoteSpawnChildRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoteSpawnChildRequest) ProtoMessage() {}
+
+func (x *RemoteSpawnChildRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_remoting_proto_msgTypes[42]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoteSpawnChildRequest.ProtoReflect.Descriptor instead.
+func (*RemoteSpawnChildRequest) Descriptor() ([]byte, []int) {
+	return file_internal_remoting_proto_rawDescGZIP(), []int{42}
+}
+
+func (x *RemoteSpawnChildRequest) GetHost() string {
+	if x != nil {
+		return x.Host
+	}
+	return ""
+}
+
+func (x *RemoteSpawnChildRequest) GetPort() int32 {
+	if x != nil {
+		return x.Port
+	}
+	return 0
+}
+
+func (x *RemoteSpawnChildRequest) GetActorName() string {
+	if x != nil {
+		return x.ActorName
+	}
+	return ""
+}
+
+func (x *RemoteSpawnChildRequest) GetActorType() string {
+	if x != nil {
+		return x.ActorType
+	}
+	return ""
+}
+
+func (x *RemoteSpawnChildRequest) GetRelocatable() bool {
+	if x != nil {
+		return x.Relocatable
+	}
+	return false
+}
+
+func (x *RemoteSpawnChildRequest) GetPassivationStrategy() *PassivationStrategy {
+	if x != nil {
+		return x.PassivationStrategy
+	}
+	return nil
+}
+
+func (x *RemoteSpawnChildRequest) GetDependencies() []*Dependency {
+	if x != nil {
+		return x.Dependencies
+	}
+	return nil
+}
+
+func (x *RemoteSpawnChildRequest) GetEnableStash() bool {
+	if x != nil {
+		return x.EnableStash
+	}
+	return false
+}
+
+func (x *RemoteSpawnChildRequest) GetReentrancy() *ReentrancyConfig {
+	if x != nil {
+		return x.Reentrancy
+	}
+	return nil
+}
+
+func (x *RemoteSpawnChildRequest) GetParent() string {
+	if x != nil {
+		return x.Parent
+	}
+	return ""
+}
+
+func (x *RemoteSpawnChildRequest) GetSupervisor() *SupervisorSpec {
+	if x != nil {
+		return x.Supervisor
+	}
+	return nil
+}
+
+type RemoteSpawnChildResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the actor address
+	Address       string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoteSpawnChildResponse) Reset() {
+	*x = RemoteSpawnChildResponse{}
+	mi := &file_internal_remoting_proto_msgTypes[43]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoteSpawnChildResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoteSpawnChildResponse) ProtoMessage() {}
+
+func (x *RemoteSpawnChildResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_remoting_proto_msgTypes[43]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoteSpawnChildResponse.ProtoReflect.Descriptor instead.
+func (*RemoteSpawnChildResponse) Descriptor() ([]byte, []int) {
+	return file_internal_remoting_proto_rawDescGZIP(), []int{43}
+}
+
+func (x *RemoteSpawnChildResponse) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
 var File_internal_remoting_proto protoreflect.FileDescriptor
 
 const file_internal_remoting_proto_rawDesc = "" +
 	"\n" +
 	"\x17internal/remoting.proto\x12\n" +
-	"internalpb\x1a\x1egoogle/protobuf/duration.proto\x1a\x14internal/actor.proto\x1a\x19internal/dependency.proto\x1a\x14internal/grain.proto\x1a\x1ainternal/passivation.proto\x1a\x14internal/peers.proto\x1a\x19internal/reentrancy.proto\"\x8b\x01\n" +
+	"internalpb\x1a\x1egoogle/protobuf/duration.proto\x1a\x14internal/actor.proto\x1a\x19internal/dependency.proto\x1a\x14internal/grain.proto\x1a\x15internal/metric.proto\x1a\x1ainternal/passivation.proto\x1a\x14internal/peers.proto\x1a\x19internal/reentrancy.proto\"\x8b\x01\n" +
 	"\x10RemoteAskRequest\x12B\n" +
 	"\x0fremote_messages\x18\x01 \x03(\v2\x19.internalpb.RemoteMessageR\x0eremoteMessages\x123\n" +
 	"\atimeout\x18\x02 \x01(\v2\x19.google.protobuf.DurationR\atimeout\"/\n" +
@@ -1374,7 +2535,83 @@ const file_internal_remoting_proto_rawDesc = "" +
 	"\fTopicMessage\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05topic\x18\x02 \x01(\tR\x05topic\x12\x18\n" +
-	"\amessage\x18\x03 \x01(\fR\amessageB\xa6\x01\n" +
+	"\amessage\x18\x03 \x01(\fR\amessage\"T\n" +
+	"\x16RemoteStashSizeRequest\x12\x12\n" +
+	"\x04host\x18\x01 \x01(\tR\x04host\x12\x12\n" +
+	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x12\n" +
+	"\x04name\x18\x03 \x01(\tR\x04name\"-\n" +
+	"\x17RemoteStashSizeResponse\x12\x12\n" +
+	"\x04size\x18\x01 \x01(\x04R\x04size\"O\n" +
+	"\x11RemoteRoleRequest\x12\x12\n" +
+	"\x04host\x18\x01 \x01(\tR\x04host\x12\x12\n" +
+	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x12\n" +
+	"\x04name\x18\x03 \x01(\tR\x04name\"(\n" +
+	"\x12RemoteRoleResponse\x12\x12\n" +
+	"\x04role\x18\x01 \x01(\tR\x04role\"W\n" +
+	"\x19RemoteDependenciesRequest\x12\x12\n" +
+	"\x04host\x18\x01 \x01(\tR\x04host\x12\x12\n" +
+	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x12\n" +
+	"\x04name\x18\x03 \x01(\tR\x04name\"X\n" +
+	"\x1aRemoteDependenciesResponse\x12:\n" +
+	"\fdependencies\x18\x01 \x03(\v2\x16.internalpb.DependencyR\fdependencies\"Q\n" +
+	"\x13RemoteMetricRequest\x12\x12\n" +
+	"\x04host\x18\x01 \x01(\tR\x04host\x12\x12\n" +
+	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x12\n" +
+	"\x04name\x18\x03 \x01(\tR\x04name\"B\n" +
+	"\x14RemoteMetricResponse\x12*\n" +
+	"\x06metric\x18\x01 \x01(\v2\x12.internalpb.MetricR\x06metric\"O\n" +
+	"\x11RemoteKindRequest\x12\x12\n" +
+	"\x04host\x18\x01 \x01(\tR\x04host\x12\x12\n" +
+	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x12\n" +
+	"\x04name\x18\x03 \x01(\tR\x04name\"(\n" +
+	"\x12RemoteKindResponse\x12\x12\n" +
+	"\x04kind\x18\x01 \x01(\tR\x04kind\"Q\n" +
+	"\x13RemoteParentRequest\x12\x12\n" +
+	"\x04host\x18\x01 \x01(\tR\x04host\x12\x12\n" +
+	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x12\n" +
+	"\x04name\x18\x03 \x01(\tR\x04name\"0\n" +
+	"\x14RemoteParentResponse\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"S\n" +
+	"\x15RemoteChildrenRequest\x12\x12\n" +
+	"\x04host\x18\x01 \x01(\tR\x04host\x12\x12\n" +
+	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x12\n" +
+	"\x04name\x18\x03 \x01(\tR\x04name\"6\n" +
+	"\x16RemoteChildrenResponse\x12\x1c\n" +
+	"\taddresses\x18\x01 \x03(\tR\taddresses\"y\n" +
+	"\x12RemoteStateRequest\x12\x12\n" +
+	"\x04host\x18\x01 \x01(\tR\x04host\x12\x12\n" +
+	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x12\n" +
+	"\x04name\x18\x03 \x01(\tR\x04name\x12'\n" +
+	"\x05state\x18\x04 \x01(\x0e2\x11.internalpb.StateR\x05state\"+\n" +
+	"\x13RemoteStateResponse\x12\x14\n" +
+	"\x05state\x18\x01 \x01(\bR\x05state\"^\n" +
+	" RemotePassivationStrategyRequest\x12\x12\n" +
+	"\x04host\x18\x01 \x01(\tR\x04host\x12\x12\n" +
+	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x12\n" +
+	"\x04name\x18\x03 \x01(\tR\x04name\"w\n" +
+	"!RemotePassivationStrategyResponse\x12R\n" +
+	"\x14passivation_strategy\x18\x01 \x01(\v2\x1f.internalpb.PassivationStrategyR\x13passivationStrategy\"\xe6\x03\n" +
+	"\x17RemoteSpawnChildRequest\x12\x12\n" +
+	"\x04host\x18\x01 \x01(\tR\x04host\x12\x12\n" +
+	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x1d\n" +
+	"\n" +
+	"actor_name\x18\x03 \x01(\tR\tactorName\x12\x1d\n" +
+	"\n" +
+	"actor_type\x18\x04 \x01(\tR\tactorType\x12 \n" +
+	"\vrelocatable\x18\x05 \x01(\bR\vrelocatable\x12R\n" +
+	"\x14passivation_strategy\x18\x06 \x01(\v2\x1f.internalpb.PassivationStrategyR\x13passivationStrategy\x12:\n" +
+	"\fdependencies\x18\a \x03(\v2\x16.internalpb.DependencyR\fdependencies\x12!\n" +
+	"\fenable_stash\x18\b \x01(\bR\venableStash\x12<\n" +
+	"\n" +
+	"reentrancy\x18\t \x01(\v2\x1c.internalpb.ReentrancyConfigR\n" +
+	"reentrancy\x12\x16\n" +
+	"\x06parent\x18\n" +
+	" \x01(\tR\x06parent\x12:\n" +
+	"\n" +
+	"supervisor\x18\v \x01(\v2\x1a.internalpb.SupervisorSpecR\n" +
+	"supervisor\"4\n" +
+	"\x18RemoteSpawnChildResponse\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddressB\xa6\x01\n" +
 	"\x0ecom.internalpbB\rRemotingProtoH\x02P\x01Z;github.com/tochemey/goakt/v4/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
 	"Internalpb\xca\x02\n" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
@@ -1392,60 +2629,90 @@ func file_internal_remoting_proto_rawDescGZIP() []byte {
 	return file_internal_remoting_proto_rawDescData
 }
 
-var file_internal_remoting_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
+var file_internal_remoting_proto_msgTypes = make([]protoimpl.MessageInfo, 44)
 var file_internal_remoting_proto_goTypes = []any{
-	(*RemoteAskRequest)(nil),            // 0: internalpb.RemoteAskRequest
-	(*RemoteAskResponse)(nil),           // 1: internalpb.RemoteAskResponse
-	(*RemoteTellRequest)(nil),           // 2: internalpb.RemoteTellRequest
-	(*RemoteTellResponse)(nil),          // 3: internalpb.RemoteTellResponse
-	(*RemoteLookupRequest)(nil),         // 4: internalpb.RemoteLookupRequest
-	(*RemoteLookupResponse)(nil),        // 5: internalpb.RemoteLookupResponse
-	(*RemoteMessage)(nil),               // 6: internalpb.RemoteMessage
-	(*RemoteReSpawnRequest)(nil),        // 7: internalpb.RemoteReSpawnRequest
-	(*RemoteReSpawnResponse)(nil),       // 8: internalpb.RemoteReSpawnResponse
-	(*RemoteStopRequest)(nil),           // 9: internalpb.RemoteStopRequest
-	(*RemoteStopResponse)(nil),          // 10: internalpb.RemoteStopResponse
-	(*RemoteSpawnRequest)(nil),          // 11: internalpb.RemoteSpawnRequest
-	(*RemoteSpawnResponse)(nil),         // 12: internalpb.RemoteSpawnResponse
-	(*RemoteReinstateRequest)(nil),      // 13: internalpb.RemoteReinstateRequest
-	(*RemoteReinstateResponse)(nil),     // 14: internalpb.RemoteReinstateResponse
-	(*RemoteAskGrainRequest)(nil),       // 15: internalpb.RemoteAskGrainRequest
-	(*RemoteAskGrainResponse)(nil),      // 16: internalpb.RemoteAskGrainResponse
-	(*RemoteTellGrainRequest)(nil),      // 17: internalpb.RemoteTellGrainRequest
-	(*RemoteTellGrainResponse)(nil),     // 18: internalpb.RemoteTellGrainResponse
-	(*RemoteActivateGrainRequest)(nil),  // 19: internalpb.RemoteActivateGrainRequest
-	(*RemoteActivateGrainResponse)(nil), // 20: internalpb.RemoteActivateGrainResponse
-	(*PersistPeerStateRequest)(nil),     // 21: internalpb.PersistPeerStateRequest
-	(*PersistPeerStateResponse)(nil),    // 22: internalpb.PersistPeerStateResponse
-	(*TopicMessage)(nil),                // 23: internalpb.TopicMessage
-	(*durationpb.Duration)(nil),         // 24: google.protobuf.Duration
-	(*SingletonSpec)(nil),               // 25: internalpb.SingletonSpec
-	(*PassivationStrategy)(nil),         // 26: internalpb.PassivationStrategy
-	(*Dependency)(nil),                  // 27: internalpb.Dependency
-	(*SupervisorSpec)(nil),              // 28: internalpb.SupervisorSpec
-	(*ReentrancyConfig)(nil),            // 29: internalpb.ReentrancyConfig
-	(*Grain)(nil),                       // 30: internalpb.Grain
-	(*PeerState)(nil),                   // 31: internalpb.PeerState
+	(*RemoteAskRequest)(nil),                  // 0: internalpb.RemoteAskRequest
+	(*RemoteAskResponse)(nil),                 // 1: internalpb.RemoteAskResponse
+	(*RemoteTellRequest)(nil),                 // 2: internalpb.RemoteTellRequest
+	(*RemoteTellResponse)(nil),                // 3: internalpb.RemoteTellResponse
+	(*RemoteLookupRequest)(nil),               // 4: internalpb.RemoteLookupRequest
+	(*RemoteLookupResponse)(nil),              // 5: internalpb.RemoteLookupResponse
+	(*RemoteMessage)(nil),                     // 6: internalpb.RemoteMessage
+	(*RemoteReSpawnRequest)(nil),              // 7: internalpb.RemoteReSpawnRequest
+	(*RemoteReSpawnResponse)(nil),             // 8: internalpb.RemoteReSpawnResponse
+	(*RemoteStopRequest)(nil),                 // 9: internalpb.RemoteStopRequest
+	(*RemoteStopResponse)(nil),                // 10: internalpb.RemoteStopResponse
+	(*RemoteSpawnRequest)(nil),                // 11: internalpb.RemoteSpawnRequest
+	(*RemoteSpawnResponse)(nil),               // 12: internalpb.RemoteSpawnResponse
+	(*RemoteReinstateRequest)(nil),            // 13: internalpb.RemoteReinstateRequest
+	(*RemoteReinstateResponse)(nil),           // 14: internalpb.RemoteReinstateResponse
+	(*RemoteAskGrainRequest)(nil),             // 15: internalpb.RemoteAskGrainRequest
+	(*RemoteAskGrainResponse)(nil),            // 16: internalpb.RemoteAskGrainResponse
+	(*RemoteTellGrainRequest)(nil),            // 17: internalpb.RemoteTellGrainRequest
+	(*RemoteTellGrainResponse)(nil),           // 18: internalpb.RemoteTellGrainResponse
+	(*RemoteActivateGrainRequest)(nil),        // 19: internalpb.RemoteActivateGrainRequest
+	(*RemoteActivateGrainResponse)(nil),       // 20: internalpb.RemoteActivateGrainResponse
+	(*PersistPeerStateRequest)(nil),           // 21: internalpb.PersistPeerStateRequest
+	(*PersistPeerStateResponse)(nil),          // 22: internalpb.PersistPeerStateResponse
+	(*TopicMessage)(nil),                      // 23: internalpb.TopicMessage
+	(*RemoteStashSizeRequest)(nil),            // 24: internalpb.RemoteStashSizeRequest
+	(*RemoteStashSizeResponse)(nil),           // 25: internalpb.RemoteStashSizeResponse
+	(*RemoteRoleRequest)(nil),                 // 26: internalpb.RemoteRoleRequest
+	(*RemoteRoleResponse)(nil),                // 27: internalpb.RemoteRoleResponse
+	(*RemoteDependenciesRequest)(nil),         // 28: internalpb.RemoteDependenciesRequest
+	(*RemoteDependenciesResponse)(nil),        // 29: internalpb.RemoteDependenciesResponse
+	(*RemoteMetricRequest)(nil),               // 30: internalpb.RemoteMetricRequest
+	(*RemoteMetricResponse)(nil),              // 31: internalpb.RemoteMetricResponse
+	(*RemoteKindRequest)(nil),                 // 32: internalpb.RemoteKindRequest
+	(*RemoteKindResponse)(nil),                // 33: internalpb.RemoteKindResponse
+	(*RemoteParentRequest)(nil),               // 34: internalpb.RemoteParentRequest
+	(*RemoteParentResponse)(nil),              // 35: internalpb.RemoteParentResponse
+	(*RemoteChildrenRequest)(nil),             // 36: internalpb.RemoteChildrenRequest
+	(*RemoteChildrenResponse)(nil),            // 37: internalpb.RemoteChildrenResponse
+	(*RemoteStateRequest)(nil),                // 38: internalpb.RemoteStateRequest
+	(*RemoteStateResponse)(nil),               // 39: internalpb.RemoteStateResponse
+	(*RemotePassivationStrategyRequest)(nil),  // 40: internalpb.RemotePassivationStrategyRequest
+	(*RemotePassivationStrategyResponse)(nil), // 41: internalpb.RemotePassivationStrategyResponse
+	(*RemoteSpawnChildRequest)(nil),           // 42: internalpb.RemoteSpawnChildRequest
+	(*RemoteSpawnChildResponse)(nil),          // 43: internalpb.RemoteSpawnChildResponse
+	(*durationpb.Duration)(nil),               // 44: google.protobuf.Duration
+	(*SingletonSpec)(nil),                     // 45: internalpb.SingletonSpec
+	(*PassivationStrategy)(nil),               // 46: internalpb.PassivationStrategy
+	(*Dependency)(nil),                        // 47: internalpb.Dependency
+	(*SupervisorSpec)(nil),                    // 48: internalpb.SupervisorSpec
+	(*ReentrancyConfig)(nil),                  // 49: internalpb.ReentrancyConfig
+	(*Grain)(nil),                             // 50: internalpb.Grain
+	(*PeerState)(nil),                         // 51: internalpb.PeerState
+	(*Metric)(nil),                            // 52: internalpb.Metric
+	(State)(0),                                // 53: internalpb.State
 }
 var file_internal_remoting_proto_depIdxs = []int32{
 	6,  // 0: internalpb.RemoteAskRequest.remote_messages:type_name -> internalpb.RemoteMessage
-	24, // 1: internalpb.RemoteAskRequest.timeout:type_name -> google.protobuf.Duration
+	44, // 1: internalpb.RemoteAskRequest.timeout:type_name -> google.protobuf.Duration
 	6,  // 2: internalpb.RemoteTellRequest.remote_messages:type_name -> internalpb.RemoteMessage
-	25, // 3: internalpb.RemoteSpawnRequest.singleton:type_name -> internalpb.SingletonSpec
-	26, // 4: internalpb.RemoteSpawnRequest.passivation_strategy:type_name -> internalpb.PassivationStrategy
-	27, // 5: internalpb.RemoteSpawnRequest.dependencies:type_name -> internalpb.Dependency
-	28, // 6: internalpb.RemoteSpawnRequest.supervisor:type_name -> internalpb.SupervisorSpec
-	29, // 7: internalpb.RemoteSpawnRequest.reentrancy:type_name -> internalpb.ReentrancyConfig
-	30, // 8: internalpb.RemoteAskGrainRequest.grain:type_name -> internalpb.Grain
-	24, // 9: internalpb.RemoteAskGrainRequest.request_timeout:type_name -> google.protobuf.Duration
-	30, // 10: internalpb.RemoteTellGrainRequest.grain:type_name -> internalpb.Grain
-	30, // 11: internalpb.RemoteActivateGrainRequest.grain:type_name -> internalpb.Grain
-	31, // 12: internalpb.PersistPeerStateRequest.peer_state:type_name -> internalpb.PeerState
-	13, // [13:13] is the sub-list for method output_type
-	13, // [13:13] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	45, // 3: internalpb.RemoteSpawnRequest.singleton:type_name -> internalpb.SingletonSpec
+	46, // 4: internalpb.RemoteSpawnRequest.passivation_strategy:type_name -> internalpb.PassivationStrategy
+	47, // 5: internalpb.RemoteSpawnRequest.dependencies:type_name -> internalpb.Dependency
+	48, // 6: internalpb.RemoteSpawnRequest.supervisor:type_name -> internalpb.SupervisorSpec
+	49, // 7: internalpb.RemoteSpawnRequest.reentrancy:type_name -> internalpb.ReentrancyConfig
+	50, // 8: internalpb.RemoteAskGrainRequest.grain:type_name -> internalpb.Grain
+	44, // 9: internalpb.RemoteAskGrainRequest.request_timeout:type_name -> google.protobuf.Duration
+	50, // 10: internalpb.RemoteTellGrainRequest.grain:type_name -> internalpb.Grain
+	50, // 11: internalpb.RemoteActivateGrainRequest.grain:type_name -> internalpb.Grain
+	51, // 12: internalpb.PersistPeerStateRequest.peer_state:type_name -> internalpb.PeerState
+	47, // 13: internalpb.RemoteDependenciesResponse.dependencies:type_name -> internalpb.Dependency
+	52, // 14: internalpb.RemoteMetricResponse.metric:type_name -> internalpb.Metric
+	53, // 15: internalpb.RemoteStateRequest.state:type_name -> internalpb.State
+	46, // 16: internalpb.RemotePassivationStrategyResponse.passivation_strategy:type_name -> internalpb.PassivationStrategy
+	46, // 17: internalpb.RemoteSpawnChildRequest.passivation_strategy:type_name -> internalpb.PassivationStrategy
+	47, // 18: internalpb.RemoteSpawnChildRequest.dependencies:type_name -> internalpb.Dependency
+	49, // 19: internalpb.RemoteSpawnChildRequest.reentrancy:type_name -> internalpb.ReentrancyConfig
+	48, // 20: internalpb.RemoteSpawnChildRequest.supervisor:type_name -> internalpb.SupervisorSpec
+	21, // [21:21] is the sub-list for method output_type
+	21, // [21:21] is the sub-list for method input_type
+	21, // [21:21] is the sub-list for extension type_name
+	21, // [21:21] is the sub-list for extension extendee
+	0,  // [0:21] is the sub-list for field type_name
 }
 
 func init() { file_internal_remoting_proto_init() }
@@ -1456,6 +2723,7 @@ func file_internal_remoting_proto_init() {
 	file_internal_actor_proto_init()
 	file_internal_dependency_proto_init()
 	file_internal_grain_proto_init()
+	file_internal_metric_proto_init()
 	file_internal_passivation_proto_init()
 	file_internal_peers_proto_init()
 	file_internal_reentrancy_proto_init()
@@ -1466,7 +2734,7 @@ func file_internal_remoting_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_remoting_proto_rawDesc), len(file_internal_remoting_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   24,
+			NumMessages:   44,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

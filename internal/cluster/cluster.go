@@ -239,7 +239,7 @@ func (x *cluster) Start(ctx context.Context) error {
 
 	conf, err := x.buildConfig()
 	if err != nil {
-		x.logger.Errorf("Failed to build engine config: %v", err)
+		x.logger.Errorf("failed to build engine config: %v (hint: check Olric bind addresses, discovery config)", err)
 		return err
 	}
 
@@ -256,25 +256,25 @@ func (x *cluster) Start(ctx context.Context) error {
 
 	cache, err := olric.New(conf)
 	if err != nil {
-		x.logger.Error(fmt.Errorf("failed to start cluster engine: %w", err))
+		x.logger.Error(fmt.Errorf("failed to start cluster engine: %w (hint: check discovery peers, network connectivity, firewall)", err))
 		return err
 	}
 
 	x.server = cache
 	if err := x.startServer(startCtx, ctx); err != nil {
-		x.logger.Error(fmt.Errorf("failed to start cluster engine: %w", err))
+		x.logger.Error(fmt.Errorf("failed to start cluster engine: %w (hint: check discovery peers, network connectivity, firewall)", err))
 		return err
 	}
 
 	x.client = x.server.NewEmbeddedClient()
 	if err := x.createDMap(); err != nil {
-		x.logger.Error(fmt.Errorf("failed to create cluster data map: %w", err))
+		x.logger.Error(fmt.Errorf("failed to create cluster data map: %w (hint: check cluster config, permissions)", err))
 		se := x.server.Shutdown(ctx)
 		return errors.Join(err, se)
 	}
 
 	if err := x.createSubscription(ctx); err != nil {
-		x.logger.Error(fmt.Errorf("failed to create cluster subscription: %w", err))
+		x.logger.Error(fmt.Errorf("failed to create cluster subscription: %w (hint: check cluster config, permissions)", err))
 		se := x.server.Shutdown(ctx)
 		return errors.Join(err, se)
 	}
@@ -327,7 +327,7 @@ func (x *cluster) Stop(ctx context.Context) error {
 	x.eventsLock.Unlock()
 
 	if err := x.server.Shutdown(ctx); err != nil {
-		x.logger.Errorf("Failed to stop cluster engine: %v", err)
+		x.logger.Errorf("failed to stop cluster engine: %v (hint: check for lingering connections or blocked shutdown)", err)
 		return err
 	}
 
@@ -714,7 +714,7 @@ func (x *cluster) Events() <-chan *Event {
 func (x *cluster) Peers(ctx context.Context) ([]*Peer, error) {
 	members, err := x.Members(ctx)
 	if err != nil {
-		x.logger.Errorf("failed to read cluster peers: %v", err)
+		x.logger.Errorf("failed to read cluster peers: %v (hint: check cluster connectivity)", err)
 		return nil, err
 	}
 
@@ -772,7 +772,7 @@ func (x *cluster) IsLeader(ctx context.Context) bool {
 
 	members, err := x.client.Members(ctx)
 	if err != nil {
-		x.logger.Errorf("failed to fetch cluster members: %v", err)
+		x.logger.Errorf("failed to fetch cluster members: %v (hint: check cluster connectivity)", err)
 		return false
 	}
 
@@ -955,7 +955,7 @@ func (x *cluster) buildConfig() (*oconfig.Config, error) {
 func (x *cluster) setupMemberlistConfig(cfg *oconfig.Config) error {
 	mconfig, err := oconfig.NewMemberlistConfig("lan")
 	if err != nil {
-		x.logger.Errorf("failed to configure memberlist: %v", err)
+		x.logger.Errorf("failed to configure memberlist: %v (hint: check bind address, discovery port)", err)
 		return err
 	}
 	mconfig.BindAddr = x.node.Host
@@ -982,7 +982,7 @@ func (x *cluster) setupMemberlistConfig(cfg *oconfig.Config) error {
 			TLS:                x.tlsInfo.ClientConfig,
 		})
 		if err != nil {
-			x.logger.Errorf("failed to create memberlist transport: %v", err)
+			x.logger.Errorf("failed to create memberlist transport: %v (hint: check TLS config, bind port)", err)
 			return err
 		}
 
@@ -1066,7 +1066,7 @@ func (x *cluster) consume() {
 			switch message.Channel {
 			case events.ClusterEventsChannel:
 				if err := x.handleClusterEvent(message.Payload); err != nil {
-					x.logger.Errorf("cluster event handling error: %v", err)
+					x.logger.Errorf("cluster event handling error: %v (hint: check event payload format)", err)
 				}
 			default:
 				// ignore

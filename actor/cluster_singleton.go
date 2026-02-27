@@ -69,7 +69,7 @@ func (x *clusterSingletonManager) Receive(ctx *ReceiveContext) {
 
 // PostStop implements the post-stop hook.
 func (*clusterSingletonManager) PostStop(ctx *Context) error {
-	ctx.ActorSystem().Logger().Infof("%s stopped successfully", ctx.ActorName())
+	ctx.ActorSystem().Logger().Infof("actor=%s stopped successfully", ctx.ActorName())
 	return nil
 }
 
@@ -78,7 +78,7 @@ func (x *clusterSingletonManager) handlePostStart(ctx *ReceiveContext) {
 	x.pid = ctx.Self()
 	x.logger = ctx.Logger()
 	x.cluster = ctx.ActorSystem().getCluster()
-	x.logger.Infof("%s started successfully", x.pid.Name())
+	x.logger.Infof("actor=%s started successfully", x.pid.Name())
 }
 
 // spawnSingletonManager creates the singleton manager actor

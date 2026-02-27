@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package internalpb;
+
+import "google/protobuf/duration.proto";
+
+option go_package = "github.com/tochemey/goakt/v4/internal/internalpb;internalpb";
+
+message Metric {
+  int64 uptime = 1;
+  google.protobuf.Duration latest_processed_duration = 2;
+  uint64 children_count = 3;
+  uint64 deadletters_count = 4;
+  uint64 restart_count = 5;
+  uint64 processed_count = 6;
+  uint64 stash_size = 7;
+  uint64 failure_count = 8;
+  uint64 reinstate_count = 9;
+}

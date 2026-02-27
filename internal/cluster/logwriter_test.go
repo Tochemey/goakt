@@ -38,7 +38,7 @@ func TestLogWriter(t *testing.T) {
 		// create a bytes buffer that implements an io.Writer
 		buffer := new(bytes.Buffer)
 		// create an instance of Log
-		logger := log.New(log.InfoLevel, buffer)
+		logger := log.NewZap(log.InfoLevel, buffer)
 		// create the olric message
 		message := "2023/11/06 20:40:24 [INFO] Olric 0.5.4 on linux/arm64 go1.21.0 => olric.go:319"
 
@@ -79,7 +79,7 @@ func TestLogWriter(t *testing.T) {
 		// create a bytes buffer that implements an io.Writer
 		buffer := new(bytes.Buffer)
 		// create an instance of Log
-		logger := log.New(log.DebugLevel, buffer)
+		logger := log.NewZap(log.DebugLevel, buffer)
 		// create the olric message
 		message := "2023/11/06 20:40:24 [DEBUG] memberlist: Failed to join 172.30.0.4:3322: dial tcp 172.30.0.4:3322: connect: connection refused"
 
@@ -117,7 +117,7 @@ func TestLogWriter(t *testing.T) {
 		// create a bytes buffer that implements an io.Writer
 		buffer := new(bytes.Buffer)
 		// create an instance of Log
-		logger := log.New(log.ErrorLevel, buffer)
+		logger := log.NewZap(log.ErrorLevel, buffer)
 		// create the olric message
 		message := "2023/11/06 20:40:24 [ERROR] Failed to publish NodeJoinEvent to cluster.events: ERR ERR cannot be reached cluster quorum to operate => events.go:40"
 
@@ -155,7 +155,7 @@ func TestLogWriter(t *testing.T) {
 		// create a bytes buffer that implements an io.Writer
 		buffer := new(bytes.Buffer)
 		// create an instance of Log
-		logger := log.New(log.WarningLevel, buffer)
+		logger := log.NewZap(log.WarningLevel, buffer)
 		// create the olric message
 		message := "2023/11/06 20:40:24 [WARN] Balancer awaits for bootstrapping"
 
@@ -191,7 +191,7 @@ func TestLogWriter(t *testing.T) {
 
 	t.Run("With unknown log level prefix", func(t *testing.T) {
 		buffer := new(bytes.Buffer)
-		logger := log.New(log.InfoLevel, buffer)
+		logger := log.NewZap(log.InfoLevel, buffer)
 		message := "2023/11/06 20:40:24 [TRACE] some verbose trace that should be ignored"
 
 		logWriter := newLogWriter(logger)
@@ -203,7 +203,7 @@ func TestLogWriter(t *testing.T) {
 
 	t.Run("With multiple brackets only one matching level", func(t *testing.T) {
 		buffer := new(bytes.Buffer)
-		logger := log.New(log.InfoLevel, buffer)
+		logger := log.NewZap(log.InfoLevel, buffer)
 		message := "prefix [SKIP] [INFO] only the info message should be logged"
 
 		logWriter := newLogWriter(logger)
@@ -222,7 +222,7 @@ func TestLogWriter(t *testing.T) {
 
 	t.Run("With empty log message", func(t *testing.T) {
 		buffer := new(bytes.Buffer)
-		logger := log.New(log.InfoLevel, buffer)
+		logger := log.NewZap(log.InfoLevel, buffer)
 		message := "    "
 
 		logWriter := newLogWriter(logger)
