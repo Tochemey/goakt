@@ -49,18 +49,6 @@ type Mailbox interface {
 Create a file in `actor/`. Pass via `WithMailbox(mailbox)` as a SpawnOption. Reference `unbounded_mailbox.go` and
 `unbounded_priority_mailbox.go`.
 
-## Passivation Strategy
-
-```go
-type Strategy interface {
-    fmt.Stringer
-    Name() string
-}
-```
-
-Create a file in `passivation/`. The strategy is configuration; the passivation manager reads it to decide when to
-passivate. Pass via `WithPassivationStrategy(strat)` as a SpawnOption.
-
 ## Extension (system-wide)
 
 ```go

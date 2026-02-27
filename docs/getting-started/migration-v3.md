@@ -206,7 +206,7 @@ Custom `Logger` implementations must implement additional methods:
 ### Path interface
 
 `pid.Path()` returns a `Path` interface—location-transparent actor identity.
-See [Location Transparency](../concepts/location-transparency.md#the-path-interface).
+See [Location Transparency](../actor/location-transparency.md#the-path-interface).
 
 ### New sentinel errors
 

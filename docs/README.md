@@ -22,7 +22,7 @@ to the project. It focuses on concepts, architecture, and efficient usage patter
 ## Quick Links
 
 - [Getting Started](getting-started/installation.md) — Installation and first actor
-- [Actor System](concepts/actor-system.md) — Runtime, API, configuration
-- [Core Concepts](concepts/actor-model.md) — Actor model, messaging, lifecycle
+- [Actor System](actor/actor-system.md) — Runtime, API, configuration
+- [Actor Model](actor/actor-model.md) — Actor model, messaging, lifecycle
 - [Architecture](architecture/overview.md) — System design and component map
 - [Contributing](contributing/overview.md) — How to contribute to GoAkt

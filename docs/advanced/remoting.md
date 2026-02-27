@@ -3,7 +3,7 @@
 ## Overview
 
 The remoting layer enables actors on different nodes to exchange messages over TCP. It is configured via `WithRemote` (
-passing `remote.Config`); the client is internal. You interact through the actor system and `ActorOf`.
+passing `remote.Config`). From inside the actor system, you interact through `ActorOf` and messaging. For external callers (CLI, API servers, batch jobs), use the [Client](client.md) package to connect to the cluster without running an actor system.
 
 ## Configuration
 

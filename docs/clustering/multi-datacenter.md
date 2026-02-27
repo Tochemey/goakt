@@ -149,7 +149,10 @@ The actor kind must be registered on the target DC's actor systems; otherwise th
 
 ## Messaging across DCs
 
-Once an actor is spawned (locally or in another DC), messaging is **location-transparent**. Use `Tell`, `Ask`, `Request` as usual; the framework routes to the correct node. Grains can be addressed by identity across DCs; the grain engine resolves the target DC from the control plane.
+Once an actor is spawned (locally or in another DC), messaging is **location-transparent**. Use `Tell`, `Ask`, `Request` as usual; the framework routes to the correct node.
+
+Grains can also be addressed by identity across DCs when multi-DC is enabled: the system uses the control plane’s cached
+active datacenter records and attempts delivery to the first endpoint that successfully handles the request.
 
 ## Readiness and errors
 
@@ -175,5 +178,5 @@ See `datacenter/controlplane/nats` and `datacenter/controlplane/etcd` as referen
 ## See also
 
 - [Clustered](clustered.md) — Cluster setup and discovery
-- [Relocation](../advanced/relocation.md) — Actor relocation within a cluster
+- [Relocation](../actor/relocation.md) — Actor relocation within a cluster
 - [Remoting](../advanced/remoting.md) — Cross-node messaging

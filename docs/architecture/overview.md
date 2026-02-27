@@ -4,7 +4,7 @@
 
 GoAkt is a framework for building **concurrent, distributed, and fault-tolerant systems** in Go using the actor model.
 Every unit of computation is an **actor**—a lightweight, isolated entity that communicates exclusively through messages.
-The [Actor System](../concepts/actor-system.md) is the top-level runtime that hosts actors and orchestrates messaging, clustering, and lifecycle.
+The [Actor System](../actor/actor-system.md) is the top-level runtime that hosts actors and orchestrates messaging, clustering, and lifecycle.
 
 ## Three deployment modes
 

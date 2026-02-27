@@ -13,7 +13,7 @@ type Actor interface {
 }
 ```
 
-Required for all actors. See [Actor Model](../concepts/actor-model.md#the-actor-interface).
+Required for all actors. See [Actor Model](../actor/actor-model.md#the-actor-interface).
 
 ## Grain
 
@@ -25,7 +25,7 @@ type Grain interface {
 }
 ```
 
-Required for virtual actors. See [Grains](../advanced/grains.md#the-grain-interface).
+Required for virtual actors. See [Grains](../grains/overview.md#the-grain-interface).
 
 ## Mailbox
 
@@ -99,7 +99,7 @@ type Strategy interface {
 }
 ```
 
-For custom passivation behavior. See [Passivation](../advanced/passivation.md#the-strategy-interface)
+For custom passivation behavior. See [Passivation](../actor/passivation.md#the-strategy-interface)
 and [Extending GoAkt](../contributing/extending.md#passivation-strategy).
 
 ## Path
@@ -118,4 +118,4 @@ type Path interface {
 ```
 
 Returned by `pid.Path()`. Location-transparent actor identity.
-See [Location Transparency](../concepts/location-transparency.md#the-path-interface).
+See [Location Transparency](../actor/location-transparency.md#the-path-interface).

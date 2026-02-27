@@ -43,7 +43,7 @@ strategy decides whether to resume, restart, stop, or escalate.
 ## Single-threaded execution
 
 GoAkt guarantees that **only one goroutine processes messages for a given actor at any time**. You never need internal
-locks to protect actor state. Message ordering between a sender-receiver pair is FIFO.
+locks to protect actor state. Messages are processed sequentially from the actor's mailbox (FIFO).
 
 ## The Actor interface
 
@@ -70,4 +70,4 @@ single-threaded execution per actor, so no locks are needed inside `Receive`.
 
 - [Brian Storti: The Actor Model](https://www.brianstorti.com/the-actor-model/) — Short introduction
 - [Messaging](messaging.md) — Tell vs Ask, message types
-- [Actor Lifecycle](actor-lifecycle.md) — Spawn, stop, state transitions
+- [Actor Lifecycle](lifecycle.md) — Spawn, stop, state transitions

@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- **Go 1.23 or higher** — GoAkt v4 requires Go 1.23+ for its type system and runtime features.
+- **Go 1.26 or higher** — GoAkt v4 requires Go 1.26+ for its type system and runtime features.
 
 ## Add the dependency
 
@@ -27,5 +27,5 @@ If your project builds without errors, the installation is complete.
 
 ## Next steps
 
-- [First Actor](first-actor.md) — Create your first actor and send messages
+- [First Actor](actor/first-actor.md) — Create your first actor and send messages
 - [Migration from v3.x](migration-v3.md) — If upgrading from v3

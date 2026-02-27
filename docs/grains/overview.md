@@ -40,7 +40,7 @@ Inside `OnReceive`, `GrainContext` provides:
 | `AskActor(name, msg, timeout)` | Ask an actor by name                  |
 | `AskGrain(to, msg, timeout)`   | Ask another grain                     |
 
-## GrainIdentity and messaging
+## Identity and messaging
 
 Use `GrainIdentity(ctx, instanceName, factory)` to obtain an identity. The factory creates the grain when the framework
 activates it. Then use `TellGrain` or `AskGrain` with that identity. The instance name (e.g., `"user-123"`) uniquely
@@ -67,5 +67,14 @@ identifies the grain within its type.
 
 ## Activation guarantee
 
-The framework prevents double-activation: only one node can own a grain identity at a time. Cluster-level atomic claims
-and activation barriers ensure exactly-once activation.
+In cluster mode, the system claims grain ownership in the cluster registry using an atomic put-if-absent operation before
+activating locally. If another node already owns the grain, requests are forwarded to that owner. If local activation
+fails after a successful claim, the claim is removed.
+
+When configured, the grain activation barrier delays grain activations until the cluster reaches the minimum peers
+quorum (or until the barrier timeout elapses).
+
+## See also
+
+- [Passivation](../actor/passivation.md) — Grains use passivation for idle-based deactivation
+- [Actor Model](../actor/actor-model.md) — When to use actors vs grains

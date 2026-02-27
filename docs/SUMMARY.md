@@ -7,18 +7,44 @@
 ## Getting Started
 
 * [Installation](getting-started/installation.md)
-* [First Actor](getting-started/first-actor.md)
 * [Migration from v3.x](getting-started/migration-v3.md)
 
-## Core Concepts
+## Actor
 
-* [Actor System](concepts/actor-system.md)
-* [Actor Model](concepts/actor-model.md)
-* [PID](concepts/pid.md)
-* [Messaging](concepts/messaging.md)
-* [Actor Lifecycle](concepts/actor-lifecycle.md)
-* [Supervision](concepts/supervision.md)
-* [Location Transparency](concepts/location-transparency.md)
+* [First Actor](actor/first-actor.md)
+* [Actor Model](actor/actor-model.md)
+* [Actor System](actor/actor-system.md)
+* [PID](actor/pid.md)
+* [Messaging](actor/messaging.md)
+* [Lifecycle](actor/lifecycle.md)
+* [Supervision](actor/supervision.md)
+* [Location Transparency](actor/location-transparency.md)
+* [Behaviors](actor/behaviors.md)
+* [Stashing](actor/stashing.md)
+* [Death Watch](actor/death-watch.md)
+* [PipeTo](actor/pipeto.md)
+* [Reentrancy](actor/reentrancy.md)
+* [Passivation](actor/passivation.md)
+* [Relocation](actor/relocation.md)
+* [Singletons](actor/singletons.md)
+* [Routers](actor/routers.md)
+* [Scheduling](actor/scheduling.md)
+* [TestKit](actor/testkit.md)
+
+## Grains
+
+* [Overview](grains/overview.md)
+
+## Infrastructure & Advanced
+
+* [Remoting](advanced/remoting.md)
+* [Client](advanced/client.md)
+* [Serialization](advanced/serialization.md)
+* [Extensions and Dependencies](advanced/extensions-and-dependencies.md)
+* [Event Streams](advanced/event-streams.md)
+* [PubSub](advanced/pubsub.md)
+* [Observability](advanced/observability.md)
+* [Coordinated Shutdown](advanced/coordinated-shutdown.md)
 
 ## Clustering
 
@@ -26,27 +52,6 @@
 * [Clustered](clustering/clustered.md)
 * [Multi-Datacenter](clustering/multi-datacenter.md)
 * [Service Discovery](clustering/service-discovery.md)
-
-## Advanced Features
-
-* [Grains (Virtual Actors)](advanced/grains.md)
-* [Remoting](advanced/remoting.md)
-* [Serialization](advanced/serialization.md)
-* [Extensions and Dependencies](advanced/extensions-and-dependencies.md)
-* [Event Streams](advanced/event-streams.md)
-* [PubSub](advanced/pubsub.md)
-* [Observability](advanced/observability.md)
-* [Coordinated Shutdown](advanced/coordinated-shutdown.md)
-* [Passivation](advanced/passivation.md)
-* [Reentrancy](advanced/reentrancy.md)
-* [Relocation](advanced/relocation.md)
-* [Routers](advanced/routers.md)
-* [Scheduling](advanced/scheduling.md)
-* [Behaviors](advanced/behaviors.md)
-* [Stashing](advanced/stashing.md)
-* [Death Watch](advanced/death-watch.md)
-* [PipeTo](advanced/pipeto.md)
-* [TestKit](advanced/testkit.md)
 
 ## Architecture
 

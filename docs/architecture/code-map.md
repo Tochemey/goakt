@@ -107,7 +107,7 @@ Pluggable service discovery. Each sub-package implements `discovery.Provider`:
 
 ## `client/`
 
-Standalone cluster client for callers outside the actor system:
+Standalone cluster client for callers outside the actor system. See [Client](../advanced/client.md) for full documentation.
 
 | File             | Purpose                     |
 |------------------|-----------------------------|

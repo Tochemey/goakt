@@ -31,7 +31,7 @@ Cluster state (actor/grain placement) needs replication. Olric provides:
 
 Mirrors Erlang/OTP and Akka:
 
-- **Deterministic lifecycle** — Stopping a parent stops descendants depth-first
+- **Lifecycle ordering** — Stopping a parent stops descendants first (depth-first)
 - **Scoped supervision** — Parent defines failure policy for children
 - **Namespacing** — Addresses reflect tree path; no name collisions
 

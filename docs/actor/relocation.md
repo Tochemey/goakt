@@ -126,7 +126,7 @@ For an actor to be relocated successfully:
 - **Dependencies** must implement `Dependency` (serializable). Pass via `WithDependencies(dep)`.
 - **Supervisor**, **passivation**, **reentrancy**, **stashing**, **role** — these are encoded in the actor's serialized form and restored on the target node.
 
-See [Extensions and Dependencies](extensions-and-dependencies.md) for dependency serialization.
+See [Extensions and Dependencies](../advanced/extensions-and-dependencies.md) for dependency serialization.
 
 ## During relocation
 
@@ -145,6 +145,7 @@ See [Extensions and Dependencies](extensions-and-dependencies.md) for dependency
 ## See also
 
 - [Clustered Mode](../clustering/clustered.md) — Cluster setup and discovery
-- [Grains](grains.md) — Virtual actors and `WithGrainDisableRelocation`
-- [Extensions and Dependencies](extensions-and-dependencies.md) — Serializable dependencies for relocation
-- [Coordinated Shutdown](coordinated-shutdown.md) — Shutdown sequence and `preShutdown`
+- [Singletons](singletons.md) — Cluster singletons and placement
+- [Grains](../grains/overview.md) — Virtual actors and `WithGrainDisableRelocation`
+- [Extensions and Dependencies](../advanced/extensions-and-dependencies.md) — Serializable dependencies for relocation
+- [Coordinated Shutdown](../advanced/coordinated-shutdown.md) — Shutdown sequence and `preShutdown`

@@ -140,5 +140,5 @@ func (a *CoordinatorActor) Receive(rctx *ReceiveContext) {
 ## See also
 
 - [Stashing](stashing.md) — Manual stashing with `Stash`, `Unstash`, `UnstashAll`; `StashNonReentrant` uses stashing internally.
-- [Messaging](../concepts/messaging.md) — `Ask`, `Tell`, `PipeTo`.
+- [Messaging](messaging.md) — `Ask`, `Tell`, `PipeTo`.
 - [Behaviors](behaviors.md) — `Become`, `UnBecome` for state transitions.

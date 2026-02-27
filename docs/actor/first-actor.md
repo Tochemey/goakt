@@ -1,6 +1,6 @@
 # First Actor
 
-This guide walks through the flow of creating an actor system, spawning an actor, and sending messages. For the full ActorSystem API and configuration, see [Actor System](../concepts/actor-system.md).
+This guide walks through the flow of creating an actor system, spawning an actor, and sending messages. For the full ActorSystem API and configuration, see [Actor System](actor-system.md).
 
 ## Flow
 
@@ -11,7 +11,7 @@ This guide walks through the flow of creating an actor system, spawning an actor
 
 ## Actor interface
 
-Implement the `Actor` interface to define your actor. See [Actor Model](../concepts/actor-model.md#the-actor-interface)
+Implement the `Actor` interface to define your actor. See [Actor Model](actor-model.md#the-actor-interface)
 for the full interface and method explanations.
 
 ## Messaging from outside

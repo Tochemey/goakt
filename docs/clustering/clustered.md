@@ -10,7 +10,7 @@ find peers.
 
 - High availability and horizontal scaling
 - Actor distribution across machines
-- Cluster singletons and relocation
+- Cluster [singletons](../actor/singletons.md) and relocation
 
 ## Key components
 
@@ -26,5 +26,5 @@ Configure the actor system with `WithCluster(clusterConfig)` and a discovery pro
 ## Relocation
 
 When a node leaves, the leader relocates its actors and grains to remaining nodes. Singleton actors move to the leader;
-others are distributed. Actors can opt out of relocation via spawn options. See [Relocation](../advanced/relocation.md) for
+others are distributed. Actors can opt out of relocation via spawn options. See [Relocation](../actor/relocation.md) for
 the full flow, configuration, and relocatability requirements.

@@ -1,0 +1,98 @@
+# Cluster Singletons
+
+A **cluster singleton** is an actor with exactly one instance across the entire cluster. It is hosted on the cluster coordinator (oldest node). When that host node leaves the cluster **gracefully**, the singleton is recreated on the new coordinator.
+
+## Singletons vs normal actors
+
+| Aspect        | Singleton                         | Normal actor                             |
+|---------------|-----------------------------------|------------------------------------------|
+| **Instances** | Exactly one per cluster           | One per spawn (many per node or cluster) |
+| **Placement** | Coordinator (oldest node) or role | Local, or any node via `SpawnOn`         |
+| **Cluster**   | Requires cluster mode             | Works standalone or in cluster           |
+| **Lifecycle** | Long-lived, relocated on shutdown | Explicit spawn/stop, can passivate       |
+| **API**       | `SpawnSingleton`                  | `Spawn`, `SpawnOn`, `SpawnFromFunc`      |
+
+## When to use singletons
+
+- **Cluster-wide coordinator** — Job scheduler, leader election, or coordination that must run once across the cluster
+- **Single source of truth** — Centralized state or registry that must be unique (e.g. license manager, cluster metadata)
+- **Exclusive resource** — A resource that must have exactly one owner (e.g. distributed lock coordinator)
+
+## When to use normal actors
+
+- **Scalable workers** — Many instances for parallelism (e.g. request handlers, workers)
+- **Per-entity or per-request** — One actor per user, session, or task
+- **Explicit lifecycle** — You control when to spawn and stop
+- **Standalone or local-only** — No cluster, or node-local state
+
+## Requirements
+
+- **Cluster mode** — Singletons require clustering. `SpawnSingleton` returns `ErrClusterDisabled` when cluster mode is off.
+- **Remoting** — Clustering requires remoting; the singleton may run on a different node than the caller.
+- **Actor kind registered** — The actor type must be registered via `WithKinds` when creating the actor system.
+
+## API
+
+```go
+pid, err := system.SpawnSingleton(ctx, "scheduler", NewSchedulerActor())
+if err != nil {
+    return err
+}
+```
+
+Use `ActorOf(ctx, name)` to resolve the singleton from any node. Messaging is location-transparent: `Tell` and `Ask` work the same whether the singleton is local or remote. From inside `Receive`, use `ctx.Request(pid, msg, opts...)` for non-blocking request-response.
+
+## Placement
+
+- **Default** — The singleton runs on the cluster coordinator (oldest node by membership).
+- **With role** — Use `WithSingletonRole(role)` to pin the singleton to nodes that advertise that role. The oldest node with the role hosts it. If no node has the role, `SpawnSingleton` returns an error.
+
+## Configuration options
+
+| Option                              | Purpose                                       | Default |
+|-------------------------------------|-----------------------------------------------|---------|
+| `WithSingletonRole(role)`           | Pin singleton to nodes with this role         | —       |
+| `WithSingletonSpawnTimeout(d)`      | Max time to wait for spawn (retries + checks) | 30s     |
+| `WithSingletonSpawnWaitInterval(d)` | Delay between retry attempts                  | 500ms   |
+| `WithSingletonSpawnRetries(n)`      | Max retry attempts before giving up           | 5       |
+
+Example with role:
+
+```go
+pid, err := system.SpawnSingleton(ctx, "scheduler", NewSchedulerActor(),
+    actor.WithSingletonRole("control-plane"),
+    actor.WithSingletonSpawnTimeout(10*time.Second),
+)
+```
+
+## Idempotency
+
+Calling `SpawnSingleton` multiple times with the same actor kind (and role, if set) typically returns `ErrSingletonAlreadyExists` when the singleton is already registered. Use `ActorOf(ctx, name)` to obtain the PID of an existing singleton.
+
+## Relocation
+
+When the host node leaves the cluster **gracefully**, the relocator recreates the singleton on the new coordinator. See [Relocation](relocation.md) for the full flow.
+
+If the host node crashes (kill -9, OOM, etc.), relocation does not run; the singleton is lost. A subsequent `SpawnSingleton` may return `ErrSingletonAlreadyExists` if the cluster still has the singleton kind registered.
+
+## Lifecycle
+
+- A singleton is created with a OneForOne supervisor strategy and lives for the lifetime of the actor system. The supervisor configuration is fixed internally (not configurable via `SpawnSingleton` options).
+- It is not passivated by default; use `WithPassivationStrategy` if you need idle-based deactivation (uncommon for singletons).
+- Use `pid.IsSingleton()` to check whether a PID is a cluster singleton.
+
+## Errors
+
+| Error                       | When                                                                       |
+|-----------------------------|----------------------------------------------------------------------------|
+| `ErrClusterDisabled`        | Cluster mode is not enabled                                                |
+| `ErrLeaderNotFound`         | No coordinator (oldest node) in the cluster                                |
+| `ErrSingletonAlreadyExists` | Another singleton of the same kind (and role) is already registered        |
+| `ErrActorAlreadyExists`     | Name collision; retries may resolve if the existing actor is the singleton |
+| Quorum errors               | Cluster cannot reach write/read quorum; retries may succeed                |
+
+## See also
+
+- [Actor System](actor-system.md) — `SpawnSingleton` in the spawn methods table
+- [Clustered Mode](../clustering/clustered.md) — Cluster setup
+- [Relocation](relocation.md) — How singletons are relocated when nodes leave

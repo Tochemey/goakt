@@ -24,7 +24,7 @@ Use `pid.IsRunning()`, `pid.IsSuspended()`, `pid.IsStopping()` to query state wh
 - **Spawn** — Creates the actor, registers it, calls `PreStart`, and starts the mailbox dispatch loop.
 - **Stop** — Sends a stop signal. The actor finishes current work, runs `PostStop`, and is removed from the tree.
 
-When a parent stops, all children stop first (depth-first). The framework ensures deterministic cleanup order.
+When a parent stops, all children stop first (depth-first). The order among descendants is not guaranteed.
 
 ## Lifecycle hooks (Actor interface)
 
@@ -55,7 +55,7 @@ Go structs in the `actor` package. Handle them in `Receive` when you need to rea
 
 | Message        | Role                                                                                                                                                                                                                                                                                    |
 |----------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Terminated** | Sent to every actor that is **watching** another actor when that watched actor stops. Use it to clean up references, restart dependents, or trigger failover. Subscribe via `ctx.Watch(targetPID)`; cancel via `ctx.UnWatch(targetPID)`. See [Death Watch](../advanced/death-watch.md). |
+| **Terminated** | Sent to every actor that is **watching** another actor when that watched actor stops. Use it to clean up references, restart dependents, or trigger failover. Subscribe via `ctx.Watch(targetPID)`; cancel via `ctx.UnWatch(targetPID)`. See [Death Watch](death-watch.md). |
 
 ### Event stream (observability)
 

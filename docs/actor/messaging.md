@@ -41,7 +41,7 @@ Inside `Receive`, the `ReceiveContext` provides these messaging operations:
 | `Ask(to *PID, message any, timeout)`   | Request-response. Blocks until reply or timeout.                                      |
 | `Response(resp any)`                   | Reply to an Ask. Call exactly once per Ask message.                                   |
 | `Request(to, message, opts...)`        | Non-blocking Ask; use continuations for the reply.                                    |
-| `PipeTo(to, task, opts...)`            | Run task asynchronously; deliver result to `to`. See [PipeTo](../advanced/pipeto.md). |
+| `PipeTo(to, task, opts...)`            | Run task asynchronously; deliver result to `to`. See [PipeTo](pipeto.md). |
 | `PipeToName(actorName, task, opts...)` | Same, target by name.                                                                 |
 
 Use `Sender()` to get the sender's PID when replying. Use `ActorSystem().ActorOf(ctx, name)` to resolve an actor by name

@@ -27,7 +27,7 @@ NewActorSystem(opts...) → Start(ctx) → [running] → Stop(ctx) → [stopped]
 - **Start** — Initializes remoting (if enabled), cluster (if enabled), scheduler, eviction, passivation, and system actors. Handle SIGTERM/SIGINT and call `Stop` for clean shutdown.
 - **Stop** — Runs coordinated shutdown hooks, stops user actors, deactivates grains, shuts down system actors, leaves cluster, stops remoting. Does not exit the process; call `os.Exit` if needed.
 
-Details: [Coordinated Shutdown](../advanced/coordinated-shutdown.md), [First Actor](../getting-started/first-actor.md).
+Details: [Coordinated Shutdown](../advanced/coordinated-shutdown.md), [First Actor](first-actor.md).
 
 ## API surface
 
@@ -40,9 +40,9 @@ Details: [Coordinated Shutdown](../advanced/coordinated-shutdown.md), [First Act
 | `SpawnFromFunc(ctx, receiveFunc, opts...)`               | `*PID`, error | Functional actor; no `Actor` implementation.                                                                                   |
 | `SpawnNamedFromFunc(ctx, name, receiveFunc, opts...)`    | `*PID`, error | Named functional actor.                                                                                                        |
 | `SpawnRouter(ctx, name, poolSize, routeesKind, opts...)` | `*PID`, error | Router with a pool of routees. Not cluster-relocatable.                                                                        |
-| `SpawnSingleton(ctx, name, actor, opts...)`              | `*PID`, error | Cluster singleton; one instance across the cluster, hosted on the oldest node.                                                 |
+| `SpawnSingleton(ctx, name, actor, opts...)`              | `*PID`, error | Cluster singleton; one instance across the cluster, hosted on the oldest node. See [Singletons](singletons.md).                 |
 
-See [Actor Lifecycle](actor-lifecycle.md), [Routers](../advanced/routers.md), [Clustering](../clustering/clustered.md).
+See [Actor Lifecycle](lifecycle.md), [Routers](routers.md), [Singletons](singletons.md), [Clustering](../clustering/clustered.md).
 
 ### Resolution and inspection
 
@@ -64,6 +64,8 @@ From outside the actor system (e.g. `main`), use `system.NoSender()`:
 - `NoSender().Tell(pid, msg)` — Fire-and-forget.
 - `NoSender().Ask(ctx, pid, msg, timeout)` — Request-response; actor must call `ctx.Response(resp)`.
 
+For processes that do not run an actor system (CLI, API server, batch job), use the [Client](../advanced/client.md) package to connect to the cluster and send messages by actor name.
+
 See [Messaging](messaging.md).
 
 ### Scheduling
@@ -76,7 +78,7 @@ See [Messaging](messaging.md).
 | `CancelSchedule(reference)`                              | Cancel by reference.              |
 | `PauseSchedule(reference)` / `ResumeSchedule(reference)` | Pause or resume a scheduled task. |
 
-Use `WithReference(id)` when scheduling if you need to cancel, pause, or resume. See [Scheduling](../advanced/scheduling.md).
+Use `WithReference(id)` when scheduling if you need to cancel, pause, or resume. See [Scheduling](scheduling.md).
 
 ### Events and observability
 
@@ -138,7 +140,7 @@ Actors obtain the system via `ctx.ActorSystem()` (or `ReceiveContext`, `GrainCon
 
 ## Further reading
 
-- [First Actor](../getting-started/first-actor.md) — Minimal flow
+- [First Actor](first-actor.md) — Minimal flow
 - [Actor Model](actor-model.md) — Actor interface and hierarchy
 - [Clustering](../clustering/standalone.md) — Standalone vs clustered vs multi-DC
 - [Reference: Interfaces](../reference/interfaces.md) — Interface definitions
