@@ -28,6 +28,8 @@ import (
 	"context"
 	"net"
 	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 // listenUDPReusePort creates a UDP listener on the given port with SO_REUSEPORT
@@ -38,12 +40,13 @@ func listenUDPReusePort(port int) (*net.UDPConn, error) {
 
 // listenUDPReusePortToAddr creates a UDP listener bound to addr with SO_REUSEPORT.
 // For loopback multi-receiver (127.255.255.255), all listeners receive broadcast packets.
+// Uses golang.org/x/sys/unix for SO_REUSEPORT (not in std syscall on Linux).
 func listenUDPReusePortToAddr(addr *net.UDPAddr) (*net.UDPConn, error) {
 	lc := net.ListenConfig{
 		Control: func(network, address string, c syscall.RawConn) error {
 			var opErr error
 			err := c.Control(func(fd uintptr) {
-				opErr = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_REUSEPORT, 1)
+				opErr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1)
 			})
 			if err != nil {
 				return err
