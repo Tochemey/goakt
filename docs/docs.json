@@ -3,11 +3,17 @@
   "name": "GoAkt",
   "description": "Distributed actor framework for Go, inspired by Erlang and Akka. Build reactive and distributed systems with typed actor messages.",
   "theme": "aspen",
+  "seo": {
+    "metatags": {
+      "canonical": "https://docs.goakt.dev"
+    }
+  },
   "colors": {
     "primary": "#2563EB",
     "light": "#3B82F6",
     "dark": "#1D4ED8"
   },
+  "favicon": "",
   "background": {
     "decoration": "gradient"
   },
