@@ -20,23 +20,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package discovery
-
-const (
-	// ProviderConsul represents the Consul discovery provider
-	ProviderConsul = "consul"
-	// ProviderMDNS represents the mDNS discovery provider
-	ProviderMDNS = "mdns"
-	// ProviderKubernetes represents the Kubernetes discovery provider
-	ProviderKubernetes = "kubernetes"
-	// ProviderNATS represents the NATS discovery provider
-	ProviderNATS = "nats"
-	// ProviderStatic represents the Static discovery provider
-	ProviderStatic = "static"
-	// ProviderDNS represents the DNS discovery provider
-	ProviderDNS = "dns"
-	// ProviderEtcd represents the Etcd discovery provider
-	ProviderEtcd = "etcd"
-	// ProviderSelfManaged represents the self-managed discovery provider
-	ProviderSelfManaged = "selfmanaged"
-)
+// Package selfmanaged provides a self-managed discovery provider that allows
+// cluster nodes to discover each other via UDP broadcast on the LAN—no
+// third-party infrastructure or peer configuration required.
+//
+// See README.md for the implementation plan.
+package selfmanaged

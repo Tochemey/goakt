@@ -20,23 +20,20 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package discovery
+//go:build !darwin && !linux && !windows
 
-const (
-	// ProviderConsul represents the Consul discovery provider
-	ProviderConsul = "consul"
-	// ProviderMDNS represents the mDNS discovery provider
-	ProviderMDNS = "mdns"
-	// ProviderKubernetes represents the Kubernetes discovery provider
-	ProviderKubernetes = "kubernetes"
-	// ProviderNATS represents the NATS discovery provider
-	ProviderNATS = "nats"
-	// ProviderStatic represents the Static discovery provider
-	ProviderStatic = "static"
-	// ProviderDNS represents the DNS discovery provider
-	ProviderDNS = "dns"
-	// ProviderEtcd represents the Etcd discovery provider
-	ProviderEtcd = "etcd"
-	// ProviderSelfManaged represents the self-managed discovery provider
-	ProviderSelfManaged = "selfmanaged"
-)
+package selfmanaged
+
+import "net"
+
+// listenUDPReusePort creates a UDP listener without SO_REUSEPORT.
+// On platforms that don't support it, only one node per host can use
+// the same broadcast port.
+func listenUDPReusePort(port int) (*net.UDPConn, error) {
+	return listenUDPReusePortToAddr(&net.UDPAddr{IP: net.IPv4zero, Port: port})
+}
+
+// listenUDPReusePortToAddr creates a UDP listener bound to addr.
+func listenUDPReusePortToAddr(addr *net.UDPAddr) (*net.UDPConn, error) {
+	return net.ListenUDP("udp4", addr)
+}

@@ -1758,17 +1758,14 @@ func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string, com
 	// create a Cluster startNode
 	host := "127.0.0.1"
 	// create the various config option
-	applicationName := "accounts"
 	actorSystemName := "testSystem"
 	natsSubject := "some-subject"
 	// create the config
 	config := nats.Config{
-		ApplicationName: applicationName,
-		ActorSystemName: actorSystemName,
-		NatsServer:      fmt.Sprintf("nats://%s", serverAddr),
-		NatsSubject:     natsSubject,
-		Host:            host,
-		DiscoveryPort:   discoveryPort,
+		NatsServer:    fmt.Sprintf("nats://%s", serverAddr),
+		NatsSubject:   natsSubject,
+		Host:          host,
+		DiscoveryPort: discoveryPort,
 	}
 
 	hostNode := discovery.Node{

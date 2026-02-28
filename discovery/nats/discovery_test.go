@@ -98,18 +98,14 @@ func TestDiscovery(t *testing.T) {
 		// create a Cluster node
 		host := "127.0.0.1"
 		// create the various config option
-		applicationName := "accounts"
-		actorSystemName := "AccountsSystem"
 		natsSubject := "some-subject"
 
 		// create the config
 		config := &Config{
-			ApplicationName: applicationName,
-			ActorSystemName: actorSystemName,
-			NatsServer:      fmt.Sprintf("nats://%s", srv.Addr().String()),
-			NatsSubject:     natsSubject,
-			Host:            host,
-			DiscoveryPort:   gossipPort,
+			NatsServer:    fmt.Sprintf("nats://%s", srv.Addr().String()),
+			NatsSubject:   natsSubject,
+			Host:          host,
+			DiscoveryPort: gossipPort,
 		}
 
 		// create the instance of provider
@@ -134,18 +130,14 @@ func TestDiscovery(t *testing.T) {
 		// create a Cluster node
 		host := "127.0.0.1"
 		// create the various config option
-		applicationName := "accounts"
-		actorSystemName := "AccountsSystem"
 		natsSubject := "some-subject"
 
 		// create the config
 		config := &Config{
-			ApplicationName: applicationName,
-			ActorSystemName: actorSystemName,
-			NatsServer:      fmt.Sprintf("nats://%s", srv.Addr().String()),
-			NatsSubject:     natsSubject,
-			Host:            host,
-			DiscoveryPort:   gossipPort,
+			NatsServer:    fmt.Sprintf("nats://%s", srv.Addr().String()),
+			NatsSubject:   natsSubject,
+			Host:          host,
+			DiscoveryPort: gossipPort,
 		}
 
 		// create the instance of provider
@@ -166,18 +158,14 @@ func TestDiscovery(t *testing.T) {
 
 		// create the various config option
 		natsServer := srv.Addr().String()
-		applicationName := "accounts"
-		actorSystemName := "AccountsSystem"
 		natsSubject := "some-subject"
 
 		// create the config
 		config := &Config{
-			ApplicationName: applicationName,
-			ActorSystemName: actorSystemName,
-			NatsServer:      fmt.Sprintf("nats://%s", natsServer),
-			NatsSubject:     natsSubject,
-			Host:            host,
-			DiscoveryPort:   gossipPort,
+			NatsServer:    fmt.Sprintf("nats://%s", natsServer),
+			NatsSubject:   natsSubject,
+			Host:          host,
+			DiscoveryPort: gossipPort,
 		}
 
 		// create the instance of provider
@@ -203,18 +191,14 @@ func TestDiscovery(t *testing.T) {
 
 		// create the various config option
 		natsServer := srv.Addr().String()
-		applicationName := "accounts"
-		actorSystemName := "AccountsSystem"
 		natsSubject := "some-subject"
 
 		// create the config
 		config := &Config{
-			ApplicationName: applicationName,
-			ActorSystemName: actorSystemName,
-			NatsServer:      fmt.Sprintf("nats://%s", natsServer),
-			NatsSubject:     natsSubject,
-			Host:            host,
-			DiscoveryPort:   gossipPort,
+			NatsServer:    fmt.Sprintf("nats://%s", natsServer),
+			NatsSubject:   natsSubject,
+			Host:          host,
+			DiscoveryPort: gossipPort,
 		}
 
 		// create the instance of provider
@@ -235,18 +219,14 @@ func TestDiscovery(t *testing.T) {
 
 		// create the various config option
 		natsServer := srv.Addr().String()
-		applicationName := "accounts"
-		actorSystemName := "AccountsSystem"
 		natsSubject := "some-subject"
 
 		// create the config
 		config := &Config{
-			ApplicationName: applicationName,
-			ActorSystemName: actorSystemName,
-			NatsServer:      fmt.Sprintf("nats://%s", natsServer),
-			NatsSubject:     natsSubject,
-			Host:            host,
-			DiscoveryPort:   gossipPort,
+			NatsServer:    fmt.Sprintf("nats://%s", natsServer),
+			NatsSubject:   natsSubject,
+			Host:          host,
+			DiscoveryPort: gossipPort,
 		}
 
 		// create the instance of provider
@@ -269,18 +249,14 @@ func TestDiscovery(t *testing.T) {
 
 		// create the various config option
 		natsServer := srv.Addr().String()
-		applicationName := "accounts"
-		actorSystemName := "AccountsSystem"
 		natsSubject := "some-subject"
 
 		// create the config
 		config := &Config{
-			ApplicationName: applicationName,
-			ActorSystemName: actorSystemName,
-			NatsServer:      fmt.Sprintf("nats://%s", natsServer),
-			NatsSubject:     natsSubject,
-			Host:            host,
-			DiscoveryPort:   gossipPort,
+			NatsServer:    fmt.Sprintf("nats://%s", natsServer),
+			NatsSubject:   natsSubject,
+			Host:          host,
+			DiscoveryPort: gossipPort,
 		}
 
 		// create the instance of provider
@@ -362,18 +338,14 @@ func TestDiscovery(t *testing.T) {
 
 		// create the various config option
 		natsServer := srv.Addr().String()
-		applicationName := "accounts"
-		actorSystemName := "AccountsSystem"
 		natsSubject := "some-subject"
 
 		// create the config
 		config := &Config{
-			ApplicationName: applicationName,
-			ActorSystemName: actorSystemName,
-			NatsServer:      fmt.Sprintf("nats://%s", natsServer),
-			NatsSubject:     natsSubject,
-			Host:            host,
-			DiscoveryPort:   gossipPort,
+			NatsServer:    fmt.Sprintf("nats://%s", natsServer),
+			NatsSubject:   natsSubject,
+			Host:          host,
+			DiscoveryPort: gossipPort,
 		}
 
 		provider := NewDiscovery(config, WithLogger(log.DiscardLogger))

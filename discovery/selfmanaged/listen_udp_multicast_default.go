@@ -20,23 +20,15 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package discovery
+//go:build !darwin
 
-const (
-	// ProviderConsul represents the Consul discovery provider
-	ProviderConsul = "consul"
-	// ProviderMDNS represents the mDNS discovery provider
-	ProviderMDNS = "mdns"
-	// ProviderKubernetes represents the Kubernetes discovery provider
-	ProviderKubernetes = "kubernetes"
-	// ProviderNATS represents the NATS discovery provider
-	ProviderNATS = "nats"
-	// ProviderStatic represents the Static discovery provider
-	ProviderStatic = "static"
-	// ProviderDNS represents the DNS discovery provider
-	ProviderDNS = "dns"
-	// ProviderEtcd represents the Etcd discovery provider
-	ProviderEtcd = "etcd"
-	// ProviderSelfManaged represents the self-managed discovery provider
-	ProviderSelfManaged = "selfmanaged"
-)
+package selfmanaged
+
+import "net"
+
+// listenUDPMulticastLoopback is only used on darwin (macOS). On Linux, 127.255.255.255
+// broadcast works; on Windows, 127.0.0.1 bind + 127.255.255.255 send works.
+// Returns an error so the caller falls back to broadcast.
+func listenUDPMulticastLoopback(port int) (*net.UDPConn, error) {
+	return nil, net.UnknownNetworkError("multicast loopback not used on this platform")
+}

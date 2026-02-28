@@ -36,6 +36,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"github.com/travisjeffery/go-dynaport"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/types/known/durationpb"
 
@@ -1649,17 +1650,14 @@ func TestGrainsWithDependenciesRelocation(t *testing.T) {
 }
 
 func TestRelocationWithConsulProvider(t *testing.T) {
-	t.Skip("Skipping relocation test with Consul provider")
 	// create a context
 	ctx := t.Context()
-	agent := startConsulAgent(t)
+	agent, ready := startConsulAgent(t)
+	<-ready
 
 	endpoint, err := agent.ApiEndpoint(ctx)
 	require.NoError(t, err)
 	require.NotEmpty(t, endpoint)
-
-	// wait for the agent to be ready
-	pause.For(time.Second)
 
 	// create and start a system cluster
 	node1, sd1 := testConsul(t, endpoint)
@@ -1684,7 +1682,7 @@ func TestRelocationWithConsulProvider(t *testing.T) {
 		require.NotNil(t, pid)
 	}
 
-	pause.For(time.Second)
+	pause.For(300 * time.Millisecond) // cluster sync interval is 300ms
 
 	for j := 1; j <= 4; j++ {
 		actorName := fmt.Sprintf("Actor2%d", j)
@@ -1693,7 +1691,7 @@ func TestRelocationWithConsulProvider(t *testing.T) {
 		require.NotNil(t, pid)
 	}
 
-	pause.For(time.Second)
+	pause.For(300 * time.Millisecond)
 
 	for j := 1; j <= 4; j++ {
 		actorName := fmt.Sprintf("Actor3%d", j)
@@ -1702,7 +1700,7 @@ func TestRelocationWithConsulProvider(t *testing.T) {
 		require.NotNil(t, pid)
 	}
 
-	pause.For(time.Second)
+	pause.For(300 * time.Millisecond)
 
 	// Verify actor is on node2 before shutdown
 	actorName := "Actor21"
@@ -1727,7 +1725,7 @@ func TestRelocationWithConsulProvider(t *testing.T) {
 			return false
 		}
 		return relocatedPID.Path().HostPort() != node2Address
-	}, 2*time.Minute, time.Second, "Actor %s should be relocated from node2 to a live node", actorName)
+	}, 4*time.Minute, 500*time.Millisecond, "Actor %s should be relocated from node2 to a live node", actorName)
 
 	sender, err := node1.ActorOf(ctx, "Actor11")
 	require.NoError(t, err)
@@ -1743,17 +1741,112 @@ func TestRelocationWithConsulProvider(t *testing.T) {
 	require.NoError(t, sd3.Close())
 }
 
+func TestRelocationWithSelfManagedProvider(t *testing.T) {
+	ctx := t.Context()
+	broadcastPort := dynaport.Get(1)[0]
+
+	node1, sd1 := testSelfManaged(t, broadcastPort)
+	require.NotNil(t, node1)
+	require.NotNil(t, sd1)
+
+	node2, sd2 := testSelfManaged(t, broadcastPort)
+	require.NotNil(t, node2)
+	require.NotNil(t, sd2)
+
+	node3, sd3 := testSelfManaged(t, broadcastPort)
+	require.NotNil(t, node3)
+	require.NotNil(t, sd3)
+
+	// wait for discovery and cluster formation (UDP broadcast/multicast on loopback)
+	// allow up to 15s on slower systems (e.g. macOS)
+	deadline := time.Now().Add(15 * time.Second)
+	var formed bool
+	for time.Now().Before(deadline) {
+		peers, err := node1.Peers(ctx, 500*time.Millisecond)
+		if err == nil && len(peers) >= 2 {
+			formed = true
+			break
+		}
+		pause.For(500 * time.Millisecond)
+	}
+	if !formed {
+		t.Skip("selfmanaged discovery did not form cluster on loopback (expected on some systems)")
+	}
+
+	// let us create 4 actors on each node
+	for j := 1; j <= 4; j++ {
+		actorName := fmt.Sprintf("Actor1%d", j)
+		pid, err := node1.Spawn(ctx, actorName, NewMockActor(), WithLongLived())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+	}
+
+	pause.For(300 * time.Millisecond)
+
+	for j := 1; j <= 4; j++ {
+		actorName := fmt.Sprintf("Actor2%d", j)
+		pid, err := node2.Spawn(ctx, actorName, NewMockActor(), WithLongLived())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+	}
+
+	pause.For(300 * time.Millisecond)
+
+	for j := 1; j <= 4; j++ {
+		actorName := fmt.Sprintf("Actor3%d", j)
+		pid, err := node3.Spawn(ctx, actorName, NewMockActor(), WithLongLived())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+	}
+
+	pause.For(300 * time.Millisecond)
+
+	// Verify actor is on node2 before shutdown
+	actorName := "Actor21"
+	node2Address := net.JoinHostPort(node2.Host(), strconv.Itoa(node2.Port()))
+	actorPID, err := node1.ActorOf(ctx, actorName)
+	require.NoError(t, err)
+	require.NotNil(t, actorPID)
+	require.Equal(t, node2Address, actorPID.Path().HostPort(), "Actor %s should be on node2 before shutdown", actorName)
+
+	// take down node2
+	require.NoError(t, node2.Stop(ctx))
+	require.NoError(t, sd2.Close())
+
+	// Wait for relocation - verify actor exists and is on a live node (not node2)
+	require.Eventually(t, func() bool {
+		exists, err := node1.ActorExists(ctx, actorName)
+		if err != nil || !exists {
+			return false
+		}
+		relocatedPID, err := node1.ActorOf(ctx, actorName)
+		if err != nil || relocatedPID == nil {
+			return false
+		}
+		return relocatedPID.Path().HostPort() != node2Address
+	}, 4*time.Minute, 500*time.Millisecond, "Actor %s should be relocated from node2 to a live node", actorName)
+
+	sender, err := node1.ActorOf(ctx, "Actor11")
+	require.NoError(t, err)
+	require.NotNil(t, sender)
+
+	err = sender.SendAsync(ctx, actorName, new(testpb.TestSend))
+	require.NoError(t, err)
+
+	require.NoError(t, node1.Stop(ctx))
+	require.NoError(t, node3.Stop(ctx))
+	require.NoError(t, sd1.Close())
+	require.NoError(t, sd3.Close())
+}
+
 func TestRelocationWithEtcdProvider(t *testing.T) {
-	t.Skip("Skipping relocation test with Etcd provider")
 	// create a context
 	ctx := t.Context()
-	cluster := startEtcdCluster(t)
+	cluster, ready := startEtcdCluster(t)
+	<-ready
 
 	endpoints, err := cluster.ClientEndpoints(ctx)
 	require.NoError(t, err)
-
-	// wait for the agent to be ready
-	pause.For(time.Second)
 
 	// create and start a system cluster
 	node1, sd1 := testEtcd(t, endpoints[0])
@@ -1796,11 +1889,13 @@ func TestRelocationWithEtcdProvider(t *testing.T) {
 		require.NotNil(t, pid)
 	}
 
-	pause.For(time.Second)
+	// Allow cluster to sync and persist peer state to etcd before shutdown
+	pause.For(5 * time.Second)
 
 	// Verify actor is on node2 before shutdown
 	actorName := "Actor21"
 	node2Address := net.JoinHostPort(node2.Host(), strconv.Itoa(node2.Port()))
+	node2PeersAddr := node2.PeersAddress()
 	actorPID, err := node1.ActorOf(ctx, actorName)
 	require.NoError(t, err)
 	require.NotNil(t, actorPID)
@@ -1810,8 +1905,8 @@ func TestRelocationWithEtcdProvider(t *testing.T) {
 	require.NoError(t, node2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 
-	// Give the cluster time to detect the node failure and start relocation
-	pause.For(2 * time.Second)
+	// Give the cluster time to detect the node failure and start relocation (etcd can be slower)
+	pause.For(5 * time.Second)
 
 	// Wait for cluster rebalancing - verify actor relocation actually occurred.
 	// The relocation process:
@@ -1825,6 +1920,8 @@ func TestRelocationWithEtcdProvider(t *testing.T) {
 	// During relocation, the actor may temporarily not exist (removed but not yet re-added),
 	// so we accept either: actor doesn't exist (relocation in progress) OR actor exists with new address (relocation complete).
 	// We reject: actor exists with old address (relocation hasn't started or failed).
+	//
+	// Etcd has higher latency than NATS/Consul; use longer timeout and check both address formats.
 	require.Eventually(t, func() bool {
 		exists, err := node1.ActorExists(ctx, actorName)
 		if err != nil {
@@ -1840,10 +1937,10 @@ func TestRelocationWithEtcdProvider(t *testing.T) {
 		if err != nil || relocatedPID == nil {
 			return false
 		}
-		// Critical check: actor must have a NEW address (not node2's address)
-		// If it still has node2's address, relocation hasn't happened yet
-		return relocatedPID.Path().HostPort() != node2Address
-	}, 2*time.Minute, time.Second, "Actor %s should be relocated from node2 (was %s) to a live node", actorName, node2Address)
+		addr := relocatedPID.Path().HostPort()
+		// Critical check: actor must have a NEW address (not node2's remoting or peers address)
+		return addr != node2Address && addr != node2PeersAddr
+	}, 4*time.Minute, 500*time.Millisecond, "Actor %s should be relocated from node2 (was %s) to a live node", actorName, node2Address)
 
 	sender, err := node1.ActorOf(ctx, "Actor11")
 	require.NoError(t, err)

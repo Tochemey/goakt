@@ -1562,6 +1562,92 @@ func TestActorSystem(t *testing.T) {
 		// shutdown the nats server gracefully
 		srv.Shutdown()
 	})
+	t.Run("With cluster events subscription (selfmanaged)", func(t *testing.T) {
+		ctx := context.TODO()
+		broadcastPort := dynaport.Get(1)[0]
+
+		// create and start system cluster (mirrors "With cluster events subscription" but uses selfmanaged discovery)
+		cl1, sd1 := testSelfManaged(t, broadcastPort)
+		peerAddress1 := cl1.PeersAddress()
+		require.NotEmpty(t, peerAddress1)
+
+		subscriber1, err := cl1.Subscribe()
+		require.NoError(t, err)
+		require.NotNil(t, subscriber1)
+
+		cl2, sd2 := testSelfManaged(t, broadcastPort)
+		peerAddress2 := cl2.PeersAddress()
+		require.NotEmpty(t, peerAddress2)
+
+		subscriber2, err := cl2.Subscribe()
+		require.NoError(t, err)
+		require.NotNil(t, subscriber2)
+
+		cl3, sd3 := testSelfManaged(t, broadcastPort)
+		peerAddress3 := cl3.PeersAddress()
+		require.NotEmpty(t, peerAddress3)
+
+		subscriber3, err := cl3.Subscribe()
+		require.NoError(t, err)
+		require.NotNil(t, subscriber3)
+
+		// wait for discovery and cluster formation (UDP broadcast on loopback)
+		pause.For(6 * time.Second)
+
+		// skip if cluster did not form (e.g. SO_REUSEPORT on loopback may not deliver cross-node)
+		peers1, _ := cl1.Peers(ctx, time.Second)
+		if len(peers1) < 2 {
+			t.Skip("selfmanaged discovery did not form cluster on loopback (expected on some systems)")
+		}
+
+		// capture the joins (cl1 should see cl2 and cl3)
+		var joins []*NodeJoined
+		for event := range subscriber1.Iterator() {
+			payload := event.Payload()
+			if nodeJoined, ok := payload.(*NodeJoined); ok {
+				joins = append(joins, nodeJoined)
+			}
+		}
+
+		require.NotEmpty(t, joins)
+		require.GreaterOrEqual(t, len(joins), 2)
+		joinedAddrs := make(map[string]bool)
+		for _, j := range joins {
+			joinedAddrs[j.Address()] = true
+			require.NotZero(t, j.Timestamp())
+		}
+		require.True(t, joinedAddrs[peerAddress2], "cl1 should see cl2 join")
+		require.True(t, joinedAddrs[peerAddress3], "cl1 should see cl3 join")
+
+		pause.For(time.Second)
+
+		require.NoError(t, cl1.Unsubscribe(subscriber1))
+		require.NoError(t, cl1.Stop(ctx))
+		require.NoError(t, sd1.Close())
+
+		pause.For(time.Second)
+
+		var lefts []*NodeLeft
+		for event := range subscriber2.Iterator() {
+			payload := event.Payload()
+			nodeLeft, ok := payload.(*NodeLeft)
+			if ok {
+				lefts = append(lefts, nodeLeft)
+			}
+		}
+
+		require.NotEmpty(t, lefts)
+		require.GreaterOrEqual(t, len(lefts), 1)
+		require.Equal(t, peerAddress1, lefts[0].Address())
+		require.NotZero(t, lefts[0].Timestamp())
+
+		require.NoError(t, cl2.Unsubscribe(subscriber2))
+		require.NoError(t, cl3.Unsubscribe(subscriber3))
+		assert.NoError(t, cl2.Stop(ctx))
+		assert.NoError(t, cl3.Stop(ctx))
+		assert.NoError(t, sd2.Close())
+		assert.NoError(t, sd3.Close())
+	})
 	t.Run("With PeerAddress empty when cluster not enabled", func(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))

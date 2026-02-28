@@ -28,6 +28,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strconv"
 	"sync"
@@ -40,6 +41,7 @@ import (
 	consulcontainer "github.com/testcontainers/testcontainers-go/modules/consul"
 	etcdContainer "github.com/testcontainers/testcontainers-go/modules/etcd"
 	"github.com/travisjeffery/go-dynaport"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	otelmetric "go.opentelemetry.io/otel/metric"
 	noopmetric "go.opentelemetry.io/otel/metric/noop"
 	"go.uber.org/atomic"
@@ -49,6 +51,7 @@ import (
 	"github.com/tochemey/goakt/v4/discovery/consul"
 	"github.com/tochemey/goakt/v4/discovery/etcd"
 	"github.com/tochemey/goakt/v4/discovery/nats"
+	"github.com/tochemey/goakt/v4/discovery/selfmanaged"
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/eventstream"
 	"github.com/tochemey/goakt/v4/extension"
@@ -1824,31 +1827,84 @@ func startNatsServer(t *testing.T) *natsserver.Server {
 	return serv
 }
 
-func startConsulAgent(t *testing.T) *consulcontainer.ConsulContainer {
+func startConsulAgent(t *testing.T) (*consulcontainer.ConsulContainer, <-chan struct{}) {
 	t.Helper()
 	container, err := consulcontainer.Run(t.Context(), "hashicorp/consul:1.15")
 	require.NoError(t, err)
-	pause.For(1 * time.Second)
 	t.Cleanup(func() {
 		err := container.Terminate(context.Background())
 		require.NoError(t, err)
 	})
-	return container
+	ready := make(chan struct{})
+	go func() {
+		ctx := context.Background()
+		for {
+			endpoint, err := container.ApiEndpoint(ctx)
+			if err != nil {
+				pause.For(100 * time.Millisecond)
+				continue
+			}
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+endpoint+"/v1/status/leader", nil)
+			if err != nil {
+				pause.For(100 * time.Millisecond)
+				continue
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				pause.For(100 * time.Millisecond)
+				continue
+			}
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				close(ready)
+				return
+			}
+			pause.For(100 * time.Millisecond)
+		}
+	}()
+	return container, ready
 }
 
-func startEtcdCluster(t *testing.T) *etcdContainer.EtcdContainer {
+func startEtcdCluster(t *testing.T) (*etcdContainer.EtcdContainer, <-chan struct{}) {
 	t.Helper()
-	etcdContainer, err := etcdContainer.Run(
+	container, err := etcdContainer.Run(
 		t.Context(),
 		"gcr.io/etcd-development/etcd:v3.5.14",
 		etcdContainer.WithNodes("etcd-1", "etcd-2", "etcd-3"),
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		err := testcontainers.TerminateContainer(etcdContainer)
+		err := testcontainers.TerminateContainer(container)
 		require.NoError(t, err)
 	})
-	return etcdContainer
+	ready := make(chan struct{})
+	go func() {
+		ctx := context.Background()
+		for {
+			endpoints, err := container.ClientEndpoints(ctx)
+			if err != nil {
+				pause.For(100 * time.Millisecond)
+				continue
+			}
+			cli, err := clientv3.New(clientv3.Config{
+				Endpoints:   endpoints,
+				DialTimeout: 5 * time.Second,
+			})
+			if err != nil {
+				pause.For(100 * time.Millisecond)
+				continue
+			}
+			_, err = cli.Put(ctx, "goakt/ready", "1")
+			_ = cli.Close()
+			if err != nil {
+				pause.For(100 * time.Millisecond)
+				continue
+			}
+			close(ready)
+			return
+		}
+	}()
+	return container, ready
 }
 
 type testClusterConfig struct {
@@ -1926,8 +1982,8 @@ func createConsulProvider(agentEndpoint string) providerFactory {
 			DiscoveryPort:   discoveryPort,
 			Context:         t.Context(),
 			HealthCheck: &consul.HealthCheck{
-				Interval: 10 * time.Second,
-				Timeout:  5 * time.Second,
+				Interval: time.Second, // short interval for faster failure detection in tests
+				Timeout:  time.Second,
 			},
 			QueryOptions: &consul.QueryOptions{
 				OnlyPassing: false,
@@ -1952,6 +2008,19 @@ func createEtcdProvider(serverAddr string) providerFactory {
 			DialTimeout:     5 * time.Second,
 		}
 		return etcd.NewDiscovery(config)
+	}
+}
+
+func createSelfManagedProvider(broadcastPort int) providerFactory {
+	return func(_ *testing.T, host string, discoveryPort int) discovery.Provider {
+		config := &selfmanaged.Config{
+			ClusterName:       "accountsSystem",
+			SelfAddress:       fmt.Sprintf("%s:%d", host, discoveryPort),
+			BroadcastPort:     broadcastPort,
+			BroadcastInterval: 100 * time.Millisecond,
+			BroadcastAddress:  net.IPv4(127, 0, 0, 1),
+		}
+		return selfmanaged.NewDiscovery(config)
 	}
 }
 
@@ -2034,6 +2103,10 @@ func testSystem(t *testing.T, providerFactory providerFactory, opts ...testClust
 
 func testNATs(t *testing.T, serverAddr string, opts ...testClusterOption) (ActorSystem, discovery.Provider) {
 	return testSystem(t, createNATsProvider(serverAddr), opts...)
+}
+
+func testSelfManaged(t *testing.T, broadcastPort int, opts ...testClusterOption) (ActorSystem, discovery.Provider) {
+	return testSystem(t, createSelfManagedProvider(broadcastPort), opts...)
 }
 
 func testConsul(t *testing.T, agentEndpoint string, opts ...testClusterOption) (ActorSystem, discovery.Provider) {
