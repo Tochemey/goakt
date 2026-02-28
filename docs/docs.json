@@ -56,13 +56,9 @@
   "navigation": {
     "groups": [
       {
-        "group": "Introduction",
-        "pages": ["index"],
-        "icon": "home"
-      },
-      {
         "group": "Getting Started",
         "pages": [
+          "index",
           "getting-started/installation",
           "getting-started/migration-v3"
         ],
