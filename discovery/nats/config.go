@@ -36,12 +36,6 @@ type Config struct {
 	NatsServer string
 	// NatsSubject defines the custom NATS subject
 	NatsSubject string
-	// The actor system name
-	// Deprecated: this field is no longer used and will be removed in a future release.
-	ActorSystemName string
-	// ApplicationName specifies the running application
-	// Deprecated: this field is no longer used and will be removed in a future release.
-	ApplicationName string
 	// Timeout defines the nodes discovery timeout
 	Timeout time.Duration
 	// MaxJoinAttempts denotes the maximum number of attempts to connect an existing NATs server

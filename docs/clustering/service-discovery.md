@@ -26,17 +26,32 @@ type Provider interface {
 
 ## Built-in providers
 
-| Provider       | Package                | Use case                        |
-|----------------|------------------------|---------------------------------|
-| **Consul**     | `discovery/consul`     | HashiCorp Consul.               |
-| **etcd**       | `discovery/etcd`       | etcd.                           |
-| **Kubernetes** | `discovery/kubernetes` | K8s API for pod discovery.      |
-| **NATS**       | `discovery/nats`       | NATS for peer discovery.        |
-| **mDNS**       | `discovery/mdns`       | Multicast DNS (local networks). |
-| **DNS-SD**     | `discovery/dnssd`      | DNS-based service discovery.    |
-| **Static**     | `discovery/static`     | Fixed list of peer addresses.   |
+| Provider         | Package                 | Use case                              |
+|------------------|-------------------------|---------------------------------------|
+| **Consul**       | `discovery/consul`      | HashiCorp Consul.                     |
+| **etcd**         | `discovery/etcd`        | etcd.                                 |
+| **Kubernetes**   | `discovery/kubernetes`  | K8s API for pod discovery.            |
+| **NATS**         | `discovery/nats`        | NATS for peer discovery.              |
+| **mDNS**         | `discovery/mdns`        | Multicast DNS (local networks).       |
+| **DNS-SD**       | `discovery/dnssd`       | DNS-based service discovery.          |
+| **Static**       | `discovery/static`      | Fixed list of peer addresses.         |
+| **Self-managed** | `discovery/selfmanaged` | UDP broadcast on LAN; no peer config. |
 
 Each provider has its own config type. See the package for constructors and options.
+
+### Self-managed (zero config)
+
+The self-managed provider uses UDP broadcast for peer discovery. No third-party services or peer IPs are required; nodes on the same LAN discover each other automatically.
+
+```go
+import "github.com/tochemey/goakt/v4/discovery/selfmanaged"
+
+config := selfmanaged.Config{
+    ClusterName: "my-app",
+    SelfAddress: "192.168.1.10:7946",
+}
+provider := selfmanaged.NewDiscovery(&config)
+```
 
 ## Configuration
 

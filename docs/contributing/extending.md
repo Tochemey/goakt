@@ -26,6 +26,7 @@ type Provider interface {
 | **Close**         | Release resources                             |
 
 Create a sub-package under `discovery/`. Pass the provider to `ClusterConfig` when creating the actor system.
+See `discovery/selfmanaged` for a built-in zero-config provider using UDP broadcast.
 
 ## Mailbox
 
@@ -64,10 +65,24 @@ type Extension interface {
 
 ```go
 type Dependency interface {
-    Serializable  // encoding.BinaryMarshaler + BinaryUnmarshaler
+    Serializable
+    // ID returns the unique identifier for the extension.
+    //
+    // The identifier must:
+    //   - Be no more than 255 characters long.
+    //   - Start with an alphanumeric character [a-zA-Z0-9].
+    //   - Contain only alphanumeric characters, hyphens (-), or underscores (_) thereafter.
+    //
+    // Identifiers that do not meet these constraints are considered invalid.
     ID() string
+}
+
+type Serializable interface {
+    encoding.BinaryMarshaler
+    encoding.BinaryUnmarshaler
 }
 ```
 
-Dependencies must be serializable for cluster relocation. Pass via `WithDependencies(dep)` as a SpawnOption. Actors
-access via `ctx.Dependencies()` in PreStart, Receive, PostStop. See [Extensions and Dependencies](../advanced/extensions-and-dependencies.md) for usage.
+Dependencies must be serializable for cluster relocation. Pass via `WithDependencies(dep)` as a SpawnOption, or register
+with the actor system via `system.Inject(dep)` after startup. Actors access via `ctx.Dependencies()` in PreStart,
+Receive, PostStop. See [Extensions and Dependencies](../advanced/extensions-and-dependencies.md) for usage.

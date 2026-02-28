@@ -99,6 +99,12 @@ See [Event Streams](../advanced/event-streams.md), [PubSub](../advanced/pubsub.m
 | `ReSpawn(ctx, name)` | Restart an actor; children are recreated with initial state. |
 | `Name()`             | Actor system name.                                           |
 
+### Dependency injection
+
+| Method                    | Purpose                                                                                                                       |
+|---------------------------|-------------------------------------------------------------------------------------------------------------------------------|
+| `Inject(dependencies...)` | Register dependency types with the actor system after startup. Enables restoration during cluster topology changes and when creating actors on remote hosts. Must be called after `Start`. |
+
 ## Configuration options
 
 Options are passed to `NewActorSystem(name, opts...)`. Each option is documented in the source; this table groups them by concern.

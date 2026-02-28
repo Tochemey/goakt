@@ -32,6 +32,12 @@ import (
 // during its lifecycle. Dependencies are critical to the actor’s runtime behavior and are
 // managed centrally through the system’s dependency registry.
 //
+// Dependencies can be injected in two ways:
+//   - At spawn time via WithDependencies(dep1, dep2, ...) as a SpawnOption.
+//   - Via the actor system via system.Inject(dep1, dep2, ...) after startup, which registers
+//     the types so the framework can restore dependencies during cluster topology changes
+//     or when creating actors on remote hosts.
+//
 // Implementations of Dependency must be serializable to enable dynamic management, persistence,
 // and reconstruction of dependencies during actor restarts, migrations, or failovers.
 //

@@ -20,23 +20,40 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package discovery
+//go:build darwin || linux
 
-const (
-	// ProviderConsul represents the Consul discovery provider
-	ProviderConsul = "consul"
-	// ProviderMDNS represents the mDNS discovery provider
-	ProviderMDNS = "mdns"
-	// ProviderKubernetes represents the Kubernetes discovery provider
-	ProviderKubernetes = "kubernetes"
-	// ProviderNATS represents the NATS discovery provider
-	ProviderNATS = "nats"
-	// ProviderStatic represents the Static discovery provider
-	ProviderStatic = "static"
-	// ProviderDNS represents the DNS discovery provider
-	ProviderDNS = "dns"
-	// ProviderEtcd represents the Etcd discovery provider
-	ProviderEtcd = "etcd"
-	// ProviderSelfManaged represents the self-managed discovery provider
-	ProviderSelfManaged = "selfmanaged"
+package selfmanaged
+
+import (
+	"context"
+	"net"
+	"syscall"
 )
+
+// listenUDPReusePort creates a UDP listener on the given port with SO_REUSEPORT
+// so multiple nodes on the same host can bind to the same broadcast port.
+func listenUDPReusePort(port int) (*net.UDPConn, error) {
+	return listenUDPReusePortToAddr(&net.UDPAddr{IP: net.IPv4zero, Port: port})
+}
+
+// listenUDPReusePortToAddr creates a UDP listener bound to addr with SO_REUSEPORT.
+// For loopback multi-receiver (127.255.255.255), all listeners receive broadcast packets.
+func listenUDPReusePortToAddr(addr *net.UDPAddr) (*net.UDPConn, error) {
+	lc := net.ListenConfig{
+		Control: func(network, address string, c syscall.RawConn) error {
+			var opErr error
+			err := c.Control(func(fd uintptr) {
+				opErr = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_REUSEPORT, 1)
+			})
+			if err != nil {
+				return err
+			}
+			return opErr
+		},
+	}
+	pc, err := lc.ListenPacket(context.Background(), "udp4", addr.String())
+	if err != nil {
+		return nil, err
+	}
+	return pc.(*net.UDPConn), nil
+}

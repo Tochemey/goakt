@@ -35,14 +35,31 @@ Dependencies are per-actor resources injected at spawn time. Unlike extensions, 
 
 ```go
 type Dependency interface {
-    Serializable  // encoding.BinaryMarshaler + BinaryUnmarshaler
+    Serializable
+    // ID returns the unique identifier for the extension.
+    //
+    // The identifier must:
+    //   - Be no more than 255 characters long.
+    //   - Start with an alphanumeric character [a-zA-Z0-9].
+    //   - Contain only alphanumeric characters, hyphens (-), or underscores (_) thereafter.
+    //
+    // Identifiers that do not meet these constraints are considered invalid.
     ID() string
+}
+
+type Serializable interface {
+    encoding.BinaryMarshaler
+    encoding.BinaryUnmarshaler
 }
 ```
 
 ### Wiring
 
-Pass via `WithDependencies(dep1, dep2, ...)` as a `SpawnOption`. The actor receives them through `ctx.Dependencies()` or `ctx.Dependency(id)` in `PreStart`, `Receive`, and `PostStop`.
+Dependencies can be injected in two ways:
+
+1. **At spawn time** — Pass via `WithDependencies(dep1, dep2, ...)` as a `SpawnOption`. The actor receives them through `ctx.Dependencies()` or `ctx.Dependency(id)` in `PreStart`, `Receive`, and `PostStop`.
+
+2. **Via the actor system** — Call `system.Inject(dep1, dep2, ...)` after the system has started. This registers the dependency types with the actor system's registry, enabling the framework to restore dependencies during cluster topology changes or when creating actors on remote hosts. You typically combine this with `WithDependencies` when spawning: inject first to register the types, then pass them at spawn so the actor receives them.
 
 ### Use cases
 
