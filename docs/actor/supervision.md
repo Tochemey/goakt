@@ -1,4 +1,8 @@
-# Supervision
+---
+title: Supervision
+description: One-for-one and one-for-all strategies, directives, and retry.
+sidebarTitle: "🛡️ Supervision"
+---
 
 ## What is supervision?
 

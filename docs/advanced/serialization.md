@@ -1,4 +1,8 @@
-# Serialization
+---
+title: Serialization
+description: Pluggable message serialization for ProtoSerializer and CBORSerializer.
+sidebarTitle: "📦 Serialization"
+---
 
 ## Overview
 

@@ -1,4 +1,8 @@
-# Multi-Datacenter
+---
+title: Multi-Datacenter
+description: Cross-datacenter replication and placement.
+sidebarTitle: "🌍 Multi-Datacenter"
+---
 
 ## Overview
 
@@ -177,6 +181,6 @@ See `datacenter/controlplane/nats` and `datacenter/controlplane/etcd` as referen
 
 ## See also
 
-- [Clustered](clustered.md) — Cluster setup and discovery
-- [Relocation](../actor/relocation.md) — Actor relocation within a cluster
-- [Remoting](../advanced/remoting.md) — Cross-node messaging
+- [Clustered](clustered) — Cluster setup and discovery
+- [Relocation](../actor/relocation) — Actor relocation within a cluster
+- [Remoting](../advanced/remoting) — Cross-node messaging

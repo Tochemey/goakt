@@ -1,4 +1,8 @@
-# Code Map
+---
+title: Code Map
+description: Package layout and responsibilities.
+sidebarTitle: "🗺️ Code Map"
+---
 
 A guided tour of the codebase. Start with `actor/`—everything flows from there.
 
@@ -107,7 +111,7 @@ Pluggable service discovery. Each sub-package implements `discovery.Provider`:
 
 ## `client/`
 
-Standalone cluster client for callers outside the actor system. See [Client](../advanced/client.md) for full documentation.
+Standalone cluster client for callers outside the actor system. See [Client](../advanced/client) for full documentation.
 
 | File             | Purpose                     |
 |------------------|-----------------------------|
@@ -163,5 +167,5 @@ protos/
 
 ## See also
 
-- [Architecture Overview](overview.md)
-- [Architecture Document](../../ARCHITECTURE.md) in the repository root for full details, data flows, and design decisions
+- [Architecture Overview](overview)
+- [Architecture Document](https://github.com/tochemey/goakt/blob/main/ARCHITECTURE.md) in the repository root for full details, data flows, and design decisions

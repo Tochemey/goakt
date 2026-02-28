@@ -1,4 +1,8 @@
-# Scheduling
+---
+title: Scheduling
+description: Timers and delayed messaging.
+sidebarTitle: "⏰ Scheduling"
+---
 
 ## Overview
 

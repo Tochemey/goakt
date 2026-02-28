@@ -1,6 +1,10 @@
-# First Actor
+---
+title: First Actor
+description: Create your first actor system, spawn an actor, and send messages.
+sidebarTitle: "🚀 First Actor"
+---
 
-This guide walks through the flow of creating an actor system, spawning an actor, and sending messages. For the full ActorSystem API and configuration, see [Actor System](actor-system.md).
+This guide walks through the flow of creating an actor system, spawning an actor, and sending messages. For the full ActorSystem API and configuration, see [Actor System](actor-system).
 
 ## Flow
 

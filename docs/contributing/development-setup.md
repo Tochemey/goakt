@@ -1,4 +1,8 @@
-# Development Setup
+---
+title: Development Setup
+description: Clone, build, and run tests.
+sidebarTitle: "🛠️ Development Setup"
+---
 
 ## Clone and prepare
 

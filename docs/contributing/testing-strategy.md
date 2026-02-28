@@ -1,4 +1,8 @@
-# Testing Strategy
+---
+title: Testing Strategy
+description: TestKit, mocks, and integration tests.
+sidebarTitle: "✅ Testing Strategy"
+---
 
 ## Test layout
 
@@ -6,7 +10,7 @@ Tests are co-located with source code in `_test.go` files. There is no separate 
 
 ## TestKit
 
-The `testkit` package provides helpers for actor-level testing. See [TestKit](../actor/testkit.md) for full documentation.
+The `testkit` package provides helpers for actor-level testing. See [TestKit](../actor/testkit) for full documentation.
 
 - **TestKit** — Creates a throwaway actor system. Provides Spawn, SpawnChild, Kill, Subscribe, NewProbe, NewGrainProbe, GrainIdentity.
 - **Probe** — Test actor that records messages. Assertions: ExpectMessage, ExpectMessageOfType, ExpectNoMessage, ExpectTerminated; Send, SendSync; Watch, WatchNamed.

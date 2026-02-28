@@ -1,4 +1,8 @@
-# Client
+---
+title: Client
+description: Standalone client for interacting with a GoAkt cluster from outside the actor system.
+sidebarTitle: "🔌 Client"
+---
 
 The `client` package provides a standalone client for interacting with a GoAkt cluster from outside the actor system. Use it when your application (CLI, API server, batch job, etc.) needs to send messages to actors or grains, spawn actors, or query cluster state without running an actor system itself.
 
@@ -127,6 +131,6 @@ The client is safe for concurrent use by multiple goroutines.
 
 ## See also
 
-- [Remoting](remoting.md) — Cluster remoting configuration
-- [Serialization](serialization.md) — Message serialization (client must match cluster)
-- [Code Map](../architecture/code-map.md) — `client/` package overview
+- [Remoting](remoting) — Cluster remoting configuration
+- [Serialization](serialization) — Message serialization (client must match cluster)
+- [Code Map](../architecture/code-map) — `client/` package overview

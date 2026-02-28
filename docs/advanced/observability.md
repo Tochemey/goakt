@@ -1,4 +1,8 @@
-# Observability
+---
+title: Observability
+description: Metrics, event streams, dead letters, and OpenTelemetry integration.
+sidebarTitle: "📊 Observability"
+---
 
 GoAkt provides built-in observability through metrics (system and per-actor), event streams, and dead letters. Metrics
 are available as programmatic snapshots and, when configured, as OpenTelemetry instruments for integration with
@@ -72,7 +76,7 @@ if m != nil {
 ## Event stream
 
 The event stream publishes **system and cluster events** (lifecycle, membership, dead letters). It is separate from
-application-level PubSub. See [Event Streams](event-streams.md) for full documentation.
+application-level PubSub. See [Event Streams](event-streams) for full documentation.
 
 ```go
 subscriber, err := sys.Subscribe()

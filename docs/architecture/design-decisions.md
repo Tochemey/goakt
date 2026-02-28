@@ -1,4 +1,8 @@
-# Design Decisions
+---
+title: Design Decisions
+description: Architectural choices and rationale.
+sidebarTitle: "📋 Design Decisions"
+---
 
 ## Why `any` instead of `proto.Message` (v4)?
 

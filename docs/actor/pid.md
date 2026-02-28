@@ -1,4 +1,8 @@
-# PID (Process Identifier)
+---
+title: PID
+description: Process identifier for location-transparent actor references.
+sidebarTitle: "🆔 PID"
+---
 
 A **PID** is the sole actor reference in GoAkt. It is a live handle to a running actor—either local (same process) or remote (another node). All messaging goes through a PID.
 

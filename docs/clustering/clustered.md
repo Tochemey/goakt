@@ -1,4 +1,8 @@
-# Clustered Mode
+---
+title: Clustered Mode
+description: Multi-node cluster with membership and discovery.
+sidebarTitle: "🔗 Clustered Mode"
+---
 
 ## Overview
 
@@ -10,7 +14,7 @@ find peers.
 
 - High availability and horizontal scaling
 - Actor distribution across machines
-- Cluster [singletons](../actor/singletons.md) and relocation
+- Cluster [singletons](../actor/singletons) and relocation
 
 ## Key components
 
@@ -21,10 +25,10 @@ find peers.
 ## Configuration
 
 Configure the actor system with `WithCluster(clusterConfig)` and a discovery provider. Configure remoting with
-`WithRemote(config)`. The cluster joins membership, and actors can be looked up via `ActorOf` across nodes. See [Service Discovery](service-discovery.md) for provider options.
+`WithRemote(config)`. The cluster joins membership, and actors can be looked up via `ActorOf` across nodes. See [Service Discovery](service-discovery) for provider options.
 
 ## Relocation
 
 When a node leaves, the leader relocates its actors and grains to remaining nodes. Singleton actors move to the leader;
-others are distributed. Actors can opt out of relocation via spawn options. See [Relocation](../actor/relocation.md) for
+others are distributed. Actors can opt out of relocation via spawn options. See [Relocation](../actor/relocation) for
 the full flow, configuration, and relocatability requirements.

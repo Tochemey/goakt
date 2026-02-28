@@ -1,6 +1,10 @@
-# Event Streams
+---
+title: Event Streams
+description: Internal in-process mechanism for system and cluster events.
+sidebarTitle: "📻 Event Streams"
+---
 
-The **event stream** is an internal in-process mechanism that publishes **system and cluster events** to subscribers. It is separate from application-level pub/sub (see [PubSub](pubsub.md)). The event stream uses a fixed internal topic; you cannot create custom topics or publish application messages to it.
+The **event stream** is an internal in-process mechanism that publishes **system and cluster events** to subscribers. It is separate from application-level pub/sub (see [PubSub](pubsub)). The event stream uses a fixed internal topic; you cannot create custom topics or publish application messages to it.
 
 ## Purpose
 
@@ -83,5 +87,5 @@ for msg := range subscriber.Iterator() {
 
 ## Related
 
-- [Observability](observability.md) — Metrics and dead letters
-- [PubSub](pubsub.md) — Application-level topic-based pub/sub (separate mechanism)
+- [Observability](observability) — Metrics and dead letters
+- [PubSub](pubsub) — Application-level topic-based pub/sub (separate mechanism)

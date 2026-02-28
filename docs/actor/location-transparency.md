@@ -1,4 +1,8 @@
-# Location Transparency
+---
+title: Location Transparency
+description: Interact with actors without knowing their physical location.
+sidebarTitle: "🌐 Location Transparency"
+---
 
 ## Concept
 

@@ -1,4 +1,8 @@
-# Migration from v3.x to v4.0.0
+---
+title: Migration from v3.x
+description: Upgrade guide from GoAkt v3 to v4.
+sidebarTitle: "🔄 Migration from v3.x"
+---
 
 This guide covers all breaking changes and migration steps when moving from GoAkt v3.x to v4.0.0.
 

@@ -1,4 +1,8 @@
-# Extensions and Dependencies
+---
+title: Extensions and Dependencies
+description: System-wide extensions and per-actor dependency injection.
+sidebarTitle: "🔧 Extensions and Dependencies"
+---
 
 GoAkt supports two injection mechanisms: **extensions** (system-wide) and **dependencies** (per-actor).
 

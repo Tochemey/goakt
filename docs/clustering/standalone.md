@@ -1,4 +1,8 @@
-# Standalone Mode
+---
+title: Standalone Mode
+description: Single-node actor system without clustering.
+sidebarTitle: "🖥️ Standalone Mode"
+---
 
 ## Overview
 
@@ -22,4 +26,4 @@ under the user guardian and communicate via direct mailbox enqueue.
 - No clustering: no discovery, no relocation, no cluster singletons
 - Single point of failure: process crash stops everything
 
-For multi-node deployments, see [Clustered](clustered.md).
+For multi-node deployments, see [Clustered](clustered).

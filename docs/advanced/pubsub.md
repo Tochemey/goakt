@@ -1,6 +1,10 @@
-# PubSub (Topic-Based Publish/Subscribe)
+---
+title: PubSub
+description: Application-level topic-based publish/subscribe messaging.
+sidebarTitle: "📢 PubSub"
+---
 
-**PubSub** enables application-level topic-based messaging. Actors subscribe to named topics and receive messages published to those topics by other actors. This is **separate from the event stream**, which only handles system and cluster events (see [Event Streams](event-streams.md)).
+**PubSub** enables application-level topic-based messaging. Actors subscribe to named topics and receive messages published to those topics by other actors. This is **separate from the event stream**, which only handles system and cluster events (see [Event Streams](event-streams)).
 
 ## Architecture
 

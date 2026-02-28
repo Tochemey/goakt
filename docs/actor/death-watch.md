@@ -1,4 +1,8 @@
-# Death Watch (Watch / Unwatch)
+---
+title: Death Watch
+description: Watch actors and react when they terminate.
+sidebarTitle: "👁️ Death Watch"
+---
 
 Death watch lets an actor receive a `Terminated` message when another actor stops. Use it to clean up references, fail over, or react to actor lifecycle.
 

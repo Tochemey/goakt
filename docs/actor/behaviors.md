@@ -1,4 +1,8 @@
-# Behaviors
+---
+title: Behaviors
+description: Switch message handlers with Become and UnBecome.
+sidebarTitle: "🎬 Behaviors"
+---
 
 Actors can change their message-handling logic at runtime using **behaviors**. A behavior is a function `func(ctx *ReceiveContext)` that processes messages. The default behavior is the actor's `Receive` method.
 
@@ -63,4 +67,4 @@ func (a *AccountActor) ConfirmTransfer(ctx *ReceiveContext) {
 
 ## Stashing with behaviors
 
-When switching behaviors, you may want to defer processing of the current message. Use `ctx.Stash()` to buffer it, then `ctx.Unstash()` or `ctx.UnstashAll()` after changing behavior. Requires `WithStashing()` at spawn. See [Stashing](stashing.md).
+When switching behaviors, you may want to defer processing of the current message. Use `ctx.Stash()` to buffer it, then `ctx.Unstash()` or `ctx.UnstashAll()` after changing behavior. Requires `WithStashing()` at spawn. See [Stashing](stashing).

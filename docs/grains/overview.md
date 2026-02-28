@@ -1,4 +1,8 @@
-# Grains (Virtual Actors)
+---
+title: Grains
+description: Virtual actors with automatic activation and passivation.
+sidebarTitle: "🌾 Grains"
+---
 
 ## Concept
 
@@ -76,5 +80,5 @@ quorum (or until the barrier timeout elapses).
 
 ## See also
 
-- [Passivation](../actor/passivation.md) — Grains use passivation for idle-based deactivation
-- [Actor Model](../actor/actor-model.md) — When to use actors vs grains
+- [Passivation](../actor/passivation) — Grains use passivation for idle-based deactivation
+- [Actor Model](../actor/actor-model) — When to use actors vs grains

@@ -1,10 +1,14 @@
-# Architecture Overview
+---
+title: Architecture Overview
+description: System design and component diagram.
+sidebarTitle: "🏗️ Architecture Overview"
+---
 
 ## Bird's eye view
 
 GoAkt is a framework for building **concurrent, distributed, and fault-tolerant systems** in Go using the actor model.
 Every unit of computation is an **actor**—a lightweight, isolated entity that communicates exclusively through messages.
-The [Actor System](../actor/actor-system.md) is the top-level runtime that hosts actors and orchestrates messaging, clustering, and lifecycle.
+The [Actor System](../actor/actor-system) is the top-level runtime that hosts actors and orchestrates messaging, clustering, and lifecycle.
 
 ## Three deployment modes
 
@@ -65,4 +69,4 @@ When a parent stops, all children stop first (depth-first). A parent supervises 
 ```
 
 Cluster state is stored in Olric (distributed hash map). Node membership uses Hashicorp Memberlist.
-See [Code Map](code-map.md) for package layout.
+See [Code Map](code-map) for package layout.

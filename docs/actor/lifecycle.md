@@ -1,4 +1,8 @@
-# Actor Lifecycle
+---
+title: Actor Lifecycle
+description: Spawn, stop, and lifecycle events.
+sidebarTitle: "🔄 Actor Lifecycle"
+---
 
 ## States
 
@@ -53,13 +57,13 @@ Go structs in the `actor` package. Handle them in `Receive` when you need to rea
 
 ### Death watch
 
-| Message        | Role                                                                                                                                                                                                                                                                                    |
-|----------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Terminated** | Sent to every actor that is **watching** another actor when that watched actor stops. Use it to clean up references, restart dependents, or trigger failover. Subscribe via `ctx.Watch(targetPID)`; cancel via `ctx.UnWatch(targetPID)`. See [Death Watch](death-watch.md). |
+| Message        | Role                                                                                                                                                                                                                                                                     |
+|----------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Terminated** | Sent to every actor that is **watching** another actor when that watched actor stops. Use it to clean up references, restart dependents, or trigger failover. Subscribe via `ctx.Watch(targetPID)`; cancel via `ctx.UnWatch(targetPID)`. See [Death Watch](death-watch). |
 
 ### Event stream (observability)
 
-These events are published to the [event stream](../advanced/event-streams.md) for subscribers. You typically do not handle them in `Receive` unless you have a specific need:
+These events are published to the [event stream](../advanced/event-streams) for subscribers. You typically do not handle them in `Receive` unless you have a specific need:
 
 | Message                       | When                                |
 |-------------------------------|-------------------------------------|

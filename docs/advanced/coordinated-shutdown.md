@@ -1,4 +1,8 @@
-# Coordinated Shutdown
+---
+title: Coordinated Shutdown
+description: Configurable shutdown hooks and graceful termination.
+sidebarTitle: "🛑 Coordinated Shutdown"
+---
 
 The actor system supports coordinated shutdown with configurable hooks and timeout.
 

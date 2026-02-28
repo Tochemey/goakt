@@ -1,0 +1,30 @@
+/* Geist Mono for code blocks - pairs with Geist (body/heading) */
+@import url("https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600;700&display=swap");
+
+/* Target code blocks and pre elements (code + ASCII diagrams) */
+#body-content pre,
+.mdx-content pre,
+[class*="code-block"] pre,
+pre[class*="shiki"],
+pre {
+  font-family:
+    "Geist Mono", "JetBrains Mono", Consolas, Monaco, monospace !important;
+  font-size: 0.8rem !important;
+  line-height: 1.5 !important;
+}
+
+/* Inline code */
+#body-content code:not(pre code),
+.mdx-content code:not(pre code) {
+  font-family:
+    "Geist Mono", "JetBrains Mono", Consolas, Monaco, monospace !important;
+  font-size: 0.85em !important;
+}
+
+/* Ensure code blocks don't overflow - keep scroll as fallback for very long lines */
+#body-content pre,
+.mdx-content pre,
+[class*="code-block"] {
+  max-width: 100%;
+  overflow-x: auto;
+}

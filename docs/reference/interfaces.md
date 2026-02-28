@@ -1,4 +1,8 @@
-# Interfaces Reference
+---
+title: Interfaces Reference
+description: Actor, Grain, and extension interface definitions.
+sidebarTitle: "📐 Interfaces Reference"
+---
 
 A quick reference for the key interfaces implemented by users and collaborators. See the linked pages for detailed
 explanations.
@@ -89,15 +93,6 @@ type Provider interface {
 ```
 
 For cluster peer discovery. See [Extending GoAkt](../contributing/extending.md#discovery-provider).
-
-## Passivation Strategy
-
-```go
-type Strategy interface {
-    fmt.Stringer
-    Name() string
-}
-```
 
 For custom passivation behavior. See [Passivation](../actor/passivation.md#the-strategy-interface)
 and [Extending GoAkt](../contributing/extending.md#passivation-strategy).

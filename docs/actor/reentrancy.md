@@ -1,4 +1,8 @@
-# Reentrancy
+---
+title: Reentrancy
+description: Reentrant messaging modes and StashNonReentrant.
+sidebarTitle: "🔀 Reentrancy"
+---
 
 ## Concept
 
@@ -139,6 +143,6 @@ func (a *CoordinatorActor) Receive(rctx *ReceiveContext) {
 
 ## See also
 
-- [Stashing](stashing.md) — Manual stashing with `Stash`, `Unstash`, `UnstashAll`; `StashNonReentrant` uses stashing internally.
-- [Messaging](messaging.md) — `Ask`, `Tell`, `PipeTo`.
-- [Behaviors](behaviors.md) — `Become`, `UnBecome` for state transitions.
+- [Stashing](stashing) — Manual stashing with `Stash`, `Unstash`, `UnstashAll`; `StashNonReentrant` uses stashing internally.
+- [Messaging](messaging) — `Ask`, `Tell`, `PipeTo`.
+- [Behaviors](behaviors) — `Become`, `UnBecome` for state transitions.

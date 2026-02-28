@@ -1,4 +1,8 @@
-# Relocation
+---
+title: Relocation
+description: Automatic actor migration when nodes leave the cluster.
+sidebarTitle: "🏃 Relocation"
+---
 
 **Relocation** is the automatic migration of actors and grains from a node that has left the cluster to the remaining live nodes. When a node shuts down **gracefully**, its relocatable actors and grains are recreated on other nodes so the cluster remains available.
 
@@ -126,7 +130,7 @@ For an actor to be relocated successfully:
 - **Dependencies** must implement `Dependency` (serializable). Pass via `WithDependencies(dep)`.
 - **Supervisor**, **passivation**, **reentrancy**, **stashing**, **role** — these are encoded in the actor's serialized form and restored on the target node.
 
-See [Extensions and Dependencies](../advanced/extensions-and-dependencies.md) for dependency serialization.
+See [Extensions and Dependencies](../advanced/extensions-and-dependencies) for dependency serialization.
 
 ## During relocation
 
@@ -144,8 +148,8 @@ See [Extensions and Dependencies](../advanced/extensions-and-dependencies.md) fo
 
 ## See also
 
-- [Clustered Mode](../clustering/clustered.md) — Cluster setup and discovery
-- [Singletons](singletons.md) — Cluster singletons and placement
-- [Grains](../grains/overview.md) — Virtual actors and `WithGrainDisableRelocation`
-- [Extensions and Dependencies](../advanced/extensions-and-dependencies.md) — Serializable dependencies for relocation
-- [Coordinated Shutdown](../advanced/coordinated-shutdown.md) — Shutdown sequence and `preShutdown`
+- [Clustered Mode](../clustering/clustered) — Cluster setup and discovery
+- [Singletons](singletons) — Cluster singletons and placement
+- [Grains](../grains/overview) — Virtual actors and `WithGrainDisableRelocation`
+- [Extensions and Dependencies](../advanced/extensions-and-dependencies) — Serializable dependencies for relocation
+- [Coordinated Shutdown](../advanced/coordinated-shutdown) — Shutdown sequence and `preShutdown`

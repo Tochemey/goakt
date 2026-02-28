@@ -1,4 +1,8 @@
-# Service Discovery
+---
+title: Service Discovery
+description: Discovery providers for cluster membership.
+sidebarTitle: "🔍 Service Discovery"
+---
 
 In clustered mode, nodes must discover each other. GoAkt uses a pluggable **discovery provider** that implements the `discovery.Provider` interface. Pass the provider to `ClusterConfig.WithDiscovery()` when creating the cluster.
 

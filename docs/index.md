@@ -1,4 +1,8 @@
-# GoAkt v4.0.0 Documentation
+---
+title: Overview
+description: GoAkt v4 — distributed actor framework for Go.
+sidebarTitle: "🏠 Overview"
+---
 
 GoAkt is a distributed actor framework for Go, inspired by Erlang and Akka. It enables you to build reactive and
 distributed systems with typed actor messages. From **v4.0.0** onward, any Go type can be used as actor messages—no
@@ -21,8 +25,8 @@ to the project. It focuses on concepts, architecture, and efficient usage patter
 
 ## Quick Links
 
-- [Getting Started](getting-started/installation.md) — Installation and first actor
-- [Actor System](actor/actor-system.md) — Runtime, API, configuration
-- [Actor Model](actor/actor-model.md) — Actor model, messaging, lifecycle
-- [Architecture](architecture/overview.md) — System design and component map
-- [Contributing](contributing/overview.md) — How to contribute to GoAkt
+- [Getting Started](getting-started/installation) — Installation and first actor
+- [Actor System](actor/actor-system) — Runtime, API, configuration
+- [Actor Model](actor/actor-model) — Actor model, messaging, lifecycle
+- [Architecture](architecture/overview) — System design and component map
+- [Contributing](contributing/overview) — How to contribute to GoAkt

@@ -1,4 +1,8 @@
-# TestKit
+---
+title: TestKit
+description: Testing helpers for actor systems and grains.
+sidebarTitle: "🧪 TestKit"
+---
 
 The `testkit` package provides helpers for actor-level testing. It creates a throwaway actor system, probes for message assertions, and supports grain testing.
 

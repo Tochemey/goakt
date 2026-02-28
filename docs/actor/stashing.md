@@ -1,4 +1,8 @@
-# Stashing
+---
+title: Stashing
+description: Buffer messages for later processing with Stash and Unstash.
+sidebarTitle: "📥 Stashing"
+---
 
 Stashing lets an actor temporarily buffer messages instead of processing them. Use it when the actor cannot handle certain messages in its current state (e.g., waiting for a resource, or during a behavior transition).
 

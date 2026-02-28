@@ -1,4 +1,8 @@
-# Cluster Singletons
+---
+title: Cluster Singletons
+description: Single actor instance across the cluster.
+sidebarTitle: "👑 Cluster Singletons"
+---
 
 A **cluster singleton** is an actor with exactly one instance across the entire cluster. It is hosted on the cluster coordinator (oldest node). When that host node leaves the cluster **gracefully**, the singleton is recreated on the new coordinator.
 
@@ -68,7 +72,7 @@ Calling `SpawnSingleton` multiple times with the same actor kind (and role, if s
 
 ## Relocation
 
-When the host node leaves the cluster **gracefully**, the relocator recreates the singleton on the new coordinator. See [Relocation](relocation.md) for the full flow.
+When the host node leaves the cluster **gracefully**, the relocator recreates the singleton on the new coordinator. See [Relocation](relocation) for the full flow.
 
 If the host node crashes (kill -9, OOM, etc.), relocation does not run; the singleton is lost. A subsequent `SpawnSingleton` may return `ErrSingletonAlreadyExists` if the cluster still has the singleton kind registered.
 
@@ -90,6 +94,6 @@ If the host node crashes (kill -9, OOM, etc.), relocation does not run; the sing
 
 ## See also
 
-- [Actor System](actor-system.md) — `SpawnSingleton` in the spawn methods table
-- [Clustered Mode](../clustering/clustered.md) — Cluster setup
-- [Relocation](relocation.md) — How singletons are relocated when nodes leave
+- [Actor System](actor-system) — `SpawnSingleton` in the spawn methods table
+- [Clustered Mode](../clustering/clustered) — Cluster setup
+- [Relocation](relocation) — How singletons are relocated when nodes leave

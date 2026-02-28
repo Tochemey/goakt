@@ -1,4 +1,8 @@
-# Extending GoAkt
+---
+title: Extending GoAkt
+description: Adding discovery, mailboxes, and extensions.
+sidebarTitle: "📚 Extending GoAkt"
+---
 
 This page lists the interfaces to implement when extending the framework. Wire implementations via the indicated
 options.
@@ -59,7 +63,7 @@ type Extension interface {
 ```
 
 `ID` must be unique, alphanumeric, up to 255 chars. Add domain-specific methods to your concrete type. Pass via
-`WithExtensions(ext)` when creating the actor system. Actors access via `ctx.Extension(id)` and type assertion. See [Extensions and Dependencies](../advanced/extensions-and-dependencies.md) for usage.
+`WithExtensions(ext)` when creating the actor system. Actors access via `ctx.Extension(id)` and type assertion. See [Extensions and Dependencies](../advanced/extensions-and-dependencies) for usage.
 
 ## Dependency (per-actor)
 
@@ -85,4 +89,4 @@ type Serializable interface {
 
 Dependencies must be serializable for cluster relocation. Pass via `WithDependencies(dep)` as a SpawnOption, or register
 with the actor system via `system.Inject(dep)` after startup. Actors access via `ctx.Dependencies()` in PreStart,
-Receive, PostStop. See [Extensions and Dependencies](../advanced/extensions-and-dependencies.md) for usage.
+Receive, PostStop. See [Extensions and Dependencies](../advanced/extensions-and-dependencies) for usage.

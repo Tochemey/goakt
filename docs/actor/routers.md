@@ -1,4 +1,8 @@
-# Routers
+---
+title: Routers
+description: Round robin, random, and fan-out routing strategies.
+sidebarTitle: "🔀 Routers"
+---
 
 ## Concept
 

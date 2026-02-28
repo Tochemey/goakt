@@ -1,4 +1,8 @@
-# Passivation
+---
+title: Passivation
+description: Idle-based and capacity-based actor deactivation.
+sidebarTitle: "💤 Passivation"
+---
 
 Passivation automatically stops actors to reclaim memory and resources. GoAkt supports two distinct mechanisms: **per-actor passivation** (idle-based) and **system eviction** (capacity-based).
 

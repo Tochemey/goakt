@@ -1,6 +1,10 @@
-# API Changes (v4.0.0)
+---
+title: API Changes (v4.0.0)
+description: Breaking changes and new APIs in v4.
+sidebarTitle: "📝 API Changes (v4.0.0)"
+---
 
-A quick summary of v4.0.0 changes. For the complete migration guide, see [Migration from v3.x](../getting-started/migration-v3.md).
+A quick summary of v4.0.0 changes. For the complete migration guide, see [Migration from v3.x](../getting-started/migration-v3).
 
 ## Executive summary
 

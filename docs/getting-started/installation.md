@@ -1,4 +1,8 @@
-# Installation
+---
+title: Installation
+description: Add GoAkt v4 to your Go module.
+sidebarTitle: "📦 Installation"
+---
 
 ## Requirements
 
@@ -27,5 +31,5 @@ If your project builds without errors, the installation is complete.
 
 ## Next steps
 
-- [First Actor](actor/first-actor.md) — Create your first actor and send messages
-- [Migration from v3.x](migration-v3.md) — If upgrading from v3
+- [First Actor](actor/first-actor) — Create your first actor and send messages
+- [Migration from v3.x](migration-v3) — If upgrading from v3

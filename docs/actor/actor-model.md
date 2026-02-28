@@ -1,4 +1,8 @@
-# Actor Model
+---
+title: Actor Model
+description: Actor interface, hierarchy, and core concepts.
+sidebarTitle: "🎭 Actor Model"
+---
 
 ## What is the actor model?
 
@@ -21,13 +25,13 @@ Actors provide a natural model for concurrent and distributed systems:
 
 ## Core concepts
 
-| Concept         | Description                                                                                                            |
-|-----------------|------------------------------------------------------------------------------------------------------------------------|
-| **Actor**       | The fundamental unit. Receives messages, updates private state, spawns children, sends messages.                       |
-| **ActorSystem** | The runtime host. Manages lifecycle, messaging, cluster membership, and remoting. See [Actor System](actor-system.md). |
-| **PID**         | Process identifier—a live handle to a running actor. Used for all interactions.                                        |
-| **Path**        | The canonical location of an actor: `goakt://system@host:port/path/to/actor`.                                          |
-| **Mailbox**     | Each actor has one. Messages wait here until the actor processes them.                                                 |
+| Concept         | Description                                                                                                         |
+|-----------------|---------------------------------------------------------------------------------------------------------------------|
+| **Actor**       | The fundamental unit. Receives messages, updates private state, spawns children, sends messages.                    |
+| **ActorSystem** | The runtime host. Manages lifecycle, messaging, cluster membership, and remoting. See [Actor System](actor-system). |
+| **PID**         | Process identifier—a live handle to a running actor. Used for all interactions.                                     |
+| **Path**        | The canonical location of an actor: `goakt://system@host:port/path/to/actor`.                                       |
+| **Mailbox**     | Each actor has one. Messages wait here until the actor processes them.                                              |
 
 ## Actor hierarchy
 
@@ -69,5 +73,5 @@ single-threaded execution per actor, so no locks are needed inside `Receive`.
 ## Further reading
 
 - [Brian Storti: The Actor Model](https://www.brianstorti.com/the-actor-model/) — Short introduction
-- [Messaging](messaging.md) — Tell vs Ask, message types
-- [Actor Lifecycle](lifecycle.md) — Spawn, stop, state transitions
+- [Messaging](messaging) — Tell vs Ask, message types
+- [Actor Lifecycle](lifecycle) — Spawn, stop, state transitions

@@ -1,4 +1,8 @@
-# PipeTo
+---
+title: PipeTo
+description: Run async tasks and deliver results to actors.
+sidebarTitle: "➡️ PipeTo"
+---
 
 PipeTo runs a task asynchronously and delivers its result (or failure) to a target actor's mailbox. Use it to offload I/O or CPU-bound work without blocking the actor, while keeping the result in the actor model.
 
