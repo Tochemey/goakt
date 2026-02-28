@@ -91,7 +91,9 @@
       },
       {
         "group": "Grains",
-        "pages": ["grains/overview"],
+        "pages": [
+          "grains/overview"
+        ],
         "icon": "box"
       },
       {
@@ -147,5 +149,8 @@
         "icon": "book"
       }
     ]
+  },
+  "icons": {
+    "library": "lucide"
   }
 }
