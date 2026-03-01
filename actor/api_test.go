@@ -28,14 +28,17 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/log"
+	mocksremote "github.com/tochemey/goakt/v4/mocks/remoteclient"
 	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
@@ -124,6 +127,62 @@ func TestAsk(t *testing.T) {
 
 		err = sys.Stop(ctx)
 		require.NoError(t, err)
+	})
+	t.Run("With remote PID and remoting disabled", func(t *testing.T) {
+		ctx := context.TODO()
+		addr := address.New("remote-actor", "sys", "127.0.0.1", 9000)
+		remotePID := newRemotePID(addr, nil) // nil remoting
+		reply, err := Ask(ctx, remotePID, new(testpb.TestReply), time.Second)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, errors.ErrRemotingDisabled)
+		assert.Nil(t, reply)
+	})
+	t.Run("With remote PID and remoting enabled (success)", func(t *testing.T) {
+		ctx := context.TODO()
+		addr := address.New("remote-actor", "sys", "127.0.0.1", 9000)
+		remotingMock := mocksremote.NewClient(t)
+		expected := &testpb.Reply{Content: "remote response"}
+		remotingMock.EXPECT().
+			RemoteAsk(
+				mock.Anything,
+				mock.MatchedBy(func(a *address.Address) bool { return a != nil && a.Equals(address.NoSender()) }),
+				mock.MatchedBy(func(a *address.Address) bool { return a != nil && a.Equals(addr) }),
+				mock.Anything,
+				time.Second,
+			).
+			Return(expected, nil).Once()
+		remotePID := newRemotePID(addr, remotingMock)
+		reply, err := Ask(ctx, remotePID, new(testpb.TestReply), time.Second)
+		require.NoError(t, err)
+		require.NotNil(t, reply)
+		assert.True(t, proto.Equal(expected, reply.(*testpb.Reply)))
+		remotingMock.AssertExpectations(t)
+	})
+	t.Run("With remote PID and invalid timeout", func(t *testing.T) {
+		ctx := context.TODO()
+		addr := address.New("remote-actor", "sys", "127.0.0.1", 9000)
+		remotingMock := mocksremote.NewClient(t)
+		remotePID := newRemotePID(addr, remotingMock)
+		reply, err := Ask(ctx, remotePID, new(testpb.TestReply), 0)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, errors.ErrInvalidTimeout)
+		assert.Nil(t, reply)
+		remotingMock.AssertNotCalled(t, "RemoteAsk")
+	})
+	t.Run("With remote PID and RemoteAsk returns error", func(t *testing.T) {
+		ctx := context.TODO()
+		addr := address.New("remote-actor", "sys", "127.0.0.1", 9000)
+		remotingMock := mocksremote.NewClient(t)
+		expectedErr := errors.ErrRequestTimeout
+		remotingMock.EXPECT().
+			RemoteAsk(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(nil, expectedErr).Once()
+		remotePID := newRemotePID(addr, remotingMock)
+		reply, err := Ask(ctx, remotePID, new(testpb.TestReply), time.Second)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, expectedErr)
+		assert.Nil(t, reply)
+		remotingMock.AssertExpectations(t)
 	})
 	t.Run("With context canceled", func(t *testing.T) {
 		// create the context
@@ -491,6 +550,45 @@ func TestTell(t *testing.T) {
 		assert.NoError(t, err)
 	},
 	)
+	t.Run("With remote PID and remoting disabled", func(t *testing.T) {
+		ctx := context.TODO()
+		addr := address.New("remote-actor", "sys", "127.0.0.1", 9000)
+		remotePID := newRemotePID(addr, nil) // nil remoting
+		err := Tell(ctx, remotePID, new(testpb.TestSend))
+		require.Error(t, err)
+		assert.ErrorIs(t, err, errors.ErrRemotingDisabled)
+	})
+	t.Run("With remote PID and remoting enabled (success)", func(t *testing.T) {
+		ctx := context.TODO()
+		addr := address.New("remote-actor", "sys", "127.0.0.1", 9000)
+		remotingMock := mocksremote.NewClient(t)
+		remotingMock.EXPECT().
+			RemoteTell(
+				mock.Anything,
+				mock.MatchedBy(func(a *address.Address) bool { return a != nil && a.Equals(address.NoSender()) }),
+				mock.MatchedBy(func(a *address.Address) bool { return a != nil && a.Equals(addr) }),
+				mock.Anything,
+			).
+			Return(nil).Once()
+		remotePID := newRemotePID(addr, remotingMock)
+		err := Tell(ctx, remotePID, new(testpb.TestSend))
+		require.NoError(t, err)
+		remotingMock.AssertExpectations(t)
+	})
+	t.Run("With remote PID and RemoteTell returns error", func(t *testing.T) {
+		ctx := context.TODO()
+		addr := address.New("remote-actor", "sys", "127.0.0.1", 9000)
+		remotingMock := mocksremote.NewClient(t)
+		expectedErr := errors.ErrRemotingDisabled
+		remotingMock.EXPECT().
+			RemoteTell(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(expectedErr).Once()
+		remotePID := newRemotePID(addr, remotingMock)
+		err := Tell(ctx, remotePID, new(testpb.TestSend))
+		require.Error(t, err)
+		assert.ErrorIs(t, err, expectedErr)
+		remotingMock.AssertExpectations(t)
+	})
 	t.Run("With stopped actor", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
