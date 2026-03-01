@@ -47,10 +47,13 @@ Also, check the reference section at the end of the post for more material regar
 
 ## 📥 Installation
 
-| Version    | Command                               | Status                                                      |
-|------------|---------------------------------------|-------------------------------------------------------------|
-| **v3.x**   | `go get github.com/tochemey/goakt/v3` | Stable, used in production                                  |
-| **v4.0.0** | `go get github.com/tochemey/goakt/v4` | Usable in production; heavy testing and refactoring ongoing |
+```bash
+# v3.x — stable, used in production
+go get github.com/tochemey/goakt/v3
+
+# v4.0.0 — usable in production; heavy testing and refactoring ongoing
+go get github.com/tochemey/goakt/v4
+```
 
 ## 📚 Documentations
 
