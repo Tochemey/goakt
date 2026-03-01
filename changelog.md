@@ -1,5 +1,113 @@
 # Changelog
 
+## [v4.0.0] - TBD
+
+> 📖 **Read more:** For the complete migration guide and detailed change tracking, see [CHANGELOG_V400.md](./CHANGELOG_V400.md).
+
+### 🎯 Executive Summary
+
+- **Unified APIs**: Single actor reference (`*PID`), single lookup (`ActorOf`), unified scheduler, pluggable serializers.
+- **Type Flexibility**: `any` replaces `proto.Message` across all message-passing surfaces; CBOR supports arbitrary Go types.
+- **Remoting**: Config-only public API; client is internal; ProtoSerializer (default) and CBORSerializer for any Go type.
+- **Identity**: `Path` interface replaces `*address.Address`; `address` package moved to `internal/address`.
+- **Performance**: Low-GC serialization, lock-free type registry, single-allocation frames, lock-free `PID.Path()`.
+
+### ⚠️ Breaking Changes
+
+#### API & Type System
+
+- `proto.Message` replaced by `any` in all public methods (`PID.Tell`, `PID.Ask`, `Schedule*`, `AskGrain`, `TellGrain`, etc.).
+- `goaktpb` package removed; system message types moved to `actor` package (e.g., `actor.PostStart`, `actor.PoisonPill`, `actor.Terminated`, `actor.Deadletter`, etc.).
+- Internal protobuf files removed (`deadletter.proto`, `healthcheck.proto`); payloads are now native Go structs.
+- `supervisionSignal` decoupled from protobuf; `msg` is now `any`, `timestamp` is `time.Time`.
+- Cluster event payload type changed from `*anypb.Any` to `any` with typed event structs (`NodeJoinedEvent`, `NodeLeftEvent`).
+
+#### Actor Reference & Lookup
+
+- `ActorRef` removed; `*PID` is the sole actor reference for local and remote actors.
+- `ActorOf` return signature unified: `(addr, pid, err)` → `(*PID, error)`; use `pid.Path()` for host/port/name/system.
+- `Actors()` and `ActorRefs()` merged into `Actors(ctx, timeout) ([]*PID, error)`.
+- `LocalActor` and `RemoteActor` removed; use `ActorOf(ctx, name)` for both.
+- `RemoteScheduleOnce`, `RemoteSchedule`, `RemoteScheduleWithCron` removed; use unified `Schedule*` with remote PID from `ActorOf`.
+- `GetPartition(name)` renamed to `Partition(name)`.
+
+#### Remoting & Configuration
+
+- Remoting client no longer exported; use actor system and `client.Node` APIs; configure via `WithRemoteConfig`.
+- `client.Node.Remoting()` and `WithRemoting` removed; use `WithRemoteConfig(config *remote.Config)` exclusively.
+
+#### Log Package
+
+- `Logger` interface extended with `*Context` methods, `LogLevel`, `Enabled`, `With`, `LogOutput`, `Flush`, `StdLogger`; custom implementations must add all new methods.
+
+#### Testkit & ReceiveContext
+
+- `testkit.Probe.SenderAddress()` removed; use `Sender()` and `pid.Path()`.
+- `ReceiveContext.SenderAddress()` and `ReceiverAddress()` removed; use `ctx.Sender().Path()` and `ctx.Self().Path()`.
+
+#### Address & Path
+
+- `address` package moved to `internal/address`; use `Path` interface from `pid.Path()` instead.
+- `PID.Address()` replaced by `PID.Path()`; returns `Path` interface with `String()`, `Name()`, `Host()`, `Port()`, `HostPort()`, `System()`, `Equals()`.
+
+### ✨ New Additions
+
+#### System Messages & Serialization
+
+- Native Go system messages in `actor/messages.go` (lifecycle, actor events, deadletter, cluster events) with `time.Time` timestamps.
+- `actor/messages_serializers.go` for encoding native message types across process boundaries.
+- Pluggable `remote.Serializer` interface; `ProtoSerializer` (default) and `CBORSerializer` for any Go type.
+- CBOR serializer with auto-registration via `WithSerializers`; lock-free type registry; single allocation on encode.
+- Serializer dispatch on server and client via `map[reflect.Type]Serializer`; composite receive path for protobuf and CBOR coexistence.
+
+#### Path & Identity
+
+- `Path` interface for location-transparent actor identity; `String()` and `HostPort()` pre-computed and cached.
+
+#### Remote Capabilities
+
+- `ActorState` enum and `RemoteState` for querying actor lifecycle on remote nodes (Running, Suspended, Stopping, Relocatable, Singleton).
+- `remote/actor_state.go` with `RemoteState(ctx, host, port, name, state)`.
+
+#### PID & Errors
+
+- `PID.Kind()` — actor kind accessor (reflected type name).
+- Remote PID — lightweight cross-node handle via `newRemotePID`.
+- New sentinel errors: `errors.ErrRemotingDisabled`, `errors.ErrNotLocal`.
+
+#### Log Package
+
+- Extended `Logger` interface with context-aware, structured logging, and introspection methods.
+- `log/slog.go` — stdlib slog implementation with low-GC optimizations (enabled-before-format, typed attrs, caller caching, buffer pooling).
+- `log/zap.go` — Zap implementation with buffered file output, typed fields, stack-allocated `With`.
+- `log/discard.go` — no-op logger for tests.
+
+#### Internal Extractions
+
+- `internal/commands` package — command abstraction extracted from `pid.go` and `actor_system.go`.
+
+### 🐛 Bug Fixes
+
+- `cleanupCluster` singleton kind removal: now checks `pid.singletonSpec != nil` instead of `pid.IsSingleton()` to fix stale kind entries and `ErrKindAlreadyExists` / `ErrSingletonAlreadyExists` on new leader.
+
+### ⚡ Internal Improvements
+
+- `address.Address.String()` — eager caching in constructors; eliminates write-race window.
+- `internal/xsync.List` — deduplication, `comparable` type param, `Contains`, pre-allocated array, cleared slots on `Reset`.
+- Scheduler — unified local/remote delivery via `makeJobFn` passing target PID to `PID.Tell`.
+- `toReceiveContext` — else-branch elimination; single unconditional `receiveContext.build` call.
+- `actor/actor_path.go` — low-GC path implementation; `HostPort()` allocation-free; `Equals` single cached-string comparison; `PID.Path()` lock-free.
+
+### 🌐 Remoting Capabilities
+
+- Length-prefixed TCP frames; pooled connections; optional TLS; compression (NoCompression, Gzip, Zstd default, Brotli).
+- Server config: `NewConfig`, `WithWriteTimeout`, `WithReadIdleTimeout`, `WithMaxFrameSize`, `WithCompression`, `WithContextPropagator`, `WithSerializers`.
+- Messaging: `RemoteTell`, `RemoteAsk`, `RemoteBatchTell`, `RemoteBatchAsk`.
+- Lifecycle: `RemoteLookup`, `RemoteSpawn`, `RemoteReSpawn`, `RemoteStop`, `RemoteReinstate`, `RemoteState`.
+- Remote spawn options: `WithHostAndPort`, `WithRelocationDisabled`, `WithDependencies`, `WithStashing`, `WithPassivationStrategy`, `WithReentrancy`, `WithSupervisor`, `WithRole`.
+- Grain operations: `RemoteActivateGrain`, `RemoteTellGrain`, `RemoteAskGrain`.
+- Serialization: ProtoSerializer default; CBOR for arbitrary Go types; custom via `remote.Serializer`.
+
 ## [v3.14.0] - 2026-02-18
 
 ### 🐛 Fixes
@@ -83,7 +191,7 @@ Leadership in the cluster is determined by node age (oldest = coordinator). By r
 ##### 📈 Performance Improvement
 
 | Metric           | Before             | After            |
-| ---------------- | ------------------ | ---------------- |
+|------------------|--------------------|------------------|
 | Network calls    | O(N)               | O(3)             |
 | Data transferred | N × payload        | 3 × payload      |
 | Shutdown latency | Wait for all peers | Wait for 2 peers |
