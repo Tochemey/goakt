@@ -81,4 +81,15 @@ func TestClientSerializerOptions(t *testing.T) {
 		assert.Same(t, s1, cl.Serializer(&nonProtoMsg{"x"}))
 		assert.Same(t, s2, cl.Serializer(&nonProtoImpl{}))
 	})
+	t.Run("WithSerializables config forwarded via ClientSerializerOptions", func(t *testing.T) {
+		type cborMsg struct {
+			ID int `cbor:"id"`
+		}
+		config := remote.NewConfig("127.0.0.1", 0, remote.WithSerializables(new(cborMsg)))
+		opts := ClientSerializerOptions(config)
+		require.NotEmpty(t, opts)
+		cl := NewClient(opts...)
+		s := cl.Serializer(&cborMsg{})
+		require.NotNil(t, s)
+	})
 }
