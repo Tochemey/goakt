@@ -1,4 +1,9 @@
-# GoAkt
+<h2 align="center">
+  <img src="docs/assets/goakt-messaging-distributed-go.png" alt="GoAkt - Messaging, Distributed Systems, Go" width="800"/><br />
+  Distributed Actor framework for Go
+</h2>
+
+---
 
 [![build](https://img.shields.io/github/actions/workflow/status/Tochemey/goakt/build.yml?branch=main)](https://github.com/Tochemey/goakt/actions/workflows/build.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/tochemey/goakt.svg)](https://pkg.go.dev/github.com/tochemey/goakt)

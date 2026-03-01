@@ -3,55 +3,24 @@
   "name": "GoAkt",
   "description": "Distributed actor framework for Go, inspired by Erlang and Akka. Build reactive and distributed systems with typed actor messages.",
   "theme": "aspen",
-  "seo": {
-    "metatags": {
-      "canonical": "https://docs.goakt.dev"
-    }
-  },
-  "colors": {
-    "primary": "#2563EB",
-    "light": "#3B82F6",
-    "dark": "#1D4ED8"
-  },
-  "favicon": "",
-  "background": {
-    "decoration": "gradient"
-  },
-  "fonts": {
-    "heading": {
-      "family": "Geist"
-    },
-    "body": {
-      "family": "Geist"
-    }
-  },
-  "appearance": {
-    "default": "system"
-  },
+  "seo": { "metatags": { "canonical": "https://docs.goakt.dev" } },
+  "colors": { "primary": "#2563EB", "light": "#3B82F6", "dark": "#1D4ED8" },
+  "favicon": "/assets/goakt-icon.png",
+  "background": { "decoration": "gradient" },
+  "fonts": { "heading": { "family": "Geist" }, "body": { "family": "Geist" } },
+  "appearance": { "default": "system" },
   "navbar": {
     "links": [
       {
         "label": "Reference",
         "href": "https://pkg.go.dev/github.com/tochemey/goakt/v4"
       },
-      {
-        "label": "GitHub",
-        "href": "https://github.com/tochemey/goakt"
-      }
+      { "label": "GitHub", "href": "https://github.com/tochemey/goakt" }
     ]
   },
-  "footer": {
-    "socials": {
-      "github": "https://github.com/tochemey/goakt"
-    }
-  },
+  "footer": { "socials": { "github": "https://github.com/tochemey/goakt" } },
   "styling": {
-    "codeblocks": {
-      "theme": {
-        "light": "github-light",
-        "dark": "dracula"
-      }
-    }
+    "codeblocks": { "theme": { "light": "github-light", "dark": "dracula" } }
   },
   "navigation": {
     "groups": [
@@ -89,13 +58,7 @@
         ],
         "icon": "users"
       },
-      {
-        "group": "Grains",
-        "pages": [
-          "grains/overview"
-        ],
-        "icon": "box"
-      },
+      { "group": "Grains", "pages": ["grains/overview"], "icon": "box" },
       {
         "group": "Advanced",
         "pages": [
@@ -150,7 +113,5 @@
       }
     ]
   },
-  "icons": {
-    "library": "lucide"
-  }
+  "icons": { "library": "lucide" }
 }
