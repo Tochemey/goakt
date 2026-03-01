@@ -114,3 +114,43 @@ func TestWithSerializers(t *testing.T) {
 		require.NotNil(t, config.Serializer(&testpb.Reply{}))
 	})
 }
+
+func TestWithSerializables(t *testing.T) {
+	type concreteMsg struct {
+		ID int `cbor:"id"`
+	}
+	type otherMsg struct {
+		Name string `cbor:"name"`
+	}
+
+	t.Run("concrete type registration", func(t *testing.T) {
+		config := &Config{serializers: make(map[reflect.Type]Serializer)}
+		WithSerializables(new(concreteMsg), new(otherMsg)).Apply(config)
+		s1 := config.Serializer(&concreteMsg{})
+		s2 := config.Serializer(&otherMsg{})
+		require.NotNil(t, s1)
+		require.NotNil(t, s2)
+		assert.Same(t, s1, s2, "same CBOR serializer instance for all types")
+	})
+
+	t.Run("nil entries ignored", func(t *testing.T) {
+		config := &Config{serializers: make(map[reflect.Type]Serializer)}
+		WithSerializables(new(concreteMsg), nil, new(otherMsg)).Apply(config)
+		require.NotNil(t, config.Serializer(&concreteMsg{}))
+		require.NotNil(t, config.Serializer(&otherMsg{}))
+	})
+
+	t.Run("CBOR round-trip with registered types", func(t *testing.T) {
+		config := &Config{serializers: make(map[reflect.Type]Serializer)}
+		WithSerializables(new(concreteMsg)).Apply(config)
+		ser := config.Serializer(&concreteMsg{})
+		require.NotNil(t, ser)
+		orig := &concreteMsg{ID: 42}
+		data, err := ser.Serialize(orig)
+		require.NoError(t, err)
+		require.NotEmpty(t, data)
+		decoded, err := ser.Deserialize(data)
+		require.NoError(t, err)
+		require.Equal(t, orig, decoded)
+	})
+}
