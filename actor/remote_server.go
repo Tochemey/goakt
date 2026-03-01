@@ -164,6 +164,9 @@ func (x *actorSystem) remoteAskHandler(ctx context.Context, conn inet.Connection
 
 	responses := make([][]byte, 0, len(request.GetRemoteMessages()))
 	for _, message := range request.GetRemoteMessages() {
+		if message == nil {
+			return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, errors.New("remote message cannot be nil")), nil
+		}
 		receiver := message.GetReceiver()
 		addr, err := address.Parse(receiver)
 		if err != nil {
@@ -183,6 +186,11 @@ func (x *actorSystem) remoteAskHandler(ctx context.Context, conn inet.Connection
 		}
 
 		pid := node.value()
+		if pid == nil {
+			err := gerrors.NewErrAddressNotFound(addr.String())
+			logger.Errorf("remote ask: address=%s not found (actor was removed): %v", addr.String(), err)
+			return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
+		}
 		if !pid.IsRunning() {
 			err := gerrors.NewErrRemoteSendFailure(gerrors.ErrDead)
 			logger.Errorf("remote ask: actor=%s not running: %v (hint: actor may have stopped, retry or check target)", addr.String(), err)
@@ -231,6 +239,9 @@ func (x *actorSystem) remoteTellHandler(ctx context.Context, conn inet.Connectio
 	}
 
 	for _, message := range request.GetRemoteMessages() {
+		if message == nil {
+			return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, errors.New("remote message cannot be nil")), nil
+		}
 		receiver := message.GetReceiver()
 		addr, err := address.Parse(receiver)
 		if err != nil {
@@ -245,6 +256,11 @@ func (x *actorSystem) remoteTellHandler(ctx context.Context, conn inet.Connectio
 		}
 
 		pid := node.value()
+		if pid == nil {
+			err := gerrors.NewErrAddressNotFound(addr.String())
+			logger.Errorf("remote tell: address=%s not found (actor was removed): %v", addr.String(), err)
+			return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
+		}
 		if !pid.IsRunning() {
 			err := gerrors.NewErrRemoteSendFailure(gerrors.ErrDead)
 			logger.Errorf("remote tell: actor=%s not running: %v (hint: actor may have stopped)", addr.String(), err)
@@ -294,6 +310,11 @@ func (x *actorSystem) remoteReSpawnHandler(ctx context.Context, conn inet.Connec
 	}
 
 	pid := node.value()
+	if pid == nil {
+		err := gerrors.NewErrAddressNotFound(actorAddress.String())
+		logger.Errorf("remote respawn: address=%s not found (actor was removed): %v", actorAddress.String(), err)
+		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
+	}
 	if err := pid.Restart(ctx); err != nil {
 		err := fmt.Errorf("failed to restart actor=%s: %w", actorAddress.String(), err)
 		logger.Errorf("remote respawn failed: %v", err)
@@ -337,6 +358,11 @@ func (x *actorSystem) remoteStopHandler(ctx context.Context, conn inet.Connectio
 	}
 
 	pid := pidNode.value()
+	if pid == nil {
+		err := gerrors.NewErrAddressNotFound(actorAddress.String())
+		logger.Errorf("remote stop: address=%s not found (actor was removed): %v", actorAddress.String(), err)
+		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
+	}
 	if err := pid.Shutdown(ctx); err != nil {
 		err := fmt.Errorf("failed to stop actor=%s: %w", actorAddress.String(), err)
 		logger.Errorf("remote stop failed: %v", err)

@@ -91,6 +91,27 @@ func newRemoteServerTestSystemWithStoppedActor(t *testing.T, host string, port i
 	return sys
 }
 
+// newRemoteServerTestSystemWithZombieNode creates a minimal actorSystem with a "zombie" node
+// in the tree: a node that exists in the map but has nil pid. This simulates the race where
+// deleteNode has cleared the pid but a handler still holds a reference to the node.
+// Used to verify handlers return CODE_NOT_FOUND instead of panicking.
+func newRemoteServerTestSystemWithZombieNode(t *testing.T, host string, port int, name string) *actorSystem {
+	t.Helper()
+	sys := newRemoteServerTestSystem(host, port)
+	sys.noSender = MockPID(sys, "nosender", 0)
+	sys.actors.noSender = sys.noSender
+	addr := address.New(name, sys.Name(), host, port)
+	addrStr := addr.String()
+	n := newPidNode(nil)
+	n.id = addrStr
+	n.name = name
+	sys.actors.mu.Lock()
+	sys.actors.pids[addrStr] = n
+	sys.actors.names[name] = n
+	sys.actors.mu.Unlock()
+	return sys
+}
+
 func TestToProtoError(t *testing.T) {
 	err := gerrors.ErrRemotingDisabled
 	resp := toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, err)
@@ -281,6 +302,27 @@ func TestRemoteAskHandler(t *testing.T) {
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
 	})
+
+	t.Run("nil message in RemoteMessages returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
+		sys := newRemoteServerTestSystem(host, port)
+		req := &internalpb.RemoteAskRequest{
+			RemoteMessages: []*internalpb.RemoteMessage{nil},
+		}
+		resp, err := sys.remoteAskHandler(ctx, nullConn, req)
+		require.NoError(t, err)
+		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
+	})
+
+	t.Run("node with nil pid returns CODE_NOT_FOUND (simulates deleteNode race)", func(t *testing.T) {
+		sys := newRemoteServerTestSystemWithZombieNode(t, host, port, "actor1")
+		addr := fmt.Sprintf("goakt://testSys@%s:%d/actor1", host, port)
+		req := &internalpb.RemoteAskRequest{
+			RemoteMessages: []*internalpb.RemoteMessage{{Receiver: addr}},
+		}
+		resp, err := sys.remoteAskHandler(ctx, nullConn, req)
+		require.NoError(t, err)
+		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
+	})
 }
 
 func TestRemoteTellHandler(t *testing.T) {
@@ -323,6 +365,27 @@ func TestRemoteTellHandler(t *testing.T) {
 
 	t.Run("actor not in tree returns CODE_NOT_FOUND", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
+		addr := fmt.Sprintf("goakt://testSys@%s:%d/actor1", host, port)
+		req := &internalpb.RemoteTellRequest{
+			RemoteMessages: []*internalpb.RemoteMessage{{Receiver: addr}},
+		}
+		resp, err := sys.remoteTellHandler(ctx, nullConn, req)
+		require.NoError(t, err)
+		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
+	})
+
+	t.Run("nil message in RemoteMessages returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
+		sys := newRemoteServerTestSystem(host, port)
+		req := &internalpb.RemoteTellRequest{
+			RemoteMessages: []*internalpb.RemoteMessage{nil},
+		}
+		resp, err := sys.remoteTellHandler(ctx, nullConn, req)
+		require.NoError(t, err)
+		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
+	})
+
+	t.Run("node with nil pid returns CODE_NOT_FOUND (simulates deleteNode race)", func(t *testing.T) {
+		sys := newRemoteServerTestSystemWithZombieNode(t, host, port, "actor1")
 		addr := fmt.Sprintf("goakt://testSys@%s:%d/actor1", host, port)
 		req := &internalpb.RemoteTellRequest{
 			RemoteMessages: []*internalpb.RemoteMessage{{Receiver: addr}},
@@ -377,6 +440,14 @@ func TestRemoteReSpawnHandler(t *testing.T) {
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
 	})
+
+	t.Run("node with nil pid returns CODE_NOT_FOUND (simulates deleteNode race)", func(t *testing.T) {
+		sys := newRemoteServerTestSystemWithZombieNode(t, host, port, "actor1")
+		req := &internalpb.RemoteReSpawnRequest{Host: host, Port: int32(port), Name: "actor1"}
+		resp, err := sys.remoteReSpawnHandler(ctx, nullConn, req)
+		require.NoError(t, err)
+		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
+	})
 }
 
 func TestRemoteStopHandler(t *testing.T) {
@@ -419,6 +490,14 @@ func TestRemoteStopHandler(t *testing.T) {
 	t.Run("actor not in tree returns CODE_NOT_FOUND", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
 		req := &internalpb.RemoteStopRequest{Host: host, Port: int32(port), Name: "missing"}
+		resp, err := sys.remoteStopHandler(ctx, nullConn, req)
+		require.NoError(t, err)
+		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
+	})
+
+	t.Run("node with nil pid returns CODE_NOT_FOUND (simulates deleteNode race)", func(t *testing.T) {
+		sys := newRemoteServerTestSystemWithZombieNode(t, host, port, "actor1")
+		req := &internalpb.RemoteStopRequest{Host: host, Port: int32(port), Name: "actor1"}
 		resp, err := sys.remoteStopHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
