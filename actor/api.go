@@ -35,7 +35,23 @@ import (
 // Ask sends a synchronous message to another actor and expect a response.
 // This block until a response is received or timed out.
 func Ask(ctx context.Context, to *PID, message any, timeout time.Duration) (response any, err error) {
-	if to == nil || !to.IsRunning() {
+	if to == nil {
+		return nil, gerrors.ErrDead
+	}
+
+	// Remote PIDs have no ActorSystem; route through remoting instead.
+	// Must check before IsRunning, which can panic when remoting is nil.
+	if to.IsRemote() {
+		if to.remoting == nil {
+			return nil, gerrors.ErrRemotingDisabled
+		}
+		if timeout <= 0 {
+			return nil, gerrors.ErrInvalidTimeout
+		}
+		return to.remoting.RemoteAsk(ctx, address.NoSender(), to.getAddress(), message, timeout)
+	}
+
+	if !to.IsRunning() {
 		return nil, gerrors.ErrDead
 	}
 
@@ -76,7 +92,20 @@ func Ask(ctx context.Context, to *PID, message any, timeout time.Duration) (resp
 
 // Tell sends an asynchronous message to an actor
 func Tell(ctx context.Context, to *PID, message any) error {
-	if to == nil || !to.IsRunning() {
+	if to == nil {
+		return gerrors.ErrDead
+	}
+
+	// Remote PIDs have no ActorSystem; route through remoting instead.
+	// Must check before IsRunning, which can panic when remoting is nil.
+	if to.IsRemote() {
+		if to.remoting == nil {
+			return gerrors.ErrRemotingDisabled
+		}
+		return to.remoting.RemoteTell(ctx, address.NoSender(), to.getAddress(), message)
+	}
+
+	if !to.IsRunning() {
 		return gerrors.ErrDead
 	}
 
