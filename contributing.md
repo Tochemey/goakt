@@ -10,6 +10,7 @@ Before you start, make sure you have these installed:
 
 * [Docker](https://docs.docker.com/get-started/get-docker/)
 * [Go](https://go.dev/doc/install)
+* [Mint CLI](https://mintlify.com/docs) — for previewing documentation changes
 
 ### Getting Started
 
@@ -39,4 +40,12 @@ Prior to submitting a [pull request](https://help.github.com/articles/using-pull
 
 ```bash
 earthly +test
+```
+
+### Previewing Documentation
+
+To preview documentation changes locally, install [Mint CLI](https://mintlify.com/docs) and run:
+
+```bash
+mint dev
 ```

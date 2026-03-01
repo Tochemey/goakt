@@ -1,5 +1,5 @@
 <h2 align="center">
-  <img src="docs/assets/goakt-messaging-distributed-go.png" alt="GoAkt - Messaging, Distributed Systems, Go" width="800"/><br />
+  <img src="docs/assets/goakt-messaging-distributed-go.png" alt="GoAkt - Distributed Actor framework for Go" width="800"/><br />
   Distributed Actor framework for Go
 </h2>
 
@@ -23,9 +23,9 @@ Also, check the reference section at the end of the post for more material regar
 
 > **Version & branches:** The stable release (**v3.x**) uses protocol buffers for actor messages. **v4.0.0** (in development on `main`) introduces typed messages with `any`—unified APIs, pluggable serializers (Proto/CBOR), and config-only remoting. See [CHANGELOG_V400.md](./CHANGELOG_V400.md) for the full roadmap and migration guide; [Docs](https://docs.goakt.dev/) for API reference. Bug fixes for v3.x are on `release/v3.14`.
 
-## ✨ Features
+## 🚀 Features
 
-- **Actor Model**: Build concurrent and distributed systems using the actor model with typed messages (any type from v4.0.0—see [CHANGELOG_V400.md](./CHANGELOG_V400.md); v3.x uses protocol buffers).
+- **Actor Model**: Build concurrent and distributed systems using the actor model with typed messages.
 - **Messaging**: Tell/Ask APIs for fire-and-forget or request/response flows.
 - **Reentrancy**: Reentrancy-enabled async request messaging with configurable modes and per-call overrides.
 - **Supervision**: One-for-one/one-for-all strategies, directives, and retry windows for fault tolerance.
@@ -45,22 +45,23 @@ Also, check the reference section at the end of the post for more material regar
 - **Extensions**: Pluggable APIs for cross-cutting capabilities.
 - **Data Center**: Multi-datacenter support with DC-transparent messaging, pluggable control plane (NATS JetStream, Etcd), DC-aware placement (SpawnOn with WithDataCenter), and cross-DC actor/grain communication.
 
-## 💻 Installation
+## 📥 Installation
 
-```shell
-go get github.com/tochemey/goakt/v3
-```
+| Version    | Command                               | Status                                                      |
+|------------|---------------------------------------|-------------------------------------------------------------|
+| **v3.x**   | `go get github.com/tochemey/goakt/v3` | Stable, used in production                                  |
+| **v4.0.0** | `go get github.com/tochemey/goakt/v4` | Usable in production; heavy testing and refactoring ongoing |
 
 ## 📚 Documentations
 
 - **v4.0.0** (upcoming): [v4.0.0](https://docs.goakt.dev)
 - **v3.x** (stable): [v3.14.0](https://tochemey.gitbook.io/goakt)
 
-## 📝 Examples
+## 💡 Examples
 
 Kindly check out the [examples](https://github.com/Tochemey/goakt-examples)' repository.
 
-## 💪 Support
+## 💙 Support
 
 GoAkt is free and open source. If you need priority support on complex topics or request new features, please consider [sponsorship](https://github.com/sponsors/Tochemey).
 
@@ -77,56 +78,18 @@ You can join these groups and chat to discuss and ask GoAkt related questions on
 
 ## 🤝 Contribution
 
-We welcome contributions! Whether you're fixing a bug, adding a new feature, or improving documentation, your help is appreciated.
-Before diving in, please read the [Architecture Document](./ARCHITECTURE.md) to understand the codebase structure, design decisions, and how the components fit together.
-This project adheres to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) to standardize commit messages and help automate releases.
-We use [Earthly](https://earthly.dev/get-earthly) for reproducible builds.
+We welcome contributions—bug fixes, new features, and documentation improvements. Before diving in, read the [Architecture Document](./ARCHITECTURE.md) to understand the codebase. We use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) and [Earthly](https://earthly.dev/get-earthly) for builds.
 
-### Prerequisites
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for prerequisites, setup, and the full contribution workflow.
 
-Before you start, make sure you have these installed:
-
-- [Docker](https://docs.docker.com/get-started/get-docker/)
-- [Go](https://go.dev/doc/install)
-
-### Getting Started
-
-1.  Fork the repository to your GitHub account.
-2.  Clone your forked repository to your local machine:
-    ```bash
-    git clone https://github.com/your-username/goakt.git
-    cd goakt
-    ```
-3.  Initialize and tidy up Go modules:
-    ```bash
-    go mod tidy
-    ```
-    This ensures all dependencies are correctly listed and downloaded.
-
-### How to Contribute
-
-1. Make your changes in your fork.
-2. Ensure your code adheres to the project's style and passes tests `earthly +test`.
-3. Commit your changes using a **Conventional Commit** message. See [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
-4. Submit a [pull request](https://help.github.com/articles/using-pull-requests) from your fork to the `main` branch of the original repository.
-5. Following the instructions in the `playground` package to leave a working sample code in case it is a bug you are fixing.
-
-### Test & Linter
-
-Prior to submitting a [pull request](https://help.github.com/articles/using-pull-requests), please run:
-
-```bash
-earthly +test
-```
-
-## 📦 In Production
+## 🏭 In Production
 
 This framework is used in production by the following projects/companies:
 
 - [Baki Money](https://www.baki.money/): AI-powered Expense Tracking platform that turns receipts into stories...
 - [Event Processor](https://www.v-app.io/iot-builder-3/): Clustered Complex Event Processor (CEP) for IoT data streams.
 
-## 💬 Feedback
+## 📣 Feedback
 
 Kindly use this [issue](https://github.com/Tochemey/goakt/issues/948) to give us your feedback that can help us enhance the framework.
 
