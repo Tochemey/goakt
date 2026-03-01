@@ -27,34 +27,34 @@
       {
         "group": "Getting Started",
         "pages": [
-          "index",
-          "getting-started/installation",
-          "getting-started/migration-v3"
+          "/index",
+          "/getting-started/installation",
+          "/getting-started/migration-v3"
         ],
         "icon": "rocket"
       },
       {
         "group": "Actor",
         "pages": [
-          "actor/first-actor",
-          "actor/actor-model",
-          "actor/actor-system",
-          "actor/pid",
-          "actor/messaging",
-          "actor/lifecycle",
-          "actor/supervision",
-          "actor/location-transparency",
-          "actor/behaviors",
-          "actor/stashing",
-          "actor/death-watch",
-          "actor/pipeto",
-          "actor/reentrancy",
-          "actor/passivation",
-          "actor/relocation",
-          "actor/singletons",
-          "actor/routers",
-          "actor/scheduling",
-          "actor/testkit"
+          "/actor/first-actor",
+          "/actor/actor-model",
+          "/actor/actor-system",
+          "/actor/pid",
+          "/actor/messaging",
+          "/actor/lifecycle",
+          "/actor/supervision",
+          "/actor/location-transparency",
+          "/actor/behaviors",
+          "/actor/stashing",
+          "/actor/death-watch",
+          "/actor/pipeto",
+          "/actor/reentrancy",
+          "/actor/passivation",
+          "/actor/relocation",
+          "/actor/singletons",
+          "/actor/routers",
+          "/actor/scheduling",
+          "/actor/testkit"
         ],
         "icon": "users"
       },
@@ -62,23 +62,23 @@
       {
         "group": "Advanced",
         "pages": [
-          "advanced/remoting",
-          "advanced/client",
+          "/advanced/remoting",
+          "/advanced/client",
           "advanced/serialization",
-          "advanced/extensions-and-dependencies",
-          "advanced/event-streams",
-          "advanced/pubsub",
-          "advanced/observability",
-          "advanced/coordinated-shutdown"
+          "/advanced/extensions-and-dependencies",
+          "/advanced/event-streams",
+          "/advanced/pubsub",
+          "/advanced/observability",
+          "/advanced/coordinated-shutdown"
         ],
         "icon": "zap"
       },
       {
         "group": "Clustering",
         "pages": [
-          "clustering/standalone",
-          "clustering/clustered",
-          "clustering/multi-datacenter",
+          "/clustering/standalone",
+          "/clustering/clustered",
+          "/clustering/multi-datacenter",
           "clustering/service-discovery"
         ],
         "icon": "network"
@@ -86,7 +86,7 @@
       {
         "group": "Architecture",
         "pages": [
-          "architecture/overview",
+          "/architecture/overview",
           "architecture/code-map",
           "architecture/design-decisions"
         ],
@@ -95,18 +95,18 @@
       {
         "group": "Contributing",
         "pages": [
-          "contributing/overview",
-          "contributing/development-setup",
-          "contributing/testing-strategy",
-          "contributing/extending"
+          "/contributing/overview",
+          "/contributing/development-setup",
+          "/contributing/testing-strategy",
+          "/contributing/extending"
         ],
         "icon": "hand-heart"
       },
       {
         "group": "Reference",
         "pages": [
-          "reference/interfaces",
-          "reference/v400-changes",
+          "/reference/interfaces",
+          "/reference/v400-changes",
           "reference/glossary"
         ],
         "icon": "book"
