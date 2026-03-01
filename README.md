@@ -17,7 +17,7 @@ across a cluster of computers.
 If you are not familiar with the actor model, the blog post from Brian Storti [here](https://www.brianstorti.com/the-actor-model/) is an excellent and short introduction to the actor model.
 Also, check the reference section at the end of the post for more material regarding the actor model.
 
-> **Note:** The `main` branch is currently the development branch for ongoing work toward **v4.0.0**. See [V400.md](./V400.md) for the roadmap and planned changes. Bug fixes for **v3.x** are carried in the `release/v3.14` branch.
+> **Note:** The `main` branch is currently the development branch for ongoing work toward **v4.0.0**. See [V400.md](./V400.md) for the roadmap and [goakt.mintlify.app](https://goakt.mintlify.app/) for the full documentation. Bug fixes for **v3.x** are carried in the `release/v3.14` branch.
 
 ## ✨ Features
 
@@ -49,7 +49,7 @@ go get github.com/tochemey/goakt/v3
 
 ## 📚 Documentation
 
-- **v4.0.0** (development): See the [docs](./docs/) folder for Mintlify-format documentation. Covers concepts, architecture, and contributing.
+- **v4.0.0** (upcoming): [goakt.mintlify.app](https://goakt.mintlify.app/) — concepts, architecture, API reference, and contributing.
 - **v3.x** (stable): [tochemey.gitbook.io/goakt](https://tochemey.gitbook.io/goakt)
 
 ## 📝 Examples
