@@ -17,7 +17,7 @@ type Actor interface {
 }
 ```
 
-Required for all actors. See [Actor Model](../actor/actor-model.md#the-actor-interface).
+Required for all actors. See [Actor Model](/actor/actor-model#the-actor-interface).
 
 ## Grain
 
@@ -29,7 +29,7 @@ type Grain interface {
 }
 ```
 
-Required for virtual actors. See [Grains](../grains/overview.md#the-grain-interface).
+Required for virtual actors. See [Grains](/grains/overview#the-grain-interface).
 
 ## Mailbox
 
@@ -43,7 +43,7 @@ type Mailbox interface {
 }
 ```
 
-Optional; for custom mailbox implementations. See [Extending GoAkt](../contributing/extending.md#mailbox).
+Optional; for custom mailbox implementations. See [Extending GoAkt](/contributing/extending#mailbox).
 
 ## Serializer
 
@@ -55,7 +55,7 @@ type Serializer interface {
 ```
 
 For custom message serialization over the wire.
-See [Serialization](../advanced/serialization.md#the-serializer-interface).
+See [Serialization](/advanced/serialization#the-serializer-interface).
 
 ## Extension
 
@@ -65,7 +65,7 @@ type Extension interface {
 }
 ```
 
-System-wide plugin. See [Extending GoAkt](../contributing/extending.md#extension-system-wide).
+System-wide plugin. See [Extending GoAkt](/contributing/extending#extension-system-wide).
 
 ## Dependency
 
@@ -77,7 +77,7 @@ type Dependency interface {
 ```
 
 Per-actor injected resource. Must be serializable for relocation.
-See [Extending GoAkt](../contributing/extending.md#dependency-per-actor).
+See [Extending GoAkt](/contributing/extending#dependency-per-actor).
 
 ## Discovery Provider
 
@@ -92,10 +92,9 @@ type Provider interface {
 }
 ```
 
-For cluster peer discovery. See [Extending GoAkt](../contributing/extending.md#discovery-provider).
+For cluster peer discovery. See [Extending GoAkt](/contributing/extending#discovery-provider).
 
-For custom passivation behavior. See [Passivation](../actor/passivation.md#the-strategy-interface)
-and [Extending GoAkt](../contributing/extending.md#passivation-strategy).
+For custom passivation behavior. See [Passivation](/actor/passivation#strategies).
 
 ## Path
 
@@ -113,4 +112,4 @@ type Path interface {
 ```
 
 Returned by `pid.Path()`. Location-transparent actor identity.
-See [Location Transparency](../actor/location-transparency.md#the-path-interface).
+See [Location Transparency](/actor/location-transparency#the-path-interface).

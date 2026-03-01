@@ -67,4 +67,4 @@ func (a *AccountActor) ConfirmTransfer(ctx *ReceiveContext) {
 
 ## Stashing with behaviors
 
-When switching behaviors, you may want to defer processing of the current message. Use `ctx.Stash()` to buffer it, then `ctx.Unstash()` or `ctx.UnstashAll()` after changing behavior. Requires `WithStashing()` at spawn. See [Stashing](stashing).
+When switching behaviors, you may want to defer processing of the current message. Use `ctx.Stash()` to buffer it, then `ctx.Unstash()` or `ctx.UnstashAll()` after changing behavior. Requires `WithStashing()` at spawn. See [Stashing](/actor/stashing).

@@ -28,7 +28,7 @@ Actors provide a natural model for concurrent and distributed systems:
 | Concept         | Description                                                                                                         |
 |-----------------|---------------------------------------------------------------------------------------------------------------------|
 | **Actor**       | The fundamental unit. Receives messages, updates private state, spawns children, sends messages.                    |
-| **ActorSystem** | The runtime host. Manages lifecycle, messaging, cluster membership, and remoting. See [Actor System](actor-system). |
+| **ActorSystem** | The runtime host. Manages lifecycle, messaging, cluster membership, and remoting. See [Actor System](/actor/actor-system). |
 | **PID**         | Process identifier—a live handle to a running actor. Used for all interactions.                                     |
 | **Path**        | The canonical location of an actor: `goakt://system@host:port/path/to/actor`.                                       |
 | **Mailbox**     | Each actor has one. Messages wait here until the actor processes them.                                              |
@@ -73,5 +73,5 @@ single-threaded execution per actor, so no locks are needed inside `Receive`.
 ## Further reading
 
 - [Brian Storti: The Actor Model](https://www.brianstorti.com/the-actor-model/) — Short introduction
-- [Messaging](messaging) — Tell vs Ask, message types
-- [Actor Lifecycle](lifecycle) — Spawn, stop, state transitions
+- [Messaging](/actor/messaging) — Tell vs Ask, message types
+- [Actor Lifecycle](/actor/lifecycle) — Spawn, stop, state transitions
