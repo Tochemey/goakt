@@ -926,6 +926,7 @@ func (x *cluster) buildConfig() (*oconfig.Config, error) {
 		Hasher:                     hasher.NewDefaultHasher(),
 		TriggerBalancerInterval:    x.triggerBalancerInterval, // keep rebalance completion timely for stable event emission
 		MemberMeta:                 meta,
+		EnableProactiveSyncOnJoin:  true,
 	}
 
 	// by default, disable redis-client logging
@@ -953,7 +954,7 @@ func (x *cluster) buildConfig() (*oconfig.Config, error) {
 // setupMemberlistConfig applies memberlist specific configuration to the
 // provided Olric config instance.
 func (x *cluster) setupMemberlistConfig(cfg *oconfig.Config) error {
-	mconfig, err := oconfig.NewMemberlistConfig("lan")
+	mconfig, err := oconfig.NewMemberlistConfig(oconfig.MemberlistEnvLAN)
 	if err != nil {
 		x.logger.Errorf("failed to configure memberlist: %v (hint: check bind address, discovery port)", err)
 		return err
@@ -1029,7 +1030,10 @@ func (x *cluster) startServer(startCtx, ctx context.Context) error {
 			return err
 		}
 	}
-	return nil
+
+	ctx, cancel := context.WithTimeout(ctx, x.bootstrapTimeout)
+	defer cancel()
+	return x.server.WaitForInitialSync(ctx)
 }
 
 // createDMap provisions the unified map used to store cluster records.
