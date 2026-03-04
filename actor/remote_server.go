@@ -104,6 +104,13 @@ func (x *actorSystem) remoteLookupHandler(ctx context.Context, conn inet.Connect
 		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrRemotingDisabled), nil
 	}
 
+	// Extract context metadata and apply context propagation if configured.
+	var err error
+	ctx, err = x.extractContextWithPropagator(ctx)
+	if err != nil {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
+	}
+
 	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
 	if remoteAddr != net.JoinHostPort(request.GetHost(), strconv.Itoa(int(request.GetPort()))) {
 		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, gerrors.ErrInvalidHost), nil
@@ -290,6 +297,13 @@ func (x *actorSystem) remoteReSpawnHandler(ctx context.Context, conn inet.Connec
 		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrRemotingDisabled), nil
 	}
 
+	// Extract context metadata and apply context propagation if configured.
+	var err error
+	ctx, err = x.extractContextWithPropagator(ctx)
+	if err != nil {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
+	}
+
 	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
 	if remoteAddr != net.JoinHostPort(request.GetHost(), strconv.Itoa(int(request.GetPort()))) {
 		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, gerrors.ErrInvalidHost), nil
@@ -338,6 +352,13 @@ func (x *actorSystem) remoteStopHandler(ctx context.Context, conn inet.Connectio
 		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrRemotingDisabled), nil
 	}
 
+	// Extract context metadata and apply context propagation if configured.
+	var err error
+	ctx, err = x.extractContextWithPropagator(ctx)
+	if err != nil {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
+	}
+
 	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
 	if remoteAddr != net.JoinHostPort(request.GetHost(), strconv.Itoa(int(request.GetPort()))) {
 		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, gerrors.ErrInvalidHost), nil
@@ -384,6 +405,13 @@ func (x *actorSystem) remoteSpawnHandler(ctx context.Context, conn inet.Connecti
 
 	if !x.remotingEnabled.Load() {
 		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrRemotingDisabled), nil
+	}
+
+	// Extract context metadata and apply context propagation if configured.
+	var err error
+	ctx, err = x.extractContextWithPropagator(ctx)
+	if err != nil {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
 	}
 
 	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
@@ -499,6 +527,13 @@ func (x *actorSystem) remoteSpawnChildHandler(ctx context.Context, conn inet.Con
 
 	if !x.remotingEnabled.Load() {
 		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrRemotingDisabled), nil
+	}
+
+	// Extract context metadata and apply context propagation if configured.
+	var err error
+	ctx, err = x.extractContextWithPropagator(ctx)
+	if err != nil {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
 	}
 
 	host := request.GetHost()
@@ -852,6 +887,13 @@ func (x *actorSystem) remoteMetricHandler(ctx context.Context, conn inet.Connect
 		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrRemotingDisabled), nil
 	}
 
+	// Extract context metadata and apply context propagation if configured.
+	var err error
+	ctx, err = x.extractContextWithPropagator(ctx)
+	if err != nil {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
+	}
+
 	host := request.GetHost()
 	port := request.GetPort()
 	name := request.GetName()
@@ -1142,6 +1184,13 @@ func (x *actorSystem) remoteActivateGrainHandler(ctx context.Context, conn inet.
 
 	if !x.remotingEnabled.Load() {
 		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrRemotingDisabled), nil
+	}
+
+	// Extract context metadata and apply context propagation if configured.
+	var err error
+	ctx, err = x.extractContextWithPropagator(ctx)
+	if err != nil {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
 	}
 
 	grain := request.GetGrain()
