@@ -1,6 +1,6 @@
 ---
 title: Routers
-description: Round robin, random, and fan-out routing strategies.
+description: Round robin, random, fan-out, and consistent-hash routing strategies.
 sidebarTitle: "🔀 Routers"
 ---
 
@@ -26,11 +26,12 @@ The router unwraps the payload and dispatches it to its routees based on the rou
 
 These strategies never wait for replies. They are fire-and-forget; routees process messages asynchronously.
 
-| Strategy       | Behavior                                   |
-|----------------|--------------------------------------------|
-| **RoundRobin** | Rotate through routees in order            |
-| **Random**     | Pick a random routee                       |
-| **FanOut**     | Send to all routees concurrently (default) |
+| Strategy           | Behavior                                                              |
+|--------------------|-----------------------------------------------------------------------|
+| **RoundRobin**     | Rotate through routees in order                                       |
+| **Random**         | Pick a random routee                                                  |
+| **FanOut**         | Send to all routees concurrently (default)                            |
+| **ConsistentHash** | Route messages with the same key to the same routee (sticky sessions) |
 
 ### Reply-Based Strategies
 
@@ -58,20 +59,37 @@ Parameters:
 
 ## Router Options
 
-| Option                                            | Description                                                                                                                                                                         |
-|---------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `WithRoutingStrategy(strategy)`                   | Set RoundRobin, Random, or FanOut. Default is FanOut.                                                                                                                               |
-| `AsScatterGatherFirst(within)`                    | Use scatter-gather-first. `within` is the total time budget for any reply.                                                                                                          |
-| `AsTailChopping(within, interval)`                | Use tail-chopping. `within` is the global deadline; `interval` is the delay between successive attempts. Requires `interval` > 0 and `within` > 0; typically `interval` < `within`. |
-| `WithRestartRouteeOnFailure(maxRetries, timeout)` | On routee panic: restart the routee (up to `maxRetries` within `timeout`).                                                                                                          |
-| `WithStopRouteeOnFailure()`                       | On routee panic: stop and remove the routee from the pool. **Default.**                                                                                                             |
-| `WithResumeRouteeOnFailure()`                     | On routee panic: resume the routee (keep state, continue processing).                                                                                                               |
+| Option                                            | Description                                                                                                                                                                                         |
+|---------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `WithRoutingStrategy(strategy)`                   | Set RoundRobin, Random, FanOut, or ConsistentHash. Default is FanOut.                                                                                                                               |
+| `WithConsistentHashRouter(extractor)`             | Use consistent-hash routing. `extractor` is a `MessageRoutingKeyExtractor` (`func(msg any) string`). Messages with the same key go to the same routee. Returns empty string to fall back to random. |
+| `WithConsistentHashVirtualNodes(n)`               | Virtual nodes per routee for the hash ring (default 150). Only with `WithConsistentHashRouter`.                                                                                                     |
+| `WithConsistentHashHasher(h)`                     | Custom hash function for the ring (default xxh3). Only with `WithConsistentHashRouter`.                                                                                                             |
+| `AsScatterGatherFirst(within)`                    | Use scatter-gather-first. `within` is the total time budget for any reply.                                                                                                                          |
+| `AsTailChopping(within, interval)`                | Use tail-chopping. `within` is the global deadline; `interval` is the delay between successive attempts. Requires `interval` > 0 and `within` > 0; typically `interval` < `within`.                 |
+| `WithRestartRouteeOnFailure(maxRetries, timeout)` | On routee panic: restart the routee (up to `maxRetries` within `timeout`).                                                                                                                          |
+| `WithStopRouteeOnFailure()`                       | On routee panic: stop and remove the routee from the pool. **Default.**                                                                                                                             |
+| `WithResumeRouteeOnFailure()`                     | On routee panic: resume the routee (keep state, continue processing).                                                                                                                               |
 
 ### Examples
 
 ```go
 // Round-robin across 10 workers
 system.SpawnRouter(ctx, "workers", 10, &Worker{}, actor.WithRoutingStrategy(actor.RoundRobinRouting))
+
+// Consistent-hash: same order ID always routes to the same routee
+system.SpawnRouter(ctx, "order-router", 5, &OrderWorker{},
+    actor.WithConsistentHashRouter(func(msg any) string {
+        switch m := msg.(type) {
+        case *OrderCommand:
+            return m.OrderID
+        case *PaymentEvent:
+            return m.CustomerID
+        default:
+            return "" // fall back to random
+        }
+    }),
+)
 
 // Scatter-gather: first reply within 500ms wins
 system.SpawnRouter(ctx, "lookup", 5, &LookupActor{}, actor.AsScatterGatherFirst(500*time.Millisecond))
@@ -138,6 +156,7 @@ func (a *MyActor) Receive(ctx *actor.ReceiveContext) {
 ## When to Use
 
 - **Load balancing** – RoundRobin or Random across a pool of workers
+- **Sticky sessions / partition affinity** – ConsistentHash when messages with the same key (e.g. order ID, customer ID) must always go to the same routee
 - **Parallel processing** – FanOut for pub/sub, cache invalidation, multi-sink processing
 - **Fastest responder** – Scatter-Gather First when you want the first successful reply
 - **Controlled probing** – Tail-Chopping when you prefer sequential probing with bounded fan-out

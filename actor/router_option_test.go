@@ -28,6 +28,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/tochemey/goakt/v4/hash"
 )
 
 func TestRouterOption(t *testing.T) {
@@ -71,5 +73,27 @@ func TestRouterOption(t *testing.T) {
 		option := WithStopRouteeOnFailure()
 		option.Apply(router)
 		assert.Equal(t, stopRoutee, router.supervisorDirective)
+	})
+	t.Run("WithConsistentHashRouter", func(t *testing.T) {
+		router := &router{}
+		extractor := func(msg any) string { return "key" }
+		option := WithConsistentHashRouter(extractor)
+		option.Apply(router)
+		assert.Equal(t, ConsistentHashRouting, router.routingStrategy)
+		require.NotNil(t, router.routingKeyExtractor)
+		assert.Equal(t, "key", router.routingKeyExtractor("anything"))
+	})
+	t.Run("WithConsistentHashVirtualNodes", func(t *testing.T) {
+		router := &router{}
+		option := WithConsistentHashVirtualNodes(300)
+		option.Apply(router)
+		assert.Equal(t, 300, router.virtualNodes)
+	})
+	t.Run("WithConsistentHashHasher", func(t *testing.T) {
+		router := &router{}
+		h := hash.DefaultHasher()
+		option := WithConsistentHashHasher(h)
+		option.Apply(router)
+		assert.Equal(t, h, router.hasher)
 	})
 }

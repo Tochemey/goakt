@@ -8,16 +8,16 @@ The **ActorSystem** is the top-level runtime that hosts actors and orchestrates 
 
 ## Role and responsibilities
 
-| Responsibility           | Description                                                                                                                                      |
-|--------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Actor hosting**        | Spawns and supervises actors under the `/user` guardian. Manages the actor tree and parent-child relationships.                                  |
-| **Messaging**            | Routes messages locally or remotely. Serializes and deserializes when crossing node boundaries.                                                  |
-| **Clustering**           | When enabled, joins a cluster, discovers peers, and provides location-transparent actor resolution.                                              |
-| **Remoting**             | When enabled, exposes a TCP server and client for cross-node communication.                                                                      |
+| Responsibility           | Description                                                                                                                                    |
+|--------------------------|------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Actor hosting**        | Spawns and supervises actors under the `/user` guardian. Manages the actor tree and parent-child relationships.                                |
+| **Messaging**            | Routes messages locally or remotely. Serializes and deserializes when crossing node boundaries.                                                |
+| **Clustering**           | When enabled, joins a cluster, discovers peers, and provides location-transparent actor resolution.                                            |
+| **Remoting**             | When enabled, exposes a TCP server and client for cross-node communication.                                                                    |
 | **Event stream**         | Publishes system and cluster events (ActorStarted, NodeJoined, Deadletter, etc.) to subscribers. See [Event Streams](/advanced/event-streams). |
 | **PubSub**               | When `WithPubSub()` or cluster is enabled, a topic actor manages application-level topics. See [PubSub](/advanced/pubsub).                     |
-| **Scheduling**           | Delivers one-time, recurring, and cron-scheduled messages to actors.                                                                             |
-| **Coordinated shutdown** | Runs shutdown hooks, stops actors depth-first, and leaves the cluster gracefully.                                                                |
+| **Scheduling**           | Delivers one-time, recurring, and cron-scheduled messages to actors.                                                                           |
+| **Coordinated shutdown** | Runs shutdown hooks, stops actors depth-first, and leaves the cluster gracefully.                                                              |
 
 See [Architecture Overview](/architecture/overview) for the component diagram.
 
@@ -44,7 +44,7 @@ Details: [Coordinated Shutdown](/advanced/coordinated-shutdown), [First Actor](/
 | `SpawnFromFunc(ctx, receiveFunc, opts...)`               | `*PID`, error | Functional actor; no `Actor` implementation.                                                                                   |
 | `SpawnNamedFromFunc(ctx, name, receiveFunc, opts...)`    | `*PID`, error | Named functional actor.                                                                                                        |
 | `SpawnRouter(ctx, name, poolSize, routeesKind, opts...)` | `*PID`, error | Router with a pool of routees. Not cluster-relocatable.                                                                        |
-| `SpawnSingleton(ctx, name, actor, opts...)`              | `*PID`, error | Cluster singleton; one instance across the cluster, hosted on the oldest node. See [Singletons](/actor/singletons).                   |
+| `SpawnSingleton(ctx, name, actor, opts...)`              | `*PID`, error | Cluster singleton; one instance across the cluster, hosted on the oldest node. See [Singletons](/actor/singletons).            |
 
 See [Actor Lifecycle](/actor/lifecycle), [Routers](/actor/routers), [Singletons](/actor/singletons), [Clustering](/clustering/clustered).
 
@@ -113,28 +113,28 @@ See [Event Streams](/advanced/event-streams), [PubSub](/advanced/pubsub), [Obser
 
 Options are passed to `NewActorSystem(name, opts...)`. Each option is documented in the source; this table groups them by concern.
 
-| Option                                     | Purpose                                                                                             |
-|--------------------------------------------|-----------------------------------------------------------------------------------------------------|
-| **Core**                                   |                                                                                                     |
-| `WithLogger(logger)`                       | Custom logger. `WithLoggingDisabled()` for no-op.                                                   |
-| `WithActorInitTimeout(d)`                  | Actor startup timeout.                                                                              |
-| `WithActorInitMaxRetries(n)`               | Retries for actor init.                                                                             |
-| `WithShutdownTimeout(d)`                   | Total shutdown timeout (default: 3 min).                                                            |
-| `WithDefaultSupervisor(supervisor)`        | Fallback supervisor for actors without explicit config.                                             |
-| **Remoting & cluster**                     |                                                                                                     |
+| Option                                     | Purpose                                                                                           |
+|--------------------------------------------|---------------------------------------------------------------------------------------------------|
+| **Core**                                   |                                                                                                   |
+| `WithLogger(logger)`                       | Custom logger. `WithLoggingDisabled()` for no-op.                                                 |
+| `WithActorInitTimeout(d)`                  | Actor startup timeout.                                                                            |
+| `WithActorInitMaxRetries(n)`               | Retries for actor init.                                                                           |
+| `WithShutdownTimeout(d)`                   | Total shutdown timeout (default: 3 min).                                                          |
+| `WithDefaultSupervisor(supervisor)`        | Fallback supervisor for actors without explicit config.                                           |
+| **Remoting & cluster**                     |                                                                                                   |
 | `WithRemote(config)`                       | Enable remoting. See [Remoting](/advanced/remoting).                                              |
 | `WithCluster(config)`                      | Enable clustering. See [Clustered](/clustering/clustered).                                        |
-| `WithTLS(info)`                            | TLS for remoting.                                                                                   |
-| `WithoutRelocation()`                      | Disable actor relocation on node departure.                                                         |
-| **Extensions & capabilities**              |                                                                                                     |
+| `WithTLS(info)`                            | TLS for remoting.                                                                                 |
+| `WithoutRelocation()`                      | Disable actor relocation on node departure.                                                       |
+| **Extensions & capabilities**              |                                                                                                   |
 | `WithExtensions(ext...)`                   | System-wide extensions. See [Extensions and Dependencies](/advanced/extensions-and-dependencies). |
-| `WithPubSub()`                             | Enable topic-based pub/sub.                                                                         |
+| `WithPubSub()`                             | Enable topic-based pub/sub.                                                                       |
 | `WithMetrics()`                            | OpenTelemetry metrics. See [Observability](/advanced/observability).                              |
-| **Shutdown & eviction**                    |                                                                                                     |
+| **Shutdown & eviction**                    |                                                                                                   |
 | `WithCoordinatedShutdown(hooks...)`        | Shutdown hooks. See [Coordinated Shutdown](/advanced/coordinated-shutdown).                       |
-| `WithEvictionStrategy(strategy, interval)` | Passivation when actor count exceeds limit.                                                         |
-| **Advanced**                               |                                                                                                     |
-| `WithPartitionHasher(hasher)`              | Custom partition hasher for cluster placement.                                                      |
+| `WithEvictionStrategy(strategy, interval)` | Passivation when actor count exceeds limit.                                                       |
+| **Advanced**                               |                                                                                                   |
+| `WithPartitionHasher(hasher)`              | Custom partition hasher for cluster placement.                                                    |
 
 ## Component relationships
 

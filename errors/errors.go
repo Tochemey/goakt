@@ -199,6 +199,9 @@ var (
 	// ErrScatterGatherFirstRouterMisconfigured is returned when a scatter-gather-first router is misconfigured.
 	ErrScatterGatherFirstRouterMisconfigured = errors.New("scatter-gather router misconfigured: within must be greater than zero")
 
+	// ErrConsistentHashRouterMisconfigured is returned when a consistent-hash router has no key extractor.
+	ErrConsistentHashRouterMisconfigured = errors.New("consistent-hash router misconfigured: key extractor is required")
+
 	// ErrMailboxFull is returned when a bounded mailbox has reached its capacity.
 	ErrMailboxFull = errors.New("mailbox is full")
 
