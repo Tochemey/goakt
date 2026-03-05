@@ -30,38 +30,107 @@ Behaviors are stored on a stack. The top of the stack handles each incoming mess
 
 ## Example
 
+An account actor that switches behaviors based on authentication and transfer confirmation:
+
 ```go
-func (a *AccountActor) Receive(ctx *ReceiveContext) {
+package main
+
+import (
+    "context"
+    "fmt"
+    "time"
+
+    "github.com/tochemey/goakt/v4/actor"
+)
+
+// Message types
+type Login struct{ User string }
+type Logout struct{}
+type Transfer struct {
+    To     string
+    Amount int64
+}
+
+type Confirm struct{}
+type Cancel struct{}
+
+type AccountActor struct {
+    balance         int64
+    pendingTransfer *Transfer // stored when awaiting confirmation
+}
+
+func (a *AccountActor) PreStart(ctx *actor.Context) error { return nil }
+func (a *AccountActor) PostStop(ctx *actor.Context) error  { return nil }
+
+func (a *AccountActor) Receive(ctx *actor.ReceiveContext) {
     switch ctx.Message().(type) {
     case *Login:
-        a.authenticate(ctx)
         ctx.Become(a.Authenticated)
     default:
         ctx.Unhandled()
     }
 }
 
-func (a *AccountActor) Authenticated(ctx *ReceiveContext) {
-    switch ctx.Message().(type) {
+func (a *AccountActor) Authenticated(ctx *actor.ReceiveContext) {
+    switch msg := ctx.Message().(type) {
     case *Logout:
         ctx.UnBecome()
     case *Transfer:
+        a.pendingTransfer = msg
         ctx.BecomeStacked(a.ConfirmTransfer)
     default:
         ctx.Unhandled()
     }
 }
 
-func (a *AccountActor) ConfirmTransfer(ctx *ReceiveContext) {
+func (a *AccountActor) ConfirmTransfer(ctx *actor.ReceiveContext) {
     switch ctx.Message().(type) {
     case *Confirm:
-        a.doTransfer(ctx)
+        if a.pendingTransfer != nil {
+            a.balance -= a.pendingTransfer.Amount
+            a.pendingTransfer = nil
+        }
         ctx.UnBecomeStacked()
     case *Cancel:
+        a.pendingTransfer = nil
         ctx.UnBecomeStacked()
     default:
         ctx.Unhandled()
     }
+}
+
+func main() {
+    ctx := context.Background()
+    system, err := actor.NewActorSystem("behaviors-demo", 
+        actor.WithLoggingDisabled(),
+        actor.WithActorInitMaxRetries(3))
+    if err != nil {
+        panic(err)
+    }
+    if err := system.Start(ctx); err != nil {
+        panic(err)
+    }
+    defer system.Stop(ctx)
+
+    acc := &AccountActor{balance: 1000}
+    pid, err := system.Spawn(ctx, "account", acc)
+    if err != nil {
+        panic(err)
+    }
+
+    // Login -> switches to Authenticated
+    _ = actor.Tell(ctx, pid, &Login{User: "alice"})
+    time.Sleep(10 * time.Millisecond)
+
+    // Transfer -> pushes ConfirmTransfer on stack
+    _ = actor.Tell(ctx, pid, &Transfer{To: "bob", Amount: 50})
+    time.Sleep(10 * time.Millisecond)
+
+    // Confirm -> pops ConfirmTransfer, executes transfer
+    _ = actor.Tell(ctx, pid, &Confirm{})
+    time.Sleep(10 * time.Millisecond)
+
+    fmt.Println("Done. Balance:", acc.balance) // 950
 }
 ```
 

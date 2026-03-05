@@ -20,53 +20,20 @@ The [Actor System](/actor/actor-system) is the top-level runtime that hosts acto
 
 ## Message flow
 
-```
-Sender                    Transport                    Receiver
-------                    ---------                    --------
-[Actor/Client]            [local / TCP]                [Target Actor]
-     |                                                      |
-     |-- Tell(message) ---------------------------------->  |
-     |                                                      | enqueue -> mailbox
-     |                                                      | dequeue -> Receive(ctx)
-     |                                                      |
-     |-- Ask(message, timeout) --------------------------> |
-     | <--------------------------- response -------------- |
-```
+![Message flow - Sender sends Tell (fire-and-forget) or Ask (request-response) to Receiver via local or TCP transport, messages enqueue to mailbox then dequeue to Receive](/assets/architecture-message-flow.png)
 
 For remote messages, the remoting layer serializes the payload over a custom TCP frame protocol with optional
 compression.
 
 ## Actor hierarchy
 
-```
-/ (root guardian)
-|-- /system     <- internal actors (dead letter, scheduler, topic actors...)
-+-- /user       <- all user-defined actors
-    |-- /user/orderService
-    |   |-- /user/orderService/inventory
-    |   +-- /user/orderService/payment
-    +-- /user/reportService
-```
+![Actor hierarchy - root guardian at top, /system branch for internal actors, /user branch for user-defined actors with nested children](/assets/architecture-actor-hierarchy.png)
 
 When a parent stops, all children stop first (depth-first). A parent supervises its children.
 
 ## Cluster architecture
 
-```
-+------------------------------------------------------------------+
-| GoAkt Cluster Node                                               |
-|                                                                  |
-| +--------------+   +---------------+   +-------------------+     |
-| | ActorSystem  |-->| Cluster       |-->| Discovery         |     |
-| |              |   | (Olric DMap)  |   | (K8s/Consul/...)  |     |
-| +------+-------+   +---------------+   +-------------------+     |
-|        |                                                         |
-| +------v-------+   +---------------+                             |
-| | Remoting     |-->| TCP Server    | <-- connections from peers  |
-| | (TCP/TLS)    |   | (frame proto) |                             |
-| +--------------+   +---------------+                             |
-+------------------------------------------------------------------+
-```
+![Cluster architecture - GoAkt Cluster Node with ActorSystem connecting to Cluster (Olric DMap), Discovery, Remoting (TCP/TLS), and TCP Server](/assets/architecture-cluster-node.png)
 
 Cluster state is stored in Olric (distributed hash map). Node membership uses Hashicorp Memberlist.
 See [Code Map](/architecture/code-map) for package layout.

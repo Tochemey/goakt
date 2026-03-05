@@ -96,26 +96,6 @@ The actor kind must be registered on the cluster via `WithKinds` when creating t
 | `RandomStrategy`     | Pick a node at random.                                                                                                    |
 | `LeastLoadStrategy`  | Prefer the node with the lowest load. Requires `WithRefresh` to update weights; otherwise weights stay at initial values. |
 
-## Example
-
-```go
-// Tell (fire-and-forget)
-err := cl.Tell(ctx, "my-actor", &mypb.MyMessage{Id: "123"})
-
-// Ask (request-response)
-reply, err := cl.Ask(ctx, "my-actor", &mypb.GetRequest{}, 5*time.Second)
-
-// Ask a grain
-grainReq := &remote.GrainRequest{Name: "user-42", Kind: "UserGrain"}
-reply, err := cl.AskGrain(ctx, grainReq, &mypb.GetUser{}, 5*time.Second)
-
-// Spawn an actor
-err := cl.Spawn(ctx, &remote.SpawnRequest{
-    Name: "worker-1",
-    Kind: "WorkerActor",
-})
-```
-
 ## Thread safety
 
 The client is safe for concurrent use by multiple goroutines.

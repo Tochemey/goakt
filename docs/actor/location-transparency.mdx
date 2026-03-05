@@ -21,6 +21,8 @@ The caller uses the same `pid.Tell(msg)` or `pid.Ask(ctx, msg, timeout)` regardl
 `pid.Path()` returns a `Path` interface—the location-transparent actor identity:
 
 ```go
+package actor
+
 type Path interface {
     Host() string
     HostPort() string

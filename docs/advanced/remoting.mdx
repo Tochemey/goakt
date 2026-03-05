@@ -47,6 +47,8 @@ When messages cross node boundaries, request-scoped metadata (trace IDs, auth to
 ### The ContextPropagator interface
 
 ```go
+package remote
+
 type ContextPropagator interface {
     Inject(ctx context.Context, headers http.Header) error
     Extract(ctx context.Context, headers http.Header) (context.Context, error)

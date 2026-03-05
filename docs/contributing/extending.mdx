@@ -10,6 +10,8 @@ options.
 ## Discovery Provider
 
 ```go
+package discovery
+
 type Provider interface {
     ID() string
     Initialize() error
@@ -35,6 +37,8 @@ See `discovery/selfmanaged` for a built-in zero-config provider using UDP broadc
 ## Mailbox
 
 ```go
+package actor
+
 type Mailbox interface {
     Enqueue(msg *ReceiveContext) error
     Dequeue() *ReceiveContext
@@ -57,6 +61,8 @@ Create a file in `actor/`. Pass via `WithMailbox(mailbox)` as a SpawnOption. Ref
 ## Extension (system-wide)
 
 ```go
+package extension
+
 type Extension interface {
     ID() string
 }
@@ -68,6 +74,8 @@ type Extension interface {
 ## Dependency (per-actor)
 
 ```go
+package extension
+
 type Dependency interface {
     Serializable
     // ID returns the unique identifier for the extension.

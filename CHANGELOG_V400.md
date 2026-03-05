@@ -46,8 +46,8 @@ v4.0.0 delivers **simplification** and **performance** through:
 | `GetPartition(name)`                            | `Partition(name)`                                                                                   |
 | `pid.Address()`                                 | `pid.Path()`                                                                                        |
 | `ctx.SenderAddress()` / `ctx.ReceiverAddress()` | `ctx.Sender().Path()` / `ctx.Self().Path()`                                                         |
-| `remote.Remoting` / `remote.Client`             | Use actor system and `client.Node` APIs; configure via `WithRemoteConfig`                           |
-| `WithRemoting`                                  | `WithRemoteConfig(config)`                                                                          |
+| `remote.Remoting` / `remote.Client`             | Use actor system and `client.Node` APIs; configure via `WithRemote` / `WithRemoteConfig`            |
+| `WithRemoting`                                  | `WithRemote(config)` (actor system) / `WithRemoteConfig(config)` (client node)                      |
 | `address` package                               | `internal/address` (use `Path` interface instead)                                                   |
 | Custom `Logger` implementations                 | Implement new methods: `*Context`, `LogLevel`, `Enabled`, `With`, `LogOutput`, `Flush`, `StdLogger` |
 
@@ -208,14 +208,14 @@ The remoting client is internal. The `remote` package exposes only configuration
 **Migration:**
 
 - Replace `remote.Remoting` / `remote.Client` — use actor system and `client.Node` APIs
-- Replace `remote.NewRemoting()` / `remote.NewClient()` — use `WithRemoteConfig(config)`
+- Replace `remote.NewRemoting()` / `remote.NewClient()` — use `WithRemote(config)` on the actor system or `WithRemoteConfig(config)` on `client.Node`
 - For tests: `mockremote.NewClient(t)` for mock injection
 
 ---
 
 #### 13. `client.Node.Remoting()` and `WithRemoting` removed
 
-Remoting is configured exclusively via `WithRemoteConfig(config *remote.Config)`. The node constructs its remoting client from the config.
+Remoting is configured via `WithRemote(config *remote.Config)` on the actor system and `WithRemoteConfig(config *remote.Config)` on `client.Node`. The node constructs its remoting client from the config.
 
 ---
 
@@ -653,7 +653,7 @@ pid, err := system.Spawn(ctx, "my-actor", NewMyActor(),
 - **One scheduler:** No `RemoteSchedule*` variants
 - **One serializer abstraction:** Pluggable; ProtoSerializer default, CBOR for any Go type
 - **Messages as `any`:** No `proto.Message` constraint
-- **Config-only remoting:** Client is internal; configure via `WithRemoteConfig`
+- **Config-only remoting:** Client is internal; configure via `WithRemote` (actor system) / `WithRemoteConfig` (client node)
 - **Path interface:** Single way to obtain actor identity; `address` package internal
 
 ### Performance

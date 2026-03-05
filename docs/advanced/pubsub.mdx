@@ -12,17 +12,7 @@ Each node runs one **topic actor** (`GoAktTopicActor`). Local actors subscribe t
 
 ### Standalone mode
 
-```
-+----------------------------------------------------------+
-|  Node                                                    |
-|                                                          |
-|   Publisher A --Publish--> +----------------+            |
-|                            | Topic Actor    |            |
-|   Subscriber B <--Tell---- | (local)        |            |
-|   Subscriber C <--Tell---- +----------------+            |
-|                                                          |
-+----------------------------------------------------------+
-```
+![PubSub Standalone Mode - Publisher sends Publish to Topic Actor, which delivers via Tell to local subscribers](/assets/pubsub-standalone-mode.png)
 
 Publishers send `Publish` to the local topic actor. The topic actor delivers the message to all local subscribers via `Tell`.
 
@@ -35,19 +25,7 @@ In a cluster, each node has its own topic actor. **Topic actors communicate with
 3. The local topic actor sends a `TopicMessage` (serialized) to each peer node's topic actor via remoting.
 4. Each remote topic actor receives the `TopicMessage`, deserializes it, and delivers to **its** local subscribers.
 
-```
-  NODE A                    NODE B                    NODE C
-  -------                   -------                   -------
-  Publisher                 Topic Actor               Topic Actor
-      |                         ^                         ^
-      | Publish                 | TopicMessage            | TopicMessage
-      v                         | (remoting)              | (remoting)
-  Topic Actor ------------------+-------------------------+
-      |                         |                         |
-      | Tell (local)            | Tell (local)            | Tell (local)
-      v                         v                         v
-  Subscriber 1, 2           Subscriber X, Y           Subscriber Z
-```
+![PubSub Cluster Mode - Topic actors on each node; Node A publisher sends Publish, Topic Actors exchange TopicMessage via remoting, each delivers via Tell to local subscribers](/assets/pubsub-cluster-mode.png)
 
 **Key point:** Subscribers always register with their **local** topic actor. Topic actors are responsible for cross-node dissemination; application actors never talk to remote topic actors directly.
 

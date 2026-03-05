@@ -9,6 +9,8 @@ In clustered mode, nodes must discover each other. GoAkt uses a pluggable **disc
 ## Provider interface
 
 ```go
+package discovery
+
 type Provider interface {
     ID() string
     Initialize() error

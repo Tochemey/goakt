@@ -1,6 +1,6 @@
 # Changelog
 
-## [v4.0.0] - TBD
+## [v4.0.0] - 2026-03-05
 
 > 📖 **Read more:** For the complete migration guide and detailed change tracking, see [CHANGELOG_V400.md](./CHANGELOG_V400.md).
 
@@ -33,8 +33,8 @@
 
 #### Remoting & Configuration
 
-- Remoting client no longer exported; use actor system and `client.Node` APIs; configure via `WithRemoteConfig`.
-- `client.Node.Remoting()` and `WithRemoting` removed; use `WithRemoteConfig(config *remote.Config)` exclusively.
+- Remoting client no longer exported; use actor system and `client.Node` APIs; configure via `WithRemote` / `WithRemoteConfig`.
+- `client.Node.Remoting()` and `WithRemoting` removed; use `WithRemote(config *remote.Config)` on the actor system or `WithRemoteConfig(config *remote.Config)` on `client.Node`.
 
 #### Log Package
 

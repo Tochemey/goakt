@@ -34,21 +34,65 @@ Stashed messages are processed in FIFO order when unstashed.
 
 ## Example
 
+A gate actor that buffers requests until opened:
+
 ```go
-func (a *GateActor) Receive(ctx *ReceiveContext) {
+package main
+
+import (
+    "context"
+    "fmt"
+    "time"
+
+    "github.com/tochemey/goakt/v4/actor"
+)
+
+type Open struct{}
+type Request struct{ Id string }
+
+type GateActor struct {
+    open   bool
+    served []string
+}
+
+func (a *GateActor) PreStart(ctx *actor.Context) error { return nil }
+func (a *GateActor) PostStop(ctx *actor.Context) error  { return nil }
+
+func (a *GateActor) Receive(ctx *actor.ReceiveContext) {
     switch msg := ctx.Message().(type) {
     case *Open:
         a.open = true
         ctx.UnstashAll()
     case *Request:
         if a.open {
-            a.handle(ctx, msg)
+            a.served = append(a.served, msg.Id)
         } else {
             ctx.Stash()
         }
     default:
         ctx.Unhandled()
     }
+}
+
+func main() {
+    ctx := context.Background()
+    system, _ := actor.NewActorSystem("stash-demo", actor.WithLoggingDisabled())
+    _ = system.Start(ctx)
+    defer system.Stop(ctx)
+
+    gate := &GateActor{}
+    pid, _ := system.Spawn(ctx, "gate", gate, actor.WithStashing())
+
+    // Request arrives before gate is open -> stashed
+    _ = actor.Tell(ctx, pid, &Request{Id: "req-1"})
+    _ = actor.Tell(ctx, pid, &Request{Id: "req-2"})
+    time.Sleep(10 * time.Millisecond)
+
+    // Open gate -> unstashes and processes req-1, req-2
+    _ = actor.Tell(ctx, pid, &Open{})
+    time.Sleep(10 * time.Millisecond)
+
+    fmt.Println("Served:", gate.served) // [req-1 req-2]
 }
 ```
 

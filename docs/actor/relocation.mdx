@@ -19,29 +19,7 @@ Relocation does **not** run in standalone mode; it requires cluster mode and rem
 
 ## Relocation flow
 
-```
-Node A (leaving)                    Cluster leader                    Remaining nodes
--------------                      --------------                    ---------------
-1. Stop() called
-2. preShutdown() builds
-   PeerState (actors + grains)
-3. shutdownCluster():
-   persistPeerStateToPeers() -----> Up to 3 oldest peers store state (2-of-3 quorum)
-   cleanupCluster() removes actors/grains from cluster map
-   cluster.Stop() leaves membership
-4. NodeLeft event emitted
-
-                                   4. Leader receives NodeLeft
-                                   5. Fetches PeerState from cluster store
-                                   6. Enqueues Rebalance to relocator
-                                   7. Relocator allocates actors/grains
-                                      - Singletons -> leader
-                                      - Others -> distributed across peers
-                                   8. recreateLocally() / spawnRemoteActor()
-                                      / recreateGrain() / activateRemoteGrain()
-                                   9. RebalanceComplete
-                                   10. Delete PeerState from store
-```
+![Relocation flow - Node A departs, persists PeerState to oldest peers, Cluster Leader receives NodeLeft, Relocator redistributes actors and grains across remaining nodes](/assets/relocation-flow.png)
 
 ### Key steps
 

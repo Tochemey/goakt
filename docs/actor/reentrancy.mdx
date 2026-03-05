@@ -112,31 +112,114 @@ In `StashNonReentrant` mode, user messages are automatically stashed while any s
 
 ## Example
 
-```go
-// Coordinator calls Worker asynchronously. AllowAll keeps the actor responsive.
-coordinator, _ := system.Spawn(ctx, "coordinator", &CoordinatorActor{},
-    actor.WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
+Reentrancy enables safe request/response cycles without deadlock. Flow: Client → ActorA → ActorB → ActorA → Client. ActorA uses `RequestName` (non-blocking); ActorB uses `Ask` (blocking). Without reentrancy, ActorA would block and the cycle would deadlock.
 
-// In CoordinatorActor.Receive:
-func (a *CoordinatorActor) Receive(rctx *ReceiveContext) {
-    switch msg := rctx.Message().(type) {
-    case *StartJob:
-        call := rctx.RequestName("worker", &DoWork{JobID: msg.ID}, actor.WithRequestTimeout(5*time.Second))
-        if call == nil {
-            rctx.Response(gerrors.ErrReentrancyDisabled)
-            return
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "time"
+
+    "github.com/tochemey/goakt/v4/actor"
+    "github.com/tochemey/goakt/v4/reentrancy"
+)
+
+// Message types for the reentrancy cycle.
+type Ping struct{}
+type GetCount struct{}
+type Count struct{ Value int } // Expected response: Value 42
+
+// Client starts the cycle on PostStart and signals doneCh when it receives Count.
+type Client struct {
+    target *actor.PID
+    doneCh chan struct{}
+}
+
+func (c *Client) PreStart(ctx *actor.Context) error { return nil }
+func (c *Client) PostStop(ctx *actor.Context) error  { return nil }
+
+func (c *Client) Receive(ctx *actor.ReceiveContext) {
+    switch msg := ctx.Message().(type) {
+    case *actor.PostStart:
+        ctx.Tell(c.target, &Ping{}) // 1. Kick off the cycle
+    case *Count:
+        fmt.Println("Count:", msg.Value) // 6. Expected: Count: 42
+        select {
+        case c.doneCh <- struct{}{}:
+        default:
         }
-        call.Then(func(resp any, err error) {
-            if err != nil {
-                rctx.Response(NewStatusFailure(err.Error(), msg))
-                return
-            }
-            rctx.Response(resp)
-        })
-    case *GetStatus:
-        rctx.Response(a.currentStatus)
     default:
-        rctx.Unhandled()
+        ctx.Unhandled()
+    }
+}
+
+// ActorA uses RequestName (non-blocking) so it can process ActorB's Ask while waiting.
+type ActorA struct{ targetName string }
+
+func (a *ActorA) PreStart(ctx *actor.Context) error { return nil }
+func (a *ActorA) PostStop(ctx *actor.Context) error  { return nil }
+
+func (a *ActorA) Receive(ctx *actor.ReceiveContext) {
+    switch ctx.Message().(type) {
+    case *Ping:
+        sender := ctx.Sender()
+        self := ctx.Self()
+        // 2. Non-blocking request to ActorB; returns immediately
+        call := ctx.RequestName(a.targetName, &Ping{}, actor.WithRequestTimeout(2*time.Second))
+        if call == nil { return }
+        call.Then(func(resp any, err error) {
+            if err != nil || sender == nil { return }
+            // 5. Forward response back to Client
+            _ = self.Tell(context.Background(), sender, resp)
+        })
+    case *GetCount:
+        // 4. ActorB's Ask arrives while we wait; reentrancy allows us to handle it
+        ctx.Response(&Count{Value: 42})
+    default:
+        ctx.Unhandled()
+    }
+}
+
+// ActorB uses Ask (blocking) to call back into ActorA.
+type ActorB struct{ actorA *actor.PID }
+
+func (b *ActorB) PreStart(ctx *actor.Context) error { return nil }
+func (b *ActorB) PostStop(ctx *actor.Context) error { return nil }
+
+func (b *ActorB) Receive(ctx *actor.ReceiveContext) {
+    switch ctx.Message().(type) {
+    case *Ping:
+        // 3. Ask ActorA for count; ActorA must be reentrant to respond
+        resp := ctx.Ask(b.actorA, &GetCount{}, 2*time.Second)
+        ctx.Response(resp)
+    default:
+        ctx.Unhandled()
+    }
+}
+
+func main() {
+    ctx := context.Background()
+    system, _ := actor.NewActorSystem("reentrancy-demo", actor.WithLoggingDisabled())
+    _ = system.Start(ctx)
+    defer system.Stop(ctx)
+
+    doneCh := make(chan struct{}, 1)
+    actorA, _ := system.Spawn(ctx, "actor-a", &ActorA{targetName: "actor-b"},
+        actor.WithReentrancy(reentrancy.New(
+            reentrancy.WithMode(reentrancy.AllowAll),
+            reentrancy.WithMaxInFlight(4),
+        )))
+    _, _ = system.Spawn(ctx, "actor-b", &ActorB{actorA: actorA})
+    _, _ = system.Spawn(ctx, "client", &Client{target: actorA, doneCh: doneCh})
+
+    // Expected: "Count: 42" then "Reentrancy cycle completed."
+    select {
+    case <-doneCh:
+        fmt.Println("Reentrancy cycle completed.")
+    case <-time.After(3 * time.Second):
+        fmt.Println("Timeout.")
     }
 }
 ```

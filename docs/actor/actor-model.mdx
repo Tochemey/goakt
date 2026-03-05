@@ -54,6 +54,8 @@ locks to protect actor state. Messages are processed sequentially from the actor
 Every actor must implement the `Actor` interface:
 
 ```go
+package actor
+
 type Actor interface {
     PreStart(ctx *Context) error
     Receive(ctx *ReceiveContext)

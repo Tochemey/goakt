@@ -16,7 +16,7 @@ decides what to do. This keeps failures localized and recoverable.
 | **OneForOne** | Only the failing child is affected              |
 | **OneForAll** | All siblings are affected (e.g., all restarted) |
 
-Choose OneForOne when failures are independent; OneForAll when siblings share critical state.
+Choose **OneForOne** when failures are independent; **OneForAll** when siblings share critical state.
 
 ## Directives
 
@@ -25,7 +25,7 @@ Choose OneForOne when failures are independent; OneForAll when siblings share cr
 | **Resume**   | Ignore the failure; continue processing       |
 | **Restart**  | Re-initialize the child (PreStart runs again) |
 | **Stop**     | Terminate the child                           |
-| **Escalate** | Pass the failure to the grandparent           |
+| **Escalate** | Pass the failure to the parent                |
 
 Configure retry windows (max retries within a time period) to avoid infinite restart loops. After the window is
 exceeded, the supervisor can escalate.

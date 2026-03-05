@@ -55,6 +55,8 @@ this registry; they use protobuf's own type resolution.
 Custom serializers must implement:
 
 ```go
+package remote
+
 type Serializer interface {
     Serialize(message any) ([]byte, error)
     Deserialize(data []byte) (any, error)

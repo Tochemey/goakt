@@ -10,19 +10,7 @@ GoAkt supports multiple clusters across datacenters. A pluggable **control plane
 
 ## Architecture
 
-```
-DC-1 (us-east-1)                    Control Plane                    DC-2 (eu-west-1)
-----------------                    --------------                    -----------------
-Cluster (Olric)                     NATS JetStream / etcd            Cluster (Olric)
-     |                                    |                                  |
-     | Register + Heartbeat                | ListActive / Watch                | Register + Heartbeat
-     +------------------------------------+------------------------------------+
-     |                                    |                                    |
-     v                                    v                                    v
-Leader registers local DC          DC records (ACTIVE, endpoints)         Leader registers local DC
-with cluster members'              propagated to all DCs                   with cluster members'
-remoting addresses                                                         remoting addresses
-```
+![Multi-Datacenter Architecture - DC-1 and DC-2 clusters communicate via a Control Plane (NATS JetStream or etcd) for registration, heartbeats, and cross-DC messaging](/assets/multi-datacenter-architecture.png)
 
 - **Control plane** — Manages datacenter registration, heartbeats, state transitions, and event watching. Implementations: NATS JetStream, etcd.
 - **DC leader** — Only the cluster leader in each DC runs the datacenter controller. It registers the local DC with the control plane using cluster members' remoting addresses.

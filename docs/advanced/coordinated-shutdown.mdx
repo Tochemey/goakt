@@ -28,6 +28,8 @@ Register hooks via `WithCoordinatedShutdown(hooks...)` when creating the actor s
 ### The ShutdownHook interface
 
 ```go
+package actor
+
 type ShutdownHook interface {
     Execute(ctx context.Context, actorSystem ActorSystem) error
     Recovery() *ShutdownHookRecovery

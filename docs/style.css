@@ -1,5 +1,12 @@
-/* Geist Mono for code blocks - pairs with Geist (body/heading) */
-@import url("https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600;700&display=swap");
+/* Cousine for code blocks; Inter for tables */
+@import url("https://fonts.googleapis.com/css2?family=Cousine:wght@400;700&family=Inter:wght@400;500;600&display=swap");
+
+/* Slightly larger base font for the whole doc */
+body,
+#body-content,
+.mdx-content {
+  font-size: 1.05rem !important;
+}
 
 /* Target code blocks and pre elements (code + ASCII diagrams) */
 #body-content pre,
@@ -7,17 +14,15 @@
 [class*="code-block"] pre,
 pre[class*="shiki"],
 pre {
-  font-family:
-    "Geist Mono", "JetBrains Mono", Consolas, Monaco, monospace !important;
-  font-size: 0.8rem !important;
+  font-family: "Cousine", Consolas, Monaco, monospace !important;
+  font-size: 0.9rem !important;
   line-height: 1.5 !important;
 }
 
 /* Inline code */
 #body-content code:not(pre code),
 .mdx-content code:not(pre code) {
-  font-family:
-    "Geist Mono", "JetBrains Mono", Consolas, Monaco, monospace !important;
+  font-family: "Cousine", Consolas, Monaco, monospace !important;
   font-size: 0.85em !important;
 }
 
@@ -27,4 +32,29 @@ pre {
 [class*="code-block"] {
   max-width: 100%;
   overflow-x: auto;
+}
+
+/* Reduce space around diagram images */
+#body-content img,
+.mdx-content img {
+  margin: 0.25rem 0;
+  display: block;
+}
+
+/* Table content: no wrap, no break */
+#body-content table td,
+#body-content table th,
+.mdx-content table td,
+.mdx-content table th {
+  font-family:
+    "Inter",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif !important;
+  font-size: 1.05rem !important;
+  line-height: 1.5 !important;
+  white-space: nowrap !important;
+  overflow-wrap: normal !important;
+  word-break: normal !important;
 }

@@ -37,14 +37,14 @@ Details: [Coordinated Shutdown](/advanced/coordinated-shutdown), [First Actor](/
 
 ### Spawning
 
-| Method                                                   | Returns       | Use case                                                                                                                       |
-|----------------------------------------------------------|---------------|--------------------------------------------------------------------------------------------------------------------------------|
-| `Spawn(ctx, name, actor, opts...)`                       | `*PID`, error | Create a named actor locally (or on a specific host with `WithHostAndPort`).                                                   |
-| `SpawnOn(ctx, name, actor, opts...)`                     | `*PID`, error | Create actor on a cluster node (placement: RoundRobin, Random, Local, LeastLoad) or in another data center (`WithDataCenter`). |
-| `SpawnFromFunc(ctx, receiveFunc, opts...)`               | `*PID`, error | Functional actor; no `Actor` implementation.                                                                                   |
-| `SpawnNamedFromFunc(ctx, name, receiveFunc, opts...)`    | `*PID`, error | Named functional actor.                                                                                                        |
-| `SpawnRouter(ctx, name, poolSize, routeesKind, opts...)` | `*PID`, error | Router with a pool of routees. Not cluster-relocatable.                                                                        |
-| `SpawnSingleton(ctx, name, actor, opts...)`              | `*PID`, error | Cluster singleton; one instance across the cluster, hosted on the oldest node. See [Singletons](/actor/singletons).            |
+| Method                                                   | Use case                                                                                                                       |
+|----------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------|
+| `Spawn(ctx, name, actor, opts...)`                       | Create a named actor locally (or on a specific host with `WithHostAndPort`).                                                   |
+| `SpawnOn(ctx, name, actor, opts...)`                     | Create actor on a cluster node (placement: RoundRobin, Random, Local, LeastLoad) or in another data center (`WithDataCenter`). |
+| `SpawnFromFunc(ctx, receiveFunc, opts...)`               | Functional actor; no `Actor` implementation.                                                                                   |
+| `SpawnNamedFromFunc(ctx, name, receiveFunc, opts...)`    | Named functional actor.                                                                                                        |
+| `SpawnRouter(ctx, name, poolSize, routeesKind, opts...)` | Router with a pool of routees. Not cluster-relocatable.                                                                        |
+| `SpawnSingleton(ctx, name, actor, opts...)`              | Cluster singleton; one instance across the cluster, hosted on the oldest node. See [Singletons](/actor/singletons).            |
 
 See [Actor Lifecycle](/actor/lifecycle), [Routers](/actor/routers), [Singletons](/actor/singletons), [Clustering](/clustering/clustered).
 

@@ -13,6 +13,8 @@ Extensions are system-wide plugins registered at actor system creation. They pro
 ### The Extension interface
 
 ```go
+package extension
+
 type Extension interface {
     ID() string
 }
@@ -38,6 +40,8 @@ Dependencies are per-actor resources injected at spawn time. Unlike extensions, 
 ### The Dependency interface
 
 ```go
+package extension
+
 type Dependency interface {
     Serializable
     // ID returns the unique identifier for the extension.
