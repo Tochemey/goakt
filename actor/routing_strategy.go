@@ -41,6 +41,12 @@ package actor
 //     Useful for pub/sub, cache invalidation, or multi-sink processing.
 //     Example:
 //     r := newRouter(3, &EventConsumer{}, logger, WithRoutingStrategy(FanOutRouting))
+//   - ConsistentHashRouting:
+//     Routes messages with the same key to the same routee using a consistent hash ring.
+//     Requires a KeyExtractor provided via WithConsistentHashRouter. Useful for sticky
+//     sessions, per-entity routing, or partitioned caches.
+//     Example:
+//     r := newRouter(5, &MyWorker{}, logger, WithConsistentHashRouter(myExtractor))
 //
 // Note: If a routee stops, it is removed from the internal map and no longer receives messages.
 type RoutingStrategy int
@@ -53,4 +59,12 @@ const (
 	RandomRouting
 	// FanOutRouting broadcasts every message to all currently available routees.
 	FanOutRouting
+	// ConsistentHashRouting routes messages with the same key (as determined by a
+	// KeyExtractor) to the same routee. Adding or removing routees only remaps
+	// keys that were assigned to the changed node; all other mappings are stable.
+	ConsistentHashRouting
 )
+
+// MessageRoutingKeyExtractor derives a routing key from a message for consistent-hash routing.
+// Return an empty string to fall back to random routing for that message.
+type MessageRoutingKeyExtractor func(msg any) string

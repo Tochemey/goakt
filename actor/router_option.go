@@ -22,7 +22,11 @@
 
 package actor
 
-import "time"
+import (
+	"time"
+
+	"github.com/tochemey/goakt/v4/hash"
+)
 
 // RouterOption is the interface that applies a configuration option.
 type RouterOption interface {
@@ -145,6 +149,69 @@ func AsScatterGatherFirst(within time.Duration) RouterOption {
 	return RouterOptionFunc(func(r *router) {
 		r.kind = scatterGatherFirstRouter
 		r.within = within
+	})
+}
+
+// WithConsistentHashRouter configures the router to use consistent-hash routing.
+//
+// Every incoming message is passed to the provided KeyExtractor to obtain a routing key.
+// Messages that produce the same key are always forwarded to the same routee, providing
+// sticky-session / partition-affinity semantics.
+//
+// When the key extractor returns an empty string the message falls back to random routing,
+// allowing heterogeneous message types to coexist safely.
+//
+// The consistent hash ring uses virtual nodes (default 150 per routee) for even distribution.
+// Adding or removing routees only remaps keys that belonged to the changed node; all other
+// mappings remain stable.
+//
+// Parameters:
+//
+//	extractor: derives a routing key from any message. Must not be nil.
+//
+// Optional configuration via additional RouterOptions:
+//   - WithConsistentHashVirtualNodes to control the number of virtual nodes.
+//   - WithConsistentHashHasher to supply a custom hash function.
+//
+// Example:
+//
+//	router, _ := system.SpawnRouter(ctx, "order-router", 5, &OrderWorker{},
+//	    actor.WithConsistentHashRouter(func(msg any) string {
+//	        switch m := msg.(type) {
+//	        case *OrderCommand:
+//	            return m.OrderID
+//	        default:
+//	            return ""
+//	        }
+//	    }),
+//	)
+func WithConsistentHashRouter(extractor MessageRoutingKeyExtractor) RouterOption {
+	return RouterOptionFunc(func(r *router) {
+		r.routingStrategy = ConsistentHashRouting
+		r.routingKeyExtractor = extractor
+		r.hasher = hash.DefaultHasher()
+		r.virtualNodes = defaultVirtualNodes
+	})
+}
+
+// WithConsistentHashVirtualNodes sets the number of virtual nodes per routee
+// on the consistent hash ring. Higher values improve key distribution at the
+// cost of slightly more memory and ring-rebuild time.
+//
+// Default: 150. Only meaningful when used together with WithConsistentHashRouter.
+func WithConsistentHashVirtualNodes(n int) RouterOption {
+	return RouterOptionFunc(func(r *router) {
+		r.virtualNodes = n
+	})
+}
+
+// WithConsistentHashHasher supplies a custom hash function for the consistent
+// hash ring. The default is hash.DefaultHasher (xxh3).
+//
+// Only meaningful when used together with WithConsistentHashRouter.
+func WithConsistentHashHasher(h hash.Hasher) RouterOption {
+	return RouterOptionFunc(func(r *router) {
+		r.hasher = h
 	})
 }
 

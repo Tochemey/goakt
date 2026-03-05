@@ -24,6 +24,8 @@ package actor
 
 import (
 	"context"
+	"fmt"
+	"math"
 	"testing"
 	"time"
 
@@ -34,6 +36,7 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/hash"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
@@ -828,6 +831,447 @@ func TestRouter(t *testing.T) {
 		waitForRouteeCount(t, ctx, router, 0)
 
 		assert.NoError(t, system.Stop(ctx))
+	})
+	t.Run("With ConsistentHash strategy same key routes to same routee", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		system, err := NewActorSystem(
+			"testSystem",
+			WithLogger(logger))
+
+		require.NoError(t, err)
+		require.NotNil(t, system)
+
+		require.NoError(t, system.Start(ctx))
+
+		pause.For(time.Second)
+
+		extractor := func(msg any) string {
+			switch m := msg.(type) {
+			case *testpb.TestLog:
+				return m.GetText()
+			default:
+				return ""
+			}
+		}
+
+		poolSize := 5
+		routerName := "consistentHashRouter"
+		router, err := system.SpawnRouter(ctx, routerName, poolSize, new(MockRoutee),
+			WithConsistentHashRouter(extractor))
+		require.NoError(t, err)
+		require.NotNil(t, router)
+
+		pause.For(time.Second)
+
+		// send the same key multiple times
+		for range 10 {
+			err = Tell(ctx, router, NewBroadcast(&testpb.TestLog{Text: "sticky-key"}))
+			require.NoError(t, err)
+		}
+
+		pause.For(time.Second)
+
+		// exactly one routee should have received all 10 messages
+		var totalCount int
+		var routeesWithMessages int
+		for i := range poolSize {
+			name := routeeName(i, routerName)
+			ref, ok := system.findRoutee(name)
+			require.True(t, ok)
+			require.NotNil(t, ref)
+
+			reply, err := Ask(ctx, ref, new(testpb.TestGetCount), time.Second)
+			require.NoError(t, err)
+			count := reply.(*testpb.TestCount).GetValue()
+			if count > 1 {
+				routeesWithMessages++
+				totalCount += int(count)
+			}
+		}
+
+		assert.Equal(t, 1, routeesWithMessages, "all messages with the same key should go to one routee")
+		// count includes the GetCount request itself (+1), so the routee has 10 TestLog + 1 GetCount = value 11
+		assert.Equal(t, 11, totalCount)
+
+		assert.NoError(t, system.Stop(ctx))
+	})
+	t.Run("With ConsistentHash strategy different keys distribute across routees", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		system, err := NewActorSystem(
+			"testSystem",
+			WithLogger(logger))
+
+		require.NoError(t, err)
+		require.NotNil(t, system)
+
+		require.NoError(t, system.Start(ctx))
+
+		pause.For(time.Second)
+
+		extractor := func(msg any) string {
+			switch m := msg.(type) {
+			case *testpb.TestLog:
+				return m.GetText()
+			default:
+				return ""
+			}
+		}
+
+		poolSize := 3
+		routerName := "consistentHashDistRouter"
+		router, err := system.SpawnRouter(ctx, routerName, poolSize, new(MockRoutee),
+			WithConsistentHashRouter(extractor))
+		require.NoError(t, err)
+		require.NotNil(t, router)
+
+		pause.For(time.Second)
+
+		// send 100 distinct keys to ensure distribution across routees
+		for i := range 100 {
+			err = Tell(ctx, router, NewBroadcast(&testpb.TestLog{Text: fmt.Sprintf("key-%d", i)}))
+			require.NoError(t, err)
+		}
+
+		pause.For(time.Second)
+
+		var routeesWithTraffic int
+		for i := range poolSize {
+			name := routeeName(i, routerName)
+			ref, ok := system.findRoutee(name)
+			require.True(t, ok)
+			reply, err := Ask(ctx, ref, new(testpb.TestGetCount), time.Second)
+			require.NoError(t, err)
+			count := reply.(*testpb.TestCount).GetValue()
+			if count > 1 {
+				routeesWithTraffic++
+			}
+		}
+
+		assert.GreaterOrEqual(t, routeesWithTraffic, 2, "distinct keys should hit at least 2 routees")
+
+		assert.NoError(t, system.Stop(ctx))
+	})
+	t.Run("With ConsistentHash strategy empty key falls back to random", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		system, err := NewActorSystem(
+			"testSystem",
+			WithLogger(logger))
+
+		require.NoError(t, err)
+		require.NotNil(t, system)
+
+		require.NoError(t, system.Start(ctx))
+
+		pause.For(time.Second)
+
+		extractor := func(msg any) string {
+			return ""
+		}
+
+		poolSize := 2
+		routerName := "consistentHashFallbackRouter"
+		router, err := system.SpawnRouter(ctx, routerName, poolSize, new(MockRoutee),
+			WithConsistentHashRouter(extractor))
+		require.NoError(t, err)
+		require.NotNil(t, router)
+
+		pause.For(time.Second)
+
+		err = Tell(ctx, router, NewBroadcast(&testpb.TestLog{Text: "something"}))
+		require.NoError(t, err)
+
+		pause.For(time.Second)
+
+		var totalCount int32
+		for i := range poolSize {
+			name := routeeName(i, routerName)
+			ref, ok := system.findRoutee(name)
+			require.True(t, ok)
+			reply, err := Ask(ctx, ref, new(testpb.TestGetCount), time.Second)
+			require.NoError(t, err)
+			totalCount += reply.(*testpb.TestCount).GetValue()
+		}
+
+		// at least one routee got the message (counter includes the GetCount itself)
+		assert.GreaterOrEqual(t, totalCount, int32(3))
+
+		assert.NoError(t, system.Stop(ctx))
+	})
+	t.Run("With ConsistentHash strategy missing key extractor fails validation", func(t *testing.T) {
+		ctx := t.Context()
+		logger := log.DiscardLogger
+		system, err := NewActorSystem(
+			"testSystem",
+			WithLogger(logger))
+
+		require.NoError(t, err)
+		require.NotNil(t, system)
+
+		require.NoError(t, system.Start(ctx))
+
+		pause.For(time.Second)
+
+		routerName := "noExtractorRouter"
+		router, err := system.SpawnRouter(ctx, routerName, 2, new(MockRoutee),
+			WithRoutingStrategy(ConsistentHashRouting))
+		require.Error(t, err)
+		require.Nil(t, router)
+		assert.ErrorIs(t, err, errors.ErrConsistentHashRouterMisconfigured)
+
+		assert.NoError(t, system.Stop(ctx))
+	})
+	t.Run("With ConsistentHash strategy ring rebuild on scale up", func(t *testing.T) {
+		ctx := t.Context()
+		logger := log.DiscardLogger
+		system, err := NewActorSystem(
+			"testSystem",
+			WithLogger(logger))
+
+		require.NoError(t, err)
+		require.NotNil(t, system)
+
+		require.NoError(t, system.Start(ctx))
+
+		pause.For(time.Second)
+
+		extractor := func(msg any) string {
+			switch m := msg.(type) {
+			case *testpb.TestLog:
+				return m.GetText()
+			default:
+				return ""
+			}
+		}
+
+		poolSize := 2
+		routerName := "consistentHashScaleRouter"
+		router, err := system.SpawnRouter(ctx, routerName, poolSize, new(MockRoutee),
+			WithConsistentHashRouter(extractor))
+		require.NoError(t, err)
+		require.NotNil(t, router)
+
+		pause.For(time.Second)
+
+		// send messages with a key before scaling
+		for range 5 {
+			err = Tell(ctx, router, NewBroadcast(&testpb.TestLog{Text: "scale-key"}))
+			require.NoError(t, err)
+		}
+
+		pause.For(time.Second)
+
+		// scale up
+		err = system.NoSender().Tell(ctx, router, NewAdjustRouterPoolSize(3))
+		require.NoError(t, err)
+
+		waitForRouteeCount(t, ctx, router, 5)
+
+		// send more messages with the same key - should still route consistently
+		for range 5 {
+			err = Tell(ctx, router, NewBroadcast(&testpb.TestLog{Text: "scale-key"}))
+			require.NoError(t, err)
+		}
+
+		pause.For(time.Second)
+
+		// verify messages still route consistently (exactly one routee handles "scale-key")
+		var receiversAfterScale int
+		for i := range 5 {
+			name := routeeName(i, routerName)
+			ref, ok := system.findRoutee(name)
+			if !ok || ref == nil {
+				continue
+			}
+			reply, err := Ask(ctx, ref, new(testpb.TestGetCount), time.Second)
+			require.NoError(t, err)
+			count := reply.(*testpb.TestCount).GetValue()
+			if count > 1 {
+				receiversAfterScale++
+			}
+		}
+
+		// the key may have been remapped to a new node on scale-up, but at most
+		// two routees should have received messages for this key (one before, one after)
+		assert.LessOrEqual(t, receiversAfterScale, 2)
+
+		assert.NoError(t, system.Stop(ctx))
+	})
+}
+
+func TestConsistentHashRing(t *testing.T) {
+	t.Run("empty ring returns empty string", func(t *testing.T) {
+		ring := newConsistentHashRing(nil, 0)
+		assert.Empty(t, ring.lookup("anything"))
+	})
+
+	t.Run("single member receives all keys", func(t *testing.T) {
+		ring := newConsistentHashRing(nil, 0)
+		ring.set([]string{"node-A"})
+
+		for i := range 100 {
+			got := ring.lookup(fmt.Sprintf("key-%d", i))
+			assert.Equal(t, "node-A", got)
+		}
+	})
+
+	t.Run("same key always maps to same member", func(t *testing.T) {
+		ring := newConsistentHashRing(nil, 0)
+		ring.set([]string{"node-A", "node-B", "node-C"})
+
+		for i := range 200 {
+			key := fmt.Sprintf("user:%d", i)
+			first := ring.lookup(key)
+			for j := range 5 {
+				_ = j
+				assert.Equal(t, first, ring.lookup(key), "key=%s must be stable", key)
+			}
+		}
+	})
+
+	t.Run("keys distribute across all members", func(t *testing.T) {
+		members := []string{"node-A", "node-B", "node-C", "node-D", "node-E"}
+		ring := newConsistentHashRing(nil, 0)
+		ring.set(members)
+
+		counts := make(map[string]int, len(members))
+		total := 10_000
+		for i := range total {
+			member := ring.lookup(fmt.Sprintf("key-%d", i))
+			counts[member]++
+		}
+
+		assert.Len(t, counts, len(members), "every member should receive at least one key")
+
+		expected := float64(total) / float64(len(members))
+		for member, count := range counts {
+			ratio := float64(count) / expected
+			assert.InDelta(t, 1.0, ratio, 0.35,
+				"member=%s count=%d expected≈%.0f ratio=%.2f", member, count, expected, ratio)
+		}
+	})
+
+	t.Run("adding a member remaps only a fraction of keys", func(t *testing.T) {
+		members := []string{"A", "B", "C"}
+		ring := newConsistentHashRing(nil, 0)
+		ring.set(members)
+
+		total := 5000
+		before := make([]string, total)
+		for i := range total {
+			before[i] = ring.lookup(fmt.Sprintf("k%d", i))
+		}
+
+		ring.set(append(members, "D"))
+
+		moved := 0
+		for i := range total {
+			after := ring.lookup(fmt.Sprintf("k%d", i))
+			if after != before[i] {
+				moved++
+			}
+		}
+
+		idealFraction := 1.0 / float64(len(members)+1)
+		actualFraction := float64(moved) / float64(total)
+		assert.Less(t, actualFraction, idealFraction*2,
+			"expected ≤%.2f%% remapped, got %.2f%%", idealFraction*200, actualFraction*100)
+	})
+
+	t.Run("removing a member only remaps that member's keys", func(t *testing.T) {
+		members := []string{"A", "B", "C", "D"}
+		ring := newConsistentHashRing(nil, 0)
+		ring.set(members)
+
+		total := 5000
+		before := make(map[string]string, total)
+		for i := range total {
+			key := fmt.Sprintf("k%d", i)
+			before[key] = ring.lookup(key)
+		}
+
+		ring.set([]string{"A", "B", "D"})
+
+		for key, prev := range before {
+			after := ring.lookup(key)
+			if prev != "C" {
+				assert.Equal(t, prev, after,
+					"key=%s was on %s (not removed), should not have moved to %s", key, prev, after)
+			}
+		}
+	})
+
+	t.Run("set clears previous members", func(t *testing.T) {
+		ring := newConsistentHashRing(nil, 0)
+		ring.set([]string{"A", "B"})
+		require.NotEmpty(t, ring.lookup("x"))
+
+		ring.set(nil)
+		assert.Empty(t, ring.lookup("x"))
+		assert.Zero(t, ring.len())
+	})
+
+	t.Run("custom hasher is used", func(t *testing.T) {
+		ring := newConsistentHashRing(hash.DefaultHasher(), 50)
+		ring.set([]string{"X", "Y"})
+		assert.Equal(t, 100, ring.len())
+
+		got := ring.lookup("test-key")
+		assert.Contains(t, []string{"X", "Y"}, got)
+	})
+
+	t.Run("custom virtual node count", func(t *testing.T) {
+		ring := newConsistentHashRing(nil, 300)
+		ring.set([]string{"A", "B"})
+		assert.Equal(t, 600, ring.len())
+	})
+
+	t.Run("default virtual node count", func(t *testing.T) {
+		ring := newConsistentHashRing(nil, 0)
+		ring.set([]string{"A"})
+		assert.Equal(t, defaultVirtualNodes, ring.len())
+	})
+
+	t.Run("large member set", func(t *testing.T) {
+		members := make([]string, 100)
+		for i := range members {
+			members[i] = fmt.Sprintf("node-%d", i)
+		}
+
+		ring := newConsistentHashRing(nil, 0)
+		ring.set(members)
+		assert.Equal(t, 100*defaultVirtualNodes, ring.len())
+
+		seen := make(map[string]struct{})
+		for i := range 50_000 {
+			m := ring.lookup(fmt.Sprintf("k%d", i))
+			seen[m] = struct{}{}
+		}
+		assert.Greater(t, len(seen), 90, "at least 90 of 100 members should see traffic")
+	})
+
+	t.Run("distribution variance", func(t *testing.T) {
+		members := []string{"A", "B", "C"}
+		ring := newConsistentHashRing(nil, 0)
+		ring.set(members)
+
+		counts := make(map[string]int, len(members))
+		total := 30_000
+		for i := range total {
+			counts[ring.lookup(fmt.Sprintf("k%d", i))]++
+		}
+
+		mean := float64(total) / float64(len(members))
+		var sumSqDev float64
+		for _, c := range counts {
+			diff := float64(c) - mean
+			sumSqDev += diff * diff
+		}
+		stddev := math.Sqrt(sumSqDev / float64(len(members)))
+		cv := stddev / mean
+		assert.Less(t, cv, 0.15, "coefficient of variation should be small")
 	})
 }
 

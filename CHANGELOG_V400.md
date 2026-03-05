@@ -463,9 +463,54 @@ The `Logger` interface has been extended with new methods. Custom implementation
 
 ---
 
+### Routing
+
+#### 34. Consistent Hash Router
+
+A new `ConsistentHashRouting` strategy routes messages with the same key to the same routee, providing sticky-session and partition-affinity semantics without requiring messages to implement any interface.
+
+**Key types:**
+
+| Type / Function                        | Package  | Purpose                                                         |
+|----------------------------------------|----------|-----------------------------------------------------------------|
+| `ConsistentHashRouting`                | `actor`  | New `RoutingStrategy` enum value                                |
+| `MessageRoutingKeyExtractor`           | `actor`  | `func(msg any) string` — derives a routing key from any message |
+| `WithConsistentHashRouter(extractor)`  | `actor`  | `RouterOption` — sets the strategy and key extractor            |
+| `WithConsistentHashVirtualNodes(n)`    | `actor`  | `RouterOption` — tunes virtual nodes per routee (default 150)   |
+| `WithConsistentHashHasher(h)`          | `actor`  | `RouterOption` — supplies a custom `hash.Hasher` (default xxh3) |
+| `ErrConsistentHashRouterMisconfigured` | `errors` | Returned when no key extractor is provided                      |
+
+**Behavior:**
+
+- Messages are passed to the `MessageRoutingKeyExtractor` to obtain a routing key
+- Messages with the same key always route to the same routee
+- When the extractor returns an empty string, the message falls back to random routing
+- The consistent hash ring uses virtual nodes for even distribution; adding or removing routees only remaps keys that belonged to the changed node
+- The ring rebuilds automatically on `postStart`, `scaleUp`, `scaleDown`, and routee removal
+- Validation rejects the router at startup if no key extractor is provided
+
+**Example:**
+
+```go
+router, _ := system.SpawnRouter(ctx, "order-router", 5, &OrderWorker{},
+    actor.WithConsistentHashRouter(func(msg any) string {
+        switch m := msg.(type) {
+        case *OrderCommand:
+            return m.OrderID
+        case *PaymentEvent:
+            return m.CustomerID
+        default:
+            return "" // falls back to random
+        }
+    }),
+)
+```
+
+---
+
 ### Internal Extractions
 
-#### 34. `internal/commands` package
+#### 35. `internal/commands` package
 
 Command abstraction extracted from `pid.go` and `actor_system.go` to reduce coupling and improve testability of actor lifecycle machinery.
 
@@ -473,7 +518,7 @@ Command abstraction extracted from `pid.go` and `actor_system.go` to reduce coup
 
 ## Bug Fixes
 
-#### 35. `cleanupCluster` singleton kind removal
+#### 36. `cleanupCluster` singleton kind removal
 
 **Problem:** During shutdown, `cleanupCluster` used `pid.IsSingleton()` to decide whether to call `cluster.RemoveKind`. `pid.reset()` clears `singletonState` to `false` during actor shutdown, so by the time `cleanupCluster` ran, `IsSingleton()` was always false and `RemoveKind` was never called. Stale kind entries caused `ErrKindAlreadyExists` / `ErrSingletonAlreadyExists` for the new leader.
 
@@ -483,13 +528,13 @@ Command abstraction extracted from `pid.go` and `actor_system.go` to reduce coup
 
 ## Internal Improvements
 
-#### 36. `address.Address.String()` — eager caching
+#### 37. `address.Address.String()` — eager caching
 
 `cachedStr` is computed once in `New` / `NewWithParent` constructors instead of lazily on first `String()` call. Eliminates write-race window and makes `String()` a pure concurrent read.
 
 ---
 
-#### 37. `internal/xsync.List` — deduplication and low-GC redesign
+#### 38. `internal/xsync.List` — deduplication and low-GC redesign
 
 - Type parameter: `any` → `comparable` (enables deduplication)
 - `Append` / `AppendMany` no-op for items already present
@@ -500,19 +545,19 @@ Command abstraction extracted from `pid.go` and `actor_system.go` to reduce coup
 
 ---
 
-#### 38. Scheduler — unified local/remote delivery
+#### 39. Scheduler — unified local/remote delivery
 
 `makeJobFn` passes target PID directly to `PID.Tell`; no separate remote-PID branching. `Tell` handles routing internally. Scheduler holds explicit `actorSystem` reference for `NoSender()` (avoids `pid.ActorSystem()` returning nil for remote PIDs).
 
 ---
 
-#### 39. `toReceiveContext` — else-branch elimination
+#### 40. `toReceiveContext` — else-branch elimination
 
 Remote-message deserialization mutates `from` and `message` in place before a single unconditional `receiveContext.build` call.
 
 ---
 
-#### 40. `actor/actor_path.go` — low-GC path implementation
+#### 41. `actor/actor_path.go` — low-GC path implementation
 
 - **`HostPort()` allocation-free:** Pre-computed and cached in `cachedHostPort` at construction
 - **`Equals`:** Single `cachedStr == other.String()` comparison

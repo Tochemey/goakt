@@ -27,12 +27,16 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"reflect"
+	"slices"
+	"sort"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
 	"github.com/flowchartsman/retry"
 
 	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/hash"
 	"github.com/tochemey/goakt/v4/internal/ticker"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/supervisor"
@@ -44,6 +48,7 @@ const (
 	standardRouter routerKind = iota
 	scatterGatherFirstRouter
 	tailChoppingRouter
+	defaultVirtualNodes = 150
 )
 
 type routeeSupervisorDirective int
@@ -70,6 +75,12 @@ type router struct {
 	// these fields are only used for tail chopping routing strategy and scatter-gather
 	within   time.Duration
 	interval time.Duration
+
+	// consistent-hash routing fields
+	routingKeyExtractor MessageRoutingKeyExtractor
+	ring                *consistentHashRing
+	virtualNodes        int
+	hasher              hash.Hasher
 
 	kind routerKind
 	name string
@@ -136,6 +147,7 @@ func (x *router) postStart(ctx *ReceiveContext) {
 		x.logger.Debugf("router=%s spawning routees=%d", x.name, x.poolSize)
 	}
 	x.spawnRoutees(ctx, 0, x.poolSize)
+	x.rebuildHashRing()
 	ctx.Become(x.broadcast)
 }
 
@@ -179,6 +191,7 @@ func (x *router) scaleUp(ctx *ReceiveContext, delta int) {
 	}
 	x.poolSize = targetSize
 	x.spawnRoutees(ctx, currentSize, targetSize)
+	x.rebuildHashRing()
 }
 
 func (x *router) scaleDown(ctx *ReceiveContext, delta int) {
@@ -206,6 +219,7 @@ func (x *router) scaleDown(ctx *ReceiveContext, delta int) {
 		ctx.Stop(routee)
 		delete(x.routeesMap, routee.ID())
 	}
+	x.rebuildHashRing()
 }
 
 func (x *router) spawnRoutees(ctx *ReceiveContext, start, size int) {
@@ -291,6 +305,7 @@ func (x *router) handleStopRoutee(ctx *ReceiveContext) {
 	}
 	ctx.Stop(sender)
 	delete(x.routeesMap, sender.ID())
+	x.rebuildHashRing()
 }
 
 func (x *router) handleBroadcast(ctx *ReceiveContext) {
@@ -352,6 +367,8 @@ func (x *router) routeByStrategy(ctx *ReceiveContext, msg any, routees []*PID) {
 	case RandomRouting:
 		routee := routees[rand.IntN(len(routees))] //nolint:gosec
 		ctx.Tell(routee, msg)
+	case ConsistentHashRouting:
+		x.routeByConsistentHash(ctx, msg, routees)
 	default:
 		sender := ctx.Self()
 		sendCtx := ctx.withoutCancel()
@@ -366,6 +383,24 @@ func (x *router) routeByStrategy(ctx *ReceiveContext, msg any, routees []*PID) {
 			}()
 		}
 	}
+}
+
+func (x *router) routeByConsistentHash(ctx *ReceiveContext, msg any, routees []*PID) {
+	key := x.routingKeyExtractor(msg)
+	if key == "" {
+		routee := routees[rand.IntN(len(routees))] //nolint:gosec
+		ctx.Tell(routee, msg)
+		return
+	}
+
+	id := x.ring.lookup(key)
+	if routee, ok := x.routeesMap[id]; ok && routee.IsRunning() {
+		ctx.Tell(routee, msg)
+		return
+	}
+
+	routee := routees[rand.IntN(len(routees))] //nolint:gosec
+	ctx.Tell(routee, msg)
 }
 
 // scatterGatherFirst fans a single request out to every currently live routee and relays
@@ -550,6 +585,24 @@ func (x *router) tailChopping(ctx *ReceiveContext, msg any, routees []*PID) {
 	}
 }
 
+// rebuildHashRing populates the consistent hash ring from the current routee
+// set. It is a no-op when the router does not use ConsistentHashRouting.
+func (x *router) rebuildHashRing() {
+	if x.routingStrategy != ConsistentHashRouting {
+		return
+	}
+
+	if x.ring == nil {
+		x.ring = newConsistentHashRing(x.hasher, x.virtualNodes)
+	}
+
+	members := make([]string, 0, len(x.routeesMap))
+	for id := range x.routeesMap {
+		members = append(members, id)
+	}
+	x.ring.set(members)
+}
+
 // routeeName returns the routee name
 func routeeName(index int, routerName string) string {
 	return fmt.Sprintf("%s%s%d", routerName, routeeNamePrefix, index)
@@ -584,6 +637,10 @@ func (x *router) validate() error {
 		}
 	}
 
+	if x.routingStrategy == ConsistentHashRouting && x.routingKeyExtractor == nil {
+		return gerrors.ErrConsistentHashRouterMisconfigured
+	}
+
 	return nil
 }
 
@@ -597,4 +654,84 @@ func reshuffleRoutees(routees []*PID) []*PID {
 	})
 
 	return shuffled
+}
+
+// consistentHashRing implements a consistent hash ring with virtual nodes.
+//
+// Each member is placed at multiple points (virtual nodes) on a uint64 ring,
+// spreading load more evenly than a single point per member. Lookup is O(log N)
+// where N is the total number of virtual nodes.
+//
+// The ring is not safe for concurrent use; the router actor processes messages
+// sequentially, so no lock is required.
+type consistentHashRing struct {
+	hasher       hash.Hasher
+	virtualNodes int
+	keys         []uint64
+	ring         map[uint64]string
+}
+
+func newConsistentHashRing(hasher hash.Hasher, virtualNodes int) *consistentHashRing {
+	if hasher == nil {
+		hasher = hash.DefaultHasher()
+	}
+	if virtualNodes <= 0 {
+		virtualNodes = defaultVirtualNodes
+	}
+	return &consistentHashRing{
+		hasher:       hasher,
+		virtualNodes: virtualNodes,
+		ring:         make(map[uint64]string),
+	}
+}
+
+// set rebuilds the ring with the given set of member IDs, replacing all
+// previous members. Passing an empty slice clears the ring.
+func (r *consistentHashRing) set(members []string) {
+	r.ring = make(map[uint64]string, len(members)*r.virtualNodes)
+	r.keys = make([]uint64, 0, len(members)*r.virtualNodes)
+
+	for _, member := range members {
+		for i := range r.virtualNodes {
+			h := r.hashVNode(member, i)
+			r.ring[h] = member
+			r.keys = append(r.keys, h)
+		}
+	}
+
+	slices.Sort(r.keys)
+}
+
+// lookup returns the member responsible for the given key.
+// Returns an empty string when the ring is empty.
+func (r *consistentHashRing) lookup(key string) string {
+	if len(r.keys) == 0 {
+		return ""
+	}
+
+	h := r.hasher.HashCode(stringToBytes(key))
+
+	idx := sort.Search(len(r.keys), func(i int) bool {
+		return r.keys[i] >= h
+	})
+
+	if idx >= len(r.keys) {
+		idx = 0
+	}
+
+	return r.ring[r.keys[idx]]
+}
+
+func (r *consistentHashRing) len() int {
+	return len(r.keys)
+}
+
+func (r *consistentHashRing) hashVNode(member string, index int) uint64 {
+	vkey := fmt.Sprintf("%s#%d", member, index)
+	return r.hasher.HashCode(stringToBytes(vkey))
+}
+
+// stringToBytes converts a string to a byte slice without allocation.
+func stringToBytes(s string) []byte {
+	return unsafe.Slice(unsafe.StringData(s), len(s))
 }
