@@ -24,6 +24,7 @@ package actor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -32,6 +33,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
+	"google.golang.org/protobuf/proto"
 
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/address"
@@ -182,6 +184,90 @@ func TestExtractContextWithPropagator(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, got)
 		assert.Equal(t, "abc123", got.Value(traceKey("trace")))
+	})
+}
+
+// TestRemoteHandlersContextPropagation verifies that all remote handlers that support
+// context propagation correctly extract context metadata and return CODE_INVALID_ARGUMENT
+// when the propagator's Extract fails.
+func TestRemoteHandlersContextPropagation(t *testing.T) {
+	const host = "127.0.0.1"
+	const port = 9099
+	ctx := context.Background()
+
+	// Create context with metadata so Extract is invoked (propagator only called when metadata exists).
+	md := inet.NewMetadata()
+	md.Set("x-trace-id", "trace-123")
+	ctxWithMD := inet.ContextWithMetadata(ctx, md)
+
+	// Propagator that fails Extract.
+	failingProp := &MockFailingContextPropagator{err: errors.New("extract failed")}
+	cfg := remote.NewConfig(host, port, remote.WithContextPropagator(failingProp))
+
+	sys := newRemoteServerTestSystem(host, port)
+	sys.remoteConfig = cfg
+
+	type handlerCase struct {
+		name    string
+		handler func(context.Context, inet.Connection, proto.Message) (proto.Message, error)
+		req     proto.Message
+	}
+
+	// Only handlers that use ctx downstream have context propagation; others are omitted.
+	cases := []handlerCase{
+		{"RemoteLookup", sys.remoteLookupHandler, &internalpb.RemoteLookupRequest{Host: host, Port: int32(port), Name: "actor1"}},
+		{"RemoteReSpawn", sys.remoteReSpawnHandler, &internalpb.RemoteReSpawnRequest{Host: host, Port: int32(port), Name: "actor1"}},
+		{"RemoteStop", sys.remoteStopHandler, &internalpb.RemoteStopRequest{Host: host, Port: int32(port), Name: "actor1"}},
+		{"RemoteSpawn", sys.remoteSpawnHandler, &internalpb.RemoteSpawnRequest{Host: host, Port: int32(port), ActorName: "actor1", ActorType: "*actor.MockActor"}},
+		{"RemoteSpawnChild", sys.remoteSpawnChildHandler, &internalpb.RemoteSpawnChildRequest{Host: host, Port: int32(port), ActorName: "child", ActorType: "*actor.MockActor", Parent: "parent"}},
+		{"RemoteMetric", sys.remoteMetricHandler, &internalpb.RemoteMetricRequest{Host: host, Port: int32(port), Name: "actor1"}},
+		{"RemoteActivateGrain", sys.remoteActivateGrainHandler, &internalpb.RemoteActivateGrainRequest{Grain: &internalpb.Grain{Host: host, Port: int32(port), GrainId: &internalpb.GrainId{Value: "kind:name"}}}},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run("propagator_extract_error_returns_CODE_INVALID_ARGUMENT_"+c.name, func(t *testing.T) {
+			resp, err := c.handler(ctxWithMD, nullConn, c.req)
+			require.NoError(t, err)
+			requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
+		})
+	}
+}
+
+// TestRemoteHandlersContextPropagationSuccess verifies that handlers succeed when
+// a propagator is configured and metadata is present (extract succeeds).
+func TestRemoteHandlersContextPropagationSuccess(t *testing.T) {
+	const host = "127.0.0.1"
+	const port = 9098
+	ctx := context.Background()
+
+	propagator := &headerPropagator{headerKey: "x-trace-id", ctxKey: "trace"}
+
+	md := inet.NewMetadata()
+	md.Set("x-trace-id", "trace-456")
+	ctxWithMD := inet.ContextWithMetadata(ctx, md)
+
+	t.Run("RemoteLookup_with_propagator_and_metadata", func(t *testing.T) {
+		ports := dynaport.Get(1)
+		p := ports[0]
+		sys, err := NewActorSystem("testSys",
+			WithRemote(remote.NewConfig(host, p, remote.WithContextPropagator(propagator))),
+			WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		impl := sys.(*actorSystem)
+		require.NoError(t, impl.Start(ctx))
+		t.Cleanup(func() { _ = impl.Stop(ctx) })
+
+		_, err = impl.Spawn(ctx, "actor1", NewMockActor())
+		require.NoError(t, err)
+
+		req := &internalpb.RemoteLookupRequest{Host: host, Port: int32(p), Name: "actor1"}
+		resp, err := impl.remoteLookupHandler(ctxWithMD, nullConn, req)
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		lookupResp, ok := resp.(*internalpb.RemoteLookupResponse)
+		require.True(t, ok)
+		require.NotEmpty(t, lookupResp.GetAddress())
 	})
 }
 
