@@ -10,12 +10,13 @@ dashboards and exporters.
 
 ## Overview
 
-| Mechanism             | Purpose                                                         |
-|-----------------------|-----------------------------------------------------------------|
-| **System metrics**    | Node-level statistics via `ActorSystem.Metric(ctx)`             |
-| **Per-actor metrics** | Actor-level statistics via `pid.Metric(ctx)`                    |
-| **Event stream**      | System and cluster events (lifecycle, membership, dead letters) |
-| **OpenTelemetry**     | Metrics exported when `WithMetrics()` is used                   |
+| Mechanism             | Purpose                                                                                    |
+| --------------------- | ------------------------------------------------------------------------------------------ |
+| **System metrics**    | Node-level statistics via `ActorSystem.Metric(ctx)`                                        |
+| **Per-actor metrics** | Actor-level statistics via `pid.Metric(ctx)`                                               |
+| **Event stream**      | System and cluster events (lifecycle, membership, dead letters)                            |
+| **OpenTelemetry**     | Metrics exported when `WithMetrics()` is used                                              |
+| **Tracing**           | Zero-instrumentation actor traces via [goakt-ebpf](https://github.com/Tochemey/goakt-ebpf) |
 
 All metrics are local—they reflect the current node only. Metrics are point-in-time snapshots; values do not update
 after the struct is returned.
@@ -28,7 +29,7 @@ after the struct is returned.
 not started.
 
 | Field                | Type     | Description                                         |
-|----------------------|----------|-----------------------------------------------------|
+| -------------------- | -------- | --------------------------------------------------- |
 | `DeadlettersCount()` | `int64`  | Total messages dropped to dead letters on this node |
 | `ActorsCount()`      | `int64`  | Total number of live actors on this node            |
 | `Uptime()`           | `int64`  | Seconds since the actor system started              |
@@ -52,7 +53,7 @@ if m != nil {
 running. For remote actors, metrics are fetched via remoting; the same fields are available.
 
 | Field                       | Type            | Description                                                                  |
-|-----------------------------|-----------------|------------------------------------------------------------------------------|
+| --------------------------- | --------------- | ---------------------------------------------------------------------------- |
 | `ProcessedCount()`          | `uint64`        | Cumulative messages processed (excludes PostStart; excludes stashed/dropped) |
 | `ChidrenCount()`            | `uint64`        | Number of direct child actors                                                |
 | `RestartCount()`            | `uint64`        | Cumulative restarts (supervision)                                            |
@@ -117,7 +118,7 @@ not exported.
 ### System-level instruments
 
 | Instrument                      | Type                       | Description                     |
-|---------------------------------|----------------------------|---------------------------------|
+| ------------------------------- | -------------------------- | ------------------------------- |
 | `actorsystem.deadletters.count` | Int64ObservableCounter     | Total dead letters on this node |
 | `actorsystem.actors.count`      | Int64ObservableCounter     | Total live actors on this node  |
 | `actorsystem.uptime`            | Int64ObservableCounter (s) | Actor system uptime in seconds  |
@@ -128,7 +129,7 @@ not exported.
 Attributes: `actor.system`, `actor.name`, `actor.kind`, `actor.address`.
 
 | Instrument                     | Type                        | Description                         |
-|--------------------------------|-----------------------------|-------------------------------------|
+| ------------------------------ | --------------------------- | ----------------------------------- |
 | `actor.children.count`         | Int64ObservableCounter      | Total child actors                  |
 | `actor.stash.size`             | Int64ObservableCounter      | Messages stashed                    |
 | `actor.deadletters.count`      | Int64ObservableCounter      | Dead letters sent by this actor     |
@@ -155,3 +156,9 @@ otel.SetMeterProvider(provider)
 
 sys, _ := actor.NewActorSystem("app", actor.WithMetrics())
 ```
+
+---
+
+## Tracing
+
+For **zero-instrumentation distributed tracing** of actor message flows, use [goakt-ebpf](https://github.com/Tochemey/goakt-ebpf). It runs as a sidecar process, attaches to your GoAkt v4 application via eBPF uprobes, and exports spans to any OTLP-compatible backend (Jaeger, Grafana Tempo, Honeycomb, etc.)—no code changes or SDK dependency in your app.
