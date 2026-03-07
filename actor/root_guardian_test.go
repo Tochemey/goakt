@@ -24,6 +24,7 @@ package actor
 
 import (
 	"context"
+	"io"
 	"testing"
 	"time"
 
@@ -36,6 +37,17 @@ import (
 )
 
 func TestRootGuardian(t *testing.T) {
+	t.Run("With PostStart and Terminated using enabled logger", func(t *testing.T) {
+		ctx := context.Background()
+		logger := log.NewZap(log.DebugLevel, io.Discard)
+		actorSystem, err := NewActorSystem("testSys", WithLogger(logger))
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+		pause.For(500 * time.Millisecond)
+		require.True(t, actorSystem.Running())
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
+
 	t.Run("With PanicSignal message", func(t *testing.T) {
 		ctx := context.Background()
 		actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
@@ -58,6 +70,39 @@ func TestRootGuardian(t *testing.T) {
 		require.NoError(t, err)
 		// wait for a while to allow the message to be processed
 		pause.For(500 * time.Millisecond)
+		require.False(t, actorSystem.Running())
+	})
+	t.Run("With PanicSignal from non-system actor does not shutdown", func(t *testing.T) {
+		ctx := context.Background()
+		actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+		pause.For(500 * time.Millisecond)
+
+		actor, err := actorSystem.Spawn(ctx, "panic-sender", NewMockActor())
+		require.NoError(t, err)
+		message, _ := anypb.New(new(testpb.TestSend))
+		err = actor.Tell(ctx, actorSystem.getRootGuardian(), NewPanicSignal(message, "test", time.Now().UTC()))
+		require.NoError(t, err)
+		pause.For(500 * time.Millisecond)
+		require.True(t, actorSystem.Running())
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("With PanicSignal when system already stopping does not double-shutdown", func(t *testing.T) {
+		ctx := context.Background()
+		actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+		pause.For(500 * time.Millisecond)
+
+		userGuardian := actorSystem.getUserGuardian()
+		message, _ := anypb.New(new(testpb.TestSend))
+		go func() {
+			_ = actorSystem.Stop(ctx)
+		}()
+		pause.For(50 * time.Millisecond)
+		_ = userGuardian.Tell(ctx, actorSystem.getRootGuardian(), NewPanicSignal(message, "test", time.Now().UTC()))
+		pause.For(time.Second)
 		require.False(t, actorSystem.Running())
 	})
 }

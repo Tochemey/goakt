@@ -44,6 +44,13 @@ import (
 )
 
 func TestAsk(t *testing.T) {
+	t.Run("With nil PID", func(t *testing.T) {
+		ctx := context.Background()
+		reply, err := Ask(ctx, nil, new(testpb.TestReply), time.Second)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, errors.ErrDead)
+		assert.Nil(t, reply)
+	})
 	t.Run("With started actor", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
@@ -329,16 +336,18 @@ func TestAsk(t *testing.T) {
 
 		pause.For(time.Second)
 
-		bytea, err := proto.Marshal(new(testpb.TestSend))
+		// Use the actor system's serializer so Message deserializes successfully;
+		// we need to reach the address.Parse error path for invalid Sender.
+		as := sys.(*actorSystem)
+		serializer := as.remoting.Serializer(new(testpb.TestSend))
+		msgBytes, err := serializer.Serialize(new(testpb.TestSend))
 		require.NoError(t, err)
 
-		// create a message to send to the test actor
 		message := &internalpb.RemoteMessage{
 			Sender:   "invalid-address",
 			Receiver: actorRef.Path().String(),
-			Message:  bytea,
+			Message:  msgBytes,
 		}
-		// send the message to the actor
 		reply, err := Ask(ctx, actorRef, message, replyTimeout)
 		// perform some assertions
 		require.Error(t, err)
@@ -347,6 +356,76 @@ func TestAsk(t *testing.T) {
 
 		err = sys.Stop(ctx)
 		require.NoError(t, err)
+	})
+	t.Run("With valid RemoteMessage and empty sender", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		sys, err := NewActorSystem("test", WithLogger(logger))
+		require.NoError(t, err)
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+		pause.For(time.Second)
+
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+		pause.For(time.Second)
+
+		// Use the actor system's serializer to produce wire-format bytes
+		as := sys.(*actorSystem)
+		serializer := as.remoting.Serializer(new(testpb.TestReply))
+		msgBytes, err := serializer.Serialize(new(testpb.TestReply))
+		require.NoError(t, err)
+		message := &internalpb.RemoteMessage{
+			Sender:   "",
+			Receiver: actorRef.Path().String(),
+			Message:  msgBytes,
+		}
+		reply, err := Ask(ctx, actorRef, message, replyTimeout)
+		require.NoError(t, err)
+		require.NotNil(t, reply)
+		actual, ok := reply.(*testpb.Reply)
+		require.True(t, ok)
+		assert.True(t, proto.Equal(&testpb.Reply{Content: "received message"}, actual))
+
+		require.NoError(t, sys.Stop(ctx))
+	})
+	t.Run("With valid RemoteMessage and valid sender", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		sys, err := NewActorSystem("test", WithLogger(logger))
+		require.NoError(t, err)
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+		pause.For(time.Second)
+
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+		pause.For(time.Second)
+
+		as := sys.(*actorSystem)
+		serializer := as.remoting.Serializer(new(testpb.TestReply))
+		msgBytes, err := serializer.Serialize(new(testpb.TestReply))
+		require.NoError(t, err)
+		validSenderAddr := "goakt://sys@127.0.0.1:9000/remote-sender"
+		message := &internalpb.RemoteMessage{
+			Sender:   validSenderAddr,
+			Receiver: actorRef.Path().String(),
+			Message:  msgBytes,
+		}
+		reply, err := Ask(ctx, actorRef, message, replyTimeout)
+		require.NoError(t, err)
+		require.NotNil(t, reply)
+		actual, ok := reply.(*testpb.Reply)
+		require.True(t, ok)
+		assert.True(t, proto.Equal(&testpb.Reply{Content: "received message"}, actual))
+
+		require.NoError(t, sys.Stop(ctx))
 	})
 	t.Run("With Batch request happy path", func(t *testing.T) {
 		// create the context
@@ -508,6 +587,12 @@ func TestAsk(t *testing.T) {
 }
 
 func TestTell(t *testing.T) {
+	t.Run("With nil PID", func(t *testing.T) {
+		ctx := context.Background()
+		err := Tell(ctx, nil, new(testpb.TestSend))
+		require.Error(t, err)
+		assert.ErrorIs(t, err, errors.ErrDead)
+	})
 	t.Run("With started actor", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
@@ -665,6 +750,38 @@ func TestTell(t *testing.T) {
 
 		err = sys.Stop(ctx)
 		require.NoError(t, err)
+	},
+	)
+	t.Run("With valid RemoteMessage via Tell", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		sys, err := NewActorSystem("test", WithLogger(logger))
+		require.NoError(t, err)
+		err = sys.Start(ctx)
+		assert.NoError(t, err)
+		pause.For(time.Second)
+
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := sys.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+		pause.For(time.Second)
+
+		as := sys.(*actorSystem)
+		serializer := as.remoting.Serializer(new(testpb.TestSend))
+		msgBytes, err := serializer.Serialize(new(testpb.TestSend))
+		require.NoError(t, err)
+		message := &internalpb.RemoteMessage{
+			Sender:   "goakt://sys@127.0.0.1:9000/sender",
+			Receiver: actorRef.Path().String(),
+			Message:  msgBytes,
+		}
+		err = Tell(ctx, actorRef, message)
+		require.NoError(t, err)
+		pause.For(500 * time.Millisecond)
+
+		require.NoError(t, sys.Stop(ctx))
 	},
 	)
 	t.Run(

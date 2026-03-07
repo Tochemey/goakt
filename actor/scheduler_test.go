@@ -34,6 +34,7 @@ import (
 	"github.com/travisjeffery/go-dynaport"
 
 	"github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/log"
@@ -1281,15 +1282,59 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Stop(ctx)
 		assert.NoError(t, err)
 	})
-	// Skipped: newRemotePID(addr, nil) is not allowed; remote PIDs must have remoting configured.
-	t.Run("With ScheduleWithCron for remote actor when remoting not enabled", func(t *testing.T) {
-		t.Skip("newRemotePID requires non-nil remoting; this scenario is not reachable")
+	t.Run("With ScheduleOnce for remote PID when remoting not enabled", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		newActorSystem, err := NewActorSystem("test", WithLogger(logger))
+		require.NoError(t, err)
+		require.NoError(t, newActorSystem.Start(ctx))
+		pause.For(time.Second)
+
+		addr := address.New("remote-actor", "other", "127.0.0.1", 9999)
+		remotePID := &PID{address: addr, path: newPath(addr), remoting: nil}
+		remotePID.setState(remoteState, true)
+
+		message := new(testpb.TestSend)
+		err = newActorSystem.ScheduleOnce(ctx, message, remotePID, 100*time.Millisecond)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, errors.ErrRemotingDisabled)
+		require.NoError(t, newActorSystem.Stop(ctx))
 	})
-	t.Run("With Schedule for remote actor when remoting not enabled", func(t *testing.T) {
-		t.Skip("newRemotePID requires non-nil remoting; this scenario is not reachable")
+	t.Run("With Schedule for remote PID when remoting not enabled", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		newActorSystem, err := NewActorSystem("test", WithLogger(logger))
+		require.NoError(t, err)
+		require.NoError(t, newActorSystem.Start(ctx))
+		pause.For(time.Second)
+
+		addr := address.New("remote-actor", "other", "127.0.0.1", 9999)
+		remotePID := &PID{address: addr, path: newPath(addr), remoting: nil}
+		remotePID.setState(remoteState, true)
+
+		message := new(testpb.TestSend)
+		err = newActorSystem.Schedule(ctx, message, remotePID, time.Second)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, errors.ErrRemotingDisabled)
+		require.NoError(t, newActorSystem.Stop(ctx))
 	})
-	t.Run("With ScheduleOnce for remote actor when remoting not enabled", func(t *testing.T) {
-		t.Skip("newRemotePID requires non-nil remoting; this scenario is not reachable")
+	t.Run("With ScheduleWithCron for remote PID when remoting not enabled", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		newActorSystem, err := NewActorSystem("test", WithLogger(logger))
+		require.NoError(t, err)
+		require.NoError(t, newActorSystem.Start(ctx))
+		pause.For(time.Second)
+
+		addr := address.New("remote-actor", "other", "127.0.0.1", 9999)
+		remotePID := &PID{address: addr, path: newPath(addr), remoting: nil}
+		remotePID.setState(remoteState, true)
+
+		message := new(testpb.TestSend)
+		err = newActorSystem.ScheduleWithCron(ctx, message, remotePID, "* * * ? * *")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, errors.ErrRemotingDisabled)
+		require.NoError(t, newActorSystem.Stop(ctx))
 	})
 	t.Run("With Schedule for remote actor when cluster is enabled", func(t *testing.T) {
 		ctx := context.TODO()

@@ -23,6 +23,7 @@
 package actor
 
 import (
+	"bytes"
 	"context"
 	stdErrors "errors"
 	"testing"
@@ -283,4 +284,185 @@ func TestDeathWatch(t *testing.T) {
 		require.NoError(t, deathWatchActor.handleTerminated(receiveCtx))
 		require.NoError(t, singletonPID.Shutdown(ctx))
 	})
+
+	// Logging path tests: verify all log messages are emitted when logger is enabled.
+	t.Run("Logging PostStop logs stopped successfully", func(t *testing.T) {
+		ctx := context.Background()
+		var buf bytes.Buffer
+		logger := log.NewSlog(log.InfoLevel, &buf)
+		actorSys, err := NewActorSystem("testSys", WithLogger(logger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSys)
+
+		err = actorSys.Start(ctx)
+		require.NoError(t, err)
+		pause.For(500 * time.Millisecond)
+
+		buf.Reset()
+		require.NoError(t, actorSys.Stop(ctx))
+		pause.For(500 * time.Millisecond)
+
+		// Flush logger if it implements Flush
+		_ = logger.Flush()
+
+		logContent := buf.String()
+		require.Contains(t, logContent, "stopped successfully", "PostStop should log when deathWatch stops")
+		require.Contains(t, logContent, "GoAktDeathWatch", "PostStop should include deathWatch actor name")
+	})
+
+	t.Run("Logging handlePostStart logs started successfully", func(t *testing.T) {
+		ctx := context.Background()
+		var buf bytes.Buffer
+		logger := log.NewSlog(log.InfoLevel, &buf)
+		actorSys, err := NewActorSystem("testSys", WithLogger(logger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSys)
+
+		err = actorSys.Start(ctx)
+		require.NoError(t, err)
+		pause.For(500 * time.Millisecond)
+
+		_ = logger.Flush()
+		logContent := buf.String()
+		require.Contains(t, logContent, "started successfully", "handlePostStart should log when deathWatch starts")
+		require.Contains(t, logContent, "GoAktDeathWatch", "handlePostStart should include deathWatch actor name")
+
+		require.NoError(t, actorSys.Stop(ctx))
+	})
+
+	t.Run("Logging handleTerminated logs when PID not found", func(t *testing.T) {
+		ctx := context.Background()
+		var buf bytes.Buffer
+		logger := log.NewSlog(log.InfoLevel, &buf)
+		actorSys, err := NewActorSystem("testSys", WithLogger(logger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSys)
+
+		err = actorSys.Start(ctx)
+		require.NoError(t, err)
+		pause.For(500 * time.Millisecond)
+
+		addr := address.New("nonexistent", actorSys.Name(), actorSys.Host(), actorSys.Port())
+		deathWatchPID := actorSys.getDeathWatch()
+		require.NotNil(t, deathWatchPID)
+		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
+
+		terminated := NewTerminated(addr.String())
+		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, terminated)
+
+		buf.Reset()
+		err = deathWatchActor.handleTerminated(receiveCtx)
+		require.NoError(t, err)
+
+		_ = logger.Flush()
+		logContent := buf.String()
+		require.Contains(t, logContent, "removing dead actor resource from system", "should log when starting to process Terminated")
+		require.Contains(t, logContent, "unable to locate dead actor resource", "should log when PID not found in tree")
+		require.Contains(t, logContent, "maybe already freed", "should log hint when PID not found")
+
+		require.NoError(t, actorSys.Stop(ctx))
+	})
+
+	t.Run("Logging handleTerminated logs when cluster removal fails", func(t *testing.T) {
+		ctx := context.Background()
+		var buf bytes.Buffer
+		logger := log.NewSlog(log.InfoLevel, &buf)
+		actorSys, err := NewActorSystem("testSys", WithLogger(logger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSys)
+
+		clmock := mockscluster.NewCluster(t)
+		sys := actorSys.(*actorSystem)
+		sys.locker.Lock()
+		sys.cluster = clmock
+		sys.locker.Unlock()
+
+		err = actorSys.Start(ctx)
+		require.NoError(t, err)
+		pause.For(500 * time.Millisecond)
+		sys.clusterEnabled.Store(true)
+
+		t.Cleanup(func() {
+			sys.clusterEnabled.Store(false)
+			sys.locker.Lock()
+			sys.cluster = nil
+			sys.locker.Unlock()
+			_ = actorSys.Stop(ctx)
+		})
+
+		const actorName = "actor-to-free"
+		clmock.EXPECT().ActorExists(mock.Anything, actorName).Return(false, nil)
+
+		cid, err := actorSys.Spawn(ctx, actorName, &noLogActor{})
+		require.NoError(t, err)
+		require.NotNil(t, cid)
+		pause.For(500 * time.Millisecond)
+
+		clusterErr := stdErrors.New("cluster failure")
+		clmock.EXPECT().RemoveActor(mock.Anything, actorName).Return(clusterErr)
+
+		deathWatchPID := actorSys.getDeathWatch()
+		require.NotNil(t, deathWatchPID)
+		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
+		terminated := NewTerminated(cid.ID())
+		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, terminated)
+
+		buf.Reset()
+		err = deathWatchActor.handleTerminated(receiveCtx)
+		require.Error(t, err)
+		require.NotNil(t, err)
+
+		_ = logger.Flush()
+		logContent := buf.String()
+		require.Contains(t, logContent, "removing dead actor resource from system", "should log when starting to process Terminated")
+		require.Contains(t, logContent, "failed to remove dead actor from cluster", "should log when cluster removal fails")
+		require.Contains(t, logContent, "cluster failure", "should include error message in log")
+
+		require.NoError(t, cid.Shutdown(ctx))
+	})
+
+	t.Run("Logging handleTerminated logs when actor successfully removed", func(t *testing.T) {
+		ctx := context.Background()
+		var buf bytes.Buffer
+		logger := log.NewSlog(log.InfoLevel, &buf)
+		actorSys, err := NewActorSystem("testSys", WithLogger(logger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSys)
+
+		err = actorSys.Start(ctx)
+		require.NoError(t, err)
+		pause.For(500 * time.Millisecond)
+
+		const actorName = "actor-to-remove"
+		cid, err := actorSys.Spawn(ctx, actorName, &noLogActor{})
+		require.NoError(t, err)
+		require.NotNil(t, cid)
+		pause.For(500 * time.Millisecond)
+
+		deathWatchPID := actorSys.getDeathWatch()
+		require.NotNil(t, deathWatchPID)
+		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
+		terminated := NewTerminated(cid.ID())
+		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, terminated)
+
+		buf.Reset()
+		err = deathWatchActor.handleTerminated(receiveCtx)
+		require.NoError(t, err)
+
+		_ = logger.Flush()
+		logContent := buf.String()
+		require.Contains(t, logContent, "removing dead actor resource from system", "should log when starting to process Terminated")
+		require.Contains(t, logContent, "removed dead actor resource from system", "should log when actor successfully removed")
+
+		require.NoError(t, cid.Shutdown(ctx))
+		require.NoError(t, actorSys.Stop(ctx))
+	})
 }
+
+// noLogActor is a minimal actor that never logs. Used in tests that capture log
+// output to avoid data races from concurrent writes to a shared buffer.
+type noLogActor struct{}
+
+func (n *noLogActor) PreStart(*Context) error { return nil }
+func (n *noLogActor) Receive(*ReceiveContext) {}
+func (n *noLogActor) PostStop(*Context) error { return nil }

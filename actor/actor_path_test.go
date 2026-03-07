@@ -43,6 +43,7 @@ func TestNewPath(t *testing.T) {
 		require.NotNil(t, p)
 
 		assert.Equal(t, "127.0.0.1", p.Host())
+		assert.Equal(t, "127.0.0.1:9000", p.HostPort())
 		assert.Equal(t, 9000, p.Port())
 		assert.Equal(t, "actor1", p.Name())
 		assert.Equal(t, "system1", p.System())
@@ -60,6 +61,7 @@ func TestNewPath(t *testing.T) {
 		assert.Equal(t, "child", p.Name())
 		assert.Equal(t, "system1", p.System())
 		assert.Equal(t, "127.0.0.1", p.Host())
+		assert.Equal(t, "127.0.0.1:9000", p.HostPort())
 		assert.Equal(t, 9000, p.Port())
 		assert.Equal(t, childAddr.String(), p.String())
 
@@ -68,6 +70,7 @@ func TestNewPath(t *testing.T) {
 		assert.Equal(t, "parent", parent.Name())
 		assert.Equal(t, "system1", parent.System())
 		assert.Equal(t, "127.0.0.1", parent.Host())
+		assert.Equal(t, "127.0.0.1:9000", parent.HostPort())
 		assert.Equal(t, 9000, parent.Port())
 		assert.Nil(t, parent.Parent())
 	})
@@ -131,6 +134,7 @@ func TestPath_Equals(t *testing.T) {
 func TestPath_NilReceiver(t *testing.T) {
 	var p *path
 	assert.Equal(t, "", p.Host())
+	assert.Equal(t, "", p.HostPort())
 	assert.Equal(t, 0, p.Port())
 	assert.Equal(t, "", p.Name())
 	assert.Nil(t, p.Parent())
@@ -138,3 +142,53 @@ func TestPath_NilReceiver(t *testing.T) {
 	assert.Equal(t, "", p.System())
 	assert.False(t, p.Equals(newPath(address.New("a", "s", "h", 0))))
 }
+
+func TestPathString(t *testing.T) {
+	t.Run("nil path returns empty string", func(t *testing.T) {
+		assert.Equal(t, "", pathString(nil))
+	})
+
+	t.Run("non-nil path returns String", func(t *testing.T) {
+		addr := address.New("actor1", "system1", "127.0.0.1", 9000)
+		p := newPath(addr)
+		require.NotNil(t, p)
+		assert.Equal(t, addr.String(), pathString(p))
+	})
+}
+
+func TestPathToAddress(t *testing.T) {
+	t.Run("nil path returns NoSender", func(t *testing.T) {
+		addr := pathToAddress(nil)
+		require.NotNil(t, addr)
+		assert.True(t, addr.Equals(address.NoSender()))
+	})
+
+	t.Run("valid path returns parsed address", func(t *testing.T) {
+		orig := address.New("actor1", "system1", "127.0.0.1", 9000)
+		p := newPath(orig)
+		require.NotNil(t, p)
+		addr := pathToAddress(p)
+		require.NotNil(t, addr)
+		assert.True(t, addr.Equals(orig))
+	})
+
+	t.Run("invalid path string returns NoSender", func(t *testing.T) {
+		// mockPath returns a string that address.Parse will reject
+		invalidPath := &mockPathForTest{s: "invalid-address"}
+		addr := pathToAddress(invalidPath)
+		require.NotNil(t, addr)
+		assert.True(t, addr.Equals(address.NoSender()))
+	})
+}
+
+// mockPathForTest implements Path for testing pathToAddress parse-failure path.
+type mockPathForTest struct{ s string }
+
+func (m *mockPathForTest) Host() string           { return "" }
+func (m *mockPathForTest) HostPort() string       { return "" }
+func (m *mockPathForTest) Port() int              { return 0 }
+func (m *mockPathForTest) Name() string           { return "" }
+func (m *mockPathForTest) Parent() Path           { return nil }
+func (m *mockPathForTest) String() string         { return m.s }
+func (m *mockPathForTest) System() string         { return "" }
+func (m *mockPathForTest) Equals(other Path) bool { return false }

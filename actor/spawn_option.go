@@ -229,24 +229,6 @@ func WithSupervisor(supervisor *supervisor.Supervisor) SpawnOption {
 	})
 }
 
-// WithPassivateAfter returns a SpawnOption that sets a custom duration after which an idle actor
-// will be passivated. Passivation allows the actor system to free up resources by stopping actors
-// that have been inactive for the specified duration. If the actor receives a message before this timeout,
-// the passivation timer is reset.
-//
-// Deprecated: Use WithPassivationStrategy with TimeBasedStrategy instead.
-//
-// Parameters:
-//   - after: Duration of inactivity before passivation.
-//
-// Returns:
-//   - SpawnOption that sets the passivation timeout.
-func WithPassivateAfter(after time.Duration) SpawnOption {
-	return spawnOption(func(config *spawnConfig) {
-		config.passivationStrategy = passivation.NewTimeBasedStrategy(after)
-	})
-}
-
 // WithLongLived returns a SpawnOption that ensures the given actor, once created, will persist
 // for the entire lifespan of the running actor system. Unlike short-lived actors that may be restarted
 // or garbage-collected, a long-lived actor remains active until the actor system itself shuts down.
