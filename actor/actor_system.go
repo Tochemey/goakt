@@ -738,7 +738,6 @@ type ActorSystem interface {
 	decreaseActorsCounter()
 	increaseActorsCounter()
 	passivationManager() *passivationManager
-	removeNodeLeft(address string)
 	getClusterStore() cluster.Store
 	getDataCenterController() *datacentercontroller.Controller
 	getDataCenterConfig() *datacenter.Config
@@ -3362,13 +3361,6 @@ func (x *actorSystem) passivationManager() *passivationManager {
 	passivator := x.passivator
 	x.locker.RUnlock()
 	return passivator
-}
-
-// removeNodeLeft removes the given left node from the actor system
-func (x *actorSystem) removeNodeLeft(address string) {
-	x.locker.RLock()
-	x.rebalancedNodes.Remove(address)
-	x.locker.RUnlock()
 }
 
 func (x *actorSystem) registerMetrics() error {

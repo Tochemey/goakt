@@ -109,4 +109,14 @@ func TestIdentity(t *testing.T) {
 		wireID := toWireGrainID(identity)
 		require.Nil(t, wireID)
 	})
+	t.Run("With valid toWireGrainID", func(t *testing.T) {
+		grain := NewMockGrain()
+		name := "testGrain"
+		identity := newGrainIdentity(grain, name)
+		wireID := toWireGrainID(identity)
+		require.NotNil(t, wireID)
+		require.Equal(t, identity.Kind(), wireID.Kind)
+		require.Equal(t, identity.Name(), wireID.Name)
+		require.Equal(t, identity.String(), wireID.Value)
+	})
 }

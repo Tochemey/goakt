@@ -140,13 +140,6 @@ func TestSpawnConfig(t *testing.T) {
 		err := config.Validate()
 		require.Error(t, err)
 	})
-	t.Run("spawn option with passivation after", func(t *testing.T) {
-		config := &spawnConfig{}
-		second := time.Second
-		option := WithPassivateAfter(second)
-		option.Apply(config)
-		require.IsType(t, new(passivation.TimeBasedStrategy), config.passivationStrategy)
-	})
 	t.Run("spawn option with long-lived", func(t *testing.T) {
 		config := &spawnConfig{}
 		option := WithLongLived()

@@ -24,6 +24,7 @@ package actor
 
 import (
 	"context"
+	"io"
 	"testing"
 	"time"
 
@@ -35,6 +36,17 @@ import (
 )
 
 func TestUserGuardian(t *testing.T) {
+	t.Run("With PostStart and Terminated using enabled logger", func(t *testing.T) {
+		ctx := context.Background()
+		logger := log.NewZap(log.DebugLevel, io.Discard)
+		actorSystem, err := NewActorSystem("testSys", WithLogger(logger))
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+		pause.For(500 * time.Millisecond)
+		require.True(t, actorSystem.Running())
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
+
 	t.Run("With unhandled message", func(t *testing.T) {
 		ctx := context.Background()
 		actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))

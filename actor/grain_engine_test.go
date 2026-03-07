@@ -25,6 +25,8 @@ package actor
 import (
 	"context"
 	"errors"
+	"net"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -34,11 +36,14 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/travisjeffery/go-dynaport"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/tochemey/goakt/v4/datacenter"
 	"github.com/tochemey/goakt/v4/discovery"
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
+	internalnet "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/log"
@@ -1001,6 +1006,482 @@ func TestSendToGrainOwner_ErrorsWhenOwnerMissing(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorContains(t, err, "grain owner is unknown")
 	require.Nil(t, resp)
+}
+
+func TestTellGrain(t *testing.T) {
+	t.Run("local mode happy path", func(t *testing.T) {
+		ctx := context.Background()
+		sys, err := NewActorSystem("tell-grain-local", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+		require.NoError(t, sys.RegisterGrainKind(ctx, &MockGrain{}))
+		identity := newGrainIdentity(NewMockGrain(), "tell-local-grain")
+
+		err = sys.TellGrain(ctx, identity, &testpb.TestSend{})
+		require.NoError(t, err)
+		pause.For(200 * time.Millisecond)
+	})
+
+	t.Run("returns ErrActorSystemNotStarted when not started", func(t *testing.T) {
+		ctx := context.Background()
+		sys, err := NewActorSystem("tell-grain-not-started", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		identity := newGrainIdentity(NewMockGrain(), "grain")
+
+		err = sys.TellGrain(ctx, identity, &testpb.TestSend{})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
+	})
+
+	t.Run("returns ErrInvalidGrainIdentity when identity invalid", func(t *testing.T) {
+		ctx := context.Background()
+		sys, err := NewActorSystem("tell-grain-invalid", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+		invalidID := &GrainIdentity{kind: "", name: ""}
+		err = sys.TellGrain(ctx, invalidID, &testpb.TestSend{})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, gerrors.ErrInvalidGrainIdentity)
+	})
+
+	t.Run("cluster mode with GetGrain success", func(t *testing.T) {
+		ctx := context.Background()
+		cl := mockcluster.NewCluster(t)
+		rem := mockremote.NewClient(t)
+		node := &discovery.Node{Host: "127.0.0.1", PeersPort: 9015, RemotingPort: 9115}
+		sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+		sys.registry.Register(NewMockGrain())
+
+		identity := newGrainIdentity(NewMockGrain(), "tell-cluster-grain")
+		owner := &internalpb.Grain{
+			GrainId: &internalpb.GrainId{Value: identity.String(), Kind: identity.Kind()},
+			Host:    "192.0.2.1",
+			Port:    16000,
+		}
+		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil).Once()
+		rem.EXPECT().Serializer(mock.Anything).Return(remote.NewProtoSerializer()).Maybe()
+		netClient := internalnet.NewClient("127.0.0.1:1", internalnet.WithDialTimeout(50*time.Millisecond))
+		rem.EXPECT().NetClient(owner.GetHost(), int(owner.GetPort())).Return(netClient).Once()
+
+		err := sys.TellGrain(ctx, identity, &testpb.TestSend{})
+		require.Error(t, err)
+	})
+}
+
+func TestAskGrain(t *testing.T) {
+	t.Run("returns ErrActorSystemNotStarted when not started", func(t *testing.T) {
+		ctx := context.Background()
+		sys, err := NewActorSystem("ask-grain-not-started", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		identity := newGrainIdentity(NewMockGrain(), "grain")
+
+		resp, err := sys.AskGrain(ctx, identity, &testpb.TestReply{}, time.Second)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
+		assert.Nil(t, resp)
+	})
+
+	t.Run("returns ErrInvalidGrainIdentity when identity invalid", func(t *testing.T) {
+		ctx := context.Background()
+		sys, err := NewActorSystem("ask-grain-invalid", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+		invalidID := &GrainIdentity{kind: "", name: ""}
+		resp, err := sys.AskGrain(ctx, invalidID, &testpb.TestReply{}, time.Second)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, gerrors.ErrInvalidGrainIdentity)
+		assert.Nil(t, resp)
+	})
+
+	t.Run("local mode happy path", func(t *testing.T) {
+		ctx := context.Background()
+		sys, err := NewActorSystem("ask-grain-local", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+		require.NoError(t, sys.RegisterGrainKind(ctx, &MockGrain{}))
+		identity := newGrainIdentity(NewMockGrain(), "ask-local-grain")
+
+		resp, err := sys.AskGrain(ctx, identity, &testpb.TestReply{}, time.Second)
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+	})
+
+	t.Run("cluster mode with GetGrain success", func(t *testing.T) {
+		ctx := context.Background()
+		cl := mockcluster.NewCluster(t)
+		rem := mockremote.NewClient(t)
+		node := &discovery.Node{Host: "127.0.0.1", PeersPort: 9016, RemotingPort: 9116}
+		sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+		sys.registry.Register(NewMockGrain())
+
+		identity := newGrainIdentity(NewMockGrain(), "ask-cluster-grain")
+		owner := &internalpb.Grain{
+			GrainId: &internalpb.GrainId{Value: identity.String(), Kind: identity.Kind()},
+			Host:    "192.0.2.1",
+			Port:    16000,
+		}
+		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil).Once()
+		rem.EXPECT().Serializer(mock.Anything).Return(remote.NewProtoSerializer()).Maybe()
+		netClient := internalnet.NewClient("127.0.0.1:1", internalnet.WithDialTimeout(50*time.Millisecond))
+		rem.EXPECT().NetClient(owner.GetHost(), int(owner.GetPort())).Return(netClient).Once()
+
+		resp, err := sys.AskGrain(ctx, identity, &testpb.TestReply{}, time.Second)
+		require.Error(t, err)
+		require.Nil(t, resp)
+	})
+}
+
+func TestSelectActivationPeer_LeastLoadActivation(t *testing.T) {
+	ctx := t.Context()
+	cl := mockcluster.NewCluster(t)
+	rem := mockremote.NewClient(t)
+	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 14000, RemotingPort: 8080}
+	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+
+	peer1 := &cluster.Peer{Host: "192.0.2.1", PeersPort: 15000, RemotingPort: 16000}
+	peer2 := &cluster.Peer{Host: "192.0.2.2", PeersPort: 15001, RemotingPort: 16001}
+
+	cl.EXPECT().Members(ctx).Return([]*cluster.Peer{peer1, peer2}, nil)
+	netClient := internalnet.NewClient("127.0.0.1:1", internalnet.WithDialTimeout(50*time.Millisecond))
+	rem.EXPECT().NetClient("192.0.2.1", 16000).Return(netClient).Once()
+	rem.EXPECT().NetClient("192.0.2.2", 16001).Return(netClient).Once()
+
+	config := newGrainConfig(WithActivationStrategy(LeastLoadActivation))
+	peer, err := sys.findActivationPeer(ctx, config)
+	require.Error(t, err)
+	require.Nil(t, peer)
+	require.ErrorContains(t, err, "failed to fetch node metric")
+}
+
+func TestSelectActivationPeer_LeastLoadActivation_Success(t *testing.T) {
+	ctx := t.Context()
+	handler := func(_ context.Context, _ internalnet.Connection, req proto.Message) (proto.Message, error) {
+		return &internalpb.GetNodeMetricResponse{NodeAddress: "127.0.0.1:16000", Load: 5}, nil
+	}
+	ps, err := internalnet.NewProtoServer("127.0.0.1:0", internalnet.WithProtoHandler("internalpb.GetNodeMetricRequest", handler))
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+	done := make(chan error, 1)
+	go func() { done <- ps.Serve() }()
+	pause.For(100 * time.Millisecond)
+	t.Cleanup(func() { _ = ps.Shutdown(time.Second); <-done })
+
+	addr := ps.ListenAddr().String()
+	host, portStr, err := net.SplitHostPort(addr)
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	cl := mockcluster.NewCluster(t)
+	rem := mockremote.NewClient(t)
+	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 14003, RemotingPort: 8083}
+	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+
+	peer1 := &cluster.Peer{Host: host, PeersPort: port, RemotingPort: port}
+	netClient := internalnet.NewClient(addr)
+	rem.EXPECT().NetClient(peer1.Host, peer1.RemotingPort).Return(netClient).Once()
+
+	peer, err := sys.leastLoadedPeer(ctx, []*cluster.Peer{peer1})
+	require.NoError(t, err)
+	require.NotNil(t, peer)
+	require.Equal(t, host, peer.Host)
+	require.Equal(t, port, peer.RemotingPort)
+}
+
+func TestSelectActivationPeer_RandomActivation(t *testing.T) {
+	ctx := t.Context()
+	cl := mockcluster.NewCluster(t)
+	rem := mockremote.NewClient(t)
+	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 14000, RemotingPort: 8080}
+	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+
+	peer1 := &cluster.Peer{Host: "192.0.2.1", PeersPort: 15000, RemotingPort: 16000}
+	peer2 := &cluster.Peer{Host: "192.0.2.2", PeersPort: 15001, RemotingPort: 16001}
+
+	cl.EXPECT().Members(ctx).Return([]*cluster.Peer{peer1, peer2}, nil)
+
+	config := newGrainConfig(WithActivationStrategy(RandomActivation))
+	peer, err := sys.findActivationPeer(ctx, config)
+	require.NoError(t, err)
+	require.NotNil(t, peer)
+	require.Contains(t, []string{"192.0.2.1", "192.0.2.2"}, peer.Host)
+}
+
+func TestSelectActivationPeer_DefaultStrategy(t *testing.T) {
+	ctx := t.Context()
+	cl := mockcluster.NewCluster(t)
+	rem := mockremote.NewClient(t)
+	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 14000, RemotingPort: 8080}
+	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+
+	peer1 := &cluster.Peer{Host: "192.0.2.1", PeersPort: 15000, RemotingPort: 16000}
+	// selectActivationPeer is called directly with peers - no Members call
+	config := newGrainConfig()
+	peer, err := sys.selectActivationPeer(ctx, []*cluster.Peer{peer1}, config.activationStrategy)
+	require.NoError(t, err)
+	require.Nil(t, peer)
+}
+
+func TestSendToGrainOwner_TellMode(t *testing.T) {
+	ctx := t.Context()
+	cl := mockcluster.NewCluster(t)
+	rem := mockremote.NewClient(t)
+	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 9013, RemotingPort: 9113}
+	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+
+	owner := &internalpb.Grain{
+		GrainId: &internalpb.GrainId{Value: "grain|test", Kind: "TestGrain"},
+		Host:    "192.0.2.1",
+		Port:    16000,
+	}
+
+	rem.EXPECT().Serializer(mock.Anything).Return(remote.NewProtoSerializer()).Once()
+	netClient := internalnet.NewClient("127.0.0.1:1", internalnet.WithDialTimeout(50*time.Millisecond))
+	rem.EXPECT().NetClient(owner.GetHost(), int(owner.GetPort())).Return(netClient).Once()
+
+	resp, err := sys.sendToGrainOwner(ctx, owner, &testpb.TestSend{}, time.Second, false)
+	require.Error(t, err)
+	require.Nil(t, resp)
+}
+
+func TestRemoteTellGrain_FallbackPaths(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("GetGrain returns non-ErrGrainNotFound error", func(t *testing.T) {
+		cl := mockcluster.NewCluster(t)
+		rem := mockremote.NewClient(t)
+		node := &discovery.Node{Host: "127.0.0.1", PeersPort: 9017, RemotingPort: 9117}
+		sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+		sys.registry.Register(NewMockGrain())
+
+		identity := newGrainIdentity(NewMockGrain(), "tell-err-grain")
+		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(nil, errors.New("cluster error")).Once()
+
+		err := sys.remoteTellGrain(ctx, identity, &testpb.TestSend{}, time.Second)
+		require.Error(t, err)
+		require.ErrorContains(t, err, "cluster error")
+	})
+
+	t.Run("GetGrain ErrGrainNotFound then tellGrainAcrossDataCenters succeeds", func(t *testing.T) {
+		rem := mockremote.NewClient(t)
+		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+			return []datacenter.DataCenterRecord{{
+				ID: "dc-1", State: datacenter.DataCenterActive,
+				Endpoints: []string{"127.0.0.1:9000"},
+			}}, nil
+		}, rem)
+		sys.clusterEnabled.Store(true)
+		cl := mockcluster.NewCluster(t)
+		cl.EXPECT().GetGrain(mock.Anything, mock.Anything).Return(nil, cluster.ErrGrainNotFound).Once()
+		sys.cluster = cl
+
+		identity := newGrainIdentity(NewMockGrain(), "tell-dc-grain")
+		rem.EXPECT().RemoteTellGrain(mock.Anything, "127.0.0.1", 9000, mock.Anything, mock.Anything).Return(nil).Once()
+
+		err := sys.remoteTellGrain(ctx, identity, &testpb.TestSend{}, time.Second)
+		require.NoError(t, err)
+	})
+}
+
+func TestRemoteAskGrain_FallbackPaths(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("GetGrain returns non-ErrGrainNotFound error", func(t *testing.T) {
+		cl := mockcluster.NewCluster(t)
+		rem := mockremote.NewClient(t)
+		node := &discovery.Node{Host: "127.0.0.1", PeersPort: 9018, RemotingPort: 9118}
+		sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+		sys.registry.Register(NewMockGrain())
+
+		identity := newGrainIdentity(NewMockGrain(), "ask-err-grain")
+		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(nil, errors.New("cluster error")).Once()
+
+		resp, err := sys.remoteAskGrain(ctx, identity, &testpb.TestReply{}, time.Second)
+		require.Error(t, err)
+		require.Nil(t, resp)
+		require.ErrorContains(t, err, "cluster error")
+	})
+
+	t.Run("GetGrain ErrGrainNotFound then askGrainAcrossDataCenters succeeds", func(t *testing.T) {
+		rem := mockremote.NewClient(t)
+		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+			return []datacenter.DataCenterRecord{{
+				ID: "dc-1", State: datacenter.DataCenterActive,
+				Endpoints: []string{"127.0.0.1:9000"},
+			}}, nil
+		}, rem)
+		sys.clusterEnabled.Store(true)
+		cl := mockcluster.NewCluster(t)
+		cl.EXPECT().GetGrain(mock.Anything, mock.Anything).Return(nil, cluster.ErrGrainNotFound).Once()
+		sys.cluster = cl
+
+		identity := newGrainIdentity(NewMockGrain(), "ask-dc-grain")
+		rem.EXPECT().RemoteAskGrain(mock.Anything, "127.0.0.1", 9000, mock.Anything, mock.Anything, time.Second).
+			Return(&testpb.TestReply{}, nil).Once()
+
+		resp, err := sys.remoteAskGrain(ctx, identity, &testpb.TestReply{}, time.Second)
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+	})
+}
+
+func TestSendToGrainOwner_AskMode(t *testing.T) {
+	ctx := t.Context()
+	cl := mockcluster.NewCluster(t)
+	rem := mockremote.NewClient(t)
+	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 9014, RemotingPort: 9114}
+	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+
+	owner := &internalpb.Grain{
+		GrainId: &internalpb.GrainId{Value: "grain|test", Kind: "TestGrain"},
+		Host:    "192.0.2.1",
+		Port:    16000,
+	}
+
+	rem.EXPECT().Serializer(mock.Anything).Return(remote.NewProtoSerializer()).Maybe()
+	netClient := internalnet.NewClient("127.0.0.1:1", internalnet.WithDialTimeout(50*time.Millisecond))
+	rem.EXPECT().NetClient(owner.GetHost(), int(owner.GetPort())).Return(netClient).Once()
+
+	resp, err := sys.sendToGrainOwner(ctx, owner, &testpb.TestReply{}, time.Second, true)
+	require.Error(t, err)
+	require.Nil(t, resp)
+}
+
+func TestSetupGrainActivationBarrier(t *testing.T) {
+	ctx := t.Context()
+	cl := mockcluster.NewCluster(t)
+	rem := mockremote.NewClient(t)
+	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 14001, RemotingPort: 8081}
+
+	t.Run("no-op when cluster disabled", func(t *testing.T) {
+		sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+		sys.clusterEnabled.Store(false)
+		sys.setupGrainActivationBarrier(ctx)
+		require.Nil(t, sys.grainBarrier)
+	})
+
+	t.Run("no-op when clusterConfig nil", func(t *testing.T) {
+		sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+		sys.clusterConfig = nil
+		sys.setupGrainActivationBarrier(ctx)
+		require.Nil(t, sys.grainBarrier)
+	})
+
+	t.Run("no-op when barrier disabled", func(t *testing.T) {
+		sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+		sys.clusterConfig = NewClusterConfig()
+		sys.setupGrainActivationBarrier(ctx)
+		require.Nil(t, sys.grainBarrier)
+	})
+
+	t.Run("opens immediately when minPeers <= 1", func(t *testing.T) {
+		sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+		sys.clusterConfig = NewClusterConfig().
+			WithMinimumPeersQuorum(1).
+			WithGrainActivationBarrier(5 * time.Second)
+		sys.setupGrainActivationBarrier(ctx)
+		require.NotNil(t, sys.grainBarrier)
+		err := sys.waitForGrainActivationBarrier(ctx)
+		require.NoError(t, err)
+	})
+
+	t.Run("calls tryOpenGrainActivationBarrier when minPeers > 1", func(t *testing.T) {
+		sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+		sys.clusterConfig = NewClusterConfig().
+			WithMinimumPeersQuorum(2).
+			WithGrainActivationBarrier(5 * time.Second)
+		peer1 := &cluster.Peer{Host: "192.0.2.1", PeersPort: 15000, RemotingPort: 16000}
+		peer2 := &cluster.Peer{Host: "192.0.2.2", PeersPort: 15001, RemotingPort: 16001}
+		cl.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{peer1, peer2}, nil).Once()
+		sys.setupGrainActivationBarrier(ctx)
+		require.NotNil(t, sys.grainBarrier)
+		err := sys.waitForGrainActivationBarrier(ctx)
+		require.NoError(t, err)
+	})
+}
+
+func TestTryOpenGrainActivationBarrier(t *testing.T) {
+	ctx := t.Context()
+	cl := mockcluster.NewCluster(t)
+	rem := mockremote.NewClient(t)
+	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 14002, RemotingPort: 8082}
+
+	t.Run("no-op when barrier nil", func(t *testing.T) {
+		sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+		sys.grainBarrier = nil
+		sys.tryOpenGrainActivationBarrier(ctx)
+	})
+
+	t.Run("no-op when cluster nil", func(t *testing.T) {
+		sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+		sys.clusterConfig = NewClusterConfig().WithMinimumPeersQuorum(2).WithGrainActivationBarrier(5 * time.Second)
+		sys.grainBarrier = newGrainActivationBarrier(2, 5*time.Second)
+		sys.cluster = nil
+		sys.tryOpenGrainActivationBarrier(ctx)
+	})
+
+	t.Run("opens when Members returns enough peers", func(t *testing.T) {
+		sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+		sys.clusterConfig = NewClusterConfig().WithMinimumPeersQuorum(2).WithGrainActivationBarrier(5 * time.Second)
+		sys.grainBarrier = newGrainActivationBarrier(2, 5*time.Second)
+		peer1 := &cluster.Peer{Host: "192.0.2.1", PeersPort: 15000, RemotingPort: 16000}
+		peer2 := &cluster.Peer{Host: "192.0.2.2", PeersPort: 15001, RemotingPort: 16001}
+		cl.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{peer1, peer2}, nil).Once()
+		sys.tryOpenGrainActivationBarrier(ctx)
+		err := sys.waitForGrainActivationBarrier(ctx)
+		require.NoError(t, err)
+	})
+
+	t.Run("does not open when Members returns too few peers", func(t *testing.T) {
+		sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+		sys.clusterConfig = NewClusterConfig().WithMinimumPeersQuorum(2).WithGrainActivationBarrier(5 * time.Second)
+		sys.grainBarrier = newGrainActivationBarrier(2, 5*time.Second)
+		cl.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{{Host: "192.0.2.1", PeersPort: 15000, RemotingPort: 16000}}, nil).Once()
+		sys.tryOpenGrainActivationBarrier(ctx)
+		waitCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+		defer cancel()
+		err := sys.waitForGrainActivationBarrier(waitCtx)
+		require.Error(t, err)
+	})
+
+	t.Run("no-op when Members returns error", func(t *testing.T) {
+		sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+		sys.clusterConfig = NewClusterConfig().WithMinimumPeersQuorum(2).WithGrainActivationBarrier(5 * time.Second)
+		sys.grainBarrier = newGrainActivationBarrier(2, 5*time.Second)
+		cl.EXPECT().Members(mock.Anything).Return(nil, errors.New("members error")).Once()
+		sys.tryOpenGrainActivationBarrier(ctx)
+		waitCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+		defer cancel()
+		err := sys.waitForGrainActivationBarrier(waitCtx)
+		require.Error(t, err)
+	})
+
+	t.Run("no-op when barrier already open", func(t *testing.T) {
+		sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+		sys.grainBarrier = newGrainActivationBarrier(2, 5*time.Second)
+		sys.grainBarrier.open()
+		sys.tryOpenGrainActivationBarrier(ctx)
+		err := sys.waitForGrainActivationBarrier(ctx)
+		require.NoError(t, err)
+	})
+}
+
+func TestRunGrainActivation_EmptyID(t *testing.T) {
+	sys, _, _, identity := newActivationTestSystem(t, NewMockGrain(), "empty-id-run", true)
+
+	pid, err := sys.runGrainActivation("", func() (*grainPID, error) {
+		return newGrainPID(identity, NewMockGrain(), sys, newGrainConfig()), nil
+	})
+	require.NoError(t, err)
+	require.NotNil(t, pid)
 }
 
 func TestGrainRegistrationAndDeregistration(t *testing.T) {
