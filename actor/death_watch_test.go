@@ -322,12 +322,12 @@ func TestDeathWatch(t *testing.T) {
 		require.NoError(t, err)
 		pause.For(500 * time.Millisecond)
 
+		require.NoError(t, actorSys.Stop(ctx))
+
 		_ = logger.Flush()
 		logContent := buf.String()
 		require.Contains(t, logContent, "started successfully", "handlePostStart should log when deathWatch starts")
 		require.Contains(t, logContent, "GoAktDeathWatch", "handlePostStart should include deathWatch actor name")
-
-		require.NoError(t, actorSys.Stop(ctx))
 	})
 
 	t.Run("Logging handleTerminated logs when PID not found", func(t *testing.T) {
