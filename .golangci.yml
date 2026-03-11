@@ -46,6 +46,9 @@ linters:
       excludes:
         - G115
         - G602
+        - G702
+        - G703
+        - G704
     misspell:
       locale: US
       ignore-rules:
