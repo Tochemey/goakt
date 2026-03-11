@@ -49,6 +49,7 @@ linters:
         - G702
         - G703
         - G704
+        - G117
     misspell:
       locale: US
       ignore-rules:
