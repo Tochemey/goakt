@@ -53,7 +53,7 @@ type Config struct {
 	// Username sets the etcd authentication user (optional).
 	Username string
 	// Password sets the etcd authentication password (optional).
-	Password string
+	Password string //nolint:gosec // internal config struct, never serialized
 }
 
 var _ validation.Validator = (*Config)(nil)
