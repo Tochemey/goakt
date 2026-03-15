@@ -26,15 +26,15 @@ import "time"
 
 // Deadletter defines the deadletter event
 type Deadletter struct {
-	sender   string
-	receiver string
+	sender   Path
+	receiver Path
 	message  any
 	sendTime time.Time
 	reason   string
 }
 
 // NewDeadletter creates a new Deadletter event.
-func NewDeadletter(sender, receiver string, message any, sendTime time.Time, reason string) *Deadletter {
+func NewDeadletter(sender, receiver Path, message any, sendTime time.Time, reason string) *Deadletter {
 	return &Deadletter{
 		sender:   sender,
 		receiver: receiver,
@@ -45,10 +45,10 @@ func NewDeadletter(sender, receiver string, message any, sendTime time.Time, rea
 }
 
 // Sender returns the sender's address.
-func (d *Deadletter) Sender() string { return d.sender }
+func (d *Deadletter) Sender() Path { return d.sender }
 
 // Receiver returns the receiver's address.
-func (d *Deadletter) Receiver() string { return d.receiver }
+func (d *Deadletter) Receiver() Path { return d.receiver }
 
 // Message returns the original message that could not be delivered.
 func (d *Deadletter) Message() any { return d.message }
@@ -61,107 +61,107 @@ func (d *Deadletter) Reason() string { return d.reason }
 
 // ActorStarted defines the actor started event
 type ActorStarted struct {
-	address   string
+	actorPath Path
 	startedAt time.Time
 }
 
 // NewActorStarted creates a new ActorStarted event stamped with the current UTC time.
-func NewActorStarted(address string) *ActorStarted {
-	return &ActorStarted{address: address, startedAt: time.Now().UTC()}
+func NewActorStarted(actorPath Path) *ActorStarted {
+	return &ActorStarted{actorPath: actorPath, startedAt: time.Now().UTC()}
 }
 
-// Address returns the actor's address.
-func (a *ActorStarted) Address() string { return a.address }
+// ActorPath returns the actor's path.
+func (a *ActorStarted) ActorPath() Path { return a.actorPath }
 
 // StartedAt returns the time the actor started.
 func (a *ActorStarted) StartedAt() time.Time { return a.startedAt }
 
 // ActorStopped defines the actor stopped event
 type ActorStopped struct {
-	address   string
+	actorPath Path
 	stoppedAt time.Time
 }
 
 // NewActorStopped creates a new ActorStopped event stamped with the current UTC time.
-func NewActorStopped(address string) *ActorStopped {
-	return &ActorStopped{address: address, stoppedAt: time.Now().UTC()}
+func NewActorStopped(actorPath Path) *ActorStopped {
+	return &ActorStopped{actorPath: actorPath, stoppedAt: time.Now().UTC()}
 }
 
-// Address returns the actor's address.
-func (a *ActorStopped) Address() string { return a.address }
+// ActorPath returns the actor's path.
+func (a *ActorStopped) ActorPath() Path { return a.actorPath }
 
 // StoppedAt returns the time the actor stopped.
 func (a *ActorStopped) StoppedAt() time.Time { return a.stoppedAt }
 
 // ActorPassivated defines the actor passivated event
 type ActorPassivated struct {
-	address      string
+	actorPath    Path
 	passivatedAt time.Time
 }
 
 // NewActorPassivated creates a new ActorPassivated event stamped with the current UTC time.
-func NewActorPassivated(address string) *ActorPassivated {
-	return &ActorPassivated{address: address, passivatedAt: time.Now().UTC()}
+func NewActorPassivated(actorPath Path) *ActorPassivated {
+	return &ActorPassivated{actorPath: actorPath, passivatedAt: time.Now().UTC()}
 }
 
-// Address returns the actor's address.
-func (a *ActorPassivated) Address() string { return a.address }
+// ActorPath returns the actor's path.
+func (a *ActorPassivated) ActorPath() Path { return a.actorPath }
 
 // PassivatedAt returns the time the actor was passivated.
 func (a *ActorPassivated) PassivatedAt() time.Time { return a.passivatedAt }
 
 // ActorChildCreated defines the child actor created event
 type ActorChildCreated struct {
-	address   string
-	parent    string
+	actorPath Path
+	parent    Path
 	createdAt time.Time
 }
 
 // NewActorChildCreated creates a new ActorChildCreated event stamped with the current UTC time.
-func NewActorChildCreated(address, parent string) *ActorChildCreated {
-	return &ActorChildCreated{address: address, parent: parent, createdAt: time.Now().UTC()}
+func NewActorChildCreated(actorPath, parent Path) *ActorChildCreated {
+	return &ActorChildCreated{actorPath: actorPath, parent: parent, createdAt: time.Now().UTC()}
 }
 
-// Address returns the child actor's address.
-func (a *ActorChildCreated) Address() string { return a.address }
+// ActorPath returns the child actor's path.
+func (a *ActorChildCreated) ActorPath() Path { return a.actorPath }
 
 // Parent returns the parent actor's address.
-func (a *ActorChildCreated) Parent() string { return a.parent }
+func (a *ActorChildCreated) Parent() Path { return a.parent }
 
 // CreatedAt returns the time the child actor was created.
 func (a *ActorChildCreated) CreatedAt() time.Time { return a.createdAt }
 
 // ActorRestarted defines the actor restarted event
 type ActorRestarted struct {
-	address     string
+	actorPath   Path
 	restartedAt time.Time
 }
 
 // NewActorRestarted creates a new ActorRestarted event stamped with the current UTC time.
-func NewActorRestarted(address string) *ActorRestarted {
-	return &ActorRestarted{address: address, restartedAt: time.Now().UTC()}
+func NewActorRestarted(actorPath Path) *ActorRestarted {
+	return &ActorRestarted{actorPath: actorPath, restartedAt: time.Now().UTC()}
 }
 
-// Address returns the actor's address.
-func (a *ActorRestarted) Address() string { return a.address }
+// ActorPath returns the actor's address.
+func (a *ActorRestarted) ActorPath() Path { return a.actorPath }
 
 // RestartedAt returns the time the actor was restarted.
 func (a *ActorRestarted) RestartedAt() time.Time { return a.restartedAt }
 
 // ActorSuspended defines the actor suspended event
 type ActorSuspended struct {
-	address     string
+	actorPath   Path
 	suspendedAt time.Time
 	reason      string
 }
 
 // NewActorSuspended creates a new ActorSuspended event stamped with the current UTC time.
-func NewActorSuspended(address, reason string) *ActorSuspended {
-	return &ActorSuspended{address: address, suspendedAt: time.Now().UTC(), reason: reason}
+func NewActorSuspended(actorPath Path, reason string) *ActorSuspended {
+	return &ActorSuspended{actorPath: actorPath, suspendedAt: time.Now().UTC(), reason: reason}
 }
 
-// Address returns the actor's address.
-func (a *ActorSuspended) Address() string { return a.address }
+// ActorPath returns the actor's path.
+func (a *ActorSuspended) ActorPath() Path { return a.actorPath }
 
 // SuspendedAt returns the time the actor was suspended.
 func (a *ActorSuspended) SuspendedAt() time.Time { return a.suspendedAt }
@@ -171,17 +171,17 @@ func (a *ActorSuspended) Reason() string { return a.reason }
 
 // ActorReinstated is triggered when an actor is reinstated
 type ActorReinstated struct {
-	address      string
+	actorPath    Path
 	reinstatedAt time.Time
 }
 
 // NewActorReinstated creates a new ActorReinstated event stamped with the current UTC time.
-func NewActorReinstated(address string) *ActorReinstated {
-	return &ActorReinstated{address: address, reinstatedAt: time.Now().UTC()}
+func NewActorReinstated(actorPath Path) *ActorReinstated {
+	return &ActorReinstated{actorPath: actorPath, reinstatedAt: time.Now().UTC()}
 }
 
-// Address returns the actor's address.
-func (a *ActorReinstated) Address() string { return a.address }
+// ActorPath returns the actor's path.
+func (a *ActorReinstated) ActorPath() Path { return a.actorPath }
 
 // ReinstatedAt returns the time the actor was reinstated.
 func (a *ActorReinstated) ReinstatedAt() time.Time { return a.reinstatedAt }
@@ -227,17 +227,17 @@ func (n *NodeLeft) Timestamp() time.Time { return n.timestamp }
 // of the actor they were observing—for example, by cleaning up resources,
 // restarting the actor, or triggering failover behavior.
 type Terminated struct {
-	address      string
+	actorPath    Path
 	terminatedAt time.Time
 }
 
 // NewTerminated creates a new Terminated message stamped with the current UTC time.
-func NewTerminated(address string) *Terminated {
-	return &Terminated{address: address, terminatedAt: time.Now().UTC()}
+func NewTerminated(actorPath Path) *Terminated {
+	return &Terminated{actorPath: actorPath, terminatedAt: time.Now().UTC()}
 }
 
-// Address returns the address of the terminated actor.
-func (t *Terminated) Address() string { return t.address }
+// ActorPath returns the path of the terminated actor.
+func (t *Terminated) ActorPath() Path { return t.actorPath }
 
 // TerminatedAt returns the time the actor was terminated.
 func (t *Terminated) TerminatedAt() time.Time { return t.terminatedAt }

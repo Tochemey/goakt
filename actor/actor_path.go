@@ -27,13 +27,21 @@ import "github.com/tochemey/goakt/v4/internal/address"
 // Path represents the logical path of an actor within an actor system.
 // It provides a location-transparent view of host, port, name, system, and parent.
 type Path interface {
+	// Host returns the hostname of the actor system node where the actor resides.
 	Host() string
+	// HostPort returns the host:port combination as a string.
 	HostPort() string
+	// Port returns the port number of the actor system node where the actor resides.
 	Port() int
+	// Name returns the name of the actor.
 	Name() string
+	// Parent returns the Path of the actor's parent, or nil if there is no parent.
 	Parent() Path
+	// String returns the full string representation of the actor path.
 	String() string
+	// System returns the name of the actor system this actor belongs to.
 	System() string
+	// Equals reports whether this path is equal to the given path.
 	Equals(other Path) bool
 }
 

@@ -41,7 +41,6 @@ import (
 
 	"github.com/tochemey/goakt/v4/datacenter"
 	gerrors "github.com/tochemey/goakt/v4/errors"
-	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/datacentercontroller"
 	"github.com/tochemey/goakt/v4/internal/pause"
@@ -740,9 +739,7 @@ func TestSpawn(t *testing.T) {
 
 		require.Len(t, items, 1)
 		item := items[0]
-		addr, err := address.Parse(item.Address())
-		require.NoError(t, err)
-		assert.True(t, pathToAddress(pid.Path()).Equals(addr))
+		assert.True(t, pid.Path().Equals(item.ActorPath()))
 		assert.Equal(t, mockErr.Error(), item.Reason())
 
 		// unsubscribe the consumer

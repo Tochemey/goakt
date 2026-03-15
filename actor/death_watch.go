@@ -86,13 +86,13 @@ func (x *deathWatch) handleTerminated(ctx *ReceiveContext) error {
 	logger := ctx.Logger()
 	actorSys := ctx.ActorSystem()
 
-	addr := msg.Address()
+	path := msg.ActorPath()
 	if logger.Enabled(log.InfoLevel) {
-		logger.Infof("actor=%s removing dead actor resource from system", addr)
+		logger.Infof("actor=%s removing dead actor resource from system", path)
 	}
 
 	actorTree := actorSys.tree()
-	if node, ok := actorTree.node(addr); ok {
+	if node, ok := actorTree.node(path.String()); ok {
 		pid := node.value()
 
 		if !pid.isStateSet(systemState) {
@@ -121,19 +121,19 @@ func (x *deathWatch) handleTerminated(ctx *ReceiveContext) error {
 
 			if err != nil {
 				if logger.Enabled(log.ErrorLevel) {
-					logger.Errorf("actor=%s failed to remove dead actor from cluster: %v", addr, err)
+					logger.Errorf("actor=%s failed to remove dead actor from cluster: %v", path, err)
 				}
 				return errors.NewInternalError(err)
 			}
 		}
 
 		if logger.Enabled(log.InfoLevel) {
-			logger.Infof("actor=%s removed dead actor resource from system", addr)
+			logger.Infof("actor=%s removed dead actor resource from system", path)
 		}
 		return nil
 	}
 	if logger.Enabled(log.InfoLevel) {
-		logger.Infof("actor=%s addr=%s unable to locate dead actor resource, maybe already freed", ctx.Self().Name(), addr)
+		logger.Infof("actor=%s addr=%s unable to locate dead actor resource, maybe already freed", ctx.Self().Name(), path)
 	}
 	return nil
 }

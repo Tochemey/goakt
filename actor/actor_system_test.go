@@ -1360,7 +1360,7 @@ func TestActorSystem(t *testing.T) {
 
 		require.Len(t, items, 5)
 		item := items[0]
-		require.Equal(t, actorRef.ID(), item.Receiver())
+		require.Equal(t, actorRef.ID(), item.Receiver().String())
 		msg := item.Message()
 		require.NotNil(t, msg)
 		require.IsType(t, &testpb.TestSend{}, msg)

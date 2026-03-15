@@ -958,7 +958,7 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 
 	eventsStream := pid.eventsStream
 	if eventsStream != nil {
-		eventsStream.Publish(eventsTopic, NewActorChildCreated(cid.ID(), pid.ID()))
+		eventsStream.Publish(eventsTopic, NewActorChildCreated(cid.Path(), pid.Path()))
 	}
 
 	// set the actor in the given actor system registry
@@ -1147,7 +1147,7 @@ func (pid *PID) PipeToName(ctx context.Context, actorName string, task func() (a
 		result, err := runTask()
 		if err != nil {
 			pid.logger.Errorf("request/request-name task failed: %v", err)
-			pid.toDeadletter(ctx, pid.Path(), pid.Path(), new(NoMessage), err)
+			pid.toDeadletter(ctx, pid.address, pid.address, new(NoMessage), err)
 			return
 		}
 
@@ -1155,7 +1155,7 @@ func (pid *PID) PipeToName(ctx context.Context, actorName string, task func() (a
 		actorSystem := pid.ActorSystem()
 		if err := actorSystem.NoSender().SendAsync(ctx, actorName, result); err != nil {
 			pid.logger.Errorf("request/request-name send async failed: %v", err)
-			pid.toDeadletter(ctx, pid.Path(), pid.Path(), result, err)
+			pid.toDeadletter(ctx, pid.address, pid.address, result, err)
 			return
 		}
 	}()
@@ -1589,7 +1589,7 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 	}
 
 	if pid.eventsStream != nil {
-		pid.eventsStream.Publish(eventsTopic, NewActorStopped(pid.ID()))
+		pid.eventsStream.Publish(eventsTopic, NewActorStopped(pid.Path()))
 	}
 
 	pid.stopLocker.Unlock()
@@ -2267,7 +2267,7 @@ func (pid *PID) init(ctx context.Context) error {
 	pid.logger.Infof("actor=%s initialization successful", pid.Name())
 
 	if pid.eventsStream != nil {
-		pid.eventsStream.Publish(eventsTopic, NewActorStarted(pid.ID()))
+		pid.eventsStream.Publish(eventsTopic, NewActorStarted(pid.Path()))
 	}
 
 	cancel()
@@ -2318,7 +2318,7 @@ func (pid *PID) freeWatchers(ctx context.Context) {
 		// this call will be fast no need of parallel processing
 		for _, watcher := range watchers {
 			watcher := watcher
-			terminated := NewTerminated(pid.ID())
+			terminated := NewTerminated(pid.Path())
 
 			if watcher.IsRunning() {
 				logger.Debugf("watcher %s releasing watched %s", watcher.Name(), pid.Name())
@@ -2453,7 +2453,7 @@ func (pid *PID) tryPassivation(reason string) bool {
 	}
 
 	if pid.eventsStream != nil {
-		pid.eventsStream.Publish(eventsTopic, NewActorPassivated(pid.ID()))
+		pid.eventsStream.Publish(eventsTopic, NewActorPassivated(pid.Path()))
 	}
 
 	pid.logger.Infof("actor=%s successfully passivated", pid.Name())
@@ -2590,7 +2590,7 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 
 	// create the message to send to the parent
 	msg := &commands.Panicking{
-		ActorID:    pid.ID(),
+		Address:    pid.address,
 		Err:        signal.Err(),
 		Message:    signal.Msg(),
 		Timestamp:  signal.Timestamp(),
@@ -2655,18 +2655,18 @@ func (pid *PID) handleReceivedErrorWithMessage(senderPID *PID, message any, err 
 	}
 
 	system := pid.ActorSystem()
-	var sender Path
+	var sender *address.Address
 	if system != nil {
-		sender = system.NoSender().Path()
+		sender = system.NoSender().address
 	}
 
 	if senderPID != nil {
 		if system == nil || !senderPID.Equals(system.NoSender()) {
-			sender = senderPID.Path()
+			sender = senderPID.address
 		}
 	}
 
-	receiver := pid.Path()
+	receiver := pid.address
 	if receiver == nil {
 		return
 	}
@@ -2676,7 +2676,7 @@ func (pid *PID) handleReceivedErrorWithMessage(senderPID *PID, message any, err 
 }
 
 // toDeadletter sends a message to the deadletter actor
-func (pid *PID) toDeadletter(ctx context.Context, from, to Path, message any, err error) {
+func (pid *PID) toDeadletter(ctx context.Context, from, to *address.Address, message any, err error) {
 	system := pid.ActorSystem()
 	if system == nil {
 		return
@@ -2684,8 +2684,8 @@ func (pid *PID) toDeadletter(ctx context.Context, from, to Path, message any, er
 	deadletter := system.getDeadletter()
 	command := &commands.SendDeadletter{
 		Deadletter: commands.Deadletter{
-			Sender:   pathString(from),
-			Receiver: pathString(to),
+			Sender:   from,
+			Receiver: to,
 			Message:  message,
 			SendTime: time.Now().UTC(),
 			Reason:   err.Error(),
@@ -2739,7 +2739,7 @@ func (pid *PID) handleCompletion(ctx context.Context, config *pipeConfig, comple
 	result, err := runTask()
 	if err != nil {
 		pid.logger.Errorf("pipe task failed: %v", err)
-		pid.toDeadletter(ctx, pid.Path(), pid.Path(), new(NoMessage), err)
+		pid.toDeadletter(ctx, pid.address, pid.address, new(NoMessage), err)
 		return
 	}
 
@@ -2747,7 +2747,7 @@ func (pid *PID) handleCompletion(ctx context.Context, config *pipeConfig, comple
 	to := completion.Receiver
 	if !to.IsRunning() {
 		pid.logger.Errorf("unable to pipe message to actor=%s: not started", to.Name())
-		pid.toDeadletter(ctx, pid.Path(), pid.Path(), result, gerrors.ErrDead)
+		pid.toDeadletter(ctx, pid.address, pid.address, result, gerrors.ErrDead)
 		return
 	}
 
@@ -2757,7 +2757,7 @@ func (pid *PID) handleCompletion(ctx context.Context, config *pipeConfig, comple
 
 // handlePanicking watches for child actor's failure and act based upon the supervisory strategy
 func (pid *PID) handlePanicking(cid *PID, msg *commands.Panicking) {
-	if cid.ID() == msg.ActorID {
+	if cid.ID() == msg.Address.String() {
 		directive := msg.Directive
 		includeSiblings := msg.Strategy == supervisor.OneForAllStrategy
 
@@ -2878,17 +2878,17 @@ func (pid *PID) suspend(reason string) {
 	// stop the supervisor loop
 	pid.stopSupervisionLoop()
 	// publish an event to the events stream
-	pid.eventsStream.Publish(eventsTopic, NewActorSuspended(pid.ID(), reason))
+	pid.eventsStream.Publish(eventsTopic, NewActorSuspended(pid.Path(), reason))
 }
 
 // getDeadlettersCount gets deadletter
 func (pid *PID) getDeadlettersCount(ctx context.Context) int64 {
 	var (
-		name    = pid.ID()
+		address = pid.address
 		to      = pid.ActorSystem().getDeadletter()
 		from    = pid.ActorSystem().getSystemGuardian()
 		message = &commands.DeadlettersCountRequest{
-			ActorID: &name,
+			Address: address,
 		}
 	)
 	if to.IsRunning() {
@@ -2933,7 +2933,7 @@ func (pid *PID) doReinstate() {
 	pid.resumePassivation()
 
 	// publish an event to the events stream
-	pid.eventsStream.Publish(eventsTopic, NewActorReinstated(pid.ID()))
+	pid.eventsStream.Publish(eventsTopic, NewActorReinstated(pid.Path()))
 }
 
 func (pid *PID) shouldAutoPassivate() bool {
@@ -3265,7 +3265,7 @@ func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *t
 	pid.restartCount.Inc()
 	pid.fireSystemMessage(ctx, new(PostStart))
 	if pid.eventsStream != nil {
-		pid.eventsStream.Publish(eventsTopic, NewActorRestarted(pid.ID()))
+		pid.eventsStream.Publish(eventsTopic, NewActorRestarted(pid.Path()))
 	}
 
 	if actorSystem != nil && !pid.isStateSet(systemState) && (didShutdown || !wasInTree) {

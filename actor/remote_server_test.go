@@ -237,8 +237,7 @@ func TestRemoteHandlersContextPropagation(t *testing.T) {
 // TestRemoteHandlersContextPropagationSuccess verifies that handlers succeed when
 // a propagator is configured and metadata is present (extract succeeds).
 func TestRemoteHandlersContextPropagationSuccess(t *testing.T) {
-	const host = "127.0.0.1"
-	const port = 9098
+	host := "127.0.0.1"
 	ctx := context.Background()
 
 	propagator := &headerPropagator{headerKey: "x-trace-id", ctxKey: "trace"}
@@ -288,8 +287,8 @@ func TestStopRemoteServer(t *testing.T) {
 }
 
 func TestRemoteLookupHandler(t *testing.T) {
-	const host = "127.0.0.1"
-	const port = 9000
+	host := "127.0.0.1"
+	port := 9000
 	ctx := context.Background()
 
 	t.Run("wrong request type returns CODE_INVALID_ARGUMENT", func(t *testing.T) {

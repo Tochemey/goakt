@@ -63,7 +63,7 @@ func TestDeadletter(t *testing.T) {
 		pause.For(time.Second)
 
 		// every message sent to the actor will result in deadletter
-		for i := 0; i < 5; i++ {
+		for range 5 {
 			require.NoError(t, Tell(ctx, actorRef, new(testpb.TestSend)))
 		}
 
@@ -116,15 +116,15 @@ func TestDeadletter(t *testing.T) {
 		pause.For(time.Second)
 
 		// every message sent to the actor will result in deadletter
-		for i := 0; i < 5; i++ {
+		for range 5 {
 			require.NoError(t, Tell(ctx, actorRef, new(testpb.TestSend)))
 		}
 
 		pause.For(time.Second)
 
-		actorID := actorRef.ID()
+		address := actorRef.address
 		reply, err := Ask(ctx, sys.getDeadletter(), &commands.DeadlettersCountRequest{
-			ActorID: &actorID,
+			Address: address,
 		}, 500*time.Millisecond)
 		require.NoError(t, err)
 		require.NotNil(t, reply)

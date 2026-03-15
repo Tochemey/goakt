@@ -5,6 +5,7 @@ run:
   tests: true
   modules-download-mode: vendor
   relative-path-mode: gomod
+  timeout: 10m
 output:
   path-prefix: ""
 linters:
