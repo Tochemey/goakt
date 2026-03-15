@@ -5,6 +5,7 @@ run:
   tests: true
   modules-download-mode: vendor
   relative-path-mode: gomod
+  timeout: 10m
 output:
   path-prefix: ""
 linters:
@@ -50,6 +51,7 @@ linters:
         - G703
         - G704
         - G117
+        - G118
     misspell:
       locale: US
       ignore-rules:

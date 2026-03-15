@@ -74,7 +74,7 @@ func TestActorStarted(t *testing.T) {
 
 	require.NotEmpty(t, started)
 	require.Len(t, started, 1)
-	require.Equal(t, pid.ID(), started[0].Address())
+	require.Equal(t, pid.Path().String(), started[0].ActorPath().String())
 	require.NotZero(t, started[0].StartedAt())
 
 	assert.NoError(t, actorSystem.Stop(ctx))
@@ -119,7 +119,7 @@ func TestActorStopped(t *testing.T) {
 
 	require.NotEmpty(t, stopped)
 	require.Len(t, stopped, 1)
-	require.Equal(t, pid.ID(), stopped[0].Address())
+	require.Equal(t, pid.Path().String(), stopped[0].ActorPath().String())
 	require.NotZero(t, stopped[0].StoppedAt())
 
 	assert.NoError(t, actorSystem.Stop(ctx))
@@ -167,7 +167,7 @@ func TestActorPassivated(t *testing.T) {
 
 	require.NotEmpty(t, passivated)
 	require.Len(t, passivated, 1)
-	require.Equal(t, pid.ID(), passivated[0].Address())
+	require.Equal(t, pid.Path().String(), passivated[0].ActorPath().String())
 	require.NotZero(t, passivated[0].PassivatedAt())
 
 	// let us send a message to the actor
@@ -219,8 +219,8 @@ func TestActorChildCreated(t *testing.T) {
 
 	require.NotEmpty(t, childCreated)
 	require.Len(t, childCreated, 1)
-	require.Equal(t, child.ID(), childCreated[0].Address())
-	require.Equal(t, parent.ID(), childCreated[0].Parent())
+	require.Equal(t, child.Path().String(), childCreated[0].ActorPath().String())
+	require.Equal(t, parent.Path().String(), childCreated[0].Parent().String())
 	require.NotZero(t, childCreated[0].CreatedAt())
 
 	//stop the actor
@@ -288,7 +288,7 @@ func TestActorRestarted(t *testing.T) {
 
 	require.NotEmpty(t, restarted)
 	require.Len(t, restarted, 1)
-	require.Equal(t, pid.ID(), restarted[0].Address())
+	require.Equal(t, pid.Path().String(), restarted[0].ActorPath().String())
 	require.NotZero(t, restarted[0].RestartedAt())
 
 	// let us send 10 messages to the actor
@@ -336,7 +336,7 @@ func TestActorSuspended(t *testing.T) {
 	}
 
 	require.Len(t, suspended, 1)
-	require.Equal(t, pid.ID(), suspended[0].Address())
+	require.Equal(t, pid.Path().String(), suspended[0].ActorPath().String())
 	require.NotZero(t, suspended[0].SuspendedAt())
 
 	require.NoError(t, actorSystem.Stop(ctx))

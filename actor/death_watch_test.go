@@ -146,7 +146,7 @@ func TestDeathWatch(t *testing.T) {
 
 		addr := address.New(actorID, actorSystem.Name(), actorSystem.Host(), actorSystem.Port())
 
-		err = Tell(ctx, pid, NewTerminated(addr.String()))
+		err = Tell(ctx, pid, NewTerminated(newPath(addr)))
 		require.NoError(t, err)
 
 		pause.For(time.Second)
@@ -203,7 +203,7 @@ func TestDeathWatch(t *testing.T) {
 		require.NotNil(t, deathWatchPID)
 		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
 
-		terminated := NewTerminated(cid.ID())
+		terminated := NewTerminated(cid.Path())
 		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, terminated)
 
 		err = deathWatchActor.handleTerminated(receiveCtx)
@@ -278,7 +278,7 @@ func TestDeathWatch(t *testing.T) {
 		clmock.EXPECT().RemoveActor(mock.Anything, actorName).Return(nil).Once()
 		clmock.EXPECT().RemoveKind(mock.Anything, expectedKind).Return(nil).Once()
 
-		terminated := NewTerminated(singletonPID.ID())
+		terminated := NewTerminated(singletonPID.Path())
 		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, terminated)
 
 		require.NoError(t, deathWatchActor.handleTerminated(receiveCtx))
@@ -347,7 +347,7 @@ func TestDeathWatch(t *testing.T) {
 		require.NotNil(t, deathWatchPID)
 		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
 
-		terminated := NewTerminated(addr.String())
+		terminated := NewTerminated(newPath(addr))
 		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, terminated)
 
 		buf.Reset()
@@ -404,7 +404,7 @@ func TestDeathWatch(t *testing.T) {
 		deathWatchPID := actorSys.getDeathWatch()
 		require.NotNil(t, deathWatchPID)
 		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
-		terminated := NewTerminated(cid.ID())
+		terminated := NewTerminated(cid.Path())
 		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, terminated)
 
 		buf.Reset()
@@ -442,7 +442,7 @@ func TestDeathWatch(t *testing.T) {
 		deathWatchPID := actorSys.getDeathWatch()
 		require.NotNil(t, deathWatchPID)
 		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
-		terminated := NewTerminated(cid.ID())
+		terminated := NewTerminated(cid.Path())
 		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, terminated)
 
 		buf.Reset()

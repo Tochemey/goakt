@@ -257,7 +257,7 @@ func (x *topicActor) sendToRemoteTopicActors(cctx context.Context, remotePeers [
 // We remove the subscriber from all topics it is subscribed to.
 // This is important to avoid memory leaks and ensure that we do not send messages to terminated actors.
 func (x *topicActor) handleTerminated(msg *Terminated) {
-	actorID := msg.Address()
+	actorID := msg.ActorPath().String()
 	x.topics.Range(func(topic string, subscribers *xsync.Map[string, *PID]) {
 		if subscriber, ok := subscribers.Get(actorID); ok {
 			subscribers.Delete(subscriber.ID())

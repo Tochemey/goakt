@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/tochemey/goakt/v4/internal/internalpb"
@@ -39,7 +40,6 @@ import (
 	testkit "github.com/tochemey/goakt/v4/mocks/discovery"
 	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
-	"github.com/travisjeffery/go-dynaport"
 )
 
 func TestSystemGuardian(t *testing.T) {

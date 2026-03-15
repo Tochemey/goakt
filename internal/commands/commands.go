@@ -25,6 +25,7 @@ package commands
 import (
 	"time"
 
+	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/supervisor"
 )
 
@@ -33,9 +34,9 @@ import (
 // used internally to avoid a circular dependency on the actor package.
 type Deadletter struct {
 	// Specifies the sender's address
-	Sender string
+	Sender *address.Address
 	// Specifies the actor address
-	Receiver string
+	Receiver *address.Address
 	// Specifies the message to send to the actor.
 	// Any message is allowed to be sent.
 	Message any
@@ -60,7 +61,7 @@ type SendDeadletter struct {
 // Optionally, the ActorID can be provided to filter deadletters for a specific actor.
 type DeadlettersCountRequest struct {
 	// Optional: actor ID to filter deadletters for a specific actor.
-	ActorID *string
+	Address *address.Address
 }
 
 // DeadlettersCountResponse returns the total number of deadletters.
@@ -106,7 +107,7 @@ type HealthCheckResponse struct{}
 
 type Panicking struct {
 	// Specifies the actor id
-	ActorID string
+	Address *address.Address
 	// Specifies the error message
 	Err error
 	// Specifies the supervisor

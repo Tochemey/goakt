@@ -1248,10 +1248,8 @@ func TestReceiveContext(t *testing.T) {
 		require.True(t, proto.Equal(send, actualMsg))
 		require.True(t, proto.Equal(send, actual))
 		require.Equal(t, deadletter.Reason(), errors.ErrUnhandled.Error())
-		addr := deadletter.Sender()
-		parsed, err := address.Parse(addr)
-		require.NoError(t, err)
-		require.True(t, pathToAddress(noSender.Path()).Equals(parsed))
+		path := deadletter.Sender()
+		require.True(t, noSender.Path().Equals(path))
 
 		assert.EqualValues(t, 1, len(consumer.Topics()))
 
@@ -1324,7 +1322,7 @@ func TestReceiveContext(t *testing.T) {
 		actual := new(testpb.TestSend)
 		require.True(t, proto.Equal(actual, actualMsg))
 		require.Equal(t, deadletter.Reason(), errors.ErrUnhandled.Error())
-		assert.Equal(t, deadletter.Sender(), pid2.Path().String())
+		assert.Equal(t, deadletter.Sender().String(), pid2.Path().String())
 
 		assert.EqualValues(t, 1, len(consumer.Topics()))
 
@@ -2961,7 +2959,7 @@ func TestReceiveContext(t *testing.T) {
 
 		require.Len(t, items, 1)
 		item := items[0]
-		require.Equal(t, pid2.ID(), item.Address())
+		require.Equal(t, pid2.Path().String(), item.ActorPath().String())
 		require.NotZero(t, item.ReinstatedAt())
 
 		require.NoError(t, actorSystem.Stop(ctx))
@@ -3075,7 +3073,7 @@ func TestReceiveContext(t *testing.T) {
 
 		require.Len(t, items, 1)
 		item := items[0]
-		require.Equal(t, pidB.ID(), item.Address())
+		require.Equal(t, pidB.ID(), item.ActorPath().String())
 		require.NotZero(t, item.ReinstatedAt())
 
 		// let us shutdown the rest

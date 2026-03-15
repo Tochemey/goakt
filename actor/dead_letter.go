@@ -102,12 +102,12 @@ func (x *deadLetter) handleDeadletter(msg *commands.Deadletter) {
 	// increment the counter
 	x.counter.Inc()
 	// publish the deadletter message to the event stream
-	deadLetter := NewDeadletter(msg.Sender, msg.Receiver, msg.Message, msg.SendTime, msg.Reason)
+	deadLetter := NewDeadletter(newPath(msg.Sender), newPath(msg.Receiver), msg.Message, msg.SendTime, msg.Reason)
 
 	x.eventsStream.Publish(eventsTopic, deadLetter)
 
 	// letters the message for future query
-	id := msg.Receiver
+	id := msg.Receiver.String()
 	x.letters.Set(id, deadLetter)
 	if counter, ok := x.counters.Get(id); ok {
 		counter.Inc()
@@ -127,8 +127,8 @@ func (x *deadLetter) handlePublishDeadletters() {
 
 // count returns the deadletter count
 func (x *deadLetter) count(msg *commands.DeadlettersCountRequest) int64 {
-	if msg.ActorID != nil {
-		if counter, ok := x.counters.Get(*msg.ActorID); ok {
+	if msg.Address != nil {
+		if counter, ok := x.counters.Get(msg.Address.String()); ok {
 			return counter.Load()
 		}
 		return 0

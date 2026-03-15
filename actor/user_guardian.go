@@ -58,7 +58,7 @@ func (x *userGuardian) Receive(ctx *ReceiveContext) {
 			x.logger.Infof("actor=%s started successfully", x.pid.Name())
 		}
 	case *Terminated:
-		actorID := msg.Address()
+		actorID := msg.ActorPath()
 		if x.logger.Enabled(log.DebugLevel) {
 			x.logger.Debugf("actor=%s received terminated actor=%s", x.pid.Name(), actorID)
 		}

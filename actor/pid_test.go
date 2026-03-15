@@ -455,7 +455,7 @@ func TestPassivation(t *testing.T) {
 
 		require.NotEmpty(t, passivated)
 		require.Len(t, passivated, 1)
-		require.Equal(t, pid.ID(), passivated[0].Address())
+		require.Equal(t, pid.ID(), passivated[0].ActorPath().String())
 		require.NotZero(t, passivated[0].PassivatedAt())
 
 		// let us send a message to the actor
@@ -1631,7 +1631,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		}
 
 		require.NotNil(t, suspendedEvent)
-		require.Equal(t, child.ID(), suspendedEvent.Address())
+		require.Equal(t, child.Path().String(), suspendedEvent.ActorPath().String())
 
 		// unsubscribe the consumer
 		err = actorSystem.Unsubscribe(subscriber)
@@ -1968,7 +1968,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.Eventually(t, func() bool {
 			for message := range consumer.Iterator() {
 				if event, ok := message.Payload().(*ActorSuspended); ok {
-					if event.Address() == child.ID() {
+					if event.ActorPath().Equals(child.Path()) {
 						return true
 					}
 				}
@@ -2798,7 +2798,7 @@ func TestSpawnChild(t *testing.T) {
 		require.Len(t, events, 1)
 
 		event := events[0]
-		assert.Equal(t, parent.ID(), event.Parent())
+		assert.Equal(t, parent.ID(), event.Parent().String())
 
 		//stop the actor
 		err = parent.Shutdown(ctx)
