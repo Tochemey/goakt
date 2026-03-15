@@ -1,5 +1,23 @@
 # Changelog
 
+## [Unreleased]
+
+### ⚠️ Breaking Changes
+
+- **Lifecycle and dead-letter event types now use `Path` instead of `string`.**
+  The following message types have been updated to use the `Path` interface for actor identification, replacing raw `string` addresses:
+  - `Deadletter`: `Sender()` and `Receiver()` now return `Path` (was `string`). `NewDeadletter` accepts `Path` for sender and receiver.
+  - `Terminated`: `Address() string` replaced by `ActorPath() Path`. `NewTerminated` accepts `Path`.
+  - `ActorStarted`: `Address() string` replaced by `ActorPath() Path`. `NewActorStarted` accepts `Path`.
+  - `ActorStopped`: `Address() string` replaced by `ActorPath() Path`. `NewActorStopped` accepts `Path`.
+  - `ActorPassivated`: `Address() string` replaced by `ActorPath() Path`. `NewActorPassivated` accepts `Path`.
+  - `ActorChildCreated`: `Address() string` replaced by `ActorPath() Path`; `Parent()` now returns `Path`. `NewActorChildCreated` accepts `Path` for both arguments.
+  - `ActorRestarted`: `Address() string` replaced by `ActorPath() Path`. `NewActorRestarted` accepts `Path`.
+  - `ActorSuspended`: `Address() string` replaced by `ActorPath() Path`. `NewActorSuspended` accepts `Path` (reason remains `string`).
+  - `ActorReinstated`: `Address() string` replaced by `ActorPath() Path`. `NewActorReinstated` accepts `Path`.
+
+  **Migration:** Replace `.Address()` calls with `.ActorPath()` and pass `Path` values (e.g., from `pid.Path()`) instead of `string` addresses when constructing or consuming these events.
+
 ## [v4.0.0] - 2026-03-05
 
 > 📖 **Read more:** For the complete migration guide and detailed change tracking, see [CHANGELOG_V400.md](./CHANGELOG_V400.md).

@@ -1,22 +1,24 @@
 # GoAkt Architecture
 
-> A distributed actor framework for Go, built on Protocol Buffers.
+> A distributed actor framework for Go.
 
 ---
 
 ## Bird's Eye View
 
-GoAkt is a framework for building **concurrent, distributed, and fault-tolerant systems** in Go using the [Actor Model](https://www.brianstorti.com/the-actor-model/). Every unit of computation is an **actor** — a lightweight, isolated entity that communicates exclusively through immutable Protocol Buffer messages. There is no shared state between actors; the only way to interact with one is to send it a message.
+GoAkt is a framework for building **concurrent, distributed, and fault-tolerant systems** in Go using the [Actor Model](https://www.brianstorti.com/the-actor-model/). Every unit of computation is an **actor** — a lightweight, isolated entity that communicates exclusively through message passing. There is no shared state between actors; the only way to interact with one is to send it a message.
+
+Messages are typed as `any` at the API level, giving callers the freedom to send plain Go structs, Protocol Buffer messages, or any other type. For remote communication, the framework uses a pluggable serializer layer — Protocol Buffers (default) and CBOR are provided out of the box, and custom serializers can be registered per type.
 
 ### The Three Deployment Modes
 
 GoAkt operates across three escalating levels of distribution:
 
-| Mode                      | Description                                                                                                                          |
-|---------------------------|--------------------------------------------------------------------------------------------------------------------------------------|
-| **Standalone**            | Single process. Actors communicate in-process. No network needed.                                                                    |
-| **Clustered (Single DC)** | Multiple nodes. Discovery via Consul, etcd, Kubernetes, NATS, mDNS, DNS-SD, or Static. Actors are location-transparent across nodes. |
-| **Multi-Datacenter**      | Multiple clusters across DCs. Pluggable control plane (NATS JetStream or etcd). DC-aware actor placement and cross-DC messaging.     |
+| Mode                      | Description                                                                                                                                       |
+|---------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Standalone**            | Single process. Actors communicate in-process. No network needed.                                                                                 |
+| **Clustered (Single DC)** | Multiple nodes. Discovery via Consul, etcd, Kubernetes, NATS, mDNS, DNS-SD, Static, or Selfmanaged. Actors are location-transparent across nodes. |
+| **Multi-Datacenter**      | Multiple clusters across DCs. Pluggable control plane (NATS JetStream or etcd). DC-aware actor placement and cross-DC messaging.                  |
 
 ### Core Concepts
 
@@ -47,11 +49,11 @@ Sender                      Transport                     Receiver
       │◄─────────────────────────────────── response ─────────│
 ```
 
-For remote messages, the `remote` package serialises the protobuf payload over a custom TCP frame protocol with optional compression (gzip, brotli, zstd).
+For remote messages, the `remote` package serialises the payload over a custom TCP frame protocol with optional compression (gzip, brotli, zstd).
 
 ### Actor Hierarchy
 
-Every actor lives inside a tree. GoAkt creates three guardian actors at startup that serve as roots:
+Every actor lives inside a tree. GoAkt creates guardian actors at startup that serve as roots:
 
 ```
 / (root guardian)
@@ -94,7 +96,6 @@ This section describes every top-level directory and its most important files. T
 ```
 goakt/
 ├── actor/              ← THE core package. Start here.
-├── address/            ← Actor address type
 ├── breaker/            ← Circuit breaker utility
 ├── client/             ← Cluster client (external callers)
 ├── datacenter/         ← Multi-datacenter support
@@ -111,7 +112,7 @@ goakt/
 ├── passivation/        ← Passivation strategy types
 ├── protos/             ← Protobuf source definitions (.proto files)
 ├── reentrancy/         ← Reentrancy configuration types
-├── remote/             ← Remoting layer (TCP messaging)
+├── remote/             ← Remoting layer (TCP messaging + serialization)
 ├── supervisor/         ← Supervision strategy types
 ├── testkit/            ← Testing helpers for actor-based tests
 └── tls/                ← TLS configuration helpers
@@ -130,7 +131,7 @@ Everything starts and ends here. The `ActorSystem` is the entry point; `PID` is 
 | `pid.go`                         | `PID` — a live reference to an actor. Owns the mailbox dispatch loop, metrics, and state transitions.                                                               |
 | `actor_ref.go`                   | `ActorRef` — a serializable, lightweight actor reference (address only, no mailbox). Used for cross-node references.                                                |
 | `receive_context.go`             | `ReceiveContext` — passed to `Receive`. It represents the message context used during message handling.                                                             |
-| `context.go`                     | `Context` — passed to `PreStart` / `PostStop`. Provides some context for PreStart and PostStop.                                                                     |
+| `context.go`                     | `Context` — passed to `PreStart` / `PostStop`. Provides actor system access, extensions, dependencies, and logger.                                                  |
 | `grain.go`                       | `Grain` interface + virtual actor machinery.                                                                                                                        |
 | `grain_engine.go`                | Grains engine: activates grains on demand, routes messages to the right node.                                                                                       |
 | `grain_pid.go`                   | `GrainPID` — PID variant for virtual actors.                                                                                                                        |
@@ -169,18 +170,6 @@ Everything starts and ends here. The `ActorSystem` is the entry point; `PID` is 
 
 ---
 
-### `address/`
-
-Defines the `Address` type used everywhere to locate actors.
-
-```
-goakt://system@host:port/user/myActor
-```
-
-Handles parsing, formatting, equality, and parent/child path relationships.
-
----
-
 ### `remote/`
 
 The remoting layer enables actors on different nodes to exchange messages transparently.
@@ -192,8 +181,11 @@ The remoting layer enables actors on different nodes to exchange messages transp
 | `peer.go`               | `Peer` — a remote node endpoint (host + port).                                                            |
 | `compression.go`        | Message compression helpers (gzip, brotli, zstd).                                                         |
 | `context_propagator.go` | Pluggable `ContextPropagator` interface for request-scoped metadata.                                      |
+| `serializer.go`         | `Serializer` interface — pluggable per-type serialization.                                                |
+| `proto_serializer.go`   | Default serializer for `proto.Message` types (Protocol Buffers).                                          |
+| `cbor_serializer.go`    | CBOR serializer for non-protobuf types.                                                                   |
 
-The wire protocol is a custom length-prefixed Protocol Buffer frame sent over TCP (see `internal/net`).
+The wire protocol is a custom length-prefixed Protocol Buffer frame sent over TCP (see `internal/net`). Custom serializers can be registered per message type, enabling the framework to handle any serializable Go type over the wire.
 
 ---
 
@@ -213,21 +205,34 @@ Implements distributed cluster membership and actor/grain registry.
 
 ---
 
+### `internal/remoteclient/`
+
+The internal remote client used by the actor system to communicate with peer nodes.
+
+| File                     | Purpose                                                                     |
+|--------------------------|-----------------------------------------------------------------------------|
+| `client.go`              | Remote client implementation — sends Tell, Ask, Spawn, and Lookup requests. |
+| `config.go`              | Client configuration (timeouts, connection pool, compression).              |
+| `serializer_dispatch.go` | Routes messages to the correct serializer based on type registration.       |
+
+---
+
 ### `discovery/`
 
 Pluggable service discovery. Each sub-package implements `discovery.Provider`.
 
-| Provider      | Backend                                         |
-|---------------|-------------------------------------------------|
-| `consul/`     | HashiCorp Consul                                |
-| `etcd/`       | etcd v3                                         |
-| `kubernetes/` | Kubernetes API (headless services / pod labels) |
-| `nats/`       | NATS messaging                                  |
-| `mdns/`       | Multicast DNS (local network, zero-config)      |
-| `dnssd/`      | DNS Service Discovery                           |
-| `static/`     | Hard-coded peer list (useful for testing)       |
+| Provider       | Backend                                         |
+|----------------|-------------------------------------------------|
+| `consul/`      | HashiCorp Consul                                |
+| `etcd/`        | etcd v3                                         |
+| `kubernetes/`  | Kubernetes API (headless services / pod labels) |
+| `nats/`        | NATS messaging                                  |
+| `mdns/`        | Multicast DNS (local network, zero-config)      |
+| `dnssd/`       | DNS Service Discovery                           |
+| `static/`      | Hard-coded peer list (useful for testing)       |
+| `selfmanaged/` | Manual/self-managed peer management             |
 
-The `Provider` interface exposes: `Initialize`, `Register`, `Deregister`, `DiscoverPeers`, `Close`.
+The `Provider` interface exposes: `ID`, `Initialize`, `Register`, `Deregister`, `DiscoverPeers`, `Close`.
 
 ---
 
@@ -272,7 +277,7 @@ Strategy types for actor passivation (automatic idle shutdown).
 
 ### `reentrancy/`
 
-Configuration for async `Ask` reentrancy inside an actor's `Receive` method.
+Configuration for async `Request` reentrancy inside an actor's `Receive` method.
 
 | Mode                | Behaviour                                                                          |
 |---------------------|------------------------------------------------------------------------------------|
@@ -330,23 +335,33 @@ The low-level network transport used by remoting.
 
 ### `internal/` — Other Sub-packages
 
-| Package               | Purpose                                                                                                                |
-|-----------------------|------------------------------------------------------------------------------------------------------------------------|
-| `internal/chain`      | Middleware-style chain execution for request pipelines.                                                                |
-| `internal/codec`      | Protobuf marshal/unmarshal helpers.                                                                                    |
-| `internal/future`     | Future/promise used by `Ask` for async result delivery.                                                                |
-| `internal/id`         | unique id generation.                                                                                                  |
-| `internal/memberlist` | Thin wrapper over Hashicorp Memberlist (cluster membership) for TCP transport. This is mainly used when TLS is enabled |
-| `internal/metric`     | OpenTelemetry metric registration helpers.                                                                             |
-| `internal/pointer`    | Generic pointer utilities.                                                                                             |
-| `internal/quorum`     | Quorum size calculations.                                                                                              |
-| `internal/registry`   | Runtime registry mapping actor type names to factory functions (needed for remote spawn and grain activation).         |
-| `internal/strconvx`   | Extended string conversion utilities.                                                                                  |
-| `internal/ticker`     | Enhanced Ticker abstraction utility.                                                                                   |
-| `internal/timer`      | Enhanced Timer abstraction utility.                                                                                    |
-| `internal/types`      | Shared internal type aliases.                                                                                          |
-| `internal/validation` | Fluent validation helpers.                                                                                             |
-| `internal/xsync`      | Extended synchronisation primitives (atomic maps, counters).                                                           |
+| Package                         | Purpose                                                                                                                                          |
+|---------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------|
+| `internal/address`              | `Address` type — canonical actor location (`goakt://system@host:port/path`). Parsing, formatting, equality, and parent/child path relationships. |
+| `internal/chain`                | Middleware-style chain execution for request pipelines.                                                                                          |
+| `internal/chunk`                | Slice chunking utilities for batch processing.                                                                                                   |
+| `internal/codec`                | Protobuf marshal/unmarshal helpers.                                                                                                              |
+| `internal/commands`             | Internal command types used within the actor system.                                                                                             |
+| `internal/datacentercontroller` | Datacenter controller implementation for multi-DC coordination.                                                                                  |
+| `internal/duration`             | Duration parsing and formatting utilities.                                                                                                       |
+| `internal/future`               | Future/promise used by `Ask` for async result delivery.                                                                                          |
+| `internal/id`                   | Unique ID generation.                                                                                                                            |
+| `internal/internalpb`           | Generated protobuf Go code for internal wire types.                                                                                              |
+| `internal/locker`               | Specialised locking primitives.                                                                                                                  |
+| `internal/memberlist`           | Thin wrapper over Hashicorp Memberlist (cluster membership) for TCP transport. Mainly used when TLS is enabled.                                  |
+| `internal/metric`               | OpenTelemetry metric registration helpers.                                                                                                       |
+| `internal/pause`                | Pause/backoff utilities.                                                                                                                         |
+| `internal/pointer`              | Generic pointer utilities.                                                                                                                       |
+| `internal/queue`                | Queue data structures used by mailbox implementations.                                                                                           |
+| `internal/quorum`               | Quorum size calculations.                                                                                                                        |
+| `internal/size`                 | Size calculation utilities.                                                                                                                      |
+| `internal/slices`               | Extended slice utilities.                                                                                                                        |
+| `internal/strconvx`             | Extended string conversion utilities.                                                                                                            |
+| `internal/ticker`               | Enhanced Ticker abstraction utility.                                                                                                             |
+| `internal/timer`                | Enhanced Timer abstraction utility.                                                                                                              |
+| `internal/types`                | Shared internal type aliases.                                                                                                                    |
+| `internal/validation`           | Fluent validation helpers.                                                                                                                       |
+| `internal/xsync`                | Extended synchronisation primitives (atomic maps, counters).                                                                                     |
 
 ---
 
@@ -361,7 +376,7 @@ protos/
 goaktpb/        ← Generated Go code from protos/goakt/
 ```
 
-All inter-actor messages **must** be protobuf types. The framework itself uses `goaktpb` for its own wire types (remote tell/ask envelopes, cluster actor records, etc.).
+The framework uses `goaktpb` for its own wire types (remote tell/ask envelopes, cluster actor records, etc.). User messages can be any type — protobuf is not required for local messaging.
 
 ---
 
@@ -401,7 +416,7 @@ user code
 actor.Tell(to *PID, msg)
   └─ PID.isForeign() ?
        yes → remoting.RemoteTell(from.Address, to.Address, msg)
-               └─ serialize msg to Any
+               └─ serialize msg via registered Serializer
                └─ build RemoteMessage protobuf frame
                └─ compress (optional)
                └─ write to TCP connection (from pool)
@@ -461,14 +476,14 @@ memberlist detects node departure
 
 ## Dependency Summary
 
-| Package            | Depends On                                                                                                                                                                 |
-|--------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `actor`            | `address`, `remote`, `internal/cluster`, `discovery/*`, `datacenter`, `supervisor`, `passivation`, `reentrancy`, `eventstream`, `extension`, `log`, `errors`, `internal/*` |
-| `remote`           | `address`, `internal/net`, `internal/codec`                                                                                                                                |
-| `internal/cluster` | `discovery`, `internal/memberlist`, `hash`                                                                                                                                 |
-| `client`           | `remote`, `address`                                                                                                                                                        |
+| Package            | Depends On                                                                                                                                                                          |
+|--------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `actor`            | `remote`, `internal/cluster`, `internal/address`, `discovery/*`, `datacenter`, `supervisor`, `passivation`, `reentrancy`, `eventstream`, `extension`, `log`, `errors`, `internal/*` |
+| `remote`           | `internal/address`, `internal/net`, `internal/codec`                                                                                                                                |
+| `internal/cluster` | `discovery`, `internal/memberlist`, `hash`                                                                                                                                          |
+| `client`           | `remote`, `internal/address`                                                                                                                                                        |
 
-`address`, `log`, `errors`, `extension`, `eventstream`, `supervisor`, `passivation`, and `reentrancy` are **leaf packages** — they depend on nothing else in this repository.
+`log`, `errors`, `extension`, `eventstream`, `supervisor`, `passivation`, and `reentrancy` are **leaf packages** — they depend on nothing else in this repository.
 
 ---
 
@@ -476,16 +491,15 @@ memberlist detects node departure
 
 This section explains the *why* behind major technical choices. Understanding these helps contributors make decisions that stay consistent with the framework's philosophy.
 
-### Why Protocol Buffers as the sole message format?
+### Why `any` as the message type with pluggable serialization?
 
-Actors in a distributed system must exchange messages across process and machine boundaries. This requires a well-defined serialization format. GoAkt mandates Protocol Buffers for all actor messages because:
+GoAkt uses `any` as the message type in its public API (`Tell`, `Ask`, `Receive`, etc.) rather than mandating a specific serialization format. This enables:
 
-- **Schema-driven contracts.** Every message has a `.proto` definition, making the wire format unambiguous. Contributors and users cannot accidentally pass unserializable types.
-- **Cross-language potential.** Protobuf schemas are language-neutral. Even though GoAkt is a Go framework, the wire format is readable by any language with a protobuf compiler.
-- **Efficient encoding.** Protobuf's binary format is compact and fast to marshal/unmarshal — critical when millions of messages flow through the system per second.
-- **Type resolution at runtime.** The framework uses protobuf's global type registry (`protoregistry.GlobalTypes`) to reconstruct messages from their fully-qualified type name. This powers remote deserialization without the sender and receiver sharing Go types at compile time.
+- **Ergonomic local messaging.** In standalone mode, actors can exchange plain Go structs with zero serialization overhead. No `.proto` files needed for in-process communication.
+- **Pluggable serialization for remote messaging.** When messages cross node boundaries, the framework routes them through a `Serializer` interface. Two implementations ship out of the box: `ProtoSerializer` (Protocol Buffers, the default) and `CBORSerializer` (CBOR encoding). Custom serializers can be registered per type.
+- **Protocol Buffers for framework internals.** The framework's own wire types (remote envelopes, cluster registry records, supervision signals) use protobuf for its schema-driven contracts, efficient binary encoding, and runtime type resolution via `protoregistry.GlobalTypes`.
 
-The trade-off is that users cannot send plain Go structs. This is intentional — it forces explicit message contracts and keeps the system honest about what crosses boundaries.
+The trade-off is that users must ensure remote messages are serializable by a registered serializer. The framework validates this at send time and returns a clear error if no serializer matches.
 
 ### Why a custom TCP frame protocol instead of gRPC?
 
@@ -862,7 +876,7 @@ This section describes the steps to add common types of extensions. No code is s
 
 1. **Create a new file** in `actor/` (e.g., `actor/my_mailbox.go`).
 2. **Implement the `Mailbox` interface** — five methods: `Enqueue`, `Dequeue`, `IsEmpty`, `Len`, `Dispose`.
-3. `Enqueue` receives a `*ReceiveContext`. `Dequeue` returns the next one (or `nil` if empty). The mailbox must be safe for concurrent `Enqueue` calls from multiple goroutines, but `Dequeue` is only ever called from the single processing goroutine.
+3. `Enqueue` receives a `*ReceiveContext` and returns an `error`. `Dequeue` returns the next `*ReceiveContext` (or `nil` if empty). The mailbox must be safe for concurrent `Enqueue` calls from multiple goroutines, but `Dequeue` is only ever called from the single processing goroutine.
 4. **Wire it in** by passing the mailbox via `WithMailbox(myMailbox)` as a `SpawnOption` when spawning an actor. No registration step is needed.
 5. Look at `unbounded_mailbox.go` (simplest) and `unbounded_priority_mailbox.go` (priority ordering) as reference implementations.
 
@@ -879,6 +893,12 @@ This section describes the steps to add common types of extensions. No code is s
 2. **Implement the `datacenter.ControlPlane` interface** — six methods: `Register`, `Heartbeat`, `SetState`, `ListActive`, `Watch`, `Deregister`.
 3. The control plane manages datacenter registration, heartbeating, state transitions, and event watching. See `datacenter/controlplane/nats/` (NATS JetStream) and `datacenter/controlplane/etcd/` as reference implementations.
 4. **Wire it in** by passing the control plane to the datacenter configuration when creating the actor system.
+
+### Adding a Custom Serializer
+
+1. **Implement the `remote.Serializer` interface** — two methods: `Serialize(message any) ([]byte, error)` and `Deserialize(data []byte) (any, error)`.
+2. Register the serializer with the remoting configuration so that messages of the target type are routed to it during remote communication.
+3. See `remote/proto_serializer.go` (Protocol Buffers) and `remote/cbor_serializer.go` (CBOR) as reference implementations.
 
 ### Creating an Extension
 
@@ -954,8 +974,9 @@ Generated by **mockery**. Pre-built mocks live in `mocks/` and cover core interf
 | **Death Watch**        | Two related mechanisms: (1) The `Watch`/`UnWatch` API on PID lets any actor subscribe to another actor's termination and receive a `Terminated` message when the watched actor stops. (2) The `deathWatch` system actor handles cleanup — when it receives a `Terminated` signal, it removes the dead actor from the actor tree and the cluster registry. |
 | **Cluster Singleton**  | An actor guaranteed to have exactly one instance running across the entire cluster. If the hosting node departs, the singleton is relocated to the leader.                                                                                                                                                                                                |
 | **Relocation**         | The process of re-spawning an actor on a different node after its original host departs the cluster. Controlled by the relocator actor on the leader node.                                                                                                                                                                                                |
-| **Discovery Provider** | A pluggable backend that tells the cluster how to find peer nodes. Implementations exist for Consul, etcd, Kubernetes, NATS, mDNS, DNS-SD, and static configuration.                                                                                                                                                                                      |
+| **Discovery Provider** | A pluggable backend that tells the cluster how to find peer nodes. Implementations exist for Consul, etcd, Kubernetes, NATS, mDNS, DNS-SD, Static, and Selfmanaged.                                                                                                                                                                                       |
 | **Control Plane**      | The multi-datacenter coordination layer. Manages DC registration, heartbeating, state transitions, and cross-DC event propagation. Implementations exist for NATS JetStream and etcd.                                                                                                                                                                     |
 | **Extension**          | A system-wide plugin registered at `ActorSystem` creation time. Provides cross-cutting capabilities (e.g., event sourcing, metrics, tracing) accessible from any actor's context via `Extension(id)`. The interface requires only `ID()`; actors type-assert to access domain-specific methods.                                                           |
 | **Dependency**         | A per-actor resource injected at spawn time. Must be serialisable (`BinaryMarshaler`/`BinaryUnmarshaler`) so it can travel with the actor during cluster relocation. Typical examples: database clients, API clients, configuration providers. Accessed via `Dependencies()` on the actor's context.                                                      |
 | **Event Stream**       | An in-process pub/sub bus. System events (actor started/stopped, cluster events, dead letters) and custom application events are published here. Subscribers receive events via Go channels.                                                                                                                                                              |
+| **Serializer**         | A pluggable component that converts messages to/from bytes for remote transport. The framework ships `ProtoSerializer` (Protocol Buffers) and `CBORSerializer` (CBOR). Custom serializers can be registered per message type.                                                                                                                             |
