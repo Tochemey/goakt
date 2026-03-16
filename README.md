@@ -58,10 +58,10 @@ go get github.com/tochemey/goakt/v3
 go get github.com/tochemey/goakt/v4
 ```
 
-## 📚 Documentations
+##  Documentations
 
-- **v4**: [v4.0.0](https://docs.goakt.dev)
-- **v3**: [v3.14.0](https://tochemey.gitbook.io/goakt)
+- **v4**: [v4](https://docs.goakt.dev)
+- **v3**: [v3](https://tochemey.gitbook.io/goakt)
 
 ## 💡 Examples
 
