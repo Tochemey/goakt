@@ -29,7 +29,7 @@ import (
 	"github.com/tochemey/goakt/v4/actor"
 )
 
-// Flow[In, Out] is a lazy description of a transformation stage.
+// Flow is a lazy description of a transformation stage.
 // It consumes elements of type In and produces elements of type Out.
 //
 // Flows are assembled into pipelines using Source.Via or the package-level Via.

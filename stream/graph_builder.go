@@ -118,11 +118,6 @@ func (g *Graph) MergeInto(into string, from ...string) *Graph {
 	return g
 }
 
-func (g *Graph) addNode(n *graphBuilderNode) {
-	g.nodes[n.name] = n
-	g.order = append(g.order, n.name)
-}
-
 // Build validates the graph and compiles it into a RunnableGraph.
 // Returns ErrInvalidGraph if the graph has no sources or sinks, if a node
 // references an unknown upstream, or if the graph contains a cycle.
@@ -138,6 +133,11 @@ func (g *Graph) Build() (RunnableGraph, error) {
 		return RunnableGraph{stages: pipelines[0]}, nil
 	}
 	return RunnableGraph{pipelines: pipelines}, nil
+}
+
+func (g *Graph) addNode(n *graphBuilderNode) {
+	g.nodes[n.name] = n
+	g.order = append(g.order, n.name)
 }
 
 func (g *Graph) validateGraph() error {

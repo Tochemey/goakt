@@ -52,7 +52,7 @@ type sharedBroadcast[T any] struct {
 func newSharedBroadcast[T any](n int, srcStages []*stageDesc) *sharedBroadcast[T] {
 	hub := &broadcastHubActor[T]{
 		n:          n,
-		slotPIDs:   make([]*actor.PID, n),
+		slots:      make([]*actor.PID, n),
 		slotSubIDs: make([]string, n),
 		demand:     make([]int64, n),
 	}
@@ -78,7 +78,7 @@ func (s *sharedBroadcast[T]) registerSlot(ctx context.Context, slot int, pid *ac
 		s.started = true
 		// Copy slot info into the hub before the goroutine start so the hub's
 		// actor goroutine sees the writes without additional synchronization.
-		copy(s.hub.slotPIDs, s.slotPIDs)
+		copy(s.hub.slots, s.slotPIDs)
 		copy(s.hub.slotSubIDs, s.slotSubIDs)
 	}
 	s.mu.Unlock()
@@ -111,7 +111,7 @@ type broadcastSlotActor[T any] struct {
 	slot          int
 	downstream    *actor.PID
 	subID         string
-	hubPID        *actor.PID
+	hub           *actor.PID
 	pendingDemand int64
 	config        StageConfig
 }
@@ -128,16 +128,16 @@ func (a *broadcastSlotActor[T]) Receive(rctx *actor.ReceiveContext) {
 		a.shared.registerSlot(rctx.Context(), a.slot, rctx.Self(), msg.subID, rctx.ActorSystem())
 
 	case *streamRequest:
-		if a.hubPID != nil {
-			rctx.Tell(a.hubPID, &slotDemand{slot: a.slot, n: msg.n})
+		if a.hub != nil {
+			rctx.Tell(a.hub, &slotDemand{slot: a.slot, n: msg.n})
 		} else {
 			a.pendingDemand += msg.n
 		}
 
 	case *hubReady:
-		a.hubPID = msg.hubPID
+		a.hub = msg.hubPID
 		if a.pendingDemand > 0 {
-			rctx.Tell(a.hubPID, &slotDemand{slot: a.slot, n: a.pendingDemand})
+			rctx.Tell(a.hub, &slotDemand{slot: a.slot, n: a.pendingDemand})
 			a.pendingDemand = 0
 		}
 
@@ -153,8 +153,8 @@ func (a *broadcastSlotActor[T]) Receive(rctx *actor.ReceiveContext) {
 		rctx.Shutdown()
 
 	case *streamCancel:
-		if a.hubPID != nil {
-			rctx.Tell(a.hubPID, &slotCancel{slot: a.slot})
+		if a.hub != nil {
+			rctx.Tell(a.hub, &slotCancel{slot: a.slot})
 		}
 		rctx.Shutdown()
 
@@ -175,7 +175,7 @@ func (a *broadcastSlotActor[T]) PostStop(_ *actor.Context) error { return nil }
 // cancellation upstream and shuts down.
 type broadcastHubActor[T any] struct {
 	n          int
-	slotPIDs   []*actor.PID // own copy; slot[i] set nil on cancel
+	slots      []*actor.PID // own copy; slot[i] set nil on cancel
 	slotSubIDs []string
 	demand     []int64 // per-slot outstanding demand
 	upstream   *actor.PID
@@ -197,9 +197,9 @@ func (a *broadcastHubActor[T]) Receive(rctx *actor.ReceiveContext) {
 		a.subID = msg.subID
 		// All slot PIDs are pre-populated (written before goroutine start).
 		// Notify every slot that the hub is ready to receive demand.
-		hubPID := rctx.Self()
-		for _, slotPID := range a.slotPIDs {
-			rctx.Tell(slotPID, &hubReady{hubPID: hubPID})
+		hub := rctx.Self()
+		for _, slot := range a.slots {
+			rctx.Tell(slot, &hubReady{hubPID: hub})
 		}
 
 	case *slotDemand:
@@ -209,11 +209,11 @@ func (a *broadcastHubActor[T]) Receive(rctx *actor.ReceiveContext) {
 	case *streamElement:
 		a.pending--
 		a.seqNo++
-		for i, slotPID := range a.slotPIDs {
-			if slotPID == nil {
+		for i, slot := range a.slots {
+			if slot == nil {
 				continue // slot has cancelled
 			}
-			rctx.Tell(slotPID, &streamElement{
+			rctx.Tell(slot, &streamElement{
 				subID: a.slotSubIDs[i],
 				value: msg.value,
 				seqNo: a.seqNo,
@@ -223,23 +223,23 @@ func (a *broadcastHubActor[T]) Receive(rctx *actor.ReceiveContext) {
 		a.maybePull(rctx)
 
 	case *streamComplete:
-		for i, slotPID := range a.slotPIDs {
-			if slotPID != nil {
-				rctx.Tell(slotPID, &streamComplete{subID: a.slotSubIDs[i]})
+		for i, slot := range a.slots {
+			if slot != nil {
+				rctx.Tell(slot, &streamComplete{subID: a.slotSubIDs[i]})
 			}
 		}
 		rctx.Shutdown()
 
 	case *streamError:
-		for i, slotPID := range a.slotPIDs {
-			if slotPID != nil {
-				rctx.Tell(slotPID, &streamError{subID: a.slotSubIDs[i], err: msg.err})
+		for i, slot := range a.slots {
+			if slot != nil {
+				rctx.Tell(slot, &streamError{subID: a.slotSubIDs[i], err: msg.err})
 			}
 		}
 		rctx.Shutdown()
 
 	case *slotCancel:
-		a.slotPIDs[msg.slot] = nil
+		a.slots[msg.slot] = nil
 		a.cancelled++
 		if a.cancelled >= a.n {
 			// Every branch has cancelled; propagate cancellation upstream.
@@ -277,7 +277,7 @@ func (a *broadcastHubActor[T]) maybePull(rctx *actor.ReceiveContext) {
 // Returns 0 when no active slots remain or all active slots have zero demand.
 func (a *broadcastHubActor[T]) minDemand() int64 {
 	result := int64(-1)
-	for i, pid := range a.slotPIDs {
+	for i, pid := range a.slots {
 		if pid == nil {
 			continue
 		}

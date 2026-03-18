@@ -30,13 +30,13 @@ import (
 	"github.com/tochemey/goakt/v4/actor"
 )
 
-// Sink[T] is a lazy description of a terminal stream stage that consumes
+// Sink is a lazy description of a terminal stream stage that consumes
 // elements of type T. Nothing executes until the graph is materialized.
 type Sink[T any] struct {
 	desc *stageDesc
 }
 
-// Collector[T] accumulates all elements emitted by a Collect sink.
+// Collector accumulates all elements emitted by a Collect sink.
 // Call Items() after the stream's Done channel is closed to retrieve results.
 type Collector[T any] struct {
 	mu    sync.Mutex

@@ -29,7 +29,7 @@ import (
 	"github.com/tochemey/goakt/v4/actor"
 )
 
-// Source[T] is a lazy description of a stream origin that produces elements of type T.
+// Source is a lazy description of a stream origin that produces elements of type T.
 // Nothing executes until the graph is materialized via RunnableGraph.Run().
 //
 // Build pipelines using Via (type-preserving) or the free function stream.Via (type-changing),

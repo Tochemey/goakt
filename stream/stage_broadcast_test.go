@@ -121,7 +121,7 @@ func TestBroadcastHubActor_SlotCancel_Unit(t *testing.T) {
 	// Construct hub directly with pre-populated slot info (mimicking registerSlot).
 	hub := &broadcastHubActor[int]{
 		n:          2,
-		slotPIDs:   []*actor.PID{slot0PID, slot1PID},
+		slots:      []*actor.PID{slot0PID, slot1PID},
 		slotSubIDs: []string{"sub-a", "sub-b"},
 		demand:     make([]int64, 2),
 	}
@@ -174,7 +174,7 @@ func TestBroadcastHubActor_StreamComplete_WithNilSlot(t *testing.T) {
 
 	hub := &broadcastHubActor[int]{
 		n:          2,
-		slotPIDs:   []*actor.PID{slot0PID, slot1PID},
+		slots:      []*actor.PID{slot0PID, slot1PID},
 		slotSubIDs: []string{"sub-a", "sub-b"},
 		demand:     make([]int64, 2),
 	}
@@ -212,7 +212,7 @@ func TestBroadcastHubActor_StreamError_WithNilSlot(t *testing.T) {
 
 	hub := &broadcastHubActor[int]{
 		n:          2,
-		slotPIDs:   []*actor.PID{slot0PID, slot1PID},
+		slots:      []*actor.PID{slot0PID, slot1PID},
 		slotSubIDs: []string{"sub-a", "sub-b"},
 		demand:     make([]int64, 2),
 	}
@@ -292,7 +292,7 @@ func TestBroadcastHubActor_Unhandled(t *testing.T) {
 
 	hub := &broadcastHubActor[int]{
 		n:          1,
-		slotPIDs:   []*actor.PID{slot0PID},
+		slots:      []*actor.PID{slot0PID},
 		slotSubIDs: []string{"sub-a"},
 		demand:     make([]int64, 1),
 	}

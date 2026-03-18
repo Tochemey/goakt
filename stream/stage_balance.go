@@ -37,7 +37,7 @@ type sharedBalance[T any] struct {
 	mu         sync.Mutex
 	n          int
 	srcStages  []*stageDesc
-	slotPIDs   []*actor.PID
+	slots      []*actor.PID
 	slotSubIDs []string
 	registered int
 	started    bool
@@ -55,7 +55,7 @@ func newSharedBalance[T any](n int, srcStages []*stageDesc) *sharedBalance[T] {
 	return &sharedBalance[T]{
 		n:          n,
 		srcStages:  srcStages,
-		slotPIDs:   make([]*actor.PID, n),
+		slots:      make([]*actor.PID, n),
 		slotSubIDs: make([]string, n),
 		hub:        hub,
 	}
@@ -66,13 +66,13 @@ func newSharedBalance[T any](n int, srcStages []*stageDesc) *sharedBalance[T] {
 // upstream sub-pipeline in a goroutine.
 func (s *sharedBalance[T]) registerSlot(ctx context.Context, slot int, pid *actor.PID, subID string, sys actor.ActorSystem) {
 	s.mu.Lock()
-	s.slotPIDs[slot] = pid
+	s.slots[slot] = pid
 	s.slotSubIDs[slot] = subID
 	s.registered++
 	allReady := s.registered == s.n && !s.started
 	if allReady {
 		s.started = true
-		copy(s.hub.slotPIDs, s.slotPIDs)
+		copy(s.hub.slotPIDs, s.slots)
 		copy(s.hub.slotSubIDs, s.slotSubIDs)
 	}
 	s.mu.Unlock()

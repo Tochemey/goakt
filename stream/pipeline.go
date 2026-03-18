@@ -22,7 +22,7 @@
 
 package stream
 
-// LinearGraph[T] is a fluent builder for linear (single-source, single-sink)
+// LinearGraph is a fluent builder for linear (single-source, single-sink)
 // stream pipelines. It wraps an in-progress Source[T] and provides a chainable
 // API that makes the pipeline-assembly intent explicit in the type system.
 //

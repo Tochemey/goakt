@@ -89,7 +89,8 @@ func (h *streamHandleImpl) signalDone(err error) {
 	})
 }
 
-func (h *streamHandleImpl) ID() string            { return h.subID }
+func (h *streamHandleImpl) ID() string { return h.subID }
+
 func (h *streamHandleImpl) Done() <-chan struct{} { return h.done }
 
 func (h *streamHandleImpl) Err() error {
