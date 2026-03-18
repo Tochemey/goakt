@@ -315,7 +315,7 @@ func (a *actorSourceActor[T]) startFetch(rctx *actor.ReceiveContext) {
 		}
 		pr, ok := resp.(*PullResponse[T])
 		if !ok {
-			return &fetchErr{err: ErrPullTimeout}, nil
+			return &fetchErr{err: fmt.Errorf("stream: unexpected pull response type %T", resp)}, nil
 		}
 		vals := make([]any, len(pr.Elements))
 		for i, e := range pr.Elements {
@@ -626,7 +626,7 @@ func (a *combineSourceActor[T, U, V]) tryEmit(rctx *actor.ReceiveContext) {
 			seqNo: a.seqNo,
 		})
 		a.demand--
-		a.metrics.elementsIn.Add(1)
+		a.metrics.elementsOut.Add(1)
 	}
 	// Complete when either side is done and its buffer is empty — no more
 	// pairs can be formed because no further elements will arrive from

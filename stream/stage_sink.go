@@ -23,6 +23,8 @@
 package stream
 
 import (
+	"sync"
+
 	"github.com/tochemey/goakt/v4/actor"
 )
 
@@ -30,15 +32,16 @@ import (
 // demand signaling back upstream using a sliding-window watermark strategy.
 
 type sinkActor struct {
-	consumeFn  func(any) error
-	onComplete func() // called once on streamComplete or Shutdown
-	upstream   *actor.PID
-	subID      string
+	consumeFn    func(any) error
+	onComplete   func() // called at most once; guarded by completeOnce
+	completeOnce sync.Once
+	upstream     *actor.PID
+	subID        string
 	// credit tracks how many elements we have signaled upstream.
 	credit  int64
 	config  StageConfig
 	metrics *stageMetrics
-	termErr error // set when the stream terminates via *streamError; read by completionWrapper
+	termErr error // set when the stream terminates with an error; read by completionWrapper
 }
 
 // TermErr returns the terminal error recorded when a *streamError was received,
@@ -101,6 +104,7 @@ func (a *sinkActor) Receive(rctx *actor.ReceiveContext) {
 					if a.config.OnDrop != nil {
 						a.config.OnDrop(msg.value, "retry-exhausted: element processing error")
 					}
+					a.termErr = retryErr
 					rctx.Tell(a.upstream, &streamCancel{subID: a.subID})
 					a.callOnComplete()
 					rctx.Shutdown()
@@ -110,11 +114,13 @@ func (a *sinkActor) Receive(rctx *actor.ReceiveContext) {
 				// Delegate to actor supervision: escalate so the stream supervisor
 				// can apply its directive. Behaves like FailFast until a dedicated
 				// stream supervisor hierarchy is established.
+				a.termErr = err
 				rctx.Tell(a.upstream, &streamCancel{subID: a.subID})
 				a.callOnComplete()
 				rctx.Shutdown()
 				return
 			default: // FailFast
+				a.termErr = err
 				rctx.Tell(a.upstream, &streamCancel{subID: a.subID})
 				a.callOnComplete()
 				rctx.Shutdown()
@@ -145,12 +151,19 @@ func (a *sinkActor) Receive(rctx *actor.ReceiveContext) {
 }
 
 func (a *sinkActor) callOnComplete() {
-	if a.onComplete != nil {
-		a.onComplete()
-	}
+	a.completeOnce.Do(func() {
+		if a.onComplete != nil {
+			a.onComplete()
+		}
+	})
 }
 
-func (a *sinkActor) PostStop(_ *actor.Context) error { return nil }
+// PostStop ensures completion hooks always fire, even when the actor is stopped
+// externally (e.g. via StreamHandle.Abort). The once guard makes this idempotent.
+func (a *sinkActor) PostStop(_ *actor.Context) error {
+	a.callOnComplete()
+	return nil
+}
 
 // Captures only the first element, cancels upstream, and completes immediately.
 
@@ -214,4 +227,9 @@ func (a *firstSinkActor[T]) markDone() {
 	a.result.once.Do(func() { close(a.result.ready) })
 }
 
-func (a *firstSinkActor[T]) PostStop(_ *actor.Context) error { return nil }
+// PostStop ensures FoldResult waiters are always unblocked, even when the actor
+// is stopped externally (e.g. via StreamHandle.Abort) before any message is processed.
+func (a *firstSinkActor[T]) PostStop(_ *actor.Context) error {
+	a.markDone()
+	return nil
+}

@@ -220,8 +220,14 @@ func Batch[T any](n int, maxWait time.Duration) Flow[T, []T] {
 // It decouples the processing rates of upstream and downstream.
 // When the buffer is full the OverflowStrategy is applied.
 func Buffer[T any](size int, strategy OverflowStrategy) Flow[T, T] {
+	if size < 1 {
+		size = 1
+	}
 	config := defaultStageConfig()
 	config.OverflowStrategy = strategy
+	config.BufferSize = size
+	config.InitialDemand = int64(size)
+	config.RefillThreshold = int64(size) / 4
 	desc := &stageDesc{
 		id:   newStageID(),
 		kind: flowKind,
@@ -239,6 +245,9 @@ func Buffer[T any](size int, strategy OverflowStrategy) Flow[T, T] {
 // A ticker-based actor is used so the stage remains responsive to cancellation
 // and completion signals while pacing output.
 func Throttle[T any](n int, per time.Duration) Flow[T, T] {
+	if n < 1 {
+		n = 1
+	}
 	perElement := per / time.Duration(n)
 	config := defaultStageConfig()
 	desc := &stageDesc{

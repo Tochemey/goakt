@@ -23,6 +23,7 @@
 package stream
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/tochemey/goakt/v4/actor"
@@ -354,7 +355,17 @@ func (a *batchFlowActor[T]) Receive(rctx *actor.ReceiveContext) {
 	case *streamElement:
 		a.metrics.elementsIn.Add(1)
 		a.upstreamCredit--
-		a.window = append(a.window, msg.value.(T))
+		elem, ok := msg.value.(T)
+		if !ok {
+			rctx.Tell(a.upstream, &streamCancel{subID: a.subID})
+			rctx.Tell(a.downstream, &streamError{
+				subID: a.subID,
+				err:   fmt.Errorf("stream: Batch got unexpected element type %T", msg.value),
+			})
+			rctx.Shutdown()
+			return
+		}
+		a.window = append(a.window, elem)
 		if !a.timerActive && len(a.window) == 1 {
 			// Schedule a flush timer on the first element of a new window.
 			a.timerActive = true

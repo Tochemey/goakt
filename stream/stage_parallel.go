@@ -30,7 +30,14 @@ import (
 	"github.com/tochemey/goakt/v4/actor"
 )
 
-// parallelResult is sent back to the parallelMapActor by a worker goroutine.
+// workerTask is sent by parallelMapActor to a worker func actor carrying one element to transform.
+type workerTask struct {
+	seqNo   uint64
+	value   any
+	replyTo *actor.PID
+}
+
+// parallelResult is sent back to the parallelMapActor by a worker func actor.
 type parallelResult struct {
 	seqNo uint64
 	value any
@@ -52,32 +59,38 @@ func (h *seqHeap) Pop() any {
 	return x
 }
 
+// parallelMapActor fans out element processing across a pool of worker func actors.
+// Each incoming streamElement is dispatched round-robin to a pre-spawned func actor.
+// Workers run the user's fn with panic recovery and reply with parallelResult messages.
+// Concurrency is bounded by demand control: the actor requests exactly `workers` elements
+// initially and one more per completed result, so at most `workers` tasks are in flight.
 type parallelMapActor[In, Out any] struct {
-	workers      int
+	workersCount int
 	fn           func(In) Out
 	ordered      bool
 	downstream   *actor.PID
 	upstream     *actor.PID
 	subID        string
-	selfPID      *actor.PID
+	self         *actor.PID
 	inFlight     int64
 	inputSeqNo   uint64 // seq assigned to each incoming element
 	outSeqNo     uint64 // seq assigned to each outgoing element (unordered)
 	nextEmit     uint64 // next inputSeqNo to emit (ordered)
 	pending      seqHeap
 	upstreamDone bool
-	sem          chan struct{} // worker slot limiter
+	workers      []*actor.PID // pre-spawned func actor workers
+	nextWorker   int          // round-robin index for worker assignment
 	config       StageConfig
 }
 
 func newParallelMapActor[In, Out any](n int, fn func(In) Out, ordered bool, cfg StageConfig) *parallelMapActor[In, Out] {
 	a := &parallelMapActor[In, Out]{
-		workers: n,
-		fn:      fn,
-		ordered: ordered,
-		sem:     make(chan struct{}, n),
-		pending: seqHeap{},
-		config:  cfg,
+		workersCount: n,
+		fn:           fn,
+		ordered:      ordered,
+		workers:      make([]*actor.PID, 0, n),
+		pending:      seqHeap{},
+		config:       cfg,
 	}
 	heap.Init(&a.pending)
 	return a
@@ -91,8 +104,47 @@ func (a *parallelMapActor[In, Out]) Receive(rctx *actor.ReceiveContext) {
 		a.upstream = msg.upstream
 		a.downstream = msg.downstream
 		a.subID = msg.subID
-		a.selfPID = rctx.Self()
-		rctx.Tell(a.upstream, &streamRequest{subID: a.subID, n: int64(a.workers)})
+		a.self = rctx.Self()
+		// Spawn worker func actors. Each handles one workerTask at a time, running fn
+		// with panic recovery and replying with a parallelResult to the parent.
+		fn := a.fn
+		selfPID := a.self
+		sys := rctx.ActorSystem()
+		ctx := rctx.Context()
+		for i := 0; i < a.workersCount; i++ {
+			pid, err := sys.SpawnFromFunc(ctx, func(_ context.Context, rawMsg any) error {
+				task, ok := rawMsg.(*workerTask)
+				if !ok {
+					return nil
+				}
+				var result parallelResult
+				result.seqNo = task.seqNo
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							if e, ok2 := r.(error); ok2 {
+								result.err = e
+							} else {
+								result.err = fmt.Errorf("stream: worker panic: %v", r)
+							}
+						}
+					}()
+					result.value = fn(task.value.(In))
+				}()
+				return actor.Tell(context.Background(), selfPID, &result)
+			})
+			if err != nil {
+				rctx.Tell(a.upstream, &streamCancel{subID: a.subID})
+				rctx.Tell(a.downstream, &streamError{
+					subID: a.subID,
+					err:   fmt.Errorf("stream: failed to spawn parallel worker: %w", err),
+				})
+				rctx.Shutdown()
+				return
+			}
+			a.workers = append(a.workers, pid)
+		}
+		rctx.Tell(a.upstream, &streamRequest{subID: a.subID, n: int64(a.workersCount)})
 
 	case *streamElement:
 		value, ok := msg.value.(In)
@@ -108,28 +160,11 @@ func (a *parallelMapActor[In, Out]) Receive(rctx *actor.ReceiveContext) {
 		a.inFlight++
 		a.inputSeqNo++
 		seqNo := a.inputSeqNo
-		selfPID := a.selfPID
-		fn := a.fn
-		a.sem <- struct{}{}
-		go func() {
-			defer func() { <-a.sem }()
-			defer func() {
-				if r := recover(); r != nil {
-					var err error
-					if e, ok2 := r.(error); ok2 {
-						err = e
-					} else {
-						err = fmt.Errorf("stream: worker panic: %v", r)
-					}
-					_ = actor.Tell(context.Background(), selfPID, &parallelResult{seqNo: seqNo, err: err})
-				}
-			}()
-			out := fn(value)
-			_ = actor.Tell(context.Background(), selfPID, &parallelResult{
-				seqNo: seqNo,
-				value: out,
-			})
-		}()
+		// Dispatch to the next worker via round-robin. Demand control guarantees that
+		// at most `workers` tasks are in flight, so no worker accumulates a backlog.
+		workerPID := a.workers[a.nextWorker]
+		a.nextWorker = (a.nextWorker + 1) % a.workersCount
+		rctx.Tell(workerPID, &workerTask{seqNo: seqNo, value: value, replyTo: a.self})
 
 	case *parallelResult:
 		a.inFlight--
@@ -194,4 +229,12 @@ func (a *parallelMapActor[In, Out]) flushOrdered(rctx *actor.ReceiveContext) {
 	}
 }
 
-func (a *parallelMapActor[In, Out]) PostStop(_ *actor.Context) error { return nil }
+// PostStop shuts down all worker func actors when the stage terminates.
+func (a *parallelMapActor[In, Out]) PostStop(_ *actor.Context) error {
+	for _, workerPID := range a.workers {
+		if workerPID != nil && workerPID.IsRunning() {
+			_ = workerPID.Shutdown(context.Background())
+		}
+	}
+	return nil
+}
