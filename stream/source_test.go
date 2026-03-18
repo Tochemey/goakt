@@ -622,7 +622,7 @@ func TestBalance_NilSlots(t *testing.T) {
 	assert.Nil(t, srcs)
 }
 
-// TestBalance_CancelOneSlot verifies that cancelling one branch leaves the
+// TestBalance_CancelOneSlot verifies that canceling one branch leaves the
 // remaining branches running.
 func TestBalance_CancelOneSlot(t *testing.T) {
 	sys := newTestSystem(t)

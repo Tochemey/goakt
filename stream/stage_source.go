@@ -129,7 +129,7 @@ func (a *chanSourceActor[T]) Receive(rctx *actor.ReceiveContext) {
 		// Bridge the external channel into the actor mailbox using a batching
 		// goroutine. Each batch drains all immediately-available elements (up to
 		// chanBridgeBatchSize) before sending a single actor.Tell, which
-		// amortises the per-element mailbox-enqueue cost on high-throughput channels
+		// amortizes the per-element mailbox-enqueue cost on high-throughput channels
 		// while keeping latency low for slow channels (partial batches are flushed
 		// as soon as no element is immediately available).
 		selfPID := rctx.Self()

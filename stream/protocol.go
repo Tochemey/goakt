@@ -65,7 +65,7 @@ type streamCancel struct {
 
 // chanBatch is sent by the channel-reader goroutine to the channel source actor,
 // carrying a batch of values drained from the external channel in one shot.
-// Batching amortises the per-element actor.Tell overhead on high-throughput channels.
+// Batching amortizes the per-element actor.Tell overhead on high-throughput channels.
 type chanBatch struct {
 	values []any
 }

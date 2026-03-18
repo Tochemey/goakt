@@ -40,7 +40,7 @@ import (
 // The coordinator's primary responsibilities are:
 //  1. Provide a named root for the pipeline subtree so Abort() can cascade via
 //     a single Shutdown() call.
-//  2. Detect when the SINK terminates before the stream has signalled completion
+//  2. Detect when the SINK terminates before the stream has signaled completion
 //     (i.e. a crash in the sink that bypasses the completionWrapper) and signal
 //     the StreamHandle so callers are not left hanging.
 //
@@ -59,7 +59,7 @@ func (c *streamCoordinator) PreStart(_ *actor.Context) error { return nil }
 // child spawned via SpawnChild when that child stops — regardless of Watch calls.
 // Source and flow stages stop as part of normal completion flow, so we only
 // act on Terminated when the message is for the sink PID and the stream has
-// not yet signalled completion (i.e. an unexpected sink crash).
+// not yet signaled completion (i.e. an unexpected sink crash).
 func (c *streamCoordinator) Receive(rctx *actor.ReceiveContext) {
 	switch msg := rctx.Message().(type) {
 	case *actor.Terminated:

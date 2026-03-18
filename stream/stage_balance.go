@@ -166,7 +166,7 @@ func (a *balanceSlotActor[T]) PostStop(_ *actor.Context) error { return nil }
 // balanceHubActor routes each element to exactly ONE slot — the next slot with
 // outstanding demand in round-robin order. This distributes work across branches
 // while preserving backpressure: upstream is pulled only when at least one
-// downstream slot has signalled capacity.
+// downstream slot has signaled capacity.
 type balanceHubActor[T any] struct {
 	n          int
 	slotPIDs   []*actor.PID
