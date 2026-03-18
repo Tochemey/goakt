@@ -40,6 +40,7 @@ type flowActor struct {
 	subID            string
 	seqNo            uint64
 	outputBuf        queue
+	startBuf         []time.Time // per-output start times; populated only when tracer != nil
 	upstreamCredit   int64
 	downstreamDemand int64
 	completing       bool // true once upstream sent streamComplete
@@ -47,7 +48,7 @@ type flowActor struct {
 	metrics          *stageMetrics
 	stageName        string
 	tracer           Tracer
-	lastInputStart   time.Time // set only when tracer != nil; used by tryFlushOutput
+	lastInputStart   time.Time // set only when tracer != nil; records start time for the current input
 }
 
 // newFlowActor creates a flowActor that applies transformFn to each element.
@@ -121,6 +122,7 @@ func (a *flowActor) Receive(rctx *actor.ReceiveContext) {
 					}
 				}
 				if retryErr != nil {
+					rctx.Tell(a.upstream, &streamCancel{subID: a.subID})
 					rctx.Tell(a.downstream, &streamError{subID: a.subID, err: retryErr})
 					rctx.Shutdown()
 					return
@@ -131,10 +133,12 @@ func (a *flowActor) Receive(rctx *actor.ReceiveContext) {
 				// stream supervisor can apply its restart/stop directive.
 				// For now this behaves like FailFast until a dedicated stream
 				// supervisor actor hierarchy is wired in.
+				rctx.Tell(a.upstream, &streamCancel{subID: a.subID})
 				rctx.Tell(a.downstream, &streamError{subID: a.subID, err: err})
 				rctx.Shutdown()
 				return
 			default: // FailFast
+				rctx.Tell(a.upstream, &streamCancel{subID: a.subID})
 				rctx.Tell(a.downstream, &streamError{subID: a.subID, err: err})
 				rctx.Shutdown()
 				return
@@ -143,6 +147,9 @@ func (a *flowActor) Receive(rctx *actor.ReceiveContext) {
 		a.upstreamCredit--
 		for _, v := range outs {
 			a.outputBuf.push(v)
+			if a.tracer != nil {
+				a.startBuf = append(a.startBuf, a.lastInputStart)
+			}
 		}
 		a.metrics.elementsOut.Add(uint64(len(outs)))
 		a.tryFlushOutput(rctx)
@@ -185,8 +192,9 @@ func (a *flowActor) tryFlushOutput(rctx *actor.ReceiveContext) {
 	for a.downstreamDemand > 0 && !a.outputBuf.empty() {
 		a.seqNo++
 		if a.tracer != nil {
-			latencyNs := time.Since(a.lastInputStart).Nanoseconds()
-			a.tracer.OnElement(a.stageName, a.seqNo, latencyNs)
+			startTime := a.startBuf[0]
+			a.startBuf = a.startBuf[1:]
+			a.tracer.OnElement(a.stageName, a.seqNo, time.Since(startTime).Nanoseconds())
 		}
 		rctx.Tell(a.downstream, &streamElement{
 			subID: a.subID,

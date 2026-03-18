@@ -135,6 +135,7 @@ func (a *sinkActor) Receive(rctx *actor.ReceiveContext) {
 
 	case *streamError:
 		a.termErr = msg.err // preserved for completionWrapper → StreamHandle.Err()
+		rctx.Tell(a.upstream, &streamCancel{subID: a.subID})
 		a.callOnComplete()
 		rctx.Shutdown()
 

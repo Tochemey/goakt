@@ -25,6 +25,7 @@ package stream
 import (
 	"container/heap"
 	"context"
+	"fmt"
 
 	"github.com/tochemey/goakt/v4/actor"
 )
@@ -94,15 +95,35 @@ func (a *parallelMapActor[In, Out]) Receive(rctx *actor.ReceiveContext) {
 		rctx.Tell(a.upstream, &streamRequest{subID: a.subID, n: int64(a.workers)})
 
 	case *streamElement:
+		value, ok := msg.value.(In)
+		if !ok {
+			rctx.Tell(a.upstream, &streamCancel{subID: a.subID})
+			rctx.Tell(a.downstream, &streamError{
+				subID: a.subID,
+				err:   fmt.Errorf("stream: type mismatch in parallel stage: expected %T, got %T", *new(In), msg.value),
+			})
+			rctx.Shutdown()
+			return
+		}
 		a.inFlight++
 		a.inputSeqNo++
 		seqNo := a.inputSeqNo
-		value := msg.value.(In)
 		selfPID := a.selfPID
 		fn := a.fn
 		a.sem <- struct{}{}
 		go func() {
 			defer func() { <-a.sem }()
+			defer func() {
+				if r := recover(); r != nil {
+					var err error
+					if e, ok2 := r.(error); ok2 {
+						err = e
+					} else {
+						err = fmt.Errorf("stream: worker panic: %v", r)
+					}
+					_ = actor.Tell(context.Background(), selfPID, &parallelResult{seqNo: seqNo, err: err})
+				}
+			}()
 			out := fn(value)
 			_ = actor.Tell(context.Background(), selfPID, &parallelResult{
 				seqNo: seqNo,
@@ -113,6 +134,7 @@ func (a *parallelMapActor[In, Out]) Receive(rctx *actor.ReceiveContext) {
 	case *parallelResult:
 		a.inFlight--
 		if msg.err != nil {
+			rctx.Tell(a.upstream, &streamCancel{subID: a.subID})
 			rctx.Tell(a.downstream, &streamError{subID: a.subID, err: msg.err})
 			rctx.Shutdown()
 			return
