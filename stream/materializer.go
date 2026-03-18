@@ -42,18 +42,31 @@ func newStreamSubID() string {
 	return strconv.FormatUint(atomic.AddUint64(&streamSeq, 1), 10)
 }
 
+// terminalErrorActor is an optional interface that sink actors implement to
+// expose the terminal error captured when a *streamError message is received.
+// completionWrapper checks for this interface in PostStop to propagate the
+// error to StreamHandle via onDone.
+type terminalErrorActor interface {
+	TermErr() error
+}
+
 // completionWrapper wraps any actor.Actor and calls onDone in PostStop.
-// The materializer uses this to detect when the sink terminates.
+// The materializer uses this to detect when the sink terminates and to
+// propagate any terminal error to the StreamHandle.
 type completionWrapper struct {
 	inner  actor.Actor
-	onDone func()
+	onDone func(error)
 }
 
 func (w *completionWrapper) PreStart(ctx *actor.Context) error { return w.inner.PreStart(ctx) }
 func (w *completionWrapper) Receive(ctx *actor.ReceiveContext) { w.inner.Receive(ctx) }
 func (w *completionWrapper) PostStop(ctx *actor.Context) error {
 	err := w.inner.PostStop(ctx)
-	w.onDone()
+	var termErr error
+	if tea, ok := w.inner.(terminalErrorActor); ok {
+		termErr = tea.TermErr()
+	}
+	w.onDone(termErr)
 	return err
 }
 
@@ -85,7 +98,7 @@ func materialize(ctx context.Context, system actor.ActorSystem, stages []*stageD
 	wrappedSinkDesc.makeActor = func(cfg StageConfig) actor.Actor {
 		return &completionWrapper{
 			inner:  origSinkMake(cfg),
-			onDone: func() { handle.signalDone(nil) },
+			onDone: handle.signalDone,
 		}
 	}
 

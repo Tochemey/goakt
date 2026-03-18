@@ -96,8 +96,12 @@ func (a *flowActor) Receive(rctx *actor.ReceiveContext) {
 			}
 			switch a.config.ErrorStrategy {
 			case Resume:
-				// Drop element and request a replacement from upstream.
+				// Drop element: update metrics, notify the OnDrop hook, and request a replacement.
 				a.upstreamCredit--
+				a.metrics.droppedElements.Add(1)
+				if a.config.OnDrop != nil {
+					a.config.OnDrop(msg.value, "resume: element processing error")
+				}
 				a.maybeRequestUpstream(rctx)
 				return
 			case Retry:

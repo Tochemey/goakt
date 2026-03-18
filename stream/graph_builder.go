@@ -124,8 +124,8 @@ func (g *Graph) addNode(n *graphBuilderNode) {
 }
 
 // Build validates the graph and compiles it into a RunnableGraph.
-// Returns ErrInvalidGraph if the graph has no sources or sinks, or if a node
-// references an unknown upstream.
+// Returns ErrInvalidGraph if the graph has no sources or sinks, if a node
+// references an unknown upstream, or if the graph contains a cycle.
 func (g *Graph) Build() (RunnableGraph, error) {
 	if err := g.validateGraph(); err != nil {
 		return RunnableGraph{}, err
@@ -221,7 +221,11 @@ func (g *Graph) compile() ([][]*stageDesc, error) {
 }
 
 // topologicalOrder returns node names in upstream-before-downstream order.
+// Returns an error if the graph contains a cycle.
 func (g *Graph) topologicalOrder() ([]string, error) {
+	// visiting tracks nodes on the current DFS recursion stack (gray nodes).
+	// visited tracks nodes whose full subtree has been explored (black nodes).
+	visiting := map[string]bool{}
 	visited := map[string]bool{}
 	var order []string
 	var visit func(name string) error
@@ -229,13 +233,18 @@ func (g *Graph) topologicalOrder() ([]string, error) {
 		if visited[name] {
 			return nil
 		}
-		visited[name] = true
+		if visiting[name] {
+			return fmt.Errorf("%w: cycle detected at node %q", ErrInvalidGraph, name)
+		}
+		visiting[name] = true
 		node := g.nodes[name]
 		for _, from := range node.from {
 			if err := visit(from); err != nil {
 				return err
 			}
 		}
+		delete(visiting, name)
+		visited[name] = true
 		order = append(order, name)
 		return nil
 	}

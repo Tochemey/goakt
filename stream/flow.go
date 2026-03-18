@@ -104,16 +104,6 @@ func (f Flow[In, Out]) WithTracer(t Tracer) Flow[In, Out] {
 	return Flow[In, Out]{desc: &newDesc}
 }
 
-// WithMicroBatch returns a new Flow that accumulates n elements before sending downstream.
-// n < 2 disables micro-batching (default behaviour).
-func (f Flow[In, Out]) WithMicroBatch(n int) Flow[In, Out] {
-	newDesc := *f.desc
-	newDesc.config.MicroBatch = n
-	prevMake := f.desc.makeActor
-	newDesc.makeActor = func(_ StageConfig) actor.Actor { return prevMake(newDesc.config) }
-	return Flow[In, Out]{desc: &newDesc}
-}
-
 // Map creates a Flow that applies fn to each element with no error path.
 func Map[In, Out any](fn func(In) Out) Flow[In, Out] {
 	return TryMap(func(in In) (Out, error) { return fn(in), nil })

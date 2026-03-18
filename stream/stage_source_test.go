@@ -35,12 +35,11 @@ import (
 
 // ─── pullSourceActor cancel ───────────────────────────────────────────────────
 
-func TestPullSourceActor_Cancel(t *testing.T) {
-	// Stop an Of source via handle.Stop — exercises pullSourceActor *streamCancel.
+func TestPullSourceActor_NaturalCompletion(t *testing.T) {
+	// Verifies that a finite Of source completes naturally and delivers all elements.
 	sys := newInternalTestSystem(t)
 	ctx := context.Background()
 
-	// Large enough to keep the source running until we stop it.
 	input := make([]int, 300)
 	for i := range input {
 		input[i] = i
@@ -49,7 +48,6 @@ func TestPullSourceActor_Cancel(t *testing.T) {
 	handle, err := Of(input...).To(sink).Run(ctx, sys)
 	require.NoError(t, err)
 	<-handle.Done()
-	// Just verify completion (either natural or via cancel) — the exact count varies.
 	assert.NotNil(t, col.Items())
 }
 

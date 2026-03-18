@@ -38,7 +38,13 @@ type sinkActor struct {
 	credit  int64
 	config  StageConfig
 	metrics *stageMetrics
+	termErr error // set when the stream terminates via *streamError; read by completionWrapper
 }
+
+// TermErr returns the terminal error recorded when a *streamError was received,
+// or nil on normal completion. Implemented for the terminalErrorActor interface
+// so completionWrapper can propagate the error to StreamHandle.
+func (a *sinkActor) TermErr() error { return a.termErr }
 
 func newSinkActor(consumeFn func(any) error, onComplete func(), config StageConfig) *sinkActor {
 	m := config.Metrics
@@ -66,7 +72,17 @@ func (a *sinkActor) Receive(rctx *actor.ReceiveContext) {
 			a.metrics.errors.Add(1)
 			switch a.config.ErrorStrategy {
 			case Resume:
-				// skip element, maybe refill
+				// Drop element: update metrics and notify the OnDrop hook, then refill.
+				a.metrics.droppedElements.Add(1)
+				if a.config.OnDrop != nil {
+					a.config.OnDrop(msg.value, "resume: element processing error")
+				}
+				if a.credit <= a.config.RefillThreshold {
+					refill := a.config.InitialDemand - a.credit
+					a.credit += refill
+					rctx.Tell(a.upstream, &streamRequest{subID: a.subID, n: refill})
+				}
+				return
 			case Retry:
 				maxAttempts := a.config.RetryConfig.MaxAttempts
 				if maxAttempts < 1 {
@@ -81,6 +97,10 @@ func (a *sinkActor) Receive(rctx *actor.ReceiveContext) {
 					a.metrics.errors.Add(1)
 				}
 				if retryErr != nil {
+					a.metrics.droppedElements.Add(1)
+					if a.config.OnDrop != nil {
+						a.config.OnDrop(msg.value, "retry-exhausted: element processing error")
+					}
 					rctx.Tell(a.upstream, &streamCancel{subID: a.subID})
 					a.callOnComplete()
 					rctx.Shutdown()
@@ -114,7 +134,7 @@ func (a *sinkActor) Receive(rctx *actor.ReceiveContext) {
 		rctx.Shutdown()
 
 	case *streamError:
-		_ = msg.err // error already propagated from upstream
+		a.termErr = msg.err // preserved for completionWrapper → StreamHandle.Err()
 		a.callOnComplete()
 		rctx.Shutdown()
 

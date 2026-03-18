@@ -28,9 +28,9 @@ type OverflowStrategy int
 
 const (
 	// DropHead drops the oldest element in the buffer to make room.
-	// This is the default strategy.
 	DropHead OverflowStrategy = iota
 	// DropTail drops the newest (incoming) element when the buffer is full.
+	// This is the default strategy.
 	DropTail
 	// BackpressureSource blocks the producing goroutine until space is available.
 	// Only valid for pull-based or goroutine-driven sources.

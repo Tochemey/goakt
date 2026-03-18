@@ -101,9 +101,6 @@ type StageConfig struct {
 	// Fusion controls whether this stage may be fused with adjacent stateless stages.
 	// Default: true.
 	Fusion bool
-	// MicroBatch, if > 1, accumulates this many elements before sending downstream.
-	// Default: 1 (no micro-batching). Only applies to flow stages.
-	MicroBatch int
 }
 
 // defaultStageConfig returns a StageConfig with production-safe defaults.
