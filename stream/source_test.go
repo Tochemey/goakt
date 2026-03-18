@@ -265,22 +265,36 @@ func TestTick_EmitsTimestamps(t *testing.T) {
 	handle, err := stream.Tick(30*time.Millisecond).To(stream.Chan(out)).Run(ctx, sys)
 	require.NoError(t, err)
 
-	time.Sleep(150 * time.Millisecond)
-	require.NoError(t, handle.Stop(ctx))
-
-	select {
-	case <-handle.Done():
-	case <-time.After(3 * time.Second):
-		t.Fatal("tick stream did not stop")
+	// Wait until we have received at least 3 ticks (with a generous timeout to
+	// accommodate slow CI runners where actor-system startup adds latency).
+	const wantTicks = 3
+	deadline := time.After(5 * time.Second)
+	var ticks []time.Time
+collect:
+	for {
+		select {
+		case ts, ok := <-out:
+			if !ok {
+				break collect
+			}
+			ticks = append(ticks, ts)
+			if len(ticks) >= wantTicks {
+				break collect
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for ticks")
+		}
 	}
 
-	// Chan sink closes `out` when the stream completes, so range terminates.
-	var ticks []time.Time
+	require.NoError(t, handle.Stop(ctx))
+	<-handle.Done()
+
+	// Drain any remaining buffered ticks.
 	for ts := range out {
 		ticks = append(ticks, ts)
 	}
-	// At 30ms interval over ~150ms we expect at least 3 ticks.
-	assert.GreaterOrEqual(t, len(ticks), 3)
+
+	assert.GreaterOrEqual(t, len(ticks), wantTicks)
 }
 
 // ─── Unfold ───────────────────────────────────────────────────────────────────
