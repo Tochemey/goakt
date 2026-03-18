@@ -1,5 +1,104 @@
 # Changelog
 
+## [Unreleased]
+
+### ✨ New Additions
+
+#### `stream` package — Reactive Streams for GoAkt
+
+A new top-level `stream` package brings demand-driven, actor-native stream processing to GoAkt.
+Every pipeline stage runs inside a GoAkt actor, inheriting supervision, lifecycle management, and
+location transparency automatically. Pipelines are lazy: nothing executes until `RunnableGraph.Run`
+is called against a live `ActorSystem`.
+
+**Core abstractions**
+
+- `Source[T]` — lazy description of a stream origin; assembled with `Via` / `To` into a `RunnableGraph`.
+- `Flow[In, Out]` — lazy description of a transformation stage; type-safe, composable.
+- `Sink[T]` — lazy description of a terminal consumer stage.
+- `RunnableGraph` — fully assembled pipeline; a value type that can be `Run` multiple times for independent instances.
+- `StreamHandle` — live handle returned by `Run`; exposes `ID()`, `Done()`, `Err()`, `Stop(ctx)`, `Abort()`, and `Metrics()`.
+
+**Sources**
+
+| Constructor                       | Description                                                                   |
+|-----------------------------------|-------------------------------------------------------------------------------|
+| `Of[T](values...)`                | Finite source from a fixed set of values                                      |
+| `Range(start, end)`               | Integer range source (`[start, end)`)                                         |
+| `FromChannel[T](ch)`              | Reads from a Go channel; completes when the channel closes                    |
+| `FromActor[T](pid)`               | Pulls from a GoAkt actor using the `PullRequest` / `PullResponse[T]` protocol |
+| `Tick(interval)`                  | Emits `time.Time` on a fixed interval; runs until cancelled                   |
+| `Merge[T](sources...)`            | Fans N sources into one; completes when all inputs complete                   |
+| `Combine[T,U,V](left, right, fn)` | Zips two sources pairwise via `fn`; zip semantics                             |
+| `Broadcast[T](src, n)`            | Fans one source out to N independent branches                                 |
+| `Balance[T](src, n)`              | Distributes one source across N branches (round-robin with backpressure)      |
+| `FromConn(conn, bufSize)`         | Reads `[]byte` frames from a `net.Conn`                                       |
+| `Unfold[S,T](seed, step)`         | Generates values from a seed with a stateful step function                    |
+
+**Flows**
+
+| Constructor                         | Description                                                                     |
+|-------------------------------------|---------------------------------------------------------------------------------|
+| `Map[In,Out](fn)`                   | Type-changing transformation; no error path                                     |
+| `TryMap[In,Out](fn)`                | Transformation with error; ErrorStrategy controls failure handling              |
+| `Filter[T](predicate)`              | Keeps only elements where `predicate` returns true                              |
+| `FlatMap[In,Out](fn)`               | Expands each element into a slice of outputs                                    |
+| `Flatten[T]()`                      | Unwraps `[]T` elements into individual elements                                 |
+| `Batch[T](n, maxWait)`              | Groups elements into `[]T` slices of at most `n`; flushes early after `maxWait` |
+| `Buffer[T](size, strategy)`         | Asynchronous buffer with configurable overflow strategy                         |
+| `Throttle[T](n, per)`               | Limits throughput to at most `n` elements per `per` duration                    |
+| `Deduplicate[T]()`                  | Suppresses consecutive duplicate elements (`T` must be comparable)              |
+| `Scan[In,State](zero, fn)`          | Running accumulation; emits each intermediate state                             |
+| `WithContext[T](key, value)`        | Labels a tracing boundary; passes elements through unchanged                    |
+| `ParallelMap[In,Out](n, fn)`        | Applies `fn` concurrently with up to `n` goroutines; unordered output           |
+| `OrderedParallelMap[In,Out](n, fn)` | Like `ParallelMap` but preserves input order (min-heap resequencing)            |
+
+**Sinks**
+
+| Constructor                     | Description                                                                    |
+|---------------------------------|--------------------------------------------------------------------------------|
+| `ForEach[T](fn)`                | Calls `fn` for each element                                                    |
+| `Collect[T]()`                  | Accumulates all elements; retrieve via `Collector[T].Items()` after completion |
+| `Fold[T,U](zero, fn)`           | Reduces to a single value; retrieve via `FoldResult[U].Value()`                |
+| `First[T]()`                    | Captures the first element then cancels upstream                               |
+| `Ignore[T]()`                   | Discards all elements; useful for side-effecting flows                         |
+| `Chan[T](ch)`                   | Writes each element to a Go channel; applies natural backpressure when full    |
+| `ToActor[T](pid)`               | Forwards each element to a GoAkt actor via `Tell`                              |
+| `ToActorNamed[T](system, name)` | Resolves actor by name on each element and forwards via `Tell`                 |
+
+**Pipeline DSL**
+
+- `From[T](src)` — starts a `LinearGraph[T]` fluent builder.
+- `LinearGraph[T].Via(flow)` — chains a type-preserving flow.
+- `LinearGraph[T].To(sink)` — attaches a sink and returns a `RunnableGraph`.
+- `ViaLinear[In,Out](g, flow)` — type-changing step on a `LinearGraph`.
+- `Via[In,Out](src, flow)` — package-level free function for type-changing flows on `Source`.
+- `Graph` DSL — named-node builder for non-linear topologies (fan-out, fan-in, merge).
+
+**Backpressure & configuration**
+
+- Credit-based demand propagation: sinks signal demand upstream; sources produce only what is requested.
+- `StageConfig` — per-stage knobs: `InitialDemand`, `RefillThreshold`, `ErrorStrategy`, `RetryConfig`, `OverflowStrategy`, `BufferSize`, `Mailbox`, `Name`, `Tags`, `Tracer`, `Fusion`, `MicroBatch`, `PullTimeout`, `OnDrop`.
+- `ErrorStrategy` — `FailFast` (default), `Resume` (skip), `Retry` (with `RetryConfig.MaxAttempts`), `Supervise`.
+- `OverflowStrategy` — `DropTail`, `DropHead`, `DropBuffer`, `Backpressure`, `Fail`.
+- `FusionMode` — `FuseStateless` (default, fuses adjacent `Map`/`Filter` stages into one actor), `FuseNone`, `FuseAggressive`.
+
+**Observability**
+
+- `Tracer` interface — per-element hooks: `OnElement`, `OnDemand`, `OnError`, `OnComplete`; attach via `WithTracer`.
+- `MetricsReporter` interface — snapshot forwarding to external systems (Prometheus, OTel).
+- `StreamHandle.Metrics()` — live `StreamMetrics` snapshot with element-in, element-out, and error counts.
+
+**Performance internals**
+
+- `time.Now()` is guarded by `tracer != nil` on the element hot path — no clock overhead when tracing is disabled.
+- `fusedFlowActor` (stage-fusion fast path) uses credit-based batch demand refill instead of one `streamRequest` allocation per element, reducing demand-message overhead by ~160× under default configuration.
+- `chanSourceActor` bridges external channels to the actor mailbox in batches of up to 64 values per `actor.Tell` call (drain-without-blocking strategy), significantly reducing mailbox-enqueue overhead on high-throughput channels while keeping latency low for slow channels.
+- `connSourceActor` pools full-sized read buffers via `sync.Pool`; each element sent downstream is an exact-sized copy, eliminating a per-read heap allocation.
+- `Filter` and `Deduplicate` return `nil` instead of an empty `[]any{}` for skipped elements, removing a slice allocation on every filtered-out element.
+- Stream sub-IDs use an atomic counter instead of UUID generation, avoiding an entropy read and string-formatting cost on every `RunnableGraph.Run` call.
+- `flowActor.tryFlushOutput` now fires `Tracer.OnElement` with the definitively-assigned sequence number, fixing incorrect seqNo reporting for multi-output transforms (`FlatMap`).
+
 ## [v4.1.0] - 2026-03-16
 
 ### ⚠️ Breaking Changes
