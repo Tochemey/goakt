@@ -91,9 +91,7 @@ func TestGraph_Build_MultipleFlowsWithSharedSource(t *testing.T) {
 	h, runErr := rg.Run(t.Context(), sys)
 	require.NoError(t, runErr)
 
-	select {
-	case <-h.Done():
-	}
+	<-h.Done()
 	require.NoError(t, h.Err())
 	require.Equal(t, []any{2, 4}, col0.Items())
 	require.Equal(t, []any{-1, -2}, col1.Items())
