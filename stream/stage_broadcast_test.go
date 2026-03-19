@@ -267,7 +267,7 @@ func TestBroadcastSlotActor_StreamCancel_Unit(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	// Give the slot a hub PID so it can forward slotCancel.
-	require.NoError(t, actor.Tell(ctx, slotPID, &hubReady{hubPID: hubPID}))
+	require.NoError(t, actor.Tell(ctx, slotPID, &hubReady{hub: hubPID}))
 	time.Sleep(5 * time.Millisecond)
 
 	// Send streamCancel — slot should forward slotCancel to hub and shut down.

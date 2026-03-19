@@ -47,7 +47,7 @@ func TestParallelMap_BasicTransform(t *testing.T) {
 	col, sink := Collect[int]()
 	handle, err := Via(
 		Of(1, 2, 3, 4, 5),
-		ParallelMap[int, int](3, func(n int) int { return n * 2 }),
+		ParallelMap(3, func(n int) int { return n * 2 }),
 	).To(sink).Run(ctx, sys)
 	require.NoError(t, err)
 	waitDone(t, handle, 5*time.Second)
@@ -84,7 +84,7 @@ func TestParallelMap_TypeConversion(t *testing.T) {
 	col, sink := Collect[string]()
 	handle, err := Via(
 		Of(1, 2, 3),
-		ParallelMap[int, string](2, func(n int) string { return fmt.Sprintf("item-%d", n) }),
+		ParallelMap(2, func(n int) string { return fmt.Sprintf("item-%d", n) }),
 	).To(sink).Run(ctx, sys)
 	require.NoError(t, err)
 	waitDone(t, handle, 5*time.Second)
@@ -124,7 +124,7 @@ func TestParallelMap_LargeInput(t *testing.T) {
 	col, sink := Collect[int]()
 	handle, err := Via(
 		Of(input...),
-		ParallelMap[int, int](4, func(v int) int { return v * v }),
+		ParallelMap(4, func(v int) int { return v * v }),
 	).To(sink).Run(ctx, sys)
 	require.NoError(t, err)
 	waitDone(t, handle, 10*time.Second)
@@ -152,7 +152,7 @@ func TestParallelMap_ConcurrencyActuallyParallel(t *testing.T) {
 	start := time.Now()
 	handle, err := Via(
 		Of(1, 2, 3, 4),
-		ParallelMap[int, int](workers, func(n int) int {
+		ParallelMap(workers, func(n int) int {
 			time.Sleep(sleep)
 			return n
 		}),
@@ -178,7 +178,7 @@ func TestParallelMap_WorkerPanic(t *testing.T) {
 
 	handle, err := Via(
 		Of(1, 2, 3),
-		ParallelMap[int, int](2, func(n int) int {
+		ParallelMap(2, func(n int) int {
 			if n == 2 {
 				panic("deliberate worker panic")
 			}
@@ -197,7 +197,7 @@ func TestParallelMap_WorkerPanicPropagatesError(t *testing.T) {
 
 	handle, err := Via(
 		Of(1, 2, 3),
-		ParallelMap[int, int](2, func(n int) int {
+		ParallelMap(2, func(n int) int {
 			if n == 2 {
 				panic(errors.New("panic error"))
 			}
@@ -217,7 +217,7 @@ func TestParallelMap_UpstreamCancel(t *testing.T) {
 
 	handle, err := Via(
 		Of(1, 2, 3, 4, 5),
-		ParallelMap[int, int](2, func(n int) int { return n }),
+		ParallelMap(2, func(n int) int { return n }),
 	).To(errSink(1, FailFast)).Run(ctx, sys)
 	require.NoError(t, err)
 	waitDone(t, handle, 5*time.Second)
@@ -234,7 +234,7 @@ func TestParallelMap_StreamCancel(t *testing.T) {
 	downPID, err := sys.Spawn(ctx, "pm-cancel-down", &dummyStageActor{})
 	require.NoError(t, err)
 
-	pa := newParallelMapActor[int, int](2, func(n int) int { return n }, false, defaultStageConfig())
+	pa := newParallelMapActor(2, func(n int) int { return n }, false, defaultStageConfig())
 	paPID, err := sys.Spawn(ctx, "pm-cancel-actor", pa)
 	require.NoError(t, err)
 
@@ -283,7 +283,7 @@ func TestParallelMap_n_LessThan1_Coerced(t *testing.T) {
 	col, sink := Collect[int]()
 	handle, err := Via(
 		Of(1, 2, 3),
-		ParallelMap[int, int](0, func(n int) int { return n }),
+		ParallelMap(0, func(n int) int { return n }),
 	).To(sink).Run(ctx, sys)
 	require.NoError(t, err)
 	waitDone(t, handle, 5*time.Second)
@@ -306,7 +306,7 @@ func TestParallelMap_WorkerCountMatchesConcurrency(t *testing.T) {
 	col, sink := Collect[int]()
 	handle, err := Via(
 		Of(1, 2, 3, 4, 5, 6),
-		ParallelMap[int, int](workers, func(n int) int {
+		ParallelMap(workers, func(n int) int {
 			cur := active.Add(1)
 			// Track the high-water mark.
 			for {
@@ -339,7 +339,7 @@ func TestOrderedParallelMap_PreservesOrder(t *testing.T) {
 	col, sink := Collect[int]()
 	handle, err := Via(
 		Of(1, 2, 3, 4, 5),
-		OrderedParallelMap[int, int](3, func(n int) int { return n * 2 }),
+		OrderedParallelMap(3, func(n int) int { return n * 2 }),
 	).To(sink).Run(ctx, sys)
 	require.NoError(t, err)
 	waitDone(t, handle, 5*time.Second)
@@ -356,7 +356,7 @@ func TestOrderedParallelMap_SingleWorker(t *testing.T) {
 	col, sink := Collect[int]()
 	handle, err := Via(
 		Of(5, 4, 3, 2, 1),
-		OrderedParallelMap[int, int](1, func(n int) int { return n * 10 }),
+		OrderedParallelMap(1, func(n int) int { return n * 10 }),
 	).To(sink).Run(ctx, sys)
 	require.NoError(t, err)
 	waitDone(t, handle, 5*time.Second)
@@ -372,7 +372,7 @@ func TestOrderedParallelMap_TypeConversion(t *testing.T) {
 	col, sink := Collect[string]()
 	handle, err := Via(
 		Of(3, 1, 2),
-		OrderedParallelMap[int, string](3, func(n int) string { return fmt.Sprintf("%03d", n) }),
+		OrderedParallelMap(3, func(n int) string { return fmt.Sprintf("%03d", n) }),
 	).To(sink).Run(ctx, sys)
 	require.NoError(t, err)
 	waitDone(t, handle, 5*time.Second)
@@ -389,7 +389,7 @@ func TestOrderedParallelMap_EmptySource(t *testing.T) {
 	col, sink := Collect[int]()
 	handle, err := Via(
 		Of[int](),
-		OrderedParallelMap[int, int](3, func(n int) int { return n }),
+		OrderedParallelMap(3, func(n int) int { return n }),
 	).To(sink).Run(ctx, sys)
 	require.NoError(t, err)
 	waitDone(t, handle, 5*time.Second)
@@ -411,7 +411,7 @@ func TestOrderedParallelMap_LargeInput(t *testing.T) {
 	col, sink := Collect[int]()
 	handle, err := Via(
 		Of(input...),
-		OrderedParallelMap[int, int](5, func(v int) int {
+		OrderedParallelMap(5, func(v int) int {
 			// Odd elements sleep briefly so results arrive out of natural order,
 			// exercising the resequencer heap.
 			if v%2 != 0 {
@@ -438,7 +438,7 @@ func TestOrderedParallelMap_WorkerPanic(t *testing.T) {
 
 	handle, err := Via(
 		Of(1, 2, 3),
-		OrderedParallelMap[int, int](2, func(n int) int {
+		OrderedParallelMap(2, func(n int) int {
 			if n == 2 {
 				panic("ordered worker panic")
 			}
@@ -458,7 +458,7 @@ func TestOrderedParallelMap_UpstreamCancel(t *testing.T) {
 
 	handle, err := Via(
 		Of(1, 2, 3, 4, 5),
-		OrderedParallelMap[int, int](2, func(n int) int { return n }),
+		OrderedParallelMap(2, func(n int) int { return n }),
 	).To(errSink(1, FailFast)).Run(ctx, sys)
 	require.NoError(t, err)
 	waitDone(t, handle, 5*time.Second)
@@ -480,7 +480,7 @@ func TestOrderedParallelMap_StreamErrorFromUpstream(t *testing.T) {
 				return n, nil
 			}),
 		),
-		OrderedParallelMap[int, int](2, func(n int) int { return n }),
+		OrderedParallelMap(2, func(n int) int { return n }),
 	).To(Ignore[int]()).Run(ctx, sys)
 	require.NoError(t, err)
 	waitDone(t, handle, 5*time.Second)
@@ -494,7 +494,7 @@ func TestOrderedParallelMap_n_LessThan1_Coerced(t *testing.T) {
 	col, sink := Collect[int]()
 	handle, err := Via(
 		Of(3, 1, 2),
-		OrderedParallelMap[int, int](-5, func(n int) int { return n }),
+		OrderedParallelMap(-5, func(n int) int { return n }),
 	).To(sink).Run(ctx, sys)
 	require.NoError(t, err)
 	waitDone(t, handle, 5*time.Second)
@@ -514,7 +514,7 @@ func TestOrderedParallelMap_StreamCancel_Unit(t *testing.T) {
 	downPID, err := sys.Spawn(ctx, "opm-cancel-down", &dummyStageActor{})
 	require.NoError(t, err)
 
-	oa := newParallelMapActor[int, int](2, func(n int) int { return n }, true, defaultStageConfig())
+	oa := newParallelMapActor(2, func(n int) int { return n }, true, defaultStageConfig())
 	oaPID, err := sys.Spawn(ctx, "opm-cancel-actor", oa)
 	require.NoError(t, err)
 
@@ -541,7 +541,7 @@ func TestParallelMap_ComposedWithFilter(t *testing.T) {
 	handle, err := Via(
 		Via(
 			Of(1, 2, 3, 4, 5, 6),
-			ParallelMap[int, int](3, func(n int) int { return n * 2 }),
+			ParallelMap(3, func(n int) int { return n * 2 }),
 		),
 		Filter(func(n int) bool { return n > 6 }),
 	).To(sink).Run(ctx, sys)
@@ -563,7 +563,7 @@ func TestOrderedParallelMap_ComposedWithScan(t *testing.T) {
 	handle, err := Via(
 		Via(
 			Of(1, 2, 3, 4),
-			OrderedParallelMap[int, int](2, func(n int) int { return n * 2 }),
+			OrderedParallelMap(2, func(n int) int { return n * 2 }),
 		),
 		Scan(0, func(acc, n int) int { return acc + n }),
 	).To(sink).Run(ctx, sys)

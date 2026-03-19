@@ -66,12 +66,12 @@ func (m *stageMetrics) snapshot() StreamMetrics {
 // aggregateMetrics sums multiple stageMetrics snapshots into one StreamMetrics.
 func aggregateMetrics(parts []StreamMetrics) StreamMetrics {
 	var agg StreamMetrics
-	for _, p := range parts {
-		agg.ElementsIn += p.ElementsIn
-		agg.ElementsOut += p.ElementsOut
-		agg.DroppedElements += p.DroppedElements
-		agg.Errors += p.Errors
-		agg.BackpressureMs += p.BackpressureMs
+	for _, part := range parts {
+		agg.ElementsIn += part.ElementsIn
+		agg.ElementsOut += part.ElementsOut
+		agg.DroppedElements += part.DroppedElements
+		agg.Errors += part.Errors
+		agg.BackpressureMs += part.BackpressureMs
 	}
 	return agg
 }

@@ -33,8 +33,6 @@ import (
 	"github.com/tochemey/goakt/v4/actor"
 )
 
-// ─── pullSourceActor cancel ───────────────────────────────────────────────────
-
 func TestPullSourceActor_NaturalCompletion(t *testing.T) {
 	// Verifies that a finite Of source completes naturally and delivers all elements.
 	sys := newInternalTestSystem(t)
@@ -72,8 +70,6 @@ func TestPullSourceActor_Cancel_ViaStop(t *testing.T) {
 	}
 }
 
-// ─── actorSourceActor fetchErr — wrong response type ─────────────────────────
-
 // wrongTypePullActor responds to PullRequest with a string instead of PullResponse[int].
 type wrongTypePullActor struct{}
 
@@ -104,8 +100,6 @@ func TestActorSourceActor_FetchErr_WrongType(t *testing.T) {
 		t.Fatal("stream did not terminate after fetchErr")
 	}
 }
-
-// ─── actorSourceActor fetchErr — actor.Ask timeout ───────────────────────────
 
 // silentPullActor never responds to PullRequest, causing actor.Ask to time out.
 type silentPullActor struct{}
@@ -145,8 +139,6 @@ func TestActorSourceActor_FetchErr_Timeout(t *testing.T) {
 		t.Fatal("stream did not terminate after fetch timeout")
 	}
 }
-
-// ─── actorSourceActor actor.Terminated ────────────────────────────────────────
 
 // stalledPullActor responds to the first PullRequest with elements, then stalls
 // so the source actor is waiting for a second pull when we kill the upstream.
@@ -201,8 +193,6 @@ func TestActorSourceActor_Terminated(t *testing.T) {
 	}
 }
 
-// ─── combineSourceActor type mismatch ─────────────────────────────────────────
-
 // TestCombineSourceActor_TypeMismatch injects a wrong-typed value into the left
 // buffer of a combineSourceActor so that the type assertion in tryEmit fails,
 // exercises the defensive streamError + shutdown path.
@@ -218,7 +208,7 @@ func TestCombineSourceActor_TypeMismatch(t *testing.T) {
 	// empty leftStages/rightStages causes validation to fail silently.
 	cfg := defaultStageConfig()
 	cfg.System = sys
-	a := newCombineSourceActor[int, string, string](
+	a := newCombineSourceActor(
 		nil, nil,
 		func(_ int, s string) string { return s },
 		cfg,
@@ -247,8 +237,6 @@ func TestCombineSourceActor_TypeMismatch(t *testing.T) {
 		return err != nil
 	}, 2*time.Second, 5*time.Millisecond)
 }
-
-// ─── actorSourceActor cancel ──────────────────────────────────────────────────
 
 // infinitePullActor always returns elements so we can cancel mid-stream.
 type infinitePullActor struct{}

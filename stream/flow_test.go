@@ -34,8 +34,6 @@ import (
 	"github.com/tochemey/goakt/v4/stream"
 )
 
-// ─── TryMap ───────────────────────────────────────────────────────────────────
-
 func TestTryMap_Success(t *testing.T) {
 	sys := newTestSystem(t)
 	ctx := context.Background()
@@ -136,8 +134,6 @@ func TestTryMap_ErrorRetry_Fails(t *testing.T) {
 	}
 }
 
-// ─── Map ──────────────────────────────────────────────────────────────────────
-
 func TestMap(t *testing.T) {
 	sys := newTestSystem(t)
 	ctx := context.Background()
@@ -151,8 +147,6 @@ func TestMap(t *testing.T) {
 	<-handle.Done()
 	assert.Equal(t, []string{"a", "b", "c"}, col.Items())
 }
-
-// ─── Filter ───────────────────────────────────────────────────────────────────
 
 func TestFilter_KeepsMatching(t *testing.T) {
 	sys := newTestSystem(t)
@@ -179,8 +173,6 @@ func TestFilter_DropAll(t *testing.T) {
 	<-handle.Done()
 	assert.Empty(t, col.Items())
 }
-
-// ─── FlatMap ──────────────────────────────────────────────────────────────────
 
 func TestFlatMap_Expansion(t *testing.T) {
 	sys := newTestSystem(t)
@@ -210,8 +202,6 @@ func TestFlatMap_EmptyOutput(t *testing.T) {
 	assert.Empty(t, col.Items())
 }
 
-// ─── Flatten ──────────────────────────────────────────────────────────────────
-
 func TestFlatten_Basic(t *testing.T) {
 	sys := newTestSystem(t)
 	ctx := context.Background()
@@ -239,8 +229,6 @@ func TestFlatten_EmptySlices(t *testing.T) {
 	<-handle.Done()
 	assert.Equal(t, []int{1}, col.Items())
 }
-
-// ─── Batch ────────────────────────────────────────────────────────────────────
 
 func TestBatch_SizeFlush(t *testing.T) {
 	sys := newTestSystem(t)
@@ -281,8 +269,6 @@ func TestBatch_TimeoutFlush(t *testing.T) {
 	assert.Equal(t, []int{1, 2}, batches[0])
 }
 
-// ─── Buffer ───────────────────────────────────────────────────────────────────
-
 func TestBuffer_PassThrough(t *testing.T) {
 	sys := newTestSystem(t)
 	ctx := context.Background()
@@ -295,8 +281,6 @@ func TestBuffer_PassThrough(t *testing.T) {
 	<-handle.Done()
 	assert.Equal(t, []int{1, 2, 3}, col.Items())
 }
-
-// ─── Throttle ─────────────────────────────────────────────────────────────────
 
 func TestThrottle_SlowsDown(t *testing.T) {
 	sys := newTestSystem(t)
@@ -317,8 +301,6 @@ func TestThrottle_SlowsDown(t *testing.T) {
 	// 4 elements × 50ms each = 200ms minimum.
 	assert.GreaterOrEqual(t, elapsed, 150*time.Millisecond)
 }
-
-// ─── Deduplicate ──────────────────────────────────────────────────────────────
 
 func TestDeduplicate_ConsecutiveDuplicates(t *testing.T) {
 	sys := newTestSystem(t)
@@ -347,8 +329,6 @@ func TestDeduplicate_AllSame(t *testing.T) {
 	assert.Equal(t, []int{5}, col.Items())
 }
 
-// ─── Scan ─────────────────────────────────────────────────────────────────────
-
 func TestScan_RunningSum(t *testing.T) {
 	sys := newTestSystem(t)
 	ctx := context.Background()
@@ -362,8 +342,6 @@ func TestScan_RunningSum(t *testing.T) {
 	<-handle.Done()
 	assert.Equal(t, []int{1, 3, 6, 10}, col.Items())
 }
-
-// ─── WithErrorStrategy ────────────────────────────────────────────────────────
 
 func TestWithErrorStrategy_Preserved(t *testing.T) {
 	// Verify that WithErrorStrategy returns a new Flow and does not mutate the original.
@@ -387,8 +365,6 @@ func TestWithErrorStrategy_Preserved(t *testing.T) {
 	assert.Equal(t, []int{3, 4}, col2.Items())
 }
 
-// ─── Multi-stage pipelines ────────────────────────────────────────────────────
-
 func TestMultiStage_MapFilterScan(t *testing.T) {
 	sys := newTestSystem(t)
 	ctx := context.Background()
@@ -406,8 +382,6 @@ func TestMultiStage_MapFilterScan(t *testing.T) {
 	// Even numbers: 2, 4, 6 → running sums: 2, 6, 12.
 	assert.Equal(t, []int{2, 6, 12}, col.Items())
 }
-
-// ─── flow streamError and streamCancel propagation ────────────────────────────
 
 func TestFlow_UpstreamError_PropagatesToSink(t *testing.T) {
 	// An error in a Map stage should propagate downstream and terminate the stream.
@@ -434,8 +408,6 @@ func TestFlow_UpstreamError_PropagatesToSink(t *testing.T) {
 		t.Fatal("stream did not terminate after upstream error")
 	}
 }
-
-// ─── WithContext ──────────────────────────────────────────────────────────────
 
 // TestWithContext_PassThrough verifies that WithContext is a transparent
 // identity flow: elements pass through with their values unchanged.

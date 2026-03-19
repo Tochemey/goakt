@@ -127,7 +127,7 @@ func (a *balanceSlotActor[T]) Receive(rctx *actor.ReceiveContext) {
 		}
 
 	case *hubReady:
-		a.hubPID = msg.hubPID
+		a.hubPID = msg.hub
 		if a.pendingDemand > 0 {
 			rctx.Tell(a.hubPID, &slotDemand{slot: a.slot, n: a.pendingDemand})
 			a.pendingDemand = 0
@@ -192,7 +192,7 @@ func (a *balanceHubActor[T]) Receive(rctx *actor.ReceiveContext) {
 		a.subID = msg.subID
 		hubPID := rctx.Self()
 		for _, slotPID := range a.slotPIDs {
-			rctx.Tell(slotPID, &hubReady{hubPID: hubPID})
+			rctx.Tell(slotPID, &hubReady{hub: hubPID})
 		}
 
 	case *slotDemand:

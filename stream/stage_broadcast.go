@@ -135,7 +135,7 @@ func (a *broadcastSlotActor[T]) Receive(rctx *actor.ReceiveContext) {
 		}
 
 	case *hubReady:
-		a.hub = msg.hubPID
+		a.hub = msg.hub
 		if a.pendingDemand > 0 {
 			rctx.Tell(a.hub, &slotDemand{slot: a.slot, n: a.pendingDemand})
 			a.pendingDemand = 0
@@ -199,7 +199,7 @@ func (a *broadcastHubActor[T]) Receive(rctx *actor.ReceiveContext) {
 		// Notify every slot that the hub is ready to receive demand.
 		hub := rctx.Self()
 		for _, slot := range a.slots {
-			rctx.Tell(slot, &hubReady{hubPID: hub})
+			rctx.Tell(slot, &hubReady{hub: hub})
 		}
 
 	case *slotDemand:

@@ -122,7 +122,7 @@ type slotDemand struct {
 // hub has been wired to its upstream. Slots that buffered demand before this
 // message arrive flush it immediately on receipt.
 type hubReady struct {
-	hubPID *actor.PID
+	hub *actor.PID
 }
 
 // slotCancel is sent by a broadcastSlotActor to the broadcastHubActor when its
