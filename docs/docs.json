@@ -69,6 +69,7 @@
           "/advanced/event-streams",
           "/advanced/pubsub",
           "/advanced/observability",
+          "/advanced/streams",
           "/advanced/coordinated-shutdown"
         ],
         "icon": "zap"
