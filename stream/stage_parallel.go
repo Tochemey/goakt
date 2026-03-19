@@ -108,7 +108,7 @@ func (a *parallelMapActor[In, Out]) Receive(rctx *actor.ReceiveContext) {
 		// Spawn worker func actors. Each handles one workerTask at a time, running fn
 		// with panic recovery and replying with a parallelResult to the parent.
 		fn := a.fn
-		selfPID := a.self
+		self := a.self
 		sys := rctx.ActorSystem()
 		ctx := rctx.Context()
 		for i := 0; i < a.workersCount; i++ {
@@ -131,7 +131,7 @@ func (a *parallelMapActor[In, Out]) Receive(rctx *actor.ReceiveContext) {
 					}()
 					result.value = fn(task.value.(In))
 				}()
-				return actor.Tell(context.Background(), selfPID, &result)
+				return actor.Tell(context.Background(), self, &result)
 			})
 			if err != nil {
 				rctx.Tell(a.upstream, &streamCancel{subID: a.subID})

@@ -56,6 +56,10 @@ type stageDesc struct {
 	fuseFn func(any) (any, bool, error)
 }
 
+// newStageID returns a short 8-character identifier derived from a UUID v4.
+// A truncated prefix is used instead of the full 36-character UUID because stage
+// IDs only need to be unique within a single materialized graph (not globally),
+// and shorter IDs keep actor names, log lines, and metrics labels compact.
 func newStageID() string {
 	return uuid.New().String()[:8]
 }

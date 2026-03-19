@@ -227,14 +227,14 @@ func ToActor[T any](pid *actor.PID) Sink[T] {
 	desc := &stageDesc{
 		id:   newStageID(),
 		kind: sinkKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		makeActor: func(config StageConfig) actor.Actor {
 			return newSinkActor(func(v any) error {
 				elem, ok := v.(T)
 				if !ok {
 					return fmt.Errorf("stream: ToActor got unexpected type %T", v)
 				}
 				return actor.Tell(context.Background(), pid, elem)
-			}, nil, cfg)
+			}, nil, config)
 		},
 		config: config,
 	}
@@ -248,7 +248,7 @@ func ToActorNamed[T any](system actor.ActorSystem, name string) Sink[T] {
 	desc := &stageDesc{
 		id:   newStageID(),
 		kind: sinkKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		makeActor: func(config StageConfig) actor.Actor {
 			return newSinkActor(func(v any) error {
 				elem, ok := v.(T)
 				if !ok {
@@ -259,7 +259,7 @@ func ToActorNamed[T any](system actor.ActorSystem, name string) Sink[T] {
 					return err
 				}
 				return actor.Tell(context.Background(), pid, elem)
-			}, nil, cfg)
+			}, nil, config)
 		},
 		config: config,
 	}
@@ -273,8 +273,8 @@ func First[T any]() (*FoldResult[T], Sink[T]) {
 	desc := &stageDesc{
 		id:   newStageID(),
 		kind: sinkKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
-			return newFirstSinkActor(res, cfg)
+		makeActor: func(config StageConfig) actor.Actor {
+			return newFirstSinkActor(res, config)
 		},
 		config: config,
 	}
@@ -288,8 +288,8 @@ func Ignore[T any]() Sink[T] {
 	desc := &stageDesc{
 		id:   newStageID(),
 		kind: sinkKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
-			return newSinkActor(func(any) error { return nil }, nil, cfg)
+		makeActor: func(config StageConfig) actor.Actor {
+			return newSinkActor(func(any) error { return nil }, nil, config)
 		},
 		config: config,
 	}
@@ -302,7 +302,7 @@ func Chan[T any](ch chan<- T) Sink[T] {
 	desc := &stageDesc{
 		id:   newStageID(),
 		kind: sinkKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		makeActor: func(config StageConfig) actor.Actor {
 			return newSinkActor(func(v any) error {
 				elem, ok := v.(T)
 				if !ok {
@@ -310,7 +310,7 @@ func Chan[T any](ch chan<- T) Sink[T] {
 				}
 				ch <- elem // blocks when ch is full, applying natural backpressure
 				return nil
-			}, func() { close(ch) }, cfg)
+			}, func() { close(ch) }, config)
 		},
 		config: config,
 	}

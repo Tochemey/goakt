@@ -344,7 +344,7 @@ func ParallelMap[In, Out any](n int, fn func(In) Out) Flow[In, Out] {
 		id:   newStageID(),
 		kind: flowKind,
 		makeActor: func(cfg StageConfig) actor.Actor {
-			return newParallelMapActor[In, Out](n, fn, false, cfg)
+			return newParallelMapActor(n, fn, false, cfg)
 		},
 		config: config,
 	}
@@ -362,7 +362,7 @@ func OrderedParallelMap[In, Out any](n int, fn func(In) Out) Flow[In, Out] {
 		id:   newStageID(),
 		kind: flowKind,
 		makeActor: func(cfg StageConfig) actor.Actor {
-			return newParallelMapActor[In, Out](n, fn, true, cfg)
+			return newParallelMapActor(n, fn, true, cfg)
 		},
 		config: config,
 	}

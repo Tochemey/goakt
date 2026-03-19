@@ -269,10 +269,12 @@ func (a *fusedFlowActor) Receive(rctx *actor.ReceiveContext) {
 			rctx.Shutdown()
 			return
 		}
+
 		if pass {
 			a.seqNo++
 			rctx.Tell(a.downstream, &streamElement{subID: a.subID, value: result, seqNo: a.seqNo})
 		}
+
 		// Refill upstream credit in batches (matching flowActor's watermark strategy)
 		// instead of sending a streamRequest for every single element. This reduces
 		// demand-message allocations by ~RefillThreshold-fold on the fused fast path.
@@ -365,6 +367,7 @@ func (a *batchFlowActor[T]) Receive(rctx *actor.ReceiveContext) {
 			rctx.Shutdown()
 			return
 		}
+
 		a.window = append(a.window, elem)
 		if !a.timerActive && len(a.window) == 1 {
 			// Schedule a flush timer on the first element of a new window.
@@ -372,6 +375,7 @@ func (a *batchFlowActor[T]) Receive(rctx *actor.ReceiveContext) {
 			_ = rctx.ActorSystem().ScheduleOnce(rctx.Context(), &batchFlush{},
 				rctx.Self(), a.maxWait, actor.WithReference(a.schedRef))
 		}
+
 		if len(a.window) >= a.maxSize {
 			a.flush(rctx)
 		}
@@ -388,6 +392,7 @@ func (a *batchFlowActor[T]) Receive(rctx *actor.ReceiveContext) {
 		if len(a.window) > 0 {
 			a.flush(rctx)
 		}
+
 		rctx.Tell(a.downstream, &streamComplete{subID: a.subID})
 		rctx.Shutdown()
 
@@ -512,6 +517,7 @@ func (a *throttleActor[T]) Receive(rctx *actor.ReceiveContext) {
 			a.metrics.elementsOut.Add(1)
 			a.maybeRequestUpstream(rctx)
 		}
+
 		if a.completed && a.buf.empty() {
 			a.finish(rctx)
 		}
@@ -543,6 +549,7 @@ func (a *throttleActor[T]) maybeRequestUpstream(rctx *actor.ReceiveContext) {
 	if available <= 0 || a.credit > a.config.RefillThreshold {
 		return
 	}
+
 	a.credit += available
 	rctx.Tell(a.upstream, &streamRequest{subID: a.subID, n: available})
 }

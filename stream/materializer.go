@@ -110,12 +110,12 @@ func materialize(ctx context.Context, system actor.ActorSystem, stages []*stageD
 	// ── Spawn the stream coordinator as the supervisor root ────────────────────
 	coord := &streamCoordinator{handle: handle}
 	coordName := fmt.Sprintf("stream-supervisor-%s", subID)
-	coordPID, err := system.Spawn(ctx, coordName, coord)
+	coordinator, err := system.Spawn(ctx, coordName, coord, actor.WithLongLived())
 	if err != nil {
 		handle.signalDone(err)
 		return nil, fmt.Errorf("stream: spawn coordinator: %w", err)
 	}
-	handle.coordPID = coordPID
+	handle.coordinator = coordinator
 
 	// ── Spawn each stage actor as a child of the coordinator ───────────────────
 	pids := make([]*actor.PID, len(wrapped))
@@ -136,16 +136,16 @@ func materialize(ctx context.Context, system actor.ActorSystem, stages []*stageD
 		stageName := cfg.Name
 		a := desc.makeActor(cfg)
 
-		var spawnOpts []actor.SpawnOption
+		spawnOpts := []actor.SpawnOption{actor.WithLongLived()}
 		if cfg.Mailbox != nil {
 			spawnOpts = append(spawnOpts, actor.WithMailbox(cfg.Mailbox))
 		} else if cfg.BufferSize > 0 {
 			spawnOpts = append(spawnOpts, actor.WithMailbox(actor.NewBoundedMailbox(cfg.BufferSize*2)))
 		}
-		pid, spawnErr := coordPID.SpawnChild(ctx, stageName, a, spawnOpts...)
+		pid, spawnErr := coordinator.SpawnChild(ctx, stageName, a, spawnOpts...)
 		if spawnErr != nil {
 			// Shut down already-spawned actors; coordinator cascades to its children.
-			_ = coordPID.Shutdown(ctx)
+			_ = coordinator.Shutdown(ctx)
 			handle.signalDone(spawnErr)
 			return nil, fmt.Errorf("stream: spawn stage %d: %w", i, spawnErr)
 		}
@@ -167,7 +167,7 @@ func materialize(ctx context.Context, system actor.ActorSystem, stages []*stageD
 			upstream:   upstream,
 			downstream: downstream,
 		}); err != nil {
-			_ = coordPID.Shutdown(ctx)
+			_ = coordinator.Shutdown(ctx)
 			handle.signalDone(err)
 			return nil, fmt.Errorf("stream: wire stage %d: %w", i, err)
 		}
@@ -178,10 +178,10 @@ func materialize(ctx context.Context, system actor.ActorSystem, stages []*stageD
 	// stages shut down as part of the normal completion flow — before the sink's
 	// onDone fires — so watching them would produce spurious errors.
 	coord.sinkPID = pids[sinkIdx]
-	coordPID.Watch(pids[sinkIdx])
+	coordinator.Watch(pids[sinkIdx])
 
-	handle.sourcePID = pids[0]
-	handle.allPIDs = pids
+	handle.source = pids[0]
+	handle.stageActors = pids
 
 	return handle, nil
 }

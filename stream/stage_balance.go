@@ -48,7 +48,7 @@ type sharedBalance[T any] struct {
 func newSharedBalance[T any](n int, srcStages []*stageDesc) *sharedBalance[T] {
 	hub := &balanceHubActor[T]{
 		n:          n,
-		slotPIDs:   make([]*actor.PID, n),
+		slots:      make([]*actor.PID, n),
 		slotSubIDs: make([]string, n),
 		demand:     make([]int64, n),
 	}
@@ -72,7 +72,7 @@ func (s *sharedBalance[T]) registerSlot(ctx context.Context, slot int, pid *acto
 	allReady := s.registered == s.n && !s.started
 	if allReady {
 		s.started = true
-		copy(s.hub.slotPIDs, s.slots)
+		copy(s.hub.slots, s.slots)
 		copy(s.hub.slotSubIDs, s.slotSubIDs)
 	}
 	s.mu.Unlock()
@@ -103,7 +103,7 @@ type balanceSlotActor[T any] struct {
 	slot          int
 	downstream    *actor.PID
 	subID         string
-	hubPID        *actor.PID
+	hub           *actor.PID
 	pendingDemand int64
 	config        StageConfig
 }
@@ -120,16 +120,16 @@ func (a *balanceSlotActor[T]) Receive(rctx *actor.ReceiveContext) {
 		a.shared.registerSlot(rctx.Context(), a.slot, rctx.Self(), msg.subID, rctx.ActorSystem())
 
 	case *streamRequest:
-		if a.hubPID != nil {
-			rctx.Tell(a.hubPID, &slotDemand{slot: a.slot, n: msg.n})
+		if a.hub != nil {
+			rctx.Tell(a.hub, &slotDemand{slot: a.slot, n: msg.n})
 		} else {
 			a.pendingDemand += msg.n
 		}
 
 	case *hubReady:
-		a.hubPID = msg.hub
+		a.hub = msg.hub
 		if a.pendingDemand > 0 {
-			rctx.Tell(a.hubPID, &slotDemand{slot: a.slot, n: a.pendingDemand})
+			rctx.Tell(a.hub, &slotDemand{slot: a.slot, n: a.pendingDemand})
 			a.pendingDemand = 0
 		}
 
@@ -145,8 +145,8 @@ func (a *balanceSlotActor[T]) Receive(rctx *actor.ReceiveContext) {
 		rctx.Shutdown()
 
 	case *streamCancel:
-		if a.hubPID != nil {
-			rctx.Tell(a.hubPID, &slotCancel{slot: a.slot})
+		if a.hub != nil {
+			rctx.Tell(a.hub, &slotCancel{slot: a.slot})
 		}
 		// Notify downstream so the sink's completionWrapper can fire.
 		if a.downstream != nil {
@@ -169,7 +169,7 @@ func (a *balanceSlotActor[T]) PostStop(_ *actor.Context) error { return nil }
 // downstream slot has signaled capacity.
 type balanceHubActor[T any] struct {
 	n          int
-	slotPIDs   []*actor.PID
+	slots      []*actor.PID
 	slotSubIDs []string
 	demand     []int64 // per-slot outstanding demand
 	upstream   *actor.PID
@@ -190,9 +190,9 @@ func (a *balanceHubActor[T]) Receive(rctx *actor.ReceiveContext) {
 	case *stageWire:
 		a.upstream = msg.upstream
 		a.subID = msg.subID
-		hubPID := rctx.Self()
-		for _, slotPID := range a.slotPIDs {
-			rctx.Tell(slotPID, &hubReady{hub: hubPID})
+		hub := rctx.Self()
+		for _, slotPID := range a.slots {
+			rctx.Tell(slotPID, &hubReady{hub: hub})
 		}
 
 	case *slotDemand:
@@ -205,14 +205,15 @@ func (a *balanceHubActor[T]) Receive(rctx *actor.ReceiveContext) {
 		chosen := -1
 		for i := 0; i < a.n; i++ {
 			idx := (a.nextSlot + i) % a.n
-			if a.slotPIDs[idx] != nil && a.demand[idx] > 0 {
+			if a.slots[idx] != nil && a.demand[idx] > 0 {
 				chosen = idx
 				break
 			}
 		}
+
 		if chosen >= 0 {
 			a.seqNo++
-			rctx.Tell(a.slotPIDs[chosen], &streamElement{
+			rctx.Tell(a.slots[chosen], &streamElement{
 				subID: a.slotSubIDs[chosen],
 				value: msg.value,
 				seqNo: a.seqNo,
@@ -224,23 +225,23 @@ func (a *balanceHubActor[T]) Receive(rctx *actor.ReceiveContext) {
 		a.maybePull(rctx)
 
 	case *streamComplete:
-		for i, slotPID := range a.slotPIDs {
-			if slotPID != nil {
-				rctx.Tell(slotPID, &streamComplete{subID: a.slotSubIDs[i]})
+		for i, slot := range a.slots {
+			if slot != nil {
+				rctx.Tell(slot, &streamComplete{subID: a.slotSubIDs[i]})
 			}
 		}
 		rctx.Shutdown()
 
 	case *streamError:
-		for i, slotPID := range a.slotPIDs {
-			if slotPID != nil {
-				rctx.Tell(slotPID, &streamError{subID: a.slotSubIDs[i], err: msg.err})
+		for i, slot := range a.slots {
+			if slot != nil {
+				rctx.Tell(slot, &streamError{subID: a.slotSubIDs[i], err: msg.err})
 			}
 		}
 		rctx.Shutdown()
 
 	case *slotCancel:
-		a.slotPIDs[msg.slot] = nil
+		a.slots[msg.slot] = nil
 		a.cancelled++
 		if a.cancelled >= a.n {
 			if a.upstream != nil {
@@ -275,7 +276,7 @@ func (a *balanceHubActor[T]) maybePull(rctx *actor.ReceiveContext) {
 // totalDemand sums outstanding demand across all active slots.
 func (a *balanceHubActor[T]) totalDemand() int64 {
 	var total int64
-	for i, pid := range a.slotPIDs {
+	for i, pid := range a.slots {
 		if pid != nil {
 			total += a.demand[i]
 		}

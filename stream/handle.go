@@ -58,10 +58,10 @@ type streamHandleImpl struct {
 	closeOnce sync.Once
 	termErr   atomic.Value // holds error
 
-	subID     string
-	sourcePID *actor.PID   // first stage — receives streamCancel on Stop
-	coordPID  *actor.PID   // supervisor coordinator — shut down on Abort (cascades to stages)
-	allPIDs   []*actor.PID // stage actors — fallback shutdown when coordPID is nil
+	subID       string
+	source      *actor.PID   // first stage — receives streamCancel on Stop
+	coordinator *actor.PID   // supervisor coordinator — shut down on Abort (cascades to stages)
+	stageActors []*actor.PID // stage actors — fallback shutdown when coordinator is nil
 
 	// per-stage metric collectors, populated by stage actors
 	sinkMetrics   *stageMetrics
@@ -72,8 +72,8 @@ func newStreamHandle(subID string, source *actor.PID, all []*actor.PID) *streamH
 	return &streamHandleImpl{
 		done:          make(chan struct{}),
 		subID:         subID,
-		sourcePID:     source,
-		allPIDs:       all,
+		source:        source,
+		stageActors:   all,
 		sinkMetrics:   &stageMetrics{},
 		sourceMetrics: &stageMetrics{},
 	}
@@ -102,11 +102,11 @@ func (h *streamHandleImpl) Err() error {
 }
 
 func (h *streamHandleImpl) Stop(ctx context.Context) error {
-	if h.sourcePID == nil {
+	if h.source == nil {
 		// No pipeline to drain.
 		return nil
 	}
-	_ = actor.Tell(ctx, h.sourcePID, &streamCancel{subID: h.subID})
+	_ = actor.Tell(ctx, h.source, &streamCancel{subID: h.subID})
 	// Wait for the stream to fully drain, respecting the caller's context deadline.
 	select {
 	case <-h.done:
@@ -121,12 +121,12 @@ func (h *streamHandleImpl) Abort() {
 	// signalDone (which may come from the completion wrapper's PostStop)
 	// carries ErrStreamCanceled.
 	h.signalDone(ErrStreamCanceled)
-	if h.coordPID != nil {
+	if h.coordinator != nil {
 		// Shutting down the coordinator cascades to all stage children.
-		_ = h.coordPID.Shutdown(context.Background())
+		_ = h.coordinator.Shutdown(context.Background())
 		return
 	}
-	for _, pid := range h.allPIDs {
+	for _, pid := range h.stageActors {
 		_ = pid.Shutdown(context.Background())
 	}
 }

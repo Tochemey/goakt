@@ -166,7 +166,7 @@ func FromChannel[T any](ch <-chan T) Source[T] {
 		id:   newStageID(),
 		kind: sourceKind,
 		makeActor: func(cfg StageConfig) actor.Actor {
-			return newChanSourceActor[T](ch, cfg)
+			return newChanSourceActor(ch, cfg)
 		},
 		config: config,
 	}
