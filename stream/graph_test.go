@@ -34,6 +34,71 @@ import (
 	"github.com/tochemey/goakt/v4/stream"
 )
 
+// TestGraph_Build_CycleDetection verifies that Build returns an error wrapping
+// ErrInvalidGraph when the node dependency graph contains a cycle.
+// Here f1 depends on f2 and f2 depends on f1, forming a direct cycle.
+func TestGraph_Build_CycleDetection(t *testing.T) {
+	identity := stream.Map(func(v any) any { return v })
+	_, sink := stream.Collect[any]()
+
+	_, err := stream.NewGraph().
+		AddSource("src", stream.Of[any](1, 2, 3)).
+		AddFlow("f1", identity, "f2"). // f1 depends on f2 (not yet defined)
+		AddFlow("f2", identity, "f1"). // f2 depends on f1 → cycle
+		AddSink("sink", sink, "f1").
+		Build()
+
+	require.ErrorIs(t, err, stream.ErrInvalidGraph)
+}
+
+// TestGraph_Build_SinkAsUpstream_Error verifies that Build returns an error when
+// a sink node is used as the upstream reference for another sink. The topology
+// is valid from a source/sink-count perspective but invalid structurally because
+// sinks cannot act as upstream stages in a pipeline.
+func TestGraph_Build_SinkAsUpstream_Error(t *testing.T) {
+	_, sink1 := stream.Collect[any]()
+	_, sink2 := stream.Collect[any]()
+
+	_, err := stream.NewGraph().
+		AddSource("src", stream.Of[any](1, 2, 3)).
+		AddSink("sink1", sink1, "src").
+		AddSink("sink2", sink2, "sink1"). // sink1 used as upstream — invalid
+		Build()
+
+	require.Error(t, err)
+}
+
+// TestGraph_Build_MultipleFlowsFromSameSource verifies a topology where two
+// separate flow chains both originate from the same source and each feeds its
+// own sink. This exercises the fan-out path in compile/buildChain.
+func TestGraph_Build_MultipleFlowsWithSharedSource(t *testing.T) {
+	double := stream.Map(func(v any) any { return v.(int) * 2 })
+	negate := stream.Map(func(v any) any { return -v.(int) })
+
+	col0, sink0 := stream.Collect[any]()
+	col1, sink1 := stream.Collect[any]()
+
+	rg, err := stream.NewGraph().
+		AddSource("src", stream.Of[any](1, 2)).
+		AddFlow("doubled", double, "src").
+		AddFlow("negated", negate, "src").
+		AddSink("s0", sink0, "doubled").
+		AddSink("s1", sink1, "negated").
+		Build()
+	require.NoError(t, err)
+
+	sys := newTestSystem(t)
+	h, runErr := rg.Run(t.Context(), sys)
+	require.NoError(t, runErr)
+
+	select {
+	case <-h.Done():
+	}
+	require.NoError(t, h.Err())
+	require.Equal(t, []any{2, 4}, col0.Items())
+	require.Equal(t, []any{-1, -2}, col1.Items())
+}
+
 func TestRunnableGraph_Run_EmptyGraph(t *testing.T) {
 	sys := newTestSystem(t)
 	_, err := stream.RunnableGraph{}.Run(context.Background(), sys)

@@ -26,6 +26,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"sort"
 	"testing"
 	"time"
@@ -36,8 +37,6 @@ import (
 	"github.com/tochemey/goakt/v4/actor"
 	"github.com/tochemey/goakt/v4/stream"
 )
-
-// ─── Of ───────────────────────────────────────────────────────────────────────
 
 func TestOf_Empty(t *testing.T) {
 	sys := newTestSystem(t)
@@ -88,8 +87,6 @@ func TestOf_LargeSlice(t *testing.T) {
 	assert.Equal(t, input, col.Items())
 }
 
-// ─── Range ────────────────────────────────────────────────────────────────────
-
 func TestRange_Basic(t *testing.T) {
 	sys := newTestSystem(t)
 	ctx := context.Background()
@@ -122,8 +119,6 @@ func TestRange_SingleElement(t *testing.T) {
 	<-handle.Done()
 	assert.Equal(t, []int64{7}, col.Items())
 }
-
-// ─── FromChannel ──────────────────────────────────────────────────────────────
 
 func TestFromChannel_PreloadedhCh(t *testing.T) {
 	sys := newTestSystem(t)
@@ -200,8 +195,6 @@ func TestFromChannel_Cancel(t *testing.T) {
 	}
 }
 
-// ─── FromActor ────────────────────────────────────────────────────────────────
-
 // intPullActor serves a finite slice of ints via the stream PullRequest protocol.
 type intPullActor struct {
 	data []int
@@ -254,8 +247,6 @@ func TestFromActor_Empty(t *testing.T) {
 	assert.Empty(t, col.Items())
 }
 
-// ─── Tick ─────────────────────────────────────────────────────────────────────
-
 func TestTick_EmitsTimestamps(t *testing.T) {
 	sys := newTestSystem(t)
 	ctx := context.Background()
@@ -297,8 +288,6 @@ collect:
 	assert.GreaterOrEqual(t, len(ticks), wantTicks)
 }
 
-// ─── Unfold ───────────────────────────────────────────────────────────────────
-
 func TestUnfold_Fibonacci(t *testing.T) {
 	sys := newTestSystem(t)
 	ctx := context.Background()
@@ -328,8 +317,6 @@ func TestUnfold_ImmediateStop(t *testing.T) {
 	// One element emitted (seed) before hasMore=false terminates.
 	assert.Equal(t, []int{0}, col.Items())
 }
-
-// ─── Merge ────────────────────────────────────────────────────────────────────
 
 func TestMerge_TwoSources(t *testing.T) {
 	sys := newTestSystem(t)
@@ -405,8 +392,6 @@ func TestMerge_Cancel(t *testing.T) {
 	}
 }
 
-// ─── Combine ──────────────────────────────────────────────────────────────────
-
 func TestCombine_ZipTwoSources(t *testing.T) {
 	sys := newTestSystem(t)
 	ctx := context.Background()
@@ -472,8 +457,6 @@ func TestCombine_Cancel(t *testing.T) {
 	}
 }
 
-// ─── From and Via ─────────────────────────────────────────────────────────────
-
 func TestFrom_Identity(t *testing.T) {
 	sys := newTestSystem(t)
 	ctx := context.Background()
@@ -521,8 +504,6 @@ func TestSourceVia_TypePreserving(t *testing.T) {
 	<-handle.Done()
 	assert.Equal(t, []int{1, 3, 5}, col.Items())
 }
-
-// ─── Balance ──────────────────────────────────────────────────────────────────
 
 // TestBalance_TwoSlots verifies that every element from a finite source is
 // delivered to exactly one branch, and all elements are accounted for.
@@ -668,8 +649,6 @@ func TestBalance_CancelOneSlot(t *testing.T) {
 	// Branch 0 should have received some elements.
 	assert.NotEmpty(t, col0.Items())
 }
-
-// ─── Broadcast ────────────────────────────────────────────────────────────────
 
 // TestBroadcast_TwoSlots verifies that every element from a finite source is
 // delivered to both branches of a 2-slot Broadcast.
@@ -916,4 +895,143 @@ func TestBroadcast_NilSlots(t *testing.T) {
 
 	srcs = stream.Broadcast(stream.Of(1, 2, 3), -1)
 	assert.Nil(t, srcs)
+}
+
+// errConnForTest is a minimal net.Conn implementation whose Read always
+// returns the provided error. Used to exercise the non-EOF error path in
+// connSourceActor.
+type errConnForTest struct {
+	readErr error
+}
+
+func (c *errConnForTest) Read([]byte) (int, error)         { return 0, c.readErr }
+func (c *errConnForTest) Write(b []byte) (int, error)      { return len(b), nil }
+func (c *errConnForTest) Close() error                     { return nil }
+func (c *errConnForTest) LocalAddr() net.Addr              { return &net.TCPAddr{} }
+func (c *errConnForTest) RemoteAddr() net.Addr             { return &net.TCPAddr{} }
+func (c *errConnForTest) SetDeadline(time.Time) error      { return nil }
+func (c *errConnForTest) SetReadDeadline(time.Time) error  { return nil }
+func (c *errConnForTest) SetWriteDeadline(time.Time) error { return nil }
+
+// TestFromConn_ReadsData_ThenEOF writes a single chunk of data to one end of a
+// net.Pipe and closes it. The source should deliver the data as one element and
+// then complete when the subsequent Read returns io.EOF.
+func TestFromConn_ReadsData_ThenEOF(t *testing.T) {
+	sys := newTestSystem(t)
+
+	client, server := net.Pipe()
+	t.Cleanup(func() { _ = client.Close() })
+
+	data := []byte("hello from conn")
+	go func() {
+		_, _ = server.Write(data)
+		_ = server.Close()
+	}()
+
+	col, sink := stream.Collect[[]byte]()
+	handle, err := stream.FromConn(client, 4096).To(sink).Run(t.Context(), sys)
+	require.NoError(t, err)
+
+	select {
+	case <-handle.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("FromConn did not complete after server closed (EOF)")
+	}
+	require.NoError(t, handle.Err())
+
+	items := col.Items()
+	require.Len(t, items, 1)
+	assert.Equal(t, data, items[0])
+}
+
+// TestFromConn_DefaultBufSize_WhenZeroOrNegative verifies that a bufSize <= 0
+// is silently coerced to 4096, and the pipeline still runs correctly.
+func TestFromConn_DefaultBufSize_WhenZeroOrNegative(t *testing.T) {
+	sys := newTestSystem(t)
+
+	client, server := net.Pipe()
+	t.Cleanup(func() { _ = client.Close() })
+
+	data := []byte("buf-size-zero-test")
+	go func() {
+		_, _ = server.Write(data)
+		_ = server.Close()
+	}()
+
+	col, sink := stream.Collect[[]byte]()
+	handle, err := stream.FromConn(client, 0).To(sink).Run(t.Context(), sys)
+	require.NoError(t, err)
+
+	select {
+	case <-handle.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("FromConn (bufSize=0) did not complete")
+	}
+	require.NoError(t, handle.Err())
+
+	items := col.Items()
+	require.Len(t, items, 1)
+	assert.Equal(t, data, items[0])
+}
+
+// TestFromConn_ReadError_TerminatesStream verifies that a non-EOF read error
+// causes the stream to terminate with an error rather than completing normally.
+func TestFromConn_ReadError_TerminatesStream(t *testing.T) {
+	sys := newTestSystem(t)
+
+	connErr := errors.New("simulated network read error")
+	conn := &errConnForTest{readErr: connErr}
+
+	handle, err := stream.FromConn(conn, 512).To(stream.Ignore[[]byte]()).Run(t.Context(), sys)
+	require.NoError(t, err)
+
+	select {
+	case <-handle.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("FromConn with read error did not terminate")
+	}
+	assert.Error(t, handle.Err())
+}
+
+// TestFromConn_MultipleChunks writes data in multiple separate writes so that
+// each Read call on the actor returns one chunk. The pipeline should collect
+// all chunks before receiving EOF.
+func TestFromConn_MultipleChunks(t *testing.T) {
+	sys := newTestSystem(t)
+
+	client, server := net.Pipe()
+	t.Cleanup(func() { _ = client.Close() })
+
+	chunks := [][]byte{
+		[]byte("chunk-one"),
+		[]byte("chunk-two"),
+		[]byte("chunk-three"),
+	}
+
+	go func() {
+		for _, chunk := range chunks {
+			// Each Write on a net.Pipe blocks until the actor reads it,
+			// so the chunks arrive sequentially as separate Read results.
+			_, _ = server.Write(chunk)
+		}
+		_ = server.Close()
+	}()
+
+	col, sink := stream.Collect[[]byte]()
+	// Small bufSize so each Write is guaranteed to fit in one Read call.
+	handle, err := stream.FromConn(client, 32).To(sink).Run(t.Context(), sys)
+	require.NoError(t, err)
+
+	select {
+	case <-handle.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("FromConn multi-chunk did not complete")
+	}
+	require.NoError(t, handle.Err())
+
+	items := col.Items()
+	require.Len(t, items, len(chunks))
+	for i, want := range chunks {
+		assert.Equal(t, want, items[i])
+	}
 }
