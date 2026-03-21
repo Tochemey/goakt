@@ -47,6 +47,7 @@ Also, check the reference section at the end of the post for more material regar
 - **Observability**: OpenTelemetry metrics, event stream, and dead letters.
 - **Extensions**: Pluggable APIs for cross-cutting capabilities.
 - **Data Center**: Multi-datacenter support with DC-transparent messaging, pluggable control plane (NATS JetStream, Etcd), DC-aware placement (SpawnOn with WithDataCenter), and cross-DC actor/grain communication.
+- **Reactive Streams**: Actor-backed, backpressure-aware stream processing with a composable DSL. Includes rich sources (channels, actors, ticks, network I/O, unfold), transformations (map, filter, flatMap, batch, throttle, deduplicate, scan, parallel map), and sinks (forEach, collect, fold, actor forwarding). Supports fan-out (broadcast, balance), fan-in (merge, combine), non-linear graph topologies, configurable error strategies (fail-fast, resume, retry), overflow strategies, automatic stage fusion, and built-in metrics and tracing hooks.
 
 ## 📥 Installation
 
