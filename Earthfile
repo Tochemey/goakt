@@ -1,6 +1,6 @@
 VERSION 0.8
 
-FROM golang:1.26.0-alpine
+FROM golang:1.26.1-alpine
 
 # install gcc dependencies into alpine for CGO
 RUN apk --no-cache add git ca-certificates gcc musl-dev libc-dev binutils-gold curl openssh
@@ -15,7 +15,7 @@ RUN go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 RUN export PATH="$PATH:$(go env GOPATH)/bin"
 
 # install buf from source
-RUN GO111MODULE=on GOBIN=/usr/local/bin go install github.com/bufbuild/buf/cmd/buf@v1.66.0
+RUN GO111MODULE=on GOBIN=/usr/local/bin go install github.com/bufbuild/buf/cmd/buf@v1.66.1
 
 # install the various tools to generate connect-go
 RUN go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
