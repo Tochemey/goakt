@@ -152,9 +152,11 @@ func (m *ORMap[K, V]) Delta() ReplicatedData {
 	return m.Clone()
 }
 
-// ResetDelta clears the dirty flag.
+// ResetDelta clears the dirty flag and resets the embedded key set's
+// delta to prevent unbounded accumulation of causal dots.
 func (m *ORMap[K, V]) ResetDelta() {
 	m.dirty = false
+	m.keys.ResetDelta()
 }
 
 // Clone returns a deep copy of the ORMap.
