@@ -1026,6 +1026,8 @@ func (x *actorSystem) Start(ctx context.Context) error {
 	x.logger.Infof("starting actor system=%s os=%s arch=%s", x.name, runtime.GOOS, runtime.GOARCH)
 	x.starting.Store(true)
 
+	x.scheduler = newScheduler(x.logger, x.shutdownTimeout, x)
+
 	if err := chain.
 		New(chain.WithFailFast(), chain.WithContext(ctx)).
 		AddRunner(x.setupRemoting).
@@ -2347,9 +2349,6 @@ func (x *actorSystem) setupRemoting() error {
 
 // startMessagesScheduler starts the messages scheduler
 func (x *actorSystem) startMessagesScheduler(ctx context.Context) {
-	// set the scheduler
-	x.scheduler = newScheduler(x.logger, x.shutdownTimeout, x)
-	// start the scheduler
 	x.scheduler.Start(ctx)
 }
 
