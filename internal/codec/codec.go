@@ -33,6 +33,7 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/tochemey/goakt/v4/crdt"
 	"github.com/tochemey/goakt/v4/datacenter"
 	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
@@ -456,4 +457,132 @@ func fromProtoState(state internalpb.DataCenterState) datacenter.DataCenterState
 // The remote.ActorState values align 1:1 with the proto enum (0-5).
 func EncodeActorState(state remote.ActorState) internalpb.State {
 	return internalpb.State(state)
+}
+
+// ORSetStringEncoder is a type assertion target for ORSet[string] encoding.
+// Since ORSet is generic, we match on this interface rather than a concrete type.
+type ORSetStringEncoder interface {
+	RawState() ([]crdt.Entry[string], map[string]uint64)
+}
+
+// EncodeCRDTData converts a crdt.ReplicatedData to its protobuf representation.
+func EncodeCRDTData(data crdt.ReplicatedData) (*internalpb.CRDTData, error) {
+	switch v := data.(type) {
+	case *crdt.GCounter:
+		return &internalpb.CRDTData{
+			Type: &internalpb.CRDTData_GCounter{
+				GCounter: encodeGCounter(v),
+			},
+		}, nil
+	case *crdt.PNCounter:
+		return &internalpb.CRDTData{
+			Type: &internalpb.CRDTData_PnCounter{
+				PnCounter: encodePNCounter(v),
+			},
+		}, nil
+	case ORSetStringEncoder:
+		return &internalpb.CRDTData{
+			Type: &internalpb.CRDTData_OrSet{
+				OrSet: encodeORSetString(v),
+			},
+		}, nil
+	default:
+		return nil, fmt.Errorf("unsupported CRDT type: %T", data)
+	}
+}
+
+// DecodeCRDTData converts a protobuf CRDTData back to a crdt.ReplicatedData.
+func DecodeCRDTData(pb *internalpb.CRDTData) (crdt.ReplicatedData, error) {
+	if pb == nil {
+		return nil, fmt.Errorf("nil CRDTData")
+	}
+	switch v := pb.Type.(type) {
+	case *internalpb.CRDTData_GCounter:
+		return decodeGCounter(v.GCounter), nil
+	case *internalpb.CRDTData_PnCounter:
+		return decodePNCounter(v.PnCounter), nil
+	case *internalpb.CRDTData_OrSet:
+		return decodeORSetString(v.OrSet), nil
+	default:
+		return nil, fmt.Errorf("unsupported CRDTData type: %T", pb.Type)
+	}
+}
+
+// EncodeCRDTKey converts a CRDT key ID and data type to its protobuf representation.
+func EncodeCRDTKey(keyID string, dataType crdt.DataType) *internalpb.CRDTKey {
+	return &internalpb.CRDTKey{
+		Id:       keyID,
+		DataType: internalpb.CRDTDataType(dataType + 1), // +1 because proto enum 0 is UNSPECIFIED
+	}
+}
+
+// DecodeCRDTKey extracts key ID and data type from a protobuf CRDTKey.
+func DecodeCRDTKey(pb *internalpb.CRDTKey) (keyID string, dataType crdt.DataType) {
+	return pb.GetId(), crdt.DataType(pb.GetDataType() - 1)
+}
+
+func encodeGCounter(c *crdt.GCounter) *internalpb.GCounterData {
+	return &internalpb.GCounterData{
+		State: c.State(),
+	}
+}
+
+func decodeGCounter(pb *internalpb.GCounterData) *crdt.GCounter {
+	return crdt.GCounterFromState(pb.GetState())
+}
+
+func encodePNCounter(c *crdt.PNCounter) *internalpb.PNCounterData {
+	inc, dec := c.State()
+	return &internalpb.PNCounterData{
+		Increments: &internalpb.GCounterData{State: inc},
+		Decrements: &internalpb.GCounterData{State: dec},
+	}
+}
+
+func decodePNCounter(pb *internalpb.PNCounterData) *crdt.PNCounter {
+	return crdt.PNCounterFromState(
+		pb.GetIncrements().GetState(),
+		pb.GetDecrements().GetState(),
+	)
+}
+
+func encodeORSetString(s ORSetStringEncoder) *internalpb.ORSetData {
+	entries, clock := s.RawState()
+	pbEntries := make([]*internalpb.ORSetData_ORSetEntry, 0, len(entries))
+	for _, e := range entries {
+		pbDots := make([]*internalpb.ORSetData_ORSetDot, len(e.Dots))
+		for i, d := range e.Dots {
+			pbDots[i] = &internalpb.ORSetData_ORSetDot{
+				NodeId:  d.NodeID,
+				Counter: d.Counter,
+			}
+		}
+		pbEntries = append(pbEntries, &internalpb.ORSetData_ORSetEntry{
+			Element: []byte(e.Element),
+			TypeUrl: "string",
+			Dots:    pbDots,
+		})
+	}
+	return &internalpb.ORSetData{
+		Entries: pbEntries,
+		Clock:   clock,
+	}
+}
+
+func decodeORSetString(pb *internalpb.ORSetData) *crdt.ORSet[string] {
+	entries := make([]crdt.Entry[string], 0, len(pb.GetEntries()))
+	for _, e := range pb.GetEntries() {
+		dots := make([]crdt.Dot, len(e.GetDots()))
+		for i, d := range e.GetDots() {
+			dots[i] = crdt.Dot{
+				NodeID:  d.GetNodeId(),
+				Counter: d.GetCounter(),
+			}
+		}
+		entries = append(entries, crdt.Entry[string]{
+			Element: string(e.GetElement()),
+			Dots:    dots,
+		})
+	}
+	return crdt.ORSetFromRawState(entries, pb.GetClock())
 }

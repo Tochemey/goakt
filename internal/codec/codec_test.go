@@ -36,6 +36,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 
+	"github.com/tochemey/goakt/v4/crdt"
 	"github.com/tochemey/goakt/v4/datacenter"
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/extension"
@@ -574,4 +575,91 @@ func TestDecodeDataCenterRecordMissingFields(t *testing.T) {
 	require.Equal(t, datacenter.DataCenterState(""), decoded.State)
 	require.True(t, decoded.LeaseExpiry.IsZero())
 	require.Equal(t, uint64(7), decoded.Version)
+}
+
+func TestEncodeCRDTData(t *testing.T) {
+	t.Run("GCounter round-trip", func(t *testing.T) {
+		gc := crdt.NewGCounter().Increment("node-1", 5).Increment("node-2", 3)
+		pb, err := EncodeCRDTData(gc)
+		require.NoError(t, err)
+		require.NotNil(t, pb.GetGCounter())
+
+		decoded, err := DecodeCRDTData(pb)
+		require.NoError(t, err)
+		require.Equal(t, gc.Value(), decoded.(*crdt.GCounter).Value())
+	})
+
+	t.Run("PNCounter round-trip", func(t *testing.T) {
+		pn := crdt.NewPNCounter().Increment("node-1", 10).Decrement("node-2", 3)
+		pb, err := EncodeCRDTData(pn)
+		require.NoError(t, err)
+		require.NotNil(t, pb.GetPnCounter())
+
+		decoded, err := DecodeCRDTData(pb)
+		require.NoError(t, err)
+		require.Equal(t, pn.Value(), decoded.(*crdt.PNCounter).Value())
+	})
+
+	t.Run("ORSet string round-trip", func(t *testing.T) {
+		os := crdt.NewORSet[string]().Add("node-1", "a").Add("node-2", "b")
+		pb, err := EncodeCRDTData(os)
+		require.NoError(t, err)
+		require.NotNil(t, pb.GetOrSet())
+
+		decoded, err := DecodeCRDTData(pb)
+		require.NoError(t, err)
+		decodedSet := decoded.(*crdt.ORSet[string])
+		require.True(t, decodedSet.Contains("a"))
+		require.True(t, decodedSet.Contains("b"))
+		require.Equal(t, 2, decodedSet.Len())
+	})
+
+	t.Run("unsupported type returns error", func(t *testing.T) {
+		_, err := EncodeCRDTData(crdt.NewLWWRegister[string]())
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "unsupported CRDT type")
+	})
+
+	t.Run("nil CRDTData returns error", func(t *testing.T) {
+		_, err := DecodeCRDTData(nil)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "nil CRDTData")
+	})
+
+	t.Run("unsupported CRDTData type returns error", func(t *testing.T) {
+		pb := &internalpb.CRDTData{
+			Type: &internalpb.CRDTData_LwwRegister{},
+		}
+		_, err := DecodeCRDTData(pb)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "unsupported CRDTData type")
+	})
+}
+
+func TestEncodeCRDTKey(t *testing.T) {
+	t.Run("encode and decode round-trip", func(t *testing.T) {
+		pb := EncodeCRDTKey("my-counter", crdt.PNCounterType)
+		require.Equal(t, "my-counter", pb.GetId())
+		require.Equal(t, internalpb.CRDTDataType_CRDT_DATA_TYPE_PN_COUNTER, pb.GetDataType())
+
+		keyID, dataType := DecodeCRDTKey(pb)
+		require.Equal(t, "my-counter", keyID)
+		require.Equal(t, crdt.PNCounterType, dataType)
+	})
+
+	t.Run("GCounter key type", func(t *testing.T) {
+		pb := EncodeCRDTKey("gc", crdt.GCounterType)
+		require.Equal(t, internalpb.CRDTDataType_CRDT_DATA_TYPE_G_COUNTER, pb.GetDataType())
+
+		_, dataType := DecodeCRDTKey(pb)
+		require.Equal(t, crdt.GCounterType, dataType)
+	})
+
+	t.Run("ORSet key type", func(t *testing.T) {
+		pb := EncodeCRDTKey("set", crdt.ORSetType)
+		require.Equal(t, internalpb.CRDTDataType_CRDT_DATA_TYPE_OR_SET, pb.GetDataType())
+
+		_, dataType := DecodeCRDTKey(pb)
+		require.Equal(t, crdt.ORSetType, dataType)
+	})
 }

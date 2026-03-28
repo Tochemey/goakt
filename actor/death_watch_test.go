@@ -23,7 +23,6 @@
 package actor
 
 import (
-	"bytes"
 	"context"
 	stdErrors "errors"
 	"testing"
@@ -288,8 +287,8 @@ func TestDeathWatch(t *testing.T) {
 	// Logging path tests: verify all log messages are emitted when logger is enabled.
 	t.Run("Logging PostStop logs stopped successfully", func(t *testing.T) {
 		ctx := context.Background()
-		var buf bytes.Buffer
-		logger := log.NewSlog(log.InfoLevel, &buf)
+		buf := &safeBuffer{}
+		logger := log.NewSlog(log.InfoLevel, buf)
 		actorSys, err := NewActorSystem("testSys", WithLogger(logger))
 		require.NoError(t, err)
 		require.NotNil(t, actorSys)
@@ -312,8 +311,8 @@ func TestDeathWatch(t *testing.T) {
 
 	t.Run("Logging handlePostStart logs started successfully", func(t *testing.T) {
 		ctx := context.Background()
-		var buf bytes.Buffer
-		logger := log.NewSlog(log.InfoLevel, &buf)
+		buf := &safeBuffer{}
+		logger := log.NewSlog(log.InfoLevel, buf)
 		actorSys, err := NewActorSystem("testSys", WithLogger(logger))
 		require.NoError(t, err)
 		require.NotNil(t, actorSys)
@@ -332,8 +331,8 @@ func TestDeathWatch(t *testing.T) {
 
 	t.Run("Logging handleTerminated logs when PID not found", func(t *testing.T) {
 		ctx := context.Background()
-		var buf bytes.Buffer
-		logger := log.NewSlog(log.InfoLevel, &buf)
+		buf := &safeBuffer{}
+		logger := log.NewSlog(log.InfoLevel, buf)
 		actorSys, err := NewActorSystem("testSys", WithLogger(logger))
 		require.NoError(t, err)
 		require.NotNil(t, actorSys)
@@ -365,8 +364,8 @@ func TestDeathWatch(t *testing.T) {
 
 	t.Run("Logging handleTerminated logs when cluster removal fails", func(t *testing.T) {
 		ctx := context.Background()
-		var buf bytes.Buffer
-		logger := log.NewSlog(log.InfoLevel, &buf)
+		buf := &safeBuffer{}
+		logger := log.NewSlog(log.InfoLevel, buf)
 		actorSys, err := NewActorSystem("testSys", WithLogger(logger))
 		require.NoError(t, err)
 		require.NotNil(t, actorSys)
@@ -423,8 +422,8 @@ func TestDeathWatch(t *testing.T) {
 
 	t.Run("Logging handleTerminated logs when actor successfully removed", func(t *testing.T) {
 		ctx := context.Background()
-		var buf bytes.Buffer
-		logger := log.NewSlog(log.InfoLevel, &buf)
+		buf := &safeBuffer{}
+		logger := log.NewSlog(log.InfoLevel, buf)
 		actorSys, err := NewActorSystem("testSys", WithLogger(logger))
 		require.NoError(t, err)
 		require.NotNil(t, actorSys)

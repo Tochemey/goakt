@@ -23,6 +23,7 @@
 package actor
 
 import (
+	"bytes"
 	"context"
 	cryptotls "crypto/tls"
 	"encoding/json"
@@ -46,6 +47,7 @@ import (
 	noopmetric "go.opentelemetry.io/otel/metric/noop"
 	"go.uber.org/atomic"
 
+	"github.com/tochemey/goakt/v4/crdt"
 	"github.com/tochemey/goakt/v4/datacenter"
 	"github.com/tochemey/goakt/v4/discovery"
 	"github.com/tochemey/goakt/v4/discovery/consul"
@@ -115,6 +117,29 @@ func (x *MockSubscriber) Receive(ctx *ReceiveContext) {
 
 func (x *MockSubscriber) PostStop(*Context) error {
 	return nil
+}
+
+type safeBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (sb *safeBuffer) Write(p []byte) (n int, err error) {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+	return sb.buf.Write(p)
+}
+
+func (sb *safeBuffer) String() string {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+	return sb.buf.String()
+}
+
+func (sb *safeBuffer) Reset() {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+	sb.buf.Reset()
 }
 
 // MockActor is an actor that helps run various test scenarios
@@ -1913,6 +1938,8 @@ type testClusterConfig struct {
 	clientTLS         *cryptotls.Config
 	pubsubEnabled     bool
 	relocationEnabled bool
+	crdtEnabled       bool
+	crdtOpts          []crdt.Option
 	extension         extension.Extension
 	dependency        extension.Dependency
 	compression       remote.Compression
@@ -1956,6 +1983,13 @@ func withMockCompression(c remote.Compression) testClusterOption {
 func withMockRoles(roles ...string) testClusterOption {
 	return func(tcc *testClusterConfig) {
 		tcc.roles = roles
+	}
+}
+
+func withTestCRDT(opts ...crdt.Option) testClusterOption {
+	return func(tcc *testClusterConfig) {
+		tcc.crdtEnabled = true
+		tcc.crdtOpts = opts
 	}
 }
 
@@ -2045,27 +2079,33 @@ func testSystem(t *testing.T, providerFactory providerFactory, opts ...testClust
 		opt(cfg)
 	}
 
+	// build the cluster config
+	clusterConfig := NewClusterConfig().
+		WithKinds(new(MockActor),
+			new(MockEntity),
+			new(exchanger),
+			new(MockGrainActor)).
+		WithGrains(new(MockGrain)).
+		WithPartitionCount(7).
+		WithReplicaCount(1).
+		WithPeersPort(peersPort).
+		WithMinimumPeersQuorum(1).
+		WithDiscoveryPort(discoveryPort).
+		WithBootstrapTimeout(time.Second).
+		WithClusterStateSyncInterval(300 * time.Millisecond).
+		WithClusterBalancerInterval(100 * time.Millisecond).
+		WithRoles(cfg.roles...).
+		WithDiscovery(provider)
+
+	if cfg.crdtEnabled {
+		clusterConfig = clusterConfig.WithCRDT(cfg.crdtOpts...)
+	}
+
 	// base options
 	options := []Option{
 		WithLogger(logger),
 		WithShutdownTimeout(3 * time.Minute),
-		WithCluster(
-			NewClusterConfig().
-				WithKinds(new(MockActor),
-					new(MockEntity),
-					new(exchanger),
-					new(MockGrainActor)).
-				WithGrains(new(MockGrain)).
-				WithPartitionCount(7).
-				WithReplicaCount(1).
-				WithPeersPort(peersPort).
-				WithMinimumPeersQuorum(1).
-				WithDiscoveryPort(discoveryPort).
-				WithBootstrapTimeout(time.Second).
-				WithClusterStateSyncInterval(300 * time.Millisecond).
-				WithClusterBalancerInterval(100 * time.Millisecond).
-				WithRoles(cfg.roles...).
-				WithDiscovery(provider)),
+		WithCluster(clusterConfig),
 	}
 
 	if cfg.pubsubEnabled {

@@ -17,3 +17,4 @@ bench/*.txt
 .gocache/
 .cache/
 .gomodcache/
+.claude/

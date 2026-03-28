@@ -20,52 +20,42 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package actor
+package crdt
 
 import (
-	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
-type nameType int
+func TestKey(t *testing.T) {
+	t.Run("GCounterKey", func(t *testing.T) {
+		k := GCounterKey("counter-1")
+		assert.Equal(t, "counter-1", k.ID())
+		assert.Equal(t, GCounterType, k.Type())
+	})
 
-const (
-	rebalancerType nameType = iota
-	rootGuardianType
-	userGuardianType
-	systemGuardianType
-	deathWatchType
-	deadletterType
-	singletonManagerType
-	topicActorType
-	noSenderType
-	peersStatesWriterType
-	replicatorType
-)
+	t.Run("PNCounterKey", func(t *testing.T) {
+		k := PNCounterKey("requests")
+		assert.Equal(t, "requests", k.ID())
+		assert.Equal(t, PNCounterType, k.Type())
+	})
 
-const (
-	// eventsTopic defines the events topic
-	eventsTopic = "topic.events"
+	t.Run("LWWRegisterKey", func(t *testing.T) {
+		k := LWWRegisterKey[string]("config-value")
+		assert.Equal(t, "config-value", k.ID())
+		assert.Equal(t, LWWRegisterType, k.Type())
+	})
 
-	reservedNamesPrefix = "GoAkt"
-	routeeNamePrefix    = "Routee"
-)
+	t.Run("ORSetKey", func(t *testing.T) {
+		k := ORSetKey[string]("sessions")
+		assert.Equal(t, "sessions", k.ID())
+		assert.Equal(t, ORSetType, k.Type())
+	})
 
-var (
-	reservedNames = map[nameType]string{
-		rebalancerType:        "GoAktRebalancer",
-		rootGuardianType:      "GoAktRootGuardian",
-		userGuardianType:      "GoAktUserGuardian",
-		systemGuardianType:    "GoAktSystemGuardian",
-		deathWatchType:        "GoAktDeathWatch",
-		deadletterType:        "GoAktDeadletter",
-		singletonManagerType:  "GoAktSingletonManager",
-		topicActorType:        "GoAktTopicActor",
-		noSenderType:          "GoAktNoSender",
-		peersStatesWriterType: "GoAktPeerStatesWriter",
-		replicatorType:        "GoAktReplicator",
-	}
-)
-
-func isSystemName(name string) bool {
-	return strings.HasPrefix(name, reservedNamesPrefix)
+	t.Run("ORSetKey with int type", func(t *testing.T) {
+		k := ORSetKey[int]("user-ids")
+		assert.Equal(t, "user-ids", k.ID())
+		assert.Equal(t, ORSetType, k.Type())
+	})
 }

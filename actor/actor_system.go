@@ -436,6 +436,9 @@ type ActorSystem interface {
 	//
 	// Returns the actor reference for the topic actor.
 	TopicActor() *PID
+	// Replicator returns the PID of the local CRDT Replicator system actor.
+	// Returns nil if CRDT replication is not enabled via ClusterConfig.WithCRDT.
+	Replicator() *PID
 	// Extensions returns a slice of all registered extensions in the ActorSystem.
 	//
 	// This allows system-level introspection or iteration over all available extensions.
@@ -818,6 +821,7 @@ type actorSystem struct {
 	deadletter       *PID
 	singletonManager *PID
 	topicActor       *PID
+	replicator       *PID
 	noSender         *PID
 	peerStatesWriter *PID
 
@@ -1035,6 +1039,7 @@ func (x *actorSystem) Start(ctx context.Context) error {
 		AddContextRunner(x.spawnSingletonManager).
 		AddContextRunner(x.spawnRelocator).
 		AddContextRunner(x.spawnTopicActor).
+		AddContextRunner(x.spawnReplicator).
 		AddContextRunner(x.startRemoteServer).
 		AddContextRunner(x.startCluster).
 		AddContextRunner(x.startDataCenterController).
@@ -1818,6 +1823,15 @@ func (x *actorSystem) TopicActor() *PID {
 	topicActor := x.topicActor
 	x.locker.RUnlock()
 	return topicActor
+}
+
+// Replicator returns the PID of the local CRDT Replicator system actor.
+// Returns nil if CRDT replication is not enabled via ClusterConfig.WithCRDT.
+func (x *actorSystem) Replicator() *PID {
+	x.locker.RLock()
+	replicator := x.replicator
+	x.locker.RUnlock()
+	return replicator
 }
 
 // Extensions returns a slice of all registered extensions in the ActorSystem.

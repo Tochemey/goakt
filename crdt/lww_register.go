@@ -1,0 +1,115 @@
+// MIT License
+//
+// Copyright (c) 2022-2026 GoAkt Team
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+package crdt
+
+import "time"
+
+// ensure LWWRegister implements ReplicatedData at compile time.
+var _ ReplicatedData = (*LWWRegister[any])(nil)
+
+// LWWRegister is a last-writer-wins register CRDT.
+//
+// It stores a single value with a timestamp. Concurrent writes are
+// resolved by taking the value with the highest timestamp. If timestamps
+// are equal, the write from the node with the lexicographically higher
+// node ID wins (deterministic tiebreaker).
+type LWWRegister[T any] struct {
+	value     T
+	timestamp int64
+	nodeID    string
+	dirty     bool
+}
+
+// NewLWWRegister creates a new LWWRegister with a zero value.
+func NewLWWRegister[T any]() *LWWRegister[T] {
+	return &LWWRegister[T]{}
+}
+
+// Set updates the register value with the given timestamp and node ID.
+// Returns a new LWWRegister with the updated state.
+func (r *LWWRegister[T]) Set(value T, timestamp time.Time, nodeID string) *LWWRegister[T] {
+	return &LWWRegister[T]{
+		value:     value,
+		timestamp: timestamp.UnixNano(),
+		nodeID:    nodeID,
+		dirty:     true,
+	}
+}
+
+// Value returns the current register value.
+func (r *LWWRegister[T]) Value() T {
+	return r.value
+}
+
+// Timestamp returns the timestamp of the current value as nanoseconds since epoch.
+func (r *LWWRegister[T]) Timestamp() int64 {
+	return r.timestamp
+}
+
+// NodeID returns the node ID that last wrote this value.
+func (r *LWWRegister[T]) NodeID() string {
+	return r.nodeID
+}
+
+// Merge combines this register with another by taking the value with the
+// highest timestamp. If timestamps are equal, the node with the
+// lexicographically higher node ID wins.
+// Both inputs are left unchanged.
+func (r *LWWRegister[T]) Merge(other ReplicatedData) ReplicatedData {
+	o, ok := other.(*LWWRegister[T])
+	if !ok {
+		return r
+	}
+
+	if o.timestamp > r.timestamp {
+		return o.Clone()
+	}
+	if o.timestamp == r.timestamp && o.nodeID > r.nodeID {
+		return o.Clone()
+	}
+	return r.Clone()
+}
+
+// Delta returns the register state if it has changed since the last ResetDelta.
+// Returns nil if there are no changes.
+func (r *LWWRegister[T]) Delta() ReplicatedData {
+	if !r.dirty {
+		return nil
+	}
+	return r.Clone()
+}
+
+// ResetDelta clears the dirty flag.
+func (r *LWWRegister[T]) ResetDelta() {
+	r.dirty = false
+}
+
+// Clone returns a deep copy of the register.
+func (r *LWWRegister[T]) Clone() ReplicatedData {
+	return &LWWRegister[T]{
+		value:     r.value,
+		timestamp: r.timestamp,
+		nodeID:    r.nodeID,
+		dirty:     r.dirty,
+	}
+}

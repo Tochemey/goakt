@@ -20,52 +20,31 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package actor
+package crdt
 
-import (
-	"strings"
-)
+// ReplicatedData is the base interface for all CRDT types.
+//
+// Every CRDT in the system must implement this interface. Implementations
+// must be safe to merge concurrently from multiple nodes — the Merge
+// function must be commutative, associative, and idempotent.
+//
+// CRDT types are treated as immutable values: every mutation returns a
+// new value. The Delta/ResetDelta pair enables delta-based replication,
+// where only the changes since the last synchronization point are
+// transmitted rather than the full state.
+type ReplicatedData interface {
+	// Merge combines this CRDT with a remote replica's state.
+	// Returns the merged result. Both inputs are left unchanged.
+	// The merge function must be commutative, associative, and idempotent.
+	Merge(other ReplicatedData) ReplicatedData
 
-type nameType int
+	// Delta returns the state changes since the last call to ResetDelta.
+	// Returns nil if there are no changes.
+	Delta() ReplicatedData
 
-const (
-	rebalancerType nameType = iota
-	rootGuardianType
-	userGuardianType
-	systemGuardianType
-	deathWatchType
-	deadletterType
-	singletonManagerType
-	topicActorType
-	noSenderType
-	peersStatesWriterType
-	replicatorType
-)
+	// ResetDelta clears the accumulated delta state.
+	ResetDelta()
 
-const (
-	// eventsTopic defines the events topic
-	eventsTopic = "topic.events"
-
-	reservedNamesPrefix = "GoAkt"
-	routeeNamePrefix    = "Routee"
-)
-
-var (
-	reservedNames = map[nameType]string{
-		rebalancerType:        "GoAktRebalancer",
-		rootGuardianType:      "GoAktRootGuardian",
-		userGuardianType:      "GoAktUserGuardian",
-		systemGuardianType:    "GoAktSystemGuardian",
-		deathWatchType:        "GoAktDeathWatch",
-		deadletterType:        "GoAktDeadletter",
-		singletonManagerType:  "GoAktSingletonManager",
-		topicActorType:        "GoAktTopicActor",
-		noSenderType:          "GoAktNoSender",
-		peersStatesWriterType: "GoAktPeerStatesWriter",
-		replicatorType:        "GoAktReplicator",
-	}
-)
-
-func isSystemName(name string) bool {
-	return strings.HasPrefix(name, reservedNamesPrefix)
+	// Clone returns a deep copy of the CRDT.
+	Clone() ReplicatedData
 }
