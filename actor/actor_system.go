@@ -1053,12 +1053,13 @@ func (x *actorSystem) Start(ctx context.Context) error {
 	x.startMessagesScheduler(ctx)
 
 	if err := x.spawnReplicator(ctx); err != nil {
+		var shutdownErr error
 		if x.replicator != nil {
-			return errors.Join(err, x.replicator.Shutdown(ctx))
+			shutdownErr = x.replicator.Shutdown(ctx)
 		}
 		x.scheduler.Stop(ctx)
 		x.startupCleanup(ctx)
-		return err
+		return errors.Join(err, shutdownErr)
 	}
 
 	if x.passivator != nil {
