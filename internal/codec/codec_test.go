@@ -762,17 +762,17 @@ type testDependency struct {
 	data []byte
 }
 
-func (d *testDependency) ID() string                       { return "test-dep" }
-func (d *testDependency) MarshalBinary() ([]byte, error)   { return d.data, nil }
-func (d *testDependency) UnmarshalBinary(b []byte) error   { d.data = b; return nil }
+func (d *testDependency) ID() string                     { return "test-dep" }
+func (d *testDependency) MarshalBinary() ([]byte, error) { return d.data, nil }
+func (d *testDependency) UnmarshalBinary(b []byte) error { d.data = b; return nil }
 
 type badUnmarshalDep struct {
 	data []byte
 }
 
-func (d *badUnmarshalDep) ID() string                       { return "bad-dep" }
-func (d *badUnmarshalDep) MarshalBinary() ([]byte, error)   { return d.data, nil }
-func (d *badUnmarshalDep) UnmarshalBinary(_ []byte) error   { return errors.New("unmarshal fail") }
+func (d *badUnmarshalDep) ID() string                     { return "bad-dep" }
+func (d *badUnmarshalDep) MarshalBinary() ([]byte, error) { return d.data, nil }
+func (d *badUnmarshalDep) UnmarshalBinary(_ []byte) error { return errors.New("unmarshal fail") }
 
 type notADependency struct{}
 
