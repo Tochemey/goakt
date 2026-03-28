@@ -97,7 +97,7 @@ func (s *Store) Save(store map[string]crdt.ReplicatedData, keyTypes map[string]c
 	return s.db.Update(func(tx *bbolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
-			return fmt.Errorf("crdt: snapshot bucket %q missing", s.bucket)
+			return fmt.Errorf("crdt: snapshot bucket %q missing", bucketName)
 		}
 
 		// clear existing entries

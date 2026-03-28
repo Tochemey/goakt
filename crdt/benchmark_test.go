@@ -28,6 +28,8 @@ import (
 	"time"
 )
 
+var benchSink any
+
 // ---------------------------------------------------------------------------
 // GCounter benchmarks
 // ---------------------------------------------------------------------------
@@ -41,11 +43,13 @@ func benchmarkGCounterMergeConverged(b *testing.B, nodes int) {
 		c2 = c2.Increment(nodeID, uint64(i+1))
 	}
 
+	var sink ReplicatedData
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		c1.Merge(c2)
+		sink = c1.Merge(c2)
 	}
+	benchSink = sink
 }
 
 func BenchmarkGCounterMergeConverged_3Nodes(b *testing.B)  { benchmarkGCounterMergeConverged(b, 3) }
@@ -61,11 +65,13 @@ func benchmarkGCounterMergeDiverged(b *testing.B, nodes int) {
 		c2 = c2.Increment(nodeID, uint64(i+2))
 	}
 
+	var sink ReplicatedData
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		c1.Merge(c2)
+		sink = c1.Merge(c2)
 	}
+	benchSink = sink
 }
 
 func BenchmarkGCounterMergeDiverged_3Nodes(b *testing.B)  { benchmarkGCounterMergeDiverged(b, 3) }
@@ -126,11 +132,13 @@ func benchmarkPNCounterMergeConverged(b *testing.B, nodes int) {
 		c2 = c2.Increment(nodeID, uint64(i+1))
 	}
 
+	var sink ReplicatedData
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		c1.Merge(c2)
+		sink = c1.Merge(c2)
 	}
+	benchSink = sink
 }
 
 func BenchmarkPNCounterMergeConverged_3Nodes(b *testing.B) {
@@ -203,11 +211,13 @@ func BenchmarkLWWRegisterMerge(b *testing.B) {
 	r1 := NewLWWRegister[string]().Set("v1", now, "node-1")
 	r2 := NewLWWRegister[string]().Set("v2", now.Add(time.Second), "node-2")
 
+	var sink ReplicatedData
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		r1.Merge(r2)
+		sink = r1.Merge(r2)
 	}
+	benchSink = sink
 }
 
 func BenchmarkLWWRegisterMergeConverged(b *testing.B) {
@@ -215,21 +225,25 @@ func BenchmarkLWWRegisterMergeConverged(b *testing.B) {
 	r1 := NewLWWRegister[string]().Set("v1", now, "node-1")
 	r2 := NewLWWRegister[string]().Set("v1", now, "node-1")
 
+	var sink ReplicatedData
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		r1.Merge(r2)
+		sink = r1.Merge(r2)
 	}
+	benchSink = sink
 }
 
 func BenchmarkLWWRegisterSet(b *testing.B) {
 	r := NewLWWRegister[string]()
 	now := time.Now()
+	var sink *LWWRegister[string]
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		r.Set("value", now, "node-1")
+		sink = r.Set("value", now, "node-1")
 	}
+	benchSink = sink
 }
 
 // ---------------------------------------------------------------------------
@@ -240,22 +254,26 @@ func BenchmarkFlagMerge(b *testing.B) {
 	f1 := NewFlag().Enable()
 	f2 := NewFlag()
 
+	var sink ReplicatedData
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		f1.Merge(f2)
+		sink = f1.Merge(f2)
 	}
+	benchSink = sink
 }
 
 func BenchmarkFlagMergeConverged(b *testing.B) {
 	f1 := NewFlag().Enable()
 	f2 := NewFlag().Enable()
 
+	var sink ReplicatedData
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		f1.Merge(f2)
+		sink = f1.Merge(f2)
 	}
+	benchSink = sink
 }
 
 func BenchmarkFlagClone(b *testing.B) {
@@ -288,11 +306,13 @@ func benchmarkORSetMergeConverged(b *testing.B, elements int) {
 		s2 = s2.Add("node-1", i)
 	}
 
+	var sink ReplicatedData
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		s1.Merge(s2)
+		sink = s1.Merge(s2)
 	}
+	benchSink = sink
 }
 
 func BenchmarkORSetMergeConverged_10(b *testing.B)   { benchmarkORSetMergeConverged(b, 10) }
@@ -307,11 +327,13 @@ func benchmarkORSetMergeDiverged(b *testing.B, elements int) {
 		s2 = s2.Add("node-2", i+elements)
 	}
 
+	var sink ReplicatedData
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		s1.Merge(s2)
+		sink = s1.Merge(s2)
 	}
+	benchSink = sink
 }
 
 func BenchmarkORSetMergeDiverged_10(b *testing.B)   { benchmarkORSetMergeDiverged(b, 10) }
@@ -413,22 +435,26 @@ func BenchmarkMVRegisterMergeConverged(b *testing.B) {
 	r := NewMVRegister[string]().Set("node-1", "hello")
 	r.ResetDelta()
 
+	var sink ReplicatedData
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		r.Merge(r)
+		sink = r.Merge(r)
 	}
+	benchSink = sink
 }
 
 func BenchmarkMVRegisterMergeConcurrent(b *testing.B) {
 	r1 := NewMVRegister[string]().Set("node-1", "a")
 	r2 := NewMVRegister[string]().Set("node-2", "b")
 
+	var sink ReplicatedData
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		r1.Merge(r2)
+		sink = r1.Merge(r2)
 	}
+	benchSink = sink
 }
 
 func BenchmarkMVRegisterClone(b *testing.B) {
@@ -481,11 +507,13 @@ func BenchmarkORMapMergeConverged(b *testing.B) {
 	}
 	m.ResetDelta()
 
+	var sink ReplicatedData
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		m.Merge(m)
+		sink = m.Merge(m)
 	}
+	benchSink = sink
 }
 
 func BenchmarkORMapMergeDiverged(b *testing.B) {
@@ -497,11 +525,13 @@ func BenchmarkORMapMergeDiverged(b *testing.B) {
 		m2 = m2.Set("node-2", key, NewGCounter().Increment("node-2", uint64(i+2)))
 	}
 
+	var sink ReplicatedData
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		m1.Merge(m2)
+		sink = m1.Merge(m2)
 	}
+	benchSink = sink
 }
 
 func benchmarkORMapMergeConvergedN(b *testing.B, size int) {
@@ -510,11 +540,13 @@ func benchmarkORMapMergeConvergedN(b *testing.B, size int) {
 		m = m.Set("node-1", fmt.Sprintf("key-%d", i), NewGCounter().Increment("node-1", uint64(i)))
 	}
 	m.ResetDelta()
+	var sink ReplicatedData
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		m.Merge(m)
+		sink = m.Merge(m)
 	}
+	benchSink = sink
 }
 
 func BenchmarkORMapMergeConverged_100(b *testing.B) { benchmarkORMapMergeConvergedN(b, 100) }
@@ -527,11 +559,13 @@ func benchmarkORMapMergeDivergedN(b *testing.B, size int) {
 		m1 = m1.Set("node-1", key, NewGCounter().Increment("node-1", uint64(i+1)))
 		m2 = m2.Set("node-2", key, NewGCounter().Increment("node-2", uint64(i+2)))
 	}
+	var sink ReplicatedData
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		m1.Merge(m2)
+		sink = m1.Merge(m2)
 	}
+	benchSink = sink
 }
 
 func BenchmarkORMapMergeDivergent_100(b *testing.B) { benchmarkORMapMergeDivergedN(b, 100) }
