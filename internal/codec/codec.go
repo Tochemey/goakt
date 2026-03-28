@@ -33,6 +33,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	"github.com/tochemey/goakt/v4/crdt"
 	"github.com/tochemey/goakt/v4/datacenter"
@@ -454,20 +455,19 @@ func fromProtoState(state internalpb.DataCenterState) datacenter.DataCenterState
 	}
 }
 
-const stringTypeURL = "type.goakt.dev/string"
-
-func stringToAny(s string) *anypb.Any {
-	return &anypb.Any{
-		TypeUrl: stringTypeURL,
-		Value:   []byte(s),
-	}
+func stringToAny(s string) (*anypb.Any, error) {
+	return anypb.New(wrapperspb.String(s))
 }
 
-func anyToString(a *anypb.Any) string {
+func anyToString(a *anypb.Any) (string, error) {
 	if a == nil {
-		return ""
+		return "", nil
 	}
-	return string(a.GetValue())
+	var sv wrapperspb.StringValue
+	if err := a.UnmarshalTo(&sv); err != nil {
+		return "", fmt.Errorf("expected google.protobuf.StringValue, got %s: %w", a.GetTypeUrl(), err)
+	}
+	return sv.GetValue(), nil
 }
 
 // EncodeActorState converts remote.ActorState to internalpb.State for wire transmission.
@@ -498,9 +498,13 @@ func EncodeCRDTData(data crdt.ReplicatedData) (*internalpb.CRDTData, error) {
 			},
 		}, nil
 	case ORSetStringEncoder:
+		orSetData, err := encodeORSetString(v)
+		if err != nil {
+			return nil, err
+		}
 		return &internalpb.CRDTData{
 			Type: &internalpb.CRDTData_OrSet{
-				OrSet: encodeORSetString(v),
+				OrSet: orSetData,
 			},
 		}, nil
 	case *crdt.Flag:
@@ -510,15 +514,23 @@ func EncodeCRDTData(data crdt.ReplicatedData) (*internalpb.CRDTData, error) {
 			},
 		}, nil
 	case LWWRegisterStringEncoder:
+		lwwData, err := encodeLWWRegisterString(v)
+		if err != nil {
+			return nil, err
+		}
 		return &internalpb.CRDTData{
 			Type: &internalpb.CRDTData_LwwRegister{
-				LwwRegister: encodeLWWRegisterString(v),
+				LwwRegister: lwwData,
 			},
 		}, nil
 	case MVRegisterStringEncoder:
+		mvData, err := encodeMVRegisterString(v)
+		if err != nil {
+			return nil, err
+		}
 		return &internalpb.CRDTData{
 			Type: &internalpb.CRDTData_MvRegister{
-				MvRegister: encodeMVRegisterString(v),
+				MvRegister: mvData,
 			},
 		}, nil
 	case ORMapStringGCounterEncoder:
@@ -547,13 +559,13 @@ func DecodeCRDTData(pb *internalpb.CRDTData) (crdt.ReplicatedData, error) {
 	case *internalpb.CRDTData_PnCounter:
 		return decodePNCounter(v.PnCounter), nil
 	case *internalpb.CRDTData_OrSet:
-		return decodeORSetString(v.OrSet), nil
+		return decodeORSetString(v.OrSet)
 	case *internalpb.CRDTData_Flag:
 		return decodeFlag(v.Flag), nil
 	case *internalpb.CRDTData_LwwRegister:
-		return decodeLWWRegisterString(v.LwwRegister), nil
+		return decodeLWWRegisterString(v.LwwRegister)
 	case *internalpb.CRDTData_MvRegister:
-		return decodeMVRegisterString(v.MvRegister), nil
+		return decodeMVRegisterString(v.MvRegister)
 	case *internalpb.CRDTData_OrMap:
 		return decodeORMapStringGCounter(v.OrMap)
 	default:
@@ -609,14 +621,17 @@ func decodePNCounter(pb *internalpb.PNCounterData) *crdt.PNCounter {
 	)
 }
 
-func encodeORSetString(s ORSetStringEncoder) *internalpb.ORSetData {
+func encodeORSetString(s ORSetStringEncoder) (*internalpb.ORSetData, error) {
 	entries, clock := s.RawState()
 	return encodeORSetEntries(entries, clock)
 }
 
-func decodeORSetString(pb *internalpb.ORSetData) *crdt.ORSet[string] {
-	entries := decodeORSetEntries(pb)
-	return crdt.ORSetFromRawState(entries, pb.GetClock())
+func decodeORSetString(pb *internalpb.ORSetData) (*crdt.ORSet[string], error) {
+	entries, err := decodeORSetEntries(pb)
+	if err != nil {
+		return nil, err
+	}
+	return crdt.ORSetFromRawState(entries, pb.GetClock()), nil
 }
 
 func encodeFlag(f *crdt.Flag) *internalpb.FlagData {
@@ -639,20 +654,28 @@ type LWWRegisterStringEncoder interface {
 	NodeID() string
 }
 
-func encodeLWWRegisterString(r LWWRegisterStringEncoder) *internalpb.LWWRegisterData {
+func encodeLWWRegisterString(r LWWRegisterStringEncoder) (*internalpb.LWWRegisterData, error) {
+	val, err := stringToAny(r.Value())
+	if err != nil {
+		return nil, fmt.Errorf("encode LWWRegister value: %w", err)
+	}
 	return &internalpb.LWWRegisterData{
-		Value:          stringToAny(r.Value()),
+		Value:          val,
 		TimestampNanos: r.Timestamp(),
 		NodeId:         r.NodeID(),
-	}
+	}, nil
 }
 
-func decodeLWWRegisterString(pb *internalpb.LWWRegisterData) *crdt.LWWRegister[string] {
+func decodeLWWRegisterString(pb *internalpb.LWWRegisterData) (*crdt.LWWRegister[string], error) {
+	val, err := anyToString(pb.GetValue())
+	if err != nil {
+		return nil, fmt.Errorf("decode LWWRegister value: %w", err)
+	}
 	return crdt.LWWRegisterFromState(
-		anyToString(pb.GetValue()),
+		val,
 		pb.GetTimestampNanos(),
 		pb.GetNodeId(),
-	)
+	), nil
 }
 
 // MVRegisterStringEncoder is a type assertion target for MVRegister[string] encoding.
@@ -660,12 +683,16 @@ type MVRegisterStringEncoder interface {
 	RawState() ([]crdt.MVEntry[string], map[string]uint64)
 }
 
-func encodeMVRegisterString(r MVRegisterStringEncoder) *internalpb.MVRegisterData {
+func encodeMVRegisterString(r MVRegisterStringEncoder) (*internalpb.MVRegisterData, error) {
 	entries, clock := r.RawState()
 	pbEntries := make([]*internalpb.MVRegisterData_MVRegisterEntry, 0, len(entries))
 	for _, e := range entries {
+		val, err := stringToAny(e.Value)
+		if err != nil {
+			return nil, fmt.Errorf("encode MVRegister entry: %w", err)
+		}
 		pbEntries = append(pbEntries, &internalpb.MVRegisterData_MVRegisterEntry{
-			Value:   stringToAny(e.Value),
+			Value:   val,
 			NodeId:  e.Dot.NodeID,
 			Counter: e.Dot.Counter,
 		})
@@ -673,21 +700,25 @@ func encodeMVRegisterString(r MVRegisterStringEncoder) *internalpb.MVRegisterDat
 	return &internalpb.MVRegisterData{
 		Entries: pbEntries,
 		Clock:   clock,
-	}
+	}, nil
 }
 
-func decodeMVRegisterString(pb *internalpb.MVRegisterData) *crdt.MVRegister[string] {
+func decodeMVRegisterString(pb *internalpb.MVRegisterData) (*crdt.MVRegister[string], error) {
 	entries := make([]crdt.MVEntry[string], 0, len(pb.GetEntries()))
 	for _, e := range pb.GetEntries() {
+		val, err := anyToString(e.GetValue())
+		if err != nil {
+			return nil, fmt.Errorf("decode MVRegister entry: %w", err)
+		}
 		entries = append(entries, crdt.MVEntry[string]{
-			Value: anyToString(e.GetValue()),
+			Value: val,
 			Dot: crdt.Dot{
 				NodeID:  e.GetNodeId(),
 				Counter: e.GetCounter(),
 			},
 		})
 	}
-	return crdt.MVRegisterFromRawState(entries, pb.GetClock())
+	return crdt.MVRegisterFromRawState(entries, pb.GetClock()), nil
 }
 
 // ORMapStringGCounterEncoder is a type assertion target for ORMap[string, *GCounter] encoding.
@@ -699,7 +730,10 @@ func encodeORMapStringGCounter(m ORMapStringGCounterEncoder) (*internalpb.ORMapD
 	state := m.RawState()
 
 	// encode key set as ORSetData
-	keySet := encodeORSetEntries(state.KeyEntries, state.KeyClock)
+	keySet, err := encodeORSetEntries(state.KeyEntries, state.KeyClock)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode ORMap key set: %w", err)
+	}
 
 	// encode values
 	pbEntries := make([]*internalpb.ORMapData_ORMapEntry, 0, len(state.Values))
@@ -708,8 +742,12 @@ func encodeORMapStringGCounter(m ORMapStringGCounterEncoder) (*internalpb.ORMapD
 		if err != nil {
 			return nil, fmt.Errorf("failed to encode ORMap value for key=%s: %w", k, err)
 		}
+		keyAny, err := stringToAny(k)
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode ORMap key=%s: %w", k, err)
+		}
 		pbEntries = append(pbEntries, &internalpb.ORMapData_ORMapEntry{
-			Key:   stringToAny(k),
+			Key:   keyAny,
 			Value: valData,
 		})
 	}
@@ -721,14 +759,25 @@ func encodeORMapStringGCounter(m ORMapStringGCounterEncoder) (*internalpb.ORMapD
 }
 
 func decodeORMapStringGCounter(pb *internalpb.ORMapData) (*crdt.ORMap[string, *crdt.GCounter], error) {
-	// decode key set
-	keyEntries := decodeORSetEntries(pb.GetKeySet())
-	keyClock := pb.GetKeySet().GetClock()
+	// decode key set (treat nil as empty)
+	var keyEntries []crdt.Entry[string]
+	var keyClock map[string]uint64
+	if ks := pb.GetKeySet(); ks != nil {
+		var err error
+		keyEntries, err = decodeORSetEntries(ks)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode ORMap key set: %w", err)
+		}
+		keyClock = ks.GetClock()
+	}
 
 	// decode values
 	values := make(map[string]*crdt.GCounter, len(pb.GetEntries()))
 	for _, e := range pb.GetEntries() {
-		key := anyToString(e.GetKey())
+		key, err := anyToString(e.GetKey())
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode ORMap key: %w", err)
+		}
 		data, err := DecodeCRDTData(e.GetValue())
 		if err != nil {
 			return nil, fmt.Errorf("failed to decode ORMap value for key=%s: %w", key, err)
@@ -749,7 +798,7 @@ func decodeORMapStringGCounter(pb *internalpb.ORMapData) (*crdt.ORMap[string, *c
 }
 
 // encodeORSetEntries encodes ORSet entries and clock to protobuf.
-func encodeORSetEntries(entries []crdt.Entry[string], clock map[string]uint64) *internalpb.ORSetData {
+func encodeORSetEntries(entries []crdt.Entry[string], clock map[string]uint64) (*internalpb.ORSetData, error) {
 	pbEntries := make([]*internalpb.ORSetData_ORSetEntry, 0, len(entries))
 	for _, e := range entries {
 		pbDots := make([]*internalpb.ORSetData_ORSetDot, len(e.Dots))
@@ -759,19 +808,23 @@ func encodeORSetEntries(entries []crdt.Entry[string], clock map[string]uint64) *
 				Counter: d.Counter,
 			}
 		}
+		elem, err := stringToAny(e.Element)
+		if err != nil {
+			return nil, fmt.Errorf("encode ORSet element: %w", err)
+		}
 		pbEntries = append(pbEntries, &internalpb.ORSetData_ORSetEntry{
-			Element: stringToAny(e.Element),
+			Element: elem,
 			Dots:    pbDots,
 		})
 	}
 	return &internalpb.ORSetData{
 		Entries: pbEntries,
 		Clock:   clock,
-	}
+	}, nil
 }
 
 // decodeORSetEntries decodes ORSet entries from protobuf.
-func decodeORSetEntries(pb *internalpb.ORSetData) []crdt.Entry[string] {
+func decodeORSetEntries(pb *internalpb.ORSetData) ([]crdt.Entry[string], error) {
 	entries := make([]crdt.Entry[string], 0, len(pb.GetEntries()))
 	for _, e := range pb.GetEntries() {
 		dots := make([]crdt.Dot, len(e.GetDots()))
@@ -781,10 +834,14 @@ func decodeORSetEntries(pb *internalpb.ORSetData) []crdt.Entry[string] {
 				Counter: d.GetCounter(),
 			}
 		}
+		elem, err := anyToString(e.GetElement())
+		if err != nil {
+			return nil, fmt.Errorf("decode ORSet element: %w", err)
+		}
 		entries = append(entries, crdt.Entry[string]{
-			Element: anyToString(e.GetElement()),
+			Element: elem,
 			Dots:    dots,
 		})
 	}
-	return entries
+	return entries, nil
 }

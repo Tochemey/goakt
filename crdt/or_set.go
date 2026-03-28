@@ -178,6 +178,10 @@ func (s *ORSet[T]) Merge(other ReplicatedData) ReplicatedData {
 // Delta returns the state changes since the last call to ResetDelta.
 // Returns nil if there are no changes. The returned delta can be used
 // as a ReplicatedData and merged into a peer's ORSet.
+//
+// The delta carries only the newly-added entries and a clock scoped to
+// the nodes that produced those dots. This prevents a peer from treating
+// the full clock as evidence that unseen dots have been removed.
 func (s *ORSet[T]) Delta() ReplicatedData {
 	if len(s.delta.added) == 0 && len(s.delta.removed) == 0 {
 		return nil
@@ -185,13 +189,21 @@ func (s *ORSet[T]) Delta() ReplicatedData {
 	// Build a minimal ORSet representing just the delta.
 	d := &ORSet[T]{
 		entries: make(map[T][]dot, len(s.delta.added)),
-		clock:   make(map[string]uint64, len(s.clock)),
+		clock:   make(map[string]uint64),
 		delta:   newORSetDelta[T](),
 	}
 	for elem, dots := range s.delta.added {
-		d.entries[elem] = cloneDots(dots)
+		cloned := cloneDots(dots)
+		d.entries[elem] = cloned
+		// Include only clock entries for nodes that produced new dots.
+		for _, dt := range cloned {
+			if c, ok := s.clock[dt.nodeID]; ok {
+				if c > d.clock[dt.nodeID] {
+					d.clock[dt.nodeID] = c
+				}
+			}
+		}
 	}
-	maps.Copy(d.clock, s.clock)
 	return d
 }
 

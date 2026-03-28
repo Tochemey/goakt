@@ -81,13 +81,15 @@ func (r *LWWRegister[T]) Merge(other ReplicatedData) ReplicatedData {
 		return r
 	}
 
-	if o.timestamp > r.timestamp {
-		return o.Clone()
+	winner := r
+	if o.timestamp > r.timestamp || (o.timestamp == r.timestamp && o.nodeID > r.nodeID) {
+		winner = o
 	}
-	if o.timestamp == r.timestamp && o.nodeID > r.nodeID {
-		return o.Clone()
+	return &LWWRegister[T]{
+		value:     winner.value,
+		timestamp: winner.timestamp,
+		nodeID:    winner.nodeID,
 	}
-	return r.Clone()
 }
 
 // Delta returns the register state if it has changed since the last ResetDelta.

@@ -87,14 +87,12 @@ func (a *SessionTracker) Receive(ctx *actor.ReceiveContext) {
 		reply := ctx.Ask(replicator, &crdt.Get[*crdt.ORSet[string]]{
 			Key: sessionsKey,
 		}, time.Second)
-		if reply != nil {
-			data := reply.(*crdt.GetResponse[*crdt.ORSet[string]]).Data
-			if data != nil {
-				fmt.Printf("[%s] active sessions: %v (count=%d)\n",
-					ctx.ActorSystem().PeersAddress(), data.Elements(), data.Len())
-			} else {
-				fmt.Printf("[%s] no sessions found\n", ctx.ActorSystem().PeersAddress())
-			}
+		resp, ok := reply.(*crdt.GetResponse[*crdt.ORSet[string]])
+		if ok && resp.Data != nil {
+			fmt.Printf("[%s] active sessions: %v (count=%d)\n",
+				ctx.ActorSystem().PeersAddress(), resp.Data.Elements(), resp.Data.Len())
+		} else {
+			fmt.Printf("[%s] no sessions found\n", ctx.ActorSystem().PeersAddress())
 		}
 	}
 }
