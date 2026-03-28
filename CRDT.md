@@ -305,7 +305,7 @@ Usage:
 var (
     requestCount   = crdt.PNCounterKey("request-count")
     activeSessions = crdt.ORSetKey[string]("active-sessions")
-    featureFlag    = crdt.LWWRegisterKey[bool]("dark-mode")
+    featureFlag    = crdt.LWWRegisterKey[string]("dark-mode")
 )
 ```
 
@@ -872,7 +872,7 @@ Keys are defined once, typically as package-level variables. The type parameter 
 var (
     requestCount   = crdt.PNCounterKey("request-count")
     activeSessions = crdt.ORSetKey[string]("active-sessions")
-    featureFlag    = crdt.LWWRegisterKey[bool]("dark-mode")
+    featureFlag    = crdt.LWWRegisterKey[string]("dark-mode")
 )
 ```
 

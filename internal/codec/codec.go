@@ -492,6 +492,12 @@ func EncodeCRDTData(data crdt.ReplicatedData) (*internalpb.CRDTData, error) {
 				Flag: encodeFlag(v),
 			},
 		}, nil
+	case LWWRegisterStringEncoder:
+		return &internalpb.CRDTData{
+			Type: &internalpb.CRDTData_LwwRegister{
+				LwwRegister: encodeLWWRegisterString(v),
+			},
+		}, nil
 	case MVRegisterStringEncoder:
 		return &internalpb.CRDTData{
 			Type: &internalpb.CRDTData_MvRegister{
@@ -527,6 +533,8 @@ func DecodeCRDTData(pb *internalpb.CRDTData) (crdt.ReplicatedData, error) {
 		return decodeORSetString(v.OrSet), nil
 	case *internalpb.CRDTData_Flag:
 		return decodeFlag(v.Flag), nil
+	case *internalpb.CRDTData_LwwRegister:
+		return decodeLWWRegisterString(v.LwwRegister), nil
 	case *internalpb.CRDTData_MvRegister:
 		return decodeMVRegisterString(v.MvRegister), nil
 	case *internalpb.CRDTData_OrMap:
@@ -549,10 +557,14 @@ func DecodeCRDTKey(pb *internalpb.CRDTKey) (keyID string, dataType crdt.DataType
 	if pb == nil {
 		return "", 0, fmt.Errorf("nil CRDTKey")
 	}
-	if pb.GetDataType() == internalpb.CRDTDataType_CRDT_DATA_TYPE_UNSPECIFIED {
+	dt := pb.GetDataType()
+	if dt == internalpb.CRDTDataType_CRDT_DATA_TYPE_UNSPECIFIED {
 		return "", 0, fmt.Errorf("unspecified CRDT data type for key=%s", pb.GetId())
 	}
-	return pb.GetId(), crdt.DataType(pb.GetDataType() - 1), nil
+	if dt < internalpb.CRDTDataType_CRDT_DATA_TYPE_G_COUNTER || dt > internalpb.CRDTDataType_CRDT_DATA_TYPE_MV_REGISTER {
+		return "", 0, fmt.Errorf("unknown CRDT data type %d for key=%s", dt, pb.GetId())
+	}
+	return pb.GetId(), crdt.DataType(dt - 1), nil
 }
 
 func encodeGCounter(c *crdt.GCounter) *internalpb.GCounterData {
@@ -601,6 +613,30 @@ func decodeFlag(pb *internalpb.FlagData) *crdt.Flag {
 		return crdt.NewFlag().Enable()
 	}
 	return crdt.NewFlag()
+}
+
+// LWWRegisterStringEncoder is a type assertion target for LWWRegister[string] encoding.
+type LWWRegisterStringEncoder interface {
+	Value() string
+	Timestamp() int64
+	NodeID() string
+}
+
+func encodeLWWRegisterString(r LWWRegisterStringEncoder) *internalpb.LWWRegisterData {
+	return &internalpb.LWWRegisterData{
+		Value:          []byte(r.Value()),
+		TypeUrl:        "string",
+		TimestampNanos: r.Timestamp(),
+		NodeId:         r.NodeID(),
+	}
+}
+
+func decodeLWWRegisterString(pb *internalpb.LWWRegisterData) *crdt.LWWRegister[string] {
+	return crdt.LWWRegisterFromState(
+		string(pb.GetValue()),
+		pb.GetTimestampNanos(),
+		pb.GetNodeId(),
+	)
 }
 
 // MVRegisterStringEncoder is a type assertion target for MVRegister[string] encoding.

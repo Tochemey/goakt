@@ -24,6 +24,7 @@ package ddata
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -145,6 +146,28 @@ func TestStore(t *testing.T) {
 		require.NoError(t, err)
 		loaded := loadedData["mv-1"].(*crdt.MVRegister[string])
 		assert.Equal(t, []string{"hello"}, loaded.Values())
+	})
+
+	t.Run("save and load round trip with LWWRegister", func(t *testing.T) {
+		dir := t.TempDir()
+		store, err := NewStore(dir)
+		require.NoError(t, err)
+		defer store.Close()
+
+		lww := crdt.NewLWWRegister[string]().Set("world", time.Now(), "node-1")
+
+		data := map[string]crdt.ReplicatedData{"lww-1": lww}
+		keyTypes := map[string]crdt.DataType{"lww-1": crdt.LWWRegisterType}
+		versions := map[string]uint64{"lww-1": 1}
+
+		err = store.Save(data, keyTypes, versions)
+		require.NoError(t, err)
+
+		loadedData, _, _, err := store.Load()
+		require.NoError(t, err)
+		loaded := loadedData["lww-1"].(*crdt.LWWRegister[string])
+		assert.Equal(t, "world", loaded.Value())
+		assert.Equal(t, "node-1", loaded.NodeID())
 	})
 
 	t.Run("load from empty DB returns empty maps", func(t *testing.T) {

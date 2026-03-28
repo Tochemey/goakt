@@ -103,7 +103,7 @@ func (s *Store) Save(store map[string]crdt.ReplicatedData, keyTypes map[string]c
 		// clear existing entries
 		cursor := bucket.Cursor()
 		for k, _ := cursor.First(); k != nil; k, _ = cursor.Next() {
-			if err := bucket.Delete(k); err != nil {
+			if err := cursor.Delete(); err != nil {
 				return err
 			}
 		}

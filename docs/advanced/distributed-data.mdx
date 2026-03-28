@@ -49,7 +49,7 @@ CRDT keys are **typed and serializable**. The type parameter ensures compile-tim
 var (
     requestCount   = crdt.PNCounterKey("request-count")
     activeSessions = crdt.ORSetKey[string]("active-sessions")
-    featureFlag    = crdt.LWWRegisterKey[bool]("dark-mode")
+    featureFlag    = crdt.LWWRegisterKey[string]("dark-mode")
     cartItems      = crdt.ORMapKey[string, *crdt.GCounter]("cart")
 )
 ```
@@ -132,11 +132,8 @@ func (a *Dashboard) Receive(ctx *actor.ReceiveContext) {
         reply := ctx.Ask(replicator, &crdt.Get[*crdt.PNCounter]{
             Key: crdt.PNCounterKey("request-count"),
         }, time.Second)
-        if reply != nil {
-            data := reply.(*crdt.GetResponse[*crdt.PNCounter]).Data
-            if data != nil {
-                a.currentCount = data.Value()
-            }
+        if getResp, ok := reply.(*crdt.GetResponse[*crdt.PNCounter]); ok && getResp.Data != nil {
+            a.currentCount = getResp.Data.Value()
         }
     }
 }
@@ -160,8 +157,9 @@ func (a *SessionMonitor) Receive(ctx *actor.ReceiveContext) {
             Key: crdt.ORSetKey[string]("active-sessions"),
         })
     case *crdt.Changed[crdt.ReplicatedData]:
-        set := msg.Data.(*crdt.ORSet[string])
-        log.Printf("active sessions updated: %v", set.Elements())
+        if set, ok := msg.Data.(*crdt.ORSet[string]); ok {
+            log.Printf("active sessions updated: %v", set.Elements())
+        }
     }
 }
 ```
@@ -217,8 +215,7 @@ When enabled:
 
 - The Replicator saves the full store to BoltDB at the configured interval.
 - On startup (or supervisor restart), the Replicator restores from the latest snapshot before participating in anti-entropy.
-- A final snapshot is persisted during graceful shutdown.
-- The snapshot file is removed on clean shutdown.
+- A final snapshot is persisted during graceful shutdown. The snapshot file is retained on disk so the Replicator can restore quickly on the next startup.
 
 Snapshots are a **recovery optimization**, not a durability guarantee. The source of truth is always the distributed CRDT state across all peers. If a snapshot is lost or corrupted, the Replicator rebuilds from peers.
 
@@ -226,18 +223,18 @@ Snapshots are a **recovery optimization**, not a durability guarantee. The sourc
 
 ## Observability
 
-When `WithMetrics()` is enabled on the actor system, the Replicator registers OpenTelemetry observable counters:
+When `WithMetrics()` is enabled on the actor system, the Replicator registers OpenTelemetry instruments:
 
 | Instrument | Type | Description |
 |------------|------|-------------|
-| `crdt.replicator.store.size` | Int64ObservableCounter | Number of CRDT keys in the local store |
+| `crdt.replicator.store.size` | Int64ObservableGauge | Number of CRDT keys in the local store |
 | `crdt.replicator.merge.count` | Int64ObservableCounter | Total merges performed from peer deltas |
 | `crdt.replicator.delta.publish.count` | Int64ObservableCounter | Deltas published via TopicActor |
 | `crdt.replicator.delta.receive.count` | Int64ObservableCounter | Deltas received from peers |
 | `crdt.replicator.coordinated.write.count` | Int64ObservableCounter | Coordinated write operations |
 | `crdt.replicator.coordinated.read.count` | Int64ObservableCounter | Coordinated read operations |
 | `crdt.replicator.antientropy.count` | Int64ObservableCounter | Anti-entropy rounds completed |
-| `crdt.replicator.tombstone.count` | Int64ObservableCounter | Active tombstones pending pruning |
+| `crdt.replicator.tombstone.count` | Int64ObservableGauge | Active tombstones pending pruning |
 
 All instruments carry an `actor.system` attribute with the actor system name.
 
@@ -306,11 +303,8 @@ func (a *SessionTracker) Receive(ctx *actor.ReceiveContext) {
         reply := ctx.Ask(replicator, &crdt.Get[*crdt.ORSet[string]]{
             Key: sessionsKey,
         }, time.Second)
-        if reply != nil {
-            data := reply.(*crdt.GetResponse[*crdt.ORSet[string]]).Data
-            if data != nil {
-                fmt.Printf("active sessions: %v\n", data.Elements())
-            }
+        if getResp, ok := reply.(*crdt.GetResponse[*crdt.ORSet[string]]); ok && getResp.Data != nil {
+            fmt.Printf("active sessions: %v\n", getResp.Data.Elements())
         }
     }
 }
@@ -332,9 +326,10 @@ func (a *SessionReporter) Receive(ctx *actor.ReceiveContext) {
             })
         }
     case *crdt.Changed[crdt.ReplicatedData]:
-        set := msg.Data.(*crdt.ORSet[string])
-        log.Printf("[reporter] sessions changed: %v (count=%d)",
-            set.Elements(), set.Len())
+        if set, ok := msg.Data.(*crdt.ORSet[string]); ok {
+            log.Printf("[reporter] sessions changed: %v (count=%d)",
+                set.Elements(), set.Len())
+        }
     }
 }
 
@@ -384,5 +379,5 @@ func main() {
 - **Single-topic dissemination** — All deltas for all keys flow through one TopicActor topic (`goakt.crdt.deltas`). This simplifies the protocol but means a high update rate on many keys produces proportional TopicActor throughput. For most workloads this is not a bottleneck.
 - **No cross-datacenter replication** — CRDTs replicate within a single cluster. Cross-datacenter delta exchange via the DataCenter control plane is planned for a future release.
 - **Tombstone window** — Deleted keys are protected by a tombstone for the configured TTL. If a node is partitioned for longer than the TTL and still holds the key, it may resurrect the key when it rejoins. Set `WithTombstoneTTL` appropriately for your partition tolerance requirements.
-- **Generic type constraints** — `ORSet[T]` requires `T` to be `comparable`. `LWWRegister[T]`, `MVRegister[T]`, and `ORMap[K, V]` require values to be serializable by the codec layer. The built-in codec currently supports `ORSet[string]`, `MVRegister[string]`, `ORMap[string, *GCounter]`, `GCounter`, `PNCounter`, and `Flag`.
+- **Generic type constraints** — `ORSet[T]` requires `T` to be `comparable`. `LWWRegister[T]`, `MVRegister[T]`, and `ORMap[K, V]` require values to be serializable by the codec layer. The built-in codec currently supports `GCounter`, `PNCounter`, `Flag`, `LWWRegister[string]`, `MVRegister[string]`, `ORSet[string]`, and `ORMap[string, *GCounter]`.
 - **No partial updates** — The `Modify` function in `Update[T]` receives the full current value and must return the full updated value. There is no patch or field-level delta mechanism.

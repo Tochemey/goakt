@@ -113,3 +113,12 @@ func (r *LWWRegister[T]) Clone() ReplicatedData {
 		dirty:     r.dirty,
 	}
 }
+
+// LWWRegisterFromState creates an LWWRegister from serialized state components.
+func LWWRegisterFromState[T any](value T, timestampNanos int64, nodeID string) *LWWRegister[T] {
+	return &LWWRegister[T]{
+		value:     value,
+		timestamp: timestampNanos,
+		nodeID:    nodeID,
+	}
+}

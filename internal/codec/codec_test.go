@@ -672,8 +672,22 @@ func TestEncodeCRDTData(t *testing.T) {
 		require.Equal(t, uint64(3), vb.Value())
 	})
 
+	t.Run("LWWRegister string round-trip", func(t *testing.T) {
+		r := crdt.NewLWWRegister[string]().Set("hello", time.Now(), "node-1")
+		pb, err := EncodeCRDTData(r)
+		require.NoError(t, err)
+		require.NotNil(t, pb.GetLwwRegister())
+
+		decoded, err := DecodeCRDTData(pb)
+		require.NoError(t, err)
+		decodedReg := decoded.(*crdt.LWWRegister[string])
+		require.Equal(t, "hello", decodedReg.Value())
+		require.Equal(t, r.Timestamp(), decodedReg.Timestamp())
+		require.Equal(t, "node-1", decodedReg.NodeID())
+	})
+
 	t.Run("unsupported type returns error", func(t *testing.T) {
-		_, err := EncodeCRDTData(crdt.NewLWWRegister[string]())
+		_, err := EncodeCRDTData(crdt.NewLWWRegister[int]())
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "unsupported CRDT type")
 	})
@@ -682,15 +696,6 @@ func TestEncodeCRDTData(t *testing.T) {
 		_, err := DecodeCRDTData(nil)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "nil CRDTData")
-	})
-
-	t.Run("unsupported CRDTData type returns error", func(t *testing.T) {
-		pb := &internalpb.CRDTData{
-			Type: &internalpb.CRDTData_LwwRegister{},
-		}
-		_, err := DecodeCRDTData(pb)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "unsupported CRDTData type")
 	})
 }
 
@@ -738,5 +743,15 @@ func TestEncodeCRDTKey(t *testing.T) {
 		_, _, err := DecodeCRDTKey(pb)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "unspecified CRDT data type")
+	})
+
+	t.Run("unknown enum value returns error", func(t *testing.T) {
+		pb := &internalpb.CRDTKey{
+			Id:       "future-key",
+			DataType: 99,
+		}
+		_, _, err := DecodeCRDTKey(pb)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "unknown CRDT data type")
 	})
 }
