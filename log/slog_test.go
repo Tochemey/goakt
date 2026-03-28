@@ -123,6 +123,90 @@ func TestNewSlog(t *testing.T) {
 	})
 }
 
+func TestNewSlogFrom(t *testing.T) {
+	t.Run("uses provided slog.Logger for logging", func(t *testing.T) {
+		buf := new(bytes.Buffer)
+		slogger := slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+		logger := NewSlogFrom(slogger, DebugLevel)
+
+		logger.Info("from external slog")
+		flushSlogLogger(t, logger)
+
+		msg, err := extractSlogMessage(buf.Bytes())
+		require.NoError(t, err)
+		require.Equal(t, "from external slog", msg)
+	})
+
+	t.Run("respects the provided level", func(t *testing.T) {
+		buf := new(bytes.Buffer)
+		slogger := slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelError}))
+		logger := NewSlogFrom(slogger, ErrorLevel)
+
+		require.Equal(t, ErrorLevel, logger.LogLevel())
+		require.False(t, logger.Enabled(DebugLevel))
+		require.False(t, logger.Enabled(InfoLevel))
+		require.True(t, logger.Enabled(ErrorLevel))
+
+		logger.Info("should be suppressed")
+		require.Empty(t, buf.String())
+
+		logger.Error("should appear")
+		msg, err := extractSlogMessage(buf.Bytes())
+		require.NoError(t, err)
+		require.Equal(t, "should appear", msg)
+	})
+
+	t.Run("LogOutput returns nil when no writers provided", func(t *testing.T) {
+		slogger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+		logger := NewSlogFrom(slogger, InfoLevel)
+
+		require.Nil(t, logger.LogOutput())
+	})
+
+	t.Run("With returns a logger that preserves structured fields", func(t *testing.T) {
+		buf := new(bytes.Buffer)
+		slogger := slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+		logger := NewSlogFrom(slogger, DebugLevel)
+
+		sub := logger.With("service", "actor-system")
+		sub.Info("with field")
+		flushSlogLogger(t, logger)
+
+		var m map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(buf.Bytes(), &m))
+		require.Contains(t, m, "service")
+	})
+
+	t.Run("Debugf logs formatted message", func(t *testing.T) {
+		buf := new(bytes.Buffer)
+		slogger := slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+		logger := NewSlogFrom(slogger, DebugLevel)
+
+		logger.Debugf("hello %s %d", "world", 42)
+		flushSlogLogger(t, logger)
+
+		msg, err := extractSlogMessage(buf.Bytes())
+		require.NoError(t, err)
+		require.Equal(t, "hello world 42", msg)
+	})
+
+	t.Run("StdLogger returns a working standard logger", func(t *testing.T) {
+		buf := new(bytes.Buffer)
+		slogger := slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+		logger := NewSlogFrom(slogger, InfoLevel)
+
+		std := logger.StdLogger()
+		require.NotNil(t, std)
+	})
+
+	t.Run("implements Logger interface", func(t *testing.T) {
+		slogger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+		logger := NewSlogFrom(slogger, InfoLevel)
+
+		var _ Logger = logger
+	})
+}
+
 func TestSlogAddSourceOutputsCaller(t *testing.T) {
 	var buf bytes.Buffer
 	l := NewSlog(InfoLevel, &buf)

@@ -92,6 +92,17 @@ type Slog struct {
 	outputs []io.Writer
 }
 
+// NewSlogFrom creates a Logger backed by the provided slog.Logger instance.
+// This allows sharing the same *slog.Logger across GoAkt and other packages
+// in your system without coupling them to GoAkt's log package.
+// The caller owns the slog.Logger and controls its output destinations.
+func NewSlogFrom(logger *slog.Logger, level Level) *Slog {
+	return &Slog{
+		logger: logger,
+		level:  level,
+	}
+}
+
 // NewSlog creates a Logger backed by slog with JSON output.
 // Performance notes:
 // - Enabled() is checked before formatting in Xf methods to avoid allocations when disabled.
