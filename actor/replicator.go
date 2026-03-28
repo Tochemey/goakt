@@ -96,10 +96,10 @@ func (e *crdtConfigExtension) Config() *crdt.Config {
 // and replicates state across the cluster via TopicActor pub/sub.
 //
 // Each node in the cluster runs its own replicatorActor. All replicators
-// subscribe to the same CRDT key topics via the TopicActor. When any
-// replicator updates a key, it publishes the delta to that key's topic.
-// Because every replicator is subscribed to the same topic, they all
-// receive the delta automatically.
+// subscribe to a single shared topic (goakt.crdt.deltas) via the TopicActor.
+// When any replicator updates a key, it publishes the delta (which carries
+// the key inside the payload) to this shared topic. Because every replicator
+// is subscribed to the same topic, they all receive the delta automatically.
 type replicatorActor struct {
 	pid                   *PID
 	topicActor            *PID

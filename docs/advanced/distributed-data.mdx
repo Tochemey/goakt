@@ -106,7 +106,7 @@ func (a *RateLimiter) Receive(ctx *actor.ReceiveContext) {
             Key:     crdt.PNCounterKey("request-count"),
             Initial: crdt.NewPNCounter(),
             Modify: func(current *crdt.PNCounter) *crdt.PNCounter {
-                return current.Increment(ctx.Self().Path().Name(), 1)
+                return current.Increment(ctx.ActorSystem().PeersAddress(), 1)
             },
         })
     }
@@ -283,7 +283,7 @@ func (a *SessionTracker) Receive(ctx *actor.ReceiveContext) {
 
     switch msg := ctx.Message().(type) {
     case *AddSession:
-        nodeID := ctx.Self().Path().Name()
+        nodeID := ctx.ActorSystem().PeersAddress()
         ctx.Tell(replicator, &crdt.Update[*crdt.ORSet[string]]{
             Key:     sessionsKey,
             Initial: crdt.NewORSet[string](),

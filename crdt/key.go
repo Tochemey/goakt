@@ -46,7 +46,8 @@ const (
 //
 // The generic parameter T binds the key to a specific CRDT type at compile time,
 // providing type safety for Update, Get, Subscribe, and Changed messages.
-// The key's ID is used as the TopicActor topic name for replication.
+// The key's ID is carried inside each delta payload for routing; all deltas
+// are published to a single shared topic (goakt.crdt.deltas) via TopicActor.
 // The DataType is serialized in anti-entropy and coordination messages
 // so that peers can validate type consistency.
 //
@@ -60,7 +61,8 @@ type Key[T ReplicatedData] struct {
 }
 
 // ID returns the key's string identifier.
-// This is used as the TopicActor topic name and the internal store key.
+// This is used as the internal store key and is embedded in delta messages
+// for routing; replication uses the shared goakt.crdt.deltas topic.
 func (k Key[T]) ID() string {
 	return k.id
 }

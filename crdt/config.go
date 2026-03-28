@@ -127,7 +127,7 @@ func WithTombstoneTTL(duration time.Duration) Option {
 
 // WithRole restricts CRDT replication to cluster nodes that advertise
 // the specified role. Only nodes with this role will spawn a Replicator
-// and subscribe to CRDT key topics. An empty string means all nodes participate.
+// and subscribe to the shared CRDT delta topic. An empty string means all nodes participate.
 func WithRole(role string) Option {
 	return func(c *Config) {
 		c.role = role

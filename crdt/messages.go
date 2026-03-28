@@ -25,7 +25,8 @@ package crdt
 // Update is sent to the Replicator to create or update a CRDT key.
 //
 // The update is always applied locally first and the delta is published
-// to the key's topic via TopicActor. If WriteTo is set, the Replicator
+// to the shared goakt.crdt.deltas topic via TopicActor (the key is
+// carried inside the delta payload). If WriteTo is set, the Replicator
 // also sends the delta directly to peers and waits for acknowledgments
 // before returning the response.
 //
@@ -79,8 +80,8 @@ type Changed[T ReplicatedData] struct {
 }
 
 // Delete is sent to the Replicator to remove a CRDT key.
-// Deletion publishes a tombstone to the key's topic. Tombstones are
-// retained for the configured TombstoneTTL before pruning.
+// Deletion publishes a tombstone to the shared goakt.crdt.deltas topic.
+// Tombstones are retained for the configured TombstoneTTL before pruning.
 type Delete[T ReplicatedData] struct {
 	Key     Key[T]
 	WriteTo Coordination

@@ -681,8 +681,9 @@ func (x *MVRegisterData) GetClock() map[string]uint64 {
 	return nil
 }
 
-// CRDTDelta is the delta message published to a key's topic via TopicActor.
-// All Replicators subscribed to the same key topic receive this message.
+// CRDTDelta is the delta message published to the shared goakt.crdt.deltas
+// topic via TopicActor. The key is carried inside the payload so that
+// receivers can route the delta to the correct local store entry.
 type CRDTDelta struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Specifies the CRDT key this delta belongs to.
