@@ -29,6 +29,8 @@ const (
 	defaultMaxDeltaSize        = 64 * 1024 // 64KB
 	defaultPruneInterval       = 5 * time.Minute
 	defaultTombstoneTTL        = 24 * time.Hour
+	defaultCoordinationTimeout = 5 * time.Second
+	defaultSnapshotInterval    = 0 // disabled by default
 )
 
 // Config holds the configuration for the CRDT Replicator.
@@ -38,6 +40,9 @@ type Config struct {
 	pruneInterval       time.Duration
 	tombstoneTTL        time.Duration
 	role                string
+	coordinationTimeout time.Duration
+	snapshotInterval    time.Duration
+	snapshotDir         string
 }
 
 // NewConfig creates a Config with default values.
@@ -47,6 +52,8 @@ func NewConfig(opts ...Option) *Config {
 		maxDeltaSize:        defaultMaxDeltaSize,
 		pruneInterval:       defaultPruneInterval,
 		tombstoneTTL:        defaultTombstoneTTL,
+		coordinationTimeout: defaultCoordinationTimeout,
+		snapshotInterval:    defaultSnapshotInterval,
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -124,5 +131,46 @@ func WithTombstoneTTL(duration time.Duration) Option {
 func WithRole(role string) Option {
 	return func(c *Config) {
 		c.role = role
+	}
+}
+
+// CoordinationTimeout returns the timeout for coordinated read/write operations.
+func (c *Config) CoordinationTimeout() time.Duration {
+	return c.coordinationTimeout
+}
+
+// SnapshotInterval returns the interval for periodic CRDT state snapshots.
+// A zero value means snapshots are disabled.
+func (c *Config) SnapshotInterval() time.Duration {
+	return c.snapshotInterval
+}
+
+// SnapshotDir returns the directory for CRDT state snapshot files.
+// An empty string means snapshots are disabled.
+func (c *Config) SnapshotDir() string {
+	return c.snapshotDir
+}
+
+// WithCoordinationTimeout sets the timeout for coordinated WriteTo/ReadFrom operations.
+// Peers that do not respond within this timeout are excluded from the coordination result.
+func WithCoordinationTimeout(duration time.Duration) Option {
+	return func(c *Config) {
+		c.coordinationTimeout = duration
+	}
+}
+
+// WithSnapshotInterval sets the interval for periodic CRDT state snapshots to BoltDB.
+// A zero value disables snapshots. Requires WithSnapshotDir to be set.
+func WithSnapshotInterval(duration time.Duration) Option {
+	return func(c *Config) {
+		c.snapshotInterval = duration
+	}
+}
+
+// WithSnapshotDir sets the directory for CRDT state snapshot files.
+// Snapshots are only enabled when both SnapshotInterval and SnapshotDir are set.
+func WithSnapshotDir(dir string) Option {
+	return func(c *Config) {
+		c.snapshotDir = dir
 	}
 }

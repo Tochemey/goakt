@@ -229,6 +229,84 @@ func TestORSet(t *testing.T) {
 	})
 }
 
+func TestORSetCompact(t *testing.T) {
+	t.Run("compact deduplicates dots per node", func(t *testing.T) {
+		// Manually build an ORSet with duplicate dots for the same element from the same node.
+		// This can happen after multiple merges.
+		s := NewORSet[string]()
+		s = s.Add("node-1", "a")
+		s = s.Add("node-1", "a") // second add creates a new dot
+		// Before compaction: element "a" has 2 dots from node-1.
+		entries, _ := s.RawState()
+		require.Len(t, entries, 1)
+		assert.Len(t, entries[0].Dots, 2)
+
+		compacted := s.Compact()
+		entries2, _ := compacted.RawState()
+		require.Len(t, entries2, 1)
+		// After compaction: only the highest dot per node remains.
+		assert.Len(t, entries2[0].Dots, 1)
+		assert.True(t, compacted.Contains("a"))
+	})
+
+	t.Run("compact preserves elements from different nodes", func(t *testing.T) {
+		s := NewORSet[string]()
+		s = s.Add("node-1", "a")
+		s = s.Add("node-2", "a")
+		compacted := s.Compact()
+		entries, _ := compacted.RawState()
+		require.Len(t, entries, 1)
+		assert.Len(t, entries[0].Dots, 2)
+	})
+
+	t.Run("compact on empty set", func(t *testing.T) {
+		s := NewORSet[string]()
+		compacted := s.Compact()
+		assert.Equal(t, 0, compacted.Len())
+	})
+
+	t.Run("compact is immutable", func(t *testing.T) {
+		s := NewORSet[string]()
+		s = s.Add("node-1", "a")
+		s = s.Add("node-1", "a")
+		compacted := s.Compact()
+		assert.NotSame(t, s, compacted)
+		// Original still has 2 dots.
+		entries, _ := s.RawState()
+		assert.Len(t, entries[0].Dots, 2)
+	})
+
+	t.Run("compact removes entries with empty dots", func(t *testing.T) {
+		// Build set, then manipulate internal state to have empty dots.
+		s := &ORSet[string]{
+			entries: map[string][]dot{
+				"a": {},
+				"b": {{nodeID: "node-1", counter: 1}},
+			},
+			clock: map[string]uint64{"node-1": 1},
+			delta: newORSetDelta[string](),
+		}
+		compacted := s.Compact()
+		assert.Equal(t, 1, compacted.Len())
+		assert.True(t, compacted.Contains("b"))
+		assert.False(t, compacted.Contains("a"))
+	})
+
+	t.Run("CompactData implements Compactable", func(t *testing.T) {
+		s := NewORSet[string]()
+		s = s.Add("node-1", "a")
+		s = s.Add("node-1", "a")
+		var c Compactable = s
+		result := c.CompactData()
+		require.NotNil(t, result)
+		compacted := result.(*ORSet[string])
+		assert.True(t, compacted.Contains("a"))
+		entries, _ := compacted.RawState()
+		require.Len(t, entries, 1)
+		assert.Len(t, entries[0].Dots, 1)
+	})
+}
+
 func TestCloneDots(t *testing.T) {
 	t.Run("nil input returns nil", func(t *testing.T) {
 		assert.Nil(t, cloneDots(nil))
@@ -241,51 +319,4 @@ func TestCloneDots(t *testing.T) {
 		cloned[0].counter = 99
 		assert.Equal(t, uint64(1), dots[0].counter)
 	})
-}
-
-func benchmarkORSetMergeConverged(b *testing.B, elements int) {
-	s1 := NewORSet[int]()
-	s2 := NewORSet[int]()
-	for i := range elements {
-		s1 = s1.Add("node-1", i)
-		s2 = s2.Add("node-1", i)
-	}
-
-	b.ReportAllocs()
-	b.ResetTimer()
-	for range b.N {
-		s1.Merge(s2)
-	}
-}
-
-func BenchmarkORSetMergeConverged_10(b *testing.B)   { benchmarkORSetMergeConverged(b, 10) }
-func BenchmarkORSetMergeConverged_100(b *testing.B)  { benchmarkORSetMergeConverged(b, 100) }
-func BenchmarkORSetMergeConverged_1000(b *testing.B) { benchmarkORSetMergeConverged(b, 1000) }
-
-func benchmarkORSetMergeDiverged(b *testing.B, elements int) {
-	s1 := NewORSet[int]()
-	s2 := NewORSet[int]()
-	for i := range elements {
-		s1 = s1.Add("node-1", i)
-		s2 = s2.Add("node-2", i+elements)
-	}
-
-	b.ReportAllocs()
-	b.ResetTimer()
-	for range b.N {
-		s1.Merge(s2)
-	}
-}
-
-func BenchmarkORSetMergeDiverged_10(b *testing.B)   { benchmarkORSetMergeDiverged(b, 10) }
-func BenchmarkORSetMergeDiverged_100(b *testing.B)  { benchmarkORSetMergeDiverged(b, 100) }
-func BenchmarkORSetMergeDiverged_1000(b *testing.B) { benchmarkORSetMergeDiverged(b, 1000) }
-
-func BenchmarkORSetAdd(b *testing.B) {
-	s := NewORSet[int]()
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := range b.N {
-		s = s.Add("node-1", i)
-	}
 }

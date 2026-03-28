@@ -69,6 +69,30 @@ func TestUpdateBridge(t *testing.T) {
 		result := u.Apply(wrongType)
 		assert.Equal(t, int64(1), result.(*PNCounter).Value())
 	})
+
+	t.Run("WriteCoordination default", func(t *testing.T) {
+		assert.Equal(t, Coordination(0), u.WriteCoordination())
+	})
+
+	t.Run("WriteCoordination majority", func(t *testing.T) {
+		u2 := &Update[*PNCounter]{
+			Key:     key,
+			Initial: NewPNCounter(),
+			Modify:  func(current *PNCounter) *PNCounter { return current },
+			WriteTo: Majority,
+		}
+		assert.Equal(t, Majority, u2.WriteCoordination())
+	})
+
+	t.Run("WriteCoordination all", func(t *testing.T) {
+		u2 := &Update[*PNCounter]{
+			Key:     key,
+			Initial: NewPNCounter(),
+			Modify:  func(current *PNCounter) *PNCounter { return current },
+			WriteTo: All,
+		}
+		assert.Equal(t, All, u2.WriteCoordination())
+	})
 }
 
 func TestGetBridge(t *testing.T) {
@@ -101,6 +125,20 @@ func TestGetBridge(t *testing.T) {
 		require.NotNil(t, resp)
 		typed := resp.(*GetResponse[*PNCounter])
 		assert.Nil(t, typed.Data)
+	})
+
+	t.Run("ReadCoordination default", func(t *testing.T) {
+		assert.Equal(t, Coordination(0), g.ReadCoordination())
+	})
+
+	t.Run("ReadCoordination majority", func(t *testing.T) {
+		g2 := &Get[*PNCounter]{Key: key, ReadFrom: Majority}
+		assert.Equal(t, Majority, g2.ReadCoordination())
+	})
+
+	t.Run("ReadCoordination all", func(t *testing.T) {
+		g2 := &Get[*PNCounter]{Key: key, ReadFrom: All}
+		assert.Equal(t, All, g2.ReadCoordination())
 	})
 }
 
@@ -140,5 +178,14 @@ func TestDeleteBridge(t *testing.T) {
 
 	t.Run("IsDelete marker", func(t *testing.T) {
 		d.IsDelete() // should not panic
+	})
+
+	t.Run("WriteCoordination default", func(t *testing.T) {
+		assert.Equal(t, Coordination(0), d.WriteCoordination())
+	})
+
+	t.Run("WriteCoordination majority", func(t *testing.T) {
+		d2 := &Delete[*GCounter]{Key: key, WriteTo: Majority}
+		assert.Equal(t, Majority, d2.WriteCoordination())
 	})
 }

@@ -48,3 +48,11 @@ type ReplicatedData interface {
 	// Clone returns a deep copy of the CRDT.
 	Clone() ReplicatedData
 }
+
+// Compactable is optionally implemented by CRDTs that support compaction.
+// Compaction removes redundant internal metadata (e.g., causal dots in OR-Sets)
+// without changing the logical value. The Replicator calls CompactData during
+// periodic prune cycles to reclaim memory.
+type Compactable interface {
+	CompactData() ReplicatedData
+}

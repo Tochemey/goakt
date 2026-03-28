@@ -34,6 +34,12 @@ const (
 	LWWRegisterType
 	// ORSetType identifies an ORSet CRDT.
 	ORSetType
+	// ORMapType identifies an ORMap CRDT.
+	ORMapType
+	// FlagType identifies a Flag CRDT.
+	FlagType
+	// MVRegisterType identifies an MVRegister CRDT.
+	MVRegisterType
 )
 
 // Key is a typed, serializable CRDT key.
@@ -82,4 +88,19 @@ func LWWRegisterKey[T any](id string) Key[*LWWRegister[T]] {
 // ORSetKey creates a typed key for an ORSet CRDT.
 func ORSetKey[T comparable](id string) Key[*ORSet[T]] {
 	return Key[*ORSet[T]]{id: id, dataType: ORSetType}
+}
+
+// ORMapKey creates a typed key for an ORMap CRDT.
+func ORMapKey[K comparable, V ReplicatedData](id string) Key[*ORMap[K, V]] {
+	return Key[*ORMap[K, V]]{id: id, dataType: ORMapType}
+}
+
+// FlagKey creates a typed key for a Flag CRDT.
+func FlagKey(id string) Key[*Flag] {
+	return Key[*Flag]{id: id, dataType: FlagType}
+}
+
+// MVRegisterKey creates a typed key for an MVRegister CRDT.
+func MVRegisterKey[T any](id string) Key[*MVRegister[T]] {
+	return Key[*MVRegister[T]]{id: id, dataType: MVRegisterType}
 }

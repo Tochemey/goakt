@@ -58,4 +58,22 @@ func TestKey(t *testing.T) {
 		assert.Equal(t, "user-ids", k.ID())
 		assert.Equal(t, ORSetType, k.Type())
 	})
+
+	t.Run("ORMapKey", func(t *testing.T) {
+		k := ORMapKey[string, *GCounter]("cart")
+		assert.Equal(t, "cart", k.ID())
+		assert.Equal(t, ORMapType, k.Type())
+	})
+
+	t.Run("FlagKey", func(t *testing.T) {
+		k := FlagKey("feature-enabled")
+		assert.Equal(t, "feature-enabled", k.ID())
+		assert.Equal(t, FlagType, k.Type())
+	})
+
+	t.Run("MVRegisterKey", func(t *testing.T) {
+		k := MVRegisterKey[string]("profile-name")
+		assert.Equal(t, "profile-name", k.ID())
+		assert.Equal(t, MVRegisterType, k.Type())
+	})
 }

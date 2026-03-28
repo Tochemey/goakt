@@ -1,6 +1,6 @@
 # GoAkt Distributed Data (CRDTs) — Architecture
 
-**Status:** Proposed
+**Status:** Implemented (Phase 1 + Phase 2 + Phase 3)
 **Target:** GoAkt v4.2.0
 **Author:** GoAkt Core Team
 
@@ -63,17 +63,17 @@ GoAkt's architecture — with Hashicorp Memberlist for gossip, a per-node actor 
 
 ## 2. Design Principles
 
-| Principle                         | What It Means                                                                                                                                                                                                                                                                                           |
-|-----------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Zero import cycles**            | The `crdt` package contains only pure data types and config — no dependency on `actor`, `internal`, or any GoAkt package. The `actor` package imports `crdt/` as a leaf dependency (for `crdt.Option` and CRDT types). The Replicator actor lives in `actor/` alongside the other system actors. `crdt/` never imports `actor/`. No cycles. |
-| **No breaking changes**           | One additive method (`Replicator() *PID`) on `ActorSystem`. No existing methods or signatures change. CRDT is opt-in via `ClusterConfig.WithCRDT(...)` — zero overhead when not enabled.                                                                                                                |
-| **Reuse existing infrastructure** | Delta dissemination uses the existing TopicActor pub/sub system — no custom gossip layer. Peer discovery, remote fan-out, message deduplication, and subscriber lifecycle are already handled.                                                                                                          |
-| **Actor-native**                  | CRDTs are accessed through a dedicated Replicator actor. Interaction is via `Tell` / `Ask` — no new communication paradigm.                                                                                                                                                                             |
-| **Delta-based**                   | Only state deltas are replicated, not full values. This keeps bandwidth proportional to change rate, not data size.                                                                                                                                                                                     |
-| **CRDT-as-value**                 | CRDT types are immutable values. Every mutation returns a new value plus a delta. No hidden shared state.                                                                                                                                                                                               |
-| **GC-friendly**                   | CRDT types minimize heap allocations: reuse slices and maps across merge operations, avoid closures in hot paths, prefer value types over pointers where practical. See [Section 14](#14-gc-and-memory-efficiency).                                                                                     |
-| **Local-first, coordination-optional** | All operations are local-first by default. Optional `WriteTo` / `ReadFrom` coordination (`Majority`, `All`) is available when stronger guarantees are needed — matching GoAkt's existing quorum model.                                                                                                   |
-| **Composable**                    | Complex CRDTs (maps, sets of registers) are built from simpler ones. The merge function composes.                                                                                                                                                                                                       |
+| Principle                              | What It Means                                                                                                                                                                                                                                                                                                                               |
+|----------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Zero import cycles**                 | The `crdt` package contains only pure data types and config — no dependency on `actor`, `internal`, or any GoAkt package. The `actor` package imports `crdt/` as a leaf dependency (for `crdt.Option` and CRDT types). The Replicator actor lives in `actor/` alongside the other system actors. `crdt/` never imports `actor/`. No cycles. |
+| **No breaking changes**                | One additive method (`Replicator() *PID`) on `ActorSystem`. No existing methods or signatures change. CRDT is opt-in via `ClusterConfig.WithCRDT(...)` — zero overhead when not enabled.                                                                                                                                                    |
+| **Reuse existing infrastructure**      | Delta dissemination uses the existing TopicActor pub/sub system — no custom gossip layer. Peer discovery, remote fan-out, message deduplication, and subscriber lifecycle are already handled.                                                                                                                                              |
+| **Actor-native**                       | CRDTs are accessed through a dedicated Replicator actor. Interaction is via `Tell` / `Ask` — no new communication paradigm.                                                                                                                                                                                                                 |
+| **Delta-based**                        | Only state deltas are replicated, not full values. This keeps bandwidth proportional to change rate, not data size.                                                                                                                                                                                                                         |
+| **CRDT-as-value**                      | CRDT types are immutable values. Every mutation returns a new value plus a delta. No hidden shared state.                                                                                                                                                                                                                                   |
+| **GC-friendly**                        | CRDT types minimize heap allocations: reuse slices and maps across merge operations, avoid closures in hot paths, prefer value types over pointers where practical. See [Section 14](#14-gc-and-memory-efficiency).                                                                                                                         |
+| **Local-first, coordination-optional** | All operations are local-first by default. Optional `WriteTo` / `ReadFrom` coordination (`Majority`, `All`) is available when stronger guarantees are needed — matching GoAkt's existing quorum model.                                                                                                                                      |
+| **Composable**                         | Complex CRDTs (maps, sets of registers) are built from simpler ones. The merge function composes.                                                                                                                                                                                                                                           |
 
 ---
 
@@ -99,16 +99,20 @@ goakt/
 │   ├── gcounter.go                ← GCounter
 │   ├── pncounter.go               ← PNCounter
 │   ├── lww_register.go            ← LWWRegister
-│   ├── or_set.go                  ← ORSet
-│   ├── or_map.go                  ← ORMap (Phase 2)
-│   ├── flag.go                    ← Flag (Phase 2)
-│   ├── mv_register.go             ← MVRegister (Phase 2)
+│   ├── or_set.go                   ← ORSet (with Compact method)
+│   ├── or_map.go                  ← ORMap
+│   ├── flag.go                    ← Flag
+│   ├── mv_register.go             ← MVRegister
 │   ├── consistency.go             ← Coordination type (Majority, All)
 │   ├── config.go                  ← Option, WithAntiEntropyInterval, WithRole, etc.
 │   └── messages.go                ← Update, Get, Subscribe, Changed message types
 │
 ├── actor/
 │   └── replicator.go              ← Replicator system actor (same pattern as relocator.go, topic_actor.go)
+│
+├── internal/
+│   └── codec/
+│       └── codec.go               ← CRDT encode/decode for protobuf wire format
 │
 ├── protos/
 │   └── internal/
@@ -212,7 +216,7 @@ These are `any`-typed messages — they work with GoAkt's `Tell`/`Ask` without t
 | **LWWRegister[T]** | Last-writer-wins register. Stores a single value with a timestamp.                       | Highest timestamp wins                     | Configuration, feature flags, actor metadata            |
 | **ORSet[T]**       | Observed-remove set. Supports add and remove without conflicts.                          | Union of observed elements, causal removal | Session tracking, topic subscriptions, actor registries |
 
-### Phase 2 — Composition
+### Composition Types
 
 | Type              | Description                                                             | Merge Rule                                   | Primary Use Cases                                      |
 |-------------------|-------------------------------------------------------------------------|----------------------------------------------|--------------------------------------------------------|
@@ -262,7 +266,6 @@ const (
     PNCounterType
     LWWRegisterType
     ORSetType
-    // Phase 2
     ORMapType
     FlagType
     MVRegisterType
@@ -286,14 +289,13 @@ func (k Key[T]) DataType() DataType { return k.dataType }
 Factory functions create keys with the correct type binding:
 
 ```go
-func GCounterKey(id string) Key[*GCounter]           { return Key[*GCounter]{id: id, dataType: GCounterType} }
-func PNCounterKey(id string) Key[*PNCounter]          { return Key[*PNCounter]{id: id, dataType: PNCounterType} }
-func LWWRegisterKey[T any](id string) Key[*LWWRegister[T]] { return Key[*LWWRegister[T]]{id: id, dataType: LWWRegisterType} }
-func ORSetKey[T comparable](id string) Key[*ORSet[T]]      { return Key[*ORSet[T]]{id: id, dataType: ORSetType} }
-// Phase 2
-func ORMapKey[K comparable, V ReplicatedData](id string) Key[*ORMap[K, V]] { ... }
-func FlagKey(id string) Key[*Flag]                    { ... }
-func MVRegisterKey[T any](id string) Key[*MVRegister[T]]   { ... }
+func GCounterKey(id string) Key[*GCounter]                                  { ... }
+func PNCounterKey(id string) Key[*PNCounter]                                { ... }
+func LWWRegisterKey[T any](id string) Key[*LWWRegister[T]]                  { ... }
+func ORSetKey[T comparable](id string) Key[*ORSet[T]]                       { ... }
+func ORMapKey[K comparable, V ReplicatedData](id string) Key[*ORMap[K, V]]  { ... }
+func FlagKey(id string) Key[*Flag]                                          { ... }
+func MVRegisterKey[T any](id string) Key[*MVRegister[T]]                    { ... }
 ```
 
 Usage:
@@ -455,13 +457,13 @@ When no role is set (default), all cluster nodes participate.
 
 ### Key Components
 
-| Component            | Location            | Responsibility                                                                                                                                                                    |
-|----------------------|---------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **CRDT Types**       | `crdt/` (public)    | Pure data structures with merge semantics. No actor dependency.                                                                                                                   |
-| **Replicator Actor** | `actor/` | Per-node system actor. Subscribes to `goakt.crdt.deltas` at startup. On local update, encodes and publishes delta. On receiving peer delta, decodes, merges into local store. Notifies local user actors of changes. |
-| **CRDT Store**       | `actor/` | In-memory `map[string]crdt.ReplicatedData` held inside the Replicator. Owned exclusively by the Replicator — no concurrent access.                                                |
-| **TopicActor**       | `actor/` (existing) | Existing cluster pub/sub. All Replicators subscribe to `goakt.crdt.deltas` through it. Handles cross-node delivery, serialization, deduplication, and subscriber lifecycle. No changes required. |
-| **CRDT Messages**    | `crdt/` (public)    | Plain Go structs (`Update`, `Get`, `Subscribe`, `Changed`) that user actors send to their local Replicator via Tell/Ask.                                                          |
+| Component            | Location            | Responsibility                                                                                                                                                                                                       |
+|----------------------|---------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **CRDT Types**       | `crdt/` (public)    | Pure data structures with merge semantics. No actor dependency.                                                                                                                                                      |
+| **Replicator Actor** | `actor/`            | Per-node system actor. Subscribes to `goakt.crdt.deltas` at startup. On local update, encodes and publishes delta. On receiving peer delta, decodes, merges into local store. Notifies local user actors of changes. |
+| **CRDT Store**       | `actor/`            | In-memory `map[string]crdt.ReplicatedData` held inside the Replicator. Owned exclusively by the Replicator — no concurrent access.                                                                                   |
+| **TopicActor**       | `actor/` (existing) | Existing cluster pub/sub. All Replicators subscribe to `goakt.crdt.deltas` through it. Handles cross-node delivery, serialization, deduplication, and subscriber lifecycle. No changes required.                     |
+| **CRDT Messages**    | `crdt/` (public)    | Plain Go structs (`Update`, `Get`, `Subscribe`, `Changed`) that user actors send to their local Replicator via Tell/Ask.                                                                                             |
 
 ---
 
@@ -613,13 +615,47 @@ const crdtTopic = "goakt.crdt.deltas"
 func (r *replicatorActor) handlePostStart(ctx *ReceiveContext) {
     r.pid = ctx.Self()
     r.topicActor = ctx.ActorSystem().TopicActor()
-    r.logger = ctx.Logger()
     r.nodeID = r.pid.ID()
+    scheduleCtx := context.WithoutCancel(ctx.Context())
+
+    sys := ctx.ActorSystem().(*actorSystem)
+    r.clusterRef = sys.getCluster()
+    r.remoting = sys.getRemoting()
 
     // subscribe to the CRDT delta topic so this Replicator receives
     // deltas from all peer Replicators in the cluster.
     if r.topicActor != nil {
         ctx.Tell(r.topicActor, NewSubscribe(crdtTopic))
+    }
+
+    // start anti-entropy schedule
+    if r.config.AntiEntropyInterval() > 0 {
+        if err := ctx.ActorSystem().Schedule(
+            scheduleCtx,
+            &antiEntropyTick{},
+            r.pid,
+            r.config.AntiEntropyInterval(),
+            WithReference(antiEntropyScheduleRef),
+        ); err != nil {
+            r.logger.Errorf("failed to schedule anti-entropy: %v", err)
+            ctx.Err(err)
+            return
+        }
+    }
+
+    // start prune schedule for tombstone cleanup
+    if r.config.PruneInterval() > 0 {
+        if err := ctx.ActorSystem().Schedule(
+            scheduleCtx,
+            &pruneTick{},
+            r.pid,
+            r.config.PruneInterval(),
+            WithReference(pruneScheduleRef),
+        ); err != nil {
+            r.logger.Errorf("failed to schedule prune: %v", err)
+            ctx.Err(err)
+            return
+        }
     }
 }
 ```
@@ -631,39 +667,40 @@ From this point on, the Replicator receives every delta published by any Replica
 When a user actor sends an `Update[T]` to the Replicator, the Replicator handles it via a type-erased internal path (since `Receive` accepts `any`). The key's `ID()` is used as the store key:
 
 ```go
-// handleUpdate is called for any Update[T] message.
-// The Replicator extracts the key ID, initial value, and modify function
-// from the type-erased message using the updateCommand interface.
 func (r *replicatorActor) handleUpdate(ctx *ReceiveContext, msg updateCommand) {
     keyID := msg.KeyID()
 
-    // 1. Get or create the CRDT value.
+    // 1. Reject updates to tombstoned keys.
+    if _, ok := r.tombstones[keyID]; ok {
+        if ctx.Sender() != nil {
+            ctx.Response(&crdt.UpdateResponse{})
+        }
+        return
+    }
+
+    // 2. Get or create the CRDT value.
     current, exists := r.store[keyID]
     if !exists {
         current = msg.InitialValue()
-        r.ensureSubscribed(ctx, keyID)
+        r.trackKey(keyID, msg.CRDTDataType())
     }
 
-    // 2. Apply the user's mutation.
+    // 3. Apply the user's mutation and extract the delta.
     updated := msg.Apply(current)
-
-    // 3. Extract the delta (what changed).
     delta := updated.Delta()
-
-    // 4. Store the updated value and reset its delta tracker.
     updated.ResetDelta()
     r.store[keyID] = updated
+    r.versions[keyID]++
 
-    // 5. Encode the delta as protobuf and publish to the shared CRDT topic.
-    //    Every other Replicator subscribed to "goakt.crdt.deltas" receives it.
+    // 4. Encode the delta as protobuf and publish to the shared CRDT topic.
     if delta != nil {
         r.publishDelta(ctx, keyID, msg.CRDTDataType(), delta)
     }
 
-    // 6. Notify local user actors watching this key.
+    // 5. Notify local user actors watching this key.
     r.notifyChanged(ctx, keyID, updated)
 
-    // 7. Reply if this was an Ask.
+    // 6. Reply if this was an Ask.
     if ctx.Sender() != nil {
         ctx.Response(&crdt.UpdateResponse{})
     }
@@ -687,7 +724,7 @@ type updateCommand interface {
 When the TopicActor delivers a protobuf `CRDTDelta` message (because this Replicator is subscribed to `goakt.crdt.deltas`), the Replicator decodes it and delegates to `handleDelta`:
 
 ```go
-func (r *replicatorActor) handleDelta(_ *ReceiveContext, msg *crdtDelta) {
+func (r *replicatorActor) handleDelta(ctx *ReceiveContext, msg *crdtDelta) {
     // Ignore our own deltas (TopicActor delivers to local subscribers too).
     if msg.Origin == r.nodeID {
         return
@@ -695,15 +732,26 @@ func (r *replicatorActor) handleDelta(_ *ReceiveContext, msg *crdtDelta) {
 
     keyID := msg.KeyID
 
-    // 1. If the key doesn't exist locally, the delta serves as the initial value.
-    current, exists := r.store[keyID]
-    if !exists {
-        r.store[keyID] = msg.Delta
+    // Reject deltas for tombstoned keys.
+    if _, ok := r.tombstones[keyID]; ok {
         return
     }
 
-    // 2. Merge the remote delta into the local value.
-    r.store[keyID] = current.Merge(msg.Delta)
+    // If the key doesn't exist locally, the delta serves as the initial value.
+    current, exists := r.store[keyID]
+    if !exists {
+        r.store[keyID] = msg.Delta
+        r.trackKey(keyID, msg.DataType)
+        r.versions[keyID]++
+        r.notifyChanged(ctx, keyID, msg.Delta)
+        return
+    }
+
+    // Merge the remote delta into the local value.
+    merged := current.Merge(msg.Delta)
+    r.store[keyID] = merged
+    r.versions[keyID]++
+    r.notifyChanged(ctx, keyID, merged)
 }
 ```
 
@@ -762,25 +810,34 @@ Anti-entropy uses **direct RemoteTell between Replicators** (not the TopicActor)
 
 ### When Anti-Entropy Fires
 
-- **Periodically** — every `antiEntropyInterval` (configurable, default 30s).
-- **On node join** — when a new node's Replicator starts, it immediately triggers one anti-entropy round to catch up on existing state.
+- **Periodically** — every `antiEntropyInterval` (configurable, default 30s), via GoAkt's `Schedule` API. The Replicator schedules an `antiEntropyTick` message to itself during `PostStart`.
 - **On supervisor restart** — if the Replicator crashes and is restarted, it starts with an empty store and relies on anti-entropy to rebuild from peers.
 
 ### Anti-Entropy Messages (Internal)
 
-These messages live in `actor/` and are serialized as protobuf for wire transport:
+These are protobuf messages defined in `crdt.proto` and handled by the Replicator:
 
-```go
-// replicaDigest is sent to a peer to initiate anti-entropy.
-type replicaDigest struct {
-    Entries map[string]uint64 // key → version
+```protobuf
+message CRDTDigestEntry {
+    CRDTKey key = 1;
+    uint64 version = 2;
 }
 
-// replicaFullState is the response containing state for divergent keys.
-type replicaFullState struct {
-    Entries map[string]crdt.ReplicatedData
+message CRDTDigest {
+    repeated CRDTDigestEntry entries = 1;
+}
+
+message CRDTFullStateEntry {
+    CRDTKey key = 1;
+    CRDTData data = 2;
+}
+
+message CRDTFullState {
+    repeated CRDTFullStateEntry entries = 1;
 }
 ```
+
+The Replicator maintains a per-key version counter (`map[string]uint64`) that increments on every local update or remote merge. The digest carries these versions so the peer can identify which keys are divergent without exchanging full state.
 
 ---
 
@@ -902,7 +959,7 @@ err := actor.Tell(ctx, replicator, &crdt.Delete[*crdt.ORSet[string]]{
 })
 ```
 
-Deletion removes the key from the local store. Tombstone support (publishing a deletion marker to `goakt.crdt.deltas` so peers also remove the key) is planned for Phase 2.
+Deletion removes the key from the local store and publishes a `CRDTTombstone` to the shared `goakt.crdt.deltas` topic via TopicActor. Peer Replicators that receive the tombstone remove the key from their local stores. Tombstones are retained for a configurable TTL (`WithTombstoneTTL`, default 24h) and pruned periodically (`WithPruneInterval`, default 5m). While a tombstone is active, updates and deltas for that key are rejected to prevent resurrection.
 
 ---
 
@@ -917,9 +974,9 @@ Every operation is **local-first** by default:
 
 This is eventually consistent, with convergence bounded by TopicActor's delivery latency (typically sub-second in a healthy cluster). For most use cases — counters, metrics, session tracking, feature flags — this is sufficient.
 
-### Optional Coordination: `WriteTo` and `ReadFrom`
+### Optional Coordination: `WriteTo` and `ReadFrom` (Phase 3)
 
-When stronger guarantees are needed, `Update` and `Get` accept an optional coordination level:
+The `Update` and `Get` message types define `WriteTo` and `ReadFrom` fields for optional coordination. The Replicator does not yet act on these fields — they are reserved for Phase 3 implementation. When stronger guarantees are needed, they will accept a coordination level:
 
 ```go
 // Coordination levels defined in crdt/consistency.go
@@ -1059,49 +1116,22 @@ CRDT deltas and full states are serialized using Protocol Buffers for wire trans
 
 ```protobuf
 syntax = "proto3";
-package goaktpb;
+package internalpb;
 
-// Serialized CRDT key — carries the string ID and the data type.
+enum CRDTDataType {
+    CRDT_DATA_TYPE_UNSPECIFIED = 0;
+    CRDT_DATA_TYPE_G_COUNTER = 1;
+    CRDT_DATA_TYPE_PN_COUNTER = 2;
+    CRDT_DATA_TYPE_LWW_REGISTER = 3;
+    CRDT_DATA_TYPE_OR_SET = 4;
+    CRDT_DATA_TYPE_OR_MAP = 5;
+    CRDT_DATA_TYPE_FLAG = 6;
+    CRDT_DATA_TYPE_MV_REGISTER = 7;
+}
+
 message CRDTKey {
     string id = 1;
     CRDTDataType data_type = 2;
-}
-
-enum CRDTDataType {
-    G_COUNTER = 0;
-    PN_COUNTER = 1;
-    LWW_REGISTER = 2;
-    OR_SET = 3;
-    OR_MAP = 4;
-    FLAG = 5;
-    MV_REGISTER = 6;
-}
-
-// Delta message published to "goakt.crdt.deltas" via TopicActor.
-// All Replicators subscribed to this topic receive this message.
-message CRDTDelta {
-    CRDTKey key = 1;
-    string origin_node = 2;
-    CRDTData data = 3;
-}
-
-// Anti-entropy digest exchanged between Replicators.
-message CRDTDigest {
-    message DigestEntry {
-        CRDTKey key = 1;
-        uint64 version = 2;
-    }
-    repeated DigestEntry entries = 1;
-}
-
-// Anti-entropy full state response for divergent keys.
-message CRDTFullState {
-    repeated CRDTEntry entries = 1;
-}
-
-message CRDTEntry {
-    CRDTKey key = 1;
-    CRDTData data = 2;
 }
 
 message CRDTData {
@@ -1112,11 +1142,12 @@ message CRDTData {
         ORSetData or_set = 4;
         ORMapData or_map = 5;
         FlagData flag = 6;
+        MVRegisterData mv_register = 7;
     }
 }
 
 message GCounterData {
-    map<string, uint64> state = 1; // nodeID → count
+    map<string, uint64> state = 1;
 }
 
 message PNCounterData {
@@ -1132,26 +1163,26 @@ message LWWRegisterData {
 }
 
 message ORSetData {
-    message Dot {
+    message ORSetDot {
         string node_id = 1;
         uint64 counter = 2;
     }
-    message Entry {
+    message ORSetEntry {
         bytes element = 1;
         string type_url = 2;
-        repeated Dot dots = 3;
+        repeated ORSetDot dots = 3;
     }
-    repeated Entry entries = 1;
+    repeated ORSetEntry entries = 1;
     map<string, uint64> clock = 2;
 }
 
 message ORMapData {
-    message MapEntry {
+    message ORMapEntry {
         bytes key = 1;
         string key_type_url = 2;
         CRDTData value = 3;
     }
-    repeated MapEntry entries = 1;
+    repeated ORMapEntry entries = 1;
     ORSetData key_set = 2;
 }
 
@@ -1159,8 +1190,43 @@ message FlagData {
     bool enabled = 1;
 }
 
+message MVRegisterData {
+    message MVRegisterEntry {
+        bytes value = 1;
+        string type_url = 2;
+        string node_id = 3;
+        uint64 counter = 4;
+    }
+    repeated MVRegisterEntry entries = 1;
+    map<string, uint64> clock = 2;
+}
+
+message CRDTDelta {
+    CRDTKey key = 1;
+    string origin_node = 2;
+    CRDTData data = 3;
+}
+
+message CRDTDigestEntry {
+    CRDTKey key = 1;
+    uint64 version = 2;
+}
+
+message CRDTDigest {
+    repeated CRDTDigestEntry entries = 1;
+}
+
+message CRDTFullStateEntry {
+    CRDTKey key = 1;
+    CRDTData data = 2;
+}
+
+message CRDTFullState {
+    repeated CRDTFullStateEntry entries = 1;
+}
+
 message CRDTTombstone {
-    string key = 1;
+    CRDTKey key = 1;
     int64 deleted_at_nanos = 2;
     string deleted_by_node = 3;
 }
@@ -1290,53 +1356,63 @@ CRDT lifecycle events are published to GoAkt's EventStream:
 
 ## 17. Phased Delivery Plan
 
-### Phase 1 — Core Types and TopicActor-Based Replication
+### Phase 1 — Core Types and TopicActor-Based Replication ✅
 
 **Goal:** Implement foundation CRDT types and the Replicator actor with TopicActor-based dissemination.
 
-- [ ] `ReplicatedData` interface in `crdt/crdt.go`
-- [ ] `Key[T]`, `DataType`, and factory functions in `crdt/key.go`
-- [ ] `GCounter` implementation + `GCounterKey` + tests + benchmarks
-- [ ] `PNCounter` implementation + `PNCounterKey` + tests + benchmarks
-- [ ] `LWWRegister[T]` implementation + `LWWRegisterKey` + tests + benchmarks
-- [ ] `ORSet[T]` implementation + `ORSetKey` + tests + benchmarks
-- [ ] Typed messages: `Update[T]`, `Get[T]`, `GetResponse[T]`, `Subscribe[T]`, `Changed[T]`, `Delete[T]`
-- [ ] CRDT config options in `crdt/config.go` (`WithAntiEntropyInterval`, `WithRole`, etc.)
-- [ ] `ClusterConfig.WithCRDT(...)` option in `actor/cluster_config.go`
-- [ ] `Replicator() *PID` method on `ActorSystem` interface
-- [ ] `replicatorType` reserved name in `actor/guardrails.go`
-- [ ] Replicator system actor in `actor/` (spawned by `spawnReplicator`)
-- [ ] Replicator subscribes to `goakt.crdt.deltas` topic at startup
-- [ ] Delta encoding as protobuf `CRDTDelta` and publishing via TopicActor
-- [ ] Delta decoding and merge on receiving peer deltas
-- [ ] Protobuf wire format for all Phase 1 types (CRDTDelta, CRDTData, etc.)
-- [ ] Local-first default consistency (no coordination)
-- [ ] Local change notifications to user actors watching keys
-- [ ] OpenTelemetry metrics
-- [ ] Integration tests (multi-node, convergence verification)
-- [ ] Zero-alloc merge benchmarks as CI gates
+- [x] `ReplicatedData` interface in `crdt/crdt.go`
+- [x] `Key[T]`, `DataType`, and factory functions in `crdt/key.go`
+- [x] `GCounter` implementation + `GCounterKey` + tests + benchmarks
+- [x] `PNCounter` implementation + `PNCounterKey` + tests + benchmarks
+- [x] `LWWRegister[T]` implementation + `LWWRegisterKey` + tests + benchmarks
+- [x] `ORSet[T]` implementation + `ORSetKey` + tests + benchmarks
+- [x] Typed messages: `Update[T]`, `Get[T]`, `GetResponse[T]`, `Subscribe[T]`, `Changed[T]`, `Delete[T]`
+- [x] CRDT config options in `crdt/config.go` (`WithAntiEntropyInterval`, `WithRole`, etc.)
+- [x] `ClusterConfig.WithCRDT(...)` option in `actor/cluster_config.go`
+- [x] `Replicator() *PID` method on `ActorSystem` interface
+- [x] `replicatorType` reserved name in `actor/guardrails.go`
+- [x] Replicator system actor in `actor/` (spawned by `spawnReplicator`)
+- [x] Replicator subscribes to `goakt.crdt.deltas` topic at startup
+- [x] Delta encoding as protobuf `CRDTDelta` and publishing via TopicActor
+- [x] Delta decoding and merge on receiving peer deltas
+- [x] Protobuf wire format for all Phase 1 types (CRDTDelta, CRDTData, etc.)
+- [x] Local-first default consistency (no coordination)
+- [x] Local change notifications to user actors watching keys
+- [x] OpenTelemetry metrics
+- [x] Integration tests (multi-node, convergence verification)
+- [x] Zero-alloc merge benchmarks as CI gates
 
-### Phase 2 — Consistency, Anti-Entropy, and Composition
+### Phase 2 — Anti-Entropy, Composition, and Tombstones ✅
 
-**Goal:** Add consistency levels, anti-entropy, and composite CRDT types.
+**Goal:** Add anti-entropy, composite CRDT types, and tombstone-based deletion.
 
-- [ ] Anti-entropy protocol (digest exchange via direct RemoteTell between Replicators)
-- [ ] `WriteTo: Majority` / `ReadFrom: Majority` coordination (direct RemoteTell/RemoteAsk)
-- [ ] `WriteTo: All` / `ReadFrom: All` coordination
-- [ ] `ORMap[K, V]` implementation + tests + benchmarks
-- [ ] `Flag` implementation + tests + benchmarks
-- [ ] `MVRegister[T]` implementation + tests + benchmarks
-- [ ] Key deletion with tombstones and pruning
-- [ ] Node departure handling (slot pruning for departed nodes)
-- [ ] ORSet compaction (causal dot pruning)
+- [x] Anti-entropy protocol (version-based digest exchange via direct RemoteTell between Replicators)
+- [x] `ORMap[K, V]` implementation + `ORMapKey` + tests + benchmarks
+- [x] `Flag` implementation + `FlagKey` + tests + benchmarks
+- [x] `MVRegister[T]` implementation + `MVRegisterKey` + tests + benchmarks
+- [x] Key deletion with tombstones and pruning (tombstones published via TopicActor, expired by configurable TTL)
+- [x] ORSet compaction (causal dot pruning via `Compact()` method)
+- [x] Protobuf wire format for Phase 2 types (ORMapData, FlagData, MVRegisterData, CRDTTombstone)
+- [x] Codec encode/decode for Flag, MVRegister[string], ORMap[string, *GCounter]
+- [x] Scheduled anti-entropy and prune ticks via GoAkt `Schedule` API
+- [x] Proper error handling with `ctx.Err()` for supervisor-driven restarts
 
-### Phase 3 — Multi-DC and Optimization
+### Phase 3 — Coordination and Optimization
 
-**Goal:** Cross-DC replication and performance hardening.
+**Goal:** WriteTo/ReadFrom coordination and performance hardening.
+
+- [x] `WriteTo: Majority` / `ReadFrom: Majority` coordination (direct RemoteTell/RemoteAsk)
+- [x] `WriteTo: All` / `ReadFrom: All` coordination
+- [x] ORMap compaction
+- [x] Durable CRDT snapshots (optional persistence to BoltDB)
+- [x] OpenTelemetry metrics
+- [x] Benchmark suite for all CRDT types (Clone, Delta, Value, Contains, Compact, merge at scale)
+- [x] Performance tuning and load testing
+
+### Phase 4 — Multi-DC and Scaling (Future)
+
+**Goal:** Cross-datacenter replication, DC-aware consistency, and scaling optimizations.
 
 - [ ] Cross-DC delta exchange via DataCenter control plane
 - [ ] DC-aware consistency levels
-- [ ] Replicator sharding for high-throughput keys
-- [ ] ORMap compaction
-- [ ] Durable CRDT snapshots (optional persistence to BoltDB)
-- [ ] Performance tuning and load testing
+- [ ] Replicator sharding for high-throughput keys (if real-world usage demonstrates the bottleneck)

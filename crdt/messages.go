@@ -113,8 +113,14 @@ func (u *Update[T]) Apply(current ReplicatedData) ReplicatedData {
 	return u.Modify(typed)
 }
 
+// WriteCoordination returns the coordination level for this update.
+func (u *Update[T]) WriteCoordination() Coordination { return u.WriteTo }
+
 // KeyID returns the key's string identifier for the replicator.
 func (g *Get[T]) KeyID() string { return g.Key.ID() }
+
+// ReadCoordination returns the coordination level for this get.
+func (g *Get[T]) ReadCoordination() Coordination { return g.ReadFrom }
 
 // Response builds a typed GetResponse from the raw ReplicatedData.
 // If the stored data is not of type T (type mismatch), Data is returned
@@ -144,3 +150,6 @@ func (d *Delete[T]) KeyID() string { return d.Key.ID() }
 
 // IsDelete is a marker method to distinguish Delete from other commands.
 func (d *Delete[T]) IsDelete() {}
+
+// WriteCoordination returns the coordination level for this delete.
+func (d *Delete[T]) WriteCoordination() Coordination { return d.WriteTo }

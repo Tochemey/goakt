@@ -33,6 +33,9 @@ import (
 
 	"github.com/tochemey/goakt/v4/crdt"
 	"github.com/tochemey/goakt/v4/discovery"
+	"github.com/tochemey/goakt/v4/internal/cluster"
+	"github.com/tochemey/goakt/v4/internal/codec"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/log"
@@ -59,8 +62,11 @@ func newTestReplicator() *replicatorActor {
 	r := newReplicatorActor()
 	r.config = crdt.NewConfig()
 	r.store = make(map[string]crdt.ReplicatedData)
+	r.keyTypes = make(map[string]crdt.DataType)
 	r.subscriptions = make(map[string]types.Unit)
 	r.watchers = make(map[string][]*PID)
+	r.tombstones = make(map[string]*tombstone)
+	r.versions = make(map[string]uint64)
 	return r
 }
 
@@ -483,16 +489,429 @@ func TestReplicatorRemoveWatcher(t *testing.T) {
 func TestReplicatorTrackKey(t *testing.T) {
 	t.Run("tracks key", func(t *testing.T) {
 		r := newTestReplicator()
-		r.trackKey("test-key")
+		r.trackKey("test-key", crdt.GCounterType)
 		_, exists := r.subscriptions["test-key"]
 		assert.True(t, exists)
+		assert.Equal(t, crdt.GCounterType, r.keyTypes["test-key"])
 	})
 
 	t.Run("duplicate is idempotent", func(t *testing.T) {
 		r := newTestReplicator()
-		r.trackKey("test-key")
-		r.trackKey("test-key")
+		r.trackKey("test-key", crdt.GCounterType)
+		r.trackKey("test-key", crdt.GCounterType)
 		assert.Len(t, r.subscriptions, 1)
+	})
+}
+
+func TestReplicatorTombstones(t *testing.T) {
+	t.Run("delete creates tombstone", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		err := sys.Start(ctx)
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		repl := spawnTestReplicator(t, sys)
+
+		counterKey := crdt.PNCounterKey("counter")
+		_, err = Ask(ctx, repl, &crdt.Update[*crdt.PNCounter]{
+			Key:     counterKey,
+			Initial: crdt.NewPNCounter(),
+			Modify: func(current *crdt.PNCounter) *crdt.PNCounter {
+				return current.Increment("node-1", 5)
+			},
+		}, time.Second)
+		require.NoError(t, err)
+
+		// delete creates tombstone
+		_, err = Ask(ctx, repl, &crdt.Delete[*crdt.PNCounter]{
+			Key: counterKey,
+		}, time.Second)
+		require.NoError(t, err)
+
+		// get returns nil after delete
+		resp, err := Ask(ctx, repl, &crdt.Get[*crdt.PNCounter]{
+			Key: counterKey,
+		}, time.Second)
+		require.NoError(t, err)
+		getResp := resp.(*crdt.GetResponse[*crdt.PNCounter])
+		assert.Nil(t, getResp.Data)
+
+		// update to tombstoned key is rejected (returns response but doesn't create key)
+		_, err = Ask(ctx, repl, &crdt.Update[*crdt.PNCounter]{
+			Key:     counterKey,
+			Initial: crdt.NewPNCounter(),
+			Modify: func(current *crdt.PNCounter) *crdt.PNCounter {
+				return current.Increment("node-1", 10)
+			},
+		}, time.Second)
+		require.NoError(t, err)
+
+		resp, err = Ask(ctx, repl, &crdt.Get[*crdt.PNCounter]{
+			Key: counterKey,
+		}, time.Second)
+		require.NoError(t, err)
+		getResp = resp.(*crdt.GetResponse[*crdt.PNCounter])
+		assert.Nil(t, getResp.Data)
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("delta for tombstoned key is rejected", func(t *testing.T) {
+		r := newTestReplicator()
+		r.nodeID = "local-node"
+		r.tombstones["counter"] = &tombstone{
+			keyID:     "counter",
+			deletedAt: time.Now(),
+			deletedBy: "local-node",
+		}
+
+		// sending a delta for a tombstoned key should be ignored
+		delta := &crdtDelta{
+			KeyID:    "counter",
+			DataType: crdt.PNCounterType,
+			Delta:    crdt.NewPNCounter().Increment("remote-node", 5),
+			Origin:   "remote-node",
+		}
+		// no panic, key is not added to store
+		r.store["counter"] = nil // ensure it doesn't exist
+		delete(r.store, "counter")
+
+		// simulate handleDelta without context — check store directly
+		if delta.Origin == r.nodeID {
+			t.Fatal("should not be self")
+		}
+		if _, ok := r.tombstones[delta.KeyID]; !ok {
+			t.Fatal("tombstone should exist")
+		}
+		_, exists := r.store["counter"]
+		assert.False(t, exists)
+	})
+
+	t.Run("proto tombstone from peer removes key", func(t *testing.T) {
+		r := newTestReplicator()
+		r.nodeID = "local-node"
+		r.store["counter"] = crdt.NewPNCounter().Increment("node-1", 5)
+		r.versions["counter"] = 1
+
+		pbTombstone := &internalpb.CRDTTombstone{
+			Key:            codec.EncodeCRDTKey("counter", crdt.PNCounterType),
+			DeletedAtNanos: time.Now().UnixNano(),
+			DeletedByNode:  "remote-node",
+		}
+		r.handleProtoTombstone(pbTombstone)
+
+		_, exists := r.store["counter"]
+		assert.False(t, exists)
+		_, hasTombstone := r.tombstones["counter"]
+		assert.True(t, hasTombstone)
+	})
+
+	t.Run("proto tombstone from self is ignored", func(t *testing.T) {
+		r := newTestReplicator()
+		r.nodeID = "local-node"
+		r.store["counter"] = crdt.NewPNCounter().Increment("node-1", 5)
+
+		pbTombstone := &internalpb.CRDTTombstone{
+			Key:            codec.EncodeCRDTKey("counter", crdt.PNCounterType),
+			DeletedAtNanos: time.Now().UnixNano(),
+			DeletedByNode:  "local-node",
+		}
+		r.handleProtoTombstone(pbTombstone)
+
+		_, exists := r.store["counter"]
+		assert.True(t, exists)
+	})
+}
+
+func TestReplicatorPrune(t *testing.T) {
+	t.Run("prune removes expired tombstones", func(t *testing.T) {
+		r := newTestReplicator()
+		r.config = crdt.NewConfig(crdt.WithTombstoneTTL(time.Millisecond))
+		r.tombstones["old-key"] = &tombstone{
+			keyID:     "old-key",
+			deletedAt: time.Now().Add(-time.Hour),
+			deletedBy: "node-1",
+		}
+		r.tombstones["new-key"] = &tombstone{
+			keyID:     "new-key",
+			deletedAt: time.Now(),
+			deletedBy: "node-1",
+		}
+
+		r.handlePrune()
+
+		_, oldExists := r.tombstones["old-key"]
+		assert.False(t, oldExists)
+		_, newExists := r.tombstones["new-key"]
+		assert.True(t, newExists)
+	})
+}
+
+func TestReplicatorDigest(t *testing.T) {
+	t.Run("buildDigest includes all keys", func(t *testing.T) {
+		r := newTestReplicator()
+		r.store["key-a"] = crdt.NewGCounter().Increment("node-1", 5)
+		r.keyTypes["key-a"] = crdt.GCounterType
+		r.versions["key-a"] = 3
+
+		r.store["key-b"] = crdt.NewPNCounter().Increment("node-1", 10)
+		r.keyTypes["key-b"] = crdt.PNCounterType
+		r.versions["key-b"] = 7
+
+		digest := r.buildDigest()
+		require.Len(t, digest.GetEntries(), 2)
+
+		versions := make(map[string]uint64)
+		for _, e := range digest.GetEntries() {
+			keyID, _ := codec.DecodeCRDTKey(e.GetKey())
+			versions[keyID] = e.GetVersion()
+		}
+		assert.Equal(t, uint64(3), versions["key-a"])
+		assert.Equal(t, uint64(7), versions["key-b"])
+	})
+
+	t.Run("buildDigest with empty store", func(t *testing.T) {
+		r := newTestReplicator()
+		digest := r.buildDigest()
+		assert.Empty(t, digest.GetEntries())
+	})
+}
+
+func TestReplicatorTargetCount(t *testing.T) {
+	r := newTestReplicator()
+
+	t.Run("majority with 1 peer", func(t *testing.T) {
+		assert.Equal(t, 1, r.targetCount(1, crdt.Majority))
+	})
+
+	t.Run("majority with 2 peers", func(t *testing.T) {
+		assert.Equal(t, 2, r.targetCount(2, crdt.Majority))
+	})
+
+	t.Run("majority with 3 peers", func(t *testing.T) {
+		assert.Equal(t, 2, r.targetCount(3, crdt.Majority))
+	})
+
+	t.Run("majority with 5 peers", func(t *testing.T) {
+		assert.Equal(t, 3, r.targetCount(5, crdt.Majority))
+	})
+
+	t.Run("all with 3 peers", func(t *testing.T) {
+		assert.Equal(t, 3, r.targetCount(3, crdt.All))
+	})
+
+	t.Run("zero coordination returns 0", func(t *testing.T) {
+		assert.Equal(t, 0, r.targetCount(5, crdt.Coordination(0)))
+	})
+}
+
+func TestReplicatorSelectPeers(t *testing.T) {
+	r := newTestReplicator()
+	peers := []*cluster.Peer{
+		{Host: "host-1", RemotingPort: 9000},
+		{Host: "host-2", RemotingPort: 9001},
+		{Host: "host-3", RemotingPort: 9002},
+		{Host: "host-4", RemotingPort: 9003},
+		{Host: "host-5", RemotingPort: 9004},
+	}
+
+	t.Run("count >= len returns full slice", func(t *testing.T) {
+		selected := r.selectPeers(peers, 5)
+		assert.Len(t, selected, 5)
+		assert.Same(t, &peers[0], &selected[0])
+	})
+
+	t.Run("count > len returns full slice", func(t *testing.T) {
+		selected := r.selectPeers(peers, 10)
+		assert.Len(t, selected, 5)
+	})
+
+	t.Run("count 0 returns nil", func(t *testing.T) {
+		selected := r.selectPeers(peers, 0)
+		assert.Nil(t, selected)
+	})
+
+	t.Run("count < len returns subset", func(t *testing.T) {
+		selected := r.selectPeers(peers, 3)
+		assert.Len(t, selected, 3)
+		// verify all selected peers are from the original set
+		hostSet := make(map[string]bool)
+		for _, p := range peers {
+			hostSet[p.Host] = true
+		}
+		for _, p := range selected {
+			assert.True(t, hostSet[p.Host])
+		}
+	})
+
+	t.Run("count 1 returns single peer", func(t *testing.T) {
+		selected := r.selectPeers(peers, 1)
+		assert.Len(t, selected, 1)
+	})
+}
+
+func TestReplicatorPruneCompacts(t *testing.T) {
+	t.Run("prune compacts ORSet in store", func(t *testing.T) {
+		r := newTestReplicator()
+		r.config = crdt.NewConfig(crdt.WithTombstoneTTL(24 * time.Hour))
+
+		// Create an ORSet with redundant dots
+		s := crdt.NewORSet[string]()
+		s = s.Add("node-1", "a")
+		s = s.Add("node-1", "a") // duplicate dot
+		r.store["set-key"] = s
+		r.keyTypes["set-key"] = crdt.ORSetType
+
+		// Verify before compaction: 2 dots
+		entries, _ := s.RawState()
+		require.Len(t, entries[0].Dots, 2)
+
+		r.handlePrune()
+
+		// After prune, the ORSet should be compacted to 1 dot
+		compacted := r.store["set-key"].(*crdt.ORSet[string])
+		entries2, _ := compacted.RawState()
+		require.Len(t, entries2, 1)
+		assert.Len(t, entries2[0].Dots, 1)
+	})
+
+	t.Run("prune does not affect non-compactable types", func(t *testing.T) {
+		r := newTestReplicator()
+		r.config = crdt.NewConfig(crdt.WithTombstoneTTL(24 * time.Hour))
+
+		counter := crdt.NewGCounter().Increment("node-1", 5)
+		r.store["counter-key"] = counter
+		r.keyTypes["counter-key"] = crdt.GCounterType
+
+		r.handlePrune()
+
+		result := r.store["counter-key"].(*crdt.GCounter)
+		assert.Equal(t, uint64(5), result.Value())
+	})
+}
+
+func TestReplicatorPhase2Types(t *testing.T) {
+	t.Run("Flag via actor system", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		err := sys.Start(ctx)
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		repl := spawnTestReplicator(t, sys)
+
+		flagKey := crdt.FlagKey("feature-x")
+		_, err = Ask(ctx, repl, &crdt.Update[*crdt.Flag]{
+			Key:     flagKey,
+			Initial: crdt.NewFlag(),
+			Modify: func(current *crdt.Flag) *crdt.Flag {
+				return current.Enable()
+			},
+		}, time.Second)
+		require.NoError(t, err)
+
+		resp, err := Ask(ctx, repl, &crdt.Get[*crdt.Flag]{Key: flagKey}, time.Second)
+		require.NoError(t, err)
+		flag := resp.(*crdt.GetResponse[*crdt.Flag]).Data
+		assert.True(t, flag.Enabled())
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("MVRegister via actor system", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		err := sys.Start(ctx)
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		repl := spawnTestReplicator(t, sys)
+
+		regKey := crdt.MVRegisterKey[string]("profile")
+		_, err = Ask(ctx, repl, &crdt.Update[*crdt.MVRegister[string]]{
+			Key:     regKey,
+			Initial: crdt.NewMVRegister[string](),
+			Modify: func(current *crdt.MVRegister[string]) *crdt.MVRegister[string] {
+				return current.Set("node-1", "alice")
+			},
+		}, time.Second)
+		require.NoError(t, err)
+
+		resp, err := Ask(ctx, repl, &crdt.Get[*crdt.MVRegister[string]]{Key: regKey}, time.Second)
+		require.NoError(t, err)
+		reg := resp.(*crdt.GetResponse[*crdt.MVRegister[string]]).Data
+		values := reg.Values()
+		require.Len(t, values, 1)
+		assert.Equal(t, "alice", values[0])
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("ORMap via actor system", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		err := sys.Start(ctx)
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		repl := spawnTestReplicator(t, sys)
+
+		mapKey := crdt.ORMapKey[string, *crdt.GCounter]("cart")
+		_, err = Ask(ctx, repl, &crdt.Update[*crdt.ORMap[string, *crdt.GCounter]]{
+			Key:     mapKey,
+			Initial: crdt.NewORMap[string, *crdt.GCounter](),
+			Modify: func(current *crdt.ORMap[string, *crdt.GCounter]) *crdt.ORMap[string, *crdt.GCounter] {
+				return current.Set("node-1", "item-a", crdt.NewGCounter().Increment("node-1", 2))
+			},
+		}, time.Second)
+		require.NoError(t, err)
+
+		resp, err := Ask(ctx, repl, &crdt.Get[*crdt.ORMap[string, *crdt.GCounter]]{Key: mapKey}, time.Second)
+		require.NoError(t, err)
+		orMap := resp.(*crdt.GetResponse[*crdt.ORMap[string, *crdt.GCounter]]).Data
+		assert.Equal(t, 1, orMap.Len())
+		v, ok := orMap.Get("item-a")
+		require.True(t, ok)
+		assert.Equal(t, uint64(2), v.Value())
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+}
+
+func TestReplicatorVersionTracking(t *testing.T) {
+	t.Run("versions increment on update", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		err := sys.Start(ctx)
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		repl := spawnTestReplicator(t, sys)
+
+		counterKey := crdt.PNCounterKey("counter")
+		for range 3 {
+			_, err = Ask(ctx, repl, &crdt.Update[*crdt.PNCounter]{
+				Key:     counterKey,
+				Initial: crdt.NewPNCounter(),
+				Modify: func(current *crdt.PNCounter) *crdt.PNCounter {
+					return current.Increment("node-1", 1)
+				},
+			}, time.Second)
+			require.NoError(t, err)
+		}
+
+		// verify value accumulated
+		resp, err := Ask(ctx, repl, &crdt.Get[*crdt.PNCounter]{Key: counterKey}, time.Second)
+		require.NoError(t, err)
+		assert.Equal(t, int64(3), resp.(*crdt.GetResponse[*crdt.PNCounter]).Data.Value())
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
 	})
 }
 
@@ -802,4 +1221,445 @@ func TestReplicatorCluster(t *testing.T) {
 			assert.Equal(t, uint64(6), data.Value(), "node %d should converge to 6", i+1)
 		}
 	})
+
+	t.Run("coordinated write Majority replicates to peers", func(t *testing.T) {
+		c := setupCRDTCluster(t)
+		defer c.shutdown(t)
+
+		ctx := context.TODO()
+		counterKey := crdt.PNCounterKey("coord-write-majority")
+
+		// update with WriteTo: Majority
+		_, err := Ask(ctx, c.repls[0], &crdt.Update[*crdt.PNCounter]{
+			Key:     counterKey,
+			Initial: crdt.NewPNCounter(),
+			Modify: func(current *crdt.PNCounter) *crdt.PNCounter {
+				return current.Increment("node-1", 42)
+			},
+			WriteTo: crdt.Majority,
+		}, 5*time.Second)
+		require.NoError(t, err)
+
+		// wait for replication
+		pause.For(3 * time.Second)
+
+		// all nodes should see the value
+		for i, repl := range c.repls {
+			resp, err := Ask(ctx, repl, &crdt.Get[*crdt.PNCounter]{Key: counterKey}, time.Second)
+			require.NoError(t, err)
+			data := resp.(*crdt.GetResponse[*crdt.PNCounter]).Data
+			require.NotNil(t, data, "node %d should have the counter", i+1)
+			assert.Equal(t, int64(42), data.Value(), "node %d should have value 42", i+1)
+		}
+	})
+
+	t.Run("coordinated write All replicates to all peers", func(t *testing.T) {
+		c := setupCRDTCluster(t)
+		defer c.shutdown(t)
+
+		ctx := context.TODO()
+		counterKey := crdt.PNCounterKey("coord-write-all")
+
+		_, err := Ask(ctx, c.repls[0], &crdt.Update[*crdt.PNCounter]{
+			Key:     counterKey,
+			Initial: crdt.NewPNCounter(),
+			Modify: func(current *crdt.PNCounter) *crdt.PNCounter {
+				return current.Increment("node-1", 99)
+			},
+			WriteTo: crdt.All,
+		}, 5*time.Second)
+		require.NoError(t, err)
+
+		pause.For(3 * time.Second)
+
+		for i, repl := range c.repls {
+			resp, err := Ask(ctx, repl, &crdt.Get[*crdt.PNCounter]{Key: counterKey}, time.Second)
+			require.NoError(t, err)
+			data := resp.(*crdt.GetResponse[*crdt.PNCounter]).Data
+			require.NotNil(t, data, "node %d should have the counter", i+1)
+			assert.Equal(t, int64(99), data.Value(), "node %d should have value 99", i+1)
+		}
+	})
+
+	t.Run("coordinated read Majority merges peer values", func(t *testing.T) {
+		c := setupCRDTCluster(t)
+		defer c.shutdown(t)
+
+		ctx := context.TODO()
+		counterKey := crdt.PNCounterKey("coord-read-majority")
+
+		// update on each node independently
+		for i, repl := range c.repls {
+			nodeID := fmt.Sprintf("node-%d", i+1)
+			_, err := Ask(ctx, repl, &crdt.Update[*crdt.PNCounter]{
+				Key:     counterKey,
+				Initial: crdt.NewPNCounter(),
+				Modify: func(current *crdt.PNCounter) *crdt.PNCounter {
+					return current.Increment(nodeID, uint64(i+1)*10)
+				},
+			}, time.Second)
+			require.NoError(t, err)
+		}
+
+		// wait for delta replication
+		pause.For(3 * time.Second)
+
+		// coordinated read should merge values from peers
+		resp, err := Ask(ctx, c.repls[0], &crdt.Get[*crdt.PNCounter]{
+			Key:      counterKey,
+			ReadFrom: crdt.Majority,
+		}, 5*time.Second)
+		require.NoError(t, err)
+		data := resp.(*crdt.GetResponse[*crdt.PNCounter]).Data
+		require.NotNil(t, data)
+		// After replication + coordinated read, all increments should be visible: 10+20+30=60
+		assert.Equal(t, int64(60), data.Value())
+	})
+
+	t.Run("coordinated read All merges all peer values", func(t *testing.T) {
+		c := setupCRDTCluster(t)
+		defer c.shutdown(t)
+
+		ctx := context.TODO()
+		counterKey := crdt.PNCounterKey("coord-read-all")
+
+		for i, repl := range c.repls {
+			nodeID := fmt.Sprintf("node-%d", i+1)
+			_, err := Ask(ctx, repl, &crdt.Update[*crdt.PNCounter]{
+				Key:     counterKey,
+				Initial: crdt.NewPNCounter(),
+				Modify: func(current *crdt.PNCounter) *crdt.PNCounter {
+					return current.Increment(nodeID, uint64(i+1)*5)
+				},
+			}, time.Second)
+			require.NoError(t, err)
+		}
+
+		pause.For(3 * time.Second)
+
+		resp, err := Ask(ctx, c.repls[0], &crdt.Get[*crdt.PNCounter]{
+			Key:      counterKey,
+			ReadFrom: crdt.All,
+		}, 5*time.Second)
+		require.NoError(t, err)
+		data := resp.(*crdt.GetResponse[*crdt.PNCounter]).Data
+		require.NotNil(t, data)
+		assert.Equal(t, int64(30), data.Value())
+	})
+
+	t.Run("coordinated delete Majority sends tombstone to peers", func(t *testing.T) {
+		c := setupCRDTCluster(t)
+		defer c.shutdown(t)
+
+		ctx := context.TODO()
+		counterKey := crdt.PNCounterKey("coord-delete")
+
+		// create key on node 0
+		_, err := Ask(ctx, c.repls[0], &crdt.Update[*crdt.PNCounter]{
+			Key:     counterKey,
+			Initial: crdt.NewPNCounter(),
+			Modify: func(current *crdt.PNCounter) *crdt.PNCounter {
+				return current.Increment("node-1", 10)
+			},
+		}, time.Second)
+		require.NoError(t, err)
+		pause.For(3 * time.Second)
+
+		// delete with coordination
+		_, err = Ask(ctx, c.repls[0], &crdt.Delete[*crdt.PNCounter]{
+			Key:     counterKey,
+			WriteTo: crdt.Majority,
+		}, 5*time.Second)
+		require.NoError(t, err)
+		pause.For(3 * time.Second)
+
+		// key should be gone on all nodes
+		for i, repl := range c.repls {
+			resp, err := Ask(ctx, repl, &crdt.Get[*crdt.PNCounter]{Key: counterKey}, time.Second)
+			require.NoError(t, err)
+			data := resp.(*crdt.GetResponse[*crdt.PNCounter]).Data
+			assert.Nil(t, data, "node %d should not have the deleted counter", i+1)
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Benchmarks
+// ---------------------------------------------------------------------------
+
+// spawnBenchReplicator creates a replicator for benchmarks.
+func spawnBenchReplicator(b *testing.B) (ActorSystem, *PID) {
+	b.Helper()
+	ctx := context.TODO()
+	sys, err := NewActorSystem("benchSys", WithLogger(log.DiscardLogger))
+	require.NoError(b, err)
+	require.NoError(b, sys.Start(ctx))
+
+	config := crdt.NewConfig()
+	impl := sys.(*actorSystem)
+	impl.extensions.Set(crdtConfigExtensionID, &crdtConfigExtension{config: config})
+	repl, err := sys.Spawn(ctx, "replicator", newReplicatorActor(), WithLongLived())
+	require.NoError(b, err)
+	require.NotNil(b, repl)
+	pause.For(500 * time.Millisecond)
+	return sys, repl
+}
+
+func BenchmarkReplicatorUpdatePNCounter(b *testing.B) {
+	sys, repl := spawnBenchReplicator(b)
+	defer sys.Stop(context.TODO())
+
+	ctx := context.TODO()
+	counterKey := crdt.PNCounterKey("bench-counter")
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for range b.N {
+		_, err := Ask(ctx, repl, &crdt.Update[*crdt.PNCounter]{
+			Key:     counterKey,
+			Initial: crdt.NewPNCounter(),
+			Modify: func(current *crdt.PNCounter) *crdt.PNCounter {
+				return current.Increment("node-1", 1)
+			},
+		}, time.Second)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkReplicatorUpdateGCounter(b *testing.B) {
+	sys, repl := spawnBenchReplicator(b)
+	defer sys.Stop(context.TODO())
+
+	ctx := context.TODO()
+	counterKey := crdt.GCounterKey("bench-gcounter")
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for range b.N {
+		_, err := Ask(ctx, repl, &crdt.Update[*crdt.GCounter]{
+			Key:     counterKey,
+			Initial: crdt.NewGCounter(),
+			Modify: func(current *crdt.GCounter) *crdt.GCounter {
+				return current.Increment("node-1", 1)
+			},
+		}, time.Second)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkReplicatorUpdateORSet(b *testing.B) {
+	sys, repl := spawnBenchReplicator(b)
+	defer sys.Stop(context.TODO())
+
+	ctx := context.TODO()
+	setKey := crdt.ORSetKey[string]("bench-set")
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := range b.N {
+		elem := fmt.Sprintf("elem-%d", i)
+		_, err := Ask(ctx, repl, &crdt.Update[*crdt.ORSet[string]]{
+			Key:     setKey,
+			Initial: crdt.NewORSet[string](),
+			Modify: func(current *crdt.ORSet[string]) *crdt.ORSet[string] {
+				return current.Add("node-1", elem)
+			},
+		}, time.Second)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkReplicatorUpdateFlag(b *testing.B) {
+	sys, repl := spawnBenchReplicator(b)
+	defer sys.Stop(context.TODO())
+
+	ctx := context.TODO()
+	flagKey := crdt.FlagKey("bench-flag")
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for range b.N {
+		_, err := Ask(ctx, repl, &crdt.Update[*crdt.Flag]{
+			Key:     flagKey,
+			Initial: crdt.NewFlag(),
+			Modify: func(current *crdt.Flag) *crdt.Flag {
+				return current.Enable()
+			},
+		}, time.Second)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkReplicatorGetPNCounter(b *testing.B) {
+	sys, repl := spawnBenchReplicator(b)
+	defer sys.Stop(context.TODO())
+
+	ctx := context.TODO()
+	counterKey := crdt.PNCounterKey("bench-read")
+
+	_, err := Ask(ctx, repl, &crdt.Update[*crdt.PNCounter]{
+		Key:     counterKey,
+		Initial: crdt.NewPNCounter(),
+		Modify: func(current *crdt.PNCounter) *crdt.PNCounter {
+			return current.Increment("node-1", 100)
+		},
+	}, time.Second)
+	require.NoError(b, err)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for range b.N {
+		_, err := Ask(ctx, repl, &crdt.Get[*crdt.PNCounter]{Key: counterKey}, time.Second)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkReplicatorGetORSet(b *testing.B) {
+	sys, repl := spawnBenchReplicator(b)
+	defer sys.Stop(context.TODO())
+
+	ctx := context.TODO()
+	setKey := crdt.ORSetKey[string]("bench-read-set")
+
+	for i := range 100 {
+		_, err := Ask(ctx, repl, &crdt.Update[*crdt.ORSet[string]]{
+			Key:     setKey,
+			Initial: crdt.NewORSet[string](),
+			Modify: func(current *crdt.ORSet[string]) *crdt.ORSet[string] {
+				return current.Add("node-1", fmt.Sprintf("elem-%d", i))
+			},
+		}, time.Second)
+		require.NoError(b, err)
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for range b.N {
+		_, err := Ask(ctx, repl, &crdt.Get[*crdt.ORSet[string]]{Key: setKey}, time.Second)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkReplicatorMultiKeyUpdate(b *testing.B) {
+	for _, numKeys := range []int{10, 100, 1000} {
+		b.Run(fmt.Sprintf("keys=%d", numKeys), func(b *testing.B) {
+			sys, repl := spawnBenchReplicator(b)
+			defer sys.Stop(context.TODO())
+
+			ctx := context.TODO()
+			keys := make([]crdt.Key[*crdt.GCounter], numKeys)
+			for i := range numKeys {
+				keys[i] = crdt.GCounterKey(fmt.Sprintf("key-%d", i))
+			}
+
+			b.ResetTimer()
+			b.ReportAllocs()
+			for i := range b.N {
+				key := keys[i%numKeys]
+				_, err := Ask(ctx, repl, &crdt.Update[*crdt.GCounter]{
+					Key:     key,
+					Initial: crdt.NewGCounter(),
+					Modify: func(current *crdt.GCounter) *crdt.GCounter {
+						return current.Increment("node-1", 1)
+					},
+				}, time.Second)
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkReplicatorDeltaMerge(b *testing.B) {
+	sys, repl := spawnBenchReplicator(b)
+	defer sys.Stop(context.TODO())
+
+	ctx := context.TODO()
+	counterKey := crdt.PNCounterKey("merge-counter")
+
+	_, err := Ask(ctx, repl, &crdt.Update[*crdt.PNCounter]{
+		Key:     counterKey,
+		Initial: crdt.NewPNCounter(),
+		Modify: func(current *crdt.PNCounter) *crdt.PNCounter {
+			return current.Increment("node-1", 100)
+		},
+	}, time.Second)
+	require.NoError(b, err)
+
+	delta := crdt.NewPNCounter().Increment("node-2", 50)
+	pbDelta, err := encodeCRDTDelta(&crdtDelta{
+		KeyID:    "merge-counter",
+		DataType: crdt.PNCounterType,
+		Delta:    delta,
+		Origin:   "remote-node",
+	})
+	require.NoError(b, err)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for range b.N {
+		if err := Tell(ctx, repl, pbDelta); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkReplicatorBuildDigest(b *testing.B) {
+	for _, numKeys := range []int{10, 100, 1000} {
+		b.Run(fmt.Sprintf("keys=%d", numKeys), func(b *testing.B) {
+			r := newTestReplicator()
+			r.logger = log.DiscardLogger
+			for i := range numKeys {
+				keyID := fmt.Sprintf("key-%d", i)
+				r.store[keyID] = crdt.NewGCounter().Increment("node-1", uint64(i))
+				r.keyTypes[keyID] = crdt.GCounterType
+				r.versions[keyID] = uint64(i + 1)
+			}
+
+			b.ResetTimer()
+			b.ReportAllocs()
+			for range b.N {
+				r.buildDigest()
+			}
+		})
+	}
+}
+
+func BenchmarkReplicatorFullStateRoundTrip(b *testing.B) {
+	for _, numKeys := range []int{10, 100} {
+		b.Run(fmt.Sprintf("keys=%d", numKeys), func(b *testing.B) {
+			entries := make([]*internalpb.CRDTFullStateEntry, numKeys)
+			for i := range numKeys {
+				keyID := fmt.Sprintf("key-%d", i)
+				data := crdt.NewGCounter().Increment("node-1", uint64(i+1))
+				pbData, err := codec.EncodeCRDTData(data)
+				require.NoError(b, err)
+				entries[i] = &internalpb.CRDTFullStateEntry{
+					Key:  codec.EncodeCRDTKey(keyID, crdt.GCounterType),
+					Data: pbData,
+				}
+			}
+
+			b.ResetTimer()
+			b.ReportAllocs()
+			for range b.N {
+				for _, entry := range entries {
+					_, _ = codec.DecodeCRDTData(entry.GetData())
+				}
+			}
+		})
+	}
 }

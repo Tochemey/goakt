@@ -614,6 +614,64 @@ func TestEncodeCRDTData(t *testing.T) {
 		require.Equal(t, 2, decodedSet.Len())
 	})
 
+	t.Run("Flag round-trip enabled", func(t *testing.T) {
+		f := crdt.NewFlag().Enable()
+		pb, err := EncodeCRDTData(f)
+		require.NoError(t, err)
+		require.NotNil(t, pb.GetFlag())
+
+		decoded, err := DecodeCRDTData(pb)
+		require.NoError(t, err)
+		require.True(t, decoded.(*crdt.Flag).Enabled())
+	})
+
+	t.Run("Flag round-trip disabled", func(t *testing.T) {
+		f := crdt.NewFlag()
+		pb, err := EncodeCRDTData(f)
+		require.NoError(t, err)
+		require.NotNil(t, pb.GetFlag())
+
+		decoded, err := DecodeCRDTData(pb)
+		require.NoError(t, err)
+		require.False(t, decoded.(*crdt.Flag).Enabled())
+	})
+
+	t.Run("MVRegister string round-trip", func(t *testing.T) {
+		r1 := crdt.NewMVRegister[string]().Set("node-1", "alice")
+		r2 := crdt.NewMVRegister[string]().Set("node-2", "bob")
+		merged := r1.Merge(r2).(*crdt.MVRegister[string])
+
+		pb, err := EncodeCRDTData(merged)
+		require.NoError(t, err)
+		require.NotNil(t, pb.GetMvRegister())
+
+		decoded, err := DecodeCRDTData(pb)
+		require.NoError(t, err)
+		decodedReg := decoded.(*crdt.MVRegister[string])
+		require.ElementsMatch(t, merged.Values(), decodedReg.Values())
+	})
+
+	t.Run("ORMap string-GCounter round-trip", func(t *testing.T) {
+		m := crdt.NewORMap[string, *crdt.GCounter]()
+		m = m.Set("node-1", "a", crdt.NewGCounter().Increment("node-1", 5))
+		m = m.Set("node-2", "b", crdt.NewGCounter().Increment("node-2", 3))
+
+		pb, err := EncodeCRDTData(m)
+		require.NoError(t, err)
+		require.NotNil(t, pb.GetOrMap())
+
+		decoded, err := DecodeCRDTData(pb)
+		require.NoError(t, err)
+		decodedMap := decoded.(*crdt.ORMap[string, *crdt.GCounter])
+		require.Equal(t, 2, decodedMap.Len())
+		va, ok := decodedMap.Get("a")
+		require.True(t, ok)
+		require.Equal(t, uint64(5), va.Value())
+		vb, ok := decodedMap.Get("b")
+		require.True(t, ok)
+		require.Equal(t, uint64(3), vb.Value())
+	})
+
 	t.Run("unsupported type returns error", func(t *testing.T) {
 		_, err := EncodeCRDTData(crdt.NewLWWRegister[string]())
 		require.Error(t, err)

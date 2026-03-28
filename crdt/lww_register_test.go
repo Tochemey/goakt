@@ -141,37 +141,3 @@ func TestLWWRegister(t *testing.T) {
 		assert.True(t, r.Value())
 	})
 }
-
-func BenchmarkLWWRegisterMerge(b *testing.B) {
-	now := time.Now()
-	r1 := NewLWWRegister[string]().Set("v1", now, "node-1")
-	r2 := NewLWWRegister[string]().Set("v2", now.Add(time.Second), "node-2")
-
-	b.ReportAllocs()
-	b.ResetTimer()
-	for range b.N {
-		r1.Merge(r2)
-	}
-}
-
-func BenchmarkLWWRegisterMergeConverged(b *testing.B) {
-	now := time.Now()
-	r1 := NewLWWRegister[string]().Set("v1", now, "node-1")
-	r2 := NewLWWRegister[string]().Set("v1", now, "node-1")
-
-	b.ReportAllocs()
-	b.ResetTimer()
-	for range b.N {
-		r1.Merge(r2)
-	}
-}
-
-func BenchmarkLWWRegisterSet(b *testing.B) {
-	r := NewLWWRegister[string]()
-	now := time.Now()
-	b.ReportAllocs()
-	b.ResetTimer()
-	for range b.N {
-		r.Set("value", now, "node-1")
-	}
-}

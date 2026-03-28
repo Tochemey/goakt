@@ -150,6 +150,9 @@ type CRDTData struct {
 	//	*CRDTData_PnCounter
 	//	*CRDTData_LwwRegister
 	//	*CRDTData_OrSet
+	//	*CRDTData_OrMap
+	//	*CRDTData_Flag
+	//	*CRDTData_MvRegister
 	Type          isCRDTData_Type `protobuf_oneof:"type"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -228,6 +231,33 @@ func (x *CRDTData) GetOrSet() *ORSetData {
 	return nil
 }
 
+func (x *CRDTData) GetOrMap() *ORMapData {
+	if x != nil {
+		if x, ok := x.Type.(*CRDTData_OrMap); ok {
+			return x.OrMap
+		}
+	}
+	return nil
+}
+
+func (x *CRDTData) GetFlag() *FlagData {
+	if x != nil {
+		if x, ok := x.Type.(*CRDTData_Flag); ok {
+			return x.Flag
+		}
+	}
+	return nil
+}
+
+func (x *CRDTData) GetMvRegister() *MVRegisterData {
+	if x != nil {
+		if x, ok := x.Type.(*CRDTData_MvRegister); ok {
+			return x.MvRegister
+		}
+	}
+	return nil
+}
+
 type isCRDTData_Type interface {
 	isCRDTData_Type()
 }
@@ -248,6 +278,18 @@ type CRDTData_OrSet struct {
 	OrSet *ORSetData `protobuf:"bytes,4,opt,name=or_set,json=orSet,proto3,oneof"`
 }
 
+type CRDTData_OrMap struct {
+	OrMap *ORMapData `protobuf:"bytes,5,opt,name=or_map,json=orMap,proto3,oneof"`
+}
+
+type CRDTData_Flag struct {
+	Flag *FlagData `protobuf:"bytes,6,opt,name=flag,proto3,oneof"`
+}
+
+type CRDTData_MvRegister struct {
+	MvRegister *MVRegisterData `protobuf:"bytes,7,opt,name=mv_register,json=mvRegister,proto3,oneof"`
+}
+
 func (*CRDTData_GCounter) isCRDTData_Type() {}
 
 func (*CRDTData_PnCounter) isCRDTData_Type() {}
@@ -255,6 +297,12 @@ func (*CRDTData_PnCounter) isCRDTData_Type() {}
 func (*CRDTData_LwwRegister) isCRDTData_Type() {}
 
 func (*CRDTData_OrSet) isCRDTData_Type() {}
+
+func (*CRDTData_OrMap) isCRDTData_Type() {}
+
+func (*CRDTData_Flag) isCRDTData_Type() {}
+
+func (*CRDTData_MvRegister) isCRDTData_Type() {}
 
 // GCounterData is the serialized state of a GCounter.
 type GCounterData struct {
@@ -485,6 +533,162 @@ func (x *ORSetData) GetClock() map[string]uint64 {
 	return nil
 }
 
+// ORMapData is the serialized state of an ORMap.
+type ORMapData struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the map entries.
+	Entries []*ORMapData_ORMapEntry `protobuf:"bytes,1,rep,name=entries,proto3" json:"entries,omitempty"`
+	// Specifies the OR-Set that manages the key set.
+	KeySet        *ORSetData `protobuf:"bytes,2,opt,name=key_set,json=keySet,proto3" json:"key_set,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ORMapData) Reset() {
+	*x = ORMapData{}
+	mi := &file_internal_crdt_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ORMapData) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ORMapData) ProtoMessage() {}
+
+func (x *ORMapData) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_crdt_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ORMapData.ProtoReflect.Descriptor instead.
+func (*ORMapData) Descriptor() ([]byte, []int) {
+	return file_internal_crdt_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *ORMapData) GetEntries() []*ORMapData_ORMapEntry {
+	if x != nil {
+		return x.Entries
+	}
+	return nil
+}
+
+func (x *ORMapData) GetKeySet() *ORSetData {
+	if x != nil {
+		return x.KeySet
+	}
+	return nil
+}
+
+// FlagData is the serialized state of a Flag.
+type FlagData struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies whether the flag is enabled.
+	Enabled       bool `protobuf:"varint,1,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FlagData) Reset() {
+	*x = FlagData{}
+	mi := &file_internal_crdt_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FlagData) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FlagData) ProtoMessage() {}
+
+func (x *FlagData) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_crdt_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FlagData.ProtoReflect.Descriptor instead.
+func (*FlagData) Descriptor() ([]byte, []int) {
+	return file_internal_crdt_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *FlagData) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+// MVRegisterData is the serialized state of an MVRegister.
+type MVRegisterData struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the register entries (one per concurrent value).
+	Entries []*MVRegisterData_MVRegisterEntry `protobuf:"bytes,1,rep,name=entries,proto3" json:"entries,omitempty"`
+	// Specifies the per-node vector clock.
+	Clock         map[string]uint64 `protobuf:"bytes,2,rep,name=clock,proto3" json:"clock,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MVRegisterData) Reset() {
+	*x = MVRegisterData{}
+	mi := &file_internal_crdt_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MVRegisterData) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MVRegisterData) ProtoMessage() {}
+
+func (x *MVRegisterData) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_crdt_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MVRegisterData.ProtoReflect.Descriptor instead.
+func (*MVRegisterData) Descriptor() ([]byte, []int) {
+	return file_internal_crdt_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *MVRegisterData) GetEntries() []*MVRegisterData_MVRegisterEntry {
+	if x != nil {
+		return x.Entries
+	}
+	return nil
+}
+
+func (x *MVRegisterData) GetClock() map[string]uint64 {
+	if x != nil {
+		return x.Clock
+	}
+	return nil
+}
+
 // CRDTDelta is the delta message published to a key's topic via TopicActor.
 // All Replicators subscribed to the same key topic receive this message.
 type CRDTDelta struct {
@@ -501,7 +705,7 @@ type CRDTDelta struct {
 
 func (x *CRDTDelta) Reset() {
 	*x = CRDTDelta{}
-	mi := &file_internal_crdt_proto_msgTypes[6]
+	mi := &file_internal_crdt_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -513,7 +717,7 @@ func (x *CRDTDelta) String() string {
 func (*CRDTDelta) ProtoMessage() {}
 
 func (x *CRDTDelta) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_crdt_proto_msgTypes[6]
+	mi := &file_internal_crdt_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -526,7 +730,7 @@ func (x *CRDTDelta) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CRDTDelta.ProtoReflect.Descriptor instead.
 func (*CRDTDelta) Descriptor() ([]byte, []int) {
-	return file_internal_crdt_proto_rawDescGZIP(), []int{6}
+	return file_internal_crdt_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *CRDTDelta) GetKey() *CRDTKey {
@@ -563,7 +767,7 @@ type CRDTDigestEntry struct {
 
 func (x *CRDTDigestEntry) Reset() {
 	*x = CRDTDigestEntry{}
-	mi := &file_internal_crdt_proto_msgTypes[7]
+	mi := &file_internal_crdt_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -575,7 +779,7 @@ func (x *CRDTDigestEntry) String() string {
 func (*CRDTDigestEntry) ProtoMessage() {}
 
 func (x *CRDTDigestEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_crdt_proto_msgTypes[7]
+	mi := &file_internal_crdt_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -588,7 +792,7 @@ func (x *CRDTDigestEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CRDTDigestEntry.ProtoReflect.Descriptor instead.
 func (*CRDTDigestEntry) Descriptor() ([]byte, []int) {
-	return file_internal_crdt_proto_rawDescGZIP(), []int{7}
+	return file_internal_crdt_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *CRDTDigestEntry) GetKey() *CRDTKey {
@@ -616,7 +820,7 @@ type CRDTDigest struct {
 
 func (x *CRDTDigest) Reset() {
 	*x = CRDTDigest{}
-	mi := &file_internal_crdt_proto_msgTypes[8]
+	mi := &file_internal_crdt_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -628,7 +832,7 @@ func (x *CRDTDigest) String() string {
 func (*CRDTDigest) ProtoMessage() {}
 
 func (x *CRDTDigest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_crdt_proto_msgTypes[8]
+	mi := &file_internal_crdt_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -641,7 +845,7 @@ func (x *CRDTDigest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CRDTDigest.ProtoReflect.Descriptor instead.
 func (*CRDTDigest) Descriptor() ([]byte, []int) {
-	return file_internal_crdt_proto_rawDescGZIP(), []int{8}
+	return file_internal_crdt_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *CRDTDigest) GetEntries() []*CRDTDigestEntry {
@@ -664,7 +868,7 @@ type CRDTFullStateEntry struct {
 
 func (x *CRDTFullStateEntry) Reset() {
 	*x = CRDTFullStateEntry{}
-	mi := &file_internal_crdt_proto_msgTypes[9]
+	mi := &file_internal_crdt_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -676,7 +880,7 @@ func (x *CRDTFullStateEntry) String() string {
 func (*CRDTFullStateEntry) ProtoMessage() {}
 
 func (x *CRDTFullStateEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_crdt_proto_msgTypes[9]
+	mi := &file_internal_crdt_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -689,7 +893,7 @@ func (x *CRDTFullStateEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CRDTFullStateEntry.ProtoReflect.Descriptor instead.
 func (*CRDTFullStateEntry) Descriptor() ([]byte, []int) {
-	return file_internal_crdt_proto_rawDescGZIP(), []int{9}
+	return file_internal_crdt_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *CRDTFullStateEntry) GetKey() *CRDTKey {
@@ -717,7 +921,7 @@ type CRDTFullState struct {
 
 func (x *CRDTFullState) Reset() {
 	*x = CRDTFullState{}
-	mi := &file_internal_crdt_proto_msgTypes[10]
+	mi := &file_internal_crdt_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -729,7 +933,7 @@ func (x *CRDTFullState) String() string {
 func (*CRDTFullState) ProtoMessage() {}
 
 func (x *CRDTFullState) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_crdt_proto_msgTypes[10]
+	mi := &file_internal_crdt_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -742,7 +946,7 @@ func (x *CRDTFullState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CRDTFullState.ProtoReflect.Descriptor instead.
 func (*CRDTFullState) Descriptor() ([]byte, []int) {
-	return file_internal_crdt_proto_rawDescGZIP(), []int{10}
+	return file_internal_crdt_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *CRDTFullState) GetEntries() []*CRDTFullStateEntry {
@@ -767,7 +971,7 @@ type CRDTTombstone struct {
 
 func (x *CRDTTombstone) Reset() {
 	*x = CRDTTombstone{}
-	mi := &file_internal_crdt_proto_msgTypes[11]
+	mi := &file_internal_crdt_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -779,7 +983,7 @@ func (x *CRDTTombstone) String() string {
 func (*CRDTTombstone) ProtoMessage() {}
 
 func (x *CRDTTombstone) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_crdt_proto_msgTypes[11]
+	mi := &file_internal_crdt_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -792,7 +996,7 @@ func (x *CRDTTombstone) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CRDTTombstone.ProtoReflect.Descriptor instead.
 func (*CRDTTombstone) Descriptor() ([]byte, []int) {
-	return file_internal_crdt_proto_rawDescGZIP(), []int{11}
+	return file_internal_crdt_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *CRDTTombstone) GetKey() *CRDTKey {
@@ -816,6 +1020,191 @@ func (x *CRDTTombstone) GetDeletedByNode() string {
 	return ""
 }
 
+// CRDTReadRequest asks a peer Replicator for its local value of a key
+// during a coordinated read (ReadFrom: Majority or All).
+type CRDTReadRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the CRDT key to read.
+	Key *CRDTKey `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	// Specifies the node requesting the read.
+	FromNode      string `protobuf:"bytes,2,opt,name=from_node,json=fromNode,proto3" json:"from_node,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CRDTReadRequest) Reset() {
+	*x = CRDTReadRequest{}
+	mi := &file_internal_crdt_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CRDTReadRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CRDTReadRequest) ProtoMessage() {}
+
+func (x *CRDTReadRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_crdt_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CRDTReadRequest.ProtoReflect.Descriptor instead.
+func (*CRDTReadRequest) Descriptor() ([]byte, []int) {
+	return file_internal_crdt_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *CRDTReadRequest) GetKey() *CRDTKey {
+	if x != nil {
+		return x.Key
+	}
+	return nil
+}
+
+func (x *CRDTReadRequest) GetFromNode() string {
+	if x != nil {
+		return x.FromNode
+	}
+	return ""
+}
+
+// CRDTReadResponse returns a peer Replicator's local value for a key
+// in response to a CRDTReadRequest.
+type CRDTReadResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the CRDT key.
+	Key *CRDTKey `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	// Specifies the local CRDT state. Nil if the key is not found.
+	Data *CRDTData `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"`
+	// Specifies the node returning the response.
+	FromNode      string `protobuf:"bytes,3,opt,name=from_node,json=fromNode,proto3" json:"from_node,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CRDTReadResponse) Reset() {
+	*x = CRDTReadResponse{}
+	mi := &file_internal_crdt_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CRDTReadResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CRDTReadResponse) ProtoMessage() {}
+
+func (x *CRDTReadResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_crdt_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CRDTReadResponse.ProtoReflect.Descriptor instead.
+func (*CRDTReadResponse) Descriptor() ([]byte, []int) {
+	return file_internal_crdt_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *CRDTReadResponse) GetKey() *CRDTKey {
+	if x != nil {
+		return x.Key
+	}
+	return nil
+}
+
+func (x *CRDTReadResponse) GetData() *CRDTData {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+func (x *CRDTReadResponse) GetFromNode() string {
+	if x != nil {
+		return x.FromNode
+	}
+	return ""
+}
+
+// CRDTSnapshotEntry is a single key's state in a durable BoltDB snapshot.
+type CRDTSnapshotEntry struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the CRDT key.
+	Key *CRDTKey `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	// Specifies the full CRDT state.
+	Data *CRDTData `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"`
+	// Specifies the local version counter.
+	Version       uint64 `protobuf:"varint,3,opt,name=version,proto3" json:"version,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CRDTSnapshotEntry) Reset() {
+	*x = CRDTSnapshotEntry{}
+	mi := &file_internal_crdt_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CRDTSnapshotEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CRDTSnapshotEntry) ProtoMessage() {}
+
+func (x *CRDTSnapshotEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_crdt_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CRDTSnapshotEntry.ProtoReflect.Descriptor instead.
+func (*CRDTSnapshotEntry) Descriptor() ([]byte, []int) {
+	return file_internal_crdt_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *CRDTSnapshotEntry) GetKey() *CRDTKey {
+	if x != nil {
+		return x.Key
+	}
+	return nil
+}
+
+func (x *CRDTSnapshotEntry) GetData() *CRDTData {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+func (x *CRDTSnapshotEntry) GetVersion() uint64 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
 // ORSetDot represents a single causal event.
 type ORSetData_ORSetDot struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -829,7 +1218,7 @@ type ORSetData_ORSetDot struct {
 
 func (x *ORSetData_ORSetDot) Reset() {
 	*x = ORSetData_ORSetDot{}
-	mi := &file_internal_crdt_proto_msgTypes[13]
+	mi := &file_internal_crdt_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -841,7 +1230,7 @@ func (x *ORSetData_ORSetDot) String() string {
 func (*ORSetData_ORSetDot) ProtoMessage() {}
 
 func (x *ORSetData_ORSetDot) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_crdt_proto_msgTypes[13]
+	mi := &file_internal_crdt_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -886,7 +1275,7 @@ type ORSetData_ORSetEntry struct {
 
 func (x *ORSetData_ORSetEntry) Reset() {
 	*x = ORSetData_ORSetEntry{}
-	mi := &file_internal_crdt_proto_msgTypes[14]
+	mi := &file_internal_crdt_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -898,7 +1287,7 @@ func (x *ORSetData_ORSetEntry) String() string {
 func (*ORSetData_ORSetEntry) ProtoMessage() {}
 
 func (x *ORSetData_ORSetEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_crdt_proto_msgTypes[14]
+	mi := &file_internal_crdt_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -935,6 +1324,143 @@ func (x *ORSetData_ORSetEntry) GetDots() []*ORSetData_ORSetDot {
 	return nil
 }
 
+// ORMapEntry is a single key-value pair in the map.
+type ORMapData_ORMapEntry struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the serialized map key.
+	Key []byte `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	// Specifies the fully-qualified Go type name for key deserialization.
+	KeyTypeUrl string `protobuf:"bytes,2,opt,name=key_type_url,json=keyTypeUrl,proto3" json:"key_type_url,omitempty"`
+	// Specifies the CRDT value associated with this key.
+	Value         *CRDTData `protobuf:"bytes,3,opt,name=value,proto3" json:"value,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ORMapData_ORMapEntry) Reset() {
+	*x = ORMapData_ORMapEntry{}
+	mi := &file_internal_crdt_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ORMapData_ORMapEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ORMapData_ORMapEntry) ProtoMessage() {}
+
+func (x *ORMapData_ORMapEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_crdt_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ORMapData_ORMapEntry.ProtoReflect.Descriptor instead.
+func (*ORMapData_ORMapEntry) Descriptor() ([]byte, []int) {
+	return file_internal_crdt_proto_rawDescGZIP(), []int{6, 0}
+}
+
+func (x *ORMapData_ORMapEntry) GetKey() []byte {
+	if x != nil {
+		return x.Key
+	}
+	return nil
+}
+
+func (x *ORMapData_ORMapEntry) GetKeyTypeUrl() string {
+	if x != nil {
+		return x.KeyTypeUrl
+	}
+	return ""
+}
+
+func (x *ORMapData_ORMapEntry) GetValue() *CRDTData {
+	if x != nil {
+		return x.Value
+	}
+	return nil
+}
+
+// MVRegisterEntry is a single value with its causal dot.
+type MVRegisterData_MVRegisterEntry struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the serialized value.
+	Value []byte `protobuf:"bytes,1,opt,name=value,proto3" json:"value,omitempty"`
+	// Specifies the fully-qualified Go type name for deserialization.
+	TypeUrl string `protobuf:"bytes,2,opt,name=type_url,json=typeUrl,proto3" json:"type_url,omitempty"`
+	// Specifies the node that wrote this value.
+	NodeId string `protobuf:"bytes,3,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	// Specifies the monotonic counter for the write event.
+	Counter       uint64 `protobuf:"varint,4,opt,name=counter,proto3" json:"counter,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MVRegisterData_MVRegisterEntry) Reset() {
+	*x = MVRegisterData_MVRegisterEntry{}
+	mi := &file_internal_crdt_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MVRegisterData_MVRegisterEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MVRegisterData_MVRegisterEntry) ProtoMessage() {}
+
+func (x *MVRegisterData_MVRegisterEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_crdt_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MVRegisterData_MVRegisterEntry.ProtoReflect.Descriptor instead.
+func (*MVRegisterData_MVRegisterEntry) Descriptor() ([]byte, []int) {
+	return file_internal_crdt_proto_rawDescGZIP(), []int{8, 0}
+}
+
+func (x *MVRegisterData_MVRegisterEntry) GetValue() []byte {
+	if x != nil {
+		return x.Value
+	}
+	return nil
+}
+
+func (x *MVRegisterData_MVRegisterEntry) GetTypeUrl() string {
+	if x != nil {
+		return x.TypeUrl
+	}
+	return ""
+}
+
+func (x *MVRegisterData_MVRegisterEntry) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
+func (x *MVRegisterData_MVRegisterEntry) GetCounter() uint64 {
+	if x != nil {
+		return x.Counter
+	}
+	return 0
+}
+
 var File_internal_crdt_proto protoreflect.FileDescriptor
 
 const file_internal_crdt_proto_rawDesc = "" +
@@ -943,13 +1469,17 @@ const file_internal_crdt_proto_rawDesc = "" +
 	"internalpb\"P\n" +
 	"\aCRDTKey\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x125\n" +
-	"\tdata_type\x18\x02 \x01(\x0e2\x18.internalpb.CRDTDataTypeR\bdataType\"\xf9\x01\n" +
+	"\tdata_type\x18\x02 \x01(\x0e2\x18.internalpb.CRDTDataTypeR\bdataType\"\x94\x03\n" +
 	"\bCRDTData\x127\n" +
 	"\tg_counter\x18\x01 \x01(\v2\x18.internalpb.GCounterDataH\x00R\bgCounter\x12:\n" +
 	"\n" +
 	"pn_counter\x18\x02 \x01(\v2\x19.internalpb.PNCounterDataH\x00R\tpnCounter\x12@\n" +
 	"\flww_register\x18\x03 \x01(\v2\x1b.internalpb.LWWRegisterDataH\x00R\vlwwRegister\x12.\n" +
-	"\x06or_set\x18\x04 \x01(\v2\x15.internalpb.ORSetDataH\x00R\x05orSetB\x06\n" +
+	"\x06or_set\x18\x04 \x01(\v2\x15.internalpb.ORSetDataH\x00R\x05orSet\x12.\n" +
+	"\x06or_map\x18\x05 \x01(\v2\x15.internalpb.ORMapDataH\x00R\x05orMap\x12*\n" +
+	"\x04flag\x18\x06 \x01(\v2\x14.internalpb.FlagDataH\x00R\x04flag\x12=\n" +
+	"\vmv_register\x18\a \x01(\v2\x1a.internalpb.MVRegisterDataH\x00R\n" +
+	"mvRegisterB\x06\n" +
 	"\x04type\"\x83\x01\n" +
 	"\fGCounterData\x129\n" +
 	"\x05state\x18\x01 \x03(\v2#.internalpb.GCounterData.StateEntryR\x05state\x1a8\n" +
@@ -983,6 +1513,29 @@ const file_internal_crdt_proto_rawDesc = "" +
 	"\n" +
 	"ClockEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\x04R\x05value:\x028\x01\"\xe5\x01\n" +
+	"\tORMapData\x12:\n" +
+	"\aentries\x18\x01 \x03(\v2 .internalpb.ORMapData.ORMapEntryR\aentries\x12.\n" +
+	"\akey_set\x18\x02 \x01(\v2\x15.internalpb.ORSetDataR\x06keySet\x1al\n" +
+	"\n" +
+	"ORMapEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\fR\x03key\x12 \n" +
+	"\fkey_type_url\x18\x02 \x01(\tR\n" +
+	"keyTypeUrl\x12*\n" +
+	"\x05value\x18\x03 \x01(\v2\x14.internalpb.CRDTDataR\x05value\"$\n" +
+	"\bFlagData\x12\x18\n" +
+	"\aenabled\x18\x01 \x01(\bR\aenabled\"\xc4\x02\n" +
+	"\x0eMVRegisterData\x12D\n" +
+	"\aentries\x18\x01 \x03(\v2*.internalpb.MVRegisterData.MVRegisterEntryR\aentries\x12;\n" +
+	"\x05clock\x18\x02 \x03(\v2%.internalpb.MVRegisterData.ClockEntryR\x05clock\x1au\n" +
+	"\x0fMVRegisterEntry\x12\x14\n" +
+	"\x05value\x18\x01 \x01(\fR\x05value\x12\x19\n" +
+	"\btype_url\x18\x02 \x01(\tR\atypeUrl\x12\x17\n" +
+	"\anode_id\x18\x03 \x01(\tR\x06nodeId\x12\x18\n" +
+	"\acounter\x18\x04 \x01(\x04R\acounter\x1a8\n" +
+	"\n" +
+	"ClockEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\x04R\x05value:\x028\x01\"}\n" +
 	"\tCRDTDelta\x12%\n" +
 	"\x03key\x18\x01 \x01(\v2\x13.internalpb.CRDTKeyR\x03key\x12\x1f\n" +
@@ -1003,7 +1556,18 @@ const file_internal_crdt_proto_rawDesc = "" +
 	"\rCRDTTombstone\x12%\n" +
 	"\x03key\x18\x01 \x01(\v2\x13.internalpb.CRDTKeyR\x03key\x12(\n" +
 	"\x10deleted_at_nanos\x18\x02 \x01(\x03R\x0edeletedAtNanos\x12&\n" +
-	"\x0fdeleted_by_node\x18\x03 \x01(\tR\rdeletedByNode*\xfb\x01\n" +
+	"\x0fdeleted_by_node\x18\x03 \x01(\tR\rdeletedByNode\"U\n" +
+	"\x0fCRDTReadRequest\x12%\n" +
+	"\x03key\x18\x01 \x01(\v2\x13.internalpb.CRDTKeyR\x03key\x12\x1b\n" +
+	"\tfrom_node\x18\x02 \x01(\tR\bfromNode\"\x80\x01\n" +
+	"\x10CRDTReadResponse\x12%\n" +
+	"\x03key\x18\x01 \x01(\v2\x13.internalpb.CRDTKeyR\x03key\x12(\n" +
+	"\x04data\x18\x02 \x01(\v2\x14.internalpb.CRDTDataR\x04data\x12\x1b\n" +
+	"\tfrom_node\x18\x03 \x01(\tR\bfromNode\"~\n" +
+	"\x11CRDTSnapshotEntry\x12%\n" +
+	"\x03key\x18\x01 \x01(\v2\x13.internalpb.CRDTKeyR\x03key\x12(\n" +
+	"\x04data\x18\x02 \x01(\v2\x14.internalpb.CRDTDataR\x04data\x12\x18\n" +
+	"\aversion\x18\x03 \x01(\x04R\aversion*\xfb\x01\n" +
 	"\fCRDTDataType\x12\x1e\n" +
 	"\x1aCRDT_DATA_TYPE_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18CRDT_DATA_TYPE_G_COUNTER\x10\x01\x12\x1d\n" +
@@ -1031,25 +1595,34 @@ func file_internal_crdt_proto_rawDescGZIP() []byte {
 }
 
 var file_internal_crdt_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_internal_crdt_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
+var file_internal_crdt_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
 var file_internal_crdt_proto_goTypes = []any{
-	(CRDTDataType)(0),            // 0: internalpb.CRDTDataType
-	(*CRDTKey)(nil),              // 1: internalpb.CRDTKey
-	(*CRDTData)(nil),             // 2: internalpb.CRDTData
-	(*GCounterData)(nil),         // 3: internalpb.GCounterData
-	(*PNCounterData)(nil),        // 4: internalpb.PNCounterData
-	(*LWWRegisterData)(nil),      // 5: internalpb.LWWRegisterData
-	(*ORSetData)(nil),            // 6: internalpb.ORSetData
-	(*CRDTDelta)(nil),            // 7: internalpb.CRDTDelta
-	(*CRDTDigestEntry)(nil),      // 8: internalpb.CRDTDigestEntry
-	(*CRDTDigest)(nil),           // 9: internalpb.CRDTDigest
-	(*CRDTFullStateEntry)(nil),   // 10: internalpb.CRDTFullStateEntry
-	(*CRDTFullState)(nil),        // 11: internalpb.CRDTFullState
-	(*CRDTTombstone)(nil),        // 12: internalpb.CRDTTombstone
-	nil,                          // 13: internalpb.GCounterData.StateEntry
-	(*ORSetData_ORSetDot)(nil),   // 14: internalpb.ORSetData.ORSetDot
-	(*ORSetData_ORSetEntry)(nil), // 15: internalpb.ORSetData.ORSetEntry
-	nil,                          // 16: internalpb.ORSetData.ClockEntry
+	(CRDTDataType)(0),                      // 0: internalpb.CRDTDataType
+	(*CRDTKey)(nil),                        // 1: internalpb.CRDTKey
+	(*CRDTData)(nil),                       // 2: internalpb.CRDTData
+	(*GCounterData)(nil),                   // 3: internalpb.GCounterData
+	(*PNCounterData)(nil),                  // 4: internalpb.PNCounterData
+	(*LWWRegisterData)(nil),                // 5: internalpb.LWWRegisterData
+	(*ORSetData)(nil),                      // 6: internalpb.ORSetData
+	(*ORMapData)(nil),                      // 7: internalpb.ORMapData
+	(*FlagData)(nil),                       // 8: internalpb.FlagData
+	(*MVRegisterData)(nil),                 // 9: internalpb.MVRegisterData
+	(*CRDTDelta)(nil),                      // 10: internalpb.CRDTDelta
+	(*CRDTDigestEntry)(nil),                // 11: internalpb.CRDTDigestEntry
+	(*CRDTDigest)(nil),                     // 12: internalpb.CRDTDigest
+	(*CRDTFullStateEntry)(nil),             // 13: internalpb.CRDTFullStateEntry
+	(*CRDTFullState)(nil),                  // 14: internalpb.CRDTFullState
+	(*CRDTTombstone)(nil),                  // 15: internalpb.CRDTTombstone
+	(*CRDTReadRequest)(nil),                // 16: internalpb.CRDTReadRequest
+	(*CRDTReadResponse)(nil),               // 17: internalpb.CRDTReadResponse
+	(*CRDTSnapshotEntry)(nil),              // 18: internalpb.CRDTSnapshotEntry
+	nil,                                    // 19: internalpb.GCounterData.StateEntry
+	(*ORSetData_ORSetDot)(nil),             // 20: internalpb.ORSetData.ORSetDot
+	(*ORSetData_ORSetEntry)(nil),           // 21: internalpb.ORSetData.ORSetEntry
+	nil,                                    // 22: internalpb.ORSetData.ClockEntry
+	(*ORMapData_ORMapEntry)(nil),           // 23: internalpb.ORMapData.ORMapEntry
+	(*MVRegisterData_MVRegisterEntry)(nil), // 24: internalpb.MVRegisterData.MVRegisterEntry
+	nil,                                    // 25: internalpb.MVRegisterData.ClockEntry
 }
 var file_internal_crdt_proto_depIdxs = []int32{
 	0,  // 0: internalpb.CRDTKey.data_type:type_name -> internalpb.CRDTDataType
@@ -1057,25 +1630,38 @@ var file_internal_crdt_proto_depIdxs = []int32{
 	4,  // 2: internalpb.CRDTData.pn_counter:type_name -> internalpb.PNCounterData
 	5,  // 3: internalpb.CRDTData.lww_register:type_name -> internalpb.LWWRegisterData
 	6,  // 4: internalpb.CRDTData.or_set:type_name -> internalpb.ORSetData
-	13, // 5: internalpb.GCounterData.state:type_name -> internalpb.GCounterData.StateEntry
-	3,  // 6: internalpb.PNCounterData.increments:type_name -> internalpb.GCounterData
-	3,  // 7: internalpb.PNCounterData.decrements:type_name -> internalpb.GCounterData
-	15, // 8: internalpb.ORSetData.entries:type_name -> internalpb.ORSetData.ORSetEntry
-	16, // 9: internalpb.ORSetData.clock:type_name -> internalpb.ORSetData.ClockEntry
-	1,  // 10: internalpb.CRDTDelta.key:type_name -> internalpb.CRDTKey
-	2,  // 11: internalpb.CRDTDelta.data:type_name -> internalpb.CRDTData
-	1,  // 12: internalpb.CRDTDigestEntry.key:type_name -> internalpb.CRDTKey
-	8,  // 13: internalpb.CRDTDigest.entries:type_name -> internalpb.CRDTDigestEntry
-	1,  // 14: internalpb.CRDTFullStateEntry.key:type_name -> internalpb.CRDTKey
-	2,  // 15: internalpb.CRDTFullStateEntry.data:type_name -> internalpb.CRDTData
-	10, // 16: internalpb.CRDTFullState.entries:type_name -> internalpb.CRDTFullStateEntry
-	1,  // 17: internalpb.CRDTTombstone.key:type_name -> internalpb.CRDTKey
-	14, // 18: internalpb.ORSetData.ORSetEntry.dots:type_name -> internalpb.ORSetData.ORSetDot
-	19, // [19:19] is the sub-list for method output_type
-	19, // [19:19] is the sub-list for method input_type
-	19, // [19:19] is the sub-list for extension type_name
-	19, // [19:19] is the sub-list for extension extendee
-	0,  // [0:19] is the sub-list for field type_name
+	7,  // 5: internalpb.CRDTData.or_map:type_name -> internalpb.ORMapData
+	8,  // 6: internalpb.CRDTData.flag:type_name -> internalpb.FlagData
+	9,  // 7: internalpb.CRDTData.mv_register:type_name -> internalpb.MVRegisterData
+	19, // 8: internalpb.GCounterData.state:type_name -> internalpb.GCounterData.StateEntry
+	3,  // 9: internalpb.PNCounterData.increments:type_name -> internalpb.GCounterData
+	3,  // 10: internalpb.PNCounterData.decrements:type_name -> internalpb.GCounterData
+	21, // 11: internalpb.ORSetData.entries:type_name -> internalpb.ORSetData.ORSetEntry
+	22, // 12: internalpb.ORSetData.clock:type_name -> internalpb.ORSetData.ClockEntry
+	23, // 13: internalpb.ORMapData.entries:type_name -> internalpb.ORMapData.ORMapEntry
+	6,  // 14: internalpb.ORMapData.key_set:type_name -> internalpb.ORSetData
+	24, // 15: internalpb.MVRegisterData.entries:type_name -> internalpb.MVRegisterData.MVRegisterEntry
+	25, // 16: internalpb.MVRegisterData.clock:type_name -> internalpb.MVRegisterData.ClockEntry
+	1,  // 17: internalpb.CRDTDelta.key:type_name -> internalpb.CRDTKey
+	2,  // 18: internalpb.CRDTDelta.data:type_name -> internalpb.CRDTData
+	1,  // 19: internalpb.CRDTDigestEntry.key:type_name -> internalpb.CRDTKey
+	11, // 20: internalpb.CRDTDigest.entries:type_name -> internalpb.CRDTDigestEntry
+	1,  // 21: internalpb.CRDTFullStateEntry.key:type_name -> internalpb.CRDTKey
+	2,  // 22: internalpb.CRDTFullStateEntry.data:type_name -> internalpb.CRDTData
+	13, // 23: internalpb.CRDTFullState.entries:type_name -> internalpb.CRDTFullStateEntry
+	1,  // 24: internalpb.CRDTTombstone.key:type_name -> internalpb.CRDTKey
+	1,  // 25: internalpb.CRDTReadRequest.key:type_name -> internalpb.CRDTKey
+	1,  // 26: internalpb.CRDTReadResponse.key:type_name -> internalpb.CRDTKey
+	2,  // 27: internalpb.CRDTReadResponse.data:type_name -> internalpb.CRDTData
+	1,  // 28: internalpb.CRDTSnapshotEntry.key:type_name -> internalpb.CRDTKey
+	2,  // 29: internalpb.CRDTSnapshotEntry.data:type_name -> internalpb.CRDTData
+	20, // 30: internalpb.ORSetData.ORSetEntry.dots:type_name -> internalpb.ORSetData.ORSetDot
+	2,  // 31: internalpb.ORMapData.ORMapEntry.value:type_name -> internalpb.CRDTData
+	32, // [32:32] is the sub-list for method output_type
+	32, // [32:32] is the sub-list for method input_type
+	32, // [32:32] is the sub-list for extension type_name
+	32, // [32:32] is the sub-list for extension extendee
+	0,  // [0:32] is the sub-list for field type_name
 }
 
 func init() { file_internal_crdt_proto_init() }
@@ -1088,6 +1674,9 @@ func file_internal_crdt_proto_init() {
 		(*CRDTData_PnCounter)(nil),
 		(*CRDTData_LwwRegister)(nil),
 		(*CRDTData_OrSet)(nil),
+		(*CRDTData_OrMap)(nil),
+		(*CRDTData_Flag)(nil),
+		(*CRDTData_MvRegister)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1095,7 +1684,7 @@ func file_internal_crdt_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_crdt_proto_rawDesc), len(file_internal_crdt_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   16,
+			NumMessages:   25,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

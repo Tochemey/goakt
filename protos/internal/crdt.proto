@@ -31,6 +31,9 @@ message CRDTData {
     PNCounterData pn_counter = 2;
     LWWRegisterData lww_register = 3;
     ORSetData or_set = 4;
+    ORMapData or_map = 5;
+    FlagData flag = 6;
+    MVRegisterData mv_register = 7;
   }
 }
 
@@ -86,6 +89,50 @@ message ORSetData {
   map<string, uint64> clock = 2;
 }
 
+// ORMapData is the serialized state of an ORMap.
+message ORMapData {
+  // ORMapEntry is a single key-value pair in the map.
+  message ORMapEntry {
+    // Specifies the serialized map key.
+    bytes key = 1;
+    // Specifies the fully-qualified Go type name for key deserialization.
+    string key_type_url = 2;
+    // Specifies the CRDT value associated with this key.
+    CRDTData value = 3;
+  }
+
+  // Specifies the map entries.
+  repeated ORMapEntry entries = 1;
+  // Specifies the OR-Set that manages the key set.
+  ORSetData key_set = 2;
+}
+
+// FlagData is the serialized state of a Flag.
+message FlagData {
+  // Specifies whether the flag is enabled.
+  bool enabled = 1;
+}
+
+// MVRegisterData is the serialized state of an MVRegister.
+message MVRegisterData {
+  // MVRegisterEntry is a single value with its causal dot.
+  message MVRegisterEntry {
+    // Specifies the serialized value.
+    bytes value = 1;
+    // Specifies the fully-qualified Go type name for deserialization.
+    string type_url = 2;
+    // Specifies the node that wrote this value.
+    string node_id = 3;
+    // Specifies the monotonic counter for the write event.
+    uint64 counter = 4;
+  }
+
+  // Specifies the register entries (one per concurrent value).
+  repeated MVRegisterEntry entries = 1;
+  // Specifies the per-node vector clock.
+  map<string, uint64> clock = 2;
+}
+
 // CRDTDelta is the delta message published to a key's topic via TopicActor.
 // All Replicators subscribed to the same key topic receive this message.
 message CRDTDelta {
@@ -133,4 +180,34 @@ message CRDTTombstone {
   int64 deleted_at_nanos = 2;
   // Specifies the node that performed the deletion.
   string deleted_by_node = 3;
+}
+
+// CRDTReadRequest asks a peer Replicator for its local value of a key
+// during a coordinated read (ReadFrom: Majority or All).
+message CRDTReadRequest {
+  // Specifies the CRDT key to read.
+  CRDTKey key = 1;
+  // Specifies the node requesting the read.
+  string from_node = 2;
+}
+
+// CRDTReadResponse returns a peer Replicator's local value for a key
+// in response to a CRDTReadRequest.
+message CRDTReadResponse {
+  // Specifies the CRDT key.
+  CRDTKey key = 1;
+  // Specifies the local CRDT state. Nil if the key is not found.
+  CRDTData data = 2;
+  // Specifies the node returning the response.
+  string from_node = 3;
+}
+
+// CRDTSnapshotEntry is a single key's state in a durable BoltDB snapshot.
+message CRDTSnapshotEntry {
+  // Specifies the CRDT key.
+  CRDTKey key = 1;
+  // Specifies the full CRDT state.
+  CRDTData data = 2;
+  // Specifies the local version counter.
+  uint64 version = 3;
 }

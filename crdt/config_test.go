@@ -39,6 +39,9 @@ func TestConfig(t *testing.T) {
 		assert.Equal(t, 5*time.Minute, c.PruneInterval())
 		assert.Equal(t, 24*time.Hour, c.TombstoneTTL())
 		assert.Empty(t, c.Role())
+		assert.Equal(t, 5*time.Second, c.CoordinationTimeout())
+		assert.Equal(t, time.Duration(0), c.SnapshotInterval())
+		assert.Empty(t, c.SnapshotDir())
 	})
 
 	t.Run("with anti-entropy interval", func(t *testing.T) {
@@ -66,16 +69,37 @@ func TestConfig(t *testing.T) {
 		assert.Equal(t, "cache-nodes", c.Role())
 	})
 
+	t.Run("with coordination timeout", func(t *testing.T) {
+		c := NewConfig(WithCoordinationTimeout(10 * time.Second))
+		assert.Equal(t, 10*time.Second, c.CoordinationTimeout())
+	})
+
+	t.Run("with snapshot interval", func(t *testing.T) {
+		c := NewConfig(WithSnapshotInterval(1 * time.Minute))
+		assert.Equal(t, 1*time.Minute, c.SnapshotInterval())
+	})
+
+	t.Run("with snapshot dir", func(t *testing.T) {
+		c := NewConfig(WithSnapshotDir("/tmp/crdt-snapshots"))
+		assert.Equal(t, "/tmp/crdt-snapshots", c.SnapshotDir())
+	})
+
 	t.Run("multiple options", func(t *testing.T) {
 		c := NewConfig(
 			WithAntiEntropyInterval(15*time.Second),
 			WithMaxDeltaSize(32*1024),
 			WithRole("stateful"),
+			WithCoordinationTimeout(3*time.Second),
+			WithSnapshotInterval(2*time.Minute),
+			WithSnapshotDir("/data/snapshots"),
 		)
 		assert.Equal(t, 15*time.Second, c.AntiEntropyInterval())
 		assert.Equal(t, 32*1024, c.MaxDeltaSize())
 		assert.Equal(t, "stateful", c.Role())
 		assert.Equal(t, defaultPruneInterval, c.PruneInterval())
 		assert.Equal(t, defaultTombstoneTTL, c.TombstoneTTL())
+		assert.Equal(t, 3*time.Second, c.CoordinationTimeout())
+		assert.Equal(t, 2*time.Minute, c.SnapshotInterval())
+		assert.Equal(t, "/data/snapshots", c.SnapshotDir())
 	})
 }

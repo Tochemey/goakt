@@ -24,9 +24,6 @@ package crdt
 
 import "maps"
 
-// ensure ORSet implements ReplicatedData at compile time.
-var _ ReplicatedData = (*ORSet[string])(nil)
-
 // dot represents a causal event: a (nodeID, counter) pair that uniquely
 // identifies a single add operation.
 type dot struct {
@@ -48,6 +45,9 @@ type ORSet[T comparable] struct {
 	delta   *orSetDelta[T]
 }
 
+// ensure ORSet implements ReplicatedData at compile time.
+var _ ReplicatedData = (*ORSet[string])(nil)
+
 // orSetDelta tracks the changes made since the last ResetDelta.
 type orSetDelta[T comparable] struct {
 	added   map[T][]dot
@@ -66,10 +66,15 @@ func NewORSet[T comparable]() *ORSet[T] {
 // Add inserts an element into the set, tagged with the given node's causal dot.
 // Returns a new ORSet with the updated state.
 func (s *ORSet[T]) Add(nodeID string, element T) *ORSet[T] {
-	out := s.cloneInternal()
+	out := s.shallowCopy()
 	out.clock[nodeID]++
 	d := dot{nodeID: nodeID, counter: out.clock[nodeID]}
-	out.entries[element] = append(out.entries[element], d)
+	// clone only the affected entry's dot slice to avoid aliasing
+	existing := out.entries[element]
+	newDots := make([]dot, len(existing)+1)
+	copy(newDots, existing)
+	newDots[len(existing)] = d
+	out.entries[element] = newDots
 	out.delta.added[element] = append(out.delta.added[element], d)
 	return out
 }
@@ -82,7 +87,7 @@ func (s *ORSet[T]) Remove(element T) *ORSet[T] {
 	if !exists {
 		return s
 	}
-	out := s.cloneInternal()
+	out := s.shallowCopy()
 	out.delta.removed[element] = append(out.delta.removed[element], dots...)
 	delete(out.entries, element)
 	return out
@@ -244,9 +249,67 @@ func ORSetFromRawState[T comparable](entries []Entry[T], clock map[string]uint64
 	return s
 }
 
+// Compact removes redundant causal dots from the set.
+// A dot is redundant if the element has multiple dots and the dot is
+// dominated by the vector clock. After compaction, each element retains
+// only the single highest dot per node. This reduces memory overhead
+// from repeated add operations on the same element.
+// Returns a new ORSet with the compacted state.
+func (s *ORSet[T]) Compact() *ORSet[T] {
+	out := &ORSet[T]{
+		entries: make(map[T][]dot, len(s.entries)),
+		clock:   make(map[string]uint64, len(s.clock)),
+		delta:   newORSetDelta[T](),
+	}
+	maps.Copy(out.clock, s.clock)
+
+	for elem, dots := range s.entries {
+		if len(dots) == 0 {
+			continue
+		}
+		// Keep only the highest-counter dot per node.
+		highest := make(map[string]dot, len(dots))
+		for _, d := range dots {
+			if existing, ok := highest[d.nodeID]; !ok || d.counter > existing.counter {
+				highest[d.nodeID] = d
+			}
+		}
+		compacted := make([]dot, 0, len(highest))
+		for _, d := range highest {
+			compacted = append(compacted, d)
+		}
+		out.entries[elem] = compacted
+	}
+
+	return out
+}
+
+// CompactData implements Compactable by delegating to Compact.
+func (s *ORSet[T]) CompactData() ReplicatedData {
+	return s.Compact()
+}
+
 // Clone returns a deep copy of the ORSet.
 func (s *ORSet[T]) Clone() ReplicatedData {
 	return s.cloneInternal()
+}
+
+// shallowCopy returns a copy that shares dot slices with the original.
+// The entries map and clock map are copied so that inserts/deletes on
+// the copy do not affect the original, but the underlying dot slices
+// are shared. Callers that modify a specific element's dots must clone
+// that slice before mutating it.
+func (s *ORSet[T]) shallowCopy() *ORSet[T] {
+	out := &ORSet[T]{
+		entries: make(map[T][]dot, len(s.entries)),
+		clock:   make(map[string]uint64, len(s.clock)),
+		delta:   s.delta.clone(),
+	}
+	for elem, dots := range s.entries {
+		out.entries[elem] = dots // shared, not cloned
+	}
+	maps.Copy(out.clock, s.clock)
+	return out
 }
 
 // cloneInternal returns a deep copy preserving the concrete type.

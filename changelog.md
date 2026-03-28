@@ -1,5 +1,75 @@
 # Changelog
 
+## [Unreleased]
+
+### Distributed Data (CRDTs)
+
+GoAkt now ships with built-in **Conflict-free Replicated Data Types** — data structures that can be updated independently on any node and are guaranteed to converge to a consistent state without coordination, locks, or consensus rounds.
+
+#### CRDT Types
+
+| Type | Description |
+|------|-------------|
+| **GCounter** | Grow-only counter with per-node increment slots |
+| **PNCounter** | Positive-negative counter (increment and decrement) |
+| **LWWRegister[T]** | Last-writer-wins register with timestamp-based conflict resolution |
+| **ORSet[T]** | Observed-remove set with add-wins semantics |
+| **ORMap[K, V]** | Map with OR-Set keys and per-value CRDT merge |
+| **Flag** | Boolean that can only transition from false to true |
+| **MVRegister[T]** | Multi-value register that preserves concurrent writes |
+
+#### How It Works
+
+- A per-node **Replicator** system actor manages the local CRDT store.
+- Delta dissemination uses the existing **TopicActor** pub/sub — no custom gossip layer.
+- **Anti-entropy** runs periodically as a safety net, exchanging version digests with random peers.
+- All CRDT types are **immutable values** — every mutation returns a new value plus a delta.
+
+#### Enabling CRDTs
+
+```go
+clusterConfig := actor.NewClusterConfig().
+    WithDiscovery(disco).
+    WithCRDT(
+        crdt.WithAntiEntropyInterval(30 * time.Second),
+        crdt.WithPruneInterval(5 * time.Minute),
+        crdt.WithTombstoneTTL(24 * time.Hour),
+    )
+```
+
+#### Using CRDTs from an Actor
+
+```go
+replicator := ctx.ActorSystem().Replicator()
+
+// Write
+actor.Tell(ctx, replicator, &crdt.Update[*crdt.PNCounter]{
+    Key:     crdt.PNCounterKey("request-count"),
+    Initial: crdt.NewPNCounter(),
+    Modify:  func(c *crdt.PNCounter) *crdt.PNCounter {
+        return c.Increment(nodeID, 1)
+    },
+})
+
+// Read
+resp, _ := actor.Ask(ctx, replicator, &crdt.Get[*crdt.PNCounter]{
+    Key: crdt.PNCounterKey("request-count"),
+}, 5*time.Second)
+count := resp.(*crdt.GetResponse[*crdt.PNCounter]).Data.Value()
+```
+
+#### Key Capabilities
+
+- **Local-first by default** — reads and writes return immediately with no network wait.
+- **Optional coordination** — `WriteTo: Majority/All` and `ReadFrom: Majority/All` for stronger consistency when needed.
+- **Key deletion** with tombstones and configurable TTL-based pruning.
+- **Change subscriptions** — actors can watch keys and receive `Changed[T]` notifications on update.
+- **Durable snapshots** — optional periodic persistence to BoltDB for crash recovery.
+- **OpenTelemetry metrics** — store size, merge count, delta publish/receive counts, anti-entropy rounds, tombstone count.
+- **Comprehensive benchmarks** — all CRDT types benchmarked for merge, clone, delta, and value operations; replicator benchmarked for end-to-end throughput.
+
+---
+
 ## [v4.1.1] - 2026-03-27
 
 ### ✨ New Additions
@@ -119,15 +189,35 @@ is called against a live `ActorSystem`.
 
 ## [v4.0.0] - 2026-03-05
 
-> 📖 **Read more:** For the complete migration guide and detailed change tracking, see [CHANGELOG_V400.md](./CHANGELOG_V400.md).
+v4.0.0 delivers **simplification** and **performance** through:
 
-### 🎯 Executive Summary
+| Theme                | Key Changes                                                                                              |
+|----------------------|----------------------------------------------------------------------------------------------------------|
+| **Unified APIs**     | Single actor reference (`*PID`), single lookup (`ActorOf`), unified scheduler, pluggable serializers     |
+| **Type Flexibility** | `any` replaces `proto.Message` across all message-passing surfaces; CBOR supports arbitrary Go types     |
+| **Remoting**         | Config-only public API; client is internal; ProtoSerializer (default) and CBORSerializer for any Go type |
+| **Identity**         | `Path` interface replaces `*address.Address`; `address` package moved to `internal/address`              |
+| **Performance**      | Low-GC serialization, lock-free type registry, single-allocation frames, lock-free `PID.Path()`          |
 
-- **Unified APIs**: Single actor reference (`*PID`), single lookup (`ActorOf`), unified scheduler, pluggable serializers.
-- **Type Flexibility**: `any` replaces `proto.Message` across all message-passing surfaces; CBOR supports arbitrary Go types.
-- **Remoting**: Config-only public API; client is internal; ProtoSerializer (default) and CBORSerializer for any Go type.
-- **Identity**: `Path` interface replaces `*address.Address`; `address` package moved to `internal/address`.
-- **Performance**: Low-GC serialization, lock-free type registry, single-allocation frames, lock-free `PID.Path()`.
+### Migration Quick Reference
+
+| From                                            | To                                                                                                  |
+|-------------------------------------------------|-----------------------------------------------------------------------------------------------------|
+| `proto.Message` in handlers/call sites          | `any`                                                                                               |
+| `goaktpb.*` types                               | `actor.*` (e.g. `actor.PostStart`, `actor.PoisonPill`)                                              |
+| `ActorRef`                                      | `*PID`                                                                                              |
+| `ActorOf` → `(addr, pid, err)`                  | `ActorOf` → `(*PID, error)`                                                                         |
+| `Actors()` / `ActorRefs(ctx, timeout)`          | `Actors(ctx, timeout) ([]*PID, error)`                                                              |
+| `LocalActor(name)`                              | `ActorOf(ctx, name)`                                                                                |
+| `RemoteActor(ctx, name)`                        | `ActorOf(ctx, name)`                                                                                |
+| `RemoteSchedule*` methods                       | `Schedule*` with remote PID from `ActorOf`                                                          |
+| `GetPartition(name)`                            | `Partition(name)`                                                                                   |
+| `pid.Address()`                                 | `pid.Path()`                                                                                        |
+| `ctx.SenderAddress()` / `ctx.ReceiverAddress()` | `ctx.Sender().Path()` / `ctx.Self().Path()`                                                         |
+| `remote.Remoting` / `remote.Client`             | Use actor system and `client.Node` APIs; configure via `WithRemote` / `WithRemoteConfig`            |
+| `WithRemoting`                                  | `WithRemote(config)` (actor system) / `WithRemoteConfig(config)` (client node)                      |
+| `address` package                               | `internal/address` (use `Path` interface instead)                                                   |
+| Custom `Logger` implementations                 | Implement new methods: `*Context`, `LogLevel`, `Enabled`, `With`, `LogOutput`, `Flush`, `StdLogger` |
 
 ### ⚠️ Breaking Changes
 
@@ -184,7 +274,6 @@ is called against a live `ActorSystem`.
 #### Remote Capabilities
 
 - `ActorState` enum and `RemoteState` for querying actor lifecycle on remote nodes (Running, Suspended, Stopping, Relocatable, Singleton).
-- `remote/actor_state.go` with `RemoteState(ctx, host, port, name, state)`.
 
 #### PID & Errors
 
@@ -198,6 +287,10 @@ is called against a live `ActorSystem`.
 - `log/slog.go` — stdlib slog implementation with low-GC optimizations (enabled-before-format, typed attrs, caller caching, buffer pooling).
 - `log/zap.go` — Zap implementation with buffered file output, typed fields, stack-allocated `With`.
 - `log/discard.go` — no-op logger for tests.
+
+#### Routing
+
+- Consistent Hash Router — `WithConsistentHashRouter(extractor)` routes messages with the same key to the same routee. Supports custom hashers, configurable virtual nodes, and automatic ring rebuild on scale events.
 
 #### Internal Extractions
 
