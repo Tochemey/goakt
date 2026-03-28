@@ -1028,6 +1028,8 @@ func (x *actorSystem) Start(ctx context.Context) error {
 
 	x.scheduler = newScheduler(x.logger, x.shutdownTimeout, x)
 
+	x.startMessagesScheduler(ctx)
+
 	if err := chain.
 		New(chain.WithFailFast(), chain.WithContext(ctx)).
 		AddRunner(x.setupRemoting).
@@ -1054,7 +1056,6 @@ func (x *actorSystem) Start(ctx context.Context) error {
 		return err
 	}
 
-	x.startMessagesScheduler(ctx)
 	if x.passivator != nil {
 		x.passivator.Start(ctx)
 	}
