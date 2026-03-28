@@ -461,7 +461,7 @@ func stringToAny(s string) (*anypb.Any, error) {
 
 func anyToString(a *anypb.Any) (string, error) {
 	if a == nil {
-		return "", fmt.Errorf("anyToString: Any value is nil")
+		return "", nil
 	}
 	var sv wrapperspb.StringValue
 	if err := a.UnmarshalTo(&sv); err != nil {
