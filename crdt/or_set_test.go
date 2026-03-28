@@ -175,6 +175,50 @@ func TestORSet(t *testing.T) {
 		assert.Nil(t, s.Delta())
 	})
 
+	t.Run("delta propagates remove to replica via merge", func(t *testing.T) {
+		// node-1 adds "a", syncs full state to replica, then removes "a".
+		// The delta after the remove must cause the replica to drop "a".
+		s := NewORSet[string]().Add("node-1", "a")
+
+		// Simulate full-state sync: replica = merge of empty with s.
+		replica := NewORSet[string]().Merge(s).(*ORSet[string])
+		require.True(t, replica.Contains("a"))
+
+		// Reset delta so subsequent changes are tracked from scratch.
+		s.ResetDelta()
+
+		// Remove "a" on the source.
+		s = s.Remove("a")
+		require.False(t, s.Contains("a"))
+
+		// Produce a delta and merge it into the replica.
+		d := s.Delta()
+		require.NotNil(t, d, "remove-only delta must not be nil")
+
+		replica = replica.Merge(d).(*ORSet[string])
+		assert.False(t, replica.Contains("a"), "remove must propagate through delta+merge")
+		assert.Equal(t, 0, replica.Len())
+	})
+
+	t.Run("delta remove does not dominate unrelated higher-counter entries", func(t *testing.T) {
+		// node-1 adds "a" (c=1), adds "b" (c=2), syncs to replica, then
+		// removes only "a". The delta must remove "a" without disturbing "b".
+		s := NewORSet[string]().Add("node-1", "a").Add("node-1", "b")
+		replica := NewORSet[string]().Merge(s).(*ORSet[string])
+		require.True(t, replica.Contains("a"))
+		require.True(t, replica.Contains("b"))
+
+		s.ResetDelta()
+		s = s.Remove("a")
+
+		d := s.Delta()
+		require.NotNil(t, d)
+
+		replica = replica.Merge(d).(*ORSet[string])
+		assert.False(t, replica.Contains("a"), "removed element must disappear")
+		assert.True(t, replica.Contains("b"), "unrelated element must survive")
+	})
+
 	t.Run("clone produces independent copy", func(t *testing.T) {
 		s := NewORSet[string]().Add("node-1", "a")
 		cloned := s.Clone().(*ORSet[string])

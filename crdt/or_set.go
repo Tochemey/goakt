@@ -204,6 +204,17 @@ func (s *ORSet[T]) Delta() ReplicatedData {
 			}
 		}
 	}
+	// Include clock entries for removed dots so that peers will see
+	// these dots as dominated and drop them during merge. We use each
+	// dot's own counter (not s.clock) to avoid over-claiming causality
+	// which could accidentally dominate unrelated higher-counter entries.
+	for _, dots := range s.delta.removed {
+		for _, dt := range dots {
+			if dt.counter > d.clock[dt.nodeID] {
+				d.clock[dt.nodeID] = dt.counter
+			}
+		}
+	}
 	return d
 }
 
