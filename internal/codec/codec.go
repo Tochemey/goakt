@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -453,6 +454,22 @@ func fromProtoState(state internalpb.DataCenterState) datacenter.DataCenterState
 	}
 }
 
+const stringTypeURL = "type.goakt.dev/string"
+
+func stringToAny(s string) *anypb.Any {
+	return &anypb.Any{
+		TypeUrl: stringTypeURL,
+		Value:   []byte(s),
+	}
+}
+
+func anyToString(a *anypb.Any) string {
+	if a == nil {
+		return ""
+	}
+	return string(a.GetValue())
+}
+
 // EncodeActorState converts remote.ActorState to internalpb.State for wire transmission.
 // The remote.ActorState values align 1:1 with the proto enum (0-5).
 func EncodeActorState(state remote.ActorState) internalpb.State {
@@ -624,8 +641,7 @@ type LWWRegisterStringEncoder interface {
 
 func encodeLWWRegisterString(r LWWRegisterStringEncoder) *internalpb.LWWRegisterData {
 	return &internalpb.LWWRegisterData{
-		Value:          []byte(r.Value()),
-		TypeUrl:        "string",
+		Value:          stringToAny(r.Value()),
 		TimestampNanos: r.Timestamp(),
 		NodeId:         r.NodeID(),
 	}
@@ -633,7 +649,7 @@ func encodeLWWRegisterString(r LWWRegisterStringEncoder) *internalpb.LWWRegister
 
 func decodeLWWRegisterString(pb *internalpb.LWWRegisterData) *crdt.LWWRegister[string] {
 	return crdt.LWWRegisterFromState(
-		string(pb.GetValue()),
+		anyToString(pb.GetValue()),
 		pb.GetTimestampNanos(),
 		pb.GetNodeId(),
 	)
@@ -649,8 +665,7 @@ func encodeMVRegisterString(r MVRegisterStringEncoder) *internalpb.MVRegisterDat
 	pbEntries := make([]*internalpb.MVRegisterData_MVRegisterEntry, 0, len(entries))
 	for _, e := range entries {
 		pbEntries = append(pbEntries, &internalpb.MVRegisterData_MVRegisterEntry{
-			Value:   []byte(e.Value),
-			TypeUrl: "string",
+			Value:   stringToAny(e.Value),
 			NodeId:  e.Dot.NodeID,
 			Counter: e.Dot.Counter,
 		})
@@ -665,7 +680,7 @@ func decodeMVRegisterString(pb *internalpb.MVRegisterData) *crdt.MVRegister[stri
 	entries := make([]crdt.MVEntry[string], 0, len(pb.GetEntries()))
 	for _, e := range pb.GetEntries() {
 		entries = append(entries, crdt.MVEntry[string]{
-			Value: string(e.GetValue()),
+			Value: anyToString(e.GetValue()),
 			Dot: crdt.Dot{
 				NodeID:  e.GetNodeId(),
 				Counter: e.GetCounter(),
@@ -694,9 +709,8 @@ func encodeORMapStringGCounter(m ORMapStringGCounterEncoder) (*internalpb.ORMapD
 			return nil, fmt.Errorf("failed to encode ORMap value for key=%s: %w", k, err)
 		}
 		pbEntries = append(pbEntries, &internalpb.ORMapData_ORMapEntry{
-			Key:        []byte(k),
-			KeyTypeUrl: "string",
-			Value:      valData,
+			Key:   stringToAny(k),
+			Value: valData,
 		})
 	}
 
@@ -714,7 +728,7 @@ func decodeORMapStringGCounter(pb *internalpb.ORMapData) (*crdt.ORMap[string, *c
 	// decode values
 	values := make(map[string]*crdt.GCounter, len(pb.GetEntries()))
 	for _, e := range pb.GetEntries() {
-		key := string(e.GetKey())
+		key := anyToString(e.GetKey())
 		data, err := DecodeCRDTData(e.GetValue())
 		if err != nil {
 			return nil, fmt.Errorf("failed to decode ORMap value for key=%s: %w", key, err)
@@ -746,8 +760,7 @@ func encodeORSetEntries(entries []crdt.Entry[string], clock map[string]uint64) *
 			}
 		}
 		pbEntries = append(pbEntries, &internalpb.ORSetData_ORSetEntry{
-			Element: []byte(e.Element),
-			TypeUrl: "string",
+			Element: stringToAny(e.Element),
 			Dots:    pbDots,
 		})
 	}
@@ -769,7 +782,7 @@ func decodeORSetEntries(pb *internalpb.ORSetData) []crdt.Entry[string] {
 			}
 		}
 		entries = append(entries, crdt.Entry[string]{
-			Element: string(e.GetElement()),
+			Element: anyToString(e.GetElement()),
 			Dots:    dots,
 		})
 	}

@@ -9,6 +9,7 @@ package internalpb
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	anypb "google.golang.org/protobuf/types/known/anypb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -408,14 +409,12 @@ func (x *PNCounterData) GetDecrements() *GCounterData {
 // LWWRegisterData is the serialized state of a LWWRegister.
 type LWWRegisterData struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the serialized value.
-	Value []byte `protobuf:"bytes,1,opt,name=value,proto3" json:"value,omitempty"`
-	// Specifies the fully-qualified Go type name for deserialization.
-	TypeUrl string `protobuf:"bytes,2,opt,name=type_url,json=typeUrl,proto3" json:"type_url,omitempty"`
+	// Specifies the typed, serialized value.
+	Value *anypb.Any `protobuf:"bytes,1,opt,name=value,proto3" json:"value,omitempty"`
 	// Specifies the write timestamp in nanoseconds since epoch.
-	TimestampNanos int64 `protobuf:"varint,3,opt,name=timestamp_nanos,json=timestampNanos,proto3" json:"timestamp_nanos,omitempty"`
+	TimestampNanos int64 `protobuf:"varint,2,opt,name=timestamp_nanos,json=timestampNanos,proto3" json:"timestamp_nanos,omitempty"`
 	// Specifies the node that last wrote this value.
-	NodeId        string `protobuf:"bytes,4,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	NodeId        string `protobuf:"bytes,3,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -450,18 +449,11 @@ func (*LWWRegisterData) Descriptor() ([]byte, []int) {
 	return file_internal_crdt_proto_rawDescGZIP(), []int{4}
 }
 
-func (x *LWWRegisterData) GetValue() []byte {
+func (x *LWWRegisterData) GetValue() *anypb.Any {
 	if x != nil {
 		return x.Value
 	}
 	return nil
-}
-
-func (x *LWWRegisterData) GetTypeUrl() string {
-	if x != nil {
-		return x.TypeUrl
-	}
-	return ""
 }
 
 func (x *LWWRegisterData) GetTimestampNanos() int64 {
@@ -1263,12 +1255,10 @@ func (x *ORSetData_ORSetDot) GetCounter() uint64 {
 // ORSetEntry is an element with its associated causal dots.
 type ORSetData_ORSetEntry struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the serialized element.
-	Element []byte `protobuf:"bytes,1,opt,name=element,proto3" json:"element,omitempty"`
-	// Specifies the fully-qualified Go type name for deserialization.
-	TypeUrl string `protobuf:"bytes,2,opt,name=type_url,json=typeUrl,proto3" json:"type_url,omitempty"`
+	// Specifies the typed, serialized element.
+	Element *anypb.Any `protobuf:"bytes,1,opt,name=element,proto3" json:"element,omitempty"`
 	// Specifies the causal dots associated with this element.
-	Dots          []*ORSetData_ORSetDot `protobuf:"bytes,3,rep,name=dots,proto3" json:"dots,omitempty"`
+	Dots          []*ORSetData_ORSetDot `protobuf:"bytes,2,rep,name=dots,proto3" json:"dots,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1303,18 +1293,11 @@ func (*ORSetData_ORSetEntry) Descriptor() ([]byte, []int) {
 	return file_internal_crdt_proto_rawDescGZIP(), []int{5, 1}
 }
 
-func (x *ORSetData_ORSetEntry) GetElement() []byte {
+func (x *ORSetData_ORSetEntry) GetElement() *anypb.Any {
 	if x != nil {
 		return x.Element
 	}
 	return nil
-}
-
-func (x *ORSetData_ORSetEntry) GetTypeUrl() string {
-	if x != nil {
-		return x.TypeUrl
-	}
-	return ""
 }
 
 func (x *ORSetData_ORSetEntry) GetDots() []*ORSetData_ORSetDot {
@@ -1327,12 +1310,10 @@ func (x *ORSetData_ORSetEntry) GetDots() []*ORSetData_ORSetDot {
 // ORMapEntry is a single key-value pair in the map.
 type ORMapData_ORMapEntry struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the serialized map key.
-	Key []byte `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
-	// Specifies the fully-qualified Go type name for key deserialization.
-	KeyTypeUrl string `protobuf:"bytes,2,opt,name=key_type_url,json=keyTypeUrl,proto3" json:"key_type_url,omitempty"`
+	// Specifies the typed, serialized map key.
+	Key *anypb.Any `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
 	// Specifies the CRDT value associated with this key.
-	Value         *CRDTData `protobuf:"bytes,3,opt,name=value,proto3" json:"value,omitempty"`
+	Value         *CRDTData `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1367,18 +1348,11 @@ func (*ORMapData_ORMapEntry) Descriptor() ([]byte, []int) {
 	return file_internal_crdt_proto_rawDescGZIP(), []int{6, 0}
 }
 
-func (x *ORMapData_ORMapEntry) GetKey() []byte {
+func (x *ORMapData_ORMapEntry) GetKey() *anypb.Any {
 	if x != nil {
 		return x.Key
 	}
 	return nil
-}
-
-func (x *ORMapData_ORMapEntry) GetKeyTypeUrl() string {
-	if x != nil {
-		return x.KeyTypeUrl
-	}
-	return ""
 }
 
 func (x *ORMapData_ORMapEntry) GetValue() *CRDTData {
@@ -1391,14 +1365,12 @@ func (x *ORMapData_ORMapEntry) GetValue() *CRDTData {
 // MVRegisterEntry is a single value with its causal dot.
 type MVRegisterData_MVRegisterEntry struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the serialized value.
-	Value []byte `protobuf:"bytes,1,opt,name=value,proto3" json:"value,omitempty"`
-	// Specifies the fully-qualified Go type name for deserialization.
-	TypeUrl string `protobuf:"bytes,2,opt,name=type_url,json=typeUrl,proto3" json:"type_url,omitempty"`
+	// Specifies the typed, serialized value.
+	Value *anypb.Any `protobuf:"bytes,1,opt,name=value,proto3" json:"value,omitempty"`
 	// Specifies the node that wrote this value.
-	NodeId string `protobuf:"bytes,3,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	NodeId string `protobuf:"bytes,2,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
 	// Specifies the monotonic counter for the write event.
-	Counter       uint64 `protobuf:"varint,4,opt,name=counter,proto3" json:"counter,omitempty"`
+	Counter       uint64 `protobuf:"varint,3,opt,name=counter,proto3" json:"counter,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1433,18 +1405,11 @@ func (*MVRegisterData_MVRegisterEntry) Descriptor() ([]byte, []int) {
 	return file_internal_crdt_proto_rawDescGZIP(), []int{8, 0}
 }
 
-func (x *MVRegisterData_MVRegisterEntry) GetValue() []byte {
+func (x *MVRegisterData_MVRegisterEntry) GetValue() *anypb.Any {
 	if x != nil {
 		return x.Value
 	}
 	return nil
-}
-
-func (x *MVRegisterData_MVRegisterEntry) GetTypeUrl() string {
-	if x != nil {
-		return x.TypeUrl
-	}
-	return ""
 }
 
 func (x *MVRegisterData_MVRegisterEntry) GetNodeId() string {
@@ -1466,7 +1431,7 @@ var File_internal_crdt_proto protoreflect.FileDescriptor
 const file_internal_crdt_proto_rawDesc = "" +
 	"\n" +
 	"\x13internal/crdt.proto\x12\n" +
-	"internalpb\"P\n" +
+	"internalpb\x1a\x19google/protobuf/any.proto\"P\n" +
 	"\aCRDTKey\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x125\n" +
 	"\tdata_type\x18\x02 \x01(\x0e2\x18.internalpb.CRDTDataTypeR\bdataType\"\x94\x03\n" +
@@ -1493,46 +1458,41 @@ const file_internal_crdt_proto_rawDesc = "" +
 	"increments\x128\n" +
 	"\n" +
 	"decrements\x18\x02 \x01(\v2\x18.internalpb.GCounterDataR\n" +
-	"decrements\"\x84\x01\n" +
-	"\x0fLWWRegisterData\x12\x14\n" +
-	"\x05value\x18\x01 \x01(\fR\x05value\x12\x19\n" +
-	"\btype_url\x18\x02 \x01(\tR\atypeUrl\x12'\n" +
-	"\x0ftimestamp_nanos\x18\x03 \x01(\x03R\x0etimestampNanos\x12\x17\n" +
-	"\anode_id\x18\x04 \x01(\tR\x06nodeId\"\xef\x02\n" +
+	"decrements\"\x7f\n" +
+	"\x0fLWWRegisterData\x12*\n" +
+	"\x05value\x18\x01 \x01(\v2\x14.google.protobuf.AnyR\x05value\x12'\n" +
+	"\x0ftimestamp_nanos\x18\x02 \x01(\x03R\x0etimestampNanos\x12\x17\n" +
+	"\anode_id\x18\x03 \x01(\tR\x06nodeId\"\xea\x02\n" +
 	"\tORSetData\x12:\n" +
 	"\aentries\x18\x01 \x03(\v2 .internalpb.ORSetData.ORSetEntryR\aentries\x126\n" +
 	"\x05clock\x18\x02 \x03(\v2 .internalpb.ORSetData.ClockEntryR\x05clock\x1a=\n" +
 	"\bORSetDot\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x18\n" +
-	"\acounter\x18\x02 \x01(\x04R\acounter\x1au\n" +
+	"\acounter\x18\x02 \x01(\x04R\acounter\x1ap\n" +
 	"\n" +
-	"ORSetEntry\x12\x18\n" +
-	"\aelement\x18\x01 \x01(\fR\aelement\x12\x19\n" +
-	"\btype_url\x18\x02 \x01(\tR\atypeUrl\x122\n" +
-	"\x04dots\x18\x03 \x03(\v2\x1e.internalpb.ORSetData.ORSetDotR\x04dots\x1a8\n" +
+	"ORSetEntry\x12.\n" +
+	"\aelement\x18\x01 \x01(\v2\x14.google.protobuf.AnyR\aelement\x122\n" +
+	"\x04dots\x18\x02 \x03(\v2\x1e.internalpb.ORSetData.ORSetDotR\x04dots\x1a8\n" +
 	"\n" +
 	"ClockEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\x04R\x05value:\x028\x01\"\xe5\x01\n" +
+	"\x05value\x18\x02 \x01(\x04R\x05value:\x028\x01\"\xd9\x01\n" +
 	"\tORMapData\x12:\n" +
 	"\aentries\x18\x01 \x03(\v2 .internalpb.ORMapData.ORMapEntryR\aentries\x12.\n" +
-	"\akey_set\x18\x02 \x01(\v2\x15.internalpb.ORSetDataR\x06keySet\x1al\n" +
+	"\akey_set\x18\x02 \x01(\v2\x15.internalpb.ORSetDataR\x06keySet\x1a`\n" +
 	"\n" +
-	"ORMapEntry\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\fR\x03key\x12 \n" +
-	"\fkey_type_url\x18\x02 \x01(\tR\n" +
-	"keyTypeUrl\x12*\n" +
-	"\x05value\x18\x03 \x01(\v2\x14.internalpb.CRDTDataR\x05value\"$\n" +
+	"ORMapEntry\x12&\n" +
+	"\x03key\x18\x01 \x01(\v2\x14.google.protobuf.AnyR\x03key\x12*\n" +
+	"\x05value\x18\x02 \x01(\v2\x14.internalpb.CRDTDataR\x05value\"$\n" +
 	"\bFlagData\x12\x18\n" +
-	"\aenabled\x18\x01 \x01(\bR\aenabled\"\xc4\x02\n" +
+	"\aenabled\x18\x01 \x01(\bR\aenabled\"\xbf\x02\n" +
 	"\x0eMVRegisterData\x12D\n" +
 	"\aentries\x18\x01 \x03(\v2*.internalpb.MVRegisterData.MVRegisterEntryR\aentries\x12;\n" +
-	"\x05clock\x18\x02 \x03(\v2%.internalpb.MVRegisterData.ClockEntryR\x05clock\x1au\n" +
-	"\x0fMVRegisterEntry\x12\x14\n" +
-	"\x05value\x18\x01 \x01(\fR\x05value\x12\x19\n" +
-	"\btype_url\x18\x02 \x01(\tR\atypeUrl\x12\x17\n" +
-	"\anode_id\x18\x03 \x01(\tR\x06nodeId\x12\x18\n" +
-	"\acounter\x18\x04 \x01(\x04R\acounter\x1a8\n" +
+	"\x05clock\x18\x02 \x03(\v2%.internalpb.MVRegisterData.ClockEntryR\x05clock\x1ap\n" +
+	"\x0fMVRegisterEntry\x12*\n" +
+	"\x05value\x18\x01 \x01(\v2\x14.google.protobuf.AnyR\x05value\x12\x17\n" +
+	"\anode_id\x18\x02 \x01(\tR\x06nodeId\x12\x18\n" +
+	"\acounter\x18\x03 \x01(\x04R\acounter\x1a8\n" +
 	"\n" +
 	"ClockEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
@@ -1623,6 +1583,7 @@ var file_internal_crdt_proto_goTypes = []any{
 	(*ORMapData_ORMapEntry)(nil),           // 23: internalpb.ORMapData.ORMapEntry
 	(*MVRegisterData_MVRegisterEntry)(nil), // 24: internalpb.MVRegisterData.MVRegisterEntry
 	nil,                                    // 25: internalpb.MVRegisterData.ClockEntry
+	(*anypb.Any)(nil),                      // 26: google.protobuf.Any
 }
 var file_internal_crdt_proto_depIdxs = []int32{
 	0,  // 0: internalpb.CRDTKey.data_type:type_name -> internalpb.CRDTDataType
@@ -1636,32 +1597,36 @@ var file_internal_crdt_proto_depIdxs = []int32{
 	19, // 8: internalpb.GCounterData.state:type_name -> internalpb.GCounterData.StateEntry
 	3,  // 9: internalpb.PNCounterData.increments:type_name -> internalpb.GCounterData
 	3,  // 10: internalpb.PNCounterData.decrements:type_name -> internalpb.GCounterData
-	21, // 11: internalpb.ORSetData.entries:type_name -> internalpb.ORSetData.ORSetEntry
-	22, // 12: internalpb.ORSetData.clock:type_name -> internalpb.ORSetData.ClockEntry
-	23, // 13: internalpb.ORMapData.entries:type_name -> internalpb.ORMapData.ORMapEntry
-	6,  // 14: internalpb.ORMapData.key_set:type_name -> internalpb.ORSetData
-	24, // 15: internalpb.MVRegisterData.entries:type_name -> internalpb.MVRegisterData.MVRegisterEntry
-	25, // 16: internalpb.MVRegisterData.clock:type_name -> internalpb.MVRegisterData.ClockEntry
-	1,  // 17: internalpb.CRDTDelta.key:type_name -> internalpb.CRDTKey
-	2,  // 18: internalpb.CRDTDelta.data:type_name -> internalpb.CRDTData
-	1,  // 19: internalpb.CRDTDigestEntry.key:type_name -> internalpb.CRDTKey
-	11, // 20: internalpb.CRDTDigest.entries:type_name -> internalpb.CRDTDigestEntry
-	1,  // 21: internalpb.CRDTFullStateEntry.key:type_name -> internalpb.CRDTKey
-	2,  // 22: internalpb.CRDTFullStateEntry.data:type_name -> internalpb.CRDTData
-	13, // 23: internalpb.CRDTFullState.entries:type_name -> internalpb.CRDTFullStateEntry
-	1,  // 24: internalpb.CRDTTombstone.key:type_name -> internalpb.CRDTKey
-	1,  // 25: internalpb.CRDTReadRequest.key:type_name -> internalpb.CRDTKey
-	1,  // 26: internalpb.CRDTReadResponse.key:type_name -> internalpb.CRDTKey
-	2,  // 27: internalpb.CRDTReadResponse.data:type_name -> internalpb.CRDTData
-	1,  // 28: internalpb.CRDTSnapshotEntry.key:type_name -> internalpb.CRDTKey
-	2,  // 29: internalpb.CRDTSnapshotEntry.data:type_name -> internalpb.CRDTData
-	20, // 30: internalpb.ORSetData.ORSetEntry.dots:type_name -> internalpb.ORSetData.ORSetDot
-	2,  // 31: internalpb.ORMapData.ORMapEntry.value:type_name -> internalpb.CRDTData
-	32, // [32:32] is the sub-list for method output_type
-	32, // [32:32] is the sub-list for method input_type
-	32, // [32:32] is the sub-list for extension type_name
-	32, // [32:32] is the sub-list for extension extendee
-	0,  // [0:32] is the sub-list for field type_name
+	26, // 11: internalpb.LWWRegisterData.value:type_name -> google.protobuf.Any
+	21, // 12: internalpb.ORSetData.entries:type_name -> internalpb.ORSetData.ORSetEntry
+	22, // 13: internalpb.ORSetData.clock:type_name -> internalpb.ORSetData.ClockEntry
+	23, // 14: internalpb.ORMapData.entries:type_name -> internalpb.ORMapData.ORMapEntry
+	6,  // 15: internalpb.ORMapData.key_set:type_name -> internalpb.ORSetData
+	24, // 16: internalpb.MVRegisterData.entries:type_name -> internalpb.MVRegisterData.MVRegisterEntry
+	25, // 17: internalpb.MVRegisterData.clock:type_name -> internalpb.MVRegisterData.ClockEntry
+	1,  // 18: internalpb.CRDTDelta.key:type_name -> internalpb.CRDTKey
+	2,  // 19: internalpb.CRDTDelta.data:type_name -> internalpb.CRDTData
+	1,  // 20: internalpb.CRDTDigestEntry.key:type_name -> internalpb.CRDTKey
+	11, // 21: internalpb.CRDTDigest.entries:type_name -> internalpb.CRDTDigestEntry
+	1,  // 22: internalpb.CRDTFullStateEntry.key:type_name -> internalpb.CRDTKey
+	2,  // 23: internalpb.CRDTFullStateEntry.data:type_name -> internalpb.CRDTData
+	13, // 24: internalpb.CRDTFullState.entries:type_name -> internalpb.CRDTFullStateEntry
+	1,  // 25: internalpb.CRDTTombstone.key:type_name -> internalpb.CRDTKey
+	1,  // 26: internalpb.CRDTReadRequest.key:type_name -> internalpb.CRDTKey
+	1,  // 27: internalpb.CRDTReadResponse.key:type_name -> internalpb.CRDTKey
+	2,  // 28: internalpb.CRDTReadResponse.data:type_name -> internalpb.CRDTData
+	1,  // 29: internalpb.CRDTSnapshotEntry.key:type_name -> internalpb.CRDTKey
+	2,  // 30: internalpb.CRDTSnapshotEntry.data:type_name -> internalpb.CRDTData
+	26, // 31: internalpb.ORSetData.ORSetEntry.element:type_name -> google.protobuf.Any
+	20, // 32: internalpb.ORSetData.ORSetEntry.dots:type_name -> internalpb.ORSetData.ORSetDot
+	26, // 33: internalpb.ORMapData.ORMapEntry.key:type_name -> google.protobuf.Any
+	2,  // 34: internalpb.ORMapData.ORMapEntry.value:type_name -> internalpb.CRDTData
+	26, // 35: internalpb.MVRegisterData.MVRegisterEntry.value:type_name -> google.protobuf.Any
+	36, // [36:36] is the sub-list for method output_type
+	36, // [36:36] is the sub-list for method input_type
+	36, // [36:36] is the sub-list for extension type_name
+	36, // [36:36] is the sub-list for extension extendee
+	0,  // [0:36] is the sub-list for field type_name
 }
 
 func init() { file_internal_crdt_proto_init() }

@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package internalpb;
 
+import "google/protobuf/any.proto";
+
 option go_package = "github.com/tochemey/goakt/v4/internal/internalpb;internalpb";
 
 // CRDTDataType identifies the CRDT type for serialization and type validation.
@@ -53,14 +55,12 @@ message PNCounterData {
 
 // LWWRegisterData is the serialized state of a LWWRegister.
 message LWWRegisterData {
-  // Specifies the serialized value.
-  bytes value = 1;
-  // Specifies the internal type tag for deserialization (e.g., "string").
-  string type_url = 2;
+  // Specifies the typed, serialized value.
+  google.protobuf.Any value = 1;
   // Specifies the write timestamp in nanoseconds since epoch.
-  int64 timestamp_nanos = 3;
+  int64 timestamp_nanos = 2;
   // Specifies the node that last wrote this value.
-  string node_id = 4;
+  string node_id = 3;
 }
 
 // ORSetData is the serialized state of an ORSet.
@@ -75,12 +75,10 @@ message ORSetData {
 
   // ORSetEntry is an element with its associated causal dots.
   message ORSetEntry {
-    // Specifies the serialized element.
-    bytes element = 1;
-    // Specifies the internal type tag for deserialization (e.g., "string").
-    string type_url = 2;
+    // Specifies the typed, serialized element.
+    google.protobuf.Any element = 1;
     // Specifies the causal dots associated with this element.
-    repeated ORSetDot dots = 3;
+    repeated ORSetDot dots = 2;
   }
 
   // Specifies the set entries.
@@ -93,12 +91,10 @@ message ORSetData {
 message ORMapData {
   // ORMapEntry is a single key-value pair in the map.
   message ORMapEntry {
-    // Specifies the serialized map key.
-    bytes key = 1;
-    // Specifies the internal type tag for key deserialization (e.g., "string").
-    string key_type_url = 2;
+    // Specifies the typed, serialized map key.
+    google.protobuf.Any key = 1;
     // Specifies the CRDT value associated with this key.
-    CRDTData value = 3;
+    CRDTData value = 2;
   }
 
   // Specifies the map entries.
@@ -117,14 +113,12 @@ message FlagData {
 message MVRegisterData {
   // MVRegisterEntry is a single value with its causal dot.
   message MVRegisterEntry {
-    // Specifies the serialized value.
-    bytes value = 1;
-    // Specifies the internal type tag for deserialization (e.g., "string").
-    string type_url = 2;
+    // Specifies the typed, serialized value.
+    google.protobuf.Any value = 1;
     // Specifies the node that wrote this value.
-    string node_id = 3;
+    string node_id = 2;
     // Specifies the monotonic counter for the write event.
-    uint64 counter = 4;
+    uint64 counter = 3;
   }
 
   // Specifies the register entries (one per concurrent value).
