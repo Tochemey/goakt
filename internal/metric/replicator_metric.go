@@ -27,23 +27,23 @@ import "go.opentelemetry.io/otel/metric"
 // ReplicatorMetric groups OpenTelemetry instruments for the CRDT Replicator actor.
 //
 // Instruments:
-//   - crdt.replicator.store.size              (Int64ObservableCounter)
+//   - crdt.replicator.store.size              (Int64ObservableGauge)
 //   - crdt.replicator.merge.count             (Int64ObservableCounter)
 //   - crdt.replicator.delta.publish.count     (Int64ObservableCounter)
 //   - crdt.replicator.delta.receive.count     (Int64ObservableCounter)
 //   - crdt.replicator.coordinated.write.count (Int64ObservableCounter)
 //   - crdt.replicator.coordinated.read.count  (Int64ObservableCounter)
 //   - crdt.replicator.antientropy.count       (Int64ObservableCounter)
-//   - crdt.replicator.tombstone.count         (Int64ObservableCounter)
+//   - crdt.replicator.tombstone.count         (Int64ObservableGauge)
 type ReplicatorMetric struct {
-	storeSize             metric.Int64ObservableCounter
+	storeSize             metric.Int64ObservableGauge
 	mergeCount            metric.Int64ObservableCounter
 	deltaPublishCount     metric.Int64ObservableCounter
 	deltaReceiveCount     metric.Int64ObservableCounter
 	coordinatedWriteCount metric.Int64ObservableCounter
 	coordinatedReadCount  metric.Int64ObservableCounter
 	antiEntropyCount      metric.Int64ObservableCounter
-	tombstoneCount        metric.Int64ObservableCounter
+	tombstoneCount        metric.Int64ObservableGauge
 }
 
 // NewReplicatorMetric creates the CRDT Replicator instruments using the provided Meter.
@@ -52,7 +52,7 @@ func NewReplicatorMetric(meter metric.Meter) (*ReplicatorMetric, error) {
 	var m ReplicatorMetric
 	var err error
 
-	if m.storeSize, err = meter.Int64ObservableCounter(
+	if m.storeSize, err = meter.Int64ObservableGauge(
 		"crdt.replicator.store.size",
 		metric.WithDescription("Number of CRDT keys in the local store"),
 	); err != nil {
@@ -101,7 +101,7 @@ func NewReplicatorMetric(meter metric.Meter) (*ReplicatorMetric, error) {
 		return nil, err
 	}
 
-	if m.tombstoneCount, err = meter.Int64ObservableCounter(
+	if m.tombstoneCount, err = meter.Int64ObservableGauge(
 		"crdt.replicator.tombstone.count",
 		metric.WithDescription("Number of active tombstones in the replicator"),
 	); err != nil {
@@ -111,8 +111,8 @@ func NewReplicatorMetric(meter metric.Meter) (*ReplicatorMetric, error) {
 	return &m, nil
 }
 
-// StoreSize returns the observable counter for CRDT store size.
-func (m *ReplicatorMetric) StoreSize() metric.Int64ObservableCounter {
+// StoreSize returns the observable gauge for CRDT store size.
+func (m *ReplicatorMetric) StoreSize() metric.Int64ObservableGauge {
 	return m.storeSize
 }
 
@@ -146,7 +146,7 @@ func (m *ReplicatorMetric) AntiEntropyCount() metric.Int64ObservableCounter {
 	return m.antiEntropyCount
 }
 
-// TombstoneCount returns the observable counter for active tombstones.
-func (m *ReplicatorMetric) TombstoneCount() metric.Int64ObservableCounter {
+// TombstoneCount returns the observable gauge for active tombstones.
+func (m *ReplicatorMetric) TombstoneCount() metric.Int64ObservableGauge {
 	return m.tombstoneCount
 }

@@ -52,10 +52,13 @@ actor.Tell(ctx, replicator, &crdt.Update[*crdt.PNCounter]{
 })
 
 // Read
-resp, _ := actor.Ask(ctx, replicator, &crdt.Get[*crdt.PNCounter]{
+resp, err := actor.Ask(ctx, replicator, &crdt.Get[*crdt.PNCounter]{
     Key: crdt.PNCounterKey("request-count"),
 }, 5*time.Second)
-count := resp.(*crdt.GetResponse[*crdt.PNCounter]).Data.Value()
+if getResp, ok := resp.(*crdt.GetResponse[*crdt.PNCounter]); ok && getResp.Data != nil {
+    count := getResp.Data.Value()
+    _ = count
+}
 ```
 
 #### Key Capabilities

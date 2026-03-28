@@ -499,9 +499,13 @@ func EncodeCRDTData(data crdt.ReplicatedData) (*internalpb.CRDTData, error) {
 			},
 		}, nil
 	case ORMapStringGCounterEncoder:
+		orMapData, err := encodeORMapStringGCounter(v)
+		if err != nil {
+			return nil, err
+		}
 		return &internalpb.CRDTData{
 			Type: &internalpb.CRDTData_OrMap{
-				OrMap: encodeORMapStringGCounter(v),
+				OrMap: orMapData,
 			},
 		}, nil
 	default:
@@ -526,7 +530,7 @@ func DecodeCRDTData(pb *internalpb.CRDTData) (crdt.ReplicatedData, error) {
 	case *internalpb.CRDTData_MvRegister:
 		return decodeMVRegisterString(v.MvRegister), nil
 	case *internalpb.CRDTData_OrMap:
-		return decodeORMapStringGCounter(v.OrMap), nil
+		return decodeORMapStringGCounter(v.OrMap)
 	default:
 		return nil, fmt.Errorf("unsupported CRDTData type: %T", pb.Type)
 	}
@@ -541,8 +545,14 @@ func EncodeCRDTKey(keyID string, dataType crdt.DataType) *internalpb.CRDTKey {
 }
 
 // DecodeCRDTKey extracts key ID and data type from a protobuf CRDTKey.
-func DecodeCRDTKey(pb *internalpb.CRDTKey) (keyID string, dataType crdt.DataType) {
-	return pb.GetId(), crdt.DataType(pb.GetDataType() - 1)
+func DecodeCRDTKey(pb *internalpb.CRDTKey) (keyID string, dataType crdt.DataType, err error) {
+	if pb == nil {
+		return "", 0, fmt.Errorf("nil CRDTKey")
+	}
+	if pb.GetDataType() == internalpb.CRDTDataType_CRDT_DATA_TYPE_UNSPECIFIED {
+		return "", 0, fmt.Errorf("unspecified CRDT data type for key=%s", pb.GetId())
+	}
+	return pb.GetId(), crdt.DataType(pb.GetDataType() - 1), nil
 }
 
 func encodeGCounter(c *crdt.GCounter) *internalpb.GCounterData {
@@ -634,7 +644,7 @@ type ORMapStringGCounterEncoder interface {
 	RawState() crdt.ORMapRawState[string, *crdt.GCounter]
 }
 
-func encodeORMapStringGCounter(m ORMapStringGCounterEncoder) *internalpb.ORMapData {
+func encodeORMapStringGCounter(m ORMapStringGCounterEncoder) (*internalpb.ORMapData, error) {
 	state := m.RawState()
 
 	// encode key set as ORSetData
@@ -645,7 +655,7 @@ func encodeORMapStringGCounter(m ORMapStringGCounterEncoder) *internalpb.ORMapDa
 	for k, v := range state.Values {
 		valData, err := EncodeCRDTData(v)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("failed to encode ORMap value for key=%s: %w", k, err)
 		}
 		pbEntries = append(pbEntries, &internalpb.ORMapData_ORMapEntry{
 			Key:        []byte(k),
@@ -657,10 +667,10 @@ func encodeORMapStringGCounter(m ORMapStringGCounterEncoder) *internalpb.ORMapDa
 	return &internalpb.ORMapData{
 		Entries: pbEntries,
 		KeySet:  keySet,
-	}
+	}, nil
 }
 
-func decodeORMapStringGCounter(pb *internalpb.ORMapData) *crdt.ORMap[string, *crdt.GCounter] {
+func decodeORMapStringGCounter(pb *internalpb.ORMapData) (*crdt.ORMap[string, *crdt.GCounter], error) {
 	// decode key set
 	keyEntries := decodeORSetEntries(pb.GetKeySet())
 	keyClock := pb.GetKeySet().GetClock()
@@ -671,11 +681,13 @@ func decodeORMapStringGCounter(pb *internalpb.ORMapData) *crdt.ORMap[string, *cr
 		key := string(e.GetKey())
 		data, err := DecodeCRDTData(e.GetValue())
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("failed to decode ORMap value for key=%s: %w", key, err)
 		}
-		if gc, ok := data.(*crdt.GCounter); ok {
-			values[key] = gc
+		gc, ok := data.(*crdt.GCounter)
+		if !ok {
+			return nil, fmt.Errorf("ORMap value for key=%s is %T, expected *GCounter", key, data)
 		}
+		values[key] = gc
 	}
 
 	rawState := crdt.ORMapRawState[string, *crdt.GCounter]{
@@ -683,7 +695,7 @@ func decodeORMapStringGCounter(pb *internalpb.ORMapData) *crdt.ORMap[string, *cr
 		KeyClock:   keyClock,
 		Values:     values,
 	}
-	return crdt.ORMapFromRawState(rawState)
+	return crdt.ORMapFromRawState(rawState), nil
 }
 
 // encodeORSetEntries encodes ORSet entries and clock to protobuf.

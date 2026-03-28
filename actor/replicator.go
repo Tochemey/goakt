@@ -438,7 +438,11 @@ func (r *replicatorActor) handleProtoTombstone(msg *internalpb.CRDTTombstone) {
 		return
 	}
 
-	keyID, dataType := codec.DecodeCRDTKey(msg.GetKey())
+	keyID, dataType, err := codec.DecodeCRDTKey(msg.GetKey())
+	if err != nil {
+		r.logger.Warnf("tombstone: failed to decode key: %v", err)
+		return
+	}
 	delete(r.store, keyID)
 	delete(r.versions, keyID)
 
@@ -537,7 +541,11 @@ func (r *replicatorActor) handleDigest(ctx *ReceiveContext, msg *internalpb.CRDT
 
 	peerVersions := make(map[string]uint64, len(msg.GetEntries()))
 	for _, e := range msg.GetEntries() {
-		keyID, _ := codec.DecodeCRDTKey(e.GetKey())
+		keyID, _, err := codec.DecodeCRDTKey(e.GetKey())
+		if err != nil {
+			r.logger.Warnf("anti-entropy digest: failed to decode key: %v", err)
+			continue
+		}
 		peerVersions[keyID] = e.GetVersion()
 	}
 
@@ -569,7 +577,11 @@ func (r *replicatorActor) handleDigest(ctx *ReceiveContext, msg *internalpb.CRDT
 // handleFullState processes a full state response from a peer during anti-entropy.
 func (r *replicatorActor) handleFullState(ctx *ReceiveContext, msg *internalpb.CRDTFullState) {
 	for _, entry := range msg.GetEntries() {
-		keyID, dataType := codec.DecodeCRDTKey(entry.GetKey())
+		keyID, dataType, err := codec.DecodeCRDTKey(entry.GetKey())
+		if err != nil {
+			r.logger.Warnf("anti-entropy full state: failed to decode key: %v", err)
+			continue
+		}
 
 		// skip tombstoned keys
 		if _, ok := r.tombstones[keyID]; ok {
@@ -726,7 +738,11 @@ func (r *replicatorActor) handleSnapshot() {
 // handleReadRequest processes a coordinated read request from a peer Replicator.
 // It returns the local value for the requested key.
 func (r *replicatorActor) handleReadRequest(ctx *ReceiveContext, msg *internalpb.CRDTReadRequest) {
-	keyID, dataType := codec.DecodeCRDTKey(msg.GetKey())
+	keyID, dataType, err := codec.DecodeCRDTKey(msg.GetKey())
+	if err != nil {
+		r.logger.Warnf("coordinated read: failed to decode key: %v", err)
+		return
+	}
 	data := r.store[keyID]
 
 	var pbData *internalpb.CRDTData
@@ -964,7 +980,10 @@ func decodeCRDTDelta(pb *internalpb.CRDTDelta) (*crdtDelta, error) {
 	if err != nil {
 		return nil, err
 	}
-	keyID, dataType := codec.DecodeCRDTKey(pb.GetKey())
+	keyID, dataType, err := codec.DecodeCRDTKey(pb.GetKey())
+	if err != nil {
+		return nil, err
+	}
 	return &crdtDelta{
 		KeyID:    keyID,
 		DataType: dataType,

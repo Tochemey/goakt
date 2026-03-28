@@ -110,8 +110,14 @@ func (s *Store) Save(store map[string]crdt.ReplicatedData, keyTypes map[string]c
 
 		// write current state
 		for keyID, data := range store {
-			dataType := keyTypes[keyID]
-			version := versions[keyID]
+			dataType, ok := keyTypes[keyID]
+			if !ok {
+				return fmt.Errorf("crdt: missing data type for key=%s", keyID)
+			}
+			version, ok := versions[keyID]
+			if !ok {
+				return fmt.Errorf("crdt: missing version for key=%s", keyID)
+			}
 
 			pbData, err := codec.EncodeCRDTData(data)
 			if err != nil {
@@ -161,7 +167,10 @@ func (s *Store) Load() (map[string]crdt.ReplicatedData, map[string]crdt.DataType
 				return fmt.Errorf("crdt: unmarshal snapshot entry: %w", err)
 			}
 
-			keyID, dataType := codec.DecodeCRDTKey(entry.GetKey())
+			keyID, dataType, err := codec.DecodeCRDTKey(entry.GetKey())
+			if err != nil {
+				return fmt.Errorf("crdt: decode snapshot key: %w", err)
+			}
 			data, err := codec.DecodeCRDTData(entry.GetData())
 			if err != nil {
 				return fmt.Errorf("crdt: decode snapshot data for key=%s: %w", keyID, err)
@@ -181,21 +190,23 @@ func (s *Store) Load() (map[string]crdt.ReplicatedData, map[string]crdt.DataType
 	return store, keyTypes, versions, nil
 }
 
-// Close releases the underlying BoltDB handle and removes the snapshot file.
+// Close releases the underlying BoltDB handle without removing the snapshot file.
+// Use Remove to delete the snapshot file when it is no longer needed.
 func (s *Store) Close() error {
 	if s.closed.Swap(true) {
 		return nil
 	}
-	closeErr := s.db.Close()
-	removeErr := os.Remove(s.path)
-	if closeErr != nil {
-		if removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
-			return errors.Join(closeErr, removeErr)
-		}
-		return closeErr
+	return s.db.Close()
+}
+
+// Remove deletes the snapshot file from disk.
+// The store must be closed before calling Remove.
+func (s *Store) Remove() error {
+	if !s.closed.Load() {
+		return fmt.Errorf("crdt: cannot remove snapshot file: store is still open")
 	}
-	if removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
-		return removeErr
+	if err := os.Remove(s.path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
 	}
 	return nil
 }

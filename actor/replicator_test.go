@@ -665,7 +665,7 @@ func TestReplicatorDigest(t *testing.T) {
 
 		versions := make(map[string]uint64)
 		for _, e := range digest.GetEntries() {
-			keyID, _ := codec.DecodeCRDTKey(e.GetKey())
+			keyID, _, _ := codec.DecodeCRDTKey(e.GetKey())
 			versions[keyID] = e.GetVersion()
 		}
 		assert.Equal(t, uint64(3), versions["key-a"])

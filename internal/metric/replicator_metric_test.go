@@ -65,14 +65,14 @@ func TestNewReplicatorMetricErrors(t *testing.T) {
 		name    string
 		failKey string
 	}{
-		{name: "store size counter", failKey: "crdt.replicator.store.size"},
+		{name: "store size gauge", failKey: "crdt.replicator.store.size"},
 		{name: "merge count counter", failKey: "crdt.replicator.merge.count"},
 		{name: "delta publish counter", failKey: "crdt.replicator.delta.publish.count"},
 		{name: "delta receive counter", failKey: "crdt.replicator.delta.receive.count"},
 		{name: "coordinated write counter", failKey: "crdt.replicator.coordinated.write.count"},
 		{name: "coordinated read counter", failKey: "crdt.replicator.coordinated.read.count"},
 		{name: "anti-entropy counter", failKey: "crdt.replicator.antientropy.count"},
-		{name: "tombstone counter", failKey: "crdt.replicator.tombstone.count"},
+		{name: "tombstone gauge", failKey: "crdt.replicator.tombstone.count"},
 	}
 
 	for _, tt := range testCases {

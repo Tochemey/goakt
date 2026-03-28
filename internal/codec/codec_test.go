@@ -700,7 +700,8 @@ func TestEncodeCRDTKey(t *testing.T) {
 		require.Equal(t, "my-counter", pb.GetId())
 		require.Equal(t, internalpb.CRDTDataType_CRDT_DATA_TYPE_PN_COUNTER, pb.GetDataType())
 
-		keyID, dataType := DecodeCRDTKey(pb)
+		keyID, dataType, err := DecodeCRDTKey(pb)
+		require.NoError(t, err)
 		require.Equal(t, "my-counter", keyID)
 		require.Equal(t, crdt.PNCounterType, dataType)
 	})
@@ -709,7 +710,8 @@ func TestEncodeCRDTKey(t *testing.T) {
 		pb := EncodeCRDTKey("gc", crdt.GCounterType)
 		require.Equal(t, internalpb.CRDTDataType_CRDT_DATA_TYPE_G_COUNTER, pb.GetDataType())
 
-		_, dataType := DecodeCRDTKey(pb)
+		_, dataType, err := DecodeCRDTKey(pb)
+		require.NoError(t, err)
 		require.Equal(t, crdt.GCounterType, dataType)
 	})
 
@@ -717,7 +719,24 @@ func TestEncodeCRDTKey(t *testing.T) {
 		pb := EncodeCRDTKey("set", crdt.ORSetType)
 		require.Equal(t, internalpb.CRDTDataType_CRDT_DATA_TYPE_OR_SET, pb.GetDataType())
 
-		_, dataType := DecodeCRDTKey(pb)
+		_, dataType, err := DecodeCRDTKey(pb)
+		require.NoError(t, err)
 		require.Equal(t, crdt.ORSetType, dataType)
+	})
+
+	t.Run("nil key returns error", func(t *testing.T) {
+		_, _, err := DecodeCRDTKey(nil)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "nil CRDTKey")
+	})
+
+	t.Run("UNSPECIFIED data type returns error", func(t *testing.T) {
+		pb := &internalpb.CRDTKey{
+			Id:       "bad-key",
+			DataType: internalpb.CRDTDataType_CRDT_DATA_TYPE_UNSPECIFIED,
+		}
+		_, _, err := DecodeCRDTKey(pb)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "unspecified CRDT data type")
 	})
 }

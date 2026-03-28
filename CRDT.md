@@ -911,13 +911,16 @@ resp, err := actor.Ask(ctx, replicator, &crdt.Update[*crdt.ORSet[string]]{
 
 ```go
 // Read from local store (default — fast, eventually consistent).
-// The response is typed — no type assertion needed.
 replicator := ctx.ActorSystem().Replicator()
 resp, err := actor.Ask(ctx, replicator, &crdt.Get[*crdt.PNCounter]{
     Key: requestCount,
 }, 5*time.Second)
-if resp != nil {
-    count := resp.(*crdt.GetResponse[*crdt.PNCounter]).Data.Value()
+if err != nil {
+    // handle error
+}
+if getResp, ok := resp.(*crdt.GetResponse[*crdt.PNCounter]); ok && getResp.Data != nil {
+    count := getResp.Data.Value()
+    _ = count
 }
 ```
 
@@ -941,12 +944,15 @@ func (a *MyActor) PreStart(ctx *actor.Context) error {
 }
 
 // Inside Receive — handle change notifications.
-// Changed[T] carries the typed value — no type assertion on the CRDT data.
+// Changed[T] carries the typed value — use safe type assertion on Data.
 func (a *MyActor) Receive(ctx *actor.ReceiveContext) {
     switch msg := ctx.Message().(type) {
     case *crdt.Changed[*crdt.ORSet[string]]:
-        sessions := msg.Data.Elements()
-        // react to updated session set
+        if msg.Data != nil {
+            sessions := msg.Data.Elements()
+            // react to updated session set
+            _ = sessions
+        }
     }
 }
 ```

@@ -286,4 +286,61 @@ func TestStore(t *testing.T) {
 		err = store.EnsureOpen()
 		assert.NoError(t, err)
 	})
+
+	t.Run("save with missing keyType returns error", func(t *testing.T) {
+		dir := t.TempDir()
+		store, err := NewStore(dir)
+		require.NoError(t, err)
+		defer store.Close()
+
+		data := map[string]crdt.ReplicatedData{
+			"counter-1": crdt.NewGCounter().Increment("node-1", 10),
+		}
+		keyTypes := map[string]crdt.DataType{}
+		versions := map[string]uint64{"counter-1": 1}
+
+		err = store.Save(data, keyTypes, versions)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "missing data type")
+	})
+
+	t.Run("save with missing version returns error", func(t *testing.T) {
+		dir := t.TempDir()
+		store, err := NewStore(dir)
+		require.NoError(t, err)
+		defer store.Close()
+
+		data := map[string]crdt.ReplicatedData{
+			"counter-1": crdt.NewGCounter().Increment("node-1", 10),
+		}
+		keyTypes := map[string]crdt.DataType{"counter-1": crdt.GCounterType}
+		versions := map[string]uint64{}
+
+		err = store.Save(data, keyTypes, versions)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "missing version")
+	})
+
+	t.Run("close then remove deletes file", func(t *testing.T) {
+		dir := t.TempDir()
+		store, err := NewStore(dir)
+		require.NoError(t, err)
+
+		err = store.Close()
+		require.NoError(t, err)
+
+		err = store.Remove()
+		require.NoError(t, err)
+	})
+
+	t.Run("remove before close returns error", func(t *testing.T) {
+		dir := t.TempDir()
+		store, err := NewStore(dir)
+		require.NoError(t, err)
+		defer store.Close()
+
+		err = store.Remove()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "store is still open")
+	})
 }
