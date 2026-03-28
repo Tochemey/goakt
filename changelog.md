@@ -8,15 +8,15 @@ GoAkt now ships with built-in **Conflict-free Replicated Data Types** — data s
 
 #### CRDT Types
 
-| Type | Description |
-|------|-------------|
-| **GCounter** | Grow-only counter with per-node increment slots |
-| **PNCounter** | Positive-negative counter (increment and decrement) |
+| Type               | Description                                                        |
+| ------------------ | ------------------------------------------------------------------ |
+| **GCounter**       | Grow-only counter with per-node increment slots                    |
+| **PNCounter**      | Positive-negative counter (increment and decrement)                |
 | **LWWRegister[T]** | Last-writer-wins register with timestamp-based conflict resolution |
-| **ORSet[T]** | Observed-remove set with add-wins semantics |
-| **ORMap[K, V]** | Map with OR-Set keys and per-value CRDT merge |
-| **Flag** | Boolean that can only transition from false to true |
-| **MVRegister[T]** | Multi-value register that preserves concurrent writes |
+| **ORSet[T]**       | Observed-remove set with add-wins semantics                        |
+| **ORMap[K, V]**    | Map with OR-Set keys and per-value CRDT merge                      |
+| **Flag**           | Boolean that can only transition from false to true                |
+| **MVRegister[T]**  | Multi-value register that preserves concurrent writes              |
 
 #### How It Works
 
@@ -95,7 +95,7 @@ is called against a live `ActorSystem`.
 **Sources**
 
 | Constructor                       | Description                                                                   |
-|-----------------------------------|-------------------------------------------------------------------------------|
+| --------------------------------- | ----------------------------------------------------------------------------- |
 | `Of[T](values...)`                | Finite source from a fixed set of values                                      |
 | `Range(start, end)`               | Integer range source (`[start, end)`)                                         |
 | `FromChannel[T](ch)`              | Reads from a Go channel; completes when the channel closes                    |
@@ -111,7 +111,7 @@ is called against a live `ActorSystem`.
 **Flows**
 
 | Constructor                         | Description                                                                     |
-|-------------------------------------|---------------------------------------------------------------------------------|
+| ----------------------------------- | ------------------------------------------------------------------------------- |
 | `Map[In,Out](fn)`                   | Type-changing transformation; no error path                                     |
 | `TryMap[In,Out](fn)`                | Transformation with error; ErrorStrategy controls failure handling              |
 | `Filter[T](predicate)`              | Keeps only elements where `predicate` returns true                              |
@@ -129,7 +129,7 @@ is called against a live `ActorSystem`.
 **Sinks**
 
 | Constructor                     | Description                                                                    |
-|---------------------------------|--------------------------------------------------------------------------------|
+| ------------------------------- | ------------------------------------------------------------------------------ |
 | `ForEach[T](fn)`                | Calls `fn` for each element                                                    |
 | `Collect[T]()`                  | Accumulates all elements; retrieve via `Collector[T].Items()` after completion |
 | `Fold[T,U](zero, fn)`           | Reduces to a single value; retrieve via `FoldResult[U].Value()`                |
@@ -195,7 +195,7 @@ is called against a live `ActorSystem`.
 v4.0.0 delivers **simplification** and **performance** through:
 
 | Theme                | Key Changes                                                                                              |
-|----------------------|----------------------------------------------------------------------------------------------------------|
+| -------------------- | -------------------------------------------------------------------------------------------------------- |
 | **Unified APIs**     | Single actor reference (`*PID`), single lookup (`ActorOf`), unified scheduler, pluggable serializers     |
 | **Type Flexibility** | `any` replaces `proto.Message` across all message-passing surfaces; CBOR supports arbitrary Go types     |
 | **Remoting**         | Config-only public API; client is internal; ProtoSerializer (default) and CBORSerializer for any Go type |
@@ -205,7 +205,7 @@ v4.0.0 delivers **simplification** and **performance** through:
 ### Migration Quick Reference
 
 | From                                            | To                                                                                                  |
-|-------------------------------------------------|-----------------------------------------------------------------------------------------------------|
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------- |
 | `proto.Message` in handlers/call sites          | `any`                                                                                               |
 | `goaktpb.*` types                               | `actor.*` (e.g. `actor.PostStart`, `actor.PoisonPill`)                                              |
 | `ActorRef`                                      | `*PID`                                                                                              |
@@ -404,7 +404,7 @@ Leadership in the cluster is determined by node age (oldest = coordinator). By r
 ##### 📈 Performance Improvement
 
 | Metric           | Before             | After            |
-|------------------|--------------------|------------------|
+| ---------------- | ------------------ | ---------------- |
 | Network calls    | O(N)               | O(3)             |
 | Data transferred | N × payload        | 3 × payload      |
 | Shutdown latency | Wait for all peers | Wait for 2 peers |
