@@ -1046,7 +1046,7 @@ func (x *actorSystem) Start(ctx context.Context) error {
 		AddContextRunner(x.startDataCenterController).
 		AddContextRunner(x.startDataCenterLeaderWatch).
 		Run(); err != nil {
-		x.reset()
+		x.startupCleanup(ctx)
 		return err
 	}
 
@@ -1054,7 +1054,7 @@ func (x *actorSystem) Start(ctx context.Context) error {
 
 	if err := x.spawnReplicator(ctx); err != nil {
 		x.scheduler.Stop(ctx)
-		x.reset()
+		x.startupCleanup(ctx)
 		return err
 	}
 
@@ -2372,6 +2372,23 @@ func (x *actorSystem) validateExtensions() error {
 		}
 	}
 	return nil
+}
+
+// startupCleanup tears down partially-started components on startup failure.
+// Unlike shutdown(), this can be called while starting=true and started=false.
+func (x *actorSystem) startupCleanup(ctx context.Context) {
+	x.stopDataCenterLeaderWatch()
+	_ = x.stopDataCenterController(ctx)
+
+	actors := x.localActors()
+	_ = x.shutdownCluster(ctx, actors, nil)
+	_ = x.shutdownRemoting(ctx)
+
+	if x.eventsStream != nil {
+		x.eventsStream.Close()
+	}
+
+	x.reset()
 }
 
 // reset the actor system
