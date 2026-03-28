@@ -1028,8 +1028,6 @@ func (x *actorSystem) Start(ctx context.Context) error {
 
 	x.scheduler = newScheduler(x.logger, x.shutdownTimeout, x)
 
-	x.startMessagesScheduler(ctx)
-
 	if err := chain.
 		New(chain.WithFailFast(), chain.WithContext(ctx)).
 		AddRunner(x.setupRemoting).
@@ -1043,16 +1041,20 @@ func (x *actorSystem) Start(ctx context.Context) error {
 		AddContextRunner(x.spawnSingletonManager).
 		AddContextRunner(x.spawnRelocator).
 		AddContextRunner(x.spawnTopicActor).
-		AddContextRunner(x.spawnReplicator).
 		AddContextRunner(x.startRemoteServer).
 		AddContextRunner(x.startCluster).
 		AddContextRunner(x.startDataCenterController).
 		AddContextRunner(x.startDataCenterLeaderWatch).
 		Run(); err != nil {
-		if stopErr := x.shutdown(ctx); stopErr != nil {
-			return errors.Join(err, stopErr)
-		}
+		x.reset()
+		return err
+	}
 
+	x.startMessagesScheduler(ctx)
+
+	if err := x.spawnReplicator(ctx); err != nil {
+		x.scheduler.Stop(ctx)
+		x.reset()
 		return err
 	}
 
