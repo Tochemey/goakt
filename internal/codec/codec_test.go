@@ -31,9 +31,11 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/tochemey/goakt/v4/crdt"
@@ -754,4 +756,238 @@ func TestEncodeCRDTKey(t *testing.T) {
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "unknown CRDT data type")
 	})
+}
+
+type testDependency struct {
+	data []byte
+}
+
+func (d *testDependency) ID() string                       { return "test-dep" }
+func (d *testDependency) MarshalBinary() ([]byte, error)   { return d.data, nil }
+func (d *testDependency) UnmarshalBinary(b []byte) error   { d.data = b; return nil }
+
+type badUnmarshalDep struct {
+	data []byte
+}
+
+func (d *badUnmarshalDep) ID() string                       { return "bad-dep" }
+func (d *badUnmarshalDep) MarshalBinary() ([]byte, error)   { return d.data, nil }
+func (d *badUnmarshalDep) UnmarshalBinary(_ []byte) error   { return errors.New("unmarshal fail") }
+
+type notADependency struct{}
+
+func TestDecodeDependencies(t *testing.T) {
+	t.Run("nil registry returns error", func(t *testing.T) {
+		_, err := DecodeDependencies(nil, &internalpb.Dependency{})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "registry required")
+	})
+
+	t.Run("happy path round-trip", func(t *testing.T) {
+		dep := &testDependency{data: []byte("hello")}
+		encoded, err := EncodeDependencies(dep)
+		require.NoError(t, err)
+		require.Len(t, encoded, 1)
+
+		reg := types.NewRegistry()
+		reg.Register(&testDependency{})
+
+		decoded, err := DecodeDependencies(reg, encoded...)
+		require.NoError(t, err)
+		require.Len(t, decoded, 1)
+		assert.Equal(t, "test-dep", decoded[0].ID())
+		raw, _ := decoded[0].MarshalBinary()
+		assert.Equal(t, []byte("hello"), raw)
+	})
+
+	t.Run("nil dependency in list is skipped", func(t *testing.T) {
+		reg := types.NewRegistry()
+		reg.Register(&testDependency{})
+
+		decoded, err := DecodeDependencies(reg, nil, nil)
+		require.NoError(t, err)
+		assert.Empty(t, decoded)
+	})
+
+	t.Run("unknown type returns error", func(t *testing.T) {
+		reg := types.NewRegistry()
+		dep := &internalpb.Dependency{
+			Id:       "unknown",
+			TypeName: "codec.nonExistentType",
+			Bytea:    []byte("data"),
+		}
+		_, err := DecodeDependencies(reg, dep)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not registered")
+	})
+
+	t.Run("unmarshal error returns error", func(t *testing.T) {
+		dep := &badUnmarshalDep{data: []byte("data")}
+		encoded, err := EncodeDependencies(dep)
+		require.NoError(t, err)
+
+		reg := types.NewRegistry()
+		reg.Register(&badUnmarshalDep{})
+
+		_, err = DecodeDependencies(reg, encoded...)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unmarshal fail")
+	})
+
+	t.Run("type not implementing Dependency returns error", func(t *testing.T) {
+		reg := types.NewRegistry()
+		reg.Register(&notADependency{})
+
+		dep := &internalpb.Dependency{
+			Id:       "bad",
+			TypeName: types.Name(&notADependency{}),
+			Bytea:    []byte("data"),
+		}
+		_, err := DecodeDependencies(reg, dep)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "does not implement")
+	})
+}
+
+func TestAnyToStringError(t *testing.T) {
+	badAny := &anypb.Any{TypeUrl: "type.googleapis.com/google.protobuf.Duration", Value: []byte{0x08, 0x01}}
+	_, err := anyToString(badAny)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "expected google.protobuf.StringValue")
+}
+
+func TestDecodeCRDTDataUnsupportedOneof(t *testing.T) {
+	pb := &internalpb.CRDTData{}
+	_, err := DecodeCRDTData(pb)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported CRDTData type")
+}
+
+func TestDecodeORSetStringBadElement(t *testing.T) {
+	badAny := &anypb.Any{TypeUrl: "type.googleapis.com/google.protobuf.Duration", Value: []byte{0x08, 0x01}}
+	pb := &internalpb.CRDTData{
+		Type: &internalpb.CRDTData_OrSet{
+			OrSet: &internalpb.ORSetData{
+				Entries: []*internalpb.ORSetData_ORSetEntry{
+					{Element: badAny},
+				},
+			},
+		},
+	}
+	_, err := DecodeCRDTData(pb)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "decode ORSet element")
+}
+
+func TestDecodeLWWRegisterStringBadValue(t *testing.T) {
+	badAny := &anypb.Any{TypeUrl: "type.googleapis.com/google.protobuf.Duration", Value: []byte{0x08, 0x01}}
+	pb := &internalpb.CRDTData{
+		Type: &internalpb.CRDTData_LwwRegister{
+			LwwRegister: &internalpb.LWWRegisterData{
+				Value: badAny,
+			},
+		},
+	}
+	_, err := DecodeCRDTData(pb)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "decode LWWRegister value")
+}
+
+func TestDecodeMVRegisterStringBadValue(t *testing.T) {
+	badAny := &anypb.Any{TypeUrl: "type.googleapis.com/google.protobuf.Duration", Value: []byte{0x08, 0x01}}
+	pb := &internalpb.CRDTData{
+		Type: &internalpb.CRDTData_MvRegister{
+			MvRegister: &internalpb.MVRegisterData{
+				Entries: []*internalpb.MVRegisterData_MVRegisterEntry{
+					{Value: badAny, NodeId: "n1", Counter: 1},
+				},
+			},
+		},
+	}
+	_, err := DecodeCRDTData(pb)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "decode MVRegister entry")
+}
+
+func TestDecodeORMapStringGCounterBadKey(t *testing.T) {
+	badAny := &anypb.Any{TypeUrl: "type.googleapis.com/google.protobuf.Duration", Value: []byte{0x08, 0x01}}
+	gcData := &internalpb.CRDTData{
+		Type: &internalpb.CRDTData_GCounter{
+			GCounter: &internalpb.GCounterData{State: map[string]uint64{"n1": 1}},
+		},
+	}
+	pb := &internalpb.CRDTData{
+		Type: &internalpb.CRDTData_OrMap{
+			OrMap: &internalpb.ORMapData{
+				Entries: []*internalpb.ORMapData_ORMapEntry{
+					{Key: badAny, Value: gcData},
+				},
+			},
+		},
+	}
+	_, err := DecodeCRDTData(pb)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "decode ORMap key")
+}
+
+func TestDecodeORMapStringGCounterBadValue(t *testing.T) {
+	goodKey, err := stringToAny("mykey")
+	require.NoError(t, err)
+
+	pb := &internalpb.CRDTData{
+		Type: &internalpb.CRDTData_OrMap{
+			OrMap: &internalpb.ORMapData{
+				Entries: []*internalpb.ORMapData_ORMapEntry{
+					{Key: goodKey, Value: nil},
+				},
+			},
+		},
+	}
+	_, err = DecodeCRDTData(pb)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "decode ORMap value")
+}
+
+func TestDecodeORMapStringGCounterWrongValueType(t *testing.T) {
+	goodKey, err := stringToAny("mykey")
+	require.NoError(t, err)
+
+	pnData := &internalpb.CRDTData{
+		Type: &internalpb.CRDTData_PnCounter{
+			PnCounter: &internalpb.PNCounterData{
+				Increments: &internalpb.GCounterData{State: map[string]uint64{"n1": 5}},
+				Decrements: &internalpb.GCounterData{State: map[string]uint64{}},
+			},
+		},
+	}
+	pb := &internalpb.CRDTData{
+		Type: &internalpb.CRDTData_OrMap{
+			OrMap: &internalpb.ORMapData{
+				Entries: []*internalpb.ORMapData_ORMapEntry{
+					{Key: goodKey, Value: pnData},
+				},
+			},
+		},
+	}
+	_, err = DecodeCRDTData(pb)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "expected *GCounter")
+}
+
+func TestDecodeORMapStringGCounterBadKeySet(t *testing.T) {
+	badAny := &anypb.Any{TypeUrl: "type.googleapis.com/google.protobuf.Duration", Value: []byte{0x08, 0x01}}
+	pb := &internalpb.CRDTData{
+		Type: &internalpb.CRDTData_OrMap{
+			OrMap: &internalpb.ORMapData{
+				KeySet: &internalpb.ORSetData{
+					Entries: []*internalpb.ORSetData_ORSetEntry{
+						{Element: badAny},
+					},
+				},
+			},
+		},
+	}
+	_, err := DecodeCRDTData(pb)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "decode ORMap key set")
 }

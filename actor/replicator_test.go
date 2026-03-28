@@ -35,6 +35,7 @@ import (
 	"github.com/tochemey/goakt/v4/discovery"
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/codec"
+	"github.com/tochemey/goakt/v4/internal/ddata"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/internal/types"
@@ -1381,6 +1382,770 @@ func TestReplicatorCluster(t *testing.T) {
 			assert.Nil(t, data, "node %d should not have the deleted counter", i+1)
 		}
 	})
+}
+
+func TestCRDTConfigExtension(t *testing.T) {
+	t.Run("ID returns expected value", func(t *testing.T) {
+		ext := &crdtConfigExtension{config: crdt.NewConfig()}
+		assert.Equal(t, crdtConfigExtensionID, ext.ID())
+	})
+
+	t.Run("Config returns config", func(t *testing.T) {
+		cfg := crdt.NewConfig()
+		ext := &crdtConfigExtension{config: cfg}
+		assert.Same(t, cfg, ext.Config())
+	})
+}
+
+func TestEncodeCRDTDeltaRoundTrip(t *testing.T) {
+	t.Run("PNCounter delta", func(t *testing.T) {
+		delta := &crdtDelta{
+			KeyID:    "counter-1",
+			DataType: crdt.PNCounterType,
+			Delta:    crdt.NewPNCounter().Increment("node-1", 5),
+			Origin:   "node-1",
+		}
+
+		pb, err := encodeCRDTDelta(delta)
+		require.NoError(t, err)
+		require.NotNil(t, pb)
+		assert.Equal(t, "node-1", pb.GetOriginNode())
+
+		decoded, err := decodeCRDTDelta(pb)
+		require.NoError(t, err)
+		assert.Equal(t, "counter-1", decoded.KeyID)
+		assert.Equal(t, crdt.PNCounterType, decoded.DataType)
+		assert.Equal(t, "node-1", decoded.Origin)
+		assert.Equal(t, int64(5), decoded.Delta.(*crdt.PNCounter).Value())
+	})
+
+	t.Run("GCounter delta", func(t *testing.T) {
+		delta := &crdtDelta{
+			KeyID:    "gc-1",
+			DataType: crdt.GCounterType,
+			Delta:    crdt.NewGCounter().Increment("node-2", 10),
+			Origin:   "node-2",
+		}
+
+		pb, err := encodeCRDTDelta(delta)
+		require.NoError(t, err)
+
+		decoded, err := decodeCRDTDelta(pb)
+		require.NoError(t, err)
+		assert.Equal(t, "gc-1", decoded.KeyID)
+		assert.Equal(t, uint64(10), decoded.Delta.(*crdt.GCounter).Value())
+	})
+
+	t.Run("encode unsupported type returns error", func(t *testing.T) {
+		delta := &crdtDelta{
+			KeyID:    "bad",
+			DataType: crdt.LWWRegisterType,
+			Delta:    crdt.NewLWWRegister[int](),
+			Origin:   "node-1",
+		}
+		_, err := encodeCRDTDelta(delta)
+		require.Error(t, err)
+	})
+
+	t.Run("decode bad data returns error", func(t *testing.T) {
+		pb := &internalpb.CRDTDelta{
+			Key:        codec.EncodeCRDTKey("key", crdt.GCounterType),
+			OriginNode: "node-1",
+			Data:       nil,
+		}
+		_, err := decodeCRDTDelta(pb)
+		require.Error(t, err)
+	})
+
+	t.Run("decode bad key returns error", func(t *testing.T) {
+		gcData, err := codec.EncodeCRDTData(crdt.NewGCounter().Increment("n1", 1))
+		require.NoError(t, err)
+
+		pb := &internalpb.CRDTDelta{
+			Key: &internalpb.CRDTKey{
+				Id:       "bad",
+				DataType: internalpb.CRDTDataType_CRDT_DATA_TYPE_UNSPECIFIED,
+			},
+			OriginNode: "node-1",
+			Data:       gcData,
+		}
+		_, err = decodeCRDTDelta(pb)
+		require.Error(t, err)
+	})
+}
+
+func TestReplicatorHandleSnapshot(t *testing.T) {
+	t.Run("nil snapshot store is no-op", func(t *testing.T) {
+		r := newTestReplicator()
+		r.logger = log.DiscardLogger
+		r.snapshotStore = nil
+		r.handleSnapshot()
+	})
+
+	t.Run("saves store to snapshot", func(t *testing.T) {
+		dir := t.TempDir()
+		store, err := ddata.NewStore(dir)
+		require.NoError(t, err)
+		defer store.Close()
+
+		r := newTestReplicator()
+		r.logger = log.DiscardLogger
+		r.snapshotStore = store
+		r.store["gc-1"] = crdt.NewGCounter().Increment("node-1", 7)
+		r.keyTypes["gc-1"] = crdt.GCounterType
+		r.versions["gc-1"] = 2
+
+		r.handleSnapshot()
+
+		loaded, loadedTypes, loadedVersions, err := store.Load()
+		require.NoError(t, err)
+		require.Len(t, loaded, 1)
+		assert.Equal(t, crdt.GCounterType, loadedTypes["gc-1"])
+		assert.Equal(t, uint64(2), loadedVersions["gc-1"])
+		assert.Equal(t, uint64(7), loaded["gc-1"].(*crdt.GCounter).Value())
+	})
+}
+
+func TestReplicatorRestoreFromSnapshot(t *testing.T) {
+	t.Run("no-op when snapshot not configured", func(t *testing.T) {
+		r := newTestReplicator()
+		r.logger = log.DiscardLogger
+		err := r.restoreFromSnapshot()
+		require.NoError(t, err)
+		assert.Nil(t, r.snapshotStore)
+	})
+
+	t.Run("restores persisted data", func(t *testing.T) {
+		dir := t.TempDir()
+
+		store, err := ddata.NewStore(dir)
+		require.NoError(t, err)
+
+		data := map[string]crdt.ReplicatedData{
+			"counter-1": crdt.NewGCounter().Increment("node-1", 42),
+		}
+		keyTypes := map[string]crdt.DataType{"counter-1": crdt.GCounterType}
+		versions := map[string]uint64{"counter-1": 5}
+		require.NoError(t, store.Save(data, keyTypes, versions))
+		require.NoError(t, store.Close())
+
+		r := newTestReplicator()
+		r.logger = log.DiscardLogger
+		r.config = crdt.NewConfig(
+			crdt.WithSnapshotInterval(time.Second),
+			crdt.WithSnapshotDir(dir),
+		)
+
+		err = r.restoreFromSnapshot()
+		require.NoError(t, err)
+		require.NotNil(t, r.snapshotStore)
+		defer r.snapshotStore.Close()
+
+		assert.Len(t, r.store, 1)
+		assert.Equal(t, uint64(42), r.store["counter-1"].(*crdt.GCounter).Value())
+		assert.Equal(t, crdt.GCounterType, r.keyTypes["counter-1"])
+		assert.Equal(t, uint64(5), r.versions["counter-1"])
+		_, hasSub := r.subscriptions["counter-1"]
+		assert.True(t, hasSub)
+	})
+
+	t.Run("empty snapshot returns empty maps", func(t *testing.T) {
+		dir := t.TempDir()
+
+		store, err := ddata.NewStore(dir)
+		require.NoError(t, err)
+		require.NoError(t, store.Close())
+
+		r := newTestReplicator()
+		r.logger = log.DiscardLogger
+		r.config = crdt.NewConfig(
+			crdt.WithSnapshotInterval(time.Second),
+			crdt.WithSnapshotDir(dir),
+		)
+
+		err = r.restoreFromSnapshot()
+		require.NoError(t, err)
+		require.NotNil(t, r.snapshotStore)
+		defer r.snapshotStore.Close()
+
+		assert.Empty(t, r.store)
+	})
+}
+
+func TestReplicatorHandleTerminated(t *testing.T) {
+	ctx := context.TODO()
+	sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	err := sys.Start(ctx)
+	require.NoError(t, err)
+
+	pid1, err := sys.Spawn(ctx, "w1", NewMockActor(), WithLongLived())
+	require.NoError(t, err)
+	pid2, err := sys.Spawn(ctx, "w2", NewMockActor(), WithLongLived())
+	require.NoError(t, err)
+
+	t.Run("removes terminated actor from all watcher lists", func(t *testing.T) {
+		r := newTestReplicator()
+		r.watchers["key-a"] = []*PID{pid1, pid2}
+		r.watchers["key-b"] = []*PID{pid1}
+
+		terminated := &Terminated{actorPath: pid1.Path()}
+		r.handleTerminated(terminated)
+
+		assert.Len(t, r.watchers["key-a"], 1)
+		assert.Equal(t, pid2.ID(), r.watchers["key-a"][0].ID())
+		_, hasBKey := r.watchers["key-b"]
+		assert.False(t, hasBKey)
+	})
+
+	t.Run("does nothing for unknown actor", func(t *testing.T) {
+		r := newTestReplicator()
+		r.watchers["key-a"] = []*PID{pid1}
+
+		terminated := &Terminated{actorPath: pid2.Path()}
+		r.handleTerminated(terminated)
+
+		assert.Len(t, r.watchers["key-a"], 1)
+	})
+
+	err = sys.Stop(ctx)
+	assert.NoError(t, err)
+}
+
+func TestReplicatorProtoDelta(t *testing.T) {
+	t.Run("proto delta from peer merges into store", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		err := sys.Start(ctx)
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		repl := spawnTestReplicator(t, sys)
+
+		counterKey := crdt.PNCounterKey("counter")
+		_, err = Ask(ctx, repl, &crdt.Update[*crdt.PNCounter]{
+			Key:     counterKey,
+			Initial: crdt.NewPNCounter(),
+			Modify: func(current *crdt.PNCounter) *crdt.PNCounter {
+				return current.Increment("node-1", 5)
+			},
+		}, time.Second)
+		require.NoError(t, err)
+
+		peerDelta := crdt.NewPNCounter().Increment("node-2", 10)
+		pbDelta, err := encodeCRDTDelta(&crdtDelta{
+			KeyID:    "counter",
+			DataType: crdt.PNCounterType,
+			Delta:    peerDelta,
+			Origin:   "peer-node",
+		})
+		require.NoError(t, err)
+
+		err = Tell(ctx, repl, pbDelta)
+		require.NoError(t, err)
+		pause.For(500 * time.Millisecond)
+
+		resp, err := Ask(ctx, repl, &crdt.Get[*crdt.PNCounter]{Key: counterKey}, time.Second)
+		require.NoError(t, err)
+		getResp := resp.(*crdt.GetResponse[*crdt.PNCounter])
+		assert.Equal(t, int64(15), getResp.Data.Value())
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("proto delta with bad data is handled gracefully", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		err := sys.Start(ctx)
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		repl := spawnTestReplicator(t, sys)
+
+		badDelta := &internalpb.CRDTDelta{
+			Key:        codec.EncodeCRDTKey("key", crdt.GCounterType),
+			OriginNode: "peer",
+			Data:       nil,
+		}
+		err = Tell(ctx, repl, badDelta)
+		require.NoError(t, err)
+		pause.For(500 * time.Millisecond)
+
+		assert.True(t, repl.IsRunning())
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+}
+
+func TestReplicatorSubscribeUnsubscribe(t *testing.T) {
+	ctx := context.TODO()
+	sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	err := sys.Start(ctx)
+	require.NoError(t, err)
+	pause.For(time.Second)
+
+	repl := spawnTestReplicator(t, sys)
+
+	watcher, err := sys.Spawn(ctx, "watcher", NewMockActor(), WithLongLived())
+	require.NoError(t, err)
+
+	counterKey := crdt.PNCounterKey("watched-counter")
+
+	err = watcher.Tell(ctx, repl, &crdt.Subscribe[*crdt.PNCounter]{Key: counterKey})
+	require.NoError(t, err)
+	pause.For(500 * time.Millisecond)
+
+	_, err = Ask(ctx, repl, &crdt.Update[*crdt.PNCounter]{
+		Key:     counterKey,
+		Initial: crdt.NewPNCounter(),
+		Modify: func(current *crdt.PNCounter) *crdt.PNCounter {
+			return current.Increment("node-1", 5)
+		},
+	}, time.Second)
+	require.NoError(t, err)
+	pause.For(500 * time.Millisecond)
+
+	err = watcher.Tell(ctx, repl, &crdt.Unsubscribe[*crdt.PNCounter]{Key: counterKey})
+	require.NoError(t, err)
+	pause.For(500 * time.Millisecond)
+
+	assert.True(t, repl.IsRunning())
+	assert.True(t, watcher.IsRunning())
+
+	err = sys.Stop(ctx)
+	assert.NoError(t, err)
+}
+
+func TestReplicatorHandleDigestAndFullState(t *testing.T) {
+	t.Run("digest processes entries and stays running", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		err := sys.Start(ctx)
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		repl := spawnTestReplicator(t, sys)
+
+		_, err = Ask(ctx, repl, &crdt.Update[*crdt.GCounter]{
+			Key:     crdt.GCounterKey("gc-1"),
+			Initial: crdt.NewGCounter(),
+			Modify: func(current *crdt.GCounter) *crdt.GCounter {
+				return current.Increment("node-1", 10)
+			},
+		}, time.Second)
+		require.NoError(t, err)
+
+		emptyDigest := &internalpb.CRDTDigest{
+			Entries: []*internalpb.CRDTDigestEntry{},
+		}
+		err = Tell(ctx, repl, emptyDigest)
+		require.NoError(t, err)
+		pause.For(500 * time.Millisecond)
+
+		assert.True(t, repl.IsRunning())
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("digest with up-to-date peer sends nothing", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		err := sys.Start(ctx)
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		repl := spawnTestReplicator(t, sys)
+
+		_, err = Ask(ctx, repl, &crdt.Update[*crdt.GCounter]{
+			Key:     crdt.GCounterKey("gc-1"),
+			Initial: crdt.NewGCounter(),
+			Modify: func(current *crdt.GCounter) *crdt.GCounter {
+				return current.Increment("node-1", 5)
+			},
+		}, time.Second)
+		require.NoError(t, err)
+
+		digest := &internalpb.CRDTDigest{
+			Entries: []*internalpb.CRDTDigestEntry{
+				{
+					Key:     codec.EncodeCRDTKey("gc-1", crdt.GCounterType),
+					Version: 999,
+				},
+			},
+		}
+		err = Tell(ctx, repl, digest)
+		require.NoError(t, err)
+		pause.For(500 * time.Millisecond)
+
+		assert.True(t, repl.IsRunning())
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("digest with bad key entry is handled gracefully", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		err := sys.Start(ctx)
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		repl := spawnTestReplicator(t, sys)
+
+		digest := &internalpb.CRDTDigest{
+			Entries: []*internalpb.CRDTDigestEntry{
+				{
+					Key: &internalpb.CRDTKey{
+						Id:       "bad",
+						DataType: internalpb.CRDTDataType_CRDT_DATA_TYPE_UNSPECIFIED,
+					},
+					Version: 1,
+				},
+			},
+		}
+		err = Tell(ctx, repl, digest)
+		require.NoError(t, err)
+		pause.For(500 * time.Millisecond)
+
+		assert.True(t, repl.IsRunning())
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("full state merges into local store", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		err := sys.Start(ctx)
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		repl := spawnTestReplicator(t, sys)
+
+		gc := crdt.NewGCounter().Increment("node-2", 20)
+		pbData, err := codec.EncodeCRDTData(gc)
+		require.NoError(t, err)
+
+		fullState := &internalpb.CRDTFullState{
+			Entries: []*internalpb.CRDTFullStateEntry{
+				{
+					Key:  codec.EncodeCRDTKey("new-gc", crdt.GCounterType),
+					Data: pbData,
+				},
+			},
+		}
+		err = Tell(ctx, repl, fullState)
+		require.NoError(t, err)
+		pause.For(500 * time.Millisecond)
+
+		resp, err := Ask(ctx, repl, &crdt.Get[*crdt.GCounter]{
+			Key: crdt.GCounterKey("new-gc"),
+		}, time.Second)
+		require.NoError(t, err)
+		getResp := resp.(*crdt.GetResponse[*crdt.GCounter])
+		require.NotNil(t, getResp.Data)
+		assert.Equal(t, uint64(20), getResp.Data.Value())
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("full state merges with existing key", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		err := sys.Start(ctx)
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		repl := spawnTestReplicator(t, sys)
+
+		_, err = Ask(ctx, repl, &crdt.Update[*crdt.GCounter]{
+			Key:     crdt.GCounterKey("merge-gc"),
+			Initial: crdt.NewGCounter(),
+			Modify: func(current *crdt.GCounter) *crdt.GCounter {
+				return current.Increment("node-1", 10)
+			},
+		}, time.Second)
+		require.NoError(t, err)
+
+		peerGC := crdt.NewGCounter().Increment("node-2", 20)
+		pbData, err := codec.EncodeCRDTData(peerGC)
+		require.NoError(t, err)
+
+		fullState := &internalpb.CRDTFullState{
+			Entries: []*internalpb.CRDTFullStateEntry{
+				{
+					Key:  codec.EncodeCRDTKey("merge-gc", crdt.GCounterType),
+					Data: pbData,
+				},
+			},
+		}
+		err = Tell(ctx, repl, fullState)
+		require.NoError(t, err)
+		pause.For(500 * time.Millisecond)
+
+		resp, err := Ask(ctx, repl, &crdt.Get[*crdt.GCounter]{
+			Key: crdt.GCounterKey("merge-gc"),
+		}, time.Second)
+		require.NoError(t, err)
+		getResp := resp.(*crdt.GetResponse[*crdt.GCounter])
+		require.NotNil(t, getResp.Data)
+		assert.Equal(t, uint64(30), getResp.Data.Value())
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("full state with bad key is handled gracefully", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		err := sys.Start(ctx)
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		repl := spawnTestReplicator(t, sys)
+
+		fullState := &internalpb.CRDTFullState{
+			Entries: []*internalpb.CRDTFullStateEntry{
+				{
+					Key: &internalpb.CRDTKey{
+						Id:       "bad",
+						DataType: internalpb.CRDTDataType_CRDT_DATA_TYPE_UNSPECIFIED,
+					},
+					Data: nil,
+				},
+			},
+		}
+		err = Tell(ctx, repl, fullState)
+		require.NoError(t, err)
+		pause.For(500 * time.Millisecond)
+
+		assert.True(t, repl.IsRunning())
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("full state with bad data is handled gracefully", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		err := sys.Start(ctx)
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		repl := spawnTestReplicator(t, sys)
+
+		fullState := &internalpb.CRDTFullState{
+			Entries: []*internalpb.CRDTFullStateEntry{
+				{
+					Key:  codec.EncodeCRDTKey("gc-bad", crdt.GCounterType),
+					Data: nil,
+				},
+			},
+		}
+		err = Tell(ctx, repl, fullState)
+		require.NoError(t, err)
+		pause.For(500 * time.Millisecond)
+
+		assert.True(t, repl.IsRunning())
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("full state skips tombstoned keys", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		err := sys.Start(ctx)
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		repl := spawnTestReplicator(t, sys)
+
+		counterKey := crdt.PNCounterKey("to-delete")
+		_, err = Ask(ctx, repl, &crdt.Update[*crdt.PNCounter]{
+			Key:     counterKey,
+			Initial: crdt.NewPNCounter(),
+			Modify: func(current *crdt.PNCounter) *crdt.PNCounter {
+				return current.Increment("node-1", 5)
+			},
+		}, time.Second)
+		require.NoError(t, err)
+
+		_, err = Ask(ctx, repl, &crdt.Delete[*crdt.PNCounter]{Key: counterKey}, time.Second)
+		require.NoError(t, err)
+
+		pn := crdt.NewPNCounter().Increment("node-2", 99)
+		pbData, err := codec.EncodeCRDTData(pn)
+		require.NoError(t, err)
+
+		fullState := &internalpb.CRDTFullState{
+			Entries: []*internalpb.CRDTFullStateEntry{
+				{
+					Key:  codec.EncodeCRDTKey("to-delete", crdt.PNCounterType),
+					Data: pbData,
+				},
+			},
+		}
+		err = Tell(ctx, repl, fullState)
+		require.NoError(t, err)
+		pause.For(500 * time.Millisecond)
+
+		resp, err := Ask(ctx, repl, &crdt.Get[*crdt.PNCounter]{Key: counterKey}, time.Second)
+		require.NoError(t, err)
+		getResp := resp.(*crdt.GetResponse[*crdt.PNCounter])
+		assert.Nil(t, getResp.Data)
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+}
+
+func TestReplicatorHandleReadRequest(t *testing.T) {
+	t.Run("returns local value for key", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		err := sys.Start(ctx)
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		repl := spawnTestReplicator(t, sys)
+
+		_, err = Ask(ctx, repl, &crdt.Update[*crdt.GCounter]{
+			Key:     crdt.GCounterKey("gc-1"),
+			Initial: crdt.NewGCounter(),
+			Modify: func(current *crdt.GCounter) *crdt.GCounter {
+				return current.Increment("node-1", 42)
+			},
+		}, time.Second)
+		require.NoError(t, err)
+
+		req := &internalpb.CRDTReadRequest{
+			Key:      codec.EncodeCRDTKey("gc-1", crdt.GCounterType),
+			FromNode: "peer-node",
+		}
+		resp, err := Ask(ctx, repl, req, time.Second)
+		require.NoError(t, err)
+		readResp, ok := resp.(*internalpb.CRDTReadResponse)
+		require.True(t, ok)
+		require.NotNil(t, readResp.GetData())
+
+		data, err := codec.DecodeCRDTData(readResp.GetData())
+		require.NoError(t, err)
+		assert.Equal(t, uint64(42), data.(*crdt.GCounter).Value())
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("returns nil data for missing key", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		err := sys.Start(ctx)
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		repl := spawnTestReplicator(t, sys)
+
+		req := &internalpb.CRDTReadRequest{
+			Key:      codec.EncodeCRDTKey("nonexistent", crdt.GCounterType),
+			FromNode: "peer-node",
+		}
+		resp, err := Ask(ctx, repl, req, time.Second)
+		require.NoError(t, err)
+		readResp, ok := resp.(*internalpb.CRDTReadResponse)
+		require.True(t, ok)
+		assert.Nil(t, readResp.GetData())
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+}
+
+func TestReplicatorProtoTombstoneWithBadKey(t *testing.T) {
+	r := newTestReplicator()
+	r.nodeID = "local-node"
+	r.logger = log.DiscardLogger
+
+	pbTombstone := &internalpb.CRDTTombstone{
+		Key: &internalpb.CRDTKey{
+			Id:       "bad",
+			DataType: internalpb.CRDTDataType_CRDT_DATA_TYPE_UNSPECIFIED,
+		},
+		DeletedAtNanos: time.Now().UnixNano(),
+		DeletedByNode:  "remote-node",
+	}
+	r.handleProtoTombstone(pbTombstone)
+	_, exists := r.tombstones["bad"]
+	assert.False(t, exists)
+}
+
+func TestReplicatorPostStopWithSnapshot(t *testing.T) {
+	ctx := context.TODO()
+	dir := t.TempDir()
+
+	sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	config := crdt.NewConfig(
+		crdt.WithSnapshotInterval(time.Minute),
+		crdt.WithSnapshotDir(dir),
+	)
+
+	err := sys.Start(ctx)
+	require.NoError(t, err)
+	pause.For(time.Second)
+
+	impl := sys.(*actorSystem)
+	impl.extensions.Set(crdtConfigExtensionID, &crdtConfigExtension{config: config})
+
+	repl, err := sys.Spawn(ctx, "replicator-snap", newReplicatorActor(), WithLongLived())
+	require.NoError(t, err)
+	require.NotNil(t, repl)
+	pause.For(500 * time.Millisecond)
+
+	counterKey := crdt.PNCounterKey("snap-counter")
+	_, err = Ask(ctx, repl, &crdt.Update[*crdt.PNCounter]{
+		Key:     counterKey,
+		Initial: crdt.NewPNCounter(),
+		Modify: func(current *crdt.PNCounter) *crdt.PNCounter {
+			return current.Increment("node-1", 77)
+		},
+	}, time.Second)
+	require.NoError(t, err)
+
+	err = sys.Stop(ctx)
+	require.NoError(t, err)
+
+	store, err := ddata.NewStore(dir)
+	require.NoError(t, err)
+	data, keyTypes, versions, loadErr := store.Load()
+	require.NoError(t, loadErr)
+	assert.Len(t, data, 1)
+	assert.Equal(t, int64(77), data["snap-counter"].(*crdt.PNCounter).Value())
+	assert.Equal(t, crdt.PNCounterType, keyTypes["snap-counter"])
+	assert.True(t, versions["snap-counter"] > 0)
+	require.NoError(t, store.Close())
+}
+
+func TestReplicatorReset(t *testing.T) {
+	r := newTestReplicator()
+	r.store["k"] = crdt.NewGCounter()
+	r.keyTypes["k"] = crdt.GCounterType
+	r.subscriptions["k"] = types.Unit{}
+	r.watchers["k"] = nil
+	r.tombstones["k"] = &tombstone{}
+	r.versions["k"] = 1
+
+	r.reset()
+
+	assert.Nil(t, r.store)
+	assert.Nil(t, r.keyTypes)
+	assert.Nil(t, r.subscriptions)
+	assert.Nil(t, r.watchers)
+	assert.Nil(t, r.tombstones)
+	assert.Nil(t, r.versions)
+	assert.Nil(t, r.snapshotStore)
 }
 
 // ---------------------------------------------------------------------------

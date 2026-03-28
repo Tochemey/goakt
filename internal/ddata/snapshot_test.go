@@ -23,13 +23,18 @@
 package ddata
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/bbolt"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v4/crdt"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
 )
 
 func TestStore(t *testing.T) {
@@ -365,5 +370,146 @@ func TestStore(t *testing.T) {
 		err = store.Remove()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "store is still open")
+	})
+
+	t.Run("NewStore with invalid directory", func(t *testing.T) {
+		dir := t.TempDir()
+		filePath := filepath.Join(dir, "blockerfile")
+		err := os.WriteFile(filePath, []byte("x"), 0o600)
+		require.NoError(t, err)
+
+		_, err = NewStore(filepath.Join(filePath, "subdir"))
+		require.Error(t, err)
+	})
+
+	t.Run("save with unsupported CRDT type returns error", func(t *testing.T) {
+		dir := t.TempDir()
+		store, err := NewStore(dir)
+		require.NoError(t, err)
+		defer store.Close()
+
+		data := map[string]crdt.ReplicatedData{
+			"lww-int": crdt.NewLWWRegister[int](),
+		}
+		keyTypes := map[string]crdt.DataType{"lww-int": crdt.LWWRegisterType}
+		versions := map[string]uint64{"lww-int": 1}
+
+		err = store.Save(data, keyTypes, versions)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "encode snapshot")
+	})
+
+	t.Run("load with corrupted entry returns error", func(t *testing.T) {
+		dir := t.TempDir()
+		store, err := NewStore(dir)
+		require.NoError(t, err)
+		defer store.Close()
+
+		err = store.db.Update(func(tx *bbolt.Tx) error {
+			b := tx.Bucket([]byte(bucketName))
+			return b.Put([]byte("corrupt-key"), []byte{0xff, 0xff})
+		})
+		require.NoError(t, err)
+
+		_, _, _, err = store.Load()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unmarshal snapshot entry")
+	})
+
+	t.Run("remove already removed file is no-op", func(t *testing.T) {
+		dir := t.TempDir()
+		store, err := NewStore(dir)
+		require.NoError(t, err)
+
+		err = store.Close()
+		require.NoError(t, err)
+
+		err = store.Remove()
+		require.NoError(t, err)
+
+		err = store.Remove()
+		require.NoError(t, err)
+	})
+
+	t.Run("load with bad CRDT key returns error", func(t *testing.T) {
+		dir := t.TempDir()
+		store, err := NewStore(dir)
+		require.NoError(t, err)
+		defer store.Close()
+
+		entry := &internalpb.CRDTSnapshotEntry{
+			Key: &internalpb.CRDTKey{
+				Id:       "bad-key",
+				DataType: internalpb.CRDTDataType_CRDT_DATA_TYPE_UNSPECIFIED,
+			},
+			Data:    &internalpb.CRDTData{},
+			Version: 1,
+		}
+		raw, err := proto.Marshal(entry)
+		require.NoError(t, err)
+
+		err = store.db.Update(func(tx *bbolt.Tx) error {
+			b := tx.Bucket([]byte(bucketName))
+			return b.Put([]byte("bad-key"), raw)
+		})
+		require.NoError(t, err)
+
+		_, _, _, err = store.Load()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "decode snapshot key")
+	})
+
+	t.Run("load with bad CRDT data returns error", func(t *testing.T) {
+		dir := t.TempDir()
+		store, err := NewStore(dir)
+		require.NoError(t, err)
+		defer store.Close()
+
+		entry := &internalpb.CRDTSnapshotEntry{
+			Key: &internalpb.CRDTKey{
+				Id:       "bad-data",
+				DataType: internalpb.CRDTDataType_CRDT_DATA_TYPE_G_COUNTER,
+			},
+			Data:    nil,
+			Version: 1,
+		}
+		raw, err := proto.Marshal(entry)
+		require.NoError(t, err)
+
+		err = store.db.Update(func(tx *bbolt.Tx) error {
+			b := tx.Bucket([]byte(bucketName))
+			return b.Put([]byte("bad-data"), raw)
+		})
+		require.NoError(t, err)
+
+		_, _, _, err = store.Load()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "decode snapshot data")
+	})
+
+	t.Run("save and load round trip with ORMap", func(t *testing.T) {
+		dir := t.TempDir()
+		store, err := NewStore(dir)
+		require.NoError(t, err)
+		defer store.Close()
+
+		m := crdt.NewORMap[string, *crdt.GCounter]()
+		m = m.Set("node-1", "key-a", crdt.NewGCounter().Increment("node-1", 5))
+
+		data := map[string]crdt.ReplicatedData{"map-1": m}
+		keyTypes := map[string]crdt.DataType{"map-1": crdt.ORMapType}
+		versions := map[string]uint64{"map-1": 1}
+
+		err = store.Save(data, keyTypes, versions)
+		require.NoError(t, err)
+
+		loadedData, loadedTypes, loadedVersions, err := store.Load()
+		require.NoError(t, err)
+		assert.Equal(t, crdt.ORMapType, loadedTypes["map-1"])
+		assert.Equal(t, uint64(1), loadedVersions["map-1"])
+		loaded := loadedData["map-1"].(*crdt.ORMap[string, *crdt.GCounter])
+		v, ok := loaded.Get("key-a")
+		require.True(t, ok)
+		assert.Equal(t, uint64(5), v.Value())
 	})
 }
