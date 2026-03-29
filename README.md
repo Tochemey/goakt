@@ -26,7 +26,7 @@ Also, check the reference section at the end of the post for more material regar
 > - **v3** — Protocol buffers for actor messages. Branch: [`release/3.14`](https://github.com/Tochemey/goakt/tree/release/3.14).
 > - **v4** — Typed messages with `any`, unified APIs, pluggable serializers (Proto/CBOR), and config-only remoting. See [CHANGELOG.md](./CHANGELOG.md) for migration; [Docs](https://docs.goakt.dev/) for API reference.
 
-## ✨ Features
+## ⚡ Features
 
 - **Actor Model**: Build concurrent and distributed systems using the actor model with typed messages.
 - **Messaging**: Tell/Ask APIs for fire-and-forget or request/response flows.
@@ -50,7 +50,7 @@ Also, check the reference section at the end of the post for more material regar
 - **Distributed Data**: Built-in CRDTs (GCounter, PNCounter, LWWRegister, MVRegister, ORSet, ORMap, Flag) with delta-based replication and anti-entropy synchronization. Supports configurable coordination levels (Majority, All) for reads and writes, key subscriptions for change notifications, tombstone-based deletion, optional BoltDB snapshots for durability, and role-based replication scoping. Type-safe keys and message APIs make it easy to build eventually consistent distributed state without external dependencies.
 - **Reactive Streams**: Actor-backed, backpressure-aware stream processing with a composable DSL. Includes rich sources (channels, actors, ticks, network I/O, unfold), transformations (map, filter, flatMap, batch, throttle, deduplicate, scan, parallel map), and sinks (forEach, collect, fold, actor forwarding). Supports fan-out (broadcast, balance), fan-in (merge, combine), non-linear graph topologies, configurable error strategies (fail-fast, resume, retry), overflow strategies, automatic stage fusion, and built-in metrics and tracing hooks.
 
-## 📥 Installation
+## 📦 Installation
 
 ```bash
 # v3.x.x — stable, used in production
@@ -60,24 +60,24 @@ go get github.com/tochemey/goakt/v3
 go get github.com/tochemey/goakt/v4
 ```
 
-##  Documentations
+## 📖 Documentations
 
 - **v4**: [v4](https://docs.goakt.dev)
 - **v3**: [v3](https://tochemey.gitbook.io/goakt)
 
-## 💡 Examples
+## 🧪 Examples
 
 Kindly check out the [examples](https://github.com/Tochemey/goakt-examples)' repository.
 
-## 💙 Support
+## 🛟 Support
 
 GoAkt is free and open source. If you need priority support on complex topics or request new features, please consider [sponsorship](https://github.com/sponsors/Tochemey).
 
-## 🔒 Security
+## 🔐 Security
 
 Applications using this library should routinely upgrade their **Go version** and refresh **dependencies** as needed to mitigate security vulnerabilities. **GoAkt** will make a best effort to keep dependencies current and perform vulnerability checks whenever necessary.
 
-## 🌍 Community
+## 💬 Community
 
 You can join these groups and chat to discuss and ask GoAkt related questions on:
 
@@ -90,7 +90,7 @@ We welcome contributions—bug fixes, new features, and documentation improvemen
 
 See [contributing.md](./contributing.md) for prerequisites, setup, and the full contribution workflow.
 
-## 🏭 In Production
+## 🚀 In Production
 
 This framework is used in production by the following projects/companies:
 
@@ -105,6 +105,6 @@ Kindly use this [issue](https://github.com/Tochemey/goakt/issues/948) to give us
 
 One can find the benchmark tests here: [Benchmark](./bench/)
 
-## 💰 Sponsors
+## ❤️ Sponsors
 
 <!-- sponsors --><a href="https://github.com/andrew-werdna"><img src="https:&#x2F;&#x2F;github.com&#x2F;andrew-werdna.png" width="60px" alt="User avatar: Andrew Brown" /></a><!-- sponsors -->
