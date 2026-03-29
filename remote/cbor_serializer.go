@@ -181,7 +181,30 @@ func (s *CBORSerializer) Deserialize(data []byte) (any, error) {
 		return nil, errors.Join(ErrCBORDeserializeFailed, err)
 	}
 
+	// Built-in primitives are returned as values (not pointers) so that
+	// round-trip serialization preserves the original type. This is critical
+	// for CRDT types that use any-typed map keys (e.g., ORSet).
+	if isBuiltinPrimitive(elemType) {
+		return ptr.Elem().Interface(), nil
+	}
 	return ptr.Interface(), nil
+}
+
+// isBuiltinPrimitive reports whether t is a Go built-in primitive type.
+// User-defined named types with primitive underlying kinds (e.g., type MyID string)
+// are excluded via the PkgPath check — they retain pointer-return semantics.
+func isBuiltinPrimitive(t reflect.Type) bool {
+	if t.PkgPath() != "" {
+		return false
+	}
+	switch t.Kind() {
+	case reflect.String, reflect.Bool,
+		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64:
+		return true
+	}
+	return false
 }
 
 // Serialize implements [Serializer]. It derives the message's type name from

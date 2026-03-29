@@ -25,7 +25,7 @@ package crdt
 import "time"
 
 // ensure LWWRegister implements ReplicatedData at compile time.
-var _ ReplicatedData = (*LWWRegister[any])(nil)
+var _ ReplicatedData = (*LWWRegister)(nil)
 
 // LWWRegister is a last-writer-wins register CRDT.
 //
@@ -33,22 +33,22 @@ var _ ReplicatedData = (*LWWRegister[any])(nil)
 // resolved by taking the value with the highest timestamp. If timestamps
 // are equal, the write from the node with the lexicographically higher
 // node ID wins (deterministic tiebreaker).
-type LWWRegister[T any] struct {
-	value     T
+type LWWRegister struct {
+	value     any
 	timestamp int64
 	nodeID    string
 	dirty     bool
 }
 
 // NewLWWRegister creates a new LWWRegister with a zero value.
-func NewLWWRegister[T any]() *LWWRegister[T] {
-	return &LWWRegister[T]{}
+func NewLWWRegister() *LWWRegister {
+	return &LWWRegister{}
 }
 
 // Set updates the register value with the given timestamp and node ID.
 // Returns a new LWWRegister with the updated state.
-func (r *LWWRegister[T]) Set(value T, timestamp time.Time, nodeID string) *LWWRegister[T] {
-	return &LWWRegister[T]{
+func (r *LWWRegister) Set(value any, timestamp time.Time, nodeID string) *LWWRegister {
+	return &LWWRegister{
 		value:     value,
 		timestamp: timestamp.UnixNano(),
 		nodeID:    nodeID,
@@ -57,17 +57,17 @@ func (r *LWWRegister[T]) Set(value T, timestamp time.Time, nodeID string) *LWWRe
 }
 
 // Value returns the current register value.
-func (r *LWWRegister[T]) Value() T {
+func (r *LWWRegister) Value() any {
 	return r.value
 }
 
 // Timestamp returns the timestamp of the current value as nanoseconds since epoch.
-func (r *LWWRegister[T]) Timestamp() int64 {
+func (r *LWWRegister) Timestamp() int64 {
 	return r.timestamp
 }
 
 // NodeID returns the node ID that last wrote this value.
-func (r *LWWRegister[T]) NodeID() string {
+func (r *LWWRegister) NodeID() string {
 	return r.nodeID
 }
 
@@ -75,8 +75,8 @@ func (r *LWWRegister[T]) NodeID() string {
 // highest timestamp. If timestamps are equal, the node with the
 // lexicographically higher node ID wins.
 // Both inputs are left unchanged.
-func (r *LWWRegister[T]) Merge(other ReplicatedData) ReplicatedData {
-	o, ok := other.(*LWWRegister[T])
+func (r *LWWRegister) Merge(other ReplicatedData) ReplicatedData {
+	o, ok := other.(*LWWRegister)
 	if !ok {
 		return r
 	}
@@ -85,7 +85,7 @@ func (r *LWWRegister[T]) Merge(other ReplicatedData) ReplicatedData {
 	if o.timestamp > r.timestamp || (o.timestamp == r.timestamp && o.nodeID > r.nodeID) {
 		winner = o
 	}
-	return &LWWRegister[T]{
+	return &LWWRegister{
 		value:     winner.value,
 		timestamp: winner.timestamp,
 		nodeID:    winner.nodeID,
@@ -94,7 +94,7 @@ func (r *LWWRegister[T]) Merge(other ReplicatedData) ReplicatedData {
 
 // Delta returns the register state if it has changed since the last ResetDelta.
 // Returns nil if there are no changes.
-func (r *LWWRegister[T]) Delta() ReplicatedData {
+func (r *LWWRegister) Delta() ReplicatedData {
 	if !r.dirty {
 		return nil
 	}
@@ -102,13 +102,13 @@ func (r *LWWRegister[T]) Delta() ReplicatedData {
 }
 
 // ResetDelta clears the dirty flag.
-func (r *LWWRegister[T]) ResetDelta() {
+func (r *LWWRegister) ResetDelta() {
 	r.dirty = false
 }
 
 // Clone returns a deep copy of the register.
-func (r *LWWRegister[T]) Clone() ReplicatedData {
-	return &LWWRegister[T]{
+func (r *LWWRegister) Clone() ReplicatedData {
+	return &LWWRegister{
 		value:     r.value,
 		timestamp: r.timestamp,
 		nodeID:    r.nodeID,
@@ -117,8 +117,8 @@ func (r *LWWRegister[T]) Clone() ReplicatedData {
 }
 
 // LWWRegisterFromState creates an LWWRegister from serialized state components.
-func LWWRegisterFromState[T any](value T, timestampNanos int64, nodeID string) *LWWRegister[T] {
-	return &LWWRegister[T]{
+func LWWRegisterFromState(value any, timestampNanos int64, nodeID string) *LWWRegister {
+	return &LWWRegister{
 		value:     value,
 		timestamp: timestampNanos,
 		nodeID:    nodeID,

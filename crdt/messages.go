@@ -33,10 +33,10 @@ package crdt
 // The Modify function is called by the Replicator and must be a pure
 // function that only uses the data parameter and stable fields from
 // enclosing scope.
-type Update[T ReplicatedData] struct {
-	Key     Key[T]
-	Initial T
-	Modify  func(current T) T
+type Update struct {
+	Key     Key
+	Initial ReplicatedData
+	Modify  func(current ReplicatedData) ReplicatedData
 	WriteTo Coordination
 }
 
@@ -48,42 +48,42 @@ type UpdateResponse struct{}
 // The local value is always returned. If ReadFrom is set, the Replicator
 // also queries peers, merges their values with the local value, and
 // returns the merged result.
-type Get[T ReplicatedData] struct {
-	Key      Key[T]
+type Get struct {
+	Key      Key
 	ReadFrom Coordination
 }
 
-// GetResponse is the typed response to a Get request.
-type GetResponse[T ReplicatedData] struct {
-	Key  Key[T]
-	Data T
+// GetResponse is the response to a Get request.
+type GetResponse struct {
+	Key  Key
+	Data ReplicatedData
 }
 
 // Subscribe registers the sender for change notifications on a key.
 // The subscriber will receive Changed messages whenever the key's value
 // is updated, either by a local mutation or a peer delta.
 // The subscriber is automatically unsubscribed if it terminates.
-type Subscribe[T ReplicatedData] struct {
-	Key Key[T]
+type Subscribe struct {
+	Key Key
 }
 
 // Unsubscribe removes the sender from change notifications on a key.
-type Unsubscribe[T ReplicatedData] struct {
-	Key Key[T]
+type Unsubscribe struct {
+	Key Key
 }
 
 // Changed is sent to watchers when a CRDT key's value changes.
 // This message is delivered for both local mutations and remote delta merges.
-type Changed[T ReplicatedData] struct {
-	Key  Key[T]
-	Data T
+type Changed struct {
+	Key  Key
+	Data ReplicatedData
 }
 
 // Delete is sent to the Replicator to remove a CRDT key.
 // Deletion publishes a tombstone to the shared goakt.crdt.deltas topic.
 // Tombstones are retained for the configured TombstoneTTL before pruning.
-type Delete[T ReplicatedData] struct {
-	Key     Key[T]
+type Delete struct {
+	Key     Key
 	WriteTo Coordination
 }
 
@@ -91,66 +91,54 @@ type Delete[T ReplicatedData] struct {
 type DeleteResponse struct{}
 
 // KeyID returns the key's string identifier for the replicator.
-func (u *Update[T]) KeyID() string { return u.Key.ID() }
+func (u *Update) KeyID() string { return u.Key.ID() }
 
 // CRDTDataType returns the CRDT data type for this update.
-func (u *Update[T]) CRDTDataType() DataType { return u.Key.Type() }
+func (u *Update) CRDTDataType() DataType { return u.Key.Type() }
 
 // InitialValue returns the initial CRDT value for a new key.
-func (u *Update[T]) InitialValue() ReplicatedData { return u.Initial }
+func (u *Update) InitialValue() ReplicatedData { return u.Initial }
 
 // Apply applies the mutation to the current value.
 // If current is nil, the mutation is applied to the Initial value.
-// If current is not of type T, it falls back to the Initial value
-// to prevent a panic from a type mismatch.
-func (u *Update[T]) Apply(current ReplicatedData) ReplicatedData {
+func (u *Update) Apply(current ReplicatedData) ReplicatedData {
 	if current == nil {
 		return u.Modify(u.Initial)
 	}
-	typed, ok := current.(T)
-	if !ok {
-		return u.Modify(u.Initial)
-	}
-	return u.Modify(typed)
+	return u.Modify(current)
 }
 
 // WriteCoordination returns the coordination level for this update.
-func (u *Update[T]) WriteCoordination() Coordination { return u.WriteTo }
+func (u *Update) WriteCoordination() Coordination { return u.WriteTo }
 
 // KeyID returns the key's string identifier for the replicator.
-func (g *Get[T]) KeyID() string { return g.Key.ID() }
+func (g *Get) KeyID() string { return g.Key.ID() }
 
 // ReadCoordination returns the coordination level for this get.
-func (g *Get[T]) ReadCoordination() Coordination { return g.ReadFrom }
+func (g *Get) ReadCoordination() Coordination { return g.ReadFrom }
 
-// Response builds a typed GetResponse from the raw ReplicatedData.
-// If the stored data is not of type T (type mismatch), Data is returned
-// as the zero value of T.
-func (g *Get[T]) Response(data ReplicatedData) any {
-	var typed T
-	if data != nil {
-		typed, _ = data.(T)
-	}
-	return &GetResponse[T]{Key: g.Key, Data: typed}
+// Response builds a GetResponse from the raw ReplicatedData.
+func (g *Get) Response(data ReplicatedData) any {
+	return &GetResponse{Key: g.Key, Data: data}
 }
 
 // KeyID returns the key's string identifier for the replicator.
-func (s *Subscribe[T]) KeyID() string { return s.Key.ID() }
+func (s *Subscribe) KeyID() string { return s.Key.ID() }
 
 // IsSubscribe is a marker method to distinguish Subscribe from other commands.
-func (s *Subscribe[T]) IsSubscribe() {}
+func (s *Subscribe) IsSubscribe() {}
 
 // KeyID returns the key's string identifier for the replicator.
-func (u *Unsubscribe[T]) KeyID() string { return u.Key.ID() }
+func (u *Unsubscribe) KeyID() string { return u.Key.ID() }
 
 // IsUnsubscribe is a marker method to distinguish Unsubscribe from other commands.
-func (u *Unsubscribe[T]) IsUnsubscribe() {}
+func (u *Unsubscribe) IsUnsubscribe() {}
 
 // KeyID returns the key's string identifier for the replicator.
-func (d *Delete[T]) KeyID() string { return d.Key.ID() }
+func (d *Delete) KeyID() string { return d.Key.ID() }
 
 // IsDelete is a marker method to distinguish Delete from other commands.
-func (d *Delete[T]) IsDelete() {}
+func (d *Delete) IsDelete() {}
 
 // WriteCoordination returns the coordination level for this delete.
-func (d *Delete[T]) WriteCoordination() Coordination { return d.WriteTo }
+func (d *Delete) WriteCoordination() Coordination { return d.WriteTo }

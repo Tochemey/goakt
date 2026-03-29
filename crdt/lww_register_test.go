@@ -34,110 +34,110 @@ func TestLWWRegister(t *testing.T) {
 	now := time.Now()
 
 	t.Run("new register has zero value", func(t *testing.T) {
-		r := NewLWWRegister[string]()
+		r := NewLWWRegister()
 		require.NotNil(t, r)
-		assert.Equal(t, "", r.Value())
+		assert.Nil(t, r.Value())
 		assert.Equal(t, int64(0), r.Timestamp())
 		assert.Equal(t, "", r.NodeID())
 	})
 
 	t.Run("set value", func(t *testing.T) {
-		r := NewLWWRegister[string]().Set("hello", now, "node-1")
+		r := NewLWWRegister().Set("hello", now, "node-1")
 		assert.Equal(t, "hello", r.Value())
 		assert.Equal(t, now.UnixNano(), r.Timestamp())
 		assert.Equal(t, "node-1", r.NodeID())
 	})
 
 	t.Run("set is immutable", func(t *testing.T) {
-		r := NewLWWRegister[string]()
+		r := NewLWWRegister()
 		r2 := r.Set("hello", now, "node-1")
-		assert.Equal(t, "", r.Value())
+		assert.Nil(t, r.Value())
 		assert.Equal(t, "hello", r2.Value())
 	})
 
 	t.Run("merge higher timestamp wins", func(t *testing.T) {
-		r1 := NewLWWRegister[string]().Set("old", now, "node-1")
-		r2 := NewLWWRegister[string]().Set("new", now.Add(time.Second), "node-2")
-		merged := r1.Merge(r2).(*LWWRegister[string])
+		r1 := NewLWWRegister().Set("old", now, "node-1")
+		r2 := NewLWWRegister().Set("new", now.Add(time.Second), "node-2")
+		merged := r1.Merge(r2).(*LWWRegister)
 		assert.Equal(t, "new", merged.Value())
 	})
 
 	t.Run("merge lower timestamp loses", func(t *testing.T) {
-		r1 := NewLWWRegister[string]().Set("new", now.Add(time.Second), "node-1")
-		r2 := NewLWWRegister[string]().Set("old", now, "node-2")
-		merged := r1.Merge(r2).(*LWWRegister[string])
+		r1 := NewLWWRegister().Set("new", now.Add(time.Second), "node-1")
+		r2 := NewLWWRegister().Set("old", now, "node-2")
+		merged := r1.Merge(r2).(*LWWRegister)
 		assert.Equal(t, "new", merged.Value())
 	})
 
 	t.Run("merge equal timestamp higher node ID wins", func(t *testing.T) {
-		r1 := NewLWWRegister[string]().Set("from-A", now, "node-A")
-		r2 := NewLWWRegister[string]().Set("from-B", now, "node-B")
-		merged := r1.Merge(r2).(*LWWRegister[string])
+		r1 := NewLWWRegister().Set("from-A", now, "node-A")
+		r2 := NewLWWRegister().Set("from-B", now, "node-B")
+		merged := r1.Merge(r2).(*LWWRegister)
 		assert.Equal(t, "from-B", merged.Value())
 	})
 
 	t.Run("merge is commutative", func(t *testing.T) {
-		r1 := NewLWWRegister[string]().Set("v1", now, "node-1")
-		r2 := NewLWWRegister[string]().Set("v2", now.Add(time.Second), "node-2")
-		m1 := r1.Merge(r2).(*LWWRegister[string])
-		m2 := r2.Merge(r1).(*LWWRegister[string])
+		r1 := NewLWWRegister().Set("v1", now, "node-1")
+		r2 := NewLWWRegister().Set("v2", now.Add(time.Second), "node-2")
+		m1 := r1.Merge(r2).(*LWWRegister)
+		m2 := r2.Merge(r1).(*LWWRegister)
 		assert.Equal(t, m1.Value(), m2.Value())
 	})
 
 	t.Run("merge is idempotent", func(t *testing.T) {
-		r1 := NewLWWRegister[string]().Set("v1", now, "node-1")
-		r2 := NewLWWRegister[string]().Set("v2", now.Add(time.Second), "node-2")
-		m1 := r1.Merge(r2).(*LWWRegister[string])
-		m2 := m1.Merge(r2).(*LWWRegister[string])
+		r1 := NewLWWRegister().Set("v1", now, "node-1")
+		r2 := NewLWWRegister().Set("v2", now.Add(time.Second), "node-2")
+		m1 := r1.Merge(r2).(*LWWRegister)
+		m2 := m1.Merge(r2).(*LWWRegister)
 		assert.Equal(t, m1.Value(), m2.Value())
 	})
 
 	t.Run("merge does not modify inputs", func(t *testing.T) {
-		r1 := NewLWWRegister[string]().Set("v1", now, "node-1")
-		r2 := NewLWWRegister[string]().Set("v2", now.Add(time.Second), "node-2")
+		r1 := NewLWWRegister().Set("v1", now, "node-1")
+		r2 := NewLWWRegister().Set("v2", now.Add(time.Second), "node-2")
 		_ = r1.Merge(r2)
 		assert.Equal(t, "v1", r1.Value())
 		assert.Equal(t, "v2", r2.Value())
 	})
 
 	t.Run("merge with non-LWWRegister returns self", func(t *testing.T) {
-		r := NewLWWRegister[string]().Set("v1", now, "node-1")
+		r := NewLWWRegister().Set("v1", now, "node-1")
 		result := r.Merge(NewGCounter())
-		assert.Equal(t, "v1", result.(*LWWRegister[string]).Value())
+		assert.Equal(t, "v1", result.(*LWWRegister).Value())
 	})
 
 	t.Run("delta returns state when dirty", func(t *testing.T) {
-		r := NewLWWRegister[string]().Set("hello", now, "node-1")
+		r := NewLWWRegister().Set("hello", now, "node-1")
 		d := r.Delta()
 		require.NotNil(t, d)
-		assert.Equal(t, "hello", d.(*LWWRegister[string]).Value())
+		assert.Equal(t, "hello", d.(*LWWRegister).Value())
 	})
 
 	t.Run("delta returns nil when not dirty", func(t *testing.T) {
-		r := NewLWWRegister[string]()
+		r := NewLWWRegister()
 		assert.Nil(t, r.Delta())
 	})
 
 	t.Run("reset delta clears dirty flag", func(t *testing.T) {
-		r := NewLWWRegister[string]().Set("hello", now, "node-1")
+		r := NewLWWRegister().Set("hello", now, "node-1")
 		r.ResetDelta()
 		assert.Nil(t, r.Delta())
 	})
 
 	t.Run("clone produces independent copy", func(t *testing.T) {
-		r := NewLWWRegister[string]().Set("hello", now, "node-1")
-		cloned := r.Clone().(*LWWRegister[string])
+		r := NewLWWRegister().Set("hello", now, "node-1")
+		cloned := r.Clone().(*LWWRegister)
 		assert.Equal(t, r.Value(), cloned.Value())
 		assert.Equal(t, r.Timestamp(), cloned.Timestamp())
 	})
 
 	t.Run("works with int type", func(t *testing.T) {
-		r := NewLWWRegister[int]().Set(42, now, "node-1")
+		r := NewLWWRegister().Set(42, now, "node-1")
 		assert.Equal(t, 42, r.Value())
 	})
 
 	t.Run("works with bool type", func(t *testing.T) {
-		r := NewLWWRegister[bool]().Set(true, now, "node-1")
-		assert.True(t, r.Value())
+		r := NewLWWRegister().Set(true, now, "node-1")
+		assert.Equal(t, true, r.Value())
 	})
 }

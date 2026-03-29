@@ -208,8 +208,8 @@ func BenchmarkPNCounterValue(b *testing.B) {
 
 func BenchmarkLWWRegisterMerge(b *testing.B) {
 	now := time.Now()
-	r1 := NewLWWRegister[string]().Set("v1", now, "node-1")
-	r2 := NewLWWRegister[string]().Set("v2", now.Add(time.Second), "node-2")
+	r1 := NewLWWRegister().Set("v1", now, "node-1")
+	r2 := NewLWWRegister().Set("v2", now.Add(time.Second), "node-2")
 
 	var sink ReplicatedData
 	b.ReportAllocs()
@@ -222,8 +222,8 @@ func BenchmarkLWWRegisterMerge(b *testing.B) {
 
 func BenchmarkLWWRegisterMergeConverged(b *testing.B) {
 	now := time.Now()
-	r1 := NewLWWRegister[string]().Set("v1", now, "node-1")
-	r2 := NewLWWRegister[string]().Set("v1", now, "node-1")
+	r1 := NewLWWRegister().Set("v1", now, "node-1")
+	r2 := NewLWWRegister().Set("v1", now, "node-1")
 
 	var sink ReplicatedData
 	b.ReportAllocs()
@@ -235,9 +235,9 @@ func BenchmarkLWWRegisterMergeConverged(b *testing.B) {
 }
 
 func BenchmarkLWWRegisterSet(b *testing.B) {
-	r := NewLWWRegister[string]()
+	r := NewLWWRegister()
 	now := time.Now()
-	var sink *LWWRegister[string]
+	var sink *LWWRegister
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
@@ -299,8 +299,8 @@ func BenchmarkFlagDelta(b *testing.B) {
 // ---------------------------------------------------------------------------
 
 func benchmarkORSetMergeConverged(b *testing.B, elements int) {
-	s1 := NewORSet[int]()
-	s2 := NewORSet[int]()
+	s1 := NewORSet()
+	s2 := NewORSet()
 	for i := range elements {
 		s1 = s1.Add("node-1", i)
 		s2 = s2.Add("node-1", i)
@@ -320,8 +320,8 @@ func BenchmarkORSetMergeConverged_100(b *testing.B)  { benchmarkORSetMergeConver
 func BenchmarkORSetMergeConverged_1000(b *testing.B) { benchmarkORSetMergeConverged(b, 1000) }
 
 func benchmarkORSetMergeDiverged(b *testing.B, elements int) {
-	s1 := NewORSet[int]()
-	s2 := NewORSet[int]()
+	s1 := NewORSet()
+	s2 := NewORSet()
 	for i := range elements {
 		s1 = s1.Add("node-1", i)
 		s2 = s2.Add("node-2", i+elements)
@@ -341,7 +341,7 @@ func BenchmarkORSetMergeDiverged_100(b *testing.B)  { benchmarkORSetMergeDiverge
 func BenchmarkORSetMergeDiverged_1000(b *testing.B) { benchmarkORSetMergeDiverged(b, 1000) }
 
 func BenchmarkORSetAdd(b *testing.B) {
-	s := NewORSet[int]()
+	s := NewORSet()
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := range b.N {
@@ -350,7 +350,7 @@ func BenchmarkORSetAdd(b *testing.B) {
 }
 
 func BenchmarkORSetContains(b *testing.B) {
-	s := NewORSet[string]()
+	s := NewORSet()
 	for i := range 1000 {
 		s = s.Add("node-1", fmt.Sprintf("elem-%d", i))
 	}
@@ -361,7 +361,7 @@ func BenchmarkORSetContains(b *testing.B) {
 }
 
 func benchmarkORSetClone(b *testing.B, size int) {
-	s := NewORSet[string]()
+	s := NewORSet()
 	for i := range size {
 		s = s.Add("node-1", fmt.Sprintf("elem-%d", i))
 	}
@@ -376,7 +376,7 @@ func BenchmarkORSetClone_100(b *testing.B)  { benchmarkORSetClone(b, 100) }
 func BenchmarkORSetClone_1000(b *testing.B) { benchmarkORSetClone(b, 1000) }
 
 func benchmarkORSetCompact(b *testing.B, size int) {
-	s := NewORSet[string]()
+	s := NewORSet()
 	for i := range size {
 		s = s.Add("node-1", fmt.Sprintf("elem-%d", i))
 		s = s.Add("node-2", fmt.Sprintf("elem-%d", i))
@@ -392,7 +392,7 @@ func BenchmarkORSetCompact_100(b *testing.B)  { benchmarkORSetCompact(b, 100) }
 func BenchmarkORSetCompact_1000(b *testing.B) { benchmarkORSetCompact(b, 1000) }
 
 func BenchmarkORSetDelta(b *testing.B) {
-	s := NewORSet[string]()
+	s := NewORSet()
 	for i := range 100 {
 		s = s.Add("node-1", fmt.Sprintf("elem-%d", i))
 	}
@@ -404,7 +404,7 @@ func BenchmarkORSetDelta(b *testing.B) {
 }
 
 func benchmarkORSetElements(b *testing.B, size int) {
-	s := NewORSet[string]()
+	s := NewORSet()
 	for i := range size {
 		s = s.Add("node-1", fmt.Sprintf("elem-%d", i))
 	}
@@ -423,7 +423,7 @@ func BenchmarkORSetElements_1000(b *testing.B) { benchmarkORSetElements(b, 1000)
 // ---------------------------------------------------------------------------
 
 func BenchmarkMVRegisterSet(b *testing.B) {
-	r := NewMVRegister[string]()
+	r := NewMVRegister()
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
@@ -432,7 +432,7 @@ func BenchmarkMVRegisterSet(b *testing.B) {
 }
 
 func BenchmarkMVRegisterMergeConverged(b *testing.B) {
-	r := NewMVRegister[string]().Set("node-1", "hello")
+	r := NewMVRegister().Set("node-1", "hello")
 	r.ResetDelta()
 
 	var sink ReplicatedData
@@ -445,8 +445,8 @@ func BenchmarkMVRegisterMergeConverged(b *testing.B) {
 }
 
 func BenchmarkMVRegisterMergeConcurrent(b *testing.B) {
-	r1 := NewMVRegister[string]().Set("node-1", "a")
-	r2 := NewMVRegister[string]().Set("node-2", "b")
+	r1 := NewMVRegister().Set("node-1", "a")
+	r2 := NewMVRegister().Set("node-2", "b")
 
 	var sink ReplicatedData
 	b.ReportAllocs()
@@ -458,7 +458,7 @@ func BenchmarkMVRegisterMergeConcurrent(b *testing.B) {
 }
 
 func BenchmarkMVRegisterClone(b *testing.B) {
-	r := NewMVRegister[string]().Set("node-1", "a").Set("node-2", "b")
+	r := NewMVRegister().Set("node-1", "a").Set("node-2", "b")
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
@@ -467,7 +467,7 @@ func BenchmarkMVRegisterClone(b *testing.B) {
 }
 
 func BenchmarkMVRegisterDelta(b *testing.B) {
-	r := NewMVRegister[string]().Set("node-1", "hello")
+	r := NewMVRegister().Set("node-1", "hello")
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
@@ -476,9 +476,9 @@ func BenchmarkMVRegisterDelta(b *testing.B) {
 }
 
 func BenchmarkMVRegisterValues(b *testing.B) {
-	r := NewMVRegister[string]()
+	r := NewMVRegister()
 	r = r.Set("node-1", "a")
-	merged := r.Merge(NewMVRegister[string]().Set("node-2", "b")).(*MVRegister[string])
+	merged := r.Merge(NewMVRegister().Set("node-2", "b")).(*MVRegister)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
@@ -491,7 +491,7 @@ func BenchmarkMVRegisterValues(b *testing.B) {
 // ---------------------------------------------------------------------------
 
 func BenchmarkORMapSet(b *testing.B) {
-	m := NewORMap[string, *GCounter]()
+	m := NewORMap()
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := range b.N {
@@ -500,7 +500,7 @@ func BenchmarkORMapSet(b *testing.B) {
 }
 
 func BenchmarkORMapMergeConverged(b *testing.B) {
-	m := NewORMap[string, *GCounter]()
+	m := NewORMap()
 	for i := range 10 {
 		key := "key-" + string(rune('a'+i))
 		m = m.Set("node-1", key, NewGCounter().Increment("node-1", uint64(i+1)))
@@ -517,8 +517,8 @@ func BenchmarkORMapMergeConverged(b *testing.B) {
 }
 
 func BenchmarkORMapMergeDiverged(b *testing.B) {
-	m1 := NewORMap[string, *GCounter]()
-	m2 := NewORMap[string, *GCounter]()
+	m1 := NewORMap()
+	m2 := NewORMap()
 	for i := range 10 {
 		key := "key-" + string(rune('a'+i))
 		m1 = m1.Set("node-1", key, NewGCounter().Increment("node-1", uint64(i+1)))
@@ -535,7 +535,7 @@ func BenchmarkORMapMergeDiverged(b *testing.B) {
 }
 
 func benchmarkORMapMergeConvergedN(b *testing.B, size int) {
-	m := NewORMap[string, *GCounter]()
+	m := NewORMap()
 	for i := range size {
 		m = m.Set("node-1", fmt.Sprintf("key-%d", i), NewGCounter().Increment("node-1", uint64(i)))
 	}
@@ -552,8 +552,8 @@ func benchmarkORMapMergeConvergedN(b *testing.B, size int) {
 func BenchmarkORMapMergeConverged_100(b *testing.B) { benchmarkORMapMergeConvergedN(b, 100) }
 
 func benchmarkORMapMergeDivergedN(b *testing.B, size int) {
-	m1 := NewORMap[string, *GCounter]()
-	m2 := NewORMap[string, *GCounter]()
+	m1 := NewORMap()
+	m2 := NewORMap()
 	for i := range size {
 		key := fmt.Sprintf("key-%d", i)
 		m1 = m1.Set("node-1", key, NewGCounter().Increment("node-1", uint64(i+1)))
@@ -571,7 +571,7 @@ func benchmarkORMapMergeDivergedN(b *testing.B, size int) {
 func BenchmarkORMapMergeDivergent_100(b *testing.B) { benchmarkORMapMergeDivergedN(b, 100) }
 
 func BenchmarkORMapGet(b *testing.B) {
-	m := NewORMap[string, *GCounter]()
+	m := NewORMap()
 	for i := range 100 {
 		m = m.Set("node-1", fmt.Sprintf("key-%d", i), NewGCounter().Increment("node-1", uint64(i)))
 	}
@@ -582,7 +582,7 @@ func BenchmarkORMapGet(b *testing.B) {
 }
 
 func BenchmarkORMapClone(b *testing.B) {
-	m := NewORMap[string, *GCounter]()
+	m := NewORMap()
 	for i := range 100 {
 		m = m.Set("node-1", fmt.Sprintf("key-%d", i), NewGCounter().Increment("node-1", uint64(i)))
 	}
@@ -594,7 +594,7 @@ func BenchmarkORMapClone(b *testing.B) {
 }
 
 func BenchmarkORMapCompact(b *testing.B) {
-	m := NewORMap[string, *GCounter]()
+	m := NewORMap()
 	for i := range 100 {
 		m = m.Set("node-1", fmt.Sprintf("key-%d", i), NewGCounter().Increment("node-1", uint64(i)))
 		m = m.Set("node-2", fmt.Sprintf("key-%d", i), NewGCounter().Increment("node-2", uint64(i)))

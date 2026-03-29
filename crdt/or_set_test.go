@@ -31,20 +31,20 @@ import (
 
 func TestORSet(t *testing.T) {
 	t.Run("new set is empty", func(t *testing.T) {
-		s := NewORSet[string]()
+		s := NewORSet()
 		require.NotNil(t, s)
 		assert.Equal(t, 0, s.Len())
 		assert.Empty(t, s.Elements())
 	})
 
 	t.Run("add element", func(t *testing.T) {
-		s := NewORSet[string]().Add("node-1", "a")
+		s := NewORSet().Add("node-1", "a")
 		assert.True(t, s.Contains("a"))
 		assert.Equal(t, 1, s.Len())
 	})
 
 	t.Run("add multiple elements", func(t *testing.T) {
-		s := NewORSet[string]().
+		s := NewORSet().
 			Add("node-1", "a").
 			Add("node-1", "b").
 			Add("node-2", "c")
@@ -55,14 +55,14 @@ func TestORSet(t *testing.T) {
 	})
 
 	t.Run("add is immutable", func(t *testing.T) {
-		s := NewORSet[string]()
+		s := NewORSet()
 		s2 := s.Add("node-1", "a")
 		assert.Equal(t, 0, s.Len())
 		assert.Equal(t, 1, s2.Len())
 	})
 
 	t.Run("remove element", func(t *testing.T) {
-		s := NewORSet[string]().
+		s := NewORSet().
 			Add("node-1", "a").
 			Add("node-1", "b").
 			Remove("a")
@@ -72,14 +72,14 @@ func TestORSet(t *testing.T) {
 	})
 
 	t.Run("remove is immutable", func(t *testing.T) {
-		s := NewORSet[string]().Add("node-1", "a")
+		s := NewORSet().Add("node-1", "a")
 		s2 := s.Remove("a")
 		assert.True(t, s.Contains("a"))
 		assert.False(t, s2.Contains("a"))
 	})
 
 	t.Run("remove nonexistent element returns same set", func(t *testing.T) {
-		s := NewORSet[string]().Add("node-1", "a")
+		s := NewORSet().Add("node-1", "a")
 		s2 := s.Remove("b")
 		assert.True(t, s2.Contains("a"))
 		assert.Equal(t, 1, s2.Len())
@@ -87,62 +87,62 @@ func TestORSet(t *testing.T) {
 
 	t.Run("add-wins semantics on merge", func(t *testing.T) {
 		// node-1 adds "a", node-2 concurrently removes "a" (which it observed earlier).
-		s1 := NewORSet[string]().Add("node-1", "a")
+		s1 := NewORSet().Add("node-1", "a")
 
 		// s2 starts from a state where "a" was added then removed.
-		s2 := NewORSet[string]().Add("node-1", "a").Remove("a")
+		s2 := NewORSet().Add("node-1", "a").Remove("a")
 		// Now node-1 re-adds "a" concurrently.
 		s1 = s1.Add("node-1", "a")
 
-		merged := s1.Merge(s2).(*ORSet[string])
+		merged := s1.Merge(s2).(*ORSet)
 		assert.True(t, merged.Contains("a"), "add should win over concurrent remove")
 	})
 
 	t.Run("merge concurrent adds from different nodes", func(t *testing.T) {
-		s1 := NewORSet[string]().Add("node-1", "a")
-		s2 := NewORSet[string]().Add("node-2", "b")
-		merged := s1.Merge(s2).(*ORSet[string])
+		s1 := NewORSet().Add("node-1", "a")
+		s2 := NewORSet().Add("node-2", "b")
+		merged := s1.Merge(s2).(*ORSet)
 		assert.True(t, merged.Contains("a"))
 		assert.True(t, merged.Contains("b"))
 		assert.Equal(t, 2, merged.Len())
 	})
 
 	t.Run("merge same element from different nodes", func(t *testing.T) {
-		s1 := NewORSet[string]().Add("node-1", "a")
-		s2 := NewORSet[string]().Add("node-2", "a")
-		merged := s1.Merge(s2).(*ORSet[string])
+		s1 := NewORSet().Add("node-1", "a")
+		s2 := NewORSet().Add("node-2", "a")
+		merged := s1.Merge(s2).(*ORSet)
 		assert.True(t, merged.Contains("a"))
 		assert.Equal(t, 1, merged.Len())
 	})
 
 	t.Run("merge is commutative", func(t *testing.T) {
-		s1 := NewORSet[string]().Add("node-1", "a").Add("node-1", "b")
-		s2 := NewORSet[string]().Add("node-2", "b").Add("node-2", "c")
-		m1 := s1.Merge(s2).(*ORSet[string])
-		m2 := s2.Merge(s1).(*ORSet[string])
+		s1 := NewORSet().Add("node-1", "a").Add("node-1", "b")
+		s2 := NewORSet().Add("node-2", "b").Add("node-2", "c")
+		m1 := s1.Merge(s2).(*ORSet)
+		m2 := s2.Merge(s1).(*ORSet)
 		assert.ElementsMatch(t, m1.Elements(), m2.Elements())
 	})
 
 	t.Run("merge is idempotent", func(t *testing.T) {
-		s1 := NewORSet[string]().Add("node-1", "a")
-		s2 := NewORSet[string]().Add("node-2", "b")
-		m1 := s1.Merge(s2).(*ORSet[string])
-		m2 := m1.Merge(s2).(*ORSet[string])
+		s1 := NewORSet().Add("node-1", "a")
+		s2 := NewORSet().Add("node-2", "b")
+		m1 := s1.Merge(s2).(*ORSet)
+		m2 := m1.Merge(s2).(*ORSet)
 		assert.ElementsMatch(t, m1.Elements(), m2.Elements())
 	})
 
 	t.Run("merge is associative", func(t *testing.T) {
-		s1 := NewORSet[string]().Add("node-1", "a")
-		s2 := NewORSet[string]().Add("node-2", "b")
-		s3 := NewORSet[string]().Add("node-3", "c")
-		m1 := s1.Merge(s2).Merge(s3).(*ORSet[string])
-		m2 := s1.Merge(s2.Merge(s3)).(*ORSet[string])
+		s1 := NewORSet().Add("node-1", "a")
+		s2 := NewORSet().Add("node-2", "b")
+		s3 := NewORSet().Add("node-3", "c")
+		m1 := s1.Merge(s2).Merge(s3).(*ORSet)
+		m2 := s1.Merge(s2.Merge(s3)).(*ORSet)
 		assert.ElementsMatch(t, m1.Elements(), m2.Elements())
 	})
 
 	t.Run("merge does not modify inputs", func(t *testing.T) {
-		s1 := NewORSet[string]().Add("node-1", "a")
-		s2 := NewORSet[string]().Add("node-2", "b")
+		s1 := NewORSet().Add("node-1", "a")
+		s2 := NewORSet().Add("node-2", "b")
 		_ = s1.Merge(s2)
 		assert.Equal(t, 1, s1.Len())
 		assert.True(t, s1.Contains("a"))
@@ -150,27 +150,27 @@ func TestORSet(t *testing.T) {
 	})
 
 	t.Run("merge with non-ORSet returns self", func(t *testing.T) {
-		s := NewORSet[string]().Add("node-1", "a")
+		s := NewORSet().Add("node-1", "a")
 		result := s.Merge(NewGCounter())
-		assert.True(t, result.(*ORSet[string]).Contains("a"))
+		assert.True(t, result.(*ORSet).Contains("a"))
 	})
 
 	t.Run("delta tracks added elements", func(t *testing.T) {
-		s := NewORSet[string]().Add("node-1", "a").Add("node-1", "b")
+		s := NewORSet().Add("node-1", "a").Add("node-1", "b")
 		d := s.Delta()
 		require.NotNil(t, d)
-		ds := d.(*ORSet[string])
+		ds := d.(*ORSet)
 		assert.True(t, ds.Contains("a"))
 		assert.True(t, ds.Contains("b"))
 	})
 
 	t.Run("delta returns nil when no changes", func(t *testing.T) {
-		s := NewORSet[string]()
+		s := NewORSet()
 		assert.Nil(t, s.Delta())
 	})
 
 	t.Run("reset delta clears tracked changes", func(t *testing.T) {
-		s := NewORSet[string]().Add("node-1", "a")
+		s := NewORSet().Add("node-1", "a")
 		s.ResetDelta()
 		assert.Nil(t, s.Delta())
 	})
@@ -178,10 +178,10 @@ func TestORSet(t *testing.T) {
 	t.Run("delta propagates remove to replica via merge", func(t *testing.T) {
 		// node-1 adds "a", syncs full state to replica, then removes "a".
 		// The delta after the remove must cause the replica to drop "a".
-		s := NewORSet[string]().Add("node-1", "a")
+		s := NewORSet().Add("node-1", "a")
 
 		// Simulate full-state sync: replica = merge of empty with s.
-		replica := NewORSet[string]().Merge(s).(*ORSet[string])
+		replica := NewORSet().Merge(s).(*ORSet)
 		require.True(t, replica.Contains("a"))
 
 		// Reset delta so subsequent changes are tracked from scratch.
@@ -195,7 +195,7 @@ func TestORSet(t *testing.T) {
 		d := s.Delta()
 		require.NotNil(t, d, "remove-only delta must not be nil")
 
-		replica = replica.Merge(d).(*ORSet[string])
+		replica = replica.Merge(d).(*ORSet)
 		assert.False(t, replica.Contains("a"), "remove must propagate through delta+merge")
 		assert.Equal(t, 0, replica.Len())
 	})
@@ -203,8 +203,8 @@ func TestORSet(t *testing.T) {
 	t.Run("delta remove does not dominate unrelated higher-counter entries", func(t *testing.T) {
 		// node-1 adds "a" (c=1), adds "b" (c=2), syncs to replica, then
 		// removes only "a". The delta must remove "a" without disturbing "b".
-		s := NewORSet[string]().Add("node-1", "a").Add("node-1", "b")
-		replica := NewORSet[string]().Merge(s).(*ORSet[string])
+		s := NewORSet().Add("node-1", "a").Add("node-1", "b")
+		replica := NewORSet().Merge(s).(*ORSet)
 		require.True(t, replica.Contains("a"))
 		require.True(t, replica.Contains("b"))
 
@@ -214,14 +214,14 @@ func TestORSet(t *testing.T) {
 		d := s.Delta()
 		require.NotNil(t, d)
 
-		replica = replica.Merge(d).(*ORSet[string])
+		replica = replica.Merge(d).(*ORSet)
 		assert.False(t, replica.Contains("a"), "removed element must disappear")
 		assert.True(t, replica.Contains("b"), "unrelated element must survive")
 	})
 
 	t.Run("clone produces independent copy", func(t *testing.T) {
-		s := NewORSet[string]().Add("node-1", "a")
-		cloned := s.Clone().(*ORSet[string])
+		s := NewORSet().Add("node-1", "a")
+		cloned := s.Clone().(*ORSet)
 		assert.True(t, cloned.Contains("a"))
 		cloned = cloned.Add("node-1", "b")
 		assert.False(t, s.Contains("b"))
@@ -229,14 +229,14 @@ func TestORSet(t *testing.T) {
 	})
 
 	t.Run("works with int type", func(t *testing.T) {
-		s := NewORSet[int]().Add("node-1", 42).Add("node-1", 99)
+		s := NewORSet().Add("node-1", 42).Add("node-1", 99)
 		assert.True(t, s.Contains(42))
 		assert.True(t, s.Contains(99))
 		assert.Equal(t, 2, s.Len())
 	})
 
 	t.Run("RawState and ORSetFromRawState round-trip", func(t *testing.T) {
-		s := NewORSet[string]().Add("node-1", "a").Add("node-2", "b")
+		s := NewORSet().Add("node-1", "a").Add("node-2", "b")
 		entries, clock := s.RawState()
 		restored := ORSetFromRawState(entries, clock)
 		assert.True(t, restored.Contains("a"))
@@ -247,7 +247,7 @@ func TestORSet(t *testing.T) {
 	t.Run("RawState skips entries with empty dots", func(t *testing.T) {
 		// Manually construct an ORSet with an empty dot entry to cover the
 		// len(dots) == 0 branch in RawState.
-		s := ORSetFromRawState([]Entry[string]{
+		s := ORSetFromRawState([]Entry{
 			{Element: "a", Dots: []Dot{{NodeID: "n1", Counter: 1}}},
 			{Element: "empty", Dots: nil},
 		}, map[string]uint64{"n1": 1})
@@ -257,15 +257,15 @@ func TestORSet(t *testing.T) {
 	})
 
 	t.Run("clone preserves remove delta", func(t *testing.T) {
-		s := NewORSet[string]().Add("node-1", "a").Add("node-1", "b")
+		s := NewORSet().Add("node-1", "a").Add("node-1", "b")
 		s = s.Remove("a")
-		cloned := s.Clone().(*ORSet[string])
+		cloned := s.Clone().(*ORSet)
 		assert.False(t, cloned.Contains("a"))
 		assert.True(t, cloned.Contains("b"))
 	})
 
 	t.Run("elements skips entries with empty dots", func(t *testing.T) {
-		s := NewORSet[string]().Add("node-1", "a").Add("node-1", "b")
+		s := NewORSet().Add("node-1", "a").Add("node-1", "b")
 		s = s.Remove("a")
 		elems := s.Elements()
 		assert.Equal(t, 1, len(elems))
@@ -277,7 +277,7 @@ func TestORSetCompact(t *testing.T) {
 	t.Run("compact deduplicates dots per node", func(t *testing.T) {
 		// Manually build an ORSet with duplicate dots for the same element from the same node.
 		// This can happen after multiple merges.
-		s := NewORSet[string]()
+		s := NewORSet()
 		s = s.Add("node-1", "a")
 		s = s.Add("node-1", "a") // second add creates a new dot
 		// Before compaction: element "a" has 2 dots from node-1.
@@ -294,7 +294,7 @@ func TestORSetCompact(t *testing.T) {
 	})
 
 	t.Run("compact preserves elements from different nodes", func(t *testing.T) {
-		s := NewORSet[string]()
+		s := NewORSet()
 		s = s.Add("node-1", "a")
 		s = s.Add("node-2", "a")
 		compacted := s.Compact()
@@ -304,13 +304,13 @@ func TestORSetCompact(t *testing.T) {
 	})
 
 	t.Run("compact on empty set", func(t *testing.T) {
-		s := NewORSet[string]()
+		s := NewORSet()
 		compacted := s.Compact()
 		assert.Equal(t, 0, compacted.Len())
 	})
 
 	t.Run("compact is immutable", func(t *testing.T) {
-		s := NewORSet[string]()
+		s := NewORSet()
 		s = s.Add("node-1", "a")
 		s = s.Add("node-1", "a")
 		compacted := s.Compact()
@@ -322,13 +322,13 @@ func TestORSetCompact(t *testing.T) {
 
 	t.Run("compact removes entries with empty dots", func(t *testing.T) {
 		// Build set, then manipulate internal state to have empty dots.
-		s := &ORSet[string]{
-			entries: map[string][]dot{
+		s := &ORSet{
+			entries: map[any][]dot{
 				"a": {},
 				"b": {{nodeID: "node-1", counter: 1}},
 			},
 			clock: map[string]uint64{"node-1": 1},
-			delta: newORSetDelta[string](),
+			delta: newORSetDelta(),
 		}
 		compacted := s.Compact()
 		assert.Equal(t, 1, compacted.Len())
@@ -337,13 +337,13 @@ func TestORSetCompact(t *testing.T) {
 	})
 
 	t.Run("CompactData implements Compactable", func(t *testing.T) {
-		s := NewORSet[string]()
+		s := NewORSet()
 		s = s.Add("node-1", "a")
 		s = s.Add("node-1", "a")
 		var c Compactable = s
 		result := c.CompactData()
 		require.NotNil(t, result)
-		compacted := result.(*ORSet[string])
+		compacted := result.(*ORSet)
 		assert.True(t, compacted.Contains("a"))
 		entries, _ := compacted.RawState()
 		require.Len(t, entries, 1)

@@ -29,28 +29,28 @@ Each node in the cluster runs its own **Replicator** system actor (`GoAktReplica
 
 ## CRDT types
 
-All types implement the `ReplicatedData` interface and are **immutable values** — every mutation returns a new value plus a delta.
+All types implement the `ReplicatedData` interface and are **immutable values** — every mutation returns a new value plus a delta. Values stored in generic CRDT types (`LWWRegister`, `ORSet`, `MVRegister`, `ORMap`) are typed as `any` and serialized over the wire using a composite Proto+CBOR serializer. Go primitives (`string`, `int`, `bool`, etc.) work out of the box; custom struct types require CBOR registration via `remote.WithSerializers`.
 
 | Type | Description | Primary use cases |
 |------|-------------|-------------------|
 | `GCounter` | Grow-only counter. Each node maintains its own increment slot; value = sum of all slots. | Monotonic metrics, event counts |
 | `PNCounter` | Positive-negative counter. Two GCounters: one for increments, one for decrements. | Rate limiters, gauges, inventory |
-| `LWWRegister[T]` | Last-writer-wins register. Stores a single value with a timestamp. | Configuration, feature flags |
-| `ORSet[T]` | Observed-remove set. Supports add and remove without conflict (add-wins semantics). | Session tracking, subscriptions |
-| `ORMap[K, V]` | Map where keys are an OR-Set and values are themselves CRDTs. | Shopping carts, user profiles |
+| `LWWRegister` | Last-writer-wins register. Stores a single value (`any`) with a timestamp. | Configuration, feature flags |
+| `ORSet` | Observed-remove set. Supports add and remove without conflict (add-wins semantics). Elements are `any`. | Session tracking, subscriptions |
+| `ORMap` | Map where keys (`any`) are an OR-Set and values are themselves CRDTs. | Shopping carts, user profiles |
 | `Flag` | Boolean that can only transition from `false` to `true`. | One-time signals, feature activation |
-| `MVRegister[T]` | Multi-value register. Concurrent writes are preserved, not overwritten. | Conflict-visible state |
+| `MVRegister` | Multi-value register. Concurrent writes are preserved, not overwritten. Values are `any`. | Conflict-visible state |
 
-### Typed keys
+### Keys
 
-CRDT keys are **typed and serializable**. The type parameter ensures compile-time safety — no type assertions on read.
+CRDT keys are **serializable** and carry the CRDT data type for wire-level validation.
 
 ```go
 var (
     requestCount   = crdt.PNCounterKey("request-count")
-    activeSessions = crdt.ORSetKey[string]("active-sessions")
-    featureFlag    = crdt.LWWRegisterKey[string]("dark-mode")
-    cartItems      = crdt.ORMapKey[string, *crdt.GCounter]("cart")
+    activeSessions = crdt.ORSetKey("active-sessions")
+    featureFlag    = crdt.LWWRegisterKey("dark-mode")
+    cartItems      = crdt.ORMapKey("cart")
 )
 ```
 
@@ -95,18 +95,18 @@ The Replicator PID is accessed via `ActorSystem.Replicator()`. It returns `nil` 
 
 ### Writing data
 
-Send an `Update[T]` to the Replicator. The `Modify` function receives the current typed value and returns the updated value.
+Send an `Update` to the Replicator. The `Modify` function receives the current value as `ReplicatedData` — use a type assertion to access the concrete type.
 
 ```go
 func (a *RateLimiter) Receive(ctx *actor.ReceiveContext) {
     switch ctx.Message().(type) {
     case *IncomingRequest:
         replicator := ctx.ActorSystem().Replicator()
-        ctx.Tell(replicator, &crdt.Update[*crdt.PNCounter]{
+        ctx.Tell(replicator, &crdt.Update{
             Key:     crdt.PNCounterKey("request-count"),
             Initial: crdt.NewPNCounter(),
-            Modify: func(current *crdt.PNCounter) *crdt.PNCounter {
-                return current.Increment(ctx.ActorSystem().PeersAddress(), 1)
+            Modify: func(current crdt.ReplicatedData) crdt.ReplicatedData {
+                return current.(*crdt.PNCounter).Increment(ctx.ActorSystem().PeersAddress(), 1)
             },
         })
     }
@@ -115,25 +115,25 @@ func (a *RateLimiter) Receive(ctx *actor.ReceiveContext) {
 
 | Field | Purpose |
 |-------|---------|
-| `Key` | Typed key identifying the CRDT |
+| `Key` | Key identifying the CRDT |
 | `Initial` | Zero value used if the key does not yet exist |
-| `Modify` | Function that receives the current value and returns the updated value |
+| `Modify` | Function that receives the current `ReplicatedData` and returns the updated value |
 | `WriteTo` | *(optional)* Coordination level: `crdt.Majority` or `crdt.All` |
 
 ### Reading data
 
-Send a `Get[T]` to the Replicator. The response is typed — no type assertion on the CRDT data itself.
+Send a `Get` to the Replicator. The response's `Data` field is `ReplicatedData` — use a type assertion to access the concrete type.
 
 ```go
 func (a *Dashboard) Receive(ctx *actor.ReceiveContext) {
     switch ctx.Message().(type) {
     case *RefreshMetrics:
         replicator := ctx.ActorSystem().Replicator()
-        reply := ctx.Ask(replicator, &crdt.Get[*crdt.PNCounter]{
+        reply := ctx.Ask(replicator, &crdt.Get{
             Key: crdt.PNCounterKey("request-count"),
         }, time.Second)
-        if getResp, ok := reply.(*crdt.GetResponse[*crdt.PNCounter]); ok && getResp.Data != nil {
-            a.currentCount = getResp.Data.Value()
+        if resp, ok := reply.(*crdt.GetResponse); ok && resp.Data != nil {
+            a.currentCount = resp.Data.(*crdt.PNCounter).Value()
         }
     }
 }
@@ -141,23 +141,25 @@ func (a *Dashboard) Receive(ctx *actor.ReceiveContext) {
 
 | Field | Purpose |
 |-------|---------|
-| `Key` | Typed key to read |
+| `Key` | Key to read |
 | `ReadFrom` | *(optional)* Coordination level: `crdt.Majority` or `crdt.All` |
 
 ### Subscribing to changes
 
-Actors can watch keys and receive `Changed[T]` notifications whenever the value changes — from local updates or peer deltas.
+Actors can watch keys and receive `Changed` notifications whenever the value changes — from local updates or peer deltas.
 
 ```go
 func (a *SessionMonitor) Receive(ctx *actor.ReceiveContext) {
     switch msg := ctx.Message().(type) {
     case *actor.PostStart:
         replicator := ctx.ActorSystem().Replicator()
-        ctx.Tell(replicator, &crdt.Subscribe[*crdt.ORSet[string]]{
-            Key: crdt.ORSetKey[string]("active-sessions"),
-        })
-    case *crdt.Changed[crdt.ReplicatedData]:
-        if set, ok := msg.Data.(*crdt.ORSet[string]); ok {
+        if replicator != nil {
+            ctx.Tell(replicator, &crdt.Subscribe{
+                Key: crdt.ORSetKey("active-sessions"),
+            })
+        }
+    case *crdt.Changed:
+        if set, ok := msg.Data.(*crdt.ORSet); ok {
             log.Printf("active sessions updated: %v", set.Elements())
         }
     }
@@ -167,8 +169,8 @@ func (a *SessionMonitor) Receive(ctx *actor.ReceiveContext) {
 ### Deleting data
 
 ```go
-ctx.Tell(replicator, &crdt.Delete[*crdt.ORSet[string]]{
-    Key:     crdt.ORSetKey[string]("active-sessions"),
+ctx.Tell(replicator, &crdt.Delete{
+    Key:     crdt.ORSetKey("active-sessions"),
     WriteTo: crdt.Majority, // optional coordination
 })
 ```
@@ -260,7 +262,7 @@ import (
 
 // -- Keys (defined once, typically package-level) --
 
-var sessionsKey = crdt.ORSetKey[string]("active-sessions")
+var sessionsKey = crdt.ORSetKey("active-sessions")
 
 // -- Messages --
 
@@ -284,27 +286,28 @@ func (a *SessionTracker) Receive(ctx *actor.ReceiveContext) {
     switch msg := ctx.Message().(type) {
     case *AddSession:
         nodeID := ctx.ActorSystem().PeersAddress()
-        ctx.Tell(replicator, &crdt.Update[*crdt.ORSet[string]]{
+        ctx.Tell(replicator, &crdt.Update{
             Key:     sessionsKey,
-            Initial: crdt.NewORSet[string](),
-            Modify: func(current *crdt.ORSet[string]) *crdt.ORSet[string] {
-                return current.Add(nodeID, msg.SessionID)
+            Initial: crdt.NewORSet(),
+            Modify: func(current crdt.ReplicatedData) crdt.ReplicatedData {
+                return current.(*crdt.ORSet).Add(nodeID, msg.SessionID)
             },
         })
     case *RemoveSession:
-        ctx.Tell(replicator, &crdt.Update[*crdt.ORSet[string]]{
+        ctx.Tell(replicator, &crdt.Update{
             Key:     sessionsKey,
-            Initial: crdt.NewORSet[string](),
-            Modify: func(current *crdt.ORSet[string]) *crdt.ORSet[string] {
-                return current.Remove(msg.SessionID)
+            Initial: crdt.NewORSet(),
+            Modify: func(current crdt.ReplicatedData) crdt.ReplicatedData {
+                return current.(*crdt.ORSet).Remove(msg.SessionID)
             },
         })
     case *PrintSessions:
-        reply := ctx.Ask(replicator, &crdt.Get[*crdt.ORSet[string]]{
+        reply := ctx.Ask(replicator, &crdt.Get{
             Key: sessionsKey,
         }, time.Second)
-        if getResp, ok := reply.(*crdt.GetResponse[*crdt.ORSet[string]]); ok && getResp.Data != nil {
-            fmt.Printf("active sessions: %v\n", getResp.Data.Elements())
+        if resp, ok := reply.(*crdt.GetResponse); ok && resp.Data != nil {
+            set := resp.Data.(*crdt.ORSet)
+            fmt.Printf("active sessions: %v\n", set.Elements())
         }
     }
 }
@@ -321,12 +324,12 @@ func (a *SessionReporter) Receive(ctx *actor.ReceiveContext) {
     case *actor.PostStart:
         replicator := ctx.ActorSystem().Replicator()
         if replicator != nil {
-            ctx.Tell(replicator, &crdt.Subscribe[*crdt.ORSet[string]]{
+            ctx.Tell(replicator, &crdt.Subscribe{
                 Key: sessionsKey,
             })
         }
-    case *crdt.Changed[crdt.ReplicatedData]:
-        if set, ok := msg.Data.(*crdt.ORSet[string]); ok {
+    case *crdt.Changed:
+        if set, ok := msg.Data.(*crdt.ORSet); ok {
             log.Printf("[reporter] sessions changed: %v (count=%d)",
                 set.Elements(), set.Len())
         }
@@ -379,5 +382,5 @@ func main() {
 - **Single-topic dissemination** — All deltas for all keys flow through one TopicActor topic (`goakt.crdt.deltas`). This simplifies the protocol but means a high update rate on many keys produces proportional TopicActor throughput. For most workloads this is not a bottleneck.
 - **No cross-datacenter replication** — CRDTs replicate within a single cluster. Cross-datacenter delta exchange via the DataCenter control plane is planned for a future release.
 - **Tombstone window** — Deleted keys are protected by a tombstone for the configured TTL. If a node is partitioned for longer than the TTL and still holds the key, it may resurrect the key when it rejoins. Set `WithTombstoneTTL` appropriately for your partition tolerance requirements.
-- **Generic type constraints** — `ORSet[T]` requires `T` to be `comparable`. `LWWRegister[T]`, `MVRegister[T]`, and `ORMap[K, V]` require values to be serializable by the codec layer. The built-in codec currently supports `GCounter`, `PNCounter`, `Flag`, `LWWRegister[string]`, `MVRegister[string]`, `ORSet[string]`, and `ORMap[string, *GCounter]`.
-- **No partial updates** — The `Modify` function in `Update[T]` receives the full current value and must return the full updated value. There is no patch or field-level delta mechanism.
+- **Value serialization** — CRDT values are serialized using a composite Proto+CBOR serializer. Go primitives (`string`, `int`, `bool`, `float64`, etc.) and `proto.Message` types work out of the box. Custom struct types must be registered via `remote.WithSerializers(new(MyType), remote.NewCBORSerializer())`.
+- **No partial updates** — The `Modify` function in `Update` receives the full current value and must return the full updated value. There is no patch or field-level delta mechanism.

@@ -95,7 +95,7 @@ actor/option.go     →  imports crdt (WithReplicator option)
 goakt/
 ├── crdt/                          ← PUBLIC: pure CRDT data types
 │   ├── crdt.go                    ← ReplicatedData interface
-│   ├── key.go                     ← Key[T] typed, serializable CRDT key + factory functions
+│   ├── key.go                     ← Key typed, serializable CRDT key + factory functions
 │   ├── gcounter.go                ← GCounter
 │   ├── pncounter.go               ← PNCounter
 │   ├── lww_register.go            ← LWWRegister
@@ -111,8 +111,10 @@ goakt/
 │   └── replicator.go              ← Replicator system actor (same pattern as relocator.go, topic_actor.go)
 │
 ├── internal/
-│   └── codec/
-│       └── codec.go               ← CRDT encode/decode for protobuf wire format
+│   └── ddata/
+│       ├── snapshot.go            ← BoltDB snapshot storage
+│       ├── crdt_codec.go          ← CRDT encode/decode for protobuf wire format
+│       └── crdt_serializer.go     ← Proto+CBOR composite serializer for CRDT values
 │
 ├── protos/
 │   └── internal/
@@ -157,46 +159,46 @@ Everything in `crdt/` — data types, messages, and config options — are plain
 ```go
 package crdt
 
-// Update[T] is sent to the Replicator to create or update a CRDT key.
+// Update is sent to the Replicator to create or update a CRDT key.
 // The update is always applied locally first and the delta is published
 // to the shared CRDT topic via TopicActor. If WriteTo is set, the Replicator
 // also sends the delta directly to peers and waits for acknowledgments.
-type Update[T ReplicatedData] struct {
-    Key     Key[T]
-    Initial T
-    Modify  func(current T) T
+type Update struct {
+    Key     Key
+    Initial ReplicatedData
+    Modify  func(current ReplicatedData) ReplicatedData
     WriteTo Coordination // optional: Majority or All (default: none — local + pub/sub only)
 }
 
-// Get[T] is sent to the Replicator to read a CRDT key.
+// Get is sent to the Replicator to read a CRDT key.
 // The local value is always returned. If ReadFrom is set, the Replicator
 // also queries peers, merges their values with the local value, and returns
 // the merged result.
-type Get[T ReplicatedData] struct {
-    Key      Key[T]
+type Get struct {
+    Key      Key
     ReadFrom Coordination // optional: Majority or All (default: none — local only)
 }
 
-// GetResponse[T] is the typed response to a Get[T].
-type GetResponse[T ReplicatedData] struct {
-    Key  Key[T]
-    Data T // nil if key not found
+// GetResponse is the response to a Get.
+type GetResponse struct {
+    Key  Key
+    Data ReplicatedData // nil if key not found
 }
 
-// Subscribe[T] registers the sender for change notifications on a key.
-type Subscribe[T ReplicatedData] struct {
-    Key Key[T]
+// Subscribe registers the sender for change notifications on a key.
+type Subscribe struct {
+    Key Key
 }
 
-// Changed[T] is sent to watchers when a CRDT key's value changes.
-type Changed[T ReplicatedData] struct {
-    Key  Key[T]
-    Data T
+// Changed is sent to watchers when a CRDT key's value changes.
+type Changed struct {
+    Key  Key
+    Data ReplicatedData
 }
 
-// Delete[T] removes a CRDT key.
-type Delete[T ReplicatedData] struct {
-    Key     Key[T]
+// Delete removes a CRDT key.
+type Delete struct {
+    Key     Key
     WriteTo Coordination // optional
 }
 ```
@@ -213,16 +215,16 @@ These are `any`-typed messages — they work with GoAkt's `Tell`/`Ask` without t
 |--------------------|------------------------------------------------------------------------------------------|--------------------------------------------|---------------------------------------------------------|
 | **GCounter**       | Grow-only counter. Each node maintains its own increment slot. Value = sum of all slots. | Per-node max                               | Monotonic metrics, event counts                         |
 | **PNCounter**      | Positive-negative counter. Two GCounters: one for increments, one for decrements.        | Component-wise GCounter merge              | Rate limiters, gauges, inventory levels                 |
-| **LWWRegister[T]** | Last-writer-wins register. Stores a single value with a timestamp.                       | Highest timestamp wins                     | Configuration, feature flags, actor metadata            |
-| **ORSet[T]**       | Observed-remove set. Supports add and remove without conflicts.                          | Union of observed elements, causal removal | Session tracking, topic subscriptions, actor registries |
+| **LWWRegister**    | Last-writer-wins register. Stores a single `any` value with a timestamp.                 | Highest timestamp wins                     | Configuration, feature flags, actor metadata            |
+| **ORSet**          | Observed-remove set. Stores `any` elements. Supports add and remove without conflicts.   | Union of observed elements, causal removal | Session tracking, topic subscriptions, actor registries |
 
 ### Composition Types
 
 | Type              | Description                                                             | Merge Rule                                   | Primary Use Cases                                      |
 |-------------------|-------------------------------------------------------------------------|----------------------------------------------|--------------------------------------------------------|
-| **ORMap[K, V]**   | Map where keys are an OR-Set and values are themselves CRDTs.           | Key-wise OR-Set merge + per-value CRDT merge | Shopping carts, user profiles, distributed config maps |
+| **ORMap**         | Map where keys are `any` and values are `ReplicatedData` CRDTs.         | Key-wise OR-Set merge + per-value CRDT merge | Shopping carts, user profiles, distributed config maps |
 | **Flag**          | A boolean that can only transition from `false` to `true`.              | Logical OR                                   | One-time coordination signals, feature activation      |
-| **MVRegister[T]** | Multi-value register. Concurrent writes are preserved, not overwritten. | Union of concurrent values                   | Conflict-visible state where user resolution is needed |
+| **MVRegister**    | Multi-value register. Stores `any` values. Concurrent writes are preserved, not overwritten. | Union of concurrent values              | Conflict-visible state where user resolution is needed |
 
 ### CRDT Interface
 
@@ -251,7 +253,7 @@ type ReplicatedData interface {
 
 ### Typed Keys
 
-CRDT keys are not plain strings — they are **typed, serializable values** that carry the CRDT data type at compile time. This provides type safety (no type assertions on read), serialization for wire transport (anti-entropy, coordination), and self-documenting code.
+CRDT keys are not plain strings — they are **serializable values** that carry the CRDT data type. This provides serialization for wire transport (anti-entropy, coordination) and self-documenting code.
 
 Defined in `crdt/key.go`:
 
@@ -271,31 +273,30 @@ const (
     MVRegisterType
 )
 
-// Key[T] is a typed, serializable CRDT key.
-// The generic parameter T is the CRDT type this key is associated with.
+// Key is a serializable CRDT key.
 // The key is serializable as (ID, DataType) for wire transport.
-type Key[T ReplicatedData] struct {
+type Key struct {
     id       string
     dataType DataType
 }
 
 // ID returns the key's string identifier.
-func (k Key[T]) ID() string { return k.id }
+func (k Key) ID() string { return k.id }
 
-// DataType returns the CRDT type this key holds.
-func (k Key[T]) DataType() DataType { return k.dataType }
+// Type returns the CRDT type this key holds.
+func (k Key) Type() DataType { return k.dataType }
 ```
 
-Factory functions create keys with the correct type binding:
+Factory functions create keys with the correct data type:
 
 ```go
-func GCounterKey(id string) Key[*GCounter]                                  { ... }
-func PNCounterKey(id string) Key[*PNCounter]                                { ... }
-func LWWRegisterKey[T any](id string) Key[*LWWRegister[T]]                  { ... }
-func ORSetKey[T comparable](id string) Key[*ORSet[T]]                       { ... }
-func ORMapKey[K comparable, V ReplicatedData](id string) Key[*ORMap[K, V]]  { ... }
-func FlagKey(id string) Key[*Flag]                                          { ... }
-func MVRegisterKey[T any](id string) Key[*MVRegister[T]]                    { ... }
+func GCounterKey(id string) Key    { ... }
+func PNCounterKey(id string) Key   { ... }
+func LWWRegisterKey(id string) Key { ... }
+func ORSetKey(id string) Key       { ... }
+func ORMapKey(id string) Key       { ... }
+func FlagKey(id string) Key        { ... }
+func MVRegisterKey(id string) Key  { ... }
 ```
 
 Usage:
@@ -304,8 +305,8 @@ Usage:
 // Define keys once — typically as package-level vars.
 var (
     requestCount   = crdt.PNCounterKey("request-count")
-    activeSessions = crdt.ORSetKey[string]("active-sessions")
-    featureFlag    = crdt.LWWRegisterKey[string]("dark-mode")
+    activeSessions = crdt.ORSetKey("active-sessions")
+    featureFlag    = crdt.LWWRegisterKey("dark-mode")
 )
 ```
 
@@ -343,25 +344,25 @@ package crdt
 
 // ORSet is an observed-remove set that supports concurrent add/remove
 // without conflicts. Uses causal dots to track element provenance.
-type ORSet[T comparable] struct {
-    entries map[T][]dot       // element → causal dots
-    clock   map[string]uint64 // vector clock per node
+type ORSet struct {
+    entries map[any][]dot       // element → causal dots
+    clock   map[string]uint64   // vector clock per node
 }
 
 // Add inserts an element, tagged with the local node's causal dot.
-func (s ORSet[T]) Add(nodeID string, element T) ORSet[T]
+func (s *ORSet) Add(nodeID string, element any) *ORSet
 
 // Remove removes an element by recording all observed causal dots.
-func (s ORSet[T]) Remove(element T) ORSet[T]
+func (s *ORSet) Remove(element any) *ORSet
 
 // Contains returns true if the element is in the set.
-func (s ORSet[T]) Contains(element T) bool
+func (s *ORSet) Contains(element any) bool
 
 // Elements returns all elements currently in the set.
-func (s ORSet[T]) Elements() []T
+func (s *ORSet) Elements() []any
 
 // Merge combines two ORSets using observed-remove semantics.
-func (s ORSet[T]) Merge(other ReplicatedData) ReplicatedData
+func (s *ORSet) Merge(other ReplicatedData) ReplicatedData
 ```
 
 ---
@@ -566,13 +567,13 @@ func (a *MyActor) Receive(ctx *actor.ReceiveContext) {
         return
     }
 
-    // Standard Tell/Ask — typed keys, no type assertions, no string lookups.
+    // Standard Tell/Ask — no string lookups.
     counter := crdt.PNCounterKey("request-count")
-    err := actor.Tell(ctx, replicator, &crdt.Update[*crdt.PNCounter]{
+    err := actor.Tell(ctx, replicator, &crdt.Update{
         Key:     counter,
         Initial: crdt.NewPNCounter(),
-        Modify:  func(current *crdt.PNCounter) *crdt.PNCounter {
-            return current.Increment(nodeID, 1)
+        Modify:  func(current crdt.ReplicatedData) crdt.ReplicatedData {
+            return current.(*crdt.PNCounter).Increment(nodeID, 1)
         },
     })
 }
@@ -664,7 +665,7 @@ From this point on, the Replicator receives every delta published by any Replica
 
 ### Handling a Local Update
 
-When a user actor sends an `Update[T]` to the Replicator, the Replicator handles it via a type-erased internal path (since `Receive` accepts `any`). The key's `ID()` is used as the store key:
+When a user actor sends an `Update` to the Replicator, the Replicator handles it internally. The key's `ID()` is used as the store key:
 
 ```go
 func (r *replicatorActor) handleUpdate(ctx *ReceiveContext, msg updateCommand) {
@@ -707,10 +708,10 @@ func (r *replicatorActor) handleUpdate(ctx *ReceiveContext, msg updateCommand) {
 }
 ```
 
-The `updateCommand` interface bridges the generic `Update[T]` to the Replicator's untyped message handling. Methods are exported so that `crdt.Update[T]` (in a separate package) can satisfy the interface:
+The `updateCommand` interface is satisfied directly by `crdt.Update`. Methods are exported so that `crdt.Update` (in a separate package) can satisfy the interface:
 
 ```go
-// updateCommand is implemented by crdt.Update[T] for any T.
+// updateCommand is implemented by crdt.Update.
 type updateCommand interface {
     KeyID() string
     CRDTDataType() crdt.DataType
@@ -757,7 +758,7 @@ func (r *replicatorActor) handleDelta(ctx *ReceiveContext, msg *crdtDelta) {
 
 ### Notifying Local User Actors
 
-When a user actor subscribes to changes on a key (via `crdt.Subscribe[T]{Key: counterKey}`), the Replicator tracks the subscriber PID internally. On any change — whether from a local update or a peer delta — it sends a `crdt.Changed` message directly to each watcher:
+When a user actor subscribes to changes on a key (via `crdt.Subscribe{Key: counterKey}`), the Replicator tracks the subscriber PID internally. On any change — whether from a local update or a peer delta — it sends a `crdt.Changed` message directly to each watcher:
 
 ```go
 func (r *replicatorActor) notifyChanged(ctx *ReceiveContext, keyID string, data crdt.ReplicatedData) {
@@ -767,7 +768,7 @@ func (r *replicatorActor) notifyChanged(ctx *ReceiveContext, keyID string, data 
     }
     for _, watcher := range watchers {
         if watcher.IsRunning() {
-            ctx.Tell(watcher, &crdt.Changed[crdt.ReplicatedData]{Data: data})
+            ctx.Tell(watcher, &crdt.Changed{Data: data})
         }
     }
 }
@@ -866,13 +867,13 @@ system, err := actor.NewActorSystem(
 
 ### 9.2 Defining Keys
 
-Keys are defined once, typically as package-level variables. The type parameter ensures compile-time safety:
+Keys are defined once, typically as package-level variables:
 
 ```go
 var (
     requestCount   = crdt.PNCounterKey("request-count")
-    activeSessions = crdt.ORSetKey[string]("active-sessions")
-    featureFlag    = crdt.LWWRegisterKey[string]("dark-mode")
+    activeSessions = crdt.ORSetKey("active-sessions")
+    featureFlag    = crdt.LWWRegisterKey("dark-mode")
 )
 ```
 
@@ -883,12 +884,12 @@ func (a *MyActor) Receive(ctx *actor.ReceiveContext) {
     replicator := ctx.ActorSystem().Replicator()
 
     // Increment a distributed counter.
-    // The Modify function receives *PNCounter directly — no type assertion needed.
-    err := actor.Tell(ctx, replicator, &crdt.Update[*crdt.PNCounter]{
+    // The Modify function receives ReplicatedData — use a type assertion to access the concrete type.
+    err := actor.Tell(ctx, replicator, &crdt.Update{
         Key:     requestCount,
         Initial: crdt.NewPNCounter(),
-        Modify:  func(current *crdt.PNCounter) *crdt.PNCounter {
-            return current.Increment(nodeID, 1)
+        Modify:  func(current crdt.ReplicatedData) crdt.ReplicatedData {
+            return current.(*crdt.PNCounter).Increment(nodeID, 1)
         },
     })
 }
@@ -897,11 +898,11 @@ func (a *MyActor) Receive(ctx *actor.ReceiveContext) {
 ```go
 // Add to a distributed set — wait for majority acknowledgment.
 replicator := ctx.ActorSystem().Replicator()
-resp, err := actor.Ask(ctx, replicator, &crdt.Update[*crdt.ORSet[string]]{
+resp, err := actor.Ask(ctx, replicator, &crdt.Update{
     Key:     activeSessions,
-    Initial: crdt.NewORSet[string](),
-    Modify:  func(current *crdt.ORSet[string]) *crdt.ORSet[string] {
-        return current.Add(nodeID, sessionID)
+    Initial: crdt.NewORSet(),
+    Modify:  func(current crdt.ReplicatedData) crdt.ReplicatedData {
+        return current.(*crdt.ORSet).Add(nodeID, sessionID)
     },
     WriteTo: crdt.Majority,
 }, 5*time.Second)
@@ -912,21 +913,21 @@ resp, err := actor.Ask(ctx, replicator, &crdt.Update[*crdt.ORSet[string]]{
 ```go
 // Read from local store (default — fast, eventually consistent).
 replicator := ctx.ActorSystem().Replicator()
-resp, err := actor.Ask(ctx, replicator, &crdt.Get[*crdt.PNCounter]{
+resp, err := actor.Ask(ctx, replicator, &crdt.Get{
     Key: requestCount,
 }, 5*time.Second)
 if err != nil {
     // handle error
 }
-if getResp, ok := resp.(*crdt.GetResponse[*crdt.PNCounter]); ok && getResp.Data != nil {
-    count := getResp.Data.Value()
+if getResp, ok := resp.(*crdt.GetResponse); ok && getResp.Data != nil {
+    count := getResp.Data.(*crdt.PNCounter).Value()
     _ = count
 }
 ```
 
 ```go
 // Read with majority coordination — queries peers and merges.
-resp, err := actor.Ask(ctx, replicator, &crdt.Get[*crdt.ORSet[string]]{
+resp, err := actor.Ask(ctx, replicator, &crdt.Get{
     Key:      activeSessions,
     ReadFrom: crdt.Majority,
 }, 5*time.Second)
@@ -938,18 +939,18 @@ resp, err := actor.Ask(ctx, replicator, &crdt.Get[*crdt.ORSet[string]]{
 // Inside an actor's PreStart — subscribe to changes on a key.
 func (a *MyActor) PreStart(ctx *actor.Context) error {
     replicator := ctx.ActorSystem().Replicator()
-    return actor.Tell(ctx, replicator, &crdt.Subscribe[*crdt.ORSet[string]]{
+    return actor.Tell(ctx, replicator, &crdt.Subscribe{
         Key: activeSessions,
     })
 }
 
 // Inside Receive — handle change notifications.
-// Changed[T] carries the typed value — use safe type assertion on Data.
+// Changed carries a ReplicatedData value — use a type assertion to access the concrete type.
 func (a *MyActor) Receive(ctx *actor.ReceiveContext) {
     switch msg := ctx.Message().(type) {
-    case *crdt.Changed[*crdt.ORSet[string]]:
+    case *crdt.Changed:
         if msg.Data != nil {
-            sessions := msg.Data.Elements()
+            sessions := msg.Data.(*crdt.ORSet).Elements()
             // react to updated session set
             _ = sessions
         }
@@ -960,7 +961,7 @@ func (a *MyActor) Receive(ctx *actor.ReceiveContext) {
 ### 9.6 Deleting Data
 
 ```go
-err := actor.Tell(ctx, replicator, &crdt.Delete[*crdt.ORSet[string]]{
+err := actor.Tell(ctx, replicator, &crdt.Delete{
     Key: activeSessions,
 })
 ```
@@ -1118,7 +1119,7 @@ CRDTs are inherently well-suited for multi-DC deployment because they tolerate a
 
 ## 13. Protobuf Wire Format
 
-CRDT deltas and full states are serialized using Protocol Buffers for wire transmission, consistent with GoAkt's existing serialization approach.
+CRDT deltas and full states are serialized using Protocol Buffers for wire transmission. CRDT values (e.g., the contents of an `LWWRegister` or `ORSet` elements) are serialized using a composite Proto+CBOR serializer: `proto.Message` values are encoded with Protocol Buffers, while Go primitives and user-registered types are encoded with CBOR. The protobuf wire format uses `bytes` fields for serialized values (not `google.protobuf.Any`).
 
 ```protobuf
 syntax = "proto3";
@@ -1262,8 +1263,8 @@ CRDT data structures are on the hot path — they are created, merged, and disca
 | **GCounter**    | `map[string]uint64`                                  | In-place update of existing map entries; new allocation only for unseen node IDs.                 | Map is long-lived, grows monotonically with cluster size.       |
 | **PNCounter**   | Two `GCounter` values                                | Same as GCounter × 2.                                                                             |                                                                 |
 | **LWWRegister** | `value any`, `timestamp int64`, `nodeID string`      | Zero allocation if incoming timestamp loses. One assignment if it wins.                           |                                                                 |
-| **ORSet**       | `map[T][]dot`, `map[string]uint64`                   | Dot slices grow with concurrent adds. Compact periodically to reclaim dots from removed elements. | Compaction runs inside anti-entropy, not on the hot merge path. |
-| **ORMap**       | `ORSet` for keys + `map[K]ReplicatedData` for values | Per-key CRDT merge allocation + key-set OR-Set merge.                                             | Nested CRDT merges follow the same rules recursively.           |
+| **ORSet**       | `map[any][]dot`, `map[string]uint64`                   | Dot slices grow with concurrent adds. Compact periodically to reclaim dots from removed elements. | Compaction runs inside anti-entropy, not on the hot merge path. |
+| **ORMap**       | `ORSet` for keys + `map[any]ReplicatedData` for values | Per-key CRDT merge allocation + key-set OR-Set merge.                                             | Nested CRDT merges follow the same rules recursively.           |
 | **Flag**        | `bool`                                               | Zero allocation.                                                                                  |                                                                 |
 
 ### 14.3 Protobuf Serialization Pools
@@ -1367,12 +1368,12 @@ CRDT lifecycle events are published to GoAkt's EventStream:
 **Goal:** Implement foundation CRDT types and the Replicator actor with TopicActor-based dissemination.
 
 - [x] `ReplicatedData` interface in `crdt/crdt.go`
-- [x] `Key[T]`, `DataType`, and factory functions in `crdt/key.go`
+- [x] `Key`, `DataType`, and factory functions in `crdt/key.go`
 - [x] `GCounter` implementation + `GCounterKey` + tests + benchmarks
 - [x] `PNCounter` implementation + `PNCounterKey` + tests + benchmarks
-- [x] `LWWRegister[T]` implementation + `LWWRegisterKey` + tests + benchmarks
-- [x] `ORSet[T]` implementation + `ORSetKey` + tests + benchmarks
-- [x] Typed messages: `Update[T]`, `Get[T]`, `GetResponse[T]`, `Subscribe[T]`, `Changed[T]`, `Delete[T]`
+- [x] `LWWRegister` implementation + `LWWRegisterKey` + tests + benchmarks
+- [x] `ORSet` implementation + `ORSetKey` + tests + benchmarks
+- [x] Message types: `Update`, `Get`, `GetResponse`, `Subscribe`, `Changed`, `Delete`
 - [x] CRDT config options in `crdt/config.go` (`WithAntiEntropyInterval`, `WithRole`, etc.)
 - [x] `ClusterConfig.WithCRDT(...)` option in `actor/cluster_config.go`
 - [x] `Replicator() *PID` method on `ActorSystem` interface
@@ -1393,13 +1394,13 @@ CRDT lifecycle events are published to GoAkt's EventStream:
 **Goal:** Add anti-entropy, composite CRDT types, and tombstone-based deletion.
 
 - [x] Anti-entropy protocol (version-based digest exchange via direct RemoteTell between Replicators)
-- [x] `ORMap[K, V]` implementation + `ORMapKey` + tests + benchmarks
+- [x] `ORMap` implementation + `ORMapKey` + tests + benchmarks
 - [x] `Flag` implementation + `FlagKey` + tests + benchmarks
-- [x] `MVRegister[T]` implementation + `MVRegisterKey` + tests + benchmarks
+- [x] `MVRegister` implementation + `MVRegisterKey` + tests + benchmarks
 - [x] Key deletion with tombstones and pruning (tombstones published via TopicActor, expired by configurable TTL)
 - [x] ORSet compaction (causal dot pruning via `Compact()` method)
 - [x] Protobuf wire format for Phase 2 types (ORMapData, FlagData, MVRegisterData, CRDTTombstone)
-- [x] Codec encode/decode for Flag, MVRegister[string], ORMap[string, *GCounter]
+- [x] Codec encode/decode for all CRDT types with Proto+CBOR serialization
 - [x] Scheduled anti-entropy and prune ticks via GoAkt `Schedule` API
 - [x] Proper error handling with `ctx.Err()` for supervisor-driven restarts
 

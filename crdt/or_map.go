@@ -25,7 +25,7 @@ package crdt
 import "maps"
 
 // ensure ORMap implements ReplicatedData at compile time.
-var _ ReplicatedData = (*ORMap[string, *GCounter])(nil)
+var _ ReplicatedData = (*ORMap)(nil)
 
 // ORMap is a map CRDT where keys are managed by an OR-Set and values
 // are themselves CRDTs.
@@ -35,18 +35,20 @@ var _ ReplicatedData = (*ORMap[string, *GCounter])(nil)
 // its own CRDT merge function. This makes ORMap composable: any CRDT
 // type can be used as a value.
 //
+// Keys must be comparable at runtime (usable as map keys).
+//
 // Primary use cases: shopping carts, user profiles, distributed config maps.
-type ORMap[K comparable, V ReplicatedData] struct {
-	keys   *ORSet[K]
-	values map[K]V
+type ORMap struct {
+	keys   *ORSet
+	values map[any]ReplicatedData
 	dirty  bool
 }
 
 // NewORMap creates a new empty ORMap.
-func NewORMap[K comparable, V ReplicatedData]() *ORMap[K, V] {
-	return &ORMap[K, V]{
-		keys:   NewORSet[K](),
-		values: make(map[K]V),
+func NewORMap() *ORMap {
+	return &ORMap{
+		keys:   NewORSet(),
+		values: make(map[any]ReplicatedData),
 	}
 }
 
@@ -54,13 +56,13 @@ func NewORMap[K comparable, V ReplicatedData]() *ORMap[K, V] {
 // If the key already exists, the value is merged with the existing value.
 // If the key is new, it is added to the key set.
 // Returns a new ORMap with the updated state.
-func (m *ORMap[K, V]) Set(nodeID string, key K, value V) *ORMap[K, V] {
+func (m *ORMap) Set(nodeID string, key any, value ReplicatedData) *ORMap {
 	out := m.cloneInternal()
 	out.keys = out.keys.Add(nodeID, key)
 	if existing, ok := out.values[key]; ok {
-		out.values[key] = existing.Merge(value).(V)
+		out.values[key] = existing.Merge(value)
 	} else {
-		out.values[key] = value.Clone().(V)
+		out.values[key] = value.Clone()
 	}
 	out.dirty = true
 	return out
@@ -69,7 +71,7 @@ func (m *ORMap[K, V]) Set(nodeID string, key K, value V) *ORMap[K, V] {
 // Remove removes a key from the map using observed-remove semantics.
 // Returns a new ORMap with the updated state. If the key is not in
 // the map, the returned map is unchanged.
-func (m *ORMap[K, V]) Remove(key K) *ORMap[K, V] {
+func (m *ORMap) Remove(key any) *ORMap {
 	if !m.keys.Contains(key) {
 		return m
 	}
@@ -81,28 +83,27 @@ func (m *ORMap[K, V]) Remove(key K) *ORMap[K, V] {
 }
 
 // Get returns the value associated with the key and whether the key exists.
-func (m *ORMap[K, V]) Get(key K) (V, bool) {
+func (m *ORMap) Get(key any) (ReplicatedData, bool) {
 	if !m.keys.Contains(key) {
-		var zero V
-		return zero, false
+		return nil, false
 	}
 	v, ok := m.values[key]
 	return v, ok
 }
 
 // Keys returns all keys currently in the map.
-func (m *ORMap[K, V]) Keys() []K {
+func (m *ORMap) Keys() []any {
 	return m.keys.Elements()
 }
 
 // Len returns the number of entries in the map.
-func (m *ORMap[K, V]) Len() int {
+func (m *ORMap) Len() int {
 	return m.keys.Len()
 }
 
 // Entries returns all key-value pairs currently in the map.
-func (m *ORMap[K, V]) Entries() map[K]V {
-	result := make(map[K]V, m.keys.Len())
+func (m *ORMap) Entries() map[any]ReplicatedData {
+	result := make(map[any]ReplicatedData, m.keys.Len())
 	for _, k := range m.keys.Elements() {
 		if v, ok := m.values[k]; ok {
 			result[k] = v
@@ -115,15 +116,15 @@ func (m *ORMap[K, V]) Entries() map[K]V {
 // Keys are merged using OR-Set semantics. For keys present in both maps,
 // values are merged using the value type's CRDT merge function.
 // Both inputs are left unchanged.
-func (m *ORMap[K, V]) Merge(other ReplicatedData) ReplicatedData {
-	o, ok := other.(*ORMap[K, V])
+func (m *ORMap) Merge(other ReplicatedData) ReplicatedData {
+	o, ok := other.(*ORMap)
 	if !ok {
 		return m
 	}
 
-	merged := &ORMap[K, V]{
-		keys:   m.keys.Merge(o.keys).(*ORSet[K]),
-		values: make(map[K]V),
+	merged := &ORMap{
+		keys:   m.keys.Merge(o.keys).(*ORSet),
+		values: make(map[any]ReplicatedData),
 	}
 
 	// For every key in the merged key set, merge the values from both sides.
@@ -132,11 +133,11 @@ func (m *ORMap[K, V]) Merge(other ReplicatedData) ReplicatedData {
 		rv, rok := o.values[key]
 		switch {
 		case lok && rok:
-			merged.values[key] = lv.Merge(rv).(V)
+			merged.values[key] = lv.Merge(rv)
 		case lok:
-			merged.values[key] = lv.Clone().(V)
+			merged.values[key] = lv.Clone()
 		case rok:
-			merged.values[key] = rv.Clone().(V)
+			merged.values[key] = rv.Clone()
 		}
 	}
 
@@ -145,7 +146,7 @@ func (m *ORMap[K, V]) Merge(other ReplicatedData) ReplicatedData {
 
 // Delta returns the state changes since the last call to ResetDelta.
 // Returns nil if there are no changes.
-func (m *ORMap[K, V]) Delta() ReplicatedData {
+func (m *ORMap) Delta() ReplicatedData {
 	if !m.dirty {
 		return nil
 	}
@@ -154,53 +155,53 @@ func (m *ORMap[K, V]) Delta() ReplicatedData {
 
 // ResetDelta clears the dirty flag and resets the embedded key set's
 // delta to prevent unbounded accumulation of causal dots.
-func (m *ORMap[K, V]) ResetDelta() {
+func (m *ORMap) ResetDelta() {
 	m.dirty = false
 	m.keys.ResetDelta()
 }
 
 // Clone returns a deep copy of the ORMap.
-func (m *ORMap[K, V]) Clone() ReplicatedData {
+func (m *ORMap) Clone() ReplicatedData {
 	return m.cloneInternal()
 }
 
 // Compact removes redundant causal dots from the key set and cleans up
 // orphaned values whose keys are no longer present after compaction.
 // Returns a new ORMap with the compacted state.
-func (m *ORMap[K, V]) Compact() *ORMap[K, V] {
+func (m *ORMap) Compact() *ORMap {
 	compactedKeys := m.keys.Compact()
-	out := &ORMap[K, V]{
+	out := &ORMap{
 		keys:   compactedKeys,
-		values: make(map[K]V, compactedKeys.Len()),
+		values: make(map[any]ReplicatedData, compactedKeys.Len()),
 	}
 	for _, key := range compactedKeys.Elements() {
 		if v, ok := m.values[key]; ok {
-			out.values[key] = v.Clone().(V)
+			out.values[key] = v.Clone()
 		}
 	}
 	return out
 }
 
 // CompactData implements Compactable by delegating to Compact.
-func (m *ORMap[K, V]) CompactData() ReplicatedData {
+func (m *ORMap) CompactData() ReplicatedData {
 	return m.Compact()
 }
 
 // ORMapRawState is the exported state of an ORMap for serialization.
-type ORMapRawState[K comparable, V ReplicatedData] struct {
-	KeyEntries []Entry[K]
+type ORMapRawState struct {
+	KeyEntries []Entry
 	KeyClock   map[string]uint64
-	Values     map[K]V
+	Values     map[any]ReplicatedData
 }
 
 // RawState returns the internal state in a serializable format.
-func (m *ORMap[K, V]) RawState() ORMapRawState[K, V] {
+func (m *ORMap) RawState() ORMapRawState {
 	entries, clock := m.keys.RawState()
-	vals := make(map[K]V, len(m.values))
+	vals := make(map[any]ReplicatedData, len(m.values))
 	for k, v := range m.values {
-		vals[k] = v.Clone().(V)
+		vals[k] = v.Clone()
 	}
-	return ORMapRawState[K, V]{
+	return ORMapRawState{
 		KeyEntries: entries,
 		KeyClock:   clock,
 		Values:     vals,
@@ -208,24 +209,24 @@ func (m *ORMap[K, V]) RawState() ORMapRawState[K, V] {
 }
 
 // ORMapFromRawState creates an ORMap from serialized state.
-func ORMapFromRawState[K comparable, V ReplicatedData](state ORMapRawState[K, V]) *ORMap[K, V] {
-	m := &ORMap[K, V]{
+func ORMapFromRawState(state ORMapRawState) *ORMap {
+	m := &ORMap{
 		keys:   ORSetFromRawState(state.KeyEntries, state.KeyClock),
-		values: make(map[K]V, len(state.Values)),
+		values: make(map[any]ReplicatedData, len(state.Values)),
 	}
 	maps.Copy(m.values, state.Values)
 	return m
 }
 
 // cloneInternal returns a deep copy preserving the concrete type.
-func (m *ORMap[K, V]) cloneInternal() *ORMap[K, V] {
-	out := &ORMap[K, V]{
+func (m *ORMap) cloneInternal() *ORMap {
+	out := &ORMap{
 		keys:   m.keys.cloneInternal(),
-		values: make(map[K]V, len(m.values)),
+		values: make(map[any]ReplicatedData, len(m.values)),
 		dirty:  m.dirty,
 	}
 	for k, v := range m.values {
-		out.values[k] = v.Clone().(V)
+		out.values[k] = v.Clone()
 	}
 	return out
 }

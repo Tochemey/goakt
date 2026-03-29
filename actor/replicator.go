@@ -42,6 +42,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/log"
+	"github.com/tochemey/goakt/v4/remote"
 	sup "github.com/tochemey/goakt/v4/supervisor"
 )
 
@@ -116,6 +117,7 @@ type replicatorActor struct {
 	actorSystem           ActorSystem
 	clusterRef            cluster.Cluster
 	remoting              remoteclient.Client
+	serializer            remote.Serializer
 	snapshotStore         *ddata.Store
 	mergeCount            atomic.Uint64
 	deltaPublishCount     atomic.Uint64
@@ -178,7 +180,12 @@ func (r *replicatorActor) PostStop(ctx *Context) error {
 
 	// persist final snapshot before shutdown
 	if r.snapshotStore != nil {
-		if err := r.snapshotStore.Save(r.store, r.keyTypes, r.versions); err != nil {
+		entries, err := r.buildSnapshotEntries()
+		if err != nil {
+			return fmt.Errorf("failed to encode final CRDT snapshot: %w", err)
+		}
+
+		if err := r.snapshotStore.Save(entries); err != nil {
 			return fmt.Errorf("failed to save final CRDT snapshot: %w", err)
 		}
 
@@ -202,6 +209,7 @@ func (r *replicatorActor) handlePostStart(ctx *ReceiveContext) {
 	sys := ctx.ActorSystem().(*actorSystem)
 	r.clusterRef = sys.getCluster()
 	r.remoting = sys.getRemoting()
+	r.serializer = ddata.NewCRDTValueSerializer()
 
 	// subscribe to the CRDT delta topic so this Replicator receives
 	// deltas from all peer Replicators in the cluster.
@@ -455,7 +463,7 @@ func (r *replicatorActor) handleProtoTombstone(msg *internalpb.CRDTTombstone) {
 // handleProtoDelta decodes a protobuf delta received from a peer replicator
 // via TopicActor and delegates to handleDelta.
 func (r *replicatorActor) handleProtoDelta(ctx *ReceiveContext, msg *internalpb.CRDTDelta) {
-	d, err := decodeCRDTDelta(msg)
+	d, err := r.decodeDelta(msg)
 	if err != nil {
 		r.logger.Warnf("failed to decode CRDT delta: %v", err)
 		return
@@ -553,9 +561,8 @@ func (r *replicatorActor) handleDigest(ctx *ReceiveContext, msg *internalpb.CRDT
 		peerVersion, peerHas := peerVersions[keyID]
 		if !peerHas || localVersion > peerVersion {
 			dataType := r.keyTypes[keyID]
-			pbData, err := codec.EncodeCRDTData(data)
+			pbData, err := ddata.EncodeCRDT(data, r.serializer)
 			if err != nil {
-				// TODO: decide what to do on encoding error. If we skip the key, the peer will never get it until the next anti-entropy round. For now we log and skip, but we may want to consider sending a tombstone or some other marker to trigger a retry on the next round.
 				r.logger.Warnf("anti-entropy: failed to encode state for key=%s: %v", keyID, err)
 				continue
 			}
@@ -586,7 +593,7 @@ func (r *replicatorActor) handleFullState(ctx *ReceiveContext, msg *internalpb.C
 			continue
 		}
 
-		data, err := codec.DecodeCRDTData(entry.GetData())
+		data, err := ddata.DecodeCRDT(entry.GetData(), r.serializer)
 		if err != nil {
 			r.logger.Warnf("anti-entropy: failed to decode state for key=%s: %v", keyID, err)
 			continue
@@ -669,7 +676,7 @@ func (r *replicatorActor) publishDelta(ctx *ReceiveContext, keyID string, dataTy
 		return
 	}
 
-	pb, err := encodeCRDTDelta(&crdtDelta{
+	pb, err := r.encodeDelta(&crdtDelta{
 		KeyID:    keyID,
 		DataType: dataType,
 		Delta:    delta,
@@ -696,7 +703,7 @@ func (r *replicatorActor) notifyChanged(ctx *ReceiveContext, keyID string, data 
 	alive := watchers[:0]
 	for _, watcher := range watchers {
 		if watcher.IsRunning() {
-			ctx.Tell(watcher, &crdt.Changed[crdt.ReplicatedData]{Data: data})
+			ctx.Tell(watcher, &crdt.Changed{Data: data})
 			alive = append(alive, watcher)
 		}
 	}
@@ -728,9 +735,36 @@ func (r *replicatorActor) handleSnapshot() {
 	if r.snapshotStore == nil {
 		return
 	}
-	if err := r.snapshotStore.Save(r.store, r.keyTypes, r.versions); err != nil {
+	entries, err := r.buildSnapshotEntries()
+	if err != nil {
+		r.logger.Errorf("failed to encode CRDT snapshot: %v", err)
+		return
+	}
+	if err := r.snapshotStore.Save(entries); err != nil {
 		r.logger.Errorf("failed to save CRDT snapshot: %v", err)
 	}
+}
+
+// buildSnapshotEntries encodes the in-memory CRDT store into protobuf snapshot entries.
+func (r *replicatorActor) buildSnapshotEntries() (map[string]*internalpb.CRDTSnapshotEntry, error) {
+	entries := make(map[string]*internalpb.CRDTSnapshotEntry, len(r.store))
+	for keyID, data := range r.store {
+		dataType, ok := r.keyTypes[keyID]
+		if !ok {
+			return nil, fmt.Errorf("missing data type for key=%s", keyID)
+		}
+		version := r.versions[keyID]
+		pbData, err := ddata.EncodeCRDT(data, r.serializer)
+		if err != nil {
+			return nil, fmt.Errorf("encode snapshot for key=%s: %w", keyID, err)
+		}
+		entries[keyID] = &internalpb.CRDTSnapshotEntry{
+			Key:     codec.EncodeCRDTKey(keyID, dataType),
+			Data:    pbData,
+			Version: version,
+		}
+	}
+	return entries, nil
 }
 
 // handleReadRequest processes a coordinated read request from a peer Replicator.
@@ -745,7 +779,7 @@ func (r *replicatorActor) handleReadRequest(ctx *ReceiveContext, msg *internalpb
 
 	var pbData *internalpb.CRDTData
 	if data != nil {
-		encoded, err := codec.EncodeCRDTData(data)
+		encoded, err := ddata.EncodeCRDT(data, r.serializer)
 		if err != nil {
 			r.logger.Warnf("coordinated read: failed to encode data for key=%s: %v", keyID, err)
 			return
@@ -778,7 +812,7 @@ func (r *replicatorActor) coordinatedWrite(ctx *ReceiveContext, keyID string, da
 
 	selected := r.selectPeers(peers, r.targetCount(len(peers), level))
 
-	pb, err := encodeCRDTDelta(&crdtDelta{
+	pb, err := r.encodeDelta(&crdtDelta{
 		KeyID:    keyID,
 		DataType: dataType,
 		Delta:    delta,
@@ -843,7 +877,7 @@ func (r *replicatorActor) coordinatedRead(ctx *ReceiveContext, keyID string, loc
 		if !ok || readResp.GetData() == nil {
 			continue
 		}
-		peerData, decodeErr := codec.DecodeCRDTData(readResp.GetData())
+		peerData, decodeErr := ddata.DecodeCRDT(readResp.GetData(), r.serializer)
 		if decodeErr != nil {
 			continue
 		}
@@ -959,9 +993,9 @@ type deleteCommand interface {
 	WriteCoordination() crdt.Coordination
 }
 
-// encodeCRDTDelta converts a crdtDelta to the protobuf wire format.
-func encodeCRDTDelta(d *crdtDelta) (*internalpb.CRDTDelta, error) {
-	data, err := codec.EncodeCRDTData(d.Delta)
+// encodeDelta converts a crdtDelta to the protobuf wire format.
+func (r *replicatorActor) encodeDelta(d *crdtDelta) (*internalpb.CRDTDelta, error) {
+	data, err := ddata.EncodeCRDT(d.Delta, r.serializer)
 	if err != nil {
 		return nil, err
 	}
@@ -972,9 +1006,9 @@ func encodeCRDTDelta(d *crdtDelta) (*internalpb.CRDTDelta, error) {
 	}, nil
 }
 
-// decodeCRDTDelta converts a protobuf CRDTDelta back to a crdtDelta.
-func decodeCRDTDelta(pb *internalpb.CRDTDelta) (*crdtDelta, error) {
-	data, err := codec.DecodeCRDTData(pb.GetData())
+// decodeDelta converts a protobuf CRDTDelta back to a crdtDelta.
+func (r *replicatorActor) decodeDelta(pb *internalpb.CRDTDelta) (*crdtDelta, error) {
+	data, err := ddata.DecodeCRDT(pb.GetData(), r.serializer)
 	if err != nil {
 		return nil, err
 	}
@@ -1073,6 +1107,10 @@ func (x *actorSystem) registerReplicatorMetrics(replActor *replicatorActor) erro
 
 // restoreFromSnapshot opens the snapshot store and restores persisted CRDT state.
 // This is a no-op when snapshot persistence is not configured.
+// Note: the serializer is not yet available during PreStart (it is set in
+// handlePostStart), so restoreFromSnapshot decodes using the default
+// ProtoSerializer. Snapshot data only contains protobuf-serialized values,
+// so this is safe.
 func (r *replicatorActor) restoreFromSnapshot() error {
 	if r.config.SnapshotInterval() <= 0 || r.config.SnapshotDir() == "" {
 		return nil
@@ -1085,24 +1123,38 @@ func (r *replicatorActor) restoreFromSnapshot() error {
 	}
 	r.snapshotStore = store
 
-	data, keyTypes, versions, err := store.Load()
+	entries, err := store.Load()
 	if err != nil {
 		r.logger.Warnf("failed to load CRDT snapshot: %v", err)
 		return nil
 	}
 
-	if len(data) == 0 {
+	if len(entries) == 0 {
 		return nil
 	}
 
-	// apply restored state
-	r.store = data
-	r.keyTypes = keyTypes
-	r.versions = versions
-	for keyID := range data {
-		r.subscriptions[keyID] = types.Unit{}
+	// Snapshot restore happens before the serializer is set (PreStart runs
+	// before PostStart). Use the dedicated CRDT value serializer for decoding.
+	serializer := ddata.NewCRDTValueSerializer()
+
+	for keyID, entry := range entries {
+		entryKeyID, dataType, keyErr := codec.DecodeCRDTKey(entry.GetKey())
+		if keyErr != nil {
+			r.logger.Warnf("failed to decode snapshot key for %s: %v", keyID, keyErr)
+			continue
+		}
+		data, decErr := ddata.DecodeCRDT(entry.GetData(), serializer)
+		if decErr != nil {
+			r.logger.Warnf("failed to decode snapshot data for key=%s: %v", entryKeyID, decErr)
+			continue
+		}
+
+		r.store[entryKeyID] = data
+		r.keyTypes[entryKeyID] = dataType
+		r.versions[entryKeyID] = entry.GetVersion()
+		r.subscriptions[entryKeyID] = types.Unit{}
 	}
 
-	r.logger.Infof("restored %d CRDT keys from snapshot", len(data))
+	r.logger.Infof("restored %d CRDT keys from snapshot", len(entries))
 	return nil
 }

@@ -26,7 +26,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -34,6 +33,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v4/crdt"
+	"github.com/tochemey/goakt/v4/internal/codec"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 )
 
@@ -44,27 +44,22 @@ func TestStore(t *testing.T) {
 		require.NoError(t, err)
 		defer store.Close()
 
-		data := map[string]crdt.ReplicatedData{
-			"counter-1": crdt.NewGCounter().Increment("node-1", 10),
+		entry := &internalpb.CRDTSnapshotEntry{
+			Key:     codec.EncodeCRDTKey("counter-1", crdt.GCounterType),
+			Data:    &internalpb.CRDTData{Type: &internalpb.CRDTData_GCounter{GCounter: &internalpb.GCounterData{State: map[string]uint64{"node-1": 10}}}},
+			Version: 5,
 		}
-		keyTypes := map[string]crdt.DataType{
-			"counter-1": crdt.GCounterType,
-		}
-		versions := map[string]uint64{
-			"counter-1": 5,
-		}
+		entries := map[string]*internalpb.CRDTSnapshotEntry{"counter-1": entry}
 
-		err = store.Save(data, keyTypes, versions)
+		err = store.Save(entries)
 		require.NoError(t, err)
 
-		loadedData, loadedTypes, loadedVersions, err := store.Load()
+		loaded, err := store.Load()
 		require.NoError(t, err)
-		require.Len(t, loadedData, 1)
-		assert.Equal(t, crdt.GCounterType, loadedTypes["counter-1"])
-		assert.Equal(t, uint64(5), loadedVersions["counter-1"])
-
-		gc := loadedData["counter-1"].(*crdt.GCounter)
-		assert.Equal(t, uint64(10), gc.Value())
+		require.Len(t, loaded, 1)
+		require.NotNil(t, loaded["counter-1"])
+		assert.Equal(t, uint64(5), loaded["counter-1"].GetVersion())
+		assert.Equal(t, uint64(10), loaded["counter-1"].GetData().GetGCounter().GetState()["node-1"])
 	})
 
 	t.Run("save and load round trip with PNCounter", func(t *testing.T) {
@@ -73,43 +68,25 @@ func TestStore(t *testing.T) {
 		require.NoError(t, err)
 		defer store.Close()
 
-		pn := crdt.NewPNCounter().Increment("node-1", 20).Decrement("node-1", 5)
-		data := map[string]crdt.ReplicatedData{"pn-1": pn}
-		keyTypes := map[string]crdt.DataType{"pn-1": crdt.PNCounterType}
-		versions := map[string]uint64{"pn-1": 3}
+		entry := &internalpb.CRDTSnapshotEntry{
+			Key: codec.EncodeCRDTKey("pn-1", crdt.PNCounterType),
+			Data: &internalpb.CRDTData{Type: &internalpb.CRDTData_PnCounter{PnCounter: &internalpb.PNCounterData{
+				Increments: &internalpb.GCounterData{State: map[string]uint64{"node-1": 20}},
+				Decrements: &internalpb.GCounterData{State: map[string]uint64{"node-1": 5}},
+			}}},
+			Version: 3,
+		}
+		entries := map[string]*internalpb.CRDTSnapshotEntry{"pn-1": entry}
 
-		err = store.Save(data, keyTypes, versions)
+		err = store.Save(entries)
 		require.NoError(t, err)
 
-		loadedData, loadedTypes, loadedVersions, err := store.Load()
+		loaded, err := store.Load()
 		require.NoError(t, err)
-		assert.Equal(t, crdt.PNCounterType, loadedTypes["pn-1"])
-		assert.Equal(t, uint64(3), loadedVersions["pn-1"])
-		assert.Equal(t, int64(15), loadedData["pn-1"].(*crdt.PNCounter).Value())
-	})
-
-	t.Run("save and load round trip with ORSet", func(t *testing.T) {
-		dir := t.TempDir()
-		store, err := NewStore(dir)
-		require.NoError(t, err)
-		defer store.Close()
-
-		orset := crdt.NewORSet[string]()
-		orset = orset.Add("node-1", "a")
-		orset = orset.Add("node-1", "b")
-
-		data := map[string]crdt.ReplicatedData{"set-1": orset}
-		keyTypes := map[string]crdt.DataType{"set-1": crdt.ORSetType}
-		versions := map[string]uint64{"set-1": 2}
-
-		err = store.Save(data, keyTypes, versions)
-		require.NoError(t, err)
-
-		loadedData, _, _, err := store.Load()
-		require.NoError(t, err)
-		loaded := loadedData["set-1"].(*crdt.ORSet[string])
-		assert.True(t, loaded.Contains("a"))
-		assert.True(t, loaded.Contains("b"))
+		require.Len(t, loaded, 1)
+		assert.Equal(t, uint64(3), loaded["pn-1"].GetVersion())
+		assert.Equal(t, uint64(20), loaded["pn-1"].GetData().GetPnCounter().GetIncrements().GetState()["node-1"])
+		assert.Equal(t, uint64(5), loaded["pn-1"].GetData().GetPnCounter().GetDecrements().GetState()["node-1"])
 	})
 
 	t.Run("save and load round trip with Flag", func(t *testing.T) {
@@ -118,74 +95,31 @@ func TestStore(t *testing.T) {
 		require.NoError(t, err)
 		defer store.Close()
 
-		flag := crdt.NewFlag().Enable()
-		data := map[string]crdt.ReplicatedData{"flag-1": flag}
-		keyTypes := map[string]crdt.DataType{"flag-1": crdt.FlagType}
-		versions := map[string]uint64{"flag-1": 1}
+		entry := &internalpb.CRDTSnapshotEntry{
+			Key:     codec.EncodeCRDTKey("flag-1", crdt.FlagType),
+			Data:    &internalpb.CRDTData{Type: &internalpb.CRDTData_Flag{Flag: &internalpb.FlagData{Enabled: true}}},
+			Version: 1,
+		}
+		entries := map[string]*internalpb.CRDTSnapshotEntry{"flag-1": entry}
 
-		err = store.Save(data, keyTypes, versions)
+		err = store.Save(entries)
 		require.NoError(t, err)
 
-		loadedData, _, _, err := store.Load()
+		loaded, err := store.Load()
 		require.NoError(t, err)
-		assert.True(t, loadedData["flag-1"].(*crdt.Flag).Enabled())
+		require.Len(t, loaded, 1)
+		assert.True(t, loaded["flag-1"].GetData().GetFlag().GetEnabled())
 	})
 
-	t.Run("save and load round trip with MVRegister", func(t *testing.T) {
+	t.Run("load from empty DB returns empty map", func(t *testing.T) {
 		dir := t.TempDir()
 		store, err := NewStore(dir)
 		require.NoError(t, err)
 		defer store.Close()
 
-		mv := crdt.NewMVRegister[string]()
-		mv = mv.Set("node-1", "hello")
-
-		data := map[string]crdt.ReplicatedData{"mv-1": mv}
-		keyTypes := map[string]crdt.DataType{"mv-1": crdt.MVRegisterType}
-		versions := map[string]uint64{"mv-1": 1}
-
-		err = store.Save(data, keyTypes, versions)
+		loaded, err := store.Load()
 		require.NoError(t, err)
-
-		loadedData, _, _, err := store.Load()
-		require.NoError(t, err)
-		loaded := loadedData["mv-1"].(*crdt.MVRegister[string])
-		assert.Equal(t, []string{"hello"}, loaded.Values())
-	})
-
-	t.Run("save and load round trip with LWWRegister", func(t *testing.T) {
-		dir := t.TempDir()
-		store, err := NewStore(dir)
-		require.NoError(t, err)
-		defer store.Close()
-
-		lww := crdt.NewLWWRegister[string]().Set("world", time.Now(), "node-1")
-
-		data := map[string]crdt.ReplicatedData{"lww-1": lww}
-		keyTypes := map[string]crdt.DataType{"lww-1": crdt.LWWRegisterType}
-		versions := map[string]uint64{"lww-1": 1}
-
-		err = store.Save(data, keyTypes, versions)
-		require.NoError(t, err)
-
-		loadedData, _, _, err := store.Load()
-		require.NoError(t, err)
-		loaded := loadedData["lww-1"].(*crdt.LWWRegister[string])
-		assert.Equal(t, "world", loaded.Value())
-		assert.Equal(t, "node-1", loaded.NodeID())
-	})
-
-	t.Run("load from empty DB returns empty maps", func(t *testing.T) {
-		dir := t.TempDir()
-		store, err := NewStore(dir)
-		require.NoError(t, err)
-		defer store.Close()
-
-		data, keyTypes, versions, err := store.Load()
-		require.NoError(t, err)
-		assert.Empty(t, data)
-		assert.Empty(t, keyTypes)
-		assert.Empty(t, versions)
+		assert.Empty(t, loaded)
 	})
 
 	t.Run("save overwrites previous data", func(t *testing.T) {
@@ -195,26 +129,34 @@ func TestStore(t *testing.T) {
 		defer store.Close()
 
 		// first save
-		data1 := map[string]crdt.ReplicatedData{
-			"a": crdt.NewGCounter().Increment("n1", 1),
-			"b": crdt.NewGCounter().Increment("n1", 2),
+		entries1 := map[string]*internalpb.CRDTSnapshotEntry{
+			"a": {
+				Key:     codec.EncodeCRDTKey("a", crdt.GCounterType),
+				Data:    &internalpb.CRDTData{Type: &internalpb.CRDTData_GCounter{GCounter: &internalpb.GCounterData{State: map[string]uint64{"n1": 1}}}},
+				Version: 1,
+			},
+			"b": {
+				Key:     codec.EncodeCRDTKey("b", crdt.GCounterType),
+				Data:    &internalpb.CRDTData{Type: &internalpb.CRDTData_GCounter{GCounter: &internalpb.GCounterData{State: map[string]uint64{"n1": 2}}}},
+				Version: 1,
+			},
 		}
-		keyTypes1 := map[string]crdt.DataType{"a": crdt.GCounterType, "b": crdt.GCounterType}
-		versions1 := map[string]uint64{"a": 1, "b": 1}
-		err = store.Save(data1, keyTypes1, versions1)
+		err = store.Save(entries1)
 		require.NoError(t, err)
 
 		// second save with different keys
-		data2 := map[string]crdt.ReplicatedData{
-			"c": crdt.NewGCounter().Increment("n1", 3),
+		entries2 := map[string]*internalpb.CRDTSnapshotEntry{
+			"c": {
+				Key:     codec.EncodeCRDTKey("c", crdt.GCounterType),
+				Data:    &internalpb.CRDTData{Type: &internalpb.CRDTData_GCounter{GCounter: &internalpb.GCounterData{State: map[string]uint64{"n1": 3}}}},
+				Version: 2,
+			},
 		}
-		keyTypes2 := map[string]crdt.DataType{"c": crdt.GCounterType}
-		versions2 := map[string]uint64{"c": 2}
-		err = store.Save(data2, keyTypes2, versions2)
+		err = store.Save(entries2)
 		require.NoError(t, err)
 
 		// load should only have "c"
-		loaded, _, _, err := store.Load()
+		loaded, err := store.Load()
 		require.NoError(t, err)
 		assert.Len(t, loaded, 1)
 		_, hasA := loaded["a"]
@@ -242,7 +184,7 @@ func TestStore(t *testing.T) {
 		err = store.Close()
 		require.NoError(t, err)
 
-		err = store.Save(nil, nil, nil)
+		err = store.Save(nil)
 		assert.ErrorIs(t, err, ErrStoreClosed)
 	})
 
@@ -254,7 +196,7 @@ func TestStore(t *testing.T) {
 		err = store.Close()
 		require.NoError(t, err)
 
-		_, _, _, err = store.Load()
+		_, err = store.Load()
 		assert.ErrorIs(t, err, ErrStoreClosed)
 	})
 
@@ -264,33 +206,39 @@ func TestStore(t *testing.T) {
 		require.NoError(t, err)
 		defer store.Close()
 
-		data := map[string]crdt.ReplicatedData{
-			"gc":   crdt.NewGCounter().Increment("n1", 5),
-			"pn":   crdt.NewPNCounter().Increment("n1", 10),
-			"flag": crdt.NewFlag().Enable(),
+		entries := map[string]*internalpb.CRDTSnapshotEntry{
+			"gc": {
+				Key:     codec.EncodeCRDTKey("gc", crdt.GCounterType),
+				Data:    &internalpb.CRDTData{Type: &internalpb.CRDTData_GCounter{GCounter: &internalpb.GCounterData{State: map[string]uint64{"n1": 5}}}},
+				Version: 1,
+			},
+			"pn": {
+				Key: codec.EncodeCRDTKey("pn", crdt.PNCounterType),
+				Data: &internalpb.CRDTData{Type: &internalpb.CRDTData_PnCounter{PnCounter: &internalpb.PNCounterData{
+					Increments: &internalpb.GCounterData{State: map[string]uint64{"n1": 10}},
+					Decrements: &internalpb.GCounterData{State: map[string]uint64{}},
+				}}},
+				Version: 2,
+			},
+			"flag": {
+				Key:     codec.EncodeCRDTKey("flag", crdt.FlagType),
+				Data:    &internalpb.CRDTData{Type: &internalpb.CRDTData_Flag{Flag: &internalpb.FlagData{Enabled: true}}},
+				Version: 3,
+			},
 		}
-		keyTypes := map[string]crdt.DataType{
-			"gc":   crdt.GCounterType,
-			"pn":   crdt.PNCounterType,
-			"flag": crdt.FlagType,
-		}
-		versions := map[string]uint64{"gc": 1, "pn": 2, "flag": 3}
 
-		err = store.Save(data, keyTypes, versions)
+		err = store.Save(entries)
 		require.NoError(t, err)
 
-		loaded, loadedTypes, loadedVersions, err := store.Load()
+		loaded, err := store.Load()
 		require.NoError(t, err)
 		assert.Len(t, loaded, 3)
-		assert.Equal(t, uint64(5), loaded["gc"].(*crdt.GCounter).Value())
-		assert.Equal(t, int64(10), loaded["pn"].(*crdt.PNCounter).Value())
-		assert.True(t, loaded["flag"].(*crdt.Flag).Enabled())
-		assert.Equal(t, crdt.GCounterType, loadedTypes["gc"])
-		assert.Equal(t, crdt.PNCounterType, loadedTypes["pn"])
-		assert.Equal(t, crdt.FlagType, loadedTypes["flag"])
-		assert.Equal(t, uint64(1), loadedVersions["gc"])
-		assert.Equal(t, uint64(2), loadedVersions["pn"])
-		assert.Equal(t, uint64(3), loadedVersions["flag"])
+		assert.Equal(t, uint64(5), loaded["gc"].GetData().GetGCounter().GetState()["n1"])
+		assert.Equal(t, uint64(10), loaded["pn"].GetData().GetPnCounter().GetIncrements().GetState()["n1"])
+		assert.True(t, loaded["flag"].GetData().GetFlag().GetEnabled())
+		assert.Equal(t, uint64(1), loaded["gc"].GetVersion())
+		assert.Equal(t, uint64(2), loaded["pn"].GetVersion())
+		assert.Equal(t, uint64(3), loaded["flag"].GetVersion())
 	})
 
 	t.Run("EnsureOpen returns error when closed", func(t *testing.T) {
@@ -313,40 +261,6 @@ func TestStore(t *testing.T) {
 
 		err = store.EnsureOpen()
 		assert.NoError(t, err)
-	})
-
-	t.Run("save with missing keyType returns error", func(t *testing.T) {
-		dir := t.TempDir()
-		store, err := NewStore(dir)
-		require.NoError(t, err)
-		defer store.Close()
-
-		data := map[string]crdt.ReplicatedData{
-			"counter-1": crdt.NewGCounter().Increment("node-1", 10),
-		}
-		keyTypes := map[string]crdt.DataType{}
-		versions := map[string]uint64{"counter-1": 1}
-
-		err = store.Save(data, keyTypes, versions)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "missing data type")
-	})
-
-	t.Run("save with missing version returns error", func(t *testing.T) {
-		dir := t.TempDir()
-		store, err := NewStore(dir)
-		require.NoError(t, err)
-		defer store.Close()
-
-		data := map[string]crdt.ReplicatedData{
-			"counter-1": crdt.NewGCounter().Increment("node-1", 10),
-		}
-		keyTypes := map[string]crdt.DataType{"counter-1": crdt.GCounterType}
-		versions := map[string]uint64{}
-
-		err = store.Save(data, keyTypes, versions)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "missing version")
 	})
 
 	t.Run("close then remove deletes file", func(t *testing.T) {
@@ -382,23 +296,6 @@ func TestStore(t *testing.T) {
 		require.Error(t, err)
 	})
 
-	t.Run("save with unsupported CRDT type returns error", func(t *testing.T) {
-		dir := t.TempDir()
-		store, err := NewStore(dir)
-		require.NoError(t, err)
-		defer store.Close()
-
-		data := map[string]crdt.ReplicatedData{
-			"lww-int": crdt.NewLWWRegister[int](),
-		}
-		keyTypes := map[string]crdt.DataType{"lww-int": crdt.LWWRegisterType}
-		versions := map[string]uint64{"lww-int": 1}
-
-		err = store.Save(data, keyTypes, versions)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "encode snapshot")
-	})
-
 	t.Run("load with corrupted entry returns error", func(t *testing.T) {
 		dir := t.TempDir()
 		store, err := NewStore(dir)
@@ -411,7 +308,7 @@ func TestStore(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		_, _, _, err = store.Load()
+		_, err = store.Load()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "unmarshal snapshot entry")
 	})
@@ -431,7 +328,7 @@ func TestStore(t *testing.T) {
 		require.NoError(t, err)
 	})
 
-	t.Run("load with bad CRDT key returns error", func(t *testing.T) {
+	t.Run("load with unspecified key type returns raw entry", func(t *testing.T) {
 		dir := t.TempDir()
 		store, err := NewStore(dir)
 		require.NoError(t, err)
@@ -454,12 +351,12 @@ func TestStore(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		_, _, _, err = store.Load()
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "decode snapshot key")
+		loaded, err := store.Load()
+		require.NoError(t, err)
+		assert.Len(t, loaded, 1)
 	})
 
-	t.Run("load with bad CRDT data returns error", func(t *testing.T) {
+	t.Run("load with nil data returns raw entry", func(t *testing.T) {
 		dir := t.TempDir()
 		store, err := NewStore(dir)
 		require.NoError(t, err)
@@ -482,34 +379,8 @@ func TestStore(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		_, _, _, err = store.Load()
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "decode snapshot data")
-	})
-
-	t.Run("save and load round trip with ORMap", func(t *testing.T) {
-		dir := t.TempDir()
-		store, err := NewStore(dir)
+		loaded, err := store.Load()
 		require.NoError(t, err)
-		defer store.Close()
-
-		m := crdt.NewORMap[string, *crdt.GCounter]()
-		m = m.Set("node-1", "key-a", crdt.NewGCounter().Increment("node-1", 5))
-
-		data := map[string]crdt.ReplicatedData{"map-1": m}
-		keyTypes := map[string]crdt.DataType{"map-1": crdt.ORMapType}
-		versions := map[string]uint64{"map-1": 1}
-
-		err = store.Save(data, keyTypes, versions)
-		require.NoError(t, err)
-
-		loadedData, loadedTypes, loadedVersions, err := store.Load()
-		require.NoError(t, err)
-		assert.Equal(t, crdt.ORMapType, loadedTypes["map-1"])
-		assert.Equal(t, uint64(1), loadedVersions["map-1"])
-		loaded := loadedData["map-1"].(*crdt.ORMap[string, *crdt.GCounter])
-		v, ok := loaded.Get("key-a")
-		require.True(t, ok)
-		assert.Equal(t, uint64(5), v.Value())
+		assert.Len(t, loaded, 1)
 	})
 }

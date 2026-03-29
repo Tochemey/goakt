@@ -210,6 +210,50 @@ func TestCBORSerializer_SerializeDeserialize_Time(t *testing.T) {
 	require.True(t, ts.Equal(decoded.At))
 }
 
+func TestCBORSerializer_PrimitiveRoundTrip(t *testing.T) {
+	// Primitive types are pre-registered in types.GlobalRegistry init().
+	// CBORSerializer must round-trip them as values (not pointers).
+	serializer := NewCBORSerializer()
+
+	tests := []struct {
+		name  string
+		value any
+	}{
+		{"string", "hello"},
+		{"empty string", ""},
+		{"bool true", true},
+		{"bool false", false},
+		{"int", int(42)},
+		{"int8", int8(-7)},
+		{"int16", int16(300)},
+		{"int32", int32(-100000)},
+		{"int64", int64(9223372036854775807)},
+		{"uint", uint(99)},
+		{"uint8", uint8(255)},
+		{"uint16", uint16(65535)},
+		{"uint32", uint32(4294967295)},
+		{"uint64", uint64(18446744073709551615)},
+		{"float32", float32(3.14)},
+		{"float64", float64(2.718281828)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data, err := serializer.Serialize(tt.value)
+			require.NoError(t, err)
+			require.NotEmpty(t, data)
+
+			actual, err := serializer.Deserialize(data)
+			require.NoError(t, err)
+
+			// Must return a value type, not a pointer.
+			require.Equal(t, reflect.TypeOf(tt.value), reflect.TypeOf(actual),
+				"round-trip should preserve value type, got %T", actual)
+			require.Equal(t, tt.value, actual)
+		})
+	}
+}
+
 func TestCBORSerializer_Serialize_Errors(t *testing.T) {
 	serializer := NewCBORSerializer()
 

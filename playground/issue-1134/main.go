@@ -40,7 +40,7 @@ import (
 )
 
 // sessionsKey is a typed CRDT key for an ORSet of session IDs.
-var sessionsKey = crdt.ORSetKey[string]("active-sessions")
+var sessionsKey = crdt.ORSetKey("active-sessions")
 
 // -- Messages --
 
@@ -66,31 +66,32 @@ func (a *SessionTracker) Receive(ctx *actor.ReceiveContext) {
 		fmt.Printf("[%s] SessionTracker started\n", ctx.ActorSystem().PeersAddress())
 	case *AddSession:
 		nodeID := ctx.Self().Path().Name()
-		ctx.Tell(replicator, &crdt.Update[*crdt.ORSet[string]]{
+		ctx.Tell(replicator, &crdt.Update{
 			Key:     sessionsKey,
-			Initial: crdt.NewORSet[string](),
-			Modify: func(current *crdt.ORSet[string]) *crdt.ORSet[string] {
-				return current.Add(nodeID, msg.SessionID)
+			Initial: crdt.NewORSet(),
+			Modify: func(current crdt.ReplicatedData) crdt.ReplicatedData {
+				return current.(*crdt.ORSet).Add(nodeID, msg.SessionID)
 			},
 		})
 		fmt.Printf("[%s] added session: %s\n", ctx.ActorSystem().PeersAddress(), msg.SessionID)
 	case *RemoveSession:
-		ctx.Tell(replicator, &crdt.Update[*crdt.ORSet[string]]{
+		ctx.Tell(replicator, &crdt.Update{
 			Key:     sessionsKey,
-			Initial: crdt.NewORSet[string](),
-			Modify: func(current *crdt.ORSet[string]) *crdt.ORSet[string] {
-				return current.Remove(msg.SessionID)
+			Initial: crdt.NewORSet(),
+			Modify: func(current crdt.ReplicatedData) crdt.ReplicatedData {
+				return current.(*crdt.ORSet).Remove(msg.SessionID)
 			},
 		})
 		fmt.Printf("[%s] removed session: %s\n", ctx.ActorSystem().PeersAddress(), msg.SessionID)
 	case *PrintSessions:
-		reply := ctx.Ask(replicator, &crdt.Get[*crdt.ORSet[string]]{
+		reply := ctx.Ask(replicator, &crdt.Get{
 			Key: sessionsKey,
 		}, time.Second)
-		resp, ok := reply.(*crdt.GetResponse[*crdt.ORSet[string]])
+		resp, ok := reply.(*crdt.GetResponse)
 		if ok && resp.Data != nil {
+			set := resp.Data.(*crdt.ORSet)
 			fmt.Printf("[%s] active sessions: %v (count=%d)\n",
-				ctx.ActorSystem().PeersAddress(), resp.Data.Elements(), resp.Data.Len())
+				ctx.ActorSystem().PeersAddress(), set.Elements(), set.Len())
 		} else {
 			fmt.Printf("[%s] no sessions found\n", ctx.ActorSystem().PeersAddress())
 		}
@@ -109,14 +110,14 @@ func (a *SessionReporter) Receive(ctx *actor.ReceiveContext) {
 	case *actor.PostStart:
 		replicator := ctx.ActorSystem().Replicator()
 		if replicator != nil {
-			ctx.Tell(replicator, &crdt.Subscribe[*crdt.ORSet[string]]{
+			ctx.Tell(replicator, &crdt.Subscribe{
 				Key: sessionsKey,
 			})
 			fmt.Printf("[%s] SessionReporter subscribed to session changes\n",
 				ctx.ActorSystem().PeersAddress())
 		}
-	case *crdt.Changed[crdt.ReplicatedData]:
-		set := msg.Data.(*crdt.ORSet[string])
+	case *crdt.Changed:
+		set := msg.Data.(*crdt.ORSet)
 		fmt.Printf("[%s] ** change notification ** sessions=%v count=%d\n",
 			ctx.ActorSystem().PeersAddress(), set.Elements(), set.Len())
 	}
