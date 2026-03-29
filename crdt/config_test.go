@@ -42,6 +42,11 @@ func TestConfig(t *testing.T) {
 		assert.Equal(t, 5*time.Second, c.CoordinationTimeout())
 		assert.Equal(t, time.Duration(0), c.SnapshotInterval())
 		assert.Empty(t, c.SnapshotDir())
+		assert.False(t, c.DataCenterEnabled())
+		assert.Equal(t, 5*time.Second, c.DataCenterReplicationInterval())
+		assert.False(t, c.DataCenterAntiEntropy())
+		assert.Equal(t, 2*time.Minute, c.DataCenterAntiEntropyInterval())
+		assert.Equal(t, 10*time.Second, c.DataCenterSendTimeout())
 	})
 
 	t.Run("with anti-entropy interval", func(t *testing.T) {
@@ -84,6 +89,31 @@ func TestConfig(t *testing.T) {
 		assert.Equal(t, "/tmp/crdt-snapshots", c.SnapshotDir())
 	})
 
+	t.Run("with data center replication", func(t *testing.T) {
+		c := NewConfig(WithDataCenterReplication())
+		assert.True(t, c.DataCenterEnabled())
+	})
+
+	t.Run("with data center replication interval", func(t *testing.T) {
+		c := NewConfig(WithDataCenterReplicationInterval(10 * time.Second))
+		assert.Equal(t, 10*time.Second, c.DataCenterReplicationInterval())
+	})
+
+	t.Run("with data center anti-entropy", func(t *testing.T) {
+		c := NewConfig(WithDataCenterAntiEntropy())
+		assert.True(t, c.DataCenterAntiEntropy())
+	})
+
+	t.Run("with data center anti-entropy interval", func(t *testing.T) {
+		c := NewConfig(WithDataCenterAntiEntropyInterval(5 * time.Minute))
+		assert.Equal(t, 5*time.Minute, c.DataCenterAntiEntropyInterval())
+	})
+
+	t.Run("with data center send timeout", func(t *testing.T) {
+		c := NewConfig(WithDataCenterSendTimeout(15 * time.Second))
+		assert.Equal(t, 15*time.Second, c.DataCenterSendTimeout())
+	})
+
 	t.Run("multiple options", func(t *testing.T) {
 		c := NewConfig(
 			WithAntiEntropyInterval(15*time.Second),
@@ -92,6 +122,11 @@ func TestConfig(t *testing.T) {
 			WithCoordinationTimeout(3*time.Second),
 			WithSnapshotInterval(2*time.Minute),
 			WithSnapshotDir("/data/snapshots"),
+			WithDataCenterReplication(),
+			WithDataCenterReplicationInterval(3*time.Second),
+			WithDataCenterAntiEntropy(),
+			WithDataCenterAntiEntropyInterval(1*time.Minute),
+			WithDataCenterSendTimeout(8*time.Second),
 		)
 		assert.Equal(t, 15*time.Second, c.AntiEntropyInterval())
 		assert.Equal(t, 32*1024, c.MaxDeltaSize())
@@ -101,5 +136,10 @@ func TestConfig(t *testing.T) {
 		assert.Equal(t, 3*time.Second, c.CoordinationTimeout())
 		assert.Equal(t, 2*time.Minute, c.SnapshotInterval())
 		assert.Equal(t, "/data/snapshots", c.SnapshotDir())
+		assert.True(t, c.DataCenterEnabled())
+		assert.Equal(t, 3*time.Second, c.DataCenterReplicationInterval())
+		assert.True(t, c.DataCenterAntiEntropy())
+		assert.Equal(t, 1*time.Minute, c.DataCenterAntiEntropyInterval())
+		assert.Equal(t, 8*time.Second, c.DataCenterSendTimeout())
 	})
 }

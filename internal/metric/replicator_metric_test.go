@@ -52,6 +52,10 @@ func TestNewReplicatorMetric(t *testing.T) {
 		assert.NotNil(t, m.CoordinatedReadCount())
 		assert.NotNil(t, m.AntiEntropyCount())
 		assert.NotNil(t, m.TombstoneCount())
+		assert.NotNil(t, m.CrossDCSendCount())
+		assert.NotNil(t, m.CrossDCReceiveCount())
+		assert.NotNil(t, m.CrossDCReplicationLag())
+		assert.NotNil(t, m.CrossDCStaleSkipCount())
 	})
 }
 
@@ -73,6 +77,10 @@ func TestNewReplicatorMetricErrors(t *testing.T) {
 		{name: "coordinated read counter", failKey: "crdt.replicator.coordinated.read.count"},
 		{name: "anti-entropy counter", failKey: "crdt.replicator.antientropy.count"},
 		{name: "tombstone gauge", failKey: "crdt.replicator.tombstone.count"},
+		{name: "cross-DC send counter", failKey: "crdt.replicator.crossdc.send.count"},
+		{name: "cross-DC receive counter", failKey: "crdt.replicator.crossdc.receive.count"},
+		{name: "cross-DC replication lag gauge", failKey: "crdt.replicator.crossdc.replication.lag"},
+		{name: "cross-DC stale skip counter", failKey: "crdt.replicator.crossdc.stale.skip.count"},
 	}
 
 	for _, tt := range testCases {

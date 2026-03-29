@@ -1197,6 +1197,80 @@ func (x *CRDTSnapshotEntry) GetVersion() uint64 {
 	return 0
 }
 
+// CRDTDeltaBatch is a batched collection of deltas and tombstones forwarded
+// between CRDT bridge actors across datacenters.
+type CRDTDeltaBatch struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the deltas accumulated since the last flush.
+	Deltas []*CRDTDelta `protobuf:"bytes,1,rep,name=deltas,proto3" json:"deltas,omitempty"`
+	// Specifies the tombstones accumulated since the last flush.
+	Tombstones []*CRDTTombstone `protobuf:"bytes,2,rep,name=tombstones,proto3" json:"tombstones,omitempty"`
+	// Specifies the datacenter that originated this batch.
+	OriginDc *DataCenter `protobuf:"bytes,3,opt,name=origin_dc,json=originDc,proto3" json:"origin_dc,omitempty"`
+	// Specifies when the batch was sent in nanoseconds since epoch.
+	SentAtNanos   int64 `protobuf:"varint,4,opt,name=sent_at_nanos,json=sentAtNanos,proto3" json:"sent_at_nanos,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CRDTDeltaBatch) Reset() {
+	*x = CRDTDeltaBatch{}
+	mi := &file_internal_crdt_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CRDTDeltaBatch) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CRDTDeltaBatch) ProtoMessage() {}
+
+func (x *CRDTDeltaBatch) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_crdt_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CRDTDeltaBatch.ProtoReflect.Descriptor instead.
+func (*CRDTDeltaBatch) Descriptor() ([]byte, []int) {
+	return file_internal_crdt_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *CRDTDeltaBatch) GetDeltas() []*CRDTDelta {
+	if x != nil {
+		return x.Deltas
+	}
+	return nil
+}
+
+func (x *CRDTDeltaBatch) GetTombstones() []*CRDTTombstone {
+	if x != nil {
+		return x.Tombstones
+	}
+	return nil
+}
+
+func (x *CRDTDeltaBatch) GetOriginDc() *DataCenter {
+	if x != nil {
+		return x.OriginDc
+	}
+	return nil
+}
+
+func (x *CRDTDeltaBatch) GetSentAtNanos() int64 {
+	if x != nil {
+		return x.SentAtNanos
+	}
+	return 0
+}
+
 // ORSetDot represents a single causal event.
 type ORSetData_ORSetDot struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -1210,7 +1284,7 @@ type ORSetData_ORSetDot struct {
 
 func (x *ORSetData_ORSetDot) Reset() {
 	*x = ORSetData_ORSetDot{}
-	mi := &file_internal_crdt_proto_msgTypes[19]
+	mi := &file_internal_crdt_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1222,7 +1296,7 @@ func (x *ORSetData_ORSetDot) String() string {
 func (*ORSetData_ORSetDot) ProtoMessage() {}
 
 func (x *ORSetData_ORSetDot) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_crdt_proto_msgTypes[19]
+	mi := &file_internal_crdt_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1265,7 +1339,7 @@ type ORSetData_ORSetEntry struct {
 
 func (x *ORSetData_ORSetEntry) Reset() {
 	*x = ORSetData_ORSetEntry{}
-	mi := &file_internal_crdt_proto_msgTypes[20]
+	mi := &file_internal_crdt_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1277,7 +1351,7 @@ func (x *ORSetData_ORSetEntry) String() string {
 func (*ORSetData_ORSetEntry) ProtoMessage() {}
 
 func (x *ORSetData_ORSetEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_crdt_proto_msgTypes[20]
+	mi := &file_internal_crdt_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1320,7 +1394,7 @@ type ORMapData_ORMapEntry struct {
 
 func (x *ORMapData_ORMapEntry) Reset() {
 	*x = ORMapData_ORMapEntry{}
-	mi := &file_internal_crdt_proto_msgTypes[22]
+	mi := &file_internal_crdt_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1332,7 +1406,7 @@ func (x *ORMapData_ORMapEntry) String() string {
 func (*ORMapData_ORMapEntry) ProtoMessage() {}
 
 func (x *ORMapData_ORMapEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_crdt_proto_msgTypes[22]
+	mi := &file_internal_crdt_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1377,7 +1451,7 @@ type MVRegisterData_MVRegisterEntry struct {
 
 func (x *MVRegisterData_MVRegisterEntry) Reset() {
 	*x = MVRegisterData_MVRegisterEntry{}
-	mi := &file_internal_crdt_proto_msgTypes[23]
+	mi := &file_internal_crdt_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1389,7 +1463,7 @@ func (x *MVRegisterData_MVRegisterEntry) String() string {
 func (*MVRegisterData_MVRegisterEntry) ProtoMessage() {}
 
 func (x *MVRegisterData_MVRegisterEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_crdt_proto_msgTypes[23]
+	mi := &file_internal_crdt_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1431,7 +1505,7 @@ var File_internal_crdt_proto protoreflect.FileDescriptor
 const file_internal_crdt_proto_rawDesc = "" +
 	"\n" +
 	"\x13internal/crdt.proto\x12\n" +
-	"internalpb\"P\n" +
+	"internalpb\x1a\x19internal/datacenter.proto\"P\n" +
 	"\aCRDTKey\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x125\n" +
 	"\tdata_type\x18\x02 \x01(\x0e2\x18.internalpb.CRDTDataTypeR\bdataType\"\x94\x03\n" +
@@ -1527,7 +1601,14 @@ const file_internal_crdt_proto_rawDesc = "" +
 	"\x11CRDTSnapshotEntry\x12%\n" +
 	"\x03key\x18\x01 \x01(\v2\x13.internalpb.CRDTKeyR\x03key\x12(\n" +
 	"\x04data\x18\x02 \x01(\v2\x14.internalpb.CRDTDataR\x04data\x12\x18\n" +
-	"\aversion\x18\x03 \x01(\x04R\aversion*\xfb\x01\n" +
+	"\aversion\x18\x03 \x01(\x04R\aversion\"\xd3\x01\n" +
+	"\x0eCRDTDeltaBatch\x12-\n" +
+	"\x06deltas\x18\x01 \x03(\v2\x15.internalpb.CRDTDeltaR\x06deltas\x129\n" +
+	"\n" +
+	"tombstones\x18\x02 \x03(\v2\x19.internalpb.CRDTTombstoneR\n" +
+	"tombstones\x123\n" +
+	"\torigin_dc\x18\x03 \x01(\v2\x16.internalpb.DataCenterR\boriginDc\x12\"\n" +
+	"\rsent_at_nanos\x18\x04 \x01(\x03R\vsentAtNanos*\xfb\x01\n" +
 	"\fCRDTDataType\x12\x1e\n" +
 	"\x1aCRDT_DATA_TYPE_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18CRDT_DATA_TYPE_G_COUNTER\x10\x01\x12\x1d\n" +
@@ -1555,7 +1636,7 @@ func file_internal_crdt_proto_rawDescGZIP() []byte {
 }
 
 var file_internal_crdt_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_internal_crdt_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
+var file_internal_crdt_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
 var file_internal_crdt_proto_goTypes = []any{
 	(CRDTDataType)(0),                      // 0: internalpb.CRDTDataType
 	(*CRDTKey)(nil),                        // 1: internalpb.CRDTKey
@@ -1576,13 +1657,15 @@ var file_internal_crdt_proto_goTypes = []any{
 	(*CRDTReadRequest)(nil),                // 16: internalpb.CRDTReadRequest
 	(*CRDTReadResponse)(nil),               // 17: internalpb.CRDTReadResponse
 	(*CRDTSnapshotEntry)(nil),              // 18: internalpb.CRDTSnapshotEntry
-	nil,                                    // 19: internalpb.GCounterData.StateEntry
-	(*ORSetData_ORSetDot)(nil),             // 20: internalpb.ORSetData.ORSetDot
-	(*ORSetData_ORSetEntry)(nil),           // 21: internalpb.ORSetData.ORSetEntry
-	nil,                                    // 22: internalpb.ORSetData.ClockEntry
-	(*ORMapData_ORMapEntry)(nil),           // 23: internalpb.ORMapData.ORMapEntry
-	(*MVRegisterData_MVRegisterEntry)(nil), // 24: internalpb.MVRegisterData.MVRegisterEntry
-	nil,                                    // 25: internalpb.MVRegisterData.ClockEntry
+	(*CRDTDeltaBatch)(nil),                 // 19: internalpb.CRDTDeltaBatch
+	nil,                                    // 20: internalpb.GCounterData.StateEntry
+	(*ORSetData_ORSetDot)(nil),             // 21: internalpb.ORSetData.ORSetDot
+	(*ORSetData_ORSetEntry)(nil),           // 22: internalpb.ORSetData.ORSetEntry
+	nil,                                    // 23: internalpb.ORSetData.ClockEntry
+	(*ORMapData_ORMapEntry)(nil),           // 24: internalpb.ORMapData.ORMapEntry
+	(*MVRegisterData_MVRegisterEntry)(nil), // 25: internalpb.MVRegisterData.MVRegisterEntry
+	nil,                                    // 26: internalpb.MVRegisterData.ClockEntry
+	(*DataCenter)(nil),                     // 27: internalpb.DataCenter
 }
 var file_internal_crdt_proto_depIdxs = []int32{
 	0,  // 0: internalpb.CRDTKey.data_type:type_name -> internalpb.CRDTDataType
@@ -1593,15 +1676,15 @@ var file_internal_crdt_proto_depIdxs = []int32{
 	7,  // 5: internalpb.CRDTData.or_map:type_name -> internalpb.ORMapData
 	8,  // 6: internalpb.CRDTData.flag:type_name -> internalpb.FlagData
 	9,  // 7: internalpb.CRDTData.mv_register:type_name -> internalpb.MVRegisterData
-	19, // 8: internalpb.GCounterData.state:type_name -> internalpb.GCounterData.StateEntry
+	20, // 8: internalpb.GCounterData.state:type_name -> internalpb.GCounterData.StateEntry
 	3,  // 9: internalpb.PNCounterData.increments:type_name -> internalpb.GCounterData
 	3,  // 10: internalpb.PNCounterData.decrements:type_name -> internalpb.GCounterData
-	21, // 11: internalpb.ORSetData.entries:type_name -> internalpb.ORSetData.ORSetEntry
-	22, // 12: internalpb.ORSetData.clock:type_name -> internalpb.ORSetData.ClockEntry
-	23, // 13: internalpb.ORMapData.entries:type_name -> internalpb.ORMapData.ORMapEntry
+	22, // 11: internalpb.ORSetData.entries:type_name -> internalpb.ORSetData.ORSetEntry
+	23, // 12: internalpb.ORSetData.clock:type_name -> internalpb.ORSetData.ClockEntry
+	24, // 13: internalpb.ORMapData.entries:type_name -> internalpb.ORMapData.ORMapEntry
 	6,  // 14: internalpb.ORMapData.key_set:type_name -> internalpb.ORSetData
-	24, // 15: internalpb.MVRegisterData.entries:type_name -> internalpb.MVRegisterData.MVRegisterEntry
-	25, // 16: internalpb.MVRegisterData.clock:type_name -> internalpb.MVRegisterData.ClockEntry
+	25, // 15: internalpb.MVRegisterData.entries:type_name -> internalpb.MVRegisterData.MVRegisterEntry
+	26, // 16: internalpb.MVRegisterData.clock:type_name -> internalpb.MVRegisterData.ClockEntry
 	1,  // 17: internalpb.CRDTDelta.key:type_name -> internalpb.CRDTKey
 	2,  // 18: internalpb.CRDTDelta.data:type_name -> internalpb.CRDTData
 	1,  // 19: internalpb.CRDTDigestEntry.key:type_name -> internalpb.CRDTKey
@@ -1615,13 +1698,16 @@ var file_internal_crdt_proto_depIdxs = []int32{
 	2,  // 27: internalpb.CRDTReadResponse.data:type_name -> internalpb.CRDTData
 	1,  // 28: internalpb.CRDTSnapshotEntry.key:type_name -> internalpb.CRDTKey
 	2,  // 29: internalpb.CRDTSnapshotEntry.data:type_name -> internalpb.CRDTData
-	20, // 30: internalpb.ORSetData.ORSetEntry.dots:type_name -> internalpb.ORSetData.ORSetDot
-	2,  // 31: internalpb.ORMapData.ORMapEntry.value:type_name -> internalpb.CRDTData
-	32, // [32:32] is the sub-list for method output_type
-	32, // [32:32] is the sub-list for method input_type
-	32, // [32:32] is the sub-list for extension type_name
-	32, // [32:32] is the sub-list for extension extendee
-	0,  // [0:32] is the sub-list for field type_name
+	10, // 30: internalpb.CRDTDeltaBatch.deltas:type_name -> internalpb.CRDTDelta
+	15, // 31: internalpb.CRDTDeltaBatch.tombstones:type_name -> internalpb.CRDTTombstone
+	27, // 32: internalpb.CRDTDeltaBatch.origin_dc:type_name -> internalpb.DataCenter
+	21, // 33: internalpb.ORSetData.ORSetEntry.dots:type_name -> internalpb.ORSetData.ORSetDot
+	2,  // 34: internalpb.ORMapData.ORMapEntry.value:type_name -> internalpb.CRDTData
+	35, // [35:35] is the sub-list for method output_type
+	35, // [35:35] is the sub-list for method input_type
+	35, // [35:35] is the sub-list for extension type_name
+	35, // [35:35] is the sub-list for extension extendee
+	0,  // [0:35] is the sub-list for field type_name
 }
 
 func init() { file_internal_crdt_proto_init() }
@@ -1629,6 +1715,7 @@ func file_internal_crdt_proto_init() {
 	if File_internal_crdt_proto != nil {
 		return
 	}
+	file_internal_datacenter_proto_init()
 	file_internal_crdt_proto_msgTypes[1].OneofWrappers = []any{
 		(*CRDTData_GCounter)(nil),
 		(*CRDTData_PnCounter)(nil),
@@ -1644,7 +1731,7 @@ func file_internal_crdt_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_crdt_proto_rawDesc), len(file_internal_crdt_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   25,
+			NumMessages:   26,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

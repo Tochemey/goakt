@@ -35,6 +35,10 @@ import "go.opentelemetry.io/otel/metric"
 //   - crdt.replicator.coordinated.read.count  (Int64ObservableCounter)
 //   - crdt.replicator.antientropy.count       (Int64ObservableCounter)
 //   - crdt.replicator.tombstone.count         (Int64ObservableGauge)
+//   - crdt.replicator.crossdc.send.count          (Int64ObservableCounter)
+//   - crdt.replicator.crossdc.receive.count       (Int64ObservableCounter)
+//   - crdt.replicator.crossdc.replication.lag     (Int64ObservableGauge)
+//   - crdt.replicator.crossdc.stale.skip.count    (Int64ObservableCounter)
 type ReplicatorMetric struct {
 	storeSize             metric.Int64ObservableGauge
 	mergeCount            metric.Int64ObservableCounter
@@ -44,6 +48,10 @@ type ReplicatorMetric struct {
 	coordinatedReadCount  metric.Int64ObservableCounter
 	antiEntropyCount      metric.Int64ObservableCounter
 	tombstoneCount        metric.Int64ObservableGauge
+	crossDCSendCount      metric.Int64ObservableCounter
+	crossDCReceiveCount   metric.Int64ObservableCounter
+	crossDCReplicationLag metric.Int64ObservableGauge
+	crossDCStaleSkipCount metric.Int64ObservableCounter
 }
 
 // NewReplicatorMetric creates the CRDT Replicator instruments using the provided Meter.
@@ -108,6 +116,35 @@ func NewReplicatorMetric(meter metric.Meter) (*ReplicatorMetric, error) {
 		return nil, err
 	}
 
+	if m.crossDCSendCount, err = meter.Int64ObservableCounter(
+		"crdt.replicator.crossdc.send.count",
+		metric.WithDescription("Total number of delta batches sent to remote datacenters"),
+	); err != nil {
+		return nil, err
+	}
+
+	if m.crossDCReceiveCount, err = meter.Int64ObservableCounter(
+		"crdt.replicator.crossdc.receive.count",
+		metric.WithDescription("Total number of delta batches received from remote datacenters"),
+	); err != nil {
+		return nil, err
+	}
+
+	if m.crossDCReplicationLag, err = meter.Int64ObservableGauge(
+		"crdt.replicator.crossdc.replication.lag",
+		metric.WithDescription("Replication lag in nanoseconds from the last received cross-DC batch"),
+		metric.WithUnit("ns"),
+	); err != nil {
+		return nil, err
+	}
+
+	if m.crossDCStaleSkipCount, err = meter.Int64ObservableCounter(
+		"crdt.replicator.crossdc.stale.skip.count",
+		metric.WithDescription("Total number of cross-DC flushes skipped due to stale DC cache"),
+	); err != nil {
+		return nil, err
+	}
+
 	return &m, nil
 }
 
@@ -149,4 +186,24 @@ func (m *ReplicatorMetric) AntiEntropyCount() metric.Int64ObservableCounter {
 // TombstoneCount returns the observable gauge for active tombstones.
 func (m *ReplicatorMetric) TombstoneCount() metric.Int64ObservableGauge {
 	return m.tombstoneCount
+}
+
+// CrossDCSendCount returns the observable counter for cross-DC batches sent.
+func (m *ReplicatorMetric) CrossDCSendCount() metric.Int64ObservableCounter {
+	return m.crossDCSendCount
+}
+
+// CrossDCReceiveCount returns the observable counter for cross-DC batches received.
+func (m *ReplicatorMetric) CrossDCReceiveCount() metric.Int64ObservableCounter {
+	return m.crossDCReceiveCount
+}
+
+// CrossDCReplicationLag returns the observable gauge for cross-DC replication lag.
+func (m *ReplicatorMetric) CrossDCReplicationLag() metric.Int64ObservableGauge {
+	return m.crossDCReplicationLag
+}
+
+// CrossDCStaleSkipCount returns the observable counter for cross-DC flushes skipped due to stale cache.
+func (m *ReplicatorMetric) CrossDCStaleSkipCount() metric.Int64ObservableCounter {
+	return m.crossDCStaleSkipCount
 }

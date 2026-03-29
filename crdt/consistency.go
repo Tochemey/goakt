@@ -31,8 +31,12 @@ package crdt
 type Coordination int
 
 const (
-	// Majority requires acknowledgment from ⌊N/2⌋ + 1 nodes.
+	// Majority requires acknowledgment from ⌊N/2⌋ + 1 nodes in the local cluster.
 	Majority Coordination = iota + 1
-	// All requires acknowledgment from all nodes.
+	// All requires acknowledgment from all nodes in the local cluster.
 	All
+	// DCMajority requires acknowledgment from a majority of nodes within each active datacenter.
+	DCMajority
+	// DCAll requires acknowledgment from all nodes in all active datacenters.
+	DCAll
 )

@@ -1,9 +1,5 @@
 # GoAkt Reactive Streams — Architecture
 
-**Status:** Implemented
-**Target:** GoAkt v4.x
-**Author:** GoAkt Core Team
-
 ---
 
 ## Table of Contents
@@ -176,6 +172,7 @@ Sink ──── Request(n=32) ────► Flow ──── Request(n=32) 
 ```
 
 Rules:
+
 - A stage only sends elements **after** receiving a demand request.
 - Demand is **cumulative**: two consecutive `Request(10)` and `Request(5)` = 15 outstanding demand.
 - A stage propagates demand upstream **before** its local buffer is fully consumed (watermark-based prefetch).

@@ -13,9 +13,11 @@ A guided tour of the codebase. Start with `actor/`—everything flows from there
 | `actor/`       | Core: ActorSystem, PID, Actor interface, spawn, mailbox, supervision          |
 | `remote/`      | Remoting config, serializers, wire protocol                                   |
 | `client/`      | Standalone cluster client for external callers (Tell, Ask, Spawn)             |
+| `crdt/`        | CRDT types, config, messages; Replicator implementation lives in `actor/`       |
 | `discovery/`   | Pluggable discovery providers (Consul, etcd, K8s, NATS, mDNS, DNS-SD, static) |
 | `datacenter/`  | Multi-DC support, control plane (NATS JetStream, etcd)                        |
 | `supervisor/`  | Supervision strategies and directives                                         |
+| `stream/`      | Reactive streams: Source, Flow, Sink, RunnableGraph; materialized on actors     |
 | `passivation/` | Passivation strategy types                                                    |
 | `reentrancy/`  | Reentrancy configuration for async Request/RequestName                        |
 | `extension/`   | Extension (system-wide) and Dependency (per-actor) interfaces                 |
@@ -42,7 +44,7 @@ A guided tour of the codebase. Start with `actor/`—everything flows from there
 | `spawn.go`                       | Spawn logic for local, remote, and cross-DC actors              |
 | `spawn_option.go`                | SpawnOption: mailbox, supervisor, passivation, reentrancy, role |
 | `option.go`                      | Option for NewActorSystem                                       |
-| `cluster_config.go`              | Cluster configuration                                           |
+| `cluster_config.go`              | Cluster configuration (optional `WithCRDT` / CRDT options)       |
 | `cluster_singleton.go`           | Cluster singleton: single instance across all nodes             |
 | `mailbox.go`                     | Mailbox interface                                               |
 | `unbounded_mailbox.go`           | Default FIFO mailbox                                            |
@@ -73,7 +75,31 @@ A guided tour of the codebase. Start with `actor/`—everything flows from there
 | `grain_activation_barrier.go`    | Barrier for grain activation during cluster events              |
 | `metric.go`                      | OpenTelemetry actor metrics                                     |
 | `func_actor.go`                  | FuncActor—create actor from a plain function                    |
+| `topic_actor.go`                 | Pub/sub topic actor; EventStream and CRDT delta topic (`goakt.crdt.deltas`) |
+| `replicator.go`                  | CRDT Replicator system actor (local store, deltas, anti-entropy) |
 | `api.go`                         | Tell, Ask, BatchTell, BatchAsk (top-level API)                  |
+
+## `crdt/`
+
+Pure CRDT data types and replication configuration—**no** import of `actor`. User and Replicator code interact via `crdt` messages and `ReplicatedData` values. See [Distributed data](/advanced/distributed-data) and the repository `arch/CRDT_ADR.md`.
+
+| File | Purpose |
+|------|---------|
+| `crdt.go`, `key.go` | `ReplicatedData`, keys, `DataType` |
+| `config.go`, `consistency.go` | `Config`, options, optional read/write coordination |
+| `messages.go` | Replicator messages (`Get`, `Update`, `Subscribe`, …) |
+| `gcounter.go`, `pncounter.go`, `lww_register.go`, `mv_register.go`, `or_set.go`, `or_map.go`, `flag.go` | CRDT implementations |
+
+## `stream/`
+
+Reactive pipelines (`Source`, `Flow`, `Sink` → `RunnableGraph`) materialized onto an `ActorSystem` with backpressure. See [Streams](/advanced/streams) and repository `arch/REACTIVE_STREAM_ADR.md`.
+
+| File | Purpose |
+|------|---------|
+| `graph.go`, `graph_builder.go`, `materializer.go` | Graph construction and `Run` |
+| `source.go`, `flow.go`, `sink.go` | Stream building blocks |
+| `handle.go`, `metrics.go` | `StreamHandle`, metrics |
+| `protocol.go`, `stage_*.go` | Stage wiring and fan-in/fan-out |
 
 ## `remote/`
 
@@ -129,7 +155,8 @@ Standalone cluster client for callers outside the actor system. See [Client](/ad
 | `internal/cluster/`              | Cluster membership, Olric, actor/grain registry, peer state store |
 | `internal/remoteclient/`         | TCP client for remoting; connection pooling, proto frames         |
 | `internal/net/`                  | TCP server, client, frame protocol, compression                   |
-| `internal/codec/`                | Protobuf marshal/unmarshal; encode/decode cluster types           |
+| `internal/codec/`                | Protobuf marshal/unmarshal; CRDT key helpers for wire types        |
+| `internal/ddata/`                | CRDT snapshots (BoltDB), `crdt_codec`, `crdt_serializer`           |
 | `internal/commands/`             | Command types for lifecycle (AsyncRequest, AsyncResponse, etc.)   |
 | `internal/datacentercontroller/` | DC controller; registers DC, heartbeats, cache refresh            |
 | `internal/types/`                | Registry interface; type name → factory for remote spawn          |
@@ -141,7 +168,7 @@ Standalone cluster client for callers outside the actor system. See [Client](/ad
 | `internal/xsync/`                | Atomic maps, extended sync primitives                             |
 | `internal/validation/`           | Fluent validation helpers                                         |
 | `internal/pointer/`              | Generic pointer utilities                                         |
-| `internal/metric/`               | OpenTelemetry metric registration                                 |
+| `internal/metric/`               | OpenTelemetry metrics (includes Replicator instruments)            |
 | `internal/chunk/`                | Chunking utilities (e.g. for relocation allocation)               |
 | `internal/slices/`               | Slice utilities (Filter, etc.)                                    |
 | `internal/internalpb/`           | Generated protobuf Go code (wire types)                           |
@@ -150,22 +177,25 @@ Standalone cluster client for callers outside the actor system. See [Client](/ad
 
 ```
 protos/
-├── internal/   ← Wire types (cluster, remoting, actor, grain, datacenter)
-└── test/      ← Test fixture proto messages
+├── internal/   ← Wire types (cluster, remoting, actor, grain, datacenter, crdt, …)
+└── test/       ← Test fixture proto messages
 ```
 
 ## Dependency summary
 
 | Package            | Depends on                                                                                                                                                      |
 |--------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `actor`            | `remote`, `internal/cluster`, `discovery/*`, `datacenter`, `supervisor`, `passivation`, `reentrancy`, `eventstream`, `extension`, `log`, `errors`, `internal/*` |
+| `actor`            | `remote`, `internal/cluster`, `discovery/*`, `datacenter`, `crdt`, `supervisor`, `passivation`, `reentrancy`, `eventstream`, `extension`, `log`, `errors`, `internal/*` |
 | `remote`           | `internal/net`, `internal/codec`                                                                                                                                |
 | `internal/cluster` | `discovery`, `internal/memberlist`, `hash`                                                                                                                      |
 | `client`           | `remote`, `internal/address`                                                                                                                                    |
+| `stream`           | `actor`                                                                                                                                                         |
 
-`log`, `errors`, `extension`, `eventstream`, `supervisor`, `passivation`, `reentrancy`, `hash`, `breaker`, `memory`, `tls` are **leaf packages**—they depend on nothing else in this repository.
+`log`, `errors`, `extension`, `eventstream`, `supervisor`, `passivation`, `reentrancy`, `hash`, `breaker`, `memory`, `tls`, and **`crdt`** are **leaf packages**—they depend on nothing else in this repository.
 
 ## See also
 
 - [Architecture Overview](/architecture/overview)
-- [Architecture Document](https://github.com/tochemey/goakt/blob/main/ARCHITECTURE.md) in the repository root for full details, data flows, and design decisions
+- [Streams](/advanced/streams) — reactive pipelines on actors
+- [Distributed data](/advanced/distributed-data) — CRDTs and the Replicator
+- [Architecture Document](https://github.com/tochemey/goakt/blob/main/arch/ARCHITECTURE.md) in `arch/` for full details, data flows, and design decisions

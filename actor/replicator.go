@@ -26,6 +26,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand/v2"
+	"net"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -34,6 +35,8 @@ import (
 	otelmetric "go.opentelemetry.io/otel/metric"
 
 	"github.com/tochemey/goakt/v4/crdt"
+	"github.com/tochemey/goakt/v4/datacenter"
+	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/codec"
 	"github.com/tochemey/goakt/v4/internal/ddata"
@@ -56,16 +59,21 @@ const crdtTopic = "goakt.crdt.deltas"
 
 // schedule references for cancellation on stop.
 const (
-	antiEntropyScheduleRef = "goakt.crdt.anti-entropy"
-	pruneScheduleRef       = "goakt.crdt.prune"
-	snapshotScheduleRef    = "goakt.crdt.snapshot"
+	antiEntropyScheduleRef     = "goakt.crdt.anti-entropy"
+	pruneScheduleRef           = "goakt.crdt.prune"
+	snapshotScheduleRef        = "goakt.crdt.snapshot"
+	dataCenterFlushScheduleRef = "goakt.crdt.dc.flush"
+	dataCenterAntiEntropyRef   = "goakt.crdt.dc.anti-entropy"
 )
 
 // internal message types for scheduled tasks.
 type (
-	antiEntropyTick struct{}
-	pruneTick       struct{}
-	snapshotTick    struct{}
+	antiEntropyTick           struct{}
+	pruneTick                 struct{}
+	snapshotTick              struct{}
+	dataCenterFlushTick       struct{}
+	dataCenterAntiEntropyTick struct{}
+	dataCenterDigestRequest   struct{}
 )
 
 // tombstone records that a key was deleted and when.
@@ -81,6 +89,7 @@ type tombstone struct {
 // it from the extension registry in PreStart rather than from a constructor argument.
 type crdtConfigExtension struct {
 	config *crdt.Config
+	dc     datacenter.DataCenter
 }
 
 // ID returns the unique extension identifier.
@@ -119,12 +128,24 @@ type replicatorActor struct {
 	remoting              remoteclient.Client
 	serializer            remote.Serializer
 	snapshotStore         *ddata.Store
+	storeSize             atomic.Int64
+	tombstoneSize         atomic.Int64
 	mergeCount            atomic.Uint64
 	deltaPublishCount     atomic.Uint64
 	deltaReceiveCount     atomic.Uint64
 	coordinatedWriteCount atomic.Uint64
 	coordinatedReadCount  atomic.Uint64
 	antiEntropyCount      atomic.Uint64
+
+	// cross-datacenter replication state
+	dc                    datacenter.DataCenter
+	originDCProto         *internalpb.DataCenter
+	pendingDeltas         []*internalpb.CRDTDelta
+	pendingTombstones     []*internalpb.CRDTTombstone
+	crossDCSendCount      atomic.Uint64
+	crossDCReceiveCount   atomic.Uint64
+	crossDCStaleSkipCount atomic.Uint64
+	lastReplicationLag    atomic.Int64
 }
 
 // enforce compilation error
@@ -145,7 +166,15 @@ func (r *replicatorActor) PreStart(ctx *Context) error {
 	if ext == nil {
 		return fmt.Errorf("crdt config extension not found")
 	}
-	r.config = ext.(*crdtConfigExtension).Config()
+	crdtExt := ext.(*crdtConfigExtension)
+	r.config = crdtExt.Config()
+	r.dc = crdtExt.dc
+	r.originDCProto = &internalpb.DataCenter{
+		Name:   r.dc.Name,
+		Region: r.dc.Region,
+		Zone:   r.dc.Zone,
+		Labels: r.dc.Labels,
+	}
 	r.store = make(map[string]crdt.ReplicatedData)
 	r.keyTypes = make(map[string]crdt.DataType)
 	r.subscriptions = make(map[string]types.Unit)
@@ -170,6 +199,8 @@ func (r *replicatorActor) Receive(ctx *ReceiveContext) {
 	default:
 		r.handleMessage(ctx)
 	}
+	r.storeSize.Store(int64(len(r.store)))
+	r.tombstoneSize.Store(int64(len(r.tombstones)))
 }
 
 // PostStop is called when the actor is shutting down.
@@ -177,6 +208,8 @@ func (r *replicatorActor) PostStop(ctx *Context) error {
 	_ = ctx.ActorSystem().CancelSchedule(antiEntropyScheduleRef)
 	_ = ctx.ActorSystem().CancelSchedule(pruneScheduleRef)
 	_ = ctx.ActorSystem().CancelSchedule(snapshotScheduleRef)
+	_ = ctx.ActorSystem().CancelSchedule(dataCenterFlushScheduleRef)
+	_ = ctx.ActorSystem().CancelSchedule(dataCenterAntiEntropyRef)
 
 	// persist final snapshot before shutdown
 	if r.snapshotStore != nil {
@@ -201,14 +234,14 @@ func (r *replicatorActor) PostStop(ctx *Context) error {
 // handlePostStart completes initialization that requires a running actor context.
 // The PID, TopicActor reference, and topic subscription require the actor to be started.
 func (r *replicatorActor) handlePostStart(ctx *ReceiveContext) {
+	actorSystem := ctx.ActorSystem()
 	r.pid = ctx.Self()
-	r.topicActor = ctx.ActorSystem().TopicActor()
+	r.topicActor = actorSystem.TopicActor()
 	r.nodeID = r.pid.ID()
 	scheduleCtx := context.WithoutCancel(ctx.Context())
 
-	sys := ctx.ActorSystem().(*actorSystem)
-	r.clusterRef = sys.getCluster()
-	r.remoting = sys.getRemoting()
+	r.clusterRef = actorSystem.getCluster()
+	r.remoting = actorSystem.getRemoting()
 	r.serializer = ddata.NewCRDTValueSerializer()
 
 	// subscribe to the CRDT delta topic so this Replicator receives
@@ -219,7 +252,7 @@ func (r *replicatorActor) handlePostStart(ctx *ReceiveContext) {
 
 	// start anti-entropy schedule
 	if r.config.AntiEntropyInterval() > 0 {
-		if err := ctx.ActorSystem().Schedule(
+		if err := actorSystem.Schedule(
 			scheduleCtx,
 			&antiEntropyTick{},
 			r.pid,
@@ -234,7 +267,7 @@ func (r *replicatorActor) handlePostStart(ctx *ReceiveContext) {
 
 	// start prune schedule for tombstone and departed node cleanup
 	if r.config.PruneInterval() > 0 {
-		if err := ctx.ActorSystem().Schedule(
+		if err := actorSystem.Schedule(
 			scheduleCtx,
 			&pruneTick{},
 			r.pid,
@@ -249,7 +282,7 @@ func (r *replicatorActor) handlePostStart(ctx *ReceiveContext) {
 
 	// start snapshot schedule if configured
 	if r.snapshotStore != nil && r.config.SnapshotInterval() > 0 {
-		if err := ctx.ActorSystem().Schedule(
+		if err := actorSystem.Schedule(
 			scheduleCtx,
 			&snapshotTick{},
 			r.pid,
@@ -257,6 +290,36 @@ func (r *replicatorActor) handlePostStart(ctx *ReceiveContext) {
 			WithReference(snapshotScheduleRef),
 		); err != nil {
 			r.logger.Errorf("failed to schedule snapshot: %v", err)
+			ctx.Err(err)
+			return
+		}
+	}
+
+	// start cross-datacenter flush schedule if configured
+	if r.config.DataCenterEnabled() && r.config.DataCenterReplicationInterval() > 0 {
+		if err := actorSystem.Schedule(
+			scheduleCtx,
+			&dataCenterFlushTick{},
+			r.pid,
+			r.config.DataCenterReplicationInterval(),
+			WithReference(dataCenterFlushScheduleRef),
+		); err != nil {
+			r.logger.Errorf("failed to schedule cross-DC flush: %v", err)
+			ctx.Err(err)
+			return
+		}
+	}
+
+	// start cross-datacenter anti-entropy schedule if configured
+	if r.config.DataCenterEnabled() && r.config.DataCenterAntiEntropy() && r.config.DataCenterAntiEntropyInterval() > 0 {
+		if err := actorSystem.Schedule(
+			scheduleCtx,
+			&dataCenterAntiEntropyTick{},
+			r.pid,
+			r.config.DataCenterAntiEntropyInterval(),
+			WithReference(dataCenterAntiEntropyRef),
+		); err != nil {
+			r.logger.Errorf("failed to schedule cross-DC anti-entropy: %v", err)
 			ctx.Err(err)
 			return
 		}
@@ -292,6 +355,14 @@ func (r *replicatorActor) handleMessage(ctx *ReceiveContext) {
 		r.handleDigest(ctx, msg)
 	case *internalpb.CRDTFullState:
 		r.handleFullState(ctx, msg)
+	case *internalpb.CRDTDeltaBatch:
+		r.handleIncomingBatch(ctx, msg)
+	case *dataCenterDigestRequest:
+		r.handleDataCenterDigestRequest(ctx)
+	case *dataCenterFlushTick:
+		r.handleDataCenterFlush(ctx)
+	case *dataCenterAntiEntropyTick:
+		r.handleDataCenterAntiEntropy(ctx)
 	case *antiEntropyTick:
 		r.handleAntiEntropy(ctx)
 	case *pruneTick:
@@ -388,7 +459,10 @@ func (r *replicatorActor) handleTerminated(msg *Terminated) {
 	for keyID, watchers := range r.watchers {
 		for i, w := range watchers {
 			if w.ID() == actorID {
-				r.watchers[keyID] = append(watchers[:i], watchers[i+1:]...)
+				n := len(watchers) - 1
+				watchers[i] = watchers[n]
+				watchers[n] = nil
+				r.watchers[keyID] = watchers[:n]
 				break
 			}
 		}
@@ -430,6 +504,11 @@ func (r *replicatorActor) handleDelete(ctx *ReceiveContext, msg deleteCommand) {
 		if r.topicActor != nil {
 			msgID := r.nodeID + ":del:" + strconv.FormatUint(r.msgSeq.Add(1), 10)
 			ctx.Tell(r.topicActor, NewPublish(msgID, crdtTopic, pb))
+		}
+
+		// buffer for cross-DC forwarding if enabled
+		if r.config.DataCenterEnabled() {
+			r.pendingTombstones = append(r.pendingTombstones, pb)
 		}
 	}
 
@@ -690,6 +769,11 @@ func (r *replicatorActor) publishDelta(ctx *ReceiveContext, keyID string, dataTy
 	msgID := r.nodeID + ":" + strconv.FormatUint(r.msgSeq.Add(1), 10)
 	ctx.Tell(r.topicActor, NewPublish(msgID, crdtTopic, pb))
 	r.deltaPublishCount.Add(1)
+
+	// buffer for cross-DC forwarding if enabled
+	if r.config.DataCenterEnabled() {
+		r.pendingDeltas = append(r.pendingDeltas, pb)
+	}
 }
 
 // notifyChanged sends a Changed message to all local watchers of a key.
@@ -724,7 +808,10 @@ func (r *replicatorActor) removeWatcher(keyID string, pid *PID) {
 	}
 	for i, w := range watchers {
 		if w.ID() == pid.ID() {
-			r.watchers[keyID] = append(watchers[:i], watchers[i+1:]...)
+			n := len(watchers) - 1
+			watchers[i] = watchers[n]
+			watchers[n] = nil
+			r.watchers[keyID] = watchers[:n]
 			return
 		}
 	}
@@ -1032,11 +1119,23 @@ func (x *actorSystem) spawnReplicator(ctx context.Context) error {
 		return nil
 	}
 
+	if requiredRole := x.clusterConfig.crdtConfig.Role(); requiredRole != "" {
+		if !x.clusterConfig.roles.Contains(requiredRole) {
+			return nil
+		}
+	}
+
 	// register the CRDT config extension so the Replicator can read it
 	// from PreStart on initial start and on supervisor restarts.
-	x.extensions.Set(crdtConfigExtensionID, &crdtConfigExtension{
+	ext := &crdtConfigExtension{
 		config: x.clusterConfig.crdtConfig,
-	})
+	}
+
+	if x.clusterConfig.dataCenterConfig != nil {
+		ext.dc = x.clusterConfig.dataCenterConfig.DataCenter
+	}
+
+	x.extensions.Set(crdtConfigExtensionID, ext)
 
 	actorName := reservedName(replicatorType)
 	replActor := newReplicatorActor()
@@ -1082,14 +1181,18 @@ func (x *actorSystem) registerReplicatorMetrics(replActor *replicatorActor) erro
 	}
 
 	_, err = meter.RegisterCallback(func(_ context.Context, observer otelmetric.Observer) error {
-		observer.ObserveInt64(metrics.StoreSize(), int64(len(replActor.store)), observeOptions...)
+		observer.ObserveInt64(metrics.StoreSize(), replActor.storeSize.Load(), observeOptions...)
 		observer.ObserveInt64(metrics.MergeCount(), int64(replActor.mergeCount.Load()), observeOptions...)
 		observer.ObserveInt64(metrics.DeltaPublishCount(), int64(replActor.deltaPublishCount.Load()), observeOptions...)
 		observer.ObserveInt64(metrics.DeltaReceiveCount(), int64(replActor.deltaReceiveCount.Load()), observeOptions...)
 		observer.ObserveInt64(metrics.CoordinatedWriteCount(), int64(replActor.coordinatedWriteCount.Load()), observeOptions...)
 		observer.ObserveInt64(metrics.CoordinatedReadCount(), int64(replActor.coordinatedReadCount.Load()), observeOptions...)
 		observer.ObserveInt64(metrics.AntiEntropyCount(), int64(replActor.antiEntropyCount.Load()), observeOptions...)
-		observer.ObserveInt64(metrics.TombstoneCount(), int64(len(replActor.tombstones)), observeOptions...)
+		observer.ObserveInt64(metrics.TombstoneCount(), replActor.tombstoneSize.Load(), observeOptions...)
+		observer.ObserveInt64(metrics.CrossDCSendCount(), int64(replActor.crossDCSendCount.Load()), observeOptions...)
+		observer.ObserveInt64(metrics.CrossDCReceiveCount(), int64(replActor.crossDCReceiveCount.Load()), observeOptions...)
+		observer.ObserveInt64(metrics.CrossDCReplicationLag(), replActor.lastReplicationLag.Load(), observeOptions...)
+		observer.ObserveInt64(metrics.CrossDCStaleSkipCount(), int64(replActor.crossDCStaleSkipCount.Load()), observeOptions...)
 		return nil
 	},
 		metrics.StoreSize(),
@@ -1100,6 +1203,10 @@ func (x *actorSystem) registerReplicatorMetrics(replActor *replicatorActor) erro
 		metrics.CoordinatedReadCount(),
 		metrics.AntiEntropyCount(),
 		metrics.TombstoneCount(),
+		metrics.CrossDCSendCount(),
+		metrics.CrossDCReceiveCount(),
+		metrics.CrossDCReplicationLag(),
+		metrics.CrossDCStaleSkipCount(),
 	)
 
 	return err
@@ -1157,4 +1264,231 @@ func (r *replicatorActor) restoreFromSnapshot() error {
 
 	r.logger.Infof("restored %d CRDT keys from snapshot", len(entries))
 	return nil
+}
+
+// handleDataCenterFlush sends all buffered deltas and tombstones to remote
+// datacenter replicators as a single CRDTDeltaBatch. Only the cluster leader
+// performs the flush; non-leaders skip silently.
+func (r *replicatorActor) handleDataCenterFlush(ctx *ReceiveContext) {
+	if len(r.pendingDeltas) == 0 && len(r.pendingTombstones) == 0 {
+		return
+	}
+
+	if r.clusterRef == nil || r.remoting == nil {
+		return
+	}
+
+	// only the leader flushes cross-DC
+	cctx := context.WithoutCancel(ctx.Context())
+	if !r.clusterRef.IsLeader(cctx) {
+		return
+	}
+
+	batch := &internalpb.CRDTDeltaBatch{
+		Deltas:      r.pendingDeltas,
+		Tombstones:  r.pendingTombstones,
+		OriginDc:    r.originDCProto,
+		SentAtNanos: time.Now().UnixNano(),
+	}
+
+	r.pendingDeltas = r.pendingDeltas[:0]
+	r.pendingTombstones = r.pendingTombstones[:0]
+
+	r.sendBatchToRemoteDataCenters(ctx, batch)
+}
+
+// handleIncomingBatch processes a CRDTDeltaBatch received from a remote
+// datacenter's replicator and merges each delta and tombstone locally.
+func (r *replicatorActor) handleIncomingBatch(ctx *ReceiveContext, batch *internalpb.CRDTDeltaBatch) {
+	originDC := batch.GetOriginDc()
+	if originDC != nil && originDC.GetName() == r.dc.Name &&
+		originDC.GetRegion() == r.dc.Region &&
+		originDC.GetZone() == r.dc.Zone {
+		return
+	}
+
+	r.lastReplicationLag.Store(time.Now().UnixNano() - batch.GetSentAtNanos())
+	r.crossDCReceiveCount.Add(1)
+
+	for _, delta := range batch.GetDeltas() {
+		r.handleProtoDelta(ctx, delta)
+	}
+
+	for _, ts := range batch.GetTombstones() {
+		r.handleProtoTombstone(ts)
+	}
+}
+
+// handleDataCenterDigestRequest responds with the local digest so that
+// a remote datacenter's replicator can perform cross-DC anti-entropy.
+func (r *replicatorActor) handleDataCenterDigestRequest(ctx *ReceiveContext) {
+	if ctx.Sender() != nil {
+		ctx.Response(r.buildDigest())
+	}
+}
+
+// handleDataCenterAntiEntropy runs one round of cross-datacenter anti-entropy
+// by exchanging a digest with a random remote datacenter's replicator.
+// Only the cluster leader performs this; non-leaders skip silently.
+func (r *replicatorActor) handleDataCenterAntiEntropy(ctx *ReceiveContext) {
+	if r.clusterRef == nil || r.remoting == nil {
+		return
+	}
+
+	cctx := context.WithoutCancel(ctx.Context())
+	if !r.clusterRef.IsLeader(cctx) {
+		return
+	}
+
+	controller := r.actorSystem.getDataCenterController()
+	if controller == nil {
+		return
+	}
+
+	records, stale := controller.ActiveRecords()
+	if stale && controller.FailOnStaleCache() {
+		return
+	}
+
+	me := r.dc.ID()
+
+	remoteCount := 0
+	for _, record := range records {
+		if record.DataCenter.ID() != me && len(record.Endpoints) > 0 {
+			remoteCount++
+		}
+	}
+
+	if remoteCount == 0 {
+		return
+	}
+
+	target := rand.IntN(remoteCount) //nolint:gosec
+	var record datacenter.DataCenterRecord
+	idx := 0
+	for _, rec := range records {
+		if rec.DataCenter.ID() != me && len(rec.Endpoints) > 0 {
+			if idx == target {
+				record = rec
+				break
+			}
+			idx++
+		}
+	}
+
+	endpoint := record.Endpoints[rand.IntN(len(record.Endpoints))] //nolint:gosec
+
+	host, portStr, err := net.SplitHostPort(endpoint)
+	if err != nil {
+		r.logger.Debugf("cross-DC anti-entropy: invalid endpoint %s: %v", endpoint, err)
+		return
+	}
+
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		r.logger.Debugf("cross-DC anti-entropy: invalid port in %s: %v", endpoint, err)
+		return
+	}
+
+	sendCtx, cancel := context.WithTimeout(cctx, r.config.DataCenterSendTimeout())
+	defer cancel()
+
+	actorName := reservedName(replicatorType)
+	to, err := r.remoting.RemoteLookup(sendCtx, host, port, actorName)
+	if err != nil {
+		r.logger.Warnf("cross-DC anti-entropy: failed to lookup replicator on %s: %v", endpoint, err)
+		return
+	}
+
+	digest := r.buildDigest()
+	from := pathToAddress(r.pid.Path())
+	if err := r.remoting.RemoteTell(sendCtx, from, to, digest); err != nil {
+		r.logger.Warnf("cross-DC anti-entropy: failed to send digest to %s: %v", endpoint, err)
+	}
+}
+
+// sendBatchToRemoteDataCenters sends a CRDTDeltaBatch to one random endpoint in each
+// remote datacenter discovered via the datacenter controller.
+// On failure it tries remaining endpoints in the same DC before moving on.
+func (r *replicatorActor) sendBatchToRemoteDataCenters(ctx *ReceiveContext, batch *internalpb.CRDTDeltaBatch) {
+	controller := r.actorSystem.getDataCenterController()
+	if controller == nil {
+		return
+	}
+
+	records, stale := controller.ActiveRecords()
+	if stale && controller.FailOnStaleCache() {
+		r.crossDCStaleSkipCount.Add(1)
+		r.logger.Warnf("cross-DC flush: skipping due to stale DC cache")
+		return
+	}
+
+	if len(records) == 0 {
+		return
+	}
+
+	from := pathToAddress(r.pid.Path())
+	actorName := reservedName(replicatorType)
+	me := r.dc.ID()
+
+	for _, record := range records {
+		if record.DataCenter.ID() == me {
+			continue
+		}
+
+		if len(record.Endpoints) == 0 {
+			continue
+		}
+
+		r.sendToDataCenter(ctx, record, from, actorName, batch)
+	}
+}
+
+// sendToDataCenter attempts to deliver a batch to a single remote DC.
+// It shuffles the endpoint list and tries each one until a send succeeds
+// or all endpoints are exhausted.
+func (r *replicatorActor) sendToDataCenter(ctx *ReceiveContext, record datacenter.DataCenterRecord, from *address.Address, actorName string, batch *internalpb.CRDTDeltaBatch) {
+	endpoints := make([]string, len(record.Endpoints))
+	copy(endpoints, record.Endpoints)
+	rand.Shuffle(len(endpoints), func(i, j int) { //nolint:gosec
+		endpoints[i], endpoints[j] = endpoints[j], endpoints[i]
+	})
+
+	timeout := r.config.DataCenterSendTimeout()
+	dcID := record.DataCenter.ID()
+
+	for _, endpoint := range endpoints {
+		host, portStr, err := net.SplitHostPort(endpoint)
+		if err != nil {
+			r.logger.Debugf("cross-DC flush: invalid endpoint %s: %v", endpoint, err)
+			continue
+		}
+
+		port, err := strconv.Atoi(portStr)
+		if err != nil {
+			r.logger.Debugf("cross-DC flush: invalid port in %s: %v", endpoint, err)
+			continue
+		}
+
+		sendCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx.Context()), timeout)
+
+		to, err := r.remoting.RemoteLookup(sendCtx, host, port, actorName)
+		if err != nil {
+			cancel()
+			r.logger.Warnf("cross-DC flush: failed to lookup replicator on %s: %v", endpoint, err)
+			continue
+		}
+
+		if err := r.remoting.RemoteTell(sendCtx, from, to, batch); err != nil {
+			cancel()
+			r.logger.Warnf("cross-DC flush: failed to send batch to %s: %v", endpoint, err)
+			continue
+		}
+
+		cancel()
+		r.crossDCSendCount.Add(1)
+		return
+	}
+
+	r.logger.Warnf("cross-DC flush: all endpoints exhausted for DC %s", dcID)
 }

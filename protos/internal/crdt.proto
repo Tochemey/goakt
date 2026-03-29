@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package internalpb;
 
+import "internal/datacenter.proto";
+
 option go_package = "github.com/tochemey/goakt/v4/internal/internalpb;internalpb";
 
 // CRDTDataType identifies the CRDT type for serialization and type validation.
@@ -203,4 +205,17 @@ message CRDTSnapshotEntry {
   CRDTData data = 2;
   // Specifies the local version counter.
   uint64 version = 3;
+}
+
+// CRDTDeltaBatch is a batched collection of deltas and tombstones forwarded
+// between CRDT bridge actors across datacenters.
+message CRDTDeltaBatch {
+  // Specifies the deltas accumulated since the last flush.
+  repeated CRDTDelta deltas = 1;
+  // Specifies the tombstones accumulated since the last flush.
+  repeated CRDTTombstone tombstones = 2;
+  // Specifies the datacenter that originated this batch.
+  DataCenter origin_dc = 3;
+  // Specifies when the batch was sent in nanoseconds since epoch.
+  int64 sent_at_nanos = 4;
 }
