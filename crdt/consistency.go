@@ -20,52 +20,19 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package actor
+package crdt
 
-import (
-	"strings"
-)
-
-type nameType int
-
-const (
-	rebalancerType nameType = iota
-	rootGuardianType
-	userGuardianType
-	systemGuardianType
-	deathWatchType
-	deadletterType
-	singletonManagerType
-	topicActorType
-	noSenderType
-	peersStatesWriterType
-	replicatorType
-)
+// Coordination defines optional coordination levels for read and write operations.
+//
+// By default, all operations are local-first: writes apply locally and publish
+// deltas via TopicActor, reads return the local value immediately.
+// When stronger guarantees are needed, set WriteTo or ReadFrom on the message
+// to one of these levels.
+type Coordination int
 
 const (
-	// eventsTopic defines the events topic
-	eventsTopic = "topic.events"
-
-	reservedNamesPrefix = "GoAkt"
-	routeeNamePrefix    = "Routee"
+	// Majority requires acknowledgment from ⌊N/2⌋ + 1 nodes.
+	Majority Coordination = iota + 1
+	// All requires acknowledgment from all nodes.
+	All
 )
-
-var (
-	reservedNames = map[nameType]string{
-		rebalancerType:        "GoAktRebalancer",
-		rootGuardianType:      "GoAktRootGuardian",
-		userGuardianType:      "GoAktUserGuardian",
-		systemGuardianType:    "GoAktSystemGuardian",
-		deathWatchType:        "GoAktDeathWatch",
-		deadletterType:        "GoAktDeadletter",
-		singletonManagerType:  "GoAktSingletonManager",
-		topicActorType:        "GoAktTopicActor",
-		noSenderType:          "GoAktNoSender",
-		peersStatesWriterType: "GoAktPeerStatesWriter",
-		replicatorType:        "GoAktReplicator",
-	}
-)
-
-func isSystemName(name string) bool {
-	return strings.HasPrefix(name, reservedNamesPrefix)
-}

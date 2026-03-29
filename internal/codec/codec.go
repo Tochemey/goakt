@@ -30,9 +30,12 @@ import (
 	"time"
 
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 
+	"github.com/tochemey/goakt/v4/crdt"
 	"github.com/tochemey/goakt/v4/datacenter"
 	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
@@ -452,8 +455,393 @@ func fromProtoState(state internalpb.DataCenterState) datacenter.DataCenterState
 	}
 }
 
+func stringToAny(s string) (*anypb.Any, error) {
+	return anypb.New(wrapperspb.String(s))
+}
+
+func anyToString(a *anypb.Any) (string, error) {
+	if a == nil {
+		return "", nil
+	}
+	var sv wrapperspb.StringValue
+	if err := a.UnmarshalTo(&sv); err != nil {
+		return "", fmt.Errorf("expected google.protobuf.StringValue, got %s: %w", a.GetTypeUrl(), err)
+	}
+	return sv.GetValue(), nil
+}
+
 // EncodeActorState converts remote.ActorState to internalpb.State for wire transmission.
 // The remote.ActorState values align 1:1 with the proto enum (0-5).
 func EncodeActorState(state remote.ActorState) internalpb.State {
 	return internalpb.State(state)
+}
+
+// ORSetStringEncoder is a type assertion target for ORSet[string] encoding.
+// Since ORSet is generic, we match on this interface rather than a concrete type.
+type ORSetStringEncoder interface {
+	RawState() ([]crdt.Entry[string], map[string]uint64)
+}
+
+// EncodeCRDTData converts a crdt.ReplicatedData to its protobuf representation.
+func EncodeCRDTData(data crdt.ReplicatedData) (*internalpb.CRDTData, error) {
+	switch v := data.(type) {
+	case *crdt.GCounter:
+		return &internalpb.CRDTData{
+			Type: &internalpb.CRDTData_GCounter{
+				GCounter: encodeGCounter(v),
+			},
+		}, nil
+	case *crdt.PNCounter:
+		return &internalpb.CRDTData{
+			Type: &internalpb.CRDTData_PnCounter{
+				PnCounter: encodePNCounter(v),
+			},
+		}, nil
+	case ORSetStringEncoder:
+		orSetData, err := encodeORSetString(v)
+		if err != nil {
+			return nil, err
+		}
+		return &internalpb.CRDTData{
+			Type: &internalpb.CRDTData_OrSet{
+				OrSet: orSetData,
+			},
+		}, nil
+	case *crdt.Flag:
+		return &internalpb.CRDTData{
+			Type: &internalpb.CRDTData_Flag{
+				Flag: encodeFlag(v),
+			},
+		}, nil
+	case LWWRegisterStringEncoder:
+		lwwData, err := encodeLWWRegisterString(v)
+		if err != nil {
+			return nil, err
+		}
+		return &internalpb.CRDTData{
+			Type: &internalpb.CRDTData_LwwRegister{
+				LwwRegister: lwwData,
+			},
+		}, nil
+	case MVRegisterStringEncoder:
+		mvData, err := encodeMVRegisterString(v)
+		if err != nil {
+			return nil, err
+		}
+		return &internalpb.CRDTData{
+			Type: &internalpb.CRDTData_MvRegister{
+				MvRegister: mvData,
+			},
+		}, nil
+	case ORMapStringGCounterEncoder:
+		orMapData, err := encodeORMapStringGCounter(v)
+		if err != nil {
+			return nil, err
+		}
+		return &internalpb.CRDTData{
+			Type: &internalpb.CRDTData_OrMap{
+				OrMap: orMapData,
+			},
+		}, nil
+	default:
+		return nil, fmt.Errorf("unsupported CRDT type: %T", data)
+	}
+}
+
+// DecodeCRDTData converts a protobuf CRDTData back to a crdt.ReplicatedData.
+func DecodeCRDTData(pb *internalpb.CRDTData) (crdt.ReplicatedData, error) {
+	if pb == nil {
+		return nil, fmt.Errorf("nil CRDTData")
+	}
+	switch v := pb.Type.(type) {
+	case *internalpb.CRDTData_GCounter:
+		return decodeGCounter(v.GCounter), nil
+	case *internalpb.CRDTData_PnCounter:
+		return decodePNCounter(v.PnCounter), nil
+	case *internalpb.CRDTData_OrSet:
+		return decodeORSetString(v.OrSet)
+	case *internalpb.CRDTData_Flag:
+		return decodeFlag(v.Flag), nil
+	case *internalpb.CRDTData_LwwRegister:
+		return decodeLWWRegisterString(v.LwwRegister)
+	case *internalpb.CRDTData_MvRegister:
+		return decodeMVRegisterString(v.MvRegister)
+	case *internalpb.CRDTData_OrMap:
+		return decodeORMapStringGCounter(v.OrMap)
+	default:
+		return nil, fmt.Errorf("unsupported CRDTData type: %T", pb.Type)
+	}
+}
+
+// EncodeCRDTKey converts a CRDT key ID and data type to its protobuf representation.
+func EncodeCRDTKey(keyID string, dataType crdt.DataType) *internalpb.CRDTKey {
+	return &internalpb.CRDTKey{
+		Id:       keyID,
+		DataType: internalpb.CRDTDataType(dataType + 1), // +1 because proto enum 0 is UNSPECIFIED
+	}
+}
+
+// DecodeCRDTKey extracts key ID and data type from a protobuf CRDTKey.
+func DecodeCRDTKey(pb *internalpb.CRDTKey) (keyID string, dataType crdt.DataType, err error) {
+	if pb == nil {
+		return "", 0, fmt.Errorf("nil CRDTKey")
+	}
+	dt := pb.GetDataType()
+	if dt == internalpb.CRDTDataType_CRDT_DATA_TYPE_UNSPECIFIED {
+		return "", 0, fmt.Errorf("unspecified CRDT data type for key=%s", pb.GetId())
+	}
+	if dt < internalpb.CRDTDataType_CRDT_DATA_TYPE_G_COUNTER || dt > internalpb.CRDTDataType_CRDT_DATA_TYPE_MV_REGISTER {
+		return "", 0, fmt.Errorf("unknown CRDT data type %d for key=%s", dt, pb.GetId())
+	}
+	return pb.GetId(), crdt.DataType(dt - 1), nil
+}
+
+func encodeGCounter(c *crdt.GCounter) *internalpb.GCounterData {
+	return &internalpb.GCounterData{
+		State: c.State(),
+	}
+}
+
+func decodeGCounter(pb *internalpb.GCounterData) *crdt.GCounter {
+	return crdt.GCounterFromState(pb.GetState())
+}
+
+func encodePNCounter(c *crdt.PNCounter) *internalpb.PNCounterData {
+	inc, dec := c.State()
+	return &internalpb.PNCounterData{
+		Increments: &internalpb.GCounterData{State: inc},
+		Decrements: &internalpb.GCounterData{State: dec},
+	}
+}
+
+func decodePNCounter(pb *internalpb.PNCounterData) *crdt.PNCounter {
+	return crdt.PNCounterFromState(
+		pb.GetIncrements().GetState(),
+		pb.GetDecrements().GetState(),
+	)
+}
+
+func encodeORSetString(s ORSetStringEncoder) (*internalpb.ORSetData, error) {
+	entries, clock := s.RawState()
+	return encodeORSetEntries(entries, clock)
+}
+
+func decodeORSetString(pb *internalpb.ORSetData) (*crdt.ORSet[string], error) {
+	entries, err := decodeORSetEntries(pb)
+	if err != nil {
+		return nil, err
+	}
+	return crdt.ORSetFromRawState(entries, pb.GetClock()), nil
+}
+
+func encodeFlag(f *crdt.Flag) *internalpb.FlagData {
+	return &internalpb.FlagData{
+		Enabled: f.Enabled(),
+	}
+}
+
+func decodeFlag(pb *internalpb.FlagData) *crdt.Flag {
+	if pb.GetEnabled() {
+		return crdt.NewFlag().Enable()
+	}
+	return crdt.NewFlag()
+}
+
+// LWWRegisterStringEncoder is a type assertion target for LWWRegister[string] encoding.
+type LWWRegisterStringEncoder interface {
+	Value() string
+	Timestamp() int64
+	NodeID() string
+}
+
+func encodeLWWRegisterString(r LWWRegisterStringEncoder) (*internalpb.LWWRegisterData, error) {
+	val, err := stringToAny(r.Value())
+	if err != nil {
+		return nil, fmt.Errorf("encode LWWRegister value: %w", err)
+	}
+	return &internalpb.LWWRegisterData{
+		Value:          val,
+		TimestampNanos: r.Timestamp(),
+		NodeId:         r.NodeID(),
+	}, nil
+}
+
+func decodeLWWRegisterString(pb *internalpb.LWWRegisterData) (*crdt.LWWRegister[string], error) {
+	val, err := anyToString(pb.GetValue())
+	if err != nil {
+		return nil, fmt.Errorf("decode LWWRegister value: %w", err)
+	}
+	return crdt.LWWRegisterFromState(
+		val,
+		pb.GetTimestampNanos(),
+		pb.GetNodeId(),
+	), nil
+}
+
+// MVRegisterStringEncoder is a type assertion target for MVRegister[string] encoding.
+type MVRegisterStringEncoder interface {
+	RawState() ([]crdt.MVEntry[string], map[string]uint64)
+}
+
+func encodeMVRegisterString(r MVRegisterStringEncoder) (*internalpb.MVRegisterData, error) {
+	entries, clock := r.RawState()
+	pbEntries := make([]*internalpb.MVRegisterData_MVRegisterEntry, 0, len(entries))
+	for _, e := range entries {
+		val, err := stringToAny(e.Value)
+		if err != nil {
+			return nil, fmt.Errorf("encode MVRegister entry: %w", err)
+		}
+		pbEntries = append(pbEntries, &internalpb.MVRegisterData_MVRegisterEntry{
+			Value:   val,
+			NodeId:  e.Dot.NodeID,
+			Counter: e.Dot.Counter,
+		})
+	}
+	return &internalpb.MVRegisterData{
+		Entries: pbEntries,
+		Clock:   clock,
+	}, nil
+}
+
+func decodeMVRegisterString(pb *internalpb.MVRegisterData) (*crdt.MVRegister[string], error) {
+	entries := make([]crdt.MVEntry[string], 0, len(pb.GetEntries()))
+	for _, e := range pb.GetEntries() {
+		val, err := anyToString(e.GetValue())
+		if err != nil {
+			return nil, fmt.Errorf("decode MVRegister entry: %w", err)
+		}
+		entries = append(entries, crdt.MVEntry[string]{
+			Value: val,
+			Dot: crdt.Dot{
+				NodeID:  e.GetNodeId(),
+				Counter: e.GetCounter(),
+			},
+		})
+	}
+	return crdt.MVRegisterFromRawState(entries, pb.GetClock()), nil
+}
+
+// ORMapStringGCounterEncoder is a type assertion target for ORMap[string, *GCounter] encoding.
+type ORMapStringGCounterEncoder interface {
+	RawState() crdt.ORMapRawState[string, *crdt.GCounter]
+}
+
+func encodeORMapStringGCounter(m ORMapStringGCounterEncoder) (*internalpb.ORMapData, error) {
+	state := m.RawState()
+
+	// encode key set as ORSetData
+	keySet, err := encodeORSetEntries(state.KeyEntries, state.KeyClock)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode ORMap key set: %w", err)
+	}
+
+	// encode values
+	pbEntries := make([]*internalpb.ORMapData_ORMapEntry, 0, len(state.Values))
+	for k, v := range state.Values {
+		valData, err := EncodeCRDTData(v)
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode ORMap value for key=%s: %w", k, err)
+		}
+		keyAny, err := stringToAny(k)
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode ORMap key=%s: %w", k, err)
+		}
+		pbEntries = append(pbEntries, &internalpb.ORMapData_ORMapEntry{
+			Key:   keyAny,
+			Value: valData,
+		})
+	}
+
+	return &internalpb.ORMapData{
+		Entries: pbEntries,
+		KeySet:  keySet,
+	}, nil
+}
+
+func decodeORMapStringGCounter(pb *internalpb.ORMapData) (*crdt.ORMap[string, *crdt.GCounter], error) {
+	// decode key set (treat nil as empty)
+	var keyEntries []crdt.Entry[string]
+	var keyClock map[string]uint64
+	if ks := pb.GetKeySet(); ks != nil {
+		var err error
+		keyEntries, err = decodeORSetEntries(ks)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode ORMap key set: %w", err)
+		}
+		keyClock = ks.GetClock()
+	}
+
+	// decode values
+	values := make(map[string]*crdt.GCounter, len(pb.GetEntries()))
+	for _, e := range pb.GetEntries() {
+		key, err := anyToString(e.GetKey())
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode ORMap key: %w", err)
+		}
+		data, err := DecodeCRDTData(e.GetValue())
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode ORMap value for key=%s: %w", key, err)
+		}
+		gc, ok := data.(*crdt.GCounter)
+		if !ok {
+			return nil, fmt.Errorf("ORMap value for key=%s is %T, expected *GCounter", key, data)
+		}
+		values[key] = gc
+	}
+
+	rawState := crdt.ORMapRawState[string, *crdt.GCounter]{
+		KeyEntries: keyEntries,
+		KeyClock:   keyClock,
+		Values:     values,
+	}
+	return crdt.ORMapFromRawState(rawState), nil
+}
+
+// encodeORSetEntries encodes ORSet entries and clock to protobuf.
+func encodeORSetEntries(entries []crdt.Entry[string], clock map[string]uint64) (*internalpb.ORSetData, error) {
+	pbEntries := make([]*internalpb.ORSetData_ORSetEntry, 0, len(entries))
+	for _, e := range entries {
+		pbDots := make([]*internalpb.ORSetData_ORSetDot, len(e.Dots))
+		for i, d := range e.Dots {
+			pbDots[i] = &internalpb.ORSetData_ORSetDot{
+				NodeId:  d.NodeID,
+				Counter: d.Counter,
+			}
+		}
+		elem, err := stringToAny(e.Element)
+		if err != nil {
+			return nil, fmt.Errorf("encode ORSet element: %w", err)
+		}
+		pbEntries = append(pbEntries, &internalpb.ORSetData_ORSetEntry{
+			Element: elem,
+			Dots:    pbDots,
+		})
+	}
+	return &internalpb.ORSetData{
+		Entries: pbEntries,
+		Clock:   clock,
+	}, nil
+}
+
+// decodeORSetEntries decodes ORSet entries from protobuf.
+func decodeORSetEntries(pb *internalpb.ORSetData) ([]crdt.Entry[string], error) {
+	entries := make([]crdt.Entry[string], 0, len(pb.GetEntries()))
+	for _, e := range pb.GetEntries() {
+		dots := make([]crdt.Dot, len(e.GetDots()))
+		for i, d := range e.GetDots() {
+			dots[i] = crdt.Dot{
+				NodeID:  d.GetNodeId(),
+				Counter: d.GetCounter(),
+			}
+		}
+		elem, err := anyToString(e.GetElement())
+		if err != nil {
+			return nil, fmt.Errorf("decode ORSet element: %w", err)
+		}
+		entries = append(entries, crdt.Entry[string]{
+			Element: elem,
+			Dots:    dots,
+		})
+	}
+	return entries, nil
 }

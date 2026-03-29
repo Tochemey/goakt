@@ -436,6 +436,9 @@ type ActorSystem interface {
 	//
 	// Returns the actor reference for the topic actor.
 	TopicActor() *PID
+	// Replicator returns the PID of the local CRDT Replicator system actor.
+	// Returns nil if CRDT replication is not enabled via ClusterConfig.WithCRDT.
+	Replicator() *PID
 	// Extensions returns a slice of all registered extensions in the ActorSystem.
 	//
 	// This allows system-level introspection or iteration over all available extensions.
@@ -818,6 +821,7 @@ type actorSystem struct {
 	deadletter       *PID
 	singletonManager *PID
 	topicActor       *PID
+	replicator       *PID
 	noSender         *PID
 	peerStatesWriter *PID
 
@@ -1022,6 +1026,8 @@ func (x *actorSystem) Start(ctx context.Context) error {
 	x.logger.Infof("starting actor system=%s os=%s arch=%s", x.name, runtime.GOOS, runtime.GOARCH)
 	x.starting.Store(true)
 
+	x.scheduler = newScheduler(x.logger, x.shutdownTimeout, x)
+
 	if err := chain.
 		New(chain.WithFailFast(), chain.WithContext(ctx)).
 		AddRunner(x.setupRemoting).
@@ -1040,14 +1046,22 @@ func (x *actorSystem) Start(ctx context.Context) error {
 		AddContextRunner(x.startDataCenterController).
 		AddContextRunner(x.startDataCenterLeaderWatch).
 		Run(); err != nil {
-		if stopErr := x.shutdown(ctx); stopErr != nil {
-			return errors.Join(err, stopErr)
-		}
-
+		x.startupCleanup(ctx)
 		return err
 	}
 
 	x.startMessagesScheduler(ctx)
+
+	if err := x.spawnReplicator(ctx); err != nil {
+		var shutdownErr error
+		if x.replicator != nil {
+			shutdownErr = x.replicator.Shutdown(ctx)
+		}
+		x.scheduler.Stop(ctx)
+		x.startupCleanup(ctx)
+		return errors.Join(err, shutdownErr)
+	}
+
 	if x.passivator != nil {
 		x.passivator.Start(ctx)
 	}
@@ -1820,6 +1834,15 @@ func (x *actorSystem) TopicActor() *PID {
 	return topicActor
 }
 
+// Replicator returns the PID of the local CRDT Replicator system actor.
+// Returns nil if CRDT replication is not enabled via ClusterConfig.WithCRDT.
+func (x *actorSystem) Replicator() *PID {
+	x.locker.RLock()
+	replicator := x.replicator
+	x.locker.RUnlock()
+	return replicator
+}
+
 // Extensions returns a slice of all registered extensions in the ActorSystem.
 //
 // This allows system-level introspection or iteration over all available extensions.
@@ -2333,9 +2356,6 @@ func (x *actorSystem) setupRemoting() error {
 
 // startMessagesScheduler starts the messages scheduler
 func (x *actorSystem) startMessagesScheduler(ctx context.Context) {
-	// set the scheduler
-	x.scheduler = newScheduler(x.logger, x.shutdownTimeout, x)
-	// start the scheduler
 	x.scheduler.Start(ctx)
 }
 
@@ -2356,6 +2376,23 @@ func (x *actorSystem) validateExtensions() error {
 		}
 	}
 	return nil
+}
+
+// startupCleanup tears down partially-started components on startup failure.
+// Unlike shutdown(), this can be called while starting=true and started=false.
+func (x *actorSystem) startupCleanup(ctx context.Context) {
+	x.stopDataCenterLeaderWatch()
+	_ = x.stopDataCenterController(ctx)
+
+	actors := x.localActors()
+	_ = x.shutdownCluster(ctx, actors, nil)
+	_ = x.shutdownRemoting(ctx)
+
+	if x.eventsStream != nil {
+		x.eventsStream.Close()
+	}
+
+	x.reset()
 }
 
 // reset the actor system

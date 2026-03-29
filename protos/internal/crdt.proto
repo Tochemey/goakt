@@ -1,0 +1,208 @@
+syntax = "proto3";
+
+package internalpb;
+
+import "google/protobuf/any.proto";
+
+option go_package = "github.com/tochemey/goakt/v4/internal/internalpb;internalpb";
+
+// CRDTDataType identifies the CRDT type for serialization and type validation.
+enum CRDTDataType {
+  CRDT_DATA_TYPE_UNSPECIFIED = 0;
+  CRDT_DATA_TYPE_G_COUNTER = 1;
+  CRDT_DATA_TYPE_PN_COUNTER = 2;
+  CRDT_DATA_TYPE_LWW_REGISTER = 3;
+  CRDT_DATA_TYPE_OR_SET = 4;
+  CRDT_DATA_TYPE_OR_MAP = 5;
+  CRDT_DATA_TYPE_FLAG = 6;
+  CRDT_DATA_TYPE_MV_REGISTER = 7;
+}
+
+// CRDTKey is a typed, serializable CRDT key.
+message CRDTKey {
+  // Specifies the key's string identifier.
+  string id = 1;
+  // Specifies the CRDT data type this key holds.
+  CRDTDataType data_type = 2;
+}
+
+// CRDTData is a union of all CRDT state representations.
+message CRDTData {
+  oneof type {
+    GCounterData g_counter = 1;
+    PNCounterData pn_counter = 2;
+    LWWRegisterData lww_register = 3;
+    ORSetData or_set = 4;
+    ORMapData or_map = 5;
+    FlagData flag = 6;
+    MVRegisterData mv_register = 7;
+  }
+}
+
+// GCounterData is the serialized state of a GCounter.
+message GCounterData {
+  // Specifies the per-node counter slots.
+  map<string, uint64> state = 1;
+}
+
+// PNCounterData is the serialized state of a PNCounter.
+message PNCounterData {
+  // Specifies the increment counter.
+  GCounterData increments = 1;
+  // Specifies the decrement counter.
+  GCounterData decrements = 2;
+}
+
+// LWWRegisterData is the serialized state of a LWWRegister.
+message LWWRegisterData {
+  // Specifies the typed, serialized value.
+  google.protobuf.Any value = 1;
+  // Specifies the write timestamp in nanoseconds since epoch.
+  int64 timestamp_nanos = 2;
+  // Specifies the node that last wrote this value.
+  string node_id = 3;
+}
+
+// ORSetData is the serialized state of an ORSet.
+message ORSetData {
+  // ORSetDot represents a single causal event.
+  message ORSetDot {
+    // Specifies the node that produced this dot.
+    string node_id = 1;
+    // Specifies the monotonic counter for the event.
+    uint64 counter = 2;
+  }
+
+  // ORSetEntry is an element with its associated causal dots.
+  message ORSetEntry {
+    // Specifies the typed, serialized element.
+    google.protobuf.Any element = 1;
+    // Specifies the causal dots associated with this element.
+    repeated ORSetDot dots = 2;
+  }
+
+  // Specifies the set entries.
+  repeated ORSetEntry entries = 1;
+  // Specifies the per-node vector clock.
+  map<string, uint64> clock = 2;
+}
+
+// ORMapData is the serialized state of an ORMap.
+message ORMapData {
+  // ORMapEntry is a single key-value pair in the map.
+  message ORMapEntry {
+    // Specifies the typed, serialized map key.
+    google.protobuf.Any key = 1;
+    // Specifies the CRDT value associated with this key.
+    CRDTData value = 2;
+  }
+
+  // Specifies the map entries.
+  repeated ORMapEntry entries = 1;
+  // Specifies the OR-Set that manages the key set.
+  ORSetData key_set = 2;
+}
+
+// FlagData is the serialized state of a Flag.
+message FlagData {
+  // Specifies whether the flag is enabled.
+  bool enabled = 1;
+}
+
+// MVRegisterData is the serialized state of an MVRegister.
+message MVRegisterData {
+  // MVRegisterEntry is a single value with its causal dot.
+  message MVRegisterEntry {
+    // Specifies the typed, serialized value.
+    google.protobuf.Any value = 1;
+    // Specifies the node that wrote this value.
+    string node_id = 2;
+    // Specifies the monotonic counter for the write event.
+    uint64 counter = 3;
+  }
+
+  // Specifies the register entries (one per concurrent value).
+  repeated MVRegisterEntry entries = 1;
+  // Specifies the per-node vector clock.
+  map<string, uint64> clock = 2;
+}
+
+// CRDTDelta is the delta message published to the shared goakt.crdt.deltas
+// topic via TopicActor. The key is carried inside the payload so that
+// receivers can route the delta to the correct local store entry.
+message CRDTDelta {
+  // Specifies the CRDT key this delta belongs to.
+  CRDTKey key = 1;
+  // Specifies the node that originated this delta.
+  string origin_node = 2;
+  // Specifies the delta state.
+  CRDTData data = 3;
+}
+
+// CRDTDigestEntry is a single entry in an anti-entropy digest.
+message CRDTDigestEntry {
+  // Specifies the CRDT key.
+  CRDTKey key = 1;
+  // Specifies the local version of this key.
+  uint64 version = 2;
+}
+
+// CRDTDigest is exchanged between Replicators during anti-entropy.
+message CRDTDigest {
+  // Specifies the digest entries.
+  repeated CRDTDigestEntry entries = 1;
+}
+
+// CRDTFullStateEntry is a single key's full state in an anti-entropy response.
+message CRDTFullStateEntry {
+  // Specifies the CRDT key.
+  CRDTKey key = 1;
+  // Specifies the full CRDT state.
+  CRDTData data = 2;
+}
+
+// CRDTFullState is the anti-entropy response containing full state for divergent keys.
+message CRDTFullState {
+  // Specifies the full state entries.
+  repeated CRDTFullStateEntry entries = 1;
+}
+
+// CRDTTombstone marks a deleted CRDT key.
+message CRDTTombstone {
+  // Specifies the deleted key.
+  CRDTKey key = 1;
+  // Specifies when the key was deleted in nanoseconds since epoch.
+  int64 deleted_at_nanos = 2;
+  // Specifies the node that performed the deletion.
+  string deleted_by_node = 3;
+}
+
+// CRDTReadRequest asks a peer Replicator for its local value of a key
+// during a coordinated read (ReadFrom: Majority or All).
+message CRDTReadRequest {
+  // Specifies the CRDT key to read.
+  CRDTKey key = 1;
+  // Specifies the node requesting the read.
+  string from_node = 2;
+}
+
+// CRDTReadResponse returns a peer Replicator's local value for a key
+// in response to a CRDTReadRequest.
+message CRDTReadResponse {
+  // Specifies the CRDT key.
+  CRDTKey key = 1;
+  // Specifies the local CRDT state. Nil if the key is not found.
+  CRDTData data = 2;
+  // Specifies the node returning the response.
+  string from_node = 3;
+}
+
+// CRDTSnapshotEntry is a single key's state in a durable BoltDB snapshot.
+message CRDTSnapshotEntry {
+  // Specifies the CRDT key.
+  CRDTKey key = 1;
+  // Specifies the full CRDT state.
+  CRDTData data = 2;
+  // Specifies the local version counter.
+  uint64 version = 3;
+}

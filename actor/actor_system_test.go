@@ -3935,7 +3935,173 @@ func TestActorSystemStartClusterErrors(t *testing.T) {
 		err = sys.Start(ctx)
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "clustering needs remoting to be enabled")
-		assert.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
+		assert.False(t, sys.Running())
+	})
+}
+
+func TestStartupCleanup(t *testing.T) {
+	t.Run("startupCleanup stops cluster and remoting", func(t *testing.T) {
+		ctx := context.TODO()
+		ports := dynaport.Get(1)
+		host := "127.0.0.1"
+
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig(host, ports[0])),
+		)
+		require.NoError(t, err)
+
+		actorSys := sys.(*actorSystem)
+
+		// simulate partial startup: remoting set up, cluster injected
+		require.NoError(t, actorSys.setupRemoting())
+		require.NotNil(t, actorSys.remoting)
+		actorSys.remotingEnabled.Store(true)
+
+		clusterMock := mockscluster.NewCluster(t)
+		clusterMock.EXPECT().IsLeader(mock.Anything).Return(false)
+		clusterMock.EXPECT().Stop(mock.Anything).Return(nil)
+		actorSys.clusterEnabled.Store(true)
+		actorSys.cluster = clusterMock
+
+		actorSys.startupCleanup(ctx)
+
+		assert.False(t, actorSys.started.Load())
+		assert.False(t, actorSys.starting.Load())
+		assert.False(t, actorSys.clusterEnabled.Load())
+		clusterMock.AssertExpectations(t)
+	})
+	t.Run("startupCleanup frees remote server port", func(t *testing.T) {
+		ctx := context.TODO()
+		ports := dynaport.Get(1)
+		host := "127.0.0.1"
+
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig(host, ports[0])),
+		)
+		require.NoError(t, err)
+
+		actorSys := sys.(*actorSystem)
+
+		// simulate partial startup: remoting and remote server started
+		require.NoError(t, actorSys.setupRemoting())
+		actorSys.remotingEnabled.Store(true)
+		require.NoError(t, actorSys.startRemoteServer(ctx))
+		require.NotNil(t, actorSys.remoteServer)
+
+		actorSys.startupCleanup(ctx)
+
+		assert.Nil(t, actorSys.remoteServer)
+
+		// verify the port is freed by listening on it again
+		listener, listenErr := net.Listen("tcp", fmt.Sprintf("%s:%d", host, ports[0]))
+		require.NoError(t, listenErr, "port should be freed after startup cleanup")
+		require.NoError(t, listener.Close())
+	})
+	t.Run("startupCleanup handles nil components gracefully", func(t *testing.T) {
+		ctx := context.TODO()
+
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(log.DiscardLogger),
+		)
+		require.NoError(t, err)
+
+		actorSys := sys.(*actorSystem)
+		actorSys.starting.Store(true)
+
+		// should not panic with nothing initialized
+		actorSys.startupCleanup(ctx)
+
+		assert.False(t, actorSys.started.Load())
+		assert.False(t, actorSys.starting.Load())
+		assert.False(t, actorSys.shuttingDown.Load())
+	})
+	t.Run("chain failure with port conflict cleans up", func(t *testing.T) {
+		ctx := context.TODO()
+		ports := dynaport.Get(1)
+		host := "127.0.0.1"
+
+		// occupy the port so startRemoteServer fails
+		listener, listenErr := net.Listen("tcp", fmt.Sprintf("%s:%d", host, ports[0]))
+		require.NoError(t, listenErr)
+
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig(host, ports[0])),
+		)
+		require.NoError(t, err)
+
+		err = sys.Start(ctx)
+		require.Error(t, err)
+
+		actorSys := sys.(*actorSystem)
+		assert.False(t, actorSys.started.Load())
+		assert.False(t, actorSys.starting.Load())
+
+		// release the port
+		require.NoError(t, listener.Close())
+	})
+	t.Run("system can restart after startup failure", func(t *testing.T) {
+		ctx := context.TODO()
+		ports := dynaport.Get(1)
+		host := "127.0.0.1"
+
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig(host, ports[0])),
+		)
+		require.NoError(t, err)
+
+		// first attempt: occupy the port to cause startup failure
+		listener, listenErr := net.Listen("tcp", fmt.Sprintf("%s:%d", host, ports[0]))
+		require.NoError(t, listenErr)
+
+		err = sys.Start(ctx)
+		require.Error(t, err)
+		assert.False(t, sys.Running())
+
+		// release the port
+		require.NoError(t, listener.Close())
+
+		// second attempt: should succeed now
+		err = sys.Start(ctx)
+		require.NoError(t, err)
+		assert.True(t, sys.Running())
+
+		require.NoError(t, sys.Stop(ctx))
+	})
+	t.Run("startup cleanup resets all state flags", func(t *testing.T) {
+		ctx := context.TODO()
+
+		provider := mocksdiscovery.NewProvider(t)
+
+		clusterConfig := NewClusterConfig().
+			WithDiscovery(provider).
+			WithDiscoveryPort(30001).
+			WithPeersPort(30002).
+			WithKinds(NewMockActor())
+
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(log.DiscardLogger),
+			WithCluster(clusterConfig),
+		)
+		require.NoError(t, err)
+
+		// this will fail in setupCluster because remoting is not enabled
+		err = sys.Start(ctx)
+		require.Error(t, err)
+
+		actorSys := sys.(*actorSystem)
+		assert.False(t, actorSys.started.Load())
+		assert.False(t, actorSys.starting.Load())
+		assert.False(t, actorSys.shuttingDown.Load())
 	})
 }
 

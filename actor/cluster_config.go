@@ -28,6 +28,7 @@ import (
 
 	goset "github.com/deckarep/golang-set/v2"
 
+	"github.com/tochemey/goakt/v4/crdt"
 	"github.com/tochemey/goakt/v4/datacenter"
 	"github.com/tochemey/goakt/v4/discovery"
 	"github.com/tochemey/goakt/v4/internal/size"
@@ -58,6 +59,7 @@ type ClusterConfig struct {
 	roles                    goset.Set[string]
 	clusterBalancerInterval  time.Duration
 	dataCenterConfig         *datacenter.Config
+	crdtConfig               *crdt.Config
 }
 
 type grainActivationBarrierConfig struct {
@@ -444,6 +446,16 @@ func (x *ClusterConfig) WithDataCenter(config *datacenter.Config) *ClusterConfig
 	if config != nil {
 		x.dataCenterConfig = config
 	}
+	return x
+}
+
+// WithCRDT enables CRDT replication on this cluster node.
+// When set, the actor system spawns a Replicator system actor that subscribes
+// to the shared goakt.crdt.deltas topic via the TopicActor and replicates
+// state across the cluster.
+// If not called, no Replicator is spawned and there is zero CRDT overhead.
+func (x *ClusterConfig) WithCRDT(opts ...crdt.Option) *ClusterConfig {
+	x.crdtConfig = crdt.NewConfig(opts...)
 	return x
 }
 

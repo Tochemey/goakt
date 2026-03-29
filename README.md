@@ -24,7 +24,7 @@ Also, check the reference section at the end of the post for more material regar
 > **Version & branches**
 >
 > - **v3** — Protocol buffers for actor messages. Branch: [`release/3.14`](https://github.com/Tochemey/goakt/tree/release/3.14).
-> - **v4** — Typed messages with `any`, unified APIs, pluggable serializers (Proto/CBOR), and config-only remoting. See [CHANGELOG_V400.md](./CHANGELOG_V400.md) for migration; [Docs](https://docs.goakt.dev/) for API reference.
+> - **v4** — Typed messages with `any`, unified APIs, pluggable serializers (Proto/CBOR), and config-only remoting. See [CHANGELOG.md](./CHANGELOG.md) for migration; [Docs](https://docs.goakt.dev/) for API reference.
 
 ## ✨ Features
 
