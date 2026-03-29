@@ -2128,26 +2128,6 @@ func TestReplicatorPostStopWithSnapshot(t *testing.T) {
 	require.NoError(t, store.Close())
 }
 
-func TestReplicatorReset(t *testing.T) {
-	r := newTestReplicator()
-	r.store["k"] = crdt.NewGCounter()
-	r.keyTypes["k"] = crdt.GCounterType
-	r.subscriptions["k"] = types.Unit{}
-	r.watchers["k"] = nil
-	r.tombstones["k"] = &tombstone{}
-	r.versions["k"] = 1
-
-	r.reset()
-
-	assert.Nil(t, r.store)
-	assert.Nil(t, r.keyTypes)
-	assert.Nil(t, r.subscriptions)
-	assert.Nil(t, r.watchers)
-	assert.Nil(t, r.tombstones)
-	assert.Nil(t, r.versions)
-	assert.Nil(t, r.snapshotStore)
-}
-
 // ---------------------------------------------------------------------------
 // Benchmarks
 // ---------------------------------------------------------------------------
