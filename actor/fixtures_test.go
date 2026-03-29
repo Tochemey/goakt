@@ -1944,6 +1944,8 @@ type testClusterConfig struct {
 	dependency        extension.Dependency
 	compression       remote.Compression
 	roles             []string
+	contextPropagator remote.ContextPropagator
+	extraGrains       []Grain
 }
 
 type testClusterOption func(*testClusterConfig)
@@ -1965,6 +1967,18 @@ func withTestPubSub() testClusterOption {
 func withoutTestRelocation() testClusterOption {
 	return func(tc *testClusterConfig) {
 		tc.relocationEnabled = false
+	}
+}
+
+func withTestContextPropagator(propagator remote.ContextPropagator) testClusterOption {
+	return func(tc *testClusterConfig) {
+		tc.contextPropagator = propagator
+	}
+}
+
+func withTestExtraGrains(grains ...Grain) testClusterOption {
+	return func(tc *testClusterConfig) {
+		tc.extraGrains = append(tc.extraGrains, grains...)
 	}
 }
 
@@ -2085,7 +2099,7 @@ func testSystem(t *testing.T, providerFactory providerFactory, opts ...testClust
 			new(MockEntity),
 			new(exchanger),
 			new(MockGrainActor)).
-		WithGrains(new(MockGrain)).
+		WithGrains(append([]Grain{new(MockGrain)}, cfg.extraGrains...)...).
 		WithPartitionCount(7).
 		WithReplicaCount(1).
 		WithPeersPort(peersPort).
@@ -2127,7 +2141,11 @@ func testSystem(t *testing.T, providerFactory providerFactory, opts ...testClust
 		options = append(options, WithExtensions(cfg.extension))
 	}
 
-	options = append(options, WithRemote(remote.NewConfig(host, remotingPort, remote.WithCompression(cfg.compression))))
+	remoteOpts := []remote.Option{remote.WithCompression(cfg.compression)}
+	if cfg.contextPropagator != nil {
+		remoteOpts = append(remoteOpts, remote.WithContextPropagator(cfg.contextPropagator))
+	}
+	options = append(options, WithRemote(remote.NewConfig(host, remotingPort, remoteOpts...)))
 
 	system, err := NewActorSystem(actorSystemName, options...)
 	require.NotNil(t, system)

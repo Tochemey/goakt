@@ -2,14 +2,14 @@
 
 ## [Unreleased]
 
-### Distributed Data (CRDTs)
+### 🔄 Distributed Data (CRDTs)
 
 GoAkt now ships with built-in **Conflict-free Replicated Data Types** — data structures that can be updated independently on any node and are guaranteed to converge to a consistent state without coordination, locks, or consensus rounds.
 
-#### CRDT Types
+#### 📦 CRDT Types
 
 | Type               | Description                                                        |
-| ------------------ | ------------------------------------------------------------------ |
+|--------------------|--------------------------------------------------------------------|
 | **GCounter**       | Grow-only counter with per-node increment slots                    |
 | **PNCounter**      | Positive-negative counter (increment and decrement)                |
 | **LWWRegister[T]** | Last-writer-wins register with timestamp-based conflict resolution |
@@ -18,14 +18,14 @@ GoAkt now ships with built-in **Conflict-free Replicated Data Types** — data s
 | **Flag**           | Boolean that can only transition from false to true                |
 | **MVRegister[T]**  | Multi-value register that preserves concurrent writes              |
 
-#### How It Works
+#### ⚙️ How It Works
 
 - A per-node **Replicator** system actor manages the local CRDT store.
 - Delta dissemination uses the existing **TopicActor** pub/sub — no custom gossip layer.
 - **Anti-entropy** runs periodically as a safety net, exchanging version digests with random peers.
 - All CRDT types are **immutable values** — every mutation returns a new value plus a delta.
 
-#### Enabling CRDTs
+#### 🔧 Enabling CRDTs
 
 ```go
 clusterConfig := actor.NewClusterConfig().
@@ -37,7 +37,7 @@ clusterConfig := actor.NewClusterConfig().
     )
 ```
 
-#### Using CRDTs from an Actor
+#### 💻 Using CRDTs from an Actor
 
 ```go
 replicator := ctx.ActorSystem().Replicator()
@@ -61,7 +61,7 @@ if getResp, ok := resp.(*crdt.GetResponse[*crdt.PNCounter]); ok && getResp.Data 
 }
 ```
 
-#### Key Capabilities
+#### 🔑 Key Capabilities
 
 - **Local-first by default** — reads and writes return immediately with no network wait.
 - **Optional coordination** — `WriteTo: Majority/All` and `ReadFrom: Majority/All` for stronger consistency when needed.
@@ -77,7 +77,7 @@ if getResp, ok := resp.(*crdt.GetResponse[*crdt.PNCounter]); ok && getResp.Data 
 
 ### ✨ New Additions
 
-#### `stream` package — Reactive Streams for GoAkt
+#### 🌊 `stream` package — Reactive Streams for GoAkt
 
 A new top-level `stream` package brings demand-driven, actor-native stream processing to GoAkt.
 Every pipeline stage runs inside a GoAkt actor, inheriting supervision, lifecycle management, and
@@ -95,7 +95,7 @@ is called against a live `ActorSystem`.
 **Sources**
 
 | Constructor                       | Description                                                                   |
-| --------------------------------- | ----------------------------------------------------------------------------- |
+|-----------------------------------|-------------------------------------------------------------------------------|
 | `Of[T](values...)`                | Finite source from a fixed set of values                                      |
 | `Range(start, end)`               | Integer range source (`[start, end)`)                                         |
 | `FromChannel[T](ch)`              | Reads from a Go channel; completes when the channel closes                    |
@@ -111,7 +111,7 @@ is called against a live `ActorSystem`.
 **Flows**
 
 | Constructor                         | Description                                                                     |
-| ----------------------------------- | ------------------------------------------------------------------------------- |
+|-------------------------------------|---------------------------------------------------------------------------------|
 | `Map[In,Out](fn)`                   | Type-changing transformation; no error path                                     |
 | `TryMap[In,Out](fn)`                | Transformation with error; ErrorStrategy controls failure handling              |
 | `Filter[T](predicate)`              | Keeps only elements where `predicate` returns true                              |
@@ -129,7 +129,7 @@ is called against a live `ActorSystem`.
 **Sinks**
 
 | Constructor                     | Description                                                                    |
-| ------------------------------- | ------------------------------------------------------------------------------ |
+|---------------------------------|--------------------------------------------------------------------------------|
 | `ForEach[T](fn)`                | Calls `fn` for each element                                                    |
 | `Collect[T]()`                  | Accumulates all elements; retrieve via `Collector[T].Items()` after completion |
 | `Fold[T,U](zero, fn)`           | Reduces to a single value; retrieve via `FoldResult[U].Value()`                |
@@ -195,17 +195,17 @@ is called against a live `ActorSystem`.
 v4.0.0 delivers **simplification** and **performance** through:
 
 | Theme                | Key Changes                                                                                              |
-| -------------------- | -------------------------------------------------------------------------------------------------------- |
+|----------------------|----------------------------------------------------------------------------------------------------------|
 | **Unified APIs**     | Single actor reference (`*PID`), single lookup (`ActorOf`), unified scheduler, pluggable serializers     |
 | **Type Flexibility** | `any` replaces `proto.Message` across all message-passing surfaces; CBOR supports arbitrary Go types     |
 | **Remoting**         | Config-only public API; client is internal; ProtoSerializer (default) and CBORSerializer for any Go type |
 | **Identity**         | `Path` interface replaces `*address.Address`; `address` package moved to `internal/address`              |
 | **Performance**      | Low-GC serialization, lock-free type registry, single-allocation frames, lock-free `PID.Path()`          |
 
-### Migration Quick Reference
+### 🗺️ Migration Quick Reference
 
 | From                                            | To                                                                                                  |
-| ----------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+|-------------------------------------------------|-----------------------------------------------------------------------------------------------------|
 | `proto.Message` in handlers/call sites          | `any`                                                                                               |
 | `goaktpb.*` types                               | `actor.*` (e.g. `actor.PostStart`, `actor.PoisonPill`)                                              |
 | `ActorRef`                                      | `*PID`                                                                                              |
@@ -224,7 +224,7 @@ v4.0.0 delivers **simplification** and **performance** through:
 
 ### ⚠️ Breaking Changes
 
-#### API & Type System
+#### 🔧 API & Type System
 
 - `proto.Message` replaced by `any` in all public methods (`PID.Tell`, `PID.Ask`, `Schedule*`, `AskGrain`, `TellGrain`, etc.).
 - `goaktpb` package removed; system message types moved to `actor` package (e.g., `actor.PostStart`, `actor.PoisonPill`, `actor.Terminated`, `actor.Deadletter`, etc.).
@@ -232,7 +232,7 @@ v4.0.0 delivers **simplification** and **performance** through:
 - `supervisionSignal` decoupled from protobuf; `msg` is now `any`, `timestamp` is `time.Time`.
 - Cluster event payload type changed from `*anypb.Any` to `any` with typed event structs (`NodeJoinedEvent`, `NodeLeftEvent`).
 
-#### Actor Reference & Lookup
+#### 🔍 Actor Reference & Lookup
 
 - `ActorRef` removed; `*PID` is the sole actor reference for local and remote actors.
 - `ActorOf` return signature unified: `(addr, pid, err)` → `(*PID, error)`; use `pid.Path()` for host/port/name/system.
@@ -241,28 +241,28 @@ v4.0.0 delivers **simplification** and **performance** through:
 - `RemoteScheduleOnce`, `RemoteSchedule`, `RemoteScheduleWithCron` removed; use unified `Schedule*` with remote PID from `ActorOf`.
 - `GetPartition(name)` renamed to `Partition(name)`.
 
-#### Remoting & Configuration
+#### 🌐 Remoting & Configuration
 
 - Remoting client no longer exported; use actor system and `client.Node` APIs; configure via `WithRemote` / `WithRemoteConfig`.
 - `client.Node.Remoting()` and `WithRemoting` removed; use `WithRemote(config *remote.Config)` on the actor system or `WithRemoteConfig(config *remote.Config)` on `client.Node`.
 
-#### Log Package
+#### 📝 Log Package
 
 - `Logger` interface extended with `*Context` methods, `LogLevel`, `Enabled`, `With`, `LogOutput`, `Flush`, `StdLogger`; custom implementations must add all new methods.
 
-#### Testkit & ReceiveContext
+#### 🧪 Testkit & ReceiveContext
 
 - `testkit.Probe.SenderAddress()` removed; use `Sender()` and `pid.Path()`.
 - `ReceiveContext.SenderAddress()` and `ReceiverAddress()` removed; use `ctx.Sender().Path()` and `ctx.Self().Path()`.
 
-#### Address & Path
+#### 🆔 Address & Path
 
 - `address` package moved to `internal/address`; use `Path` interface from `pid.Path()` instead.
 - `PID.Address()` replaced by `PID.Path()`; returns `Path` interface with `String()`, `Name()`, `Host()`, `Port()`, `HostPort()`, `System()`, `Equals()`.
 
 ### ✨ New Additions
 
-#### System Messages & Serialization
+#### 📨 System Messages & Serialization
 
 - Native Go system messages in `actor/messages.go` (lifecycle, actor events, deadletter, cluster events) with `time.Time` timestamps.
 - `actor/messages_serializers.go` for encoding native message types across process boundaries.
@@ -270,32 +270,32 @@ v4.0.0 delivers **simplification** and **performance** through:
 - CBOR serializer with auto-registration via `WithSerializers`; lock-free type registry; single allocation on encode.
 - Serializer dispatch on server and client via `map[reflect.Type]Serializer`; composite receive path for protobuf and CBOR coexistence.
 
-#### Path & Identity
+#### 🆔 Path & Identity
 
 - `Path` interface for location-transparent actor identity; `String()` and `HostPort()` pre-computed and cached.
 
-#### Remote Capabilities
+#### 🌐 Remote Capabilities
 
 - `ActorState` enum and `RemoteState` for querying actor lifecycle on remote nodes (Running, Suspended, Stopping, Relocatable, Singleton).
 
-#### PID & Errors
+#### 🔖 PID & Errors
 
 - `PID.Kind()` — actor kind accessor (reflected type name).
 - Remote PID — lightweight cross-node handle via `newRemotePID`.
 - New sentinel errors: `errors.ErrRemotingDisabled`, `errors.ErrNotLocal`.
 
-#### Log Package
+#### 📝 Log Package
 
 - Extended `Logger` interface with context-aware, structured logging, and introspection methods.
 - `log/slog.go` — stdlib slog implementation with low-GC optimizations (enabled-before-format, typed attrs, caller caching, buffer pooling).
 - `log/zap.go` — Zap implementation with buffered file output, typed fields, stack-allocated `With`.
 - `log/discard.go` — no-op logger for tests.
 
-#### Routing
+#### 🔀 Routing
 
 - Consistent Hash Router — `WithConsistentHashRouter(extractor)` routes messages with the same key to the same routee. Supports custom hashers, configurable virtual nodes, and automatic ring rebuild on scale events.
 
-#### Internal Extractions
+#### 📦 Internal Extractions
 
 - `internal/commands` package — command abstraction extracted from `pid.go` and `actor_system.go`.
 
@@ -404,7 +404,7 @@ Leadership in the cluster is determined by node age (oldest = coordinator). By r
 ##### 📈 Performance Improvement
 
 | Metric           | Before             | After            |
-| ---------------- | ------------------ | ---------------- |
+|------------------|--------------------|------------------|
 | Network calls    | O(N)               | O(3)             |
 | Data transferred | N × payload        | 3 × payload      |
 | Shutdown latency | Wait for all peers | Wait for 2 peers |

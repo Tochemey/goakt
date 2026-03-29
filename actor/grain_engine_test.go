@@ -1063,9 +1063,8 @@ func TestTellGrain(t *testing.T) {
 			Port:    16000,
 		}
 		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil).Once()
-		rem.EXPECT().Serializer(mock.Anything).Return(remote.NewProtoSerializer()).Maybe()
-		netClient := internalnet.NewClient("127.0.0.1:1", internalnet.WithDialTimeout(50*time.Millisecond))
-		rem.EXPECT().NetClient(owner.GetHost(), int(owner.GetPort())).Return(netClient).Once()
+		rem.EXPECT().RemoteTellGrain(mock.Anything, owner.GetHost(), int(owner.GetPort()), mock.Anything, mock.Anything).
+			Return(errors.New("connection refused")).Once()
 
 		err := sys.TellGrain(ctx, identity, &testpb.TestSend{})
 		require.Error(t, err)
@@ -1129,9 +1128,8 @@ func TestAskGrain(t *testing.T) {
 			Port:    16000,
 		}
 		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil).Once()
-		rem.EXPECT().Serializer(mock.Anything).Return(remote.NewProtoSerializer()).Maybe()
-		netClient := internalnet.NewClient("127.0.0.1:1", internalnet.WithDialTimeout(50*time.Millisecond))
-		rem.EXPECT().NetClient(owner.GetHost(), int(owner.GetPort())).Return(netClient).Once()
+		rem.EXPECT().RemoteAskGrain(mock.Anything, owner.GetHost(), int(owner.GetPort()), mock.Anything, mock.Anything, time.Second).
+			Return(nil, errors.New("connection refused")).Once()
 
 		resp, err := sys.AskGrain(ctx, identity, &testpb.TestReply{}, time.Second)
 		require.Error(t, err)
@@ -1243,9 +1241,8 @@ func TestSendToGrainOwner_TellMode(t *testing.T) {
 		Port:    16000,
 	}
 
-	rem.EXPECT().Serializer(mock.Anything).Return(remote.NewProtoSerializer()).Once()
-	netClient := internalnet.NewClient("127.0.0.1:1", internalnet.WithDialTimeout(50*time.Millisecond))
-	rem.EXPECT().NetClient(owner.GetHost(), int(owner.GetPort())).Return(netClient).Once()
+	rem.EXPECT().RemoteTellGrain(mock.Anything, owner.GetHost(), int(owner.GetPort()), mock.Anything, mock.Anything).
+		Return(errors.New("connection refused")).Once()
 
 	resp, err := sys.sendToGrainOwner(ctx, owner, &testpb.TestSend{}, time.Second, false)
 	require.Error(t, err)
@@ -1346,9 +1343,8 @@ func TestSendToGrainOwner_AskMode(t *testing.T) {
 		Port:    16000,
 	}
 
-	rem.EXPECT().Serializer(mock.Anything).Return(remote.NewProtoSerializer()).Maybe()
-	netClient := internalnet.NewClient("127.0.0.1:1", internalnet.WithDialTimeout(50*time.Millisecond))
-	rem.EXPECT().NetClient(owner.GetHost(), int(owner.GetPort())).Return(netClient).Once()
+	rem.EXPECT().RemoteAskGrain(mock.Anything, owner.GetHost(), int(owner.GetPort()), mock.Anything, mock.Anything, time.Second).
+		Return(nil, errors.New("connection refused")).Once()
 
 	resp, err := sys.sendToGrainOwner(ctx, owner, &testpb.TestReply{}, time.Second, true)
 	require.Error(t, err)
@@ -1572,5 +1568,105 @@ func TestGrainRegistrationAndDeregistration(t *testing.T) {
 
 		err = sys.Stop(ctx)
 		assert.Error(t, err)
+	})
+}
+
+func TestGrainContextPropagation(t *testing.T) {
+	ctxKey := grainTestCtxKey{}
+	headerKey := "x-goakt-grain-trace"
+
+	t.Run("AskGrain propagates context across nodes", func(t *testing.T) {
+		ctx := context.Background()
+		srv := startNatsServer(t)
+
+		propagator := &headerPropagator{headerKey: headerKey, ctxKey: ctxKey}
+		grain := &contextEchoGrain{key: ctxKey}
+
+		node1, sd1 := testNATs(t, srv.Addr().String(),
+			withTestContextPropagator(propagator),
+			withTestExtraGrains(grain))
+		node2, sd2 := testNATs(t, srv.Addr().String(),
+			withTestContextPropagator(propagator),
+			withTestExtraGrains(&contextEchoGrain{key: ctxKey}))
+
+		defer func() {
+			assert.NoError(t, node2.Stop(ctx))
+			assert.NoError(t, node1.Stop(ctx))
+			sd2.Close()
+			sd1.Close()
+			srv.Shutdown()
+		}()
+
+		pause.For(time.Second)
+
+		// Activate grain on node1
+		identity, err := node1.GrainIdentity(ctx, "ask-ctx-grain", func(_ context.Context) (Grain, error) {
+			return grain, nil
+		})
+		require.NoError(t, err)
+
+		// First call from node1 to activate the grain
+		resp, err := node1.AskGrain(ctx, identity, new(testpb.TestReply), time.Second)
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		pause.For(time.Second)
+
+		// Send from node2 with propagated context value — routes through TCP remoting
+		headerVal := "cross-node-ask-value"
+		propagatedCtx := context.WithValue(ctx, ctxKey, headerVal)
+		resp, err = node2.AskGrain(propagatedCtx, identity, new(testpb.TestReply), time.Second)
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+
+		reply, ok := resp.(*testpb.Reply)
+		require.True(t, ok)
+		require.Equal(t, headerVal, reply.GetContent())
+		require.Equal(t, headerVal, grain.Seen())
+	})
+
+	t.Run("TellGrain propagates context across nodes", func(t *testing.T) {
+		ctx := context.Background()
+		srv := startNatsServer(t)
+
+		propagator := &headerPropagator{headerKey: headerKey, ctxKey: ctxKey}
+		grain := &contextEchoGrain{key: ctxKey}
+
+		node1, sd1 := testNATs(t, srv.Addr().String(),
+			withTestContextPropagator(propagator),
+			withTestExtraGrains(grain))
+		node2, sd2 := testNATs(t, srv.Addr().String(),
+			withTestContextPropagator(propagator),
+			withTestExtraGrains(&contextEchoGrain{key: ctxKey}))
+
+		defer func() {
+			assert.NoError(t, node2.Stop(ctx))
+			assert.NoError(t, node1.Stop(ctx))
+			sd2.Close()
+			sd1.Close()
+			srv.Shutdown()
+		}()
+
+		pause.For(time.Second)
+
+		// Activate grain on node1
+		identity, err := node1.GrainIdentity(ctx, "tell-ctx-grain", func(_ context.Context) (Grain, error) {
+			return grain, nil
+		})
+		require.NoError(t, err)
+
+		// First call from node1 to activate the grain
+		_, err = node1.AskGrain(ctx, identity, new(testpb.TestReply), time.Second)
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		// Send from node2 with propagated context value — routes through TCP remoting
+		headerVal := "cross-node-tell-value"
+		propagatedCtx := context.WithValue(ctx, ctxKey, headerVal)
+		err = node2.TellGrain(propagatedCtx, identity, new(testpb.TestSend))
+		require.NoError(t, err)
+
+		require.Eventually(t, func() bool {
+			return grain.Seen() == headerVal
+		}, 2*time.Second, 50*time.Millisecond)
 	})
 }

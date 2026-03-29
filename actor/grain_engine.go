@@ -35,7 +35,6 @@ import (
 	goset "github.com/deckarep/golang-set/v2"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/tochemey/goakt/v4/datacenter"
 	gerrors "github.com/tochemey/goakt/v4/errors"
@@ -1035,73 +1034,25 @@ func (x *actorSystem) sendToGrainOwner(ctx context.Context, owner *internalpb.Gr
 }
 
 // sendRemoteAskGrainRequest sends a request to a known Grain endpoint and returns the decoded reply.
-// It handles protobuf serialization, context propagation headers, and response decoding.
+// It delegates to the remote client's RemoteAskGrain method, which handles serialization,
+// context propagation (via enrichContext/ContextPropagator.Inject), and response decoding.
 func (x *actorSystem) sendRemoteAskGrainRequest(ctx context.Context, grain *internalpb.Grain, message any, timeout time.Duration) (any, error) {
-	serializer := x.remoting.Serializer(message)
-	if serializer == nil {
-		return nil, gerrors.NewErrInvalidMessage(fmt.Errorf("no serializer found for message type %T", message))
+	grainRequest := &remote.GrainRequest{
+		Name: grain.GetGrainId().GetName(),
+		Kind: grain.GetGrainId().GetKind(),
 	}
-
-	serialized, err := serializer.Serialize(message)
-	if err != nil {
-		return nil, err
-	}
-
-	client := x.remoting.NetClient(grain.GetHost(), int(grain.GetPort()))
-	request := &internalpb.RemoteAskGrainRequest{
-		Grain:          grain,
-		Message:        serialized,
-		RequestTimeout: durationpb.New(timeout),
-	}
-
-	resp, err := client.SendProto(ctx, request)
-	if err != nil {
-		return nil, err
-	}
-
-	// Check for proto errors
-	if errResp, ok := resp.(*internalpb.Error); ok {
-		return nil, fmt.Errorf("proto error: code=%s, msg=%s", errResp.GetCode(), errResp.GetMessage())
-	}
-
-	askResp, ok := resp.(*internalpb.RemoteAskGrainResponse)
-	if !ok {
-		return nil, fmt.Errorf("invalid response type")
-	}
-
-	return x.remoting.Serializer(nil).Deserialize(askResp.GetMessage())
+	return x.remoting.RemoteAskGrain(ctx, grain.GetHost(), int(grain.GetPort()), grainRequest, message, timeout)
 }
 
 // sendRemoteTellGrainRequest sends a fire-and-forget message to a known Grain endpoint.
-// It handles protobuf serialization and context propagation headers.
+// It delegates to the remote client's RemoteTellGrain method, which handles serialization,
+// context propagation (via enrichContext/ContextPropagator.Inject), and error handling.
 func (x *actorSystem) sendRemoteTellGrainRequest(ctx context.Context, grain *internalpb.Grain, message any) error {
-	serializer := x.remoting.Serializer(message)
-	if serializer == nil {
-		return gerrors.NewErrInvalidMessage(fmt.Errorf("no serializer found for message type %T", message))
+	grainRequest := &remote.GrainRequest{
+		Name: grain.GetGrainId().GetName(),
+		Kind: grain.GetGrainId().GetKind(),
 	}
-
-	serialized, err := serializer.Serialize(message)
-	if err != nil {
-		return err
-	}
-
-	client := x.remoting.NetClient(grain.GetHost(), int(grain.GetPort()))
-	request := &internalpb.RemoteTellGrainRequest{
-		Grain:   grain,
-		Message: serialized,
-	}
-
-	resp, err := client.SendProto(ctx, request)
-	if err != nil {
-		return err
-	}
-
-	// Check for proto errors
-	if errResp, ok := resp.(*internalpb.Error); ok {
-		return fmt.Errorf("proto error: code=%s, msg=%s", errResp.GetCode(), errResp.GetMessage())
-	}
-
-	return nil
+	return x.remoting.RemoteTellGrain(ctx, grain.GetHost(), int(grain.GetPort()), grainRequest, message)
 }
 
 // recreateGrain recreates a serialized Grain.

@@ -176,8 +176,6 @@ func (r *replicatorActor) PostStop(ctx *Context) error {
 	_ = ctx.ActorSystem().CancelSchedule(pruneScheduleRef)
 	_ = ctx.ActorSystem().CancelSchedule(snapshotScheduleRef)
 
-	defer r.reset()
-
 	// persist final snapshot before shutdown
 	if r.snapshotStore != nil {
 		if err := r.snapshotStore.Save(r.store, r.keyTypes, r.versions); err != nil {
@@ -1107,16 +1105,4 @@ func (r *replicatorActor) restoreFromSnapshot() error {
 
 	r.logger.Infof("restored %d CRDT keys from snapshot", len(data))
 	return nil
-}
-
-// reset clears all in-memory state so the replicator can be
-// cleanly restarted by the supervisor.
-func (r *replicatorActor) reset() {
-	r.store = nil
-	r.keyTypes = nil
-	r.subscriptions = nil
-	r.watchers = nil
-	r.tombstones = nil
-	r.versions = nil
-	r.snapshotStore = nil
 }
