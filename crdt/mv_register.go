@@ -25,11 +25,11 @@ package crdt
 import "maps"
 
 // ensure MVRegister implements ReplicatedData at compile time.
-var _ ReplicatedData = (*MVRegister[string])(nil)
+var _ ReplicatedData = (*MVRegister)(nil)
 
 // mvEntry holds a value tagged with its causal dot.
-type mvEntry[T any] struct {
-	value T
+type mvEntry struct {
+	value any
 	dot   dot
 }
 
@@ -45,15 +45,15 @@ type mvEntry[T any] struct {
 // On merge, values whose dots are dominated by the other replica's
 // clock are discarded (they have been superseded). Values with
 // undominated dots are kept (they are concurrent).
-type MVRegister[T any] struct {
-	entries []mvEntry[T]
+type MVRegister struct {
+	entries []mvEntry
 	clock   map[string]uint64
 	dirty   bool
 }
 
 // NewMVRegister creates a new empty MVRegister.
-func NewMVRegister[T any]() *MVRegister[T] {
-	return &MVRegister[T]{
+func NewMVRegister() *MVRegister {
+	return &MVRegister{
 		clock: make(map[string]uint64),
 	}
 }
@@ -61,19 +61,19 @@ func NewMVRegister[T any]() *MVRegister[T] {
 // Set writes a value to the register on behalf of the given node.
 // This supersedes all values previously observed by this register.
 // Returns a new MVRegister with the updated state.
-func (r *MVRegister[T]) Set(nodeID string, value T) *MVRegister[T] {
+func (r *MVRegister) Set(nodeID string, value any) *MVRegister {
 	out := r.cloneInternal()
 	out.clock[nodeID]++
 	d := dot{nodeID: nodeID, counter: out.clock[nodeID]}
-	out.entries = []mvEntry[T]{{value: value, dot: d}}
+	out.entries = []mvEntry{{value: value, dot: d}}
 	out.dirty = true
 	return out
 }
 
 // Values returns all currently held values.
 // A single value means no conflicts; multiple values indicate concurrent writes.
-func (r *MVRegister[T]) Values() []T {
-	result := make([]T, len(r.entries))
+func (r *MVRegister) Values() []any {
+	result := make([]any, len(r.entries))
 	for i, e := range r.entries {
 		result[i] = e.value
 	}
@@ -83,13 +83,13 @@ func (r *MVRegister[T]) Values() []T {
 // Merge combines this MVRegister with another.
 // Values whose dots are dominated by the other replica's clock are discarded.
 // Remaining values (concurrent writes) are kept. Both inputs are left unchanged.
-func (r *MVRegister[T]) Merge(other ReplicatedData) ReplicatedData {
-	o, ok := other.(*MVRegister[T])
+func (r *MVRegister) Merge(other ReplicatedData) ReplicatedData {
+	o, ok := other.(*MVRegister)
 	if !ok {
 		return r
 	}
 
-	merged := &MVRegister[T]{
+	merged := &MVRegister{
 		clock: make(map[string]uint64, len(r.clock)+len(o.clock)),
 	}
 
@@ -122,7 +122,7 @@ func (r *MVRegister[T]) Merge(other ReplicatedData) ReplicatedData {
 
 // Delta returns the register state if it has changed since the last ResetDelta.
 // Returns nil if there are no changes.
-func (r *MVRegister[T]) Delta() ReplicatedData {
+func (r *MVRegister) Delta() ReplicatedData {
 	if !r.dirty {
 		return nil
 	}
@@ -130,21 +130,21 @@ func (r *MVRegister[T]) Delta() ReplicatedData {
 }
 
 // ResetDelta clears the dirty flag.
-func (r *MVRegister[T]) ResetDelta() {
+func (r *MVRegister) ResetDelta() {
 	r.dirty = false
 }
 
 // MVEntry is an exported representation of an MVRegister entry for serialization.
-type MVEntry[T any] struct {
-	Value T
+type MVEntry struct {
+	Value any
 	Dot   Dot
 }
 
 // RawState returns the internal state in a serializable format.
-func (r *MVRegister[T]) RawState() (entries []MVEntry[T], clock map[string]uint64) {
-	result := make([]MVEntry[T], len(r.entries))
+func (r *MVRegister) RawState() (entries []MVEntry, clock map[string]uint64) {
+	result := make([]MVEntry, len(r.entries))
 	for i, e := range r.entries {
-		result[i] = MVEntry[T]{
+		result[i] = MVEntry{
 			Value: e.value,
 			Dot:   Dot{NodeID: e.dot.nodeID, Counter: e.dot.counter},
 		}
@@ -155,13 +155,13 @@ func (r *MVRegister[T]) RawState() (entries []MVEntry[T], clock map[string]uint6
 }
 
 // MVRegisterFromRawState creates an MVRegister from serialized state.
-func MVRegisterFromRawState[T any](entries []MVEntry[T], clock map[string]uint64) *MVRegister[T] {
-	r := &MVRegister[T]{
-		entries: make([]mvEntry[T], len(entries)),
+func MVRegisterFromRawState(entries []MVEntry, clock map[string]uint64) *MVRegister {
+	r := &MVRegister{
+		entries: make([]mvEntry, len(entries)),
 		clock:   make(map[string]uint64, len(clock)),
 	}
 	for i, e := range entries {
-		r.entries[i] = mvEntry[T]{
+		r.entries[i] = mvEntry{
 			value: e.Value,
 			dot:   dot{nodeID: e.Dot.NodeID, counter: e.Dot.Counter},
 		}
@@ -171,14 +171,14 @@ func MVRegisterFromRawState[T any](entries []MVEntry[T], clock map[string]uint64
 }
 
 // Clone returns a deep copy of the MVRegister.
-func (r *MVRegister[T]) Clone() ReplicatedData {
+func (r *MVRegister) Clone() ReplicatedData {
 	return r.cloneInternal()
 }
 
 // cloneInternal returns a deep copy preserving the concrete type.
-func (r *MVRegister[T]) cloneInternal() *MVRegister[T] {
-	out := &MVRegister[T]{
-		entries: make([]mvEntry[T], len(r.entries)),
+func (r *MVRegister) cloneInternal() *MVRegister {
+	out := &MVRegister{
+		entries: make([]mvEntry, len(r.entries)),
 		clock:   make(map[string]uint64, len(r.clock)),
 		dirty:   r.dirty,
 	}
@@ -188,7 +188,7 @@ func (r *MVRegister[T]) cloneInternal() *MVRegister[T] {
 }
 
 // containsMVDot returns true if any entry has a matching dot.
-func containsMVDot[T any](entries []mvEntry[T], d dot) bool {
+func containsMVDot(entries []mvEntry, d dot) bool {
 	for _, e := range entries {
 		if e.dot.nodeID == d.nodeID && e.dot.counter == d.counter {
 			return true
@@ -198,7 +198,7 @@ func containsMVDot[T any](entries []mvEntry[T], d dot) bool {
 }
 
 // appendMVEntryUnique appends an entry only if no entry with the same dot exists.
-func appendMVEntryUnique[T any](entries []mvEntry[T], e mvEntry[T]) []mvEntry[T] {
+func appendMVEntryUnique(entries []mvEntry, e mvEntry) []mvEntry {
 	if containsMVDot(entries, e.dot) {
 		return entries
 	}

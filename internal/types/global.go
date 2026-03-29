@@ -32,6 +32,33 @@ import (
 // resolve Go types from their wire names. Used by remote and internal/remoteclient.
 var GlobalRegistry = NewRegistry()
 
+func init() {
+	// Pre-register Go primitive types so that CBORSerializer can encode and
+	// decode them without explicit user registration. This is required for
+	// CRDT types that store any-typed values (ORSet elements, LWWRegister
+	// values, etc.). We register via reflect.Type to bypass the pointer-only
+	// gate in RegisterSerializerType.
+	primitives := [...]reflect.Type{
+		reflect.TypeFor[string](),
+		reflect.TypeFor[bool](),
+		reflect.TypeFor[int](),
+		reflect.TypeFor[int8](),
+		reflect.TypeFor[int16](),
+		reflect.TypeFor[int32](),
+		reflect.TypeFor[int64](),
+		reflect.TypeFor[uint](),
+		reflect.TypeFor[uint8](),
+		reflect.TypeFor[uint16](),
+		reflect.TypeFor[uint32](),
+		reflect.TypeFor[uint64](),
+		reflect.TypeFor[float32](),
+		reflect.TypeFor[float64](),
+	}
+	for _, t := range primitives {
+		GlobalRegistry.Register(t)
+	}
+}
+
 // UsesRegistry is implemented by serializers that use the global types registry.
 // Used to avoid importing remote for type assertion.
 type UsesRegistry interface {

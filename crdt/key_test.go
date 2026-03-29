@@ -42,25 +42,25 @@ func TestKey(t *testing.T) {
 	})
 
 	t.Run("LWWRegisterKey", func(t *testing.T) {
-		k := LWWRegisterKey[string]("config-value")
+		k := LWWRegisterKey("config-value")
 		assert.Equal(t, "config-value", k.ID())
 		assert.Equal(t, LWWRegisterType, k.Type())
 	})
 
 	t.Run("ORSetKey", func(t *testing.T) {
-		k := ORSetKey[string]("sessions")
+		k := ORSetKey("sessions")
 		assert.Equal(t, "sessions", k.ID())
 		assert.Equal(t, ORSetType, k.Type())
 	})
 
 	t.Run("ORSetKey with int type", func(t *testing.T) {
-		k := ORSetKey[int]("user-ids")
+		k := ORSetKey("user-ids")
 		assert.Equal(t, "user-ids", k.ID())
 		assert.Equal(t, ORSetType, k.Type())
 	})
 
 	t.Run("ORMapKey", func(t *testing.T) {
-		k := ORMapKey[string, *GCounter]("cart")
+		k := ORMapKey("cart")
 		assert.Equal(t, "cart", k.ID())
 		assert.Equal(t, ORMapType, k.Type())
 	})
@@ -72,7 +72,7 @@ func TestKey(t *testing.T) {
 	})
 
 	t.Run("MVRegisterKey", func(t *testing.T) {
-		k := MVRegisterKey[string]("profile-name")
+		k := MVRegisterKey("profile-name")
 		assert.Equal(t, "profile-name", k.ID())
 		assert.Equal(t, MVRegisterType, k.Type())
 	})

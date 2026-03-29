@@ -39,33 +39,35 @@ type dot struct {
 // a concurrent add on another node is not affected by a remove that has
 // not observed it. This gives add-wins semantics: if an add and a remove
 // happen concurrently, the element remains in the set.
-type ORSet[T comparable] struct {
-	entries map[T][]dot
+//
+// Elements must be comparable at runtime (usable as map keys).
+type ORSet struct {
+	entries map[any][]dot
 	clock   map[string]uint64
-	delta   *orSetDelta[T]
+	delta   *orSetDelta
 }
 
 // ensure ORSet implements ReplicatedData at compile time.
-var _ ReplicatedData = (*ORSet[string])(nil)
+var _ ReplicatedData = (*ORSet)(nil)
 
 // orSetDelta tracks the changes made since the last ResetDelta.
-type orSetDelta[T comparable] struct {
-	added   map[T][]dot
-	removed map[T][]dot
+type orSetDelta struct {
+	added   map[any][]dot
+	removed map[any][]dot
 }
 
 // NewORSet creates a new empty ORSet.
-func NewORSet[T comparable]() *ORSet[T] {
-	return &ORSet[T]{
-		entries: make(map[T][]dot),
+func NewORSet() *ORSet {
+	return &ORSet{
+		entries: make(map[any][]dot),
 		clock:   make(map[string]uint64),
-		delta:   newORSetDelta[T](),
+		delta:   newORSetDelta(),
 	}
 }
 
 // Add inserts an element into the set, tagged with the given node's causal dot.
 // Returns a new ORSet with the updated state.
-func (s *ORSet[T]) Add(nodeID string, element T) *ORSet[T] {
+func (s *ORSet) Add(nodeID string, element any) *ORSet {
 	out := s.shallowCopy()
 	out.clock[nodeID]++
 	d := dot{nodeID: nodeID, counter: out.clock[nodeID]}
@@ -82,7 +84,7 @@ func (s *ORSet[T]) Add(nodeID string, element T) *ORSet[T] {
 // Remove removes an element from the set by recording all observed dots.
 // Returns a new ORSet with the updated state. If the element is not in
 // the set, the returned set is unchanged.
-func (s *ORSet[T]) Remove(element T) *ORSet[T] {
+func (s *ORSet) Remove(element any) *ORSet {
 	dots, exists := s.entries[element]
 	if !exists {
 		return s
@@ -94,15 +96,15 @@ func (s *ORSet[T]) Remove(element T) *ORSet[T] {
 }
 
 // Contains returns true if the element is in the set.
-func (s *ORSet[T]) Contains(element T) bool {
+func (s *ORSet) Contains(element any) bool {
 	dots, exists := s.entries[element]
 	return exists && len(dots) > 0
 }
 
 // Elements returns all elements currently in the set.
 // The returned slice is a snapshot; modifications to it do not affect the set.
-func (s *ORSet[T]) Elements() []T {
-	result := make([]T, 0, len(s.entries))
+func (s *ORSet) Elements() []any {
+	result := make([]any, 0, len(s.entries))
 	for elem, dots := range s.entries {
 		if len(dots) > 0 {
 			result = append(result, elem)
@@ -112,7 +114,7 @@ func (s *ORSet[T]) Elements() []T {
 }
 
 // Len returns the number of elements in the set.
-func (s *ORSet[T]) Len() int {
+func (s *ORSet) Len() int {
 	count := 0
 	for _, dots := range s.entries {
 		if len(dots) > 0 {
@@ -125,16 +127,16 @@ func (s *ORSet[T]) Len() int {
 // Merge combines this ORSet with another using observed-remove semantics.
 // An element is present in the merged set if it has at least one dot that
 // is not dominated by the other set's clock. Both inputs are left unchanged.
-func (s *ORSet[T]) Merge(other ReplicatedData) ReplicatedData {
-	o, ok := other.(*ORSet[T])
+func (s *ORSet) Merge(other ReplicatedData) ReplicatedData {
+	o, ok := other.(*ORSet)
 	if !ok {
 		return s
 	}
 
-	merged := &ORSet[T]{
-		entries: make(map[T][]dot),
+	merged := &ORSet{
+		entries: make(map[any][]dot),
 		clock:   make(map[string]uint64, len(s.clock)+len(o.clock)),
-		delta:   newORSetDelta[T](),
+		delta:   newORSetDelta(),
 	}
 
 	// Merge clocks: take the max of each node's counter.
@@ -146,7 +148,7 @@ func (s *ORSet[T]) Merge(other ReplicatedData) ReplicatedData {
 	}
 
 	// Collect all elements from both sets.
-	allElements := make(map[T]struct{}, len(s.entries)+len(o.entries))
+	allElements := make(map[any]struct{}, len(s.entries)+len(o.entries))
 	for elem := range s.entries {
 		allElements[elem] = struct{}{}
 	}
@@ -182,15 +184,15 @@ func (s *ORSet[T]) Merge(other ReplicatedData) ReplicatedData {
 // The delta carries only the newly-added entries and a clock scoped to
 // the nodes that produced those dots. This prevents a peer from treating
 // the full clock as evidence that unseen dots have been removed.
-func (s *ORSet[T]) Delta() ReplicatedData {
+func (s *ORSet) Delta() ReplicatedData {
 	if len(s.delta.added) == 0 && len(s.delta.removed) == 0 {
 		return nil
 	}
 	// Build a minimal ORSet representing just the delta.
-	d := &ORSet[T]{
-		entries: make(map[T][]dot, len(s.delta.added)),
+	d := &ORSet{
+		entries: make(map[any][]dot, len(s.delta.added)),
 		clock:   make(map[string]uint64),
-		delta:   newORSetDelta[T](),
+		delta:   newORSetDelta(),
 	}
 	for elem, dots := range s.delta.added {
 		cloned := cloneDots(dots)
@@ -219,8 +221,8 @@ func (s *ORSet[T]) Delta() ReplicatedData {
 }
 
 // ResetDelta clears the accumulated delta state.
-func (s *ORSet[T]) ResetDelta() {
-	s.delta = newORSetDelta[T]()
+func (s *ORSet) ResetDelta() {
+	s.delta = newORSetDelta()
 }
 
 // Dot is an exported representation of a causal dot for serialization.
@@ -230,15 +232,15 @@ type Dot struct {
 }
 
 // Entry is an exported representation of an ORSet entry for serialization.
-type Entry[T comparable] struct {
-	Element T
+type Entry struct {
+	Element any
 	Dots    []Dot
 }
 
 // RawState returns the internal state in a serializable format.
 // Used by the codec layer for protobuf encoding.
-func (s *ORSet[T]) RawState() (entries []Entry[T], clock map[string]uint64) {
-	result := make([]Entry[T], 0, len(s.entries))
+func (s *ORSet) RawState() (entries []Entry, clock map[string]uint64) {
+	result := make([]Entry, 0, len(s.entries))
 	for elem, dots := range s.entries {
 		if len(dots) == 0 {
 			continue
@@ -247,7 +249,7 @@ func (s *ORSet[T]) RawState() (entries []Entry[T], clock map[string]uint64) {
 		for i, d := range dots {
 			exported[i] = Dot{NodeID: d.nodeID, Counter: d.counter}
 		}
-		result = append(result, Entry[T]{Element: elem, Dots: exported})
+		result = append(result, Entry{Element: elem, Dots: exported})
 	}
 	clk := make(map[string]uint64, len(s.clock))
 	maps.Copy(clk, s.clock)
@@ -255,11 +257,11 @@ func (s *ORSet[T]) RawState() (entries []Entry[T], clock map[string]uint64) {
 }
 
 // ORSetFromRawState creates an ORSet from serialized state.
-func ORSetFromRawState[T comparable](entries []Entry[T], clock map[string]uint64) *ORSet[T] {
-	s := &ORSet[T]{
-		entries: make(map[T][]dot, len(entries)),
+func ORSetFromRawState(entries []Entry, clock map[string]uint64) *ORSet {
+	s := &ORSet{
+		entries: make(map[any][]dot, len(entries)),
 		clock:   make(map[string]uint64, len(clock)),
-		delta:   newORSetDelta[T](),
+		delta:   newORSetDelta(),
 	}
 	for _, e := range entries {
 		dots := make([]dot, len(e.Dots))
@@ -278,11 +280,11 @@ func ORSetFromRawState[T comparable](entries []Entry[T], clock map[string]uint64
 // only the single highest dot per node. This reduces memory overhead
 // from repeated add operations on the same element.
 // Returns a new ORSet with the compacted state.
-func (s *ORSet[T]) Compact() *ORSet[T] {
-	out := &ORSet[T]{
-		entries: make(map[T][]dot, len(s.entries)),
+func (s *ORSet) Compact() *ORSet {
+	out := &ORSet{
+		entries: make(map[any][]dot, len(s.entries)),
 		clock:   make(map[string]uint64, len(s.clock)),
-		delta:   newORSetDelta[T](),
+		delta:   newORSetDelta(),
 	}
 	maps.Copy(out.clock, s.clock)
 
@@ -308,12 +310,12 @@ func (s *ORSet[T]) Compact() *ORSet[T] {
 }
 
 // CompactData implements Compactable by delegating to Compact.
-func (s *ORSet[T]) CompactData() ReplicatedData {
+func (s *ORSet) CompactData() ReplicatedData {
 	return s.Compact()
 }
 
 // Clone returns a deep copy of the ORSet.
-func (s *ORSet[T]) Clone() ReplicatedData {
+func (s *ORSet) Clone() ReplicatedData {
 	return s.cloneInternal()
 }
 
@@ -322,9 +324,9 @@ func (s *ORSet[T]) Clone() ReplicatedData {
 // the copy do not affect the original, but the underlying dot slices
 // are shared. Callers that modify a specific element's dots must clone
 // that slice before mutating it.
-func (s *ORSet[T]) shallowCopy() *ORSet[T] {
-	out := &ORSet[T]{
-		entries: make(map[T][]dot, len(s.entries)),
+func (s *ORSet) shallowCopy() *ORSet {
+	out := &ORSet{
+		entries: make(map[any][]dot, len(s.entries)),
 		clock:   make(map[string]uint64, len(s.clock)),
 		delta:   s.delta.clone(),
 	}
@@ -336,9 +338,9 @@ func (s *ORSet[T]) shallowCopy() *ORSet[T] {
 }
 
 // cloneInternal returns a deep copy preserving the concrete type.
-func (s *ORSet[T]) cloneInternal() *ORSet[T] {
-	out := &ORSet[T]{
-		entries: make(map[T][]dot, len(s.entries)),
+func (s *ORSet) cloneInternal() *ORSet {
+	out := &ORSet{
+		entries: make(map[any][]dot, len(s.entries)),
 		clock:   make(map[string]uint64, len(s.clock)),
 		delta:   s.delta.clone(),
 	}
@@ -350,16 +352,16 @@ func (s *ORSet[T]) cloneInternal() *ORSet[T] {
 }
 
 // newORSetDelta creates an empty delta tracker.
-func newORSetDelta[T comparable]() *orSetDelta[T] {
-	return &orSetDelta[T]{
-		added:   make(map[T][]dot),
-		removed: make(map[T][]dot),
+func newORSetDelta() *orSetDelta {
+	return &orSetDelta{
+		added:   make(map[any][]dot),
+		removed: make(map[any][]dot),
 	}
 }
 
 // clone returns a deep copy of the delta tracker.
-func (d *orSetDelta[T]) clone() *orSetDelta[T] {
-	out := newORSetDelta[T]()
+func (d *orSetDelta) clone() *orSetDelta {
+	out := newORSetDelta()
 	for elem, dots := range d.added {
 		out.added[elem] = cloneDots(dots)
 	}

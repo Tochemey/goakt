@@ -42,10 +42,8 @@ const (
 	MVRegisterType
 )
 
-// Key is a typed, serializable CRDT key.
+// Key is a serializable CRDT key.
 //
-// The generic parameter T binds the key to a specific CRDT type at compile time,
-// providing type safety for Update, Get, Subscribe, and Changed messages.
 // The key's ID is carried inside each delta payload for routing; all deltas
 // are published to a single shared topic (goakt.crdt.deltas) via TopicActor.
 // The DataType is serialized in anti-entropy and coordination messages
@@ -54,8 +52,8 @@ const (
 // Keys are typically defined as package-level variables:
 //
 //	var requestCount = crdt.PNCounterKey("request-count")
-//	var activeSessions = crdt.ORSetKey[string]("active-sessions")
-type Key[T ReplicatedData] struct {
+//	var activeSessions = crdt.ORSetKey("active-sessions")
+type Key struct {
 	id       string
 	dataType DataType
 }
@@ -63,46 +61,46 @@ type Key[T ReplicatedData] struct {
 // ID returns the key's string identifier.
 // This is used as the internal store key and is embedded in delta messages
 // for routing; replication uses the shared goakt.crdt.deltas topic.
-func (k Key[T]) ID() string {
+func (k Key) ID() string {
 	return k.id
 }
 
 // Type returns the CRDT data type this key is associated with.
-func (k Key[T]) Type() DataType {
+func (k Key) Type() DataType {
 	return k.dataType
 }
 
-// GCounterKey creates a typed key for a GCounter CRDT.
-func GCounterKey(id string) Key[*GCounter] {
-	return Key[*GCounter]{id: id, dataType: GCounterType}
+// GCounterKey creates a key for a GCounter CRDT.
+func GCounterKey(id string) Key {
+	return Key{id: id, dataType: GCounterType}
 }
 
-// PNCounterKey creates a typed key for a PNCounter CRDT.
-func PNCounterKey(id string) Key[*PNCounter] {
-	return Key[*PNCounter]{id: id, dataType: PNCounterType}
+// PNCounterKey creates a key for a PNCounter CRDT.
+func PNCounterKey(id string) Key {
+	return Key{id: id, dataType: PNCounterType}
 }
 
-// LWWRegisterKey creates a typed key for a LWWRegister CRDT.
-func LWWRegisterKey[T any](id string) Key[*LWWRegister[T]] {
-	return Key[*LWWRegister[T]]{id: id, dataType: LWWRegisterType}
+// LWWRegisterKey creates a key for a LWWRegister CRDT.
+func LWWRegisterKey(id string) Key {
+	return Key{id: id, dataType: LWWRegisterType}
 }
 
-// ORSetKey creates a typed key for an ORSet CRDT.
-func ORSetKey[T comparable](id string) Key[*ORSet[T]] {
-	return Key[*ORSet[T]]{id: id, dataType: ORSetType}
+// ORSetKey creates a key for an ORSet CRDT.
+func ORSetKey(id string) Key {
+	return Key{id: id, dataType: ORSetType}
 }
 
-// ORMapKey creates a typed key for an ORMap CRDT.
-func ORMapKey[K comparable, V ReplicatedData](id string) Key[*ORMap[K, V]] {
-	return Key[*ORMap[K, V]]{id: id, dataType: ORMapType}
+// ORMapKey creates a key for an ORMap CRDT.
+func ORMapKey(id string) Key {
+	return Key{id: id, dataType: ORMapType}
 }
 
-// FlagKey creates a typed key for a Flag CRDT.
-func FlagKey(id string) Key[*Flag] {
-	return Key[*Flag]{id: id, dataType: FlagType}
+// FlagKey creates a key for a Flag CRDT.
+func FlagKey(id string) Key {
+	return Key{id: id, dataType: FlagType}
 }
 
-// MVRegisterKey creates a typed key for an MVRegister CRDT.
-func MVRegisterKey[T any](id string) Key[*MVRegister[T]] {
-	return Key[*MVRegister[T]]{id: id, dataType: MVRegisterType}
+// MVRegisterKey creates a key for an MVRegister CRDT.
+func MVRegisterKey(id string) Key {
+	return Key{id: id, dataType: MVRegisterType}
 }

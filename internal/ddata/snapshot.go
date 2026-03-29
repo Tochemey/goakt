@@ -34,8 +34,6 @@ import (
 	"go.etcd.io/bbolt"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/tochemey/goakt/v4/crdt"
-	"github.com/tochemey/goakt/v4/internal/codec"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 )
 
@@ -54,6 +52,9 @@ var (
 )
 
 // Store persists CRDT state to BoltDB for durable recovery.
+// The store is a raw byte-storage layer: it accepts and returns pre-encoded
+// CRDTSnapshotEntry protobuf messages. All CRDT encoding/decoding is the
+// responsibility of the caller (the replicator).
 type Store struct {
 	db     *bbolt.DB
 	bucket []byte
@@ -87,9 +88,9 @@ func NewStore(dir string) (*Store, error) {
 	return &Store{db: db, bucket: bucket, path: path}, nil
 }
 
-// Save persists the entire CRDT store to BoltDB.
-// Each key is stored as a serialized CRDTSnapshotEntry.
-func (s *Store) Save(store map[string]crdt.ReplicatedData, keyTypes map[string]crdt.DataType, versions map[string]uint64) error {
+// Save persists the pre-encoded CRDT snapshot entries to BoltDB.
+// Each entry is keyed by its CRDT key ID.
+func (s *Store) Save(entries map[string]*internalpb.CRDTSnapshotEntry) error {
 	if s.closed.Load() {
 		return ErrStoreClosed
 	}
@@ -109,27 +110,7 @@ func (s *Store) Save(store map[string]crdt.ReplicatedData, keyTypes map[string]c
 		}
 
 		// write current state
-		for keyID, data := range store {
-			dataType, ok := keyTypes[keyID]
-			if !ok {
-				return fmt.Errorf("crdt: missing data type for key=%s", keyID)
-			}
-			version, ok := versions[keyID]
-			if !ok {
-				return fmt.Errorf("crdt: missing version for key=%s", keyID)
-			}
-
-			pbData, err := codec.EncodeCRDTData(data)
-			if err != nil {
-				return fmt.Errorf("crdt: encode snapshot for key=%s: %w", keyID, err)
-			}
-
-			entry := &internalpb.CRDTSnapshotEntry{
-				Key:     codec.EncodeCRDTKey(keyID, dataType),
-				Data:    pbData,
-				Version: version,
-			}
-
+		for keyID, entry := range entries {
 			raw, err := proto.Marshal(entry)
 			if err != nil {
 				return fmt.Errorf("crdt: marshal snapshot entry for key=%s: %w", keyID, err)
@@ -144,16 +125,14 @@ func (s *Store) Save(store map[string]crdt.ReplicatedData, keyTypes map[string]c
 	})
 }
 
-// Load restores the CRDT store from BoltDB.
-// Returns empty maps if no snapshot exists.
-func (s *Store) Load() (map[string]crdt.ReplicatedData, map[string]crdt.DataType, map[string]uint64, error) {
+// Load restores the pre-encoded CRDT snapshot entries from BoltDB.
+// Returns an empty map if no snapshot exists.
+func (s *Store) Load() (map[string]*internalpb.CRDTSnapshotEntry, error) {
 	if s.closed.Load() {
-		return nil, nil, nil, ErrStoreClosed
+		return nil, ErrStoreClosed
 	}
 
-	store := make(map[string]crdt.ReplicatedData)
-	keyTypes := make(map[string]crdt.DataType)
-	versions := make(map[string]uint64)
+	entries := make(map[string]*internalpb.CRDTSnapshotEntry)
 
 	err := s.db.View(func(tx *bbolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
@@ -166,28 +145,16 @@ func (s *Store) Load() (map[string]crdt.ReplicatedData, map[string]crdt.DataType
 			if err := proto.Unmarshal(v, entry); err != nil {
 				return fmt.Errorf("crdt: unmarshal snapshot entry: %w", err)
 			}
-
-			keyID, dataType, err := codec.DecodeCRDTKey(entry.GetKey())
-			if err != nil {
-				return fmt.Errorf("crdt: decode snapshot key: %w", err)
-			}
-			data, err := codec.DecodeCRDTData(entry.GetData())
-			if err != nil {
-				return fmt.Errorf("crdt: decode snapshot data for key=%s: %w", keyID, err)
-			}
-
-			store[keyID] = data
-			keyTypes[keyID] = dataType
-			versions[keyID] = entry.GetVersion()
+			entries[string(k)] = entry
 			return nil
 		})
 	})
 
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 
-	return store, keyTypes, versions, nil
+	return entries, nil
 }
 
 // Close releases the underlying BoltDB handle without removing the snapshot file.

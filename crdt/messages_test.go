@@ -31,11 +31,11 @@ import (
 
 func TestUpdateBridge(t *testing.T) {
 	key := PNCounterKey("counter")
-	u := &Update[*PNCounter]{
+	u := &Update{
 		Key:     key,
 		Initial: NewPNCounter(),
-		Modify: func(current *PNCounter) *PNCounter {
-			return current.Increment("node-1", 1)
+		Modify: func(current ReplicatedData) ReplicatedData {
+			return current.(*PNCounter).Increment("node-1", 1)
 		},
 	}
 
@@ -64,10 +64,9 @@ func TestUpdateBridge(t *testing.T) {
 		assert.Equal(t, int64(1), result.(*PNCounter).Value())
 	})
 
-	t.Run("Apply with type mismatch falls back to initial", func(t *testing.T) {
+	t.Run("Apply with type mismatch panics", func(t *testing.T) {
 		wrongType := NewGCounter().Increment("node-1", 99)
-		result := u.Apply(wrongType)
-		assert.Equal(t, int64(1), result.(*PNCounter).Value())
+		assert.Panics(t, func() { u.Apply(wrongType) })
 	})
 
 	t.Run("WriteCoordination default", func(t *testing.T) {
@@ -75,20 +74,20 @@ func TestUpdateBridge(t *testing.T) {
 	})
 
 	t.Run("WriteCoordination majority", func(t *testing.T) {
-		u2 := &Update[*PNCounter]{
+		u2 := &Update{
 			Key:     key,
 			Initial: NewPNCounter(),
-			Modify:  func(current *PNCounter) *PNCounter { return current },
+			Modify:  func(current ReplicatedData) ReplicatedData { return current },
 			WriteTo: Majority,
 		}
 		assert.Equal(t, Majority, u2.WriteCoordination())
 	})
 
 	t.Run("WriteCoordination all", func(t *testing.T) {
-		u2 := &Update[*PNCounter]{
+		u2 := &Update{
 			Key:     key,
 			Initial: NewPNCounter(),
-			Modify:  func(current *PNCounter) *PNCounter { return current },
+			Modify:  func(current ReplicatedData) ReplicatedData { return current },
 			WriteTo: All,
 		}
 		assert.Equal(t, All, u2.WriteCoordination())
@@ -97,7 +96,7 @@ func TestUpdateBridge(t *testing.T) {
 
 func TestGetBridge(t *testing.T) {
 	key := PNCounterKey("counter")
-	g := &Get[*PNCounter]{Key: key}
+	g := &Get{Key: key}
 
 	t.Run("KeyID", func(t *testing.T) {
 		assert.Equal(t, "counter", g.KeyID())
@@ -107,24 +106,24 @@ func TestGetBridge(t *testing.T) {
 		data := NewPNCounter().Increment("node-1", 5)
 		resp := g.Response(data)
 		require.NotNil(t, resp)
-		typed := resp.(*GetResponse[*PNCounter])
+		typed := resp.(*GetResponse)
 		assert.Equal(t, "counter", typed.Key.ID())
-		assert.Equal(t, int64(5), typed.Data.Value())
+		assert.Equal(t, int64(5), typed.Data.(*PNCounter).Value())
 	})
 
 	t.Run("Response with nil data", func(t *testing.T) {
 		resp := g.Response(nil)
 		require.NotNil(t, resp)
-		typed := resp.(*GetResponse[*PNCounter])
+		typed := resp.(*GetResponse)
 		assert.Nil(t, typed.Data)
 	})
 
-	t.Run("Response with type mismatch returns zero value", func(t *testing.T) {
+	t.Run("Response with different type stores it as-is", func(t *testing.T) {
 		wrongType := NewGCounter().Increment("node-1", 99)
 		resp := g.Response(wrongType)
 		require.NotNil(t, resp)
-		typed := resp.(*GetResponse[*PNCounter])
-		assert.Nil(t, typed.Data)
+		typed := resp.(*GetResponse)
+		assert.Equal(t, uint64(99), typed.Data.(*GCounter).Value())
 	})
 
 	t.Run("ReadCoordination default", func(t *testing.T) {
@@ -132,19 +131,19 @@ func TestGetBridge(t *testing.T) {
 	})
 
 	t.Run("ReadCoordination majority", func(t *testing.T) {
-		g2 := &Get[*PNCounter]{Key: key, ReadFrom: Majority}
+		g2 := &Get{Key: key, ReadFrom: Majority}
 		assert.Equal(t, Majority, g2.ReadCoordination())
 	})
 
 	t.Run("ReadCoordination all", func(t *testing.T) {
-		g2 := &Get[*PNCounter]{Key: key, ReadFrom: All}
+		g2 := &Get{Key: key, ReadFrom: All}
 		assert.Equal(t, All, g2.ReadCoordination())
 	})
 }
 
 func TestSubscribeBridge(t *testing.T) {
-	key := ORSetKey[string]("sessions")
-	s := &Subscribe[*ORSet[string]]{Key: key}
+	key := ORSetKey("sessions")
+	s := &Subscribe{Key: key}
 
 	t.Run("KeyID", func(t *testing.T) {
 		assert.Equal(t, "sessions", s.KeyID())
@@ -156,8 +155,8 @@ func TestSubscribeBridge(t *testing.T) {
 }
 
 func TestUnsubscribeBridge(t *testing.T) {
-	key := ORSetKey[string]("sessions")
-	u := &Unsubscribe[*ORSet[string]]{Key: key}
+	key := ORSetKey("sessions")
+	u := &Unsubscribe{Key: key}
 
 	t.Run("KeyID", func(t *testing.T) {
 		assert.Equal(t, "sessions", u.KeyID())
@@ -170,7 +169,7 @@ func TestUnsubscribeBridge(t *testing.T) {
 
 func TestDeleteBridge(t *testing.T) {
 	key := GCounterKey("counter")
-	d := &Delete[*GCounter]{Key: key}
+	d := &Delete{Key: key}
 
 	t.Run("KeyID", func(t *testing.T) {
 		assert.Equal(t, "counter", d.KeyID())
@@ -185,7 +184,7 @@ func TestDeleteBridge(t *testing.T) {
 	})
 
 	t.Run("WriteCoordination majority", func(t *testing.T) {
-		d2 := &Delete[*GCounter]{Key: key, WriteTo: Majority}
+		d2 := &Delete{Key: key, WriteTo: Majority}
 		assert.Equal(t, Majority, d2.WriteCoordination())
 	})
 }

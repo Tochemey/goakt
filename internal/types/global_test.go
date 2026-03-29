@@ -41,6 +41,20 @@ func TestGlobalRegistry(t *testing.T) {
 	})
 }
 
+func TestPrimitiveTypesRegisteredAtInit(t *testing.T) {
+	names := []string{
+		"string", "bool",
+		"int", "int8", "int16", "int32", "int64",
+		"uint", "uint8", "uint16", "uint32", "uint64",
+		"float32", "float64",
+	}
+	for _, name := range names {
+		typ, ok := GlobalRegistry.TypeOf(name)
+		require.True(t, ok, "primitive type %q not registered", name)
+		require.NotNil(t, typ, "primitive type %q has nil reflect.Type", name)
+	}
+}
+
 func TestRegisterSerializerType(t *testing.T) {
 	type plainStruct struct{ X int }
 
