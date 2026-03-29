@@ -138,11 +138,11 @@ goakt/
                ┌───────────┴───────────┐
                │                       │
     ┌──────────┴──────┐          ┌─────┴───────────┐
-    │  actor/         │          │  user code       │
-    │  (imports crdt/ │          │  (imports crdt/  │
-    │   for Option +  │          │   + actor/)      │
-    │   Replicator    │          │                  │
-    │   lives here)   │          │                  │
+    │  actor/         │          │  user code      │
+    │  (imports crdt/ │          │  (imports crdt/ │
+    │   for Option +  │          │   + actor/)     │
+    │   Replicator    │          │                 │
+    │   lives here)   │          │                 │
     └─────────────────┘          └─────────────────┘
 ```
 
@@ -211,20 +211,20 @@ These are `any`-typed messages — they work with GoAkt's `Tell`/`Ask` without t
 
 ### Phase 1 — Foundation
 
-| Type               | Description                                                                              | Merge Rule                                 | Primary Use Cases                                       |
-|--------------------|------------------------------------------------------------------------------------------|--------------------------------------------|---------------------------------------------------------|
-| **GCounter**       | Grow-only counter. Each node maintains its own increment slot. Value = sum of all slots. | Per-node max                               | Monotonic metrics, event counts                         |
-| **PNCounter**      | Positive-negative counter. Two GCounters: one for increments, one for decrements.        | Component-wise GCounter merge              | Rate limiters, gauges, inventory levels                 |
-| **LWWRegister**    | Last-writer-wins register. Stores a single `any` value with a timestamp.                 | Highest timestamp wins                     | Configuration, feature flags, actor metadata            |
-| **ORSet**          | Observed-remove set. Stores `any` elements. Supports add and remove without conflicts.   | Union of observed elements, causal removal | Session tracking, topic subscriptions, actor registries |
+| Type            | Description                                                                              | Merge Rule                                 | Primary Use Cases                                       |
+|-----------------|------------------------------------------------------------------------------------------|--------------------------------------------|---------------------------------------------------------|
+| **GCounter**    | Grow-only counter. Each node maintains its own increment slot. Value = sum of all slots. | Per-node max                               | Monotonic metrics, event counts                         |
+| **PNCounter**   | Positive-negative counter. Two GCounters: one for increments, one for decrements.        | Component-wise GCounter merge              | Rate limiters, gauges, inventory levels                 |
+| **LWWRegister** | Last-writer-wins register. Stores a single `any` value with a timestamp.                 | Highest timestamp wins                     | Configuration, feature flags, actor metadata            |
+| **ORSet**       | Observed-remove set. Stores `any` elements. Supports add and remove without conflicts.   | Union of observed elements, causal removal | Session tracking, topic subscriptions, actor registries |
 
 ### Composition Types
 
-| Type              | Description                                                             | Merge Rule                                   | Primary Use Cases                                      |
-|-------------------|-------------------------------------------------------------------------|----------------------------------------------|--------------------------------------------------------|
-| **ORMap**         | Map where keys are `any` and values are `ReplicatedData` CRDTs.         | Key-wise OR-Set merge + per-value CRDT merge | Shopping carts, user profiles, distributed config maps |
-| **Flag**          | A boolean that can only transition from `false` to `true`.              | Logical OR                                   | One-time coordination signals, feature activation      |
-| **MVRegister**    | Multi-value register. Stores `any` values. Concurrent writes are preserved, not overwritten. | Union of concurrent values              | Conflict-visible state where user resolution is needed |
+| Type           | Description                                                                                  | Merge Rule                                   | Primary Use Cases                                      |
+|----------------|----------------------------------------------------------------------------------------------|----------------------------------------------|--------------------------------------------------------|
+| **ORMap**      | Map where keys are `any` and values are `ReplicatedData` CRDTs.                              | Key-wise OR-Set merge + per-value CRDT merge | Shopping carts, user profiles, distributed config maps |
+| **Flag**       | A boolean that can only transition from `false` to `true`.                                   | Logical OR                                   | One-time coordination signals, feature activation      |
+| **MVRegister** | Multi-value register. Stores `any` values. Concurrent writes are preserved, not overwritten. | Union of concurrent values                   | Conflict-visible state where user resolution is needed |
 
 ### CRDT Interface
 
@@ -1089,31 +1089,202 @@ The CRDT store is **independent of Olric**. Olric continues to manage the actor/
 
 ## 12. Multi-Datacenter Support
 
-CRDTs are inherently well-suited for multi-DC deployment because they tolerate arbitrary network delays and partitions.
+CRDTs are inherently well-suited for multi-DC deployment because they tolerate arbitrary network delays and partitions. This section describes the recommended deployment topology, the two-layer communication model, and how cross-DC CRDT replication integrates with GoAkt's existing infrastructure.
 
-### Cross-DC Replication
+### 12.1 Recommended Topology: One Cluster per Datacenter
+
+GoAkt's multi-DC architecture is built on a clear separation between **intra-DC clustering** and **cross-DC coordination**:
 
 ```
-┌─────────────────┐          ┌─────────────────┐
-│ DC-West          │          │ DC-East          │
-│                  │          │                  │
-│ ┌──────────────┐ │  cross-  │ ┌──────────────┐ │
-│ │ Replicator   │◄┼──DC─────┼►│ Replicator   │ │
-│ │ (TopicActor  │ │  pub/sub │ │ (TopicActor  │ │
-│ │  within DC)  │ │          │ │  within DC)  │ │
-│ └──────────────┘ │          │ └──────────────┘ │
-└─────────────────┘          └─────────────────┘
+┌────────────────────────────────────────────────────────────────────┐
+│                       Global Control Plane                         │
+│                  (NATS JetStream or etcd)                          │
+│                                                                    │
+│  Responsibilities:                                                 │
+│  - DataCenterRecord registry (name, region, zone, labels, endpoints│
+│  - Liveness via heartbeat + lease TTL                              │
+│  - State machine: REGISTERED -> ACTIVE -> DRAINING -> INACTIVE     │
+│  - Watch stream for topology change notifications                  │
+└────────────────────────────────────────────────────────────────────┘
+        ↑ register / heartbeat            ↑ register / heartbeat
+        ↓ watch / list active             ↓ watch / list active
+┌─────────────────────────────────┐ ┌─────────────────────────────────┐
+│ Datacenter: dc-west             │ │ Datacenter: dc-east             │
+│ Region: us-west-2               │ │ Region: us-east-1               │
+│                                 │ │                                 │
+│ ┌─────────────────────────────┐ │ │ ┌─────────────────────────────┐ │
+│ │ Cluster A                   │ │ │ │ Cluster B                   │ │
+│ │ (Olric + Memberlist)        │ │ │ │ (Olric + Memberlist)        │ │
+│ │                             │ │ │ │                             │ │
+│ │ Discovery: Consul/K8s/      │ │ │ │ Discovery: Consul/K8s/      │ │
+│ │   etcd/NATS/DNS-SD          │ │ │ │   etcd/NATS/DNS-SD          │ │
+│ │ Peers: A1, A2, A3           │ │ │ │ Peers: B1, B2, B3           │ │
+│ │                             │ │ │ │                             │ │
+│ │ ┌─────────────────────────┐ │ │ │ │ ┌─────────────────────────┐ │ │
+│ │ │ Actor Registry          │ │ │ │ │ │ Actor Registry          │ │ │
+│ │ │ Grain Registry          │ │ │ │ │ │ Grain Registry          │ │ │
+│ │ │ TopicActor (pub/sub)    │ │ │ │ │ │ TopicActor (pub/sub)    │ │ │
+│ │ │ Replicator (CRDTs)      │ │ │ │ │ │ Replicator (CRDTs)      │ │ │
+│ │ └─────────────────────────┘ │ │ │ │ └─────────────────────────┘ │ │
+│ └─────────────────────────────┘ │ │ └─────────────────────────────┘ │
+│                                 │ │                                 │
+│ DC Controller (leader only)     │ │ DC Controller (leader only)     │
+│ - Advertises endpoints:         │ │ - Advertises endpoints:         │
+│   [A1:9090, A2:9090, A3:9090]   │ │   [B1:9090, B2:9090, B3:9090]   │
+│ - Renews lease periodically     │ │ - Renews lease periodically     │
+│ - Caches active DC records      │ │ - Caches active DC records      │
+└─────────────────────────────────┘ └─────────────────────────────────┘
 ```
 
-- **Intra-DC**: TopicActor pub/sub handles delta dissemination (low latency, immediate delivery).
-- **Cross-DC**: Lower-frequency delta exchange via GoAkt's existing DataCenter control plane (NATS JetStream or etcd).
-- **Merge is safe**: CRDTs guarantee convergence regardless of message ordering or delay — cross-DC latency is handled naturally.
+**Key principles:**
 
-### DC-Aware Consistency
+| Principle                     | Description                                                                                                                                                                                                                       |
+|-------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **One cluster per DC**        | Each datacenter runs an independent GoAkt cluster with its own discovery provider, Olric ring, Memberlist, actor registry, and grain registry. Clusters are completely isolated from each other at the membership level.          |
+| **Discovery is DC-scoped**    | The discovery provider (Consul, Kubernetes, etcd, NATS, DNS-SD, etc.) discovers peers within a single datacenter only. It has no cross-DC awareness.                                                                              |
+| **Control plane bridges DCs** | A global control plane (NATS JetStream or etcd) serves as the cross-DC coordination layer. Each DC's cluster leader registers the DC's metadata and remoting endpoints, renews liveness leases, and caches the set of active DCs. |
+| **Leader-only DC management** | Only the cluster leader in each DC runs the DataCenter controller. This avoids conflicting writes to the control plane. Leadership changes are handled automatically via the leader watch loop.                                   |
+| **Cross-DC via remoting**     | Cross-DC communication (grain routing, actor spawning, CRDT replication) uses GoAkt's remoting layer to send messages directly to endpoints discovered via the control plane — not through cluster membership.                    |
 
-- Default (no coordination) — scoped to the local DC via TopicActor.
-- `WriteTo: Majority` / `ReadFrom: Majority` — can be configured as DC-local majority or global majority.
-- Cross-DC consistency is opt-in: by default, CRDTs replicate within a DC via TopicActor and across DCs via the control plane, with no cross-DC consistency guarantees beyond eventual convergence.
+### 12.2 Two-Layer Communication Model
+
+The topology creates two distinct communication layers:
+
+```
+┌───────────────────────────────────┐ ┌─────────────────────────────────────────────┐
+│ Layer 1: Intra-DC (Cluster)       │ │ Layer 2: Cross-DC (Control Plane + Remoting)│
+├───────────────────────────────────┤ ├─────────────────────────────────────────────┤
+│ - Memberlist gossip               │ │ - Control plane registry (NATS JetStream/   │
+│ - Olric distributed hash map      │ │   etcd)                                     │
+│ - TopicActor pub/sub              │ │ - DC endpoint discovery via cached active   │
+│ - Replicator delta dissemination  │ │   records                                   │
+│ - Anti-entropy digest exchange    │ │ - Direct remoting RPCs to remote DC         │
+│ - Coordinated reads/writes        │ │   endpoints                                 │
+│                                   │ │ - Cross-DC CRDT bridge (Phase 4)            │
+│                                   │ │ - Cross-DC anti-entropy (Phase 4)           │
+│                                   │ │ - DC-aware coordination (Phase 4)           │
+├───────────────────────────────────┤ ├─────────────────────────────────────────────┤
+│ Latency: sub-ms to low ms         │ │ Latency: tens to hundreds of ms             │
+│ Scope: nodes within one cluster   │ │ Scope: all active datacenters               │
+└───────────────────────────────────┘ └─────────────────────────────────────────────┘
+```
+
+**Intra-DC (Layer 1)** handles all latency-sensitive operations: delta dissemination via TopicActor, anti-entropy via direct peer exchange, and coordinated reads/writes. All peers discovered via `cluster.Peers()` are within the same DC.
+
+**Cross-DC (Layer 2)** handles availability and convergence across datacenters. The DC controller maintains a cached view of all active DCs and their endpoints. Cross-DC operations use remoting RPCs to specific endpoints rather than broadcast.
+
+### 12.3 Why One Cluster per DC (Not a Single Global Cluster)
+
+While it is technically possible to configure a single discovery namespace that spans DCs (making all nodes join one global cluster), this is **not recommended** for CRDT deployments:
+
+| Concern                 | Single Global Cluster                                                                                                 | One Cluster per DC (Recommended)                                                             |
+|-------------------------|-----------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------|
+| **Memberlist protocol** | Gossip protocol traffic increases with O(n log n) across WAN; failure detection becomes noisy due to cross-DC latency | Gossip stays within DC; fast, reliable failure detection                                     |
+| **Olric DMap**          | Distributed hash map partitions span DCs; partition rebalancing on node failure crosses WAN                           | Partitions stay local; rebalancing is fast and LAN-only                                      |
+| **TopicActor fan-out**  | Every published delta is sent to every node across all DCs; O(total_nodes) cross-WAN messages per update              | Fan-out stays within DC; cross-DC replication is batched and controlled                      |
+| **Anti-entropy**        | Random peer may be in a remote DC; digest exchange pays WAN latency on every tick                                     | Peers are always local; cross-DC anti-entropy runs on a separate, lower-frequency schedule   |
+| **Coordinated ops**     | `Majority` quorum includes remote DC nodes; latency is bounded by slowest DC                                          | `Majority` is fast (DC-local); `DCMajority` is available when cross-DC guarantees are needed |
+| **Partition behavior**  | A network partition between DCs splits the cluster; Olric quorum breaks, actors may become unreachable                | Each DC continues operating independently; CRDTs converge after partition heals              |
+| **Operational clarity** | One large cluster to debug; mixed LAN/WAN latency makes performance unpredictable                                     | Each DC is an independent operational unit; cross-DC issues are isolated                     |
+
+### 12.4 Cross-DC CRDT Replication (Phase 4)
+
+With the one-cluster-per-DC topology, the CRDT Replicator's existing mechanisms (TopicActor, `cluster.Peers()`, coordinated ops) are all **DC-scoped by design**. Cross-DC replication requires a dedicated bridge that uses the control plane to discover remote DCs and remoting to exchange deltas.
+
+#### Architecture
+
+```
+    DC-West                                         DC-East
+┌──────────────────────────┐                 ┌──────────────────────────┐
+│                          │                 │                          │
+│ Replicator --> TopicActor│                 │ Replicator --> TopicActor│
+│     |         (intra-DC  │                 │     |         (intra-DC  │
+│     |          pub/sub)  │                 │     |          pub/sub)  │
+│     |                    │                 │     |                    │
+│     v                    │  remoting       │     v                    │
+│ CRDTBridge ──────────────┼─(batched)───────┼─ CRDTBridge              │
+│ (leader only)            │  deltas         │ (leader only)            │
+│                          │                 │                          │
+│                          │  remoting       │                          │
+│ Anti-Entropy ────────────┼─(digest +───────┼─ Anti-Entropy            │
+│ (periodic, cross-DC)     │  full state)    │ (periodic, cross-DC)     │
+│                          │                 │                          │
+└──────────────────────────┘                 └──────────────────────────┘
+```
+
+#### Intra-DC Replication (Existing — Phase 1-3)
+
+1. User sends `crdt.Update` to the local Replicator actor.
+2. Replicator applies the mutation, extracts the delta, and publishes it as a `CRDTDelta` protobuf to the `goakt.crdt.deltas` topic via TopicActor.
+3. TopicActor fans out the delta to all peer Replicators in the local cluster.
+4. Each peer merges the delta into its local store and notifies watchers.
+5. Anti-entropy runs on `AntiEntropyInterval` (default 30s): picks a random local peer, exchanges digests, transfers full state for divergent keys.
+
+#### Cross-DC Replication (Phase 4 — To Be Built)
+
+**CRDT Bridge Actor** — a new system actor (`crdtBridgeActor`) that runs **on the cluster leader only** (same pattern as the DC controller):
+
+1. **Subscribes** to `goakt.crdt.deltas` locally to receive all intra-DC deltas and tombstones.
+2. **Batches** deltas over a configurable interval (`CrossDCReplicationInterval`, default 5s) to reduce cross-DC traffic.
+3. **Discovers** remote DC endpoints via the DC controller's cached active records (`ActiveRecords()`).
+4. **Forwards** the batched `CRDTDeltaBatch` to the bridge actor on each remote DC via remoting.
+5. **Receives** batched deltas from remote bridges, deduplicates by `(origin_node, key, version)`, and publishes them to the local TopicActor for intra-DC dissemination.
+
+**Cross-DC Anti-Entropy** — extends the Replicator's existing anti-entropy to also exchange digests with one random endpoint from each remote DC on a separate, lower-frequency interval (`CrossDCAntiEntropyInterval`, default 60s). This serves as a safety net: even if the bridge misses deltas during a leadership failover or network blip, anti-entropy will converge cross-DC state.
+
+#### DC-Aware Consistency Levels
+
+Extend the existing `Coordination` type with cross-DC scopes:
+
+| Level        | Scope              | Quorum                  | Latency       |
+|--------------|--------------------|-------------------------|---------------|
+| `Majority`   | Local cluster only | ⌊N_local/2⌋ + 1         | Low (LAN)     |
+| `All`        | Local cluster only | N_local                 | Low (LAN)     |
+| `DCMajority` | All active DCs     | Majority within each DC | High (WAN)    |
+| `DCAll`      | All active DCs     | All nodes in all DCs    | Highest (WAN) |
+
+`Majority` and `All` retain their existing DC-local semantics. `DCMajority` and `DCAll` are new levels that coordinate across DCs using the control plane's active DC list.
+
+#### Cross-DC Tombstone Propagation
+
+Tombstones are published to `goakt.crdt.deltas` like regular deltas, so the bridge forwards them cross-DC automatically. The `tombstoneTTL` (default 24h) must be long enough for tombstones to propagate across all DCs before expiry — otherwise a deleted key could be resurrected by a stale full-state transfer from a DC that hasn't received the tombstone yet.
+
+### 12.5 Configuration
+
+Cross-DC CRDT replication is opt-in. When multi-DC is enabled on the actor system and CRDTs are configured, the bridge and cross-DC anti-entropy activate automatically:
+
+```go
+dcConfig := datacenter.NewConfig(
+    datacenter.WithControlPlane(natsControlPlane),
+    datacenter.WithDataCenter(datacenter.DataCenter{
+        Name:   "dc-west",
+        Region: "us-west-2",
+        Zone:   "us-west-2a",
+    }),
+)
+
+clusterCfg := actor.NewClusterConfig().
+    WithDataCenter(dcConfig).
+    WithCRDT(
+        // Intra-DC settings
+        crdt.WithAntiEntropyInterval(30 * time.Second),
+        crdt.WithTombstoneTTL(24 * time.Hour),
+        // Cross-DC settings (Phase 4)
+        crdt.WithCrossDCReplicationInterval(5 * time.Second),
+        crdt.WithCrossDCAntiEntropy(true),
+        crdt.WithCrossDCAntiEntropyInterval(60 * time.Second),
+    )
+```
+
+### 12.6 Failure Modes and Convergence Guarantees
+
+| Failure                           | Behavior                                                                                                                                                                                                     |
+|-----------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **DC leader failover**            | New leader starts the bridge actor; missed deltas are recovered by cross-DC anti-entropy on the next tick.                                                                                                   |
+| **Network partition between DCs** | Each DC continues operating independently with full local availability. CRDTs on both sides of the partition diverge but are guaranteed to converge once the partition heals and deltas/anti-entropy resume. |
+| **Control plane unavailable**     | Bridge cannot discover remote DCs; cross-DC replication pauses. Intra-DC replication is unaffected. Once the control plane recovers, the bridge resumes and anti-entropy fills any gaps.                     |
+| **Single node failure within DC** | Handled by intra-DC cluster membership and Replicator's existing anti-entropy. No cross-DC impact.                                                                                                           |
+| **Stale DC cache**                | Configurable via `FailOnStaleCache`: strict mode rejects cross-DC operations on stale cache; best-effort mode proceeds with potentially outdated DC list.                                                    |
 
 ---
 
@@ -1258,14 +1429,14 @@ CRDT data structures are on the hot path — they are created, merged, and disca
 
 ### 14.2 Per-Type Allocation Profile
 
-| Type            | Internal State                                       | Merge Allocation                                                                                  | Notes                                                           |
-|-----------------|------------------------------------------------------|---------------------------------------------------------------------------------------------------|-----------------------------------------------------------------|
-| **GCounter**    | `map[string]uint64`                                  | In-place update of existing map entries; new allocation only for unseen node IDs.                 | Map is long-lived, grows monotonically with cluster size.       |
-| **PNCounter**   | Two `GCounter` values                                | Same as GCounter × 2.                                                                             |                                                                 |
-| **LWWRegister** | `value any`, `timestamp int64`, `nodeID string`      | Zero allocation if incoming timestamp loses. One assignment if it wins.                           |                                                                 |
+| Type            | Internal State                                         | Merge Allocation                                                                                  | Notes                                                           |
+|-----------------|--------------------------------------------------------|---------------------------------------------------------------------------------------------------|-----------------------------------------------------------------|
+| **GCounter**    | `map[string]uint64`                                    | In-place update of existing map entries; new allocation only for unseen node IDs.                 | Map is long-lived, grows monotonically with cluster size.       |
+| **PNCounter**   | Two `GCounter` values                                  | Same as GCounter × 2.                                                                             |                                                                 |
+| **LWWRegister** | `value any`, `timestamp int64`, `nodeID string`        | Zero allocation if incoming timestamp loses. One assignment if it wins.                           |                                                                 |
 | **ORSet**       | `map[any][]dot`, `map[string]uint64`                   | Dot slices grow with concurrent adds. Compact periodically to reclaim dots from removed elements. | Compaction runs inside anti-entropy, not on the hot merge path. |
 | **ORMap**       | `ORSet` for keys + `map[any]ReplicatedData` for values | Per-key CRDT merge allocation + key-set OR-Set merge.                                             | Nested CRDT merges follow the same rules recursively.           |
-| **Flag**        | `bool`                                               | Zero allocation.                                                                                  |                                                                 |
+| **Flag**        | `bool`                                                 | Zero allocation.                                                                                  |                                                                 |
 
 ### 14.3 Protobuf Serialization Pools
 
@@ -1418,8 +1589,14 @@ CRDT lifecycle events are published to GoAkt's EventStream:
 
 ### Phase 4 — Multi-DC and Scaling (Future)
 
-**Goal:** Cross-datacenter replication, DC-aware consistency, and scaling optimizations.
+**Goal:** Cross-datacenter replication, DC-aware consistency, and scaling optimizations. See [Section 12](#12-multi-datacenter-support) for full topology and design details.
 
-- [ ] Cross-DC delta exchange via DataCenter control plane
-- [ ] DC-aware consistency levels
+- [ ] `CRDTDeltaBatch` protobuf message + codec support
+- [ ] Cross-DC configuration options (`WithCrossDCReplicationInterval`, `WithCrossDCAntiEntropy`, `WithCrossDCAntiEntropyInterval`)
+- [ ] `crdtBridgeActor` system actor (leader-only, batched delta forwarding via remoting)
+- [ ] Wire bridge into cluster startup alongside DC controller
+- [ ] Cross-DC anti-entropy (extend Replicator to exchange digests with remote DC endpoints)
+- [ ] `DCMajority` / `DCAll` coordination levels
+- [ ] Cross-DC replication lag metrics (OpenTelemetry)
+- [ ] Integration tests (multi-DC convergence, partition healing, leader failover)
 - [ ] Replicator sharding for high-throughput keys (if real-world usage demonstrates the bottleneck)

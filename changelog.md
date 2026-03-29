@@ -8,15 +8,15 @@ GoAkt now ships with built-in **Conflict-free Replicated Data Types** — data s
 
 #### 📦 CRDT Types
 
-| Type               | Description                                                        |
-|--------------------|--------------------------------------------------------------------|
-| **GCounter**       | Grow-only counter with per-node increment slots                    |
-| **PNCounter**      | Positive-negative counter (increment and decrement)                |
-| **LWWRegister[T]** | Last-writer-wins register with timestamp-based conflict resolution |
-| **ORSet[T]**       | Observed-remove set with add-wins semantics                        |
-| **ORMap[K, V]**    | Map with OR-Set keys and per-value CRDT merge                      |
-| **Flag**           | Boolean that can only transition from false to true                |
-| **MVRegister[T]**  | Multi-value register that preserves concurrent writes              |
+| Type            | Description                                                        |
+|-----------------|--------------------------------------------------------------------|
+| **GCounter**    | Grow-only counter with per-node increment slots                    |
+| **PNCounter**   | Positive-negative counter (increment and decrement)                |
+| **LWWRegister** | Last-writer-wins register with timestamp-based conflict resolution |
+| **ORSet**       | Observed-remove set with add-wins semantics                        |
+| **ORMap**       | Map with OR-Set keys and per-value CRDT merge                      |
+| **Flag**        | Boolean that can only transition from false to true                |
+| **MVRegister**  | Multi-value register that preserves concurrent writes              |
 
 #### ⚙️ How It Works
 
@@ -43,20 +43,20 @@ clusterConfig := actor.NewClusterConfig().
 replicator := ctx.ActorSystem().Replicator()
 
 // Write
-actor.Tell(ctx, replicator, &crdt.Update[*crdt.PNCounter]{
+actor.Tell(ctx.Context(), replicator, &crdt.Update{
     Key:     crdt.PNCounterKey("request-count"),
     Initial: crdt.NewPNCounter(),
-    Modify:  func(c *crdt.PNCounter) *crdt.PNCounter {
-        return c.Increment(nodeID, 1)
+    Modify:  func(current crdt.ReplicatedData) crdt.ReplicatedData {
+        return current.(*crdt.PNCounter).Increment(nodeID, 1)
     },
 })
 
 // Read
-resp, err := actor.Ask(ctx, replicator, &crdt.Get[*crdt.PNCounter]{
+resp, err := actor.Ask(ctx.Context(), replicator, &crdt.Get{
     Key: crdt.PNCounterKey("request-count"),
 }, 5*time.Second)
-if getResp, ok := resp.(*crdt.GetResponse[*crdt.PNCounter]); ok && getResp.Data != nil {
-    count := getResp.Data.Value()
+if getResp, ok := resp.(*crdt.GetResponse); ok && getResp.Data != nil {
+    count := getResp.Data.(*crdt.PNCounter).Value()
     _ = count
 }
 ```
