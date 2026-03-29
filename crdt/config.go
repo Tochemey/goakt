@@ -25,12 +25,15 @@ package crdt
 import "time"
 
 const (
-	defaultAntiEntropyInterval = 30 * time.Second
-	defaultMaxDeltaSize        = 64 * 1024 // 64KB
-	defaultPruneInterval       = 5 * time.Minute
-	defaultTombstoneTTL        = 24 * time.Hour
-	defaultCoordinationTimeout = 5 * time.Second
-	defaultSnapshotInterval    = 0 // disabled by default
+	defaultAntiEntropyInterval           = 30 * time.Second
+	defaultMaxDeltaSize                  = 64 * 1024 // 64KB
+	defaultPruneInterval                 = 5 * time.Minute
+	defaultTombstoneTTL                  = 24 * time.Hour
+	defaultCoordinationTimeout           = 5 * time.Second
+	defaultSnapshotInterval              = 0 // disabled by default
+	defaultDataCenterReplicationInterval = 5 * time.Second
+	defaultDataCenterAntiEntropyInterval = 2 * time.Minute
+	defaultDataCenterSendTimeout         = 10 * time.Second
 )
 
 // Config holds the configuration for the CRDT Replicator.
@@ -43,17 +46,27 @@ type Config struct {
 	coordinationTimeout time.Duration
 	snapshotInterval    time.Duration
 	snapshotDir         string
+
+	// data center replication settings
+	dataCenterEnabled             bool
+	dataCenterReplicationInterval time.Duration
+	dataCenterAntiEntropy         bool
+	dataCenterAntiEntropyInterval time.Duration
+	dataCenterSendTimeout         time.Duration
 }
 
 // NewConfig creates a Config with default values.
 func NewConfig(opts ...Option) *Config {
 	c := &Config{
-		antiEntropyInterval: defaultAntiEntropyInterval,
-		maxDeltaSize:        defaultMaxDeltaSize,
-		pruneInterval:       defaultPruneInterval,
-		tombstoneTTL:        defaultTombstoneTTL,
-		coordinationTimeout: defaultCoordinationTimeout,
-		snapshotInterval:    defaultSnapshotInterval,
+		antiEntropyInterval:           defaultAntiEntropyInterval,
+		maxDeltaSize:                  defaultMaxDeltaSize,
+		pruneInterval:                 defaultPruneInterval,
+		tombstoneTTL:                  defaultTombstoneTTL,
+		coordinationTimeout:           defaultCoordinationTimeout,
+		snapshotInterval:              defaultSnapshotInterval,
+		dataCenterReplicationInterval: defaultDataCenterReplicationInterval,
+		dataCenterAntiEntropyInterval: defaultDataCenterAntiEntropyInterval,
+		dataCenterSendTimeout:         defaultDataCenterSendTimeout,
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -172,5 +185,74 @@ func WithSnapshotInterval(duration time.Duration) Option {
 func WithSnapshotDir(dir string) Option {
 	return func(c *Config) {
 		c.snapshotDir = dir
+	}
+}
+
+// DataCenterEnabled returns whether cross-datacenter CRDT replication is enabled.
+func (c *Config) DataCenterEnabled() bool {
+	return c.dataCenterEnabled
+}
+
+// DataCenterReplicationInterval returns the interval at which batched deltas
+// are flushed to remote datacenters.
+func (c *Config) DataCenterReplicationInterval() time.Duration {
+	return c.dataCenterReplicationInterval
+}
+
+// DataCenterAntiEntropy returns whether cross-datacenter anti-entropy is enabled.
+func (c *Config) DataCenterAntiEntropy() bool {
+	return c.dataCenterAntiEntropy
+}
+
+// DataCenterAntiEntropyInterval returns the interval for cross-datacenter
+// anti-entropy digest exchange.
+func (c *Config) DataCenterAntiEntropyInterval() time.Duration {
+	return c.dataCenterAntiEntropyInterval
+}
+
+// WithDataCenterReplication enables cross-datacenter CRDT replication.
+// When enabled, the replicator on the cluster leader batches deltas and
+// forwards them to replicators on remote datacenters via remoting.
+func WithDataCenterReplication() Option {
+	return func(c *Config) {
+		c.dataCenterEnabled = true
+	}
+}
+
+// WithDataCenterReplicationInterval sets the interval at which the replicator
+// flushes batched deltas to remote datacenters.
+func WithDataCenterReplicationInterval(d time.Duration) Option {
+	return func(c *Config) {
+		c.dataCenterReplicationInterval = d
+	}
+}
+
+// WithDataCenterAntiEntropy enables periodic cross-datacenter anti-entropy
+// digest exchange between replicators.
+func WithDataCenterAntiEntropy() Option {
+	return func(c *Config) {
+		c.dataCenterAntiEntropy = true
+	}
+}
+
+// WithDataCenterAntiEntropyInterval sets the interval for cross-datacenter
+// anti-entropy rounds.
+func WithDataCenterAntiEntropyInterval(d time.Duration) Option {
+	return func(c *Config) {
+		c.dataCenterAntiEntropyInterval = d
+	}
+}
+
+// DataCenterSendTimeout returns the per-DC timeout for cross-datacenter
+// RemoteLookup + RemoteTell operations during delta batch flush.
+func (c *Config) DataCenterSendTimeout() time.Duration {
+	return c.dataCenterSendTimeout
+}
+
+// WithDataCenterSendTimeout sets the per-DC timeout applied to each
+// cross-datacenter send attempt (RemoteLookup + RemoteTell).
+func WithDataCenterSendTimeout(d time.Duration) Option {
+	return func(c *Config) {
+		c.dataCenterSendTimeout = d
 	}
 }

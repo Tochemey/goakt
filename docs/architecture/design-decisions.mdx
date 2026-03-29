@@ -31,6 +31,14 @@ Cluster state (actor/grain placement) needs replication. Olric provides:
 - **Distributed hash map** — Configurable quorum for consistency
 - **Memberlist** — Same membership layer as the cluster
 
+## Why CRDTs in addition to Olric?
+
+Actor and grain **registry** entries are strongly consistent via Olric quorums. **Application data** that must stay available under partition and merge without a single writer uses **CRDTs** in the `crdt` package, replicated by a dedicated **Replicator** actor. Deltas fan out over the existing topic bus—separate concern from registry reads and writes. See [Distributed data](/advanced/distributed-data).
+
+## Why reactive streams on top of actors?
+
+The `stream` package composes **Source → Flow → Sink** graphs that materialize as **actors per stage**, inheriting supervision, lifecycle, and **demand-driven backpressure** instead of unbounded queues. Streams are optional; they do not replace Tell/Ask. See [Streams](/advanced/streams).
+
 ## Why a tree-based actor hierarchy?
 
 Mirrors Erlang/OTP and Akka:

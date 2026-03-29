@@ -32,6 +32,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tochemey/goakt/v4/crdt"
+	"github.com/tochemey/goakt/v4/datacenter"
 	"github.com/tochemey/goakt/v4/discovery"
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/codec"
@@ -793,7 +794,7 @@ func TestReplicatorPruneCompacts(t *testing.T) {
 	})
 }
 
-func TestReplicatorPhase2Types(t *testing.T) {
+func TestReplicatorDataTypes(t *testing.T) {
 	t.Run("Flag via actor system", func(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
@@ -1009,6 +1010,131 @@ func TestReplicatorCluster(t *testing.T) {
 		require.NoError(t, node1.Stop(ctx))
 		require.NoError(t, node2.Stop(ctx))
 		require.NoError(t, node3.Stop(ctx))
+		require.NoError(t, sd1.Close())
+		require.NoError(t, sd2.Close())
+		require.NoError(t, sd3.Close())
+		srv.Shutdown()
+	})
+
+	t.Run("replicator is spawned when node role matches CRDT role", func(t *testing.T) {
+		ctx := context.TODO()
+		srv := startNatsServer(t)
+
+		node1, sd1 := testNATs(t, srv.Addr().String(),
+			withTestCRDT(crdt.WithRole("crdt-node")),
+			withMockRoles("crdt-node"),
+		)
+		node2, sd2 := testNATs(t, srv.Addr().String(),
+			withTestCRDT(crdt.WithRole("crdt-node")),
+			withMockRoles("crdt-node"),
+		)
+		node3, sd3 := testNATs(t, srv.Addr().String(),
+			withTestCRDT(crdt.WithRole("crdt-node")),
+			withMockRoles("crdt-node"),
+		)
+
+		pause.For(3 * time.Second)
+
+		assert.NotNil(t, node1.Replicator(), "node1 should have replicator when role matches")
+		assert.NotNil(t, node2.Replicator(), "node2 should have replicator when role matches")
+		assert.NotNil(t, node3.Replicator(), "node3 should have replicator when role matches")
+
+		require.NoError(t, node1.Stop(ctx))
+		require.NoError(t, node2.Stop(ctx))
+		require.NoError(t, node3.Stop(ctx))
+		require.NoError(t, sd1.Close())
+		require.NoError(t, sd2.Close())
+		require.NoError(t, sd3.Close())
+		srv.Shutdown()
+	})
+
+	t.Run("replicator is nil when node role does not match CRDT role", func(t *testing.T) {
+		ctx := context.TODO()
+		srv := startNatsServer(t)
+
+		node1, sd1 := testNATs(t, srv.Addr().String(),
+			withTestCRDT(crdt.WithRole("crdt-node")),
+			withMockRoles("web-server"),
+		)
+		node2, sd2 := testNATs(t, srv.Addr().String(),
+			withTestCRDT(crdt.WithRole("crdt-node")),
+			withMockRoles("web-server"),
+		)
+		node3, sd3 := testNATs(t, srv.Addr().String(),
+			withTestCRDT(crdt.WithRole("crdt-node")),
+		)
+
+		pause.For(3 * time.Second)
+
+		assert.Nil(t, node1.Replicator(), "node1 should not have replicator when role mismatches")
+		assert.Nil(t, node2.Replicator(), "node2 should not have replicator when role mismatches")
+		assert.Nil(t, node3.Replicator(), "node3 should not have replicator when no roles assigned")
+
+		require.NoError(t, node1.Stop(ctx))
+		require.NoError(t, node2.Stop(ctx))
+		require.NoError(t, node3.Stop(ctx))
+		require.NoError(t, sd1.Close())
+		require.NoError(t, sd2.Close())
+		require.NoError(t, sd3.Close())
+		srv.Shutdown()
+	})
+
+	t.Run("replicator is spawned when CRDT role is empty regardless of node roles", func(t *testing.T) {
+		ctx := context.TODO()
+		srv := startNatsServer(t)
+
+		node1, sd1 := testNATs(t, srv.Addr().String(),
+			withTestCRDT(),
+			withMockRoles("web-server"),
+		)
+		node2, sd2 := testNATs(t, srv.Addr().String(),
+			withTestCRDT(),
+			withMockRoles("api-server"),
+		)
+		node3, sd3 := testNATs(t, srv.Addr().String(),
+			withTestCRDT(),
+		)
+
+		pause.For(3 * time.Second)
+
+		assert.NotNil(t, node1.Replicator(), "node1 should have replicator when no CRDT role is set")
+		assert.NotNil(t, node2.Replicator(), "node2 should have replicator when no CRDT role is set")
+		assert.NotNil(t, node3.Replicator(), "node3 should have replicator when no CRDT role is set")
+
+		require.NoError(t, node1.Stop(ctx))
+		require.NoError(t, node2.Stop(ctx))
+		require.NoError(t, node3.Stop(ctx))
+		require.NoError(t, sd1.Close())
+		require.NoError(t, sd2.Close())
+		require.NoError(t, sd3.Close())
+		srv.Shutdown()
+	})
+
+	t.Run("mixed roles: only matching nodes spawn replicator", func(t *testing.T) {
+		ctx := context.TODO()
+		srv := startNatsServer(t)
+
+		nodeWithRole, sd1 := testNATs(t, srv.Addr().String(),
+			withTestCRDT(crdt.WithRole("crdt-node")),
+			withMockRoles("crdt-node", "web-server"),
+		)
+		nodeWithoutRole, sd2 := testNATs(t, srv.Addr().String(),
+			withTestCRDT(crdt.WithRole("crdt-node")),
+			withMockRoles("web-server"),
+		)
+		nodeNoRoles, sd3 := testNATs(t, srv.Addr().String(),
+			withTestCRDT(crdt.WithRole("crdt-node")),
+		)
+
+		pause.For(3 * time.Second)
+
+		assert.NotNil(t, nodeWithRole.Replicator(), "node with matching role should have replicator")
+		assert.Nil(t, nodeWithoutRole.Replicator(), "node without matching role should not have replicator")
+		assert.Nil(t, nodeNoRoles.Replicator(), "node with no roles should not have replicator")
+
+		require.NoError(t, nodeWithRole.Stop(ctx))
+		require.NoError(t, nodeWithoutRole.Stop(ctx))
+		require.NoError(t, nodeNoRoles.Stop(ctx))
 		require.NoError(t, sd1.Close())
 		require.NoError(t, sd2.Close())
 		require.NoError(t, sd3.Close())
@@ -2127,6 +2253,361 @@ func TestReplicatorPostStopWithSnapshot(t *testing.T) {
 	assert.NotNil(t, loaded["snap-counter"].GetData().GetPnCounter())
 	assert.True(t, loaded["snap-counter"].GetVersion() > 0)
 	require.NoError(t, store.Close())
+}
+
+// spawnTestReplicatorWithDC registers the CRDT config extension with DC identity
+// and spawns a Replicator actor configured for cross-DC replication.
+func spawnTestReplicatorWithDC(t *testing.T, sys ActorSystem, dcName, dcRegion, dcZone string) *PID {
+	t.Helper()
+	ctx := context.TODO()
+	config := crdt.NewConfig(crdt.WithDataCenterReplication())
+	impl := sys.(*actorSystem)
+	impl.extensions.Set(crdtConfigExtensionID, &crdtConfigExtension{
+		config: config,
+		dc: datacenter.DataCenter{
+			Name:   dcName,
+			Region: dcRegion,
+			Zone:   dcZone,
+		},
+	})
+	repl, err := sys.Spawn(ctx, "replicator", newReplicatorActor(), WithLongLived())
+	require.NoError(t, err)
+	require.NotNil(t, repl)
+	pause.For(500 * time.Millisecond)
+	return repl
+}
+
+func TestReplicatorDataCenterExtension(t *testing.T) {
+	t.Run("extension carries DC identity", func(t *testing.T) {
+		ext := &crdtConfigExtension{
+			config: crdt.NewConfig(crdt.WithDataCenterReplication()),
+			dc: datacenter.DataCenter{
+				Name:   "dc-west",
+				Region: "us-west-2",
+				Zone:   "us-west-2a",
+			},
+		}
+		assert.Equal(t, "dc-west", ext.dc.Name)
+		assert.Equal(t, "us-west-2", ext.dc.Region)
+		assert.Equal(t, "us-west-2a", ext.dc.Zone)
+		assert.True(t, ext.Config().DataCenterEnabled())
+	})
+
+	t.Run("extension without DC has zero-value DC", func(t *testing.T) {
+		ext := &crdtConfigExtension{config: crdt.NewConfig()}
+		assert.Empty(t, ext.dc.Name)
+		assert.False(t, ext.Config().DataCenterEnabled())
+	})
+}
+
+func TestReplicatorDataCenterReplicationEnabled(t *testing.T) {
+	t.Run("replicator starts with DC config enabled", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		err := sys.Start(ctx)
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		repl := spawnTestReplicatorWithDC(t, sys, "dc-west", "us-west-2", "us-west-2a")
+		assert.True(t, repl.IsRunning())
+
+		counterKey := crdt.PNCounterKey("dc-counter")
+		_, err = Ask(ctx, repl, &crdt.Update{
+			Key:     counterKey,
+			Initial: crdt.NewPNCounter(),
+			Modify: func(current crdt.ReplicatedData) crdt.ReplicatedData {
+				return current.(*crdt.PNCounter).Increment("node-1", 5)
+			},
+		}, time.Second)
+		require.NoError(t, err)
+
+		resp, err := Ask(ctx, repl, &crdt.Get{Key: counterKey}, time.Second)
+		require.NoError(t, err)
+		getResp := resp.(*crdt.GetResponse)
+		assert.Equal(t, int64(5), getResp.Data.(*crdt.PNCounter).Value())
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("flush tick is handled gracefully without cluster", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		err := sys.Start(ctx)
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		repl := spawnTestReplicatorWithDC(t, sys, "dc-west", "us-west-2", "us-west-2a")
+
+		err = Tell(ctx, repl, &dataCenterFlushTick{})
+		require.NoError(t, err)
+		pause.For(500 * time.Millisecond)
+
+		assert.True(t, repl.IsRunning())
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("anti-entropy tick is handled gracefully without cluster", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		err := sys.Start(ctx)
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		repl := spawnTestReplicatorWithDC(t, sys, "dc-west", "us-west-2", "us-west-2a")
+
+		err = Tell(ctx, repl, &dataCenterAntiEntropyTick{})
+		require.NoError(t, err)
+		pause.For(500 * time.Millisecond)
+
+		assert.True(t, repl.IsRunning())
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+}
+
+func TestReplicatorIncomingBatch(t *testing.T) {
+	t.Run("incoming batch from remote DC merges deltas", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		err := sys.Start(ctx)
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		repl := spawnTestReplicatorWithDC(t, sys, "dc-west", "us-west-2", "us-west-2a")
+
+		// encode a delta from a "remote" DC
+		r := newTestReplicator()
+		pbDelta, err := r.encodeDelta(&crdtDelta{
+			KeyID:    "remote-counter",
+			DataType: crdt.PNCounterType,
+			Delta:    crdt.NewPNCounter().Increment("remote-node", 42),
+			Origin:   "remote-node",
+		})
+		require.NoError(t, err)
+
+		batch := &internalpb.CRDTDeltaBatch{
+			Deltas: []*internalpb.CRDTDelta{pbDelta},
+			OriginDc: &internalpb.DataCenter{
+				Name:   "dc-east",
+				Region: "us-east-1",
+				Zone:   "us-east-1a",
+			},
+			SentAtNanos: time.Now().UnixNano(),
+		}
+
+		err = Tell(ctx, repl, batch)
+		require.NoError(t, err)
+		pause.For(500 * time.Millisecond)
+
+		// verify the delta was merged
+		resp, err := Ask(ctx, repl, &crdt.Get{Key: crdt.PNCounterKey("remote-counter")}, time.Second)
+		require.NoError(t, err)
+		getResp := resp.(*crdt.GetResponse)
+		require.NotNil(t, getResp.Data)
+		assert.Equal(t, int64(42), getResp.Data.(*crdt.PNCounter).Value())
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("incoming batch from same DC is discarded", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		err := sys.Start(ctx)
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		repl := spawnTestReplicatorWithDC(t, sys, "dc-west", "us-west-2", "us-west-2a")
+
+		r := newTestReplicator()
+		pbDelta, err := r.encodeDelta(&crdtDelta{
+			KeyID:    "self-counter",
+			DataType: crdt.PNCounterType,
+			Delta:    crdt.NewPNCounter().Increment("self-node", 10),
+			Origin:   "self-node",
+		})
+		require.NoError(t, err)
+
+		// same DC identity as the replicator
+		batch := &internalpb.CRDTDeltaBatch{
+			Deltas: []*internalpb.CRDTDelta{pbDelta},
+			OriginDc: &internalpb.DataCenter{
+				Name:   "dc-west",
+				Region: "us-west-2",
+				Zone:   "us-west-2a",
+			},
+			SentAtNanos: time.Now().UnixNano(),
+		}
+
+		err = Tell(ctx, repl, batch)
+		require.NoError(t, err)
+		pause.For(500 * time.Millisecond)
+
+		// key should not exist since the batch was discarded
+		resp, err := Ask(ctx, repl, &crdt.Get{Key: crdt.PNCounterKey("self-counter")}, time.Second)
+		require.NoError(t, err)
+		getResp := resp.(*crdt.GetResponse)
+		assert.Nil(t, getResp.Data)
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("incoming batch with tombstones deletes keys", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		err := sys.Start(ctx)
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		repl := spawnTestReplicatorWithDC(t, sys, "dc-west", "us-west-2", "us-west-2a")
+
+		// create a local key first
+		counterKey := crdt.PNCounterKey("tombstone-counter")
+		_, err = Ask(ctx, repl, &crdt.Update{
+			Key:     counterKey,
+			Initial: crdt.NewPNCounter(),
+			Modify: func(current crdt.ReplicatedData) crdt.ReplicatedData {
+				return current.(*crdt.PNCounter).Increment("node-1", 5)
+			},
+		}, time.Second)
+		require.NoError(t, err)
+
+		// send a batch with a tombstone from remote DC
+		batch := &internalpb.CRDTDeltaBatch{
+			Tombstones: []*internalpb.CRDTTombstone{
+				{
+					Key:            codec.EncodeCRDTKey("tombstone-counter", crdt.PNCounterType),
+					DeletedAtNanos: time.Now().UnixNano(),
+					DeletedByNode:  "remote-node",
+				},
+			},
+			OriginDc: &internalpb.DataCenter{
+				Name:   "dc-east",
+				Region: "us-east-1",
+				Zone:   "us-east-1a",
+			},
+			SentAtNanos: time.Now().UnixNano(),
+		}
+
+		err = Tell(ctx, repl, batch)
+		require.NoError(t, err)
+		pause.For(500 * time.Millisecond)
+
+		// key should be deleted
+		resp, err := Ask(ctx, repl, &crdt.Get{Key: counterKey}, time.Second)
+		require.NoError(t, err)
+		getResp := resp.(*crdt.GetResponse)
+		assert.Nil(t, getResp.Data)
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+}
+
+func TestReplicatorDataCenterDigestRequest(t *testing.T) {
+	t.Run("digest request returns local digest via Ask", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		err := sys.Start(ctx)
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		repl := spawnTestReplicatorWithDC(t, sys, "dc-west", "us-west-2", "us-west-2a")
+
+		// add some data first
+		_, err = Ask(ctx, repl, &crdt.Update{
+			Key:     crdt.GCounterKey("gc-1"),
+			Initial: crdt.NewGCounter(),
+			Modify: func(current crdt.ReplicatedData) crdt.ReplicatedData {
+				return current.(*crdt.GCounter).Increment("node-1", 10)
+			},
+		}, time.Second)
+		require.NoError(t, err)
+
+		_, err = Ask(ctx, repl, &crdt.Update{
+			Key:     crdt.PNCounterKey("pn-1"),
+			Initial: crdt.NewPNCounter(),
+			Modify: func(current crdt.ReplicatedData) crdt.ReplicatedData {
+				return current.(*crdt.PNCounter).Increment("node-1", 20)
+			},
+		}, time.Second)
+		require.NoError(t, err)
+
+		// ask for the digest
+		resp, err := Ask(ctx, repl, &dataCenterDigestRequest{}, time.Second)
+		require.NoError(t, err)
+
+		digest, ok := resp.(*internalpb.CRDTDigest)
+		require.True(t, ok)
+		require.NotNil(t, digest)
+		assert.Len(t, digest.GetEntries(), 2)
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("digest request with empty store returns empty digest", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		err := sys.Start(ctx)
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		repl := spawnTestReplicatorWithDC(t, sys, "dc-west", "us-west-2", "us-west-2a")
+
+		resp, err := Ask(ctx, repl, &dataCenterDigestRequest{}, time.Second)
+		require.NoError(t, err)
+
+		digest, ok := resp.(*internalpb.CRDTDigest)
+		require.True(t, ok)
+		require.NotNil(t, digest)
+		assert.Empty(t, digest.GetEntries())
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
+}
+
+func TestReplicatorDataCenterFlush(t *testing.T) {
+	t.Run("flush tick with no cluster does not panic", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		err := sys.Start(ctx)
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		repl := spawnTestReplicatorWithDC(t, sys, "dc-west", "us-west-2", "us-west-2a")
+
+		_, err = Ask(ctx, repl, &crdt.Update{
+			Key:     crdt.PNCounterKey("flush-counter"),
+			Initial: crdt.NewPNCounter(),
+			Modify: func(current crdt.ReplicatedData) crdt.ReplicatedData {
+				return current.(*crdt.PNCounter).Increment("node-1", 5)
+			},
+		}, time.Second)
+		require.NoError(t, err)
+
+		// flush tick without cluster — should return early without panic
+		err = Tell(ctx, repl, &dataCenterFlushTick{})
+		require.NoError(t, err)
+		pause.For(500 * time.Millisecond)
+
+		assert.True(t, repl.IsRunning())
+
+		// data should still be accessible
+		resp, err := Ask(ctx, repl, &crdt.Get{Key: crdt.PNCounterKey("flush-counter")}, time.Second)
+		require.NoError(t, err)
+		getResp := resp.(*crdt.GetResponse)
+		assert.Equal(t, int64(5), getResp.Data.(*crdt.PNCounter).Value())
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
 }
 
 // ---------------------------------------------------------------------------

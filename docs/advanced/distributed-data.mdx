@@ -6,7 +6,7 @@ sidebarTitle: "🔄 Distributed Data"
 
 **Distributed Data** provides replicated data structures — **Conflict-free Replicated Data Types (CRDTs)** — that can be updated independently on any node and are guaranteed to converge to a consistent state. No coordination, no locks, no consensus rounds.
 
-This enables use cases like distributed counters, cluster-wide session registries, feature flags, and shopping carts where every node can read and write locally with immediate response, and all nodes converge automatically.
+This enables use cases like distributed counters, cluster-wide session registries, feature flags, and shopping carts where every node can read and write locally with immediate response, and all nodes converge automatically. With **multi-datacenter** cluster configuration and `WithDataCenterReplication`, the same CRDTs can also replicate **across** datacenters (leader batch flush over remoting), while each DC keeps its own cluster and TopicActor fan-out.
 
 ## Architecture
 
@@ -53,8 +53,6 @@ Both Replicators are **equal participants** — they both subscribe to the same 
 
 **Anti-entropy** runs periodically as a safety net. Each Replicator exchanges version digests with a random peer, and any divergent keys are repaired. This ensures convergence even if some deltas were lost during a network partition.
 
----
-
 ## CRDT types
 
 All types implement the `ReplicatedData` interface and are **immutable values** — every mutation returns a new value plus a delta. Values stored in generic CRDT types (`LWWRegister`, `ORSet`, `MVRegister`, `ORMap`) are typed as `any` and serialized over the wire using a composite Proto+CBOR serializer. Go primitives (`string`, `int`, `bool`, etc.) work out of the box; custom struct types require CBOR registration via `remote.WithSerializers`.
@@ -82,8 +80,6 @@ var (
 )
 ```
 
----
-
 ## Enabling CRDTs
 
 CRDT replication is enabled through `ClusterConfig.WithCRDT(...)`. When not enabled, no Replicator is spawned — zero overhead.
@@ -104,18 +100,57 @@ system, _ := actor.NewActorSystem("my-system",
 
 ### Configuration options
 
-| Option                    | Default       | Description                                                                          |
-| ------------------------- | ------------- | ------------------------------------------------------------------------------------ |
-| `WithAntiEntropyInterval` | 30s           | Interval between anti-entropy digest exchanges with a random peer                    |
-| `WithMaxDeltaSize`        | 64KB          | Maximum serialized delta size per publish; larger deltas trigger full-state transfer |
-| `WithPruneInterval`       | 5m            | Interval for pruning expired tombstones and compacting CRDTs                         |
-| `WithTombstoneTTL`        | 24h           | How long deletion tombstones are retained to prevent key resurrection                |
-| `WithCoordinationTimeout` | 5s            | Timeout for coordinated `WriteTo`/`ReadFrom` operations                              |
-| `WithRole`                | _(all nodes)_ | Restrict CRDT replication to nodes with this role                                    |
-| `WithSnapshotInterval`    | _(disabled)_  | Interval for periodic BoltDB snapshots (requires `WithSnapshotDir`)                  |
-| `WithSnapshotDir`         | _(disabled)_  | Directory for snapshot files                                                         |
+| Option                              | Default       | Description                                                                                                 |
+| ----------------------------------- | ------------- | ----------------------------------------------------------------------------------------------------------- |
+| `WithAntiEntropyInterval`           | 30s           | Interval between anti-entropy digest exchanges with a random peer                                           |
+| `WithMaxDeltaSize`                  | 64KB          | Maximum serialized delta size per publish; larger deltas trigger full-state transfer                        |
+| `WithPruneInterval`                 | 5m            | Interval for pruning expired tombstones and compacting CRDTs                                                |
+| `WithTombstoneTTL`                  | 24h           | How long deletion tombstones are retained to prevent key resurrection                                       |
+| `WithCoordinationTimeout`           | 5s            | Timeout for coordinated `WriteTo`/`ReadFrom` operations                                                     |
+| `WithRole`                          | _(all nodes)_ | Restrict CRDT replication to nodes with this role                                                           |
+| `WithSnapshotInterval`              | _(disabled)_  | Interval for periodic BoltDB snapshots (requires `WithSnapshotDir`)                                         |
+| `WithSnapshotDir`                   | _(disabled)_  | Directory for snapshot files                                                                                |
+| `WithDataCenterReplication`         | _(off)_       | Enable cross-DC batch flush from the cluster leader’s Replicator (requires `WithDataCenter` on the cluster) |
+| `WithDataCenterReplicationInterval` | 5s            | How often the leader flushes buffered deltas/tombstones to remote DCs                                       |
+| `WithDataCenterAntiEntropy`         | _(off)_       | Enable periodic cross-DC digest exchange (leader only)                                                      |
+| `WithDataCenterAntiEntropyInterval` | 2m            | Interval between cross-DC anti-entropy rounds                                                               |
+| `WithDataCenterSendTimeout`         | 10s           | Per-attempt timeout for cross-DC `RemoteLookup` + `RemoteTell`                                              |
 
----
+## Multi-datacenter replication
+
+When you run **one GoAkt cluster per datacenter**, CRDT deltas still replicate **inside** each cluster via TopicActor. To **also** replicate across DCs, enable multi-DC on the cluster and cross-DC CRDT on the CRDT config.
+
+**Requirements**
+
+- `ClusterConfig.WithDataCenter(...)` with a validated `datacenter.Config` (control plane + local `DataCenter` metadata).
+- `ClusterConfig.WithCRDT(...)` including `crdt.WithDataCenterReplication()` (and optional anti-entropy / interval / send-timeout options).
+
+**Behavior**
+
+- Every node runs a Replicator; only the **cluster leader** periodically sends a protobuf `CRDTDeltaBatch` (buffered deltas and tombstones, origin DC, send timestamp) to remote DCs using the DC controller’s `ActiveRecords()` and remoting.
+- Remote Replicators apply the batch locally; those updates then spread **within** that DC through the usual `goakt.crdt.deltas` topic.
+- Optional **cross-DC anti-entropy** sends a digest to a random remote DC on a slower schedule, similar in spirit to intra-DC anti-entropy.
+
+`crdt.DCMajority` and `crdt.DCAll` exist for future **coordinated** read/write across DCs; today, use `Majority` / `All` for intra-cluster coordination only.
+
+```go
+dcCfg := datacenter.NewConfig()
+dcCfg.ControlPlane = controlPlane
+dcCfg.DataCenter = datacenter.DataCenter{Name: "dc-west", Region: "us-west-2", Zone: "us-west-2a"}
+
+clusterConfig := actor.NewClusterConfig().
+    WithDiscovery(discoveryProvider).
+    WithDataCenter(dcCfg).
+    WithCRDT(
+        crdt.WithAntiEntropyInterval(30 * time.Second),
+        crdt.WithDataCenterReplication(),
+        crdt.WithDataCenterReplicationInterval(5 * time.Second),
+        // optional:
+        // crdt.WithDataCenterAntiEntropy(),
+        // crdt.WithDataCenterAntiEntropyInterval(2 * time.Minute),
+        // crdt.WithDataCenterSendTimeout(10 * time.Second),
+    )
+```
 
 ## Using the Replicator
 
@@ -205,8 +240,6 @@ ctx.Tell(replicator, &crdt.Delete{
 
 Deletion removes the key from the local store and publishes a tombstone to all peers. Tombstones are retained for the configured TTL and pruned periodically. While a tombstone is active, updates for that key are rejected to prevent resurrection.
 
----
-
 ## Consistency model
 
 ### Default: local-first
@@ -230,7 +263,7 @@ When stronger guarantees are needed, set `WriteTo` or `ReadFrom` on the message:
 
 When `ReadFrom: Majority` and `WriteTo: Majority` are used together, the system provides **strong eventual consistency with read-your-writes** guarantees.
 
----
+`crdt.DCMajority` and `crdt.DCAll` are reserved for future cross-DC coordinated operations; today they do not add remote DC fan-out beyond normal local apply + TopicActor publish.
 
 ## Durable snapshots
 
@@ -249,26 +282,26 @@ When enabled:
 
 Snapshots are a **recovery optimization**, not a durability guarantee. The source of truth is always the distributed CRDT state across all peers. If a snapshot is lost or corrupted, the Replicator rebuilds from peers.
 
----
-
 ## Observability
 
 When `WithMetrics()` is enabled on the actor system, the Replicator registers OpenTelemetry instruments:
 
-| Instrument                                | Type                   | Description                             |
-| ----------------------------------------- | ---------------------- | --------------------------------------- |
-| `crdt.replicator.store.size`              | Int64ObservableGauge   | Number of CRDT keys in the local store  |
-| `crdt.replicator.merge.count`             | Int64ObservableCounter | Total merges performed from peer deltas |
-| `crdt.replicator.delta.publish.count`     | Int64ObservableCounter | Deltas published via TopicActor         |
-| `crdt.replicator.delta.receive.count`     | Int64ObservableCounter | Deltas received from peers              |
-| `crdt.replicator.coordinated.write.count` | Int64ObservableCounter | Coordinated write operations            |
-| `crdt.replicator.coordinated.read.count`  | Int64ObservableCounter | Coordinated read operations             |
-| `crdt.replicator.antientropy.count`       | Int64ObservableCounter | Anti-entropy rounds completed           |
-| `crdt.replicator.tombstone.count`         | Int64ObservableGauge   | Active tombstones pending pruning       |
+| Instrument                                 | Type                   | Description                                |
+| ------------------------------------------ | ---------------------- | ------------------------------------------ |
+| `crdt.replicator.store.size`               | Int64ObservableGauge   | Number of CRDT keys in the local store     |
+| `crdt.replicator.merge.count`              | Int64ObservableCounter | Total merges performed from peer deltas    |
+| `crdt.replicator.delta.publish.count`      | Int64ObservableCounter | Deltas published via TopicActor            |
+| `crdt.replicator.delta.receive.count`      | Int64ObservableCounter | Deltas received from peers                 |
+| `crdt.replicator.coordinated.write.count`  | Int64ObservableCounter | Coordinated write operations               |
+| `crdt.replicator.coordinated.read.count`   | Int64ObservableCounter | Coordinated read operations                |
+| `crdt.replicator.antientropy.count`        | Int64ObservableCounter | Anti-entropy rounds completed              |
+| `crdt.replicator.tombstone.count`          | Int64ObservableGauge   | Active tombstones pending pruning          |
+| `crdt.replicator.crossdc.send.count`       | Int64ObservableCounter | Delta batches sent to remote DCs (leader)  |
+| `crdt.replicator.crossdc.receive.count`    | Int64ObservableCounter | Delta batches received from remote DCs     |
+| `crdt.replicator.crossdc.replication.lag`  | Int64ObservableGauge   | Lag (ns) from last received cross-DC batch |
+| `crdt.replicator.crossdc.stale.skip.count` | Int64ObservableCounter | Flushes skipped due to stale DC cache      |
 
 All instruments carry an `actor.system` attribute with the actor system name.
-
----
 
 ## Full example
 
@@ -402,8 +435,6 @@ func main() {
 }
 ```
 
----
-
 ## Limitations
 
 CRDTs are a powerful tool for distributed state, but they are not a silver bullet. Be aware of the following limitations before choosing this approach.
@@ -443,9 +474,9 @@ The Replicator runs a **prune cycle** (default every 5 minutes) that handles tom
 
 All deltas for all keys flow through one TopicActor topic (`goakt.crdt.deltas`). This simplifies the protocol but means a high update rate on many keys produces proportional TopicActor throughput. For most workloads this is not a bottleneck.
 
-### No cross-datacenter replication
+### Cross-datacenter replication caveats
 
-CRDTs replicate within a single cluster. Cross-datacenter delta exchange via the DataCenter control plane is planned for a future release.
+Cross-DC replication depends on the **DC control plane** (for active DC records), **cluster leadership** (only the leader sends batches), and **WAN** latency. If the control plane is unavailable or the DC cache is stale, cross-DC flush may pause; intra-DC replication continues. Tune `WithDataCenterSendTimeout`, replication interval, and datacenter `FailOnStaleCache` for your SLOs.
 
 ### Tombstone window
 

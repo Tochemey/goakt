@@ -86,7 +86,7 @@ You can join these groups and chat to discuss and ask GoAkt related questions on
 
 ## 🤝 Contribution
 
-We welcome contributions—bug fixes, new features, and documentation improvements. Before diving in, read the [Architecture Document](./ARCHITECTURE.md) to understand the codebase. We use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) and [Earthly](https://earthly.dev/get-earthly) for builds.
+We welcome contributions—bug fixes, new features, and documentation improvements. Before diving in, read the [Architecture Document](./arch/ARCHITECTURE.md) to understand the codebase. We use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) and [Earthly](https://earthly.dev/get-earthly) for builds.
 
 See [contributing.md](./contributing.md) for prerequisites, setup, and the full contribution workflow.
 

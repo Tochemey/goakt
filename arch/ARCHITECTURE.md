@@ -22,16 +22,18 @@ GoAkt operates across three escalating levels of distribution:
 
 ### Core Concepts
 
-| Concept         | Description                                                                                                                                                   |
-|-----------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Actor**       | The fundamental unit. Receives messages, updates private state, spawns children, sends messages.                                                              |
-| **ActorSystem** | The runtime host. Manages actor lifecycle, messaging, cluster membership, and remoting.                                                                       |
-| **PID**         | A process identifier — a live handle to a running actor. Used for all interactions.                                                                           |
-| **Address**     | The canonical location of an actor: `goakt://system@host:port/path/to/actor`.                                                                                 |
-| **Grain**       | A virtual actor. Automatically activated on first message, deactivated when idle. Always addressable by identity regardless of where it lives in the cluster. |
-| **Mailbox**     | Each actor has one. Messages wait here until the actor is ready to process them.                                                                              |
-| **Supervisor**  | Each actor has a parent that defines what happens when the actor fails (stop, resume, restart, escalate).                                                     |
-| **Passivation** | Actors that have been idle for too long are automatically stopped to reclaim memory.                                                                          |
+| Concept               | Description                                                                                                                                                                                                            |
+|-----------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Actor**             | The fundamental unit. Receives messages, updates private state, spawns children, sends messages.                                                                                                                       |
+| **ActorSystem**       | The runtime host. Manages actor lifecycle, messaging, cluster membership, and remoting.                                                                                                                                |
+| **PID**               | A process identifier — a live handle to a running actor. Used for all interactions.                                                                                                                                    |
+| **Address**           | The canonical location of an actor: `goakt://system@host:port/path/to/actor`.                                                                                                                                          |
+| **Grain**             | A virtual actor. Automatically activated on first message, deactivated when idle. Always addressable by identity regardless of where it lives in the cluster.                                                          |
+| **Mailbox**           | Each actor has one. Messages wait here until the actor is ready to process them.                                                                                                                                       |
+| **Supervisor**        | Each actor has a parent that defines what happens when the actor fails (stop, resume, restart, escalate).                                                                                                              |
+| **Passivation**       | Actors that have been idle for too long are automatically stopped to reclaim memory.                                                                                                                                   |
+| **Reactive stream**   | A `Source` → (optional `Flow` stages) → `Sink` pipeline materialized with `RunnableGraph.Run` on an `ActorSystem`. Stages run as actors; demand-driven **backpressure** limits in-flight work.                         |
+| **CRDT / Replicator** | **Conflict-free replicated data types** (`crdt` package) merged by the cluster **Replicator** system actor. Replication is **eventually consistent** and distinct from the Olric actor/grain registry (quorum-strong). |
 
 ### Message Flow
 
@@ -98,6 +100,7 @@ goakt/
 ├── actor/              ← THE core package. Start here.
 ├── breaker/            ← Circuit breaker utility
 ├── client/             ← Cluster client (external callers)
+├── crdt/               ← CRDT data types and replication config (Replicator lives in actor/)
 ├── datacenter/         ← Multi-datacenter support
 ├── discovery/          ← Service discovery providers
 ├── errors/             ← Shared error sentinels
@@ -114,6 +117,7 @@ goakt/
 ├── reentrancy/         ← Reentrancy configuration types
 ├── remote/             ← Remoting layer (TCP messaging + serialization)
 ├── supervisor/         ← Supervision strategy types
+├── stream/             ← Reactive streams (backpressure-aware pipelines on actors)
 ├── testkit/            ← Testing helpers for actor-based tests
 └── tls/                ← TLS configuration helpers
 ```
@@ -152,7 +156,7 @@ Everything starts and ends here. The `ActorSystem` is the entry point; `PID` is 
 | `spawn.go`                       | Spawn logic for both local and remote actors.                                                                                                                       |
 | `spawn_option.go`                | `SpawnOption` functional options (mailbox, supervisor, passivation, reentrancy…).                                                                                   |
 | `option.go`                      | `Option` functional options for `NewActorSystem`.                                                                                                                   |
-| `cluster_config.go`              | Cluster-mode configuration for the actor system.                                                                                                                    |
+| `cluster_config.go`              | Cluster-mode configuration for the actor system (including optional `WithCRDT` / CRDT options).                                                                     |
 | `cluster_singleton.go`           | Cluster singleton: guarantees a single instance of an actor across all nodes.                                                                                       |
 | `dead_letter.go`                 | Dead-letter actor: captures messages sent to stopped/non-existent actors.                                                                                           |
 | `death_watch.go`                 | System actor that cleans up dead actors: removes them from the actor tree and cluster registry on termination.                                                      |
@@ -164,7 +168,8 @@ Everything starts and ends here. The `ActorSystem` is the entry point; `PID` is 
 | `metric.go`                      | OpenTelemetry actor metrics (message count, mailbox depth, processing time…).                                                                                       |
 | `pools.go`                       | Object pools for `ReceiveContext` and related structs.                                                                                                              |
 | `func_actor.go`                  | `FuncActor` — create an actor from a plain function (no struct needed).                                                                                             |
-| `topic_actor.go`                 | Pub/sub topic actor powering the `EventStream`.                                                                                                                     |
+| `topic_actor.go`                 | Pub/sub topic actor powering the `EventStream` and CRDT delta fan-out (`goakt.crdt.deltas`).                                                                        |
+| `replicator.go`                  | CRDT **Replicator** system actor: local store, delta publish/subscribe, anti-entropy, optional multi-DC flush (see `crdt.Config`).                                  |
 | `reentrancy.go`                  | Reentrancy support wired into PID's dispatch loop.                                                                                                                  |
 | `reflection.go`                  | Runtime type helpers for grain identity and actor registration.                                                                                                     |
 
@@ -295,6 +300,50 @@ Used by the actor system to broadcast: actor started/stopped, cluster node event
 
 ---
 
+### `crdt/`
+
+Public **conflict-free replicated data types** and replication options. The package has **no** dependency on `actor` — pure values, `ReplicatedData`, `Config`, and Tell/Ask message types (`messages.go`). Cluster wiring (`ClusterConfig.WithCRDT`, `ActorSystem.Replicator()`) lives in `actor/`.
+
+| File              | Purpose                                                                                 |
+|-------------------|-----------------------------------------------------------------------------------------|
+| `crdt.go`         | `ReplicatedData`, `Compactable` — base interfaces for merge/delta/clone.                |
+| `key.go`          | Key, `DataType`, constructors for typed keys.                                           |
+| `config.go`       | `Config`, functional options (anti-entropy, snapshots, roles, multi-DC, coordination…). |
+| `consistency.go`  | Optional read/write coordination modes (`Majority`, `All`, DC-scoped variants).         |
+| `messages.go`     | Messages used with the Replicator actor (`Get`, `Update`, `Subscribe`, `Changed`, …).   |
+| `gcounter.go`     | Grow-only counter.                                                                      |
+| `pncounter.go`    | Increment/decrement counter.                                                            |
+| `lww_register.go` | Last-writer-wins register.                                                              |
+| `mv_register.go`  | Multi-value register.                                                                   |
+| `or_set.go`       | Observed-remove set (with optional compaction).                                         |
+| `or_map.go`       | Observed-remove map of CRDT values.                                                     |
+| `flag.go`         | Boolean flag CRDT.                                                                      |
+
+For replication protocol, consistency guarantees, and multi-DC behaviour, see **`arch/CRDT_ADR.md`**.
+
+---
+
+### `stream/`
+
+**Reactive streams** on top of the actor model: composable `Source[T]`, `Flow[In, Out]`, and `Sink[T]` assembled into a `RunnableGraph` and started with `Run(ctx, system)` (see `materializer.go`). Demand propagates upstream as internal messages; stages use bounded buffers and **credit-based backpressure**. A `StreamHandle` exposes completion, stop/abort, and metrics.
+
+| File                                                                                  | Purpose                                                 |
+|---------------------------------------------------------------------------------------|---------------------------------------------------------|
+| `stream.go`                                                                           | Package overview and shared concepts.                   |
+| `source.go`, `sink.go`, `flow.go`                                                     | Stream building blocks.                                 |
+| `graph.go`, `graph_builder.go`                                                        | `RunnableGraph` construction.                           |
+| `materializer.go`                                                                     | Materializes graphs onto an `ActorSystem` (`Run`).      |
+| `handle.go`, `metrics.go`                                                             | `StreamHandle`, `StreamMetrics`.                        |
+| `protocol.go`                                                                         | Internal demand/element/cancel messages between stages. |
+| `stage_source.go`, `stage_sink.go`, `stage_flow.go`                                   | Per-stage actor wiring.                                 |
+| `stage_parallel.go`, `stage_broadcast.go`, `stage_balance.go`, `stage_coordinator.go` | Fan-out, fan-in, parallel stages.                       |
+| `pipeline.go`                                                                         | Pipeline helpers.                                       |
+| `queue.go`, `overflow.go`, `config.go`, `errors.go`, `tracer.go`                      | Buffers, overflow policy, tuning, errors, tracing.      |
+
+End-to-end design (demand model, fusion, metrics) is documented in **`arch/REACTIVE_STREAM_ADR.md`**.
+
+---
+
 ### `extension/`
 
 Defines two distinct interfaces:
@@ -340,7 +389,8 @@ The low-level network transport used by remoting.
 | `internal/address`              | `Address` type — canonical actor location (`goakt://system@host:port/path`). Parsing, formatting, equality, and parent/child path relationships. |
 | `internal/chain`                | Middleware-style chain execution for request pipelines.                                                                                          |
 | `internal/chunk`                | Slice chunking utilities for batch processing.                                                                                                   |
-| `internal/codec`                | Protobuf marshal/unmarshal helpers.                                                                                                              |
+| `internal/codec`                | Protobuf marshal/unmarshal helpers; CRDT key/value helpers for wire types.                                                                       |
+| `internal/ddata`                | CRDT persistence and encoding: `snapshot` (BoltDB), `crdt_codec`, `crdt_serializer` (proto + CBOR composite).                                    |
 | `internal/commands`             | Internal command types used within the actor system.                                                                                             |
 | `internal/datacentercontroller` | Datacenter controller implementation for multi-DC coordination.                                                                                  |
 | `internal/duration`             | Duration parsing and formatting utilities.                                                                                                       |
@@ -349,7 +399,7 @@ The low-level network transport used by remoting.
 | `internal/internalpb`           | Generated protobuf Go code for internal wire types.                                                                                              |
 | `internal/locker`               | Specialised locking primitives.                                                                                                                  |
 | `internal/memberlist`           | Thin wrapper over Hashicorp Memberlist (cluster membership) for TCP transport. Mainly used when TLS is enabled.                                  |
-| `internal/metric`               | OpenTelemetry metric registration helpers.                                                                                                       |
+| `internal/metric`               | OpenTelemetry metric registration helpers (including `replicator_metric.go` for CRDT).                                                           |
 | `internal/pause`                | Pause/backoff utilities.                                                                                                                         |
 | `internal/pointer`              | Generic pointer utilities.                                                                                                                       |
 | `internal/queue`                | Queue data structures used by mailbox implementations.                                                                                           |
@@ -370,7 +420,7 @@ The low-level network transport used by remoting.
 ```
 protos/
 ├── goakt/      ← Public-facing .proto definitions (messages, actor requests, cluster events)
-├── internal/   ← Internal wire types (cluster registry, remoting frames)
+├── internal/   ← Internal wire types (cluster registry, remoting frames, CRDT payloads in crdt.proto)
 └── test/       ← Test fixture proto messages
 
 goaktpb/        ← Generated Go code from protos/goakt/
@@ -388,6 +438,8 @@ The framework uses `goaktpb` for its own wire types (remote tell/ask envelopes, 
 | `errors/`  | Sentinel error values shared across packages (e.g., `ErrActorNotFound`, `ErrDeadLetter`).              |
 | `hash/`    | Consistent hashing for partition-based actor placement in the cluster.                                 |
 | `breaker/` | Circuit breaker for protecting async outbound calls (used by `PipeTo` operations).                     |
+| `crdt/`    | CRDT types and replication configuration (used by `actor` when CRDT is enabled).                       |
+| `stream/`  | Reactive stream DSL; depends on `actor` for materialization and stage execution.                       |
 | `memory/`  | Memory size helpers.                                                                                   |
 | `tls/`     | `TLSInfo` config type for TLS-enabled remoting.                                                        |
 | `testkit/` | Test probes, assertion helpers, and fixture factories for writing actor-level tests.                   |
@@ -476,14 +528,15 @@ memberlist detects node departure
 
 ## Dependency Summary
 
-| Package            | Depends On                                                                                                                                                                          |
-|--------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `actor`            | `remote`, `internal/cluster`, `internal/address`, `discovery/*`, `datacenter`, `supervisor`, `passivation`, `reentrancy`, `eventstream`, `extension`, `log`, `errors`, `internal/*` |
-| `remote`           | `internal/address`, `internal/net`, `internal/codec`                                                                                                                                |
-| `internal/cluster` | `discovery`, `internal/memberlist`, `hash`                                                                                                                                          |
-| `client`           | `remote`, `internal/address`                                                                                                                                                        |
+| Package            | Depends On                                                                                                                                                                                  |
+|--------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `actor`            | `remote`, `internal/cluster`, `internal/address`, `discovery/*`, `datacenter`, `crdt`, `supervisor`, `passivation`, `reentrancy`, `eventstream`, `extension`, `log`, `errors`, `internal/*` |
+| `remote`           | `internal/address`, `internal/net`, `internal/codec`                                                                                                                                        |
+| `internal/cluster` | `discovery`, `internal/memberlist`, `hash`                                                                                                                                                  |
+| `client`           | `remote`, `internal/address`                                                                                                                                                                |
+| `stream`           | `actor`                                                                                                                                                                                     |
 
-`log`, `errors`, `extension`, `eventstream`, `supervisor`, `passivation`, and `reentrancy` are **leaf packages** — they depend on nothing else in this repository.
+`log`, `errors`, `extension`, `eventstream`, `supervisor`, `passivation`, `reentrancy`, and **`crdt`** are **leaf packages** — they depend on nothing else in this repository.
 
 ---
 
@@ -675,6 +728,7 @@ The startup sequence is fail-fast — if any step errors, the system calls `shut
 
 5.  Start background services
     └─ startMessagesScheduler()  — cron-like scheduled message delivery
+    └─ spawnReplicator()         — CRDT Replicator when cluster + `WithCRDT` + role match (see `crdt.Config`)
     └─ passivator.Start()        — passivation manager (shared goroutine)
     └─ startEviction()           — periodic eviction of expired state
 
@@ -788,6 +842,20 @@ When Memberlist detects a node departure:
 6. A `RebalanceComplete` event is emitted.
 
 Actors flagged as non-relocatable and system actors are skipped.
+
+### CRDT replication (eventual consistency)
+
+The **actor/grain registry** above uses Olric **quorum** semantics. **CRDT state** is separate: each eligible node runs a **Replicator** actor that holds a local map of `crdt.ReplicatedData` values, publishes **deltas** on the shared topic `goakt.crdt.deltas`, and merges remote deltas so replicas **converge** without a single writer. Optional `ReadFrom` / `WriteTo` coordination in `crdt.Config` can align reads or writes with a majority (or all) of nodes when stronger behaviour is required. Enable CRDTs with `ClusterConfig.WithCRDT(...)`; the Replicator is spawned only when cluster mode is on, CRDT config is set, and the node’s **role** matches `crdt.Config` when a role is required.
+
+For wire format, anti-entropy, snapshots, multi-DC, and metrics, see [CRDT Design](./CRDTs.md).
+
+---
+
+## Reactive streams (`stream` package)
+
+The **`stream`** package layers a **reactive, demand-driven** processing model on GoAkt: pipelines are graphs of **Source** (producers), **Flow** (transforms), and **Sink** (consumers). Materialization creates **one actor per stage** (with fusion where configured), so streams inherit supervision, lifecycle, and backpressure semantics from the runtime. Downstream stages request elements upstream; overflow policies and bounded queues prevent unbounded buffering.
+
+This document only positions streams in the architecture; for pull-based demand, graph shapes, stage fusion, and metrics, see [Reactive Streams Design](./REACTIVE_STREAMS.md).
 
 ---
 
@@ -980,3 +1048,7 @@ Generated by **mockery**. Pre-built mocks live in `mocks/` and cover core interf
 | **Dependency**         | A per-actor resource injected at spawn time. Must be serialisable (`BinaryMarshaler`/`BinaryUnmarshaler`) so it can travel with the actor during cluster relocation. Typical examples: database clients, API clients, configuration providers. Accessed via `Dependencies()` on the actor's context.                                                      |
 | **Event Stream**       | An in-process pub/sub bus. System events (actor started/stopped, cluster events, dead letters) and custom application events are published here. Subscribers receive events via Go channels.                                                                                                                                                              |
 | **Serializer**         | A pluggable component that converts messages to/from bytes for remote transport. The framework ships `ProtoSerializer` (Protocol Buffers) and `CBORSerializer` (CBOR). Custom serializers can be registered per message type.                                                                                                                             |
+| **CRDT**               | Conflict-free replicated data type: independent updates on each node merge to a common state. Implemented in `crdt/`; merged by the **Replicator** actor using delta broadcast and optional anti-entropy.                                                                                                                                                 |
+| **Replicator**         | System actor (`actor/replicator.go`) that owns the local CRDT store and replication when `ClusterConfig.WithCRDT` is enabled. Accessed via `ActorSystem.Replicator()` (may be `nil` if CRDT is disabled or the node’s role does not match).                                                                                                               |
+| **Reactive stream**    | A materialized `stream.RunnableGraph`: staged processing with demand-driven backpressure, implemented as actors. See `stream` package and `arch/REACTIVE_STREAM_ADR.md`.                                                                                                                                                                                       |
+| **RunnableGraph**      | A fully connected `stream` pipeline (`Source` → `Flow`* → `Sink`) ready to `Run` on an `ActorSystem`, returning a `StreamHandle`.                                                                                                                                                                                                                         |

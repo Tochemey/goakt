@@ -100,10 +100,12 @@ func decodeDependencyFromBytes(registry types.Registry, typeName string, bytea [
 	if !ok {
 		return nil, fmt.Errorf("dependency type %q not registered", typeName)
 	}
-	elem := reflect.TypeOf((*extension.Dependency)(nil)).Elem()
+
+	elem := reflect.TypeFor[extension.Dependency]()
 	if !dept.Implements(elem) && !reflect.PointerTo(dept).Implements(elem) {
 		return nil, fmt.Errorf("type %q does not implement extension.Dependency", typeName)
 	}
+
 	instance := reflect.New(dept)
 	if dependency, ok := instance.Interface().(extension.Dependency); ok {
 		if err := dependency.UnmarshalBinary(bytea); err != nil {
