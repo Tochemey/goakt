@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/Workiva/go-datastructures v1.1.7
-	github.com/andybalholm/brotli v1.2.0
+	github.com/andybalholm/brotli v1.2.1
 	github.com/deckarep/golang-set/v2 v2.8.0
 	github.com/flowchartsman/retry v1.2.0
 	github.com/fxamacker/cbor/v2 v2.9.1
