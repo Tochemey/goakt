@@ -13,7 +13,7 @@
   <a href="https://www.bestpractices.dev/projects/9248"><img src="https://www.bestpractices.dev/projects/9248/badge" alt="OpenSSF Best Practices" /></a>
 </p>
 
-Distributed [Go](https://go.dev/) actor framework to build a reactive and distributed system in Go with typed actor messages. 
+Distributed [Go](https://go.dev/) actor framework to build a reactive and distributed system in Go with typed actor messages.
 GoAkt is highly scalable and available when running in cluster mode. It comes with the necessary features require to
 build a distributed actor-based system without sacrificing performance and reliability. With GoAkt, you can instantly create a fast, scalable, distributed system
 across a cluster of computers.
@@ -105,7 +105,11 @@ Kindly use this [issue](https://github.com/Tochemey/goakt/issues/948) to give us
 
 ## Benchmark
 
-One can find the benchmark tests here: [Benchmark](./bench/)
+One can find the benchmark tests here: [Benchmark](./benchmark/)
+
+## Architecture
+
+One can find the architecture documents here: [Architecture](./architecture/)
 
 ## Sponsors
 

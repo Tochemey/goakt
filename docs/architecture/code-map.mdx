@@ -81,7 +81,7 @@ A guided tour of the codebase. Start with `actor/`—everything flows from there
 
 ## `crdt/`
 
-Pure CRDT data types and replication configuration—**no** import of `actor`. User and Replicator code interact via `crdt` messages and `ReplicatedData` values. See [Distributed data](/advanced/distributed-data) and the repository `arch/CRDT_ADR.md`.
+Pure CRDT data types and replication configuration—**no** import of `actor`. User and Replicator code interact via `crdt` messages and `ReplicatedData` values. See [Distributed data](/advanced/distributed-data) and the repository `architecture/CRDT_ADR.md`.
 
 | File | Purpose |
 |------|---------|
@@ -92,7 +92,7 @@ Pure CRDT data types and replication configuration—**no** import of `actor`. U
 
 ## `stream/`
 
-Reactive pipelines (`Source`, `Flow`, `Sink` → `RunnableGraph`) materialized onto an `ActorSystem` with backpressure. See [Streams](/advanced/streams) and repository `arch/REACTIVE_STREAM_ADR.md`.
+Reactive pipelines (`Source`, `Flow`, `Sink` → `RunnableGraph`) materialized onto an `ActorSystem` with backpressure. See [Streams](/advanced/streams) and repository `architecture/REACTIVE_STREAM_ADR.md`.
 
 | File | Purpose |
 |------|---------|
@@ -198,4 +198,4 @@ protos/
 - [Architecture Overview](/architecture/overview)
 - [Streams](/advanced/streams) — reactive pipelines on actors
 - [Distributed data](/advanced/distributed-data) — CRDTs and the Replicator
-- [Architecture Document](https://github.com/tochemey/goakt/blob/main/arch/ARCHITECTURE.md) in `arch/` for full details, data flows, and design decisions
+- [Architecture Document](https://github.com/tochemey/goakt/blob/main/architecture/ARCHITECTURE.md) in `architecture/` for full details, data flows, and design decisions
