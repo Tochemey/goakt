@@ -1,37 +1,61 @@
-/* Cousine for code blocks; Inter for tables */
-@import url("https://fonts.googleapis.com/css2?family=Cousine:wght@400;700&family=Inter:wght@400;500;600&display=swap");
+/* Inter for tables */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap");
 
-/* Slightly larger base font for the whole doc */
-body,
-#body-content,
-.mdx-content {
-  font-size: 1.05rem !important;
+/* Code blocks */
+pre.shiki {
+  font-size: 0.8rem;
+  line-height: 1.4rem;
 }
 
-/* Target code blocks and pre elements (code + ASCII diagrams) */
-#body-content pre,
-.mdx-content pre,
-[class*="code-block"] pre,
-pre[class*="shiki"],
-pre {
-  font-family: "Cousine", Consolas, Monaco, monospace !important;
-  font-size: 0.9rem !important;
-  line-height: 1.5 !important;
+/* Remove top border radius when code block has a header */
+.code-block:has([data-component-part="code-block-header"])
+  div[data-component-part="code-block-root"] {
+  border-top-right-radius: 0px !important;
+  border-top-left-radius: 0px !important;
 }
 
-/* Inline code */
-#body-content code:not(pre code),
-.mdx-content code:not(pre code) {
-  font-family: "Cousine", Consolas, Monaco, monospace !important;
-  font-size: 0.85em !important;
+/* Remove top border radius for code groups with tab bars */
+.code-group:has([data-component-part="code-group-tab-bar"])
+  div[data-component-part="code-block-root"] {
+  border-top-right-radius: 0px !important;
+  border-top-left-radius: 0px !important;
 }
 
-/* Ensure code blocks don't overflow - keep scroll as fallback for very long lines */
-#body-content pre,
-.mdx-content pre,
-[class*="code-block"] {
-  max-width: 100%;
-  overflow-x: auto;
+/* Line-highlighted code blocks */
+.dark
+  [data-component-part="code-block-root"]:not(.has-line-numbers)
+  .line-highlight,
+.dark
+  [data-component-part="code-block-root"]:not(.has-line-numbers)
+  .line-highlight:after,
+.dark
+  [data-component-part="code-block-root"]:not(.has-line-numbers)
+  .line-highlight:before {
+  background: rgb(219 219 219 / 20%) !important;
+}
+
+.dark
+  [data-component-part="code-block-root"]:not(.has-line-numbers)
+  .line-highlight:before {
+  border-color: white;
+}
+
+[data-component-part="code-block-root"]:not(.has-line-numbers) .line-highlight,
+[data-component-part="code-block-root"]:not(.has-line-numbers)
+  .line-highlight:after,
+[data-component-part="code-block-root"]:not(.has-line-numbers)
+  .line-highlight:before {
+  background: rgb(var(--gray-200) / 0.5) !important;
+}
+
+[data-component-part="code-block-root"]:not(.has-line-numbers)
+  .line-highlight:before {
+  border-color: rgb(172, 172, 172);
+}
+
+/* Tighten code blocks inside callouts */
+div.callout .code-block {
+  margin-bottom: 0px;
 }
 
 /* Reduce space around diagram images */
@@ -41,7 +65,7 @@ pre {
   display: block;
 }
 
-/* Table content: no wrap, no break */
+/* Table content: compact, readable */
 #body-content table td,
 #body-content table th,
 .mdx-content table td,
@@ -52,9 +76,18 @@ pre {
     BlinkMacSystemFont,
     "Segoe UI",
     sans-serif !important;
-  font-size: 1.05rem !important;
-  line-height: 1.5 !important;
+  font-size: 0.875rem !important;
+  line-height: 1.4 !important;
+  padding: 0.4rem 0.6rem !important;
   white-space: nowrap !important;
-  overflow-wrap: normal !important;
+  overflow-wrap: break-word !important;
   word-break: normal !important;
+}
+
+#body-content table th,
+.mdx-content table th {
+  font-weight: 600 !important;
+  font-size: 0.8rem !important;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
 }

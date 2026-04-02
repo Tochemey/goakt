@@ -22,14 +22,14 @@ GoAkt supports multiple clusters across datacenters. A pluggable **control plane
 - **Disaster recovery and failover** — Replicate or fail over to another DC.
 - **DC-aware placement** — Spawn actors in a specific datacenter via `SpawnOn` with `WithDataCenter`.
 
-## Control plane backends
+## Control Planes
 
-| Backend            | Package                        | Use case                                  |
-|--------------------|--------------------------------|-------------------------------------------|
-| **NATS JetStream** | `datacenter/controlplane/nats` | Lightweight, good for cloud-native setups |
-| **etcd**           | `datacenter/controlplane/etcd` | Strong consistency, Kubernetes-friendly   |
+| Backend  | Package                        | Use case                                  |
+| -------- | ------------------------------ | ----------------------------------------- |
+| **NATS** | `datacenter/controlplane/nats` | Lightweight, good for cloud-native setups |
+| **etcd** | `datacenter/controlplane/etcd` | Strong consistency, Kubernetes-friendly   |
 
-### NATS JetStream
+### NATS
 
 ```go
 import "github.com/tochemey/goakt/v4/datacenter/controlplane/nats"
@@ -102,7 +102,7 @@ Endpoints for cross-DC routing are **not** set in config; the cluster leader reg
 ## Datacenter config options
 
 | Option                 | Default | Purpose                                                                                                                                        |
-|------------------------|---------|------------------------------------------------------------------------------------------------------------------------------------------------|
+| ---------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | `HeartbeatInterval`    | 10s     | How often the DC renews its liveness lease                                                                                                     |
 | `CacheRefreshInterval` | 10s     | How often the DC registry cache is refreshed                                                                                                   |
 | `MaxCacheStaleness`    | 30s     | Max age of cached DC data before routing is restricted                                                                                         |
@@ -112,7 +112,7 @@ Endpoints for cross-DC routing are **not** set in config; the cluster leader reg
 ## Data center states
 
 | State        | Meaning                                             |
-|--------------|-----------------------------------------------------|
+| ------------ | --------------------------------------------------- |
 | `REGISTERED` | Record exists but not yet eligible for routing      |
 | `ACTIVE`     | Eligible for routing as long as lease is valid      |
 | `DRAINING`   | Avoid new placements; existing traffic may continue |
@@ -149,12 +149,12 @@ active datacenter records and attempts delivery to the first endpoint that succe
 ## Readiness and errors
 
 | API                              | Purpose                                                |
-|----------------------------------|--------------------------------------------------------|
+| -------------------------------- | ------------------------------------------------------ |
 | `system.DataCenterReady()`       | Returns whether the multi-DC controller is operational |
 | `system.DataCenterLastRefresh()` | Time of last successful DC cache refresh               |
 
 | Error                         | When                                                                |
-|-------------------------------|---------------------------------------------------------------------|
+| ----------------------------- | ------------------------------------------------------------------- |
 | `ErrDataCenterNotReady`       | Controller not ready; `SpawnOn` with `WithDataCenter` fails         |
 | `ErrDataCenterStaleRecords`   | Cache older than `MaxCacheStaleness` and `FailOnStaleCache` is true |
 | `ErrDataCenterRecordNotFound` | Target DC not in active records or not in `ACTIVE` state            |

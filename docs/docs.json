@@ -112,6 +112,13 @@
           "reference/glossary"
         ],
         "icon": "book"
+      },
+      {
+        "group": "Meta Framework",
+        "pages": [
+          "/meta-framework/ego"
+        ],
+        "icon": "layers"
       }
     ]
   },

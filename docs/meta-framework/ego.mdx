@@ -1,0 +1,184 @@
+---
+title: eGo
+description: Event sourcing, durable state, CQRS projections, and saga orchestration built on GoAkt.
+sidebarTitle: "🧠 eGo"
+---
+
+**[eGo](https://github.com/Tochemey/ego)** is a companion framework built on top of GoAkt that adds event sourcing, durable state, CQRS projections, and saga orchestration. It uses Protocol Buffers for commands, events, and state, and relies on GoAkt for actor execution, supervision, clustering, and remoting.
+
+eGo is not bundled with GoAkt
+
+## Installation
+
+```bash
+go get github.com/tochemey/ego/v4
+```
+
+## Why eGo
+
+GoAkt provides the actor runtime — messaging, supervision, clustering, streams. eGo builds on that runtime to solve the **persistence and workflow** layer:
+
+| Concern                 | GoAkt | eGo                            |
+| ----------------------- | ----- | ------------------------------ |
+| Actor execution         | Yes   | Uses GoAkt                     |
+| Clustering and remoting | Yes   | Uses GoAkt                     |
+| Event sourcing          | —     | `EventSourcedBehavior`         |
+| Durable state           | —     | `DurableStateBehavior`         |
+| CQRS projections        | —     | Projection runner              |
+| Saga / process manager  | —     | `Saga`                         |
+| Event publishing        | —     | Kafka, Pulsar, NATS, WebSocket |
+| Snapshot recovery       | —     | `SnapshotStore`                |
+| Encryption at rest      | —     | Events and snapshots           |
+
+## Core behaviors
+
+eGo offers two persistence models. Choose based on whether you need a full event history or just the latest state.
+
+### Event-sourced behavior
+
+`EventSourcedBehavior` captures state changes as domain events. Commands are processed sequentially — each command produces zero or more events that are persisted to a journal. State is rebuilt by replaying events on recovery.
+
+| Method                                    | Purpose                                                                  |
+| ----------------------------------------- | ------------------------------------------------------------------------ |
+| `ID()`                                    | Unique behavior identifier                                               |
+| `InitialState()`                          | Returns the zero-value state (protobuf message)                          |
+| `HandleCommand(ctx, command, priorState)` | Validates the command against current state and returns resulting events |
+| `HandleEvent(ctx, event, priorState)`     | Applies a single event to produce the next state                         |
+
+Additional capabilities:
+
+| Feature            | Description                                                                 |
+| ------------------ | --------------------------------------------------------------------------- |
+| Snapshots          | Periodic state snapshots to reduce replay time on recovery                  |
+| Event batching     | Accumulate events across commands and flush in a single store write         |
+| Retention policies | Automatically clean up old events and snapshots after a successful snapshot |
+| Event adapters     | Transform persisted events during replay for schema evolution               |
+| Encryption         | At-rest encryption of events and snapshots                                  |
+
+### Durable-state behavior
+
+`DurableStateBehavior` persists only the latest state — no event log, no replay. Each successful command produces a new state version, and only the latest version is stored.
+
+| Method                                              | Purpose                                         |
+| --------------------------------------------------- | ----------------------------------------------- |
+| `ID()`                                              | Unique behavior identifier                      |
+| `InitialState()`                                    | Returns the zero-value state (protobuf message) |
+| `HandleCommand(ctx, command, priorState, revision)` | Validates the command and returns the new state |
+
+This model is a good fit for configuration-style entities, lower-overhead persistence needs, and use cases where audit replay is not required.
+
+### Choosing a model
+
+| Aspect      | Event-sourced                     | Durable-state              |
+| ----------- | --------------------------------- | -------------------------- |
+| Persistence | Domain events                     | Latest state               |
+| Recovery    | Replay (optionally from snapshot) | Load latest version        |
+| History     | Full audit trail                  | None                       |
+| Complexity  | Higher                            | Lower                      |
+| Best fit    | Business-critical workflows       | Configuration, simple CRUD |
+
+## Persistence stores
+
+eGo uses pluggable store interfaces. In-memory stores ship for testing; production backends are in the [ego-contrib](https://github.com/Tochemey/ego-contrib) repository.
+
+| Store              | Interface                   | Backends          |
+| ------------------ | --------------------------- | ----------------- |
+| Event journal      | `persistence.EventsStore`   | Postgres, MongoDB |
+| Snapshots          | `persistence.SnapshotStore` | Postgres, MongoDB |
+| Durable state      | `persistence.StateStore`    | Postgres, MongoDB |
+| Projection offsets | `offsetstore.OffsetStore`   | Postgres, MongoDB |
+
+Implement any interface to plug in your own backend.
+
+## Engine
+
+The eGo `Engine` manages entity lifecycle, wires persistence, and optionally enables clustering. Create an engine with `ego.NewEngine(name, eventStore, options...)`, then call `Start` and `Stop` to manage its lifecycle.
+
+| Option                      | Purpose                                               |
+| --------------------------- | ----------------------------------------------------- |
+| `WithSnapshotStore(store)`  | Enable snapshot-based recovery                        |
+| `WithSnapshotInterval(n)`   | Snapshot every `n` events                             |
+| `WithTelemetry(telemetry)`  | Enable OpenTelemetry traces and metrics               |
+| `WithLogger(logger)`        | Pluggable structured logging                          |
+| `WithEncryption(encryptor)` | At-rest encryption for events and snapshots           |
+| `WithCluster(...)`          | Distribute entities across nodes via GoAkt clustering |
+
+### Entity spawn options
+
+| Option                        | Purpose                                         |
+| ----------------------------- | ----------------------------------------------- |
+| `WithSnapshotInterval(n)`     | Snapshot every `n` events for this entity       |
+| `WithBatchThreshold(n)`       | Flush after `n` accumulated events              |
+| `WithBatchFlushWindow(d)`     | Flush after duration `d`, whichever comes first |
+| `WithRetentionPolicy(policy)` | Auto-cleanup of old events and snapshots        |
+
+### Clustering
+
+eGo delegates clustering to GoAkt. Use `WithCluster` to distribute entities across nodes. Entities are partitioned by identity and placed on nodes transparently. Commands are routed by the framework.
+
+## Event batching
+
+Under concurrent load, individual store writes become a throughput bottleneck. Event batching accumulates events across commands and flushes in a single write. While a batch is written, incoming commands are stashed and replayed after the write completes. A threshold of `0` (default) disables batching.
+
+| Write latency       | Recommended threshold |
+| ------------------- | --------------------- |
+| < 100us (in-memory) | Disabled              |
+| 100us–1ms           | 5–10                  |
+| 1ms–10ms            | 10–50                 |
+| > 10ms              | 50–100                |
+
+## Projections
+
+Projections consume persisted events and build read models. They track progress via an offset store and support retry, dead-letter handling, and rebuild.
+
+| Capability      | Description                                              |
+| --------------- | -------------------------------------------------------- |
+| Offset tracking | Resumes from the last committed offset                   |
+| Dead letters    | Captures failures after retry exhaustion                 |
+| Rebuild         | `Engine.RebuildProjection()` from a chosen point in time |
+| Lag monitoring  | `Engine.ProjectionLag()` per shard with OTel metrics     |
+| Event adapters  | Schema evolution during consumption                      |
+| Decryption      | Automatic decryption before handler processing           |
+
+## Event publishing
+
+eGo provides publisher APIs for pushing domain changes to external systems.
+
+| Publisher        | Model                 | Connectors                     |
+| ---------------- | --------------------- | ------------------------------ |
+| `EventPublisher` | Event-sourced events  | Kafka, Pulsar, NATS, WebSocket |
+| `StatePublisher` | Durable-state updates | Kafka, Pulsar, NATS, WebSocket |
+
+## Sagas
+
+Sagas coordinate long-running workflows across multiple entities with compensation for failures. Saga state is persisted using the same event-sourced foundations. Start a saga with `Engine.Saga()` and inspect it with `Engine.SagaStatus()`. Define compensation logic for timeouts and failures within your saga behavior.
+
+## Event adapters
+
+Event adapters transform persisted events during replay and projection consumption, enabling schema evolution without data migration. Register transforms via the `eventadapter` package.
+
+## Encryption
+
+eGo supports at-rest encryption of events and snapshots for GDPR and compliance requirements. Enable with `WithEncryption(encryptor)` on the engine. Use `Engine.EraseEntity(entityID)` for GDPR-style data erasure.
+
+## Observability
+
+When configured with `WithTelemetry()`, eGo emits OpenTelemetry traces and metrics:
+
+| Signal      | What is measured                                                        |
+| ----------- | ----------------------------------------------------------------------- |
+| Traces      | Command processing, persistence writes                                  |
+| Metrics     | Command counters, latency histograms, persisted events, active entities |
+| Projections | Processing counters, lag, latest offset, events-behind                  |
+
+## Testkit
+
+eGo ships a scenario-based testkit for validating behaviors without a running store. Use `testkit.New` for event-sourced and `testkit.NewDurableState` for durable-state behaviors with a Given/When/Then API.
+
+## See also
+
+- [eGo repository](https://github.com/Tochemey/ego) — Source code, examples, and changelog
+- [ego-contrib](https://github.com/Tochemey/ego-contrib) — Postgres and MongoDB store implementations
+- [Extensions and Dependencies](/advanced/extensions-and-dependencies) — GoAkt extension mechanism that eGo builds on
+- [PubSub](/advanced/pubsub) — Application-level topic-based messaging
+- [Coordinated Shutdown](/advanced/coordinated-shutdown) — Graceful shutdown that eGo entities participate in
