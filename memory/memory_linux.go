@@ -26,9 +26,12 @@ package memory
 
 import "syscall"
 
-// Size returns the total memory of the system in bytes
-// It uses the syscall.Sysinfo function to get the memory size
-// and returns the value as an uint64.
+// Size returns the total physical memory of the system in bytes.
+//
+// It calls the Linux sysinfo(2) syscall and returns Totalram * Unit.
+// The Unit field is the memory unit size (typically 1 on 64-bit systems),
+// used to scale the values when they would otherwise overflow a 32-bit field.
+// Reference: https://man7.org/linux/man-pages/man2/sysinfo.2.html
 func Size() (uint64, error) {
 	in := &syscall.Sysinfo_t{}
 	err := syscall.Sysinfo(in)
@@ -38,9 +41,12 @@ func Size() (uint64, error) {
 	return uint64(in.Totalram) * uint64(in.Unit), nil
 }
 
-// Free returns the free memory of the system in bytes
-// It uses the syscall.Sysinfo function to get the memory size
-// and returns the value as an uint64.
+// Free returns the free physical memory of the system in bytes.
+//
+// It calls the Linux sysinfo(2) syscall and returns Freeram * Unit.
+// This reflects memory not currently used by the kernel or userspace processes,
+// but does not include reclaimable buffers/cache (use /proc/meminfo for that).
+// Reference: https://man7.org/linux/man-pages/man2/sysinfo.2.html
 func Free() (uint64, error) {
 	in := &syscall.Sysinfo_t{}
 	err := syscall.Sysinfo(in)

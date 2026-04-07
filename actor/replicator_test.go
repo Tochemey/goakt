@@ -3986,8 +3986,10 @@ func spawnReplicatorWithDCController(
 	// Close is called during actor system shutdown
 	remotingMock.EXPECT().Close().Maybe()
 
+	impl.locker.Lock()
 	impl.cluster = clusterMock
 	impl.remoting = remotingMock
+	impl.locker.Unlock()
 	impl.clusterEnabled.Store(true)
 	impl.remotingEnabled.Store(true)
 	impl.dataCenterController = controller
@@ -5148,16 +5150,19 @@ func TestReplicatorDataCenterFlushDrainsPendingBuffers(t *testing.T) {
 		},
 	}, time.Second)
 	require.NoError(t, err)
-	pause.For(200 * time.Millisecond)
 
 	assert.True(t, len(replActor.pendingDeltas) > 0)
 
 	err = Tell(context.TODO(), repl, &dataCenterFlushTick{})
 	require.NoError(t, err)
-	pause.For(time.Second)
 
-	assert.Equal(t, 0, len(replActor.pendingDeltas))
-	assert.Equal(t, 0, len(replActor.pendingTombstones))
+	// Use a Get as a synchronization barrier: the actor processes messages
+	// sequentially, so by the time it handles this Get the flush is done.
+	_, err = Ask(context.TODO(), repl, &crdt.Get{Key: counterKey}, time.Second)
+	require.NoError(t, err)
+
+	assert.Empty(t, replActor.pendingDeltas)
+	assert.Empty(t, replActor.pendingTombstones)
 	assert.True(t, repl.IsRunning())
 
 	err = sys.Stop(context.TODO())

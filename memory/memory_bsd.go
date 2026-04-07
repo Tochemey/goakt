@@ -24,9 +24,11 @@
 
 package memory
 
-// Size returns the total memory of the system in bytes
-// It uses the sysctl command to get the memory size
-// and returns the value as an uint64.
+// Size returns the total physical memory of the system in bytes.
+//
+// It reads the "hw.physmem" sysctl, which reports the amount of physical memory
+// available to the kernel (total RAM minus firmware reservations).
+// Reference: https://man.freebsd.org/cgi/man.cgi?sysctl(3)
 func Size() (uint64, error) {
 	s, err := sysctl("hw.physmem")
 	if err != nil {
@@ -35,11 +37,14 @@ func Size() (uint64, error) {
 	return s, nil
 }
 
-// Free returns the free memory of the system in bytes
-// It uses the sysctl command to get the memory size
-// and returns the value as an uint64.
+// Free returns the user-accessible memory of the system in bytes.
+//
+// It reads the "hw.usermem" sysctl, which reports physical memory available to
+// userspace (total minus kernel-wired pages). Note: this is not the same as
+// currently unused memory — it includes memory actively used by applications.
+// Reference: https://man.freebsd.org/cgi/man.cgi?sysctl(3)
 func Free() (uint64, error) {
-	s, err := sysctlUint64("hw.usermem")
+	s, err := sysctl("hw.usermem")
 	if err != nil {
 		return 0, err
 	}

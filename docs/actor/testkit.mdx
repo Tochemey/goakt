@@ -14,7 +14,7 @@ The `testkit` package provides helpers for actor-level testing. It creates a thr
 ```
 
 | Method                                                   | Purpose                                                               |
-|----------------------------------------------------------|-----------------------------------------------------------------------|
+| -------------------------------------------------------- | --------------------------------------------------------------------- |
 | `ActorSystem()`                                          | Access the underlying actor system.                                   |
 | `Spawn(ctx, name, actor, opts...)`                       | Spawn an actor. Fails the test on error.                              |
 | `SpawnChild(ctx, childName, parentName, actor, opts...)` | Spawn a child of an existing actor.                                   |
@@ -28,7 +28,7 @@ The `testkit` package provides helpers for actor-level testing. It creates a thr
 ### Options
 
 | Option                   | Purpose                                   |
-|--------------------------|-------------------------------------------|
+| ------------------------ | ----------------------------------------- |
 | `WithLogging(level)`     | Enable logging at the given level.        |
 | `WithExtensions(ext...)` | Register extensions with the test system. |
 
@@ -46,32 +46,55 @@ A probe is a test actor that records messages. Use it to assert message delivery
 
 ### Probe interface
 
-| Method                              | Purpose                                                                      |
-|-------------------------------------|------------------------------------------------------------------------------|
-| `ExpectMessage(msg)`                | Assert the next message exactly matches `msg`. Fails on timeout or mismatch. |
-| `ExpectMessageWithin(d, msg)`       | Same with custom timeout.                                                    |
-| `ExpectMessageOfType(msg)`          | Assert the next message has the same type as `msg`.                          |
-| `ExpectMessageOfTypeWithin(d, msg)` | Same with custom timeout.                                                    |
-| `ExpectNoMessage()`                 | Assert no message arrives within the default timeout.                        |
-| `ExpectAnyMessage()`                | Wait for and return the next message.                                        |
-| `ExpectAnyMessageWithin(d)`         | Same with custom timeout.                                                    |
-| `ExpectTerminated(actorName)`       | Assert a `Terminated` message for the given actor.                           |
-| `Send(actorName, msg)`              | Tell the named actor (fire-and-forget).                                      |
-| `SendSync(actorName, msg, timeout)` | Ask the named actor; record the response in the probe.                       |
-| `Sender()`                          | PID of the sender of the last received message.                              |
-| `PID()`                             | PID of the probe itself (use as sender in tests).                            |
-| `Watch(pid)`                        | Subscribe to termination of `pid`.                                           |
-| `WatchNamed(actorName)`             | Subscribe to termination of the named actor.                                 |
-| `Stop()`                            | Shutdown the probe. Call in cleanup.                                         |
+| Method                                               | Purpose                                                                      |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `ExpectMessage(msg)`                                 | Assert the next message exactly matches `msg`. Fails on timeout or mismatch. |
+| `ExpectMessageWithin(d, msg)`                        | Same with custom timeout.                                                    |
+| `ExpectMessageOfType(msg)`                           | Assert the next message has the same type as `msg`.                          |
+| `ExpectMessageOfTypeWithin(d, msg)`                  | Same with custom timeout.                                                    |
+| `ExpectNoMessage()`                                  | Assert no message arrives within the default timeout.                        |
+| `ExpectAnyMessage()`                                 | Wait for and return the next message.                                        |
+| `ExpectAnyMessageWithin(d)`                          | Same with custom timeout.                                                    |
+| `ExpectTerminated(actorName)`                        | Assert a `Terminated` message for the given actor.                           |
+| `ExpectTerminatedWithin(actorName, d)`               | Same with custom timeout.                                                    |
+| `ExpectMessageMatching(predicate)`                   | Assert the next message satisfies the predicate function.                    |
+| `ExpectChildSpawned(parentName, childName)`          | Assert a child actor was spawned by the given parent.                        |
+| `ExpectChildSpawnedWithin(parentName, childName, d)` | Same with custom timeout.                                                    |
+| `ClearMessages()`                                    | Drain all pending messages from the probe's queue.                           |
+| `Send(actorName, msg)`                               | Tell the named actor (fire-and-forget).                                      |
+| `SendSync(actorName, msg, timeout)`                  | Ask the named actor; record the response in the probe.                       |
+| `Sender()`                                           | PID of the sender of the last received message.                              |
+| `PID()`                                              | PID of the probe itself (use as sender in tests).                            |
+| `Watch(pid)`                                         | Subscribe to termination of `pid`.                                           |
+| `WatchNamed(actorName)`                              | Subscribe to termination of the named actor.                                 |
+| `Stop()`                                             | Shutdown the probe. Call in cleanup.                                         |
 
 Default timeout is 3 seconds. Probes work in both standalone and cluster mode.
+
+### Asserting child actor creation
+
+When an actor spawns a child during message handling, use `ExpectChildSpawned` to verify:
+
+```go
+func TestSpawnsChild(t *testing.T) {
+    ctx := context.Background()
+    kit := testkit.New(ctx, t)
+    defer kit.Shutdown(ctx)
+
+    probe := kit.NewProbe(ctx)
+    defer probe.Stop()
+
+    kit.Spawn(ctx, "parent", NewParentActor())
+    probe.ExpectChildSpawned("parent", "worker")
+}
+```
 
 ## GrainProbe
 
 Similar to Probe but for grains. Use `GrainIdentity` to create identities, then send and assert responses.
 
 | Method                             | Purpose                                |
-|------------------------------------|----------------------------------------|
+| ---------------------------------- | -------------------------------------- |
 | `ExpectResponse(msg)`              | Assert the next response matches.      |
 | `ExpectResponseWithin(d, msg)`     | Same with custom timeout.              |
 | `ExpectResponseOfType(msg)`        | Assert type match.                     |
