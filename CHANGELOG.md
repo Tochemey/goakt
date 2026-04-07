@@ -1,5 +1,22 @@
 # Changelog
 
+## [Unreleased]
+
+### ✨ New Additions
+
+- Enhanced the `testkit` package with new helper methods for improved test ergonomics.
+
+### 🔧 Improvements
+
+- Adjusted the `benchmark` package name for consistency.
+- Conducted general code cleanup across the codebase.
+- Cleaned up the documentation site and README.
+
+### 📦 Dependencies
+
+- Updated `dorny/paths-filter` action to v4.
+- Updated `github.com/andybalholm/brotli` to v1.2.1.
+
 ## v4.2.0 - 2026-03-31
 
 ### 🔄 Distributed Data (CRDTs)
