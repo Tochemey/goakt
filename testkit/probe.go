@@ -33,6 +33,7 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/eventstream"
 	"github.com/tochemey/goakt/v4/internal/timer"
 )
 
@@ -205,6 +206,18 @@ type Probe interface {
 	//	probe.ExpectTerminated(workerPID.Name())
 	Watch(pid *actor.PID)
 
+	// ExpectChildSpawned asserts that a child actor with the given name was spawned
+	// by the specified parent actor within the default timeout.
+	// It subscribes to the actor system's event stream and waits for a matching
+	// ActorChildCreated event.
+	ExpectChildSpawned(parentName string, childName string)
+
+	// ExpectChildSpawnedWithin asserts that a child actor with the given name was spawned
+	// by the specified parent actor within the given duration.
+	// It subscribes to the actor system's event stream and waits for a matching
+	// ActorChildCreated event.
+	ExpectChildSpawnedWithin(parentName string, childName string, duration time.Duration)
+
 	// Stop stops the probe actor and releases any associated resources.
 	// This should be called at the end of a test to clean up the probe.
 	Stop()
@@ -226,9 +239,11 @@ type probe struct {
 	testingT *testing.T
 
 	testCtx        context.Context
+	actorSystem    actor.ActorSystem
 	pid            *actor.PID
 	lastSender     *actor.PID
 	messageQueue   chan message
+	subscriber     eventstream.Subscriber
 	defaultTimeout time.Duration
 	timers         *timer.Pool
 }
@@ -376,8 +391,22 @@ func (x *probe) Watch(pid *actor.PID) {
 	x.pid.Watch(pid)
 }
 
+// ExpectChildSpawned asserts that a child actor with the given name was spawned
+// by the specified parent actor within the default timeout.
+func (x *probe) ExpectChildSpawned(parentName string, childName string) {
+	x.expectChildSpawned(parentName, childName, x.defaultTimeout)
+}
+
+// ExpectChildSpawnedWithin asserts that a child actor with the given name was spawned
+// by the specified parent actor within the given duration.
+func (x *probe) ExpectChildSpawnedWithin(parentName string, childName string, duration time.Duration) {
+	x.expectChildSpawned(parentName, childName, duration)
+}
+
 // Stop stops the probe actor and releases any associated resources.
 func (x *probe) Stop() {
+	x.subscriber.Shutdown()
+	_ = x.actorSystem.Unsubscribe(x.subscriber)
 	err := x.pid.Shutdown(x.testCtx)
 	require.NoError(x.testingT, err)
 }
@@ -391,11 +420,19 @@ func newProbe(ctx context.Context, actorSystem actor.ActorSystem, t *testing.T) 
 	if err != nil {
 		return nil, err
 	}
+
+	subscriber, err := actorSystem.Subscribe()
+	if err != nil {
+		return nil, err
+	}
+
 	return &probe{
 		testingT:       t,
 		testCtx:        ctx,
+		actorSystem:    actorSystem,
 		pid:            pid,
 		messageQueue:   msgQueue,
+		subscriber:     subscriber,
 		defaultTimeout: DefaultTimeout,
 		timers:         timer.NewPool(),
 	}, nil
@@ -468,4 +505,27 @@ func (x *probe) expectMessageOfType(duration time.Duration, messageType any) {
 	require.NotNil(x.testingT, received, fmt.Sprintf("timeout (%v) during expectMessageOfType while waiting", duration))
 	expectedType := reflect.TypeOf(received) == messageType
 	require.True(x.testingT, expectedType, fmt.Sprintf("expected %v, found %v", messageType, reflect.TypeOf(received)))
+}
+
+func (x *probe) expectChildSpawned(parentName, childName string, duration time.Duration) {
+	deadline := time.After(duration)
+	poll := time.NewTicker(50 * time.Millisecond)
+	defer poll.Stop()
+
+	for {
+		for msg := range x.subscriber.Iterator() {
+			if event, ok := msg.Payload().(*actor.ActorChildCreated); ok {
+				if event.Parent().Name() == parentName && event.ActorPath().Name() == childName {
+					return
+				}
+			}
+		}
+
+		select {
+		case <-deadline:
+			require.Fail(x.testingT, fmt.Sprintf("timeout (%v) waiting for child %q to be spawned by %q", duration, childName, parentName))
+			return
+		case <-poll.C:
+		}
+	}
 }
