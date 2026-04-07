@@ -179,6 +179,39 @@ func (m *MultiNodes) Stop() {
 	m.nodes.Reset()
 }
 
+// GetNode retrieves a previously started test node by name.
+// It fails the test if the node does not exist.
+func (m *MultiNodes) GetNode(name string) *TestNode {
+	require.True(m.gt, m.started.Load(), "multi-nodes must be started before getting a node")
+	node, ok := m.nodes.Get(name)
+	require.True(m.gt, ok, fmt.Sprintf("node %q not found", name))
+	return node
+}
+
+// StopNode gracefully shuts down a single test node by name, removing it from the cluster.
+// It fails the test if the node does not exist or fails to stop.
+func (m *MultiNodes) StopNode(ctx context.Context, name string) {
+	require.True(m.gt, m.started.Load(), "multi-nodes must be started before stopping a node")
+	node, ok := m.nodes.Get(name)
+	require.True(m.gt, ok, fmt.Sprintf("node %q not found", name))
+
+	if err := chain.
+		New(chain.WithFailFast()).
+		AddRunner(func() error { return node.actorSystem.Stop(ctx) }).
+		AddRunner(func() error { return node.discovery.Close() }).
+		Run(); err != nil {
+		m.gt.Fatalf("failed to stop node %s: %v", name, err)
+	}
+
+	node.created.Store(false)
+	m.nodes.Delete(name)
+}
+
+// NodeCount returns the number of currently running test nodes.
+func (m *MultiNodes) NodeCount() int {
+	return m.nodes.Len()
+}
+
 // StartNode initializes and starts a new test node within the multi-node test environment.
 // The newly started node will automatically join the existing actor cluster (if one exists),
 // making it immediately available for actor spawning, message routing, and inter-node communication.

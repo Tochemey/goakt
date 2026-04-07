@@ -25,13 +25,14 @@
 package memory
 
 import (
+	"fmt"
+	"sync"
 	"syscall"
 	"unsafe"
 )
 
-// https://msdn.microsoft.com/en-us/library/windows/desktop/aa366589(v=vs.85).aspx
-// https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/ns-sysinfoapi-memorystatusex
-// https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-globalmemorystatusex
+// memStatusEx mirrors the Windows MEMORYSTATUSEX structure.
+// Reference: https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/ns-sysinfoapi-memorystatusex
 type memStatusEx struct {
 	dwLength     uint32
 	dwMemoryLoad uint32
@@ -40,48 +41,75 @@ type memStatusEx struct {
 	unused       [5]uint64
 }
 
-// Size returns the total memory of the system in bytes
-// It uses the GlobalMemoryStatusEx function to get the memory size
-// and returns the value as an uint64.
-func Size() (uint64, error) {
-	kernel32, err := syscall.LoadDLL("kernel32.dll")
-	if err != nil {
-		return 0, err
-	}
+// globalMemoryStatusExProc holds the resolved GlobalMemoryStatusEx procedure.
+// Resolved once via sync.Once to avoid repeated LoadDLL + FindProc calls.
+//
+// Reference: https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-globalmemorystatusex
+var (
+	globalMemoryStatusExProc *syscall.Proc
+	globalMemoryStatusExErr  error
+	globalMemoryStatusExOnce sync.Once
+)
 
-	globalMemoryStatusEx, err := kernel32.FindProc("GlobalMemoryStatusEx")
+// loadGlobalMemoryStatusEx resolves the GlobalMemoryStatusEx procedure from
+// kernel32.dll exactly once. Subsequent calls return the cached result.
+func loadGlobalMemoryStatusEx() (*syscall.Proc, error) {
+	globalMemoryStatusExOnce.Do(func() {
+		kernel32, err := syscall.LoadDLL("kernel32.dll")
+		if err != nil {
+			globalMemoryStatusExErr = err
+			return
+		}
+		globalMemoryStatusExProc, globalMemoryStatusExErr = kernel32.FindProc("GlobalMemoryStatusEx")
+	})
+	return globalMemoryStatusExProc, globalMemoryStatusExErr
+}
+
+// callGlobalMemoryStatusEx invokes the Windows GlobalMemoryStatusEx API and
+// populates a memStatusEx struct.
+//
+// On failure (return value 0), the error from GetLastError is propagated.
+// Reference: https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-globalmemorystatusex
+func callGlobalMemoryStatusEx() (*memStatusEx, error) {
+	proc, err := loadGlobalMemoryStatusEx()
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	msx := &memStatusEx{
 		dwLength: 64,
 	}
-	r, _, _ := globalMemoryStatusEx.Call(uintptr(unsafe.Pointer(msx)))
+	// Proc.Call always returns a non-nil error (from GetLastError).
+	// Only inspect it when r == 0 (API failure).
+	// Reference: https://pkg.go.dev/syscall#Proc.Call
+	r, _, callErr := proc.Call(uintptr(unsafe.Pointer(msx)))
 	if r == 0 {
-		return 0, nil
+		return nil, fmt.Errorf("GlobalMemoryStatusEx failed: %w", callErr)
+	}
+	return msx, nil
+}
+
+// Size returns the total physical memory of the system in bytes.
+//
+// It calls the Windows GlobalMemoryStatusEx API and returns the ullTotalPhys
+// field from the MEMORYSTATUSEX structure.
+// Reference: https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-globalmemorystatusex
+func Size() (uint64, error) {
+	msx, err := callGlobalMemoryStatusEx()
+	if err != nil {
+		return 0, err
 	}
 	return msx.ullTotalPhys, nil
 }
 
-// Free returns the free memory of the system in bytes
-// It uses the GlobalMemoryStatusEx function to get the memory size
-// and returns the value as an uint64.
+// Free returns the available physical memory of the system in bytes.
+//
+// It calls the Windows GlobalMemoryStatusEx API and returns the ullAvailPhys
+// field from the MEMORYSTATUSEX structure.
+// Reference: https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-globalmemorystatusex
 func Free() (uint64, error) {
-	kernel32, err := syscall.LoadDLL("kernel32.dll")
+	msx, err := callGlobalMemoryStatusEx()
 	if err != nil {
 		return 0, err
-	}
-
-	globalMemoryStatusEx, err := kernel32.FindProc("GlobalMemoryStatusEx")
-	if err != nil {
-		return 0, err
-	}
-	msx := &memStatusEx{
-		dwLength: 64,
-	}
-	r, _, _ := globalMemoryStatusEx.Call(uintptr(unsafe.Pointer(msx)))
-	if r == 0 {
-		return 0, nil
 	}
 	return msx.ullAvailPhys, nil
 }

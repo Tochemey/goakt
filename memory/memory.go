@@ -24,11 +24,15 @@ package memory
 
 import "runtime"
 
-// Used returns the current memory usage of the application in bytes
-// It uses the runtime package to get memory statistics
-// and returns the Alloc field which represents the bytes allocated and
-// not yet freed. This is a good indicator of the current memory usage of
-// the application.
+// Used returns the current heap memory usage of the application in bytes.
+//
+// It reads runtime.MemStats.Alloc, which represents bytes allocated on the heap
+// and not yet freed. This is a point-in-time snapshot; the value may change
+// between calls as the garbage collector runs.
+//
+// Note: this measures the Go process heap, not total system memory consumed
+// (which also includes stack, mmap'd regions, and CGo allocations).
+// Reference: https://pkg.go.dev/runtime#MemStats
 func Used() uint64 {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)

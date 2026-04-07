@@ -30,29 +30,40 @@ import (
 	"strconv"
 )
 
-// Size returns the total memory of the system in bytes
-// It uses the sysctl command to get the memory size
-// and returns the value as an uint64.
+// pageSizeRegex and freePagesRegex are compiled once at package level to avoid
+// repeated compilation on every Free() call.
+// They parse the output of the macOS vm_stat command.
+// Reference: man vm_stat(1) on macOS.
+var (
+	pageSizeRegex  = regexp.MustCompile(`page size of ([0-9]*) bytes`)
+	freePagesRegex = regexp.MustCompile(`Pages free: *([0-9]*)\.`)
+)
+
+// Size returns the total physical memory of the system in bytes.
+//
+// It reads the "hw.memsize" sysctl, which reports total RAM on macOS.
+// Reference: https://developer.apple.com/documentation/kernel/1387446-sysctlbyname
 func Size() (uint64, error) {
 	s, err := sysctl("hw.memsize")
 	if err != nil {
-		return 0, nil
+		return 0, err
 	}
 	return s, nil
 }
 
-// Free returns the free memory of the system in bytes
-// It uses the vm_stat command to get the memory size
-// and returns the value as an uint64.
+// Free returns the free physical memory of the system in bytes.
+//
+// It invokes the vm_stat command and parses its output to extract the page size
+// and the number of free pages. Free memory is computed as: freePages * pageSize.
+// If the page size is not found in the output, it defaults to 4096 bytes.
+//
+// Reference: man vm_stat(1) on macOS.
 func Free() (uint64, error) {
 	cmd := exec.Command("vm_stat")
 	outBytes, err := cmd.Output()
 	if err != nil {
 		return 0, err
 	}
-
-	pageSizeRegex := regexp.MustCompile("page size of ([0-9]*) bytes")
-	freePagesRegex := regexp.MustCompile(`Pages free: *([0-9]*)\.`)
 
 	matches := pageSizeRegex.FindSubmatchIndex(outBytes)
 	pageSize := uint64(4096)

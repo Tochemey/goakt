@@ -51,7 +51,7 @@ func TestTestNode(t *testing.T) {
 		node.Spawn(ctx, name, &pinger{})
 
 		require.Eventually(t, func() bool {
-			pid, err := node.actorSystem.ActorOf(ctx, name)
+			pid, err := node.ActorSystem().ActorOf(ctx, name)
 			return err == nil && pid != nil
 		}, time.Second, 10*time.Millisecond)
 	})
@@ -61,7 +61,7 @@ func TestTestNode(t *testing.T) {
 		node.SpawnSingleton(ctx, name, &pinger{})
 
 		require.Eventually(t, func() bool {
-			pid, err := node.actorSystem.ActorOf(ctx, name)
+			pid, err := node.ActorSystem().ActorOf(ctx, name)
 			return err == nil && pid != nil
 		}, 2*time.Second, 10*time.Millisecond)
 	})
@@ -101,8 +101,54 @@ func TestTestNode(t *testing.T) {
 		node.Kill(ctx, name)
 
 		require.Eventually(t, func() bool {
-			_, err := node.actorSystem.ActorOf(ctx, name)
+			_, err := node.ActorSystem().ActorOf(ctx, name)
 			return err != nil
 		}, 2*time.Second, 10*time.Millisecond)
+	})
+
+	t.Run("ActorSystem", func(t *testing.T) {
+		sys := node.ActorSystem()
+		require.NotNil(t, sys)
+		require.True(t, sys.Running())
+	})
+}
+
+func TestMultiNodes(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("NodeCount", func(t *testing.T) {
+		multi := NewMultiNodes(t, log.DiscardLogger, []actor.Actor{&pinger{}}, nil)
+		multi.Start()
+		t.Cleanup(multi.Stop)
+
+		require.Equal(t, 0, multi.NodeCount())
+
+		multi.StartNode(ctx, "node-a")
+		require.Equal(t, 1, multi.NodeCount())
+
+		multi.StartNode(ctx, "node-b")
+		require.Equal(t, 2, multi.NodeCount())
+	})
+
+	t.Run("GetNode", func(t *testing.T) {
+		multi := NewMultiNodes(t, log.DiscardLogger, []actor.Actor{&pinger{}}, nil)
+		multi.Start()
+		t.Cleanup(multi.Stop)
+
+		started := multi.StartNode(ctx, "get-node")
+		retrieved := multi.GetNode("get-node")
+		require.Equal(t, started.NodeName(), retrieved.NodeName())
+	})
+
+	t.Run("StopNode", func(t *testing.T) {
+		multi := NewMultiNodes(t, log.DiscardLogger, []actor.Actor{&pinger{}}, nil)
+		multi.Start()
+		t.Cleanup(multi.Stop)
+
+		multi.StartNode(ctx, "stop-node")
+		require.Equal(t, 1, multi.NodeCount())
+
+		multi.StopNode(ctx, "stop-node")
+		require.Equal(t, 0, multi.NodeCount())
 	})
 }

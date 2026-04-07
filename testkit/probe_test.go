@@ -268,6 +268,87 @@ func TestTestProbe(t *testing.T) {
 		probe.Stop()
 		testkit.Shutdown(ctx)
 	})
+	t.Run("Assert multiple probes", func(t *testing.T) {
+		ctx := context.TODO()
+		testkit := New(ctx, t, WithLogging(log.ErrorLevel))
+
+		testkit.Spawn(ctx, "pinger", &pinger{})
+
+		probe1 := testkit.NewProbe(ctx)
+		probe2 := testkit.NewProbe(ctx)
+
+		require.NotEqual(t, probe1.PID().Name(), probe2.PID().Name())
+
+		probe1.Send("pinger", new(testpb.TestPing))
+		probe1.ExpectMessage(new(testpb.TestPong))
+
+		probe2.Send("pinger", new(testpb.TestPing))
+		probe2.ExpectMessage(new(testpb.TestPong))
+
+		probe1.Stop()
+		probe2.Stop()
+		testkit.Shutdown(ctx)
+	})
+	t.Run("Assert ExpectTerminatedWithin", func(t *testing.T) {
+		ctx := context.TODO()
+		testkit := New(ctx, t, WithLogging(log.ErrorLevel))
+
+		testkit.Spawn(ctx, "pinger", &pinger{})
+
+		probe := testkit.NewProbe(ctx)
+		probe.WatchNamed("pinger")
+
+		probe.Send("pinger", new(actor.PoisonPill))
+		probe.ExpectTerminatedWithin("pinger", 5*time.Second)
+		probe.ExpectNoMessage()
+
+		probe.Stop()
+		testkit.Shutdown(ctx)
+	})
+	t.Run("Assert ExpectMessageMatching", func(t *testing.T) {
+		ctx := context.TODO()
+		testkit := New(ctx, t, WithLogging(log.ErrorLevel))
+
+		testkit.Spawn(ctx, "pinger", &pinger{})
+
+		probe := testkit.NewProbe(ctx)
+		probe.Send("pinger", new(testpb.TestPing))
+
+		probe.ExpectMessageMatching(func(msg any) bool {
+			_, ok := msg.(*testpb.TestPong)
+			return ok
+		})
+		probe.ExpectNoMessage()
+
+		probe.Stop()
+		testkit.Shutdown(ctx)
+	})
+	t.Run("Assert ClearMessages", func(t *testing.T) {
+		ctx := context.TODO()
+		testkit := New(ctx, t, WithLogging(log.ErrorLevel))
+
+		testkit.Spawn(ctx, "pinger", &pinger{})
+
+		probe := testkit.NewProbe(ctx)
+
+		probe.Send("pinger", new(testpb.TestPing))
+		probe.Send("pinger", new(testpb.TestPing))
+
+		// wait for both replies
+		probe.ExpectAnyMessage()
+		probe.ExpectAnyMessage()
+
+		// send more messages
+		probe.Send("pinger", new(testpb.TestPing))
+		probe.ExpectAnyMessage()
+
+		// clear and verify no pending messages
+		probe.ClearMessages()
+		probe.ExpectNoMessage()
+
+		probe.Stop()
+		testkit.Shutdown(ctx)
+	})
 }
 
 type pinger struct{}

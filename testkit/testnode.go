@@ -53,6 +53,12 @@ func (x TestNode) NodeName() string {
 	return x.nodeName
 }
 
+// ActorSystem returns the underlying actor system for the test node.
+// This allows direct access to actor system methods not explicitly wrapped by TestNode.
+func (x TestNode) ActorSystem() goakt.ActorSystem {
+	return x.actorSystem
+}
+
 // Spawn creates and registers a new actor with the provided name in the test node's actor system.
 // If the actor fails to spawn, the test will fail immediately.
 //

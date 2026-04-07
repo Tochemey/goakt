@@ -29,14 +29,23 @@ import (
 	"unsafe"
 )
 
+// sysctl retrieves a numeric sysctl value as uint64. It uses syscall.Sysctl which
+// returns the raw kernel value as a Go string.
+//
+// The unsafe.Pointer cast reinterprets the byte representation as a native-endian
+// uint64 (equivalent to *(uint64*)buf in C).
+//
+// Padding: syscall.Sysctl converts the raw C buffer to a Go string, which strips
+// the trailing null byte. For an 8-byte integer this leaves 7 bytes. We pad with
+// zero bytes up to 8 to ensure the unsafe cast reads a full uint64.
+// Reference: https://github.com/golang/go/issues/21614
 func sysctl(name string) (uint64, error) {
 	s, err := syscall.Sysctl(name)
 	if err != nil {
 		return 0, err
 	}
-	// hack because the string conversion above drops a \0
 	b := []byte(s)
-	if len(b) < 8 {
+	for len(b) < 8 {
 		b = append(b, 0)
 	}
 	return *(*uint64)(unsafe.Pointer(&b[0])), nil
