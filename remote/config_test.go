@@ -125,9 +125,9 @@ func TestConfig(t *testing.T) {
 }
 
 func TestConfigCompression(t *testing.T) {
-	t.Run("default is zstd", func(t *testing.T) {
+	t.Run("default is none", func(t *testing.T) {
 		config := DefaultConfig()
-		assert.Equal(t, ZstdCompression, config.Compression())
+		assert.Equal(t, NoCompression, config.Compression())
 	})
 	t.Run("custom compression applied", func(t *testing.T) {
 		config := NewConfig("127.0.0.1", 0, WithCompression(GzipCompression))

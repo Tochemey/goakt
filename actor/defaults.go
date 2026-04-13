@@ -56,6 +56,18 @@ const (
 	// DefaultClusterBalancerInterval defines the default cluster balancer interval
 	DefaultClusterBalancerInterval = time.Second
 	kindRoleSeparator              = "::"
+
+	// remoteSendCoalescingMaxBatch caps the number of fire-and-forget RemoteTell
+	// messages the internal outbound coalescer packs into a single
+	// RemoteTellRequest. Internal tuning; not exposed on remote.Config.
+	//
+	// Benchmarked on Apple M1 with 20 senders / 10 engines / 2000 actors and
+	// default zstd compression: throughput scales roughly linearly with batch
+	// size through 256, then diminishes (64→~680k msgs/sec, 256→~890k,
+	// 512→~980k). 256 is the sweet spot — meaningfully better than 64 at
+	// trivial memory cost (at most 256 pointers plus their payloads queued
+	// per destination during a burst).
+	remoteSendCoalescingMaxBatch = 256
 )
 
 var (

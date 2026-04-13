@@ -50,7 +50,10 @@ import (
 
 // newRemoteServerTestSystem builds the minimal actorSystem needed to unit-test
 // the proto TCP handler methods in remote_server.go.
-// It does NOT start the actor system; handlers are called directly.
+// It does NOT start the actor system; handlers are called directly. A real
+// remoting client is attached so the handler's upfront payload decode
+// (which needs access to the serializer registry) works against an
+// environment that mirrors production wiring.
 func newRemoteServerTestSystem(host string, port int) *actorSystem {
 	sys := &actorSystem{
 		actors:       newTree(),
@@ -59,6 +62,7 @@ func newRemoteServerTestSystem(host string, port int) *actorSystem {
 		name:         "testSys",
 		grains:       xsync.NewMap[string, *grainPID](),
 		askTimeout:   DefaultAskTimeout,
+		remoting:     remoteclient.NewClient(),
 	}
 	sys.remotingEnabled.Store(true)
 	return sys
@@ -438,17 +442,18 @@ func TestRemoteTellHandler(t *testing.T) {
 		assert.True(t, ok)
 	})
 
-	t.Run("message with unparseable receiver returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
+	t.Run("unparseable receiver is logged and skipped, batch still succeeds", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
 		req := &internalpb.RemoteTellRequest{
 			RemoteMessages: []*internalpb.RemoteMessage{{Receiver: "bad-address"}},
 		}
 		resp, err := sys.remoteTellHandler(ctx, nullConn, req)
 		require.NoError(t, err)
-		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
+		_, ok := resp.(*internalpb.RemoteTellResponse)
+		assert.True(t, ok, "per-message failures must not fail the whole batch")
 	})
 
-	t.Run("actor not in tree returns CODE_NOT_FOUND", func(t *testing.T) {
+	t.Run("actor not in tree is dead-lettered, batch still succeeds", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
 		addr := fmt.Sprintf("goakt://testSys@%s:%d/actor1", host, port)
 		req := &internalpb.RemoteTellRequest{
@@ -456,20 +461,22 @@ func TestRemoteTellHandler(t *testing.T) {
 		}
 		resp, err := sys.remoteTellHandler(ctx, nullConn, req)
 		require.NoError(t, err)
-		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
+		_, ok := resp.(*internalpb.RemoteTellResponse)
+		assert.True(t, ok, "per-message failures must not fail the whole batch")
 	})
 
-	t.Run("nil message in RemoteMessages returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
+	t.Run("nil entry in RemoteMessages is logged and skipped, batch still succeeds", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
 		req := &internalpb.RemoteTellRequest{
 			RemoteMessages: []*internalpb.RemoteMessage{nil},
 		}
 		resp, err := sys.remoteTellHandler(ctx, nullConn, req)
 		require.NoError(t, err)
-		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
+		_, ok := resp.(*internalpb.RemoteTellResponse)
+		assert.True(t, ok, "nil entries are skipped, not fatal")
 	})
 
-	t.Run("node with nil pid returns CODE_NOT_FOUND (simulates deleteNode race)", func(t *testing.T) {
+	t.Run("node with nil pid is dead-lettered, batch still succeeds", func(t *testing.T) {
 		sys := newRemoteServerTestSystemWithZombieNode(t, host, port, "actor1")
 		addr := fmt.Sprintf("goakt://testSys@%s:%d/actor1", host, port)
 		req := &internalpb.RemoteTellRequest{
@@ -477,7 +484,8 @@ func TestRemoteTellHandler(t *testing.T) {
 		}
 		resp, err := sys.remoteTellHandler(ctx, nullConn, req)
 		require.NoError(t, err)
-		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
+		_, ok := resp.(*internalpb.RemoteTellResponse)
+		assert.True(t, ok, "per-message failures must not fail the whole batch")
 	})
 }
 
@@ -2192,4 +2200,81 @@ type testRemoteClient struct {
 
 func (c *testRemoteClient) Serializer(_ any) remote.Serializer {
 	return c.serializer
+}
+
+// TestApplyPerMessageMetadata exercises every branch of the helper that
+// overlays per-RemoteMessage metadata onto the dispatch context.
+func TestApplyPerMessageMetadata(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("empty metadata returns context unchanged", func(t *testing.T) {
+		sys := newRemoteServerTestSystem("127.0.0.1", 9000)
+		sys.remoteConfig = remote.NewConfig("127.0.0.1", 9000,
+			remote.WithContextPropagator(&headerPropagator{headerKey: "x-trace-id", ctxKey: "trace"}))
+
+		got, err := sys.messageMetadata(ctx, nil)
+		require.NoError(t, err)
+		assert.Equal(t, ctx, got)
+
+		got, err = sys.messageMetadata(ctx, map[string]string{})
+		require.NoError(t, err)
+		assert.Equal(t, ctx, got)
+	})
+
+	t.Run("metadata but nil propagator returns context unchanged", func(t *testing.T) {
+		sys := newRemoteServerTestSystem("127.0.0.1", 9000)
+		// No propagator configured.
+		got, err := sys.messageMetadata(ctx, map[string]string{"x-trace-id": "abc"})
+		require.NoError(t, err)
+		assert.Equal(t, ctx, got)
+	})
+
+	t.Run("metadata with propagator enriches context", func(t *testing.T) {
+		type traceKey = string
+		propagator := &headerPropagator{headerKey: "x-trace-id", ctxKey: traceKey("trace")}
+		sys := newRemoteServerTestSystem("127.0.0.1", 9000)
+		sys.remoteConfig = remote.NewConfig("127.0.0.1", 9000, remote.WithContextPropagator(propagator))
+
+		got, err := sys.messageMetadata(ctx, map[string]string{"x-trace-id": "per-msg"})
+		require.NoError(t, err)
+		assert.Equal(t, "per-msg", got.Value(traceKey("trace")))
+	})
+
+	t.Run("propagator extract error propagates", func(t *testing.T) {
+		failing := &MockFailingContextPropagator{err: errors.New("extract failed")}
+		sys := newRemoteServerTestSystem("127.0.0.1", 9000)
+		sys.remoteConfig = remote.NewConfig("127.0.0.1", 9000, remote.WithContextPropagator(failing))
+
+		_, err := sys.messageMetadata(ctx, map[string]string{"x-trace-id": "abc"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "extract failed")
+	})
+}
+
+// TestRemoteTellHandler_PerMessageMetadataError confirms that a per-message
+// propagator failure is dead-lettered locally on the server and does not
+// fail the rest of the batch. With the continue-on-failure semantics the
+// whole request still returns success.
+func TestRemoteTellHandler_PerMessageMetadataError(t *testing.T) {
+	const host = "127.0.0.1"
+	const port = 9100
+	failing := &MockFailingContextPropagator{err: errors.New("extract failed")}
+	sys := newRemoteServerTestSystem(host, port)
+	sys.remoteConfig = remote.NewConfig(host, port, remote.WithContextPropagator(failing))
+	sys.remotingEnabled.Store(true)
+
+	req := &internalpb.RemoteTellRequest{
+		RemoteMessages: []*internalpb.RemoteMessage{
+			{
+				Sender:   address.New("from", "testSys", host, port).String(),
+				Receiver: address.New("dst", "testSys", host, port).String(),
+				Message:  []byte{},
+				Metadata: map[string]string{"x-trace-id": "abc"},
+			},
+		},
+	}
+	resp, err := sys.remoteTellHandler(context.Background(), nullConn, req)
+	require.NoError(t, err)
+	_, ok := resp.(*internalpb.RemoteTellResponse)
+	assert.True(t, ok, "per-message metadata failures must not fail the whole batch")
 }

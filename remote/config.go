@@ -79,7 +79,7 @@ func NewConfig(bindAddr string, bindPort int, opts ...Option) *Config {
 		idleTimeout:     1200 * time.Second,
 		bindAddr:        bindAddr,
 		bindPort:        bindPort,
-		compression:     ZstdCompression,
+		compression:     NoCompression,
 		serializers:     make(map[reflect.Type]Serializer, 10),
 		maxIdleConns:    8,                // 8 pooled connections per endpoint
 		dialTimeout:     5 * time.Second,  // 5s dial timeout
@@ -106,7 +106,7 @@ func DefaultConfig() *Config {
 		idleTimeout:     1200 * time.Second,
 		bindAddr:        "127.0.0.1",
 		bindPort:        0,
-		compression:     ZstdCompression,
+		compression:     NoCompression,
 		serializers:     make(map[reflect.Type]Serializer, 10),
 		maxIdleConns:    8,                // 8 pooled connections per endpoint
 		dialTimeout:     5 * time.Second,  // 5s dial timeout

@@ -71,6 +71,13 @@ var (
 	// ErrRemoteSendFailure is returned when sending a remote message fails due to network or protocol issues.
 	ErrRemoteSendFailure = errors.New("remote send failed")
 
+	// ErrRemoteSendBackpressure is returned when a coalesced RemoteTell could
+	// not be enqueued for the per-destination writer within the caller's
+	// context deadline because the outbound queue was saturated. It signals
+	// that the sender is producing faster than the transport can drain; the
+	// caller decides whether to retry, drop, or circuit-break.
+	ErrRemoteSendBackpressure = errors.New("remote send backpressure: outbound queue full")
+
 	// ErrNameRequired is returned when an actor system name is required but not provided.
 	ErrNameRequired = errors.New("actor system is required")
 

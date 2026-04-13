@@ -557,14 +557,17 @@ func WithClientKeepAlive(d time.Duration) ClientOption {
 // the supported options for remoting traffic.
 //
 // Supported compression algorithms:
-//   - ZstdCompression (default): Optimal balance of compression ratio and CPU usage.
-//     Recommended for most use cases, especially high-frequency messaging.
-//   - BrotliCompression: Excellent compression ratio, good for web contexts.
-//   - GzipCompression: Widely supported, good compatibility but slower than Zstd.
-//   - NoCompression: Disables compression. Use only if CPU is extremely constrained
-//     or for debugging purposes.
+//   - NoCompression (default): No transport-level compression. Lowest CPU and
+//     allocator overhead. Recommended for intra-cluster / LAN deployments.
+//   - ZstdCompression: Best ratio-to-CPU trade-off. Opt in for cross-region /
+//     WAN links or when sending large or highly repetitive payloads.
+//   - BrotliCompression: Highest ratio, slower compression — bandwidth-scarce
+//     scenarios where added latency is acceptable.
+//   - GzipCompression: Universally supported, slower than Zstd at comparable
+//     ratios. Useful for compatibility with non-GoAkt consumers.
 //
-// If not specified, ZstdCompression is used by default for optimal performance.
+// If not specified, NoCompression is used. Both peers of a remote connection
+// must agree on the algorithm.
 func WithClientCompression(c remote.Compression) ClientOption {
 	return func(r *client) {
 		r.compression = c
@@ -627,6 +630,54 @@ func WithClientSerializers(msg any, serializer remote.Serializer) ClientOption {
 			iface:      reflect.TypeOf(msg),
 			serializer: serializer,
 		})
+	}
+}
+
+// WithSendCoalescing enables per-destination send coalescing for RemoteTell.
+// When enabled, RemoteTell enqueues the serialized message onto a bounded
+// per-destination ring and returns immediately; a single writer goroutine
+// per destination sends whatever is available as soon as it wakes up
+// (Nagle-style). Batching only occurs naturally while a previous send RPC
+// is in flight: messages enqueued during that window are drained into the
+// next batch, capped at maxBatch. A single message against an idle
+// destination is sent immediately — no artificial delay.
+//
+// Semantics (different from the synchronous default):
+//   - RemoteTell returns nil once the message is enqueued. It does NOT report
+//     transport or server-side errors. Use WithCoalescingErrorHandler to
+//     observe failed batches.
+//   - Messages to the same destination preserve submission order.
+//   - Cross-destination ordering is not guaranteed (it already isn't).
+//   - If the per-destination ring is full, RemoteTell falls back to a
+//     synchronous send for that message only.
+//   - On Close, pending batches are flushed best-effort.
+//
+// Context propagation is preserved: if WithClientContextPropagator is set,
+// the propagator is invoked per call at enqueue time and its headers are
+// stored on each RemoteMessage, so the server can apply distinct metadata
+// to every message in a coalesced batch. Per-call deadlines, however, are
+// not honored on the async path — the caller's context governs enqueue
+// only; batch flushes use a fixed transport deadline.
+//
+// A maxBatch <= 0 disables coalescing and restores the synchronous
+// RemoteTell path end-to-end.
+//
+// A maxBatch <= 0 disables coalescing and restores the synchronous default.
+func WithSendCoalescing(maxBatch int) ClientOption {
+	return func(r *client) {
+		r.coalescing.maxBatch = maxBatch
+	}
+}
+
+// WithCoalescingErrorHandler registers a callback invoked when a coalesced
+// batch fails to send. The handler receives the destination ("host:port"),
+// the messages in the failed batch, and the transport/server error. It runs
+// inline on the per-destination writer goroutine and must not block.
+//
+// Has no effect unless WithSendCoalescing is also set.
+func WithCoalescingErrorHandler(h CoalescingErrorHandler) ClientOption {
+	return func(r *client) {
+		r.coalescing.errHandler = h
 	}
 }
 
@@ -697,6 +748,20 @@ type client struct {
 	// dependencyRegistry is used to decode remote dependencies into extension.Dependency.
 	// Required for RemoteDependencies when the response contains dependencies.
 	dependencyRegistry types.Registry
+
+	// coalescing configures optional per-destination send coalescing. When
+	// enabled, RemoteTell returns as soon as the message is enqueued for the
+	// per-destination writer goroutine, and transport errors are reported via
+	// the configured CoalescingErrorHandler instead of the RemoteTell return
+	// value. Disabled by default.
+	coalescing coalescingConfig
+
+	// coalescers caches one coalescer per destination endpoint ("host:port").
+	// Populated lazily on first coalesced send to a new destination and
+	// torn down in Close. coalescersMu guards the creation path only; reads
+	// go through the lock-free map Get.
+	coalescers   *xsync.Map[string, *coalescer]
+	coalescersMu sync.Mutex
 }
 
 var _ Client = (*client)(nil)
@@ -717,19 +782,20 @@ var _ Client = (*client)(nil)
 func NewClient(opts ...ClientOption) Client {
 	r := &client{
 		// Performance defaults based on benchmarks
-		maxIdleConns: 8,                      // 8 pooled connections per endpoint
-		idleTimeout:  30 * time.Second,       // 30s before eviction
-		dialTimeout:  5 * time.Second,        // 5s dial timeout
-		keepAlive:    15 * time.Second,       // 15s TCP keep-alive
-		compression:  remote.ZstdCompression, // Zstd compression (matches server default in remote.Config)
+		maxIdleConns: 8,                    // 8 pooled connections per endpoint
+		idleTimeout:  30 * time.Second,     // 30s before eviction
+		dialTimeout:  5 * time.Second,      // 5s dial timeout
+		keepAlive:    15 * time.Second,     // 15s TCP keep-alive
+		compression:  remote.NoCompression, // No compression (matches server default in remote.Config)
 		clientCache:  xsync.NewMap[string, *inet.Client](),
+		coalescers:   xsync.NewMap[string, *coalescer](),
 		// Pre-allocate with capacity for the default entry plus a few custom ones.
 		serializers: make([]ifaceEntry, 0, 4),
 	}
 
 	// Register the default proto serializer for all proto.Message implementations.
 	r.serializers = append(r.serializers, ifaceEntry{
-		iface:      reflect.TypeOf((*proto.Message)(nil)).Elem(),
+		iface:      reflect.TypeFor[proto.Message](),
 		serializer: remote.NewProtoSerializer(),
 	})
 
@@ -1502,13 +1568,58 @@ func (r *client) RemoteTell(ctx context.Context, from, to *address.Address, mess
 		return gerrors.NewErrInvalidMessage(err)
 	}
 
-	// Enrich context with metadata
+	// Coalesced fast path: enqueue onto the per-destination writer and return.
+	// Context propagation is preserved by snapshotting the propagator's
+	// headers into each RemoteMessage at enqueue time; the server applies the
+	// per-message metadata when dispatching. That keeps trace spans and
+	// baggage correct even when many callers' messages share a batch.
+	if r.coalescing.enabled() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		md, err := r.injectMessageMetadata(ctx)
+		if err != nil {
+			return err
+		}
+
+		msg := &internalpb.RemoteMessage{
+			Sender:   from.String(),
+			Receiver: to.String(),
+			Message:  marshaled,
+			Metadata: md,
+		}
+
+		c := r.getCoalescer(to.Host(), to.Port())
+		if c == nil {
+			return gerrors.NewErrRemoteSendFailure(errors.New("no coalescer available for destination"))
+		}
+
+		// Block until the per-destination writer has room, the caller's
+		// context expires, or the coalescer is shut down. This is the
+		// industry-standard backpressure pattern (see coalescer.submit for
+		// references). No silent drop, no unbounded buffering, no fallback
+		// to a second connection.
+		switch err := c.submit(ctx, msg); {
+		case err == nil:
+			return nil
+		case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+			// The caller's deadline passed before the outbound queue
+			// drained. Surface as backpressure so callers can retry,
+			// drop, or circuit-break visibly — wrapping the context
+			// error keeps the original cause available via errors.Is.
+			return errors.Join(gerrors.ErrRemoteSendBackpressure, err)
+		default:
+			return gerrors.NewErrRemoteSendFailure(err)
+		}
+	}
+
+	// Non-coalesced path (WithSendCoalescing not set). One RPC per call.
 	ctx, err = r.enrichContext(ctx)
 	if err != nil {
 		return err
 	}
 
-	// Get pooled client
 	client := r.NetClient(to.Host(), to.Port())
 	request := &internalpb.RemoteTellRequest{
 		RemoteMessages: []*internalpb.RemoteMessage{
@@ -1520,13 +1631,64 @@ func (r *client) RemoteTell(ctx context.Context, from, to *address.Address, mess
 		},
 	}
 
-	// Send request
 	resp, err := client.SendProto(ctx, request)
 	if err != nil {
 		return err
 	}
 
 	return checkProtoError(resp)
+}
+
+// injectMessageMetadata snapshots the configured context propagator's
+// output for the given context into a map suitable for RemoteMessage.Metadata.
+// Returns nil when no propagator is configured or the propagator produced no
+// headers; the server side falls back to the request-level metadata in that
+// case, preserving behavior for callers that don't use propagation.
+func (r *client) injectMessageMetadata(ctx context.Context) (map[string]string, error) {
+	if r.contextPropagator == nil {
+		return nil, nil
+	}
+	headers := make(nethttp.Header, 4)
+	if err := r.contextPropagator.Inject(ctx, headers); err != nil {
+		return nil, err
+	}
+	if len(headers) == 0 {
+		return nil, nil
+	}
+	md := make(map[string]string, len(headers))
+	for k, v := range headers {
+		if len(v) > 0 {
+			md[k] = v[0]
+		}
+	}
+	return md, nil
+}
+
+// getCoalescer returns the per-destination coalescer for (host, port), creating
+// it on first use. Lazy initialization uses the same double-checked pattern as
+// NetClient. Returns nil if coalescing is not enabled.
+func (r *client) getCoalescer(host string, port int) *coalescer {
+	if !r.coalescing.enabled() {
+		return nil
+	}
+
+	dest := net.JoinHostPort(host, strconv.Itoa(port))
+	if c, ok := r.coalescers.Get(dest); ok {
+		return c
+	}
+
+	// Resolve the net client outside the coalescer creation lock: NetClient
+	// takes r.clientMu internally, so nesting would self-deadlock.
+	nc := r.NetClient(host, port)
+	r.coalescersMu.Lock()
+	defer r.coalescersMu.Unlock()
+	if c, ok := r.coalescers.Get(dest); ok {
+		return c
+	}
+
+	coalescer := newCoalescer(dest, nc, r.coalescing)
+	r.coalescers.Set(dest, coalescer)
+	return coalescer
 }
 
 // RemoteAsk delivers a request message to a remote actor and waits for the first
@@ -1976,6 +2138,13 @@ func (r *client) RemoteReinstate(ctx context.Context, host string, port int, nam
 //
 // After calling Close, the client should not be used for new requests.
 func (r *client) Close() {
+	// Drain and stop all coalescers first so any pending batches are flushed
+	// through still-open pooled clients before those clients close.
+	r.coalescers.Range(func(_ string, c *coalescer) {
+		c.close()
+	})
+	r.coalescers.Reset()
+
 	// Close all pooled clients to release TCP connections and file descriptors
 	r.clientCache.Range(func(_ string, client *inet.Client) {
 		client.Close()

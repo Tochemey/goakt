@@ -2781,6 +2781,54 @@ func TestRemoteContextPropagation(t *testing.T) {
 			return actor.Seen() == headerVal
 		}, time.Second, 10*time.Millisecond)
 	})
+
+	t.Run("RemoteTell coalesced path propagates per-call context", func(t *testing.T) {
+		// Uses the coalesced send path to prove per-message propagation
+		// survives batching: a single ctx value is set before each send, the
+		// value differs per send, and the receiver must observe the correct
+		// value for each message.
+		ctxKey := remoteTestCtxKey{}
+		headerKey := "x-goakt-propagated"
+		ctx := context.Background()
+
+		sys, err := NewActorSystem(
+			"ctx-extract-tell-coalesced",
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig("127.0.0.1", dynaport.Get(1)[0],
+				remote.WithContextPropagator(&headerPropagator{headerKey: headerKey, ctxKey: ctxKey}))),
+		)
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		pause.For(200 * time.Millisecond)
+		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
+
+		recorder := &contextRecordingActor{key: ctxKey}
+		actorName := "context-tell-coalesced"
+		pid, err := sys.Spawn(ctx, actorName, recorder)
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		rem := remoteclient.NewClient(
+			remoteclient.WithClientContextPropagator(&headerPropagator{headerKey: headerKey, ctxKey: ctxKey}),
+			// Large batch + long flush so every send enters the same batch.
+			remoteclient.WithSendCoalescing(64),
+		)
+		t.Cleanup(rem.Close)
+
+		addr, err := rem.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+		require.NoError(t, err)
+
+		expected := []string{"alpha", "beta", "gamma", "delta", "epsilon"}
+		for _, v := range expected {
+			callCtx := context.WithValue(context.Background(), ctxKey, v)
+			require.NoError(t, rem.RemoteTell(callCtx, address.NoSender(), addr, new(testpb.TestSend)))
+		}
+
+		require.Eventually(t, func() bool { return recorder.Count() == len(expected) }, 2*time.Second, 10*time.Millisecond)
+		got := recorder.Seen()
+		assert.ElementsMatch(t, expected, got,
+			"every coalesced message must carry the context value present at its enqueue time")
+	})
 }
 
 func TestRemotingRecover(t *testing.T) {

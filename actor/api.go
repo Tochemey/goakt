@@ -56,10 +56,13 @@ func Ask(ctx context.Context, to *PID, message any, timeout time.Duration) (resp
 	}
 
 	noSender := to.ActorSystem().NoSender()
-	receiveContext, err := toReceiveContext(ctx, noSender, to, message, false)
+	decoded, from, err := resolveDispatch(to, noSender, message)
 	if err != nil {
 		return nil, err
 	}
+	message = decoded
+
+	receiveContext := toReceiveContext(ctx, from, to, message, false)
 
 	responseCh := receiveContext.response
 	to.doReceive(receiveContext)
@@ -109,12 +112,11 @@ func Tell(ctx context.Context, to *PID, message any) error {
 		return gerrors.ErrDead
 	}
 
-	receiveContext, err := toReceiveContext(ctx, to.ActorSystem().NoSender(), to, message, true)
+	decoded, from, err := resolveDispatch(to, to.ActorSystem().NoSender(), message)
 	if err != nil {
 		return err
 	}
-
-	to.doReceive(receiveContext)
+	to.doReceive(toReceiveContext(ctx, from, to, decoded, true))
 	return nil
 }
 
@@ -147,32 +149,66 @@ func BatchAsk(ctx context.Context, to *PID, timeout time.Duration, messages ...a
 	return
 }
 
-// toReceiveContext creates a ReceiveContext provided a message and a receiver
-func toReceiveContext(ctx context.Context, from, to *PID, message any, async bool) (*ReceiveContext, error) {
-	receiveContext := getContext()
+// toReceiveContext builds a ReceiveContext for delivery into to's mailbox.
+// The caller is responsible for resolving the sender PID and decoding the
+// message into a typed payload; this function performs no interpretation.
+//
+// RemoteMessage wire payloads must be passed through unwrapRemoteMessage
+// first so a single helper owns the serializer + sender-address resolution
+// path (see handleRemoteTell, handleRemoteAsk).
+func toReceiveContext(ctx context.Context, from, to *PID, message any, async bool) *ReceiveContext {
+	rc := getContext()
+	rc.build(ctx, from, to, message, async)
+	return rc
+}
 
-	if msg, ok := message.(*internalpb.RemoteMessage); ok {
-		serializer := to.remoting.Serializer(nil)
-		actual, err := serializer.Deserialize(msg.GetMessage())
-		if err != nil {
-			return nil, gerrors.NewErrInvalidRemoteMessage(err)
-		}
-
-		// Build the sender PID from the wire address. Remote messages carry the
-		// sender identity as a string; we materialise it as a lightweight remote PID
-		// so that ctx.Sender() is always a unified *PID, never a raw *address.Address.
-		from = to.ActorSystem().NoSender()
-		if rawSender := msg.GetSender(); rawSender != "" {
-			addr, err := address.Parse(rawSender)
-			if err != nil {
-				return nil, gerrors.NewErrInvalidRemoteMessage(err)
-			}
-			from = newRemotePID(addr, to.remoting)
-		}
-
-		message = actual
+// unwrapRemoteMessage turns a wire RemoteMessage into the two runtime values
+// required to deliver it into a local mailbox: the typed payload and the
+// sender PID. Returns ErrInvalidRemoteMessage for unknown payload types or
+// unparseable sender addresses. The returned sender is never nil — wire
+// messages with an empty sender yield the target system's NoSender.
+func unwrapRemoteMessage(to *PID, msg *internalpb.RemoteMessage) (any, *PID, error) {
+	payload, err := to.remoting.Serializer(nil).Deserialize(msg.GetMessage())
+	if err != nil {
+		return nil, nil, gerrors.NewErrInvalidRemoteMessage(err)
 	}
 
-	receiveContext.build(ctx, from, to, message, async)
-	return receiveContext, nil
+	raw := msg.GetSender()
+	if raw == "" {
+		return payload, to.ActorSystem().NoSender(), nil
+	}
+
+	addr, err := address.Parse(raw)
+	if err != nil {
+		return nil, nil, gerrors.NewErrInvalidRemoteMessage(err)
+	}
+	return payload, newRemotePID(addr, to.remoting), nil
+}
+
+// resolveDispatch produces the (payload, sender) pair that the dispatcher
+// ultimately needs, whatever the shape of the incoming message.
+//
+// When message is a wire RemoteMessage it is unwrapped (see
+// unwrapRemoteMessage); the caller's from wins if it is a concrete sender
+// (anything other than the target's NoSender), otherwise the sender
+// materialized from the wire is used. For non-RemoteMessage inputs message
+// and from are returned unchanged.
+//
+// This lets the remote tell handler — which has already parsed the sender
+// once for dead-letter routing — skip a redundant address parse, while
+// legacy call sites that only have NoSender keep getting the wire sender
+// resolved for them.
+func resolveDispatch(to, from *PID, message any) (any, *PID, error) {
+	rm, ok := message.(*internalpb.RemoteMessage)
+	if !ok {
+		return message, from, nil
+	}
+	payload, wireFrom, err := unwrapRemoteMessage(to, rm)
+	if err != nil {
+		return nil, nil, err
+	}
+	if from != nil && from != to.ActorSystem().NoSender() {
+		return payload, from, nil
+	}
+	return payload, wireFrom, nil
 }

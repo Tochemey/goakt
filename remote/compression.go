@@ -28,24 +28,35 @@ package remote
 // a mismatch will produce unreadable frames.
 //
 // The default for both NewRemoting and NewConfig / DefaultConfig is
-// ZstdCompression, which offers an excellent trade-off between compression
-// ratio and CPU overhead for high-frequency actor messaging.
+// NoCompression. This matches the convention adopted by gRPC, Akka, Erlang
+// distribution, Kafka, Orleans, and most service meshes: transport-level
+// compression is left off because typical actor payloads are small structured
+// protobuf for which compression yields little bandwidth and meaningful CPU
+// and allocation overhead, especially on intra-cluster LAN links.
+//
+// Enable ZstdCompression (or GzipCompression / BrotliCompression) explicitly
+// via WithCompression for deployments where bandwidth is the binding constraint
+// — most commonly cross-region / WAN links, or when sending large or highly
+// repetitive payloads.
 type Compression int
 
 const (
 	// NoCompression disables compression entirely. Data is transmitted as raw
-	// protobuf-encoded frames with no additional processing.
+	// protobuf-encoded frames with no additional processing. This is the
+	// default for both NewRemoting and NewConfig / DefaultConfig.
 	//
 	// Pros:
 	//   - Zero CPU overhead for compression/decompression.
 	//   - Lowest possible per-message latency.
+	//   - No per-connection encoder/decoder state — lighter on the allocator
+	//     under high fan-out topologies.
 	//   - Simplifies debugging because payloads are not transformed on the wire.
 	//
 	// Cons:
-	//   - No bandwidth savings; large or repetitive messages consume
-	//     significantly more network I/O.
-	//   - Not recommended for production workloads unless the network is
-	//     extremely fast and CPU is the bottleneck.
+	//   - No bandwidth savings; large or repetitive messages consume more
+	//     network I/O than they would with a compressed transport.
+	//   - For bandwidth-constrained links (cross-region, WAN, metered
+	//     networks) prefer ZstdCompression.
 	NoCompression Compression = iota
 
 	// GzipCompression uses the gzip (RFC 1952 / DEFLATE) algorithm.
@@ -61,8 +72,10 @@ const (
 	//   - No built-in dictionary support for small-message optimization.
 	GzipCompression
 
-	// ZstdCompression uses the Zstandard (RFC 8878) algorithm. This is the
-	// default for both client and server.
+	// ZstdCompression uses the Zstandard (RFC 8878) algorithm. Recommended
+	// when bandwidth is the binding constraint (cross-region / WAN links,
+	// large or highly repetitive payloads). Must be set explicitly via
+	// WithCompression; it is not enabled by default.
 	//
 	// Pros:
 	//   - Excellent compression ratio (typically 50-70% bandwidth reduction

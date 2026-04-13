@@ -1775,6 +1775,44 @@ func (a *contextEchoActor) setSeen(val any) {
 	a.seen = val
 }
 
+// contextRecordingActor records every ctx value observed under a given key
+// across all received messages. Used to verify per-message context
+// propagation through the coalesced send path.
+type contextRecordingActor struct {
+	key  any
+	mu   sync.Mutex
+	seen []string
+}
+
+func (*contextRecordingActor) PreStart(*Context) error { return nil }
+func (*contextRecordingActor) PostStop(*Context) error { return nil }
+
+func (a *contextRecordingActor) Receive(ctx *ReceiveContext) {
+	if _, ok := ctx.Message().(*testpb.TestSend); !ok {
+		return
+	}
+	v := ctx.Context().Value(a.key)
+	if s, ok := v.(string); ok {
+		a.mu.Lock()
+		a.seen = append(a.seen, s)
+		a.mu.Unlock()
+	}
+}
+
+func (a *contextRecordingActor) Count() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return len(a.seen)
+}
+
+func (a *contextRecordingActor) Seen() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make([]string, len(a.seen))
+	copy(out, a.seen)
+	return out
+}
+
 func (a *contextEchoActor) Seen() any {
 	a.mu.RLock()
 	defer a.mu.RUnlock()

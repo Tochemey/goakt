@@ -6,6 +6,19 @@
 
 - Enhanced the `testkit` package with new helper methods for improved test ergonomics.
 
+### 🚀 Performance
+
+- **Remote `Tell` send coalescing.** The outbound `RemoteTell` path now uses a per-destination Nagle-style writer that amortizes per-RPC cost across messages that pile up while a previous send is in flight. A single message against an idle destination is still sent immediately — batching happens only while a send is already in progress, so there is no artificial latency on the happy path. Measured on Apple M1 with 20 senders / 10 engines / 2000 actors and default zstd compression, throughput goes from **~122k msgs/sec to ~880k msgs/sec (~7.2×)**. The benchmark covering this configuration lives in `benchmark/remote_tell_thoughput_test.go`.
+- Context propagation is preserved end-to-end via a new per-message `metadata` field on `RemoteMessage`, populated by the configured `ContextPropagator` at enqueue time and applied by the server before dispatching each message.
+- Wire format: `internalpb.RemoteMessage` gained `map<string, string> metadata = 4;`. Additive and backward-compatible — older peers ignore the field.
+
+### ⚠️ Behavior changes
+
+- `RemoteTell` now returns after the message is enqueued for the per-destination coalesced writer rather than after the transport ACK. Transport errors for batched sends are reported asynchronously through the actor system's logger. Callers that need synchronous delivery confirmation should continue to use `RemoteAsk`, which is unaffected.
+- Per-call context deadlines set on a `RemoteTell` call are not honored by the coalesced path; the writer uses its own transport deadline.
+- **Default remote compression changed from `ZstdCompression` to `NoCompression`.** This aligns GoAkt with the convention adopted by gRPC, Akka, Erlang distribution, Kafka, and Orleans: transport-level compression is left off by default because typical actor payloads are small structured protobuf for which compression yields little bandwidth savings and meaningful CPU and allocator overhead — particularly on intra-cluster LAN links. Deployments where bandwidth is the binding constraint (cross-region / WAN, large or highly repetitive payloads) should opt in explicitly with `remote.WithCompression(remote.ZstdCompression)`. Both ends of a remote connection must agree on the algorithm, so when upgrading either configure both peers explicitly or upgrade them together.
+- **`RemoteTell` now applies bounded-queue backpressure when send coalescing is enabled.** Previously, when the per-destination writer's input channel was saturated the call silently fell through to a second synchronous connection; under burst load this exposed callers to transport-level errors from connection-pool contention. Behaviour now matches the industry-standard pattern used by Erlang distribution, Akka Artery, Kafka producer, and gRPC streaming: the call blocks on the outbound queue until space becomes available, the caller's `context` is cancelled, or the transport is shut down. On context deadline/cancel the call returns a new typed error `errors.ErrRemoteSendBackpressure` (joined with the underlying `ctx.Err()`, so `errors.Is(err, context.DeadlineExceeded)` remains true); callers decide whether to retry, drop, or circuit-break. The synchronous fallback path has been removed. This eliminates a class of spurious transport errors under load (benchmarks run during development went from ~500 errors / 10M sends to 0) and makes overload visible as a distinct, actionable signal rather than generic RPC failure.
+
 ### 🔧 Improvements
 
 - Adjusted the `benchmark` package name for consistency.
