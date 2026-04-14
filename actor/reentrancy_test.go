@@ -659,7 +659,7 @@ func TestProcessStashErrorPath(t *testing.T) {
 	pid.doReceive(receiveCtx)
 
 	require.Eventually(t, func() bool {
-		return pid.processing.Load() == idle && pid.mailbox.IsEmpty()
+		return pid.schedState.Load() == dispatchIdle && pid.mailbox.IsEmpty()
 	}, reentrancyReplyTimeout, reentrancyShortWait)
 }
 
@@ -667,12 +667,12 @@ func TestHandleAsyncRequestValidationErrors(t *testing.T) {
 	pid := &PID{logger: log.DiscardLogger}
 
 	t.Run("nil request", func(t *testing.T) {
-		pid.handleAsyncRequest(nil, nil)
+		pid.handleAsyncRequest(nil, nil, time.Now())
 	})
 
 	t.Run("missing fields", func(t *testing.T) {
 		received := newReceiveContext(context.Background(), pid, pid, new(testpb.TestSend))
-		pid.handleAsyncRequest(received, &commands.AsyncRequest{})
+		pid.handleAsyncRequest(received, &commands.AsyncRequest{}, time.Now())
 	})
 }
 

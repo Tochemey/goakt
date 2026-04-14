@@ -53,12 +53,66 @@ linters:
         - G117
         - G118
     misspell:
+      # Codebase uses British spellings throughout. The locale is US so
+      # misspell flags American forms as the "correct" target, and the
+      # ignore-rules below list the British forms we want to keep. Add
+      # every inflection of a verb (root, third-person, past, gerund) so
+      # comments like "the queue is signalled" or "amortises the cost"
+      # are not flagged.
       locale: US
       ignore-rules:
+        # cancel
         - cancelled
+        - cancelling
+        # behaviour / behave
         - behaviour
+        - behaviours
+        - behavioural
+        # initialise
+        - initialise
         - initialised
+        - initialises
+        - initialising
+        # materialise
         - materialise
+        - materialised
+        - materialises
+        - materialising
+        # amortise
+        - amortise
+        - amortised
+        - amortises
+        - amortising
+        # maximise / minimise
+        - maximise
+        - maximised
+        - maximises
+        - maximising
+        - minimise
+        - minimised
+        - minimises
+        - minimising
+        # signal (double-l British past/gerund)
+        - signalled
+        - signalling
+        # serialise / deserialise (often appear in messaging/IO comments)
+        - serialise
+        - serialised
+        - serialises
+        - serialising
+        - deserialise
+        - deserialised
+        - deserialises
+        - deserialising
+        # organise / synchronise — common in concurrency comments
+        - organise
+        - organised
+        - organises
+        - organising
+        - synchronise
+        - synchronised
+        - synchronises
+        - synchronising
     revive:
       enable-all-rules: false
       enable-default-rules: true

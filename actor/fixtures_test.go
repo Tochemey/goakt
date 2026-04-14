@@ -32,6 +32,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -2110,7 +2111,46 @@ func createSelfManagedProvider(broadcastPort int) providerFactory {
 	}
 }
 
+// testSystemPortBindRetries is the number of times testSystem retries
+// start-up when the underlying cluster/memberlist binder loses the race
+// to claim a dynaport-allocated port. dynaport opens a short-lived
+// listener to discover a free port then closes it, leaving a TOCTOU
+// window where a parallel test or process can grab the port before the
+// cluster actually binds. Retrying with a fresh port set makes CI
+// immune to that race.
+const testSystemPortBindRetries = 5
+
+// isPortBindError inspects an error chain for the classic
+// "address already in use" signal. Used by testSystem to decide whether
+// to retry Start with a fresh dynaport allocation.
+func isPortBindError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "address already in use") ||
+		strings.Contains(msg, "bind: address already in use")
+}
+
 func testSystem(t *testing.T, providerFactory providerFactory, opts ...testClusterOption) (ActorSystem, discovery.Provider) {
+	for attempt := range testSystemPortBindRetries {
+		system, provider, err := startTestSystem(t, providerFactory, opts...)
+		if err == nil {
+			return system, provider
+		}
+		if !isPortBindError(err) {
+			require.NoError(t, err)
+		}
+		t.Logf("testSystem port-bind collision on attempt %d/%d: %v", attempt+1, testSystemPortBindRetries, err)
+	}
+	t.Fatalf("testSystem failed to obtain a free port set after %d attempts", testSystemPortBindRetries)
+	return nil, nil
+}
+
+// startTestSystem performs one testSystem attempt and returns any
+// Start-time error so the caller can distinguish port-bind collisions
+// from fatal misconfigurations.
+func startTestSystem(t *testing.T, providerFactory providerFactory, opts ...testClusterOption) (ActorSystem, discovery.Provider, error) {
 	ctx := context.TODO()
 	logger := log.DiscardLogger
 
@@ -2193,8 +2233,10 @@ func testSystem(t *testing.T, providerFactory providerFactory, opts ...testClust
 		require.NoError(t, system.Inject(cfg.dependency))
 	}
 
-	require.NoError(t, system.Start(ctx))
-	return system, provider
+	if err := system.Start(ctx); err != nil {
+		return nil, nil, err
+	}
+	return system, provider, nil
 }
 
 func testNATs(t *testing.T, serverAddr string, opts ...testClusterOption) (ActorSystem, discovery.Provider) {

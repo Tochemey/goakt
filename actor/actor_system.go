@@ -810,6 +810,10 @@ type actorSystem struct {
 	// specifies the message scheduler
 	scheduler *scheduler
 
+	// dispatcher drives the shared worker pool that processes actor
+	// mailboxes. Created in Start, torn down non-blockingly in shutdown.
+	dispatcher *dispatcher
+
 	// manages passivation deadlines without per-actor goroutines
 	passivator *passivationManager
 
@@ -1037,6 +1041,9 @@ func (x *actorSystem) Start(ctx context.Context) error {
 	x.starting.Store(true)
 
 	x.scheduler = newScheduler(x.logger, x.shutdownTimeout, x)
+
+	x.dispatcher = newDispatcher(dispatcherWorkerCount(), dispatcherThroughput)
+	x.dispatcher.start()
 
 	if err := chain.
 		New(chain.WithFailFast(), chain.WithContext(ctx)).
@@ -2455,6 +2462,12 @@ func (x *actorSystem) shutdown(ctx context.Context) (err error) {
 
 	defer func() {
 		x.reset()
+		// Signal dispatcher shutdown after all actors are torn down and
+		// state is reset. We do not wait for workers to exit because this
+		// shutdown path may be running on one of the worker goroutines
+		// (e.g. triggered from an actor receive handler). Workers exit
+		// autonomously once their current turn completes.
+		x.dispatcher.signalStop()
 		err = multierr.Combine(err, x.logger.Flush())
 	}()
 

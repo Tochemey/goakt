@@ -23,7 +23,6 @@
 package actor
 
 import (
-	"sync"
 	"sync/atomic"
 	"unsafe"
 )
@@ -45,8 +44,27 @@ type node struct {
 	next  unsafe.Pointer
 }
 
-// Single global pool for mpscNode to avoid per-op allocations.
-var nodePool = sync.Pool{New: func() any { return new(node) }}
+// nodePoolSize controls the bounded channel-based pool for MPSC queue nodes.
+// Nodes are produced on the consumer's P (Dequeue → Put) and consumed on
+// the producer's P (Enqueue → Get). With sync.Pool, every Get becomes a
+// cross-P steal because the producing and consuming Ps differ. A channel-
+// based pool eliminates this thrashing.
+//
+// Sized to absorb the in-flight node working set under high parallelism;
+// a too-small pool drops nodes back to GC and forces mallocgc on the hot
+// Enqueue path.
+const nodePoolSize = 8192
+
+// nodeCh is a channel-based bounded pool for MPSC queue node objects.
+// Pre-warmed at package init so the first burst of Enqueue calls finds
+// nodes waiting and does not fall through to mallocgc on every send.
+var nodeCh = func() chan *node {
+	ch := make(chan *node, nodePoolSize)
+	for range nodePoolSize {
+		ch <- new(node)
+	}
+	return ch
+}()
 
 // UnboundedMailbox is a lock-free multi-producer, single-consumer (MPSC)
 // FIFO queue used as the actor mailbox.
@@ -97,7 +115,12 @@ func NewUnboundedMailbox() *UnboundedMailbox {
 // non-blocking and preserves FIFO ordering. The method currently always returns
 // nil; the error is present to satisfy the Mailbox interface.
 func (m *UnboundedMailbox) Enqueue(value *ReceiveContext) error {
-	tnode := nodePool.Get().(*node)
+	var tnode *node
+	select {
+	case tnode = <-nodeCh:
+	default:
+		tnode = new(node)
+	}
 
 	// Non-atomic store: the node is thread-local and invisible to other
 	// goroutines until the SwapPointer below publishes it.
@@ -133,7 +156,10 @@ func (m *UnboundedMailbox) Dequeue() *ReceiveContext {
 	value := next.value
 	next.value = nil // avoid memory leaks; safe because node is now consumed
 
-	nodePool.Put(head)
+	select {
+	case nodeCh <- head:
+	default:
+	}
 	return value
 }
 
