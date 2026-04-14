@@ -109,6 +109,9 @@ func (d *dispatcher) stop() {
 // within a worker turn; each worker finishes its current turn and exits
 // on its next take. Idempotent.
 func (d *dispatcher) signalStop() {
+	if d == nil {
+		return
+	}
 	if !d.stopping.CompareAndSwap(false, true) {
 		return
 	}
