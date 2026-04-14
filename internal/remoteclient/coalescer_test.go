@@ -621,8 +621,13 @@ func TestCoalescing_SubmitAfterClose(t *testing.T) {
 // goroutine is stuck mid-flush — the only way to reliably fill the outbound
 // channel so backpressure can be exercised.
 type blockingServer struct {
-	release chan struct{}
-	hits    atomic.Int64
+	release     chan struct{}
+	releaseOnce sync.Once
+	hits        atomic.Int64
+}
+
+func (b *blockingServer) closeRelease() {
+	b.releaseOnce.Do(func() { close(b.release) })
 }
 
 func (b *blockingServer) handler(ctx context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
@@ -654,11 +659,7 @@ func startBlockingServer(t *testing.T) (*blockingServer, string, int, func()) {
 
 	stop := func() {
 		// Release any parked handler so the server can shut down.
-		select {
-		case <-bs.release:
-		default:
-			close(bs.release)
-		}
+		bs.closeRelease()
 		require.NoError(t, ps.Shutdown(time.Second))
 		<-done
 	}
@@ -676,16 +677,12 @@ func newStuckCoalescer(t *testing.T, maxBatch int) (c *coalescer, release func()
 	bs, host, port, srvStop := startBlockingServer(t)
 	nc := inet.NewClient(net.JoinHostPort(host, strconv.Itoa(port)))
 	c = newCoalescer(net.JoinHostPort(host, strconv.Itoa(port)), nc, coalescingConfig{maxBatch: maxBatch})
-	release = func() { close(bs.release); bs.release = make(chan struct{}) }
+	release = bs.closeRelease
 	stop = func() {
 		// Release any parked handler first so the writer goroutine's
 		// in-flight SendProto can return; otherwise c.close() blocks on
 		// the writer for the full RPC timeout.
-		select {
-		case <-bs.release:
-		default:
-			close(bs.release)
-		}
+		bs.closeRelease()
 		// Break any remaining in-flight RPC by closing the net client
 		// before waiting on the writer goroutine — the writer then
 		// observes a transport error and returns promptly instead of
