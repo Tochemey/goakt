@@ -24,7 +24,6 @@ require (
 	github.com/testcontainers/testcontainers-go/modules/consul v0.42.0
 	github.com/testcontainers/testcontainers-go/modules/etcd v0.42.0
 	github.com/tochemey/olric v0.3.9
-	github.com/travisjeffery/go-dynaport v1.0.0
 	github.com/zeebo/xxh3 v1.1.0
 	go.etcd.io/bbolt v1.4.3
 	go.etcd.io/etcd/api/v3 v3.6.10

@@ -32,7 +32,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/travisjeffery/go-dynaport"
+
+	dynaport "github.com/tochemey/goakt/v4/internal/net"
 )
 
 func TestBroadcast_encodePacket(t *testing.T) {

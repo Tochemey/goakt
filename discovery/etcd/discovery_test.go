@@ -30,9 +30,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	testcontainer "github.com/testcontainers/testcontainers-go/modules/etcd"
-	"github.com/travisjeffery/go-dynaport"
 
 	"github.com/tochemey/goakt/v4/discovery"
+	dynaport "github.com/tochemey/goakt/v4/internal/net"
 )
 
 func TestDiscovery(t *testing.T) {

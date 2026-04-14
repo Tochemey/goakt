@@ -34,7 +34,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/proto"
 
 	actors "github.com/tochemey/goakt/v4/actor"
@@ -1628,7 +1627,7 @@ func TestClient(t *testing.T) {
 
 	t.Run("With Kinds failure when cluster not enabled", func(t *testing.T) {
 		ctx := context.TODO()
-		nodePorts := dynaport.Get(1)
+		nodePorts := inet.Get(1)
 		remotingPort := nodePorts[0]
 		host := "127.0.0.1"
 		actorSystemName := "testSystem"
@@ -1678,7 +1677,7 @@ func TestClient(t *testing.T) {
 	})
 	t.Run("With GetNodeMetric failure when cluster not enabled", func(t *testing.T) {
 		ctx := context.TODO()
-		nodePorts := dynaport.Get(1)
+		nodePorts := inet.Get(1)
 		remotingPort := nodePorts[0]
 		host := "127.0.0.1"
 		actorSystemName := "testSystem"
@@ -1750,7 +1749,7 @@ func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string, com
 	ctx := context.TODO()
 
 	// generate the ports for the single startNode
-	nodePorts := dynaport.Get(3)
+	nodePorts := inet.Get(3)
 	discoveryPort := nodePorts[0]
 	peersPort := nodePorts[1]
 	remotePort := nodePorts[2]

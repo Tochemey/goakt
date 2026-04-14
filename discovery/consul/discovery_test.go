@@ -30,10 +30,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go/modules/consul"
-	"github.com/travisjeffery/go-dynaport"
 	"go.uber.org/atomic"
 
 	"github.com/tochemey/goakt/v4/discovery"
+	dynaport "github.com/tochemey/goakt/v4/internal/net"
 )
 
 func TestDiscovery(t *testing.T) {

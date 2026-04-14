@@ -26,9 +26,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/travisjeffery/go-dynaport"
 
 	"github.com/tochemey/goakt/v4/internal/address"
+	dynaport "github.com/tochemey/goakt/v4/internal/net"
 )
 
 func TestTree(t *testing.T) {

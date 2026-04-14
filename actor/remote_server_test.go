@@ -32,7 +32,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/proto"
 
 	gerrors "github.com/tochemey/goakt/v4/errors"
@@ -251,7 +250,7 @@ func TestRemoteHandlersContextPropagationSuccess(t *testing.T) {
 	ctxWithMD := inet.ContextWithMetadata(ctx, md)
 
 	t.Run("RemoteLookup_with_propagator_and_metadata", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p, remote.WithContextPropagator(propagator))),
@@ -728,7 +727,7 @@ func TestRemoteSpawnChildHandler(t *testing.T) {
 	})
 
 	t.Run("parent kind mismatch returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -754,7 +753,7 @@ func TestRemoteSpawnChildHandler(t *testing.T) {
 	})
 
 	t.Run("success returns child address", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -821,7 +820,7 @@ func TestRemotePassivationStrategyHandler(t *testing.T) {
 	})
 
 	t.Run("success returns time-based passivation strategy", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -849,7 +848,7 @@ func TestRemotePassivationStrategyHandler(t *testing.T) {
 	})
 
 	t.Run("success returns long-lived passivation strategy", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -873,7 +872,7 @@ func TestRemotePassivationStrategyHandler(t *testing.T) {
 	})
 
 	t.Run("success returns message-count-based passivation strategy", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -938,7 +937,7 @@ func TestRemoteStateHandler(t *testing.T) {
 	})
 
 	t.Run("success returns true for STATE_RUNNING when actor is running", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -960,7 +959,7 @@ func TestRemoteStateHandler(t *testing.T) {
 	})
 
 	t.Run("success returns false for STATE_STOPPING when actor is running", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -982,7 +981,7 @@ func TestRemoteStateHandler(t *testing.T) {
 	})
 
 	t.Run("success returns false for STATE_SUSPENDED when actor is not suspended", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -1004,7 +1003,7 @@ func TestRemoteStateHandler(t *testing.T) {
 	})
 
 	t.Run("success returns true for STATE_RELOCATABLE when actor is relocatable", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -1026,7 +1025,7 @@ func TestRemoteStateHandler(t *testing.T) {
 	})
 
 	t.Run("success returns false for STATE_RELOCATABLE when actor has relocation disabled", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -1048,7 +1047,7 @@ func TestRemoteStateHandler(t *testing.T) {
 	})
 
 	t.Run("success returns false for STATE_UNKNOWN", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -1116,7 +1115,7 @@ func TestRemoteChildrenHandler(t *testing.T) {
 	})
 
 	t.Run("success returns empty addresses when actor has no children", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -1138,7 +1137,7 @@ func TestRemoteChildrenHandler(t *testing.T) {
 	})
 
 	t.Run("success returns child addresses when actor has children", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -1222,7 +1221,7 @@ func TestRemoteParentHandler(t *testing.T) {
 	})
 
 	t.Run("root actor returns parent address", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -1246,7 +1245,7 @@ func TestRemoteParentHandler(t *testing.T) {
 	})
 
 	t.Run("success returns parent address for child actor", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -1317,7 +1316,7 @@ func TestRemoteKindHandler(t *testing.T) {
 	})
 
 	t.Run("success returns actor kind", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -1385,7 +1384,7 @@ func TestRemoteDependenciesHandler(t *testing.T) {
 	})
 
 	t.Run("success returns empty dependencies when actor has none", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -1407,7 +1406,7 @@ func TestRemoteDependenciesHandler(t *testing.T) {
 	})
 
 	t.Run("success returns dependencies when actor has them", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -1480,7 +1479,7 @@ func TestRemoteMetricHandler(t *testing.T) {
 	})
 
 	t.Run("success returns metric for running actor", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -1552,7 +1551,7 @@ func TestRemoteRoleHandler(t *testing.T) {
 	})
 
 	t.Run("success returns empty role when actor has none", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -1574,7 +1573,7 @@ func TestRemoteRoleHandler(t *testing.T) {
 	})
 
 	t.Run("success returns role when actor has one", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -1643,7 +1642,7 @@ func TestRemoteStashSizeHandler(t *testing.T) {
 	})
 
 	t.Run("success returns stash size for running actor", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -2029,7 +2028,7 @@ func TestRemoteTellGrainHandlerDeserializationError(t *testing.T) {
 // to call the server handlers over the wire against a real actor system.
 func TestRemoteServerHandlersIntegration(t *testing.T) {
 	ctx := context.Background()
-	ports := dynaport.Get(1)
+	ports := inet.Get(1)
 	port := ports[0]
 	host := "127.0.0.1"
 

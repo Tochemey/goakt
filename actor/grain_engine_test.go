@@ -35,7 +35,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v4/datacenter"
@@ -847,7 +846,7 @@ func TestTryClaimGrain_AlreadyExistsOwnerLookupError(t *testing.T) {
 func TestRemoting_RemoteActivateGrain_WithActorSystem(t *testing.T) {
 	ctx := context.TODO()
 	logger := log.DiscardLogger
-	ports := dynaport.Get(1)
+	ports := internalnet.Get(1)
 	remotingPort := ports[0]
 	host := "0.0.0.0"
 
@@ -895,7 +894,7 @@ func TestRemoting_RemoteActivateGrain_WithActorSystem(t *testing.T) {
 func TestRemoting_RemoteTellGrain_WithActorSystem(t *testing.T) {
 	ctx := context.TODO()
 	logger := log.DiscardLogger
-	ports := dynaport.Get(1)
+	ports := internalnet.Get(1)
 	remotingPort := ports[0]
 	host := "0.0.0.0"
 
@@ -945,7 +944,7 @@ func TestRemoting_RemoteTellGrain_WithActorSystem(t *testing.T) {
 func TestRemoting_RemoteAskGrain_WithActorSystem(t *testing.T) {
 	ctx := context.TODO()
 	logger := log.DiscardLogger
-	ports := dynaport.Get(1)
+	ports := internalnet.Get(1)
 	remotingPort := ports[0]
 	host := "0.0.0.0"
 
