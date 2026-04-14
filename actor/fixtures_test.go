@@ -1569,7 +1569,9 @@ func MockReplicationTestSystem(clusterMock *mockcluster.Cluster) *actorSystem {
 		cluster:      clusterMock,
 		topicActor:   topic,
 		noSender:     noSender,
+		dispatcher:   newDispatcher(dispatcherWorkerCount(), dispatcherThroughput),
 	}
+	sys.dispatcher.start()
 
 	sys.started.Store(true)
 	sys.starting.Store(false)
@@ -1597,7 +1599,9 @@ func MockSimpleClusterReadyActorSystem(rem remoteclient.Client, cl cluster.Clust
 			node.RemotingPort,
 			opts...,
 		),
+		dispatcher: newDispatcher(dispatcherWorkerCount(), dispatcherThroughput),
 	}
+	sys.dispatcher.start()
 
 	sys.started.Store(true)
 	sys.clusterEnabled.Store(true)
@@ -1693,6 +1697,7 @@ func MockSingletonClusterReadyActorSystem(t *testing.T) *actorSystem {
 	actorSys.clusterEnabled.Store(true)
 	actorSys.remotingEnabled.Store(true)
 	actorSys.clusterNode = clusterNode
+	actorSys.dispatcher.start()
 
 	return actorSys
 }

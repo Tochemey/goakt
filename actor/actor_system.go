@@ -957,6 +957,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	system.defaultSupervisor = sup.NewSupervisor()
 	system.defaultPassivationStrategy = passivation.NewTimeBasedStrategy(DefaultPassivationTimeout)
 	system.passivator = newPassivationManager(system.logger)
+	system.dispatcher = newDispatcher(dispatcherWorkerCount(), dispatcherThroughput)
 
 	// apply the various options
 	for _, opt := range opts {
@@ -1042,7 +1043,6 @@ func (x *actorSystem) Start(ctx context.Context) error {
 
 	x.scheduler = newScheduler(x.logger, x.shutdownTimeout, x)
 
-	x.dispatcher = newDispatcher(dispatcherWorkerCount(), dispatcherThroughput)
 	x.dispatcher.start()
 
 	if err := chain.
@@ -2433,6 +2433,7 @@ func (x *actorSystem) startupCleanup(ctx context.Context) {
 		x.eventsStream.Close()
 	}
 
+	x.dispatcher.signalStop()
 	x.reset()
 }
 

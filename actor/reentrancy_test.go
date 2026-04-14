@@ -518,7 +518,7 @@ func TestRequestValidationFailures(t *testing.T) {
 	})
 
 	t.Run("reentrancy off", func(t *testing.T) {
-		pid := newRunningPIDWithReentrancy(reentrancy.Off, 0)
+		pid := newRunningPIDWithReentrancy(t, reentrancy.Off, 0)
 		target := &PID{}
 		target.setState(runningState, true)
 		_, err := pid.request(ctx, target, new(testpb.TestSend))
@@ -528,7 +528,7 @@ func TestRequestValidationFailures(t *testing.T) {
 
 func TestRequestTellErrorDeregisters(t *testing.T) {
 	ctx := context.Background()
-	pid := newRunningPIDWithReentrancy(reentrancy.AllowAll, 0)
+	pid := newRunningPIDWithReentrancy(t, reentrancy.AllowAll, 0)
 	target := &PID{}
 	target.setState(runningState, false)
 
@@ -647,10 +647,16 @@ func TestRequestNameRemoteTellError(t *testing.T) {
 }
 
 func TestProcessStashErrorPath(t *testing.T) {
+	d := newDispatcher(dispatcherWorkerCount(), dispatcherThroughput)
+	d.start()
+	t.Cleanup(d.stop)
+
 	pid := &PID{
-		mailbox:    NewUnboundedMailbox(),
-		logger:     log.DiscardLogger,
-		reentrancy: newReentrancyState(reentrancy.AllowAll, 0),
+		mailbox:       NewUnboundedMailbox(),
+		systemMailbox: NewUnboundedMailbox(),
+		logger:        log.DiscardLogger,
+		reentrancy:    newReentrancyState(reentrancy.AllowAll, 0),
+		dispatcher:    d,
 	}
 	pid.reentrancy.blockingCount.Store(1)
 
@@ -688,7 +694,7 @@ func TestHandleAsyncResponsePaths(t *testing.T) {
 	})
 
 	t.Run("error response completes", func(t *testing.T) {
-		pid := newRunningPIDWithReentrancy(reentrancy.AllowAll, 0)
+		pid := newRunningPIDWithReentrancy(t, reentrancy.AllowAll, 0)
 		state := newRequestState("err", reentrancy.AllowAll, pid)
 		require.NoError(t, pid.registerRequestState(state))
 
@@ -713,7 +719,7 @@ func TestHandleAsyncResponsePaths(t *testing.T) {
 	})
 
 	t.Run("error response unknown", func(t *testing.T) {
-		pid := newRunningPIDWithReentrancy(reentrancy.AllowAll, 0)
+		pid := newRunningPIDWithReentrancy(t, reentrancy.AllowAll, 0)
 		pid.handleAsyncResponse(nil, &commands.AsyncResponse{
 			CorrelationID: "missing",
 			Error:         "boom",
@@ -721,7 +727,7 @@ func TestHandleAsyncResponsePaths(t *testing.T) {
 	})
 
 	t.Run("nil message completes", func(t *testing.T) {
-		pid := newRunningPIDWithReentrancy(reentrancy.AllowAll, 0)
+		pid := newRunningPIDWithReentrancy(t, reentrancy.AllowAll, 0)
 		state := newRequestState("nil-msg", reentrancy.AllowAll, pid)
 		require.NoError(t, pid.registerRequestState(state))
 
@@ -742,12 +748,12 @@ func TestHandleAsyncResponsePaths(t *testing.T) {
 	})
 
 	t.Run("nil message unknown", func(t *testing.T) {
-		pid := newRunningPIDWithReentrancy(reentrancy.AllowAll, 0)
+		pid := newRunningPIDWithReentrancy(t, reentrancy.AllowAll, 0)
 		pid.handleAsyncResponse(nil, &commands.AsyncResponse{CorrelationID: "missing"})
 	})
 
 	t.Run("any message passes through", func(t *testing.T) {
-		pid := newRunningPIDWithReentrancy(reentrancy.AllowAll, 0)
+		pid := newRunningPIDWithReentrancy(t, reentrancy.AllowAll, 0)
 		state := newRequestState("any-msg", reentrancy.AllowAll, pid)
 		require.NoError(t, pid.registerRequestState(state))
 
@@ -775,7 +781,7 @@ func TestHandleAsyncResponsePaths(t *testing.T) {
 	})
 
 	t.Run("invalid any unknown", func(t *testing.T) {
-		pid := newRunningPIDWithReentrancy(reentrancy.AllowAll, 0)
+		pid := newRunningPIDWithReentrancy(t, reentrancy.AllowAll, 0)
 		pid.handleAsyncResponse(nil, &commands.AsyncResponse{
 			CorrelationID: "missing",
 			Message:       &anypb.Any{TypeUrl: "type.googleapis.com/nope.Nope", Value: []byte("bad")},
@@ -783,7 +789,7 @@ func TestHandleAsyncResponsePaths(t *testing.T) {
 	})
 
 	t.Run("success completes", func(t *testing.T) {
-		pid := newRunningPIDWithReentrancy(reentrancy.AllowAll, 0)
+		pid := newRunningPIDWithReentrancy(t, reentrancy.AllowAll, 0)
 		state := newRequestState("ok", reentrancy.AllowAll, pid)
 		require.NoError(t, pid.registerRequestState(state))
 
@@ -815,7 +821,7 @@ func TestHandleAsyncResponsePaths(t *testing.T) {
 	})
 
 	t.Run("success unknown", func(t *testing.T) {
-		pid := newRunningPIDWithReentrancy(reentrancy.AllowAll, 0)
+		pid := newRunningPIDWithReentrancy(t, reentrancy.AllowAll, 0)
 		payload, err := anypb.New(&testpb.Reply{Content: "ok"})
 		require.NoError(t, err)
 		pid.handleAsyncResponse(nil, &commands.AsyncResponse{
@@ -962,7 +968,7 @@ func TestCompleteRequest(t *testing.T) {
 
 func TestEnqueueAsyncError(t *testing.T) {
 	ctx := context.Background()
-	pid := newRunningPIDWithReentrancy(reentrancy.AllowAll, 0)
+	pid := newRunningPIDWithReentrancy(t, reentrancy.AllowAll, 0)
 
 	require.ErrorIs(t, pid.enqueueAsyncError(ctx, "", gerrors.ErrRequestTimeout), gerrors.ErrInvalidMessage)
 	require.NoError(t, pid.enqueueAsyncError(ctx, "noop", nil))
@@ -1125,11 +1131,18 @@ func invalidUTF8String() string {
 	return string([]byte{0xff})
 }
 
-func newRunningPIDWithReentrancy(mode reentrancy.Mode, maxInFlight int) *PID {
+func newRunningPIDWithReentrancy(t *testing.T, mode reentrancy.Mode, maxInFlight int) *PID {
+	t.Helper()
+	d := newDispatcher(dispatcherWorkerCount(), dispatcherThroughput)
+	d.start()
+	t.Cleanup(d.stop)
+
 	pid := &PID{
-		logger:     log.DiscardLogger,
-		mailbox:    NewUnboundedMailbox(),
-		reentrancy: newReentrancyState(mode, maxInFlight),
+		logger:        log.DiscardLogger,
+		mailbox:       NewUnboundedMailbox(),
+		systemMailbox: NewUnboundedMailbox(),
+		reentrancy:    newReentrancyState(mode, maxInFlight),
+		dispatcher:    d,
 	}
 	pid.setState(runningState, true)
 	return pid

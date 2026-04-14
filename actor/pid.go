@@ -3353,7 +3353,6 @@ func isLongLivedPassivationStrategy(strategy passivation.Strategy) bool {
 func isControlMessage(message any) bool {
 	switch message.(type) {
 	case *PoisonPill,
-		*commands.HealthCheckRequest,
 		*commands.Panicking,
 		*PausePassivation,
 		*ResumePassivation,
