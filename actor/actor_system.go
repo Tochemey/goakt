@@ -744,6 +744,7 @@ type ActorSystem interface {
 	decreaseActorsCounter()
 	increaseActorsCounter()
 	passivationManager() *passivationManager
+	getDispatcher() *dispatcher
 	getClusterStore() cluster.Store
 	getDataCenterController() *datacentercontroller.Controller
 	getDataCenterConfig() *datacenter.Config
@@ -3454,6 +3455,14 @@ func (x *actorSystem) passivationManager() *passivationManager {
 	passivator := x.passivator
 	x.locker.RUnlock()
 	return passivator
+}
+
+// getDispatcher returns the shared worker pool that drives mailbox
+// processing for both actors and grains. The dispatcher is created in
+// NewActorSystem and started in Start; callers must not assume it is
+// running outside of that lifecycle window.
+func (x *actorSystem) getDispatcher() *dispatcher {
+	return x.dispatcher
 }
 
 func (x *actorSystem) registerMetrics() error {

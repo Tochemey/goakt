@@ -25,7 +25,9 @@ package benchmark
 import (
 	"context"
 	"errors"
+	"fmt"
 	"runtime"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -285,6 +287,152 @@ func BenchmarkSendAsync(b *testing.B) {
 			}
 		}
 	})
+	b.StopTimer()
+	messagesPerSec := float64(b.N) / b.Elapsed().Seconds()
+	b.ReportMetric(messagesPerSec, "messages/sec")
+}
+
+// benchGrain is a minimal Grain used by the throughput benchmarks. It
+// performs the same dispatch work as Actor (no business logic), so the
+// numbers reflect the dispatcher + mailbox path rather than user code.
+type benchGrain struct{}
+
+func (*benchGrain) OnActivate(context.Context, *actor.GrainProps) error   { return nil }
+func (*benchGrain) OnDeactivate(context.Context, *actor.GrainProps) error { return nil }
+
+func (*benchGrain) OnReceive(ctx *actor.GrainContext) {
+	switch ctx.Message().(type) {
+	case *testpb.TestSend:
+		ctx.NoErr()
+	case *testpb.TestReply:
+		ctx.Response(replyMessage)
+	default:
+		ctx.Unhandled()
+	}
+}
+
+// BenchmarkGrainTell measures fire-and-forget throughput against a
+// single grain. Producers race on the same mailbox + schedState CAS.
+// Migrating grains onto the dispatcher pool removes the per-burst
+// goroutine spawn from this hot path; the remaining cost is the
+// mailbox enqueue and one schedule per idle->busy transition.
+func BenchmarkGrainTell(b *testing.B) {
+	ctx := context.Background()
+
+	actorSystem, err := actor.NewActorSystem("bench",
+		actor.WithLogger(log.DiscardLogger),
+		actor.WithActorInitMaxRetries(1))
+	if err != nil {
+		b.Fatalf("failed to create actor system: %v", err)
+	}
+	if err := actorSystem.Start(ctx); err != nil {
+		b.Fatalf("failed to start actor system: %v", err)
+	}
+	b.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	identity, err := actorSystem.GrainIdentity(ctx, "receiver", func(context.Context) (actor.Grain, error) {
+		return &benchGrain{}, nil
+	})
+	if err != nil {
+		b.Fatalf("failed to create grain identity: %v", err)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		msg := new(testpb.TestSend)
+		for pb.Next() {
+			if err := actorSystem.TellGrain(ctx, identity, msg); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	b.StopTimer()
+	messagesPerSec := float64(b.N) / b.Elapsed().Seconds()
+	b.ReportMetric(messagesPerSec, "messages/sec")
+}
+
+// BenchmarkGrainTellFanOut spreads load across many grains. This is the
+// case where the dispatcher pool change matters most: under the old
+// per-burst goroutine model, each active grain spawned its own
+// goroutine, so N concurrent grains = N goroutines. With the shared
+// pool, goroutine count is bounded by GOMAXPROCS regardless of N.
+func BenchmarkGrainTellFanOut(b *testing.B) {
+	const grainCount = 256
+	ctx := context.Background()
+
+	actorSystem, err := actor.NewActorSystem("bench",
+		actor.WithLogger(log.DiscardLogger),
+		actor.WithActorInitMaxRetries(1))
+	if err != nil {
+		b.Fatalf("failed to create actor system: %v", err)
+	}
+	if err := actorSystem.Start(ctx); err != nil {
+		b.Fatalf("failed to start actor system: %v", err)
+	}
+	b.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	identities := make([]*actor.GrainIdentity, grainCount)
+	for i := range identities {
+		id, err := actorSystem.GrainIdentity(ctx, fmt.Sprintf("g-%d", i), func(context.Context) (actor.Grain, error) {
+			return &benchGrain{}, nil
+		})
+		if err != nil {
+			b.Fatalf("failed to create grain identity: %v", err)
+		}
+		identities[i] = id
+	}
+
+	var counter atomic.Uint64
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		msg := new(testpb.TestSend)
+		for pb.Next() {
+			idx := counter.Add(1) % grainCount
+			if err := actorSystem.TellGrain(ctx, identities[idx], msg); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	b.StopTimer()
+	messagesPerSec := float64(b.N) / b.Elapsed().Seconds()
+	b.ReportMetric(messagesPerSec, "messages/sec")
+}
+
+// BenchmarkGrainAsk measures synchronous request/response latency.
+// Sequential to avoid mailbox contention on a single grain — same
+// rationale as BenchmarkAsk for actors.
+func BenchmarkGrainAsk(b *testing.B) {
+	ctx := context.Background()
+
+	actorSystem, err := actor.NewActorSystem("bench",
+		actor.WithLogger(log.DiscardLogger),
+		actor.WithActorInitMaxRetries(1))
+	if err != nil {
+		b.Fatalf("failed to create actor system: %v", err)
+	}
+	if err := actorSystem.Start(ctx); err != nil {
+		b.Fatalf("failed to start actor system: %v", err)
+	}
+	b.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	identity, err := actorSystem.GrainIdentity(ctx, "receiver", func(context.Context) (actor.Grain, error) {
+		return &benchGrain{}, nil
+	})
+	if err != nil {
+		b.Fatalf("failed to create grain identity: %v", err)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	msg := new(testpb.TestReply)
+	for i := 0; i < b.N; i++ {
+		if _, err := actorSystem.AskGrain(ctx, identity, msg, time.Second); err != nil {
+			b.Fatal(err)
+		}
+	}
 	b.StopTimer()
 	messagesPerSec := float64(b.N) / b.Elapsed().Seconds()
 	b.ReportMetric(messagesPerSec, "messages/sec")

@@ -59,8 +59,16 @@ type grainPID struct {
 	// specifies the logger to use
 	logger log.Logger
 
-	// atomic flag indicating whether the grain is processing messages
-	processing atomic.Int32
+	// schedState drives the grain's membership on the dispatcher's ready
+	// queue. The Idle -> Scheduled -> Processing transitions enforce that
+	// at most one worker drains the mailbox at a time, replacing the old
+	// per-burst goroutine while preserving the single-threaded execution
+	// invariant per grain.
+	schedState dispatchState
+	// dispatcher is the shared worker pool that runs grain turns. Set at
+	// construction from the owning actor system; nil only in unit tests
+	// that drive runTurn directly.
+	dispatcher *dispatcher
 	remoting   remoteclient.Client
 
 	// the list of dependencies
@@ -77,7 +85,10 @@ type grainPID struct {
 	disableRelocation atomic.Bool
 }
 
-var _ passivationParticipant = (*grainPID)(nil)
+var (
+	_ passivationParticipant = (*grainPID)(nil)
+	_ schedulable            = (*grainPID)(nil)
+)
 
 func newGrainPID(identity *GrainIdentity, grain Grain, actorSystem ActorSystem, config *grainConfig) *grainPID {
 	pid := &grainPID{
@@ -87,13 +98,13 @@ func newGrainPID(identity *GrainIdentity, grain Grain, actorSystem ActorSystem, 
 		actorSystem:        actorSystem,
 		logger:             actorSystem.Logger(),
 		remoting:           actorSystem.getRemoting(),
+		dispatcher:         actorSystem.getDispatcher(),
 		dependencies:       config.dependencies,
 		latestReceiveTime:  atomic.Time{},
 		config:             config,
 		passivationManager: actorSystem.passivationManager(),
 	}
 
-	pid.processing.Store(idle)
 	pid.activated.Store(false)
 	pid.onPoisonPill.Store(false)
 	pid.disableRelocation.Store(false)
@@ -251,60 +262,84 @@ func (pid *grainPID) isActive() bool {
 	return pid != nil && pid.activated.Load()
 }
 
-// receive pushes a given message to the actor mailbox
-// and signals the receiveLoop to process it
+// receive pushes a given message to the grain mailbox and schedules the
+// grain on the dispatcher pool. Idempotent in scheduling: concurrent
+// producers race on the Idle -> Scheduled CAS and only the winner pushes
+// onto the ready queue. The losers' messages are still drained because
+// the winner's turn observes them via the FIFO mailbox.
 func (pid *grainPID) receive(grainContext *GrainContext) {
-	if pid.isActive() {
-		if err := pid.mailbox.Enqueue(grainContext); err != nil {
-			grainContext.Err(err)
-			return
-		}
-		pid.process()
+	if !pid.isActive() {
+		return
+	}
+	if err := pid.mailbox.Enqueue(grainContext); err != nil {
+		grainContext.Err(err)
+		return
+	}
+	if pid.schedState.TrySchedule() {
+		pid.dispatcher.schedule(pid)
 	}
 }
 
-// process extracts every message from the actor mailbox
-// and pass it to the appropriate behavior for handling
-func (pid *grainPID) process() {
-	// Only start a processing loop when transitioning from idle -> busy.
-	// If another loop is already running (state is busy), exit early.
-	if !pid.processing.CompareAndSwap(idle, busy) {
+// runTurn implements schedulable. A dispatcher worker calls this after
+// pulling the grain off the ready queue. The method takes exclusive
+// ownership via the Scheduled -> Processing CAS, drains up to the
+// dispatcher's throughput budget, and then either yields back to
+// Scheduled (re-pushing onto the worker's local queue) or transitions to
+// Idle with a race-safe reclaim if a concurrent enqueue slipped in.
+//
+// Cooperative scheduling replaces the per-burst goroutine model: a
+// worker drains the budget then rotates to a sibling, which caps the
+// blocking window any one grain can impose on its peers and amortises
+// scheduling cost across a batch of messages.
+func (pid *grainPID) runTurn(w *worker) {
+	if !pid.schedState.TakeForProcessing() {
 		return
 	}
 
-	go func() {
-		var grainContext *GrainContext
-		for {
-			if grainContext != nil {
-				releaseGrainContext(grainContext)
+	budget := w.dispatcher.throughput
+	for range budget {
+		grainContext := pid.mailbox.Dequeue()
+		if grainContext == nil {
+			if pid.finishOrReclaim() {
+				return
 			}
-
-			if grainContext = pid.mailbox.Dequeue(); grainContext != nil {
-				switch grainContext.Message().(type) {
-				case *PoisonPill:
-					pid.handlePoisonPill(grainContext)
-				default:
-					pid.handleGrainContext(grainContext)
-				}
-			}
-
-			// if no more messages, change busy state to idle
-			pid.processing.Store(idle)
-
-			// Check if new messages were added in the meantime and restart processing
-			if !pid.mailbox.IsEmpty() && pid.processing.CompareAndSwap(idle, busy) {
-				continue
-			}
-
-			// Release the last processed context before exiting so it is
-			// returned to the pool instead of leaking until the next GC cycle.
-			if grainContext != nil {
-				releaseGrainContext(grainContext)
-			}
-
-			return
+			continue
 		}
-	}()
+		pid.dispatchOne(grainContext)
+	}
+	pid.schedState.YieldToScheduled()
+	w.reschedule(pid)
+}
+
+// dispatchOne routes a single message through the appropriate handler
+// and returns the GrainContext to its pool. Splitting the switch out of
+// runTurn keeps the hot loop tight and ensures the context is released
+// even when a handler panics (recovery is inside handle*).
+func (pid *grainPID) dispatchOne(grainContext *GrainContext) {
+	switch grainContext.Message().(type) {
+	case *PoisonPill:
+		pid.handlePoisonPill(grainContext)
+	default:
+		pid.handleGrainContext(grainContext)
+	}
+	releaseGrainContext(grainContext)
+}
+
+// finishOrReclaim attempts the Processing -> Idle transition. Returns
+// true when the caller must exit the turn (no work remains and ownership
+// is fully released). Returns false when a concurrent enqueue raced the
+// transition, ownership was reclaimed, and the caller must continue
+// draining within the same budget.
+func (pid *grainPID) finishOrReclaim() bool {
+	pid.schedState.reset()
+	if pid.mailbox.IsEmpty() {
+		return true
+	}
+
+	if !pid.schedState.TrySchedule() {
+		return true
+	}
+	return !pid.schedState.TakeForProcessing()
 }
 
 func (pid *grainPID) handlePoisonPill(grainContext *GrainContext) {

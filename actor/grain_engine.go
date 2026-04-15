@@ -863,8 +863,29 @@ func (x *actorSystem) runGrainActivation(id string, fn func() (*grainPID, error)
 //  4. On activation failure after a claim, remove the cluster entry to avoid stale ownership.
 //  5. Publish successful activation to the cluster registry.
 func (x *actorSystem) ensureGrainProcess(ctx context.Context, id *GrainIdentity) (*grainPID, error) {
-	return x.runGrainActivation(id.String(), func() (*grainPID, error) {
-		if process, ok := x.grains.Get(id.String()); ok {
+	key := id.String()
+
+	// Fast path: a local process already exists and is activated. This
+	// is the steady-state hot path hit by every Tell/Ask after the first
+	// call. Skipping singleflight here avoids the per-call closure
+	// allocation plus singleflight's internal Call/mutex/waitgroup
+	// bookkeeping. Correctness: `activated` flips to true only at the
+	// tail of the slow path below (after registry and cluster checks),
+	// so an observed true here means those validations already passed
+	// for this process instance. If the grain is later unregistered or
+	// deactivated, `activated` flips to false and the next send falls
+	// through to the slow path which runs the full validation.
+	//
+	// We intentionally do NOT repeat the registry.Exists check here:
+	// getGrain() acquires the grainPID mutex, which would dominate the
+	// hot path with no practical benefit (registrations are set at
+	// startup and the slow path validates on re-activation).
+	if process, ok := x.grains.Get(key); ok && process.isActive() {
+		return process, nil
+	}
+
+	return x.runGrainActivation(key, func() (*grainPID, error) {
+		if process, ok := x.grains.Get(key); ok {
 			return x.ensureExistingGrainProcess(ctx, id, process)
 		}
 
