@@ -53,13 +53,17 @@ import (
 // nolint
 func TestGrainPIDProcessReleasesContexts(t *testing.T) {
 	grain := &MockContextReleasingGrain{done: make(chan *GrainContext, 2)}
-	pid := &grainPID{
-		grain:   grain,
-		mailbox: newGrainMailbox(0), // unbounded
-		logger:  log.DiscardLogger,
-	}
+	d := newDispatcher(1, dispatcherThroughput)
+	d.start()
+	t.Cleanup(d.stop)
 
-	pid.processing.Store(idle)
+	pid := &grainPID{
+		grain:      grain,
+		mailbox:    newGrainMailbox(0), // unbounded
+		logger:     log.DiscardLogger,
+		dispatcher: d,
+	}
+	pid.activated.Store(true)
 
 	ctx := context.Background()
 	identity := &GrainIdentity{kind: "TestKind", name: "TestID"}
@@ -67,16 +71,14 @@ func TestGrainPIDProcessReleasesContexts(t *testing.T) {
 	first := getGrainContext().build(ctx, pid, nil, identity, &testpb.TestReply{}, false)
 	second := getGrainContext().build(ctx, pid, nil, identity, &testpb.TestReply{}, false)
 
-	pid.mailbox.Enqueue(first)
-	pid.mailbox.Enqueue(second)
-
-	pid.process()
+	pid.receive(first)
+	pid.receive(second)
 
 	require.Same(t, first, <-grain.done)
 	require.Same(t, second, <-grain.done)
 
 	require.Eventually(t, func() bool {
-		return pid.mailbox.IsEmpty() && pid.processing.Load() == idle
+		return pid.mailbox.IsEmpty() && pid.schedState.Load() == dispatchIdle
 	}, time.Second, 10*time.Millisecond)
 
 	require.Nil(t, first.Message())
