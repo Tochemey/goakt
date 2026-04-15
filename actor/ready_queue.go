@@ -67,6 +67,10 @@ type localQueue struct {
 	// size is the live item count, used to detect full/empty without
 	// disambiguating head==tail wrap-around.
 	size int
+	// sizeAtomic mirrors size and is updated under mu. Stealers load it
+	// without taking mu to skip empty victims on the hot path; the
+	// worst-case false positive is a wasted lock, not a lost item.
+	sizeAtomic atomic.Int32
 }
 
 // globalQueue is an unbounded amortised-FIFO ring buffer guarded by an
@@ -159,27 +163,42 @@ func (rq *readyQueue) take(workerID int) (schedulable, bool) {
 		if s := rq.locals[workerID].popFront(); s != nil {
 			return s, true
 		}
+
 		if s := rq.popGlobal(); s != nil {
 			return s, true
 		}
+
 		if s := rq.trySteal(workerID); s != nil {
 			return s, true
 		}
-		if !rq.park() {
+
+		s, ok := rq.parkAndTake()
+		if !ok {
 			return nil, false
+		}
+
+		if s != nil {
+			return s, true
 		}
 	}
 }
 
 // popGlobal returns the head of the global queue, or nil if the queue
-// is empty.
+// is empty. A lock-free globalCount check avoids parkMu when the queue
+// is already observed empty — the dominant case on the worker wake-up
+// loop once an actor's mailbox has drained.
 func (rq *readyQueue) popGlobal() schedulable {
+	if rq.globalCount.Load() == 0 {
+		return nil
+	}
+
 	rq.parkMu.Lock()
-	defer rq.parkMu.Unlock()
 	s := rq.global.pop()
 	if s != nil {
 		rq.globalCount.Store(int32(rq.global.size))
 	}
+
+	rq.parkMu.Unlock()
 	return s
 }
 
@@ -187,6 +206,12 @@ func (rq *readyQueue) popGlobal() schedulable {
 // half of the first non-empty queue. Returns nil if every sibling is
 // empty. Single-worker pools have no siblings to steal from and exit
 // immediately.
+//
+// Each victim is probed via a lock-free atomic size load first so empty
+// siblings cost a cheap read instead of a mutex acquire. The sibling's
+// mu is only taken when the atomic load observes pending work, eliminating
+// the N-way mutex fan-out that otherwise dominated the take loop when
+// most queues are idle.
 func (rq *readyQueue) trySteal(workerID int) schedulable {
 	n := len(rq.locals)
 	if n == 1 {
@@ -194,33 +219,42 @@ func (rq *readyQueue) trySteal(workerID int) schedulable {
 	}
 	own := rq.locals[workerID]
 	for i := 1; i < n; i++ {
-		victim := (workerID + i) % n
-		if s := rq.locals[victim].stealHalf(own); s != nil {
+		victim := rq.locals[(workerID+i)%n]
+		if victim.sizeAtomic.Load() == 0 {
+			continue
+		}
+
+		if s := victim.stealHalf(own); s != nil {
 			return s
 		}
 	}
 	return nil
 }
 
-// park waits on the condition variable until woken by push or close.
-// Returns false when the queue has been closed and the worker should
-// exit; true when the worker should retry the take loop.
+// parkAndTake waits on the condition variable until woken by push or
+// close, and returns the head of the global queue in the same critical
+// section that observed it. This fuses park + popGlobal so a signalled
+// worker does not unlock parkMu only to re-acquire it one call later.
 //
-// A final lock-held check of the global queue closes the race between
-// the lock-free take attempts and a concurrent push: if push appended
-// after take's last popGlobal but before park took parkMu, this check
-// catches the new item and avoids parking on stale state.
-func (rq *readyQueue) park() bool {
+// Returns (nil, false) when the queue is closed and the worker should
+// exit. Returns (s, true) with a non-nil item on a successful wake-up,
+// or (nil, true) when the queue was non-empty on entry (caller retries
+// the take loop).
+func (rq *readyQueue) parkAndTake() (schedulable, bool) {
 	rq.parkMu.Lock()
 	for {
 		if rq.closed {
 			rq.parkMu.Unlock()
-			return false
+			return nil, false
 		}
+
 		if rq.global.size > 0 {
+			s := rq.global.pop()
+			rq.globalCount.Store(int32(rq.global.size))
 			rq.parkMu.Unlock()
-			return true
+			return s, true
 		}
+
 		rq.parked++
 		rq.cond.Wait()
 		rq.parked--
@@ -260,12 +294,19 @@ func (q *localQueue) pushBack(s schedulable) bool {
 	q.buf[q.tail] = s
 	q.tail = (q.tail + 1) % localQueueCap
 	q.size++
+	q.sizeAtomic.Store(int32(q.size))
 	q.mu.Unlock()
 	return true
 }
 
 // popFront dequeues from the head. Returns nil when the queue is empty.
+// The lock-free sizeAtomic probe lets callers skip the mutex entirely
+// on an empty local ring, which is the common case on the worker's
+// wake-up loop.
 func (q *localQueue) popFront() schedulable {
+	if q.sizeAtomic.Load() == 0 {
+		return nil
+	}
 	q.mu.Lock()
 	if q.size == 0 {
 		q.mu.Unlock()
@@ -275,6 +316,7 @@ func (q *localQueue) popFront() schedulable {
 	q.buf[q.head] = nil
 	q.head = (q.head + 1) % localQueueCap
 	q.size--
+	q.sizeAtomic.Store(int32(q.size))
 	q.mu.Unlock()
 	return s
 }
@@ -319,6 +361,8 @@ func (q *localQueue) stealHalf(dst *localQueue) schedulable {
 		q.head = (q.head + 1) % localQueueCap
 		q.size--
 	}
+	q.sizeAtomic.Store(int32(q.size))
+	dst.sizeAtomic.Store(int32(dst.size))
 	return head
 }
 
