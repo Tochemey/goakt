@@ -30,12 +30,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
+	dynaport "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/log"
 	mocksremote "github.com/tochemey/goakt/v4/mocks/remoteclient"
@@ -864,5 +864,122 @@ func TestTell(t *testing.T) {
 
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
+	})
+}
+
+// TestUnwrapRemoteMessage covers every branch of unwrapRemoteMessage:
+// deserialize failure, empty sender fallback, unparseable sender, and the
+// happy path with a concrete sender PID.
+func TestUnwrapRemoteMessage(t *testing.T) {
+	ctx := context.Background()
+	host := "127.0.0.1"
+	port := dynaport.Get(1)[0]
+
+	sys, err := NewActorSystem("test", WithLogger(log.DiscardLogger), WithRemote(remote.NewConfig(host, port)))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+	pause.For(200 * time.Millisecond)
+	t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
+
+	target, err := sys.Spawn(ctx, "target", NewMockActor())
+	require.NoError(t, err)
+
+	t.Run("deserialize failure returns ErrInvalidRemoteMessage", func(t *testing.T) {
+		msg := &internalpb.RemoteMessage{Message: []byte{0xDE, 0xAD}}
+		payload, from, err := unwrapRemoteMessage(target, msg)
+		require.Error(t, err)
+		require.ErrorIs(t, err, errors.ErrInvalidRemoteMessage)
+		assert.Nil(t, payload)
+		assert.Nil(t, from)
+	})
+
+	validPayload, err := sys.(*actorSystem).remoting.Serializer(new(testpb.TestSend)).Serialize(new(testpb.TestSend))
+	require.NoError(t, err)
+
+	t.Run("empty sender yields target system NoSender", func(t *testing.T) {
+		msg := &internalpb.RemoteMessage{Message: validPayload}
+		payload, from, err := unwrapRemoteMessage(target, msg)
+		require.NoError(t, err)
+		assert.NotNil(t, payload)
+		assert.Equal(t, target.ActorSystem().NoSender(), from)
+	})
+
+	t.Run("unparseable sender returns ErrInvalidRemoteMessage", func(t *testing.T) {
+		msg := &internalpb.RemoteMessage{Message: validPayload, Sender: "not-a-valid-address"}
+		payload, from, err := unwrapRemoteMessage(target, msg)
+		require.Error(t, err)
+		require.ErrorIs(t, err, errors.ErrInvalidRemoteMessage)
+		assert.Nil(t, payload)
+		assert.Nil(t, from)
+	})
+
+	t.Run("parseable sender yields a remote PID at the wire address", func(t *testing.T) {
+		wireSender := address.New("remote", "otherSys", "10.0.0.1", 9999)
+		msg := &internalpb.RemoteMessage{Message: validPayload, Sender: wireSender.String()}
+		payload, from, err := unwrapRemoteMessage(target, msg)
+		require.NoError(t, err)
+		assert.NotNil(t, payload)
+		require.NotNil(t, from)
+		assert.True(t, from.IsRemote(), "wire sender must be a remote PID")
+		assert.Equal(t, wireSender.String(), from.getAddress().String())
+	})
+}
+
+// TestResolveDispatch covers every branch of resolveDispatch:
+// non-RemoteMessage passthrough, RemoteMessage with a caller-supplied
+// concrete sender (wins over the wire), RemoteMessage with NoSender
+// falling back to the wire sender, and unwrap errors propagating.
+func TestResolveDispatch(t *testing.T) {
+	ctx := context.Background()
+	host := "127.0.0.1"
+	port := dynaport.Get(1)[0]
+
+	sys, err := NewActorSystem("test", WithLogger(log.DiscardLogger), WithRemote(remote.NewConfig(host, port)))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+	pause.For(200 * time.Millisecond)
+	t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
+
+	target, err := sys.Spawn(ctx, "target", NewMockActor())
+	require.NoError(t, err)
+	noSender := target.ActorSystem().NoSender()
+
+	t.Run("non-RemoteMessage is passed through unchanged", func(t *testing.T) {
+		typed := new(testpb.TestSend)
+		payload, from, err := resolveDispatch(target, noSender, typed)
+		require.NoError(t, err)
+		assert.Same(t, typed, payload)
+		assert.Equal(t, noSender, from)
+	})
+
+	validPayload, err := sys.(*actorSystem).remoting.Serializer(new(testpb.TestSend)).Serialize(new(testpb.TestSend))
+	require.NoError(t, err)
+	wireSender := address.New("remote", "otherSys", "10.0.0.1", 9999)
+	msg := &internalpb.RemoteMessage{Message: validPayload, Sender: wireSender.String()}
+
+	t.Run("RemoteMessage with NoSender caller falls back to wire sender", func(t *testing.T) {
+		payload, from, err := resolveDispatch(target, noSender, msg)
+		require.NoError(t, err)
+		assert.NotNil(t, payload)
+		require.NotNil(t, from)
+		assert.True(t, from.IsRemote())
+		assert.Equal(t, wireSender.String(), from.getAddress().String())
+	})
+
+	t.Run("RemoteMessage with concrete caller sender wins over wire sender", func(t *testing.T) {
+		callerSender := target // any non-NoSender PID
+		payload, from, err := resolveDispatch(target, callerSender, msg)
+		require.NoError(t, err)
+		assert.NotNil(t, payload)
+		assert.Same(t, callerSender, from, "caller's concrete sender must be respected")
+	})
+
+	t.Run("unwrap error is propagated", func(t *testing.T) {
+		bad := &internalpb.RemoteMessage{Message: []byte{0x00, 0x01}}
+		payload, from, err := resolveDispatch(target, noSender, bad)
+		require.Error(t, err)
+		require.ErrorIs(t, err, errors.ErrInvalidRemoteMessage)
+		assert.Nil(t, payload)
+		assert.Nil(t, from)
 	})
 }

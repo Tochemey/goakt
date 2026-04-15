@@ -31,10 +31,10 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/tochemey/goakt/v4/internal/internalpb"
+	dynaport "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/log"
 	testkit "github.com/tochemey/goakt/v4/mocks/discovery"

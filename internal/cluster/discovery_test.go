@@ -28,9 +28,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/travisjeffery/go-dynaport"
 
 	"github.com/tochemey/goakt/v4/discovery"
+	dynaport "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/log"
 	testkit "github.com/tochemey/goakt/v4/mocks/discovery"
 )

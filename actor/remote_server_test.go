@@ -32,7 +32,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/proto"
 
 	gerrors "github.com/tochemey/goakt/v4/errors"
@@ -50,7 +49,10 @@ import (
 
 // newRemoteServerTestSystem builds the minimal actorSystem needed to unit-test
 // the proto TCP handler methods in remote_server.go.
-// It does NOT start the actor system; handlers are called directly.
+// It does NOT start the actor system; handlers are called directly. A real
+// remoting client is attached so the handler's upfront payload decode
+// (which needs access to the serializer registry) works against an
+// environment that mirrors production wiring.
 func newRemoteServerTestSystem(host string, port int) *actorSystem {
 	sys := &actorSystem{
 		actors:       newTree(),
@@ -59,6 +61,7 @@ func newRemoteServerTestSystem(host string, port int) *actorSystem {
 		name:         "testSys",
 		grains:       xsync.NewMap[string, *grainPID](),
 		askTimeout:   DefaultAskTimeout,
+		remoting:     remoteclient.NewClient(),
 	}
 	sys.remotingEnabled.Store(true)
 	return sys
@@ -247,7 +250,7 @@ func TestRemoteHandlersContextPropagationSuccess(t *testing.T) {
 	ctxWithMD := inet.ContextWithMetadata(ctx, md)
 
 	t.Run("RemoteLookup_with_propagator_and_metadata", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p, remote.WithContextPropagator(propagator))),
@@ -438,17 +441,18 @@ func TestRemoteTellHandler(t *testing.T) {
 		assert.True(t, ok)
 	})
 
-	t.Run("message with unparseable receiver returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
+	t.Run("unparseable receiver is logged and skipped, batch still succeeds", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
 		req := &internalpb.RemoteTellRequest{
 			RemoteMessages: []*internalpb.RemoteMessage{{Receiver: "bad-address"}},
 		}
 		resp, err := sys.remoteTellHandler(ctx, nullConn, req)
 		require.NoError(t, err)
-		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
+		_, ok := resp.(*internalpb.RemoteTellResponse)
+		assert.True(t, ok, "per-message failures must not fail the whole batch")
 	})
 
-	t.Run("actor not in tree returns CODE_NOT_FOUND", func(t *testing.T) {
+	t.Run("actor not in tree is dead-lettered, batch still succeeds", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
 		addr := fmt.Sprintf("goakt://testSys@%s:%d/actor1", host, port)
 		req := &internalpb.RemoteTellRequest{
@@ -456,20 +460,22 @@ func TestRemoteTellHandler(t *testing.T) {
 		}
 		resp, err := sys.remoteTellHandler(ctx, nullConn, req)
 		require.NoError(t, err)
-		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
+		_, ok := resp.(*internalpb.RemoteTellResponse)
+		assert.True(t, ok, "per-message failures must not fail the whole batch")
 	})
 
-	t.Run("nil message in RemoteMessages returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
+	t.Run("nil entry in RemoteMessages is logged and skipped, batch still succeeds", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
 		req := &internalpb.RemoteTellRequest{
 			RemoteMessages: []*internalpb.RemoteMessage{nil},
 		}
 		resp, err := sys.remoteTellHandler(ctx, nullConn, req)
 		require.NoError(t, err)
-		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
+		_, ok := resp.(*internalpb.RemoteTellResponse)
+		assert.True(t, ok, "nil entries are skipped, not fatal")
 	})
 
-	t.Run("node with nil pid returns CODE_NOT_FOUND (simulates deleteNode race)", func(t *testing.T) {
+	t.Run("node with nil pid is dead-lettered, batch still succeeds", func(t *testing.T) {
 		sys := newRemoteServerTestSystemWithZombieNode(t, host, port, "actor1")
 		addr := fmt.Sprintf("goakt://testSys@%s:%d/actor1", host, port)
 		req := &internalpb.RemoteTellRequest{
@@ -477,7 +483,8 @@ func TestRemoteTellHandler(t *testing.T) {
 		}
 		resp, err := sys.remoteTellHandler(ctx, nullConn, req)
 		require.NoError(t, err)
-		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
+		_, ok := resp.(*internalpb.RemoteTellResponse)
+		assert.True(t, ok, "per-message failures must not fail the whole batch")
 	})
 }
 
@@ -720,7 +727,7 @@ func TestRemoteSpawnChildHandler(t *testing.T) {
 	})
 
 	t.Run("parent kind mismatch returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -746,7 +753,7 @@ func TestRemoteSpawnChildHandler(t *testing.T) {
 	})
 
 	t.Run("success returns child address", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -813,7 +820,7 @@ func TestRemotePassivationStrategyHandler(t *testing.T) {
 	})
 
 	t.Run("success returns time-based passivation strategy", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -841,7 +848,7 @@ func TestRemotePassivationStrategyHandler(t *testing.T) {
 	})
 
 	t.Run("success returns long-lived passivation strategy", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -865,7 +872,7 @@ func TestRemotePassivationStrategyHandler(t *testing.T) {
 	})
 
 	t.Run("success returns message-count-based passivation strategy", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -930,7 +937,7 @@ func TestRemoteStateHandler(t *testing.T) {
 	})
 
 	t.Run("success returns true for STATE_RUNNING when actor is running", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -952,7 +959,7 @@ func TestRemoteStateHandler(t *testing.T) {
 	})
 
 	t.Run("success returns false for STATE_STOPPING when actor is running", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -974,7 +981,7 @@ func TestRemoteStateHandler(t *testing.T) {
 	})
 
 	t.Run("success returns false for STATE_SUSPENDED when actor is not suspended", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -996,7 +1003,7 @@ func TestRemoteStateHandler(t *testing.T) {
 	})
 
 	t.Run("success returns true for STATE_RELOCATABLE when actor is relocatable", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -1018,7 +1025,7 @@ func TestRemoteStateHandler(t *testing.T) {
 	})
 
 	t.Run("success returns false for STATE_RELOCATABLE when actor has relocation disabled", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -1040,7 +1047,7 @@ func TestRemoteStateHandler(t *testing.T) {
 	})
 
 	t.Run("success returns false for STATE_UNKNOWN", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -1108,7 +1115,7 @@ func TestRemoteChildrenHandler(t *testing.T) {
 	})
 
 	t.Run("success returns empty addresses when actor has no children", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -1130,7 +1137,7 @@ func TestRemoteChildrenHandler(t *testing.T) {
 	})
 
 	t.Run("success returns child addresses when actor has children", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -1214,7 +1221,7 @@ func TestRemoteParentHandler(t *testing.T) {
 	})
 
 	t.Run("root actor returns parent address", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -1238,7 +1245,7 @@ func TestRemoteParentHandler(t *testing.T) {
 	})
 
 	t.Run("success returns parent address for child actor", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -1309,7 +1316,7 @@ func TestRemoteKindHandler(t *testing.T) {
 	})
 
 	t.Run("success returns actor kind", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -1377,7 +1384,7 @@ func TestRemoteDependenciesHandler(t *testing.T) {
 	})
 
 	t.Run("success returns empty dependencies when actor has none", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -1399,7 +1406,7 @@ func TestRemoteDependenciesHandler(t *testing.T) {
 	})
 
 	t.Run("success returns dependencies when actor has them", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -1472,7 +1479,7 @@ func TestRemoteMetricHandler(t *testing.T) {
 	})
 
 	t.Run("success returns metric for running actor", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -1544,7 +1551,7 @@ func TestRemoteRoleHandler(t *testing.T) {
 	})
 
 	t.Run("success returns empty role when actor has none", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -1566,7 +1573,7 @@ func TestRemoteRoleHandler(t *testing.T) {
 	})
 
 	t.Run("success returns role when actor has one", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -1635,7 +1642,7 @@ func TestRemoteStashSizeHandler(t *testing.T) {
 	})
 
 	t.Run("success returns stash size for running actor", func(t *testing.T) {
-		ports := dynaport.Get(1)
+		ports := inet.Get(1)
 		p := ports[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -2021,7 +2028,7 @@ func TestRemoteTellGrainHandlerDeserializationError(t *testing.T) {
 // to call the server handlers over the wire against a real actor system.
 func TestRemoteServerHandlersIntegration(t *testing.T) {
 	ctx := context.Background()
-	ports := dynaport.Get(1)
+	ports := inet.Get(1)
 	port := ports[0]
 	host := "127.0.0.1"
 
@@ -2192,4 +2199,81 @@ type testRemoteClient struct {
 
 func (c *testRemoteClient) Serializer(_ any) remote.Serializer {
 	return c.serializer
+}
+
+// TestApplyPerMessageMetadata exercises every branch of the helper that
+// overlays per-RemoteMessage metadata onto the dispatch context.
+func TestApplyPerMessageMetadata(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("empty metadata returns context unchanged", func(t *testing.T) {
+		sys := newRemoteServerTestSystem("127.0.0.1", 9000)
+		sys.remoteConfig = remote.NewConfig("127.0.0.1", 9000,
+			remote.WithContextPropagator(&headerPropagator{headerKey: "x-trace-id", ctxKey: "trace"}))
+
+		got, err := sys.messageMetadata(ctx, nil)
+		require.NoError(t, err)
+		assert.Equal(t, ctx, got)
+
+		got, err = sys.messageMetadata(ctx, map[string]string{})
+		require.NoError(t, err)
+		assert.Equal(t, ctx, got)
+	})
+
+	t.Run("metadata but nil propagator returns context unchanged", func(t *testing.T) {
+		sys := newRemoteServerTestSystem("127.0.0.1", 9000)
+		// No propagator configured.
+		got, err := sys.messageMetadata(ctx, map[string]string{"x-trace-id": "abc"})
+		require.NoError(t, err)
+		assert.Equal(t, ctx, got)
+	})
+
+	t.Run("metadata with propagator enriches context", func(t *testing.T) {
+		type traceKey = string
+		propagator := &headerPropagator{headerKey: "x-trace-id", ctxKey: traceKey("trace")}
+		sys := newRemoteServerTestSystem("127.0.0.1", 9000)
+		sys.remoteConfig = remote.NewConfig("127.0.0.1", 9000, remote.WithContextPropagator(propagator))
+
+		got, err := sys.messageMetadata(ctx, map[string]string{"x-trace-id": "per-msg"})
+		require.NoError(t, err)
+		assert.Equal(t, "per-msg", got.Value(traceKey("trace")))
+	})
+
+	t.Run("propagator extract error propagates", func(t *testing.T) {
+		failing := &MockFailingContextPropagator{err: errors.New("extract failed")}
+		sys := newRemoteServerTestSystem("127.0.0.1", 9000)
+		sys.remoteConfig = remote.NewConfig("127.0.0.1", 9000, remote.WithContextPropagator(failing))
+
+		_, err := sys.messageMetadata(ctx, map[string]string{"x-trace-id": "abc"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "extract failed")
+	})
+}
+
+// TestRemoteTellHandler_PerMessageMetadataError confirms that a per-message
+// propagator failure is dead-lettered locally on the server and does not
+// fail the rest of the batch. With the continue-on-failure semantics the
+// whole request still returns success.
+func TestRemoteTellHandler_PerMessageMetadataError(t *testing.T) {
+	const host = "127.0.0.1"
+	const port = 9100
+	failing := &MockFailingContextPropagator{err: errors.New("extract failed")}
+	sys := newRemoteServerTestSystem(host, port)
+	sys.remoteConfig = remote.NewConfig(host, port, remote.WithContextPropagator(failing))
+	sys.remotingEnabled.Store(true)
+
+	req := &internalpb.RemoteTellRequest{
+		RemoteMessages: []*internalpb.RemoteMessage{
+			{
+				Sender:   address.New("from", "testSys", host, port).String(),
+				Receiver: address.New("dst", "testSys", host, port).String(),
+				Message:  []byte{},
+				Metadata: map[string]string{"x-trace-id": "abc"},
+			},
+		},
+	}
+	resp, err := sys.remoteTellHandler(context.Background(), nullConn, req)
+	require.NoError(t, err)
+	_, ok := resp.(*internalpb.RemoteTellResponse)
+	assert.True(t, ok, "per-message metadata failures must not fail the whole batch")
 }

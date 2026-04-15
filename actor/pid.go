@@ -69,10 +69,11 @@ import (
 // specifies the state in which the PID is
 // regarding message processing
 
+// idle/busy model the processing-state atomic used by non-PID
+// consumers (e.g. grain_pid). The actor PID itself no longer uses
+// this pair; its scheduling is driven by schedState + the dispatcher.
 const (
-	// idle means there are no messages to process
 	idle int32 = iota
-	// busy means the PID is processing messages
 	busy
 )
 
@@ -144,8 +145,16 @@ type PID struct {
 	// the default initialization timeout is 1s
 	initTimeout atomic.Duration
 
-	// specifies the actor mailbox
+	// mailbox holds user messages in FIFO order, drained by runTurn up
+	// to the dispatcher's per-turn throughput budget.
 	mailbox Mailbox
+
+	// systemMailbox is the priority queue for control-plane messages
+	// (PoisonPill, Panicking, Pause/ResumePassivation, HealthCheckRequest,
+	// Terminated, PanicSignal, SendDeadletter). runTurn consults it
+	// before the user mailbox so shutdown and supervision signals never
+	// queue behind a user backlog.
+	systemMailbox Mailbox
 
 	// the actor actorSystem
 	actorSystem ActorSystem
@@ -181,8 +190,14 @@ type PID struct {
 	supervisionStopSignal    chan types.Unit
 	supervisionStopRequested atomic.Bool
 
-	// atomic flag indicating whether the actor is processing messages
-	processing atomic.Int32
+	// schedState drives the dispatcher-pool ready-queue membership for
+	// this actor.
+	schedState dispatchState
+
+	// dispatcher is cached from the actor system at construction time so
+	// the hot-path doReceive can schedule this actor without an interface
+	// assertion on every message.
+	dispatcher *dispatcher
 
 	remoting remoteclient.Client
 
@@ -206,7 +221,10 @@ type PID struct {
 	metricProvider *metric.Provider
 }
 
-var _ passivationParticipant = (*PID)(nil)
+var (
+	_ passivationParticipant = (*PID)(nil)
+	_ schedulable            = (*PID)(nil)
+)
 
 // newPID creates a new pid
 func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...pidOption) (*PID, error) {
@@ -226,6 +244,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		logger:                log.NewZap(log.ErrorLevel, os.Stderr),
 		address:               address,
 		mailbox:               NewUnboundedMailbox(),
+		systemMailbox:         NewUnboundedMailbox(),
 		supervisionChan:       make(chan *supervisionSignal, 1),
 		supervisionStopSignal: make(chan types.Unit, 1),
 		path:                  newPath(address),
@@ -239,7 +258,6 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	pid.failureCount.Store(0)
 	pid.reinstateCount.Store(0)
 	pid.initTimeout.Store(DefaultInitTimeout)
-	pid.processing.Store(int32(idle))
 	pid.setState(relocationState, true)
 
 	for _, opt := range opts {
@@ -1211,11 +1229,13 @@ func (pid *PID) Ask(ctx context.Context, to *PID, message any, timeout time.Dura
 // Tell sends a message asynchronously to the target PID.
 // Routing is location-transparent: remote PIDs are handled via the remoting layer.
 func (pid *PID) Tell(ctx context.Context, to *PID, message any) error {
-	if to.IsRemote() {
+	state := to.state.Load()
+	if state&uint32(remoteState) != 0 {
 		return pid.remoteTell(ctx, to.getAddress(), message)
 	}
 
-	if !to.IsRunning() {
+	if state&uint32(runningState) == 0 ||
+		state&uint32(stoppingState|passivatingState|suspendedState) != 0 {
 		return gerrors.ErrDead
 	}
 
@@ -1774,101 +1794,135 @@ func (pid *PID) buildAsyncRequest(message any, correlationID string) (*commands.
 	}, nil
 }
 
-// doReceive pushes a given message to the actor mailbox
-// and signals the receiveLoop to process it
+// doReceive enqueues a message onto the actor's user or system mailbox
+// and schedules the actor onto the dispatcher if it is not already in
+// flight. This is the entry point for internal message delivery that
+// may carry control-plane messages (PoisonPill, HealthCheck, etc.).
 func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
-	// fast path: check if system is shutting down
+	msg := receiveCtx.Message()
+
 	if system := pid.actorSystem; system != nil && system.isStopping() {
-		// slow path: only check message type if shutting down
-		// system messages must be allowed through for proper shutdown/supervision
-		if !isSystemMessage(receiveCtx.Message()) {
+		if !isSystemMessage(msg) {
 			pid.handleReceivedError(receiveCtx, gerrors.ErrSystemShuttingDown)
 			return
 		}
 	}
 
-	if err := pid.mailbox.Enqueue(receiveCtx); err != nil {
+	if isControlMessage(msg) {
+		_ = pid.systemMailbox.Enqueue(receiveCtx)
+	} else if err := pid.mailbox.Enqueue(receiveCtx); err != nil {
 		pid.logger.Warn(err)
 		pid.handleReceivedError(receiveCtx, err)
-	}
-	pid.process()
-}
-
-// process extracts every message from the actor mailbox
-// and pass it to the appropriate behavior for handling
-func (pid *PID) process() {
-	// Only start a processing loop when transitioning from idle -> busy.
-	// If another loop is already running (state is busy), exit early.
-	if !pid.processing.CompareAndSwap(idle, busy) {
 		return
 	}
 
-	go func() {
-		var received *ReceiveContext
-		for {
-			if received != nil {
-				releaseContext(received)
-			}
+	if pid.schedState.TrySchedule() {
+		pid.dispatcher.schedule(pid)
+	}
+}
 
-			if received = pid.mailbox.Dequeue(); received != nil {
-				if pid.enableReentrancyStash(received) {
-					if err := pid.stash(received); err != nil {
-						pid.logger.Warn(err)
-						pid.handleReceivedError(received, err)
-					}
-					received = nil
-					continue
-				}
-				// Process the message
-				switch msg := received.Message().(type) {
-				case *PoisonPill:
-					_ = pid.Shutdown(received.Context())
-				case *commands.HealthCheckRequest:
-					pid.handleHealthcheck(received)
-				case *commands.Panicking:
-					pid.handlePanicking(received.Sender(), msg)
-				case *PausePassivation:
-					pid.pausePassivation()
-				case *ResumePassivation:
-					pid.resumePassivation()
-				case *commands.AsyncRequest:
-					pid.handleAsyncRequest(received, msg)
-				case *commands.AsyncResponse:
-					pid.handleAsyncResponse(received, msg)
-				default:
-					pid.handleReceived(received)
-				}
-			}
+// runTurn implements schedulable. A dispatcher worker calls this after
+// pulling the actor off the ready queue. The method takes exclusive
+// ownership via the Scheduled -> Processing CAS, drains up to the
+// dispatcher's throughput budget by interleaving system and user
+// mailbox messages (system messages always win), then either yields
+// back to Scheduled (and re-pushes onto the worker's local queue) or
+// transitions to Idle with a race-safe reclaim if a concurrent enqueue
+// slipped in.
+func (pid *PID) runTurn(w *worker) {
+	if !pid.schedState.TakeForProcessing() {
+		return
+	}
 
-			// if no more messages, change busy state to idle
-			pid.processing.Store(idle)
-
-			// Check if new messages were added in the meantime and restart processing
-			if !pid.mailbox.IsEmpty() && pid.processing.CompareAndSwap(idle, busy) {
-				continue
+	now := time.Now()
+	budget := w.dispatcher.throughput
+	for range budget {
+		if sysMsg := pid.systemMailbox.Dequeue(); sysMsg != nil {
+			if !pid.dispatchOne(sysMsg, now) {
+				releaseContext(sysMsg)
 			}
-
-			// Release the last processed context before exiting so it is
-			// returned to the pool instead of leaking until the next GC cycle.
-			if received != nil {
-				releaseContext(received)
-			}
-			return
+			continue
 		}
-	}()
+		received := pid.mailbox.Dequeue()
+		if received == nil {
+			if pid.finishOrReclaim() {
+				return
+			}
+			continue
+		}
+		if !pid.dispatchOne(received, now) {
+			releaseContext(received)
+		}
+	}
+	pid.schedState.YieldToScheduled()
+	w.reschedule(pid)
+}
+
+// finishOrReclaim attempts the Processing -> Idle transition. Returns
+// true when the caller must exit the turn (no work remains and ownership
+// is fully released). Returns false when a concurrent enqueue raced the
+// transition, ownership was reclaimed, and the caller must continue
+// draining within the same budget.
+//
+// The check is inlined (rather than passed as a closure) so the hot-path
+// does not allocate a method-bound closure on every turn end.
+func (pid *PID) finishOrReclaim() bool {
+	pid.schedState.reset()
+	if pid.mailbox.IsEmpty() && pid.systemMailbox.IsEmpty() {
+		return true
+	}
+
+	if !pid.schedState.TrySchedule() {
+		return true
+	}
+	return !pid.schedState.TakeForProcessing()
+}
+
+// dispatchOne routes a single message to its handler. Returns true when
+// the context has been retained by the actor (currently only the
+// reentrancy stash path) so the caller must NOT release it back to the
+// pool. Returns false for normal in-place dispatch.
+func (pid *PID) dispatchOne(received *ReceiveContext, now time.Time) (retained bool) {
+	if pid.enableReentrancyStash(received) {
+		if err := pid.stash(received); err != nil {
+			pid.logger.Warn(err)
+			pid.handleReceivedError(received, err)
+			return false
+		}
+		return true
+	}
+	switch msg := received.Message().(type) {
+	case *PoisonPill:
+		_ = pid.Shutdown(received.Context())
+	case *commands.HealthCheckRequest:
+		pid.handleHealthcheck(received, now)
+	case *commands.Panicking:
+		pid.handlePanicking(received.Sender(), msg)
+	case *PausePassivation:
+		pid.pausePassivation()
+	case *ResumePassivation:
+		pid.resumePassivation()
+	case *commands.AsyncRequest:
+		pid.handleAsyncRequest(received, msg, now)
+	case *commands.AsyncResponse:
+		pid.handleAsyncResponse(received, msg)
+	default:
+		pid.handleReceived(received, now)
+	}
+	return false
 }
 
 // handleHealthcheck is used to handle the readiness probe messages
-func (pid *PID) handleHealthcheck(received *ReceiveContext) {
-	pid.markActivity(time.Now())
+func (pid *PID) handleHealthcheck(received *ReceiveContext, now time.Time) {
+	pid.markActivity(now)
 	received.Response(new(commands.HealthCheckResponse))
 }
 
 // handleReceived picks the right behavior and processes the message
-func (pid *PID) handleReceived(received *ReceiveContext) {
+func (pid *PID) handleReceived(received *ReceiveContext, now time.Time) {
 	defer pid.recovery(received)
 	if behavior := pid.behaviorStack.Peek(); behavior != nil {
-		pid.markActivity(time.Now().UTC())
+		pid.markActivity(now)
 		pid.recordProcessedMessage()
 		behavior(received)
 	}
@@ -1901,7 +1955,7 @@ func (pid *PID) enableReentrancyStash(received *ReceiveContext) bool {
 //
 // Design decision: async metadata is carried on ReceiveContext to enable Response
 // to send AsyncResponse without changing the user-facing API.
-func (pid *PID) handleAsyncRequest(received *ReceiveContext, req *commands.AsyncRequest) {
+func (pid *PID) handleAsyncRequest(received *ReceiveContext, req *commands.AsyncRequest, now time.Time) {
 	if received == nil || req == nil {
 		pid.handleReceivedError(received, gerrors.ErrInvalidMessage)
 		return
@@ -1915,7 +1969,7 @@ func (pid *PID) handleAsyncRequest(received *ReceiveContext, req *commands.Async
 	received.message = req.Message
 	received.response = nil
 	received.withRequestMeta(req.CorrelationID, req.ReplyTo)
-	pid.handleReceived(received)
+	pid.handleReceived(received, now)
 }
 
 // handleAsyncResponse resolves an AsyncResponse and completes the tracked call.
@@ -3216,10 +3270,10 @@ func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *t
 		tk.Stop()
 	}
 
-	// Wait for any in-flight processing goroutine to fully drain before
-	// reinitializing. The MPSC mailbox is single-consumer; starting a new
-	// consumer while the old one is still calling Dequeue is a data race.
-	for pid.processing.Load() != idle {
+	// Wait until no worker holds the actor before re-initializing. The
+	// MPSC mailbox is single-consumer; restarting while a worker is mid
+	// Dequeue would be a data race.
+	for pid.schedState.Load() == dispatchProcessing {
 		runtime.Gosched()
 	}
 
@@ -3253,7 +3307,7 @@ func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *t
 		return fmt.Errorf("actor=(%s) failed to restart: %w", pid.Name(), err)
 	}
 
-	pid.processing.Store(idle)
+	pid.schedState.reset()
 	pid.setState(suspendedState, false)
 	pid.startSupervision()
 	pid.startPassivation()
@@ -3288,10 +3342,28 @@ func isLongLivedPassivationStrategy(strategy passivation.Strategy) bool {
 	return ok
 }
 
-// isSystemMessage checks if a message is a system message that must be allowed
-// through even during system shutdown (e.g., for proper shutdown, supervision, lifecycle).
+// isControlMessage identifies messages that bypass the user-message
+// backlog and route to the actor's system mailbox. Shutdown,
+// supervision, lifecycle and observability signals must not queue
+// behind a user-message burst.
 //
-// This is a zero-allocation type switch that identifies critical system messages.
+// Narrower than isSystemMessage by design: AsyncRequest and
+// AsyncResponse participate in the reentrancy stash protocol and must
+// keep FIFO ordering with user messages, so they are not control plane.
+func isControlMessage(message any) bool {
+	switch message.(type) {
+	case *PoisonPill,
+		*commands.Panicking,
+		*PausePassivation,
+		*ResumePassivation,
+		*PanicSignal,
+		*Terminated,
+		*commands.SendDeadletter:
+		return true
+	}
+	return false
+}
+
 func isSystemMessage(message any) bool {
 	switch message.(type) {
 	case *commands.AsyncResponse,

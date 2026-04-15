@@ -26,25 +26,31 @@ import (
 	"github.com/tochemey/goakt/v4/internal/timer"
 )
 
-// contextPoolSize controls the bounded channel-based pool for ReceiveContext.
-// Unlike sync.Pool, items in a channel survive GC cycles, which eliminates
-// the "pool thrashing" pattern that dominates CPU time (56% madvise + 23%
-// pool overhead in profiling). The size should be large enough to absorb
-// burst traffic without overflowing to heap allocation.
-const contextPoolSize = 512
+// contextPoolSize controls the bounded channel-based pool for
+// ReceiveContext. The channel pool out-performs sync.Pool on the
+// Tell hot path: ReceiveContexts produced by sender goroutines are
+// consumed on the worker goroutine, a producer/consumer split that
+// turns sync.Pool's per-P cache into constant cross-P stealing. A
+// shared channel removes the steal but introduces a mutex; sized
+// large enough that producers find items waiting in steady state and
+// consumers do not drop when releasing.
+const contextPoolSize = 8192
 
 // contextCh is a channel-based bounded pool for ReceiveContext objects.
-// It survives GC cycles and provides stable allocation behavior without
-// the cross-P thrashing inherent to sync.Pool.
-var contextCh = make(chan *ReceiveContext, contextPoolSize)
+// Pre-warmed at package init so the first burst of Tell calls finds
+// items waiting and does not fall through to mallocgc on every send.
+var contextCh = func() chan *ReceiveContext {
+	ch := make(chan *ReceiveContext, contextPoolSize)
+	for range contextPoolSize {
+		ch <- new(ReceiveContext)
+	}
+	return ch
+}()
 
 // responseCh is a channel-based bounded pool for response channels.
-// Survives GC cycles unlike sync.Pool, eliminating cross-P thrashing
-// for synchronous (Ask) message paths.
 var responseCh = make(chan chan any, contextPoolSize)
 
 // errorCh is a channel-based bounded pool for error channels.
-// Survives GC cycles unlike sync.Pool.
 var errorCh = make(chan chan error, contextPoolSize)
 
 var timers = timer.NewPool()
@@ -52,8 +58,8 @@ var timers = timer.NewPool()
 // emptyAnyCh is a pre-closed channel returned by BatchAsk for empty message slices.
 var emptyAnyCh = func() chan any { ch := make(chan any); close(ch); return ch }()
 
-// getContext retrieves a ReceiveContext from the channel-based pool.
-// Falls back to heap allocation if the pool is empty.
+// getContext retrieves a ReceiveContext from the channel pool, falling
+// back to a fresh allocation on momentary contention/empty.
 func getContext() *ReceiveContext {
 	select {
 	case ctx := <-contextCh:
@@ -63,10 +69,9 @@ func getContext() *ReceiveContext {
 	}
 }
 
-// releaseContext sends the message context back to the channel-based pool.
-// If the context was stashed by the user's behavior (ctx.Stash()),
-// it is still owned by the stash and must not be returned to the pool.
-// If the pool is full, the context is dropped for GC collection.
+// releaseContext returns the context to the channel pool. Contexts that
+// were stashed by the actor's behaviour are still owned by the stash
+// buffer and must not be returned. A full pool drops the excess for GC.
 func releaseContext(receiveContext *ReceiveContext) {
 	if receiveContext.stashed.Load() {
 		return
@@ -75,10 +80,13 @@ func releaseContext(receiveContext *ReceiveContext) {
 	select {
 	case contextCh <- receiveContext:
 	default:
-		// Pool is full; let GC collect the excess context.
 	}
 }
 
+// getResponseChannel returns a buffered (capacity 1) reply channel from
+// the pool, allocating a fresh one on miss. Callers obtain the channel
+// before issuing an Ask and return it via putResponseChannel after the
+// reply is consumed (or the caller gives up).
 func getResponseChannel() chan any {
 	select {
 	case ch := <-responseCh:
@@ -88,23 +96,20 @@ func getResponseChannel() chan any {
 	}
 }
 
+// putResponseChannel returns ch to the pool after draining any stale
+// reply that may have arrived from an actor that responded after the
+// caller's deadline expired. A full pool drops the excess for GC.
 func putResponseChannel(ch chan any) {
-	// Drain any stale response (e.g. from a timed-out Ask where the actor
-	// replied after the caller gave up).
-	for {
-		select {
-		case <-ch:
-			continue
-		default:
-		}
-		break
-	}
+	drainAnyChannel(ch)
 	select {
 	case responseCh <- ch:
 	default:
 	}
 }
 
+// getErrorChannel returns a buffered (capacity 1) error channel from
+// the pool, allocating a fresh one on miss. Used by request paths that
+// pipe an asynchronous error back to the caller.
 func getErrorChannel() chan error {
 	select {
 	case ch := <-errorCh:
@@ -114,18 +119,36 @@ func getErrorChannel() chan error {
 	}
 }
 
+// putErrorChannel returns ch to the pool after draining any stale
+// error. A full pool drops the excess for GC.
 func putErrorChannel(ch chan error) {
-	// Drain any stale error.
-	for {
-		select {
-		case <-ch:
-			continue
-		default:
-		}
-		break
-	}
+	drainErrorChannel(ch)
 	select {
 	case errorCh <- ch:
 	default:
+	}
+}
+
+// drainAnyChannel non-blockingly empties ch so it can be returned to a
+// pool in a clean state.
+func drainAnyChannel(ch chan any) {
+	for {
+		select {
+		case <-ch:
+		default:
+			return
+		}
+	}
+}
+
+// drainErrorChannel non-blockingly empties ch so it can be returned to
+// a pool in a clean state.
+func drainErrorChannel(ch chan error) {
+	for {
+		select {
+		case <-ch:
+		default:
+			return
+		}
 	}
 }

@@ -31,10 +31,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/travisjeffery/go-dynaport"
 
 	"github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/address"
+	dynaport "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/log"
@@ -294,7 +294,7 @@ func TestScheduler(t *testing.T) {
 		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
-		host := "0.0.0.0"
+		host := "127.0.0.1"
 
 		// create the actor system
 		newActorSystem, err := NewActorSystem(
@@ -426,7 +426,7 @@ func TestScheduler(t *testing.T) {
 		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
-		host := "0.0.0.0"
+		host := "127.0.0.1"
 
 		// create the actor system
 		newActorSystem, err := NewActorSystem(
@@ -676,7 +676,7 @@ func TestScheduler(t *testing.T) {
 		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
-		host := "0.0.0.0"
+		host := "127.0.0.1"
 
 		// create the actor system
 		newActorSystem, err := NewActorSystem(
@@ -806,7 +806,7 @@ func TestScheduler(t *testing.T) {
 		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
-		host := "0.0.0.0"
+		host := "127.0.0.1"
 
 		// create the actor system
 		newActorSystem, err := NewActorSystem(
@@ -854,7 +854,7 @@ func TestScheduler(t *testing.T) {
 		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
-		host := "0.0.0.0"
+		host := "127.0.0.1"
 
 		// create the actor system
 		newActorSystem, err := NewActorSystem(
@@ -1120,7 +1120,7 @@ func TestScheduler(t *testing.T) {
 		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
-		host := "0.0.0.0"
+		host := "127.0.0.1"
 
 		// create the actor system
 		newActorSystem, err := NewActorSystem(
@@ -1179,7 +1179,7 @@ func TestScheduler(t *testing.T) {
 		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
-		host := "0.0.0.0"
+		host := "127.0.0.1"
 
 		// create the actor system
 		newActorSystem, err := NewActorSystem(
@@ -1230,7 +1230,7 @@ func TestScheduler(t *testing.T) {
 		// generate the remoting port
 		nodePorts := dynaport.Get(1)
 		remotingPort := nodePorts[0]
-		host := "0.0.0.0"
+		host := "127.0.0.1"
 
 		// create the actor system
 		newActorSystem, err := NewActorSystem(

@@ -54,10 +54,16 @@ func withCustomLogger(logger log.Logger) pidOption {
 	}
 }
 
-// withActorSystem set the actor system of the pid
+// withActorSystem set the actor system of the pid and caches the
+// concrete *actorSystem's dispatcher on the PID for the hot-path
+// enqueue. Remote PIDs pass a nil dispatcher because remoting has its
+// own delivery path that never calls the local dispatcher.
 func withActorSystem(sys ActorSystem) pidOption {
 	return func(pid *PID) {
 		pid.actorSystem = sys
+		if as, ok := sys.(*actorSystem); ok {
+			pid.dispatcher = as.dispatcher
+		}
 	}
 }
 

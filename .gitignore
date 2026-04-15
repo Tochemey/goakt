@@ -18,3 +18,7 @@ bench/*.txt
 .cache/
 .gomodcache/
 .claude/
+
+# go test compiled binaries left by `go test -c` / `-cpuprofile`
+*.test
+*.prof

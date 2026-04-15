@@ -60,6 +60,12 @@ message RemoteMessage {
   // Specifies the message to send to the actor
   // Any proto message is allowed to be sent
   bytes message = 3;
+  // Per-message propagation metadata (trace headers, baggage, auth, etc.).
+  // When set, the server applies it via the configured ContextPropagator in
+  // preference to the request-level metadata. This enables coalesced batches
+  // that carry distinct per-call context for every message. Left empty by the
+  // synchronous RemoteTell path, which still propagates at the request level.
+  map<string, string> metadata = 4;
 }
 
 message RemoteReSpawnRequest {

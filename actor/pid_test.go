@@ -37,7 +37,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"github.com/travisjeffery/go-dynaport"
 	"go.opentelemetry.io/otel"
 	noopmetric "go.opentelemetry.io/otel/metric/noop"
 	"go.uber.org/atomic"
@@ -51,6 +50,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/commands"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/metric"
+	dynaport "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/internal/xsync"
@@ -733,6 +733,8 @@ func TestRestart(t *testing.T) {
 		system := sys.(*actorSystem)
 		system.noSender = &PID{actorSystem: system, logger: log.DiscardLogger}
 		system.noSender.setState(runningState, true)
+		system.dispatcher.start()
+		t.Cleanup(func() { system.dispatcher.stop() })
 
 		rootAddr := system.actorAddress("root")
 		root, err := newPID(ctx, rootAddr, NewMockActor(), withActorSystem(system), withCustomLogger(log.DiscardLogger))
@@ -777,6 +779,8 @@ func TestRestart(t *testing.T) {
 		system := sys.(*actorSystem)
 		system.noSender = &PID{actorSystem: system, logger: log.DiscardLogger}
 		system.noSender.setState(runningState, true)
+		system.dispatcher.start()
+		t.Cleanup(func() { system.dispatcher.stop() })
 
 		rootAddr := system.actorAddress("root")
 		root, err := newPID(ctx, rootAddr, NewMockActor(), withActorSystem(system), withCustomLogger(log.DiscardLogger))

@@ -715,8 +715,11 @@ type ActorSystem interface {
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
 	handleRemoteAsk(ctx context.Context, to *PID, message any, timeout time.Duration) (response any, err error)
-	// handleRemoteTell handles an asynchronous message to an actor
-	handleRemoteTell(ctx context.Context, to *PID, message any) error
+	// handleRemoteTell handles an asynchronous message to an actor. The
+	// caller may pass a pre-resolved sender PID; callers that don't have one
+	// (or only have an ad-hoc NoSender) can pass the system's NoSender and
+	// let toReceiveContext materialise the sender from the wire message.
+	handleRemoteTell(ctx context.Context, from *PID, to *PID, message any) error
 	// putActorOnCluster sets actor in the actor system actors registry
 	putActorOnCluster(actor *PID) error
 	// getCluster returns the cluster engine
@@ -783,6 +786,13 @@ type actorSystem struct {
 	remoteServer *inet.ProtoServer // Proto TCP server
 	remoteConfig *remote.Config
 
+	// coalescedFailureQueue receives whole-batch failures surfaced by the
+	// outbound RemoteTell coalescer. A dedicated goroutine drains it and
+	// publishes each failed message to the local dead-letter actor, keeping
+	// the coalescer's writer goroutine unblocked by the fan-out work.
+	coalescedFailureQueue chan coalescedFailure
+	coalescedFailureWG    sync.WaitGroup
+
 	// cluster settings
 	clusterEnabled  atomic.Bool
 	cluster         cluster.Cluster
@@ -799,6 +809,10 @@ type actorSystem struct {
 
 	// specifies the message scheduler
 	scheduler *scheduler
+
+	// dispatcher drives the shared worker pool that processes actor
+	// mailboxes. Created in Start, torn down non-blockingly in shutdown.
+	dispatcher *dispatcher
 
 	// manages passivation deadlines without per-actor goroutines
 	passivator *passivationManager
@@ -943,6 +957,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	system.defaultSupervisor = sup.NewSupervisor()
 	system.defaultPassivationStrategy = passivation.NewTimeBasedStrategy(DefaultPassivationTimeout)
 	system.passivator = newPassivationManager(system.logger)
+	system.dispatcher = newDispatcher(dispatcherWorkerCount(), dispatcherThroughput)
 
 	// apply the various options
 	for _, opt := range opts {
@@ -1027,6 +1042,8 @@ func (x *actorSystem) Start(ctx context.Context) error {
 	x.starting.Store(true)
 
 	x.scheduler = newScheduler(x.logger, x.shutdownTimeout, x)
+
+	x.dispatcher.start()
 
 	if err := chain.
 		New(chain.WithFailFast(), chain.WithContext(ctx)).
@@ -1956,10 +1973,13 @@ func (x *actorSystem) validate() error {
 // This block until a response is received or timed out.
 func (x *actorSystem) handleRemoteAsk(ctx context.Context, to *PID, message any, timeout time.Duration) (response any, err error) {
 	noSender := x.NoSender()
-	receiveContext, err := toReceiveContext(ctx, noSender, to, message, false)
+	decoded, from, err := resolveDispatch(to, noSender, message)
 	if err != nil {
 		return nil, err
 	}
+	message = decoded
+
+	receiveContext := toReceiveContext(ctx, from, to, message, false)
 
 	responseCh := receiveContext.response
 	to.doReceive(receiveContext)
@@ -1990,14 +2010,21 @@ func (x *actorSystem) handleRemoteAsk(ctx context.Context, to *PID, message any,
 	}
 }
 
-// handleRemoteTell handles an asynchronous message to an actor
-func (x *actorSystem) handleRemoteTell(ctx context.Context, to *PID, message any) error {
-	receiveContext, err := toReceiveContext(ctx, x.NoSender(), to, message, true)
+// handleRemoteTell handles an asynchronous message to an actor.
+//
+// When the caller has already resolved the sender (the remote tell handler
+// does this so the dispatch and dead-letter flows share a single parse),
+// it passes a non-nil from and resolveDispatch respects it verbatim.
+// Otherwise the sender carried on the wire RemoteMessage is materialized.
+func (x *actorSystem) handleRemoteTell(ctx context.Context, from *PID, to *PID, message any) error {
+	if from == nil {
+		from = x.NoSender()
+	}
+	decoded, resolvedFrom, err := resolveDispatch(to, from, message)
 	if err != nil {
 		return err
 	}
-
-	to.doReceive(receiveContext)
+	to.doReceive(toReceiveContext(ctx, resolvedFrom, to, decoded, true))
 	return nil
 }
 
@@ -2350,6 +2377,20 @@ func (x *actorSystem) setupRemoting() error {
 		opts = append(opts, remoteclient.WithClientTLS(x.tlsInfo.ClientConfig))
 	}
 
+	// Outbound RemoteTell coalescer. Internal optimization — amortizes the
+	// per-RPC cost across messages that pile up while a previous send is in
+	// flight (Nagle-style). On an idle destination, the first message is
+	// flushed immediately; batching only kicks in naturally when load exceeds
+	// the RPC completion rate. Whole-batch failures (transport or protocol)
+	// are fanned out to the local dead-letter actor so operators and
+	// subscribers of the dead-letter event stream observe them the same way
+	// they observe local-delivery failures.
+	x.startCoalescedFailureDrain()
+	opts = append(opts,
+		remoteclient.WithSendCoalescing(remoteSendCoalescingMaxBatch),
+		remoteclient.WithCoalescingErrorHandler(x.enqueueCoalescedFailure),
+	)
+
 	x.remoting = remoteclient.NewClient(opts...)
 	return nil
 }
@@ -2392,6 +2433,7 @@ func (x *actorSystem) startupCleanup(ctx context.Context) {
 		x.eventsStream.Close()
 	}
 
+	x.dispatcher.signalStop()
 	x.reset()
 }
 
@@ -2421,6 +2463,12 @@ func (x *actorSystem) shutdown(ctx context.Context) (err error) {
 
 	defer func() {
 		x.reset()
+		// Signal dispatcher shutdown after all actors are torn down and
+		// state is reset. We do not wait for workers to exit because this
+		// shutdown path may be running on one of the worker goroutines
+		// (e.g. triggered from an actor receive handler). Workers exit
+		// autonomously once their current turn completes.
+		x.dispatcher.signalStop()
 		err = multierr.Combine(err, x.logger.Flush())
 	}()
 
@@ -3169,6 +3217,14 @@ func (x *actorSystem) shutdownRemoting(ctx context.Context) error {
 		if x.remoting != nil {
 			x.remoting.Close()
 		}
+
+		// Close the fan-out queue after the coalescer has finished its final
+		// flushes so late errors still get a chance to be recorded. The drain
+		// goroutine itself is best-effort: the dead-letter actor may already
+		// be stopped by this point (its Shutdown runs earlier in the
+		// coordinated sequence), in which case deadLetterRemoteMessage bails
+		// out cleanly.
+		x.stopCoalescedFailureDrain()
 
 		if x.remoteServer != nil {
 			timeout, cancel := context.WithTimeout(ctx, 30*time.Second)

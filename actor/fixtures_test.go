@@ -41,7 +41,6 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	consulcontainer "github.com/testcontainers/testcontainers-go/modules/consul"
 	etcdContainer "github.com/testcontainers/testcontainers-go/modules/etcd"
-	"github.com/travisjeffery/go-dynaport"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	otelmetric "go.opentelemetry.io/otel/metric"
 	noopmetric "go.opentelemetry.io/otel/metric/noop"
@@ -61,6 +60,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/datacentercontroller"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
+	dynaport "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/internal/types"
@@ -1568,7 +1568,9 @@ func MockReplicationTestSystem(clusterMock *mockcluster.Cluster) *actorSystem {
 		cluster:      clusterMock,
 		topicActor:   topic,
 		noSender:     noSender,
+		dispatcher:   newDispatcher(dispatcherWorkerCount(), dispatcherThroughput),
 	}
+	sys.dispatcher.start()
 
 	sys.started.Store(true)
 	sys.starting.Store(false)
@@ -1596,7 +1598,9 @@ func MockSimpleClusterReadyActorSystem(rem remoteclient.Client, cl cluster.Clust
 			node.RemotingPort,
 			opts...,
 		),
+		dispatcher: newDispatcher(dispatcherWorkerCount(), dispatcherThroughput),
 	}
+	sys.dispatcher.start()
 
 	sys.started.Store(true)
 	sys.clusterEnabled.Store(true)
@@ -1692,6 +1696,7 @@ func MockSingletonClusterReadyActorSystem(t *testing.T) *actorSystem {
 	actorSys.clusterEnabled.Store(true)
 	actorSys.remotingEnabled.Store(true)
 	actorSys.clusterNode = clusterNode
+	actorSys.dispatcher.start()
 
 	return actorSys
 }
@@ -1773,6 +1778,44 @@ func (a *contextEchoActor) setSeen(val any) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.seen = val
+}
+
+// contextRecordingActor records every ctx value observed under a given key
+// across all received messages. Used to verify per-message context
+// propagation through the coalesced send path.
+type contextRecordingActor struct {
+	key  any
+	mu   sync.Mutex
+	seen []string
+}
+
+func (*contextRecordingActor) PreStart(*Context) error { return nil }
+func (*contextRecordingActor) PostStop(*Context) error { return nil }
+
+func (a *contextRecordingActor) Receive(ctx *ReceiveContext) {
+	if _, ok := ctx.Message().(*testpb.TestSend); !ok {
+		return
+	}
+	v := ctx.Context().Value(a.key)
+	if s, ok := v.(string); ok {
+		a.mu.Lock()
+		a.seen = append(a.seen, s)
+		a.mu.Unlock()
+	}
+}
+
+func (a *contextRecordingActor) Count() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return len(a.seen)
+}
+
+func (a *contextRecordingActor) Seen() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make([]string, len(a.seen))
+	copy(out, a.seen)
+	return out
 }
 
 func (a *contextEchoActor) Seen() any {

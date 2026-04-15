@@ -37,7 +37,7 @@ import (
 	"github.com/kapetan-io/tackle/autotls"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/travisjeffery/go-dynaport"
+	dynaport "github.com/tochemey/goakt/v4/internal/net"
 
 	"github.com/tochemey/goakt/v4/internal/pause"
 )

@@ -30,11 +30,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/travisjeffery/go-dynaport"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/address"
+	dynaport "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/log"
 	mocksremote "github.com/tochemey/goakt/v4/mocks/remoteclient"
@@ -511,9 +511,11 @@ func TestReceiveContext(t *testing.T) {
 			self:    pid1,
 		}
 
-		// send the message to the exchanger actor one using remote messaging
+		// send a message with no registered serializer (a plain string) to
+		// force a synchronous error out of the remoting client; this is the
+		// sync failure path the context must surface via getError.
 		addr := address.New(actorName2, sys.Name(), "127.0.0.1", remotingPort)
-		context.Tell(newRemotePID(addr, pid1.remoting), new(testpb.TestRemoteSend))
+		context.Tell(newRemotePID(addr, pid1.remoting), "not a registered proto message")
 		require.Error(t, context.getError())
 		pause.For(time.Second)
 
@@ -1818,9 +1820,11 @@ func TestReceiveContext(t *testing.T) {
 			self:    pid1,
 		}
 
-		// send the message to the exchanger actor one using remote messaging
+		// send a message with no registered serializer so the remoting client
+		// returns a synchronous error (ErrInvalidMessage) the context must
+		// surface via getError.
 		addr := address.New(actorName2, sys.Name(), "127.0.0.1", remotingPort)
-		context.BatchTell(newRemotePID(addr, pid1.remoting), new(testpb.TestRemoteSend))
+		context.BatchTell(newRemotePID(addr, pid1.remoting), "not a registered proto message")
 		require.Error(t, context.getError())
 		pause.For(time.Second)
 
@@ -2766,23 +2770,14 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, pidA)
 
-		// create actorC
-		pidC, err := actorSystem2.Spawn(ctx, "ExchangeC", &MockRemote{})
-		require.NoError(t, err)
-		require.NotNil(t, pidC)
-
-		// create actorB
-		actorB := &MockForward{
-			remoteRef: pidC,
-		}
-
-		require.NoError(t, pidC.Shutdown(ctx))
+		// actorB's target was never spawned. ForwardTo must surface the
+		// lookup failure via the context's error channel.
+		actorB := &MockForward{remoteRef: nil}
 
 		pidB, err := actorSystem2.Spawn(ctx, "ExchangeB", actorB)
 		require.NoError(t, err)
 		require.NotNil(t, pidB)
 
-		// create an instance of receive context
 		context := &ReceiveContext{
 			ctx:     ctx,
 			message: new(testpb.TestRemoteForward),
@@ -2790,9 +2785,7 @@ func TestReceiveContext(t *testing.T) {
 			self:    pidB,
 		}
 
-		// actor A is killing actor C using a forward pattern
-		// actorA tell actorB forward actorC
-		context.ForwardTo("ExchangeC")
+		context.ForwardTo("NonExistentActor")
 		require.Error(t, context.getError())
 
 		// wait for the async call to properly complete

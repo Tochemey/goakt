@@ -198,6 +198,30 @@ func TestParse(t *testing.T) {
 		}
 	})
 
+	t.Run("Round-trip with String", func(t *testing.T) {
+		// Parse(s).String() must equal s for any string Parse accepts.
+		// The receive path in actorSystem.deliverRemoteTellMessage relies on
+		// this property to skip Parse on the happy path and look up actors
+		// directly by the wire receiver string.
+		cases := []string{
+			"goakt://system@host:1234/name",
+			"goakt://system@host:1234/parent/child",
+			"goakt://orders@127.0.0.1:9000/checkout",
+			"goakt://orders@127.0.0.1:9000/root/checkout",
+			"goakt://Sys@HOST:1/Name",
+			"goakt://s@h:0/n",
+			"goakt://s@h:65535/n",
+		}
+		for _, s := range cases {
+			t.Run(s, func(t *testing.T) {
+				addr, err := Parse(s)
+				assert.NoError(t, err)
+				assert.NotNil(t, addr)
+				assert.Equal(t, s, addr.String())
+			})
+		}
+	})
+
 	t.Run("Invalid address", func(t *testing.T) {
 		tests := []struct {
 			name        string

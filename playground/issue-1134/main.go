@@ -29,11 +29,11 @@ import (
 	"time"
 
 	natsserver "github.com/nats-io/nats-server/v2/server"
-	"github.com/travisjeffery/go-dynaport"
 
 	"github.com/tochemey/goakt/v4/actor"
 	"github.com/tochemey/goakt/v4/crdt"
 	"github.com/tochemey/goakt/v4/discovery/nats"
+	dynaport "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/remote"

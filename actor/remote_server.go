@@ -39,12 +39,28 @@ import (
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/codec"
+	"github.com/tochemey/goakt/v4/internal/commands"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	inet "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pointer"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/remote"
 )
+
+// coalescedFailureQueueSize caps the buffered handoffs between the coalescer's
+// writer goroutine and the dead-letter fan-out drain. Under a prolonged
+// outage we'd rather drop handoffs (with a log) than grow the queue
+// unbounded or slow the writer down.
+const coalescedFailureQueueSize = 256
+
+// coalescedFailure bundles a whole-batch failure reported by the outbound
+// coalescer. The fan-out drain goroutine turns each entry into a dead-letter
+// publication via deadLetterRemoteMessage.
+type coalescedFailure struct {
+	dest     string
+	messages []*internalpb.RemoteMessage
+	cause    error
+}
 
 // toProtoError creates an internalpb.Error message with the specified code and error message.
 // This is the standard way to return errors from proto TCP handlers to match the error
@@ -87,6 +103,26 @@ func (x *actorSystem) extractContextWithPropagator(ctx context.Context) (context
 	})
 
 	// Apply the propagator to extract context values from the headers.
+	return propagator.Extract(ctx, headers)
+}
+
+// messageMetadata overlays a RemoteMessage's per-message metadata
+// (populated by the coalesced client path) onto ctx via the configured
+// propagator. When the message has no metadata or no propagator is set, ctx
+// is returned unchanged and the caller continues to use the request-level
+// context produced by extractContextWithPropagator.
+func (x *actorSystem) messageMetadata(ctx context.Context, md map[string]string) (context.Context, error) {
+	if len(md) == 0 {
+		return ctx, nil
+	}
+	propagator := x.remoteConfig.ContextPropagator()
+	if propagator == nil {
+		return ctx, nil
+	}
+	headers := make(nethttp.Header, len(md))
+	for k, v := range md {
+		headers.Set(k, v)
+	}
 	return propagator.Extract(ctx, headers)
 }
 
@@ -245,39 +281,17 @@ func (x *actorSystem) remoteTellHandler(ctx context.Context, conn inet.Connectio
 		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
 	}
 
+	// Per-message failures are routed to the local dead-letter actor and the
+	// loop continues. The client may have packed multiple independent tells
+	// into a single wire-level batch (see the outbound coalescer); failing
+	// the whole request on the first bad message would also fail every
+	// healthy sibling, which is not what any caller asked for.
 	for _, message := range request.GetRemoteMessages() {
 		if message == nil {
-			return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, errors.New("remote message cannot be nil")), nil
+			logger.Error("remote tell: nil message in batch, skipping")
+			continue
 		}
-		receiver := message.GetReceiver()
-		addr, err := address.Parse(receiver)
-		if err != nil {
-			return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
-		}
-
-		node, exist := x.actors.node(addr.String())
-		if !exist {
-			err := gerrors.NewErrAddressNotFound(addr.String())
-			logger.Errorf("remote tell: address=%s not found: %v (hint: verify actor exists on target node)", addr.String(), err)
-			return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
-		}
-
-		pid := node.value()
-		if pid == nil {
-			err := gerrors.NewErrAddressNotFound(addr.String())
-			logger.Errorf("remote tell: address=%s not found (actor was removed): %v", addr.String(), err)
-			return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
-		}
-		if !pid.IsRunning() {
-			err := gerrors.NewErrRemoteSendFailure(gerrors.ErrDead)
-			logger.Errorf("remote tell: actor=%s not running: %v (hint: actor may have stopped)", addr.String(), err)
-			return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
-		}
-
-		if err := x.handleRemoteTell(ctx, pid, message); err != nil {
-			logger.Errorf("remote tell failed: %v", err)
-			return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
-		}
+		x.deliverRemoteTellMessage(ctx, message)
 	}
 
 	return new(internalpb.RemoteTellResponse), nil
@@ -1455,4 +1469,233 @@ func (x *actorSystem) stopRemoteServer(timeout time.Duration) error {
 
 	x.logger.Info("Remote server shut down successfully")
 	return nil
+}
+
+// deliverRemoteTellMessage dispatches a single RemoteMessage from the
+// inbound batch to its local target actor. Per-message failures (bad
+// address, bad metadata, unknown actor, dead actor, mailbox refused) are
+// routed to the local dead-letter actor and logged; they never propagate
+// up to fail the whole batch, because the wire-level batch may pack
+// independent tells from many concurrent senders.
+func (x *actorSystem) deliverRemoteTellMessage(ctx context.Context, message *internalpb.RemoteMessage) {
+	logger := x.logger
+	receiver := message.GetReceiver()
+
+	// The wire receiver is already in canonical form — it was produced by
+	// Address.String() on the sender side, and Parse(s).String() == s for any
+	// well-formed input. So we
+	// look up the local actor by the raw string on the happy path and only
+	// materialize a *address.Address when a dead-letter or structured log
+	// actually needs one. This keeps inbound dispatch allocation-free for
+	// address parsing.
+	//
+	// parseForFailure is the cold-path helper: it materializes the structured
+	// receiver address so callers can publish a meaningful dead-letter entry
+	// (Sender/Receiver on Deadletter are *address.Address). When parsing
+	// fails the receiver was malformed at the wire — log and bail since we
+	// have no routing information for a dead-letter record.
+	parseForFailure := func(cause error) (*address.Address, bool) {
+		addr, parseErr := address.Parse(receiver)
+		if parseErr != nil {
+			logger.Errorf("remote tell: unparseable receiver %q (underlying: %v): %v", receiver, cause, parseErr)
+			return nil, false
+		}
+		return addr, true
+	}
+
+	// Decode the payload exactly once. Both the dispatch path
+	// (handleRemoteTell) and every dead-letter publication downstream need
+	// the typed message; decoding here makes that single source of truth
+	// explicit and lets deadLetterRemoteMessage stay free of serializer
+	// concerns. A decode failure means we can neither dispatch nor produce
+	// a useful dead-letter entry (Deadletter.Message is the typed payload),
+	// so we log and skip.
+	payload, err := x.remoting.Serializer(nil).Deserialize(message.GetMessage())
+	if err != nil {
+		logger.Errorf("remote tell: deserialize payload for %s: %v", receiver, err)
+		return
+	}
+
+	msgCtx, err := x.messageMetadata(ctx, message.GetMetadata())
+	if err != nil {
+		addr, ok := parseForFailure(err)
+		if !ok {
+			return
+		}
+
+		from := x.newRemoteSenderPID(message.GetSender())
+		logger.Errorf("remote tell: bad metadata for %s: %v", addr.String(), err)
+		x.deadLetterRemoteMessage(from.getAddress(), addr, payload, err)
+		return
+	}
+
+	node, exist := x.actors.node(receiver)
+	if !exist {
+		err := gerrors.NewErrAddressNotFound(receiver)
+		addr, ok := parseForFailure(err)
+		if !ok {
+			return
+		}
+		from := x.newRemoteSenderPID(message.GetSender())
+		logger.Errorf("remote tell: address=%s not found: %v", addr.String(), err)
+		x.deadLetterRemoteMessage(from.getAddress(), addr, payload, err)
+		return
+	}
+
+	pid := node.value()
+	if pid == nil {
+		err := gerrors.NewErrAddressNotFound(receiver)
+		addr, ok := parseForFailure(err)
+		if !ok {
+			return
+		}
+		from := x.newRemoteSenderPID(message.GetSender())
+		logger.Errorf("remote tell: address=%s not found (actor was removed): %v", addr.String(), err)
+		x.deadLetterRemoteMessage(from.getAddress(), addr, payload, err)
+		return
+	}
+
+	if !pid.IsRunning() {
+		err := gerrors.NewErrRemoteSendFailure(gerrors.ErrDead)
+		addr, ok := parseForFailure(err)
+		if !ok {
+			return
+		}
+		from := x.newRemoteSenderPID(message.GetSender())
+		logger.Errorf("remote tell: actor=%s not running: %v", addr.String(), err)
+		x.deadLetterRemoteMessage(from.getAddress(), addr, payload, err)
+		return
+	}
+
+	from := x.newRemoteSenderPID(message.GetSender())
+	if err := x.handleRemoteTell(msgCtx, from, pid, payload); err != nil {
+		addr, ok := parseForFailure(err)
+		if !ok {
+			return
+		}
+		logger.Errorf("remote tell: dispatch to %s failed: %v", addr.String(), err)
+		x.deadLetterRemoteMessage(from.getAddress(), addr, payload, err)
+	}
+}
+
+// newRemoteSenderPID materializes a remote sender identity from the wire
+// string. When the string is empty or unparseable the local NoSender is
+// returned so downstream consumers always receive a non-nil *PID (the
+// address embedded in the PID is used for dead-letter routing, so losing
+// sender identity must not block publication).
+func (x *actorSystem) newRemoteSenderPID(addrStr string) *PID {
+	if addrStr == "" {
+		return x.NoSender()
+	}
+
+	addr, err := address.Parse(addrStr)
+	if err != nil {
+		return x.NoSender()
+	}
+
+	return newRemotePID(addr, x.remoting)
+}
+
+// deadLetterRemoteMessage publishes a failed remote delivery to the local
+// dead-letter actor so operators and consumers of the dead-letter event
+// stream can observe remote failures the same way local ones are observed.
+//
+// The caller is expected to have already resolved both addresses and
+// decoded the payload — this helper is a pure formatter over the
+// SendDeadletter command and owns no serializer, parsing, or validation
+// logic of its own. Decoupling these concerns keeps a single source of
+// truth for each step on the remote tell path.
+//
+// Best-effort: if the dead-letter actor or the system guardian is
+// unavailable (system shutting down) the call is silently skipped.
+func (x *actorSystem) deadLetterRemoteMessage(sender, receiver *address.Address, message any, cause error) {
+	deadLetter := x.getDeadletter()
+	if deadLetter == nil || !deadLetter.IsRunning() {
+		return
+	}
+
+	guardian := x.getSystemGuardian()
+	if guardian == nil || !guardian.IsRunning() {
+		return
+	}
+
+	cmd := &commands.SendDeadletter{
+		Deadletter: commands.Deadletter{
+			Sender:   sender,
+			Receiver: receiver,
+			Message:  message,
+			SendTime: time.Now().UTC(),
+			Reason:   cause.Error(),
+		},
+	}
+	_ = guardian.Tell(context.Background(), deadLetter, cmd)
+}
+
+// startCoalescedFailureDrain spins up the goroutine that consumes failed
+// coalesced batches and publishes each message to the local dead-letter
+// actor. Safe to call multiple times — re-entry is a no-op when the queue
+// already exists.
+func (x *actorSystem) startCoalescedFailureDrain() {
+	if x.coalescedFailureQueue != nil {
+		return
+	}
+	x.coalescedFailureQueue = make(chan coalescedFailure, coalescedFailureQueueSize)
+	x.coalescedFailureWG.Add(1)
+	go x.drainCoalescedFailures()
+}
+
+// stopCoalescedFailureDrain closes the fan-out queue and waits for the drain
+// goroutine to finish. Callers are expected to have invoked remoting.Close
+// first so the coalescer has flushed its final batches.
+func (x *actorSystem) stopCoalescedFailureDrain() {
+	if x.coalescedFailureQueue == nil {
+		return
+	}
+	close(x.coalescedFailureQueue)
+	x.coalescedFailureWG.Wait()
+	x.coalescedFailureQueue = nil
+}
+
+// enqueueCoalescedFailure is the CoalescingErrorHandler wired into the
+// outbound coalescer. It logs the whole-batch failure (operators still want
+// the "endpoint unreachable" signal with a destination) and hands the batch
+// off to the fan-out drain. Drops the handoff if the queue is full or the
+// system is shutting down.
+func (x *actorSystem) enqueueCoalescedFailure(dest string, messages []*internalpb.RemoteMessage, cause error) {
+	x.logger.Warnf("coalesced remote tell to %s failed for %d message(s): %v", dest, len(messages), cause)
+	if x.shuttingDown.Load() || x.coalescedFailureQueue == nil {
+		return
+	}
+
+	select {
+	case x.coalescedFailureQueue <- coalescedFailure{dest: dest, messages: messages, cause: cause}:
+	default:
+		x.logger.Warnf("deadletter fan-out queue full, dropping %d message(s) to %s", len(messages), dest)
+	}
+}
+
+// drainCoalescedFailures is the goroutine body that turns each coalesced
+// failure into N dead-letter publications. Exits when the queue is closed.
+//
+// Each RemoteMessage is unpacked once (receiver parse + payload decode)
+// before being handed to deadLetterRemoteMessage, matching the
+// deserialize-once contract used by deliverRemoteTellMessage.
+func (x *actorSystem) drainCoalescedFailures() {
+	defer x.coalescedFailureWG.Done()
+	for failure := range x.coalescedFailureQueue {
+		for _, m := range failure.messages {
+			receiver, err := address.Parse(m.GetReceiver())
+			if err != nil {
+				x.logger.Errorf("deadletter (coalesced): unparseable receiver %q: %v", m.GetReceiver(), err)
+				continue
+			}
+			payload, err := x.remoting.Serializer(nil).Deserialize(m.GetMessage())
+			if err != nil {
+				x.logger.Errorf("deadletter (coalesced): deserialize payload for %s: %v", receiver.String(), err)
+				continue
+			}
+			senderAddr := x.newRemoteSenderPID(m.GetSender()).getAddress()
+			x.deadLetterRemoteMessage(senderAddr, receiver, payload, failure.cause)
+		}
+	}
 }

@@ -52,8 +52,8 @@ import (
 func TestRemotingOptionsAndDefaults(t *testing.T) {
 	r := NewClient().(*client)
 
-	// Default compression is Zstd (matches server default in remote.Config)
-	assert.Equal(t, remote.ZstdCompression, r.Compression())
+	// Default compression is none (matches server default in remote.Config)
+	assert.Equal(t, remote.NoCompression, r.Compression())
 	assert.Nil(t, r.TLSConfig())
 
 	// Verify connection pooling defaults based on benchmarks
