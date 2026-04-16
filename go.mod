@@ -38,9 +38,9 @@ require (
 	golang.org/x/sync v0.20.0
 	golang.org/x/sys v0.43.0
 	google.golang.org/protobuf v1.36.11
-	k8s.io/api v0.35.3
-	k8s.io/apimachinery v0.35.3
-	k8s.io/client-go v0.35.3
+	k8s.io/api v0.35.4
+	k8s.io/apimachinery v0.35.4
+	k8s.io/client-go v0.35.4
 )
 
 require (
@@ -64,7 +64,7 @@ require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/distribution/reference v0.6.0 // indirect
-	github.com/docker/go-connections v0.6.0 // indirect
+	github.com/docker/go-connections v0.7.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/ebitengine/purego v0.10.0 // indirect
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
@@ -73,27 +73,27 @@ require (
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
-	github.com/go-openapi/jsonpointer v0.22.5 // indirect
+	github.com/go-openapi/jsonpointer v0.23.0 // indirect
 	github.com/go-openapi/jsonreference v0.21.5 // indirect
-	github.com/go-openapi/swag v0.25.5 // indirect
-	github.com/go-openapi/swag/cmdutils v0.25.5 // indirect
-	github.com/go-openapi/swag/conv v0.25.5 // indirect
-	github.com/go-openapi/swag/fileutils v0.25.5 // indirect
-	github.com/go-openapi/swag/jsonname v0.25.5 // indirect
-	github.com/go-openapi/swag/jsonutils v0.25.5 // indirect
-	github.com/go-openapi/swag/loading v0.25.5 // indirect
-	github.com/go-openapi/swag/mangling v0.25.5 // indirect
-	github.com/go-openapi/swag/netutils v0.25.5 // indirect
-	github.com/go-openapi/swag/stringutils v0.25.5 // indirect
-	github.com/go-openapi/swag/typeutils v0.25.5 // indirect
-	github.com/go-openapi/swag/yamlutils v0.25.5 // indirect
+	github.com/go-openapi/swag v0.26.0 // indirect
+	github.com/go-openapi/swag/cmdutils v0.26.0 // indirect
+	github.com/go-openapi/swag/conv v0.26.0 // indirect
+	github.com/go-openapi/swag/fileutils v0.26.0 // indirect
+	github.com/go-openapi/swag/jsonname v0.26.0 // indirect
+	github.com/go-openapi/swag/jsonutils v0.26.0 // indirect
+	github.com/go-openapi/swag/loading v0.26.0 // indirect
+	github.com/go-openapi/swag/mangling v0.26.0 // indirect
+	github.com/go-openapi/swag/netutils v0.26.0 // indirect
+	github.com/go-openapi/swag/stringutils v0.26.0 // indirect
+	github.com/go-openapi/swag/typeutils v0.26.0 // indirect
+	github.com/go-openapi/swag/yamlutils v0.26.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/btree v1.1.3 // indirect
 	github.com/google/gnostic-models v0.7.1 // indirect
 	github.com/google/go-tpm v0.9.8 // indirect
-	github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0 // indirect
+	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-hclog v1.6.3 // indirect
@@ -173,7 +173,7 @@ require (
 	k8s.io/utils v0.0.0-20260319190234-28399d86e0b5 // indirect
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect
-	sigs.k8s.io/structured-merge-diff/v6 v6.3.2 // indirect
+	sigs.k8s.io/structured-merge-diff/v6 v6.4.0 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
 
