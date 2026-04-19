@@ -4,6 +4,19 @@ description: Architectural choices and rationale.
 sidebarTitle: "📋 Design Decisions"
 ---
 
+## Why a fixed dispatcher pool instead of a goroutine per actor?
+
+Earlier versions ran each active actor on its own drainer goroutine. v4.2.1 replaced that with a **fixed worker pool** — typically `max(GOMAXPROCS, 2)` workers — that cooperatively multiplexes the entire actor population, following the Akka / Pekko / Erlang / Orleans pattern.
+
+Trade-offs driving the change:
+
+- **Goroutine count decoupled from actor count.** Systems with 100k actors no longer allocate 100k goroutine stacks. `runtime.NumGoroutine()` stabilises at `workerCount + O(1)`.
+- **Fairness by construction.** A per-turn throughput budget (configurable via `WithThroughputBudget`, default 32) bounds how long one busy actor can hold a worker before yielding — peers aren't starved by a hot mailbox.
+- **Better CPU cache use.** When a worker processes several messages for the same actor back-to-back, the CPU keeps that actor's mailbox, state, and `Receive` code in its fast on-chip memory (CPU cache). Rotating to a different actor on every message would force the CPU to reload everything from main memory each time — measurably slower.
+- **Control-plane priority preserved.** Every actor carries a dedicated system mailbox drained before the user mailbox on every turn, so `PoisonPill`, supervision, passivation, and termination messages cannot queue behind a user-message backlog.
+
+Every user-visible semantic is unchanged: per-actor FIFO, single-threaded execution, `PreStart` / `PostStop` contract, reentrancy, panic recovery, and supervision all hold — the three-state `Idle` / `Scheduled` / `Processing` CAS on each PID enforces the single-consumer invariant the mailbox contract depends on. See [Dispatcher Pool](/architecture/dispatcher-pool) for the full design.
+
 ## Why `any` instead of `proto.Message` (v4)?
 
 v4 allows any type as actor messages. Benefits:

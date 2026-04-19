@@ -90,7 +90,8 @@
         "pages": [
           "/architecture/overview",
           "architecture/code-map",
-          "architecture/design-decisions"
+          "architecture/design-decisions",
+          "architecture/dispatcher-pool"
         ],
         "icon": "layout"
       },
