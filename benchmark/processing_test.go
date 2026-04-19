@@ -482,3 +482,267 @@ func BenchmarkSendSync(b *testing.B) {
 	messagesPerSec := float64(b.N) / b.Elapsed().Seconds()
 	b.ReportMetric(messagesPerSec, "messages/sec")
 }
+
+// throughputBudgets is the sweep used by the *Throughput variants of the
+// benchmarks below. It spans from below-default (fair / latency-friendly) to
+// well above default (throughput-oriented) so the curve is visible.
+var throughputBudgets = []int{8, 32, 64, 128, 256}
+
+// BenchmarkTellThroughput is a variant of BenchmarkTell that sweeps the
+// dispatcher's per-turn message budget via WithThroughputBudget. Everything else
+// (workload, parallelism, message shape) is held constant so the reported
+// messages/sec deltas reflect only the scheduler knob.
+func BenchmarkTellThroughput(b *testing.B) {
+	for _, budget := range throughputBudgets {
+		b.Run(fmt.Sprintf("budget=%d", budget), func(b *testing.B) {
+			ctx := context.Background()
+
+			actorSystem, err := actor.NewActorSystem("bench",
+				actor.WithLogger(log.DiscardLogger),
+				actor.WithActorInitMaxRetries(1),
+				actor.WithThroughputBudget(budget))
+			if err != nil {
+				b.Fatalf("failed to create actor system: %v", err)
+			}
+
+			if err := actorSystem.Start(ctx); err != nil {
+				b.Fatalf("failed to start actor system: %v", err)
+			}
+			b.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+			sender, err := actorSystem.Spawn(ctx, "sender", new(Actor))
+			if err != nil {
+				b.Fatalf("failed to spawn sender: %v", err)
+			}
+			receiver, err := actorSystem.Spawn(ctx, "receiver", new(Actor))
+			if err != nil {
+				b.Fatalf("failed to spawn receiver: %v", err)
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			b.RunParallel(func(pb *testing.PB) {
+				msg := new(testpb.TestSend)
+				for pb.Next() {
+					if err := sender.Tell(ctx, receiver, msg); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+			b.StopTimer()
+			messagesPerSec := float64(b.N) / b.Elapsed().Seconds()
+			b.ReportMetric(messagesPerSec, "messages/sec")
+		})
+	}
+}
+
+// BenchmarkRequestThroughput is a variant of BenchmarkRequest that sweeps the
+// dispatcher's per-turn message budget. Request/response workloads interleave
+// ask replies with incoming messages, so the budget affects how quickly a
+// requester's continuation runs relative to new requests.
+func BenchmarkRequestThroughput(b *testing.B) {
+	for _, budget := range throughputBudgets {
+		b.Run(fmt.Sprintf("budget=%d", budget), func(b *testing.B) {
+			ctx := context.Background()
+
+			actorSystem, err := actor.NewActorSystem("bench",
+				actor.WithLogger(log.DiscardLogger),
+				actor.WithActorInitMaxRetries(1),
+				actor.WithThroughputBudget(budget))
+			if err != nil {
+				b.Fatalf("failed to create actor system: %v", err)
+			}
+
+			if err := actorSystem.Start(ctx); err != nil {
+				b.Fatalf("failed to start actor system: %v", err)
+			}
+			b.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+			sender, err := actorSystem.Spawn(ctx, "sender", new(Actor))
+			if err != nil {
+				b.Fatalf("failed to spawn sender: %v", err)
+			}
+			receiver, err := actorSystem.Spawn(ctx, "receiver", new(Actor))
+			if err != nil {
+				b.Fatalf("failed to spawn receiver: %v", err)
+			}
+
+			doneCh := make(chan struct{}, runtime.GOMAXPROCS(0))
+			errCh := make(chan error, 1)
+			requesterActor := &requestBenchActor{
+				target: receiver,
+				doneCh: doneCh,
+				errCh:  errCh,
+			}
+			requester, err := actorSystem.Spawn(ctx, "requester", requesterActor, actor.WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
+			if err != nil {
+				b.Fatalf("failed to spawn requester: %v", err)
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			b.RunParallel(func(pb *testing.PB) {
+				msg := new(testpb.TestSend)
+				for pb.Next() {
+					if err := sender.Tell(ctx, requester, msg); err != nil {
+						b.Fatal(err)
+					}
+					<-doneCh
+					select {
+					case err := <-errCh:
+						b.Fatal(err)
+					default:
+					}
+				}
+			})
+			b.StopTimer()
+			messagesPerSec := float64(b.N) / b.Elapsed().Seconds()
+			b.ReportMetric(messagesPerSec, "messages/sec")
+		})
+	}
+}
+
+// BenchmarkGrainTellThroughput is a variant of BenchmarkGrainTell that sweeps
+// the dispatcher's per-turn message budget. All producers race on the same
+// grain mailbox, so the budget controls how many messages the worker drains
+// before yielding back to the scheduler.
+func BenchmarkGrainTellThroughput(b *testing.B) {
+	for _, budget := range throughputBudgets {
+		b.Run(fmt.Sprintf("budget=%d", budget), func(b *testing.B) {
+			ctx := context.Background()
+
+			actorSystem, err := actor.NewActorSystem("bench",
+				actor.WithLogger(log.DiscardLogger),
+				actor.WithActorInitMaxRetries(1),
+				actor.WithThroughputBudget(budget))
+			if err != nil {
+				b.Fatalf("failed to create actor system: %v", err)
+			}
+			if err := actorSystem.Start(ctx); err != nil {
+				b.Fatalf("failed to start actor system: %v", err)
+			}
+			b.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+			identity, err := actorSystem.GrainIdentity(ctx, "receiver", func(context.Context) (actor.Grain, error) {
+				return &benchGrain{}, nil
+			})
+			if err != nil {
+				b.Fatalf("failed to create grain identity: %v", err)
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			b.RunParallel(func(pb *testing.PB) {
+				msg := new(testpb.TestSend)
+				for pb.Next() {
+					if err := actorSystem.TellGrain(ctx, identity, msg); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+			b.StopTimer()
+			messagesPerSec := float64(b.N) / b.Elapsed().Seconds()
+			b.ReportMetric(messagesPerSec, "messages/sec")
+		})
+	}
+}
+
+// BenchmarkGrainTellFanOutThroughput is a variant of BenchmarkGrainTellFanOut
+// that sweeps the dispatcher's per-turn message budget. With 256 grains and
+// work spread round-robin, the budget's fairness vs amortization trade-off is
+// most visible: higher values reduce scheduling overhead but let individual
+// grains hold workers longer before siblings get a turn.
+func BenchmarkGrainTellFanOutThroughput(b *testing.B) {
+	const grainCount = 256
+	for _, budget := range throughputBudgets {
+		b.Run(fmt.Sprintf("budget=%d", budget), func(b *testing.B) {
+			ctx := context.Background()
+
+			actorSystem, err := actor.NewActorSystem("bench",
+				actor.WithLogger(log.DiscardLogger),
+				actor.WithActorInitMaxRetries(1),
+				actor.WithThroughputBudget(budget))
+			if err != nil {
+				b.Fatalf("failed to create actor system: %v", err)
+			}
+			if err := actorSystem.Start(ctx); err != nil {
+				b.Fatalf("failed to start actor system: %v", err)
+			}
+			b.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+			identities := make([]*actor.GrainIdentity, grainCount)
+			for i := range identities {
+				id, err := actorSystem.GrainIdentity(ctx, fmt.Sprintf("g-%d", i), func(context.Context) (actor.Grain, error) {
+					return &benchGrain{}, nil
+				})
+				if err != nil {
+					b.Fatalf("failed to create grain identity: %v", err)
+				}
+				identities[i] = id
+			}
+
+			var counter atomic.Uint64
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			b.RunParallel(func(pb *testing.PB) {
+				msg := new(testpb.TestSend)
+				for pb.Next() {
+					idx := counter.Add(1) % grainCount
+					if err := actorSystem.TellGrain(ctx, identities[idx], msg); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+			b.StopTimer()
+			messagesPerSec := float64(b.N) / b.Elapsed().Seconds()
+			b.ReportMetric(messagesPerSec, "messages/sec")
+		})
+	}
+}
+
+// BenchmarkSendSyncThroughput is a variant of BenchmarkSendSync that sweeps
+// the dispatcher's per-turn message budget. SendSync is synchronous, so
+// per-call latency dominates; the budget's effect is smaller than on Tell but
+// still visible at higher values where cache locality on the receiver improves.
+func BenchmarkSendSyncThroughput(b *testing.B) {
+	for _, budget := range throughputBudgets {
+		b.Run(fmt.Sprintf("budget=%d", budget), func(b *testing.B) {
+			ctx := context.Background()
+
+			actorSystem, err := actor.NewActorSystem("bench",
+				actor.WithLogger(log.DiscardLogger),
+				actor.WithActorInitMaxRetries(1),
+				actor.WithThroughputBudget(budget))
+			if err != nil {
+				b.Fatalf("failed to create actor system: %v", err)
+			}
+
+			if err := actorSystem.Start(ctx); err != nil {
+				b.Fatalf("failed to start actor system: %v", err)
+			}
+			b.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+			sender, err := actorSystem.Spawn(ctx, "sender", new(Actor))
+			if err != nil {
+				b.Fatalf("failed to spawn sender: %v", err)
+			}
+			_, err = actorSystem.Spawn(ctx, "receiver", new(Actor))
+			if err != nil {
+				b.Fatalf("failed to spawn receiver: %v", err)
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			msg := new(testpb.TestReply)
+			for i := 0; i < b.N; i++ {
+				if _, err := sender.SendSync(ctx, "receiver", msg, time.Second); err != nil {
+					b.Fatal(err)
+				}
+			}
+			b.StopTimer()
+			messagesPerSec := float64(b.N) / b.Elapsed().Seconds()
+			b.ReportMetric(messagesPerSec, "messages/sec")
+		})
+	}
+}

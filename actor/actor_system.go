@@ -815,6 +815,10 @@ type actorSystem struct {
 	// mailboxes. Created in Start, torn down non-blockingly in shutdown.
 	dispatcher *dispatcher
 
+	// dispatcherThroughput is the per-turn message budget applied to the
+	// dispatcher at construction time. Set via WithThroughputBudget.
+	dispatcherThroughput int
+
 	// manages passivation deadlines without per-actor goroutines
 	passivator *passivationManager
 
@@ -919,26 +923,27 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	}
 
 	system := &actorSystem{
-		actorsQueue:         make(chan *internalpb.Actor, 10),
-		name:                name,
-		logger:              log.NewZap(log.ErrorLevel, os.Stderr),
-		actorInitMaxRetries: DefaultInitMaxRetries,
-		shutdownTimeout:     DefaultShutdownTimeout,
-		eventsStream:        eventstream.New(),
-		partitionHasher:     hash.DefaultHasher(),
-		actorInitTimeout:    DefaultInitTimeout,
-		eventsQueue:         make(chan *cluster.Event, 1),
-		registry:            types.NewRegistry(),
-		remoteConfig:        remote.DefaultConfig(),
-		actors:              newTree(),
-		shutdownHooks:       make([]ShutdownHook, 0),
-		rebalancedNodes:     goset.NewSet[string](),
-		topicActor:          nil,
-		extensions:          xsync.NewMap[string, extension.Extension](),
-		grainsQueue:         make(chan *internalpb.Grain, 10),
-		grains:              xsync.NewMap[string, *grainPID](),
-		askTimeout:          DefaultAskTimeout,
-		evictionStopSig:     make(chan types.Unit, 1),
+		actorsQueue:          make(chan *internalpb.Actor, 10),
+		name:                 name,
+		logger:               log.NewZap(log.ErrorLevel, os.Stderr),
+		actorInitMaxRetries:  DefaultInitMaxRetries,
+		shutdownTimeout:      DefaultShutdownTimeout,
+		eventsStream:         eventstream.New(),
+		partitionHasher:      hash.DefaultHasher(),
+		actorInitTimeout:     DefaultInitTimeout,
+		eventsQueue:          make(chan *cluster.Event, 1),
+		registry:             types.NewRegistry(),
+		remoteConfig:         remote.DefaultConfig(),
+		actors:               newTree(),
+		shutdownHooks:        make([]ShutdownHook, 0),
+		rebalancedNodes:      goset.NewSet[string](),
+		topicActor:           nil,
+		extensions:           xsync.NewMap[string, extension.Extension](),
+		grainsQueue:          make(chan *internalpb.Grain, 10),
+		grains:               xsync.NewMap[string, *grainPID](),
+		askTimeout:           DefaultAskTimeout,
+		evictionStopSig:      make(chan types.Unit, 1),
+		dispatcherThroughput: dispatcherThroughput,
 	}
 
 	system.startedAt.Store(0)
@@ -958,12 +963,14 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	system.defaultSupervisor = sup.NewSupervisor()
 	system.defaultPassivationStrategy = passivation.NewTimeBasedStrategy(DefaultPassivationTimeout)
 	system.passivator = newPassivationManager(system.logger)
-	system.dispatcher = newDispatcher(dispatcherWorkerCount(), dispatcherThroughput)
 
 	// apply the various options
 	for _, opt := range opts {
 		opt.Apply(system)
 	}
+
+	// build the dispatcher after options so tuning knobs like WithThroughputBudget take effect.
+	system.dispatcher = newDispatcher(dispatcherWorkerCount(), system.dispatcherThroughput)
 
 	if err := system.validate(); err != nil {
 		return nil, err

@@ -44,4 +44,15 @@ When a parent stops, all children stop first (depth-first). A parent supervises 
 
 **Placement and membership** state (which actors and grains live where) is stored in Olric (distributed hash map) with configurable quorum. Node membership uses Hashicorp Memberlist. **CRDT application state** (when enabled via `ClusterConfig.WithCRDT`) is replicated separately by the **Replicator** actor using delta broadcast over the topic bus—not through Olric DMap writes.
 
-See [Code Map](/architecture/code-map) for package layout and [Distributed data](/advanced/distributed-data) for CRDT behaviour.
+## Deep dives
+
+The following pages describe the internal architecture of each major subsystem:
+
+| Subsystem | Page | What it covers |
+|-----------|------|----------------|
+| **Scheduler** | [Dispatcher Pool](/architecture/dispatcher-pool) | Fixed worker pool, actor state machine, ready queue, work stealing, system-message priority, throughput tuning. |
+
+## See also
+
+- [Code Map](/architecture/code-map) — package layout and file-level responsibilities
+- [Design Decisions](/architecture/design-decisions) — rationale behind architectural choices
