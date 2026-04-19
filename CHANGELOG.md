@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### ✨ New Additions
+
+- **`WithThroughputBudget` option — tunable dispatcher per-turn message budget.** Exposes the dispatcher's per-turn message budget (the maximum number of messages a worker drains from a single actor before yielding back to the scheduler) as a user-configurable `ActorSystem` option. The default remains `32`, chosen for balanced fairness across many actors; raising it amortises per-turn scheduling overhead and keeps CPU caches warm on hot actors at the cost of fairness, and lowering it favours tail-latency predictability under many-small-actor workloads. Per-actor FIFO ordering and the single-threaded-per-actor execution invariant are preserved regardless of the value — a yield is a pause, not a reorder. Variant benchmarks — `BenchmarkTellThroughput`, `BenchmarkRequestThroughput`, `BenchmarkSendSyncThroughput`, `BenchmarkGrainTellThroughput`, `BenchmarkGrainTellFanOutThroughput` — sweep the budget across `{8, 32, 64, 128, 256}` so users can measure impact on their own workload. Measured on Apple M1, the default is near-optimal on typical workloads; fan-out workloads see ~2-5% aggregate gains at `64`-`128` and a mild regression at `256`, confirming the fairness cost at very high budgets. See the `WithThroughputBudget` godoc for guidance per workload class.
+
 ## v4.2.1 - 2026-04-16
 
 ### ✨ New Additions
