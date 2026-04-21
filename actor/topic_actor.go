@@ -143,11 +143,9 @@ func (x *topicActor) handlePublish(ctx *ReceiveContext) {
 		msg := message
 
 		// send the message to all local subscribers in a separate goroutine
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			x.sendToLocalSubscribers(cctx, topic, msg, &wg)
-		}()
+		})
 
 		// send the message to all remote subscribers in a separate goroutine
 		// this can only be done if the actor system is clustered
@@ -160,11 +158,9 @@ func (x *topicActor) handlePublish(ctx *ReceiveContext) {
 
 			remotePeers := buildRemotePeers(peers)
 
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				x.sendToRemoteTopicActors(cctx, remotePeers, actorName, messageID, topic, message, &wg)
-			}()
+			})
 		}
 
 		// wait for all messages to be sent to all subscribers
@@ -186,7 +182,6 @@ func buildRemotePeers(peers []*cluster.Peer) []remotePeer {
 func (x *topicActor) sendToLocalSubscribers(cctx context.Context, topic string, msg any, wg *sync.WaitGroup) {
 	if subscribers, ok := x.topics.Get(topic); ok && subscribers.Len() != 0 {
 		for _, subscriber := range subscribers.Values() {
-			subscriber := subscriber
 			// make sure subscriber does exist
 			_, ok := x.actorSystem.tree().node(subscriber.ID())
 			if ok && subscriber.IsRunning() {
@@ -209,7 +204,6 @@ func (x *topicActor) sendToLocalSubscribers(cctx context.Context, topic string, 
 func (x *topicActor) sendToRemoteTopicActors(cctx context.Context, remotePeers []remotePeer, actorName, messageID, topic string, message any, wg *sync.WaitGroup) {
 	if len(remotePeers) > 0 {
 		for _, peer := range remotePeers {
-			peer := peer
 			wg.Add(1)
 			go func(peer remotePeer) {
 				defer wg.Done()

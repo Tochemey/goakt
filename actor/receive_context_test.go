@@ -2097,16 +2097,14 @@ func TestReceiveContext(t *testing.T) {
 		messageContext.PipeTo(pid2, task)
 
 		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
+		wg.Go(func() {
 			// Wait for some time and during that period send some messages to the actor
 			// send three messages while waiting for the future to completed
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
 			pause.For(time.Second)
-			wg.Done()
-		}()
+		})
 
 		wg.Wait()
 
@@ -3123,16 +3121,14 @@ func TestReceiveContext(t *testing.T) {
 		messageContext.PipeToName("Exchange2", task)
 
 		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
+		wg.Go(func() {
 			// Wait for some time and during that period send some messages to the actor
 			// send three messages while waiting for the future to completed
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
 			pause.For(time.Second)
-			wg.Done()
-		}()
+		})
 
 		wg.Wait()
 

@@ -33,7 +33,7 @@ func TestTicker(t *testing.T) {
 	intervals := 100 * time.Millisecond
 	ticker := New(intervals)
 	ticker.Start()
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		<-ticker.Ticks
 	}
 	ticker.Stop()

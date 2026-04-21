@@ -323,11 +323,9 @@ func BenchmarkProtoServer_KeepAlive(b *testing.B) {
 	// request per goroutine and returning connections to the pool.
 	var warmWg sync.WaitGroup
 	for range benchConcurrency {
-		warmWg.Add(1)
-		go func() {
-			defer warmWg.Done()
+		warmWg.Go(func() {
 			_, _ = client.SendProto(context.Background(), benchProtoReq) //nolint:errcheck
-		}()
+		})
 	}
 	warmWg.Wait()
 

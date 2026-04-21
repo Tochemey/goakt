@@ -58,7 +58,7 @@ func errorType(err error) string {
 		return "nil"
 	}
 	rtype := reflect.TypeOf(err)
-	if rtype.Kind() == reflect.Ptr {
+	if rtype.Kind() == reflect.Pointer {
 		rtype = rtype.Elem()
 	}
 	return rtype.String()

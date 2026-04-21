@@ -196,7 +196,7 @@ func TestProtoSerializer_MarshalUnmarshalBinaryWithMetadata_Success(t *testing.T
 
 	t.Run("with many headers", func(t *testing.T) {
 		md := NewMetadata()
-		for i := 0; i < 20; i++ {
+		for i := range 20 {
 			md.Set(string(rune('a'+i)), string(rune('A'+i)))
 		}
 
@@ -209,7 +209,7 @@ func TestProtoSerializer_MarshalUnmarshalBinaryWithMetadata_Success(t *testing.T
 		require.NotNil(t, mdOut)
 
 		// Verify all headers round-trip.
-		for i := 0; i < 20; i++ {
+		for i := range 20 {
 			val, ok := mdOut.Get(string(rune('a' + i)))
 			require.True(t, ok)
 			require.Equal(t, string(rune('A'+i)), val)

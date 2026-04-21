@@ -205,7 +205,7 @@ func TestMetadata_Marshal(t *testing.T) {
 
 	t.Run("large number of headers", func(t *testing.T) {
 		md := NewMetadata()
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			md.Set("key"+string(rune('0'+i%10)), "value")
 		}
 		data := md.MarshalBinary()
@@ -320,7 +320,7 @@ func TestMetadata_Unmarshal(t *testing.T) {
 	t.Run("map pre-sizing", func(t *testing.T) {
 		// Create metadata with many headers to verify map pre-sizing works.
 		md1 := NewMetadata()
-		for i := 0; i < 50; i++ {
+		for i := range 50 {
 			md1.Set("key"+string(rune('a'+i%26)), "value")
 		}
 		data := md1.MarshalBinary()

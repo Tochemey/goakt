@@ -373,7 +373,6 @@ func (x *router) routeByStrategy(ctx *ReceiveContext, msg any, routees []*PID) {
 		sender := ctx.Self()
 		sendCtx := ctx.withoutCancel()
 		for _, routee := range routees {
-			routee := routee
 			go func() {
 				if err := sender.Tell(sendCtx, routee, msg); err != nil {
 					if x.logger.Enabled(log.WarningLevel) {

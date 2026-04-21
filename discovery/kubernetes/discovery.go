@@ -147,7 +147,6 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 
 MainLoop:
 	for _, pod := range pods.Items {
-		pod := pod
 
 		if pod.Status.Phase != corev1.PodRunning {
 			continue MainLoop

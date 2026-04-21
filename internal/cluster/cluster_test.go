@@ -2824,12 +2824,10 @@ func TestConsumeDispatchesClusterEvents(t *testing.T) {
 	cl.consumeCtx, cl.consumeCancel = context.WithCancel(context.Background())
 
 	done := make(chan struct{})
-	cl.consumeWg.Add(1)
-	go func() {
-		defer cl.consumeWg.Done()
+	cl.consumeWg.Go(func() {
 		cl.consume()
 		close(done)
-	}()
+	})
 
 	node := "127.0.0.1:9000"
 	payload, err := json.Marshal(events.NodeJoinEvent{
@@ -2910,7 +2908,7 @@ func TestSendEventLockedDropsWhenChannelFull(t *testing.T) {
 	cl.events <- &Event{Type: NodeJoined}
 
 	// Send multiple events - all should be dropped without blocking
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		start := time.Now()
 		cl.sendEventLocked(&Event{Type: NodeLeft})
 		duration := time.Since(start)
@@ -2943,11 +2941,9 @@ func TestStopWaitsForConsume(t *testing.T) {
 	// Create a mock server to avoid nil pointer in Stop()
 	cl.server = &olric.Olric{}
 
-	cl.consumeWg.Add(1)
-	go func() {
-		defer cl.consumeWg.Done()
+	cl.consumeWg.Go(func() {
 		cl.consume()
-	}()
+	})
 
 	// Send a message to ensure consume is processing
 	msgs <- &redis.Message{
@@ -2988,11 +2984,9 @@ func TestStopNoPanicOnClosedChannel(t *testing.T) {
 	cl.shutdownTimeout = 5 * time.Second
 	close(msgs) // Close immediately
 
-	cl.consumeWg.Add(1)
-	go func() {
-		defer cl.consumeWg.Done()
+	cl.consumeWg.Go(func() {
 		cl.consume()
-	}()
+	})
 
 	// Wait for consume to finish
 	time.Sleep(100 * time.Millisecond)
@@ -3080,16 +3074,14 @@ func TestStopTimeoutHandling(t *testing.T) {
 	cl.messages = msgs
 	shutdownTimeout := 100 * time.Millisecond // Short timeout
 
-	cl.consumeWg.Add(1)
-	go func() {
-		defer cl.consumeWg.Done()
+	cl.consumeWg.Go(func() {
 		// Simulate slow processing - block on reading from channel
 		select {
 		case <-msgs:
 		case <-time.After(500 * time.Millisecond):
 		}
 		cl.consume()
-	}()
+	})
 
 	// Test timeout behavior
 	ctx, cancelFn := context.WithTimeout(context.Background(), shutdownTimeout)

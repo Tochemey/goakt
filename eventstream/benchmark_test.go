@@ -58,7 +58,7 @@ func newBenchmarkStream(topic string, subs int) *EventsStream {
 		topics:      make(map[string]map[string]Subscriber, 1),
 	}
 	es.topics[topic] = make(map[string]Subscriber, subs)
-	for i := 0; i < subs; i++ {
+	for i := range subs {
 		sub := newBenchSubscriber(strconv.Itoa(i))
 		es.subscribers[sub.ID()] = sub
 		es.topics[topic][sub.ID()] = sub
@@ -86,7 +86,6 @@ func publishToTopicAsyncWait(es *EventsStream, topic string, msg any) {
 	var wg sync.WaitGroup
 	wg.Add(len(snapshot))
 	for _, sub := range snapshot {
-		sub := sub
 		if !sub.Active() {
 			wg.Done()
 			continue

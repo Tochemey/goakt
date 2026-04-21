@@ -45,7 +45,6 @@ import (
 	"github.com/tochemey/goakt/v4/internal/id"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	inet "github.com/tochemey/goakt/v4/internal/net"
-	"github.com/tochemey/goakt/v4/internal/pointer"
 	"github.com/tochemey/goakt/v4/internal/strconvx"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/internal/xsync"
@@ -617,7 +616,7 @@ func WithClientSerializers(msg any, serializer remote.Serializer) ClientOption {
 		typ := reflect.TypeOf(msg)
 		// A typed nil pointer whose element is an interface (e.g. (*proto.Message)(nil))
 		// registers the serializer for all values that implement that interface.
-		if typ != nil && typ.Kind() == reflect.Ptr && typ.Elem().Kind() == reflect.Interface {
+		if typ != nil && typ.Kind() == reflect.Pointer && typ.Elem().Kind() == reflect.Interface {
 			r.serializers = append(r.serializers, ifaceEntry{
 				iface:      typ.Elem(),
 				serializer: serializer,
@@ -2003,7 +2002,7 @@ func (r *client) RemoteSpawn(ctx context.Context, host string, port int, spawnRe
 
 	if res, ok := resp.(*internalpb.RemoteSpawnResponse); ok && res.GetAddress() != "" {
 		addr := res.GetAddress()
-		return pointer.To(addr), nil
+		return new(addr), nil
 	}
 
 	return nil, gerrors.ErrInvalidResponse
@@ -2050,7 +2049,7 @@ func (r *client) RemoteReSpawn(ctx context.Context, host string, port int, name 
 	// Extract address from successful response
 	if res, ok := resp.(*internalpb.RemoteReSpawnResponse); ok && res.GetAddress() != "" {
 		addr := res.GetAddress()
-		return pointer.To(addr), nil
+		return new(addr), nil
 	}
 
 	return nil, gerrors.ErrInvalidResponse
@@ -2359,7 +2358,7 @@ func getGrainFromRequest(host string, port int, grainRequest *remote.GrainReques
 		Dependencies:      dependencies,
 		ActivationRetries: int32(grainRequest.ActivationRetries),
 		ActivationTimeout: durationpb.New(grainRequest.ActivationTimeout),
-		MailboxCapacity:   pointer.To(grainRequest.MailboxCapacity),
+		MailboxCapacity:   new(grainRequest.MailboxCapacity),
 	}
 
 	return grain, nil

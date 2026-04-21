@@ -56,9 +56,7 @@ func TestUnboundedSegmentedMailbox_OneProducer(t *testing.T) {
 	mb := NewUnboundedSegmentedMailbox()
 
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		cnt := 0
 		for cnt < exp {
 			if mb.Dequeue() != nil {
@@ -67,7 +65,7 @@ func TestUnboundedSegmentedMailbox_OneProducer(t *testing.T) {
 				runtime.Gosched()
 			}
 		}
-	}()
+	})
 
 	for range exp {
 		require.NoError(t, mb.Enqueue(new(ReceiveContext)))
@@ -86,9 +84,7 @@ func TestUnboundedSegmentedMailbox_MultipleProducers(t *testing.T) {
 	mb := NewUnboundedSegmentedMailbox()
 
 	var consumerWg sync.WaitGroup
-	consumerWg.Add(1)
-	go func() {
-		defer consumerWg.Done()
+	consumerWg.Go(func() {
 		cnt := 0
 		for cnt < total {
 			if mb.Dequeue() != nil {
@@ -97,7 +93,7 @@ func TestUnboundedSegmentedMailbox_MultipleProducers(t *testing.T) {
 				runtime.Gosched()
 			}
 		}
-	}()
+	})
 
 	var prodWg sync.WaitGroup
 	prodWg.Add(producers)

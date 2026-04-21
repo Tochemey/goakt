@@ -114,10 +114,7 @@ func Of[T any](values ...T) Source[T] {
 				if len(anys) == 0 {
 					return nil, false
 				}
-				take := int(n)
-				if take > len(anys) {
-					take = len(anys)
-				}
+				take := min(int(n), len(anys))
 				batch := anys[:take]
 				anys = anys[take:]
 				return batch, len(anys) > 0
@@ -335,7 +332,7 @@ func Unfold[S, T any](seed S, step func(S) (S, T, bool)) Source[T] {
 			cur := seed
 			return newPullSourceActor(func(n int64) ([]any, bool) {
 				batch := make([]any, 0, n)
-				for i := int64(0); i < n; i++ {
+				for range n {
 					next, elem, more := step(cur)
 					cur = next
 					batch = append(batch, elem)

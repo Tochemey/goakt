@@ -44,7 +44,7 @@ func TestRoundRobin(t *testing.T) {
 	)
 
 	actual := make([]string, 4)
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		actual[i] = balancer.Next().getAddress()
 	}
 

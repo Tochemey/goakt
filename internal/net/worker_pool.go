@@ -108,7 +108,7 @@ func (wp *WorkerPool[T]) Start() {
 			wp.shards[i] = &poolShard[T]{
 				wp: wp,
 				workerCache: sync.Pool{
-					New: func() interface{} {
+					New: func() any {
 						return &workerInstance[T]{}
 					},
 				},
@@ -314,7 +314,7 @@ func (wp *WorkerPool[T]) cleanup() {
 				}
 				j = lo
 			} else {
-				for j = 0; j < iws; j++ {
+				for j = range iws {
 					if now-atomic.LoadInt64(&idleWorkerList[j].lastUsed) < lifetime {
 						break
 					}
@@ -383,7 +383,7 @@ func (sm64 *splitMix64) Int63() int64 {
 }
 
 var splitMix64Pool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		sm64 := &splitMix64{}
 		sm64.Init(time.Now().UnixNano())
 		return sm64

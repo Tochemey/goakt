@@ -54,7 +54,6 @@ import (
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/locker"
 	"github.com/tochemey/goakt/v4/internal/metric"
-	"github.com/tochemey/goakt/v4/internal/pointer"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/internal/ticker"
 	"github.com/tochemey/goakt/v4/internal/types"
@@ -346,7 +345,7 @@ func (pid *PID) Role() *string {
 	if pid.IsRemote() {
 		role, err := pid.remoting.RemoteRole(context.Background(), pid.address.Host(), pid.address.Port(), pid.Name())
 		if err == nil {
-			return pointer.To(role)
+			return new(role)
 		}
 		return nil
 	}
@@ -2371,7 +2370,6 @@ func (pid *PID) freeWatchers(ctx context.Context) {
 	if len(watchers) > 0 {
 		// this call will be fast no need of parallel processing
 		for _, watcher := range watchers {
-			watcher := watcher
 			terminated := NewTerminated(pid.Path())
 
 			if watcher.IsRunning() {
@@ -2852,7 +2850,6 @@ func (pid *PID) handleStopDirective(cid *PID, includeSiblings bool) {
 
 	eg, ctx := errgroup.WithContext(ctx)
 	for _, spid := range pids {
-		spid := spid
 		eg.Go(func() error {
 			// TODO: revisit this
 			//pid.UnWatch(spid)
@@ -2886,7 +2883,6 @@ func (pid *PID) handleRestartDirective(cid *PID, maxRetries uint32, timeout time
 
 	eg, ctx := errgroup.WithContext(ctx)
 	for _, spid := range pids {
-		spid := spid
 		eg.Go(func() error {
 			pid.UnWatch(spid)
 			var err error
@@ -3293,7 +3289,6 @@ func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *t
 
 	eg, gctx := errgroup.WithContext(ctx)
 	for _, child := range node.children {
-		child := child
 		eg.Go(func() error {
 			return restartSubtree(gctx, child, pid, tree, deathWatch, actorSystem)
 		})

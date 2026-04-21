@@ -73,10 +73,10 @@ func RegisterSerializerType(msg any, serializer any) {
 		return
 	}
 	typ := reflect.TypeOf(msg)
-	if typ == nil || typ.Kind() != reflect.Ptr || typ.Elem().Kind() == reflect.Interface {
+	if typ == nil || typ.Kind() != reflect.Pointer || typ.Elem().Kind() == reflect.Interface {
 		return
 	}
-	protoMsgType := reflect.TypeOf((*proto.Message)(nil)).Elem()
+	protoMsgType := reflect.TypeFor[proto.Message]()
 	if typ.Implements(protoMsgType) {
 		return
 	}

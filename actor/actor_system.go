@@ -3129,7 +3129,6 @@ func (x *actorSystem) cleanupCluster(ctx context.Context, pids []*PID) error {
 
 	// Remove all actors from the cluster
 	for _, pid := range pids {
-		pid := pid
 		eg.Go(func() error {
 			actorName := pid.Name()
 			if err := x.cluster.RemoveActor(ctx, actorName); err != nil {
@@ -3144,7 +3143,6 @@ func (x *actorSystem) cleanupCluster(ctx context.Context, pids []*PID) error {
 	// Remove all grains from the cluster if exists
 	if x.grains.Len() > 0 {
 		for _, grain := range x.grains.Values() {
-			grain := grain
 			eg.Go(func() error {
 				if err := x.cluster.RemoveGrain(ctx, grain.identity.String()); err != nil {
 					x.logger.Errorf("failed to remove grain=%s from cluster: %v (hint: check cluster connectivity)", grain.identity.String(), err)
@@ -3613,7 +3611,6 @@ func (x *actorSystem) persistPeerStateToPeers(ctx context.Context, peerState *in
 
 	// Launch parallel RPCs to all selected peers
 	for _, peer := range peers {
-		peer := peer
 		go func() {
 			// Get pooled proto TCP client
 			client := remoting.NetClient(peer.Host, peer.RemotingPort)

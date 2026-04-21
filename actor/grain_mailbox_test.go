@@ -75,10 +75,10 @@ func TestGrainMailboxConcurrentEnqueue_Unbounded(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(producers)
 
-	for i := 0; i < producers; i++ {
+	for range producers {
 		go func() {
 			defer wg.Done()
-			for j := 0; j < messagesPerProducer; j++ {
+			for range messagesPerProducer {
 				require.NoError(t, mailbox.Enqueue(&GrainContext{}))
 			}
 		}()
@@ -176,7 +176,7 @@ func TestGrainMailboxCapacityZeroOrNegative_IsUnbounded(t *testing.T) {
 	mNeg := newGrainMailbox(-10)
 
 	// Try to enqueue a bunch; should never return ErrMailboxFull.
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		require.NoError(t, m0.Enqueue(&GrainContext{}))
 		require.NoError(t, mNeg.Enqueue(&GrainContext{}))
 	}

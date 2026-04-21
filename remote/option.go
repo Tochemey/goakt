@@ -163,7 +163,7 @@ func WithSerializers(msg any, serializer Serializer) Option {
 		typ := reflect.TypeOf(msg)
 		// A typed nil pointer whose element is an interface (e.g. (*proto.Message)(nil))
 		// registers the serializer for all values that implement that interface.
-		if typ != nil && typ.Kind() == reflect.Ptr && typ.Elem().Kind() == reflect.Interface {
+		if typ != nil && typ.Kind() == reflect.Pointer && typ.Elem().Kind() == reflect.Interface {
 			config.serializers[typ.Elem()] = serializer
 			return
 		}
@@ -213,7 +213,7 @@ func WithSerializables(msgs ...any) Option {
 			}
 			// A typed nil pointer whose element is an interface (e.g. (*MyInterface)(nil))
 			// registers the serializer for all values that implement that interface.
-			if typ.Kind() == reflect.Ptr && typ.Elem().Kind() == reflect.Interface {
+			if typ.Kind() == reflect.Pointer && typ.Elem().Kind() == reflect.Interface {
 				config.serializers[typ.Elem()] = cbor
 				continue
 			}

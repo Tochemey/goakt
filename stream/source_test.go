@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"slices"
 	"sort"
 	"testing"
 	"time"
@@ -157,7 +158,7 @@ func TestFromChannel_StreamingChannel(t *testing.T) {
 
 	ch := make(chan int)
 	go func() {
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			ch <- i
 		}
 		close(ch)
@@ -206,10 +207,7 @@ func (a *intPullActor) PostStop(_ *actor.Context) error { return nil }
 func (a *intPullActor) Receive(ctx *actor.ReceiveContext) {
 	switch msg := ctx.Message().(type) {
 	case *stream.PullRequest:
-		n := int(msg.N)
-		if n > len(a.data) {
-			n = len(a.data)
-		}
+		n := min(int(msg.N), len(a.data))
 		batch := make([]int, n)
 		copy(batch, a.data[:n])
 		a.data = a.data[n:]
@@ -569,11 +567,11 @@ func TestBalance_EachElementDeliveredOnce(t *testing.T) {
 	for _, col := range cols {
 		all = append(all, col.Items()...)
 	}
-	sort.Slice(all, func(i, j int) bool { return all[i] < all[j] })
+	slices.Sort(all)
 
 	// All 100 elements must be present, each exactly once.
 	require.Len(t, all, n)
-	for i := int64(0); i < n; i++ {
+	for i := range int64(n) {
 		assert.Equal(t, i, all[i])
 	}
 }
@@ -812,7 +810,7 @@ func TestBroadcast_LargeSource(t *testing.T) {
 	assert.Len(t, items1, n)
 
 	// Verify all elements are present (order preserved within each branch).
-	for i := int64(0); i < n; i++ {
+	for i := range int64(n) {
 		assert.Equal(t, i, items0[i])
 		assert.Equal(t, i, items1[i])
 	}

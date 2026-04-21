@@ -43,7 +43,7 @@ func TestNewDiscovery(t *testing.T) {
 	d := NewDiscovery(cfg)
 	require.NotNil(t, d)
 	assert.IsType(t, &Discovery{}, d)
-	var p interface{} = d
+	var p any = d
 	_, ok := p.(discovery.Provider)
 	assert.True(t, ok)
 }

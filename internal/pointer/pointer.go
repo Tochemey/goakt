@@ -23,8 +23,10 @@
 package pointer
 
 // To returns a pointer to the given value.
+//
+//go:fix inline
 func To[T any](v T) *T {
-	return &v
+	return new(v)
 }
 
 // Deref dereferences ptr and returns the value it points to if no nil, or else

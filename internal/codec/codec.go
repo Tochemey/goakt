@@ -255,10 +255,7 @@ func EncodeReentrancy(reentrancy *reentrancy.Reentrancy) *internalpb.ReentrancyC
 	if reentrancy == nil {
 		return nil
 	}
-	maxInFlight := reentrancy.MaxInFlight()
-	if maxInFlight < 0 {
-		maxInFlight = 0
-	}
+	maxInFlight := max(reentrancy.MaxInFlight(), 0)
 	var limit uint32
 	switch {
 	case maxInFlight <= 0:

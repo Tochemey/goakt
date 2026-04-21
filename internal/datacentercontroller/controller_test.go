@@ -99,8 +99,7 @@ func TestControllerStartStopHappyPath(t *testing.T) {
 		config.WatchEnabled = false
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	require.NoError(t, manager.Start(ctx))
 	require.NoError(t, manager.Start(ctx))
@@ -138,8 +137,7 @@ func TestControllerStartRefreshError(t *testing.T) {
 		config.WatchEnabled = false
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	require.NoError(t, manager.Start(ctx))
 	require.True(t, manager.started.Load())
@@ -166,8 +164,7 @@ func TestControllerStartWithWatchEnabled(t *testing.T) {
 		config.WatchEnabled = true
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	require.NoError(t, manager.Start(ctx))
 	require.NoError(t, manager.Stop(context.Background()))
@@ -476,8 +473,7 @@ func TestControllerWatchLoopUnsupported(t *testing.T) {
 	manager := newTestController(t, cp, func(config *Config) {
 		config.CacheRefreshInterval = time.Millisecond
 	})
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	manager.ctx = ctx
 
 	done := make(chan struct{})

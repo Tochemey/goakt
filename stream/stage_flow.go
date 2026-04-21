@@ -107,10 +107,7 @@ func (a *flowActor) Receive(rctx *actor.ReceiveContext) {
 				a.maybeRequestUpstream(rctx)
 				return
 			case Retry:
-				maxAttempts := a.config.RetryConfig.MaxAttempts
-				if maxAttempts < 1 {
-					maxAttempts = 1
-				}
+				maxAttempts := max(a.config.RetryConfig.MaxAttempts, 1)
 				var retryErr error
 				for attempt := 0; attempt < maxAttempts; attempt++ {
 					outs, retryErr = a.transformFn(msg.value)

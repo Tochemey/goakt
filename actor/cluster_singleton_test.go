@@ -42,7 +42,6 @@ import (
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	dynaport "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
-	"github.com/tochemey/goakt/v4/internal/pointer"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/log"
 	mockcluster "github.com/tochemey/goakt/v4/mocks/cluster"
@@ -345,7 +344,7 @@ func TestSingletonActor(t *testing.T) {
 						req.Singleton.MaxRetries == singletonSpec.MaxRetries &&
 						req.Role == nil
 				}),
-			).Return(pointer.To("goakt://test@127.0.0.1:9000/actor"), nil).Once()
+			).Return(new("goakt://test@127.0.0.1:9000/actor"), nil).Once()
 
 		_, err := system.SpawnSingleton(ctx, "singleton", NewMockActor(),
 			WithSingletonSpawnRetries(int(singletonSpec.MaxRetries)),
@@ -481,7 +480,7 @@ func TestSingletonActor(t *testing.T) {
 						req.Role != nil &&
 						*req.Role == role
 				}),
-			).Return(pointer.To("goakt://test@127.0.0.1:9000/actor"), nil).Once()
+			).Return(new("goakt://test@127.0.0.1:9000/actor"), nil).Once()
 
 		_, err := system.spawnSingletonWithRole(ctx, clusterMock, "singleton", NewMockActor(), role,
 			singletonSpec.SpawnTimeout,
@@ -634,7 +633,7 @@ func TestSpawnSingletonReturnsPID(t *testing.T) {
 			RemoteSpawn(mock.Anything, leader.Host, leader.RemotingPort, mock.MatchedBy(func(req *remote.SpawnRequest) bool {
 				return req != nil && req.Name == "singleton" && req.Kind == "actor.mockactor"
 			})).
-			Return(pointer.To(expectedAddr), nil).Once()
+			Return(new(expectedAddr), nil).Once()
 
 		pid, err := system.SpawnSingleton(ctx, "singleton", NewMockActor(),
 			WithSingletonSpawnRetries(2),
@@ -706,7 +705,7 @@ func TestSpawnSingletonReturnsPID(t *testing.T) {
 			Return(nil, olric.ErrReadQuorum).Once()
 		remotingMock.EXPECT().
 			RemoteSpawn(mock.Anything, leader.Host, leader.RemotingPort, mock.Anything).
-			Return(pointer.To(expectedAddr), nil).Once()
+			Return(new(expectedAddr), nil).Once()
 
 		pid, err := system.SpawnSingleton(ctx, "singleton", NewMockActor(),
 			WithSingletonSpawnRetries(3),
@@ -1314,7 +1313,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 						*req.Role == role
 				}),
 			).
-			Return(pointer.To("goakt://test@127.0.0.1:9000/actor"), nil).
+			Return(new("goakt://test@127.0.0.1:9000/actor"), nil).
 			Once()
 
 		_, err := system.SpawnSingleton(
@@ -1373,7 +1372,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 						req.Role == nil
 				}),
 			).
-			Return(pointer.To("goakt://test@127.0.0.1:9000/actor"), nil).
+			Return(new("goakt://test@127.0.0.1:9000/actor"), nil).
 			Once()
 
 		_, err := system.SpawnSingleton(
@@ -1465,7 +1464,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 								req.Role == nil
 						}),
 					).
-					Return(pointer.To("goakt://test@127.0.0.1:9000/actor"), nil).
+					Return(new("goakt://test@127.0.0.1:9000/actor"), nil).
 					Once()
 
 				_, err := system.SpawnSingleton(

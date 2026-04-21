@@ -216,7 +216,7 @@ func TestStash(t *testing.T) {
 		require.EqualValues(t, 1, pid.StashSize())
 
 		// at this stage any message sent to the actor is stashed
-		for i := 0; i < 5; i++ {
+		for range 5 {
 			assert.NoError(t, Tell(ctx, pid, new(testpb.TestSend)))
 		}
 

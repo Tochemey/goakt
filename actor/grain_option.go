@@ -28,7 +28,6 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/tochemey/goakt/v4/extension"
-	"github.com/tochemey/goakt/v4/internal/pointer"
 	"github.com/tochemey/goakt/v4/internal/validation"
 	"github.com/tochemey/goakt/v4/internal/xsync"
 )
@@ -282,7 +281,7 @@ func WithActivationStrategy(strategy ActivationStrategy) GrainOption {
 //   - GrainOption that sets the role in the grainConfig.
 func WithActivationRole(role string) GrainOption {
 	return func(config *grainConfig) {
-		config.role = pointer.To(role)
+		config.role = new(role)
 	}
 }
 

@@ -165,7 +165,6 @@ func (h *multiHandle) waitAll() {
 	var wg sync.WaitGroup
 	wg.Add(len(h.handles))
 	for _, sh := range h.handles {
-		sh := sh
 		go func() {
 			defer wg.Done()
 			<-sh.Done()
@@ -196,7 +195,6 @@ func (h *multiHandle) Stop(ctx context.Context) error {
 	wg.Add(len(h.handles))
 	errs := make([]error, len(h.handles))
 	for i, sh := range h.handles {
-		i, sh := i, sh
 		go func() {
 			defer wg.Done()
 			errs[i] = sh.Stop(ctx)

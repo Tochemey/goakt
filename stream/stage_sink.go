@@ -87,10 +87,7 @@ func (a *sinkActor) Receive(rctx *actor.ReceiveContext) {
 				}
 				return
 			case Retry:
-				maxAttempts := a.config.RetryConfig.MaxAttempts
-				if maxAttempts < 1 {
-					maxAttempts = 1
-				}
+				maxAttempts := max(a.config.RetryConfig.MaxAttempts, 1)
 				var retryErr error
 				for attempt := 0; attempt < maxAttempts; attempt++ {
 					retryErr = a.consumeFn(msg.value)

@@ -38,7 +38,6 @@ import (
 	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/internal/codec"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
-	"github.com/tochemey/goakt/v4/internal/pointer"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/internal/xsync"
 	"github.com/tochemey/goakt/v4/log"
@@ -492,7 +491,7 @@ func (pid *grainPID) toWireGrain() (*internalpb.Grain, error) {
 		Dependencies:      dependencies,
 		ActivationTimeout: durationpb.New(pid.config.initTimeout.Load()),
 		ActivationRetries: pid.config.initMaxRetries.Load(),
-		MailboxCapacity:   pointer.To(pid.mailbox.Capacity()),
+		MailboxCapacity:   new(pid.mailbox.Capacity()),
 		DisableRelocation: pid.disableRelocation.Load(),
 	}, nil
 }
