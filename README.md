@@ -25,59 +25,49 @@ Also, check the reference section at the end of the post for more material regar
 
 ## Features
 
-### Core & Messaging
+- **Core & Messaging**
+  - Actor model — concurrent, distributed actors with typed messages
+  - Grains — virtual actors with their own context and lifecycle
+  - Actor hierarchies — parent/child trees via `SpawnChild`, with child/parent navigation
+  - Lifecycle hooks — `PreStart` and `PostStop`; graceful stop and poison-pill shutdown
+  - Behavior switching — `Become` / `UnBecome` plus stacked `BecomeStacked` / `UnBecomeStacked` for protocol phases
+  - Messaging — `Tell` / `Ask` for fire-and-forget and request/response flows, plus `BatchTell` / `BatchAsk` for bulk delivery
+  - PubSub — topic-based publish/subscribe via a dedicated `TopicActor`, cluster-aware with cross-node dissemination over remoting
+  - Forward & PipeTo — forward messages preserving the original sender; pipe async task results back to an actor
+  - Reentrancy — non-blocking async `Request` with configurable modes and in-flight limits
+  - Watch & Terminated — monitor actor lifecycle and receive `Terminated` on death
+  - Stashing — `Stash` / `Unstash` / `UnstashAll` to defer messages during transient states
+  - Dependency injection — attach runtime dependencies to actors at spawn time
+- **Supervision & Fault Tolerance**
+  - Supervision — one-for-one / one-for-all strategies with `Stop` / `Resume` / `Restart` / `Escalate` directives and retry windows
+  - Passivation — auto-stop idle actors via a time-based strategy
+  - Reinstate — bring a previously stopped actor back online by PID or name
+  - Circuit breaker — `PipeTo` integrates the `breaker` package to short-circuit calls to unhealthy dependencies
+  - Dead letters — unhandled messages captured and published on the event stream
+- **Scheduling**
+  - Timers — `ScheduleOnce`, recurring `Schedule`, and `ScheduleWithCron` for cron-driven delivery
+  - Schedule lifecycle — `PauseSchedule` / `ResumeSchedule` / `CancelSchedule` on existing references
+- **Routing & Mailboxes**
+  - Routers — round-robin, random, and fan-out routing strategies
+  - Mailboxes — unbounded FIFO, bounded, priority, and fair (segmented) mailboxes
+- **Cluster & Topology**
+  - Remoting — TCP actor communication across nodes with pluggable serializers (Proto, CBOR and custom)
+  - Clustering — Consul, etcd, Kubernetes, NATS, mDNS, and static discovery
+  - Location transparency — address actors without knowing their node
+  - Relocation — automatic actor relocation on node failure
+  - Cluster singletons — single instance cluster-wide with guardian lifecycle
+  - Multi-datacenter — DC-transparent messaging, pluggable control plane (NATS JetStream, Etcd), DC-aware placement
+- **State & Streams**
+  - Distributed data — CRDTs (GCounter, PNCounter, LWWRegister, MVRegister, ORSet, ORMap, Flag) with delta replication, anti-entropy sync, tombstone deletion, and snapshots
+  - Reactive streams — backpressure-aware stream processing with a composable DSL (map, filter, flatMap, batch, throttle, fan-out/in), stage fusion, and built-in metrics/tracing
+- **Observability & Extensibility**
+  - Observability — OpenTelemetry metrics, event stream, dead letters
+  - Event stream — in-process topic-based pub/sub for system and user events
+  - Context propagation — pluggable propagation for request-scoped metadata
+  - Extensions — pluggable APIs for cross-cutting capabilities
+  - TLS / mTLS — configurable transport security for remoting
 
-- **Actor model** — concurrent, distributed actors with typed messages
-- **Grains** — virtual actors with their own context and lifecycle
-- **Actor hierarchies** — parent/child trees via `SpawnChild`, with child/parent navigation
-- **Lifecycle hooks** — `PreStart` and `PostStop`; graceful stop and poison-pill shutdown
-- **Behavior switching** — `Become` / `UnBecome` plus stacked `BecomeStacked` / `UnBecomeStacked` for protocol phases
-- **Messaging** — `Tell` / `Ask` for fire-and-forget and request/response flows, plus `BatchTell` / `BatchAsk` for bulk delivery
-- **Forward & PipeTo** — forward messages preserving the original sender; pipe async task results back to an actor
-- **Reentrancy** — non-blocking async `Request` with configurable modes and in-flight limits
-- **Watch & Terminated** — monitor actor lifecycle and receive `Terminated` on death
-- **Stashing** — `Stash` / `Unstash` / `UnstashAll` to defer messages during transient states
-- **Dependency injection** — attach runtime dependencies to actors at spawn time
-
-### Supervision & Fault Tolerance
-
-- **Supervision** — one-for-one / one-for-all strategies with `Stop` / `Resume` / `Restart` / `Escalate` directives and retry windows
-- **Passivation** — auto-stop idle actors via a time-based strategy
-- **Reinstate** — bring a previously stopped actor back online by PID or name
-- **Circuit breaker** — `PipeTo` integrates the `breaker` package to short-circuit calls to unhealthy dependencies
-- **Dead letters** — unhandled messages captured and published on the event stream
-
-### Scheduling
-
-- **Timers** — `ScheduleOnce`, recurring `Schedule`, and `ScheduleWithCron` for cron-driven delivery
-- **Schedule lifecycle** — `PauseSchedule` / `ResumeSchedule` / `CancelSchedule` on existing references
-
-### Routing & Mailboxes
-
-- **Routers** — round-robin, random, and fan-out routing strategies
-- **Mailboxes** — unbounded FIFO, bounded, priority, and fair (segmented) mailboxes
-
-### Cluster & Topology
-
-- **Remoting** — TCP actor communication across nodes with pluggable serializers (Proto, CBOR)
-- **Clustering** — Consul, etcd, Kubernetes, NATS, mDNS, and static discovery
-- **Location transparency** — address actors without knowing their node
-- **Relocation** — automatic actor relocation on node failure
-- **Cluster singletons** — single instance cluster-wide with guardian lifecycle
-- **Multi-datacenter** — DC-transparent messaging, pluggable control plane (NATS JetStream, Etcd), DC-aware placement
-
-### State & Streams
-
-- **Distributed data** — CRDTs (GCounter, PNCounter, LWWRegister, MVRegister, ORSet, ORMap, Flag) with delta replication, anti-entropy sync, tombstone deletion, and BoltDB snapshots
-- **Reactive streams** — backpressure-aware stream processing with a composable DSL (map, filter, flatMap, batch, throttle, fan-out/in), stage fusion, and built-in metrics/tracing
-
-### Observability & Extensibility
-
-- **Observability** — OpenTelemetry metrics, event stream, dead letters
-- **Event stream** — in-process topic-based pub/sub for system and user events
-- **Context propagation** — pluggable propagation for request-scoped metadata
-- **Extensions** — pluggable APIs for cross-cutting capabilities
-- **TLS / mTLS** — configurable transport security for remoting
+See [docs.goakt.dev](https://docs.goakt.dev) for the full feature reference.
 
 ## Installation
 
