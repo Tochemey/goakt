@@ -60,6 +60,32 @@ func (a *Actor) PostStop(*actor.Context) error {
 	return nil
 }
 
+// countingActor counts TestSend deliveries and closes done exactly once
+// when received reaches target. received is a plain int64 because an
+// actor's Receive is invoked serially by a single dispatcher worker;
+// no synchronisation is required.
+type countingActor struct {
+	received int64
+	done     chan struct{}
+	target   int64
+}
+
+func (a *countingActor) PreStart(*actor.Context) error { return nil }
+
+func (a *countingActor) Receive(ctx *actor.ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *testpb.TestSend:
+		a.received++
+		if a.received == a.target {
+			close(a.done)
+		}
+	default:
+		ctx.Unhandled()
+	}
+}
+
+func (a *countingActor) PostStop(*actor.Context) error { return nil }
+
 type requestBenchActor struct {
 	target *actor.PID
 	doneCh chan struct{}
@@ -126,7 +152,11 @@ func BenchmarkTell(b *testing.B) {
 	if err != nil {
 		b.Fatalf("failed to spawn sender: %v", err)
 	}
-	receiver, err := actorSystem.Spawn(ctx, "receiver", new(Actor))
+	done := make(chan struct{})
+	receiver, err := actorSystem.Spawn(ctx, "receiver", &countingActor{
+		done:   done,
+		target: int64(b.N),
+	})
 	if err != nil {
 		b.Fatalf("failed to spawn receiver: %v", err)
 	}
@@ -142,6 +172,7 @@ func BenchmarkTell(b *testing.B) {
 			}
 		}
 	})
+	<-done
 	b.StopTimer()
 	messagesPerSec := float64(b.N) / b.Elapsed().Seconds()
 	b.ReportMetric(messagesPerSec, "messages/sec")
@@ -271,8 +302,11 @@ func BenchmarkSendAsync(b *testing.B) {
 	if err != nil {
 		b.Fatalf("failed to spawn sender: %v", err)
 	}
-	_, err = actorSystem.Spawn(ctx, "receiver", new(Actor))
-	if err != nil {
+	done := make(chan struct{})
+	if _, err = actorSystem.Spawn(ctx, "receiver", &countingActor{
+		done:   done,
+		target: int64(b.N),
+	}); err != nil {
 		b.Fatalf("failed to spawn receiver: %v", err)
 	}
 
@@ -287,6 +321,7 @@ func BenchmarkSendAsync(b *testing.B) {
 			}
 		}
 	})
+	<-done
 	b.StopTimer()
 	messagesPerSec := float64(b.N) / b.Elapsed().Seconds()
 	b.ReportMetric(messagesPerSec, "messages/sec")
@@ -311,6 +346,31 @@ func (*benchGrain) OnReceive(ctx *actor.GrainContext) {
 	}
 }
 
+// countingGrain is the grain counterpart of countingActor. received is a
+// plain int64 because a grain's OnReceive is invoked serially on a
+// single dispatcher worker; no synchronisation is required.
+type countingGrain struct {
+	received int64
+	done     chan struct{}
+	target   int64
+}
+
+func (*countingGrain) OnActivate(context.Context, *actor.GrainProps) error   { return nil }
+func (*countingGrain) OnDeactivate(context.Context, *actor.GrainProps) error { return nil }
+
+func (g *countingGrain) OnReceive(ctx *actor.GrainContext) {
+	switch ctx.Message().(type) {
+	case *testpb.TestSend:
+		g.received++
+		if g.received == g.target {
+			close(g.done)
+		}
+		ctx.NoErr()
+	default:
+		ctx.Unhandled()
+	}
+}
+
 // BenchmarkGrainTell measures fire-and-forget throughput against a
 // single grain. Producers race on the same mailbox + schedState CAS.
 // Migrating grains onto the dispatcher pool removes the per-burst
@@ -330,8 +390,10 @@ func BenchmarkGrainTell(b *testing.B) {
 	}
 	b.Cleanup(func() { _ = actorSystem.Stop(ctx) })
 
+	done := make(chan struct{})
+	target := int64(b.N)
 	identity, err := actorSystem.GrainIdentity(ctx, "receiver", func(context.Context) (actor.Grain, error) {
-		return &benchGrain{}, nil
+		return &countingGrain{done: done, target: target}, nil
 	})
 	if err != nil {
 		b.Fatalf("failed to create grain identity: %v", err)
@@ -347,6 +409,7 @@ func BenchmarkGrainTell(b *testing.B) {
 			}
 		}
 	})
+	<-done
 	b.StopTimer()
 	messagesPerSec := float64(b.N) / b.Elapsed().Seconds()
 	b.ReportMetric(messagesPerSec, "messages/sec")
@@ -372,16 +435,7 @@ func BenchmarkGrainTellFanOut(b *testing.B) {
 	}
 	b.Cleanup(func() { _ = actorSystem.Stop(ctx) })
 
-	identities := make([]*actor.GrainIdentity, grainCount)
-	for i := range identities {
-		id, err := actorSystem.GrainIdentity(ctx, fmt.Sprintf("g-%d", i), func(context.Context) (actor.Grain, error) {
-			return &benchGrain{}, nil
-		})
-		if err != nil {
-			b.Fatalf("failed to create grain identity: %v", err)
-		}
-		identities[i] = id
-	}
+	identities, dones := setupFanOutGrains(b, ctx, actorSystem, grainCount)
 
 	var counter atomic.Uint64
 
@@ -396,9 +450,48 @@ func BenchmarkGrainTellFanOut(b *testing.B) {
 			}
 		}
 	})
+	for _, d := range dones {
+		<-d
+	}
 	b.StopTimer()
 	messagesPerSec := float64(b.N) / b.Elapsed().Seconds()
 	b.ReportMetric(messagesPerSec, "messages/sec")
+}
+
+// setupFanOutGrains provisions grainCount grains for the round-robin
+// fan-out benchmarks. Each grain gets a private int64 counter, a private
+// done channel, and a target computed from the round-robin distribution
+// counter.Add(1) % grainCount over b.N messages:
+//   - grain 0 receives messages at positions grainCount, 2*grainCount, ...
+//   - grain i (1..grainCount-1) receives messages at positions i, i+grainCount, ...
+//
+// The returned slices are aligned: dones[i] completes when identities[i]
+// has received all its messages.
+func setupFanOutGrains(b *testing.B, ctx context.Context, system actor.ActorSystem, grainCount uint64) ([]*actor.GrainIdentity, []chan struct{}) {
+	n := uint64(b.N)
+	identities := make([]*actor.GrainIdentity, grainCount)
+	dones := make([]chan struct{}, grainCount)
+	for i := range grainCount {
+		var target int64
+		if i == 0 {
+			target = int64(n / grainCount)
+		} else if i <= n {
+			target = int64((n-i)/grainCount) + 1
+		}
+		done := make(chan struct{})
+		if target == 0 {
+			close(done)
+		}
+		id, err := system.GrainIdentity(ctx, fmt.Sprintf("g-%d", i), func(context.Context) (actor.Grain, error) {
+			return &countingGrain{done: done, target: target}, nil
+		})
+		if err != nil {
+			b.Fatalf("failed to create grain identity: %v", err)
+		}
+		identities[i] = id
+		dones[i] = done
+	}
+	return identities, dones
 }
 
 // BenchmarkGrainAsk measures synchronous request/response latency.
@@ -514,7 +607,11 @@ func BenchmarkTellThroughput(b *testing.B) {
 			if err != nil {
 				b.Fatalf("failed to spawn sender: %v", err)
 			}
-			receiver, err := actorSystem.Spawn(ctx, "receiver", new(Actor))
+			done := make(chan struct{})
+			receiver, err := actorSystem.Spawn(ctx, "receiver", &countingActor{
+				done:   done,
+				target: int64(b.N),
+			})
 			if err != nil {
 				b.Fatalf("failed to spawn receiver: %v", err)
 			}
@@ -529,6 +626,7 @@ func BenchmarkTellThroughput(b *testing.B) {
 					}
 				}
 			})
+			<-done
 			b.StopTimer()
 			messagesPerSec := float64(b.N) / b.Elapsed().Seconds()
 			b.ReportMetric(messagesPerSec, "messages/sec")
@@ -623,8 +721,10 @@ func BenchmarkGrainTellThroughput(b *testing.B) {
 			}
 			b.Cleanup(func() { _ = actorSystem.Stop(ctx) })
 
+			done := make(chan struct{})
+			target := int64(b.N)
 			identity, err := actorSystem.GrainIdentity(ctx, "receiver", func(context.Context) (actor.Grain, error) {
-				return &benchGrain{}, nil
+				return &countingGrain{done: done, target: target}, nil
 			})
 			if err != nil {
 				b.Fatalf("failed to create grain identity: %v", err)
@@ -640,6 +740,7 @@ func BenchmarkGrainTellThroughput(b *testing.B) {
 					}
 				}
 			})
+			<-done
 			b.StopTimer()
 			messagesPerSec := float64(b.N) / b.Elapsed().Seconds()
 			b.ReportMetric(messagesPerSec, "messages/sec")
@@ -670,16 +771,7 @@ func BenchmarkGrainTellFanOutThroughput(b *testing.B) {
 			}
 			b.Cleanup(func() { _ = actorSystem.Stop(ctx) })
 
-			identities := make([]*actor.GrainIdentity, grainCount)
-			for i := range identities {
-				id, err := actorSystem.GrainIdentity(ctx, fmt.Sprintf("g-%d", i), func(context.Context) (actor.Grain, error) {
-					return &benchGrain{}, nil
-				})
-				if err != nil {
-					b.Fatalf("failed to create grain identity: %v", err)
-				}
-				identities[i] = id
-			}
+			identities, dones := setupFanOutGrains(b, ctx, actorSystem, grainCount)
 
 			var counter atomic.Uint64
 
@@ -694,6 +786,9 @@ func BenchmarkGrainTellFanOutThroughput(b *testing.B) {
 					}
 				}
 			})
+			for _, d := range dones {
+				<-d
+			}
 			b.StopTimer()
 			messagesPerSec := float64(b.N) / b.Elapsed().Seconds()
 			b.ReportMetric(messagesPerSec, "messages/sec")

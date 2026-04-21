@@ -34,16 +34,20 @@ type stashState struct {
 	locker sync.Mutex
 }
 
-// stash adds the current message to the stash buffer
+// stash adds the current message to the stash buffer. ctx is still
+// linked into the main mailbox via its intrusive `next`, so a clone
+// is enqueued instead — the original completes its main-mailbox turn.
 func (pid *PID) stash(ctx *ReceiveContext) error {
 	state := pid.stashState
 	if state == nil || state.box == nil {
 		return gerrors.ErrStashBufferNotSet
 	}
-	return state.box.Enqueue(ctx)
+	return state.box.Enqueue(cloneContext(ctx))
 }
 
-// unstash unstashes the oldest message in the stash and prepends to the mailbox
+// unstash pops the oldest stashed message and re-enters it into the
+// main mailbox. The dequeued context is the stash mailbox's new
+// sentinel, so a clone is re-enqueued instead of the original.
 func (pid *PID) unstash() error {
 	state := pid.stashState
 	if state == nil || state.box == nil {
@@ -54,10 +58,7 @@ func (pid *PID) unstash() error {
 	if received == nil {
 		return errors.New("stash buffer may be closed")
 	}
-	// Clear the stashed flag so the context can be released normally
-	// after it is processed through the mailbox.
-	received.stashed.Store(false)
-	pid.doReceive(received)
+	pid.doReceive(cloneContext(received))
 	return nil
 }
 
@@ -72,10 +73,7 @@ func (pid *PID) unstashAll() error {
 	state.locker.Lock()
 	for !state.box.IsEmpty() {
 		if received := state.box.Dequeue(); received != nil {
-			// Clear the stashed flag so the context can be released normally
-			// after it is processed through the mailbox.
-			received.stashed.Store(false)
-			pid.doReceive(received)
+			pid.doReceive(cloneContext(received))
 		}
 	}
 	state.locker.Unlock()

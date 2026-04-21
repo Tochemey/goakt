@@ -1837,9 +1837,7 @@ func (pid *PID) runTurn(w *worker) {
 	budget := w.dispatcher.throughput
 	for range budget {
 		if sysMsg := pid.systemMailbox.Dequeue(); sysMsg != nil {
-			if !pid.dispatchOne(sysMsg, now) {
-				releaseContext(sysMsg)
-			}
+			pid.dispatchOne(sysMsg, now)
 			continue
 		}
 		received := pid.mailbox.Dequeue()
@@ -1849,9 +1847,7 @@ func (pid *PID) runTurn(w *worker) {
 			}
 			continue
 		}
-		if !pid.dispatchOne(received, now) {
-			releaseContext(received)
-		}
+		pid.dispatchOne(received, now)
 	}
 	pid.schedState.YieldToScheduled()
 	w.reschedule(pid)
@@ -1877,18 +1873,17 @@ func (pid *PID) finishOrReclaim() bool {
 	return !pid.schedState.TakeForProcessing()
 }
 
-// dispatchOne routes a single message to its handler. Returns true when
-// the context has been retained by the actor (currently only the
-// reentrancy stash path) so the caller must NOT release it back to the
-// pool. Returns false for normal in-place dispatch.
-func (pid *PID) dispatchOne(received *ReceiveContext, now time.Time) (retained bool) {
+// dispatchOne routes a single message to its handler. Release is owned
+// by UnboundedMailbox.Dequeue, which reclaims the previous sentinel;
+// dispatchOne must not return the context here or the mailbox would
+// hand out an in-use head.
+func (pid *PID) dispatchOne(received *ReceiveContext, now time.Time) {
 	if pid.enableReentrancyStash(received) {
 		if err := pid.stash(received); err != nil {
 			pid.logger.Warn(err)
 			pid.handleReceivedError(received, err)
-			return false
 		}
-		return true
+		return
 	}
 	switch msg := received.Message().(type) {
 	case *PoisonPill:
@@ -1908,7 +1903,6 @@ func (pid *PID) dispatchOne(received *ReceiveContext, now time.Time) (retained b
 	default:
 		pid.handleReceived(received, now)
 	}
-	return false
 }
 
 // handleHealthcheck is used to handle the readiness probe messages

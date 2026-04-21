@@ -69,18 +69,22 @@ func getContext() *ReceiveContext {
 	}
 }
 
-// releaseContext returns the context to the channel pool. Contexts that
-// were stashed by the actor's behaviour are still owned by the stash
-// buffer and must not be returned. A full pool drops the excess for GC.
-func releaseContext(receiveContext *ReceiveContext) {
-	if receiveContext.stashed.Load() {
-		return
-	}
-	receiveContext.reset()
-	select {
-	case contextCh <- receiveContext:
-	default:
-	}
+// cloneContext returns a fresh ReceiveContext populated with src's
+// message-scoped fields. Required when a context must enter a second
+// mailbox: a ReceiveContext can be linked into only one mailbox at a
+// time via its intrusive `next` field, so callers enqueue the clone
+// and let the original complete its current lifecycle.
+func cloneContext(src *ReceiveContext) *ReceiveContext {
+	dst := getContext()
+	dst.ctx = src.ctx
+	dst.message = src.message
+	dst.sender = src.sender
+	dst.self = src.self
+	dst.response = src.response
+	dst.requestID = src.requestID
+	dst.requestReplyTo = src.requestReplyTo
+	dst.err = src.err
+	return dst
 }
 
 // getResponseChannel returns a buffered (capacity 1) reply channel from
