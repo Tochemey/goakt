@@ -64,6 +64,15 @@ func NewProtoSerializer() *ProtoSerializer {
 // type name. Returns [ErrMarshalBinaryFailed] wrapping the proto error on
 // marshal failure.
 func (x *ProtoSerializer) MarshalBinary(message proto.Message) ([]byte, error) {
+	return x.MarshalBinaryTo(nil, message)
+}
+
+// MarshalBinaryTo is identical to [MarshalBinary] but draws the output frame
+// buffer from pool when non-nil, falling back to a fresh allocation otherwise.
+// Callers using the pooled variant own the returned slice until they write it
+// to the wire, at which point they must return it via pool.Put. The slice is
+// unsafe to reuse once released.
+func (x *ProtoSerializer) MarshalBinaryTo(pool *FramePool, message proto.Message) ([]byte, error) {
 	if message == nil {
 		return nil, ErrUnknownMessageType
 	}
@@ -77,8 +86,12 @@ func (x *ProtoSerializer) MarshalBinary(message proto.Message) ([]byte, error) {
 	protoSize := proto.Size(message)
 	totalLen := 4 + 4 + nameLen + protoSize
 
-	// Single allocation: exact-size output frame.
-	out := make([]byte, 0, totalLen)
+	var out []byte
+	if pool != nil {
+		out = pool.Get(totalLen)[:0]
+	} else {
+		out = make([]byte, 0, totalLen)
+	}
 
 	// Write the two uint32 header fields into a stack-allocated array,
 	// then append. No reflection, no interface boxing.
@@ -93,6 +106,9 @@ func (x *ProtoSerializer) MarshalBinary(message proto.Message) ([]byte, error) {
 	// Marshal the proto payload directly into the tail of out.
 	out, err := proto.MarshalOptions{}.MarshalAppend(out, message)
 	if err != nil {
+		if pool != nil {
+			pool.Put(out)
+		}
 		return nil, errors.Join(ErrMarshalBinaryFailed, err)
 	}
 
@@ -168,6 +184,13 @@ func (x *ProtoSerializer) UnmarshalBinary(data []byte) (proto.Message, protorefl
 // type name. Returns [ErrMarshalBinaryFailed] wrapping the proto error on
 // marshal failure.
 func (x *ProtoSerializer) MarshalBinaryWithMetadata(message proto.Message, md *Metadata) ([]byte, error) {
+	return x.MarshalBinaryWithMetadataTo(nil, message, md)
+}
+
+// MarshalBinaryWithMetadataTo is identical to [MarshalBinaryWithMetadata] but
+// draws the output frame buffer from pool when non-nil. Ownership semantics
+// match [MarshalBinaryTo].
+func (x *ProtoSerializer) MarshalBinaryWithMetadataTo(pool *FramePool, message proto.Message, md *Metadata) ([]byte, error) {
 	if message == nil {
 		return nil, ErrUnknownMessageType
 	}
@@ -188,8 +211,12 @@ func (x *ProtoSerializer) MarshalBinaryWithMetadata(message proto.Message, md *M
 	protoSize := proto.Size(message)
 	totalLen := 4 + 4 + nameLen + 4 + metaLen + protoSize
 
-	// Single allocation: exact-size output frame.
-	out := make([]byte, 0, totalLen)
+	var out []byte
+	if pool != nil {
+		out = pool.Get(totalLen)[:0]
+	} else {
+		out = make([]byte, 0, totalLen)
+	}
 
 	// Write the three fixed header fields (totalLen, nameLen, metaLen)
 	// into a stack-allocated array, then append.
@@ -210,6 +237,9 @@ func (x *ProtoSerializer) MarshalBinaryWithMetadata(message proto.Message, md *M
 	// Marshal the proto payload directly into the tail of out.
 	out, err := proto.MarshalOptions{}.MarshalAppend(out, message)
 	if err != nil {
+		if pool != nil {
+			pool.Put(out)
+		}
 		return nil, errors.Join(ErrMarshalBinaryFailed, err)
 	}
 
