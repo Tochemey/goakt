@@ -24,29 +24,19 @@ package actor
 
 import (
 	"runtime"
-	"sync"
 	"sync/atomic"
 
 	gerrors "github.com/tochemey/goakt/v4/errors"
 )
 
-// grainNode is a queue node for the grain MPSC mailbox.
-//
-// The value field is a plain (non-atomic) pointer because all accesses are
-// ordered by the atomic operations on the queue's head and tail pointers:
-//   - Enqueue writes value before publishing the node via tail.Swap.
-//   - Dequeue reads value after acquiring the node via head.next.Load.
-type grainNode struct {
-	value *GrainContext
-	next  atomic.Pointer[grainNode]
-}
-
-var grainNodePool = sync.Pool{New: func() any { return new(grainNode) }}
-
+// grainMailbox is a lock-free multi-producer, single-consumer (MPSC)
+// FIFO queue used as the per-grain inbox. GrainContext itself serves as
+// the intrusive list node via its `next` field, so a GrainContext may
+// be linked into only one mailbox at a time.
 type grainMailbox struct {
-	head atomic.Pointer[grainNode]
+	head atomic.Pointer[GrainContext]
 	_    CacheLinePadding
-	tail atomic.Pointer[grainNode]
+	tail atomic.Pointer[GrainContext]
 	_    CacheLinePadding
 	// len is the number of enqueued messages. In bounded mode, producers
 	// reserve capacity by CAS-incrementing len before linking their node.
@@ -59,16 +49,17 @@ type grainMailbox struct {
 }
 
 func newGrainMailbox(capacity int64) *grainMailbox {
-	item := new(grainNode)
+	sentinel := new(GrainContext)
 	mailbox := &grainMailbox{capacity: capacity}
-	mailbox.head.Store(item)
-	mailbox.tail.Store(item)
+	mailbox.head.Store(sentinel)
+	mailbox.tail.Store(sentinel)
 	return mailbox
 }
 
-// Enqueue places the given GrainContext at the tail of the mailbox.
-//
-// It is safe for concurrent producers. Ordering is preserved (FIFO).
+// Enqueue places value at the tail of the mailbox. Safe for concurrent
+// producers. Returns ErrMailboxFull when capacity is set and reached.
+// The GrainContext must not already be linked into any mailbox; its
+// `next` field is overwritten.
 func (m *grainMailbox) Enqueue(value *GrainContext) error {
 	if ok := m.tryEnqueue(value); !ok {
 		return gerrors.ErrMailboxFull
@@ -76,10 +67,12 @@ func (m *grainMailbox) Enqueue(value *GrainContext) error {
 	return nil
 }
 
-// Dequeue removes and returns the next GrainContext from the mailbox.
+// Dequeue removes and returns the next GrainContext, or nil when empty.
+// Must be called from a single consumer goroutine.
 //
-// It returns nil when the mailbox is empty. Only a single consumer should
-// invoke Dequeue concurrently.
+// The returned GrainContext becomes the new sentinel; the caller must
+// not release it — the next Dequeue will. The previous sentinel is
+// reset and returned to the shared GrainContext pool.
 func (m *grainMailbox) Dequeue() *GrainContext {
 	head := m.head.Load()
 	next := head.next.Load()
@@ -98,20 +91,20 @@ func (m *grainMailbox) Dequeue() *GrainContext {
 
 	m.head.Store(next)
 
-	// Non-atomic read: visible because the head.next.Load above acquired
-	// the ordering established by the producer's prev.next.Store.
-	value := next.value
-	next.value = nil // safe: node is consumed, not reachable from head
-
 	// Decrement for both modes (bounded producers pre-incremented).
 	m.len.Add(-1)
 
-	// Recycle old head.
+	// The previous sentinel (head) is no longer referenced by the mailbox.
+	// Reset and recycle into the shared pool so the next producer can skip
+	// mallocgc.
 	head.next.Store(nil)
-	head.value = nil
-	grainNodePool.Put(head)
+	head.reset()
+	select {
+	case grainContextCh <- head:
+	default:
+	}
 
-	return value
+	return next
 }
 
 // Len returns the current number of messages enqueued in the mailbox.
@@ -143,15 +136,11 @@ func (m *grainMailbox) tryEnqueue(value *GrainContext) bool {
 		}
 	}
 
-	n := grainNodePool.Get().(*grainNode)
-	// Non-atomic store: the node is thread-local and invisible to other
-	// goroutines until the tail.Swap below publishes it.
-	n.value = value
-	n.next.Store(nil)
+	value.next.Store(nil)
 
 	// swap tail, then link prev.next.
-	prev := m.tail.Swap(n)
-	prev.next.Store(n)
+	prev := m.tail.Swap(value)
+	prev.next.Store(value)
 
 	// unbounded increments after linking.
 	if m.capacity <= 0 {

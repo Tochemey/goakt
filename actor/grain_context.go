@@ -77,6 +77,11 @@ func releaseGrainContext(ctx *GrainContext) {
 //	    }
 //	}
 type GrainContext struct {
+	// next is the intrusive mailbox link. Accessed atomically by the
+	// producer (Enqueue) and the single consumer (Dequeue). Kept as the
+	// first field to isolate its cache line from the cold fields below
+	// under heavy producer contention.
+	next           atomic.Pointer[GrainContext]
 	ctx            context.Context
 	self           *GrainIdentity
 	actorSystem    ActorSystem

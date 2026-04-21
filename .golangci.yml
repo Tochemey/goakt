@@ -113,6 +113,7 @@ linters:
         - synchronised
         - synchronises
         - synchronising
+        - synchronisation
     revive:
       enable-all-rules: false
       enable-default-rules: true
