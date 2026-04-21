@@ -320,9 +320,11 @@ func (c *Client) SendProtoWithMetadata(ctx context.Context, req proto.Message) (
 	}
 
 	// Write serialized message.
-	if _, err := conn.Write(reqData); err != nil {
+	_, writeErr := conn.Write(reqData)
+	c.framePool.Put(reqData)
+	if writeErr != nil {
 		c.Discard(conn)
-		return nil, nil, err
+		return nil, nil, writeErr
 	}
 
 	// Read the complete response frame from a pooled buffer.
@@ -373,9 +375,11 @@ func (c *Client) SendProtoNoReply(ctx context.Context, req proto.Message) error 
 	}
 
 	// Write serialized message.
-	if _, err := conn.Write(reqData); err != nil {
+	_, writeErr := conn.Write(reqData)
+	c.framePool.Put(reqData)
+	if writeErr != nil {
 		c.Discard(conn)
-		return err
+		return writeErr
 	}
 
 	c.Put(conn)
@@ -413,9 +417,11 @@ func (c *Client) SendBatchProto(ctx context.Context, reqs []proto.Message) ([]pr
 			return nil, err
 		}
 
-		if _, err := conn.Write(reqData); err != nil {
+		_, writeErr := conn.Write(reqData)
+		c.framePool.Put(reqData)
+		if writeErr != nil {
 			c.Discard(conn)
-			return nil, err
+			return nil, writeErr
 		}
 
 		// Allow context cancellation between sends.
@@ -493,9 +499,11 @@ func (c *Client) SendProtoManyNoReply(ctx context.Context, reqs []proto.Message)
 			return err
 		}
 
-		if _, err := conn.Write(reqData); err != nil {
+		_, writeErr := conn.Write(reqData)
+		c.framePool.Put(reqData)
+		if writeErr != nil {
 			c.Discard(conn)
-			return err
+			return writeErr
 		}
 
 		// Allow context cancellation between sends.
@@ -612,9 +620,9 @@ func (c *Client) marshalProtoWithContext(ctx context.Context, msg proto.Message)
 	// Check once if metadata exists in the context.
 	md, hasMD := FromContext(ctx)
 	if hasMD && md != nil {
-		return c.serializer.MarshalBinaryWithMetadata(msg, md)
+		return c.serializer.MarshalBinaryWithMetadataTo(c.framePool, msg, md)
 	}
-	return c.serializer.MarshalBinary(msg)
+	return c.serializer.MarshalBinaryTo(c.framePool, msg)
 }
 
 // unmarshalProtoResponse unmarshals a protobuf response frame, automatically

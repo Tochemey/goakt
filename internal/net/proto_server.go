@@ -524,7 +524,7 @@ func (ps *ProtoServer) handleConn(conn Connection) {
 		}
 
 		// Serialize and write the response frame.
-		respData, merr := ps.serializer.MarshalBinary(resp)
+		respData, merr := ps.serializer.MarshalBinaryTo(ps.framePool, resp)
 		if merr != nil {
 			return // Marshal failure — close connection.
 		}
@@ -532,11 +532,14 @@ func (ps *ProtoServer) handleConn(conn Connection) {
 		if ps.idleTimeout > 0 {
 			deadline := time.Now().Add(ps.idleTimeout)
 			if err := conn.SetWriteDeadline(deadline); err != nil {
+				ps.framePool.Put(respData)
 				return
 			}
 		}
 
-		if _, err := conn.Write(respData); err != nil {
+		_, writeErr := conn.Write(respData)
+		ps.framePool.Put(respData)
+		if writeErr != nil {
 			return // Write failure — close connection.
 		}
 	}
