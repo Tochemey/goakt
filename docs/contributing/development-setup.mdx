@@ -9,22 +9,22 @@ sidebarTitle: "🛠️ Development Setup"
 ```bash
 git clone https://github.com/your-username/goakt.git
 cd goakt
-go mod tidy
 ```
 
 ## Build and test
 
-We use [Earthly](https://earthly.dev/get-earthly) for reproducible builds:
+Developer tooling runs inside Docker via the `Makefile`, so you only need Docker and `make`:
 
 ```bash
-earthly +test
+make image   # build the tools image (once)
+make test    # run lint + full test suite
 ```
 
-This runs the full test suite in a consistent environment. Run it before submitting a pull request.
+Run `make help` to see every target (`vendor`, `mock`, `protogen`, `certs`, `lint`, `unit-test`, `clean`).
 
 ## Local Go commands
 
-You can also use standard Go commands:
+You can also use standard Go commands if you have Go installed:
 
 ```bash
 go build ./...

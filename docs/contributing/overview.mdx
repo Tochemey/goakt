@@ -10,8 +10,9 @@ started.
 ## Prerequisites
 
 - [Docker](https://docs.docker.com/get-started/get-docker/)
-- [Go](https://go.dev/doc/install)
-- [Earthly](https://earthly.dev/get-earthly) for reproducible builds
+- `make` (pre-installed on macOS and most Linux distributions)
+
+All developer tooling (Go, `buf`, `mockery`, `golangci-lint`, `openssl`) runs inside a Docker image built by the `Makefile`. No additional local installs are required.
 
 ## Before you start
 
@@ -24,7 +25,7 @@ started.
 
 1. Fork the repository
 2. Create a branch for your change
-3. Make your changes; ensure tests pass: `earthly +test`
+3. Make your changes; ensure tests pass: `make test`
 4. Commit with a conventional commit message
 5. Open a pull request to the `main` branch
 6. For bug fixes, leave a working sample in the `playground` package per its instructions
