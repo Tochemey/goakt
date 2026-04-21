@@ -11,7 +11,7 @@
   <a href="https://go.dev/doc/install"><img src="https://img.shields.io/github/go-mod/go-version/Tochemey/goakt" alt="GitHub go.mod Go version" /></a>
   <a href="https://github.com/avelino/awesome-go"><img src="https://awesome.re/badge.svg" alt="Awesome" /></a>
   <a href="https://www.bestpractices.dev/projects/9248"><img src="https://www.bestpractices.dev/projects/9248/badge" alt="OpenSSF Best Practices" /></a>
-  <a href="https://github.com/Tochemey/goakt"><img src="https://img.shields.io/github/created-at/Tochemey/goakt" alt="GitHub Created At" /></a>
+  <a href="https://github.com/Tochemey/goakt"><img src="https://img.shields.io/github/created-at/Tochemey/goakt?label=since" alt="GitHub Created At" /></a>
 </p>
 
 Distributed [Go](https://go.dev/) actor framework to build a reactive and distributed system in Go with typed actor messages.
