@@ -32,8 +32,12 @@ const segmentSize = 256
 type segment struct {
 	// writeIdx is incremented atomically by producers to reserve a slot
 	writeIdx atomic.Uint64
-	// deqIdx is advanced by the single consumer only
-	deqIdx uint64
+	// deqIdx is advanced by the consumer. Atomic because the dispatcher pool
+	// can hand ownership to a different worker goroutine between turns: the
+	// outgoing worker may still read deqIdx in IsEmpty (via finishOrReclaim)
+	// after reset() releases ownership but before the new worker's
+	// TakeForProcessing establishes a happens-before on this field.
+	deqIdx atomic.Uint64
 	// next points to the next segment; set once by a producer when segment rolls over
 	next atomic.Pointer[segment]
 	// data holds the messages for this segment; atomic to coordinate producers/consumer
@@ -45,7 +49,7 @@ var segmentPool = sync.Pool{New: func() any { return new(segment) }}
 func newSegment() *segment {
 	seg := segmentPool.Get().(*segment)
 	seg.writeIdx.Store(0)
-	seg.deqIdx = 0
+	seg.deqIdx.Store(0)
 	seg.next.Store(nil)
 	for i := range seg.data {
 		seg.data[i].Store(nil)
@@ -96,7 +100,7 @@ func newSegment() *segment {
 //     control, or supervision strategies to avoid unbounded memory growth when
 //     the consumer becomes slow.
 type UnboundedSegmentedMailbox struct {
-	head  *segment // consumer-only pointer to current head segment
+	head  atomic.Pointer[segment] // consumer advances; atomic for cross-worker visibility during dispatcher handoff
 	_pad1 [64]byte
 	tail  atomic.Pointer[segment] // producers modify via atomic ops
 	_pad2 [64]byte
@@ -115,7 +119,8 @@ var _ Mailbox = (*UnboundedSegmentedMailbox)(nil)
 // MPSC queue with good cache locality and low allocation rates.
 func NewUnboundedSegmentedMailbox() *UnboundedSegmentedMailbox {
 	first := newSegment()
-	m := &UnboundedSegmentedMailbox{head: first}
+	m := &UnboundedSegmentedMailbox{}
+	m.head.Store(first)
 	m.tail.Store(first)
 	return m
 }
@@ -168,18 +173,18 @@ func (m *UnboundedSegmentedMailbox) Enqueue(value *ReceiveContext) error {
 //   - Must be called from exactly one goroutine. Multiple consumers are not
 //     supported and would violate internal invariants.
 func (m *UnboundedSegmentedMailbox) Dequeue() *ReceiveContext {
-	seg := m.head // single consumer owns head pointer
+	seg := m.head.Load()
 	for {
 		enq := min(seg.writeIdx.Load(), segmentSize)
-		if seg.deqIdx < enq {
-			idx := seg.deqIdx
-			val := seg.data[idx].Load()
+		deq := seg.deqIdx.Load()
+		if deq < enq {
+			val := seg.data[deq].Load()
 			if val == nil {
 				// not yet published; treat as empty
 				return nil
 			}
-			seg.data[idx].Store(nil)
-			seg.deqIdx++
+			seg.data[deq].Store(nil)
+			seg.deqIdx.Store(deq + 1)
 			atomic.AddInt64(&m.length, -1)
 			return val
 		}
@@ -189,7 +194,7 @@ func (m *UnboundedSegmentedMailbox) Dequeue() *ReceiveContext {
 			return nil
 		}
 		// recycle old head
-		m.head = next
+		m.head.Store(next)
 		seg.next.Store(nil)
 		segmentPool.Put(seg)
 		seg = next
@@ -201,9 +206,9 @@ func (m *UnboundedSegmentedMailbox) Dequeue() *ReceiveContext {
 // It is an O(1) snapshot check. Under concurrency it is best‑effort and may
 // briefly lag producers.
 func (m *UnboundedSegmentedMailbox) IsEmpty() bool {
-	seg := m.head
+	seg := m.head.Load()
 	enq := min(seg.writeIdx.Load(), segmentSize)
-	if seg.deqIdx < enq {
+	if seg.deqIdx.Load() < enq {
 		return false
 	}
 	return seg.next.Load() == nil

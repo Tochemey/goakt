@@ -23,6 +23,7 @@
 package actor
 
 import (
+	"context"
 	"runtime"
 	"sync/atomic"
 	"testing"
@@ -177,6 +178,108 @@ func TestDispatcherHighFanout(t *testing.T) {
 		}
 		return true
 	}, 5*time.Second, 5*time.Millisecond)
+}
+
+// TestDispatcherDrainFromWorkerGoroutine verifies that drain(ctx) does not
+// self-deadlock when called from within a worker turn. Before the drain fix,
+// calling stop() from a worker goroutine would deadlock because the worker
+// waited on its own WaitGroup.
+func TestDispatcherDrainFromWorkerGoroutine(t *testing.T) {
+	d := newDispatcher(2, dispatcherThroughput)
+	d.start()
+
+	drainDone := make(chan struct{})
+	item := &reschedSchedulable{
+		onRun: func(_ schedulable, _ *worker) {
+			// Called from within a worker turn — this would deadlock with stop()
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			d.drain(ctx)
+			close(drainDone)
+		},
+	}
+	item.self = item
+	d.schedule(item)
+
+	select {
+	case <-drainDone:
+		// drain returned without deadlock
+	case <-time.After(5 * time.Second):
+		t.Fatal("drain(ctx) deadlocked when called from worker goroutine")
+	}
+}
+
+// TestDispatcherDrainWaitsForInflight verifies that drain blocks until
+// in-flight turns complete (or context expires).
+func TestDispatcherDrainWaitsForInflight(t *testing.T) {
+	d := newDispatcher(1, dispatcherThroughput)
+	d.start()
+
+	blocker := make(chan struct{})
+	var finished atomic.Bool
+	item := &reschedSchedulable{
+		onRun: func(_ schedulable, _ *worker) {
+			<-blocker
+			finished.Store(true)
+		},
+	}
+	item.self = item
+	d.schedule(item)
+
+	// Wait for the worker to enter the blocked turn
+	time.Sleep(50 * time.Millisecond)
+
+	drained := make(chan struct{})
+	go func() {
+		d.drain(context.Background())
+		close(drained)
+	}()
+
+	// drain should not return while worker is blocked
+	select {
+	case <-drained:
+		t.Fatal("drain returned before in-flight turn completed")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(blocker)
+	<-drained
+	require.True(t, finished.Load())
+}
+
+// TestDispatcherDrainRespectsContextTimeout verifies that drain returns
+// when the context expires even if workers haven't finished.
+func TestDispatcherDrainRespectsContextTimeout(t *testing.T) {
+	d := newDispatcher(1, dispatcherThroughput)
+	d.start()
+
+	blocker := make(chan struct{})
+	defer close(blocker)
+	item := &reschedSchedulable{
+		onRun: func(_ schedulable, _ *worker) {
+			<-blocker // block forever
+		},
+	}
+	item.self = item
+	d.schedule(item)
+
+	time.Sleep(50 * time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	drained := make(chan struct{})
+	go func() {
+		d.drain(ctx)
+		close(drained)
+	}()
+
+	select {
+	case <-drained:
+		// drain returned due to context timeout — correct
+	case <-time.After(2 * time.Second):
+		t.Fatal("drain did not respect context timeout")
+	}
 }
 
 // reschedSchedulable is a schedulable whose behaviour is supplied by a

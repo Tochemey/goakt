@@ -209,6 +209,62 @@ func TestUnboundedSegmentedMailbox_EnqueueAdvancesLinkedTail(t *testing.T) {
 	mb.Dispose()
 }
 
+// TestUnboundedSegmentedMailbox_CrossWorkerHandoff exercises the race that
+// occurs when dispatcher ownership of a mailbox is handed from one worker
+// goroutine to another. The outgoing worker calls IsEmpty() (reads deqIdx and
+// head) while the incoming worker calls Dequeue() (writes deqIdx and advances
+// head). Before the atomic fix, this was a data race on plain uint64/pointer.
+// Run with: go test -race -count=5 -run TestUnboundedSegmentedMailbox_CrossWorkerHandoff
+func TestUnboundedSegmentedMailbox_CrossWorkerHandoff(t *testing.T) {
+	mb := NewUnboundedSegmentedMailbox()
+
+	const rounds = 10000
+	const producers = 4
+
+	// Producers enqueue continuously
+	var prodWg sync.WaitGroup
+	prodWg.Add(producers)
+	stop := make(chan struct{})
+	for range producers {
+		go func() {
+			defer prodWg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					_ = mb.Enqueue(new(ReceiveContext))
+				}
+			}
+		}()
+	}
+
+	// Simulate two "workers" alternately calling Dequeue and IsEmpty,
+	// which is what happens during dispatcher worker handoff.
+	var handoffWg sync.WaitGroup
+	handoffWg.Add(2)
+
+	// Worker A: dequeue
+	go func() {
+		defer handoffWg.Done()
+		for range rounds {
+			mb.Dequeue()
+		}
+	}()
+
+	// Worker B: IsEmpty (read-side of the race)
+	go func() {
+		defer handoffWg.Done()
+		for range rounds {
+			mb.IsEmpty()
+		}
+	}()
+
+	handoffWg.Wait()
+	close(stop)
+	prodWg.Wait()
+}
+
 func BenchmarkUnboundedSegmentedMailbox(b *testing.B) {
 	mb := NewUnboundedSegmentedMailbox()
 

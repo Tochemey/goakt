@@ -23,6 +23,7 @@
 package actor
 
 import (
+	"context"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -102,6 +103,23 @@ func (d *dispatcher) stop() {
 	}
 	d.readyQueue.close()
 	d.wg.Wait()
+}
+
+// drain signals all workers to stop accepting new work and blocks until
+// every worker has finished its current turn or the context expires.
+// Unlike stop, drain is safe from any goroutine: when called from a
+// worker turn the context timeout prevents self-deadlock.
+func (d *dispatcher) drain(ctx context.Context) {
+	d.signalStop()
+	done := make(chan struct{})
+	go func() {
+		d.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
 }
 
 // signalStop closes the ready queue and wakes all parked workers, then
