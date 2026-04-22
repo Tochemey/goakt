@@ -2168,6 +2168,23 @@ func (x *actorSystem) completeRelocation() {
 // putActorOnCluster broadcast the newly (re)spawned actor into the cluster
 func (x *actorSystem) putActorOnCluster(pid *PID) error {
 	if x.clusterEnabled.Load() {
+		// Guard: don't send on actorsQueue during/after shutdown.
+		// shuttingDown is set to true in shutdown() before the channel
+		// is closed in shutdownCluster(), so this check prevents the
+		// common case. The deferred recover handles the TOCTOU race
+		// where shuttingDown is read as false but the channel is closed
+		// between the check and the send.
+		if x.shuttingDown.Load() {
+			return nil
+		}
+		defer func() {
+			if r := recover(); r != nil {
+				if err, ok := r.(error); !ok || err.Error() != "send on closed channel" {
+					panic(r)
+				}
+			}
+		}()
+
 		actor, err := pid.toSerialize()
 		if err != nil {
 			return err
@@ -2180,6 +2197,23 @@ func (x *actorSystem) putActorOnCluster(pid *PID) error {
 // putGrainOnCluster broadcast the newly (re)activated grain into the cluster
 func (x *actorSystem) putGrainOnCluster(pid *grainPID) error {
 	if x.clusterEnabled.Load() {
+		// Guard: don't send on grainsQueue during/after shutdown.
+		// shuttingDown is set to true in shutdown() before the channel
+		// is closed in shutdownCluster(), so this check prevents the
+		// common case. The deferred recover handles the TOCTOU race
+		// where shuttingDown is read as false but the channel is closed
+		// between the check and the send.
+		if x.shuttingDown.Load() {
+			return nil
+		}
+		defer func() {
+			if r := recover(); r != nil {
+				if err, ok := r.(error); !ok || err.Error() != "send on closed channel" {
+					panic(r)
+				}
+			}
+		}()
+
 		grain, err := pid.toWireGrain()
 		if err != nil {
 			return err
@@ -2532,6 +2566,12 @@ func (x *actorSystem) shutdown(ctx context.Context) (err error) {
 		// Combine all errors if present
 		return multierr.Combine(hooksErr, err, clusterErr)
 	}
+
+	// Drain the dispatcher before deactivating grains so no worker is
+	// mid-turn on a grain when OnDeactivate is called. The context
+	// carries the shutdown timeout; if we're on a worker goroutine,
+	// the timeout prevents self-deadlock.
+	x.dispatcher.drain(ctx)
 
 	// deactivate all grains while cluster + pubsub system actors are still alive
 	if x.grains.Len() > 0 {
