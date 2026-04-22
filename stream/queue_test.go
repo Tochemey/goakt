@@ -80,7 +80,7 @@ func TestQueue_Peek_DoesNotConsume(t *testing.T) {
 
 func TestQueue_Len_AfterPushPop(t *testing.T) {
 	q := &queue{}
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		q.push(i)
 	}
 	assert.Equal(t, 5, q.len())
@@ -96,11 +96,11 @@ func TestQueue_Len_AfterPushPop(t *testing.T) {
 func TestQueue_Compaction(t *testing.T) {
 	q := &queue{}
 	// Push 10 elements.
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		q.push(i)
 	}
 	// Pop exactly 5: head becomes 5, len(data)=10. head*2 == 10 >= 10 → compact.
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		v := q.pop()
 		assert.Equal(t, i, v)
 	}
@@ -117,11 +117,11 @@ func TestQueue_Compaction(t *testing.T) {
 // correct after compaction when more elements are pushed.
 func TestQueue_Compaction_SubsequentPushes(t *testing.T) {
 	q := &queue{}
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		q.push(i)
 	}
 	// Pop 3: head=3, len=6. 3*2=6 >= 6 → compact to [3,4,5].
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		q.pop()
 	}
 	assert.Equal(t, 3, q.len())
@@ -141,7 +141,7 @@ func TestQueue_Compaction_SubsequentPushes(t *testing.T) {
 // (set to nil) so the GC can collect the underlying values.
 func TestQueue_NilsVacatedAfterCompaction(t *testing.T) {
 	q := &queue{}
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		q.push(i)
 	}
 	// Pop 2: head=2, len=4. 2*2=4 >= 4 → compact.

@@ -26,6 +26,7 @@ import (
 	"context"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/extension"
@@ -78,11 +79,11 @@ import (
 //	    }
 //	}
 type ReceiveContext struct {
-	// stashed indicates that this context has been placed into the actor's stash
-	// buffer by the user's behavior (via ctx.Stash()). When set, the process loop
-	// must NOT release this context back to the pool because the stash still holds
-	// a live reference. The flag is cleared when the context is unstashed.
-	stashed        atomic.Bool
+	// next is the intrusive mailbox link. Accessed atomically by the
+	// producer (Enqueue) and the single consumer (Dequeue). Kept as the
+	// first field to isolate its cache line from the cold fields below
+	// under heavy producer contention.
+	next           unsafe.Pointer
 	ctx            context.Context
 	message        any
 	sender         *PID
@@ -241,11 +242,7 @@ func (rctx *ReceiveContext) Stash() {
 	recipient := rctx.self
 	if err := recipient.stash(rctx); err != nil {
 		rctx.Err(err)
-		return
 	}
-	// Mark the context as stashed so the process loop does not release it
-	// back to the pool. The stash now owns this context until Unstash/UnstashAll.
-	rctx.stashed.Store(true)
 }
 
 // Unstash dequeues the oldest stashed message and prepends it to the mailbox.
@@ -749,12 +746,9 @@ func (rctx *ReceiveContext) reset() {
 	rctx.requestID = ""
 	rctx.requestReplyTo = ""
 
-	// Note: responseClosed and stashed are not reset here because:
-	// - responseClosed: set explicitly by build() in the sync path;
-	//   for async (Tell) it is never checked, so a stale value is harmless.
-	// - stashed: releaseContext() skips stashed contexts, so any context
-	//   reaching reset() already has stashed == false.
-	// Avoiding these two atomic stores shaves ~10ns per message.
+	// responseClosed is not reset: build() overwrites it in the sync
+	// path, and async (Tell) never reads it. Skipping the atomic store
+	// saves a handful of ns on the hot path.
 }
 
 // withoutCancel safely derives a non-cancelable context from the current context.

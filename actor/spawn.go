@@ -642,7 +642,7 @@ func (x *actorSystem) spawnSingletonWithRole(ctx context.Context, cl cluster.Clu
 				WaitInterval: waitInterval,
 				MaxRetries:   retries,
 			},
-			Role: pointer.To(role),
+			Role: new(role),
 		})
 
 		if err != nil {
@@ -657,7 +657,7 @@ func (x *actorSystem) spawnSingletonWithRole(ctx context.Context, cl cluster.Clu
 		return newRemotePID(address, x.remoting), nil
 	}
 
-	pid, err := x.spawnSingletonOnLocal(ctx, name, actor, pointer.To(role), spawnTimeout, waitInterval, retries)
+	pid, err := x.spawnSingletonOnLocal(ctx, name, actor, new(role), spawnTimeout, waitInterval, retries)
 	if err != nil {
 		return nil, err
 	}
@@ -676,7 +676,7 @@ func (x *actorSystem) spawnSingletonOnLocal(ctx context.Context, name string, ac
 	}
 
 	// check some preconditions
-	if err := x.checkSpawnPreconditions(ctx, name, actor, true, pointer.To(singletonRole)); err != nil {
+	if err := x.checkSpawnPreconditions(ctx, name, actor, true, new(singletonRole)); err != nil {
 		return nil, err
 	}
 
@@ -785,7 +785,7 @@ func (x *actorSystem) spawnOnDatacenter(ctx context.Context, name string, actor 
 	var dcRecord *datacenter.DataCenterRecord
 	for _, record := range activeRecords {
 		if record.State == datacenter.DataCenterActive && record.ID == config.dataCenter.ID() {
-			dcRecord = pointer.To(record)
+			dcRecord = new(record)
 			break
 		}
 	}

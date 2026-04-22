@@ -108,7 +108,7 @@ func (wp *WorkerPool[T]) Start() {
 			wp.shards[i] = &poolShard[T]{
 				wp: wp,
 				workerCache: sync.Pool{
-					New: func() interface{} {
+					New: func() any {
 						return &workerInstance[T]{}
 					},
 				},
@@ -301,6 +301,11 @@ func (wp *WorkerPool[T]) cleanup() {
 			idleWorkerList := shard.idleWorkerList
 			iws := len(idleWorkerList)
 
+			// j is the count of leading entries whose lastUsed is past
+			// the lifetime threshold; they are the prefix to reap. When every
+			// entry is expired j must equal iws (reap all), so use the
+			// explicit C-style for loop where j is iws after normal completion.
+			// (Integer range `for j = range iws` would leave j at iws-1.)
 			var j int
 			if iws > 400 {
 				lo, hi := 0, iws
@@ -383,7 +388,7 @@ func (sm64 *splitMix64) Int63() int64 {
 }
 
 var splitMix64Pool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		sm64 := &splitMix64{}
 		sm64.Init(time.Now().UnixNano())
 		return sm64

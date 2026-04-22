@@ -11,6 +11,8 @@
   <a href="https://go.dev/doc/install"><img src="https://img.shields.io/github/go-mod/go-version/Tochemey/goakt" alt="GitHub go.mod Go version" /></a>
   <a href="https://github.com/avelino/awesome-go"><img src="https://awesome.re/badge.svg" alt="Awesome" /></a>
   <a href="https://www.bestpractices.dev/projects/9248"><img src="https://www.bestpractices.dev/projects/9248/badge" alt="OpenSSF Best Practices" /></a>
+  <a href="https://github.com/Tochemey/goakt/releases/latest"><img src="https://img.shields.io/github/v/release/Tochemey/goakt" alt="Latest Release" /></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/github/license/Tochemey/goakt" alt="License" /></a>
 </p>
 
 Distributed [Go](https://go.dev/) actor framework to build a reactive and distributed system in Go with typed actor messages.
@@ -21,51 +23,62 @@ across a cluster of computers.
 If you are not familiar with the actor model, the blog post from Brian Storti [here](https://www.brianstorti.com/the-actor-model/) is an excellent and short introduction to the actor model.
 Also, check the reference section at the end of the post for more material regarding the actor model.
 
-> **Version & branches**
->
-> - **v3** — Protocol buffers for actor messages. Branch: [`release/3.14`](https://github.com/Tochemey/goakt/tree/release/3.14).
-> - **v4** — Typed messages with `any`, unified APIs, pluggable serializers (Proto/CBOR), and config-only remoting. See [CHANGELOG.md](./CHANGELOG.md) for migration; [Docs](https://docs.goakt.dev/) for API reference.
-
 ## Features
 
-| Feature                   | Description                                                                                                                                                                                                                                                                           |
-|---------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Actor Model**           | Build concurrent and distributed systems using the actor model with typed messages.                                                                                                                                                                                                   |
-| **Messaging**             | Tell/Ask APIs for fire-and-forget or request/response flows.                                                                                                                                                                                                                          |
-| **Reentrancy**            | Reentrancy-enabled async request messaging with configurable modes and per-call overrides.                                                                                                                                                                                            |
-| **Supervision**           | One-for-one/one-for-all strategies, directives, and retry windows for fault tolerance.                                                                                                                                                                                                |
-| **Remoting**              | Seamless communication between actors across nodes over TCP.                                                                                                                                                                                                                          |
-| **Context Propagation**   | Pluggable context propagation for request-scoped metadata.                                                                                                                                                                                                                            |
-| **Clustering**            | Multiple discovery backends (Consul, etcd, Kubernetes, NATS, mDNS, static).                                                                                                                                                                                                           |
-| **Location Transparency** | Interact with actors without needing to know their physical location.                                                                                                                                                                                                                 |
-| **Relocation**            | Automatic actor relocation on node failure with configurable policies.                                                                                                                                                                                                                |
-| **Cluster Singletons**    | Run a single instance across the cluster with guardian-based lifecycle.                                                                                                                                                                                                               |
-| **Grains**                | Virtual actors capabilities.                                                                                                                                                                                                                                                          |
-| **Passivation**           | Automatically stop idle actors and reclaim resources.                                                                                                                                                                                                                                 |
-| **Routers**               | Routing strategies such as round robin, random, and fan-out.                                                                                                                                                                                                                          |
-| **Scheduling**            | Timers and delayed messaging built into the runtime.                                                                                                                                                                                                                                  |
-| **Stashing & Mailboxes**  | Stash buffers and customizable mailboxes (bounded/unbounded, priority).                                                                                                                                                                                                               |
-| **Dependency Injection**  | Attach runtime dependencies to actors at spawn time.                                                                                                                                                                                                                                  |
-| **Observability**         | OpenTelemetry metrics, event stream, and dead letters.                                                                                                                                                                                                                                |
-| **Extensions**            | Pluggable APIs for cross-cutting capabilities.                                                                                                                                                                                                                                        |
-| **Data Center**           | Multi-datacenter support with DC-transparent messaging, pluggable control plane (NATS JetStream, Etcd), DC-aware placement, and cross-DC actor/grain communication.                                                                                                                   |
-| **Distributed Data**      | Built-in CRDTs (GCounter, PNCounter, LWWRegister, MVRegister, ORSet, ORMap, Flag) with delta-based replication and anti-entropy synchronization. Configurable coordination levels, key subscriptions, tombstone-based deletion, BoltDB snapshots, and role-based replication scoping. |
-| **Reactive Streams**      | Actor-backed, backpressure-aware stream processing with a composable DSL. Rich sources, transformations (map, filter, flatMap, batch, throttle, scan, parallel map), sinks, fan-out/fan-in, graph topologies, error/overflow strategies, stage fusion, and built-in metrics/tracing.  |
+- **Core & Messaging**
+  - Actor model — concurrent, distributed actors with typed messages
+  - Grains — virtual actors with their own context and lifecycle
+  - Actor hierarchies — parent/child trees via `SpawnChild`, with child/parent navigation
+  - Lifecycle hooks — `PreStart` and `PostStop`; graceful stop and poison-pill shutdown
+  - Behavior switching — `Become` / `UnBecome` plus stacked `BecomeStacked` / `UnBecomeStacked` for protocol phases
+  - Messaging — `Tell` / `Ask` for fire-and-forget and request/response flows, plus `BatchTell` / `BatchAsk` for bulk delivery
+  - PubSub — topic-based publish/subscribe via a dedicated `TopicActor`, cluster-aware with cross-node dissemination over remoting
+  - Forward & PipeTo — forward messages preserving the original sender; pipe async task results back to an actor
+  - Reentrancy — non-blocking async `Request` with configurable modes and in-flight limits
+  - Watch & Terminated — monitor actor lifecycle and receive `Terminated` on death
+  - Stashing — `Stash` / `Unstash` / `UnstashAll` to defer messages during transient states
+  - Dependency injection — attach runtime dependencies to actors at spawn time
+- **Supervision & Fault Tolerance**
+  - Supervision — one-for-one / one-for-all strategies with `Stop` / `Resume` / `Restart` / `Escalate` directives and retry windows
+  - Passivation — auto-stop idle actors via a time-based strategy
+  - Reinstate — bring a previously stopped actor back online by PID or name
+  - Circuit breaker — `PipeTo` integrates the `breaker` package to short-circuit calls to unhealthy dependencies
+  - Dead letters — unhandled messages captured and published on the event stream
+- **Scheduling**
+  - Timers — `ScheduleOnce`, recurring `Schedule`, and `ScheduleWithCron` for cron-driven delivery
+  - Schedule lifecycle — `PauseSchedule` / `ResumeSchedule` / `CancelSchedule` on existing references
+- **Routing & Mailboxes**
+  - Routers — round-robin, random, and fan-out routing strategies
+  - Mailboxes — unbounded FIFO, bounded, priority, and fair (segmented) mailboxes
+- **Cluster & Topology**
+  - Remoting — TCP actor communication across nodes with pluggable serializers (Proto, CBOR and custom)
+  - Clustering — Consul, etcd, Kubernetes, NATS, mDNS, and static discovery
+  - Location transparency — address actors without knowing their node
+  - Relocation — automatic actor relocation on node failure
+  - Cluster singletons — single instance cluster-wide with guardian lifecycle
+  - Multi-datacenter — DC-transparent messaging, pluggable control plane (NATS JetStream, Etcd), DC-aware placement
+- **State & Streams**
+  - Distributed data — CRDTs (GCounter, PNCounter, LWWRegister, MVRegister, ORSet, ORMap, Flag) with delta replication, anti-entropy sync, tombstone deletion, and snapshots
+  - Reactive streams — backpressure-aware stream processing with a composable DSL (map, filter, flatMap, batch, throttle, fan-out/in), stage fusion, and built-in metrics/tracing
+- **Observability & Extensibility**
+  - Observability — OpenTelemetry metrics, event stream, dead letters
+  - Event stream — in-process topic-based pub/sub for system and user events
+  - Context propagation — pluggable propagation for request-scoped metadata
+  - Extensions — pluggable APIs for cross-cutting capabilities
+  - TLS / mTLS — configurable transport security for remoting
+
+See [docs.goakt.dev](https://docs.goakt.dev) for the full feature reference.
 
 ## Installation
 
 ```bash
-# v3.x.x — stable, used in production
-go get github.com/tochemey/goakt/v3
-
-# v4.x.x — production ready
 go get github.com/tochemey/goakt/v4
 ```
 
 ## Documentations
 
-- **v4**: [v4](https://docs.goakt.dev)
-- **v3**: [v3](https://tochemey.gitbook.io/goakt)
+- **v4**: [docs.goakt.dev](https://docs.goakt.dev)
+- **v3** (legacy): [tochemey.gitbook.io/goakt](https://tochemey.gitbook.io/goakt)
 
 ## Examples
 
@@ -88,7 +101,7 @@ You can join these groups and chat to discuss and ask GoAkt related questions on
 
 ## Contribution
 
-We welcome contributions—bug fixes, new features, and documentation improvements. Before diving in, read the [Architecture Document](./arch/ARCHITECTURE.md) to understand the codebase. We use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) and [Earthly](https://earthly.dev/get-earthly) for builds.
+We welcome contributions—bug fixes, new features, and documentation improvements. Before diving in, read the [Architecture Document](./arch/ARCHITECTURE.md) to understand the codebase. We use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) and a Docker-backed `Makefile` so contributors only need Docker and Make installed — run `make help` to see the available targets.
 
 See [contributing.md](./CONTRIBUTING.md) for prerequisites, setup, and the full contribution workflow.
 

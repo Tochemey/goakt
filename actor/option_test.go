@@ -217,3 +217,41 @@ func TestWithDefaultSupervisor(t *testing.T) {
 		assert.Same(t, custom, system.defaultSupervisor)
 	})
 }
+
+func TestWithThroughputBudget(t *testing.T) {
+	t.Run("When value is positive it overrides the default", func(t *testing.T) {
+		system := new(actorSystem)
+		system.dispatcherThroughput = dispatcherThroughput
+
+		WithThroughputBudget(128).Apply(system)
+
+		assert.Equal(t, 128, system.dispatcherThroughput)
+	})
+
+	t.Run("When value is 64 it overrides the default", func(t *testing.T) {
+		system := new(actorSystem)
+		system.dispatcherThroughput = dispatcherThroughput
+
+		WithThroughputBudget(64).Apply(system)
+
+		assert.Equal(t, 64, system.dispatcherThroughput)
+	})
+
+	t.Run("When value is zero the default is retained", func(t *testing.T) {
+		system := new(actorSystem)
+		system.dispatcherThroughput = dispatcherThroughput
+
+		WithThroughputBudget(0).Apply(system)
+
+		assert.Equal(t, dispatcherThroughput, system.dispatcherThroughput)
+	})
+
+	t.Run("When value is negative the default is retained", func(t *testing.T) {
+		system := new(actorSystem)
+		system.dispatcherThroughput = dispatcherThroughput
+
+		WithThroughputBudget(-10).Apply(system)
+
+		assert.Equal(t, dispatcherThroughput, system.dispatcherThroughput)
+	})
+}

@@ -24,8 +24,6 @@ package actor
 
 import (
 	"time"
-
-	"github.com/tochemey/goakt/v4/internal/pointer"
 )
 
 // clusterSingletonConfig holds configuration options for cluster singleton actors.
@@ -83,7 +81,7 @@ type ClusterSingletonOption func(*clusterSingletonConfig)
 func WithSingletonRole(role string) ClusterSingletonOption {
 	return func(c *clusterSingletonConfig) {
 		if role != "" {
-			c.role = pointer.To(role)
+			c.role = new(role)
 		}
 	}
 }

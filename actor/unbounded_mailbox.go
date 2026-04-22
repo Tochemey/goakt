@@ -30,67 +30,30 @@ import (
 // CacheLinePadding prevents false sharing between CPU cache lines
 type CacheLinePadding [64]byte
 
-// node is a queue node for the MPSC mailbox.
-//
-// The value field is a plain (non-atomic) pointer because all accesses are
-// ordered by the atomic operations on the queue's head and tail pointers:
-//   - Enqueue writes value before publishing the node via atomic.SwapPointer(tail).
-//   - Dequeue reads value after acquiring the node via atomic.LoadPointer(head.next).
-//
-// This eliminates two atomic operations per message (Store + Load) compared to
-// using atomic.Pointer.
-type node struct {
-	value *ReceiveContext
-	next  unsafe.Pointer
-}
-
-// nodePoolSize controls the bounded channel-based pool for MPSC queue nodes.
-// Nodes are produced on the consumer's P (Dequeue → Put) and consumed on
-// the producer's P (Enqueue → Get). With sync.Pool, every Get becomes a
-// cross-P steal because the producing and consuming Ps differ. A channel-
-// based pool eliminates this thrashing.
-//
-// Sized to absorb the in-flight node working set under high parallelism;
-// a too-small pool drops nodes back to GC and forces mallocgc on the hot
-// Enqueue path.
-const nodePoolSize = 8192
-
-// nodeCh is a channel-based bounded pool for MPSC queue node objects.
-// Pre-warmed at package init so the first burst of Enqueue calls finds
-// nodes waiting and does not fall through to mallocgc on every send.
-var nodeCh = func() chan *node {
-	ch := make(chan *node, nodePoolSize)
-	for range nodePoolSize {
-		ch <- new(node)
-	}
-	return ch
-}()
-
 // UnboundedMailbox is a lock-free multi-producer, single-consumer (MPSC)
 // FIFO queue used as the actor mailbox.
 //
-// It is safe for many producer goroutines to call Enqueue concurrently, while
-// exactly one consumer goroutine calls Dequeue. Ordering is preserved (FIFO)
-// with respect to overall arrival order. Operations are non-blocking and rely
-// on atomic pointer updates; underlying nodes are pooled via sync.Pool to
-// reduce allocations.
+// Many producer goroutines may call Enqueue concurrently; exactly one
+// consumer goroutine calls Dequeue. Ordering is FIFO with respect to
+// arrival. Operations are non-blocking and rely on atomic pointer
+// updates.
 //
-// The mailbox is unbounded: if producers outpace the consumer, memory usage can
-// grow without limit. Consider higher-level backpressure if needed.
+// ReceiveContext itself serves as the intrusive list node via its
+// `next` field, so a ReceiveContext may be linked into only one mailbox
+// at a time.
 //
-// The zero value of UnboundedMailbox is not ready for use; always construct via
-// NewUnboundedMailbox.
+// The mailbox is unbounded: if producers outpace the consumer, memory
+// grows without limit. Apply higher-level backpressure if needed.
+//
+// The zero value is not usable; always construct via NewUnboundedMailbox.
 //
 // Reference: https://concurrencyfreaks.blogspot.com/2014/04/multi-producer-single-consumer-queue.html
 type UnboundedMailbox struct {
-	// head pointer for dequeue operations (consumer side)
-	// Padded to prevent false sharing
-	head unsafe.Pointer // *node
+	// head and tail are padded to opposite cache lines so concurrent
+	// producers and the single consumer do not thrash each other.
+	head unsafe.Pointer // *ReceiveContext
 	_    CacheLinePadding
-
-	// tail pointer for enqueue operations (producer side)
-	// Padded to prevent false sharing
-	tail unsafe.Pointer // *node
+	tail unsafe.Pointer // *ReceiveContext
 	_    CacheLinePadding
 }
 
@@ -98,52 +61,37 @@ type UnboundedMailbox struct {
 var _ Mailbox = (*UnboundedMailbox)(nil)
 
 // NewUnboundedMailbox returns a new, initialized UnboundedMailbox.
-//
-// The returned mailbox supports concurrent producers and a single consumer.
-// Always use this constructor; the zero value is not usable.
+// The zero value is not usable.
 func NewUnboundedMailbox() *UnboundedMailbox {
-	item := new(node)
+	sentinel := new(ReceiveContext)
 	return &UnboundedMailbox{
-		head: unsafe.Pointer(item),
-		tail: unsafe.Pointer(item),
+		head: unsafe.Pointer(sentinel),
+		tail: unsafe.Pointer(sentinel),
 	}
 }
 
-// Enqueue appends the given ReceiveContext to the tail of the mailbox.
+// Enqueue appends value to the tail of the mailbox. Safe to call
+// concurrently from multiple producers. Always returns nil; the error
+// is present to satisfy the Mailbox interface.
 //
-// It is safe to call Enqueue concurrently from multiple goroutines. The call is
-// non-blocking and preserves FIFO ordering. The method currently always returns
-// nil; the error is present to satisfy the Mailbox interface.
+// The ReceiveContext must not already be linked into any mailbox; its
+// `next` field is overwritten.
 func (m *UnboundedMailbox) Enqueue(value *ReceiveContext) error {
-	var tnode *node
-	select {
-	case tnode = <-nodeCh:
-	default:
-		tnode = new(node)
-	}
-
-	// Non-atomic store: the node is thread-local and invisible to other
-	// goroutines until the SwapPointer below publishes it.
-	tnode.value = value
-	// next must be an atomic store because other goroutines read this field
-	// atomically (e.g. IsEmpty, Len). Mixed atomic/non-atomic accesses on the
-	// same location are data races in Go's memory model.
-	atomic.StorePointer(&tnode.next, nil)
-
-	// Atomically swap the tail pointer and link the previous tail to this node
-	prev := (*node)(atomic.SwapPointer(&m.tail, unsafe.Pointer(tnode)))
-	atomic.StorePointer(&prev.next, unsafe.Pointer(tnode))
+	atomic.StorePointer(&value.next, nil)
+	prev := (*ReceiveContext)(atomic.SwapPointer(&m.tail, unsafe.Pointer(value)))
+	atomic.StorePointer(&prev.next, unsafe.Pointer(value))
 	return nil
 }
 
-// Dequeue removes and returns the next message at the head of the mailbox.
+// Dequeue removes and returns the next message, or nil when empty.
+// Must be called from a single consumer goroutine.
 //
-// It returns nil if the mailbox is empty. Dequeue must be called by exactly one
-// consumer goroutine; concurrent calls to Dequeue are not supported. The call is
-// non-blocking and suitable for use inside an actor/event loop.
+// The returned ReceiveContext becomes the new sentinel; the caller must
+// not release it — the next Dequeue will. The previous sentinel is
+// reset and returned to the shared context pool.
 func (m *UnboundedMailbox) Dequeue() *ReceiveContext {
-	head := (*node)(atomic.LoadPointer(&m.head))
-	next := (*node)(atomic.LoadPointer(&head.next))
+	head := (*ReceiveContext)(atomic.LoadPointer(&m.head))
+	next := (*ReceiveContext)(atomic.LoadPointer(&head.next))
 
 	if next == nil {
 		return nil
@@ -151,49 +99,42 @@ func (m *UnboundedMailbox) Dequeue() *ReceiveContext {
 
 	atomic.StorePointer(&m.head, unsafe.Pointer(next))
 
-	// Non-atomic read: visible because the LoadPointer(&head.next) above
-	// acquired the ordering established by the producer's StorePointer.
-	value := next.value
-	next.value = nil // avoid memory leaks; safe because node is now consumed
-
+	// A sibling worker that observed m.head before the StorePointer
+	// above may still hold a pointer to the old head and atomically
+	// load its next field via IsEmpty/Len. The reset here must match
+	// that with an atomic store.
+	head.reset()
+	atomic.StorePointer(&head.next, nil)
 	select {
-	case nodeCh <- head:
+	case contextCh <- head:
 	default:
 	}
-	return value
+
+	return next
 }
 
 // Len returns an approximate number of messages currently in the mailbox.
-//
-// This performs an O(n) traversal and may race with concurrent producers,
-// making the result a point-in-time estimate. Avoid calling Len in hot paths;
-// prefer external accounting if frequent checks are required.
+// O(n) traversal and racy with producers; use only outside hot paths.
 func (m *UnboundedMailbox) Len() int64 {
 	var count int64
-	head := (*node)(atomic.LoadPointer(&m.head))
-	current := (*node)(atomic.LoadPointer(&head.next))
+	head := (*ReceiveContext)(atomic.LoadPointer(&m.head))
+	current := (*ReceiveContext)(atomic.LoadPointer(&head.next))
 
 	for current != nil {
 		count++
-		current = (*node)(atomic.LoadPointer(&current.next))
+		current = (*ReceiveContext)(atomic.LoadPointer(&current.next))
 	}
 
 	return count
 }
 
 // IsEmpty reports whether the mailbox currently holds no messages.
-//
-// The result is a snapshot that may become stale immediately in the presence of
-// concurrent producers. It is O(1) and safe to call from the consumer.
+// The result is a racy snapshot; safe only from the consumer.
 func (m *UnboundedMailbox) IsEmpty() bool {
-	head := (*node)(atomic.LoadPointer(&m.head))
-	next := (*node)(atomic.LoadPointer(&head.next))
+	head := (*ReceiveContext)(atomic.LoadPointer(&m.head))
+	next := atomic.LoadPointer(&head.next)
 	return next == nil
 }
 
-// Dispose implements the Mailbox interface.
-//
-// For UnboundedMailbox this is a no-op provided for interface compliance. It
-// does not free resources beyond what the garbage collector and internal pools
-// already manage, and it does not affect in-flight producers/consumer.
+// Dispose is a no-op for UnboundedMailbox; present for interface compliance.
 func (m *UnboundedMailbox) Dispose() {}

@@ -777,7 +777,7 @@ func TestControlPlaneListActiveSorting(t *testing.T) {
 	defer func() { _ = cp.Close() }()
 
 	// Register multiple records and verify sorting
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		record := newRecord(nextID())
 		record.State = datacenter.DataCenterActive
 		_, _, err := cp.Register(context.Background(), record)

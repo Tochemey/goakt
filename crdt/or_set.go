@@ -330,9 +330,8 @@ func (s *ORSet) shallowCopy() *ORSet {
 		clock:   make(map[string]uint64, len(s.clock)),
 		delta:   s.delta.clone(),
 	}
-	for elem, dots := range s.entries {
-		out.entries[elem] = dots // shared, not cloned
-	}
+	// shared, not cloned
+	maps.Copy(out.entries, s.entries)
 	maps.Copy(out.clock, s.clock)
 	return out
 }

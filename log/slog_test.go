@@ -82,7 +82,7 @@ func extractSlogLevel(b []byte) (string, error) {
 }
 
 func extractSlogLogLine(out []byte) []byte {
-	for _, line := range bytes.Split(out, []byte("\n")) {
+	for line := range bytes.SplitSeq(out, []byte("\n")) {
 		line = bytes.TrimSpace(line)
 		if len(line) == 0 {
 			continue

@@ -44,7 +44,6 @@ import (
 	"github.com/tochemey/goakt/v4/internal/datacentercontroller"
 	dynaport "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
-	"github.com/tochemey/goakt/v4/internal/pointer"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/log"
 	mockcluster "github.com/tochemey/goakt/v4/mocks/cluster"
@@ -934,7 +933,7 @@ func TestSpawn(t *testing.T) {
 				require.Equal(t, reentrancy.AllowAll, request.Reentrancy.Mode())
 				require.Equal(t, 7, request.Reentrancy.MaxInFlight())
 			}).
-			Return(pointer.To("goakt://test@127.0.0.1:9000/actor"), nil).
+			Return(new("goakt://test@127.0.0.1:9000/actor"), nil).
 			Once()
 
 		_, err := system.SpawnOn(ctx, actorName, actor,
@@ -1698,7 +1697,7 @@ func TestSpawn(t *testing.T) {
 					req.Relocatable == true &&
 					req.EnableStashing == false
 			})).
-			Return(pointer.To("goakt://test@127.0.0.1:9000/actor"), nil).
+			Return(new("goakt://test@127.0.0.1:9000/actor"), nil).
 			Once()
 
 		actor := NewMockActor()
@@ -1933,7 +1932,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 					req.Relocatable == true &&
 					req.EnableStashing == false
 			})).
-			Return(pointer.To("goakt://test@127.0.0.1:9000/actor"), nil).
+			Return(new("goakt://test@127.0.0.1:9000/actor"), nil).
 			Once()
 
 		config := newSpawnConfig(WithDataCenter(&targetDC))
@@ -1962,7 +1961,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 					req.PassivationStrategy != nil &&
 					req.EnableStashing == true
 			})).
-			Return(pointer.To("goakt://test@127.0.0.1:9000/actor"), nil).
+			Return(new("goakt://test@127.0.0.1:9000/actor"), nil).
 			Once()
 
 		config := newSpawnConfig(

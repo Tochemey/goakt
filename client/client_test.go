@@ -84,7 +84,7 @@ func TestClientUpdateNodes(t *testing.T) {
 
 		// Concurrent writes and reads
 		done := make(chan bool)
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			go func(val float64) {
 				node.SetWeight(val)
 				_ = node.getWeight()
@@ -93,7 +93,7 @@ func TestClientUpdateNodes(t *testing.T) {
 		}
 
 		// Wait for all goroutines
-		for i := 0; i < 10; i++ {
+		for range 10 {
 			<-done
 		}
 

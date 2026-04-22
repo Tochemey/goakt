@@ -28,7 +28,6 @@ import (
 	"github.com/tochemey/goakt/v4/eventstream"
 	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/internal/metric"
-	"github.com/tochemey/goakt/v4/internal/pointer"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/internal/xsync"
 	"github.com/tochemey/goakt/v4/log"
@@ -178,7 +177,7 @@ func asSystemActor() pidOption {
 func withRole(role string) pidOption {
 	return func(pid *PID) {
 		if role != "" {
-			pid.role = pointer.To(role)
+			pid.role = new(role)
 		}
 	}
 }

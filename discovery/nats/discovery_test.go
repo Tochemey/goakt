@@ -115,7 +115,7 @@ func TestDiscovery(t *testing.T) {
 		// this is a cheap test
 		// assert the type of svc
 		assert.IsType(t, &Discovery{}, provider)
-		var p interface{} = provider
+		var p any = provider
 		_, ok := p.(discovery.Provider)
 		assert.True(t, ok)
 	})

@@ -48,7 +48,7 @@ func ClientSerializerOptions(cfg *remote.Config) []ClientOption {
 	// The proto.Message interface entry is always pre-registered by NewConfig /
 	// DefaultConfig. NewClient seeds itself with the same default, so skip it
 	// here to avoid a redundant entry in the client's serializer slice.
-	protoMsgType := reflect.TypeOf((*proto.Message)(nil)).Elem()
+	protoMsgType := reflect.TypeFor[proto.Message]()
 
 	opts := make([]ClientOption, 0, len(serializers))
 	for typ, ser := range serializers {

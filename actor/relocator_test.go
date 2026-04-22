@@ -45,7 +45,6 @@ import (
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	dynaport "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
-	"github.com/tochemey/goakt/v4/internal/pointer"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/log"
@@ -236,7 +235,7 @@ func TestRelocatorSpawnRemoteActorSetsReentrancyConfig(t *testing.T) {
 			require.Equal(t, reentrancy.StashNonReentrant, req.Reentrancy.Mode())
 			require.Equal(t, 5, req.Reentrancy.MaxInFlight())
 		}).
-		Return(pointer.To("goakt://test@127.0.0.1:9000/actor"), nil).
+		Return(new("goakt://test@127.0.0.1:9000/actor"), nil).
 		Once()
 
 	actor := &relocator{
@@ -326,7 +325,7 @@ func TestRelocatorRecreateLocallyUsesSingletonSpec(t *testing.T) {
 			WaitInterval: singletonSpec.WaitInterval,
 			MaxRetries:   singletonSpec.MaxRetries,
 		},
-		Role: pointer.To("blue"),
+		Role: new("blue"),
 	}
 
 	clusterMock.EXPECT().RemoveActor(mock.Anything, "singleton").Return(nil).Once()
@@ -1389,7 +1388,6 @@ func TestGrainsRelocation(t *testing.T) {
 		{node1, "Grain-24"},
 	}
 	for _, gc := range grainCases {
-		gc := gc
 		require.Eventually(t, func() bool {
 			identity, err := gc.node.GrainIdentity(ctx, gc.name, func(ctx context.Context) (Grain, error) {
 				return NewMockGrain(), nil
@@ -1501,7 +1499,6 @@ func TestPersistenceGrainsRelocation(t *testing.T) {
 		{node1, "Grain-24"},
 	}
 	for _, gc := range pgCases {
-		gc := gc
 		// Step 1: wait until grain is accessible with its pre-relocation balance.
 		require.Eventually(t, func() bool {
 			identity, err := gc.node.GrainIdentity(ctx, gc.name, func(ctx context.Context) (Grain, error) {
@@ -1630,7 +1627,6 @@ func TestGrainsWithDependenciesRelocation(t *testing.T) {
 		{node1, "Grain-24", "email24", dependencyID},
 	}
 	for _, gc := range gdCases {
-		gc := gc
 		require.Eventually(t, func() bool {
 			identity, err := gc.node.GrainIdentity(ctx, gc.name, func(ctx context.Context) (Grain, error) {
 				return NewMockGrain(), nil

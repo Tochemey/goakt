@@ -147,10 +147,5 @@ func (x *List[T]) Reset() {
 // contains reports whether item is already in x.data.
 // Callers must hold at least a read lock.
 func (x *List[T]) contains(item T) bool {
-	for _, v := range x.data {
-		if v == item {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(x.data, item)
 }

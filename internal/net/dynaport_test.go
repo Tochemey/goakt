@@ -101,16 +101,14 @@ func TestConcurrentGetProducesDistinctPorts(t *testing.T) {
 	)
 
 	for range goroutines {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			ports := Get(perCall)
 			mu.Lock()
 			for _, p := range ports {
 				all[p]++
 			}
 			mu.Unlock()
-		}()
+		})
 	}
 	wg.Wait()
 

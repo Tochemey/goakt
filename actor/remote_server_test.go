@@ -69,7 +69,7 @@ func newRemoteServerTestSystem(host string, port int) *actorSystem {
 
 // requireProtoError asserts that the returned proto message is an *internalpb.Error
 // with the expected code.
-func requireProtoError(t *testing.T, msg interface{}, code internalpb.Code) {
+func requireProtoError(t *testing.T, msg any, code internalpb.Code) {
 	t.Helper()
 	protoErr, ok := msg.(*internalpb.Error)
 	require.True(t, ok, "expected *internalpb.Error, got %T", msg)
@@ -228,7 +228,6 @@ func TestRemoteHandlersContextPropagation(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		c := c
 		t.Run("propagator_extract_error_returns_CODE_INVALID_ARGUMENT_"+c.name, func(t *testing.T) {
 			resp, err := c.handler(ctxWithMD, nullConn, c.req)
 			require.NoError(t, err)

@@ -558,7 +558,7 @@ func TestRestart(t *testing.T) {
 
 		assert.EqualValues(t, 1, pid.RestartCount())
 		// let us send 10 messages to the actor
-		for i := 0; i < count; i++ {
+		for range count {
 			err = Tell(ctx, pid, new(testpb.TestSend))
 			assert.NoError(t, err)
 		}
@@ -887,7 +887,7 @@ func TestRestart(t *testing.T) {
 		assert.NotNil(t, pid)
 		// let us send 10 messages to the actor
 		count := 10
-		for i := 0; i < count; i++ {
+		for range count {
 			err := Tell(ctx, pid, new(testpb.TestSend))
 			assert.NoError(t, err)
 		}
@@ -2465,7 +2465,7 @@ func TestActorHandle(t *testing.T) {
 	assert.NotNil(t, pid)
 	actorHandle := pid.Actor()
 	assert.IsType(t, &exchanger{}, actorHandle)
-	var p interface{} = actorHandle
+	var p any = actorHandle
 	_, ok := p.(Actor)
 	assert.True(t, ok)
 	// stop the actor
@@ -2896,11 +2896,9 @@ func TestSpawnChild(t *testing.T) {
 
 		// let us sleep for some time to make the actor idle
 		wg := sync.WaitGroup{}
-		wg.Add(1)
-		go func() {
+		wg.Go(func() {
 			pause.For(time.Second)
-			wg.Done()
-		}()
+		})
 		// block until timer is up
 		wg.Wait()
 
@@ -3722,16 +3720,14 @@ func TestPipeTo(t *testing.T) {
 		require.NoError(t, err)
 
 		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
+		wg.Go(func() {
 			// Wait for some time and during that period send some messages to the actor
 			// send three messages while waiting for the future to completed
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
 			pause.For(time.Second)
-			wg.Done()
-		}()
+		})
 		wg.Wait()
 
 		pause.For(time.Second)
@@ -3881,16 +3877,14 @@ func TestPipeTo(t *testing.T) {
 		require.NoError(t, err)
 
 		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
+		wg.Go(func() {
 			// Wait for some time and during that period send some messages to the actor
 			// send three messages while waiting for the future to completed
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
 			pause.For(time.Second)
-			wg.Done()
-		}()
+		})
 
 		cancel()
 		wg.Wait()
@@ -4040,16 +4034,14 @@ func TestPipeTo(t *testing.T) {
 		pause.For(time.Second)
 
 		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
+		wg.Go(func() {
 			// Wait for some time and during that period send some messages to the actor
 			// send three messages while waiting for the future to completed
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), time.Minute)
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), time.Minute)
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), time.Minute)
 			pause.For(time.Second)
-			wg.Done()
-		}()
+		})
 		wg.Wait()
 
 		pause.For(time.Second)
@@ -4185,16 +4177,14 @@ func TestPipeTo(t *testing.T) {
 		require.NoError(t, pid2.Shutdown(ctx))
 
 		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
+		wg.Go(func() {
 			// Wait for some time and during that period send some messages to the actor
 			// send three messages while waiting for the future to completed
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
 			pause.For(time.Second)
-			wg.Done()
-		}()
+		})
 		wg.Wait()
 
 		pause.For(time.Second)
@@ -5644,16 +5634,14 @@ func TestPipeToName(t *testing.T) {
 		require.NoError(t, err)
 
 		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
+		wg.Go(func() {
 			// Wait for some time and during that period send some messages to the actor
 			// send three messages while waiting for the future to completed
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
 			pause.For(time.Second)
-			wg.Done()
-		}()
+		})
 		wg.Wait()
 
 		pause.For(time.Second)
@@ -5808,16 +5796,14 @@ func TestPipeToName(t *testing.T) {
 		require.NoError(t, err)
 
 		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
+		wg.Go(func() {
 			// Wait for some time and during that period send some messages to the actor
 			// send three messages while waiting for the future to completed
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), askTimeout)
 			pause.For(time.Second)
-			wg.Done()
-		}()
+		})
 
 		cancel()
 		wg.Wait()
@@ -5980,16 +5966,14 @@ func TestPipeToName(t *testing.T) {
 		pause.For(time.Second)
 
 		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
+		wg.Go(func() {
 			// Wait for some time and during that period send some messages to the actor
 			// send three messages while waiting for the future to completed
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), time.Minute)
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), time.Minute)
 			_, _ = Ask(ctx, pid1, new(testpb.TestReply), time.Minute)
 			pause.For(time.Second)
-			wg.Done()
-		}()
+		})
 		wg.Wait()
 
 		pause.For(time.Second)

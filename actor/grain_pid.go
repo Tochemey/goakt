@@ -38,7 +38,6 @@ import (
 	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/internal/codec"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
-	"github.com/tochemey/goakt/v4/internal/pointer"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/internal/xsync"
 	"github.com/tochemey/goakt/v4/log"
@@ -50,8 +49,12 @@ type grainPID struct {
 	identity *GrainIdentity
 	mailbox  *grainMailbox
 
-	latestReceiveTime atomic.Time
-	processedCount    atomic.Int64
+	// latestReceiveTimeNano holds the latest receive timestamp as
+	// UnixNano. Stored as int64 because atomic.Time boxes time.Time
+	// into an atomic.Value on every Store, which would allocate on
+	// the hot path.
+	latestReceiveTimeNano atomic.Int64
+	processedCount        atomic.Int64
 
 	// the actor system
 	actorSystem ActorSystem
@@ -92,17 +95,17 @@ var (
 
 func newGrainPID(identity *GrainIdentity, grain Grain, actorSystem ActorSystem, config *grainConfig) *grainPID {
 	pid := &grainPID{
-		grain:              grain,
-		identity:           identity,
-		mailbox:            newGrainMailbox(config.capacity),
-		actorSystem:        actorSystem,
-		logger:             actorSystem.Logger(),
-		remoting:           actorSystem.getRemoting(),
-		dispatcher:         actorSystem.getDispatcher(),
-		dependencies:       config.dependencies,
-		latestReceiveTime:  atomic.Time{},
-		config:             config,
-		passivationManager: actorSystem.passivationManager(),
+		grain:                 grain,
+		identity:              identity,
+		mailbox:               newGrainMailbox(config.capacity),
+		actorSystem:           actorSystem,
+		logger:                actorSystem.Logger(),
+		remoting:              actorSystem.getRemoting(),
+		dispatcher:            actorSystem.getDispatcher(),
+		dependencies:          config.dependencies,
+		latestReceiveTimeNano: atomic.Int64{},
+		config:                config,
+		passivationManager:    actorSystem.passivationManager(),
 	}
 
 	pid.activated.Store(false)
@@ -218,7 +221,7 @@ func (pid *grainPID) deactivate(ctx context.Context) (err error) {
 	defer func() {
 		pid.activated.Store(false)
 		pid.activatedAt.Store(0)
-		pid.latestReceiveTime.Store(time.Time{})
+		pid.latestReceiveTimeNano.Store(0)
 		pid.onPoisonPill.Store(false)
 		pid.disableRelocation.Store(false)
 	}()
@@ -311,10 +314,10 @@ func (pid *grainPID) runTurn(w *worker) {
 	w.reschedule(pid)
 }
 
-// dispatchOne routes a single message through the appropriate handler
-// and returns the GrainContext to its pool. Splitting the switch out of
-// runTurn keeps the hot loop tight and ensures the context is released
-// even when a handler panics (recovery is inside handle*).
+// dispatchOne routes a single message through the appropriate handler.
+// Release is owned by grainMailbox.Dequeue, which reclaims the
+// previous sentinel; dispatchOne must not return the context here or
+// the mailbox would hand out an in-use head.
 func (pid *grainPID) dispatchOne(grainContext *GrainContext) {
 	switch grainContext.Message().(type) {
 	case *PoisonPill:
@@ -322,7 +325,6 @@ func (pid *grainPID) dispatchOne(grainContext *GrainContext) {
 	default:
 		pid.handleGrainContext(grainContext)
 	}
-	releaseGrainContext(grainContext)
 }
 
 // finishOrReclaim attempts the Processing -> Idle transition. Returns
@@ -422,7 +424,11 @@ func (pid *grainPID) passivationID() string {
 }
 
 func (pid *grainPID) passivationLatestActivity() time.Time {
-	return pid.latestReceiveTime.Load()
+	nanos := pid.latestReceiveTimeNano.Load()
+	if nanos == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, nanos)
 }
 
 func (pid *grainPID) passivationTry(reason string) bool {
@@ -443,7 +449,7 @@ func (pid *grainPID) passivationTry(reason string) bool {
 }
 
 func (pid *grainPID) markActivity(at time.Time) {
-	pid.latestReceiveTime.Store(at)
+	pid.latestReceiveTimeNano.Store(at.UnixNano())
 	if pid.passivationManager != nil {
 		pid.passivationManager.Touch(pid)
 	}
@@ -492,7 +498,7 @@ func (pid *grainPID) toWireGrain() (*internalpb.Grain, error) {
 		Dependencies:      dependencies,
 		ActivationTimeout: durationpb.New(pid.config.initTimeout.Load()),
 		ActivationRetries: pid.config.initMaxRetries.Load(),
-		MailboxCapacity:   pointer.To(pid.mailbox.Capacity()),
+		MailboxCapacity:   new(pid.mailbox.Capacity()),
 		DisableRelocation: pid.disableRelocation.Load(),
 	}, nil
 }

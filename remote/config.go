@@ -23,6 +23,7 @@
 package remote
 
 import (
+	"maps"
 	"net"
 	"reflect"
 	"strconv"
@@ -87,7 +88,7 @@ func NewConfig(bindAddr string, bindPort int, opts ...Option) *Config {
 	}
 
 	// Register the default proto serializer for all proto.Message implementations.
-	cfg.serializers[reflect.TypeOf((*proto.Message)(nil)).Elem()] = NewProtoSerializer()
+	cfg.serializers[reflect.TypeFor[proto.Message]()] = NewProtoSerializer()
 
 	// apply the options
 	for _, opt := range opts {
@@ -114,7 +115,7 @@ func DefaultConfig() *Config {
 	}
 
 	// Register the default proto serializer for all proto.Message implementations.
-	cfg.serializers[reflect.TypeOf((*proto.Message)(nil)).Elem()] = NewProtoSerializer()
+	cfg.serializers[reflect.TypeFor[proto.Message]()] = NewProtoSerializer()
 
 	return cfg
 }
@@ -208,9 +209,7 @@ func (x *Config) Serializer(msg any) Serializer {
 // without affecting the Config.
 func (x *Config) Serializers() map[reflect.Type]Serializer {
 	result := make(map[reflect.Type]Serializer, len(x.serializers))
-	for k, v := range x.serializers {
-		result[k] = v
-	}
+	maps.Copy(result, x.serializers)
 	return result
 }
 

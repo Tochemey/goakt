@@ -40,7 +40,7 @@ func TestWorkerPool_BasicLifecycle(t *testing.T) {
 	})
 	wp.Start()
 
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		require.NoError(t, wp.AddTask(i))
 	}
 
@@ -108,7 +108,7 @@ func TestWorkerPool_GetSpawnedWorkers(t *testing.T) {
 	wp.SetNumShards(1)
 	wp.Start()
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		require.NoError(t, wp.AddTask(i))
 	}
 
@@ -149,7 +149,7 @@ func TestWorkerPool_AddTaskForShard(t *testing.T) {
 	wp.SetNumShards(4)
 	wp.Start()
 
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		require.NoError(t, wp.AddTaskForShard(i, i%4))
 	}
 

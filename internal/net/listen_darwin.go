@@ -21,7 +21,6 @@
 // SOFTWARE.
 
 //go:build darwin
-// +build darwin
 
 package net
 

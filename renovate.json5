@@ -62,7 +62,7 @@
     {
       customType: 'regex',
       managerFilePatterns: [
-        '/Earthfile$/',
+        '/Dockerfile\\.tools$/',
       ],
       matchStrings: [
         'FROM golang:(?<currentValue>.*?)\\n',
@@ -73,32 +73,10 @@
     {
       customType: 'regex',
       managerFilePatterns: [
-        '/Earthfile$/',
+        '/Dockerfile\\.tools$/',
       ],
       matchStrings: [
-        'google.golang.org/protobuf/cmd/protoc-gen-go@(?<currentValue>.*?)\\n',
-      ],
-      depNameTemplate: 'google.golang.org/protobuf',
-      datasourceTemplate: 'go',
-    },
-    {
-      customType: 'regex',
-      managerFilePatterns: [
-        '/Earthfile$/',
-      ],
-      matchStrings: [
-        'google.golang.org/grpc/cmd/protoc-gen-go-grpc@(?<currentValue>.*?)\\n',
-      ],
-      depNameTemplate: 'google.golang.org/grpc/cmd/protoc-gen-go-grpc',
-      datasourceTemplate: 'go',
-    },
-    {
-      customType: 'regex',
-      managerFilePatterns: [
-        '/Earthfile$/',
-      ],
-      matchStrings: [
-        'github.com/bufbuild/buf/cmd/buf@(?<currentValue>.*?)\\n',
+        'ARG BUF_VERSION=(?<currentValue>.*?)\\n',
       ],
       depNameTemplate: 'github.com/bufbuild/buf',
       datasourceTemplate: 'go',
@@ -106,10 +84,21 @@
     {
       customType: 'regex',
       managerFilePatterns: [
-        '/Earthfile$/',
+        '/Dockerfile\\.tools$/',
       ],
       matchStrings: [
-        '\\$\\(go env GOPATH\\)/bin (?<currentValue>.*?)\\n',
+        'ARG MOCKERY_VERSION=(?<currentValue>.*?)\\n',
+      ],
+      depNameTemplate: 'github.com/vektra/mockery/v2',
+      datasourceTemplate: 'go',
+    },
+    {
+      customType: 'regex',
+      managerFilePatterns: [
+        '/Dockerfile\\.tools$/',
+      ],
+      matchStrings: [
+        'ARG GOLANGCI_VERSION=(?<currentValue>.*?)\\n',
       ],
       depNameTemplate: 'golangci/golangci-lint',
       datasourceTemplate: 'github-releases',

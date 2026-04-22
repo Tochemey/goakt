@@ -132,7 +132,7 @@ func TestCoalescing_DefaultDisabled(t *testing.T) {
 
 	from := address.New("from", "sys", host, port)
 	to := address.New("to", "sys", host, port)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		require.NoError(t, r.RemoteTell(context.Background(), from, to, durationpb.New(time.Duration(i)*time.Millisecond)))
 	}
 	assert.Equal(t, int64(5), tc.requests.Load(), "each RemoteTell should produce one RPC when coalescing is disabled")
@@ -157,7 +157,7 @@ func TestCoalescing_BatchesUnderLoad(t *testing.T) {
 	from := address.New("from", "sys", host, port)
 	to := address.New("to", "sys", host, port)
 	const n = 200
-	for i := 0; i < n; i++ {
+	for i := range n {
 		require.NoError(t, r.RemoteTell(context.Background(), from, to, durationpb.New(time.Duration(i)*time.Millisecond)))
 	}
 	require.Eventually(t, func() bool { return tc.messages.Load() == int64(n) }, 2*time.Second, 2*time.Millisecond)
@@ -181,7 +181,7 @@ func TestCoalescing_RespectsMaxBatch(t *testing.T) {
 	from := address.New("from", "sys", host, port)
 	to := address.New("to", "sys", host, port)
 	const n = 64
-	for i := 0; i < n; i++ {
+	for i := range n {
 		require.NoError(t, r.RemoteTell(context.Background(), from, to, durationpb.New(time.Duration(i)*time.Millisecond)))
 	}
 	require.Eventually(t, func() bool { return tc.messages.Load() == int64(n) }, 2*time.Second, 2*time.Millisecond)
@@ -226,7 +226,7 @@ func TestCoalescing_FlushOnClose(t *testing.T) {
 	from := address.New("from", "sys", host, port)
 	to := address.New("to", "sys", host, port)
 	const n = 16
-	for i := 0; i < n; i++ {
+	for i := range n {
 		require.NoError(t, r.RemoteTell(context.Background(), from, to, durationpb.New(time.Duration(i)*time.Millisecond)))
 	}
 
@@ -272,7 +272,7 @@ func TestCoalescing_ErrorHandler(t *testing.T) {
 	from := address.New("from", "sys", host, port)
 	to := address.New("to", "sys", host, port)
 	// RemoteTell still returns nil because the error is async.
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		require.NoError(t, r.RemoteTell(context.Background(), from, to, durationpb.New(time.Duration(i)*time.Millisecond)))
 	}
 	require.Eventually(t, func() bool {
@@ -304,7 +304,7 @@ func TestCoalescing_PropagatesPerMessageMetadata(t *testing.T) {
 
 	from := address.New("from", "sys", host, port)
 	to := address.New("to", "sys", host, port)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		require.NoError(t, r.RemoteTell(context.Background(), from, to, durationpb.New(time.Duration(i)*time.Millisecond)))
 	}
 	require.Eventually(t, func() bool { return tc.messages.Load() == 5 }, time.Second, 2*time.Millisecond)
@@ -409,7 +409,7 @@ func TestCoalescing_EmptyPropagatorYieldsNoMetadata(t *testing.T) {
 
 	from := address.New("from", "sys", host, port)
 	to := address.New("to", "sys", host, port)
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		require.NoError(t, r.RemoteTell(context.Background(), from, to, durationpb.New(time.Duration(i)*time.Millisecond)))
 	}
 	require.Eventually(t, func() bool { return tc.messages.Load() == 4 }, time.Second, 2*time.Millisecond)
@@ -434,7 +434,7 @@ func TestCoalescing_NoPropagatorNoMetadata(t *testing.T) {
 
 	from := address.New("from", "sys", host, port)
 	to := address.New("to", "sys", host, port)
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		require.NoError(t, r.RemoteTell(context.Background(), from, to, durationpb.New(time.Duration(i)*time.Millisecond)))
 	}
 	require.Eventually(t, func() bool { return tc.messages.Load() == 4 }, time.Second, 2*time.Millisecond)
@@ -489,10 +489,10 @@ func TestCoalescing_MultipleDestinations(t *testing.T) {
 	to1 := address.New("a", "sys", host1, port1)
 	to2 := address.New("b", "sys", host2, port2)
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		require.NoError(t, r.RemoteTell(context.Background(), from, to1, durationpb.New(time.Duration(i)*time.Millisecond)))
 	}
-	for i := 0; i < 7; i++ {
+	for i := range 7 {
 		require.NoError(t, r.RemoteTell(context.Background(), from, to2, durationpb.New(time.Duration(i)*time.Millisecond)))
 	}
 
@@ -521,10 +521,10 @@ func TestCoalescing_ConcurrentSubmitters(t *testing.T) {
 	)
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
-	for g := 0; g < goroutines; g++ {
+	for range goroutines {
 		go func() {
 			defer wg.Done()
-			for i := 0; i < perGR; i++ {
+			for i := range perGR {
 				_ = r.RemoteTell(context.Background(), from, to, durationpb.New(time.Duration(i)*time.Millisecond))
 			}
 		}()
@@ -571,7 +571,7 @@ func TestCoalescing_ErrorHandlerNilDoesNotPanic(t *testing.T) {
 	from := address.New("from", "sys", host, port)
 	to := address.New("to", "sys", host, port)
 	assert.NotPanics(t, func() {
-		for i := 0; i < 4; i++ {
+		for i := range 4 {
 			_ = r.RemoteTell(context.Background(), from, to, durationpb.New(time.Duration(i)*time.Millisecond))
 		}
 		// Give the writer time to invoke the (nil) error path.
@@ -596,7 +596,7 @@ func TestCoalescing_DefaultTunables(t *testing.T) {
 
 	from := address.New("from", "sys", host, port)
 	to := address.New("to", "sys", host, port)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		require.NoError(t, r.RemoteTell(context.Background(), from, to, durationpb.New(time.Duration(i)*time.Millisecond)))
 	}
 	require.Eventually(t, func() bool { return tc.messages.Load() == 3 }, time.Second, 2*time.Millisecond)

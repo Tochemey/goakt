@@ -73,7 +73,7 @@ func TestUnboundedMailboxOneProducer(t *testing.T) {
 		}
 	}()
 
-	for i := 0; i < expCount; i++ {
+	for range expCount {
 		err := mailbox.Enqueue(new(ReceiveContext))
 		require.NoError(t, err)
 	}

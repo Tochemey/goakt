@@ -293,6 +293,70 @@ func WithMetrics() Option {
 	})
 }
 
+// WithThroughputBudget sets the dispatcher's per-turn message budget: the maximum number
+// of messages a worker processes from a single actor before yielding control back
+// to the scheduler so that other ready actors can run.
+//
+// The default is 32, which favors fairness and predictable tail latency across
+// many actors. Raising the value amortizes per-turn scheduling overhead and keeps
+// CPU caches warm on hot actors, improving aggregate throughput at the cost of
+// fairness — a busy actor can hold a worker longer before peers get a turn.
+//
+// How to choose a value:
+//
+//   - 8 to 16: Latency-critical systems with many small actors where tail latency
+//     dominates (e.g., request/response routing, control planes).
+//   - 32 (default): Balanced setting suitable for most mixed workloads.
+//   - 64: Safe upgrade for throughput-oriented systems. Typically yields ~5-15%
+//     higher aggregate throughput on message-heavy workloads with negligible
+//     fairness cost.
+//   - 128: Heavy ingest and aggregation workloads (log pipelines, event firehoses,
+//     batch processors) where per-message work is short and scheduling overhead
+//     is the bottleneck.
+//   - 256 and above: Only useful for synthetic benchmarks or pathological
+//     single-hot-actor workloads. Throughput gains flatten beyond this point,
+//     and tail latencies grow noticeably.
+//
+// Performance intuition:
+//
+//   - Each turn pays a fixed bookkeeping cost (ready-queue pop, atomic state
+//     transitions, possible reschedule push). A larger budget spreads that cost
+//     over more messages.
+//   - Processing the same actor back-to-back keeps its mailbox, state, and
+//     receive code paths hot in L1/L2 caches. This is often the larger win over
+//     pure scheduling amortization.
+//   - Past a certain point, the system becomes processing-bound rather than
+//     scheduling-bound and the curve flattens.
+//
+// Guarantees that are NOT affected by this option:
+//
+//   - Per-actor FIFO message ordering is preserved. A yield is a pause, not a
+//     reorder: unread messages remain at the head of the mailbox and are
+//     processed in order on the next turn.
+//   - Single-threaded execution per actor is preserved. Only one worker ever
+//     processes a given actor at a time, regardless of the budget value.
+//   - System messages and user messages continue to be interleaved within a turn
+//     according to the existing policy; only the total number of messages served
+//     per turn changes.
+//
+// Validation:
+//
+// Values less than or equal to zero are ignored and the default is retained.
+//
+// Example:
+//
+//	system, err := NewActorSystem("my-system",
+//	    WithLogger(logger),
+//	    WithThroughputBudget(64), // prefer aggregate throughput over strict fairness
+//	)
+func WithThroughputBudget(n int) Option {
+	return OptionFunc(func(system *actorSystem) {
+		if n > 0 {
+			system.dispatcherThroughput = n
+		}
+	})
+}
+
 // WithDefaultSupervisor configures the ActorSystem-wide supervisor used for actors that
 // are spawned without an explicit supervisor.
 //

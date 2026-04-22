@@ -26,7 +26,6 @@ import (
 	"context"
 	"encoding/binary"
 	"time"
-	"unsafe"
 )
 
 type metadataKey struct{}
@@ -120,14 +119,10 @@ func (m *Metadata) MarshalBinary() []byte {
 	return buf
 }
 
-// UnmarshalBinary decodes metadata from bytes. It uses zero-copy string extraction
-// via unsafe pointers, so the returned header keys and values reference the
-// input data slice directly. The caller must not modify data after calling
-// UnmarshalBinary if the Metadata will continue to be used.
-//
-// This optimization avoids allocating N×2 strings (one per key, one per value)
-// at the cost of retaining the data slice in memory as long as the Metadata
-// or any extracted header strings remain reachable.
+// UnmarshalBinary decodes metadata from bytes. Header keys and values are
+// copied into independent strings so the [Metadata] remains valid after the
+// input slice is reused or mutated — in particular, callers are free to
+// return pooled frame buffers immediately after this call.
 func (m *Metadata) UnmarshalBinary(data []byte) error {
 	if len(data) < 10 {
 		return ErrInvalidMetadata
@@ -140,7 +135,6 @@ func (m *Metadata) UnmarshalBinary(data []byte) error {
 	pos += 2
 	m.headers = make(map[string]string, count)
 
-	// Read headers using zero-copy string extraction.
 	for range count {
 		if pos+2 > len(data) {
 			return ErrInvalidMetadata
@@ -151,8 +145,7 @@ func (m *Metadata) UnmarshalBinary(data []byte) error {
 		if pos+keyLen > len(data) {
 			return ErrInvalidMetadata
 		}
-		// Zero-copy: string references data slice directly.
-		key := unsafe.String(unsafe.SliceData(data[pos:pos+keyLen]), keyLen)
+		key := string(data[pos : pos+keyLen])
 		pos += keyLen
 
 		if pos+2 > len(data) {
@@ -164,8 +157,7 @@ func (m *Metadata) UnmarshalBinary(data []byte) error {
 		if pos+valLen > len(data) {
 			return ErrInvalidMetadata
 		}
-		// Zero-copy: string references data slice directly.
-		val := unsafe.String(unsafe.SliceData(data[pos:pos+valLen]), valLen)
+		val := string(data[pos : pos+valLen])
 		pos += valLen
 
 		m.headers[key] = val

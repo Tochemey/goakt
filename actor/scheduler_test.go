@@ -114,7 +114,7 @@ func TestScheduler(t *testing.T) {
 
 		// Schedule multiple messages with short delays
 		numMessages := 20
-		for i := 0; i < numMessages; i++ {
+		for range numMessages {
 			message := new(testpb.TestSend)
 			err = newActorSystem.ScheduleOnce(ctx, message, actorRef, 50*time.Millisecond)
 			require.NoError(t, err)

@@ -75,10 +75,10 @@ func TestGrainMailboxConcurrentEnqueue_Unbounded(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(producers)
 
-	for i := 0; i < producers; i++ {
+	for range producers {
 		go func() {
 			defer wg.Done()
-			for j := 0; j < messagesPerProducer; j++ {
+			for range messagesPerProducer {
 				require.NoError(t, mailbox.Enqueue(&GrainContext{}))
 			}
 		}()
@@ -176,7 +176,7 @@ func TestGrainMailboxCapacityZeroOrNegative_IsUnbounded(t *testing.T) {
 	mNeg := newGrainMailbox(-10)
 
 	// Try to enqueue a bunch; should never return ErrMailboxFull.
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		require.NoError(t, m0.Enqueue(&GrainContext{}))
 		require.NoError(t, mNeg.Enqueue(&GrainContext{}))
 	}
@@ -188,20 +188,19 @@ func TestGrainMailboxCapacityZeroOrNegative_IsUnbounded(t *testing.T) {
 func TestGrainMailboxDequeue_WaitsForLinkAfterTailSwap(t *testing.T) {
 	m := newGrainMailbox(0) // unbounded or bounded doesn't matter for this path
 
-	// Arrange: create the node we will "half-enqueue"
+	// Arrange: create the context we will "half-enqueue". With the
+	// intrusive mailbox, GrainContext itself is the list node.
 	ctx := &GrainContext{}
-	n := grainNodePool.Get().(*grainNode)
-	n.value = ctx
-	n.next.Store(nil)
+	ctx.next.Store(nil)
 
 	// Step 1 of enqueue: advance tail, but DO NOT link prev.next yet.
-	prev := m.tail.Swap(n)
+	prev := m.tail.Swap(ctx)
 
-	// Sanity: head is still the dummy; tail is now n; dummy.next is still nil.
+	// Sanity: head is still the dummy; tail is now ctx; dummy.next is still nil.
 	head := m.head.Load()
 	require.Same(t, prev, head)
 	require.Nil(t, head.next.Load())
-	require.Same(t, n, m.tail.Load())
+	require.Same(t, ctx, m.tail.Load())
 
 	// Start consumer. It should enter the "wait for link" loop and block.
 	resultCh := make(chan *GrainContext, 1)
@@ -218,7 +217,7 @@ func TestGrainMailboxDequeue_WaitsForLinkAfterTailSwap(t *testing.T) {
 	}
 
 	// Step 2 of enqueue: publish the link.
-	prev.next.Store(n)
+	prev.next.Store(ctx)
 
 	// Now Dequeue should complete and return ctx.
 	select {
