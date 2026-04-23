@@ -862,7 +862,12 @@ type actorSystem struct {
 	// startupCleanup(). Producers of actorsQueue / grainsQueue select
 	// against it to avoid racing a concurrent close of those queues.
 	// Guarded by the shuttingDown CAS so close runs exactly once.
-	shutdownSignal   chan types.Unit
+	shutdownSignal chan types.Unit
+	// drainers tracks the replicateActors / replicateGrains goroutines.
+	// shutdown waits on it before reset() reassigns shutdownSignal, so
+	// the drainer's initial read of the field happens-before any later
+	// reassignment for a restart cycle.
+	drainers         sync.WaitGroup
 	grainsQueue      chan *internalpb.Grain
 	grains           *xsync.Map[string, *grainPID]
 	grainBarrier     *grainActivationBarrier
@@ -2301,6 +2306,11 @@ func (x *actorSystem) startCluster(ctx context.Context) error {
 	x.eventsQueue = x.cluster.Events()
 	x.rebalancingQueue = make(chan *internalpb.PeerState, 1)
 	go x.clusterEventsLoop()
+	// Track the replicate drainers so shutdown can wait for them to
+	// exit before reset() reassigns shutdownSignal. Without this, the
+	// drainer's initial read of x.shutdownSignal would have no
+	// happens-before relation to reset()'s later write.
+	x.drainers.Add(2)
 	go x.replicateActors()
 	go x.replicateGrains()
 
@@ -2465,6 +2475,10 @@ func (x *actorSystem) startupCleanup(ctx context.Context) {
 	}
 
 	x.dispatcher.signalStop()
+	// Wait for replicate drainers before reset reassigns shutdownSignal.
+	// If cluster setup never got as far as spawning them, drainers' count
+	// is zero and Wait returns immediately.
+	x.drainers.Wait()
 	x.reset()
 }
 
@@ -2503,6 +2517,11 @@ func (x *actorSystem) shutdown(ctx context.Context) (err error) {
 	}
 
 	defer func() {
+		// Wait for the replicate drainers to exit before reset()
+		// reassigns shutdownSignal. Drainers already observed the
+		// close above and will return shortly after draining any
+		// buffered items, so this does not add meaningful latency.
+		x.drainers.Wait()
 		x.reset()
 		// Signal dispatcher shutdown after all actors are torn down and
 		// state is reset. We do not wait for workers to exit because this
@@ -2675,18 +2694,26 @@ func (x *actorSystem) poisonAllGrains(ctx context.Context) error {
 // replicateActors publishes newly created actors into the cluster when
 // cluster is enabled. Exits on shutdownSignal after draining any items
 // still buffered on actorsQueue. Also exits if actorsQueue is closed.
+//
+// The shutdown signal and queue are captured into locals once on
+// goroutine entry. shutdown() waits on x.drainers before calling
+// reset(), so the initial field reads here happen-before any later
+// reassignment — no race even across restart cycles.
 func (x *actorSystem) replicateActors() {
+	defer x.drainers.Done()
+	signal := x.shutdownSignal
+	queue := x.actorsQueue
 	for {
 		select {
-		case actor, ok := <-x.actorsQueue:
+		case actor, ok := <-queue:
 			if !ok {
 				return
 			}
 			x.replicateOneActor(actor)
-		case <-x.shutdownSignal:
+		case <-signal:
 			for {
 				select {
-				case actor, ok := <-x.actorsQueue:
+				case actor, ok := <-queue:
 					if !ok {
 						return
 					}
@@ -2733,17 +2760,22 @@ func (x *actorSystem) replicateOneActor(actor *internalpb.Actor) {
 // cluster is enabled. Exits on shutdownSignal after draining any items
 // still buffered on grainsQueue. Also exits if grainsQueue is closed.
 func (x *actorSystem) replicateGrains() {
+	defer x.drainers.Done()
+	// See replicateActors for why signal / queue are captured once here
+	// rather than read from the struct on every iteration.
+	signal := x.shutdownSignal
+	queue := x.grainsQueue
 	for {
 		select {
-		case grain, ok := <-x.grainsQueue:
+		case grain, ok := <-queue:
 			if !ok {
 				return
 			}
 			x.replicateOneGrain(grain)
-		case <-x.shutdownSignal:
+		case <-signal:
 			for {
 				select {
-				case grain, ok := <-x.grainsQueue:
+				case grain, ok := <-queue:
 					if !ok {
 						return
 					}
