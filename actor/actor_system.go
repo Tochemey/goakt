@@ -2578,7 +2578,11 @@ func (x *actorSystem) shutdown(ctx context.Context) (err error) {
 	// mid-turn on a grain when OnDeactivate is called. The context
 	// carries the shutdown timeout; if we're on a worker goroutine,
 	// the timeout prevents self-deadlock.
-	x.dispatcher.drain(ctx)
+	if drainErr := x.dispatcher.drain(ctx); drainErr != nil {
+		x.logger.Errorf("failed to drain dispatcher cleanly before grain deactivation: %v (hint: shutdown timed out or was canceled)", drainErr)
+		clusterErr := shutdownClusterAndRemoting()
+		return multierr.Combine(hooksErr, drainErr, clusterErr)
+	}
 
 	// deactivate all grains while cluster + pubsub system actors are still alive
 	if x.grains.Len() > 0 {

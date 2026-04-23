@@ -188,23 +188,21 @@ func TestDispatcherDrainFromWorkerGoroutine(t *testing.T) {
 	d := newDispatcher(2, dispatcherThroughput)
 	d.start()
 
-	drainDone := make(chan struct{})
+	drainErr := make(chan error, 1)
 	item := &reschedSchedulable{
 		onRun: func(_ schedulable, _ *worker) {
-			// Called from within a worker turn — this would deadlock with stop()
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 			defer cancel()
-			d.drain(ctx)
-			close(drainDone)
+			drainErr <- d.drain(ctx)
 		},
 	}
 	item.self = item
 	d.schedule(item)
 
 	select {
-	case <-drainDone:
-		// drain returned without deadlock
-	case <-time.After(5 * time.Second):
+	case err := <-drainErr:
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	case <-time.After(2 * time.Second):
 		t.Fatal("drain(ctx) deadlocked when called from worker goroutine")
 	}
 }
@@ -215,10 +213,12 @@ func TestDispatcherDrainWaitsForInflight(t *testing.T) {
 	d := newDispatcher(1, dispatcherThroughput)
 	d.start()
 
+	started := make(chan struct{})
 	blocker := make(chan struct{})
 	var finished atomic.Bool
 	item := &reschedSchedulable{
 		onRun: func(_ schedulable, _ *worker) {
+			close(started)
 			<-blocker
 			finished.Store(true)
 		},
@@ -226,8 +226,7 @@ func TestDispatcherDrainWaitsForInflight(t *testing.T) {
 	item.self = item
 	d.schedule(item)
 
-	// Wait for the worker to enter the blocked turn
-	time.Sleep(50 * time.Millisecond)
+	<-started
 
 	drained := make(chan struct{})
 	go func() {
@@ -253,17 +252,19 @@ func TestDispatcherDrainRespectsContextTimeout(t *testing.T) {
 	d := newDispatcher(1, dispatcherThroughput)
 	d.start()
 
+	started := make(chan struct{})
 	blocker := make(chan struct{})
 	defer close(blocker)
 	item := &reschedSchedulable{
 		onRun: func(_ schedulable, _ *worker) {
+			close(started)
 			<-blocker // block forever
 		},
 	}
 	item.self = item
 	d.schedule(item)
 
-	time.Sleep(50 * time.Millisecond)
+	<-started
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()

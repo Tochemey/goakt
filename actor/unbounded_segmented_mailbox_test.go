@@ -224,12 +224,17 @@ func TestUnboundedSegmentedMailbox_CrossWorkerHandoff(t *testing.T) {
 	for range producers {
 		go func() {
 			defer prodWg.Done()
+			var spins uint32
 			for {
 				select {
 				case <-stop:
 					return
 				default:
 					_ = mb.Enqueue(new(ReceiveContext))
+					spins++
+					if spins%64 == 0 {
+						runtime.Gosched()
+					}
 				}
 			}
 		}()

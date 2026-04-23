@@ -109,7 +109,7 @@ func (d *dispatcher) stop() {
 // every worker has finished its current turn or the context expires.
 // Unlike stop, drain is safe from any goroutine: when called from a
 // worker turn the context timeout prevents self-deadlock.
-func (d *dispatcher) drain(ctx context.Context) {
+func (d *dispatcher) drain(ctx context.Context) error {
 	d.signalStop()
 	done := make(chan struct{})
 	go func() {
@@ -118,7 +118,9 @@ func (d *dispatcher) drain(ctx context.Context) {
 	}()
 	select {
 	case <-done:
+		return nil
 	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
