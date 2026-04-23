@@ -23,9 +23,7 @@
 package actor
 
 import (
-	"context"
 	"runtime"
-	"sync"
 	"sync/atomic"
 )
 
@@ -48,10 +46,10 @@ type dispatcher struct {
 	throughput int
 	// started becomes true after the first successful start call.
 	started atomic.Bool
-	// stopping becomes true after the first stop or signalStop call.
+	// stopping becomes true after the first signalStop call, gating
+	// the ready-queue close so repeated signalStop invocations are
+	// no-ops.
 	stopping atomic.Bool
-	// wg tracks live worker goroutines for stop's blocking wait.
-	wg sync.WaitGroup
 }
 
 // dispatcherWorkerCount is the default worker pool size. We size the
@@ -84,43 +82,7 @@ func (d *dispatcher) start() {
 		return
 	}
 	for _, w := range d.workers {
-		d.wg.Add(1)
 		go w.run()
-	}
-}
-
-// stop signals all workers to drain their current turn and exit, then
-// blocks until every worker has returned. Idempotent.
-//
-// Must NOT be called from within a worker turn; the caller's goroutine
-// would wait on its own WaitGroup and deadlock. Callers that may run on
-// a worker (for example actorSystem.shutdown triggered from an actor
-// receive) must use signalStop instead.
-func (d *dispatcher) stop() {
-	if !d.stopping.CompareAndSwap(false, true) {
-		d.wg.Wait()
-		return
-	}
-	d.readyQueue.close()
-	d.wg.Wait()
-}
-
-// drain signals all workers to stop accepting new work and blocks until
-// every worker has finished its current turn or the context expires.
-// Unlike stop, drain is safe from any goroutine: when called from a
-// worker turn the context timeout prevents self-deadlock.
-func (d *dispatcher) drain(ctx context.Context) error {
-	d.signalStop()
-	done := make(chan struct{})
-	go func() {
-		d.wg.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
 	}
 }
 

@@ -734,7 +734,7 @@ func TestRestart(t *testing.T) {
 		system.noSender = &PID{actorSystem: system, logger: log.DiscardLogger}
 		system.noSender.setState(runningState, true)
 		system.dispatcher.start()
-		t.Cleanup(func() { system.dispatcher.stop() })
+		t.Cleanup(func() { system.dispatcher.signalStop() })
 
 		rootAddr := system.actorAddress("root")
 		root, err := newPID(ctx, rootAddr, NewMockActor(), withActorSystem(system), withCustomLogger(log.DiscardLogger))
@@ -780,7 +780,7 @@ func TestRestart(t *testing.T) {
 		system.noSender = &PID{actorSystem: system, logger: log.DiscardLogger}
 		system.noSender.setState(runningState, true)
 		system.dispatcher.start()
-		t.Cleanup(func() { system.dispatcher.stop() })
+		t.Cleanup(func() { system.dispatcher.signalStop() })
 
 		rootAddr := system.actorAddress("root")
 		root, err := newPID(ctx, rootAddr, NewMockActor(), withActorSystem(system), withCustomLogger(log.DiscardLogger))

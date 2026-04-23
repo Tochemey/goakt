@@ -39,6 +39,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/codec"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
+	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/internal/xsync"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/passivation"
@@ -86,6 +87,12 @@ type grainPID struct {
 
 	onPoisonPill      atomic.Bool
 	disableRelocation atomic.Bool
+
+	// deactivated is closed exactly once when deactivate completes
+	// (success or failure). Shutdown uses this to wait for grain
+	// OnDeactivate hooks that are dispatched via a PoisonPill turn.
+	deactivated     chan types.Unit
+	deactivatedOnce sync.Once
 }
 
 var (
@@ -106,6 +113,7 @@ func newGrainPID(identity *GrainIdentity, grain Grain, actorSystem ActorSystem, 
 		latestReceiveTimeNano: atomic.Int64{},
 		config:                config,
 		passivationManager:    actorSystem.passivationManager(),
+		deactivated:           make(chan types.Unit),
 	}
 
 	pid.activated.Store(false)
@@ -224,6 +232,16 @@ func (pid *grainPID) deactivate(ctx context.Context) (err error) {
 		pid.latestReceiveTimeNano.Store(0)
 		pid.onPoisonPill.Store(false)
 		pid.disableRelocation.Store(false)
+		// Signal completion exactly once so callers waiting on
+		// <-pid.deactivated (e.g. shutdown) unblock even on panic
+		// or error. Nil-guard lets tests that construct grainPID as
+		// a struct literal (without going through newGrainPID) still
+		// drive deactivate without panicking on close of nil channel.
+		pid.deactivatedOnce.Do(func() {
+			if pid.deactivated != nil {
+				close(pid.deactivated)
+			}
+		})
 	}()
 
 	if logger.Enabled(log.InfoLevel) {

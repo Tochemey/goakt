@@ -1558,17 +1558,18 @@ func MockReplicationTestSystem(clusterMock *mockcluster.Cluster) *actorSystem {
 	noSender.setState(runningState, true)
 
 	sys := &actorSystem{
-		name:         "test-replication",
-		logger:       log.DiscardLogger,
-		actors:       newTree(),
-		actorsQueue:  make(chan *internalpb.Actor, 4),
-		grainsQueue:  make(chan *internalpb.Grain, 4),
-		remoteConfig: remote.NewConfig("127.0.0.1", 8080),
-		clusterNode:  &discovery.Node{Host: "127.0.0.1", PeersPort: 9000},
-		cluster:      clusterMock,
-		topicActor:   topic,
-		noSender:     noSender,
-		dispatcher:   newDispatcher(dispatcherWorkerCount(), dispatcherThroughput),
+		name:           "test-replication",
+		logger:         log.DiscardLogger,
+		actors:         newTree(),
+		actorsQueue:    make(chan *internalpb.Actor, 4),
+		grainsQueue:    make(chan *internalpb.Grain, 4),
+		shutdownSignal: make(chan types.Unit),
+		remoteConfig:   remote.NewConfig("127.0.0.1", 8080),
+		clusterNode:    &discovery.Node{Host: "127.0.0.1", PeersPort: 9000},
+		cluster:        clusterMock,
+		topicActor:     topic,
+		noSender:       noSender,
+		dispatcher:     newDispatcher(dispatcherWorkerCount(), dispatcherThroughput),
 	}
 	sys.dispatcher.start()
 
@@ -1609,11 +1610,17 @@ func MockSimpleClusterReadyActorSystem(rem remoteclient.Client, cl cluster.Clust
 	sys.registry = types.NewRegistry()
 	sys.reflection = newReflection(sys.registry)
 	sys.grainsQueue = make(chan *internalpb.Grain, 1)
+	sys.shutdownSignal = make(chan types.Unit)
 
 	// nolint
 	go func() {
-		for range sys.grainsQueue {
-			// drop test grains
+		for {
+			select {
+			case <-sys.grainsQueue:
+				// drop test grains
+			case <-sys.shutdownSignal:
+				return
+			}
 		}
 	}()
 

@@ -23,7 +23,6 @@
 package actor
 
 import (
-	"context"
 	"runtime"
 	"sync/atomic"
 	"testing"
@@ -54,20 +53,20 @@ func TestDispatcherWorkerCountFloor(t *testing.T) {
 	require.GreaterOrEqual(t, dispatcherWorkerCount(), 2)
 }
 
-func TestDispatcherStartStopIdempotent(t *testing.T) {
+func TestDispatcherStartSignalStopIdempotent(t *testing.T) {
 	d := newDispatcher(2, dispatcherThroughput)
 	d.start()
 	d.start() // idempotent
 
 	require.Len(t, d.workers, 2)
-	d.stop()
-	d.stop() // idempotent
+	d.signalStop()
+	d.signalStop() // idempotent
 }
 
 func TestDispatcherScheduleProcessesItem(t *testing.T) {
 	d := newDispatcher(2, dispatcherThroughput)
 	d.start()
-	defer d.stop()
+	defer d.signalStop()
 
 	c := &countingSchedulable{}
 	c.remaining.Store(1)
@@ -81,7 +80,7 @@ func TestDispatcherScheduleProcessesItem(t *testing.T) {
 func TestDispatcherReschedulesViaWorkerLocalQueue(t *testing.T) {
 	d := newDispatcher(2, dispatcherThroughput)
 	d.start()
-	defer d.stop()
+	defer d.signalStop()
 
 	c := &countingSchedulable{}
 	c.remaining.Store(10)
@@ -98,7 +97,7 @@ func TestDispatcherReschedulesViaWorkerLocalQueue(t *testing.T) {
 func TestWorkerRescheduleUsesLocalQueue(t *testing.T) {
 	d := newDispatcher(1, dispatcherThroughput)
 	d.start()
-	defer d.stop()
+	defer d.signalStop()
 
 	w := d.workers[0]
 	var turns atomic.Int32
@@ -118,48 +117,11 @@ func TestWorkerRescheduleUsesLocalQueue(t *testing.T) {
 	}, 2*time.Second, time.Millisecond)
 }
 
-func TestDispatcherStopWaitsForInflightTurn(t *testing.T) {
-	// Verify that stop() blocks until an in-flight turn completes; workers
-	// are not abandoned mid-turn. Drain-on-stop semantics are Phase 2 and
-	// intentionally not asserted here.
-	d := newDispatcher(1, dispatcherThroughput)
-	d.start()
-
-	blocker := make(chan struct{})
-	release := make(chan struct{})
-	var finished atomic.Bool
-	block := &reschedSchedulable{
-		onRun: func(self schedulable, _ *worker) {
-			close(blocker)
-			<-release
-			finished.Store(true)
-		},
-	}
-	block.self = block
-	d.schedule(block)
-	<-blocker
-
-	stopped := make(chan struct{})
-	go func() {
-		d.stop()
-		close(stopped)
-	}()
-	// stop() must not return while the worker is still inside runTurn.
-	select {
-	case <-stopped:
-		t.Fatal("stop returned before in-flight turn completed")
-	case <-time.After(50 * time.Millisecond):
-	}
-	close(release)
-	<-stopped
-	require.True(t, finished.Load())
-}
-
 func TestDispatcherHighFanout(t *testing.T) {
 	workerCount := max(runtime.GOMAXPROCS(0), 2)
 	d := newDispatcher(workerCount, dispatcherThroughput)
 	d.start()
-	defer d.stop()
+	defer d.signalStop()
 
 	const N = 5000
 	items := make([]*countingSchedulable, N)
@@ -178,109 +140,6 @@ func TestDispatcherHighFanout(t *testing.T) {
 		}
 		return true
 	}, 5*time.Second, 5*time.Millisecond)
-}
-
-// TestDispatcherDrainFromWorkerGoroutine verifies that drain(ctx) does not
-// self-deadlock when called from within a worker turn. Before the drain fix,
-// calling stop() from a worker goroutine would deadlock because the worker
-// waited on its own WaitGroup.
-func TestDispatcherDrainFromWorkerGoroutine(t *testing.T) {
-	d := newDispatcher(2, dispatcherThroughput)
-	d.start()
-
-	drainErr := make(chan error, 1)
-	item := &reschedSchedulable{
-		onRun: func(_ schedulable, _ *worker) {
-			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-			defer cancel()
-			drainErr <- d.drain(ctx)
-		},
-	}
-	item.self = item
-	d.schedule(item)
-
-	select {
-	case err := <-drainErr:
-		require.ErrorIs(t, err, context.DeadlineExceeded)
-	case <-time.After(2 * time.Second):
-		t.Fatal("drain(ctx) deadlocked when called from worker goroutine")
-	}
-}
-
-// TestDispatcherDrainWaitsForInflight verifies that drain blocks until
-// in-flight turns complete (or context expires).
-func TestDispatcherDrainWaitsForInflight(t *testing.T) {
-	d := newDispatcher(1, dispatcherThroughput)
-	d.start()
-
-	started := make(chan struct{})
-	blocker := make(chan struct{})
-	var finished atomic.Bool
-	item := &reschedSchedulable{
-		onRun: func(_ schedulable, _ *worker) {
-			close(started)
-			<-blocker
-			finished.Store(true)
-		},
-	}
-	item.self = item
-	d.schedule(item)
-
-	<-started
-
-	drained := make(chan struct{})
-	go func() {
-		d.drain(context.Background())
-		close(drained)
-	}()
-
-	// drain should not return while worker is blocked
-	select {
-	case <-drained:
-		t.Fatal("drain returned before in-flight turn completed")
-	case <-time.After(50 * time.Millisecond):
-	}
-
-	close(blocker)
-	<-drained
-	require.True(t, finished.Load())
-}
-
-// TestDispatcherDrainRespectsContextTimeout verifies that drain returns
-// when the context expires even if workers haven't finished.
-func TestDispatcherDrainRespectsContextTimeout(t *testing.T) {
-	d := newDispatcher(1, dispatcherThroughput)
-	d.start()
-
-	started := make(chan struct{})
-	blocker := make(chan struct{})
-	defer close(blocker)
-	item := &reschedSchedulable{
-		onRun: func(_ schedulable, _ *worker) {
-			close(started)
-			<-blocker // block forever
-		},
-	}
-	item.self = item
-	d.schedule(item)
-
-	<-started
-
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-
-	drained := make(chan struct{})
-	go func() {
-		d.drain(ctx)
-		close(drained)
-	}()
-
-	select {
-	case <-drained:
-		// drain returned due to context timeout — correct
-	case <-time.After(2 * time.Second):
-		t.Fatal("drain did not respect context timeout")
-	}
 }
 
 // reschedSchedulable is a schedulable whose behaviour is supplied by a

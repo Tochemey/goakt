@@ -29,7 +29,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	stdatomic "sync/atomic"
 	"testing"
 	"time"
 
@@ -56,7 +55,7 @@ func TestGrainPIDProcessReleasesContexts(t *testing.T) {
 	grain := &MockContextReleasingGrain{done: make(chan *GrainContext, 2)}
 	d := newDispatcher(1, dispatcherThroughput)
 	d.start()
-	t.Cleanup(d.stop)
+	t.Cleanup(d.signalStop)
 
 	pid := &grainPID{
 		grain:      grain,
@@ -1597,99 +1596,6 @@ func TestEnsureGrainProcessCluster(t *testing.T) {
 		_, ok := sys.grains.Get(id.String())
 		require.True(t, ok)
 	})
-}
-
-func TestGrainsQueueGuardPreventsPostShutdownSend(t *testing.T) {
-	var shuttingDown stdatomic.Bool
-	ch := make(chan int, 10)
-
-	guardedSend := func(v int) bool {
-		if shuttingDown.Load() {
-			return false
-		}
-		ch <- v
-		return true
-	}
-
-	assert.True(t, guardedSend(1))
-	assert.True(t, guardedSend(2))
-	assert.Equal(t, 2, len(ch))
-
-	shuttingDown.Store(true)
-	assert.False(t, guardedSend(3))
-	assert.False(t, guardedSend(4))
-	assert.Equal(t, 2, len(ch))
-
-	close(ch)
-}
-
-func TestGrainsQueueRecoverCatchesSendOnClosedChannel(t *testing.T) {
-	ch := make(chan int, 10)
-	close(ch)
-
-	var panicked bool
-	func() {
-		defer func() {
-			if r := recover(); r != nil {
-				panicked = true
-			}
-		}()
-		ch <- 1
-	}()
-
-	assert.True(t, panicked, "expected recover to catch send-on-closed-channel panic")
-}
-
-func TestGrainsQueueConcurrentSendersStopOnFlag(t *testing.T) {
-	const senders = 20
-	const sendsPerSender = 5000
-
-	var shuttingDown stdatomic.Bool
-	var sent stdatomic.Int64
-	ch := make(chan int, 100)
-
-	guardedSend := func(v int) {
-		if shuttingDown.Load() {
-			return
-		}
-		ch <- v
-		sent.Add(1)
-	}
-
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		for v := range ch {
-			_ = v
-		}
-	}()
-
-	var wg sync.WaitGroup
-	wg.Add(senders)
-	for range senders {
-		go func() {
-			defer wg.Done()
-			for i := range sendsPerSender {
-				guardedSend(i)
-			}
-		}()
-	}
-
-	require.Eventually(t, func() bool {
-		return sent.Load() > 0
-	}, time.Second, time.Millisecond, "timed out waiting for a sender to make progress before shutdown")
-	shuttingDown.Store(true)
-	wg.Wait()
-
-	sentCount := sent.Load()
-	totalPossible := int64(senders * sendsPerSender)
-
-	close(ch)
-	<-done
-
-	require.Greater(t, sentCount, int64(0), "some sends should succeed before shutdown")
-	require.Less(t, sentCount, totalPossible, "flag should have stopped some senders")
-	t.Logf("sent %d / %d messages before shutdown flag", sentCount, totalPossible)
 }
 
 // nolint
