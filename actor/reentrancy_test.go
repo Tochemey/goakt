@@ -649,7 +649,7 @@ func TestRequestNameRemoteTellError(t *testing.T) {
 func TestProcessStashErrorPath(t *testing.T) {
 	d := newDispatcher(dispatcherWorkerCount(), dispatcherThroughput)
 	d.start()
-	t.Cleanup(d.stop)
+	t.Cleanup(d.signalStop)
 
 	pid := &PID{
 		mailbox:       NewUnboundedMailbox(),
@@ -1135,7 +1135,7 @@ func newRunningPIDWithReentrancy(t *testing.T, mode reentrancy.Mode, maxInFlight
 	t.Helper()
 	d := newDispatcher(dispatcherWorkerCount(), dispatcherThroughput)
 	d.start()
-	t.Cleanup(d.stop)
+	t.Cleanup(d.signalStop)
 
 	pid := &PID{
 		logger:        log.DiscardLogger,

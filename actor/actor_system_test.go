@@ -5393,6 +5393,7 @@ func TestReplicateActors_ErrorPaths(t *testing.T) {
 
 	t.Cleanup(func() { clusterMock.AssertExpectations(t) })
 
+	system.drainers.Add(1)
 	done := make(chan struct{})
 	go func() {
 		system.replicateActors()
@@ -5426,6 +5427,7 @@ func TestReplicateGrains_ErrorPaths(t *testing.T) {
 
 	t.Cleanup(func() { clusterMock.AssertExpectations(t) })
 
+	system.drainers.Add(1)
 	done := make(chan struct{})
 	go func() {
 		system.replicateGrains()

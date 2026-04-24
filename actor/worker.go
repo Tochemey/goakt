@@ -39,7 +39,6 @@ type worker struct {
 // run is the worker's main loop. It exits cleanly when the dispatcher's
 // ready queue is closed and no further work is available.
 func (w *worker) run() {
-	defer w.dispatcher.wg.Done()
 	for {
 		s, ok := w.dispatcher.readyQueue.take(w.id)
 		if !ok {

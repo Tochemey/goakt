@@ -55,7 +55,7 @@ func TestGrainPIDProcessReleasesContexts(t *testing.T) {
 	grain := &MockContextReleasingGrain{done: make(chan *GrainContext, 2)}
 	d := newDispatcher(1, dispatcherThroughput)
 	d.start()
-	t.Cleanup(d.stop)
+	t.Cleanup(d.signalStop)
 
 	pid := &grainPID{
 		grain:      grain,

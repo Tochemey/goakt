@@ -857,7 +857,17 @@ type actorSystem struct {
 	relocationEnabled atomic.Bool
 	extensions        *xsync.Map[string, extension.Extension]
 
-	shuttingDown     atomic.Bool
+	shuttingDown atomic.Bool
+	// shutdownSignal is closed once at the start of shutdown() or
+	// startupCleanup(). Producers of actorsQueue / grainsQueue select
+	// against it to avoid racing a concurrent close of those queues.
+	// Guarded by the shuttingDown CAS so close runs exactly once.
+	shutdownSignal chan types.Unit
+	// drainers tracks the replicateActors / replicateGrains goroutines.
+	// shutdown waits on it before reset() reassigns shutdownSignal, so
+	// the drainer's initial read of the field happens-before any later
+	// reassignment for a restart cycle.
+	drainers         sync.WaitGroup
 	grainsQueue      chan *internalpb.Grain
 	grains           *xsync.Map[string, *grainPID]
 	grainBarrier     *grainActivationBarrier
@@ -940,6 +950,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		topicActor:           nil,
 		extensions:           xsync.NewMap[string, extension.Extension](),
 		grainsQueue:          make(chan *internalpb.Grain, 10),
+		shutdownSignal:       make(chan types.Unit),
 		grains:               xsync.NewMap[string, *grainPID](),
 		askTimeout:           DefaultAskTimeout,
 		evictionStopSig:      make(chan types.Unit, 1),
@@ -2172,27 +2183,38 @@ func (x *actorSystem) completeRelocation() {
 	x.relocating.Store(false)
 }
 
-// putActorOnCluster broadcast the newly (re)spawned actor into the cluster
+// putActorOnCluster broadcasts the newly (re)spawned actor into the
+// cluster. The select guards against the shutdown race: if shutdownSignal
+// closes first (shutdown has started), the send is skipped instead of
+// racing shutdownCluster on the channel.
 func (x *actorSystem) putActorOnCluster(pid *PID) error {
-	if x.clusterEnabled.Load() {
-		actor, err := pid.toSerialize()
-		if err != nil {
-			return err
-		}
-		x.actorsQueue <- actor
+	if !x.clusterEnabled.Load() {
+		return nil
+	}
+	actor, err := pid.toSerialize()
+	if err != nil {
+		return err
+	}
+	select {
+	case x.actorsQueue <- actor:
+	case <-x.shutdownSignal:
 	}
 	return nil
 }
 
-// putGrainOnCluster broadcast the newly (re)activated grain into the cluster
+// putGrainOnCluster broadcasts the newly (re)activated grain into the
+// cluster. See putActorOnCluster for the shutdown-race reasoning.
 func (x *actorSystem) putGrainOnCluster(pid *grainPID) error {
-	if x.clusterEnabled.Load() {
-		grain, err := pid.toWireGrain()
-		if err != nil {
-			return err
-		}
-
-		x.grainsQueue <- grain
+	if !x.clusterEnabled.Load() {
+		return nil
+	}
+	grain, err := pid.toWireGrain()
+	if err != nil {
+		return err
+	}
+	select {
+	case x.grainsQueue <- grain:
+	case <-x.shutdownSignal:
 	}
 	return nil
 }
@@ -2284,6 +2306,11 @@ func (x *actorSystem) startCluster(ctx context.Context) error {
 	x.eventsQueue = x.cluster.Events()
 	x.rebalancingQueue = make(chan *internalpb.PeerState, 1)
 	go x.clusterEventsLoop()
+	// Track the replicate drainers so shutdown can wait for them to
+	// exit before reset() reassigns shutdownSignal. Without this, the
+	// drainer's initial read of x.shutdownSignal would have no
+	// happens-before relation to reset()'s later write.
+	x.drainers.Add(2)
 	go x.replicateActors()
 	go x.replicateGrains()
 
@@ -2430,6 +2457,12 @@ func (x *actorSystem) validateExtensions() error {
 // startupCleanup tears down partially-started components on startup failure.
 // Unlike shutdown(), this can be called while starting=true and started=false.
 func (x *actorSystem) startupCleanup(ctx context.Context) {
+	// Close shutdownSignal so any producer that already began publishing
+	// stops before we tear down cluster queues. Guarded by the CAS so
+	// close runs exactly once across startupCleanup / shutdown.
+	if x.shuttingDown.CompareAndSwap(false, true) {
+		close(x.shutdownSignal)
+	}
 	x.stopDataCenterLeaderWatch()
 	_ = x.stopDataCenterController(ctx)
 
@@ -2442,6 +2475,10 @@ func (x *actorSystem) startupCleanup(ctx context.Context) {
 	}
 
 	x.dispatcher.signalStop()
+	// Wait for replicate drainers before reset reassigns shutdownSignal.
+	// If cluster setup never got as far as spawning them, drainers' count
+	// is zero and Wait returns immediately.
+	x.drainers.Wait()
 	x.reset()
 }
 
@@ -2453,6 +2490,11 @@ func (x *actorSystem) reset() {
 	x.actors.reset()
 	x.grains.Reset()
 	x.shuttingDown.Store(false)
+	// Recreate shutdownSignal so a subsequent shutdown or startupCleanup
+	// can close it exactly once. Without this, restarting the system
+	// after a prior shutdown / startup failure would double-close the
+	// same channel on the next teardown.
+	x.shutdownSignal = make(chan types.Unit)
 	x.clusterStore = nil
 	x.dataCenterController = nil
 	x.dataCenterLeaderTicker = nil
@@ -2467,9 +2509,19 @@ func (x *actorSystem) shutdown(ctx context.Context) (err error) {
 	}
 
 	x.logger.Info("shutdown process begins")
-	x.shuttingDown.Store(true)
+	// First CAS wins and closes shutdownSignal so producers stop sending
+	// on cluster queues. Subsequent calls (e.g. racing shutdown requests)
+	// observe shuttingDown=true and skip the close.
+	if x.shuttingDown.CompareAndSwap(false, true) {
+		close(x.shutdownSignal)
+	}
 
 	defer func() {
+		// Wait for the replicate drainers to exit before reset()
+		// reassigns shutdownSignal. Drainers already observed the
+		// close above and will return shortly after draining any
+		// buffered items, so this does not add meaningful latency.
+		x.drainers.Wait()
 		x.reset()
 		// Signal dispatcher shutdown after all actors are torn down and
 		// state is reset. We do not wait for workers to exit because this
@@ -2540,20 +2592,16 @@ func (x *actorSystem) shutdown(ctx context.Context) (err error) {
 		return multierr.Combine(hooksErr, err, clusterErr)
 	}
 
-	// deactivate all grains while cluster + pubsub system actors are still alive
-	if x.grains.Len() > 0 {
-		x.logger.Info("deactivating all grains...")
-		grains := x.grains.Values()
-		for _, grain := range grains {
-			if err := grain.deactivate(ctx); err != nil {
-				x.logger.Errorf("failed to deactivate grain=%s: %v (hint: check OnDeactivate implementation)", grain.getIdentity().String(), err)
-				// TODO: should we return here or continue with the next grain?
-				//return multierr.Combine(hooksErr, err)
-			}
-			x.grains.Delete(grain.getIdentity().String())
-			x.logger.Infof("grain=%s deactivated", grain.getIdentity().String())
-		}
-	}
+	// Route grain deactivation through the mailbox. Sending a PoisonPill
+	// instead of calling deactivate directly means OnDeactivate runs
+	// inside the grain's dispatcher turn, under schedState.Processing —
+	// the same lock that serialises OnReceive. That removes the need
+	// for a dispatcher-wide drain and eliminates the OnReceive /
+	// OnDeactivate race at its source. ctx bounds how long we wait for
+	// all grains to finish; any grain that doesn't drain in time is
+	// abandoned (the pill sits in its mailbox and is lost when the
+	// dispatcher is signalled to stop later in the defer).
+	poisonErr := x.poisonAllGrains(ctx)
 
 	// shutdown remaining system actors
 	if err := chain.
@@ -2566,7 +2614,7 @@ func (x *actorSystem) shutdown(ctx context.Context) (err error) {
 		x.logger.Errorf("failed to shutdown cleanly: %v (hint: check system actor PostStop)", err)
 		clusterErr := shutdownClusterAndRemoting()
 		// Combine all errors if present
-		return multierr.Combine(hooksErr, err, clusterErr)
+		return multierr.Combine(hooksErr, poisonErr, err, clusterErr)
 	}
 
 	x.actors.deleteNode(x.getRootGuardian())
@@ -2580,71 +2628,181 @@ func (x *actorSystem) shutdown(ctx context.Context) (err error) {
 	clusterErr := shutdownClusterAndRemoting()
 	if clusterErr != nil {
 		x.logger.Errorf("failed shutdown: %v (hint: check cluster/remoting shutdown)", clusterErr)
-		return multierr.Combine(hooksErr, clusterErr)
+		return multierr.Combine(hooksErr, poisonErr, clusterErr)
 	}
 
-	if hooksErr != nil {
-		x.logger.Errorf("failed shutdown cleanly: %v (hint: check PreStop/PostStop hooks)", hooksErr)
-		return hooksErr
+	if hooksErr != nil || poisonErr != nil {
+		if hooksErr != nil {
+			x.logger.Errorf("failed shutdown cleanly: %v (hint: check PreStop/PostStop hooks)", hooksErr)
+		}
+		return multierr.Combine(hooksErr, poisonErr)
 	}
 
 	x.logger.Info("shutdown successfully")
 	return nil
 }
 
-// replicateActors publishes newly created actor into the cluster when cluster is enabled
-func (x *actorSystem) replicateActors() {
-	for actor := range x.actorsQueue {
-		// never replicate system actors because there are specific to the
-		// started node
-		addr, _ := address.Parse(actor.GetAddress())
-		if isSystemName(addr.Name()) {
+// poisonAllGrains sends a PoisonPill to every active grain and waits
+// for each to signal deactivation, bounded by ctx. Because
+// handlePoisonPill runs inside the grain's dispatcher turn (under
+// schedState.Processing), OnDeactivate is serialised with OnReceive —
+// no cross-goroutine access on user grain state.
+//
+// Returns ctx.Err() if the deadline expires before every grain finishes.
+// Grains that did not drain in time are left in the registry; their
+// pending pill sits in the mailbox and is lost when the dispatcher is
+// signalled to stop later in shutdown's defer. Callers treat this as a
+// best-effort outcome — some OnDeactivate hooks may not run under a
+// tight shutdown deadline.
+func (x *actorSystem) poisonAllGrains(ctx context.Context) error {
+	if x.grains.Len() == 0 {
+		return nil
+	}
+
+	grains := x.grains.Values()
+	x.logger.Infof("deactivating %d grains via PoisonPill...", len(grains))
+
+	pending := make([]*grainPID, 0, len(grains))
+	for _, grain := range grains {
+		if !grain.isActive() {
+			x.grains.Delete(grain.getIdentity().String())
 			continue
 		}
 
-		if !x.isStopping() && x.InCluster() {
-			ctx := context.Background()
-			cluster := x.getCluster()
-			if actor.GetSingleton() != nil {
-				kind := actor.GetType()
-				role := actor.GetRole()
-				if role != "" {
-					kind = kindRole(kind, role)
-				}
+		gctx := getGrainContext()
+		gctx.build(ctx, grain, x, grain.getIdentity(), new(PoisonPill), false)
+		grain.receive(gctx)
+		pending = append(pending, grain)
+	}
 
-				if err := cluster.PutKind(ctx, kind); err != nil {
-					x.logger.Warn(err.Error())
-					continue
-				}
+	for _, grain := range pending {
+		select {
+		case <-grain.deactivated:
+			x.grains.Delete(grain.getIdentity().String())
+			x.logger.Infof("grain=%s deactivated", grain.getIdentity().String())
+		case <-ctx.Done():
+			x.logger.Errorf(
+				"shutdown context expired before grain=%s finished deactivating (hint: OnDeactivate will not run for remaining grains)",
+				grain.getIdentity().String(),
+			)
+			return ctx.Err()
+		}
+	}
+	return nil
+}
+
+// replicateActors publishes newly created actors into the cluster when
+// cluster is enabled. Exits on shutdownSignal after draining any items
+// still buffered on actorsQueue. Also exits if actorsQueue is closed.
+//
+// The shutdown signal and queue are captured into locals once on
+// goroutine entry. shutdown() waits on x.drainers before calling
+// reset(), so the initial field reads here happen-before any later
+// reassignment — no race even across restart cycles.
+func (x *actorSystem) replicateActors() {
+	defer x.drainers.Done()
+	signal := x.shutdownSignal
+	queue := x.actorsQueue
+	for {
+		select {
+		case actor, ok := <-queue:
+			if !ok {
+				return
 			}
-
-			if err := cluster.PutActor(ctx, actor); err != nil {
-				x.logger.Warn(err.Error())
+			x.replicateOneActor(actor)
+		case <-signal:
+			for {
+				select {
+				case actor, ok := <-queue:
+					if !ok {
+						return
+					}
+					x.replicateOneActor(actor)
+				default:
+					return
+				}
 			}
 		}
 	}
 }
 
-// replicateGrains publishes newly created grain into the cluster when cluster is enabled
+// replicateOneActor performs the per-message replication body. Factored
+// out so both the live-processing and post-signal drain branches of
+// replicateActors share the same logic.
+func (x *actorSystem) replicateOneActor(actor *internalpb.Actor) {
+	addr, _ := address.Parse(actor.GetAddress())
+	if isSystemName(addr.Name()) {
+		return
+	}
+	if x.isStopping() || !x.InCluster() {
+		return
+	}
+
+	ctx := context.Background()
+	cluster := x.getCluster()
+	if actor.GetSingleton() != nil {
+		kind := actor.GetType()
+		role := actor.GetRole()
+		if role != "" {
+			kind = kindRole(kind, role)
+		}
+		if err := cluster.PutKind(ctx, kind); err != nil {
+			x.logger.Warn(err.Error())
+			return
+		}
+	}
+	if err := cluster.PutActor(ctx, actor); err != nil {
+		x.logger.Warn(err.Error())
+	}
+}
+
+// replicateGrains publishes newly created grains into the cluster when
+// cluster is enabled. Exits on shutdownSignal after draining any items
+// still buffered on grainsQueue. Also exits if grainsQueue is closed.
 func (x *actorSystem) replicateGrains() {
-	for grain := range x.grainsQueue {
-		// never replicate system grains because there are specific to the
-		// started node
-		if isSystemName(grain.GetGrainId().GetName()) {
-			continue
-		}
-
-		if !x.isStopping() && x.InCluster() {
-			ctx := context.Background()
-
-			if err := x.cluster.PutGrain(ctx, grain); err != nil {
-				x.logger.Warn(err.Error())
+	defer x.drainers.Done()
+	// See replicateActors for why signal / queue are captured once here
+	// rather than read from the struct on every iteration.
+	signal := x.shutdownSignal
+	queue := x.grainsQueue
+	for {
+		select {
+		case grain, ok := <-queue:
+			if !ok {
+				return
 			}
-
-			if err := x.cluster.PutKind(ctx, grain.GetGrainId().GetKind()); err != nil {
-				x.logger.Warn(err.Error())
+			x.replicateOneGrain(grain)
+		case <-signal:
+			for {
+				select {
+				case grain, ok := <-queue:
+					if !ok {
+						return
+					}
+					x.replicateOneGrain(grain)
+				default:
+					return
+				}
 			}
 		}
+	}
+}
+
+// replicateOneGrain performs the per-message replication body for grains.
+func (x *actorSystem) replicateOneGrain(grain *internalpb.Grain) {
+	if isSystemName(grain.GetGrainId().GetName()) {
+		return
+	}
+	if x.isStopping() || !x.InCluster() {
+		return
+	}
+
+	ctx := context.Background()
+	if err := x.cluster.PutGrain(ctx, grain); err != nil {
+		x.logger.Warn(err.Error())
+	}
+	if err := x.cluster.PutKind(ctx, grain.GetGrainId().GetKind()); err != nil {
+		x.logger.Warn(err.Error())
 	}
 }
 
@@ -3196,10 +3354,11 @@ func (x *actorSystem) shutdownCluster(ctx context.Context, actors []*PID, peerSt
 			}
 		}
 
-		if x.actorsQueue != nil {
-			close(x.actorsQueue)
-		}
-
+		// actorsQueue and grainsQueue are deliberately not closed here:
+		// producers select against shutdownSignal (closed earlier in
+		// shutdown / startupCleanup), and drainers exit on the same
+		// signal after draining buffered items. Not closing avoids the
+		// send-on-closed-channel race entirely.
 		x.clusterEnabled.Store(false)
 		x.relocating.Store(false)
 		x.pubsubEnabled.Store(false)
@@ -3207,10 +3366,6 @@ func (x *actorSystem) shutdownCluster(ctx context.Context, actors []*PID, peerSt
 
 		if x.rebalancingQueue != nil {
 			close(x.rebalancingQueue)
-		}
-
-		if x.grainsQueue != nil {
-			close(x.grainsQueue)
 		}
 
 		x.relocatingLocker.Unlock()
