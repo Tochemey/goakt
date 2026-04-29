@@ -171,10 +171,10 @@ github.com/grandcat/zeroconf v1.0.0 h1:uHhahLBKqwWBV6WZUDAT71044vwOTL+McW0mBJvo6
 github.com/grandcat/zeroconf v1.0.0/go.mod h1:lTKmG1zh86XyCoUeIHSA4FJMBwCJiQmGfcP2PdzytEs=
 github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 h1:5VipnvEpbqr2gA2VbM+nYVbkIF28c5ZQfqCBQ5g2xfk=
 github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0/go.mod h1:Hyl3n6Twe1hvtd9XUXDec4pTvgMSEixRuQKPTMH2bNs=
-github.com/hashicorp/consul/api v1.34.1 h1:/qKFfBJ5GEmY3sIlK1HulRJciLoT1pCGBkq2gwILXVg=
-github.com/hashicorp/consul/api v1.34.1/go.mod h1:K+7fQ7o5QEyoFRyXtX3/iGSxDbg9jYWGJ5rDyrXzHU8=
-github.com/hashicorp/consul/sdk v0.17.2 h1:sC0jgNhJkZX3wo1DCrkG12r+1JlZQpWvk3AoL3yZE4Q=
-github.com/hashicorp/consul/sdk v0.17.2/go.mod h1:VjccKcw6YhMhjH84/ZhTXZ0OG4SUq+K25P6DiCV/Hvg=
+github.com/hashicorp/consul/api v1.34.2 h1:B5jqSSKwWyY8U8WiGS5vmPEPkkF0bAvrECykdZkDR80=
+github.com/hashicorp/consul/api v1.34.2/go.mod h1:+gAdHQa2zvgYX3ZfcgITtnYCSj6AgS/cgotvCKaE+b8=
+github.com/hashicorp/consul/sdk v0.18.1 h1:RDTeBvAeOveI2xI86sV+8WkaN7OkP4zz+cG3fOobDCM=
+github.com/hashicorp/consul/sdk v0.18.1/go.mod h1:XdP2tEJmAvlK4jgoKTTtohGkRJlS4mU44mv9/sjU21s=
 github.com/hashicorp/errwrap v1.0.0/go.mod h1:YH+1FKiLXxHSkmPseP+kNlulaMuP3n2brvKWEqk/Jc4=
 github.com/hashicorp/errwrap v1.1.0 h1:OxrOeh75EUXMY8TBjag2fzXGZ40LB6IKw45YeGUDY2I=
 github.com/hashicorp/errwrap v1.1.0/go.mod h1:YH+1FKiLXxHSkmPseP+kNlulaMuP3n2brvKWEqk/Jc4=
@@ -220,8 +220,8 @@ github.com/json-iterator/go v1.1.12 h1:PV8peI4a0ysnczrg+LtxykD8LfKY9ML6u2jnxaEnr
 github.com/json-iterator/go v1.1.12/go.mod h1:e30LSqwooZae/UwlEbR2852Gd8hjQvJoHmT4TnhNGBo=
 github.com/julienschmidt/httprouter v1.2.0/go.mod h1:SYymIcj16QtmaHHD7aYtjjsJG7VTCxuUUipMqKk8s4w=
 github.com/julienschmidt/httprouter v1.3.0/go.mod h1:JR6WtHb+2LUe8TCKY3cZOxFyyO8IZAc4RVcycCCAKdM=
-github.com/kapetan-io/tackle v0.14.0 h1:Qu3zq6+95DLX7n71Up9X8SGFycCuvMyzo2D0m5Hkblk=
-github.com/kapetan-io/tackle v0.14.0/go.mod h1:pDr4mjpo2RQO/q/je1dGuGwnBVwZcsRp60wgDV2hA3c=
+github.com/kapetan-io/tackle v0.15.0 h1:J+D04RuxEKtybzCjuzgcmQuFBiEpYa+5vPU2mAgAxTs=
+github.com/kapetan-io/tackle v0.15.0/go.mod h1:pDr4mjpo2RQO/q/je1dGuGwnBVwZcsRp60wgDV2hA3c=
 github.com/kisielk/errcheck v1.5.0/go.mod h1:pFxgyoBC7bSaBwPgfKdkLd5X25qrDl4LWUI2bnpBCr8=
 github.com/kisielk/gotool v1.0.0/go.mod h1:XhKaO+MFFWcvkIS/tQcRk01m1F5IRFswLeQ+oQHNcck=
 github.com/klauspost/compress v1.18.5 h1:/h1gH5Ce+VWNLSWqPzOVn6XBO+vJbCNGvjoaGBFW2IE=
