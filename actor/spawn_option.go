@@ -179,6 +179,63 @@ func newSpawnConfig(opts ...SpawnOption) *spawnConfig {
 	return config
 }
 
+// clone returns a deep copy of the spawnConfig and applies the given SpawnOption(s)
+// to override settings on the copy. The receiver is left untouched.
+//
+// Pointer-to-scalar fields (host, port, role) and the singletonSpec struct are
+// reallocated so that mutations on the clone do not propagate back to the source.
+// The dependency slice is reallocated as well; its elements are copied by reference.
+// Reference-type fields (mailbox, supervisor, passivationStrategy, reentrancy,
+// dataCenter) are shared with the source because the existing SpawnOption setters
+// replace these references rather than mutating them in place.
+//
+// Parameters:
+//   - opts: Variadic list of SpawnOption functions applied to the clone after the copy.
+//
+// Returns:
+//   - Pointer to the cloned spawnConfig with overrides applied.
+func (s *spawnConfig) clone(opts ...SpawnOption) *spawnConfig {
+	cloned := &spawnConfig{
+		mailbox:             s.mailbox,
+		supervisor:          s.supervisor,
+		asSingleton:         s.asSingleton,
+		relocatable:         s.relocatable,
+		enableStash:         s.enableStash,
+		isSystem:            s.isSystem,
+		placement:           s.placement,
+		passivationStrategy: s.passivationStrategy,
+		reentrancy:          s.reentrancy,
+		dataCenter:          s.dataCenter,
+	}
+
+	if len(s.dependencies) > 0 {
+		cloned.dependencies = make([]extension.Dependency, len(s.dependencies))
+		copy(cloned.dependencies, s.dependencies)
+	}
+
+	if s.role != nil {
+		cloned.role = new(*s.role)
+	}
+
+	if s.host != nil {
+		cloned.host = new(*s.host)
+	}
+
+	if s.port != nil {
+		cloned.port = new(*s.port)
+	}
+
+	if s.singletonSpec != nil {
+		spec := *s.singletonSpec
+		cloned.singletonSpec = &spec
+	}
+
+	for _, opt := range opts {
+		opt.Apply(cloned)
+	}
+	return cloned
+}
+
 // SpawnOption defines the interface for configuring actor spawn behavior.
 //
 // Implementations of this interface can be passed to actor spawning functions

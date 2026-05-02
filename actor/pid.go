@@ -266,6 +266,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	if pid.supervisor == nil {
 		pid.supervisor = supervisor.NewSupervisor()
 	}
+
 	if pid.passivationStrategy == nil {
 		pid.passivationStrategy = passivation.NewTimeBasedStrategy(DefaultPassivationTimeout)
 	}
@@ -548,6 +549,7 @@ func (pid *PID) Parent() *PID {
 		}
 		return newRemotePID(address, pid.remoting)
 	}
+
 	tree := pid.ActorSystem().tree()
 	parent, ok := tree.parent(pid)
 	if !ok {
@@ -563,6 +565,7 @@ func (pid *PID) Children() []*PID {
 		if err != nil {
 			return nil
 		}
+
 		children := make([]*PID, 0, len(addresses))
 		for _, address := range addresses {
 			children = append(children, newRemotePID(address, pid.remoting))
@@ -594,6 +597,7 @@ func (pid *PID) Stop(ctx context.Context, cid *PID) error {
 		if r == nil {
 			r = pid.remoting
 		}
+
 		if r == nil {
 			return gerrors.ErrRemotingDisabled
 		}
@@ -786,6 +790,7 @@ func (pid *PID) Restart(ctx context.Context) error {
 		if pid.remoting == nil {
 			return gerrors.ErrRemotingDisabled
 		}
+
 		if _, err := pid.remoting.RemoteReSpawn(ctx, pid.Path().Host(), pid.Path().Port(), pid.Name()); err != nil {
 			return err
 		}
@@ -873,113 +878,16 @@ func (pid *PID) LatestProcessedDuration() time.Duration {
 // If a running child with the same name already exists, its PID is returned without creating a new one.
 // Returns ErrNotLocal for remote PIDs and ErrDead if this actor is not running.
 func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts ...SpawnOption) (*PID, error) {
-	spawnConfig := newSpawnConfig(opts...)
-	if err := spawnConfig.Validate(); err != nil {
+	config := newSpawnConfig(opts...)
+	if err := config.Validate(); err != nil {
 		return nil, err
 	}
 
 	if pid.IsRemote() {
-		address, err := pid.remoting.RemoteSpawnChild(ctx, pid.address.Host(), pid.address.Port(), &remote.SpawnChildRequest{
-			Name:                name,
-			Kind:                types.Name(actor),
-			Parent:              pid.Name(),
-			Relocatable:         spawnConfig.relocatable,
-			PassivationStrategy: spawnConfig.passivationStrategy,
-			Supervisor:          spawnConfig.supervisor,
-			Dependencies:        spawnConfig.dependencies,
-			EnableStashing:      spawnConfig.enableStash,
-			Reentrancy:          spawnConfig.reentrancy,
-		})
-		if err != nil {
-			return nil, err
-		}
-		return newRemotePID(address, pid.remoting), nil
+		return pid.spawnChildRemote(ctx, name, actor, config)
 	}
 
-	if !pid.IsRunning() {
-		return nil, gerrors.ErrDead
-	}
-
-	if !spawnConfig.isSystem {
-		// you should not create a system-based actor or
-		// use the system actor naming convention pattern
-		if isSystemName(name) {
-			return nil, gerrors.ErrReservedName
-		}
-	}
-
-	childAddress := pid.childAddress(name)
-	tree := pid.actorSystem.tree()
-	if cnode, ok := tree.node(childAddress.String()); ok {
-		cid := cnode.value()
-		if cid.IsRunning() {
-			return cid, nil
-		}
-	}
-
-	// create the child actor options child inherits parent's options
-	pidOptions := []pidOption{
-		withInitMaxRetries(int(pid.initMaxRetries.Load())),
-		withCustomLogger(pid.logger),
-		withActorSystem(pid.actorSystem),
-		withEventsStream(pid.eventsStream),
-		withInitTimeout(pid.initTimeout.Load()),
-		withRemoting(pid.remoting),
-		withPassivationManager(pid.passivationManager),
-		withMetricProvider(pid.metricProvider),
-		withRelocationDisabled(), // by default child is not relocatable
-	}
-
-	if spawnConfig.mailbox != nil {
-		pidOptions = append(pidOptions, withMailbox(spawnConfig.mailbox))
-	}
-
-	// set the supervisor strategies when defined
-	if spawnConfig.supervisor != nil {
-		pidOptions = append(pidOptions, withSupervisor(spawnConfig.supervisor))
-	}
-
-	// enable stash
-	if spawnConfig.enableStash {
-		pidOptions = append(pidOptions, withStash())
-	}
-
-	// set the dependencies when defined
-	if spawnConfig.dependencies != nil {
-		_ = pid.ActorSystem().Inject(spawnConfig.dependencies...)
-		pidOptions = append(pidOptions, withDependencies(spawnConfig.dependencies...))
-	}
-
-	pidOptions = append(pidOptions, withPassivationStrategy(spawnConfig.passivationStrategy))
-
-	// create the child PID
-	cid, err := newPID(
-		ctx,
-		childAddress,
-		actor,
-		pidOptions...,
-	)
-
-	if err != nil {
-		return nil, err
-	}
-
-	if !cid.isStateSet(systemState) {
-		pid.ActorSystem().increaseActorsCounter()
-	}
-
-	// no need to handle the error because the given parent exist and running
-	// that check was done in the above lines
-	_ = tree.addNode(pid, cid)
-	tree.addWatcher(cid, pid.ActorSystem().getDeathWatch())
-
-	eventsStream := pid.eventsStream
-	if eventsStream != nil {
-		eventsStream.Publish(eventsTopic, NewActorChildCreated(cid.Path(), pid.Path()))
-	}
-
-	// set the actor in the given actor system registry
-	return cid, pid.ActorSystem().putActorOnCluster(cid)
+	return pid.spawnChildLocal(ctx, name, actor, config)
 }
 
 // Reinstate resumes a suspended actor, allowing it to process messages again.
@@ -1454,15 +1362,18 @@ func (pid *PID) BatchTell(ctx context.Context, to *PID, messages ...any) error {
 	if !pid.IsRunning() {
 		return gerrors.ErrDead
 	}
+
 	if len(messages) == 0 {
 		return nil
 	}
+
 	if to.IsRemote() {
 		if !pid.remotingEnabled() {
 			return gerrors.ErrRemotingDisabled
 		}
 		return pid.remoting.RemoteBatchTell(ctx, pid.getAddress(), to.getAddress(), messages)
 	}
+
 	for _, message := range messages {
 		if err := pid.Tell(ctx, to, message); err != nil {
 			return err
@@ -3195,6 +3106,138 @@ func (pid *PID) assertLocal() error {
 		return gerrors.ErrNotLocal
 	}
 	return nil
+}
+
+// spawnChildRemote dispatches a SpawnChild request to the remote node owning this PID.
+// The spawn config is cloned with relocation disabled before being serialized into
+// the request so that the remote child inherits the parent-local non-relocatable
+// default without mutating the caller's configuration.
+func (pid *PID) spawnChildRemote(ctx context.Context, name string, actor Actor, config *spawnConfig) (*PID, error) {
+	clone := config.clone(WithRelocationDisabled())
+	address, err := pid.remoting.RemoteSpawnChild(ctx, pid.address.Host(), pid.address.Port(), &remote.SpawnChildRequest{
+		Name:                name,
+		Kind:                types.Name(actor),
+		Parent:              pid.Name(),
+		Relocatable:         clone.relocatable,
+		PassivationStrategy: clone.passivationStrategy,
+		Supervisor:          clone.supervisor,
+		Dependencies:        clone.dependencies,
+		EnableStashing:      clone.enableStash,
+		Reentrancy:          clone.reentrancy,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return newRemotePID(address, pid.remoting), nil
+}
+
+// spawnChildLocal creates and registers a child actor on the local actor system.
+// It enforces the live-parent and reserved-name preconditions, returns an existing
+// running child when the name is already in use, and otherwise materializes a new
+// PID, attaches it to the supervision tree, and publishes the child-created event.
+func (pid *PID) spawnChildLocal(ctx context.Context, name string, actor Actor, config *spawnConfig) (*PID, error) {
+	if !pid.IsRunning() {
+		return nil, gerrors.ErrDead
+	}
+
+	if !config.isSystem {
+		// you should not create a system-based actor or
+		// use the system actor naming convention pattern
+		if isSystemName(name) {
+			return nil, gerrors.ErrReservedName
+		}
+	}
+
+	childAddress := pid.childAddress(name)
+	tree := pid.actorSystem.tree()
+	if existing, ok := pid.findRunningChild(tree, childAddress.String()); ok {
+		return existing, nil
+	}
+
+	if config.dependencies != nil {
+		_ = pid.ActorSystem().Inject(config.dependencies...)
+	}
+
+	cid, err := newPID(
+		ctx,
+		childAddress,
+		actor,
+		pid.buildChildOptions(config)...,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	if !cid.isStateSet(systemState) {
+		pid.ActorSystem().increaseActorsCounter()
+	}
+
+	// no need to handle the error because the given parent exist and running
+	// that check was done in the above lines
+	_ = tree.addNode(pid, cid)
+	tree.addWatcher(cid, pid.ActorSystem().getDeathWatch())
+
+	eventsStream := pid.eventsStream
+	if eventsStream != nil {
+		eventsStream.Publish(eventsTopic, NewActorChildCreated(cid.Path(), pid.Path()))
+	}
+
+	// set the actor in the given actor system registry
+	return cid, pid.ActorSystem().putActorOnCluster(cid)
+}
+
+// findRunningChild returns the child PID registered at childAddress in tree
+// when it exists and is still running. The boolean return distinguishes a missing
+// node from a known-but-stopped child so callers can decide whether to reuse or
+// recreate.
+func (pid *PID) findRunningChild(tree *tree, childAddress string) (*PID, bool) {
+	cnode, ok := tree.node(childAddress)
+	if !ok {
+		return nil, false
+	}
+
+	cid := cnode.value()
+	if !cid.IsRunning() {
+		return nil, false
+	}
+	return cid, true
+}
+
+// buildChildOptions translates a spawn config into the pidOption list used
+// when materializing a child PID. The parent's runtime wiring (logger, actor
+// system, remoting, passivation manager, etc.) is always inherited; child-specific
+// overrides from config are appended only when set.
+func (pid *PID) buildChildOptions(config *spawnConfig) []pidOption {
+	pidOptions := []pidOption{
+		withInitMaxRetries(int(pid.initMaxRetries.Load())),
+		withCustomLogger(pid.logger),
+		withActorSystem(pid.actorSystem),
+		withEventsStream(pid.eventsStream),
+		withInitTimeout(pid.initTimeout.Load()),
+		withRemoting(pid.remoting),
+		withPassivationManager(pid.passivationManager),
+		withMetricProvider(pid.metricProvider),
+		withRelocationDisabled(), // by default child is not relocatable
+	}
+
+	if config.mailbox != nil {
+		pidOptions = append(pidOptions, withMailbox(config.mailbox))
+	}
+
+	if config.supervisor != nil {
+		pidOptions = append(pidOptions, withSupervisor(config.supervisor))
+	}
+
+	if config.enableStash {
+		pidOptions = append(pidOptions, withStash())
+	}
+
+	if config.dependencies != nil {
+		pidOptions = append(pidOptions, withDependencies(config.dependencies...))
+	}
+
+	pidOptions = append(pidOptions, withPassivationStrategy(config.passivationStrategy))
+	return pidOptions
 }
 
 func buildRestartSubtree(root *PID, tree *tree) *restartNode {

@@ -23,6 +23,7 @@
 package actor
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -161,5 +162,110 @@ func TestSpawnConfig(t *testing.T) {
 		err := config.Validate()
 		require.Error(t, err)
 		require.ErrorIs(t, err, errors.ErrInvalidReentrancyMode)
+	})
+}
+
+func TestSpawnConfigClone(t *testing.T) {
+	t.Run("clones every field without overrides", func(t *testing.T) {
+		mailbox := NewUnboundedMailbox()
+		sup := supervisor.NewSupervisor(supervisor.WithStrategy(supervisor.OneForOneStrategy))
+		dep := NewMockDependency("dep-1", "user", "email")
+		strategy := passivation.NewLongLivedStrategy()
+		reent := reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll), reentrancy.WithMaxInFlight(2))
+
+		original := newSpawnConfig(
+			WithMailbox(mailbox),
+			WithSupervisor(sup),
+			WithDependencies(dep),
+			WithStashing(),
+			WithPassivationStrategy(strategy),
+			WithReentrancy(reent),
+			WithRole("api"),
+			WithHostAndPort("localhost", 8080),
+			WithPlacement(Random),
+			WithRelocationDisabled(),
+		)
+		withSingleton(&singletonSpec{SpawnTimeout: 5 * time.Second, WaitInterval: time.Second, MaxRetries: 2}).Apply(original)
+
+		cloned := original.clone()
+
+		require.NotSame(t, original, cloned)
+		require.Equal(t, original, cloned)
+	})
+
+	t.Run("mutating cloned scalar pointers does not affect the source", func(t *testing.T) {
+		original := newSpawnConfig(
+			WithRole("api"),
+			WithHostAndPort("localhost", 8080),
+		)
+
+		cloned := original.clone()
+
+		require.NotSame(t, original.role, cloned.role)
+		require.NotSame(t, original.host, cloned.host)
+		require.NotSame(t, original.port, cloned.port)
+
+		*cloned.role = "worker"
+		*cloned.host = "remote"
+		*cloned.port = 9090
+
+		require.Equal(t, "api", *original.role)
+		require.Equal(t, "localhost", *original.host)
+		require.Equal(t, 8080, *original.port)
+	})
+
+	t.Run("dependencies slice is reallocated", func(t *testing.T) {
+		dep := NewMockDependency("dep-1", "user", "email")
+		original := newSpawnConfig(WithDependencies(dep))
+
+		cloned := original.clone()
+
+		require.Equal(t, original.dependencies, cloned.dependencies)
+		require.NotEqual(t,
+			fmt.Sprintf("%p", original.dependencies),
+			fmt.Sprintf("%p", cloned.dependencies),
+		)
+	})
+
+	t.Run("singletonSpec is reallocated", func(t *testing.T) {
+		original := newSpawnConfig()
+		withSingleton(&singletonSpec{SpawnTimeout: 5 * time.Second, WaitInterval: time.Second, MaxRetries: 2}).Apply(original)
+
+		cloned := original.clone()
+
+		require.NotSame(t, original.singletonSpec, cloned.singletonSpec)
+		cloned.singletonSpec.MaxRetries = 99
+		require.Equal(t, int32(2), original.singletonSpec.MaxRetries)
+	})
+
+	t.Run("applies overrides on the clone only", func(t *testing.T) {
+		original := newSpawnConfig(
+			WithRole("api"),
+			WithPlacement(Random),
+		)
+
+		newSup := supervisor.NewSupervisor(supervisor.WithStrategy(supervisor.OneForOneStrategy))
+		cloned := original.clone(
+			WithRole("worker"),
+			WithPlacement(LeastLoad),
+			WithSupervisor(newSup),
+		)
+
+		require.Equal(t, "worker", *cloned.role)
+		require.Equal(t, LeastLoad, cloned.placement)
+		require.Same(t, newSup, cloned.supervisor)
+
+		require.Equal(t, "api", *original.role)
+		require.Equal(t, Random, original.placement)
+		require.Nil(t, original.supervisor)
+	})
+
+	t.Run("clones a zero-value config", func(t *testing.T) {
+		original := &spawnConfig{}
+
+		cloned := original.clone()
+
+		require.NotSame(t, original, cloned)
+		require.Equal(t, original, cloned)
 	})
 }

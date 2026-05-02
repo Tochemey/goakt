@@ -143,8 +143,7 @@ func (pid *grainPID) activate(ctx context.Context) (err error) {
 			cancel()
 			switch v := r.(type) {
 			case error:
-				var pe *gerrors.PanicError
-				if errors.As(v, &pe) {
+				if pe, ok := errors.AsType[*gerrors.PanicError](v); ok {
 					err = gerrors.NewErrGrainActivationFailure(pe)
 					return
 				}
@@ -201,8 +200,7 @@ func (pid *grainPID) deactivate(ctx context.Context) (err error) {
 		if r := recover(); r != nil {
 			switch v := r.(type) {
 			case error:
-				var pe *gerrors.PanicError
-				if errors.As(v, &pe) {
+				if pe, ok := errors.AsType[*gerrors.PanicError](v); ok {
 					err = gerrors.NewErrGrainDeactivationFailure(pe)
 					return
 				}
@@ -247,6 +245,7 @@ func (pid *grainPID) deactivate(ctx context.Context) (err error) {
 	if logger.Enabled(log.InfoLevel) {
 		logger.Infof("grain=%s deactivating", pid.identity.String())
 	}
+
 	if pid.remoting != nil {
 		pid.remoting.Close()
 	}
@@ -292,10 +291,12 @@ func (pid *grainPID) receive(grainContext *GrainContext) {
 	if !pid.isActive() {
 		return
 	}
+
 	if err := pid.mailbox.Enqueue(grainContext); err != nil {
 		grainContext.Err(err)
 		return
 	}
+
 	if pid.schedState.TrySchedule() {
 		pid.dispatcher.schedule(pid)
 	}
@@ -384,8 +385,7 @@ func (pid *grainPID) recovery(received *GrainContext) {
 	if r := recover(); r != nil {
 		switch err, ok := r.(error); {
 		case ok:
-			var pe *gerrors.PanicError
-			if errors.As(err, &pe) {
+			if pe, ok := errors.AsType[*gerrors.PanicError](err); ok {
 				received.Err(pe)
 				return
 			}
@@ -457,6 +457,7 @@ func (pid *grainPID) passivationTry(reason string) bool {
 	if pid.logger.Enabled(log.InfoLevel) {
 		pid.logger.Infof("grain=%s reason=%s passivation triggered", pid.identity.String(), reason)
 	}
+
 	if err := pid.deactivate(context.Background()); err != nil {
 		if pid.logger.Enabled(log.ErrorLevel) {
 			pid.logger.Errorf("failed to passivate grain=%s: %v (hint: check OnPassivate implementation)", pid.identity.String(), err)
