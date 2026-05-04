@@ -9,10 +9,10 @@
   <a href="https://goreportcard.com/report/github.com/tochemey/goakt"><img src="https://goreportcard.com/badge/github.com/tochemey/goakt" alt="Go Report Card" /></a>
   <a href="https://codecov.io/gh/Tochemey/goakt"><img src="https://codecov.io/gh/Tochemey/goakt/graph/badge.svg?token=J0p9MzwSRH" alt="codecov" /></a>
   <a href="https://go.dev/doc/install"><img src="https://img.shields.io/github/go-mod/go-version/Tochemey/goakt" alt="GitHub go.mod Go version" /></a>
-  <a href="https://github.com/avelino/awesome-go"><img src="https://awesome.re/badge.svg" alt="Awesome" /></a>
-  <a href="https://www.bestpractices.dev/projects/9248"><img src="https://www.bestpractices.dev/projects/9248/badge" alt="OpenSSF Best Practices" /></a>
   <a href="https://github.com/Tochemey/goakt/releases/latest"><img src="https://img.shields.io/github/v/release/Tochemey/goakt" alt="Latest Release" /></a>
   <a href="./LICENSE"><img src="https://img.shields.io/github/license/Tochemey/goakt" alt="License" /></a>
+  <a href="https://github.com/avelino/awesome-go"><img src="https://awesome.re/badge.svg" alt="Awesome" /></a>
+  <a href="https://www.bestpractices.dev/projects/9248"><img src="https://www.bestpractices.dev/projects/9248/badge" alt="OpenSSF Best Practices" /></a>
 </p>
 
 Distributed [Go](https://go.dev/) actor framework to build a reactive and distributed system in Go with typed actor messages.
