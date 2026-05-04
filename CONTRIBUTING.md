@@ -48,6 +48,12 @@ Run `make help` to list every target. The common ones are:
 4. Submit a [pull request](https://help.github.com/articles/using-pull-requests) from your fork to the `main` branch of the original repository.
 5. Follow the instructions in the `playground` package to leave a working sample in case it is a bug.
 
+### Contributor License Agreement (CLA)
+
+GoAkt requires every contributor to sign our [Contributor License Agreement](CLA.md) before their pull request can be merged. This protects both you and the project, and only needs to be done once.
+
+When you open your first pull request, the **CLA Assistant** bot (powered by [cla-assistant.io](https://cla-assistant.io)) will comment with a link to sign the CLA. Click the link, authenticate with GitHub, and confirm your acceptance. The signature covers all of your future contributions. The PR cannot be merged until the CLA check passes.
+
 ### Previewing Documentation
 
 To preview documentation changes locally, install [Mint CLI](https://mintlify.com/docs) and run:
