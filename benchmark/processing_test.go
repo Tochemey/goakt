@@ -42,6 +42,12 @@ type Actor struct{}
 var replyMessage = &testpb.Reply{Content: "reply"}
 var errRequestBenchFailed = errors.New("request benchmark failed")
 
+// payloadSizes is the sweep used by BenchmarkTellPayload. It spans from
+// the empty-message dispatch baseline used by the other benchmarks up to
+// 64 KiB so the curve where data-movement cost overtakes dispatch cost
+// is visible.
+var payloadSizes = []int{0, 64, 1024, 8192, 65536}
+
 func (a *Actor) PreStart(*actor.Context) error {
 	return nil
 }
@@ -145,6 +151,7 @@ func BenchmarkTell(b *testing.B) {
 	if err := actorSystem.Start(ctx); err != nil {
 		b.Fatalf("failed to start actor system: %v", err)
 	}
+
 	b.Cleanup(func() { _ = actorSystem.Stop(ctx) })
 
 	// create the actor refs
@@ -152,6 +159,7 @@ func BenchmarkTell(b *testing.B) {
 	if err != nil {
 		b.Fatalf("failed to spawn sender: %v", err)
 	}
+
 	done := make(chan struct{})
 	receiver, err := actorSystem.Spawn(ctx, "receiver", &countingActor{
 		done:   done,
@@ -176,6 +184,89 @@ func BenchmarkTell(b *testing.B) {
 	b.StopTimer()
 	messagesPerSec := float64(b.N) / b.Elapsed().Seconds()
 	b.ReportMetric(messagesPerSec, "messages/sec")
+}
+
+// payloadMsg carries a sized byte payload for BenchmarkTellPayload. The
+// slice header is shared across producers; the receiver does not mutate
+// it, so the cost reported is the dispatch path plus the per-message
+// pointer hand-off, not allocations of the payload itself.
+type payloadMsg struct{ Data []byte }
+
+type payloadCounterActor struct {
+	received int64
+	done     chan struct{}
+	target   int64
+}
+
+func (a *payloadCounterActor) PreStart(*actor.Context) error { return nil }
+
+func (a *payloadCounterActor) Receive(ctx *actor.ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *payloadMsg:
+		a.received++
+		if a.received == a.target {
+			close(a.done)
+		}
+	default:
+		ctx.Unhandled()
+	}
+}
+
+func (a *payloadCounterActor) PostStop(*actor.Context) error { return nil }
+
+// BenchmarkTellPayload is a variant of BenchmarkTell that sweeps message
+// payload size. Empty-payload benchmarks measure dispatcher and mailbox
+// overhead in isolation; this benchmark separates that overhead from the
+// per-message data cost so throughput claims can be cited at a payload
+// size that matches the workload being argued about.
+func BenchmarkTellPayload(b *testing.B) {
+	for _, size := range payloadSizes {
+		b.Run(fmt.Sprintf("size=%d", size), func(b *testing.B) {
+			ctx := context.Background()
+
+			actorSystem, err := actor.NewActorSystem("bench",
+				actor.WithLogger(log.DiscardLogger),
+				actor.WithActorInitMaxRetries(1))
+			if err != nil {
+				b.Fatalf("failed to create actor system: %v", err)
+			}
+
+			if err := actorSystem.Start(ctx); err != nil {
+				b.Fatalf("failed to start actor system: %v", err)
+			}
+
+			b.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+			sender, err := actorSystem.Spawn(ctx, "sender", new(Actor))
+			if err != nil {
+				b.Fatalf("failed to spawn sender: %v", err)
+			}
+			done := make(chan struct{})
+			receiver, err := actorSystem.Spawn(ctx, "receiver", &payloadCounterActor{
+				done:   done,
+				target: int64(b.N),
+			})
+			if err != nil {
+				b.Fatalf("failed to spawn receiver: %v", err)
+			}
+
+			msg := &payloadMsg{Data: make([]byte, size)}
+			b.SetBytes(int64(size))
+			b.ReportAllocs()
+			b.ResetTimer()
+			b.RunParallel(func(pb *testing.PB) {
+				for pb.Next() {
+					if err := sender.Tell(ctx, receiver, msg); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+			<-done
+			b.StopTimer()
+			messagesPerSec := float64(b.N) / b.Elapsed().Seconds()
+			b.ReportMetric(messagesPerSec, "messages/sec")
+		})
+	}
 }
 
 func BenchmarkRequest(b *testing.B) {
