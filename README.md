@@ -26,47 +26,47 @@ Also, check the reference section at the end of the post for more material regar
 
 ## Features
 
-- **Core & Messaging**
-  - Actor model — concurrent, distributed actors with typed messages
-  - Grains — virtual actors with their own context and lifecycle
-  - Actor hierarchies — parent/child trees via `SpawnChild`, with child/parent navigation
-  - Lifecycle hooks — `PreStart` and `PostStop`; graceful stop and poison-pill shutdown
-  - Behavior switching — `Become` / `UnBecome` plus stacked `BecomeStacked` / `UnBecomeStacked` for protocol phases
-  - Messaging — `Tell` / `Ask` for fire-and-forget and request/response flows, plus `BatchTell` / `BatchAsk` for bulk delivery
-  - PubSub — topic-based publish/subscribe via a dedicated `TopicActor`, cluster-aware with cross-node dissemination over remoting
-  - Forward & PipeTo — forward messages preserving the original sender; pipe async task results back to an actor
-  - Reentrancy — non-blocking async `Request` with configurable modes and in-flight limits
-  - Watch & Terminated — monitor actor lifecycle and receive `Terminated` on death
-  - Stashing — `Stash` / `Unstash` / `UnstashAll` to defer messages during transient states
-  - Dependency injection — attach runtime dependencies to actors at spawn time
-- **Supervision & Fault Tolerance**
-  - Supervision — one-for-one / one-for-all strategies with `Stop` / `Resume` / `Restart` / `Escalate` directives and retry windows
-  - Passivation — auto-stop idle actors via a time-based strategy
-  - Reinstate — bring a previously stopped actor back online by PID or name
-  - Circuit breaker — `PipeTo` integrates the `breaker` package to short-circuit calls to unhealthy dependencies
-  - Dead letters — unhandled messages captured and published on the event stream
+- **Core**
+  - Actor model: concurrent, distributed actors with typed messages
+  - Grains: virtual actors with their own context and lifecycle
+  - Actor hierarchies: parent and child trees via *SpawnChild*, with child to parent navigation
+  - Lifecycle hooks: *PreStart* and *PostStop*, with graceful stop and poison-pill shutdown
+  - Behavior switching: *Become* and *UnBecome*, plus stacked *BecomeStacked* and *UnBecomeStacked* for protocol phases
+  - Messaging: *Tell* and *Ask* for fire-and-forget and request-response flows, plus *BatchTell* and *BatchAsk* for bulk delivery
+  - Forward and PipeTo: forward messages preserving the original sender, and pipe async task results back to an actor
+  - Reentrancy: non-blocking async *Request* with configurable modes and in-flight limits
+  - Stashing: *Stash*, *Unstash*, and *UnstashAll* to defer messages during transient states
+  - Watch and Terminated: monitor actor lifecycle and receive *Terminated* on death
+  - PubSub: topic-based publish and subscribe via a dedicated *TopicActor*, cluster-aware with cross-node dissemination over remoting
+  - Mailboxes: unbounded FIFO, bounded, priority, and fair (segmented) mailboxes
+  - Supervision: one-for-one and one-for-all strategies with *Stop*, *Resume*, *Restart*, and *Escalate* directives, plus retry windows
+  - Passivation: auto-stop idle actors via a time-based strategy
+  - Reinstate: bring a previously stopped actor back online by PID or name
+  - Circuit breaker: *PipeTo* integrates the *breaker* package to short-circuit calls to unhealthy dependencies
+  - Dead letters: unhandled messages captured and published on the event stream
+- **Routing**
+  - Routers: round-robin, random, and fan-out routing strategies
 - **Scheduling**
-  - Timers — `ScheduleOnce`, recurring `Schedule`, and `ScheduleWithCron` for cron-driven delivery
-  - Schedule lifecycle — `PauseSchedule` / `ResumeSchedule` / `CancelSchedule` on existing references
-- **Routing & Mailboxes**
-  - Routers — round-robin, random, and fan-out routing strategies
-  - Mailboxes — unbounded FIFO, bounded, priority, and fair (segmented) mailboxes
-- **Cluster & Topology**
-  - Remoting — TCP actor communication across nodes with pluggable serializers (Proto, CBOR and custom)
-  - Clustering — Consul, etcd, Kubernetes, NATS, mDNS, and static discovery
-  - Location transparency — address actors without knowing their node
-  - Relocation — automatic actor relocation on node failure
-  - Cluster singletons — single instance cluster-wide with guardian lifecycle
-  - Multi-datacenter — DC-transparent messaging, pluggable control plane (NATS JetStream, Etcd), DC-aware placement
-- **State & Streams**
-  - Distributed data — CRDTs (GCounter, PNCounter, LWWRegister, MVRegister, ORSet, ORMap, Flag) with delta replication, anti-entropy sync, tombstone deletion, and snapshots
-  - Reactive streams — backpressure-aware stream processing with a composable DSL (map, filter, flatMap, batch, throttle, fan-out/in), stage fusion, and built-in metrics/tracing
-- **Observability & Extensibility**
-  - Observability — OpenTelemetry metrics, event stream, dead letters
-  - Event stream — in-process topic-based pub/sub for system and user events
-  - Context propagation — pluggable propagation for request-scoped metadata
-  - Extensions — pluggable APIs for cross-cutting capabilities
-  - TLS / mTLS — configurable transport security for remoting
+  - Timers: *ScheduleOnce*, recurring *Schedule*, and *ScheduleWithCron* for cron-driven message delivery
+  - Schedule lifecycle: *PauseSchedule*, *ResumeSchedule*, and *CancelSchedule* on existing references
+- **Cluster**
+  - Remoting: TCP actor communication across nodes with pluggable serializers (Proto, CBOR, and custom)
+  - TLS and mTLS: configurable transport security for remoting
+  - Clustering: Consul, etcd, Kubernetes, NATS, mDNS, and static discovery
+  - Location transparency: address actors without knowing their node
+  - Relocation: automatic actor relocation on node failure
+  - Cluster singletons: single instance cluster-wide with guardian lifecycle
+  - Multi-datacenter: DC-transparent messaging, pluggable control plane (NATS JetStream, Etcd), and DC-aware placement
+- **CRDTs and Streams**
+  - Distributed data: CRDTs (GCounter, PNCounter, LWWRegister, MVRegister, ORSet, ORMap, and Flag) with delta replication, anti-entropy sync, tombstone deletion, and snapshots
+  - Reactive streams: backpressure-aware stream processing with a composable DSL (map, filter, flatMap, batch, throttle, and fan-out and fan-in), stage fusion, and built-in metrics and tracing
+- **Observability**
+  - Observability: OpenTelemetry metrics, event stream, and dead letters
+  - Event stream: in-process topic-based publish and subscribe for system and user events
+  - Context propagation: pluggable propagation for request-scoped metadata
+- **Extensibility**
+  - Extensions: register system-wide capabilities with *WithExtensions* on the actor system, then resolve them from any actor or grain via *Extension* on the receive context
+  - Dependency injection: attach serializable dependencies to an actor at spawn time with *WithDependencies*, accessed inside *Receive* via *Dependency* and *Dependencies*; the actor system can also *Inject* dependency types for cluster-wide reconstruction on relocation
 
 See [docs.goakt.dev](https://docs.goakt.dev) for the full feature reference.
 
@@ -76,10 +76,9 @@ See [docs.goakt.dev](https://docs.goakt.dev) for the full feature reference.
 go get github.com/tochemey/goakt/v4
 ```
 
-## Documentations
+## Documentation
 
-- **v4**: [docs.goakt.dev](https://docs.goakt.dev)
-- **v3** (legacy): [tochemey.gitbook.io/goakt](https://tochemey.gitbook.io/goakt)
+[docs.goakt.dev](https://docs.goakt.dev)
 
 ## Examples
 
@@ -102,7 +101,7 @@ You can join these groups and chat to discuss and ask GoAkt related questions on
 
 ## Contribution
 
-We welcome contributions—bug fixes, new features, and documentation improvements. Before diving in, read the [Architecture Document](./arch/ARCHITECTURE.md) to understand the codebase. We use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) and a Docker-backed `Makefile` so contributors only need Docker and Make installed — run `make help` to see the available targets.
+We welcome contributions: bug fixes, new features, and documentation improvements. Before diving in, read the [Architecture Document](./arch/ARCHITECTURE.md) to understand the codebase. We use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) and a Docker-backed `Makefile` so contributors only need Docker and Make installed; run `make help` to see the available targets.
 
 See [contributing.md](./CONTRIBUTING.md) for prerequisites, setup, and the full contribution workflow.
 
