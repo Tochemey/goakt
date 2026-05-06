@@ -25,6 +25,7 @@ package stream_test
 import (
 	"context"
 	"errors"
+	"sort"
 	"testing"
 	"time"
 
@@ -457,4 +458,144 @@ func TestWithContext_Chained(t *testing.T) {
 	}
 
 	assert.Equal(t, []string{"a!", "b!", "c!"}, col.Items())
+}
+
+func TestFlatMapConcat_PreservesEndToEndOrder(t *testing.T) {
+	sys := newTestSystem(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Input [1, 2, 3]; for each n, emit Range(0, n) ⇒ [0], [0,1], [0,1,2].
+	// Concat preserves end-to-end order: [0, 0, 1, 0, 1, 2].
+	src := stream.Range(1, 4)
+	flow := stream.FlatMapConcat(func(n int64) stream.Source[int64] {
+		return stream.Range(0, n)
+	})
+
+	collector, sink := stream.Collect[int64]()
+	handle, err := stream.From(src).Via(flow).To(sink).Run(ctx, sys)
+	require.NoError(t, err)
+
+	select {
+	case <-handle.Done():
+	case <-ctx.Done():
+		t.Fatal("stream did not complete in time")
+	}
+	require.NoError(t, handle.Err())
+
+	require.Equal(t, []int64{0, 0, 1, 0, 1, 2}, collector.Items())
+}
+
+func TestFlatMapMerge_FlattensAllElements(t *testing.T) {
+	sys := newTestSystem(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// breadth=2: sub-source order is non-deterministic. Verify the bag.
+	src := stream.Range(1, 4)
+	flow := stream.FlatMapMerge(2, func(n int64) stream.Source[int64] {
+		return stream.Range(0, n)
+	})
+
+	collector, sink := stream.Collect[int64]()
+	handle, err := stream.From(src).Via(flow).To(sink).Run(ctx, sys)
+	require.NoError(t, err)
+
+	select {
+	case <-handle.Done():
+	case <-ctx.Done():
+		t.Fatal("stream did not complete in time")
+	}
+	require.NoError(t, handle.Err())
+
+	got := collector.Items()
+	sort.Slice(got, func(i, j int) bool { return got[i] < got[j] })
+	require.Equal(t, []int64{0, 0, 0, 1, 1, 2}, got)
+}
+
+func TestFlatMapConcat_EmptyInnerSourcesDropElements(t *testing.T) {
+	sys := newTestSystem(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// fn returns an empty Source for every input. Result: empty stream.
+	src := stream.Of(1, 2, 3)
+	flow := stream.FlatMapConcat(func(int) stream.Source[int] {
+		return stream.Of[int]()
+	})
+
+	collector, sink := stream.Collect[int]()
+	handle, err := stream.From(src).Via(flow).To(sink).Run(ctx, sys)
+	require.NoError(t, err)
+
+	select {
+	case <-handle.Done():
+	case <-ctx.Done():
+		t.Fatal("stream did not complete in time")
+	}
+	require.NoError(t, handle.Err())
+	require.Empty(t, collector.Items())
+}
+
+func TestFlatMapConcat_InnerErrorFailsTheStream(t *testing.T) {
+	sys := newTestSystem(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	innerErr := errors.New("inner failure")
+
+	src := stream.Of(1, 2, 3)
+	flow := stream.FlatMapConcat(func(n int) stream.Source[int] {
+		// Inner source produces a single element, but a TryMap inside it
+		// errors when the element is the trigger value.
+		return stream.Via(
+			stream.Of(n),
+			stream.TryMap(func(v int) (int, error) {
+				if v == 2 {
+					return 0, innerErr
+				}
+
+				return v, nil
+			}),
+		)
+	})
+
+	_, sink := stream.Collect[int]()
+	handle, err := stream.From(src).Via(flow).To(sink).Run(ctx, sys)
+	require.NoError(t, err)
+
+	select {
+	case <-handle.Done():
+	case <-ctx.Done():
+		t.Fatal("stream did not complete in time")
+	}
+
+	require.Error(t, handle.Err())
+	require.True(t, errors.Is(handle.Err(), innerErr),
+		"expected inner error to surface; got %v", handle.Err())
+}
+
+func TestFlatMapMerge_BreadthZeroCoercesToOne(t *testing.T) {
+	sys := newTestSystem(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// breadth=0 should be coerced to 1 (sequential), preserving order.
+	src := stream.Range(1, 4)
+	flow := stream.FlatMapMerge(0, func(n int64) stream.Source[int64] {
+		return stream.Range(0, n)
+	})
+
+	collector, sink := stream.Collect[int64]()
+	handle, err := stream.From(src).Via(flow).To(sink).Run(ctx, sys)
+	require.NoError(t, err)
+
+	select {
+	case <-handle.Done():
+	case <-ctx.Done():
+		t.Fatal("stream did not complete in time")
+	}
+	require.NoError(t, handle.Err())
+
+	require.Equal(t, []int64{0, 0, 1, 0, 1, 2}, collector.Items())
 }

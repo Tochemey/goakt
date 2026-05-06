@@ -125,10 +125,12 @@ func (g *Graph) Build() (RunnableGraph, error) {
 	if err := g.validateGraph(); err != nil {
 		return RunnableGraph{}, err
 	}
+
 	pipelines, err := g.compile()
 	if err != nil {
 		return RunnableGraph{}, err
 	}
+
 	if len(pipelines) == 1 {
 		return RunnableGraph{stages: pipelines[0]}, nil
 	}
@@ -148,6 +150,7 @@ func (g *Graph) validateGraph() error {
 			}
 		}
 	}
+
 	srcCount, sinkCount := 0, 0
 	for _, node := range g.nodes {
 		switch node.kind {
@@ -157,9 +160,11 @@ func (g *Graph) validateGraph() error {
 			sinkCount++
 		}
 	}
+
 	if srcCount == 0 {
 		return fmt.Errorf("%w: graph has no sources", ErrInvalidGraph)
 	}
+
 	if sinkCount == 0 {
 		return fmt.Errorf("%w: graph has no sinks", ErrInvalidGraph)
 	}
@@ -195,10 +200,12 @@ func (g *Graph) compile() ([][]*stageDesc, error) {
 		if downCount[name] <= 1 {
 			continue
 		}
+
 		srcChain, err := g.buildOwnChain(name, fanOuts)
 		if err != nil {
 			return nil, fmt.Errorf("stream: building fan-out chain for %q: %w", name, err)
 		}
+
 		n := downCount[name]
 		fanOuts[name] = &fanOutReg{shared: newSharedBroadcast[any](n, srcChain)}
 	}
@@ -210,10 +217,12 @@ func (g *Graph) compile() ([][]*stageDesc, error) {
 		if node.kind != gnSinkKind {
 			continue
 		}
+
 		chain, err := g.buildChain(node.from[0], fanOuts)
 		if err != nil {
 			return nil, fmt.Errorf("stream: compiling pipeline for sink %q: %w", name, err)
 		}
+
 		pipeline := append(chain, node.stages...)
 		pipelines = append(pipelines, pipeline)
 	}
@@ -233,9 +242,11 @@ func (g *Graph) topologicalOrder() ([]string, error) {
 		if visited[name] {
 			return nil
 		}
+
 		if visiting[name] {
 			return fmt.Errorf("%w: cycle detected at node %q", ErrInvalidGraph, name)
 		}
+
 		visiting[name] = true
 		node := g.nodes[name]
 		for _, from := range node.from {
@@ -243,6 +254,7 @@ func (g *Graph) topologicalOrder() ([]string, error) {
 				return err
 			}
 		}
+
 		delete(visiting, name)
 		visited[name] = true
 		order = append(order, name)
@@ -304,6 +316,7 @@ func (g *Graph) buildMergeDesc(node *graphBuilderNode, fanOuts map[string]*fanOu
 		}
 		subStages[i] = chain
 	}
+
 	captured := subStages
 	return &stageDesc{
 		id:   newStageID(),
