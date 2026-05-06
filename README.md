@@ -68,17 +68,13 @@ Also, check the reference section at the end of the post for more material regar
   - Extensions: register system-wide capabilities with *WithExtensions* on the actor system, then resolve them from any actor or grain via *Extension* on the receive context
   - Dependency injection: attach serializable dependencies to an actor at spawn time with *WithDependencies*, accessed inside *Receive* via *Dependency* and *Dependencies*; the actor system can also *Inject* dependency types for cluster-wide reconstruction on relocation
 
-See [docs.goakt.dev](https://docs.goakt.dev) for the full feature reference.
+See [Documentation](https://docs.goakt.dev) for the full feature reference.
 
 ## Installation
 
 ```bash
 go get github.com/tochemey/goakt/v4
 ```
-
-## Documentation
-
-[docs.goakt.dev](https://docs.goakt.dev)
 
 ## Examples
 
