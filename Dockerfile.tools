@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # Toolchain image consumed by the Makefile. Contributors do not install these
 # tools locally; `make` builds this image and runs targets inside it.
-FROM golang:1.26.1-alpine
+FROM golang:1.26.2-alpine
 
 ARG GOLANGCI_VERSION=v2.11.4
 ARG BUF_VERSION=v1.68.3
