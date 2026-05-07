@@ -325,7 +325,7 @@ func MergePrioritized[T any](weights []int, sources ...Source[T]) Source[T] {
 	}
 	w := make([]int, len(weights))
 	copy(w, weights)
-	rng := mrand.New(mrand.NewPCG(mrand.Uint64(), mrand.Uint64()))
+	rng := mrand.New(mrand.NewPCG(mrand.Uint64(), mrand.Uint64())) // #nosec G404 -- non-security: weighted slot selection for stream merging
 	selectSlot := func(bufs []queue) int {
 		total := 0
 		for i := range bufs {
