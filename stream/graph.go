@@ -115,9 +115,11 @@ func (g RunnableGraph) validate() error {
 	if len(g.stages) < 2 {
 		return ErrInvalidGraph
 	}
+
 	if g.stages[0].kind != sourceKind {
 		return fmt.Errorf("stream: first stage must be a source, got kind %d", g.stages[0].kind)
 	}
+
 	if g.stages[len(g.stages)-1].kind != sinkKind {
 		return fmt.Errorf("stream: last stage must be a sink, got kind %d", g.stages[len(g.stages)-1].kind)
 	}

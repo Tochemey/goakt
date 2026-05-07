@@ -82,8 +82,17 @@ func (w *completionWrapper) PostStop(ctx *actor.Context) error {
 // The sink sends the initial demand signal on receipt of its stageWire
 // message, starting the pipeline.
 func materialize(ctx context.Context, system actor.ActorSystem, stages []*stageDesc) (StreamHandle, error) {
+	handle, _, err := materializeWithHead(ctx, system, stages)
+	return handle, err
+}
+
+// materializeWithHead behaves like materialize but additionally returns the
+// PID of the head (first) stage. SubFlow uses this so the splitter can push
+// elements directly into a per-substream feedSourceActor without needing a
+// type assertion against the StreamHandle interface.
+func materializeWithHead(ctx context.Context, system actor.ActorSystem, stages []*stageDesc) (StreamHandle, *actor.PID, error) {
 	if err := (RunnableGraph{stages: stages}).validate(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	subID := newStreamSubID()
@@ -107,52 +116,57 @@ func materialize(ctx context.Context, system actor.ActorSystem, stages []*stageD
 	copy(wrapped, stages)
 	wrapped[sinkIdx] = &wrappedSinkDesc
 
-	// ── Spawn the stream coordinator as the supervisor root ────────────────────
+	// Spawn the stream coordinator as the supervisor root
 	coord := &streamCoordinator{handle: handle}
 	coordName := fmt.Sprintf("stream-supervisor-%s", subID)
 	coordinator, err := system.Spawn(ctx, coordName, coord, actor.WithLongLived())
 	if err != nil {
 		handle.signalDone(err)
-		return nil, fmt.Errorf("stream: spawn coordinator: %w", err)
+		return nil, nil, fmt.Errorf("stream: spawn coordinator: %w", err)
 	}
+
 	handle.coordinator = coordinator
 
-	// ── Spawn each stage actor as a child of the coordinator ───────────────────
+	// Spawn each stage actor as a child of the coordinator
 	pids := make([]*actor.PID, len(wrapped))
 	for i, desc := range wrapped {
-		cfg := desc.config
-		cfg.System = system
+		config := desc.config
+		config.System = system
 		// Inject shared metrics pointers so StreamHandle.Metrics() reflects real counts.
 		if i == 0 {
-			cfg.Metrics = handle.sourceMetrics
+			config.Metrics = handle.sourceMetrics
 		}
+
 		if i == sinkIdx {
-			cfg.Metrics = handle.sinkMetrics
+			config.Metrics = handle.sinkMetrics
 		}
+
 		// Inject the stage name into cfg so actors know their own name (for tracer calls).
-		if cfg.Name == "" {
-			cfg.Name = fmt.Sprintf("stream-%s-%d", subID, i)
+		if config.Name == "" {
+			config.Name = fmt.Sprintf("stream-%s-%d", subID, i)
 		}
-		stageName := cfg.Name
-		a := desc.makeActor(cfg)
+
+		stageName := config.Name
+		a := desc.makeActor(config)
 
 		spawnOpts := []actor.SpawnOption{actor.WithLongLived()}
-		if cfg.Mailbox != nil {
-			spawnOpts = append(spawnOpts, actor.WithMailbox(cfg.Mailbox))
-		} else if cfg.BufferSize > 0 {
-			spawnOpts = append(spawnOpts, actor.WithMailbox(actor.NewBoundedMailbox(cfg.BufferSize*2)))
+		if config.Mailbox != nil {
+			spawnOpts = append(spawnOpts, actor.WithMailbox(config.Mailbox))
+		} else if config.BufferSize > 0 {
+			spawnOpts = append(spawnOpts, actor.WithMailbox(actor.NewBoundedMailbox(config.BufferSize*2)))
 		}
+
 		pid, spawnErr := coordinator.SpawnChild(ctx, stageName, a, spawnOpts...)
 		if spawnErr != nil {
 			// Shut down already-spawned actors; coordinator cascades to its children.
 			_ = coordinator.Shutdown(ctx)
 			handle.signalDone(spawnErr)
-			return nil, fmt.Errorf("stream: spawn stage %d: %w", i, spawnErr)
+			return nil, nil, fmt.Errorf("stream: spawn stage %d: %w", i, spawnErr)
 		}
 		pids[i] = pid
 	}
 
-	// ── Wire stages: send each actor its upstream and downstream PIDs ──────────
+	// Wire stages: send each actor its upstream and downstream PIDs
 	n := len(pids)
 	for i, pid := range pids {
 		var upstream, downstream *actor.PID
@@ -169,7 +183,7 @@ func materialize(ctx context.Context, system actor.ActorSystem, stages []*stageD
 		}); err != nil {
 			_ = coordinator.Shutdown(ctx)
 			handle.signalDone(err)
-			return nil, fmt.Errorf("stream: wire stage %d: %w", i, err)
+			return nil, nil, fmt.Errorf("stream: wire stage %d: %w", i, err)
 		}
 	}
 
@@ -183,7 +197,7 @@ func materialize(ctx context.Context, system actor.ActorSystem, stages []*stageD
 	handle.source = pids[0]
 	handle.stageActors = pids
 
-	return handle, nil
+	return handle, pids[0], nil
 }
 
 // applyFusion combines adjacent fusable flow stages into a single fused stage.

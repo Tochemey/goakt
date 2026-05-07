@@ -131,3 +131,52 @@ type hubReady struct {
 type slotCancel struct {
 	slot int
 }
+
+// subUpstreamElem carries an element from the upstream feeder sink to the
+// subFlowSourceActor (the splitter), one per element produced by the original
+// source pipeline.
+type subUpstreamElem struct {
+	value any
+}
+
+// subUpstreamDone is sent by the upstream feeder sink when the original source
+// pipeline has completed.
+type subUpstreamDone struct{}
+
+// subPush is sent by the splitter to a per-substream feedSourceActor to inject
+// one element into that substream's pipeline.
+type subPush struct {
+	value any
+}
+
+// subFeedDone is sent by the splitter to a per-substream feedSourceActor when
+// no more elements will arrive for that substream.
+type subFeedDone struct{}
+
+// subOut carries one merged element from a per-substream sink back to the
+// splitter, which then forwards it downstream.
+type subOut struct {
+	value any
+}
+
+// subDone is sent by a per-substream sink when the substream has completed
+// normally. key is the type-erased substream key (the splitter casts back
+// to its concrete type for state cleanup).
+type subDone struct {
+	key any
+}
+
+// subErr is sent by a per-substream sink when the substream pipeline failed.
+// The splitter dispatches on the configured SubstreamErrorStrategy.
+type subErr struct {
+	key any
+	err error
+}
+
+// subFeedAck is sent by a feedSourceActor to the splitter when it has
+// dispatched n elements to its own downstream. The splitter uses it to
+// decrement the per-key in-flight counter and resume routing for that key.
+type subFeedAck struct {
+	key any
+	n   int64
+}

@@ -23,13 +23,14 @@ transparency for free. Pipelines are **lazy**: nothing executes until `RunnableG
 
 ## Core abstractions
 
-| Type            | Role                                                                    |
-| --------------- | ----------------------------------------------------------------------- |
-| `Source[T]`     | Origin of stream elements; produces values of type `T`                  |
-| `Flow[In, Out]` | Transformation stage; consumes `In`, emits `Out`                        |
-| `Sink[T]`       | Terminal consumer; processes elements and drives backpressure           |
-| `RunnableGraph` | Fully assembled pipeline; a value type that can be `Run` multiple times |
-| `StreamHandle`  | Live handle returned by `Run`; controls lifecycle and exposes metrics   |
+| Type            | Role                                                                        |
+| --------------- | --------------------------------------------------------------------------- |
+| `Source[T]`     | Origin of stream elements; produces values of type `T`                      |
+| `Flow[In, Out]` | Transformation stage; consumes `In`, emits `Out`                            |
+| `Sink[T]`       | Terminal consumer; processes elements and drives backpressure               |
+| `SubFlow[K, T]` | "Stream of streams" — partition by key, transform per-substream, merge back |
+| `RunnableGraph` | Fully assembled pipeline; a value type that can be `Run` multiple times     |
+| `StreamHandle`  | Live handle returned by `Run`; controls lifecycle and exposes metrics       |
 
 A minimal pipeline looks like this:
 
@@ -208,6 +209,30 @@ stream.FlatMap(func(s string) []string { return strings.Split(s, ",") })
 stream.Flatten[string]()
 ```
 
+### Streaming flat-map
+
+When the per-element expansion is itself a stream (e.g. paginated API calls, per-row database queries), use the
+streaming flat-map operators instead of `FlatMap`. Each input element produces a `Source[Out]` whose elements are
+flattened into the main pipeline:
+
+```go
+// FlatMapConcat: drain each sub-source fully before starting the next.
+// Order is preserved end-to-end.
+stream.FlatMapConcat(func(userID int) stream.Source[Order] {
+    return fetchUserOrders(userID) // Source[Order]
+})
+
+// FlatMapMerge: up to N sub-sources active concurrently; outputs interleaved.
+// Order across sub-sources is non-deterministic; order within each preserved.
+stream.FlatMapMerge(8, func(userID int) stream.Source[Order] {
+    return fetchUserOrders(userID)
+})
+```
+
+Backpressure is bounded by the breadth: the FlatMap stage requests at most `breadth` elements from upstream, and
+the next batch is requested only as sub-sources complete — so a slow inner source naturally throttles the outer
+pipeline. Sub-pipeline handles are tracked and aborted on cancellation or failure to avoid leaking goroutines.
+
 ### Windowing and rate control
 
 ```go
@@ -252,6 +277,8 @@ stream.OrderedParallelMap(8, func(req Request) Response { return callAPI(req) })
 | `TryMap[In, Out](fn)`                | Transformation with error; `ErrorStrategy` controls failure handling   |
 | `Filter[T](predicate)`               | Keeps only elements where `predicate` returns true                     |
 | `FlatMap[In, Out](fn)`               | Expands each element into a slice of outputs                           |
+| `FlatMapConcat[In, Out](fn)`         | Per-element streaming flat-map; sub-sources drained sequentially       |
+| `FlatMapMerge[In, Out](breadth, fn)` | Per-element streaming flat-map; up to `breadth` sub-sources concurrent |
 | `Flatten[T]()`                       | Unwraps `[]T` elements into individual elements                        |
 | `Batch[T](n, maxWait)`               | Groups into `[]T` slices of at most `n`; flushes early after `maxWait` |
 | `Buffer[T](size, strategy)`          | Asynchronous buffer with configurable overflow strategy                |
@@ -395,6 +422,99 @@ stream.From(stream.Combine(prices, orders, func(p Price, o Order) Quote {
 })).To(stream.ForEach(func(q Quote) { submit(q) })).
     Run(ctx, sys)
 ```
+
+---
+
+## Substreams (SubFlow)
+
+Three constructors produce a `SubFlow`, each with different routing semantics: `GroupBy` partitions by a key function (one substream per distinct key, materialised lazily), `SplitWhen` starts a new substream when a predicate is true (the triggering element becomes the FIRST of the new substream), and `SplitAfter` ends the current substream after a predicate-true element (the triggering element becomes the LAST of the closing substream). Per-substream state — `Scan` accumulators, `Deduplicate`'s last-seen value, anything stateful in the per-substream chain — is genuinely independent because each substream is a real GoAkt actor pipeline materialised lazily on its first element. `MergeSubstreams` collapses the partitioned stream back into a flat `Source[T]` whose elements interleave non-deterministically across substreams while preserving order within a single substream.
+
+```go
+// Partition events by tenantID, count events per tenant via a per-substream
+// Scan, then merge all per-tenant counters into a single flat stream.
+src := stream.FromChannel(eventCh) // Source[Event]
+
+byTenant := stream.GroupBy(src, 1024, func(e Event) string { return e.TenantID })
+counted  := stream.SubFlowVia(byTenant, stream.Scan(0, func(acc int, _ Event) int { return acc + 1 }))
+merged   := stream.MergeSubstreams(counted)
+
+stream.From(merged).
+    To(stream.ForEach(func(n int) { log.Println(n) })).
+    Run(ctx, sys)
+```
+
+The key function is captured at `GroupBy` time and applied to upstream elements regardless of how many `SubFlowVia` calls follow — the per-substream output type can change freely without affecting routing.
+
+### Splitting on a delimiter
+
+`SplitWhen` and `SplitAfter` take a predicate instead of a key function and produce a `SubFlow[int, T]` whose synthetic substream IDs increment on each rotation. They differ in where the triggering element lands:
+
+```go
+// SplitWhen: predicate-true element starts a NEW substream.
+//   input:        1, 2, 0, 3, 4, 0, 5
+//   substreams:  [1, 2] [0, 3, 4] [0, 5]
+src := stream.FromChannel(eventCh) // Source[int]
+sf  := stream.SplitWhen(src, func(n int) bool { return n == 0 })
+
+// SplitAfter: predicate-true element ENDS the current substream.
+//   input:        1, 2, 0, 3, 4, 0, 5
+//   substreams:  [1, 2, 0] [3, 4, 0] [5]
+sf  := stream.SplitAfter(src, func(n int) bool { return n == 0 })
+```
+
+These are the natural primitives for parsing delimited streams (newline-terminated frames, control sentinels, batch markers) where each delimiter starts or ends a logical group rather than tagging a key. Substreams are sequential — at most one is actively receiving new elements at a time — so the `maxSubstreams` cap is generally unnecessary and `0` (unbounded) is fine.
+
+### Cardinality cap
+
+The `maxSubstreams` parameter caps the number of concurrently-open substreams; pass `0` for unbounded. Exceeding the cap terminates the stream with `ErrTooManySubstreams`, so unbounded key cardinality is a visible failure rather than a silent memory leak:
+
+```go
+sf := stream.GroupBy(src, 100, keyFn) // up to 100 distinct keys
+```
+
+### Per-substream backpressure
+
+Each substream has an independent in-flight cap (default `256` elements). When a substream is at capacity, the configured `OverflowStrategy` decides what happens to new elements with that key. Substream feed sources acknowledge consumption to the splitter in batches (matching the `flowActor` watermark refill at `perKeyBuffer/4`), so per-key memory is bounded without per-element protocol overhead.
+
+```go
+sf := stream.GroupBy(src, 0, keyFn).
+    WithSubstreamBuffer(64, stream.FailSource)
+```
+
+| Strategy                          | Behaviour                                                                                                                                   |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DropTail` (default)              | Discard the newest element when the substream is at capacity                                                                                |
+| `DropHead` / `BackpressureSource` | Currently collapse to drop-newest — `DropHead` would break per-key ordering and `BackpressureSource` would deadlock the splitter on inbound |
+| `FailSource`                      | Terminate the stream with `ErrSubstreamOverflow`                                                                                            |
+
+Drops are reported through the existing `OnDrop` hook and the `droppedElements` metric. For tighter or more elaborate bounds (e.g. time-based windowing per key), compose a `Buffer` or `Throttle` flow inside the per-substream chain.
+
+### Per-substream error strategy
+
+When a per-key sub-pipeline fails, `SubstreamErrorStrategy` controls how the splitter reacts. The default mirrors the FailFast contract of linear flows; the alternatives let one substream's failure stay isolated.
+
+| Strategy                     | Behaviour                                                                                                                                                 |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SubstreamFailAll` (default) | Surface the error verbatim via `StreamHandle.Err()` and terminate the entire stream                                                                       |
+| `SubstreamDrop`              | Blocklist the failing key and complete that substream silently; sibling substreams finish normally; further elements with the blocklisted key are dropped |
+| `SubstreamRestart`           | Discard the failed pipeline; the next element with that key spawns a fresh substream from scratch                                                         |
+
+```go
+sf := stream.GroupBy(src, 0, keyFn).
+    WithErrorStrategy(stream.SubstreamDrop)
+```
+
+### Reference
+
+| Constructor / method                                  | Description                                                                         |
+| ----------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `GroupBy[T, K](src, maxSubstreams, keyFn)`            | Partition `src` by `keyFn`; returns `SubFlow[K, T]`                                 |
+| `SplitWhen[T](src, predicate)`                        | New substream begins when `predicate` is true; element is FIRST of new substream    |
+| `SplitAfter[T](src, predicate)`                       | Current substream ends after `predicate` is true; element is LAST of that substream |
+| `SubFlowVia[K, In, Out](sf, flow)`                    | Append a transformation to each substream's pipeline                                |
+| `MergeSubstreams[K, T](sf)`                           | Collapse substreams back into a flat `Source[T]` (non-deterministic interleave)     |
+| `SubFlow.WithSubstreamBuffer(perKeyBuffer, strategy)` | Per-substream in-flight cap and overflow strategy                                   |
+| `SubFlow.WithErrorStrategy(strategy)`                 | Per-substream failure handling policy                                               |
 
 ---
 
@@ -716,21 +836,22 @@ and tight integration with GoAkt actor supervision.
 [Akka Streams](https://doc.akka.io/docs/akka/current/stream/index.html) (Scala / Java) is the direct inspiration for
 GoAkt Streams. Both implement the Reactive Streams specification.
 
-| Aspect                | Akka Streams                                | GoAkt Streams                                           |
-| --------------------- | ------------------------------------------- | ------------------------------------------------------- |
-| **Language**          | Scala / Java (JVM)                          | Go                                                      |
-| **Backpressure**      | Reactive Streams specification              | Credit-based pull; equivalent semantics                 |
-| **Graph DSL**         | Rich typed graph builder (`GraphDSL`)       | `Graph` named-node builder                              |
-| **Stage fusion**      | Automatic operator fusion                   | `FuseStateless` (default), `FuseNone`, `FuseAggressive` |
-| **Materializer**      | `ActorMaterializer`                         | GoAkt `ActorSystem`                                     |
-| **Error handling**    | `SupervisionStrategy` per flow              | `ErrorStrategy` per stage                               |
-| **Fan-out**           | `Broadcast`, `Balance`, `Partition`         | `Broadcast`, `Balance`                                  |
-| **Fan-in**            | `Merge`, `MergePreferred`, `Zip`, `ZipWith` | `Merge`, `Combine`                                      |
-| **Actor interop**     | `Source.actorRef`, `Sink.actorRef`          | `FromActor`, `ToActor`, `ToActorNamed`                  |
-| **Type safety**       | Full (Scala generics)                       | Full (Go generics)                                      |
-| **Operator richness** | Very rich                                   | Core operators; sufficient for most workloads           |
-| **Runtime**           | JVM; Akka actor system                      | Go runtime; GoAkt actor system                          |
-| **Licence**           | BSL 1.1 (Lightbend)                         | MIT                                                     |
+| Aspect                | Akka Streams                                                                | GoAkt Streams                                                                                          |
+| --------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| **Language**          | Scala / Java (JVM)                                                          | Go                                                                                                     |
+| **Backpressure**      | Reactive Streams specification                                              | Credit-based pull; equivalent semantics                                                                |
+| **Graph DSL**         | Rich typed graph builder (`GraphDSL`)                                       | `Graph` named-node builder                                                                             |
+| **Stage fusion**      | Automatic operator fusion                                                   | `FuseStateless` (default), `FuseNone`, `FuseAggressive`                                                |
+| **Materializer**      | `ActorMaterializer`                                                         | GoAkt `ActorSystem`                                                                                    |
+| **Error handling**    | `SupervisionStrategy` per flow                                              | `ErrorStrategy` per stage                                                                              |
+| **Fan-out**           | `Broadcast`, `Balance`, `Partition`                                         | `Broadcast`, `Balance`                                                                                 |
+| **Fan-in**            | `Merge`, `MergePreferred`, `Zip`, `ZipWith`                                 | `Merge`, `Combine`                                                                                     |
+| **Substreams**        | `groupBy`, `splitWhen`, `splitAfter`, `mergeSubstreams`, `concatSubstreams` | `GroupBy`, `SplitWhen`, `SplitAfter`, `MergeSubstreams` (with per-substream buffer and error strategy) |
+| **Actor interop**     | `Source.actorRef`, `Sink.actorRef`                                          | `FromActor`, `ToActor`, `ToActorNamed`                                                                 |
+| **Type safety**       | Full (Scala generics)                                                       | Full (Go generics)                                                                                     |
+| **Operator richness** | Very rich                                                                   | Core operators; sufficient for most workloads                                                          |
+| **Runtime**           | JVM; Akka actor system                                                      | Go runtime; GoAkt actor system                                                                         |
+| **Licence**           | BSL 1.1 (Lightbend)                                                         | MIT                                                                                                    |
 
 GoAkt Streams deliberately mirrors Akka Streams' core concepts — lazy `Source`, `Flow`, `Sink`, demand-driven
 backpressure, stage fusion — while adapting them to Go idioms and the GoAkt actor hierarchy. The `PullRequest` /

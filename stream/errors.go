@@ -47,4 +47,26 @@ var (
 	ErrPullTimeout = errors.New("stream: pull from actor source timed out")
 	// ErrInvalidGraph is returned when a RunnableGraph has fewer than 2 stages (source + sink).
 	ErrInvalidGraph = errors.New("stream: graph must have at least a source and a sink")
+	// ErrTooManySubstreams is returned when a GroupBy / Split* operation would
+	// open more substreams than the configured maxSubstreams cap allows.
+	ErrTooManySubstreams = errors.New("stream: too many substreams")
+	// ErrSubstreamOverflow is returned when a substream's per-key buffer
+	// would be exceeded under FailSource overflow.
+	ErrSubstreamOverflow = errors.New("stream: substream buffer overflow")
+)
+
+// SubstreamErrorStrategy controls how the splitter responds when a per-key
+// substream pipeline fails.
+type SubstreamErrorStrategy int
+
+const (
+	// SubstreamFailAll terminates the entire stream when any substream fails.
+	// This is the default and matches the FailFast contract of linear flows.
+	SubstreamFailAll SubstreamErrorStrategy = iota
+	// SubstreamDrop completes the failing substream silently and adds its key
+	// to a blocklist so future elements with that key are discarded.
+	SubstreamDrop
+	// SubstreamRestart discards the failing substream's pipeline; the next
+	// element with that key spawns a fresh substream from scratch.
+	SubstreamRestart
 )

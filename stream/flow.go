@@ -59,6 +59,7 @@ func (f Flow[In, Out]) WithRetryConfig(rc RetryConfig) Flow[In, Out] {
 	if rc.MaxAttempts < 1 {
 		rc.MaxAttempts = 1
 	}
+
 	newDesc := *f.desc
 	newDesc.config.RetryConfig = rc
 	prevMake := f.desc.makeActor
@@ -96,9 +97,9 @@ func (f Flow[In, Out]) WithTags(tags map[string]string) Flow[In, Out] {
 }
 
 // WithTracer returns a new Flow with the given Tracer attached.
-func (f Flow[In, Out]) WithTracer(t Tracer) Flow[In, Out] {
+func (f Flow[In, Out]) WithTracer(tracer Tracer) Flow[In, Out] {
 	newDesc := *f.desc
-	newDesc.config.Tracer = t
+	newDesc.config.Tracer = tracer
 	prevMake := f.desc.makeActor
 	newDesc.makeActor = func(_ StageConfig) actor.Actor { return prevMake(newDesc.config) }
 	return Flow[In, Out]{desc: &newDesc}
@@ -131,9 +132,11 @@ func Filter[T any](predicate func(T) bool) Flow[T, T] {
 				if !ok {
 					return nil, fmt.Errorf("stream: Filter got unexpected type %T", v)
 				}
+
 				if predicate(elem) {
 					return []any{elem}, nil
 				}
+
 				return nil, nil
 			}, config)
 		},
@@ -162,11 +165,13 @@ func FlatMap[In, Out any](fn func(In) []Out) Flow[In, Out] {
 				if !ok {
 					return nil, fmt.Errorf("stream: FlatMap got unexpected type %T", v)
 				}
+
 				outs := fn(elem)
 				result := make([]any, len(outs))
 				for i, o := range outs {
 					result[i] = o
 				}
+
 				return result, nil
 			}, config)
 		},
@@ -188,10 +193,12 @@ func Flatten[T any]() Flow[[]T, T] {
 				if !ok {
 					return nil, fmt.Errorf("stream: Flatten got unexpected type %T", v)
 				}
+
 				result := make([]any, len(slice))
 				for i, e := range slice {
 					result[i] = e
 				}
+
 				return result, nil
 			}, config)
 		},
@@ -223,6 +230,7 @@ func Buffer[T any](size int, strategy OverflowStrategy) Flow[T, T] {
 	if size < 1 {
 		size = 1
 	}
+
 	config := defaultStageConfig()
 	config.OverflowStrategy = strategy
 	config.BufferSize = size
@@ -248,6 +256,7 @@ func Throttle[T any](n int, per time.Duration) Flow[T, T] {
 	if n < 1 {
 		n = 1
 	}
+
 	perElement := per / time.Duration(n)
 	config := defaultStageConfig()
 	desc := &stageDesc{
@@ -276,9 +285,11 @@ func Deduplicate[T comparable]() Flow[T, T] {
 				if !ok {
 					return nil, fmt.Errorf("stream: Deduplicate got unexpected type %T", v)
 				}
+
 				if hasLast && last == elem {
 					return nil, nil
 				}
+
 				last = elem
 				hasLast = true
 				return []any{elem}, nil
@@ -363,6 +374,49 @@ func OrderedParallelMap[In, Out any](n int, fn func(In) Out) Flow[In, Out] {
 		kind: flowKind,
 		makeActor: func(cfg StageConfig) actor.Actor {
 			return newParallelMapActor(n, fn, true, cfg)
+		},
+		config: config,
+	}
+	return Flow[In, Out]{desc: desc}
+}
+
+// FlatMapConcat creates a Flow that, for each input element, materialises a
+// user-supplied Source[Out] as a sub-pipeline and emits its elements
+// downstream. Sub-sources are processed strictly in order — the next input
+// element is consumed only after the current sub-source has fully completed
+// and all of its elements have been forwarded — so end-to-end ordering is
+// preserved across input elements.
+//
+// Use FlatMap when fn returns an in-memory slice; FlatMapConcat when fn
+// returns a streaming Source[Out] that should be drained sequentially
+// (e.g. paginated API calls, per-element database queries).
+func FlatMapConcat[In, Out any](fn func(In) Source[Out]) Flow[In, Out] {
+	return makeFlatMapStreamFlow(1, fn)
+}
+
+// FlatMapMerge creates a Flow that, for each input element, materialises a
+// user-supplied Source[Out] as a sub-pipeline. Up to breadth sub-pipelines
+// run concurrently and their outputs are interleaved as they arrive — order
+// across sub-sources is non-deterministic, order within each sub-source is
+// preserved. breadth < 1 is coerced to 1 (equivalent to FlatMapConcat).
+//
+// Use this when sub-sources can be drained independently and concurrent
+// execution improves throughput (e.g. parallel HTTP fetches, per-element
+// fan-out across worker queries).
+func FlatMapMerge[In, Out any](breadth int, fn func(In) Source[Out]) Flow[In, Out] {
+	return makeFlatMapStreamFlow(breadth, fn)
+}
+
+// makeFlatMapStreamFlow is the shared constructor for FlatMapConcat /
+// FlatMapMerge. The stage is non-fusable because it dynamically materialises
+// sub-pipelines, which requires its own Receive loop.
+func makeFlatMapStreamFlow[In, Out any](breadth int, fn func(In) Source[Out]) Flow[In, Out] {
+	config := defaultStageConfig()
+	desc := &stageDesc{
+		id:   newStageID(),
+		kind: flowKind,
+		makeActor: func(cfg StageConfig) actor.Actor {
+			return newFlatMapStreamActor(breadth, fn, cfg)
 		},
 		config: config,
 	}
