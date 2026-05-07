@@ -1,6 +1,89 @@
 /* Inter for tables */
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap");
 
+/* ===========================================================================
+   Typography: compact, readable, sleek
+
+   Mintlify's defaults are tuned for very wide reading widths; on a typical
+   developer screen the body and heading scale runs slightly large. We scale
+   down the content area (not the chrome) and tighten heading line-heights /
+   letter-spacing for a more refined feel. The HTML root remains at 16px so
+   navbar / footer / chrome rems are unaffected.
+   =========================================================================== */
+
+#content,
+mdx-content {
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: "kern", "liga", "calt";
+}
+
+#page-title,
+#content h1 {
+  font-size: 1.75rem;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+}
+
+#content h2 {
+  font-size: 1.35rem;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  margin-top: 2rem;
+}
+
+#content h3 {
+  font-size: 1.1rem;
+  line-height: 1.3;
+  margin-top: 1.5rem;
+}
+
+#content h4 {
+  font-size: 0.975rem;
+  line-height: 1.35;
+}
+
+#content p {
+  margin: 0.6rem 0;
+}
+
+#content ul,
+#content ol {
+  margin: 0.5rem 0;
+}
+
+#content li {
+  margin: 0.2rem 0;
+}
+
+#content li > p {
+  margin: 0.25rem 0;
+}
+
+/* Sidebar: compact navigation */
+#sidebar-content {
+  font-size: 13px;
+}
+
+sidebar-group-header {
+  font-size: 11px !important;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* Table of contents: smallest, subtle */
+#table-of-contents-content,
+toc {
+  font-size: 12.5px;
+}
+
+toc-item {
+  line-height: 1.45;
+}
+
 /* Code blocks */
 pre.shiki {
   font-size: 0.8rem;

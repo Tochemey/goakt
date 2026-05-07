@@ -1,13 +1,17 @@
 ---
-title: Streams
+title: Reactive Streams
 description: Demand-driven, actor-native stream processing with backpressure, stage fusion, and rich operators.
-sidebarTitle: "🌊 Streams"
+sidebarTitle: "Reactive Streams"
 ---
 
 GoAkt Streams is a reactive, demand-driven data-processing library built directly on top of the GoAkt actor model.
 Every pipeline stage runs inside a GoAkt actor, which means it inherits supervision, lifecycle management, and location
 transparency for free. Pipelines are **lazy**: nothing executes until `RunnableGraph.Run` is called against a live
 `ActorSystem`.
+
+## Why
+
+Raw actor messaging requires you to handle buffer overflow, message loss, and backpressure by hand: every actor that consumes faster or slower than its peers becomes a coordination problem you have to solve case-by-case. Streams handle all of this automatically, giving you a safe and composable programming model on top of actors so you can focus on what flows through the pipeline rather than how to keep it from breaking under load.
 
 ## Overview
 
@@ -178,9 +182,18 @@ handle, err := stream.From(stream.FromConn(conn, 4096)).
 | `FromActor[T](pid)`                 | Pulls from a GoAkt actor via `PullRequest` / `PullResponse[T]`         |
 | `Tick(interval)`                    | Emits `time.Time` on a fixed interval; runs until cancelled            |
 | `Merge[T](sources...)`              | Fans N sources into one; completes when all inputs complete            |
-| `Combine[T, U, V](left, right, fn)` | Zips two sources pairwise via `fn` (zip semantics)                     |
+| `Concat[T](sources...)`             | Consumes sub-sources sequentially; completes when the last completes   |
+| `Combine[T, U, V](left, right, fn)` | Zips two sources pairwise via `fn` (mixed input types)                 |
+| `Zip[T](sources...)`                | Zips N same-typed sources into `[]T` tuples                            |
+| `ZipWith[T, V](fn, sources...)`     | N-input zip via user combine `fn`                                      |
+| `MergePreferred[T](idx, sources...)`| Like `Merge` but drains slot `idx` first when it has data              |
+| `MergePrioritized[T](weights, srcs)`| Weighted random slot selection over slots that have data               |
+| `MergeLatest[T](sources...)`        | Emits `[]T` snapshots of the latest value on every input               |
+| `MergeSequence[T](extractSeq, srcs)`| Emits in ascending seq order across N inputs                           |
 | `Broadcast[T](src, n)`              | Fans one source out to N independent branches                          |
 | `Balance[T](src, n)`                | Distributes one source across N branches with round-robin backpressure |
+| `Partition[T](src, n, fn)`          | Routes each element to one of N branches via predicate `fn`            |
+| `Unzip[T, A, B](src, fn)`           | Splits a source into two sources of different element types            |
 | `FromConn(conn, bufSize)`           | Reads `[]byte` frames from a `net.Conn`                                |
 
 ---
@@ -392,6 +405,41 @@ for i, branch := range workers {
 }
 ```
 
+### Partition
+
+`Partition` routes each element to exactly one of N branches based on a user predicate. Out-of-range or
+already-cancelled slot results are dropped silently. Backpressure is conservative: the hub pulls from upstream only
+when every active branch has outstanding demand, so the destination slot for any incoming element is guaranteed
+capacity.
+
+```go
+branches := stream.Partition(stream.FromChannel(eventCh), 3, func(e Event) int {
+    switch e.Kind {
+    case "audit":   return 0
+    case "metric":  return 1
+    default:        return 2
+    }
+})
+
+for i, b := range branches {
+    stream.From(b).To(stream.ForEach(handlers[i])).Run(ctx, sys)
+}
+```
+
+### Unzip
+
+`Unzip` splits a single source into two sources of potentially different element types. It is composed of
+`Broadcast(src, 2)` plus a `Map` per branch and follows the same backpressure rules as `Broadcast`.
+
+```go
+type kv struct { K string; V int }
+
+keys, values := stream.Unzip(
+    stream.FromChannel(kvCh),
+    func(p kv) (string, int) { return p.K, p.V },
+)
+```
+
 ### Merge
 
 `Merge` fans N independent sources into a single downstream. Elements arrive in non-deterministic order; completion
@@ -408,19 +456,116 @@ stream.From(merged).
     Run(ctx, sys)
 ```
 
-### Combine (zip)
+### Concat
 
-`Combine` pairs elements from two sources with a combine function (zip semantics). It completes when either source
-is exhausted:
+`Concat` consumes sub-sources sequentially: the next sub-pipeline only spawns after the current one completes,
+bounding in-flight cost at one sub-pipeline regardless of source count. Per-source ordering is preserved across the
+boundary.
+
+```go
+all := stream.Concat(
+    stream.Of(1, 2, 3),
+    stream.Of(4, 5),
+    stream.Of(6, 7, 8, 9),
+)
+// emits: 1, 2, 3, 4, 5, 6, 7, 8, 9
+```
+
+### Combine (zip, two-input mixed-type)
+
+`Combine` pairs elements from two sources with a combine function. It completes when either source is exhausted.
+Use it when the two inputs have different element types:
 
 ```go
 prices := stream.FromChannel(priceCh)    // Source[Price]
 orders := stream.FromChannel(orderCh)    // Source[Order]
 
-stream.From(stream.Combine(prices, orders, func(p Price, o Order) Quote {
+quotes := stream.Combine(prices, orders, func(p Price, o Order) Quote {
     return Quote{Price: p, Order: o}
-})).To(stream.ForEach(func(q Quote) { submit(q) })).
+})
+```
+
+### Zip / ZipWith (N-input same-type)
+
+`Zip` combines N same-typed sources into a stream of `[]T` tuples; `ZipWith` does the same with a user combine
+function. Both complete as soon as any input is exhausted.
+
+```go
+// []int snapshots, one per matched group
+trios := stream.Zip(
+    stream.Of(1, 2, 3),
+    stream.Of(10, 20, 30),
+    stream.Of(100, 200, 300),
+)
+
+// User combine: sum across slots
+sums := stream.ZipWith(
+    func(parts []int) int { s := 0; for _, v := range parts { s += v }; return s },
+    stream.Of(1, 2, 3),
+    stream.Of(10, 20, 30),
+    stream.Of(100, 200, 300),
+)
+```
+
+### MergePreferred
+
+Like `Merge`, but always drains the priority slot first when it has data, falling back to the lowest-indexed
+non-empty slot otherwise. Useful when one input represents a higher-priority feed (e.g. a control channel) that
+should be drained ahead of background traffic. Panics on out-of-range index.
+
+```go
+src := stream.MergePreferred(
+    0, // slot 0 = control
+    stream.FromChannel(controlCh),
+    stream.FromChannel(workCh),
+)
+```
+
+### MergePrioritized
+
+Picks the next slot by weighted random over slots that currently have data. Slots with weight 0 are only selected
+when they are the only ones with data. Panics on `weights` / `sources` length mismatch.
+
+```go
+src := stream.MergePrioritized(
+    []int{3, 1}, // src1 wins ~3:1
+    src1,
+    src2,
+)
+```
+
+### MergeLatest
+
+Emits `[]T` snapshots of the latest value seen on every input. Each upstream emission queues one snapshot, but the
+first only fires once every input has emitted at least once. Completes when every input completes.
+
+```go
+snapshots := stream.MergeLatest(
+    stream.FromChannel(temperatureCh),
+    stream.FromChannel(humidityCh),
+)
+
+stream.From(snapshots).
+    To(stream.ForEach(func(s []float64) {
+        log.Printf("temp=%.1f humidity=%.1f", s[0], s[1])
+    })).
     Run(ctx, sys)
+```
+
+### MergeSequence
+
+Emits in strict ascending sequence-number order across N inputs by buffering out-of-order elements in a min-heap.
+Inputs must collectively produce a contiguous range of sequence numbers starting from 0. If all inputs complete
+with the next-expected sequence still missing, the stream fails with a missing-sequence error.
+
+```go
+type item struct { Seq int64; Val string }
+
+ordered := stream.MergeSequence(
+    func(i item) int64 { return i.Seq },
+    evenSeqSrc, // emits seqs 0, 2, 4, ...
+    oddSeqSrc,  // emits seqs 1, 3, 5, ...
+)
 ```
 
 ---
@@ -520,19 +665,36 @@ sf := stream.GroupBy(src, 0, keyFn).
 
 ## Pipeline DSL (Graph builder)
 
-For non-linear topologies — fan-out branches that later merge, or multiple independent pipelines sharing a source —
-use the `Graph` DSL:
+For non-linear topologies (fan-out branches that later merge, or multiple independent pipelines sharing a source)
+use the `Graph` DSL. Nodes are identified by string names and connected by referencing upstream names:
 
 ```go
-g := stream.NewGraph()
+// The Graph DSL is type-erased: nodes operate on Source[any], Flow[any, any],
+// and Sink[any]. Use these typed constructors when assembling.
+g := stream.NewGraph().
+    AddSource("in",     stream.FromChannel[any](eventCh)).
+    AddFlow("validate", stream.Filter[any](isValid),         "in").
+    AddFlow("enrich",   stream.Map[any, any](enrich),        "validate").
+    AddSink("db",       stream.ForEach[any](db.Insert),      "enrich").
+    AddSink("metrics",  stream.ForEach[any](metrics.Record), "enrich")
 
-g.Source("in", stream.FromChannel(eventCh))
-g.Flow("validate", stream.From("in"), stream.Filter[Event](isValid))
-g.Flow("enrich",   stream.From("validate"), stream.Map(enrich))
-g.Sink("db",       stream.From("enrich"), stream.ForEach(func(e Event) { db.Insert(e) }))
-g.Sink("metrics",  stream.From("enrich"), stream.ForEach(func(e Event) { metrics.Record(e) }))
+rg, err := g.Build()
+if err != nil { return err }
 
-handle, err := g.Build().Run(ctx, sys)
+handle, err := rg.Run(ctx, sys)
+```
+
+Two fan-in node kinds are available alongside `AddFlow` and `AddSink`:
+
+- `MergeInto(name, from...)` interleaves elements from multiple upstream nodes (non-deterministic order).
+- `ConcatInto(name, from...)` consumes upstreams sequentially, preserving per-source ordering across the boundary.
+
+```go
+g := stream.NewGraph().
+    AddSource("a",   srcA).
+    AddSource("b",   srcB).
+    ConcatInto("ab", "a", "b").     // a then b, in order
+    AddSink("out",   sink, "ab")
 ```
 
 ---

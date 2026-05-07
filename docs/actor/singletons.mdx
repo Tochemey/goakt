@@ -1,7 +1,7 @@
 ---
 title: Cluster Singletons
 description: Single actor instance across the cluster.
-sidebarTitle: "👑 Cluster Singletons"
+sidebarTitle: "Cluster Singletons"
 ---
 
 A **cluster singleton** is an actor with exactly one instance across the entire cluster. It is hosted on the cluster coordinator (oldest node). When that host node leaves the cluster **gracefully**, the singleton is recreated on the new coordinator.

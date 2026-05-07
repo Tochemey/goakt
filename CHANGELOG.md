@@ -4,10 +4,62 @@
 
 ### ✨ New Additions
 
-- **SubFlow — substream support for the `stream` package.** The reactive streams package gains a "stream of streams" abstraction modelled after Akka Streams. Three constructors produce a `SubFlow[K, T]`: `stream.GroupBy(src, maxSubstreams, keyFn)` partitions by key — one substream per distinct key, materialised lazily; `stream.SplitWhen(src, predicate)` begins a new substream when the predicate is true (the triggering element becomes the FIRST of the new substream); `stream.SplitAfter(src, predicate)` ends the current substream after a predicate-true element (the triggering element becomes the LAST of the closing substream). `SplitWhen` and `SplitAfter` produce `SubFlow[int, T]` keyed by a monotonic synthetic counter — the natural primitives for parsing delimited streams. Per-substream transformations are appended with `stream.SubFlowVia(sf, flow)`; `stream.MergeSubstreams(sf)` collapses the substreams back into a flat `Source[T]` whose elements are interleaved as they become available. For `GroupBy` a `maxSubstreams` cap protects against unbounded key cardinality and surfaces as `ErrTooManySubstreams`. Each substream is implemented as a real GoAkt sub-pipeline (`feedSourceActor` → user flows → terminal merge sink) materialised lazily on its first element, so per-substream state (e.g. `Scan` accumulators) is genuinely independent. Key functions and predicates are type-erased at construction time, which lets `SubFlowVia` change the substream output type freely while routing continues to be computed against the original element type. Verified against per-key map / per-key scan / cardinality-cap / delimiter-start / delimiter-end / no-match-single-substream scenarios under `-race`.
-- **Per-substream backpressure with explicit overflow strategy.** `SubFlow.WithSubstreamBuffer(perKeyBuffer, strategy OverflowStrategy)` caps the number of in-flight elements the splitter will hold for a single substream before applying the configured `OverflowStrategy`. The default is 256 elements per key with `DropTail` semantics; `FailSource` raises `ErrSubstreamOverflow` and terminates the stream so skewed-workload incidents are observable rather than silent. Substream feed sources acknowledge consumption to the splitter in batches (matching the existing `flowActor` watermark refill pattern at `perKeyBuffer/4`), so per-key memory is bounded without per-element protocol overhead. Drops are reported through the existing `OnDrop` hook and the `droppedElements` metric; users wanting a different bound per substream can compose with the existing `Buffer` flow inside the per-substream chain. `DropHead` and `BackpressureSource` currently collapse to drop-newest and are documented as such — the alternatives would either break per-key ordering (`DropHead`) or deadlock the splitter on inbound (`BackpressureSource`).
-- **`FlatMapConcat` / `FlatMapMerge` — streaming per-element flat-map.** Two new flow operators for cases where the per-element expansion is itself a stream rather than an in-memory slice (paginated API calls, per-row database queries, fan-out worker invocations). `stream.FlatMapConcat(fn func(In) Source[Out])` drains each sub-source fully before starting the next, preserving end-to-end ordering across input elements; `stream.FlatMapMerge(breadth int, fn ...)` runs up to `breadth` sub-sources concurrently and interleaves their outputs as they arrive (order across sub-sources non-deterministic, order within each sub-source preserved). Both reuse the `subMergeSinkActor` plumbing introduced for SubFlow — sub-pipelines are real GoAkt actor pipelines materialised via the standard `materialize` path, with the merge sink forwarding `streamElement` → `subOut`, `streamComplete` → `subDone{key}`, `streamError` → `subErr{key, err}`. Demand is bounded by the breadth: the stage requests at most `breadth` elements from upstream, refilling only as sub-pipelines finish, so a slow inner source naturally throttles the outer pipeline. Active sub-pipeline `StreamHandle`s are tracked and `Abort()`ed on cancellation, failure, or `PostStop` so independent sub-coordinators do not outlive the FlatMap stage. Verified against ordering / concurrent-flatten / empty-inner / inner-error / breadth-zero-coercion scenarios under `-race`.
-- **Per-substream error strategy — substream failures are now visible.** A new `SubstreamErrorStrategy` enum, exposed via `SubFlow.WithErrorStrategy`, controls how the splitter reacts when a per-key sub-pipeline errors: `SubstreamFailAll` (default) surfaces the error verbatim through `StreamHandle.Err()` and terminates the entire stream — matching the FailFast contract of linear flows; `SubstreamDrop` blocklists the failing key, completes the affected substream silently, and lets sibling substreams finish normally; `SubstreamRestart` discards the failed pipeline so the next element with the same key spawns a fresh substream from scratch. Previously substream errors were swallowed by the standard `newSinkActor` path inside the per-substream merge sink — a correctness gap. The new dedicated `subMergeSinkActor` distinguishes `streamComplete` from `streamError` and forwards the latter as a typed `subErr{key, err}` message that the splitter dispatches per the configured strategy. Internal protocol additions (`subErr`, `subFeedAck`, key-carrying `subDone`) are not part of the public surface.
+#### Stream graph junctions
+
+Eight new fan-in / fan-out operators for the `stream` package, completing the non-linear topology surface.
+
+Fan-in:
+
+- `Concat(sources...)`: consumes sub-sources sequentially; only one sub-pipeline is materialised at a time.
+- `Zip(sources...) Source[[]T]` / `ZipWith(combine, sources...) Source[V]`: pair N same-typed inputs into tuples (or a user combine); completes when any input is exhausted.
+- `MergePreferred(preferredIdx, sources...)`: drains the priority slot first; falls back to the lowest-indexed non-empty slot.
+- `MergePrioritized(weights, sources...)`: picks the next slot by weighted random over slots with data.
+- `MergeLatest(sources...)`: emits `[]T` snapshots of the latest value on every input; first snapshot only after every input has emitted once.
+- `MergeSequence(extractSeq, sources...)`: emits in strict ascending sequence order across N inputs; fails on missing seq at completion.
+
+Fan-out:
+
+- `Partition(src, n, partitionFn)`: routes each element to exactly one branch by user predicate.
+- `Unzip(src, unzipFn)`: splits a single source into two sources of potentially different element types.
+
+Graph DSL adds a matching `ConcatInto(name, from...)` node kind alongside `MergeInto`.
+
+#### SubFlow: substream support
+
+A "stream of streams" abstraction. Three constructors produce a `SubFlow[K, T]`:
+
+- `GroupBy(src, maxSubstreams, keyFn)`: one substream per distinct key, materialised lazily; cardinality capped by `maxSubstreams` (overflow returns `ErrTooManySubstreams`).
+- `SplitWhen(src, predicate)`: start a new substream on a predicate-true element (becomes the first of the new substream).
+- `SplitAfter(src, predicate)`: end the current substream after a predicate-true element (becomes the last of the closing substream).
+
+Compose with `SubFlowVia(sf, flow)` for per-substream transforms; `MergeSubstreams(sf)` collapses back into a flat `Source[T]`. Each substream is a real GoAkt sub-pipeline materialised lazily on its first element, so per-substream state (e.g. `Scan` accumulators) is genuinely independent.
+
+#### Per-substream backpressure
+
+`SubFlow.WithSubstreamBuffer(perKeyBuffer, strategy)` caps in-flight elements per substream and applies an `OverflowStrategy`:
+
+- Default: 256 elements per key with `DropTail`.
+- `FailSource`: raises `ErrSubstreamOverflow` and terminates the stream so skewed-workload incidents are observable rather than silent.
+- `DropHead` and `BackpressureSource` currently collapse to drop-newest (alternatives would break per-key ordering or deadlock the splitter).
+
+Drops are reported via the existing `OnDrop` hook and `droppedElements` metric.
+
+#### `FlatMapConcat` / `FlatMapMerge`
+
+Two flow operators for per-element expansions that are themselves streams (paginated APIs, per-row queries, fan-out workers):
+
+- `FlatMapConcat(fn func(In) Source[Out])`: drains each sub-source fully before starting the next; preserves end-to-end ordering.
+- `FlatMapMerge(breadth, fn)`: runs up to `breadth` sub-sources concurrently; order within each preserved, order across non-deterministic. Demand is bounded by `breadth` so a slow inner source throttles the outer pipeline.
+
+#### Per-substream error strategy
+
+`SubFlow.WithErrorStrategy(SubstreamErrorStrategy)` controls how the splitter reacts when a per-key sub-pipeline errors:
+
+- `SubstreamFailAll` (default): fails the whole stream via `StreamHandle.Err()`; matches FailFast.
+- `SubstreamDrop`: blocklist the failing key; siblings finish normally.
+- `SubstreamRestart`: discard the failed pipeline; next element with the same key spawns a fresh substream.
+
+Previously substream errors were swallowed inside the per-substream sink, a correctness gap closed by this change.
 
 ## v4.2.2 - 2026-04-24
 
