@@ -4,6 +4,17 @@
 
 ### ✨ New Additions
 
+#### Cross-node stream refs (`SourceRef` / `SinkRef`)
+
+Wire-portable handles that adapt a `Source[T]` or `Sink[T]` into a stage usable on any node in the cluster, mirroring Akka StreamRefs.
+
+- `Source.SourceRef(ctx, sys)` publishes a producer; receivers reconstruct the source via `ref.Source(sys)`. `Sink.SinkRef(ctx, sys)` does the symmetric thing for consumers via `ref.Sink(sys)`. Refs themselves are plain serialisable values and can be shipped inside any registered remote message — so a node can hand off "where to send/read from" the same way it would hand off any other piece of data.
+- **Setup prerequisite — both registrations are required on every node:** append `stream.RemoteOptions()` to your `remote.NewConfig` (registers the subscribe / request / complete / error / cancel control wires) **and** register the element type with `remote.WithSerializables(new(MyEvent))` (the same registration any remote `rctx.Tell` to a remote PID needs). Forgetting either is the common failure mode — missing control-plane registration manifests as the bridge hanging on subscribe; missing element-type registration manifests as `"no serializer found"` on the producer's first ship or as silent dead-letter on the consumer side. Asymmetric registration (one node has it, the other doesn't) breaks only the unconfigured direction. User element types travel across the wire as ordinary remote messages — no extra envelope, no double encoding — so the remoting layer's existing CBOR registry handles them with no per-stream serializer overhead.
+- Single-subscription semantics. The endpoint stays alive through a 30s grace window after stream completion so a racing late subscriber gets a deterministic `"already consumed"` rejection rather than telling a dead actor; after the window the endpoint reaps itself via `system.ScheduleOnce`, so consumed refs don't leak in long-running processes.
+- Wire-level credit: the consumer's downstream demand drives `streamRequestWire` upstream; the producer ships only what was requested. A bounded pending queue (1024 elements) converts a slow-consumer scenario into a visible `"backpressure overflow"` stream error instead of unbounded mailbox growth.
+- Bridges `Watch` their remote endpoint as defense in depth — an unexpected endpoint death (panic, system shutdown mid-stream, expired grace on a stale ref) surfaces a stream error on the bridge's `StreamHandle` instead of a hang.
+- Endpoint resolution uses the same `flowchartsman/retry` package the rest of goakt uses for cluster lookups (jittered exponential backoff, capped 10s budget) so cross-cluster propagation latency is absorbed transparently.
+
 #### Stream graph junctions
 
 Eight new fan-in / fan-out operators for the `stream` package, completing the non-linear topology surface.
@@ -60,6 +71,10 @@ Two flow operators for per-element expansions that are themselves streams (pagin
 - `SubstreamRestart`: discard the failed pipeline; next element with the same key spawns a fresh substream.
 
 Previously substream errors were swallowed inside the per-substream sink, a correctness gap closed by this change.
+
+### 🐛 Fixes
+
+- **Shared remoting client closed by per-actor shutdown.** `pid.doStop` and `grainPID.deactivate` were calling `pid.remoting.Close()`, but `pid.remoting` is the actor system's shared remoting client (set on every spawned PID via `withRemoting(x.remoting)` in `actorSystem.spawnActor`). Stopping any single actor closed every outbound coalescer system-wide, so a concurrent `rctx.Tell` from another live actor saw `"remote send failed: coalescer is closed"` and silently dropped the message — observable as cross-node stream tests where the producer source completes, shuts down, and races with the bridge's element sends. The remoting client is system-owned; it is now closed only by `shutdownRemoting` during actor-system shutdown. Per-actor lifecycle no longer touches it.
 
 ## v4.2.2 - 2026-04-24
 

@@ -187,17 +187,25 @@ func fromWire[T any](msg any) (T, bool) {
 }
 
 // resolveEndpoint looks up the endpoint actor by name. Cluster registration
-// on the producer side is asynchronous, so the first ActorOf right after a
-// ref is published may miss; the retry loop hides that propagation lag from
-// callers. Uses the same flowchartsman/retry package the rest of goakt uses
-// for cluster operations — exponential backoff with jitter, capped at
-// maxBackoff per-attempt and at totalBudget overall via the context.
+// on the producer side is asynchronous: putActorOnCluster hands off to a
+// background broadcast queue, replicateActors drains the queue one entry at
+// a time (each cluster.PutActor up to a 1s timeout), and olric replication
+// then has to reach the consumer node. Under heavy load — many actor systems
+// sharing a host on CI, slow olric peers — that pipeline can take tens of
+// seconds before the new actor is visible from the other node.
+//
+// The retry loop hides that propagation lag from callers using the same
+// flowchartsman/retry package the rest of goakt uses for cluster operations
+// (jittered exponential backoff, capped at maxBackoff per attempt, capped at
+// totalBudget overall via the context). The 30s budget is sized generously
+// for loaded CI; happy-path lookups still return on the first attempt in
+// well under a millisecond.
 func resolveEndpoint(ctx context.Context, sys actor.ActorSystem, name string) (*actor.PID, error) {
 	const (
-		maxAttempts    = 100
+		maxAttempts    = 300
 		initialBackoff = 100 * time.Millisecond
 		maxBackoff     = time.Second
-		totalBudget    = 10 * time.Second
+		totalBudget    = 30 * time.Second
 	)
 
 	ctx, cancel := context.WithTimeout(ctx, totalBudget)
