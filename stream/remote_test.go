@@ -147,7 +147,7 @@ func TestSourceRef_StopCancels(t *testing.T) {
 
 	// Use Tick as an effectively-infinite source so the stream cannot finish
 	// on its own — only Stop should drive completion.
-	ref, err := stream.Tick(50 * time.Millisecond).SourceRef(ctx, sys)
+	ref, err := stream.Tick(50*time.Millisecond).SourceRef(ctx, sys)
 	require.NoError(t, err)
 
 	_, sink := stream.Collect[time.Time]()
@@ -297,7 +297,7 @@ func TestSourceRef_EndpointDeathSurfacedAsError(t *testing.T) {
 
 	// Tick is effectively-infinite so the bridge cannot finish on its own
 	// before we kill the endpoint.
-	ref, err := stream.Tick(50 * time.Millisecond).SourceRef(ctx, sys)
+	ref, err := stream.Tick(50*time.Millisecond).SourceRef(ctx, sys)
 	require.NoError(t, err)
 
 	_, sink := stream.Collect[time.Time]()
