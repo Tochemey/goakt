@@ -138,7 +138,7 @@ func newClusterPair(t *testing.T, extraOpts ...remote.Option) (actor.ActorSystem
 		remoteCfg := remote.NewConfig(host, remotingPort, remoteOpts...)
 
 		sys, err := actor.NewActorSystem(name,
-			actor.WithLogger(log.DefaultLogger),
+			actor.WithLogger(log.DiscardLogger),
 			actor.WithCluster(clusterCfg),
 			actor.WithRemote(remoteCfg),
 			actor.WithShutdownTimeout(30*time.Second),
