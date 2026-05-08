@@ -1,13 +1,17 @@
 ---
-title: Streams
+title: Reactive Streams
 description: Demand-driven, actor-native stream processing with backpressure, stage fusion, and rich operators.
-sidebarTitle: "🌊 Streams"
+sidebarTitle: "Reactive Streams"
 ---
 
 GoAkt Streams is a reactive, demand-driven data-processing library built directly on top of the GoAkt actor model.
 Every pipeline stage runs inside a GoAkt actor, which means it inherits supervision, lifecycle management, and location
 transparency for free. Pipelines are **lazy**: nothing executes until `RunnableGraph.Run` is called against a live
 `ActorSystem`.
+
+## Why
+
+Raw actor messaging requires you to handle buffer overflow, message loss, and backpressure by hand: every actor that consumes faster or slower than its peers becomes a coordination problem you have to solve case-by-case. Streams handle all of this automatically, giving you a safe and composable programming model on top of actors so you can focus on what flows through the pipeline rather than how to keep it from breaking under load.
 
 ## Overview
 
@@ -169,19 +173,28 @@ handle, err := stream.From(stream.FromConn(conn, 4096)).
 
 ### Reference
 
-| Constructor                         | Description                                                            |
-| ----------------------------------- | ---------------------------------------------------------------------- |
-| `Of[T](values...)`                  | Finite source from a fixed set of values                               |
-| `Range(start, end)`                 | Integer range `[start, end)`                                           |
-| `Unfold[S, T](seed, step)`          | Generates values from a seed with a stateful step function             |
-| `FromChannel[T](ch)`                | Reads from a Go channel; completes when the channel closes             |
-| `FromActor[T](pid)`                 | Pulls from a GoAkt actor via `PullRequest` / `PullResponse[T]`         |
-| `Tick(interval)`                    | Emits `time.Time` on a fixed interval; runs until cancelled            |
-| `Merge[T](sources...)`              | Fans N sources into one; completes when all inputs complete            |
-| `Combine[T, U, V](left, right, fn)` | Zips two sources pairwise via `fn` (zip semantics)                     |
-| `Broadcast[T](src, n)`              | Fans one source out to N independent branches                          |
-| `Balance[T](src, n)`                | Distributes one source across N branches with round-robin backpressure |
-| `FromConn(conn, bufSize)`           | Reads `[]byte` frames from a `net.Conn`                                |
+| Constructor                          | Description                                                            |
+| ------------------------------------ | ---------------------------------------------------------------------- |
+| `Of[T](values...)`                   | Finite source from a fixed set of values                               |
+| `Range(start, end)`                  | Integer range `[start, end)`                                           |
+| `Unfold[S, T](seed, step)`           | Generates values from a seed with a stateful step function             |
+| `FromChannel[T](ch)`                 | Reads from a Go channel; completes when the channel closes             |
+| `FromActor[T](pid)`                  | Pulls from a GoAkt actor via `PullRequest` / `PullResponse[T]`         |
+| `Tick(interval)`                     | Emits `time.Time` on a fixed interval; runs until cancelled            |
+| `Merge[T](sources...)`               | Fans N sources into one; completes when all inputs complete            |
+| `Concat[T](sources...)`              | Consumes sub-sources sequentially; completes when the last completes   |
+| `Combine[T, U, V](left, right, fn)`  | Zips two sources pairwise via `fn` (mixed input types)                 |
+| `Zip[T](sources...)`                 | Zips N same-typed sources into `[]T` tuples                            |
+| `ZipWith[T, V](fn, sources...)`      | N-input zip via user combine `fn`                                      |
+| `MergePreferred[T](idx, sources...)` | Like `Merge` but drains slot `idx` first when it has data              |
+| `MergePrioritized[T](weights, srcs)` | Weighted random slot selection over slots that have data               |
+| `MergeLatest[T](sources...)`         | Emits `[]T` snapshots of the latest value on every input               |
+| `MergeSequence[T](extractSeq, srcs)` | Emits in ascending seq order across N inputs                           |
+| `Broadcast[T](src, n)`               | Fans one source out to N independent branches                          |
+| `Balance[T](src, n)`                 | Distributes one source across N branches with round-robin backpressure |
+| `Partition[T](src, n, fn)`           | Routes each element to one of N branches via predicate `fn`            |
+| `Unzip[T, A, B](src, fn)`            | Splits a source into two sources of different element types            |
+| `FromConn(conn, bufSize)`            | Reads `[]byte` frames from a `net.Conn`                                |
 
 ---
 
@@ -392,6 +405,41 @@ for i, branch := range workers {
 }
 ```
 
+### Partition
+
+`Partition` routes each element to exactly one of N branches based on a user predicate. Out-of-range or
+already-cancelled slot results are dropped silently. Backpressure is conservative: the hub pulls from upstream only
+when every active branch has outstanding demand, so the destination slot for any incoming element is guaranteed
+capacity.
+
+```go
+branches := stream.Partition(stream.FromChannel(eventCh), 3, func(e Event) int {
+    switch e.Kind {
+    case "audit":   return 0
+    case "metric":  return 1
+    default:        return 2
+    }
+})
+
+for i, b := range branches {
+    stream.From(b).To(stream.ForEach(handlers[i])).Run(ctx, sys)
+}
+```
+
+### Unzip
+
+`Unzip` splits a single source into two sources of potentially different element types. It is composed of
+`Broadcast(src, 2)` plus a `Map` per branch and follows the same backpressure rules as `Broadcast`.
+
+```go
+type kv struct { K string; V int }
+
+keys, values := stream.Unzip(
+    stream.FromChannel(kvCh),
+    func(p kv) (string, int) { return p.K, p.V },
+)
+```
+
 ### Merge
 
 `Merge` fans N independent sources into a single downstream. Elements arrive in non-deterministic order; completion
@@ -408,19 +456,116 @@ stream.From(merged).
     Run(ctx, sys)
 ```
 
-### Combine (zip)
+### Concat
 
-`Combine` pairs elements from two sources with a combine function (zip semantics). It completes when either source
-is exhausted:
+`Concat` consumes sub-sources sequentially: the next sub-pipeline only spawns after the current one completes,
+bounding in-flight cost at one sub-pipeline regardless of source count. Per-source ordering is preserved across the
+boundary.
+
+```go
+all := stream.Concat(
+    stream.Of(1, 2, 3),
+    stream.Of(4, 5),
+    stream.Of(6, 7, 8, 9),
+)
+// emits: 1, 2, 3, 4, 5, 6, 7, 8, 9
+```
+
+### Combine (zip, two-input mixed-type)
+
+`Combine` pairs elements from two sources with a combine function. It completes when either source is exhausted.
+Use it when the two inputs have different element types:
 
 ```go
 prices := stream.FromChannel(priceCh)    // Source[Price]
 orders := stream.FromChannel(orderCh)    // Source[Order]
 
-stream.From(stream.Combine(prices, orders, func(p Price, o Order) Quote {
+quotes := stream.Combine(prices, orders, func(p Price, o Order) Quote {
     return Quote{Price: p, Order: o}
-})).To(stream.ForEach(func(q Quote) { submit(q) })).
+})
+```
+
+### Zip / ZipWith (N-input same-type)
+
+`Zip` combines N same-typed sources into a stream of `[]T` tuples; `ZipWith` does the same with a user combine
+function. Both complete as soon as any input is exhausted.
+
+```go
+// []int snapshots, one per matched group
+trios := stream.Zip(
+    stream.Of(1, 2, 3),
+    stream.Of(10, 20, 30),
+    stream.Of(100, 200, 300),
+)
+
+// User combine: sum across slots
+sums := stream.ZipWith(
+    func(parts []int) int { s := 0; for _, v := range parts { s += v }; return s },
+    stream.Of(1, 2, 3),
+    stream.Of(10, 20, 30),
+    stream.Of(100, 200, 300),
+)
+```
+
+### MergePreferred
+
+Like `Merge`, but always drains the priority slot first when it has data, falling back to the lowest-indexed
+non-empty slot otherwise. Useful when one input represents a higher-priority feed (e.g. a control channel) that
+should be drained ahead of background traffic. Panics on out-of-range index.
+
+```go
+src := stream.MergePreferred(
+    0, // slot 0 = control
+    stream.FromChannel(controlCh),
+    stream.FromChannel(workCh),
+)
+```
+
+### MergePrioritized
+
+Picks the next slot by weighted random over slots that currently have data. Slots with weight 0 are only selected
+when they are the only ones with data. Panics on `weights` / `sources` length mismatch.
+
+```go
+src := stream.MergePrioritized(
+    []int{3, 1}, // src1 wins ~3:1
+    src1,
+    src2,
+)
+```
+
+### MergeLatest
+
+Emits `[]T` snapshots of the latest value seen on every input. Each upstream emission queues one snapshot, but the
+first only fires once every input has emitted at least once. Completes when every input completes.
+
+```go
+snapshots := stream.MergeLatest(
+    stream.FromChannel(temperatureCh),
+    stream.FromChannel(humidityCh),
+)
+
+stream.From(snapshots).
+    To(stream.ForEach(func(s []float64) {
+        log.Printf("temp=%.1f humidity=%.1f", s[0], s[1])
+    })).
     Run(ctx, sys)
+```
+
+### MergeSequence
+
+Emits in strict ascending sequence-number order across N inputs by buffering out-of-order elements in a min-heap.
+Inputs must collectively produce a contiguous range of sequence numbers starting from 0. If all inputs complete
+with the next-expected sequence still missing, the stream fails with a missing-sequence error.
+
+```go
+type item struct { Seq int64; Val string }
+
+ordered := stream.MergeSequence(
+    func(i item) int64 { return i.Seq },
+    evenSeqSrc, // emits seqs 0, 2, 4, ...
+    oddSeqSrc,  // emits seqs 1, 3, 5, ...
+)
 ```
 
 ---
@@ -520,20 +665,144 @@ sf := stream.GroupBy(src, 0, keyFn).
 
 ## Pipeline DSL (Graph builder)
 
-For non-linear topologies — fan-out branches that later merge, or multiple independent pipelines sharing a source —
-use the `Graph` DSL:
+For non-linear topologies (fan-out branches that later merge, or multiple independent pipelines sharing a source)
+use the `Graph` DSL. Nodes are identified by string names and connected by referencing upstream names:
 
 ```go
-g := stream.NewGraph()
+// The Graph DSL is type-erased: nodes operate on Source[any], Flow[any, any],
+// and Sink[any]. Use these typed constructors when assembling.
+g := stream.NewGraph().
+    AddSource("in",     stream.FromChannel[any](eventCh)).
+    AddFlow("validate", stream.Filter[any](isValid),         "in").
+    AddFlow("enrich",   stream.Map[any, any](enrich),        "validate").
+    AddSink("db",       stream.ForEach[any](db.Insert),      "enrich").
+    AddSink("metrics",  stream.ForEach[any](metrics.Record), "enrich")
 
-g.Source("in", stream.FromChannel(eventCh))
-g.Flow("validate", stream.From("in"), stream.Filter[Event](isValid))
-g.Flow("enrich",   stream.From("validate"), stream.Map(enrich))
-g.Sink("db",       stream.From("enrich"), stream.ForEach(func(e Event) { db.Insert(e) }))
-g.Sink("metrics",  stream.From("enrich"), stream.ForEach(func(e Event) { metrics.Record(e) }))
+rg, err := g.Build()
+if err != nil { return err }
 
-handle, err := g.Build().Run(ctx, sys)
+handle, err := rg.Run(ctx, sys)
 ```
+
+Two fan-in node kinds are available alongside `AddFlow` and `AddSink`:
+
+- `MergeInto(name, from...)` interleaves elements from multiple upstream nodes (non-deterministic order).
+- `ConcatInto(name, from...)` consumes upstreams sequentially, preserving per-source ordering across the boundary.
+
+```go
+g := stream.NewGraph().
+    AddSource("a",   srcA).
+    AddSource("b",   srcB).
+    ConcatInto("ab", "a", "b").     // a then b, in order
+    AddSink("out",   sink, "ab")
+```
+
+---
+
+## Cross-node stream refs
+
+`SourceRef[T]` and `SinkRef[T]` are wire-portable handles to a stream endpoint actor. Pass one inside any registered remote message and a different node materialises it back into an ordinary `Source[T]` or `Sink[T]` — the same fluent builder works whether the producer and consumer share an actor system or live on opposite ends of a cluster. The model mirrors Akka StreamRefs.
+
+Refs encode the producer node's address (host, port, actor name), so cross-node resolution is a direct `RemoteLookup` against the producer's remote server. There is no reliance on cluster-registry replication — the consumer can resolve and subscribe the moment the producer node is reachable, regardless of how loaded the cluster's actor registry is.
+
+### Setup
+
+Cross-node refs only work when both sides of the connection have the wire control protocol **and** the element type registered with their remoting layer. Without this registration the consumer's bridge can't subscribe (control messages won't deserialize) or the producer's elements can't be serialised — symptoms include hanging `Run` calls, stream-level `"no serializer found for message type ..."` errors, and elements silently routed to dead-letter.
+
+**Required on every node that participates:**
+
+```go
+remoteCfg := remote.NewConfig("0.0.0.0", 9000,
+    stream.RemoteOptions(),                  // (1) control-plane wire types
+    remote.WithSerializables(new(MyEvent)),  // (2) your element type T
+)
+
+sys, err := actor.NewActorSystem("my-app",
+    actor.WithRemote(remoteCfg),             // remoting must be enabled
+    actor.WithCluster(clusterCfg),           // for cluster-based discovery
+)
+```
+
+1. `stream.RemoteOptions()` registers the small subscribe / request / complete / error / cancel control-plane wire types. Append it to your existing `remote.NewConfig` options on every node — producer side, consumer side, and any node that might hold or forward a ref. **Forgetting it on either side is the most common cause of hangs**: the bridge sends `streamSubscribeWire` and the endpoint never sees a recognisable message because its remoting layer can't decode the type.
+2. Element types must be registered with `remote.WithSerializables(new(MyEvent))` — same as for any other `rctx.Tell` to a remote PID. Refs do **not** wrap elements in an envelope, so missing element-type registration on the producer side fails the send, and missing it on the consumer side fails the receive.
+
+**Things that will silently break the feature otherwise:**
+
+- **Asymmetric registration.** The producer registers `MyEvent` but the consumer does not (or vice versa). The end with the missing registration logs a `"no serializer found"` warning when the message arrives; for the consumer that means elements never reach the local sink. Always register the same element types on both ends.
+- **Registering the value type as a non-pointer.** `remote.WithSerializables` keys on the exact type passed in — typically `*MyEvent` from `new(MyEvent)`. Sending a value-type element over the wire still works because the bridge's `wireForm` helper auto-wraps non-pointer values into a `*T` registered key, but if you pass a struct value (instead of `new(...)` or an interface pointer) into `WithSerializables` itself, the registry stores the wrong type and lookups miss. Stick to the `new(MyEvent)` form.
+- **Skipping `stream.RemoteOptions()` on a forwarding-only node.** Any node that may receive a `SourceRef[T]` / `SinkRef[T]` inside another message — even just to inspect or relay it — needs `stream.RemoteOptions()` registered, because the ref struct itself is serialised through the same registry. A node missing it will fail to deserialize incoming refs.
+- **Disabling remoting entirely.** Cross-node refs require `actor.WithRemote(...)` on both ends. Without it `ref.Source(sys)` / `ref.Sink(sys)` materialise a bridge that can't reach the remote endpoint and surfaces an `"actor not found"` resolution error after the retry budget expires.
+- **Producer node unreachable at resolve time.** Refs carry the producer node's host:port, so resolution is a direct `RemoteLookup` against the producer's remote server — there is no dependency on async cluster registry propagation. If the producer node is briefly unreachable when the consumer resolves (network blip, just-restarting node), the bridge retries with jittered exponential backoff for up to 10s. After that it surfaces a `"resolve source ref"` / `"resolve sink ref"` error rather than hanging — handle it in the receiving side just like any remote-Tell failure.
+
+Element values cross the wire as ordinary remote messages — no extra envelope, no double encoding. Whatever is registered with `remote.WithSerializables` round-trips automatically, just as it would for any other `rctx.Tell` to a remote PID.
+
+### `SourceRef` — publish a producer
+
+A `SourceRef[T]` exposes a local `Source[T]` to a remote consumer. The ref is a plain serialisable value — wrap it in any user-defined message type you like (registered with the same remoting layer) and ship it however your application already moves data between nodes.
+
+```go
+// User-defined wrapper — anything carrying the ref alongside whatever
+// other context the consumer needs.
+type OffersFeed struct {
+    Ref stream.SourceRef[int]
+}
+
+// Both nodes register the wrapper plus the int element type:
+//   stream.RemoteOptions(),
+//   remote.WithSerializables(new(OffersFeed), new(int)),
+
+// Producer node (sysA)
+ref, err := stream.Of(1, 2, 3, 4, 5).SourceRef(ctx, sysA)
+if err != nil { return err }
+
+// Hand the ref off through whatever channel makes sense for your app —
+// a remote Tell, a cluster pub/sub topic, an actor registry, an HTTP
+// response body decoded back into an OffersFeed, etc.
+publisher.Tell(ctx, downstreamPID, &OffersFeed{Ref: ref})
+
+// Consumer node (sysB), inside the actor that received OffersFeed:
+feed := msg.(*OffersFeed)
+col, sink := stream.Collect[int]()
+h, err := feed.Ref.Source(sysB).
+    Via(stream.Map(func(n int) int { return n * 2 })).
+    To(sink).
+    Run(ctx, sysB)
+```
+
+The underlying source pipeline is materialised lazily — only when a subscriber connects via `ref.Source(...).Run(...)`. Constructing the ref is cheap.
+
+### `SinkRef` — publish a consumer
+
+The mirror image: a `SinkRef[T]` exposes a local `Sink[T]` so a remote node can pipe data into it.
+
+```go
+// Consumer node (sysA)
+col, sink := stream.Collect[int]()
+ref, err := sink.SinkRef(ctx, sysA)
+if err != nil { return err }
+
+// Producer node (sysB)
+h, err := stream.From(stream.Of(10, 20, 30, 40, 50)).
+    To(ref.Sink(sysB)).
+    Run(ctx, sysB)
+```
+
+### Semantics
+
+- **Single subscription per ref.** A second `ref.Source(...)` / `ref.Sink(...)` materialisation observes a stream-level error (`"already subscribed"` while the first stream is active, `"already consumed"` after it finishes). Refs are one-shot, matching Akka StreamRefs.
+- **Wire-level credit.** The consumer's downstream demand drives `streamRequestWire` to the producer; the producer ships exactly that many elements before pausing. A bounded pending queue (1024 elements) on the producer side converts a slow-consumer scenario into a visible `"backpressure overflow"` stream error rather than unbounded buffering on the producer node.
+- **Bounded lifecycle.** After the stream completes (success or error), the endpoint actor stays alive for a 30-second grace window so a racing late subscriber gets a clean rejection rather than telling a dead actor and hanging. After the grace window the endpoint reaps itself via `system.ScheduleOnce`. Refs that are never consumed are reaped at actor-system shutdown.
+- **Death detection.** Bridges `Watch` their remote endpoint as defense in depth — an unexpected endpoint death (panic, system shutdown mid-stream, expired grace on a stale ref) surfaces as a stream error on the bridge's `StreamHandle.Err()`, never a hang. Combined with retry-with-jitter resolution that absorbs cluster propagation latency, this keeps cross-node graphs reliable under load.
+
+### Reference
+
+| Constructor / method                   | Description                                                       |
+| -------------------------------------- | ----------------------------------------------------------------- |
+| `Source[T].SourceRef(ctx, sys)`        | Publish a `Source[T]` as a wire-portable `SourceRef[T]`           |
+| `(SourceRef[T]).Source(sys) Source[T]` | Adapt a ref back into a `Source[T]` for use in a local graph      |
+| `Sink[T].SinkRef(ctx, sys)`            | Publish a `Sink[T]` as a wire-portable `SinkRef[T]`               |
+| `(SinkRef[T]).Sink(sys) Sink[T]`       | Adapt a ref back into a `Sink[T]` for use in a local graph        |
+| `RemoteOptions() remote.Option`        | Registers the control-plane wire protocol with `remote.NewConfig` |
 
 ---
 
@@ -847,6 +1116,7 @@ GoAkt Streams. Both implement the Reactive Streams specification.
 | **Fan-out**           | `Broadcast`, `Balance`, `Partition`                                         | `Broadcast`, `Balance`                                                                                 |
 | **Fan-in**            | `Merge`, `MergePreferred`, `Zip`, `ZipWith`                                 | `Merge`, `Combine`                                                                                     |
 | **Substreams**        | `groupBy`, `splitWhen`, `splitAfter`, `mergeSubstreams`, `concatSubstreams` | `GroupBy`, `SplitWhen`, `SplitAfter`, `MergeSubstreams` (with per-substream buffer and error strategy) |
+| **Cross-node refs**   | `SourceRef`, `SinkRef`                                                      | `SourceRef`, `SinkRef` (single-subscription, grace-period reaped, credit-paced)                        |
 | **Actor interop**     | `Source.actorRef`, `Sink.actorRef`                                          | `FromActor`, `ToActor`, `ToActorNamed`                                                                 |
 | **Type safety**       | Full (Scala generics)                                                       | Full (Go generics)                                                                                     |
 | **Operator richness** | Very rich                                                                   | Core operators; sufficient for most workloads                                                          |

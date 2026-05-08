@@ -23,6 +23,8 @@
 package stream
 
 import (
+	"fmt"
+	mrand "math/rand/v2"
 	"net"
 	"time"
 
@@ -222,6 +224,221 @@ func Merge[T any](sources ...Source[T]) Source[T] {
 	return Source[T]{stages: []*stageDesc{desc}}
 }
 
+// MergeLatest merges N same-typed sources into a stream of []T snapshots.
+// Each upstream emission queues one snapshot containing the latest element
+// seen on every input. The first snapshot is only emitted once every input
+// has produced at least one element. Completes when every input has
+// completed and every queued snapshot has been emitted.
+func MergeLatest[T any](sources ...Source[T]) Source[[]T] {
+	config := defaultStageConfig()
+	subStages := make([][]*stageDesc, len(sources))
+	for i, src := range sources {
+		subStages[i] = src.stages
+	}
+	desc := &stageDesc{
+		id:   newStageID(),
+		kind: sourceKind,
+		makeActor: func(cfg StageConfig) actor.Actor {
+			return newMergeLatestSourceActor[T](subStages, cfg)
+		},
+		config: config,
+	}
+	return Source[[]T]{stages: []*stageDesc{desc}}
+}
+
+// MergeSequence merges N same-typed sources whose elements collectively form a
+// contiguous range of sequence numbers starting from 0. extractSeq pulls the
+// sequence number from each element. The output emits elements in ascending
+// sequence order, buffering out-of-order elements internally.
+//
+// If all inputs complete while the buffer still holds elements whose smallest
+// sequence number is not the next expected one, the stream fails with a
+// missing-sequence error.
+func MergeSequence[T any](extractSeq func(T) int64, sources ...Source[T]) Source[T] {
+	config := defaultStageConfig()
+	subStages := make([][]*stageDesc, len(sources))
+	for i, src := range sources {
+		subStages[i] = src.stages
+	}
+	erased := func(v any) int64 {
+		t, ok := v.(T)
+		if !ok {
+			return -1
+		}
+		return extractSeq(t)
+	}
+	desc := &stageDesc{
+		id:   newStageID(),
+		kind: sourceKind,
+		makeActor: func(cfg StageConfig) actor.Actor {
+			return newMergeSequenceSourceActor[T](subStages, erased, cfg)
+		},
+		config: config,
+	}
+	return Source[T]{stages: []*stageDesc{desc}}
+}
+
+// MergePreferred merges N sources but always drains the slot at index
+// preferred first when that slot has buffered elements. If the preferred
+// slot is empty, it falls back to the lowest-indexed non-empty slot. This
+// is useful when one input represents a higher-priority feed that should be
+// drained ahead of background traffic.
+//
+// Panics if preferred is out of range. Returns an empty source when sources
+// is empty.
+func MergePreferred[T any](preferred int, sources ...Source[T]) Source[T] {
+	if len(sources) == 0 {
+		return Merge[T]()
+	}
+	if preferred < 0 || preferred >= len(sources) {
+		panic(fmt.Sprintf("stream: MergePreferred: preferred index %d out of range [0,%d)", preferred, len(sources)))
+	}
+	pref := preferred
+	selectSlot := func(bufs []queue) int {
+		if !bufs[pref].empty() {
+			return pref
+		}
+		for i := range bufs {
+			if !bufs[i].empty() {
+				return i
+			}
+		}
+		return -1
+	}
+	return newWeightedMergeSource(sources, selectSlot)
+}
+
+// MergePrioritized merges N sources and selects the next slot to drain by
+// weighted random choice: slot i is chosen with probability weights[i] /
+// sum(weights[j] for j with non-empty buffer). Slots whose buffers are empty
+// are skipped. Slots with weight 0 are only selected when they are the only
+// slots with data.
+//
+// weights must have the same length as sources. Panics on length mismatch.
+// Returns an empty source when sources is empty.
+func MergePrioritized[T any](weights []int, sources ...Source[T]) Source[T] {
+	if len(sources) == 0 {
+		return Merge[T]()
+	}
+	if len(weights) != len(sources) {
+		panic(fmt.Sprintf("stream: MergePrioritized: weights length %d != sources length %d", len(weights), len(sources)))
+	}
+	w := make([]int, len(weights))
+	copy(w, weights)
+	rng := mrand.New(mrand.NewPCG(mrand.Uint64(), mrand.Uint64())) // #nosec G404 -- non-security: weighted slot selection for stream merging
+	selectSlot := func(bufs []queue) int {
+		total := 0
+		for i := range bufs {
+			if !bufs[i].empty() {
+				total += w[i]
+			}
+		}
+		if total <= 0 {
+			for i := range bufs {
+				if !bufs[i].empty() {
+					return i
+				}
+			}
+			return -1
+		}
+		r := rng.IntN(total)
+		for i := range bufs {
+			if bufs[i].empty() {
+				continue
+			}
+			r -= w[i]
+			if r < 0 {
+				return i
+			}
+		}
+		return -1
+	}
+	return newWeightedMergeSource(sources, selectSlot)
+}
+
+// newWeightedMergeSource is the shared body of MergePreferred and
+// MergePrioritized: it captures the sub-source stage lists and wires a
+// weightedMergeSourceActor with the given selector strategy.
+func newWeightedMergeSource[T any](sources []Source[T], selectSlot slotSelector) Source[T] {
+	config := defaultStageConfig()
+	subStages := make([][]*stageDesc, len(sources))
+	for i, src := range sources {
+		subStages[i] = src.stages
+	}
+	desc := &stageDesc{
+		id:   newStageID(),
+		kind: sourceKind,
+		makeActor: func(cfg StageConfig) actor.Actor {
+			return newWeightedMergeSourceActor[T](subStages, selectSlot, cfg)
+		},
+		config: config,
+	}
+	return Source[T]{stages: []*stageDesc{desc}}
+}
+
+// Concat creates a Source that consumes elements from each input source in order:
+// it pulls from sources[i+1] only after sources[i] completes. Per-source ordering
+// is preserved, and the concatenation completes when the last source completes.
+//
+// Unlike Merge (which interleaves), Concat materializes at most one sub-pipeline
+// at a time, bounding the in-flight resource cost regardless of how many
+// sources are concatenated.
+func Concat[T any](sources ...Source[T]) Source[T] {
+	config := defaultStageConfig()
+	subStages := make([][]*stageDesc, len(sources))
+	for i, src := range sources {
+		subStages[i] = src.stages
+	}
+	desc := &stageDesc{
+		id:   newStageID(),
+		kind: sourceKind,
+		makeActor: func(cfg StageConfig) actor.Actor {
+			return newConcatSourceActor[T](subStages, cfg)
+		},
+		config: config,
+	}
+	return Source[T]{stages: []*stageDesc{desc}}
+}
+
+// Zip combines N same-typed sources into a single source whose elements are
+// []T tuples holding one element from each input in source order. It emits one
+// tuple per matched group and completes when any input completes with an empty
+// buffer (no further tuples can be formed from that side).
+//
+// Inputs share the element type T. For two sources of different types, use
+// Combine.
+func Zip[T any](sources ...Source[T]) Source[[]T] {
+	return ZipWith(func(s []T) []T {
+		out := make([]T, len(s))
+		copy(out, s)
+		return out
+	}, sources...)
+}
+
+// ZipWith combines N same-typed sources via the supplied combine function.
+// combine receives a fresh slice of length N on every call, ordered to match
+// the input sources. ZipWith completes when any input completes with an empty
+// buffer.
+//
+// Inputs share the element type T. For two sources of different types, use
+// Combine.
+func ZipWith[T, V any](combine func([]T) V, sources ...Source[T]) Source[V] {
+	config := defaultStageConfig()
+	subStages := make([][]*stageDesc, len(sources))
+	for i, src := range sources {
+		subStages[i] = src.stages
+	}
+	desc := &stageDesc{
+		id:   newStageID(),
+		kind: sourceKind,
+		makeActor: func(cfg StageConfig) actor.Actor {
+			return newZipNSourceActor(subStages, combine, cfg)
+		},
+		config: config,
+	}
+	return Source[V]{stages: []*stageDesc{desc}}
+}
+
 // Combine creates a Source that pairs elements from two sources using a combine function.
 // It emits one combined element per pair (zip semantics) and completes when
 // either source is exhausted.
@@ -298,6 +515,66 @@ func Balance[T any](src Source[T], n int) []Source[T] {
 		sources[i] = Source[T]{stages: []*stageDesc{desc}}
 	}
 	return sources
+}
+
+// Partition fans out a single Source to n independent branches, routing each
+// element to exactly one branch as determined by partitionFn. Unlike Broadcast
+// (which sends every element to every branch) and Balance (which round-robins),
+// Partition lets the caller decide where each element goes.
+//
+// partitionFn must return an index in [0, n). Out-of-range results, as well as
+// elements destined for branches that have already cancelled, are dropped
+// silently.
+//
+// Each branch must be independently materialized by calling Run on its
+// RunnableGraph. The upstream pipeline is spawned once the last branch
+// materializes. Backpressure is conservative: the hub pulls from src only when
+// every active branch has outstanding demand, ensuring the branch selected by
+// partitionFn has capacity for any element it routes.
+//
+// If n < 1, Partition returns an empty slice and src is not consumed.
+func Partition[T any](src Source[T], n int, partitionFn func(T) int) []Source[T] {
+	if n < 1 {
+		return nil
+	}
+	erased := func(v any) int {
+		t, ok := v.(T)
+		if !ok {
+			return -1
+		}
+		return partitionFn(t)
+	}
+	shared := newSharedPartition[T](n, src.stages, erased)
+	sources := make([]Source[T], n)
+	for i := range sources {
+		slot := i
+		config := defaultStageConfig()
+		desc := &stageDesc{
+			id:   newStageID(),
+			kind: sourceKind,
+			makeActor: func(cfg StageConfig) actor.Actor {
+				return &partitionSlotActor[T]{shared: shared, slot: slot, config: cfg}
+			},
+			config: config,
+		}
+		sources[i] = Source[T]{stages: []*stageDesc{desc}}
+	}
+	return sources
+}
+
+// Unzip splits a single source into two sources of potentially different
+// element types. unzipFn receives each input element and returns the (left,
+// right) parts; the returned sources emit the left and right parts
+// respectively.
+//
+// Both branches must be independently materialized, the same way as Broadcast.
+// The upstream pipeline is shared — every input element is delivered to both
+// branches with backpressure paced by the slowest branch.
+func Unzip[T, A, B any](src Source[T], unzipFn func(T) (A, B)) (Source[A], Source[B]) {
+	branches := Broadcast(src, 2)
+	left := Via(branches[0], Map(func(v T) A { a, _ := unzipFn(v); return a }))
+	right := Via(branches[1], Map(func(v T) B { _, b := unzipFn(v); return b }))
+	return left, right
 }
 
 // FromConn creates a Source that reads []byte frames from a net.Conn.

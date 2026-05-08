@@ -35,7 +35,8 @@ const (
 	gnSourceKind gnKind = iota
 	gnFlowKind
 	gnSinkKind
-	gnMergeKind // created by MergeInto
+	gnMergeKind  // created by MergeInto
+	gnConcatKind // created by ConcatInto
 )
 
 // graphBuilderNode represents one named node in a Graph topology.
@@ -113,6 +114,19 @@ func (g *Graph) MergeInto(into string, from ...string) *Graph {
 	g.addNode(&graphBuilderNode{
 		name: into,
 		kind: gnMergeKind,
+		from: from,
+	})
+	return g
+}
+
+// ConcatInto creates a fan-in (concat) node named into that consumes elements
+// from the listed upstream nodes sequentially: only after the i-th upstream
+// completes does the node start consuming from the (i+1)-th. Per-source
+// ordering is preserved across the boundary.
+func (g *Graph) ConcatInto(into string, from ...string) *Graph {
+	g.addNode(&graphBuilderNode{
+		name: into,
+		kind: gnConcatKind,
 		from: from,
 	})
 	return g
@@ -260,6 +274,7 @@ func (g *Graph) topologicalOrder() ([]string, error) {
 		order = append(order, name)
 		return nil
 	}
+
 	for _, name := range g.order {
 		if err := visit(name); err != nil {
 			return nil, err
@@ -301,6 +316,12 @@ func (g *Graph) buildOwnChain(name string, fanOuts map[string]*fanOutReg) ([]*st
 			return nil, err
 		}
 		return []*stageDesc{desc}, nil
+	case gnConcatKind:
+		desc, err := g.buildConcatDesc(node, fanOuts)
+		if err != nil {
+			return nil, err
+		}
+		return []*stageDesc{desc}, nil
 	default:
 		return nil, fmt.Errorf("stream: unexpected node kind %d for node %q in upstream chain", node.kind, name)
 	}
@@ -323,6 +344,28 @@ func (g *Graph) buildMergeDesc(node *graphBuilderNode, fanOuts map[string]*fanOu
 		kind: sourceKind,
 		makeActor: func(cfg StageConfig) actor.Actor {
 			return newMergeSourceActor[any](captured, cfg)
+		},
+		config: defaultStageConfig(),
+	}, nil
+}
+
+// buildConcatDesc creates a concatSourceActor stageDesc for a gnConcatKind node.
+func (g *Graph) buildConcatDesc(node *graphBuilderNode, fanOuts map[string]*fanOutReg) (*stageDesc, error) {
+	subStages := make([][]*stageDesc, len(node.from))
+	for i, from := range node.from {
+		chain, err := g.buildChain(from, fanOuts)
+		if err != nil {
+			return nil, err
+		}
+		subStages[i] = chain
+	}
+
+	captured := subStages
+	return &stageDesc{
+		id:   newStageID(),
+		kind: sourceKind,
+		makeActor: func(cfg StageConfig) actor.Actor {
+			return newConcatSourceActor[any](captured, cfg)
 		},
 		config: defaultStageConfig(),
 	}, nil

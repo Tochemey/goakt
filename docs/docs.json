@@ -58,17 +58,43 @@
         ],
         "icon": "users"
       },
-      { "group": "Grains", "pages": ["grains/overview"], "icon": "box" },
+      {
+        "group": "Grains",
+        "pages": ["/grains/overview"],
+        "icon": "box"
+      },
+      {
+        "group": "Remoting",
+        "pages": [
+          "/advanced/remoting",
+          "/advanced/serialization"
+        ],
+        "icon": "radio"
+      },
+      {
+        "group": "Cluster",
+        "pages": [
+          "/clustering/standalone",
+          "/clustering/clustered",
+          "/clustering/multi-datacenter",
+          "/clustering/service-discovery"
+        ],
+        "icon": "network"
+      },
+      {
+        "group": "Observability",
+        "pages": [
+          "/advanced/observability",
+          "/advanced/event-streams"
+        ],
+        "icon": "activity"
+      },
       {
         "group": "Advanced",
         "pages": [
-          "/advanced/remoting",
           "/advanced/client",
-          "advanced/serialization",
           "/advanced/extensions-and-dependencies",
-          "/advanced/event-streams",
           "/advanced/pubsub",
-          "/advanced/observability",
           "/advanced/distributed-data",
           "/advanced/streams",
           "/advanced/coordinated-shutdown"
@@ -76,27 +102,17 @@
         "icon": "zap"
       },
       {
-        "group": "Clustering",
-        "pages": [
-          "/clustering/standalone",
-          "/clustering/clustered",
-          "/clustering/multi-datacenter",
-          "clustering/service-discovery"
-        ],
-        "icon": "network"
-      },
-      {
         "group": "Architecture",
         "pages": [
           "/architecture/overview",
-          "architecture/code-map",
-          "architecture/design-decisions",
-          "architecture/dispatcher-pool"
+          "/architecture/code-map",
+          "/architecture/design-decisions",
+          "/architecture/dispatcher-pool"
         ],
-        "icon": "layout"
+        "icon": "blocks"
       },
       {
-        "group": "Contributing",
+        "group": "Contribution",
         "pages": [
           "/contributing/overview",
           "/contributing/development-setup",
@@ -110,15 +126,13 @@
         "pages": [
           "/reference/interfaces",
           "/reference/v400-changes",
-          "reference/glossary"
+          "/reference/glossary"
         ],
         "icon": "book"
       },
       {
         "group": "Meta Framework",
-        "pages": [
-          "/meta-framework/ego"
-        ],
+        "pages": ["/meta-framework/ego"],
         "icon": "layers"
       }
     ]

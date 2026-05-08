@@ -1,7 +1,7 @@
 ---
 title: Dispatcher Pool
 description: The execution substrate underneath every actor — a fixed worker pool that cooperatively multiplexes the entire actor population.
-sidebarTitle: "🔀 Dispatcher Pool"
+sidebarTitle: "Dispatcher Pool"
 ---
 
 GoAkt processes actor messages on a **fixed pool of worker goroutines** that cooperatively multiplex the entire actor population. Each `ActorSystem` owns one `dispatcher`. When an actor receives a message, it is scheduled onto a shared ready queue; a worker pulls it off, drains up to a configurable throughput budget, and yields back so other actors get a turn.
