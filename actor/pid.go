@@ -2459,10 +2459,6 @@ func (pid *PID) doStop(ctx context.Context) error {
 	// stop supervisor loop
 	pid.stopSupervisionLoop()
 
-	if pid.remoting != nil {
-		pid.remoting.Close()
-	}
-
 	if err := chain.
 		New(chain.WithFailFast()).
 		AddRunner(func() error { return pid.freeWatchees() }).

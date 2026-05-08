@@ -246,10 +246,6 @@ func (pid *grainPID) deactivate(ctx context.Context) (err error) {
 		logger.Infof("grain=%s deactivating", pid.identity.String())
 	}
 
-	if pid.remoting != nil {
-		pid.remoting.Close()
-	}
-
 	if err := pid.grain.OnDeactivate(ctx, newGrainProps(pid.identity, pid.actorSystem, pid.dependencies.Values())); err != nil {
 		if pid.logger.Enabled(log.ErrorLevel) {
 			pid.logger.Errorf("grain=%s deactivation failed (hint: check OnDeactivate implementation)", pid.identity.String())

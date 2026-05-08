@@ -78,6 +78,9 @@ linters:
         - materialised
         - materialises
         - materialising
+        - materialisation
+        - serialisation
+        - recognisable
         # amortise
         - amortise
         - amortised
