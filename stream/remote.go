@@ -43,64 +43,74 @@ const (
 )
 
 // SourceRef is a wire-portable handle to a stream source endpoint running
-// somewhere in the actor system. Use FromRef to plug it back into a graph as
-// a Source[T]. Refs can be sent inside any registered message and across
-// nodes; the receiving node resolves the endpoint via the actor registry.
-// One subscription per ref.
+// on a specific node. Use ref.Source(sys) to plug it back into a graph as a
+// Source[T]. Refs can be sent inside any registered message and across
+// nodes; the receiving node resolves the endpoint by direct address (no
+// reliance on async cluster broadcast). One subscription per ref.
 //
-// Treat the Name field as opaque: it is the endpoint actor's registered
-// name. It is exported only so the GoAkt CBOR serializer can marshal it via
-// reflection — do not construct refs by hand.
+// Name / Host / Port together identify the endpoint actor and are exported
+// only so the GoAkt CBOR serializer can marshal them via reflection —
+// callers must not construct refs by hand.
 type SourceRef[T any] struct {
 	Name string
+	Host string
+	Port int
 }
 
 // SinkRef is the symmetric handle for a stream sink endpoint. See SourceRef
 // for the lifecycle and serialisation contract.
 type SinkRef[T any] struct {
 	Name string
+	Host string
+	Port int
 }
 
 // SourceRef publishes the source as a wire-portable SourceRef[T] that can be
-// sent to any node and adapted back into a Source[T] via FromRef. The
-// underlying source pipeline is materialised lazily, only when a subscriber
-// connects: the ref itself is cheap to create and ship.
+// sent to any node and adapted back into a Source[T] via ref.Source(sys).
+// The underlying source pipeline is materialised lazily, only when a
+// subscriber connects: the ref itself is cheap to create and ship.
 //
-// The endpoint accepts a single subscription. Subsequent FromRef calls on
-// the same ref receive a stream-level error.
+// The endpoint accepts a single subscription. Subsequent ref.Source(...)
+// materialisations receive a stream-level error.
 func (s Source[T]) SourceRef(ctx context.Context, sys actor.ActorSystem) (SourceRef[T], error) {
 	name := newSourceRefName()
 	endpoint := newSourceRefEndpointActor[T](s.stages)
 	if _, err := sys.Spawn(ctx, name, endpoint, actor.WithLongLived()); err != nil {
 		return SourceRef[T]{}, fmt.Errorf("stream: source ref: %w", err)
 	}
-	return SourceRef[T]{Name: name}, nil
+	return SourceRef[T]{Name: name, Host: sys.Host(), Port: sys.Port()}, nil
 }
 
 // SinkRef publishes the sink as a wire-portable SinkRef[T] that can be sent
-// to any node and adapted back into a Sink[T] via ToRef. The underlying
-// sink pipeline is materialised lazily, only when a producer connects.
+// to any node and adapted back into a Sink[T] via ref.Sink(sys). The
+// underlying sink pipeline is materialised lazily, only when a producer
+// connects.
 func (s Sink[T]) SinkRef(ctx context.Context, sys actor.ActorSystem) (SinkRef[T], error) {
 	name := newSinkRefName()
 	endpoint := newSinkRefEndpointActor[T](s.desc)
 	if _, err := sys.Spawn(ctx, name, endpoint, actor.WithLongLived()); err != nil {
 		return SinkRef[T]{}, fmt.Errorf("stream: sink ref: %w", err)
 	}
-	return SinkRef[T]{Name: name}, nil
+	return SinkRef[T]{Name: name, Host: sys.Host(), Port: sys.Port()}, nil
 }
 
 // Source adapts the ref into a Source[T] usable in any local graph on sys.
 // Resolution happens at materialisation time: the bridge looks up the
-// endpoint by name (locally or via the cluster registry) and subscribes.
+// endpoint by direct address. Cross-node lookups talk to the producer node's
+// remote server directly — no cluster registry / olric replication is on
+// the critical path, so resolution succeeds as soon as the producer is
+// reachable rather than after async broadcast propagates.
 func (r SourceRef[T]) Source(sys actor.ActorSystem) Source[T] {
 	config := defaultStageConfig()
 	config.System = sys
 	name := r.Name
+	host := r.Host
+	port := r.Port
 	desc := &stageDesc{
 		id:   newStageID(),
 		kind: sourceKind,
 		makeActor: func(cfg StageConfig) actor.Actor {
-			return newRemoteSourceBridgeActor[T](name, cfg)
+			return newRemoteSourceBridgeActor[T](name, host, port, cfg)
 		},
 		config: config,
 	}
@@ -109,16 +119,21 @@ func (r SourceRef[T]) Source(sys actor.ActorSystem) Source[T] {
 
 // Sink adapts the ref into a Sink[T] usable in any local graph on sys. The
 // producer-side bridge ships every element it consumes to the endpoint over
-// the wire and translates wire credit into local upstream demand.
+// the wire and translates wire credit into local upstream demand. Like
+// SourceRef.Source, resolution is by direct address — the consumer node's
+// remote server is asked for the named actor without going through the
+// cluster registry.
 func (r SinkRef[T]) Sink(sys actor.ActorSystem) Sink[T] {
 	config := defaultStageConfig()
 	config.System = sys
 	name := r.Name
+	host := r.Host
+	port := r.Port
 	desc := &stageDesc{
 		id:   newStageID(),
 		kind: sinkKind,
 		makeActor: func(cfg StageConfig) actor.Actor {
-			return newRemoteSinkBridgeActor[T](name, cfg)
+			return newRemoteSinkBridgeActor[T](name, host, port, cfg)
 		},
 		config: config,
 	}
@@ -186,27 +201,33 @@ func fromWire[T any](msg any) (T, bool) {
 	return zero, false
 }
 
-// resolveEndpoint looks up the endpoint actor by name. Cluster registration
-// on the producer side is asynchronous: putActorOnCluster hands off to a
-// background broadcast queue, replicateActors drains the queue one entry at
-// a time (each cluster.PutActor up to a 1s timeout), and olric replication
-// then has to reach the consumer node. Under heavy load — many actor systems
-// sharing a host on CI, slow olric peers — that pipeline can take tens of
-// seconds before the new actor is visible from the other node.
+// resolveEndpoint resolves a ref's endpoint actor by direct address.
 //
-// The retry loop hides that propagation lag from callers using the same
-// flowchartsman/retry package the rest of goakt uses for cluster operations
-// (jittered exponential backoff, capped at maxBackoff per attempt, capped at
-// totalBudget overall via the context). The 30s budget is sized generously
-// for loaded CI; happy-path lookups still return on the first attempt in
-// well under a millisecond.
-func resolveEndpoint(ctx context.Context, sys actor.ActorSystem, name string) (*actor.PID, error) {
+// When the endpoint lives on the local node the local actor tree is
+// queried; otherwise the bridge's own PID is used to issue a RemoteLookup
+// against the producer node's remote server, which deterministically
+// answers from its own actor tree without consulting any cluster registry.
+// Eliminating the cluster-registry round-trip makes resolution independent
+// of the asynchronous putActorOnCluster broadcast and the underlying olric
+// replication latency, both of which can spike past 30s on a loaded CI host
+// even though the actor exists and is reachable.
+//
+// A short retry loop (jittered exponential backoff via the same
+// flowchartsman/retry package the rest of goakt uses) absorbs the brief
+// window between the producer's Spawn and its remote server starting to
+// answer for the new actor, and any transient connectivity failures.
+func resolveEndpoint(ctx context.Context, sys actor.ActorSystem, self *actor.PID, host string, port int, name string) (*actor.PID, error) {
 	const (
-		maxAttempts    = 300
+		maxAttempts    = 50
 		initialBackoff = 100 * time.Millisecond
 		maxBackoff     = time.Second
-		totalBudget    = 30 * time.Second
+		totalBudget    = 10 * time.Second
 	)
+
+	// Local fast path: same node — skip remoting entirely.
+	if host == sys.Host() && port == sys.Port() {
+		return sys.ActorOf(ctx, name)
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, totalBudget)
 	defer cancel()
@@ -215,7 +236,7 @@ func resolveEndpoint(ctx context.Context, sys actor.ActorSystem, name string) (*
 	retrier := retry.NewRetrier(maxAttempts, initialBackoff, maxBackoff)
 	err := retrier.RunContext(ctx, func(ctx context.Context) error {
 		var err error
-		pid, err = sys.ActorOf(ctx, name)
+		pid, err = self.RemoteLookup(ctx, host, port, name)
 		return err
 	})
 	if err != nil {

@@ -271,6 +271,8 @@ func (a *sourceRefEndpointActor[T]) scheduleTermination(rctx *actor.ReceiveConte
 // protocol.
 type remoteSourceBridgeActor[T any] struct {
 	endpointName string
+	endpointHost string
+	endpointPort int
 	system       actor.ActorSystem
 	endpoint     *actor.PID
 	downstream   *actor.PID
@@ -288,9 +290,11 @@ type remoteSourceBridgeActor[T any] struct {
 	config    StageConfig
 }
 
-func newRemoteSourceBridgeActor[T any](endpointName string, config StageConfig) *remoteSourceBridgeActor[T] {
+func newRemoteSourceBridgeActor[T any](endpointName, endpointHost string, endpointPort int, config StageConfig) *remoteSourceBridgeActor[T] {
 	return &remoteSourceBridgeActor[T]{
 		endpointName: endpointName,
+		endpointHost: endpointHost,
+		endpointPort: endpointPort,
 		system:       config.System,
 		config:       config,
 	}
@@ -306,7 +310,7 @@ func (a *remoteSourceBridgeActor[T]) Receive(rctx *actor.ReceiveContext) {
 		a.downstream = msg.downstream
 		a.subID = msg.subID
 
-		endpoint, err := resolveEndpoint(rctx.Context(), a.system, a.endpointName)
+		endpoint, err := resolveEndpoint(rctx.Context(), a.system, rctx.Self(), a.endpointHost, a.endpointPort, a.endpointName)
 		if err != nil {
 			rctx.Tell(a.downstream, &streamError{
 				subID: a.subID,

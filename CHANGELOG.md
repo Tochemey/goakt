@@ -13,7 +13,7 @@ Wire-portable handles that adapt a `Source[T]` or `Sink[T]` into a stage usable 
 - Single-subscription semantics. The endpoint stays alive through a 30s grace window after stream completion so a racing late subscriber gets a deterministic `"already consumed"` rejection rather than telling a dead actor; after the window the endpoint reaps itself via `system.ScheduleOnce`, so consumed refs don't leak in long-running processes.
 - Wire-level credit: the consumer's downstream demand drives `streamRequestWire` upstream; the producer ships only what was requested. A bounded pending queue (1024 elements) converts a slow-consumer scenario into a visible `"backpressure overflow"` stream error instead of unbounded mailbox growth.
 - Bridges `Watch` their remote endpoint as defense in depth — an unexpected endpoint death (panic, system shutdown mid-stream, expired grace on a stale ref) surfaces a stream error on the bridge's `StreamHandle` instead of a hang.
-- Endpoint resolution uses the same `flowchartsman/retry` package the rest of goakt uses for cluster lookups (jittered exponential backoff, capped 10s budget) so cross-cluster propagation latency is absorbed transparently.
+- **Direct-address resolution** — refs carry the producer node's host:port plus actor name, so the consumer's bridge resolves via `pid.RemoteLookup(host, port, name)` straight against the producer's remote server. Cluster-registry / olric replication is **not** on the critical path, so resolution succeeds the moment the producer node is reachable rather than after async broadcast catches up. A short retry loop (jittered exponential backoff via `flowchartsman/retry`, 10s budget) absorbs transient connectivity blips.
 
 #### Stream graph junctions
 

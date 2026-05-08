@@ -157,12 +157,14 @@ func (a *sinkRefEndpointActor[T]) PostStop(_ *actor.Context) error { return nil 
 
 // remoteSinkBridgeActor is the producer-side sink stage that adapts a SinkRef
 // back into a Sink[T] in the local graph. It resolves the endpoint by name
-// (with brief retries because cluster registration on the consumer side is
-// asynchronous), sends streamSubscribeWire, ships incoming local elements as
-// ordinary remote messages (the remoting layer serializes them), and
-// translates wire credit into local upstream demand.
+// (resolution is direct against the consumer node's remote server — no
+// cluster registry on the critical path), sends streamSubscribeWire, ships
+// incoming local elements as ordinary remote messages (the remoting layer
+// serializes them), and translates wire credit into local upstream demand.
 type remoteSinkBridgeActor[T any] struct {
 	endpointName string
+	endpointHost string
+	endpointPort int
 	system       actor.ActorSystem
 	endpoint     *actor.PID
 	upstream     *actor.PID
@@ -172,9 +174,11 @@ type remoteSinkBridgeActor[T any] struct {
 	config       StageConfig
 }
 
-func newRemoteSinkBridgeActor[T any](endpointName string, config StageConfig) *remoteSinkBridgeActor[T] {
+func newRemoteSinkBridgeActor[T any](endpointName, endpointHost string, endpointPort int, config StageConfig) *remoteSinkBridgeActor[T] {
 	return &remoteSinkBridgeActor[T]{
 		endpointName: endpointName,
+		endpointHost: endpointHost,
+		endpointPort: endpointPort,
 		system:       config.System,
 		config:       config,
 	}
@@ -194,7 +198,7 @@ func (a *remoteSinkBridgeActor[T]) Receive(rctx *actor.ReceiveContext) {
 		a.upstream = msg.upstream
 		a.subID = msg.subID
 
-		endpoint, err := resolveEndpoint(rctx.Context(), a.system, a.endpointName)
+		endpoint, err := resolveEndpoint(rctx.Context(), a.system, rctx.Self(), a.endpointHost, a.endpointPort, a.endpointName)
 		if err != nil {
 			a.termErr = fmt.Errorf("stream: resolve sink ref %q: %w", a.endpointName, err)
 			rctx.Shutdown()

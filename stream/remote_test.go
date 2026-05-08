@@ -187,7 +187,7 @@ func TestRefs_CrossNode(t *testing.T) {
 
 		select {
 		case <-h.Done():
-		case <-time.After(60 * time.Second):
+		case <-time.After(30 * time.Second):
 			t.Fatal("cross-node source ref did not complete")
 		}
 		require.NoError(t, h.Err())
@@ -211,7 +211,7 @@ func TestRefs_CrossNode(t *testing.T) {
 
 		select {
 		case <-h.Done():
-		case <-time.After(60 * time.Second):
+		case <-time.After(30 * time.Second):
 			t.Fatal("cross-node sink ref did not complete")
 		}
 		require.NoError(t, h.Err())
