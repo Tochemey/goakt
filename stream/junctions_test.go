@@ -33,6 +33,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/stream"
 )
 
@@ -442,6 +443,91 @@ func TestMergeLatest_EmitsSnapshotsAfterFirstFromEachInput(t *testing.T) {
 		require.Len(t, snap, 2, "snapshot must hold one value per slot")
 		assert.Contains(t, []int{1, 2, 3}, snap[0], "slot 0 latest must be from src 0")
 		assert.Contains(t, []int{10, 20}, snap[1], "slot 1 latest must be from src 1")
+	}
+}
+
+// TestMergeLatest_NoSources completes immediately with no elements. This
+// covers the empty-sources branch that emits a streamComplete on stageWire
+// without spawning any sub-pipelines.
+func TestMergeLatest_NoSources(t *testing.T) {
+	sys := newTestSystem(t)
+	ctx := context.Background()
+
+	col, sink := stream.Collect[[]int]()
+	h, err := stream.MergeLatest[int]().To(sink).Run(ctx, sys)
+	require.NoError(t, err)
+
+	select {
+	case <-h.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("empty merge-latest did not complete")
+	}
+	require.NoError(t, h.Err())
+	assert.Empty(t, col.Items())
+}
+
+// TestMergeLatest_StopCancels verifies that Stop on a MergeLatest fed by
+// infinite inputs propagates a streamCancel that the merge-latest source
+// translates into a clean completion. This covers the streamCancel case in
+// mergeLatestSourceActor.Receive.
+func TestMergeLatest_StopCancels(t *testing.T) {
+	sys := newTestSystem(t)
+	ctx := context.Background()
+
+	_, sink := stream.Collect[[]time.Time]()
+	src := stream.MergeLatest(
+		stream.Tick(50*time.Millisecond),
+		stream.Tick(50*time.Millisecond),
+	)
+	h, err := src.To(sink).Run(ctx, sys)
+	require.NoError(t, err)
+
+	pause.For(150 * time.Millisecond)
+	require.NoError(t, h.Stop(ctx))
+
+	select {
+	case <-h.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("merge-latest did not complete after Stop")
+	}
+}
+
+// TestPartition_StopCancelsAllBranches verifies that stopping all partition
+// branch handles propagates streamCancel through every slot to the hub, which
+// in turn cancels the upstream once every slot has cancelled. This exercises
+// the streamCancel path in partitionSlotActor and the slotCancel path in
+// partitionHubActor.
+func TestPartition_StopCancelsAllBranches(t *testing.T) {
+	sys := newTestSystem(t)
+	ctx := context.Background()
+
+	branches := stream.Partition(
+		stream.Tick(50*time.Millisecond),
+		2,
+		func(time.Time) int { return 0 },
+	)
+	require.Len(t, branches, 2)
+
+	handles := make([]stream.StreamHandle, 0, 2)
+	for _, b := range branches {
+		_, sink := stream.Collect[time.Time]()
+		h, err := b.To(sink).Run(ctx, sys)
+		require.NoError(t, err)
+		handles = append(handles, h)
+	}
+
+	pause.For(150 * time.Millisecond)
+
+	for _, h := range handles {
+		require.NoError(t, h.Stop(ctx))
+	}
+
+	for _, h := range handles {
+		select {
+		case <-h.Done():
+		case <-time.After(5 * time.Second):
+			t.Fatal("partition branch did not complete after Stop")
+		}
 	}
 }
 
