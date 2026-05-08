@@ -35,22 +35,17 @@ import (
 )
 
 const (
-	// Short prefixes keep endpoint names compact (~16 chars total). Long
-	// names interact badly with the cluster registry lookup path; the
-	// prefix is only retained for diagnostic clarity in logs.
+	// Short prefixes that tag endpoint actor names for log readability.
 	sourceRefNamePrefix = "src-ref-"
 	sinkRefNamePrefix   = "sink-ref-"
 )
 
-// SourceRef is a wire-portable handle to a stream source endpoint running
-// on a specific node. Use ref.Source(sys) to plug it back into a graph as a
-// Source[T]. Refs can be sent inside any registered message and across
-// nodes; the receiving node resolves the endpoint by direct address (no
-// reliance on async cluster broadcast). One subscription per ref.
+// SourceRef is a wire-portable handle to a stream source endpoint. It can
+// be sent inside any registered message and adapted back into a Source[T]
+// via ref.Source(sys). Each ref accepts a single subscription.
 //
-// Name / Host / Port together identify the endpoint actor and are exported
-// only so the GoAkt CBOR serializer can marshal them via reflection —
-// callers must not construct refs by hand.
+// Name, Host and Port are exported only so the GoAkt CBOR serializer can
+// marshal them; callers must not construct refs by hand.
 type SourceRef[T any] struct {
 	Name string
 	Host string
@@ -65,12 +60,9 @@ type SinkRef[T any] struct {
 	Port int
 }
 
-// SourceRef publishes the source as a wire-portable SourceRef[T] that can be
-// sent to any node and adapted back into a Source[T] via ref.Source(sys).
-// The underlying source pipeline is materialised lazily, only when a
-// subscriber connects: the ref itself is cheap to create and ship.
-//
-// The endpoint accepts a single subscription. Subsequent ref.Source(...)
+// SourceRef publishes the source as a wire-portable SourceRef[T]. Creating
+// the ref is cheap; the underlying pipeline is materialised lazily when a
+// subscriber connects. Only one subscription is accepted — later
 // materialisations receive a stream-level error.
 func (s Source[T]) SourceRef(ctx context.Context, sys actor.ActorSystem) (SourceRef[T], error) {
 	name := newSourceRefName()
@@ -81,10 +73,8 @@ func (s Source[T]) SourceRef(ctx context.Context, sys actor.ActorSystem) (Source
 	return SourceRef[T]{Name: name, Host: sys.Host(), Port: sys.Port()}, nil
 }
 
-// SinkRef publishes the sink as a wire-portable SinkRef[T] that can be sent
-// to any node and adapted back into a Sink[T] via ref.Sink(sys). The
-// underlying sink pipeline is materialised lazily, only when a producer
-// connects.
+// SinkRef publishes the sink as a wire-portable SinkRef[T]. The underlying
+// pipeline is materialised lazily when a producer connects.
 func (s Sink[T]) SinkRef(ctx context.Context, sys actor.ActorSystem) (SinkRef[T], error) {
 	name := newSinkRefName()
 	endpoint := newSinkRefEndpointActor[T](s.desc)
@@ -95,11 +85,8 @@ func (s Sink[T]) SinkRef(ctx context.Context, sys actor.ActorSystem) (SinkRef[T]
 }
 
 // Source adapts the ref into a Source[T] usable in any local graph on sys.
-// Resolution happens at materialisation time: the bridge looks up the
-// endpoint by direct address. Cross-node lookups talk to the producer node's
-// remote server directly — no cluster registry / olric replication is on
-// the critical path, so resolution succeeds as soon as the producer is
-// reachable rather than after async broadcast propagates.
+// Endpoint resolution happens at materialisation time, by direct address
+// against the producer node's remote server.
 func (r SourceRef[T]) Source(sys actor.ActorSystem) Source[T] {
 	config := defaultStageConfig()
 	config.System = sys
@@ -118,11 +105,9 @@ func (r SourceRef[T]) Source(sys actor.ActorSystem) Source[T] {
 }
 
 // Sink adapts the ref into a Sink[T] usable in any local graph on sys. The
-// producer-side bridge ships every element it consumes to the endpoint over
-// the wire and translates wire credit into local upstream demand. Like
-// SourceRef.Source, resolution is by direct address — the consumer node's
-// remote server is asked for the named actor without going through the
-// cluster registry.
+// producer-side bridge ships every consumed element to the endpoint and
+// translates wire credit into local upstream demand. Endpoint resolution
+// is by direct address, like SourceRef.Source.
 func (r SinkRef[T]) Sink(sys actor.ActorSystem) Sink[T] {
 	config := defaultStageConfig()
 	config.System = sys
@@ -166,12 +151,10 @@ func RemoteOptions() remote.Option {
 func newSourceRefName() string { return sourceRefNamePrefix + newStageID() }
 func newSinkRefName() string   { return sinkRefNamePrefix + newStageID() }
 
-// wireForm returns a value suitable for sending over goakt remoting. The
-// remoting layer keys its serializer registry on the exact type passed to
-// remote.WithSerializables — typically a pointer (new(T) ⇒ *T) — so a value
-// type would miss the lookup. Wrapping non-pointer values in a pointer makes
-// the registered *T entry match without requiring users to register T twice.
-// Already-pointer values are returned unchanged.
+// wireForm wraps non-pointer values in a pointer so the remoting serializer
+// registry — keyed on the exact type passed to remote.WithSerializables,
+// typically *T from new(T) — finds a match. Already-pointer values are
+// returned unchanged.
 func wireForm(v any) any {
 	if v == nil {
 		return v
@@ -185,11 +168,9 @@ func wireForm(v any) any {
 	return p.Interface()
 }
 
-// fromWire returns the user value carried by a remote message. The remoting
-// layer's CBOR serializer auto-dereferences primitive types but returns
-// non-primitive types as pointers, so a T-typed receiver must handle either
-// form: T directly, or *T to deref. Returns the zero T and false when the
-// message is neither.
+// fromWire returns the user value carried by a remote message. The CBOR
+// serializer delivers primitives as T and non-primitives as *T, so the
+// receiver must handle both. Returns the zero T and false otherwise.
 func fromWire[T any](msg any) (T, bool) {
 	if v, ok := msg.(T); ok {
 		return v, true
@@ -201,21 +182,11 @@ func fromWire[T any](msg any) (T, bool) {
 	return zero, false
 }
 
-// resolveEndpoint resolves a ref's endpoint actor by direct address.
-//
-// When the endpoint lives on the local node the local actor tree is
-// queried; otherwise the bridge's own PID is used to issue a RemoteLookup
-// against the producer node's remote server, which deterministically
-// answers from its own actor tree without consulting any cluster registry.
-// Eliminating the cluster-registry round-trip makes resolution independent
-// of the asynchronous putActorOnCluster broadcast and the underlying olric
-// replication latency, both of which can spike past 30s on a loaded CI host
-// even though the actor exists and is reachable.
-//
-// A short retry loop (jittered exponential backoff via the same
-// flowchartsman/retry package the rest of goakt uses) absorbs the brief
-// window between the producer's Spawn and its remote server starting to
-// answer for the new actor, and any transient connectivity failures.
+// resolveEndpoint returns the PID of the endpoint actor identified by
+// host, port and name. Local refs are looked up via the actor tree; remote
+// refs via RemoteLookup against the producer node's remote server. A short
+// retry loop with exponential backoff covers the brief window between
+// Spawn and the actor becoming reachable, and transient network failures.
 func resolveEndpoint(ctx context.Context, sys actor.ActorSystem, self *actor.PID, host string, port int, name string) (*actor.PID, error) {
 	const (
 		maxAttempts    = 50
