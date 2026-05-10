@@ -28,10 +28,8 @@ import (
 	"fmt"
 	"net"
 	"strconv"
-	"strings"
 	"sync"
 
-	goset "github.com/deckarep/golang-set/v2"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/client/v3/namespace"
 	"go.uber.org/atomic"
@@ -61,13 +59,15 @@ var _ discovery.Provider = (*Discovery)(nil)
 
 // NewDiscovery creates a new instance of Discovery with the provided configuration.
 func NewDiscovery(config *Config) *Discovery {
+	// shallow-copy the user's Config so Initialize defaults don't mutate the caller's pointer
+	cfg := *config
 	return &Discovery{
-		config:      config,
+		config:      &cfg,
 		initialized: atomic.NewBool(false),
 		registered:  atomic.NewBool(false),
 		mu:          &sync.RWMutex{},
-		key:         net.JoinHostPort(config.Host, strconv.Itoa(config.DiscoveryPort)),
-		prefix:      fmt.Sprintf("%s/", config.ActorSystemName),
+		key:         net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.DiscoveryPort)),
+		prefix:      fmt.Sprintf("%s/", cfg.ActorSystemName),
 	}
 }
 
@@ -108,13 +108,14 @@ func (x *Discovery) Initialize() error {
 	ctx, cancel := context.WithTimeout(x.config.Context, x.config.DialTimeout)
 	defer cancel()
 
-	// TODO: maybe assert more the response from etcd
-	_, err = client.Status(ctx, x.config.Endpoints[0])
-	if err != nil {
+	// MemberList probes the cluster via any reachable endpoint, so a single bad
+	// entry in Endpoints doesn't fail Initialize.
+	if _, err = client.MemberList(ctx); err != nil {
+		err = fmt.Errorf("failed to connect to etcd: %w", err)
 		if cerr := client.Close(); cerr != nil {
-			return errors.Join(err, fmt.Errorf("failed to close etcd client: %w", cerr))
+			err = errors.Join(err, fmt.Errorf("failed to close etcd client: %w", cerr))
 		}
-		return fmt.Errorf("failed to connect to etcd: %w", err)
+		return err
 	}
 
 	x.client = client
@@ -145,26 +146,28 @@ func (x *Discovery) Register() error {
 		return fmt.Errorf("failed to create lease: %w", err)
 	}
 
-	x.leaseID = lease.ID
-	_, err = x.namespaceKV.Put(ctx, x.key, x.key, clientv3.WithLease(lease.ID))
-	if err != nil {
+	if _, err = x.namespaceKV.Put(ctx, x.key, x.key, clientv3.WithLease(lease.ID)); err != nil {
+		// orphaned lease will expire after TTL, but revoke eagerly to keep etcd clean
+		_, _ = x.namespaceLE.Revoke(ctx, lease.ID)
 		return fmt.Errorf("failed to register service: %w", err)
 	}
 
 	// Start lease keep-alive
 	keepAliveCtx, keepAliveCancel := context.WithCancel(x.config.Context)
-	x.cancelKeepAlive = keepAliveCancel
-
-	ch, kaerr := x.client.KeepAlive(keepAliveCtx, x.leaseID)
+	ch, kaerr := x.client.KeepAlive(keepAliveCtx, lease.ID)
 	if kaerr != nil {
 		keepAliveCancel()
+		_, _ = x.namespaceLE.Revoke(ctx, lease.ID)
 		return fmt.Errorf("failed to start keep-alive: %w", kaerr)
 	}
 
-	// Start goroutine to consume keep-alive responses
+	x.leaseID = lease.ID
+	x.cancelKeepAlive = keepAliveCancel
+
+	// Drain keep-alive responses so the channel never blocks the etcd client.
+	// ch is closed by etcd when keepAliveCtx is cancelled, ending this goroutine.
 	go func() {
 		for ka := range ch {
-			// Consume keep-alive responses to prevent channel from blocking
 			_ = ka
 		}
 	}()
@@ -176,38 +179,35 @@ func (x *Discovery) Register() error {
 // DiscoverPeers implements discovery.Provider.
 func (x *Discovery) DiscoverPeers() ([]string, error) {
 	x.mu.RLock()
-	defer x.mu.RUnlock()
-
 	if !x.initialized.Load() {
+		x.mu.RUnlock()
 		return nil, discovery.ErrNotInitialized
 	}
-
 	if !x.registered.Load() {
+		x.mu.RUnlock()
 		return nil, discovery.ErrNotRegistered
 	}
+	kv := x.namespaceKV
+	clientCtx := x.client.Ctx()
+	x.mu.RUnlock()
 
-	ctx, cancel := context.WithTimeout(x.client.Ctx(), x.config.Timeout)
+	ctx, cancel := context.WithTimeout(clientCtx, x.config.Timeout)
 	defer cancel()
 
-	peers := goset.NewSet[string]()
-	resp, err := x.namespaceKV.Get(ctx, "", clientv3.WithPrefix())
+	resp, err := kv.Get(ctx, "", clientv3.WithPrefix())
 	if err != nil {
 		return nil, fmt.Errorf("failed to discover peers: %w", err)
 	}
 
-	for _, kv := range resp.Kvs {
-		key := string(kv.Key)
-		address := string(kv.Value)
-
-		// Skip our own registration
-		if key == x.key {
+	// etcd keys are unique, so no set dedup is needed.
+	peers := make([]string, 0, len(resp.Kvs))
+	for _, item := range resp.Kvs {
+		if string(item.Key) == x.key {
 			continue
 		}
-
-		peers.Add(address)
+		peers = append(peers, string(item.Value))
 	}
-
-	return peers.ToSlice(), nil
+	return peers, nil
 }
 
 // Deregister implements discovery.Provider.
@@ -223,7 +223,15 @@ func (x *Discovery) Deregister() error {
 		return discovery.ErrNotRegistered
 	}
 
-	// Cancel keep-alive
+	x.deregisterLocked()
+	return nil
+}
+
+// deregisterLocked cancels the keep-alive and revokes the lease.
+// Caller must hold x.mu in write mode and must have verified registered==true.
+func (x *Discovery) deregisterLocked() {
+	defer x.registered.Store(false)
+
 	if x.cancelKeepAlive != nil {
 		x.cancelKeepAlive()
 		x.cancelKeepAlive = nil
@@ -233,13 +241,10 @@ func (x *Discovery) Deregister() error {
 		ctx, cancel := context.WithTimeout(x.client.Ctx(), x.config.Timeout)
 		defer cancel()
 
-		// An error shouldn't fail deregistration
-		// The lease will expire naturally if revoke fails
+		// Best-effort: the lease will expire naturally if revoke fails (e.g. etcd unreachable).
 		_, _ = x.namespaceLE.Revoke(ctx, x.leaseID)
 		x.leaseID = 0
 	}
-	x.registered.Store(false)
-	return nil
 }
 
 // Close implements discovery.Provider.
@@ -247,7 +252,10 @@ func (x *Discovery) Close() error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
-	// Close etcd client
+	if x.registered.Load() {
+		x.deregisterLocked()
+	}
+
 	if x.client != nil {
 		if err := x.client.Close(); err != nil {
 			return fmt.Errorf("failed to close etcd client: %w", err)
@@ -256,14 +264,5 @@ func (x *Discovery) Close() error {
 	}
 
 	x.initialized.Store(false)
-	x.registered.Store(false)
 	return nil
-}
-
-// extractNodeID extracts node ID from etcd key
-func (x *Discovery) extractNodeID(key string) string {
-	if !strings.HasPrefix(key, x.prefix) {
-		return ""
-	}
-	return strings.TrimPrefix(key, x.prefix)
 }

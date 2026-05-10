@@ -134,6 +134,29 @@ func TestDiscovery(t *testing.T) {
 		err = provider.Initialize()
 		assert.NoError(t, err)
 	})
+	t.Run("With Initialize: connect failure", func(t *testing.T) {
+		ctx := t.Context()
+		nodePorts := dynaport.Get(1)
+		port := nodePorts[0]
+
+		// point at an unreachable endpoint so MemberList fails
+		config := &Config{
+			Endpoints:       []string{"http://127.0.0.1:1"},
+			Timeout:         2 * time.Second,
+			ActorSystemName: "AccountsSystem",
+			Host:            "127.0.0.1",
+			DiscoveryPort:   port,
+			Context:         ctx,
+			TTL:             60,
+			DialTimeout:     1 * time.Second,
+		}
+
+		provider := NewDiscovery(config)
+		err := provider.Initialize()
+		require.Error(t, err)
+		require.ErrorContains(t, err, "failed to connect to etcd")
+		require.False(t, provider.initialized.Load())
+	})
 	t.Run("With Initialize: with invalid config", func(t *testing.T) {
 		ctx := t.Context()
 

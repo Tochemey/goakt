@@ -26,9 +26,9 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"slices"
 	"strconv"
 	"sync"
+	"time"
 
 	goset "github.com/deckarep/golang-set/v2"
 	"go.uber.org/atomic"
@@ -42,6 +42,8 @@ import (
 	"github.com/tochemey/goakt/v4/internal/locker"
 )
 
+const discoverPeersTimeout = 30 * time.Second
+
 // Discovery represents the kubernetes discovery
 type Discovery struct {
 	_      locker.NoCopy
@@ -49,9 +51,14 @@ type Discovery struct {
 	client kubernetes.Interface
 	mu     sync.Mutex
 
-	stopChan chan struct{}
+	// labelSelector is the cached pod label selector string built from config.PodLabels
+	labelSelector string
 	// states whether the actor system has started or not
 	initialized *atomic.Bool
+
+	// Test seams: overridden in unit tests so Register can run without a live cluster.
+	inClusterConfig func() (*rest.Config, error)
+	newForConfig    func(*rest.Config) (kubernetes.Interface, error)
 }
 
 // enforce compilation error
@@ -59,15 +66,15 @@ var _ discovery.Provider = &Discovery{}
 
 // NewDiscovery returns an instance of the kubernetes discovery provider
 func NewDiscovery(config *Config) *Discovery {
-	// create an instance of
-	discovery := &Discovery{
-		mu:          sync.Mutex{},
-		stopChan:    make(chan struct{}, 1),
-		initialized: atomic.NewBool(false),
-		config:      config,
+	return &Discovery{
+		mu:              sync.Mutex{},
+		initialized:     atomic.NewBool(false),
+		config:          config,
+		inClusterConfig: rest.InClusterConfig,
+		newForConfig: func(c *rest.Config) (kubernetes.Interface, error) {
+			return kubernetes.NewForConfig(c)
+		},
 	}
-
-	return discovery
 }
 
 // ID returns the discovery provider id
@@ -84,7 +91,12 @@ func (d *Discovery) Initialize() error {
 		return discovery.ErrAlreadyInitialized
 	}
 
-	return d.config.Validate()
+	if err := d.config.Validate(); err != nil {
+		return err
+	}
+
+	d.labelSelector = labels.SelectorFromSet(d.config.PodLabels).String()
+	return nil
 }
 
 // Register registers this node to a service discovery directory.
@@ -96,18 +108,18 @@ func (d *Discovery) Register() error {
 		return discovery.ErrAlreadyRegistered
 	}
 
-	config, err := rest.InClusterConfig()
+	config, err := d.inClusterConfig()
 	if err != nil {
 		return fmt.Errorf("failed to get the in-cluster config of the kubernetes provider: %w", err)
 	}
 
-	client, err := kubernetes.NewForConfig(config)
+	client, err := d.newForConfig(config)
 	if err != nil {
 		return fmt.Errorf("failed to create the kubernetes client api: %w", err)
 	}
 
 	d.client = client
-	d.initialized = atomic.NewBool(true)
+	d.initialized.Store(true)
 	return nil
 }
 
@@ -119,8 +131,7 @@ func (d *Discovery) Deregister() error {
 	if !d.initialized.Load() {
 		return discovery.ErrNotInitialized
 	}
-	d.initialized = atomic.NewBool(false)
-	close(d.stopChan)
+	d.initialized.Store(false)
 	return nil
 }
 
@@ -130,26 +141,22 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 		return nil, discovery.ErrNotInitialized
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), discoverPeersTimeout)
+	defer cancel()
 
 	pods, err := d.client.CoreV1().Pods(d.config.Namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: labels.SelectorFromSet(d.config.PodLabels).String(),
+		LabelSelector: d.labelSelector,
+		FieldSelector: "status.phase=" + string(corev1.PodRunning),
 	})
 
 	if err != nil {
 		return nil, err
 	}
 
-	validPortNames := []string{d.config.PeersPortName, d.config.DiscoveryPortName, d.config.RemotingPortName}
-
-	// define the addresses list
 	addresses := goset.NewSet[string]()
 
 MainLoop:
 	for _, pod := range pods.Items {
-		if pod.Status.Phase != corev1.PodRunning {
-			continue MainLoop
-		}
 		// If there is a Ready condition available, we need that to be true.
 		// If no ready condition is set, then we accept this pod regardless.
 		for _, condition := range pod.Status.Conditions {
@@ -158,15 +165,11 @@ MainLoop:
 			}
 		}
 
-		// iterate the pod containers and find the named port
 		for _, container := range pod.Spec.Containers {
 			for _, port := range container.Ports {
-				if !slices.Contains(validPortNames, port.Name) {
-					continue
-				}
-
 				if port.Name == d.config.DiscoveryPortName {
 					addresses.Add(net.JoinHostPort(pod.Status.PodIP, strconv.Itoa(int(port.ContainerPort))))
+					continue MainLoop
 				}
 			}
 		}

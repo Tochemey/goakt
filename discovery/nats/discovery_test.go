@@ -306,13 +306,12 @@ func TestDiscovery(t *testing.T) {
 		discoveredNodeAddr = client1.address
 		require.Equal(t, peers[0], discoveredNodeAddr)
 
-		// de-register client 2 but it can see client1
+		// after de-registering client 2, it can no longer discover peers
 		require.NoError(t, client2.Deregister())
 		peers, err = client2.DiscoverPeers()
-		require.NoError(t, err)
-		require.NotEmpty(t, peers)
-		discoveredNodeAddr = client1.address
-		require.Equal(t, peers[0], discoveredNodeAddr)
+		require.Error(t, err)
+		assert.EqualError(t, err, discovery.ErrNotRegistered.Error())
+		require.Empty(t, peers)
 
 		// client-1 cannot see the deregistered client
 		peers, err = client1.DiscoverPeers()
@@ -361,5 +360,24 @@ func TestDiscovery(t *testing.T) {
 		// initialize
 		err := provider.Initialize()
 		assert.Error(t, err)
+	})
+	t.Run("With Register after Deregister", func(t *testing.T) {
+		// start the NATS server
+		srv := startNatsServer(t)
+		t.Cleanup(srv.Shutdown)
+
+		provider := newPeer(t, srv.Addr().String())
+
+		require.NoError(t, provider.Register())
+		require.True(t, provider.registered.Load())
+
+		require.NoError(t, provider.Deregister())
+		require.False(t, provider.registered.Load(), "registered must be cleared after Deregister")
+
+		// re-register must succeed
+		require.NoError(t, provider.Register())
+		require.True(t, provider.registered.Load())
+
+		require.NoError(t, provider.Close())
 	})
 }

@@ -32,13 +32,15 @@ import (
 
 // Config holds configuration for etcd service discovery
 type Config struct {
-	// Context specifies the execution context for Consul operations.
+	// Context specifies the long-lived execution context for etcd operations,
+	// including the lease keep-alive. Must outlive the provider — if it is
+	// cancelled, the lease keep-alive stops and the node is removed from etcd.
 	// If nil, context.Background() will be used.
 	Context context.Context
 	// Endpoints is a list of etcd cluster endpoints
 	Endpoints []string
 	// ActorSystemName is the name of the actor system.
-	// It is used as the service identifier when registering with Consul.
+	// It is used as the namespace prefix under which nodes register in etcd.
 	ActorSystemName string
 	// Host is the hostname or IP address of the actor system.
 	Host string

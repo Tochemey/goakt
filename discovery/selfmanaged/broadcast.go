@@ -24,6 +24,7 @@ package selfmanaged
 
 import (
 	"bytes"
+	"errors"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -55,7 +56,7 @@ type broadcast struct {
 	send             *net.UDPConn
 	clusterNameBytes []byte // cached for handlePacket to avoid repeated []byte conversion
 
-	peers   sync.Map // map[string]*int64 — address -> lastSeen Unix nano (ptr avoids boxing on updates)
+	peers   sync.Map // map[string]*atomic.Int64 — address -> lastSeen Unix nano (ptr ensures 8-byte alignment on 32-bit)
 	stopped atomic.Bool
 	done    chan struct{}
 	wg      sync.WaitGroup
@@ -141,7 +142,7 @@ func (b *broadcast) getPeers(selfAddr string) []string {
 	out := make([]string, 0, 16)
 	b.peers.Range(func(key, value any) bool {
 		addr := key.(string)
-		lastSeen := atomic.LoadInt64(value.(*int64))
+		lastSeen := value.(*atomic.Int64).Load()
 		if addr != selfAddr && lastSeen > expiry {
 			out = append(out, addr)
 		}
@@ -189,18 +190,23 @@ func (b *broadcast) recvLoop() {
 			return
 		default:
 		}
-		if b.recv != nil {
-			_ = b.recv.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
-			n, _, err := b.recv.ReadFromUDP(buf)
-			if err != nil {
-				if !b.stopped.Load() && !isTimeout(err) {
-					continue
-				}
+		if b.recv == nil {
+			return
+		}
+		_ = b.recv.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+		n, _, err := b.recv.ReadFromUDP(buf)
+		if err != nil {
+			if b.stopped.Load() || errors.Is(err, net.ErrClosed) {
 				return
 			}
-			if n > 0 {
-				b.handlePacket(buf[:n])
+			if isTimeout(err) {
+				continue
 			}
+			// transient error; retry
+			continue
+		}
+		if n > 0 {
+			b.handlePacket(buf[:n])
 		}
 	}
 }
@@ -210,28 +216,27 @@ func (b *broadcast) handlePacket(data []byte) {
 	if len(parts) != 3 || !bytes.Equal(parts[0], protocolVersionBytes) || !bytes.Equal(parts[1], b.clusterNameBytes) {
 		return
 	}
-	addrBytes := bytes.TrimSpace(parts[2])
-	if len(addrBytes) == 0 {
+	addrStr := string(bytes.TrimSpace(parts[2]))
+	if addrStr == "" {
 		return
 	}
-	idx := bytes.IndexByte(addrBytes, ':')
-	if idx <= 0 || idx >= len(addrBytes)-1 {
+	// net.SplitHostPort handles both "host:port" and "[ipv6]:port"; rejects malformed input.
+	host, port, err := net.SplitHostPort(addrStr)
+	if err != nil || host == "" || port == "" {
 		return
 	}
-	portBytes := addrBytes[idx+1:]
-	for _, c := range portBytes {
+	for _, c := range []byte(port) {
 		if c < '0' || c > '9' {
 			return
 		}
 	}
-	addrStr := string(addrBytes)
 	ts := time.Now().UnixNano()
 	if v, ok := b.peers.Load(addrStr); ok {
-		atomic.StoreInt64(v.(*int64), ts)
+		v.(*atomic.Int64).Store(ts)
 		return
 	}
-	p := new(int64)
-	atomic.StoreInt64(p, ts)
+	p := new(atomic.Int64)
+	p.Store(ts)
 	b.peers.Store(addrStr, p)
 }
 

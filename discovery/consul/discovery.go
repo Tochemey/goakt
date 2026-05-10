@@ -23,13 +23,11 @@
 package consul
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"strconv"
 	"sync"
 
-	goset "github.com/deckarep/golang-set/v2"
 	"github.com/hashicorp/consul/api"
 	"go.uber.org/atomic"
 
@@ -45,7 +43,6 @@ type Discovery struct {
 	initialized *atomic.Bool
 	registered  *atomic.Bool
 	mu          *sync.RWMutex
-	ctx         context.Context
 	serviceID   string
 }
 
@@ -55,17 +52,14 @@ var _ discovery.Provider = (*Discovery)(nil)
 // It initializes the provider with the given configuration and sets the initial state.
 // It returns a pointer to the Discovery instance.
 func NewDiscovery(config *Config) *Discovery {
-	if config == nil {
-		config = new(Config)
-	}
-
+	// shallow-copy the user's Config so Sanitize doesn't mutate the caller's pointer
+	cfg := *config
 	return &Discovery{
-		config:      config,
+		config:      &cfg,
 		initialized: atomic.NewBool(false),
 		registered:  atomic.NewBool(false),
 		mu:          &sync.RWMutex{},
-		ctx:         config.Context,
-		serviceID:   net.JoinHostPort(config.Host, strconv.Itoa(config.DiscoveryPort)),
+		serviceID:   net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.DiscoveryPort)),
 	}
 }
 
@@ -99,17 +93,14 @@ func (x *Discovery) Initialize() error {
 		return fmt.Errorf("failed to create consul client: %w", err)
 	}
 
-	_, cancel := context.WithTimeout(x.ctx, x.config.Timeout)
-	defer cancel()
-
-	_, err = client.Agent().Self()
-	if err != nil {
+	// Self() probes the agent. The Consul Go client uses its own HTTP timeout
+	// so we don't wrap a context here — the API doesn't accept one for this call.
+	if _, err = client.Agent().Self(); err != nil {
 		return fmt.Errorf("failed to connect to consul: %w", err)
 	}
 
 	x.client = client
 	x.initialized.Store(true)
-
 	return nil
 }
 
@@ -118,7 +109,6 @@ func (x *Discovery) Register() error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
-	// TODO: maybe remove this check
 	if !x.initialized.Load() {
 		return discovery.ErrNotInitialized
 	}
@@ -160,71 +150,61 @@ func (x *Discovery) Deregister() error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
-	// TODO: maybe remove this check
 	if !x.initialized.Load() {
 		return discovery.ErrNotInitialized
 	}
-
 	if !x.registered.Load() {
 		return discovery.ErrNotRegistered
 	}
+	return x.deregisterLocked()
+}
 
-	err := x.client.Agent().ServiceDeregister(x.serviceID)
-	if err != nil {
-		return err
-	}
-
-	x.registered.Store(false)
-	return nil
+// deregisterLocked removes the service from Consul.
+// Caller must hold x.mu in write mode and must have verified registered==true.
+func (x *Discovery) deregisterLocked() error {
+	defer x.registered.Store(false)
+	return x.client.Agent().ServiceDeregister(x.serviceID)
 }
 
 // DiscoverPeers retrieves the list of peers registered in Consul.
 // It returns a slice of strings containing the addresses of the peers.
 func (x *Discovery) DiscoverPeers() ([]string, error) {
 	x.mu.RLock()
-	defer x.mu.RUnlock()
-
-	// TODO: maybe remove this check
 	if !x.initialized.Load() {
+		x.mu.RUnlock()
 		return nil, discovery.ErrNotInitialized
 	}
-
 	if !x.registered.Load() {
+		x.mu.RUnlock()
 		return nil, discovery.ErrNotRegistered
 	}
+	client := x.client
+	x.mu.RUnlock()
 
-	// Build query options
 	queryOpts := &api.QueryOptions{
 		AllowStale: x.config.QueryOptions.AllowStale,
 		Datacenter: x.config.QueryOptions.Datacenter,
 		Near:       x.config.QueryOptions.Near,
 	}
-
 	if x.config.QueryOptions.WaitTime > 0 {
 		queryOpts.WaitTime = x.config.QueryOptions.WaitTime
 	}
 
-	var services []*api.ServiceEntry
-	var err error
-
-	// Query services - use health endpoint to get full service info
-	services, _, err = x.client.Health().Service(
+	services, _, err := client.Health().Service(
 		x.config.ActorSystemName,
 		x.config.ActorSystemName,
 		x.config.QueryOptions.OnlyPassing,
 		queryOpts)
-
 	if err != nil {
 		return nil, fmt.Errorf("failed to discover services: %w", err)
 	}
 
-	peers := goset.NewSet[string]()
+	// Consul service IDs are unique by host:port, so no set dedup is needed.
+	peers := make([]string, 0, len(services))
 	for _, service := range services {
 		if service == nil || service.Service == nil || service.Node == nil {
 			continue
 		}
-
-		// Skip self if registered
 		if service.Service.ID == x.serviceID {
 			continue
 		}
@@ -233,24 +213,26 @@ func (x *Discovery) DiscoverPeers() ([]string, error) {
 		if address == "" {
 			address = service.Node.Address
 		}
-
 		if service.Service.Port > 0 {
-			peers.Add(net.JoinHostPort(address, strconv.Itoa(service.Service.Port)))
+			peers = append(peers, net.JoinHostPort(address, strconv.Itoa(service.Service.Port)))
 		} else {
-			peers.Add(address)
+			peers = append(peers, address)
 		}
 	}
-
-	return peers.ToSlice(), nil
+	return peers, nil
 }
 
 // Close cleans up the discovery provider.
+// If still registered, the service is deregistered from Consul on a best-effort basis;
+// the error is dropped because Close has no meaningful recovery.
 func (x *Discovery) Close() error {
-	x.initialized.Store(false)
-	x.registered.Store(false)
-
 	x.mu.Lock()
+	defer x.mu.Unlock()
+
+	if x.registered.Load() {
+		_ = x.deregisterLocked()
+	}
+	x.initialized.Store(false)
 	x.client = nil
-	x.mu.Unlock()
 	return nil
 }
