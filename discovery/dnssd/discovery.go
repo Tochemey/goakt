@@ -26,6 +26,7 @@ import (
 	"context"
 	"net"
 	"sync"
+	"time"
 
 	goset "github.com/deckarep/golang-set/v2"
 	"go.uber.org/atomic"
@@ -34,10 +35,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/locker"
 )
 
-const (
-	DomainName = "domain-name"
-	IPv6       = "ipv6"
-)
+const lookupTimeout = 30 * time.Second
 
 // Discovery represents the DNS service discovery
 // IP addresses are looked up by querying the default
@@ -47,8 +45,8 @@ type Discovery struct {
 	mu     sync.Mutex
 	config *Config
 
-	// states whether the actor system has started or not
 	initialized *atomic.Bool
+	registered  *atomic.Bool
 }
 
 // enforce compilation error
@@ -60,6 +58,7 @@ func NewDiscovery(config *Config) *Discovery {
 		mu:          sync.Mutex{},
 		config:      config,
 		initialized: atomic.NewBool(false),
+		registered:  atomic.NewBool(false),
 	}
 }
 
@@ -68,27 +67,34 @@ func (d *Discovery) ID() string {
 	return discovery.ProviderDNS
 }
 
-// Initialize initializes the plugin: registers some internal data structures, clients etc.
+// Initialize validates the provider configuration and marks the provider as ready
+// for Register / DiscoverPeers.
 func (d *Discovery) Initialize() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.initialized.Load() {
 		return discovery.ErrAlreadyInitialized
 	}
-
-	return d.config.Validate()
+	if err := d.config.Validate(); err != nil {
+		return err
+	}
+	d.initialized.Store(true)
+	return nil
 }
 
-// Register registers this node to a service discovery directory.
+// Register marks this node as participating in discovery. DNS-SD has no remote
+// registry to announce to, so this is purely local state.
 func (d *Discovery) Register() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	if d.initialized.Load() {
+	if !d.initialized.Load() {
+		return discovery.ErrNotInitialized
+	}
+	if d.registered.Load() {
 		return discovery.ErrAlreadyRegistered
 	}
-
-	d.initialized = atomic.NewBool(true)
+	d.registered.Store(true)
 	return nil
 }
 
@@ -100,59 +106,53 @@ func (d *Discovery) Deregister() error {
 	if !d.initialized.Load() {
 		return discovery.ErrNotInitialized
 	}
-	d.initialized = atomic.NewBool(false)
+	if !d.registered.Load() {
+		return discovery.ErrNotRegistered
+	}
+	d.registered.Store(false)
 	return nil
 }
 
 // DiscoverPeers returns a list of known nodes.
 func (d *Discovery) DiscoverPeers() ([]string, error) {
 	d.mu.Lock()
-	defer d.mu.Unlock()
-
 	if !d.initialized.Load() {
+		d.mu.Unlock()
 		return nil, discovery.ErrNotInitialized
 	}
-
-	ctx := context.Background()
-
-	// set ipv6 filter
-	v6 := false
-	if d.config.IPv6 != nil {
-		v6 = *d.config.IPv6
+	if !d.registered.Load() {
+		d.mu.Unlock()
+		return nil, discovery.ErrNotRegistered
 	}
+	domain := d.config.DomainName
+	v6 := d.config.IPv6 != nil && *d.config.IPv6
+	d.mu.Unlock()
 
-	var err error
+	ctx, cancel := context.WithTimeout(context.Background(), lookupTimeout)
+	defer cancel()
 
-	resolver := &net.Resolver{
-		PreferGo: true, // Prefer Go's DNS resolver
-	}
+	resolver := &net.Resolver{PreferGo: true}
 
-	// only extract ipv6
 	if v6 {
-		ips, err := resolver.LookupIP(ctx, "ip6", d.config.DomainName)
+		ips, err := resolver.LookupIP(ctx, "ip6", domain)
 		if err != nil {
 			return nil, err
 		}
-
 		ipList := make([]string, len(ips))
-		for index, ip := range ips {
-			ipList[index] = ip.String()
+		for i, ip := range ips {
+			ipList[i] = ip.String()
 		}
-
 		return goset.NewSet(ipList...).ToSlice(), nil
 	}
 
-	// lookup the addresses based upon the dns name
-	addrs, err := resolver.LookupIPAddr(ctx, d.config.DomainName)
+	addrs, err := resolver.LookupIPAddr(ctx, domain)
 	if err != nil {
 		return nil, err
 	}
-
 	ipList := make([]string, len(addrs))
-	for index, addr := range addrs {
-		ipList[index] = addr.IP.String()
+	for i, addr := range addrs {
+		ipList[i] = addr.IP.String()
 	}
-
 	return goset.NewSet(ipList...).ToSlice(), nil
 }
 

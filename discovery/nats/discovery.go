@@ -40,7 +40,11 @@ import (
 	"github.com/tochemey/goakt/v4/log"
 )
 
-// Discovery represents the kubernetes discovery
+// peerResponseBuffer caps the in-flight peer responses held while DiscoverPeers waits
+// out its timeout. NATS slow-consumer behavior takes over if a cluster fan-out exceeds this.
+const peerResponseBuffer = 32
+
+// Discovery represents the NATS discovery
 type Discovery struct {
 	_      locker.NoCopy
 	config *Config
@@ -51,8 +55,8 @@ type Discovery struct {
 
 	// define the nats connection
 	connection *nats.Conn
-	// define a slice of subscriptions
-	subscriptions []*nats.Subscription
+	// subscription is the single active subscription on NatsSubject (set by Register).
+	subscription *nats.Subscription
 
 	// define a logger
 	logger log.Logger
@@ -63,14 +67,15 @@ type Discovery struct {
 // enforce compilation error
 var _ discovery.Provider = &Discovery{}
 
-// NewDiscovery returns an instance of the kubernetes discovery provider
+// NewDiscovery returns an instance of the NATS discovery provider
 func NewDiscovery(config *Config, opts ...Option) *Discovery {
-	// create an instance of
+	// shallow-copy the user's Config so Initialize defaults don't mutate the caller's pointer
+	cfg := *config
 	d := &Discovery{
 		mu:          sync.Mutex{},
 		initialized: atomic.NewBool(false),
 		registered:  atomic.NewBool(false),
-		config:      config,
+		config:      &cfg,
 		logger:      log.DiscardLogger,
 	}
 
@@ -79,7 +84,7 @@ func NewDiscovery(config *Config, opts ...Option) *Discovery {
 		opt.Apply(d)
 	}
 
-	d.address = net.JoinHostPort(config.Host, strconv.Itoa(config.DiscoveryPort))
+	d.address = net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.DiscoveryPort))
 	return d
 }
 
@@ -141,7 +146,7 @@ func (d *Discovery) Initialize() error {
 
 	// create the NATs connection
 	d.connection = connection
-	d.initialized = atomic.NewBool(true)
+	d.initialized.Store(true)
 	return nil
 }
 
@@ -167,9 +172,6 @@ func (d *Discovery) Register() error {
 		case internalpb.NatsMessageType_NATS_MESSAGE_TYPE_DEREGISTER:
 			d.logger.Infof("received deregistration request from peer[name=%s, host=%s, port=%d]",
 				message.GetName(), message.GetHost(), message.GetPort())
-		case internalpb.NatsMessageType_NATS_MESSAGE_TYPE_REGISTER:
-			d.logger.Infof("received registration request from peer[name=%s, host=%s, port=%d]",
-				message.GetName(), message.GetHost(), message.GetPort())
 		case internalpb.NatsMessageType_NATS_MESSAGE_TYPE_REQUEST:
 			d.logger.Infof("received identification request from peer[name=%s, host=%s, port=%d]",
 				message.GetName(), message.GetHost(), message.GetPort())
@@ -194,8 +196,8 @@ func (d *Discovery) Register() error {
 		return err
 	}
 
-	d.subscriptions = append(d.subscriptions, subscription)
-	d.registered = atomic.NewBool(true)
+	d.subscription = subscription
+	d.registered.Store(true)
 	return nil
 }
 
@@ -203,29 +205,27 @@ func (d *Discovery) Register() error {
 func (d *Discovery) Deregister() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	return d.deregisterLocked()
+}
 
-	// first check whether the discovery provider has been registered or not
+// deregisterLocked unsubscribes and publishes a DEREGISTER notification.
+// Caller must hold d.mu.
+func (d *Discovery) deregisterLocked() error {
 	if !d.registered.Load() {
 		return discovery.ErrNotRegistered
 	}
 
-	// shutdown all the subscriptions
-	for _, subscription := range d.subscriptions {
-		// when subscription is defined
-		if subscription != nil {
-			// check whether the subscription is active or not
-			if subscription.IsValid() {
-				// unsubscribe and return when there is an error
-				if err := subscription.Unsubscribe(); err != nil {
-					return err
-				}
-			}
+	defer d.registered.Store(false)
+
+	if d.subscription != nil && d.subscription.IsValid() {
+		if err := d.subscription.Unsubscribe(); err != nil {
+			return err
 		}
 	}
 
-	// send the de-registration message to notify peers
+	d.subscription = nil
+
 	if d.connection != nil {
-		// send a message to deregister stating we are out
 		message := &internalpb.NatsMessage{
 			Host:        d.config.Host,
 			Port:        int32(d.config.DiscoveryPort),
@@ -236,34 +236,41 @@ func (d *Discovery) Deregister() error {
 		bytea, _ := proto.Marshal(message)
 		return d.connection.Publish(d.config.NatsSubject, bytea)
 	}
-	d.registered.Store(false)
 	return nil
 }
 
 // DiscoverPeers returns a list of known nodes.
-func (d *Discovery) DiscoverPeers() ([]string, error) {
+func (d *Discovery) DiscoverPeers() (peers []string, err error) {
 	d.mu.Lock()
-	defer d.mu.Unlock()
-
 	if !d.initialized.Load() {
+		d.mu.Unlock()
 		return nil, discovery.ErrNotInitialized
 	}
-
 	if !d.registered.Load() {
+		d.mu.Unlock()
 		return nil, discovery.ErrNotRegistered
 	}
+	conn := d.connection
+	d.mu.Unlock()
 
 	// Set up a reply channel, then broadcast for all peers to
 	// report their presence.
 	// collect as many responses as possible in the given timeout.
 	inbox := nats.NewInbox()
-	recv := make(chan *nats.Msg, 32)
+	recv := make(chan *nats.Msg, peerResponseBuffer)
 
 	// bind to receive messages
-	sub, err := d.connection.ChanSubscribe(inbox, recv)
+	sub, err := conn.ChanSubscribe(inbox, recv)
 	if err != nil {
 		return nil, err
 	}
+
+	defer func() {
+		if uerr := sub.Unsubscribe(); uerr != nil {
+			d.logger.Errorf("failed to unsubscribe from discovery inbox: %v", uerr)
+			err = errors.Join(err, uerr)
+		}
+	}()
 
 	request := &internalpb.NatsMessage{
 		Host:        d.config.Host,
@@ -273,23 +280,17 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 	}
 
 	bytea, _ := proto.Marshal(request)
-	if err = d.connection.PublishRequest(d.config.NatsSubject, inbox, bytea); err != nil {
+	if err = conn.PublishRequest(d.config.NatsSubject, inbox, bytea); err != nil {
 		return nil, err
 	}
 
-	var peers []string
 	timeout := time.After(d.config.Timeout)
 	me := d.address
 	for {
 		select {
-		case msg, ok := <-recv:
-			if !ok {
-				// Subscription is closed
-				return peers, nil
-			}
-
+		case msg := <-recv:
 			message := new(internalpb.NatsMessage)
-			if err := proto.Unmarshal(msg.Data, message); err != nil {
+			if err = proto.Unmarshal(msg.Data, message); err != nil {
 				d.logger.Errorf("failed to unmarshal nats message: %v", err)
 				return nil, err
 			}
@@ -303,8 +304,7 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 			peers = append(peers, addr)
 
 		case <-timeout:
-			_ = sub.Unsubscribe()
-			close(recv)
+			return peers, nil
 		}
 	}
 }
@@ -314,26 +314,18 @@ func (d *Discovery) Close() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	d.initialized.Store(false)
-	d.registered.Store(false)
-
-	if d.connection != nil {
-		defer func() {
-			d.connection.Close()
-			d.connection = nil
-		}()
-
-		for _, subscription := range d.subscriptions {
-			if subscription != nil {
-				if subscription.IsValid() {
-					if err := subscription.Unsubscribe(); err != nil {
-						return err
-					}
-				}
-			}
-		}
-
-		return d.connection.Flush()
+	if d.registered.Load() {
+		// best-effort: notify peers and clear subscription state. Errors are dropped
+		// because Close has no meaningful recovery — the connection is about to die.
+		_ = d.deregisterLocked()
 	}
-	return nil
+	d.initialized.Store(false)
+
+	if d.connection == nil {
+		return nil
+	}
+	err := d.connection.Flush()
+	d.connection.Close()
+	d.connection = nil
+	return err
 }

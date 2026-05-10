@@ -52,60 +52,72 @@ func TestBroadcast_encodePacket(t *testing.T) {
 }
 
 func TestBroadcast_handlePacket(t *testing.T) {
-	cfg := &Config{
-		ClusterName: "test-cluster",
-		SelfAddress: "127.0.0.1:7946",
+	newB := func() *broadcast {
+		return newBroadcast(&Config{
+			ClusterName: "test-cluster",
+			SelfAddress: "127.0.0.1:7946",
+		})
 	}
-	b := newBroadcast(cfg)
 
 	t.Run("valid packet", func(t *testing.T) {
-		pkt := fmt.Appendf(nil, "%s|%s|192.168.1.20:7947", protocolVersion, cfg.ClusterName)
+		b := newB()
+		pkt := fmt.Appendf(nil, "%s|%s|192.168.1.20:7947", protocolVersion, b.config.ClusterName)
 		b.handlePacket(pkt)
-		peers := b.getPeers(cfg.SelfAddress)
+		peers := b.getPeers(b.config.SelfAddress)
 		require.Len(t, peers, 1)
 		assert.Equal(t, "192.168.1.20:7947", peers[0])
 	})
-	t.Run("wrong protocol version", func(t *testing.T) {
-		pkt := []byte("goakt-v2|test-cluster|192.168.1.21:7947")
+	t.Run("valid ipv6 packet", func(t *testing.T) {
+		b := newB()
+		pkt := fmt.Appendf(nil, "%s|%s|[2001:db8::1]:7947", protocolVersion, b.config.ClusterName)
 		b.handlePacket(pkt)
-		peers := b.getPeers(cfg.SelfAddress)
-		assert.Len(t, peers, 1, "should not add peer from wrong protocol")
+		peers := b.getPeers(b.config.SelfAddress)
+		require.Len(t, peers, 1)
+		assert.Equal(t, "[2001:db8::1]:7947", peers[0])
+	})
+	t.Run("wrong protocol version", func(t *testing.T) {
+		b := newB()
+		b.handlePacket([]byte("goakt-v2|test-cluster|192.168.1.21:7947"))
+		assert.Empty(t, b.getPeers(b.config.SelfAddress))
 	})
 	t.Run("wrong cluster name", func(t *testing.T) {
-		pkt := fmt.Appendf(nil, "%s|other-cluster|192.168.1.22:7947", protocolVersion)
-		b.handlePacket(pkt)
-		peers := b.getPeers(cfg.SelfAddress)
-		assert.Len(t, peers, 1, "should not add peer from different cluster")
+		b := newB()
+		b.handlePacket(fmt.Appendf(nil, "%s|other-cluster|192.168.1.22:7947", protocolVersion))
+		assert.Empty(t, b.getPeers(b.config.SelfAddress))
 	})
 	t.Run("invalid address format", func(t *testing.T) {
-		pkt := fmt.Appendf(nil, "%s|%s|invalid", protocolVersion, cfg.ClusterName)
-		b.handlePacket(pkt)
-		peers := b.getPeers(cfg.SelfAddress)
-		assert.Len(t, peers, 1)
+		b := newB()
+		b.handlePacket(fmt.Appendf(nil, "%s|%s|invalid", protocolVersion, b.config.ClusterName))
+		assert.Empty(t, b.getPeers(b.config.SelfAddress))
 	})
 	t.Run("invalid port in address", func(t *testing.T) {
-		pkt := fmt.Appendf(nil, "%s|%s|192.168.1.20:notaport", protocolVersion, cfg.ClusterName)
-		b.handlePacket(pkt)
-		peers := b.getPeers(cfg.SelfAddress)
-		assert.Len(t, peers, 1)
+		b := newB()
+		b.handlePacket(fmt.Appendf(nil, "%s|%s|192.168.1.20:notaport", protocolVersion, b.config.ClusterName))
+		assert.Empty(t, b.getPeers(b.config.SelfAddress))
 	})
 	t.Run("empty address", func(t *testing.T) {
-		pkt := fmt.Appendf(nil, "%s|%s|   ", protocolVersion, cfg.ClusterName)
-		b.handlePacket(pkt)
-		peers := b.getPeers(cfg.SelfAddress)
-		assert.Len(t, peers, 1)
+		b := newB()
+		b.handlePacket(fmt.Appendf(nil, "%s|%s|   ", protocolVersion, b.config.ClusterName))
+		assert.Empty(t, b.getPeers(b.config.SelfAddress))
 	})
 	t.Run("empty host in address", func(t *testing.T) {
-		pkt := fmt.Appendf(nil, "%s|%s|:7946", protocolVersion, cfg.ClusterName)
-		b.handlePacket(pkt)
-		peers := b.getPeers(cfg.SelfAddress)
-		assert.Len(t, peers, 1)
+		b := newB()
+		b.handlePacket(fmt.Appendf(nil, "%s|%s|:7946", protocolVersion, b.config.ClusterName))
+		assert.Empty(t, b.getPeers(b.config.SelfAddress))
 	})
 	t.Run("malformed packet", func(t *testing.T) {
+		b := newB()
 		b.handlePacket([]byte("short"))
 		b.handlePacket([]byte("only|two"))
-		peers := b.getPeers(cfg.SelfAddress)
-		assert.Len(t, peers, 1)
+		assert.Empty(t, b.getPeers(b.config.SelfAddress))
+	})
+	t.Run("updates lastSeen on duplicate", func(t *testing.T) {
+		b := newB()
+		pkt := fmt.Appendf(nil, "%s|%s|192.168.1.30:7947", protocolVersion, b.config.ClusterName)
+		b.handlePacket(pkt)
+		b.handlePacket(pkt)
+		peers := b.getPeers(b.config.SelfAddress)
+		require.Len(t, peers, 1)
 	})
 }
 
@@ -191,6 +203,39 @@ func TestBroadcast_stopIdempotent(t *testing.T) {
 
 func TestIsTimeout(t *testing.T) {
 	assert.False(t, isTimeout(net.UnknownNetworkError("unknown")))
+}
+
+// Regression: recvLoop used to exit after the first 100ms read deadline,
+// so any packet arriving after a brief idle period was lost.
+func TestBroadcast_recvLoop_survivesIdle(t *testing.T) {
+	ports := dynaport.Get(1)
+	broadcastPort := ports[0]
+	cfg := &Config{
+		ClusterName:       "test-cluster",
+		SelfAddress:       "127.0.0.1:7946",
+		BroadcastPort:     broadcastPort,
+		BroadcastInterval: 200 * time.Millisecond,
+		BroadcastAddress:  net.IPv4(127, 0, 0, 1),
+	}
+	b := newBroadcast(cfg)
+	require.NoError(t, b.start())
+	defer b.stop()
+
+	// Idle for longer than the read deadline (100ms) so multiple timeouts elapse.
+	time.Sleep(400 * time.Millisecond)
+
+	conn, err := net.DialUDP("udp4", nil, &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: broadcastPort})
+	require.NoError(t, err)
+	defer conn.Close()
+
+	pkt := fmt.Appendf(nil, "%s|%s|192.168.1.88:7950", protocolVersion, cfg.ClusterName)
+	_, err = conn.Write(pkt)
+	require.NoError(t, err)
+
+	time.Sleep(100 * time.Millisecond)
+	peers := b.getPeers(cfg.SelfAddress)
+	require.Len(t, peers, 1, "recvLoop must keep receiving after idle period")
+	assert.Equal(t, "192.168.1.88:7950", peers[0])
 }
 
 func TestBroadcast_receivesPacket(t *testing.T) {

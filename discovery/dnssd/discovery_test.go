@@ -86,10 +86,10 @@ func TestDiscovery(t *testing.T) {
 		require.NoError(t, provider.Register())
 
 		pause.For(time.Second)
-		require.True(t, provider.initialized.Load())
+		require.True(t, provider.registered.Load())
 		require.NoError(t, provider.Deregister())
 		pause.For(time.Second)
-		assert.False(t, provider.initialized.Load())
+		assert.False(t, provider.registered.Load())
 	})
 	t.Run("With Register when already registered", func(t *testing.T) {
 		// create the config
@@ -102,13 +102,13 @@ func TestDiscovery(t *testing.T) {
 		require.NoError(t, provider.Register())
 
 		pause.For(time.Second)
-		require.True(t, provider.initialized.Load())
+		require.True(t, provider.registered.Load())
 		err := provider.Register()
 		require.Error(t, err)
 		require.EqualError(t, err, discovery.ErrAlreadyRegistered.Error())
 		require.NoError(t, provider.Deregister())
 		pause.For(time.Second)
-		assert.False(t, provider.initialized.Load())
+		assert.False(t, provider.registered.Load())
 	})
 	t.Run("With Deregister", func(t *testing.T) {
 		// create the config
@@ -119,6 +119,7 @@ func TestDiscovery(t *testing.T) {
 		provider := NewDiscovery(config)
 		// for the sake of the test
 		provider.initialized = atomic.NewBool(true)
+		provider.registered = atomic.NewBool(true)
 		assert.NoError(t, provider.Deregister())
 	})
 	t.Run("With Deregister when not initialized", func(t *testing.T) {
@@ -133,6 +134,34 @@ func TestDiscovery(t *testing.T) {
 		err := provider.Deregister()
 		assert.Error(t, err)
 		assert.EqualError(t, err, discovery.ErrNotInitialized.Error())
+	})
+	t.Run("With Initialize: invalid config", func(t *testing.T) {
+		// missing DomainName fails Validate
+		provider := NewDiscovery(&Config{})
+		err := provider.Initialize()
+		require.Error(t, err)
+		assert.False(t, provider.initialized.Load())
+	})
+	t.Run("With Register: not initialized", func(t *testing.T) {
+		provider := NewDiscovery(&Config{DomainName: "google.com"})
+		err := provider.Register()
+		require.Error(t, err)
+		assert.EqualError(t, err, discovery.ErrNotInitialized.Error())
+	})
+	t.Run("With Deregister: not registered", func(t *testing.T) {
+		provider := NewDiscovery(&Config{DomainName: "google.com"})
+		require.NoError(t, provider.Initialize())
+		err := provider.Deregister()
+		require.Error(t, err)
+		assert.EqualError(t, err, discovery.ErrNotRegistered.Error())
+	})
+	t.Run("With DiscoverPeers: not registered", func(t *testing.T) {
+		provider := NewDiscovery(&Config{DomainName: "google.com"})
+		require.NoError(t, provider.Initialize())
+		peers, err := provider.DiscoverPeers()
+		require.Error(t, err)
+		assert.Empty(t, peers)
+		assert.EqualError(t, err, discovery.ErrNotRegistered.Error())
 	})
 	t.Run("With DiscoverPeers: not initialized", func(t *testing.T) {
 		// create the config

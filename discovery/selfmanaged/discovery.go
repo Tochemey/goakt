@@ -105,6 +105,10 @@ func (d *Discovery) Deregister() error {
 // this node. Addresses are in host:discoveryPort format for Memberlist.
 func (d *Discovery) DiscoverPeers() ([]string, error) {
 	d.mu.Lock()
+	if !d.init {
+		d.mu.Unlock()
+		return nil, discovery.ErrNotInitialized
+	}
 	if !d.reg || d.bc == nil {
 		d.mu.Unlock()
 		return nil, discovery.ErrNotRegistered

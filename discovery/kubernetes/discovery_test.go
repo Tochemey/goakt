@@ -33,7 +33,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes"
 	testclient "k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
 	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/tochemey/goakt/v4/discovery"
@@ -226,6 +228,14 @@ func TestDiscovery(t *testing.T) {
 		provider.initialized = atomic.NewBool(true)
 		assert.Error(t, provider.Initialize())
 	})
+	t.Run("With Initialize: invalid config", func(t *testing.T) {
+		// missing required fields should surface as a validation error
+		provider := NewDiscovery(&Config{})
+		err := provider.Initialize()
+		require.Error(t, err)
+		assert.False(t, provider.initialized.Load())
+		assert.Empty(t, provider.labelSelector)
+	})
 	t.Run("With Deregister", func(t *testing.T) {
 		// create the instance of provider
 		provider := NewDiscovery(nil)
@@ -265,6 +275,37 @@ func TestRegister(t *testing.T) {
 		// Ensure client is not set and not marked initialized
 		require.Nil(t, provider.client)
 		require.False(t, provider.initialized.Load())
+	})
+
+	t.Run("client factory error", func(t *testing.T) {
+		provider := NewDiscovery(nil)
+		provider.inClusterConfig = func() (*rest.Config, error) {
+			return &rest.Config{Host: "http://fake"}, nil
+		}
+		provider.newForConfig = func(*rest.Config) (kubernetes.Interface, error) {
+			return nil, errors.New("bad config")
+		}
+
+		err := provider.Register()
+		require.Error(t, err)
+		require.ErrorContains(t, err, "failed to create the kubernetes client api")
+		require.Nil(t, provider.client)
+		require.False(t, provider.initialized.Load())
+	})
+
+	t.Run("success", func(t *testing.T) {
+		fake := testclient.NewClientset()
+		provider := NewDiscovery(nil)
+		provider.inClusterConfig = func() (*rest.Config, error) {
+			return &rest.Config{Host: "http://fake"}, nil
+		}
+		provider.newForConfig = func(*rest.Config) (kubernetes.Interface, error) {
+			return fake, nil
+		}
+
+		require.NoError(t, provider.Register())
+		require.True(t, provider.initialized.Load())
+		require.Same(t, fake, provider.client)
 	})
 }
 

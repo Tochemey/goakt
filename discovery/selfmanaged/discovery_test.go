@@ -156,6 +156,13 @@ func TestDiscovery_DiscoverPeers(t *testing.T) {
 		BroadcastInterval: 100 * time.Millisecond,
 		BroadcastAddress:  net.IPv4(127, 0, 0, 1),
 	}
+	t.Run("not initialized", func(t *testing.T) {
+		d := NewDiscovery(cfg)
+		peers, err := d.DiscoverPeers()
+		require.Error(t, err)
+		assert.Nil(t, peers)
+		assert.ErrorIs(t, err, discovery.ErrNotInitialized)
+	})
 	t.Run("not registered", func(t *testing.T) {
 		d := NewDiscovery(cfg)
 		require.NoError(t, d.Initialize())

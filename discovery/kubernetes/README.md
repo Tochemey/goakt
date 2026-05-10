@@ -50,10 +50,10 @@ type Provider interface {
 
 ### How It Works
 
-1. **Initialize**: Validate config; no API connection yet.
-2. **Register**: Load in-cluster config (`rest.InClusterConfig()`); create Kubernetes client; start background pod watcher.
-3. **DiscoverPeers**: List pods in namespace with `PodLabels`; for each pod, get IP and port named `DiscoveryPortName`; return addresses (excluding self).
-4. **Deregister**: Stop watcher; release resources.
+1. **Initialize**: Validate config and pre-compute the label selector; no API connection yet.
+2. **Register**: Load in-cluster config (`rest.InClusterConfig()`); create the Kubernetes client.
+3. **DiscoverPeers**: List pods in the namespace matching `PodLabels` and `status.phase=Running`; for each ready pod, read the port named `DiscoveryPortName` and return `podIP:port`.
+4. **Deregister**: Mark the provider as uninitialized.
 
 ```
     Pod A                                    Pod B
