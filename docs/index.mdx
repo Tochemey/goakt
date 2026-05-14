@@ -15,7 +15,7 @@ to the project. It focuses on concepts, architecture, and efficient usage patter
 
 - **Unified APIs**: Single actor reference (`*PID`), single lookup (`ActorOf`), unified scheduler
 - **Type flexibility**: `any` replaces `proto.Message` across all message-passing surfaces
-- **Pluggable serialization**: ProtoSerializer (default) and CBORSerializer for arbitrary Go types
+- **Pluggable serialization**: ProtoSerializer (default), plus CBORSerializer and JSONSerializer (sonic-backed) for arbitrary Go types
 - **Simplified remoting**: Config-only public API; client is internal
 - **Path interface**: Location-transparent actor identity replacing `*address.Address`
 

@@ -154,3 +154,43 @@ func TestWithSerializables(t *testing.T) {
 		require.Equal(t, orig, decoded)
 	})
 }
+
+func TestWithJSONSerializables(t *testing.T) {
+	type concreteMsg struct {
+		ID int `json:"id"`
+	}
+	type otherMsg struct {
+		Name string `json:"name"`
+	}
+
+	t.Run("concrete type registration", func(t *testing.T) {
+		config := &Config{serializers: make(map[reflect.Type]Serializer)}
+		WithJSONSerializables(new(concreteMsg), new(otherMsg)).Apply(config)
+		s1 := config.Serializer(&concreteMsg{})
+		s2 := config.Serializer(&otherMsg{})
+		require.NotNil(t, s1)
+		require.NotNil(t, s2)
+		assert.Same(t, s1, s2, "same JSON serializer instance for all types")
+	})
+
+	t.Run("nil entries ignored", func(t *testing.T) {
+		config := &Config{serializers: make(map[reflect.Type]Serializer)}
+		WithJSONSerializables(new(concreteMsg), nil, new(otherMsg)).Apply(config)
+		require.NotNil(t, config.Serializer(&concreteMsg{}))
+		require.NotNil(t, config.Serializer(&otherMsg{}))
+	})
+
+	t.Run("JSON round-trip with registered types", func(t *testing.T) {
+		config := &Config{serializers: make(map[reflect.Type]Serializer)}
+		WithJSONSerializables(new(concreteMsg)).Apply(config)
+		ser := config.Serializer(&concreteMsg{})
+		require.NotNil(t, ser)
+		orig := &concreteMsg{ID: 42}
+		data, err := ser.Serialize(orig)
+		require.NoError(t, err)
+		require.NotEmpty(t, data)
+		decoded, err := ser.Deserialize(data)
+		require.NoError(t, err)
+		require.Equal(t, orig, decoded)
+	})
+}
