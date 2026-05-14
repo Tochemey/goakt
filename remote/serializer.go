@@ -58,34 +58,15 @@ package remote
 // payloads or unrecognized type identifiers. Returning a nil error alongside
 // a nil or zero value is incorrect and may cause silent data loss.
 //
-// # Example implementation
+// # Built-in implementations
 //
-//	type JSONSerializer struct{}
+// GoAkt ships three built-in serializers that satisfy this interface:
+//   - [ProtoSerializer] — protobuf wire format, the default for [proto.Message] types.
+//   - [CBORSerializer] — CBOR over the global types registry, for arbitrary Go values.
+//   - [JSONSerializer] — JSON (via sonic) over the same registry, for arbitrary Go values.
 //
-//	type envelope struct {
-//	    Type    string          `json:"type"`
-//	    Payload json.RawMessage `json:"payload"`
-//	}
-//
-//	func (s *JSONSerializer) Serialize(message any) ([]byte, error) {
-//	    payload, err := json.Marshal(message)
-//	    if err != nil {
-//	        return nil, err
-//	    }
-//	    env := envelope{
-//	        Type:    fmt.Sprintf("%T", message),
-//	        Payload: payload,
-//	    }
-//	    return json.Marshal(env)
-//	}
-//
-//	func (s *JSONSerializer) Deserialize(data []byte) (any, error) {
-//	    var env envelope
-//	    if err := json.Unmarshal(data, &env); err != nil {
-//	        return nil, err
-//	    }
-//	    // resolve the concrete type by name and unmarshal into it …
-//	}
+// All three share an identical length-prefixed, self-describing frame layout
+// so a custom implementation can interoperate by following the same pattern.
 type Serializer interface {
 	// Serialize encodes message into a byte slice suitable for transmission
 	// over the network. The encoding must be self-describing so that

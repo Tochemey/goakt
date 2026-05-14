@@ -21,14 +21,16 @@ defer sys.Stop()
 
 Create a `remote.Config` with `remote.NewConfig(bindAddr, bindPort, opts...)`. The bind address should be a concrete IP (e.g., `127.0.0.1` or `0.0.0.0`), not a hostname. Pass it to the actor system via `actor.WithRemote(cfg)`.
 
-| Option                  | Purpose                                           |
-|-------------------------|---------------------------------------------------|
-| `WithCompression`       | None, Gzip, Zstd (default), Brotli                |
-| `WithMaxFrameSize`      | Max frame size (default 16MB)                     |
-| `WithWriteTimeout`      | Connection write timeout                          |
-| `WithReadIdleTimeout`   | Health check / ping interval                      |
-| `WithSerializers`       | Custom message serialization                      |
-| `WithContextPropagator` | Propagate trace IDs, auth tokens, correlation IDs |
+| Option                  | Purpose                                               |
+| ----------------------- | ----------------------------------------------------- |
+| `WithCompression`       | None, Gzip, Zstd (default), Brotli                    |
+| `WithMaxFrameSize`      | Max frame size (default 16MB)                         |
+| `WithWriteTimeout`      | Connection write timeout                              |
+| `WithReadIdleTimeout`   | Health check / ping interval                          |
+| `WithSerializers`       | Bind a `Serializer` to a message type or interface    |
+| `WithSerializables`     | Bulk-register types with the built-in CBOR serializer |
+| `WithJSONSerializables` | Bulk-register types with the built-in JSON serializer |
+| `WithContextPropagator` | Propagate trace IDs, auth tokens, correlation IDs     |
 
 ## Transport
 
@@ -56,7 +58,7 @@ type ContextPropagator interface {
 ```
 
 | Method      | Purpose                                                                                                                    |
-|-------------|----------------------------------------------------------------------------------------------------------------------------|
+| ----------- | -------------------------------------------------------------------------------------------------------------------------- |
 | **Inject**  | Write context values into headers for outgoing requests. Called before sending a remote message.                           |
 | **Extract** | Read headers from an incoming request and return a context with propagated values. Called when receiving a remote message. |
 

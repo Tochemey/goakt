@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+### ✨ New Additions
+
+#### JSON serializer (sonic-backed)
+
+Third built-in serializer alongside `ProtoSerializer` and `CBORSerializer`. `remote.JSONSerializer` encodes arbitrary Go values as JSON via [bytedance/sonic](https://github.com/bytedance/sonic) using the `ConfigFastest` preset (no HTML escaping, no JSON-marshaler validation — output is consumed by another goAkt node, not a browser).
+
+- **Same wire shape as the other built-ins.** Length-prefixed self-describing frame: `totalLen | nameLen | type-name | json-bytes`, all big-endian uint32 headers — identical layout to `ProtoSerializer` and `CBORSerializer`.
+- **Same registration path.** `WithSerializers(new(MyMessage), remote.NewJSONSerializer())` auto-registers the type in the global types registry; no separate `RegisterSerializableTypes`-style step. Both sender and receiver must register the same types.
+- **Platform support.** sonic ships JIT-accelerated fast paths for amd64 and arm64 and falls back to `encoding/json` on other architectures (386, riscv64, s390x). API surface is identical; only throughput differs.
+- **Depth bound.** sonic does not expose a per-decode nesting limit, so peer-controlled payloads are bounded by `WithMaxFrameSize` (default 16MB). Tune downward if accepting frames from untrusted peers.
+
+#### `WithJSONSerializables` convenience option
+
+Bulk JSON registration mirroring `WithSerializables` for CBOR. Shares a lazy `DefaultJSONSerializer()` singleton across all calls — `JSONSerializer` is stateless, so reuse is safe and avoids per-option allocation.
+
+```go
+remote.NewConfig("0.0.0.0", 9000,
+    remote.WithJSONSerializables(new(MyEventA), new(MyEventB), (*MyInterface)(nil)),
+)
+```
+
+Typed nil interface pointers bind the serializer at the interface level; concrete types bind per-type.
+
 ## v4.2.3 - 2026-05-09
 
 ### ✨ New Additions

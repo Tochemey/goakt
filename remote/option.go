@@ -38,6 +38,14 @@ var (
 	sharedCBOROnce sync.Once
 )
 
+// sharedJSON is a lazy-initialized singleton for WithJSONSerializables.
+// JSONSerializer is stateless and safe for concurrent use; reusing it
+// avoids per-option allocations.
+var (
+	sharedJSON     *JSONSerializer
+	sharedJSONOnce sync.Once
+)
+
 // DefaultCBORSerializer returns a shared [CBORSerializer] instance.
 // CBORSerializer is stateless and safe for concurrent use; reusing it
 // avoids per-option allocations when using [WithSerializables] or
@@ -45,6 +53,14 @@ var (
 func DefaultCBORSerializer() *CBORSerializer {
 	sharedCBOROnce.Do(func() { sharedCBOR = NewCBORSerializer() })
 	return sharedCBOR
+}
+
+// DefaultJSONSerializer returns a shared [JSONSerializer] instance.
+// JSONSerializer is stateless and safe for concurrent use; reusing it
+// avoids per-option allocations when using [WithJSONSerializables].
+func DefaultJSONSerializer() *JSONSerializer {
+	sharedJSONOnce.Do(func() { sharedJSON = NewJSONSerializer() })
+	return sharedJSON
 }
 
 // Option is the interface that applies a configuration option.
@@ -177,6 +193,8 @@ func WithSerializers(msg any, serializer Serializer) Option {
 // or interface types. It is a convenience for registering multiple types with
 // [CBORSerializer] without repeating the serializer instance.
 //
+// See [WithJSONSerializables] for the JSON counterpart.
+//
 // # Concrete type registration
 //
 // Pass any value of the target type to bind the CBOR serializer to that exact type:
@@ -207,6 +225,7 @@ func WithSerializables(msgs ...any) Option {
 			if msg == nil {
 				continue
 			}
+
 			typ := reflect.TypeOf(msg)
 			if typ == nil {
 				continue
@@ -220,6 +239,58 @@ func WithSerializables(msgs ...any) Option {
 			// Concrete type — register in global registry and config
 			types.RegisterSerializerType(msg, cbor)
 			config.serializers[typ] = cbor
+		}
+	})
+}
+
+// WithJSONSerializables registers the JSON serializer for each of the given
+// concrete or interface types. It is the JSON counterpart to [WithSerializables]
+// and behaves identically aside from the encoding format.
+//
+// # Concrete type registration
+//
+// Pass any value of the target type to bind the JSON serializer to that exact type:
+//
+//	WithJSONSerializables(new(MyMessage), new(OtherMessage))
+//
+// Each concrete type is automatically registered in the global type registry used
+// for JSON serialization. No separate registration step is required.
+//
+// # Interface registration
+//
+// Pass a typed nil pointer to an interface to bind the JSON serializer to every
+// message that implements that interface:
+//
+//	WithJSONSerializables((*MyInterface)(nil))
+//
+// # Dispatch order
+//
+// When [Config.Serializer] resolves a serializer for a message it checks, in order:
+//  1. Exact concrete type — the entry registered with the message's dynamic type.
+//  2. Interface match — the first registered interface the message implements.
+//
+// Nil entries in the types slice are silently ignored.
+func WithJSONSerializables(msgs ...any) Option {
+	json := DefaultJSONSerializer()
+	return OptionFunc(func(config *Config) {
+		for _, msg := range msgs {
+			if msg == nil {
+				continue
+			}
+
+			typ := reflect.TypeOf(msg)
+			if typ == nil {
+				continue
+			}
+			// A typed nil pointer whose element is an interface (e.g. (*MyInterface)(nil))
+			// registers the serializer for all values that implement that interface.
+			if typ.Kind() == reflect.Pointer && typ.Elem().Kind() == reflect.Interface {
+				config.serializers[typ.Elem()] = json
+				continue
+			}
+			// Concrete type — register in global registry and config
+			types.RegisterSerializerType(msg, json)
+			config.serializers[typ] = json
 		}
 	})
 }

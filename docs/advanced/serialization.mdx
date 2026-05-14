@@ -1,17 +1,24 @@
 ---
 title: Serialization
-description: Pluggable message serialization for ProtoSerializer and CBORSerializer.
+description: Pluggable message serialization — ProtoSerializer, CBORSerializer, and JSONSerializer.
 sidebarTitle: "Serialization"
 ---
 
 ## Overview
 
-Messages crossing process boundaries must be serialized. GoAkt v4 supports pluggable serializers. The default is
-**ProtoSerializer** for `proto.Message`. **CBORSerializer** supports arbitrary Go types.
+Messages crossing process boundaries must be serialized. GoAkt v4 ships three pluggable serializers and supports custom implementations via the `Serializer` interface.
+
+| Serializer          | Wire format        | Best for                                                                |
+| ------------------- | ------------------ | ----------------------------------------------------------------------- |
+| **ProtoSerializer** | protobuf (default) | `proto.Message` types — schema-driven, compact, language-portable.      |
+| **CBORSerializer**  | CBOR (binary)      | Plain Go structs — compact binary, faster than JSON, schema-less.       |
+| **JSONSerializer**  | JSON (via sonic)   | Plain Go structs where interoperability or human-readability is wanted. |
+
+All three use the same length-prefixed self-describing frame, so a custom implementation that follows the same pattern can interoperate.
 
 ## ProtoSerializer (default)
 
-Protobuf messages use the default serializer automatically. No registration needed for `proto.Message` types.
+Protobuf messages use the default serializer automatically. No registration needed for `proto.Message` types — `NewConfig` registers `ProtoSerializer` for the `proto.Message` interface, and proto's own `protoregistry.GlobalTypes` (populated by generated init() functions) resolves the concrete type on the receiver.
 
 ## CBOR for plain Go structs
 
@@ -20,9 +27,35 @@ config. Types are registered automatically in the type registry. Both sender and
 via `WithSerializers`; for receive-only types, register them the same way — the type is auto-registered for
 deserialization.
 
+For bulk registration, `remote.WithSerializables(new(MyMessage), new(OtherMessage))` registers each type with a shared CBOR serializer instance.
+
+## JSON for plain Go structs
+
+JSON works identically to CBOR — same registration path, same wire frame, different encoding.
+
+```go
+cfg := remote.NewConfig("0.0.0.0", 9000,
+    remote.WithSerializers(new(MyMessage), remote.NewJSONSerializer()),
+)
+```
+
+For bulk registration, use the parallel convenience option:
+
+```go
+cfg := remote.NewConfig("0.0.0.0", 9000,
+    remote.WithJSONSerializables(new(EventA), new(EventB), (*MyInterface)(nil)),
+)
+```
+
+`JSONSerializer` is backed by [bytedance/sonic](https://github.com/bytedance/sonic) configured for maximum throughput (`sonic.ConfigFastest` — no HTML escaping, no JSON-marshaler validation). On amd64 and arm64 sonic uses JIT-accelerated fast paths; on other architectures it transparently falls back to `encoding/json`.
+
+### CBOR vs JSON
+
+Pick **CBOR** when both ends are goAkt and you want the smallest payloads and fastest decode. Pick **JSON** when payloads need to be human-readable in logs, inspected with `jq`, or consumed by non-goAkt tooling. Both share the same registry plumbing — switching is a one-line change in your config.
+
 ### How Go types are magically serialized
 
-When you pass a concrete Go type to `WithSerializers` with `CBORSerializer`, the type is **automatically registered**
+When you pass a concrete Go type to `WithSerializers` with `CBORSerializer` or `JSONSerializer`, the type is **automatically registered**
 in a global type registry. There is no separate registration step — no `RegisterSerializableTypes` or similar.
 
 **One line does it all:**
@@ -35,16 +68,16 @@ cfg := remote.NewConfig("0.0.0.0", 9000,
 
 Under the hood:
 
-1. **On config build:** When `WithSerializers(new(MyMessage), remote.NewCBORSerializer())` is applied, GoAkt detects
-   that the serializer is `CBORSerializer` and the type is a concrete non-proto struct. It registers `MyMessage` in a
+1. **On config build:** When `WithSerializers(new(MyMessage), serializer)` is applied, GoAkt detects
+   that the serializer uses the registry (CBOR or JSON) and the type is a concrete non-proto struct. It registers `MyMessage` in a
    global type registry keyed by the type's reflected name.
 
-2. **On serialize:** When a message is sent, `CBORSerializer` looks up the type name in the registry, encodes the
-   value as CBOR, and prepends a self-describing frame (total length, type name length, type name, payload). The
+2. **On serialize:** When a message is sent, the serializer looks up the type name in the registry, encodes the
+   value as CBOR or JSON, and prepends a self-describing frame (total length, type name length, type name, payload). The
    receiver can reconstruct the exact Go type from the type name.
 
 3. **On deserialize:** When bytes arrive, the frame header is parsed, the type name is extracted, and the registry is
-   consulted to resolve the concrete Go type. A new instance is allocated and the CBOR payload is unmarshaled into it.
+   consulted to resolve the concrete Go type. A new instance is allocated and the payload is unmarshaled into it.
 
 Both sender and receiver must register the same types via `WithSerializers`. For types you only receive (never send),
 register them the same way — the type is auto-registered for deserialization. Proto message types are excluded from
@@ -64,7 +97,7 @@ type Serializer interface {
 ```
 
 | Method          | Purpose                                                                                                                                                   |
-|-----------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Serialize**   | Encode a message into bytes. The encoding must be **self-describing** so the receiver can reconstruct the concrete type without out-of-band coordination. |
 | **Deserialize** | Decode bytes back into the original Go value. The dynamic type must match what was passed to Serialize.                                                   |
 
@@ -73,5 +106,5 @@ config.
 
 ## Wire format
 
-Frames use: total length, type name length, type name, payload. Both client and server must use compatible serializers
+Frames use: total length, type name length, type name, payload. All three built-in serializers share this layout, so a custom serializer that follows the same pattern interoperates at the frame level. Both client and server must use compatible serializers
 and compression.
