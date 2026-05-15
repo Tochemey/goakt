@@ -1,0 +1,102 @@
+name: release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - CHANGELOG.md
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Parse CHANGELOG and print the release notes, but skip tag/release/discussion creation."
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  discussions: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Cut release from CHANGELOG
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Parse top CHANGELOG section
+        id: parse
+        run: |
+          set -euo pipefail
+
+          header=$(awk '/^## / { print; exit }' CHANGELOG.md)
+          echo "Top header: ${header}"
+
+          if [[ ! "$header" =~ ^"## "(v[0-9]+\.[0-9]+\.[0-9]+)" - "[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]*$ ]]; then
+            echo "Top section is not a versioned release; nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          version="${BASH_REMATCH[1]}"
+
+          if git rev-parse --verify --quiet "refs/tags/${version}" >/dev/null; then
+            echo "Tag ${version} already exists; nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          awk -v hdr="$header" '
+            $0 == hdr { capture = 1; next }
+            capture && /^## / { exit }
+            capture {
+              buf = buf $0 "\n"
+              if (NF) { final = buf; started = 1 }
+              if (!NF && !started) { buf = "" }
+            }
+            END { printf "%s", final }
+          ' CHANGELOG.md > release-notes.md
+
+          if [[ ! -s release-notes.md ]]; then
+            echo "Extracted release notes are empty; refusing to publish."
+            exit 1
+          fi
+
+          prev=$(git tag --list 'v*' --sort=-v:refname | head -n 1 || true)
+          if [[ -n "${prev}" ]]; then
+            printf '\n**Full Changelog**: https://github.com/%s/compare/%s...%s\n' \
+              "${GITHUB_REPOSITORY}" "${prev}" "${version}" >> release-notes.md
+          fi
+
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Dry-run preview
+        if: steps.parse.outputs.skip != 'true' && github.event.inputs.dry_run == 'true'
+        run: |
+          echo "::group::Would publish ${{ steps.parse.outputs.version }}"
+          echo "Target SHA:         ${{ github.sha }}"
+          echo "Tag / title:        ${{ steps.parse.outputs.version }}"
+          echo "Discussion category: Announcements"
+          echo "----- release-notes.md -----"
+          cat release-notes.md
+          echo "----- end -----"
+          echo "::endgroup::"
+          echo "Dry run: no tag, no release, no discussion created."
+
+      - name: Create GitHub release and announcement
+        if: steps.parse.outputs.skip != 'true' && github.event.inputs.dry_run != 'true'
+        run: |
+          set -euo pipefail
+          gh release create "${{ steps.parse.outputs.version }}" \
+            --target "${{ github.sha }}" \
+            --title "${{ steps.parse.outputs.version }}" \
+            --notes-file release-notes.md \
+            --discussion-category "Announcements" \
+            --verify-tag=false
