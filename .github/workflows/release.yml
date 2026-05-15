@@ -70,6 +70,34 @@ jobs:
 
           prev=$(git tag --list 'v*' --sort=-v:refname | head -n 1 || true)
           if [[ -n "${prev}" ]]; then
+            # Contributors: GitHub handles of commit authors since prev tag,
+            # bots filtered out, dedup preserving first-seen order.
+            contribs_file=$(mktemp)
+            gh api "repos/${GITHUB_REPOSITORY}/compare/${prev}...${GITHUB_SHA}" \
+              --jq '.commits[].author.login // empty' > "$contribs_file" 2>/dev/null || true
+            mapfile -t contribs < <(
+              (grep -v '\[bot\]$' "$contribs_file" 2>/dev/null || true) \
+              | awk 'NF && !seen[$0]++'
+            )
+            rm -f "$contribs_file"
+
+            if (( ${#contribs[@]} > 0 )); then
+              n=${#contribs[@]}
+              if (( n == 1 )); then
+                list="@${contribs[0]}"
+              elif (( n == 2 )); then
+                list="@${contribs[0]} and @${contribs[1]}"
+              else
+                list=""
+                for ((i=0; i<n-1; i++)); do
+                  list+="@${contribs[i]}, "
+                done
+                list+="and @${contribs[n-1]}"
+              fi
+              printf '\n### 👥 Contributors\n\nThanks to %s for landing this release.\n' \
+                "$list" >> release-notes.md
+            fi
+
             printf '\n**Full Changelog**: https://github.com/%s/compare/%s...%s\n' \
               "${GITHUB_REPOSITORY}" "${prev}" "${version}" >> release-notes.md
           fi
