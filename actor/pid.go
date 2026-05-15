@@ -1501,10 +1501,10 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 	}
 
 	pid.stopLocker.Lock()
-	pid.logger.Infof("shutdown started for actor=%s", pid.Name())
+	pid.logger.Debugf("shutdown started for actor=%s", pid.Name())
 
 	if !pid.isStateSet(runningState) {
-		pid.logger.Infof("actor=%s is offline, maybe passivated or stopped already", pid.Name())
+		pid.logger.Debugf("actor=%s is offline, maybe passivated or stopped already", pid.Name())
 		pid.stopLocker.Unlock()
 		return nil
 	}
@@ -1523,7 +1523,7 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 	}
 
 	pid.stopLocker.Unlock()
-	pid.logger.Infof("actor=%s successfully shutdown", pid.Name())
+	pid.logger.Debugf("actor=%s successfully shutdown", pid.Name())
 	return nil
 }
 
@@ -2205,7 +2205,7 @@ func (pid *PID) getAddress() *address.Address {
 // init initializes the given actor and init processing messages
 // when the initialization failed the actor will not be started
 func (pid *PID) init(ctx context.Context) error {
-	pid.logger.Infof("initialization process started for actor %s", pid.Name())
+	pid.logger.Debugf("initialization process started for actor %s", pid.Name())
 
 	initContext := newContext(ctx, pid.Name(), pid.actorSystem, pid.Dependencies()...)
 
@@ -2222,7 +2222,7 @@ func (pid *PID) init(ctx context.Context) error {
 	}
 
 	pid.setState(runningState, true)
-	pid.logger.Infof("actor=%s initialization successful", pid.Name())
+	pid.logger.Debugf("actor=%s initialization successful", pid.Name())
 
 	if pid.eventsStream != nil {
 		pid.eventsStream.Publish(eventsTopic, NewActorStarted(pid.Path()))
@@ -2389,7 +2389,7 @@ func (pid *PID) tryPassivation(reason string) bool {
 		return false
 	}
 
-	pid.logger.Infof("passivation mode triggered for actor=%s reason=%s", pid.Name(), reason)
+	pid.logger.Debugf("passivation mode triggered for actor=%s reason=%s", pid.Name(), reason)
 	pid.setState(passivatingState, true)
 	defer pid.setState(passivatingState, false)
 
@@ -2413,7 +2413,7 @@ func (pid *PID) tryPassivation(reason string) bool {
 		pid.eventsStream.Publish(eventsTopic, NewActorPassivated(pid.Path()))
 	}
 
-	pid.logger.Infof("actor=%s successfully passivated", pid.Name())
+	pid.logger.Debugf("actor=%s successfully passivated", pid.Name())
 	return true
 }
 
@@ -2479,7 +2479,7 @@ func (pid *PID) doStop(ctx context.Context) error {
 		return err
 	}
 
-	pid.logger.Infof("shutdown process completed for actor %s", pid.Name())
+	pid.logger.Debugf("shutdown process completed for actor %s", pid.Name())
 	return nil
 }
 
@@ -2554,7 +2554,7 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 
 	if parent := pid.Parent(); parent != nil && !parent.Equals(pid.ActorSystem().NoSender()) {
 		pid.logger.Warnf("actor=%s child=%s failing: err=%s", parent.Name(), pid.Name(), msg.Err.Error())
-		pid.logger.Infof("actor=%s activates strategy=%s directive=%s for failing child actor=%s",
+		pid.logger.Debugf("actor=%s activates strategy=%s directive=%s for failing child actor=%s",
 			parent.Name(),
 			pid.supervisor.Strategy(),
 			directive,
@@ -2820,7 +2820,7 @@ func (pid *PID) childAddress(name string) *address.Address {
 
 // suspend puts the actor in a suspension mode.
 func (pid *PID) suspend(reason string) {
-	pid.logger.Infof("actor=%s going into suspension mode", pid.Name())
+	pid.logger.Debugf("actor=%s going into suspension mode", pid.Name())
 	pid.setState(suspendedState, true)
 	// increment suspension count
 	pid.failureCount.Inc()
@@ -2863,7 +2863,7 @@ func (pid *PID) fireSystemMessage(ctx context.Context, message any) {
 }
 
 func (pid *PID) doReinstate() {
-	pid.logger.Infof("actor=%s reinstated", pid.Name())
+	pid.logger.Debugf("actor=%s reinstated", pid.Name())
 	// if we're already running and not suspended, nothing to do
 	if pid.IsRunning() && !pid.IsSuspended() {
 		return
@@ -2966,7 +2966,7 @@ func (pid *PID) healthCheck(ctx context.Context) error {
 		return errors.Join(err, pid.Shutdown(ctx))
 	}
 
-	logger.Infof("actor=%s readiness probe completed", pid.Name())
+	logger.Debugf("actor=%s readiness probe completed", pid.Name())
 	return nil
 }
 

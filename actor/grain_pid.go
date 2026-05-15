@@ -128,8 +128,8 @@ func newGrainPID(identity *GrainIdentity, grain Grain, actorSystem ActorSystem, 
 // activate activates the Grain
 func (pid *grainPID) activate(ctx context.Context) (err error) {
 	logger := pid.logger
-	if logger.Enabled(log.InfoLevel) {
-		logger.Infof("grain=%s activating", pid.identity.String())
+	if logger.Enabled(log.DebugLevel) {
+		logger.Debugf("grain=%s activating", pid.identity.String())
 	}
 
 	retries := pid.config.initMaxRetries.Load()
@@ -178,8 +178,8 @@ func (pid *grainPID) activate(ctx context.Context) (err error) {
 	pid.activated.Store(true)
 	pid.activatedAt.Store(time.Now().Unix())
 	pid.deactivateAfter.Store(pid.config.deactivateAfter)
-	if pid.logger.Enabled(log.InfoLevel) {
-		pid.logger.Infof("grain=%s activated successfully", pid.identity.String())
+	if pid.logger.Enabled(log.DebugLevel) {
+		pid.logger.Debugf("grain=%s activated successfully", pid.identity.String())
 	}
 	cancel()
 
@@ -242,8 +242,8 @@ func (pid *grainPID) deactivate(ctx context.Context) (err error) {
 		})
 	}()
 
-	if logger.Enabled(log.InfoLevel) {
-		logger.Infof("grain=%s deactivating", pid.identity.String())
+	if logger.Enabled(log.DebugLevel) {
+		logger.Debugf("grain=%s deactivating", pid.identity.String())
 	}
 
 	if err := pid.grain.OnDeactivate(ctx, newGrainProps(pid.identity, pid.actorSystem, pid.dependencies.Values())); err != nil {
@@ -266,8 +266,8 @@ func (pid *grainPID) deactivate(ctx context.Context) (err error) {
 		}
 	}
 
-	if pid.logger.Enabled(log.InfoLevel) {
-		pid.logger.Infof("grain=%s deactivated successfully", pid.identity.String())
+	if pid.logger.Enabled(log.DebugLevel) {
+		pid.logger.Debugf("grain=%s deactivated successfully", pid.identity.String())
 	}
 	return nil
 }
@@ -450,8 +450,8 @@ func (pid *grainPID) passivationTry(reason string) bool {
 		return false
 	}
 
-	if pid.logger.Enabled(log.InfoLevel) {
-		pid.logger.Infof("grain=%s reason=%s passivation triggered", pid.identity.String(), reason)
+	if pid.logger.Enabled(log.DebugLevel) {
+		pid.logger.Debugf("grain=%s reason=%s passivation triggered", pid.identity.String(), reason)
 	}
 
 	if err := pid.deactivate(context.Background()); err != nil {

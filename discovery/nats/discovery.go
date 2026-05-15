@@ -170,10 +170,10 @@ func (d *Discovery) Register() error {
 
 		switch message.GetMessageType() {
 		case internalpb.NatsMessageType_NATS_MESSAGE_TYPE_DEREGISTER:
-			d.logger.Infof("received deregistration request from peer[name=%s, host=%s, port=%d]",
+			d.logger.Debugf("received deregistration request from peer[name=%s, host=%s, port=%d]",
 				message.GetName(), message.GetHost(), message.GetPort())
 		case internalpb.NatsMessageType_NATS_MESSAGE_TYPE_REQUEST:
-			d.logger.Infof("received identification request from peer[name=%s, host=%s, port=%d]",
+			d.logger.Debugf("received identification request from peer[name=%s, host=%s, port=%d]",
 				message.GetName(), message.GetHost(), message.GetPort())
 
 			response := &internalpb.NatsMessage{

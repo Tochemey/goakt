@@ -2271,14 +2271,14 @@ func (x *actorSystem) setupCluster() error {
 
 	for _, kind := range x.clusterConfig.kinds.Values() {
 		x.registry.Register(kind)
-		x.logger.Infof("kind=%s registered", types.Name(kind))
+		x.logger.Debugf("kind=%s registered", types.Name(kind))
 	}
 
 	grains := x.clusterConfig.grains.Values()
 	if len(grains) > 0 {
 		for _, grain := range grains {
 			x.registry.Register(grain)
-			x.logger.Infof("grain=%s registered", types.Name(grain))
+			x.logger.Debugf("grain=%s registered", types.Name(grain))
 		}
 	}
 
@@ -2660,7 +2660,7 @@ func (x *actorSystem) poisonAllGrains(ctx context.Context) error {
 	}
 
 	grains := x.grains.Values()
-	x.logger.Infof("deactivating %d grains via PoisonPill...", len(grains))
+	x.logger.Debugf("deactivating %d grains via PoisonPill...", len(grains))
 
 	pending := make([]*grainPID, 0, len(grains))
 	for _, grain := range grains {
@@ -2679,7 +2679,7 @@ func (x *actorSystem) poisonAllGrains(ctx context.Context) error {
 		select {
 		case <-grain.deactivated:
 			x.grains.Delete(grain.getIdentity().String())
-			x.logger.Infof("grain=%s deactivated", grain.getIdentity().String())
+			x.logger.Debugf("grain=%s deactivated", grain.getIdentity().String())
 		case <-ctx.Done():
 			x.logger.Errorf(
 				"shutdown context expired before grain=%s finished deactivating (hint: OnDeactivate will not run for remaining grains)",
@@ -3278,7 +3278,7 @@ func (x *actorSystem) cleanupCluster(ctx context.Context, pids []*PID) error {
 						x.logger.Errorf("failed to remove kind=%s from cluster: %v (hint: check cluster connectivity)", kind, err)
 						return err
 					}
-					x.logger.Infof("kind=%s removed from cluster", kind)
+					x.logger.Debugf("kind=%s removed from cluster", kind)
 					return nil
 				})
 			}
@@ -3293,7 +3293,7 @@ func (x *actorSystem) cleanupCluster(ctx context.Context, pids []*PID) error {
 				x.logger.Errorf("failed to remove actor=%s from cluster: %v (hint: check cluster connectivity)", actorName, err)
 				return err
 			}
-			x.logger.Infof("actor=%s removed from cluster", actorName)
+			x.logger.Debugf("actor=%s removed from cluster", actorName)
 			return nil
 		})
 	}
@@ -3306,7 +3306,7 @@ func (x *actorSystem) cleanupCluster(ctx context.Context, pids []*PID) error {
 					x.logger.Errorf("failed to remove grain=%s from cluster: %v (hint: check cluster connectivity)", grain.identity.String(), err)
 					return err
 				}
-				x.logger.Infof("grain=%s removed from cluster", grain.identity.String())
+				x.logger.Debugf("grain=%s removed from cluster", grain.identity.String())
 				return nil
 			})
 		}
@@ -3741,7 +3741,7 @@ func (x *actorSystem) persistPeerStateToPeers(ctx context.Context, peerState *in
 
 	peerAddr := x.PeersAddress()
 	totalPeers := len(peers)
-	x.logger.Infof("node=%s replicating state to peers=%d", peerAddr, totalPeers)
+	x.logger.Debugf("node=%s replicating state to peers=%d", peerAddr, totalPeers)
 
 	// Create a cancellable context for early termination after quorum
 	rpcCtx, cancelRPCs := context.WithCancel(ctx)
@@ -3810,7 +3810,7 @@ func (x *actorSystem) persistPeerStateToPeers(ctx context.Context, peerState *in
 				if successCount >= defaultReplicationQuorum {
 					// Quorum reached - cancel remaining RPCs and return success
 					cancelRPCs()
-					x.logger.Infof("node=%s replication quorum reached peers=%d/%d", peerAddr, successCount, totalPeers)
+					x.logger.Debugf("node=%s replication quorum reached peers=%d/%d", peerAddr, successCount, totalPeers)
 					return nil
 				}
 			} else if !errors.Is(err, context.Canceled) {
@@ -3874,13 +3874,13 @@ func (x *actorSystem) selectOldestPeers(ctx context.Context, k int) ([]*cluster.
 
 	// Edge case: No peers (single node cluster)
 	if n == 0 {
-		x.logger.Info("no peers available, skipping state replication")
+		x.logger.Debug("no peers available, skipping state replication")
 		return nil, nil
 	}
 
 	// Edge case: Fewer peers than k
 	if n < k {
-		x.logger.Infof("only %d peers available, replicating to all", n)
+		x.logger.Debugf("only %d peers available, replicating to all", n)
 		// Still sort for consistency
 		sort.Slice(peers, func(i, j int) bool {
 			return peers[i].CreatedAt < peers[j].CreatedAt

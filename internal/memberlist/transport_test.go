@@ -23,6 +23,7 @@
 package memberlist
 
 import (
+	"bytes"
 	"crypto/tls"
 	"fmt"
 	"log"
@@ -38,6 +39,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	dynaport "github.com/tochemey/goakt/v4/internal/net"
+
+	goaktlog "github.com/tochemey/goakt/v4/log"
 
 	"github.com/tochemey/goakt/v4/internal/pause"
 )
@@ -188,6 +191,38 @@ func TestTCPTransport(t *testing.T) {
 
 		pause.For(time.Second)
 		require.Len(t, cluster.delegates[1].Messages(), 1)
+	})
+	t.Run("NewTransport routes logs through config.Logger", func(t *testing.T) {
+		buf := new(bytes.Buffer)
+		host := "127.0.0.1"
+		transport, err := NewTransport(TransportConfig{
+			BindAddrs: []string{host},
+			BindPort:  0,
+			Logger:    goaktlog.NewZap(goaktlog.DebugLevel, buf),
+		})
+		require.NoError(t, err)
+		require.NotNil(t, transport)
+		defer func() { _ = transport.Shutdown() }()
+
+		ports := dynaport.Get(1)
+		_, _, err = transport.FinalAdvertiseAddr(host, ports[0])
+		require.NoError(t, err)
+
+		// FinalAdvertiseAddr logs at Debug; if the transport ignored config.Logger
+		// the buffer would stay empty.
+		assert.Contains(t, buf.String(), "advertise address")
+	})
+	t.Run("NewTransport falls back to DiscardLogger when config.Logger is nil", func(t *testing.T) {
+		host := "127.0.0.1"
+		transport, err := NewTransport(TransportConfig{
+			BindAddrs: []string{host},
+			BindPort:  0,
+		})
+		require.NoError(t, err)
+		require.NotNil(t, transport)
+		defer func() { _ = transport.Shutdown() }()
+
+		assert.Equal(t, goaktlog.DiscardLogger, transport.logger)
 	})
 }
 

@@ -332,7 +332,8 @@ func TestDeathWatch(t *testing.T) {
 	t.Run("Logging handleTerminated logs when PID not found", func(t *testing.T) {
 		ctx := context.Background()
 		buf := &safeBuffer{}
-		logger := log.NewSlog(log.InfoLevel, buf)
+		// handleTerminated diagnostics are per-actor lifecycle, logged at Debug.
+		logger := log.NewSlog(log.DebugLevel, buf)
 		actorSys, err := NewActorSystem("testSys", WithLogger(logger))
 		require.NoError(t, err)
 		require.NotNil(t, actorSys)
@@ -365,7 +366,8 @@ func TestDeathWatch(t *testing.T) {
 	t.Run("Logging handleTerminated logs when cluster removal fails", func(t *testing.T) {
 		ctx := context.Background()
 		buf := &safeBuffer{}
-		logger := log.NewSlog(log.InfoLevel, buf)
+		// handleTerminated diagnostics are per-actor lifecycle, logged at Debug.
+		logger := log.NewSlog(log.DebugLevel, buf)
 		actorSys, err := NewActorSystem("testSys", WithLogger(logger))
 		require.NoError(t, err)
 		require.NotNil(t, actorSys)
@@ -423,7 +425,8 @@ func TestDeathWatch(t *testing.T) {
 	t.Run("Logging handleTerminated logs when actor successfully removed", func(t *testing.T) {
 		ctx := context.Background()
 		buf := &safeBuffer{}
-		logger := log.NewSlog(log.InfoLevel, buf)
+		// handleTerminated diagnostics are per-actor lifecycle, logged at Debug.
+		logger := log.NewSlog(log.DebugLevel, buf)
 		actorSys, err := NewActorSystem("testSys", WithLogger(logger))
 		require.NoError(t, err)
 		require.NotNil(t, actorSys)

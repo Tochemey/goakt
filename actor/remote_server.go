@@ -480,7 +480,7 @@ func (x *actorSystem) remoteSpawnHandler(ctx context.Context, conn inet.Connecti
 			return wrapSpawnErr(err), nil
 		}
 
-		logger.Infof("actor=%s host=%s port=%d actor created successfully", request.GetActorName(), request.GetHost(), request.GetPort())
+		logger.Debugf("actor=%s host=%s port=%d actor created successfully", request.GetActorName(), request.GetHost(), request.GetPort())
 		return &internalpb.RemoteSpawnResponse{Address: pid.ID()}, nil
 	}
 
@@ -527,7 +527,7 @@ func (x *actorSystem) remoteSpawnHandler(ctx context.Context, conn inet.Connecti
 		return wrapSpawnErr(err), nil
 	}
 
-	logger.Infof("actor=%s created on host=%s port=%d", request.GetActorName(), request.GetHost(), request.GetPort())
+	logger.Debugf("actor=%s created on host=%s port=%d", request.GetActorName(), request.GetHost(), request.GetPort())
 	return &internalpb.RemoteSpawnResponse{Address: pid.ID()}, nil
 }
 
@@ -624,7 +624,7 @@ func (x *actorSystem) remoteSpawnChildHandler(ctx context.Context, conn inet.Con
 		return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
 	}
 
-	x.logger.Infof("actor=%s parent=%s host=%s port=%d child actor created successfully", childName, parentName, host, port)
+	x.logger.Debugf("actor=%s parent=%s host=%s port=%d child actor created successfully", childName, parentName, host, port)
 	return &internalpb.RemoteSpawnChildResponse{Address: cid.ID()}, nil
 }
 
@@ -1221,7 +1221,7 @@ func (x *actorSystem) remoteActivateGrainHandler(ctx context.Context, conn inet.
 		return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
 	}
 
-	logger.Infof("recreated grain=%s on host=%s port=%d", grain.GetGrainId().GetValue(), host, port)
+	logger.Debugf("recreated grain=%s on host=%s port=%d", grain.GetGrainId().GetValue(), host, port)
 	return new(internalpb.RemoteActivateGrainResponse), nil
 }
 
@@ -1244,7 +1244,7 @@ func (x *actorSystem) persistPeerStateHandler(ctx context.Context, conn inet.Con
 	}
 
 	peerAddr := fmt.Sprintf("%s:%d", request.GetPeerState().GetHost(), request.GetPeerState().GetPeersPort())
-	logger.Infof("node=%s persisting peer=%s state", x.PeersAddress(), peerAddr)
+	logger.Debugf("node=%s persisting peer=%s state", x.PeersAddress(), peerAddr)
 
 	if err := x.clusterStore.PersistPeerState(ctx, request.GetPeerState()); err != nil {
 		logger.Errorf("node=%s failed to persist peer=%s state: %v", x.PeersAddress(), peerAddr, err)

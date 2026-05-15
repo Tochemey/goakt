@@ -140,7 +140,7 @@ func (x *actorSystem) GrainIdentity(ctx context.Context, name string, factory Gr
 		return nil, err
 	}
 
-	x.logger.Infof("activating grain=%s", identity.String())
+	x.logger.Debugf("activating grain=%s", identity.String())
 	owner, err := x.resolveGrainOwner(ctx, identity)
 	if err != nil {
 		x.logger.Errorf("failed to resolve owner for grain (%s): %v (hint: check cluster connectivity, grain registration)", identity.String(), err)
@@ -154,7 +154,7 @@ func (x *actorSystem) GrainIdentity(ctx context.Context, name string, factory Gr
 	}
 
 	if handled {
-		x.logger.Infof("grain=%s activated remotely", identity.String())
+		x.logger.Debugf("grain=%s activated remotely", identity.String())
 		return identity, nil
 	}
 
@@ -162,7 +162,7 @@ func (x *actorSystem) GrainIdentity(ctx context.Context, name string, factory Gr
 		return nil, err
 	}
 
-	x.logger.Infof("grain (%s) activated locally", identity.String())
+	x.logger.Debugf("grain (%s) activated locally", identity.String())
 	return identity, nil
 }
 
@@ -1090,7 +1090,7 @@ func (x *actorSystem) recreateGrain(ctx context.Context, serializedGrain *intern
 
 func (x *actorSystem) recreateGrainOnce(ctx context.Context, serializedGrain *internalpb.Grain) (*grainPID, error) {
 	logger := x.logger
-	logger.Infof("recreating grain=%s", serializedGrain.GrainId.GetValue())
+	logger.Debugf("recreating grain=%s", serializedGrain.GrainId.GetValue())
 
 	// make sure the grain is not a system grain
 	if isSystemName(serializedGrain.GrainId.GetValue()) {
