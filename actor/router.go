@@ -262,8 +262,8 @@ func (x *router) handlePanicSignal(ctx *ReceiveContext) {
 func (x *router) handleRestartRoutee(ctx *ReceiveContext) {
 	goCtx := ctx.withoutCancel()
 	sender := ctx.Sender()
-	if x.logger.Enabled(log.InfoLevel) {
-		x.logger.Infof("restarting routee (%s)...", sender.ID())
+	if x.logger.Enabled(log.DebugLevel) {
+		x.logger.Debugf("restarting routee (%s)...", sender.ID())
 	}
 
 	var err error
@@ -284,23 +284,23 @@ func (x *router) handleRestartRoutee(ctx *ReceiveContext) {
 		return
 	}
 
-	if x.logger.Enabled(log.InfoLevel) {
-		x.logger.Infof("routee=%s restarted", sender.ID())
+	if x.logger.Enabled(log.DebugLevel) {
+		x.logger.Debugf("routee=%s restarted", sender.ID())
 	}
 	x.routeesMap[sender.ID()] = sender
 }
 
 func (x *router) handleResumeRoutee(ctx *ReceiveContext) {
 	sender := ctx.Sender()
-	if x.logger.Enabled(log.InfoLevel) {
-		x.logger.Infof("resuming routee (%s)...", sender.ID())
+	if x.logger.Enabled(log.DebugLevel) {
+		x.logger.Debugf("resuming routee (%s)...", sender.ID())
 	}
 	ctx.Reinstate(sender)
 }
 
 func (x *router) handleStopRoutee(ctx *ReceiveContext) {
 	sender := ctx.Sender()
-	if x.logger.Enabled(log.InfoLevel) {
+	if x.logger.Enabled(log.DebugLevel) {
 		x.logger.Debugf("stopping routee=%s", sender.ID())
 	}
 	ctx.Stop(sender)

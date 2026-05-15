@@ -49,6 +49,7 @@ var (
 	debugPrefix = []byte("[DEBUG]")
 	warnPrefix  = []byte("[WARN]")
 	errorPrefix = []byte("[ERROR]")
+	errPrefix   = []byte("[ERR]")
 )
 
 type parsedMessage struct {
@@ -95,8 +96,10 @@ func (l *logWriter) Write(message []byte) (n int, err error) {
 	case !ok:
 		// message does not have a known prefix; ignore
 	case msg.level == infoLevel:
-		if l.logger.Enabled(log.InfoLevel) {
-			l.logger.Info(msg.text)
+		// Third-party Info (olric routing table, memberlist gossip, etc.) is steady-state
+		// operational noise — surface it only when consumers enable Debug.
+		if l.logger.Enabled(log.DebugLevel) {
+			l.logger.Debug(msg.text)
 		}
 	case msg.level == debugLevel:
 		if l.logger.Enabled(log.DebugLevel) {
@@ -168,6 +171,7 @@ func findFirstPrefix(line []byte) (level logLevel, idx int, plen int, ok bool) {
 	save(bytes.Index(line, debugPrefix), debugLevel, debugPrefix)
 	save(bytes.Index(line, warnPrefix), warnLevel, warnPrefix)
 	save(bytes.Index(line, errorPrefix), errorLevel, errorPrefix)
+	save(bytes.Index(line, errPrefix), errorLevel, errPrefix)
 
 	return level, firstIdx, plen, ok
 }

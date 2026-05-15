@@ -87,8 +87,8 @@ func (x *deathWatch) handleTerminated(ctx *ReceiveContext) error {
 	actorSys := ctx.ActorSystem()
 
 	path := msg.ActorPath()
-	if logger.Enabled(log.InfoLevel) {
-		logger.Infof("actor=%s removing dead actor resource from system", path)
+	if logger.Enabled(log.DebugLevel) {
+		logger.Debugf("actor=%s removing dead actor resource from system", path)
 	}
 
 	actorTree := actorSys.tree()
@@ -127,13 +127,13 @@ func (x *deathWatch) handleTerminated(ctx *ReceiveContext) error {
 			}
 		}
 
-		if logger.Enabled(log.InfoLevel) {
-			logger.Infof("actor=%s removed dead actor resource from system", path)
+		if logger.Enabled(log.DebugLevel) {
+			logger.Debugf("actor=%s removed dead actor resource from system", path)
 		}
 		return nil
 	}
-	if logger.Enabled(log.InfoLevel) {
-		logger.Infof("actor=%s addr=%s unable to locate dead actor resource, maybe already freed", ctx.Self().Name(), path)
+	if logger.Enabled(log.DebugLevel) {
+		logger.Debugf("actor=%s addr=%s unable to locate dead actor resource, maybe already freed", ctx.Self().Name(), path)
 	}
 	return nil
 }

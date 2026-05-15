@@ -29,7 +29,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -70,9 +69,13 @@ func NewTransport(config TransportConfig) (*Transport, error) {
 
 	// Build out the new transport.
 	var ok bool
+	logger := config.Logger
+	if logger == nil {
+		logger = log.DiscardLogger
+	}
 	t := Transport{
 		config:   config,
-		logger:   log.NewZap(log.InfoLevel, os.Stdout),
+		logger:   logger,
 		packetCh: make(chan *memberlist.Packet),
 		connCh:   make(chan net.Conn),
 	}

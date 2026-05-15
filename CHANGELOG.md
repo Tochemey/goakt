@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### 🔉 Logging changes
+
+#### Quieter default log stream
+
+The framework's `Info` level is now reserved for **system-wide, low-frequency operator events**: actor system start/stop, signal handler, clustering enable/start/stop, remote server start/listen/TLS/shutdown, scheduler start/stop, eviction loop start/stop, cluster node joined/left, rebalance start/complete, and data-center topology changes. Per-actor / per-grain / per-RPC / per-peer / per-rebalance-item lifecycle (init, shutdown, passivation, suspension, reinstate, supervision, grain activate/deactivate, remote spawn, peer replication, dead-actor cleanup, routee restart/resume, NATS peer chatter) was demoted to `Debug`.
+
+Third-party `[INFO]` lines emitted by olric and hashicorp/memberlist (routing table updates, gossip events, anti-entropy) are also demoted to `Debug`. `[WARN]` and `[ERROR]`/`[ERR]` from those libraries are unchanged.
+
+**Migration.** If you relied on the previous verbosity (per-actor lifecycle traces, olric routing-table chatter visible at `Info`), set your logger to `log.DebugLevel`. Errors and warnings are unaffected — a healthy steady-state cluster now produces close to zero `Info` lines per node per minute.
+
+#### Memberlist transport now honors `TransportConfig.Logger`
+
+`internal/memberlist.NewTransport` previously ignored the `Logger` field on its config and wrote to stdout at `Info`. It now routes through the configured logger (or `log.DiscardLogger` when none is supplied), so transport-level errors and warnings reach the same sink as the rest of the framework. Added recognition of memberlist's short `[ERR]` prefix in the third-party log adapter — these lines were previously dropped silently.
+
 ### ✨ New Additions
 
 #### JSON serializer (sonic-backed)

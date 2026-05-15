@@ -227,7 +227,7 @@ func (r *replicatorActor) PostStop(ctx *Context) error {
 		}
 	}
 
-	r.logger.Infof("actor=%s stopped successfully", ctx.ActorName())
+	r.logger.Debugf("actor=%s stopped successfully", ctx.ActorName())
 	return nil
 }
 
@@ -325,7 +325,7 @@ func (r *replicatorActor) handlePostStart(ctx *ReceiveContext) {
 		}
 	}
 
-	r.logger.Infof("actor=%s started successfully", r.pid.Name())
+	r.logger.Debugf("actor=%s started successfully", r.pid.Name())
 }
 
 // handleMessage dispatches CRDT commands to the appropriate handler.
@@ -1262,7 +1262,7 @@ func (r *replicatorActor) restoreFromSnapshot() error {
 		r.subscriptions[entryKeyID] = types.Unit{}
 	}
 
-	r.logger.Infof("restored %d CRDT keys from snapshot", len(entries))
+	r.logger.Debugf("restored %d CRDT keys from snapshot", len(entries))
 	return nil
 }
 

@@ -108,8 +108,8 @@ func (x *systemGuardian) completeRebalancing(msg *internalpb.RebalanceComplete) 
 	}
 	x.pid.ActorSystem().completeRelocation()
 
-	if x.logger.Enabled(log.InfoLevel) {
-		x.logger.Infof("removing left node=%s from cluster store", msg.GetPeerAddress())
+	if x.logger.Enabled(log.DebugLevel) {
+		x.logger.Debugf("removing left node=%s from cluster store", msg.GetPeerAddress())
 	}
 
 	ctx := context.Background()
@@ -121,8 +121,10 @@ func (x *systemGuardian) completeRebalancing(msg *internalpb.RebalanceComplete) 
 		return err
 	}
 
+	if x.logger.Enabled(log.DebugLevel) {
+		x.logger.Debugf("left node=%s removed from cache", msg.GetPeerAddress())
+	}
 	if x.logger.Enabled(log.InfoLevel) {
-		x.logger.Infof("left node=%s removed from cache", msg.GetPeerAddress())
 		x.logger.Info("rebalancing completed successfully")
 	}
 	return nil

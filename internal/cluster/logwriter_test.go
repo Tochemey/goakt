@@ -35,14 +35,12 @@ import (
 
 func TestLogWriter(t *testing.T) {
 	t.Run("With info log", func(t *testing.T) {
-		// create a bytes buffer that implements an io.Writer
+		// Third-party [INFO] lines are demoted to goakt Debug so consumers don't see
+		// olric/memberlist steady-state chatter unless they enable Debug.
 		buffer := new(bytes.Buffer)
-		// create an instance of Log
-		logger := log.NewZap(log.InfoLevel, buffer)
-		// create the olric message
+		logger := log.NewZap(log.DebugLevel, buffer)
 		message := "2023/11/06 20:40:24 [INFO] Olric 0.5.4 on linux/arm64 go1.21.0 => olric.go:319"
 
-		// create an instance of logWriter
 		logWriter := newLogWriter(logger)
 		res, err := logWriter.Write([]byte(message))
 		require.NoError(t, err)
@@ -55,9 +53,8 @@ func TestLogWriter(t *testing.T) {
 
 		lvl, err := extractLevel(buffer.Bytes())
 		require.NoError(t, err)
-		require.Equal(t, log.InfoLevel.String(), lvl)
+		require.Equal(t, log.DebugLevel.String(), lvl)
 
-		// reset the buffer
 		buffer.Reset()
 		message = "[INFO] Olric 0.5.4 on linux/arm64 go1.21.0 => olric.go:319"
 
@@ -72,7 +69,59 @@ func TestLogWriter(t *testing.T) {
 
 		lvl, err = extractLevel(buffer.Bytes())
 		require.NoError(t, err)
-		require.Equal(t, log.InfoLevel.String(), lvl)
+		require.Equal(t, log.DebugLevel.String(), lvl)
+	})
+
+	t.Run("With info log is silent when Debug disabled", func(t *testing.T) {
+		buffer := new(bytes.Buffer)
+		logger := log.NewZap(log.InfoLevel, buffer)
+		message := "[INFO] Olric 0.5.4 on linux/arm64 go1.21.0"
+
+		logWriter := newLogWriter(logger)
+		res, err := logWriter.Write([]byte(message))
+		require.NoError(t, err)
+		require.EqualValues(t, len(message), res)
+		require.Zero(t, buffer.Len())
+	})
+
+	t.Run("With short ERR prefix", func(t *testing.T) {
+		buffer := new(bytes.Buffer)
+		logger := log.NewZap(log.ErrorLevel, buffer)
+		message := "2023/11/06 20:40:24 [ERR] memberlist: failed to receive"
+
+		logWriter := newLogWriter(logger)
+		res, err := logWriter.Write([]byte(message))
+		require.NoError(t, err)
+		require.EqualValues(t, len(message), res)
+
+		expected := "memberlist: failed to receive"
+		actual, err := extractMessage(buffer.Bytes())
+		require.NoError(t, err)
+		require.Equal(t, expected, actual)
+
+		lvl, err := extractLevel(buffer.Bytes())
+		require.NoError(t, err)
+		require.Equal(t, log.ErrorLevel.String(), lvl)
+	})
+
+	t.Run("With ERROR takes precedence over ERR when both could match", func(t *testing.T) {
+		// [ERR] is a prefix of [ERROR]; bytes.Index would match [ERR] at the same offset
+		// as [ERROR]. The save() in findFirstPrefix must let [ERROR] win so the full
+		// 7-byte prefix is stripped (not just 5 bytes, which would leak "OR] body" into
+		// the logged text).
+		buffer := new(bytes.Buffer)
+		logger := log.NewZap(log.ErrorLevel, buffer)
+		message := "[ERROR] olric: real error body"
+
+		logWriter := newLogWriter(logger)
+		res, err := logWriter.Write([]byte(message))
+		require.NoError(t, err)
+		require.EqualValues(t, len(message), res)
+
+		expected := "olric: real error body"
+		actual, err := extractMessage(buffer.Bytes())
+		require.NoError(t, err)
+		require.Equal(t, expected, actual)
 	})
 
 	t.Run("With debug log", func(t *testing.T) {
@@ -203,7 +252,7 @@ func TestLogWriter(t *testing.T) {
 
 	t.Run("With multiple brackets only one matching level", func(t *testing.T) {
 		buffer := new(bytes.Buffer)
-		logger := log.NewZap(log.InfoLevel, buffer)
+		logger := log.NewZap(log.DebugLevel, buffer)
 		message := "prefix [SKIP] [INFO] only the info message should be logged"
 
 		logWriter := newLogWriter(logger)
@@ -217,7 +266,7 @@ func TestLogWriter(t *testing.T) {
 		require.Equal(t, expected, actual)
 		lvl, err := extractLevel(buffer.Bytes())
 		require.NoError(t, err)
-		require.Equal(t, log.InfoLevel.String(), lvl)
+		require.Equal(t, log.DebugLevel.String(), lvl)
 	})
 
 	t.Run("With empty log message", func(t *testing.T) {
