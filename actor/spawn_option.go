@@ -116,6 +116,9 @@ type spawnConfig struct {
 	// This will be used when remoting is enabled and the actor type must be registered
 	// on the remote node.
 	port *int
+	// snapshotInterval is the per-actor snapshot cadence applied only when the
+	// actor is event-sourced. Ignored for all other actor kinds.
+	snapshotInterval uint64
 }
 
 var _ validation.Validator = (*spawnConfig)(nil)
@@ -206,6 +209,7 @@ func (s *spawnConfig) clone(opts ...SpawnOption) *spawnConfig {
 		passivationStrategy: s.passivationStrategy,
 		reentrancy:          s.reentrancy,
 		dataCenter:          s.dataCenter,
+		snapshotInterval:    s.snapshotInterval,
 	}
 
 	if len(s.dependencies) > 0 {
@@ -515,5 +519,18 @@ func withSingleton(spec *singletonSpec) SpawnOption {
 func asSystem() SpawnOption {
 	return spawnOption(func(config *spawnConfig) {
 		config.isSystem = true
+	})
+}
+
+// WithSnapshotInterval sets how often (in events) an intermediate snapshot is
+// written for event-sourced actors. A value of zero (the default) disables
+// intermediate snapshotting.
+//
+// This option only applies to actors spawned via [ActorSystem.SpawnEventSourced];
+// it is silently ignored for every other actor kind. A [persistence.SnapshotStore]
+// must be wired via [WithSnapshotStore] for snapshots to be written.
+func WithSnapshotInterval(n uint64) SpawnOption {
+	return spawnOption(func(config *spawnConfig) {
+		config.snapshotInterval = n
 	})
 }

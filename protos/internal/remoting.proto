@@ -118,6 +118,10 @@ message RemoteSpawnRequest {
   SupervisorSpec supervisor = 11;
   // Specifies the reentrancy configuration when explicitly set
   ReentrancyConfig reentrancy = 12;
+  // Specifies how often (in events) an intermediate snapshot is written for
+  // event-sourced actors. Zero (default) disables intermediate snapshotting.
+  // Ignored for non-event-sourced actor kinds.
+  uint64 snapshot_interval = 13;
 }
 
 message RemoteSpawnResponse {

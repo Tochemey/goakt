@@ -45,6 +45,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/pointer"
 	"github.com/tochemey/goakt/v4/internal/strconvx"
 	"github.com/tochemey/goakt/v4/internal/types"
+	"github.com/tochemey/goakt/v4/persistence"
 	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/supervisor"
 )
@@ -411,6 +412,60 @@ func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Act
 		// Resolve the cluster coordinator and spawn locally if it's us; otherwise delegate via RemoteSpawn.
 		return x.spawnSingletonOnLeader(ctx, cl, name, actor, cfg.spawnTimeout, cfg.waitInterval, retries)
 	})
+}
+
+// WithEventSourcedBehavior registers an EventSourcedBehavior with the actor
+// system at runtime so it can be spawned via SpawnEventSourced and relocated
+// to this node. Call it before spawning a behavior that was not declared at
+// startup via [WithEventSourcing]. This is the runtime counterpart to the
+// free function of the same name used inside [WithEventSourcing].
+func (x *actorSystem) WithEventSourcedBehavior(behavior EventSourcedBehavior) error {
+	if !x.Running() {
+		return gerrors.ErrActorSystemNotStarted
+	}
+
+	if x.Extension(persistence.EventsStoreExtensionID) == nil {
+		return gerrors.ErrEventsStoreRequired
+	}
+
+	if behavior == nil {
+		return nil
+	}
+
+	x.registry.Register(behavior)
+	return nil
+}
+
+// SpawnEventSourced creates and starts an event-sourced actor.
+// The actor's name is used as the persistence ID.
+//
+// The behavior travels as a dependency alongside the spawn request so the
+// same behavior type can be reconstructed on any node the actor is relocated
+// to — provided that node also declared this behavior via [WithEventSourcing]
+// or [actorSystem.RegisterEventSourcedBehavior].
+//
+// Returns [gerrors.ErrEventsStoreRequired] if [WithEventSourcing] was not
+// configured on this actor system. Returns an error if behavior's type was
+// not registered on this node: such an actor could not be relocated, so
+// spawning is rejected up front.
+func (x *actorSystem) SpawnEventSourced(ctx context.Context, name string, behavior EventSourcedBehavior, opts ...EventSourcedOption) (*PID, error) {
+	if !x.Running() {
+		return nil, gerrors.ErrActorSystemNotStarted
+	}
+
+	if x.Extension(persistence.EventsStoreExtensionID) == nil {
+		return nil, gerrors.ErrEventsStoreRequired
+	}
+
+	if _, ok := x.registry.TypeOf(types.Name(behavior)); !ok {
+		return nil, fmt.Errorf("event-sourced behavior %T was not declared via WithEventSourcing on this node; add it to WithEventSourcing's behaviors list before spawning", behavior)
+	}
+
+	builder := newEventSourcedBuilder(opts...)
+	spawnOpts := make([]SpawnOption, 0, len(builder.spawnOpts)+1)
+	spawnOpts = append(spawnOpts, WithDependencies(behavior, builder.config))
+	spawnOpts = append(spawnOpts, builder.spawnOpts...)
+	return x.Spawn(ctx, name, &eventSourcedActor{}, spawnOpts...)
 }
 
 // retrySpawnSingleton runs spawnFn with retries according to cfg.

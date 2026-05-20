@@ -248,6 +248,9 @@ var (
 
 	// ErrInvalidKinds is returned when the child and parent kinds are different.
 	ErrInvalidKinds = errors.New("child and parent kinds must be the same")
+
+	// ErrEventsStoreRequired is returned when SpawnEventSourced is called without an events store.
+	ErrEventsStoreRequired = errors.New("events store is required for event-sourced actors")
 )
 
 // NewErrInvalidTCPAddress formats an ErrInvalidTCPAddress with the given address.

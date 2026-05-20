@@ -233,6 +233,29 @@ type ActorSystem interface {
 	// If the oldest node leaves the cluster, the singleton is restarted on the new oldest node.
 	// This is useful for managing shared resources or coordinating tasks that should be handled by a single actor.
 	SpawnSingleton(ctx context.Context, name string, actor Actor, opts ...ClusterSingletonOption) (*PID, error)
+	// SpawnEventSourced creates and starts an event-sourced actor.
+	//
+	// The actor's name is used as the persistence ID for all store reads and
+	// writes. The system must be wired for event sourcing via [WithEventSourcing];
+	// otherwise this returns [errors.ErrEventsStoreRequired]. Behaviors must be
+	// declared via [WithEventSourcing] or [ActorSystem.RegisterEventSourcedBehavior]
+	// before spawn; spawning an undeclared behavior returns an error.
+	//
+	// On startup the actor recovers its state automatically: it loads the latest
+	// snapshot (if a snapshot store is configured) and replays any events written
+	// after that snapshot. Passivation is safe because recovery is fully automatic.
+	SpawnEventSourced(ctx context.Context, name string, behavior EventSourcedBehavior, opts ...EventSourcedOption) (*PID, error)
+	// WithEventSourcedBehavior registers an [EventSourcedBehavior] at runtime
+	// so that [SpawnEventSourced] can spawn it and the cluster can relocate it
+	// to this node. Use the [WithEventSourcedBehavior] free function inside
+	// [WithEventSourcing] for the startup case; use this method when behaviors
+	// are loaded dynamically — e.g. from plugins or feature flags — after the
+	// actor system has started.
+	//
+	// Returns [errors.ErrActorSystemNotStarted] if the system has not been
+	// started, and [errors.ErrEventsStoreRequired] if [WithEventSourcing] was
+	// not configured.
+	WithEventSourcedBehavior(behavior EventSourcedBehavior) error
 	// Kill stops a given actor in the system either locally or on a remote node(when clustering is enabled)
 	Kill(ctx context.Context, name string) error
 	// ReSpawn recreates a given actor in the system.
