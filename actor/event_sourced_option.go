@@ -28,6 +28,7 @@ import (
 	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/internal/codec"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
+	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/persistence"
 )
 
@@ -43,12 +44,12 @@ type eventSourcedConfig struct {
 
 var _ extension.Dependency = (*eventSourcedConfig)(nil)
 
-func (c *eventSourcedConfig) ID() string { return eventSourcedConfigID }
+func (x *eventSourcedConfig) ID() string { return eventSourcedConfigID }
 
 // MarshalBinary encodes the criteria as a proto-marshaled [internalpb.SnapshotSpec].
 // A nil criteria encodes to an empty byte slice.
-func (c *eventSourcedConfig) MarshalBinary() ([]byte, error) {
-	spec := codec.EncodeSnapshotCriteria(c.criteria)
+func (x *eventSourcedConfig) MarshalBinary() ([]byte, error) {
+	spec := codec.EncodeSnapshotCriteria(x.criteria)
 	if spec == nil {
 		return []byte{}, nil
 	}
@@ -56,16 +57,18 @@ func (c *eventSourcedConfig) MarshalBinary() ([]byte, error) {
 }
 
 // UnmarshalBinary decodes data written by MarshalBinary.
-func (c *eventSourcedConfig) UnmarshalBinary(data []byte) error {
+func (x *eventSourcedConfig) UnmarshalBinary(data []byte) error {
 	if len(data) == 0 {
-		c.criteria = nil
+		x.criteria = nil
 		return nil
 	}
+
 	var spec internalpb.SnapshotSpec
 	if err := proto.Unmarshal(data, &spec); err != nil {
 		return err
 	}
-	c.criteria = codec.DecodeSnapshotCriteria(&spec)
+
+	x.criteria = codec.DecodeSnapshotCriteria(&spec)
 	return nil
 }
 
@@ -73,7 +76,7 @@ func (c *eventSourcedConfig) UnmarshalBinary(data []byte) error {
 // [WithEventSourcing].
 type EventSourcingOption func(*eventSourcingConfig)
 
-// eventSourcingConfig accumulates the optional knobs for [WithEventSourcing].
+// eventSourcingConfig holds the optional settings for [WithEventSourcing].
 type eventSourcingConfig struct {
 	snapshotStore persistence.SnapshotStore
 	behaviors     []EventSourcedBehavior
@@ -87,13 +90,10 @@ func WithSnapshotStore(store persistence.SnapshotStore) EventSourcingOption {
 	return func(c *eventSourcingConfig) { c.snapshotStore = store }
 }
 
-// WithEventSourcedBehavior declares an additional [EventSourcedBehavior] to
-// register with the event-sourcing system at startup. It can be supplied to
-// [WithEventSourcing] alongside (or instead of) the positional behaviors slice
-// and is the recommended form when registering behaviors one-by-one.
-//
-// Multiple uses accumulate; the same effect can also be achieved at runtime
-// via [ActorSystem.RegisterEventSourcedBehavior].
+// WithEventSourcedBehavior declares a behavior to register at startup. It
+// accumulates on each call and is equivalent to appending to the behaviors
+// slice passed to [WithEventSourcing]. To register a behavior after the
+// system has started, use [ActorSystem.RegisterEventSourcedBehavior].
 func WithEventSourcedBehavior(behavior EventSourcedBehavior) EventSourcingOption {
 	return func(c *eventSourcingConfig) {
 		if behavior != nil {
@@ -102,23 +102,16 @@ func WithEventSourcedBehavior(behavior EventSourcedBehavior) EventSourcingOption
 	}
 }
 
-// WithEventSourcing wires the actor system for event-sourced actors:
+// WithEventSourcing wires the actor system for event-sourced actors. It
+// registers the events store as an extension, registers the optional snapshot
+// store (via [WithSnapshotStore]), registers the internal actor and dependency
+// types used for relocation, and records every behavior in behaviors and any
+// added via [WithEventSourcedBehavior].
 //
-//   - registers the [persistence.EventsStore] as an extension;
-//   - registers the optional [persistence.SnapshotStore] (via [WithSnapshotStore])
-//     as an extension;
-//   - registers the internal event-sourced actor and config types so spawn
-//     requests can be reconstructed during cluster relocation;
-//   - registers every behavior in behaviors (and any added via
-//     [WithEventSourcedBehavior]) so its concrete type can be instantiated
-//     from a dependency on this node, whether the actor was spawned here or
-//     relocated here from another node.
-//
-// Call this option on every node in the cluster at startup with the same set
-// of behaviors. Behaviors can be added later at runtime via
-// [ActorSystem.RegisterEventSourcedBehavior]. A behavior that has not been
-// declared here or registered at runtime cannot be spawned on, or relocated
-// to, this node.
+// Apply this option on every node in the cluster with the same behaviors.
+// Behaviors can also be added at runtime via
+// [ActorSystem.RegisterEventSourcedBehavior]. A behavior not registered on a
+// node cannot be spawned there or relocated to it.
 func WithEventSourcing(eventsStore persistence.EventsStore, behaviors []EventSourcedBehavior, opts ...EventSourcingOption) Option {
 	config := &eventSourcingConfig{}
 	for _, opt := range opts {
@@ -133,15 +126,25 @@ func WithEventSourcing(eventsStore persistence.EventsStore, behaviors []EventSou
 
 		s.registry.Register(&eventSourcedActor{})
 		s.registry.Register(&eventSourcedConfig{})
+		s.registry.Register(&eventSourcedDependency{})
+
 		for _, b := range behaviors {
-			if b == nil {
-				continue
-			}
-			s.registry.Register(b)
+			registerBehavior(s, b)
 		}
 
 		for _, b := range config.behaviors {
-			s.registry.Register(b)
+			registerBehavior(s, b)
 		}
 	})
+}
+
+// registerBehavior records behavior in the actor system's registry and in
+// [types.GlobalRegistry] so that [eventSourcedDependency.UnmarshalBinary] can
+// instantiate it during deserialization.
+func registerBehavior(s *actorSystem, behavior EventSourcedBehavior) {
+	if behavior == nil {
+		return
+	}
+	s.registry.Register(behavior)
+	types.GlobalRegistry.Register(behavior)
 }

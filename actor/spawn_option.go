@@ -119,6 +119,9 @@ type spawnConfig struct {
 	port *int
 	// snapshot criteria
 	snapshotCriteria *persistence.SnapshotCriteria
+	// isEventSourced marks the actor as event-sourced; the PID rejects user
+	// child spawns when this is set.
+	isEventSourced bool
 }
 
 var _ validation.Validator = (*spawnConfig)(nil)
@@ -210,6 +213,7 @@ func (s *spawnConfig) clone(opts ...SpawnOption) *spawnConfig {
 		reentrancy:          s.reentrancy,
 		dataCenter:          s.dataCenter,
 		snapshotCriteria:    s.snapshotCriteria,
+		isEventSourced:      s.isEventSourced,
 	}
 
 	if len(s.dependencies) > 0 {
@@ -238,6 +242,16 @@ func (s *spawnConfig) clone(opts ...SpawnOption) *spawnConfig {
 		opt.Apply(cloned)
 	}
 	return cloned
+}
+
+// asOptions returns a SpawnOption that copies the receiver's fields into the
+// target config when applied. The receiver is captured by reference; callers
+// must not mutate it after the option is constructed.
+func (s *spawnConfig) asOptions() SpawnOption {
+	source := s
+	return spawnOption(func(c *spawnConfig) {
+		*c = *source
+	})
 }
 
 // SpawnOption defines the interface for configuring actor spawn behavior.
@@ -497,25 +511,22 @@ func WithHostAndPort(host string, port int) SpawnOption {
 	})
 }
 
-// WithSnapshotCriteria configures the snapshot policy for an event-sourced actor.
+// WithSnapshotCriteria configures the snapshot policy for an event-sourced
+// actor. The criteria fields control four independent settings:
 //
-// Snapshots capture the actor's full state at a point in time so that recovery
-// can replay from the snapshot rather than from the very first event. The criteria
-// control three independent aspects of that policy:
-//
-//   - SnapshotInterval: how many events must accumulate before a new snapshot is
-//     written. 0 or 1 means every event triggers a snapshot; N > 1 means only
-//     every Nth event does.
+//   - SnapshotInterval: 0 disables intermediate snapshots and only writes the
+//     final snapshot at shutdown; N > 0 writes a snapshot every N events.
 //   - DeleteEventsOnSnapshot: when true, events up to the snapshot sequence
-//     number are deleted after a successful snapshot write, reducing storage.
+//     number are deleted after a successful snapshot write.
 //   - DeleteSnapshotsOnSnapshot: when true, all previous snapshots are deleted
-//     after a new one is written, keeping only the latest.
-//   - EventsRetentionCount: the number of events to keep before the snapshot
-//     point even when DeleteEventsOnSnapshot is true. 0 deletes all events up
-//     to the snapshot; N retains the last N events as a safety margin.
+//     after a new one is written.
+//   - EventsRetentionCount: the number of events to retain before the snapshot
+//     point when DeleteEventsOnSnapshot is true. 0 deletes all events up to
+//     the snapshot; N retains the last N. If N is greater than or equal to
+//     the snapshot sequence, no events are deleted.
 //
-// Passing nil disables snapshot creation entirely; the actor will rely solely on
-// its event log for recovery.
+// A nil criteria disables snapshot creation; the actor relies on the event
+// log alone for recovery.
 func WithSnapshotCriteria(criteria *persistence.SnapshotCriteria) SpawnOption {
 	return spawnOption(func(config *spawnConfig) {
 		config.snapshotCriteria = criteria
@@ -544,5 +555,21 @@ func withSingleton(spec *singletonSpec) SpawnOption {
 func asSystem() SpawnOption {
 	return spawnOption(func(config *spawnConfig) {
 		config.isSystem = true
+	})
+}
+
+// asEventSourced returns a SpawnOption that marks the actor as event-sourced.
+//
+// This is used internally to spawn event-sourced actors and should not be used directly by end users.
+//
+// An event-sourced actor maintains its state by persisting events rather than relying on in-memory state.
+// The PID of an event-sourced actor rejects user child spawns to enforce a clear separation between
+// the actor's behavior and its persistence logic. An event-sourced actor cannot have user-spawned children
+//
+// Returns:
+//   - SpawnOption that marks the actor as event-sourced.
+func asEventSourced() SpawnOption {
+	return spawnOption(func(config *spawnConfig) {
+		config.isEventSourced = true
 	})
 }

@@ -23,26 +23,31 @@
 package actor
 
 import (
+	"github.com/tochemey/goakt/v4/eventstream"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/persistence"
 )
 
-// snapshotWriterChildName is the well-known child name under which an
-// event-sourced actor spawns its [snapshotWriterActor] helper.
+// snapshotWriterChildName is the child name used when an event-sourced actor
+// spawns its [snapshotWriterActor] helper.
 const snapshotWriterChildName = "snapshot-writer"
 
-// writeSnapshotCmd is the fire-and-forget message sent to snapshotWriterActor.
+// writeSnapshotCmd is the message sent to [snapshotWriterActor].
 type writeSnapshotCmd struct {
 	snapshot *persistence.PersistedSnapshot
 }
 
-// snapshotWriterActor is an internal child actor that persists snapshots
-// asynchronously so the parent EventSourcedActor is never blocked waiting for
-// snapshot writes. Snapshot write failures are logged at warn level and do not
-// propagate to the parent.
+// snapshotWriterActor persists snapshots asynchronously for its parent
+// event-sourced actor and applies the configured retention policy after a
+// successful write. Failures are logged and published as
+// [SnapshotWriteFailed], [SnapshotDeleteFailed], or [EventsDeleteFailed]
+// events; they do not propagate to the parent.
 type snapshotWriterActor struct {
-	store  persistence.SnapshotStore
-	logger log.Logger
+	snapshotStore persistence.SnapshotStore
+	eventsStore   persistence.EventsStore
+	criteria      *persistence.SnapshotCriteria
+	eventsStream  eventstream.Stream
+	logger        log.Logger
 }
 
 var _ Actor = (*snapshotWriterActor)(nil)
@@ -53,12 +58,19 @@ func (x *snapshotWriterActor) PreStart(ctx *Context) error {
 }
 
 func (x *snapshotWriterActor) Receive(ctx *ReceiveContext) {
-	if m, ok := ctx.Message().(writeSnapshotCmd); ok {
-		if err := x.store.WriteSnapshot(ctx.Context(), m.snapshot); err != nil {
-			x.logger.Warnf("snapshot write failed: persistenceID=%s seq=%d: %v",
-				m.snapshot.PersistenceID, m.snapshot.SequenceNumber, err)
-		}
+	m, ok := ctx.Message().(writeSnapshotCmd)
+	if !ok {
+		return
 	}
+
+	if err := x.snapshotStore.WriteSnapshot(ctx.Context(), m.snapshot); err != nil {
+		x.logger.Warnf("snapshot write failed: persistenceID=%s seq=%d: %v",
+			m.snapshot.PersistenceID, m.snapshot.SequenceNumber, err)
+		publishFailure(x.eventsStream, NewSnapshotWriteFailed(m.snapshot.PersistenceID, m.snapshot.SequenceNumber, err))
+		return
+	}
+
+	applyRetentionPolicy(ctx.Context(), x.logger, x.eventsStream, x.eventsStore, x.snapshotStore, x.criteria, m.snapshot)
 }
 
 func (x *snapshotWriterActor) PostStop(_ *Context) error {

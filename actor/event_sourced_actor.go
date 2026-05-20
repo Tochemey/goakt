@@ -30,11 +30,16 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/eventstream"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/persistence"
 	"github.com/tochemey/goakt/v4/remote"
+	"github.com/tochemey/goakt/v4/supervisor"
 )
+
+// finalSnapshotTimeout bounds the synchronous snapshot write performed in PostStop.
+const finalSnapshotTimeout = 5 * time.Second
 
 // eventSourcedActor implements Actor for event-sourced behaviors.
 // The actor's name (set at spawn time) is the persistence ID used for all
@@ -43,32 +48,43 @@ type eventSourcedActor struct {
 	behavior         EventSourcedBehavior
 	snapshotCriteria *persistence.SnapshotCriteria
 
-	logger         log.Logger
-	persistenceID  string
-	currentState   any
-	sequenceNumber uint64
-	snapshotWriter *PID
-	eventsStore    persistence.EventsStore
-	snapshotStore  persistence.SnapshotStore
+	logger           log.Logger
+	persistenceID    string
+	writerID         string
+	snapshotWriterID string
+	currentState     any
+	sequenceNumber   uint64
+	snapshotWriter   *PID
+	eventsStore      persistence.EventsStore
+	snapshotStore    persistence.SnapshotStore
+	eventsStream     eventstream.Stream
 }
 
 var _ Actor = (*eventSourcedActor)(nil)
 
-// PreStart resolves the behavior and config from the injected dependencies,
-// loads the stores from system extensions, and recovers actor state from the
-// event log (and optional snapshot). The behavior and config travel with the
-// spawn request as dependencies so this path is identical for the initial
-// spawn and for a relocated spawn on another node.
+// PreStart resolves the behavior and snapshot criteria from the injected
+// dependencies, loads the events and snapshot stores from system extensions,
+// and recovers actor state from the snapshot and event log.
 func (x *eventSourcedActor) PreStart(ctx *Context) error {
 	x.logger = ctx.Logger()
 	x.persistenceID = ctx.ActorName()
 
-	for _, dep := range ctx.Dependencies() {
-		switch d := dep.(type) {
-		case EventSourcedBehavior:
-			x.behavior = d
-		case *eventSourcedConfig:
-			x.snapshotCriteria = d.criteria
+	for _, dependency := range ctx.Dependencies() {
+		if dependency == nil {
+			continue
+		}
+
+		switch dependency.ID() {
+		case eventSourcedBehaviorDependencyID:
+			bd, ok := dependency.(*eventSourcedDependency)
+			if !ok || bd.inner == nil {
+				return fmt.Errorf("event-sourced actor %s: behavior dependency is malformed", x.persistenceID)
+			}
+			x.behavior = bd.inner
+		case eventSourcedConfigID:
+			if cfg, ok := dependency.(*eventSourcedConfig); ok {
+				x.snapshotCriteria = cfg.criteria
+			}
 		}
 	}
 
@@ -136,20 +152,43 @@ func (x *eventSourcedActor) recover(ctx context.Context) error {
 // Receive handles the PostStart lifecycle message and all user commands.
 func (x *eventSourcedActor) Receive(rctx *ReceiveContext) {
 	switch rctx.Message().(type) {
-
 	case *PostStart:
+		x.eventsStream = rctx.Self().eventsStream
+		x.writerID = rctx.Self().ID()
 		if x.snapshotStore != nil {
-			snapWriter, err := rctx.Self().SpawnChild(rctx.Context(), snapshotWriterChildName,
-				&snapshotWriterActor{store: x.snapshotStore})
+			snapshotWriter, err := rctx.Self().spawnChildLocal(rctx.Context(), snapshotWriterChildName,
+				&snapshotWriterActor{
+					snapshotStore: x.snapshotStore,
+					eventsStore:   x.eventsStore,
+					criteria:      x.snapshotCriteria,
+					eventsStream:  x.eventsStream,
+				}, newSpawnConfig(
+					childSpawnOptions()...,
+				))
 			if err != nil {
 				rctx.Err(fmt.Errorf("event-sourced actor %s: spawn snapshot writer: %w", x.persistenceID, err))
 				return
 			}
-			x.snapshotWriter = snapWriter
+			x.snapshotWriter = snapshotWriter
+			x.snapshotWriterID = snapshotWriter.ID()
 		}
 
 	default:
 		x.handleCommand(rctx)
+	}
+}
+
+// childSpawnOptions returns the shared spawn options for persistence child
+// actors. Children are long-lived and supervised with a restart directive so
+// they recover automatically on transient failures.
+func childSpawnOptions() []SpawnOption {
+	return []SpawnOption{
+		WithLongLived(),
+		WithSupervisor(
+			supervisor.NewSupervisor(
+				supervisor.WithAnyErrorDirective(supervisor.RestartDirective),
+			),
+		),
 	}
 }
 
@@ -165,11 +204,21 @@ func (x *eventSourcedActor) handleCommand(rctx *ReceiveContext) {
 		return
 	}
 
+	// Apply each event to a tentative state and serialize it in the same pass.
+	// An apply failure or serialization failure aborts before any store write,
+	// so persisted events are always replayable. An events-store write failure
+	// leaves currentState and sequenceNumber untouched.
+	tentativeState := x.currentState
 	persisted := make([]*persistence.PersistedEvent, 0, len(events))
 
 	for i, event := range events {
-		s, kind := serializerFor(event)
+		nextState, err := x.behavior.HandleEvent(rctx.Context(), event, tentativeState)
+		if err != nil {
+			rctx.Err(fmt.Errorf("event-sourced actor %s: apply event[%d]: %w", x.persistenceID, i, err))
+			return
+		}
 
+		s, kind := serializerFor(event)
 		payload, err := s.Serialize(event)
 		if err != nil {
 			rctx.Err(fmt.Errorf("event-sourced actor %s: serialize event[%d]: %w", x.persistenceID, i, err))
@@ -183,8 +232,9 @@ func (x *eventSourcedActor) handleCommand(rctx *ReceiveContext) {
 			Payload:        payload,
 			Manifest:       types.Name(event),
 			SerializerKind: kind,
-			WriterActorID:  x.persistenceID,
+			WriterActorID:  x.writerID,
 		})
+		tentativeState = nextState
 	}
 
 	if err := x.eventsStore.WriteEvents(rctx.Context(), persisted); err != nil {
@@ -192,16 +242,9 @@ func (x *eventSourcedActor) handleCommand(rctx *ReceiveContext) {
 		return
 	}
 
-	for i, event := range events {
-		newState, err := x.behavior.HandleEvent(rctx.Context(), event, x.currentState)
-		if err != nil {
-			rctx.Err(fmt.Errorf("event-sourced actor %s: apply event[%d]: %w", x.persistenceID, i, err))
-			return
-		}
-
-		x.currentState = newState
-		x.sequenceNumber++
-	}
+	// Commit only after the write succeeds.
+	x.currentState = tentativeState
+	x.sequenceNumber += uint64(len(events))
 
 	if x.snapshotCriteria != nil && x.snapshotCriteria.SnapshotInterval > 0 &&
 		x.sequenceNumber%x.snapshotCriteria.SnapshotInterval == 0 && x.snapshotWriter != nil {
@@ -209,36 +252,86 @@ func (x *eventSourcedActor) handleCommand(rctx *ReceiveContext) {
 		if err != nil {
 			x.logger.Warnf("event-sourced actor %s: build snapshot: %v", x.persistenceID, err)
 		} else {
-			_ = Tell(rctx.Context(), x.snapshotWriter, writeSnapshotCmd{snapshot: snap})
+			rctx.Tell(x.snapshotWriter, writeSnapshotCmd{snapshot: snap})
 		}
 	}
 
 	rctx.Response(x.currentState)
 }
 
-// PostStop writes a final snapshot synchronously to speed up the next recovery.
-// The write is bounded by [finalSnapshotTimeout] so a slow snapshot store cannot
-// hang actor shutdown indefinitely.
+// PostStop writes a final snapshot synchronously and applies the configured
+// retention policy. The write is bounded by [finalSnapshotTimeout].
 func (x *eventSourcedActor) PostStop(ctx *Context) error {
-	if x.snapshotStore != nil && x.sequenceNumber > 0 {
-		snap, err := x.buildSnapshot()
-		if err != nil {
-			x.logger.Warnf("event-sourced actor %s: build final snapshot: %v", x.persistenceID, err)
-			return nil
-		}
-
-		writeCtx, cancel := context.WithTimeout(ctx.Context(), finalSnapshotTimeout)
-		defer cancel()
-		if err := x.snapshotStore.WriteSnapshot(writeCtx, snap); err != nil {
-			x.logger.Warnf("event-sourced actor %s: write final snapshot: %v", x.persistenceID, err)
-		}
+	if x.snapshotStore == nil || x.sequenceNumber == 0 {
+		return nil
 	}
 
+	snap, err := x.buildSnapshot()
+	if err != nil {
+		x.logger.Warnf("event-sourced actor %s: build final snapshot: %v", x.persistenceID, err)
+		return nil
+	}
+
+	writeCtx, cancel := context.WithTimeout(ctx.Context(), finalSnapshotTimeout)
+	defer cancel()
+	if err := x.snapshotStore.WriteSnapshot(writeCtx, snap); err != nil {
+		x.logger.Warnf("event-sourced actor %s: write final snapshot: %v", x.persistenceID, err)
+		publishFailure(x.eventsStream, NewSnapshotWriteFailed(snap.PersistenceID, snap.SequenceNumber, err))
+		return nil
+	}
+
+	applyRetentionPolicy(writeCtx, x.logger, x.eventsStream, x.eventsStore, x.snapshotStore, x.snapshotCriteria, snap)
 	return nil
 }
 
-// finalSnapshotTimeout bounds the synchronous snapshot write performed in PostStop.
-const finalSnapshotTimeout = 5 * time.Second
+// applyRetentionPolicy applies criteria's deletion settings after a
+// successful snapshot write: it deletes prior events when DeleteEventsOnSnapshot
+// is set (honoring EventsRetentionCount) and prior snapshots when
+// DeleteSnapshotsOnSnapshot is set. Failures are logged and published as
+// [EventsDeleteFailed] or [SnapshotDeleteFailed] events.
+func applyRetentionPolicy(
+	ctx context.Context,
+	logger log.Logger,
+	stream eventstream.Stream,
+	eventsStore persistence.EventsStore,
+	snapshotStore persistence.SnapshotStore,
+	criteria *persistence.SnapshotCriteria,
+	snapshot *persistence.PersistedSnapshot,
+) {
+	if criteria == nil || snapshot == nil {
+		return
+	}
+
+	if criteria.DeleteEventsOnSnapshot && eventsStore != nil {
+		// Skip deletion when retention covers or exceeds the snapshot sequence.
+		if snapshot.SequenceNumber > criteria.EventsRetentionCount {
+			toSeq := snapshot.SequenceNumber - criteria.EventsRetentionCount
+			if err := eventsStore.DeleteEvents(ctx, snapshot.PersistenceID, toSeq); err != nil {
+				logger.Warnf("event-sourced actor %s: delete events on snapshot (toSeq=%d): %v",
+					snapshot.PersistenceID, toSeq, err)
+				publishFailure(stream, NewEventsDeleteFailed(snapshot.PersistenceID, toSeq, err))
+			}
+		}
+	}
+
+	if criteria.DeleteSnapshotsOnSnapshot && snapshotStore != nil && snapshot.SequenceNumber > 1 {
+		toSeq := snapshot.SequenceNumber - 1
+		if err := snapshotStore.DeleteSnapshots(ctx, snapshot.PersistenceID, toSeq); err != nil {
+			logger.Warnf("event-sourced actor %s: delete snapshots on snapshot (toSeq=%d): %v",
+				snapshot.PersistenceID, toSeq, err)
+			publishFailure(stream, NewSnapshotDeleteFailed(snapshot.PersistenceID, toSeq, err))
+		}
+	}
+}
+
+// publishFailure publishes event to the actor system's event stream, or
+// no-ops when stream is nil.
+func publishFailure(stream eventstream.Stream, event any) {
+	if stream == nil {
+		return
+	}
+	stream.Publish(eventsTopic, event)
+}
 
 func (x *eventSourcedActor) buildSnapshot() (*persistence.PersistedSnapshot, error) {
 	s, kind := serializerFor(x.currentState)
@@ -255,7 +348,7 @@ func (x *eventSourcedActor) buildSnapshot() (*persistence.PersistedSnapshot, err
 		Payload:        payload,
 		Manifest:       types.Name(x.currentState),
 		SerializerKind: kind,
-		WriterActorID:  x.persistenceID,
+		WriterActorID:  x.snapshotWriterID,
 	}, nil
 }
 

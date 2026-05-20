@@ -258,6 +258,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	pid.reinstateCount.Store(0)
 	pid.initTimeout.Store(DefaultInitTimeout)
 	pid.setState(relocationState, true)
+	pid.setState(eventSourcedState, false)
 
 	for _, opt := range opts {
 		opt(pid)
@@ -876,8 +877,13 @@ func (pid *PID) LatestProcessedDuration() time.Duration {
 
 // SpawnChild creates, starts, and supervises a child actor with the given name.
 // If a running child with the same name already exists, its PID is returned without creating a new one.
-// Returns ErrNotLocal for remote PIDs and ErrDead if this actor is not running.
+// Returns ErrNotLocal for remote PIDs, ErrDead if this actor is not running, and
+// ErrEventSourcedChildrenNotAllowed if this actor is event-sourced.
 func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts ...SpawnOption) (*PID, error) {
+	if pid.isStateSet(eventSourcedState) {
+		return nil, gerrors.ErrEventSourcedChildrenNotAllowed
+	}
+
 	config := newSpawnConfig(opts...)
 	if err := config.Validate(); err != nil {
 		return nil, err
@@ -2261,6 +2267,7 @@ func (pid *PID) reset() {
 	pid.setState(passivationPausedState, false)
 	pid.setState(passivatingState, false)
 	pid.setState(passivationSkipNextState, false)
+	pid.setState(eventSourcedState, false)
 	if pid.reentrancy != nil {
 		pid.reentrancy.reset()
 	}

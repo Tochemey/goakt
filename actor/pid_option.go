@@ -190,3 +190,9 @@ func withMetricProvider(metricProvider *metric.Provider) pidOption {
 		}
 	}
 }
+
+func isEventSourced() pidOption {
+	return func(pid *PID) {
+		pid.setState(eventSourcedState, true)
+	}
+}

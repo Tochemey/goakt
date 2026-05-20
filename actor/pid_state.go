@@ -53,6 +53,7 @@ const (
 	relocationState
 	systemState
 	remoteState
+	eventSourcedState
 )
 
 func (pid *PID) isStateSet(state pidState) bool {
@@ -72,9 +73,11 @@ func (pid *PID) setState(state pidState, enabled bool) {
 		} else {
 			desired = pidState &^ uint32(state)
 		}
+
 		if desired == pidState {
 			return
 		}
+
 		if pid.state.CompareAndSwap(pidState, desired) {
 			return
 		}

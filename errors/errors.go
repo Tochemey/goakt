@@ -251,6 +251,27 @@ var (
 
 	// ErrEventsStoreRequired is returned when SpawnEventSourced is called without an events store.
 	ErrEventsStoreRequired = errors.New("events store is required for event-sourced actors")
+
+	// ErrEventSourcedBehaviorRequired is returned when SpawnEventSourced is
+	// called with a nil behavior.
+	ErrEventSourcedBehaviorRequired = errors.New("event-sourced behavior is required")
+
+	// ErrEventSourcedBehaviorNotRegistered is returned when the behavior's Go
+	// type has not been registered on the local node.
+	ErrEventSourcedBehaviorNotRegistered = errors.New("event-sourced behavior is not registered on this node")
+
+	// ErrEventSourcedBehaviorSmuggled is returned when a dependency passed via
+	// WithDependencies implements EventSourcedBehavior. Behaviors must be passed
+	// via the behavior parameter of SpawnEventSourced.
+	ErrEventSourcedBehaviorSmuggled = errors.New("event-sourced behavior must be passed as the behavior parameter, not through WithDependencies")
+
+	// ErrEventSourcedDependencyIDReserved is returned when a user-supplied
+	// dependency uses an ID reserved for event-sourced internals.
+	ErrEventSourcedDependencyIDReserved = errors.New("dependency ID is reserved for event-sourced internals")
+
+	// ErrEventSourcedChildrenNotAllowed is returned when SpawnChild is called
+	// on an event-sourced actor's PID.
+	ErrEventSourcedChildrenNotAllowed = errors.New("event-sourced actors cannot spawn children")
 )
 
 // NewErrInvalidTCPAddress formats an ErrInvalidTCPAddress with the given address.

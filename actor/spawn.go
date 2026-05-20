@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"net"
+	"reflect"
 	"runtime"
 	"sort"
 	"strconv"
@@ -90,6 +91,13 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 		return nil, err
 	}
 
+	return x.spawnFromConfig(ctx, name, actor, config)
+}
+
+// spawnFromConfig spawns actor using a pre-validated spawnConfig. Callers
+// that construct the config directly (such as [actorSystem.SpawnEventSourced])
+// use this helper to avoid re-parsing the option slice.
+func (x *actorSystem) spawnFromConfig(ctx context.Context, name string, actor Actor, config *spawnConfig) (*PID, error) {
 	if config.host != nil || config.port != nil {
 		// check whether remoting is enabled
 		if !x.remotingEnabled.Load() {
@@ -133,7 +141,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 		}
 	}
 
-	pid, err := x.configPID(ctx, name, actor, opts...)
+	pid, err := x.configPID(ctx, name, actor, config.asOptions())
 	if err != nil {
 		return nil, err
 	}
@@ -415,12 +423,14 @@ func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Act
 	})
 }
 
-// WithEventSourcedBehavior registers an EventSourcedBehavior with the actor
-// system at runtime so it can be spawned via SpawnEventSourced and relocated
-// to this node. Call it before spawning a behavior that was not declared at
-// startup via [WithEventSourcing]. This is the runtime counterpart to the
-// free function of the same name used inside [WithEventSourcing].
-func (x *actorSystem) WithEventSourcedBehavior(behavior EventSourcedBehavior) error {
+// RegisterEventSourcedBehavior registers behavior at runtime. Use it for
+// behaviors not declared at startup via [WithEventSourcing]; the registration
+// must happen before [actorSystem.SpawnEventSourced] is called with behavior.
+//
+// It returns [errors.ErrActorSystemNotStarted] if the system is not running,
+// [errors.ErrEventsStoreRequired] if [WithEventSourcing] was not configured,
+// and [errors.ErrEventSourcedBehaviorRequired] if behavior is nil.
+func (x *actorSystem) RegisterEventSourcedBehavior(behavior EventSourcedBehavior) error {
 	if !x.Running() {
 		return gerrors.ErrActorSystemNotStarted
 	}
@@ -429,26 +439,29 @@ func (x *actorSystem) WithEventSourcedBehavior(behavior EventSourcedBehavior) er
 		return gerrors.ErrEventsStoreRequired
 	}
 
-	if behavior == nil {
-		return nil
+	if isBehaviorNil(behavior) {
+		return gerrors.ErrEventSourcedBehaviorRequired
 	}
 
-	x.registry.Register(behavior)
+	registerBehavior(x, behavior)
 	return nil
 }
 
-// SpawnEventSourced creates and starts an event-sourced actor.
-// The actor's name is used as the persistence ID.
+// SpawnEventSourced creates and starts an event-sourced actor. The actor's
+// name is used as the persistence ID. The behavior is reconstructed on any
+// node where its type is registered via [WithEventSourcing] or
+// [ActorSystem.RegisterEventSourcedBehavior].
 //
-// The behavior travels as a dependency alongside the spawn request so the
-// same behavior type can be reconstructed on any node the actor is relocated
-// to — provided that node also declared this behavior via [WithEventSourcing]
-// or [actorSystem.RegisterEventSourcedBehavior].
-//
-// Returns [gerrors.ErrEventsStoreRequired] if [WithEventSourcing] was not
-// configured on this actor system. Returns an error if behavior's type was
-// not registered on this node: such an actor could not be relocated, so
-// spawning is rejected up front.
+// It returns one of:
+//   - [errors.ErrActorSystemNotStarted] if the system is not running.
+//   - [errors.ErrEventsStoreRequired] if [WithEventSourcing] was not configured.
+//   - [errors.ErrEventSourcedBehaviorRequired] if behavior is nil.
+//   - [errors.ErrEventSourcedBehaviorNotRegistered] if behavior's type is not
+//     registered on this node.
+//   - [errors.ErrEventSourcedBehaviorSmuggled] if a user dependency implements
+//     [EventSourcedBehavior].
+//   - [errors.ErrEventSourcedDependencyIDReserved] if a user dependency uses
+//     an internal dependency ID.
 func (x *actorSystem) SpawnEventSourced(ctx context.Context, name string, behavior EventSourcedBehavior, opts ...SpawnOption) (*PID, error) {
 	if !x.Running() {
 		return nil, gerrors.ErrActorSystemNotStarted
@@ -458,24 +471,70 @@ func (x *actorSystem) SpawnEventSourced(ctx context.Context, name string, behavi
 		return nil, gerrors.ErrEventsStoreRequired
 	}
 
-	if _, ok := x.registry.TypeOf(types.Name(behavior)); !ok {
-		return nil, fmt.Errorf("event-sourced behavior %T was not declared via WithEventSourcing on this node; add it to WithEventSourcing's behaviors list before spawning", behavior)
+	if isBehaviorNil(behavior) {
+		return nil, gerrors.ErrEventSourcedBehaviorRequired
 	}
 
+	if _, ok := x.registry.TypeOf(types.Name(behavior)); !ok {
+		return nil, fmt.Errorf("%w: %T", gerrors.ErrEventSourcedBehaviorNotRegistered, behavior)
+	}
+
+	// mark the actor as event-sourced so that internal wrappers and guards can recognize it; this is needed
+	opts = append(opts, asEventSourced())
 	config := newSpawnConfig(opts...)
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}
 
-	esConfig := &eventSourcedConfig{criteria: config.snapshotCriteria}
+	if err := checkEventSourcedDependencies(config.dependencies); err != nil {
+		return nil, err
+	}
 
-	// Merge internal deps (behavior + esConfig) with any user-supplied deps.
-	// Appending WithDependencies last ensures it wins over any the caller included in opts,
-	// so neither set is silently dropped.
-	dependencies := make([]extension.Dependency, 0, 2+len(config.dependencies))
-	dependencies = append(dependencies, behavior, esConfig)
-	dependencies = append(dependencies, config.dependencies...)
-	return x.Spawn(ctx, name, &eventSourcedActor{}, append(opts, WithDependencies(dependencies...))...)
+	// Prepend the internal wrappers to the user dependency slice.
+	config.dependencies = append(
+		[]extension.Dependency{
+			&eventSourcedDependency{inner: behavior},
+			&eventSourcedConfig{criteria: config.snapshotCriteria},
+		},
+		config.dependencies...,
+	)
+
+	return x.spawnFromConfig(ctx, name, &eventSourcedActor{}, config)
+}
+
+// isBehaviorNil reports whether behavior is nil, either as an untyped-nil
+// interface or as an interface holding a typed-nil reference.
+func isBehaviorNil(behavior EventSourcedBehavior) bool {
+	if behavior == nil {
+		return true
+	}
+
+	v := reflect.ValueOf(behavior)
+	switch v.Kind() {
+	case reflect.Pointer, reflect.Interface, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func:
+		return v.IsNil()
+	}
+	return false
+}
+
+// checkEventSourcedDependencies rejects user-supplied dependencies that
+// implement [EventSourcedBehavior] or use a reserved internal dependency ID.
+func checkEventSourcedDependencies(deps []extension.Dependency) error {
+	for _, dep := range deps {
+		if dep == nil {
+			continue
+		}
+
+		if _, ok := dep.(EventSourcedBehavior); ok {
+			return fmt.Errorf("%w: dependency %T", gerrors.ErrEventSourcedBehaviorSmuggled, dep)
+		}
+
+		switch dep.ID() {
+		case eventSourcedBehaviorDependencyID, eventSourcedConfigID:
+			return fmt.Errorf("%w: ID %q is reserved", gerrors.ErrEventSourcedDependencyIDReserved, dep.ID())
+		}
+	}
+	return nil
 }
 
 // retrySpawnSingleton runs spawnFn with retries according to cfg.

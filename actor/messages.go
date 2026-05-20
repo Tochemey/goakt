@@ -505,3 +505,99 @@ func NewAdjustRouterPoolSize(poolSize int32) *AdjustRouterPoolSize {
 
 // PoolSize returns the signed delta to apply to the router's pool.
 func (a *AdjustRouterPoolSize) PoolSize() int32 { return a.poolSize }
+
+// SnapshotWriteFailed is published when an event-sourced actor's snapshot
+// store rejects a write. The actor continues to serve commands; the event log
+// remains the source of truth.
+type SnapshotWriteFailed struct {
+	persistenceID  string
+	sequenceNumber uint64
+	cause          error
+	failedAt       time.Time
+}
+
+// NewSnapshotWriteFailed creates a SnapshotWriteFailed event stamped with the current UTC time.
+func NewSnapshotWriteFailed(persistenceID string, sequenceNumber uint64, cause error) *SnapshotWriteFailed {
+	return &SnapshotWriteFailed{
+		persistenceID:  persistenceID,
+		sequenceNumber: sequenceNumber,
+		cause:          cause,
+		failedAt:       time.Now().UTC(),
+	}
+}
+
+// PersistenceID returns the persistence ID of the actor whose snapshot failed.
+func (e *SnapshotWriteFailed) PersistenceID() string { return e.persistenceID }
+
+// SequenceNumber returns the sequence number the failed snapshot was meant to capture.
+func (e *SnapshotWriteFailed) SequenceNumber() uint64 { return e.sequenceNumber }
+
+// Cause returns the underlying store error.
+func (e *SnapshotWriteFailed) Cause() error { return e.cause }
+
+// FailedAt returns the time the failure was observed.
+func (e *SnapshotWriteFailed) FailedAt() time.Time { return e.failedAt }
+
+// SnapshotDeleteFailed is published when the retention policy's
+// DeleteSnapshotsOnSnapshot step fails. The new snapshot is already durable;
+// stale snapshots remain and will be retried on the next snapshot.
+type SnapshotDeleteFailed struct {
+	persistenceID    string
+	toSequenceNumber uint64
+	cause            error
+	failedAt         time.Time
+}
+
+// NewSnapshotDeleteFailed creates a SnapshotDeleteFailed event stamped with the current UTC time.
+func NewSnapshotDeleteFailed(persistenceID string, toSequenceNumber uint64, cause error) *SnapshotDeleteFailed {
+	return &SnapshotDeleteFailed{
+		persistenceID:    persistenceID,
+		toSequenceNumber: toSequenceNumber,
+		cause:            cause,
+		failedAt:         time.Now().UTC(),
+	}
+}
+
+// PersistenceID returns the persistence ID of the actor whose snapshot delete failed.
+func (e *SnapshotDeleteFailed) PersistenceID() string { return e.persistenceID }
+
+// ToSequenceNumber returns the upper-bound sequence number passed to DeleteSnapshots.
+func (e *SnapshotDeleteFailed) ToSequenceNumber() uint64 { return e.toSequenceNumber }
+
+// Cause returns the underlying store error.
+func (e *SnapshotDeleteFailed) Cause() error { return e.cause }
+
+// FailedAt returns the time the failure was observed.
+func (e *SnapshotDeleteFailed) FailedAt() time.Time { return e.failedAt }
+
+// EventsDeleteFailed is published when the retention policy's
+// DeleteEventsOnSnapshot step fails. The snapshot is durable and recovery
+// remains correct; log compaction is retried on the next snapshot.
+type EventsDeleteFailed struct {
+	persistenceID    string
+	toSequenceNumber uint64
+	cause            error
+	failedAt         time.Time
+}
+
+// NewEventsDeleteFailed creates an EventsDeleteFailed event stamped with the current UTC time.
+func NewEventsDeleteFailed(persistenceID string, toSequenceNumber uint64, cause error) *EventsDeleteFailed {
+	return &EventsDeleteFailed{
+		persistenceID:    persistenceID,
+		toSequenceNumber: toSequenceNumber,
+		cause:            cause,
+		failedAt:         time.Now().UTC(),
+	}
+}
+
+// PersistenceID returns the persistence ID of the actor whose event delete failed.
+func (e *EventsDeleteFailed) PersistenceID() string { return e.persistenceID }
+
+// ToSequenceNumber returns the upper-bound sequence number passed to DeleteEvents.
+func (e *EventsDeleteFailed) ToSequenceNumber() uint64 { return e.toSequenceNumber }
+
+// Cause returns the underlying store error.
+func (e *EventsDeleteFailed) Cause() error { return e.cause }
+
+// FailedAt returns the time the failure was observed.
+func (e *EventsDeleteFailed) FailedAt() time.Time { return e.failedAt }

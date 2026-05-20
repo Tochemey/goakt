@@ -233,29 +233,26 @@ type ActorSystem interface {
 	// If the oldest node leaves the cluster, the singleton is restarted on the new oldest node.
 	// This is useful for managing shared resources or coordinating tasks that should be handled by a single actor.
 	SpawnSingleton(ctx context.Context, name string, actor Actor, opts ...ClusterSingletonOption) (*PID, error)
-	// SpawnEventSourced creates and starts an event-sourced actor.
+	// SpawnEventSourced creates and starts an event-sourced actor. The actor's
+	// name is used as the persistence ID. The system must be wired via
+	// [WithEventSourcing] and the behavior's type must be registered there or
+	// via [ActorSystem.RegisterEventSourcedBehavior].
 	//
-	// The actor's name is used as the persistence ID for all store reads and
-	// writes. The system must be wired for event sourcing via [WithEventSourcing];
-	// otherwise this returns [errors.ErrEventsStoreRequired]. Behaviors must be
-	// declared via [WithEventSourcing] or [ActorSystem.RegisterEventSourcedBehavior]
-	// before spawn; spawning an undeclared behavior returns an error.
-	//
-	// On startup the actor recovers its state automatically: it loads the latest
-	// snapshot (if a snapshot store is configured) and replays any events written
-	// after that snapshot. Passivation is safe because recovery is fully automatic.
+	// On startup the actor recovers its state: it loads the latest snapshot if
+	// a snapshot store is configured and replays any events written after that
+	// snapshot.
 	SpawnEventSourced(ctx context.Context, name string, behavior EventSourcedBehavior, opts ...SpawnOption) (*PID, error)
-	// WithEventSourcedBehavior registers an [EventSourcedBehavior] at runtime
-	// so that [SpawnEventSourced] can spawn it and the cluster can relocate it
-	// to this node. Use the [WithEventSourcedBehavior] free function inside
-	// [WithEventSourcing] for the startup case; use this method when behaviors
-	// are loaded dynamically — e.g. from plugins or feature flags — after the
-	// actor system has started.
+	// RegisterEventSourcedBehavior registers behavior at runtime. Use the
+	// [WithEventSourcedBehavior] option inside [WithEventSourcing] for the
+	// startup case; use this method when behaviors are loaded dynamically (for
+	// example, from plugins or feature flags) after the actor system has
+	// started.
 	//
-	// Returns [errors.ErrActorSystemNotStarted] if the system has not been
-	// started, and [errors.ErrEventsStoreRequired] if [WithEventSourcing] was
-	// not configured.
-	WithEventSourcedBehavior(behavior EventSourcedBehavior) error
+	// It returns [errors.ErrActorSystemNotStarted] if the system is not
+	// running, [errors.ErrEventsStoreRequired] if [WithEventSourcing] was not
+	// configured, and [errors.ErrEventSourcedBehaviorRequired] if behavior is
+	// nil.
+	RegisterEventSourcedBehavior(behavior EventSourcedBehavior) error
 	// Kill stops a given actor in the system either locally or on a remote node(when clustering is enabled)
 	Kill(ctx context.Context, name string) error
 	// ReSpawn recreates a given actor in the system.
@@ -3039,6 +3036,18 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 		pidOpts = append(pidOpts, asSystemActor())
 	}
 
+	// Cluster relocation uses Spawn (not SpawnEventSourced) to recreate an
+	// event-sourced actor on the receiver, so the SpawnOption-driven flag is
+	// not set on that path. Detect the wrapper type directly so the children
+	// guard survives relocation.
+	if _, ok := actor.(*eventSourcedActor); ok {
+		spawnConfig.isEventSourced = true
+	}
+
+	if spawnConfig.isEventSourced {
+		pidOpts = append(pidOpts, isEventSourced())
+	}
+
 	// set the mailbox option
 	if spawnConfig.mailbox != nil {
 		pidOpts = append(pidOpts, withMailbox(spawnConfig.mailbox))
@@ -3048,6 +3057,7 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 	if supervisor == nil {
 		supervisor = x.defaultSupervisor
 	}
+
 	if supervisor != nil {
 		pidOpts = append(pidOpts, withSupervisor(supervisor))
 	}

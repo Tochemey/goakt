@@ -88,6 +88,23 @@ message SnapshotSpec {
   uint64 events_retention_count = 4;
 }
 
+// EventSourcedBehaviorEnvelope wraps a serialized EventSourcedBehavior so the
+// receiving node can locate the concrete Go type and reconstruct it.
+//
+// This is the body of the internal behaviorDependency that travels with every
+// event-sourced spawn request. The outer Dependency.type_name resolves to the
+// wrapper type; the type_name field below resolves to the user's concrete
+// behavior type.
+message EventSourcedBehaviorEnvelope {
+  // Lowercased fully-qualified Go type name of the inner behavior, used to
+  // look up the type in the global types registry on the receiving node.
+  string type_name = 1;
+  // Bytes produced by the inner behavior's MarshalBinary.
+  bytes payload = 2;
+  // Reserved for forward-compatible behavior schema migrations. Unset today.
+  uint32 schema_version = 3;
+}
+
 message SingletonSpec {
   // Specifies the spawn timeout for the singleton actor
   google.protobuf.Duration spawn_timeout = 1;
