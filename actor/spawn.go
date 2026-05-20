@@ -40,6 +40,7 @@ import (
 
 	"github.com/tochemey/goakt/v4/datacenter"
 	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/pointer"
@@ -448,7 +449,7 @@ func (x *actorSystem) WithEventSourcedBehavior(behavior EventSourcedBehavior) er
 // configured on this actor system. Returns an error if behavior's type was
 // not registered on this node: such an actor could not be relocated, so
 // spawning is rejected up front.
-func (x *actorSystem) SpawnEventSourced(ctx context.Context, name string, behavior EventSourcedBehavior, opts ...EventSourcedOption) (*PID, error) {
+func (x *actorSystem) SpawnEventSourced(ctx context.Context, name string, behavior EventSourcedBehavior, opts ...SpawnOption) (*PID, error) {
 	if !x.Running() {
 		return nil, gerrors.ErrActorSystemNotStarted
 	}
@@ -461,11 +462,20 @@ func (x *actorSystem) SpawnEventSourced(ctx context.Context, name string, behavi
 		return nil, fmt.Errorf("event-sourced behavior %T was not declared via WithEventSourcing on this node; add it to WithEventSourcing's behaviors list before spawning", behavior)
 	}
 
-	builder := newEventSourcedBuilder(opts...)
-	spawnOpts := make([]SpawnOption, 0, len(builder.spawnOpts)+1)
-	spawnOpts = append(spawnOpts, WithDependencies(behavior, builder.config))
-	spawnOpts = append(spawnOpts, builder.spawnOpts...)
-	return x.Spawn(ctx, name, &eventSourcedActor{}, spawnOpts...)
+	config := newSpawnConfig(opts...)
+	if err := config.Validate(); err != nil {
+		return nil, err
+	}
+
+	esConfig := &eventSourcedConfig{criteria: config.snapshotCriteria}
+
+	// Merge internal deps (behavior + esConfig) with any user-supplied deps.
+	// Appending WithDependencies last ensures it wins over any the caller included in opts,
+	// so neither set is silently dropped.
+	dependencies := make([]extension.Dependency, 0, 2+len(config.dependencies))
+	dependencies = append(dependencies, behavior, esConfig)
+	dependencies = append(dependencies, config.dependencies...)
+	return x.Spawn(ctx, name, &eventSourcedActor{}, append(opts, WithDependencies(dependencies...))...)
 }
 
 // retrySpawnSingleton runs spawnFn with retries according to cfg.

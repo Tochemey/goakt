@@ -399,6 +399,12 @@ func (r *relocator) recreateLocally(ctx context.Context, props *internalpb.Actor
 		spawnOpts = append(spawnOpts, WithDependencies(dependencies...))
 	}
 
+	if props.GetSnapshotSpec() != nil {
+		if decoded := codec.DecodeSnapshotCriteria(props.GetSnapshotSpec()); decoded != nil {
+			spawnOpts = append(spawnOpts, WithSnapshotCriteria(decoded))
+		}
+	}
+
 	_, err = r.pid.ActorSystem().Spawn(ctx, addr.Name(), actor, spawnOpts...)
 	return err
 }

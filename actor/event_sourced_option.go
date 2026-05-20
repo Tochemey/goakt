@@ -23,41 +23,49 @@
 package actor
 
 import (
-	"encoding/binary"
-	"fmt"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v4/extension"
+	"github.com/tochemey/goakt/v4/internal/codec"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/persistence"
 )
 
 // eventSourcedConfigID is the stable dependency ID for eventSourcedConfig.
 const eventSourcedConfigID = "goakt-es-config"
 
-// eventSourcedConfig carries the per-actor configuration that must survive
-// actor relocation. It implements [extension.Dependency] so the relocator can
-// serialize and restore it on the target node without any external state.
+// eventSourcedConfig carries the snapshot criteria for an event-sourced actor.
+// It implements [extension.Dependency] so it is serialized alongside the behavior
+// when the actor is relocated to another node.
 type eventSourcedConfig struct {
-	snapshotInterval uint64
+	criteria *persistence.SnapshotCriteria
 }
 
 var _ extension.Dependency = (*eventSourcedConfig)(nil)
 
-// ID implements [extension.Dependency].
 func (c *eventSourcedConfig) ID() string { return eventSourcedConfigID }
 
-// MarshalBinary encodes the config as an 8-byte big-endian snapshotInterval.
+// MarshalBinary encodes the criteria as a proto-marshaled [internalpb.SnapshotSpec].
+// A nil criteria encodes to an empty byte slice.
 func (c *eventSourcedConfig) MarshalBinary() ([]byte, error) {
-	buf := make([]byte, 8)
-	binary.BigEndian.PutUint64(buf, c.snapshotInterval)
-	return buf, nil
+	spec := codec.EncodeSnapshotCriteria(c.criteria)
+	if spec == nil {
+		return []byte{}, nil
+	}
+	return proto.Marshal(spec)
 }
 
 // UnmarshalBinary decodes data written by MarshalBinary.
 func (c *eventSourcedConfig) UnmarshalBinary(data []byte) error {
-	if len(data) < 8 {
-		return fmt.Errorf("eventSourcedConfig: data too short (%d bytes)", len(data))
+	if len(data) == 0 {
+		c.criteria = nil
+		return nil
 	}
-	c.snapshotInterval = binary.BigEndian.Uint64(data[:8])
+	var spec internalpb.SnapshotSpec
+	if err := proto.Unmarshal(data, &spec); err != nil {
+		return err
+	}
+	c.criteria = codec.DecodeSnapshotCriteria(&spec)
 	return nil
 }
 
@@ -74,7 +82,7 @@ type eventSourcingConfig struct {
 // WithSnapshotStore installs an optional [persistence.SnapshotStore] alongside
 // the events store wired by [WithEventSourcing]. When present, event-sourced
 // actors will write a final snapshot on shutdown and intermediate snapshots
-// when [WithSnapshotInterval] is set.
+// when [WithSnapshotCriteria] is passed to [actorSystem.SpawnEventSourced].
 func WithSnapshotStore(store persistence.SnapshotStore) EventSourcingOption {
 	return func(c *eventSourcingConfig) { c.snapshotStore = store }
 }
@@ -111,20 +119,18 @@ func WithEventSourcedBehavior(behavior EventSourcedBehavior) EventSourcingOption
 // [ActorSystem.RegisterEventSourcedBehavior]. A behavior that has not been
 // declared here or registered at runtime cannot be spawned on, or relocated
 // to, this node.
-func WithEventSourcing(
-	eventsStore persistence.EventsStore,
-	behaviors []EventSourcedBehavior,
-	opts ...EventSourcingOption,
-) Option {
-	cfg := &eventSourcingConfig{}
+func WithEventSourcing(eventsStore persistence.EventsStore, behaviors []EventSourcedBehavior, opts ...EventSourcingOption) Option {
+	config := &eventSourcingConfig{}
 	for _, opt := range opts {
-		opt(cfg)
+		opt(config)
 	}
+
 	return OptionFunc(func(s *actorSystem) {
 		s.extensions.Set(persistence.EventsStoreExtensionID, persistence.NewEventsStoreExtension(eventsStore))
-		if cfg.snapshotStore != nil {
-			s.extensions.Set(persistence.SnapshotStoreExtensionID, persistence.NewSnapshotStoreExtension(cfg.snapshotStore))
+		if config.snapshotStore != nil {
+			s.extensions.Set(persistence.SnapshotStoreExtensionID, persistence.NewSnapshotStoreExtension(config.snapshotStore))
 		}
+
 		s.registry.Register(&eventSourcedActor{})
 		s.registry.Register(&eventSourcedConfig{})
 		for _, b := range behaviors {
@@ -133,7 +139,8 @@ func WithEventSourcing(
 			}
 			s.registry.Register(b)
 		}
-		for _, b := range cfg.behaviors {
+
+		for _, b := range config.behaviors {
 			s.registry.Register(b)
 		}
 	})

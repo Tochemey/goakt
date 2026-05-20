@@ -32,6 +32,7 @@ import (
 	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/internal/validation"
 	"github.com/tochemey/goakt/v4/passivation"
+	"github.com/tochemey/goakt/v4/persistence"
 	"github.com/tochemey/goakt/v4/reentrancy"
 	"github.com/tochemey/goakt/v4/supervisor"
 )
@@ -116,9 +117,8 @@ type spawnConfig struct {
 	// This will be used when remoting is enabled and the actor type must be registered
 	// on the remote node.
 	port *int
-	// snapshotInterval is the per-actor snapshot cadence applied only when the
-	// actor is event-sourced. Ignored for all other actor kinds.
-	snapshotInterval uint64
+	// snapshot criteria
+	snapshotCriteria *persistence.SnapshotCriteria
 }
 
 var _ validation.Validator = (*spawnConfig)(nil)
@@ -209,7 +209,7 @@ func (s *spawnConfig) clone(opts ...SpawnOption) *spawnConfig {
 		passivationStrategy: s.passivationStrategy,
 		reentrancy:          s.reentrancy,
 		dataCenter:          s.dataCenter,
-		snapshotInterval:    s.snapshotInterval,
+		snapshotCriteria:    s.snapshotCriteria,
 	}
 
 	if len(s.dependencies) > 0 {
@@ -497,6 +497,31 @@ func WithHostAndPort(host string, port int) SpawnOption {
 	})
 }
 
+// WithSnapshotCriteria configures the snapshot policy for an event-sourced actor.
+//
+// Snapshots capture the actor's full state at a point in time so that recovery
+// can replay from the snapshot rather than from the very first event. The criteria
+// control three independent aspects of that policy:
+//
+//   - SnapshotInterval: how many events must accumulate before a new snapshot is
+//     written. 0 or 1 means every event triggers a snapshot; N > 1 means only
+//     every Nth event does.
+//   - DeleteEventsOnSnapshot: when true, events up to the snapshot sequence
+//     number are deleted after a successful snapshot write, reducing storage.
+//   - DeleteSnapshotsOnSnapshot: when true, all previous snapshots are deleted
+//     after a new one is written, keeping only the latest.
+//   - EventsRetentionCount: the number of events to keep before the snapshot
+//     point even when DeleteEventsOnSnapshot is true. 0 deletes all events up
+//     to the snapshot; N retains the last N events as a safety margin.
+//
+// Passing nil disables snapshot creation entirely; the actor will rely solely on
+// its event log for recovery.
+func WithSnapshotCriteria(criteria *persistence.SnapshotCriteria) SpawnOption {
+	return spawnOption(func(config *spawnConfig) {
+		config.snapshotCriteria = criteria
+	})
+}
+
 // withSingleton returns a SpawnOption that ensures the actor is a singleton within the system.
 //
 // This is an internal method to set the singleton flag and should not be used directly by end users.
@@ -519,18 +544,5 @@ func withSingleton(spec *singletonSpec) SpawnOption {
 func asSystem() SpawnOption {
 	return spawnOption(func(config *spawnConfig) {
 		config.isSystem = true
-	})
-}
-
-// WithSnapshotInterval sets how often (in events) an intermediate snapshot is
-// written for event-sourced actors. A value of zero (the default) disables
-// intermediate snapshotting.
-//
-// This option only applies to actors spawned via [ActorSystem.SpawnEventSourced];
-// it is silently ignored for every other actor kind. A [persistence.SnapshotStore]
-// must be wired via [WithSnapshotStore] for snapshots to be written.
-func WithSnapshotInterval(n uint64) SpawnOption {
-	return spawnOption(func(config *spawnConfig) {
-		config.snapshotInterval = n
 	})
 }

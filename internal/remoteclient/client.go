@@ -1967,6 +1967,11 @@ func (r *client) RemoteSpawn(ctx context.Context, host string, port int, spawnRe
 		reentrancy = codec.EncodeReentrancy(spawnRequest.Reentrancy)
 	}
 
+	var snapshotSpec *internalpb.SnapshotSpec
+	if spawnRequest.SnapshotCriteria != nil {
+		snapshotSpec = codec.EncodeSnapshotCriteria(spawnRequest.SnapshotCriteria)
+	}
+
 	// Enrich context with metadata
 	ctx, err = r.enrichContext(ctx)
 	if err != nil {
@@ -1988,6 +1993,7 @@ func (r *client) RemoteSpawn(ctx context.Context, host string, port int, spawnRe
 		Role:                spawnRequest.Role,
 		Supervisor:          codec.EncodeSupervisor(spawnRequest.Supervisor),
 		Reentrancy:          reentrancy,
+		SnapshotSpec:        snapshotSpec,
 	}
 
 	// Send request

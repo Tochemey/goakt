@@ -250,7 +250,7 @@ func TestEventSourced(t *testing.T) {
 		sys := newESTestSystem(t, eventsStore, snapStore, &counterBehavior{})
 
 		pid, err := sys.SpawnEventSourced(ctx, "counter-interval", &counterBehavior{},
-			WithSnapshotInterval(3))
+			WithSnapshotCriteria(&persistence.SnapshotCriteria{SnapshotInterval: 3}))
 		require.NoError(t, err)
 
 		for i := 0; i < 3; i++ {

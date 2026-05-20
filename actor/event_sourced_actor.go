@@ -40,8 +40,8 @@ import (
 // The actor's name (set at spawn time) is the persistence ID used for all
 // store reads and writes.
 type eventSourcedActor struct {
-	behavior EventSourcedBehavior
-	config   *eventSourcedConfig
+	behavior         EventSourcedBehavior
+	snapshotCriteria *persistence.SnapshotCriteria
 
 	logger         log.Logger
 	persistenceID  string
@@ -68,16 +68,12 @@ func (x *eventSourcedActor) PreStart(ctx *Context) error {
 		case EventSourcedBehavior:
 			x.behavior = d
 		case *eventSourcedConfig:
-			x.config = d
+			x.snapshotCriteria = d.criteria
 		}
 	}
 
 	if x.behavior == nil {
 		return fmt.Errorf("event-sourced actor %s: behavior dependency missing", x.persistenceID)
-	}
-
-	if x.config == nil {
-		return fmt.Errorf("event-sourced actor %s: config dependency missing", x.persistenceID)
 	}
 
 	x.currentState = x.behavior.InitialState()
@@ -207,7 +203,8 @@ func (x *eventSourcedActor) handleCommand(rctx *ReceiveContext) {
 		x.sequenceNumber++
 	}
 
-	if x.config.snapshotInterval > 0 && x.sequenceNumber%x.config.snapshotInterval == 0 && x.snapshotWriter != nil {
+	if x.snapshotCriteria != nil && x.snapshotCriteria.SnapshotInterval > 0 &&
+		x.sequenceNumber%x.snapshotCriteria.SnapshotInterval == 0 && x.snapshotWriter != nil {
 		snap, err := x.buildSnapshot()
 		if err != nil {
 			x.logger.Warnf("event-sourced actor %s: build snapshot: %v", x.persistenceID, err)

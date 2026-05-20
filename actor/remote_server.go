@@ -521,6 +521,12 @@ func (x *actorSystem) remoteSpawnHandler(ctx context.Context, conn inet.Connecti
 		opts = append(opts, WithDependencies(dependencies...))
 	}
 
+	if request.GetSnapshotSpec() != nil {
+		if decoded := codec.DecodeSnapshotCriteria(request.GetSnapshotSpec()); decoded != nil {
+			opts = append(opts, WithSnapshotCriteria(decoded))
+		}
+	}
+
 	pid, err := x.Spawn(ctx, request.GetActorName(), actor, opts...)
 	if err != nil {
 		logger.Errorf("failed to create actor (%s) on host=%s port=%d: %v (hint: verify actor type registered, check dependencies)", request.GetActorName(), request.GetHost(), request.GetPort(), err)

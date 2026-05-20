@@ -244,7 +244,7 @@ type ActorSystem interface {
 	// On startup the actor recovers its state automatically: it loads the latest
 	// snapshot (if a snapshot store is configured) and replays any events written
 	// after that snapshot. Passivation is safe because recovery is fully automatic.
-	SpawnEventSourced(ctx context.Context, name string, behavior EventSourcedBehavior, opts ...EventSourcedOption) (*PID, error)
+	SpawnEventSourced(ctx context.Context, name string, behavior EventSourcedBehavior, opts ...SpawnOption) (*PID, error)
 	// WithEventSourcedBehavior registers an [EventSourcedBehavior] at runtime
 	// so that [SpawnEventSourced] can spawn it and the cluster can relocate it
 	// to this node. Use the [WithEventSourcedBehavior] free function inside
