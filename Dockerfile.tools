@@ -5,10 +5,9 @@ FROM golang:1.26.2-alpine
 
 ARG GOLANGCI_VERSION=v2.11.4
 ARG BUF_VERSION=v1.69.0
-ARG MOCKERY_VERSION=v3.7.0
+ARG MOCKERY_VERSION=v2.53.6
 ARG PROTOC_GEN_GO_VERSION=latest
 ARG PROTOC_GEN_GO_GRPC_VERSION=latest
-ARG PROTOC_GEN_CONNECT_GO_VERSION=latest
 ARG GRPCURL_VERSION=latest
 
 RUN apk add --no-cache \
@@ -26,7 +25,6 @@ RUN apk add --no-cache \
 
 RUN GOBIN=/usr/local/bin go install google.golang.org/protobuf/cmd/protoc-gen-go@${PROTOC_GEN_GO_VERSION} \
  && GOBIN=/usr/local/bin go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@${PROTOC_GEN_GO_GRPC_VERSION} \
- && GOBIN=/usr/local/bin go install connectrpc.com/connect/cmd/protoc-gen-connect-go@${PROTOC_GEN_CONNECT_GO_VERSION} \
  && GOBIN=/usr/local/bin go install github.com/fullstorydev/grpcurl/cmd/grpcurl@${GRPCURL_VERSION} \
  && GOBIN=/usr/local/bin go install github.com/bufbuild/buf/cmd/buf@${BUF_VERSION} \
  && GOBIN=/usr/local/bin go install github.com/vektra/mockery/v2@${MOCKERY_VERSION} \

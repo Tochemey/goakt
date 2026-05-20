@@ -46,6 +46,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/xsync"
 	mocks "github.com/tochemey/goakt/v4/mocks/extension"
 	"github.com/tochemey/goakt/v4/passivation"
+	"github.com/tochemey/goakt/v4/persistence"
 	"github.com/tochemey/goakt/v4/reentrancy"
 	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/supervisor"
@@ -441,6 +442,30 @@ func TestDecodeWithMaxRetriesOnly(t *testing.T) {
 	require.NotNil(t, decoded)
 	require.EqualValues(t, 5, decoded.MaxRetries())
 	require.Equal(t, time.Duration(0), decoded.Timeout())
+}
+
+func TestEncodeSnapshotCriteria(t *testing.T) {
+	t.Run("When criteria is nil returns nil", func(t *testing.T) {
+		var criteria *persistence.SnapshotCriteria
+		require.Nil(t, EncodeSnapshotCriteria(criteria))
+	})
+	t.Run("When criteria is defined returns a valid snapshot spec", func(t *testing.T) {
+		criteria := &persistence.SnapshotCriteria{
+			DeleteEventsOnSnapshot:    true,
+			DeleteSnapshotsOnSnapshot: false,
+			EventsRetentionCount:      uint64(2),
+			SnapshotInterval:          uint64(3),
+		}
+		expected := &internalpb.SnapshotSpec{
+			SnapshotInterval:          uint64(3),
+			DeleteEventsOnSnapshot:    true,
+			DeleteSnapshotsOnSnapshot: false,
+			EventsRetentionCount:      uint64(2),
+		}
+
+		actual := EncodeSnapshotCriteria(criteria)
+		assert.True(t, proto.Equal(expected, actual))
+	})
 }
 
 func errorType(err error) string {

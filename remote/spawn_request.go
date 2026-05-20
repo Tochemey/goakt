@@ -30,6 +30,7 @@ import (
 	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/internal/validation"
 	"github.com/tochemey/goakt/v4/passivation"
+	"github.com/tochemey/goakt/v4/persistence"
 	"github.com/tochemey/goakt/v4/reentrancy"
 	"github.com/tochemey/goakt/v4/supervisor"
 )
@@ -173,6 +174,9 @@ type SpawnRequest struct {
 	// Reentrancy defines async request behavior for the spawned actor.
 	// When nil, async requests are disabled (default behavior).
 	Reentrancy *reentrancy.Reentrancy
+
+	// SnapshotCriteria defines the snapshot criteria when the actor is event sourced
+	SnapshotCriteria *persistence.SnapshotCriteria
 }
 
 // _ ensures that SpawnRequest implements the validation.Validator interface at compile time.

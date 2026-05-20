@@ -39,6 +39,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/passivation"
+	"github.com/tochemey/goakt/v4/persistence"
 	"github.com/tochemey/goakt/v4/reentrancy"
 	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/supervisor"
@@ -116,7 +117,7 @@ func decodeDependencyFromBytes(registry types.Registry, typeName string, bytea [
 	return nil, fmt.Errorf("failed to instantiate dependency %q", typeName)
 }
 
-// EncodePassivationStrategy encodes a passivation strategy into its protobuf representation.
+// EncodePassivationStrategy encodes a Passivation strategy into its protobuf representation.
 // Returns a pointer to internalpb.PassivationStrategy or nil if the strategy is not recognized.
 func EncodePassivationStrategy(strategy passivation.Strategy) *internalpb.PassivationStrategy {
 	switch s := strategy.(type) {
@@ -282,6 +283,35 @@ func DecodeReentrancy(config *internalpb.ReentrancyConfig) *reentrancy.Reentranc
 		reentrancy.WithMode(mode),
 		reentrancy.WithMaxInFlight(maxInFlight),
 	)
+}
+
+// EncodeSnapshotCriteria encodes a SnapshotCriteria into its protobuf representation
+func EncodeSnapshotCriteria(criteria *persistence.SnapshotCriteria) *internalpb.SnapshotSpec {
+	if criteria == nil {
+		return nil
+	}
+
+	return &internalpb.SnapshotSpec{
+		SnapshotInterval:          criteria.SnapshotInterval,
+		DeleteEventsOnSnapshot:    criteria.DeleteEventsOnSnapshot,
+		DeleteSnapshotsOnSnapshot: criteria.DeleteSnapshotsOnSnapshot,
+		EventsRetentionCount:      criteria.EventsRetentionCount,
+	}
+}
+
+// DecodeSnapshotCriteria decodes the snapshot spec into snapshot criteria
+func DecodeSnapshotCriteria(spec *internalpb.SnapshotSpec) *persistence.SnapshotCriteria {
+	if spec == nil {
+		return nil
+	}
+
+	// no need to use the getters because we previously check whether spec is not nil
+	return &persistence.SnapshotCriteria{
+		DeleteEventsOnSnapshot:    spec.DeleteEventsOnSnapshot,
+		DeleteSnapshotsOnSnapshot: spec.DeleteSnapshotsOnSnapshot,
+		EventsRetentionCount:      spec.EventsRetentionCount,
+		SnapshotInterval:          spec.SnapshotInterval,
+	}
 }
 
 // toInternalReentrancyMode maps local modes to protobuf enums.

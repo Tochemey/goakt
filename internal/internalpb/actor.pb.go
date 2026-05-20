@@ -339,7 +339,9 @@ type Actor struct {
 	// Specifies the supervisor configuration when explicitly set
 	Supervisor *SupervisorSpec `protobuf:"bytes,9,opt,name=supervisor,proto3" json:"supervisor,omitempty"`
 	// Specifies the reentrancy configuration when explicitly set
-	Reentrancy    *ReentrancyConfig `protobuf:"bytes,10,opt,name=reentrancy,proto3" json:"reentrancy,omitempty"`
+	Reentrancy *ReentrancyConfig `protobuf:"bytes,10,opt,name=reentrancy,proto3" json:"reentrancy,omitempty"`
+	// Specifies the snapshot spec
+	SnapshotSpec  *SnapshotSpec `protobuf:"bytes,11,opt,name=snapshot_spec,json=snapshotSpec,proto3" json:"snapshot_spec,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -444,6 +446,91 @@ func (x *Actor) GetReentrancy() *ReentrancyConfig {
 	return nil
 }
 
+func (x *Actor) GetSnapshotSpec() *SnapshotSpec {
+	if x != nil {
+		return x.SnapshotSpec
+	}
+	return nil
+}
+
+type SnapshotSpec struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies how often (in events) an intermediate snapshot is written for
+	// event-sourced actors. Zero (default) disables intermediate snapshotting.
+	// Ignored for non-event-sourced actor kinds.
+	SnapshotInterval uint64 `protobuf:"varint,1,opt,name=snapshot_interval,json=snapshotInterval,proto3" json:"snapshot_interval,omitempty"`
+	// States whether to delete events up to the snapshot
+	// sequence number after a successful snapshot write.
+	DeleteEventsOnSnapshot bool `protobuf:"varint,2,opt,name=delete_events_on_snapshot,json=deleteEventsOnSnapshot,proto3" json:"delete_events_on_snapshot,omitempty"`
+	// States whether to delete older snapshots after
+	// a new snapshot is written, keeping only the latest.
+	DeleteSnapshotsOnSnapshot bool `protobuf:"varint,3,opt,name=delete_snapshots_on_snapshot,json=deleteSnapshotsOnSnapshot,proto3" json:"delete_snapshots_on_snapshot,omitempty"`
+	// EventsRetentionCount is the number of events to retain before the
+	// snapshot point. A value of 0 means delete all events up to the snapshot.
+	// A value of N means keep the last N events before the snapshot as a safety margin.
+	EventsRetentionCount uint64 `protobuf:"varint,4,opt,name=events_retention_count,json=eventsRetentionCount,proto3" json:"events_retention_count,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
+}
+
+func (x *SnapshotSpec) Reset() {
+	*x = SnapshotSpec{}
+	mi := &file_internal_actor_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SnapshotSpec) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SnapshotSpec) ProtoMessage() {}
+
+func (x *SnapshotSpec) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_actor_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SnapshotSpec.ProtoReflect.Descriptor instead.
+func (*SnapshotSpec) Descriptor() ([]byte, []int) {
+	return file_internal_actor_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *SnapshotSpec) GetSnapshotInterval() uint64 {
+	if x != nil {
+		return x.SnapshotInterval
+	}
+	return 0
+}
+
+func (x *SnapshotSpec) GetDeleteEventsOnSnapshot() bool {
+	if x != nil {
+		return x.DeleteEventsOnSnapshot
+	}
+	return false
+}
+
+func (x *SnapshotSpec) GetDeleteSnapshotsOnSnapshot() bool {
+	if x != nil {
+		return x.DeleteSnapshotsOnSnapshot
+	}
+	return false
+}
+
+func (x *SnapshotSpec) GetEventsRetentionCount() uint64 {
+	if x != nil {
+		return x.EventsRetentionCount
+	}
+	return 0
+}
+
 type SingletonSpec struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Specifies the spawn timeout for the singleton actor
@@ -458,7 +545,7 @@ type SingletonSpec struct {
 
 func (x *SingletonSpec) Reset() {
 	*x = SingletonSpec{}
-	mi := &file_internal_actor_proto_msgTypes[3]
+	mi := &file_internal_actor_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -470,7 +557,7 @@ func (x *SingletonSpec) String() string {
 func (*SingletonSpec) ProtoMessage() {}
 
 func (x *SingletonSpec) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_actor_proto_msgTypes[3]
+	mi := &file_internal_actor_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -483,7 +570,7 @@ func (x *SingletonSpec) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SingletonSpec.ProtoReflect.Descriptor instead.
 func (*SingletonSpec) Descriptor() ([]byte, []int) {
-	return file_internal_actor_proto_rawDescGZIP(), []int{3}
+	return file_internal_actor_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *SingletonSpec) GetSpawnTimeout() *durationpb.Duration {
@@ -526,7 +613,7 @@ const file_internal_actor_proto_rawDesc = "" +
 	"directives\x18\x04 \x03(\v2#.internalpb.SupervisorDirectiveRuleR\n" +
 	"directives\x12T\n" +
 	"\x13any_error_directive\x18\x05 \x01(\x0e2\x1f.internalpb.SupervisorDirectiveH\x00R\x11anyErrorDirective\x88\x01\x01B\x16\n" +
-	"\x14_any_error_directive\"\xdf\x03\n" +
+	"\x14_any_error_directive\"\x9e\x04\n" +
 	"\x05Actor\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x127\n" +
@@ -542,8 +629,14 @@ const file_internal_actor_proto_rawDesc = "" +
 	"\n" +
 	"reentrancy\x18\n" +
 	" \x01(\v2\x1c.internalpb.ReentrancyConfigR\n" +
-	"reentrancyB\a\n" +
-	"\x05_role\"\xb0\x01\n" +
+	"reentrancy\x12=\n" +
+	"\rsnapshot_spec\x18\v \x01(\v2\x18.internalpb.SnapshotSpecR\fsnapshotSpecB\a\n" +
+	"\x05_role\"\xed\x01\n" +
+	"\fSnapshotSpec\x12+\n" +
+	"\x11snapshot_interval\x18\x01 \x01(\x04R\x10snapshotInterval\x129\n" +
+	"\x19delete_events_on_snapshot\x18\x02 \x01(\bR\x16deleteEventsOnSnapshot\x12?\n" +
+	"\x1cdelete_snapshots_on_snapshot\x18\x03 \x01(\bR\x19deleteSnapshotsOnSnapshot\x124\n" +
+	"\x16events_retention_count\x18\x04 \x01(\x04R\x14eventsRetentionCount\"\xb0\x01\n" +
 	"\rSingletonSpec\x12>\n" +
 	"\rspawn_timeout\x18\x01 \x01(\v2\x19.google.protobuf.DurationR\fspawnTimeout\x12>\n" +
 	"\rwait_interval\x18\x02 \x01(\v2\x19.google.protobuf.DurationR\fwaitInterval\x12\x1f\n" +
@@ -583,7 +676,7 @@ func file_internal_actor_proto_rawDescGZIP() []byte {
 }
 
 var file_internal_actor_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_internal_actor_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_internal_actor_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_internal_actor_proto_goTypes = []any{
 	(SupervisorStrategy)(0),         // 0: internalpb.SupervisorStrategy
 	(SupervisorDirective)(0),        // 1: internalpb.SupervisorDirective
@@ -591,30 +684,32 @@ var file_internal_actor_proto_goTypes = []any{
 	(*SupervisorDirectiveRule)(nil), // 3: internalpb.SupervisorDirectiveRule
 	(*SupervisorSpec)(nil),          // 4: internalpb.SupervisorSpec
 	(*Actor)(nil),                   // 5: internalpb.Actor
-	(*SingletonSpec)(nil),           // 6: internalpb.SingletonSpec
-	(*durationpb.Duration)(nil),     // 7: google.protobuf.Duration
-	(*PassivationStrategy)(nil),     // 8: internalpb.PassivationStrategy
-	(*Dependency)(nil),              // 9: internalpb.Dependency
-	(*ReentrancyConfig)(nil),        // 10: internalpb.ReentrancyConfig
+	(*SnapshotSpec)(nil),            // 6: internalpb.SnapshotSpec
+	(*SingletonSpec)(nil),           // 7: internalpb.SingletonSpec
+	(*durationpb.Duration)(nil),     // 8: google.protobuf.Duration
+	(*PassivationStrategy)(nil),     // 9: internalpb.PassivationStrategy
+	(*Dependency)(nil),              // 10: internalpb.Dependency
+	(*ReentrancyConfig)(nil),        // 11: internalpb.ReentrancyConfig
 }
 var file_internal_actor_proto_depIdxs = []int32{
 	1,  // 0: internalpb.SupervisorDirectiveRule.directive:type_name -> internalpb.SupervisorDirective
 	0,  // 1: internalpb.SupervisorSpec.strategy:type_name -> internalpb.SupervisorStrategy
-	7,  // 2: internalpb.SupervisorSpec.timeout:type_name -> google.protobuf.Duration
+	8,  // 2: internalpb.SupervisorSpec.timeout:type_name -> google.protobuf.Duration
 	3,  // 3: internalpb.SupervisorSpec.directives:type_name -> internalpb.SupervisorDirectiveRule
 	1,  // 4: internalpb.SupervisorSpec.any_error_directive:type_name -> internalpb.SupervisorDirective
-	6,  // 5: internalpb.Actor.singleton:type_name -> internalpb.SingletonSpec
-	8,  // 6: internalpb.Actor.passivation_strategy:type_name -> internalpb.PassivationStrategy
-	9,  // 7: internalpb.Actor.dependencies:type_name -> internalpb.Dependency
+	7,  // 5: internalpb.Actor.singleton:type_name -> internalpb.SingletonSpec
+	9,  // 6: internalpb.Actor.passivation_strategy:type_name -> internalpb.PassivationStrategy
+	10, // 7: internalpb.Actor.dependencies:type_name -> internalpb.Dependency
 	4,  // 8: internalpb.Actor.supervisor:type_name -> internalpb.SupervisorSpec
-	10, // 9: internalpb.Actor.reentrancy:type_name -> internalpb.ReentrancyConfig
-	7,  // 10: internalpb.SingletonSpec.spawn_timeout:type_name -> google.protobuf.Duration
-	7,  // 11: internalpb.SingletonSpec.wait_interval:type_name -> google.protobuf.Duration
-	12, // [12:12] is the sub-list for method output_type
-	12, // [12:12] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	11, // 9: internalpb.Actor.reentrancy:type_name -> internalpb.ReentrancyConfig
+	6,  // 10: internalpb.Actor.snapshot_spec:type_name -> internalpb.SnapshotSpec
+	8,  // 11: internalpb.SingletonSpec.spawn_timeout:type_name -> google.protobuf.Duration
+	8,  // 12: internalpb.SingletonSpec.wait_interval:type_name -> google.protobuf.Duration
+	13, // [13:13] is the sub-list for method output_type
+	13, // [13:13] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_internal_actor_proto_init() }
@@ -633,7 +728,7 @@ func file_internal_actor_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_actor_proto_rawDesc), len(file_internal_actor_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   4,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -64,3 +64,20 @@ type PersistedSnapshot struct {
 	// snapshot. For event-sourced actors it equals PersistenceID.
 	WriterActorID string
 }
+
+type SnapshotCriteria struct {
+	// DeleteEventsOnSnapshot when true, deletes events up to the snapshot
+	// sequence number after a successful snapshot write.
+	DeleteEventsOnSnapshot bool
+	// DeleteSnapshotsOnSnapshot when true, deletes older snapshots after
+	// a new snapshot is written, keeping only the latest.
+	DeleteSnapshotsOnSnapshot bool
+	// EventsRetentionCount is the number of events to retain before the
+	// snapshot point. A value of 0 means delete all events up to the snapshot.
+	// A value of N means keep the last N events before the snapshot as a safety margin.
+	EventsRetentionCount uint64
+	// snapshotInterval defines how often resulting state is stored alongside events.
+	// A value of 0 or 1 means every event carries a snapshot (default behavior).
+	// A value of N > 1 means only every Nth event carries a resulting state snapshot.
+	SnapshotInterval uint64
+}
