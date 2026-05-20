@@ -468,6 +468,27 @@ func TestEncodeSnapshotCriteria(t *testing.T) {
 	})
 }
 
+func TestDecodeSnapshotCriteria(t *testing.T) {
+	t.Run("When spec is nil returns nil", func(t *testing.T) {
+		var spec *internalpb.SnapshotSpec
+		require.Nil(t, DecodeSnapshotCriteria(spec))
+	})
+	t.Run("When spec is defined returns a valid criteria", func(t *testing.T) {
+		spec := &internalpb.SnapshotSpec{
+			SnapshotInterval:          uint64(5),
+			DeleteEventsOnSnapshot:    true,
+			DeleteSnapshotsOnSnapshot: true,
+			EventsRetentionCount:      uint64(3),
+		}
+		actual := DecodeSnapshotCriteria(spec)
+		require.NotNil(t, actual)
+		assert.Equal(t, uint64(5), actual.SnapshotInterval)
+		assert.True(t, actual.DeleteEventsOnSnapshot)
+		assert.True(t, actual.DeleteSnapshotsOnSnapshot)
+		assert.Equal(t, uint64(3), actual.EventsRetentionCount)
+	})
+}
+
 func errorType(err error) string {
 	if err == nil {
 		return "nil"

@@ -949,7 +949,80 @@ func TestSpawnEventSourced_Hardening(t *testing.T) {
 		}, time.Second, 25*time.Millisecond,
 			"framework must spawn the snapshot writer even when user children are blocked")
 	})
+
+	t.Run("RegisterEventSourcedBehavior fails when the system is not running", func(t *testing.T) {
+		sys, err := NewActorSystem("rb-not-running",
+			WithLogger(log.DiscardLogger),
+			WithEventSourcing(persistence.NewMemoryEventsStore(), nil),
+		)
+		require.NoError(t, err)
+		err = sys.RegisterEventSourcedBehavior(&counterBehavior{})
+		assert.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
+	})
+
+	t.Run("RegisterEventSourcedBehavior fails when no events store is configured", func(t *testing.T) {
+		ctx := context.Background()
+		sys, err := NewActorSystem("rb-no-store", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+		err = sys.RegisterEventSourcedBehavior(&counterBehavior{})
+		assert.ErrorIs(t, err, gerrors.ErrEventsStoreRequired)
+	})
+
+	t.Run("RegisterEventSourcedBehavior rejects a nil behavior", func(t *testing.T) {
+		ctx := context.Background()
+		sys := newEventSourcingTestSystem(t, persistence.NewMemoryEventsStore(), nil)
+		_ = ctx
+		err := sys.RegisterEventSourcedBehavior(nil)
+		assert.ErrorIs(t, err, gerrors.ErrEventSourcedBehaviorRequired)
+	})
+
+	t.Run("SpawnEventSourced fails when the system is not running", func(t *testing.T) {
+		sys, err := NewActorSystem("es-not-running",
+			WithLogger(log.DiscardLogger),
+			WithEventSourcing(persistence.NewMemoryEventsStore(), []EventSourcedBehavior{&counterBehavior{}}),
+		)
+		require.NoError(t, err)
+		pid, err := sys.SpawnEventSourced(context.Background(), "x", &counterBehavior{})
+		assert.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
+		assert.Nil(t, pid)
+	})
+
+	t.Run("SpawnEventSourced fails for an unregistered behavior type", func(t *testing.T) {
+		ctx := context.Background()
+		sys := newEventSourcingTestSystem(t, persistence.NewMemoryEventsStore(), nil)
+		pid, err := sys.SpawnEventSourced(ctx, "unreg", &noRegBehavior{})
+		assert.ErrorIs(t, err, gerrors.ErrEventSourcedBehaviorNotRegistered)
+		assert.Nil(t, pid)
+	})
+
+	t.Run("SpawnEventSourced surfaces spawn-config validation errors", func(t *testing.T) {
+		ctx := context.Background()
+		sys := newEventSourcingTestSystem(t, persistence.NewMemoryEventsStore(), nil, &counterBehavior{})
+
+		// A dependency with a blank ID fails spawnConfig.Validate.
+		pid, err := sys.SpawnEventSourced(ctx, "cfg-invalid", &counterBehavior{},
+			WithDependencies(&userDep{id: "", data: "x"}))
+		require.Error(t, err)
+		assert.Nil(t, pid)
+	})
 }
+
+// noRegBehavior is intentionally never registered, used to exercise the
+// "behavior type not registered" error path.
+type noRegBehavior struct{}
+
+func (n *noRegBehavior) InitialState() any { return &counterState{} }
+func (n *noRegBehavior) HandleCommand(_ context.Context, _ any, _ any) ([]any, error) {
+	return nil, nil
+}
+func (n *noRegBehavior) HandleEvent(_ context.Context, _ any, state any) (any, error) {
+	return state, nil
+}
+func (n *noRegBehavior) MarshalBinary() ([]byte, error) { return nil, nil }
+func (n *noRegBehavior) UnmarshalBinary([]byte) error   { return nil }
 
 func TestBehaviorDependency_RoundTrip(t *testing.T) {
 	t.Run("marshal then unmarshal restores the inner behavior type", func(t *testing.T) {
@@ -996,6 +1069,246 @@ func TestBehaviorDependency_RoundTrip(t *testing.T) {
 	t.Run("ID is stable and matches the reserved constant", func(t *testing.T) {
 		dep := &eventSourcedDependency{}
 		assert.Equal(t, eventSourcedBehaviorDependencyID, dep.ID())
+	})
+
+	t.Run("unmarshal fails on malformed envelope bytes", func(t *testing.T) {
+		dep := &eventSourcedDependency{}
+		err := dep.UnmarshalBinary([]byte("not-a-valid-protobuf"))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unmarshal envelope")
+	})
+
+	t.Run("unmarshal fails when the envelope type name is empty", func(t *testing.T) {
+		data, err := proto.Marshal(&internalpb.EventSourcedBehaviorEnvelope{})
+		require.NoError(t, err)
+
+		dep := &eventSourcedDependency{}
+		err = dep.UnmarshalBinary(data)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "empty type name")
+	})
+
+	t.Run("unmarshal fails when the registered type does not implement EventSourcedBehavior", func(t *testing.T) {
+		// userDep is a Dependency but not an EventSourcedBehavior.
+		types.GlobalRegistry.Register(&userDep{})
+		data, err := proto.Marshal(&internalpb.EventSourcedBehaviorEnvelope{
+			TypeName: types.Name(&userDep{}),
+		})
+		require.NoError(t, err)
+
+		dep := &eventSourcedDependency{}
+		err = dep.UnmarshalBinary(data)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "does not implement EventSourcedBehavior")
+	})
+}
+
+func TestEventSourcedConfig_RoundTrip(t *testing.T) {
+	t.Run("MarshalBinary returns empty bytes when criteria is nil", func(t *testing.T) {
+		cfg := &eventSourcedConfig{}
+		data, err := cfg.MarshalBinary()
+		require.NoError(t, err)
+		assert.Empty(t, data)
+	})
+
+	t.Run("MarshalBinary then UnmarshalBinary preserves criteria", func(t *testing.T) {
+		original := &eventSourcedConfig{
+			criteria: &persistence.SnapshotCriteria{
+				SnapshotInterval:          5,
+				DeleteEventsOnSnapshot:    true,
+				DeleteSnapshotsOnSnapshot: true,
+				EventsRetentionCount:      2,
+			},
+		}
+		data, err := original.MarshalBinary()
+		require.NoError(t, err)
+		require.NotEmpty(t, data)
+
+		decoded := &eventSourcedConfig{}
+		require.NoError(t, decoded.UnmarshalBinary(data))
+		require.NotNil(t, decoded.criteria)
+		assert.Equal(t, uint64(5), decoded.criteria.SnapshotInterval)
+		assert.True(t, decoded.criteria.DeleteEventsOnSnapshot)
+		assert.True(t, decoded.criteria.DeleteSnapshotsOnSnapshot)
+		assert.Equal(t, uint64(2), decoded.criteria.EventsRetentionCount)
+	})
+
+	t.Run("UnmarshalBinary on empty bytes clears criteria", func(t *testing.T) {
+		cfg := &eventSourcedConfig{criteria: &persistence.SnapshotCriteria{SnapshotInterval: 99}}
+		require.NoError(t, cfg.UnmarshalBinary(nil))
+		assert.Nil(t, cfg.criteria)
+	})
+
+	t.Run("UnmarshalBinary fails on malformed bytes", func(t *testing.T) {
+		cfg := &eventSourcedConfig{}
+		err := cfg.UnmarshalBinary([]byte("not-a-valid-protobuf"))
+		require.Error(t, err)
+	})
+}
+
+func TestWithEventSourcedBehaviorOption(t *testing.T) {
+	t.Run("nil behavior is ignored", func(t *testing.T) {
+		cfg := &eventSourcingConfig{}
+		WithEventSourcedBehavior(nil)(cfg)
+		assert.Empty(t, cfg.behaviors)
+	})
+
+	t.Run("non-nil behavior accumulates", func(t *testing.T) {
+		cfg := &eventSourcingConfig{}
+		WithEventSourcedBehavior(&counterBehavior{})(cfg)
+		WithEventSourcedBehavior(&counterBehavior{})(cfg)
+		assert.Len(t, cfg.behaviors, 2)
+	})
+}
+
+func TestEventSourcedRecoveryFailures(t *testing.T) {
+	t.Run("recovery fails when an event in the log cannot be applied", func(t *testing.T) {
+		ctx := context.Background()
+		store := persistence.NewMemoryEventsStore()
+
+		// Plant a poison event the behavior's HandleEvent will reject.
+		s, kind := serializerFor(&poisonEvent{})
+		payload, err := s.Serialize(&poisonEvent{})
+		require.NoError(t, err)
+		require.NoError(t, store.WriteEvents(ctx, []*persistence.PersistedEvent{{
+			PersistenceID:  "counter-bad-event",
+			SequenceNumber: 1,
+			Timestamp:      time.Now(),
+			Payload:        payload,
+			Manifest:       types.Name(&poisonEvent{}),
+			SerializerKind: kind,
+		}}))
+
+		sys := newEventSourcingTestSystem(t, store, nil, &counterBehavior{})
+		pid, err := sys.SpawnEventSourced(ctx, "counter-bad-event", &counterBehavior{})
+		require.Error(t, err)
+		assert.Nil(t, pid)
+		assert.Contains(t, err.Error(), "apply event seq=1")
+	})
+
+	t.Run("recovery fails when an event payload cannot be deserialized", func(t *testing.T) {
+		ctx := context.Background()
+		store := persistence.NewMemoryEventsStore()
+		require.NoError(t, store.WriteEvents(ctx, []*persistence.PersistedEvent{{
+			PersistenceID:  "counter-bad-decode",
+			SequenceNumber: 1,
+			Timestamp:      time.Now(),
+			Payload:        []byte{0xff, 0xff, 0xff}, // garbage
+			Manifest:       types.Name(&counterEvent{}),
+			SerializerKind: persistence.CBORSerializerKind,
+		}}))
+
+		sys := newEventSourcingTestSystem(t, store, nil, &counterBehavior{})
+		pid, err := sys.SpawnEventSourced(ctx, "counter-bad-decode", &counterBehavior{})
+		require.Error(t, err)
+		assert.Nil(t, pid)
+		assert.Contains(t, err.Error(), "deserialize event seq=1")
+	})
+
+	t.Run("recovery fails when the latest snapshot payload cannot be deserialized", func(t *testing.T) {
+		ctx := context.Background()
+		eventsStore := persistence.NewMemoryEventsStore()
+		snapStore := persistence.NewMemorySnapshotStore()
+		require.NoError(t, snapStore.WriteSnapshot(ctx, &persistence.PersistedSnapshot{
+			PersistenceID:  "counter-bad-snap",
+			SequenceNumber: 1,
+			Timestamp:      time.Now(),
+			Payload:        []byte{0xff, 0xff, 0xff}, // garbage
+			Manifest:       types.Name(&counterState{}),
+			SerializerKind: persistence.CBORSerializerKind,
+		}))
+
+		sys := newEventSourcingTestSystem(t, eventsStore, snapStore, &counterBehavior{})
+		pid, err := sys.SpawnEventSourced(ctx, "counter-bad-snap", &counterBehavior{})
+		require.Error(t, err)
+		assert.Nil(t, pid)
+		assert.Contains(t, err.Error(), "deserialize snapshot")
+	})
+}
+
+func TestSerializerHelpers(t *testing.T) {
+	t.Run("serializerFor on a proto.Message returns the proto serializer", func(t *testing.T) {
+		s, kind := serializerFor(&internalpb.SnapshotSpec{})
+		require.NotNil(t, s)
+		assert.Equal(t, persistence.ProtobufSerializerKind, kind)
+	})
+
+	t.Run("serializerFor on a non-proto value returns CBOR", func(t *testing.T) {
+		s, kind := serializerFor(&counterState{})
+		require.NotNil(t, s)
+		assert.Equal(t, persistence.CBORSerializerKind, kind)
+	})
+
+	t.Run("serializerByKind selects proto for proto kind", func(t *testing.T) {
+		require.NotNil(t, serializerByKind(persistence.ProtobufSerializerKind))
+	})
+
+	t.Run("serializerByKind selects CBOR for CBOR kind", func(t *testing.T) {
+		require.NotNil(t, serializerByKind(persistence.CBORSerializerKind))
+	})
+}
+
+func TestPublishFailureNilStream(t *testing.T) {
+	// Calling publishFailure with a nil stream must be a no-op (no panic).
+	publishFailure(nil, NewSnapshotWriteFailed("anything", 0, errors.New("x")))
+}
+
+// valueBehavior satisfies EventSourcedBehavior with value receivers, used to
+// exercise the non-nilable-kind branch in isBehaviorNil.
+type valueBehavior struct{}
+
+func (v valueBehavior) InitialState() any                                            { return nil }
+func (v valueBehavior) HandleCommand(_ context.Context, _ any, _ any) ([]any, error) { return nil, nil }
+func (v valueBehavior) HandleEvent(_ context.Context, _ any, state any) (any, error) {
+	return state, nil
+}
+func (v valueBehavior) MarshalBinary() ([]byte, error) { return nil, nil }
+func (v valueBehavior) UnmarshalBinary(_ []byte) error { return nil }
+
+func TestIsBehaviorNil(t *testing.T) {
+	t.Run("untyped-nil interface returns true", func(t *testing.T) {
+		assert.True(t, isBehaviorNil(nil))
+	})
+	t.Run("typed-nil pointer returns true", func(t *testing.T) {
+		var b *counterBehavior
+		assert.True(t, isBehaviorNil(b))
+	})
+	t.Run("non-nil pointer returns false", func(t *testing.T) {
+		assert.False(t, isBehaviorNil(&counterBehavior{}))
+	})
+	t.Run("non-pointer struct value returns false", func(t *testing.T) {
+		assert.False(t, isBehaviorNil(valueBehavior{}))
+	})
+}
+
+func TestCheckEventSourcedDependencies_SkipsNilEntries(t *testing.T) {
+	// nil entries are skipped without affecting the check outcome.
+	assert.NoError(t, checkEventSourcedDependencies([]extension.Dependency{nil}))
+}
+
+func TestEventSourcedActor_PreStartValidation(t *testing.T) {
+	t.Run("fails when no behavior dependency is injected", func(t *testing.T) {
+		ctx := context.Background()
+		sys := newEventSourcingTestSystem(t, persistence.NewMemoryEventsStore(), nil, &counterBehavior{})
+
+		// Spawn the wrapper directly with only the es-config dependency.
+		pid, err := sys.Spawn(ctx, "no-behavior-dep", &eventSourcedActor{},
+			WithDependencies(&eventSourcedConfig{}))
+		require.Error(t, err)
+		assert.Nil(t, pid)
+		assert.Contains(t, err.Error(), "behavior dependency missing")
+	})
+
+	t.Run("fails when the behavior dependency is malformed", func(t *testing.T) {
+		ctx := context.Background()
+		sys := newEventSourcingTestSystem(t, persistence.NewMemoryEventsStore(), nil, &counterBehavior{})
+
+		// A wrapper with no inner behavior is malformed.
+		pid, err := sys.Spawn(ctx, "malformed-behavior-dep", &eventSourcedActor{},
+			WithDependencies(&eventSourcedDependency{}))
+		require.Error(t, err)
+		assert.Nil(t, pid)
+		assert.Contains(t, err.Error(), "malformed")
 	})
 }
 

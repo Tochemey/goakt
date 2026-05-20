@@ -1,5 +1,113 @@
 # Changelog
 
+## [Unreleased]
+
+### ✨ New Additions
+
+#### Event-sourced actors
+
+First-class persistent actors whose state is rebuilt by replaying a durable event log. State derives from three pure functions — `InitialState`, `HandleCommand`, `HandleEvent` — with events written through a pluggable store.
+
+```go
+type CartBehavior struct{}
+
+func (b *CartBehavior) InitialState() any                                                    { return &CartState{} }
+func (b *CartBehavior) HandleCommand(ctx context.Context, cmd any, state any) ([]any, error) { ... }
+func (b *CartBehavior) HandleEvent(ctx context.Context, event any, state any) (any, error)   { ... }
+func (b *CartBehavior) MarshalBinary() ([]byte, error)                                       { return nil, nil }
+func (b *CartBehavior) UnmarshalBinary([]byte) error                                         { return nil }
+
+sys, _ := NewActorSystem("orders",
+    WithEventSourcing(eventsStore, []EventSourcedBehavior{&CartBehavior{}},
+        WithSnapshotStore(snapshotStore),
+    ),
+)
+
+// The actor name is the persistence ID.
+pid, _ := sys.SpawnEventSourced(ctx, "cart-42", &CartBehavior{},
+    WithSnapshotCriteria(&persistence.SnapshotCriteria{
+        SnapshotInterval:       100,
+        DeleteEventsOnSnapshot: true,
+        EventsRetentionCount:   10,
+    }),
+)
+```
+
+- **Pure event folding.** `HandleCommand` validates and produces events; `HandleEvent` folds events into state and runs both on live processing and recovery replay. Both must be deterministic — side effects belong elsewhere.
+- **Apply-before-persist ordering.** Each command flows through `HandleCommand → HandleEvent (tentative state) → serialize → WriteEvents → commit`. A broken event aborts the batch before anything is written, so persisted events are always replayable; a `WriteEvents` failure leaves state and sequence number untouched.
+- **Automatic recovery.** On `PreStart` the actor loads the latest snapshot (if configured) and replays every later event through `HandleEvent`. Passivation and cluster relocation are safe — recovery runs automatically on every re-spawn.
+
+#### `persistence` package
+
+Pluggable store contracts that decouple event-sourcing from any specific backend.
+
+- **`EventsStore`** — `WriteEvents`, `ReplayEvents`, `GetLatestEvent`, `DeleteEvents`. Must be concurrency-safe and return results in ascending sequence-number order.
+- **`SnapshotStore`** — `WriteSnapshot`, `GetLatestSnapshot`, `DeleteSnapshots`.
+- **`PersistedEvent` / `PersistedSnapshot`** — wire records carrying `PersistenceID`, `SequenceNumber`, `Timestamp`, `Payload`, `Manifest`, `SerializerKind`, and `WriterActorID`. `PersistenceID` is the stable entity identity (the actor name); `WriterActorID` is the per-instance writer fingerprint — useful for split-brain detection and write provenance, since the two differ across restarts and relocations.
+- **In-memory stores** — `NewMemoryEventsStore()` and `NewMemorySnapshotStore()` for tests. Plug a database-backed implementation behind the same interfaces in production.
+
+Stores are registered as actor-system extensions through `WithEventSourcing` and resolved at spawn time.
+
+#### Snapshot policy
+
+`WithSnapshotCriteria(*persistence.SnapshotCriteria)` exposes four independent knobs:
+
+- `SnapshotInterval` — `0` disables intermediate snapshots; `N > 0` writes one every `N` events. The synchronous final snapshot at shutdown always runs when a snapshot store is configured.
+- `DeleteEventsOnSnapshot` — delete events with sequence number `≤ snapshot.SequenceNumber - EventsRetentionCount` after each successful snapshot.
+- `EventsRetentionCount` — events to retain behind the snapshot as a safety margin; `0` deletes everything up to the snapshot.
+- `DeleteSnapshotsOnSnapshot` — delete every prior snapshot with a strictly smaller sequence number after a new one lands.
+
+Intermediate snapshots are written by an internal `snapshotWriterActor` child so the parent never blocks on persistence I/O. The final `PostStop` snapshot is synchronous, bounded by a 5-second timeout so a slow store cannot hang shutdown indefinitely.
+
+#### Behavior registration
+
+```go
+WithEventSourcing(eventsStore, []EventSourcedBehavior{&CartBehavior{}, &OrderBehavior{}})
+WithEventSourcedBehavior(&CartBehavior{})            // additional behaviors at startup
+sys.RegisterEventSourcedBehavior(&InvoiceBehavior{}) // at runtime
+```
+
+**Setup prerequisite — register every behavior on every node** that may spawn or receive it via relocation. Registration populates both the actor-system registry (codec resolution) and `types.GlobalRegistry` (receiver-side deserialization). Missing registrations surface as `errors.ErrEventSourcedBehaviorNotRegistered`.
+
+#### Cluster relocation
+
+Event-sourced actors are first-class for rebalancing.
+
+- The internal `eventSourcedActor` is registered as a cluster kind by `WithEventSourcing`, so the relocator can recreate it on any node.
+- The user behavior travels inside an unforgeable `eventSourcedDependency` wrapper (`internalpb.EventSourcedBehaviorEnvelope`) that encodes only the inner type's Go name. The receiver looks the type up in `types.GlobalRegistry`, instantiates a zero value, and rebuilds per-actor state from the shared events store in `PreStart`.
+- Snapshot criteria ride alongside the behavior via the `eventSourcedConfig` dependency.
+- The receiver's `configPID` detects `*eventSourcedActor` and applies the same children guard automatically, so a relocated PID enforces the same constraints as a freshly spawned one.
+
+#### Failure observability
+
+Snapshot and retention failures are published to the actor system's event stream as typed, non-fatal events — the event log remains the source of truth and the actor keeps serving commands.
+
+- `actor.SnapshotWriteFailed{PersistenceID, SequenceNumber, Cause, FailedAt}`
+- `actor.SnapshotDeleteFailed{PersistenceID, ToSequenceNumber, Cause, FailedAt}`
+- `actor.EventsDeleteFailed{PersistenceID, ToSequenceNumber, Cause, FailedAt}`
+
+Subscribe via `actorSystem.Subscribe()` — the same channel that carries `Deadletter` and `ActorStarted`.
+
+### 🛡️ Constraints and guards
+
+#### No user children on event-sourced actors
+
+`pid.SpawnChild` on an event-sourced actor returns `errors.ErrEventSourcedChildrenNotAllowed`. The guard rides on a new `eventSourcedState` bit on `*PID`, set both by `SpawnEventSourced` at spawn time and by the relocator (so the constraint survives cluster moves). The framework's own snapshot-writer child is spawned through an unexported helper that bypasses the public guard. Coordinate multi-entity workflows from an orchestrator actor above the event-sourced leaves rather than from inside a behavior.
+
+#### Hardened spawn API
+
+`SpawnEventSourced` rejects up front, before any spawn-side work:
+
+| Condition                                                         | Error                                  |
+|-------------------------------------------------------------------|----------------------------------------|
+| nil or typed-nil behavior                                         | `ErrEventSourcedBehaviorRequired`      |
+| unregistered behavior type                                        | `ErrEventSourcedBehaviorNotRegistered` |
+| `WithDependencies` dependency implementing `EventSourcedBehavior` | `ErrEventSourcedBehaviorSmuggled`      |
+| dependency ID collides with an internal reserved ID               | `ErrEventSourcedDependencyIDReserved`  |
+| system not wired via `WithEventSourcing`                          | `ErrEventsStoreRequired`               |
+
+All are sentinels in the `errors` package and matchable via `errors.Is`.
+
 ## v4.2.4 - 2026-05-15
 
 ### 🔉 Logging changes
