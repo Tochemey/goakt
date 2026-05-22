@@ -234,6 +234,39 @@ type Client interface {
 	//   - Transport and context errors.
 	RemoteStop(ctx context.Context, host string, port int, name string) error
 
+	// RemoteWatch registers a remote watcher for an actor on the remote node.
+	// When the watched actor terminates, the remote node delivers a Terminated
+	// message to the watcher address.
+	//
+	// Parameters:
+	//   - ctx: Cancellation and deadlines.
+	//   - host, port: Location of the remote actor system hosting the watchee.
+	//   - name: Watchee actor name.
+	//   - watcher: Address of the watcher to notify on termination.
+	//
+	// Behavior:
+	//   - Idempotent. Registering the same watcher twice is a no-op.
+	//
+	// Errors:
+	//   - NotFound if the watchee does not exist on the remote node.
+	//   - Transport and context errors.
+	RemoteWatch(ctx context.Context, host string, port int, name string, watcher *address.Address) error
+
+	// RemoteUnWatch cancels a previously registered remote watch.
+	//
+	// Parameters:
+	//   - ctx: Cancellation and deadlines.
+	//   - host, port: Location of the remote actor system hosting the watchee.
+	//   - name: Watchee actor name.
+	//   - watcher: Address of the watcher that previously watched the actor.
+	//
+	// Behavior:
+	//   - Idempotent. Unwatching an unknown pair is a no-op.
+	//
+	// Errors:
+	//   - Transport and context errors.
+	RemoteUnWatch(ctx context.Context, host string, port int, name string, watcher *address.Address) error
+
 	// RemoteReinstate requests resumption of a previously passivated actor on
 	// the remote node.
 	//
@@ -2084,6 +2117,69 @@ func (r *client) RemoteStop(ctx context.Context, host string, port int, name str
 	}
 
 	// Ignore NOT_FOUND errors (actor doesn't exist)
+	if errResp, ok := resp.(*internalpb.Error); ok {
+		if errResp.GetCode() == internalpb.Code_CODE_NOT_FOUND {
+			return nil
+		}
+	}
+
+	return checkProtoError(resp)
+}
+
+// RemoteWatch registers a remote watcher for an actor on the remote node.
+func (r *client) RemoteWatch(ctx context.Context, host string, port int, name string, watcher *address.Address) error {
+	port32, err := strconvx.Int2Int32(port)
+	if err != nil {
+		return err
+	}
+
+	ctx, err = r.enrichContext(ctx)
+	if err != nil {
+		return err
+	}
+
+	client := r.NetClient(host, port)
+	request := &internalpb.RemoteWatchRequest{
+		Host:           host,
+		Port:           port32,
+		Name:           name,
+		WatcherAddress: watcher.String(),
+	}
+
+	resp, err := client.SendProto(ctx, request)
+	if err != nil {
+		return err
+	}
+
+	return checkProtoError(resp)
+}
+
+// RemoteUnWatch cancels a previously registered remote watch on the remote node.
+// Unknown pairs are treated as a no-op and return nil.
+func (r *client) RemoteUnWatch(ctx context.Context, host string, port int, name string, watcher *address.Address) error {
+	port32, err := strconvx.Int2Int32(port)
+	if err != nil {
+		return err
+	}
+
+	ctx, err = r.enrichContext(ctx)
+	if err != nil {
+		return err
+	}
+
+	client := r.NetClient(host, port)
+	request := &internalpb.RemoteUnWatchRequest{
+		Host:           host,
+		Port:           port32,
+		Name:           name,
+		WatcherAddress: watcher.String(),
+	}
+
+	resp, err := client.SendProto(ctx, request)
+	if err != nil {
+		return err
+	}
+
 	if errResp, ok := resp.(*internalpb.Error); ok {
 		if errResp.GetCode() == internalpb.Code_CODE_NOT_FOUND {
 			return nil

@@ -4761,6 +4761,240 @@ func TestWatch(t *testing.T) {
 	pause.For(time.Second)
 	assert.NoError(t, actorSystem.Stop(ctx))
 }
+func TestWatchUnWatchRemote(t *testing.T) {
+	ctx := context.TODO()
+	host := "127.0.0.1"
+	ports := dynaport.Get(1)
+
+	actorSystem, err := NewActorSystem("testSys",
+		WithRemote(remote.NewConfig(host, ports[0])),
+		WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+	t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	pause.For(time.Second)
+
+	pid, err := actorSystem.Spawn(ctx, "watcher", NewMockActor())
+	require.NoError(t, err)
+
+	remoteCidAddr := address.New("remoteCid", "remoteSys", "10.0.0.1", 9000)
+
+	t.Run("nil cid is a no-op", func(t *testing.T) {
+		require.NotPanics(t, func() { pid.Watch(nil) })
+		require.NotPanics(t, func() { pid.UnWatch(nil) })
+	})
+
+	t.Run("remote watcher self is a no-op", func(t *testing.T) {
+		remotingMock := mocksremote.NewClient(t)
+		remoteSelf := newRemotePID(address.New("self", "remoteSys", "10.0.0.2", 9000), remotingMock)
+		// No EXPECT — any RPC would fail mock expectations.
+		remoteSelf.Watch(pid)
+		remoteSelf.UnWatch(pid)
+	})
+
+	t.Run("remote cid with nil remoting skips registration", func(t *testing.T) {
+		cid := newRemotePID(remoteCidAddr, nil)
+		pid.Watch(cid)
+		require.Empty(t, actorSystem.getRemoteWatches().watcheesFor(pid.ID()))
+	})
+
+	t.Run("RemoteWatch failure does not record locally", func(t *testing.T) {
+		remotingMock := mocksremote.NewClient(t)
+		remotingMock.EXPECT().
+			RemoteWatch(mock.Anything, remoteCidAddr.Host(), remoteCidAddr.Port(), remoteCidAddr.Name(), mock.Anything).
+			Return(assert.AnError).Once()
+
+		cid := newRemotePID(remoteCidAddr, remotingMock)
+		pid.Watch(cid)
+
+		require.Empty(t, actorSystem.getRemoteWatches().watcheesFor(pid.ID()))
+		remotingMock.AssertExpectations(t)
+	})
+
+	t.Run("RemoteWatch success records the watchee then UnWatch clears it", func(t *testing.T) {
+		remotingMock := mocksremote.NewClient(t)
+		remotingMock.EXPECT().
+			RemoteWatch(mock.Anything, remoteCidAddr.Host(), remoteCidAddr.Port(), remoteCidAddr.Name(), mock.Anything).
+			Return(nil).Once()
+		remotingMock.EXPECT().
+			RemoteUnWatch(mock.Anything, remoteCidAddr.Host(), remoteCidAddr.Port(), remoteCidAddr.Name(), mock.Anything).
+			Return(nil).Once()
+
+		cid := newRemotePID(remoteCidAddr, remotingMock)
+
+		pid.Watch(cid)
+		watchees := actorSystem.getRemoteWatches().watcheesFor(pid.ID())
+		require.Len(t, watchees, 1)
+		require.Equal(t, remoteCidAddr.String(), watchees[0].String())
+
+		pid.UnWatch(cid)
+		require.Empty(t, actorSystem.getRemoteWatches().watcheesFor(pid.ID()))
+		remotingMock.AssertExpectations(t)
+	})
+
+	t.Run("UnWatch tolerates RemoteUnWatch failure and still clears local state", func(t *testing.T) {
+		remotingMock := mocksremote.NewClient(t)
+		remotingMock.EXPECT().
+			RemoteWatch(mock.Anything, remoteCidAddr.Host(), remoteCidAddr.Port(), remoteCidAddr.Name(), mock.Anything).
+			Return(nil).Once()
+		remotingMock.EXPECT().
+			RemoteUnWatch(mock.Anything, remoteCidAddr.Host(), remoteCidAddr.Port(), remoteCidAddr.Name(), mock.Anything).
+			Return(assert.AnError).Once()
+
+		cid := newRemotePID(remoteCidAddr, remotingMock)
+
+		pid.Watch(cid)
+		require.Len(t, actorSystem.getRemoteWatches().watcheesFor(pid.ID()), 1)
+
+		pid.UnWatch(cid)
+		require.Empty(t, actorSystem.getRemoteWatches().watcheesFor(pid.ID()))
+		remotingMock.AssertExpectations(t)
+	})
+}
+
+func TestFreeWatchersRemotePass(t *testing.T) {
+	ctx := context.TODO()
+	host := "127.0.0.1"
+	ports := dynaport.Get(1)
+
+	actorSystem, err := NewActorSystem("testSys",
+		WithRemote(remote.NewConfig(host, ports[0])),
+		WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+	t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	pause.For(time.Second)
+
+	pid, err := actorSystem.Spawn(ctx, "watchee", NewMockActor())
+	require.NoError(t, err)
+
+	remoteWatcherAddr := address.New("remoteWatcher", "remoteSys", "10.0.0.1", 9000)
+	actorSystem.getRemoteWatches().addWatcher(pid.ID(), remoteWatcherAddr)
+
+	remotingMock := mocksremote.NewClient(t)
+	remotingMock.EXPECT().
+		RemoteTell(mock.Anything, pid.getAddress(), remoteWatcherAddr, mock.AnythingOfType("*actor.Terminated")).
+		Return(nil).Once()
+
+	pid.fieldsLocker.Lock()
+	pid.remoting = remotingMock
+	pid.fieldsLocker.Unlock()
+
+	pid.freeWatchers(ctx)
+
+	remotingMock.AssertExpectations(t)
+}
+
+func TestFreeWatchersRemoteTellFailureIsLogged(t *testing.T) {
+	ctx := context.TODO()
+	host := "127.0.0.1"
+	ports := dynaport.Get(1)
+
+	actorSystem, err := NewActorSystem("testSys",
+		WithRemote(remote.NewConfig(host, ports[0])),
+		WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+	t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	pause.For(time.Second)
+
+	pid, err := actorSystem.Spawn(ctx, "watchee", NewMockActor())
+	require.NoError(t, err)
+
+	remoteWatcherAddr := address.New("remoteWatcher", "remoteSys", "10.0.0.1", 9000)
+	actorSystem.getRemoteWatches().addWatcher(pid.ID(), remoteWatcherAddr)
+
+	remotingMock := mocksremote.NewClient(t)
+	remotingMock.EXPECT().
+		RemoteTell(mock.Anything, pid.getAddress(), remoteWatcherAddr, mock.AnythingOfType("*actor.Terminated")).
+		Return(assert.AnError).Once()
+
+	pid.fieldsLocker.Lock()
+	pid.remoting = remotingMock
+	pid.fieldsLocker.Unlock()
+
+	require.NotPanics(t, func() { pid.freeWatchers(ctx) })
+	remotingMock.AssertExpectations(t)
+}
+
+func TestFreeWatcheesRemotePass(t *testing.T) {
+	ctx := context.TODO()
+	host := "127.0.0.1"
+	ports := dynaport.Get(1)
+
+	actorSystem, err := NewActorSystem("testSys",
+		WithRemote(remote.NewConfig(host, ports[0])),
+		WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+	t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	pause.For(time.Second)
+
+	pid, err := actorSystem.Spawn(ctx, "watcher", NewMockActor())
+	require.NoError(t, err)
+
+	remoteWatcheeAddr := address.New("remoteWatchee", "remoteSys", "10.0.0.1", 9000)
+	actorSystem.getRemoteWatches().addWatchee(pid.ID(), remoteWatcheeAddr)
+
+	// Pre-populate a remote watcher entry too so dropPID has work to do on both
+	// sides; we verify it is cleared.
+	remoteWatcherAddr := address.New("remoteWatcher", "remoteSys", "10.0.0.2", 9000)
+	actorSystem.getRemoteWatches().addWatcher(pid.ID(), remoteWatcherAddr)
+
+	remotingMock := mocksremote.NewClient(t)
+	remotingMock.EXPECT().
+		RemoteUnWatch(mock.Anything, remoteWatcheeAddr.Host(), remoteWatcheeAddr.Port(), remoteWatcheeAddr.Name(), pid.getAddress()).
+		Return(nil).Once()
+
+	pid.fieldsLocker.Lock()
+	pid.remoting = remotingMock
+	pid.fieldsLocker.Unlock()
+
+	require.NoError(t, pid.freeWatchees(ctx))
+
+	require.Empty(t, actorSystem.getRemoteWatches().watcheesFor(pid.ID()))
+	require.Empty(t, actorSystem.getRemoteWatches().watchersFor(pid.ID()))
+	remotingMock.AssertExpectations(t)
+}
+
+func TestFreeWatcheesRemoteUnWatchFailureIsLogged(t *testing.T) {
+	ctx := context.TODO()
+	host := "127.0.0.1"
+	ports := dynaport.Get(1)
+
+	actorSystem, err := NewActorSystem("testSys",
+		WithRemote(remote.NewConfig(host, ports[0])),
+		WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+	t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	pause.For(time.Second)
+
+	pid, err := actorSystem.Spawn(ctx, "watcher", NewMockActor())
+	require.NoError(t, err)
+
+	remoteWatcheeAddr := address.New("remoteWatchee", "remoteSys", "10.0.0.1", 9000)
+	actorSystem.getRemoteWatches().addWatchee(pid.ID(), remoteWatcheeAddr)
+
+	remotingMock := mocksremote.NewClient(t)
+	remotingMock.EXPECT().
+		RemoteUnWatch(mock.Anything, remoteWatcheeAddr.Host(), remoteWatcheeAddr.Port(), remoteWatcheeAddr.Name(), pid.getAddress()).
+		Return(assert.AnError).Once()
+
+	pid.fieldsLocker.Lock()
+	pid.remoting = remotingMock
+	pid.fieldsLocker.Unlock()
+
+	require.NoError(t, pid.freeWatchees(ctx))
+	require.Empty(t, actorSystem.getRemoteWatches().watcheesFor(pid.ID()))
+	remotingMock.AssertExpectations(t)
+}
+
 func TestUnWatchWithInexistentNode(t *testing.T) {
 	ctx := context.TODO()
 	host := "127.0.0.1"

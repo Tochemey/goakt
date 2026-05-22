@@ -123,6 +123,28 @@ func WithShutdownTimeout(timeout time.Duration) Option {
 	)
 }
 
+// WithRemoteWatchTimeout sets the deadline applied to remote PID.Watch and
+// PID.UnWatch round-trip RPCs.
+//
+// When PID.Watch or PID.UnWatch targets an actor on a remote node, the local
+// caller blocks until the receiving node acknowledges the registration. The
+// configured timeout bounds that wait so a slow or unreachable peer cannot
+// stall the caller indefinitely. On timeout the RPC error is logged at debug
+// level; for PID.Watch the local registration is not recorded, for PID.UnWatch
+// the local registration has already been dropped before the RPC was issued.
+//
+// A non-positive value leaves the existing setting unchanged. Defaults to
+// DefaultRemoteWatchTimeout.
+func WithRemoteWatchTimeout(timeout time.Duration) Option {
+	return OptionFunc(
+		func(a *actorSystem) {
+			if timeout > 0 {
+				a.remoteWatchTimeout = timeout
+			}
+		},
+	)
+}
+
 // WithPartitionHasher sets the partition hasher.
 func WithPartitionHasher(hasher hash.Hasher) Option {
 	return OptionFunc(
