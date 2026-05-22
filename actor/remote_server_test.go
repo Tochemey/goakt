@@ -55,13 +55,14 @@ import (
 // environment that mirrors production wiring.
 func newRemoteServerTestSystem(host string, port int) *actorSystem {
 	sys := &actorSystem{
-		actors:       newTree(),
-		logger:       log.DiscardLogger,
-		remoteConfig: remote.NewConfig(host, port),
-		name:         "testSys",
-		grains:       xsync.NewMap[string, *grainPID](),
-		askTimeout:   DefaultAskTimeout,
-		remoting:     remoteclient.NewClient(),
+		actors:        newTree(),
+		logger:        log.DiscardLogger,
+		remoteConfig:  remote.NewConfig(host, port),
+		name:          "testSys",
+		grains:        xsync.NewMap[string, *grainPID](),
+		askTimeout:    DefaultAskTimeout,
+		remoting:      remoteclient.NewClient(),
+		remoteWatches: newRemoteWatchRegistry(),
 	}
 	sys.remotingEnabled.Store(true)
 	return sys
@@ -2275,4 +2276,161 @@ func TestRemoteTellHandler_PerMessageMetadataError(t *testing.T) {
 	require.NoError(t, err)
 	_, ok := resp.(*internalpb.RemoteTellResponse)
 	assert.True(t, ok, "per-message metadata failures must not fail the whole batch")
+}
+
+func TestRemoteWatchHandler(t *testing.T) {
+	const host = "127.0.0.1"
+	const port = 9300
+	ctx := context.Background()
+	watcherAddr := address.New("watcher", "remoteSys", "10.0.0.1", 9000)
+
+	t.Run("wrong request type returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
+		sys := newRemoteServerTestSystem(host, port)
+		resp, err := sys.remoteWatchHandler(ctx, nullConn, new(internalpb.RemoteWatchResponse))
+		require.NoError(t, err)
+		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
+	})
+
+	t.Run("remoting disabled returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
+		sys := newRemoteServerTestSystem(host, port)
+		sys.remotingEnabled.Store(false)
+		req := &internalpb.RemoteWatchRequest{Host: host, Port: int32(port), Name: "watchee", WatcherAddress: watcherAddr.String()}
+		resp, err := sys.remoteWatchHandler(ctx, nullConn, req)
+		require.NoError(t, err)
+		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
+	})
+
+	t.Run("mismatched host returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
+		sys := newRemoteServerTestSystem(host, port)
+		req := &internalpb.RemoteWatchRequest{Host: "10.0.0.1", Port: int32(port), Name: "watchee", WatcherAddress: watcherAddr.String()}
+		resp, err := sys.remoteWatchHandler(ctx, nullConn, req)
+		require.NoError(t, err)
+		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
+	})
+
+	t.Run("system actor name returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
+		sys := newRemoteServerTestSystem(host, port)
+		req := &internalpb.RemoteWatchRequest{Host: host, Port: int32(port), Name: reservedNamesPrefix + "guard", WatcherAddress: watcherAddr.String()}
+		resp, err := sys.remoteWatchHandler(ctx, nullConn, req)
+		require.NoError(t, err)
+		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
+	})
+
+	t.Run("unparseable watcher address returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
+		sys := newRemoteServerTestSystem(host, port)
+		req := &internalpb.RemoteWatchRequest{Host: host, Port: int32(port), Name: "watchee", WatcherAddress: "not-an-address"}
+		resp, err := sys.remoteWatchHandler(ctx, nullConn, req)
+		require.NoError(t, err)
+		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
+	})
+
+	t.Run("watchee not in tree returns CODE_NOT_FOUND", func(t *testing.T) {
+		sys := newRemoteServerTestSystem(host, port)
+		req := &internalpb.RemoteWatchRequest{Host: host, Port: int32(port), Name: "missing", WatcherAddress: watcherAddr.String()}
+		resp, err := sys.remoteWatchHandler(ctx, nullConn, req)
+		require.NoError(t, err)
+		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
+	})
+
+	t.Run("zombie node returns CODE_NOT_FOUND", func(t *testing.T) {
+		sys := newRemoteServerTestSystemWithZombieNode(t, host, port, "watchee")
+		req := &internalpb.RemoteWatchRequest{Host: host, Port: int32(port), Name: "watchee", WatcherAddress: watcherAddr.String()}
+		resp, err := sys.remoteWatchHandler(ctx, nullConn, req)
+		require.NoError(t, err)
+		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
+	})
+
+	t.Run("happy path records the watcher in the registry", func(t *testing.T) {
+		sys := newRemoteServerTestSystemWithStoppedActor(t, host, port, "watchee")
+		req := &internalpb.RemoteWatchRequest{Host: host, Port: int32(port), Name: "watchee", WatcherAddress: watcherAddr.String()}
+
+		resp, err := sys.remoteWatchHandler(ctx, nullConn, req)
+		require.NoError(t, err)
+		_, ok := resp.(*internalpb.RemoteWatchResponse)
+		require.True(t, ok)
+
+		watcheeID := address.New("watchee", sys.Name(), host, port).String()
+		registered := sys.remoteWatches.watchersFor(watcheeID)
+		require.Len(t, registered, 1)
+		require.Equal(t, watcherAddr.String(), registered[0].String())
+	})
+}
+
+func TestRemoteUnWatchHandler(t *testing.T) {
+	const host = "127.0.0.1"
+	const port = 9301
+	ctx := context.Background()
+	watcherAddr := address.New("watcher", "remoteSys", "10.0.0.1", 9000)
+
+	t.Run("wrong request type returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
+		sys := newRemoteServerTestSystem(host, port)
+		resp, err := sys.remoteUnWatchHandler(ctx, nullConn, new(internalpb.RemoteUnWatchResponse))
+		require.NoError(t, err)
+		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
+	})
+
+	t.Run("remoting disabled returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
+		sys := newRemoteServerTestSystem(host, port)
+		sys.remotingEnabled.Store(false)
+		req := &internalpb.RemoteUnWatchRequest{Host: host, Port: int32(port), Name: "watchee", WatcherAddress: watcherAddr.String()}
+		resp, err := sys.remoteUnWatchHandler(ctx, nullConn, req)
+		require.NoError(t, err)
+		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
+	})
+
+	t.Run("mismatched host returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
+		sys := newRemoteServerTestSystem(host, port)
+		req := &internalpb.RemoteUnWatchRequest{Host: "10.0.0.1", Port: int32(port), Name: "watchee", WatcherAddress: watcherAddr.String()}
+		resp, err := sys.remoteUnWatchHandler(ctx, nullConn, req)
+		require.NoError(t, err)
+		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
+	})
+
+	t.Run("system actor name returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
+		sys := newRemoteServerTestSystem(host, port)
+		req := &internalpb.RemoteUnWatchRequest{Host: host, Port: int32(port), Name: reservedNamesPrefix + "guard", WatcherAddress: watcherAddr.String()}
+		resp, err := sys.remoteUnWatchHandler(ctx, nullConn, req)
+		require.NoError(t, err)
+		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
+	})
+
+	t.Run("unparseable watcher address returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
+		sys := newRemoteServerTestSystem(host, port)
+		req := &internalpb.RemoteUnWatchRequest{Host: host, Port: int32(port), Name: "watchee", WatcherAddress: "not-an-address"}
+		resp, err := sys.remoteUnWatchHandler(ctx, nullConn, req)
+		require.NoError(t, err)
+		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
+	})
+
+	t.Run("watchee not in tree returns success (already gone)", func(t *testing.T) {
+		sys := newRemoteServerTestSystem(host, port)
+		req := &internalpb.RemoteUnWatchRequest{Host: host, Port: int32(port), Name: "missing", WatcherAddress: watcherAddr.String()}
+		resp, err := sys.remoteUnWatchHandler(ctx, nullConn, req)
+		require.NoError(t, err)
+		_, ok := resp.(*internalpb.RemoteUnWatchResponse)
+		require.True(t, ok)
+	})
+
+	t.Run("zombie node returns success", func(t *testing.T) {
+		sys := newRemoteServerTestSystemWithZombieNode(t, host, port, "watchee")
+		req := &internalpb.RemoteUnWatchRequest{Host: host, Port: int32(port), Name: "watchee", WatcherAddress: watcherAddr.String()}
+		resp, err := sys.remoteUnWatchHandler(ctx, nullConn, req)
+		require.NoError(t, err)
+		_, ok := resp.(*internalpb.RemoteUnWatchResponse)
+		require.True(t, ok)
+	})
+
+	t.Run("happy path removes the watcher from the registry", func(t *testing.T) {
+		sys := newRemoteServerTestSystemWithStoppedActor(t, host, port, "watchee")
+		watcheeID := address.New("watchee", sys.Name(), host, port).String()
+		sys.remoteWatches.addWatcher(watcheeID, watcherAddr)
+
+		req := &internalpb.RemoteUnWatchRequest{Host: host, Port: int32(port), Name: "watchee", WatcherAddress: watcherAddr.String()}
+		resp, err := sys.remoteUnWatchHandler(ctx, nullConn, req)
+		require.NoError(t, err)
+		_, ok := resp.(*internalpb.RemoteUnWatchResponse)
+		require.True(t, ok)
+
+		require.Empty(t, sys.remoteWatches.watchersFor(watcheeID))
+	})
 }

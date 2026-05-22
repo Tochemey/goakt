@@ -6707,3 +6707,125 @@ func TestPersistPeerStateToPeers(t *testing.T) {
 		_ = err // Error is acceptable here due to context cancellation
 	})
 }
+
+type terminatedProbeActor struct {
+	received chan *Terminated
+}
+
+var _ Actor = (*terminatedProbeActor)(nil)
+
+func newTerminatedProbeActor() *terminatedProbeActor {
+	return &terminatedProbeActor{received: make(chan *Terminated, 64)}
+}
+
+func (a *terminatedProbeActor) PreStart(*Context) error { return nil }
+
+func (a *terminatedProbeActor) Receive(ctx *ReceiveContext) {
+	switch msg := ctx.Message().(type) {
+	case *PostStart:
+	case *Terminated:
+		a.received <- msg
+	default:
+		ctx.Unhandled()
+	}
+}
+
+func (a *terminatedProbeActor) PostStop(*Context) error { return nil }
+
+func TestPruneRemoteWatchesForHost(t *testing.T) {
+	ctx := context.Background()
+	host := "127.0.0.1"
+	ports := dynaport.Get(1)
+
+	newSystem := func(t *testing.T) *actorSystem {
+		t.Helper()
+		sys, err := NewActorSystem("prune-test",
+			WithRemote(remote.NewConfig(host, ports[0])),
+			WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { _ = sys.Stop(ctx) })
+		pause.For(time.Second)
+		return sys.(*actorSystem)
+	}
+
+	t.Run("empty nodeAddress is a no-op", func(t *testing.T) {
+		sys := newSystem(t)
+		require.NotPanics(t, func() {
+			sys.pruneRemoteWatchesForHost(ctx, "", time.Now())
+		})
+	})
+
+	t.Run("unknown host with no entries is a no-op", func(t *testing.T) {
+		sys := newSystem(t)
+		require.NotPanics(t, func() {
+			sys.pruneRemoteWatchesForHost(ctx, "10.99.99.99:7000", time.Now())
+		})
+	})
+
+	t.Run("watcher entries are dropped silently", func(t *testing.T) {
+		sys := newSystem(t)
+		pid, err := sys.Spawn(ctx, "local-actor", NewMockActor())
+		require.NoError(t, err)
+
+		watcherAddr := address.New("remoteWatcher", "remoteSys", "10.0.0.1", 9000)
+		sys.remoteWatches.addWatcher(pid.ID(), watcherAddr)
+
+		sys.pruneRemoteWatchesForHost(ctx, "10.0.0.1:7000", time.Now())
+
+		require.Empty(t, sys.remoteWatches.watchersFor(pid.ID()))
+	})
+
+	t.Run("watchee entries deliver synthesized Terminated with deathTime", func(t *testing.T) {
+		sys := newSystem(t)
+		probe := newTerminatedProbeActor()
+		pid, err := sys.Spawn(ctx, "watcher-actor", probe)
+		require.NoError(t, err)
+
+		watcheeAddr := address.New("remoteWatchee", "remoteSys", "10.0.0.2", 9000)
+		sys.remoteWatches.addWatchee(pid.ID(), watcheeAddr)
+
+		deathTime := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+		sys.pruneRemoteWatchesForHost(ctx, "10.0.0.2:7000", deathTime)
+
+		select {
+		case got := <-probe.received:
+			require.True(t, got.terminatedAt.Equal(deathTime), "want %v got %v", deathTime, got.terminatedAt)
+			require.NotNil(t, got.actorPath)
+			require.Equal(t, watcheeAddr.String(), got.actorPath.String())
+		case <-time.After(2 * time.Second):
+			t.Fatal("did not receive synthesized Terminated")
+		}
+
+		require.Empty(t, sys.remoteWatches.watcheesFor(pid.ID()))
+	})
+
+	t.Run("missing local watcher pid is skipped without panic", func(t *testing.T) {
+		sys := newSystem(t)
+		watcheeAddr := address.New("remoteWatchee", "remoteSys", "10.0.0.3", 9000)
+		sys.remoteWatches.addWatchee("goakt://prune-test@127.0.0.1:0/ghost", watcheeAddr)
+
+		require.NotPanics(t, func() {
+			sys.pruneRemoteWatchesForHost(ctx, "10.0.0.3:7000", time.Now())
+		})
+		require.Empty(t, sys.remoteWatches.watcheesFor("goakt://prune-test@127.0.0.1:0/ghost"))
+	})
+
+	t.Run("malformed nodeAddress falls back to using it as-is", func(t *testing.T) {
+		sys := newSystem(t)
+		// Register a watchee with host == the literal string used as nodeAddress.
+		watcheeAddr := address.New("x", "remoteSys", "weirdhost", 9000)
+		probe := newTerminatedProbeActor()
+		pid, err := sys.Spawn(ctx, "fallback-watcher", probe)
+		require.NoError(t, err)
+		sys.remoteWatches.addWatchee(pid.ID(), watcheeAddr)
+
+		sys.pruneRemoteWatchesForHost(ctx, "weirdhost", time.Now())
+
+		select {
+		case <-probe.received:
+		case <-time.After(2 * time.Second):
+			t.Fatal("malformed nodeAddress did not trigger synthesized Terminated")
+		}
+	})
+}

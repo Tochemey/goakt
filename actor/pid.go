@@ -1528,20 +1528,87 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 }
 
 // Watch registers pid to receive a Terminated message when cid shuts down.
-// It is a no-op for remote PIDs.
+// It is a no-op when pid itself is a remote handle or cid is nil.
+// When cid is remote, the watch is registered on cid's host via the remoting
+// layer and tracked locally in the remote watch registry so freeWatchees can
+// release it on shutdown. Failures of the remote RPC are logged and the
+// local registration is skipped. The remote call blocks until the RPC
+// returns; callers should account for the round-trip cost.
 func (pid *PID) Watch(cid *PID) {
-	if pid.IsRemote() {
+	if pid.IsRemote() || cid == nil {
 		return
 	}
+
+	if cid.IsRemote() {
+		cidAddr := cid.getAddress()
+
+		// Prefer the remoting client embedded in the cid handle (the one that
+		// resolved cid in the first place); fall back to the watcher's own
+		// remoting client to mirror PID.Stop's selection policy.
+		r := cid.remoting
+		if r == nil {
+			r = pid.remoting
+		}
+
+		if r == nil {
+			pid.logger.Debugf("watch: cannot register remote watch for %s: remoting disabled", cidAddr)
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), pid.ActorSystem().getRemoteWatchTimeout())
+		defer cancel()
+
+		if err := r.RemoteWatch(ctx, cidAddr.Host(), cidAddr.Port(), cidAddr.Name(), pid.getAddress()); err != nil {
+			pid.logger.Debugf("watch: RemoteWatch to %s failed: %v", cidAddr, err)
+			return
+		}
+
+		// Local registration happens only after the remote acknowledged, so
+		// freeWatchees never tries to unwatch something the remote does not
+		// actually know about.
+		pid.ActorSystem().getRemoteWatches().addWatchee(pid.ID(), cidAddr)
+		return
+	}
+
 	pid.ActorSystem().tree().addWatcher(cid, pid)
 }
 
 // UnWatch cancels the watch previously registered by Watch for cid.
-// It is a no-op for remote PIDs.
+// It is a no-op when pid itself is a remote handle or cid is nil.
+// When cid is remote, the local registration is dropped first so the local
+// state is always clean even if the best-effort RemoteUnWatch fails;
+// transport failures are logged but not surfaced.
 func (pid *PID) UnWatch(cid *PID) {
-	if pid.IsRemote() {
+	if pid.IsRemote() || cid == nil {
 		return
 	}
+
+	if cid.IsRemote() {
+		cidAddr := cid.getAddress()
+
+		// Drop local state first so a failing RPC cannot leave a stale entry.
+		pid.ActorSystem().getRemoteWatches().removeWatchee(pid.ID(), cidAddr)
+
+		// Same remoting selection as PID.Watch / PID.Stop: prefer cid's own
+		// client, fall back to the watcher's.
+		r := cid.remoting
+		if r == nil {
+			r = pid.remoting
+		}
+
+		if r == nil {
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), pid.ActorSystem().getRemoteWatchTimeout())
+		defer cancel()
+
+		if err := r.RemoteUnWatch(ctx, cidAddr.Host(), cidAddr.Port(), cidAddr.Name(), pid.getAddress()); err != nil {
+			pid.logger.Debugf("unwatch: RemoteUnWatch to %s failed: %v", cidAddr, err)
+		}
+		return
+	}
+
 	pid.ActorSystem().tree().removeWatcher(cid, pid)
 }
 
@@ -2266,51 +2333,95 @@ func (pid *PID) reset() {
 	}
 }
 
-// freeWatchers releases all the actors watching this actor
+// freeWatchers releases all the actors watching this actor.
+// Local watchers receive a Terminated message via the regular mailbox path.
+// Remote watchers receive a Terminated message via fire-and-forget RemoteTell;
+// its wire encoding is provided by terminatedSerializer and decoded back to
+// *Terminated on the receiving node, so user actors observe a single message
+// type regardless of locality. No synchronous liveness probe is issued, so
+// the shutdown path is not gated on the reachability of any remote peer.
 func (pid *PID) freeWatchers(ctx context.Context) {
 	logger := pid.logger
 	logger.Debugf("freeing all actor %s's watchers", pid.Name())
+
 	tree := pid.ActorSystem().tree()
 	watchers := tree.watchers(pid)
-	if len(watchers) > 0 {
-		// this call will be fast no need of parallel processing
-		for _, watcher := range watchers {
-			terminated := NewTerminated(pid.Path())
+	for _, watcher := range watchers {
+		terminated := NewTerminated(pid.Path())
 
-			if watcher.IsRunning() {
-				logger.Debugf("watcher %s releasing watched %s", watcher.Name(), pid.Name())
-				// ignore error here because the watcher is running
-				_ = pid.Tell(ctx, watcher, terminated)
-				watcher.UnWatch(pid)
-				logger.Debugf("watcher %s released watched %s", watcher.Name(), pid.Name())
+		if watcher.IsRunning() {
+			logger.Debugf("watcher %s releasing watched %s", watcher.Name(), pid.Name())
+			// ignore error here because the watcher is running
+			_ = pid.Tell(ctx, watcher, terminated)
+			watcher.UnWatch(pid)
+			logger.Debugf("watcher %s released watched %s", watcher.Name(), pid.Name())
+		}
+	}
+
+	remoteWatchers := pid.ActorSystem().getRemoteWatches().watchersFor(pid.ID())
+	if len(remoteWatchers) > 0 && pid.remoting != nil {
+		terminated := NewTerminated(pid.Path())
+		from := pid.getAddress()
+
+		for _, watcherAddr := range remoteWatchers {
+			if err := pid.remoting.RemoteTell(ctx, from, watcherAddr, terminated); err != nil {
+				logger.Debugf("freeWatchers: RemoteTell Terminated to %s failed: %v", watcherAddr, err)
 			}
 		}
+	}
 
-		logger.Debugf("all actor %s's watchers freed", pid.Name())
+	if len(watchers) == 0 && len(remoteWatchers) == 0 {
+		logger.Debugf("actor=%s has no watchers, maybe already freed", pid.Name())
 		return
 	}
-	logger.Debugf("actor=%s has no watchers, maybe already freed", pid.Name())
+
+	logger.Debugf("all actor %s's watchers freed", pid.Name())
 }
 
-// freeWatchees releases all actors that have been watched by this actor
-func (pid *PID) freeWatchees() error {
+// freeWatchees releases all actors that have been watched by this actor.
+// Local watchees are released via pid.UnWatch on the existing tree path.
+// Remote watchees are released by sending a best-effort RemoteUnWatch to each
+// peer; failures are logged at debug and do not block shutdown. The remote
+// watch registry is then cleared in one shot for this pid, so neither direction
+// keeps stale entries after the actor has terminated.
+func (pid *PID) freeWatchees(ctx context.Context) error {
 	logger := pid.logger
 	logger.Debugf("freeing all actor %s's watched actors", pid.Name())
 
 	tree := pid.ActorSystem().tree()
 	watchees := tree.watchees(pid)
-	if len(watchees) > 0 {
-		// this call will be fast no need of parallel processing
-		for _, watched := range watchees {
-			logger.Debugf("watcher %s unwatching actor %s", pid.Name(), watched.Name())
-			pid.UnWatch(watched)
-			logger.Debugf("watcher=%s unwatch actor=%s", pid.Name(), watched.Name())
-		}
+	for _, watched := range watchees {
+		logger.Debugf("watcher %s unwatching actor %s", pid.Name(), watched.Name())
+		pid.UnWatch(watched)
+		logger.Debugf("watcher=%s unwatch actor=%s", pid.Name(), watched.Name())
+	}
 
-		logger.Debugf("actor=%s successfully unwatch all watched actors", pid.Name())
+	remoteWatches := pid.ActorSystem().getRemoteWatches()
+	remoteWatchees := remoteWatches.watcheesFor(pid.ID())
+	if len(remoteWatchees) > 0 && pid.remoting != nil {
+		from := pid.getAddress()
+		timeout := pid.ActorSystem().getRemoteWatchTimeout()
+
+		for _, watcheeAddr := range remoteWatchees {
+			rpcCtx, cancel := context.WithTimeout(ctx, timeout)
+			err := pid.remoting.RemoteUnWatch(rpcCtx, watcheeAddr.Host(), watcheeAddr.Port(), watcheeAddr.Name(), from)
+			cancel()
+			if err != nil {
+				logger.Debugf("freeWatchees: RemoteUnWatch to %s failed: %v", watcheeAddr, err)
+			}
+		}
+	}
+
+	// Clear both watcher and watchee entries for this pid so a shutdown
+	// followed by re-use of the same id does not see stale state.
+	remoteWatches.dropPID(pid.ID())
+
+	if len(watchees) == 0 && len(remoteWatchees) == 0 {
+		logger.Debugf("actor=%s has no watched actors, maybe already freed", pid.Name())
 		return nil
 	}
-	logger.Debugf("actor=%s has no watched actors, maybe already freed", pid.Name())
+
+	logger.Debugf("actor=%s successfully unwatch all watched actors", pid.Name())
 	return nil
 }
 
@@ -2461,7 +2572,7 @@ func (pid *PID) doStop(ctx context.Context) error {
 
 	if err := chain.
 		New(chain.WithFailFast()).
-		AddRunner(func() error { return pid.freeWatchees() }).
+		AddRunner(func() error { return pid.freeWatchees(ctx) }).
 		AddRunner(func() error { return pid.freeChildren(ctx) }).
 		Run(); err != nil {
 		return err

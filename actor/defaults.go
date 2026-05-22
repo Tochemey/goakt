@@ -52,6 +52,11 @@ const (
 	DefaultClusterStateSyncInterval = time.Minute
 	// DefaultGrainRequestTimeout defines the default grain request timeout
 	DefaultGrainRequestTimeout = 5 * time.Second
+	// DefaultRemoteWatchTimeout defines the default deadline applied to
+	// remote PID.Watch / PID.UnWatch round-trip RPCs. Bounds how long the
+	// local caller waits for the remote node to acknowledge registration
+	// before the call is abandoned.
+	DefaultRemoteWatchTimeout = 5 * time.Second
 
 	// DefaultClusterBalancerInterval defines the default cluster balancer interval
 	DefaultClusterBalancerInterval = time.Second

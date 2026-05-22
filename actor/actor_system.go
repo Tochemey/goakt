@@ -726,6 +726,11 @@ type ActorSystem interface {
 	getCluster() cluster.Cluster
 	// tree returns the actors tree
 	tree() *tree
+	// getRemoteWatches returns the remote watch registry
+	getRemoteWatches() *remoteWatchRegistry
+	// getRemoteWatchTimeout returns the deadline applied to remote
+	// PID.Watch / PID.UnWatch RPCs
+	getRemoteWatchTimeout() time.Duration
 
 	completeRelocation()
 	getRootGuardian() *PID
@@ -756,6 +761,10 @@ type actorSystem struct {
 	_ locker.NoCopy
 	// hold the actors tree in the system
 	actors *tree
+	// tracks remote watch relationships separately from the pid tree.
+	// Sparse: empty for actor systems that do not participate in remote
+	// watching.
+	remoteWatches *remoteWatchRegistry
 
 	// states whether the actor system has started or not
 	started  atomic.Bool
@@ -769,6 +778,9 @@ type actorSystem struct {
 	// Specifies how long the sender of a message should wait to receive a reply
 	// when using SendReply. The default value is 5s
 	askTimeout time.Duration
+	// Specifies the deadline applied to remote PID.Watch / PID.UnWatch RPCs.
+	// The default value is DefaultRemoteWatchTimeout (5s).
+	remoteWatchTimeout time.Duration
 	// Specifies the shutdown timeout. The default value is 3mn
 	shutdownTimeout time.Duration
 	// Specifies the maximum of retries to attempt when the actor
@@ -945,6 +957,8 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		registry:             types.NewRegistry(),
 		remoteConfig:         remote.DefaultConfig(),
 		actors:               newTree(),
+		remoteWatches:        newRemoteWatchRegistry(),
+		remoteWatchTimeout:   DefaultRemoteWatchTimeout,
 		shutdownHooks:        make([]ShutdownHook, 0),
 		rebalancedNodes:      goset.NewSet[string](),
 		topicActor:           nil,
@@ -2395,6 +2409,7 @@ func (x *actorSystem) setupRemoting() error {
 		// Register built-in serializers for native actor message types.
 		// These are internal and not visible to application code.
 		remoteclient.WithClientSerializers(new(PoisonPill), &poisonPillSerializer{}),
+		remoteclient.WithClientSerializers(new(Terminated), &terminatedSerializer{}),
 		// set the dependency registry for the remoting client
 		remoteclient.WithDependencyRegistry(x.registry),
 	}
@@ -2882,6 +2897,7 @@ func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
 	nodeLeft := event.Payload.(*cluster.NodeLeftEvent)
 	x.logger.Infof("node=%s detected node left event: node=%s", x.String(), nodeLeft.Address)
 
+	x.pruneRemoteWatchesForHost(context.Background(), nodeLeft.Address, nodeLeft.Timestamp)
 	x.resyncAfterClusterEvent("node left", nodeLeft.Address)
 	x.triggerDataCentersReconciliation()
 
@@ -2920,6 +2936,64 @@ func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
 	}
 
 	x.logger.Debugf("node=%s cleaned up node=%s left from state cache", x.String(), nodeLeft.Address)
+}
+
+// pruneRemoteWatchesForHost cleans up the remote watch registry after a
+// cluster node has left. Watcher-side entries (remote actors that were
+// watching local pids on the departed host) are dropped silently — the
+// watcher is unreachable, no further notification is possible. Watchee-side
+// entries (local pids that were watching remote actors on the departed host)
+// receive a synthesized Terminated message delivered to the local watcher so
+// the application observes the same lifecycle event it would on a clean
+// remote shutdown.
+//
+// The synthesized Terminated carries deathTime — typically the timestamp
+// reported by the cluster membership layer when the departure was detected —
+// rather than the current wall clock, so watchers using TerminatedAt for
+// ordering or auditing see the accurate event time.
+//
+// The host is matched as the leading portion of nodeAddress up to the first
+// colon. This assumes the cluster and remoting layers share the same host
+// identifier (typically true since both derive it from the same listen-address
+// configuration). When nodeAddress does not parse as host:port it is used
+// as-is so misconfigured callers still get a registry sweep.
+func (x *actorSystem) pruneRemoteWatchesForHost(ctx context.Context, nodeAddress string, deathTime time.Time) {
+	host, _, err := net.SplitHostPort(nodeAddress)
+	if err != nil {
+		host = nodeAddress
+	}
+
+	entries := x.remoteWatches.dropHost(host)
+	if len(entries.Watchees) == 0 {
+		return
+	}
+
+	sender := x.deathWatch
+	if sender == nil {
+		return
+	}
+
+	for _, watchee := range entries.Watchees {
+		node, ok := x.actors.node(watchee.LocalID)
+		if !ok {
+			continue
+		}
+
+		watcher := node.value()
+		if watcher == nil || !watcher.IsRunning() {
+			continue
+		}
+
+		terminated := &Terminated{
+			actorPath:    newPath(watchee.RemoteAddress),
+			terminatedAt: deathTime.UTC(),
+		}
+
+		if err := sender.Tell(ctx, watcher, terminated); err != nil {
+			x.logger.Debugf("node-left: failed to deliver synthesized Terminated for %s to %s: %v",
+				watchee.RemoteAddress, watcher.Name(), err)
+		}
+	}
 }
 
 // resyncAfterClusterEvent handles resyncing actors and grains after a cluster event.
@@ -3087,6 +3161,17 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 // tree returns the actors tree
 func (x *actorSystem) tree() *tree {
 	return x.actors
+}
+
+// getRemoteWatches returns the remote watch registry.
+func (x *actorSystem) getRemoteWatches() *remoteWatchRegistry {
+	return x.remoteWatches
+}
+
+// getRemoteWatchTimeout returns the deadline applied to remote
+// PID.Watch / PID.UnWatch RPCs.
+func (x *actorSystem) getRemoteWatchTimeout() time.Duration {
+	return x.remoteWatchTimeout
 }
 
 // getCluster returns the cluster engine

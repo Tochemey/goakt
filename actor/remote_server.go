@@ -407,6 +407,99 @@ func (x *actorSystem) remoteStopHandler(ctx context.Context, conn inet.Connectio
 	return new(internalpb.RemoteStopResponse), nil
 }
 
+// remoteWatchHandler handles RemoteWatch requests over the proto TCP transport.
+// It registers a remote watcher against a local actor so the watcher is notified
+// when the actor terminates.
+func (x *actorSystem) remoteWatchHandler(_ context.Context, _ inet.Connection, req proto.Message) (proto.Message, error) {
+	request, ok := req.(*internalpb.RemoteWatchRequest)
+	if !ok {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, errors.New("invalid request type")), nil
+	}
+
+	logger := x.logger
+
+	if !x.remotingEnabled.Load() {
+		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrRemotingDisabled), nil
+	}
+
+	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
+	if remoteAddr != net.JoinHostPort(request.GetHost(), strconv.Itoa(int(request.GetPort()))) {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, gerrors.ErrInvalidHost), nil
+	}
+
+	if isSystemName(request.GetName()) {
+		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.NewErrActorNotFound(request.GetName())), nil
+	}
+
+	watcherAddr, err := address.Parse(request.GetWatcherAddress())
+	if err != nil {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
+	}
+
+	watcheeAddr := address.New(request.GetName(), x.Name(), request.GetHost(), int(request.GetPort()))
+	cidNode, exist := x.actors.node(watcheeAddr.String())
+	if !exist {
+		err := gerrors.NewErrAddressNotFound(watcheeAddr.String())
+		logger.Errorf("remote watch: address=%s not found: %v", watcheeAddr.String(), err)
+		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
+	}
+
+	cid := cidNode.value()
+	if cid == nil {
+		err := gerrors.NewErrAddressNotFound(watcheeAddr.String())
+		logger.Errorf("remote watch: address=%s not found (actor was removed): %v", watcheeAddr.String(), err)
+		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
+	}
+
+	x.remoteWatches.addWatcher(cid.ID(), watcherAddr)
+	return new(internalpb.RemoteWatchResponse), nil
+}
+
+// remoteUnWatchHandler handles RemoteUnWatch requests over the proto TCP transport.
+// It removes a remote watcher previously registered against a local actor.
+func (x *actorSystem) remoteUnWatchHandler(_ context.Context, _ inet.Connection, req proto.Message) (proto.Message, error) {
+	request, ok := req.(*internalpb.RemoteUnWatchRequest)
+	if !ok {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, errors.New("invalid request type")), nil
+	}
+
+	logger := x.logger
+
+	if !x.remotingEnabled.Load() {
+		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrRemotingDisabled), nil
+	}
+
+	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
+	if remoteAddr != net.JoinHostPort(request.GetHost(), strconv.Itoa(int(request.GetPort()))) {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, gerrors.ErrInvalidHost), nil
+	}
+
+	if isSystemName(request.GetName()) {
+		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.NewErrActorNotFound(request.GetName())), nil
+	}
+
+	watcherAddr, err := address.Parse(request.GetWatcherAddress())
+	if err != nil {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
+	}
+
+	watcheeAddr := address.New(request.GetName(), x.Name(), request.GetHost(), int(request.GetPort()))
+	cidNode, exist := x.actors.node(watcheeAddr.String())
+	if !exist {
+		err := gerrors.NewErrAddressNotFound(watcheeAddr.String())
+		logger.Debugf("remote unwatch: address=%s not found (already gone): %v", watcheeAddr.String(), err)
+		return new(internalpb.RemoteUnWatchResponse), nil
+	}
+
+	cid := cidNode.value()
+	if cid == nil {
+		return new(internalpb.RemoteUnWatchResponse), nil
+	}
+
+	x.remoteWatches.removeWatcher(cid.ID(), watcherAddr)
+	return new(internalpb.RemoteUnWatchResponse), nil
+}
+
 // remoteSpawnHandler handles RemoteSpawn requests over the proto TCP transport.
 // It spawns a new actor on the remote machine.
 func (x *actorSystem) remoteSpawnHandler(ctx context.Context, conn inet.Connection, req proto.Message) (proto.Message, error) {
@@ -1327,6 +1420,8 @@ func (x *actorSystem) protoServerOptions() []inet.ProtoServerOption {
 		inet.WithProtoHandler("internalpb.RemoteTellRequest", x.remoteTellHandler),
 		inet.WithProtoHandler("internalpb.RemoteReSpawnRequest", x.remoteReSpawnHandler),
 		inet.WithProtoHandler("internalpb.RemoteStopRequest", x.remoteStopHandler),
+		inet.WithProtoHandler("internalpb.RemoteWatchRequest", x.remoteWatchHandler),
+		inet.WithProtoHandler("internalpb.RemoteUnWatchRequest", x.remoteUnWatchHandler),
 		inet.WithProtoHandler("internalpb.RemoteSpawnRequest", x.remoteSpawnHandler),
 		inet.WithProtoHandler("internalpb.RemoteSpawnChildRequest", x.remoteSpawnChildHandler),
 		inet.WithProtoHandler("internalpb.RemotePassivationStrategyRequest", x.remotePassivationStrategyHandler),

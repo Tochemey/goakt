@@ -89,6 +89,13 @@ func TestOption(t *testing.T) {
 			},
 		},
 		{
+			name:   "WithRemoteWatchTimeout",
+			option: WithRemoteWatchTimeout(3 * time.Second),
+			check: func(t *testing.T, sys *actorSystem) {
+				assert.Equal(t, 3*time.Second, sys.remoteWatchTimeout)
+			},
+		},
+		{
 			name:   "WithPartitionHasher",
 			option: WithPartitionHasher(hasher),
 			check: func(t *testing.T, sys *actorSystem) {
@@ -253,5 +260,27 @@ func TestWithThroughputBudget(t *testing.T) {
 		WithThroughputBudget(-10).Apply(system)
 
 		assert.Equal(t, dispatcherThroughput, system.dispatcherThroughput)
+	})
+}
+
+func TestWithRemoteWatchTimeout(t *testing.T) {
+	t.Run("positive value sets the timeout", func(t *testing.T) {
+		system := new(actorSystem)
+		WithRemoteWatchTimeout(7 * time.Second).Apply(system)
+		assert.Equal(t, 7*time.Second, system.remoteWatchTimeout)
+	})
+
+	t.Run("zero value leaves the existing setting unchanged", func(t *testing.T) {
+		system := new(actorSystem)
+		system.remoteWatchTimeout = DefaultRemoteWatchTimeout
+		WithRemoteWatchTimeout(0).Apply(system)
+		assert.Equal(t, DefaultRemoteWatchTimeout, system.remoteWatchTimeout)
+	})
+
+	t.Run("negative value leaves the existing setting unchanged", func(t *testing.T) {
+		system := new(actorSystem)
+		system.remoteWatchTimeout = DefaultRemoteWatchTimeout
+		WithRemoteWatchTimeout(-1 * time.Second).Apply(system)
+		assert.Equal(t, DefaultRemoteWatchTimeout, system.remoteWatchTimeout)
 	})
 }

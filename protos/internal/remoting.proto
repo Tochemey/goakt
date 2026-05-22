@@ -93,6 +93,34 @@ message RemoteStopRequest {
 
 message RemoteStopResponse {}
 
+// RemoteWatchRequest registers a remote watcher for an actor on this node.
+message RemoteWatchRequest {
+  // Specifies the remote host address of the watchee
+  string host = 1;
+  // Specifies the remote port of the watchee
+  int32 port = 2;
+  // Specifies the watchee actor name
+  string name = 3;
+  // Specifies the full address of the watcher to notify on termination
+  string watcher_address = 4;
+}
+
+message RemoteWatchResponse {}
+
+// RemoteUnWatchRequest cancels a previously registered remote watch.
+message RemoteUnWatchRequest {
+  // Specifies the remote host address of the watchee
+  string host = 1;
+  // Specifies the remote port of the watchee
+  int32 port = 2;
+  // Specifies the watchee actor name
+  string name = 3;
+  // Specifies the full address of the watcher that previously watched the actor
+  string watcher_address = 4;
+}
+
+message RemoteUnWatchResponse {}
+
 message RemoteSpawnRequest {
   // Specifies the remote host address
   string host = 1;

@@ -2303,3 +2303,143 @@ func TestRemoteSpawnChild_EmptyAddressReturnsError(t *testing.T) {
 	require.NoError(t, ps.Shutdown(time.Second))
 	<-done
 }
+
+func TestRemoteWatch_Success(t *testing.T) {
+	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
+		return new(internalpb.RemoteWatchResponse), nil
+	}
+	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteWatchRequest", handler))
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+	done := make(chan error, 1)
+	go func() { done <- ps.Serve() }()
+	pause.For(100 * time.Millisecond)
+	host, portStr, err := net.SplitHostPort(ps.ListenAddr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	r := NewClient(WithClientCompression(remote.NoCompression))
+	defer r.Close()
+
+	watcher := address.New("watcher", "sys", "10.0.0.1", 9000)
+	err = r.RemoteWatch(context.Background(), host, port, "watchee", watcher)
+	require.NoError(t, err)
+
+	require.NoError(t, ps.Shutdown(time.Second))
+	<-done
+}
+
+func TestRemoteWatch_ServerError(t *testing.T) {
+	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
+		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "actor not found"}, nil
+	}
+	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteWatchRequest", handler))
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+	done := make(chan error, 1)
+	go func() { done <- ps.Serve() }()
+	pause.For(100 * time.Millisecond)
+	host, portStr, err := net.SplitHostPort(ps.ListenAddr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	r := NewClient(WithClientCompression(remote.NoCompression))
+	defer r.Close()
+
+	watcher := address.New("watcher", "sys", "10.0.0.1", 9000)
+	err = r.RemoteWatch(context.Background(), host, port, "missing", watcher)
+	require.Error(t, err)
+
+	require.NoError(t, ps.Shutdown(time.Second))
+	<-done
+}
+
+func TestRemoteWatch_InvalidPort(t *testing.T) {
+	r := NewClient()
+	port := int(math.MaxInt32) + 1
+	watcher := address.New("watcher", "sys", "10.0.0.1", 9000)
+
+	err := r.RemoteWatch(context.Background(), "host", port, "watchee", watcher)
+	assert.Error(t, err)
+	assert.ErrorContains(t, err, "out of range")
+}
+
+func TestRemoteWatch_ConnectionRefused(t *testing.T) {
+	r := NewClient()
+	watcher := address.New("watcher", "sys", "10.0.0.1", 9000)
+
+	err := r.RemoteWatch(context.Background(), "host", 1000, "watchee", watcher)
+	assert.Error(t, err)
+}
+
+func TestRemoteUnWatch_Success(t *testing.T) {
+	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
+		return new(internalpb.RemoteUnWatchResponse), nil
+	}
+	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteUnWatchRequest", handler))
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+	done := make(chan error, 1)
+	go func() { done <- ps.Serve() }()
+	pause.For(100 * time.Millisecond)
+	host, portStr, err := net.SplitHostPort(ps.ListenAddr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	r := NewClient(WithClientCompression(remote.NoCompression))
+	defer r.Close()
+
+	watcher := address.New("watcher", "sys", "10.0.0.1", 9000)
+	err = r.RemoteUnWatch(context.Background(), host, port, "watchee", watcher)
+	require.NoError(t, err)
+
+	require.NoError(t, ps.Shutdown(time.Second))
+	<-done
+}
+
+func TestRemoteUnWatch_NotFoundReturnsNoError(t *testing.T) {
+	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
+		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "actor not found"}, nil
+	}
+	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteUnWatchRequest", handler))
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+	done := make(chan error, 1)
+	go func() { done <- ps.Serve() }()
+	pause.For(100 * time.Millisecond)
+	host, portStr, err := net.SplitHostPort(ps.ListenAddr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	r := NewClient(WithClientCompression(remote.NoCompression))
+	defer r.Close()
+
+	watcher := address.New("watcher", "sys", "10.0.0.1", 9000)
+	err = r.RemoteUnWatch(context.Background(), host, port, "missing", watcher)
+	require.NoError(t, err)
+
+	require.NoError(t, ps.Shutdown(time.Second))
+	<-done
+}
+
+func TestRemoteUnWatch_InvalidPort(t *testing.T) {
+	r := NewClient()
+	port := int(math.MaxInt32) + 1
+	watcher := address.New("watcher", "sys", "10.0.0.1", 9000)
+
+	err := r.RemoteUnWatch(context.Background(), "host", port, "watchee", watcher)
+	assert.Error(t, err)
+	assert.ErrorContains(t, err, "out of range")
+}
+
+func TestRemoteUnWatch_ConnectionRefused(t *testing.T) {
+	r := NewClient()
+	watcher := address.New("watcher", "sys", "10.0.0.1", 9000)
+
+	err := r.RemoteUnWatch(context.Background(), "host", 1000, "watchee", watcher)
+	assert.Error(t, err)
+}

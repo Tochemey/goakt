@@ -21,7 +21,7 @@ DOCKER_RUN := docker run --rm \
 	-w $(WORKDIR) \
 	$(IMAGE)
 
-.PHONY: help image test lint unit-test mock protogen certs vendor clean
+.PHONY: help image test lint unit-test mock protogen proto-format proto-lint certs vendor clean
 
 help: ## Show available targets
 	@awk 'BEGIN{FS=":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -60,6 +60,12 @@ protogen: image ## Regenerate protobuf Go code
 		mv gen/test test/data/testpb && \
 		mv gen/internal internal/internalpb && \
 		rm -rf gen'
+
+proto-format: image ## Format proto files with buf
+	$(DOCKER_RUN) buf format -w
+
+proto-lint: image ## Lint proto files with buf
+	$(DOCKER_RUN) buf lint
 
 certs: image ## Regenerate TLS test fixtures under test/data/certs
 	$(DOCKER_RUN) sh -c 'cd test/data/certs && \
