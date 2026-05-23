@@ -70,33 +70,30 @@ jobs:
 
           prev=$(git tag --list 'v*' --sort=-v:refname | head -n 1 || true)
           if [[ -n "${prev}" ]]; then
-            # Contributors: GitHub handles of commit authors since prev tag,
-            # bots filtered out, dedup preserving first-seen order.
-            contribs_file=$(mktemp)
-            gh api "repos/${GITHUB_REPOSITORY}/compare/${prev}...${GITHUB_SHA}" \
-              --jq '.commits[].author.login // empty' > "$contribs_file" 2>/dev/null || true
-            mapfile -t contribs < <(
-              (grep -v '\[bot\]$' "$contribs_file" 2>/dev/null || true) \
-              | awk 'NF && !seen[$0]++'
-            )
-            rm -f "$contribs_file"
-
-            if (( ${#contribs[@]} > 0 )); then
-              n=${#contribs[@]}
-              if (( n == 1 )); then
-                list="@${contribs[0]}"
-              elif (( n == 2 )); then
-                list="@${contribs[0]} and @${contribs[1]}"
-              else
-                list=""
-                for ((i=0; i<n-1; i++)); do
-                  list+="@${contribs[i]}, "
-                done
-                list+="and @${contribs[n-1]}"
-              fi
-              printf '\n### 👥 Contributors\n\nThanks to %s for landing this release.\n' \
-                "$list" >> release-notes.md
+            # Pull Requests:
+            shas_file=$(mktemp)
+            prs_file=$(mktemp)
+            if ! gh api "repos/${GITHUB_REPOSITORY}/compare/${prev}...${GITHUB_SHA}" \
+                  --jq '.commits[].sha' > "$shas_file"; then
+              echo "::warning::compare ${prev}...${GITHUB_SHA} failed; Pull Requests section will be incomplete"
             fi
+
+            while IFS= read -r sha; do
+              [[ -z "$sha" ]] && continue
+              if ! gh api "repos/${GITHUB_REPOSITORY}/commits/${sha}/pulls" \
+                    --jq '.[] | select(.merged_at != null) | "\(.number)\t\(.title)\t\(.user.login)"' \
+                    >> "$prs_file"; then
+                echo "::warning::PR lookup failed for ${sha}; release notes may be missing entries"
+              fi
+            done < "$shas_file"
+            rm -f "$shas_file"
+
+            if [[ -s "$prs_file" ]]; then
+              printf '\n### 🔀 Pull Requests\n\n' >> release-notes.md
+              awk -F'\t' '!seen[$1]++ { printf "- #%s %s by @%s\n", $1, $2, $3 }' \
+                "$prs_file" >> release-notes.md
+            fi
+            rm -f "$prs_file"
 
             printf '\n**Full Changelog**: https://github.com/%s/compare/%s...%s\n' \
               "${GITHUB_REPOSITORY}" "${prev}" "${version}" >> release-notes.md
