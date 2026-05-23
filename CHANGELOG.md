@@ -6,13 +6,13 @@
 
 #### Cluster-aware `PID.Watch` / `PID.UnWatch`
 
-`PID.Watch` and `PID.UnWatch` now work across cluster nodes. Watching a remote actor delivers an `*actor.Terminated` message — through the same `case *Terminated:` arm — as watching a local one, whether the watchee shuts down cleanly or its host node disappears from the cluster.
+`PID.Watch` and `PID.UnWatch` now work across cluster nodes. Watching a remote actor delivers an `*actor.Terminated` message (through the same `case *Terminated:` arm) as watching a local one, whether the watchee shuts down cleanly or its host node disappears from the cluster.
 
 - **Same API, no migration.** Both calls remain `func(cid *PID)`. Existing local-only code is unaffected; the cross-node path activates automatically when the target PID is remote.
 - **Synchronous registration.** When the target is remote, `Watch` blocks on a single round-trip RPC to register the watch on the watchee's host; `UnWatch` reverses it. The deadline is bounded by `WithRemoteWatchTimeout` (default 5s). On failure, no local registration is recorded, so retries are safe.
-- **Clean remote shutdown.** When a remote watchee terminates normally, its node delivers a `Terminated` to every watcher via fire-and-forget remote tell — no synchronous probe, so an unreachable peer cannot stall the watchee's shutdown.
+- **Clean remote shutdown.** When a remote watchee terminates normally, its node delivers a `Terminated` to every watcher via fire-and-forget remote tell, with no synchronous probe, so an unreachable peer cannot stall the watchee's shutdown.
 - **Node-loss notification.** If a node disappears from the cluster, watchers of actors on that host receive a `Terminated` stamped with the cluster-detected loss time, so `Terminated.TerminatedAt()` reflects the actual death moment rather than the receiver's wall clock.
-- **Symmetric teardown.** When a local actor with outstanding remote watches shuts down, the framework notifies each remote peer and clears both sides of the registry — no dangling entries.
+- **Symmetric teardown.** When a local actor with outstanding remote watches shuts down, the framework notifies each remote peer and clears both sides of the registry, leaving no dangling entries.
 
 ```go
 func (a *MyActor) Receive(ctx *actor.ReceiveContext) {
@@ -41,7 +41,7 @@ actor.NewActorSystem("svc",
 
 ### 🔌 Wire protocol
 
-Two new internal RPCs (`RemoteWatchRequest`, `RemoteUnWatchRequest`) back the cross-node watch pair, and `actor.Terminated` is now serializable over the wire (`Terminated.TerminatedAt()` survives the round-trip). All three are framework-internal — public Go types and method signatures are unchanged.
+Two new internal RPCs (`RemoteWatchRequest`, `RemoteUnWatchRequest`) back the cross-node watch pair, and `actor.Terminated` is now serializable over the wire (`Terminated.TerminatedAt()` survives the round-trip). All three are framework-internal; public Go types and method signatures are unchanged.
 
 ## v4.2.4 - 2026-05-15
 

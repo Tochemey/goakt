@@ -1,5 +1,5 @@
 <h2 align="center">
-  <img src="docs/assets/goakt-messaging-distributed-go.png" alt="GoAkt - Distributed Actor framework for Go" width="450"/><br />
+  <img src="docs/assets/goakt-messaging-distributed-go.png" alt="GoAkt - Distributed Actor framework for Go" width="500"/><br />
   Distributed Actor framework for Go
 </h2>
 
@@ -13,60 +13,69 @@
   <a href="./LICENSE"><img src="https://img.shields.io/github/license/Tochemey/goakt" alt="License" /></a>
   <a href="./CLA.md"><img src="https://img.shields.io/badge/CLA-signed%20on%20PR-blue" alt="CLA" /></a>
   <a href="https://github.com/avelino/awesome-go"><img src="https://awesome.re/badge.svg" alt="Awesome" /></a>
-  <a href="https://www.bestpractices.dev/projects/9248"><img src="https://www.bestpractices.dev/projects/9248/badge" alt="OpenSSF Best Practices" /></a>
+  <!-- <a href="https://www.bestpractices.dev/projects/9248"><img src="https://www.bestpractices.dev/projects/9248/badge" alt="OpenSSF Best Practices" /></a> -->
 </p>
 
-Distributed [Go](https://go.dev/) actor framework to build a reactive and distributed system in Go with typed actor messages.
-GoAkt is highly scalable and available when running in cluster mode. It comes with the necessary features require to
-build a distributed actor-based system without sacrificing performance and reliability. With GoAkt, you can instantly create a fast, scalable, distributed system
-across a cluster of computers.
+GoAkt is a distributed actor framework for [Go](https://go.dev/) that lets you build reactive systems with typed messages. It runs as a single process or a cluster of nodes behind the same API, and ships with the primitives (supervision, remoting, clustering, CRDTs, streams, observability) needed to put actor systems into production without re-rolling them yourself.
 
-If you are not familiar with the actor model, the blog post from Brian Storti [here](https://www.brianstorti.com/the-actor-model/) is an excellent and short introduction to the actor model.
-Also, check the reference section at the end of the post for more material regarding the actor model.
+New to the actor model? Brian Storti's [short introduction](https://www.brianstorti.com/the-actor-model/) is a good starting point; the references at the end of that post go deeper.
 
 ## Features
 
-- **Core**
-  - Actor model: concurrent, distributed actors with typed messages
-  - Grains: virtual actors with their own context and lifecycle
-  - Actor hierarchies: parent and child trees via *SpawnChild*, with child to parent navigation
-  - Lifecycle hooks: *PreStart* and *PostStop*, with graceful stop and poison-pill shutdown
-  - Behavior switching: *Become* and *UnBecome*, plus stacked *BecomeStacked* and *UnBecomeStacked* for protocol phases
-  - Messaging: *Tell* and *Ask* for fire-and-forget and request-response flows, plus *BatchTell* and *BatchAsk* for bulk delivery
-  - Forward and PipeTo: forward messages preserving the original sender, and pipe async task results back to an actor
-  - Reentrancy: non-blocking async *Request* with configurable modes and in-flight limits
-  - Stashing: *Stash*, *Unstash*, and *UnstashAll* to defer messages during transient states
-  - Watch and Terminated: monitor actor lifecycle and receive *Terminated* on death
-  - PubSub: topic-based publish and subscribe via a dedicated *TopicActor*, cluster-aware with cross-node dissemination over remoting
-  - Mailboxes: unbounded FIFO, bounded, priority, and fair (segmented) mailboxes
-  - Supervision: one-for-one and one-for-all strategies with *Stop*, *Resume*, *Restart*, and *Escalate* directives, plus retry windows
-  - Passivation: auto-stop idle actors via a time-based strategy
-  - Reinstate: bring a previously stopped actor back online by PID or name
-  - Circuit breaker: *PipeTo* integrates the *breaker* package to short-circuit calls to unhealthy dependencies
-  - Dead letters: unhandled messages captured and published on the event stream
-- **Routing**
-  - Routers: round-robin, random, and fan-out routing strategies
-- **Scheduling**
-  - Timers: *ScheduleOnce*, recurring *Schedule*, and *ScheduleWithCron* for cron-driven message delivery
-  - Schedule lifecycle: *PauseSchedule*, *ResumeSchedule*, and *CancelSchedule* on existing references
-- **Cluster**
-  - Remoting: TCP actor communication across nodes with pluggable serializers (Proto, CBOR, and custom)
-  - TLS and mTLS: configurable transport security for remoting
-  - Clustering: Consul, etcd, Kubernetes, NATS, mDNS, and static discovery
-  - Location transparency: address actors without knowing their node
-  - Relocation: automatic actor relocation on node failure
-  - Cluster singletons: single instance cluster-wide with guardian lifecycle
-  - Multi-datacenter: DC-transparent messaging, pluggable control plane (NATS JetStream, Etcd), and DC-aware placement
-- **CRDTs and Streams**
-  - Distributed data: CRDTs (GCounter, PNCounter, LWWRegister, MVRegister, ORSet, ORMap, and Flag) with delta replication, anti-entropy sync, tombstone deletion, and snapshots
-  - Reactive streams: backpressure-aware stream processing with a composable DSL (map, filter, flatMap, batch, throttle, and fan-out and fan-in), stage fusion, and built-in metrics and tracing
-- **Observability**
-  - Observability: OpenTelemetry metrics, event stream, and dead letters
-  - Event stream: in-process topic-based publish and subscribe for system and user events
-  - Context propagation: pluggable propagation for request-scoped metadata
-- **Extensibility**
-  - Extensions: register system-wide capabilities with *WithExtensions* on the actor system, then resolve them from any actor or grain via *Extension* on the receive context
-  - Dependency injection: attach serializable dependencies to an actor at spawn time with *WithDependencies*, accessed inside *Receive* via *Dependency* and *Dependencies*; the actor system can also *Inject* dependency types for cluster-wide reconstruction on relocation
+### Core
+
+- Actor model: concurrent actors with typed messages
+- Grains: virtual actors with their own context and lifecycle
+- Hierarchies: parent and child trees via `SpawnChild`, with child-to-parent navigation
+- Lifecycle: `PreStart`, `PostStop`, graceful stop, and poison-pill shutdown
+- Behavior switching: `Become` and `UnBecome`, plus stacked `BecomeStacked` and `UnBecomeStacked` for protocol phases
+- Messaging: `Tell`, `Ask`, `BatchTell`, and `BatchAsk` for fire-and-forget, request-response, and bulk delivery
+- Forward and `PipeTo`: forward messages preserving the original sender, and pipe async task results back to an actor
+- Reentrancy: non-blocking async `Request` with configurable modes and in-flight limits
+- Stashing: `Stash`, `Unstash`, and `UnstashAll` to defer messages during transient states
+- Watch and Terminated: monitor actor lifecycle and receive `Terminated` on death
+- PubSub: topic-based publish and subscribe via a dedicated `TopicActor`, cluster-aware with cross-node dissemination over remoting
+- Mailboxes: unbounded FIFO, bounded, priority, and fair (segmented)
+- Supervision: one-for-one and one-for-all strategies with `Stop`, `Resume`, `Restart`, and `Escalate` directives, plus retry windows
+- Passivation: auto-stop idle actors via a time-based strategy
+- Reinstate: bring a previously stopped actor back online by PID or name
+- Circuit breaker: `PipeTo` integrates the `breaker` package to short-circuit calls to unhealthy dependencies
+- Dead letters: unhandled messages captured and published on the event stream
+
+### Routing
+
+- Routers: round-robin, random, and fan-out strategies
+
+### Scheduling
+
+- Timers: `ScheduleOnce`, recurring `Schedule`, and `ScheduleWithCron` for cron-driven message delivery
+- Schedule lifecycle: `PauseSchedule`, `ResumeSchedule`, and `CancelSchedule` on existing references
+
+### Cluster
+
+- Remoting: TCP actor communication across nodes with pluggable serializers (Proto, CBOR, and custom)
+- TLS and mTLS: configurable transport security for remoting
+- Discovery: Consul, etcd, Kubernetes, NATS, mDNS, and static
+- Location transparency: address actors without knowing their node
+- Relocation: automatic actor relocation on node failure
+- Cluster singletons: single instance cluster-wide with guardian lifecycle
+- Multi-datacenter: DC-transparent messaging, pluggable control plane (NATS JetStream, etcd), and DC-aware placement
+
+### CRDTs & Streams
+
+- CRDTs: `GCounter`, `PNCounter`, `LWWRegister`, `MVRegister`, `ORSet`, `ORMap`, and `Flag`, with delta replication, anti-entropy sync, tombstone deletion, and snapshots
+- Reactive streams: backpressure-aware processing with a composable DSL (`map`, `filter`, `flatMap`, `batch`, `throttle`, fan-out and fan-in), stage fusion, and built-in metrics and tracing
+
+### Observability
+
+- OpenTelemetry metrics, event stream, and dead letters
+- Event stream: in-process topic-based publish and subscribe for system and user events
+- Context propagation: pluggable propagation for request-scoped metadata
+
+### Extensibility
+
+- Extensions: register system-wide capabilities with `WithExtensions` on the actor system, then resolve them from any actor or grain via `Extension` on the receive context
+- Dependency injection: attach serializable dependencies to an actor at spawn time with `WithDependencies`, accessed inside `Receive` via `Dependency` and `Dependencies`; the actor system can also `Inject` dependency types for cluster-wide reconstruction on relocation
 
 See [Documentation](https://docs.goakt.dev) for the full feature reference.
 
@@ -78,7 +87,15 @@ go get github.com/tochemey/goakt/v4
 
 ## Examples
 
-Kindly check out the [examples](https://github.com/Tochemey/goakt-examples)' repository.
+See the [examples repository](https://github.com/Tochemey/goakt-examples) for runnable code covering local, remote, and clustered actor systems.
+
+## Architecture
+
+Architecture documents: [Architecture](./architecture/).
+
+## Benchmark
+
+Benchmark suite: [Benchmark](./benchmark/).
 
 ## Support
 
@@ -105,21 +122,13 @@ See [contributing.md](./CONTRIBUTING.md) for prerequisites, setup, and the full 
 
 This framework is used in production by the following projects/companies:
 
-- [Baki Money](https://www.baki.money/): AI-powered Expense Tracking platform that turns receipts into stories...
+- [Baki Money](https://www.baki.money/): AI-powered expense tracking platform that turns receipts into stories.
 - [Event Processor](https://www.v-app.io/iot-builder-3/): Clustered Complex Event Processor (CEP) for IoT data streams.
-
-## Feedback
-
-Kindly use this [issue](https://github.com/Tochemey/goakt/issues/948) to give us your feedback that can help us enhance the framework.
-
-## Benchmark
-
-One can find the benchmark tests here: [Benchmark](./benchmark/)
-
-## Architecture
-
-One can find the architecture documents here: [Architecture](./architecture/)
 
 ## Sponsors
 
 <!-- sponsors --><a href="https://github.com/andrew-werdna"><img src="https:&#x2F;&#x2F;github.com&#x2F;andrew-werdna.png" width="60px" alt="User avatar: Andrew Brown" /></a><!-- sponsors -->
+
+## Feedback
+
+Share feedback on this [tracking issue](https://github.com/Tochemey/goakt/issues/948); it helps shape what we work on next.
