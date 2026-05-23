@@ -4,15 +4,15 @@
 
 ### ✨ New Additions
 
-#### Location-transparent `PID.Watch` / `PID.UnWatch`
+#### Cluster-aware `PID.Watch` / `PID.UnWatch`
 
-`PID.Watch` and `PID.UnWatch` now work across cluster nodes. Watching a remote actor delivers the same `*actor.Terminated` message — through the same `case *Terminated:` arm — as watching a local one, whether the watchee shuts down cleanly or its node disappears from the cluster.
+`PID.Watch` and `PID.UnWatch` now work across cluster nodes. Watching a remote actor delivers an `*actor.Terminated` message — through the same `case *Terminated:` arm — as watching a local one, whether the watchee shuts down cleanly or its host node disappears from the cluster.
 
-- **Method signatures unchanged.** Both calls remain `func(cid *PID)` — no migration needed. Existing local-only code keeps its current behavior; the remote path activates automatically when `cid.IsRemote()`. Calling `Watch`/`UnWatch` on a remote PID handle (i.e., from the wrong node) stays a no-op, as before.
-- **Synchronous setup.** When `cid` is remote, `Watch` blocks on a single round-trip RPC to register the watch on the watchee's host; `UnWatch` does the reverse. The timeout is bounded by `WithRemoteWatchTimeout` (default 5s). RPC failures are logged at debug; on `Watch` failure no local registration is recorded, so `freeWatchees` never tries to drop a watch the remote does not actually hold.
-- **Clean remote shutdown.** When a remote watchee terminates normally, its node delivers a `Terminated` to every remote watcher via a fire-and-forget `RemoteTell`. No synchronous liveness probe is issued, so an unreachable peer can no longer stall the watchee's shutdown.
-- **Crash recovery via `NodeLeft`.** If a remote node disappears from the cluster, the local actor system synthesizes a `Terminated` (stamped with the cluster-detected `nodeLeft.Timestamp`) and delivers it to every local watcher of an actor on that host. Watchers see the same lifecycle event they would on a clean remote shutdown.
-- **Symmetric cleanup on local shutdown.** When a local actor shuts down with outstanding remote watches, `freeWatchees` sends `RemoteUnWatch` to each remote peer and clears both sides of the registry in one shot. No dangling entries linger after termination.
+- **Same API, no migration.** Both calls remain `func(cid *PID)`. Existing local-only code is unaffected; the cross-node path activates automatically when the target PID is remote.
+- **Synchronous registration.** When the target is remote, `Watch` blocks on a single round-trip RPC to register the watch on the watchee's host; `UnWatch` reverses it. The deadline is bounded by `WithRemoteWatchTimeout` (default 5s). On failure, no local registration is recorded, so retries are safe.
+- **Clean remote shutdown.** When a remote watchee terminates normally, its node delivers a `Terminated` to every watcher via fire-and-forget remote tell — no synchronous probe, so an unreachable peer cannot stall the watchee's shutdown.
+- **Node-loss notification.** If a node disappears from the cluster, watchers of actors on that host receive a `Terminated` stamped with the cluster-detected loss time, so `Terminated.TerminatedAt()` reflects the actual death moment rather than the receiver's wall clock.
+- **Symmetric teardown.** When a local actor with outstanding remote watches shuts down, the framework notifies each remote peer and clears both sides of the registry — no dangling entries.
 
 ```go
 func (a *MyActor) Receive(ctx *actor.ReceiveContext) {
@@ -30,7 +30,7 @@ func (a *MyActor) Receive(ctx *actor.ReceiveContext) {
 
 #### `WithRemoteWatchTimeout` option
 
-Bounds the per-call deadline for `PID.Watch` / `PID.UnWatch` round-trip RPCs. Non-positive values are ignored. Defaults to `DefaultRemoteWatchTimeout` (5s).
+Bounds the per-call deadline for the `Watch` / `UnWatch` round-trip RPCs. Non-positive values are ignored. Defaults to 5s.
 
 ```go
 actor.NewActorSystem("svc",
@@ -41,13 +41,7 @@ actor.NewActorSystem("svc",
 
 ### 🔌 Wire protocol
 
-#### `RemoteWatchRequest` / `RemoteUnWatchRequest`
-
-Two new internal proto messages backing the watch / unwatch RPC pair. Carries the watchee's host / port / name plus the watcher's full address so the receiving node can route the eventual `Terminated` back over the remoting layer. Fully internal — not part of the public API.
-
-#### Internal `Terminated` serializer
-
-`actor.Terminated` is now serializable over the wire via a built-in serializer registered automatically inside `actorSystem.setupRemoting`, alongside the existing `PoisonPill` serializer. The serializer uses a magic-tagged binary layout (`[8 magic][4 BE path-len][path UTF-8][8 BE int64 unix-nanos]`) and is never exposed to application code — `Terminated` remains a plain Go struct on both ends. Round-trip preserves the sender's `terminatedAt` so watchers using `Terminated.TerminatedAt()` for ordering or auditing observe the actual death time, not the receiver's wall clock.
+Two new internal RPCs (`RemoteWatchRequest`, `RemoteUnWatchRequest`) back the cross-node watch pair, and `actor.Terminated` is now serializable over the wire (`Terminated.TerminatedAt()` survives the round-trip). All three are framework-internal — public Go types and method signatures are unchanged.
 
 ## v4.2.4 - 2026-05-15
 

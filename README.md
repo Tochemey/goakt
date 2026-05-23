@@ -1,5 +1,5 @@
 <h2 align="center">
-  <img src="docs/assets/goakt-messaging-distributed-go.png" alt="GoAkt - Distributed Actor framework for Go" width="800"/><br />
+  <img src="docs/assets/goakt-messaging-distributed-go.png" alt="GoAkt - Distributed Actor framework for Go" width="450"/><br />
   Distributed Actor framework for Go
 </h2>
 
