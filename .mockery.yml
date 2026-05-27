@@ -1,0 +1,42 @@
+all: false
+template: testify
+formatter: goimports
+structname: "{{.InterfaceName}}"
+filename: "{{.InterfaceName | snakecase}}.go"
+
+packages:
+  github.com/tochemey/goakt/v4/hash:
+    config:
+      dir: mocks/hash
+      pkgname: hash
+    interfaces:
+      Hasher:
+
+  github.com/tochemey/goakt/v4/discovery:
+    config:
+      dir: mocks/discovery
+      pkgname: discovery
+    interfaces:
+      Provider:
+
+  github.com/tochemey/goakt/v4/internal/cluster:
+    config:
+      dir: mocks/cluster
+      pkgname: cluster
+    interfaces:
+      Cluster:
+
+  github.com/tochemey/goakt/v4/extension:
+    config:
+      dir: mocks/extension
+      pkgname: extension
+    interfaces:
+      Dependency:
+      Extension:
+
+  github.com/tochemey/goakt/v4/internal/remoteclient:
+    config:
+      dir: mocks/remoteclient
+      pkgname: remoteclient
+    interfaces:
+      Client:

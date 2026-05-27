@@ -5,7 +5,7 @@ FROM golang:1.26.3-alpine
 
 ARG GOLANGCI_VERSION=v2.12.2
 ARG BUF_VERSION=v1.69.0
-ARG MOCKERY_VERSION=v2.53.6
+ARG MOCKERY_VERSION=v3.7.0
 ARG PROTOC_GEN_GO_VERSION=latest
 ARG PROTOC_GEN_GO_GRPC_VERSION=latest
 ARG PROTOC_GEN_CONNECT_GO_VERSION=latest
@@ -29,7 +29,7 @@ RUN GOBIN=/usr/local/bin go install google.golang.org/protobuf/cmd/protoc-gen-go
  && GOBIN=/usr/local/bin go install connectrpc.com/connect/cmd/protoc-gen-connect-go@${PROTOC_GEN_CONNECT_GO_VERSION} \
  && GOBIN=/usr/local/bin go install github.com/fullstorydev/grpcurl/cmd/grpcurl@${GRPCURL_VERSION} \
  && GOBIN=/usr/local/bin go install github.com/bufbuild/buf/cmd/buf@${BUF_VERSION} \
- && GOBIN=/usr/local/bin go install github.com/vektra/mockery/v2@${MOCKERY_VERSION} \
+ && GOBIN=/usr/local/bin go install github.com/vektra/mockery/v3@${MOCKERY_VERSION} \
  && curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh \
         | sh -s -- -b /usr/local/bin ${GOLANGCI_VERSION}
 

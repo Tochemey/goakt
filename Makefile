@@ -42,14 +42,8 @@ unit-test: image vendor ## Run unit tests with coverage
 		-coverprofile=coverage.out -covermode=atomic -coverpkg=./... \
 		$$(go list ./... | grep -v -E "(goaktpb|mocks|internal/internalpb)")'
 
-mock: image ## Regenerate mocks
-	$(DOCKER_RUN) sh -c '\
-		mockery --dir hash              --name Hasher     --keeptree --exported=true --with-expecter=true --inpackage=true --disable-version-string=true --output ./mocks/hash         --case snake && \
-		mockery --dir discovery         --name Provider   --keeptree --exported=true --with-expecter=true --inpackage=true --disable-version-string=true --output ./mocks/discovery    --case snake && \
-		mockery --dir internal/cluster  --name Cluster    --keeptree --exported=true --with-expecter=true --inpackage=true --disable-version-string=true --output ./mocks/cluster      --case snake && \
-		mockery --dir extension         --name Dependency --keeptree --exported=true --with-expecter=true --inpackage=true --disable-version-string=true --output ./mocks/extension    --case snake && \
-		mockery --dir extension         --name Extension  --keeptree --exported=true --with-expecter=true --inpackage=true --disable-version-string=true --output ./mocks/extension    --case snake && \
-		mockery --dir internal/remoteclient --name Client --keeptree --exported=true --with-expecter=true --inpackage=true --disable-version-string=true --output ./mocks/remoteclient --case snake'
+mock: image ## Regenerate mocks (config in .mockery.yml)
+	$(DOCKER_RUN) mockery
 
 protogen: image ## Regenerate protobuf Go code
 	$(DOCKER_RUN) sh -c '\
