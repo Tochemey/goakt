@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### 🐛 Fixes
+
+- **Panic in `getDeadlettersCount` under concurrent Prometheus scrape.** When `WithMetrics()` was enabled, the per-PID OTel callback asked the deadletter actor for its count on every scrape. The guard `if to.IsRunning()` is not atomic with the subsequent `Ask`: if the deadletter actor transitioned to stopping in that window, `Ask` returned `(nil, ErrDead)`, the error was discarded, and the bare type assertion `message.(*commands.DeadlettersCountResponse)` panicked on the `nil` reply, taking down the process during `Registry.Gather`. `getDeadlettersCount` now checks the `Ask` error, a `nil` reply, and the type assertion before reading `TotalCount`, returning `0` on any failure, matching the safe pattern already used by `actorSystem.getSetDeadlettersCount`.
+- **Leaked OTel metrics callback under high actor churn.** `registerMetrics` discarded the `Registration` handle returned by `meter.RegisterCallback`, so the callback outlived the actor and kept firing on every scrape for every PID that had ever existed, accumulating with each spawn/stop cycle and compounding the panic above. The handle is now stored on the `PID` (guarded by `fieldsLocker`) and unregistered in `doStop`, so the callback is released on every termination path (graceful shutdown and passivation). `registerMetrics` also unregisters any prior handle before installing a new one, so restarting an actor no longer leaks a second live registration.
+
 ## v4.2.5 - 2026-05-23
 
 ### ✨ New Additions
