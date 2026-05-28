@@ -142,6 +142,23 @@ func (sb *safeBuffer) Reset() {
 	sb.buf.Reset()
 }
 
+// wrongDeadletterResponder replies to every request with a message type other
+// than *commands.DeadlettersCountResponse. It is used to drive the type
+// assertion guard in getDeadlettersCount.
+type wrongDeadletterResponder struct{}
+
+var _ Actor = (*wrongDeadletterResponder)(nil)
+
+func (a *wrongDeadletterResponder) PreStart(*Context) error { return nil }
+func (a *wrongDeadletterResponder) PostStop(*Context) error { return nil }
+func (a *wrongDeadletterResponder) Receive(ctx *ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *PostStart:
+	default:
+		ctx.Response(new(testpb.Reply))
+	}
+}
+
 // MockActor is an actor that helps run various test scenarios
 type MockActor struct{}
 
@@ -2384,12 +2401,25 @@ func (m *manualMeterProvider) Meter(_ string, _ ...otelmetric.MeterOption) otelm
 
 type manualMeter struct {
 	otelmetric.Meter
-	callbacks []otelmetric.Callback
+	callbacks    []otelmetric.Callback
+	unregistered int
 }
 
 func (m *manualMeter) RegisterCallback(cb otelmetric.Callback, _ ...otelmetric.Observable) (otelmetric.Registration, error) {
 	m.callbacks = append(m.callbacks, cb)
-	return noopmetric.Registration{}, nil
+	return &trackingRegistration{meter: m}, nil
+}
+
+// trackingRegistration records when a callback registration is unregistered so
+// tests can assert that metrics callbacks are released on actor shutdown.
+type trackingRegistration struct {
+	noopmetric.Registration
+	meter *manualMeter
+}
+
+func (r *trackingRegistration) Unregister() error {
+	r.meter.unregistered++
+	return nil
 }
 
 // immediateMeter triggers the callback at registration time.

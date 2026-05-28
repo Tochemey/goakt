@@ -4658,6 +4658,37 @@ func TestNewPID(t *testing.T) {
 		}
 		require.NotEmpty(t, observer.records)
 	})
+	t.Run("With metrics callback unregistered on shutdown", func(t *testing.T) {
+		ctx := context.Background()
+
+		prevProvider := otel.GetMeterProvider()
+		meterProvider := newManualMeterProvider()
+		otel.SetMeterProvider(meterProvider)
+		t.Cleanup(func() { otel.SetMeterProvider(prevProvider) })
+
+		sys, err := NewActorSystem("testSys",
+			WithLogger(log.DiscardLogger),
+			WithMetrics())
+		require.NoError(t, err)
+		require.NotNil(t, sys)
+
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { require.NoError(t, sys.Stop(ctx)) })
+
+		manual, ok := meterProvider.meter.(*manualMeter)
+		require.True(t, ok)
+
+		pid, err := sys.Spawn(ctx, "metrics-actor", NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		before := manual.unregistered
+		require.NoError(t, pid.Shutdown(ctx))
+
+		// stopping the actor must release its metrics callback so it no longer
+		// fires on subsequent scrapes.
+		require.Equal(t, before+1, manual.unregistered)
+	})
 }
 
 func TestLogger(t *testing.T) {
@@ -4716,6 +4747,52 @@ func TestDeadletterCountMetric(t *testing.T) {
 	err = sys.Stop(ctx)
 	assert.NoError(t, err)
 }
+
+func TestDeadletterCountNoPanicWhenAskFails(t *testing.T) {
+	ctx := context.TODO()
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	require.NoError(t, sys.Start(ctx))
+
+	pause.For(time.Second)
+
+	actorRef, err := sys.Spawn(ctx, "actorName", NewMockActor())
+	require.NoError(t, err)
+	require.NotNil(t, actorRef)
+
+	// the deadletter actor is still running, but a cancelled context makes the
+	// internal Ask return (nil, err). The count must be reported as 0 instead
+	// of panicking on a type assertion against a nil reply (see issue #1189).
+	cancelledCtx, cancel := context.WithCancel(ctx)
+	cancel()
+
+	require.NotPanics(t, func() {
+		require.EqualValues(t, 0, actorRef.getDeadlettersCount(cancelledCtx))
+	})
+
+	// an unexpected reply type from the deadletter actor must also report 0
+	// rather than panicking on the type assertion.
+	wrongResponder, err := sys.Spawn(ctx, "wrongResponder", &wrongDeadletterResponder{})
+	require.NoError(t, err)
+
+	system, ok := sys.(*actorSystem)
+	require.True(t, ok)
+	system.locker.Lock()
+	system.deadletter = wrongResponder
+	system.locker.Unlock()
+
+	require.NotPanics(t, func() {
+		require.EqualValues(t, 0, actorRef.getDeadlettersCount(ctx))
+	})
+
+	// once the deadletter actor is no longer running the count is reported as 0.
+	require.NoError(t, wrongResponder.Shutdown(ctx))
+	require.EqualValues(t, 0, actorRef.getDeadlettersCount(ctx))
+
+	require.NoError(t, sys.Stop(ctx))
+}
+
 func TestWatch(t *testing.T) {
 	ctx := context.TODO()
 	host := "127.0.0.1"

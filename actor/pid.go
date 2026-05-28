@@ -218,6 +218,11 @@ type PID struct {
 	singletonSpec *singletonSpec
 
 	metricProvider *metric.Provider
+
+	// metricRegistration holds the OTel callback registration so it can be
+	// unregistered when the actor stops. Guarded by fieldsLocker. Without this
+	// the callback outlives the actor and keeps firing on every scrape.
+	metricRegistration otelmetric.Registration
 }
 
 var (
@@ -2562,6 +2567,10 @@ func (pid *PID) unsetBehaviorStacked() {
 func (pid *PID) doStop(ctx context.Context) error {
 	pid.cancelInFlightRequests(gerrors.ErrRequestCanceled)
 
+	// stop the OTel metrics callback so it no longer fires on scrapes once the
+	// actor is gone, preventing callback accumulation under high actor churn.
+	pid.unregisterMetrics()
+
 	defer func() {
 		pid.setState(runningState, false)
 		pid.reset()
@@ -2954,12 +2963,18 @@ func (pid *PID) getDeadlettersCount(ctx context.Context) int64 {
 		}
 	)
 	if to.IsRunning() {
-		// ask the deadletter actor for the count
-		// using the default ask timeout
-		// note: no need to check for error because this call is internal
-		message, _ := from.Ask(ctx, to, message, DefaultAskTimeout)
-		// cast the response received from the deadletter
-		deadlettersCount := message.(*commands.DeadlettersCountResponse)
+		// ask the deadletter actor for the count using the default ask timeout.
+		// IsRunning is not atomic with Ask: if the deadletter actor transitions
+		// to stopping between the guard and the reply, Ask returns (nil, ErrDead).
+		// Discard the count in that case instead of asserting on a nil reply.
+		resp, err := from.Ask(ctx, to, message, DefaultAskTimeout)
+		if err != nil || resp == nil {
+			return 0
+		}
+		deadlettersCount, ok := resp.(*commands.DeadlettersCountResponse)
+		if !ok || deadlettersCount == nil {
+			return 0
+		}
 		return deadlettersCount.TotalCount
 	}
 	return 0
@@ -3156,7 +3171,11 @@ func (pid *PID) registerMetrics() error {
 			otelmetric.WithAttributes(attribute.String("actor.address", pid.ID())),
 		}
 
-		_, err = meter.RegisterCallback(func(ctx context.Context, observer otelmetric.Observer) error {
+		// unregister any previous callback before registering a new one so
+		// that restarting an actor does not leak a second live registration.
+		pid.unregisterMetrics()
+
+		registration, err := meter.RegisterCallback(func(ctx context.Context, observer otelmetric.Observer) error {
 			observer.ObserveInt64(metrics.ChildrenCount(), int64(pid.ChildrenCount()), observeOptions...)
 			observer.ObserveInt64(metrics.StashSize(), int64(pid.StashSize()), observeOptions...)
 			observer.ObserveInt64(metrics.RestartCount(), int64(pid.RestartCount()), observeOptions...)
@@ -3177,10 +3196,31 @@ func (pid *PID) registerMetrics() error {
 			metrics.FailureCount(),
 			metrics.ReinstateCount(),
 		)
+		if err != nil {
+			return err
+		}
 
-		return err
+		pid.fieldsLocker.Lock()
+		pid.metricRegistration = registration
+		pid.fieldsLocker.Unlock()
 	}
 	return nil
+}
+
+// unregisterMetrics unregisters the OTel callback previously installed by
+// registerMetrics, if any. It is safe to call multiple times and when metrics
+// were never registered.
+func (pid *PID) unregisterMetrics() {
+	pid.fieldsLocker.Lock()
+	registration := pid.metricRegistration
+	pid.metricRegistration = nil
+	pid.fieldsLocker.Unlock()
+
+	if registration != nil {
+		// the error returned by Unregister is non-actionable here; the handle
+		// is discarded regardless so the callback stops firing.
+		_ = registration.Unregister()
+	}
 }
 
 // remoteTell sends a message to an actor remotely without expecting any reply
