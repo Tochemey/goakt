@@ -1,5 +1,35 @@
 # Changelog
 
+## [Unreleased]
+
+### ✨ New Additions
+
+#### `RelocationFailed` event
+
+When a departed node's actors or grains cannot be re-deployed during cluster rebalancing, the relocator now publishes a `RelocationFailed` event to the system event stream instead of silently giving up. Relocation is intentionally not retried (a retry would block the serialized relocator and re-run already-completed spawns, lengthening the recovery window for every other node), so subscribe to this event to drive your own recovery, such as re-spawning the affected actors or alerting.
+
+```go
+subscriber, _ := sys.Subscribe()
+defer sys.Unsubscribe(subscriber)
+
+for msg := range subscriber.Iterator() {
+    if e, ok := msg.Payload().(*actor.RelocationFailed); ok {
+        log.Printf("relocation failed: node=%s actors=%v grains=%v err=%v",
+            e.Address(), e.Actors(), e.Grains(), e.Error())
+    }
+}
+```
+
+### 🚀 Performance
+
+- **Parallel actor and grain relocation.** The relocator previously issued every remote spawn and grain activation for a departed node sequentially from a single goroutine, so recovery time grew linearly with the number of relocated actors. Spawns and activations now run concurrently with a bounded worker pool (`defaultRelocationConcurrency`), capping the fan-out of remote RPCs while shortening the rebalance window for nodes that hosted many actors.
+
+### 🐛 Fixes
+
+- **Failed rebalance no longer wedges future relocations.** When a rebalance returned early on error (cluster peer lookup failure, or a spawn failure surfaced through the wait group), the `relocating` flag was cleared only on the success path, so it stayed set forever and permanently blocked every subsequent cluster rebalance. The relocator now always releases the flag on the failure path.
+- **Busy-spin removed from the rebalancing loop.** While a relocation was in flight, the rebalancing loop re-queued the pending peer state and immediately re-read it, spinning a CPU core for the entire duration of the in-flight rebalance. The loop now blocks on a condition variable until the active relocation completes, preserving one-at-a-time serialization without the spin, and wakes promptly on shutdown.
+- **Departed node's peer state removed on relocation failure.** The leader previously kept the departed node's peer-state snapshot in the cluster store when relocation failed, leaving an orphaned entry that nothing would ever consume. The failure path now deletes it, mirroring the success path.
+
 ## v4.2.6 - 2026-05-29
 
 ### 🐛 Fixes
