@@ -505,3 +505,49 @@ func NewAdjustRouterPoolSize(poolSize int32) *AdjustRouterPoolSize {
 
 // PoolSize returns the signed delta to apply to the router's pool.
 func (a *AdjustRouterPoolSize) PoolSize() int32 { return a.poolSize }
+
+// RelocationFailed is a system-level message used to indicate that a relocation process has failed.
+type RelocationFailed struct {
+	// the address of the departed node
+	address   string
+	timestamp time.Time
+	actors    []string
+	grains    []string
+	err       error
+}
+
+// NewRelocationFailed creates a new RelocationFailed message.
+//
+// This system-level message indicates that a relocation attempt (typically triggered
+// by a departed/unreachable node) could not be completed.
+//
+// Parameters:
+//   - address: the address of the node whose departure triggered the relocation.
+//   - timestamp: when the relocation failure was detected/recorded.
+//   - actors: the actor paths impacted by the failed relocation (may be empty).
+//   - grains: the grain IDs impacted by the failed relocation (may be empty).
+//   - err: the underlying error that caused the relocation to fail.
+func NewRelocationFailed(address string, timestamp time.Time, actors, grains []string, err error) *RelocationFailed {
+	return &RelocationFailed{
+		address:   address,
+		timestamp: timestamp,
+		actors:    actors,
+		grains:    grains,
+		err:       err,
+	}
+}
+
+// Address returns the address of the departed node that caused the relocation failure.
+func (r *RelocationFailed) Address() string { return r.address }
+
+// Timestamp returns the time when the relocation failure was detected.
+func (r *RelocationFailed) Timestamp() time.Time { return r.timestamp }
+
+// Actors returns the list of actor paths that were affected by the relocation failure.
+func (r *RelocationFailed) Actors() []string { return r.actors }
+
+// Grains returns the list of grain IDs that were affected by the relocation failure.
+func (r *RelocationFailed) Grains() []string { return r.grains }
+
+// Error returns the error that caused the relocation failure.
+func (r *RelocationFailed) Error() error { return r.err }

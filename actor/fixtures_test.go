@@ -1588,6 +1588,7 @@ func MockReplicationTestSystem(clusterMock *mockcluster.Cluster) *actorSystem {
 		noSender:       noSender,
 		dispatcher:     newDispatcher(dispatcherWorkerCount(), dispatcherThroughput),
 	}
+	sys.relocatingCond = sync.NewCond(&sys.relocatingMu)
 	sys.dispatcher.start()
 
 	sys.started.Store(true)
@@ -2261,9 +2262,12 @@ func (x *MockMeterProvider) Meter(name string, opts ...otelmetric.MeterOption) o
 }
 
 type recordingPeerStateStore struct {
-	err      error
-	called   bool
-	lastPeer *internalpb.PeerState
+	err          error
+	called       bool
+	lastPeer     *internalpb.PeerState
+	deleteCalled bool
+	deletedAddr  string
+	deleteErr    error
 }
 
 func (s *recordingPeerStateStore) PersistPeerState(_ context.Context, peer *internalpb.PeerState) error {
@@ -2276,8 +2280,10 @@ func (s *recordingPeerStateStore) GetPeerState(_ context.Context, _ string) (*in
 	return nil, false
 }
 
-func (s *recordingPeerStateStore) DeletePeerState(_ context.Context, _ string) error {
-	return nil
+func (s *recordingPeerStateStore) DeletePeerState(_ context.Context, address string) error {
+	s.deleteCalled = true
+	s.deletedAddr = address
+	return s.deleteErr
 }
 
 func (s *recordingPeerStateStore) Close() error {

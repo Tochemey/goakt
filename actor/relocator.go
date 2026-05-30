@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -41,6 +42,12 @@ import (
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/remote"
 )
+
+// defaultRelocationConcurrency bounds the number of concurrent spawn and grain
+// activation operations performed during a single cluster rebalance. It caps the
+// fan-out of remote RPCs so relocating a node that hosted a large number of
+// actors does not trigger an unbounded burst of goroutines and peer connections.
+const defaultRelocationConcurrency = 10
 
 // relocator is a system actor that helps rebalance cluster
 // when the cluster topology changes
@@ -81,14 +88,19 @@ func (r *relocator) Relocate(ctx *ReceiveContext) {
 		rctx := context.WithoutCancel(ctx.Context())
 		peerState := msg.GetPeerState()
 
+		address := net.JoinHostPort(peerState.GetHost(), strconv.Itoa(int(peerState.GetPeersPort())))
+		actors := peerState.GetActors()
+		grains := peerState.GetGrains()
+
 		peers, err := r.pid.ActorSystem().getCluster().Peers(rctx)
 		if err != nil {
-			ctx.Err(errors.NewInternalError(err))
+			r.abortRelocation(ctx, address, actors, grains, errors.NewInternalError(err))
 			return
 		}
 
 		leaderShares, peersShares := r.allocateActors(len(peers)+1, peerState)
 		eg, egCtx := errgroup.WithContext(rctx)
+		eg.SetLimit(defaultRelocationConcurrency)
 		logger := r.pid.getLogger()
 
 		r.relocateActors(egCtx, eg, leaderShares, peersShares, peers)
@@ -102,8 +114,7 @@ func (r *relocator) Relocate(ctx *ReceiveContext) {
 		if len(leaderShares) > 0 || len(peersShares) > 0 || len(peerState.GetGrains()) > 0 {
 			if err := eg.Wait(); err != nil {
 				logger.Errorf("cluster rebalancing failed: %v (hint: check cluster quorum, peer connectivity)", err)
-				ctx.Err(err)
-				// TODO: let us add the supervisor to handle this error
+				r.abortRelocation(ctx, address, actors, grains, err)
 				return
 			}
 		}
@@ -114,46 +125,89 @@ func (r *relocator) Relocate(ctx *ReceiveContext) {
 	}
 }
 
-func (r *relocator) relocateActors(ctx context.Context, eg *errgroup.Group, leaderShares []*internalpb.Actor, peersShares [][]*internalpb.Actor, peers []*cluster.Peer) {
-	if len(leaderShares) > 0 {
-		eg.Go(func() error {
-			for _, actor := range leaderShares {
-				addr, err := address.Parse(actor.GetAddress())
-				if err != nil {
-					return errors.NewSpawnError(err)
-				}
+// abortRelocation gives up on a failed rebalance. Relocation is deliberately not
+// retried: re-running it would block the serialized relocator behind backoff and
+// re-do already-completed spawns, lengthening the recovery window for every other
+// node. Instead the failure is surfaced as a RelocationFailed event on the system
+// event stream so the application can subscribe and decide how to react.
+//
+// Releasing the flag is essential: the success path clears it via
+// RebalanceComplete in the system guardian, so a failed rebalance that returns
+// early would otherwise leave relocating set forever and permanently block every
+// future cluster rebalance. The departed node's peer state is removed from the
+// cluster store, mirroring the success path: relocation is not retried and the
+// RelocationFailed event already carries the affected actors and grains, so the
+// snapshot has no remaining consumer.
+func (r *relocator) abortRelocation(ctx *ReceiveContext, address string, actors map[string]*internalpb.Actor, grains map[string]*internalpb.Grain, err error) {
+	r.pid.ActorSystem().completeRelocation()
+	r.publishRelocationFailed(address, actors, grains, err)
 
-				if !isSystemName(addr.Name()) {
-					if err := r.recreateLocally(ctx, actor, true); err != nil {
-						return errors.NewSpawnError(err)
-					}
-				}
+	if derr := r.pid.ActorSystem().getClusterStore().DeletePeerState(context.WithoutCancel(ctx.Context()), address); derr != nil {
+		r.pid.getLogger().Errorf("failed to remove peer=%s state after failed relocation: %v (hint: check cluster store)", address, derr)
+	}
+
+	ctx.Err(err)
+}
+
+// publishRelocationFailed emits a RelocationFailed event describing the departed
+// node and the actors and grains that could not be relocated.
+func (r *relocator) publishRelocationFailed(address string, actors map[string]*internalpb.Actor, grains map[string]*internalpb.Grain, err error) {
+	if r.pid.eventsStream == nil {
+		return
+	}
+
+	actorNames := make([]string, 0, len(actors))
+	for _, actor := range actors {
+		actorNames = append(actorNames, actor.GetAddress())
+	}
+
+	grainIDs := make([]string, 0, len(grains))
+	for _, grain := range grains {
+		grainIDs = append(grainIDs, grain.GetGrainId().GetValue())
+	}
+
+	r.pid.eventsStream.Publish(eventsTopic, NewRelocationFailed(address, time.Now().UTC(), actorNames, grainIDs, err))
+}
+
+func (r *relocator) relocateActors(ctx context.Context, eg *errgroup.Group, leaderShares []*internalpb.Actor, peersShares [][]*internalpb.Actor, peers []*cluster.Peer) {
+	// recreate the leader's share locally, one bounded goroutine per actor
+	for _, actor := range leaderShares {
+		eg.Go(func() error {
+			addr, err := address.Parse(actor.GetAddress())
+			if err != nil {
+				return errors.NewSpawnError(err)
+			}
+
+			if isSystemName(addr.Name()) {
+				return nil
+			}
+
+			if err := r.recreateLocally(ctx, actor, true); err != nil {
+				return errors.NewSpawnError(err)
 			}
 			return nil
 		})
 	}
 
-	if len(peersShares) > 0 {
-		eg.Go(func() error {
-			for i := 1; i < len(peersShares); i++ {
-				actors := peersShares[i]
-				peer := peers[i-1]
-				for _, actor := range actors {
-					addr, err := address.Parse(actor.GetAddress())
-					if err != nil {
-						return errors.NewSpawnError(err)
-					}
-
-					notSingleton := actor.GetSingleton() == nil
-					if !isSystemName(addr.Name()) && notSingleton && actor.GetRelocatable() {
-						if err := r.spawnRemoteActor(ctx, actor, peer); err != nil {
-							return err
-						}
-					}
+	// spawn each peer's share on its target peer, one bounded goroutine per actor
+	for i := 1; i < len(peersShares); i++ {
+		actors := peersShares[i]
+		peer := peers[i-1]
+		for _, actor := range actors {
+			eg.Go(func() error {
+				addr, err := address.Parse(actor.GetAddress())
+				if err != nil {
+					return errors.NewSpawnError(err)
 				}
-			}
-			return nil
-		})
+
+				notSingleton := actor.GetSingleton() == nil
+				if isSystemName(addr.Name()) || !notSingleton || !actor.GetRelocatable() {
+					return nil
+				}
+
+				return r.spawnRemoteActor(ctx, actor, peer)
+			})
+		}
 	}
 }
 
@@ -209,35 +263,34 @@ func (r *relocator) relocateGrains(ctx context.Context, eg *errgroup.Group, lead
 	if len(leaderGrains) > 0 {
 		leaderHost := r.pid.ActorSystem().Host()
 		leaderPort := int32(r.pid.ActorSystem().Port())
-		eg.Go(func() error {
-			for _, grain := range leaderGrains {
-				if !isSystemName(grain.GetGrainId().GetName()) && !grain.GetDisableRelocation() {
-					grain.Host = leaderHost
-					grain.Port = leaderPort
-					if err := r.pid.ActorSystem().recreateGrain(ctx, grain); err != nil {
-						return errors.NewSpawnError(err)
-					}
+		// activate the leader's share locally, one bounded goroutine per grain
+		for _, grain := range leaderGrains {
+			eg.Go(func() error {
+				if isSystemName(grain.GetGrainId().GetName()) || grain.GetDisableRelocation() {
+					return nil
 				}
-			}
-			return nil
-		})
+				grain.Host = leaderHost
+				grain.Port = leaderPort
+				if err := r.pid.ActorSystem().recreateGrain(ctx, grain); err != nil {
+					return errors.NewSpawnError(err)
+				}
+				return nil
+			})
+		}
 	}
 
-	if len(peersGrains) > 0 {
-		eg.Go(func() error {
-			for i := 1; i < len(peersGrains); i++ {
-				grains := peersGrains[i]
-				peer := peers[i-1]
-				for _, grain := range grains {
-					if !isSystemName(grain.GetGrainId().GetName()) && !grain.GetDisableRelocation() {
-						if err := r.activateRemoteGrain(ctx, grain, peer); err != nil {
-							return err
-						}
-					}
+	// activate each peer's share on its target peer, one bounded goroutine per grain
+	for i := 1; i < len(peersGrains); i++ {
+		grains := peersGrains[i]
+		peer := peers[i-1]
+		for _, grain := range grains {
+			eg.Go(func() error {
+				if isSystemName(grain.GetGrainId().GetName()) || grain.GetDisableRelocation() {
+					return nil
 				}
-			}
-			return nil
-		})
+				return r.activateRemoteGrain(ctx, grain, peer)
+			})
+		}
 	}
 }
 

@@ -40,6 +40,7 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/eventstream"
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
@@ -85,8 +86,12 @@ func TestRelocatorPeersError(t *testing.T) {
 	expectedErr := stdErrors.New("cluster failure")
 	clusterMock.EXPECT().Peers(mock.Anything).Return(nil, expectedErr).Once()
 
+	store := &recordingPeerStateStore{}
 	sys.cluster = clusterMock
+	sys.clusterStore = store
 	sys.relocationEnabled.Store(true)
+	// simulate the flag set by rebalancingLoop before dispatching the rebalance
+	sys.relocating.Store(true)
 
 	actor := &relocator{
 		remoting: remoteclient.NewClient(),
@@ -106,6 +111,189 @@ func TestRelocatorPeersError(t *testing.T) {
 	var internalErr *errors.InternalError
 	require.ErrorAs(t, errRecorded, &internalErr)
 	require.Contains(t, errRecorded.Error(), expectedErr.Error())
+
+	// a failed rebalance must release the relocating flag, otherwise every
+	// future cluster rebalance would be permanently blocked
+	require.False(t, sys.relocating.Load())
+
+	// the departed node's peer state must be removed from the cluster store
+	require.True(t, store.deleteCalled)
+}
+
+func TestRelocatorReleasesFlagOnSpawnFailure(t *testing.T) {
+	ctx := context.Background()
+
+	system, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NotNil(t, system)
+
+	sys := system.(*actorSystem)
+
+	clusterMock := mockscluster.NewCluster(t)
+	// single-node cluster: no peers, so every relocated actor lands on the leader
+	clusterMock.EXPECT().Peers(mock.Anything).Return(nil, nil).Once()
+
+	store := &recordingPeerStateStore{}
+	sys.cluster = clusterMock
+	sys.clusterStore = store
+	sys.relocationEnabled.Store(true)
+	sys.relocating.Store(true)
+
+	// subscribe to the event stream so we can assert the RelocationFailed event
+	stream := eventstream.New()
+	consumer := stream.AddSubscriber()
+	stream.Subscribe(consumer, eventsTopic)
+
+	actor := &relocator{
+		remoting: remoteclient.NewClient(),
+		pid: &PID{
+			actorSystem:  system,
+			logger:       log.DiscardLogger,
+			eventsStream: stream,
+		},
+	}
+
+	// an unparsable actor address makes the spawn goroutine fail, surfacing
+	// through eg.Wait() and exercising the second abort path in Relocate
+	peerState := &internalpb.PeerState{
+		Host:      "127.0.0.1",
+		PeersPort: 9000,
+		Actors: map[string]*internalpb.Actor{
+			"broken": {Address: "invalid-address", Relocatable: true},
+		},
+	}
+	msg := &internalpb.Rebalance{PeerState: peerState}
+	receiveCtx := newReceiveContext(ctx, nil, actor.pid, msg)
+
+	actor.Relocate(receiveCtx)
+
+	errRecorded := receiveCtx.getError()
+	require.Error(t, errRecorded)
+
+	var spawnErr *errors.SpawnError
+	require.ErrorAs(t, errRecorded, &spawnErr)
+
+	require.False(t, sys.relocating.Load())
+
+	// the failure must be surfaced on the event stream rather than retried
+	var events []*RelocationFailed
+	for message := range consumer.Iterator() {
+		if event, ok := message.Payload().(*RelocationFailed); ok {
+			events = append(events, event)
+		}
+	}
+	require.Len(t, events, 1)
+	assert.Equal(t, "127.0.0.1:9000", events[0].Address())
+	assert.Equal(t, []string{"invalid-address"}, events[0].Actors())
+	require.Error(t, events[0].Error())
+
+	// the departed node's peer state must be removed from the cluster store
+	require.True(t, store.deleteCalled)
+	assert.Equal(t, "127.0.0.1:9000", store.deletedAddr)
+}
+
+// TestRelocatorPublishRelocationFailedIncludesActorsAndGrains verifies the
+// RelocationFailed event carries the departed node's address together with the
+// affected actor addresses and grain ids.
+func TestRelocatorPublishRelocationFailedIncludesActorsAndGrains(t *testing.T) {
+	system, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	stream := eventstream.New()
+	consumer := stream.AddSubscriber()
+	stream.Subscribe(consumer, eventsTopic)
+
+	actor := &relocator{
+		pid: &PID{
+			actorSystem:  system,
+			logger:       log.DiscardLogger,
+			eventsStream: stream,
+		},
+	}
+
+	actors := map[string]*internalpb.Actor{
+		"a1": {Address: "actor-1"},
+	}
+	grains := map[string]*internalpb.Grain{
+		"g1": {GrainId: &internalpb.GrainId{Value: "grain-1"}},
+	}
+
+	actor.publishRelocationFailed("127.0.0.1:9000", actors, grains, stdErrors.New("boom"))
+
+	var events []*RelocationFailed
+	for message := range consumer.Iterator() {
+		if event, ok := message.Payload().(*RelocationFailed); ok {
+			events = append(events, event)
+		}
+	}
+	require.Len(t, events, 1)
+	assert.Equal(t, "127.0.0.1:9000", events[0].Address())
+	assert.Equal(t, []string{"actor-1"}, events[0].Actors())
+	assert.Equal(t, []string{"grain-1"}, events[0].Grains())
+	require.Error(t, events[0].Error())
+}
+
+// TestRelocatorPublishRelocationFailedWithoutEventStream verifies the publish
+// path is a safe no-op when no event stream is configured on the relocator pid.
+func TestRelocatorPublishRelocationFailedWithoutEventStream(t *testing.T) {
+	actor := &relocator{pid: &PID{}} // eventsStream is nil
+
+	require.NotPanics(t, func() {
+		actor.publishRelocationFailed("127.0.0.1:9000",
+			map[string]*internalpb.Actor{"a1": {Address: "actor-1"}}, nil, stdErrors.New("boom"))
+	})
+}
+
+// TestRelocatorAbortRelocationToleratesDeletePeerStateError verifies that a
+// failure to delete the departed node's peer state does not prevent the relocator
+// from releasing the relocating flag, publishing the failure event, or recording
+// the original relocation error.
+func TestRelocatorAbortRelocationToleratesDeletePeerStateError(t *testing.T) {
+	ctx := context.Background()
+
+	system, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	sys := system.(*actorSystem)
+
+	store := &recordingPeerStateStore{deleteErr: stdErrors.New("store down")}
+	sys.clusterStore = store
+	sys.relocating.Store(true)
+
+	stream := eventstream.New()
+	consumer := stream.AddSubscriber()
+	stream.Subscribe(consumer, eventsTopic)
+
+	actor := &relocator{
+		pid: &PID{
+			actorSystem:  system,
+			logger:       log.DiscardLogger,
+			eventsStream: stream,
+		},
+	}
+
+	originalErr := errors.NewSpawnError(stdErrors.New("spawn boom"))
+	receiveCtx := newReceiveContext(ctx, nil, actor.pid, new(internalpb.Rebalance))
+
+	actor.abortRelocation(receiveCtx, "127.0.0.1:9000",
+		map[string]*internalpb.Actor{"a1": {Address: "actor-1"}}, nil, originalErr)
+
+	// flag released even though the delete failed
+	require.False(t, sys.relocating.Load())
+	// the delete was attempted
+	require.True(t, store.deleteCalled)
+	assert.Equal(t, "127.0.0.1:9000", store.deletedAddr)
+	// the original spawn error is recorded, not the delete error
+	var spawnErr *errors.SpawnError
+	require.ErrorAs(t, receiveCtx.getError(), &spawnErr)
+	// the failure event is still published
+	var events []*RelocationFailed
+	for message := range consumer.Iterator() {
+		if event, ok := message.Payload().(*RelocationFailed); ok {
+			events = append(events, event)
+		}
+	}
+	require.Len(t, events, 1)
 }
 
 func TestRelocatorSpawnRemoteActorActorExistsError(t *testing.T) {
