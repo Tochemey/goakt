@@ -859,7 +859,11 @@ type actorSystem struct {
 	startedAt        atomic.Int64
 	relocating       atomic.Bool
 	relocatingLocker sync.Mutex
-	shutdownHooks    []ShutdownHook
+	// relocatingMu/relocatingCond let rebalancingLoop block until an in-flight
+	// relocation completes instead of busy re-queueing the pending peer state.
+	relocatingMu   sync.Mutex
+	relocatingCond *sync.Cond
+	shutdownHooks  []ShutdownHook
 
 	actorsCounter      atomic.Uint64
 	deadlettersCounter atomic.Uint64
@@ -973,6 +977,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 
 	system.startedAt.Store(0)
 	system.relocating.Store(false)
+	system.relocatingCond = sync.NewCond(&system.relocatingMu)
 	system.actorsCounter.Store(0)
 	system.deadlettersCounter.Store(0)
 	system.shuttingDown.Store(false)
@@ -2194,7 +2199,10 @@ func (x *actorSystem) getRelocator() *PID {
 }
 
 func (x *actorSystem) completeRelocation() {
+	x.relocatingMu.Lock()
 	x.relocating.Store(false)
+	x.relocatingCond.Signal()
+	x.relocatingMu.Unlock()
 }
 
 // putActorOnCluster broadcasts the newly (re)spawned actor into the
@@ -3027,14 +3035,26 @@ func (x *actorSystem) rebalancingLoop() {
 			continue
 		}
 
-		if x.relocating.Load() {
-			x.relocatingLocker.Lock()
-			x.rebalancingQueue <- peerState
-			x.relocatingLocker.Unlock()
-			continue
+		// Wait for any in-flight relocation to finish before dispatching the
+		// next one, then claim the slot. This blocks on a condition variable
+		// instead of busy re-queueing the pending peer state, so the loop no
+		// longer spins a CPU core while a rebalance is running.
+		x.relocatingMu.Lock()
+		for x.relocating.Load() && !x.isStopping() {
+			x.relocatingCond.Wait()
 		}
 
-		x.relocating.Store(true)
+		stopping := x.isStopping()
+		if !stopping {
+			x.relocating.Store(true)
+		}
+
+		x.relocatingMu.Unlock()
+
+		if stopping {
+			return
+		}
+
 		message := &internalpb.Rebalance{PeerState: peerState}
 		if err := x.systemGuardian.Tell(ctx, x.relocator, message); err != nil {
 			x.logger.Errorf("failed to send rebalance to system guardian: %v (hint: check system guardian state)", err)
@@ -3445,7 +3465,12 @@ func (x *actorSystem) shutdownCluster(ctx context.Context, actors []*PID, peerSt
 		// signal after draining buffered items. Not closing avoids the
 		// send-on-closed-channel race entirely.
 		x.clusterEnabled.Store(false)
+		// release the relocation slot and wake rebalancingLoop if it is blocked
+		// waiting for an in-flight relocation; it observes isStopping and exits.
+		x.relocatingMu.Lock()
 		x.relocating.Store(false)
+		x.relocatingCond.Broadcast()
+		x.relocatingMu.Unlock()
 		x.pubsubEnabled.Store(false)
 		x.relocatingLocker.Lock()
 
