@@ -28,7 +28,7 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/hashicorp/consul/api"
+	"github.com/hashicorp/consul/api/v2"
 	"go.uber.org/atomic"
 
 	"github.com/tochemey/goakt/v4/discovery"
