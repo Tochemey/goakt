@@ -39,7 +39,7 @@ import (
 	"unicode/utf8"
 )
 
-// SlogLog implements Logger using the standard library slog package.
+// Slog implements Logger using the standard library slog package.
 // It is optimized for low GC: Enabled() checks avoid formatting when disabled,
 // and With() uses typed slog.Attr for common types to avoid reflection.
 var _ Logger = (*Slog)(nil)
@@ -142,12 +142,21 @@ func appendJSONEscaped(buf *bytes.Buffer, s string) {
 				i++
 				continue
 			}
+
 			if c == '\n' || c == '\r' || c == '\t' {
 				_ = buf.WriteByte('\\')
-				_ = buf.WriteByte(map[byte]byte{'\n': 'n', '\r': 'r', '\t': 't'}[c])
+				switch c {
+				case '\n':
+					_ = buf.WriteByte('n')
+				case '\r':
+					_ = buf.WriteByte('r')
+				case '\t':
+					_ = buf.WriteByte('t')
+				}
 				i++
 				continue
 			}
+
 			if c < ' ' {
 				_, _ = buf.WriteString(`\u00`)
 				_ = buf.WriteByte(hex[c>>4])
@@ -155,25 +164,36 @@ func appendJSONEscaped(buf *bytes.Buffer, s string) {
 				i++
 				continue
 			}
+
 			_ = buf.WriteByte(c)
 			i++
 			continue
 		}
+
 		r, size := utf8.DecodeRuneInString(s[i:])
 		if r == utf8.RuneError && size == 1 {
 			_, _ = buf.WriteString(`\ufffd`)
 			i++
 			continue
 		}
+
 		if r == '\u2028' || r == '\u2029' {
 			_, _ = buf.WriteString(`\u202`)
 			_ = buf.WriteByte(hex[r&0xF])
 			i += size
 			continue
 		}
+
 		_, _ = buf.WriteString(s[i : i+size])
 		i += size
 	}
+}
+
+// appendTimestamp writes t formatted with slogTimeFormat into buf, using a
+// stack-allocated scratch buffer to avoid heap allocation.
+func appendTimestamp(buf *bytes.Buffer, t time.Time) {
+	var scratch [32]byte
+	_, _ = buf.Write(t.AppendFormat(scratch[:0], slogTimeFormat))
 }
 
 // appendSlogValue serializes a slog.Value as JSON into buf without using encoding/json
@@ -212,8 +232,7 @@ func appendSlogValue(buf *bytes.Buffer, v slog.Value) {
 		_, _ = buf.Write(strconv.AppendInt(scratch[:0], int64(v.Duration()), 10))
 	case slog.KindTime:
 		_ = buf.WriteByte('"')
-		var tsScratch [32]byte
-		_, _ = buf.Write(v.Time().AppendFormat(tsScratch[:0], slogTimeFormat))
+		appendTimestamp(buf, v.Time())
 		_ = buf.WriteByte('"')
 	case slog.KindAny:
 		a := v.Any()
@@ -254,154 +273,123 @@ func callerAttr(skip int) slog.Attr {
 	if !ok {
 		return slog.String("caller", "???")
 	}
+
 	if cached, ok := callerCache.Load(pc); ok {
 		return cached.(slog.Attr)
 	}
+
 	attr := slog.String("caller", buildCallerString(file, line))
 	callerCache.Store(pc, attr)
 	return attr
 }
 
-// buildCallerString produces a short "parent/file.go:line" string from a full file path.
+// buildCallerString produces a short "parent/file.go:line" string from a full
+// file path, keeping at most the last two path components (e.g. a full path ending
+// in ".../actor/scheduler.go" yields "actor/scheduler.go:98"). A path with a single
+// separator keeps only the base name, and a path with none is returned as-is.
 //
-// Algorithm: scans backwards from the end of file to find the last two path separators
-// ('/' or '\\'). This yields "parentDir/base.go". The line number is appended using
-// strconv.AppendInt into a stack-allocated [12]byte scratch buffer to avoid heap allocation.
-// The string is assembled in a pooled bytes.Buffer (bufferPool) to amortize allocation
-// across calls. If there is no parent directory, returns "file.go:line" directly.
+// It runs only on a callerCache miss (once per distinct call site for the lifetime
+// of the process), so it favors clarity over micro-optimization.
 func buildCallerString(file string, line int) string {
-	lastSlash := -1
-	for i := len(file) - 1; i >= 0; i-- {
-		if file[i] == '/' || file[i] == '\\' {
-			lastSlash = i
-			break
+	short := file
+	if lastSlash := strings.LastIndexAny(file, `/\`); lastSlash >= 0 {
+		if prevSlash := strings.LastIndexAny(file[:lastSlash], `/\`); prevSlash >= 0 {
+			short = file[prevSlash+1:]
+		} else {
+			short = file[lastSlash+1:]
 		}
 	}
-	if lastSlash < 0 {
-		var scratch [12]byte
-		return file + ":" + string(strconv.AppendInt(scratch[:0], int64(line), 10))
+	return short + ":" + strconv.Itoa(line)
+}
+
+// emit logs fmt.Sprint(v...) at the given level when that level is enabled.
+// The callerAttr skip of 3 assumes exactly one public method frame between the
+// caller and this helper (caller -> Debug/DebugContext/... -> emit -> callerAttr),
+// so the reported caller is the user's call site.
+func (sl *Slog) emit(ctx context.Context, level Level, slevel slog.Level, v []any) {
+	if sl.Enabled(level) {
+		sl.logger.LogAttrs(ctx, slevel, fmt.Sprint(v...), callerAttr(3))
 	}
-	base := file[lastSlash+1:]
-	prevSlash := -1
-	for i := lastSlash - 1; i >= 0; i-- {
-		if file[i] == '/' || file[i] == '\\' {
-			prevSlash = i
-			break
-		}
+}
+
+// emitf logs formatMsg(format, v) at the given level when that level is enabled.
+// See emit for the callerAttr skip rationale.
+func (sl *Slog) emitf(ctx context.Context, level Level, slevel slog.Level, format string, v []any) {
+	if sl.Enabled(level) {
+		sl.logger.LogAttrs(ctx, slevel, formatMsg(format, v), callerAttr(3))
 	}
-	buf := bufferPool.Get().(*bytes.Buffer)
-	buf.Reset()
-	defer func() {
-		if buf.Cap() <= maxBufferPoolCap {
-			buf.Reset()
-			bufferPool.Put(buf)
-		}
-	}()
-	var scratch [12]byte
-	if prevSlash >= 0 {
-		_, _ = buf.WriteString(file[prevSlash+1 : lastSlash])
-		_ = buf.WriteByte('/')
-	}
-	_, _ = buf.WriteString(base)
-	_ = buf.WriteByte(':')
-	_, _ = buf.Write(strconv.AppendInt(scratch[:0], int64(line), 10))
-	return buf.String()
 }
 
 // Debug logs at debug level.
-func (sl *Slog) Debug(v ...any) {
-	sl.DebugContext(context.Background(), v...)
-}
+func (sl *Slog) Debug(v ...any) { sl.emit(context.Background(), DebugLevel, slog.LevelDebug, v) }
 
 // Debugf logs a formatted message at debug level.
 func (sl *Slog) Debugf(format string, v ...any) {
-	sl.DebugfContext(context.Background(), format, v...)
+	sl.emitf(context.Background(), DebugLevel, slog.LevelDebug, format, v)
 }
 
 // DebugContext logs at debug level with the given context.
 func (sl *Slog) DebugContext(ctx context.Context, v ...any) {
-	if sl.Enabled(DebugLevel) {
-		sl.logger.LogAttrs(ctx, slog.LevelDebug, fmt.Sprint(v...), callerAttr(3))
-	}
+	sl.emit(ctx, DebugLevel, slog.LevelDebug, v)
 }
 
 // DebugfContext logs a formatted message at debug level with the given context.
 func (sl *Slog) DebugfContext(ctx context.Context, format string, v ...any) {
-	if sl.Enabled(DebugLevel) {
-		sl.logger.LogAttrs(ctx, slog.LevelDebug, formatMsg(format, v), callerAttr(3))
-	}
+	sl.emitf(ctx, DebugLevel, slog.LevelDebug, format, v)
 }
 
 // Info logs at info level.
-func (sl *Slog) Info(v ...any) {
-	sl.InfoContext(context.Background(), v...)
-}
+func (sl *Slog) Info(v ...any) { sl.emit(context.Background(), InfoLevel, slog.LevelInfo, v) }
 
 // Infof logs a formatted message at info level.
 func (sl *Slog) Infof(format string, v ...any) {
-	sl.InfofContext(context.Background(), format, v...)
+	sl.emitf(context.Background(), InfoLevel, slog.LevelInfo, format, v)
 }
 
 // InfoContext logs at info level with the given context.
 func (sl *Slog) InfoContext(ctx context.Context, v ...any) {
-	if sl.Enabled(InfoLevel) {
-		sl.logger.LogAttrs(ctx, slog.LevelInfo, fmt.Sprint(v...), callerAttr(3))
-	}
+	sl.emit(ctx, InfoLevel, slog.LevelInfo, v)
 }
 
 // InfofContext logs a formatted message at info level with the given context.
 func (sl *Slog) InfofContext(ctx context.Context, format string, v ...any) {
-	if sl.Enabled(InfoLevel) {
-		sl.logger.LogAttrs(ctx, slog.LevelInfo, formatMsg(format, v), callerAttr(3))
-	}
+	sl.emitf(ctx, InfoLevel, slog.LevelInfo, format, v)
 }
 
 // Warn logs at warn level.
-func (sl *Slog) Warn(v ...any) {
-	sl.WarnContext(context.Background(), v...)
-}
+func (sl *Slog) Warn(v ...any) { sl.emit(context.Background(), WarningLevel, slog.LevelWarn, v) }
 
 // Warnf logs a formatted message at warn level.
 func (sl *Slog) Warnf(format string, v ...any) {
-	sl.WarnfContext(context.Background(), format, v...)
+	sl.emitf(context.Background(), WarningLevel, slog.LevelWarn, format, v)
 }
 
 // WarnContext logs at warn level with the given context.
 func (sl *Slog) WarnContext(ctx context.Context, v ...any) {
-	if sl.Enabled(WarningLevel) {
-		sl.logger.LogAttrs(ctx, slog.LevelWarn, fmt.Sprint(v...), callerAttr(3))
-	}
+	sl.emit(ctx, WarningLevel, slog.LevelWarn, v)
 }
 
 // WarnfContext logs a formatted message at warn level with the given context.
 func (sl *Slog) WarnfContext(ctx context.Context, format string, v ...any) {
-	if sl.Enabled(WarningLevel) {
-		sl.logger.LogAttrs(ctx, slog.LevelWarn, formatMsg(format, v), callerAttr(3))
-	}
+	sl.emitf(ctx, WarningLevel, slog.LevelWarn, format, v)
 }
 
 // Error logs at error level.
-func (sl *Slog) Error(v ...any) {
-	sl.ErrorContext(context.Background(), v...)
-}
+func (sl *Slog) Error(v ...any) { sl.emit(context.Background(), ErrorLevel, slog.LevelError, v) }
 
 // Errorf logs a formatted message at error level.
 func (sl *Slog) Errorf(format string, v ...any) {
-	sl.ErrorfContext(context.Background(), format, v...)
+	sl.emitf(context.Background(), ErrorLevel, slog.LevelError, format, v)
 }
 
 // ErrorContext logs at error level with the given context.
 func (sl *Slog) ErrorContext(ctx context.Context, v ...any) {
-	if sl.Enabled(ErrorLevel) {
-		sl.logger.LogAttrs(ctx, slog.LevelError, fmt.Sprint(v...), callerAttr(3))
-	}
+	sl.emit(ctx, ErrorLevel, slog.LevelError, v)
 }
 
 // ErrorfContext logs a formatted message at error level with the given context.
 func (sl *Slog) ErrorfContext(ctx context.Context, format string, v ...any) {
-	if sl.Enabled(ErrorLevel) {
-		sl.logger.LogAttrs(ctx, slog.LevelError, formatMsg(format, v), callerAttr(3))
-	}
+	sl.emitf(ctx, ErrorLevel, slog.LevelError, format, v)
 }
 
 // Fatal logs at error level and exits.
@@ -432,7 +420,7 @@ func (sl *Slog) Panicf(format string, v ...any) {
 
 // Enabled reports whether the given level is enabled.
 func (sl *Slog) Enabled(level Level) bool {
-	return sl.logger.Enabled(context.Background(), sl.slogLevel(level))
+	return sl.logger.Enabled(context.Background(), toSlogLevel(level))
 }
 
 // LogLevel returns the configured minimum level.
@@ -561,7 +549,7 @@ func (sl *Slog) Flush() error {
 // instance at its configured minimum level. Useful for passing to third-party
 // libraries that accept a *log.Logger.
 func (sl *Slog) StdLogger() *golog.Logger {
-	return slog.NewLogLogger(sl.logger.Handler(), sl.slogLevel(sl.level))
+	return slog.NewLogLogger(sl.logger.Handler(), toSlogLevel(sl.level))
 }
 
 // toSlogLevel maps a GoAkt log.Level to the corresponding slog.Level.
@@ -583,12 +571,6 @@ func toSlogLevel(level Level) slog.Level {
 	default:
 		return slog.LevelInfo
 	}
-}
-
-// slogLevel is a receiver method that delegates to toSlogLevel for use in
-// methods that need the conversion as a method expression.
-func (sl *Slog) slogLevel(level Level) slog.Level {
-	return toSlogLevel(level)
 }
 
 // formatMsg returns the formatted message using fmt.Sprintf.
@@ -716,11 +698,11 @@ func (h *slogOrderedHandler) Handle(_ context.Context, r slog.Record) error {
 		return true
 	})
 
+	// levelStr is a known-safe value from slogLevelStrings, so it needs no escaping.
 	buf.WriteString(`{"level":"`)
-	appendJSONEscaped(buf, levelStr)
+	buf.WriteString(levelStr)
 	buf.WriteString(`","ts":"`)
-	var tsScratch [32]byte
-	buf.Write(r.Time.AppendFormat(tsScratch[:0], slogTimeFormat))
+	appendTimestamp(buf, r.Time)
 	buf.WriteString(`","caller":"`)
 	appendJSONEscaped(buf, callerStr)
 	buf.WriteString(`","msg":"`)

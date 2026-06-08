@@ -1,5 +1,66 @@
 # Changelog
 
+## [Unreleased]
+
+### ✨ New Additions
+
+#### `log.NewZapFrom`
+
+`log.NewZapFrom(logger *zap.Logger)` creates a GoAkt `Logger` backed by a `*zap.Logger` you already own, mirroring the existing `log.NewSlogFrom`. This lets you share one zap instance across GoAkt and the rest of your application without coupling them to GoAkt's `log` package, and without GoAkt dictating the encoding, outputs, or level.
+
+```go
+zl, _ := zap.NewProduction()
+sys, _ := actor.NewActorSystem("my-system", actor.WithLogger(log.NewZapFrom(zl)))
+```
+
+GoAkt's leveled methods wrap the logger and add one stack frame, so `NewZapFrom` derives a child logger with `zap.AddCallerSkip(1)`; if the supplied logger has caller annotation enabled (`zap.AddCaller`), the reported `caller` points at your call site rather than into GoAkt's `log` package. The supplied logger is not modified (zap loggers are immutable). Because the caller owns the output destinations, `LogOutput` returns `nil` and `Flush` delegates to the logger's `Sync` (swallowing the benign sync errors console streams return on some platforms).
+
+### 🐛 Fixes
+
+#### `NewZap` no longer hijacks the global zap logger
+
+`log.NewZap` called `zap.ReplaceGlobals`, mutating process-global zap state every time it ran, including at package init for the `DebugLogger` and `DefaultLogger` vars. Any application constructing its own `NewZap(...)` silently overwrote the host program's global zap logger, and the installed global carried GoAkt's `AddCallerSkip(1)` (calibrated for GoAkt's wrapper), so direct `zap.L()` / `zap.S()` usage elsewhere reported caller information off by one frame. The `ReplaceGlobals` call has been removed; nothing in GoAkt reads the zap global, so this changes no observable behavior for GoAkt callers while leaving the host application's global logger untouched.
+
+### ♻️ Refactors
+
+#### Slimmer `log.Logger` interface
+
+The `log.Logger` interface has been trimmed to align with modern Go logging practice (the `log/slog` design philosophy): a logging abstraction should not let a library terminate the host process, and it should not leak backend internals. The following methods were **removed from the interface**:
+
+- `Fatal(...any)` / `Fatalf(string, ...any)`
+- `Panic(...any)` / `Panicf(string, ...any)`
+- `LogOutput() []io.Writer`
+
+The level methods (`Info`/`Infof`/`InfoContext`/`InfofContext` and the `Warn`/`Error`/`Debug` equivalents), `Enabled`, `With`, `LogLevel`, `Flush`, and `StdLogger` are unchanged. The concrete implementations (`Slog`, `Zap`, and the discard logger) **still expose** `Fatal`/`Panic`/`LogOutput` as methods, so application code that holds a concrete type keeps working.
+
+`Level.String()` now returns `"invalid"` (instead of an empty string) for `InvalidLevel` and any unrecognized level. The numeric values of the level constants are unchanged.
+
+### ⚠️ Migration
+
+- **You hold the interface (`log.Logger`) and call `Fatal`/`Fatalf`/`Panic`/`Panicf`.** Log at error level and then halt explicitly:
+
+  ```go
+  // Before
+  logger.Fatal(err)
+
+  // After
+  logger.Error(err)
+  os.Exit(1)
+  ```
+
+  ```go
+  // Before
+  logger.Panic(err)
+
+  // After
+  logger.Error(err)
+  panic(err)
+  ```
+
+- **You hold a concrete logger** (e.g. the value returned by `log.NewZap` / `log.NewSlog`, or `log.DefaultLogger`). No change is required; `Fatal`/`Panic`/`LogOutput` remain available on the concrete type.
+
+- **You call `LogOutput()` through the interface.** Either keep a reference to the concrete type, or track the writers you passed into the constructor yourself.
+
 ## v4.2.7 - 2026-06-01
 
 ### ✨ New Additions

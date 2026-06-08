@@ -38,7 +38,7 @@ type PostStopFunc = func(ctx context.Context) error
 // FuncOption is the interface that applies a SpawnHook option.
 type FuncOption interface {
 	// Apply sets the Option value of a config.
-	Apply(actor *funcConfig)
+	Apply(config *funcConfig)
 }
 
 var _ FuncOption = funcOption(nil)

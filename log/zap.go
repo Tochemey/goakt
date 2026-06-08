@@ -24,9 +24,11 @@ package log
 
 import (
 	"context"
+	"errors"
 	"io"
 	golog "log"
 	"os"
+	"syscall"
 	"time"
 
 	"go.uber.org/multierr"
@@ -67,6 +69,10 @@ type Zap struct {
 	sugar               *zap.SugaredLogger
 	outputs             []io.Writer
 	bufferedWriteSyncer *zapcore.BufferedWriteSyncer
+	// borrowed reports whether the underlying *zap.Logger was supplied by the
+	// caller (via NewZapFrom) rather than constructed here. When true, GoAkt does
+	// not own the output writers, so Flush delegates to the logger's own Sync.
+	borrowed bool
 }
 
 // enforce compilation and linter error
@@ -92,14 +98,35 @@ func NewZap(level Level, writers ...io.Writer) *Zap {
 		zap.AddStacktrace(zapcore.ErrorLevel),
 		zap.AddStacktrace(zapcore.FatalLevel))
 
-	// set the global logger
-	zap.ReplaceGlobals(zapLogger)
 	// create the instance of Log and returns it
 	return &Zap{
 		logger:              zapLogger,
 		sugar:               zapLogger.Sugar(),
 		outputs:             writers,
 		bufferedWriteSyncer: bufferedWriteSyncer,
+	}
+}
+
+// NewZapFrom creates a Logger backed by the provided *zap.Logger instance.
+// This allows sharing the same *zap.Logger across GoAkt and other packages
+// in your system without coupling them to GoAkt's log package. The caller owns
+// the *zap.Logger and controls its output destinations, encoding, and level.
+//
+// GoAkt's leveled methods wrap the logger and add one stack frame, so NewZapFrom
+// derives a child logger with zap.AddCallerSkip(1). If the provided logger has
+// caller annotation enabled (zap.AddCaller), the reported caller then points at
+// your call site rather than into GoAkt's log package. The provided logger is not
+// modified: zap loggers are immutable and WithOptions returns a derived copy.
+//
+// The minimum level is read from the provided logger's core, so LogLevel and
+// Enabled reflect the level you configured. Because the caller owns the output
+// destinations, LogOutput returns nil and Flush delegates to the logger's Sync.
+func NewZapFrom(logger *zap.Logger) *Zap {
+	wrapped := logger.WithOptions(zap.AddCallerSkip(1))
+	return &Zap{
+		logger:   wrapped,
+		sugar:    wrapped.Sugar(),
+		borrowed: true,
 	}
 }
 
@@ -258,6 +285,7 @@ func (z *Zap) With(keyValues ...any) Logger {
 		sugar:               newLogger.Sugar(),
 		outputs:             z.outputs,
 		bufferedWriteSyncer: z.bufferedWriteSyncer,
+		borrowed:            z.borrowed,
 	}
 }
 
@@ -316,12 +344,33 @@ func (z *Zap) LogOutput() []io.Writer {
 // Flush flushes buffered log entries. Call this during a graceful shutdown
 // when no more log writes are expected. If no buffered outputs are configured,
 // Flush is a no-op.
+//
+// For loggers created via NewZapFrom, GoAkt does not own the output writers, so
+// Flush delegates to the underlying logger's Sync, swallowing the benign errors
+// that syncing console streams (stdout/stderr) returns on some platforms.
 func (z *Zap) Flush() error {
+	if z.borrowed {
+		if err := z.logger.Sync(); err != nil && !isBenignSyncError(err) {
+			return err
+		}
+		return nil
+	}
+
 	if z.bufferedWriteSyncer != nil {
 		return z.bufferedWriteSyncer.Stop()
 	}
 
 	return syncFileOutputs(z.outputs)
+}
+
+// isBenignSyncError reports whether err is a sync error that is safe to ignore.
+// Syncing a console stream (stdout/stderr) or other non-syncable file descriptor
+// returns a platform-specific errno (EINVAL on Linux, ENOTTY on macOS/BSD, and
+// EBADF for already-closed descriptors) that does not indicate data loss.
+func isBenignSyncError(err error) bool {
+	return errors.Is(err, syscall.EINVAL) ||
+		errors.Is(err, syscall.ENOTTY) ||
+		errors.Is(err, syscall.EBADF)
 }
 
 func syncFileOutputs(outputs []io.Writer) error {

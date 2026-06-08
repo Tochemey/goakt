@@ -201,11 +201,40 @@ type ActorSystem interface {
 	//
 	// ⚠️ Note: The created actor uses the default mailbox from the actor system unless overridden in opts.
 	SpawnOn(ctx context.Context, name string, actor Actor, opts ...SpawnOption) (*PID, error)
-	// SpawnFromFunc creates an actor with the given receive function. One can set the PreStart and PostStop lifecycle hooks
-	// in the given optional options
+	// SpawnFromFunc creates and starts an actor whose behavior is defined by the given receive function,
+	// generating a unique name automatically. This is a lightweight alternative to implementing the Actor
+	// interface when only message handling logic is required and the actor does not need a stable, well-known name.
+	//
+	// The receiveFunc is invoked for every message the actor receives. Optional lifecycle hooks and a custom
+	// mailbox can be supplied through opts:
+	//   - [WithPreStart] runs a hook before the actor starts processing messages.
+	//   - [WithPostStop] runs a hook after the actor has stopped.
+	//   - [WithFuncMailbox] overrides the default mailbox.
+	//
+	// The created actor is not relocatable: when running in a cluster it will not be redeployed to another node
+	// if its host node leaves the cluster.
+	//
+	// It returns the [PID] of the spawned actor, or an error if the actor system is not running, the
+	// preconditions fail, or the actor cannot be initialized.
 	SpawnFromFunc(ctx context.Context, receiveFunc ReceiveFunc, opts ...FuncOption) (*PID, error)
-	// SpawnNamedFromFunc creates an actor with the given receive function and provided name. One can set the PreStart and PostStop lifecycle hooks
-	// in the given optional options
+	// SpawnNamedFromFunc creates and starts an actor whose behavior is defined by the given receive function,
+	// registering it under the provided name. This is a lightweight alternative to implementing the Actor
+	// interface when only message handling logic is required.
+	//
+	// The receiveFunc is invoked for every message the actor receives. Optional lifecycle hooks and a custom
+	// mailbox can be supplied through opts:
+	//   - [WithPreStart] runs a hook before the actor starts processing messages.
+	//   - [WithPostStop] runs a hook after the actor has stopped.
+	//   - [WithFuncMailbox] overrides the default mailbox.
+	//
+	// The name must be unique within the actor system. If an actor with the same name already exists and is
+	// running, that actor is returned and no new actor is created.
+	//
+	// The created actor is not relocatable: when running in a cluster it will not be redeployed to another node
+	// if its host node leaves the cluster.
+	//
+	// It returns the [PID] of the spawned actor, or an error if the actor system is not running, the
+	// preconditions fail, or the actor cannot be initialized.
 	SpawnNamedFromFunc(ctx context.Context, name string, receiveFunc ReceiveFunc, opts ...FuncOption) (*PID, error)
 	// SpawnRouter creates and initializes a new router actor with the specified options.
 	//
@@ -1025,7 +1054,7 @@ func (x *actorSystem) Run(ctx context.Context, startHook func(ctx context.Contex
 		AddContextRunner(startHook).
 		AddContextRunner(x.Start).
 		Run(); err != nil {
-		x.logger.Fatal(err)
+		x.logger.Error(err)
 		os.Exit(1)
 		return
 	}
@@ -1045,7 +1074,8 @@ func (x *actorSystem) Run(ctx context.Context, startHook func(ctx context.Contex
 			AddContextRunner(stophook).
 			AddContextRunner(x.Stop).
 			Run(); err != nil {
-			x.logger.Fatal(err)
+			x.logger.Error(err)
+			os.Exit(1)
 		}
 
 		signal.Stop(notifier)

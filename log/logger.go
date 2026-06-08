@@ -24,13 +24,12 @@ package log
 
 import (
 	"context"
-	"io"
 	golog "log"
 )
 
 // Logger represents a leveled logger used by GoAkt.
 //
-// Implementations typically encode a severity level (debug/info/warn/error/fatal/panic),
+// Implementations typically encode a severity level (debug/info/warn/error),
 // attach optional metadata (e.g., timestamps), and write entries to one or more io.Writer
 // destinations.
 //
@@ -38,8 +37,10 @@ import (
 //   - X(...any): log values (commonly formatted similarly to fmt.Sprint)
 //   - Xf(format string, ...any): log using a format string (commonly formatted similarly to fmt.Sprintf)
 //
-// Fatal/Fatalf terminate the process by calling os.Exit(1).
-// Panic/Panicf call panic with the constructed message.
+// The interface intentionally omits Fatal/Panic methods: a library must not terminate
+// the host process or panic on the application's behalf. Callers that want such behavior
+// should log at error level and then decide how to halt. Concrete implementations in this
+// package still expose Fatal/Panic methods for application code that holds the concrete type.
 //
 // Flush may be used to force buffered implementations to write pending entries; for
 // unbuffered implementations it may be a no-op.
@@ -92,26 +93,6 @@ type Logger interface {
 	// ErrorfContext logs a formatted message at error level with the given context.
 	ErrorfContext(context.Context, string, ...any)
 
-	// Fatal logs a message at fatal level and then terminates the process.
-	//
-	// Implementations must call os.Exit(1) after emitting the log entry.
-	Fatal(...any)
-
-	// Fatalf logs a formatted message at fatal level and then terminates the process.
-	//
-	// Implementations must call os.Exit(1) after emitting the log entry.
-	Fatalf(string, ...any)
-
-	// Panic logs a message at panic level and then panics.
-	//
-	// Implementations must call panic after emitting the log entry.
-	Panic(...any)
-
-	// Panicf logs a formatted message at panic level and then panics.
-	//
-	// Implementations must call panic after emitting the log entry.
-	Panicf(string, ...any)
-
 	// Debug logs a message at debug level.
 	//
 	// The arguments are implementation-defined but typically formatted similarly to fmt.Sprint.
@@ -146,11 +127,6 @@ type Logger interface {
 	// Implementations that do not support structured fields may ignore the
 	// pairs and return the receiver unchanged.
 	With(keyValues ...any) Logger
-
-	// LogOutput returns the configured output destinations for this logger.
-	//
-	// Implementations may write to all returned writers, one of them, or a wrapped writer.
-	LogOutput() []io.Writer
 
 	// Flush forces any buffered log entries to be written to their outputs.
 	//

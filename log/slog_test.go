@@ -24,6 +24,7 @@ package log
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -728,4 +729,86 @@ func BenchmarkSlogInfofWithFields(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		logger.Infof("actor=Pong readiness probe completed")
 	}
+}
+
+func TestSlogInternalCoverage(t *testing.T) {
+	t.Run("appendJSONEscaped handles invalid utf8 and valid multibyte runes", func(t *testing.T) {
+		buf := new(bytes.Buffer)
+		// 0xff is an invalid UTF-8 start byte -> the literal 6-char escape �.
+		appendJSONEscaped(buf, "\xff")
+		require.Equal(t, "\\ufffd", buf.String())
+
+		buf.Reset()
+		// Valid multibyte runes are copied verbatim.
+		appendJSONEscaped(buf, "héllo界")
+		require.Equal(t, "héllo界", buf.String())
+
+		buf.Reset()
+		// Control characters \n, \r and \t are backslash-escaped.
+		appendJSONEscaped(buf, "\n\r\t")
+		require.Equal(t, `\n\r\t`, buf.String())
+	})
+
+	t.Run("appendSlogValue handles bool-false, duration and unknown kinds", func(t *testing.T) {
+		buf := new(bytes.Buffer)
+		appendSlogValue(buf, slog.BoolValue(false))
+		require.Equal(t, "false", buf.String())
+
+		buf.Reset()
+		appendSlogValue(buf, slog.DurationValue(2*time.Second))
+		require.Equal(t, strconv.FormatInt(int64(2*time.Second), 10), buf.String())
+
+		buf.Reset()
+		// KindGroup is not handled explicitly and falls through to the null default.
+		appendSlogValue(buf, slog.GroupValue(slog.String("a", "b")))
+		require.Equal(t, "null", buf.String())
+	})
+
+	t.Run("callerAttr returns ??? when the frame cannot be recovered", func(t *testing.T) {
+		attr := callerAttr(10000)
+		require.Equal(t, "caller", attr.Key)
+		require.Equal(t, "???", attr.Value.String())
+	})
+
+	t.Run("buildCallerString keeps at most two path components", func(t *testing.T) {
+		// Full path -> last two components.
+		require.Equal(t, "actor/scheduler.go:98", buildCallerString("/home/x/goakt/actor/scheduler.go", 98))
+		// Single separator -> base name only.
+		require.Equal(t, "file.go:5", buildCallerString("dir/file.go", 5))
+		// No separator -> returned as-is.
+		require.Equal(t, "file.go:5", buildCallerString("file.go", 5))
+	})
+
+	t.Run("Handle covers level fallback, reserved-key skip and empty-attr skip", func(t *testing.T) {
+		buf := new(bytes.Buffer)
+		h := newSlogOrderedHandler(buf, slog.LevelDebug, []slog.Attr{
+			{},                                  // empty attr -> skipped
+			slog.String(slog.MessageKey, "dup"), // reserved key -> skipped
+		})
+		// A level outside slogLevelStrings falls back to "info".
+		rec := slog.NewRecord(time.Unix(0, 0).UTC(), slog.Level(99), "hi", 0)
+		require.NoError(t, h.Handle(context.Background(), rec))
+
+		fields := decodeLine(t, buf.Bytes())
+		require.Equal(t, "info", fields["level"])
+		require.Equal(t, "hi", fields["msg"])
+	})
+}
+
+func TestSlogContextMethods(t *testing.T) {
+	ctx := context.Background()
+	buf := new(bytes.Buffer)
+	logger := NewSlog(DebugLevel, buf)
+
+	// Context variants are public entry points; exercise each directly.
+	logger.DebugContext(ctx, "debug ctx")
+	logger.DebugfContext(ctx, "debugf ctx %s", "v")
+	logger.InfoContext(ctx, "info ctx")
+	logger.InfofContext(ctx, "infof ctx %s", "v")
+	logger.WarnContext(ctx, "warn ctx")
+	logger.WarnfContext(ctx, "warnf ctx %s", "v")
+	logger.ErrorContext(ctx, "error ctx")
+	logger.ErrorfContext(ctx, "errorf ctx %s", "v")
+
+	require.NotEmpty(t, buf.String())
 }

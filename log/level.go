@@ -57,6 +57,6 @@ func (l Level) String() string {
 	case ErrorLevel:
 		return "error"
 	default:
-		return "" // FIXME: Surely we should blast here
+		return "invalid"
 	}
 }
