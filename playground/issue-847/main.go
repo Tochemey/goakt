@@ -90,8 +90,8 @@ func main() {
 
 	_, err = system.Spawn(ctx, "foo", &Foo{}, actor.WithLongLived())
 	if err != nil {
-		system.Logger().Fatal(err)
-		return
+		system.Logger().Error(err)
+		os.Exit(1)
 	}
 
 	sigint := make(chan os.Signal, 1)

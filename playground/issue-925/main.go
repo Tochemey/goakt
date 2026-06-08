@@ -45,7 +45,8 @@ func main() {
 	fmt.Println("\nSpawning actor...")
 	pid, err := actorSystem.Spawn(ctx, "actor1", &MyActor{}, actor.WithLongLived())
 	if err != nil {
-		logger.Fatal()
+		logger.Error(err)
+		os.Exit(1)
 	}
 
 	// wait for a while to let actor start and spawn its children

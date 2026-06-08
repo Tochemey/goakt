@@ -67,7 +67,7 @@ func TestLevelString(t *testing.T) {
 		{
 			name:     "none",
 			level:    InvalidLevel,
-			expected: "",
+			expected: "invalid",
 		},
 	}
 

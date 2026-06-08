@@ -35,7 +35,9 @@ import (
 )
 
 func TestDiscardLoggerBasics(t *testing.T) {
-	logger := DiscardLogger
+	// Use the concrete type: Fatal/Panic/LogOutput are no longer part of the
+	// Logger interface but remain available on the concrete implementation.
+	logger := discardLogger{}
 
 	callDiscardMethod(t, "Debug", "debug")
 	callDiscardMethod(t, "Debugf", "debug %s", "msg")
@@ -90,20 +92,20 @@ func callDiscardMethod(t *testing.T, name string, args ...any) {
 
 func TestDiscardLoggerPanic(t *testing.T) {
 	assert.PanicsWithValue(t, "panic", func() {
-		DiscardLogger.Panic("panic")
+		discardLogger{}.Panic("panic")
 	})
 }
 
 func TestDiscardLoggerPanicf(t *testing.T) {
 	assert.PanicsWithValue(t, "panic 42", func() {
-		DiscardLogger.Panicf("panic %d", 42)
+		discardLogger{}.Panicf("panic %d", 42)
 	})
 }
 
 // nolint
 func TestDiscardLoggerFatal(t *testing.T) {
 	if os.Getenv("GO_TEST_DISCARD_FATAL") == "1" {
-		DiscardLogger.Fatal("fatal message")
+		discardLogger{}.Fatal("fatal message")
 		return
 	}
 
@@ -120,13 +122,13 @@ func TestDiscardLoggerFatalHelper(t *testing.T) {
 	if os.Getenv("GO_TEST_DISCARD_FATAL") != "1" {
 		t.Skip("helper process")
 	}
-	DiscardLogger.Fatal("fatal message")
+	discardLogger{}.Fatal("fatal message")
 }
 
 // nolint
 func TestDiscardLoggerFatalf(t *testing.T) {
 	if os.Getenv("GO_TEST_DISCARD_FATALF") == "1" {
-		DiscardLogger.Fatalf("fatal formatted %d", 42)
+		discardLogger{}.Fatalf("fatal formatted %d", 42)
 		return
 	}
 
@@ -143,5 +145,5 @@ func TestDiscardLoggerFatalfHelper(t *testing.T) {
 	if os.Getenv("GO_TEST_DISCARD_FATALF") != "1" {
 		t.Skip("helper process")
 	}
-	DiscardLogger.Fatalf("fatal formatted %d", 42)
+	discardLogger{}.Fatalf("fatal formatted %d", 42)
 }

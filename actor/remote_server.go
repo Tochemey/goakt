@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"net"
 	nethttp "net/http"
+	"os"
 	"strconv"
 	"time"
 
@@ -1539,7 +1540,8 @@ func (x *actorSystem) startRemoteServer(ctx context.Context) error {
 	// Start serving in a background goroutine.
 	go func() {
 		if err := protoServer.Serve(); err != nil {
-			x.logger.Fatal(fmt.Errorf("remote server failed: %w", err))
+			x.logger.Error(fmt.Errorf("remote server failed: %w", err))
+			os.Exit(1)
 		}
 	}()
 

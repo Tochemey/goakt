@@ -26,10 +26,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
 	"strconv"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -205,7 +207,7 @@ func TestDiscardLoggerNoOps(t *testing.T) {
 	assert.False(t, DiscardLogger.Enabled(InfoLevel))
 	assert.True(t, DiscardLogger.Enabled(FatalLevel))
 	assert.True(t, DiscardLogger.Enabled(PanicLevel))
-	assert.NotEmpty(t, DiscardLogger.LogOutput())
+	assert.NotEmpty(t, discardLogger{}.LogOutput())
 	require.NoError(t, DiscardLogger.Flush())
 	require.NotNil(t, DiscardLogger.StdLogger())
 }
@@ -779,4 +781,102 @@ func extractLevel(bytes []byte) (string, error) {
 	}
 
 	return "", nil
+}
+
+// syncErrSyncer is a zapcore.WriteSyncer whose Sync returns a configurable error.
+type syncErrSyncer struct{ err error }
+
+func (s syncErrSyncer) Write(p []byte) (int, error) { return len(p), nil }
+func (s syncErrSyncer) Sync() error                 { return s.err }
+
+// zapFromSyncErr builds a *zap.Logger whose Sync returns err.
+func zapFromSyncErr(err error) *zap.Logger {
+	enc := zapcore.NewJSONEncoder(newZapConfig().EncoderConfig)
+	core := zapcore.NewCore(enc, syncErrSyncer{err: err}, zapcore.InfoLevel)
+	return zap.New(core)
+}
+
+// decodeLine decodes a single JSON log line into a map of string fields.
+func decodeLine(t *testing.T, line []byte) map[string]string {
+	t.Helper()
+	raw := make(map[string]json.RawMessage)
+	require.NoError(t, json.Unmarshal(line, &raw))
+	out := make(map[string]string, len(raw))
+	for k, v := range raw {
+		s, err := strconv.Unquote(string(v))
+		if err != nil {
+			s = string(v)
+		}
+		out[k] = s
+	}
+	return out
+}
+
+func TestNewZapFrom(t *testing.T) {
+	t.Run("wraps a caller-supplied logger with correct level, caller and output", func(t *testing.T) {
+		buffer := new(bytes.Buffer)
+		enc := zapcore.NewJSONEncoder(newZapConfig().EncoderConfig)
+		core := zapcore.NewCore(enc, zapcore.AddSync(buffer), zapcore.DebugLevel)
+		dev := zap.New(core, zap.AddCaller())
+
+		logger := NewZapFrom(dev)
+		logger.Info("hello from zapfrom")
+
+		fields := decodeLine(t, buffer.Bytes())
+		require.Equal(t, "info", fields["level"])
+		require.Equal(t, "hello from zapfrom", fields["msg"])
+		// AddCallerSkip(1) must point the caller at this test, not log/zap.go.
+		require.Contains(t, fields["caller"], "zap_test.go")
+		require.NotContains(t, fields["caller"], "/zap.go:")
+
+		// The caller owns the writers, so GoAkt reports no outputs and derives
+		// the level from the supplied core.
+		require.Nil(t, logger.LogOutput())
+		require.Equal(t, DebugLevel, logger.LogLevel())
+		require.True(t, logger.Enabled(DebugLevel))
+
+		// Flush over a buffer-backed core is a no-op Sync.
+		require.NoError(t, logger.Flush())
+	})
+
+	t.Run("does not mutate the supplied logger", func(t *testing.T) {
+		buffer := new(bytes.Buffer)
+		enc := zapcore.NewJSONEncoder(newZapConfig().EncoderConfig)
+		core := zapcore.NewCore(enc, zapcore.AddSync(buffer), zapcore.InfoLevel)
+		dev := zap.New(core, zap.AddCaller())
+
+		_ = NewZapFrom(dev)
+		// Logging directly through the original logger still points at this test
+		// (NewZapFrom derived a copy via WithOptions and left dev untouched).
+		dev.Info("direct")
+		fields := decodeLine(t, buffer.Bytes())
+		require.Contains(t, fields["caller"], "zap_test.go")
+	})
+
+	t.Run("With preserves the borrowed flag and adds fields", func(t *testing.T) {
+		buffer := new(bytes.Buffer)
+		enc := zapcore.NewJSONEncoder(newZapConfig().EncoderConfig)
+		core := zapcore.NewCore(enc, zapcore.AddSync(buffer), zapcore.InfoLevel)
+		dev := zap.New(core)
+
+		logger := NewZapFrom(dev).With("service", "test")
+		logger.Info("with field")
+
+		fields := decodeLine(t, buffer.Bytes())
+		require.Equal(t, "test", fields["service"])
+		// borrowed propagated through With: Flush delegates to Sync and returns nil.
+		require.NoError(t, logger.Flush())
+	})
+
+	t.Run("Flush swallows benign console sync errors", func(t *testing.T) {
+		require.NoError(t, NewZapFrom(zapFromSyncErr(syscall.EINVAL)).Flush())
+		require.NoError(t, NewZapFrom(zapFromSyncErr(syscall.ENOTTY)).Flush())
+		require.NoError(t, NewZapFrom(zapFromSyncErr(syscall.EBADF)).Flush())
+	})
+
+	t.Run("Flush surfaces real sync errors", func(t *testing.T) {
+		wantErr := errors.New("disk full")
+		err := NewZapFrom(zapFromSyncErr(wantErr)).Flush()
+		require.ErrorIs(t, err, wantErr)
+	})
 }
