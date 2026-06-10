@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## v4.2.8 - 2026-10-01
 
 ### ✨ New Additions
 
