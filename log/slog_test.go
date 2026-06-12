@@ -157,6 +157,44 @@ func TestNewSlogFrom(t *testing.T) {
 		require.Equal(t, "should appear", msg)
 	})
 
+	t.Run("level floors a more verbose handler", func(t *testing.T) {
+		buf := new(bytes.Buffer)
+		slogger := slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+		logger := NewSlogFrom(slogger, WarningLevel)
+
+		require.False(t, logger.Enabled(DebugLevel))
+		require.False(t, logger.Enabled(InfoLevel))
+		require.True(t, logger.Enabled(WarningLevel))
+		require.True(t, logger.Enabled(ErrorLevel))
+
+		logger.Debug("debug suppressed")
+		logger.Info("info suppressed")
+		require.Empty(t, buf.String())
+
+		logger.Warn("warn appears")
+		msg, err := extractSlogMessage(buf.Bytes())
+		require.NoError(t, err)
+		require.Equal(t, "warn appears", msg)
+	})
+
+	t.Run("handler still filters below the given level", func(t *testing.T) {
+		buf := new(bytes.Buffer)
+		slogger := slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+		logger := NewSlogFrom(slogger, DebugLevel)
+
+		require.False(t, logger.Enabled(DebugLevel))
+		require.False(t, logger.Enabled(InfoLevel))
+		require.True(t, logger.Enabled(WarningLevel))
+
+		logger.Info("info suppressed by handler")
+		require.Empty(t, buf.String())
+
+		logger.Warn("warn appears")
+		msg, err := extractSlogMessage(buf.Bytes())
+		require.NoError(t, err)
+		require.Equal(t, "warn appears", msg)
+	})
+
 	t.Run("LogOutput returns nil when no writers provided", func(t *testing.T) {
 		slogger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 		logger := NewSlogFrom(slogger, InfoLevel)

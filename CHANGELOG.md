@@ -1,5 +1,25 @@
 # Changelog
 
+## [Unreleased]
+
+### 🐛 Fixes
+
+#### `NewSlogFrom` honors its level parameter
+
+`log.NewSlogFrom(logger *slog.Logger, level Level)` stored the `level` argument but never used it for filtering ([#1201](https://github.com/Tochemey/goakt/issues/1201)). `Enabled` delegated straight to the wrapped `*slog.Logger`'s handler, so the effective level was whatever the injected handler allowed: sharing an application logger running at INFO and passing `WarningLevel` to keep GoAkt's actor-lifecycle chatter out of production logs silently had no effect, while `LogLevel()` still reported the configured level (which also fed the cluster engine's log configuration with a level GoAkt itself was not honoring).
+
+The level now acts as a minimum level in addition to the wrapped handler's own filtering: a record is emitted only when it passes both. The comparison happens in `slog.Level` space because GoAkt's `Level` constants are not ordered by severity (`DebugLevel` sits numerically above `WarningLevel`), so a record's GoAkt level is mapped through the slog level mapping before being compared against the floor. `NewSlog` is unaffected: it already baked the level into its own handler, and for loggers it builds the new check is a no-op.
+
+```go
+appLogger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+l := log.NewSlogFrom(appLogger, log.WarningLevel)
+l.Info("suppressed by the WARNING floor") // was printed before the fix
+l.Warn("passes the floor")
+```
+
+A runnable sample lives in `playground/issue-1201`.
+
 ## v4.2.8 - 2026-10-01
 
 ### ✨ New Additions
