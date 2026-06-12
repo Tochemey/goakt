@@ -96,6 +96,11 @@ type Slog struct {
 // This allows sharing the same *slog.Logger across GoAkt and other packages
 // in your system without coupling them to GoAkt's log package.
 // The caller owns the slog.Logger and controls its output destinations.
+//
+// The given level acts as a minimum level for GoAkt's logging in addition to
+// any filtering performed by the provided logger's handler: a record is
+// emitted only when its level passes both. This lets you keep the shared
+// handler at a verbose level while flooring GoAkt's own output higher.
 func NewSlogFrom(logger *slog.Logger, level Level) *Slog {
 	return &Slog{
 		logger: logger,
@@ -419,8 +424,12 @@ func (sl *Slog) Panicf(format string, v ...any) {
 }
 
 // Enabled reports whether the given level is enabled.
+// A level is enabled when it passes both the logger's configured minimum level
+// and the underlying slog handler's own filtering. The comparison happens in
+// slog.Level space because GoAkt Level constants are not ordered by severity.
 func (sl *Slog) Enabled(level Level) bool {
-	return sl.logger.Enabled(context.Background(), toSlogLevel(level))
+	slevel := toSlogLevel(level)
+	return slevel >= toSlogLevel(sl.level) && sl.logger.Enabled(context.Background(), slevel)
 }
 
 // LogLevel returns the configured minimum level.
