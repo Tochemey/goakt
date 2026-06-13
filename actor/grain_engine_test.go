@@ -47,6 +47,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/log"
 	mockcluster "github.com/tochemey/goakt/v4/mocks/cluster"
+	mockdiscovery "github.com/tochemey/goakt/v4/mocks/discovery"
 	mockremote "github.com/tochemey/goakt/v4/mocks/remoteclient"
 	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
@@ -1723,4 +1724,76 @@ func TestGrainContextPropagation(t *testing.T) {
 			return grain.Seen() == headerVal
 		}, 2*time.Second, 50*time.Millisecond)
 	})
+}
+
+// TestGrainActivationDuringShutdownNoRace reproduces issue https://github.com/Tochemey/goakt/issues/1205: a data race
+// between actorSystem shutdown (reset()) and an in-flight grain activation
+// reading shutdownSignal in putGrainOnCluster(). Several goroutines publish
+// grains to the cluster (the exact racing read) right up to and during Stop()
+// (which calls reset(), the racing write). Must be run under -race.
+func TestGrainActivationDuringShutdownNoRace(t *testing.T) {
+	ctx := context.TODO()
+	nodePorts := internalnet.Get(3)
+	gossipPort := nodePorts[0]
+	clusterPort := nodePorts[1]
+	remotingPort := nodePorts[2]
+	host := "127.0.0.1"
+
+	addrs := []string{net.JoinHostPort(host, strconv.Itoa(gossipPort))}
+
+	provider := new(mockdiscovery.Provider)
+	system, err := NewActorSystem(
+		"test",
+		WithLogger(log.DiscardLogger),
+		WithRemote(remote.NewConfig(host, remotingPort)),
+		WithCluster(
+			NewClusterConfig().
+				WithKinds(new(MockActor)).
+				WithGrains(new(MockGrain)).
+				WithPartitionCount(9).
+				WithReplicaCount(1).
+				WithPeersPort(clusterPort).
+				WithMinimumPeersQuorum(1).
+				WithDiscoveryPort(gossipPort).
+				WithDiscovery(provider)),
+	)
+	require.NoError(t, err)
+
+	provider.EXPECT().ID().Return("testDisco")
+	provider.EXPECT().Initialize().Return(nil)
+	provider.EXPECT().Register().Return(nil)
+	provider.EXPECT().Deregister().Return(nil)
+	provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+	provider.EXPECT().Close().Return(nil)
+
+	require.NoError(t, system.Start(ctx))
+	pause.For(time.Second)
+
+	sys := system.(*actorSystem)
+
+	// Several publishers keep evaluating putGrainOnCluster's select (which
+	// reads x.shutdownSignal) so reads overlap reset()'s write during Stop.
+	// Each goroutine owns its grain/identity to avoid unrelated shared state.
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := range 8 {
+		grain := NewMockGrain()
+		pid := newGrainPID(newGrainIdentity(grain, "race-grain-"+strconv.Itoa(i)), grain, sys, newGrainConfig())
+		wg.Go(func() {
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					_ = sys.putGrainOnCluster(pid)
+				}
+			}
+		})
+	}
+
+	require.NoError(t, system.Stop(ctx))
+	close(stop)
+	wg.Wait()
+
+	provider.AssertExpectations(t)
 }

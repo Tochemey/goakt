@@ -1109,6 +1109,14 @@ func (x *actorSystem) Start(ctx context.Context) error {
 	x.logger.Infof("starting actor system=%s os=%s arch=%s", x.name, runtime.GOOS, runtime.GOARCH)
 	x.starting.Store(true)
 
+	// (Re)create shutdownSignal here, the only point where no cluster
+	// producer or replicate drainer is alive yet. Recreating it during
+	// teardown (in reset()) would race the concurrent reads in
+	// putActorOnCluster / putGrainOnCluster. A fresh channel per start
+	// lets the next shutdown close it exactly once without double-closing
+	// the one a prior teardown already closed.
+	x.shutdownSignal = make(chan types.Unit)
+
 	x.scheduler = newScheduler(x.logger, x.shutdownTimeout, x)
 
 	x.dispatcher.start()
@@ -2358,10 +2366,8 @@ func (x *actorSystem) startCluster(ctx context.Context) error {
 	x.eventsQueue = x.cluster.Events()
 	x.rebalancingQueue = make(chan *internalpb.PeerState, 1)
 	go x.clusterEventsLoop()
-	// Track the replicate drainers so shutdown can wait for them to
-	// exit before reset() reassigns shutdownSignal. Without this, the
-	// drainer's initial read of x.shutdownSignal would have no
-	// happens-before relation to reset()'s later write.
+	// Track the replicate drainers so shutdown can wait for them to drain
+	// the cluster queues before reset() clears the rest of the state.
 	x.drainers.Add(2)
 	go x.replicateActors()
 	go x.replicateGrains()
@@ -2528,9 +2534,9 @@ func (x *actorSystem) startupCleanup(ctx context.Context) {
 	}
 
 	x.dispatcher.signalStop()
-	// Wait for replicate drainers before reset reassigns shutdownSignal.
-	// If cluster setup never got as far as spawning them, drainers' count
-	// is zero and Wait returns immediately.
+	// Wait for the replicate drainers to drain the cluster queues before
+	// reset() clears state. If cluster setup never got as far as spawning
+	// them, drainers' count is zero and Wait returns immediately.
 	x.drainers.Wait()
 	x.reset()
 }
@@ -2543,11 +2549,8 @@ func (x *actorSystem) reset() {
 	x.actors.reset()
 	x.grains.Reset()
 	x.shuttingDown.Store(false)
-	// Recreate shutdownSignal so a subsequent shutdown or startupCleanup
-	// can close it exactly once. Without this, restarting the system
-	// after a prior shutdown / startup failure would double-close the
-	// same channel on the next teardown.
-	x.shutdownSignal = make(chan types.Unit)
+	// shutdownSignal is intentionally left closed here. It is recreated in
+	// Start(), the only point where no producer/drainer can race the write.
 	x.clusterStore = nil
 	x.dataCenterController = nil
 	x.dataCenterLeaderTicker = nil
@@ -2570,10 +2573,10 @@ func (x *actorSystem) shutdown(ctx context.Context) (err error) {
 	}
 
 	defer func() {
-		// Wait for the replicate drainers to exit before reset()
-		// reassigns shutdownSignal. Drainers already observed the
-		// close above and will return shortly after draining any
-		// buffered items, so this does not add meaningful latency.
+		// Wait for the replicate drainers to exit before reset() clears
+		// state. Drainers already observed the close above and will return
+		// shortly after draining any buffered items, so this does not add
+		// meaningful latency.
 		x.drainers.Wait()
 		x.reset()
 		// Signal dispatcher shutdown after all actors are torn down and
