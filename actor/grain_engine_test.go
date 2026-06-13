@@ -1797,3 +1797,107 @@ func TestGrainActivationDuringShutdownNoRace(t *testing.T) {
 
 	provider.AssertExpectations(t)
 }
+
+// TestRemoteTellGrainLocalShortCircuit verifies that a Tell to a grain already
+// activated on this node delivers in-process without the per-send cluster
+// registry lookup. No GetGrain expectation is set, so any cluster lookup fails
+// the mock.
+func TestRemoteTellGrainLocalShortCircuit(t *testing.T) {
+	grain := NewMockGrain()
+	sys, cl, _, identity := newActivationTestSystem(t, grain, "local-fast-tell", true)
+	pid := seedInactiveGrainPID(sys, identity, grain, newGrainConfig())
+	pid.activated.Store(true)
+
+	err := sys.remoteTellGrain(context.Background(), identity, new(testpb.TestSend), time.Second)
+	require.NoError(t, err)
+	cl.AssertNotCalled(t, "GetGrain", mock.Anything, mock.Anything)
+}
+
+// TestRemoteAskGrainLocalShortCircuit is the Ask counterpart of
+// TestRemoteTellGrainLocalShortCircuit.
+func TestRemoteAskGrainLocalShortCircuit(t *testing.T) {
+	grain := NewMockGrain()
+	sys, cl, _, identity := newActivationTestSystem(t, grain, "local-fast-ask", true)
+	pid := seedInactiveGrainPID(sys, identity, grain, newGrainConfig())
+	pid.activated.Store(true)
+
+	resp, err := sys.remoteAskGrain(context.Background(), identity, new(testpb.TestReply), time.Second)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	cl.AssertNotCalled(t, "GetGrain", mock.Anything, mock.Anything)
+}
+
+// benchmarkNodeLocalGrainSystem starts a single-node clustered system with an
+// activated grain and returns it for node-local Tell/Ask benchmarks.
+func benchmarkNodeLocalGrainSystem(b *testing.B) (ActorSystem, *GrainIdentity) {
+	b.Helper()
+	ctx := context.TODO()
+	nodePorts := internalnet.Get(3)
+	host := "127.0.0.1"
+	addrs := []string{net.JoinHostPort(host, strconv.Itoa(nodePorts[0]))}
+
+	provider := new(mockdiscovery.Provider)
+	provider.EXPECT().ID().Return("bench").Maybe()
+	provider.EXPECT().Initialize().Return(nil).Maybe()
+	provider.EXPECT().Register().Return(nil).Maybe()
+	provider.EXPECT().Deregister().Return(nil).Maybe()
+	provider.EXPECT().DiscoverPeers().Return(addrs, nil).Maybe()
+	provider.EXPECT().Close().Return(nil).Maybe()
+
+	system, err := NewActorSystem(
+		"bench",
+		WithLogger(log.DiscardLogger),
+		WithRemote(remote.NewConfig(host, nodePorts[2])),
+		WithCluster(
+			NewClusterConfig().
+				WithGrains(new(MockGrain)).
+				WithPartitionCount(9).
+				WithReplicaCount(1).
+				WithPeersPort(nodePorts[1]).
+				WithMinimumPeersQuorum(1).
+				WithDiscoveryPort(nodePorts[0]).
+				WithDiscovery(provider)),
+	)
+	require.NoError(b, err)
+	require.NoError(b, system.Start(ctx))
+	pause.For(time.Second)
+
+	identity, err := system.GrainIdentity(ctx, "bench-grain", func(context.Context) (Grain, error) {
+		return NewMockGrain(), nil
+	})
+	require.NoError(b, err)
+
+	b.Cleanup(func() { _ = system.Stop(ctx) })
+	return system, identity
+}
+
+// BenchmarkTellGrainNodeLocal measures node-local TellGrain throughput, where
+// the grain is owned by the calling node and the cluster lookup is skipped.
+func BenchmarkTellGrainNodeLocal(b *testing.B) {
+	system, identity := benchmarkNodeLocalGrainSystem(b)
+	ctx := context.TODO()
+	msg := new(testpb.TestSend)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for range b.N {
+		if err := system.TellGrain(ctx, identity, msg); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// BenchmarkAskGrainNodeLocal is the Ask counterpart of BenchmarkTellGrainNodeLocal.
+func BenchmarkAskGrainNodeLocal(b *testing.B) {
+	system, identity := benchmarkNodeLocalGrainSystem(b)
+	ctx := context.TODO()
+	msg := new(testpb.TestReply)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for range b.N {
+		if _, err := system.AskGrain(ctx, identity, msg, time.Second); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

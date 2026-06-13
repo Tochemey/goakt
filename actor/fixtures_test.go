@@ -1580,6 +1580,7 @@ func MockReplicationTestSystem(clusterMock *mockcluster.Cluster) *actorSystem {
 		actors:         newTree(),
 		actorsQueue:    make(chan *internalpb.Actor, 4),
 		grainsQueue:    make(chan *internalpb.Grain, 4),
+		grains:         xsync.NewMap[string, *grainPID](),
 		shutdownSignal: make(chan types.Unit),
 		remoteConfig:   remote.NewConfig("127.0.0.1", 8080),
 		clusterNode:    &discovery.Node{Host: "127.0.0.1", PeersPort: 9000},

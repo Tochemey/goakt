@@ -12,6 +12,12 @@ In cluster mode, `TellGrain` and `AskGrain` always routed through the remoting s
 
 A runnable sample lives in `playground/issue-1203`.
 
+#### Node-local grain sends skip the cluster registry lookup
+
+After the remoting round trip was removed (above), every node-local `TellGrain`/`AskGrain` still resolved the owner through the cluster registry first: `remoteTellGrain`/`remoteAskGrain` called `cluster.GetGrain` before any local check ([#1203](https://github.com/Tochemey/goakt/issues/1203)), paying a cluster-engine read lock, an olric map `Get`, and a protobuf decode on every send. That lookup became the per-send cost that capped node-local throughput once the network hop was gone, and its read lock is shared with grain registration and removal, coupling the send hot path to cluster mutation.
+
+Both paths now check the local grain table first. When the grain is already activated and live on this node it is owned here, so the message is delivered in-process and the registry lookup is skipped entirely. The `isActive()` guard keeps relocation correct: a grain being moved is deactivated during the handoff, so the send falls through to the authoritative cluster lookup. In `BenchmarkTellGrainNodeLocal` / `BenchmarkAskGrainNodeLocal` this cuts per-send allocations from 36 to 2 (Tell) and 35 to 1 (Ask), roughly 3x to 5x faster per call.
+
 ### 🐛 Fixes
 
 #### `NewSlogFrom` honors its level parameter

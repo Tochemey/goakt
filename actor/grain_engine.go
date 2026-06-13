@@ -459,6 +459,17 @@ func (x *actorSystem) sendRemoteActivateGrain(ctx context.Context, grain *intern
 // Returns:
 //   - error: error if the request fails.
 func (x *actorSystem) remoteTellGrain(ctx context.Context, id *GrainIdentity, message any, timeout time.Duration) error {
+	// Fast path: a grain that is already activated and live on this node is
+	// owned by this node, so deliver in-process and skip the cluster registry
+	// lookup (engine RLock + olric Get + protobuf decode) on every send. The
+	// isActive() guard keeps relocation correct: a grain being moved is
+	// deactivated during the handoff, so this falls through to the
+	// authoritative cluster lookup below.
+	if process, ok := x.grains.Get(id.String()); ok && process.isActive() {
+		_, err := x.localSend(ctx, id, message, timeout, false)
+		return err
+	}
+
 	// Try local cluster first
 	grain, err := x.getCluster().GetGrain(ctx, id.String())
 	if err == nil {
@@ -500,6 +511,12 @@ func (x *actorSystem) remoteTellGrain(ctx context.Context, id *GrainIdentity, me
 //   - proto.Message: the response from the Grain.
 //   - error: error if the request fails.
 func (x *actorSystem) remoteAskGrain(ctx context.Context, id *GrainIdentity, message any, timeout time.Duration) (any, error) {
+	// Fast path: see remoteTellGrain. A locally active grain is owned here, so
+	// deliver in-process and skip the per-send cluster registry lookup.
+	if process, ok := x.grains.Get(id.String()); ok && process.isActive() {
+		return x.localSend(ctx, id, message, timeout, true)
+	}
+
 	// Try local cluster first
 	grain, err := x.getCluster().GetGrain(ctx, id.String())
 	if err == nil {
