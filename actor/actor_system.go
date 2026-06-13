@@ -909,9 +909,8 @@ type actorSystem struct {
 	// Guarded by the shuttingDown CAS so close runs exactly once.
 	shutdownSignal chan types.Unit
 	// drainers tracks the replicateActors / replicateGrains goroutines.
-	// shutdown waits on it before reset() reassigns shutdownSignal, so
-	// the drainer's initial read of the field happens-before any later
-	// reassignment for a restart cycle.
+	// shutdown waits on it so the drainers finish draining the cluster
+	// queues before reset() clears the rest of the system state.
 	drainers         sync.WaitGroup
 	grainsQueue      chan *internalpb.Grain
 	grains           *xsync.Map[string, *grainPID]
