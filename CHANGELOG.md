@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## v4.2.9 - 2026-13-01
 
 ### 🚀 Performance
 
