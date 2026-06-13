@@ -30,6 +30,12 @@ l.Warn("passes the floor")
 
 A runnable sample lives in `playground/issue-1201`.
 
+#### Data race between actor-system shutdown and in-flight grain activation
+
+Under `-race`, stopping a clustered `ActorSystem` while a grain was being activated tripped the race detector ([#1205](https://github.com/Tochemey/goakt/issues/1205)). `reset()` (reached from `Stop()`) recreated the `shutdownSignal` channel during teardown, while a concurrent `putGrainOnCluster()` (reached from `GrainIdentity`/`TellGrain`/`AskGrain`) read that same field in its publish `select`, with no synchronization between the two paths. The node-local grain fast path widened the window where activation overlaps shutdown, which is why it surfaced after v4.2.8.
+
+`shutdownSignal` is now recreated once at the start of `Start()`, the only point where no cluster producer or replicate drainer is alive, instead of during `reset()`. Teardown leaves the channel closed, so any producer racing shutdown only ever reads a stable closed channel (its `select` returns at once and the publish is skipped, exactly as intended). The fix adds no locks, atomics, or hot-path allocations, and covers both `putGrainOnCluster` and the structurally identical `putActorOnCluster`.
+
 ## v4.2.8 - 2026-10-01
 
 ### ✨ New Additions
