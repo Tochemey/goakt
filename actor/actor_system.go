@@ -2793,6 +2793,17 @@ func (x *actorSystem) replicateOneActor(actor *internalpb.Actor) {
 		return
 	}
 
+	// Skip replication if the actor was already removed locally. Replication is
+	// asynchronous (the actor is queued on spawn and published here later), while
+	// removal on kill is synchronous via the death watch (deleteNode followed by
+	// cluster.RemoveActor). When an actor is killed right after being spawned, the
+	// queued PutActor can run after RemoveActor and re-register a dead actor in the
+	// cluster registry, where it would never be cleaned up. Mirrors the stale-actor
+	// check in removeStaleClusterActors.
+	if _, ok := x.actors.node(addr.String()); !ok {
+		return
+	}
+
 	ctx := context.Background()
 	cluster := x.getCluster()
 	if actor.GetSingleton() != nil {

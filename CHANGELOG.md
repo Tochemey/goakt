@@ -12,6 +12,12 @@ In cluster mode, `TellGrain` and `AskGrain` always routed through the remoting s
 
 A runnable sample lives in `playground/issue-1203`.
 
+#### Node-local grain sends skip the cluster registry lookup
+
+After the remoting round trip was removed (above), every node-local `TellGrain`/`AskGrain` still resolved the owner through the cluster registry first: `remoteTellGrain`/`remoteAskGrain` called `cluster.GetGrain` before any local check ([#1203](https://github.com/Tochemey/goakt/issues/1203)), paying a cluster-engine read lock, an olric map `Get`, and a protobuf decode on every send. That lookup became the per-send cost that capped node-local throughput once the network hop was gone, and its read lock is shared with grain registration and removal, coupling the send hot path to cluster mutation.
+
+Both paths now check the local grain table first. When the grain is already activated and live on this node it is owned here, so the message is delivered in-process and the registry lookup is skipped entirely. The `isActive()` guard keeps relocation correct: a grain being moved is deactivated during the handoff, so the send falls through to the authoritative cluster lookup. In `BenchmarkTellGrainNodeLocal` / `BenchmarkAskGrainNodeLocal` this cuts per-send allocations from 36 to 2 (Tell) and 35 to 1 (Ask), roughly 3x to 5x faster per call.
+
 ### 🐛 Fixes
 
 #### `NewSlogFrom` honors its level parameter
@@ -35,6 +41,12 @@ A runnable sample lives in `playground/issue-1201`.
 Under `-race`, stopping a clustered `ActorSystem` while a grain was being activated tripped the race detector ([#1205](https://github.com/Tochemey/goakt/issues/1205)). `reset()` (reached from `Stop()`) recreated the `shutdownSignal` channel during teardown, while a concurrent `putGrainOnCluster()` (reached from `GrainIdentity`/`TellGrain`/`AskGrain`) read that same field in its publish `select`, with no synchronization between the two paths. The node-local grain fast path widened the window where activation overlaps shutdown, which is why it surfaced after v4.2.8.
 
 `shutdownSignal` is now recreated once at the start of `Start()`, the only point where no cluster producer or replicate drainer is alive, instead of during `reset()`. Teardown leaves the channel closed, so any producer racing shutdown only ever reads a stable closed channel (its `select` returns at once and the publish is skipped, exactly as intended). The fix adds no locks, atomics, or hot-path allocations, and covers both `putGrainOnCluster` and the structurally identical `putActorOnCluster`.
+
+#### Killed actor re-registered in the cluster registry
+
+In cluster mode, spawning an actor and killing it back-to-back could leave a stale entry in the cluster registry forever. Spawn replicates the actor to the cluster asynchronously: `putActorOnCluster` queues it on `actorsQueue` and the `replicateActors` drainer later calls `cluster.PutActor`. Kill, by contrast, removes it synchronously through the death watch (`deleteNode` then `cluster.RemoveActor`). When the two interleave so the queued `PutActor` runs after `RemoveActor`, the dead actor is re-inserted and never cleaned up. `ActorOf` then resolves it through the cluster slow path and returns a remote PID with no error, even though the actor is gone. This surfaced as a flaky `testkit` `TestTestNode/Kill`.
+
+`replicateOneActor` now skips publishing when the actor is no longer present in the local actor tree, mirroring the stale-actor check in `removeStaleClusterActors`. By the time a stale `PutActor` is drained, the death watch has already removed the node locally, so the publish is dropped and the dead actor stays out of the registry. The normal path (actor still alive) is unaffected.
 
 ## v4.2.8 - 2026-10-01
 

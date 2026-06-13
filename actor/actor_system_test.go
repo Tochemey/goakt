@@ -5371,8 +5371,16 @@ func TestReplicateActors_ErrorPaths(t *testing.T) {
 	system := MockReplicationTestSystem(clusterMock)
 	system.relocationEnabled.Store(true)
 
+	addPIDNode := func(addr *address.Address) {
+		pid := &PID{address: addr, path: newPath(addr), actorSystem: system}
+		node := newPidNode(pid)
+		system.actors.pids[node.id] = node
+		system.actors.names[node.name] = node
+	}
+
 	// Expect PutKind to fail for singleton actors and trigger the warning path.
 	addr := address.New("singleton", "test-replication", "127.0.0.1", 8080)
+	addPIDNode(addr)
 	singleton := &internalpb.Actor{
 		Address: addr.String(),
 		Type:    "singleton-kind",
@@ -5385,8 +5393,10 @@ func TestReplicateActors_ErrorPaths(t *testing.T) {
 	clusterMock.EXPECT().PutKind(mock.Anything, singleton.GetType()).Return(fmt.Errorf("put kind failure")).Once()
 
 	// Expect PutActor to fail for regular actors after publish attempts.
+	regularAddr := address.New("regular", "test-replication", "127.0.0.1", 8080)
+	addPIDNode(regularAddr)
 	regular := &internalpb.Actor{
-		Address: address.New("regular", "test-replication", "127.0.0.1", 8080).String(),
+		Address: regularAddr.String(),
 		Type:    "regular-kind",
 	}
 	clusterMock.EXPECT().PutActor(mock.Anything, regular).Return(fmt.Errorf("put actor failure")).Once()
@@ -5402,6 +5412,42 @@ func TestReplicateActors_ErrorPaths(t *testing.T) {
 
 	system.actorsQueue <- singleton
 	system.actorsQueue <- regular
+	close(system.actorsQueue)
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("replicateActors did not drain the queue")
+	}
+}
+
+// TestReplicateActors_SkipsRemovedActor reproduces the spawn-then-kill race:
+// an actor is queued for replication on spawn, but killed (removed from the
+// local tree) before the queued PutActor runs. The stale PutActor must be
+// skipped so a dead actor is never re-registered in the cluster registry.
+func TestReplicateActors_SkipsRemovedActor(t *testing.T) {
+	clusterMock := new(mockscluster.Cluster)
+	system := MockReplicationTestSystem(clusterMock)
+	system.relocationEnabled.Store(true)
+
+	// The actor is NOT present in the local tree, simulating an actor that was
+	// killed before its queued replication was processed. No cluster calls are
+	// expected: AssertExpectations fails if PutActor/PutKind are invoked.
+	removed := &internalpb.Actor{
+		Address: address.New("removed", "test-replication", "127.0.0.1", 8080).String(),
+		Type:    "removed-kind",
+	}
+
+	t.Cleanup(func() { clusterMock.AssertExpectations(t) })
+
+	system.drainers.Add(1)
+	done := make(chan struct{})
+	go func() {
+		system.replicateActors()
+		close(done)
+	}()
+
+	system.actorsQueue <- removed
 	close(system.actorsQueue)
 
 	select {
