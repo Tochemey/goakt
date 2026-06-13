@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### 🚀 Performance
+
+#### Node-local grain delivery skips the remoting round trip
+
+In cluster mode, `TellGrain` and `AskGrain` always routed through the remoting stack for a grain owned by the **calling node**, turning every node-local grain message into a loopback TCP round trip (serialize, loopback connection, deserialize, synchronous ack) ([#1203](https://github.com/Tochemey/goakt/issues/1203)). Once a grain was activated and registered in the cluster, the send path went straight to `RemoteTellGrain`/`RemoteAskGrain` regardless of where the grain lived, dialing `host:port` even when that was the current node. This capped local grain throughput at roughly 500 msgs/s and stalled each sender for the full round trip.
+
+`remoteTellGrain` and `remoteAskGrain` now short-circuit when the resolved owner is the calling node (`isLocalGrainOwner`), delivering in-process via `localSend` and skipping the remoting hop. Location transparency is a contract about call semantics, not a mandate to serialize node-local calls, so observable behavior is unchanged. This mainly benefits single-node deployments and any co-located caller/grain pattern, where the round trip was pure overhead.
+
+A runnable sample lives in `playground/issue-1203`.
+
 ### 🐛 Fixes
 
 #### `NewSlogFrom` honors its level parameter
@@ -11,9 +21,9 @@
 The level now acts as a minimum level in addition to the wrapped handler's own filtering: a record is emitted only when it passes both. The comparison happens in `slog.Level` space because GoAkt's `Level` constants are not ordered by severity (`DebugLevel` sits numerically above `WarningLevel`), so a record's GoAkt level is mapped through the slog level mapping before being compared against the floor. `NewSlog` is unaffected: it already baked the level into its own handler, and for loggers it builds the new check is a no-op.
 
 ```go
-appLogger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-l := log.NewSlogFrom(appLogger, log.WarningLevel)
+l := log.NewSlogFrom(logger, log.WarningLevel)
 l.Info("suppressed by the WARNING floor") // was printed before the fix
 l.Warn("passes the floor")
 ```

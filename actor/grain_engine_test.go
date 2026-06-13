@@ -1068,6 +1068,35 @@ func TestTellGrain(t *testing.T) {
 		err := sys.TellGrain(ctx, identity, &testpb.TestSend{})
 		require.Error(t, err)
 	})
+
+	t.Run("cluster mode delivers in-process when grain owned by current node", func(t *testing.T) {
+		ctx := context.Background()
+		cl := mockcluster.NewCluster(t)
+		rem := mockremote.NewClient(t)
+		node := &discovery.Node{Host: "127.0.0.1", PeersPort: 9017, RemotingPort: 9117}
+		sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+		sys.registry.Register(NewMockGrain())
+
+		identity := newGrainIdentity(NewMockGrain(), "tell-local-owner-grain")
+		// Owner endpoint matches the current node, so delivery must stay in-process.
+		owner := &internalpb.Grain{
+			GrainId: &internalpb.GrainId{Value: identity.String(), Kind: identity.Kind()},
+			Host:    node.Host,
+			Port:    int32(node.RemotingPort),
+		}
+		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil)
+		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
+
+		// No RemoteTellGrain expectation: a loopback round trip would fail the
+		// mockremote client, proving the message was delivered locally.
+		err := sys.TellGrain(ctx, identity, &testpb.TestSend{})
+		require.NoError(t, err)
+
+		require.Eventually(t, func() bool {
+			_, ok := sys.grains.Get(identity.String())
+			return ok
+		}, 100*time.Millisecond, 5*time.Millisecond, "grain should be activated locally after TellGrain")
+	})
 }
 
 func TestAskGrain(t *testing.T) {
@@ -1133,6 +1162,32 @@ func TestAskGrain(t *testing.T) {
 		resp, err := sys.AskGrain(ctx, identity, &testpb.TestReply{}, time.Second)
 		require.Error(t, err)
 		require.Nil(t, resp)
+	})
+
+	t.Run("cluster mode delivers in-process when grain owned by current node", func(t *testing.T) {
+		ctx := context.Background()
+		cl := mockcluster.NewCluster(t)
+		rem := mockremote.NewClient(t)
+		node := &discovery.Node{Host: "127.0.0.1", PeersPort: 9018, RemotingPort: 9118}
+		sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+		sys.registry.Register(NewMockGrain())
+
+		identity := newGrainIdentity(NewMockGrain(), "ask-local-owner-grain")
+		// Owner endpoint matches the current node, so delivery must stay in-process.
+		owner := &internalpb.Grain{
+			GrainId: &internalpb.GrainId{Value: identity.String(), Kind: identity.Kind()},
+			Host:    node.Host,
+			Port:    int32(node.RemotingPort),
+		}
+		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil)
+		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
+
+		// No RemoteAskGrain expectation: a loopback round trip would fail the
+		// mockremote client, proving the request was served locally.
+		resp, err := sys.AskGrain(ctx, identity, &testpb.TestReply{}, time.Second)
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		require.Equal(t, "received message", resp.(*testpb.Reply).Content)
 	})
 }
 

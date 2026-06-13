@@ -462,6 +462,12 @@ func (x *actorSystem) remoteTellGrain(ctx context.Context, id *GrainIdentity, me
 	// Try local cluster first
 	grain, err := x.getCluster().GetGrain(ctx, id.String())
 	if err == nil {
+		// When the grain is owned by the calling node, deliver in-process and
+		// skip the remoting round trip (loopback serialization/connection).
+		if x.isLocalGrainOwner(grain) {
+			_, err := x.localSend(ctx, id, message, timeout, false)
+			return err
+		}
 		return x.sendRemoteTellGrainRequest(ctx, grain, message)
 	}
 
@@ -497,6 +503,11 @@ func (x *actorSystem) remoteAskGrain(ctx context.Context, id *GrainIdentity, mes
 	// Try local cluster first
 	grain, err := x.getCluster().GetGrain(ctx, id.String())
 	if err == nil {
+		// When the grain is owned by the calling node, deliver in-process and
+		// skip the remoting round trip (loopback serialization/connection).
+		if x.isLocalGrainOwner(grain) {
+			return x.localSend(ctx, id, message, timeout, true)
+		}
 		return x.sendRemoteAskGrainRequest(ctx, grain, message, timeout)
 	}
 
