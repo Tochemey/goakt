@@ -42,6 +42,12 @@ Under `-race`, stopping a clustered `ActorSystem` while a grain was being activa
 
 `shutdownSignal` is now recreated once at the start of `Start()`, the only point where no cluster producer or replicate drainer is alive, instead of during `reset()`. Teardown leaves the channel closed, so any producer racing shutdown only ever reads a stable closed channel (its `select` returns at once and the publish is skipped, exactly as intended). The fix adds no locks, atomics, or hot-path allocations, and covers both `putGrainOnCluster` and the structurally identical `putActorOnCluster`.
 
+#### Killed actor re-registered in the cluster registry
+
+In cluster mode, spawning an actor and killing it back-to-back could leave a stale entry in the cluster registry forever ([#TODO](https://github.com/Tochemey/goakt/issues/TODO)). Spawn replicates the actor to the cluster asynchronously: `putActorOnCluster` queues it on `actorsQueue` and the `replicateActors` drainer later calls `cluster.PutActor`. Kill, by contrast, removes it synchronously through the death watch (`deleteNode` then `cluster.RemoveActor`). When the two interleave so the queued `PutActor` runs after `RemoveActor`, the dead actor is re-inserted and never cleaned up. `ActorOf` then resolves it through the cluster slow path and returns a remote PID with no error, even though the actor is gone. This surfaced as a flaky `testkit` `TestTestNode/Kill`.
+
+`replicateOneActor` now skips publishing when the actor is no longer present in the local actor tree, mirroring the stale-actor check in `removeStaleClusterActors`. By the time a stale `PutActor` is drained, the death watch has already removed the node locally, so the publish is dropped and the dead actor stays out of the registry. The normal path (actor still alive) is unaffected.
+
 ## v4.2.8 - 2026-10-01
 
 ### ✨ New Additions
