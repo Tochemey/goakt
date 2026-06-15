@@ -592,6 +592,27 @@ func shouldRetrySpawnSingleton(err error) bool {
 		return true
 	}
 
+	// Leader-delegated transient conditions. When SpawnSingleton is delegated to the
+	// coordinator over the network (spawnSingletonOnLeader -> RemoteSpawn), the leader's
+	// transient failures are serialized to proto codes and de-serialized by the client
+	// (checkProtoError) into these error values rather than their locally-detected
+	// equivalents. Without recognizing them here, a node calling SpawnSingleton during
+	// membership churn (e.g. a rolling restart) would fail terminally instead of retrying
+	// within its budget until the cluster settles:
+	//   - ErrRemoteSendFailure: CODE_UNAVAILABLE, mapped from leader quorum errors.
+	//   - ErrRequestTimeout:     CODE_DEADLINE_EXCEEDED on the leader.
+	//   - ErrAddressNotFound:    CODE_NOT_FOUND from a stale coordinator view or a singleton
+	//     not yet placed while membership is reconciling.
+	//   - ErrInvalidResponse:    the contacted leader is shutting down or the caller's
+	//     coordinator view is stale, so the reply is neither a typed error nor a spawn
+	//     response with a non-empty address.
+	if errors.Is(err, gerrors.ErrRemoteSendFailure) ||
+		errors.Is(err, gerrors.ErrRequestTimeout) ||
+		errors.Is(err, gerrors.ErrAddressNotFound) ||
+		errors.Is(err, gerrors.ErrInvalidResponse) {
+		return true
+	}
+
 	// Retry on non-Connect timeouts as well (can happen depending on call stack).
 	if errors.Is(err, context.DeadlineExceeded) {
 		return true
