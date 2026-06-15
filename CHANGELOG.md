@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## v4.2.10 - 2026-06-15
 
 ### 🐛 Fixes
 
@@ -10,12 +10,12 @@
 
 When the local node is not the coordinator, `spawnSingletonOnLeader` delegates the spawn to the leader through `remoting.RemoteSpawn`. On the leader, transient failures are mapped to a proto error code by `wrapSpawnErr` and serialized back across the remoting boundary, where the client's `checkProtoError` de-serializes them into a *different* set of error values than their locally-detected equivalents:
 
-| Leader condition | Proto code | Client yields | Retried before the fix? |
-|---|---|---|---|
-| quorum error | `CODE_UNAVAILABLE` | `ErrRemoteSendFailure` | ❌ |
-| deadline exceeded | `CODE_DEADLINE_EXCEEDED` | `ErrRequestTimeout` | ❌ |
-| stale coordinator / not-yet-placed | `CODE_NOT_FOUND` | `ErrAddressNotFound` | ❌ |
-| non-`Error` / empty reply | (none) | `ErrInvalidResponse` | ❌ |
+| Leader condition                   | Proto code               | Client yields          | Retried before the fix? |
+|------------------------------------|--------------------------|------------------------|-------------------------|
+| quorum error                       | `CODE_UNAVAILABLE`       | `ErrRemoteSendFailure` | ❌                       |
+| deadline exceeded                  | `CODE_DEADLINE_EXCEEDED` | `ErrRequestTimeout`    | ❌                       |
+| stale coordinator / not-yet-placed | `CODE_NOT_FOUND`         | `ErrAddressNotFound`   | ❌                       |
+| non-`Error` / empty reply          | (none)                   | `ErrInvalidResponse`   | ❌                       |
 
 The retry classifier `shouldRetrySpawnSingleton` only recognized the locally-detected transient forms (quorum errors, `ErrLeaderNotFound`, `ErrEngineNotRunning`, no-role-members, `context.DeadlineExceeded`, `net.Error` timeouts, and `ECONNREFUSED`), so the leader-delegated forms above were treated as terminal and the retrier stopped immediately, never spending its retry budget.
 
@@ -23,7 +23,7 @@ The classifier now also treats `ErrRemoteSendFailure`, `ErrRequestTimeout`, `Err
 
 A runnable sample lives in `playground/issue-1209`. The exact transient error only surfaces inside a sub-second reconciliation window in a live cluster, so the deterministic regression coverage is in the unit tests (`TestSpawnSingletonRetryBehavior` and `TestShouldRetrySpawnSingleton`), which drive the leader-delegated errors directly through the classifier and the retrier.
 
-## v4.2.9 - 2026-13-01
+## v4.2.9 - 2026-06-13
 
 ### 🚀 Performance
 
@@ -71,7 +71,7 @@ In cluster mode, spawning an actor and killing it back-to-back could leave a sta
 
 `replicateOneActor` now skips publishing when the actor is no longer present in the local actor tree, mirroring the stale-actor check in `removeStaleClusterActors`. By the time a stale `PutActor` is drained, the death watch has already removed the node locally, so the publish is dropped and the dead actor stays out of the registry. The normal path (actor still alive) is unaffected.
 
-## v4.2.8 - 2026-10-01
+## v4.2.8 - 2026-06-10
 
 ### ✨ New Additions
 
