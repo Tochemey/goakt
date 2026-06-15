@@ -1399,6 +1399,26 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 				name: "deadline exceeded",
 				err:  context.DeadlineExceeded,
 			},
+			// Leader-delegated transient conditions: the leader's failures are serialized to
+			// proto codes and de-serialized by the client into these error values (see
+			// checkProtoError). Before the fix shouldRetrySpawnSingleton did not recognize
+			// them and SpawnSingleton failed terminally during membership churn (issue #1209).
+			{
+				name: "remote send failure (leader quorum error)",
+				err:  gerrors.ErrRemoteSendFailure,
+			},
+			{
+				name: "request timeout (leader deadline exceeded)",
+				err:  gerrors.ErrRequestTimeout,
+			},
+			{
+				name: "address not found (stale coordinator view)",
+				err:  gerrors.ErrAddressNotFound,
+			},
+			{
+				name: "invalid response (leader shutting down)",
+				err:  gerrors.ErrInvalidResponse,
+			},
 		}
 
 		for _, tc := range cases {
@@ -1479,4 +1499,74 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 			})
 		}
 	})
+
+	t.Run("surfaces leader-delegated transient error after the retry budget is exhausted", func(t *testing.T) {
+		ctx := context.Background()
+		ports := dynaport.Get(3)
+
+		clusterMock := mockcluster.NewCluster(t)
+		remotingMock := mockremote.NewClient(t)
+		system := MockSingletonClusterReadyActorSystem(t)
+		system.remoting = remotingMock
+
+		system.locker.Lock()
+		system.cluster = clusterMock
+		system.locker.Unlock()
+
+		leader := &cluster.Peer{
+			Host:         "127.0.0.1",
+			RemotingPort: ports[2],
+			Coordinator:  true,
+		}
+
+		// The leader keeps returning a transient remote send failure for every attempt:
+		// the retrier must spend its full budget rather than stopping on the first
+		// occurrence, then surface the error.
+		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{leader}, nil).Times(2)
+		remotingMock.EXPECT().
+			RemoteSpawn(mock.Anything, leader.Host, leader.RemotingPort, mock.Anything).
+			Return(nil, gerrors.ErrRemoteSendFailure).
+			Times(2)
+
+		_, err := system.SpawnSingleton(
+			ctx,
+			"singleton",
+			NewMockActor(),
+			WithSingletonSpawnRetries(2),
+			WithSingletonSpawnWaitInterval(time.Millisecond),
+			WithSingletonSpawnTimeout(time.Second),
+		)
+		require.ErrorIs(t, err, gerrors.ErrRemoteSendFailure)
+	})
+}
+
+func TestShouldRetrySpawnSingleton(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil error", err: nil, want: false},
+		{name: "leader not found", err: gerrors.ErrLeaderNotFound, want: true},
+		{name: "engine not running", err: cluster.ErrEngineNotRunning, want: true},
+		{name: "no role members", err: errNoRoleMembers{role: "control"}, want: true},
+		{name: "context deadline exceeded", err: context.DeadlineExceeded, want: true},
+		{name: "connection refused", err: fmt.Errorf("dial: %w", syscall.ECONNREFUSED), want: true},
+		// Leader-delegated transient conditions (issue #1209).
+		{name: "remote send failure", err: gerrors.ErrRemoteSendFailure, want: true},
+		{name: "wrapped remote send failure", err: fmt.Errorf("spawn: %w", gerrors.ErrRemoteSendFailure), want: true},
+		{name: "request timeout", err: gerrors.ErrRequestTimeout, want: true},
+		{name: "address not found", err: gerrors.ErrAddressNotFound, want: true},
+		{name: "invalid response", err: gerrors.ErrInvalidResponse, want: true},
+		// Terminal conditions must not be retried.
+		{name: "singleton already exists", err: gerrors.ErrSingletonAlreadyExists, want: false},
+		{name: "type not registered", err: gerrors.ErrTypeNotRegistered, want: false},
+		{name: "arbitrary error", err: stdErrors.New("boom"), want: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, shouldRetrySpawnSingleton(tc.err))
+		})
+	}
 }

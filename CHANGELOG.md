@@ -1,5 +1,28 @@
 # Changelog
 
+## [Unreleased]
+
+### 🐛 Fixes
+
+#### `SpawnSingleton` retries leader-delegated transient errors during membership churn
+
+`SpawnSingleton` failed terminally on transient cluster conditions when the spawn was delegated to the coordinator over the network, even though the same conditions were retried when detected locally ([#1209](https://github.com/Tochemey/goakt/issues/1209)). A node that called `SpawnSingleton` while cluster membership was still reconciling (for example a node joining during a rolling restart) could fail to start with `invalid response` (`ErrInvalidResponse`) or `remote send failed` (`ErrRemoteSendFailure`) instead of retrying until the cluster settled.
+
+When the local node is not the coordinator, `spawnSingletonOnLeader` delegates the spawn to the leader through `remoting.RemoteSpawn`. On the leader, transient failures are mapped to a proto error code by `wrapSpawnErr` and serialized back across the remoting boundary, where the client's `checkProtoError` de-serializes them into a *different* set of error values than their locally-detected equivalents:
+
+| Leader condition | Proto code | Client yields | Retried before the fix? |
+|---|---|---|---|
+| quorum error | `CODE_UNAVAILABLE` | `ErrRemoteSendFailure` | ❌ |
+| deadline exceeded | `CODE_DEADLINE_EXCEEDED` | `ErrRequestTimeout` | ❌ |
+| stale coordinator / not-yet-placed | `CODE_NOT_FOUND` | `ErrAddressNotFound` | ❌ |
+| non-`Error` / empty reply | (none) | `ErrInvalidResponse` | ❌ |
+
+The retry classifier `shouldRetrySpawnSingleton` only recognized the locally-detected transient forms (quorum errors, `ErrLeaderNotFound`, `ErrEngineNotRunning`, no-role-members, `context.DeadlineExceeded`, `net.Error` timeouts, and `ECONNREFUSED`), so the leader-delegated forms above were treated as terminal and the retrier stopped immediately, never spending its retry budget.
+
+The classifier now also treats `ErrRemoteSendFailure`, `ErrRequestTimeout`, `ErrAddressNotFound`, and `ErrInvalidResponse` as retryable. Because `shouldRetrySpawnSingleton` is used only on the singleton spawn path, no other call path is affected. A node that calls `SpawnSingleton` during membership churn now retries within its existing budget (default: 5 retries over a 30s window) and eventually spawns or confirms the singleton instead of failing terminally.
+
+A runnable sample lives in `playground/issue-1209`. The exact transient error only surfaces inside a sub-second reconciliation window in a live cluster, so the deterministic regression coverage is in the unit tests (`TestSpawnSingletonRetryBehavior` and `TestShouldRetrySpawnSingleton`), which drive the leader-delegated errors directly through the classifier and the retrier.
+
 ## v4.2.9 - 2026-13-01
 
 ### 🚀 Performance
