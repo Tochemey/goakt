@@ -90,6 +90,23 @@ Subscribers receive the message as a normal `Receive` invocation—the payload i
 - **Remote dissemination:** The topic actor sends a serialized `TopicMessage` to each peer's topic actor via remoting. Each peer's topic actor deserializes and delivers to its local subscribers.
 - **Deduplication:** Uses sender ID, topic, and message ID to avoid processing the same message twice (e.g. when a topic actor receives a `TopicMessage` from multiple paths).
 
+## Deduplication retention
+
+The topic actor remembers recently delivered message identifiers so it can suppress duplicate deliveries. This state is bounded by a **retention window**: each entry expires after the window elapses, keeping memory flat under sustained, high-rate publishing instead of growing for the lifetime of the actor system.
+
+The window defaults to 2 minutes and is configurable with `WithMessageRetention`:
+
+```go
+system, _ := actor.NewActorSystem("app",
+    actor.WithPubSub(),
+    actor.WithMessageRetention(5*time.Minute),
+)
+```
+
+<Note>
+A duplicate that arrives after the retention window has elapsed may be redelivered, which is acceptable under at-least-once delivery. Size the window to the largest plausible redelivery delay for your transport (network retries and cross-node dissemination), not to your total publish volume.
+</Note>
+
 ## Example
 
 ```go

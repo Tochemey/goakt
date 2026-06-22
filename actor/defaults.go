@@ -58,6 +58,13 @@ const (
 	// before the call is abandoned.
 	DefaultRemoteWatchTimeout = 5 * time.Second
 
+	// DefaultMessageRetention defines how long the pub/sub topic actor remembers
+	// a delivered message identifier in order to suppress duplicate deliveries.
+	// It bounds the deduplication state so memory stays flat under sustained
+	// publishing; a duplicate that arrives after the window may be redelivered,
+	// which is acceptable under at-least-once delivery.
+	DefaultMessageRetention = 2 * time.Minute
+
 	// DefaultClusterBalancerInterval defines the default cluster balancer interval
 	DefaultClusterBalancerInterval = time.Second
 	kindRoleSeparator              = "::"

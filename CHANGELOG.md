@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### 🐛 Fixes
+
+#### Topic actor deduplication state is now bounded under sustained publishing
+
+The cluster pub/sub topic actor keeps a `processed` set to deduplicate delivered messages, but entries were only ever added, never removed individually ([#1214](https://github.com/Tochemey/goakt/issues/1214)). Under a long-lived producer that publishes continuously, the set grew without bound for the lifetime of the actor system: each publish adds an entry keyed by `{senderID, topic, messageID}`, and the only clearing was `Reset()` in `PreStart`/`PostStop`. Because the topic actor is supervised with `ResumeDirective` (resume does not re-run `PreStart`), in steady state the set was never cleared, leaking memory for always-on, high-rate publishers.
+
+The deduplication state only needs to cover a recent window of message identifiers, so `processed` now uses a time-windowed map (`xsync.TTLMap`) whose entries expire after a configurable retention window. Expired entries are evicted lazily on access, with no background goroutine, so the footprint stays bounded by the publish rate times the window instead of growing forever. A duplicate that arrives after the window has elapsed may be redelivered, which is acceptable under at-least-once delivery.
+
+The retention window defaults to 2 minutes (`DefaultMessageRetention`, matching the duplicate-window convention used by systems such as NATS JetStream) and is configurable via the new `WithMessageRetention(time.Duration)` actor system option:
+
+```go
+system, _ := actor.NewActorSystem("sys",
+    actor.WithPubSub(),
+    actor.WithMessageRetention(5*time.Minute),
+)
+```
+
+The option is additive and non-breaking; existing systems pick up the bounded behavior automatically with the default window. Deduplication of duplicates that arrive within the window is unchanged.
+
 ## v4.2.10 - 2026-06-15
 
 ### 🐛 Fixes

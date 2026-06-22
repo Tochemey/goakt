@@ -900,7 +900,10 @@ type actorSystem struct {
 	tlsInfo           *gtls.Info
 	pubsubEnabled     atomic.Bool
 	relocationEnabled atomic.Bool
-	extensions        *xsync.Map[string, extension.Extension]
+	// messageRetention bounds how long the pub/sub topic actor remembers a
+	// delivered message identifier in order to suppress duplicate deliveries.
+	messageRetention time.Duration
+	extensions       *xsync.Map[string, extension.Extension]
 
 	shuttingDown atomic.Bool
 	// shutdownSignal is closed once at the start of shutdown() or
@@ -999,6 +1002,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		shutdownSignal:       make(chan types.Unit),
 		grains:               xsync.NewMap[string, *grainPID](),
 		askTimeout:           DefaultAskTimeout,
+		messageRetention:     DefaultMessageRetention,
 		evictionStopSig:      make(chan types.Unit, 1),
 		dispatcherThroughput: dispatcherThroughput,
 	}

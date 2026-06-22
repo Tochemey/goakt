@@ -211,6 +211,32 @@ func WithPubSub() Option {
 	})
 }
 
+// WithMessageRetention sets how long the pub/sub topic actor remembers a
+// delivered message's identifier in order to suppress duplicate deliveries.
+//
+// The topic actor tracks recently delivered messages to avoid handing the same
+// message to a subscriber twice. Each entry expires after the retention window,
+// which keeps the tracking state bounded under sustained publishing instead of
+// growing for the lifetime of the actor system. A duplicate that arrives after
+// the window has elapsed may be redelivered, which is acceptable under
+// at-least-once delivery.
+//
+// A non-positive duration is ignored and the default (see DefaultMessageRetention)
+// is retained.
+//
+// Example:
+//
+//	system := NewActorSystem("sys", WithPubSub(), WithMessageRetention(5*time.Minute))
+//
+// Returns an Option that configures the actor system accordingly.
+func WithMessageRetention(retention time.Duration) Option {
+	return OptionFunc(func(system *actorSystem) {
+		if retention > 0 {
+			system.messageRetention = retention
+		}
+	})
+}
+
 // WithoutRelocation returns an Option that disables actor relocation in the cluster.
 //
 // When this option is set, the actor system will not attempt to relocate actors
