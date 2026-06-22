@@ -18,7 +18,7 @@ require (
 	github.com/klauspost/compress v1.18.6
 	github.com/nats-io/nats-server/v2 v2.14.2
 	github.com/nats-io/nats.go v1.52.0
-	github.com/redis/go-redis/v9 v9.20.1
+	github.com/redis/go-redis/v9 v9.21.0
 	github.com/reugn/go-quartz v0.15.2
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go v0.43.0
@@ -26,7 +26,7 @@ require (
 	github.com/testcontainers/testcontainers-go/modules/etcd v0.43.0
 	github.com/tochemey/olric v0.3.9
 	github.com/zeebo/xxh3 v1.1.0
-	go.etcd.io/bbolt v1.4.3
+	go.etcd.io/bbolt v1.5.0
 	go.etcd.io/etcd/api/v3 v3.6.12
 	go.etcd.io/etcd/client/v3 v3.6.12
 	go.opentelemetry.io/otel v1.44.0
