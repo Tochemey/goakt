@@ -165,6 +165,21 @@ func TestWithPubSub(t *testing.T) {
 	assert.True(t, system.pubsubEnabled.Load())
 }
 
+func TestWithMessageRetention(t *testing.T) {
+	t.Run("When retention is positive", func(t *testing.T) {
+		system := new(actorSystem)
+		opt := WithMessageRetention(5 * time.Minute)
+		opt.Apply(system)
+		assert.Equal(t, 5*time.Minute, system.messageRetention)
+	})
+	t.Run("When retention is non-positive it is ignored", func(t *testing.T) {
+		system := &actorSystem{messageRetention: DefaultMessageRetention}
+		opt := WithMessageRetention(0)
+		opt.Apply(system)
+		assert.Equal(t, DefaultMessageRetention, system.messageRetention)
+	})
+}
+
 func TestWithExtensions(t *testing.T) {
 	ext := new(MockExtension)
 	system := new(actorSystem)

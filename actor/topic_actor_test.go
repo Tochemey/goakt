@@ -497,6 +497,68 @@ func TestTopicActor(t *testing.T) {
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
 
+	t.Run("With message retention bounding the dedup state and allowing redelivery", func(t *testing.T) {
+		ctx := context.Background()
+		retention := 500 * time.Millisecond
+		actorSystem, _ := NewActorSystem("testSys",
+			WithLogger(log.DiscardLogger),
+			WithPubSub(),
+			WithMessageRetention(retention),
+		)
+
+		// start the actor system
+		err := actorSystem.Start(ctx)
+		require.NoError(t, err)
+
+		// wait for the actor system to be ready
+		pause.For(time.Second)
+
+		subscriber, err := actorSystem.Spawn(ctx, "subscriber", NewMockSubscriber(), WithLongLived())
+		require.NoError(t, err)
+		require.NotNil(t, subscriber)
+
+		pause.For(500 * time.Millisecond)
+
+		topic := "test-topic"
+		err = subscriber.Tell(ctx, actorSystem.TopicActor(), NewSubscribe(topic))
+		require.NoError(t, err)
+		pause.For(500 * time.Millisecond)
+
+		// the subscribe ack increments the counter to 1
+		require.EqualValues(t, 1, subscriber.Actor().(*MockSubscriber).counter.Load())
+
+		publisher, err := actorSystem.Spawn(ctx, "publisher", NewMockSubscriber())
+		require.NoError(t, err)
+		require.NotNil(t, publisher)
+
+		pause.For(time.Second)
+
+		message := NewPublish("message1", topic, new(testpb.TestCount))
+
+		// the first publish is delivered
+		require.NoError(t, publisher.Tell(ctx, actorSystem.TopicActor(), message))
+		pause.For(200 * time.Millisecond)
+		require.EqualValues(t, 2, subscriber.Actor().(*MockSubscriber).counter.Load())
+
+		// an immediate re-publish within the retention window is deduplicated
+		require.NoError(t, publisher.Tell(ctx, actorSystem.TopicActor(), message))
+		pause.For(200 * time.Millisecond)
+		require.EqualValues(t, 2, subscriber.Actor().(*MockSubscriber).counter.Load())
+
+		// once the retention window elapses the dedup entry expires, so the same
+		// message is delivered again instead of being suppressed forever
+		pause.For(retention + 500*time.Millisecond)
+		require.NoError(t, publisher.Tell(ctx, actorSystem.TopicActor(), message))
+		pause.For(300 * time.Millisecond)
+		require.EqualValues(t, 3, subscriber.Actor().(*MockSubscriber).counter.Load())
+
+		// the dedup state stays bounded: expired entries do not accumulate
+		topicActor := actorSystem.TopicActor().Actor().(*topicActor)
+		require.LessOrEqual(t, topicActor.processed.Len(), 1)
+
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
+
 	t.Run("With attempt to shutdown when system is not shutting down", func(t *testing.T) {
 		ctx := context.Background()
 		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithPubSub())

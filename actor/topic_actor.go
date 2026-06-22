@@ -25,6 +25,7 @@ package actor
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/cluster"
@@ -53,8 +54,11 @@ type key struct {
 type topicActor struct {
 	pid *PID
 	// topics holds the list of all topics and their subscribers
-	topics    *xsync.Map[string, *xsync.Map[string, *PID]]
-	processed *xsync.Map[key, types.Unit]
+	topics *xsync.Map[string, *xsync.Map[string, *PID]]
+	// processed deduplicates recently delivered messages. Entries expire after
+	// the configured retention window so the map stays bounded under sustained
+	// publishing instead of growing for the lifetime of the actor system.
+	processed *xsync.TTLMap[key, types.Unit]
 	logger    log.Logger
 
 	cluster     cluster.Cluster
@@ -66,10 +70,13 @@ type topicActor struct {
 var _ Actor = (*topicActor)(nil)
 
 // newTopicActor creates a new cluster pubsub mediator.
-func newTopicActor(remoting remoteclient.Client) Actor {
+//
+// retention bounds how long a delivered message identifier is remembered for
+// deduplication before its entry expires.
+func newTopicActor(remoting remoteclient.Client, retention time.Duration) Actor {
 	return &topicActor{
 		topics:    xsync.NewMap[string, *xsync.Map[string, *PID]](),
-		processed: xsync.NewMap[key, types.Unit](),
+		processed: xsync.NewTTLMap[key, types.Unit](retention),
 		remoting:  remoting,
 	}
 }
@@ -373,7 +380,7 @@ func (x *actorSystem) spawnTopicActor(ctx context.Context) error {
 	actorName := reservedName(topicActorType)
 	x.topicActor, _ = x.configPID(ctx,
 		actorName,
-		newTopicActor(x.remoting),
+		newTopicActor(x.remoting, x.messageRetention),
 		asSystem(),
 		WithLongLived(),
 		WithSupervisor(
