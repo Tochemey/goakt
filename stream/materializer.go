@@ -81,7 +81,7 @@ func (w *completionWrapper) PostStop(ctx *actor.Context) error {
 //
 // The sink sends the initial demand signal on receipt of its stageWire
 // message, starting the pipeline.
-func materialize(ctx context.Context, system actor.ActorSystem, stages []*stageDesc) (StreamHandle, error) {
+func materialize(ctx context.Context, system actor.ActorSystem, stages []*stage) (StreamHandle, error) {
 	handle, _, err := materializeWithHead(ctx, system, stages)
 	return handle, err
 }
@@ -90,7 +90,7 @@ func materialize(ctx context.Context, system actor.ActorSystem, stages []*stageD
 // PID of the head (first) stage. SubFlow uses this so the splitter can push
 // elements directly into a per-substream feedSourceActor without needing a
 // type assertion against the StreamHandle interface.
-func materializeWithHead(ctx context.Context, system actor.ActorSystem, stages []*stageDesc) (StreamHandle, *actor.PID, error) {
+func materializeWithHead(ctx context.Context, system actor.ActorSystem, stages []*stage) (StreamHandle, *actor.PID, error) {
 	if err := (RunnableGraph{stages: stages}).validate(); err != nil {
 		return nil, nil, err
 	}
@@ -102,9 +102,9 @@ func materializeWithHead(ctx context.Context, system actor.ActorSystem, stages [
 
 	// Wrap the sink stage so PostStop signals completion.
 	sinkIdx := len(stages) - 1
-	origSinkMake := stages[sinkIdx].makeActor
+	origSinkMake := stages[sinkIdx].actorFn
 	wrappedSinkDesc := *stages[sinkIdx]
-	wrappedSinkDesc.makeActor = func(cfg StageConfig) actor.Actor {
+	wrappedSinkDesc.actorFn = func(cfg StageConfig) actor.Actor {
 		return &completionWrapper{
 			inner:  origSinkMake(cfg),
 			onDone: handle.signalDone,
@@ -112,7 +112,7 @@ func materializeWithHead(ctx context.Context, system actor.ActorSystem, stages [
 	}
 
 	// Build a local slice with the wrapped sink.
-	wrapped := make([]*stageDesc, len(stages))
+	wrapped := make([]*stage, len(stages))
 	copy(wrapped, stages)
 	wrapped[sinkIdx] = &wrappedSinkDesc
 
@@ -147,7 +147,7 @@ func materializeWithHead(ctx context.Context, system actor.ActorSystem, stages [
 		}
 
 		stageName := config.Name
-		a := desc.makeActor(config)
+		a := desc.actorFn(config)
 
 		spawnOpts := []actor.SpawnOption{actor.WithLongLived()}
 		if config.Mailbox != nil {
@@ -202,11 +202,11 @@ func materializeWithHead(ctx context.Context, system actor.ActorSystem, stages [
 
 // applyFusion combines adjacent fusable flow stages into a single fused stage.
 // Source and sink stages are never fused.
-func applyFusion(stages []*stageDesc, mode FusionMode) []*stageDesc {
+func applyFusion(stages []*stage, mode FusionMode) []*stage {
 	if mode == FuseNone || len(stages) < 2 {
 		return stages
 	}
-	result := make([]*stageDesc, 0, len(stages))
+	result := make([]*stage, 0, len(stages))
 	i := 0
 	for i < len(stages) {
 		s := stages[i]
@@ -247,11 +247,11 @@ func applyFusion(stages []*stageDesc, mode FusionMode) []*stageDesc {
 		// Create a fused stage that applies the composed function.
 		fusedComposed := composed
 		fusedConfig := last.config // use last stage's config
-		fusedDesc := &stageDesc{
+		fusedDesc := &stage{
 			id:     newStageID(),
 			kind:   flowKind,
 			config: fusedConfig,
-			makeActor: func(cfg StageConfig) actor.Actor {
+			actorFn: func(cfg StageConfig) actor.Actor {
 				return newFusedFlowActor(fusedComposed, cfg)
 			},
 		}
@@ -264,7 +264,7 @@ func applyFusion(stages []*stageDesc, mode FusionMode) []*stageDesc {
 // materializeAll materializes each pipeline independently and returns a
 // multiHandle that aggregates their lifecycles. On any spawn failure the
 // already-started pipelines are aborted before the error is returned.
-func materializeAll(ctx context.Context, system actor.ActorSystem, pipelines [][]*stageDesc) (StreamHandle, error) {
+func materializeAll(ctx context.Context, system actor.ActorSystem, pipelines [][]*stage) (StreamHandle, error) {
 	handles := make([]StreamHandle, 0, len(pipelines))
 	for _, pipeline := range pipelines {
 		h, err := materialize(ctx, system, pipeline)

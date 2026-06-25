@@ -28,23 +28,25 @@ import (
 	"github.com/tochemey/goakt/v4/actor"
 )
 
-// gnKind classifies a graph builder node.
-type gnKind int
+// nodeKind classifies a graph builder node.
+type nodeKind int
 
 const (
-	gnSourceKind gnKind = iota
-	gnFlowKind
-	gnSinkKind
-	gnMergeKind  // created by MergeInto
-	gnConcatKind // created by ConcatInto
+	nodeSourceKind nodeKind = iota
+	nodeFlowKind
+	nodeSinkKind
+	nodeMergeKind  // created by MergeInto
+	nodeConcatKind // created by ConcatInto
 )
 
-// graphBuilderNode represents one named node in a Graph topology.
-type graphBuilderNode struct {
-	name   string
-	kind   gnKind
-	stages []*stageDesc // pre-compiled descriptors for this node (nil for merge)
-	from   []string     // upstream node names
+// node represents one named node in a Graph topology.
+type node struct {
+	// name is the node name.
+	name string
+	// kind is the node kind.
+	kind   nodeKind
+	stages []*stage // pre-compiled descriptors for this node (nil for merge)
+	from   []string // upstream node names
 }
 
 // fanOutReg tracks the sharedBroadcast and slot allocation for a fan-out node.
@@ -65,20 +67,20 @@ type fanOutReg struct {
 // Type-erasure note: the Graph DSL operates on any-typed stages. Use
 // Source[any], Flow[any,any], and Sink[any] when constructing nodes.
 type Graph struct {
-	nodes map[string]*graphBuilderNode
+	nodes map[string]*node
 	order []string // insertion order for deterministic compilation
 }
 
 // NewGraph creates an empty graph builder.
 func NewGraph() *Graph {
-	return &Graph{nodes: map[string]*graphBuilderNode{}}
+	return &Graph{nodes: map[string]*node{}}
 }
 
 // AddSource registers a named source node.
 func (g *Graph) AddSource(name string, src Source[any]) *Graph {
-	g.addNode(&graphBuilderNode{
+	g.addNode(&node{
 		name:   name,
-		kind:   gnSourceKind,
+		kind:   nodeSourceKind,
 		stages: src.stages,
 	})
 	return g
@@ -86,10 +88,10 @@ func (g *Graph) AddSource(name string, src Source[any]) *Graph {
 
 // AddFlow registers a named flow node wired from the named upstream node.
 func (g *Graph) AddFlow(name string, flow Flow[any, any], from string) *Graph {
-	g.addNode(&graphBuilderNode{
+	g.addNode(&node{
 		name:   name,
-		kind:   gnFlowKind,
-		stages: []*stageDesc{flow.desc},
+		kind:   nodeFlowKind,
+		stages: []*stage{flow.stage},
 		from:   []string{from},
 	})
 	return g
@@ -97,10 +99,10 @@ func (g *Graph) AddFlow(name string, flow Flow[any, any], from string) *Graph {
 
 // AddSink registers a named sink node wired from the named upstream node.
 func (g *Graph) AddSink(name string, sink Sink[any], from string) *Graph {
-	g.addNode(&graphBuilderNode{
+	g.addNode(&node{
 		name:   name,
-		kind:   gnSinkKind,
-		stages: []*stageDesc{sink.desc},
+		kind:   nodeSinkKind,
+		stages: []*stage{sink.desc},
 		from:   []string{from},
 	})
 	return g
@@ -111,9 +113,9 @@ func (g *Graph) AddSink(name string, sink Sink[any], from string) *Graph {
 // arrival order (non-deterministic), and the merge completes when all
 // upstreams have completed.
 func (g *Graph) MergeInto(into string, from ...string) *Graph {
-	g.addNode(&graphBuilderNode{
+	g.addNode(&node{
 		name: into,
-		kind: gnMergeKind,
+		kind: nodeMergeKind,
 		from: from,
 	})
 	return g
@@ -124,9 +126,9 @@ func (g *Graph) MergeInto(into string, from ...string) *Graph {
 // completes does the node start consuming from the (i+1)-th. Per-source
 // ordering is preserved across the boundary.
 func (g *Graph) ConcatInto(into string, from ...string) *Graph {
-	g.addNode(&graphBuilderNode{
+	g.addNode(&node{
 		name: into,
-		kind: gnConcatKind,
+		kind: nodeConcatKind,
 		from: from,
 	})
 	return g
@@ -151,7 +153,7 @@ func (g *Graph) Build() (RunnableGraph, error) {
 	return RunnableGraph{pipelines: pipelines}, nil
 }
 
-func (g *Graph) addNode(n *graphBuilderNode) {
+func (g *Graph) addNode(n *node) {
 	g.nodes[n.name] = n
 	g.order = append(g.order, n.name)
 }
@@ -168,9 +170,9 @@ func (g *Graph) validateGraph() error {
 	srcCount, sinkCount := 0, 0
 	for _, node := range g.nodes {
 		switch node.kind {
-		case gnSourceKind:
+		case nodeSourceKind:
 			srcCount++
-		case gnSinkKind:
+		case nodeSinkKind:
 			sinkCount++
 		}
 	}
@@ -186,7 +188,7 @@ func (g *Graph) validateGraph() error {
 }
 
 // compile produces one []*stageDesc pipeline per sink node, ordered by insertion.
-func (g *Graph) compile() ([][]*stageDesc, error) {
+func (g *Graph) compile() ([][]*stage, error) {
 	// Count how many distinct downstream nodes reference each node.
 	downCount := map[string]int{}
 	for _, node := range g.nodes {
@@ -225,10 +227,10 @@ func (g *Graph) compile() ([][]*stageDesc, error) {
 	}
 
 	// Compile one pipeline per sink, in insertion order.
-	var pipelines [][]*stageDesc
+	var pipelines [][]*stage
 	for _, name := range g.order {
 		node := g.nodes[name]
-		if node.kind != gnSinkKind {
+		if node.kind != nodeSinkKind {
 			continue
 		}
 
@@ -285,11 +287,11 @@ func (g *Graph) topologicalOrder() ([]string, error) {
 
 // buildChain builds the stage chain that produces elements up to (not including)
 // the named node's own stages, substituting fan-out nodes with broadcast slots.
-func (g *Graph) buildChain(name string, fanOuts map[string]*fanOutReg) ([]*stageDesc, error) {
+func (g *Graph) buildChain(name string, fanOuts map[string]*fanOutReg) ([]*stage, error) {
 	if reg, ok := fanOuts[name]; ok {
 		slot := reg.nextSlot
 		reg.nextSlot++
-		return []*stageDesc{makeBroadcastSlotDesc(reg.shared, slot)}, nil
+		return []*stage{makeBroadcastSlotDesc(reg.shared, slot)}, nil
 	}
 	return g.buildOwnChain(name, fanOuts)
 }
@@ -297,39 +299,39 @@ func (g *Graph) buildChain(name string, fanOuts map[string]*fanOutReg) ([]*stage
 // buildOwnChain builds the stage chain INCLUDING the named node's own stages,
 // without treating the node itself as a fan-out (used when computing the
 // srcStages for a sharedBroadcast).
-func (g *Graph) buildOwnChain(name string, fanOuts map[string]*fanOutReg) ([]*stageDesc, error) {
+func (g *Graph) buildOwnChain(name string, fanOuts map[string]*fanOutReg) ([]*stage, error) {
 	node := g.nodes[name]
 	switch node.kind {
-	case gnSourceKind:
-		out := make([]*stageDesc, len(node.stages))
+	case nodeSourceKind:
+		out := make([]*stage, len(node.stages))
 		copy(out, node.stages)
 		return out, nil
-	case gnFlowKind:
+	case nodeFlowKind:
 		up, err := g.buildChain(node.from[0], fanOuts)
 		if err != nil {
 			return nil, err
 		}
 		return append(up, node.stages...), nil
-	case gnMergeKind:
+	case nodeMergeKind:
 		desc, err := g.buildMergeDesc(node, fanOuts)
 		if err != nil {
 			return nil, err
 		}
-		return []*stageDesc{desc}, nil
-	case gnConcatKind:
+		return []*stage{desc}, nil
+	case nodeConcatKind:
 		desc, err := g.buildConcatDesc(node, fanOuts)
 		if err != nil {
 			return nil, err
 		}
-		return []*stageDesc{desc}, nil
+		return []*stage{desc}, nil
 	default:
 		return nil, fmt.Errorf("stream: unexpected node kind %d for node %q in upstream chain", node.kind, name)
 	}
 }
 
-// buildMergeDesc creates a mergeSourceActor stageDesc for a gnMergeKind node.
-func (g *Graph) buildMergeDesc(node *graphBuilderNode, fanOuts map[string]*fanOutReg) (*stageDesc, error) {
-	subStages := make([][]*stageDesc, len(node.from))
+// buildMergeDesc creates a mergeSourceActor stageDesc for a nodeMergeKind node.
+func (g *Graph) buildMergeDesc(node *node, fanOuts map[string]*fanOutReg) (*stage, error) {
+	subStages := make([][]*stage, len(node.from))
 	for i, from := range node.from {
 		chain, err := g.buildChain(from, fanOuts)
 		if err != nil {
@@ -339,10 +341,10 @@ func (g *Graph) buildMergeDesc(node *graphBuilderNode, fanOuts map[string]*fanOu
 	}
 
 	captured := subStages
-	return &stageDesc{
+	return &stage{
 		id:   newStageID(),
 		kind: sourceKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		actorFn: func(cfg StageConfig) actor.Actor {
 			return newMergeSourceActor[any](captured, cfg)
 		},
 		config: defaultStageConfig(),
@@ -350,8 +352,8 @@ func (g *Graph) buildMergeDesc(node *graphBuilderNode, fanOuts map[string]*fanOu
 }
 
 // buildConcatDesc creates a concatSourceActor stageDesc for a gnConcatKind node.
-func (g *Graph) buildConcatDesc(node *graphBuilderNode, fanOuts map[string]*fanOutReg) (*stageDesc, error) {
-	subStages := make([][]*stageDesc, len(node.from))
+func (g *Graph) buildConcatDesc(node *node, fanOuts map[string]*fanOutReg) (*stage, error) {
+	subStages := make([][]*stage, len(node.from))
 	for i, from := range node.from {
 		chain, err := g.buildChain(from, fanOuts)
 		if err != nil {
@@ -361,10 +363,10 @@ func (g *Graph) buildConcatDesc(node *graphBuilderNode, fanOuts map[string]*fanO
 	}
 
 	captured := subStages
-	return &stageDesc{
+	return &stage{
 		id:   newStageID(),
 		kind: sourceKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		actorFn: func(cfg StageConfig) actor.Actor {
 			return newConcatSourceActor[any](captured, cfg)
 		},
 		config: defaultStageConfig(),
@@ -372,11 +374,11 @@ func (g *Graph) buildConcatDesc(node *graphBuilderNode, fanOuts map[string]*fanO
 }
 
 // makeBroadcastSlotDesc creates a stageDesc for one slot of a sharedBroadcast.
-func makeBroadcastSlotDesc[T any](shared *sharedBroadcast[T], slot int) *stageDesc {
-	return &stageDesc{
+func makeBroadcastSlotDesc[T any](shared *sharedBroadcast[T], slot int) *stage {
+	return &stage{
 		id:   newStageID(),
 		kind: sourceKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		actorFn: func(cfg StageConfig) actor.Actor {
 			return &broadcastSlotActor[T]{shared: shared, slot: slot, config: cfg}
 		},
 		config: defaultStageConfig(),

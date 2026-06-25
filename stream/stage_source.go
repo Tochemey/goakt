@@ -404,12 +404,12 @@ func (a *tickSourceActor) PostStop(_ *actor.Context) error {
 
 // makeMergeSinkDesc returns a stageDesc for an internal sink that forwards
 // received elements and its completion signal to self.
-func makeMergeSinkDesc(self *actor.PID, slot int) *stageDesc {
+func makeMergeSinkDesc(self *actor.PID, slot int) *stage {
 	config := defaultStageConfig()
-	return &stageDesc{
+	return &stage{
 		id:   newStageID(),
 		kind: sinkKind,
-		makeActor: func(config StageConfig) actor.Actor {
+		actorFn: func(config StageConfig) actor.Actor {
 			return newSinkActor(func(v any) error {
 				return actor.Tell(context.Background(), self, &mergeSubValue{slot: slot, value: v})
 			}, func() {
@@ -421,7 +421,7 @@ func makeMergeSinkDesc(self *actor.PID, slot int) *stageDesc {
 }
 
 // spawnSubPipeline materializes stages (appended with an internal sink) into system.
-func spawnSubPipeline(ctx context.Context, system actor.ActorSystem, stages []*stageDesc) {
+func spawnSubPipeline(ctx context.Context, system actor.ActorSystem, stages []*stage) {
 	_, _ = materialize(ctx, system, stages)
 }
 
@@ -429,7 +429,7 @@ func spawnSubPipeline(ctx context.Context, system actor.ActorSystem, stages []*s
 // downstream, buffering elements that arrive before demand is available and
 // completing only once all sub-sources have sent mergeSubDone.
 type mergeSourceActor[T any] struct {
-	subStages  [][]*stageDesc
+	subStages  [][]*stage
 	system     actor.ActorSystem
 	downstream *actor.PID
 	subID      string
@@ -442,7 +442,7 @@ type mergeSourceActor[T any] struct {
 }
 
 // newMergeSourceActor creates a mergeSourceActor for the given sub-source stage lists.
-func newMergeSourceActor[T any](subStages [][]*stageDesc, config StageConfig) *mergeSourceActor[T] {
+func newMergeSourceActor[T any](subStages [][]*stage, config StageConfig) *mergeSourceActor[T] {
 	m := config.Metrics
 	if m == nil {
 		m = &stageMetrics{}
@@ -468,7 +468,7 @@ func (a *mergeSourceActor[T]) Receive(rctx *actor.ReceiveContext) {
 		ctx := rctx.Context()
 		for i, sub := range a.subStages {
 			sink := makeMergeSinkDesc(self, i)
-			all := make([]*stageDesc, len(sub)+1)
+			all := make([]*stage, len(sub)+1)
 			copy(all, sub)
 			all[len(sub)] = sink
 			spawnSubPipeline(ctx, a.system, all)
@@ -521,8 +521,8 @@ func (a *mergeSourceActor[T]) PostStop(_ *actor.Context) error { return nil }
 // a combine function, emitting one output element per input pair (zip semantics).
 // It completes when either source is exhausted and all matched pairs are emitted.
 type combineSourceActor[T, U, V any] struct {
-	leftStages  []*stageDesc
-	rightStages []*stageDesc
+	leftStages  []*stage
+	rightStages []*stage
 	combineFn   func(T, U) V
 	system      actor.ActorSystem
 	downstream  *actor.PID
@@ -539,7 +539,7 @@ type combineSourceActor[T, U, V any] struct {
 
 // newCombineSourceActor creates a combineSourceActor that zips left and right sources.
 func newCombineSourceActor[T, U, V any](
-	left []*stageDesc, right []*stageDesc,
+	left []*stage, right []*stage,
 	fn func(T, U) V, config StageConfig,
 ) *combineSourceActor[T, U, V] {
 	m := config.Metrics
@@ -570,10 +570,10 @@ func (a *combineSourceActor[T, U, V]) Receive(rctx *actor.ReceiveContext) {
 
 		leftSink := makeMergeSinkDesc(self, 0)
 		rightSink := makeMergeSinkDesc(self, 1)
-		leftAll := make([]*stageDesc, len(a.leftStages)+1)
+		leftAll := make([]*stage, len(a.leftStages)+1)
 		copy(leftAll, a.leftStages)
 		leftAll[len(a.leftStages)] = leftSink
-		rightAll := make([]*stageDesc, len(a.rightStages)+1)
+		rightAll := make([]*stage, len(a.rightStages)+1)
 		copy(rightAll, a.rightStages)
 		rightAll[len(a.rightStages)] = rightSink
 

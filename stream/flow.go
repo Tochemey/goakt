@@ -36,20 +36,20 @@ import (
 // Use the builder methods (WithErrorStrategy, etc.) to customize behaviour
 // before attaching the flow to a source.
 type Flow[In, Out any] struct {
-	desc *stageDesc
+	stage *stage
 }
 
 // WithErrorStrategy returns a new Flow that uses the given ErrorStrategy
 // for element-level processing errors.
 func (f Flow[In, Out]) WithErrorStrategy(s ErrorStrategy) Flow[In, Out] {
-	newDesc := *f.desc
-	newDesc.config.ErrorStrategy = s
+	newStage := *f.stage
+	newStage.config.ErrorStrategy = s
 	// Rebuild makeActor so it captures the updated config value.
-	prevMake := f.desc.makeActor
-	newDesc.makeActor = func(_ StageConfig) actor.Actor {
-		return prevMake(newDesc.config)
+	prevMake := f.stage.actorFn
+	newStage.actorFn = func(_ StageConfig) actor.Actor {
+		return prevMake(newStage.config)
 	}
-	return Flow[In, Out]{desc: &newDesc}
+	return Flow[In, Out]{stage: &newStage}
 }
 
 // WithRetryConfig returns a new Flow with a custom RetryConfig.
@@ -60,49 +60,49 @@ func (f Flow[In, Out]) WithRetryConfig(rc RetryConfig) Flow[In, Out] {
 		rc.MaxAttempts = 1
 	}
 
-	newDesc := *f.desc
-	newDesc.config.RetryConfig = rc
-	prevMake := f.desc.makeActor
-	newDesc.makeActor = func(_ StageConfig) actor.Actor {
-		return prevMake(newDesc.config)
+	newStage := *f.stage
+	newStage.config.RetryConfig = rc
+	prevMake := f.stage.actorFn
+	newStage.actorFn = func(_ StageConfig) actor.Actor {
+		return prevMake(newStage.config)
 	}
-	return Flow[In, Out]{desc: &newDesc}
+	return Flow[In, Out]{stage: &newStage}
 }
 
 // WithMailbox returns a new Flow that uses the given actor.Mailbox for its stage actor.
 func (f Flow[In, Out]) WithMailbox(mailbox actor.Mailbox) Flow[In, Out] {
-	newDesc := *f.desc
-	newDesc.config.Mailbox = mailbox
-	prevMake := f.desc.makeActor
-	newDesc.makeActor = func(_ StageConfig) actor.Actor { return prevMake(newDesc.config) }
-	return Flow[In, Out]{desc: &newDesc}
+	newStage := *f.stage
+	newStage.config.Mailbox = mailbox
+	prevMake := f.stage.actorFn
+	newStage.actorFn = func(_ StageConfig) actor.Actor { return prevMake(newStage.config) }
+	return Flow[In, Out]{stage: &newStage}
 }
 
 // WithName returns a new Flow with a custom stage actor name.
 func (f Flow[In, Out]) WithName(name string) Flow[In, Out] {
-	newDesc := *f.desc
-	newDesc.config.Name = name
-	prevMake := f.desc.makeActor
-	newDesc.makeActor = func(_ StageConfig) actor.Actor { return prevMake(newDesc.config) }
-	return Flow[In, Out]{desc: &newDesc}
+	newStage := *f.stage
+	newStage.config.Name = name
+	prevMake := f.stage.actorFn
+	newStage.actorFn = func(_ StageConfig) actor.Actor { return prevMake(newStage.config) }
+	return Flow[In, Out]{stage: &newStage}
 }
 
 // WithTags returns a new Flow with tags propagated to metrics and traces.
 func (f Flow[In, Out]) WithTags(tags map[string]string) Flow[In, Out] {
-	newDesc := *f.desc
-	newDesc.config.Tags = tags
-	prevMake := f.desc.makeActor
-	newDesc.makeActor = func(_ StageConfig) actor.Actor { return prevMake(newDesc.config) }
-	return Flow[In, Out]{desc: &newDesc}
+	newStage := *f.stage
+	newStage.config.Tags = tags
+	prevMake := f.stage.actorFn
+	newStage.actorFn = func(_ StageConfig) actor.Actor { return prevMake(newStage.config) }
+	return Flow[In, Out]{stage: &newStage}
 }
 
 // WithTracer returns a new Flow with the given Tracer attached.
 func (f Flow[In, Out]) WithTracer(tracer Tracer) Flow[In, Out] {
-	newDesc := *f.desc
-	newDesc.config.Tracer = tracer
-	prevMake := f.desc.makeActor
-	newDesc.makeActor = func(_ StageConfig) actor.Actor { return prevMake(newDesc.config) }
-	return Flow[In, Out]{desc: &newDesc}
+	newStage := *f.stage
+	newStage.config.Tracer = tracer
+	prevMake := f.stage.actorFn
+	newStage.actorFn = func(_ StageConfig) actor.Actor { return prevMake(newStage.config) }
+	return Flow[In, Out]{stage: &newStage}
 }
 
 // Map creates a Flow that applies fn to each element with no error path.
@@ -123,10 +123,10 @@ func TryMap[In, Out any](fn func(In) (Out, error)) Flow[In, Out] {
 // the stage immediately requests a replacement from upstream.
 func Filter[T any](predicate func(T) bool) Flow[T, T] {
 	config := defaultStageConfig()
-	desc := &stageDesc{
+	stage := &stage{
 		id:   newStageID(),
 		kind: flowKind,
-		makeActor: func(config StageConfig) actor.Actor {
+		actorFn: func(config StageConfig) actor.Actor {
 			return newFlowActor(func(v any) ([]any, error) {
 				elem, ok := v.(T)
 				if !ok {
@@ -149,17 +149,17 @@ func Filter[T any](predicate func(T) bool) Flow[T, T] {
 			return elem, predicate(elem), nil
 		},
 	}
-	return Flow[T, T]{desc: desc}
+	return Flow[T, T]{stage: stage}
 }
 
 // FlatMap creates a Flow that applies fn to each element and flattens the
 // resulting slices into individual elements downstream.
 func FlatMap[In, Out any](fn func(In) []Out) Flow[In, Out] {
 	config := defaultStageConfig()
-	desc := &stageDesc{
+	stage := &stage{
 		id:   newStageID(),
 		kind: flowKind,
-		makeActor: func(config StageConfig) actor.Actor {
+		actorFn: func(config StageConfig) actor.Actor {
 			return newFlowActor(func(v any) ([]any, error) {
 				elem, ok := v.(In)
 				if !ok {
@@ -177,17 +177,17 @@ func FlatMap[In, Out any](fn func(In) []Out) Flow[In, Out] {
 		},
 		config: config,
 	}
-	return Flow[In, Out]{desc: desc}
+	return Flow[In, Out]{stage: stage}
 }
 
 // Flatten expands slices into individual elements downstream.
 // Each incoming []T is unwrapped and its elements are emitted one by one.
 func Flatten[T any]() Flow[[]T, T] {
 	config := defaultStageConfig()
-	desc := &stageDesc{
+	stage := &stage{
 		id:   newStageID(),
 		kind: flowKind,
-		makeActor: func(config StageConfig) actor.Actor {
+		actorFn: func(config StageConfig) actor.Actor {
 			return newFlowActor(func(v any) ([]any, error) {
 				slice, ok := v.([]T)
 				if !ok {
@@ -204,7 +204,7 @@ func Flatten[T any]() Flow[[]T, T] {
 		},
 		config: config,
 	}
-	return Flow[[]T, T]{desc: desc}
+	return Flow[[]T, T]{stage: stage}
 }
 
 // Batch groups elements into slices of at most n elements, flushing early
@@ -212,15 +212,15 @@ func Flatten[T any]() Flow[[]T, T] {
 // The downstream receives []T values.
 func Batch[T any](n int, maxWait time.Duration) Flow[T, []T] {
 	config := defaultStageConfig()
-	desc := &stageDesc{
+	stage := &stage{
 		id:   newStageID(),
 		kind: flowKind,
-		makeActor: func(config StageConfig) actor.Actor {
+		actorFn: func(config StageConfig) actor.Actor {
 			return newBatchFlowActor[T](n, maxWait, config)
 		},
 		config: config,
 	}
-	return Flow[T, []T]{desc: desc}
+	return Flow[T, []T]{stage: stage}
 }
 
 // Buffer inserts an asynchronous buffer stage of the given capacity.
@@ -236,17 +236,17 @@ func Buffer[T any](size int, strategy OverflowStrategy) Flow[T, T] {
 	config.BufferSize = size
 	config.InitialDemand = int64(size)
 	config.RefillThreshold = int64(size) / 4
-	desc := &stageDesc{
+	stage := &stage{
 		id:   newStageID(),
 		kind: flowKind,
-		makeActor: func(config StageConfig) actor.Actor {
+		actorFn: func(config StageConfig) actor.Actor {
 			return newFlowActor(func(v any) ([]any, error) {
 				return []any{v}, nil // identity; the stage actor provides the buffer
 			}, config)
 		},
 		config: config,
 	}
-	return Flow[T, T]{desc: desc}
+	return Flow[T, T]{stage: stage}
 }
 
 // Throttle limits throughput to at most n elements per the given duration.
@@ -259,25 +259,25 @@ func Throttle[T any](n int, per time.Duration) Flow[T, T] {
 
 	perElement := per / time.Duration(n)
 	config := defaultStageConfig()
-	desc := &stageDesc{
+	stage := &stage{
 		id:   newStageID(),
 		kind: flowKind,
-		makeActor: func(config StageConfig) actor.Actor {
+		actorFn: func(config StageConfig) actor.Actor {
 			return newThrottleActor[T](perElement, config)
 		},
 		config: config,
 	}
-	return Flow[T, T]{desc: desc}
+	return Flow[T, T]{stage: stage}
 }
 
 // Deduplicate suppresses consecutive duplicate elements.
 // Equality is tested with ==; T must be comparable.
 func Deduplicate[T comparable]() Flow[T, T] {
 	config := defaultStageConfig()
-	desc := &stageDesc{
+	stage := &stage{
 		id:   newStageID(),
 		kind: flowKind,
-		makeActor: func(config StageConfig) actor.Actor {
+		actorFn: func(config StageConfig) actor.Actor {
 			var last T
 			var hasLast bool
 			return newFlowActor(func(v any) ([]any, error) {
@@ -297,17 +297,17 @@ func Deduplicate[T comparable]() Flow[T, T] {
 		},
 		config: config,
 	}
-	return Flow[T, T]{desc: desc}
+	return Flow[T, T]{stage: stage}
 }
 
 // Scan applies fn cumulatively, emitting each intermediate accumulator state.
 // The initial accumulator value is provided by zero.
 func Scan[In, State any](zero State, fn func(State, In) State) Flow[In, State] {
 	config := defaultStageConfig()
-	desc := &stageDesc{
+	stage := &stage{
 		id:   newStageID(),
 		kind: flowKind,
-		makeActor: func(config StageConfig) actor.Actor {
+		actorFn: func(config StageConfig) actor.Actor {
 			acc := zero
 			return newFlowActor(func(v any) ([]any, error) {
 				elem, ok := v.(In)
@@ -320,7 +320,7 @@ func Scan[In, State any](zero State, fn func(State, In) State) Flow[In, State] {
 		},
 		config: config,
 	}
-	return Flow[In, State]{desc: desc}
+	return Flow[In, State]{stage: stage}
 }
 
 // WithContext creates a type-preserving Flow that passes each element through
@@ -332,15 +332,15 @@ func WithContext[T any](key, value string) Flow[T, T] {
 	_ = key
 	_ = value
 	config := defaultStageConfig()
-	desc := &stageDesc{
+	stage := &stage{
 		id:   newStageID(),
 		kind: flowKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		actorFn: func(cfg StageConfig) actor.Actor {
 			return newFlowActor(func(v any) ([]any, error) { return []any{v}, nil }, cfg)
 		},
 		config: config,
 	}
-	return Flow[T, T]{desc: desc}
+	return Flow[T, T]{stage: stage}
 }
 
 // ParallelMap applies fn to each element using up to n goroutines concurrently.
@@ -351,15 +351,15 @@ func ParallelMap[In, Out any](n int, fn func(In) Out) Flow[In, Out] {
 		n = 1
 	}
 	config := defaultStageConfig()
-	desc := &stageDesc{
+	stage := &stage{
 		id:   newStageID(),
 		kind: flowKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		actorFn: func(cfg StageConfig) actor.Actor {
 			return newParallelMapActor(n, fn, false, cfg)
 		},
 		config: config,
 	}
-	return Flow[In, Out]{desc: desc}
+	return Flow[In, Out]{stage: stage}
 }
 
 // OrderedParallelMap applies fn using up to n goroutines but emits results in
@@ -369,15 +369,15 @@ func OrderedParallelMap[In, Out any](n int, fn func(In) Out) Flow[In, Out] {
 		n = 1
 	}
 	config := defaultStageConfig()
-	desc := &stageDesc{
+	stage := &stage{
 		id:   newStageID(),
 		kind: flowKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		actorFn: func(cfg StageConfig) actor.Actor {
 			return newParallelMapActor(n, fn, true, cfg)
 		},
 		config: config,
 	}
-	return Flow[In, Out]{desc: desc}
+	return Flow[In, Out]{stage: stage}
 }
 
 // FlatMapConcat creates a Flow that, for each input element, materialises a
@@ -412,23 +412,23 @@ func FlatMapMerge[In, Out any](breadth int, fn func(In) Source[Out]) Flow[In, Ou
 // sub-pipelines, which requires its own Receive loop.
 func makeFlatMapStreamFlow[In, Out any](breadth int, fn func(In) Source[Out]) Flow[In, Out] {
 	config := defaultStageConfig()
-	desc := &stageDesc{
+	stage := &stage{
 		id:   newStageID(),
 		kind: flowKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		actorFn: func(cfg StageConfig) actor.Actor {
 			return newFlatMapStreamActor(breadth, fn, cfg)
 		},
 		config: config,
 	}
-	return Flow[In, Out]{desc: desc}
+	return Flow[In, Out]{stage: stage}
 }
 
 // makeMapFlow is the shared implementation for Map / MapOK.
 func makeMapFlow[In, Out any](fn func(In) (Out, error), config StageConfig) Flow[In, Out] {
-	desc := &stageDesc{
+	stage := &stage{
 		id:   newStageID(),
 		kind: flowKind,
-		makeActor: func(config StageConfig) actor.Actor {
+		actorFn: func(config StageConfig) actor.Actor {
 			return newFlowActor(func(v any) ([]any, error) {
 				elem, ok := v.(In)
 				if !ok {
@@ -447,12 +447,14 @@ func makeMapFlow[In, Out any](fn func(In) (Out, error), config StageConfig) Flow
 			if !ok {
 				return nil, false, fmt.Errorf("stream: Map (fused) got unexpected type %T, want %T", v, *new(In))
 			}
+
 			out, err := fn(elem)
 			if err != nil {
 				return nil, false, err
 			}
+
 			return out, true, nil
 		},
 	}
-	return Flow[In, Out]{desc: desc}
+	return Flow[In, Out]{stage: stage}
 }

@@ -24,7 +24,7 @@ require (
 	github.com/testcontainers/testcontainers-go v0.43.0
 	github.com/testcontainers/testcontainers-go/modules/consul v0.43.0
 	github.com/testcontainers/testcontainers-go/modules/etcd v0.43.0
-	github.com/tochemey/olric v0.3.9
+	github.com/tochemey/olric v0.3.10
 	github.com/zeebo/xxh3 v1.1.0
 	go.etcd.io/bbolt v1.5.0
 	go.etcd.io/etcd/api/v3 v3.6.12
@@ -49,7 +49,7 @@ require (
 	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/RoaringBitmap/roaring v1.9.4 // indirect
-	github.com/antithesishq/antithesis-sdk-go v0.7.0 // indirect
+	github.com/antithesishq/antithesis-sdk-go v0.7.2 // indirect
 	github.com/armon/go-metrics v0.4.1 // indirect
 	github.com/bits-and-blooms/bitset v1.24.5 // indirect
 	github.com/bytedance/gopkg v0.1.4 // indirect
@@ -101,7 +101,7 @@ require (
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-hclog v1.6.3 // indirect
 	github.com/hashicorp/go-immutable-radix v1.3.1 // indirect
-	github.com/hashicorp/go-metrics v0.5.4 // indirect
+	github.com/hashicorp/go-metrics v0.6.0 // indirect
 	github.com/hashicorp/go-msgpack/v2 v2.1.5 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/hashicorp/go-rootcerts v1.0.2 // indirect
@@ -168,14 +168,14 @@ require (
 	golang.org/x/text v0.38.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	golang.org/x/tools v0.46.0 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20260618152121-87f3d3e198d3 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260618152121-87f3d3e198d3 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20260622175928-b703f567277d // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260622175928-b703f567277d // indirect
 	google.golang.org/grpc v1.81.1 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	k8s.io/klog/v2 v2.140.0 // indirect
-	k8s.io/kube-openapi v0.0.0-20260618221249-bc653b64f974 // indirect
+	k8s.io/kube-openapi v0.0.0-20260624041617-8f3fa4921821 // indirect
 	k8s.io/utils v0.0.0-20260617174310-a95e086a2553 // indirect
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect
@@ -184,11 +184,14 @@ require (
 )
 
 // HashiCorp renamed github.com/armon/go-metrics to github.com/hashicorp/go-metrics
-// in v0.4.2 and every release since declares the new module path, so they fail
-// to satisfy the legacy import path that hashicorp/go-metrics/compat still
-// pulls in transitively (via memberlist → goakt). v0.4.1 is the last
-// version that resolves under the armon path; exclude the broken ones so
-// `go mod tidy` and `go get -u` stop probing them.
+// in v0.4.2; every tag since declares the new module path and cannot be required
+// under the legacy armon path. memberlist's hashicorp/go-metrics/compat shim
+// imports github.com/armon/go-metrics by default, but builds with the
+// `hashicorpmetrics` build tag route through github.com/hashicorp/go-metrics
+// instead. We build with that tag (see Makefile / CI), so the armon dependency
+// below is only a never-compiled fallback pinned at its last valid tag (v0.4.1).
+// The excludes keep `go mod tidy` and `go get -u` from probing the broken
+// armon-path tags that resolve to the renamed module.
 exclude (
 	github.com/armon/go-metrics v0.4.2
 	github.com/armon/go-metrics v0.5.0
@@ -196,4 +199,5 @@ exclude (
 	github.com/armon/go-metrics v0.5.2
 	github.com/armon/go-metrics v0.5.3
 	github.com/armon/go-metrics v0.5.4
+	github.com/armon/go-metrics v0.6.0
 )

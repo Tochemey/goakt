@@ -40,7 +40,7 @@ import (
 type sharedBroadcast[T any] struct {
 	mu         sync.Mutex
 	n          int
-	srcStages  []*stageDesc
+	srcStages  []*stage
 	slotPIDs   []*actor.PID
 	slotSubIDs []string
 	registered int
@@ -49,7 +49,7 @@ type sharedBroadcast[T any] struct {
 }
 
 // newSharedBroadcast creates the coordination struct and pre-allocates the hub.
-func newSharedBroadcast[T any](n int, srcStages []*stageDesc) *sharedBroadcast[T] {
+func newSharedBroadcast[T any](n int, srcStages []*stage) *sharedBroadcast[T] {
 	hub := &broadcastHubActor[T]{
 		n:          n,
 		slots:      make([]*actor.PID, n),
@@ -84,16 +84,16 @@ func (s *sharedBroadcast[T]) registerSlot(ctx context.Context, slot int, pid *ac
 	s.mu.Unlock()
 
 	if allReady {
-		hubSinkDesc := &stageDesc{
+		hubSinkDesc := &stage{
 			id:   newStageID(),
 			kind: sinkKind,
-			makeActor: func(cfg StageConfig) actor.Actor {
+			actorFn: func(cfg StageConfig) actor.Actor {
 				s.hub.config = cfg
 				return s.hub
 			},
 			config: defaultStageConfig(),
 		}
-		all := make([]*stageDesc, len(s.srcStages)+1)
+		all := make([]*stage, len(s.srcStages)+1)
 		copy(all, s.srcStages)
 		all[len(s.srcStages)] = hubSinkDesc
 		go spawnSubPipeline(ctx, sys, all)

@@ -135,11 +135,11 @@ func (a *feedSourceActor) PostStop(_ *actor.Context) error { return nil }
 
 // makeFeedSourceDesc returns a stageDesc whose actor is a feedSourceActor.
 // The descriptor is a regular sourceKind stage so it slots into materialize().
-func makeFeedSourceDesc(splitter *actor.PID, key any, ackThreshold int64) *stageDesc {
-	return &stageDesc{
+func makeFeedSourceDesc(splitter *actor.PID, key any, ackThreshold int64) *stage {
+	return &stage{
 		id:   newStageID(),
 		kind: sourceKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		actorFn: func(cfg StageConfig) actor.Actor {
 			return newFeedSourceActor(splitter, key, ackThreshold, cfg)
 		},
 		config: defaultStageConfig(),
@@ -150,12 +150,12 @@ func makeFeedSourceDesc(splitter *actor.PID, key any, ackThreshold int64) *stage
 // original source pipeline to the splitter as *subUpstreamElem and reports
 // completion with *subUpstreamDone. It is appended to the upstream pipeline
 // when the splitter materializes itself.
-func makeUpstreamFeederSinkDesc(splitter *actor.PID) *stageDesc {
+func makeUpstreamFeederSinkDesc(splitter *actor.PID) *stage {
 	config := defaultStageConfig()
-	return &stageDesc{
+	return &stage{
 		id:   newStageID(),
 		kind: sinkKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		actorFn: func(cfg StageConfig) actor.Actor {
 			return newSinkActor(func(v any) error {
 				return actor.Tell(context.Background(), splitter, &subUpstreamElem{value: v})
 			}, func() {
@@ -224,12 +224,12 @@ func (a *subMergeSinkActor) Receive(rctx *actor.ReceiveContext) {
 func (a *subMergeSinkActor) PostStop(_ *actor.Context) error { return nil }
 
 // makeSubMergeSinkDesc returns the terminal sink of a per-substream pipeline.
-func makeSubMergeSinkDesc(splitter *actor.PID, key any) *stageDesc {
+func makeSubMergeSinkDesc(splitter *actor.PID, key any) *stage {
 	config := defaultStageConfig()
-	return &stageDesc{
+	return &stage{
 		id:   newStageID(),
 		kind: sinkKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		actorFn: func(cfg StageConfig) actor.Actor {
 			return newSubMergeSinkActor(splitter, key)
 		},
 		config: config,
@@ -259,8 +259,8 @@ type substreamState struct {
 //     Restart simply forgets the failed pipeline so the next element with
 //     the same key spawns a fresh substream.
 type subFlowSourceActor[K comparable] struct {
-	upstreamStages []*stageDesc
-	subStages      []*stageDesc
+	upstreamStages []*stage
+	subStages      []*stage
 	mode           splitMode
 	keyFn          func(any) K    // GroupBy only
 	splitPred      func(any) bool // SplitWhen / SplitAfter only
@@ -299,8 +299,8 @@ type subFlowSourceActor[K comparable] struct {
 }
 
 func newSubFlowSourceActor[K comparable](
-	upstream []*stageDesc,
-	sub []*stageDesc,
+	upstream []*stage,
+	sub []*stage,
 	mode splitMode,
 	keyFn func(any) K,
 	splitPred func(any) bool,
@@ -394,7 +394,7 @@ func (a *subFlowSourceActor[K]) PostStop(_ *actor.Context) error { return nil }
 
 func (a *subFlowSourceActor[K]) spawnUpstream(rctx *actor.ReceiveContext) {
 	feeder := makeUpstreamFeederSinkDesc(rctx.Self())
-	all := make([]*stageDesc, len(a.upstreamStages)+1)
+	all := make([]*stage, len(a.upstreamStages)+1)
 	copy(all, a.upstreamStages)
 	all[len(a.upstreamStages)] = feeder
 	spawnSubPipeline(rctx.Context(), a.system, all)
@@ -516,7 +516,7 @@ func (a *subFlowSourceActor[K]) spawnSubstream(rctx *actor.ReceiveContext, key K
 		ackThreshold = 1
 	}
 
-	stages := make([]*stageDesc, 0, len(a.subStages)+2)
+	stages := make([]*stage, 0, len(a.subStages)+2)
 	stages = append(stages, makeFeedSourceDesc(rctx.Self(), key, ackThreshold))
 	stages = append(stages, a.subStages...)
 	stages = append(stages, makeSubMergeSinkDesc(rctx.Self(), key))

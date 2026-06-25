@@ -80,8 +80,8 @@ const (
 // routing path stays valid as the substream output type evolves; for
 // SplitWhen / SplitAfter the predicate plays the same role.
 type SubFlow[K comparable, T any] struct {
-	upstream      []*stageDesc
-	sub           []*stageDesc
+	upstream      []*stage
+	sub           []*stage
 	mode          splitMode
 	keyFn         func(any) K    // used only when mode == splitModeGroupBy
 	splitPred     func(any) bool // used only when mode == splitModeWhen / splitModeAfter
@@ -115,7 +115,7 @@ func (sf SubFlow[K, T]) WithErrorStrategy(strategy SubstreamErrorStrategy) SubFl
 // the number of concurrently-open substreams; exceeding it terminates the
 // stream with ErrTooManySubstreams. Pass 0 for an unbounded cap.
 func GroupBy[T any, K comparable](src Source[T], maxSubstreams int, keyFn func(T) K) SubFlow[K, T] {
-	upstream := make([]*stageDesc, len(src.stages))
+	upstream := make([]*stage, len(src.stages))
 	copy(upstream, src.stages)
 
 	erasedKeyFn := func(rawValue any) K {
@@ -155,7 +155,7 @@ func SplitAfter[T any](src Source[T], predicate func(T) bool) SubFlow[int, T] {
 
 // newSplitSubFlow is the shared constructor for SplitWhen / SplitAfter.
 func newSplitSubFlow[T any](src Source[T], predicate func(T) bool, mode splitMode) SubFlow[int, T] {
-	upstream := make([]*stageDesc, len(src.stages))
+	upstream := make([]*stage, len(src.stages))
 	copy(upstream, src.stages)
 
 	erasedPredicate := func(rawValue any) bool {
@@ -176,9 +176,9 @@ func newSplitSubFlow[T any](src Source[T], predicate func(T) bool, mode splitMod
 // applied independently within each substream, so e.g. a Scan stage carries
 // its own accumulator per substream. Mirrors the package-level Via for Source.
 func SubFlowVia[K comparable, In, Out any](sf SubFlow[K, In], flow Flow[In, Out]) SubFlow[K, Out] {
-	sub := make([]*stageDesc, len(sf.sub)+1)
+	sub := make([]*stage, len(sf.sub)+1)
 	copy(sub, sf.sub)
-	sub[len(sf.sub)] = flow.desc
+	sub[len(sf.sub)] = flow.stage
 
 	return SubFlow[K, Out]{
 		upstream:      sf.upstream,
@@ -209,13 +209,13 @@ func MergeSubstreams[K comparable, T any](sf SubFlow[K, T]) Source[T] {
 	errorStrategy := sf.errorStrategy
 
 	config := defaultStageConfig()
-	desc := &stageDesc{
+	desc := &stage{
 		id:   newStageID(),
 		kind: sourceKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		actorFn: func(cfg StageConfig) actor.Actor {
 			return newSubFlowSourceActor(upstream, sub, mode, keyFn, splitPred, maxSubs, perKeyBuffer, overflow, errorStrategy, cfg)
 		},
 		config: config,
 	}
-	return Source[T]{stages: []*stageDesc{desc}}
+	return Source[T]{stages: []*stage{desc}}
 }

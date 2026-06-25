@@ -249,7 +249,7 @@ func TestBroadcastSlotActor_StreamCancel_Unit(t *testing.T) {
 
 	// Build a shared with n=1 but mark as started so registerSlot does not spawn
 	// a sub-pipeline (srcStages is empty, which would fail materialization).
-	shared := newSharedBroadcast[int](1, []*stageDesc{})
+	shared := newSharedBroadcast[int](1, []*stage{})
 	shared.mu.Lock()
 	shared.started = true // prevent upstream spawn
 	shared.mu.Unlock()
@@ -327,7 +327,7 @@ func TestBroadcastSlotActor_Unhandled(t *testing.T) {
 	downPID, err := sys.Spawn(ctx, "sl-unk-down", &dummyStageActor{})
 	require.NoError(t, err)
 
-	shared := newSharedBroadcast[int](1, []*stageDesc{})
+	shared := newSharedBroadcast[int](1, []*stage{})
 	shared.mu.Lock()
 	shared.started = true
 	shared.mu.Unlock()

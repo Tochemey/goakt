@@ -64,7 +64,7 @@ func (h *mergeSeqHeap) Pop() any {
 // elements whose smallest seq is not the expected one, the actor emits a
 // streamError describing the missing sequence number.
 type mergeSequenceSourceActor[T any] struct {
-	subStages  [][]*stageDesc
+	subStages  [][]*stage
 	extractFn  func(any) int64
 	system     actor.ActorSystem
 	downstream *actor.PID
@@ -81,7 +81,7 @@ type mergeSequenceSourceActor[T any] struct {
 
 // newMergeSequenceSourceActor creates an actor that merges N sub-source
 // pipelines into a single ordered output by extracted sequence number.
-func newMergeSequenceSourceActor[T any](subStages [][]*stageDesc, extractFn func(any) int64, config StageConfig) *mergeSequenceSourceActor[T] {
+func newMergeSequenceSourceActor[T any](subStages [][]*stage, extractFn func(any) int64, config StageConfig) *mergeSequenceSourceActor[T] {
 	m := config.Metrics
 	if m == nil {
 		m = &stageMetrics{}
@@ -113,7 +113,7 @@ func (a *mergeSequenceSourceActor[T]) Receive(rctx *actor.ReceiveContext) {
 		ctx := rctx.Context()
 		for i, sub := range a.subStages {
 			sink := makeMergeSinkDesc(self, i)
-			all := make([]*stageDesc, len(sub)+1)
+			all := make([]*stage, len(sub)+1)
 			copy(all, sub)
 			all[len(sub)] = sink
 			spawnSubPipeline(ctx, a.system, all)

@@ -216,10 +216,10 @@ func TestBatchFlowActor_StreamCancel(t *testing.T) {
 	sentinel := errors.New("batch rejected")
 	config := defaultStageConfig()
 	config.ErrorStrategy = FailFast
-	desc := &stageDesc{
+	desc := &stage{
 		id:   newStageID(),
 		kind: sinkKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		actorFn: func(cfg StageConfig) actor.Actor {
 			return newSinkActor(func(v any) error {
 				_ = v.([]int)
 				return sentinel
@@ -333,10 +333,10 @@ func TestFlowActor_ErrorSupervise(t *testing.T) {
 
 	config := defaultStageConfig()
 	config.ErrorStrategy = Supervise
-	flowDesc := &stageDesc{
+	flowDesc := &stage{
 		id:   newStageID(),
 		kind: flowKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		actorFn: func(cfg StageConfig) actor.Actor {
 			return newFlowActor(func(v any) ([]any, error) {
 				n := v.(int)
 				if n == 2 {
@@ -349,7 +349,7 @@ func TestFlowActor_ErrorSupervise(t *testing.T) {
 	}
 	src := Of(1, 2, 3)
 	_, sink := Collect[int]()
-	stages := make([]*stageDesc, 0, len(src.stages)+2)
+	stages := make([]*stage, 0, len(src.stages)+2)
 	stages = append(stages, src.stages...)
 	stages = append(stages, flowDesc, sink.desc)
 	handle, err := RunnableGraph{stages: stages}.Run(ctx, sys)

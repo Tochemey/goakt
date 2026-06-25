@@ -37,7 +37,7 @@ import (
 // Build pipelines using Via (type-preserving) or the free function stream.Via (type-changing),
 // then terminate with To to obtain a RunnableGraph.
 type Source[T any] struct {
-	stages []*stageDesc // ordered: [source, flow0, flow1, ...]
+	stages []*stage // ordered: [source, flow0, flow1, ...]
 }
 
 // Via applies a type-preserving Flow to this Source, returning a new Source[T].
@@ -48,7 +48,7 @@ func (s Source[T]) Via(flow Flow[T, T]) Source[T] {
 
 // To attaches a Sink[T], completing the graph and returning a RunnableGraph.
 func (s Source[T]) To(sink Sink[T]) RunnableGraph {
-	stages := make([]*stageDesc, len(s.stages)+1)
+	stages := make([]*stage, len(s.stages)+1)
 	copy(stages, s.stages)
 	stages[len(s.stages)] = sink.desc
 	return RunnableGraph{stages: stages}
@@ -69,12 +69,12 @@ func (s Source[T]) withSourceConfig(fn func(*StageConfig)) Source[T] {
 	if len(s.stages) == 0 {
 		return s
 	}
-	newStages := make([]*stageDesc, len(s.stages))
+	newStages := make([]*stage, len(s.stages))
 	copy(newStages, s.stages)
 	newDesc := *newStages[0]
 	fn(&newDesc.config)
-	prevMake := newStages[0].makeActor
-	newDesc.makeActor = func(_ StageConfig) actor.Actor { return prevMake(newDesc.config) }
+	prevMake := newStages[0].actorFn
+	newDesc.actorFn = func(_ StageConfig) actor.Actor { return prevMake(newDesc.config) }
 	newStages[0] = &newDesc
 	return Source[T]{stages: newStages}
 }
@@ -95,19 +95,19 @@ func From[T any](src Source[T]) *LinearGraph[T] {
 // This free function is required for type-changing flows because Go methods
 // cannot introduce additional type parameters.
 func Via[In, Out any](src Source[In], flow Flow[In, Out]) Source[Out] {
-	stages := make([]*stageDesc, len(src.stages)+1)
+	stages := make([]*stage, len(src.stages)+1)
 	copy(stages, src.stages)
-	stages[len(src.stages)] = flow.desc
+	stages[len(src.stages)] = flow.stage
 	return Source[Out]{stages: stages}
 }
 
 // Of creates a finite Source that emits the given values in order, then completes.
 func Of[T any](values ...T) Source[T] {
 	config := defaultStageConfig()
-	desc := &stageDesc{
+	desc := &stage{
 		id:   newStageID(),
 		kind: sourceKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		actorFn: func(cfg StageConfig) actor.Actor {
 			anys := make([]any, len(values))
 			for i, v := range values {
 				anys[i] = v
@@ -124,16 +124,16 @@ func Of[T any](values ...T) Source[T] {
 		},
 		config: config,
 	}
-	return Source[T]{stages: []*stageDesc{desc}}
+	return Source[T]{stages: []*stage{desc}}
 }
 
 // Range creates a Source that emits integers from start (inclusive) to end (exclusive).
 func Range(start, end int64) Source[int64] {
 	config := defaultStageConfig()
-	desc := &stageDesc{
+	desc := &stage{
 		id:   newStageID(),
 		kind: sourceKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		actorFn: func(cfg StageConfig) actor.Actor {
 			cur := start
 			return newPullSourceActor(func(n int64) ([]any, bool) {
 				if cur >= end {
@@ -153,7 +153,7 @@ func Range(start, end int64) Source[int64] {
 		},
 		config: config,
 	}
-	return Source[int64]{stages: []*stageDesc{desc}}
+	return Source[int64]{stages: []*stage{desc}}
 }
 
 // FromChannel creates a Source backed by a Go channel.
@@ -161,15 +161,15 @@ func Range(start, end int64) Source[int64] {
 // Backpressure naturally limits how fast the channel goroutine advances.
 func FromChannel[T any](ch <-chan T) Source[T] {
 	config := defaultStageConfig()
-	desc := &stageDesc{
+	desc := &stage{
 		id:   newStageID(),
 		kind: sourceKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		actorFn: func(cfg StageConfig) actor.Actor {
 			return newChanSourceActor(ch, cfg)
 		},
 		config: config,
 	}
-	return Source[T]{stages: []*stageDesc{desc}}
+	return Source[T]{stages: []*stage{desc}}
 }
 
 // FromActor creates a Source that pulls elements from a GoAkt actor by sending
@@ -177,30 +177,30 @@ func FromChannel[T any](ch <-chan T) Source[T] {
 // The target actor must implement the pull protocol (see PullRequest / PullResponse).
 func FromActor[T any](pid *actor.PID) Source[T] {
 	config := defaultStageConfig()
-	desc := &stageDesc{
+	desc := &stage{
 		id:   newStageID(),
 		kind: sourceKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		actorFn: func(cfg StageConfig) actor.Actor {
 			return newActorSourceActor[T](pid, cfg)
 		},
 		config: config,
 	}
-	return Source[T]{stages: []*stageDesc{desc}}
+	return Source[T]{stages: []*stage{desc}}
 }
 
 // Tick creates a Source that emits the current time on a fixed interval.
 // The stream runs indefinitely until stopped via StreamHandle.Stop.
 func Tick(interval time.Duration) Source[time.Time] {
 	config := defaultStageConfig()
-	desc := &stageDesc{
+	desc := &stage{
 		id:   newStageID(),
 		kind: sourceKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		actorFn: func(cfg StageConfig) actor.Actor {
 			return newTickSourceActor(interval, cfg)
 		},
 		config: config,
 	}
-	return Source[time.Time]{stages: []*stageDesc{desc}}
+	return Source[time.Time]{stages: []*stage{desc}}
 }
 
 // Merge combines multiple Sources into one, emitting elements as they arrive.
@@ -209,19 +209,19 @@ func Tick(interval time.Duration) Source[time.Time] {
 func Merge[T any](sources ...Source[T]) Source[T] {
 	config := defaultStageConfig()
 	// Capture the stage lists of all sub-sources.
-	subStages := make([][]*stageDesc, len(sources))
+	subStages := make([][]*stage, len(sources))
 	for i, src := range sources {
 		subStages[i] = src.stages
 	}
-	desc := &stageDesc{
+	desc := &stage{
 		id:   newStageID(),
 		kind: sourceKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		actorFn: func(cfg StageConfig) actor.Actor {
 			return newMergeSourceActor[T](subStages, cfg)
 		},
 		config: config,
 	}
-	return Source[T]{stages: []*stageDesc{desc}}
+	return Source[T]{stages: []*stage{desc}}
 }
 
 // MergeLatest merges N same-typed sources into a stream of []T snapshots.
@@ -231,19 +231,19 @@ func Merge[T any](sources ...Source[T]) Source[T] {
 // completed and every queued snapshot has been emitted.
 func MergeLatest[T any](sources ...Source[T]) Source[[]T] {
 	config := defaultStageConfig()
-	subStages := make([][]*stageDesc, len(sources))
+	subStages := make([][]*stage, len(sources))
 	for i, src := range sources {
 		subStages[i] = src.stages
 	}
-	desc := &stageDesc{
+	desc := &stage{
 		id:   newStageID(),
 		kind: sourceKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		actorFn: func(cfg StageConfig) actor.Actor {
 			return newMergeLatestSourceActor[T](subStages, cfg)
 		},
 		config: config,
 	}
-	return Source[[]T]{stages: []*stageDesc{desc}}
+	return Source[[]T]{stages: []*stage{desc}}
 }
 
 // MergeSequence merges N same-typed sources whose elements collectively form a
@@ -256,7 +256,7 @@ func MergeLatest[T any](sources ...Source[T]) Source[[]T] {
 // missing-sequence error.
 func MergeSequence[T any](extractSeq func(T) int64, sources ...Source[T]) Source[T] {
 	config := defaultStageConfig()
-	subStages := make([][]*stageDesc, len(sources))
+	subStages := make([][]*stage, len(sources))
 	for i, src := range sources {
 		subStages[i] = src.stages
 	}
@@ -267,15 +267,15 @@ func MergeSequence[T any](extractSeq func(T) int64, sources ...Source[T]) Source
 		}
 		return extractSeq(t)
 	}
-	desc := &stageDesc{
+	desc := &stage{
 		id:   newStageID(),
 		kind: sourceKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		actorFn: func(cfg StageConfig) actor.Actor {
 			return newMergeSequenceSourceActor[T](subStages, erased, cfg)
 		},
 		config: config,
 	}
-	return Source[T]{stages: []*stageDesc{desc}}
+	return Source[T]{stages: []*stage{desc}}
 }
 
 // MergePreferred merges N sources but always drains the slot at index
@@ -361,19 +361,19 @@ func MergePrioritized[T any](weights []int, sources ...Source[T]) Source[T] {
 // weightedMergeSourceActor with the given selector strategy.
 func newWeightedMergeSource[T any](sources []Source[T], selectSlot slotSelector) Source[T] {
 	config := defaultStageConfig()
-	subStages := make([][]*stageDesc, len(sources))
+	subStages := make([][]*stage, len(sources))
 	for i, src := range sources {
 		subStages[i] = src.stages
 	}
-	desc := &stageDesc{
+	desc := &stage{
 		id:   newStageID(),
 		kind: sourceKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		actorFn: func(cfg StageConfig) actor.Actor {
 			return newWeightedMergeSourceActor[T](subStages, selectSlot, cfg)
 		},
 		config: config,
 	}
-	return Source[T]{stages: []*stageDesc{desc}}
+	return Source[T]{stages: []*stage{desc}}
 }
 
 // Concat creates a Source that consumes elements from each input source in order:
@@ -385,19 +385,19 @@ func newWeightedMergeSource[T any](sources []Source[T], selectSlot slotSelector)
 // sources are concatenated.
 func Concat[T any](sources ...Source[T]) Source[T] {
 	config := defaultStageConfig()
-	subStages := make([][]*stageDesc, len(sources))
+	subStages := make([][]*stage, len(sources))
 	for i, src := range sources {
 		subStages[i] = src.stages
 	}
-	desc := &stageDesc{
+	desc := &stage{
 		id:   newStageID(),
 		kind: sourceKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		actorFn: func(cfg StageConfig) actor.Actor {
 			return newConcatSourceActor[T](subStages, cfg)
 		},
 		config: config,
 	}
-	return Source[T]{stages: []*stageDesc{desc}}
+	return Source[T]{stages: []*stage{desc}}
 }
 
 // Zip combines N same-typed sources into a single source whose elements are
@@ -424,19 +424,19 @@ func Zip[T any](sources ...Source[T]) Source[[]T] {
 // Combine.
 func ZipWith[T, V any](combine func([]T) V, sources ...Source[T]) Source[V] {
 	config := defaultStageConfig()
-	subStages := make([][]*stageDesc, len(sources))
+	subStages := make([][]*stage, len(sources))
 	for i, src := range sources {
 		subStages[i] = src.stages
 	}
-	desc := &stageDesc{
+	desc := &stage{
 		id:   newStageID(),
 		kind: sourceKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		actorFn: func(cfg StageConfig) actor.Actor {
 			return newZipNSourceActor(subStages, combine, cfg)
 		},
 		config: config,
 	}
-	return Source[V]{stages: []*stageDesc{desc}}
+	return Source[V]{stages: []*stage{desc}}
 }
 
 // Combine creates a Source that pairs elements from two sources using a combine function.
@@ -444,15 +444,15 @@ func ZipWith[T, V any](combine func([]T) V, sources ...Source[T]) Source[V] {
 // either source is exhausted.
 func Combine[T, U, V any](left Source[T], right Source[U], combine func(T, U) V) Source[V] {
 	config := defaultStageConfig()
-	desc := &stageDesc{
+	desc := &stage{
 		id:   newStageID(),
 		kind: sourceKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		actorFn: func(cfg StageConfig) actor.Actor {
 			return newCombineSourceActor(left.stages, right.stages, combine, cfg)
 		},
 		config: config,
 	}
-	return Source[V]{stages: []*stageDesc{desc}}
+	return Source[V]{stages: []*stage{desc}}
 }
 
 // Broadcast fans out a single Source to n independent branches. Each returned
@@ -475,15 +475,15 @@ func Broadcast[T any](src Source[T], n int) []Source[T] {
 	for i := range sources {
 		slot := i
 		config := defaultStageConfig()
-		desc := &stageDesc{
+		desc := &stage{
 			id:   newStageID(),
 			kind: sourceKind,
-			makeActor: func(cfg StageConfig) actor.Actor {
+			actorFn: func(cfg StageConfig) actor.Actor {
 				return &broadcastSlotActor[T]{shared: shared, slot: slot, config: cfg}
 			},
 			config: config,
 		}
-		sources[i] = Source[T]{stages: []*stageDesc{desc}}
+		sources[i] = Source[T]{stages: []*stage{desc}}
 	}
 	return sources
 }
@@ -504,15 +504,15 @@ func Balance[T any](src Source[T], n int) []Source[T] {
 	for i := range sources {
 		slot := i
 		config := defaultStageConfig()
-		desc := &stageDesc{
+		desc := &stage{
 			id:   newStageID(),
 			kind: sourceKind,
-			makeActor: func(cfg StageConfig) actor.Actor {
+			actorFn: func(cfg StageConfig) actor.Actor {
 				return &balanceSlotActor[T]{shared: shared, slot: slot, config: cfg}
 			},
 			config: config,
 		}
-		sources[i] = Source[T]{stages: []*stageDesc{desc}}
+		sources[i] = Source[T]{stages: []*stage{desc}}
 	}
 	return sources
 }
@@ -549,15 +549,15 @@ func Partition[T any](src Source[T], n int, partitionFn func(T) int) []Source[T]
 	for i := range sources {
 		slot := i
 		config := defaultStageConfig()
-		desc := &stageDesc{
+		desc := &stage{
 			id:   newStageID(),
 			kind: sourceKind,
-			makeActor: func(cfg StageConfig) actor.Actor {
+			actorFn: func(cfg StageConfig) actor.Actor {
 				return &partitionSlotActor[T]{shared: shared, slot: slot, config: cfg}
 			},
 			config: config,
 		}
-		sources[i] = Source[T]{stages: []*stageDesc{desc}}
+		sources[i] = Source[T]{stages: []*stage{desc}}
 	}
 	return sources
 }
@@ -586,15 +586,15 @@ func FromConn(conn net.Conn, bufSize int) Source[[]byte] {
 		bufSize = 4096
 	}
 	config := defaultStageConfig()
-	desc := &stageDesc{
+	desc := &stage{
 		id:   newStageID(),
 		kind: sourceKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		actorFn: func(cfg StageConfig) actor.Actor {
 			return newConnSourceActor(conn, bufSize, cfg)
 		},
 		config: config,
 	}
-	return Source[[]byte]{stages: []*stageDesc{desc}}
+	return Source[[]byte]{stages: []*stage{desc}}
 }
 
 // Unfold creates a Source from a seed value and a step function.
@@ -602,10 +602,10 @@ func FromConn(conn net.Conn, bufSize int) Source[[]byte] {
 // The source terminates when hasMore is false.
 func Unfold[S, T any](seed S, step func(S) (S, T, bool)) Source[T] {
 	config := defaultStageConfig()
-	desc := &stageDesc{
+	desc := &stage{
 		id:   newStageID(),
 		kind: sourceKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		actorFn: func(cfg StageConfig) actor.Actor {
 			cur := seed
 			return newPullSourceActor(func(n int64) ([]any, bool) {
 				batch := make([]any, 0, n)
@@ -622,5 +622,5 @@ func Unfold[S, T any](seed S, step func(S) (S, T, bool)) Source[T] {
 		},
 		config: config,
 	}
-	return Source[T]{stages: []*stageDesc{desc}}
+	return Source[T]{stages: []*stage{desc}}
 }

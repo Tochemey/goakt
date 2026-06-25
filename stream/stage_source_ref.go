@@ -68,7 +68,7 @@ type sourceRefShutdown struct{}
 // is reaped only on explicit cancel (streamCancelWire) or actor-system
 // shutdown. This matches Akka StreamRefs' single-use semantics.
 type sourceRefEndpointActor[T any] struct {
-	srcStages  []*stageDesc
+	srcStages  []*stage
 	system     actor.ActorSystem
 	subscriber *actor.PID
 	streamID   string
@@ -85,7 +85,7 @@ type sourceRefEndpointActor[T any] struct {
 
 // newSourceRefEndpointActor constructs an endpoint actor over the given
 // source stage list. The endpoint does nothing until a subscriber arrives.
-func newSourceRefEndpointActor[T any](srcStages []*stageDesc) *sourceRefEndpointActor[T] {
+func newSourceRefEndpointActor[T any](srcStages []*stage) *sourceRefEndpointActor[T] {
 	return &sourceRefEndpointActor[T]{srcStages: srcStages}
 }
 
@@ -122,7 +122,7 @@ func (a *sourceRefEndpointActor[T]) Receive(rctx *actor.ReceiveContext) {
 		// The slot value is unused for source refs (only one subscriber).
 		self := rctx.Self()
 		sink := makeMergeSinkDesc(self, 0)
-		all := make([]*stageDesc, len(a.srcStages)+1)
+		all := make([]*stage, len(a.srcStages)+1)
 		copy(all, a.srcStages)
 		all[len(a.srcStages)] = sink
 		spawnSubPipeline(rctx.Context(), a.system, all)

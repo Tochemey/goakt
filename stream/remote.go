@@ -93,15 +93,15 @@ func (r SourceRef[T]) Source(sys actor.ActorSystem) Source[T] {
 	name := r.Name
 	host := r.Host
 	port := r.Port
-	desc := &stageDesc{
+	desc := &stage{
 		id:   newStageID(),
 		kind: sourceKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		actorFn: func(cfg StageConfig) actor.Actor {
 			return newRemoteSourceBridgeActor[T](name, host, port, cfg)
 		},
 		config: config,
 	}
-	return Source[T]{stages: []*stageDesc{desc}}
+	return Source[T]{stages: []*stage{desc}}
 }
 
 // Sink adapts the ref into a Sink[T] usable in any local graph on sys. The
@@ -114,10 +114,10 @@ func (r SinkRef[T]) Sink(sys actor.ActorSystem) Sink[T] {
 	name := r.Name
 	host := r.Host
 	port := r.Port
-	desc := &stageDesc{
+	desc := &stage{
 		id:   newStageID(),
 		kind: sinkKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		actorFn: func(cfg StageConfig) actor.Actor {
 			return newRemoteSinkBridgeActor[T](name, host, port, cfg)
 		},
 		config: config,

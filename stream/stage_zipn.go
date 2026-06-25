@@ -36,7 +36,7 @@ import (
 // V is the output element type produced by the combine function from a slice of
 // length len(subStages) containing one element per slot in slot order.
 type zipNSourceActor[T, V any] struct {
-	subStages  [][]*stageDesc
+	subStages  [][]*stage
 	combineFn  func([]T) V
 	system     actor.ActorSystem
 	downstream *actor.PID
@@ -52,7 +52,7 @@ type zipNSourceActor[T, V any] struct {
 // newZipNSourceActor creates a zipNSourceActor over the given sub-source stage
 // lists. combineFn is invoked once per emitted tuple with a slice holding one
 // element from each slot.
-func newZipNSourceActor[T, V any](subStages [][]*stageDesc, combineFn func([]T) V, config StageConfig) *zipNSourceActor[T, V] {
+func newZipNSourceActor[T, V any](subStages [][]*stage, combineFn func([]T) V, config StageConfig) *zipNSourceActor[T, V] {
 	m := config.Metrics
 	if m == nil {
 		m = &stageMetrics{}
@@ -85,7 +85,7 @@ func (a *zipNSourceActor[T, V]) Receive(rctx *actor.ReceiveContext) {
 		ctx := rctx.Context()
 		for i, sub := range a.subStages {
 			sink := makeMergeSinkDesc(self, i)
-			all := make([]*stageDesc, len(sub)+1)
+			all := make([]*stage, len(sub)+1)
 			copy(all, sub)
 			all[len(sub)] = sink
 			spawnSubPipeline(ctx, a.system, all)

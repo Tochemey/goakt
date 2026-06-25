@@ -40,16 +40,19 @@ const (
 	sinkKind
 )
 
-// stageDesc is an immutable description of one stage.
+// stage is an immutable description of one stage.
 // It is assembled into a RunnableGraph by Source.To() and materialized into
 // an actor when RunnableGraph.Run() is called.
-type stageDesc struct {
-	id   string
+type stage struct {
+	// id is the stage identifier.
+	id string
+	// kind is the stage kind.
 	kind stageKind
-	// makeActor is called once per materialization to create the stage actor.
+	// actorFn is called once per materialization to create the stage actor.
 	// config is the final, builder-modified StageConfig at spawn time.
-	makeActor func(config StageConfig) actor.Actor
-	config    StageConfig
+	actorFn func(config StageConfig) actor.Actor
+	// config is the stage configuration.
+	config StageConfig
 	// fuseFn is set for stateless stages (Map, Filter) and enables stage fusion.
 	// Returns (result, pass, err). When pass is false, the element is filtered out.
 	// When err is non-nil, the element failed processing.
@@ -84,8 +87,8 @@ const (
 // multiple pipelines produced by the Graph DSL (pipelines). Run dispatches
 // to the appropriate materializer automatically.
 type RunnableGraph struct {
-	stages     []*stageDesc   // non-nil for a single linear pipeline
-	pipelines  [][]*stageDesc // non-nil for multi-pipeline graphs (Graph DSL)
+	stages     []*stage   // non-nil for a single linear pipeline
+	pipelines  [][]*stage // non-nil for multi-pipeline graphs (Graph DSL)
 	fusionMode FusionMode
 }
 
@@ -101,7 +104,7 @@ func (g RunnableGraph) WithFusion(mode FusionMode) RunnableGraph {
 // metrics, or an error if spawning fails.
 func (g RunnableGraph) Run(ctx context.Context, system actor.ActorSystem) (StreamHandle, error) {
 	if len(g.pipelines) > 0 {
-		fused := make([][]*stageDesc, len(g.pipelines))
+		fused := make([][]*stage, len(g.pipelines))
 		for i, p := range g.pipelines {
 			fused[i] = applyFusion(p, g.fusionMode)
 		}

@@ -33,7 +33,7 @@ import (
 // Sink is a lazy description of a terminal stream stage that consumes
 // elements of type T. Nothing executes until the graph is materialized.
 type Sink[T any] struct {
-	desc *stageDesc
+	desc *stage
 }
 
 // Collector accumulates all elements emitted by a Collect sink.
@@ -76,8 +76,8 @@ func (c *Collector[T]) Items() []T {
 func (s Sink[T]) WithErrorStrategy(strategy ErrorStrategy) Sink[T] {
 	newDesc := *s.desc
 	newDesc.config.ErrorStrategy = strategy
-	prevMake := s.desc.makeActor
-	newDesc.makeActor = func(_ StageConfig) actor.Actor {
+	prevMake := s.desc.actorFn
+	newDesc.actorFn = func(_ StageConfig) actor.Actor {
 		return prevMake(newDesc.config)
 	}
 	return Sink[T]{desc: &newDesc}
@@ -92,8 +92,8 @@ func (s Sink[T]) WithRetryConfig(rc RetryConfig) Sink[T] {
 	}
 	newDesc := *s.desc
 	newDesc.config.RetryConfig = rc
-	prevMake := s.desc.makeActor
-	newDesc.makeActor = func(_ StageConfig) actor.Actor {
+	prevMake := s.desc.actorFn
+	newDesc.actorFn = func(_ StageConfig) actor.Actor {
 		return prevMake(newDesc.config)
 	}
 	return Sink[T]{desc: &newDesc}
@@ -103,8 +103,8 @@ func (s Sink[T]) WithRetryConfig(rc RetryConfig) Sink[T] {
 func (s Sink[T]) WithMailbox(mailbox actor.Mailbox) Sink[T] {
 	newDesc := *s.desc
 	newDesc.config.Mailbox = mailbox
-	prevMake := s.desc.makeActor
-	newDesc.makeActor = func(_ StageConfig) actor.Actor { return prevMake(newDesc.config) }
+	prevMake := s.desc.actorFn
+	newDesc.actorFn = func(_ StageConfig) actor.Actor { return prevMake(newDesc.config) }
 	return Sink[T]{desc: &newDesc}
 }
 
@@ -112,8 +112,8 @@ func (s Sink[T]) WithMailbox(mailbox actor.Mailbox) Sink[T] {
 func (s Sink[T]) WithName(name string) Sink[T] {
 	newDesc := *s.desc
 	newDesc.config.Name = name
-	prevMake := s.desc.makeActor
-	newDesc.makeActor = func(_ StageConfig) actor.Actor { return prevMake(newDesc.config) }
+	prevMake := s.desc.actorFn
+	newDesc.actorFn = func(_ StageConfig) actor.Actor { return prevMake(newDesc.config) }
 	return Sink[T]{desc: &newDesc}
 }
 
@@ -121,8 +121,8 @@ func (s Sink[T]) WithName(name string) Sink[T] {
 func (s Sink[T]) WithTags(tags map[string]string) Sink[T] {
 	newDesc := *s.desc
 	newDesc.config.Tags = tags
-	prevMake := s.desc.makeActor
-	newDesc.makeActor = func(_ StageConfig) actor.Actor { return prevMake(newDesc.config) }
+	prevMake := s.desc.actorFn
+	newDesc.actorFn = func(_ StageConfig) actor.Actor { return prevMake(newDesc.config) }
 	return Sink[T]{desc: &newDesc}
 }
 
@@ -130,8 +130,8 @@ func (s Sink[T]) WithTags(tags map[string]string) Sink[T] {
 func (s Sink[T]) WithTracer(t Tracer) Sink[T] {
 	newDesc := *s.desc
 	newDesc.config.Tracer = t
-	prevMake := s.desc.makeActor
-	newDesc.makeActor = func(_ StageConfig) actor.Actor { return prevMake(newDesc.config) }
+	prevMake := s.desc.actorFn
+	newDesc.actorFn = func(_ StageConfig) actor.Actor { return prevMake(newDesc.config) }
 	return Sink[T]{desc: &newDesc}
 }
 
@@ -139,10 +139,10 @@ func (s Sink[T]) WithTracer(t Tracer) Sink[T] {
 // Errors returned by fn are handled per the pipeline's ErrorStrategy.
 func ForEach[T any](fn func(T)) Sink[T] {
 	config := defaultStageConfig()
-	desc := &stageDesc{
+	desc := &stage{
 		id:   newStageID(),
 		kind: sinkKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		actorFn: func(cfg StageConfig) actor.Actor {
 			return newSinkActor(func(v any) error {
 				elem, ok := v.(T)
 				if !ok {
@@ -162,10 +162,10 @@ func ForEach[T any](fn func(T)) Sink[T] {
 func Collect[T any]() (*Collector[T], Sink[T]) {
 	result := newCollector[T]()
 	config := defaultStageConfig()
-	desc := &stageDesc{
+	desc := &stage{
 		id:   newStageID(),
 		kind: sinkKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		actorFn: func(cfg StageConfig) actor.Actor {
 			return newSinkActor(func(v any) error {
 				elem, ok := v.(T)
 				if !ok {
@@ -185,10 +185,10 @@ func Collect[T any]() (*Collector[T], Sink[T]) {
 func Fold[T, U any](zero U, fn func(U, T) U) (*FoldResult[U], Sink[T]) {
 	res := &FoldResult[U]{value: zero, ready: make(chan struct{})}
 	config := defaultStageConfig()
-	desc := &stageDesc{
+	desc := &stage{
 		id:   newStageID(),
 		kind: sinkKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		actorFn: func(cfg StageConfig) actor.Actor {
 			return newSinkActor(func(v any) error {
 				elem, ok := v.(T)
 				if !ok {
@@ -224,10 +224,10 @@ func (r *FoldResult[U]) Value() U {
 // ToActor creates a Sink that forwards each element to the given GoAkt actor via Tell.
 func ToActor[T any](pid *actor.PID) Sink[T] {
 	config := defaultStageConfig()
-	desc := &stageDesc{
+	desc := &stage{
 		id:   newStageID(),
 		kind: sinkKind,
-		makeActor: func(config StageConfig) actor.Actor {
+		actorFn: func(config StageConfig) actor.Actor {
 			return newSinkActor(func(v any) error {
 				elem, ok := v.(T)
 				if !ok {
@@ -245,10 +245,10 @@ func ToActor[T any](pid *actor.PID) Sink[T] {
 // and forwards the element via Tell.
 func ToActorNamed[T any](system actor.ActorSystem, name string) Sink[T] {
 	config := defaultStageConfig()
-	desc := &stageDesc{
+	desc := &stage{
 		id:   newStageID(),
 		kind: sinkKind,
-		makeActor: func(config StageConfig) actor.Actor {
+		actorFn: func(config StageConfig) actor.Actor {
 			return newSinkActor(func(v any) error {
 				elem, ok := v.(T)
 				if !ok {
@@ -270,10 +270,10 @@ func ToActorNamed[T any](system actor.ActorSystem, name string) Sink[T] {
 func First[T any]() (*FoldResult[T], Sink[T]) {
 	res := &FoldResult[T]{ready: make(chan struct{})}
 	config := defaultStageConfig()
-	desc := &stageDesc{
+	desc := &stage{
 		id:   newStageID(),
 		kind: sinkKind,
-		makeActor: func(config StageConfig) actor.Actor {
+		actorFn: func(config StageConfig) actor.Actor {
 			return newFirstSinkActor(res, config)
 		},
 		config: config,
@@ -285,10 +285,10 @@ func First[T any]() (*FoldResult[T], Sink[T]) {
 // Useful when side effects in upstream flows are the goal.
 func Ignore[T any]() Sink[T] {
 	config := defaultStageConfig()
-	desc := &stageDesc{
+	desc := &stage{
 		id:   newStageID(),
 		kind: sinkKind,
-		makeActor: func(config StageConfig) actor.Actor {
+		actorFn: func(config StageConfig) actor.Actor {
 			return newSinkActor(func(any) error { return nil }, nil, config)
 		},
 		config: config,
@@ -299,10 +299,10 @@ func Ignore[T any]() Sink[T] {
 // Chan writes each element to ch. If ch is full, backpressure propagates upstream.
 func Chan[T any](ch chan<- T) Sink[T] {
 	config := defaultStageConfig()
-	desc := &stageDesc{
+	desc := &stage{
 		id:   newStageID(),
 		kind: sinkKind,
-		makeActor: func(config StageConfig) actor.Actor {
+		actorFn: func(config StageConfig) actor.Actor {
 			return newSinkActor(func(v any) error {
 				elem, ok := v.(T)
 				if !ok {

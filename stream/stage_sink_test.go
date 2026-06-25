@@ -50,10 +50,10 @@ func errSink(bad int, strategy ErrorStrategy) Sink[int] {
 	sentinel := errors.New("bad element")
 	config := defaultStageConfig()
 	config.ErrorStrategy = strategy
-	desc := &stageDesc{
+	desc := &stage{
 		id:   newStageID(),
 		kind: sinkKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		actorFn: func(cfg StageConfig) actor.Actor {
 			return newSinkActor(func(v any) error {
 				if v.(int) == bad {
 					return sentinel
@@ -72,10 +72,10 @@ func collectSink(strategy ErrorStrategy) (*[]int, Sink[int]) {
 	sentinel := errors.New("bad element")
 	config := defaultStageConfig()
 	config.ErrorStrategy = strategy
-	desc := &stageDesc{
+	desc := &stage{
 		id:   newStageID(),
 		kind: sinkKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		actorFn: func(cfg StageConfig) actor.Actor {
 			return newSinkActor(func(v any) error {
 				n := v.(int)
 				if n == 99 {
@@ -112,10 +112,10 @@ func TestSinkActor_ErrorRetry_Succeeds(t *testing.T) {
 	config := defaultStageConfig()
 	config.ErrorStrategy = Retry
 	collected := &[]int{}
-	desc := &stageDesc{
+	desc := &stage{
 		id:   newStageID(),
 		kind: sinkKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		actorFn: func(cfg StageConfig) actor.Actor {
 			return newSinkActor(func(v any) error {
 				n := v.(int)
 				if n == 2 && attempts == 0 {

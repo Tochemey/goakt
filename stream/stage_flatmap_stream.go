@@ -165,7 +165,7 @@ func (a *flatMapStreamActor[In, Out]) spawnInner(rctx *actor.ReceiveContext, inp
 	a.subCounter++
 	subKey := a.subCounter
 
-	stages := make([]*stageDesc, 0, len(innerSource.stages)+1)
+	stages := make([]*stage, 0, len(innerSource.stages)+1)
 	stages = append(stages, innerSource.stages...)
 	stages = append(stages, makeSubMergeSinkDesc(rctx.Self(), subKey))
 

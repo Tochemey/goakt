@@ -34,7 +34,7 @@ import (
 // has produced at least one element. Completes when every input has signalled
 // done and every queued snapshot has been emitted.
 type mergeLatestSourceActor[T any] struct {
-	subStages        [][]*stageDesc
+	subStages        [][]*stage
 	system           actor.ActorSystem
 	downstream       *actor.PID
 	subID            string
@@ -52,7 +52,7 @@ type mergeLatestSourceActor[T any] struct {
 
 // newMergeLatestSourceActor creates an actor that emits a snapshot of the
 // latest value on each slot whenever any slot produces a new element.
-func newMergeLatestSourceActor[T any](subStages [][]*stageDesc, config StageConfig) *mergeLatestSourceActor[T] {
+func newMergeLatestSourceActor[T any](subStages [][]*stage, config StageConfig) *mergeLatestSourceActor[T] {
 	m := config.Metrics
 	if m == nil {
 		m = &stageMetrics{}
@@ -85,7 +85,7 @@ func (a *mergeLatestSourceActor[T]) Receive(rctx *actor.ReceiveContext) {
 		ctx := rctx.Context()
 		for i, sub := range a.subStages {
 			sink := makeMergeSinkDesc(self, i)
-			all := make([]*stageDesc, len(sub)+1)
+			all := make([]*stage, len(sub)+1)
 			copy(all, sub)
 			all[len(sub)] = sink
 			spawnSubPipeline(ctx, a.system, all)

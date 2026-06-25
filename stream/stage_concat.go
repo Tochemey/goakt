@@ -36,7 +36,7 @@ import (
 // sub-pipeline at a time. This bounds the in-flight resource cost at one
 // sub-pipeline regardless of how many sources are concatenated.
 type concatSourceActor[T any] struct {
-	subStages  [][]*stageDesc
+	subStages  [][]*stage
 	system     actor.ActorSystem
 	downstream *actor.PID
 	subID      string
@@ -51,7 +51,7 @@ type concatSourceActor[T any] struct {
 
 // newConcatSourceActor creates a concatSourceActor for the given sub-source
 // stage lists, consumed in the order provided.
-func newConcatSourceActor[T any](subStages [][]*stageDesc, config StageConfig) *concatSourceActor[T] {
+func newConcatSourceActor[T any](subStages [][]*stage, config StageConfig) *concatSourceActor[T] {
 	m := config.Metrics
 	if m == nil {
 		m = &stageMetrics{}
@@ -115,7 +115,7 @@ func (a *concatSourceActor[T]) spawnNext(rctx *actor.ReceiveContext) {
 	a.current++
 	sub := a.subStages[a.current]
 	sink := makeMergeSinkDesc(rctx.Self(), a.current)
-	all := make([]*stageDesc, len(sub)+1)
+	all := make([]*stage, len(sub)+1)
 	copy(all, sub)
 	all[len(sub)] = sink
 	spawnSubPipeline(rctx.Context(), a.system, all)

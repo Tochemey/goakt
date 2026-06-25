@@ -37,7 +37,7 @@ type slotSelector func(bufs []queue) int
 // merge: complete only after every slot is done and every per-slot buffer
 // is drained.
 type weightedMergeSourceActor[T any] struct {
-	subStages  [][]*stageDesc
+	subStages  [][]*stage
 	selectSlot slotSelector
 	system     actor.ActorSystem
 	downstream *actor.PID
@@ -52,7 +52,7 @@ type weightedMergeSourceActor[T any] struct {
 
 // newWeightedMergeSourceActor creates an actor that merges N sub-source
 // pipelines using selectSlot to pick which slot to drain on each emission.
-func newWeightedMergeSourceActor[T any](subStages [][]*stageDesc, selectSlot slotSelector, config StageConfig) *weightedMergeSourceActor[T] {
+func newWeightedMergeSourceActor[T any](subStages [][]*stage, selectSlot slotSelector, config StageConfig) *weightedMergeSourceActor[T] {
 	m := config.Metrics
 	if m == nil {
 		m = &stageMetrics{}
@@ -85,7 +85,7 @@ func (a *weightedMergeSourceActor[T]) Receive(rctx *actor.ReceiveContext) {
 		ctx := rctx.Context()
 		for i, sub := range a.subStages {
 			sink := makeMergeSinkDesc(self, i)
-			all := make([]*stageDesc, len(sub)+1)
+			all := make([]*stage, len(sub)+1)
 			copy(all, sub)
 			all[len(sub)] = sink
 			spawnSubPipeline(ctx, a.system, all)

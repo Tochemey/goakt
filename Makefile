@@ -38,7 +38,7 @@ lint: image ## Run golangci-lint
 	$(DOCKER_RUN) golangci-lint run --timeout 10m
 
 unit-test: image vendor ## Run unit tests with coverage
-	$(DOCKER_RUN) sh -c 'go test -p 1 -timeout 0 -race -v \
+	$(DOCKER_RUN) sh -c 'go test -tags=hashicorpmetrics -p 1 -timeout 0 -race -v \
 		-coverprofile=coverage.out -covermode=atomic -coverpkg=./... \
 		$$(go list ./... | grep -v -E "(goaktpb|mocks|internal/internalpb)")'
 

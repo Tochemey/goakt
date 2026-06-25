@@ -51,7 +51,7 @@ const sinkRefAckThreshold int64 = sinkRefInitialCredit / 4
 // One subscription per endpoint: subsequent subscribes receive
 // streamErrorWire and are otherwise ignored.
 type sinkRefEndpointActor[T any] struct {
-	sinkDesc   *stageDesc
+	sinkDesc   *stage
 	system     actor.ActorSystem
 	subscriber *actor.PID
 	streamID   string
@@ -59,7 +59,7 @@ type sinkRefEndpointActor[T any] struct {
 	feedKey    string
 }
 
-func newSinkRefEndpointActor[T any](sinkDesc *stageDesc) *sinkRefEndpointActor[T] {
+func newSinkRefEndpointActor[T any](sinkDesc *stage) *sinkRefEndpointActor[T] {
 	return &sinkRefEndpointActor[T]{sinkDesc: sinkDesc}
 }
 
@@ -87,7 +87,7 @@ func (a *sinkRefEndpointActor[T]) Receive(rctx *actor.ReceiveContext) {
 		// Spawn [feedSourceActor] -> [user sink] sub-pipeline. The feed source's
 		// splitter is this actor — it will receive subFeedAck for refill.
 		feedDesc := makeFeedSourceDesc(rctx.Self(), a.feedKey, sinkRefAckThreshold)
-		stages := []*stageDesc{feedDesc, a.sinkDesc}
+		stages := []*stage{feedDesc, a.sinkDesc}
 		_, head, err := materializeWithHead(rctx.Context(), a.system, stages)
 		if err != nil {
 			rctx.Tell(a.subscriber, &streamErrorWire{

@@ -120,15 +120,15 @@ func TestActorSourceActor_FetchErr_Timeout(t *testing.T) {
 	// Build a source with very short pull timeout so actor.Ask times out.
 	config := defaultStageConfig()
 	config.PullTimeout = 50 * time.Millisecond
-	desc := &stageDesc{
+	desc := &stage{
 		id:   newStageID(),
 		kind: sourceKind,
-		makeActor: func(cfg StageConfig) actor.Actor {
+		actorFn: func(cfg StageConfig) actor.Actor {
 			return newActorSourceActor[int](pid, cfg)
 		},
 		config: config,
 	}
-	src := Source[int]{stages: []*stageDesc{desc}}
+	src := Source[int]{stages: []*stage{desc}}
 
 	handle, err := src.To(Ignore[int]()).Run(ctx, sys)
 	require.NoError(t, err)

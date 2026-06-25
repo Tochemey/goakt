@@ -36,7 +36,7 @@ import (
 type sharedBalance[T any] struct {
 	mu         sync.Mutex
 	n          int
-	srcStages  []*stageDesc
+	srcStages  []*stage
 	slots      []*actor.PID
 	slotSubIDs []string
 	registered int
@@ -45,7 +45,7 @@ type sharedBalance[T any] struct {
 }
 
 // newSharedBalance creates the coordination struct and pre-allocates the hub.
-func newSharedBalance[T any](n int, srcStages []*stageDesc) *sharedBalance[T] {
+func newSharedBalance[T any](n int, srcStages []*stage) *sharedBalance[T] {
 	hub := &balanceHubActor[T]{
 		n:          n,
 		slots:      make([]*actor.PID, n),
@@ -78,16 +78,16 @@ func (s *sharedBalance[T]) registerSlot(ctx context.Context, slot int, pid *acto
 	s.mu.Unlock()
 
 	if allReady {
-		hubSinkDesc := &stageDesc{
+		hubSinkDesc := &stage{
 			id:   newStageID(),
 			kind: sinkKind,
-			makeActor: func(cfg StageConfig) actor.Actor {
+			actorFn: func(cfg StageConfig) actor.Actor {
 				s.hub.config = cfg
 				return s.hub
 			},
 			config: defaultStageConfig(),
 		}
-		all := make([]*stageDesc, len(s.srcStages)+1)
+		all := make([]*stage, len(s.srcStages)+1)
 		copy(all, s.srcStages)
 		all[len(s.srcStages)] = hubSinkDesc
 		go spawnSubPipeline(ctx, sys, all)

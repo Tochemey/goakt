@@ -31,11 +31,11 @@ import (
 	"github.com/tochemey/goakt/v4/actor"
 )
 
-func makeStageDesc(kind stageKind) *stageDesc {
-	return &stageDesc{
+func makeStageDesc(kind stageKind) *stage {
+	return &stage{
 		id:   newStageID(),
 		kind: kind,
-		makeActor: func(_ StageConfig) actor.Actor {
+		actorFn: func(_ StageConfig) actor.Actor {
 			return newSinkActor(func(any) error { return nil }, nil, defaultStageConfig())
 		},
 		config: defaultStageConfig(),
@@ -46,7 +46,7 @@ func TestValidate_FirstStageNotSource(t *testing.T) {
 	// A 2-stage graph whose first stage is a flow (not a source) should fail.
 	flow := makeStageDesc(flowKind)
 	sink := makeStageDesc(sinkKind)
-	g := RunnableGraph{stages: []*stageDesc{flow, sink}}
+	g := RunnableGraph{stages: []*stage{flow, sink}}
 	err := g.validate()
 	require.Error(t, err)
 }
@@ -55,7 +55,7 @@ func TestValidate_LastStageNotSink(t *testing.T) {
 	// A 2-stage graph whose last stage is a flow (not a sink) should fail.
 	src := makeStageDesc(sourceKind)
 	flow := makeStageDesc(flowKind)
-	g := RunnableGraph{stages: []*stageDesc{src, flow}}
+	g := RunnableGraph{stages: []*stage{src, flow}}
 	err := g.validate()
 	require.Error(t, err)
 }

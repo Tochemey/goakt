@@ -6,6 +6,10 @@ run:
   modules-download-mode: vendor
   relative-path-mode: gomod
   timeout: 10m
+  # Route hashicorp/go-metrics/compat (pulled in via memberlist) through
+  # github.com/hashicorp/go-metrics instead of the deprecated armon fallback.
+  build-tags:
+    - hashicorpmetrics
 output:
   path-prefix: ""
 linters:
