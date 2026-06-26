@@ -37,6 +37,7 @@ import (
 	"github.com/hashicorp/go-sockaddr"
 	"github.com/hashicorp/memberlist"
 
+	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/log"
 )
 
@@ -54,8 +55,9 @@ type Transport struct {
 
 	shutdown atomic.Int32
 
-	advertiseMu   sync.RWMutex
-	advertiseAddr string
+	// advertiseAddr holds the advertised address as a string. It is written
+	// exactly once during FinalAdvertiseAddr and read lock-free on every send.
+	advertiseAddr atomic.Value
 }
 
 var _ memberlist.NodeAwareTransport = (*Transport)(nil)
@@ -73,6 +75,7 @@ func NewTransport(config TransportConfig) (*Transport, error) {
 	if logger == nil {
 		logger = log.DiscardLogger
 	}
+
 	t := Transport{
 		config:   config,
 		logger:   logger,
@@ -169,6 +172,7 @@ func (t *Transport) FinalAdvertiseAddr(ip string, port int) (net.IP, int, error)
 			if err != nil {
 				return nil, 0, fmt.Errorf("failed to get interface addresses: %v", err)
 			}
+
 			if ip == "" {
 				return nil, 0, fmt.Errorf("no private IP address found, and explicit IP not provided")
 			}
@@ -195,13 +199,13 @@ func (t *Transport) FinalAdvertiseAddr(ip string, port int) (net.IP, int, error)
 func (t *Transport) WriteTo(b []byte, addr string) (time.Time, error) {
 	err := t.writeTo(b, addr)
 	if err != nil {
-		logger := t.logger
 		if strings.Contains(err.Error(), "connection refused") {
 			// The connection refused is a common error that could happen during normal operations when a node
 			// shutdown (or crash). It shouldn't be considered a warning condition on the sender side.
-			logger = t.debugLogger()
+			t.logger.Debugf("failed to WriteTo %s: %v", addr, err)
+		} else {
+			t.logger.Infof("failed to WriteTo %s: %v", addr, err)
 		}
-		logger.Infof("failed to WriteTo %s: %v", addr, err)
 
 		// WriteTo is used to send "UDP" packets. Since we use TCP, we can detect more errors,
 		// but memberlist library doesn't seem to cope with that very well. That is why we return nil instead.
@@ -234,7 +238,7 @@ func (t *Transport) writeTo(b []byte, addr string) error {
 
 	// Prepare the header *before* setting the deadline on the connection.
 	headerBuf := bytes.Buffer{}
-	headerBuf.WriteByte(byte(packet))
+	_ = headerBuf.WriteByte(byte(packet))
 
 	// We need to send our address to the other side, otherwise other side can only see IP and port from TCP header.
 	// But that doesn't match our node address (new TCP connection has new random port), which confuses memberlist.
@@ -245,8 +249,8 @@ func (t *Transport) writeTo(b []byte, addr string) error {
 		return fmt.Errorf("local address too long")
 	}
 
-	headerBuf.WriteByte(byte(len(ourAddr)))
-	headerBuf.WriteString(ourAddr)
+	_ = headerBuf.WriteByte(byte(len(ourAddr)))
+	_, _ = headerBuf.WriteString(ourAddr)
 
 	if t.config.PacketWriteTimeout > 0 {
 		deadline := time.Now().Add(t.config.PacketWriteTimeout)
@@ -256,26 +260,17 @@ func (t *Transport) writeTo(b []byte, addr string) error {
 		}
 	}
 
-	_, err = c.Write(headerBuf.Bytes())
+	// Coalesce the header, payload and digest into a single writev so the whole
+	// packet is sent with one syscall instead of three, with no extra copying.
+	total := int64(headerBuf.Len() + len(b) + len(digest))
+	bufs := net.Buffers{headerBuf.Bytes(), b, digest[:]}
+	n, err := bufs.WriteTo(c)
 	if err != nil {
-		return fmt.Errorf("sending local address: %v", err)
+		return fmt.Errorf("sending packet: %v", err)
 	}
 
-	n, err := c.Write(b)
-	if err != nil {
-		return fmt.Errorf("sending data: %v", err)
-	}
-	if n != len(b) {
-		return fmt.Errorf("sending data: short write")
-	}
-
-	// Append digest.
-	n, err = c.Write(digest[:])
-	if err != nil {
-		return fmt.Errorf("digest: %v", err)
-	}
-	if n != len(digest) {
-		return fmt.Errorf("digest: short write")
+	if n != total {
+		return fmt.Errorf("sending packet: short write")
 	}
 
 	closed = true
@@ -284,7 +279,7 @@ func (t *Transport) writeTo(b []byte, addr string) error {
 		return fmt.Errorf("close: %v", err)
 	}
 
-	t.debugLogger().Infof("sent packet to %s, size=(%d), hash=(%s)", addr, len(b), fmt.Sprintf("%x", digest))
+	t.logger.Debugf("sent packet to %s, size=(%d), hash=(%x)", addr, len(b), digest)
 	return nil
 }
 
@@ -377,7 +372,7 @@ func (t *Transport) tcpListen(tcpLn net.Listener) {
 			}
 
 			t.logger.Errorf("failed to accept tcp connection: %v", err)
-			time.Sleep(loopDelay)
+			pause.For(loopDelay)
 			continue
 		}
 		// No error, reset loop delay
@@ -387,15 +382,8 @@ func (t *Transport) tcpListen(tcpLn net.Listener) {
 	}
 }
 
-func (t *Transport) debugLogger() log.Logger {
-	if t.config.DebugEnabled {
-		return log.DebugLogger
-	}
-	return log.DiscardLogger
-}
-
 func (t *Transport) handleConnection(conn net.Conn) {
-	t.debugLogger().Debugf("New connection: %s", conn.RemoteAddr())
+	t.logger.Debugf("New connection: %s", conn.RemoteAddr())
 
 	closeConn := true
 	defer func() {
@@ -429,18 +417,18 @@ func (t *Transport) handleConnection(conn net.Conn) {
 		_, err = io.ReadFull(conn, addrBuf)
 
 		if err != nil {
-			t.logger.Errorf("error while reading node address length from packet remote=(%s) message type: %v", conn.RemoteAddr(), err)
+			t.logger.Errorf("error while reading node address from packet remote=(%s) message type: %v", conn.RemoteAddr(), err)
 			return
 		}
 
 		buf, err := io.ReadAll(conn)
 		if err != nil {
-			t.logger.Errorf("error while reading node address length from packet remote=(%s) message type: %v", conn.RemoteAddr(), err)
+			t.logger.Errorf("error while reading payload from packet remote=(%s) message type: %v", conn.RemoteAddr(), err)
 			return
 		}
 
 		if len(buf) < md5.Size {
-			t.logger.Warnf("not enough data received data_length=(%d) from packet remote=(%s) message type: %v", len(buf), conn.RemoteAddr(), err)
+			t.logger.Warnf("not enough data received data_length=(%d) from packet remote=(%s)", len(buf), conn.RemoteAddr())
 			return
 		}
 
@@ -449,10 +437,11 @@ func (t *Transport) handleConnection(conn net.Conn) {
 		expectedDigest := md5.Sum(buf) // nolint
 
 		if !bytes.Equal(receivedDigest, expectedDigest[:]) {
-			t.logger.Warnf("packet digest mismatch. expected=(%s), received=(%s), data_length=(%d), remote=(%s)", fmt.Sprintf("%x", expectedDigest), fmt.Sprintf("%x", receivedDigest), len(buf), conn.RemoteAddr())
+			t.logger.Warnf("packet digest mismatch. expected=(%x), received=(%x), data_length=(%d), remote=(%s)", expectedDigest, receivedDigest, len(buf), conn.RemoteAddr())
+			return
 		}
 
-		t.debugLogger().Infof("Received packet addr=(%s), size=(%d), hash=(%s)", addr(addrBuf), len(buf), fmt.Sprintf("%x", receivedDigest))
+		t.logger.Debugf("Received packet addr=(%s), size=(%d), hash=(%x)", addr(addrBuf), len(buf), receivedDigest)
 		t.packetCh <- &memberlist.Packet{
 			Buf:       buf,
 			From:      addr(addrBuf),
@@ -464,16 +453,15 @@ func (t *Transport) handleConnection(conn net.Conn) {
 }
 
 func (t *Transport) setAdvertisedAddr(advertiseAddr net.IP, advertisePort int) {
-	t.advertiseMu.Lock()
-	defer t.advertiseMu.Unlock()
 	addr := net.TCPAddr{IP: advertiseAddr, Port: advertisePort}
-	t.advertiseAddr = addr.String()
+	t.advertiseAddr.Store(addr.String())
 }
 
 func (t *Transport) getAdvertisedAddr() string {
-	t.advertiseMu.RLock()
-	defer t.advertiseMu.RUnlock()
-	return t.advertiseAddr
+	if v := t.advertiseAddr.Load(); v != nil {
+		return v.(string)
+	}
+	return ""
 }
 
 func (t *Transport) getConnection(addr string, timeout time.Duration) (net.Conn, error) {

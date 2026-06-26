@@ -24,9 +24,11 @@ package memberlist
 
 import (
 	"bytes"
+	"crypto/md5" // nolint
 	"crypto/tls"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -170,6 +172,80 @@ func TestTCPTransport(t *testing.T) {
 		assert.Zero(t, port)
 		assert.NoError(t, transport.Shutdown())
 	})
+	t.Run("With FinalAdvertiseAddr resolves a private IP for the 0.0.0.0 bind", func(t *testing.T) {
+		transport, err := NewTransport(TransportConfig{
+			BindAddrs: []string{zeroZeroZeroZero},
+			BindPort:  0,
+		})
+		require.NoError(t, err)
+		require.NotNil(t, transport)
+		defer func() { _ = transport.Shutdown() }()
+
+		// With an empty advertise IP and a 0.0.0.0 bind, the transport must
+		// discover a concrete private IP instead of advertising 0.0.0.0.
+		ip, port, err := transport.FinalAdvertiseAddr("", 0)
+		require.NoError(t, err)
+		require.NotNil(t, ip)
+		assert.False(t, ip.IsUnspecified())
+		assert.Equal(t, transport.GetAutoBindPort(), port)
+	})
+	t.Run("WriteTo swallows and logs a send failure", func(t *testing.T) {
+		buf := new(bytes.Buffer)
+		transport, err := NewTransport(TransportConfig{
+			BindAddrs: []string{"127.0.0.1"},
+			BindPort:  0,
+			Logger:    goaktlog.NewZap(goaktlog.DebugLevel, buf),
+		})
+		require.NoError(t, err)
+		require.NotNil(t, transport)
+		defer func() { _ = transport.Shutdown() }()
+
+		// An unparseable address makes the dial fail with an error that is not
+		// "connection refused", so WriteTo logs through the configured logger
+		// and still returns a nil error to keep memberlist happy.
+		ts, err := transport.WriteTo([]byte("payload"), "invalid-address")
+		require.NoError(t, err)
+		assert.False(t, ts.IsZero())
+		assert.Contains(t, buf.String(), "failed to WriteTo")
+	})
+	t.Run("WriteTo swallows a connection refused failure", func(t *testing.T) {
+		transport, err := NewTransport(TransportConfig{
+			BindAddrs: []string{"127.0.0.1"},
+			BindPort:  0,
+		})
+		require.NoError(t, err)
+		require.NotNil(t, transport)
+		defer func() { _ = transport.Shutdown() }()
+
+		// dynaport hands back a free port with nothing listening on it, so the
+		// dial is refused, exercising the connection-refused branch of WriteTo.
+		ports := dynaport.Get(1)
+		ts, err := transport.WriteTo([]byte("payload"), fmt.Sprintf("127.0.0.1:%d", ports[0]))
+		require.NoError(t, err)
+		assert.False(t, ts.IsZero())
+	})
+	t.Run("tcpListen backs off and stops on repeated accept errors", func(t *testing.T) {
+		buf := new(bytes.Buffer)
+		transport := &Transport{
+			logger: goaktlog.NewZap(goaktlog.DebugLevel, buf),
+		}
+
+		ln := &errAcceptListener{}
+		ln.onAccept = func(attempt int) {
+			// Let the backoff grow past maxDelay (exercising the cap) before
+			// signalling shutdown so the loop exits on the next failed accept.
+			if attempt >= 10 {
+				transport.shutdown.Store(1)
+			}
+		}
+
+		transport.wg.Add(1)
+		go transport.tcpListen(ln)
+		transport.wg.Wait()
+
+		assert.GreaterOrEqual(t, ln.attempts, 10)
+		assert.Contains(t, buf.String(), "failed to accept tcp connection")
+	})
 	t.Run("SendBestEffort", func(t *testing.T) {
 		cluster, cleanup := makeCluster(t)
 		defer cleanup()
@@ -223,6 +299,65 @@ func TestTCPTransport(t *testing.T) {
 		defer func() { _ = transport.Shutdown() }()
 
 		assert.Equal(t, goaktlog.DiscardLogger, transport.logger)
+	})
+}
+
+func TestTCPTransportPacketDigest(t *testing.T) {
+	// buildPacket frames a raw packet exactly as writeTo does on the wire:
+	// [packet type][addr length][addr][payload][md5 digest].
+	buildPacket := func(payload []byte, digest [md5.Size]byte) []byte {
+		from := []byte("127.0.0.1:7946")
+		buf := []byte{byte(packet), byte(len(from))}
+		buf = append(buf, from...)
+		buf = append(buf, payload...)
+		return append(buf, digest[:]...)
+	}
+
+	send := func(t *testing.T, transport *Transport, raw []byte) {
+		addr := transport.tcpListeners[0].Addr().String()
+		conn, err := net.DialTimeout("tcp", addr, time.Second)
+		require.NoError(t, err)
+		_, err = conn.Write(raw)
+		require.NoError(t, err)
+		require.NoError(t, conn.Close())
+	}
+
+	t.Run("delivers packet with a matching digest", func(t *testing.T) {
+		transport, err := NewTransport(TransportConfig{
+			BindAddrs: []string{"127.0.0.1"},
+			BindPort:  0,
+		})
+		require.NoError(t, err)
+		defer func() { _ = transport.Shutdown() }()
+
+		payload := []byte("hello")
+		send(t, transport, buildPacket(payload, md5.Sum(payload))) // nolint
+
+		select {
+		case pkt := <-transport.PacketCh():
+			assert.Equal(t, payload, pkt.Buf)
+		case <-time.After(time.Second):
+			t.Fatal("expected packet to be delivered")
+		}
+	})
+
+	t.Run("drops packet with a mismatched digest", func(t *testing.T) {
+		transport, err := NewTransport(TransportConfig{
+			BindAddrs: []string{"127.0.0.1"},
+			BindPort:  0,
+		})
+		require.NoError(t, err)
+		defer func() { _ = transport.Shutdown() }()
+
+		payload := []byte("hello")
+		send(t, transport, buildPacket(payload, md5.Sum([]byte("tampered")))) // nolint
+
+		select {
+		case <-transport.PacketCh():
+			t.Fatal("packet with mismatched digest must be dropped, not delivered")
+		case <-time.After(500 * time.Millisecond):
+			// expected: nothing delivered
+		}
 	})
 }
 
@@ -368,3 +503,23 @@ func (d *delegate) LocalState(join bool) []byte {
 
 // nolint
 func (d *delegate) MergeRemoteState(buf []byte, join bool) {}
+
+// errAcceptListener is a net.Listener whose Accept always fails. It drives the
+// tcpListen backoff loop without needing a real network listener. Accept is
+// only ever called from the single tcpListen goroutine, so attempts needs no
+// synchronization; the test reads it after the WaitGroup has settled.
+type errAcceptListener struct {
+	attempts int
+	onAccept func(attempt int)
+}
+
+func (l *errAcceptListener) Accept() (net.Conn, error) {
+	l.attempts++
+	if l.onAccept != nil {
+		l.onAccept(l.attempts)
+	}
+	return nil, fmt.Errorf("accept failed on attempt %d", l.attempts)
+}
+
+func (l *errAcceptListener) Close() error   { return nil }
+func (l *errAcceptListener) Addr() net.Addr { return &net.TCPAddr{} }
