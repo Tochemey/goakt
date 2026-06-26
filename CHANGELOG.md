@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+
+### 🚀 Performance
+
+#### Lower-overhead memberlist TCP transport packet path
+
+The custom memberlist TCP transport carried avoidable overhead on the packet send path ([#1219](https://github.com/Tochemey/goakt/issues/1219)). Because that path is high frequency (gossip, probes, and pings), each packet was sent with three separate `Write` calls (header, payload, digest), took an `RWMutex` on every send to read the advertised address, and allocated an intermediate string when logging the packet digest. The three writes are now coalesced into a single `writev` via `net.Buffers` with no extra copying, the advertised address (written once during `FinalAdvertiseAddr`) is read lock-free from an atomic value, and the digest is formatted with the `%x` verb directly on the byte slice instead of through an intermediate `fmt.Sprintf`.
+
+### 🐛 Fixes
+
+#### Memberlist transport drops packets that fail the digest check
+
+On the receive path, a packet whose trailing md5 digest did not match the recomputed digest was logged as a mismatch but still delivered to memberlist ([#1219](https://github.com/Tochemey/goakt/issues/1219)). A failed digest check now drops the packet instead of forwarding a corrupt payload. Two related logging defects in the same path are fixed as well: the "not enough data received" warning no longer interpolates an always-nil error, and the three distinct read failures (address length, address bytes, and payload) now report the operation that actually failed instead of sharing one misleading message.
+
 ## v4.2.11 - 2026-06-22
 
 ### 🐛 Fixes
