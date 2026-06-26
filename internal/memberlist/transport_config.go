@@ -44,7 +44,6 @@ type TransportConfig struct {
 	// Logger is a logger for operator messages.
 	Logger log.Logger
 
-	TLSEnabled   bool
-	TLS          *tls.Config
-	DebugEnabled bool
+	TLSEnabled bool
+	TLS        *tls.Config
 }

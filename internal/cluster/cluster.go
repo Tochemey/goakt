@@ -978,7 +978,6 @@ func (x *cluster) setupMemberlistConfig(cfg *oconfig.Config) error {
 			PacketDialTimeout:  5 * time.Second,
 			PacketWriteTimeout: 5 * time.Second,
 			Logger:             x.logger,
-			DebugEnabled:       false,
 			TLSEnabled:         true,
 			TLS:                x.tlsInfo.ClientConfig,
 		})
