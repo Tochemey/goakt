@@ -50,6 +50,9 @@ type dispatcher struct {
 	// the ready-queue close so repeated signalStop invocations are
 	// no-ops.
 	stopping atomic.Bool
+	// supervisor is the shared, system-wide consumer that handles actor
+	// failures, replacing the per-actor supervision goroutine.
+	supervisor *supervision
 }
 
 // dispatcherWorkerCount is the default worker pool size. We size the
@@ -68,6 +71,7 @@ func newDispatcher(workerCount, throughput int) *dispatcher {
 		readyQueue: newReadyQueue(workerCount),
 		workers:    make([]*worker, workerCount),
 		throughput: throughput,
+		supervisor: newSupervision(),
 	}
 	for i := range d.workers {
 		d.workers[i] = &worker{id: i, dispatcher: d}
@@ -84,6 +88,7 @@ func (d *dispatcher) start() {
 	for _, w := range d.workers {
 		go w.run()
 	}
+	d.supervisor.start()
 }
 
 // signalStop closes the ready queue and wakes all parked workers, then
@@ -98,6 +103,7 @@ func (d *dispatcher) signalStop() {
 		return
 	}
 	d.readyQueue.close()
+	d.supervisor.stop()
 }
 
 // schedule enqueues s onto the global ready queue. Safe to call from any
@@ -105,4 +111,10 @@ func (d *dispatcher) signalStop() {
 // worker's own rescheduling path goes through worker.reschedule.
 func (d *dispatcher) schedule(s schedulable) {
 	d.readyQueue.push(s)
+}
+
+// submitSupervision hands a failing actor and its signal to the shared
+// supervision consumer.
+func (d *dispatcher) submitSupervision(pid *PID, signal *supervisionSignal) {
+	d.supervisor.Submit(pid, signal)
 }

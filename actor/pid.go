@@ -184,10 +184,7 @@ type PID struct {
 	reinstateCount atomic.Int64
 
 	// supervisor strategy
-	supervisor               *supervisor.Supervisor
-	supervisionChan          chan *supervisionSignal
-	supervisionStopSignal    chan types.Unit
-	supervisionStopRequested atomic.Bool
+	supervisor *supervisor.Supervisor
 
 	// schedState drives the dispatcher-pool ready-queue membership for
 	// this actor.
@@ -249,8 +246,6 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		address:               address,
 		mailbox:               NewUnboundedMailbox(),
 		systemMailbox:         NewUnboundedMailbox(),
-		supervisionChan:       make(chan *supervisionSignal, 1),
-		supervisionStopSignal: make(chan types.Unit, 1),
 		path:                  newPath(address),
 	}
 
@@ -284,7 +279,6 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		return nil, err
 	}
 
-	pid.startSupervision()
 	pid.startPassivation()
 
 	if err := pid.healthCheck(ctx); err != nil {
@@ -2233,32 +2227,43 @@ func (pid *PID) recovery(received *ReceiveContext) {
 			var pe *gerrors.PanicError
 			if errors.As(err, &pe) {
 				// in case PanicError is sent just forward it
-				pid.supervisionChan <- newSupervisionSignal(pe, received.Message())
+				pid.submitSupervision(newSupervisionSignal(pe, received.Message()))
 				return
 			}
 
 			// this is a normal error just wrap it with some stack trace
 			// for rich logging purpose
 			pc, fn, line, _ := runtime.Caller(2)
-			pid.supervisionChan <- newSupervisionSignal(
+			pid.submitSupervision(newSupervisionSignal(
 				gerrors.NewPanicError(
 					fmt.Errorf("%w at %s[%s:%d]", err, runtime.FuncForPC(pc).Name(), fn, line),
-				), received.Message())
+				), received.Message()))
 
 		default:
 			// we have no idea what panic it is. Enrich it with some stack trace for rich
 			// logging purpose
 			pc, fn, line, _ := runtime.Caller(2)
-			pid.supervisionChan <- newSupervisionSignal(
+			pid.submitSupervision(newSupervisionSignal(
 				gerrors.NewPanicError(
 					fmt.Errorf("%#v at %s[%s:%d]", r, runtime.FuncForPC(pc).Name(), fn, line),
-				), received.Message())
+				), received.Message()))
 		}
 		return
 	}
 	if err := received.getError(); err != nil {
-		pid.supervisionChan <- newSupervisionSignal(err, received.Message())
+		pid.submitSupervision(newSupervisionSignal(err, received.Message()))
 	}
+}
+
+// submitSupervision routes a failure signal to the shared supervision consumer
+// owned by the dispatcher. It falls back to handling the signal inline for PIDs
+// constructed without a dispatcher (edge construction paths and tests).
+func (pid *PID) submitSupervision(signal *supervisionSignal) {
+	if pid.dispatcher != nil {
+		pid.dispatcher.submitSupervision(pid, signal)
+		return
+	}
+	pid.notifyParent(signal)
 }
 
 // getAddress returns the internal address for use with APIs that require *address.Address
@@ -2576,9 +2581,6 @@ func (pid *PID) doStop(ctx context.Context) error {
 		pid.reset()
 	}()
 
-	// stop supervisor loop
-	pid.stopSupervisionLoop()
-
 	if err := chain.
 		New(chain.WithFailFast()).
 		AddRunner(func() error { return pid.freeWatchees(ctx) }).
@@ -2601,43 +2603,6 @@ func (pid *PID) doStop(ctx context.Context) error {
 
 	pid.logger.Debugf("shutdown process completed for actor %s", pid.Name())
 	return nil
-}
-
-// startSupervision send error notifications to the parent actor
-func (pid *PID) startSupervision() {
-	pid.supervisionStopRequested.Store(false)
-	go func() {
-		for {
-			select {
-			case signal := <-pid.supervisionChan:
-				pid.notifyParent(signal)
-			case <-pid.supervisionStopSignal:
-				return
-			}
-		}
-	}()
-}
-
-// stopSupervisionLoop stops the supervision loop
-// it is safe to call this method multiple times
-func (pid *PID) stopSupervisionLoop() {
-	if pid.supervisionStopSignal == nil {
-		return
-	}
-
-	if pid.supervisionStopRequested.Load() {
-		return
-	}
-
-	if pid.supervisionStopRequested.CompareAndSwap(false, true) {
-		select {
-		case pid.supervisionStopSignal <- types.Unit{}:
-			return
-		default:
-			// channel already has a stop signal queued
-			pid.supervisionStopRequested.Store(false)
-		}
-	}
 }
 
 // notifyParent sends a notification to the parent actor
@@ -2946,8 +2911,6 @@ func (pid *PID) suspend(reason string) {
 	pid.failureCount.Inc()
 	// pause passivation loop
 	pid.pausePassivation()
-	// stop the supervisor loop
-	pid.stopSupervisionLoop()
 	// publish an event to the events stream
 	pid.eventsStream.Publish(eventsTopic, NewActorSuspended(pid.Path(), reason))
 }
@@ -3004,8 +2967,6 @@ func (pid *PID) doReinstate() {
 	// doesn't immediately fire before the skip guard can cancel the in-flight attempt.
 	pid.markActivity(time.Now())
 
-	// resume the supervisor loop
-	pid.startSupervision()
 	// resume passivation loop
 	pid.resumePassivation()
 
@@ -3488,7 +3449,6 @@ func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *t
 
 	pid.schedState.reset()
 	pid.setState(suspendedState, false)
-	pid.startSupervision()
 	pid.startPassivation()
 
 	if err := pid.healthCheck(ctx); err != nil {

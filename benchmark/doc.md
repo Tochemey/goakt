@@ -74,3 +74,16 @@ go test -run=^$ -bench=^BenchmarkActorMemoryFootprint$ -benchmem ./benchmark/
 ```
 go test -run=^$ -bench=^BenchmarkRemoteTellThroughput$ -benchtime=1x ./benchmark/
 ```
+
+### MillionActorsSustainedLoad — 1M actors processing under sustained load
+
+A single-node scale test (not a benchmark) that spawns one million actors,
+keeps every one of them processing messages for a fixed window, and reports
+memory (bytes/actor, HeapInuse, GC) and CPU (consumed CPU time, average cores,
+GC CPU fraction, throughput). It is build-tagged behind `scale` so it stays out
+of the normal suite, and needs a machine with enough memory: one supervision
+goroutine per actor means ~1M goroutines, so budget several GB of RAM.
+
+```
+go test -tags=scale -run TestMillionActorsSustainedLoad -v -timeout 30m ./benchmark/
+```
