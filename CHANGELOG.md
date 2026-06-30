@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### 🚀 Performance
+
+#### Supervision no longer runs a goroutine per actor
+
+Every actor (`PID`) started a dedicated supervision goroutine that lived for the actor's entire lifetime, blocked on a per-actor channel waiting to forward failure signals to its parent ([#1222](https://github.com/Tochemey/goakt/issues/1222)). Because the goroutine existed per actor and was released only when the actor stopped, the process goroutine count and the associated goroutine-stack memory grew linearly with the actor population, even when no actor ever failed. On a single node holding a large population this was the dominant per-actor cost: spawning one million actors meant roughly one million idle goroutines.
+
+Failure handling is now multiplexed onto a single shared consumer owned by the dispatcher. One goroutine drains failure signals from every actor and applies the existing supervisor directives (resume, restart, stop, escalate), so the live goroutine count stays bounded and independent of the actor count, matching the cooperative model already used for message dispatch. The supervision semantics are unchanged: per-actor signal ordering is preserved and only the first failure of an actor is acted on.
+
+In a single-node test that spawns one million message-processing actors, the live goroutine count drops from about one per actor to a small constant (the dispatcher worker pool plus the shared supervision and passivation goroutines), and resident memory falls with the per-actor goroutine stacks removed. A build-tagged scale test (`benchmark/scale_test.go`, run with `-tags=scale`) asserts the goroutine count stays bounded as the population grows.
+
 ## v4.2.12 - 2026-06-26
 
 ### 🚀 Performance

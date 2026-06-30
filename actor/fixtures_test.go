@@ -54,7 +54,6 @@ import (
 	"github.com/tochemey/goakt/v4/discovery/nats"
 	"github.com/tochemey/goakt/v4/discovery/selfmanaged"
 	gerrors "github.com/tochemey/goakt/v4/errors"
-	"github.com/tochemey/goakt/v4/eventstream"
 	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/cluster"
@@ -201,16 +200,6 @@ func (p *MockActor) Receive(ctx *ReceiveContext) {
 		wg.Wait()
 	default:
 		ctx.Unhandled()
-	}
-}
-
-func MockSupervisionPID(t *testing.T) *PID {
-	t.Helper()
-	return &PID{
-		logger:                log.DiscardLogger,
-		address:               address.New("child", "test-system", "127.0.0.1", 0),
-		supervisionStopSignal: make(chan types.Unit, 1),
-		eventsStream:          eventstream.New(),
 	}
 }
 

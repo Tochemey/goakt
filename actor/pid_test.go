@@ -52,7 +52,6 @@ import (
 	"github.com/tochemey/goakt/v4/internal/metric"
 	dynaport "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
-	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/internal/xsync"
 	"github.com/tochemey/goakt/v4/log"
 	testkit "github.com/tochemey/goakt/v4/mocks/discovery"
@@ -744,11 +743,6 @@ func TestRestart(t *testing.T) {
 		child, err := newPID(ctx, childAddr, NewMockActor(), withActorSystem(system), withCustomLogger(log.DiscardLogger))
 		require.NoError(t, err)
 
-		t.Cleanup(func() {
-			root.stopSupervisionLoop()
-			child.stopSupervisionLoop()
-		})
-
 		tree := system.tree()
 		require.NoError(t, tree.addRootNode(root))
 		require.NoError(t, tree.addNode(root, child))
@@ -789,11 +783,6 @@ func TestRestart(t *testing.T) {
 		childAddr := address.NewWithParent("child", rootAddr.System(), rootAddr.Host(), rootAddr.Port(), rootAddr)
 		child, err := newPID(ctx, childAddr, NewMockActor(), withActorSystem(system), withCustomLogger(log.DiscardLogger))
 		require.NoError(t, err)
-
-		t.Cleanup(func() {
-			root.stopSupervisionLoop()
-			child.stopSupervisionLoop()
-		})
 
 		tree := system.tree()
 		require.NoError(t, tree.addRootNode(root))
@@ -1900,47 +1889,6 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		//stop the actor
 		require.NoError(t, actorSystem.Stop(ctx))
-	})
-	t.Run("Suspend does not block when stop already queued", func(t *testing.T) {
-		pid := MockSupervisionPID(t)
-		pid.supervisionStopSignal <- types.Unit{}
-
-		done := make(chan struct{})
-		go func() {
-			pid.suspend("test")
-			close(done)
-		}()
-
-		select {
-		case <-done:
-		case <-time.After(500 * time.Millisecond):
-			t.Fatal("suspend blocked with pending supervision stop signal")
-		}
-	})
-	t.Run("Stop signal emission is idempotent per cycle", func(t *testing.T) {
-		pid := MockSupervisionPID(t)
-
-		pid.stopSupervisionLoop()
-		select {
-		case <-pid.supervisionStopSignal:
-		case <-time.After(100 * time.Millisecond):
-			t.Fatal("expected supervision stop signal")
-		}
-
-		pid.stopSupervisionLoop()
-		select {
-		case <-pid.supervisionStopSignal:
-			t.Fatal("unexpected extra supervision stop signal")
-		default:
-		}
-
-		pid.supervisionStopRequested.Store(false)
-		pid.stopSupervisionLoop()
-		select {
-		case <-pid.supervisionStopSignal:
-		case <-time.After(100 * time.Millisecond):
-			t.Fatal("expected supervision stop signal after reset")
-		}
 	})
 	t.Run("When Parent shuts down child supervision loop does not deadlock", func(t *testing.T) {
 		ctx := context.Background()
