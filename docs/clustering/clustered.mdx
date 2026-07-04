@@ -32,3 +32,44 @@ Configure the actor system with `WithCluster(clusterConfig)` and a discovery pro
 When a node leaves, the leader relocates its actors and grains to remaining nodes. Singleton actors move to the leader;
 others are distributed. Actors can opt out of relocation via spawn options. See [Relocation](/actor/relocation) for
 the full flow, configuration, and relocatability requirements.
+
+## Leadership
+
+Exactly one node in the cluster acts as the coordinator (leader) at any given time. The leader drives internal
+responsibilities such as relocation and cluster singleton placement, but its status is also queryable from application
+code:
+
+| Method                     | Purpose                                                                              |
+| -------------------------- | ------------------------------------------------------------------------------------- |
+| `ActorSystem.IsLeader(ctx)` | Reports whether the local node is the current cluster coordinator.                   |
+| `ActorSystem.Leader(ctx)`   | Returns the `*remote.Peer` describing the current cluster leader.                    |
+
+Both methods require cluster mode; they return `ErrClusterDisabled` when clustering is not enabled.
+
+```go
+isLeader, err := system.IsLeader(ctx)
+if err != nil {
+    return err
+}
+if isLeader {
+    // this node is the cluster coordinator
+}
+```
+
+<Note>
+  This lets non-actor code (background jobs, metrics exporters, gateway components) ask "am I the leader?" without
+  routing through an actor.
+</Note>
+
+Whenever the local node's coordinator status flips, a `LeaderChanged` event is published on the
+[event stream](/advanced/event-streams), alongside `NodeJoined` and `NodeLeft`. Exactly one `LeaderChanged` event is
+published per transition - for example, when the current leader leaves the cluster, only the newly elected node
+observes a `LeaderChanged(isLeader=true)` event.
+
+```go
+for msg := range subscriber.Iterator() {
+    if leaderChanged, ok := msg.Payload().(*actor.LeaderChanged); ok {
+        log.Printf("leadership changed: address=%s isLeader=%t", leaderChanged.Address(), leaderChanged.IsLeader())
+    }
+}
+```

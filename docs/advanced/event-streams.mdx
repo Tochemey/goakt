@@ -49,6 +49,7 @@ The system publishes these events to the event stream:
 | `Deadletter`        | Message could not be delivered (non-existent or stopped actor)                |
 | `NodeJoined`        | A node joined the cluster (cluster mode only)                                 |
 | `NodeLeft`          | A node left the cluster (cluster mode only)                                   |
+| `LeaderChanged`     | The local node's coordinator status changed (cluster mode only)              |
 | `RelocationFailed`  | A departed node's actors or grains could not be relocated (cluster mode only) |
 
 ## Usage
@@ -72,6 +73,8 @@ for msg := range subscriber.Iterator() {
         log.Printf("node joined: %s", e.Address())
     case *actor.NodeLeft:
         log.Printf("node left: %s", e.Address())
+    case *actor.LeaderChanged:
+        log.Printf("leadership changed: address=%s isLeader=%t", e.Address(), e.IsLeader())
     case *actor.RelocationFailed:
         log.Printf("relocation failed: node=%s actors=%v grains=%v err=%v", e.Address(), e.Actors(), e.Grains(), e.Error())
     }
@@ -83,7 +86,7 @@ for msg := range subscriber.Iterator() {
 ## Implementation notes
 
 - The event stream is backed by the `eventstream` package. The actor system creates an `EventsStream` at startup and subscribes callers to the internal topic `topic.events`.
-- Lifecycle events (ActorStarted, ActorStopped, etc.) are published by the PID and death-watch logic. Cluster events (NodeJoined, NodeLeft) are published by the cluster events loop when membership changes.
+- Lifecycle events (ActorStarted, ActorStopped, etc.) are published by the PID and death-watch logic. Cluster events (NodeJoined, NodeLeft) are published by the cluster events loop when membership changes. `LeaderChanged` is published from the same loop whenever a topology event flips the local node's coordinator status; the initial coordinator election on startup is not published, only subsequent transitions.
 - `RelocationFailed` is published by the relocator when a departed node's actors or grains cannot be re-deployed. Relocation is not retried; subscribe to this event to drive your own recovery (for example, re-spawning the affected actors or alerting).
 - Dead letters are published by the dead-letter actor when messages cannot be delivered.
 - The event stream is always present; no option is required. It is independent of `WithPubSub()` and cluster mode.

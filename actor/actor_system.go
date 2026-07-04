@@ -851,6 +851,10 @@ type actorSystem struct {
 	eventsQueue     <-chan *cluster.Event
 	partitionHasher hash.Hasher
 	clusterNode     *discovery.Node
+	// leaderState caches the last known coordinator status of this node so that
+	// clusterEventsLoop can detect leadership transitions on topology events and
+	// publish a LeaderChanged event exactly once per transition.
+	leaderState atomic.Bool
 
 	// help protect some the fields to set
 	locker sync.RWMutex
@@ -2382,6 +2386,9 @@ func (x *actorSystem) startCluster(ctx context.Context) error {
 	x.setupGrainActivationBarrier(ctx)
 
 	x.eventsQueue = x.cluster.Events()
+	// establish the initial coordinator baseline silently; only subsequent
+	// transitions detected from topology events are published as LeaderChanged
+	x.leaderState.Store(x.cluster.IsLeader(ctx))
 	x.rebalancingQueue = make(chan *internalpb.PeerState, 1)
 	go x.clusterEventsLoop()
 	// Track the replicate drainers so shutdown can wait for them to drain
@@ -2950,6 +2957,27 @@ func (x *actorSystem) clusterEventsLoop() {
 		case cluster.NodeJoined:
 			x.handleNodeJoinedEvent(event)
 		}
+
+		x.detectLeaderTransition()
+	}
+}
+
+// detectLeaderTransition compares the coordinator status observed after a topology
+// event against the last known state and publishes a LeaderChanged event exactly
+// once per transition. It is only ever invoked from clusterEventsLoop, so the
+// compare-and-store on leaderState never races with itself.
+func (x *actorSystem) detectLeaderTransition() {
+	ctx := context.Background()
+	isLeader := x.cluster.IsLeader(ctx)
+	if x.leaderState.Swap(isLeader) == isLeader {
+		return
+	}
+
+	if x.eventsStream != nil {
+		message := NewLeaderChanged(x.PeersAddress(), isLeader, time.Now().UTC())
+		x.logger.Debugf("node=%s publishing cluster event=LeaderChanged(isLeader=%t)", x.String(), isLeader)
+		x.eventsStream.Publish(eventsTopic, message)
+		x.logger.Debugf("node=%s published cluster event=LeaderChanged(isLeader=%t) successfully", x.String(), isLeader)
 	}
 }
 
