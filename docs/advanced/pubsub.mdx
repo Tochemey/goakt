@@ -143,3 +143,9 @@ func (a *OrderService) Receive(ctx *ReceiveContext) {
 | Subscribers | External (monitoring, logging)        | Your actors                          |
 | API         | `Subscribe()` / `Unsubscribe()`       | Messages to `TopicActor()`           |
 | Option      | Always present                        | `WithPubSub()` or cluster            |
+
+<Note>
+Need a subscriber that is not an actor — a websocket/SSE handler, for example? See
+[Non-Actor PubSub Subscriptions](/advanced/pubsub-bridge) for `ActorSystem.SubscribeTopic`, a
+plain-callback subscription built on top of the same topic actor described above.
+</Note>

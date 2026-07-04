@@ -162,7 +162,16 @@ func (x *actorSystem) SubscribeTopic(topic string, handler func(ctx context.Cont
 	}
 
 	name := fmt.Sprintf("%s-%s", pubsubBridgeNamePrefix, uuid.NewString())
-	pid, err := x.Spawn(context.Background(), name,
+
+	// The bridge is spawned via configPID directly (the same path topicActor and replicator
+	// use) rather than the public Spawn, and deliberately skips putActorOnCluster: it is a
+	// purely local construct that topicActor only ever addresses by its in-memory *PID, so it
+	// never needs cluster-wide resolution. Routing it through Spawn would register it in the
+	// cluster's actor directory on creation but, because asSystem() marks it as a system actor,
+	// the death watch's cluster cleanup on termination is skipped for system actors - leaking
+	// one cluster-directory entry per SubscribeTopic/Unsubscribe cycle for the lifetime of the
+	// cluster, which matters for exactly the churn-heavy gateway workloads this API targets.
+	pid, err := x.configPID(context.Background(), name,
 		newPubSubBridgeActor(topic, topicActorPID, handler),
 		asSystem(),
 		WithLongLived(),
@@ -177,6 +186,11 @@ func (x *actorSystem) SubscribeTopic(topic string, handler func(ctx context.Cont
 	if err != nil {
 		return nil, err
 	}
+
+	if err := x.actors.addNode(x.systemGuardian, pid); err != nil {
+		return nil, err
+	}
+	x.actors.addWatcher(pid, x.deathWatch)
 
 	return &pubsubBridgeSubscription{topic: topic, pid: pid}, nil
 }
