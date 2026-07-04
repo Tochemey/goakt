@@ -63,7 +63,8 @@ import (
 //   - Transport: Client is implemented on top of a custom proto-based TCP protocol.
 //     TLS can be enabled via WithRemotingTLS. The configured MaxReadFrameSize applies
 //     to both read and send limits for all RPCs.
-//   - Payloads: Messages are serialized as google.protobuf.Any. The caller is
+//   - Payloads: Messages are serialized into self-describing frames that embed
+//     the fully-qualified type name (see remote.Serializer). The caller is
 //     responsible for using message types known to both peers.
 //   - Addresses: All remote operations identify actors by address.Address.
 //   - Concurrency: Implementations are safe for concurrent use by multiple goroutines.
@@ -323,7 +324,7 @@ type Client interface {
 	//   - ctx: Governs cancellation and deadlines for the outbound RPC.
 	//   - host, port: Location of the remote actor system where the grain is hosted.
 	//   - grainRequest: Grain activation details (identity, kind, and any activation metadata).
-	//   - message: A protobuf message to send; packed into a google.protobuf.Any.
+	//   - message: The message to send; serialized via the matching registered serializer.
 	//   - timeout: A server-side processing window for sending the request and collecting the response. If zero, the server may apply a default policy; ctx still applies.
 	//
 	// Returns:
@@ -794,35 +795,45 @@ type client struct {
 	// go through the lock-free map Get.
 	coalescers   *xsync.Map[string, *coalescer]
 	coalescersMu sync.Mutex
+
+	// payloadPool recycles the intermediate payload frames produced when
+	// serializing outbound messages on the synchronous send paths. The frame
+	// is referenced by the request envelope only until the wire request has
+	// been marshaled and sent, so it is returned to the pool as soon as the
+	// RPC completes. Asynchronous paths (coalescing) must not use it: their
+	// payloads outlive the call.
+	payloadPool *inet.FramePool
 }
 
 var _ Client = (*client)(nil)
 
 // NewClient constructs a Remoting client configured with the supplied
-// options. By default, the returned client uses an insecure TCP transport with
-// connection pooling (8 connections per endpoint) and Zstd compression.
+// options. By default, the returned client uses an insecure TCP transport
+// with connection pooling (inet.DefaultMaxIdleConns idle connections retained
+// per endpoint) and no compression.
 // Custom options may enable TLS, adjust pool sizes, or change compression.
 //
 // Default settings are optimized for low-latency, high-throughput actor messaging:
-//   - 8 pooled connections per remote endpoint
+//   - inet.DefaultMaxIdleConns pooled connections retained per remote endpoint
 //   - 30s idle timeout before connection eviction
 //   - 5s dial timeout for new connections
 //   - 15s TCP keep-alive for detecting broken connections
-//   - Zstd compression (matches server default in remote.Config)
+//   - no compression (matches server default in remote.Config)
 //
 // Call Close when the client is no longer needed to avoid leaking TCP connections.
 func NewClient(opts ...ClientOption) Client {
 	r := &client{
 		// Performance defaults based on benchmarks
-		maxIdleConns: 8,                    // 8 pooled connections per endpoint
-		idleTimeout:  30 * time.Second,     // 30s before eviction
-		dialTimeout:  5 * time.Second,      // 5s dial timeout
-		keepAlive:    15 * time.Second,     // 15s TCP keep-alive
-		compression:  remote.NoCompression, // No compression (matches server default in remote.Config)
+		maxIdleConns: inet.DefaultMaxIdleConns, // pooled connections retained per endpoint
+		idleTimeout:  30 * time.Second,         // 30s before eviction
+		dialTimeout:  5 * time.Second,          // 5s dial timeout
+		keepAlive:    15 * time.Second,         // 15s TCP keep-alive
+		compression:  remote.NoCompression,     // No compression (matches server default in remote.Config)
 		clientCache:  xsync.NewMap[string, *inet.Client](),
 		coalescers:   xsync.NewMap[string, *coalescer](),
 		// Pre-allocate with capacity for the default entry plus a few custom ones.
 		serializers: make([]ifaceEntry, 0, 4),
+		payloadPool: inet.NewFramePool(),
 	}
 
 	// Register the default proto serializer for all proto.Message implementations.
@@ -839,7 +850,7 @@ func NewClient(opts ...ClientOption) Client {
 	// Build the composite dispatcher once; it references the now-frozen
 	// serializers slice and is returned by Serializer(nil) on every
 	// inbound message without allocation.
-	r.dispatcher = &serializerDispatch{entries: r.serializers}
+	r.dispatcher = newSerializerDispatch(r.serializers)
 
 	// Set default factory if not overridden (for testing)
 	if r.clientFactory == nil {
@@ -1463,7 +1474,7 @@ func (r *client) RemoteActivateGrain(ctx context.Context, host string, port int,
 //   - ctx: Governs cancellation and deadlines for the outbound RPC.
 //   - host, port: Location of the remote actor system where the grain is hosted.
 //   - grainRequest: Grain activation details (identity, kind, and any activation metadata).
-//   - message: A protobuf message to send; packed into a google.protobuf.Any.
+//   - message: The message to send; serialized via the matching registered serializer.
 //   - timeout: A server-side processing window for sending the request and collecting the response. If zero, the server may apply a default policy; ctx still applies.
 //
 // Returns:
@@ -1475,6 +1486,11 @@ func (r *client) RemoteActivateGrain(ctx context.Context, host string, port int,
 //
 // Note: The grain must already be activated, or the grain kind must be registered on the remote actor system using RegisterGrainKind.
 func (r *client) RemoteAskGrain(ctx context.Context, host string, port int, grainRequest *remote.GrainRequest, message any, timeout time.Duration) (response any, err error) {
+	// Bound the whole round trip client-side; a lost response then fails the
+	// call after timeout instead of hanging forever on the socket read.
+	ctx, cancel := askContext(ctx, timeout)
+	defer cancel()
+
 	grain, err := getGrainFromRequest(host, port, grainRequest)
 	if err != nil {
 		return nil, err
@@ -1532,7 +1548,7 @@ func (r *client) RemoteAskGrain(ctx context.Context, host string, port int, grai
 //   - ctx: Governs cancellation and deadlines for the outbound RPC.
 //   - host, port: Location of the remote actor system where the grain is hosted.
 //   - grainRequest: Grain activation details (identity, kind, and any activation metadata).
-//   - message: A protobuf message that will be packed into a google.protobuf.Any.
+//   - message: The message to send; serialized via the matching registered serializer.
 //
 // Behavior:
 //   - Returns when the RPC completes; no application-level acknowledgement is awaited.
@@ -1581,7 +1597,8 @@ func (r *client) RemoteTellGrain(ctx context.Context, host string, port int, gra
 }
 
 // RemoteTell sends a message to a remote actor without awaiting a reply. The
-// message is serialized into google.protobuf.Any and transmitted as a single RPC.
+// message is serialized into a self-describing frame and transmitted as a
+// single RPC.
 //
 // Semantics and caveats:
 //   - Best-effort, at-most-once delivery at the transport layer.
@@ -1595,17 +1612,19 @@ func (r *client) RemoteTell(ctx context.Context, from, to *address.Address, mess
 		return gerrors.NewErrInvalidMessage(fmt.Errorf("no serializer found for message type %T", message))
 	}
 
-	marshaled, err := serializer.Serialize(message)
-	if err != nil {
-		return gerrors.NewErrInvalidMessage(err)
-	}
-
 	// Coalesced fast path: enqueue onto the per-destination writer and return.
 	// Context propagation is preserved by snapshotting the propagator's
 	// headers into each RemoteMessage at enqueue time; the server applies the
 	// per-message metadata when dispatching. That keeps trace spans and
 	// baggage correct even when many callers' messages share a batch.
+	// The payload outlives this call (it is flushed asynchronously), so it
+	// must not come from the payload pool.
 	if r.coalescing.enabled() {
+		marshaled, err := serializer.Serialize(message)
+		if err != nil {
+			return gerrors.NewErrInvalidMessage(err)
+		}
+
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -1647,6 +1666,16 @@ func (r *client) RemoteTell(ctx context.Context, from, to *address.Address, mess
 	}
 
 	// Non-coalesced path (WithSendCoalescing not set). One RPC per call.
+	// The payload frame is pooled: the envelope references it only until
+	// SendProto has marshaled and written the wire request.
+	marshaled, pooled, err := r.serializePayload(serializer, message)
+	if err != nil {
+		return gerrors.NewErrInvalidMessage(err)
+	}
+	if pooled {
+		defer r.payloadPool.Put(marshaled)
+	}
+
 	ctx, err = r.enrichContext(ctx)
 	if err != nil {
 		return err
@@ -1724,21 +1753,32 @@ func (r *client) getCoalescer(host string, port int) *coalescer {
 }
 
 // RemoteAsk delivers a request message to a remote actor and waits for the first
-// reply within the specified timeout. The response is returned as an Any proto.
+// reply within the specified timeout. The response is decoded back to its
+// original message type.
 //
 // Notes:
 //   - If multiple responses are produced, the first one is returned.
 //   - A zero timeout defers to server policy; ctx still governs cancellation.
 //   - Errors may include NotFound, DeadlineExceeded, Unavailable, etc.
 func (r *client) RemoteAsk(ctx context.Context, from, to *address.Address, message any, timeout time.Duration) (response any, err error) {
+	// Bound the whole round trip client-side; a lost response then fails the
+	// call after timeout instead of hanging forever on the socket read.
+	ctx, cancel := askContext(ctx, timeout)
+	defer cancel()
+
 	serializer := r.resolveSerializer(message)
 	if serializer == nil {
 		return nil, gerrors.NewErrInvalidMessage(fmt.Errorf("no serializer found for message type %T", message))
 	}
 
-	marshaled, err := serializer.Serialize(message)
+	// The payload frame is pooled: the envelope references it only until
+	// SendProto has marshaled and written the wire request.
+	marshaled, pooled, err := r.serializePayload(serializer, message)
 	if err != nil {
 		return nil, gerrors.NewErrInvalidMessage(err)
+	}
+	if pooled {
+		defer r.payloadPool.Put(marshaled)
 	}
 
 	// Enrich context with metadata
@@ -1889,6 +1929,11 @@ func (r *client) RemoteBatchTell(ctx context.Context, from, to *address.Address,
 // The number and order of responses may not match the requests. If correlation
 // is required, include a correlation ID within your message payloads.
 func (r *client) RemoteBatchAsk(ctx context.Context, from, to *address.Address, messages []any, timeout time.Duration) (responses []any, err error) {
+	// Bound the whole round trip client-side; a lost response then fails the
+	// call after timeout instead of hanging forever on the socket read.
+	ctx, cancel := askContext(ctx, timeout)
+	defer cancel()
+
 	remoteMessages := make([]*internalpb.RemoteMessage, 0, len(messages))
 	serializers := make([]remote.Serializer, 0, len(messages))
 	// Pre-compute address strings once; they are constant across the whole batch.
@@ -2338,9 +2383,48 @@ func (r *client) newNetClient(host string, port int) *inet.Client {
 	return inet.NewClient(addr, opts...)
 }
 
+// serializePayload serializes message with serializer, drawing the frame
+// from the client's payload pool when the serializer supports pooled output
+// (the built-in proto serializer). The boolean reports whether the caller
+// must return the frame via payloadPool.Put once the enclosing wire request
+// has been sent.
+func (r *client) serializePayload(serializer remote.Serializer, message any) ([]byte, bool, error) {
+	if ps, ok := serializer.(*remote.ProtoSerializer); ok {
+		data, err := ps.SerializeTo(r.payloadPool, message)
+		return data, err == nil, err
+	}
+
+	data, err := serializer.Serialize(message)
+
+	return data, false, err
+}
+
+// askContext bounds ctx with the per-call ask timeout so the transport
+// socket deadline engages and a lost response fails the call once the
+// timeout elapses instead of blocking forever. The effective deadline is
+// the earliest of the existing context deadline and the timeout, matching
+// the documented Client semantics. A non-positive timeout leaves ctx
+// untouched and cancellation stays fully context-driven.
+func askContext(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout <= 0 {
+		return ctx, func() {}
+	}
+
+	return context.WithTimeout(ctx, timeout)
+}
+
 // enrichContext adds metadata to context if propagator is configured.
 // This is called once per request and reuses the same context object.
 func (r *client) enrichContext(ctx context.Context) (context.Context, error) {
+	// Nothing to propagate: no propagator headers and no deadline means the
+	// metadata would be empty on the wire. Return ctx untouched so the send
+	// path emits a legacy frame and the receiver skips metadata handling
+	// entirely.
+	_, hasDeadline := ctx.Deadline()
+	if r.contextPropagator == nil && !hasDeadline {
+		return ctx, nil
+	}
+
 	// Create proto metadata
 	md := inet.NewMetadata()
 

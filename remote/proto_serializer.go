@@ -29,7 +29,8 @@ import (
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
-	"google.golang.org/protobuf/reflect/protoregistry"
+
+	inet "github.com/tochemey/goakt/v4/internal/net"
 )
 
 // ProtoSerializer errors.
@@ -116,6 +117,16 @@ func NewProtoSerializer() *ProtoSerializer {
 // Returns [ErrUnknownMessageType] if the message has no registered type name.
 // Returns [ErrSerializeFailed] wrapping the proto error on marshal failure.
 func (x *ProtoSerializer) Serialize(message any) ([]byte, error) {
+	return x.SerializeTo(nil, message)
+}
+
+// SerializeTo is identical to [ProtoSerializer.Serialize] but draws the
+// output frame from pool when non-nil, falling back to a fresh allocation
+// otherwise. The caller owns the returned slice and must return it via
+// pool.Put once the frame has been consumed (for example, after the
+// enclosing wire request has been transmitted); the slice must not be used
+// after that.
+func (x *ProtoSerializer) SerializeTo(pool *inet.FramePool, message any) ([]byte, error) {
 	msg, ok := message.(proto.Message)
 	if !ok {
 		return nil, ErrNotProtoMessage
@@ -127,11 +138,20 @@ func (x *ProtoSerializer) Serialize(message any) ([]byte, error) {
 		return nil, ErrUnknownMessageType
 	}
 
-	protoSize := proto.Size(msg)
+	// UseCachedSize lets MarshalAppend reuse the size computed here instead
+	// of traversing the message a second time.
+	opts := proto.MarshalOptions{UseCachedSize: true}
+
+	protoSize := opts.Size(msg)
 	totalLen := 4 + 4 + nameLen + protoSize
 
-	// Single allocation: exact-size output frame.
-	out := make([]byte, 0, totalLen)
+	// Single allocation (or pooled buffer): exact-size output frame.
+	var out []byte
+	if pool != nil {
+		out = pool.Get(totalLen)[:0]
+	} else {
+		out = make([]byte, 0, totalLen)
+	}
 
 	// Write both uint32 header fields into a stack-allocated array, then
 	// append — no reflection, no interface boxing.
@@ -144,8 +164,11 @@ func (x *ProtoSerializer) Serialize(message any) ([]byte, error) {
 	out = append(out, messageName...)
 
 	// Marshal the proto payload directly into the tail of out.
-	out, err := proto.MarshalOptions{}.MarshalAppend(out, msg)
+	out, err := opts.MarshalAppend(out, msg)
 	if err != nil {
+		if pool != nil {
+			pool.Put(out)
+		}
 		return nil, errors.Join(ErrSerializeFailed, err)
 	}
 
@@ -185,7 +208,7 @@ func (x *ProtoSerializer) Deserialize(data []byte) (any, error) {
 	// the key and does not hold a reference to our slice after the call.
 	typeName := protoreflect.FullName(unsafe.String(unsafe.SliceData(data[8:8+nameLen]), nameLen))
 
-	msgType, err := protoregistry.GlobalTypes.FindMessageByName(typeName)
+	msgType, err := inet.FindMessageType(typeName)
 	if err != nil {
 		return nil, errors.Join(ErrUnknownMessageType, err)
 	}

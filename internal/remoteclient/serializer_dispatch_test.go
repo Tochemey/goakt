@@ -36,10 +36,11 @@ import (
 
 // stubSerializer is a test-only Serializer with configurable outcomes.
 type stubSerializer struct {
-	serializeData  []byte
-	serializeErr   error
-	deserializeMsg any
-	deserializeErr error
+	serializeData    []byte
+	serializeErr     error
+	deserializeMsg   any
+	deserializeErr   error
+	deserializeCalls int
 }
 
 func (s *stubSerializer) Serialize(any) ([]byte, error) {
@@ -47,6 +48,7 @@ func (s *stubSerializer) Serialize(any) ([]byte, error) {
 }
 
 func (s *stubSerializer) Deserialize([]byte) (any, error) {
+	s.deserializeCalls++
 	return s.deserializeMsg, s.deserializeErr
 }
 
@@ -158,5 +160,75 @@ func TestSerializerDispatch_Deserialize(t *testing.T) {
 		decoded, err := dispatcher.Deserialize(raw)
 		require.NoError(t, err)
 		require.NotNil(t, decoded)
+	})
+}
+
+func TestSerializerDispatch_ProtoFastPath(t *testing.T) {
+	t.Run("proto frame skips serializers registered ahead of proto", func(t *testing.T) {
+		stub := &stubSerializer{deserializeErr: errors.New("must not be tried")}
+		d := newSerializerDispatch([]ifaceEntry{
+			{serializer: stub},
+			{serializer: remote.NewProtoSerializer()},
+		})
+		require.NotNil(t, d.proto)
+
+		raw, err := remote.NewProtoSerializer().Serialize(durationpb.New(3 * time.Second))
+		require.NoError(t, err)
+
+		decoded, err := d.Deserialize(raw)
+		require.NoError(t, err)
+		require.NotNil(t, decoded)
+
+		assert.Equal(t, 0, stub.deserializeCalls, "non-proto serializer must not attempt a proto frame")
+	})
+
+	t.Run("unresolvable frame falls back to registration order", func(t *testing.T) {
+		want := "decoded-by-stub"
+		stub := &stubSerializer{deserializeMsg: want}
+		d := newSerializerDispatch([]ifaceEntry{
+			{serializer: stub},
+			{serializer: remote.NewProtoSerializer()},
+		})
+
+		decoded, err := d.Deserialize([]byte("not-a-shared-layout-frame"))
+		require.NoError(t, err)
+		assert.Equal(t, want, decoded)
+		assert.Equal(t, 1, stub.deserializeCalls)
+	})
+
+	t.Run("no proto serializer registered keeps ordered behavior", func(t *testing.T) {
+		want := "stub-result"
+		stub := &stubSerializer{deserializeMsg: want}
+		d := newSerializerDispatch([]ifaceEntry{{serializer: stub}})
+		require.Nil(t, d.proto)
+
+		decoded, err := d.Deserialize([]byte("data"))
+		require.NoError(t, err)
+		assert.Equal(t, want, decoded)
+	})
+}
+
+func TestFrameTypeName(t *testing.T) {
+	t.Run("valid frame yields the embedded name", func(t *testing.T) {
+		raw, err := remote.NewProtoSerializer().Serialize(durationpb.New(time.Second))
+		require.NoError(t, err)
+
+		name, ok := frameTypeName(raw)
+		require.True(t, ok)
+		assert.Equal(t, "google.protobuf.Duration", string(name))
+	})
+
+	t.Run("short frame is rejected", func(t *testing.T) {
+		_, ok := frameTypeName([]byte{0, 1, 2})
+		assert.False(t, ok)
+	})
+
+	t.Run("inconsistent lengths are rejected", func(t *testing.T) {
+		// totalLen=16 but nameLen overruns it.
+		frame := make([]byte, 16)
+		frame[3] = 16
+		frame[7] = 100
+		_, ok := frameTypeName(frame)
+		assert.False(t, ok)
 	})
 }

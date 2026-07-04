@@ -55,6 +55,13 @@ func NewFramePool() *FramePool {
 	return pool
 }
 
+// headerPool recycles the *[]byte boxes that carry buffers in and out of
+// the bucket pools. Without it, Put would allocate a fresh pointer box per
+// call, taxing every pooled frame cycle with one hidden allocation.
+var headerPool = sync.Pool{
+	New: func() any { return new([]byte) },
+}
+
 // Get returns a []byte of exactly n bytes, drawn from the smallest pool
 // bucket that can satisfy the request. For sizes larger than the biggest
 // bucket a fresh slice is allocated (and will be collected by the GC).
@@ -64,8 +71,15 @@ func (x *FramePool) Get(n int) []byte {
 		// Oversized frame — allocate directly.
 		return make([]byte, n)
 	}
+
 	bp := x.pools[idx].Get().(*[]byte)
-	return (*bp)[:n]
+	buf := (*bp)[:n]
+
+	// Recycle the pointer box so Put can reuse it instead of allocating.
+	*bp = nil
+	headerPool.Put(bp)
+
+	return buf
 }
 
 // Put returns a buffer to the appropriate pool bucket. Buffers that do not
@@ -77,8 +91,10 @@ func (x *FramePool) Put(buf []byte) {
 	if idx < 0 || idx >= numBuckets {
 		return // oversized or misaligned — let GC collect it
 	}
-	buf = buf[:c]
-	x.pools[idx].Put(&buf)
+
+	bp := headerPool.Get().(*[]byte)
+	*bp = buf[:c]
+	x.pools[idx].Put(bp)
 }
 
 // bucketIndex returns the pool index for a buffer of size n.

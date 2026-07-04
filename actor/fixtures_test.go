@@ -1572,6 +1572,7 @@ func MockReplicationTestSystem(clusterMock *mockcluster.Cluster) *actorSystem {
 		grains:         xsync.NewMap[string, *grainPID](),
 		shutdownSignal: make(chan types.Unit),
 		remoteConfig:   remote.NewConfig("127.0.0.1", 8080),
+		remoteHostPort: net.JoinHostPort("127.0.0.1", "8080"),
 		clusterNode:    &discovery.Node{Host: "127.0.0.1", PeersPort: 9000},
 		cluster:        clusterMock,
 		topicActor:     topic,

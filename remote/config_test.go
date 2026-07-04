@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
+	inet "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/size"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
@@ -45,7 +46,7 @@ func TestConfig(t *testing.T) {
 		assert.Exactly(t, 1200*time.Second, config.IdleTimeout())
 		assert.Exactly(t, "127.0.0.1", config.BindAddr())
 		assert.Exactly(t, 0, config.BindPort())
-		assert.Exactly(t, 8, config.MaxIdleConns())
+		assert.Exactly(t, inet.DefaultMaxIdleConns, config.MaxIdleConns())
 		assert.Exactly(t, 5*time.Second, config.DialTimeout())
 		assert.Exactly(t, 15*time.Second, config.KeepAlive())
 	})

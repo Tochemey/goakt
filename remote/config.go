@@ -82,9 +82,9 @@ func NewConfig(bindAddr string, bindPort int, opts ...Option) *Config {
 		bindPort:        bindPort,
 		compression:     NoCompression,
 		serializers:     make(map[reflect.Type]Serializer, 10),
-		maxIdleConns:    8,                // 8 pooled connections per endpoint
-		dialTimeout:     5 * time.Second,  // 5s dial timeout
-		keepAlive:       15 * time.Second, // 15s TCP keep-alive
+		maxIdleConns:    inet.DefaultMaxIdleConns, // pooled connections retained per endpoint
+		dialTimeout:     5 * time.Second,          // 5s dial timeout
+		keepAlive:       15 * time.Second,         // 15s TCP keep-alive
 	}
 
 	// Register the default proto serializer for all proto.Message implementations.
@@ -109,9 +109,9 @@ func DefaultConfig() *Config {
 		bindPort:        0,
 		compression:     NoCompression,
 		serializers:     make(map[reflect.Type]Serializer, 10),
-		maxIdleConns:    8,                // 8 pooled connections per endpoint
-		dialTimeout:     5 * time.Second,  // 5s dial timeout
-		keepAlive:       15 * time.Second, // 15s TCP keep-alive
+		maxIdleConns:    inet.DefaultMaxIdleConns, // pooled connections retained per endpoint
+		dialTimeout:     5 * time.Second,          // 5s dial timeout
+		keepAlive:       15 * time.Second,         // 15s TCP keep-alive
 	}
 
 	// Register the default proto serializer for all proto.Message implementations.

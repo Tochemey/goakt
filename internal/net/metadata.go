@@ -32,7 +32,10 @@ type metadataKey struct{}
 
 // Metadata carries context information (headers, deadline) across the wire.
 // The internal representation stores the deadline as int64 (UnixNano) to
-// avoid GC scanning of time.Time values.
+// avoid GC scanning of time.Time values. On the wire the deadline travels as
+// the remaining time (nanoseconds) rather than an absolute timestamp, so the
+// receiver re-derives it on its own clock and enforcement never depends on
+// cross-node clock synchronization.
 type Metadata struct {
 	headers      map[string]string
 	deadlineNano int64 // UnixNano; 0 means no deadline
@@ -86,7 +89,7 @@ func (m *Metadata) GetDeadline() (time.Time, bool) {
 // the exact output size. The returned byte slice should not be modified by
 // the caller.
 //
-// Format: [2-byte count][for each: 2-byte key len, key, 2-byte val len, val][8-byte deadline]
+// Format: [2-byte count][for each: 2-byte key len, key, 2-byte val len, val][8-byte remaining time]
 func (m *Metadata) MarshalBinary() []byte {
 	// Pre-compute exact size.
 	size := 10 // 2 (count) + 8 (deadline)
@@ -113,8 +116,20 @@ func (m *Metadata) MarshalBinary() []byte {
 		pos += copy(buf[pos:], v)
 	}
 
-	// Write deadline (UnixNano, 0 if not set).
-	binary.BigEndian.PutUint64(buf[pos:], uint64(m.deadlineNano))
+	// Write the deadline as remaining time in nanoseconds (0 if not set) so
+	// the receiver derives the absolute deadline on its own clock. A negative
+	// value means the deadline already passed; an exactly-zero remainder is
+	// nudged to -1 so it is not mistaken for "no deadline".
+	var remaining int64
+
+	if m.deadlineNano != 0 {
+		remaining = m.deadlineNano - time.Now().UnixNano()
+		if remaining == 0 {
+			remaining = -1
+		}
+	}
+
+	binary.BigEndian.PutUint64(buf[pos:], uint64(remaining))
 
 	return buf
 }
@@ -163,31 +178,42 @@ func (m *Metadata) UnmarshalBinary(data []byte) error {
 		m.headers[key] = val
 	}
 
-	// Read deadline.
+	// Read the remaining time and rebase it onto this node's clock (see
+	// MarshalBinary for the wire semantics).
 	if pos+8 > len(data) {
 		return ErrInvalidMetadata
 	}
-	m.deadlineNano = int64(binary.BigEndian.Uint64(data[pos:]))
+
+	remaining := int64(binary.BigEndian.Uint64(data[pos:]))
+	if remaining != 0 {
+		m.deadlineNano = time.Now().UnixNano() + remaining
+	} else {
+		m.deadlineNano = 0
+	}
 
 	return nil
 }
 
-// ToContext creates a context with this metadata attached. If a deadline
-// is set, it is also applied to the returned context.
-//
-// Note: The cancel function from WithDeadline is intentionally not called here
-// because the returned context is transferred to the caller, who becomes
-// responsible for cancellation. Calling cancel here would prematurely cancel
-// the context before the caller can use it.
+// ToContext creates a context with this metadata attached as a value. It
+// deliberately does not create a deadline context: doing so per message
+// starts a runtime timer whose cancel function nobody on the generic
+// transport path can safely call (tell-style messages outlive the handler).
+// Consumers that need the propagated deadline enforced derive it in a scope
+// they own via [Metadata.DeadlineContext].
 func (m *Metadata) ToContext(parent context.Context) context.Context {
-	ctx := parent
-	if m.deadlineNano > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithDeadline(ctx, time.Unix(0, m.deadlineNano))
-		// Cancel function intentionally not called — caller owns the returned context.
-		_ = cancel
+	return context.WithValue(parent, metadataKey{}, m)
+}
+
+// DeadlineContext returns a context bounded by this metadata's deadline and
+// the cancel function that releases its timer. The caller must call cancel
+// once the bounded work completes. When no deadline is set, parent is
+// returned with a no-op cancel.
+func (m *Metadata) DeadlineContext(parent context.Context) (context.Context, context.CancelFunc) {
+	if m.deadlineNano == 0 {
+		return parent, func() {}
 	}
-	return context.WithValue(ctx, metadataKey{}, m)
+
+	return context.WithDeadline(parent, time.Unix(0, m.deadlineNano))
 }
 
 // FromContext extracts metadata from a context.
