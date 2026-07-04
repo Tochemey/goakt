@@ -139,8 +139,8 @@ type ProtoServerOption func(*ProtoServer)
 // connections.
 //
 // Defaults: no idle timeout (connections live until closed by the peer),
-// no fallback handler (unregistered message types are silently skipped),
-// max frame size of 16 MiB.
+// no fallback handler (a frame carrying an unregistered message type closes
+// its connection), max frame size of 16 MiB.
 func NewProtoServer(listenAddr string, opts ...ProtoServerOption) (*ProtoServer, error) {
 	ps := &ProtoServer{
 		handlers:     make(map[protoreflect.FullName]ProtoHandler),
@@ -180,7 +180,9 @@ func WithProtoHandler(fullName protoreflect.FullName, handler ProtoHandler) Prot
 
 // WithFallbackProtoHandler sets a catch-all [ProtoHandler] invoked when no
 // handler is registered for the incoming message type. If no fallback is
-// set, unregistered messages are silently skipped (no response is sent).
+// set, a frame carrying an unregistered message type closes its connection
+// so a request/response peer fails fast instead of waiting for a reply that
+// will never arrive.
 func WithFallbackProtoHandler(handler ProtoHandler) ProtoServerOption {
 	return func(ps *ProtoServer) {
 		ps.fallback = handler
@@ -425,6 +427,13 @@ func (ps *ProtoServer) AcceptedConnections() int32 {
 func (ps *ProtoServer) handleConn(conn Connection) {
 	ctx := ps.server.Context()
 
+	// Buffer the read side for the connection's lifetime: the frame header
+	// and body coalesce into one kernel read, and back-to-back frames of a
+	// pipelined batch drain from the buffer instead of separate reads.
+	// Deadlines still apply; the reader draws from conn.
+	reader := getPooledReader(conn)
+	defer putPooledReader(reader)
+
 	for {
 		// Apply idle timeout if configured.
 		if ps.idleTimeout > 0 {
@@ -436,7 +445,7 @@ func (ps *ProtoServer) handleConn(conn Connection) {
 
 		// Read the 4-byte length header into a stack-allocated array (zero alloc).
 		var hdr [4]byte
-		if _, err := io.ReadFull(conn, hdr[:]); err != nil {
+		if _, err := io.ReadFull(reader, hdr[:]); err != nil {
 			return // EOF, timeout, or connection reset — exit silently.
 		}
 
@@ -452,7 +461,7 @@ func (ps *ProtoServer) handleConn(conn Connection) {
 		frame := ps.framePool.Get(int(totalLen))
 		copy(frame[:4], hdr[:])
 
-		if _, err := io.ReadFull(conn, frame[4:]); err != nil {
+		if _, err := io.ReadFull(reader, frame[4:]); err != nil {
 			ps.framePool.Put(frame)
 			return
 		}
@@ -483,11 +492,22 @@ func (ps *ProtoServer) handleConn(conn Connection) {
 			msg, typeName, err = ps.serializer.UnmarshalBinary(frame)
 		}
 
-		ps.framePool.Put(frame)
-
 		if err != nil {
+			ps.framePool.Put(frame)
 			return // Corrupt frame — close connection.
 		}
+
+		// Resolve the handler while the frame is still alive: typeName is a
+		// zero-copy view into the pooled frame buffer and reading it after
+		// the buffer is returned to the pool races with the next Get that
+		// reuses and overwrites the buffer, yielding a garbage name and a
+		// spurious lookup miss.
+		handler, ok := ps.handlers[typeName]
+		if !ok {
+			handler = ps.fallback
+		}
+
+		ps.framePool.Put(frame)
 
 		// Enrich the context with metadata if present. This enables context
 		// propagation (tracing, auth, deadlines) across the proto TCP transport.
@@ -496,17 +516,21 @@ func (ps *ProtoServer) handleConn(conn Connection) {
 			handlerCtx = md.ToContext(ctx)
 		}
 
-		// Dispatch to the registered handler.
-		handler, ok := ps.handlers[typeName]
-		if !ok {
-			handler = ps.fallback
-		}
 		if handler == nil {
-			// No handler and no fallback — skip the message.
-			continue
+			// No handler and no fallback. Close the connection instead of
+			// silently consuming the frame: on request/response connections a
+			// silently dropped request leaves the peer blocked forever
+			// waiting for a reply that will never come, whereas a close
+			// surfaces an immediate EOF. An unroutable frame also indicates a
+			// protocol error or frame corruption, so the connection cannot be
+			// trusted anyway.
+			return
 		}
 
-		resp, panicked, herr := ps.recover(handlerCtx, handler, conn, msg, typeName)
+		// proto.MessageName reads the name from the decoded message's
+		// descriptor, which is heap-stable, unlike typeName, which must not
+		// outlive the frame buffer released above.
+		resp, panicked, herr := ps.recover(handlerCtx, handler, conn, msg, proto.MessageName(msg))
 		if panicked {
 			// Handler panicked — close the connection so the client receives an
 			// immediate EOF instead of blocking forever waiting for a response

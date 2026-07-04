@@ -45,7 +45,7 @@ func TestNewClient(t *testing.T) {
 		c := NewClient("localhost:9000")
 		require.NotNil(t, c)
 		require.Equal(t, "localhost:9000", c.addr)
-		require.Equal(t, 8, c.maxIdle)
+		require.Equal(t, DefaultMaxIdleConns, c.maxIdle)
 		require.Equal(t, 30*time.Second, c.idleTimeout)
 		require.Equal(t, 5*time.Second, c.dialer.Timeout)
 		require.Equal(t, 15*time.Second, c.dialer.KeepAlive)

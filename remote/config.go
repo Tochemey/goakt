@@ -36,6 +36,12 @@ import (
 	"github.com/tochemey/goakt/v4/internal/validation"
 )
 
+// DefaultMaxIdleConns is the default number of pooled idle connections
+// retained per remote endpoint, as reported by [Config.MaxIdleConns] when no
+// override is applied. Idle connections beyond the pool's idle timeout are
+// closed, so this bounds the peak idle sockets kept per peer.
+const DefaultMaxIdleConns = inet.DefaultMaxIdleConns
+
 // Config defines the remote config.
 //
 // BindAddr must be provided as a physical IP address rather than a DNS name so
@@ -82,9 +88,9 @@ func NewConfig(bindAddr string, bindPort int, opts ...Option) *Config {
 		bindPort:        bindPort,
 		compression:     NoCompression,
 		serializers:     make(map[reflect.Type]Serializer, 10),
-		maxIdleConns:    8,                // 8 pooled connections per endpoint
-		dialTimeout:     5 * time.Second,  // 5s dial timeout
-		keepAlive:       15 * time.Second, // 15s TCP keep-alive
+		maxIdleConns:    DefaultMaxIdleConns, // pooled connections retained per endpoint
+		dialTimeout:     5 * time.Second,     // 5s dial timeout
+		keepAlive:       15 * time.Second,    // 15s TCP keep-alive
 	}
 
 	// Register the default proto serializer for all proto.Message implementations.
@@ -109,9 +115,9 @@ func DefaultConfig() *Config {
 		bindPort:        0,
 		compression:     NoCompression,
 		serializers:     make(map[reflect.Type]Serializer, 10),
-		maxIdleConns:    8,                // 8 pooled connections per endpoint
-		dialTimeout:     5 * time.Second,  // 5s dial timeout
-		keepAlive:       15 * time.Second, // 15s TCP keep-alive
+		maxIdleConns:    DefaultMaxIdleConns, // pooled connections retained per endpoint
+		dialTimeout:     5 * time.Second,     // 5s dial timeout
+		keepAlive:       15 * time.Second,    // 15s TCP keep-alive
 	}
 
 	// Register the default proto serializer for all proto.Message implementations.

@@ -23,8 +23,13 @@
 package remoteclient
 
 import (
+	"encoding/binary"
 	"errors"
+	"unsafe"
 
+	"google.golang.org/protobuf/reflect/protoreflect"
+
+	inet "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/remote"
 )
 
@@ -36,18 +41,61 @@ var (
 // serializerDispatch is a composite [Serializer] returned by
 // [remoting.Serializer] when the caller passes nil (receive path).
 // Built once per [remoting] instance and reused for every inbound message.
-// It tries each registered serializer in registration order and returns
-// the first successful result.
+//
+// Decoding dispatches by the type name embedded in the shared frame layout:
+// a frame whose name resolves in the protobuf registry goes straight to the
+// registered proto serializer regardless of registration order, so no
+// serializer wastes a full failed decode attempt on a frame it cannot
+// handle. Frames that do not resolve fall back to trying each registered
+// serializer in registration order.
 type serializerDispatch struct {
 	entries []ifaceEntry
+	// proto is the first registered [*remote.ProtoSerializer], if any; it is
+	// the type-name fast-path target.
+	proto *remote.ProtoSerializer
 }
 
 var _ remote.Serializer = (*serializerDispatch)(nil)
+
+// newSerializerDispatch builds the composite dispatcher over the frozen
+// entries slice.
+func newSerializerDispatch(entries []ifaceEntry) *serializerDispatch {
+	dispatch := &serializerDispatch{entries: entries}
+
+	for i := range entries {
+		if ps, ok := entries[i].serializer.(*remote.ProtoSerializer); ok {
+			dispatch.proto = ps
+			break
+		}
+	}
+
+	return dispatch
+}
+
+// frameTypeName extracts the fully-qualified type name embedded in the
+// shared [totalLen|nameLen|typeName|payload] frame layout. The returned name
+// is a zero-copy view into data, valid only while data is alive and
+// unmodified.
+func frameTypeName(data []byte) (protoreflect.FullName, bool) {
+	if len(data) < 8 {
+		return "", false
+	}
+
+	totalLen := int(binary.BigEndian.Uint32(data[:4]))
+	nameLen := int(binary.BigEndian.Uint32(data[4:8]))
+
+	if totalLen < 8 || len(data) < totalLen || nameLen <= 0 || 8+nameLen > totalLen {
+		return "", false
+	}
+
+	return protoreflect.FullName(unsafe.String(unsafe.SliceData(data[8:8+nameLen]), nameLen)), true
+}
 
 // Serialize tries each registered serializer in order and returns the first
 // successful encoding.
 func (x *serializerDispatch) Serialize(message any) ([]byte, error) {
 	var lastErr error
+
 	for i := range x.entries {
 		data, err := x.entries[i].serializer.Serialize(message)
 		if err == nil {
@@ -55,16 +103,35 @@ func (x *serializerDispatch) Serialize(message any) ([]byte, error) {
 		}
 		lastErr = err
 	}
+
 	if lastErr != nil {
 		return nil, lastErr
 	}
+
 	return nil, errNoSerializerEncode
 }
 
-// Deserialize tries each registered serializer in order and returns the first
-// successful decoding.
+// Deserialize decodes data produced by any registered serializer. Frames
+// whose embedded type name resolves in the protobuf registry decode via the
+// proto serializer directly; everything else tries each registered
+// serializer in registration order.
 func (x *serializerDispatch) Deserialize(data []byte) (any, error) {
+	if x.proto != nil {
+		if name, ok := frameTypeName(data); ok {
+			if _, err := inet.FindMessageType(name); err == nil {
+				msg, err := x.proto.Deserialize(data)
+				if err == nil {
+					return msg, nil
+				}
+				// A registry hit with a failed decode is pathological (e.g. a
+				// non-proto payload under a colliding name); fall through to
+				// the ordered loop rather than failing outright.
+			}
+		}
+	}
+
 	var lastErr error
+
 	for i := range x.entries {
 		msg, err := x.entries[i].serializer.Deserialize(data)
 		if err == nil {
@@ -72,8 +139,10 @@ func (x *serializerDispatch) Deserialize(data []byte) (any, error) {
 		}
 		lastErr = err
 	}
+
 	if lastErr != nil {
 		return nil, lastErr
 	}
+
 	return nil, errNoSerializerDecode
 }

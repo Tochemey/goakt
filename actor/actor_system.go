@@ -807,6 +807,9 @@ type actorSystem struct {
 	// Specifies how long the sender of a message should wait to receive a reply
 	// when using SendReply. The default value is 5s
 	askTimeout time.Duration
+	// Canonical "host:port" of the remoting bind address, precomputed once
+	// at remoting startup so per-message handlers do not rebuild it.
+	remoteHostPort string
 	// Specifies the deadline applied to remote PID.Watch / PID.UnWatch RPCs.
 	// The default value is DefaultRemoteWatchTimeout (5s).
 	remoteWatchTimeout time.Duration
@@ -914,14 +917,19 @@ type actorSystem struct {
 	// drainers tracks the replicateActors / replicateGrains goroutines.
 	// shutdown waits on it so the drainers finish draining the cluster
 	// queues before reset() clears the rest of the system state.
-	drainers         sync.WaitGroup
-	grainsQueue      chan *internalpb.Grain
-	grains           *xsync.Map[string, *grainPID]
-	grainBarrier     *grainActivationBarrier
-	grainActivation  singleflight.Group
-	evictionStrategy *EvictionStrategy
-	evictionInterval time.Duration
-	evictionStopSig  chan types.Unit
+	drainers    sync.WaitGroup
+	grainsQueue chan *internalpb.Grain
+	grains      *xsync.Map[string, *grainPID]
+	// Caches parsed sender addresses of inbound remote messages so the hot
+	// receive path skips address.Parse. Addresses are immutable, so entries
+	// never go stale; the cache is flushed wholesale when it reaches
+	// remoteSenderAddressCacheCap to stay bounded.
+	remoteSenderAddresses *xsync.Map[string, *address.Address]
+	grainBarrier          *grainActivationBarrier
+	grainActivation       singleflight.Group
+	evictionStrategy      *EvictionStrategy
+	evictionInterval      time.Duration
+	evictionStopSig       chan types.Unit
 
 	metricProvider *metric.Provider
 
@@ -980,31 +988,32 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	}
 
 	system := &actorSystem{
-		actorsQueue:          make(chan *internalpb.Actor, 10),
-		name:                 name,
-		logger:               log.NewZap(log.ErrorLevel, os.Stderr),
-		actorInitMaxRetries:  DefaultInitMaxRetries,
-		shutdownTimeout:      DefaultShutdownTimeout,
-		eventsStream:         eventstream.New(),
-		partitionHasher:      hash.DefaultHasher(),
-		actorInitTimeout:     DefaultInitTimeout,
-		eventsQueue:          make(chan *cluster.Event, 1),
-		registry:             types.NewRegistry(),
-		remoteConfig:         remote.DefaultConfig(),
-		actors:               newTree(),
-		remoteWatches:        newRemoteWatchRegistry(),
-		remoteWatchTimeout:   DefaultRemoteWatchTimeout,
-		shutdownHooks:        make([]ShutdownHook, 0),
-		rebalancedNodes:      goset.NewSet[string](),
-		topicActor:           nil,
-		extensions:           xsync.NewMap[string, extension.Extension](),
-		grainsQueue:          make(chan *internalpb.Grain, 10),
-		shutdownSignal:       make(chan types.Unit),
-		grains:               xsync.NewMap[string, *grainPID](),
-		askTimeout:           DefaultAskTimeout,
-		messageRetention:     DefaultMessageRetention,
-		evictionStopSig:      make(chan types.Unit, 1),
-		dispatcherThroughput: dispatcherThroughput,
+		actorsQueue:           make(chan *internalpb.Actor, 10),
+		name:                  name,
+		logger:                log.NewZap(log.ErrorLevel, os.Stderr),
+		actorInitMaxRetries:   DefaultInitMaxRetries,
+		shutdownTimeout:       DefaultShutdownTimeout,
+		eventsStream:          eventstream.New(),
+		partitionHasher:       hash.DefaultHasher(),
+		actorInitTimeout:      DefaultInitTimeout,
+		eventsQueue:           make(chan *cluster.Event, 1),
+		registry:              types.NewRegistry(),
+		remoteConfig:          remote.DefaultConfig(),
+		actors:                newTree(),
+		remoteWatches:         newRemoteWatchRegistry(),
+		remoteWatchTimeout:    DefaultRemoteWatchTimeout,
+		shutdownHooks:         make([]ShutdownHook, 0),
+		rebalancedNodes:       goset.NewSet[string](),
+		topicActor:            nil,
+		extensions:            xsync.NewMap[string, extension.Extension](),
+		grainsQueue:           make(chan *internalpb.Grain, 10),
+		shutdownSignal:        make(chan types.Unit),
+		grains:                xsync.NewMap[string, *grainPID](),
+		remoteSenderAddresses: xsync.NewMap[string, *address.Address](),
+		askTimeout:            DefaultAskTimeout,
+		messageRetention:      DefaultMessageRetention,
+		evictionStopSig:       make(chan types.Unit, 1),
+		dispatcherThroughput:  dispatcherThroughput,
 	}
 
 	system.startedAt.Store(0)
@@ -2551,6 +2560,7 @@ func (x *actorSystem) reset() {
 	x.extensions.Reset()
 	x.actors.reset()
 	x.grains.Reset()
+	x.remoteSenderAddresses.Reset()
 	x.shuttingDown.Store(false)
 	// shutdownSignal is intentionally left closed here. It is recreated in
 	// Start(), the only point where no producer/drainer can race the write.

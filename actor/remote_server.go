@@ -54,6 +54,11 @@ import (
 // unbounded or slow the writer down.
 const coalescedFailureQueueSize = 256
 
+// remoteSenderAddressCacheCap bounds the parsed sender-address cache. When
+// the cache reaches this size it is flushed wholesale; entries are cheap to
+// rebuild and addresses are immutable, so the flush is correctness-neutral.
+const remoteSenderAddressCacheCap = 8192
+
 // coalescedFailure bundles a whole-batch failure reported by the outbound
 // coalescer. The fan-out drain goroutine turns each entry into a dead-letter
 // publication via deadLetterRemoteMessage.
@@ -127,6 +132,19 @@ func (x *actorSystem) messageMetadata(ctx context.Context, md map[string]string)
 	return propagator.Extract(ctx, headers)
 }
 
+// deadlineContext bounds ctx by the client-propagated deadline when the
+// message metadata carries one. The caller must defer cancel so the deadline
+// timer is released when the handler's synchronous work completes instead of
+// leaking until it fires. When no metadata or deadline is present, ctx is
+// returned unchanged with a no-op cancel.
+func deadlineContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if md, ok := inet.FromContext(ctx); ok && md != nil {
+		return md.DeadlineContext(ctx)
+	}
+
+	return ctx, func() {}
+}
+
 // remoteLookupHandler handles RemoteLookup requests over the proto TCP transport.
 // It checks if the specified actor exists and returns its address.
 func (x *actorSystem) remoteLookupHandler(ctx context.Context, conn inet.Connection, req proto.Message) (proto.Message, error) {
@@ -148,10 +166,13 @@ func (x *actorSystem) remoteLookupHandler(ctx context.Context, conn inet.Connect
 		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
 	}
 
-	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
-	if remoteAddr != net.JoinHostPort(request.GetHost(), strconv.Itoa(int(request.GetPort()))) {
-		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, gerrors.ErrInvalidHost), nil
+	if err := x.validateRemoteHost(request.GetHost(), request.GetPort()); err != nil {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
 	}
+
+	// Enforce the client-propagated deadline within this handler's scope.
+	ctx, cancel := deadlineContext(ctx)
+	defer cancel()
 
 	actorName := request.GetName()
 	if !isSystemName(actorName) && x.clusterEnabled.Load() {
@@ -206,38 +227,54 @@ func (x *actorSystem) remoteAskHandler(ctx context.Context, conn inet.Connection
 		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
 	}
 
+	// Enforce the client-propagated deadline within this handler's scope.
+	ctx, cancel := deadlineContext(ctx)
+	defer cancel()
+
 	responses := make([][]byte, 0, len(request.GetRemoteMessages()))
 	for _, message := range request.GetRemoteMessages() {
 		if message == nil {
 			return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, errors.New("remote message cannot be nil")), nil
 		}
 		receiver := message.GetReceiver()
-		addr, err := address.Parse(receiver)
-		if err != nil {
-			return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
-		}
 
-		remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
-		if remoteAddr != net.JoinHostPort(addr.Host(), strconv.Itoa(addr.Port())) {
-			return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, gerrors.ErrInvalidHost), nil
-		}
-
-		node, exist := x.actors.node(addr.String())
+		// Look up the local actor by the raw wire string first: the receiver
+		// is canonical (produced by Address.String() on the sender side), so
+		// the happy path needs no parse and no self-address rebuild. Parsing
+		// and host validation only run on the miss path to classify the
+		// failure.
+		node, exist := x.actors.node(receiver)
 		if !exist {
-			err := gerrors.NewErrAddressNotFound(addr.String())
-			logger.Errorf("remote ask: address=%s not found: %v (hint: verify actor exists on target node)", addr.String(), err)
-			return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
+			addr, err := address.Parse(receiver)
+			if err != nil {
+				return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
+			}
+
+			if err := x.validateRemoteHost(addr.Host(), int32(addr.Port())); err != nil {
+				return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
+			}
+
+			// A parseable receiver may spell the same actor differently from
+			// Address.String() (e.g. zero-padded port), so retry with the
+			// canonical form before reporting the actor missing.
+			node, exist = x.actors.node(addr.String())
+			if !exist {
+				notFound := gerrors.NewErrAddressNotFound(receiver)
+				logger.Errorf("remote ask: address=%s not found: %v (hint: verify actor exists on target node)", receiver, notFound)
+				return toProtoError(internalpb.Code_CODE_NOT_FOUND, notFound), nil
+			}
 		}
 
 		pid := node.value()
 		if pid == nil {
-			err := gerrors.NewErrAddressNotFound(addr.String())
-			logger.Errorf("remote ask: address=%s not found (actor was removed): %v", addr.String(), err)
+			err := gerrors.NewErrAddressNotFound(receiver)
+			logger.Errorf("remote ask: address=%s not found (actor was removed): %v", receiver, err)
 			return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 		}
+
 		if !pid.IsRunning() {
 			err := gerrors.NewErrRemoteSendFailure(gerrors.ErrDead)
-			logger.Errorf("remote ask: actor=%s not running: %v (hint: actor may have stopped, retry or check target)", addr.String(), err)
+			logger.Errorf("remote ask: actor=%s not running: %v (hint: actor may have stopped, retry or check target)", receiver, err)
 			return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
 		}
 
@@ -319,9 +356,8 @@ func (x *actorSystem) remoteReSpawnHandler(ctx context.Context, conn inet.Connec
 		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
 	}
 
-	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
-	if remoteAddr != net.JoinHostPort(request.GetHost(), strconv.Itoa(int(request.GetPort()))) {
-		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, gerrors.ErrInvalidHost), nil
+	if err := x.validateRemoteHost(request.GetHost(), request.GetPort()); err != nil {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
 	}
 
 	// Make sure we don't interfere with system actors.
@@ -344,6 +380,10 @@ func (x *actorSystem) remoteReSpawnHandler(ctx context.Context, conn inet.Connec
 		logger.Errorf("remote respawn: address=%s not found (actor was removed): %v", actorAddress.String(), err)
 		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 	}
+	// Enforce the client-propagated deadline within this handler's scope.
+	ctx, cancel := deadlineContext(ctx)
+	defer cancel()
+
 	if err := pid.Restart(ctx); err != nil {
 		err := fmt.Errorf("failed to restart actor=%s: %w", actorAddress.String(), err)
 		logger.Errorf("remote respawn failed: %v", err)
@@ -374,9 +414,8 @@ func (x *actorSystem) remoteStopHandler(ctx context.Context, conn inet.Connectio
 		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
 	}
 
-	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
-	if remoteAddr != net.JoinHostPort(request.GetHost(), strconv.Itoa(int(request.GetPort()))) {
-		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, gerrors.ErrInvalidHost), nil
+	if err := x.validateRemoteHost(request.GetHost(), request.GetPort()); err != nil {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
 	}
 
 	// Make sure we don't interfere with system actors.
@@ -399,6 +438,11 @@ func (x *actorSystem) remoteStopHandler(ctx context.Context, conn inet.Connectio
 		logger.Errorf("remote stop: address=%s not found (actor was removed): %v", actorAddress.String(), err)
 		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 	}
+
+	// Enforce the client-propagated deadline within this handler's scope.
+	ctx, cancel := deadlineContext(ctx)
+	defer cancel()
+
 	if err := pid.Shutdown(ctx); err != nil {
 		err := fmt.Errorf("failed to stop actor=%s: %w", actorAddress.String(), err)
 		logger.Errorf("remote stop failed: %v", err)
@@ -410,7 +454,9 @@ func (x *actorSystem) remoteStopHandler(ctx context.Context, conn inet.Connectio
 
 // remoteWatchHandler handles RemoteWatch requests over the proto TCP transport.
 // It registers a remote watcher against a local actor so the watcher is notified
-// when the actor terminates.
+// when the actor terminates. It does not apply deadlineContext: watcher
+// registration is purely in-memory, so there is no work a deadline could
+// cancel.
 func (x *actorSystem) remoteWatchHandler(_ context.Context, _ inet.Connection, req proto.Message) (proto.Message, error) {
 	request, ok := req.(*internalpb.RemoteWatchRequest)
 	if !ok {
@@ -423,9 +469,8 @@ func (x *actorSystem) remoteWatchHandler(_ context.Context, _ inet.Connection, r
 		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrRemotingDisabled), nil
 	}
 
-	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
-	if remoteAddr != net.JoinHostPort(request.GetHost(), strconv.Itoa(int(request.GetPort()))) {
-		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, gerrors.ErrInvalidHost), nil
+	if err := x.validateRemoteHost(request.GetHost(), request.GetPort()); err != nil {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
 	}
 
 	if isSystemName(request.GetName()) {
@@ -458,6 +503,8 @@ func (x *actorSystem) remoteWatchHandler(_ context.Context, _ inet.Connection, r
 
 // remoteUnWatchHandler handles RemoteUnWatch requests over the proto TCP transport.
 // It removes a remote watcher previously registered against a local actor.
+// It does not apply deadlineContext: watcher removal is purely in-memory, so
+// there is no work a deadline could cancel.
 func (x *actorSystem) remoteUnWatchHandler(_ context.Context, _ inet.Connection, req proto.Message) (proto.Message, error) {
 	request, ok := req.(*internalpb.RemoteUnWatchRequest)
 	if !ok {
@@ -470,9 +517,8 @@ func (x *actorSystem) remoteUnWatchHandler(_ context.Context, _ inet.Connection,
 		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrRemotingDisabled), nil
 	}
 
-	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
-	if remoteAddr != net.JoinHostPort(request.GetHost(), strconv.Itoa(int(request.GetPort()))) {
-		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, gerrors.ErrInvalidHost), nil
+	if err := x.validateRemoteHost(request.GetHost(), request.GetPort()); err != nil {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
 	}
 
 	if isSystemName(request.GetName()) {
@@ -522,15 +568,18 @@ func (x *actorSystem) remoteSpawnHandler(ctx context.Context, conn inet.Connecti
 		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
 	}
 
-	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
-	if remoteAddr != net.JoinHostPort(request.GetHost(), strconv.Itoa(int(request.GetPort()))) {
-		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, gerrors.ErrInvalidHost), nil
+	if err := x.validateRemoteHost(request.GetHost(), request.GetPort()); err != nil {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
 	}
 
 	// Make sure we don't interfere with system actors.
 	if isSystemName(request.GetActorName()) {
 		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.NewErrActorNotFound(request.GetActorName())), nil
 	}
+
+	// Enforce the client-propagated deadline within this handler's scope.
+	ctx, cancel := deadlineContext(ctx)
+	defer cancel()
 
 	actor, err := x.reflection.instantiateActor(request.GetActorType())
 	if err != nil {
@@ -707,6 +756,10 @@ func (x *actorSystem) remoteSpawnChildHandler(ctx context.Context, conn inet.Con
 		}
 		opts = append(opts, WithDependencies(dependencies...))
 	}
+
+	// Enforce the client-propagated deadline within this handler's scope.
+	ctx, cancel := deadlineContext(ctx)
+	defer cancel()
 
 	cid, err := pid.SpawnChild(ctx, childName, pid.Actor(), opts...)
 	if err != nil {
@@ -1025,6 +1078,10 @@ func (x *actorSystem) remoteMetricHandler(ctx context.Context, conn inet.Connect
 		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 	}
 
+	// Enforce the client-propagated deadline within this handler's scope.
+	ctx, cancel := deadlineContext(ctx)
+	defer cancel()
+
 	metric := pid.Metric(ctx)
 	if metric == nil {
 		return new(internalpb.RemoteMetricResponse), nil
@@ -1124,7 +1181,9 @@ func (x *actorSystem) remoteStashSizeHandler(ctx context.Context, conn inet.Conn
 }
 
 // remoteReinstateHandler handles RemoteReinstate requests over the proto TCP transport.
-// It reinstates a previously stopped actor on the remote machine.
+// It reinstates a previously stopped actor on the remote machine. It does not
+// apply deadlineContext: reinstatement is a synchronous in-memory state flip
+// (doReinstate), so there is no work a deadline could cancel.
 func (x *actorSystem) remoteReinstateHandler(ctx context.Context, conn inet.Connection, req proto.Message) (proto.Message, error) {
 	request, ok := req.(*internalpb.RemoteReinstateRequest)
 	if !ok {
@@ -1137,9 +1196,8 @@ func (x *actorSystem) remoteReinstateHandler(ctx context.Context, conn inet.Conn
 		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrRemotingDisabled), nil
 	}
 
-	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
-	if remoteAddr != net.JoinHostPort(request.GetHost(), strconv.Itoa(int(request.GetPort()))) {
-		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, gerrors.ErrInvalidHost), nil
+	if err := x.validateRemoteHost(request.GetHost(), request.GetPort()); err != nil {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
 	}
 
 	// Make sure we don't interfere with system actors.
@@ -1191,6 +1249,10 @@ func (x *actorSystem) remoteAskGrainHandler(ctx context.Context, conn inet.Conne
 	if err != nil {
 		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
 	}
+
+	// Enforce the client-propagated deadline within this handler's scope.
+	ctx, cancel := deadlineContext(ctx)
+	defer cancel()
 
 	serializer := x.remoting.Serializer(nil)
 	message, err := serializer.Deserialize(request.GetMessage())
@@ -1310,6 +1372,10 @@ func (x *actorSystem) remoteActivateGrainHandler(ctx context.Context, conn inet.
 		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
 	}
 
+	// Enforce the client-propagated deadline within this handler's scope.
+	ctx, cancel := deadlineContext(ctx)
+	defer cancel()
+
 	if err := x.recreateGrain(ctx, grain); err != nil {
 		logger.Errorf("failed to recreate grain=%s on host=%s port=%d: %v", grain.GetGrainId().GetValue(), host, port, err)
 		return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
@@ -1360,14 +1426,13 @@ func (x *actorSystem) getNodeMetricHandler(_ context.Context, _ inet.Connection,
 		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrClusterDisabled), nil
 	}
 
-	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
-	if remoteAddr != request.GetNodeAddress() {
+	if x.remoteHostPort != request.GetNodeAddress() {
 		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, gerrors.ErrInvalidHost), nil
 	}
 
 	load := x.actorsCounter.Load() + uint64(x.grains.Len())
 	return &internalpb.GetNodeMetricResponse{
-		NodeAddress: remoteAddr,
+		NodeAddress: x.remoteHostPort,
 		Load:        load,
 	}, nil
 }
@@ -1384,8 +1449,7 @@ func (x *actorSystem) getKindsHandler(_ context.Context, _ inet.Connection, req 
 		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrClusterDisabled), nil
 	}
 
-	remoteAddr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
-	if remoteAddr != request.GetNodeAddress() {
+	if x.remoteHostPort != request.GetNodeAddress() {
 		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, gerrors.ErrInvalidHost), nil
 	}
 
@@ -1398,10 +1462,12 @@ func (x *actorSystem) getKindsHandler(_ context.Context, _ inet.Connection, req 
 }
 
 // validateRemoteHost checks if the incoming request is for the correct host/port.
-// Returns an error if the request is not for this actor system's configured address.
+// Returns an error if the request is not for this actor system's configured
+// address. Both sides of the comparison use the net.JoinHostPort format
+// (x.remoteHostPort is precomputed by startRemoteServer), so IPv6 hosts
+// compare consistently.
 func (x *actorSystem) validateRemoteHost(host string, port int32) error {
-	addr := fmt.Sprintf("%s:%d", x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
-	if addr != net.JoinHostPort(host, strconv.Itoa(int(port))) {
+	if x.remoteHostPort != net.JoinHostPort(host, strconv.Itoa(int(port))) {
 		return gerrors.ErrInvalidHost
 	}
 	return nil
@@ -1459,8 +1525,10 @@ func (x *actorSystem) startRemoteServer(ctx context.Context) error {
 
 	x.logger.Info("Starting remote server...")
 
-	// Build the server address from the remote config.
+	// Build the server address from the remote config and cache it for
+	// per-message host validation in the request handlers.
 	hostPort := net.JoinHostPort(x.remoteConfig.BindAddr(), strconv.Itoa(x.remoteConfig.BindPort()))
+	x.remoteHostPort = hostPort
 
 	// Create proto server options based on the remote config.
 	serverOpts := x.protoServerOptions()
@@ -1685,10 +1753,24 @@ func (x *actorSystem) newRemoteSenderPID(addrStr string) *PID {
 		return x.NoSender()
 	}
 
+	// Fast path: the sender address was parsed by an earlier message.
+	// Addresses are immutable, so a cached entry never goes stale. A fresh
+	// PID handle is still materialized per message; only the parse is
+	// shared.
+	if addr, ok := x.remoteSenderAddresses.Get(addrStr); ok {
+		return newRemotePID(addr, x.remoting)
+	}
+
 	addr, err := address.Parse(addrStr)
 	if err != nil {
 		return x.NoSender()
 	}
+
+	if x.remoteSenderAddresses.Len() >= remoteSenderAddressCacheCap {
+		x.remoteSenderAddresses.Reset()
+	}
+
+	x.remoteSenderAddresses.Set(addrStr, addr)
 
 	return newRemotePID(addr, x.remoting)
 }

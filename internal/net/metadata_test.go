@@ -192,15 +192,15 @@ func TestMetadata_Marshal(t *testing.T) {
 
 	t.Run("with deadline", func(t *testing.T) {
 		md := NewMetadata()
-		deadline := time.Unix(1700000000, 123456789)
-		md.SetDeadline(deadline)
+		md.SetDeadline(time.Now().Add(time.Minute))
 		data := md.MarshalBinary()
 
 		require.GreaterOrEqual(t, len(data), 10)
 
-		// Extract deadline from end of data.
-		deadlineNano := int64(binary.BigEndian.Uint64(data[len(data)-8:]))
-		require.Equal(t, deadline.UnixNano(), deadlineNano)
+		// The wire carries the remaining time, not the absolute deadline.
+		remaining := int64(binary.BigEndian.Uint64(data[len(data)-8:]))
+		require.Greater(t, remaining, int64(0))
+		require.LessOrEqual(t, remaining, int64(time.Minute))
 	})
 
 	t.Run("large number of headers", func(t *testing.T) {
@@ -262,9 +262,9 @@ func TestMetadata_Unmarshal(t *testing.T) {
 		require.Equal(t, "value3", v3)
 	})
 
-	t.Run("deadline round-trip", func(t *testing.T) {
+	t.Run("deadline round-trip rebases on the local clock", func(t *testing.T) {
 		md1 := NewMetadata()
-		deadline := time.Unix(1700000000, 555000000)
+		deadline := time.Now().Add(time.Minute)
 		md1.SetDeadline(deadline)
 		data := md1.MarshalBinary()
 
@@ -274,14 +274,14 @@ func TestMetadata_Unmarshal(t *testing.T) {
 
 		dl, ok := md2.GetDeadline()
 		require.True(t, ok)
-		require.Equal(t, deadline.UnixNano(), dl.UnixNano())
+		require.WithinDuration(t, deadline, dl, time.Second)
 	})
 
 	t.Run("full round-trip", func(t *testing.T) {
 		md1 := NewMetadata()
 		md1.Set("trace-id", "abc123")
 		md1.Set("span-id", "xyz789")
-		deadline := time.Unix(1800000000, 999999999)
+		deadline := time.Now().Add(time.Minute)
 		md1.SetDeadline(deadline)
 		data := md1.MarshalBinary()
 
@@ -299,7 +299,19 @@ func TestMetadata_Unmarshal(t *testing.T) {
 
 		dl, ok := md2.GetDeadline()
 		require.True(t, ok)
-		require.Equal(t, deadline.UnixNano(), dl.UnixNano())
+		require.WithinDuration(t, deadline, dl, time.Second)
+	})
+
+	t.Run("expired deadline round-trips as expired", func(t *testing.T) {
+		md1 := NewMetadata()
+		md1.SetDeadline(time.Now().Add(-time.Minute))
+
+		md2 := NewMetadata()
+		require.NoError(t, md2.UnmarshalBinary(md1.MarshalBinary()))
+
+		dl, ok := md2.GetDeadline()
+		require.True(t, ok)
+		require.True(t, dl.Before(time.Now()), "deadline expired on the sender must stay expired on the receiver")
 	})
 
 	t.Run("zero-copy string references", func(t *testing.T) {
@@ -478,22 +490,27 @@ func TestMetadata_ToContext(t *testing.T) {
 		require.Equal(t, "value2", v2)
 	})
 
-	t.Run("metadata with deadline to context", func(t *testing.T) {
+	t.Run("metadata with deadline does not create a deadline context", func(t *testing.T) {
 		md := NewMetadata()
 		deadline := time.Now().Add(5 * time.Second)
 		md.SetDeadline(deadline)
 
 		ctx := md.ToContext(context.Background())
 
-		// Verify context has deadline.
-		ctxDeadline, ok := ctx.Deadline()
-		require.True(t, ok)
-		require.True(t, deadline.Equal(ctxDeadline))
+		// ToContext attaches the metadata as a value only; deadline
+		// enforcement is opt-in via DeadlineContext so no timer leaks on
+		// the generic transport path.
+		_, ok := ctx.Deadline()
+		require.False(t, ok)
 
-		// Verify metadata is attached.
+		// Verify metadata is attached and still carries the deadline.
 		extracted, ok := FromContext(ctx)
 		require.True(t, ok)
 		require.NotNil(t, extracted)
+
+		mdDeadline, hasDeadline := extracted.GetDeadline()
+		require.True(t, hasDeadline)
+		require.True(t, deadline.Equal(mdDeadline))
 	})
 
 	t.Run("metadata without deadline to context", func(t *testing.T) {
@@ -512,7 +529,7 @@ func TestMetadata_ToContext(t *testing.T) {
 		require.NotNil(t, extracted)
 	})
 
-	t.Run("parent context with existing deadline", func(t *testing.T) {
+	t.Run("parent context deadline is preserved untouched", func(t *testing.T) {
 		parentDeadline := time.Now().Add(10 * time.Second)
 		parentCtx, cancel := context.WithDeadline(context.Background(), parentDeadline)
 		defer cancel()
@@ -523,10 +540,11 @@ func TestMetadata_ToContext(t *testing.T) {
 
 		ctx := md.ToContext(parentCtx)
 
-		// The metadata deadline should take precedence (it's sooner).
+		// ToContext no longer overlays the metadata deadline; the parent
+		// deadline remains the context deadline.
 		ctxDeadline, ok := ctx.Deadline()
 		require.True(t, ok)
-		require.True(t, mdDeadline.Equal(ctxDeadline))
+		require.True(t, parentDeadline.Equal(ctxDeadline))
 	})
 
 	t.Run("parent context with values", func(t *testing.T) {
@@ -548,6 +566,51 @@ func TestMetadata_ToContext(t *testing.T) {
 		v, ok := extracted.Get("child")
 		require.True(t, ok)
 		require.Equal(t, "metadata", v)
+	})
+}
+
+func TestMetadata_DeadlineContext(t *testing.T) {
+	t.Run("deadline set bounds the context and cancel releases it", func(t *testing.T) {
+		md := NewMetadata()
+		deadline := time.Now().Add(5 * time.Second)
+		md.SetDeadline(deadline)
+
+		ctx, cancel := md.DeadlineContext(context.Background())
+
+		ctxDeadline, ok := ctx.Deadline()
+		require.True(t, ok)
+		require.True(t, deadline.Equal(ctxDeadline))
+
+		cancel()
+		require.ErrorIs(t, ctx.Err(), context.Canceled)
+	})
+
+	t.Run("earlier metadata deadline wins over parent", func(t *testing.T) {
+		parentDeadline := time.Now().Add(10 * time.Second)
+		parentCtx, parentCancel := context.WithDeadline(context.Background(), parentDeadline)
+		defer parentCancel()
+
+		md := NewMetadata()
+		mdDeadline := time.Now().Add(2 * time.Second)
+		md.SetDeadline(mdDeadline)
+
+		ctx, cancel := md.DeadlineContext(parentCtx)
+		defer cancel()
+
+		ctxDeadline, ok := ctx.Deadline()
+		require.True(t, ok)
+		require.True(t, mdDeadline.Equal(ctxDeadline))
+	})
+
+	t.Run("no deadline returns parent with no-op cancel", func(t *testing.T) {
+		md := NewMetadata()
+		parent := context.Background()
+
+		ctx, cancel := md.DeadlineContext(parent)
+		require.Equal(t, parent, ctx)
+
+		cancel()
+		require.NoError(t, ctx.Err())
 	})
 }
 
@@ -701,7 +764,7 @@ func TestMetadata_EdgeCases(t *testing.T) {
 
 		dl, ok := md2.GetDeadline()
 		require.True(t, ok)
-		require.Equal(t, deadline.UnixNano(), dl.UnixNano())
+		require.WithinDuration(t, deadline, dl, time.Second)
 	})
 
 	t.Run("reuse metadata instance", func(t *testing.T) {

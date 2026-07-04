@@ -29,7 +29,8 @@ import (
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
-	"google.golang.org/protobuf/reflect/protoregistry"
+
+	inet "github.com/tochemey/goakt/v4/internal/net"
 )
 
 // ProtoSerializer errors.
@@ -127,7 +128,11 @@ func (x *ProtoSerializer) Serialize(message any) ([]byte, error) {
 		return nil, ErrUnknownMessageType
 	}
 
-	protoSize := proto.Size(msg)
+	// UseCachedSize lets MarshalAppend reuse the size computed here instead
+	// of traversing the message a second time.
+	opts := proto.MarshalOptions{UseCachedSize: true}
+
+	protoSize := opts.Size(msg)
 	totalLen := 4 + 4 + nameLen + protoSize
 
 	// Single allocation: exact-size output frame.
@@ -144,7 +149,7 @@ func (x *ProtoSerializer) Serialize(message any) ([]byte, error) {
 	out = append(out, messageName...)
 
 	// Marshal the proto payload directly into the tail of out.
-	out, err := proto.MarshalOptions{}.MarshalAppend(out, msg)
+	out, err := opts.MarshalAppend(out, msg)
 	if err != nil {
 		return nil, errors.Join(ErrSerializeFailed, err)
 	}
@@ -185,7 +190,7 @@ func (x *ProtoSerializer) Deserialize(data []byte) (any, error) {
 	// the key and does not hold a reference to our slice after the call.
 	typeName := protoreflect.FullName(unsafe.String(unsafe.SliceData(data[8:8+nameLen]), nameLen))
 
-	msgType, err := protoregistry.GlobalTypes.FindMessageByName(typeName)
+	msgType, err := inet.FindMessageType(typeName)
 	if err != nil {
 		return nil, errors.Join(ErrUnknownMessageType, err)
 	}

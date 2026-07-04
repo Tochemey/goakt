@@ -37,6 +37,12 @@ import (
 // ErrRemoteSendFailure so public surface stays stable.
 var errCoalescerClosed = errors.New("remote send: coalescer is closed")
 
+// coalescerFlushTimeout bounds each batched flush RPC so a wedged peer fails
+// the flush instead of stalling the writer goroutine indefinitely. The
+// context and timer it requires are per flush, amortized across the whole
+// batch.
+const coalescerFlushTimeout = 5 * time.Second
+
 // CoalescingErrorHandler is invoked when a batched flush fails. It receives
 // the destination endpoint ("host:port"), the messages that were in the failed
 // batch, and the underlying error. Handlers run inline on the per-destination
@@ -174,7 +180,7 @@ func (c *coalescer) run() {
 		req := &internalpb.RemoteTellRequest{RemoteMessages: batch}
 		// Per-message propagation metadata is already carried inside each
 		// RemoteMessage, so the batch context only needs a transport deadline.
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), coalescerFlushTimeout)
 		resp, err := c.netClient.SendProto(ctx, req)
 		cancel()
 		if err == nil {

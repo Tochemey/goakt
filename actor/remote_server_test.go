@@ -55,14 +55,16 @@ import (
 // environment that mirrors production wiring.
 func newRemoteServerTestSystem(host string, port int) *actorSystem {
 	sys := &actorSystem{
-		actors:        newTree(),
-		logger:        log.DiscardLogger,
-		remoteConfig:  remote.NewConfig(host, port),
-		name:          "testSys",
-		grains:        xsync.NewMap[string, *grainPID](),
-		askTimeout:    DefaultAskTimeout,
-		remoting:      remoteclient.NewClient(),
-		remoteWatches: newRemoteWatchRegistry(),
+		actors:                newTree(),
+		logger:                log.DiscardLogger,
+		remoteConfig:          remote.NewConfig(host, port),
+		name:                  "testSys",
+		grains:                xsync.NewMap[string, *grainPID](),
+		askTimeout:            DefaultAskTimeout,
+		remoting:              remoteclient.NewClient(),
+		remoteWatches:         newRemoteWatchRegistry(),
+		remoteHostPort:        fmt.Sprintf("%s:%d", host, port),
+		remoteSenderAddresses: xsync.NewMap[string, *address.Address](),
 	}
 	sys.remotingEnabled.Store(true)
 	return sys
@@ -188,6 +190,50 @@ func TestExtractContextWithPropagator(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, got)
 		assert.Equal(t, "abc123", got.Value(traceKey("trace")))
+	})
+}
+
+func TestDeadlineContext(t *testing.T) {
+	t.Run("no metadata returns parent unchanged", func(t *testing.T) {
+		ctx := context.Background()
+		got, cancel := deadlineContext(ctx)
+		defer cancel()
+
+		assert.Equal(t, ctx, got)
+	})
+
+	t.Run("metadata without deadline returns parent unchanged", func(t *testing.T) {
+		ctx := inet.ContextWithMetadata(context.Background(), inet.NewMetadata())
+		got, cancel := deadlineContext(ctx)
+		defer cancel()
+
+		assert.Equal(t, ctx, got)
+
+		_, ok := got.Deadline()
+		assert.False(t, ok)
+	})
+
+	t.Run("metadata deadline bounds the returned context", func(t *testing.T) {
+		deadline := time.Now().Add(time.Minute)
+		md := inet.NewMetadata()
+		md.SetDeadline(deadline)
+
+		got, cancel := deadlineContext(inet.ContextWithMetadata(context.Background(), md))
+		defer cancel()
+
+		d, ok := got.Deadline()
+		require.True(t, ok)
+		assert.WithinDuration(t, deadline, d, time.Second)
+	})
+
+	t.Run("expired metadata deadline yields an already-done context", func(t *testing.T) {
+		md := inet.NewMetadata()
+		md.SetDeadline(time.Now().Add(-time.Second))
+
+		got, cancel := deadlineContext(inet.ContextWithMetadata(context.Background(), md))
+		defer cancel()
+
+		require.ErrorIs(t, got.Err(), context.DeadlineExceeded)
 	})
 }
 
@@ -327,6 +373,61 @@ func TestRemoteLookupHandler(t *testing.T) {
 	})
 }
 
+func TestNewRemoteSenderPID(t *testing.T) {
+	const host = "127.0.0.1"
+	const port = 9000
+
+	t.Run("empty sender returns NoSender", func(t *testing.T) {
+		sys := newRemoteServerTestSystem(host, port)
+		sys.noSender = MockPID(sys, "nosender", 0)
+
+		pid := sys.newRemoteSenderPID("")
+		assert.Equal(t, sys.NoSender(), pid)
+	})
+
+	t.Run("malformed sender returns NoSender", func(t *testing.T) {
+		sys := newRemoteServerTestSystem(host, port)
+		sys.noSender = MockPID(sys, "nosender", 0)
+
+		pid := sys.newRemoteSenderPID("not-an-address")
+		assert.Equal(t, sys.NoSender(), pid)
+	})
+
+	t.Run("valid sender is parsed once and cached", func(t *testing.T) {
+		sys := newRemoteServerTestSystem(host, port)
+		sender := address.New("sender", "testSys", host, port).String()
+
+		first := sys.newRemoteSenderPID(sender)
+		require.NotNil(t, first)
+		require.True(t, first.IsRemote())
+		assert.Equal(t, sender, first.getAddress().String())
+		assert.Equal(t, 1, sys.remoteSenderAddresses.Len())
+
+		second := sys.newRemoteSenderPID(sender)
+		require.NotNil(t, second)
+
+		// The cached parse is shared; the PID handles stay per-message.
+		assert.Same(t, first.getAddress(), second.getAddress())
+		assert.NotSame(t, first, second)
+	})
+
+	t.Run("cache flushes wholesale at capacity", func(t *testing.T) {
+		sys := newRemoteServerTestSystem(host, port)
+
+		for i := range remoteSenderAddressCacheCap {
+			addr := address.New(fmt.Sprintf("filler-%d", i), "testSys", host, port)
+			sys.remoteSenderAddresses.Set(addr.String(), addr)
+		}
+		require.Equal(t, remoteSenderAddressCacheCap, sys.remoteSenderAddresses.Len())
+
+		sender := address.New("fresh-sender", "testSys", host, port).String()
+		pid := sys.newRemoteSenderPID(sender)
+		require.NotNil(t, pid)
+
+		assert.Equal(t, 1, sys.remoteSenderAddresses.Len())
+	})
+}
+
 func TestRemoteAskHandler(t *testing.T) {
 	const host = "127.0.0.1"
 	const port = 9001
@@ -410,6 +511,22 @@ func TestRemoteAskHandler(t *testing.T) {
 		resp, err := sys.remoteAskHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
+	})
+
+	t.Run("non-canonical receiver resolves via canonical retry", func(t *testing.T) {
+		sys := newRemoteServerTestSystemWithStoppedActor(t, host, port, "actor1")
+
+		// The zero-padded port makes the raw wire string miss the tree while
+		// the parsed canonical form matches the registered actor. Reaching the
+		// not-running branch (CODE_INTERNAL_ERROR) proves the retry resolved
+		// the actor; a raw-only lookup would return CODE_NOT_FOUND instead.
+		addr := fmt.Sprintf("goakt://testSys@%s:0%d/actor1", host, port)
+		req := &internalpb.RemoteAskRequest{
+			RemoteMessages: []*internalpb.RemoteMessage{{Receiver: addr}},
+		}
+		resp, err := sys.remoteAskHandler(ctx, nullConn, req)
+		require.NoError(t, err)
+		requireProtoError(t, resp, internalpb.Code_CODE_INTERNAL_ERROR)
 	})
 }
 

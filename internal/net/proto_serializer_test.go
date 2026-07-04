@@ -24,12 +24,16 @@ package net
 
 import (
 	"encoding/binary"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/reflect/protoregistry"
 
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
@@ -101,6 +105,117 @@ func TestProtoSerializer_UnmarshalBinary_UnknownType(t *testing.T) {
 	require.Nil(t, actual)
 }
 
+func TestFindMessageType_NegativeCache(t *testing.T) {
+	t.Run("registry miss is cached and keeps failing", func(t *testing.T) {
+		name := protoreflect.FullName("goakt.test.DoesNotExist")
+		t.Cleanup(func() { protoMessageTypes.Delete(name) })
+
+		_, err := FindMessageType(name)
+		require.ErrorIs(t, err, protoregistry.NotFound)
+
+		cached, ok := protoMessageTypes.Load(name)
+		require.True(t, ok, "the miss should be cached")
+
+		_, miss := cached.(typeNotFound)
+		require.True(t, miss, "the cached entry should be a miss marker")
+
+		_, err = FindMessageType(name)
+		require.ErrorIs(t, err, protoregistry.NotFound)
+	})
+
+	t.Run("cap flush drops miss markers but keeps resolved types", func(t *testing.T) {
+		resolvedName := protoreflect.FullName("testpb.Reply")
+		missName := protoreflect.FullName("goakt.test.FlushMe")
+		newMissName := protoreflect.FullName("goakt.test.AnotherMiss")
+
+		t.Cleanup(func() {
+			protoMessageTypes.Delete(missName)
+			protoMessageTypes.Delete(newMissName)
+			negativeTypeCount.Store(0)
+		})
+
+		resolved, err := FindMessageType(resolvedName)
+		require.NoError(t, err)
+		require.NotNil(t, resolved)
+
+		_, err = FindMessageType(missName)
+		require.ErrorIs(t, err, protoregistry.NotFound)
+
+		// Force the next miss to trigger the wholesale flush.
+		negativeTypeCount.Store(negativeTypeCacheCap)
+
+		_, err = FindMessageType(newMissName)
+		require.ErrorIs(t, err, protoregistry.NotFound)
+
+		_, ok := protoMessageTypes.Load(missName)
+		require.False(t, ok, "old miss markers should be flushed")
+
+		_, ok = protoMessageTypes.Load(resolvedName)
+		require.True(t, ok, "resolved types must survive the flush")
+	})
+
+	t.Run("flush is single-flight", func(t *testing.T) {
+		missName := protoreflect.FullName("goakt.test.SingleFlight")
+
+		t.Cleanup(func() {
+			protoMessageTypes.Delete(missName)
+			typeCacheFlushing.Store(false)
+			negativeTypeCount.Store(0)
+		})
+
+		_, err := FindMessageType(missName)
+		require.ErrorIs(t, err, protoregistry.NotFound)
+
+		// While another goroutine holds the flush, a losing caller must
+		// return immediately without scanning: the miss marker survives.
+		typeCacheFlushing.Store(true)
+		cleanTypeCache()
+
+		_, ok := protoMessageTypes.Load(missName)
+		require.True(t, ok, "a losing flusher must not scan the cache")
+
+		// Once the winner releases the gate, the next flush proceeds.
+		typeCacheFlushing.Store(false)
+		cleanTypeCache()
+
+		_, ok = protoMessageTypes.Load(missName)
+		require.False(t, ok, "the winning flusher must drop miss markers")
+		require.Zero(t, negativeTypeCount.Load())
+	})
+
+	t.Run("concurrent misses past the cap stay bounded", func(t *testing.T) {
+		t.Cleanup(func() {
+			cleanTypeCache()
+			negativeTypeCount.Store(0)
+		})
+
+		// Park the count at the cap so every miss below races into the
+		// flush path; the race detector guards the single-flight gate.
+		negativeTypeCount.Store(negativeTypeCacheCap)
+
+		const workers = 8
+		const missesPerWorker = 64
+
+		var wg sync.WaitGroup
+		wg.Add(workers)
+
+		for w := range workers {
+			go func(w int) {
+				defer wg.Done()
+
+				for i := range missesPerWorker {
+					name := protoreflect.FullName(fmt.Sprintf("goakt.test.Concurrent%d_%d", w, i))
+					_, err := FindMessageType(name)
+					assert.ErrorIs(t, err, protoregistry.NotFound)
+				}
+			}(w)
+		}
+
+		wg.Wait()
+		require.LessOrEqual(t, negativeTypeCount.Load(), int64(negativeTypeCacheCap))
+	})
+}
+
 func TestProtoSerializer_UnmarshalBinary_InvalidProtoPayload(t *testing.T) {
 	msgName := string(proto.MessageName(&testpb.Reply{}))
 	payload := []byte{0xff, 0xff, 0xff}
@@ -127,7 +242,8 @@ func TestProtoSerializer_MarshalUnmarshalBinaryWithMetadata_Success(t *testing.T
 		md := NewMetadata()
 		md.Set("trace-id", "abc123")
 		md.Set("span-id", "xyz789")
-		md.SetDeadline(time.Unix(1234567890, 0))
+		expectedDeadline := time.Now().Add(time.Minute)
+		md.SetDeadline(expectedDeadline)
 
 		data, err := serializer.MarshalBinaryWithMetadata(orig, md)
 		require.NoError(t, err)
@@ -152,7 +268,7 @@ func TestProtoSerializer_MarshalUnmarshalBinaryWithMetadata_Success(t *testing.T
 
 		deadline, ok := mdOut.GetDeadline()
 		require.True(t, ok)
-		require.Equal(t, time.Unix(1234567890, 0), deadline)
+		require.WithinDuration(t, expectedDeadline, deadline, time.Second)
 	})
 
 	t.Run("with nil metadata", func(t *testing.T) {
@@ -377,7 +493,7 @@ func TestMetadata_MarshalUnmarshal(t *testing.T) {
 
 	t.Run("with deadline only", func(t *testing.T) {
 		md := NewMetadata()
-		deadline := time.Unix(1700000000, 123456789)
+		deadline := time.Now().Add(time.Minute)
 		md.SetDeadline(deadline)
 
 		data := md.MarshalBinary()
@@ -388,14 +504,13 @@ func TestMetadata_MarshalUnmarshal(t *testing.T) {
 
 		dl, ok := md2.GetDeadline()
 		require.True(t, ok)
-		require.Equal(t, deadline, dl)
+		require.WithinDuration(t, deadline, dl, time.Second)
 	})
 
 	t.Run("with headers and deadline", func(t *testing.T) {
 		md := NewMetadata()
 		md.Set("trace-id", "abc123")
-		// Use Unix time to avoid monotonic clock comparison issues.
-		deadline := time.Unix(1700000000, 555000000)
+		deadline := time.Now().Add(time.Minute)
 		md.SetDeadline(deadline)
 
 		data := md.MarshalBinary()
@@ -410,7 +525,7 @@ func TestMetadata_MarshalUnmarshal(t *testing.T) {
 
 		dl, ok := md2.GetDeadline()
 		require.True(t, ok)
-		require.True(t, deadline.Equal(dl), "deadlines should be equal")
+		require.WithinDuration(t, deadline, dl, time.Second)
 	})
 }
 

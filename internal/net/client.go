@@ -39,6 +39,15 @@ import (
 // This can be overridden per-client using [WithMaxFrameSize] or per-server using [WithProtoServerMaxFrameSize].
 const defaultMaxFrameSize uint32 = 16 << 20
 
+// DefaultMaxIdleConns is the default number of idle connections retained in
+// the pool per endpoint. The pool bounds retention, not concurrency: under
+// fan-out, every connection beyond this count is dialed fresh and closed on
+// return, so the default is sized to cover realistic caller concurrency and
+// avoid dial/close churn. Idle connections past the idle timeout are evicted
+// lazily on the next [Client.Get] for the endpoint; a quiet endpoint holds
+// its pooled sockets until then or until [Client.Close].
+const DefaultMaxIdleConns = 32
+
 // Client is a thread-safe, connection-pooling TCP client. It dials the
 // target address, optionally wraps connections with TLS and [ConnWrapper]
 // layers (e.g. compression), and maintains a LIFO pool of idle connections
@@ -110,12 +119,12 @@ type ClientOption func(*Client)
 
 // NewClient creates a Client that connects to addr (host:port).
 //
-// Defaults: 8 max idle connections, 30 s idle timeout, 5 s dial timeout,
-// 15 s TCP keep-alive, 16 MiB max frame size.
+// Defaults: [DefaultMaxIdleConns] max idle connections, 30 s idle timeout,
+// 5 s dial timeout, 15 s TCP keep-alive, 16 MiB max frame size.
 func NewClient(addr string, opts ...ClientOption) *Client {
 	c := &Client{
 		addr:         addr,
-		maxIdle:      8,
+		maxIdle:      DefaultMaxIdleConns,
 		idleTimeout:  30 * time.Second,
 		maxFrameSize: defaultMaxFrameSize,
 		serializer:   NewProtoSerializer(),
@@ -564,7 +573,10 @@ func (c *Client) dial(ctx context.Context) (net.Conn, error) {
 		conn = wrapped
 	}
 
-	return conn, nil
+	// Buffer the read side so the frame header and body coalesce into one
+	// kernel read. The reader travels with the connection through the idle
+	// pool, so buffered read-ahead is never stranded across exchanges.
+	return newBufferedConn(conn), nil
 }
 
 // readProtoFrame reads a single [ProtoSerializer] frame from r.

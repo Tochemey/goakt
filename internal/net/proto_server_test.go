@@ -26,6 +26,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"io"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -415,8 +416,10 @@ func TestProtoServer_FallbackHandler(t *testing.T) {
 	<-done
 }
 
-func TestProtoServer_UnregisteredMessageSkipped(t *testing.T) {
-	// No handlers registered and no fallback — unregistered messages are skipped.
+func TestProtoServer_UnregisteredMessageClosesConn(t *testing.T) {
+	// No handlers registered and no fallback — an unroutable frame must close
+	// the connection so a request/response peer observes an immediate EOF
+	// instead of blocking forever on a response that will never arrive.
 	ps, err := NewProtoServer("127.0.0.1:0")
 	require.NoError(t, err)
 
@@ -429,9 +432,18 @@ func TestProtoServer_UnregisteredMessageSkipped(t *testing.T) {
 	client := NewClient(ps.ListenAddr().String())
 	defer func() { _ = client.Close() }()
 
-	// Fire-and-forget with no handler — should not hang or error.
-	err = client.SendProtoNoReply(context.Background(), &testpb.Reply{Content: "ignored"})
-	require.NoError(t, err)
+	t.Run("request/response caller fails fast with EOF", func(t *testing.T) {
+		_, err := client.SendProto(context.Background(), &testpb.Reply{Content: "ignored"})
+		require.Error(t, err)
+		require.ErrorIs(t, err, io.EOF)
+	})
+
+	t.Run("fire-and-forget caller is unaffected", func(t *testing.T) {
+		// The write completes before the server processes the frame; the
+		// connection closing afterwards does not fail the no-reply call.
+		err := client.SendProtoNoReply(context.Background(), &testpb.Reply{Content: "ignored"})
+		require.NoError(t, err)
+	})
 
 	pause.For(100 * time.Millisecond)
 
@@ -887,9 +899,10 @@ func TestProtoServer_MetadataExtraction(t *testing.T) {
 		require.Equal(t, "xyz789", receivedHeaders["span-id"])
 		require.Equal(t, "secret", receivedHeaders["auth-token"])
 
-		// Verify the handler received the deadline.
+		// Verify the handler received the deadline (rebased on the receiver's
+		// clock, so equal only within tolerance).
 		require.True(t, hasDeadline, "deadline should be present")
-		require.True(t, receivedDeadline.Equal(expectedDeadline), "deadline should match")
+		require.WithinDuration(t, expectedDeadline, receivedDeadline, time.Second, "deadline should match")
 
 		require.NoError(t, ps.Shutdown(time.Second))
 		<-done
@@ -982,11 +995,25 @@ func TestProtoServer_MetadataExtraction(t *testing.T) {
 
 	t.Run("metadata deadline propagation", func(t *testing.T) {
 		var ctxHadDeadline bool
-		var ctxDeadline time.Time
+		var mdDeadline time.Time
+		var mdHadDeadline bool
+		var derivedDeadline time.Time
+		var derivedHadDeadline bool
 
 		handler := func(ctx context.Context, _ Connection, req proto.Message) (proto.Message, error) {
-			// Check if the context has the propagated deadline.
-			ctxDeadline, ctxHadDeadline = ctx.Deadline()
+			// The transport must not impose a deadline context itself (that
+			// would leak a timer per message); the deadline travels in the
+			// metadata and handlers opt in via DeadlineContext.
+			_, ctxHadDeadline = ctx.Deadline()
+
+			md, ok := FromContext(ctx)
+			if ok && md != nil {
+				mdDeadline, mdHadDeadline = md.GetDeadline()
+
+				bounded, cancel := md.DeadlineContext(ctx)
+				defer cancel()
+				derivedDeadline, derivedHadDeadline = bounded.Deadline()
+			}
 			return req, nil
 		}
 
@@ -1015,9 +1042,13 @@ func TestProtoServer_MetadataExtraction(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, resp)
 
-		// Verify the handler's context had the deadline.
-		require.True(t, ctxHadDeadline, "context should have deadline")
-		require.True(t, ctxDeadline.Equal(expectedDeadline), "deadline should match")
+		// The transport context itself carries no deadline; the metadata does,
+		// and DeadlineContext derives an enforced deadline from it.
+		require.False(t, ctxHadDeadline, "transport context must not carry a deadline")
+		require.True(t, mdHadDeadline, "metadata should carry the deadline")
+		require.WithinDuration(t, expectedDeadline, mdDeadline, time.Second, "metadata deadline should match")
+		require.True(t, derivedHadDeadline, "DeadlineContext should enforce the deadline")
+		require.WithinDuration(t, expectedDeadline, derivedDeadline, time.Second, "derived deadline should match")
 
 		require.NoError(t, ps.Shutdown(time.Second))
 		<-done

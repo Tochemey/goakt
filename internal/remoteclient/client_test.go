@@ -26,6 +26,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"io"
 	"math"
 	"net"
 	"strconv"
@@ -57,7 +58,7 @@ func TestRemotingOptionsAndDefaults(t *testing.T) {
 	assert.Nil(t, r.TLSConfig())
 
 	// Verify connection pooling defaults based on benchmarks
-	assert.Equal(t, 8, r.maxIdleConns)
+	assert.Equal(t, inet.DefaultMaxIdleConns, r.maxIdleConns)
 	assert.Equal(t, 30*time.Second, r.idleTimeout)
 	assert.Equal(t, 5*time.Second, r.dialTimeout)
 	assert.Equal(t, 15*time.Second, r.keepAlive)
@@ -430,6 +431,85 @@ func TestRemoteAsk_ProtoError(t *testing.T) {
 
 	require.NoError(t, ps.Shutdown(time.Second))
 	<-done
+}
+
+func TestRemoteAsk_TimeoutOnSwallowedResponse(t *testing.T) {
+	// A sink server that consumes request bytes and never responds,
+	// simulating a swallowed response. The ask must fail once the timeout
+	// elapses instead of blocking forever on the socket read.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer func() { _ = ln.Close() }()
+
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+
+			go func() {
+				_, _ = io.Copy(io.Discard, conn)
+				_ = conn.Close()
+			}()
+		}
+	}()
+
+	host, portStr, err := net.SplitHostPort(ln.Addr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	r := NewClient(WithClientCompression(remote.NoCompression))
+	defer r.Close()
+
+	from := address.New("from", "sys", host, port)
+	to := address.New("to", "sys", host, port)
+
+	timeout := 300 * time.Millisecond
+	start := time.Now()
+	_, err = r.RemoteAsk(context.Background(), from, to, durationpb.New(time.Second), timeout)
+	elapsed := time.Since(start)
+
+	require.Error(t, err)
+	assert.GreaterOrEqual(t, elapsed, timeout)
+	assert.Less(t, elapsed, 5*time.Second)
+}
+
+func TestAskContext(t *testing.T) {
+	t.Run("positive timeout sets a deadline", func(t *testing.T) {
+		ctx, cancel := askContext(context.Background(), time.Second)
+		defer cancel()
+
+		deadline, ok := ctx.Deadline()
+		require.True(t, ok)
+		assert.WithinDuration(t, time.Now().Add(time.Second), deadline, 100*time.Millisecond)
+	})
+
+	t.Run("zero timeout leaves the context untouched", func(t *testing.T) {
+		parent := context.Background()
+		ctx, cancel := askContext(parent, 0)
+		defer cancel()
+
+		_, ok := ctx.Deadline()
+		require.False(t, ok)
+		assert.Equal(t, parent, ctx)
+	})
+
+	t.Run("earlier parent deadline wins", func(t *testing.T) {
+		parent, parentCancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer parentCancel()
+
+		parentDeadline, ok := parent.Deadline()
+		require.True(t, ok)
+
+		ctx, cancel := askContext(parent, time.Hour)
+		defer cancel()
+
+		deadline, ok := ctx.Deadline()
+		require.True(t, ok)
+		assert.Equal(t, parentDeadline, deadline)
+	})
 }
 
 func TestRemoteLookup_NotFoundReturnsNoSender(t *testing.T) {
@@ -864,11 +944,16 @@ func TestWithRemotingSerializers(t *testing.T) {
 }
 
 func TestEnrichContext(t *testing.T) {
-	t.Run("no propagator no deadline", func(t *testing.T) {
+	t.Run("no propagator no deadline returns ctx untouched", func(t *testing.T) {
 		r := NewClient().(*client)
-		enriched, err := r.enrichContext(context.Background())
+		parent := context.Background()
+
+		enriched, err := r.enrichContext(parent)
 		require.NoError(t, err)
-		assert.NotNil(t, enriched)
+		assert.Equal(t, parent, enriched)
+
+		_, ok := inet.FromContext(enriched)
+		assert.False(t, ok)
 	})
 
 	t.Run("propagator inject error is propagated", func(t *testing.T) {
@@ -891,7 +976,17 @@ func TestEnrichContext(t *testing.T) {
 		defer cancel()
 		enriched, err := r.enrichContext(ctx)
 		require.NoError(t, err)
-		assert.NotNil(t, enriched)
+
+		md, ok := inet.FromContext(enriched)
+		require.True(t, ok)
+		require.NotNil(t, md)
+
+		parentDeadline, hasParentDeadline := ctx.Deadline()
+		require.True(t, hasParentDeadline)
+
+		mdDeadline, hasMDDeadline := md.GetDeadline()
+		require.True(t, hasMDDeadline)
+		assert.Equal(t, parentDeadline.UnixNano(), mdDeadline.UnixNano())
 	})
 }
 
@@ -2442,4 +2537,38 @@ func TestRemoteUnWatch_ConnectionRefused(t *testing.T) {
 
 	err := r.RemoteUnWatch(context.Background(), "host", 1000, "watchee", watcher)
 	assert.Error(t, err)
+}
+
+func TestSerializePayload(t *testing.T) {
+	r := NewClient().(*client)
+	protoSerializer := remote.NewProtoSerializer()
+
+	t.Run("pooled fast path is wire-compatible with the public serializer", func(t *testing.T) {
+		msg := durationpb.New(3 * time.Second)
+
+		pooledFrame, pooled, err := r.serializePayload(protoSerializer, msg)
+		require.NoError(t, err)
+		require.True(t, pooled, "proto messages must take the pooled path")
+
+		publicFrame, err := protoSerializer.Serialize(msg)
+		require.NoError(t, err)
+		assert.Equal(t, publicFrame, pooledFrame, "pooled frame must byte-match remote.ProtoSerializer output")
+
+		r.payloadPool.Put(pooledFrame)
+	})
+
+	t.Run("non-proto message falls back to the serializer and its error", func(t *testing.T) {
+		_, pooled, err := r.serializePayload(protoSerializer, "not a proto message")
+		require.ErrorIs(t, err, remote.ErrNotProtoMessage)
+		assert.False(t, pooled)
+	})
+
+	t.Run("custom serializer bypasses the pool", func(t *testing.T) {
+		serializer := &stubSerializer{serializeData: []byte("custom-encoded")}
+
+		data, pooled, err := r.serializePayload(serializer, "anything")
+		require.NoError(t, err)
+		require.Equal(t, serializer.serializeData, data)
+		assert.False(t, pooled, "non-proto serializers must not hand out pooled frames")
+	})
 }
