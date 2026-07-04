@@ -435,7 +435,7 @@ func (x *actorSystem) activateGrainLocally(ctx context.Context, identity *GrainI
 func (x *actorSystem) sendRemoteActivateGrain(ctx context.Context, grain *internalpb.Grain) error {
 	// Convert internalpb.Grain to remote.GrainRequest
 	grainRequest := &remote.GrainRequest{
-		Name:              grain.GetGrainId().GetValue(),
+		Name:              grain.GetGrainId().GetName(),
 		Kind:              grain.GetGrainId().GetKind(),
 		ActivationTimeout: time.Second,
 		ActivationRetries: 5,
