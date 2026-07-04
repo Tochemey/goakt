@@ -2383,15 +2383,24 @@ func (r *client) newNetClient(host string, port int) *inet.Client {
 	return inet.NewClient(addr, opts...)
 }
 
+// protoFramer is the stateless internal serializer behind the pooled fast
+// path in serializePayload. It emits the exact frame layout of
+// [remote.ProtoSerializer.Serialize], but can draw the output buffer from a
+// frame pool, which the public [remote.Serializer] interface deliberately
+// does not expose.
+var protoFramer = inet.NewProtoSerializer()
+
 // serializePayload serializes message with serializer, drawing the frame
 // from the client's payload pool when the serializer supports pooled output
 // (the built-in proto serializer). The boolean reports whether the caller
 // must return the frame via payloadPool.Put once the enclosing wire request
 // has been sent.
 func (r *client) serializePayload(serializer remote.Serializer, message any) ([]byte, bool, error) {
-	if ps, ok := serializer.(*remote.ProtoSerializer); ok {
-		data, err := ps.SerializeTo(r.payloadPool, message)
-		return data, err == nil, err
+	if _, ok := serializer.(*remote.ProtoSerializer); ok {
+		if msg, ok := message.(proto.Message); ok {
+			data, err := protoFramer.MarshalBinaryTo(r.payloadPool, msg)
+			return data, err == nil, err
+		}
 	}
 
 	data, err := serializer.Serialize(message)

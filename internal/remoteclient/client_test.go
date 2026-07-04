@@ -2538,3 +2538,37 @@ func TestRemoteUnWatch_ConnectionRefused(t *testing.T) {
 	err := r.RemoteUnWatch(context.Background(), "host", 1000, "watchee", watcher)
 	assert.Error(t, err)
 }
+
+func TestSerializePayload(t *testing.T) {
+	r := NewClient().(*client)
+	protoSerializer := remote.NewProtoSerializer()
+
+	t.Run("pooled fast path is wire-compatible with the public serializer", func(t *testing.T) {
+		msg := durationpb.New(3 * time.Second)
+
+		pooledFrame, pooled, err := r.serializePayload(protoSerializer, msg)
+		require.NoError(t, err)
+		require.True(t, pooled, "proto messages must take the pooled path")
+
+		publicFrame, err := protoSerializer.Serialize(msg)
+		require.NoError(t, err)
+		assert.Equal(t, publicFrame, pooledFrame, "pooled frame must byte-match remote.ProtoSerializer output")
+
+		r.payloadPool.Put(pooledFrame)
+	})
+
+	t.Run("non-proto message falls back to the serializer and its error", func(t *testing.T) {
+		_, pooled, err := r.serializePayload(protoSerializer, "not a proto message")
+		require.ErrorIs(t, err, remote.ErrNotProtoMessage)
+		assert.False(t, pooled)
+	})
+
+	t.Run("custom serializer bypasses the pool", func(t *testing.T) {
+		serializer := &stubSerializer{serializeData: []byte("custom-encoded")}
+
+		data, pooled, err := r.serializePayload(serializer, "anything")
+		require.NoError(t, err)
+		require.Equal(t, serializer.serializeData, data)
+		assert.False(t, pooled, "non-proto serializers must not hand out pooled frames")
+	})
+}

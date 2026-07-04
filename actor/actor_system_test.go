@@ -2850,8 +2850,14 @@ func TestRemotingRecover(t *testing.T) {
 		remoting := remoteclient.NewClient()
 		t.Cleanup(remoting.Close)
 
+		// A context deadline forces propagation metadata onto the wire; a
+		// bare context would skip metadata entirely and the server would
+		// never invoke the panicking propagator.
+		callCtx, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
+
 		to := address.New("receiver", "remote-sys", host, remotingPort)
-		err = remoting.RemoteTell(ctx, address.NoSender(), to, new(testpb.TestSend))
+		err = remoting.RemoteTell(callCtx, address.NoSender(), to, new(testpb.TestSend))
 		require.Error(t, err)
 	})
 }
@@ -2919,7 +2925,7 @@ func TestRemotingLookup(t *testing.T) {
 		const actorName = "test"
 		actualHost := sys.Host()
 		actualPort := int(sys.Port())
-		sys.(*actorSystem).remoteConfig = remote.NewConfig(actualHost, actualPort+1)
+		sys.(*actorSystem).remoteHostPort = net.JoinHostPort(actualHost, strconv.Itoa(actualPort+1))
 
 		remoting := remoteclient.NewClient()
 		t.Cleanup(remoting.Close)
@@ -3068,7 +3074,7 @@ func TestRemotingReSpawn(t *testing.T) {
 
 		actualHost := sys.Host()
 		actualPort := int(sys.Port())
-		sys.(*actorSystem).remoteConfig = remote.NewConfig(actualHost, actualPort+1)
+		sys.(*actorSystem).remoteHostPort = net.JoinHostPort(actualHost, strconv.Itoa(actualPort+1))
 
 		remoting := remoteclient.NewClient()
 		t.Cleanup(remoting.Close)
@@ -3522,7 +3528,7 @@ func TestRemotingStop(t *testing.T) {
 
 		actualHost := sys.Host()
 		actualPort := int(sys.Port())
-		sys.(*actorSystem).remoteConfig = remote.NewConfig(actualHost, actualPort+1)
+		sys.(*actorSystem).remoteHostPort = net.JoinHostPort(actualHost, strconv.Itoa(actualPort+1))
 
 		remoting := remoteclient.NewClient()
 		t.Cleanup(remoting.Close)
@@ -4254,7 +4260,7 @@ func TestRemotingSpawn(t *testing.T) {
 
 		actualHost := sys.Host()
 		actualPort := int(sys.Port())
-		sys.(*actorSystem).remoteConfig = remote.NewConfig(actualHost, actualPort+1)
+		sys.(*actorSystem).remoteHostPort = net.JoinHostPort(actualHost, strconv.Itoa(actualPort+1))
 
 		remoting := remoteclient.NewClient()
 		t.Cleanup(remoting.Close)
@@ -5147,7 +5153,7 @@ func TestRemotingReinstate(t *testing.T) {
 
 		actualHost := sys.Host()
 		actualPort := int(sys.Port())
-		sys.(*actorSystem).remoteConfig = remote.NewConfig(actualHost, actualPort+1)
+		sys.(*actorSystem).remoteHostPort = net.JoinHostPort(actualHost, strconv.Itoa(actualPort+1))
 
 		remoting := remoteclient.NewClient()
 		t.Cleanup(remoting.Close)

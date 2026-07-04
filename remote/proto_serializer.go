@@ -117,16 +117,6 @@ func NewProtoSerializer() *ProtoSerializer {
 // Returns [ErrUnknownMessageType] if the message has no registered type name.
 // Returns [ErrSerializeFailed] wrapping the proto error on marshal failure.
 func (x *ProtoSerializer) Serialize(message any) ([]byte, error) {
-	return x.SerializeTo(nil, message)
-}
-
-// SerializeTo is identical to [ProtoSerializer.Serialize] but draws the
-// output frame from pool when non-nil, falling back to a fresh allocation
-// otherwise. The caller owns the returned slice and must return it via
-// pool.Put once the frame has been consumed (for example, after the
-// enclosing wire request has been transmitted); the slice must not be used
-// after that.
-func (x *ProtoSerializer) SerializeTo(pool *inet.FramePool, message any) ([]byte, error) {
 	msg, ok := message.(proto.Message)
 	if !ok {
 		return nil, ErrNotProtoMessage
@@ -145,13 +135,8 @@ func (x *ProtoSerializer) SerializeTo(pool *inet.FramePool, message any) ([]byte
 	protoSize := opts.Size(msg)
 	totalLen := 4 + 4 + nameLen + protoSize
 
-	// Single allocation (or pooled buffer): exact-size output frame.
-	var out []byte
-	if pool != nil {
-		out = pool.Get(totalLen)[:0]
-	} else {
-		out = make([]byte, 0, totalLen)
-	}
+	// Single allocation: exact-size output frame.
+	out := make([]byte, 0, totalLen)
 
 	// Write both uint32 header fields into a stack-allocated array, then
 	// append — no reflection, no interface boxing.
@@ -166,9 +151,6 @@ func (x *ProtoSerializer) SerializeTo(pool *inet.FramePool, message any) ([]byte
 	// Marshal the proto payload directly into the tail of out.
 	out, err := opts.MarshalAppend(out, msg)
 	if err != nil {
-		if pool != nil {
-			pool.Put(out)
-		}
 		return nil, errors.Join(ErrSerializeFailed, err)
 	}
 
