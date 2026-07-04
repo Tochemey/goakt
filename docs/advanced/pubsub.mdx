@@ -133,6 +133,32 @@ func (a *OrderService) Receive(ctx *ReceiveContext) {
 }
 ```
 
+## Presence and introspection
+
+The topic actor already tracks, per node, which local actors are subscribed to which topics. `ActorSystem` exposes read-only, cluster-wide aggregations of that state so application code can answer questions like "who is subscribed to this topic" or "how many subscribers does it have" without maintaining a separate registry.
+
+| Method                                                      | Purpose                                                                             |
+|--------------------------------------------------------------|--------------------------------------------------------------------------------------|
+| `TopicSubscriberCount(ctx, topic, timeout) (int, error)`      | Number of subscribers to `topic` across the whole cluster.                          |
+| `TopicSubscribers(ctx, topic, timeout) ([]string, error)`     | Canonical addresses of every subscriber to `topic` across the whole cluster.         |
+| `Topics(ctx, timeout) ([]string, error)`                      | Names of the topics that currently have at least one subscriber anywhere in the cluster. |
+
+```go
+count, err := system.TopicSubscriberCount(ctx, "orders", 5*time.Second)
+subscribers, err := system.TopicSubscribers(ctx, "orders", 5*time.Second)
+topics, err := system.Topics(ctx, 5*time.Second)
+```
+
+In cluster mode, each node's topic actor answers a presence query for its own local subscribers, and the querying node's topic actor fans the same question out to every peer's topic actor and merges the answers. Outside cluster mode, the aggregation is just the local view. The `timeout` bounds that cluster-wide fan-out; it is ignored when clustering is not enabled.
+
+<Note>
+All three methods require the topic actor to be running (`WithPubSub()` or clustering enabled); otherwise they return `ErrTopicActorNotStarted`.
+</Note>
+
+<Warning>
+A peer that cannot be reached within `timeout` (e.g. it left the cluster) is silently excluded from the aggregated result rather than failing the whole call—presence degrades to a partial view instead of an error.
+</Warning>
+
 ## Event stream vs PubSub
 
 | Aspect      | Event stream                          | PubSub                               |

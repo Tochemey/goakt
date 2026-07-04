@@ -580,4 +580,92 @@ func TestTopicActor(t *testing.T) {
 
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
+
+	t.Run("With TopicSubscribers, TopicSubscriberCount and Topics without clustering", func(t *testing.T) {
+		ctx := context.Background()
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithPubSub())
+
+		// start the actor system
+		err := actorSystem.Start(ctx)
+		require.NoError(t, err)
+
+		// wait for the actor system to be ready
+		pause.For(time.Second)
+
+		// no subscriber yet: the topic is unknown
+		count, err := actorSystem.TopicSubscriberCount(ctx, "test-topic", time.Second)
+		require.NoError(t, err)
+		require.Zero(t, count)
+
+		topics, err := actorSystem.Topics(ctx, time.Second)
+		require.NoError(t, err)
+		require.Empty(t, topics)
+
+		actor1, err := actorSystem.Spawn(ctx, "actor1", NewMockSubscriber(), WithLongLived())
+		require.NoError(t, err)
+
+		actor2, err := actorSystem.Spawn(ctx, "actor2", NewMockSubscriber(), WithLongLived())
+		require.NoError(t, err)
+
+		topic := "test-topic"
+		require.NoError(t, actor1.Tell(ctx, actorSystem.TopicActor(), NewSubscribe(topic)))
+		pause.For(500 * time.Millisecond)
+		require.NoError(t, actor2.Tell(ctx, actorSystem.TopicActor(), NewSubscribe(topic)))
+		pause.For(500 * time.Millisecond)
+
+		count, err = actorSystem.TopicSubscriberCount(ctx, topic, time.Second)
+		require.NoError(t, err)
+		require.EqualValues(t, 2, count)
+
+		subscribers, err := actorSystem.TopicSubscribers(ctx, topic, time.Second)
+		require.NoError(t, err)
+		require.ElementsMatch(t, []string{actor1.ID(), actor2.ID()}, subscribers)
+
+		topics, err = actorSystem.Topics(ctx, time.Second)
+		require.NoError(t, err)
+		require.Equal(t, []string{topic}, topics)
+
+		// unsubscribe one actor and check the counts are updated
+		require.NoError(t, actor1.Tell(ctx, actorSystem.TopicActor(), NewUnsubscribe(topic)))
+		pause.For(500 * time.Millisecond)
+
+		count, err = actorSystem.TopicSubscriberCount(ctx, topic, time.Second)
+		require.NoError(t, err)
+		require.EqualValues(t, 1, count)
+
+		subscribers, err = actorSystem.TopicSubscribers(ctx, topic, time.Second)
+		require.NoError(t, err)
+		require.Equal(t, []string{actor2.ID()}, subscribers)
+
+		// a topic nobody ever subscribed to reports zero subscribers, not an error
+		count, err = actorSystem.TopicSubscriberCount(ctx, "unknown-topic", time.Second)
+		require.NoError(t, err)
+		require.Zero(t, count)
+
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
+
+	t.Run("With TopicSubscribers when the topic actor is not started", func(t *testing.T) {
+		ctx := context.Background()
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+		require.NoError(t, actorSystem.Start(ctx))
+		pause.For(time.Second)
+
+		require.Nil(t, actorSystem.TopicActor())
+
+		_, err := actorSystem.TopicSubscribers(ctx, "test-topic", time.Second)
+		require.Error(t, err)
+		require.ErrorIs(t, err, gerrors.ErrTopicActorNotStarted)
+
+		_, err = actorSystem.TopicSubscriberCount(ctx, "test-topic", time.Second)
+		require.Error(t, err)
+		require.ErrorIs(t, err, gerrors.ErrTopicActorNotStarted)
+
+		_, err = actorSystem.Topics(ctx, time.Second)
+		require.Error(t, err)
+		require.ErrorIs(t, err, gerrors.ErrTopicActorNotStarted)
+
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
 }

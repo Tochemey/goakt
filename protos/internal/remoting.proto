@@ -203,6 +203,32 @@ message TopicMessage {
   bytes message = 3;
 }
 
+// TopicPresenceRequest asks a peer TopicActor for the subscribers it holds
+// locally for a given topic. Peers answer with their local view only; they
+// do not fan the request out any further.
+message TopicPresenceRequest {
+  // Specifies the topic to inspect
+  string topic = 1;
+}
+
+// TopicPresenceResponse returns a peer TopicActor's local subscribers for
+// the topic named in the matching TopicPresenceRequest.
+message TopicPresenceResponse {
+  // Specifies the canonical addresses of the local subscribers
+  repeated string subscribers = 1;
+}
+
+// TopicListRequest asks a peer TopicActor for the set of topics that
+// currently have at least one local subscriber.
+message TopicListRequest {}
+
+// TopicListResponse returns a peer TopicActor's locally known topics in
+// response to a TopicListRequest.
+message TopicListResponse {
+  // Specifies the locally known topics
+  repeated string topics = 1;
+}
+
 message RemoteStashSizeRequest {
   // Specifies the remote host address
   string host = 1;

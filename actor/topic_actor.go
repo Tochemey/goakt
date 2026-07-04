@@ -49,6 +49,35 @@ type key struct {
 	messageID string
 }
 
+// topicPresenceQuery asks the local topic actor for the cluster-wide
+// subscriber addresses of a topic. Unlike internalpb.TopicPresenceRequest
+// (the wire-level message peers exchange), this query is only ever sent
+// in-process and triggers the fan-out to every peer's topic actor.
+type topicPresenceQuery struct {
+	topic   string
+	timeout time.Duration
+}
+
+// topicPresenceReply carries the cluster-wide subscriber addresses gathered
+// in response to a topicPresenceQuery.
+type topicPresenceReply struct {
+	subscribers []string
+}
+
+// topicListQuery asks the local topic actor for the cluster-wide set of
+// active topics. Unlike internalpb.TopicListRequest (the wire-level message
+// peers exchange), this query is only ever sent in-process and triggers the
+// fan-out to every peer's topic actor.
+type topicListQuery struct {
+	timeout time.Duration
+}
+
+// topicListReply carries the cluster-wide topic names gathered in response
+// to a topicListQuery.
+type topicListReply struct {
+	topics []string
+}
+
 // topicActor is a system actor that manages a registry of actors that subscribe to topics.
 // This actor must be started when cluster mode is enabled in all nodesMap before any actor subscribes
 type topicActor struct {
@@ -101,6 +130,14 @@ func (x *topicActor) Receive(ctx *ReceiveContext) {
 		x.handlePublish(ctx)
 	case *internalpb.TopicMessage:
 		x.handleTopicMessage(ctx)
+	case *topicPresenceQuery:
+		x.handleTopicPresenceQuery(ctx)
+	case *internalpb.TopicPresenceRequest:
+		x.handleTopicPresenceRequest(ctx)
+	case *topicListQuery:
+		x.handleTopicListQuery(ctx)
+	case *internalpb.TopicListRequest:
+		x.handleTopicListRequest(ctx)
 	case *Terminated:
 		x.handleTerminated(msg)
 	default:
@@ -251,6 +288,189 @@ func (x *topicActor) sendToRemoteTopicActors(cctx context.Context, remotePeers [
 			}(peer)
 		}
 	}
+}
+
+// localSubscribers returns the canonical addresses of the still-alive local
+// subscribers of topic, pruning any that have terminated without going
+// through handleTerminated (e.g. a stale entry left by a race with Watch).
+func (x *topicActor) localSubscribers(topic string) []string {
+	subscribers, ok := x.topics.Get(topic)
+	if !ok {
+		return nil
+	}
+
+	var ids []string
+	for _, subscriber := range subscribers.Values() {
+		_, exists := x.actorSystem.tree().node(subscriber.ID())
+		if exists && subscriber.IsRunning() {
+			ids = append(ids, subscriber.ID())
+			continue
+		}
+		// remove the subscriber if it does not exist
+		subscribers.Delete(subscriber.ID())
+	}
+	return ids
+}
+
+// localTopics returns the names of the topics that currently have at least
+// one local subscriber.
+func (x *topicActor) localTopics() []string {
+	var topics []string
+	x.topics.Range(func(topic string, subscribers *xsync.Map[string, *PID]) {
+		if subscribers.Len() != 0 {
+			topics = append(topics, topic)
+		}
+	})
+	return topics
+}
+
+// handleTopicPresenceRequest answers a peer topic actor's query for this
+// node's local subscribers of a topic. It never fans the request out any
+// further: cluster-wide aggregation is driven by the querying node's
+// handleTopicPresenceQuery.
+func (x *topicActor) handleTopicPresenceRequest(ctx *ReceiveContext) {
+	if request, ok := ctx.Message().(*internalpb.TopicPresenceRequest); ok {
+		ctx.Response(&internalpb.TopicPresenceResponse{Subscribers: x.localSubscribers(request.GetTopic())})
+	}
+}
+
+// handleTopicPresenceQuery aggregates the cluster-wide subscriber addresses
+// of a topic: the local view plus a fan-out TopicPresenceRequest to every
+// peer's topic actor, reusing the same peer discovery handlePublish uses to
+// disseminate messages.
+func (x *topicActor) handleTopicPresenceQuery(ctx *ReceiveContext) {
+	query, ok := ctx.Message().(*topicPresenceQuery)
+	if !ok {
+		return
+	}
+
+	subscribers := x.localSubscribers(query.topic)
+
+	if x.actorSystem.InCluster() {
+		cctx := context.WithoutCancel(ctx.Context())
+		peers, err := x.cluster.Peers(cctx)
+		if err != nil {
+			ctx.Err(errors.NewInternalError(err))
+			return
+		}
+
+		remoteSubscribers := x.queryRemotePeers(cctx, buildRemotePeers(peers), &internalpb.TopicPresenceRequest{Topic: query.topic}, query.timeout,
+			func(resp any) []string {
+				presence, ok := resp.(*internalpb.TopicPresenceResponse)
+				if !ok || presence == nil {
+					return nil
+				}
+				return presence.GetSubscribers()
+			})
+		subscribers = append(subscribers, remoteSubscribers...)
+	}
+
+	ctx.Response(&topicPresenceReply{subscribers: subscribers})
+}
+
+// handleTopicListRequest answers a peer topic actor's query for this node's
+// locally known topics. It never fans the request out any further:
+// cluster-wide aggregation is driven by the querying node's
+// handleTopicListQuery.
+func (x *topicActor) handleTopicListRequest(ctx *ReceiveContext) {
+	if _, ok := ctx.Message().(*internalpb.TopicListRequest); ok {
+		ctx.Response(&internalpb.TopicListResponse{Topics: x.localTopics()})
+	}
+}
+
+// handleTopicListQuery aggregates the cluster-wide set of active topics: the
+// local view plus a fan-out TopicListRequest to every peer's topic actor.
+func (x *topicActor) handleTopicListQuery(ctx *ReceiveContext) {
+	query, ok := ctx.Message().(*topicListQuery)
+	if !ok {
+		return
+	}
+
+	// the same topic name can be active on more than one node, so dedupe
+	// while merging the local view with each peer's.
+	seen := make(map[string]types.Unit)
+	var topics []string
+	addTopics := func(names []string) {
+		for _, name := range names {
+			if _, exists := seen[name]; !exists {
+				seen[name] = types.Unit{}
+				topics = append(topics, name)
+			}
+		}
+	}
+	addTopics(x.localTopics())
+
+	if x.actorSystem.InCluster() {
+		cctx := context.WithoutCancel(ctx.Context())
+		peers, err := x.cluster.Peers(cctx)
+		if err != nil {
+			ctx.Err(errors.NewInternalError(err))
+			return
+		}
+
+		remoteTopics := x.queryRemotePeers(cctx, buildRemotePeers(peers), &internalpb.TopicListRequest{}, query.timeout,
+			func(resp any) []string {
+				list, ok := resp.(*internalpb.TopicListResponse)
+				if !ok || list == nil {
+					return nil
+				}
+				return list.GetTopics()
+			})
+		addTopics(remoteTopics)
+	}
+
+	ctx.Response(&topicListReply{topics: topics})
+}
+
+// queryRemotePeers asks every remote peer's topic actor the given request and
+// merges the string values that extract returns out of each reply. Peers that
+// cannot be reached or fail to answer within timeout are skipped: presence
+// queries degrade to a partial view rather than failing outright.
+func (x *topicActor) queryRemotePeers(cctx context.Context, remotePeers []remotePeer, request any, timeout time.Duration, extract func(resp any) []string) []string {
+	if len(remotePeers) == 0 {
+		return nil
+	}
+
+	actorName := reservedName(topicActorType)
+	from := pathToAddress(x.pid.Path())
+
+	var (
+		mu      sync.Mutex
+		results []string
+		wg      sync.WaitGroup
+	)
+
+	for _, peer := range remotePeers {
+		wg.Add(1)
+		go func(peer remotePeer) {
+			defer wg.Done()
+			to, err := x.remoting.RemoteLookup(cctx, peer.host, peer.port, actorName)
+			if err != nil {
+				x.logger.Warnf("failed to lookup actor %s on remote=[host=%s, port=%d]: %s",
+					actorName, peer.host, peer.port, err.Error())
+				return
+			}
+
+			resp, err := x.remoting.RemoteAsk(cctx, from, to, request, timeout)
+			if err != nil {
+				x.logger.Warnf("failed to query topic actor %s on remote=[host=%s, port=%d]: %s",
+					actorName, peer.host, peer.port, err.Error())
+				return
+			}
+
+			values := extract(resp)
+			if len(values) == 0 {
+				return
+			}
+
+			mu.Lock()
+			results = append(results, values...)
+			mu.Unlock()
+		}(peer)
+	}
+
+	wg.Wait()
+	return results
 }
 
 // handleTerminated handles Terminated message

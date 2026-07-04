@@ -123,6 +123,11 @@ var (
 	// ErrSchedulerNotStarted is returned when attempting to use the scheduler before it has started.
 	ErrSchedulerNotStarted = errors.New("scheduler has not started")
 
+	// ErrTopicActorNotStarted is returned when attempting to query topic presence
+	// (subscriber count, subscribers, or the topic list) while the topic actor has
+	// not been started. Enable it with WithPubSub, or by enabling clustering.
+	ErrTopicActorNotStarted = errors.New("topic actor has not started")
+
 	// ErrInvalidMessage indicates that a message is structurally or semantically invalid.
 	ErrInvalidMessage = errors.New("invalid message")
 
