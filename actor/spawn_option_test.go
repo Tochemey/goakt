@@ -117,6 +117,13 @@ func TestSpawnOption(t *testing.T) {
 		require.Error(t, err)
 		require.ErrorIs(t, err, errors.ErrInvalidTCPAddress)
 	})
+	t.Run("spawn option with ephemeral", func(t *testing.T) {
+		config := &spawnConfig{relocatable: true}
+		option := WithEphemeral()
+		option.Apply(config)
+		require.False(t, config.relocatable)
+		require.IsType(t, &passivation.LongLivedStrategy{}, config.passivationStrategy)
+	})
 }
 
 func TestNewSpawnConfig(t *testing.T) {

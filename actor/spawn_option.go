@@ -314,6 +314,34 @@ func WithRelocationDisabled() SpawnOption {
 	})
 }
 
+// WithEphemeral returns a SpawnOption bundling the settings recommended for
+// connection-lifetime actors: one actor per websocket/SSE/streaming client, spawned
+// and stopped at high rates and living exactly as long as the connection it represents.
+//
+// It combines:
+//   - Relocation disabled: a connection actor is useless on another node once its
+//     underlying socket has died with the node that hosted it, so it must never be
+//     recreated elsewhere during cluster rebalancing.
+//   - Long-lived passivation: the caller stops the actor explicitly when the
+//     connection closes, so registering it with the passivation manager's idle-timer
+//     bookkeeping would only add overhead that is never exercised.
+//
+// This is equivalent to combining WithRelocationDisabled and
+// WithPassivationStrategy(passivation.NewLongLivedStrategy()), expressed as a single
+// self-describing option for the connection-actor pattern.
+//
+// WithEphemeral does not stop the actor for you: call Shutdown (or PID.Shutdown)
+// when the underlying connection closes.
+//
+// Returns:
+//   - SpawnOption that disables relocation and idle-based passivation bookkeeping for the actor.
+func WithEphemeral() SpawnOption {
+	return spawnOption(func(config *spawnConfig) {
+		config.relocatable = false
+		config.passivationStrategy = passivation.NewLongLivedStrategy()
+	})
+}
+
 // WithDependencies returns a SpawnOption that injects the given dependencies into
 // the actor during its initialization.
 //

@@ -1068,6 +1068,91 @@ func TestRelocationWithActorRelocationDisabled(t *testing.T) {
 	srv.Shutdown()
 }
 
+// TestRelocationWithEphemeralActor proves that an actor spawned with WithEphemeral,
+// the option recommended for connection-lifetime actors, is excluded from relocation
+// bookkeeping the same way an actor spawned with WithRelocationDisabled is: it never
+// reappears on a surviving peer once its host node leaves the cluster.
+func TestRelocationWithEphemeralActor(t *testing.T) {
+	// create a context
+	ctx := context.TODO()
+	// start the NATS server
+	srv := startNatsServer(t)
+
+	// create and start system cluster
+	node1, sd1 := testNATs(t, srv.Addr().String())
+	require.NotNil(t, node1)
+	require.NotNil(t, sd1)
+
+	// create and start system cluster
+	node2, sd2 := testNATs(t, srv.Addr().String())
+	require.NotNil(t, node2)
+	require.NotNil(t, sd2)
+
+	// create and start system cluster
+	node3, sd3 := testNATs(t, srv.Addr().String())
+	require.NotNil(t, node3)
+	require.NotNil(t, sd3)
+
+	for j := 1; j <= 4; j++ {
+		actorName := fmt.Sprintf("Node1-Actor-%d", j)
+		pid, err := node1.Spawn(ctx, actorName, NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+	}
+
+	pause.For(time.Second)
+
+	for j := 1; j <= 4; j++ {
+		actorName := fmt.Sprintf("Node2-Actor-%d", j)
+		pid, err := node2.Spawn(ctx, actorName, NewMockActor(), WithEphemeral())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+		require.False(t, pid.IsRelocatable())
+	}
+
+	pause.For(time.Second)
+
+	for j := 1; j <= 4; j++ {
+		actorName := fmt.Sprintf("Node3-Actor-%d", j)
+		pid, err := node3.Spawn(ctx, actorName, NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+	}
+
+	pause.For(time.Second)
+
+	// take down node2
+	require.NoError(t, node2.Stop(ctx))
+	require.NoError(t, sd2.Close())
+
+	// Allow time for the cluster to detect node2 leaving
+	pause.For(2 * time.Second)
+
+	// Verify the ephemeral actor is never relocated.
+	// We poll for a reasonable window to confirm the actor stays gone.
+	actorName := "Node2-Actor-1"
+	require.Eventually(t, func() bool {
+		exists, err := node1.ActorExists(ctx, actorName)
+		if err != nil {
+			return false
+		}
+		return !exists
+	}, 30*time.Second, time.Second, "ephemeral actor %s should not be relocated", actorName)
+
+	sender, err := node1.ActorOf(ctx, "Node1-Actor-1")
+	require.NoError(t, err)
+	require.NotNil(t, sender)
+
+	err = sender.SendAsync(ctx, actorName, new(testpb.TestSend))
+	require.Error(t, err)
+
+	assert.NoError(t, node1.Stop(ctx))
+	assert.NoError(t, node3.Stop(ctx))
+	assert.NoError(t, sd1.Close())
+	assert.NoError(t, sd3.Close())
+	srv.Shutdown()
+}
+
 func TestRelocationWithSystemRelocationDisabled(t *testing.T) {
 	// create a context
 	ctx := context.TODO()

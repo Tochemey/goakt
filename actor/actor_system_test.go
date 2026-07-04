@@ -6693,6 +6693,38 @@ func TestPreShutdown(t *testing.T) {
 		require.NoError(t, err)
 		assert.Nil(t, peerState)
 	})
+
+	t.Run("excludes ephemeral actors from the peer state snapshot", func(t *testing.T) {
+		ctx := context.TODO()
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		system.relocationEnabled.Store(true)
+
+		require.NoError(t, system.spawnRootGuardian(ctx))
+		require.NoError(t, system.spawnSystemGuardian(ctx))
+		require.NoError(t, system.spawnUserGuardian(ctx))
+
+		clusterMock.EXPECT().ActorExists(mock.Anything, "durable").Return(false, nil).Once()
+		clusterMock.EXPECT().ActorExists(mock.Anything, "ephemeral").Return(false, nil).Once()
+
+		durablePID, err := system.Spawn(ctx, "durable", NewMockActor())
+		require.NoError(t, err)
+		require.True(t, durablePID.IsRelocatable())
+
+		ephemeralPID, err := system.Spawn(ctx, "ephemeral", NewMockActor(), WithEphemeral())
+		require.NoError(t, err)
+		require.False(t, ephemeralPID.IsRelocatable())
+
+		peerState, err := system.preShutdown()
+		require.NoError(t, err)
+		require.NotNil(t, peerState)
+
+		_, hasDurable := peerState.GetActors()[durablePID.ID()]
+		assert.True(t, hasDurable, "relocatable actor must be part of the peer state snapshot")
+
+		_, hasEphemeral := peerState.GetActors()[ephemeralPID.ID()]
+		assert.False(t, hasEphemeral, "ephemeral actor must be excluded from relocation bookkeeping")
+	})
 }
 
 func TestPersistPeerStateToPeers(t *testing.T) {
