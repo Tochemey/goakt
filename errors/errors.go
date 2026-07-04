@@ -256,6 +256,14 @@ var (
 
 	// ErrInvalidKinds is returned when the child and parent kinds are different.
 	ErrInvalidKinds = errors.New("child and parent kinds must be the same")
+
+	// ErrPubSubDisabled indicates an attempt to use pub-sub features when PubSub mode
+	// is not enabled for the actor system. Enable it with WithPubSub, or by enabling
+	// cluster mode.
+	ErrPubSubDisabled = errors.New("pubsub is not enabled")
+
+	// ErrSubscribeHandlerRequired is returned when SubscribeTopic is called with a nil handler.
+	ErrSubscribeHandlerRequired = errors.New("subscribe handler is required")
 )
 
 // NewErrInvalidTCPAddress formats an ErrInvalidTCPAddress with the given address.

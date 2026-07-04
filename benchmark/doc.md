@@ -69,6 +69,12 @@ go test -run=^$ -bench='Throughput$' -count=5 ./benchmark/
 go test -run=^$ -bench=^BenchmarkActorMemoryFootprint$ -benchmem ./benchmark/
 ```
 
+### PubSubBridgeDelivery — SubscribeTopic (non-actor pub/sub) delivery throughput
+
+```
+go test -run=^$ -bench=^BenchmarkPubSubBridgeDelivery$ -count=10 ./benchmark/
+```
+
 ### RemoteTellThroughput — TCP send across 10 systems for 10 s
 
 ```

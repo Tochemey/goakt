@@ -465,6 +465,38 @@ type ActorSystem interface {
 	//
 	// Returns the actor reference for the topic actor.
 	TopicActor() *PID
+	// SubscribeTopic registers a plain callback as a subscriber of the given topic, without
+	// requiring the caller to define or spawn an Actor. This is the non-actor counterpart of
+	// sending a Subscribe message to TopicActor(); it is meant for gateway-style integrations
+	// (e.g. a websocket/SSE handler) that only need to forward published messages somewhere.
+	//
+	// Internally, a bridge actor is spawned to subscribe to the topic like any other actor
+	// subscriber would, so delivery ordering, at-least-once semantics, cross-node dissemination,
+	// and the existing deduplication/retention behavior are all unchanged. handler is invoked
+	// once per delivered message; a panic inside handler is recovered and logged and never
+	// terminates the subscription.
+	//
+	// Requirements:
+	//   - PubSub mode must be enabled, either via WithPubSub() or because cluster mode is enabled.
+	//     Otherwise ErrPubSubDisabled is returned.
+	//
+	// Parameters:
+	//   - topic: the topic name to subscribe to.
+	//   - handler: invoked with each message delivered to topic. It runs on the bridge actor's
+	//     goroutine; keep it fast or hand off blocking work to avoid delaying other deliveries.
+	//
+	// Returns:
+	//   - Subscription: call Unsubscribe or Close on it to stop delivery and release the bridge actor.
+	//   - error: ErrActorSystemNotStarted if the system is not running, ErrPubSubDisabled if pub/sub
+	//     is not enabled, ErrSubscribeHandlerRequired if handler is nil, or a spawn error otherwise.
+	//
+	// Usage:
+	//
+	//	sub, err := system.SubscribeTopic("orders", func(ctx context.Context, msg proto.Message) {
+	//	    // forward msg to a websocket connection, log it, etc.
+	//	})
+	//	defer sub.Close()
+	SubscribeTopic(topic string, handler func(ctx context.Context, message proto.Message)) (Subscription, error)
 	// Replicator returns the PID of the local CRDT Replicator system actor.
 	// Returns nil if CRDT replication is not enabled via ClusterConfig.WithCRDT.
 	Replicator() *PID

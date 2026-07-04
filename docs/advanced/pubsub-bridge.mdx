@@ -1,0 +1,107 @@
+---
+title: Non-Actor PubSub Subscriptions
+description: Subscribe a plain callback to a pub/sub topic without defining or spawning an Actor.
+sidebarTitle: "PubSub Bridge"
+---
+
+Subscribing to a [PubSub](/advanced/pubsub) topic normally requires an actor: you define an
+`Actor`, spawn it, send it a `Subscribe` message, and match on the published message type in
+`Receive`. That is the right shape when the subscriber is itself part of your actor graph, but it
+is unnecessary ceremony for gateway-style code — a websocket or SSE handler, for example — that
+only needs to forward whatever is published on a topic somewhere else.
+
+`ActorSystem.SubscribeTopic` registers a plain Go callback as a topic subscriber instead.
+
+## SubscribeTopic
+
+```go
+sub, err := system.SubscribeTopic("orders", func(ctx context.Context, msg proto.Message) {
+    // forward msg to a websocket connection, log it, push it to a channel, etc.
+})
+if err != nil {
+    log.Fatal(err)
+}
+defer sub.Close()
+```
+
+| Method                                | Purpose                                                                        |
+|----------------------------------------|--------------------------------------------------------------------------------|
+| `ActorSystem.SubscribeTopic(topic, handler)` | Registers handler as a subscriber of topic. Returns a `Subscription` or an error. |
+
+Requirements:
+
+- PubSub mode must be enabled, either via `WithPubSub()` or because cluster mode is enabled. If it
+  is not, `SubscribeTopic` returns `errors.ErrPubSubDisabled`.
+- `handler` must not be nil, otherwise `errors.ErrSubscribeHandlerRequired` is returned.
+- The actor system must be running, otherwise `errors.ErrActorSystemNotStarted` is returned.
+
+## Subscription
+
+```go
+type Subscription interface {
+    Topic() string
+    Unsubscribe() error
+    Close() error
+}
+```
+
+`Unsubscribe` and `Close` are equivalent: either stops delivery to the handler and releases the
+internal resources backing the subscription. Both are safe to call more than once — only the first
+call has any effect.
+
+## How it works
+
+`SubscribeTopic` spawns an internally managed bridge actor that subscribes to the topic exactly
+the way any other actor subscriber does — it sends `Subscribe` to [`TopicActor()`](/advanced/pubsub)
+and is watched by it like any other subscriber. This means:
+
+- **Delivery, ordering, and dedup are untouched.** The bridge is just another subscriber from
+  `topicActor`'s point of view; the retention/dedup window configured with `WithMessageRetention`
+  applies identically.
+- **Cross-node dissemination is untouched.** In cluster mode, a message published on one node
+  reaches a `SubscribeTopic` handler registered on another node through the same `TopicMessage`
+  path actor-to-actor pub/sub uses.
+- **Unsubscribing shuts the bridge actor down.** `topicActor` watches every subscriber and removes
+  it from its registry when the subscriber terminates, so `Unsubscribe`/`Close` simply stops the
+  bridge actor and relies on that existing cleanup path.
+
+<Note>
+The handler is invoked on the bridge actor's own goroutine, one message at a time — the same
+sequencing guarantee a `Receive` method gets. Keep it fast, or hand off blocking work (e.g. to a
+buffered channel) instead of doing it inline.
+</Note>
+
+<Warning>
+A panic raised inside handler is recovered like any other actor panic and does not tear down the
+subscription — the bridge actor resumes and keeps delivering later messages. It is still your
+responsibility to avoid leaving shared state inconsistent if your handler panics mid-update.
+</Warning>
+
+## Non-proto payloads
+
+`SubscribeTopic`'s handler signature takes a `proto.Message`, matching the type PubSub uses for
+cross-node dissemination. If something publishes a payload that does not implement `proto.Message`
+to a topic a bridge is subscribed to, the bridge drops it (and logs a warning) instead of invoking
+the handler — the bridge itself is unaffected.
+
+## Example: a websocket gateway
+
+```go
+sub, err := system.SubscribeTopic("orders", func(_ context.Context, msg proto.Message) {
+    event, ok := msg.(*ordersv1.OrderCreated)
+    if !ok {
+        return
+    }
+    payload, _ := protojson.Marshal(event)
+    wsConn.WriteMessage(websocket.TextMessage, payload)
+})
+if err != nil {
+    return err
+}
+
+// when the websocket connection closes:
+defer sub.Close()
+```
+
+No actor definition, no `Receive` switch, no manual `Subscribe`/`Unsubscribe` message plumbing —
+just a callback tied to the lifetime of the connection it serves.
