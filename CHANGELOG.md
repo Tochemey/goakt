@@ -1,5 +1,20 @@
 # Changelog
 
+## [Unreleased]
+
+### ✨ Features
+
+- **Factory-free grain activation with `GrainOf`** ([#1231](https://github.com/Tochemey/goakt/issues/1231)). The new generic package-level function `actor.GrainOf[*MyGrain](ctx, system, name, opts...)` retrieves or activates a grain without a factory: the grain kind is derived from the type parameter, auto-registered in the kind registry, and the grain is constructed as a zero value only when local activation is actually needed. Initialization belongs in `OnActivate`, with external resources supplied through `WithGrainDependencies`, which is the same construction contract the cluster already applies when recreating or relocating grains. Identity resolution no longer executes a factory or allocates a grain instance on lookups and remote activations. The testkit gains matching `testkit.GrainOf[T]` and `testkit.NodeGrainOf[T]` helpers. `GrainOf` rejects non pointer-to-struct type parameters with the new `ErrInvalidGrainKind` and detects same-named kind collisions across packages with the new `ErrGrainKindConflict` instead of silently instantiating the wrong type.
+
+### 🗑️ Deprecations
+
+- The factory-based grain APIs are deprecated but remain functional: `ActorSystem.GrainIdentity`, `GrainContext.GrainIdentity`, the `GrainFactory` type, and the testkit `TestKit.GrainIdentity` / `TestNode.GrainIdentity` wrappers. Migrate to `GrainOf`; factories that capture dependencies in their closure only ever took effect on the local node, since remote recreation always built the grain as a zero value.
+
+### 🐛 Fixes
+
+- **`WithGrainDisableRelocation` now reaches the cluster** ([#1231](https://github.com/Tochemey/goakt/issues/1231)). The option was stored in the grain configuration but never propagated: the wire record always carried `DisableRelocation=false`, so the relocator relocated grains that had explicitly opted out. The flag now flows end to end through the claim record, the remote activation request (new `DisableRelocation` field on `remote.GrainRequest`), and grain recreation, so peer-activated and recreated grains keep the opt-out.
+- **Remote grain activation no longer discards the caller's configuration.** The remote activation request hardcoded a 1s activation timeout with 5 retries and dropped dependencies and mailbox capacity. It now carries the configured `WithGrainInitTimeout`, `WithGrainInitMaxRetries`, `WithGrainMailboxCapacity`, and `WithGrainDependencies` values to the activating node.
+
 ## v4.2.13 - 2026-07-04
 
 ### 🚀 Performance
