@@ -124,7 +124,7 @@ func TestGrainIdentity_RemoteActivationOnDifferentPeer(t *testing.T) {
 		return actual != nil && actual.GetGrainId().GetValue() == identity.String()
 	})).Return(nil).Once()
 	rem.EXPECT().RemoteActivateGrain(ctx, remotePeer.Host, remotePeer.RemotingPort, mock.MatchedBy(func(req *remote.GrainRequest) bool {
-		return req != nil && req.Name == identity.String()
+		return req != nil && req.Name == identity.Name() && req.Kind == identity.Kind()
 	})).Return(nil)
 
 	got, err := sys.GrainIdentity(ctx, name, func(context.Context) (Grain, error) {
@@ -163,7 +163,7 @@ func TestGrainIdentity_RemoteActivationOnDifferentPeer_WithBrotliCompression(t *
 		return actual != nil && actual.GetGrainId().GetValue() == identity.String()
 	})).Return(nil).Once()
 	rem.EXPECT().RemoteActivateGrain(ctx, remotePeer.Host, remotePeer.RemotingPort, mock.MatchedBy(func(req *remote.GrainRequest) bool {
-		return req != nil && req.Name == identity.String()
+		return req != nil && req.Name == identity.Name() && req.Kind == identity.Kind()
 	})).Return(nil)
 
 	got, err := actorSystem.GrainIdentity(ctx, name, func(context.Context) (Grain, error) {
@@ -202,7 +202,7 @@ func TestGrainIdentity_RemoteActivationOnDifferentPeer_WithZstandardCompression(
 		return actual != nil && actual.GetGrainId().GetValue() == identity.String()
 	})).Return(nil).Once()
 	rem.EXPECT().RemoteActivateGrain(ctx, remotePeer.Host, remotePeer.RemotingPort, mock.MatchedBy(func(req *remote.GrainRequest) bool {
-		return req != nil && req.Name == identity.String()
+		return req != nil && req.Name == identity.Name() && req.Kind == identity.Kind()
 	})).Return(nil)
 
 	got, err := actorSystem.GrainIdentity(ctx, name, func(context.Context) (Grain, error) {
@@ -241,7 +241,7 @@ func TestGrainIdentity_RemoteActivationOnDifferentPeer_WithGzipCompression(t *te
 		return actual != nil && actual.GetGrainId().GetValue() == identity.String()
 	})).Return(nil).Once()
 	rem.EXPECT().RemoteActivateGrain(ctx, remotePeer.Host, remotePeer.RemotingPort, mock.MatchedBy(func(req *remote.GrainRequest) bool {
-		return req != nil && req.Name == identity.String()
+		return req != nil && req.Name == identity.Name() && req.Kind == identity.Kind()
 	})).Return(nil)
 
 	got, err := actorSystem.GrainIdentity(ctx, name, func(context.Context) (Grain, error) {
