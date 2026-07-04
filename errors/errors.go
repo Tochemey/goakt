@@ -180,6 +180,14 @@ var (
 	// ErrGrainNotRegistered is returned when attempting to use a Grain type that has not been registered.
 	ErrGrainNotRegistered = errors.New("grain type is not registered")
 
+	// ErrInvalidGrainKind is returned when the grain kind is not a pointer to a struct implementing the Grain interface.
+	ErrInvalidGrainKind = errors.New("grain kind must be a pointer to a struct implementing Grain")
+
+	// ErrGrainKindConflict is returned when a different grain type is already registered under the same kind name.
+	// Grain kinds are keyed by their package-qualified type name; two grain types whose packages share the same
+	// base name collide and cannot coexist in the same actor system.
+	ErrGrainKindConflict = errors.New("a different grain type is already registered under this kind")
+
 	// ErrUnhanledMessage is returned when a message is received that the actor/grain does not know how to handle.
 	ErrUnhanledMessage = errors.New("unhandled message")
 

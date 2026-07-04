@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"net"
+	"reflect"
 	"strconv"
 	"sync"
 	"time"
@@ -130,6 +131,11 @@ func (x *actorSystem) RegisterGrainKind(_ context.Context, kind Grain) error {
 // Note:
 //   - This method abstracts away the details of Grain lifecycle management.
 //   - Use this to obtain a reference to a Grain for message passing or further operations.
+//
+// Deprecated: use the package-level GrainOf function instead. GrainOf derives the grain kind
+// from its type parameter, requires no factory, and only constructs the grain (as a zero value)
+// when local activation is needed. The factory-based path remains functional but will be
+// removed in a future major release.
 func (x *actorSystem) GrainIdentity(ctx context.Context, name string, factory GrainFactory, opts ...GrainOption) (*GrainIdentity, error) {
 	if !x.started.Load() || x.isStopping() {
 		return nil, gerrors.ErrActorSystemNotStarted
@@ -140,6 +146,58 @@ func (x *actorSystem) GrainIdentity(ctx context.Context, name string, factory Gr
 		return nil, err
 	}
 
+	return x.activateGrain(ctx, identity, staticGrainProvider(grain), config)
+}
+
+// grainOf retrieves or activates the Grain identified by the prototype's kind and the given name.
+//
+// The prototype is only used to derive the grain kind via reflection; it is never activated.
+// The kind is auto-registered in the local registry so that remote activation, recreation and
+// relocation can instantiate it on this node. When local activation is required, the grain
+// instance is created as a zero value from the registry, exactly like the recreation path.
+func (x *actorSystem) grainOf(ctx context.Context, prototype Grain, name string, opts ...GrainOption) (*GrainIdentity, error) {
+	if !x.started.Load() || x.isStopping() {
+		return nil, gerrors.ErrActorSystemNotStarted
+	}
+
+	identity := newGrainIdentity(prototype, name)
+	config, err := x.validateGrainActivation(identity, opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	// The registry keys kinds by their package-qualified type name. When the kind
+	// is already registered, make sure it maps to the caller's type: silently
+	// instantiating a same-named type from another package would route messages
+	// to the wrong grain implementation.
+	if rtype, ok := x.registry.TypeOf(identity.Kind()); ok {
+		if rtype != reflect.TypeOf(prototype).Elem() {
+			return nil, gerrors.ErrGrainKindConflict
+		}
+	} else {
+		x.registry.Register(prototype)
+	}
+
+	provider := func() (Grain, error) {
+		return x.getReflection().instantiateGrain(identity.Kind())
+	}
+
+	return x.activateGrain(ctx, identity, provider, config)
+}
+
+// grainProvider lazily supplies the grain instance to activate. It is only
+// invoked when local activation actually constructs a new grain process,
+// never for lookups of already-active grains or remote activations.
+type grainProvider func() (Grain, error)
+
+// staticGrainProvider wraps an already-constructed grain instance into a grainProvider.
+func staticGrainProvider(grain Grain) grainProvider {
+	return func() (Grain, error) { return grain, nil }
+}
+
+// activateGrain resolves the grain owner and activates the grain remotely or
+// locally. It is the shared orchestration behind GrainIdentity and GrainOf.
+func (x *actorSystem) activateGrain(ctx context.Context, identity *GrainIdentity, provider grainProvider, config *grainConfig) (*GrainIdentity, error) {
 	x.logger.Debugf("activating grain=%s", identity.String())
 	owner, err := x.resolveGrainOwner(ctx, identity)
 	if err != nil {
@@ -147,7 +205,7 @@ func (x *actorSystem) GrainIdentity(ctx context.Context, name string, factory Gr
 		return nil, err
 	}
 
-	handled, err := x.tryRemoteGrainActivation(ctx, identity, grain, config, owner)
+	handled, err := x.tryRemoteGrainActivation(ctx, identity, config, owner)
 	if err != nil {
 		x.logger.Errorf("failed to attempt remote activation for grain (%s): %v (hint: check target node reachable, grain OnActivate)", identity.String(), err)
 		return nil, err
@@ -158,7 +216,7 @@ func (x *actorSystem) GrainIdentity(ctx context.Context, name string, factory Gr
 		return identity, nil
 	}
 
-	if err := x.activateGrainLocally(ctx, identity, grain, config, owner); err != nil {
+	if err := x.activateGrainLocally(ctx, identity, provider, config, owner); err != nil {
 		return nil, err
 	}
 
@@ -281,21 +339,32 @@ func (x *actorSystem) prepareGrainIdentity(ctx context.Context, name string, fac
 	}
 
 	identity := newGrainIdentity(grain, name)
-	if err := identity.Validate(); err != nil {
-		return nil, nil, nil, err
-	}
-
-	// make sure we don't interfere with system actors.
-	if isSystemName(identity.Name()) {
-		return nil, nil, nil, gerrors.NewErrReservedName(identity.String())
-	}
-
-	config := newGrainConfig(opts...)
-	if err := config.Validate(); err != nil {
+	config, err := x.validateGrainActivation(identity, opts...)
+	if err != nil {
 		return nil, nil, nil, err
 	}
 
 	return grain, identity, config, nil
+}
+
+// validateGrainActivation validates the grain identity and builds the grain
+// configuration from the provided options.
+func (x *actorSystem) validateGrainActivation(identity *GrainIdentity, opts ...GrainOption) (*grainConfig, error) {
+	if err := identity.Validate(); err != nil {
+		return nil, err
+	}
+
+	// make sure we don't interfere with system actors.
+	if isSystemName(identity.Name()) {
+		return nil, gerrors.NewErrReservedName(identity.String())
+	}
+
+	config := newGrainConfig(opts...)
+	if err := config.Validate(); err != nil {
+		return nil, err
+	}
+
+	return config, nil
 }
 
 // resolveGrainOwner returns the cluster owner record when clustering is enabled.
@@ -308,7 +377,7 @@ func (x *actorSystem) resolveGrainOwner(ctx context.Context, identity *GrainIden
 
 // tryRemoteGrainActivation attempts to activate the grain on a remote owner or activation peer.
 // It returns true when the caller should stop and return the identity without local activation.
-func (x *actorSystem) tryRemoteGrainActivation(ctx context.Context, identity *GrainIdentity, grain Grain, config *grainConfig, owner *internalpb.Grain) (bool, error) {
+func (x *actorSystem) tryRemoteGrainActivation(ctx context.Context, identity *GrainIdentity, config *grainConfig, owner *internalpb.Grain) (bool, error) {
 	if !x.InCluster() {
 		return false, nil
 	}
@@ -340,13 +409,12 @@ func (x *actorSystem) tryRemoteGrainActivation(ctx context.Context, identity *Gr
 		return false, nil
 	}
 
-	return x.tryPeerActivation(ctx, identity, grain, config, peer)
+	return x.tryPeerActivation(ctx, identity, config, peer)
 }
 
 // tryPeerActivation claims the grain for a remote peer and triggers remote activation.
-func (x *actorSystem) tryPeerActivation(ctx context.Context, identity *GrainIdentity, grain Grain, config *grainConfig, peer *cluster.Peer) (bool, error) {
-	pid := newGrainPID(identity, grain, x, config)
-	grainInfo, err := pid.toWireGrain()
+func (x *actorSystem) tryPeerActivation(ctx context.Context, identity *GrainIdentity, config *grainConfig, peer *cluster.Peer) (bool, error) {
+	grainInfo, err := wireGrain(identity, config, x.Host(), x.Port())
 	if err != nil {
 		return false, err
 	}
@@ -373,15 +441,19 @@ func (x *actorSystem) tryPeerActivation(ctx context.Context, identity *GrainIden
 }
 
 // activateGrainLocally ensures a local grain exists, claims ownership when needed, and activates it.
-func (x *actorSystem) activateGrainLocally(ctx context.Context, identity *GrainIdentity, grain Grain, config *grainConfig, owner *internalpb.Grain) error {
+func (x *actorSystem) activateGrainLocally(ctx context.Context, identity *GrainIdentity, provider grainProvider, config *grainConfig, owner *internalpb.Grain) error {
 	_, err := x.runGrainActivation(identity.String(), func() (*grainPID, error) {
 		pid, ok := x.grains.Get(identity.String())
 		if !ok {
+			grain, err := provider()
+			if err != nil {
+				return nil, err
+			}
 			pid = newGrainPID(identity, grain, x, config)
 		}
 
-		if !x.registry.Exists(grain) {
-			x.registry.Register(grain)
+		if !x.registry.Exists(pid.getGrain()) {
+			x.registry.Register(pid.getGrain())
 		}
 
 		claimed := false
@@ -433,12 +505,20 @@ func (x *actorSystem) activateGrainLocally(ctx context.Context, identity *GrainI
 
 // sendRemoteActivateGrain triggers activation on a remote node for the provided grain identity.
 func (x *actorSystem) sendRemoteActivateGrain(ctx context.Context, grain *internalpb.Grain) error {
+	dependencies, err := x.getReflection().dependenciesFromProto(grain.GetDependencies()...)
+	if err != nil {
+		return err
+	}
+
 	// Convert internalpb.Grain to remote.GrainRequest
 	grainRequest := &remote.GrainRequest{
 		Name:              grain.GetGrainId().GetName(),
 		Kind:              grain.GetGrainId().GetKind(),
-		ActivationTimeout: time.Second,
-		ActivationRetries: 5,
+		Dependencies:      dependencies,
+		ActivationTimeout: grain.GetActivationTimeout().AsDuration(),
+		ActivationRetries: int(grain.GetActivationRetries()),
+		MailboxCapacity:   grain.GetMailboxCapacity(),
+		DisableRelocation: grain.GetDisableRelocation(),
 	}
 
 	// Call the high-level RemoteActivateGrain method
@@ -1161,6 +1241,10 @@ func (x *actorSystem) recreateGrainOnce(ctx context.Context, serializedGrain *in
 		if serializedGrain.MailboxCapacity != nil {
 			capacity := serializedGrain.GetMailboxCapacity()
 			options = append(options, WithGrainMailboxCapacity(capacity))
+		}
+
+		if serializedGrain.GetDisableRelocation() {
+			options = append(options, WithGrainDisableRelocation())
 		}
 
 		config := newGrainConfig(options...)

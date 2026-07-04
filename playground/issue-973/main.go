@@ -130,9 +130,7 @@ func startActorSystem(ctx context.Context, systemName, serverAddr string) actor.
 // nolint
 func activateGrain(ctx context.Context, actorSystem actor.ActorSystem, grainName string, strategy actor.ActivationStrategy) {
 	fmt.Printf("Activating grain %s...\n", grainName)
-	if _, err := actorSystem.GrainIdentity(ctx, grainName, func(ctx context.Context) (actor.Grain, error) {
-		return &MyGrain{}, nil
-	}, actor.WithActivationStrategy(strategy)); err != nil {
+	if _, err := actor.GrainOf[*MyGrain](ctx, actorSystem, grainName, actor.WithActivationStrategy(strategy)); err != nil {
 		fmt.Printf("Error activating grain %s: %v\n", grainName, err)
 		os.Exit(1)
 	}

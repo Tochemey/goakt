@@ -331,7 +331,7 @@ func TestTryRemoteGrainActivation(t *testing.T) {
 
 		rem.EXPECT().RemoteActivateGrain(ctx, owner.Host, int(owner.Port), mock.Anything).Return(nil)
 
-		handled, err := sys.tryRemoteGrainActivation(ctx, identity, grain, newGrainConfig(), owner)
+		handled, err := sys.tryRemoteGrainActivation(ctx, identity, newGrainConfig(), owner)
 		require.NoError(t, err)
 		require.True(t, handled)
 	})
@@ -350,7 +350,7 @@ func TestTryRemoteGrainActivation(t *testing.T) {
 		rem.EXPECT().RemoteActivateGrain(ctx, owner.Host, int(owner.Port), mock.Anything).Return(expectedErr)
 		cl.EXPECT().RemoveGrain(ctx, identity.String()).Return(nil).Once()
 
-		handled, err := sys.tryRemoteGrainActivation(ctx, identity, grain, newGrainConfig(), owner)
+		handled, err := sys.tryRemoteGrainActivation(ctx, identity, newGrainConfig(), owner)
 		require.NoError(t, err)
 		require.False(t, handled)
 	})
@@ -365,7 +365,7 @@ func TestTryRemoteGrainActivation(t *testing.T) {
 			Port:    int32(sys.Port()),
 		}
 
-		handled, err := sys.tryRemoteGrainActivation(ctx, identity, grain, newGrainConfig(), owner)
+		handled, err := sys.tryRemoteGrainActivation(ctx, identity, newGrainConfig(), owner)
 		require.NoError(t, err)
 		require.False(t, handled)
 		rem.AssertNotCalled(t, "RemoteActivateGrain", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
@@ -377,7 +377,7 @@ func TestTryRemoteGrainActivation(t *testing.T) {
 		sys, _, rem, identity := newActivationTestSystem(t, grain, "owner-empty", true)
 		owner := &internalpb.Grain{}
 
-		handled, err := sys.tryRemoteGrainActivation(ctx, identity, grain, newGrainConfig(), owner)
+		handled, err := sys.tryRemoteGrainActivation(ctx, identity, newGrainConfig(), owner)
 		require.NoError(t, err)
 		require.False(t, handled)
 		rem.AssertNotCalled(t, "RemoteActivateGrain", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
@@ -391,7 +391,7 @@ func TestTryRemoteGrainActivation(t *testing.T) {
 
 		cl.EXPECT().Members(ctx).Return([]*cluster.Peer{{Host: "192.0.2.52", Roles: []string{"api"}}}, nil)
 
-		handled, err := sys.tryRemoteGrainActivation(ctx, identity, grain, config, nil)
+		handled, err := sys.tryRemoteGrainActivation(ctx, identity, config, nil)
 		require.Error(t, err)
 		require.False(t, handled)
 	})
@@ -404,7 +404,7 @@ func TestTryRemoteGrainActivation(t *testing.T) {
 
 		cl.EXPECT().Members(ctx).Return([]*cluster.Peer{localPeer}, nil)
 
-		handled, err := sys.tryRemoteGrainActivation(ctx, identity, grain, newGrainConfig(), nil)
+		handled, err := sys.tryRemoteGrainActivation(ctx, identity, newGrainConfig(), nil)
 		require.NoError(t, err)
 		require.False(t, handled)
 	})
@@ -423,7 +423,7 @@ func TestTryRemoteGrainActivation(t *testing.T) {
 		cl.EXPECT().Members(ctx).Return([]*cluster.Peer{localPeer, remotePeer}, nil)
 		cl.EXPECT().NextRoundRobinValue(ctx, cluster.GrainsRoundRobinKey).Return(1, nil)
 
-		handled, err := sys.tryRemoteGrainActivation(ctx, identity, grain, newGrainConfig(WithActivationStrategy(RoundRobinActivation)), nil)
+		handled, err := sys.tryRemoteGrainActivation(ctx, identity, newGrainConfig(WithActivationStrategy(RoundRobinActivation)), nil)
 		require.NoError(t, err)
 		require.False(t, handled)
 	})
@@ -439,7 +439,7 @@ func TestTryPeerActivation(t *testing.T) {
 
 		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, expectedErr).Once()
 
-		handled, err := sys.tryPeerActivation(ctx, identity, grain, newGrainConfig(), peer)
+		handled, err := sys.tryPeerActivation(ctx, identity, newGrainConfig(), peer)
 		require.ErrorIs(t, err, expectedErr)
 		require.False(t, handled)
 		rem.AssertNotCalled(t, "RemoteActivateGrain", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
@@ -454,7 +454,7 @@ func TestTryPeerActivation(t *testing.T) {
 		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
 		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(nil, cluster.ErrGrainNotFound).Once()
 
-		handled, err := sys.tryPeerActivation(ctx, identity, grain, newGrainConfig(), peer)
+		handled, err := sys.tryPeerActivation(ctx, identity, newGrainConfig(), peer)
 		require.NoError(t, err)
 		require.True(t, handled)
 		rem.AssertNotCalled(t, "RemoteActivateGrain", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
@@ -472,7 +472,7 @@ func TestTryPeerActivation(t *testing.T) {
 			return actual != nil && actual.GetGrainId().GetValue() == identity.String()
 		})).Return(expectedErr).Once()
 
-		handled, err := sys.tryPeerActivation(ctx, identity, grain, newGrainConfig(), peer)
+		handled, err := sys.tryPeerActivation(ctx, identity, newGrainConfig(), peer)
 		require.ErrorIs(t, err, expectedErr)
 		require.False(t, handled)
 		rem.AssertNotCalled(t, "RemoteActivateGrain", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
@@ -492,7 +492,7 @@ func TestTryPeerActivation(t *testing.T) {
 		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
 		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil).Once()
 
-		handled, err := sys.tryPeerActivation(ctx, identity, grain, newGrainConfig(), peer)
+		handled, err := sys.tryPeerActivation(ctx, identity, newGrainConfig(), peer)
 		require.NoError(t, err)
 		require.True(t, handled)
 		rem.AssertNotCalled(t, "RemoteActivateGrain", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
@@ -508,7 +508,7 @@ func TestActivateGrainLocally(t *testing.T) {
 
 		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, expectedErr).Once()
 
-		err := sys.activateGrainLocally(ctx, identity, grain, newGrainConfig(), nil)
+		err := sys.activateGrainLocally(ctx, identity, staticGrainProvider(grain), newGrainConfig(), nil)
 		require.ErrorIs(t, err, expectedErr)
 		require.True(t, sys.registry.Exists(grain))
 	})
@@ -520,7 +520,7 @@ func TestActivateGrainLocally(t *testing.T) {
 		expectedErr := errors.New("wire encode failed")
 		config := newGrainConfig(WithGrainDependencies(&MockFailingDependency{err: expectedErr}))
 
-		err := sys.activateGrainLocally(ctx, identity, grain, config, nil)
+		err := sys.activateGrainLocally(ctx, identity, staticGrainProvider(grain), config, nil)
 		require.ErrorIs(t, err, expectedErr)
 	})
 
@@ -535,7 +535,7 @@ func TestActivateGrainLocally(t *testing.T) {
 			return actual != nil && actual.GetGrainId().GetValue() == identity.String()
 		})).Return(expectedErr).Once()
 
-		err := sys.activateGrainLocally(ctx, identity, grain, newGrainConfig(), nil)
+		err := sys.activateGrainLocally(ctx, identity, staticGrainProvider(grain), newGrainConfig(), nil)
 		require.ErrorIs(t, err, expectedErr)
 	})
 
@@ -552,7 +552,7 @@ func TestActivateGrainLocally(t *testing.T) {
 		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
 		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(remoteOwner, nil).Once()
 
-		err := sys.activateGrainLocally(ctx, identity, grain, newGrainConfig(), nil)
+		err := sys.activateGrainLocally(ctx, identity, staticGrainProvider(grain), newGrainConfig(), nil)
 		require.NoError(t, err)
 		require.Empty(t, grain.name)
 
@@ -568,7 +568,7 @@ func TestActivateGrainLocally(t *testing.T) {
 		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
 		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(nil, cluster.ErrGrainNotFound).Once()
 
-		err := sys.activateGrainLocally(ctx, identity, grain, newGrainConfig(), nil)
+		err := sys.activateGrainLocally(ctx, identity, staticGrainProvider(grain), newGrainConfig(), nil)
 		require.NoError(t, err)
 		require.Equal(t, identity.Name(), grain.name)
 
@@ -591,7 +591,7 @@ func TestActivateGrainLocally(t *testing.T) {
 		})).Return(nil).Once()
 		cl.EXPECT().RemoveGrain(mock.Anything, identity.String()).Return(nil).Once()
 
-		err := sys.activateGrainLocally(ctx, identity, grain, config, nil)
+		err := sys.activateGrainLocally(ctx, identity, staticGrainProvider(grain), config, nil)
 		require.ErrorIs(t, err, gerrors.ErrGrainActivationFailure)
 	})
 
@@ -607,7 +607,7 @@ func TestActivateGrainLocally(t *testing.T) {
 			Port:    int32(sys.Port()),
 		}
 
-		err := sys.activateGrainLocally(ctx, identity, grain, config, owner)
+		err := sys.activateGrainLocally(ctx, identity, staticGrainProvider(grain), config, owner)
 		require.ErrorIs(t, err, expectedErr)
 	})
 
@@ -625,7 +625,7 @@ func TestActivateGrainLocally(t *testing.T) {
 			Port:    int32(sys.Port()),
 		}
 
-		err := sys.activateGrainLocally(ctx, identity, grain, newGrainConfig(), owner)
+		err := sys.activateGrainLocally(ctx, identity, staticGrainProvider(grain), newGrainConfig(), owner)
 		require.NoError(t, err)
 		require.Equal(t, "pre-activated", grain.name)
 	})
@@ -637,7 +637,7 @@ func TestActivateGrainLocally(t *testing.T) {
 		sys.grainBarrier = newGrainActivationBarrier(2, 10*time.Millisecond)
 		owner := &internalpb.Grain{GrainId: &internalpb.GrainId{Value: identity.String()}}
 
-		err := sys.activateGrainLocally(ctx, identity, grain, newGrainConfig(), owner)
+		err := sys.activateGrainLocally(ctx, identity, staticGrainProvider(grain), newGrainConfig(), owner)
 		require.ErrorIs(t, err, gerrors.ErrGrainActivationBarrierTimeout)
 	})
 }
@@ -1900,4 +1900,97 @@ func BenchmarkAskGrainNodeLocal(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
+}
+
+func TestWireGrainDisableRelocation(t *testing.T) {
+	grain := NewMockGrain()
+	sys, _, _, identity := newActivationTestSystem(t, grain, "claim-wire", true)
+
+	wire, err := wireGrain(identity, newGrainConfig(WithGrainMailboxCapacity(16)), sys.Host(), sys.Port())
+	require.NoError(t, err)
+	require.Equal(t, identity.String(), wire.GetGrainId().GetValue())
+	require.Equal(t, sys.Host(), wire.GetHost())
+	require.EqualValues(t, sys.Port(), wire.GetPort())
+	require.EqualValues(t, 16, wire.GetMailboxCapacity())
+	require.False(t, wire.GetDisableRelocation())
+
+	wire, err = wireGrain(identity, newGrainConfig(WithGrainDisableRelocation()), sys.Host(), sys.Port())
+	require.NoError(t, err)
+	require.True(t, wire.GetDisableRelocation())
+}
+
+func TestRecreateGrainPreservesDisableRelocation(t *testing.T) {
+	ctx := t.Context()
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+	t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+	as := sys.(*actorSystem)
+	as.registry.Register(&MockGrain{})
+
+	identity := newGrainIdentity(&MockGrain{}, "recreate-disable-relocation")
+	wire, err := wireGrain(identity, newGrainConfig(WithGrainDisableRelocation()), as.Host(), as.Port())
+	require.NoError(t, err)
+	require.True(t, wire.GetDisableRelocation())
+
+	require.NoError(t, as.recreateGrain(ctx, wire))
+
+	// the rebuilt config carries the flag, so the republished wire record keeps it
+	pid, ok := as.grains.Get(identity.String())
+	require.True(t, ok)
+	require.True(t, pid.config.disableRelocation)
+
+	republished, err := pid.toWireGrain()
+	require.NoError(t, err)
+	require.True(t, republished.GetDisableRelocation())
+}
+
+func TestPeerActivationPropagatesGrainConfig(t *testing.T) {
+	ctx := t.Context()
+	name := "remote-config-grain"
+	identity := newGrainIdentity((*grainOfCounterGrain)(nil), name)
+	remotePeer := &cluster.Peer{Host: "192.0.2.30", PeersPort: 15030, RemotingPort: 16030}
+	alternatePeer := &cluster.Peer{Host: "192.0.2.31", PeersPort: 15031, RemotingPort: 16031}
+	localPeer := &cluster.Peer{Host: "127.0.0.1", PeersPort: 14030, RemotingPort: 8095}
+
+	cl := mockcluster.NewCluster(t)
+	rem := mockremote.NewClient(t)
+	node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
+	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+
+	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
+	cl.EXPECT().GetGrain(ctx, identity.String()).Return(nil, cluster.ErrGrainNotFound)
+	cl.EXPECT().Members(ctx).Return([]*cluster.Peer{remotePeer, alternatePeer}, nil)
+	cl.EXPECT().NextRoundRobinValue(ctx, cluster.GrainsRoundRobinKey).Return(1, nil)
+	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, nil).Once()
+
+	// the claim record must carry the caller's configuration
+	cl.EXPECT().PutGrain(mock.Anything, mock.MatchedBy(func(actual *internalpb.Grain) bool {
+		return actual.GetGrainId().GetValue() == identity.String() &&
+			actual.GetDisableRelocation() &&
+			actual.GetActivationTimeout().AsDuration() == 9*time.Second &&
+			actual.GetActivationRetries() == 3 &&
+			actual.GetMailboxCapacity() == 64
+	})).Return(nil).Once()
+
+	// the remote activation request must carry the same configuration instead of defaults
+	rem.EXPECT().RemoteActivateGrain(ctx, remotePeer.Host, remotePeer.RemotingPort, mock.MatchedBy(func(req *remote.GrainRequest) bool {
+		return req.Name == identity.Name() &&
+			req.Kind == identity.Kind() &&
+			req.DisableRelocation &&
+			req.ActivationTimeout == 9*time.Second &&
+			req.ActivationRetries == 3 &&
+			req.MailboxCapacity == 64
+	})).Return(nil)
+
+	got, err := GrainOf[*grainOfCounterGrain](ctx, sys, name,
+		WithActivationStrategy(RoundRobinActivation),
+		WithGrainDisableRelocation(),
+		WithGrainInitTimeout(9*time.Second),
+		WithGrainInitMaxRetries(3),
+		WithGrainMailboxCapacity(64))
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, identity.String(), got.String())
 }

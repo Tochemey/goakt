@@ -483,6 +483,7 @@ func BenchmarkGrainTell(b *testing.B) {
 
 	done := make(chan struct{})
 	target := int64(b.N)
+	//nolint:staticcheck // the deprecated factory path is kept here: the benchmark injects per-run state that zero-value construction cannot carry
 	identity, err := actorSystem.GrainIdentity(ctx, "receiver", func(context.Context) (actor.Grain, error) {
 		return &countingGrain{done: done, target: target}, nil
 	})
@@ -573,6 +574,7 @@ func setupFanOutGrains(b *testing.B, ctx context.Context, system actor.ActorSyst
 		if target == 0 {
 			close(done)
 		}
+		//nolint:staticcheck // the deprecated factory path is kept here: the benchmark injects per-run state that zero-value construction cannot carry
 		id, err := system.GrainIdentity(ctx, fmt.Sprintf("g-%d", i), func(context.Context) (actor.Grain, error) {
 			return &countingGrain{done: done, target: target}, nil
 		})
@@ -602,9 +604,7 @@ func BenchmarkGrainAsk(b *testing.B) {
 	}
 	b.Cleanup(func() { _ = actorSystem.Stop(ctx) })
 
-	identity, err := actorSystem.GrainIdentity(ctx, "receiver", func(context.Context) (actor.Grain, error) {
-		return &benchGrain{}, nil
-	})
+	identity, err := actor.GrainOf[*benchGrain](ctx, actorSystem, "receiver")
 	if err != nil {
 		b.Fatalf("failed to create grain identity: %v", err)
 	}
@@ -814,6 +814,7 @@ func BenchmarkGrainTellThroughput(b *testing.B) {
 
 			done := make(chan struct{})
 			target := int64(b.N)
+			//nolint:staticcheck // the deprecated factory path is kept here: the benchmark injects per-run state that zero-value construction cannot carry
 			identity, err := actorSystem.GrainIdentity(ctx, "receiver", func(context.Context) (actor.Grain, error) {
 				return &countingGrain{done: done, target: target}, nil
 			})

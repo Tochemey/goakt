@@ -2548,6 +2548,7 @@ func getGrainFromRequest(host string, port int, grainRequest *remote.GrainReques
 		ActivationRetries: int32(grainRequest.ActivationRetries),
 		ActivationTimeout: durationpb.New(grainRequest.ActivationTimeout),
 		MailboxCapacity:   new(grainRequest.MailboxCapacity),
+		DisableRelocation: grainRequest.DisableRelocation,
 	}
 
 	return grain, nil

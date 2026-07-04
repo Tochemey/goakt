@@ -281,3 +281,23 @@ func TestGrainPIDHandlePoisonPillRecoversDeactivatePanic(t *testing.T) {
 	var panicErr *gerrors.PanicError
 	require.ErrorAs(t, err, &panicErr)
 }
+
+func TestToWireGrainDisableRelocation(t *testing.T) {
+	ctx := t.Context()
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+	t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+	identity := newGrainIdentity(&MockGrain{}, "wire-default")
+	pid := newGrainPID(identity, &MockGrain{}, sys, newGrainConfig())
+	wire, err := pid.toWireGrain()
+	require.NoError(t, err)
+	require.False(t, wire.GetDisableRelocation())
+
+	identity = newGrainIdentity(&MockGrain{}, "wire-disabled")
+	pid = newGrainPID(identity, &MockGrain{}, sys, newGrainConfig(WithGrainDisableRelocation()))
+	wire, err = pid.toWireGrain()
+	require.NoError(t, err)
+	require.True(t, wire.GetDisableRelocation())
+}

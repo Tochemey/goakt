@@ -43,7 +43,7 @@ Relocation does **not** run in standalone mode; it requires cluster mode and rem
 ## Actor allocation
 
 | Actor type        | Destination                                 |
-|-------------------|---------------------------------------------|
+| ----------------- | ------------------------------------------- |
 | **Singleton**     | Leader node only                            |
 | **Non-singleton** | Distributed across leader + peers (chunked) |
 
@@ -71,8 +71,7 @@ When the host node leaves, this actor is **not** recreated elsewhere. Use for:
 ### Disable relocation for a grain
 
 ```go
-cfg := newGrainConfig(WithGrainDisableRelocation())
-system.RegisterGrain(MyGrainType, factory, cfg)
+identity, err := actor.GrainOf[*MyGrain](ctx, system, "my-grain", actor.WithGrainDisableRelocation())
 ```
 
 If the hosting node leaves, the grain instance is lost. Re-addressing the grain by ID will create a new instance on another node; any in-memory state is gone. Persist state externally if you need recovery.
@@ -120,7 +119,7 @@ See [Extensions and Dependencies](/advanced/extensions-and-dependencies) for dep
 ## Check relocatability
 
 | API                     | Purpose                                      |
-|-------------------------|----------------------------------------------|
+| ----------------------- | -------------------------------------------- |
 | `pid.IsRelocatable()`   | Returns whether the actor may be relocated.  |
 | `pid.Path().HostPort()` | Current host:port; changes after relocation. |
 

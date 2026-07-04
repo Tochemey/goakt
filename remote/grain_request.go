@@ -66,6 +66,10 @@ type GrainRequest struct {
 
 	// MailboxCapacity is the capacity of the Grain mailbox (<=0 means unbounded).
 	MailboxCapacity int64
+
+	// DisableRelocation indicates that the Grain must not be relocated to another
+	// node when its hosting node leaves the cluster.
+	DisableRelocation bool
 }
 
 var _ validation.Validator = (*GrainRequest)(nil)

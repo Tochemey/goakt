@@ -142,6 +142,10 @@ func (x *TestKit) NewGrainProbe(ctx context.Context) GrainProbe {
 }
 
 // GrainIdentity creates a grain identity
+//
+// Deprecated: use the package-level GrainOf function instead. GrainOf derives the grain
+// kind from its type parameter and requires no factory. This method will be removed in a
+// future major release.
 func (x *TestKit) GrainIdentity(ctx context.Context, name string, factory goakt.GrainFactory, opts ...goakt.GrainOption) *goakt.GrainIdentity {
 	require.True(x.testingT, x.started.Load(), "require testkit to be started")
 	require.NotNil(x.testingT, factory)

@@ -125,6 +125,7 @@ See [Dispatcher Pool](/architecture/dispatcher-pool) for the full design.
 | File                          | Purpose                                                                 |
 | ----------------------------- | ----------------------------------------------------------------------- |
 | `grain.go`                    | `Grain` interface                                                       |
+| `grain_of.go`                 | `GrainOf[T]` generic, factory-free grain activation entry point         |
 | `grain_engine.go`             | Grain activation, routing, passivation                                  |
 | `grain_pid.go`                | `grainPID` — `PID` variant for virtual actors; implements `schedulable` |
 | `grain_context.go`            | `GrainContext` for `OnReceive`                                          |

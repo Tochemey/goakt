@@ -190,9 +190,7 @@ func main() {
 
 	// Activate the grain on this node so it registers as node-local in the
 	// cluster registry; every subsequent send resolves the local node as owner.
-	identity, err := actorSystem.GrainIdentity(ctx, "local-grain", func(context.Context) (actor.Grain, error) {
-		return newCounterGrain(), nil
-	})
+	identity, err := actor.GrainOf[*counterGrain](ctx, actorSystem, "local-grain")
 	if err != nil {
 		fmt.Printf("FAIL: error activating grain: %v\n", err)
 		os.Exit(1)

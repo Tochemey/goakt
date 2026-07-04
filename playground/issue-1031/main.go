@@ -140,12 +140,10 @@ func main() {
 	fmt.Println("Cluster started")
 
 	for i := range 10 {
-		identity, err := actorSystem.GrainIdentity(
+		identity, err := actor.GrainOf[*Grain](
 			ctx,
+			actorSystem,
 			fmt.Sprintf("test-%d", i),
-			func(ctx context.Context) (actor.Grain, error) {
-				return NewGrain(), nil
-			},
 		)
 		if err != nil {
 			fmt.Printf("Error creating grain: %v\n", err)

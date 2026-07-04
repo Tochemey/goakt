@@ -22,7 +22,7 @@ The `testkit` package provides helpers for actor-level testing. It creates a thr
 | `Kill(ctx, name)`                                        | Stop an actor by name.                                                |
 | `NewProbe(ctx)`                                          | Create a test probe.                                                  |
 | `NewGrainProbe(ctx)`                                     | Create a grain test probe.                                            |
-| `GrainIdentity(ctx, name, factory, opts...)`             | Create a grain identity.                                              |
+| `GrainOf[T](ctx, kit, name, opts...)`                    | Create a grain identity of kind T (package-level function).           |
 | `Shutdown(ctx)`                                          | Stop the actor system.                                                |
 
 ### Options
@@ -91,7 +91,8 @@ func TestSpawnsChild(t *testing.T) {
 
 ## GrainProbe
 
-Similar to Probe but for grains. Use `GrainIdentity` to create identities, then send and assert responses.
+Similar to Probe but for grains. Use the package-level `testkit.GrainOf[T]` function (or `testkit.NodeGrainOf[T]` on a
+cluster test node) to create identities, then send and assert responses.
 
 | Method                             | Purpose                                |
 | ---------------------------------- | -------------------------------------- |

@@ -48,9 +48,35 @@ Inside `OnReceive`, `GrainContext` provides:
 
 ## Identity and messaging
 
-Use `GrainIdentity(ctx, instanceName, factory)` to obtain an identity. The factory creates the grain when the framework
-activates it. Then use `TellGrain` or `AskGrain` with that identity. The instance name (e.g., `"user-123"`) uniquely
-identifies the grain within its type.
+Use the generic `actor.GrainOf` function to obtain an identity. The type parameter must be a pointer to your grain
+struct; the framework derives the grain kind from it, so no factory is required. Then use `TellGrain` or `AskGrain`
+with that identity. The instance name (e.g., `"user-123"`) uniquely identifies the grain within its kind.
+
+```go
+identity, err := actor.GrainOf[*UserGrain](ctx, system, "user-123")
+if err != nil {
+    return err
+}
+
+response, err := system.AskGrain(ctx, identity, request, time.Second)
+```
+
+When activation is needed, the framework constructs the grain as a zero value of its struct type. Put initialization
+logic in `OnActivate` and supply external resources (database handles, clients, configuration) through
+`WithGrainDependencies`; they are available from the `GrainProps` passed to `OnActivate`. This is the same construction
+contract the cluster applies when it recreates or relocates a grain on another node.
+
+<Note>
+Calling `GrainOf` automatically registers the grain kind on the calling node. In cluster mode, nodes that can host a
+grain without ever resolving it themselves (for example, targets of relocation or remote activation) must register the
+kind at startup, either with `RegisterGrainKind` or through `ClusterConfig.WithGrains`.
+</Note>
+
+<Warning>
+The factory-based `GrainIdentity(ctx, name, factory, opts...)` API is deprecated. It still works, but factories that
+capture dependencies in their closure only take effect on the local node; a grain recreated or relocated elsewhere is
+always built as a zero value. Migrate to `GrainOf` with `OnActivate`-based initialization.
+</Warning>
 
 ## When to use grains
 

@@ -41,6 +41,11 @@ import "context"
 //
 // The returned Grain must be safe for single-threaded access, as the system guarantees
 // that only one message is processed at a time per grain instance.
+//
+// Deprecated: use the package-level GrainOf function instead of factory-based grain
+// activation. Grains are constructed as zero values from the registry; initialization
+// belongs in OnActivate and external resources are supplied via WithGrainDependencies.
+// This type will be removed in a future major release.
 type GrainFactory func(ctx context.Context) (Grain, error)
 
 // Grain defines the contract for grains (virtual actors) in the goakt actor system.
