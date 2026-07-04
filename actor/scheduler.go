@@ -24,6 +24,7 @@ package actor
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"sync"
 	"time"
@@ -34,6 +35,7 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/xsync"
 	"github.com/tochemey/goakt/v4/log"
 )
@@ -68,9 +70,14 @@ func newScheduler(logger log.Logger, shutdownTimeout time.Duration, system Actor
 	// 2. If the job becomes outdated, go-quartz tries to reschedule it
 	// 3. The already-expired trigger returns an error, causing the job to be dropped
 	// By setting a 24-hour threshold, we ensure jobs are executed even if delayed.
+	// JobMetadata is enabled so a job's Execute closure can read the tick's exact
+	// scheduled fire time via quartz.JobMetadataContextKey; WithClusterSingleFire uses it
+	// to key the cluster-wide fire claim on the trigger tick rather than on wall-clock time
+	// at invocation, which would drift across nodes.
 	quartzScheduler, _ := quartz.NewStdScheduler(
 		quartz.WithLogger(quartzlogger.NewSimpleLogger(nil, quartzlogger.LevelOff)),
 		quartz.WithOutdatedThreshold(24*time.Hour),
+		quartz.WithJobMetadata(),
 	)
 
 	// create an instance of scheduler
@@ -339,7 +346,53 @@ func (x *scheduler) makeJobFn(to *PID, message any, cfg *scheduleConfig) func(ct
 		sender = noSender
 	}
 	return func(ctx context.Context) (bool, error) {
+		if cfg.ClusterSingleFire() {
+			won, err := x.claimClusterFire(ctx, cfg.Reference())
+			if err != nil {
+				return false, err
+			}
+			if !won {
+				// Another node already claimed this tick: skip delivery silently.
+				return true, nil
+			}
+		}
+
 		err := sender.Tell(ctx, to, message)
 		return err == nil, err
+	}
+}
+
+// clusterSingleFireClaimTTL bounds how long a WithClusterSingleFire claim survives in the
+// cluster store. It exists purely for garbage collection: every tick claims a distinct key
+// (reference plus trigger tick), so correctness never depends on this value, only on how
+// long stale claim entries are allowed to linger.
+const clusterSingleFireClaimTTL = time.Minute
+
+// claimClusterFire arbitrates which node is allowed to deliver the current trigger tick of a
+// schedule configured with WithClusterSingleFire. It returns true for the caller that should
+// proceed with delivery, and false for every other node racing for the same tick.
+//
+// Outside cluster mode, or when the tick's scheduled fire time is unavailable, it fails open
+// (returns true) rather than silently dropping every delivery: the option is documented as a
+// no-op outside cluster mode.
+func (x *scheduler) claimClusterFire(ctx context.Context, reference string) (bool, error) {
+	if !x.actorSystem.InCluster() {
+		return true, nil
+	}
+
+	metadata, ok := ctx.Value(quartz.JobMetadataContextKey).(quartz.JobMetadata)
+	if !ok {
+		return true, nil
+	}
+
+	key := fmt.Sprintf("%s@%d", reference, metadata.RunTime)
+	err := cluster.ClaimScheduleFire(ctx, x.actorSystem.getCluster(), key, clusterSingleFireClaimTTL)
+	switch {
+	case err == nil:
+		return true, nil
+	case stderrors.Is(err, cluster.ErrScheduleFireClaimed):
+		return false, nil
+	default:
+		return false, err
 	}
 }

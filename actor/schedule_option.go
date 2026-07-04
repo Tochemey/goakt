@@ -27,8 +27,9 @@ import (
 )
 
 type scheduleConfig struct {
-	sender    *PID
-	reference string
+	sender            *PID
+	reference         string
+	clusterSingleFire bool
 }
 
 // newScheduleConfig creates and returns a new scheduleConfig instance using the provided ScheduleOption arguments.
@@ -52,6 +53,11 @@ func (s *scheduleConfig) Sender() *PID {
 // Reference returns the scheduled message reference.
 func (s *scheduleConfig) Reference() string {
 	return s.reference
+}
+
+// ClusterSingleFire reports whether WithClusterSingleFire was applied to this schedule.
+func (s *scheduleConfig) ClusterSingleFire() bool {
+	return s.clusterSingleFire
 }
 
 // ScheduleOption defines an interface for applying configuration options to a scheduleConfig instance
@@ -106,5 +112,34 @@ func WithSender(sender *PID) ScheduleOption {
 func WithReference(referenceID string) ScheduleOption {
 	return ScheduleOptionFunc(func(sc *scheduleConfig) {
 		sc.reference = referenceID
+	})
+}
+
+// WithClusterSingleFire arbitrates delivery of a schedule so that, when the actor system
+// is running in cluster mode, only one node in the cluster delivers the message on any given
+// trigger tick, even though every node registered the schedule independently.
+//
+// This targets the common deployment shape where the same application code (and therefore the
+// same Schedule/ScheduleOnce/ScheduleWithCron call) runs on every replica of a cluster: without
+// this option each replica's own scheduler fires independently, so a cron registered on N
+// replicas delivers N times per tick. With this option set, every node still runs its own
+// go-quartz trigger locally (so ticks stay in sync across the cluster with no extra network
+// round trips on the hot path), but immediately before delivery each node races to claim an
+// exclusive, short-lived slot for that specific tick in the cluster's shared store; only the
+// winner proceeds to deliver, and every other node silently skips that tick.
+//
+// Requirements:
+//   - All nodes racing for the same tick must register the schedule with the same Reference
+//     (see WithReference); the claim is keyed on the reference plus the tick, so nodes using
+//     different references never arbitrate against each other.
+//   - Outside cluster mode (ActorSystem.InCluster() is false), this option is a no-op: the
+//     schedule always fires, exactly as if the option had not been set.
+//
+// This does not provide delivery guarantees beyond what the underlying schedule already offers:
+// if the winning node crashes after claiming the tick but before delivering, that specific tick
+// is skipped cluster-wide, and delivery resumes on the very next tick.
+func WithClusterSingleFire() ScheduleOption {
+	return ScheduleOptionFunc(func(sc *scheduleConfig) {
+		sc.clusterSingleFire = true
 	})
 }

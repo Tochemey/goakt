@@ -512,6 +512,50 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Stop(ctx)
 		assert.NoError(t, err)
 	})
+	t.Run("With ScheduleWithCron and WithClusterSingleFire outside cluster mode is a no-op", func(t *testing.T) {
+		// create the context
+		ctx := context.TODO()
+		// define the logger to use
+		logger := log.DiscardLogger
+		// create the actor system
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+		)
+		// assert there are no error
+		require.NoError(t, err)
+
+		// start the actor system
+		err = newActorSystem.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// create a test actor
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		pause.For(time.Second)
+
+		// send a message to the actor after 100 ms
+		message := new(testpb.TestSend)
+		// set cron expression to run every second
+		const expr = "* * * ? * *"
+		err = newActorSystem.ScheduleWithCron(ctx, message, actorRef, expr, WithClusterSingleFire())
+		require.NoError(t, err)
+
+		// wait for two seconds: delivery must proceed exactly as without the option
+		// since the actor system is not running in cluster mode.
+		pause.For(2 * time.Second)
+		assert.EqualValues(t, 2, actorRef.ProcessedCount()-1)
+
+		// stop the actor
+		err = newActorSystem.Stop(ctx)
+		assert.NoError(t, err)
+	})
 	t.Run("With ScheduleWithCron when cluster is enabled", func(t *testing.T) {
 		ctx := context.TODO()
 		nodePorts := dynaport.Get(3)
@@ -581,6 +625,72 @@ func TestScheduler(t *testing.T) {
 		assert.GreaterOrEqual(t, processed, 2)
 
 		// stop the actor
+		err = newActorSystem.Stop(ctx)
+		assert.NoError(t, err)
+		provider.AssertExpectations(t)
+	})
+	t.Run("With ScheduleWithCron and WithClusterSingleFire when cluster is enabled", func(t *testing.T) {
+		ctx := context.TODO()
+		nodePorts := dynaport.Get(3)
+		discoveryPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		logger := log.DiscardLogger
+		host := "127.0.0.1"
+
+		addrs := []string{
+			net.JoinHostPort(host, strconv.Itoa(discoveryPort)),
+		}
+
+		provider := new(testkit.Provider)
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+			WithCluster(
+				NewClusterConfig().
+					WithKinds(new(MockActor)).
+					WithPartitionCount(9).
+					WithReplicaCount(1).
+					WithPeersPort(clusterPort).
+					WithMinimumPeersQuorum(1).
+					WithDiscoveryPort(discoveryPort).
+					WithDiscovery(provider)),
+		)
+		require.NoError(t, err)
+
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		err = newActorSystem.Start(ctx)
+		require.NoError(t, err)
+
+		pause.For(time.Second)
+
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		pause.For(time.Second)
+
+		// as the sole node racing for every tick, this node always wins the claim, so
+		// WithClusterSingleFire must not prevent delivery.
+		message := new(testpb.TestSend)
+		const expr = "* * * ? * *"
+		err = newActorSystem.ScheduleWithCron(ctx, message, actorRef, expr, WithClusterSingleFire())
+		require.NoError(t, err)
+
+		require.Eventually(t, func() bool {
+			return actorRef.ProcessedCount()-1 >= 2
+		}, 5*time.Second, 100*time.Millisecond)
+
 		err = newActorSystem.Stop(ctx)
 		assert.NoError(t, err)
 		provider.AssertExpectations(t)

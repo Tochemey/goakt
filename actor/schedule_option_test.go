@@ -76,3 +76,14 @@ func TestScheduleOption(t *testing.T) {
 	err = newActorSystem.Stop(ctx)
 	assert.NoError(t, err)
 }
+
+func TestWithClusterSingleFire(t *testing.T) {
+	t.Run("unset by default", func(t *testing.T) {
+		config := newScheduleConfig()
+		require.False(t, config.ClusterSingleFire())
+	})
+	t.Run("set via option", func(t *testing.T) {
+		config := newScheduleConfig(WithClusterSingleFire())
+		require.True(t, config.ClusterSingleFire())
+	})
+}
