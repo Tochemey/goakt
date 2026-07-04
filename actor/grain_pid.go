@@ -85,8 +85,7 @@ type grainPID struct {
 	deactivateAfter    atomic.Duration
 	passivationManager *passivationManager
 
-	onPoisonPill      atomic.Bool
-	disableRelocation atomic.Bool
+	onPoisonPill atomic.Bool
 
 	// deactivated is closed exactly once when deactivate completes
 	// (success or failure). Shutdown uses this to wait for grain
@@ -118,7 +117,6 @@ func newGrainPID(identity *GrainIdentity, grain Grain, actorSystem ActorSystem, 
 
 	pid.activated.Store(false)
 	pid.onPoisonPill.Store(false)
-	pid.disableRelocation.Store(false)
 	pid.processedCount.Store(0)
 	pid.activatedAt.Store(0)
 
@@ -229,7 +227,6 @@ func (pid *grainPID) deactivate(ctx context.Context) (err error) {
 		pid.activatedAt.Store(0)
 		pid.latestReceiveTimeNano.Store(0)
 		pid.onPoisonPill.Store(false)
-		pid.disableRelocation.Store(false)
 		// Signal completion exactly once so callers waiting on
 		// <-pid.deactivated (e.g. shutdown) unblock even on panic
 		// or error. Nil-guard lets tests that construct grainPID as
@@ -497,23 +494,32 @@ func (pid *grainPID) unregisterPassivation() {
 }
 
 func (pid *grainPID) toWireGrain() (*internalpb.Grain, error) {
-	dependencies, err := codec.EncodeDependencies(pid.dependencies.Values()...)
+	return wireGrain(pid.identity, pid.config, pid.actorSystem.Host(), pid.actorSystem.Port())
+}
+
+// wireGrain builds the cluster wire record for a grain from its identity and
+// configuration. It is the single source of truth for the wire representation:
+// both live grain processes (toWireGrain) and claim-time records built before
+// any grain process exists (tryPeerActivation) must go through it so the two
+// representations cannot drift.
+func wireGrain(identity *GrainIdentity, config *grainConfig, host string, port int) (*internalpb.Grain, error) {
+	dependencies, err := codec.EncodeDependencies(config.dependencies.Values()...)
 	if err != nil {
 		return nil, err
 	}
 
 	return &internalpb.Grain{
 		GrainId: &internalpb.GrainId{
-			Kind:  pid.identity.Kind(),
-			Name:  pid.identity.Name(),
-			Value: pid.identity.String(),
+			Kind:  identity.Kind(),
+			Name:  identity.Name(),
+			Value: identity.String(),
 		},
-		Host:              pid.actorSystem.Host(),
-		Port:              int32(pid.actorSystem.Port()),
+		Host:              host,
+		Port:              int32(port),
 		Dependencies:      dependencies,
-		ActivationTimeout: durationpb.New(pid.config.initTimeout.Load()),
-		ActivationRetries: pid.config.initMaxRetries.Load(),
-		MailboxCapacity:   new(pid.mailbox.Capacity()),
-		DisableRelocation: pid.disableRelocation.Load(),
+		ActivationTimeout: durationpb.New(config.initTimeout.Load()),
+		ActivationRetries: config.initMaxRetries.Load(),
+		MailboxCapacity:   new(config.capacity),
+		DisableRelocation: config.disableRelocation,
 	}, nil
 }

@@ -405,6 +405,13 @@ func (gctx *GrainContext) PipeToSelf(task func() (any, error), opts ...PipeOptio
 //	    // handle error
 //	}
 //	err = ctx.TellGrain(id, &MyMessage{})
+//
+// Deprecated: use the package-level GrainOf function instead, for example:
+//
+//	id, err := actor.GrainOf[*MyGrain](context.WithoutCancel(gctx.Context()), gctx.ActorSystem(), name, opts...)
+//
+// GrainOf derives the grain kind from its type parameter and requires no factory.
+// The factory-based path remains functional but will be removed in a future major release.
 func (gctx *GrainContext) GrainIdentity(name string, factory GrainFactory, opts ...GrainOption) (*GrainIdentity, error) {
 	ctx := context.WithoutCancel(gctx.Context())
 	return gctx.actorSystem.GrainIdentity(ctx, name, factory, opts...)

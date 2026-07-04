@@ -33,6 +33,7 @@ import (
 
 	"github.com/tochemey/goakt/v4/actor"
 	"github.com/tochemey/goakt/v4/discovery/nats"
+	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
@@ -45,9 +46,18 @@ func NewGrain() *Grain {
 	return &Grain{}
 }
 
+var instanceSeen = make(map[string]bool)
+
 func (x *Grain) OnActivate(ctx context.Context, props *actor.GrainProps) error {
 	x.name = props.Identity().Name()
-	fmt.Printf("Grain activated: %s\n", x.name)
+
+	if _, ok := instanceSeen[x.name]; ok {
+		fmt.Printf("grain %s already exists\n", x.name)
+	}
+	instanceSeen[x.name] = true
+
+	time.Sleep(100 * time.Millisecond)
+
 	return nil
 }
 
@@ -62,6 +72,7 @@ func (x *Grain) OnReceive(ctx *actor.GrainContext) {
 }
 
 func (x *Grain) OnDeactivate(ctx context.Context, _ *actor.GrainProps) error {
+	fmt.Println("Grain deactivated")
 	return nil
 }
 
@@ -155,26 +166,20 @@ func main() {
 
 	fmt.Println("Cluster started")
 
-	if len(args) == 0 {
-		for i := range 10000 {
-			time.Sleep(5 * time.Millisecond)
+	for i := range 10000 {
+		pause.For(5 * time.Millisecond)
 
-			identity, err := actorSystem.GrainIdentity(
-				ctx,
-				fmt.Sprintf("name-%d", i),
-				func(ctx context.Context) (actor.Grain, error) {
-					return NewGrain(), nil
-				},
-				actor.WithActivationStrategy(actor.RandomActivation),
-			)
-			if err != nil {
-				fmt.Printf("Error getting grain: %v\n", err)
-				continue
-			}
-
-			fmt.Printf("Asking grain %s\n", identity.String())
-			actorSystem.AskGrain(ctx, identity, &testpb.TestReadiness{}, time.Second)
+		identity, err := actor.GrainOf[*Grain](
+			ctx,
+			actorSystem,
+			fmt.Sprintf("name-%d", i),
+			actor.WithActivationStrategy(actor.RandomActivation),
+		)
+		if err != nil {
+			fmt.Printf("Error getting grain: %v\n", err)
+			continue
 		}
+		actorSystem.AskGrain(ctx, identity, &testpb.TestReadiness{}, time.Second)
 	}
 
 	ch := make(chan os.Signal, 1)

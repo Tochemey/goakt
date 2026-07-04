@@ -174,9 +174,7 @@ func main() {
 	// each of those failed with the "must contain only word characters" error.
 	for i := range grainsCount {
 		name := fmt.Sprintf("my-grain-%d", i)
-		identity, err := nodeA.GrainIdentity(ctx, name, func(context.Context) (actor.Grain, error) {
-			return new(demoGrain), nil
-		}, actor.WithActivationStrategy(actor.RoundRobinActivation))
+		identity, err := actor.GrainOf[*demoGrain](ctx, nodeA, name, actor.WithActivationStrategy(actor.RoundRobinActivation))
 		if err != nil {
 			fmt.Printf("FAIL: activation of %s failed (issue #1227): %v\n", name, err)
 			os.Exit(1)

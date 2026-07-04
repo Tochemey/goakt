@@ -147,6 +147,10 @@ func (x TestNode) SpawnGrainProbe(ctx context.Context) GrainProbe {
 }
 
 // GrainIdentity creates a grain identity
+//
+// Deprecated: use the package-level NodeGrainOf function instead. NodeGrainOf derives the
+// grain kind from its type parameter and requires no factory. This method will be removed
+// in a future major release.
 func (x TestNode) GrainIdentity(ctx context.Context, name string, factory goakt.GrainFactory, opts ...goakt.GrainOption) *goakt.GrainIdentity {
 	require.NotNil(x.testingT, factory)
 	identity, err := x.actorSystem.GrainIdentity(ctx, name, factory, opts...)
