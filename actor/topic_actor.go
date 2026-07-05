@@ -24,8 +24,12 @@ package actor
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
+
+	"go.uber.org/atomic"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/cluster"
@@ -260,13 +264,13 @@ func (x *topicActor) sendToRemoteTopicActors(cctx context.Context, remotePeers [
 // localSubscriberCount returns the number of still-alive local subscribers of
 // topic, pruning any that have terminated without going through
 // handleTerminated (e.g. a stale entry left by a race with Watch).
-func (x *topicActor) localSubscriberCount(topic string) int {
+func (x *topicActor) localSubscriberCount(topic string) int32 {
 	subscribers, ok := x.topics.Get(topic)
 	if !ok {
 		return 0
 	}
 
-	count := 0
+	var count int32
 	for _, subscriber := range subscribers.Values() {
 		_, exists := x.actorSystem.tree().node(subscriber.ID())
 		if exists && subscriber.IsRunning() {
@@ -285,8 +289,7 @@ func (x *topicActor) localSubscriberCount(topic string) int {
 // handleGetTopicStats, which prevents query storms/loops.
 func (x *topicActor) handleTopicStatsRequest(ctx *ReceiveContext) {
 	if request, ok := ctx.Message().(*internalpb.TopicStatsRequest); ok {
-		count := int32(x.localSubscriberCount(request.GetTopic()))
-		ctx.Response(&internalpb.TopicStatsResponse{LocalSubscriberCount: count})
+		ctx.Response(&internalpb.TopicStatsResponse{LocalSubscriberCount: x.localSubscriberCount(request.GetTopic())})
 	}
 }
 
@@ -313,66 +316,58 @@ func (x *topicActor) handleGetTopicStats(ctx *ReceiveContext) {
 			return
 		}
 
-		instances += x.queryRemotePeerInstanceCount(cctx, buildRemotePeers(peers), query.topic)
+		remoteInstances, err := x.queryRemotePeerInstanceCount(cctx, buildRemotePeers(peers), query.topic)
+		if err != nil {
+			ctx.Err(errors.NewInternalError(err))
+			return
+		}
+		instances += int(remoteInstances)
 	}
 
 	ctx.Response(&TopicStats{
 		Topic:                query.topic,
-		LocalSubscriberCount: local,
+		LocalSubscriberCount: int(local),
 		TopicInstanceCount:   instances,
 	})
 }
 
 // queryRemotePeerInstanceCount asks every remote peer's topic actor for its
 // local subscriber count of topic and returns how many peers reported at
-// least one. Peers that cannot be reached or fail to answer within
-// DefaultAskTimeout are skipped: the count degrades to a partial view rather
-// than failing outright.
-func (x *topicActor) queryRemotePeerInstanceCount(cctx context.Context, remotePeers []remotePeer, topic string) int {
+// least one. A peer that cannot be looked up or fails to answer within
+// DefaultAskTimeout fails the query; the caller decides how to surface it.
+func (x *topicActor) queryRemotePeerInstanceCount(cctx context.Context, remotePeers []remotePeer, topic string) (int32, error) {
 	if len(remotePeers) == 0 {
-		return 0
+		return 0, nil
 	}
 
 	actorName := reservedName(topicActorType)
 	from := pathToAddress(x.pid.Path())
 
-	var (
-		mu        sync.Mutex
-		instances int
-		wg        sync.WaitGroup
-	)
-
+	var instances atomic.Int32
+	eg, egCtx := errgroup.WithContext(cctx)
 	for _, peer := range remotePeers {
-		wg.Add(1)
-		go func(peer remotePeer) {
-			defer wg.Done()
-			to, err := x.remoting.RemoteLookup(cctx, peer.host, peer.port, actorName)
+		eg.Go(func() error {
+			to, err := x.remoting.RemoteLookup(egCtx, peer.host, peer.port, actorName)
 			if err != nil {
-				x.logger.Warnf("failed to lookup actor %s on remote=[host=%s, port=%d]: %s",
-					actorName, peer.host, peer.port, err.Error())
-				return
+				return fmt.Errorf("failed to lookup actor %s on remote=[host=%s, port=%d]: %w", actorName, peer.host, peer.port, err)
 			}
 
-			resp, err := x.remoting.RemoteAsk(cctx, from, to, &internalpb.TopicStatsRequest{Topic: topic}, DefaultAskTimeout)
+			resp, err := x.remoting.RemoteAsk(egCtx, from, to, &internalpb.TopicStatsRequest{Topic: topic}, DefaultAskTimeout)
 			if err != nil {
-				x.logger.Warnf("failed to query topic actor %s on remote=[host=%s, port=%d]: %s",
-					actorName, peer.host, peer.port, err.Error())
-				return
+				return fmt.Errorf("failed to query topic actor %s on remote=[host=%s, port=%d]: %w", actorName, peer.host, peer.port, err)
 			}
 
-			stats, ok := resp.(*internalpb.TopicStatsResponse)
-			if !ok || stats == nil || stats.GetLocalSubscriberCount() <= 0 {
-				return
+			if stats, ok := resp.(*internalpb.TopicStatsResponse); ok && stats.GetLocalSubscriberCount() > 0 {
+				instances.Inc()
 			}
-
-			mu.Lock()
-			instances++
-			mu.Unlock()
-		}(peer)
+			return nil
+		})
 	}
 
-	wg.Wait()
-	return instances
+	if err := eg.Wait(); err != nil {
+		return 0, err
+	}
+	return instances.Load(), nil
 }
 
 // handleTerminated handles Terminated message
