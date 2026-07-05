@@ -133,6 +133,34 @@ func (a *OrderService) Receive(ctx *ReceiveContext) {
 }
 ```
 
+## Topic statistics
+
+`ActorSystem.TopicStats` returns a read-only, point-in-time snapshot of a topic's subscription state, without ever exposing subscriber identities. `TopicStats` is immutable and exposes its values through accessor methods:
+
+- `Topic() string` is the topic these stats describe.
+- `LocalSubscriberCount() int32` is the number of subscribers registered on **this node's** topic actor for the topic.
+- `TopicInstanceCount() int32` is the number of topic-actor instances (nodes) cluster-wide that currently have at least one subscriber for the topic.
+
+```go
+stats, err := system.TopicStats(ctx, "orders", 5*time.Second)
+if err != nil {
+    // handle error
+}
+fmt.Printf("local=%d instances=%d\n", stats.LocalSubscriberCount(), stats.TopicInstanceCount())
+```
+
+In cluster mode, the local node's topic actor answers with its own local subscriber count and fans a lightweight query out to every peer's topic actor to determine how many of them also have subscribers. Peers answer with their local view only and never fan the query out any further, which avoids query storms. Outside cluster mode, `TopicInstanceCount` is simply 0 or 1 depending on whether this node has local subscribers.
+
+<Note>
+`TopicStats` is an eventually consistent, point-in-time snapshot with no delivery guarantee: subscribers may join or leave between the query and the response.
+</Note>
+
+<Warning>
+`TopicStats` prefers an explicit failure over an inconsistent count. In cluster mode, if any peer cannot be reached within `timeout`, the whole call returns an error rather than a silently undercounted `TopicInstanceCount`. Retry the query, or treat the error as "cluster state is currently in flux".
+</Warning>
+
+`TopicStats` requires the topic actor to be running (`WithPubSub()` or clustering enabled); otherwise it returns `ErrTopicActorNotStarted`.
+
 ## Event stream vs PubSub
 
 | Aspect      | Event stream                          | PubSub                               |

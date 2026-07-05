@@ -455,6 +455,10 @@ type ActorSystem interface {
 	//
 	// Returns the actor reference for the topic actor.
 	TopicActor() *PID
+	// TopicStats returns a snapshot of the given topic's subscription state across
+	// the cluster. In non-clustered mode, TopicInstanceCount is 0 or 1 based on
+	// local subscribers.
+	TopicStats(ctx context.Context, topic string, timeout time.Duration) (*TopicStats, error)
 	// Replicator returns the PID of the local CRDT Replicator system actor.
 	// Returns nil if CRDT replication is not enabled via ClusterConfig.WithCRDT.
 	Replicator() *PID
@@ -1936,6 +1940,28 @@ func (x *actorSystem) TopicActor() *PID {
 	topicActor := x.topicActor
 	x.locker.RUnlock()
 	return topicActor
+}
+
+// TopicStats returns a snapshot of the given topic's subscription state across
+// the cluster. In non-clustered mode, TopicInstanceCount is 0 or 1 based on
+// local subscribers.
+func (x *actorSystem) TopicStats(ctx context.Context, topic string, timeout time.Duration) (*TopicStats, error) {
+	topicActor := x.TopicActor()
+	if topicActor == nil {
+		return nil, gerrors.ErrTopicActorNotStarted
+	}
+
+	reply, err := x.getSystemGuardian().Ask(ctx, topicActor, &getTopicStats{topic: topic}, timeout)
+	if err != nil {
+		return nil, err
+	}
+
+	stats, ok := reply.(*TopicStats)
+	if !ok || stats == nil {
+		return nil, gerrors.ErrInvalidResponse
+	}
+
+	return stats, nil
 }
 
 // Replicator returns the PID of the local CRDT Replicator system actor.
