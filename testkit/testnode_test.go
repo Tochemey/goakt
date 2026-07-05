@@ -24,6 +24,8 @@ package testkit
 
 import (
 	"context"
+	"sort"
+	"sync"
 	"testing"
 	"time"
 
@@ -33,6 +35,52 @@ import (
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
+
+// fireEvent records one delivery observed by a fireRecorder actor during a
+// cluster-single-fire test.
+type fireEvent struct {
+	node string
+	at   time.Time
+}
+
+// fireSink collects fireEvents across every node's fireRecorder instance. All nodes in a
+// MultiNodes test run in the same process, so a single sink shared by pointer across the
+// per-node actor instances gives the test a cluster-wide view of deliveries.
+type fireSink struct {
+	mu     sync.Mutex
+	events []fireEvent
+}
+
+func (s *fireSink) record(node string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append(s.events, fireEvent{node: node, at: time.Now()})
+}
+
+func (s *fireSink) snapshot() []fireEvent {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]fireEvent, len(s.events))
+	copy(out, s.events)
+	return out
+}
+
+// fireRecorder is a test actor that records every testpb.TestSend it receives into a
+// shared fireSink, tagged with the node it was spawned on.
+type fireRecorder struct {
+	node string
+	sink *fireSink
+}
+
+var _ actor.Actor = (*fireRecorder)(nil)
+
+func (r *fireRecorder) PreStart(*actor.Context) error { return nil }
+func (r *fireRecorder) PostStop(*actor.Context) error { return nil }
+func (r *fireRecorder) Receive(ctx *actor.ReceiveContext) {
+	if _, ok := ctx.Message().(*testpb.TestSend); ok {
+		r.sink.record(r.node)
+	}
+}
 
 func TestTestNode(t *testing.T) {
 	ctx := context.Background()
@@ -151,4 +199,145 @@ func TestMultiNodes(t *testing.T) {
 		multi.StopNode(ctx, "stop-node")
 		require.Equal(t, 0, multi.NodeCount())
 	})
+}
+
+// TestClusterSingleFireSchedule asserts that a cron schedule registered independently on
+// every node of a cluster, with the same reference, is delivered exactly once per tick
+// cluster-wide - single fire is intrinsic to cron schedules in cluster mode, no option
+// required - and that this invariant survives one of the racing nodes leaving mid-run.
+func TestClusterSingleFireSchedule(t *testing.T) {
+	ctx := context.Background()
+
+	multi := NewMultiNodes(t, log.DiscardLogger, []actor.Actor{&fireRecorder{}}, nil)
+	multi.Start()
+	t.Cleanup(multi.Stop)
+
+	const (
+		reference  = "cluster-single-fire-schedule-test"
+		cronExpr   = "*/2 * * ? * *"
+		tickWindow = 2 * time.Second
+		actorName  = "fire-recorder"
+	)
+
+	sink := &fireSink{}
+	nodeNames := []string{"node-1", "node-2", "node-3"}
+
+	for _, name := range nodeNames {
+		node := multi.StartNode(ctx, name)
+		system := node.ActorSystem()
+
+		// Actor names must be unique cluster-wide, so each node spawns its own
+		// receiver under a node-scoped name. The schedules still race against each
+		// other because they all share the same reference below.
+		pid, err := system.Spawn(ctx, actorName+"-"+name, &fireRecorder{node: name, sink: sink})
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		err = system.ScheduleWithCron(
+			ctx, new(testpb.TestSend), pid, cronExpr,
+			actor.WithReference(reference),
+		)
+		require.NoError(t, err)
+	}
+
+	// let several ticks elapse while all three nodes race for each one.
+	require.Eventually(t, func() bool {
+		return len(sink.snapshot()) >= 4
+	}, 20*time.Second, 200*time.Millisecond)
+
+	assertSingleDeliveryPerTick(t, sink.snapshot(), tickWindow)
+
+	// takeover: stop one of the racing nodes mid-run and assert the single-fire
+	// invariant still holds using only the survivors. Record the moment node-2 is
+	// fully stopped so the "must not deliver" check only considers ticks that fire
+	// strictly after it has left (an in-flight tick claimed just before shutdown may
+	// still drain, and is not a violation of the leaving semantics).
+	multi.StopNode(ctx, "node-2")
+	stoppedAt := time.Now()
+
+	countBefore := len(sink.snapshot())
+	require.Eventually(t, func() bool {
+		return len(sink.snapshot()) >= countBefore+4
+	}, 20*time.Second, 200*time.Millisecond)
+
+	final := sink.snapshot()
+	assertSingleDeliveryPerTick(t, final, tickWindow)
+	for _, e := range final {
+		if e.at.After(stoppedAt) {
+			require.NotEqual(t, "node-2", e.node, "stopped node must not deliver ticks that fire after it leaves")
+		}
+	}
+}
+
+// TestNodeLocalIntervalSchedule asserts the kept node-local behavior for non-cron schedules:
+// since interval RunTimes are anchored to each node's own registration clock and never align
+// cluster-wide, an interval schedule never claims, so the same reference registered on every
+// node must still deliver independently on every node instead of arbitrating to one winner.
+func TestNodeLocalIntervalSchedule(t *testing.T) {
+	ctx := context.Background()
+
+	multi := NewMultiNodes(t, log.DiscardLogger, []actor.Actor{&fireRecorder{}}, nil)
+	multi.Start()
+	t.Cleanup(multi.Stop)
+
+	const (
+		reference = "node-local-interval-schedule-test"
+		interval  = 500 * time.Millisecond
+		actorName = "fire-recorder"
+	)
+
+	sink := &fireSink{}
+	nodeNames := []string{"node-1", "node-2", "node-3"}
+
+	for _, name := range nodeNames {
+		node := multi.StartNode(ctx, name)
+		system := node.ActorSystem()
+
+		pid, err := system.Spawn(ctx, actorName+"-"+name, &fireRecorder{node: name, sink: sink})
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		err = system.Schedule(
+			ctx, new(testpb.TestSend), pid, interval,
+			actor.WithReference(reference),
+		)
+		require.NoError(t, err)
+	}
+
+	// every node must accumulate its own deliveries independently; none arbitrates against
+	// the others since interval schedules never claim.
+	require.Eventually(t, func() bool {
+		perNode := make(map[string]int)
+		for _, e := range sink.snapshot() {
+			perNode[e.node]++
+		}
+		for _, name := range nodeNames {
+			if perNode[name] < 2 {
+				return false
+			}
+		}
+		return true
+	}, 15*time.Second, 200*time.Millisecond)
+}
+
+// assertSingleDeliveryPerTick fails the test if any two deliveries land within a quarter of
+// the cron period of each other. All nodes evaluate the cron expression in UTC, so their
+// triggers fire at the same instant and a failed arbitration surfaces as two near-simultaneous
+// deliveries (gap on the order of claim + mailbox latency, well under period/4). Legitimate
+// consecutive ticks are a full period apart, so the quarter-period threshold cleanly separates
+// the two while tolerating delivery jitter up to three quarters of a period. Comparing every
+// adjacent pair across the whole sorted list (rather than bucketing) avoids missing a duplicate
+// that straddles a fixed window boundary.
+func assertSingleDeliveryPerTick(t *testing.T, events []fireEvent, period time.Duration) {
+	t.Helper()
+
+	sorted := make([]fireEvent, len(events))
+	copy(sorted, events)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].at.Before(sorted[j].at) })
+
+	for i := 1; i < len(sorted); i++ {
+		gap := sorted[i].at.Sub(sorted[i-1].at)
+		require.GreaterOrEqualf(t, gap, period/4,
+			"deliveries %+v and %+v are only %s apart: duplicate delivery for a single tick", sorted[i-1], sorted[i], gap)
+	}
 }
