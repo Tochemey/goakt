@@ -494,6 +494,12 @@ func TestTopicActor(t *testing.T) {
 		require.True(t, ok)
 		require.EqualValues(t, subscribers.Len(), 2)
 
+		// the same cleanup must be observable through the public API, not
+		// just the internal subscriber map
+		count, err := actorSystem.TopicSubscriberCount(ctx, topic, time.Second)
+		require.NoError(t, err)
+		require.EqualValues(t, 2, count)
+
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
 
