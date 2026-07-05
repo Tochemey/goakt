@@ -1610,17 +1610,19 @@ func TestActorSystem(t *testing.T) {
 		require.NoError(t, cl1.Stop(ctx))
 		require.NoError(t, sd1.Close())
 
-		pause.For(time.Second)
-
+		// cl2 is promoted to coordinator once cl1 departs, publishing exactly one
+		// LeaderChanged that carries the new leader's address. Leadership handover
+		// is eventual, so drain the subscriber until the event surfaces.
 		var leaderChanges []*LeaderChanged
-		for event := range subscriber2.Iterator() {
-			if leaderChanged, ok := event.Payload().(*LeaderChanged); ok {
-				leaderChanges = append(leaderChanges, leaderChanged)
+		require.Eventually(t, func() bool {
+			for event := range subscriber2.Iterator() {
+				if leaderChanged, ok := event.Payload().(*LeaderChanged); ok {
+					leaderChanges = append(leaderChanges, leaderChanged)
+				}
 			}
-		}
+			return len(leaderChanges) >= 1
+		}, 10*time.Second, 200*time.Millisecond)
 
-		// exactly one LeaderChanged is published when the coordinator departs,
-		// carrying the new leader's address
 		require.Len(t, leaderChanges, 1)
 		require.Equal(t, peerAddress2, leaderChanges[0].Address())
 		require.NotZero(t, leaderChanges[0].Timestamp())

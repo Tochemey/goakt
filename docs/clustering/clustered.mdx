@@ -57,9 +57,9 @@ if isLeader {
 ```
 
 Whenever the cluster coordinator moves to a different node, every node publishes a `LeaderChanged` event on its
-local [event stream](/advanced/event-streams), alongside `NodeJoined` and `NodeLeft` - exactly once per transition,
-carrying the new leader's address. Like the other topology events, it exists for observability (monitoring,
-logging, dashboards); leadership itself is managed entirely by the framework.
+local [event stream](/advanced/event-streams), alongside `NodeJoined` and `NodeLeft`, carrying the new leader's
+address. Like the other topology events, it exists for observability (monitoring, logging, dashboards); leadership
+itself is managed entirely by the framework.
 
 ```go
 for msg := range subscriber.Iterator() {
@@ -68,3 +68,11 @@ for msg := range subscriber.Iterator() {
     }
 }
 ```
+
+<Note>
+`LeaderChanged` is eventually consistent. It is derived from cluster topology events, so it is published once
+per leadership change shortly after the cluster settles, and the node's initial leadership is seeded silently
+rather than announced. Delivery is best-effort and may be missed under heavy event churn. Treat it as a
+notification, not a source of truth. When you need the authoritative current leader, call `IsLeader(ctx)` or
+`Leader(ctx)`.
+</Note>

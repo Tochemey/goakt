@@ -42,6 +42,11 @@ func TestEvent(t *testing.T) {
 				expected: "NodeLeft",
 			},
 			{
+				name:     "LeaderChanged",
+				event:    LeaderChanged,
+				expected: "LeaderChanged",
+			},
+			{
 				name:     "Unknown event",
 				event:    EventType(100),
 				expected: "100",

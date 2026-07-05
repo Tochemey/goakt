@@ -197,6 +197,12 @@ type cluster struct {
 	rebalanceStartSeen       map[uint64]struct{}
 	rebalanceCompleteSeen    map[uint64]struct{}
 
+	// lastCoordinatorAddr caches the coordinator's peers address to detect
+	// leadership changes. It is seeded (non-empty) in Start before the consume
+	// goroutine launches and thereafter touched only while holding eventsLock, so
+	// it never races. Only changes away from this baseline emit LeaderChanged.
+	lastCoordinatorAddr string
+
 	running *atomic.Bool
 }
 
@@ -292,6 +298,14 @@ func (x *cluster) Start(ctx context.Context) error {
 	}
 
 	x.running.Store(true)
+
+	// Seed the leadership baseline silently. The engine has synced membership by
+	// the time it reaches this point, so a running cluster always has a visible
+	// coordinator (at minimum the local node). This runs before the consume
+	// goroutine launches, so lastCoordinatorAddr is not written concurrently, and
+	// only later changes are emitted as LeaderChanged.
+	x.lastCoordinatorAddr = x.coordinatorAddress(ctx)
+
 	x.consumeCtx, x.consumeCancel = context.WithCancel(ctx)
 	x.consumeWg.Go(func() {
 		x.consume()
@@ -798,6 +812,37 @@ func (x *cluster) IsLeader(ctx context.Context) bool {
 	return false
 }
 
+// coordinatorAddress returns the peers address of the current cluster
+// coordinator as reported by the engine, or empty when the membership cannot be
+// read. A running cluster always has a coordinator, so this only returns empty
+// on a transient fetch failure.
+func (x *cluster) coordinatorAddress(ctx context.Context) string {
+	x.mu.RLock()
+	defer x.mu.RUnlock()
+
+	if x.client == nil {
+		return ""
+	}
+
+	members, err := x.client.Members(ctx)
+	if err != nil {
+		x.logger.Errorf("failed to fetch cluster members: %v (hint: check cluster connectivity)", err)
+		return ""
+	}
+
+	for _, member := range members {
+		if !member.Coordinator {
+			continue
+		}
+
+		node := new(discovery.Node)
+		_ = json.Unmarshal([]byte(member.Meta), node)
+		return node.PeersAddress()
+	}
+
+	return ""
+}
+
 // GetPartition returns the partition identifier used to distribute the actor
 // key in the unified map.
 func (x *cluster) GetPartition(actorName string) uint64 {
@@ -1271,6 +1316,11 @@ func (x *cluster) processRebalanceComplete(ev events.RebalanceCompleteEvent) {
 
 	x.emitPendingLeftForEpochLocked(ev.Epoch)
 	x.emitPendingJoinForEpochLocked(ev.Epoch)
+
+	// Reconcile leadership once the membership has settled for this epoch. This
+	// no-ops when the coordinator is unchanged, so join-only rebalances cost a
+	// single local membership read.
+	x.detectLeaderChangeLocked()
 }
 
 // assignJoinEpochLocked maps pending joins to the latest rebalance epoch since newer epochs
@@ -1319,6 +1369,29 @@ func (x *cluster) emitPendingLeftForEpochLocked(epoch uint64) {
 		delete(x.nodeLeftTimestamps, node)
 		delete(x.rebalanceLeftNodeEpochs, node)
 	}
+}
+
+// detectLeaderChangeLocked emits a LeaderChanged event when the cluster
+// coordinator differs from the last observed one. A transient membership-fetch
+// failure returns an empty address, which is ignored so the baseline is
+// preserved. It must be called while holding eventsLock.
+func (x *cluster) detectLeaderChangeLocked() {
+	ctx, cancel := context.WithTimeout(context.Background(), x.readTimeout)
+	defer cancel()
+
+	coordinator := x.coordinatorAddress(ctx)
+	if coordinator == "" || coordinator == x.lastCoordinatorAddr {
+		return
+	}
+
+	x.lastCoordinatorAddr = coordinator
+	x.sendEventLocked(&Event{
+		Payload: &LeaderChangedEvent{
+			Address:   coordinator,
+			Timestamp: time.Now().UTC(),
+		},
+		Type: LeaderChanged,
+	})
 }
 
 func (x *cluster) emitNodeLeftLocked(node string, timestamp int64) {
