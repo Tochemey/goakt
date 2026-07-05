@@ -1393,17 +1393,28 @@ func (x *actorSystem) Leader(ctx context.Context) (leader *remote.Peer, err erro
 		return nil, gerrors.ErrClusterDisabled
 	}
 
+	return x.coordinatorPeer(ctx)
+}
+
+// coordinatorPeer returns the member currently flagged as cluster coordinator
+// by the underlying engine, or nil when no single coordinator is visible (for
+// example during an election window). Unlike Leader it does not require the
+// actor system to be marked running, so it is safe to call during startup and
+// from the cluster events loop. Using the authoritative coordinator flag keeps
+// Leader, IsLeader and the LeaderChanged event consistent with one another.
+func (x *actorSystem) coordinatorPeer(ctx context.Context) (*remote.Peer, error) {
 	members, err := x.cluster.Members(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	sort.Slice(members, func(i int, j int) bool {
-		return members[i].CreatedAt < members[j].CreatedAt
-	})
+	for _, member := range members {
+		if member.Coordinator {
+			return cluster.ToRemotePeer(member), nil
+		}
+	}
 
-	leader = cluster.ToRemotePeer(members[0])
-	return leader, nil
+	return nil, nil
 }
 
 // DiscoveryPort returns the port used for service discovery.
@@ -2902,36 +2913,47 @@ func (x *actorSystem) resyncGrains() error {
 	return nil
 }
 
-// clusterEventsLoop listens to cluster events and send them to the event streams
+// clusterEventsLoop consumes cluster topology events, publishes them on the
+// event stream and reconciles cluster leadership. It runs in a single goroutine,
+// so the leadership state stays free of data races without locking.
 func (x *actorSystem) clusterEventsLoop() {
 	for event := range x.eventsQueue {
-		if x.isStopping() || !x.InCluster() || event == nil || event.Payload == nil {
-			continue
-		}
+		x.handleClusterEvent(event)
+	}
+}
 
-		var message any
-		switch evt := event.Payload.(type) {
-		case *cluster.NodeJoinedEvent:
-			message = NewNodeJoined(evt.Address, evt.Timestamp)
-		case *cluster.NodeLeftEvent:
-			message = NewNodeLeft(evt.Address, evt.Timestamp)
-		default:
-			x.logger.Warnf("node=%s received unknown cluster event type=%T", x.String(), evt)
-			continue
-		}
+// handleClusterEvent forwards a single cluster event to the event stream and
+// applies any side effects. Leadership changes are detected by the cluster
+// engine and arrive here as LeaderChangedEvent, so this only forwards them.
+func (x *actorSystem) handleClusterEvent(event *cluster.Event) {
+	if x.isStopping() || !x.InCluster() || event == nil || event.Payload == nil {
+		return
+	}
 
-		if x.eventsStream != nil {
-			x.logger.Debugf("node=%s publishing cluster event=%s", x.String(), event.Type)
-			x.eventsStream.Publish(eventsTopic, message)
-			x.logger.Debugf("node=%s published cluster event=%s successfully", x.String(), event.Type)
-		}
+	var message any
+	switch evt := event.Payload.(type) {
+	case *cluster.NodeJoinedEvent:
+		message = NewNodeJoined(evt.Address, evt.Timestamp)
+	case *cluster.NodeLeftEvent:
+		message = NewNodeLeft(evt.Address, evt.Timestamp)
+	case *cluster.LeaderChangedEvent:
+		message = NewLeaderChanged(evt.Address, evt.Timestamp)
+	default:
+		x.logger.Warnf("node=%s received unknown cluster event type=%T", x.String(), evt)
+		return
+	}
 
-		switch event.Type {
-		case cluster.NodeLeft:
-			x.handleNodeLeftEvent(event)
-		case cluster.NodeJoined:
-			x.handleNodeJoinedEvent(event)
-		}
+	if x.eventsStream != nil {
+		x.logger.Debugf("node=%s publishing cluster event=%s", x.String(), event.Type)
+		x.eventsStream.Publish(eventsTopic, message)
+		x.logger.Debugf("node=%s published cluster event=%s successfully", x.String(), event.Type)
+	}
+
+	switch event.Type {
+	case cluster.NodeLeft:
+		x.handleNodeLeftEvent(event)
+	case cluster.NodeJoined:
+		x.handleNodeJoinedEvent(event)
 	}
 }
 

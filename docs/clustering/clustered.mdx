@@ -32,3 +32,47 @@ Configure the actor system with `WithCluster(clusterConfig)` and a discovery pro
 When a node leaves, the leader relocates its actors and grains to remaining nodes. Singleton actors move to the leader;
 others are distributed. Actors can opt out of relocation via spawn options. See [Relocation](/actor/relocation) for
 the full flow, configuration, and relocatability requirements.
+
+## Leadership
+
+Exactly one node in the cluster acts as the coordinator (leader) at any given time. The leader drives internal
+responsibilities such as relocation and cluster singleton placement, but its status is also queryable from application
+code:
+
+| Method                     | Purpose                                                                              |
+| -------------------------- | ------------------------------------------------------------------------------------- |
+| `ActorSystem.IsLeader(ctx)` | Reports whether the local node is the current cluster coordinator.                   |
+| `ActorSystem.Leader(ctx)`   | Returns the `*remote.Peer` describing the current cluster leader.                    |
+
+Both methods require cluster mode; they return `ErrClusterDisabled` when clustering is not enabled.
+
+```go
+isLeader, err := system.IsLeader(ctx)
+if err != nil {
+    return err
+}
+if isLeader {
+    // this node is the cluster coordinator
+}
+```
+
+Whenever the cluster coordinator moves to a different node, every node publishes a `LeaderChanged` event on its
+local [event stream](/advanced/event-streams), alongside `NodeJoined` and `NodeLeft`, carrying the new leader's
+address. Like the other topology events, it exists for observability (monitoring, logging, dashboards); leadership
+itself is managed entirely by the framework.
+
+```go
+for msg := range subscriber.Iterator() {
+    if leaderChanged, ok := msg.Payload().(*actor.LeaderChanged); ok {
+        log.Printf("cluster leader is now %s", leaderChanged.Address())
+    }
+}
+```
+
+<Note>
+`LeaderChanged` is eventually consistent. It is derived from cluster topology events, so it is published once
+per leadership change shortly after the cluster settles, and the node's initial leadership is seeded silently
+rather than announced. Delivery is best-effort and may be missed under heavy event churn. Treat it as a
+notification, not a source of truth. When you need the authoritative current leader, call `IsLeader(ctx)` or
+`Leader(ctx)`.
+</Note>

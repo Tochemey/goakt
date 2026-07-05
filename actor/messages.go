@@ -220,6 +220,25 @@ func (n *NodeLeft) Address() string { return n.address }
 // Timestamp returns the time the node left.
 func (n *NodeLeft) Timestamp() time.Time { return n.timestamp }
 
+// LeaderChanged defines the cluster leadership change event. Every node
+// publishes it on its local events stream when it observes that the cluster
+// coordinator moved to a different node; Address is the new leader's address.
+type LeaderChanged struct {
+	address   string
+	timestamp time.Time
+}
+
+// NewLeaderChanged creates a new LeaderChanged event.
+func NewLeaderChanged(address string, timestamp time.Time) *LeaderChanged {
+	return &LeaderChanged{address: address, timestamp: timestamp}
+}
+
+// Address returns the new cluster leader's address.
+func (l *LeaderChanged) Address() string { return l.address }
+
+// Timestamp returns the time the leadership change was detected.
+func (l *LeaderChanged) Timestamp() time.Time { return l.timestamp }
+
 // Terminated is a lifecycle notification message sent to all actors
 // that are watching a given actor when it has stopped or been terminated.
 //

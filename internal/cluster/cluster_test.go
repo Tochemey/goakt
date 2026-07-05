@@ -3419,3 +3419,225 @@ func TestSetupMemberlistConfigWithTLS(t *testing.T) {
 	require.NotNil(t, cfg.MemberlistConfig)
 	require.NotNil(t, cfg.MemberlistConfig.Transport)
 }
+
+func newOlricMember(t *testing.T, host string, peersPort int, coordinator bool) olric.Member {
+	t.Helper()
+	node := &discovery.Node{
+		Name:          host,
+		Host:          host,
+		DiscoveryPort: 1,
+		PeersPort:     peersPort,
+		RemotingPort:  2,
+	}
+	meta, err := json.Marshal(node)
+	require.NoError(t, err)
+	return olric.Member{
+		Name:        net.JoinHostPort(host, strconv.Itoa(peersPort)),
+		Meta:        string(meta),
+		Coordinator: coordinator,
+	}
+}
+
+func TestCoordinatorAddress(t *testing.T) {
+	t.Run("returns the coordinator peers address", func(t *testing.T) {
+		leader := newOlricMember(t, "127.0.0.1", 3001, true)
+		follower := newOlricMember(t, "127.0.0.1", 3002, false)
+		cl := &cluster{
+			running: atomic.NewBool(true),
+			logger:  log.DiscardLogger,
+			client:  &MockOlricClient{MockClient: &MockClient{}, members: []olric.Member{follower, leader}},
+		}
+
+		require.Equal(t, "127.0.0.1:3001", cl.coordinatorAddress(context.Background()))
+	})
+
+	t.Run("returns empty when the membership fetch fails", func(t *testing.T) {
+		cl := &cluster{
+			running: atomic.NewBool(true),
+			logger:  log.DiscardLogger,
+			client:  &MockOlricClient{MockClient: &MockClient{membersErr: errors.New("boom")}},
+		}
+
+		require.Empty(t, cl.coordinatorAddress(context.Background()))
+	})
+
+	t.Run("returns empty when no coordinator is flagged", func(t *testing.T) {
+		m1 := newOlricMember(t, "127.0.0.1", 3001, false)
+		m2 := newOlricMember(t, "127.0.0.1", 3002, false)
+		cl := &cluster{
+			running: atomic.NewBool(true),
+			logger:  log.DiscardLogger,
+			client:  &MockOlricClient{MockClient: &MockClient{}, members: []olric.Member{m1, m2}},
+		}
+
+		require.Empty(t, cl.coordinatorAddress(context.Background()))
+	})
+
+	t.Run("returns empty when the client is not initialised", func(t *testing.T) {
+		cl := &cluster{
+			running: atomic.NewBool(true),
+			logger:  log.DiscardLogger,
+		}
+
+		require.Empty(t, cl.coordinatorAddress(context.Background()))
+	})
+}
+
+func TestDetectLeaderChange(t *testing.T) {
+	t.Run("emits LeaderChanged when the coordinator changes", func(t *testing.T) {
+		leader := newOlricMember(t, "127.0.0.1", 3002, true)
+		cl := &cluster{
+			running:             atomic.NewBool(true),
+			logger:              log.DiscardLogger,
+			readTimeout:         time.Second,
+			lastCoordinatorAddr: "127.0.0.1:3001",
+			client:              &MockOlricClient{MockClient: &MockClient{}, members: []olric.Member{leader}},
+			events:              make(chan *Event, 1),
+		}
+
+		cl.detectLeaderChangeLocked()
+
+		require.Equal(t, "127.0.0.1:3002", cl.lastCoordinatorAddr)
+		select {
+		case event := <-cl.events:
+			require.Equal(t, LeaderChanged, event.Type)
+			changed, ok := event.Payload.(*LeaderChangedEvent)
+			require.True(t, ok)
+			require.Equal(t, "127.0.0.1:3002", changed.Address)
+			require.False(t, changed.Timestamp.IsZero())
+		default:
+			t.Fatal("expected a LeaderChanged event")
+		}
+	})
+
+	t.Run("does not emit when the coordinator is unchanged", func(t *testing.T) {
+		leader := newOlricMember(t, "127.0.0.1", 3001, true)
+		cl := &cluster{
+			running:             atomic.NewBool(true),
+			logger:              log.DiscardLogger,
+			readTimeout:         time.Second,
+			lastCoordinatorAddr: "127.0.0.1:3001",
+			client:              &MockOlricClient{MockClient: &MockClient{}, members: []olric.Member{leader}},
+			events:              make(chan *Event, 1),
+		}
+
+		cl.detectLeaderChangeLocked()
+
+		require.Equal(t, "127.0.0.1:3001", cl.lastCoordinatorAddr)
+		require.Empty(t, cl.events)
+	})
+
+	t.Run("preserves the baseline when the membership fetch fails", func(t *testing.T) {
+		cl := &cluster{
+			running:             atomic.NewBool(true),
+			logger:              log.DiscardLogger,
+			readTimeout:         time.Second,
+			lastCoordinatorAddr: "127.0.0.1:3001",
+			client:              &MockOlricClient{MockClient: &MockClient{membersErr: errors.New("boom")}},
+			events:              make(chan *Event, 1),
+		}
+
+		cl.detectLeaderChangeLocked()
+
+		require.Equal(t, "127.0.0.1:3001", cl.lastCoordinatorAddr)
+		require.Empty(t, cl.events)
+	})
+}
+
+// collectLeaderChanges drains a node's event stream for up to timeout, returning
+// every LeaderChanged event observed in that window.
+func collectLeaderChanges(t *testing.T, node Cluster, timeout time.Duration) []*LeaderChangedEvent {
+	t.Helper()
+	var changes []*LeaderChangedEvent
+	deadline := time.After(timeout)
+	for {
+		select {
+		case event, ok := <-node.Events():
+			if !ok {
+				return changes
+			}
+			if changed, ok := event.Payload.(*LeaderChangedEvent); ok {
+				changes = append(changes, changed)
+			}
+		case <-deadline:
+			return changes
+		}
+	}
+}
+
+func TestLeaderChangedEvent(t *testing.T) {
+	t.Run("emits LeaderChanged when the coordinator departs", func(t *testing.T) {
+		ctx := context.TODO()
+		srv := startNatsServer(t)
+
+		// node1 starts first and is therefore the sole coordinator
+		node1, sd1 := startEngine(t, srv.Addr().String())
+		require.NotNil(t, node1)
+		pause.For(2 * time.Second)
+
+		// node2 joins the already-formed cluster
+		node2, sd2 := startEngine(t, srv.Addr().String())
+		require.NotNil(t, node2)
+		node2Addr := node2.(*cluster).node.PeersAddress()
+		pause.For(2 * time.Second)
+
+		require.True(t, node1.IsLeader(ctx))
+		require.False(t, node2.IsLeader(ctx))
+
+		// the initial coordinator is seeded silently, so no LeaderChanged surfaces
+		// on node2 while the cluster is stable
+		require.Empty(t, collectLeaderChanges(t, node2, time.Second))
+
+		// the coordinator leaves the cluster
+		require.NoError(t, node1.Stop(ctx))
+		require.NoError(t, sd1.Close())
+
+		// node2 is promoted and emits exactly one LeaderChanged carrying its address
+		changes := collectLeaderChanges(t, node2, 10*time.Second)
+		require.Len(t, changes, 1)
+		require.Equal(t, node2Addr, changes[0].Address)
+		require.False(t, changes[0].Timestamp.IsZero())
+		require.True(t, node2.IsLeader(ctx))
+
+		require.NoError(t, node2.Stop(ctx))
+		require.NoError(t, sd2.Close())
+		srv.Shutdown()
+	})
+
+	t.Run("does not emit LeaderChanged when a non-coordinator departs", func(t *testing.T) {
+		ctx := context.TODO()
+		srv := startNatsServer(t)
+
+		node1, sd1 := startEngine(t, srv.Addr().String())
+		require.NotNil(t, node1)
+		pause.For(2 * time.Second)
+
+		node2, sd2 := startEngine(t, srv.Addr().String())
+		require.NotNil(t, node2)
+		pause.For(time.Second)
+
+		// node3 is the newest node, so it is never the coordinator
+		node3, sd3 := startEngine(t, srv.Addr().String())
+		require.NotNil(t, node3)
+		pause.For(2 * time.Second)
+
+		require.True(t, node1.IsLeader(ctx))
+
+		// draining node1 up to here clears the join events
+		collectLeaderChanges(t, node1, time.Second)
+
+		// a non-coordinator departure leaves the coordinator unchanged
+		require.NoError(t, node3.Stop(ctx))
+		require.NoError(t, sd3.Close())
+		pause.For(3 * time.Second)
+
+		require.Empty(t, collectLeaderChanges(t, node1, 2*time.Second))
+		require.True(t, node1.IsLeader(ctx))
+
+		require.NoError(t, node1.Stop(ctx))
+		require.NoError(t, sd1.Close())
+		require.NoError(t, node2.Stop(ctx))
+		require.NoError(t, sd2.Close())
+		srv.Shutdown()
+	})
+}

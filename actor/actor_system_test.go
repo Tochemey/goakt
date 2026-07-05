@@ -1562,6 +1562,80 @@ func TestActorSystem(t *testing.T) {
 		// shutdown the nats server gracefully
 		srv.Shutdown()
 	})
+	t.Run("With LeaderChanged event on coordinator transition", func(t *testing.T) {
+		ctx := context.TODO()
+		srv := startNatsServer(t)
+
+		// cl1 starts first and is therefore the sole coordinator
+		cl1, sd1 := testNATs(t, srv.Addr().String())
+		peerAddress1 := cl1.PeersAddress()
+		require.NotEmpty(t, peerAddress1)
+
+		subscriber1, err := cl1.Subscribe()
+		require.NoError(t, err)
+		require.NotNil(t, subscriber1)
+
+		// cl2 joins an already-formed cluster; it must not become coordinator
+		cl2, sd2 := testNATs(t, srv.Addr().String())
+		peerAddress2 := cl2.PeersAddress()
+		require.NotEmpty(t, peerAddress2)
+
+		subscriber2, err := cl2.Subscribe()
+		require.NoError(t, err)
+		require.NotNil(t, subscriber2)
+
+		pause.For(time.Second)
+
+		isLeader1, err := cl1.IsLeader(ctx)
+		require.NoError(t, err)
+		require.True(t, isLeader1)
+
+		isLeader2, err := cl2.IsLeader(ctx)
+		require.NoError(t, err)
+		require.False(t, isLeader2)
+
+		// joining an existing cluster does not change who the coordinator is,
+		// so no LeaderChanged event should have been published on either side
+		for event := range subscriber1.Iterator() {
+			_, ok := event.Payload().(*LeaderChanged)
+			require.False(t, ok, "unexpected LeaderChanged event on cl1 after cl2 joined")
+		}
+		for event := range subscriber2.Iterator() {
+			_, ok := event.Payload().(*LeaderChanged)
+			require.False(t, ok, "unexpected LeaderChanged event on cl2 after joining")
+		}
+
+		// the coordinator leaves the cluster
+		require.NoError(t, cl1.Unsubscribe(subscriber1))
+		require.NoError(t, cl1.Stop(ctx))
+		require.NoError(t, sd1.Close())
+
+		// cl2 is promoted to coordinator once cl1 departs, publishing exactly one
+		// LeaderChanged that carries the new leader's address. Leadership handover
+		// is eventual, so drain the subscriber until the event surfaces.
+		var leaderChanges []*LeaderChanged
+		require.Eventually(t, func() bool {
+			for event := range subscriber2.Iterator() {
+				if leaderChanged, ok := event.Payload().(*LeaderChanged); ok {
+					leaderChanges = append(leaderChanges, leaderChanged)
+				}
+			}
+			return len(leaderChanges) >= 1
+		}, 10*time.Second, 200*time.Millisecond)
+
+		require.Len(t, leaderChanges, 1)
+		require.Equal(t, peerAddress2, leaderChanges[0].Address())
+		require.NotZero(t, leaderChanges[0].Timestamp())
+
+		isLeader2, err = cl2.IsLeader(ctx)
+		require.NoError(t, err)
+		require.True(t, isLeader2)
+
+		require.NoError(t, cl2.Unsubscribe(subscriber2))
+		assert.NoError(t, cl2.Stop(ctx))
+		assert.NoError(t, sd2.Close())
+		srv.Shutdown()
+	})
 	t.Run("With cluster events subscription (selfmanaged)", func(t *testing.T) {
 		ctx := context.TODO()
 		broadcastPort := dynaport.Get(1)[0]

@@ -32,6 +32,7 @@ type EventType int
 const (
 	NodeJoined EventType = iota
 	NodeLeft
+	LeaderChanged
 )
 
 func (x EventType) String() string {
@@ -40,6 +41,8 @@ func (x EventType) String() string {
 		return "NodeJoined"
 	case NodeLeft:
 		return "NodeLeft"
+	case LeaderChanged:
+		return "LeaderChanged"
 	default:
 		return fmt.Sprintf("%d", int(x))
 	}
@@ -62,6 +65,16 @@ type NodeJoinedEvent struct {
 // NodeLeft defines the node left event
 type NodeLeftEvent struct {
 	// Specifies the node address
+	Address string
+	// Specifies the timestamp
+	Timestamp time.Time
+}
+
+// LeaderChangedEvent defines the cluster leadership change event. It is emitted
+// once when the cluster coordinator moves to a different node, carrying the new
+// coordinator's peers address.
+type LeaderChangedEvent struct {
+	// Specifies the new coordinator's peers address
 	Address string
 	// Specifies the timestamp
 	Timestamp time.Time
