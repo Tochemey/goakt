@@ -851,10 +851,9 @@ type actorSystem struct {
 	eventsQueue     <-chan *cluster.Event
 	partitionHasher hash.Hasher
 	clusterNode     *discovery.Node
-	// leaderState caches the last known coordinator status of this node so that
-	// clusterEventsLoop can detect leadership transitions on topology events and
-	// publish a LeaderChanged event exactly once per transition.
-	leaderState atomic.Bool
+	// lastLeaderAddr caches the last observed leader address (only touched from
+	// Start and clusterEventsLoop) so each transition publishes exactly once.
+	lastLeaderAddr string
 
 	// help protect some the fields to set
 	locker sync.RWMutex
@@ -2386,9 +2385,9 @@ func (x *actorSystem) startCluster(ctx context.Context) error {
 	x.setupGrainActivationBarrier(ctx)
 
 	x.eventsQueue = x.cluster.Events()
-	// establish the initial coordinator baseline silently; only subsequent
+	// establish the initial leader baseline silently; only subsequent
 	// transitions detected from topology events are published as LeaderChanged
-	x.leaderState.Store(x.cluster.IsLeader(ctx))
+	x.lastLeaderAddr = x.observedLeaderAddress(ctx)
 	x.rebalancingQueue = make(chan *internalpb.PeerState, 1)
 	go x.clusterEventsLoop()
 	// Track the replicate drainers so shutdown can wait for them to drain
@@ -2962,23 +2961,33 @@ func (x *actorSystem) clusterEventsLoop() {
 	}
 }
 
-// detectLeaderTransition compares the coordinator status observed after a topology
-// event against the last known state and publishes a LeaderChanged event exactly
-// once per transition. It is only ever invoked from clusterEventsLoop, so the
-// compare-and-store on leaderState never races with itself.
+// detectLeaderTransition compares the leader address observed after a topology
+// event against the last known one and publishes a LeaderChanged event exactly
+// once per transition, on every node. It is only ever invoked from
+// clusterEventsLoop, so lastLeaderAddr never races with itself.
 func (x *actorSystem) detectLeaderTransition() {
-	ctx := context.Background()
-	isLeader := x.cluster.IsLeader(ctx)
-	if x.leaderState.Swap(isLeader) == isLeader {
+	leaderAddr := x.observedLeaderAddress(context.Background())
+	if leaderAddr == "" || leaderAddr == x.lastLeaderAddr {
 		return
 	}
+	x.lastLeaderAddr = leaderAddr
 
 	if x.eventsStream != nil {
-		message := NewLeaderChanged(x.PeersAddress(), isLeader, time.Now().UTC())
-		x.logger.Debugf("node=%s publishing cluster event=LeaderChanged(isLeader=%t)", x.String(), isLeader)
+		message := NewLeaderChanged(leaderAddr, time.Now().UTC())
+		x.logger.Debugf("node=%s publishing cluster event=LeaderChanged(leader=%s)", x.String(), leaderAddr)
 		x.eventsStream.Publish(eventsTopic, message)
-		x.logger.Debugf("node=%s published cluster event=LeaderChanged(isLeader=%t) successfully", x.String(), isLeader)
 	}
+}
+
+// observedLeaderAddress returns the current cluster coordinator's peers address,
+// or empty when it cannot be determined (engine down, membership fetch failure,
+// or no coordinator visible during a transition window).
+func (x *actorSystem) observedLeaderAddress(ctx context.Context) string {
+	leader, err := x.Leader(ctx)
+	if err != nil || leader == nil {
+		return ""
+	}
+	return leader.PeersAddress()
 }
 
 // handleNodeJoinedEvent processes a NodeJoined cluster event.

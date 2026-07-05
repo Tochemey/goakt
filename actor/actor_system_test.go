@@ -1619,9 +1619,9 @@ func TestActorSystem(t *testing.T) {
 			}
 		}
 
-		// exactly one LeaderChanged is published when the coordinator departs
+		// exactly one LeaderChanged is published when the coordinator departs,
+		// carrying the new leader's address
 		require.Len(t, leaderChanges, 1)
-		require.True(t, leaderChanges[0].IsLeader())
 		require.Equal(t, peerAddress2, leaderChanges[0].Address())
 		require.NotZero(t, leaderChanges[0].Timestamp())
 

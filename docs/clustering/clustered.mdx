@@ -61,15 +61,16 @@ if isLeader {
   routing through an actor.
 </Note>
 
-Whenever the local node's coordinator status flips, a `LeaderChanged` event is published on the
-[event stream](/advanced/event-streams), alongside `NodeJoined` and `NodeLeft`. Exactly one `LeaderChanged` event is
-published per transition - for example, when the current leader leaves the cluster, only the newly elected node
-observes a `LeaderChanged(isLeader=true)` event.
+Whenever the cluster coordinator moves to a different node, every node publishes a `LeaderChanged` event on its
+local [event stream](/advanced/event-streams), alongside `NodeJoined` and `NodeLeft` - exactly once per transition,
+carrying the new leader's address. Compare it with `ActorSystem.PeersAddress()` to know whether the local node is
+the one that took over.
 
 ```go
 for msg := range subscriber.Iterator() {
     if leaderChanged, ok := msg.Payload().(*actor.LeaderChanged); ok {
-        log.Printf("leadership changed: address=%s isLeader=%t", leaderChanged.Address(), leaderChanged.IsLeader())
+        becameLeader := leaderChanged.Address() == system.PeersAddress()
+        log.Printf("cluster leader is now %s (self=%t)", leaderChanged.Address(), becameLeader)
     }
 }
 ```

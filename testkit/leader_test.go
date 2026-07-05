@@ -108,23 +108,29 @@ func TestLeaderElection(t *testing.T) {
 		return ok
 	}, 10*time.Second, 100*time.Millisecond)
 
-	// exactly one LeaderChanged(isLeader=true) must be observed across the whole
-	// cluster for this transition. The internal cluster event pipeline that
-	// drives LeaderChanged lags slightly behind the live membership view used
-	// above, so drain the subscribers repeatedly until the event surfaces.
-	var leaderChanges []*actor.LeaderChanged
+	// every surviving node observes the transition and publishes exactly one
+	// LeaderChanged on its local stream, all carrying the new leader's address.
+	// The internal cluster event pipeline lags slightly behind the live
+	// membership view used above, so drain the subscribers until it surfaces.
+	newLeaderName, ok := findLeader(ctx, t, nodes)
+	require.True(t, ok)
+	newLeaderAddress := nodes[newLeaderName].ActorSystem().PeersAddress()
+
+	leaderChangesByNode := make(map[string][]*actor.LeaderChanged, len(subscribers))
 	require.Eventually(t, func() bool {
-		for _, subscriber := range subscribers {
+		for name, subscriber := range subscribers {
 			for event := range subscriber.Iterator() {
 				if leaderChanged, ok := event.Payload().(*actor.LeaderChanged); ok {
-					leaderChanges = append(leaderChanges, leaderChanged)
+					leaderChangesByNode[name] = append(leaderChangesByNode[name], leaderChanged)
 				}
 			}
 		}
-		return len(leaderChanges) > 0
+		return len(leaderChangesByNode) == len(subscribers)
 	}, 10*time.Second, 200*time.Millisecond)
 
-	require.Len(t, leaderChanges, 1)
-	require.True(t, leaderChanges[0].IsLeader())
-	require.NotZero(t, leaderChanges[0].Timestamp())
+	for name, changes := range leaderChangesByNode {
+		require.Len(t, changes, 1, "node %s must observe exactly one transition", name)
+		require.Equal(t, newLeaderAddress, changes[0].Address(), "node %s", name)
+		require.NotZero(t, changes[0].Timestamp())
+	}
 }
