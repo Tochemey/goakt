@@ -13,6 +13,9 @@
   <a href="./CLA.md"><img src="https://img.shields.io/badge/CLA-signed%20on%20PR-blue" alt="CLA" /></a>
   <a href="https://github.com/avelino/awesome-go"><img src="https://awesome.re/badge.svg" alt="Awesome" /></a>
   <a href="https://human-oss.dev"><img src="https://human-oss.dev/badge.svg" alt="Open Source AI Manifesto" /></a>
+  <a href="https://join.slack.com/t/oss-r2l2029/shared_invite/zt-42zcqua8y-unSUH0tFlOQzwT_smzYfOQ">
+    <img src="https://img.shields.io/badge/Slack-Join%20our%20community-4A154B?logo=slack&logoColor=white" alt="Join our Slack">
+  </a>  
   <!-- <a href="https://www.bestpractices.dev/projects/9248"><img src="https://www.bestpractices.dev/projects/9248/badge" alt="OpenSSF Best Practices" /></a> -->
 </p>
 
@@ -111,6 +114,7 @@ You can join these groups and chat to discuss and ask GoAkt related questions on
 
 [![GitHub Discussions](https://img.shields.io/github/discussions/Tochemey/goakt)](https://github.com/Tochemey/goakt/discussions)
 [![GitHub Issues or Pull Requests](https://img.shields.io/github/issues/Tochemey/goakt)](https://github.com/Tochemey/goakt/issues)
+[![Slack](https://img.shields.io/badge/Slack-Join%20our%20community-4A154B?logo=slack&logoColor=white)](https://join.slack.com/t/oss-r2l2029/shared_invite/zt-42zcqua8y-unSUH0tFlOQzwT_smzYfOQ)
 
 ## Contribution
 
