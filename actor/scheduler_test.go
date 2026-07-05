@@ -24,20 +24,26 @@ package actor
 
 import (
 	"context"
+	stderrors "errors"
 	"net"
 	"strconv"
 	"testing"
 	"time"
 
+	"github.com/reugn/go-quartz/job"
+	"github.com/reugn/go-quartz/quartz"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/address"
+	"github.com/tochemey/goakt/v4/internal/cluster"
 	dynaport "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/log"
+	mockscluster "github.com/tochemey/goakt/v4/mocks/cluster"
 	testkit "github.com/tochemey/goakt/v4/mocks/discovery"
 	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
@@ -567,13 +573,16 @@ func TestScheduler(t *testing.T) {
 
 		pause.For(time.Second)
 
-		// send a message to the actor after 100 ms
+		// send a message to the actor after 100 ms; cluster-mode cron requires an explicit
+		// reference since single fire is now intrinsic to cron+cluster.
 		message := new(testpb.TestSend)
 		// set cron expression to run every second
 		const expr = "* * * ? * *"
-		err = newActorSystem.ScheduleWithCron(ctx, message, actorRef, expr)
+		err = newActorSystem.ScheduleWithCron(ctx, message, actorRef, expr, WithReference("cron-cluster-test"))
 		require.NoError(t, err)
 
+		// as the sole node racing for every tick, this node always wins the claim, so
+		// delivery must proceed exactly as it would without any other node in the race.
 		require.Eventually(t, func() bool {
 			return actorRef.ProcessedCount()-1 >= 2
 		}, 5*time.Second, 100*time.Millisecond)
@@ -581,6 +590,68 @@ func TestScheduler(t *testing.T) {
 		assert.GreaterOrEqual(t, processed, 2)
 
 		// stop the actor
+		err = newActorSystem.Stop(ctx)
+		assert.NoError(t, err)
+		provider.AssertExpectations(t)
+	})
+	t.Run("With ScheduleWithCron in cluster mode without explicit reference returns an error", func(t *testing.T) {
+		ctx := context.TODO()
+		nodePorts := dynaport.Get(3)
+		discoveryPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		logger := log.DiscardLogger
+		host := "127.0.0.1"
+
+		addrs := []string{
+			net.JoinHostPort(host, strconv.Itoa(discoveryPort)),
+		}
+
+		provider := new(testkit.Provider)
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+			WithCluster(
+				NewClusterConfig().
+					WithKinds(new(MockActor)).
+					WithPartitionCount(9).
+					WithReplicaCount(1).
+					WithPeersPort(clusterPort).
+					WithMinimumPeersQuorum(1).
+					WithDiscoveryPort(discoveryPort).
+					WithDiscovery(provider)),
+		)
+		require.NoError(t, err)
+
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		err = newActorSystem.Start(ctx)
+		require.NoError(t, err)
+
+		pause.For(time.Second)
+
+		actorName := "test"
+		actor := NewMockActor()
+		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
+		require.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		pause.For(time.Second)
+
+		// no WithReference: an auto-generated per-node reference would let every node
+		// deliver independently, defeating cluster-wide single fire, so this must be refused.
+		message := new(testpb.TestSend)
+		const expr = "* * * ? * *"
+		err = newActorSystem.ScheduleWithCron(ctx, message, actorRef, expr)
+		require.ErrorIs(t, err, errors.ErrScheduleReferenceRequired)
+
 		err = newActorSystem.Stop(ctx)
 		assert.NoError(t, err)
 		provider.AssertExpectations(t)
@@ -780,11 +851,12 @@ func TestScheduler(t *testing.T) {
 		addr, err := remoting.RemoteLookup(ctx, newActorSystem.Host(), int(newActorSystem.Port()), actorName)
 		require.NoError(t, err)
 
-		// send a message to the actor after 100 ms
+		// send a message to the actor after 100 ms; cluster-mode cron requires an explicit
+		// reference since single fire is now intrinsic to cron+cluster.
 		message := new(testpb.TestSend)
 		// set cron expression to run every second
 		const expr = "* * * ? * *"
-		err = newActorSystem.ScheduleWithCron(ctx, message, newRemotePID(addr, remoting), expr)
+		err = newActorSystem.ScheduleWithCron(ctx, message, newRemotePID(addr, remoting), expr, WithReference("cron-remote-cluster-test"))
 		require.NoError(t, err)
 
 		require.Eventually(t, func() bool {
@@ -1672,4 +1744,224 @@ func TestScheduler(t *testing.T) {
 		err = newActorSystem.Stop(ctx)
 		assert.NoError(t, err)
 	})
+}
+
+func TestCronClaimTTL(t *testing.T) {
+	t.Run("sub-minute period clamps to the floor", func(t *testing.T) {
+		trigger, err := quartz.NewCronTrigger("* * * ? * *") // every second
+		require.NoError(t, err)
+		require.Equal(t, minScheduleFireClaimTTL, cronClaimTTL(trigger))
+	})
+	t.Run("in-range period is used as-is", func(t *testing.T) {
+		trigger, err := quartz.NewCronTrigger("0 */5 * * * *") // every 5 minutes
+		require.NoError(t, err)
+		require.Equal(t, 5*time.Minute, cronClaimTTL(trigger))
+	})
+	t.Run("multi-hour period is used as-is", func(t *testing.T) {
+		trigger, err := quartz.NewCronTrigger("0 0 */3 * * *") // every 3 hours
+		require.NoError(t, err)
+		require.Equal(t, 3*time.Hour, cronClaimTTL(trigger))
+	})
+	t.Run("multi-day period clamps to the ceiling", func(t *testing.T) {
+		trigger, err := quartz.NewCronTrigger("0 0 0 ? * 1") // weekly
+		require.NoError(t, err)
+		require.Equal(t, maxScheduleFireClaimTTL, cronClaimTTL(trigger))
+	})
+	t.Run("first fire time error falls back to the floor", func(t *testing.T) {
+		trigger := quartz.NewRunOnceTrigger(time.Second)
+		_, err := trigger.NextFireTime(quartz.NowNano()) // expire the trigger
+		require.NoError(t, err)
+		require.Equal(t, minScheduleFireClaimTTL, cronClaimTTL(trigger))
+	})
+	t.Run("second fire time error falls back to the floor", func(t *testing.T) {
+		// a fresh run-once trigger yields one fire time then expires, so cronClaimTTL's
+		// second NextFireTime call fails.
+		trigger := quartz.NewRunOnceTrigger(time.Second)
+		require.Equal(t, minScheduleFireClaimTTL, cronClaimTTL(trigger))
+	})
+}
+
+func TestClaimClusterFire(t *testing.T) {
+	metadataCtx := func(runTime int64) context.Context {
+		return context.WithValue(context.Background(), quartz.JobMetadataContextKey, quartz.JobMetadata{RunTime: runTime})
+	}
+
+	t.Run("fails open when job metadata is missing", func(t *testing.T) {
+		sched := newScheduler(log.DiscardLogger, time.Second, nil)
+		claim := &scheduleFireClaim{reference: "ref", ttl: time.Minute}
+
+		won, err := sched.claimClusterFire(context.Background(), claim)
+		require.NoError(t, err)
+		require.True(t, won)
+	})
+	t.Run("skips a stale tick without claiming", func(t *testing.T) {
+		// a tick older than the claim TTL must be skipped before any cluster call: the
+		// winner's claim entry may already have expired, so claiming would deliver a
+		// duplicate. The bare actor system proves no claim was attempted, since a claim
+		// attempt against its nil cluster engine would surface ErrClusterDisabled.
+		sched := newScheduler(log.DiscardLogger, time.Second, &actorSystem{})
+		claim := &scheduleFireClaim{reference: "ref", ttl: time.Minute}
+
+		won, err := sched.claimClusterFire(metadataCtx(time.Now().Add(-2*time.Minute).UnixNano()), claim)
+		require.NoError(t, err)
+		require.False(t, won)
+	})
+	t.Run("errors when the cluster engine is unavailable", func(t *testing.T) {
+		sched := newScheduler(log.DiscardLogger, time.Second, &actorSystem{})
+		claim := &scheduleFireClaim{reference: "ref", ttl: time.Minute}
+
+		won, err := sched.claimClusterFire(metadataCtx(time.Now().UnixNano()), claim)
+		require.ErrorIs(t, err, errors.ErrClusterDisabled)
+		require.False(t, won)
+	})
+	t.Run("skips delivery when another node already claimed the tick", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		clusterMock.EXPECT().ClaimScheduleFire(mock.Anything, mock.Anything, time.Minute).Return(cluster.ErrScheduleFireClaimed)
+
+		sched := newScheduler(log.DiscardLogger, time.Second, &actorSystem{cluster: clusterMock})
+		claim := &scheduleFireClaim{reference: "ref", ttl: time.Minute}
+
+		won, err := sched.claimClusterFire(metadataCtx(time.Now().UnixNano()), claim)
+		require.NoError(t, err)
+		require.False(t, won)
+	})
+	t.Run("propagates claim errors and skips delivery", func(t *testing.T) {
+		expectedErr := stderrors.New("claim failure")
+		clusterMock := mockscluster.NewCluster(t)
+		clusterMock.EXPECT().ClaimScheduleFire(mock.Anything, mock.Anything, time.Minute).Return(expectedErr)
+
+		sched := newScheduler(log.DiscardLogger, time.Second, &actorSystem{cluster: clusterMock})
+		claim := &scheduleFireClaim{reference: "ref", ttl: time.Minute}
+
+		won, err := sched.claimClusterFire(metadataCtx(time.Now().UnixNano()), claim)
+		require.ErrorIs(t, err, expectedErr)
+		require.False(t, won)
+	})
+}
+
+// TestScheduleWithCronTimezone pins that ScheduleWithCron evaluates the cron expression in UTC
+// when the actor system is in cluster mode, so every node computes the same tick instants and
+// the per-tick fire claims line up cluster-wide, and in the process local timezone otherwise.
+// The chosen location is asserted through the scheduled trigger's description (which embeds the
+// location) rather than by mutating the global time.Local, which would race the actor-system
+// goroutines under the race detector. "UTC" and the local location name differ as strings, so
+// the assertions have teeth even when the test host itself runs in UTC.
+func TestScheduleWithCronTimezone(t *testing.T) {
+	// daily at noon: never fires during the test, so the job stays queued for inspection and
+	// no delivery or claim happens.
+	const expr = "0 0 12 * * *"
+
+	scheduledTriggerDescription := func(t *testing.T, sys ActorSystem, reference string) string {
+		t.Helper()
+		sysImpl := sys.(*actorSystem)
+		job, err := sysImpl.scheduler.quartzScheduler.GetScheduledJob(quartz.NewJobKey(reference))
+		require.NoError(t, err)
+
+		return job.Trigger().Description()
+	}
+
+	t.Run("non-cluster mode evaluates cron in the local timezone", func(t *testing.T) {
+		ctx := context.TODO()
+		newActorSystem, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, newActorSystem.Start(ctx))
+
+		pause.For(time.Second)
+
+		actorRef, err := newActorSystem.Spawn(ctx, "test", NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, actorRef)
+
+		const reference = "cron-local-tz"
+		require.NoError(t, newActorSystem.ScheduleWithCron(ctx, new(testpb.TestSend), actorRef, expr, WithReference(reference)))
+
+		localTrigger, err := quartz.NewCronTriggerWithLoc(expr, time.Now().Location())
+		require.NoError(t, err)
+		require.Equal(t, localTrigger.Description(), scheduledTriggerDescription(t, newActorSystem, reference))
+
+		require.NoError(t, newActorSystem.Stop(ctx))
+	})
+
+	t.Run("cluster mode evaluates cron in UTC", func(t *testing.T) {
+		ctx := context.TODO()
+		nodePorts := dynaport.Get(3)
+		discoveryPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+		host := "127.0.0.1"
+
+		addrs := []string{net.JoinHostPort(host, strconv.Itoa(discoveryPort))}
+
+		provider := new(testkit.Provider)
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+			WithCluster(
+				NewClusterConfig().
+					WithKinds(new(MockActor)).
+					WithPartitionCount(9).
+					WithReplicaCount(1).
+					WithPeersPort(clusterPort).
+					WithMinimumPeersQuorum(1).
+					WithDiscoveryPort(discoveryPort).
+					WithDiscovery(provider)),
+		)
+		require.NoError(t, err)
+
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		require.NoError(t, newActorSystem.Start(ctx))
+
+		pause.For(time.Second)
+
+		actorRef, err := newActorSystem.Spawn(ctx, "test", NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, actorRef)
+
+		pause.For(time.Second)
+
+		const reference = "cron-utc-tz"
+		require.NoError(t, newActorSystem.ScheduleWithCron(ctx, new(testpb.TestSend), actorRef, expr, WithReference(reference)))
+
+		utcTrigger, err := quartz.NewCronTriggerWithLoc(expr, time.UTC)
+		require.NoError(t, err)
+		require.Equal(t, utcTrigger.Description(), scheduledTriggerDescription(t, newActorSystem, reference))
+
+		require.NoError(t, newActorSystem.Stop(ctx))
+		provider.AssertExpectations(t)
+	})
+}
+
+// TestSchedulerJobMetadataPresent pins that go-quartz attaches JobMetadata to a scheduled
+// job's execution context: claimClusterFire fails open (skips arbitration) without it, so a
+// regression here would silently defeat cluster-wide single fire instead of failing loudly.
+func TestSchedulerJobMetadataPresent(t *testing.T) {
+	sched := newScheduler(log.DiscardLogger, time.Second, nil)
+	ctx := context.Background()
+	sched.Start(ctx)
+	defer sched.Stop(ctx)
+
+	metadataCh := make(chan quartz.JobMetadata, 1)
+	probe := func(ctx context.Context) (bool, error) {
+		if md, ok := ctx.Value(quartz.JobMetadataContextKey).(quartz.JobMetadata); ok {
+			metadataCh <- md
+		}
+		return true, nil
+	}
+
+	detail := quartz.NewJobDetail(job.NewFunctionJob(probe), quartz.NewJobKey("probe"))
+	require.NoError(t, sched.quartzScheduler.ScheduleJob(detail, quartz.NewRunOnceTrigger(10*time.Millisecond)))
+
+	select {
+	case md := <-metadataCh:
+		require.NotZero(t, md.RunTime)
+	case <-time.After(2 * time.Second):
+		t.Fatal("job metadata was not present in execution context")
+	}
 }

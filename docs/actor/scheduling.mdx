@@ -38,7 +38,7 @@ The scheduler starts automatically when the actor system starts and stops when t
 
 | Option                       | Purpose                                                                                                                                                                                 |
 |------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `WithReference(referenceID)` | Set a unique ID for cancel, pause, or resume. **Strongly recommended** if you plan to manage the schedule later. Without it, an auto-generated UUID is used and may not be retrievable. |
+| `WithReference(referenceID)` | Set a unique ID for cancel, pause, or resume. **Strongly recommended** if you plan to manage the schedule later. Without it, an auto-generated UUID is used and may not be retrievable. **Required** for `ScheduleWithCron` in cluster mode; see [Cluster-Wide Single Fire](#cluster-wide-single-fire) below. |
 | `WithSender(pid)`            | Set the sender PID for the scheduled message. Defaults to `NoSender` (nil) so the target actor sees `ctx.Sender()` as nil.                                                              |
 
 ## Examples
@@ -118,6 +118,40 @@ Cron expressions are evaluated in the **local timezone** of the process (`time.N
 - **Periodic aggregation or cleanup** — Use `ScheduleWithCron` for daily, hourly, or custom schedules.
 - **Scheduled jobs** — Use cron expressions for complex recurring patterns (e.g., "every weekday at 9am").
 
+## Cluster-Wide Single Fire
+
+<Note>
+Cluster-wide single fire applies to `ScheduleWithCron` only, and only in cluster mode ([`WithCluster`](/actor/cluster)). `Schedule` (interval) and `ScheduleOnce` are always node-local, in cluster mode or not.
+</Note>
+
+In a clustered deployment, the same application code (and therefore the same `ScheduleWithCron` call) typically runs on every node. **When the actor system is in cluster mode, single-fire delivery for cron schedules is intrinsic**; there is no option to opt in or out of. Every node still runs its own go-quartz cron trigger locally (so ticks stay in sync across the cluster with no extra network round trips on the hot path), but immediately before delivery each node races to claim an exclusive, short-lived slot for that specific tick in the cluster's shared store, the same put-if-absent primitive that guarantees a grain is activated on only one node. Only the winner proceeds to deliver; every other node silently skips that tick.
+
+**`WithReference` is required for `ScheduleWithCron` in cluster mode.** The claim is keyed on the reference plus the tick, so every node racing for the same tick must register with the same reference. Since a reference left unset is auto-generated per call (and therefore different on every node), `ScheduleWithCron` rejects the call outright with `ErrScheduleReferenceRequired` rather than silently deliver the message once per node:
+
+```go
+// Registered identically on every node in the cluster; only one node delivers per tick.
+err := system.ScheduleWithCron(
+    ctx, &DailyReport{}, pid, "0 0 9 * * *",
+    actor.WithReference("daily-report"),
+)
+```
+
+<Note>
+In cluster mode the cron expression is evaluated in **UTC** so every node computes the same tick instants regardless of its local timezone; the claim is keyed on the tick's fire time, and a wall-clock expression like `"0 0 9 * * *"` evaluated in each node's own zone would give mixed-timezone nodes different keys and deliver once per timezone instead of once per cluster. Outside cluster mode the expression is evaluated in the process's local timezone, as before. Express cluster cron schedules in UTC accordingly (for example, `"0 0 9 * * *"` fires at 09:00 UTC).
+</Note>
+
+**`Schedule` and `ScheduleOnce` stay node-local**, even in cluster mode: their fire times are anchored to each node's own local registration clock rather than a shared, deterministic schedule, so there is no common tick for nodes to arbitrate over. Registering the same interval or one-shot schedule on every node delivers on every node, exactly as outside cluster mode.
+
+The cluster-wide claim's TTL is scaled to the cron schedule's own period, clamped between one minute and 24 hours. The TTL must outlive the worst-case delivery lag between nodes handling the same tick: a node that claims after a stale entry has already expired would win the same tick again and deliver a duplicate. To close that window at its source, a node that reaches a tick more than the claim TTL late (for example, after a long pause while the scheduler still replays overdue ticks) skips it without claiming, trading a missed tick that every node was too late for over a duplicate delivery. Claim entries are reclaimed by their TTL alone; canceling a schedule or stopping a node never deletes them, since an entry may be the winning claim other nodes are still arbitrating against.
+
+<Note>
+In cluster mode each node registers its own local cron trigger, so `CancelSchedule` only stops the trigger on the node where it is called. The schedule keeps firing cluster-wide from the remaining nodes; to stop it everywhere, cancel it on every node that registered it.
+</Note>
+
+<Warning>
+This does not add delivery guarantees beyond what the underlying schedule already offers. If the winning node crashes after claiming the tick but before delivering, that specific tick is skipped cluster-wide; delivery resumes on the next tick. If the winning node leaves the cluster between ticks, arbitration for the next tick proceeds normally among the remaining nodes; there is no fixed "leader" to fail over.
+</Warning>
+
 ## Sender and Target Actor
 
 For scheduled messages, the target actor receives the message via `Tell`. By default, `ctx.Sender()` is `nil` (NoSender). Use `WithSender(pid)` if you want the target to know which actor scheduled the message.
@@ -129,6 +163,7 @@ For scheduled messages, the target actor receives the message via `Tell`. By def
 | `ErrSchedulerNotStarted`        | Actor system not started; scheduler is started with the system |
 | `ErrScheduledReferenceNotFound` | Cancel, pause, or resume called with an unknown reference      |
 | `ErrRemotingDisabled`           | Scheduling to a remote PID when remoting is not enabled        |
+| `ErrScheduleReferenceRequired`  | `ScheduleWithCron` in cluster mode called without `WithReference` |
 
 ## Delivery Semantics
 
