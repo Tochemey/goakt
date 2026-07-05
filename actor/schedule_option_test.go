@@ -77,13 +77,15 @@ func TestScheduleOption(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestWithClusterSingleFire(t *testing.T) {
-	t.Run("unset by default", func(t *testing.T) {
+func TestScheduleConfigExplicitReference(t *testing.T) {
+	t.Run("auto-generated reference is not explicit", func(t *testing.T) {
 		config := newScheduleConfig()
-		require.False(t, config.ClusterSingleFire())
+		require.False(t, config.hasExplicitReference())
+		require.NotEmpty(t, config.Reference())
 	})
-	t.Run("set via option", func(t *testing.T) {
-		config := newScheduleConfig(WithClusterSingleFire())
-		require.True(t, config.ClusterSingleFire())
+	t.Run("WithReference marks the reference explicit", func(t *testing.T) {
+		config := newScheduleConfig(WithReference("ref"))
+		require.True(t, config.hasExplicitReference())
+		require.Equal(t, "ref", config.Reference())
 	})
 }

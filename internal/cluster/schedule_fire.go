@@ -32,23 +32,35 @@ import (
 )
 
 // namespaceScheduleFire stores the short-lived fire claims used to arbitrate which node
-// delivers a given tick of a cluster-single-fire schedule (see actor.WithClusterSingleFire).
+// delivers a given tick of a cluster-wide cron schedule (see actor.ScheduleWithCron).
 const namespaceScheduleFire recordNamespace = "schedule-fire"
 
 // ErrScheduleFireClaimed is returned by ClaimScheduleFire when another node has already
 // won the race for the given key.
 var ErrScheduleFireClaimed = errors.New("schedule fire already claimed")
 
+// SupportsScheduleFireClaim reports whether cl can atomically arbitrate a cluster-wide
+// schedule-fire claim. Only the builtin engine exposes the NX+EX primitive this needs; other
+// Cluster implementations have no safe substitute, so callers must check this before relying
+// on ClaimScheduleFire (see errors.ErrSingleFireUnsupported).
+func SupportsScheduleFireClaim(cl Cluster) bool {
+	_, ok := cl.(*cluster)
+	return ok
+}
+
 // ClaimScheduleFire attempts to claim the exclusive right to deliver one trigger tick of a
-// cluster-single-fire schedule. It uses the same atomic put-if-absent primitive that
+// cluster-wide cron schedule. It uses the same atomic put-if-absent primitive that
 // PutGrainIfAbsent uses to guarantee single grain activation across the cluster.
 //
 // key uniquely identifies the (schedule reference, trigger tick) pair being arbitrated: callers
 // are expected to derive it from a value that is identical across every node racing for the same
 // tick (e.g. the trigger's deterministic next-fire timestamp), so a fresh key is used per tick.
-// ttl bounds how long the claim entry survives in the cluster store; it exists purely to keep
-// the store from growing unbounded over the lifetime of a long-running schedule; correctness
-// never depends on it, since every tick already claims a distinct key.
+//
+// ttl must exceed the worst-case clock/scheduling spread between nodes racing for the same
+// tick, or a slower node could win the claim for what is effectively the following tick,
+// causing that tick to be skipped cluster-wide. Scaling ttl to (at least) the cron period is
+// the safe default: a node lagging by more than the period is indistinguishable from having
+// missed the tick and moved on to the next one, so no correctness is lost by that clamp either.
 //
 // Returns nil for the caller that wins the race for key (it must proceed to deliver), and
 // ErrScheduleFireClaimed for every other caller racing for the same key (it must skip delivery
@@ -61,21 +73,13 @@ func ClaimScheduleFire(ctx context.Context, cl Cluster, key string, ttl time.Dur
 		return fmt.Errorf("schedule fire key is empty")
 	}
 
-	// Fast path for the built-in implementation: a single atomic NX+EX write on the
-	// unified map.
-	if c, ok := cl.(*cluster); ok {
-		return c.claimScheduleFire(ctx, key, ttl)
+	c, ok := cl.(*cluster)
+	if !ok {
+		// Callers must gate on SupportsScheduleFireClaim before scheduling; reaching this
+		// means that guard was skipped, so fail loudly instead of silently degrading.
+		return fmt.Errorf("cluster implementation does not support schedule-fire claims")
 	}
-
-	// Best-effort fallback for other Cluster implementations, built only from the
-	// generic job-key primitives the interface already exposes. It is still subject to
-	// races (no atomic NX there) and cannot expire the claim on its own; each tick using
-	// a fresh key still prevents unbounded skew from a stuck claim.
-	jobID := string(namespaceScheduleFire) + namespaceSeparator + key
-	if _, err := cl.JobKey(ctx, jobID); err == nil {
-		return ErrScheduleFireClaimed
-	}
-	return cl.PutJobKey(ctx, jobID, []byte{1})
+	return c.claimScheduleFire(ctx, key, ttl)
 }
 
 // claimScheduleFire performs the atomic NX+EX write backing ClaimScheduleFire for the
@@ -100,4 +104,31 @@ func (x *cluster) claimScheduleFire(ctx context.Context, key string, ttl time.Du
 		return err
 	}
 	return nil
+}
+
+// RemoveScheduleFire best-effort deletes a previously claimed schedule-fire key so it does not
+// linger in the store until its TTL expires. It is safe to call even if the key was never
+// claimed or the cluster implementation does not support schedule-fire claims at all.
+func RemoveScheduleFire(ctx context.Context, cl Cluster, key string) error {
+	if cl == nil || key == "" {
+		return nil
+	}
+
+	c, ok := cl.(*cluster)
+	if !ok {
+		return nil
+	}
+	return c.removeScheduleFire(ctx, key)
+}
+
+// removeScheduleFire deletes a schedule-fire claim entry from the built-in cluster's store.
+func (x *cluster) removeScheduleFire(ctx context.Context, key string) error {
+	if !x.running.Load() {
+		return ErrEngineNotRunning
+	}
+
+	x.mu.Lock()
+	defer x.mu.Unlock()
+
+	return x.deleteRecord(ctx, namespaceScheduleFire, key)
 }

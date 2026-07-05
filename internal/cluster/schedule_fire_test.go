@@ -92,43 +92,63 @@ func TestClaimScheduleFireSucceeds(t *testing.T) {
 	require.Len(t, gotOptions, 2)
 }
 
-func TestClaimScheduleFireFallbackReturnsClaimedWhenJobKeyExists(t *testing.T) {
-	cl := &MockCluster{
-		jobKeyFn: func(context.Context, string) ([]byte, error) {
-			return []byte{1}, nil
-		},
-	}
-
+func TestClaimScheduleFireReturnsErrorForUnsupportedCluster(t *testing.T) {
+	cl := &MockCluster{}
 	err := ClaimScheduleFire(context.Background(), cl, "key", time.Minute)
-	require.ErrorIs(t, err, ErrScheduleFireClaimed)
-	require.Equal(t, 1, cl.jobKeyCalls)
-	require.Zero(t, cl.putJobKeyCalls)
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrScheduleFireClaimed)
 }
 
-func TestClaimScheduleFireFallbackClaimsWhenJobKeyAbsent(t *testing.T) {
-	cl := &MockCluster{
-		jobKeyFn: func(context.Context, string) ([]byte, error) {
-			return nil, errors.New("not found")
-		},
-	}
-
-	err := ClaimScheduleFire(context.Background(), cl, "key", time.Minute)
-	require.NoError(t, err)
-	require.Equal(t, 1, cl.jobKeyCalls)
-	require.Equal(t, 1, cl.putJobKeyCalls)
+func TestSupportsScheduleFireClaim(t *testing.T) {
+	require.True(t, SupportsScheduleFireClaim(&cluster{}))
+	require.False(t, SupportsScheduleFireClaim(&MockCluster{}))
+	require.False(t, SupportsScheduleFireClaim(nil))
 }
 
-func TestClaimScheduleFireFallbackPropagatesPutJobKeyError(t *testing.T) {
-	expectedErr := errors.New("put job key failed")
-	cl := &MockCluster{
-		jobKeyFn: func(context.Context, string) ([]byte, error) {
-			return nil, errors.New("not found")
-		},
-		putJobKeyFn: func(context.Context, string, []byte) error {
-			return expectedErr
+func TestRemoveScheduleFireNoopWhenClusterOrKeyMissing(t *testing.T) {
+	require.NoError(t, RemoveScheduleFire(context.Background(), nil, "key"))
+	require.NoError(t, RemoveScheduleFire(context.Background(), &cluster{}, ""))
+}
+
+func TestRemoveScheduleFireNoopForUnsupportedCluster(t *testing.T) {
+	require.NoError(t, RemoveScheduleFire(context.Background(), &MockCluster{}, "key"))
+}
+
+func TestRemoveScheduleFireReturnsErrorWhenNotRunning(t *testing.T) {
+	cl := &cluster{running: atomic.NewBool(false)}
+	err := RemoveScheduleFire(context.Background(), cl, "key")
+	require.ErrorIs(t, err, ErrEngineNotRunning)
+}
+
+func TestRemoveScheduleFireDeletesTheComposedKey(t *testing.T) {
+	var gotKeys []string
+	cl := &cluster{
+		running:      atomic.NewBool(true),
+		writeTimeout: time.Second,
+		dmap: &MockDMap{
+			deleteFn: func(_ context.Context, keys ...string) (int, error) {
+				gotKeys = keys
+				return 1, nil
+			},
 		},
 	}
 
-	err := ClaimScheduleFire(context.Background(), cl, "key", time.Minute)
+	require.NoError(t, RemoveScheduleFire(context.Background(), cl, "key"))
+	require.Equal(t, []string{composeKey(namespaceScheduleFire, "key")}, gotKeys)
+}
+
+func TestRemoveScheduleFirePropagatesDMapError(t *testing.T) {
+	expectedErr := errors.New("delete failure")
+	cl := &cluster{
+		running:      atomic.NewBool(true),
+		writeTimeout: time.Second,
+		dmap: &MockDMap{
+			deleteFn: func(context.Context, ...string) (int, error) {
+				return 0, expectedErr
+			},
+		},
+	}
+
+	err := RemoveScheduleFire(context.Background(), cl, "key")
 	require.ErrorIs(t, err, expectedErr)
 }

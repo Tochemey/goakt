@@ -94,9 +94,9 @@ func bucketByTick(events []fireEvent, window time.Duration) map[int64][]fireEven
 }
 
 // TestClusterSingleFireSchedule asserts that a cron schedule registered independently on
-// every node of a cluster, with the same reference and WithClusterSingleFire set, is
-// delivered exactly once per tick cluster-wide, and that this invariant survives one of the
-// racing nodes leaving mid-run.
+// every node of a cluster, with the same reference, is delivered exactly once per tick
+// cluster-wide - single fire is intrinsic to cron schedules in cluster mode, no option
+// required - and that this invariant survives one of the racing nodes leaving mid-run.
 func TestClusterSingleFireSchedule(t *testing.T) {
 	ctx := context.Background()
 
@@ -128,7 +128,6 @@ func TestClusterSingleFireSchedule(t *testing.T) {
 		err = system.ScheduleWithCron(
 			ctx, new(testpb.TestSend), pid, cronExpr,
 			actor.WithReference(reference),
-			actor.WithClusterSingleFire(),
 		)
 		require.NoError(t, err)
 	}
@@ -158,7 +157,7 @@ func TestClusterSingleFireSchedule(t *testing.T) {
 }
 
 // assertAtMostOneDeliveryPerTick fails the test if any tick window observed more than one
-// delivery, which would mean WithClusterSingleFire failed to arbitrate a duplicate.
+// delivery, which would mean cluster-wide single fire failed to arbitrate a duplicate.
 func assertAtMostOneDeliveryPerTick(t *testing.T, events []fireEvent, window time.Duration) {
 	t.Helper()
 
@@ -167,4 +166,55 @@ func assertAtMostOneDeliveryPerTick(t *testing.T, events []fireEvent, window tim
 		require.Lenf(t, bucketEvents, 1,
 			"tick %d: expected exactly one delivery, got %d: %+v", tick, len(bucketEvents), bucketEvents)
 	}
+}
+
+// TestNodeLocalIntervalSchedule asserts the kept node-local behavior for non-cron schedules:
+// since interval RunTimes are anchored to each node's own registration clock and never align
+// cluster-wide, an interval schedule never claims, so the same reference registered on every
+// node must still deliver independently on every node instead of arbitrating to one winner.
+func TestNodeLocalIntervalSchedule(t *testing.T) {
+	ctx := context.Background()
+
+	multi := NewMultiNodes(t, log.DiscardLogger, []actor.Actor{&fireRecorder{}}, nil)
+	multi.Start()
+	t.Cleanup(multi.Stop)
+
+	const (
+		reference = "node-local-interval-schedule-test"
+		interval  = 500 * time.Millisecond
+		actorName = "fire-recorder"
+	)
+
+	sink := &fireSink{}
+	nodeNames := []string{"node-1", "node-2", "node-3"}
+
+	for _, name := range nodeNames {
+		node := multi.StartNode(ctx, name)
+		system := node.ActorSystem()
+
+		pid, err := system.Spawn(ctx, actorName+"-"+name, &fireRecorder{node: name, sink: sink})
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		err = system.Schedule(
+			ctx, new(testpb.TestSend), pid, interval,
+			actor.WithReference(reference),
+		)
+		require.NoError(t, err)
+	}
+
+	// every node must accumulate its own deliveries independently; none arbitrates against
+	// the others since interval schedules never claim.
+	require.Eventually(t, func() bool {
+		perNode := make(map[string]int)
+		for _, e := range sink.snapshot() {
+			perNode[e.node]++
+		}
+		for _, name := range nodeNames {
+			if perNode[name] < 2 {
+				return false
+			}
+		}
+		return true
+	}, 15*time.Second, 200*time.Millisecond)
 }

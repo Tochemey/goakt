@@ -209,14 +209,10 @@ type MockCluster struct {
 	putGrainFn       func(context.Context, *internalpb.Grain) error
 	putKindFn        func(context.Context, string) error
 	lookupKindFn     func(context.Context, string) (string, error)
-	jobKeyFn         func(context.Context, string) ([]byte, error)
-	putJobKeyFn      func(context.Context, string, []byte) error
 	grainExistsCalls int
 	putGrainCalls    int
 	putKindCalls     int
 	lookupKindCalls  int
-	jobKeyCalls      int
-	putJobKeyCalls   int
 }
 
 func (x *MockCluster) Start(context.Context) error { panic("unexpected call") }
@@ -273,28 +269,16 @@ func (x *MockCluster) Grains(context.Context, time.Duration) ([]*internalpb.Grai
 	panic("unexpected call")
 }
 
-func (x *MockCluster) RemoveKind(context.Context, string) error { panic("unexpected call") }
-func (x *MockCluster) Events() <-chan *Event                    { panic("unexpected call") }
-func (x *MockCluster) Peers(context.Context) ([]*Peer, error)   { panic("unexpected call") }
-func (x *MockCluster) IsLeader(context.Context) bool            { panic("unexpected call") }
-func (x *MockCluster) GetPartition(string) uint64               { panic("unexpected call") }
-func (x *MockCluster) IsRunning() bool                          { panic("unexpected call") }
-func (x *MockCluster) PutJobKey(ctx context.Context, jobID string, metadata []byte) error {
-	x.putJobKeyCalls++
-	if x.putJobKeyFn != nil {
-		return x.putJobKeyFn(ctx, jobID, metadata)
-	}
-	return nil
-}
-func (x *MockCluster) DeleteJobKey(context.Context, string) error { panic("unexpected call") }
-func (x *MockCluster) JobKey(ctx context.Context, jobID string) ([]byte, error) {
-	x.jobKeyCalls++
-	if x.jobKeyFn != nil {
-		return x.jobKeyFn(ctx, jobID)
-	}
-	return nil, nil
-}
-func (x *MockCluster) Members(context.Context) ([]*Peer, error) { panic("unexpected call") }
+func (x *MockCluster) RemoveKind(context.Context, string) error        { panic("unexpected call") }
+func (x *MockCluster) Events() <-chan *Event                           { panic("unexpected call") }
+func (x *MockCluster) Peers(context.Context) ([]*Peer, error)          { panic("unexpected call") }
+func (x *MockCluster) IsLeader(context.Context) bool                   { panic("unexpected call") }
+func (x *MockCluster) GetPartition(string) uint64                      { panic("unexpected call") }
+func (x *MockCluster) IsRunning() bool                                 { panic("unexpected call") }
+func (x *MockCluster) PutJobKey(context.Context, string, []byte) error { panic("unexpected call") }
+func (x *MockCluster) DeleteJobKey(context.Context, string) error      { panic("unexpected call") }
+func (x *MockCluster) JobKey(context.Context, string) ([]byte, error)  { panic("unexpected call") }
+func (x *MockCluster) Members(context.Context) ([]*Peer, error)        { panic("unexpected call") }
 func (x *MockCluster) NextRoundRobinValue(context.Context, string) (int, error) {
 	panic("unexpected call")
 }
