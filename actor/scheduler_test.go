@@ -1965,3 +1965,160 @@ func TestSchedulerJobMetadataPresent(t *testing.T) {
 		t.Fatal("job metadata was not present in execution context")
 	}
 }
+
+func TestSchedulerListSchedules(t *testing.T) {
+	t.Run("With no schedules", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		system, err := NewActorSystem("test", WithLogger(logger))
+		require.NoError(t, err)
+
+		require.NoError(t, system.Start(ctx))
+		pause.For(time.Second)
+
+		assert.Empty(t, system.ListSchedules())
+
+		require.NoError(t, system.Stop(ctx))
+	})
+	t.Run("With scheduler not started", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		system, err := NewActorSystem("test", WithLogger(logger))
+		require.NoError(t, err)
+
+		require.NoError(t, system.Start(ctx))
+		pause.For(time.Second)
+
+		// test purpose only
+		typedSystem := system.(*actorSystem)
+		typedSystem.scheduler.Stop(ctx)
+
+		assert.Empty(t, system.ListSchedules())
+
+		require.NoError(t, system.Stop(ctx))
+	})
+	t.Run("With an interval schedule", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		system, err := NewActorSystem("test", WithLogger(logger))
+		require.NoError(t, err)
+
+		require.NoError(t, system.Start(ctx))
+		pause.For(time.Second)
+
+		actorRef, err := system.Spawn(ctx, "test", NewMockActor())
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		message := new(testpb.TestSend)
+		err = system.Schedule(ctx, message, actorRef, 100*time.Millisecond, WithReference("interval-ref"))
+		require.NoError(t, err)
+
+		schedules := system.ListSchedules()
+		require.Len(t, schedules, 1)
+		info := schedules[0]
+		assert.Equal(t, "interval-ref", info.Reference)
+		assert.Equal(t, actorRef.Path().String(), info.Path)
+
+		require.NoError(t, system.CancelSchedule("interval-ref"))
+		assert.Empty(t, system.ListSchedules())
+
+		require.NoError(t, system.Stop(ctx))
+	})
+	t.Run("With a ScheduleOnce schedule that disappears once delivered", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		system, err := NewActorSystem("test", WithLogger(logger))
+		require.NoError(t, err)
+
+		require.NoError(t, system.Start(ctx))
+		pause.For(time.Second)
+
+		actorRef, err := system.Spawn(ctx, "test", NewMockActor())
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		message := new(testpb.TestSend)
+		err = system.ScheduleOnce(ctx, message, actorRef, 50*time.Millisecond, WithReference("run-once"))
+		require.NoError(t, err)
+
+		schedules := system.ListSchedules()
+		require.Len(t, schedules, 1)
+		info := schedules[0]
+		assert.Equal(t, "run-once", info.Reference)
+		assert.Equal(t, actorRef.Path().String(), info.Path)
+
+		require.Eventually(t, func() bool {
+			return actorRef.ProcessedCount()-1 >= 1
+		}, 2*time.Second, 20*time.Millisecond)
+
+		// the one-shot has fired: it must no longer be listed even though it was
+		// never explicitly canceled.
+		require.Eventually(t, func() bool {
+			return len(system.ListSchedules()) == 0
+		}, 2*time.Second, 20*time.Millisecond)
+
+		require.NoError(t, system.Stop(ctx))
+	})
+	t.Run("With a cron schedule", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		system, err := NewActorSystem("test", WithLogger(logger))
+		require.NoError(t, err)
+
+		require.NoError(t, system.Start(ctx))
+		pause.For(time.Second)
+
+		actorRef, err := system.Spawn(ctx, "test", NewMockActor())
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		message := new(testpb.TestSend)
+		const expr = "* * * ? * *"
+		err = system.ScheduleWithCron(ctx, message, actorRef, expr, WithReference("cron-ref"))
+		require.NoError(t, err)
+
+		schedules := system.ListSchedules()
+		require.Len(t, schedules, 1)
+		info := schedules[0]
+		assert.Equal(t, "cron-ref", info.Reference)
+		assert.Equal(t, actorRef.Path().String(), info.Path)
+
+		require.NoError(t, system.CancelSchedule("cron-ref"))
+		assert.Empty(t, system.ListSchedules())
+
+		require.NoError(t, system.Stop(ctx))
+	})
+	t.Run("With multiple schedules", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+		system, err := NewActorSystem("test", WithLogger(logger))
+		require.NoError(t, err)
+
+		require.NoError(t, system.Start(ctx))
+		pause.For(time.Second)
+
+		actorRef, err := system.Spawn(ctx, "test", NewMockActor())
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		message := new(testpb.TestSend)
+		require.NoError(t, system.Schedule(ctx, message, actorRef, 5*time.Second, WithReference("interval-ref")))
+		require.NoError(t, system.ScheduleOnce(ctx, message, actorRef, 5*time.Second, WithReference("once-ref")))
+		require.NoError(t, system.ScheduleWithCron(ctx, message, actorRef, "0 0 0 1 1 ?", WithReference("cron-ref")))
+
+		schedules := system.ListSchedules()
+		require.Len(t, schedules, 3)
+
+		byReference := make(map[string]ScheduleInfo, len(schedules))
+		for _, info := range schedules {
+			byReference[info.Reference] = info
+		}
+
+		require.Contains(t, byReference, "interval-ref")
+		require.Contains(t, byReference, "once-ref")
+		require.Contains(t, byReference, "cron-ref")
+
+		require.NoError(t, system.Stop(ctx))
+	})
+}

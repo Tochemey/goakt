@@ -404,8 +404,7 @@ type ActorSystem interface {
 	//   - error: An error is returned if the scheduled message cannot be found, was never paused, has already been delivered, or cannot be resumed.
 	ResumeSchedule(reference string) error
 	// ListSchedules returns a read-only snapshot of every schedule currently known to the scheduler:
-	// reference, trigger kind (once/interval/cron), the cron expression or interval, the next fire time,
-	// and the target actor address.
+	// its reference and the target actor path.
 	//
 	// It has no effect on the schedules themselves. A schedule stops appearing once it has been
 	// canceled via CancelSchedule or, for one-shot schedules created via ScheduleOnce, once it has
@@ -1588,8 +1587,7 @@ func (x *actorSystem) ResumeSchedule(reference string) error {
 }
 
 // ListSchedules returns a read-only snapshot of every schedule currently known to the scheduler:
-// reference, trigger kind (once/interval/cron), the cron expression or interval, the next fire time,
-// and the target actor address.
+// its reference and the target actor path.
 //
 // It has no effect on the schedules themselves. A schedule stops appearing once it has been
 // canceled via CancelSchedule or, for one-shot schedules created via ScheduleOnce, once it has
