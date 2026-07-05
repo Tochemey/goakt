@@ -158,7 +158,7 @@ func (x *scheduler) ScheduleOnce(message any, to *PID, delay time.Duration, opts
 	reference := senderConfig.Reference()
 	jobKey := quartz.NewJobKey(reference)
 	x.scheduledKeys.Set(reference, jobKey)
-	x.recordSchedule(reference, &scheduleMeta{kind: TriggerKindOnce, interval: delay, address: to.Path().String()})
+	x.recordSchedule(reference, &scheduleMeta{path: to.Path().String()})
 
 	detail := quartz.NewJobDetail(job.NewFunctionJob(jobFn), jobKey)
 	return x.quartzScheduler.ScheduleJob(detail, quartz.NewRunOnceTrigger(delay))
@@ -200,7 +200,7 @@ func (x *scheduler) Schedule(message any, to *PID, interval time.Duration, opts 
 	reference := senderConfig.Reference()
 	jobKey := quartz.NewJobKey(reference)
 	x.scheduledKeys.Set(reference, jobKey)
-	x.recordSchedule(reference, &scheduleMeta{kind: TriggerKindInterval, interval: interval, address: to.Path().String()})
+	x.recordSchedule(reference, &scheduleMeta{path: to.Path().String()})
 
 	detail := quartz.NewJobDetail(job.NewFunctionJob(jobFn), jobKey)
 	return x.quartzScheduler.ScheduleJob(detail, quartz.NewSimpleTrigger(interval))
@@ -250,7 +250,7 @@ func (x *scheduler) ScheduleWithCron(message any, to *PID, cronExpression string
 		x.logger.Error(fmt.Errorf("failed to schedule message: %w", err))
 		return err
 	}
-	x.recordSchedule(reference, &scheduleMeta{kind: TriggerKindCron, expression: cronExpression, address: to.Path().String()})
+	x.recordSchedule(reference, &scheduleMeta{path: to.Path().String()})
 
 	return x.quartzScheduler.ScheduleJob(detail, trigger)
 }

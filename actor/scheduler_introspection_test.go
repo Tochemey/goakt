@@ -87,11 +87,7 @@ func TestSchedulerListSchedules(t *testing.T) {
 		require.Len(t, schedules, 1)
 		info := schedules[0]
 		assert.Equal(t, "interval-ref", info.Reference)
-		assert.Equal(t, TriggerKindInterval, info.TriggerKind)
-		assert.Equal(t, 100*time.Millisecond, info.Interval)
-		assert.Empty(t, info.Expression)
-		assert.Equal(t, actorRef.Path().String(), info.Address)
-		assert.False(t, info.NextFireTime.IsZero())
+		assert.Equal(t, actorRef.Path().String(), info.Path)
 
 		require.NoError(t, system.CancelSchedule("interval-ref"))
 		assert.Empty(t, system.ListSchedules())
@@ -119,10 +115,7 @@ func TestSchedulerListSchedules(t *testing.T) {
 		require.Len(t, schedules, 1)
 		info := schedules[0]
 		assert.Equal(t, "run-once", info.Reference)
-		assert.Equal(t, TriggerKindOnce, info.TriggerKind)
-		assert.Equal(t, 50*time.Millisecond, info.Interval)
-		assert.Empty(t, info.Expression)
-		assert.Equal(t, actorRef.Path().String(), info.Address)
+		assert.Equal(t, actorRef.Path().String(), info.Path)
 
 		require.Eventually(t, func() bool {
 			return actorRef.ProcessedCount()-1 >= 1
@@ -158,11 +151,7 @@ func TestSchedulerListSchedules(t *testing.T) {
 		require.Len(t, schedules, 1)
 		info := schedules[0]
 		assert.Equal(t, "cron-ref", info.Reference)
-		assert.Equal(t, TriggerKindCron, info.TriggerKind)
-		assert.Equal(t, expr, info.Expression)
-		assert.Zero(t, info.Interval)
-		assert.Equal(t, actorRef.Path().String(), info.Address)
-		assert.False(t, info.NextFireTime.IsZero())
+		assert.Equal(t, actorRef.Path().String(), info.Path)
 
 		require.NoError(t, system.CancelSchedule("cron-ref"))
 		assert.Empty(t, system.ListSchedules())
@@ -198,9 +187,6 @@ func TestSchedulerListSchedules(t *testing.T) {
 		require.Contains(t, byReference, "interval-ref")
 		require.Contains(t, byReference, "once-ref")
 		require.Contains(t, byReference, "cron-ref")
-		assert.Equal(t, TriggerKindInterval, byReference["interval-ref"].TriggerKind)
-		assert.Equal(t, TriggerKindOnce, byReference["once-ref"].TriggerKind)
-		assert.Equal(t, TriggerKindCron, byReference["cron-ref"].TriggerKind)
 
 		require.NoError(t, system.Stop(ctx))
 	})

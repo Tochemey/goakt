@@ -22,18 +22,10 @@
 
 package actor
 
-import "time"
+import (
+	"errors"
 
-// TriggerKind identifies the kind of trigger backing a scheduled message.
-type TriggerKind string
-
-const (
-	// TriggerKindOnce identifies a schedule created via ScheduleOnce: it fires exactly once after a delay.
-	TriggerKindOnce TriggerKind = "once"
-	// TriggerKindInterval identifies a schedule created via Schedule: it fires repeatedly at a fixed interval.
-	TriggerKindInterval TriggerKind = "interval"
-	// TriggerKindCron identifies a schedule created via ScheduleWithCron: it fires according to a cron expression.
-	TriggerKindCron TriggerKind = "cron"
+	"github.com/reugn/go-quartz/quartz"
 )
 
 // ScheduleInfo is a read-only snapshot describing a single scheduled message known to the scheduler.
@@ -44,30 +36,15 @@ const (
 type ScheduleInfo struct {
 	// Reference is the schedule reference, either user-supplied via WithReference or auto-generated.
 	Reference string
-	// TriggerKind reports which of ScheduleOnce/Schedule/ScheduleWithCron created this schedule.
-	TriggerKind TriggerKind
-	// Expression is the cron expression used to create the schedule. It is only set when
-	// TriggerKind is TriggerKindCron.
-	Expression string
-	// Interval is the fixed delivery interval for TriggerKindInterval, or the original delay for
-	// TriggerKindOnce. It is zero when TriggerKind is TriggerKindCron.
-	Interval time.Duration
-	// NextFireTime is the next time, as reported by the underlying scheduler, at which the message
-	// will be delivered.
-	NextFireTime time.Time
-	// Address is the target actor address the message will be delivered to.
-	Address string
+	// Path is the target actor path the message will be delivered to.
+	Path string
 }
 
-// scheduleMeta captures the information about a schedule that the underlying quartz job cannot
-// report back on its own: the trigger's origin (kind + expression/interval) and the delivery
-// target's address. The quartz scheduled job itself remains the source of truth for the next
-// fire time and for whether the schedule still exists.
+// scheduleMeta captures what the underlying quartz job cannot report back on its own: the
+// delivery target's path. The quartz scheduled job itself remains the source of truth for
+// whether the schedule still exists.
 type scheduleMeta struct {
-	kind       TriggerKind
-	expression string
-	interval   time.Duration
-	address    string
+	path string
 }
 
 // recordSchedule stores the introspection metadata for a newly created schedule.
@@ -76,8 +53,8 @@ func (x *scheduler) recordSchedule(reference string, meta *scheduleMeta) {
 	x.scheduledMeta.Set(reference, meta)
 }
 
-// ListSchedules returns a snapshot of every schedule currently known to the scheduler: reference,
-// trigger kind, cron expression or interval, next fire time, and target actor address.
+// ListSchedules returns a snapshot of every schedule currently known to the scheduler:
+// its reference and the target actor path.
 //
 // It is purely read-only and has no effect on the schedules themselves. A schedule stops appearing
 // once it has been canceled (CancelSchedule) or, for one-shot schedules created via ScheduleOnce,
@@ -96,20 +73,18 @@ func (x *scheduler) ListSchedules() []ScheduleInfo {
 			return
 		}
 
-		scheduledJob, err := x.quartzScheduler.GetScheduledJob(jobKey)
-		if err != nil {
-			// the underlying quartz job is gone: either it was a one-shot that already fired,
-			// or it was removed through a path that did not clean up scheduledMeta.
+		if _, err := x.quartzScheduler.GetScheduledJob(jobKey); err != nil {
+			// only job-not-found means the schedule legitimately ended (fired one-shot or a
+			// removal path that skipped scheduledMeta); anything else is unexpected and logged
+			if !errors.Is(err, quartz.ErrJobNotFound) {
+				x.logger.Warnf("failed to look up scheduled job reference=%s: %v", reference, err)
+			}
 			return
 		}
 
 		infos = append(infos, ScheduleInfo{
-			Reference:    reference,
-			TriggerKind:  meta.kind,
-			Expression:   meta.expression,
-			Interval:     meta.interval,
-			NextFireTime: time.Unix(0, scheduledJob.NextRunTime()),
-			Address:      meta.address,
+			Reference: reference,
+			Path:      meta.path,
 		})
 	})
 
