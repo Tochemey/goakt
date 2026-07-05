@@ -27,8 +27,9 @@ import (
 )
 
 type scheduleConfig struct {
-	sender    *PID
-	reference string
+	sender            *PID
+	reference         string
+	referenceExplicit bool
 }
 
 // newScheduleConfig creates and returns a new scheduleConfig instance using the provided ScheduleOption arguments.
@@ -52,6 +53,13 @@ func (s *scheduleConfig) Sender() *PID {
 // Reference returns the scheduled message reference.
 func (s *scheduleConfig) Reference() string {
 	return s.reference
+}
+
+// hasExplicitReference reports whether WithReference was applied, as opposed to the
+// auto-generated UUID default; ScheduleWithCron uses this to require a stable, caller-chosen
+// identity before arbitrating cluster-wide single fire.
+func (s *scheduleConfig) hasExplicitReference() bool {
+	return s.referenceExplicit
 }
 
 // ScheduleOption defines an interface for applying configuration options to a scheduleConfig instance
@@ -103,8 +111,12 @@ func WithSender(sender *PID) ScheduleOption {
 //
 // Note:
 //   - It's strongly recommended to set a reference ID if you plan to cancel, pause, or resume the message later.
+//   - ScheduleWithCron in cluster mode requires this option: it arbitrates single delivery
+//     per tick using the reference as the cluster-wide claim key, so an auto-generated
+//     per-node reference would defeat that arbitration (see ErrScheduleReferenceRequired).
 func WithReference(referenceID string) ScheduleOption {
 	return ScheduleOptionFunc(func(sc *scheduleConfig) {
 		sc.reference = referenceID
+		sc.referenceExplicit = true
 	})
 }

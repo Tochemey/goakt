@@ -76,3 +76,16 @@ func TestScheduleOption(t *testing.T) {
 	err = newActorSystem.Stop(ctx)
 	assert.NoError(t, err)
 }
+
+func TestScheduleConfigExplicitReference(t *testing.T) {
+	t.Run("auto-generated reference is not explicit", func(t *testing.T) {
+		config := newScheduleConfig()
+		require.False(t, config.hasExplicitReference())
+		require.NotEmpty(t, config.Reference())
+	})
+	t.Run("WithReference marks the reference explicit", func(t *testing.T) {
+		config := newScheduleConfig(WithReference("ref"))
+		require.True(t, config.hasExplicitReference())
+		require.Equal(t, "ref", config.Reference())
+	})
+}

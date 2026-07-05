@@ -362,41 +362,24 @@ type ActorSystem interface {
 	//   - error: An error is returned if the cron expression is invalid or if scheduling fails due to internal errors.
 	//
 	// Note:
+	//   - In cluster mode the message is delivered exactly once per trigger tick across the
+	//     cluster, WithReference is required (the call is rejected with
+	//     ErrScheduleReferenceRequired otherwise), and the cron expression is evaluated in
+	//     UTC so every node computes the same tick instants. Outside cluster mode the
+	//     expression is evaluated in the process's local timezone.
 	//   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the scheduled message.
 	//   - If no reference is set, an automatic one will be generated internally, which may not be easily retrievable for future operations.
 	//   - The cron expression must follow the format supported by the scheduler (typically 6 or 5 fields depending on implementation).
 	ScheduleWithCron(ctx context.Context, message any, pid *PID, cronExpression string, opts ...ScheduleOption) error
-	// RemoteScheduleWithCron schedules a message to be sent to a remote actor according to a cron expression.
+	// CancelSchedule cancels the schedule registered under the given reference, stopping any
+	// future deliveries for it.
 	//
-	// This method allows scheduling messages to remote actors using flexible cron-based timing,
-	// enabling complex recurring schedules for message delivery.
-	// Remoting must be enabled in the actor system for this method to work.
+	// In cluster mode each node runs its own copy of the schedule, so CancelSchedule only
+	// cancels the copy on the node it is called on; call it on every node that registered the
+	// schedule to stop it cluster-wide.
 	//
-	// Parameters:
-	//	  - ctx: The context for managing cancellation and deadlines.
-	//   - message: The proto.Message to be delivered according to the cron schedule.
-	//   - receiver: The address.Address of the remote actor that will receive the message.
-	//   - cronExpression: A standard cron-formatted string defining the schedule (e.g., "0 0 * * *").
-	//   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
-	//
-	// Returns:
-	//   - error: An error is returned if the cron expression is invalid, remoting is disabled, or scheduling fails.
-	//
-	// Note:
-	//   - Remoting must be enabled in the actor system for this functionality.
-	//   - It's strongly recommended to set a unique reference ID using WithReference if you intend to cancel, pause, or resume the scheduled message.
-	//   - If no reference is set, an automatic one will be generated internally and may not be easily retrievable.
-	//   - The cron expression must conform to the scheduler’s supported format (usually 5 or 6 fields).
-	// CancelSchedule cancels a previously scheduled message intended for delivery to a target actor (PID).
-	//
-	// It attempts to locate and cancel the scheduled task associated with the specified message reference.
-	// If the scheduled message cannot be found, has already been delivered, or was previously canceled, an error is returned.
-	//
-	// Parameters:
-	//   - reference: The message reference previously used when scheduling the message
-	//
-	// Returns:
-	//   - error: An error is returned if the scheduled message could not be found or canceled.
+	// It returns an error if no schedule is registered under the reference on this node (for
+	// example when it was never scheduled, already delivered, or already canceled).
 	CancelSchedule(reference string) error
 	// PauseSchedule pauses a previously scheduled message that was set to be delivered to a target actor (PID).
 	//
@@ -420,6 +403,13 @@ type ActorSystem interface {
 	// Returns:
 	//   - error: An error is returned if the scheduled message cannot be found, was never paused, has already been delivered, or cannot be resumed.
 	ResumeSchedule(reference string) error
+	// ListSchedules returns a read-only snapshot of every schedule currently known to the scheduler:
+	// its reference and the target actor path.
+	//
+	// It has no effect on the schedules themselves. A schedule stops appearing once it has been
+	// canceled via CancelSchedule or, for one-shot schedules created via ScheduleOnce, once it has
+	// fired and been delivered.
+	ListSchedules() []ScheduleInfo
 	// PeersAddress returns the actor system address known in the cluster. That address is used by other nodes to communicate with the actor system.
 	// This address is empty when cluster mode is not activated
 	PeersAddress() string
@@ -1546,6 +1536,11 @@ func (x *actorSystem) ScheduleOnce(_ context.Context, message any, pid *PID, int
 //   - error: An error is returned if the cron expression is invalid or if scheduling fails due to internal errors.
 //
 // Note:
+//   - In cluster mode the message is delivered exactly once per trigger tick across the
+//     cluster, WithReference is required (the call is rejected with
+//     ErrScheduleReferenceRequired otherwise), and the cron expression is evaluated in UTC
+//     so every node computes the same tick instants. Outside cluster mode the expression is
+//     evaluated in the process's local timezone.
 //   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the scheduled message.
 //   - If no reference is set, an automatic one will be generated internally, which may not be easily retrievable for future operations.
 //   - The cron expression must follow the format supported by the scheduler (typically 6 or 5 fields depending on implementation).
@@ -1553,38 +1548,15 @@ func (x *actorSystem) ScheduleWithCron(_ context.Context, message any, pid *PID,
 	return x.scheduler.ScheduleWithCron(message, pid, cronExpression, opts...)
 }
 
-// RemoteScheduleWithCron schedules a message to be sent to a remote actor according to a cron expression.
+// CancelSchedule cancels the schedule registered under the given reference, stopping any
+// future deliveries for it.
 //
-// This method allows scheduling messages to remote actors using flexible cron-based timing,
-// enabling complex recurring schedules for message delivery.
-// Remoting must be enabled in the actor system for this method to work.
+// In cluster mode each node runs its own copy of the schedule, so CancelSchedule only cancels
+// the copy on the node it is called on; call it on every node that registered the schedule to
+// stop it cluster-wide.
 //
-// Parameters:
-//   - ctx: The context for managing cancellation and deadlines.
-//   - message: The proto.Message to be delivered according to the cron schedule.
-//   - to: The address.Address of the remote actor that will receive the message.
-//   - cronExpression: A standard cron-formatted string defining the schedule (e.g., "0 0 * * *").
-//   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
-//
-// Returns:
-//   - error: An error is returned if the cron expression is invalid, remoting is disabled, or scheduling fails.
-//
-// Note:
-//   - Remoting must be enabled in the actor system for this functionality.
-//   - It's strongly recommended to set a unique reference ID using WithReference if you intend to cancel, pause, or resume the scheduled message.
-//   - If no reference is set, an automatic one will be generated internally and may not be easily retrievable.
-//   - The cron expression must conform to the scheduler’s supported format (usually 5 or 6 fields).
-//
-// CancelSchedule cancels a previously scheduled message intended for delivery to a target actor.
-//
-// It attempts to locate and cancel the scheduled task associated with the specified message reference.
-// If the scheduled message cannot be found, has already been delivered, or was previously canceled, an error is returned.
-//
-// Parameters:
-//   - reference: The message reference previously used when scheduling the message
-//
-// Returns:
-//   - error: An error is returned if the scheduled message could not be found or canceled.
+// It returns an error if no schedule is registered under the reference on this node (for
+// example when it was never scheduled, already delivered, or already canceled).
 func (x *actorSystem) CancelSchedule(reference string) error {
 	return x.scheduler.CancelSchedule(reference)
 }
@@ -1615,6 +1587,16 @@ func (x *actorSystem) PauseSchedule(reference string) error {
 //   - error: An error is returned if the scheduled message cannot be found, was never paused, has already been delivered, or cannot be resumed.
 func (x *actorSystem) ResumeSchedule(reference string) error {
 	return x.scheduler.ResumeSchedule(reference)
+}
+
+// ListSchedules returns a read-only snapshot of every schedule currently known to the scheduler:
+// its reference and the target actor path.
+//
+// It has no effect on the schedules themselves. A schedule stops appearing once it has been
+// canceled via CancelSchedule or, for one-shot schedules created via ScheduleOnce, once it has
+// fired and been delivered.
+func (x *actorSystem) ListSchedules() []ScheduleInfo {
+	return x.scheduler.ListSchedules()
 }
 
 // Subscribe creates an event subscriber to consume events from the actor system.
