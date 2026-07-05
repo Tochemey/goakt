@@ -56,21 +56,15 @@ if isLeader {
 }
 ```
 
-<Note>
-  This lets non-actor code (background jobs, metrics exporters, gateway components) ask "am I the leader?" without
-  routing through an actor.
-</Note>
-
 Whenever the cluster coordinator moves to a different node, every node publishes a `LeaderChanged` event on its
 local [event stream](/advanced/event-streams), alongside `NodeJoined` and `NodeLeft` - exactly once per transition,
-carrying the new leader's address. Compare it with `ActorSystem.PeersAddress()` to know whether the local node is
-the one that took over.
+carrying the new leader's address. Like the other topology events, it exists for observability (monitoring,
+logging, dashboards); leadership itself is managed entirely by the framework.
 
 ```go
 for msg := range subscriber.Iterator() {
     if leaderChanged, ok := msg.Payload().(*actor.LeaderChanged); ok {
-        becameLeader := leaderChanged.Address() == system.PeersAddress()
-        log.Printf("cluster leader is now %s (self=%t)", leaderChanged.Address(), becameLeader)
+        log.Printf("cluster leader is now %s", leaderChanged.Address())
     }
 }
 ```
