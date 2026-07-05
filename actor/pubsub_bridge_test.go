@@ -232,4 +232,118 @@ func TestSubscribeTopic(t *testing.T) {
 		require.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
 		require.Nil(t, sub)
 	})
+
+	t.Run("A blocking handler delays its own subsequent deliveries without affecting another topic's bridge", func(t *testing.T) {
+		ctx := context.Background()
+		actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithPubSub())
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		pause.For(time.Second)
+
+		blockTopic := "block-topic"
+		otherTopic := "other-topic"
+
+		unblock := make(chan struct{})
+		var blockingOrder []string
+		var blockingMu sync.Mutex
+
+		blockingSub, err := actorSystem.SubscribeTopic(blockTopic, func(_ context.Context, message proto.Message) {
+			count := message.(*testpb.TestCount)
+			if count.GetValue() == 1 {
+				// hold the bridge's single mailbox goroutine until told to
+				// proceed, so a second published message must queue behind it
+				<-unblock
+			}
+			blockingMu.Lock()
+			blockingOrder = append(blockingOrder, "block")
+			blockingMu.Unlock()
+		})
+		require.NoError(t, err)
+
+		var otherCounter atomic.Int64
+		otherSub, err := actorSystem.SubscribeTopic(otherTopic, func(context.Context, proto.Message) {
+			otherCounter.Inc()
+		})
+		require.NoError(t, err)
+
+		pause.For(500 * time.Millisecond)
+
+		publisher, err := actorSystem.Spawn(ctx, "publisher", NewMockSubscriber())
+		require.NoError(t, err)
+
+		require.NoError(t, publisher.Tell(ctx, actorSystem.TopicActor(), NewPublish("m1", blockTopic, &testpb.TestCount{Value: 1})))
+		require.NoError(t, publisher.Tell(ctx, actorSystem.TopicActor(), NewPublish("m2", blockTopic, &testpb.TestCount{Value: 2})))
+
+		pause.For(300 * time.Millisecond)
+
+		// the blocked bridge must not stall delivery to an unrelated topic's bridge
+		require.NoError(t, publisher.Tell(ctx, actorSystem.TopicActor(), NewPublish("m3", otherTopic, new(testpb.TestCount))))
+		pause.For(300 * time.Millisecond)
+		require.EqualValues(t, 1, otherCounter.Load(), "the other topic's bridge must be delivered to while the blocking topic's bridge is stuck")
+
+		close(unblock)
+		pause.For(500 * time.Millisecond)
+
+		blockingMu.Lock()
+		require.Equal(t, []string{"block", "block"}, blockingOrder, "both messages must eventually be delivered in order, without loss")
+		blockingMu.Unlock()
+
+		require.NoError(t, blockingSub.Close())
+		require.NoError(t, otherSub.Close())
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
+
+	t.Run("Closing a subscription twice is a safe no-op", func(t *testing.T) {
+		ctx := context.Background()
+		actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithPubSub())
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		pause.For(time.Second)
+
+		sub, err := actorSystem.SubscribeTopic("test-topic", func(context.Context, proto.Message) {})
+		require.NoError(t, err)
+
+		require.NoError(t, sub.Close())
+		require.NoError(t, sub.Close(), "a second Close must not error")
+
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
+
+	t.Run("Subscribing the same callback to a topic twice delivers each publish twice", func(t *testing.T) {
+		// SubscribeTopic is not idempotent: each call spawns its own bridge
+		// actor and registers it as an independent subscriber, so subscribing
+		// twice is indistinguishable from two different subscribers and both
+		// receive every publish.
+		ctx := context.Background()
+		actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithPubSub())
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		pause.For(time.Second)
+
+		var counter atomic.Int64
+		topic := "test-topic"
+		handler := func(context.Context, proto.Message) { counter.Inc() }
+
+		sub1, err := actorSystem.SubscribeTopic(topic, handler)
+		require.NoError(t, err)
+		sub2, err := actorSystem.SubscribeTopic(topic, handler)
+		require.NoError(t, err)
+
+		pause.For(500 * time.Millisecond)
+
+		publisher, err := actorSystem.Spawn(ctx, "publisher", NewMockSubscriber())
+		require.NoError(t, err)
+
+		require.NoError(t, publisher.Tell(ctx, actorSystem.TopicActor(), NewPublish("message1", topic, new(testpb.TestCount))))
+		pause.For(500 * time.Millisecond)
+
+		require.EqualValues(t, 2, counter.Load(), "each independent subscription must be delivered to")
+
+		require.NoError(t, sub1.Close())
+		require.NoError(t, sub2.Close())
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
 }
