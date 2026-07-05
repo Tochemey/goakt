@@ -98,14 +98,14 @@ type ScheduleInfo struct {
 	// Reference is the schedule reference, either user-supplied via WithReference or auto-generated.
 	Reference string
 	// Path is the target actor path the message will be delivered to.
-	Path string
+	Path Path
 }
 
 // scheduleMeta captures what the underlying quartz job cannot report back on its own: the
 // delivery target's path. The quartz scheduled job itself remains the source of truth for
 // whether the schedule still exists.
 type scheduleMeta struct {
-	path string
+	path Path
 }
 
 // newScheduler creates an instance of scheduler
@@ -212,7 +212,7 @@ func (x *scheduler) ScheduleOnce(message any, to *PID, delay time.Duration, opts
 	reference := senderConfig.Reference()
 	jobKey := quartz.NewJobKey(reference)
 	x.scheduledKeys.Set(reference, jobKey)
-	x.recordSchedule(reference, &scheduleMeta{path: to.Path().String()})
+	x.recordSchedule(reference, &scheduleMeta{path: to.Path()})
 
 	detail := quartz.NewJobDetail(job.NewFunctionJob(jobFn), jobKey)
 	return x.quartzScheduler.ScheduleJob(detail, quartz.NewRunOnceTrigger(delay))
@@ -255,7 +255,7 @@ func (x *scheduler) Schedule(message any, to *PID, interval time.Duration, opts 
 	reference := senderConfig.Reference()
 	jobKey := quartz.NewJobKey(reference)
 	x.scheduledKeys.Set(reference, jobKey)
-	x.recordSchedule(reference, &scheduleMeta{path: to.Path().String()})
+	x.recordSchedule(reference, &scheduleMeta{path: to.Path()})
 
 	detail := quartz.NewJobDetail(job.NewFunctionJob(jobFn), jobKey)
 	return x.quartzScheduler.ScheduleJob(detail, quartz.NewSimpleTrigger(interval))
@@ -338,7 +338,7 @@ func (x *scheduler) ScheduleWithCron(message any, to *PID, cronExpression string
 	reference := senderConfig.Reference()
 	jobKey := quartz.NewJobKey(reference)
 	x.scheduledKeys.Set(reference, jobKey)
-	x.recordSchedule(reference, &scheduleMeta{path: to.Path().String()})
+	x.recordSchedule(reference, &scheduleMeta{path: to.Path()})
 
 	detail := quartz.NewJobDetail(job.NewFunctionJob(jobFn), jobKey)
 	return x.quartzScheduler.ScheduleJob(detail, trigger)
@@ -425,12 +425,6 @@ func (x *scheduler) ResumeSchedule(reference string) error {
 	return x.quartzScheduler.ResumeJob(jobKey)
 }
 
-// recordSchedule stores the introspection metadata for a newly created schedule.
-// Called by ScheduleOnce, Schedule and ScheduleWithCron right after the job key is registered.
-func (x *scheduler) recordSchedule(reference string, meta *scheduleMeta) {
-	x.scheduledMeta.Set(reference, meta)
-}
-
 // ListSchedules returns a snapshot of every schedule currently known to the scheduler:
 // its reference and the target actor path.
 //
@@ -467,6 +461,12 @@ func (x *scheduler) ListSchedules() []ScheduleInfo {
 	})
 
 	return infos
+}
+
+// recordSchedule stores the introspection metadata for a newly created schedule.
+// Called by ScheduleOnce, Schedule and ScheduleWithCron right after the job key is registered.
+func (x *scheduler) recordSchedule(reference string, meta *scheduleMeta) {
+	x.scheduledMeta.Set(reference, meta)
 }
 
 // cronClaimTTL derives the cluster schedule-fire claim TTL from the gap between two

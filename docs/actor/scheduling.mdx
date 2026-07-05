@@ -178,7 +178,7 @@ For scheduled messages, the target actor receives the message via `Tell`. By def
 ```go
 type ScheduleInfo struct {
 	Reference string // the schedule reference (user-supplied or auto-generated)
-	Path      string // target actor path
+	Path      Path   // target actor path
 }
 ```
 

@@ -2018,7 +2018,7 @@ func TestSchedulerListSchedules(t *testing.T) {
 		require.Len(t, schedules, 1)
 		info := schedules[0]
 		assert.Equal(t, "interval-ref", info.Reference)
-		assert.Equal(t, actorRef.Path().String(), info.Path)
+		assert.Equal(t, actorRef.Path().String(), info.Path.String())
 
 		require.NoError(t, system.CancelSchedule("interval-ref"))
 		assert.Empty(t, system.ListSchedules())
@@ -2046,7 +2046,7 @@ func TestSchedulerListSchedules(t *testing.T) {
 		require.Len(t, schedules, 1)
 		info := schedules[0]
 		assert.Equal(t, "run-once", info.Reference)
-		assert.Equal(t, actorRef.Path().String(), info.Path)
+		assert.Equal(t, actorRef.Path().String(), info.Path.String())
 
 		require.Eventually(t, func() bool {
 			return actorRef.ProcessedCount()-1 >= 1
@@ -2082,7 +2082,7 @@ func TestSchedulerListSchedules(t *testing.T) {
 		require.Len(t, schedules, 1)
 		info := schedules[0]
 		assert.Equal(t, "cron-ref", info.Reference)
-		assert.Equal(t, actorRef.Path().String(), info.Path)
+		assert.Equal(t, actorRef.Path().String(), info.Path.String())
 
 		require.NoError(t, system.CancelSchedule("cron-ref"))
 		assert.Empty(t, system.ListSchedules())
