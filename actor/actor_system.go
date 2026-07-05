@@ -465,30 +465,10 @@ type ActorSystem interface {
 	//
 	// Returns the actor reference for the topic actor.
 	TopicActor() *PID
-	// TopicSubscriberCount returns the number of subscribers to topic across the
-	// entire cluster. It is a shorthand for len(TopicSubscribers(...)); see
-	// TopicSubscribers for the aggregation semantics and requirements.
-	TopicSubscriberCount(ctx context.Context, topic string, timeout time.Duration) (int, error)
-	// TopicSubscribers returns the canonical addresses of every subscriber to
-	// topic, aggregated cluster-wide from the topic actor's existing per-node
-	// subscriber registries. In cluster mode this fans out to every peer's
-	// topic actor and merges their local views with this node's; the timeout
-	// bounds that fan-out and is ignored when not in cluster mode.
-	//
-	// Requirements:
-	//   - PubSub mode must be enabled via WithPubSub(), or clustering must be enabled.
-	//
-	// Returns ErrTopicActorNotStarted when the topic actor is unavailable.
-	TopicSubscribers(ctx context.Context, topic string, timeout time.Duration) ([]string, error)
-	// Topics returns the names of the topics that currently have at least one
-	// subscriber anywhere in the cluster. The timeout bounds the cluster-wide
-	// fan-out and is ignored when not in cluster mode.
-	//
-	// Requirements:
-	//   - PubSub mode must be enabled via WithPubSub(), or clustering must be enabled.
-	//
-	// Returns ErrTopicActorNotStarted when the topic actor is unavailable.
-	Topics(ctx context.Context, timeout time.Duration) ([]string, error)
+	// TopicStats returns a snapshot of the given topic's subscription state across
+	// the cluster. In non-clustered mode, TopicInstanceCount is 0 or 1 based on
+	// local subscribers.
+	TopicStats(ctx context.Context, topic string, timeout time.Duration) (*TopicStats, error)
 	// Replicator returns the PID of the local CRDT Replicator system actor.
 	// Returns nil if CRDT replication is not enabled via ClusterConfig.WithCRDT.
 	Replicator() *PID
@@ -1969,69 +1949,25 @@ func (x *actorSystem) TopicActor() *PID {
 	return topicActor
 }
 
-// TopicSubscriberCount returns the number of subscribers to topic across the
-// entire cluster. It is a shorthand for len(TopicSubscribers(...)); see
-// TopicSubscribers for the aggregation semantics and requirements.
-func (x *actorSystem) TopicSubscriberCount(ctx context.Context, topic string, timeout time.Duration) (int, error) {
-	subscribers, err := x.TopicSubscribers(ctx, topic, timeout)
-	if err != nil {
-		return 0, err
-	}
-	return len(subscribers), nil
-}
-
-// TopicSubscribers returns the canonical addresses of every subscriber to
-// topic, aggregated cluster-wide from the topic actor's existing per-node
-// subscriber registries. In cluster mode this fans out to every peer's
-// topic actor and merges their local views with this node's; the timeout
-// bounds that fan-out and is ignored when not in cluster mode.
-//
-// Requirements:
-//   - PubSub mode must be enabled via WithPubSub(), or clustering must be enabled.
-//
-// Returns ErrTopicActorNotStarted when the topic actor is unavailable.
-func (x *actorSystem) TopicSubscribers(ctx context.Context, topic string, timeout time.Duration) ([]string, error) {
+// TopicStats returns a snapshot of the given topic's subscription state across
+// the cluster. In non-clustered mode, TopicInstanceCount is 0 or 1 based on
+// local subscribers.
+func (x *actorSystem) TopicStats(ctx context.Context, topic string, timeout time.Duration) (*TopicStats, error) {
 	topicActor := x.TopicActor()
 	if topicActor == nil {
 		return nil, gerrors.ErrTopicActorNotStarted
 	}
 
-	reply, err := x.getSystemGuardian().Ask(ctx, topicActor, &topicPresenceQuery{topic: topic, timeout: timeout}, timeout)
+	reply, err := x.getSystemGuardian().Ask(ctx, topicActor, &getTopicStats{topic: topic}, timeout)
 	if err != nil {
 		return nil, err
 	}
 
-	presence, ok := reply.(*topicPresenceReply)
-	if !ok || presence == nil {
+	stats, ok := reply.(*TopicStats)
+	if !ok || stats == nil {
 		return nil, gerrors.ErrInvalidResponse
 	}
-	return presence.subscribers, nil
-}
-
-// Topics returns the names of the topics that currently have at least one
-// subscriber anywhere in the cluster. The timeout bounds the cluster-wide
-// fan-out and is ignored when not in cluster mode.
-//
-// Requirements:
-//   - PubSub mode must be enabled via WithPubSub(), or clustering must be enabled.
-//
-// Returns ErrTopicActorNotStarted when the topic actor is unavailable.
-func (x *actorSystem) Topics(ctx context.Context, timeout time.Duration) ([]string, error) {
-	topicActor := x.TopicActor()
-	if topicActor == nil {
-		return nil, gerrors.ErrTopicActorNotStarted
-	}
-
-	reply, err := x.getSystemGuardian().Ask(ctx, topicActor, &topicListQuery{timeout: timeout}, timeout)
-	if err != nil {
-		return nil, err
-	}
-
-	list, ok := reply.(*topicListReply)
-	if !ok || list == nil {
-		return nil, gerrors.ErrInvalidResponse
-	}
-	return list.topics, nil
+	return stats, nil
 }
 
 // Replicator returns the PID of the local CRDT Replicator system actor.

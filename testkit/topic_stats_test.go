@@ -34,73 +34,78 @@ import (
 	"github.com/tochemey/goakt/v4/log"
 )
 
-// TestTopicPresence exercises TopicSubscriberCount, TopicSubscribers and Topics
-// across a real cluster: subscribers spread over different nodes, an
-// unsubscribe on one node, and a node leaving the cluster altogether.
-func TestTopicPresence(t *testing.T) {
+// TestTopicStats exercises TopicStats across a real cluster: subscribers
+// spread over different nodes, an unsubscribe on one node, and a node
+// leaving the cluster altogether.
+func TestTopicStats(t *testing.T) {
 	ctx := context.Background()
 
 	multi := NewMultiNodes(t, log.DiscardLogger, []actor.Actor{&pinger{}}, nil)
 	multi.Start()
 	t.Cleanup(multi.Stop)
 
-	node1 := multi.StartNode(ctx, "topic-presence-node-1")
-	node2 := multi.StartNode(ctx, "topic-presence-node-2")
-	node3 := multi.StartNode(ctx, "topic-presence-node-3")
+	node1 := multi.StartNode(ctx, "topic-stats-node-1")
+	node2 := multi.StartNode(ctx, "topic-stats-node-2")
+	node3 := multi.StartNode(ctx, "topic-stats-node-3")
 
 	// give the cluster time to settle before subscribing
 	pause.For(2 * time.Second)
 
-	const topic = "presence-topic"
+	const topic = "stats-topic"
 
 	node1.Spawn(ctx, "subscriber-1", &pinger{})
-	node2.Spawn(ctx, "subscriber-2", &pinger{})
+	node2.Spawn(ctx, "subscriber-2a", &pinger{})
+	node2.Spawn(ctx, "subscriber-2b", &pinger{})
 	node3.Spawn(ctx, "subscriber-3", &pinger{})
 
 	sub1, err := node1.ActorSystem().ActorOf(ctx, "subscriber-1")
 	require.NoError(t, err)
-	sub2, err := node2.ActorSystem().ActorOf(ctx, "subscriber-2")
+	sub2a, err := node2.ActorSystem().ActorOf(ctx, "subscriber-2a")
+	require.NoError(t, err)
+	sub2b, err := node2.ActorSystem().ActorOf(ctx, "subscriber-2b")
 	require.NoError(t, err)
 	sub3, err := node3.ActorSystem().ActorOf(ctx, "subscriber-3")
 	require.NoError(t, err)
 
 	require.NoError(t, sub1.Tell(ctx, node1.ActorSystem().TopicActor(), actor.NewSubscribe(topic)))
-	require.NoError(t, sub2.Tell(ctx, node2.ActorSystem().TopicActor(), actor.NewSubscribe(topic)))
+	require.NoError(t, sub2a.Tell(ctx, node2.ActorSystem().TopicActor(), actor.NewSubscribe(topic)))
+	require.NoError(t, sub2b.Tell(ctx, node2.ActorSystem().TopicActor(), actor.NewSubscribe(topic)))
 	require.NoError(t, sub3.Tell(ctx, node3.ActorSystem().TopicActor(), actor.NewSubscribe(topic)))
 
-	// the count and membership are visible cluster-wide regardless of which
-	// node the query is issued from, once all three subscriptions land.
+	// node2 has two local subscribers; the cluster-wide instance count only
+	// reflects the number of nodes with subscribers (three), not the total
+	// subscriber count (four).
 	require.Eventually(t, func() bool {
-		count, err := node1.ActorSystem().TopicSubscriberCount(ctx, topic, 5*time.Second)
-		return err == nil && count == 3
+		stats, err := node2.ActorSystem().TopicStats(ctx, topic, 5*time.Second)
+		return err == nil && stats.LocalSubscriberCount == 2 && stats.TopicInstanceCount == 3
 	}, 15*time.Second, 300*time.Millisecond)
 
-	subscribers, err := node2.ActorSystem().TopicSubscribers(ctx, topic, 5*time.Second)
+	stats1, err := node1.ActorSystem().TopicStats(ctx, topic, 5*time.Second)
 	require.NoError(t, err)
-	require.ElementsMatch(t, []string{sub1.ID(), sub2.ID(), sub3.ID()}, subscribers)
+	require.Equal(t, topic, stats1.Topic)
+	require.Equal(t, 1, stats1.LocalSubscriberCount)
+	require.Equal(t, 3, stats1.TopicInstanceCount)
 
-	topics, err := node3.ActorSystem().Topics(ctx, 5*time.Second)
+	stats3, err := node3.ActorSystem().TopicStats(ctx, topic, 5*time.Second)
 	require.NoError(t, err)
-	require.Equal(t, []string{topic}, topics)
+	require.Equal(t, 1, stats3.LocalSubscriberCount)
+	require.Equal(t, 3, stats3.TopicInstanceCount)
 
-	// unsubscribing on one node is reflected in the cluster-wide count queried
-	// from a different node.
-	require.NoError(t, sub2.Tell(ctx, node2.ActorSystem().TopicActor(), actor.NewUnsubscribe(topic)))
+	// unsubscribing node3's only subscriber drops the cluster-wide instance
+	// count, visible from a different node.
+	require.NoError(t, sub3.Tell(ctx, node3.ActorSystem().TopicActor(), actor.NewUnsubscribe(topic)))
 
 	require.Eventually(t, func() bool {
-		subs, err := node1.ActorSystem().TopicSubscribers(ctx, topic, 5*time.Second)
-		return err == nil && len(subs) == 2
+		stats, err := node1.ActorSystem().TopicStats(ctx, topic, 5*time.Second)
+		return err == nil && stats.TopicInstanceCount == 2
 	}, 15*time.Second, 300*time.Millisecond)
 
-	subscribers, err = node1.ActorSystem().TopicSubscribers(ctx, topic, 5*time.Second)
-	require.NoError(t, err)
-	require.ElementsMatch(t, []string{sub1.ID(), sub3.ID()}, subscribers)
-
-	// node3 leaving the cluster removes its subscriber from the aggregated view.
-	multi.StopNode(ctx, "topic-presence-node-3")
+	// node2 leaving the cluster degrades the aggregation gracefully: the
+	// remaining nodes silently skip the unreachable peer instead of failing.
+	multi.StopNode(ctx, "topic-stats-node-2")
 
 	require.Eventually(t, func() bool {
-		subs, err := node1.ActorSystem().TopicSubscribers(ctx, topic, 5*time.Second)
-		return err == nil && len(subs) == 1 && subs[0] == sub1.ID()
+		stats, err := node1.ActorSystem().TopicStats(ctx, topic, 5*time.Second)
+		return err == nil && stats.TopicInstanceCount == 1 && stats.LocalSubscriberCount == 1
 	}, 20*time.Second, 300*time.Millisecond)
 }

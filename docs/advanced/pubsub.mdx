@@ -133,31 +133,36 @@ func (a *OrderService) Receive(ctx *ReceiveContext) {
 }
 ```
 
-## Presence and introspection
+## Topic statistics
 
-The topic actor already tracks, per node, which local actors are subscribed to which topics. `ActorSystem` exposes read-only, cluster-wide aggregations of that state so application code can answer questions like "who is subscribed to this topic" or "how many subscribers does it have" without maintaining a separate registry.
-
-| Method                                                      | Purpose                                                                             |
-|--------------------------------------------------------------|--------------------------------------------------------------------------------------|
-| `TopicSubscriberCount(ctx, topic, timeout) (int, error)`      | Number of subscribers to `topic` across the whole cluster.                          |
-| `TopicSubscribers(ctx, topic, timeout) ([]string, error)`     | Canonical addresses of every subscriber to `topic` across the whole cluster.         |
-| `Topics(ctx, timeout) ([]string, error)`                      | Names of the topics that currently have at least one subscriber anywhere in the cluster. |
+`ActorSystem.TopicStats` returns a read-only, point-in-time snapshot of a topic's subscription state, without ever exposing subscriber identities:
 
 ```go
-count, err := system.TopicSubscriberCount(ctx, "orders", 5*time.Second)
-subscribers, err := system.TopicSubscribers(ctx, "orders", 5*time.Second)
-topics, err := system.Topics(ctx, 5*time.Second)
+type TopicStats struct {
+    Topic                string
+    LocalSubscriberCount int
+    TopicInstanceCount   int
+}
 ```
 
-In cluster mode, each node's topic actor answers a presence query for its own local subscribers, and the querying node's topic actor fans the same question out to every peer's topic actor and merges the answers. Outside cluster mode, the aggregation is just the local view. The `timeout` bounds that cluster-wide fan-out; it is ignored when clustering is not enabled.
+- `LocalSubscriberCount` — subscribers registered on **this node's** topic actor for the topic.
+- `TopicInstanceCount` — number of topic-actor instances (nodes) cluster-wide that currently have at least one subscriber for the topic.
+
+```go
+stats, err := system.TopicStats(ctx, "orders", 5*time.Second)
+if err != nil {
+    // handle error
+}
+fmt.Printf("local=%d instances=%d\n", stats.LocalSubscriberCount, stats.TopicInstanceCount)
+```
+
+In cluster mode, the local node's topic actor answers with its own local subscriber count, and fans a lightweight query out to every peer's topic actor to determine how many of them also have subscribers; peers answer with their local view only and never fan the query out any further, which avoids query storms. Outside cluster mode, `TopicInstanceCount` is simply 0 or 1 depending on whether this node has local subscribers. The `timeout` bounds that cluster-wide fan-out and is ignored when clustering is not enabled.
 
 <Note>
-All three methods require the topic actor to be running (`WithPubSub()` or clustering enabled); otherwise they return `ErrTopicActorNotStarted`.
+`TopicStats` is an eventually consistent, point-in-time snapshot with no delivery guarantee: a peer that cannot be reached within `timeout` (e.g. it left the cluster, or a message is in flight) is silently excluded from `TopicInstanceCount` rather than failing the whole call.
 </Note>
 
-<Warning>
-A peer that cannot be reached within `timeout` (e.g. it left the cluster) is silently excluded from the aggregated result rather than failing the whole call—presence degrades to a partial view instead of an error.
-</Warning>
+`TopicStats` requires the topic actor to be running (`WithPubSub()` or clustering enabled); otherwise it returns `ErrTopicActorNotStarted`.
 
 ## Event stream vs PubSub
 

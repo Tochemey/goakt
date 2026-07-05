@@ -551,3 +551,20 @@ func (r *RelocationFailed) Grains() []string { return r.grains }
 
 // Error returns the error that caused the relocation failure.
 func (r *RelocationFailed) Error() error { return r.err }
+
+// TopicStats is a point-in-time snapshot of a topic's subscription state.
+type TopicStats struct {
+	// Topic is the topic these stats describe.
+	Topic string
+	// LocalSubscriberCount is the number of subscribers registered on this
+	// node's topic actor for the topic at the time of the query.
+	LocalSubscriberCount int
+	// TopicInstanceCount is the number of topic-actor instances (nodes) in the
+	// cluster that currently have at least one subscriber for the topic.
+	TopicInstanceCount int
+}
+
+// getTopicStats asks the local topic actor for a TopicStats snapshot of topic.
+type getTopicStats struct {
+	topic string
+}

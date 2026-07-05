@@ -496,9 +496,9 @@ func TestTopicActor(t *testing.T) {
 
 		// the same cleanup must be observable through the public API, not
 		// just the internal subscriber map
-		count, err := actorSystem.TopicSubscriberCount(ctx, topic, time.Second)
+		stats, err := actorSystem.TopicStats(ctx, topic, time.Second)
 		require.NoError(t, err)
-		require.EqualValues(t, 2, count)
+		require.EqualValues(t, 2, stats.LocalSubscriberCount)
 
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
@@ -587,7 +587,7 @@ func TestTopicActor(t *testing.T) {
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
 
-	t.Run("With TopicSubscribers, TopicSubscriberCount and Topics without clustering", func(t *testing.T) {
+	t.Run("With TopicStats local counts and instance count without clustering", func(t *testing.T) {
 		ctx := context.Background()
 		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithPubSub())
 
@@ -598,14 +598,14 @@ func TestTopicActor(t *testing.T) {
 		// wait for the actor system to be ready
 		pause.For(time.Second)
 
-		// no subscriber yet: the topic is unknown
-		count, err := actorSystem.TopicSubscriberCount(ctx, "test-topic", time.Second)
-		require.NoError(t, err)
-		require.Zero(t, count)
+		topic := "test-topic"
 
-		topics, err := actorSystem.Topics(ctx, time.Second)
+		// no subscriber yet: zero counts, and the instance count is 0, not 1
+		stats, err := actorSystem.TopicStats(ctx, topic, time.Second)
 		require.NoError(t, err)
-		require.Empty(t, topics)
+		require.Equal(t, topic, stats.Topic)
+		require.Zero(t, stats.LocalSubscriberCount)
+		require.Zero(t, stats.TopicInstanceCount)
 
 		actor1, err := actorSystem.Spawn(ctx, "actor1", NewMockSubscriber(), WithLongLived())
 		require.NoError(t, err)
@@ -613,45 +613,83 @@ func TestTopicActor(t *testing.T) {
 		actor2, err := actorSystem.Spawn(ctx, "actor2", NewMockSubscriber(), WithLongLived())
 		require.NoError(t, err)
 
-		topic := "test-topic"
 		require.NoError(t, actor1.Tell(ctx, actorSystem.TopicActor(), NewSubscribe(topic)))
 		pause.For(500 * time.Millisecond)
 		require.NoError(t, actor2.Tell(ctx, actorSystem.TopicActor(), NewSubscribe(topic)))
 		pause.For(500 * time.Millisecond)
 
-		count, err = actorSystem.TopicSubscriberCount(ctx, topic, time.Second)
+		stats, err = actorSystem.TopicStats(ctx, topic, time.Second)
 		require.NoError(t, err)
-		require.EqualValues(t, 2, count)
+		require.EqualValues(t, 2, stats.LocalSubscriberCount)
+		require.EqualValues(t, 1, stats.TopicInstanceCount)
 
-		subscribers, err := actorSystem.TopicSubscribers(ctx, topic, time.Second)
-		require.NoError(t, err)
-		require.ElementsMatch(t, []string{actor1.ID(), actor2.ID()}, subscribers)
-
-		topics, err = actorSystem.Topics(ctx, time.Second)
-		require.NoError(t, err)
-		require.Equal(t, []string{topic}, topics)
-
-		// unsubscribe one actor and check the counts are updated
+		// unsubscribe one actor and check the local count is updated
 		require.NoError(t, actor1.Tell(ctx, actorSystem.TopicActor(), NewUnsubscribe(topic)))
 		pause.For(500 * time.Millisecond)
 
-		count, err = actorSystem.TopicSubscriberCount(ctx, topic, time.Second)
+		stats, err = actorSystem.TopicStats(ctx, topic, time.Second)
 		require.NoError(t, err)
-		require.EqualValues(t, 1, count)
+		require.EqualValues(t, 1, stats.LocalSubscriberCount)
+		require.EqualValues(t, 1, stats.TopicInstanceCount)
 
-		subscribers, err = actorSystem.TopicSubscribers(ctx, topic, time.Second)
-		require.NoError(t, err)
-		require.Equal(t, []string{actor2.ID()}, subscribers)
+		// unsubscribing the last subscriber brings the instance count back to 0
+		require.NoError(t, actor2.Tell(ctx, actorSystem.TopicActor(), NewUnsubscribe(topic)))
+		pause.For(500 * time.Millisecond)
 
-		// a topic nobody ever subscribed to reports zero subscribers, not an error
-		count, err = actorSystem.TopicSubscriberCount(ctx, "unknown-topic", time.Second)
+		stats, err = actorSystem.TopicStats(ctx, topic, time.Second)
 		require.NoError(t, err)
-		require.Zero(t, count)
+		require.Zero(t, stats.LocalSubscriberCount)
+		require.Zero(t, stats.TopicInstanceCount)
+
+		// a topic nobody ever subscribed to reports zero counts, not an error
+		stats, err = actorSystem.TopicStats(ctx, "unknown-topic", time.Second)
+		require.NoError(t, err)
+		require.Zero(t, stats.LocalSubscriberCount)
+		require.Zero(t, stats.TopicInstanceCount)
 
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
 
-	t.Run("With TopicSubscribers when the topic actor is not started", func(t *testing.T) {
+	t.Run("With TopicStats pruning dead local subscribers", func(t *testing.T) {
+		ctx := context.Background()
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithPubSub())
+
+		require.NoError(t, actorSystem.Start(ctx))
+		pause.For(time.Second)
+
+		topic := "test-topic"
+
+		live, err := actorSystem.Spawn(ctx, "live", NewMockSubscriber(), WithLongLived())
+		require.NoError(t, err)
+
+		dead, err := actorSystem.Spawn(ctx, "dead", NewMockSubscriber(), WithLongLived())
+		require.NoError(t, err)
+
+		require.NoError(t, live.Tell(ctx, actorSystem.TopicActor(), NewSubscribe(topic)))
+		pause.For(500 * time.Millisecond)
+
+		// stop the actor without unsubscribing first, then race a stale entry
+		// back into the topic actor's registry to simulate a subscriber that
+		// terminated without going through handleTerminated.
+		require.NoError(t, dead.Shutdown(ctx))
+		pause.For(500 * time.Millisecond)
+
+		topicActor := actorSystem.TopicActor().Actor().(*topicActor)
+		subscribers, ok := topicActor.topics.Get(topic)
+		require.True(t, ok)
+		subscribers.Set(dead.ID(), dead)
+
+		// the dead subscriber must be pruned from the count, mirroring the
+		// liveness filter sendToLocalSubscribers applies.
+		stats, err := actorSystem.TopicStats(ctx, topic, time.Second)
+		require.NoError(t, err)
+		require.EqualValues(t, 1, stats.LocalSubscriberCount)
+		require.EqualValues(t, 1, stats.TopicInstanceCount)
+
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
+
+	t.Run("With TopicStats when the topic actor is not started", func(t *testing.T) {
 		ctx := context.Background()
 		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
@@ -660,15 +698,7 @@ func TestTopicActor(t *testing.T) {
 
 		require.Nil(t, actorSystem.TopicActor())
 
-		_, err := actorSystem.TopicSubscribers(ctx, "test-topic", time.Second)
-		require.Error(t, err)
-		require.ErrorIs(t, err, gerrors.ErrTopicActorNotStarted)
-
-		_, err = actorSystem.TopicSubscriberCount(ctx, "test-topic", time.Second)
-		require.Error(t, err)
-		require.ErrorIs(t, err, gerrors.ErrTopicActorNotStarted)
-
-		_, err = actorSystem.Topics(ctx, time.Second)
+		_, err := actorSystem.TopicStats(ctx, "test-topic", time.Second)
 		require.Error(t, err)
 		require.ErrorIs(t, err, gerrors.ErrTopicActorNotStarted)
 
