@@ -40,6 +40,29 @@ import (
 	"github.com/tochemey/goakt/v4/log"
 )
 
+// minScheduleFireClaimTTL and maxScheduleFireClaimTTL bound the derived TTL. The floor keeps
+// tight cron periods from producing a claim window shorter than realistic node spread. The
+// ceiling matches the scheduler's WithOutdatedThreshold: a claim must outlive any tick the
+// scheduler is still willing to execute late, otherwise a node lagging past the claim's expiry
+// would win the same tick again and deliver a duplicate.
+const (
+	minScheduleFireClaimTTL = time.Minute
+	maxScheduleFireClaimTTL = 24 * time.Hour
+)
+
+// scheduleFireClaimKeyFormat composes the cluster-wide claim key from the schedule reference
+// and the tick's scheduled fire time (quartz.JobMetadata.RunTime).
+const scheduleFireClaimKeyFormat = "%s@%d"
+
+// scheduleFireClaim carries the cluster-wide single-fire arbitration parameters for a cron
+// schedule registered in cluster mode. A nil *scheduleFireClaim means the schedule never
+// claims and always fires locally (every non-cron schedule, and every cron schedule outside
+// cluster mode).
+type scheduleFireClaim struct {
+	reference string
+	ttl       time.Duration
+}
+
 // scheduler defines the Go-Akt scheduler.
 // Its job is to help stack messages that will be delivered in the future to actors.
 type scheduler struct {
@@ -58,10 +81,6 @@ type scheduler struct {
 	// actorSystem is needed to resolve NoSender() for remote-PID schedules,
 	// since remote PIDs carry no actor-system reference.
 	actorSystem ActorSystem
-	// fireClaims tracks, per reference, the most recent cluster schedule-fire claim key
-	// attempted so CancelSchedule/Stop can remove it instead of waiting out its TTL; claims
-	// are attempted from quartz's own goroutines, hence the concurrency-safe map.
-	fireClaims *xsync.Map[string, string]
 }
 
 // newScheduler creates an instance of scheduler
@@ -93,7 +112,6 @@ func newScheduler(logger log.Logger, shutdownTimeout time.Duration, system Actor
 		shutdownTimeout: shutdownTimeout,
 		scheduledKeys:   xsync.NewMap[string, *quartz.JobKey](),
 		actorSystem:     system,
-		fireClaims:      xsync.NewMap[string, string](),
 	}
 
 	// return the instance of the scheduler
@@ -127,7 +145,6 @@ func (x *scheduler) Stop(ctx context.Context) {
 	defer cancel()
 	x.quartzScheduler.Wait(ctx)
 
-	x.removeAllFireClaims(ctx)
 	x.scheduledKeys.Reset()
 	x.logger.Info("messages scheduler stopped...:)")
 }
@@ -262,9 +279,6 @@ func (x *scheduler) ScheduleWithCron(message any, to *PID, cronExpression string
 		if !senderConfig.hasExplicitReference() {
 			return errors.ErrScheduleReferenceRequired
 		}
-		if !cluster.SupportsScheduleFireClaim(x.actorSystem.getCluster()) {
-			return errors.ErrSingleFireUnsupported
-		}
 		claim = &scheduleFireClaim{
 			reference: senderConfig.Reference(),
 			ttl:       cronClaimTTL(trigger),
@@ -296,7 +310,6 @@ func (x *scheduler) CancelSchedule(reference string) error {
 	defer x.mu.Unlock()
 
 	defer x.scheduledKeys.Delete(reference)
-	defer x.cleanupFireClaim(reference)
 
 	if !x.started.Load() {
 		return errors.ErrSchedulerNotStarted
@@ -362,33 +375,10 @@ func (x *scheduler) ResumeSchedule(reference string) error {
 	return x.quartzScheduler.ResumeJob(jobKey)
 }
 
-// scheduleFireClaim carries the cluster-wide single-fire arbitration parameters for a cron
-// schedule registered in cluster mode. A nil *scheduleFireClaim means the schedule never
-// claims and always fires locally (every non-cron schedule, and every cron schedule outside
-// cluster mode).
-type scheduleFireClaim struct {
-	reference string
-	ttl       time.Duration
-}
-
-// minScheduleFireClaimTTL and maxScheduleFireClaimTTL bound the derived TTL so an unusually
-// tight or loose cron period can't produce a claim window that is impractically short (churns
-// the cluster store every tick) or long (masks a crashed node for too long).
-const (
-	minScheduleFireClaimTTL = time.Minute
-	maxScheduleFireClaimTTL = time.Hour
-)
-
 // cronClaimTTL derives the cluster schedule-fire claim TTL from the gap between two
 // consecutive fire times of trigger, clamped to [minScheduleFireClaimTTL, maxScheduleFireClaimTTL].
-//
-// Correctness requires ttl to exceed the worst-case spread between nodes handling the same
-// tick: nodes racing for a tick that observe it up to ttl apart still arbitrate against the
-// same key, so scaling the TTL to at least the cron period is what makes the claim safe, not
-// merely a garbage-collection nicety. With ttl >= the period, a node lagging beyond that is
-// indistinguishable from having missed the tick and moved on to the next one, so clamping the
-// derived value to the range above never harms correctness, only how quickly a stale claim
-// is forgotten.
+// The TTL must cover the worst-case lag between nodes handling the same tick; see
+// cluster.ClaimScheduleFire.
 func cronClaimTTL(trigger quartz.Trigger) time.Duration {
 	now := quartz.NowNano()
 	first, err := trigger.NextFireTime(now)
@@ -440,24 +430,25 @@ func (x *scheduler) makeJobFn(to *PID, message any, cfg *scheduleConfig, claim *
 
 // claimClusterFire arbitrates which node is allowed to deliver the current trigger tick of a
 // cron schedule running in cluster mode. It returns true for the caller that should proceed
-// with delivery, and false for every other node racing for the same tick.
-//
-// It records the attempted key in fireClaims before racing for it, so CancelSchedule/Stop can
-// remove it later regardless of whether this node wins or loses the race.
+// with delivery, and false for every other node racing for the same tick. Claim entries are
+// reclaimed by their TTL alone; a canceled schedule or a stopping node never deletes them,
+// since the entry may be the winning claim other nodes are still arbitrating against.
 //
 // If the tick's scheduled fire time is unavailable, it fails open (returns true) rather than
-// silently dropping every delivery cluster-wide; TestSchedulerJobMetadataPresent pins that
-// go-quartz keeps this metadata available so this fallback stays dormant in practice.
+// silently dropping every delivery cluster-wide.
 func (x *scheduler) claimClusterFire(ctx context.Context, claim *scheduleFireClaim) (bool, error) {
 	metadata, ok := ctx.Value(quartz.JobMetadataContextKey).(quartz.JobMetadata)
 	if !ok {
 		return true, nil
 	}
 
-	key := fmt.Sprintf("%s@%d", claim.reference, metadata.RunTime)
-	x.fireClaims.Set(claim.reference, key)
+	cl := x.actorSystem.getCluster()
+	if cl == nil {
+		return false, errors.ErrClusterDisabled
+	}
 
-	err := cluster.ClaimScheduleFire(ctx, x.actorSystem.getCluster(), key, claim.ttl)
+	key := fmt.Sprintf(scheduleFireClaimKeyFormat, claim.reference, metadata.RunTime)
+	err := cl.ClaimScheduleFire(ctx, key, claim.ttl)
 	switch {
 	case err == nil:
 		return true, nil
@@ -466,35 +457,4 @@ func (x *scheduler) claimClusterFire(ctx context.Context, claim *scheduleFireCla
 	default:
 		return false, err
 	}
-}
-
-// cleanupFireClaim best-effort removes the most recent schedule-fire claim key attempted for
-// reference so a canceled cron schedule doesn't leave a claim to linger in the cluster store
-// until its TTL expires.
-func (x *scheduler) cleanupFireClaim(reference string) {
-	key, ok := x.fireClaims.Get(reference)
-	if !ok {
-		return
-	}
-	x.fireClaims.Delete(reference)
-
-	if err := cluster.RemoveScheduleFire(context.Background(), x.actorSystem.getCluster(), key); err != nil {
-		x.logger.Warnf("failed to remove schedule-fire claim %s: %v", key, err)
-	}
-}
-
-// removeAllFireClaims best-effort removes every tracked schedule-fire claim key on scheduler
-// shutdown, backstopped by each claim's own TTL for anything this misses (e.g. a claim
-// attempted after this loop already read the map).
-func (x *scheduler) removeAllFireClaims(ctx context.Context) {
-	if x.fireClaims.Len() == 0 {
-		return
-	}
-	cl := x.actorSystem.getCluster()
-	x.fireClaims.Range(func(_ string, key string) {
-		if err := cluster.RemoveScheduleFire(ctx, cl, key); err != nil {
-			x.logger.Warnf("failed to remove schedule-fire claim %s: %v", key, err)
-		}
-	})
-	x.fireClaims.Reset()
 }

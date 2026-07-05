@@ -262,13 +262,7 @@ var (
 	// the reference as the shared identity every node claims against; an auto-generated
 	// per-node reference would give every node its own key, so the tick would still
 	// deliver N times instead of once.
-	ErrScheduleReferenceRequired = errors.New("explicit reference required: ScheduleWithCron in cluster mode arbitrates single delivery per cron tick using the reference as the cluster-wide claim key; set one with WithReference, otherwise the auto-generated per-node reference lets every node deliver independently")
-
-	// ErrSingleFireUnsupported is returned by ScheduleWithCron in cluster mode when the
-	// configured Cluster implementation cannot atomically arbitrate the cluster-wide
-	// single-fire claim (only the builtin engine can). Scheduling is refused outright
-	// rather than silently degrading to an unbounded writer or duplicate delivery.
-	ErrSingleFireUnsupported = errors.New("cluster-wide single fire is not supported by this cluster implementation: it lacks the atomic claim primitive ScheduleWithCron requires in cluster mode")
+	ErrScheduleReferenceRequired = errors.New("an explicit reference (WithReference) is required for ScheduleWithCron in cluster mode")
 )
 
 // NewErrInvalidTCPAddress formats an ErrInvalidTCPAddress with the given address.

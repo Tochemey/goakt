@@ -36,7 +36,6 @@ import (
 
 	"github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/address"
-	"github.com/tochemey/goakt/v4/internal/cluster"
 	dynaport "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
@@ -648,82 +647,6 @@ func TestScheduler(t *testing.T) {
 		const expr = "* * * ? * *"
 		err = newActorSystem.ScheduleWithCron(ctx, message, actorRef, expr)
 		require.ErrorIs(t, err, errors.ErrScheduleReferenceRequired)
-
-		err = newActorSystem.Stop(ctx)
-		assert.NoError(t, err)
-		provider.AssertExpectations(t)
-	})
-	t.Run("With CancelSchedule removes the tracked cluster schedule-fire claim", func(t *testing.T) {
-		ctx := context.TODO()
-		nodePorts := dynaport.Get(3)
-		discoveryPort := nodePorts[0]
-		clusterPort := nodePorts[1]
-		remotingPort := nodePorts[2]
-
-		logger := log.DiscardLogger
-		host := "127.0.0.1"
-
-		addrs := []string{
-			net.JoinHostPort(host, strconv.Itoa(discoveryPort)),
-		}
-
-		provider := new(testkit.Provider)
-		newActorSystem, err := NewActorSystem(
-			"test",
-			WithLogger(logger),
-			WithRemote(remote.NewConfig(host, remotingPort)),
-			WithCluster(
-				NewClusterConfig().
-					WithKinds(new(MockActor)).
-					WithPartitionCount(9).
-					WithReplicaCount(1).
-					WithPeersPort(clusterPort).
-					WithMinimumPeersQuorum(1).
-					WithDiscoveryPort(discoveryPort).
-					WithDiscovery(provider)),
-		)
-		require.NoError(t, err)
-
-		provider.EXPECT().ID().Return("testDisco")
-		provider.EXPECT().Initialize().Return(nil)
-		provider.EXPECT().Register().Return(nil)
-		provider.EXPECT().Deregister().Return(nil)
-		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
-		provider.EXPECT().Close().Return(nil)
-
-		err = newActorSystem.Start(ctx)
-		require.NoError(t, err)
-
-		pause.For(time.Second)
-
-		actorName := "test"
-		actor := NewMockActor()
-		actorRef, err := newActorSystem.Spawn(ctx, actorName, actor)
-		require.NoError(t, err)
-		assert.NotNil(t, actorRef)
-
-		pause.For(time.Second)
-
-		const reference = "cancel-cleanup-ref"
-		message := new(testpb.TestSend)
-		const expr = "* * * ? * *"
-		err = newActorSystem.ScheduleWithCron(ctx, message, actorRef, expr, WithReference(reference))
-		require.NoError(t, err)
-
-		// let at least one tick fire so the claim path records a key for this reference.
-		require.Eventually(t, func() bool {
-			return actorRef.ProcessedCount()-1 >= 1
-		}, 5*time.Second, 100*time.Millisecond)
-
-		typedSystem := newActorSystem.(*actorSystem)
-		key, ok := typedSystem.scheduler.fireClaims.Get(reference)
-		require.True(t, ok, "expected a tracked claim key for the reference")
-
-		require.NoError(t, newActorSystem.CancelSchedule(reference))
-
-		// the tracked claim key must no longer exist in the cluster store: re-claiming it
-		// must succeed now that CancelSchedule has cleaned it up.
-		require.NoError(t, cluster.ClaimScheduleFire(ctx, typedSystem.getCluster(), key, time.Minute))
 
 		err = newActorSystem.Stop(ctx)
 		assert.NoError(t, err)
@@ -1830,10 +1753,49 @@ func TestCronClaimTTL(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, 5*time.Minute, cronClaimTTL(trigger))
 	})
-	t.Run("multi-hour period clamps to the ceiling", func(t *testing.T) {
+	t.Run("multi-hour period is used as-is", func(t *testing.T) {
 		trigger, err := quartz.NewCronTrigger("0 0 */3 * * *") // every 3 hours
 		require.NoError(t, err)
+		require.Equal(t, 3*time.Hour, cronClaimTTL(trigger))
+	})
+	t.Run("multi-day period clamps to the ceiling", func(t *testing.T) {
+		trigger, err := quartz.NewCronTrigger("0 0 0 ? * 1") // weekly
+		require.NoError(t, err)
 		require.Equal(t, maxScheduleFireClaimTTL, cronClaimTTL(trigger))
+	})
+	t.Run("first fire time error falls back to the floor", func(t *testing.T) {
+		trigger := quartz.NewRunOnceTrigger(time.Second)
+		_, err := trigger.NextFireTime(quartz.NowNano()) // expire the trigger
+		require.NoError(t, err)
+		require.Equal(t, minScheduleFireClaimTTL, cronClaimTTL(trigger))
+	})
+	t.Run("second fire time error falls back to the floor", func(t *testing.T) {
+		// a fresh run-once trigger yields one fire time then expires, so cronClaimTTL's
+		// second NextFireTime call fails.
+		trigger := quartz.NewRunOnceTrigger(time.Second)
+		require.Equal(t, minScheduleFireClaimTTL, cronClaimTTL(trigger))
+	})
+}
+
+func TestClaimClusterFire(t *testing.T) {
+	t.Run("fails open when job metadata is missing", func(t *testing.T) {
+		sched := newScheduler(log.DiscardLogger, time.Second, nil)
+		claim := &scheduleFireClaim{reference: "ref", ttl: time.Minute}
+
+		won, err := sched.claimClusterFire(context.Background(), claim)
+		require.NoError(t, err)
+		require.True(t, won)
+	})
+	t.Run("propagates claim errors and skips delivery", func(t *testing.T) {
+		// a bare actor system has no cluster engine, so the claim call fails; the job
+		// must surface the error instead of delivering.
+		sched := newScheduler(log.DiscardLogger, time.Second, &actorSystem{})
+		claim := &scheduleFireClaim{reference: "ref", ttl: time.Minute}
+		ctx := context.WithValue(context.Background(), quartz.JobMetadataContextKey, quartz.JobMetadata{RunTime: 42})
+
+		won, err := sched.claimClusterFire(ctx, claim)
+		require.Error(t, err)
+		require.False(t, won)
 	})
 }
 

@@ -74,7 +74,7 @@ type Cluster_ActorExists_Call struct {
 // ActorExists is a helper method to define mock.On call
 //   - ctx context.Context
 //   - actorName string
-func (_e *Cluster_Expecter) ActorExists(ctx interface{}, actorName interface{}) *Cluster_ActorExists_Call {
+func (_e *Cluster_Expecter) ActorExists(ctx any, actorName any) *Cluster_ActorExists_Call {
 	return &Cluster_ActorExists_Call{Call: _e.mock.On("ActorExists", ctx, actorName)}
 }
 
@@ -142,7 +142,7 @@ type Cluster_Actors_Call struct {
 // Actors is a helper method to define mock.On call
 //   - ctx context.Context
 //   - timeout time.Duration
-func (_e *Cluster_Expecter) Actors(ctx interface{}, timeout interface{}) *Cluster_Actors_Call {
+func (_e *Cluster_Expecter) Actors(ctx any, timeout any) *Cluster_Actors_Call {
 	return &Cluster_Actors_Call{Call: _e.mock.On("Actors", ctx, timeout)}
 }
 
@@ -174,6 +174,69 @@ func (_c *Cluster_Actors_Call) RunAndReturn(run func(ctx context.Context, timeou
 	return _c
 }
 
+// ClaimScheduleFire provides a mock function for the type Cluster
+func (_mock *Cluster) ClaimScheduleFire(ctx context.Context, key string, ttl time.Duration) error {
+	ret := _mock.Called(ctx, key, ttl)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ClaimScheduleFire")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, time.Duration) error); ok {
+		r0 = returnFunc(ctx, key, ttl)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// Cluster_ClaimScheduleFire_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ClaimScheduleFire'
+type Cluster_ClaimScheduleFire_Call struct {
+	*mock.Call
+}
+
+// ClaimScheduleFire is a helper method to define mock.On call
+//   - ctx context.Context
+//   - key string
+//   - ttl time.Duration
+func (_e *Cluster_Expecter) ClaimScheduleFire(ctx any, key any, ttl any) *Cluster_ClaimScheduleFire_Call {
+	return &Cluster_ClaimScheduleFire_Call{Call: _e.mock.On("ClaimScheduleFire", ctx, key, ttl)}
+}
+
+func (_c *Cluster_ClaimScheduleFire_Call) Run(run func(ctx context.Context, key string, ttl time.Duration)) *Cluster_ClaimScheduleFire_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 time.Duration
+		if args[2] != nil {
+			arg2 = args[2].(time.Duration)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *Cluster_ClaimScheduleFire_Call) Return(err error) *Cluster_ClaimScheduleFire_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *Cluster_ClaimScheduleFire_Call) RunAndReturn(run func(ctx context.Context, key string, ttl time.Duration) error) *Cluster_ClaimScheduleFire_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DeleteJobKey provides a mock function for the type Cluster
 func (_mock *Cluster) DeleteJobKey(ctx context.Context, jobID string) error {
 	ret := _mock.Called(ctx, jobID)
@@ -199,7 +262,7 @@ type Cluster_DeleteJobKey_Call struct {
 // DeleteJobKey is a helper method to define mock.On call
 //   - ctx context.Context
 //   - jobID string
-func (_e *Cluster_Expecter) DeleteJobKey(ctx interface{}, jobID interface{}) *Cluster_DeleteJobKey_Call {
+func (_e *Cluster_Expecter) DeleteJobKey(ctx any, jobID any) *Cluster_DeleteJobKey_Call {
 	return &Cluster_DeleteJobKey_Call{Call: _e.mock.On("DeleteJobKey", ctx, jobID)}
 }
 
@@ -313,7 +376,7 @@ type Cluster_GetActor_Call struct {
 // GetActor is a helper method to define mock.On call
 //   - ctx context.Context
 //   - actorName string
-func (_e *Cluster_Expecter) GetActor(ctx interface{}, actorName interface{}) *Cluster_GetActor_Call {
+func (_e *Cluster_Expecter) GetActor(ctx any, actorName any) *Cluster_GetActor_Call {
 	return &Cluster_GetActor_Call{Call: _e.mock.On("GetActor", ctx, actorName)}
 }
 
@@ -381,7 +444,7 @@ type Cluster_GetGrain_Call struct {
 // GetGrain is a helper method to define mock.On call
 //   - ctx context.Context
 //   - identity string
-func (_e *Cluster_Expecter) GetGrain(ctx interface{}, identity interface{}) *Cluster_GetGrain_Call {
+func (_e *Cluster_Expecter) GetGrain(ctx any, identity any) *Cluster_GetGrain_Call {
 	return &Cluster_GetGrain_Call{Call: _e.mock.On("GetGrain", ctx, identity)}
 }
 
@@ -437,7 +500,7 @@ type Cluster_GetPartition_Call struct {
 
 // GetPartition is a helper method to define mock.On call
 //   - actorName string
-func (_e *Cluster_Expecter) GetPartition(actorName interface{}) *Cluster_GetPartition_Call {
+func (_e *Cluster_Expecter) GetPartition(actorName any) *Cluster_GetPartition_Call {
 	return &Cluster_GetPartition_Call{Call: _e.mock.On("GetPartition", actorName)}
 }
 
@@ -498,7 +561,7 @@ type Cluster_GrainExists_Call struct {
 // GrainExists is a helper method to define mock.On call
 //   - ctx context.Context
 //   - identity string
-func (_e *Cluster_Expecter) GrainExists(ctx interface{}, identity interface{}) *Cluster_GrainExists_Call {
+func (_e *Cluster_Expecter) GrainExists(ctx any, identity any) *Cluster_GrainExists_Call {
 	return &Cluster_GrainExists_Call{Call: _e.mock.On("GrainExists", ctx, identity)}
 }
 
@@ -566,7 +629,7 @@ type Cluster_Grains_Call struct {
 // Grains is a helper method to define mock.On call
 //   - ctx context.Context
 //   - timeout time.Duration
-func (_e *Cluster_Expecter) Grains(ctx interface{}, timeout interface{}) *Cluster_Grains_Call {
+func (_e *Cluster_Expecter) Grains(ctx any, timeout any) *Cluster_Grains_Call {
 	return &Cluster_Grains_Call{Call: _e.mock.On("Grains", ctx, timeout)}
 }
 
@@ -622,7 +685,7 @@ type Cluster_IsLeader_Call struct {
 
 // IsLeader is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *Cluster_Expecter) IsLeader(ctx interface{}) *Cluster_IsLeader_Call {
+func (_e *Cluster_Expecter) IsLeader(ctx any) *Cluster_IsLeader_Call {
 	return &Cluster_IsLeader_Call{Call: _e.mock.On("IsLeader", ctx)}
 }
 
@@ -729,7 +792,7 @@ type Cluster_JobKey_Call struct {
 // JobKey is a helper method to define mock.On call
 //   - ctx context.Context
 //   - jobID string
-func (_e *Cluster_Expecter) JobKey(ctx interface{}, jobID interface{}) *Cluster_JobKey_Call {
+func (_e *Cluster_Expecter) JobKey(ctx any, jobID any) *Cluster_JobKey_Call {
 	return &Cluster_JobKey_Call{Call: _e.mock.On("JobKey", ctx, jobID)}
 }
 
@@ -795,7 +858,7 @@ type Cluster_LookupKind_Call struct {
 // LookupKind is a helper method to define mock.On call
 //   - ctx context.Context
 //   - kind string
-func (_e *Cluster_Expecter) LookupKind(ctx interface{}, kind interface{}) *Cluster_LookupKind_Call {
+func (_e *Cluster_Expecter) LookupKind(ctx any, kind any) *Cluster_LookupKind_Call {
 	return &Cluster_LookupKind_Call{Call: _e.mock.On("LookupKind", ctx, kind)}
 }
 
@@ -862,7 +925,7 @@ type Cluster_Members_Call struct {
 
 // Members is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *Cluster_Expecter) Members(ctx interface{}) *Cluster_Members_Call {
+func (_e *Cluster_Expecter) Members(ctx any) *Cluster_Members_Call {
 	return &Cluster_Members_Call{Call: _e.mock.On("Members", ctx)}
 }
 
@@ -923,7 +986,7 @@ type Cluster_NextRoundRobinValue_Call struct {
 // NextRoundRobinValue is a helper method to define mock.On call
 //   - ctx context.Context
 //   - key string
-func (_e *Cluster_Expecter) NextRoundRobinValue(ctx interface{}, key interface{}) *Cluster_NextRoundRobinValue_Call {
+func (_e *Cluster_Expecter) NextRoundRobinValue(ctx any, key any) *Cluster_NextRoundRobinValue_Call {
 	return &Cluster_NextRoundRobinValue_Call{Call: _e.mock.On("NextRoundRobinValue", ctx, key)}
 }
 
@@ -990,7 +1053,7 @@ type Cluster_Peers_Call struct {
 
 // Peers is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *Cluster_Expecter) Peers(ctx interface{}) *Cluster_Peers_Call {
+func (_e *Cluster_Expecter) Peers(ctx any) *Cluster_Peers_Call {
 	return &Cluster_Peers_Call{Call: _e.mock.On("Peers", ctx)}
 }
 
@@ -1042,7 +1105,7 @@ type Cluster_PutActor_Call struct {
 // PutActor is a helper method to define mock.On call
 //   - ctx context.Context
 //   - actor *internalpb.Actor
-func (_e *Cluster_Expecter) PutActor(ctx interface{}, actor interface{}) *Cluster_PutActor_Call {
+func (_e *Cluster_Expecter) PutActor(ctx any, actor any) *Cluster_PutActor_Call {
 	return &Cluster_PutActor_Call{Call: _e.mock.On("PutActor", ctx, actor)}
 }
 
@@ -1099,7 +1162,7 @@ type Cluster_PutGrain_Call struct {
 // PutGrain is a helper method to define mock.On call
 //   - ctx context.Context
 //   - grain *internalpb.Grain
-func (_e *Cluster_Expecter) PutGrain(ctx interface{}, grain interface{}) *Cluster_PutGrain_Call {
+func (_e *Cluster_Expecter) PutGrain(ctx any, grain any) *Cluster_PutGrain_Call {
 	return &Cluster_PutGrain_Call{Call: _e.mock.On("PutGrain", ctx, grain)}
 }
 
@@ -1157,7 +1220,7 @@ type Cluster_PutJobKey_Call struct {
 //   - ctx context.Context
 //   - jobID string
 //   - metadata []byte
-func (_e *Cluster_Expecter) PutJobKey(ctx interface{}, jobID interface{}, metadata interface{}) *Cluster_PutJobKey_Call {
+func (_e *Cluster_Expecter) PutJobKey(ctx any, jobID any, metadata any) *Cluster_PutJobKey_Call {
 	return &Cluster_PutJobKey_Call{Call: _e.mock.On("PutJobKey", ctx, jobID, metadata)}
 }
 
@@ -1219,7 +1282,7 @@ type Cluster_PutKind_Call struct {
 // PutKind is a helper method to define mock.On call
 //   - ctx context.Context
 //   - kind string
-func (_e *Cluster_Expecter) PutKind(ctx interface{}, kind interface{}) *Cluster_PutKind_Call {
+func (_e *Cluster_Expecter) PutKind(ctx any, kind any) *Cluster_PutKind_Call {
 	return &Cluster_PutKind_Call{Call: _e.mock.On("PutKind", ctx, kind)}
 }
 
@@ -1276,7 +1339,7 @@ type Cluster_RemoveActor_Call struct {
 // RemoveActor is a helper method to define mock.On call
 //   - ctx context.Context
 //   - actorName string
-func (_e *Cluster_Expecter) RemoveActor(ctx interface{}, actorName interface{}) *Cluster_RemoveActor_Call {
+func (_e *Cluster_Expecter) RemoveActor(ctx any, actorName any) *Cluster_RemoveActor_Call {
 	return &Cluster_RemoveActor_Call{Call: _e.mock.On("RemoveActor", ctx, actorName)}
 }
 
@@ -1333,7 +1396,7 @@ type Cluster_RemoveGrain_Call struct {
 // RemoveGrain is a helper method to define mock.On call
 //   - ctx context.Context
 //   - identity string
-func (_e *Cluster_Expecter) RemoveGrain(ctx interface{}, identity interface{}) *Cluster_RemoveGrain_Call {
+func (_e *Cluster_Expecter) RemoveGrain(ctx any, identity any) *Cluster_RemoveGrain_Call {
 	return &Cluster_RemoveGrain_Call{Call: _e.mock.On("RemoveGrain", ctx, identity)}
 }
 
@@ -1390,7 +1453,7 @@ type Cluster_RemoveKind_Call struct {
 // RemoveKind is a helper method to define mock.On call
 //   - ctx context.Context
 //   - kind string
-func (_e *Cluster_Expecter) RemoveKind(ctx interface{}, kind interface{}) *Cluster_RemoveKind_Call {
+func (_e *Cluster_Expecter) RemoveKind(ctx any, kind any) *Cluster_RemoveKind_Call {
 	return &Cluster_RemoveKind_Call{Call: _e.mock.On("RemoveKind", ctx, kind)}
 }
 
@@ -1446,7 +1509,7 @@ type Cluster_Start_Call struct {
 
 // Start is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *Cluster_Expecter) Start(ctx interface{}) *Cluster_Start_Call {
+func (_e *Cluster_Expecter) Start(ctx any) *Cluster_Start_Call {
 	return &Cluster_Start_Call{Call: _e.mock.On("Start", ctx)}
 }
 
@@ -1497,7 +1560,7 @@ type Cluster_Stop_Call struct {
 
 // Stop is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *Cluster_Expecter) Stop(ctx interface{}) *Cluster_Stop_Call {
+func (_e *Cluster_Expecter) Stop(ctx any) *Cluster_Stop_Call {
 	return &Cluster_Stop_Call{Call: _e.mock.On("Stop", ctx)}
 }
 

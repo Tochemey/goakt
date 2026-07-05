@@ -68,7 +68,14 @@ const (
 	namespaceGrains recordNamespace = "grains"
 	namespaceKinds  recordNamespace = "kinds"
 	namespaceJobs   recordNamespace = "jobs"
+	// namespaceScheduleFire stores the short-lived fire claims used to arbitrate which node
+	// delivers a given tick of a cluster-wide cron schedule (see actor.ScheduleWithCron).
+	namespaceScheduleFire recordNamespace = "schedule-fire"
 )
+
+// scheduleFireClaimValue is the placeholder payload for a schedule-fire claim entry; only the
+// key's existence matters for arbitration.
+var scheduleFireClaimValue = []byte{1}
 
 func composeKey(namespace recordNamespace, id string) string {
 	return fmt.Sprintf("%s%s%s", string(namespace), namespaceSeparator, id)
@@ -121,6 +128,11 @@ type Cluster interface {
 	GetPartition(actorName string) uint64
 	// IsRunning reports whether the cluster engine is currently running.
 	IsRunning() bool
+	// ClaimScheduleFire atomically claims the exclusive right to deliver one trigger tick of
+	// a cluster-wide cron schedule. It returns nil for the winning caller and
+	// ErrScheduleFireClaimed for every other caller racing for the same key; see the
+	// builtin implementation for the key and ttl contract.
+	ClaimScheduleFire(ctx context.Context, key string, ttl time.Duration) error
 	// PutJobKey stores job metadata.
 	PutJobKey(ctx context.Context, jobID string, metadata []byte) error
 	// DeleteJobKey removes job metadata.
@@ -877,6 +889,47 @@ func (x *cluster) JobKey(ctx context.Context, jobID string) ([]byte, error) {
 	defer x.mu.RUnlock()
 
 	return x.getRecord(ctx, namespaceJobs, jobID)
+}
+
+// ClaimScheduleFire attempts to claim the exclusive right to deliver one trigger tick of a
+// cluster-wide cron schedule, using the same atomic put-if-absent (NX+EX) primitive that
+// guarantees single grain activation across the cluster.
+//
+// key uniquely identifies the (schedule reference, trigger tick) pair being arbitrated: callers
+// are expected to derive it from a value that is identical across every node racing for the same
+// tick (e.g. the trigger's deterministic next-fire timestamp), so a fresh key is used per tick.
+//
+// ttl must exceed the worst-case scheduling lag between nodes handling the same tick: because
+// the key is per tick, a node whose claim attempt arrives after the winner's entry has expired
+// would win again and deliver a duplicate. Claim entries are reclaimed by their TTL alone;
+// there is no explicit delete, so a claim outlives cancellations and node shutdowns by design.
+//
+// Returns nil for the caller that wins the race for key (it must proceed to deliver), and
+// ErrScheduleFireClaimed for every other caller racing for the same key (it must skip delivery
+// for that tick silently).
+func (x *cluster) ClaimScheduleFire(ctx context.Context, key string, ttl time.Duration) error {
+	if key == "" {
+		return errors.New("schedule fire key is empty")
+	}
+	if !x.running.Load() {
+		return ErrEngineNotRunning
+	}
+
+	x.mu.Lock()
+	defer x.mu.Unlock()
+
+	ctx = context.WithoutCancel(ctx)
+	ctx, cancel := context.WithTimeout(ctx, x.writeTimeout)
+	defer cancel()
+
+	err := x.dmap.Put(ctx, composeKey(namespaceScheduleFire, key), scheduleFireClaimValue, olric.NX(), olric.EX(ttl))
+	if err != nil {
+		if errors.Is(err, olric.ErrKeyFound) {
+			return ErrScheduleFireClaimed
+		}
+		return err
+	}
+	return nil
 }
 
 // buildConfig creates the Olric configuration tailored to the current
