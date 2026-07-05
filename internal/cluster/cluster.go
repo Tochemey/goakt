@@ -899,36 +899,40 @@ func (x *cluster) JobKey(ctx context.Context, jobID string) ([]byte, error) {
 // are expected to derive it from a value that is identical across every node racing for the same
 // tick (e.g. the trigger's deterministic next-fire timestamp), so a fresh key is used per tick.
 //
-// ttl must exceed the worst-case scheduling lag between nodes handling the same tick: because
-// the key is per tick, a node whose claim attempt arrives after the winner's entry has expired
-// would win again and deliver a duplicate. Claim entries are reclaimed by their TTL alone;
-// there is no explicit delete, so a claim outlives cancellations and node shutdowns by design.
+// Because the key is per tick, a caller whose claim arrives after the winner's entry has
+// expired would win again and deliver a duplicate: callers must therefore never claim a tick
+// older than ttl (the actor scheduler skips such stale ticks before calling this). Claim
+// entries are reclaimed by their TTL alone; there is no explicit delete, so a claim outlives
+// cancellations and node shutdowns by design.
 //
 // Returns nil for the caller that wins the race for key (it must proceed to deliver), and
 // ErrScheduleFireClaimed for every other caller racing for the same key (it must skip delivery
 // for that tick silently).
 func (x *cluster) ClaimScheduleFire(ctx context.Context, key string, ttl time.Duration) error {
-	if key == "" {
-		return errors.New("schedule fire key is empty")
-	}
 	if !x.running.Load() {
 		return ErrEngineNotRunning
 	}
 
-	x.mu.Lock()
-	defer x.mu.Unlock()
+	if key == "" {
+		return errors.New("schedule fire key is empty")
+	}
 
-	ctx = context.WithoutCancel(ctx)
-	ctx, cancel := context.WithTimeout(ctx, x.writeTimeout)
-	defer cancel()
+	// Unlike the registration-time write paths, this runs on every cron tick, so it takes the
+	// read lock only (same as RemoveActor): atomicity comes from the server-side NX+EX write,
+	// not from the local mutex, and holding the write lock across a network round trip per
+	// tick would stall actor placement and lookups behind schedule arbitration.
+	x.mu.RLock()
+	defer x.mu.RUnlock()
 
-	err := x.dmap.Put(ctx, composeKey(namespaceScheduleFire, key), scheduleFireClaimValue, olric.NX(), olric.EX(ttl))
+	err := x.putRecordIfAbsent(ctx, namespaceScheduleFire, key, scheduleFireClaimValue, olric.EX(ttl))
 	if err != nil {
 		if errors.Is(err, olric.ErrKeyFound) {
 			return ErrScheduleFireClaimed
 		}
+
 		return err
 	}
+
 	return nil
 }
 
@@ -1399,12 +1403,12 @@ func (x *cluster) putGrainIfAbsent(ctx context.Context, grain *internalpb.Grain)
 	return nil
 }
 
-func (x *cluster) putRecordIfAbsent(ctx context.Context, namespace recordNamespace, key string, value []byte) error {
+func (x *cluster) putRecordIfAbsent(ctx context.Context, namespace recordNamespace, key string, value []byte, options ...olric.PutOption) error {
 	ctx = context.WithoutCancel(ctx)
 	ctx, cancel := context.WithTimeout(ctx, x.writeTimeout)
 	defer cancel()
 
-	return x.dmap.Put(ctx, composeKey(namespace, key), value, olric.NX())
+	return x.dmap.Put(ctx, composeKey(namespace, key), value, append([]olric.PutOption{olric.NX()}, options...)...)
 }
 
 func (x *cluster) putKindIfAbsent(ctx context.Context, kind string) error {

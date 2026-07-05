@@ -40,14 +40,18 @@ import (
 	"github.com/tochemey/goakt/v4/log"
 )
 
-// minScheduleFireClaimTTL and maxScheduleFireClaimTTL bound the derived TTL. The floor keeps
-// tight cron periods from producing a claim window shorter than realistic node spread. The
-// ceiling matches the scheduler's WithOutdatedThreshold: a claim must outlive any tick the
-// scheduler is still willing to execute late, otherwise a node lagging past the claim's expiry
-// would win the same tick again and deliver a duplicate.
+// scheduleOutdatedThreshold is how late a scheduled tick may still execute before quartz
+// drops it as outdated (see newScheduler for why the default 100ms threshold is unusable).
+const scheduleOutdatedThreshold = 24 * time.Hour
+
+// minScheduleFireClaimTTL and maxScheduleFireClaimTTL bound the derived claim TTL. The floor
+// keeps tight cron periods from producing a claim window shorter than realistic node spread;
+// the ceiling caps how long claim entries linger for very long cron periods. A tick older
+// than the claim TTL is never delivered in cluster mode (claimClusterFire skips it as stale),
+// which is what keeps a node lagging past a claim's expiry from re-winning the same tick.
 const (
 	minScheduleFireClaimTTL = time.Minute
-	maxScheduleFireClaimTTL = 24 * time.Hour
+	maxScheduleFireClaimTTL = scheduleOutdatedThreshold
 )
 
 // scheduleFireClaimKeyFormat composes the cluster-wide claim key from the schedule reference
@@ -99,7 +103,7 @@ func newScheduler(logger log.Logger, shutdownTimeout time.Duration, system Actor
 	// invocation, which would drift across nodes.
 	quartzScheduler, _ := quartz.NewStdScheduler(
 		quartz.WithLogger(quartzlogger.NewSimpleLogger(nil, quartzlogger.LevelOff)),
-		quartz.WithOutdatedThreshold(24*time.Hour),
+		quartz.WithOutdatedThreshold(scheduleOutdatedThreshold),
 		quartz.WithJobMetadata(),
 	)
 
@@ -247,6 +251,10 @@ func (x *scheduler) Schedule(message any, to *PID, interval time.Duration, opts 
 //   - error: An error is returned if the cron expression is invalid or if scheduling fails due to internal errors.
 //
 // Note:
+//   - In cluster mode the message is delivered exactly once per trigger tick across the
+//     cluster, WithReference is required (ErrScheduleReferenceRequired otherwise), and the
+//     cron expression is evaluated in UTC so every node computes the same tick instants.
+//     Outside cluster mode the expression is evaluated in the process's local timezone.
 //   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the scheduled message.
 //   - If no reference is set, an automatic one will be generated internally, which may not be easily retrievable for future operations.
 //   - The cron expression must follow the format supported by the scheduler (typically 6 or 5 fields depending on implementation).
@@ -262,7 +270,21 @@ func (x *scheduler) ScheduleWithCron(message any, to *PID, cronExpression string
 		return errors.ErrRemotingDisabled
 	}
 
+	// The cluster engine is wired before the scheduler starts, so gate on it rather than on
+	// InCluster(): the latter also requires the actor system's started flag, which is set
+	// after the scheduler starts, and a call racing ActorSystem.Start would otherwise
+	// register a permanently claim-free schedule.
+	inCluster := x.actorSystem.getCluster() != nil
+
+	// In cluster mode the cron expression is evaluated in UTC so every node computes the
+	// same tick instants: the fire claim is keyed on the tick's fire time, and
+	// location-dependent fire times (e.g. "0 0 9 * * *" on mixed-timezone nodes) would give
+	// each timezone group its own key and deliver once per group instead of once per cluster.
 	location := time.Now().Location()
+	if inCluster {
+		location = time.UTC
+	}
+
 	trigger, err := quartz.NewCronTriggerWithLoc(cronExpression, location)
 	if err != nil {
 		x.logger.Error(fmt.Errorf("failed to schedule message: %w", err))
@@ -272,13 +294,14 @@ func (x *scheduler) ScheduleWithCron(message any, to *PID, cronExpression string
 	senderConfig := newScheduleConfig(opts...)
 
 	var claim *scheduleFireClaim
-	if x.actorSystem.InCluster() {
+	if inCluster {
 		// Interval/one-shot RunTimes are anchored to each node's local registration clock and
 		// never align cluster-wide, so single fire is cron-only: a cron trigger's next fire
 		// time is wall-clock deterministic, which is what makes cross-node arbitration meaningful.
 		if !senderConfig.hasExplicitReference() {
 			return errors.ErrScheduleReferenceRequired
 		}
+
 		claim = &scheduleFireClaim{
 			reference: senderConfig.Reference(),
 			ttl:       cronClaimTTL(trigger),
@@ -385,6 +408,7 @@ func cronClaimTTL(trigger quartz.Trigger) time.Duration {
 	if err != nil {
 		return minScheduleFireClaimTTL
 	}
+
 	second, err := trigger.NextFireTime(first)
 	if err != nil {
 		return minScheduleFireClaimTTL
@@ -411,12 +435,17 @@ func (x *scheduler) makeJobFn(to *PID, message any, cfg *scheduleConfig, claim *
 	if sender == nil || sender.Equals(noSender) {
 		sender = noSender
 	}
+
 	return func(ctx context.Context) (bool, error) {
 		if claim != nil {
 			won, err := x.claimClusterFire(ctx, claim)
 			if err != nil {
+				// quartz runs job functions with logging disabled and no retries, so this is
+				// the only place a claim failure becomes observable.
+				x.logger.Warnf("failed to claim cron tick for schedule=(%s): %v", claim.reference, err)
 				return false, err
 			}
+
 			if !won {
 				// Another node already claimed this tick: skip delivery silently.
 				return true, nil
@@ -434,12 +463,23 @@ func (x *scheduler) makeJobFn(to *PID, message any, cfg *scheduleConfig, claim *
 // reclaimed by their TTL alone; a canceled schedule or a stopping node never deletes them,
 // since the entry may be the winning claim other nodes are still arbitrating against.
 //
+// A tick older than the claim TTL is skipped without claiming: quartz replays missed ticks
+// for up to scheduleOutdatedThreshold, so a node lagging past the TTL would otherwise find
+// the winner's expired claim and deliver the tick a second time. Skipping keeps the
+// at-most-once-per-tick guarantee at the cost of never delivering a tick that every node
+// missed for longer than the TTL.
+//
 // If the tick's scheduled fire time is unavailable, it fails open (returns true) rather than
 // silently dropping every delivery cluster-wide.
 func (x *scheduler) claimClusterFire(ctx context.Context, claim *scheduleFireClaim) (bool, error) {
 	metadata, ok := ctx.Value(quartz.JobMetadataContextKey).(quartz.JobMetadata)
 	if !ok {
 		return true, nil
+	}
+
+	if lag := time.Since(time.Unix(0, metadata.RunTime)); lag > claim.ttl {
+		x.logger.Warnf("skipping stale cron tick for schedule=(%s): tick is %s late, claim ttl is %s", claim.reference, lag, claim.ttl)
+		return false, nil
 	}
 
 	cl := x.actorSystem.getCluster()

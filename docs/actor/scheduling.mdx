@@ -135,9 +135,13 @@ err := system.ScheduleWithCron(
 )
 ```
 
+<Note>
+In cluster mode the cron expression is evaluated in **UTC** so every node computes the same tick instants regardless of its local timezone; the claim is keyed on the tick's fire time, and a wall-clock expression like `"0 0 9 * * *"` evaluated in each node's own zone would give mixed-timezone nodes different keys and deliver once per timezone instead of once per cluster. Outside cluster mode the expression is evaluated in the process's local timezone, as before. Express cluster cron schedules in UTC accordingly (for example, `"0 0 9 * * *"` fires at 09:00 UTC).
+</Note>
+
 **`Schedule` and `ScheduleOnce` stay node-local**, even in cluster mode: their fire times are anchored to each node's own local registration clock rather than a shared, deterministic schedule, so there is no common tick for nodes to arbitrate over. Registering the same interval or one-shot schedule on every node delivers on every node, exactly as outside cluster mode.
 
-The cluster-wide claim's TTL is scaled to the cron schedule's own period, clamped between one minute and 24 hours (the same window within which the scheduler still executes a delayed tick). The TTL must outlive the worst-case delivery lag between nodes handling the same tick: a node that claims after a stale entry has already expired would win the same tick again and deliver a duplicate. Claim entries are reclaimed by their TTL alone; canceling a schedule or stopping a node never deletes them, since an entry may be the winning claim other nodes are still arbitrating against.
+The cluster-wide claim's TTL is scaled to the cron schedule's own period, clamped between one minute and 24 hours. The TTL must outlive the worst-case delivery lag between nodes handling the same tick: a node that claims after a stale entry has already expired would win the same tick again and deliver a duplicate. To close that window at its source, a node that reaches a tick more than the claim TTL late (for example, after a long pause while the scheduler still replays overdue ticks) skips it without claiming, trading a missed tick that every node was too late for over a duplicate delivery. Claim entries are reclaimed by their TTL alone; canceling a schedule or stopping a node never deletes them, since an entry may be the winning claim other nodes are still arbitrating against.
 
 <Note>
 In cluster mode each node registers its own local cron trigger, so `CancelSchedule` only stops the trigger on the node where it is called. The schedule keeps firing cluster-wide from the remaining nodes; to stop it everywhere, cancel it on every node that registered it.

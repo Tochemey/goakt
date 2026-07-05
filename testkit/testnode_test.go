@@ -242,25 +242,30 @@ func TestClusterSingleFireSchedule(t *testing.T) {
 
 	// let several ticks elapse while all three nodes race for each one.
 	require.Eventually(t, func() bool {
-		return len(sink.snapshot()) >= 2
-	}, 15*time.Second, 200*time.Millisecond)
+		return len(sink.snapshot()) >= 4
+	}, 20*time.Second, 200*time.Millisecond)
 
-	preStopEvents := sink.snapshot()
-	assertSingleDeliveryPerTick(t, preStopEvents, tickWindow)
+	assertSingleDeliveryPerTick(t, sink.snapshot(), tickWindow)
 
 	// takeover: stop one of the racing nodes mid-run and assert the single-fire
-	// invariant still holds using only the survivors.
+	// invariant still holds using only the survivors. Record the moment node-2 is
+	// fully stopped so the "must not deliver" check only considers ticks that fire
+	// strictly after it has left (an in-flight tick claimed just before shutdown may
+	// still drain, and is not a violation of the leaving semantics).
 	multi.StopNode(ctx, "node-2")
+	stoppedAt := time.Now()
 
-	countBefore := len(preStopEvents)
+	countBefore := len(sink.snapshot())
 	require.Eventually(t, func() bool {
-		return len(sink.snapshot()) >= countBefore+2
-	}, 15*time.Second, 200*time.Millisecond)
+		return len(sink.snapshot()) >= countBefore+4
+	}, 20*time.Second, 200*time.Millisecond)
 
-	postStopEvents := sink.snapshot()[countBefore:]
-	assertSingleDeliveryPerTick(t, postStopEvents, tickWindow)
-	for _, e := range postStopEvents {
-		require.NotEqual(t, "node-2", e.node, "stopped node must not deliver after leaving")
+	final := sink.snapshot()
+	assertSingleDeliveryPerTick(t, final, tickWindow)
+	for _, e := range final {
+		if e.at.After(stoppedAt) {
+			require.NotEqual(t, "node-2", e.node, "stopped node must not deliver ticks that fire after it leaves")
+		}
 	}
 }
 
@@ -315,11 +320,14 @@ func TestNodeLocalIntervalSchedule(t *testing.T) {
 	}, 15*time.Second, 200*time.Millisecond)
 }
 
-// assertSingleDeliveryPerTick fails the test if two deliveries land closer together than half
-// the cron period. Duplicates of the same tick arrive nearly simultaneously while consecutive
-// ticks are a full period apart, so spacing distinguishes them without assuming which fixed
-// window a delivery falls into (duplicates straddling a window boundary would evade a
-// bucket-based check).
+// assertSingleDeliveryPerTick fails the test if any two deliveries land within a quarter of
+// the cron period of each other. All nodes evaluate the cron expression in UTC, so their
+// triggers fire at the same instant and a failed arbitration surfaces as two near-simultaneous
+// deliveries (gap on the order of claim + mailbox latency, well under period/4). Legitimate
+// consecutive ticks are a full period apart, so the quarter-period threshold cleanly separates
+// the two while tolerating delivery jitter up to three quarters of a period. Comparing every
+// adjacent pair across the whole sorted list (rather than bucketing) avoids missing a duplicate
+// that straddles a fixed window boundary.
 func assertSingleDeliveryPerTick(t *testing.T, events []fireEvent, period time.Duration) {
 	t.Helper()
 
@@ -329,7 +337,7 @@ func assertSingleDeliveryPerTick(t *testing.T, events []fireEvent, period time.D
 
 	for i := 1; i < len(sorted); i++ {
 		gap := sorted[i].at.Sub(sorted[i-1].at)
-		require.GreaterOrEqualf(t, gap, period/2,
+		require.GreaterOrEqualf(t, gap, period/4,
 			"deliveries %+v and %+v are only %s apart: duplicate delivery for a single tick", sorted[i-1], sorted[i], gap)
 	}
 }

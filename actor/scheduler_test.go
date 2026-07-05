@@ -24,6 +24,7 @@ package actor
 
 import (
 	"context"
+	stderrors "errors"
 	"net"
 	"strconv"
 	"testing"
@@ -32,14 +33,17 @@ import (
 	"github.com/reugn/go-quartz/job"
 	"github.com/reugn/go-quartz/quartz"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/address"
+	"github.com/tochemey/goakt/v4/internal/cluster"
 	dynaport "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/log"
+	mockscluster "github.com/tochemey/goakt/v4/mocks/cluster"
 	testkit "github.com/tochemey/goakt/v4/mocks/discovery"
 	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
@@ -1778,6 +1782,10 @@ func TestCronClaimTTL(t *testing.T) {
 }
 
 func TestClaimClusterFire(t *testing.T) {
+	metadataCtx := func(runTime int64) context.Context {
+		return context.WithValue(context.Background(), quartz.JobMetadataContextKey, quartz.JobMetadata{RunTime: runTime})
+	}
+
 	t.Run("fails open when job metadata is missing", func(t *testing.T) {
 		sched := newScheduler(log.DiscardLogger, time.Second, nil)
 		claim := &scheduleFireClaim{reference: "ref", ttl: time.Minute}
@@ -1786,15 +1794,47 @@ func TestClaimClusterFire(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, won)
 	})
-	t.Run("propagates claim errors and skips delivery", func(t *testing.T) {
-		// a bare actor system has no cluster engine, so the claim call fails; the job
-		// must surface the error instead of delivering.
+	t.Run("skips a stale tick without claiming", func(t *testing.T) {
+		// a tick older than the claim TTL must be skipped before any cluster call: the
+		// winner's claim entry may already have expired, so claiming would deliver a
+		// duplicate. The bare actor system proves no claim was attempted, since a claim
+		// attempt against its nil cluster engine would surface ErrClusterDisabled.
 		sched := newScheduler(log.DiscardLogger, time.Second, &actorSystem{})
 		claim := &scheduleFireClaim{reference: "ref", ttl: time.Minute}
-		ctx := context.WithValue(context.Background(), quartz.JobMetadataContextKey, quartz.JobMetadata{RunTime: 42})
 
-		won, err := sched.claimClusterFire(ctx, claim)
-		require.Error(t, err)
+		won, err := sched.claimClusterFire(metadataCtx(time.Now().Add(-2*time.Minute).UnixNano()), claim)
+		require.NoError(t, err)
+		require.False(t, won)
+	})
+	t.Run("errors when the cluster engine is unavailable", func(t *testing.T) {
+		sched := newScheduler(log.DiscardLogger, time.Second, &actorSystem{})
+		claim := &scheduleFireClaim{reference: "ref", ttl: time.Minute}
+
+		won, err := sched.claimClusterFire(metadataCtx(time.Now().UnixNano()), claim)
+		require.ErrorIs(t, err, errors.ErrClusterDisabled)
+		require.False(t, won)
+	})
+	t.Run("skips delivery when another node already claimed the tick", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		clusterMock.EXPECT().ClaimScheduleFire(mock.Anything, mock.Anything, time.Minute).Return(cluster.ErrScheduleFireClaimed)
+
+		sched := newScheduler(log.DiscardLogger, time.Second, &actorSystem{cluster: clusterMock})
+		claim := &scheduleFireClaim{reference: "ref", ttl: time.Minute}
+
+		won, err := sched.claimClusterFire(metadataCtx(time.Now().UnixNano()), claim)
+		require.NoError(t, err)
+		require.False(t, won)
+	})
+	t.Run("propagates claim errors and skips delivery", func(t *testing.T) {
+		expectedErr := stderrors.New("claim failure")
+		clusterMock := mockscluster.NewCluster(t)
+		clusterMock.EXPECT().ClaimScheduleFire(mock.Anything, mock.Anything, time.Minute).Return(expectedErr)
+
+		sched := newScheduler(log.DiscardLogger, time.Second, &actorSystem{cluster: clusterMock})
+		claim := &scheduleFireClaim{reference: "ref", ttl: time.Minute}
+
+		won, err := sched.claimClusterFire(metadataCtx(time.Now().UnixNano()), claim)
+		require.ErrorIs(t, err, expectedErr)
 		require.False(t, won)
 	})
 }
