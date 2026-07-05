@@ -261,6 +261,13 @@ var (
 
 	// ErrInvalidKinds is returned when the child and parent kinds are different.
 	ErrInvalidKinds = errors.New("child and parent kinds must be the same")
+
+	// ErrScheduleReferenceRequired is returned by ScheduleWithCron in cluster mode when no
+	// explicit reference was set via WithReference. Cluster-wide single fire arbitrates on
+	// the reference as the shared identity every node claims against; an auto-generated
+	// per-node reference would give every node its own key, so the tick would still
+	// deliver N times instead of once.
+	ErrScheduleReferenceRequired = errors.New("an explicit reference (WithReference) is required for ScheduleWithCron in cluster mode")
 )
 
 // NewErrInvalidTCPAddress formats an ErrInvalidTCPAddress with the given address.

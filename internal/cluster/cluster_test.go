@@ -2388,6 +2388,61 @@ func TestJobKeyReturnsMetadata(t *testing.T) {
 	require.Equal(t, metadata, value)
 }
 
+func TestClaimScheduleFireReturnsErrorWhenKeyEmpty(t *testing.T) {
+	cl := &cluster{running: atomic.NewBool(true)}
+	err := cl.ClaimScheduleFire(context.Background(), "", time.Minute)
+	require.EqualError(t, err, "schedule fire key is empty")
+}
+
+func TestClaimScheduleFireReturnsErrorWhenNotRunning(t *testing.T) {
+	cl := &cluster{running: atomic.NewBool(false)}
+	err := cl.ClaimScheduleFire(context.Background(), "key", time.Minute)
+	require.ErrorIs(t, err, ErrEngineNotRunning)
+}
+
+func TestClaimScheduleFireReturnsClaimedWhenKeyExists(t *testing.T) {
+	cl := &cluster{
+		running:      atomic.NewBool(true),
+		dmap:         &MockDMap{putErr: olric.ErrKeyFound},
+		writeTimeout: time.Second,
+	}
+
+	err := cl.ClaimScheduleFire(context.Background(), "key", time.Minute)
+	require.ErrorIs(t, err, ErrScheduleFireClaimed)
+}
+
+func TestClaimScheduleFirePropagatesDMapError(t *testing.T) {
+	expectedErr := errors.New("put failure")
+	cl := &cluster{
+		running:      atomic.NewBool(true),
+		dmap:         &MockDMap{putErr: expectedErr},
+		writeTimeout: time.Second,
+	}
+
+	err := cl.ClaimScheduleFire(context.Background(), "key", time.Minute)
+	require.ErrorIs(t, err, expectedErr)
+}
+
+func TestClaimScheduleFireSucceeds(t *testing.T) {
+	var gotOptions []olric.PutOption
+	cl := &cluster{
+		running:      atomic.NewBool(true),
+		writeTimeout: time.Second,
+		dmap: &MockDMap{
+			putFn: func(_ context.Context, key string, _ any, options ...olric.PutOption) error { // nolint
+				require.Equal(t, composeKey(namespaceScheduleFire, "key"), key)
+				gotOptions = options
+				return nil
+			},
+		},
+	}
+
+	err := cl.ClaimScheduleFire(context.Background(), "key", time.Minute)
+	require.NoError(t, err)
+	// NX (claim-once) and EX (TTL) must both be applied to the write.
+	require.Len(t, gotOptions, 2)
+}
+
 // nolint
 func TestDeleteJobKeyPropagatesError(t *testing.T) {
 	expectedErr := errors.New("delete failure")

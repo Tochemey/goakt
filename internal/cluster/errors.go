@@ -43,6 +43,9 @@ var (
 	ErrGrainAlreadyExists = errors.New("grain already exists")
 	// ErrKindAlreadyExists is returned when an actor kind entry already exists.
 	ErrKindAlreadyExists = errors.New("kind already exists")
+	// ErrScheduleFireClaimed is returned by ClaimScheduleFire when another node has already
+	// won the race for the given key.
+	ErrScheduleFireClaimed = errors.New("schedule fire already claimed")
 )
 
 // IsQuorumError returns true when a cluster operation failed due to quorum constraints.

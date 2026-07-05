@@ -68,7 +68,14 @@ const (
 	namespaceGrains recordNamespace = "grains"
 	namespaceKinds  recordNamespace = "kinds"
 	namespaceJobs   recordNamespace = "jobs"
+	// namespaceScheduleFire stores the short-lived fire claims used to arbitrate which node
+	// delivers a given tick of a cluster-wide cron schedule (see actor.ScheduleWithCron).
+	namespaceScheduleFire recordNamespace = "schedule-fire"
 )
+
+// scheduleFireClaimValue is the placeholder payload for a schedule-fire claim entry; only the
+// key's existence matters for arbitration.
+var scheduleFireClaimValue = []byte{1}
 
 func composeKey(namespace recordNamespace, id string) string {
 	return fmt.Sprintf("%s%s%s", string(namespace), namespaceSeparator, id)
@@ -121,6 +128,11 @@ type Cluster interface {
 	GetPartition(actorName string) uint64
 	// IsRunning reports whether the cluster engine is currently running.
 	IsRunning() bool
+	// ClaimScheduleFire atomically claims the exclusive right to deliver one trigger tick of
+	// a cluster-wide cron schedule. It returns nil for the winning caller and
+	// ErrScheduleFireClaimed for every other caller racing for the same key; see the
+	// builtin implementation for the key and ttl contract.
+	ClaimScheduleFire(ctx context.Context, key string, ttl time.Duration) error
 	// PutJobKey stores job metadata.
 	PutJobKey(ctx context.Context, jobID string, metadata []byte) error
 	// DeleteJobKey removes job metadata.
@@ -879,6 +891,51 @@ func (x *cluster) JobKey(ctx context.Context, jobID string) ([]byte, error) {
 	return x.getRecord(ctx, namespaceJobs, jobID)
 }
 
+// ClaimScheduleFire attempts to claim the exclusive right to deliver one trigger tick of a
+// cluster-wide cron schedule, using the same atomic put-if-absent (NX+EX) primitive that
+// guarantees single grain activation across the cluster.
+//
+// key uniquely identifies the (schedule reference, trigger tick) pair being arbitrated: callers
+// are expected to derive it from a value that is identical across every node racing for the same
+// tick (e.g. the trigger's deterministic next-fire timestamp), so a fresh key is used per tick.
+//
+// Because the key is per tick, a caller whose claim arrives after the winner's entry has
+// expired would win again and deliver a duplicate: callers must therefore never claim a tick
+// older than ttl (the actor scheduler skips such stale ticks before calling this). Claim
+// entries are reclaimed by their TTL alone; there is no explicit delete, so a claim outlives
+// cancellations and node shutdowns by design.
+//
+// Returns nil for the caller that wins the race for key (it must proceed to deliver), and
+// ErrScheduleFireClaimed for every other caller racing for the same key (it must skip delivery
+// for that tick silently).
+func (x *cluster) ClaimScheduleFire(ctx context.Context, key string, ttl time.Duration) error {
+	if !x.running.Load() {
+		return ErrEngineNotRunning
+	}
+
+	if key == "" {
+		return errors.New("schedule fire key is empty")
+	}
+
+	// Unlike the registration-time write paths, this runs on every cron tick, so it takes the
+	// read lock only (same as RemoveActor): atomicity comes from the server-side NX+EX write,
+	// not from the local mutex, and holding the write lock across a network round trip per
+	// tick would stall actor placement and lookups behind schedule arbitration.
+	x.mu.RLock()
+	defer x.mu.RUnlock()
+
+	err := x.putRecordIfAbsent(ctx, namespaceScheduleFire, key, scheduleFireClaimValue, olric.EX(ttl))
+	if err != nil {
+		if errors.Is(err, olric.ErrKeyFound) {
+			return ErrScheduleFireClaimed
+		}
+
+		return err
+	}
+
+	return nil
+}
+
 // buildConfig creates the Olric configuration tailored to the current
 // cluster settings.
 func (x *cluster) buildConfig() (*oconfig.Config, error) {
@@ -1346,12 +1403,12 @@ func (x *cluster) putGrainIfAbsent(ctx context.Context, grain *internalpb.Grain)
 	return nil
 }
 
-func (x *cluster) putRecordIfAbsent(ctx context.Context, namespace recordNamespace, key string, value []byte) error {
+func (x *cluster) putRecordIfAbsent(ctx context.Context, namespace recordNamespace, key string, value []byte, options ...olric.PutOption) error {
 	ctx = context.WithoutCancel(ctx)
 	ctx, cancel := context.WithTimeout(ctx, x.writeTimeout)
 	defer cancel()
 
-	return x.dmap.Put(ctx, composeKey(namespace, key), value, olric.NX())
+	return x.dmap.Put(ctx, composeKey(namespace, key), value, append([]olric.PutOption{olric.NX()}, options...)...)
 }
 
 func (x *cluster) putKindIfAbsent(ctx context.Context, kind string) error {
