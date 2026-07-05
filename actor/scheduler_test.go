@@ -1839,6 +1839,105 @@ func TestClaimClusterFire(t *testing.T) {
 	})
 }
 
+// TestScheduleWithCronTimezone pins that ScheduleWithCron evaluates the cron expression in UTC
+// when the actor system is in cluster mode, so every node computes the same tick instants and
+// the per-tick fire claims line up cluster-wide, and in the process local timezone otherwise.
+// The chosen location is asserted through the scheduled trigger's description (which embeds the
+// location) rather than by mutating the global time.Local, which would race the actor-system
+// goroutines under the race detector. "UTC" and the local location name differ as strings, so
+// the assertions have teeth even when the test host itself runs in UTC.
+func TestScheduleWithCronTimezone(t *testing.T) {
+	// daily at noon: never fires during the test, so the job stays queued for inspection and
+	// no delivery or claim happens.
+	const expr = "0 0 12 * * *"
+
+	scheduledTriggerDescription := func(t *testing.T, sys ActorSystem, reference string) string {
+		t.Helper()
+		sysImpl := sys.(*actorSystem)
+		job, err := sysImpl.scheduler.quartzScheduler.GetScheduledJob(quartz.NewJobKey(reference))
+		require.NoError(t, err)
+
+		return job.Trigger().Description()
+	}
+
+	t.Run("non-cluster mode evaluates cron in the local timezone", func(t *testing.T) {
+		ctx := context.TODO()
+		newActorSystem, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, newActorSystem.Start(ctx))
+
+		pause.For(time.Second)
+
+		actorRef, err := newActorSystem.Spawn(ctx, "test", NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, actorRef)
+
+		const reference = "cron-local-tz"
+		require.NoError(t, newActorSystem.ScheduleWithCron(ctx, new(testpb.TestSend), actorRef, expr, WithReference(reference)))
+
+		localTrigger, err := quartz.NewCronTriggerWithLoc(expr, time.Now().Location())
+		require.NoError(t, err)
+		require.Equal(t, localTrigger.Description(), scheduledTriggerDescription(t, newActorSystem, reference))
+
+		require.NoError(t, newActorSystem.Stop(ctx))
+	})
+
+	t.Run("cluster mode evaluates cron in UTC", func(t *testing.T) {
+		ctx := context.TODO()
+		nodePorts := dynaport.Get(3)
+		discoveryPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+		host := "127.0.0.1"
+
+		addrs := []string{net.JoinHostPort(host, strconv.Itoa(discoveryPort))}
+
+		provider := new(testkit.Provider)
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig(host, remotingPort)),
+			WithCluster(
+				NewClusterConfig().
+					WithKinds(new(MockActor)).
+					WithPartitionCount(9).
+					WithReplicaCount(1).
+					WithPeersPort(clusterPort).
+					WithMinimumPeersQuorum(1).
+					WithDiscoveryPort(discoveryPort).
+					WithDiscovery(provider)),
+		)
+		require.NoError(t, err)
+
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		require.NoError(t, newActorSystem.Start(ctx))
+
+		pause.For(time.Second)
+
+		actorRef, err := newActorSystem.Spawn(ctx, "test", NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, actorRef)
+
+		pause.For(time.Second)
+
+		const reference = "cron-utc-tz"
+		require.NoError(t, newActorSystem.ScheduleWithCron(ctx, new(testpb.TestSend), actorRef, expr, WithReference(reference)))
+
+		utcTrigger, err := quartz.NewCronTriggerWithLoc(expr, time.UTC)
+		require.NoError(t, err)
+		require.Equal(t, utcTrigger.Description(), scheduledTriggerDescription(t, newActorSystem, reference))
+
+		require.NoError(t, newActorSystem.Stop(ctx))
+		provider.AssertExpectations(t)
+	})
+}
+
 // TestSchedulerJobMetadataPresent pins that go-quartz attaches JobMetadata to a scheduled
 // job's execution context: claimClusterFire fails open (skips arbitration) without it, so a
 // regression here would silently defeat cluster-wide single fire instead of failing loudly.
