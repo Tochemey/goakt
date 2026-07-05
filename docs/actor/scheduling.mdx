@@ -32,6 +32,7 @@ The scheduler starts automatically when the actor system starts and stops when t
 | `CancelSchedule(reference)`                              | Cancel a scheduled message              |
 | `PauseSchedule(reference)`                               | Pause delivery                          |
 | `ResumeSchedule(reference)`                              | Resume a paused schedule                |
+| `ListSchedules()`                                         | List every schedule currently known to the scheduler |
 
 ## Schedule Options
 
@@ -169,3 +170,24 @@ For scheduled messages, the target actor receives the message via `Tell`. By def
 - **Fire-and-forget** — Scheduling does not provide built-in delivery guarantees (at-least-once or exactly-once). Ensure idempotency where needed.
 - **No retries** — If delivery fails (e.g., actor not found), the message is not retried.
 - **ScheduleOnce** — Delivered exactly once after the delay; no further deliveries.
+
+## Introspection
+
+`ListSchedules()` returns a read-only snapshot of every schedule the scheduler currently knows about. Use it to answer "what is currently scheduled, and to whom will it deliver?" - the read-side counterpart of the reference-based Cancel/Pause/Resume management APIs.
+
+```go
+type ScheduleInfo struct {
+	Reference string // the schedule reference (user-supplied or auto-generated)
+	Path      string // target actor path
+}
+```
+
+```go
+for _, info := range system.ListSchedules() {
+	fmt.Printf("%s -> %s\n", info.Reference, info.Path)
+}
+```
+
+<Note>
+`ListSchedules` is purely read-only: it has no effect on the schedules themselves. A schedule stops appearing once it has been canceled via `CancelSchedule` or, for one-shot schedules created via `ScheduleOnce`, once it has fired and been delivered — there is no need to clean anything up manually.
+</Note>

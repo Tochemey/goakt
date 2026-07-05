@@ -403,6 +403,13 @@ type ActorSystem interface {
 	// Returns:
 	//   - error: An error is returned if the scheduled message cannot be found, was never paused, has already been delivered, or cannot be resumed.
 	ResumeSchedule(reference string) error
+	// ListSchedules returns a read-only snapshot of every schedule currently known to the scheduler:
+	// its reference and the target actor path.
+	//
+	// It has no effect on the schedules themselves. A schedule stops appearing once it has been
+	// canceled via CancelSchedule or, for one-shot schedules created via ScheduleOnce, once it has
+	// fired and been delivered.
+	ListSchedules() []ScheduleInfo
 	// PeersAddress returns the actor system address known in the cluster. That address is used by other nodes to communicate with the actor system.
 	// This address is empty when cluster mode is not activated
 	PeersAddress() string
@@ -1577,6 +1584,16 @@ func (x *actorSystem) PauseSchedule(reference string) error {
 //   - error: An error is returned if the scheduled message cannot be found, was never paused, has already been delivered, or cannot be resumed.
 func (x *actorSystem) ResumeSchedule(reference string) error {
 	return x.scheduler.ResumeSchedule(reference)
+}
+
+// ListSchedules returns a read-only snapshot of every schedule currently known to the scheduler:
+// its reference and the target actor path.
+//
+// It has no effect on the schedules themselves. A schedule stops appearing once it has been
+// canceled via CancelSchedule or, for one-shot schedules created via ScheduleOnce, once it has
+// fired and been delivered.
+func (x *actorSystem) ListSchedules() []ScheduleInfo {
+	return x.scheduler.ListSchedules()
 }
 
 // Subscribe creates an event subscriber to consume events from the actor system.
