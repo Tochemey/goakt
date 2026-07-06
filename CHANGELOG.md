@@ -4,11 +4,32 @@
 
 ### ✨ Features
 
-- **Topic subscription introspection with `TopicStats`** ([#1238](https://github.com/Tochemey/goakt/issues/1238)). `ActorSystem.TopicStats(ctx, topic, timeout) (*TopicStats, error)` returns a read-only, point-in-time snapshot of a topic's subscription state without ever exposing subscriber identities, so presence-style features ("how many clients follow this feed", "does any node have subscribers for this topic") no longer require a shadow registry alongside the built-in pub/sub. `TopicStats` reports `LocalSubscriberCount` (subscribers registered on this node's topic actor) and `TopicInstanceCount` (topic-actor instances, i.e. nodes, cluster-wide with at least one subscriber for the topic). In cluster mode the local topic actor answers with its own count and fans a lightweight query out to every peer's topic actor; peers answer with their local view only and never fan the query out any further, which avoids query storms. Outside cluster mode `TopicInstanceCount` is simply 0 or 1 depending on whether this node has local subscribers. The count reflects only live subscribers, applying the same liveness filter the publish path uses, so it matches what a publish would actually deliver to. `TopicStats` prefers an explicit failure over an inconsistent count: if any peer cannot be reached within `timeout`, the whole call returns an error rather than a silently undercounted result. It requires the topic actor to be running (`WithPubSub()` or clustering enabled), otherwise it returns the new `ErrTopicActorNotStarted`. Publish, subscribe, and delivery semantics are unchanged.
-- **Cluster-wide single fire for cron schedules** ([#1236](https://github.com/Tochemey/goakt/issues/1236)). In cluster mode, `ScheduleWithCron` now delivers exactly once per trigger tick across the cluster. Every node keeps running its own cron trigger locally, so ticks stay in sync with no extra network round trips on the hot path; immediately before delivery each node races to claim an exclusive, TTL-bounded slot for that specific tick in the cluster store, the same atomic put-if-absent primitive that guarantees single grain activation. Only the claim winner delivers; every other node silently skips that tick, and if the winning node leaves the cluster, arbitration for the next tick proceeds among the remaining nodes with no fixed leader to fail over. The cron expression is evaluated in UTC in cluster mode so every node computes the same tick instants regardless of its local timezone (outside cluster mode it stays local-timezone, as before). The claim TTL scales with the cron period, clamped between one minute and 24 hours, and a node that reaches a tick more than the TTL late skips it rather than re-delivering an already-delivered tick. `Schedule` (interval) and `ScheduleOnce` remain node-local, in cluster mode or not: their fire times are anchored to each node's own registration clock, so there is no shared tick to arbitrate. Outside cluster mode nothing changes.
-- **Scheduler introspection with `ListSchedules`** ([#1235](https://github.com/Tochemey/goakt/issues/1235)). `ActorSystem.ListSchedules() []ScheduleInfo` returns a read-only snapshot of every schedule currently known to the scheduler, exposed alongside the existing reference-based `CancelSchedule`/`PauseSchedule`/`ResumeSchedule` management APIs. Each `ScheduleInfo` reports the schedule `Reference` (user-supplied via `WithReference` or auto-generated) and the target actor `Path`. It has no effect on the schedules themselves, and a schedule stops appearing once it has been canceled or, for one-shot schedules created via `ScheduleOnce`, once it has fired and been delivered.
-- **React to cluster leadership changes with the `LeaderChanged` event** ([#1233](https://github.com/Tochemey/goakt/issues/1233)). Each node publishes a `LeaderChanged` event on its eventstream, alongside `NodeJoined`/`NodeLeft`, when the coordinator moves to a different node, so code can react to failovers without polling `IsLeader`. It carries the new coordinator's peers address (`Address()`) and transition time (`Timestamp()`). The cluster engine emits it from the authoritative membership flag once membership settles after a topology change, at most once per transition; the initial coordinator is seeded silently, not announced. It is best-effort and eventually consistent (may be missed under heavy churn), so query `IsLeader(ctx)` or `Leader(ctx)` for authoritative state. Nothing is emitted outside cluster mode.
-- **Factory-free grain activation with `GrainOf`** ([#1231](https://github.com/Tochemey/goakt/issues/1231)). The new generic package-level function `actor.GrainOf[*MyGrain](ctx, system, name, opts...)` retrieves or activates a grain without a factory: the grain kind is derived from the type parameter, auto-registered in the kind registry, and the grain is constructed as a zero value only when local activation is actually needed. Initialization belongs in `OnActivate`, with external resources supplied through `WithGrainDependencies`, which is the same construction contract the cluster already applies when recreating or relocating grains. Identity resolution no longer executes a factory or allocates a grain instance on lookups and remote activations. The testkit gains matching `testkit.GrainOf[T]` and `testkit.NodeGrainOf[T]` helpers. `GrainOf` rejects non pointer-to-struct type parameters with the new `ErrInvalidGrainKind` and detects same-named kind collisions across packages with the new `ErrGrainKindConflict` instead of silently instantiating the wrong type.
+- **Topic subscription introspection with `TopicStats`** ([#1238](https://github.com/Tochemey/goakt/issues/1238)). `ActorSystem.TopicStats(ctx, topic, timeout) (*TopicStats, error)` returns a read-only, point-in-time snapshot of a topic's subscription state without ever exposing subscriber identities, so presence-style features ("how many clients follow this feed", "does any node have subscribers for this topic") no longer require a shadow registry alongside the built-in pub/sub.
+  - `TopicStats` reports `LocalSubscriberCount` (subscribers registered on this node's topic actor) and `TopicInstanceCount` (topic-actor instances, i.e. nodes, cluster-wide with at least one subscriber for the topic).
+  - In cluster mode the local topic actor answers with its own count and fans a lightweight query out to every peer's topic actor; peers answer with their local view only and never fan the query out any further, which avoids query storms. Outside cluster mode `TopicInstanceCount` is simply 0 or 1 depending on whether this node has local subscribers.
+  - The count reflects only live subscribers, applying the same liveness filter the publish path uses, so it matches what a publish would actually deliver to.
+  - `TopicStats` prefers an explicit failure over an inconsistent count: if any peer cannot be reached within `timeout`, the whole call returns an error rather than a silently undercounted result.
+  - It requires the topic actor to be running (`WithPubSub()` or clustering enabled), otherwise it returns the new `ErrTopicActorNotStarted`. Publish, subscribe, and delivery semantics are unchanged.
+- **Cluster-wide single fire for cron schedules** ([#1236](https://github.com/Tochemey/goakt/issues/1236)). In cluster mode, `ScheduleWithCron` now delivers exactly once per trigger tick across the cluster.
+  - Every node keeps running its own cron trigger locally, so ticks stay in sync with no extra network round trips on the hot path.
+  - Immediately before delivery each node races to claim an exclusive, TTL-bounded slot for that specific tick in the cluster store, the same atomic put-if-absent primitive that guarantees single grain activation. Only the claim winner delivers; every other node silently skips that tick.
+  - There is no fixed leader to fail over: if the winning node leaves the cluster, arbitration for the next tick proceeds among the remaining nodes.
+  - The cron expression is evaluated in UTC in cluster mode so every node computes the same tick instants regardless of its local timezone (outside cluster mode it stays local-timezone, as before).
+  - The claim TTL scales with the cron period, clamped between one minute and 24 hours, and a node that reaches a tick more than the TTL late skips it rather than re-delivering an already-delivered tick.
+  - `Schedule` (interval) and `ScheduleOnce` remain node-local, in cluster mode or not: their fire times are anchored to each node's own registration clock, so there is no shared tick to arbitrate. Outside cluster mode nothing changes.
+- **Scheduler introspection with `ListSchedules`** ([#1235](https://github.com/Tochemey/goakt/issues/1235)). `ActorSystem.ListSchedules() []ScheduleInfo` returns a read-only snapshot of every schedule currently known to the scheduler, exposed alongside the existing reference-based `CancelSchedule`/`PauseSchedule`/`ResumeSchedule` management APIs.
+  - Each `ScheduleInfo` reports the schedule `Reference` (user-supplied via `WithReference` or auto-generated) and the target actor `Path`.
+  - It has no effect on the schedules themselves, and a schedule stops appearing once it has been canceled or, for one-shot schedules created via `ScheduleOnce`, once it has fired and been delivered.
+- **React to cluster leadership changes with the `LeaderChanged` event** ([#1233](https://github.com/Tochemey/goakt/issues/1233)). Each node publishes a `LeaderChanged` event on its eventstream, alongside `NodeJoined`/`NodeLeft`, when the coordinator moves to a different node, so code can react to failovers without polling `IsLeader`.
+  - The event carries the new coordinator's peers address (`Address()`) and transition time (`Timestamp()`).
+  - The cluster engine emits it from the authoritative membership flag once membership settles after a topology change, at most once per transition; the initial coordinator is seeded silently, not announced.
+  - It is best-effort and eventually consistent (may be missed under heavy churn), so query `IsLeader(ctx)` or `Leader(ctx)` for authoritative state. Nothing is emitted outside cluster mode.
+- **Factory-free grain activation with `GrainOf`** ([#1231](https://github.com/Tochemey/goakt/issues/1231)). The new generic package-level function `actor.GrainOf[*MyGrain](ctx, system, name, opts...)` retrieves or activates a grain without a factory.
+  - The grain kind is derived from the type parameter, auto-registered in the kind registry, and the grain is constructed as a zero value only when local activation is actually needed.
+  - Initialization belongs in `OnActivate`, with external resources supplied through `WithGrainDependencies`, which is the same construction contract the cluster already applies when recreating or relocating grains.
+  - Identity resolution no longer executes a factory or allocates a grain instance on lookups and remote activations.
+  - The testkit gains matching `testkit.GrainOf[T]` and `testkit.NodeGrainOf[T]` helpers.
+  - `GrainOf` rejects non pointer-to-struct type parameters with the new `ErrInvalidGrainKind` and detects same-named kind collisions across packages with the new `ErrGrainKindConflict` instead of silently instantiating the wrong type.
 
 ### ⚠️ Behavior changes
 
@@ -20,14 +41,14 @@
 
 - The factory-based grain APIs are deprecated but remain functional: `ActorSystem.GrainIdentity`, `GrainContext.GrainIdentity`, the `GrainFactory` type, and the testkit `TestKit.GrainIdentity` / `TestNode.GrainIdentity` wrappers. Migrate to `GrainOf`; factories that capture dependencies in their closure only ever took effect on the local node, since remote recreation always built the grain as a zero value.
 
-### 🐛 Fixes
+### 🔧 Fixes
 
 - **`WithGrainDisableRelocation` now reaches the cluster** ([#1231](https://github.com/Tochemey/goakt/issues/1231)). The option was stored in the grain configuration but never propagated: the wire record always carried `DisableRelocation=false`, so the relocator relocated grains that had explicitly opted out. The flag now flows end to end through the claim record, the remote activation request (new `DisableRelocation` field on `remote.GrainRequest`), and grain recreation, so peer-activated and recreated grains keep the opt-out.
 - **Remote grain activation no longer discards the caller's configuration.** The remote activation request hardcoded a 1s activation timeout with 5 retries and dropped dependencies and mailbox capacity. It now carries the configured `WithGrainInitTimeout`, `WithGrainInitMaxRetries`, `WithGrainMailboxCapacity`, and `WithGrainDependencies` values to the activating node.
 
 ## v4.2.13 - 2026-07-04
 
-### 🚀 Performance
+### ⚡ Performance
 
 - **Supervision no longer runs a goroutine per actor** ([#1222](https://github.com/Tochemey/goakt/issues/1222)). Failure signals are drained by a single shared consumer owned by the dispatcher instead of one lifetime goroutine per actor, so the goroutine count stays bounded and independent of the actor population. Supervision semantics are unchanged (per-actor signal ordering, first failure wins). A build-tagged scale test (`benchmark/scale_test.go`, `-tags=scale`) asserts the bound holds at one million actors.
 - **Faster remoting hot path** (client and server, profiled end to end):
@@ -38,7 +59,7 @@
   - The default idle connection pool per endpoint was raised from 8 to 32, exported as `remote.DefaultMaxIdleConns`.
   - Measured on Apple M1 (go1.26): serial remote ask 43 to 40 allocs/op, concurrent remote ask about 7% faster, ingress sender-address handling 28% faster with 33% fewer allocations. Bytes per ask rose roughly 18% because each ask now enforces a real context deadline (see the hang fix below).
 
-### 🐛 Fixes
+### 🔧 Fixes
 
 - **Cross-node grain activation no longer fails identity validation** ([#1227](https://github.com/Tochemey/goakt/issues/1227)). `sendRemoteActivateGrain` sent the full `kind/name` identity as the wire request's `Name`, so the receiver rebuilt it as `kind/kind/name` and rejected valid names. The request now carries the bare grain name. Two-node reproduction in `playground/issue-1227`.
 - **Concurrent remote asks could hang forever.** The server could recycle a pooled frame buffer before the handler lookup read the message type name from it, silently dropping the request, and the client never enforced the ask timeout locally. Fixed by looking up the handler before recycling the buffer, closing the connection on a frame with no registered handler (mismatched peers fail fast; pooled clients redial), and bounding `RemoteAsk`, `RemoteBatchAsk`, and `RemoteAskGrain` with a client-side deadline derived from the ask timeout. Validated with 3.6 million operations under the race detector.
@@ -47,13 +68,13 @@
 
 ## v4.2.12 - 2026-06-26
 
-### 🚀 Performance
+### ⚡ Performance
 
 #### Lower-overhead memberlist TCP transport packet path
 
 The custom memberlist TCP transport carried avoidable overhead on the packet send path ([#1219](https://github.com/Tochemey/goakt/issues/1219)). Because that path is high frequency (gossip, probes, and pings), each packet was sent with three separate `Write` calls (header, payload, digest), took an `RWMutex` on every send to read the advertised address, and allocated an intermediate string when logging the packet digest. The three writes are now coalesced into a single `writev` via `net.Buffers` with no extra copying, the advertised address (written once during `FinalAdvertiseAddr`) is read lock-free from an atomic value, and the digest is formatted with the `%x` verb directly on the byte slice instead of through an intermediate `fmt.Sprintf`.
 
-### 🐛 Fixes
+### 🔧 Fixes
 
 #### Memberlist transport drops packets that fail the digest check
 
@@ -61,7 +82,7 @@ On the receive path, a packet whose trailing md5 digest did not match the recomp
 
 ## v4.2.11 - 2026-06-22
 
-### 🐛 Fixes
+### 🔧 Fixes
 
 #### Topic actor deduplication state is now bounded under sustained publishing
 
@@ -82,7 +103,7 @@ The option is additive and non-breaking; existing systems pick up the bounded be
 
 ## v4.2.10 - 2026-06-15
 
-### 🐛 Fixes
+### 🔧 Fixes
 
 #### `SpawnSingleton` retries leader-delegated transient errors during membership churn
 
@@ -105,7 +126,7 @@ A runnable sample lives in `playground/issue-1209`. The exact transient error on
 
 ## v4.2.9 - 2026-06-13
 
-### 🚀 Performance
+### ⚡ Performance
 
 #### Node-local grain delivery skips the remoting round trip
 
@@ -121,7 +142,7 @@ After the remoting round trip was removed (above), every node-local `TellGrain`/
 
 Both paths now check the local grain table first. When the grain is already activated and live on this node it is owned here, so the message is delivered in-process and the registry lookup is skipped entirely. The `isActive()` guard keeps relocation correct: a grain being moved is deactivated during the handoff, so the send falls through to the authoritative cluster lookup. In `BenchmarkTellGrainNodeLocal` / `BenchmarkAskGrainNodeLocal` this cuts per-send allocations from 36 to 2 (Tell) and 35 to 1 (Ask), roughly 3x to 5x faster per call.
 
-### 🐛 Fixes
+### 🔧 Fixes
 
 #### `NewSlogFrom` honors its level parameter
 
@@ -166,7 +187,7 @@ sys, _ := actor.NewActorSystem("my-system", actor.WithLogger(log.NewZapFrom(zl))
 
 GoAkt's leveled methods wrap the logger and add one stack frame, so `NewZapFrom` derives a child logger with `zap.AddCallerSkip(1)`; if the supplied logger has caller annotation enabled (`zap.AddCaller`), the reported `caller` points at your call site rather than into GoAkt's `log` package. The supplied logger is not modified (zap loggers are immutable). Because the caller owns the output destinations, `LogOutput` returns `nil` and `Flush` delegates to the logger's `Sync` (swallowing the benign sync errors console streams return on some platforms).
 
-### 🐛 Fixes
+### 🔧 Fixes
 
 #### `NewZap` no longer hijacks the global zap logger
 
@@ -232,11 +253,11 @@ for msg := range subscriber.Iterator() {
 }
 ```
 
-### 🚀 Performance
+### ⚡ Performance
 
 - **Parallel actor and grain relocation.** The relocator previously issued every remote spawn and grain activation for a departed node sequentially from a single goroutine, so recovery time grew linearly with the number of relocated actors. Spawns and activations now run concurrently with a bounded worker pool (`defaultRelocationConcurrency`), capping the fan-out of remote RPCs while shortening the rebalance window for nodes that hosted many actors.
 
-### 🐛 Fixes
+### 🔧 Fixes
 
 - **Failed rebalance no longer wedges future relocations.** When a rebalance returned early on error (cluster peer lookup failure, or a spawn failure surfaced through the wait group), the `relocating` flag was cleared only on the success path, so it stayed set forever and permanently blocked every subsequent cluster rebalance. The relocator now always releases the flag on the failure path.
 - **Busy-spin removed from the rebalancing loop.** While a relocation was in flight, the rebalancing loop re-queued the pending peer state and immediately re-read it, spinning a CPU core for the entire duration of the in-flight rebalance. The loop now blocks on a condition variable until the active relocation completes, preserving one-at-a-time serialization without the spin, and wakes promptly on shutdown.
@@ -244,7 +265,7 @@ for msg := range subscriber.Iterator() {
 
 ## v4.2.6 - 2026-05-29
 
-### 🐛 Fixes
+### 🔧 Fixes
 
 - **Panic in `getDeadlettersCount` under concurrent Prometheus scrape.** When `WithMetrics()` was enabled, the per-PID OTel callback asked the deadletter actor for its count on every scrape. The guard `if to.IsRunning()` is not atomic with the subsequent `Ask`: if the deadletter actor transitioned to stopping in that window, `Ask` returned `(nil, ErrDead)`, the error was discarded, and the bare type assertion `message.(*commands.DeadlettersCountResponse)` panicked on the `nil` reply, taking down the process during `Registry.Gather`. `getDeadlettersCount` now checks the `Ask` error, a `nil` reply, and the type assertion before reading `TotalCount`, returning `0` on any failure, matching the safe pattern already used by `actorSystem.getSetDeadlettersCount`.
 - **Leaked OTel metrics callback under high actor churn.** `registerMetrics` discarded the `Registration` handle returned by `meter.RegisterCallback`, so the callback outlived the actor and kept firing on every scrape for every PID that had ever existed, accumulating with each spawn/stop cycle and compounding the panic above. The handle is now stored on the `PID` (guarded by `fieldsLocker`) and unregistered in `doStop`, so the callback is released on every termination path (graceful shutdown and passivation). `registerMetrics` also unregisters any prior handle before installing a new one, so restarting an actor no longer leaks a second live registration.
@@ -403,7 +424,7 @@ Two flow operators for per-element expansions that are themselves streams (pagin
 
 Previously substream errors were swallowed inside the per-substream sink, a correctness gap closed by this change.
 
-### 🐛 Fixes
+### 🔧 Fixes
 
 - **Shared remoting client closed by per-actor shutdown.** `pid.doStop` and `grainPID.deactivate` were calling `pid.remoting.Close()`, but `pid.remoting` is the actor system's shared remoting client (set on every spawned PID via `withRemoting(x.remoting)` in `actorSystem.spawnActor`). Stopping any single actor closed every outbound coalescer system-wide, so a concurrent `rctx.Tell` from another live actor saw `"remote send failed: coalescer is closed"` and silently dropped the message — observable as cross-node stream tests where the producer source completes, shuts down, and races with the bridge's element sends. The remoting client is system-owned; it is now closed only by `shutdownRemoting` during actor-system shutdown. Per-actor lifecycle no longer touches it.
 
@@ -413,12 +434,12 @@ Previously substream errors were swallowed inside the per-substream sink, a corr
 
 - **`WithThroughputBudget` option — tunable dispatcher per-turn message budget.** Exposes the dispatcher's per-turn message budget (the maximum number of messages a worker drains from a single actor before yielding back to the scheduler) as a user-configurable `ActorSystem` option. The default remains `32`, chosen for balanced fairness across many actors; raising it amortises per-turn scheduling overhead and keeps CPU caches warm on hot actors at the cost of fairness, and lowering it favours tail-latency predictability under many-small-actor workloads. Per-actor FIFO ordering and the single-threaded-per-actor execution invariant are preserved regardless of the value — a yield is a pause, not a reorder. Variant benchmarks — `BenchmarkTellThroughput`, `BenchmarkRequestThroughput`, `BenchmarkSendSyncThroughput`, `BenchmarkGrainTellThroughput`, `BenchmarkGrainTellFanOutThroughput` — sweep the budget across `{8, 32, 64, 128, 256}` so users can measure impact on their own workload. Measured on Apple M1, the default is near-optimal on typical workloads; fan-out workloads see ~2-5% aggregate gains at `64`-`128` and a mild regression at `256`, confirming the fairness cost at very high budgets. See the `WithThroughputBudget` godoc for guidance per workload class.
 
-### 🚀 Performance
+### ⚡ Performance
 
 - **Pooled output frames on the remote-Tell send path.** The outbound encoder in `internal/net` now draws its output buffer from the existing `FramePool` (previously used only on the read side) and returns it to the pool after `conn.Write`. This closes the last reflective-`make([]byte, 0, totalLen)` hot-path allocation on the client encode and server response paths. The public `ProtoSerializer.MarshalBinary` and `MarshalBinaryWithMetadata` APIs are unchanged; new `*To` variants accept an optional `*FramePool` and form the pooled fast path used by `Client` and `ProtoServer`. Wire format is unchanged. Measured on Apple M1 with the `BenchmarkRemoteTellThroughput` configuration (20 senders / 10 engines / 2000 actors over localhost): **bytes allocated per message 507 → 427 (−15.8%)** with throughput flat within run-to-run variance. `ProtoSerializer.MarshalBinary` drops from 13.8% of allocated bytes to not appearing in the top allocators at all.
 - **Intrusive mailboxes — allocation-free local dispatch hot path.** `UnboundedMailbox` and `grainMailbox` now use their payload types (`*ReceiveContext` / `*GrainContext`) directly as the MPSC linked-list node via an unexported `next` field, retiring the separate `node` struct and its dedicated pool on both paths. Under sustained producer-faster-than-consumer load, peak in-flight message count vastly exceeds any fixed pool size, so the old design churned through `new(node)` per message once the pool saturated — dominating GC CPU time. Collapsing the two-pool design into one eliminates that half of the churn, and the remaining `ReceiveContext` / `GrainContext` pool is now the only allocation surface on the hot path. On the grain side, `grainPID`'s activity timestamp also moves from `go.uber.org/atomic.Time` (boxed through `atomic.Value`) to a stdlib `atomic.Int64` holding UnixNano, removing the per-message allocation inside `markActivity`. Net result — machine-independent: the `Tell` / `SendAsync` benchmarks drop from 1 to 0 reported allocs/op under the bench harness; `BenchmarkGrainTell`, `BenchmarkGrainTellFanOut`, and `BenchmarkGrainAsk` drop from 24 B/op, 1 allocs/op to 0 B/op, 0 allocs/op. Absolute throughput gains are workload- and hardware-dependent; the architectural property is that the hot path no longer allocates, so GC cost scales with application logic, not with message rate. A payload type is linked into at most one mailbox at a time; the stash path therefore copies across mailboxes via a new `cloneContext` (slow path, not on dispatch). Public `ReceiveContext`, `GrainContext`, `Mailbox`, `UnboundedMailbox`, and `grainMailbox` constructors and method signatures are unchanged.
 
-### 🐛 Fixes
+### 🔧 Fixes
 
 - **Worker-pool cleanup off-by-one — leaked one idle worker per pass under the small-list path.** A recent modernisation of `internal/net.WorkerPool.cleanup` swapped the small-list reap loop from `for j = 0; j < iws; j++` to `for j = range iws`; the two forms differ in post-loop `j` value (`iws` vs `iws - 1`), so the reap prefix `idleWorkerList[:j]` left the last expired worker behind on every cleanup tick. Once the list reached a single stuck entry the `if j == 0 { continue }` early-out skipped it forever, leaking worker goroutines. Reverted to the explicit C-style form with a comment documenting the hazard so the linter's "modernize using range over int" suggestion does not re-trigger it. The binary-search branch (`iws > 400`) was unaffected. Covered by `TestWorkerPool_Cleanup` and `TestWorkerPool_CleanupIdleWorkerSlots`, which had been silently failing.
 - **Metadata zero-copy lifetime bug under pooled frames.** `internal/net.Metadata.UnmarshalBinary` extracted header keys and values via `unsafe.String` pointers that aliased the caller-supplied byte slice. On the server path that slice is a pooled request frame returned to the `FramePool` before the handler runs — with the write path also now drawing from the same pool, the buffer can be recycled and overwritten while the handler is still holding those metadata strings, corrupting their bytes. Replaced the zero-copy extraction with explicit `string(data[...])` copies; metadata payloads are small (a few headers per call) and the allocation cost is negligible compared to the correctness win. No public API change.
@@ -438,7 +459,7 @@ Previously substream errors were swallowed inside the per-substream sink, a corr
 
 - Enhanced the `testkit` package with new helper methods for improved test ergonomics.
 
-### 🚀 Performance
+### ⚡ Performance
 
 - **Dispatcher pool — actor scheduling substrate.** The per-actor spawn-on-burst drainer goroutine is replaced with a fixed pool of worker goroutines (`max(GOMAXPROCS, 2)`) that cooperatively multiplex the entire actor population, following the Akka / Pekko / Erlang / Orleans pattern. Each `ActorSystem` owns one `dispatcher`; actors are scheduled onto a hybrid ready queue (per-worker 256-slot local rings + shared amortised-FIFO global ring + half-quota work stealing + condvar parking). A worker pulls an actor, drains up to `32` messages per turn, then yields so peers get a turn — bounding the blocking window a single actor can impose and decoupling goroutine count from actor count. A three-state atomic machine (`Idle` / `Scheduled` / `Processing`) on each `PID` preserves the single-threaded-per-actor execution invariant via a `Scheduled → Processing` CAS. Every user-visible semantic (FIFO ordering, `PreStart` / `PostStop` contract, reentrancy stash, panic recovery, supervision) is unchanged; the only observable difference is that `runtime.NumGoroutine()` no longer scales with active-actor count. Each actor also gains a dedicated system mailbox that is drained before the user mailbox every turn, so control-plane messages (`PoisonPill`, supervision, passivation, `Terminated`, dead-letter routing) cannot queue behind a user-message backlog. See [`architecture/DISPATCHER_POOL_DESIGN.md`](architecture/DISPATCHER_POOL_DESIGN.md).
 - **Grains migrated onto the dispatcher pool.** `grainPID` now implements the same `schedulable` contract as `PID` and shares the actor system's dispatcher, retiring the per-grain spawn-on-burst drainer goroutine. The single-threaded-per-grain execution invariant is preserved by the same three-state CAS (`Idle` / `Scheduled` / `Processing`) used by actors; worker turns drain up to 32 messages per rotation, with race-safe reclaim on drain and cooperative yield-and-reschedule when the budget is exhausted. Goroutine count is now bounded by GOMAXPROCS regardless of active grain count — at million-grain scale this removes the dominant per-grain goroutine stack overhead. Public `Grain`, `GrainContext`, and `GrainIdentity` semantics are unchanged.
@@ -763,7 +784,7 @@ v4.0.0 delivers **simplification** and **performance** through:
 
 - `internal/commands` package — command abstraction extracted from `pid.go` and `actor_system.go`.
 
-### 🐛 Bug Fixes
+### 🔧 Bug Fixes
 
 - `cleanupCluster` singleton kind removal: now checks `pid.singletonSpec != nil` instead of `pid.IsSingleton()` to fix stale kind entries and `ErrKindAlreadyExists` / `ErrSingletonAlreadyExists` on new leader.
 
@@ -787,7 +808,7 @@ v4.0.0 delivers **simplification** and **performance** through:
 
 ## [v3.14.0] - 2026-02-18
 
-### 🐛 Fixes
+### 🔧 Fixes
 
 - 🛡️ `preShutdown` now skips building and persisting peer state when relocation is disabled, avoiding unnecessary cluster operations and ensuring shutdown proceeds correctly when `WithoutRelocation` is configured.
 - 🔀 Fix channel-pool poisoning in `GrainContext.NoErr()` where sending on both the response and error channels for synchronous calls created a scheduling race — if preempted between the two sends, the second value landed on a channel already returned to the pool, corrupting subsequent callers.
@@ -818,7 +839,7 @@ v4.0.0 delivers **simplification** and **performance** through:
 
 ## [v3.13.0] - 2026-01-23
 
-### 🐛 Fixes
+### 🔧 Fixes
 
 - 🔧 Fix and simplify the implementation of the relocation engine.
 - 🛡️ Harden the cluster singleton implementation with well guided godoc
@@ -978,7 +999,7 @@ This is an internal optimization with no API changes. Existing applications requ
 - 🧭 `SpawnOn` now uses the system-wide default supervisor strategy configured via `WithDefaultSupervisor`.
 - 🧭 Added `WithDefaultSupervisor` to configure the ActorSystem-wide default supervisor strategy.
 
-### 🐛 Fixes
+### 🔧 Fixes
 
 - 🧱 Grain activation flow revamped to prevent panics and duplicate activations.
 - ♻️ Added recovery handling for Grain activation/deactivation failures.
