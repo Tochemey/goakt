@@ -1025,6 +1025,23 @@ func (f *fakeKV) Get(context.Context, string, ...clientv3.OpOption) (*clientv3.G
 	return f.getResp, nil
 }
 
+func (f *fakeKV) GetStream(context.Context, string, ...clientv3.OpOption) (clientv3.GetStreamChan, error) {
+	if f.getErr != nil {
+		return nil, f.getErr
+	}
+
+	resp := f.getResp
+	if resp == nil {
+		resp = &clientv3.GetResponse{}
+	}
+
+	ch := make(chan clientv3.RangeStreamResponse, 1)
+	ch <- clientv3.RangeStreamResponse{RangeResponse: (*etcdserverpb.RangeResponse)(resp)}
+	close(ch)
+
+	return ch, nil
+}
+
 func (f *fakeKV) Delete(context.Context, string, ...clientv3.OpOption) (*clientv3.DeleteResponse, error) {
 	return &clientv3.DeleteResponse{}, nil
 }
