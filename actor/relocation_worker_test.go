@@ -147,10 +147,10 @@ func TestRelocationWorkerPartialFailureListsExactlyFailedItems(t *testing.T) {
 	sys := system.(*actorSystem)
 
 	clusterMock := mockscluster.NewCluster(t)
-	// single-node cluster: no peers, so every relocated actor lands on the leader
+	// single-node cluster: no peers, so every relocated actor lands on the leader.
+	// The non-relocatable actor is skipped before any registry access, so the
+	// strict mock carries no GetActor/RemoveActor expectations for it.
 	clusterMock.EXPECT().Peers(mock.Anything).Return(nil, nil).Once()
-	// the non-relocatable actor has no stale registry entry left
-	clusterMock.EXPECT().GetActor(mock.Anything, "skipped").Return(nil, cluster.ErrActorNotFound).Once()
 
 	store := &recordingPeerStateStore{}
 	sys.cluster = clusterMock
@@ -202,6 +202,148 @@ func TestRelocationWorkerPartialFailureListsExactlyFailedItems(t *testing.T) {
 	assert.Empty(t, events[0].Grains())
 }
 
+// TestRelocationWorkerReleasesLazyGrains verifies that grains relocate lazily
+// by default: the worker cleans their directory entry (so they re-activate on
+// next use) instead of recreating them, and reports no failure.
+func TestRelocationWorkerReleasesLazyGrains(t *testing.T) {
+	ctx := context.Background()
+
+	system, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	sys := system.(*actorSystem)
+
+	clusterMock := mockscluster.NewCluster(t)
+	// single-node cluster: no peers
+	clusterMock.EXPECT().Peers(mock.Anything).Return(nil, nil).Once()
+	// the lazy grain's directory entry still points at the departed node, so it
+	// is released rather than recreated
+	clusterMock.EXPECT().GetGrain(mock.Anything, "kind/lazy").
+		Return(&internalpb.Grain{
+			GrainId: &internalpb.GrainId{Value: "kind/lazy"},
+			Host:    "127.0.0.1",
+			Port:    8080,
+		}, nil).Once()
+	clusterMock.EXPECT().RemoveGrain(mock.Anything, "kind/lazy").Return(nil).Once()
+
+	store := &recordingPeerStateStore{}
+	sys.cluster = clusterMock
+	sys.clusterStore = store
+	sys.relocationEnabled.Store(true)
+
+	peerState := &internalpb.PeerState{
+		Host:         "127.0.0.1",
+		PeersPort:    9000,
+		RemotingPort: 8080,
+		Grains: map[string]*internalpb.Grain{
+			"lazy": {GrainId: &internalpb.GrainId{Kind: "kind", Name: "lazy", Value: "kind/lazy"}},
+		},
+	}
+	require.True(t, sys.beginRelocation("127.0.0.1:9000", peerState))
+
+	stream := eventstream.New()
+	consumer := stream.AddSubscriber()
+	stream.Subscribe(consumer, eventsTopic)
+
+	worker := &relocationWorker{
+		remoting: remoteclient.NewClient(),
+		pid: &PID{
+			actorSystem:  system,
+			logger:       log.DiscardLogger,
+			eventsStream: stream,
+		},
+		logger: log.DiscardLogger,
+	}
+
+	receiveCtx := newReceiveContext(ctx, nil, worker.pid, &internalpb.Rebalance{PeerState: peerState})
+	worker.relocate(receiveCtx, peerState)
+
+	_, inflight := sys.relocationJob("127.0.0.1:9000")
+	require.False(t, inflight)
+	require.True(t, store.deleteCalled)
+
+	// releasing a lazy grain is not an item loss, so no RelocationFailed event
+	require.Empty(t, collectRelocationFailedEvents(consumer))
+}
+
+// TestRelocationWorkerDistributesLazyGrainsToPeers verifies lazy grains are
+// allocated across the peers like any other item instead of being released
+// entirely by the worker's node: with one peer and two lazy grains, the worker
+// releases one locally and hands the other to the peer in a RelocateBatch
+// request.
+func TestRelocationWorkerDistributesLazyGrainsToPeers(t *testing.T) {
+	ctx := context.Background()
+
+	system, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	sys := system.(*actorSystem)
+
+	peer := &cluster.Peer{Host: "127.0.0.2", RemotingPort: 9002}
+	clusterMock := mockscluster.NewCluster(t)
+	clusterMock.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{peer}, nil).Once()
+	// exactly one grain is released locally (the leader's share); which of the
+	// two it is depends on map iteration order
+	clusterMock.EXPECT().GetGrain(mock.Anything, mock.Anything).
+		Return(&internalpb.Grain{
+			GrainId: &internalpb.GrainId{Value: "kind/lazy"},
+			Host:    "127.0.0.1",
+			Port:    8080,
+		}, nil).Once()
+	clusterMock.EXPECT().RemoveGrain(mock.Anything, mock.Anything).Return(nil).Once()
+
+	// the other grain travels to the peer inside a RelocateBatch request
+	var batched []*internalpb.Grain
+	remotingMock := mocksremote.NewClient(t)
+	remotingMock.EXPECT().RelocateBatch(mock.Anything, "127.0.0.2", 9002, mock.Anything).
+		RunAndReturn(func(_ context.Context, _ string, _ int, request *internalpb.RelocateBatchRequest) (*internalpb.RelocateBatchResponse, error) {
+			batched = append(batched, request.GetGrains()...)
+			return new(internalpb.RelocateBatchResponse), nil
+		}).Once()
+
+	store := &recordingPeerStateStore{}
+	sys.cluster = clusterMock
+	sys.clusterStore = store
+	sys.relocationEnabled.Store(true)
+
+	peerState := &internalpb.PeerState{
+		Host:         "127.0.0.1",
+		PeersPort:    9000,
+		RemotingPort: 8080,
+		Grains: map[string]*internalpb.Grain{
+			"lazy-1": {GrainId: &internalpb.GrainId{Kind: "kind", Name: "lazy-1", Value: "kind/lazy-1"}},
+			"lazy-2": {GrainId: &internalpb.GrainId{Kind: "kind", Name: "lazy-2", Value: "kind/lazy-2"}},
+		},
+	}
+	require.True(t, sys.beginRelocation("127.0.0.1:9000", peerState))
+
+	stream := eventstream.New()
+	consumer := stream.AddSubscriber()
+	stream.Subscribe(consumer, eventsTopic)
+
+	worker := &relocationWorker{
+		remoting: remotingMock,
+		pid: &PID{
+			actorSystem:  system,
+			logger:       log.DiscardLogger,
+			eventsStream: stream,
+		},
+		logger: log.DiscardLogger,
+	}
+
+	receiveCtx := newReceiveContext(ctx, nil, worker.pid, &internalpb.Rebalance{PeerState: peerState})
+	worker.relocate(receiveCtx, peerState)
+
+	// the peer received exactly one lazy grain
+	require.Len(t, batched, 1)
+	assert.False(t, batched[0].GetEagerRelocation())
+
+	_, inflight := sys.relocationJob("127.0.0.1:9000")
+	require.False(t, inflight)
+	require.True(t, store.deleteCalled)
+	require.Empty(t, collectRelocationFailedEvents(consumer))
+}
+
 // TestRelocationWorkerReassignsShareOnPeerFailure verifies that a share whose
 // target peer is unreachable (after the bounded retries) is moved once to the
 // next surviving peer instead of being reported as failed.
@@ -230,7 +372,9 @@ func TestRelocationWorkerReassignsShareOnPeerFailure(t *testing.T) {
 
 // TestRelocationWorkerShareFailsWithoutFallbackPeer verifies that when the
 // target peer is unreachable and no other peer survives, every item of the
-// share is reported as failed instead of aborting anything else.
+// share is reported as failed instead of aborting anything else, except lazy
+// grains: their unsent release is a cleanup optimization that self-heals on
+// next activation, not an item loss.
 func TestRelocationWorkerShareFailsWithoutFallbackPeer(t *testing.T) {
 	ctx := context.Background()
 
@@ -243,7 +387,10 @@ func TestRelocationWorkerShareFailsWithoutFallbackPeer(t *testing.T) {
 	peers := []*cluster.Peer{{Host: "127.0.0.1", RemotingPort: 9001}}
 	requests := buildRelocateBatchRequests("127.0.0.1:8080",
 		[]*internalpb.Actor{{Address: "actor-1"}},
-		[]*internalpb.Grain{{GrainId: &internalpb.GrainId{Value: "grain-1"}}})
+		[]*internalpb.Grain{
+			{GrainId: &internalpb.GrainId{Value: "grain-1"}, EagerRelocation: true},
+			{GrainId: &internalpb.GrainId{Value: "grain-lazy"}},
+		})
 	failures := &relocationFailures{}
 
 	worker.relocateShare(ctx, requests, peers[0], peers, failures)
@@ -253,6 +400,7 @@ func TestRelocationWorkerShareFailsWithoutFallbackPeer(t *testing.T) {
 
 	actors, grains := splitFailures(items)
 	assert.Equal(t, []string{"actor-1"}, actors)
+	// the eager grain is reported, the lazy grain is not
 	assert.Equal(t, []string{"grain-1"}, grains)
 
 	for _, item := range items {
@@ -330,6 +478,53 @@ func TestBuildRelocateBatchRequestsChunksLargeShares(t *testing.T) {
 	for _, request := range requests {
 		assert.Equal(t, "127.0.0.1:8080", request.GetDepartedNode())
 	}
+}
+
+// TestRelocatableGrains verifies relocation-disabled grains are dropped from
+// the allocation entirely while eager and lazy grains both participate (the
+// relocation target dispatches on each grain's eager_relocation flag).
+func TestRelocatableGrains(t *testing.T) {
+	grains := map[string]*internalpb.Grain{
+		"eager": {GrainId: &internalpb.GrainId{Value: "eager"}, EagerRelocation: true},
+		"lazy":  {GrainId: &internalpb.GrainId{Value: "lazy"}},
+		"disabled": {
+			GrainId:           &internalpb.GrainId{Value: "disabled"},
+			DisableRelocation: true,
+		},
+	}
+
+	relocatable := relocatableGrains(grains)
+
+	require.Len(t, relocatable, 2)
+
+	values := []string{
+		relocatable[0].GetGrainId().GetValue(),
+		relocatable[1].GetGrainId().GetValue(),
+	}
+	assert.ElementsMatch(t, []string{"eager", "lazy"}, values)
+}
+
+// TestAllocateGrainsSlice verifies allocateGrains distributes an eager grain
+// slice across the leader and peer shares.
+func TestAllocateGrainsSlice(t *testing.T) {
+	t.Run("empty slice yields no shares", func(t *testing.T) {
+		leader, peers := allocateGrains(3, nil)
+		assert.Empty(t, leader)
+		assert.Empty(t, peers)
+	})
+
+	t.Run("distributes remainder and first chunk to the leader", func(t *testing.T) {
+		grains := make([]*internalpb.Grain, 5)
+		for i := range grains {
+			grains[i] = &internalpb.Grain{GrainId: &internalpb.GrainId{Value: fmt.Sprintf("grain-%d", i)}}
+		}
+
+		// totalPeers = leader + 2 peers = 3; quotient 1, remainder 2
+		leader, peers := allocateGrains(3, grains)
+		// remainder (2) + first chunk (1) go to the leader
+		assert.Len(t, leader, 3)
+		require.Len(t, peers, 3)
+	})
 }
 
 // TestNextSurvivingPeer verifies fallback peer selection: the next peer in the

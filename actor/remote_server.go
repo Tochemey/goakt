@@ -1417,10 +1417,13 @@ func (x *actorSystem) persistPeerStateHandler(ctx context.Context, conn inet.Con
 }
 
 // relocateBatchHandler handles RelocateBatch requests over the proto TCP transport.
-// It recreates one share of a departed node's actors and grains on this node in a
-// single round trip during cluster rebalancing. Item failures are collected and
-// reported per item in the response; only batch-level preconditions (malformed
-// request, remoting or clustering disabled) produce an error response.
+// It relocates one share of a departed node's actors and grains on this node in a
+// single round trip during cluster rebalancing: actors and eager grains are
+// recreated, lazy grains (the default, dispatched on the grain's eager_relocation
+// flag) only have their directory entry released so they re-activate on next use.
+// Item failures are collected and reported per item in the response; only
+// batch-level preconditions (malformed request, remoting or clustering disabled)
+// produce an error response.
 func (x *actorSystem) relocateBatchHandler(ctx context.Context, _ inet.Connection, req proto.Message) (proto.Message, error) {
 	request, ok := req.(*internalpb.RelocateBatchRequest)
 	if !ok {
@@ -1479,6 +1482,16 @@ func (x *actorSystem) relocateBatchHandler(ctx context.Context, _ inet.Connectio
 
 	for _, wireGrain := range request.GetGrains() {
 		eg.Go(func() error {
+			// lazy grains: directory cleanup only. A failure here is not an
+			// item loss (activation self-heals a stale entry on next use), so
+			// it is logged, not recorded as a relocation failure.
+			if !wireGrain.GetEagerRelocation() {
+				if err := x.releaseGrainForLazyRelocation(ctx, wireGrain, departedNode); err != nil {
+					logger.Warnf("node=%s failed to release lazy grain=%s directory entry: %v (hint: entry self-heals on next activation)", x.PeersAddress(), wireGrain.GetGrainId().GetValue(), err)
+				}
+				return nil
+			}
+
 			if err := x.recreateGrainFromWire(ctx, wireGrain, departedNode); err != nil {
 				logger.Errorf("node=%s failed to relocate grain=%s: %v (hint: check grain OnActivate, grain kind registered)", x.PeersAddress(), wireGrain.GetGrainId().GetValue(), err)
 				record(wireGrain.GetGrainId().GetValue(), true, err)

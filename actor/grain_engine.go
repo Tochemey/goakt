@@ -519,6 +519,7 @@ func (x *actorSystem) sendRemoteActivateGrain(ctx context.Context, grain *intern
 		ActivationRetries: int(grain.GetActivationRetries()),
 		MailboxCapacity:   grain.GetMailboxCapacity(),
 		DisableRelocation: grain.GetDisableRelocation(),
+		EagerRelocation:   grain.GetEagerRelocation(),
 	}
 
 	// Call the high-level RemoteActivateGrain method
@@ -1221,6 +1222,43 @@ func (x *actorSystem) recreateGrainFromWire(ctx context.Context, grain *internal
 	return x.recreateGrain(ctx, grain)
 }
 
+// releaseGrainForLazyRelocation removes the directory entry of a grain hosted
+// by a departed node so the grain re-activates on a surviving node the next
+// time it is addressed. Unlike recreateGrainFromWire it never reactivates the
+// grain, matching the lazy (default) relocation behavior for virtual actors.
+//
+// The removal is gated exactly like recreateGrainFromWire: the entry is only
+// deleted when it still points at the departed node. An entry that has already
+// been re-owned elsewhere is left untouched, and a missing entry is a no-op.
+// Because the activation path also self-heals a stale entry (it drops an entry
+// whose owner is unreachable and re-activates), this cleanup is an optimization
+// that avoids the first caller paying that penalty, not a correctness
+// requirement.
+func (x *actorSystem) releaseGrainForLazyRelocation(ctx context.Context, grain *internalpb.Grain, departedNode string) error {
+	if isSystemName(grain.GetGrainId().GetName()) || grain.GetDisableRelocation() {
+		return nil
+	}
+
+	identity := grain.GetGrainId().GetValue()
+	existing, err := x.cluster.GetGrain(ctx, identity)
+	switch {
+	case err == nil:
+		entry := net.JoinHostPort(existing.GetHost(), strconv.Itoa(int(existing.GetPort())))
+		if entry != departedNode {
+			// already reactivated/re-owned elsewhere; leave it alone
+			return nil
+		}
+		if rerr := x.cluster.RemoveGrain(ctx, identity); rerr != nil {
+			return gerrors.NewInternalError(rerr)
+		}
+		return nil
+	case errors.Is(err, cluster.ErrGrainNotFound):
+		return nil
+	default:
+		return gerrors.NewInternalError(err)
+	}
+}
+
 // recreateGrain recreates a serialized Grain.
 //
 // It instantiates the grain, activates it, registers it locally, and updates the cluster registry.
@@ -1282,6 +1320,10 @@ func (x *actorSystem) recreateGrainOnce(ctx context.Context, serializedGrain *in
 
 		if serializedGrain.GetDisableRelocation() {
 			options = append(options, WithGrainDisableRelocation())
+		}
+
+		if serializedGrain.GetEagerRelocation() {
+			options = append(options, WithGrainEagerRelocation())
 		}
 
 		config := newGrainConfig(options...)

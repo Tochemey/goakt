@@ -135,8 +135,17 @@ func (w *relocationWorker) relocate(ctx *ReceiveContext, peerState *internalpb.P
 	}
 
 	failures := &relocationFailures{}
+
+	// Grains relocate lazily by default: eager grains are reactivated upfront,
+	// lazy grains only have their directory entry cleaned so the next
+	// TellGrain/AskGrain re-activates them on a live node. Both kinds are
+	// allocated across the leader and the peers, each target dispatching on the
+	// grain's own eager_relocation flag, so the cleanup fan-out scales out
+	// instead of being issued entirely by this node.
+	grains := relocatableGrains(peerState.GetGrains())
+
 	leaderActors, peerActors := allocateActors(len(peers)+1, peerState)
-	leaderGrains, peerGrains := allocateGrains(len(peers)+1, peerState)
+	leaderGrains, peerGrains := allocateGrains(len(peers)+1, grains)
 
 	eg := new(errgroup.Group)
 	eg.SetLimit(defaultRelocationConcurrency)
@@ -163,6 +172,16 @@ func (w *relocationWorker) relocate(ctx *ReceiveContext, peerState *internalpb.P
 
 	for _, wireGrain := range leaderGrains {
 		eg.Go(func() error {
+			// lazy grains: directory cleanup only. A failure here is not an
+			// item loss (activation self-heals a stale entry on next use), so
+			// it is logged, not recorded as a relocation failure.
+			if !wireGrain.GetEagerRelocation() {
+				if err := system.releaseGrainForLazyRelocation(rctx, wireGrain, departedNode); err != nil {
+					w.logger.Warnf("failed to release lazy grain=%s directory entry: %v (hint: entry self-heals on next activation)", wireGrain.GetGrainId().GetValue(), err)
+				}
+				return nil
+			}
+
 			if err := system.recreateGrainFromWire(rctx, wireGrain, departedNode); err != nil {
 				w.logger.Errorf("failed to relocate grain=%s locally: %v (hint: check grain OnActivate, grain kind registered)", wireGrain.GetGrainId().GetValue(), err)
 				failures.record(wireGrain.GetGrainId().GetValue(), true, err)
@@ -172,10 +191,7 @@ func (w *relocationWorker) relocate(ctx *ReceiveContext, peerState *internalpb.P
 	}
 
 	// hand each peer its share with batched round trips, one goroutine per peer
-	shares := len(peerActors)
-	if len(peerGrains) > shares {
-		shares = len(peerGrains)
-	}
+	shares := max(len(peerActors), len(peerGrains))
 
 	for i := 1; i < shares; i++ {
 		var shareActors []*internalpb.Actor
@@ -366,6 +382,9 @@ func nextSurvivingPeer(peers []*cluster.Peer, target *cluster.Peer) *cluster.Pee
 }
 
 // recordUnsent marks every item of the given unsent batch requests as failed.
+// Unsent lazy grains are deliberately not recorded: their release is a cleanup
+// optimization, not an item move, and the directory entry self-heals on the
+// grain's next activation.
 func recordUnsent(requests []*internalpb.RelocateBatchRequest, err error, failures *relocationFailures) {
 	for _, request := range requests {
 		for _, wireActor := range request.GetActors() {
@@ -373,6 +392,10 @@ func recordUnsent(requests []*internalpb.RelocateBatchRequest, err error, failur
 		}
 
 		for _, wireGrain := range request.GetGrains() {
+			if !wireGrain.GetEagerRelocation() {
+				continue
+			}
+
 			failures.record(wireGrain.GetGrainId().GetValue(), true, err)
 		}
 	}
@@ -468,21 +491,41 @@ func allocateActors(totalPeers int, nodeLeftState *internalpb.PeerState) (leader
 	return leaderShares, chunks
 }
 
+// relocatableGrains returns the departed node's grains that participate in
+// relocation. Grains that opted out entirely (WithGrainDisableRelocation) are
+// skipped: they are lost with the node and re-addressing makes a fresh
+// instance, so relocation never touches them.
+//
+// Whether a returned grain is reactivated upfront (eager,
+// WithGrainEagerRelocation) or only has its directory entry released so it
+// re-activates on next use (lazy, the default) is decided by each relocation
+// target from the grain's own eager_relocation flag.
+func relocatableGrains(grains map[string]*internalpb.Grain) []*internalpb.Grain {
+	relocatable := make([]*internalpb.Grain, 0, len(grains))
+
+	for _, grain := range grains {
+		if grain.GetDisableRelocation() {
+			continue
+		}
+
+		relocatable = append(relocatable, grain)
+	}
+
+	return relocatable
+}
+
 // allocateGrains distributes grains among the leader and peers for rebalancing.
 //
 // It returns two values:
 //   - leaderShares: grains to be created on the leader node
 //   - peersShares: a slice of grain slices; the first entry belongs to the
 //     leader and entries 1..n map to peers 0..n-1
-func allocateGrains(totalPeers int, nodeLeftState *internalpb.PeerState) (leaderShares []*internalpb.Grain, peersShares [][]*internalpb.Grain) {
-	grains := nodeLeftState.GetGrains()
+func allocateGrains(totalPeers int, grains []*internalpb.Grain) (leaderShares []*internalpb.Grain, peersShares [][]*internalpb.Grain) {
 	grainCount := len(grains)
 
 	// Collect all grains to be rebalanced
 	toRebalances := make([]*internalpb.Grain, 0, grainCount)
-	for _, grain := range grains {
-		toRebalances = append(toRebalances, grain)
-	}
+	toRebalances = append(toRebalances, grains...)
 
 	quotient := grainCount / totalPeers
 	remainder := grainCount % totalPeers

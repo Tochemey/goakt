@@ -193,6 +193,10 @@ var (
 	// base name collide and cannot coexist in the same actor system.
 	ErrGrainKindConflict = errors.New("a different grain type is already registered under this kind")
 
+	// ErrGrainRelocationConflict is returned when a grain is configured with both
+	// WithGrainDisableRelocation and WithGrainEagerRelocation, which are mutually exclusive.
+	ErrGrainRelocationConflict = errors.New("grain cannot be both relocation-disabled and eager-relocated")
+
 	// ErrUnhanledMessage is returned when a message is received that the actor/grain does not know how to handle.
 	ErrUnhanledMessage = errors.New("unhandled message")
 

@@ -52,12 +52,25 @@ type relocator struct {
 	remoting remoteclient.Client
 	pid      *PID
 	logger   log.Logger
-	// workers maps a live worker name to the departed peer address it is
-	// relocating. Entries are removed when the worker terminates.
-	workers map[string]string
+	// workers maps a live worker name to the relocation job it owns. Entries
+	// are removed when the worker terminates.
+	workers map[string]workerJob
 	// sequence disambiguates worker names when the same address departs
 	// again after a completed relocation.
 	sequence uint64
+}
+
+// workerJob identifies the relocation job a worker owns: the departed peer
+// address and the exact peer state snapshot registered for it. The snapshot
+// pointer is the job's identity: local tells pass messages by reference, so
+// the pointer registered by beginRelocation is the one that reaches the
+// relocator inside the Rebalance message. handleTerminated compares it against
+// the currently registered job to tell a stale Terminated (whose job was
+// already released, and possibly re-registered by a newer departure of the
+// same address) from an abnormal worker death.
+type workerJob struct {
+	address   string
+	peerState *internalpb.PeerState
 }
 
 // enforce compilation error
@@ -69,7 +82,7 @@ var _ Actor = (*relocator)(nil)
 func newRelocator(remoting remoteclient.Client) *relocator {
 	return &relocator{
 		remoting: remoting,
-		workers:  make(map[string]string),
+		workers:  make(map[string]workerJob),
 	}
 }
 
@@ -103,15 +116,15 @@ func (r *relocator) PostStop(ctx *Context) error {
 // startWorker spawns and watches a relocation worker for the departed node
 // described by peerState, then hands it the rebalance order. If the worker
 // cannot be spawned the relocation is aborted and reported.
+//
+// There is deliberately no per-address dedupe here: beginRelocation gates
+// dispatch, so every Rebalance message corresponds to a freshly registered
+// job that needs a worker. A tracked worker with the same address can only be
+// one that already completed and released its job but whose Terminated has
+// not been processed yet; skipping the new job because of it would orphan the
+// registration.
 func (r *relocator) startWorker(ctx *ReceiveContext, peerState *internalpb.PeerState) {
 	address := net.JoinHostPort(peerState.GetHost(), strconv.Itoa(int(peerState.GetPeersPort())))
-
-	for _, inflight := range r.workers {
-		if inflight == address {
-			r.logger.Warnf("%s found relocation already in flight for node=%s", r.pid.Name(), address)
-			return
-		}
-	}
 
 	r.sequence++
 	name := fmt.Sprintf("%s-%d", reservedName(relocationWorkerType), r.sequence)
@@ -133,32 +146,34 @@ func (r *relocator) startWorker(ctx *ReceiveContext, peerState *internalpb.PeerS
 	}
 
 	ctx.Watch(worker)
-	r.workers[name] = address
+	r.workers[name] = workerJob{address: address, peerState: peerState}
 	ctx.Tell(worker, &internalpb.Rebalance{PeerState: peerState})
 }
 
 // handleTerminated reconciles the death of a relocation worker. A worker that
 // completed normally has already published its outcome, deleted the departed
 // node's peer state and released the relocation job before stopping, so the
-// job lookup misses and there is nothing to do. A job still registered can
-// only mean the worker died abnormally (panic), in which case the relocation
-// is aborted and reported here.
+// registered job either misses or belongs to a newer relocation of the same
+// address that departed again in the meantime; both leave nothing to do here.
+// The registered job matching the dead worker's own snapshot can only mean
+// the worker died abnormally (panic), in which case the relocation is aborted
+// and reported.
 func (r *relocator) handleTerminated(ctx *ReceiveContext, msg *Terminated) {
 	name := msg.ActorPath().Name()
-	address, ok := r.workers[name]
+	job, ok := r.workers[name]
 	if !ok {
 		return
 	}
 
 	delete(r.workers, name)
 
-	peerState, ok := r.pid.ActorSystem().relocationJob(address)
-	if !ok {
+	registered, ok := r.pid.ActorSystem().relocationJob(job.address)
+	if !ok || registered != job.peerState {
 		return
 	}
 
-	r.logger.Errorf("relocation worker=%s for node=%s terminated unexpectedly (hint: check logs for panics)", name, address)
-	r.abortRelocation(ctx, address, peerState, errors.NewRebalancingError(fmt.Errorf("relocation worker for node=%s terminated unexpectedly", address)))
+	r.logger.Errorf("relocation worker=%s for node=%s terminated unexpectedly (hint: check logs for panics)", name, job.address)
+	r.abortRelocation(ctx, job.address, registered, errors.NewRebalancingError(fmt.Errorf("relocation worker for node=%s terminated unexpectedly", job.address)))
 }
 
 // abortRelocation gives up on a relocation that could not run at all: it

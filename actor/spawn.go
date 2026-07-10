@@ -932,15 +932,17 @@ func (x *actorSystem) actorsRoundRobinPlacementPeer(ctx context.Context, peers [
 // cluster. A stale cluster registry entry still pointing at that address is
 // removed before respawning; an entry pointing anywhere else means the actor has
 // already been recreated by a concurrent relocation or a client spawn, so it is
-// skipped. System actors and singleton actors are always skipped: singletons are
-// recreated on the leader through recreateSingletonFromWire.
+// skipped. System actors, singleton actors and non-relocatable actors are always
+// skipped before any registry mutation: singletons are recreated on the leader
+// through recreateSingletonFromWire, and non-relocatable actors are lost with
+// their node by design, so their registry entry must not be touched here.
 func (x *actorSystem) recreateActorFromWire(ctx context.Context, props *internalpb.Actor, departedNode string) error {
 	addr, err := address.Parse(props.GetAddress())
 	if err != nil {
 		return gerrors.NewInternalError(err)
 	}
 
-	if isSystemName(addr.Name()) || props.GetSingleton() != nil {
+	if isSystemName(addr.Name()) || props.GetSingleton() != nil || !props.GetRelocatable() {
 		return nil
 	}
 
@@ -966,10 +968,6 @@ func (x *actorSystem) recreateActorFromWire(ctx context.Context, props *internal
 	actor, err := x.reflection.instantiateActor(props.GetType())
 	if err != nil {
 		return err
-	}
-
-	if !props.GetRelocatable() {
-		return nil
 	}
 
 	spawnOpts := []SpawnOption{

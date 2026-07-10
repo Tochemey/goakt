@@ -204,7 +204,10 @@ type RelocateBatchRequest struct {
 	DepartedNode string `protobuf:"bytes,1,opt,name=departed_node,json=departedNode,proto3" json:"departed_node,omitempty"`
 	// Specifies the actors to recreate on the target node
 	Actors []*Actor `protobuf:"bytes,2,rep,name=actors,proto3" json:"actors,omitempty"`
-	// Specifies the grains to activate on the target node
+	// Specifies the grains to relocate on the target node. The target dispatches
+	// on each grain's eager_relocation flag: eager grains are reactivated
+	// upfront, lazy grains (the default) only have their directory entry
+	// released so they re-activate on next use.
 	Grains        []*Grain `protobuf:"bytes,3,rep,name=grains,proto3" json:"grains,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

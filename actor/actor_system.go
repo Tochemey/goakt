@@ -764,6 +764,7 @@ type ActorSystem interface {
 	endRelocation(peerAddress string)
 	recreateActorFromWire(ctx context.Context, props *internalpb.Actor, departedNode string) error
 	recreateGrainFromWire(ctx context.Context, grain *internalpb.Grain, departedNode string) error
+	releaseGrainForLazyRelocation(ctx context.Context, grain *internalpb.Grain, departedNode string) error
 	getRootGuardian() *PID
 	getSystemGuardian() *PID
 	getUserGuardian() *PID
@@ -2933,9 +2934,9 @@ func (x *actorSystem) replicateOneGrain(grain *internalpb.Grain) {
 	}
 }
 
-// resyncActors resyncs all actors in the actor system
-// This is only called during cluster events like NodeLeft or NodeJoined
-// to ensure that all actors are properly synchronized across the cluster.
+// resyncActors resyncs all actors in the actor system.
+// This is only called on a NodeLeft event to repair registry entries whose
+// owning partition was lost with the departed node (see handleNodeLeftEvent).
 func (x *actorSystem) resyncActors() error {
 	actors := x.localActors()
 	for _, actor := range actors {
@@ -2947,9 +2948,9 @@ func (x *actorSystem) resyncActors() error {
 	return nil
 }
 
-// resyncGrains resyncs all grains in the actor system
-// This is only called during cluster events like NodeLeft or NodeJoined
-// to ensure that all actors are properly synchronized across the cluster.
+// resyncGrains resyncs all grains in the actor system.
+// This is only called on a NodeLeft event to repair registry entries whose
+// owning partition was lost with the departed node (see handleNodeLeftEvent).
 func (x *actorSystem) resyncGrains() error {
 	grains := x.grains.Values()
 	for _, grain := range grains {
@@ -3011,7 +3012,11 @@ func (x *actorSystem) handleNodeJoinedEvent(event *cluster.Event) {
 	x.logger.Infof("node=%s detected node joined event: node=%s", x.String(), nodeJoined.Address)
 
 	x.tryOpenGrainActivationBarrier(context.Background())
-	x.resyncAfterClusterEvent("node joined", nodeJoined.Address)
+	// A joining node does not invalidate any existing registry entry: the
+	// cluster store (Olric DMap) migrates partition data to the new owner as
+	// part of rebalancing, so re-putting every local actor and grain here would
+	// be O(total cluster actors) redundant writes. Repair on departure only
+	// (handleNodeLeftEvent), where partitions can actually be dropped.
 	x.triggerDataCentersReconciliation()
 }
 
@@ -3021,6 +3026,11 @@ func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
 	x.logger.Infof("node=%s detected node left event: node=%s", x.String(), nodeLeft.Address)
 
 	x.pruneRemoteWatchesForHost(context.Background(), nodeLeft.Address, nodeLeft.Timestamp)
+	// Repair the cluster store after a departure: with a replica count of 1 the
+	// partitions owned by the departed node are lost, so surviving nodes re-put
+	// their own live actors and grains to restore any registry entries that were
+	// hosted on those partitions. Relocation (below) handles the departed node's
+	// own actors and grains separately.
 	x.resyncAfterClusterEvent("node left", nodeLeft.Address)
 	x.triggerDataCentersReconciliation()
 

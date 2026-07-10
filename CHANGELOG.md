@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### ⚡ Performance
+
+- **Relocation on node departure scales better with grain and actor count** ([#1255](https://github.com/Tochemey/goakt/issues/1255)).
+  - **Grains now relocate lazily by default.** Previously every grain of a departed node was eagerly reactivated up front — an O(all grains) `OnActivate` storm for entities that may never be called again. Now, by default, only the grain's directory entry is cleaned and the grain re-activates on a surviving node the next time it is addressed (`TellGrain`/`AskGrain`). The directory cleanup itself is distributed across the surviving nodes through the batched relocation requests instead of being issued entirely by the node coordinating the rebalance.
+  - **Topology events no longer trigger a full registry re-put on every join.** A joining node no longer causes every node to re-put all of its local actors and grains into the cluster store; Olric migrates partition data to the new owner during rebalancing. The repair-on-departure path (which guards a replica count of 1) is unchanged.
+
+### ✨ Features
+
+- **`WithGrainEagerRelocation` opts a grain back into upfront relocation** ([#1255](https://github.com/Tochemey/goakt/issues/1255)). Grains that must stay warm without an external trigger (timers, streams, background work) can be reactivated immediately on a surviving node when their host departs, restoring the pre-lazy behavior per grain. It is mutually exclusive with `WithGrainDisableRelocation` (`ErrGrainRelocationConflict`).
+
+### ⚠️ Behavior changes
+
+- **Grains relocate lazily by default.** Applications that relied on a departed node's grains being reactivated up front (without being re-addressed) must now opt in with `WithGrainEagerRelocation`. Grains addressed after a node loss reactivate transparently as before.
+
 ## v4.3.1 - 2026-07-10
 
 ### 🔧 Fixes

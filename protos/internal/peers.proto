@@ -41,7 +41,10 @@ message RelocateBatchRequest {
   string departed_node = 1;
   // Specifies the actors to recreate on the target node
   repeated internalpb.Actor actors = 2;
-  // Specifies the grains to activate on the target node
+  // Specifies the grains to relocate on the target node. The target dispatches
+  // on each grain's eager_relocation flag: eager grains are reactivated
+  // upfront, lazy grains (the default) only have their directory entry
+  // released so they re-activate on next use.
   repeated internalpb.Grain grains = 3;
 }
 

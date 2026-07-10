@@ -135,7 +135,7 @@ func TestRelocatorTerminatedAbortsInflightJob(t *testing.T) {
 			eventsStream: stream,
 		},
 		logger:  log.DiscardLogger,
-		workers: map[string]string{workerName: "127.0.0.1:9000"},
+		workers: map[string]workerJob{workerName: {address: "127.0.0.1:9000", peerState: peerState}},
 	}
 
 	terminated := &Terminated{actorPath: newPath(address.New(workerName, "test", "127.0.0.1", 9000))}
@@ -191,7 +191,7 @@ func TestRelocatorTerminatedAfterNormalCompletionIsNoOp(t *testing.T) {
 			eventsStream: stream,
 		},
 		logger:  log.DiscardLogger,
-		workers: map[string]string{workerName: "127.0.0.1:9000"},
+		workers: map[string]workerJob{workerName: {address: "127.0.0.1:9000", peerState: &internalpb.PeerState{Host: "127.0.0.1", PeersPort: 9000}}},
 	}
 
 	// no beginRelocation: the worker already released the job before stopping
@@ -222,7 +222,7 @@ func TestRelocatorTerminatedIgnoresUnknownWorker(t *testing.T) {
 	manager := &relocator{
 		pid:     &PID{actorSystem: system, logger: log.DiscardLogger},
 		logger:  log.DiscardLogger,
-		workers: make(map[string]string),
+		workers: make(map[string]workerJob),
 	}
 
 	terminated := &Terminated{actorPath: newPath(address.New("some-actor", "test", "127.0.0.1", 9000))}
@@ -233,27 +233,98 @@ func TestRelocatorTerminatedIgnoresUnknownWorker(t *testing.T) {
 	})
 }
 
-// TestRelocatorSkipsDuplicateRebalanceForInflightAddress verifies the relocator
-// does not spawn a second worker for a departed address whose relocation is
-// still in flight.
-func TestRelocatorSkipsDuplicateRebalanceForInflightAddress(t *testing.T) {
+// TestRelocatorStaleTerminatedDoesNotAbortNewerJob covers the re-departure
+// race: worker-1 completed and released its job, the same address departed
+// again and a new job was registered before worker-1's Terminated reached the
+// relocator. The stale Terminated must leave the newer job untouched instead
+// of aborting it.
+func TestRelocatorStaleTerminatedDoesNotAbortNewerJob(t *testing.T) {
 	ctx := context.Background()
 
 	system, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
 	require.NoError(t, err)
 
+	sys := system.(*actorSystem)
+	store := &recordingPeerStateStore{}
+	sys.clusterStore = store
+
+	oldPeerState := &internalpb.PeerState{Host: "127.0.0.1", PeersPort: 9000}
+	newPeerState := &internalpb.PeerState{Host: "127.0.0.1", PeersPort: 9000}
+	require.True(t, sys.beginRelocation("127.0.0.1:9000", newPeerState))
+
+	stream := eventstream.New()
+	consumer := stream.AddSubscriber()
+	stream.Subscribe(consumer, eventsTopic)
+
+	workerName := reservedName(relocationWorkerType) + "-1"
+	manager := &relocator{
+		pid: &PID{
+			actorSystem:  system,
+			logger:       log.DiscardLogger,
+			eventsStream: stream,
+		},
+		logger:  log.DiscardLogger,
+		workers: map[string]workerJob{workerName: {address: "127.0.0.1:9000", peerState: oldPeerState}},
+	}
+
+	terminated := &Terminated{actorPath: newPath(address.New(workerName, "test", "127.0.0.1", 9000))}
+	receiveCtx := newReceiveContext(ctx, nil, manager.pid, terminated)
+	manager.Receive(receiveCtx)
+
+	// the dead worker is untracked but the newer job stays registered
+	require.Empty(t, manager.workers)
+	registered, inflight := sys.relocationJob("127.0.0.1:9000")
+	require.True(t, inflight)
+	require.Same(t, newPeerState, registered)
+
+	// no spurious abort: the peer state snapshot is kept and no failure is published
+	require.False(t, store.deleteCalled)
+
+	var events []*RelocationFailed
+	for message := range consumer.Iterator() {
+		if event, ok := message.Payload().(*RelocationFailed); ok {
+			events = append(events, event)
+		}
+	}
+	require.Empty(t, events)
+}
+
+// TestRelocatorRebalanceForReDepartedAddressIsNotSkipped covers the other half
+// of the re-departure race: a Rebalance for an address whose completed worker
+// is still tracked (its Terminated not yet processed) must be handled, not
+// silently dropped. Here the worker spawn fails (the relocator pid is not part
+// of a running actor tree), so handling means aborting the relocation: the job
+// is released and the peer state snapshot removed instead of staying orphaned.
+func TestRelocatorRebalanceForReDepartedAddressIsNotSkipped(t *testing.T) {
+	ctx := context.Background()
+
+	system, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	sys := system.(*actorSystem)
+	store := &recordingPeerStateStore{}
+	sys.clusterStore = store
+
+	oldPeerState := &internalpb.PeerState{Host: "127.0.0.1", PeersPort: 9000}
+	newPeerState := &internalpb.PeerState{Host: "127.0.0.1", PeersPort: 9000}
+	require.True(t, sys.beginRelocation("127.0.0.1:9000", newPeerState))
+
+	workerName := reservedName(relocationWorkerType) + "-1"
 	manager := &relocator{
 		pid:     &PID{actorSystem: system, logger: log.DiscardLogger},
 		logger:  log.DiscardLogger,
-		workers: map[string]string{"worker-1": "127.0.0.1:9000"},
+		workers: map[string]workerJob{workerName: {address: "127.0.0.1:9000", peerState: oldPeerState}},
 	}
 
-	peerState := &internalpb.PeerState{Host: "127.0.0.1", PeersPort: 9000}
-	receiveCtx := newReceiveContext(ctx, nil, manager.pid, &internalpb.Rebalance{PeerState: peerState})
+	receiveCtx := newReceiveContext(ctx, nil, manager.pid, &internalpb.Rebalance{PeerState: newPeerState})
 	manager.Receive(receiveCtx)
 
-	// no new worker was tracked
-	require.Len(t, manager.workers, 1)
+	// the rebalance was processed: the failed spawn aborted the relocation,
+	// releasing the job and removing the peer state snapshot
+	_, inflight := sys.relocationJob("127.0.0.1:9000")
+	require.False(t, inflight)
+	require.True(t, store.deleteCalled)
+	assert.Equal(t, "127.0.0.1:9000", store.deletedAddr)
 }
 
 func TestRelocation(t *testing.T) {

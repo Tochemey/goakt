@@ -2610,6 +2610,7 @@ func getGrainFromRequest(host string, port int, grainRequest *remote.GrainReques
 		ActivationTimeout: durationpb.New(grainRequest.ActivationTimeout),
 		MailboxCapacity:   new(grainRequest.MailboxCapacity),
 		DisableRelocation: grainRequest.DisableRelocation,
+		EagerRelocation:   grainRequest.EagerRelocation,
 	}
 
 	return grain, nil

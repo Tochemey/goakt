@@ -1946,6 +1946,106 @@ func TestRecreateGrainPreservesDisableRelocation(t *testing.T) {
 	require.True(t, republished.GetDisableRelocation())
 }
 
+func TestWireGrainEagerRelocation(t *testing.T) {
+	grain := NewMockGrain()
+	sys, _, _, identity := newActivationTestSystem(t, grain, "claim-wire-eager", true)
+
+	// default is lazy
+	wire, err := wireGrain(identity, newGrainConfig(), sys.Host(), sys.Port())
+	require.NoError(t, err)
+	require.False(t, wire.GetEagerRelocation())
+
+	wire, err = wireGrain(identity, newGrainConfig(WithGrainEagerRelocation()), sys.Host(), sys.Port())
+	require.NoError(t, err)
+	require.True(t, wire.GetEagerRelocation())
+}
+
+func TestRecreateGrainPreservesEagerRelocation(t *testing.T) {
+	ctx := t.Context()
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+	t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+	as := sys.(*actorSystem)
+	as.registry.Register(&MockGrain{})
+
+	identity := newGrainIdentity(&MockGrain{}, "recreate-eager-relocation")
+	wire, err := wireGrain(identity, newGrainConfig(WithGrainEagerRelocation()), as.Host(), as.Port())
+	require.NoError(t, err)
+	require.True(t, wire.GetEagerRelocation())
+
+	require.NoError(t, as.recreateGrain(ctx, wire))
+
+	pid, ok := as.grains.Get(identity.String())
+	require.True(t, ok)
+	require.True(t, pid.config.eagerRelocation)
+
+	republished, err := pid.toWireGrain()
+	require.NoError(t, err)
+	require.True(t, republished.GetEagerRelocation())
+}
+
+func TestReleaseGrainForLazyRelocation(t *testing.T) {
+	ctx := context.Background()
+	departedNode := net.JoinHostPort("127.0.0.9", "16000")
+
+	grainOnDeparted := func(identity *GrainIdentity) *internalpb.Grain {
+		return &internalpb.Grain{
+			GrainId: &internalpb.GrainId{
+				Kind:  identity.Kind(),
+				Name:  identity.Name(),
+				Value: identity.String(),
+			},
+			Host: "127.0.0.9",
+			Port: 16000,
+		}
+	}
+
+	t.Run("removes the directory entry when it still points at the departed node", func(t *testing.T) {
+		sys, cl, _, identity := newActivationTestSystem(t, &MockGrain{}, "lazy-release-hit", false)
+		wire := grainOnDeparted(identity)
+
+		cl.EXPECT().GetGrain(ctx, identity.String()).Return(wire, nil).Once()
+		cl.EXPECT().RemoveGrain(ctx, identity.String()).Return(nil).Once()
+
+		require.NoError(t, sys.releaseGrainForLazyRelocation(ctx, wire, departedNode))
+	})
+
+	t.Run("leaves an entry already re-owned elsewhere untouched", func(t *testing.T) {
+		sys, cl, _, identity := newActivationTestSystem(t, &MockGrain{}, "lazy-release-moved", false)
+		wire := grainOnDeparted(identity)
+
+		// the live entry now points at a surviving node
+		existing := &internalpb.Grain{
+			GrainId: wire.GetGrainId(),
+			Host:    "127.0.0.8",
+			Port:    16001,
+		}
+		cl.EXPECT().GetGrain(ctx, identity.String()).Return(existing, nil).Once()
+
+		require.NoError(t, sys.releaseGrainForLazyRelocation(ctx, wire, departedNode))
+	})
+
+	t.Run("is a no-op when the entry is already gone", func(t *testing.T) {
+		sys, cl, _, identity := newActivationTestSystem(t, &MockGrain{}, "lazy-release-missing", false)
+		wire := grainOnDeparted(identity)
+
+		cl.EXPECT().GetGrain(ctx, identity.String()).Return(nil, cluster.ErrGrainNotFound).Once()
+
+		require.NoError(t, sys.releaseGrainForLazyRelocation(ctx, wire, departedNode))
+	})
+
+	t.Run("skips relocation-disabled grains without touching the cluster", func(t *testing.T) {
+		sys, _, _, identity := newActivationTestSystem(t, &MockGrain{}, "lazy-release-disabled", false)
+		wire := grainOnDeparted(identity)
+		wire.DisableRelocation = true
+
+		// no GetGrain / RemoveGrain expectations: the method must return early
+		require.NoError(t, sys.releaseGrainForLazyRelocation(ctx, wire, departedNode))
+	})
+}
+
 func TestPeerActivationPropagatesGrainConfig(t *testing.T) {
 	ctx := t.Context()
 	name := "remote-config-grain"

@@ -29,9 +29,9 @@ Relocation does **not** run in standalone mode; it requires cluster mode and rem
 4. **NodeLeft** — The cluster emits a `NodeLeft` event. The **leader** node handles it: it fetches the departed node's `PeerState` from its local cluster store (the leader must have been one of the up-to-3 peers that received the state), registers an in-flight relocation job for the departed address, and sends a `Rebalance` message to the relocator. A duplicate `NodeLeft` for an address whose relocation is still in flight is ignored; once the relocation completes, a later departure of the same address is rebalanced again.
 5. **Relocation worker** — The relocator spawns a short-lived worker per departed node, so relocations of distinct nodes proceed concurrently. The worker:
    - Allocates actors: singletons go to the leader; non-singletons are distributed across leader + peers.
-   - Allocates grains: same distribution.
-   - Recreates the leader's share locally (via `SpawnSingleton` for singletons).
-   - Hands each peer its whole share in batched `RelocateBatch` requests (at most 500 items per request) instead of one RPC per actor. The target node recreates the items and reports failures per item.
+   - Allocates grains across leader + peers the same way; each target then dispatches on the grain's own relocation intent. **Lazy** grains (the default) are *not* reactivated upfront: the target only cleans their directory entry so the next `TellGrain`/`AskGrain` re-activates them on a live node. **Eager** grains (opted in with `WithGrainEagerRelocation`) are recreated up front like actors.
+   - Handles the leader's share locally (via `SpawnSingleton` for singletons).
+   - Hands each peer its whole share in batched `RelocateBatch` requests (at most 500 items per request) instead of one RPC per actor. The target node recreates or releases the items and reports failures per item.
    - Cleans up stale registry entries with gating: an entry is removed only when it still points at the departed node. An entry pointing at a live node means the item was already recreated elsewhere and is skipped.
 6. **Completion** — The worker publishes the outcome, deletes the departed node's state from the cluster store, releases the relocation job, and stops.
 
@@ -42,12 +42,13 @@ Item failures are isolated: a failing actor, grain, or peer never aborts the res
 - Each batch request is attempted twice with a short backoff before its target peer is considered unreachable.
 - When a peer is unreachable, the unsent remainder of its share is moved once to the next surviving peer.
 - Items that still cannot be relocated are reported in a single `RelocationFailed` event on the event stream, listing exactly the failed actor addresses and grain identities. Items that were relocated are not listed.
+- A failed lazy-grain release is never reported: it is a cleanup optimization, not an item loss. The directory entry self-heals when the grain is next addressed.
 
 <Warning>
-  The relocation handoff uses a batched wire request introduced in v4.4. During
-  a rolling upgrade, run homogeneous GoAkt versions before triggering topology
-  changes: an older node cannot process the batched request, and its share is
-  then reassigned to another peer or reported as failed.
+  The relocation handoff uses a batched wire request. During a rolling upgrade,
+  run homogeneous GoAkt versions before triggering topology changes: an older
+  node cannot process the batched request, and its share is then reassigned to
+  another peer or reported as failed.
 </Warning>
 
 ## Actor allocation
@@ -61,7 +62,9 @@ Only **relocatable** actors are recreated. Actors with `WithRelocationDisabled` 
 
 ## Grain allocation
 
-Grains are distributed similarly: remainder to the leader, then chunks to peers. Grains with `WithGrainDisableRelocation` are skipped.
+Grains are virtual actors, so they relocate **lazily by default**: when the hosting node departs, the runtime does *not* reactivate them up front. It only cleans the grain's directory entry, and the grain re-activates on a surviving node the next time it is addressed (`TellGrain`/`AskGrain`). This avoids an `OnActivate` reactivation storm for grains that may never be called again. The cleanup work itself is distributed like any other relocation item (remainder to the leader, then chunks to peers), so it does not funnel through a single node.
+
+Grains opted into eager relocation with `WithGrainEagerRelocation` are instead recreated up front on their target node, the same way actors are. Grains with `WithGrainDisableRelocation` are skipped entirely; they are lost with the node.
 
 ## Configuration
 
@@ -85,6 +88,20 @@ identity, err := actor.GrainOf[*MyGrain](ctx, system, "my-grain", actor.WithGrai
 ```
 
 If the hosting node leaves, the grain instance is lost. Re-addressing the grain by ID will create a new instance on another node; any in-memory state is gone. Persist state externally if you need recovery.
+
+### Eager relocation for a grain
+
+By default grains relocate lazily (reactivate on next use). Opt a grain into upfront reactivation with `WithGrainEagerRelocation`:
+
+```go
+identity, err := actor.GrainOf[*MyGrain](ctx, system, "my-grain", actor.WithGrainEagerRelocation())
+```
+
+Use this for grains that must stay warm without an external trigger — for example those driving timers, streams, or background work that must resume immediately after the host departs.
+
+<Note>
+  `WithGrainEagerRelocation` and `WithGrainDisableRelocation` are mutually exclusive; configuring both fails validation.
+</Note>
 
 ### Disable relocation system-wide
 

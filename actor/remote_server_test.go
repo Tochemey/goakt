@@ -2640,7 +2640,7 @@ func TestRelocateBatchHandler(t *testing.T) {
 		clusterMock.EXPECT().GetActor(mock.Anything, "moved").
 			Return(&internalpb.Actor{Address: address.New("moved", sys.Name(), "10.0.0.9", 7000).String()}, nil).Once()
 
-		// grain entry pointing at a live third node: left alone as well
+		// eager grain entry pointing at a live third node: left alone as well
 		clusterMock.EXPECT().GetGrain(mock.Anything, "kind/moved-grain").
 			Return(&internalpb.Grain{Host: "10.0.0.9", Port: 7000, GrainId: &internalpb.GrainId{Value: "kind/moved-grain", Name: "moved-grain"}}, nil).Once()
 
@@ -2658,13 +2658,16 @@ func TestRelocateBatchHandler(t *testing.T) {
 				{Address: "invalid-address", Relocatable: true},
 				// system actor: skipped silently
 				{Address: address.New(reservedName(rebalancerType), sys.Name(), "127.0.0.1", 8080).String()},
+				// non-relocatable actor: skipped before any registry access (the
+				// strict cluster mock has no expectations for it)
+				{Address: address.New("pinned", sys.Name(), "127.0.0.1", 8080).String(), Relocatable: false},
 				// already relocated elsewhere: skipped silently
-				{Address: address.New("moved", sys.Name(), "127.0.0.1", 8080).String()},
+				{Address: address.New("moved", sys.Name(), "127.0.0.1", 8080).String(), Relocatable: true},
 				// stale entry on the departed node: removed then respawned
 				{Address: address.New("stale", sys.Name(), "127.0.0.1", 8080).String(), Type: types.Name(new(MockActor)), Relocatable: true},
 			},
 			Grains: []*internalpb.Grain{
-				{GrainId: &internalpb.GrainId{Value: "kind/moved-grain", Name: "moved-grain"}},
+				{GrainId: &internalpb.GrainId{Value: "kind/moved-grain", Name: "moved-grain"}, EagerRelocation: true},
 			},
 		}
 
@@ -2683,5 +2686,42 @@ func TestRelocateBatchHandler(t *testing.T) {
 		require.Len(t, response.GetFailures(), 2)
 		assert.True(t, failed["invalid-address"])
 		assert.True(t, failed[address.New("stale", sys.Name(), "127.0.0.1", 8080).String()])
+	})
+
+	t.Run("lazy grains are released, not reactivated", func(t *testing.T) {
+		sys := newRemoteServerTestSystem("127.0.0.1", 9000)
+		sys.clusterEnabled.Store(true)
+		sys.clusterNode = &discovery.Node{Host: "127.0.0.1", PeersPort: 9000}
+
+		clusterMock := mockscluster.NewCluster(t)
+		sys.cluster = clusterMock
+
+		// lazy grain entry still pointing at the departed node: released so the
+		// grain re-activates on next use; nothing is instantiated or activated
+		clusterMock.EXPECT().GetGrain(mock.Anything, "kind/lazy-stale").
+			Return(&internalpb.Grain{Host: "127.0.0.1", Port: 8080, GrainId: &internalpb.GrainId{Value: "kind/lazy-stale", Name: "lazy-stale"}}, nil).Once()
+		clusterMock.EXPECT().RemoveGrain(mock.Anything, "kind/lazy-stale").Return(nil).Once()
+
+		// lazy grain whose directory lookup fails: logged only, the entry
+		// self-heals on the grain's next activation
+		clusterMock.EXPECT().GetGrain(mock.Anything, "kind/lazy-fail").
+			Return(nil, errors.New("registry unavailable")).Once()
+
+		request := &internalpb.RelocateBatchRequest{
+			DepartedNode: departedNode,
+			Grains: []*internalpb.Grain{
+				{GrainId: &internalpb.GrainId{Value: "kind/lazy-stale", Name: "lazy-stale"}},
+				{GrainId: &internalpb.GrainId{Value: "kind/lazy-fail", Name: "lazy-fail"}},
+			},
+		}
+
+		resp, err := sys.relocateBatchHandler(ctx, nullConn, request)
+		require.NoError(t, err)
+
+		response, ok := resp.(*internalpb.RelocateBatchResponse)
+		require.True(t, ok, "expected *internalpb.RelocateBatchResponse, got %T", resp)
+
+		// a lazy release failure is not an item loss, so nothing is reported
+		require.Empty(t, response.GetFailures())
 	})
 }
