@@ -1580,7 +1580,7 @@ func MockReplicationTestSystem(clusterMock *mockcluster.Cluster) *actorSystem {
 		noSender:              noSender,
 		dispatcher:            newDispatcher(dispatcherWorkerCount(), dispatcherThroughput),
 	}
-	sys.relocatingCond = sync.NewCond(&sys.relocatingMu)
+	sys.relocationJobs = make(map[string]*internalpb.PeerState)
 	sys.dispatcher.start()
 
 	sys.started.Store(true)

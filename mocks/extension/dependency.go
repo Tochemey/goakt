@@ -158,7 +158,7 @@ type Dependency_UnmarshalBinary_Call struct {
 
 // UnmarshalBinary is a helper method to define mock.On call
 //   - data []byte
-func (_e *Dependency_Expecter) UnmarshalBinary(data interface{}) *Dependency_UnmarshalBinary_Call {
+func (_e *Dependency_Expecter) UnmarshalBinary(data any) *Dependency_UnmarshalBinary_Call {
 	return &Dependency_UnmarshalBinary_Call{Call: _e.mock.On("UnmarshalBinary", data)}
 }
 

@@ -38,7 +38,6 @@ import (
 	"syscall"
 	"time"
 
-	goset "github.com/deckarep/golang-set/v2"
 	"github.com/flowchartsman/retry"
 	"go.opentelemetry.io/otel/attribute"
 	otelmetric "go.opentelemetry.io/otel/metric"
@@ -760,7 +759,11 @@ type ActorSystem interface {
 	// PID.Watch / PID.UnWatch RPCs
 	getRemoteWatchTimeout() time.Duration
 
-	completeRelocation()
+	beginRelocation(peerAddress string, peerState *internalpb.PeerState) bool
+	relocationJob(peerAddress string) (*internalpb.PeerState, bool)
+	endRelocation(peerAddress string)
+	recreateActorFromWire(ctx context.Context, props *internalpb.Actor, departedNode string) error
+	recreateGrainFromWire(ctx context.Context, grain *internalpb.Grain, departedNode string) error
 	getRootGuardian() *PID
 	getSystemGuardian() *PID
 	getUserGuardian() *PID
@@ -872,9 +875,7 @@ type actorSystem struct {
 	registry   types.Registry
 	reflection *reflection
 
-	clusterConfig    *ClusterConfig
-	rebalancingQueue chan *internalpb.PeerState
-	rebalancedNodes  goset.Set[string]
+	clusterConfig *ClusterConfig
 
 	relocator        *PID
 	rootGuardian     *PID
@@ -888,14 +889,16 @@ type actorSystem struct {
 	noSender         *PID
 	peerStatesWriter *PID
 
-	startedAt        atomic.Int64
-	relocating       atomic.Bool
-	relocatingLocker sync.Mutex
-	// relocatingMu/relocatingCond let rebalancingLoop block until an in-flight
-	// relocation completes instead of busy re-queueing the pending peer state.
-	relocatingMu   sync.Mutex
-	relocatingCond *sync.Cond
-	shutdownHooks  []ShutdownHook
+	startedAt atomic.Int64
+	// relocationJobs tracks the in-flight relocations by departed peer address,
+	// each holding the departed node's peer state snapshot. An entry is added
+	// when the leader dispatches a rebalance and removed on completion, so a
+	// node address that departs again after a completed relocation is
+	// rebalanced again while duplicate NodeLeft events for an in-flight
+	// relocation are ignored.
+	relocationJobs       map[string]*internalpb.PeerState
+	relocationJobsLocker sync.Mutex
+	shutdownHooks        []ShutdownHook
 
 	actorsCounter      atomic.Uint64
 	deadlettersCounter atomic.Uint64
@@ -1003,7 +1006,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		remoteWatches:         newRemoteWatchRegistry(),
 		remoteWatchTimeout:    DefaultRemoteWatchTimeout,
 		shutdownHooks:         make([]ShutdownHook, 0),
-		rebalancedNodes:       goset.NewSet[string](),
+		relocationJobs:        make(map[string]*internalpb.PeerState),
 		topicActor:            nil,
 		extensions:            xsync.NewMap[string, extension.Extension](),
 		grainsQueue:           make(chan *internalpb.Grain, 10),
@@ -1017,8 +1020,6 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	}
 
 	system.startedAt.Store(0)
-	system.relocating.Store(false)
-	system.relocatingCond = sync.NewCond(&system.relocatingMu)
 	system.actorsCounter.Store(0)
 	system.deadlettersCounter.Store(0)
 	system.shuttingDown.Store(false)
@@ -2273,11 +2274,38 @@ func (x *actorSystem) getRelocator() *PID {
 	return rebalancer
 }
 
-func (x *actorSystem) completeRelocation() {
-	x.relocatingMu.Lock()
-	x.relocating.Store(false)
-	x.relocatingCond.Signal()
-	x.relocatingMu.Unlock()
+// beginRelocation registers an in-flight relocation for the departed peer
+// address, holding its peer state snapshot. It returns false when a relocation
+// for that address is already in flight, so duplicate NodeLeft events do not
+// dispatch a second rebalance.
+func (x *actorSystem) beginRelocation(peerAddress string, peerState *internalpb.PeerState) bool {
+	x.relocationJobsLocker.Lock()
+	defer x.relocationJobsLocker.Unlock()
+
+	if _, exists := x.relocationJobs[peerAddress]; exists {
+		return false
+	}
+
+	x.relocationJobs[peerAddress] = peerState
+	return true
+}
+
+// relocationJob returns the peer state snapshot of the in-flight relocation
+// registered for the departed peer address, if any.
+func (x *actorSystem) relocationJob(peerAddress string) (*internalpb.PeerState, bool) {
+	x.relocationJobsLocker.Lock()
+	defer x.relocationJobsLocker.Unlock()
+
+	peerState, ok := x.relocationJobs[peerAddress]
+	return peerState, ok
+}
+
+// endRelocation releases the in-flight relocation registered for the departed
+// peer address so a future departure of the same address can rebalance again.
+func (x *actorSystem) endRelocation(peerAddress string) {
+	x.relocationJobsLocker.Lock()
+	delete(x.relocationJobs, peerAddress)
+	x.relocationJobsLocker.Unlock()
 }
 
 // putActorOnCluster broadcasts the newly (re)spawned actor into the
@@ -2401,18 +2429,12 @@ func (x *actorSystem) startCluster(ctx context.Context) error {
 	x.setupGrainActivationBarrier(ctx)
 
 	x.eventsQueue = x.cluster.Events()
-	x.rebalancingQueue = make(chan *internalpb.PeerState, 1)
 	go x.clusterEventsLoop()
 	// Track the replicate drainers so shutdown can wait for them to drain
 	// the cluster queues before reset() clears the rest of the state.
 	x.drainers.Add(2)
 	go x.replicateActors()
 	go x.replicateGrains()
-
-	// start the various relocation loops when relocation is enabled
-	if x.relocationEnabled.Load() {
-		go x.rebalancingLoop()
-	}
 
 	if err := x.cleanupStaleLocalActors(ctx); err != nil {
 		x.logger.Warnf("failed to cleanup stale cluster actors: %v", err)
@@ -3011,20 +3033,31 @@ func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
 	if x.cluster.IsLeader(ctx) {
 		x.logger.Infof("leader=%s initiating rebalancing for node=%s", x.String(), nodeLeft.Address)
 
-		if !x.rebalancedNodes.Contains(nodeLeft.Address) {
-			x.rebalancedNodes.Add(nodeLeft.Address)
+		// fetch the peer state of the node that left from the cluster store
+		peerState, ok := x.clusterStore.GetPeerState(ctx, nodeLeft.Address)
+		if !ok {
+			x.logger.Warnf("leader=%s could not find node=%s state in cluster store", x.String(), nodeLeft.Address)
+			return
+		}
 
-			// fetch the peer state of the node that left from the cluster store
-			// and enqueue it for rebalancing
-			peerState, ok := x.clusterStore.GetPeerState(ctx, nodeLeft.Address)
-			if !ok {
-				x.logger.Warnf("leader=%s could not find node=%s state in cluster store", x.String(), nodeLeft.Address)
-				return
-			}
+		if !x.shouldRebalance(peerState) {
+			x.logger.Debugf("leader=%s found no node=%s state to rebalance", x.String(), nodeLeft.Address)
+			return
+		}
 
-			x.relocatingLocker.Lock()
-			x.rebalancingQueue <- peerState
-			x.relocatingLocker.Unlock()
+		// register the relocation job; a duplicate NodeLeft for an in-flight
+		// relocation is ignored, while a node address that departs again after
+		// a completed relocation is rebalanced again
+		if !x.beginRelocation(nodeLeft.Address, peerState) {
+			x.logger.Debugf("leader=%s found relocation already in flight for node=%s", x.String(), nodeLeft.Address)
+			return
+		}
+
+		// dispatch to the relocator; its mailbox is the queue, so a burst of
+		// node departures never blocks the cluster events loop
+		if err := x.systemGuardian.Tell(ctx, x.relocator, &internalpb.Rebalance{PeerState: peerState}); err != nil {
+			x.logger.Errorf("failed to send rebalance to relocator: %v (hint: check relocator state)", err)
+			x.endRelocation(nodeLeft.Address)
 		}
 		return
 	}
@@ -3115,43 +3148,6 @@ func (x *actorSystem) resyncAfterClusterEvent(eventType, nodeAddress string) {
 		}
 
 		x.logger.Debugf("node=%s resynced grains after event=%s", x.String(), eventType)
-	}
-}
-
-// rebalancingLoop helps perform cluster rebalancing
-func (x *actorSystem) rebalancingLoop() {
-	for peerState := range x.rebalancingQueue {
-		ctx := context.Background()
-		if !x.shouldRebalance(peerState) {
-			x.logger.Debugf("node=%s found no peer=%s state to rebalance", x.name,
-				net.JoinHostPort(peerState.GetHost(), strconv.Itoa(int(peerState.GetPeersPort()))))
-			continue
-		}
-
-		// Wait for any in-flight relocation to finish before dispatching the
-		// next one, then claim the slot. This blocks on a condition variable
-		// instead of busy re-queueing the pending peer state, so the loop no
-		// longer spins a CPU core while a rebalance is running.
-		x.relocatingMu.Lock()
-		for x.relocating.Load() && !x.isStopping() {
-			x.relocatingCond.Wait()
-		}
-
-		stopping := x.isStopping()
-		if !stopping {
-			x.relocating.Store(true)
-		}
-
-		x.relocatingMu.Unlock()
-
-		if stopping {
-			return
-		}
-
-		message := &internalpb.Rebalance{PeerState: peerState}
-		if err := x.systemGuardian.Tell(ctx, x.relocator, message); err != nil {
-			x.logger.Errorf("failed to send rebalance to system guardian: %v (hint: check system guardian state)", err)
-		}
 	}
 }
 
@@ -3558,20 +3554,13 @@ func (x *actorSystem) shutdownCluster(ctx context.Context, actors []*PID, peerSt
 		// signal after draining buffered items. Not closing avoids the
 		// send-on-closed-channel race entirely.
 		x.clusterEnabled.Store(false)
-		// release the relocation slot and wake rebalancingLoop if it is blocked
-		// waiting for an in-flight relocation; it observes isStopping and exits.
-		x.relocatingMu.Lock()
-		x.relocating.Store(false)
-		x.relocatingCond.Broadcast()
-		x.relocatingMu.Unlock()
 		x.pubsubEnabled.Store(false)
-		x.relocatingLocker.Lock()
 
-		if x.rebalancingQueue != nil {
-			close(x.rebalancingQueue)
-		}
-
-		x.relocatingLocker.Unlock()
+		// drop any in-flight relocation jobs; their workers are stopped with
+		// the actor tree and the cluster store is already closed
+		x.relocationJobsLocker.Lock()
+		x.relocationJobs = make(map[string]*internalpb.PeerState)
+		x.relocationJobsLocker.Unlock()
 	}
 	return nil
 }

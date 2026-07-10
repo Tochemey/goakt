@@ -1184,6 +1184,43 @@ func (x *actorSystem) sendRemoteTellGrainRequest(ctx context.Context, grain *int
 	return x.remoting.RemoteTellGrain(ctx, grain.GetHost(), int(grain.GetPort()), grainRequest, message)
 }
 
+// recreateGrainFromWire relocates a serialized grain from a departed node onto
+// this node. It is used during cluster rebalancing.
+//
+// departedNode is the remoting address (host:port) of the node that left the
+// cluster. A stale cluster registry entry still pointing at that address is
+// removed before reactivation; an entry pointing anywhere else means the grain
+// has already been reactivated by a concurrent relocation or an incoming call,
+// so it is skipped. System grains and grains that opted out of relocation are
+// skipped as well.
+func (x *actorSystem) recreateGrainFromWire(ctx context.Context, grain *internalpb.Grain, departedNode string) error {
+	if isSystemName(grain.GetGrainId().GetName()) || grain.GetDisableRelocation() {
+		return nil
+	}
+
+	identity := grain.GetGrainId().GetValue()
+	existing, err := x.cluster.GetGrain(ctx, identity)
+
+	switch {
+	case err == nil:
+		entry := net.JoinHostPort(existing.GetHost(), strconv.Itoa(int(existing.GetPort())))
+		if entry != departedNode {
+			// the grain has already been reactivated somewhere else; leave it alone
+			return nil
+		}
+
+		if rerr := x.cluster.RemoveGrain(ctx, identity); rerr != nil {
+			return gerrors.NewInternalError(rerr)
+		}
+	case errors.Is(err, cluster.ErrGrainNotFound):
+		// no stale registry entry; proceed with the reactivation
+	default:
+		return gerrors.NewInternalError(err)
+	}
+
+	return x.recreateGrain(ctx, grain)
+}
+
 // recreateGrain recreates a serialized Grain.
 //
 // It instantiates the grain, activates it, registers it locally, and updates the cluster registry.

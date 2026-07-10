@@ -545,28 +545,42 @@ memberlist detects node departure
   └─ every node: resync local actors/grains in registry, trigger DC reconciliation
   └─ leader node only (non-leaders just clean up the departed peer's cached state):
        ├─ check relocation is enabled
-       ├─ deduplicate via rebalancedNodes set (process each departure at most once)
        ├─ fetch departed node's PeerState from cluster store (actors + grains it owned)
-       ├─ enqueue PeerState into rebalancingQueue
-       └─ rebalancingLoop picks it up:
-            ├─ set relocating flag (only one rebalance at a time)
-            ├─ send Rebalance message to the relocator actor
-            └─ relocator.Relocate():
-                 ├─ allocateActors(): partition actors among leader + peers
-                 │    ├─ singleton actors → always go to the leader
-                 │    ├─ remaining actors → split evenly across all nodes
-                 │    └─ skip: system actors, non-relocatable actors
-                 ├─ allocateGrains(): partition grains evenly across all nodes
-                 │    └─ skip: system grains, grains with relocation disabled
-                 ├─ run leader + peer relocation in parallel (errgroup):
-                 │    ├─ leader shares: recreate locally (Spawn or SpawnSingleton)
-                 │    │    └─ remove stale entry → instantiate actor → apply
-                 │    │       original options (supervisor, passivation, reentrancy,
-                 │    │       dependencies, stashing, role) → register new location
-                 │    └─ peer shares: spawn remotely via RemoteSpawn / RemoteActivateGrain
-                 │         └─ remove stale entry → send spawn request to target node
-                 │            → target registers new location
-                 └─ send RebalanceComplete back to the actor system
+       ├─ shouldRebalance(): skip when there is nothing to relocate
+       ├─ beginRelocation(address, peerState): register the in-flight job keyed by
+       │    departed address. A duplicate NodeLeft for an address whose relocation
+       │    is still in flight is ignored; once it completes, a later departure of
+       │    the same address is rebalanced again.
+       └─ Tell the relocator a Rebalance message (its mailbox is the queue, so a
+          burst of departures never blocks the cluster events loop):
+            └─ relocator.startWorker(): spawn one short-lived relocation worker per
+               departed node (distinct nodes relocate concurrently), watch it, then
+               hand it the Rebalance order.
+                 └─ relocationWorker.relocate():
+                      ├─ allocateActors(): partition actors among leader + peers
+                      │    ├─ singleton actors → always go to the leader
+                      │    ├─ remaining actors → split evenly across all nodes
+                      │    └─ skip: system actors, non-relocatable actors
+                      ├─ allocateGrains(): partition grains evenly across all nodes
+                      │    └─ skip: system grains, grains with relocation disabled
+                      ├─ run leader + peer relocation in parallel (bounded errgroup):
+                      │    ├─ leader shares: recreate locally (Spawn or SpawnSingleton)
+                      │    │    └─ gate on stale entry (still points at departed node)
+                      │    │       → instantiate actor → apply original options
+                      │    │       (supervisor, passivation, reentrancy, dependencies,
+                      │    │       stashing, role) → register new location
+                      │    └─ peer shares: hand each peer its whole share in batched
+                      │         RelocateBatch RPCs (≤ 500 items/request, retried twice).
+                      │         An unreachable peer's unsent remainder is moved once to
+                      │         the next surviving peer; the target recreates items and
+                      │         reports per-item failures.
+                      ├─ publish a single RelocationFailed event listing exactly the
+                      │    actor addresses and grain identities that could not be moved
+                      └─ finish(): delete departed node's PeerState from the cluster
+                           store, endRelocation(address) to release the job, then stop.
+                           A worker that dies abnormally (panic → StopDirective) leaves
+                           the job registered; the relocator's Terminated handler then
+                           aborts and reports it.
 ```
 
 ---
@@ -882,13 +896,14 @@ When Memberlist detects a node departure:
 
 1. The cluster emits a `NodeLeft` event.
 2. The **leader node** fetches the departed node's peer state (list of actors and grains it owned) from the cluster store.
-3. The leader sends a `Rebalance` message to the relocator actor.
-4. The relocator distributes the departed node's actors and grains across remaining nodes:
+3. The leader registers an in-flight relocation job keyed by the departed address (`beginRelocation`), so duplicate `NodeLeft` events for an address whose relocation is still running are ignored, then sends a `Rebalance` message to the relocator actor.
+4. The relocator spawns one short-lived **relocation worker per departed node**, so relocations of distinct nodes proceed concurrently. Each worker distributes the departed node's actors and grains across remaining nodes:
    - Singleton actors always move to the leader.
    - Non-singleton, relocatable actors are spread across peers.
    - Grains are distributed evenly.
-5. For each relocated actor/grain: the stale registry entry is removed, the actor is re-spawned on the target node, and the new location is registered.
-6. A `RebalanceComplete` event is emitted.
+5. The worker recreates the leader's share locally and hands each peer its whole share in batched `RelocateBatch` requests (at most 500 items per request, retried twice before the peer is considered unreachable). An unreachable peer's unsent remainder is moved once to the next surviving peer.
+6. Failures are isolated per item: a failing actor, grain, or peer never aborts the rest of the rebalance. The items that could not be relocated are reported in a single `RelocationFailed` event on the event stream.
+7. On completion the worker deletes the departed node's peer state from the cluster store, releases the relocation job (`endRelocation`), and stops. A worker that dies abnormally (a panic stops it) leaves its job registered, and the relocator's `Terminated` handler aborts and reports the relocation.
 
 Actors flagged as non-relocatable and system actors are skipped.
 

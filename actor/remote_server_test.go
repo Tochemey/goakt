@@ -31,9 +31,11 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/tochemey/goakt/v4/discovery"
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
@@ -43,6 +45,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/internal/xsync"
 	"github.com/tochemey/goakt/v4/log"
+	mockscluster "github.com/tochemey/goakt/v4/mocks/cluster"
 	"github.com/tochemey/goakt/v4/passivation"
 	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
@@ -2591,4 +2594,94 @@ func TestRemotingSurvivesExpiredStartContext(t *testing.T) {
 	reply, err := remoting.RemoteAsk(ctx, address.NoSender(), addr, new(testpb.TestReply), 20*time.Second)
 	require.NoError(t, err)
 	require.NotNil(t, reply)
+}
+
+// TestRelocateBatchHandler exercises the RelocateBatch proto handler: batch-level
+// preconditions, per-item failure reporting, and the stale-entry gating that only
+// removes registry entries still pointing at the departed node.
+func TestRelocateBatchHandler(t *testing.T) {
+	ctx := context.Background()
+	const departedNode = "127.0.0.1:8080"
+
+	t.Run("invalid request type", func(t *testing.T) {
+		sys := newRemoteServerTestSystem("127.0.0.1", 9000)
+		resp, err := sys.relocateBatchHandler(ctx, nullConn, new(internalpb.RemoteLookupRequest))
+		require.NoError(t, err)
+		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
+	})
+
+	t.Run("remoting disabled", func(t *testing.T) {
+		sys := newRemoteServerTestSystem("127.0.0.1", 9000)
+		sys.remotingEnabled.Store(false)
+		resp, err := sys.relocateBatchHandler(ctx, nullConn, new(internalpb.RelocateBatchRequest))
+		require.NoError(t, err)
+		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
+	})
+
+	t.Run("cluster disabled", func(t *testing.T) {
+		sys := newRemoteServerTestSystem("127.0.0.1", 9000)
+		resp, err := sys.relocateBatchHandler(ctx, nullConn, new(internalpb.RelocateBatchRequest))
+		require.NoError(t, err)
+		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
+	})
+
+	t.Run("per-item outcomes with gated stale-entry cleanup", func(t *testing.T) {
+		sys := newRemoteServerTestSystem("127.0.0.1", 9000)
+		sys.clusterEnabled.Store(true)
+		sys.clusterNode = &discovery.Node{Host: "127.0.0.1", PeersPort: 9000}
+		sys.registry = types.NewRegistry()
+		sys.reflection = newReflection(sys.registry)
+		sys.registry.Register(new(MockActor))
+
+		clusterMock := mockscluster.NewCluster(t)
+		sys.cluster = clusterMock
+
+		// entry pointing at a live third node: left alone, no removal, no failure
+		clusterMock.EXPECT().GetActor(mock.Anything, "moved").
+			Return(&internalpb.Actor{Address: address.New("moved", sys.Name(), "10.0.0.9", 7000).String()}, nil).Once()
+
+		// grain entry pointing at a live third node: left alone as well
+		clusterMock.EXPECT().GetGrain(mock.Anything, "kind/moved-grain").
+			Return(&internalpb.Grain{Host: "10.0.0.9", Port: 7000, GrainId: &internalpb.GrainId{Value: "kind/moved-grain", Name: "moved-grain"}}, nil).Once()
+
+		// entry still pointing at the departed node: removed before the respawn
+		// (the respawn itself fails on this non-started test system and is
+		// reported per item instead of failing the batch)
+		clusterMock.EXPECT().GetActor(mock.Anything, "stale").
+			Return(&internalpb.Actor{Address: address.New("stale", sys.Name(), "127.0.0.1", 8080).String()}, nil).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, "stale").Return(nil).Once()
+
+		request := &internalpb.RelocateBatchRequest{
+			DepartedNode: departedNode,
+			Actors: []*internalpb.Actor{
+				// unparsable address: reported per item
+				{Address: "invalid-address", Relocatable: true},
+				// system actor: skipped silently
+				{Address: address.New(reservedName(rebalancerType), sys.Name(), "127.0.0.1", 8080).String()},
+				// already relocated elsewhere: skipped silently
+				{Address: address.New("moved", sys.Name(), "127.0.0.1", 8080).String()},
+				// stale entry on the departed node: removed then respawned
+				{Address: address.New("stale", sys.Name(), "127.0.0.1", 8080).String(), Type: types.Name(new(MockActor)), Relocatable: true},
+			},
+			Grains: []*internalpb.Grain{
+				{GrainId: &internalpb.GrainId{Value: "kind/moved-grain", Name: "moved-grain"}},
+			},
+		}
+
+		resp, err := sys.relocateBatchHandler(ctx, nullConn, request)
+		require.NoError(t, err)
+
+		response, ok := resp.(*internalpb.RelocateBatchResponse)
+		require.True(t, ok, "expected *internalpb.RelocateBatchResponse, got %T", resp)
+
+		failed := make(map[string]bool, len(response.GetFailures()))
+		for _, failure := range response.GetFailures() {
+			failed[failure.GetId()] = true
+		}
+
+		// exactly the unparsable actor and the failed respawn are reported
+		require.Len(t, response.GetFailures(), 2)
+		assert.True(t, failed["invalid-address"])
+		assert.True(t, failed[address.New("stale", sys.Name(), "127.0.0.1", 8080).String()])
+	})
 }

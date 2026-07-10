@@ -25,20 +25,14 @@ package actor
 import (
 	"context"
 	"io"
-	"net"
-	"strconv"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	"github.com/tochemey/goakt/v4/internal/internalpb"
-	dynaport "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/log"
-	testkit "github.com/tochemey/goakt/v4/mocks/discovery"
-	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
@@ -102,43 +96,6 @@ func TestSystemGuardian(t *testing.T) {
 		pause.For(500 * time.Millisecond)
 		require.True(t, actorSystem.Running())
 		require.NoError(t, actorSystem.Stop(ctx))
-	})
-	t.Run("With RebalanceComplete message", func(t *testing.T) {
-		ctx := context.Background()
-		nodePorts := dynaport.Get(3)
-		host := "127.0.0.1"
-		addrs := []string{net.JoinHostPort(host, strconv.Itoa(nodePorts[0]))}
-		provider := new(testkit.Provider)
-		provider.EXPECT().ID().Return("testDisco")
-		provider.EXPECT().Initialize().Return(nil)
-		provider.EXPECT().Register().Return(nil)
-		provider.EXPECT().Deregister().Return(nil)
-		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
-		provider.EXPECT().Close().Return(nil)
-
-		actorSystem, err := NewActorSystem("testSys",
-			WithLogger(log.DiscardLogger),
-			WithRemote(remote.NewConfig(host, nodePorts[2])),
-			WithCluster(NewClusterConfig().
-				WithKinds(new(MockActor)).
-				WithPartitionCount(9).
-				WithReplicaCount(1).
-				WithPeersPort(nodePorts[1]).
-				WithMinimumPeersQuorum(1).
-				WithDiscoveryPort(nodePorts[0]).
-				WithDiscovery(provider)),
-		)
-		require.NoError(t, err)
-		require.NoError(t, actorSystem.Start(ctx))
-		pause.For(2 * time.Second)
-
-		systemGuardian := actorSystem.getSystemGuardian()
-		require.NotNil(t, systemGuardian)
-		err = systemGuardian.Tell(ctx, systemGuardian, &internalpb.RebalanceComplete{PeerAddress: "127.0.0.1:99999"})
-		require.NoError(t, err)
-		pause.For(500 * time.Millisecond)
-		require.NoError(t, actorSystem.Stop(ctx))
-		provider.AssertExpectations(t)
 	})
 	t.Run("With unhandled message result in deadletter", func(t *testing.T) {
 		ctx := context.Background()

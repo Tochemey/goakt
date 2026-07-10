@@ -5783,7 +5783,6 @@ func TestStopReturnsCleanupClusterError(t *testing.T) {
 	system := MockReplicationTestSystem(clusterMock)
 	system.grains = xsync.NewMap[string, *grainPID]()
 	system.extensions = xsync.NewMap[string, extension.Extension]()
-	system.relocating.Store(false)
 	system.actors = newTree()
 	system.actors.noSender = nil
 	system.noSender = nil
@@ -6954,4 +6953,33 @@ func TestPruneRemoteWatchesForHost(t *testing.T) {
 			t.Fatal("malformed nodeAddress did not trigger synthesized Terminated")
 		}
 	})
+}
+
+// TestBeginEndRelocation verifies the in-flight relocation job registry:
+// duplicate departures are ignored while in flight, distinct addresses proceed
+// concurrently, and a completed address can rebalance again (regression for the
+// old rebalancedNodes set that never evicted entries).
+func TestBeginEndRelocation(t *testing.T) {
+	system, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	sys := system.(*actorSystem)
+
+	peerState := &internalpb.PeerState{Host: "127.0.0.1", PeersPort: 9000}
+	require.True(t, sys.beginRelocation("127.0.0.1:9000", peerState))
+	// a duplicate NodeLeft for an in-flight relocation is ignored
+	require.False(t, sys.beginRelocation("127.0.0.1:9000", peerState))
+
+	got, ok := sys.relocationJob("127.0.0.1:9000")
+	require.True(t, ok)
+	require.Same(t, peerState, got)
+
+	// distinct departed nodes relocate concurrently
+	require.True(t, sys.beginRelocation("127.0.0.2:9000", peerState))
+
+	// after completion the same address can be rebalanced again
+	sys.endRelocation("127.0.0.1:9000")
+	_, ok = sys.relocationJob("127.0.0.1:9000")
+	require.False(t, ok)
+	require.True(t, sys.beginRelocation("127.0.0.1:9000", peerState))
 }

@@ -193,6 +193,186 @@ func (x *RebalanceComplete) GetPeerAddress() string {
 	return ""
 }
 
+// RelocateBatchRequest carries one target peer's share of a departed node's
+// actors and grains, relocated in a single round trip.
+type RelocateBatchRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the remoting address (host:remoting_port) of the node that left
+	// the cluster. The target uses it to clean up stale registry entries that
+	// still point at the departed node before recreating the relocated actors
+	// and grains.
+	DepartedNode string `protobuf:"bytes,1,opt,name=departed_node,json=departedNode,proto3" json:"departed_node,omitempty"`
+	// Specifies the actors to recreate on the target node
+	Actors []*Actor `protobuf:"bytes,2,rep,name=actors,proto3" json:"actors,omitempty"`
+	// Specifies the grains to activate on the target node
+	Grains        []*Grain `protobuf:"bytes,3,rep,name=grains,proto3" json:"grains,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RelocateBatchRequest) Reset() {
+	*x = RelocateBatchRequest{}
+	mi := &file_internal_peers_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RelocateBatchRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RelocateBatchRequest) ProtoMessage() {}
+
+func (x *RelocateBatchRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_peers_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RelocateBatchRequest.ProtoReflect.Descriptor instead.
+func (*RelocateBatchRequest) Descriptor() ([]byte, []int) {
+	return file_internal_peers_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *RelocateBatchRequest) GetDepartedNode() string {
+	if x != nil {
+		return x.DepartedNode
+	}
+	return ""
+}
+
+func (x *RelocateBatchRequest) GetActors() []*Actor {
+	if x != nil {
+		return x.Actors
+	}
+	return nil
+}
+
+func (x *RelocateBatchRequest) GetGrains() []*Grain {
+	if x != nil {
+		return x.Grains
+	}
+	return nil
+}
+
+// RelocateBatchResponse reports per-item relocation failures.
+// An empty list means the whole batch was relocated successfully.
+type RelocateBatchResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the items that could not be relocated
+	Failures      []*RelocationFailure `protobuf:"bytes,1,rep,name=failures,proto3" json:"failures,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RelocateBatchResponse) Reset() {
+	*x = RelocateBatchResponse{}
+	mi := &file_internal_peers_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RelocateBatchResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RelocateBatchResponse) ProtoMessage() {}
+
+func (x *RelocateBatchResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_peers_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RelocateBatchResponse.ProtoReflect.Descriptor instead.
+func (*RelocateBatchResponse) Descriptor() ([]byte, []int) {
+	return file_internal_peers_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *RelocateBatchResponse) GetFailures() []*RelocationFailure {
+	if x != nil {
+		return x.Failures
+	}
+	return nil
+}
+
+// RelocationFailure describes a single actor or grain that could not be
+// relocated as part of a RelocateBatchRequest.
+type RelocationFailure struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the actor address or the grain identity string
+	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// Specifies whether the failed item is a grain
+	Grain bool `protobuf:"varint,2,opt,name=grain,proto3" json:"grain,omitempty"`
+	// Specifies the failure reason
+	Message       string `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RelocationFailure) Reset() {
+	*x = RelocationFailure{}
+	mi := &file_internal_peers_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RelocationFailure) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RelocationFailure) ProtoMessage() {}
+
+func (x *RelocationFailure) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_peers_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RelocationFailure.ProtoReflect.Descriptor instead.
+func (*RelocationFailure) Descriptor() ([]byte, []int) {
+	return file_internal_peers_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *RelocationFailure) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *RelocationFailure) GetGrain() bool {
+	if x != nil {
+		return x.Grain
+	}
+	return false
+}
+
+func (x *RelocationFailure) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
 type PersistPeerActor struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Specifies the peer host
@@ -209,7 +389,7 @@ type PersistPeerActor struct {
 
 func (x *PersistPeerActor) Reset() {
 	*x = PersistPeerActor{}
-	mi := &file_internal_peers_proto_msgTypes[3]
+	mi := &file_internal_peers_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -221,7 +401,7 @@ func (x *PersistPeerActor) String() string {
 func (*PersistPeerActor) ProtoMessage() {}
 
 func (x *PersistPeerActor) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_peers_proto_msgTypes[3]
+	mi := &file_internal_peers_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -234,7 +414,7 @@ func (x *PersistPeerActor) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PersistPeerActor.ProtoReflect.Descriptor instead.
 func (*PersistPeerActor) Descriptor() ([]byte, []int) {
-	return file_internal_peers_proto_rawDescGZIP(), []int{3}
+	return file_internal_peers_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *PersistPeerActor) GetHost() string {
@@ -281,7 +461,7 @@ type PersistPeerGrain struct {
 
 func (x *PersistPeerGrain) Reset() {
 	*x = PersistPeerGrain{}
-	mi := &file_internal_peers_proto_msgTypes[4]
+	mi := &file_internal_peers_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -293,7 +473,7 @@ func (x *PersistPeerGrain) String() string {
 func (*PersistPeerGrain) ProtoMessage() {}
 
 func (x *PersistPeerGrain) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_peers_proto_msgTypes[4]
+	mi := &file_internal_peers_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -306,7 +486,7 @@ func (x *PersistPeerGrain) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PersistPeerGrain.ProtoReflect.Descriptor instead.
 func (*PersistPeerGrain) Descriptor() ([]byte, []int) {
-	return file_internal_peers_proto_rawDescGZIP(), []int{4}
+	return file_internal_peers_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *PersistPeerGrain) GetHost() string {
@@ -350,7 +530,7 @@ type RemovePeerActor struct {
 
 func (x *RemovePeerActor) Reset() {
 	*x = RemovePeerActor{}
-	mi := &file_internal_peers_proto_msgTypes[5]
+	mi := &file_internal_peers_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -362,7 +542,7 @@ func (x *RemovePeerActor) String() string {
 func (*RemovePeerActor) ProtoMessage() {}
 
 func (x *RemovePeerActor) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_peers_proto_msgTypes[5]
+	mi := &file_internal_peers_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -375,7 +555,7 @@ func (x *RemovePeerActor) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemovePeerActor.ProtoReflect.Descriptor instead.
 func (*RemovePeerActor) Descriptor() ([]byte, []int) {
-	return file_internal_peers_proto_rawDescGZIP(), []int{5}
+	return file_internal_peers_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *RemovePeerActor) GetPeerAddress() string {
@@ -403,7 +583,7 @@ type RemovePeerGrain struct {
 
 func (x *RemovePeerGrain) Reset() {
 	*x = RemovePeerGrain{}
-	mi := &file_internal_peers_proto_msgTypes[6]
+	mi := &file_internal_peers_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -415,7 +595,7 @@ func (x *RemovePeerGrain) String() string {
 func (*RemovePeerGrain) ProtoMessage() {}
 
 func (x *RemovePeerGrain) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_peers_proto_msgTypes[6]
+	mi := &file_internal_peers_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -428,7 +608,7 @@ func (x *RemovePeerGrain) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemovePeerGrain.ProtoReflect.Descriptor instead.
 func (*RemovePeerGrain) Descriptor() ([]byte, []int) {
-	return file_internal_peers_proto_rawDescGZIP(), []int{6}
+	return file_internal_peers_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *RemovePeerGrain) GetPeerAddress() string {
@@ -455,7 +635,7 @@ type GetPeerState struct {
 
 func (x *GetPeerState) Reset() {
 	*x = GetPeerState{}
-	mi := &file_internal_peers_proto_msgTypes[7]
+	mi := &file_internal_peers_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -467,7 +647,7 @@ func (x *GetPeerState) String() string {
 func (*GetPeerState) ProtoMessage() {}
 
 func (x *GetPeerState) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_peers_proto_msgTypes[7]
+	mi := &file_internal_peers_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -480,7 +660,7 @@ func (x *GetPeerState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPeerState.ProtoReflect.Descriptor instead.
 func (*GetPeerState) Descriptor() ([]byte, []int) {
-	return file_internal_peers_proto_rawDescGZIP(), []int{7}
+	return file_internal_peers_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *GetPeerState) GetPeerAddress() string {
@@ -500,7 +680,7 @@ type DeletePeerState struct {
 
 func (x *DeletePeerState) Reset() {
 	*x = DeletePeerState{}
-	mi := &file_internal_peers_proto_msgTypes[8]
+	mi := &file_internal_peers_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -512,7 +692,7 @@ func (x *DeletePeerState) String() string {
 func (*DeletePeerState) ProtoMessage() {}
 
 func (x *DeletePeerState) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_peers_proto_msgTypes[8]
+	mi := &file_internal_peers_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -525,7 +705,7 @@ func (x *DeletePeerState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeletePeerState.ProtoReflect.Descriptor instead.
 func (*DeletePeerState) Descriptor() ([]byte, []int) {
-	return file_internal_peers_proto_rawDescGZIP(), []int{8}
+	return file_internal_peers_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *DeletePeerState) GetPeerAddress() string {
@@ -558,7 +738,17 @@ const file_internal_peers_proto_rawDesc = "" +
 	"\n" +
 	"peer_state\x18\x01 \x01(\v2\x15.internalpb.PeerStateR\tpeerState\"6\n" +
 	"\x11RebalanceComplete\x12!\n" +
-	"\fpeer_address\x18\x01 \x01(\tR\vpeerAddress\"\x93\x01\n" +
+	"\fpeer_address\x18\x01 \x01(\tR\vpeerAddress\"\x91\x01\n" +
+	"\x14RelocateBatchRequest\x12#\n" +
+	"\rdeparted_node\x18\x01 \x01(\tR\fdepartedNode\x12)\n" +
+	"\x06actors\x18\x02 \x03(\v2\x11.internalpb.ActorR\x06actors\x12)\n" +
+	"\x06grains\x18\x03 \x03(\v2\x11.internalpb.GrainR\x06grains\"R\n" +
+	"\x15RelocateBatchResponse\x129\n" +
+	"\bfailures\x18\x01 \x03(\v2\x1d.internalpb.RelocationFailureR\bfailures\"S\n" +
+	"\x11RelocationFailure\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
+	"\x05grain\x18\x02 \x01(\bR\x05grain\x12\x18\n" +
+	"\amessage\x18\x03 \x01(\tR\amessage\"\x93\x01\n" +
 	"\x10PersistPeerActor\x12\x12\n" +
 	"\x04host\x18\x01 \x01(\tR\x04host\x12#\n" +
 	"\rremoting_port\x18\x02 \x01(\x05R\fremotingPort\x12\x1d\n" +
@@ -600,37 +790,43 @@ func file_internal_peers_proto_rawDescGZIP() []byte {
 	return file_internal_peers_proto_rawDescData
 }
 
-var file_internal_peers_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_internal_peers_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_internal_peers_proto_goTypes = []any{
-	(*PeerState)(nil),         // 0: internalpb.PeerState
-	(*Rebalance)(nil),         // 1: internalpb.Rebalance
-	(*RebalanceComplete)(nil), // 2: internalpb.RebalanceComplete
-	(*PersistPeerActor)(nil),  // 3: internalpb.PersistPeerActor
-	(*PersistPeerGrain)(nil),  // 4: internalpb.PersistPeerGrain
-	(*RemovePeerActor)(nil),   // 5: internalpb.RemovePeerActor
-	(*RemovePeerGrain)(nil),   // 6: internalpb.RemovePeerGrain
-	(*GetPeerState)(nil),      // 7: internalpb.GetPeerState
-	(*DeletePeerState)(nil),   // 8: internalpb.DeletePeerState
-	nil,                       // 9: internalpb.PeerState.ActorsEntry
-	nil,                       // 10: internalpb.PeerState.GrainsEntry
-	(*Actor)(nil),             // 11: internalpb.Actor
-	(*Grain)(nil),             // 12: internalpb.Grain
-	(*GrainId)(nil),           // 13: internalpb.GrainId
+	(*PeerState)(nil),             // 0: internalpb.PeerState
+	(*Rebalance)(nil),             // 1: internalpb.Rebalance
+	(*RebalanceComplete)(nil),     // 2: internalpb.RebalanceComplete
+	(*RelocateBatchRequest)(nil),  // 3: internalpb.RelocateBatchRequest
+	(*RelocateBatchResponse)(nil), // 4: internalpb.RelocateBatchResponse
+	(*RelocationFailure)(nil),     // 5: internalpb.RelocationFailure
+	(*PersistPeerActor)(nil),      // 6: internalpb.PersistPeerActor
+	(*PersistPeerGrain)(nil),      // 7: internalpb.PersistPeerGrain
+	(*RemovePeerActor)(nil),       // 8: internalpb.RemovePeerActor
+	(*RemovePeerGrain)(nil),       // 9: internalpb.RemovePeerGrain
+	(*GetPeerState)(nil),          // 10: internalpb.GetPeerState
+	(*DeletePeerState)(nil),       // 11: internalpb.DeletePeerState
+	nil,                           // 12: internalpb.PeerState.ActorsEntry
+	nil,                           // 13: internalpb.PeerState.GrainsEntry
+	(*Actor)(nil),                 // 14: internalpb.Actor
+	(*Grain)(nil),                 // 15: internalpb.Grain
+	(*GrainId)(nil),               // 16: internalpb.GrainId
 }
 var file_internal_peers_proto_depIdxs = []int32{
-	9,  // 0: internalpb.PeerState.actors:type_name -> internalpb.PeerState.ActorsEntry
-	10, // 1: internalpb.PeerState.grains:type_name -> internalpb.PeerState.GrainsEntry
+	12, // 0: internalpb.PeerState.actors:type_name -> internalpb.PeerState.ActorsEntry
+	13, // 1: internalpb.PeerState.grains:type_name -> internalpb.PeerState.GrainsEntry
 	0,  // 2: internalpb.Rebalance.peer_state:type_name -> internalpb.PeerState
-	11, // 3: internalpb.PersistPeerActor.actor:type_name -> internalpb.Actor
-	12, // 4: internalpb.PersistPeerGrain.grain:type_name -> internalpb.Grain
-	13, // 5: internalpb.RemovePeerGrain.grain_id:type_name -> internalpb.GrainId
-	11, // 6: internalpb.PeerState.ActorsEntry.value:type_name -> internalpb.Actor
-	12, // 7: internalpb.PeerState.GrainsEntry.value:type_name -> internalpb.Grain
-	8,  // [8:8] is the sub-list for method output_type
-	8,  // [8:8] is the sub-list for method input_type
-	8,  // [8:8] is the sub-list for extension type_name
-	8,  // [8:8] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	14, // 3: internalpb.RelocateBatchRequest.actors:type_name -> internalpb.Actor
+	15, // 4: internalpb.RelocateBatchRequest.grains:type_name -> internalpb.Grain
+	5,  // 5: internalpb.RelocateBatchResponse.failures:type_name -> internalpb.RelocationFailure
+	14, // 6: internalpb.PersistPeerActor.actor:type_name -> internalpb.Actor
+	15, // 7: internalpb.PersistPeerGrain.grain:type_name -> internalpb.Grain
+	16, // 8: internalpb.RemovePeerGrain.grain_id:type_name -> internalpb.GrainId
+	14, // 9: internalpb.PeerState.ActorsEntry.value:type_name -> internalpb.Actor
+	15, // 10: internalpb.PeerState.GrainsEntry.value:type_name -> internalpb.Grain
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_internal_peers_proto_init() }
@@ -646,7 +842,7 @@ func file_internal_peers_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_peers_proto_rawDesc), len(file_internal_peers_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   11,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

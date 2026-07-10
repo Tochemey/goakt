@@ -42,6 +42,8 @@ import (
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/cluster"
+	"github.com/tochemey/goakt/v4/internal/codec"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/pointer"
 	"github.com/tochemey/goakt/v4/internal/strconvx"
 	"github.com/tochemey/goakt/v4/internal/types"
@@ -919,4 +921,89 @@ func (x *actorSystem) actorsRoundRobinPlacementPeer(ctx context.Context, peers [
 		return nil, err
 	}
 	return peers[(next-1)%len(peers)], nil
+}
+
+// recreateActorFromWire recreates an actor on this node from its serialized wire
+// representation, restoring its spawn-time configuration (supervisor, passivation,
+// reentrancy, stashing, role and dependencies). It is used during cluster
+// rebalancing to relocate actors hosted on a departed node.
+//
+// departedNode is the remoting address (host:port) of the node that left the
+// cluster. A stale cluster registry entry still pointing at that address is
+// removed before respawning; an entry pointing anywhere else means the actor has
+// already been recreated by a concurrent relocation or a client spawn, so it is
+// skipped. System actors and singleton actors are always skipped: singletons are
+// recreated on the leader through recreateSingletonFromWire.
+func (x *actorSystem) recreateActorFromWire(ctx context.Context, props *internalpb.Actor, departedNode string) error {
+	addr, err := address.Parse(props.GetAddress())
+	if err != nil {
+		return gerrors.NewInternalError(err)
+	}
+
+	if isSystemName(addr.Name()) || props.GetSingleton() != nil {
+		return nil
+	}
+
+	existing, err := x.cluster.GetActor(ctx, addr.Name())
+
+	switch {
+	case err == nil:
+		entry, perr := address.Parse(existing.GetAddress())
+		if perr == nil && entry.HostPort() != departedNode {
+			// the actor has already been recreated somewhere else; leave it alone
+			return nil
+		}
+
+		if rerr := x.cluster.RemoveActor(ctx, addr.Name()); rerr != nil {
+			return gerrors.NewInternalError(rerr)
+		}
+	case errors.Is(err, cluster.ErrActorNotFound):
+		// no stale registry entry; proceed with the respawn
+	default:
+		return gerrors.NewInternalError(err)
+	}
+
+	actor, err := x.reflection.instantiateActor(props.GetType())
+	if err != nil {
+		return err
+	}
+
+	if !props.GetRelocatable() {
+		return nil
+	}
+
+	spawnOpts := []SpawnOption{
+		WithPassivationStrategy(codec.DecodePassivationStrategy(props.GetPassivationStrategy())),
+	}
+
+	if props.GetEnableStash() {
+		spawnOpts = append(spawnOpts, WithStashing())
+	}
+
+	if props.GetRole() != "" {
+		spawnOpts = append(spawnOpts, WithRole(props.GetRole()))
+	}
+
+	if props.GetReentrancy() != nil {
+		spawnOpts = append(spawnOpts, WithReentrancy(codec.DecodeReentrancy(props.GetReentrancy())))
+	}
+
+	if props.GetSupervisor() != nil {
+		if decoded := codec.DecodeSupervisor(props.GetSupervisor()); decoded != nil {
+			spawnOpts = append(spawnOpts, WithSupervisor(decoded))
+		}
+	}
+
+	if len(props.GetDependencies()) > 0 {
+		dependencies, err := x.reflection.dependenciesFromProto(props.GetDependencies()...)
+		if err != nil {
+			return err
+		}
+
+		spawnOpts = append(spawnOpts, WithDependencies(dependencies...))
+	}
+
+	_, err = x.Spawn(ctx, addr.Name(), actor, spawnOpts...)
+
+	return err
 }
