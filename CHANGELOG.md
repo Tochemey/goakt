@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### 🔧 Fixes
+
+- **Remoting no longer inherits cancelation from the `Start` context** ([#1252](https://github.com/Tochemey/goakt/issues/1252)). The remoting server stored the startup context as its long-lived base context, so a bounded `Start(ctx)` (a DI OnStart hook, a startup timeout) expiring after startup poisoned every inbound handler context: all remote operations against the node failed with `context deadline exceeded` until the process restarted. The server base context is now detached via `context.WithoutCancel`, preserving context values while leaving the server's lifetime to `Stop()`.
+
 ## v4.3.0 - 2026-07-09
 
 ### ✨ Features
