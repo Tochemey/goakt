@@ -24,7 +24,7 @@ require (
 	github.com/testcontainers/testcontainers-go v0.43.0
 	github.com/testcontainers/testcontainers-go/modules/consul v0.43.0
 	github.com/testcontainers/testcontainers-go/modules/etcd v0.43.0
-	github.com/tochemey/olric v0.3.10
+	github.com/tochemey/olric v0.3.11
 	github.com/zeebo/xxh3 v1.1.0
 	go.etcd.io/bbolt v1.5.0
 	go.etcd.io/etcd/api/v3 v3.6.13
@@ -36,8 +36,8 @@ require (
 	go.uber.org/multierr v1.11.0
 	go.uber.org/zap v1.28.0
 	golang.org/x/net v0.56.0
-	golang.org/x/sync v0.21.0
-	golang.org/x/sys v0.46.0
+	golang.org/x/sync v0.22.0
+	golang.org/x/sys v0.47.0
 	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af
 	k8s.io/api v0.36.2
 	k8s.io/apimachinery v0.36.2

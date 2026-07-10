@@ -21,62 +21,44 @@ GoAkt is a distributed actor framework for [Go](https://go.dev/) that lets you b
 
 New to the actor model? Brian Storti's [short introduction](https://www.brianstorti.com/the-actor-model/) is a good starting point; the references at the end of that post go deeper.
 
+## Table of Contents
+
+- [Features](#features)
+- [Installation](#installation)
+- [Examples](#examples)
+- [Support](#support)
+- [Security](#security)
+- [Community](#community)
+- [Contribution](#contribution)
+- [Architecture](#architecture)
+- [Benchmark](#benchmark)
+- [In Production](#in-production)
+- [Sponsors](#sponsors)
+- [Feedback](#feedback)
+
 ## Features
 
-### Core
-
-- Actor model: concurrent actors with typed messages
-- Grains: virtual actors with their own context and lifecycle
-- Hierarchies: parent and child trees via `SpawnChild`, with child-to-parent navigation
-- Lifecycle: `PreStart`, `PostStop`, graceful stop, and poison-pill shutdown
-- Behavior switching: `Become` and `UnBecome`, plus stacked `BecomeStacked` and `UnBecomeStacked` for protocol phases
-- Messaging: `Tell`, `Ask`, `BatchTell`, and `BatchAsk` for fire-and-forget, request-response, and bulk delivery
-- Forward and `PipeTo`: forward messages preserving the original sender, and pipe async task results back to an actor
-- Reentrancy: non-blocking async `Request` with configurable modes and in-flight limits
-- Stashing: `Stash`, `Unstash`, and `UnstashAll` to defer messages during transient states
-- Watch and Terminated: monitor actor lifecycle and receive `Terminated` on death
-- PubSub: topic-based publish and subscribe via a dedicated `TopicActor`, cluster-aware with cross-node dissemination over remoting
-- Mailboxes: unbounded FIFO, bounded, priority, and fair (segmented)
-- Supervision: one-for-one and one-for-all strategies with `Stop`, `Resume`, `Restart`, and `Escalate` directives, plus retry windows
-- Passivation: auto-stop idle actors via a time-based strategy
-- Reinstate: bring a previously stopped actor back online by PID or name
-- Circuit breaker: `PipeTo` integrates the `breaker` package to short-circuit calls to unhealthy dependencies
-- Dead letters: unhandled messages captured and published on the event stream
-
-### Routing
-
-- Routers: round-robin, random, and fan-out strategies
-
-### Scheduling
-
-- Timers: `ScheduleOnce`, recurring `Schedule`, and `ScheduleWithCron` for cron-driven message delivery
-- Schedule lifecycle: `PauseSchedule`, `ResumeSchedule`, and `CancelSchedule` on existing references
-
-### Cluster
-
-- Remoting: TCP actor communication across nodes with pluggable serializers (Proto, CBOR, and custom)
-- TLS and mTLS: configurable transport security for remoting
-- Discovery: Consul, etcd, Kubernetes, NATS, mDNS, and static
-- Location transparency: address actors without knowing their node
-- Relocation: automatic actor relocation on node failure
-- Cluster singletons: single instance cluster-wide with guardian lifecycle
-- Multi-datacenter: DC-transparent messaging, pluggable control plane (NATS JetStream, etcd), and DC-aware placement
-
-### CRDTs & Streams
-
-- CRDTs: `GCounter`, `PNCounter`, `LWWRegister`, `MVRegister`, `ORSet`, `ORMap`, and `Flag`, with delta replication, anti-entropy sync, tombstone deletion, and snapshots
-- Reactive streams: backpressure-aware processing with a composable DSL (`map`, `filter`, `flatMap`, `batch`, `throttle`, fan-out and fan-in), stage fusion, and built-in metrics and tracing
-
-### Observability
-
-- OpenTelemetry metrics, event stream, and dead letters
-- Event stream: in-process topic-based publish and subscribe for system and user events
-- Context propagation: pluggable propagation for request-scoped metadata
-
-### Extensibility
-
-- Extensions: register system-wide capabilities with `WithExtensions` on the actor system, then resolve them from any actor or grain via `Extension` on the receive context
-- Dependency injection: attach serializable dependencies to an actor at spawn time with `WithDependencies`, accessed inside `Receive` via `Dependency` and `Dependencies`; the actor system can also `Inject` dependency types for cluster-wide reconstruction on relocation
+- **Actors and Grains**: concurrent actors with typed messages, plus virtual actors (grains) with their own context and lifecycle
+- **Messaging**: `Tell`, `Ask`, `BatchTell`, and `BatchAsk`; `Forward` preserves the original sender and `PipeTo` feeds async results back to an actor, guarded by a built-in circuit breaker
+- **Reentrancy**: non-blocking `Request` with configurable modes and in-flight limits
+- **Hierarchies and Supervision**: parent-child trees via `SpawnChild`; one-for-one and one-for-all strategies with `Stop`, `Resume`, `Restart`, and `Escalate` directives and retry windows
+- **Lifecycle**: `PreStart`, `PostStop`, graceful stop, poison-pill shutdown, passivation of idle actors, and `Reinstate` to bring stopped actors back online
+- **Behaviors and Stashing**: `Become` and `UnBecome` (with stacked variants) for protocol phases; `Stash` and `Unstash` to defer messages during transient states
+- **Watch and dead letters**: receive `Terminated` when a watched actor dies; unhandled messages are captured on the event stream
+- **Mailboxes**: unbounded FIFO, bounded, priority, and fair (segmented)
+- **Routers**: round-robin, random, and fan-out strategies
+- **PubSub**: cluster-aware topic publish and subscribe through a dedicated `TopicActor`
+- **Scheduling**: `ScheduleOnce`, recurring `Schedule`, and cron-driven `ScheduleWithCron`, with pause, resume, and cancel
+- **Remoting**: TCP actor communication across nodes with pluggable serializers (Proto, CBOR, custom) and TLS or mTLS transport security
+- **Discovery**: Consul, etcd, Kubernetes, NATS, mDNS, and static
+- **Location transparency**: address any actor without knowing which node hosts it
+- **Resilience**: automatic actor relocation on node failure and cluster-wide singletons with guardian lifecycle
+- **Multi-datacenter**: DC-transparent messaging, pluggable control plane (NATS JetStream, etcd), and DC-aware placement
+- **CRDTs**: `GCounter`, `PNCounter`, `LWWRegister`, `MVRegister`, `ORSet`, `ORMap`, and `Flag`, with delta replication, anti-entropy sync, tombstone deletion, and snapshots
+- **Reactive streams**: backpressure-aware pipelines with a composable DSL (`map`, `filter`, `flatMap`, `batch`, `throttle`, fan-out and fan-in), stage fusion, and built-in metrics and tracing
+- **Observability**: OpenTelemetry metrics, an in-process event stream for system and user events, and pluggable context propagation for request-scoped metadata
+- **Extensions**: register system-wide capabilities with `WithExtensions` and resolve them from any actor or grain
+- **Dependency injection**: attach serializable dependencies at spawn time with `WithDependencies`, reconstructed cluster-wide on relocation
 
 See [Documentation](https://docs.goakt.dev) for the full feature reference.
 
@@ -89,14 +71,6 @@ go get github.com/tochemey/goakt/v4
 ## Examples
 
 See the [examples repository](https://github.com/Tochemey/goakt-examples) for runnable code covering local, remote, and clustered actor systems.
-
-## Architecture
-
-Architecture documents: [Architecture](./architecture/).
-
-## Benchmark
-
-Benchmark suite: [Benchmark](./benchmark/).
 
 ## Support
 
@@ -116,9 +90,17 @@ You can join these groups and chat to discuss and ask GoAkt related questions on
 
 ## Contribution
 
-We welcome contributions: bug fixes, new features, and documentation improvements. Before diving in, read the [Architecture Document](./arch/ARCHITECTURE.md) to understand the codebase. We use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) and a Docker-backed `Makefile` so contributors only need Docker and Make installed; run `make help` to see the available targets.
+We welcome contributions: bug fixes, new features, and documentation improvements. Before diving in, read the [Architecture Document](./architecture/ARCHITECTURE.md) to understand the codebase. We use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) and a Docker-backed `Makefile` so contributors only need Docker and Make installed; run `make help` to see the available targets.
 
 See [contributing.md](./CONTRIBUTING.md) for prerequisites, setup, and the full contribution workflow.
+
+## Architecture
+
+Architecture documents: [Architecture](./architecture/).
+
+## Benchmark
+
+Benchmark suite: [Benchmark](./benchmark/).
 
 ## In Production
 

@@ -1,4 +1,4 @@
-# Dispatcher Pool — Architecture
+# Dispatcher Pool Architecture
 
 > The execution substrate underneath every actor in GoAkt.
 
@@ -52,29 +52,30 @@ goroutine.
            └──────┴──────┴──────┴─────┴──────┘
               Each Wᵢ loop:
                  s := readyQueue.take(i)          // local → global → steal → park
-                 s.runTurn(w)                     // drain ≤ 32 msgs, then yield
+                 s.runTurn(w)                     // drain ≤ throughput msgs, then yield
 ```
 
 The public API is untouched: `Tell`, `Ask`, `Spawn`, `Actor.Receive`,
-`PreStart`, `PostStop`, mailboxes — all unchanged. The dispatcher lives
+`PreStart`, `PostStop`, mailboxes: all unchanged. The dispatcher lives
 below `PID.doReceive` and is an implementation detail of the actor package.
 
 ---
 
 ## 2. Components
 
-| File                                                    | Responsibility                                                                    |
-|---------------------------------------------------------|-----------------------------------------------------------------------------------|
-| [`actor/dispatcher.go`](../actor/dispatcher.go)         | Worker pool, lifecycle (`start` / `stop` / `signalStop`), `schedule` entry point. |
-| [`actor/worker.go`](../actor/worker.go)                 | Worker goroutine loop, local-queue reschedule helper.                             |
-| [`actor/ready_queue.go`](../actor/ready_queue.go)       | Per-worker ring buffers, global overflow ring, work stealing, condvar parking.    |
-| [`actor/dispatch_state.go`](../actor/dispatch_state.go) | Three-state atomic machine (`Idle` / `Scheduled` / `Processing`) per actor.       |
-| [`actor/pid.go`](../actor/pid.go)                       | `schedulable.runTurn` implementation, mailbox split, `doReceive` enqueue path.    |
+| File                                                    | Responsibility                                                                                |
+|---------------------------------------------------------|-----------------------------------------------------------------------------------------------|
+| [`actor/dispatcher.go`](../actor/dispatcher.go)         | Worker pool, lifecycle (`start` / `signalStop`), `schedule` entry point, supervision handoff. |
+| [`actor/worker.go`](../actor/worker.go)                 | Worker goroutine loop, local-queue reschedule helper.                                         |
+| [`actor/ready_queue.go`](../actor/ready_queue.go)       | Per-worker ring buffers, global overflow ring, work stealing, condvar parking.                |
+| [`actor/dispatch_state.go`](../actor/dispatch_state.go) | Three-state atomic machine (`Idle` / `Scheduled` / `Processing`) per actor.                   |
+| [`actor/supervision.go`](../actor/supervision.go)       | Shared supervision consumer owned by the dispatcher; drains failure signals from every actor. |
+| [`actor/pid.go`](../actor/pid.go)                       | `schedulable.runTurn` implementation, mailbox split, `doReceive` enqueue path.                |
 
 The dispatcher is constructed in
-[`actorSystem.Start`](../actor/actor_system.go) via
-`newDispatcher(dispatcherWorkerCount(), dispatcherThroughput)` and started
-before any actor is spawned.
+[`NewActorSystem`](../actor/actor_system.go), after the options are applied,
+via `newDispatcher(dispatcherWorkerCount(), system.dispatcherThroughput)`;
+`actorSystem.Start` calls `dispatcher.start()` before any actor is spawned.
 
 ### 2.1 `schedulable` interface
 
@@ -111,10 +112,10 @@ Each `PID` carries a lock-free `schedState` with three values:
             ┌────────────┐
             │ Processing │   exactly one worker owns the actor
             └─────┬──────┘
-                  │ Throughput hit, mailbox non-empty
+                  │ Throughput budget exhausted
                   │   → Store Scheduled; re-push to owning worker's local ring
                   │
-                  │ Budget exhausted with empty mailboxes
+                  │ A dequeue finds both mailboxes drained mid-turn
                   │   → Store Idle; re-check mailboxes; if a racing enqueue
                   │     slipped in, CAS Idle → Scheduled and reclaim
                   ▼
@@ -144,6 +145,7 @@ func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
     if isControlMessage(msg) {
         _ = pid.systemMailbox.Enqueue(receiveCtx)
     } else if err := pid.mailbox.Enqueue(receiveCtx); err != nil {
+        pid.logger.Warn(err)
         pid.handleReceivedError(receiveCtx, err)
         return
     }
@@ -156,7 +158,7 @@ func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
 `isControlMessage` routes `PoisonPill`, `Panicking`, `Pause/ResumePassivation`,
 `PanicSignal`, `Terminated`, and `SendDeadletter` to the system mailbox; all
 other messages go to the user mailbox. `AsyncRequest` / `AsyncResponse` are
-*not* control messages — they participate in the reentrancy stash and must
+*not* control messages; they participate in the reentrancy stash and must
 keep FIFO order with user traffic.
 
 The hot path is one atomic read, one CAS, one mailbox op, and (for the first
@@ -179,9 +181,7 @@ func (pid *PID) runTurn(w *worker) {
     budget := w.dispatcher.throughput
     for range budget {
         if sysMsg := pid.systemMailbox.Dequeue(); sysMsg != nil {
-            if !pid.dispatchOne(sysMsg, now) {
-                releaseContext(sysMsg)
-            }
+            pid.dispatchOne(sysMsg, now)
             continue
         }
         received := pid.mailbox.Dequeue()
@@ -191,9 +191,7 @@ func (pid *PID) runTurn(w *worker) {
             }
             continue
         }
-        if !pid.dispatchOne(received, now) {
-            releaseContext(received)
-        }
+        pid.dispatchOne(received, now)
     }
     pid.schedState.YieldToScheduled()
     w.reschedule(pid)
@@ -202,19 +200,21 @@ func (pid *PID) runTurn(w *worker) {
 
 Two correctness details worth calling out:
 
-- **`dispatchOne` returns `retained bool`.** The reentrancy-stash path holds
-  on to the `ReceiveContext` beyond the turn, so the caller must *not* return
-  it to the pool in that case. All other paths dispatch in place and the
-  context is released.
+- **Context release is owned by the mailbox.** `UnboundedMailbox.Dequeue`
+  reclaims the previous sentinel node, so `dispatchOne` must *not* return the
+  `ReceiveContext` to the pool itself; the mailbox would hand out an in-use
+  head. The reentrancy-stash path holds on to the context beyond the turn.
 - **`finishOrReclaim` closes the enqueue/finish race.** After a drained
-  dequeue, it stores `Idle`, re-reads both mailboxes, and — if a concurrent
-  `doReceive` slipped a message in between the last dequeue and the state
-  store — attempts `TrySchedule` followed by `TakeForProcessing` to reclaim
-  ownership and keep draining within the current turn.
+  dequeue, it stores `Idle`, re-checks both mailboxes for emptiness, and, if
+  a concurrent `doReceive` slipped a message in between the last dequeue and
+  the state store, attempts `TrySchedule` followed by `TakeForProcessing` to
+  reclaim ownership and keep draining within the current turn.
 
-When the budget is exhausted and work remains, the actor yields to
-`Scheduled` and is re-pushed onto the owning worker's local ring via
-`worker.reschedule`. Yielded actors land at the **tail** of the local ring,
+When the budget is exhausted, the actor yields to `Scheduled` and is
+re-pushed onto the owning worker's local ring via `worker.reschedule`,
+whether or not work remains; an actor with drained mailboxes transitions
+back to `Idle` through `finishOrReclaim` at the start of its next turn.
+Yielded actors land at the **tail** of the local ring,
 behind any other scheduled actor, guaranteeing forward progress for peers.
 
 ---
@@ -252,7 +252,7 @@ the take fast-path to skip the mutex when the global ring is known empty.
 When both the local and global rings are empty, the worker rotates through
 sibling workers and attempts to steal half of the first non-empty victim.
 The probe uses the victim's `sizeAtomic` to skip idle siblings without a
-mutex acquire — this matters at scale because every park/wake cycle walks
+mutex acquire; this matters at scale because every park/wake cycle walks
 the sibling array, and the N-way mutex fan-out dominated the take loop
 before the atomic-probe optimisation.
 
@@ -279,9 +279,9 @@ Control-plane messages (`PoisonPill`, supervision, passivation, dead-letter
 routing) cannot queue behind a user-message backlog. Every actor has two
 mailboxes:
 
-- `systemMailbox Mailbox` — an unbounded mailbox that holds control
+- `systemMailbox Mailbox`: an unbounded mailbox that holds control
   messages. Always consulted first inside the budget loop.
-- `mailbox Mailbox` — the normal user mailbox, unchanged from the public
+- `mailbox Mailbox`: the normal user mailbox, unchanged from the public
   `Mailbox` contract.
 
 This is the same split used by Akka and Pekko. Because `systemMailbox` is
@@ -298,22 +298,22 @@ slot and are not aware of the system mailbox.
 
 ### 8.1 Start
 
-`actorSystem.Start` constructs the dispatcher with
-`workerCount = max(GOMAXPROCS, 2)` and `throughput = 32`, then calls
-`dispatcher.start()` which spawns the worker goroutines. Both `start` and the
-stop variants are idempotent.
+`NewActorSystem` constructs the dispatcher with
+`workerCount = max(GOMAXPROCS, 2)` and `throughput = 32` (overridable per
+system with `WithThroughputBudget`). `actorSystem.Start` calls
+`dispatcher.start()`, which spawns the worker goroutines and the shared
+supervision consumer. Both `start` and `signalStop` are idempotent.
 
 ### 8.2 Shutdown
 
-`dispatcher.stop()` closes the ready queue and blocks on the worker
-`WaitGroup`. It must not be called from within a worker turn — the caller
-would wait on its own completion and deadlock.
-
-`actorSystem.shutdown` can be triggered from inside an actor receive handler
-(for example, `rootGuardian.handlePanicSignal`), so it uses
-`dispatcher.signalStop()` from the shutdown defer instead. `signalStop`
-closes the ready queue and wakes all parked workers without blocking; each
-worker finishes its current turn and exits autonomously on its next take.
+`dispatcher.signalStop()` closes the ready queue, wakes all parked workers,
+and stops the shared supervision consumer without waiting for the workers to
+exit. There is no blocking stop variant: `actorSystem.shutdown` can be
+triggered from inside an actor receive handler (for example,
+`rootGuardian.handlePanicSignal`), so the shutdown defer that calls
+`signalStop` must not wait on a worker that may be running the shutdown
+itself. Each worker finishes its current turn and exits autonomously on its
+next take.
 
 PoisonPill delivery is preserved during shutdown: the system-message path is
 drained at turn time, so actors still process their final
@@ -348,9 +348,12 @@ The dispatcher pool preserves every semantic that user code relies on:
   inside a turn on whichever worker happens to own the actor.
 - **Reentrancy stash.** Unchanged; reentrance happens within a single
   worker's call stack for one actor.
-- **Panic recovery.** `defer recover()` inside `dispatchOne`, same as before.
-- **Supervision.** Supervisor directives run on the parent's turn after the
-  child's `Panicking` message reaches the parent's system mailbox.
+- **Panic recovery.** `defer pid.recovery(received)` inside `handleReceived`
+  converts a panic into a supervision signal.
+- **Supervision.** Failure signals go to the single shared supervision
+  consumer owned by the dispatcher (`actor/supervision.go`), which forwards
+  a `Panicking` message to the parent's system mailbox; the supervisor
+  directive still runs on the parent's turn.
 
 The only externally-visible change is `runtime.NumGoroutine()`: it now
 returns `workerCount + O(1)` instead of scaling with active-actor count.
@@ -359,15 +362,15 @@ returns `workerCount + O(1)` instead of scaling with active-actor count.
 
 ## 10. Tuning Constants
 
-All four are unexported package constants, tuned once and revisited only
+All four are unexported package defaults, tuned once and revisited only
 when benchmarks demand it:
 
-| Constant                | Value                  | Location                                          |
-|-------------------------|------------------------|---------------------------------------------------|
-| Worker pool size        | `max(GOMAXPROCS, 2)`   | `dispatcherWorkerCount` in `actor/dispatcher.go`  |
-| Throughput budget       | `32`                   | `dispatcherThroughput` in `actor/dispatcher.go`   |
-| Local-ring capacity     | `256`                  | `localQueueCap` in `actor/ready_queue.go`         |
-| Global-ring initial cap | `64` (doubles on grow) | `globalQueueInitialCap` in `actor/ready_queue.go` |
+| Constant                | Value                                                       | Location                                          |
+|-------------------------|-------------------------------------------------------------|---------------------------------------------------|
+| Worker pool size        | `max(GOMAXPROCS, 2)`                                        | `dispatcherWorkerCount` in `actor/dispatcher.go`  |
+| Throughput budget       | `32` (default; `WithThroughputBudget` overrides per system) | `dispatcherThroughput` in `actor/dispatcher.go`   |
+| Local-ring capacity     | `256`                                                       | `localQueueCap` in `actor/ready_queue.go`         |
+| Global-ring initial cap | `64` (doubles on grow)                                      | `globalQueueInitialCap` in `actor/ready_queue.go` |
 
 The worker count is floored at 2 so work-stealing always has at least one
 sibling to probe. The throughput budget is chosen to amortise Go's
