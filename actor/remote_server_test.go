@@ -45,6 +45,7 @@ import (
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/passivation"
 	"github.com/tochemey/goakt/v4/remote"
+	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
 // newRemoteServerTestSystem builds the minimal actorSystem needed to unit-test
@@ -2550,4 +2551,44 @@ func TestRemoteUnWatchHandler(t *testing.T) {
 
 		require.Empty(t, sys.remoteWatches.watchersFor(watcheeID))
 	})
+}
+
+// TestRemotingSurvivesExpiredStartContext pins the fix for #1252: the remoting server
+// must not inherit cancelation from the Start context, so a bounded startup context
+// expiring after startup completed leaves inbound remoting fully functional.
+func TestRemotingSurvivesExpiredStartContext(t *testing.T) {
+	remotingPort := inet.Get(1)[0]
+
+	sys, err := NewActorSystem("test",
+		WithLogger(log.DiscardLogger),
+		WithRemote(remote.NewConfig("127.0.0.1", remotingPort)),
+	)
+	require.NoError(t, err)
+
+	startCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	require.NoError(t, sys.Start(startCtx))
+
+	ctx := context.TODO()
+	t.Cleanup(func() { require.NoError(t, sys.Stop(ctx)) })
+
+	actorName := "test"
+	pid, err := sys.Spawn(ctx, actorName, NewMockActor())
+	require.NoError(t, err)
+	require.NotNil(t, pid)
+
+	// let the startup budget expire; before the fix every handler context was
+	// born already DeadlineExceeded from this point on
+	pause.For(time.Second)
+
+	remoting := remoteclient.NewClient()
+	t.Cleanup(remoting.Close)
+
+	addr, err := remoting.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
+	require.NoError(t, err)
+	require.NotNil(t, addr)
+
+	reply, err := remoting.RemoteAsk(ctx, address.NoSender(), addr, new(testpb.TestReply), 20*time.Second)
+	require.NoError(t, err)
+	require.NotNil(t, reply)
 }

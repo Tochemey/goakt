@@ -1543,8 +1543,10 @@ func (x *actorSystem) startRemoteServer(ctx context.Context) error {
 		serverOpts = append(serverOpts, inet.WithProtoServerIdleTimeout(x.remoteConfig.IdleTimeout()))
 	}
 
-	// Add context to the server.
-	serverOpts = append(serverOpts, inet.WithProtoServerContext(ctx))
+	// Detach the server's base context from Start's cancelation/deadline: the server's
+	// lifetime is governed by Stop, and a bounded startup context (a DI OnStart hook, a
+	// startup timeout) expiring later must not poison every inbound handler context.
+	serverOpts = append(serverOpts, inet.WithProtoServerContext(context.WithoutCancel(ctx)))
 
 	// Add panic recovery so a misbehaving handler does not crash the connection.
 	serverOpts = append(serverOpts, inet.WithProtoServerPanicHandler(func(typeName protoreflect.FullName, recovered any) {
