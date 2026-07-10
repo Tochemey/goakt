@@ -111,7 +111,7 @@ This framework is used in production by the following projects/companies:
 
 ## Sponsors
 
-<!-- sponsors --><a href="https://github.com/andrew-werdna"><img src="https:&#x2F;&#x2F;github.com&#x2F;andrew-werdna.png" width="60px" alt="User avatar: Andrew Brown" /></a><!-- sponsors -->
+<!-- sponsors --><a href="https://github.com/andrew-werdna"><img src="https:&#x2F;&#x2F;github.com&#x2F;andrew-werdna.png" width="60px" alt="User avatar: Andrew Brown" /></a><a href="https://github.com/StringKe"><img src="https:&#x2F;&#x2F;github.com&#x2F;StringKe.png" width="60px" alt="User avatar: StringKe" /></a><!-- sponsors -->
 
 ## Feedback
 
