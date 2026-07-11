@@ -27,6 +27,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"os/signal"
@@ -7169,6 +7170,25 @@ func TestDeriveRelocationSetFromRegistry(t *testing.T) {
 		require.Len(t, state.GetGrains(), 1)
 		_, hasG1 := state.GetGrains()["k/g1"]
 		assert.True(t, hasG1)
+	})
+
+	t.Run("returns false when a port does not fit int32", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+
+		// a peers port beyond math.MaxInt32 parses as an int but must be
+		// rejected by the bounds-checked conversion instead of truncating
+		// silently into the wire record
+		system.peerRemotingPorts.Set("127.0.0.2:2147483648", departedRemoting)
+		state, ok := system.deriveRelocationSetFromRegistry(context.Background(), "127.0.0.2:2147483648")
+		require.False(t, ok)
+		assert.Nil(t, state)
+
+		// an out-of-range cached remoting port is rejected the same way
+		system.peerRemotingPorts.Set(departedPeerAddress, math.MaxInt32+1)
+		state, ok = system.deriveRelocationSetFromRegistry(context.Background(), departedPeerAddress)
+		require.False(t, ok)
+		assert.Nil(t, state)
 	})
 
 	t.Run("returns false when the remoting port is not cached", func(t *testing.T) {

@@ -64,6 +64,7 @@ import (
 	inet "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pointer"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
+	"github.com/tochemey/goakt/v4/internal/strconvx"
 	"github.com/tochemey/goakt/v4/internal/ticker"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/internal/validation"
@@ -3311,6 +3312,20 @@ func (x *actorSystem) deriveRelocationSetFromRegistry(ctx context.Context, peerA
 		return nil, false
 	}
 
+	// Bounds-checked conversions keep an out-of-range port from silently
+	// truncating into the derived snapshot's wire record.
+	peersPort32, err := strconvx.Int2Int32(peersPort)
+	if err != nil {
+		x.logger.Errorf("node=%s derived an invalid peers port from address=%s: %v", x.String(), peerAddress, err)
+		return nil, false
+	}
+
+	remotingPort32, err := strconvx.Int2Int32(remotingPort)
+	if err != nil {
+		x.logger.Errorf("node=%s derived an invalid remoting port for departed node=%s: %v", x.String(), peerAddress, err)
+		return nil, false
+	}
+
 	timeout := x.clusterReadTimeout(time.Second)
 
 	// Filter to the departed host during the scan so a crash recovery never
@@ -3382,8 +3397,8 @@ func (x *actorSystem) deriveRelocationSetFromRegistry(ctx context.Context, peerA
 
 	return &internalpb.PeerState{
 		Host:         host,
-		PeersPort:    int32(peersPort),    // nolint
-		RemotingPort: int32(remotingPort), // nolint
+		PeersPort:    peersPort32,
+		RemotingPort: remotingPort32,
 		Actors:       wireActors,
 		Grains:       wireGrains,
 	}, true
