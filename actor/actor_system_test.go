@@ -7068,6 +7068,29 @@ func TestPruneRemoteWatchesForHost(t *testing.T) {
 // duplicate departures are ignored while in flight, distinct addresses proceed
 // concurrently, and a completed address can rebalance again (regression for the
 // old rebalancedNodes set that never evicted entries).
+// TestClusterReadTimeout verifies the shared accessor behind the registry scan
+// budgets: the user-configured cluster read timeout wins, and the caller's
+// fallback applies when clustering is not configured or the value is unset.
+func TestClusterReadTimeout(t *testing.T) {
+	system, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	sys := system.(*actorSystem)
+
+	// no cluster config: the fallback applies
+	require.Nil(t, sys.clusterConfig)
+	assert.Equal(t, 2*time.Second, sys.clusterReadTimeout(2*time.Second))
+
+	// cluster config without an explicit read timeout: the fallback applies
+	sys.clusterConfig = NewClusterConfig()
+	sys.clusterConfig.readTimeout = 0
+	assert.Equal(t, 2*time.Second, sys.clusterReadTimeout(2*time.Second))
+
+	// user-configured read timeout wins over the fallback
+	sys.clusterConfig = NewClusterConfig().WithReadTimeout(5 * time.Second)
+	assert.Equal(t, 5*time.Second, sys.clusterReadTimeout(2*time.Second))
+}
+
 func TestBeginEndRelocation(t *testing.T) {
 	system, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
 	require.NoError(t, err)

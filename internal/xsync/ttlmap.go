@@ -173,6 +173,15 @@ func (s *TTLMap[K, V]) ActiveLen() int {
 	return n
 }
 
+// Delete removes the entry for k, if present, whether live or expired. The
+// vacated order slot is reclaimed on the next Set-driven compaction, matching
+// Get's lazy-delete behavior.
+func (s *TTLMap[K, V]) Delete(k K) {
+	s.mu.Lock()
+	delete(s.items, k)
+	s.mu.Unlock()
+}
+
 // Reset removes all entries from the map. Vacated slots are zeroed so any
 // key or value references are released for garbage collection.
 func (s *TTLMap[K, V]) Reset() {

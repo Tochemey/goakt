@@ -98,6 +98,11 @@ const (
 	// re-puts of each survivor's own local entries during a slow rolling restart
 	// (idempotent Puts, O(local actors) each), whereas too short risks losing
 	// registry entries for actors that are still alive on survivors.
+	//
+	// This constant is the floor, sized for the default cadence. When the user
+	// stretches the routing-table refresh via WithClusterStateSyncInterval the
+	// effective window scales with it (twice the configured interval; see
+	// NewActorSystem), so a slower cadence never outlives the window.
 	correlatedDepartureWindow = 2 * time.Minute
 )
 
@@ -807,6 +812,9 @@ type ActorSystem interface {
 	// decide whether the leader is an eligible relocation target for a
 	// role-constrained actor.
 	getNodeRoles() []string
+	// clusterReadTimeout returns the user-configured cluster read timeout, or
+	// fallback when clustering is not configured or the value is unset.
+	clusterReadTimeout(fallback time.Duration) time.Duration
 	recreateActorFromWire(ctx context.Context, props *internalpb.Actor, departedNode string) error
 	recreateGrainFromWire(ctx context.Context, grain *internalpb.Grain, departedNode string) error
 	releaseGrainForLazyRelocation(ctx context.Context, grain *internalpb.Grain, departedNode string) error
@@ -1120,6 +1128,17 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	// apply the various options
 	for _, opt := range opts {
 		opt.Apply(system)
+	}
+
+	// The correlated-departure window must cover olric's re-replication time,
+	// which is driven by the routing-table refresh cadence. That cadence is
+	// user-configurable (WithClusterStateSyncInterval), so when it is stretched
+	// beyond the default the window scales with it, keeping the compile-time
+	// constant as a floor rather than a silent cap (see correlatedDepartureWindow).
+	if system.clusterConfig != nil {
+		if window := 2 * system.clusterConfig.clusterStateSyncInterval; window > correlatedDepartureWindow {
+			system.recentDepartures = xsync.NewTTLMap[string, types.Unit](window)
+		}
 	}
 
 	// build the dispatcher after options so tuning knobs like WithThroughputBudget take effect.
@@ -3138,6 +3157,12 @@ func (x *actorSystem) handleNodeJoinedEvent(event *cluster.Event) {
 	// departs without a graceful-shutdown snapshot (see handleNodeLeftEvent).
 	x.cachePeerRemotingPorts(context.Background())
 
+	// A member that restarts at the same host:port within its own handoff
+	// window is reachable again: close the window so name-based sends resolving
+	// to it are delivered instead of being stalled or refused as mid-relocation
+	// for the remainder of the window.
+	x.markEndpointRecovered(nodeJoined.Address)
+
 	x.tryOpenGrainActivationBarrier(context.Background())
 	// A joining node does not invalidate any existing registry entry: the
 	// cluster store (Olric DMap) migrates partition data to the new owner as
@@ -3286,10 +3311,7 @@ func (x *actorSystem) deriveRelocationSetFromRegistry(ctx context.Context, peerA
 		return nil, false
 	}
 
-	timeout := time.Second
-	if x.clusterConfig != nil && x.clusterConfig.readTimeout > 0 {
-		timeout = x.clusterConfig.readTimeout
-	}
+	timeout := x.clusterReadTimeout(time.Second)
 
 	// Filter to the departed host during the scan so a crash recovery never
 	// materializes the whole cluster registry just to keep one node's records;
@@ -3641,6 +3663,16 @@ func (x *actorSystem) getNodeRoles() []string {
 	}
 
 	return x.clusterNode.Roles
+}
+
+// clusterReadTimeout returns the user-configured cluster read timeout, or
+// fallback when clustering is not configured or the value is unset.
+func (x *actorSystem) clusterReadTimeout(fallback time.Duration) time.Duration {
+	if x.clusterConfig != nil && x.clusterConfig.readTimeout > 0 {
+		return x.clusterConfig.readTimeout
+	}
+
+	return fallback
 }
 
 // actorAddress returns the actor path provided the actor name
@@ -4229,7 +4261,13 @@ func (x *actorSystem) recordRelocationMetrics(ctx context.Context, departed stri
 		attribute.String("relocation.node", departed),
 	)
 
-	x.relocationMetric.Duration().Record(ctx, duration.Milliseconds(), attrs)
+	// An aborted relocation carries no meaningful wall-clock duration (nothing
+	// ran); recording its zero would skew the histogram toward instant
+	// rebalances, so only genuine durations are sampled.
+	if duration > 0 {
+		x.relocationMetric.Duration().Record(ctx, duration.Milliseconds(), attrs)
+	}
+
 	x.relocationMetric.Relocated().Add(ctx, int64(relocated), attrs)
 	x.relocationMetric.Failed().Add(ctx, int64(failed), attrs)
 }
@@ -4255,7 +4293,21 @@ func (x *actorSystem) recordRelocationMetrics(ctx context.Context, departed stri
 func (x *actorSystem) reportAbortedRelocation(ctx context.Context, pid *PID, peersAddress string, peerState *internalpb.PeerState, elapsed time.Duration, cause error) {
 	departedNode := address.FormatHostPort(peerState.GetHost(), int(peerState.GetRemotingPort()))
 
+	// The abort runs precisely when the cluster is already unhealthy (peers
+	// unreachable or the worker dead), and it executes inside the relocator's
+	// message handler, so the directory cleanup is bounded and fanned out
+	// rather than issued as unbounded sequential round trips: a grain whose
+	// release cannot complete within the budget is reported as failed instead
+	// of stalling the relocator's mailbox.
+	rctx, cancel := context.WithTimeout(ctx, abortedRelocationCleanupTimeout)
+	defer cancel()
+
+	var mu sync.Mutex
 	failedGrains := make(map[string]*internalpb.Grain)
+
+	eg := new(errgroup.Group)
+	eg.SetLimit(defaultRelocationConcurrency)
+
 	for id, grain := range peerState.GetGrains() {
 		if grain.GetDisableRelocation() {
 			continue
@@ -4266,11 +4318,19 @@ func (x *actorSystem) reportAbortedRelocation(ctx context.Context, pid *PID, pee
 			continue
 		}
 
-		if err := x.releaseGrainForLazyRelocation(ctx, grain, departedNode); err != nil {
-			x.logger.Errorf("node=%s failed to release lazy grain=%s directory entry on aborted relocation: %v (hint: grain may be unreachable until re-registered; check cluster quorum)", x.String(), grain.GetGrainId().GetValue(), err)
-			failedGrains[id] = grain
-		}
+		eg.Go(func() error {
+			if err := x.releaseGrainForLazyRelocation(rctx, grain, departedNode); err != nil {
+				x.logger.Errorf("node=%s failed to release lazy grain=%s directory entry on aborted relocation: %v (hint: grain may be unreachable until re-registered; check cluster quorum)", x.String(), grain.GetGrainId().GetValue(), err)
+
+				mu.Lock()
+				failedGrains[id] = grain
+				mu.Unlock()
+			}
+			return nil
+		})
 	}
+
+	_ = eg.Wait()
 
 	publishRelocationFailed(pid, peersAddress, peerState.GetActors(), failedGrains, cause)
 	x.recordRelocationMetrics(ctx, peersAddress, elapsed, 0, len(peerState.GetActors())+len(failedGrains))

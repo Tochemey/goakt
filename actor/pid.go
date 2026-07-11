@@ -1154,6 +1154,9 @@ func (pid *PID) Tell(ctx context.Context, to *PID, message any) error {
 
 // SendAsync sends a message asynchronously to the named actor.
 // The actor is resolved locally first; if not found, all active datacenters are queried.
+// It never blocks on a relocation handoff: when the target's host has just left
+// the cluster and its actors are being recreated elsewhere, SendAsync fails
+// fast with ErrRelocationInProgress instead of buffering the send.
 func (pid *PID) SendAsync(ctx context.Context, actorName string, message any) error {
 	if err := pid.assertLocal(); err != nil {
 		return err
@@ -1167,11 +1170,12 @@ func (pid *PID) SendAsync(ctx context.Context, actorName string, message any) er
 	// is unnecessary here and would add contention on the hot path.
 	system := pid.actorSystem
 
-	// Resolve in the local datacenter and deliver, masking the brief window in
-	// which the target's host has left the cluster and its actor is being
-	// recreated on a survivor (see deliverAcrossHandoff). In steady state this
-	// resolves and delivers exactly once.
-	_, err := pid.deliverAcrossHandoff(ctx, actorName, 0, func(ctx context.Context, to *PID) (any, error) {
+	// Resolve in the local datacenter and deliver exactly once. SendAsync is a
+	// non-blocking fire-and-forget API (it also backs rctx.SendAsync inside
+	// actor receive loops), so it never enters the handoff retry loop: a target
+	// mid-relocation fails fast with ErrRelocationInProgress instead of being
+	// buffered (see deliverBypassingHandoff).
+	_, err := pid.deliverBypassingHandoff(ctx, actorName, func(ctx context.Context, to *PID) (any, error) {
 		return nil, pid.Tell(ctx, to, message)
 	})
 	if err == nil {

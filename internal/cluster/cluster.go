@@ -456,29 +456,7 @@ func (x *cluster) ActorExists(ctx context.Context, actorName string) (bool, erro
 
 // Actors scans the unified map and returns all registered actors.
 func (x *cluster) Actors(ctx context.Context, timeout time.Duration) ([]*internalpb.Actor, error) {
-	if !x.running.Load() {
-		return nil, ErrEngineNotRunning
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	x.mu.RLock()
-	defer x.mu.RUnlock()
-
-	var (
-		mu     sync.Mutex
-		actors = make([]*internalpb.Actor, 0)
-	)
-	if err := x.scanActors(ctx, func(actor *internalpb.Actor) {
-		mu.Lock()
-		actors = append(actors, actor)
-		mu.Unlock()
-	}); err != nil {
-		return nil, err
-	}
-
-	return actors, nil
+	return collectScan(ctx, x, timeout, x.scanActors, nil)
 }
 
 // CountActorsByHost scans the unified map and tallies registered actors per
@@ -517,73 +495,6 @@ func (x *cluster) CountActorsByHost(ctx context.Context, timeout time.Duration) 
 	}
 
 	return counts, nil
-}
-
-// scanActors streams every registered actor record and invokes visit for each,
-// decoded exactly once. It is the shared scan used by Actors and
-// CountActorsByHost so both agree on which keys are actor metadata (skipping the
-// round-robin counter and foreign namespaces).
-//
-// The registry can hold thousands of entries, so the per-key Gets are fanned out
-// with bounded concurrency (actorScanConcurrency) instead of issued one at a
-// time: a sequential scan otherwise blows the caller's timeout budget on large
-// registries. Keys are collected up front so the scanner is released before the
-// Gets run. visit may be called from multiple goroutines concurrently, so
-// callers must synchronize any shared state they mutate; the callback order is
-// unspecified.
-//
-// Callers must hold x.mu (read lock) for the duration of the scan.
-func (x *cluster) scanActors(ctx context.Context, visit func(*internalpb.Actor)) error {
-	scanner, err := x.dmap.Scan(ctx)
-	if err != nil {
-		return err
-	}
-
-	rrKey := composeKey(namespaceActors, ActorsRoundRobinKey)
-	keys := make([]string, 0)
-	for scanner.Next() {
-		key := scanner.Key()
-		if !hasNamespace(key, namespaceActors) {
-			continue
-		}
-
-		if key == rrKey {
-			// skip the round-robin counter entry which is not actor metadata
-			continue
-		}
-		keys = append(keys, key)
-	}
-	scanner.Close()
-
-	eg, egctx := errgroup.WithContext(ctx)
-	eg.SetLimit(actorScanConcurrency)
-	for _, key := range keys {
-		eg.Go(func() error {
-			resp, err := x.dmap.Get(egctx, key)
-			if err != nil {
-				if errors.Is(err, olric.ErrKeyNotFound) {
-					// the entry was removed between the scan and this Get; skip it
-					return nil
-				}
-				return err
-			}
-
-			value, err := resp.Byte()
-			if err != nil {
-				return err
-			}
-
-			actor, err := decode(value)
-			if err != nil {
-				return err
-			}
-
-			visit(actor)
-			return nil
-		})
-	}
-
-	return eg.Wait()
 }
 
 // PutGrain stores the provided grain metadata and refreshes the peer state.
@@ -729,29 +640,7 @@ func (x *cluster) RemoveGrain(ctx context.Context, identity string) error {
 
 // Grains scans the map and returns all registered grains.
 func (x *cluster) Grains(ctx context.Context, timeout time.Duration) ([]*internalpb.Grain, error) {
-	if !x.running.Load() {
-		return nil, ErrEngineNotRunning
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	x.mu.RLock()
-	defer x.mu.RUnlock()
-
-	var (
-		mu     sync.Mutex
-		grains = make([]*internalpb.Grain, 0)
-	)
-	if err := x.scanGrains(ctx, func(grain *internalpb.Grain) {
-		mu.Lock()
-		grains = append(grains, grain)
-		mu.Unlock()
-	}); err != nil {
-		return nil, err
-	}
-
-	return grains, nil
+	return collectScan(ctx, x, timeout, x.scanGrains, nil)
 }
 
 // ActorsByHost streams the registry and returns only the actors owned by the
@@ -759,128 +648,21 @@ func (x *cluster) Grains(ctx context.Context, timeout time.Duration) ([]*interna
 // full actor set, so recovering a single crashed node's records after a
 // departure does not spike memory proportional to the whole cluster registry.
 func (x *cluster) ActorsByHost(ctx context.Context, host string, port int, timeout time.Duration) ([]*internalpb.Actor, error) {
-	if !x.running.Load() {
-		return nil, ErrEngineNotRunning
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	x.mu.RLock()
-	defer x.mu.RUnlock()
-
 	target := address.FormatHostPort(host, port)
-	var (
-		mu     sync.Mutex
-		actors = make([]*internalpb.Actor, 0)
-	)
-	if err := x.scanActors(ctx, func(actor *internalpb.Actor) {
+	return collectScan(ctx, x, timeout, x.scanActors, func(actor *internalpb.Actor) bool {
 		hostPort, ok := address.HostPortOf(actor.GetAddress())
-		if !ok || hostPort != target {
-			return
-		}
-		mu.Lock()
-		actors = append(actors, actor)
-		mu.Unlock()
-	}); err != nil {
-		return nil, err
-	}
-
-	return actors, nil
+		return ok && hostPort == target
+	})
 }
 
 // GrainsByHost streams the registry and returns only the grains owned by the
 // given host:port. Like ActorsByHost it discards non-matching records during
 // the scan instead of building the full grain set first.
 func (x *cluster) GrainsByHost(ctx context.Context, host string, port int, timeout time.Duration) ([]*internalpb.Grain, error) {
-	if !x.running.Load() {
-		return nil, ErrEngineNotRunning
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	x.mu.RLock()
-	defer x.mu.RUnlock()
-
 	port32 := int32(port) // nolint
-	var (
-		mu     sync.Mutex
-		grains = make([]*internalpb.Grain, 0)
-	)
-	if err := x.scanGrains(ctx, func(grain *internalpb.Grain) {
-		if grain.GetHost() != host || grain.GetPort() != port32 {
-			return
-		}
-		mu.Lock()
-		grains = append(grains, grain)
-		mu.Unlock()
-	}); err != nil {
-		return nil, err
-	}
-
-	return grains, nil
-}
-
-// scanGrains streams every registered grain record and invokes visit for each,
-// decoded exactly once. It mirrors scanActors: keys are collected up front so
-// the scanner is released before the per-key Gets fan out with bounded
-// concurrency, keeping a large registry from blowing the caller's timeout on a
-// sequential scan. visit may be called concurrently, so callers must synchronize
-// any shared state they mutate; the callback order is unspecified.
-//
-// Callers must hold x.mu (read lock) for the duration of the scan.
-func (x *cluster) scanGrains(ctx context.Context, visit func(*internalpb.Grain)) error {
-	scanner, err := x.dmap.Scan(ctx)
-	if err != nil {
-		return err
-	}
-
-	rrKey := composeKey(namespaceGrains, GrainsRoundRobinKey)
-	keys := make([]string, 0)
-	for scanner.Next() {
-		key := scanner.Key()
-		if !hasNamespace(key, namespaceGrains) {
-			continue
-		}
-
-		if key == rrKey {
-			// skip the round-robin counter entry which is not grain metadata
-			continue
-		}
-		keys = append(keys, key)
-	}
-	scanner.Close()
-
-	eg, egctx := errgroup.WithContext(ctx)
-	eg.SetLimit(actorScanConcurrency)
-	for _, key := range keys {
-		eg.Go(func() error {
-			resp, err := x.dmap.Get(egctx, key)
-			if err != nil {
-				if errors.Is(err, olric.ErrKeyNotFound) {
-					// the entry was removed between the scan and this Get; skip it
-					return nil
-				}
-				return err
-			}
-
-			value, err := resp.Byte()
-			if err != nil {
-				return err
-			}
-
-			grain, err := decodeGrain(value)
-			if err != nil {
-				return err
-			}
-
-			visit(grain)
-			return nil
-		})
-	}
-
-	return eg.Wait()
+	return collectScan(ctx, x, timeout, x.scanGrains, func(grain *internalpb.Grain) bool {
+		return grain.GetHost() == host && grain.GetPort() == port32
+	})
 }
 
 // LookupKind fetches the value registered for the provided actor kind.
@@ -1726,4 +1508,125 @@ func (x *cluster) deleteRecord(ctx context.Context, namespace recordNamespace, k
 
 	_, err := x.dmap.Delete(ctx, composeKey(namespace, key))
 	return err
+}
+
+// scanActors streams every registered actor record and invokes visit for each,
+// decoded exactly once. It is the shared scan used by Actors, ActorsByHost and
+// CountActorsByHost so all agree on which keys are actor metadata. See
+// scanNamespace for the concurrency contract on visit.
+//
+// Callers must hold x.mu (read lock) for the duration of the scan.
+func (x *cluster) scanActors(ctx context.Context, visit func(*internalpb.Actor)) error {
+	return scanNamespace(ctx, x, namespaceActors, ActorsRoundRobinKey, decode, visit)
+}
+
+// scanGrains streams every registered grain record and invokes visit for each,
+// decoded exactly once. It is the grain counterpart of scanActors; see
+// scanNamespace for the concurrency contract on visit.
+//
+// Callers must hold x.mu (read lock) for the duration of the scan.
+func (x *cluster) scanGrains(ctx context.Context, visit func(*internalpb.Grain)) error {
+	return scanNamespace(ctx, x, namespaceGrains, GrainsRoundRobinKey, decodeGrain, visit)
+}
+
+// scanNamespace streams every record in the given namespace and invokes visit
+// for each, decoded exactly once. It is the single scan protocol behind the
+// actor and grain registry scans, so both agree on which keys are record
+// metadata: foreign namespaces and the namespace's round-robin counter entry
+// (rrName), which is not record metadata, are skipped.
+//
+// The registry can hold thousands of entries, so the per-key Gets are fanned out
+// with bounded concurrency (actorScanConcurrency) instead of issued one at a
+// time: a sequential scan otherwise blows the caller's timeout budget on large
+// registries. Keys are collected up front so the scanner is released before the
+// Gets run. visit may be called from multiple goroutines concurrently, so
+// callers must synchronize any shared state they mutate; the callback order is
+// unspecified.
+//
+// Callers must hold x.mu (read lock) for the duration of the scan.
+func scanNamespace[T any](ctx context.Context, x *cluster, namespace recordNamespace, rrName string, decodeRecord func([]byte) (T, error), visit func(T)) error {
+	scanner, err := x.dmap.Scan(ctx)
+	if err != nil {
+		return err
+	}
+
+	rrKey := composeKey(namespace, rrName)
+	keys := make([]string, 0)
+
+	for scanner.Next() {
+		key := scanner.Key()
+		if !hasNamespace(key, namespace) || key == rrKey {
+			continue
+		}
+		keys = append(keys, key)
+	}
+
+	scanner.Close()
+
+	eg, egctx := errgroup.WithContext(ctx)
+	eg.SetLimit(actorScanConcurrency)
+
+	for _, key := range keys {
+		eg.Go(func() error {
+			resp, err := x.dmap.Get(egctx, key)
+			if err != nil {
+				if errors.Is(err, olric.ErrKeyNotFound) {
+					// the entry was removed between the scan and this Get; skip it
+					return nil
+				}
+				return err
+			}
+
+			value, err := resp.Byte()
+			if err != nil {
+				return err
+			}
+
+			record, err := decodeRecord(value)
+			if err != nil {
+				return err
+			}
+
+			visit(record)
+			return nil
+		})
+	}
+
+	return eg.Wait()
+}
+
+// collectScan runs scan under the cluster's shared read guards (engine-running
+// check, caller timeout, membership read lock) and collects every record the
+// keep filter accepts; a nil keep collects everything. It is the shared shell
+// of the slice-returning registry scans (Actors, ActorsByHost, Grains,
+// GrainsByHost) so the guard-and-collect protocol lives in one place.
+func collectScan[T any](ctx context.Context, x *cluster, timeout time.Duration, scan func(context.Context, func(T)) error, keep func(T) bool) ([]T, error) {
+	if !x.running.Load() {
+		return nil, ErrEngineNotRunning
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	x.mu.RLock()
+	defer x.mu.RUnlock()
+
+	var (
+		mu  sync.Mutex
+		out = make([]T, 0)
+	)
+
+	if err := scan(ctx, func(record T) {
+		if keep != nil && !keep(record) {
+			return
+		}
+
+		mu.Lock()
+		out = append(out, record)
+		mu.Unlock()
+	}); err != nil {
+		return nil, err
+	}
+
+	return out, nil
 }

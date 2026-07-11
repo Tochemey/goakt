@@ -218,10 +218,9 @@ func TestRelocationWorkerReleasesLazyGrains(t *testing.T) {
 	sys := system.(*actorSystem)
 
 	clusterMock := mockscluster.NewCluster(t)
-	// single-node cluster: no peers
+	// single-node cluster: no peers. With no actors to place, the load scan
+	// (CountActorsByHost) is skipped entirely.
 	clusterMock.EXPECT().Peers(mock.Anything).Return(nil, nil).Once()
-	// the leader tallies actors per node once to seed load-aware placement
-	clusterMock.EXPECT().CountActorsByHost(mock.Anything, mock.Anything).Return(nil, nil).Once()
 	// the lazy grain's directory entry still points at the departed node, so it
 	// is released rather than recreated
 	clusterMock.EXPECT().GetGrain(mock.Anything, "kind/lazy").
@@ -288,8 +287,8 @@ func TestRelocationWorkerDistributesLazyGrainsToPeers(t *testing.T) {
 	peer := &cluster.Peer{Host: "127.0.0.2", RemotingPort: 9002}
 	clusterMock := mockscluster.NewCluster(t)
 	clusterMock.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{peer}, nil).Once()
-	// the leader tallies actors per node once to seed load-aware placement
-	clusterMock.EXPECT().CountActorsByHost(mock.Anything, mock.Anything).Return(nil, nil).Once()
+	// with no actors to place, the load scan (CountActorsByHost) is skipped
+	// entirely.
 	// exactly one grain is released locally (the leader's share); which of the
 	// two it is depends on map iteration order
 	clusterMock.EXPECT().GetGrain(mock.Anything, mock.Anything).
@@ -453,11 +452,13 @@ func TestRelocationWorkerShareFailsWithoutFallbackPeer(t *testing.T) {
 	}
 }
 
-// TestRelocationWorkerReleasesUndeliverableLazyGrains verifies that when a lazy
-// grain's share cannot be delivered to any peer, the leader removes its stale
-// directory entry itself so the grain is not left permanently unreachable (the
-// TellGrain/AskGrain fast path does not self-heal a stale owner). The lazy grain
-// is not reported as a failure; only the eager grain is.
+// TestRelocationWorkerReleasesUndeliverableLazyGrains verifies that when a
+// share cannot be delivered to any peer, the leader takes it locally through
+// the shared dispatch rule: the lazy grain's stale directory entry is removed
+// (so the grain is not left permanently unreachable; the TellGrain/AskGrain
+// fast path does not self-heal a stale owner) and the eager grain is handled
+// by recreateGrainFromWire, which here observes an entry already re-owned by
+// another live node and skips it. Neither grain is a failure.
 func TestRelocationWorkerReleasesUndeliverableLazyGrains(t *testing.T) {
 	ctx := context.Background()
 
@@ -480,6 +481,14 @@ func TestRelocationWorkerReleasesUndeliverableLazyGrains(t *testing.T) {
 			Port:    8080,
 		}, nil).Once()
 	clusterMock.EXPECT().RemoveGrain(mock.Anything, "kind/lazy").Return(nil).Once()
+	// the eager grain's entry already points at another live node, so the
+	// leader-local dispatch skips reactivating it
+	clusterMock.EXPECT().GetGrain(mock.Anything, "kind/eager").
+		Return(&internalpb.Grain{
+			GrainId: &internalpb.GrainId{Value: "kind/eager"},
+			Host:    "127.0.0.2",
+			Port:    9002,
+		}, nil).Once()
 	sys.cluster = clusterMock
 
 	worker := &relocationWorker{
@@ -497,10 +506,7 @@ func TestRelocationWorkerReleasesUndeliverableLazyGrains(t *testing.T) {
 
 	worker.relocateShare(ctx, requests, peers[0], peers, failures)
 
-	items := failures.items()
-	require.Len(t, items, 1)
-	assert.True(t, items[0].GetGrain())
-	assert.Equal(t, "kind/eager", items[0].GetId())
+	assert.Empty(t, failures.items())
 }
 
 // TestRelocationWorkerReportsFailedUndeliverableLazyRelease verifies that when
@@ -621,6 +627,38 @@ func TestBuildRelocateBatchRequestsChunksLargeShares(t *testing.T) {
 // out, and an actor no survivor can host is recorded once with an accurate
 // message instead of being blamed on a single ring-neighbor.
 func TestReassignByRole(t *testing.T) {
+	t.Run("distributes across survivors and records the truly unplaceable", testReassignByRoleDistribution)
+	t.Run("falls back to the leader for actors only it can host", testReassignByRoleLeaderFallback)
+	t.Run("spreads role-less actors across eligible survivors", testReassignByRoleSpreadsLoad)
+}
+
+func testReassignByRoleSpreadsLoad(t *testing.T) {
+	actors := make([]*internalpb.Actor, 6)
+	for i := range actors {
+		actors[i] = &internalpb.Actor{Address: address.New(fmt.Sprintf("actor-%d", i), "test", "127.0.0.9", 7000).String()}
+	}
+	requests := []*internalpb.RelocateBatchRequest{{DepartedNode: "127.0.0.9:7000", Actors: actors}}
+
+	survivors := []*cluster.Peer{
+		{Host: "10.0.0.1", RemotingPort: 1},
+		{Host: "10.0.0.2", RemotingPort: 2},
+		{Host: "10.0.0.3", RemotingPort: 3},
+	}
+
+	failures := &relocationFailures{}
+	actorShares, leaderActors, _ := reassignByRole(requests, survivors, nil, failures)
+
+	// role-less actors must spread evenly instead of piling onto survivors[0]
+	require.Len(t, actorShares, 3)
+	for i := range actorShares {
+		assert.Len(t, actorShares[i], 2, "survivor %d must receive an even share", i)
+	}
+
+	assert.Empty(t, leaderActors)
+	assert.Empty(t, failures.items())
+}
+
+func testReassignByRoleDistribution(t *testing.T) {
 	gpu := "gpu"
 	blue := "blue"
 	missing := "missing"
@@ -651,7 +689,7 @@ func TestReassignByRole(t *testing.T) {
 	}
 
 	failures := &relocationFailures{}
-	actorShares, grains := reassignByRole(requests, survivors, failures)
+	actorShares, leaderActors, grains := reassignByRole(requests, survivors, nil, failures)
 
 	require.Len(t, actorShares, 3)
 	// role-less actor lands on the first survivor
@@ -664,6 +702,9 @@ func TestReassignByRole(t *testing.T) {
 	require.Len(t, actorShares[2], 1)
 	assert.Contains(t, actorShares[2][0].GetAddress(), "blue-actor")
 
+	// a role-less leader takes nothing while survivors can host every actor
+	assert.Empty(t, leaderActors)
+
 	// grains are flattened out for the caller to place
 	require.Len(t, grains, 1)
 
@@ -673,6 +714,49 @@ func TestReassignByRole(t *testing.T) {
 	assert.False(t, items[0].GetGrain())
 	assert.Contains(t, items[0].GetId(), "unplaceable")
 	assert.Contains(t, items[0].GetMessage(), "missing")
+}
+
+func testReassignByRoleLeaderFallback(t *testing.T) {
+	gpu := "gpu"
+	missing := "missing"
+	requests := []*internalpb.RelocateBatchRequest{
+		{
+			DepartedNode: "127.0.0.9:7000",
+			Actors: []*internalpb.Actor{
+				{Address: address.New("no-role", "test", "127.0.0.9", 7000).String()},
+				{Address: address.New("gpu-actor", "test", "127.0.0.9", 7000).String(), Role: &gpu},
+				{Address: address.New("unplaceable", "test", "127.0.0.9", 7000).String(), Role: &missing},
+			},
+		},
+	}
+
+	// no survivor advertises gpu, but the leader does: the gpu actor must be
+	// recovered locally instead of being reported as unplaceable
+	survivors := []*cluster.Peer{{Host: "10.0.0.1", RemotingPort: 1}}
+
+	failures := &relocationFailures{}
+	actorShares, leaderActors, grains := reassignByRole(requests, survivors, []string{"gpu"}, failures)
+
+	require.Len(t, actorShares, 1)
+	require.Len(t, actorShares[0], 1)
+	assert.Contains(t, actorShares[0][0].GetAddress(), "no-role")
+
+	require.Len(t, leaderActors, 1)
+	assert.Contains(t, leaderActors[0].GetAddress(), "gpu-actor")
+
+	assert.Empty(t, grains)
+
+	// only the actor no surviving node (leader included) can host is a failure
+	items := failures.items()
+	require.Len(t, items, 1)
+	assert.Contains(t, items[0].GetId(), "unplaceable")
+
+	// with no survivors at all, every leader-eligible actor goes local
+	failures = &relocationFailures{}
+	actorShares, leaderActors, _ = reassignByRole(requests, nil, []string{"gpu"}, failures)
+	assert.Empty(t, actorShares)
+	require.Len(t, leaderActors, 2)
+	require.Len(t, failures.items(), 1)
 }
 
 // TestSurvivingPeersExcept verifies the failed target is removed from the peer

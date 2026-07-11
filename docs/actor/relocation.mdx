@@ -167,17 +167,19 @@ See [Extensions and Dependencies](/advanced/extensions-and-dependencies) for dep
 
 ### Message handoff
 
-Name-based sends automatically mask the brief handoff window. When you route a message to an actor whose host has just left the cluster, `SendAsync` / `SendSync` (and the `ReceiveContext` equivalents) detect that the target is being relocated and **buffer the send by re-resolving and retrying with bounded backoff** instead of failing immediately. Once the actor re-registers on a surviving node, the message is delivered there.
+Synchronous name-based sends automatically mask the brief handoff window. When you route a message to an actor whose host has just left the cluster, `SendSync` (and its `ReceiveContext` equivalent) detects that the target is being relocated and **buffers the send by re-resolving and retrying with bounded backoff** instead of failing immediately. Once the actor re-registers on a surviving node, the message is delivered there.
+
+`SendAsync` is non-blocking by contract (it also backs `rctx.SendAsync` inside actor receive loops), so it never waits out a handoff. A target mid-relocation fails fast with `ErrRelocationInProgress`, a retryable signal, instead of being buffered or dialing the departed host.
 
 <Note>
-This is bounded, not unbounded. Each node opens a short handoff window when it observes a departure; a send retries only within that window and only while the target's former host is still relocating. In steady state (no relocation in flight) sends resolve and deliver exactly once, adding no latency. If the window closes before the actor reappears, the send returns a retryable error:
+Masking is bounded, not unbounded. Each node opens a short handoff window when it observes a departure; a `SendSync` retries only within that window (never beyond its own timeout) and only while the target's former host is still relocating. In steady state (no relocation in flight) sends resolve and deliver exactly once, adding no latency. If the window closes before the actor reappears, the send returns a retryable error:
 
 - `ErrActorNotFound`: the actor could not be resolved on any surviving node.
 - `ErrRelocationInProgress`: the target is still being relocated; retry shortly.
 </Note>
 
 <Warning>
-Masking applies to identity-based routing (`SendAsync` / `SendSync` and their `ReceiveContext` wrappers), which re-resolve the target on each attempt. Holding a stale remote `*PID` obtained before the departure and calling `Tell` / `Ask` on it directly bypasses re-resolution and can still surface a connection error, so resolve by name during churn.
+Identity-based routing (`SendAsync` / `SendSync` and their `ReceiveContext` wrappers) re-resolves the target on each send, so both observe the relocation. Holding a stale remote `*PID` obtained before the departure and calling `Tell` / `Ask` on it directly bypasses re-resolution and can still surface a connection error, so resolve by name during churn.
 </Warning>
 
 ## Check relocatability

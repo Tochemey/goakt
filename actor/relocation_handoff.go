@@ -80,6 +80,26 @@ func (x *actorSystem) markEndpointRelocating(peerAddress string) {
 	x.relocatingEndpoints.Set(address.FormatHostPort(host, remotingPort), types.Unit{})
 }
 
+// markEndpointRecovered closes the handoff window for the remoting endpoint of
+// a node that rejoined the cluster at peerAddress. A member that restarts at
+// the same host:port within its own handoff window is healthy and reachable
+// again; leaving the mask in place would stall or refuse every name-based send
+// that resolves to it for the remainder of the window. Unresolvable addresses
+// and unknown ports mean nothing was masked, so the call is a no-op.
+func (x *actorSystem) markEndpointRecovered(peerAddress string) {
+	host, _, err := net.SplitHostPort(peerAddress)
+	if err != nil {
+		return
+	}
+
+	remotingPort, ok := x.peerRemotingPort(peerAddress)
+	if !ok {
+		return
+	}
+
+	x.relocatingEndpoints.Delete(address.FormatHostPort(host, remotingPort))
+}
+
 // isEndpointRelocating reports whether addr resolves to a remoting endpoint that
 // is within its handoff window (its host recently left the cluster and its
 // actors are being recreated elsewhere).
@@ -193,12 +213,14 @@ func (pid *PID) deliverAcrossHandoff(ctx context.Context, actorName string, maxW
 	// notFoundDeadline caps the shorter masking applied to a *failed*
 	// resolution. It is deliberately much shorter than the full window so a name
 	// that never existed (which can only reach the not-found branch) fails fast
-	// during a handoff instead of stalling for the whole window. It never
-	// outlives the caller's own budget.
-	notFoundDeadline := start.Add(relocationNotFoundMaskWindow)
-	if !callerDeadline.IsZero() && callerDeadline.Before(notFoundDeadline) {
-		notFoundDeadline = callerDeadline
-	}
+	// during a handoff instead of stalling for the whole window. It is anchored
+	// at the first not-found observation, not at the send's start: a send that
+	// first masked the pinned-endpoint case and then sees the registry entry's
+	// removal (the remove-then-respawn gap while the actor is recreated on a
+	// survivor) must still get the full not-found budget, otherwise it would
+	// surface a spurious not-found in exactly the scenario the mask exists for.
+	// It never outlives the caller's own budget.
+	var notFoundDeadline time.Time
 
 	backoff := relocationHandoffMinBackoff
 	buffered := false
@@ -234,7 +256,15 @@ func (pid *PID) deliverAcrossHandoff(ctx context.Context, actorName string, maxW
 			// Resolution failed transiently while a relocation is in flight (the
 			// record was removed but its replacement is not visible yet). This is
 			// speculative (a never-existed name looks identical), so it is masked
-			// only briefly.
+			// only briefly, starting from this first failed resolution.
+			if notFoundDeadline.IsZero() {
+				notFoundDeadline = time.Now().Add(relocationNotFoundMaskWindow)
+
+				if !callerDeadline.IsZero() && callerDeadline.Before(notFoundDeadline) {
+					notFoundDeadline = callerDeadline
+				}
+			}
+
 			retryErr = err
 			attemptDeadline = notFoundDeadline
 
@@ -257,6 +287,29 @@ func (pid *PID) deliverAcrossHandoff(ctx context.Context, actorName string, maxW
 		backoff = min(backoff*2, relocationHandoffMaxBackoff)
 		to, err = system.ActorOf(ctx, actorName)
 	}
+}
+
+// deliverBypassingHandoff resolves actorName once and delivers immediately,
+// never entering the handoff retry loop: it is the non-blocking counterpart of
+// deliverAcrossHandoff for fire-and-forget sends (SendAsync, including its
+// ReceiveContext wrapper, which runs inside actor receive loops and must never
+// sleep out a relocation window). A target still pinned to a departing
+// endpoint is not dialed (the host is gone); the send fails fast with
+// ErrRelocationInProgress, a retryable signal that tells the caller the actor
+// is being recreated rather than a misleading connection error.
+func (pid *PID) deliverBypassingHandoff(ctx context.Context, actorName string, deliver func(context.Context, *PID) (any, error)) (any, error) {
+	system := pid.actorSystem
+
+	to, err := system.ActorOf(ctx, actorName)
+	if err != nil {
+		return nil, err
+	}
+
+	if system.InCluster() && to.IsRemote() && system.isEndpointRelocating(to.getAddress()) {
+		return nil, gerrors.ErrRelocationInProgress
+	}
+
+	return deliver(ctx, to)
 }
 
 // sleepWithinHandoff blocks for up to d, clamped so it never sleeps past

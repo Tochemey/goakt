@@ -68,9 +68,17 @@ const (
 	// stays registered so future departures of that address are skipped.
 	relocationBatchSendTimeout = 30 * time.Second
 	// relocationLoadScanTimeout bounds the registry scan that seeds load-aware
-	// placement. The scan is best-effort: on timeout or error it is skipped and
-	// placement falls back to an even split of the departed node's actors.
+	// placement when no cluster read timeout is configured (see
+	// clusterReadTimeout). The scan is best-effort: on timeout or error it is
+	// skipped and placement falls back to an even split of the departed node's
+	// actors.
 	relocationLoadScanTimeout = 2 * time.Second
+	// abortedRelocationCleanupTimeout bounds the lazy-grain directory cleanup an
+	// aborted relocation performs (see reportAbortedRelocation). The abort runs
+	// precisely when the cluster is already unhealthy, so the cleanup must not
+	// hold the relocator's mailbox on unbounded round trips; a grain whose
+	// release cannot complete within the budget is reported as failed instead.
+	abortedRelocationCleanupTimeout = 30 * time.Second
 )
 
 // relocationWorker relocates the actors and grains of a single departed node.
@@ -173,7 +181,14 @@ func (w *relocationWorker) relocate(ctx *ReceiveContext, peerState *internalpb.P
 	// instead of being issued entirely by this node.
 	grains := relocatableGrains(peerState.GetGrains())
 
-	leaderActors, peerActors, unplaceableActors := allocateActors(system.getNodeRoles(), peers, peerState, w.targetLoads(rctx, system, peers))
+	// The load scan only seeds actor placement, so a departed node with no
+	// actors to place skips the registry scan entirely.
+	var loads []int
+	if len(peerState.GetActors()) > 0 {
+		loads = w.targetLoads(rctx, system, peers)
+	}
+
+	leaderActors, peerActors, unplaceableActors := allocateActors(system.getNodeRoles(), peers, peerState, loads)
 	leaderGrains, peerGrains := allocateGrains(len(peers)+1, grains)
 
 	// Role-constrained actors with no surviving eligible node cannot be
@@ -254,9 +269,11 @@ func (w *relocationWorker) relocate(ctx *ReceiveContext, peerState *internalpb.P
 // failure returns nil and allocateActors falls back to balancing only the
 // departed node's actors.
 func (w *relocationWorker) targetLoads(ctx context.Context, system ActorSystem, peers []*cluster.Peer) []int {
-	// CountActorsByHost applies relocationLoadScanTimeout to ctx internally, so
-	// the scan is already bounded; no extra context wrapper is needed here.
-	counts, err := system.getCluster().CountActorsByHost(ctx, relocationLoadScanTimeout)
+	// CountActorsByHost applies the timeout to ctx internally, so the scan is
+	// already bounded; no extra context wrapper is needed here. The budget
+	// honors the user-configured cluster read timeout, like the sibling scan in
+	// deriveRelocationSetFromRegistry, falling back to relocationLoadScanTimeout.
+	counts, err := system.getCluster().CountActorsByHost(ctx, system.clusterReadTimeout(relocationLoadScanTimeout))
 	if err != nil {
 		w.logger.Warnf("load-aware relocation disabled for this rebalance: registry scan failed: %v (hint: placement falls back to an even split of the departed node's actors)", err)
 		return nil
@@ -342,9 +359,13 @@ func enqueueRelocation(ctx context.Context, eg *errgroup.Group, system ActorSyst
 // the remaining survivors: each actor moves to a survivor that advertises its
 // required role and grains (which carry no role) move to a survivor, so a
 // role-constrained actor is not dropped merely because one ring-neighbor lacks
-// its role. An actor that no survivor can host is recorded once with an accurate
-// message; items a chosen survivor also fails to accept are recorded as failed
-// (eager grains and actors) or have their lazy directory entry released.
+// its role. The leader (this node) counts as a surviving host too: an actor
+// only it can host by role is recreated locally, and when no peer survives the
+// whole remainder is taken locally instead of being reported lost. An actor
+// that no surviving node (leader included) can host is recorded once with an
+// accurate message; items a chosen survivor also fails to accept are recorded
+// as failed (eager grains and actors) or have their lazy directory entry
+// released.
 func (w *relocationWorker) relocateShare(ctx context.Context, requests []*internalpb.RelocateBatchRequest, target *cluster.Peer, peers []*cluster.Peer, failures *relocationFailures) {
 	remaining, err := w.sendBatches(ctx, target, requests, failures)
 	if err == nil {
@@ -354,28 +375,53 @@ func (w *relocationWorker) relocateShare(ctx context.Context, requests []*intern
 	w.logger.Warnf("peer=%s:%d unreachable during relocation: %v (hint: redistributing its share among the remaining survivors)", target.Host, target.RemotingPort, err)
 
 	survivors := survivingPeersExcept(peers, target)
-	if len(survivors) == 0 {
+
+	// Without a system there is no local (leader) fallback: record the unsent
+	// share as failed. Only test doubles construct the worker without a pid.
+	if len(survivors) == 0 && w.pid == nil {
 		recordUnsent(remaining, err, failures)
 		w.releaseUndeliverableLazyGrains(ctx, remaining, failures)
 		return
 	}
 
+	var leaderRoles []string
+	if w.pid != nil {
+		leaderRoles = w.pid.ActorSystem().getNodeRoles()
+	}
+
 	departedNode := departedNodeOf(remaining)
-	actorShares, grains := reassignByRole(remaining, survivors, failures)
+	actorShares, leaderActors, grains := reassignByRole(remaining, survivors, leaderRoles, failures)
+
+	// With no peer left standing the leader is the last surviving node, so it
+	// also takes the grains (eager reactivated locally, lazy released).
+	var leaderGrains []*internalpb.Grain
+	if len(survivors) == 0 {
+		leaderGrains = grains
+		grains = nil
+	}
+
+	if len(leaderActors) > 0 || len(leaderGrains) > 0 {
+		system := w.pid.ActorSystem()
+		eg := new(errgroup.Group)
+		eg.SetLimit(defaultRelocationConcurrency)
+		enqueueRelocation(ctx, eg, system, w.logger, departedNode, leaderActors, leaderGrains, failures.record)
+		_ = eg.Wait()
+	}
+
+	// Grains carry no role, so they spread round-robin across the survivors
+	// instead of piling onto one ring-neighbor; a share whose target is
+	// unreachable is released (lazy) or recorded (eager) below.
+	grainShares := make([][]*internalpb.Grain, len(survivors))
+	for i, grain := range grains {
+		grainShares[i%len(survivors)] = append(grainShares[i%len(survivors)], grain)
+	}
 
 	for i, survivor := range survivors {
-		// grains carry no role, so the first survivor takes them all; if it is
-		// unreachable they are released (lazy) or recorded (eager) below.
-		var grainShare []*internalpb.Grain
-		if i == 0 {
-			grainShare = grains
-		}
-
-		if len(actorShares[i]) == 0 && len(grainShare) == 0 {
+		if len(actorShares[i]) == 0 && len(grainShares[i]) == 0 {
 			continue
 		}
 
-		reqs := buildRelocateBatchRequests(departedNode, actorShares[i], grainShare)
+		reqs := buildRelocateBatchRequests(departedNode, actorShares[i], grainShares[i])
 		unsent, serr := w.sendBatches(ctx, survivor, reqs, failures)
 		if serr != nil {
 			recordUnsent(unsent, serr, failures)
@@ -409,39 +455,57 @@ func departedNodeOf(requests []*internalpb.RelocateBatchRequest) string {
 }
 
 // reassignByRole distributes the unsent actors across survivors, assigning each
-// actor to the first survivor advertising its required role and recording an
-// accurate failure for any actor that no survivor can host. It returns the
-// per-survivor actor shares (aligned to survivors) and the flattened grains,
-// which carry no role and are placed by the caller.
-func reassignByRole(requests []*internalpb.RelocateBatchRequest, survivors []*cluster.Peer, failures *relocationFailures) (actorShares [][]*internalpb.Actor, grains []*internalpb.Grain) {
+// actor to the least-loaded survivor advertising its required role (ties break
+// on the lower index) so the redistributed share spreads out instead of piling
+// onto one ring-neighbor. An actor no peer can host falls back to the leader
+// (this node) when leaderRoles qualify it, so an actor whose only remaining
+// eligible host is the leader is recovered locally instead of being dropped;
+// only an actor that no surviving node (leader included) can host is recorded
+// as failed. It returns the per-survivor actor shares (aligned to survivors),
+// the leader's local share, and the flattened grains, which carry no role and
+// are placed by the caller.
+func reassignByRole(requests []*internalpb.RelocateBatchRequest, survivors []*cluster.Peer, leaderRoles []string, failures *relocationFailures) (actorShares [][]*internalpb.Actor, leaderActors []*internalpb.Actor, grains []*internalpb.Grain) {
 	actorShares = make([][]*internalpb.Actor, len(survivors))
 
 	for _, request := range requests {
 		grains = append(grains, request.GetGrains()...)
 
 		for _, wireActor := range request.GetActors() {
-			idx := firstEligibleSurvivor(survivors, wireActor.GetRole())
-			if idx < 0 {
-				rerr := errors.NewRebalancingError(fmt.Errorf("no surviving node advertises role %q required by actor %s", wireActor.GetRole(), wireActor.GetAddress()))
-				failures.record(wireActor.GetAddress(), false, rerr)
+			if idx := leastLoadedEligibleSurvivor(survivors, actorShares, wireActor.GetRole()); idx >= 0 {
+				actorShares[idx] = append(actorShares[idx], wireActor)
 				continue
 			}
-			actorShares[idx] = append(actorShares[idx], wireActor)
+
+			if eligibleForRole(leaderRoles, wireActor.GetRole()) {
+				leaderActors = append(leaderActors, wireActor)
+				continue
+			}
+
+			rerr := errors.NewRebalancingError(fmt.Errorf("no surviving node advertises role %q required by actor %s", wireActor.GetRole(), wireActor.GetAddress()))
+			failures.record(wireActor.GetAddress(), false, rerr)
 		}
 	}
 
-	return actorShares, grains
+	return actorShares, leaderActors, grains
 }
 
-// firstEligibleSurvivor returns the index of the first survivor advertising the
-// given role, or -1 when none does. A role-less actor is eligible everywhere.
-func firstEligibleSurvivor(survivors []*cluster.Peer, role string) int {
+// leastLoadedEligibleSurvivor returns the index of the eligible survivor with
+// the smallest share assigned so far (ties break on the lower index), or -1
+// when none advertises the given role. A role-less actor is eligible everywhere.
+func leastLoadedEligibleSurvivor(survivors []*cluster.Peer, shares [][]*internalpb.Actor, role string) int {
+	best := -1
+
 	for i, survivor := range survivors {
-		if eligibleForRole(survivor.Roles, role) {
-			return i
+		if !eligibleForRole(survivor.Roles, role) {
+			continue
+		}
+
+		if best < 0 || len(shares[i]) < len(shares[best]) {
+			best = i
 		}
 	}
-	return -1
+
+	return best
 }
 
 // releaseUndeliverableLazyGrains removes, leader-side, the directory entries of

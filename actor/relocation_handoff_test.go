@@ -26,6 +26,7 @@ import (
 	"context"
 	stderrors "errors"
 	"net"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -128,6 +129,27 @@ func TestRelocatingEndpointTracking(t *testing.T) {
 		assert.False(t, sys.isEndpointRelocating(address.New("a", "test", "127.0.0.9", remotingPort+1)))
 		// nil address never matches
 		assert.False(t, sys.isEndpointRelocating(nil))
+	})
+
+	t.Run("recovery closes the handoff window for a rejoined endpoint", func(t *testing.T) {
+		sys.peerRemotingPorts.Set(peerAddress, remotingPort)
+		sys.markEndpointRelocating(peerAddress)
+		require.True(t, sys.isEndpointRelocating(address.New("a", "test", "127.0.0.9", remotingPort)))
+
+		sys.markEndpointRecovered(peerAddress)
+
+		assert.False(t, sys.isEndpointRelocating(address.New("a", "test", "127.0.0.9", remotingPort)))
+		assert.False(t, sys.relocationInFlight())
+	})
+
+	t.Run("recovery is a no-op on a malformed or unknown address", func(t *testing.T) {
+		sys.peerRemotingPorts.Set(peerAddress, remotingPort)
+		sys.markEndpointRelocating(peerAddress)
+
+		sys.markEndpointRecovered("not-an-address")
+		sys.markEndpointRecovered(net.JoinHostPort("127.0.0.42", "9999"))
+
+		assert.True(t, sys.isEndpointRelocating(address.New("a", "test", "127.0.0.9", remotingPort)))
 	})
 }
 
@@ -429,5 +451,111 @@ func TestDeliverAcrossHandoff(t *testing.T) {
 		require.ErrorIs(t, err, gerrors.ErrRelocationInProgress)
 		assert.Less(t, elapsed, relocationHandoffWindow, "the caller timeout must cap the wait below the full handoff window")
 		assert.Equal(t, 1, sys.handoffs)
+	})
+
+	t.Run("not-found masking budget starts at the first failed resolution", func(t *testing.T) {
+		departing := remotePIDAt("127.0.0.9", 7000)
+		survivor := remotePIDAt("127.0.0.2", 9002)
+		start := time.Now()
+		var sawNotFound atomic.Bool
+		sys := &fakeHandoffSystem{
+			inCluster:  true,
+			inFlight:   true,
+			relocating: map[string]bool{address.FormatHostPort("127.0.0.9", 7000): true},
+			resolve: func(int) (*PID, error) {
+				// Pinned to the departing endpoint well past the not-found mask
+				// window, then the registry entry is removed (the remove-then-
+				// respawn gap) before the survivor's entry appears. If the
+				// not-found budget were anchored at the send's start it would
+				// already be exhausted here and the send would fail spuriously.
+				if time.Since(start) < 2*relocationNotFoundMaskWindow {
+					return departing, nil
+				}
+				if sawNotFound.CompareAndSwap(false, true) {
+					return nil, gerrors.NewErrActorNotFound("target")
+				}
+				return survivor, nil
+			},
+		}
+		pid := &PID{actorSystem: sys}
+
+		resp, err := pid.deliverAcrossHandoff(context.Background(), "target", 0, func(_ context.Context, to *PID) (any, error) {
+			assert.Same(t, survivor, to)
+			return "done", nil
+		})
+		require.NoError(t, err)
+		assert.Equal(t, "done", resp)
+		assert.True(t, sawNotFound.Load(), "the resolve sequence must have exercised the not-found branch")
+	})
+}
+
+func TestDeliverBypassingHandoff(t *testing.T) {
+	t.Run("not clustered delivers once and returns the result", func(t *testing.T) {
+		to := remotePIDAt("127.0.0.1", 9001)
+		sys := &fakeHandoffSystem{
+			inCluster: false,
+			resolve:   func(int) (*PID, error) { return to, nil },
+		}
+		pid := &PID{actorSystem: sys}
+
+		resp, err := pid.deliverBypassingHandoff(context.Background(), "target", func(context.Context, *PID) (any, error) {
+			return "ok", nil
+		})
+		require.NoError(t, err)
+		assert.Equal(t, "ok", resp)
+		assert.Equal(t, 1, sys.attempts)
+	})
+
+	t.Run("surfaces the resolution error without retrying", func(t *testing.T) {
+		sys := &fakeHandoffSystem{
+			inCluster: true,
+			inFlight:  true, // even mid-relocation there is no masking here
+			resolve:   func(int) (*PID, error) { return nil, gerrors.NewErrActorNotFound("target") },
+		}
+		pid := &PID{actorSystem: sys}
+
+		_, err := pid.deliverBypassingHandoff(context.Background(), "target", func(context.Context, *PID) (any, error) {
+			t.Fatal("deliver must not be called when resolution fails")
+			return nil, nil
+		})
+		require.ErrorIs(t, err, gerrors.ErrActorNotFound)
+		assert.Equal(t, 1, sys.attempts, "a non-blocking send must never retry")
+		assert.Equal(t, 0, sys.handoffs)
+	})
+
+	t.Run("fails fast with ErrRelocationInProgress on a departing endpoint", func(t *testing.T) {
+		departing := remotePIDAt("127.0.0.9", 7000)
+		sys := &fakeHandoffSystem{
+			inCluster:  true,
+			relocating: map[string]bool{address.FormatHostPort("127.0.0.9", 7000): true},
+			resolve:    func(int) (*PID, error) { return departing, nil },
+		}
+		pid := &PID{actorSystem: sys}
+
+		start := time.Now()
+		_, err := pid.deliverBypassingHandoff(context.Background(), "target", func(context.Context, *PID) (any, error) {
+			t.Fatal("deliver must not dial a departing endpoint")
+			return nil, nil
+		})
+		require.ErrorIs(t, err, gerrors.ErrRelocationInProgress)
+		assert.Equal(t, 1, sys.attempts)
+		assert.Equal(t, 0, sys.handoffs, "a fail-fast send is not a buffered handoff")
+		assert.Less(t, time.Since(start), relocationHandoffMinBackoff, "the send must not sleep")
+	})
+
+	t.Run("clustered live target delivers and surfaces the outcome", func(t *testing.T) {
+		to := remotePIDAt("127.0.0.1", 9001)
+		boom := stderrors.New("boom")
+		sys := &fakeHandoffSystem{
+			inCluster: true,
+			resolve:   func(int) (*PID, error) { return to, nil },
+		}
+		pid := &PID{actorSystem: sys}
+
+		_, err := pid.deliverBypassingHandoff(context.Background(), "target", func(context.Context, *PID) (any, error) {
+			return nil, boom
+		})
+		require.ErrorIs(t, err, boom)
+		assert.Equal(t, 1, sys.attempts)
 	})
 }

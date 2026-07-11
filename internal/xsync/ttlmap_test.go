@@ -225,6 +225,33 @@ func TestTTLMapActiveLenCountsOnlyLiveEntries(t *testing.T) {
 	assert.Equal(t, 1, m.ActiveLen())
 }
 
+func TestTTLMapDelete(t *testing.T) {
+	m := NewTTLMap[int, string](time.Minute)
+	m.Set(1, "one")
+	m.Set(2, "two")
+
+	m.Delete(1)
+
+	_, ok := m.Get(1)
+	assert.False(t, ok)
+	assert.Equal(t, 1, m.ActiveLen())
+	assert.True(t, m.Active())
+
+	val, ok := m.Get(2)
+	require.True(t, ok)
+	assert.Equal(t, "two", val)
+
+	// deleting an absent key is a no-op
+	m.Delete(42)
+	assert.Equal(t, 1, m.ActiveLen())
+
+	// a deleted key can be re-set and read back
+	m.Set(1, "uno")
+	val, ok = m.Get(1)
+	require.True(t, ok)
+	assert.Equal(t, "uno", val)
+}
+
 func TestTTLMapReset(t *testing.T) {
 	m := NewTTLMap[int, string](time.Minute)
 	m.Set(1, "one")
