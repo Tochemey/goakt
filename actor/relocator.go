@@ -178,13 +178,24 @@ func (r *relocator) handleTerminated(ctx *ReceiveContext, msg *Terminated) {
 
 // abortRelocation gives up on a relocation that could not run at all: it
 // publishes a RelocationFailed event listing every actor and grain of the
-// departed node, removes the node's peer state snapshot and releases the
-// relocation job so future departures of the same address can rebalance.
+// departed node, records the loss in the relocation metrics, removes the node's
+// peer state snapshot and releases the relocation job so future departures of
+// the same address can rebalance.
 func (r *relocator) abortRelocation(ctx *ReceiveContext, address string, peerState *internalpb.PeerState, err error) {
-	publishRelocationFailed(r.pid, address, peerState.GetActors(), peerState.GetGrains(), err)
-
 	system := r.pid.ActorSystem()
-	if derr := system.getClusterStore().DeletePeerState(context.WithoutCancel(ctx.Context()), address); derr != nil {
+	rctx := context.WithoutCancel(ctx.Context())
+
+	// An aborted rebalance (worker spawn failure or abnormal worker death)
+	// relocates nothing. Apply the shared abort accounting so this path agrees
+	// with the worker's Peers() abort and the normal per-item path: every
+	// relocatable actor and eager grain is reported as failed, lazy grain
+	// directory entries are released locally (only a failed release is a
+	// failure), and disabled grains are excluded rather than counted as losses.
+	// This also records the loss in relocation.failed.count so alerting sees it
+	// instead of a healthy-looking rebalance.
+	system.reportAbortedRelocation(rctx, r.pid, address, peerState, 0, err)
+
+	if derr := system.getClusterStore().DeletePeerState(rctx, address); derr != nil {
 		r.logger.Errorf("failed to remove peer=%s state after failed relocation: %v (hint: check cluster store)", address, derr)
 	}
 

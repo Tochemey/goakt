@@ -30,7 +30,6 @@ import (
 	nethttp "net/http"
 	"os"
 	"strconv"
-	"sync"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -1454,55 +1453,18 @@ func (x *actorSystem) relocateBatchHandler(ctx context.Context, _ inet.Connectio
 	logger.Debugf("node=%s relocating batch from departed node=%s: actors=%d grains=%d",
 		x.PeersAddress(), departedNode, len(request.GetActors()), len(request.GetGrains()))
 
-	var (
-		mu       sync.Mutex
-		failures []*internalpb.RelocationFailure
-	)
-
-	record := func(id string, grain bool, err error) {
-		mu.Lock()
-		failures = append(failures, &internalpb.RelocationFailure{Id: id, Grain: grain, Message: err.Error()})
-		mu.Unlock()
-	}
+	failures := &relocationFailures{}
 
 	// Goroutines never return an error so a failing item cannot cancel its
-	// siblings; failures are collected per item instead.
+	// siblings; failures are collected per item instead. The eager/lazy dispatch
+	// is the same shared rule the leader applies to its own share (see
+	// enqueueRelocation), so leader-side and peer-side behavior cannot diverge.
 	eg := new(errgroup.Group)
 	eg.SetLimit(defaultRelocationConcurrency)
-
-	for _, wireActor := range request.GetActors() {
-		eg.Go(func() error {
-			if err := x.recreateActorFromWire(ctx, wireActor, departedNode); err != nil {
-				logger.Errorf("node=%s failed to relocate actor=%s: %v (hint: check actor type registered, cluster quorum)", x.PeersAddress(), wireActor.GetAddress(), err)
-				record(wireActor.GetAddress(), false, err)
-			}
-			return nil
-		})
-	}
-
-	for _, wireGrain := range request.GetGrains() {
-		eg.Go(func() error {
-			// lazy grains: directory cleanup only. A failure here is not an
-			// item loss (activation self-heals a stale entry on next use), so
-			// it is logged, not recorded as a relocation failure.
-			if !wireGrain.GetEagerRelocation() {
-				if err := x.releaseGrainForLazyRelocation(ctx, wireGrain, departedNode); err != nil {
-					logger.Warnf("node=%s failed to release lazy grain=%s directory entry: %v (hint: entry self-heals on next activation)", x.PeersAddress(), wireGrain.GetGrainId().GetValue(), err)
-				}
-				return nil
-			}
-
-			if err := x.recreateGrainFromWire(ctx, wireGrain, departedNode); err != nil {
-				logger.Errorf("node=%s failed to relocate grain=%s: %v (hint: check grain OnActivate, grain kind registered)", x.PeersAddress(), wireGrain.GetGrainId().GetValue(), err)
-				record(wireGrain.GetGrainId().GetValue(), true, err)
-			}
-			return nil
-		})
-	}
-
+	enqueueRelocation(ctx, eg, x, logger, departedNode, request.GetActors(), request.GetGrains(), failures.record)
 	_ = eg.Wait()
 
-	return &internalpb.RelocateBatchResponse{Failures: failures}, nil
+	return &internalpb.RelocateBatchResponse{Failures: failures.items()}, nil
 }
 
 // getNodeMetricHandler handles GetNodeMetric requests over the proto TCP transport.

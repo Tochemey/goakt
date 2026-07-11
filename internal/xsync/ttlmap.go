@@ -143,6 +143,36 @@ func (s *TTLMap[K, V]) Len() int {
 	return l
 }
 
+// Active reports whether the map holds at least one live (non-expired) entry.
+// See ActiveLen for the semantics; this is a convenience for the common
+// "is anything still active" gate.
+func (s *TTLMap[K, V]) Active() bool {
+	return s.ActiveLen() > 0
+}
+
+// ActiveLen returns the number of live (non-expired) entries.
+//
+// Unlike Len it ignores entries that have expired but have not yet been evicted
+// (eviction otherwise only runs on Set), so a caller gets a truthful live count
+// without first triggering a Set. Expired entries encountered during the scan
+// are dropped from the index map, matching Get's lazy-delete behavior; the
+// vacated order slots are reclaimed on the next Set-driven compaction.
+func (s *TTLMap[K, V]) ActiveLen() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := s.now()
+	n := 0
+	for k, idx := range s.items {
+		if now < s.order[idx].expireAt {
+			n++
+			continue
+		}
+		delete(s.items, k)
+	}
+	return n
+}
+
 // Reset removes all entries from the map. Vacated slots are zeroed so any
 // key or value references are released for garbage collection.
 func (s *TTLMap[K, V]) Reset() {

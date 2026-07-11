@@ -87,6 +87,13 @@ var (
 	// ErrActorNotFound indicates that the specified actor could not be found in the system.
 	ErrActorNotFound = errors.New("actor not found")
 
+	// ErrRelocationInProgress is returned when a message is routed to an actor
+	// whose host has left the cluster and whose relocation onto a surviving
+	// node did not complete within the bounded handoff window. It is a
+	// transient, retryable condition: the caller may retry the send once the
+	// relocation settles.
+	ErrRelocationInProgress = errors.New("target actor is being relocated; retry shortly")
+
 	// ErrMethodCallNotAllowed is returned when an RPC-style method call is attempted but not permitted.
 	ErrMethodCallNotAllowed = errors.New("method call not allowed")
 

@@ -185,6 +185,46 @@ func TestTTLMapRefreshExtendsDeadline(t *testing.T) {
 	assert.Equal(t, "one", val)
 }
 
+func TestTTLMapActiveIgnoresExpiredEntries(t *testing.T) {
+	clock := newFakeClock()
+	m := NewTTLMap[int, int](time.Minute)
+	m.now = clock.NowNano
+
+	assert.False(t, m.Active())
+	assert.Equal(t, 0, m.ActiveLen())
+
+	for i := range 5 {
+		m.Set(i, i)
+	}
+	assert.True(t, m.Active())
+	assert.Equal(t, 5, m.ActiveLen())
+
+	// past the deadline every entry has expired but none has been evicted
+	// (eviction only runs on Set); Len still counts them, Active/ActiveLen do not.
+	clock.Advance(2 * time.Minute)
+	assert.Equal(t, 5, m.Len())
+	assert.False(t, m.Active())
+	assert.Equal(t, 0, m.ActiveLen())
+
+	// the scan also dropped the expired keys from the index map
+	assert.Equal(t, 0, m.Len())
+}
+
+func TestTTLMapActiveLenCountsOnlyLiveEntries(t *testing.T) {
+	clock := newFakeClock()
+	m := NewTTLMap[int, int](time.Minute)
+	m.now = clock.NowNano
+
+	m.Set(1, 1)
+	clock.Advance(30 * time.Second)
+	m.Set(2, 2) // deadline is 30s later than key 1
+
+	// advance past key 1's deadline but not key 2's
+	clock.Advance(40 * time.Second)
+	assert.True(t, m.Active())
+	assert.Equal(t, 1, m.ActiveLen())
+}
+
 func TestTTLMapReset(t *testing.T) {
 	m := NewTTLMap[int, string](time.Minute)
 	m.Set(1, "one")

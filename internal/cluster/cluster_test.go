@@ -2213,6 +2213,183 @@ func TestActorsPropagatesByteError(t *testing.T) {
 }
 
 // nolint
+func TestCountActorsByHostTalliesPerHost(t *testing.T) {
+	// two actors share one host, a third lives on another host; the tally must
+	// group by the address's raw "host:port".
+	first := address.New("a", "system", "127.0.0.1", 8080)
+	second := address.New("b", "system", "127.0.0.1", 8080)
+	third := address.New("c", "system", "127.0.0.2", 9002)
+
+	encoded := make(map[string][]byte, 3)
+	for _, addr := range []*address.Address{first, second, third} {
+		key := composeKey(namespaceActors, addr.String())
+		value, err := encode(&internalpb.Actor{Address: addr.String()})
+		require.NoError(t, err)
+		encoded[key] = value
+	}
+
+	rrKey := composeKey(namespaceActors, ActorsRoundRobinKey)
+	grainKey := composeKey(namespaceGrains, "grain")
+
+	keys := make([]string, 0, len(encoded)+2)
+	for key := range encoded {
+		keys = append(keys, key)
+	}
+	keys = append(keys, rrKey, grainKey)
+
+	cl := &cluster{
+		running: atomic.NewBool(true),
+		logger:  log.DiscardLogger,
+		dmap: &MockDMap{
+			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
+				return &iteratorStub{keys: keys}, nil
+			},
+			getFn: func(ctx context.Context, key string) (*olric.GetResponse, error) {
+				value, ok := encoded[key]
+				if !ok {
+					// the round-robin counter and non-actor namespaces must be
+					// filtered out before any Get is issued.
+					t.Fatalf("unexpected Get for key %q", key)
+				}
+				return newGetResponseWithValue(value), nil
+			},
+		},
+	}
+
+	counts, err := cl.CountActorsByHost(context.Background(), time.Second)
+	require.NoError(t, err)
+	require.Equal(t, map[string]int{
+		address.FormatHostPort("127.0.0.1", 8080): 2,
+		address.FormatHostPort("127.0.0.2", 9002): 1,
+	}, counts)
+}
+
+// nolint
+func TestCountActorsByHostReturnsScanError(t *testing.T) {
+	expectedErr := errors.New("scan failure")
+	cl := &cluster{
+		running: atomic.NewBool(true),
+		logger:  log.DiscardLogger,
+		dmap: &MockDMap{
+			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
+				return nil, expectedErr
+			},
+		},
+	}
+
+	counts, err := cl.CountActorsByHost(context.Background(), time.Second)
+	require.Nil(t, counts)
+	require.ErrorIs(t, err, expectedErr)
+}
+
+// nolint
+func TestCountActorsByHostPropagatesGetError(t *testing.T) {
+	expectedErr := errors.New("actors get failure")
+	cl := &cluster{
+		running: atomic.NewBool(true),
+		logger:  log.DiscardLogger,
+		dmap: &MockDMap{
+			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
+				return &iteratorStub{keys: []string{composeKey(namespaceActors, "actor")}}, nil
+			},
+			getFn: func(ctx context.Context, key string) (*olric.GetResponse, error) {
+				require.Equal(t, composeKey(namespaceActors, "actor"), key)
+				return nil, expectedErr
+			},
+		},
+	}
+
+	counts, err := cl.CountActorsByHost(context.Background(), time.Second)
+	require.Nil(t, counts)
+	require.ErrorIs(t, err, expectedErr)
+}
+
+// nolint
+func TestActorsByHostReturnsOnlyMatchingHost(t *testing.T) {
+	match1 := address.New("a", "system", "127.0.0.1", 8080)
+	match2 := address.New("b", "system", "127.0.0.1", 8080)
+	other := address.New("c", "system", "127.0.0.2", 9002)
+
+	encoded := make(map[string][]byte, 3)
+	for _, addr := range []*address.Address{match1, match2, other} {
+		key := composeKey(namespaceActors, addr.String())
+		value, err := encode(&internalpb.Actor{Address: addr.String()})
+		require.NoError(t, err)
+		encoded[key] = value
+	}
+
+	keys := make([]string, 0, len(encoded))
+	for key := range encoded {
+		keys = append(keys, key)
+	}
+
+	cl := &cluster{
+		running: atomic.NewBool(true),
+		logger:  log.DiscardLogger,
+		dmap: &MockDMap{
+			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
+				return &iteratorStub{keys: keys}, nil
+			},
+			getFn: func(ctx context.Context, key string) (*olric.GetResponse, error) {
+				return newGetResponseWithValue(encoded[key]), nil
+			},
+		},
+	}
+
+	actors, err := cl.ActorsByHost(context.Background(), "127.0.0.1", 8080, time.Second)
+	require.NoError(t, err)
+	require.Len(t, actors, 2)
+	for _, actor := range actors {
+		hostPort, ok := address.HostPortOf(actor.GetAddress())
+		require.True(t, ok)
+		require.Equal(t, address.FormatHostPort("127.0.0.1", 8080), hostPort)
+	}
+}
+
+// nolint
+func TestGrainsByHostReturnsOnlyMatchingHost(t *testing.T) {
+	grains := []*internalpb.Grain{
+		{GrainId: &internalpb.GrainId{Value: "k/g1"}, Host: "127.0.0.1", Port: 8080},
+		{GrainId: &internalpb.GrainId{Value: "k/g2"}, Host: "127.0.0.2", Port: 9002},
+		{GrainId: &internalpb.GrainId{Value: "k/g3"}, Host: "127.0.0.1", Port: 8080},
+	}
+
+	encoded := make(map[string][]byte, len(grains))
+	for _, grain := range grains {
+		key := composeKey(namespaceGrains, grain.GetGrainId().GetValue())
+		value, err := encodeGrain(grain)
+		require.NoError(t, err)
+		encoded[key] = value
+	}
+
+	keys := make([]string, 0, len(encoded))
+	for key := range encoded {
+		keys = append(keys, key)
+	}
+
+	cl := &cluster{
+		running: atomic.NewBool(true),
+		logger:  log.DiscardLogger,
+		dmap: &MockDMap{
+			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
+				return &iteratorStub{keys: keys}, nil
+			},
+			getFn: func(ctx context.Context, key string) (*olric.GetResponse, error) {
+				return newGetResponseWithValue(encoded[key]), nil
+			},
+		},
+	}
+
+	result, err := cl.GrainsByHost(context.Background(), "127.0.0.1", 8080, time.Second)
+	require.NoError(t, err)
+	require.Len(t, result, 2)
+	for _, grain := range result {
+		require.Equal(t, "127.0.0.1", grain.GetHost())
+		require.Equal(t, int32(8080), grain.GetPort())
+	}
+}
+
+// nolint
 func TestGetGrainReturnsDMapError(t *testing.T) {
 	expectedErr := errors.New("get failure")
 	cl := &cluster{

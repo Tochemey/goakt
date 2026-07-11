@@ -251,3 +251,57 @@ func TestParse(t *testing.T) {
 		}
 	})
 }
+
+func TestHostPortOf(t *testing.T) {
+	tests := []struct {
+		name   string
+		addr   string
+		wantHP string
+		wantOK bool
+	}{
+		{name: "IPv4 address", addr: "goakt://system@127.0.0.1:8080/name", wantHP: "127.0.0.1:8080", wantOK: true},
+		{name: "hostname address", addr: "goakt://sys@node-1.svc:9000/root/child", wantHP: "node-1.svc:9000", wantOK: true},
+		{name: "IPv6 address is raw and un-bracketed", addr: "goakt://system@::1:8080/name", wantHP: "::1:8080", wantOK: true},
+		{name: "matches what the address embeds", addr: New("actor", "system", "10.0.0.5", 7000).String(), wantHP: "10.0.0.5:7000", wantOK: true},
+		{name: "no path segment", addr: "goakt://system@127.0.0.1:8080", wantHP: "", wantOK: false},
+		{name: "no system separator", addr: "goakt://127.0.0.1:8080/name", wantHP: "", wantOK: false},
+		{name: "empty endpoint", addr: "goakt://system@/name", wantHP: "", wantOK: false},
+		{name: "empty string", addr: "", wantHP: "", wantOK: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hostPort, ok := HostPortOf(tt.addr)
+			assert.Equal(t, tt.wantOK, ok)
+			assert.Equal(t, tt.wantHP, hostPort)
+		})
+	}
+}
+
+func TestFormatHostPort(t *testing.T) {
+	// FormatHostPort must be the inverse of HostPortOf for both IPv4 and IPv6,
+	// and must match the raw endpoint an address embeds (no IPv6 brackets).
+	tests := []struct {
+		name string
+		host string
+		port int
+		want string
+	}{
+		{name: "IPv4", host: "127.0.0.1", port: 8080, want: "127.0.0.1:8080"},
+		{name: "hostname", host: "node-1.svc", port: 9000, want: "node-1.svc:9000"},
+		{name: "IPv6 stays un-bracketed", host: "::1", port: 9003, want: "::1:9003"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			formatted := FormatHostPort(tt.host, tt.port)
+			assert.Equal(t, tt.want, formatted)
+
+			// round-trip: the endpoint embedded in a full address extracts back
+			// to exactly the formatted value.
+			embedded, ok := HostPortOf(New("actor", "system", tt.host, tt.port).String())
+			assert.True(t, ok)
+			assert.Equal(t, formatted, embedded)
+		})
+	}
+}

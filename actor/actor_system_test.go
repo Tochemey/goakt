@@ -5713,6 +5713,115 @@ func TestResyncGrains_ErrorPaths(t *testing.T) {
 	assert.ErrorIs(t, err, assert.AnError)
 }
 
+func TestResyncAfterClusterEventSkipsWithReplicas(t *testing.T) {
+	clusterMock := new(mockscluster.Cluster)
+	system := MockReplicationTestSystem(clusterMock)
+	system.clusterConfig = &ClusterConfig{replicaCount: 2}
+
+	system.locker.Lock()
+	system.actors = newTree()
+	system.actors.noSender = system.noSender
+	system.grains = xsync.NewMap[string, *grainPID]()
+	system.locker.Unlock()
+
+	pid := &PID{
+		actor:        NewMockActor(),
+		address:      address.New("resync-skip", system.name, "127.0.0.1", int(system.remoteConfig.BindPort())),
+		dependencies: xsync.NewMap[string, extension.Dependency](),
+		logger:       log.DiscardLogger,
+		actorSystem:  system,
+	}
+	pid.setState(runningState, true)
+
+	node := newPidNode(pid)
+	system.actors.pids[node.id] = node
+	system.actors.counter.Add(1)
+
+	system.resyncAfterClusterEvent(cluster.NodeLeft, "127.0.0.1:9000")
+
+	// With more than one replica olric re-replicates the departed partitions,
+	// so the surviving actor must not be re-enqueued for a redundant repair.
+	assert.Empty(t, system.actorsQueue)
+}
+
+func TestResyncAfterClusterEventRunsWithoutReplicas(t *testing.T) {
+	clusterMock := new(mockscluster.Cluster)
+	system := MockReplicationTestSystem(clusterMock)
+	system.clusterConfig = &ClusterConfig{replicaCount: 1}
+
+	system.locker.Lock()
+	system.actors = newTree()
+	system.actors.noSender = system.noSender
+	system.grains = xsync.NewMap[string, *grainPID]()
+	system.locker.Unlock()
+
+	pid := &PID{
+		actor:        NewMockActor(),
+		address:      address.New("resync-run", system.name, "127.0.0.1", int(system.remoteConfig.BindPort())),
+		dependencies: xsync.NewMap[string, extension.Dependency](),
+		logger:       log.DiscardLogger,
+		actorSystem:  system,
+	}
+	pid.setState(runningState, true)
+
+	node := newPidNode(pid)
+	system.actors.pids[node.id] = node
+	system.actors.counter.Add(1)
+
+	system.resyncAfterClusterEvent(cluster.NodeLeft, "127.0.0.1:9000")
+
+	// Without replicas the surviving actor's registry entry may have been lost
+	// with the departed node, so it must be re-enqueued for cluster repair.
+	select {
+	case actor := <-system.actorsQueue:
+		assert.Equal(t, pid.ID(), actor.GetAddress())
+	default:
+		t.Fatal("expected the surviving actor to be re-enqueued for cluster repair")
+	}
+}
+
+func TestResyncAfterClusterEventRunsOnCorrelatedDepartures(t *testing.T) {
+	clusterMock := new(mockscluster.Cluster)
+	system := MockReplicationTestSystem(clusterMock)
+	system.clusterConfig = &ClusterConfig{replicaCount: 2}
+
+	system.locker.Lock()
+	system.actors = newTree()
+	system.actors.noSender = system.noSender
+	system.grains = xsync.NewMap[string, *grainPID]()
+	system.locker.Unlock()
+
+	pid := &PID{
+		actor:        NewMockActor(),
+		address:      address.New("resync-correlated", system.name, "127.0.0.1", int(system.remoteConfig.BindPort())),
+		dependencies: xsync.NewMap[string, extension.Dependency](),
+		logger:       log.DiscardLogger,
+		actorSystem:  system,
+	}
+	pid.setState(runningState, true)
+
+	node := newPidNode(pid)
+	system.actors.pids[node.id] = node
+	system.actors.counter.Add(1)
+
+	// First departure alone stays within olric's tolerance (replicaCount-1=1),
+	// so the repair is skipped.
+	system.resyncAfterClusterEvent(cluster.NodeLeft, "127.0.0.1:9000")
+	assert.Empty(t, system.actorsQueue)
+
+	// A second, distinct departure within the correlated-departure window reaches
+	// replicaCount concurrent losses, so olric backups may not have survived and
+	// the repair must run to restore entries for actors alive on this survivor.
+	system.resyncAfterClusterEvent(cluster.NodeLeft, "127.0.0.2:9000")
+
+	select {
+	case actor := <-system.actorsQueue:
+		assert.Equal(t, pid.ID(), actor.GetAddress())
+	default:
+		t.Fatal("expected the surviving actor to be re-enqueued for cluster repair on correlated departures")
+	}
+}
+
 func TestCleanupCluster_RemoveKindFailure(t *testing.T) {
 	clusterMock := new(mockscluster.Cluster)
 	system := MockReplicationTestSystem(clusterMock)
@@ -6999,6 +7108,10 @@ func TestDeriveRelocationSetFromRegistry(t *testing.T) {
 		system := MockReplicationTestSystem(clusterMock)
 		system.peerRemotingPorts.Set(departedPeerAddress, departedRemoting)
 
+		// ActorsByHost/GrainsByHost already filter to the departed node's
+		// host:port in the cluster layer, so the mock returns only records on the
+		// departed node; deriveRelocationSetFromRegistry then applies the
+		// relocatable and system-name filters.
 		actors := []*internalpb.Actor{
 			// included: relocatable actor on the departed node
 			{Address: address.New("worker-1", system.name, departedHost, departedRemoting).String(), Relocatable: true},
@@ -7006,23 +7119,17 @@ func TestDeriveRelocationSetFromRegistry(t *testing.T) {
 			{Address: address.New("worker-2", system.name, departedHost, departedRemoting).String(), Relocatable: false},
 			// excluded: system actor
 			{Address: address.New("GoAktSystemGuardian", system.name, departedHost, departedRemoting).String(), Relocatable: true},
-			// excluded: lives on another (surviving) node
-			{Address: address.New("worker-3", system.name, "127.0.0.1", 8080).String(), Relocatable: true},
-			// excluded: unparseable address
-			{Address: "not-a-valid-address", Relocatable: true},
 		}
 
 		grains := []*internalpb.Grain{
 			// included: grain on the departed node
 			{GrainId: &internalpb.GrainId{Kind: "k", Name: "g1", Value: "k/g1"}, Host: departedHost, Port: departedRemoting},
-			// excluded: grain on a surviving node
-			{GrainId: &internalpb.GrainId{Kind: "k", Name: "g2", Value: "k/g2"}, Host: "127.0.0.1", Port: 8080},
 			// excluded: system grain
 			{GrainId: &internalpb.GrainId{Kind: "k", Name: "GoAktSystemGuardian", Value: "k/GoAktSystemGuardian"}, Host: departedHost, Port: departedRemoting},
 		}
 
-		clusterMock.EXPECT().Actors(mock.Anything, mock.Anything).Return(actors, nil).Once()
-		clusterMock.EXPECT().Grains(mock.Anything, mock.Anything).Return(grains, nil).Once()
+		clusterMock.EXPECT().ActorsByHost(mock.Anything, departedHost, departedRemoting, mock.Anything).Return(actors, nil).Once()
+		clusterMock.EXPECT().GrainsByHost(mock.Anything, departedHost, departedRemoting, mock.Anything).Return(grains, nil).Once()
 
 		state, ok := system.deriveRelocationSetFromRegistry(context.Background(), departedPeerAddress)
 		require.True(t, ok)
@@ -7060,12 +7167,55 @@ func TestDeriveRelocationSetFromRegistry(t *testing.T) {
 		assert.Nil(t, state)
 	})
 
+	t.Run("returns false when the peer port is not numeric", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+
+		state, ok := system.deriveRelocationSetFromRegistry(context.Background(), "127.0.0.2:notaport")
+		assert.False(t, ok)
+		assert.Nil(t, state)
+	})
+
+	t.Run("uses the configured cluster read timeout", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		system.peerRemotingPorts.Set(departedPeerAddress, departedRemoting)
+
+		readTimeout := 3 * time.Second
+		system.clusterConfig = &ClusterConfig{readTimeout: readTimeout}
+
+		clusterMock.EXPECT().ActorsByHost(mock.Anything, departedHost, departedRemoting, readTimeout).Return(nil, nil).Once()
+		clusterMock.EXPECT().GrainsByHost(mock.Anything, departedHost, departedRemoting, readTimeout).Return(nil, nil).Once()
+
+		state, ok := system.deriveRelocationSetFromRegistry(context.Background(), departedPeerAddress)
+		require.True(t, ok)
+		require.NotNil(t, state)
+	})
+
+	t.Run("skips actors with unparseable addresses", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		system.peerRemotingPorts.Set(departedPeerAddress, departedRemoting)
+
+		actors := []*internalpb.Actor{
+			// relocatable but with an address that cannot be parsed: skipped
+			{Address: "not-an-address", Relocatable: true},
+		}
+		clusterMock.EXPECT().ActorsByHost(mock.Anything, departedHost, departedRemoting, mock.Anything).Return(actors, nil).Once()
+		clusterMock.EXPECT().GrainsByHost(mock.Anything, departedHost, departedRemoting, mock.Anything).Return(nil, nil).Once()
+
+		state, ok := system.deriveRelocationSetFromRegistry(context.Background(), departedPeerAddress)
+		require.True(t, ok)
+		require.NotNil(t, state)
+		assert.Empty(t, state.GetActors())
+	})
+
 	t.Run("returns false when the actor scan fails", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
 		system := MockReplicationTestSystem(clusterMock)
 		system.peerRemotingPorts.Set(departedPeerAddress, departedRemoting)
 
-		clusterMock.EXPECT().Actors(mock.Anything, mock.Anything).Return(nil, assert.AnError).Once()
+		clusterMock.EXPECT().ActorsByHost(mock.Anything, departedHost, departedRemoting, mock.Anything).Return(nil, assert.AnError).Once()
 
 		state, ok := system.deriveRelocationSetFromRegistry(context.Background(), departedPeerAddress)
 		assert.False(t, ok)
@@ -7077,8 +7227,8 @@ func TestDeriveRelocationSetFromRegistry(t *testing.T) {
 		system := MockReplicationTestSystem(clusterMock)
 		system.peerRemotingPorts.Set(departedPeerAddress, departedRemoting)
 
-		clusterMock.EXPECT().Actors(mock.Anything, mock.Anything).Return(nil, nil).Once()
-		clusterMock.EXPECT().Grains(mock.Anything, mock.Anything).Return(nil, assert.AnError).Once()
+		clusterMock.EXPECT().ActorsByHost(mock.Anything, departedHost, departedRemoting, mock.Anything).Return(nil, nil).Once()
+		clusterMock.EXPECT().GrainsByHost(mock.Anything, departedHost, departedRemoting, mock.Anything).Return(nil, assert.AnError).Once()
 
 		state, ok := system.deriveRelocationSetFromRegistry(context.Background(), departedPeerAddress)
 		assert.False(t, ok)
@@ -7090,8 +7240,8 @@ func TestDeriveRelocationSetFromRegistry(t *testing.T) {
 		system := MockReplicationTestSystem(clusterMock)
 		system.peerRemotingPorts.Set(departedPeerAddress, departedRemoting)
 
-		clusterMock.EXPECT().Actors(mock.Anything, mock.Anything).Return(nil, nil).Once()
-		clusterMock.EXPECT().Grains(mock.Anything, mock.Anything).Return(nil, nil).Once()
+		clusterMock.EXPECT().ActorsByHost(mock.Anything, departedHost, departedRemoting, mock.Anything).Return(nil, nil).Once()
+		clusterMock.EXPECT().GrainsByHost(mock.Anything, departedHost, departedRemoting, mock.Anything).Return(nil, nil).Once()
 
 		state, ok := system.deriveRelocationSetFromRegistry(context.Background(), departedPeerAddress)
 		require.True(t, ok)

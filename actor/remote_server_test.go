@@ -2702,8 +2702,10 @@ func TestRelocateBatchHandler(t *testing.T) {
 			Return(&internalpb.Grain{Host: "127.0.0.1", Port: 8080, GrainId: &internalpb.GrainId{Value: "kind/lazy-stale", Name: "lazy-stale"}}, nil).Once()
 		clusterMock.EXPECT().RemoveGrain(mock.Anything, "kind/lazy-stale").Return(nil).Once()
 
-		// lazy grain whose directory lookup fails: logged only, the entry
-		// self-heals on the grain's next activation
+		// lazy grain whose directory release fails: the entry stays pinned to
+		// the dead node and the TellGrain/AskGrain fast path does not self-heal a
+		// stale owner, so the grain would be unreachable with no signal; it is
+		// reported as a relocation failure.
 		clusterMock.EXPECT().GetGrain(mock.Anything, "kind/lazy-fail").
 			Return(nil, errors.New("registry unavailable")).Once()
 
@@ -2721,7 +2723,10 @@ func TestRelocateBatchHandler(t *testing.T) {
 		response, ok := resp.(*internalpb.RelocateBatchResponse)
 		require.True(t, ok, "expected *internalpb.RelocateBatchResponse, got %T", resp)
 
-		// a lazy release failure is not an item loss, so nothing is reported
-		require.Empty(t, response.GetFailures())
+		// the successfully released lazy grain is not reported; only the one whose
+		// release failed (and cannot self-heal) is surfaced as a failure
+		require.Len(t, response.GetFailures(), 1)
+		assert.Equal(t, "kind/lazy-fail", response.GetFailures()[0].GetId())
+		assert.True(t, response.GetFailures()[0].GetGrain())
 	})
 }

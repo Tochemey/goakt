@@ -39,6 +39,7 @@ import (
 	"github.com/tochemey/olric/hasher"
 	"github.com/tochemey/olric/pkg/storage"
 	"go.uber.org/atomic"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/tochemey/goakt/v4/discovery"
 	"github.com/tochemey/goakt/v4/hash"
@@ -59,6 +60,12 @@ const (
 	GrainsRoundRobinKey     = "grains_rr_index"
 	rebalanceReasonNodeLeft = "node-left"
 	rebalanceReasonNodeJoin = "node-join"
+	// actorScanConcurrency bounds how many actor records are fetched in parallel
+	// when scanning the registry (Actors, CountActorsByHost). The registry scan
+	// otherwise issues one sequential network Get per actor key, which times out
+	// the scan budget on large registries; fanning the Gets out keeps the scan
+	// within budget while capping the burst of concurrent reads.
+	actorScanConcurrency = 16
 )
 
 type recordNamespace string
@@ -102,6 +109,15 @@ type Cluster interface {
 	ActorExists(ctx context.Context, actorName string) (bool, error)
 	// Actors enumerates all actors tracked by the cluster.
 	Actors(ctx context.Context, timeout time.Duration) ([]*internalpb.Actor, error)
+	// ActorsByHost streams the registry and returns only the actors owned by the
+	// given host:port. It filters during the scan so it never materializes the
+	// whole registry to recover a single node's records.
+	ActorsByHost(ctx context.Context, host string, port int, timeout time.Duration) ([]*internalpb.Actor, error)
+	// CountActorsByHost returns the number of registered actors per owning node,
+	// keyed by the actor address's raw "host:port". It streams the registry and
+	// discards each record after counting, so its peak memory is proportional to
+	// the number of distinct nodes rather than the number of actors.
+	CountActorsByHost(ctx context.Context, timeout time.Duration) (map[string]int, error)
 	// PutGrain records grain metadata in the cluster state.
 	PutGrain(ctx context.Context, grain *internalpb.Grain) error
 	// GetGrain fetches grain metadata for the provided identity.
@@ -112,6 +128,10 @@ type Cluster interface {
 	GrainExists(ctx context.Context, identity string) (bool, error)
 	// Grains enumerates all grains tracked by the cluster.
 	Grains(ctx context.Context, timeout time.Duration) ([]*internalpb.Grain, error)
+	// GrainsByHost streams the registry and returns only the grains owned by the
+	// given host:port, filtering during the scan rather than building the full
+	// grain set first.
+	GrainsByHost(ctx context.Context, host string, port int, timeout time.Duration) ([]*internalpb.Grain, error)
 	// LookupKind reads the value registered for the provided actor kind.
 	LookupKind(ctx context.Context, kind string) (string, error)
 	// PutKind registers an actor kind mapping.
@@ -446,45 +466,124 @@ func (x *cluster) Actors(ctx context.Context, timeout time.Duration) ([]*interna
 	x.mu.RLock()
 	defer x.mu.RUnlock()
 
-	scanner, err := x.dmap.Scan(ctx)
-	if err != nil {
+	var (
+		mu     sync.Mutex
+		actors = make([]*internalpb.Actor, 0)
+	)
+	if err := x.scanActors(ctx, func(actor *internalpb.Actor) {
+		mu.Lock()
+		actors = append(actors, actor)
+		mu.Unlock()
+	}); err != nil {
 		return nil, err
 	}
-	defer scanner.Close()
+
+	return actors, nil
+}
+
+// CountActorsByHost scans the unified map and tallies registered actors per
+// owning node, keyed by the actor address's raw "host:port".
+//
+// Unlike Actors it never materializes the full actor set: each record is
+// decoded only to read its address and is then discarded, so peak memory is
+// proportional to the number of distinct hosts (plus the bounded set of records
+// in flight), not the number of actors. This is the load signal the leader uses
+// to seed relocation placement, so it must stay cheap even for large registries.
+func (x *cluster) CountActorsByHost(ctx context.Context, timeout time.Duration) (map[string]int, error) {
+	if !x.running.Load() {
+		return nil, ErrEngineNotRunning
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	x.mu.RLock()
+	defer x.mu.RUnlock()
+
+	var (
+		mu     sync.Mutex
+		counts = make(map[string]int)
+	)
+	if err := x.scanActors(ctx, func(actor *internalpb.Actor) {
+		hostPort, ok := address.HostPortOf(actor.GetAddress())
+		if !ok {
+			return
+		}
+		mu.Lock()
+		counts[hostPort]++
+		mu.Unlock()
+	}); err != nil {
+		return nil, err
+	}
+
+	return counts, nil
+}
+
+// scanActors streams every registered actor record and invokes visit for each,
+// decoded exactly once. It is the shared scan used by Actors and
+// CountActorsByHost so both agree on which keys are actor metadata (skipping the
+// round-robin counter and foreign namespaces).
+//
+// The registry can hold thousands of entries, so the per-key Gets are fanned out
+// with bounded concurrency (actorScanConcurrency) instead of issued one at a
+// time: a sequential scan otherwise blows the caller's timeout budget on large
+// registries. Keys are collected up front so the scanner is released before the
+// Gets run. visit may be called from multiple goroutines concurrently, so
+// callers must synchronize any shared state they mutate; the callback order is
+// unspecified.
+//
+// Callers must hold x.mu (read lock) for the duration of the scan.
+func (x *cluster) scanActors(ctx context.Context, visit func(*internalpb.Actor)) error {
+	scanner, err := x.dmap.Scan(ctx)
+	if err != nil {
+		return err
+	}
 
 	rrKey := composeKey(namespaceActors, ActorsRoundRobinKey)
-	actors := make([]*internalpb.Actor, 0)
+	keys := make([]string, 0)
 	for scanner.Next() {
 		key := scanner.Key()
 		if !hasNamespace(key, namespaceActors) {
 			continue
 		}
+
 		if key == rrKey {
 			// skip the round-robin counter entry which is not actor metadata
 			continue
 		}
+		keys = append(keys, key)
+	}
+	scanner.Close()
 
-		resp, err := x.dmap.Get(ctx, key)
-		if err != nil {
-			if errors.Is(err, olric.ErrKeyNotFound) {
-				continue
+	eg, egctx := errgroup.WithContext(ctx)
+	eg.SetLimit(actorScanConcurrency)
+	for _, key := range keys {
+		eg.Go(func() error {
+			resp, err := x.dmap.Get(egctx, key)
+			if err != nil {
+				if errors.Is(err, olric.ErrKeyNotFound) {
+					// the entry was removed between the scan and this Get; skip it
+					return nil
+				}
+				return err
 			}
-			return nil, err
-		}
 
-		value, err := resp.Byte()
-		if err != nil {
-			return nil, err
-		}
+			value, err := resp.Byte()
+			if err != nil {
+				return err
+			}
 
-		actor, err := decode(value)
-		if err != nil {
-			return nil, err
-		}
-		actors = append(actors, actor)
+			actor, err := decode(value)
+			if err != nil {
+				return err
+			}
+
+			visit(actor)
+			return nil
+		})
 	}
 
-	return actors, nil
+	return eg.Wait()
 }
 
 // PutGrain stores the provided grain metadata and refreshes the peer state.
@@ -539,6 +638,7 @@ func PutGrainIfAbsent(ctx context.Context, cl Cluster, grain *internalpb.Grain) 
 	if err != nil {
 		return err
 	}
+
 	if exists {
 		return ErrGrainAlreadyExists
 	}
@@ -639,45 +739,148 @@ func (x *cluster) Grains(ctx context.Context, timeout time.Duration) ([]*interna
 	x.mu.RLock()
 	defer x.mu.RUnlock()
 
-	scanner, err := x.dmap.Scan(ctx)
-	if err != nil {
+	var (
+		mu     sync.Mutex
+		grains = make([]*internalpb.Grain, 0)
+	)
+	if err := x.scanGrains(ctx, func(grain *internalpb.Grain) {
+		mu.Lock()
+		grains = append(grains, grain)
+		mu.Unlock()
+	}); err != nil {
 		return nil, err
 	}
-	defer scanner.Close()
+
+	return grains, nil
+}
+
+// ActorsByHost streams the registry and returns only the actors owned by the
+// given host:port (an actor address's raw endpoint). It never materializes the
+// full actor set, so recovering a single crashed node's records after a
+// departure does not spike memory proportional to the whole cluster registry.
+func (x *cluster) ActorsByHost(ctx context.Context, host string, port int, timeout time.Duration) ([]*internalpb.Actor, error) {
+	if !x.running.Load() {
+		return nil, ErrEngineNotRunning
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	x.mu.RLock()
+	defer x.mu.RUnlock()
+
+	target := address.FormatHostPort(host, port)
+	var (
+		mu     sync.Mutex
+		actors = make([]*internalpb.Actor, 0)
+	)
+	if err := x.scanActors(ctx, func(actor *internalpb.Actor) {
+		hostPort, ok := address.HostPortOf(actor.GetAddress())
+		if !ok || hostPort != target {
+			return
+		}
+		mu.Lock()
+		actors = append(actors, actor)
+		mu.Unlock()
+	}); err != nil {
+		return nil, err
+	}
+
+	return actors, nil
+}
+
+// GrainsByHost streams the registry and returns only the grains owned by the
+// given host:port. Like ActorsByHost it discards non-matching records during
+// the scan instead of building the full grain set first.
+func (x *cluster) GrainsByHost(ctx context.Context, host string, port int, timeout time.Duration) ([]*internalpb.Grain, error) {
+	if !x.running.Load() {
+		return nil, ErrEngineNotRunning
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	x.mu.RLock()
+	defer x.mu.RUnlock()
+
+	port32 := int32(port) // nolint
+	var (
+		mu     sync.Mutex
+		grains = make([]*internalpb.Grain, 0)
+	)
+	if err := x.scanGrains(ctx, func(grain *internalpb.Grain) {
+		if grain.GetHost() != host || grain.GetPort() != port32 {
+			return
+		}
+		mu.Lock()
+		grains = append(grains, grain)
+		mu.Unlock()
+	}); err != nil {
+		return nil, err
+	}
+
+	return grains, nil
+}
+
+// scanGrains streams every registered grain record and invokes visit for each,
+// decoded exactly once. It mirrors scanActors: keys are collected up front so
+// the scanner is released before the per-key Gets fan out with bounded
+// concurrency, keeping a large registry from blowing the caller's timeout on a
+// sequential scan. visit may be called concurrently, so callers must synchronize
+// any shared state they mutate; the callback order is unspecified.
+//
+// Callers must hold x.mu (read lock) for the duration of the scan.
+func (x *cluster) scanGrains(ctx context.Context, visit func(*internalpb.Grain)) error {
+	scanner, err := x.dmap.Scan(ctx)
+	if err != nil {
+		return err
+	}
 
 	rrKey := composeKey(namespaceGrains, GrainsRoundRobinKey)
-	grains := make([]*internalpb.Grain, 0)
+	keys := make([]string, 0)
 	for scanner.Next() {
 		key := scanner.Key()
 		if !hasNamespace(key, namespaceGrains) {
 			continue
 		}
+
 		if key == rrKey {
 			// skip the round-robin counter entry which is not grain metadata
 			continue
 		}
+		keys = append(keys, key)
+	}
+	scanner.Close()
 
-		resp, err := x.dmap.Get(ctx, key)
-		if err != nil {
-			if errors.Is(err, olric.ErrKeyNotFound) {
-				continue
+	eg, egctx := errgroup.WithContext(ctx)
+	eg.SetLimit(actorScanConcurrency)
+	for _, key := range keys {
+		eg.Go(func() error {
+			resp, err := x.dmap.Get(egctx, key)
+			if err != nil {
+				if errors.Is(err, olric.ErrKeyNotFound) {
+					// the entry was removed between the scan and this Get; skip it
+					return nil
+				}
+				return err
 			}
-			return nil, err
-		}
 
-		value, err := resp.Byte()
-		if err != nil {
-			return nil, err
-		}
+			value, err := resp.Byte()
+			if err != nil {
+				return err
+			}
 
-		grain, err := decodeGrain(value)
-		if err != nil {
-			return nil, err
-		}
-		grains = append(grains, grain)
+			grain, err := decodeGrain(value)
+			if err != nil {
+				return err
+			}
+
+			visit(grain)
+			return nil
+		})
 	}
 
-	return grains, nil
+	return eg.Wait()
 }
 
 // LookupKind fetches the value registered for the provided actor kind.

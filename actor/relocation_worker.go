@@ -24,6 +24,7 @@ package actor
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"net"
 	"slices"
@@ -56,6 +57,20 @@ const (
 	relocationRetryMinBackoff = 100 * time.Millisecond
 	// relocationRetryMaxBackoff is the backoff ceiling between RelocateBatch attempts.
 	relocationRetryMaxBackoff = time.Second
+	// relocationBatchSendTimeout bounds a single RelocateBatch RPC attempt. The
+	// relocation context is detached with context.WithoutCancel and carries no
+	// deadline of its own, and the transport only imposes a connection deadline
+	// when the context has one. Without this a target that black-holes after the
+	// TCP connect (plausible during the same network event that caused the
+	// departure) would block the batch send - and thus the whole rebalance -
+	// indefinitely: the errgroup never completes, no failure event or metric is
+	// emitted, the peer-state snapshot is never deleted, and the relocation job
+	// stays registered so future departures of that address are skipped.
+	relocationBatchSendTimeout = 30 * time.Second
+	// relocationLoadScanTimeout bounds the registry scan that seeds load-aware
+	// placement. The scan is best-effort: on timeout or error it is skipped and
+	// placement falls back to an even split of the departed node's actors.
+	relocationLoadScanTimeout = 2 * time.Second
 )
 
 // relocationWorker relocates the actors and grains of a single departed node.
@@ -117,24 +132,34 @@ func (w *relocationWorker) PostStop(*Context) error {
 // abnormally.
 func (w *relocationWorker) relocate(ctx *ReceiveContext, peerState *internalpb.PeerState) {
 	system := w.pid.ActorSystem()
-	address := net.JoinHostPort(peerState.GetHost(), strconv.Itoa(int(peerState.GetPeersPort())))
-	departedNode := net.JoinHostPort(peerState.GetHost(), strconv.Itoa(int(peerState.GetRemotingPort())))
+	// peersAddress is the relocation bookkeeping key. It must stay byte-identical
+	// to the key used by handleNodeLeftEvent (the NodeLeft peers address) and by
+	// relocator.startWorker, so it keeps the exact net.JoinHostPort form both use.
+	peersAddress := net.JoinHostPort(peerState.GetHost(), strconv.Itoa(int(peerState.GetPeersPort())))
+	// departedNode is the remoting endpoint compared against endpoints sliced out
+	// of an actor/grain address (address.HostPort() / FormatHostPort), which never
+	// bracket IPv6 hosts. Build it with the same canonical form; net.JoinHostPort
+	// would bracket IPv6 hosts and silently break every comparison on an IPv6 cluster.
+	departedNode := address.FormatHostPort(peerState.GetHost(), int(peerState.GetRemotingPort()))
 	rctx := context.WithoutCancel(ctx.Context())
+	start := time.Now()
 
 	if system.isStopping() {
-		system.endRelocation(address)
+		system.endRelocation(peersAddress)
 		return
 	}
 
 	peers, err := system.getCluster().Peers(rctx)
 	if err != nil {
-		w.logger.Errorf("cluster rebalancing failed for node=%s: %v (hint: check cluster quorum, peer connectivity)", address, err)
-		// Report only the items whose loss is a real failure: every relocatable
-		// actor, but only eager grains. Lazy grains self-heal on next activation
-		// and disabled grains are lost by design, so neither belongs in the
-		// failure event (matching the normal per-item reporting path).
-		publishRelocationFailed(w.pid, address, peerState.GetActors(), eagerRelocationGrains(peerState.GetGrains()), errors.NewInternalError(err))
-		w.finish(rctx, address)
+		w.logger.Errorf("cluster rebalancing failed for node=%s: %v (hint: check cluster quorum, peer connectivity)", peersAddress, err)
+		// Nothing could be relocated. Apply the shared abort accounting so this
+		// path matches the relocator's abort and the normal per-item path: every
+		// relocatable actor and eager grain is a failure, lazy grain directory
+		// entries are released locally (only a failed release is a failure), and
+		// disabled grains are excluded. This also records the loss in
+		// relocation.failed.count so alerting sees it instead of a silent gap.
+		system.reportAbortedRelocation(rctx, w.pid, peersAddress, peerState, time.Since(start), errors.NewInternalError(err))
+		w.finish(rctx, peersAddress)
 		return
 	}
 
@@ -148,7 +173,7 @@ func (w *relocationWorker) relocate(ctx *ReceiveContext, peerState *internalpb.P
 	// instead of being issued entirely by this node.
 	grains := relocatableGrains(peerState.GetGrains())
 
-	leaderActors, peerActors, unplaceableActors := allocateActors(system.getNodeRoles(), peers, peerState)
+	leaderActors, peerActors, unplaceableActors := allocateActors(system.getNodeRoles(), peers, peerState, w.targetLoads(rctx, system, peers))
 	leaderGrains, peerGrains := allocateGrains(len(peers)+1, grains)
 
 	// Role-constrained actors with no surviving eligible node cannot be
@@ -163,45 +188,11 @@ func (w *relocationWorker) relocate(ctx *ReceiveContext, peerState *internalpb.P
 	eg := new(errgroup.Group)
 	eg.SetLimit(defaultRelocationConcurrency)
 
-	// recreate the leader's share locally, one bounded goroutine per item;
-	// a failing item records a failure instead of cancelling its siblings
-	for _, wireActor := range leaderActors {
-		eg.Go(func() error {
-			var err error
-
-			if wireActor.GetSingleton() != nil {
-				err = recreateSingletonFromWire(rctx, system, wireActor)
-			} else {
-				err = system.recreateActorFromWire(rctx, wireActor, departedNode)
-			}
-
-			if err != nil {
-				w.logger.Errorf("failed to relocate actor=%s locally: %v (hint: check actor type registered, cluster quorum)", wireActor.GetAddress(), err)
-				failures.record(wireActor.GetAddress(), false, err)
-			}
-			return nil
-		})
-	}
-
-	for _, wireGrain := range leaderGrains {
-		eg.Go(func() error {
-			// lazy grains: directory cleanup only. A failure here is not an
-			// item loss (activation self-heals a stale entry on next use), so
-			// it is logged, not recorded as a relocation failure.
-			if !wireGrain.GetEagerRelocation() {
-				if err := system.releaseGrainForLazyRelocation(rctx, wireGrain, departedNode); err != nil {
-					w.logger.Warnf("failed to release lazy grain=%s directory entry: %v (hint: entry self-heals on next activation)", wireGrain.GetGrainId().GetValue(), err)
-				}
-				return nil
-			}
-
-			if err := system.recreateGrainFromWire(rctx, wireGrain, departedNode); err != nil {
-				w.logger.Errorf("failed to relocate grain=%s locally: %v (hint: check grain OnActivate, grain kind registered)", wireGrain.GetGrainId().GetValue(), err)
-				failures.record(wireGrain.GetGrainId().GetValue(), true, err)
-			}
-			return nil
-		})
-	}
+	// recreate the leader's share locally through the shared dispatch so the
+	// leader-side and peer-side (RelocateBatch handler) paths cannot drift in
+	// how items are recreated, which grains are released versus reactivated, and
+	// what counts as a failure.
+	enqueueRelocation(rctx, eg, system, w.logger, departedNode, leaderActors, leaderGrains, failures.record)
 
 	// hand each peer its share with batched round trips, one goroutine per peer
 	shares := max(len(peerActors), len(peerGrains))
@@ -229,17 +220,55 @@ func (w *relocationWorker) relocate(ctx *ReceiveContext, peerState *internalpb.P
 
 	_ = eg.Wait()
 
-	if failed := failures.items(); len(failed) > 0 {
-		actors, grains := splitFailures(failed)
-		err := errors.NewRebalancingError(fmt.Errorf("relocation of node=%s completed with %d failed actors and %d failed grains", address, len(actors), len(grains)))
+	failed := failures.items()
+
+	// relocated = every relocatable item minus the ones that failed. Lazy
+	// grains that self-heal are counted as relocated (they were handled and are
+	// not reported as failures), matching the failure-reporting semantics.
+	relocatedCount := max((len(peerState.GetActors())+len(grains))-len(failed), 0)
+	system.recordRelocationMetrics(rctx, peersAddress, time.Since(start), relocatedCount, len(failed))
+
+	if len(failed) > 0 {
+		failedActors, failedGrains := splitFailures(failed)
+		err := errors.NewRebalancingError(fmt.Errorf("relocation of node=%s completed with %d failed actors and %d failed grains", peersAddress, len(failedActors), len(failedGrains)))
 		w.logger.Errorf("%v (hint: subscribe to RelocationFailed events for the affected actors and grains)", err)
 
 		if w.pid.eventsStream != nil {
-			w.pid.eventsStream.Publish(eventsTopic, NewRelocationFailed(address, time.Now().UTC(), actors, grains, err))
+			w.pid.eventsStream.Publish(eventsTopic, NewRelocationFailed(peersAddress, time.Now().UTC(), failedActors, failedGrains, err))
 		}
 	}
 
-	w.finish(rctx, address)
+	w.finish(rctx, peersAddress)
+}
+
+// targetLoads returns the current actor occupancy of each relocation target,
+// aligned to allocateActors' indexing (index 0 = leader, index i = peers[i-1]).
+//
+// It is a best-effort placement signal: the leader asks the cluster for a
+// per-node actor tally so the departed node's actors land on the least-loaded
+// surviving nodes rather than being split evenly among targets that started out
+// unevenly loaded. CountActorsByHost streams the registry and returns only the
+// small per-node map, so the leader never materializes the full actor set to
+// seed placement. The departed node's own entries are keyed to its (now dead)
+// address, so they match no target and never inflate a survivor's load. A scan
+// failure returns nil and allocateActors falls back to balancing only the
+// departed node's actors.
+func (w *relocationWorker) targetLoads(ctx context.Context, system ActorSystem, peers []*cluster.Peer) []int {
+	// CountActorsByHost applies relocationLoadScanTimeout to ctx internally, so
+	// the scan is already bounded; no extra context wrapper is needed here.
+	counts, err := system.getCluster().CountActorsByHost(ctx, relocationLoadScanTimeout)
+	if err != nil {
+		w.logger.Warnf("load-aware relocation disabled for this rebalance: registry scan failed: %v (hint: placement falls back to an even split of the departed node's actors)", err)
+		return nil
+	}
+
+	loads := make([]int, len(peers)+1)
+	loads[0] = counts[address.FormatHostPort(system.Host(), system.Port())]
+	for i, peer := range peers {
+		loads[i+1] = counts[address.FormatHostPort(peer.Host, peer.RemotingPort)]
+	}
+
+	return loads
 }
 
 // finish removes the departed node's peer state snapshot and releases the
@@ -254,35 +283,165 @@ func (w *relocationWorker) finish(ctx context.Context, address string) {
 	system.endRelocation(address)
 }
 
+// enqueueRelocation schedules recreation of the given actors and grains on eg,
+// one bounded goroutine per item, and records a per-item failure via record for
+// anything that cannot be recovered. It is the single dispatch rule shared by
+// the leader's local share and the peer-side RelocateBatch handler so the two
+// cannot drift:
+//
+//   - a singleton actor is re-established through the cluster singleton path
+//     (recreateSingletonFromWire), any other actor through recreateActorFromWire;
+//     a failure is recorded against the actor address;
+//   - an eager grain is reactivated up front (recreateGrainFromWire); a lazy
+//     grain (the default) only has its stale directory entry released so the
+//     next TellGrain/AskGrain re-activates it on a survivor. A lazy grain is a
+//     failure only when its release fails, because the entry then still points
+//     at the dead node and the fast path does not self-heal a stale owner.
+//
+// A failing item records a failure instead of cancelling its siblings, so every
+// goroutine returns nil. record must be safe for concurrent use.
+func enqueueRelocation(ctx context.Context, eg *errgroup.Group, system ActorSystem, logger log.Logger, departedNode string, actors []*internalpb.Actor, grains []*internalpb.Grain, record func(id string, grain bool, err error)) {
+	for _, wireActor := range actors {
+		eg.Go(func() error {
+			var err error
+			if wireActor.GetSingleton() != nil {
+				err = recreateSingletonFromWire(ctx, system, wireActor, departedNode)
+			} else {
+				err = system.recreateActorFromWire(ctx, wireActor, departedNode)
+			}
+
+			if err != nil {
+				logger.Errorf("failed to relocate actor=%s: %v (hint: check actor type registered, cluster quorum)", wireActor.GetAddress(), err)
+				record(wireActor.GetAddress(), false, err)
+			}
+			return nil
+		})
+	}
+
+	for _, wireGrain := range grains {
+		eg.Go(func() error {
+			if !wireGrain.GetEagerRelocation() {
+				if err := system.releaseGrainForLazyRelocation(ctx, wireGrain, departedNode); err != nil {
+					logger.Errorf("failed to release lazy grain=%s directory entry: %v (hint: grain may be unreachable until re-registered; check cluster quorum)", wireGrain.GetGrainId().GetValue(), err)
+					record(wireGrain.GetGrainId().GetValue(), true, err)
+				}
+				return nil
+			}
+
+			if err := system.recreateGrainFromWire(ctx, wireGrain, departedNode); err != nil {
+				logger.Errorf("failed to relocate grain=%s: %v (hint: check grain OnActivate, grain kind registered)", wireGrain.GetGrainId().GetValue(), err)
+				record(wireGrain.GetGrainId().GetValue(), true, err)
+			}
+			return nil
+		})
+	}
+}
+
 // relocateShare delivers one peer's share, batch by batch, to its target. When
-// the target becomes unreachable the unsent remainder is moved once to the next
-// surviving peer; items that still cannot be delivered are recorded as failed.
+// the target becomes unreachable the unsent remainder is redistributed across
+// the remaining survivors: each actor moves to a survivor that advertises its
+// required role and grains (which carry no role) move to a survivor, so a
+// role-constrained actor is not dropped merely because one ring-neighbor lacks
+// its role. An actor that no survivor can host is recorded once with an accurate
+// message; items a chosen survivor also fails to accept are recorded as failed
+// (eager grains and actors) or have their lazy directory entry released.
 func (w *relocationWorker) relocateShare(ctx context.Context, requests []*internalpb.RelocateBatchRequest, target *cluster.Peer, peers []*cluster.Peer, failures *relocationFailures) {
 	remaining, err := w.sendBatches(ctx, target, requests, failures)
 	if err == nil {
 		return
 	}
 
-	w.logger.Warnf("peer=%s:%d unreachable during relocation: %v (hint: reassigning share to next peer)", target.Host, target.RemotingPort, err)
+	w.logger.Warnf("peer=%s:%d unreachable during relocation: %v (hint: redistributing its share among the remaining survivors)", target.Host, target.RemotingPort, err)
 
-	fallback := nextSurvivingPeer(peers, target)
-	if fallback == nil {
+	survivors := survivingPeersExcept(peers, target)
+	if len(survivors) == 0 {
 		recordUnsent(remaining, err, failures)
-		w.releaseUndeliverableLazyGrains(ctx, remaining)
+		w.releaseUndeliverableLazyGrains(ctx, remaining, failures)
 		return
 	}
 
-	// The fallback peer need not advertise the same roles as the original
-	// target. Drop role-ineligible actors and record them as failures instead
-	// of silently placing a role-constrained actor on an ineligible node (the
-	// receiving node spawns WithRole as metadata and does not re-check it).
-	remaining = filterUnplaceableByRole(remaining, fallback.Roles, failures)
+	departedNode := departedNodeOf(remaining)
+	actorShares, grains := reassignByRole(remaining, survivors, failures)
 
-	remaining, err = w.sendBatches(ctx, fallback, remaining, failures)
-	if err != nil {
-		recordUnsent(remaining, err, failures)
-		w.releaseUndeliverableLazyGrains(ctx, remaining)
+	for i, survivor := range survivors {
+		// grains carry no role, so the first survivor takes them all; if it is
+		// unreachable they are released (lazy) or recorded (eager) below.
+		var grainShare []*internalpb.Grain
+		if i == 0 {
+			grainShare = grains
+		}
+
+		if len(actorShares[i]) == 0 && len(grainShare) == 0 {
+			continue
+		}
+
+		reqs := buildRelocateBatchRequests(departedNode, actorShares[i], grainShare)
+		unsent, serr := w.sendBatches(ctx, survivor, reqs, failures)
+		if serr != nil {
+			recordUnsent(unsent, serr, failures)
+			w.releaseUndeliverableLazyGrains(ctx, unsent, failures)
+		}
 	}
+}
+
+// survivingPeersExcept returns every peer other than target (matched on
+// host:remoting-port), preserving order.
+func survivingPeersExcept(peers []*cluster.Peer, target *cluster.Peer) []*cluster.Peer {
+	survivors := make([]*cluster.Peer, 0, len(peers))
+	for _, peer := range peers {
+		if peer.Host == target.Host && peer.RemotingPort == target.RemotingPort {
+			continue
+		}
+		survivors = append(survivors, peer)
+	}
+	return survivors
+}
+
+// departedNodeOf returns the departed-node marker carried by a batch of
+// relocation requests (they all share the same value).
+func departedNodeOf(requests []*internalpb.RelocateBatchRequest) string {
+	for _, request := range requests {
+		if request.GetDepartedNode() != "" {
+			return request.GetDepartedNode()
+		}
+	}
+	return ""
+}
+
+// reassignByRole distributes the unsent actors across survivors, assigning each
+// actor to the first survivor advertising its required role and recording an
+// accurate failure for any actor that no survivor can host. It returns the
+// per-survivor actor shares (aligned to survivors) and the flattened grains,
+// which carry no role and are placed by the caller.
+func reassignByRole(requests []*internalpb.RelocateBatchRequest, survivors []*cluster.Peer, failures *relocationFailures) (actorShares [][]*internalpb.Actor, grains []*internalpb.Grain) {
+	actorShares = make([][]*internalpb.Actor, len(survivors))
+
+	for _, request := range requests {
+		grains = append(grains, request.GetGrains()...)
+
+		for _, wireActor := range request.GetActors() {
+			idx := firstEligibleSurvivor(survivors, wireActor.GetRole())
+			if idx < 0 {
+				rerr := errors.NewRebalancingError(fmt.Errorf("no surviving node advertises role %q required by actor %s", wireActor.GetRole(), wireActor.GetAddress()))
+				failures.record(wireActor.GetAddress(), false, rerr)
+				continue
+			}
+			actorShares[idx] = append(actorShares[idx], wireActor)
+		}
+	}
+
+	return actorShares, grains
+}
+
+// firstEligibleSurvivor returns the index of the first survivor advertising the
+// given role, or -1 when none does. A role-less actor is eligible everywhere.
+func firstEligibleSurvivor(survivors []*cluster.Peer, role string) int {
+	for i, survivor := range survivors {
+		if eligibleForRole(survivor.Roles, role) {
+			return i
+		}
+	}
+	return -1
 }
 
 // releaseUndeliverableLazyGrains removes, leader-side, the directory entries of
@@ -293,7 +452,12 @@ func (w *relocationWorker) relocateShare(ctx context.Context, requests []*intern
 // deliberately does not report lazy grains as failures, so this best-effort
 // cleanup is what makes them provably self-healing; eager grains are already
 // recorded as failures by recordUnsent.
-func (w *relocationWorker) releaseUndeliverableLazyGrains(ctx context.Context, requests []*internalpb.RelocateBatchRequest) {
+//
+// When the cleanup itself fails the entry stays pinned to the dead node with no
+// self-heal path, so the grain is recorded as a relocation failure to preserve
+// the guarantee that every relocated grain is either reachable again or listed
+// in RelocationFailed.
+func (w *relocationWorker) releaseUndeliverableLazyGrains(ctx context.Context, requests []*internalpb.RelocateBatchRequest, failures *relocationFailures) {
 	if w.pid == nil {
 		return
 	}
@@ -307,44 +471,11 @@ func (w *relocationWorker) releaseUndeliverableLazyGrains(ctx context.Context, r
 			}
 
 			if err := system.releaseGrainForLazyRelocation(ctx, wireGrain, request.GetDepartedNode()); err != nil {
-				w.logger.Warnf("failed to release undeliverable lazy grain=%s directory entry: %v (hint: entry self-heals on next GrainIdentity activation)", wireGrain.GetGrainId().GetValue(), err)
+				w.logger.Errorf("failed to release undeliverable lazy grain=%s directory entry: %v (hint: grain may be unreachable until re-registered; check cluster quorum)", wireGrain.GetGrainId().GetValue(), err)
+				failures.record(wireGrain.GetGrainId().GetValue(), true, err)
 			}
 		}
 	}
-}
-
-// filterUnplaceableByRole returns the batch requests carrying only items the
-// target may host, recording every actor whose required role the target does
-// not advertise as a relocation failure. Grains carry no role and are always
-// retained; a request left with no actors and no grains is dropped.
-func filterUnplaceableByRole(requests []*internalpb.RelocateBatchRequest, targetRoles []string, failures *relocationFailures) []*internalpb.RelocateBatchRequest {
-	filtered := make([]*internalpb.RelocateBatchRequest, 0, len(requests))
-
-	for _, request := range requests {
-		var placeable []*internalpb.Actor
-
-		for _, wireActor := range request.GetActors() {
-			if eligibleForRole(targetRoles, wireActor.GetRole()) {
-				placeable = append(placeable, wireActor)
-				continue
-			}
-
-			rerr := errors.NewRebalancingError(fmt.Errorf("no surviving node advertises role %q required by actor %s", wireActor.GetRole(), wireActor.GetAddress()))
-			failures.record(wireActor.GetAddress(), false, rerr)
-		}
-
-		if len(placeable) == 0 && len(request.GetGrains()) == 0 {
-			continue
-		}
-
-		filtered = append(filtered, &internalpb.RelocateBatchRequest{
-			DepartedNode: request.GetDepartedNode(),
-			Actors:       placeable,
-			Grains:       request.GetGrains(),
-		})
-	}
-
-	return filtered
 }
 
 // sendBatches sends the given batch requests to the target in order and
@@ -371,7 +502,12 @@ func (w *relocationWorker) sendBatch(ctx context.Context, target *cluster.Peer, 
 
 	retrier := retry.NewRetrier(relocationBatchMaxAttempts, relocationRetryMinBackoff, relocationRetryMaxBackoff)
 	err := retrier.RunContext(ctx, func(ctx context.Context) error {
-		resp, err := w.remoting.RelocateBatch(ctx, target.Host, target.RemotingPort, request)
+		// Bound each attempt so a black-holed target cannot wedge the send
+		// forever; the detached relocation context carries no deadline of its own.
+		attemptCtx, cancel := context.WithTimeout(ctx, relocationBatchSendTimeout)
+		defer cancel()
+
+		resp, err := w.remoting.RelocateBatch(attemptCtx, target.Host, target.RemotingPort, request)
 		if err != nil {
 			return err
 		}
@@ -385,11 +521,17 @@ func (w *relocationWorker) sendBatch(ctx context.Context, target *cluster.Peer, 
 
 // recreateSingletonFromWire respawns a singleton actor from its serialized wire
 // representation on this node (the leader) through the cluster singleton spawn
-// path, restoring its singleton spawn configuration. The departed node's
-// registry entry is removed unconditionally: singleton placement is arbitrated
-// by the singleton spawn path itself, not by the relocation gating used for
-// regular actors.
-func recreateSingletonFromWire(ctx context.Context, system ActorSystem, props *internalpb.Actor) error {
+// path, restoring its singleton spawn configuration.
+//
+// It is gated on the departed node exactly like recreateActorFromWire: the
+// singleton is only re-established when its registry entry still points at the
+// departed node (or is missing). An entry pointing anywhere else means the
+// singleton was already recreated on a survivor, so this is a stale re-run (a
+// duplicate NodeLeft against a peer-state snapshot that a failed DeletePeerState
+// left behind, or a leadership change) and the unconditional RemoveActor +
+// RemoveKind + SpawnSingleton below would tear down and double-spawn the live
+// singleton. Skipping in that case keeps the relocation idempotent.
+func recreateSingletonFromWire(ctx context.Context, system ActorSystem, props *internalpb.Actor, departedNode string) error {
 	addr, err := address.Parse(props.GetAddress())
 	if err != nil {
 		return errors.NewInternalError(err)
@@ -397,6 +539,19 @@ func recreateSingletonFromWire(ctx context.Context, system ActorSystem, props *i
 
 	if isSystemName(addr.Name()) {
 		return nil
+	}
+
+	existing, gerr := system.getCluster().GetActor(ctx, addr.Name())
+	switch {
+	case gerr == nil:
+		if entry, perr := address.Parse(existing.GetAddress()); perr == nil && entry.HostPort() != departedNode {
+			// already recreated on a survivor; do not tear it down and respawn
+			return nil
+		}
+	case stderrors.Is(gerr, cluster.ErrActorNotFound):
+		// no registry entry; fall through and (re-)establish the singleton
+	default:
+		return errors.NewInternalError(gerr)
 	}
 
 	if err := system.getCluster().RemoveActor(ctx, addr.Name()); err != nil {
@@ -462,22 +617,6 @@ func buildRelocateBatchRequests(departedNode string, actors []*internalpb.Actor,
 	}
 
 	return requests
-}
-
-// nextSurvivingPeer returns the peer following target in the given list,
-// wrapping around, or nil when target is the only peer.
-func nextSurvivingPeer(peers []*cluster.Peer, target *cluster.Peer) *cluster.Peer {
-	if len(peers) < 2 {
-		return nil
-	}
-
-	for i, peer := range peers {
-		if peer.Host == target.Host && peer.RemotingPort == target.RemotingPort {
-			return peers[(i+1)%len(peers)]
-		}
-	}
-
-	return peers[0]
 }
 
 // recordUnsent marks every item of the given unsent batch requests as failed.
@@ -573,7 +712,14 @@ func eligibleForRole(targetRoles []string, role string) bool {
 // any role constraint) is re-arbitrated by the cluster singleton spawn path.
 // Non-singleton actors are assigned to the least-loaded eligible target so the
 // load spreads evenly while respecting role constraints.
-func allocateActors(leaderRoles []string, peers []*cluster.Peer, nodeLeftState *internalpb.PeerState) (leaderShares []*internalpb.Actor, peersShares [][]*internalpb.Actor, unplaceable []*internalpb.Actor) {
+//
+// baseLoads carries each target's current actor occupancy (index 0 = leader,
+// index i = peers[i-1]) so placement accounts for how loaded a surviving node
+// already is, not just how many departed actors it has been handed. This stops
+// the leader (or a single peer) from being over-assigned when the survivors
+// started out unevenly loaded. A nil or mis-sized baseLoads falls back to
+// balancing only the departed node's actors (all targets start at zero).
+func allocateActors(leaderRoles []string, peers []*cluster.Peer, nodeLeftState *internalpb.PeerState, baseLoads []int) (leaderShares []*internalpb.Actor, peersShares [][]*internalpb.Actor, unplaceable []*internalpb.Actor) {
 	// targetRoles[0] is the leader; targetRoles[i] maps to peers[i-1]. The peer
 	// role slices are referenced, not copied, so no per-target allocation.
 	targetRoles := make([][]string, 0, len(peers)+1)
@@ -585,6 +731,9 @@ func allocateActors(leaderRoles []string, peers []*cluster.Peer, nodeLeftState *
 
 	peersShares = make([][]*internalpb.Actor, len(targetRoles))
 	loads := make([]int, len(targetRoles))
+	if len(baseLoads) == len(loads) {
+		copy(loads, baseLoads)
+	}
 
 	for _, actor := range nodeLeftState.GetActors() {
 		// Singletons are re-arbitrated by the singleton spawn path, so they
@@ -621,24 +770,6 @@ func allocateActors(leaderRoles []string, peers []*cluster.Peer, nodeLeftState *
 	leaderShares = append(leaderShares, peersShares[0]...)
 
 	return leaderShares, peersShares, unplaceable
-}
-
-// eagerRelocationGrains returns only the grains whose loss counts as a
-// relocation failure: eager grains that must be recreated up front. Lazy grains
-// (the default) self-heal on their next activation and disabled grains are lost
-// by design, so neither is reported when relocation aborts before dispatch.
-func eagerRelocationGrains(grains map[string]*internalpb.Grain) map[string]*internalpb.Grain {
-	filtered := make(map[string]*internalpb.Grain, len(grains))
-
-	for id, grain := range grains {
-		if grain.GetDisableRelocation() || !grain.GetEagerRelocation() {
-			continue
-		}
-
-		filtered[id] = grain
-	}
-
-	return filtered
 }
 
 // relocatableGrains returns the departed node's grains that participate in

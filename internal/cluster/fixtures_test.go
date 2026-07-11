@@ -230,6 +230,12 @@ func (x *MockCluster) ActorExists(context.Context, string) (bool, error) {
 func (x *MockCluster) Actors(context.Context, time.Duration) ([]*internalpb.Actor, error) {
 	panic("unexpected call")
 }
+func (x *MockCluster) ActorsByHost(context.Context, string, int, time.Duration) ([]*internalpb.Actor, error) {
+	panic("unexpected call")
+}
+func (x *MockCluster) CountActorsByHost(context.Context, time.Duration) (map[string]int, error) {
+	panic("unexpected call")
+}
 func (x *MockCluster) PutGrain(ctx context.Context, grain *internalpb.Grain) error {
 	x.putGrainCalls++
 	if x.putGrainFn != nil {
@@ -266,6 +272,9 @@ func (x *MockCluster) GrainExists(ctx context.Context, identity string) (bool, e
 	return false, nil
 }
 func (x *MockCluster) Grains(context.Context, time.Duration) ([]*internalpb.Grain, error) {
+	panic("unexpected call")
+}
+func (x *MockCluster) GrainsByHost(context.Context, string, int, time.Duration) ([]*internalpb.Grain, error) {
 	panic("unexpected call")
 }
 

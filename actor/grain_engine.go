@@ -39,6 +39,7 @@ import (
 
 	"github.com/tochemey/goakt/v4/datacenter"
 	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/pointer"
@@ -1204,7 +1205,10 @@ func (x *actorSystem) recreateGrainFromWire(ctx context.Context, grain *internal
 
 	switch {
 	case err == nil:
-		entry := net.JoinHostPort(existing.GetHost(), strconv.Itoa(int(existing.GetPort())))
+		// Use the canonical (un-bracketed) host:port form so the comparison
+		// matches the departedNode marker built with address.FormatHostPort;
+		// net.JoinHostPort would bracket IPv6 hosts and never match.
+		entry := address.FormatHostPort(existing.GetHost(), int(existing.GetPort()))
 		if entry != departedNode {
 			// the registry entry points at a node other than the departed one,
 			// so the grain was already reactivated there; leave it alone to avoid
@@ -1247,7 +1251,9 @@ func (x *actorSystem) releaseGrainForLazyRelocation(ctx context.Context, grain *
 	existing, err := x.cluster.GetGrain(ctx, identity)
 	switch {
 	case err == nil:
-		entry := net.JoinHostPort(existing.GetHost(), strconv.Itoa(int(existing.GetPort())))
+		// Canonical (un-bracketed) host:port form, matching the departedNode
+		// marker; see recreateGrainFromWire for why net.JoinHostPort is unsafe.
+		entry := address.FormatHostPort(existing.GetHost(), int(existing.GetPort()))
 		if entry != departedNode {
 			// already reactivated/re-owned elsewhere; leave it alone
 			return nil

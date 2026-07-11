@@ -1167,10 +1167,15 @@ func (pid *PID) SendAsync(ctx context.Context, actorName string, message any) er
 	// is unnecessary here and would add contention on the hot path.
 	system := pid.actorSystem
 
-	// try to find the actor in the local datacenter
-	cid, err := system.ActorOf(ctx, actorName)
+	// Resolve in the local datacenter and deliver, masking the brief window in
+	// which the target's host has left the cluster and its actor is being
+	// recreated on a survivor (see deliverAcrossHandoff). In steady state this
+	// resolves and delivers exactly once.
+	_, err := pid.deliverAcrossHandoff(ctx, actorName, 0, func(ctx context.Context, to *PID) (any, error) {
+		return nil, pid.Tell(ctx, to, message)
+	})
 	if err == nil {
-		return pid.Tell(ctx, cid, message)
+		return nil
 	}
 
 	// Actor not found in local datacenter - check if it's a "not found" error
@@ -1186,7 +1191,7 @@ func (pid *PID) SendAsync(ctx context.Context, actorName string, message any) er
 	}
 
 	// Try to find the actor in remote datacenters
-	cid, err = pid.DiscoverActor(ctx, actorName, timeout)
+	cid, err := pid.DiscoverActor(ctx, actorName, timeout)
 	if err != nil {
 		return err
 	}
@@ -1209,10 +1214,15 @@ func (pid *PID) SendSync(ctx context.Context, actorName string, message any, tim
 	// Access actorSystem directly: immutable after PID construction.
 	system := pid.actorSystem
 
-	// try to find the actor in the local datacenter
-	cid, err := system.ActorOf(ctx, actorName)
+	// Resolve in the local datacenter and ask, masking the brief window in
+	// which the target's host has left the cluster and its actor is being
+	// recreated on a survivor (see deliverAcrossHandoff). In steady state this
+	// resolves and asks exactly once.
+	response, err = pid.deliverAcrossHandoff(ctx, actorName, timeout, func(ctx context.Context, to *PID) (any, error) {
+		return pid.Ask(ctx, to, message, timeout)
+	})
 	if err == nil {
-		return pid.Ask(ctx, cid, message, timeout)
+		return response, nil
 	}
 
 	// Actor not found in local datacenter - check if it's a "not found" error
@@ -1233,7 +1243,7 @@ func (pid *PID) SendSync(ctx context.Context, actorName string, message any, tim
 	}
 
 	// Try to find the actor in remote datacenters
-	cid, err = pid.DiscoverActor(ctx, actorName, lookupTimeout)
+	cid, err := pid.DiscoverActor(ctx, actorName, lookupTimeout)
 	if err != nil {
 		return nil, err
 	}

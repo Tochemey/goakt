@@ -295,6 +295,41 @@ func (x *Address) HostPort() string {
 	return builder.String()
 }
 
+// HostPortOf extracts the raw "host:port" endpoint from a serialized actor
+// address ("goakt://system@host:port/name") without allocating an Address. The
+// returned endpoint is exactly the form embedded by String() and HostPort()
+// (raw host, no IPv6 brackets), so it compares equal to FormatHostPort(host,
+// port). ok is false when addr is not a well-formed goakt address.
+//
+// It relies on strings.Cut, whose results share addr's backing array, so the
+// extraction is allocation-free. This matters when tallying a large cluster
+// registry, where parsing every address into an Address would otherwise
+// allocate one struct plus one string per actor.
+func HostPortOf(addr string) (hostPort string, ok bool) {
+	_, rest, ok := strings.Cut(addr, "@")
+	if !ok {
+		return "", false
+	}
+
+	hostPort, _, ok = strings.Cut(rest, "/")
+	if !ok {
+		return "", false
+	}
+	return hostPort, hostPort != ""
+}
+
+// FormatHostPort renders a "host:port" endpoint exactly as it is embedded in an
+// address's String() form: a raw host followed by the port, with no IPv6
+// brackets. It is the inverse of HostPortOf.
+//
+// Use it (never net.JoinHostPort) whenever a host/port pair must be compared
+// against an endpoint sliced out of an address: net.JoinHostPort wraps IPv6
+// hosts in brackets, which never match the un-bracketed form stored in the
+// address and would silently break endpoint comparisons on IPv6 clusters.
+func FormatHostPort(host string, port int) string {
+	return host + ":" + strconv.Itoa(port)
+}
+
 // Equals reports whether x and a represent the same address.
 //
 // Equals performs a deep, field-by-field comparison of the underlying protobuf
