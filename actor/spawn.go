@@ -952,7 +952,12 @@ func (x *actorSystem) recreateActorFromWire(ctx context.Context, props *internal
 	case err == nil:
 		entry, perr := address.Parse(existing.GetAddress())
 		if perr == nil && entry.HostPort() != departedNode {
-			// the actor has already been recreated somewhere else; leave it alone
+			// the registry entry points at a node other than the departed one,
+			// so the actor was already recreated there (concurrent relocation or
+			// a client respawn); leave it alone to avoid a double spawn. Logged
+			// rather than silent so a rare stale entry (e.g. a lost replication
+			// write pointing at a previous owner) is diagnosable.
+			x.logger.Debugf("node=%s skipping relocation of actor=%s: registry entry points at %s, not departed node %s", x.String(), addr.Name(), entry.HostPort(), departedNode)
 			return nil
 		}
 

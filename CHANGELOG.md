@@ -11,6 +11,8 @@
 ### ✨ Features
 
 - **`WithGrainEagerRelocation` opts a grain back into upfront relocation** ([#1255](https://github.com/Tochemey/goakt/issues/1255)). Grains that must stay warm without an external trigger (timers, streams, background work) can be reactivated immediately on a surviving node when their host departs, restoring the pre-lazy behavior per grain. It is mutually exclusive with `WithGrainDisableRelocation` (`ErrGrainRelocationConflict`).
+- **Relocation now recovers actors and grains after a node crash** ([#1255](https://github.com/Tochemey/goakt/issues/1255)). Previously relocation only ran when a node shut down gracefully (it depended on the `PeerState` snapshot that node replicated before leaving); an abrupt departure (`kill -9`, OOM, partition) lost its actors and grains. When no snapshot exists, the leader now reconstructs the departed node's relocation set from the replicated cluster registry, so its relocatable actors and grains are recreated on surviving nodes. Each node keeps a small peers-address → remoting-port cache (seeded at startup, refreshed on `NodeJoined`) to identify a crashed node's registry records, since the `NodeLeft` event only carries the peers address. Crash recovery relies on a cluster replica count greater than 1.
+- **Role-aware relocation placement** ([#1255](https://github.com/Tochemey/goakt/issues/1255)). Actors spawned with `WithRole` are now relocated only onto nodes advertising that role, matching initial placement. Each actor is assigned to the least-loaded eligible node across the leader and surviving peers. When no surviving node advertises a required role, the actor is reported in the `RelocationFailed` event instead of being silently dropped.
 
 ### ⚠️ Behavior changes
 

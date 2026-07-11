@@ -546,9 +546,15 @@ memberlist detects node departure
      replica-count-of-1 partition owned by the departed node is otherwise lost),
      trigger DC reconciliation. (NodeJoined does NOT resync: Olric migrates
      partition data to the joining node, so re-putting would be redundant.)
+  └─ every node also refreshes the peers-address → remoting-port cache on
+     NodeJoined (and seeds it at startup) so a crashed node can be resolved later
   └─ leader node only (non-leaders just clean up the departed peer's cached state):
        ├─ check relocation is enabled
        ├─ fetch departed node's PeerState from cluster store (actors + grains it owned)
+       │    └─ on a miss (crash: no graceful snapshot) derive the set from the
+       │       replicated registry instead — deriveRelocationSetFromRegistry()
+       │       scans cluster actors/grains and keeps those whose host:remotingPort
+       │       matches the departed node (remoting port resolved from the cache)
        ├─ shouldRebalance(): skip when there is nothing to relocate
        ├─ beginRelocation(address, peerState): register the in-flight job keyed by
        │    departed address. A duplicate NodeLeft for an address whose relocation
@@ -562,7 +568,10 @@ memberlist detects node departure
                  └─ relocationWorker.relocate():
                       ├─ allocateActors(): partition actors among leader + peers
                       │    ├─ singleton actors → always go to the leader
-                      │    ├─ remaining actors → split evenly across all nodes
+                      │    ├─ role-constrained actors → least-loaded node advertising
+                      │    │    the role; if none survives, recorded as a relocation
+                      │    │    failure instead of being dropped
+                      │    ├─ remaining actors → least-loaded node across all targets
                       │    └─ skip: system actors, non-relocatable actors
                       ├─ allocateGrains(): partition grains among leader + peers,
                       │    so even the lazy directory cleanup fans out instead of
@@ -905,11 +914,11 @@ There is no automatic split-brain resolution; the framework relies on quorum to 
 When Memberlist detects a node departure:
 
 1. The cluster emits a `NodeLeft` event.
-2. The **leader node** fetches the departed node's peer state (list of actors and grains it owned) from the cluster store.
+2. The **leader node** fetches the departed node's peer state (list of actors and grains it owned) from the cluster store. On a **graceful** shutdown this is the snapshot the departing node replicated to its oldest peers. On a **crash** there is no snapshot, so the leader instead **derives the relocation set from the replicated registry** (`deriveRelocationSetFromRegistry`): it scans cluster actors and grains and keeps those whose `host:remotingPort` matches the departed node. The remoting port is resolved from a peers-address → remoting-port cache that every node keeps (seeded at startup, refreshed on `NodeJoined`), because the `NodeLeft` event only carries the peers address.
 3. The leader registers an in-flight relocation job keyed by the departed address (`beginRelocation`), so duplicate `NodeLeft` events for an address whose relocation is still running are ignored, then sends a `Rebalance` message to the relocator actor.
 4. The relocator spawns one short-lived **relocation worker per departed node**, so relocations of distinct nodes proceed concurrently. Each worker distributes the departed node's actors and grains across remaining nodes:
    - Singleton actors always move to the leader.
-   - Non-singleton, relocatable actors are spread across peers.
+   - Non-singleton, relocatable actors are spread across the least-loaded eligible nodes. An actor spawned with a **role** only lands on nodes advertising that role; if none survive, it is reported as a relocation failure instead of being silently dropped.
    - Grains are distributed evenly; each target then dispatches on the grain's own relocation intent (eager grains are reactivated up front, lazy grains only have their directory entry released so they re-activate on next use).
 5. The worker handles the leader's share locally and hands each peer its whole share in batched `RelocateBatch` requests (at most 500 items per request, two attempts each before the peer is considered unreachable). An unreachable peer's unsent remainder is moved once to the next surviving peer.
 6. Failures are isolated per item: a failing actor, grain, or peer never aborts the rest of the rebalance. The items that could not be relocated are reported in a single `RelocationFailed` event on the event stream.

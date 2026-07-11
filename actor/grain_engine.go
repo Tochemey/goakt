@@ -1206,7 +1206,11 @@ func (x *actorSystem) recreateGrainFromWire(ctx context.Context, grain *internal
 	case err == nil:
 		entry := net.JoinHostPort(existing.GetHost(), strconv.Itoa(int(existing.GetPort())))
 		if entry != departedNode {
-			// the grain has already been reactivated somewhere else; leave it alone
+			// the registry entry points at a node other than the departed one,
+			// so the grain was already reactivated there; leave it alone to avoid
+			// a double activation. Logged rather than silent so a rare stale
+			// entry is diagnosable.
+			x.logger.Debugf("node=%s skipping relocation of grain=%s: registry entry points at %s, not departed node %s", x.String(), identity, entry, departedNode)
 			return nil
 		}
 

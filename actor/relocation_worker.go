@@ -26,6 +26,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -39,7 +40,6 @@ import (
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
-	"github.com/tochemey/goakt/v4/internal/slices"
 	"github.com/tochemey/goakt/v4/log"
 )
 
@@ -129,7 +129,11 @@ func (w *relocationWorker) relocate(ctx *ReceiveContext, peerState *internalpb.P
 	peers, err := system.getCluster().Peers(rctx)
 	if err != nil {
 		w.logger.Errorf("cluster rebalancing failed for node=%s: %v (hint: check cluster quorum, peer connectivity)", address, err)
-		publishRelocationFailed(w.pid, address, peerState.GetActors(), peerState.GetGrains(), errors.NewInternalError(err))
+		// Report only the items whose loss is a real failure: every relocatable
+		// actor, but only eager grains. Lazy grains self-heal on next activation
+		// and disabled grains are lost by design, so neither belongs in the
+		// failure event (matching the normal per-item reporting path).
+		publishRelocationFailed(w.pid, address, peerState.GetActors(), eagerRelocationGrains(peerState.GetGrains()), errors.NewInternalError(err))
 		w.finish(rctx, address)
 		return
 	}
@@ -144,8 +148,17 @@ func (w *relocationWorker) relocate(ctx *ReceiveContext, peerState *internalpb.P
 	// instead of being issued entirely by this node.
 	grains := relocatableGrains(peerState.GetGrains())
 
-	leaderActors, peerActors := allocateActors(len(peers)+1, peerState)
+	leaderActors, peerActors, unplaceableActors := allocateActors(system.getNodeRoles(), peers, peerState)
 	leaderGrains, peerGrains := allocateGrains(len(peers)+1, grains)
+
+	// Role-constrained actors with no surviving eligible node cannot be
+	// relocated; record them so subscribers observe the loss via RelocationFailed
+	// instead of the actors silently disappearing.
+	for _, wireActor := range unplaceableActors {
+		rerr := errors.NewRebalancingError(fmt.Errorf("no surviving node advertises role %q required by actor %s", wireActor.GetRole(), wireActor.GetAddress()))
+		w.logger.Errorf("cannot relocate actor=%s: %v (hint: add a node advertising the required role, or remove the role constraint)", wireActor.GetAddress(), rerr)
+		failures.record(wireActor.GetAddress(), false, rerr)
+	}
 
 	eg := new(errgroup.Group)
 	eg.SetLimit(defaultRelocationConcurrency)
@@ -255,13 +268,83 @@ func (w *relocationWorker) relocateShare(ctx context.Context, requests []*intern
 	fallback := nextSurvivingPeer(peers, target)
 	if fallback == nil {
 		recordUnsent(remaining, err, failures)
+		w.releaseUndeliverableLazyGrains(ctx, remaining)
 		return
 	}
+
+	// The fallback peer need not advertise the same roles as the original
+	// target. Drop role-ineligible actors and record them as failures instead
+	// of silently placing a role-constrained actor on an ineligible node (the
+	// receiving node spawns WithRole as metadata and does not re-check it).
+	remaining = filterUnplaceableByRole(remaining, fallback.Roles, failures)
 
 	remaining, err = w.sendBatches(ctx, fallback, remaining, failures)
 	if err != nil {
 		recordUnsent(remaining, err, failures)
+		w.releaseUndeliverableLazyGrains(ctx, remaining)
 	}
+}
+
+// releaseUndeliverableLazyGrains removes, leader-side, the directory entries of
+// lazy grains that could not be handed off to any peer. Without this their
+// entries keep pointing at the departed (dead) node, and the TellGrain/AskGrain
+// fast path does not self-heal a stale owner (only the GrainIdentity activation
+// path does), so the grain would be permanently unreachable. recordUnsent
+// deliberately does not report lazy grains as failures, so this best-effort
+// cleanup is what makes them provably self-healing; eager grains are already
+// recorded as failures by recordUnsent.
+func (w *relocationWorker) releaseUndeliverableLazyGrains(ctx context.Context, requests []*internalpb.RelocateBatchRequest) {
+	if w.pid == nil {
+		return
+	}
+
+	system := w.pid.ActorSystem()
+
+	for _, request := range requests {
+		for _, wireGrain := range request.GetGrains() {
+			if wireGrain.GetEagerRelocation() {
+				continue
+			}
+
+			if err := system.releaseGrainForLazyRelocation(ctx, wireGrain, request.GetDepartedNode()); err != nil {
+				w.logger.Warnf("failed to release undeliverable lazy grain=%s directory entry: %v (hint: entry self-heals on next GrainIdentity activation)", wireGrain.GetGrainId().GetValue(), err)
+			}
+		}
+	}
+}
+
+// filterUnplaceableByRole returns the batch requests carrying only items the
+// target may host, recording every actor whose required role the target does
+// not advertise as a relocation failure. Grains carry no role and are always
+// retained; a request left with no actors and no grains is dropped.
+func filterUnplaceableByRole(requests []*internalpb.RelocateBatchRequest, targetRoles []string, failures *relocationFailures) []*internalpb.RelocateBatchRequest {
+	filtered := make([]*internalpb.RelocateBatchRequest, 0, len(requests))
+
+	for _, request := range requests {
+		var placeable []*internalpb.Actor
+
+		for _, wireActor := range request.GetActors() {
+			if eligibleForRole(targetRoles, wireActor.GetRole()) {
+				placeable = append(placeable, wireActor)
+				continue
+			}
+
+			rerr := errors.NewRebalancingError(fmt.Errorf("no surviving node advertises role %q required by actor %s", wireActor.GetRole(), wireActor.GetAddress()))
+			failures.record(wireActor.GetAddress(), false, rerr)
+		}
+
+		if len(placeable) == 0 && len(request.GetGrains()) == 0 {
+			continue
+		}
+
+		filtered = append(filtered, &internalpb.RelocateBatchRequest{
+			DepartedNode: request.GetDepartedNode(),
+			Actors:       placeable,
+			Grains:       request.GetGrains(),
+		})
+	}
+
+	return filtered
 }
 
 // sendBatches sends the given batch requests to the target in order and
@@ -317,6 +400,22 @@ func recreateSingletonFromWire(ctx context.Context, system ActorSystem, props *i
 	}
 
 	if err := system.getCluster().RemoveActor(ctx, addr.Name()); err != nil {
+		return errors.NewInternalError(err)
+	}
+
+	// A crashed node never runs its singleton-kind cleanup (RemoveKind), so its
+	// kind reservation lingers in the cluster registry. Left in place it makes
+	// SpawnSingleton fail with ErrSingletonAlreadyExists (a terminal error),
+	// stranding the singleton cluster-wide and defeating crash recovery. Clear
+	// the stale reservation first so the leader can re-establish it; RemoveKind
+	// is idempotent, so this is a no-op on the graceful path where the kind was
+	// already released.
+	kind := props.GetType()
+	if role := props.GetRole(); role != "" {
+		kind = kindRole(kind, role)
+	}
+
+	if err := system.getCluster().RemoveKind(ctx, kind); err != nil {
 		return errors.NewInternalError(err)
 	}
 
@@ -448,47 +547,98 @@ func (r *relocationFailures) items() []*internalpb.RelocationFailure {
 	return r.failures
 }
 
-// allocateActors builds the list of actors to recreate on the leader node and
-// the shares to hand to the peers in the cluster. Singleton actors always land
-// in the leader's share; the leader also takes the division remainder and the
-// first chunk. Chunks 1..n map to peers 0..n-1.
-func allocateActors(totalPeers int, nodeLeftState *internalpb.PeerState) (leaderShares []*internalpb.Actor, peersShares [][]*internalpb.Actor) {
-	actors := nodeLeftState.GetActors()
-	actorsCount := len(actors)
+// eligibleForRole reports whether a target advertising targetRoles may host an
+// actor requiring role. A role-less actor (empty role) is eligible everywhere.
+// It scans the role slice directly rather than building a lookup set per target:
+// role lists are tiny (usually zero to a few entries), so a linear scan is both
+// faster and allocation-free, which keeps the per-rebalance work GC-friendly.
+func eligibleForRole(targetRoles []string, role string) bool {
+	return role == "" || slices.Contains(targetRoles, role)
+}
 
-	// Collect all actors to be rebalanced
-	toRebalances := make([]*internalpb.Actor, 0, actorsCount)
-	for _, actorProps := range actors {
-		toRebalances = append(toRebalances, actorProps)
+// allocateActors distributes the departed node's actors across the leader
+// (index 0) and the surviving peers (indexes 1..n, where index i maps to
+// peers[i-1]), honoring each actor's required role.
+//
+// The returned values are:
+//   - leaderShares: actors to recreate on the leader (singletons plus the
+//     leader's own balanced share at index 0 of peersShares)
+//   - peersShares: per-target shares aligned to the worker's fan-out indexing
+//     (index 0 is the leader, index i maps to peers[i-1])
+//   - unplaceable: role-constrained actors for which no surviving target
+//     advertises the required role; the caller records these as relocation
+//     failures instead of silently dropping them
+//
+// Singleton actors always go to the leader share: their placement (including
+// any role constraint) is re-arbitrated by the cluster singleton spawn path.
+// Non-singleton actors are assigned to the least-loaded eligible target so the
+// load spreads evenly while respecting role constraints.
+func allocateActors(leaderRoles []string, peers []*cluster.Peer, nodeLeftState *internalpb.PeerState) (leaderShares []*internalpb.Actor, peersShares [][]*internalpb.Actor, unplaceable []*internalpb.Actor) {
+	// targetRoles[0] is the leader; targetRoles[i] maps to peers[i-1]. The peer
+	// role slices are referenced, not copied, so no per-target allocation.
+	targetRoles := make([][]string, 0, len(peers)+1)
+	targetRoles = append(targetRoles, leaderRoles)
+
+	for _, peer := range peers {
+		targetRoles = append(targetRoles, peer.Roles)
 	}
 
-	// Separate singleton actors to be assigned to the leader
-	leaderShares = slices.Filter(toRebalances, func(actor *internalpb.Actor) bool {
-		return actor.GetSingleton() != nil
-	})
+	peersShares = make([][]*internalpb.Actor, len(targetRoles))
+	loads := make([]int, len(targetRoles))
 
-	// Remove singleton actors from the list
-	toRebalances = slices.Filter(toRebalances, func(actor *internalpb.Actor) bool {
-		return actor.GetSingleton() == nil
-	})
+	for _, actor := range nodeLeftState.GetActors() {
+		// Singletons are re-arbitrated by the singleton spawn path, so they
+		// always land in the leader's share regardless of role.
+		if actor.GetSingleton() != nil {
+			leaderShares = append(leaderShares, actor)
+			continue
+		}
 
-	// Distribute remaining actors among peers
-	actorsCount = len(toRebalances)
-	quotient := actorsCount / totalPeers
-	remainder := actorsCount % totalPeers
+		role := actor.GetRole()
+		best := -1
 
-	// Assign remainder actors to the leader
-	leaderShares = append(leaderShares, toRebalances[:remainder]...)
+		for idx := range targetRoles {
+			if !eligibleForRole(targetRoles[idx], role) {
+				continue
+			}
 
-	// Chunk the remaining actors for peers
-	chunks := chunk.Chunkify(toRebalances[remainder:], quotient)
+			if best == -1 || loads[idx] < loads[best] {
+				best = idx
+			}
+		}
 
-	// Ensure leader takes the first chunk
-	if len(chunks) > 0 {
-		leaderShares = append(leaderShares, chunks[0]...)
+		if best == -1 {
+			// no surviving node advertises the required role
+			unplaceable = append(unplaceable, actor)
+			continue
+		}
+
+		peersShares[best] = append(peersShares[best], actor)
+		loads[best]++
 	}
 
-	return leaderShares, chunks
+	// the leader recreates its own balanced share (index 0) locally
+	leaderShares = append(leaderShares, peersShares[0]...)
+
+	return leaderShares, peersShares, unplaceable
+}
+
+// eagerRelocationGrains returns only the grains whose loss counts as a
+// relocation failure: eager grains that must be recreated up front. Lazy grains
+// (the default) self-heal on their next activation and disabled grains are lost
+// by design, so neither is reported when relocation aborts before dispatch.
+func eagerRelocationGrains(grains map[string]*internalpb.Grain) map[string]*internalpb.Grain {
+	filtered := make(map[string]*internalpb.Grain, len(grains))
+
+	for id, grain := range grains {
+		if grain.GetDisableRelocation() || !grain.GetEagerRelocation() {
+			continue
+		}
+
+		filtered[id] = grain
+	}
+
+	return filtered
 }
 
 // relocatableGrains returns the departed node's grains that participate in

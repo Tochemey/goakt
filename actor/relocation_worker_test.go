@@ -408,6 +408,56 @@ func TestRelocationWorkerShareFailsWithoutFallbackPeer(t *testing.T) {
 	}
 }
 
+// TestRelocationWorkerReleasesUndeliverableLazyGrains verifies that when a lazy
+// grain's share cannot be delivered to any peer, the leader removes its stale
+// directory entry itself so the grain is not left permanently unreachable (the
+// TellGrain/AskGrain fast path does not self-heal a stale owner). The lazy grain
+// is not reported as a failure; only the eager grain is.
+func TestRelocationWorkerReleasesUndeliverableLazyGrains(t *testing.T) {
+	ctx := context.Background()
+
+	system, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	sys := system.(*actorSystem)
+
+	transportErr := stdErrors.New("connection refused")
+	remotingMock := mocksremote.NewClient(t)
+	remotingMock.EXPECT().RelocateBatch(mock.Anything, "127.0.0.1", 9001, mock.Anything).
+		Return(nil, transportErr).Times(relocationBatchMaxAttempts)
+
+	clusterMock := mockscluster.NewCluster(t)
+	// the leader releases the undeliverable lazy grain's stale directory entry
+	clusterMock.EXPECT().GetGrain(mock.Anything, "kind/lazy").
+		Return(&internalpb.Grain{
+			GrainId: &internalpb.GrainId{Value: "kind/lazy"},
+			Host:    "127.0.0.1",
+			Port:    8080,
+		}, nil).Once()
+	clusterMock.EXPECT().RemoveGrain(mock.Anything, "kind/lazy").Return(nil).Once()
+	sys.cluster = clusterMock
+
+	worker := &relocationWorker{
+		remoting: remotingMock,
+		pid:      &PID{actorSystem: system, logger: log.DiscardLogger},
+		logger:   log.DiscardLogger,
+	}
+	peers := []*cluster.Peer{{Host: "127.0.0.1", RemotingPort: 9001}}
+	requests := buildRelocateBatchRequests("127.0.0.1:8080", nil,
+		[]*internalpb.Grain{
+			{GrainId: &internalpb.GrainId{Kind: "kind", Name: "lazy", Value: "kind/lazy"}},
+			{GrainId: &internalpb.GrainId{Kind: "kind", Name: "eager", Value: "kind/eager"}, EagerRelocation: true},
+		})
+	failures := &relocationFailures{}
+
+	worker.relocateShare(ctx, requests, peers[0], peers, failures)
+
+	items := failures.items()
+	require.Len(t, items, 1)
+	assert.True(t, items[0].GetGrain())
+	assert.Equal(t, "kind/eager", items[0].GetId())
+}
+
 // TestRelocationWorkerMergesRemoteItemFailures verifies that per-item failures
 // reported by the target peer are collected.
 func TestRelocationWorkerMergesRemoteItemFailures(t *testing.T) {
@@ -480,6 +530,66 @@ func TestBuildRelocateBatchRequestsChunksLargeShares(t *testing.T) {
 	}
 }
 
+// TestFilterUnplaceableByRole verifies the role-aware fallback filter: actors
+// whose required role the fallback peer does not advertise are recorded as
+// failures and dropped, while role-less actors, role-matching actors and all
+// grains are retained.
+func TestFilterUnplaceableByRole(t *testing.T) {
+	gpu := "gpu"
+	blue := "blue"
+	requests := []*internalpb.RelocateBatchRequest{
+		{
+			DepartedNode: "127.0.0.9:7000",
+			Actors: []*internalpb.Actor{
+				{Address: address.New("no-role", "test", "127.0.0.9", 7000).String()},
+				{Address: address.New("gpu-actor", "test", "127.0.0.9", 7000).String(), Role: &gpu},
+				{Address: address.New("blue-actor", "test", "127.0.0.9", 7000).String(), Role: &blue},
+			},
+			Grains: []*internalpb.Grain{{GrainId: &internalpb.GrainId{Value: "grain-1"}}},
+		},
+		{
+			DepartedNode: "127.0.0.9:7000",
+			Actors: []*internalpb.Actor{
+				{Address: address.New("gpu-only", "test", "127.0.0.9", 7000).String(), Role: &gpu},
+			},
+		},
+	}
+
+	failures := &relocationFailures{}
+	filtered := filterUnplaceableByRole(requests, []string{"blue"}, failures)
+
+	// the second request held only a gpu actor and no grains, so it is dropped
+	require.Len(t, filtered, 1)
+	// role-less and blue actors are kept; the gpu actor is dropped
+	require.Len(t, filtered[0].GetActors(), 2)
+	require.Len(t, filtered[0].GetGrains(), 1)
+
+	items := failures.items()
+	require.Len(t, items, 2)
+
+	for _, item := range items {
+		require.False(t, item.GetGrain())
+		require.Contains(t, item.GetId(), "gpu")
+	}
+}
+
+// TestEagerRelocationGrains verifies only eager grains are treated as failures
+// when relocation aborts before dispatch: lazy grains self-heal and disabled
+// grains are lost by design, so both are excluded.
+func TestEagerRelocationGrains(t *testing.T) {
+	grains := map[string]*internalpb.Grain{
+		"eager":    {GrainId: &internalpb.GrainId{Value: "eager"}, EagerRelocation: true},
+		"lazy":     {GrainId: &internalpb.GrainId{Value: "lazy"}},
+		"disabled": {GrainId: &internalpb.GrainId{Value: "disabled"}, DisableRelocation: true},
+	}
+
+	filtered := eagerRelocationGrains(grains)
+
+	require.Len(t, filtered, 1)
+	_, ok := filtered["eager"]
+	require.True(t, ok)
+}
+
 // TestRelocatableGrains verifies relocation-disabled grains are dropped from
 // the allocation entirely while eager and lazy grains both participate (the
 // relocation target dispatches on each grain's eager_relocation flag).
@@ -527,6 +637,124 @@ func TestAllocateGrainsSlice(t *testing.T) {
 	})
 }
 
+// TestAllocateActorsRoleAware verifies allocateActors honors actor role
+// constraints, keeps the leader/peer share indexing, routes singletons to the
+// leader, and reports role-unsatisfiable actors as unplaceable.
+func TestAllocateActorsRoleAware(t *testing.T) {
+	newActor := func(name, role string, singleton bool) *internalpb.Actor {
+		addr := address.New(name, "test", "127.0.0.9", 7000).String()
+		a := &internalpb.Actor{Address: addr, Relocatable: true}
+		if role != "" {
+			a.Role = &role
+		}
+		if singleton {
+			a.Singleton = &internalpb.SingletonSpec{}
+		}
+		return a
+	}
+
+	t.Run("role-less actors distribute across leader and peers with no unplaceable", func(t *testing.T) {
+		peers := []*cluster.Peer{
+			{Host: "127.0.0.1", RemotingPort: 9001},
+			{Host: "127.0.0.2", RemotingPort: 9002},
+		}
+		actors := map[string]*internalpb.Actor{}
+		for i := range 6 {
+			name := fmt.Sprintf("actor-%d", i)
+			actors[name] = newActor(name, "", false)
+		}
+		state := &internalpb.PeerState{Actors: actors}
+
+		leader, peersShares, unplaceable := allocateActors(nil, peers, state)
+
+		assert.Empty(t, unplaceable)
+		// index 0 = leader, indexes 1..n map to peers[i-1]
+		require.Len(t, peersShares, len(peers)+1)
+		assert.ElementsMatch(t, leader, peersShares[0])
+
+		total := 0
+		for _, share := range peersShares {
+			total += len(share)
+		}
+		assert.Equal(t, 6, total)
+		// balanced across the 3 targets (leader + 2 peers)
+		for _, share := range peersShares {
+			assert.Equal(t, 2, len(share))
+		}
+	})
+
+	t.Run("role-constrained actor lands on the matching peer", func(t *testing.T) {
+		peers := []*cluster.Peer{
+			{Host: "127.0.0.1", RemotingPort: 9001, Roles: []string{"worker"}},
+			{Host: "127.0.0.2", RemotingPort: 9002, Roles: []string{"api"}},
+		}
+		state := &internalpb.PeerState{Actors: map[string]*internalpb.Actor{
+			"api-actor": newActor("api-actor", "api", false),
+		}}
+
+		leader, peersShares, unplaceable := allocateActors([]string{"control"}, peers, state)
+
+		assert.Empty(t, unplaceable)
+		assert.Empty(t, leader)
+		// peers[1] advertises "api" -> peersShares index 2
+		require.Len(t, peersShares, 3)
+		require.Len(t, peersShares[2], 1)
+		assert.Equal(t, "api-actor", mustName(t, peersShares[2][0]))
+	})
+
+	t.Run("role-constrained actor lands on the leader when only leader matches", func(t *testing.T) {
+		peers := []*cluster.Peer{
+			{Host: "127.0.0.1", RemotingPort: 9001, Roles: []string{"worker"}},
+		}
+		state := &internalpb.PeerState{Actors: map[string]*internalpb.Actor{
+			"control-actor": newActor("control-actor", "control", false),
+		}}
+
+		leader, _, unplaceable := allocateActors([]string{"control"}, peers, state)
+
+		assert.Empty(t, unplaceable)
+		require.Len(t, leader, 1)
+		assert.Equal(t, "control-actor", mustName(t, leader[0]))
+	})
+
+	t.Run("role with no eligible target is reported as unplaceable", func(t *testing.T) {
+		peers := []*cluster.Peer{
+			{Host: "127.0.0.1", RemotingPort: 9001, Roles: []string{"worker"}},
+		}
+		state := &internalpb.PeerState{Actors: map[string]*internalpb.Actor{
+			"gpu-actor": newActor("gpu-actor", "gpu", false),
+		}}
+
+		leader, _, unplaceable := allocateActors([]string{"control"}, peers, state)
+
+		assert.Empty(t, leader)
+		require.Len(t, unplaceable, 1)
+		assert.Equal(t, "gpu-actor", mustName(t, unplaceable[0]))
+	})
+
+	t.Run("singletons always go to the leader share regardless of role", func(t *testing.T) {
+		peers := []*cluster.Peer{
+			{Host: "127.0.0.1", RemotingPort: 9001, Roles: []string{"api"}},
+		}
+		state := &internalpb.PeerState{Actors: map[string]*internalpb.Actor{
+			"singleton-actor": newActor("singleton-actor", "api", true),
+		}}
+
+		leader, _, unplaceable := allocateActors(nil, peers, state)
+
+		assert.Empty(t, unplaceable)
+		require.Len(t, leader, 1)
+		assert.Equal(t, "singleton-actor", mustName(t, leader[0]))
+	})
+}
+
+func mustName(t *testing.T, actor *internalpb.Actor) string {
+	t.Helper()
+	addr, err := address.Parse(actor.GetAddress())
+	require.NoError(t, err)
+	return addr.Name()
+}
+
 // TestNextSurvivingPeer verifies fallback peer selection: the next peer in the
 // list wrapping around, nil when the target is the only peer, and the first
 // peer when the target is unknown.
@@ -572,6 +800,7 @@ func TestRecreateSingletonFromWireUsesSingletonSpec(t *testing.T) {
 	}
 
 	clusterMock.EXPECT().RemoveActor(mock.Anything, "singleton").Return(nil).Once()
+	clusterMock.EXPECT().RemoveKind(mock.Anything, kindRole(types.Name(new(MockActor)), "blue")).Return(nil).Once()
 
 	spy := &spawnSingletonSpy{actorSystem: system}
 	err := recreateSingletonFromWire(ctx, spy, props)
