@@ -77,6 +77,21 @@ const (
 	nodeLeftEmitTimeout = 30 * time.Second
 )
 
+// defaultBootstrapMaxAttempts and defaultBootstrapRetryBackoff bound the in-process
+// bootstrap retry: a node joining a data-bearing cluster can transiently exceed the
+// bootstrap timeout while partitions redistribute, and crashing the process turns
+// that transient into a restart loop. Backoff grows linearly (backoff * attempt).
+//
+// defaultBootstrapMaxAttempts is not comparable to Olric's MaxJoinAttempts (10): the
+// two are nested, not parallel. Every attempt here already contains Olric's full
+// join-retry budget inside server.Start; this value multiplies the whole bootstrap
+// sequence (join, initial sync, dmap creation), so raising it multiplies worst-case
+// startup latency by the bootstrap timeout windows each attempt can consume.
+const (
+	defaultBootstrapMaxAttempts  = 3
+	defaultBootstrapRetryBackoff = time.Second
+)
+
 type recordNamespace string
 
 const (
@@ -203,6 +218,8 @@ type cluster struct {
 	readTimeout             time.Duration
 	shutdownTimeout         time.Duration
 	bootstrapTimeout        time.Duration
+	bootstrapMaxAttempts    int
+	bootstrapRetryBackoff   time.Duration
 	routingTableInterval    time.Duration
 	triggerBalancerInterval time.Duration
 	tlsInfo                 *gtls.Info
@@ -267,6 +284,8 @@ func New(name string, disco discovery.Provider, node *discovery.Node, opts ...Co
 		readTimeout:             config.readTimeout,
 		shutdownTimeout:         config.shutdownTimeout,
 		bootstrapTimeout:        config.bootstrapTimeout,
+		bootstrapMaxAttempts:    defaultBootstrapMaxAttempts,
+		bootstrapRetryBackoff:   defaultBootstrapRetryBackoff,
 		routingTableInterval:    config.routingTableInterval,
 		triggerBalancerInterval: config.triggerBalancerInterval,
 		tlsInfo:                 config.tlsInfo,
@@ -283,21 +302,6 @@ func New(name string, disco discovery.Provider, node *discovery.Node, opts ...Co
 	}
 }
 
-// bootstrapMaxAttempts and bootstrapRetryBackoff bound the in-process bootstrap retry:
-// a node joining a data-bearing cluster can transiently exceed the bootstrap timeout
-// while partitions redistribute, and crashing the process turns that transient into a
-// restart loop. Backoff grows linearly (backoff * attempt).
-//
-// bootstrapMaxAttempts is not comparable to Olric's MaxJoinAttempts (10): the two are
-// nested, not parallel. Every attempt here already contains Olric's full join-retry
-// budget inside server.Start; this constant multiplies the whole bootstrap sequence
-// (join, initial sync, dmap creation), so raising it multiplies worst-case startup
-// latency by the bootstrap timeout windows each attempt can consume.
-const (
-	bootstrapMaxAttempts  = 3
-	bootstrapRetryBackoff = time.Second
-)
-
 // Start initializes the cluster engine, configures the underlying Olric
 // instance, and begins consuming cluster events. Bootstrap is retried a bounded
 // number of times with backoff; every failed attempt fully tears down the
@@ -307,7 +311,7 @@ func (x *cluster) Start(ctx context.Context) error {
 		return nil
 	}
 
-	if err := retryBootstrap(ctx, bootstrapMaxAttempts, bootstrapRetryBackoff, x.logger, func() error {
+	if err := retryBootstrap(ctx, x.bootstrapMaxAttempts, x.bootstrapRetryBackoff, x.logger, func() error {
 		return x.bootstrap(ctx)
 	}); err != nil {
 		return err
@@ -326,6 +330,7 @@ func (x *cluster) Start(ctx context.Context) error {
 	x.consumeWg.Go(func() {
 		x.consume()
 	})
+
 	return nil
 }
 
@@ -347,6 +352,11 @@ func retryBootstrap(ctx context.Context, maxAttempts int, backoff time.Duration,
 			break
 		}
 
+		// do not promise a retry the dead context will never allow
+		if ctx.Err() != nil {
+			return errors.Join(err, ctx.Err())
+		}
+
 		wait := time.Duration(n) * backoff
 		logger.Warnf("cluster bootstrap attempt %d/%d failed: %v; retrying in %s (hint: the cluster may still be redistributing partitions)", n, maxAttempts, err, wait)
 
@@ -362,18 +372,19 @@ func retryBootstrap(ctx context.Context, maxAttempts int, backoff time.Duration,
 
 // bootstrap performs one full engine bootstrap attempt. Every failure path tears
 // down whatever was started, so a failed attempt leaves no bound port, joined
-// member, or half-initialized state behind.
+// member, or half-initialized state behind. Failures are returned, not logged:
+// retryBootstrap emits one log line per failed attempt and the wrapped hints
+// travel with the error to the final caller.
 func (x *cluster) bootstrap(ctx context.Context) error {
 	conf, err := x.buildConfig()
 	if err != nil {
-		x.logger.Warnf("failed to build engine config: %v (hint: check Olric bind addresses, discovery config)", err)
-		return err
+		return fmt.Errorf("failed to build engine config: %w (hint: check Olric bind addresses, discovery config)", err)
 	}
 
 	conf.Hasher = &hasherWrapper{x.hasher}
 
 	if err := x.setupMemberlistConfig(conf); err != nil {
-		return err
+		return fmt.Errorf("failed to configure memberlist: %w (hint: check bind address, discovery port)", err)
 	}
 
 	x.configureDiscovery(conf)
@@ -383,27 +394,23 @@ func (x *cluster) bootstrap(ctx context.Context) error {
 
 	cache, err := olric.New(conf)
 	if err != nil {
-		x.logger.Warn(fmt.Errorf("failed to start cluster engine: %w (hint: check discovery peers, network connectivity, firewall)", err))
-		return err
+		return fmt.Errorf("failed to start cluster engine: %w (hint: check discovery peers, network connectivity, firewall)", err)
 	}
 
 	x.server = cache
 	if err := x.startServer(startCtx, ctx); err != nil {
-		x.logger.Warn(fmt.Errorf("failed to start cluster engine: %w (hint: check discovery peers, network connectivity, firewall)", err))
-		return err
+		return fmt.Errorf("failed to start cluster engine: %w (hint: check discovery peers, network connectivity, firewall)", err)
 	}
 
 	x.client = x.server.NewEmbeddedClient()
 	if err := x.createDMap(); err != nil {
-		x.logger.Warn(fmt.Errorf("failed to create cluster data map: %w (hint: check cluster config, permissions)", err))
 		se := x.server.Shutdown(ctx)
-		return errors.Join(err, se)
+		return errors.Join(fmt.Errorf("failed to create cluster data map: %w (hint: check cluster config, permissions)", err), se)
 	}
 
 	if err := x.createSubscription(ctx); err != nil {
-		x.logger.Warn(fmt.Errorf("failed to create cluster subscription: %w (hint: check cluster config, permissions)", err))
 		se := x.server.Shutdown(ctx)
-		return errors.Join(err, se)
+		return errors.Join(fmt.Errorf("failed to create cluster subscription: %w (hint: check cluster config, permissions)", err), se)
 	}
 
 	return nil
@@ -1130,7 +1137,6 @@ func (x *cluster) buildConfig() (*oconfig.Config, error) {
 func (x *cluster) setupMemberlistConfig(cfg *oconfig.Config) error {
 	mconfig, err := oconfig.NewMemberlistConfig(oconfig.MemberlistEnvLAN)
 	if err != nil {
-		x.logger.Warnf("failed to configure memberlist: %v (hint: check bind address, discovery port)", err)
 		return err
 	}
 	mconfig.BindAddr = x.node.Host
@@ -1183,16 +1189,29 @@ func (x *cluster) configureDiscovery(conf *oconfig.Config) {
 	}
 }
 
+// initialSyncer is the narrow slice of the Olric server surface needed by
+// waitForInitialSync; it keeps the sync failure path unit-testable.
+type initialSyncer interface {
+	WaitForInitialSync(ctx context.Context) error
+	Shutdown(ctx context.Context) error
+}
+
 // startServer launches the embedded Olric server and waits for it to become
-// ready or return an error.
+// ready or return an error. The watcher goroutine captures the server instance:
+// it can outlive this attempt when server.Start unblocks late, and must never
+// touch the x.server field a later bootstrap attempt may have reassigned.
 func (x *cluster) startServer(startCtx, ctx context.Context) error {
+	server := x.server
 	errCh := make(chan error, 1)
+
 	go func() {
 		defer close(errCh)
-		if err := x.server.Start(); err != nil {
-			errCh <- errors.Join(err, x.server.Shutdown(ctx))
+
+		if err := server.Start(); err != nil {
+			errCh <- errors.Join(err, server.Shutdown(ctx))
 			return
 		}
+
 		errCh <- nil
 	}()
 
@@ -1204,12 +1223,18 @@ func (x *cluster) startServer(startCtx, ctx context.Context) error {
 		}
 	}
 
-	syncCtx, cancel := context.WithTimeout(ctx, x.bootstrapTimeout)
+	return waitForInitialSync(ctx, x.bootstrapTimeout, server)
+}
+
+// waitForInitialSync waits up to timeout for the initial replica sync and tears
+// the server down on failure: a sync timeout must not leak the started server
+// (port bound, memberlist joined).
+func waitForInitialSync(ctx context.Context, timeout time.Duration, server initialSyncer) error {
+	syncCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	if err := x.server.WaitForInitialSync(syncCtx); err != nil {
-		// a sync timeout must not leak the started server (port bound, memberlist joined)
-		return errors.Join(err, x.server.Shutdown(ctx))
+	if err := server.WaitForInitialSync(syncCtx); err != nil {
+		return errors.Join(err, server.Shutdown(ctx))
 	}
 
 	return nil

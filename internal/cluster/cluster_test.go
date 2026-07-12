@@ -143,9 +143,8 @@ func TestNotRunningReturnsErrEngineNotRunning(t *testing.T) {
 }
 
 func TestRetryBootstrap(t *testing.T) {
-	t.Run("first attempt succeeds without sleeping", func(t *testing.T) {
+	t.Run("first attempt succeeds without retrying", func(t *testing.T) {
 		calls := 0
-		start := time.Now()
 		err := retryBootstrap(context.Background(), 3, time.Second, log.DiscardLogger, func() error {
 			calls++
 			return nil
@@ -153,7 +152,6 @@ func TestRetryBootstrap(t *testing.T) {
 
 		require.NoError(t, err)
 		assert.Equal(t, 1, calls)
-		assert.Less(t, time.Since(start), 500*time.Millisecond)
 	})
 
 	t.Run("transient failure heals within the attempt budget", func(t *testing.T) {
@@ -185,7 +183,7 @@ func TestRetryBootstrap(t *testing.T) {
 		assert.Contains(t, err.Error(), "after 3 attempts")
 	})
 
-	t.Run("context cancelation during backoff stops retrying", func(t *testing.T) {
+	t.Run("context already cancelled stops before the backoff", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		boom := errors.New("boom")
 		calls := 0
@@ -200,12 +198,82 @@ func TestRetryBootstrap(t *testing.T) {
 		assert.ErrorIs(t, err, boom)
 		assert.ErrorIs(t, err, context.Canceled)
 	})
+
+	t.Run("context cancelation during backoff stops retrying", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		go func() {
+			pause.For(100 * time.Millisecond)
+			cancel()
+		}()
+
+		boom := errors.New("boom")
+		calls := 0
+		err := retryBootstrap(ctx, 3, time.Hour, log.DiscardLogger, func() error {
+			calls++
+			return boom
+		})
+
+		require.Error(t, err)
+		assert.Equal(t, 1, calls)
+		assert.ErrorIs(t, err, boom)
+		assert.ErrorIs(t, err, context.Canceled)
+	})
 }
 
-// TestBootstrapFailureRetriesAndReleasesPorts pins both halves of #1257: a failing
-// bootstrap is retried the full attempt budget (instead of killing the process on the
-// first error), and every failed attempt tears the partial engine down, so no port is
-// left bound once Start finally gives up.
+// fakeInitialSyncer stubs the initialSyncer surface to drive the initial-sync
+// failure paths that need a multi-replica cluster mid-redistribution to occur
+// for real.
+type fakeInitialSyncer struct {
+	syncErr     error
+	shutdownErr error
+	shutdowns   int
+}
+
+func (f *fakeInitialSyncer) WaitForInitialSync(context.Context) error { return f.syncErr }
+
+func (f *fakeInitialSyncer) Shutdown(context.Context) error {
+	f.shutdowns++
+	return f.shutdownErr
+}
+
+func TestWaitForInitialSync(t *testing.T) {
+	t.Run("success leaves the server running", func(t *testing.T) {
+		server := &fakeInitialSyncer{}
+		err := waitForInitialSync(context.Background(), time.Second, server)
+		require.NoError(t, err)
+		assert.Zero(t, server.shutdowns)
+	})
+
+	t.Run("sync failure tears the started server down", func(t *testing.T) {
+		syncErr := errors.New("sync timed out")
+		server := &fakeInitialSyncer{syncErr: syncErr}
+		err := waitForInitialSync(context.Background(), time.Second, server)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, syncErr)
+		assert.Equal(t, 1, server.shutdowns)
+	})
+
+	t.Run("failed teardown is joined to the sync error", func(t *testing.T) {
+		syncErr := errors.New("sync timed out")
+		shutdownErr := errors.New("shutdown failed")
+		server := &fakeInitialSyncer{syncErr: syncErr, shutdownErr: shutdownErr}
+		err := waitForInitialSync(context.Background(), time.Second, server)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, syncErr)
+		assert.ErrorIs(t, err, shutdownErr)
+		assert.Equal(t, 1, server.shutdowns)
+	})
+}
+
+// TestBootstrapFailureRetriesAndReleasesPorts drives the real Start with
+// unreachable discovery: the bootstrap failure (here in the join phase) is
+// retried the full attempt budget instead of killing the process on the first
+// error, and every failed attempt tears the partial engine down, so no port is
+// left bound once Start finally gives up. The initial-sync failure path, which
+// needs a multi-replica cluster mid-redistribution to occur for real, is
+// covered by TestWaitForInitialSync.
 func TestBootstrapFailureRetriesAndReleasesPorts(t *testing.T) {
 	ctx := context.TODO()
 	nodePorts := dynaport.Get(4)
@@ -239,9 +307,13 @@ func TestBootstrapFailureRetriesAndReleasesPorts(t *testing.T) {
 
 	require.NotNil(t, engine)
 
+	// shrink the retry backoff so the test does not sleep through the
+	// production 1s+2s waits; the attempt budget stays at the default
+	engine.(*cluster).bootstrapRetryBackoff = 50 * time.Millisecond
+
 	err := engine.Start(ctx)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), fmt.Sprintf("after %d attempts", bootstrapMaxAttempts), "bootstrap must exhaust its retry budget, not fail on the first attempt")
+	assert.Contains(t, err.Error(), fmt.Sprintf("after %d attempts", defaultBootstrapMaxAttempts), "bootstrap must exhaust its retry budget, not fail on the first attempt")
 
 	for _, port := range []int{gossipPort, clusterPort} {
 		ln, lerr := net.Listen("tcp", fmt.Sprintf("%s:%d", host, port))
