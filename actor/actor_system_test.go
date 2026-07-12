@@ -52,6 +52,7 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/eventstream"
 	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/cluster"
@@ -4156,6 +4157,80 @@ func TestClusterSingleNodeStartsWithDefaultReplication(t *testing.T) {
 	require.NoError(t, sys.Stop(ctx))
 }
 
+func TestGateCrashRecoveryOwnsPortCachePruning(t *testing.T) {
+	// handleNodeLeftEvent hands the departed node's remoting-port cache entry
+	// to the recovery goroutine: the entry must still be resolvable when the
+	// quiescence gate opens, and must be pruned once recovery completes
+	clusterMock := mockscluster.NewCluster(t)
+	system := MockReplicationTestSystem(clusterMock)
+	system.eventsStream = eventstream.New()
+
+	peer := "127.0.0.1:3320"
+	system.peerRemotingPorts.Set(peer, 9090)
+
+	clusterMock.EXPECT().LastRebalanceEvent().Return(time.Time{}).Maybe()
+	clusterMock.EXPECT().ActorsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, nil).Once()
+	clusterMock.EXPECT().GrainsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, nil).Once()
+
+	system.gateCrashRecovery(peer)
+
+	_, cached := system.peerRemotingPort(peer)
+	require.False(t, cached, "recovery owns the cache entry and must prune it on completion")
+}
+
+func TestGateCrashRecoveryRetriesDerivation(t *testing.T) {
+	// the derivation's registry scan can transiently fail on an unreachable
+	// member while the cluster churns: the quiesce-then-derive cycle must be
+	// retried instead of permanently skipping the crashed node's rebalance
+	clusterMock := mockscluster.NewCluster(t)
+	system := MockReplicationTestSystem(clusterMock)
+	system.eventsStream = eventstream.New()
+
+	consumer := system.eventsStream.AddSubscriber()
+	system.eventsStream.Subscribe(consumer, eventsTopic)
+
+	peer := "127.0.0.1:3320"
+	system.peerRemotingPorts.Set(peer, 9090)
+
+	clusterMock.EXPECT().LastRebalanceEvent().Return(time.Time{}).Maybe()
+	// the first scan fails transiently, the retry succeeds
+	clusterMock.EXPECT().ActorsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, assert.AnError).Once()
+	clusterMock.EXPECT().ActorsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, nil).Once()
+	clusterMock.EXPECT().GrainsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, nil).Once()
+
+	system.gateCrashRecovery(peer)
+
+	var derived []*RelocationDerived
+
+	for event := range consumer.Iterator() {
+		if msg, ok := event.Payload().(*RelocationDerived); ok {
+			derived = append(derived, msg)
+		}
+	}
+
+	require.Len(t, derived, 1, "derivation must succeed on retry and publish RelocationDerived")
+
+	_, cached := system.peerRemotingPort(peer)
+	require.False(t, cached, "recovery must prune the cache entry once done")
+}
+
+func TestGateCrashRecoveryGivesUpAfterMaxAttempts(t *testing.T) {
+	clusterMock := mockscluster.NewCluster(t)
+	system := MockReplicationTestSystem(clusterMock)
+	system.eventsStream = eventstream.New()
+
+	peer := "127.0.0.1:3320"
+	system.peerRemotingPorts.Set(peer, 9090)
+
+	clusterMock.EXPECT().LastRebalanceEvent().Return(time.Time{}).Maybe()
+	clusterMock.EXPECT().ActorsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, assert.AnError).Times(relocationDeriveMaxAttempts)
+
+	system.gateCrashRecovery(peer)
+
+	_, cached := system.peerRemotingPort(peer)
+	require.False(t, cached, "the cache entry is pruned even when recovery gives up")
+}
+
 func TestPublishRelocationDerived(t *testing.T) {
 	ctx := t.Context()
 	ports := dynaport.Get(1)
@@ -5800,6 +5875,118 @@ func TestCleanupStaleLocalActors(t *testing.T) {
 		clusterMock.EXPECT().RemoveActor(mock.Anything, staleAddr.Name()).Return(assert.AnError).Once()
 
 		require.NoError(t, system.cleanupStaleLocalActors(context.Background()))
+	})
+
+	t.Run("removes stale singleton records instead of respawning", func(t *testing.T) {
+		// singletons are re-arbitrated by the leader on demand: a stale
+		// singleton record is dropped, never respawned locally
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		system.actors = newTree()
+
+		staleAddr := address.New("stale-singleton", system.name, "127.0.0.1", 8080)
+		actors := []*internalpb.Actor{{
+			Address:     staleAddr.String(),
+			Relocatable: true,
+			Singleton:   &internalpb.SingletonSpec{},
+		}}
+
+		clusterMock.EXPECT().Actors(mock.Anything, mock.Anything).Return(actors, nil).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, staleAddr.Name()).Return(nil).Once()
+
+		require.NoError(t, system.cleanupStaleLocalActors(context.Background()))
+	})
+
+	t.Run("respawn failure does not fail cleanup and restores the record", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		system.actors = newTree()
+		system.registry = types.NewRegistry()
+		system.reflection = newReflection(system.registry)
+
+		staleAddr := address.New("stale", system.name, "127.0.0.1", 8080)
+		record := &internalpb.Actor{
+			Address:     staleAddr.String(),
+			Type:        "unregistered.Type",
+			Relocatable: true,
+		}
+
+		clusterMock.EXPECT().Actors(mock.Anything, mock.Anything).Return([]*internalpb.Actor{record}, nil).Once()
+		// the respawn path releases the entry, fails to instantiate the
+		// unregistered type, and restores the record
+		clusterMock.EXPECT().GetActor(mock.Anything, staleAddr.Name()).Return(record, nil).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, staleAddr.Name()).Return(nil).Once()
+		clusterMock.EXPECT().PutActor(mock.Anything, record).Return(nil).Once()
+
+		require.NoError(t, system.cleanupStaleLocalActors(context.Background()))
+	})
+
+	t.Run("respawns relocatable actors of a previous incarnation", func(t *testing.T) {
+		// a container that crashes and restarts in place rejoins at the same
+		// address without the cluster ever observing a NodeLeft: the registry
+		// records of its previous incarnation must be respawned locally, not
+		// erased
+		ctx := context.TODO()
+		nodePorts := dynaport.Get(3)
+		host := "127.0.0.1"
+
+		addrs := []string{
+			net.JoinHostPort(host, strconv.Itoa(nodePorts[0])),
+		}
+
+		provider := new(mocksdiscovery.Provider)
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig(host, nodePorts[2])),
+			WithCluster(
+				NewClusterConfig().
+					WithKinds(new(MockActor)).
+					WithReplicaCount(1).
+					WithPeersPort(nodePorts[1]).
+					WithDiscoveryPort(nodePorts[0]).
+					WithDiscovery(provider)),
+		)
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+
+		x := sys.(*actorSystem)
+
+		// spawn a relocatable actor and wait for its registry record
+		pid, err := sys.Spawn(ctx, "phoenix", NewMockActor(), WithLongLived())
+		require.NoError(t, err)
+
+		// replication to the registry is asynchronous: wait for the record
+		// itself, not for the local PID
+		require.Eventually(t, func() bool {
+			_, err := x.getCluster().GetActor(ctx, "phoenix")
+			return err == nil
+		}, 10*time.Second, 100*time.Millisecond)
+
+		// simulate the previous incarnation's death: the local PID vanishes
+		// while the registry record keeps pointing at this node's address
+		x.actors.deleteNode(pid)
+		_, found := x.actors.node(pid.getAddress().String())
+		require.False(t, found)
+
+		require.NoError(t, x.cleanupStaleLocalActors(ctx))
+
+		// the actor is respawned locally instead of erased
+		_, found = x.actors.node(pid.getAddress().String())
+		require.True(t, found, "relocatable actor must be respawned, not erased")
+
+		exists, err := sys.ActorExists(ctx, "phoenix")
+		require.NoError(t, err)
+		require.True(t, exists, "registry record must survive the reconciliation")
+
+		require.NoError(t, sys.Stop(ctx))
 	})
 }
 

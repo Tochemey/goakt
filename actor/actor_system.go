@@ -62,6 +62,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/locker"
 	"github.com/tochemey/goakt/v4/internal/metric"
 	inet "github.com/tochemey/goakt/v4/internal/net"
+	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/internal/pointer"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/internal/strconvx"
@@ -2591,9 +2592,17 @@ func (x *actorSystem) startCluster(ctx context.Context) error {
 	return nil
 }
 
-// cleanupStaleLocalActors removes cluster actor records that belong to this node
-// but have no corresponding local PID. This is a best-effort cleanup for unclean
-// restarts and does not fail startup on errors.
+// cleanupStaleLocalActors reconciles cluster actor records that belong to this
+// node but have no corresponding local PID, which happens when a previous
+// incarnation of this node crashed and restarted at the same address (a
+// container restart in place) without the cluster ever observing a NodeLeft.
+// Relocatable actors are respawned locally from their registry record, exactly
+// as crash relocation would have recreated them on a survivor; without this
+// they would be erased with no relocation, no event and no trace. Singleton
+// and non-relocatable records are removed: singletons are re-arbitrated by the
+// leader on demand and non-relocatable actors are lost with their incarnation
+// by design. This is best-effort for unclean restarts and does not fail
+// startup on errors.
 func (x *actorSystem) cleanupStaleLocalActors(ctx context.Context) error {
 	if !x.clusterEnabled.Load() || x.cluster == nil {
 		return nil
@@ -2611,6 +2620,8 @@ func (x *actorSystem) cleanupStaleLocalActors(ctx context.Context) error {
 
 	host := x.remoteConfig.BindAddr()
 	port := x.remoteConfig.BindPort()
+	selfAddress := net.JoinHostPort(host, strconv.Itoa(port))
+	recovered := 0
 
 	for _, actor := range actors {
 		addr, err := address.Parse(actor.GetAddress())
@@ -2632,12 +2643,26 @@ func (x *actorSystem) cleanupStaleLocalActors(ctx context.Context) error {
 			continue
 		}
 
+		if actor.GetSingleton() == nil && actor.GetRelocatable() {
+			if err := x.recreateActorFromWire(ctx, actor, selfAddress); err != nil {
+				x.logger.Warnf("failed to recover actor %s from a previous incarnation of this node: %v", addr.String(), err)
+				continue
+			}
+
+			recovered++
+			continue
+		}
+
 		if err := x.cluster.RemoveActor(ctx, addr.Name()); err != nil {
 			x.logger.Warnf("failed to remove stale cluster actor %s: %v", addr.String(), err)
 			continue
 		}
 
 		x.logger.Debugf("removed stale cluster actor %s", addr.String())
+	}
+
+	if recovered > 0 {
+		x.logger.Infof("recovered %d relocatable actor(s) from a previous incarnation of node=%s", recovered, selfAddress)
 	}
 
 	return nil
@@ -3192,10 +3217,20 @@ func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
 	x.logger.Infof("node=%s detected node left event: node=%s", x.String(), nodeLeft.Address)
 
 	// The departed node is already gone from membership, so prune its cached
-	// remoting port once this handler has had the chance to consult it. Doing
-	// so keeps the cache bounded under churn; a stable address that leaves and
-	// rejoins is re-added on the next membership refresh.
-	defer x.forgetPeerRemotingPort(nodeLeft.Address)
+	// remoting port once its departure has been fully handled. Doing so keeps
+	// the cache bounded under churn; a stable address that leaves and rejoins
+	// is re-added on the next membership refresh. When crash recovery runs
+	// asynchronously (gateCrashRecovery), the goroutine takes ownership of the
+	// pruning: a deferred prune here would race the recovery's registry
+	// derivation, which resolves the remoting port from this cache seconds
+	// later, and losing that race silently skips the whole rebalance.
+	pruneCachedPort := true
+
+	defer func() {
+		if pruneCachedPort {
+			x.forgetPeerRemotingPort(nodeLeft.Address)
+		}
+	}()
 
 	x.pruneRemoteWatchesForHost(context.Background(), nodeLeft.Address, nodeLeft.Timestamp)
 	// Repair the cluster store after a departure. With a replica count of 1 the
@@ -3229,8 +3264,12 @@ func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
 			// Reconstruct the relocation set from the replicated registry so its
 			// actors and grains are still recovered onto surviving nodes. The
 			// derivation is gated on olric's partition repair going quiet and
-			// therefore runs off the events loop (see gateCrashRecovery).
+			// therefore runs off the events loop (see gateCrashRecovery), which
+			// consults the remoting-port cache once the gate opens: the cache
+			// entry must outlive this handler, so the recovery goroutine owns
+			// its pruning.
 			x.logger.Warnf("leader=%s found no snapshot for node=%s; deriving relocation set from the cluster registry", x.String(), nodeLeft.Address)
+			pruneCachedPort = false
 			go x.gateCrashRecovery(nodeLeft.Address)
 			return
 		}
@@ -3287,26 +3326,48 @@ func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
 // into failures. It runs on its own goroutine so the wait never blocks the
 // cluster events loop; the wait is bounded so recovery still proceeds when the
 // repair signal never settles.
+//
+// The whole quiesce-then-derive cycle is retried a bounded number of times:
+// recovery runs precisely while the cluster is churning (a replacement node may
+// be joining, crash-looping, or flapping), so the derivation's registry scan
+// can transiently fail on an unreachable member. Giving up on the first error
+// would permanently skip the rebalance and silently lose every actor of the
+// crashed node.
 func (x *actorSystem) gateCrashRecovery(peerAddress string) {
-	ctx := context.Background()
-	deadline := time.Now().Add(relocationQuiescenceMaxWait)
+	// this goroutine owns the departed node's remoting-port cache entry (see
+	// handleNodeLeftEvent): prune it only once recovery no longer needs it
+	defer x.forgetPeerRemotingPort(peerAddress)
 
-	for time.Since(x.cluster.LastRebalanceEvent()) < relocationQuiescenceWindow {
-		if x.isStopping() {
+	ctx := context.Background()
+
+	var peerState *internalpb.PeerState
+
+	for attempt := 1; ; attempt++ {
+		if !x.awaitRelocationQuiescence(peerAddress) {
 			return
 		}
 
-		if time.Now().After(deadline) {
-			x.logger.Warnf("leader=%s proceeding with crash recovery for node=%s before partition repair went quiet (hint: recovery may be partial; affected items appear in RelocationFailed)", x.String(), peerAddress)
+		var ok bool
+		if peerState, ok = x.deriveRelocationSetFromRegistry(ctx, peerAddress); ok {
 			break
 		}
 
-		time.Sleep(relocationQuiescencePoll)
+		if attempt >= relocationDeriveMaxAttempts {
+			x.logger.Errorf("leader=%s could not derive relocation set for node=%s after %d attempts; skipping rebalance (hint: its actors are not recovered; check cluster health)", x.String(), peerAddress, attempt)
+			return
+		}
+
+		x.logger.Warnf("leader=%s could not derive relocation set for node=%s (attempt %d/%d); retrying in %s", x.String(), peerAddress, attempt, relocationDeriveMaxAttempts, relocationDeriveRetryBackoff)
+		pause.For(relocationDeriveRetryBackoff)
+
+		if x.isStopping() {
+			return
+		}
 	}
 
-	peerState, ok := x.deriveRelocationSetFromRegistry(ctx, peerAddress)
-	if !ok {
-		x.logger.Warnf("leader=%s could not derive relocation set for node=%s; skipping rebalance", x.String(), peerAddress)
+	// the retries above can keep this goroutine alive across a shutdown: never
+	// publish or dispatch on a system that is stopping
+	if x.isStopping() {
 		return
 	}
 
@@ -3317,6 +3378,36 @@ func (x *actorSystem) gateCrashRecovery(peerAddress string) {
 	// empty, which on a crash is suspicious rather than benign.
 	x.publishRelocationDerived(peerAddress, peerState)
 
+	x.dispatchDerivedRebalance(ctx, peerAddress, peerState)
+}
+
+// awaitRelocationQuiescence blocks until no olric rebalance event has been
+// observed for relocationQuiescenceWindow, polling at
+// relocationQuiescencePoll and never waiting longer than
+// relocationQuiescenceMaxWait before proceeding anyway. It reports false when
+// the system started stopping, in which case recovery must be abandoned.
+func (x *actorSystem) awaitRelocationQuiescence(peerAddress string) bool {
+	deadline := time.Now().Add(relocationQuiescenceMaxWait)
+
+	for time.Since(x.cluster.LastRebalanceEvent()) < relocationQuiescenceWindow {
+		if x.isStopping() {
+			return false
+		}
+
+		if time.Now().After(deadline) {
+			x.logger.Warnf("leader=%s proceeding with crash recovery for node=%s before partition repair went quiet (hint: recovery may be partial; affected items appear in RelocationFailed)", x.String(), peerAddress)
+			break
+		}
+
+		pause.For(relocationQuiescencePoll)
+	}
+
+	return true
+}
+
+// dispatchDerivedRebalance hands a derived relocation set to the relocator,
+// applying the same gating as the snapshot path.
+func (x *actorSystem) dispatchDerivedRebalance(ctx context.Context, peerAddress string, peerState *internalpb.PeerState) {
 	if !x.shouldRebalance(peerState) {
 		x.logger.Debugf("leader=%s found no node=%s state to rebalance", x.String(), peerAddress)
 		return
@@ -3470,13 +3561,17 @@ func (x *actorSystem) deriveRelocationSetFromRegistry(ctx context.Context, peerA
 // actor names and grain IDs the derivation found. See RelocationDerived for the
 // best-effort contract.
 func (x *actorSystem) publishRelocationDerived(peerAddress string, peerState *internalpb.PeerState) {
-	var actors []string
+	if x.eventsStream == nil {
+		return
+	}
+
+	actors := make([]string, 0, len(peerState.GetActors()))
 
 	for name := range peerState.GetActors() {
 		actors = append(actors, name)
 	}
 
-	var grains []string
+	grains := make([]string, 0, len(peerState.GetGrains()))
 	for id := range peerState.GetGrains() {
 		grains = append(grains, id)
 	}

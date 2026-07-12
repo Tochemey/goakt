@@ -1,0 +1,136 @@
+# RBAC for Kubernetes discovery
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: issue1260
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "watch", "list"]
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: issue1260
+subjects:
+  - kind: ServiceAccount
+    name: default
+    namespace: default
+roleRef:
+  kind: ClusterRole
+  name: issue1260
+  apiGroup: rbac.authorization.k8s.io
+---
+# StatefulSet with OrderedReady: pods start strictly one after the other, which
+# exercises the issue-1260 requirement that a lone node on the DEFAULT cluster
+# configuration (replicaCount=2) bootstraps by itself before any peer exists.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: issue1260
+  labels:
+    app.kubernetes.io/name: issue1260
+spec:
+  serviceName: issue1260
+  replicas: 3
+  podManagementPolicy: OrderedReady
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: issue1260
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: issue1260
+    spec:
+      restartPolicy: Always
+      containers:
+        - name: issue1260
+          image: "issue1260:dev"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+              protocol: TCP
+            - containerPort: 50052
+              name: remoting-port
+              protocol: TCP
+            - containerPort: 3322
+              name: discovery-port
+              protocol: TCP
+            - containerPort: 3320
+              name: peers-port
+              protocol: TCP
+          env:
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: SERVICE_NAME
+              value: "issue1260"
+            - name: HTTP_PORT
+              value: "8080"
+            - name: DISCOVERY_PORT
+              value: "3322"
+            - name: PEERS_PORT
+              value: "3320"
+            - name: REMOTING_PORT
+              value: "50052"
+            - name: LOG_LEVEL
+              value: "debug"
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+          # /health answers as soon as the process runs; /ready only once the
+          # actor system joined the cluster. Liveness must never kill a pod
+          # that is still bootstrapping into a busy cluster.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            failureThreshold: 6
+---
+# Headless service for the StatefulSet: gives each pod the stable DNS name the
+# node advertises as its remoting host.
+apiVersion: v1
+kind: Service
+metadata:
+  name: issue1260
+  labels:
+    app.kubernetes.io/name: issue1260
+spec:
+  selector:
+    app.kubernetes.io/name: issue1260
+  clusterIP: None
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: http
+      name: http
+    - protocol: TCP
+      port: 50052
+      targetPort: remoting-port
+      name: remoting-port
+    - protocol: TCP
+      port: 3322
+      targetPort: discovery-port
+      name: discovery-port
+    - protocol: TCP
+      port: 3320
+      targetPort: peers-port
+      name: peers-port

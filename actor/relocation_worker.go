@@ -105,6 +105,20 @@ const (
 	// hold the relocator's mailbox on unbounded round trips; a grain whose
 	// release cannot complete within the budget is reported as failed instead.
 	abortedRelocationCleanupTimeout = 30 * time.Second
+	// relocationItemMaxAttempts and relocationItemRetryBackoff bound the
+	// per-item retry in enqueueRelocation (see retryRelocationItem): relocation
+	// runs while the cluster is digesting a node loss, so registry operations
+	// transiently time out and a single-attempt failure would permanently lose
+	// the item.
+	relocationItemMaxAttempts  = 3
+	relocationItemRetryBackoff = 500 * time.Millisecond
+	// relocationDeriveMaxAttempts and relocationDeriveRetryBackoff bound the
+	// quiesce-then-derive retry in gateCrashRecovery: the derivation's registry
+	// scan can transiently fail on an unreachable member (a replacement node
+	// joining or flapping), and a single-attempt failure would permanently skip
+	// the crashed node's rebalance.
+	relocationDeriveMaxAttempts  = 4
+	relocationDeriveRetryBackoff = 5 * time.Second
 )
 
 // relocationWorker relocates the actors and grains of a single departed node.
@@ -346,12 +360,12 @@ func (w *relocationWorker) finish(ctx context.Context, address string) {
 func enqueueRelocation(ctx context.Context, eg *errgroup.Group, system ActorSystem, logger log.Logger, departedNode string, actors []*internalpb.Actor, grains []*internalpb.Grain, record func(id string, grain bool, err error)) {
 	for _, wireActor := range actors {
 		eg.Go(func() error {
-			var err error
-			if wireActor.GetSingleton() != nil {
-				err = recreateSingletonFromWire(ctx, system, wireActor, departedNode)
-			} else {
-				err = system.recreateActorFromWire(ctx, wireActor, departedNode)
-			}
+			err := retryRelocationItem(ctx, func() error {
+				if wireActor.GetSingleton() != nil {
+					return recreateSingletonFromWire(ctx, system, wireActor, departedNode)
+				}
+				return system.recreateActorFromWire(ctx, wireActor, departedNode)
+			})
 
 			if err != nil {
 				logger.Errorf("failed to relocate actor=%s: %v (hint: check actor type registered, cluster quorum)", wireActor.GetAddress(), err)
@@ -364,19 +378,60 @@ func enqueueRelocation(ctx context.Context, eg *errgroup.Group, system ActorSyst
 	for _, wireGrain := range grains {
 		eg.Go(func() error {
 			if !wireGrain.GetEagerRelocation() {
-				if err := system.releaseGrainForLazyRelocation(ctx, wireGrain, departedNode); err != nil {
+				err := retryRelocationItem(ctx, func() error {
+					return system.releaseGrainForLazyRelocation(ctx, wireGrain, departedNode)
+				})
+				if err != nil {
 					logger.Errorf("failed to release lazy grain=%s directory entry: %v (hint: grain may be unreachable until re-registered; check cluster quorum)", wireGrain.GetGrainId().GetValue(), err)
 					record(wireGrain.GetGrainId().GetValue(), true, err)
 				}
 				return nil
 			}
 
-			if err := system.recreateGrainFromWire(ctx, wireGrain, departedNode); err != nil {
+			err := retryRelocationItem(ctx, func() error {
+				return system.recreateGrainFromWire(ctx, wireGrain, departedNode)
+			})
+			if err != nil {
 				logger.Errorf("failed to relocate grain=%s: %v (hint: check grain OnActivate, grain kind registered)", wireGrain.GetGrainId().GetValue(), err)
 				record(wireGrain.GetGrainId().GetValue(), true, err)
 			}
 			return nil
 		})
+	}
+}
+
+// retryRelocationItem runs recreate up to relocationItemMaxAttempts times with
+// a linear backoff between attempts. Relocation runs while the cluster is still
+// digesting a node loss, so registry reads and writes transiently time out;
+// giving up on the first error would turn those into permanently lost items,
+// because the failure report is terminal and relocation is never re-run.
+// Non-transient errors (unregistered kind, invalid record) fail on every
+// attempt and only cost two extra rounds on this cold path.
+func retryRelocationItem(ctx context.Context, recreate func() error) error {
+	var err error
+
+	// one reusable timer across attempts, created stopped and re-armed per
+	// wait: time.After would arm a new timer per retry that lingers until it
+	// fires, and relocation can run thousands of items concurrently
+	timer := time.NewTimer(0)
+	if !timer.Stop() {
+		<-timer.C
+	}
+	defer timer.Stop()
+
+	for attempt := 1; ; attempt++ {
+		err = recreate()
+		if err == nil || attempt >= relocationItemMaxAttempts {
+			return err
+		}
+
+		timer.Reset(time.Duration(attempt) * relocationItemRetryBackoff)
+
+		select {
+		case <-ctx.Done():
+			return err
+		case <-timer.C:
+		}
 	}
 }
 

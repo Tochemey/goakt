@@ -636,10 +636,11 @@ func TestRelocationWorkerReportsFailedUndeliverableLazyRelease(t *testing.T) {
 	remotingMock.EXPECT().RelocateBatch(mock.Anything, "127.0.0.1", 9001, mock.Anything).
 		Return(nil, transportErr).Times(relocationBatchMaxAttempts)
 
+	// the lazy release is retried before being reported as failed
 	clusterMock := mockscluster.NewCluster(t)
 	clusterMock.EXPECT().GetGrain(mock.Anything, "kind/lazy").
-		Return(&internalpb.Grain{GrainId: &internalpb.GrainId{Value: "kind/lazy"}, Host: "127.0.0.1", Port: 8080}, nil).Once()
-	clusterMock.EXPECT().RemoveGrain(mock.Anything, "kind/lazy").Return(stdErrors.New("store down")).Once()
+		Return(&internalpb.Grain{GrainId: &internalpb.GrainId{Value: "kind/lazy"}, Host: "127.0.0.1", Port: 8080}, nil).Times(relocationItemMaxAttempts)
+	clusterMock.EXPECT().RemoveGrain(mock.Anything, "kind/lazy").Return(stdErrors.New("store down")).Times(relocationItemMaxAttempts)
 	sys.cluster = clusterMock
 
 	worker := &relocationWorker{
@@ -1483,4 +1484,48 @@ func TestRecreateSingletonFromWireSkipsWhenAlreadyRelocated(t *testing.T) {
 	assert.False(t, spy.called)
 	clusterMock.AssertNotCalled(t, "RemoveActor", mock.Anything, mock.Anything)
 	clusterMock.AssertNotCalled(t, "RemoveKind", mock.Anything, mock.Anything)
+}
+
+func TestRetryRelocationItem(t *testing.T) {
+	t.Run("succeeds after transient failures", func(t *testing.T) {
+		attempts := 0
+
+		err := retryRelocationItem(context.Background(), func() error {
+			attempts++
+			if attempts < relocationItemMaxAttempts {
+				return assert.AnError
+			}
+			return nil
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, relocationItemMaxAttempts, attempts)
+	})
+
+	t.Run("gives up after max attempts", func(t *testing.T) {
+		attempts := 0
+
+		err := retryRelocationItem(context.Background(), func() error {
+			attempts++
+			return assert.AnError
+		})
+
+		require.ErrorIs(t, err, assert.AnError)
+		require.Equal(t, relocationItemMaxAttempts, attempts)
+	})
+
+	t.Run("stops when the context is cancelled", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		attempts := 0
+
+		err := retryRelocationItem(ctx, func() error {
+			attempts++
+			return assert.AnError
+		})
+
+		require.ErrorIs(t, err, assert.AnError)
+		require.Equal(t, 1, attempts)
+	})
 }

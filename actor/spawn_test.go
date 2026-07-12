@@ -40,11 +40,14 @@ import (
 
 	"github.com/tochemey/goakt/v4/datacenter"
 	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/datacentercontroller"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
 	dynaport "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
+	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/log"
 	mockcluster "github.com/tochemey/goakt/v4/mocks/cluster"
 	mocks "github.com/tochemey/goakt/v4/mocks/discovery"
@@ -1976,4 +1979,83 @@ func TestSpawnOnDatacenter(t *testing.T) {
 		require.NoError(t, err)
 		remotingMock.AssertExpectations(t)
 	})
+}
+
+func TestRecreateActorFromWireRestoresRecordOnFailure(t *testing.T) {
+	// releaseDepartedEntry removes the registry record before the respawn; when
+	// the respawn then fails, the record must be restored so the actor stays
+	// recoverable instead of being silently lost
+	clusterMock := mockcluster.NewCluster(t)
+	system := MockReplicationTestSystem(clusterMock)
+	system.registry = types.NewRegistry()
+	system.reflection = newReflection(system.registry)
+
+	departedNode := "127.0.0.1:8080"
+	record := &internalpb.Actor{
+		Address:     address.New("phoenix", system.name, "127.0.0.1", 8080).String(),
+		Type:        "unregistered.Type",
+		Relocatable: true,
+	}
+
+	clusterMock.EXPECT().GetActor(mock.Anything, "phoenix").Return(record, nil).Once()
+	clusterMock.EXPECT().RemoveActor(mock.Anything, "phoenix").Return(nil).Once()
+	// the restore after the failed instantiation
+	clusterMock.EXPECT().PutActor(mock.Anything, record).Return(nil).Once()
+
+	err := system.recreateActorFromWire(context.Background(), record, departedNode)
+	require.Error(t, err)
+	clusterMock.AssertExpectations(t)
+}
+
+func TestRecreateActorFromWireRestoreFailureKeepsRespawnError(t *testing.T) {
+	// a failed restore is logged, not propagated: the caller reports the
+	// respawn error itself
+	clusterMock := mockcluster.NewCluster(t)
+	system := MockReplicationTestSystem(clusterMock)
+	system.registry = types.NewRegistry()
+	system.reflection = newReflection(system.registry)
+
+	departedNode := "127.0.0.1:8080"
+	record := &internalpb.Actor{
+		Address:     address.New("phoenix", system.name, "127.0.0.1", 8080).String(),
+		Type:        "unregistered.Type",
+		Relocatable: true,
+	}
+
+	clusterMock.EXPECT().GetActor(mock.Anything, "phoenix").Return(record, nil).Once()
+	clusterMock.EXPECT().RemoveActor(mock.Anything, "phoenix").Return(nil).Once()
+	clusterMock.EXPECT().PutActor(mock.Anything, record).Return(assert.AnError).Once()
+
+	err := system.recreateActorFromWire(context.Background(), record, departedNode)
+	require.Error(t, err)
+	require.NotErrorIs(t, err, assert.AnError)
+	clusterMock.AssertExpectations(t)
+}
+
+func TestRecreateActorFromWireRestoresRecordOnSpawnOptionsFailure(t *testing.T) {
+	// the actor type is registered but its serialized dependencies cannot be
+	// rebuilt: the record must be restored so the actor stays recoverable
+	clusterMock := mockcluster.NewCluster(t)
+	system := MockReplicationTestSystem(clusterMock)
+	system.registry = types.NewRegistry()
+	system.registry.Register(new(MockActor))
+	system.reflection = newReflection(system.registry)
+
+	departedNode := "127.0.0.1:8080"
+	record := &internalpb.Actor{
+		Address:     address.New("phoenix", system.name, "127.0.0.1", 8080).String(),
+		Type:        types.Name(new(MockActor)),
+		Relocatable: true,
+		Dependencies: []*internalpb.Dependency{
+			{TypeName: "unregistered.Dependency"},
+		},
+	}
+
+	clusterMock.EXPECT().GetActor(mock.Anything, "phoenix").Return(record, nil).Once()
+	clusterMock.EXPECT().RemoveActor(mock.Anything, "phoenix").Return(nil).Once()
+	clusterMock.EXPECT().PutActor(mock.Anything, record).Return(nil).Once()
+
+	err := system.recreateActorFromWire(context.Background(), record, departedNode)
+	require.Error(t, err)
+	clusterMock.AssertExpectations(t)
 }
