@@ -283,13 +283,73 @@ func New(name string, disco discovery.Provider, node *discovery.Node, opts ...Co
 	}
 }
 
+// bootstrapMaxAttempts and bootstrapRetryBackoff bound the in-process bootstrap retry:
+// a node joining a data-bearing cluster can transiently exceed the bootstrap timeout
+// while partitions redistribute, and crashing the process turns that transient into a
+// restart loop. Backoff grows linearly (backoff * attempt).
+const (
+	bootstrapMaxAttempts  = 3
+	bootstrapRetryBackoff = time.Second
+)
+
 // Start initializes the cluster engine, configures the underlying Olric
-// instance, and begins consuming cluster events.
+// instance, and begins consuming cluster events. Bootstrap is retried a bounded
+// number of times with backoff; every failed attempt fully tears down the
+// partial engine before the next one.
 func (x *cluster) Start(ctx context.Context) error {
 	if x.running.Load() {
 		return nil
 	}
 
+	if err := retryBootstrap(ctx, bootstrapMaxAttempts, bootstrapRetryBackoff, x.logger, func() error {
+		return x.bootstrap(ctx)
+	}); err != nil {
+		return err
+	}
+
+	x.running.Store(true)
+
+	// Seed the leadership baseline silently. The engine has synced membership by
+	// the time it reaches this point, so a running cluster always has a visible
+	// coordinator (at minimum the local node). This runs before the consume
+	// goroutine launches, so lastCoordinatorAddr is not written concurrently, and
+	// only later changes are emitted as LeaderChanged.
+	x.lastCoordinatorAddr = x.coordinatorAddress(ctx)
+
+	x.consumeCtx, x.consumeCancel = context.WithCancel(ctx)
+	x.consumeWg.Go(func() {
+		x.consume()
+	})
+	return nil
+}
+
+// retryBootstrap runs attempt up to maxAttempts times, sleeping backoff*n between
+// failures, and returns nil on the first success. It stops early when ctx dies and
+// wraps the final error with the attempt count so exhaustion is unambiguous in logs.
+func retryBootstrap(ctx context.Context, maxAttempts int, backoff time.Duration, logger log.Logger, attempt func() error) error {
+	var err error
+	for n := 1; n <= maxAttempts; n++ {
+		if err = attempt(); err == nil {
+			return nil
+		}
+		if n == maxAttempts {
+			break
+		}
+		wait := time.Duration(n) * backoff
+		logger.Warnf("cluster bootstrap attempt %d/%d failed: %v; retrying in %s (hint: the cluster may still be redistributing partitions)", n, maxAttempts, err, wait)
+		select {
+		case <-ctx.Done():
+			return errors.Join(err, ctx.Err())
+		case <-time.After(wait):
+		}
+	}
+	return fmt.Errorf("cluster bootstrap failed after %d attempts: %w", maxAttempts, err)
+}
+
+// bootstrap performs one full engine bootstrap attempt. Every failure path tears
+// down whatever was started, so a failed attempt leaves no bound port, joined
+// member, or half-initialized state behind.
+func (x *cluster) bootstrap(ctx context.Context) error {
 	conf, err := x.buildConfig()
 	if err != nil {
 		x.logger.Errorf("failed to build engine config: %v (hint: check Olric bind addresses, discovery config)", err)
@@ -332,19 +392,6 @@ func (x *cluster) Start(ctx context.Context) error {
 		return errors.Join(err, se)
 	}
 
-	x.running.Store(true)
-
-	// Seed the leadership baseline silently. The engine has synced membership by
-	// the time it reaches this point, so a running cluster always has a visible
-	// coordinator (at minimum the local node). This runs before the consume
-	// goroutine launches, so lastCoordinatorAddr is not written concurrently, and
-	// only later changes are emitted as LeaderChanged.
-	x.lastCoordinatorAddr = x.coordinatorAddress(ctx)
-
-	x.consumeCtx, x.consumeCancel = context.WithCancel(ctx)
-	x.consumeWg.Go(func() {
-		x.consume()
-	})
 	return nil
 }
 
@@ -1143,9 +1190,14 @@ func (x *cluster) startServer(startCtx, ctx context.Context) error {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, x.bootstrapTimeout)
+	syncCtx, cancel := context.WithTimeout(ctx, x.bootstrapTimeout)
 	defer cancel()
-	return x.server.WaitForInitialSync(ctx)
+	if err := x.server.WaitForInitialSync(syncCtx); err != nil {
+		// symmetric with the server.Start and createDMap failure paths: a sync
+		// timeout must not leak a running server (port bound, memberlist joined)
+		return errors.Join(err, x.server.Shutdown(ctx))
+	}
+	return nil
 }
 
 // createDMap provisions the unified map used to store cluster records.
