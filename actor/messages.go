@@ -571,6 +571,51 @@ func (r *RelocationFailed) Grains() []string { return r.grains }
 // Error returns the error that caused the relocation failure.
 func (r *RelocationFailed) Error() error { return r.err }
 
+// RelocationDerived is a system-level message emitted when the leader reconstructs a
+// departed node's relocation set from the replicated cluster registry because the node
+// crashed without leaving a graceful-shutdown snapshot.
+//
+// The derived set is best-effort: registry records lost with the crashed node's partitions
+// (or with concurrent node losses) cannot be detected, so the set may be incomplete even
+// though relocation of the listed items proceeds normally. An empty set on a crash is
+// suspicious rather than benign. Subscribers holding an external record of placements can
+// diff it against the listed actors and grains to detect and reconcile silent losses.
+type RelocationDerived struct {
+	// the address of the departed node
+	address   string
+	timestamp time.Time
+	actors    []string
+	grains    []string
+}
+
+// NewRelocationDerived creates a new RelocationDerived message.
+//
+// Parameters:
+//   - address: the address of the crashed node whose relocation set was derived.
+//   - timestamp: when the derivation completed.
+//   - actors: the actor names found in the registry for the crashed node (may be empty).
+//   - grains: the grain IDs found in the registry for the crashed node (may be empty).
+func NewRelocationDerived(address string, timestamp time.Time, actors, grains []string) *RelocationDerived {
+	return &RelocationDerived{
+		address:   address,
+		timestamp: timestamp,
+		actors:    actors,
+		grains:    grains,
+	}
+}
+
+// Address returns the address of the crashed node whose relocation set was derived.
+func (r *RelocationDerived) Address() string { return r.address }
+
+// Timestamp returns the time when the derivation completed.
+func (r *RelocationDerived) Timestamp() time.Time { return r.timestamp }
+
+// Actors returns the actor names recovered from the registry for the crashed node.
+func (r *RelocationDerived) Actors() []string { return r.actors }
+
+// Grains returns the grain IDs recovered from the registry for the crashed node.
+func (r *RelocationDerived) Grains() []string { return r.grains }
+
 // TopicStats is a point-in-time snapshot of a topic's subscription state.
 type TopicStats struct {
 	topic                string

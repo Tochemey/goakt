@@ -2494,6 +2494,10 @@ func (x *actorSystem) setupCluster() error {
 		return errors.New("clustering needs remoting to be enabled")
 	}
 
+	if x.clusterConfig.replicaCount == 1 {
+		x.logger.Warn("cluster replica count is 1: registry partitions owned by a crashed node are lost with it, so registry-derived crash recovery will be partial (hint: use WithReplicaCount(2) or higher to keep a backup copy of every partition)")
+	}
+
 	x.clusterNode = &discovery.Node{
 		Name:          x.name,
 		Host:          x.remoteConfig.BindAddr(),
@@ -3306,6 +3310,13 @@ func (x *actorSystem) gateCrashRecovery(peerAddress string) {
 		return
 	}
 
+	// surface the best-effort nature of registry-derived recovery on the events
+	// stream: records lost with the crashed node's partitions cannot be listed,
+	// so subscribers holding an external record of placements can diff against
+	// the derived set to detect silent losses. Published even when the set is
+	// empty, which on a crash is suspicious rather than benign.
+	x.publishRelocationDerived(peerAddress, peerState)
+
 	if !x.shouldRebalance(peerState) {
 		x.logger.Debugf("leader=%s found no node=%s state to rebalance", x.String(), peerAddress)
 		return
@@ -3452,6 +3463,25 @@ func (x *actorSystem) deriveRelocationSetFromRegistry(ctx context.Context, peerA
 		Actors:       wireActors,
 		Grains:       wireGrains,
 	}, true
+}
+
+// publishRelocationDerived emits a RelocationDerived event for a crashed node
+// whose relocation set was reconstructed from the cluster registry, listing the
+// actor names and grain IDs the derivation found. See RelocationDerived for the
+// best-effort contract.
+func (x *actorSystem) publishRelocationDerived(peerAddress string, peerState *internalpb.PeerState) {
+	var actors []string
+
+	for name := range peerState.GetActors() {
+		actors = append(actors, name)
+	}
+
+	var grains []string
+	for id := range peerState.GetGrains() {
+		grains = append(grains, id)
+	}
+
+	x.eventsStream.Publish(eventsTopic, NewRelocationDerived(peerAddress, time.Now().UTC(), actors, grains))
 }
 
 // pruneRemoteWatchesForHost cleans up the remote watch registry after a

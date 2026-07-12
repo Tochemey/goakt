@@ -160,4 +160,17 @@ func TestClusterConfig(t *testing.T) {
 		assert.False(t, config.grainActivationBarrierEnabled())
 		assert.Zero(t, config.grainActivationBarrierTimeout())
 	})
+
+	t.Run("With default replication settings", func(t *testing.T) {
+		config := NewClusterConfig()
+
+		// the default replica count keeps a backup copy of every registry
+		// partition so registry-derived crash recovery stays complete when a
+		// single node is lost; the quorums stay at 1 so registry writes keep
+		// succeeding while a node is down
+		assert.EqualValues(t, 2, config.replicaCount)
+		assert.EqualValues(t, 1, config.readQuorum)
+		assert.EqualValues(t, 1, config.writeQuorum)
+		assert.EqualValues(t, 1, config.minimumPeersQuorum)
+	})
 }

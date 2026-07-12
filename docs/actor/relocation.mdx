@@ -79,9 +79,25 @@ Relocation does not depend on a clean shutdown. There are two sources for a depa
 
 To attribute registry records to the crashed node, each node keeps a small cache mapping every peer's **peers address** (`host:peersPort`, carried by the `NodeLeft` event) to its **remoting address** (`host:remotingPort`, how records are keyed). The cache is seeded from membership when clustering starts and refreshed on every `NodeJoined`, so a node observed alive at any point remains resolvable when it later crashes. The derived set contains only **relocatable** actors and the departed node's grains; from there it flows through the exact same worker, gating, and failure-reporting path as the graceful case.
 
-<Note>
-  Crash recovery relies on the registry being replicated. With a cluster replica count of 1, the partitions owned by the crashed node are lost, so its records may not be recoverable. Run with a replica count &gt; 1 to make crash recovery effective.
-</Note>
+Every registry-derived recovery is announced by a `RelocationDerived` event on the event stream, listing the actor names and grain IDs the derivation found. The event fires even when the derived set is empty, which on a crash signals suspected record loss rather than a benign no-op. Subscribers holding an external record of placements can diff it against the listed items to detect and reconcile silent losses.
+
+### Replication settings
+
+Crash recovery is only as good as the registry's replication. Registry records are partitioned by actor name, so the partitions a node owns hold a share of **every** node's records; whatever is not replicated is lost with the node that owned it.
+
+The default configuration is `replicaCount=2` with `writeQuorum=1` and `readQuorum=1`:
+
+- Every registry partition has a backup on another node, so the loss of a **single node** is fully recoverable: the survivor's backup copy is promoted before the recovery scan runs.
+- The quorums stay at 1 so registry writes keep succeeding while a node is down. During the failure-detection window (the few seconds between a crash and the routing table dropping the dead member), writes to partitions where the dead node was primary or backup fail transiently; after the routing table updates, writes succeed against the reassigned owners.
+- Quorum 1 does not weaken grain single activation: that is arbitrated by an atomic put-if-absent on the partition's primary owner, not by read/write quorum overlap. Read repair is enabled, so a replica that missed a write is healed on the next read.
+
+Set `WithReplicaCount(3)` to also tolerate two concurrent node losses, at the cost of one more synchronous write per registry update.
+
+<Warning>
+  With `WithReplicaCount(1)` there are no backups: the partitions owned by a crashed node are lost with it, and registry-derived recovery silently misses the affected records. The actor system logs a warning at startup when clustering runs with a replica count of 1.
+</Warning>
+
+Cases that remain open at any replica count: losing all owners of a partition at once loses its records; a write acknowledged with a single copy (its backup replication failed and the key was never read again) is lost if its primary crashes; a full-cluster restart starts with an empty registry, which relocation does not cover regardless since no leader survives to rebalance.
 
 ## Grain allocation
 

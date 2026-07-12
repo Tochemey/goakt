@@ -23,6 +23,7 @@
 package actor
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -4066,6 +4067,158 @@ func TestActorSystemStartClusterErrors(t *testing.T) {
 		assert.ErrorContains(t, err, "clustering needs remoting to be enabled")
 		assert.False(t, sys.Running())
 	})
+}
+
+func TestSetupClusterWarnsOnSingleReplica(t *testing.T) {
+	buffer := new(bytes.Buffer)
+	logger := log.NewZap(log.WarningLevel, buffer)
+
+	nodePorts := dynaport.Get(3)
+	provider := new(mocksdiscovery.Provider)
+
+	clusterConfig := NewClusterConfig().
+		WithKinds(new(MockActor)).
+		WithReplicaCount(1).
+		WithPeersPort(nodePorts[1]).
+		WithDiscoveryPort(nodePorts[0]).
+		WithDiscovery(provider)
+
+	sys, err := NewActorSystem(
+		"test",
+		WithLogger(logger),
+		WithRemote(remote.NewConfig("127.0.0.1", nodePorts[2])),
+		WithCluster(clusterConfig),
+	)
+	require.NoError(t, err)
+
+	x := sys.(*actorSystem)
+	require.NoError(t, x.setupCluster())
+
+	t.Cleanup(func() {
+		if x.clusterStore != nil {
+			require.NoError(t, x.clusterStore.Close())
+		}
+	})
+
+	assert.Contains(t, buffer.String(), "cluster replica count is 1")
+}
+
+func TestClusterSingleNodeStartsWithDefaultReplication(t *testing.T) {
+	// a developer using the default cluster configuration (replicaCount=2) must
+	// be able to start the first node of a cluster alone: rolling updates and
+	// ordered statefulsets never bring all nodes up at the same instant. The
+	// lone node completes its initial partition sync through the
+	// empty-partition escape (half the bootstrap timeout)
+	ctx := context.TODO()
+	nodePorts := dynaport.Get(3)
+	gossipPort := nodePorts[0]
+	clusterPort := nodePorts[1]
+	remotingPort := nodePorts[2]
+	host := "127.0.0.1"
+
+	addrs := []string{
+		net.JoinHostPort(host, strconv.Itoa(gossipPort)),
+	}
+
+	provider := new(mocksdiscovery.Provider)
+	provider.EXPECT().ID().Return("testDisco")
+	provider.EXPECT().Initialize().Return(nil)
+	provider.EXPECT().Register().Return(nil)
+	provider.EXPECT().Deregister().Return(nil)
+	provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+	provider.EXPECT().Close().Return(nil)
+
+	sys, err := NewActorSystem(
+		"test",
+		WithLogger(log.DiscardLogger),
+		WithRemote(remote.NewConfig(host, remotingPort)),
+		WithCluster(
+			NewClusterConfig().
+				WithKinds(new(MockActor)).
+				WithPeersPort(clusterPort).
+				WithDiscoveryPort(gossipPort).
+				WithDiscovery(provider)),
+	)
+	require.NoError(t, err)
+
+	// the lone node bootstraps on its own
+	require.NoError(t, sys.Start(ctx))
+
+	// the cluster is functional: spawning writes to the registry
+	pid, err := sys.Spawn(ctx, "Exchange1", &exchanger{})
+	require.NoError(t, err)
+	require.NotNil(t, pid)
+
+	exists, err := sys.ActorExists(ctx, "Exchange1")
+	require.NoError(t, err)
+	require.True(t, exists)
+
+	require.NoError(t, sys.Stop(ctx))
+}
+
+func TestPublishRelocationDerived(t *testing.T) {
+	ctx := t.Context()
+	ports := dynaport.Get(1)
+
+	sys, err := NewActorSystem("testSys",
+		WithRemote(remote.NewConfig("127.0.0.1", ports[0])),
+		WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	require.NoError(t, sys.Start(ctx))
+
+	consumer, err := sys.Subscribe()
+	require.NoError(t, err)
+
+	peerAddress := "127.0.0.1:3322"
+	peerState := &internalpb.PeerState{
+		Host:         "127.0.0.1",
+		PeersPort:    3322,
+		RemotingPort: 3323,
+		Actors: map[string]*internalpb.Actor{
+			"actor1": {},
+			"actor2": {},
+		},
+		Grains: map[string]*internalpb.Grain{
+			"grainKind/grain1": {},
+		},
+	}
+
+	sys.(*actorSystem).publishRelocationDerived(peerAddress, peerState)
+
+	var derived []*RelocationDerived
+
+	for event := range consumer.Iterator() {
+		if msg, ok := event.Payload().(*RelocationDerived); ok {
+			derived = append(derived, msg)
+		}
+	}
+
+	require.Len(t, derived, 1)
+	assert.Equal(t, peerAddress, derived[0].Address())
+	assert.NotZero(t, derived[0].Timestamp())
+	assert.ElementsMatch(t, []string{"actor1", "actor2"}, derived[0].Actors())
+	assert.ElementsMatch(t, []string{"grainKind/grain1"}, derived[0].Grains())
+
+	// an empty derived set still publishes: on a crash it signals suspected loss
+	consumer2, err := sys.Subscribe()
+	require.NoError(t, err)
+
+	sys.(*actorSystem).publishRelocationDerived(peerAddress, &internalpb.PeerState{})
+
+	derived = nil
+
+	for event := range consumer2.Iterator() {
+		if msg, ok := event.Payload().(*RelocationDerived); ok {
+			derived = append(derived, msg)
+		}
+	}
+
+	require.Len(t, derived, 1)
+	assert.Empty(t, derived[0].Actors())
+	assert.Empty(t, derived[0].Grains())
+
+	assert.NoError(t, sys.Stop(ctx))
 }
 
 func TestStartupCleanup(t *testing.T) {

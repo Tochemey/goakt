@@ -51,6 +51,7 @@ The system publishes these events to the event stream:
 | `NodeLeft`          | A node left the cluster (cluster mode only)                                   |
 | `LeaderChanged`     | The cluster coordinator moved to a different node (cluster mode only)        |
 | `RelocationFailed`  | A departed node's actors or grains could not be relocated (cluster mode only) |
+| `RelocationDerived` | A crashed node's relocation set was reconstructed from the cluster registry, best-effort (cluster mode only) |
 
 ## Usage
 
@@ -88,6 +89,7 @@ for msg := range subscriber.Iterator() {
 - The event stream is backed by the `eventstream` package. The actor system creates an `EventsStream` at startup and subscribes callers to the internal topic `topic.events`.
 - Lifecycle events (ActorStarted, ActorStopped, etc.) are published by the PID and death-watch logic. Cluster events (NodeJoined, NodeLeft) are published by the cluster events loop when membership changes. `LeaderChanged` is published from the same loop, on every node, whenever a topology event reveals that the coordinator moved to a different node; the initial coordinator election on startup is not published, only subsequent transitions.
 - `RelocationFailed` is published by the relocator when a departed node's actors or grains cannot be re-deployed. Relocation is not retried; subscribe to this event to drive your own recovery (for example, re-spawning the affected actors or alerting).
+- `RelocationDerived` is published by the leader when a node crashes without leaving a graceful-shutdown snapshot and its relocation set is reconstructed from the replicated cluster registry. The derived set is best-effort: records lost with the crashed node's partitions cannot be listed, so an empty or unexpectedly small set signals suspected record loss. See the [relocation](/actor/relocation) page for the replication settings that govern completeness.
 - Dead letters are published by the dead-letter actor when messages cannot be delivered.
 - The event stream is always present; no option is required. It is independent of `WithPubSub()` and cluster mode.
 
