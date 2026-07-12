@@ -7219,12 +7219,29 @@ func TestDeriveRelocationSetFromRegistry(t *testing.T) {
 		assert.Nil(t, state)
 	})
 
-	t.Run("uses the configured cluster read timeout", func(t *testing.T) {
+	t.Run("floors the scan budget at the recovery timeout", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
 		system := MockReplicationTestSystem(clusterMock)
 		system.peerRemotingPorts.Set(departedPeerAddress, departedRemoting)
 
-		readTimeout := 3 * time.Second
+		// a lookup-sized read timeout must not abandon the crash-recovery scan:
+		// the recovery floor wins
+		system.clusterConfig = &ClusterConfig{readTimeout: 3 * time.Second}
+
+		clusterMock.EXPECT().ActorsByHost(mock.Anything, departedHost, departedRemoting, relocationDeriveScanTimeout).Return(nil, nil).Once()
+		clusterMock.EXPECT().GrainsByHost(mock.Anything, departedHost, departedRemoting, relocationDeriveScanTimeout).Return(nil, nil).Once()
+
+		state, ok := system.deriveRelocationSetFromRegistry(context.Background(), departedPeerAddress)
+		require.True(t, ok)
+		require.NotNil(t, state)
+	})
+
+	t.Run("honors a configured read timeout above the recovery floor", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		system.peerRemotingPorts.Set(departedPeerAddress, departedRemoting)
+
+		readTimeout := relocationDeriveScanTimeout + time.Minute
 		system.clusterConfig = &ClusterConfig{readTimeout: readTimeout}
 
 		clusterMock.EXPECT().ActorsByHost(mock.Anything, departedHost, departedRemoting, readTimeout).Return(nil, nil).Once()

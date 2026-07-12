@@ -1052,6 +1052,50 @@ func (_c *Cluster_JobKey_Call) RunAndReturn(run func(ctx context.Context, jobID 
 	return _c
 }
 
+// LastRebalanceEvent provides a mock function for the type Cluster
+func (_mock *Cluster) LastRebalanceEvent() time.Time {
+	ret := _mock.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for LastRebalanceEvent")
+	}
+
+	var r0 time.Time
+	if returnFunc, ok := ret.Get(0).(func() time.Time); ok {
+		r0 = returnFunc()
+	} else {
+		r0 = ret.Get(0).(time.Time)
+	}
+	return r0
+}
+
+// Cluster_LastRebalanceEvent_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LastRebalanceEvent'
+type Cluster_LastRebalanceEvent_Call struct {
+	*mock.Call
+}
+
+// LastRebalanceEvent is a helper method to define mock.On call
+func (_e *Cluster_Expecter) LastRebalanceEvent() *Cluster_LastRebalanceEvent_Call {
+	return &Cluster_LastRebalanceEvent_Call{Call: _e.mock.On("LastRebalanceEvent")}
+}
+
+func (_c *Cluster_LastRebalanceEvent_Call) Run(run func()) *Cluster_LastRebalanceEvent_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *Cluster_LastRebalanceEvent_Call) Return(time1 time.Time) *Cluster_LastRebalanceEvent_Call {
+	_c.Call.Return(time1)
+	return _c
+}
+
+func (_c *Cluster_LastRebalanceEvent_Call) RunAndReturn(run func() time.Time) *Cluster_LastRebalanceEvent_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // LookupKind provides a mock function for the type Cluster
 func (_mock *Cluster) LookupKind(ctx context.Context, kind string) (string, error) {
 	ret := _mock.Called(ctx, kind)

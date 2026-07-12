@@ -73,6 +73,32 @@ const (
 	// skipped and placement falls back to an even split of the departed node's
 	// actors.
 	relocationLoadScanTimeout = 2 * time.Second
+	// relocationSpawnMaxAttempts and relocationSpawnRetryBackoff bound the
+	// respawn retry inside recreateActorFromWire. The registry delete of the
+	// departed node's record and the duplicate-name check inside Spawn
+	// (cluster.ActorExists) are not atomic across replicas: with a replica
+	// count above 1 and a read quorum of 1, the check can hit a backup replica
+	// that has not yet applied the delete and spuriously report the crashed
+	// actor as already existing. The retry gives the delete time to propagate;
+	// a name genuinely owned by a live node is never retried.
+	relocationSpawnMaxAttempts  = 5
+	relocationSpawnRetryBackoff = 100 * time.Millisecond
+	// relocationQuiescenceWindow, relocationQuiescencePoll and
+	// relocationQuiescenceMaxWait govern the gate on crash recovery (see
+	// gateCrashRecovery): the registry is only scanned once no olric rebalance
+	// event has been observed for the window, polling at the given cadence,
+	// and never waiting longer than the max before proceeding anyway.
+	relocationQuiescenceWindow  = 3 * time.Second
+	relocationQuiescencePoll    = 200 * time.Millisecond
+	relocationQuiescenceMaxWait = 30 * time.Second
+	// relocationDeriveScanTimeout floors the registry scans that reconstruct a
+	// crashed node's relocation set (deriveRelocationSetFromRegistry). Crash
+	// recovery is a correctness path that must cover the whole registry: the
+	// interactive cluster read timeout (default one second, tuned for
+	// single-record lookups) cannot scan a registry of thousands of records,
+	// and a timed-out scan abandons the entire rebalance, losing every actor
+	// of the crashed node.
+	relocationDeriveScanTimeout = time.Minute
 	// abortedRelocationCleanupTimeout bounds the lazy-grain directory cleanup an
 	// aborted relocation performs (see reportAbortedRelocation). The abort runs
 	// precisely when the cluster is already unhealthy, so the cleanup must not

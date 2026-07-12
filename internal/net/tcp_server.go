@@ -305,9 +305,15 @@ func (s *TCPServer) Listen() error {
 		network = "tcp6"
 	}
 
-	s.listenConfig.underlying.Control = applyListenSocketOptions(s.listenConfig)
+	// Listen on a local copy of the net.ListenConfig instead of mutating the
+	// server's ListenConfig in place: servers created without WithListenConfig
+	// all share the package-level defaultListenConfig, so writing its Control
+	// field here would race when several servers start concurrently in one
+	// process (multi-node in-process clusters in tests).
+	listenConfig := s.listenConfig.underlying
+	listenConfig.Control = applyListenSocketOptions(s.listenConfig)
 
-	listener, err := s.listenConfig.underlying.Listen(s.Context(), network, s.listenAddr.String())
+	listener, err := listenConfig.Listen(s.Context(), network, s.listenAddr.String())
 	if err != nil {
 		return err
 	}

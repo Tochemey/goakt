@@ -3223,13 +3223,12 @@ func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
 		if !ok {
 			// No graceful-shutdown snapshot: the node most likely crashed.
 			// Reconstruct the relocation set from the replicated registry so its
-			// actors and grains are still recovered onto surviving nodes.
+			// actors and grains are still recovered onto surviving nodes. The
+			// derivation is gated on olric's partition repair going quiet and
+			// therefore runs off the events loop (see gateCrashRecovery).
 			x.logger.Warnf("leader=%s found no snapshot for node=%s; deriving relocation set from the cluster registry", x.String(), nodeLeft.Address)
-			peerState, ok = x.deriveRelocationSetFromRegistry(ctx, nodeLeft.Address)
-			if !ok {
-				x.logger.Warnf("leader=%s could not derive relocation set for node=%s; skipping rebalance", x.String(), nodeLeft.Address)
-				return
-			}
+			go x.gateCrashRecovery(nodeLeft.Address)
+			return
 		}
 
 		if !x.shouldRebalance(peerState) {
@@ -3273,6 +3272,54 @@ func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
 	}
 
 	x.logger.Debugf("node=%s cleaned up node=%s left from state cache", x.String(), nodeLeft.Address)
+}
+
+// gateCrashRecovery derives a crashed node's relocation set and dispatches its
+// rebalance once olric's post-departure partition repair has gone quiet. A
+// SIGKILL leaves olric promoting backups and moving fragments for a while
+// after the NodeLeft epoch completes; scanning the registry or respawning
+// during that window reads inconsistent replicas (the scan misses records and
+// the respawn's duplicate check sees stale ones), turning recoverable actors
+// into failures. It runs on its own goroutine so the wait never blocks the
+// cluster events loop; the wait is bounded so recovery still proceeds when the
+// repair signal never settles.
+func (x *actorSystem) gateCrashRecovery(peerAddress string) {
+	ctx := context.Background()
+	deadline := time.Now().Add(relocationQuiescenceMaxWait)
+
+	for time.Since(x.cluster.LastRebalanceEvent()) < relocationQuiescenceWindow {
+		if x.isStopping() {
+			return
+		}
+
+		if time.Now().After(deadline) {
+			x.logger.Warnf("leader=%s proceeding with crash recovery for node=%s before partition repair went quiet (hint: recovery may be partial; affected items appear in RelocationFailed)", x.String(), peerAddress)
+			break
+		}
+
+		time.Sleep(relocationQuiescencePoll)
+	}
+
+	peerState, ok := x.deriveRelocationSetFromRegistry(ctx, peerAddress)
+	if !ok {
+		x.logger.Warnf("leader=%s could not derive relocation set for node=%s; skipping rebalance", x.String(), peerAddress)
+		return
+	}
+
+	if !x.shouldRebalance(peerState) {
+		x.logger.Debugf("leader=%s found no node=%s state to rebalance", x.String(), peerAddress)
+		return
+	}
+
+	if !x.beginRelocation(peerAddress, peerState) {
+		x.logger.Debugf("leader=%s found relocation already in flight for node=%s", x.String(), peerAddress)
+		return
+	}
+
+	if err := x.systemGuardian.Tell(ctx, x.relocator, &internalpb.Rebalance{PeerState: peerState}); err != nil {
+		x.logger.Errorf("failed to send rebalance to relocator: %v (hint: check relocator state)", err)
+		x.endRelocation(peerAddress)
+	}
 }
 
 // deriveRelocationSetFromRegistry reconstructs a departed node's relocation set
@@ -3326,7 +3373,10 @@ func (x *actorSystem) deriveRelocationSetFromRegistry(ctx context.Context, peerA
 		return nil, false
 	}
 
-	timeout := x.clusterReadTimeout(time.Second)
+	// recovery-sized budget: the user-configured read timeout is honored when
+	// it exceeds the floor, but a lookup-sized timeout must never abandon the
+	// crash-recovery scan (a timed-out scan skips the whole rebalance)
+	timeout := max(x.clusterReadTimeout(time.Second), relocationDeriveScanTimeout)
 
 	// Filter to the departed host during the scan so a crash recovery never
 	// materializes the whole cluster registry just to keep one node's records;

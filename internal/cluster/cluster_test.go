@@ -3818,3 +3818,15 @@ func TestLeaderChangedEvent(t *testing.T) {
 		srv.Shutdown()
 	})
 }
+
+// TestLastRebalanceEvent verifies the rebalance-activity signal consumed by
+// the crash-recovery gate: zero before any olric rebalance event is observed,
+// and the recorded instant afterwards.
+func TestLastRebalanceEvent(t *testing.T) {
+	cl := new(cluster)
+	assert.True(t, cl.LastRebalanceEvent().IsZero())
+
+	now := time.Now()
+	cl.lastRebalanceEventNanos.Store(now.UnixNano())
+	assert.WithinDuration(t, now, cl.LastRebalanceEvent(), time.Millisecond)
+}

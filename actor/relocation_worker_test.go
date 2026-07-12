@@ -26,6 +26,7 @@ import (
 	"context"
 	stdErrors "errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -269,6 +270,116 @@ func TestRelocationWorkerReleasesLazyGrains(t *testing.T) {
 
 	// releasing a lazy grain is not an item loss, so no RelocationFailed event
 	require.Empty(t, collectRelocationFailedEvents(consumer))
+}
+
+// TestRelocationRPCScaling pins the O(peers) RPC guarantee of the relocation
+// redesign (architecture review, "Expected impact" table): relocating 10,000
+// actors across 10 surviving peers must cost exactly
+// peers x ceil(share/defaultRelocationBatchSize) = 10 x 2 = 20 RelocateBatch
+// RPCs, and zero per-actor remoting or registry round trips. A regression back
+// to per-actor fan-out (~30,000 leader-issued operations) fails this test
+// immediately, either on the call count or on an unexpected mock call.
+func TestRelocationRPCScaling(t *testing.T) {
+	ctx := context.Background()
+
+	system, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	sys := system.(*actorSystem)
+
+	const (
+		numActors = 10_000
+		numPeers  = 10
+	)
+
+	peers := make([]*cluster.Peer, numPeers)
+	for i := range peers {
+		peers[i] = &cluster.Peer{Host: fmt.Sprintf("10.0.0.%d", i+1), RemotingPort: 9001 + i}
+	}
+
+	// The leader reports a huge pre-existing load, so load-aware placement
+	// sends every actor to the peers and the leader recreates nothing locally:
+	// the test then observes pure batch-RPC traffic.
+	loads := map[string]int{address.FormatHostPort(sys.Host(), sys.Port()): 1_000_000}
+
+	clusterMock := mockscluster.NewCluster(t)
+	clusterMock.EXPECT().Peers(mock.Anything).Return(peers, nil).Once()
+	clusterMock.EXPECT().CountActorsByHost(mock.Anything, mock.Anything).Return(loads, nil).Once()
+
+	var (
+		mu           sync.Mutex
+		callsPerPeer = make(map[string]int)
+		totalCalls   int
+	)
+
+	remotingMock := mocksremote.NewClient(t)
+	remotingMock.EXPECT().RelocateBatch(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, host string, port int, request *internalpb.RelocateBatchRequest) (*internalpb.RelocateBatchResponse, error) {
+			require.LessOrEqual(t, len(request.GetActors()), defaultRelocationBatchSize)
+
+			mu.Lock()
+			callsPerPeer[address.FormatHostPort(host, port)]++
+			totalCalls++
+			mu.Unlock()
+
+			return new(internalpb.RelocateBatchResponse), nil
+		})
+
+	store := &recordingPeerStateStore{}
+	sys.cluster = clusterMock
+	sys.clusterStore = store
+	sys.relocationEnabled.Store(true)
+
+	wireActors := make(map[string]*internalpb.Actor, numActors)
+	for i := range numActors {
+		name := fmt.Sprintf("actor-%d", i)
+		wireActors[name] = &internalpb.Actor{
+			Address:     address.New(name, sys.name, "127.0.0.1", 8080).String(),
+			Relocatable: true,
+		}
+	}
+
+	peerState := &internalpb.PeerState{
+		Host:         "127.0.0.1",
+		PeersPort:    9000,
+		RemotingPort: 8080,
+		Actors:       wireActors,
+	}
+	require.True(t, sys.beginRelocation("127.0.0.1:9000", peerState))
+
+	stream := eventstream.New()
+	consumer := stream.AddSubscriber()
+	stream.Subscribe(consumer, eventsTopic)
+
+	worker := &relocationWorker{
+		remoting: remotingMock,
+		pid: &PID{
+			actorSystem:  system,
+			logger:       log.DiscardLogger,
+			eventsStream: stream,
+		},
+		logger: log.DiscardLogger,
+	}
+
+	receiveCtx := newReceiveContext(ctx, nil, worker.pid, &internalpb.Rebalance{PeerState: peerState})
+	worker.relocate(receiveCtx, peerState)
+
+	// 10,000 actors over 10 peers = 1,000 per share; at a batch size of 500
+	// that is exactly 2 RPCs per peer, 20 in total.
+	batchesPerPeer := (numActors/numPeers + defaultRelocationBatchSize - 1) / defaultRelocationBatchSize
+	assert.Equal(t, numPeers*batchesPerPeer, totalCalls)
+	require.Len(t, callsPerPeer, numPeers)
+
+	for peerAddress, calls := range callsPerPeer {
+		assert.Equal(t, batchesPerPeer, calls, "peer %s must receive exactly its share's batches", peerAddress)
+	}
+
+	// every item relocated: no failure event, job released, snapshot deleted
+	require.Empty(t, collectRelocationFailedEvents(consumer))
+
+	_, inflight := sys.relocationJob("127.0.0.1:9000")
+	require.False(t, inflight)
+	require.True(t, store.deleteCalled)
 }
 
 // TestRelocationWorkerDistributesLazyGrainsToPeers verifies lazy grains are

@@ -66,6 +66,15 @@ const (
 	// the scan budget on large registries; fanning the Gets out keeps the scan
 	// within budget while capping the burst of concurrent reads.
 	actorScanConcurrency = 16
+	// nodeLeftEmitTimeout bounds how long a tracked node departure may wait for
+	// its rebalance epoch to complete before the NodeLeft event is emitted
+	// anyway. The epoch gate orders NodeLeft after olric's partition promotion,
+	// but it is an ordering optimization, not a correctness requirement:
+	// memberlist has already confirmed the death, and after an abrupt kill
+	// olric's rebalance can wedge (endless fragment moves to the dead member),
+	// which would otherwise suppress the NodeLeft forever and, with it, the
+	// crashed node's relocation.
+	nodeLeftEmitTimeout = 30 * time.Second
 )
 
 type recordNamespace string
@@ -148,6 +157,11 @@ type Cluster interface {
 	GetPartition(actorName string) uint64
 	// IsRunning reports whether the cluster engine is currently running.
 	IsRunning() bool
+	// LastRebalanceEvent returns the time of the most recent olric partition
+	// rebalance event (start or complete) observed by this node, or the zero
+	// time when none was observed. Callers use it to wait for the post-departure
+	// partition repair to go quiet before scanning the registry.
+	LastRebalanceEvent() time.Time
 	// ClaimScheduleFire atomically claims the exclusive right to deliver one trigger tick of
 	// a cluster-wide cron schedule. It returns nil for the winning caller and
 	// ErrScheduleFireClaimed for every other caller racing for the same key; see the
@@ -216,6 +230,7 @@ type cluster struct {
 	rebalanceLeftLatestEpoch uint64
 	rebalanceStartSeen       map[uint64]struct{}
 	rebalanceCompleteSeen    map[uint64]struct{}
+	lastRebalanceEventNanos  atomic.Int64
 
 	// lastCoordinatorAddr caches the coordinator's peers address to detect
 	// leadership changes. It is seeded (non-empty) in Start before the consume
@@ -880,6 +895,17 @@ func (x *cluster) NextRoundRobinValue(ctx context.Context, key string) (int, err
 	return next, nil
 }
 
+// LastRebalanceEvent returns the time of the most recent olric partition
+// rebalance event observed by this node, or the zero time when none was
+// observed.
+func (x *cluster) LastRebalanceEvent() time.Time {
+	nanos := x.lastRebalanceEventNanos.Load()
+	if nanos == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, nanos)
+}
+
 // IsRunning exposes whether the cluster engine has been started.
 func (x *cluster) IsRunning() bool {
 	return x.running.Load()
@@ -1248,6 +1274,12 @@ func (x *cluster) trackNodeLeftEvent(ev events.NodeLeftEvent) {
 	}
 	x.nodeLeftTimestamps[ev.NodeLeft] = ev.Timestamp
 
+	// safety net: emit after a bounded wait when the departure's rebalance
+	// epoch never completes (see nodeLeftEmitTimeout)
+	time.AfterFunc(nodeLeftEmitTimeout, func() {
+		x.emitOverdueNodeLeft(ev.NodeLeft)
+	})
+
 	if x.rebalanceLeftLatestEpoch != 0 {
 		x.rebalanceLeftNodeEpochs[ev.NodeLeft] = x.rebalanceLeftLatestEpoch
 		if _, complete := x.rebalanceCompleteSeen[x.rebalanceLeftLatestEpoch]; complete {
@@ -1256,8 +1288,27 @@ func (x *cluster) trackNodeLeftEvent(ev events.NodeLeftEvent) {
 	}
 }
 
+// emitOverdueNodeLeft emits the NodeLeft event for a departure still pending
+// after nodeLeftEmitTimeout, meaning its rebalance epoch never completed. A
+// departure already emitted through the normal epoch-complete path is a no-op.
+func (x *cluster) emitOverdueNodeLeft(node string) {
+	x.eventsLock.Lock()
+	defer x.eventsLock.Unlock()
+
+	timestamp, pending := x.nodeLeftTimestamps[node]
+	if !pending {
+		return
+	}
+
+	x.logger.Warnf("emitting overdue NodeLeft for node=%s: its rebalance epoch never completed (hint: olric partition repair may be wedged after an abrupt departure)", node)
+	x.emitNodeLeftLocked(node, timestamp)
+	delete(x.nodeLeftTimestamps, node)
+	delete(x.rebalanceLeftNodeEpochs, node)
+}
+
 // processRebalanceStart records rebalance epochs tied to join/leave triggers.
 func (x *cluster) processRebalanceStart(ev events.RebalanceStartEvent) {
+	x.lastRebalanceEventNanos.Store(time.Now().UnixNano())
 	if ev.Reason != rebalanceReasonNodeLeft && ev.Reason != rebalanceReasonNodeJoin {
 		return
 	}
@@ -1291,6 +1342,7 @@ func (x *cluster) processRebalanceStart(ev events.RebalanceStartEvent) {
 
 // processRebalanceComplete emits pending NodeLeft and NodeJoined events when the rebalance epoch completes.
 func (x *cluster) processRebalanceComplete(ev events.RebalanceCompleteEvent) {
+	x.lastRebalanceEventNanos.Store(time.Now().UnixNano())
 	x.eventsLock.Lock()
 	defer x.eventsLock.Unlock()
 

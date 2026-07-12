@@ -284,6 +284,7 @@ func (x *MockCluster) Peers(context.Context) ([]*Peer, error)   { panic("unexpec
 func (x *MockCluster) IsLeader(context.Context) bool            { panic("unexpected call") }
 func (x *MockCluster) GetPartition(string) uint64               { panic("unexpected call") }
 func (x *MockCluster) IsRunning() bool                          { panic("unexpected call") }
+func (x *MockCluster) LastRebalanceEvent() time.Time            { panic("unexpected call") }
 func (x *MockCluster) ClaimScheduleFire(context.Context, string, time.Duration) error {
 	panic("unexpected call")
 }
