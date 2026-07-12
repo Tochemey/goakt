@@ -287,6 +287,12 @@ func New(name string, disco discovery.Provider, node *discovery.Node, opts ...Co
 // a node joining a data-bearing cluster can transiently exceed the bootstrap timeout
 // while partitions redistribute, and crashing the process turns that transient into a
 // restart loop. Backoff grows linearly (backoff * attempt).
+//
+// bootstrapMaxAttempts is not comparable to Olric's MaxJoinAttempts (10): the two are
+// nested, not parallel. Every attempt here already contains Olric's full join-retry
+// budget inside server.Start; this constant multiplies the whole bootstrap sequence
+// (join, initial sync, dmap creation), so raising it multiplies worst-case startup
+// latency by the bootstrap timeout windows each attempt can consume.
 const (
 	bootstrapMaxAttempts  = 3
 	bootstrapRetryBackoff = time.Second
@@ -326,6 +332,9 @@ func (x *cluster) Start(ctx context.Context) error {
 // retryBootstrap runs attempt up to maxAttempts times, sleeping backoff*n between
 // failures, and returns nil on the first success. It stops early when ctx dies and
 // wraps the final error with the attempt count so exhaustion is unambiguous in logs.
+// Every failure is treated as potentially transient: a permanent error (e.g. a
+// misconfigured bind address) also burns the attempt budget, which only adds the
+// bounded backoff to an already-fatal startup path and keeps the sequence simple.
 func retryBootstrap(ctx context.Context, maxAttempts int, backoff time.Duration, logger log.Logger, attempt func() error) error {
 	var err error
 	for n := 1; n <= maxAttempts; n++ {
@@ -352,7 +361,7 @@ func retryBootstrap(ctx context.Context, maxAttempts int, backoff time.Duration,
 func (x *cluster) bootstrap(ctx context.Context) error {
 	conf, err := x.buildConfig()
 	if err != nil {
-		x.logger.Errorf("failed to build engine config: %v (hint: check Olric bind addresses, discovery config)", err)
+		x.logger.Warnf("failed to build engine config: %v (hint: check Olric bind addresses, discovery config)", err)
 		return err
 	}
 
@@ -369,25 +378,25 @@ func (x *cluster) bootstrap(ctx context.Context) error {
 
 	cache, err := olric.New(conf)
 	if err != nil {
-		x.logger.Error(fmt.Errorf("failed to start cluster engine: %w (hint: check discovery peers, network connectivity, firewall)", err))
+		x.logger.Warn(fmt.Errorf("failed to start cluster engine: %w (hint: check discovery peers, network connectivity, firewall)", err))
 		return err
 	}
 
 	x.server = cache
 	if err := x.startServer(startCtx, ctx); err != nil {
-		x.logger.Error(fmt.Errorf("failed to start cluster engine: %w (hint: check discovery peers, network connectivity, firewall)", err))
+		x.logger.Warn(fmt.Errorf("failed to start cluster engine: %w (hint: check discovery peers, network connectivity, firewall)", err))
 		return err
 	}
 
 	x.client = x.server.NewEmbeddedClient()
 	if err := x.createDMap(); err != nil {
-		x.logger.Error(fmt.Errorf("failed to create cluster data map: %w (hint: check cluster config, permissions)", err))
+		x.logger.Warn(fmt.Errorf("failed to create cluster data map: %w (hint: check cluster config, permissions)", err))
 		se := x.server.Shutdown(ctx)
 		return errors.Join(err, se)
 	}
 
 	if err := x.createSubscription(ctx); err != nil {
-		x.logger.Error(fmt.Errorf("failed to create cluster subscription: %w (hint: check cluster config, permissions)", err))
+		x.logger.Warn(fmt.Errorf("failed to create cluster subscription: %w (hint: check cluster config, permissions)", err))
 		se := x.server.Shutdown(ctx)
 		return errors.Join(err, se)
 	}
@@ -1116,7 +1125,7 @@ func (x *cluster) buildConfig() (*oconfig.Config, error) {
 func (x *cluster) setupMemberlistConfig(cfg *oconfig.Config) error {
 	mconfig, err := oconfig.NewMemberlistConfig(oconfig.MemberlistEnvLAN)
 	if err != nil {
-		x.logger.Errorf("failed to configure memberlist: %v (hint: check bind address, discovery port)", err)
+		x.logger.Warnf("failed to configure memberlist: %v (hint: check bind address, discovery port)", err)
 		return err
 	}
 	mconfig.BindAddr = x.node.Host

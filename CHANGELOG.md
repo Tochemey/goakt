@@ -7,8 +7,6 @@
 - **Cluster bootstrap survives transient slowness instead of crashing the node** ([#1257](https://github.com/Tochemey/goakt/issues/1257)). `cluster.Start` was a single all-or-nothing attempt: a node joining a data-bearing cluster (partitions redistributing during a rolling update) could exceed the bootstrap timeout, fail, and take the process down, leaving Kubernetes CrashLoopBackOff as the de facto retry loop. Bootstrap is now retried a bounded number of times (3 attempts, linear backoff) with a full engine teardown between attempts; Olric's own join retries only ever covered the memberlist join, not the initial sync and dmap creation that follow it. `DefaultClusterBootstrapTimeout` is unchanged.
 - **The initial-sync failure path no longer leaks a running engine**. When `WaitForInitialSync` timed out, the already-started Olric server (port bound, memberlist joined) was left running, asymmetrically with the `server.Start` and `createDMap` failure paths which both shut it down. It is now torn down like the others, which is also what makes the bootstrap retry above safe.
 
-## Unreleased
-
 ### ⚡ Performance
 
 - **Relocation on node departure scales better with grain and actor count** ([#1255](https://github.com/Tochemey/goakt/issues/1255)).
