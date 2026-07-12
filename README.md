@@ -7,60 +7,24 @@
   <a href="https://github.com/Tochemey/goakt/actions/workflows/build.yml"><img src="https://img.shields.io/github/actions/workflow/status/Tochemey/goakt/build.yml?branch=main" alt="build" /></a>
   <a href="https://pkg.go.dev/github.com/tochemey/goakt"><img src="https://pkg.go.dev/badge/github.com/tochemey/goakt.svg" alt="Go Reference" /></a>
   <a href="https://codecov.io/gh/Tochemey/goakt"><img src="https://codecov.io/gh/Tochemey/goakt/graph/badge.svg?token=J0p9MzwSRH" alt="codecov" /></a>
-  <a href="https://go.dev/doc/install"><img src="https://img.shields.io/github/go-mod/go-version/Tochemey/goakt" alt="GitHub go.mod Go version" /></a>
-  <a href="https://github.com/Tochemey/goakt/releases/latest"><img src="https://img.shields.io/github/v/release/Tochemey/goakt" alt="Latest Release" /></a>
   <a href="./LICENSE"><img src="https://img.shields.io/github/license/Tochemey/goakt" alt="License" /></a>
-  <a href="./CLA.md"><img src="https://img.shields.io/badge/CLA-signed%20on%20PR-blue" alt="CLA" /></a>
   <a href="https://github.com/avelino/awesome-go"><img src="https://awesome.re/badge.svg" alt="Awesome" /></a>
   <a href="https://human-oss.dev"><img src="https://human-oss.dev/badge.svg" alt="Open Source AI Manifesto" /></a>
   <a href="https://join.slack.com/t/oss-r2l2029/shared_invite/zt-42zcqua8y-unSUH0tFlOQzwT_smzYfOQ"><img src="https://img.shields.io/badge/Slack-Join%20our%20community-4A154B?logo=slack&logoColor=white" alt="Join our Slack" /></a>
-  <a href="https://www.bestpractices.dev/projects/9248"><img src="https://www.bestpractices.dev/projects/9248/badge" alt="OpenSSF Best Practices" /></a>
 </p>
 
-GoAkt is a distributed actor framework for [Go](https://go.dev/) that lets you build reactive systems with typed messages. It runs as a single process or a cluster of nodes behind the same API, and ships with the primitives (supervision, remoting, clustering, CRDTs, streams, observability) needed to put actor systems into production without re-rolling them yourself.
+GoAkt is a distributed actor framework for [Go](https://go.dev/), inspired by Erlang and Akka. In development since 2022 and used [in production](#in-production), it lets you build responsive, resilient, and elastic systems with typed actor messages, running as a single process or a cluster of nodes behind the same API.
+
+- **Simpler concurrency.** Actors process one message at a time; you write plain Go with no locks, channel plumbing, or shared-state bugs.
+- **Location transparency.** Send a message to a local, remote, or clustered actor with the same API; the framework handles the wire.
+- **Resilience by design.** Supervision trees and the "let it crash" model, inspired by Erlang/OTP, keep failures contained and recoverable.
+- **Production batteries included.** Clustering, virtual actors (grains), CRDTs, streams, scheduling, passivation, and observability, without re-rolling them yourself.
+
+Teams use GoAkt for event processing, IoT and edge workloads, real-time platforms, and distributed backends that would otherwise need a message broker plus custom coordination code.
 
 New to the actor model? Brian Storti's [short introduction](https://www.brianstorti.com/the-actor-model/) is a good starting point; the references at the end of that post go deeper.
 
-## Table of Contents
-
-- [Features](#features)
-- [Installation](#installation)
-- [Examples](#examples)
-- [Support](#support)
-- [Security](#security)
-- [Community](#community)
-- [Contribution](#contribution)
-- [Architecture](#architecture)
-- [Benchmark](#benchmark)
-- [In Production](#in-production)
-- [Sponsors](#sponsors)
-- [Feedback](#feedback)
-
-## Features
-
-- **Actors and Grains**: concurrent actors with typed messages, plus virtual actors (grains) with their own context and lifecycle
-- **Messaging**: `Tell`, `Ask`, `BatchTell`, and `BatchAsk`; `Forward` preserves the original sender and `PipeTo` feeds async results back to an actor, guarded by a built-in circuit breaker
-- **Reentrancy**: non-blocking `Request` with configurable modes and in-flight limits
-- **Hierarchies and Supervision**: parent-child trees via `SpawnChild`; one-for-one and one-for-all strategies with `Stop`, `Resume`, `Restart`, and `Escalate` directives and retry windows
-- **Lifecycle**: `PreStart`, `PostStop`, graceful stop, poison-pill shutdown, passivation of idle actors, and `Reinstate` to bring stopped actors back online
-- **Behaviors and Stashing**: `Become` and `UnBecome` (with stacked variants) for protocol phases; `Stash` and `Unstash` to defer messages during transient states
-- **Watch and dead letters**: receive `Terminated` when a watched actor dies; unhandled messages are captured on the event stream
-- **Mailboxes**: unbounded FIFO, bounded, priority, and fair (segmented)
-- **Routers**: round-robin, random, and fan-out strategies
-- **PubSub**: cluster-aware topic publish and subscribe through a dedicated `TopicActor`
-- **Scheduling**: `ScheduleOnce`, recurring `Schedule`, and cron-driven `ScheduleWithCron`, with pause, resume, and cancel
-- **Remoting**: TCP actor communication across nodes with pluggable serializers (Proto, CBOR, custom) and TLS or mTLS transport security
-- **Discovery**: Consul, etcd, Kubernetes, NATS, mDNS, and static
-- **Location transparency**: address any actor without knowing which node hosts it
-- **Resilience**: automatic actor relocation on node failure and cluster-wide singletons with guardian lifecycle
-- **Multi-datacenter**: DC-transparent messaging, pluggable control plane (NATS JetStream, etcd), and DC-aware placement
-- **CRDTs**: `GCounter`, `PNCounter`, `LWWRegister`, `MVRegister`, `ORSet`, `ORMap`, and `Flag`, with delta replication, anti-entropy sync, tombstone deletion, and snapshots
-- **Reactive streams**: backpressure-aware pipelines with a composable DSL (`map`, `filter`, `flatMap`, `batch`, `throttle`, fan-out and fan-in), stage fusion, and built-in metrics and tracing
-- **Observability**: OpenTelemetry metrics, an in-process event stream for system and user events, and pluggable context propagation for request-scoped metadata
-- **Extensions**: register system-wide capabilities with `WithExtensions` and resolve them from any actor or grain
-- **Dependency injection**: attach serializable dependencies at spawn time with `WithDependencies`, reconstructed cluster-wide on relocation
-
-See [Documentation](https://docs.goakt.dev) for the full feature reference.
+See the [documentation](https://docs.goakt.dev) for the full feature reference.
 
 ## Installation
 
@@ -68,9 +32,19 @@ See [Documentation](https://docs.goakt.dev) for the full feature reference.
 go get github.com/tochemey/goakt/v4
 ```
 
+  <a href="https://go.dev/doc/install"><img src="https://img.shields.io/github/go-mod/go-version/Tochemey/goakt" alt="GitHub go.mod Go version" /></a>
+  <a href="https://github.com/Tochemey/goakt/releases/latest"><img src="https://img.shields.io/github/v/release/Tochemey/goakt" alt="Latest Release" /></a>
+
 ## Examples
 
 See the [examples repository](https://github.com/Tochemey/goakt-examples) for runnable code covering local, remote, and clustered actor systems.
+
+## In Production
+
+This framework is used in production by the following projects/companies:
+
+- [Baki Money](https://www.baki.money/): AI-powered expense tracking platform that turns receipts into stories.
+- [Event Processor](https://www.v-app.io/iot-builder-3/): Clustered Complex Event Processor (CEP) for IoT data streams.
 
 ## Support
 
@@ -90,6 +64,8 @@ You can join these groups and chat to discuss and ask GoAkt related questions on
 
 ## Contribution
 
+  <a href="./CLA.md"><img src="https://img.shields.io/badge/CLA-signed%20on%20PR-blue" alt="CLA" /></a>
+
 We welcome contributions: bug fixes, new features, and documentation improvements. Before diving in, read the [Architecture Document](./architecture/ARCHITECTURE.md) to understand the codebase. We use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) and a Docker-backed `Makefile` so contributors only need Docker and Make installed; run `make help` to see the available targets.
 
 See [contributing.md](./CONTRIBUTING.md) for prerequisites, setup, and the full contribution workflow.
@@ -101,13 +77,6 @@ Architecture documents: [Architecture](./architecture/).
 ## Benchmark
 
 Benchmark suite: [Benchmark](./benchmark/).
-
-## In Production
-
-This framework is used in production by the following projects/companies:
-
-- [Baki Money](https://www.baki.money/): AI-powered expense tracking platform that turns receipts into stories.
-- [Event Processor](https://www.v-app.io/iot-builder-3/): Clustered Complex Event Processor (CEP) for IoT data streams.
 
 ## Sponsors
 
