@@ -337,21 +337,26 @@ func (x *cluster) Start(ctx context.Context) error {
 // bounded backoff to an already-fatal startup path and keeps the sequence simple.
 func retryBootstrap(ctx context.Context, maxAttempts int, backoff time.Duration, logger log.Logger, attempt func() error) error {
 	var err error
+
 	for n := 1; n <= maxAttempts; n++ {
 		if err = attempt(); err == nil {
 			return nil
 		}
+
 		if n == maxAttempts {
 			break
 		}
+
 		wait := time.Duration(n) * backoff
 		logger.Warnf("cluster bootstrap attempt %d/%d failed: %v; retrying in %s (hint: the cluster may still be redistributing partitions)", n, maxAttempts, err, wait)
+
 		select {
 		case <-ctx.Done():
 			return errors.Join(err, ctx.Err())
 		case <-time.After(wait):
 		}
 	}
+
 	return fmt.Errorf("cluster bootstrap failed after %d attempts: %w", maxAttempts, err)
 }
 
@@ -1201,11 +1206,12 @@ func (x *cluster) startServer(startCtx, ctx context.Context) error {
 
 	syncCtx, cancel := context.WithTimeout(ctx, x.bootstrapTimeout)
 	defer cancel()
+
 	if err := x.server.WaitForInitialSync(syncCtx); err != nil {
-		// symmetric with the server.Start and createDMap failure paths: a sync
-		// timeout must not leak a running server (port bound, memberlist joined)
+		// a sync timeout must not leak the started server (port bound, memberlist joined)
 		return errors.Join(err, x.server.Shutdown(ctx))
 	}
+
 	return nil
 }
 

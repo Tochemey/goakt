@@ -150,6 +150,7 @@ func TestRetryBootstrap(t *testing.T) {
 			calls++
 			return nil
 		})
+
 		require.NoError(t, err)
 		assert.Equal(t, 1, calls)
 		assert.Less(t, time.Since(start), 500*time.Millisecond)
@@ -162,8 +163,10 @@ func TestRetryBootstrap(t *testing.T) {
 			if calls < 3 {
 				return errors.New("still syncing")
 			}
+
 			return nil
 		})
+
 		require.NoError(t, err)
 		assert.Equal(t, 3, calls)
 	})
@@ -175,6 +178,7 @@ func TestRetryBootstrap(t *testing.T) {
 			calls++
 			return boom
 		})
+
 		require.Error(t, err)
 		assert.Equal(t, 3, calls)
 		assert.ErrorIs(t, err, boom)
@@ -190,6 +194,7 @@ func TestRetryBootstrap(t *testing.T) {
 			cancel()
 			return boom
 		})
+
 		require.Error(t, err)
 		assert.Equal(t, 1, calls)
 		assert.ErrorIs(t, err, boom)
@@ -218,6 +223,7 @@ func TestBootstrapFailureRetriesAndReleasesPorts(t *testing.T) {
 		MaxJoinAttempts: 1,
 		ReconnectWait:   100 * time.Millisecond,
 	}
+
 	hostNode := discovery.Node{
 		Name:          host,
 		Host:          host,
@@ -230,11 +236,12 @@ func TestBootstrapFailureRetriesAndReleasesPorts(t *testing.T) {
 		WithLogger(log.DiscardLogger),
 		WithBootstrapTimeout(time.Second),
 	)
+
 	require.NotNil(t, engine)
 
 	err := engine.Start(ctx)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "after 3 attempts", "bootstrap must exhaust its retry budget, not fail on the first attempt")
+	assert.Contains(t, err.Error(), fmt.Sprintf("after %d attempts", bootstrapMaxAttempts), "bootstrap must exhaust its retry budget, not fail on the first attempt")
 
 	for _, port := range []int{gossipPort, clusterPort} {
 		ln, lerr := net.Listen("tcp", fmt.Sprintf("%s:%d", host, port))
