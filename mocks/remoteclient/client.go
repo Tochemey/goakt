@@ -149,7 +149,7 @@ type Client_NetClient_Call struct {
 // NetClient is a helper method to define mock.On call
 //   - host string
 //   - port int
-func (_e *Client_Expecter) NetClient(host interface{}, port interface{}) *Client_NetClient_Call {
+func (_e *Client_Expecter) NetClient(host any, port any) *Client_NetClient_Call {
 	return &Client_NetClient_Call{Call: _e.mock.On("NetClient", host, port)}
 }
 
@@ -181,6 +181,86 @@ func (_c *Client_NetClient_Call) RunAndReturn(run func(host string, port int) *n
 	return _c
 }
 
+// RelocateBatch provides a mock function for the type Client
+func (_mock *Client) RelocateBatch(ctx context.Context, host string, port int, request *internalpb.RelocateBatchRequest) (*internalpb.RelocateBatchResponse, error) {
+	ret := _mock.Called(ctx, host, port, request)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RelocateBatch")
+	}
+
+	var r0 *internalpb.RelocateBatchResponse
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, int, *internalpb.RelocateBatchRequest) (*internalpb.RelocateBatchResponse, error)); ok {
+		return returnFunc(ctx, host, port, request)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, int, *internalpb.RelocateBatchRequest) *internalpb.RelocateBatchResponse); ok {
+		r0 = returnFunc(ctx, host, port, request)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*internalpb.RelocateBatchResponse)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, int, *internalpb.RelocateBatchRequest) error); ok {
+		r1 = returnFunc(ctx, host, port, request)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// Client_RelocateBatch_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RelocateBatch'
+type Client_RelocateBatch_Call struct {
+	*mock.Call
+}
+
+// RelocateBatch is a helper method to define mock.On call
+//   - ctx context.Context
+//   - host string
+//   - port int
+//   - request *internalpb.RelocateBatchRequest
+func (_e *Client_Expecter) RelocateBatch(ctx any, host any, port any, request any) *Client_RelocateBatch_Call {
+	return &Client_RelocateBatch_Call{Call: _e.mock.On("RelocateBatch", ctx, host, port, request)}
+}
+
+func (_c *Client_RelocateBatch_Call) Run(run func(ctx context.Context, host string, port int, request *internalpb.RelocateBatchRequest)) *Client_RelocateBatch_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 int
+		if args[2] != nil {
+			arg2 = args[2].(int)
+		}
+		var arg3 *internalpb.RelocateBatchRequest
+		if args[3] != nil {
+			arg3 = args[3].(*internalpb.RelocateBatchRequest)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+		)
+	})
+	return _c
+}
+
+func (_c *Client_RelocateBatch_Call) Return(relocateBatchResponse *internalpb.RelocateBatchResponse, err error) *Client_RelocateBatch_Call {
+	_c.Call.Return(relocateBatchResponse, err)
+	return _c
+}
+
+func (_c *Client_RelocateBatch_Call) RunAndReturn(run func(ctx context.Context, host string, port int, request *internalpb.RelocateBatchRequest) (*internalpb.RelocateBatchResponse, error)) *Client_RelocateBatch_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RemoteActivateGrain provides a mock function for the type Client
 func (_mock *Client) RemoteActivateGrain(ctx context.Context, host string, port int, grainRequest *remote.GrainRequest) error {
 	ret := _mock.Called(ctx, host, port, grainRequest)
@@ -208,7 +288,7 @@ type Client_RemoteActivateGrain_Call struct {
 //   - host string
 //   - port int
 //   - grainRequest *remote.GrainRequest
-func (_e *Client_Expecter) RemoteActivateGrain(ctx interface{}, host interface{}, port interface{}, grainRequest interface{}) *Client_RemoteActivateGrain_Call {
+func (_e *Client_Expecter) RemoteActivateGrain(ctx any, host any, port any, grainRequest any) *Client_RemoteActivateGrain_Call {
 	return &Client_RemoteActivateGrain_Call{Call: _e.mock.On("RemoteActivateGrain", ctx, host, port, grainRequest)}
 }
 
@@ -289,7 +369,7 @@ type Client_RemoteAsk_Call struct {
 //   - to *address.Address
 //   - message any
 //   - timeout time.Duration
-func (_e *Client_Expecter) RemoteAsk(ctx interface{}, from interface{}, to interface{}, message interface{}, timeout interface{}) *Client_RemoteAsk_Call {
+func (_e *Client_Expecter) RemoteAsk(ctx any, from any, to any, message any, timeout any) *Client_RemoteAsk_Call {
 	return &Client_RemoteAsk_Call{Call: _e.mock.On("RemoteAsk", ctx, from, to, message, timeout)}
 }
 
@@ -376,7 +456,7 @@ type Client_RemoteAskGrain_Call struct {
 //   - grainRequest *remote.GrainRequest
 //   - message any
 //   - timeout time.Duration
-func (_e *Client_Expecter) RemoteAskGrain(ctx interface{}, host interface{}, port interface{}, grainRequest interface{}, message interface{}, timeout interface{}) *Client_RemoteAskGrain_Call {
+func (_e *Client_Expecter) RemoteAskGrain(ctx any, host any, port any, grainRequest any, message any, timeout any) *Client_RemoteAskGrain_Call {
 	return &Client_RemoteAskGrain_Call{Call: _e.mock.On("RemoteAskGrain", ctx, host, port, grainRequest, message, timeout)}
 }
 
@@ -467,7 +547,7 @@ type Client_RemoteBatchAsk_Call struct {
 //   - to *address.Address
 //   - messages []any
 //   - timeout time.Duration
-func (_e *Client_Expecter) RemoteBatchAsk(ctx interface{}, from interface{}, to interface{}, messages interface{}, timeout interface{}) *Client_RemoteBatchAsk_Call {
+func (_e *Client_Expecter) RemoteBatchAsk(ctx any, from any, to any, messages any, timeout any) *Client_RemoteBatchAsk_Call {
 	return &Client_RemoteBatchAsk_Call{Call: _e.mock.On("RemoteBatchAsk", ctx, from, to, messages, timeout)}
 }
 
@@ -541,7 +621,7 @@ type Client_RemoteBatchTell_Call struct {
 //   - from *address.Address
 //   - to *address.Address
 //   - messages []any
-func (_e *Client_Expecter) RemoteBatchTell(ctx interface{}, from interface{}, to interface{}, messages interface{}) *Client_RemoteBatchTell_Call {
+func (_e *Client_Expecter) RemoteBatchTell(ctx any, from any, to any, messages any) *Client_RemoteBatchTell_Call {
 	return &Client_RemoteBatchTell_Call{Call: _e.mock.On("RemoteBatchTell", ctx, from, to, messages)}
 }
 
@@ -621,7 +701,7 @@ type Client_RemoteChildren_Call struct {
 //   - host string
 //   - port int
 //   - name string
-func (_e *Client_Expecter) RemoteChildren(ctx interface{}, host interface{}, port interface{}, name interface{}) *Client_RemoteChildren_Call {
+func (_e *Client_Expecter) RemoteChildren(ctx any, host any, port any, name any) *Client_RemoteChildren_Call {
 	return &Client_RemoteChildren_Call{Call: _e.mock.On("RemoteChildren", ctx, host, port, name)}
 }
 
@@ -701,7 +781,7 @@ type Client_RemoteDependencies_Call struct {
 //   - host string
 //   - port int
 //   - name string
-func (_e *Client_Expecter) RemoteDependencies(ctx interface{}, host interface{}, port interface{}, name interface{}) *Client_RemoteDependencies_Call {
+func (_e *Client_Expecter) RemoteDependencies(ctx any, host any, port any, name any) *Client_RemoteDependencies_Call {
 	return &Client_RemoteDependencies_Call{Call: _e.mock.On("RemoteDependencies", ctx, host, port, name)}
 }
 
@@ -779,7 +859,7 @@ type Client_RemoteKind_Call struct {
 //   - host string
 //   - port int
 //   - name string
-func (_e *Client_Expecter) RemoteKind(ctx interface{}, host interface{}, port interface{}, name interface{}) *Client_RemoteKind_Call {
+func (_e *Client_Expecter) RemoteKind(ctx any, host any, port any, name any) *Client_RemoteKind_Call {
 	return &Client_RemoteKind_Call{Call: _e.mock.On("RemoteKind", ctx, host, port, name)}
 }
 
@@ -859,7 +939,7 @@ type Client_RemoteLookup_Call struct {
 //   - host string
 //   - port int
 //   - name string
-func (_e *Client_Expecter) RemoteLookup(ctx interface{}, host interface{}, port interface{}, name interface{}) *Client_RemoteLookup_Call {
+func (_e *Client_Expecter) RemoteLookup(ctx any, host any, port any, name any) *Client_RemoteLookup_Call {
 	return &Client_RemoteLookup_Call{Call: _e.mock.On("RemoteLookup", ctx, host, port, name)}
 }
 
@@ -939,7 +1019,7 @@ type Client_RemoteMetric_Call struct {
 //   - host string
 //   - port int
 //   - name string
-func (_e *Client_Expecter) RemoteMetric(ctx interface{}, host interface{}, port interface{}, name interface{}) *Client_RemoteMetric_Call {
+func (_e *Client_Expecter) RemoteMetric(ctx any, host any, port any, name any) *Client_RemoteMetric_Call {
 	return &Client_RemoteMetric_Call{Call: _e.mock.On("RemoteMetric", ctx, host, port, name)}
 }
 
@@ -1019,7 +1099,7 @@ type Client_RemoteParent_Call struct {
 //   - host string
 //   - port int
 //   - name string
-func (_e *Client_Expecter) RemoteParent(ctx interface{}, host interface{}, port interface{}, name interface{}) *Client_RemoteParent_Call {
+func (_e *Client_Expecter) RemoteParent(ctx any, host any, port any, name any) *Client_RemoteParent_Call {
 	return &Client_RemoteParent_Call{Call: _e.mock.On("RemoteParent", ctx, host, port, name)}
 }
 
@@ -1099,7 +1179,7 @@ type Client_RemotePassivationStrategy_Call struct {
 //   - host string
 //   - port int
 //   - name string
-func (_e *Client_Expecter) RemotePassivationStrategy(ctx interface{}, host interface{}, port interface{}, name interface{}) *Client_RemotePassivationStrategy_Call {
+func (_e *Client_Expecter) RemotePassivationStrategy(ctx any, host any, port any, name any) *Client_RemotePassivationStrategy_Call {
 	return &Client_RemotePassivationStrategy_Call{Call: _e.mock.On("RemotePassivationStrategy", ctx, host, port, name)}
 }
 
@@ -1179,7 +1259,7 @@ type Client_RemoteReSpawn_Call struct {
 //   - host string
 //   - port int
 //   - name string
-func (_e *Client_Expecter) RemoteReSpawn(ctx interface{}, host interface{}, port interface{}, name interface{}) *Client_RemoteReSpawn_Call {
+func (_e *Client_Expecter) RemoteReSpawn(ctx any, host any, port any, name any) *Client_RemoteReSpawn_Call {
 	return &Client_RemoteReSpawn_Call{Call: _e.mock.On("RemoteReSpawn", ctx, host, port, name)}
 }
 
@@ -1248,7 +1328,7 @@ type Client_RemoteReinstate_Call struct {
 //   - host string
 //   - port int
 //   - name string
-func (_e *Client_Expecter) RemoteReinstate(ctx interface{}, host interface{}, port interface{}, name interface{}) *Client_RemoteReinstate_Call {
+func (_e *Client_Expecter) RemoteReinstate(ctx any, host any, port any, name any) *Client_RemoteReinstate_Call {
 	return &Client_RemoteReinstate_Call{Call: _e.mock.On("RemoteReinstate", ctx, host, port, name)}
 }
 
@@ -1326,7 +1406,7 @@ type Client_RemoteRole_Call struct {
 //   - host string
 //   - port int
 //   - name string
-func (_e *Client_Expecter) RemoteRole(ctx interface{}, host interface{}, port interface{}, name interface{}) *Client_RemoteRole_Call {
+func (_e *Client_Expecter) RemoteRole(ctx any, host any, port any, name any) *Client_RemoteRole_Call {
 	return &Client_RemoteRole_Call{Call: _e.mock.On("RemoteRole", ctx, host, port, name)}
 }
 
@@ -1406,7 +1486,7 @@ type Client_RemoteSpawn_Call struct {
 //   - host string
 //   - port int
 //   - spawnRequest *remote.SpawnRequest
-func (_e *Client_Expecter) RemoteSpawn(ctx interface{}, host interface{}, port interface{}, spawnRequest interface{}) *Client_RemoteSpawn_Call {
+func (_e *Client_Expecter) RemoteSpawn(ctx any, host any, port any, spawnRequest any) *Client_RemoteSpawn_Call {
 	return &Client_RemoteSpawn_Call{Call: _e.mock.On("RemoteSpawn", ctx, host, port, spawnRequest)}
 }
 
@@ -1486,7 +1566,7 @@ type Client_RemoteSpawnChild_Call struct {
 //   - host string
 //   - port int
 //   - childRequest *remote.SpawnChildRequest
-func (_e *Client_Expecter) RemoteSpawnChild(ctx interface{}, host interface{}, port interface{}, childRequest interface{}) *Client_RemoteSpawnChild_Call {
+func (_e *Client_Expecter) RemoteSpawnChild(ctx any, host any, port any, childRequest any) *Client_RemoteSpawnChild_Call {
 	return &Client_RemoteSpawnChild_Call{Call: _e.mock.On("RemoteSpawnChild", ctx, host, port, childRequest)}
 }
 
@@ -1564,7 +1644,7 @@ type Client_RemoteStashSize_Call struct {
 //   - host string
 //   - port int
 //   - name string
-func (_e *Client_Expecter) RemoteStashSize(ctx interface{}, host interface{}, port interface{}, name interface{}) *Client_RemoteStashSize_Call {
+func (_e *Client_Expecter) RemoteStashSize(ctx any, host any, port any, name any) *Client_RemoteStashSize_Call {
 	return &Client_RemoteStashSize_Call{Call: _e.mock.On("RemoteStashSize", ctx, host, port, name)}
 }
 
@@ -1643,7 +1723,7 @@ type Client_RemoteState_Call struct {
 //   - port int
 //   - name string
 //   - state remote.ActorState
-func (_e *Client_Expecter) RemoteState(ctx interface{}, host interface{}, port interface{}, name interface{}, state interface{}) *Client_RemoteState_Call {
+func (_e *Client_Expecter) RemoteState(ctx any, host any, port any, name any, state any) *Client_RemoteState_Call {
 	return &Client_RemoteState_Call{Call: _e.mock.On("RemoteState", ctx, host, port, name, state)}
 }
 
@@ -1717,7 +1797,7 @@ type Client_RemoteStop_Call struct {
 //   - host string
 //   - port int
 //   - name string
-func (_e *Client_Expecter) RemoteStop(ctx interface{}, host interface{}, port interface{}, name interface{}) *Client_RemoteStop_Call {
+func (_e *Client_Expecter) RemoteStop(ctx any, host any, port any, name any) *Client_RemoteStop_Call {
 	return &Client_RemoteStop_Call{Call: _e.mock.On("RemoteStop", ctx, host, port, name)}
 }
 
@@ -1786,7 +1866,7 @@ type Client_RemoteTell_Call struct {
 //   - from *address.Address
 //   - to *address.Address
 //   - message any
-func (_e *Client_Expecter) RemoteTell(ctx interface{}, from interface{}, to interface{}, message interface{}) *Client_RemoteTell_Call {
+func (_e *Client_Expecter) RemoteTell(ctx any, from any, to any, message any) *Client_RemoteTell_Call {
 	return &Client_RemoteTell_Call{Call: _e.mock.On("RemoteTell", ctx, from, to, message)}
 }
 
@@ -1856,7 +1936,7 @@ type Client_RemoteTellGrain_Call struct {
 //   - port int
 //   - grainRequest *remote.GrainRequest
 //   - message any
-func (_e *Client_Expecter) RemoteTellGrain(ctx interface{}, host interface{}, port interface{}, grainRequest interface{}, message interface{}) *Client_RemoteTellGrain_Call {
+func (_e *Client_Expecter) RemoteTellGrain(ctx any, host any, port any, grainRequest any, message any) *Client_RemoteTellGrain_Call {
 	return &Client_RemoteTellGrain_Call{Call: _e.mock.On("RemoteTellGrain", ctx, host, port, grainRequest, message)}
 }
 
@@ -1931,7 +2011,7 @@ type Client_RemoteUnWatch_Call struct {
 //   - port int
 //   - name string
 //   - watcher *address.Address
-func (_e *Client_Expecter) RemoteUnWatch(ctx interface{}, host interface{}, port interface{}, name interface{}, watcher interface{}) *Client_RemoteUnWatch_Call {
+func (_e *Client_Expecter) RemoteUnWatch(ctx any, host any, port any, name any, watcher any) *Client_RemoteUnWatch_Call {
 	return &Client_RemoteUnWatch_Call{Call: _e.mock.On("RemoteUnWatch", ctx, host, port, name, watcher)}
 }
 
@@ -2006,7 +2086,7 @@ type Client_RemoteWatch_Call struct {
 //   - port int
 //   - name string
 //   - watcher *address.Address
-func (_e *Client_Expecter) RemoteWatch(ctx interface{}, host interface{}, port interface{}, name interface{}, watcher interface{}) *Client_RemoteWatch_Call {
+func (_e *Client_Expecter) RemoteWatch(ctx any, host any, port any, name any, watcher any) *Client_RemoteWatch_Call {
 	return &Client_RemoteWatch_Call{Call: _e.mock.On("RemoteWatch", ctx, host, port, name, watcher)}
 }
 
@@ -2079,7 +2159,7 @@ type Client_Serializer_Call struct {
 
 // Serializer is a helper method to define mock.On call
 //   - msg any
-func (_e *Client_Expecter) Serializer(msg interface{}) *Client_Serializer_Call {
+func (_e *Client_Expecter) Serializer(msg any) *Client_Serializer_Call {
 	return &Client_Serializer_Call{Call: _e.mock.On("Serializer", msg)}
 }
 

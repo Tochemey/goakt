@@ -27,6 +27,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	gerrors "github.com/tochemey/goakt/v4/errors"
 )
 
 func TestGrainOptions(t *testing.T) {
@@ -112,5 +114,23 @@ func TestGrainOptions(t *testing.T) {
 		option := WithGrainDisableRelocation()
 		option(config)
 		require.True(t, config.disableRelocation)
+	})
+	t.Run("With Eager Relocation", func(t *testing.T) {
+		config := new(grainConfig)
+		option := WithGrainEagerRelocation()
+		option(config)
+		require.True(t, config.eagerRelocation)
+	})
+	t.Run("Eager and Disable Relocation conflict is rejected", func(t *testing.T) {
+		config := newGrainConfig(WithGrainDisableRelocation(), WithGrainEagerRelocation())
+		err := config.Validate()
+		require.Error(t, err)
+		require.ErrorIs(t, err, gerrors.ErrGrainRelocationConflict)
+	})
+	t.Run("Default grain config is lazy relocation", func(t *testing.T) {
+		config := newGrainConfig()
+		require.NoError(t, config.Validate())
+		require.False(t, config.eagerRelocation)
+		require.False(t, config.disableRelocation)
 	})
 }

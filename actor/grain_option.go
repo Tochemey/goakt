@@ -27,6 +27,7 @@ import (
 
 	"go.uber.org/atomic"
 
+	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/internal/validation"
 	"github.com/tochemey/goakt/v4/internal/xsync"
@@ -90,6 +91,11 @@ type grainConfig struct {
 	capacity int64
 	// this feature can be used to disable relocation of grains in cluster mode
 	disableRelocation bool
+	// eagerRelocation opts the grain into upfront reactivation on a surviving
+	// node when its host departs the cluster. When false (default) the grain
+	// relocates lazily: its directory entry is cleaned and it re-activates on
+	// next use.
+	eagerRelocation bool
 }
 
 // newGrainConfig creates a new grainConfig instance and applies the provided GrainOption(s).
@@ -129,6 +135,9 @@ var _ validation.Validator = (*grainConfig)(nil)
 //
 // Returns an error if any dependency has an invalid ID, otherwise returns nil.
 func (s *grainConfig) Validate() error {
+	if s.disableRelocation && s.eagerRelocation {
+		return gerrors.ErrGrainRelocationConflict
+	}
 	for _, dependency := range s.dependencies.Values() {
 		if dependency != nil {
 			if err := validation.NewIDValidator(dependency.ID()).Validate(); err != nil {
@@ -351,5 +360,32 @@ func WithGrainMailboxCapacity(capacity int64) GrainOption {
 func WithGrainDisableRelocation() GrainOption {
 	return func(config *grainConfig) {
 		config.disableRelocation = true
+	}
+}
+
+// WithGrainEagerRelocation returns a GrainOption that opts a Grain into eager
+// relocation in cluster mode.
+//
+// By default grains relocate lazily: when the hosting node departs the cluster,
+// the runtime only cleans the grain's directory entry and the grain is
+// re-activated on a surviving node the next time it is addressed
+// (TellGrain/AskGrain). This matches the virtual-actor model and avoids an
+// upfront reactivation storm for grains that may never be called again.
+//
+// With this option enabled, the grain is instead reactivated immediately on a
+// surviving node as part of relocation, restoring the pre-lazy behavior for
+// grains that must be warm at all times (for example those driving timers,
+// streams, or background work that must resume without an external trigger).
+//
+// Notes:
+//   - This option only has an effect when cluster mode is enabled.
+//   - It is mutually exclusive with WithGrainDisableRelocation; configuring both
+//     fails validation with ErrGrainRelocationConflict.
+//
+// Returns:
+//   - GrainOption: an option that sets eagerRelocation to true in the grain configuration.
+func WithGrainEagerRelocation() GrainOption {
+	return func(config *grainConfig) {
+		config.eagerRelocation = true
 	}
 }

@@ -93,8 +93,12 @@ type Grain struct {
 	ActivationRetries int32                  `protobuf:"varint,6,opt,name=activation_retries,json=activationRetries,proto3" json:"activation_retries,omitempty"`
 	MailboxCapacity   *int64                 `protobuf:"varint,7,opt,name=mailbox_capacity,json=mailboxCapacity,proto3,oneof" json:"mailbox_capacity,omitempty"`
 	DisableRelocation bool                   `protobuf:"varint,8,opt,name=disable_relocation,json=disableRelocation,proto3" json:"disable_relocation,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// eager_relocation opts the grain into upfront reactivation on another node
+	// when its host departs the cluster. When false (default) the grain relocates
+	// lazily: its directory entry is cleaned and it re-activates on next use.
+	EagerRelocation bool `protobuf:"varint,9,opt,name=eager_relocation,json=eagerRelocation,proto3" json:"eager_relocation,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *Grain) Reset() {
@@ -183,6 +187,13 @@ func (x *Grain) GetDisableRelocation() bool {
 	return false
 }
 
+func (x *Grain) GetEagerRelocation() bool {
+	if x != nil {
+		return x.EagerRelocation
+	}
+	return false
+}
+
 var File_internal_grain_proto protoreflect.FileDescriptor
 
 const file_internal_grain_proto_rawDesc = "" +
@@ -192,7 +203,7 @@ const file_internal_grain_proto_rawDesc = "" +
 	"\aGrainId\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
-	"\x05value\x18\x03 \x01(\tR\x05value\"\x88\x03\n" +
+	"\x05value\x18\x03 \x01(\tR\x05value\"\xb3\x03\n" +
 	"\x05Grain\x12.\n" +
 	"\bgrain_id\x18\x01 \x01(\v2\x13.internalpb.GrainIdR\agrainId\x12\x12\n" +
 	"\x04host\x18\x02 \x01(\tR\x04host\x12\x12\n" +
@@ -201,7 +212,8 @@ const file_internal_grain_proto_rawDesc = "" +
 	"\x12activation_timeout\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\x11activationTimeout\x12-\n" +
 	"\x12activation_retries\x18\x06 \x01(\x05R\x11activationRetries\x12.\n" +
 	"\x10mailbox_capacity\x18\a \x01(\x03H\x00R\x0fmailboxCapacity\x88\x01\x01\x12-\n" +
-	"\x12disable_relocation\x18\b \x01(\bR\x11disableRelocationB\x13\n" +
+	"\x12disable_relocation\x18\b \x01(\bR\x11disableRelocation\x12)\n" +
+	"\x10eager_relocation\x18\t \x01(\bR\x0feagerRelocationB\x13\n" +
 	"\x11_mailbox_capacityB\xa3\x01\n" +
 	"\x0ecom.internalpbB\n" +
 	"GrainProtoH\x02P\x01Z;github.com/tochemey/goakt/v4/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +

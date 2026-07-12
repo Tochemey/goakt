@@ -230,6 +230,12 @@ func (x *MockCluster) ActorExists(context.Context, string) (bool, error) {
 func (x *MockCluster) Actors(context.Context, time.Duration) ([]*internalpb.Actor, error) {
 	panic("unexpected call")
 }
+func (x *MockCluster) ActorsByHost(context.Context, string, int, time.Duration) ([]*internalpb.Actor, error) {
+	panic("unexpected call")
+}
+func (x *MockCluster) CountActorsByHost(context.Context, time.Duration) (map[string]int, error) {
+	panic("unexpected call")
+}
 func (x *MockCluster) PutGrain(ctx context.Context, grain *internalpb.Grain) error {
 	x.putGrainCalls++
 	if x.putGrainFn != nil {
@@ -268,6 +274,9 @@ func (x *MockCluster) GrainExists(ctx context.Context, identity string) (bool, e
 func (x *MockCluster) Grains(context.Context, time.Duration) ([]*internalpb.Grain, error) {
 	panic("unexpected call")
 }
+func (x *MockCluster) GrainsByHost(context.Context, string, int, time.Duration) ([]*internalpb.Grain, error) {
+	panic("unexpected call")
+}
 
 func (x *MockCluster) RemoveKind(context.Context, string) error { panic("unexpected call") }
 func (x *MockCluster) Events() <-chan *Event                    { panic("unexpected call") }
@@ -275,6 +284,7 @@ func (x *MockCluster) Peers(context.Context) ([]*Peer, error)   { panic("unexpec
 func (x *MockCluster) IsLeader(context.Context) bool            { panic("unexpected call") }
 func (x *MockCluster) GetPartition(string) uint64               { panic("unexpected call") }
 func (x *MockCluster) IsRunning() bool                          { panic("unexpected call") }
+func (x *MockCluster) LastRebalanceEvent() time.Time            { panic("unexpected call") }
 func (x *MockCluster) ClaimScheduleFire(context.Context, string, time.Duration) error {
 	panic("unexpected call")
 }

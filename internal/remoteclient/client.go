@@ -300,6 +300,25 @@ type Client interface {
 	// Note: The grain kind must be registered on the remote actor system using RegisterGrainKind.
 	RemoteActivateGrain(ctx context.Context, host string, port int, grainRequest *remote.GrainRequest) error
 
+	// RelocateBatch relocates a batch of actors and grains onto the given remote node
+	// in a single round trip. It is used during cluster rebalancing to hand a target
+	// peer its whole share of a departed node's actors and grains.
+	//
+	// Parameters:
+	//   - ctx: Governs cancellation and deadlines for the outbound RPC.
+	//   - host, port: Location of the remote actor system that will host the relocated items.
+	//   - request: The departed node address and the actors and grains to recreate.
+	//
+	// Returns:
+	//   - response: Per-item failures; an empty failure list means the whole batch succeeded.
+	//
+	// Errors:
+	//   - Transport and context errors.
+	//   - Batch-level server-side failures surfaced as proto errors (e.g., FailedPrecondition when
+	//     remoting or clustering is disabled). Item-level failures are reported in the response,
+	//     not as an error.
+	RelocateBatch(ctx context.Context, host string, port int, request *internalpb.RelocateBatchRequest) (*internalpb.RelocateBatchResponse, error)
+
 	// RemoteTellGrain sends a one-way (fire-and-forget) message to a grain.
 	//
 	// Parameters:
@@ -1468,6 +1487,48 @@ func (r *client) RemoteActivateGrain(ctx context.Context, host string, port int,
 	return checkProtoError(resp)
 }
 
+// RelocateBatch relocates a batch of actors and grains onto the given remote node
+// in a single round trip. It is used during cluster rebalancing to hand a target
+// peer its whole share of a departed node's actors and grains.
+//
+// Parameters:
+//   - ctx: Governs cancellation and deadlines for the outbound RPC.
+//   - host, port: Location of the remote actor system that will host the relocated items.
+//   - request: The departed node address and the actors and grains to recreate.
+//
+// Returns:
+//   - response: Per-item failures; an empty failure list means the whole batch succeeded.
+//
+// Errors:
+//   - Transport and context errors.
+//   - Batch-level server-side failures surfaced as proto errors (e.g., FailedPrecondition when
+//     remoting or clustering is disabled). Item-level failures are reported in the response,
+//     not as an error.
+func (r *client) RelocateBatch(ctx context.Context, host string, port int, request *internalpb.RelocateBatchRequest) (*internalpb.RelocateBatchResponse, error) {
+	ctx, err := r.enrichContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	client := r.NetClient(host, port)
+
+	resp, err := client.SendProto(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := checkProtoError(resp); err != nil {
+		return nil, err
+	}
+
+	response, ok := resp.(*internalpb.RelocateBatchResponse)
+	if !ok {
+		return nil, fmt.Errorf("unexpected response type %T", resp)
+	}
+
+	return response, nil
+}
+
 // RemoteAskGrain sends a request message to a grain and waits for a reply, subject to the provided timeout and context.
 //
 // Parameters:
@@ -2549,6 +2610,7 @@ func getGrainFromRequest(host string, port int, grainRequest *remote.GrainReques
 		ActivationTimeout: durationpb.New(grainRequest.ActivationTimeout),
 		MailboxCapacity:   new(grainRequest.MailboxCapacity),
 		DisableRelocation: grainRequest.DisableRelocation,
+		EagerRelocation:   grainRequest.EagerRelocation,
 	}
 
 	return grain, nil

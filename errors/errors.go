@@ -87,6 +87,13 @@ var (
 	// ErrActorNotFound indicates that the specified actor could not be found in the system.
 	ErrActorNotFound = errors.New("actor not found")
 
+	// ErrRelocationInProgress is returned when a message is routed to an actor
+	// whose host has left the cluster and whose relocation onto a surviving
+	// node did not complete within the bounded handoff window. It is a
+	// transient, retryable condition: the caller may retry the send once the
+	// relocation settles.
+	ErrRelocationInProgress = errors.New("target actor is being relocated; retry shortly")
+
 	// ErrMethodCallNotAllowed is returned when an RPC-style method call is attempted but not permitted.
 	ErrMethodCallNotAllowed = errors.New("method call not allowed")
 
@@ -192,6 +199,10 @@ var (
 	// Grain kinds are keyed by their package-qualified type name; two grain types whose packages share the same
 	// base name collide and cannot coexist in the same actor system.
 	ErrGrainKindConflict = errors.New("a different grain type is already registered under this kind")
+
+	// ErrGrainRelocationConflict is returned when a grain is configured with both
+	// WithGrainDisableRelocation and WithGrainEagerRelocation, which are mutually exclusive.
+	ErrGrainRelocationConflict = errors.New("grain cannot be both relocation-disabled and eager-relocated")
 
 	// ErrUnhanledMessage is returned when a message is received that the actor/grain does not know how to handle.
 	ErrUnhanledMessage = errors.New("unhandled message")

@@ -34,163 +34,19 @@ import (
 
 	"github.com/kapetan-io/tackle/autotls"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/sync/errgroup"
-	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/eventstream"
 	"github.com/tochemey/goakt/v4/internal/address"
-	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	dynaport "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
-	"github.com/tochemey/goakt/v4/internal/remoteclient"
-	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/log"
-	mockscluster "github.com/tochemey/goakt/v4/mocks/cluster"
-	mocksremote "github.com/tochemey/goakt/v4/mocks/remoteclient"
 	"github.com/tochemey/goakt/v4/reentrancy"
-	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/supervisor"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
-
-type spawnSingletonSpy struct {
-	*actorSystem
-	called    bool
-	actorName string
-	actor     Actor
-	config    *clusterSingletonConfig
-}
-
-func (s *spawnSingletonSpy) SpawnSingleton(ctx context.Context, name string, actor Actor, opts ...ClusterSingletonOption) (*PID, error) {
-	s.called = true
-	s.actorName = name
-	s.actor = actor
-	s.config = newClusterSingletonConfig(opts...)
-	return nil, nil
-}
-
-func TestRelocatorPeersError(t *testing.T) {
-	ctx := context.Background()
-
-	system, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
-	require.NoError(t, err)
-	require.NotNil(t, system)
-
-	sys := system.(*actorSystem)
-
-	clusterMock := mockscluster.NewCluster(t)
-	expectedErr := stdErrors.New("cluster failure")
-	clusterMock.EXPECT().Peers(mock.Anything).Return(nil, expectedErr).Once()
-
-	store := &recordingPeerStateStore{}
-	sys.cluster = clusterMock
-	sys.clusterStore = store
-	sys.relocationEnabled.Store(true)
-	// simulate the flag set by rebalancingLoop before dispatching the rebalance
-	sys.relocating.Store(true)
-
-	actor := &relocator{
-		remoting: remoteclient.NewClient(),
-		pid: &PID{
-			actorSystem: system,
-		},
-	}
-
-	msg := &internalpb.Rebalance{PeerState: new(internalpb.PeerState)}
-	receiveCtx := newReceiveContext(ctx, nil, actor.pid, msg)
-
-	actor.Relocate(receiveCtx)
-
-	errRecorded := receiveCtx.getError()
-	require.Error(t, errRecorded)
-
-	var internalErr *errors.InternalError
-	require.ErrorAs(t, errRecorded, &internalErr)
-	require.Contains(t, errRecorded.Error(), expectedErr.Error())
-
-	// a failed rebalance must release the relocating flag, otherwise every
-	// future cluster rebalance would be permanently blocked
-	require.False(t, sys.relocating.Load())
-
-	// the departed node's peer state must be removed from the cluster store
-	require.True(t, store.deleteCalled)
-}
-
-func TestRelocatorReleasesFlagOnSpawnFailure(t *testing.T) {
-	ctx := context.Background()
-
-	system, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
-	require.NoError(t, err)
-	require.NotNil(t, system)
-
-	sys := system.(*actorSystem)
-
-	clusterMock := mockscluster.NewCluster(t)
-	// single-node cluster: no peers, so every relocated actor lands on the leader
-	clusterMock.EXPECT().Peers(mock.Anything).Return(nil, nil).Once()
-
-	store := &recordingPeerStateStore{}
-	sys.cluster = clusterMock
-	sys.clusterStore = store
-	sys.relocationEnabled.Store(true)
-	sys.relocating.Store(true)
-
-	// subscribe to the event stream so we can assert the RelocationFailed event
-	stream := eventstream.New()
-	consumer := stream.AddSubscriber()
-	stream.Subscribe(consumer, eventsTopic)
-
-	actor := &relocator{
-		remoting: remoteclient.NewClient(),
-		pid: &PID{
-			actorSystem:  system,
-			logger:       log.DiscardLogger,
-			eventsStream: stream,
-		},
-	}
-
-	// an unparsable actor address makes the spawn goroutine fail, surfacing
-	// through eg.Wait() and exercising the second abort path in Relocate
-	peerState := &internalpb.PeerState{
-		Host:      "127.0.0.1",
-		PeersPort: 9000,
-		Actors: map[string]*internalpb.Actor{
-			"broken": {Address: "invalid-address", Relocatable: true},
-		},
-	}
-	msg := &internalpb.Rebalance{PeerState: peerState}
-	receiveCtx := newReceiveContext(ctx, nil, actor.pid, msg)
-
-	actor.Relocate(receiveCtx)
-
-	errRecorded := receiveCtx.getError()
-	require.Error(t, errRecorded)
-
-	var spawnErr *errors.SpawnError
-	require.ErrorAs(t, errRecorded, &spawnErr)
-
-	require.False(t, sys.relocating.Load())
-
-	// the failure must be surfaced on the event stream rather than retried
-	var events []*RelocationFailed
-	for message := range consumer.Iterator() {
-		if event, ok := message.Payload().(*RelocationFailed); ok {
-			events = append(events, event)
-		}
-	}
-	require.Len(t, events, 1)
-	assert.Equal(t, "127.0.0.1:9000", events[0].Address())
-	assert.Equal(t, []string{"invalid-address"}, events[0].Actors())
-	require.Error(t, events[0].Error())
-
-	// the departed node's peer state must be removed from the cluster store
-	require.True(t, store.deleteCalled)
-	assert.Equal(t, "127.0.0.1:9000", store.deletedAddr)
-}
 
 // TestRelocatorPublishRelocationFailedIncludesActorsAndGrains verifies the
 // RelocationFailed event carries the departed node's address together with the
@@ -203,12 +59,10 @@ func TestRelocatorPublishRelocationFailedIncludesActorsAndGrains(t *testing.T) {
 	consumer := stream.AddSubscriber()
 	stream.Subscribe(consumer, eventsTopic)
 
-	actor := &relocator{
-		pid: &PID{
-			actorSystem:  system,
-			logger:       log.DiscardLogger,
-			eventsStream: stream,
-		},
+	pid := &PID{
+		actorSystem:  system,
+		logger:       log.DiscardLogger,
+		eventsStream: stream,
 	}
 
 	actors := map[string]*internalpb.Actor{
@@ -218,7 +72,7 @@ func TestRelocatorPublishRelocationFailedIncludesActorsAndGrains(t *testing.T) {
 		"g1": {GrainId: &internalpb.GrainId{Value: "grain-1"}},
 	}
 
-	actor.publishRelocationFailed("127.0.0.1:9000", actors, grains, stdErrors.New("boom"))
+	publishRelocationFailed(pid, "127.0.0.1:9000", actors, grains, stdErrors.New("boom"))
 
 	var events []*RelocationFailed
 	for message := range consumer.Iterator() {
@@ -233,60 +87,106 @@ func TestRelocatorPublishRelocationFailedIncludesActorsAndGrains(t *testing.T) {
 	require.Error(t, events[0].Error())
 }
 
-// TestRelocatorPublishRelocationFailedWithoutEventStream verifies the publish
-// path is a safe no-op when no event stream is configured on the relocator pid.
-func TestRelocatorPublishRelocationFailedWithoutEventStream(t *testing.T) {
-	actor := &relocator{pid: &PID{}} // eventsStream is nil
-
-	require.NotPanics(t, func() {
-		actor.publishRelocationFailed("127.0.0.1:9000",
-			map[string]*internalpb.Actor{"a1": {Address: "actor-1"}}, nil, stdErrors.New("boom"))
-	})
-}
-
-// TestRelocatorAbortRelocationToleratesDeletePeerStateError verifies that a
-// failure to delete the departed node's peer state does not prevent the relocator
-// from releasing the relocating flag, publishing the failure event, or recording
-// the original relocation error.
-func TestRelocatorAbortRelocationToleratesDeletePeerStateError(t *testing.T) {
+// TestRelocatorAbortToleratesDeletePeerStateError verifies that a failure to
+// delete the departed node's peer state during an aborted rebalance is logged
+// but does not prevent the in-flight job from being released.
+func TestRelocatorAbortToleratesDeletePeerStateError(t *testing.T) {
 	ctx := context.Background()
 
 	system, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
 	require.NoError(t, err)
 
 	sys := system.(*actorSystem)
-
 	store := &recordingPeerStateStore{deleteErr: stdErrors.New("store down")}
 	sys.clusterStore = store
-	sys.relocating.Store(true)
+
+	peerState := &internalpb.PeerState{
+		Host:      "127.0.0.1",
+		PeersPort: 9000,
+		Actors:    map[string]*internalpb.Actor{"a1": {Address: "actor-1"}},
+	}
+	require.True(t, sys.beginRelocation("127.0.0.1:9000", peerState))
+
+	manager := &relocator{
+		pid:    &PID{actorSystem: system, logger: log.DiscardLogger},
+		logger: log.DiscardLogger,
+	}
+
+	receiveCtx := newReceiveContext(ctx, nil, manager.pid, &internalpb.Rebalance{PeerState: peerState})
+	manager.abortRelocation(receiveCtx, "127.0.0.1:9000", peerState, stdErrors.New("boom"))
+
+	require.True(t, store.deleteCalled)
+	_, inflight := sys.relocationJob("127.0.0.1:9000")
+	require.False(t, inflight)
+}
+
+// TestRelocatorPublishRelocationFailedWithoutEventStream verifies the publish
+// path is a safe no-op when no event stream is configured on the pid.
+func TestRelocatorPublishRelocationFailedWithoutEventStream(t *testing.T) {
+	require.NotPanics(t, func() {
+		publishRelocationFailed(&PID{}, "127.0.0.1:9000",
+			map[string]*internalpb.Actor{"a1": {Address: "actor-1"}}, nil, stdErrors.New("boom"))
+	})
+}
+
+// TestRelocatorTerminatedAbortsInflightJob verifies that a worker death with a
+// still-registered relocation job (the abnormal-death path) publishes a
+// RelocationFailed event listing every actor and every eager grain of the
+// departed node, removes its peer state snapshot, and releases the job so a
+// future departure of the same address can rebalance again. Lazy grains are
+// released rather than reported (covered separately); this uses an eager grain
+// so the abort accounting reports it.
+func TestRelocatorTerminatedAbortsInflightJob(t *testing.T) {
+	ctx := context.Background()
+
+	system, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	sys := system.(*actorSystem)
+	store := &recordingPeerStateStore{}
+	sys.clusterStore = store
+
+	peerState := &internalpb.PeerState{
+		Host:      "127.0.0.1",
+		PeersPort: 9000,
+		Actors: map[string]*internalpb.Actor{
+			"a1": {Address: "actor-1"},
+		},
+		Grains: map[string]*internalpb.Grain{
+			"g1": {GrainId: &internalpb.GrainId{Value: "grain-1"}, EagerRelocation: true},
+		},
+	}
+	require.True(t, sys.beginRelocation("127.0.0.1:9000", peerState))
 
 	stream := eventstream.New()
 	consumer := stream.AddSubscriber()
 	stream.Subscribe(consumer, eventsTopic)
 
-	actor := &relocator{
+	workerName := reservedName(relocationWorkerType) + "-1"
+	manager := &relocator{
 		pid: &PID{
 			actorSystem:  system,
 			logger:       log.DiscardLogger,
 			eventsStream: stream,
 		},
+		logger:  log.DiscardLogger,
+		workers: map[string]workerJob{workerName: {address: "127.0.0.1:9000", peerState: peerState}},
 	}
 
-	originalErr := errors.NewSpawnError(stdErrors.New("spawn boom"))
-	receiveCtx := newReceiveContext(ctx, nil, actor.pid, new(internalpb.Rebalance))
+	terminated := &Terminated{actorPath: newPath(address.New(workerName, "test", "127.0.0.1", 9000))}
+	receiveCtx := newReceiveContext(ctx, nil, manager.pid, terminated)
+	manager.Receive(receiveCtx)
 
-	actor.abortRelocation(receiveCtx, "127.0.0.1:9000",
-		map[string]*internalpb.Actor{"a1": {Address: "actor-1"}}, nil, originalErr)
+	// the in-flight job is released so a future departure can rebalance again
+	_, inflight := sys.relocationJob("127.0.0.1:9000")
+	require.False(t, inflight)
+	require.Empty(t, manager.workers)
 
-	// flag released even though the delete failed
-	require.False(t, sys.relocating.Load())
-	// the delete was attempted
+	// the departed node's peer state is removed
 	require.True(t, store.deleteCalled)
 	assert.Equal(t, "127.0.0.1:9000", store.deletedAddr)
-	// the original spawn error is recorded, not the delete error
-	var spawnErr *errors.SpawnError
-	require.ErrorAs(t, receiveCtx.getError(), &spawnErr)
-	// the failure event is still published
+
+	// the abnormal death is surfaced as a RelocationFailed event listing all items
 	var events []*RelocationFailed
 	for message := range consumer.Iterator() {
 		if event, ok := message.Payload().(*RelocationFailed); ok {
@@ -294,244 +194,172 @@ func TestRelocatorAbortRelocationToleratesDeletePeerStateError(t *testing.T) {
 		}
 	}
 	require.Len(t, events, 1)
+	assert.Equal(t, "127.0.0.1:9000", events[0].Address())
+	assert.Equal(t, []string{"actor-1"}, events[0].Actors())
+	assert.Equal(t, []string{"grain-1"}, events[0].Grains())
+	require.Error(t, events[0].Error())
 }
 
-func TestRelocatorSpawnRemoteActorActorExistsError(t *testing.T) {
-	ctx := context.Background()
-
-	system, err := NewActorSystem("relocator-actor-exists-error", WithLogger(log.DiscardLogger))
-	require.NoError(t, err)
-	require.NotNil(t, system)
-
-	sys := system.(*actorSystem)
-
-	clusterMock := mockscluster.NewCluster(t)
-	expectedErr := stdErrors.New("cluster ActorExists failure")
-	clusterMock.EXPECT().ActorExists(mock.Anything, "relocated-actor").Return(false, expectedErr).Once()
-
-	sys.relocationEnabled.Store(true)
-	sys.cluster = clusterMock
-
-	actor := &relocator{
-		remoting: remoteclient.NewClient(),
-		pid: &PID{
-			actorSystem: system,
-		},
-	}
-
-	targetActor := &internalpb.Actor{
-		Address: address.New("relocated-actor", "system", "127.0.0.1", 8080).String(),
-	}
-	targetPeer := &cluster.Peer{
-		Host:         "127.0.0.1",
-		RemotingPort: 8080,
-	}
-
-	err = actor.spawnRemoteActor(ctx, targetActor, targetPeer)
-	require.Error(t, err)
-
-	var internalErr *errors.InternalError
-	require.ErrorAs(t, err, &internalErr)
-	require.Contains(t, err.Error(), expectedErr.Error())
-}
-
-func TestRelocatorSpawnRemoteActorRemoveActorError(t *testing.T) {
+// TestRelocatorTerminatedAfterNormalCompletionIsNoOp verifies that a worker
+// death whose job has already been released (the normal completion path, where
+// the worker did its own bookkeeping before stopping) does not publish a
+// spurious RelocationFailed event or touch the cluster store.
+func TestRelocatorTerminatedAfterNormalCompletionIsNoOp(t *testing.T) {
 	ctx := context.Background()
 
 	system, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
 	require.NoError(t, err)
-	require.NotNil(t, system)
 
 	sys := system.(*actorSystem)
+	store := &recordingPeerStateStore{}
+	sys.clusterStore = store
 
-	clusterMock := mockscluster.NewCluster(t)
-	clusterMock.EXPECT().ActorExists(mock.Anything, "relocated-actor").Return(true, nil).Once()
-	expectedErr := fmt.Errorf("failed to remove actor from cluster")
-	clusterMock.EXPECT().RemoveActor(mock.Anything, "relocated-actor").Return(expectedErr).Once()
+	stream := eventstream.New()
+	consumer := stream.AddSubscriber()
+	stream.Subscribe(consumer, eventsTopic)
 
-	sys.cluster = clusterMock
-
-	sys.relocationEnabled.Store(true)
-	sys.cluster = clusterMock
-
-	actor := &relocator{
-		remoting: remoteclient.NewClient(),
+	workerName := reservedName(relocationWorkerType) + "-1"
+	manager := &relocator{
 		pid: &PID{
-			actorSystem: system,
+			actorSystem:  system,
+			logger:       log.DiscardLogger,
+			eventsStream: stream,
 		},
+		logger:  log.DiscardLogger,
+		workers: map[string]workerJob{workerName: {address: "127.0.0.1:9000", peerState: &internalpb.PeerState{Host: "127.0.0.1", PeersPort: 9000}}},
 	}
 
-	targetActor := &internalpb.Actor{
-		Address: address.New("relocated-actor", "system", "127.0.0.1", 8080).String(),
-	}
-	targetPeer := &cluster.Peer{
-		Host:         "127.0.0.1",
-		RemotingPort: 8080,
-	}
+	// no beginRelocation: the worker already released the job before stopping
+	terminated := &Terminated{actorPath: newPath(address.New(workerName, "test", "127.0.0.1", 9000))}
+	receiveCtx := newReceiveContext(ctx, nil, manager.pid, terminated)
+	manager.Receive(receiveCtx)
 
-	err = actor.spawnRemoteActor(ctx, targetActor, targetPeer)
-	require.Error(t, err)
+	require.Empty(t, manager.workers)
+	require.False(t, store.deleteCalled)
 
-	var internalErr *errors.InternalError
-	require.ErrorAs(t, err, &internalErr)
-	require.Contains(t, err.Error(), expectedErr.Error())
+	var events []*RelocationFailed
+	for message := range consumer.Iterator() {
+		if event, ok := message.Payload().(*RelocationFailed); ok {
+			events = append(events, event)
+		}
+	}
+	require.Empty(t, events)
 }
 
-func TestRelocatorSpawnRemoteActorInvalidAddress(t *testing.T) {
+// TestRelocatorTerminatedIgnoresUnknownWorker verifies that a Terminated for an
+// actor the relocator does not track is ignored.
+func TestRelocatorTerminatedIgnoresUnknownWorker(t *testing.T) {
 	ctx := context.Background()
 
-	system := MockReplicationTestSystem(mockscluster.NewCluster(t))
-
-	actor := &relocator{
-		remoting: remoteclient.NewClient(),
-		pid: &PID{
-			actorSystem: system,
-		},
-	}
-
-	targetActor := &internalpb.Actor{
-		Address: "invalid-address",
-	}
-	targetPeer := &cluster.Peer{
-		Host:         "127.0.0.1",
-		RemotingPort: 8080,
-	}
-
-	err := actor.spawnRemoteActor(ctx, targetActor, targetPeer)
-	require.Error(t, err)
-
-	var internalErr *errors.InternalError
-	require.ErrorAs(t, err, &internalErr)
-	assert.ErrorContains(t, err, "address format is invalid")
-}
-
-func TestRelocatorSpawnRemoteActorSetsReentrancyConfig(t *testing.T) {
-	ctx := context.Background()
-
-	system, err := NewActorSystem("relocator-reentrancy", WithLogger(log.DiscardLogger))
+	system, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
 	require.NoError(t, err)
 
-	sys := system.(*actorSystem)
-	clusterMock := mockscluster.NewCluster(t)
-	clusterMock.EXPECT().ActorExists(mock.Anything, "relocated-actor").Return(false, nil).Once()
-	sys.cluster = clusterMock
-
-	remotingMock := mocksremote.NewClient(t)
-	remotingMock.EXPECT().RemoteSpawn(mock.Anything, "127.0.0.1", 9000, mock.Anything).
-		Run(func(_ context.Context, _ string, _ int, req *remote.SpawnRequest) {
-			require.NotNil(t, req.Reentrancy)
-			require.Equal(t, reentrancy.StashNonReentrant, req.Reentrancy.Mode())
-			require.Equal(t, 5, req.Reentrancy.MaxInFlight())
-		}).
-		Return(new("goakt://test@127.0.0.1:9000/actor"), nil).
-		Once()
-
-	actor := &relocator{
-		remoting: remotingMock,
-		pid: &PID{
-			actorSystem: system,
-		},
-		logger: log.DiscardLogger,
+	manager := &relocator{
+		pid:     &PID{actorSystem: system, logger: log.DiscardLogger},
+		logger:  log.DiscardLogger,
+		workers: make(map[string]workerJob),
 	}
 
-	targetActor := &internalpb.Actor{
-		Address: address.New("relocated-actor", system.Name(), "127.0.0.1", 8080).String(),
-		Type:    "relocated-kind",
-		Reentrancy: &internalpb.ReentrancyConfig{
-			Mode:        internalpb.ReentrancyMode_REENTRANCY_MODE_STASH_NON_REENTRANT,
-			MaxInFlight: 5,
-		},
-	}
-	targetPeer := &cluster.Peer{
-		Host:         "127.0.0.1",
-		RemotingPort: 9000,
-	}
+	terminated := &Terminated{actorPath: newPath(address.New("some-actor", "test", "127.0.0.1", 9000))}
+	receiveCtx := newReceiveContext(ctx, nil, manager.pid, terminated)
 
-	err = actor.spawnRemoteActor(ctx, targetActor, targetPeer)
-	require.NoError(t, err)
-}
-
-func TestRelocatorRelocateActorsInvalidAddress(t *testing.T) {
-	ctx := context.Background()
-
-	actor := &relocator{}
-
-	var eg errgroup.Group
-	actor.relocateActors(ctx, &eg, []*internalpb.Actor{
-		{Address: "invalid-address"},
-	}, nil, nil)
-
-	err := eg.Wait()
-	require.Error(t, err)
-
-	var spawnErr *errors.SpawnError
-	require.ErrorAs(t, err, &spawnErr)
-	assert.ErrorContains(t, err, "address format is invalid")
-}
-
-func TestRelocatorRelocateActorsInvalidAddressForPeerShare(t *testing.T) {
-	ctx := context.Background()
-
-	actor := &relocator{}
-
-	var eg errgroup.Group
-	actor.relocateActors(ctx, &eg, nil, [][]*internalpb.Actor{
-		nil,
-		{{Address: "invalid-address"}},
-	}, []*cluster.Peer{
-		{Host: "127.0.0.1", RemotingPort: 8080},
+	require.NotPanics(t, func() {
+		manager.Receive(receiveCtx)
 	})
-
-	err := eg.Wait()
-	require.Error(t, err)
-
-	var spawnErr *errors.SpawnError
-	require.ErrorAs(t, err, &spawnErr)
-	assert.ErrorContains(t, err, "address format is invalid")
 }
 
-func TestRelocatorRecreateLocallyUsesSingletonSpec(t *testing.T) {
+// TestRelocatorStaleTerminatedDoesNotAbortNewerJob covers the re-departure
+// race: worker-1 completed and released its job, the same address departed
+// again and a new job was registered before worker-1's Terminated reached the
+// relocator. The stale Terminated must leave the newer job untouched instead
+// of aborting it.
+func TestRelocatorStaleTerminatedDoesNotAbortNewerJob(t *testing.T) {
 	ctx := context.Background()
-	system := MockSingletonClusterReadyActorSystem(t)
-	clusterMock := mockscluster.NewCluster(t)
-	system.locker.Lock()
-	system.cluster = clusterMock
-	system.locker.Unlock()
 
-	system.registry.Register(new(MockActor))
-
-	singletonSpec := &internalpb.SingletonSpec{
-		SpawnTimeout: durationpb.New(3 * time.Second),
-		WaitInterval: durationpb.New(250 * time.Millisecond),
-		MaxRetries:   int32(4),
-	}
-	props := &internalpb.Actor{
-		Address: address.New("singleton", system.Name(), "127.0.0.1", 8080).String(),
-		Type:    types.Name(new(MockActor)),
-		Singleton: &internalpb.SingletonSpec{
-			SpawnTimeout: singletonSpec.SpawnTimeout,
-			WaitInterval: singletonSpec.WaitInterval,
-			MaxRetries:   singletonSpec.MaxRetries,
-		},
-		Role: new("blue"),
-	}
-
-	clusterMock.EXPECT().RemoveActor(mock.Anything, "singleton").Return(nil).Once()
-
-	spy := &spawnSingletonSpy{actorSystem: system}
-	relocator := &relocator{pid: &PID{actorSystem: spy}}
-	err := relocator.recreateLocally(ctx, props, true)
+	system, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
 	require.NoError(t, err)
 
-	require.True(t, spy.called)
-	require.Equal(t, "singleton", spy.actorName)
-	require.Equal(t, props.GetType(), types.Name(spy.actor))
-	require.NotNil(t, spy.config)
-	require.Equal(t, singletonSpec.SpawnTimeout.AsDuration(), spy.config.spawnTimeout)
-	require.Equal(t, singletonSpec.WaitInterval.AsDuration(), spy.config.waitInterval)
-	require.Equal(t, int(singletonSpec.MaxRetries), spy.config.numberOfRetries)
-	require.NotNil(t, spy.config.Role())
-	require.Equal(t, props.GetRole(), *spy.config.Role())
+	sys := system.(*actorSystem)
+	store := &recordingPeerStateStore{}
+	sys.clusterStore = store
+
+	oldPeerState := &internalpb.PeerState{Host: "127.0.0.1", PeersPort: 9000}
+	newPeerState := &internalpb.PeerState{Host: "127.0.0.1", PeersPort: 9000}
+	require.True(t, sys.beginRelocation("127.0.0.1:9000", newPeerState))
+
+	stream := eventstream.New()
+	consumer := stream.AddSubscriber()
+	stream.Subscribe(consumer, eventsTopic)
+
+	workerName := reservedName(relocationWorkerType) + "-1"
+	manager := &relocator{
+		pid: &PID{
+			actorSystem:  system,
+			logger:       log.DiscardLogger,
+			eventsStream: stream,
+		},
+		logger:  log.DiscardLogger,
+		workers: map[string]workerJob{workerName: {address: "127.0.0.1:9000", peerState: oldPeerState}},
+	}
+
+	terminated := &Terminated{actorPath: newPath(address.New(workerName, "test", "127.0.0.1", 9000))}
+	receiveCtx := newReceiveContext(ctx, nil, manager.pid, terminated)
+	manager.Receive(receiveCtx)
+
+	// the dead worker is untracked but the newer job stays registered
+	require.Empty(t, manager.workers)
+	registered, inflight := sys.relocationJob("127.0.0.1:9000")
+	require.True(t, inflight)
+	require.Same(t, newPeerState, registered)
+
+	// no spurious abort: the peer state snapshot is kept and no failure is published
+	require.False(t, store.deleteCalled)
+
+	var events []*RelocationFailed
+	for message := range consumer.Iterator() {
+		if event, ok := message.Payload().(*RelocationFailed); ok {
+			events = append(events, event)
+		}
+	}
+	require.Empty(t, events)
+}
+
+// TestRelocatorRebalanceForReDepartedAddressIsNotSkipped covers the other half
+// of the re-departure race: a Rebalance for an address whose completed worker
+// is still tracked (its Terminated not yet processed) must be handled, not
+// silently dropped. Here the worker spawn fails (the relocator pid is not part
+// of a running actor tree), so handling means aborting the relocation: the job
+// is released and the peer state snapshot removed instead of staying orphaned.
+func TestRelocatorRebalanceForReDepartedAddressIsNotSkipped(t *testing.T) {
+	ctx := context.Background()
+
+	system, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	sys := system.(*actorSystem)
+	store := &recordingPeerStateStore{}
+	sys.clusterStore = store
+
+	oldPeerState := &internalpb.PeerState{Host: "127.0.0.1", PeersPort: 9000}
+	newPeerState := &internalpb.PeerState{Host: "127.0.0.1", PeersPort: 9000}
+	require.True(t, sys.beginRelocation("127.0.0.1:9000", newPeerState))
+
+	workerName := reservedName(relocationWorkerType) + "-1"
+	manager := &relocator{
+		pid:     &PID{actorSystem: system, logger: log.DiscardLogger},
+		logger:  log.DiscardLogger,
+		workers: map[string]workerJob{workerName: {address: "127.0.0.1:9000", peerState: oldPeerState}},
+	}
+
+	receiveCtx := newReceiveContext(ctx, nil, manager.pid, &internalpb.Rebalance{PeerState: newPeerState})
+	manager.Receive(receiveCtx)
+
+	// the rebalance was processed: the failed spawn aborted the relocation,
+	// releasing the job and removing the peer state snapshot
+	_, inflight := sys.relocationJob("127.0.0.1:9000")
+	require.False(t, inflight)
+	require.True(t, store.deleteCalled)
+	assert.Equal(t, "127.0.0.1:9000", store.deletedAddr)
 }
 
 func TestRelocation(t *testing.T) {
@@ -694,6 +522,264 @@ func TestRelocation(t *testing.T) {
 		require.NotNil(t, localPID.reentrancy)
 		require.Equal(t, reentrancy.StashNonReentrant, localPID.reentrancy.mode)
 		require.Equal(t, 3, localPID.reentrancy.maxInFlight)
+	}
+
+	assert.NoError(t, node1.Stop(ctx))
+	assert.NoError(t, node3.Stop(ctx))
+	assert.NoError(t, sd1.Close())
+	assert.NoError(t, sd3.Close())
+	srv.Shutdown()
+}
+
+// TestRelocationWithReplicasReReplicatesSurvivorRegistry is the end-to-end
+// counterpart to the resyncAfterClusterEvent unit tests. It proves, over a real
+// NATS-backed cluster and a real olric registry, the two guarantees the mock
+// test cannot: (1) at replicaCount>1 the blanket registry re-put on NodeLeft is
+// skipped, and (2) olric nevertheless re-replicates the departed node's
+// partitions cleanly, so no surviving node's registry entry is lost.
+//
+// Why this is not vacuous:
+//   - replicaCount=2 makes resyncAfterClusterEvent take its early-return branch
+//     (asserted via the running config), so a surviving entry that was primaried
+//     on the dead node can ONLY come back through olric backup promotion; no
+//     resync re-put runs to paper over a loss.
+//   - replicaCount=2 means olric keeps a backup replica of every partition on a
+//     second member. A settle window before the kill lets those backups fully
+//     replicate, so when node2 dies its partitions are promoted from the backups
+//     the surviving nodes already hold.
+//   - The survivor actors below cover every partition (asserted). Since olric
+//     spreads partition primaries across all three members, at least one
+//     survivor entry is necessarily primaried on node2. Its survival after node2
+//     dies is therefore direct evidence of clean re-replication.
+func TestRelocationWithReplicasReReplicatesSurvivorRegistry(t *testing.T) {
+	ctx := context.TODO()
+	srv := startNatsServer(t)
+
+	const (
+		replicaCount = 2
+		// olric runs in synchronous replication mode, so it writes the backup
+		// replica as part of every put regardless of quorum; writeQuorum=1 is
+		// therefore enough to guarantee the backup exists before the departure
+		// (a higher quorum would only add ack latency, not durability here).
+		writeQuorum = 1
+		readQuorum  = 1
+		// the test fixture (testSystem) provisions the cluster with 7 partitions
+		partitionCount = 7
+	)
+
+	// replicaCount>1 clusters cannot bootstrap a lone node (olric waits for a
+	// backup replica owner), so all three nodes are started concurrently.
+	systems, providers := testNATsConcurrent(t, srv.Addr().String(), 3,
+		withTestReplication(replicaCount, writeQuorum, readQuorum),
+		withTestBootstrapTimeout(20*time.Second),
+	)
+	node1, node2, node3 := systems[0], systems[1], systems[2]
+	sd1, sd2, sd3 := providers[0], providers[1], providers[2]
+
+	// The skip branch in resyncAfterClusterEvent is taken iff replicaCount > 1.
+	// Assert the optimization is actually engaged on the surviving nodes so the
+	// registry recovery below can only be olric's re-replication, never a resync.
+	for _, node := range []ActorSystem{node1, node3} {
+		require.Greater(t, node.(*actorSystem).clusterConfig.replicaCount, uint32(1),
+			"resyncAfterClusterEvent must be in its skip regime for this test to be meaningful")
+	}
+
+	// Spawn a large spread of survivor actors on node1 and node3 (never node2).
+	const perNode = 40
+	survivors := make([]string, 0, perNode*2)
+	for j := 1; j <= perNode; j++ {
+		name := fmt.Sprintf("Survivor-A-%d", j)
+		pid, err := node1.Spawn(ctx, name, NewMockActor(), WithLongLived())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+		survivors = append(survivors, name)
+	}
+
+	for j := 1; j <= perNode; j++ {
+		name := fmt.Sprintf("Survivor-B-%d", j)
+		pid, err := node3.Spawn(ctx, name, NewMockActor(), WithLongLived())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+		survivors = append(survivors, name)
+	}
+
+	// Let the registry and its backup replicas settle across the cluster before
+	// we remove a primary owner.
+	pause.For(5 * time.Second)
+
+	node1Address := net.JoinHostPort(node1.Host(), strconv.Itoa(node1.Port()))
+	node2Address := net.JoinHostPort(node2.Host(), strconv.Itoa(node2.Port()))
+	node3Address := net.JoinHostPort(node3.Host(), strconv.Itoa(node3.Port()))
+
+	// Precondition: the survivor entries span every partition. Combined with
+	// olric distributing partition primaries across all three members, this makes
+	// it certain that at least one survivor entry is primaried on node2 and thus
+	// depends on backup promotion to survive node2's departure.
+	cl := node1.(*actorSystem).getCluster()
+	partitions := make(map[uint64]struct{})
+	for _, name := range survivors {
+		require.Eventually(t, func() bool {
+			exists, err := node1.ActorExists(ctx, name)
+			return err == nil && exists
+		}, 30*time.Second, 200*time.Millisecond, "survivor %s should be registered before node2 departs", name)
+		partitions[cl.GetPartition(name)] = struct{}{}
+	}
+	require.Len(t, partitions, partitionCount,
+		"survivor entries must cover every partition so that some are provably primaried on node2")
+
+	// Kill node2. Because replicaCount>1, no surviving node re-puts its registry
+	// entries; olric alone must promote the backups it holds for node2's
+	// partitions.
+	require.NoError(t, node2.Stop(ctx))
+	require.NoError(t, sd2.Close())
+
+	// give the cluster time to detect the departure and rebalance partitions
+	pause.For(3 * time.Second)
+
+	// Core assertion: every survivor entry is still present and still resolves to
+	// its original live owner. Entries that were primaried on node2 can only be
+	// here because olric promoted their backup - the resync re-put was skipped -
+	// which is exactly the "olric re-replicates cleanly" guarantee.
+	recovered := make(map[string]string, len(survivors))
+	for _, name := range survivors {
+		require.Eventually(t, func() bool {
+			exists, err := node1.ActorExists(ctx, name)
+			return err == nil && exists
+		}, 90*time.Second, 500*time.Millisecond,
+			"survivor %s must remain registered after node2 departs (olric backup promotion)", name)
+
+		pid, err := node1.ActorOf(ctx, name)
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+		owner := pid.Path().HostPort()
+		require.NotEqual(t, node2Address, owner, "survivor %s must never resolve to the dead node", name)
+		require.Contains(t, []string{node1Address, node3Address}, owner,
+			"survivor %s must resolve to a live original owner", name)
+		recovered[name] = owner
+	}
+	require.Len(t, recovered, len(survivors), "no survivor registry entry may be lost when resync is skipped")
+
+	// The recovered entries are usable, not merely present: survivors remain
+	// routable across the cluster.
+	sender, err := node1.ActorOf(ctx, survivors[0])
+	require.NoError(t, err)
+	require.NotNil(t, sender)
+	for _, name := range survivors {
+		require.Eventually(t, func() bool {
+			return sender.SendAsync(ctx, name, new(testpb.TestSend)) == nil
+		}, 90*time.Second, 500*time.Millisecond, "survivor %s must be reachable after node2 departs", name)
+	}
+
+	assert.NoError(t, node1.Stop(ctx))
+	assert.NoError(t, node3.Stop(ctx))
+	assert.NoError(t, sd1.Close())
+	assert.NoError(t, sd3.Close())
+	srv.Shutdown()
+}
+
+// TestRelocationWithReplicasRelocatesDepartedActors is the companion to
+// TestRelocationWithReplicasReReplicatesSurvivorRegistry. That test proves the
+// SURVIVING nodes' registry entries are re-replicated cleanly when resync is
+// skipped; this one proves the complementary case still works at replicaCount>1:
+// the DEPARTED node's own actors are relocated onto the surviving nodes.
+//
+// This closes the gap flagged when the secondary sub-check was dropped from the
+// re-replication test: departed-actor relocation had no coverage at
+// replicaCount>1 (all other relocation tests run at replicaCount=1). It waits
+// for the freshly formed cluster to fully converge before stopping node2, since
+// perturbing an unsettled replicaCount>1 cluster triggers spurious membership
+// churn that is unrelated to the relocation behaviour under test.
+func TestRelocationWithReplicasRelocatesDepartedActors(t *testing.T) {
+	ctx := context.TODO()
+	srv := startNatsServer(t)
+
+	// replicaCount>1 clusters cannot bootstrap a lone node, so start concurrently.
+	systems, providers := testNATsConcurrent(t, srv.Addr().String(), 3,
+		withTestReplication(2, 1, 1),
+		withTestBootstrapTimeout(20*time.Second),
+	)
+	node1, node2, node3 := systems[0], systems[1], systems[2]
+	sd1, sd2, sd3 := providers[0], providers[1], providers[2]
+
+	// the optimization is engaged: NodeLeft takes the resync skip branch
+	require.Greater(t, node1.(*actorSystem).clusterConfig.replicaCount, uint32(1))
+
+	// A freshly formed replicaCount>1 cluster keeps rebalancing partitions for a
+	// while after Start returns. Perturbing membership (stopping node2) before
+	// that settles lets memberlist mistake a busy survivor for a failed node,
+	// which cascades into spurious departures. Wait until every node sees both
+	// peers and give partition rebalancing time to quiesce before continuing.
+	survivors := []ActorSystem{node1, node2, node3}
+	require.Eventually(t, func() bool {
+		for _, node := range survivors {
+			peers, err := node.(*actorSystem).cluster.Peers(ctx)
+			if err != nil || len(peers) != 2 {
+				return false
+			}
+		}
+		return true
+	}, 60*time.Second, time.Second, "cluster membership never converged to 3 nodes")
+	pause.For(5 * time.Second)
+
+	departed := []string{"Departed-1", "Departed-2", "Departed-3", "Departed-4", "Departed-5", "Departed-6"}
+	for _, name := range departed {
+		pid, err := node2.Spawn(ctx, name, NewMockActor(), WithLongLived())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+	}
+
+	// a live sender on node1 to exercise reachability after relocation
+	_, err := node1.Spawn(ctx, "Departed-Sender", NewMockActor(), WithLongLived())
+	require.NoError(t, err)
+
+	pause.For(3 * time.Second)
+
+	node1Address := net.JoinHostPort(node1.Host(), strconv.Itoa(node1.Port()))
+	node2Address := net.JoinHostPort(node2.Host(), strconv.Itoa(node2.Port()))
+	node3Address := net.JoinHostPort(node3.Host(), strconv.Itoa(node3.Port()))
+
+	// sanity: the actors start out on node2
+	for _, name := range departed {
+		pid, err := node1.ActorOf(ctx, name)
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+		require.Equal(t, node2Address, pid.Path().HostPort(), "actor %s should start on node2", name)
+	}
+
+	// take node2 down; resync is skipped (replicaCount>1), so relocation alone
+	// must move node2's actors onto the surviving nodes.
+	require.NoError(t, node2.Stop(ctx))
+	require.NoError(t, sd2.Close())
+
+	// The cluster registry is the source of truth for relocation placement:
+	// every departed actor must resolve to a surviving node (never node2, never
+	// missing). Reading via the leader's cluster client mirrors what ActorOf
+	// resolves, and require.Eventually retries transient registry read errors.
+	registry := node1.(*actorSystem).getCluster()
+	for _, name := range departed {
+		require.Eventually(t, func() bool {
+			actor, err := registry.GetActor(ctx, name)
+			if err != nil {
+				return false
+			}
+			owner, err := address.Parse(actor.GetAddress())
+			if err != nil {
+				return false
+			}
+			hostPort := owner.HostPort()
+			return hostPort == node1Address || hostPort == node3Address
+		}, 90*time.Second, 500*time.Millisecond,
+			"actor %s must be relocated onto a surviving node after node2 departs", name)
+	}
+
+	// end-to-end: the relocated actors are routable from a live sender
+	sender, err := node1.ActorOf(ctx, "Departed-Sender")
+	require.NoError(t, err)
+	require.NotNil(t, sender)
+	for _, name := range departed {
+		require.Eventually(t, func() bool {
+			return sender.SendAsync(ctx, name, new(testpb.TestSend)) == nil
+		}, 90*time.Second, 500*time.Millisecond, "relocated actor %s must be reachable", name)
 	}
 
 	assert.NoError(t, node1.Stop(ctx))

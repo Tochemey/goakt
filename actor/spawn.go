@@ -42,6 +42,8 @@ import (
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/cluster"
+	"github.com/tochemey/goakt/v4/internal/codec"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/pointer"
 	"github.com/tochemey/goakt/v4/internal/strconvx"
 	"github.com/tochemey/goakt/v4/internal/types"
@@ -919,4 +921,157 @@ func (x *actorSystem) actorsRoundRobinPlacementPeer(ctx context.Context, peers [
 		return nil, err
 	}
 	return peers[(next-1)%len(peers)], nil
+}
+
+// recreateActorFromWire recreates an actor on this node from its serialized wire
+// representation, restoring its spawn-time configuration (supervisor, passivation,
+// reentrancy, stashing, role and dependencies). It is used during cluster
+// rebalancing to relocate actors hosted on a departed node.
+//
+// departedNode is the remoting address (host:port) of the node that left the
+// cluster. A stale cluster registry entry still pointing at that address is
+// removed before respawning; an entry pointing anywhere else means the actor has
+// already been recreated by a concurrent relocation or a client spawn, so it is
+// skipped. System actors, singleton actors and non-relocatable actors are always
+// skipped before any registry mutation: singletons are recreated on the leader
+// through recreateSingletonFromWire, and non-relocatable actors are lost with
+// their node by design, so their registry entry must not be touched here.
+func (x *actorSystem) recreateActorFromWire(ctx context.Context, props *internalpb.Actor, departedNode string) error {
+	addr, err := address.Parse(props.GetAddress())
+	if err != nil {
+		return gerrors.NewInternalError(err)
+	}
+
+	if isSystemName(addr.Name()) || props.GetSingleton() != nil || !props.GetRelocatable() {
+		return nil
+	}
+
+	proceed, err := x.releaseDepartedEntry(ctx, addr.Name(), departedNode)
+	if err != nil || !proceed {
+		return err
+	}
+
+	actor, err := x.reflection.instantiateActor(props.GetType())
+	if err != nil {
+		return err
+	}
+
+	spawnOpts, err := x.wireSpawnOptions(props)
+	if err != nil {
+		return err
+	}
+
+	return x.spawnRelocatedActor(ctx, addr.Name(), actor, departedNode, spawnOpts)
+}
+
+// releaseDepartedEntry resolves the registry entry for name and removes it when
+// it still points at the departed node, reporting whether the caller should
+// proceed with the respawn. It reports false without error when the entry
+// points at another live node: the actor was already recreated there
+// (concurrent relocation or a client respawn), so respawning it here would be
+// a double spawn. Logged rather than silent so a rare stale entry (e.g. a lost
+// replication write pointing at a previous owner) is diagnosable. A missing
+// entry proceeds as-is.
+func (x *actorSystem) releaseDepartedEntry(ctx context.Context, name, departedNode string) (bool, error) {
+	existing, err := x.cluster.GetActor(ctx, name)
+
+	switch {
+	case err == nil:
+		entry, perr := address.Parse(existing.GetAddress())
+		if perr == nil && entry.HostPort() != departedNode {
+			x.logger.Debugf("node=%s skipping relocation of actor=%s: registry entry points at %s, not departed node %s", x.String(), name, entry.HostPort(), departedNode)
+			return false, nil
+		}
+
+		if rerr := x.cluster.RemoveActor(ctx, name); rerr != nil {
+			return false, gerrors.NewInternalError(rerr)
+		}
+
+		return true, nil
+	case errors.Is(err, cluster.ErrActorNotFound):
+		// no stale registry entry; proceed with the respawn
+		return true, nil
+	default:
+		return false, gerrors.NewInternalError(err)
+	}
+}
+
+// wireSpawnOptions rebuilds the spawn options carried by a serialized actor
+// record so a relocated actor keeps its passivation, stashing, role,
+// reentrancy, supervision and dependencies.
+func (x *actorSystem) wireSpawnOptions(props *internalpb.Actor) ([]SpawnOption, error) {
+	spawnOpts := []SpawnOption{
+		WithPassivationStrategy(codec.DecodePassivationStrategy(props.GetPassivationStrategy())),
+	}
+
+	if props.GetEnableStash() {
+		spawnOpts = append(spawnOpts, WithStashing())
+	}
+
+	if props.GetRole() != "" {
+		spawnOpts = append(spawnOpts, WithRole(props.GetRole()))
+	}
+
+	if props.GetReentrancy() != nil {
+		spawnOpts = append(spawnOpts, WithReentrancy(codec.DecodeReentrancy(props.GetReentrancy())))
+	}
+
+	if props.GetSupervisor() != nil {
+		if decoded := codec.DecodeSupervisor(props.GetSupervisor()); decoded != nil {
+			spawnOpts = append(spawnOpts, WithSupervisor(decoded))
+		}
+	}
+
+	if len(props.GetDependencies()) > 0 {
+		dependencies, err := x.reflection.dependenciesFromProto(props.GetDependencies()...)
+		if err != nil {
+			return nil, err
+		}
+
+		spawnOpts = append(spawnOpts, WithDependencies(dependencies...))
+	}
+
+	return spawnOpts, nil
+}
+
+// spawnRelocatedActor spawns a relocated actor, absorbing the spurious
+// ErrActorAlreadyExists a stale replica read can produce. The registry delete
+// in releaseDepartedEntry and the duplicate-name check inside Spawn
+// (cluster.ActorExists) are not atomic across replicas: with replicaCount
+// above 1 and a read quorum of 1, the check can hit a backup replica that has
+// not yet applied the delete and still holds the record pointing at the
+// departed node. On that signal the entry is re-resolved and the spawn retried
+// briefly, so a stale replica read never turns a recoverable actor into a
+// permanent relocation failure; a name genuinely owned by a live node is left
+// alone.
+func (x *actorSystem) spawnRelocatedActor(ctx context.Context, name string, actor Actor, departedNode string, spawnOpts []SpawnOption) error {
+	var err error
+
+	for attempt := 1; ; attempt++ {
+		_, err = x.Spawn(ctx, name, actor, spawnOpts...)
+		if err == nil || !errors.Is(err, gerrors.ErrActorAlreadyExists) {
+			return err
+		}
+
+		proceed, rerr := x.releaseDepartedEntry(ctx, name, departedNode)
+		if rerr != nil {
+			return rerr
+		}
+
+		if !proceed {
+			// genuinely re-owned by a live node (possibly this one via a
+			// concurrent duplicate); the actor is not lost
+			return nil
+		}
+
+		if attempt >= relocationSpawnMaxAttempts {
+			return err
+		}
+
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(relocationSpawnRetryBackoff):
+		}
+	}
 }

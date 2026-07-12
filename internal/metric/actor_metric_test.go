@@ -121,3 +121,23 @@ func (m instrumentFailingMeter) Int64ObservableGauge(
 	}
 	return m.Meter.Int64ObservableGauge(name, options...)
 }
+
+func (m instrumentFailingMeter) Int64Histogram(
+	name string,
+	options ...metric.Int64HistogramOption,
+) (metric.Int64Histogram, error) {
+	if err, ok := m.failures[name]; ok {
+		return nil, err
+	}
+	return m.Meter.Int64Histogram(name, options...)
+}
+
+func (m instrumentFailingMeter) Int64Counter(
+	name string,
+	options ...metric.Int64CounterOption,
+) (metric.Int64Counter, error) {
+	if err, ok := m.failures[name]; ok {
+		return nil, err
+	}
+	return m.Meter.Int64Counter(name, options...)
+}

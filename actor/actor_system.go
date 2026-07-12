@@ -38,7 +38,6 @@ import (
 	"syscall"
 	"time"
 
-	goset "github.com/deckarep/golang-set/v2"
 	"github.com/flowchartsman/retry"
 	"go.opentelemetry.io/otel/attribute"
 	otelmetric "go.opentelemetry.io/otel/metric"
@@ -65,6 +64,7 @@ import (
 	inet "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pointer"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
+	"github.com/tochemey/goakt/v4/internal/strconvx"
 	"github.com/tochemey/goakt/v4/internal/ticker"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/internal/validation"
@@ -80,6 +80,31 @@ import (
 const (
 	defaultReplicationFactor = 3
 	defaultReplicationQuorum = 2 // Wait for 2-of-3 acks
+
+	// correlatedDepartureWindow bounds how long a node departure is remembered
+	// when detecting a correlated (multi-node) failure. Departures within this
+	// window are treated as concurrent: once replicaCount of them accumulate,
+	// the registry repair runs even at replicaCount > 1 because olric's backups
+	// may not have survived the burst.
+	//
+	// It must comfortably exceed the time olric needs to re-replicate a
+	// partition after a loss, otherwise sequential failures spaced just past the
+	// window each look isolated and a partition that lost every replica is never
+	// repaired (permanent registry loss). olric drives re-replication from its
+	// routing table, which refreshes on the order of a minute by default
+	// (internal/cluster's routingTableInterval), so this window is set to a
+	// small multiple of that cadence rather than a few seconds.
+	//
+	// The bias is deliberately toward safety: too long only costs redundant
+	// re-puts of each survivor's own local entries during a slow rolling restart
+	// (idempotent Puts, O(local actors) each), whereas too short risks losing
+	// registry entries for actors that are still alive on survivors.
+	//
+	// This constant is the floor, sized for the default cadence. When the user
+	// stretches the routing-table refresh via WithClusterStateSyncInterval the
+	// effective window scales with it (twice the configured interval; see
+	// NewActorSystem), so a slower cadence never outlives the window.
+	correlatedDepartureWindow = 2 * time.Minute
 )
 
 // ActorSystem defines the contract of an actor system
@@ -760,7 +785,40 @@ type ActorSystem interface {
 	// PID.Watch / PID.UnWatch RPCs
 	getRemoteWatchTimeout() time.Duration
 
-	completeRelocation()
+	beginRelocation(peerAddress string, peerState *internalpb.PeerState) bool
+	relocationJob(peerAddress string) (*internalpb.PeerState, bool)
+	endRelocation(peerAddress string)
+	// recordRelocationMetrics records the duration and relocated/failed item
+	// counts of a single departed node's relocation. It is a no-op when metrics
+	// are disabled.
+	recordRelocationMetrics(ctx context.Context, departed string, duration time.Duration, relocated, failed int)
+	// reportAbortedRelocation applies the shared accounting for a relocation
+	// that could not run to completion (peer enumeration failure, worker spawn
+	// failure or abnormal worker death). It releases lazy grain directory
+	// entries locally and publishes a RelocationFailed event plus failure
+	// metrics using the same rule as the normal per-item path.
+	reportAbortedRelocation(ctx context.Context, pid *PID, peersAddress string, peerState *internalpb.PeerState, elapsed time.Duration, cause error)
+	// isEndpointRelocating reports whether addr resolves to a remoting endpoint
+	// whose host recently left the cluster and is still within its handoff
+	// window.
+	isEndpointRelocating(addr *address.Address) bool
+	// relocationInFlight reports whether any departed endpoint is still within
+	// its handoff window.
+	relocationInFlight() bool
+	// recordRelocationHandoff records that a name-based send was buffered and
+	// retried while its target was relocating. It is a no-op when metrics are
+	// disabled.
+	recordRelocationHandoff(ctx context.Context)
+	// getNodeRoles returns the roles advertised by the local node, used to
+	// decide whether the leader is an eligible relocation target for a
+	// role-constrained actor.
+	getNodeRoles() []string
+	// clusterReadTimeout returns the user-configured cluster read timeout, or
+	// fallback when clustering is not configured or the value is unset.
+	clusterReadTimeout(fallback time.Duration) time.Duration
+	recreateActorFromWire(ctx context.Context, props *internalpb.Actor, departedNode string) error
+	recreateGrainFromWire(ctx context.Context, grain *internalpb.Grain, departedNode string) error
+	releaseGrainForLazyRelocation(ctx context.Context, grain *internalpb.Grain, departedNode string) error
 	getRootGuardian() *PID
 	getSystemGuardian() *PID
 	getUserGuardian() *PID
@@ -872,9 +930,7 @@ type actorSystem struct {
 	registry   types.Registry
 	reflection *reflection
 
-	clusterConfig    *ClusterConfig
-	rebalancingQueue chan *internalpb.PeerState
-	rebalancedNodes  goset.Set[string]
+	clusterConfig *ClusterConfig
 
 	relocator        *PID
 	rootGuardian     *PID
@@ -888,14 +944,45 @@ type actorSystem struct {
 	noSender         *PID
 	peerStatesWriter *PID
 
-	startedAt        atomic.Int64
-	relocating       atomic.Bool
-	relocatingLocker sync.Mutex
-	// relocatingMu/relocatingCond let rebalancingLoop block until an in-flight
-	// relocation completes instead of busy re-queueing the pending peer state.
-	relocatingMu   sync.Mutex
-	relocatingCond *sync.Cond
-	shutdownHooks  []ShutdownHook
+	startedAt atomic.Int64
+	// relocationJobs tracks the in-flight relocations by departed peer address,
+	// each holding the departed node's peer state snapshot. An entry is added
+	// when the leader dispatches a rebalance and removed on completion, so a
+	// node address that departs again after a completed relocation is
+	// rebalanced again while duplicate NodeLeft events for an in-flight
+	// relocation are ignored.
+	relocationJobs       map[string]*internalpb.PeerState
+	relocationJobsLocker sync.Mutex
+
+	// peerRemotingPorts caches each known peer's remoting port keyed by its
+	// peers address (host:peersPort). It exists so crash recovery can identify
+	// a departed node's registry records: a NodeLeft event only carries the
+	// peers address, but actor/grain records key on the remoting address, and a
+	// crashed node is already gone from membership when the event arrives. The
+	// cache is populated from live membership on cluster events and consulted on
+	// NodeLeft when no graceful-shutdown snapshot exists.
+	peerRemotingPorts *xsync.Map[string, int]
+
+	// relocatingEndpoints records the remoting endpoints (host:port) of nodes
+	// that recently left the cluster while relocation is enabled, each retained
+	// for a bounded handoff window. Senders consult it to mask the window in
+	// which a departed node's actors are being recreated on a survivor: a send
+	// routed by name to such an endpoint is briefly retried (re-resolving the
+	// target) instead of failing with a connection error or a spurious "actor
+	// not found". Entries expire on their own, so steady-state sends never pay
+	// for this.
+	relocatingEndpoints *xsync.TTLMap[string, types.Unit]
+
+	// recentDepartures records the peers addresses of nodes that left within the
+	// correlated-departure window, each retained for that window. It lets the
+	// registry repair-on-departure detect a correlated (multi-node) failure: at
+	// replicaCount > 1 the repair is normally skipped because olric promotes
+	// backups, but olric only tolerates replicaCount-1 simultaneous losses, so
+	// once this many nodes depart together the repair must still run to restore
+	// entries whose every replica was lost. Entries expire on their own.
+	recentDepartures *xsync.TTLMap[string, types.Unit]
+
+	shutdownHooks []ShutdownHook
 
 	actorsCounter      atomic.Uint64
 	deadlettersCounter atomic.Uint64
@@ -932,6 +1019,9 @@ type actorSystem struct {
 	evictionStopSig       chan types.Unit
 
 	metricProvider *metric.Provider
+	// relocationMetric holds the synchronous relocation instruments. It is nil
+	// unless OpenTelemetry metrics are enabled, so all recording is guarded.
+	relocationMetric *metric.RelocationMetric
 
 	clusterStore cluster.Store
 
@@ -1003,7 +1093,10 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		remoteWatches:         newRemoteWatchRegistry(),
 		remoteWatchTimeout:    DefaultRemoteWatchTimeout,
 		shutdownHooks:         make([]ShutdownHook, 0),
-		rebalancedNodes:       goset.NewSet[string](),
+		relocationJobs:        make(map[string]*internalpb.PeerState),
+		peerRemotingPorts:     xsync.NewMap[string, int](),
+		relocatingEndpoints:   xsync.NewTTLMap[string, types.Unit](relocationHandoffWindow),
+		recentDepartures:      xsync.NewTTLMap[string, types.Unit](correlatedDepartureWindow),
 		topicActor:            nil,
 		extensions:            xsync.NewMap[string, extension.Extension](),
 		grainsQueue:           make(chan *internalpb.Grain, 10),
@@ -1017,8 +1110,6 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	}
 
 	system.startedAt.Store(0)
-	system.relocating.Store(false)
-	system.relocatingCond = sync.NewCond(&system.relocatingMu)
 	system.actorsCounter.Store(0)
 	system.deadlettersCounter.Store(0)
 	system.shuttingDown.Store(false)
@@ -1038,6 +1129,17 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	// apply the various options
 	for _, opt := range opts {
 		opt.Apply(system)
+	}
+
+	// The correlated-departure window must cover olric's re-replication time,
+	// which is driven by the routing-table refresh cadence. That cadence is
+	// user-configurable (WithClusterStateSyncInterval), so when it is stretched
+	// beyond the default the window scales with it, keeping the compile-time
+	// constant as a floor rather than a silent cap (see correlatedDepartureWindow).
+	if system.clusterConfig != nil {
+		if window := 2 * system.clusterConfig.clusterStateSyncInterval; window > correlatedDepartureWindow {
+			system.recentDepartures = xsync.NewTTLMap[string, types.Unit](window)
+		}
 	}
 
 	// build the dispatcher after options so tuning knobs like WithThroughputBudget take effect.
@@ -2273,11 +2375,74 @@ func (x *actorSystem) getRelocator() *PID {
 	return rebalancer
 }
 
-func (x *actorSystem) completeRelocation() {
-	x.relocatingMu.Lock()
-	x.relocating.Store(false)
-	x.relocatingCond.Signal()
-	x.relocatingMu.Unlock()
+// beginRelocation registers an in-flight relocation for the departed peer
+// address, holding its peer state snapshot. It returns false when a relocation
+// for that address is already in flight, so duplicate NodeLeft events do not
+// dispatch a second rebalance.
+func (x *actorSystem) beginRelocation(peerAddress string, peerState *internalpb.PeerState) bool {
+	x.relocationJobsLocker.Lock()
+	defer x.relocationJobsLocker.Unlock()
+
+	if _, exists := x.relocationJobs[peerAddress]; exists {
+		return false
+	}
+
+	x.relocationJobs[peerAddress] = peerState
+	return true
+}
+
+// relocationJob returns the peer state snapshot of the in-flight relocation
+// registered for the departed peer address, if any.
+func (x *actorSystem) relocationJob(peerAddress string) (*internalpb.PeerState, bool) {
+	x.relocationJobsLocker.Lock()
+	defer x.relocationJobsLocker.Unlock()
+
+	peerState, ok := x.relocationJobs[peerAddress]
+	return peerState, ok
+}
+
+// endRelocation releases the in-flight relocation registered for the departed
+// peer address so a future departure of the same address can rebalance again.
+func (x *actorSystem) endRelocation(peerAddress string) {
+	x.relocationJobsLocker.Lock()
+	delete(x.relocationJobs, peerAddress)
+	x.relocationJobsLocker.Unlock()
+}
+
+// cachePeerRemotingPorts refreshes the peers-address -> remoting-port cache from
+// current live membership (peers plus self). It merges rather than replaces so a
+// node that has just departed remains resolvable until its NodeLeft is handled;
+// forgetPeerRemotingPort prunes the entry afterwards to keep the map bounded.
+func (x *actorSystem) cachePeerRemotingPorts(ctx context.Context) {
+	if !x.clusterEnabled.Load() || x.cluster == nil {
+		return
+	}
+
+	peers, err := x.cluster.Peers(ctx)
+	if err != nil {
+		x.logger.Warnf("node=%s failed to refresh peer remoting ports: %v (hint: check cluster connectivity)", x.String(), err)
+		return
+	}
+
+	// include self so a same-host layout (multiple nodes on one host) never
+	// misattributes the local node's remoting port to a departed peer
+	x.peerRemotingPorts.Set(x.PeersAddress(), x.Port())
+
+	for _, peer := range peers {
+		x.peerRemotingPorts.Set(peer.PeerAddress(), peer.RemotingPort)
+	}
+}
+
+// peerRemotingPort returns the cached remoting port for a peers address.
+func (x *actorSystem) peerRemotingPort(peerAddress string) (int, bool) {
+	return x.peerRemotingPorts.Get(peerAddress)
+}
+
+// forgetPeerRemotingPort drops a peers address from the cache once its departure
+// has been handled, bounding the map under churn (a stable address that leaves
+// and rejoins is re-added on the next membership refresh).
+func (x *actorSystem) forgetPeerRemotingPort(peerAddress string) {
+	x.peerRemotingPorts.Delete(peerAddress)
 }
 
 // putActorOnCluster broadcasts the newly (re)spawned actor into the
@@ -2400,19 +2565,19 @@ func (x *actorSystem) startCluster(ctx context.Context) error {
 
 	x.setupGrainActivationBarrier(ctx)
 
+	// Seed the peers-address -> remoting-port cache from the current membership
+	// before the events loop starts, so a node that was already a member at
+	// startup can still be resolved by handleNodeLeftEvent when it later crashes
+	// without a graceful-shutdown snapshot.
+	x.cachePeerRemotingPorts(ctx)
+
 	x.eventsQueue = x.cluster.Events()
-	x.rebalancingQueue = make(chan *internalpb.PeerState, 1)
 	go x.clusterEventsLoop()
 	// Track the replicate drainers so shutdown can wait for them to drain
 	// the cluster queues before reset() clears the rest of the state.
 	x.drainers.Add(2)
 	go x.replicateActors()
 	go x.replicateGrains()
-
-	// start the various relocation loops when relocation is enabled
-	if x.relocationEnabled.Load() {
-		go x.rebalancingLoop()
-	}
 
 	if err := x.cleanupStaleLocalActors(ctx); err != nil {
 		x.logger.Warnf("failed to cleanup stale cluster actors: %v", err)
@@ -2911,9 +3076,9 @@ func (x *actorSystem) replicateOneGrain(grain *internalpb.Grain) {
 	}
 }
 
-// resyncActors resyncs all actors in the actor system
-// This is only called during cluster events like NodeLeft or NodeJoined
-// to ensure that all actors are properly synchronized across the cluster.
+// resyncActors resyncs all actors in the actor system.
+// This is only called on a NodeLeft event to repair registry entries whose
+// owning partition was lost with the departed node (see handleNodeLeftEvent).
 func (x *actorSystem) resyncActors() error {
 	actors := x.localActors()
 	for _, actor := range actors {
@@ -2925,9 +3090,9 @@ func (x *actorSystem) resyncActors() error {
 	return nil
 }
 
-// resyncGrains resyncs all grains in the actor system
-// This is only called during cluster events like NodeLeft or NodeJoined
-// to ensure that all actors are properly synchronized across the cluster.
+// resyncGrains resyncs all grains in the actor system.
+// This is only called on a NodeLeft event to repair registry entries whose
+// owning partition was lost with the departed node (see handleNodeLeftEvent).
 func (x *actorSystem) resyncGrains() error {
 	grains := x.grains.Values()
 	for _, grain := range grains {
@@ -2988,8 +3153,32 @@ func (x *actorSystem) handleNodeJoinedEvent(event *cluster.Event) {
 	nodeJoined := event.Payload.(*cluster.NodeJoinedEvent)
 	x.logger.Infof("node=%s detected node joined event: node=%s", x.String(), nodeJoined.Address)
 
+	// Refresh the peers-address -> remoting-port cache so the joining node (and
+	// any membership churn since the last event) is resolvable when it later
+	// departs without a graceful-shutdown snapshot (see handleNodeLeftEvent).
+	x.cachePeerRemotingPorts(context.Background())
+
+	// A member that restarts at the same host:port within its own handoff
+	// window is reachable again: close the window so name-based sends resolving
+	// to it are delivered instead of being stalled or refused as mid-relocation
+	// for the remainder of the window.
+	x.markEndpointRecovered(nodeJoined.Address)
+
 	x.tryOpenGrainActivationBarrier(context.Background())
-	x.resyncAfterClusterEvent("node joined", nodeJoined.Address)
+	// A joining node does not invalidate any existing registry entry: the
+	// cluster store (Olric DMap) migrates partition data to the new owner as
+	// part of rebalancing, so re-putting every local actor and grain here would
+	// be O(total cluster actors) redundant writes. Repair on departure only
+	// (handleNodeLeftEvent), where partitions can actually be dropped.
+	//
+	// Tradeoff (deliberate): with replicaCount=1 (the default) a partition has
+	// no backup, so if a migration to the joining node is disrupted mid-flight
+	// its entries can be lost, and that loss is not repaired until the next
+	// departure-triggered resync. Repairing here on every join would trade a
+	// rare, self-correcting gap for a guaranteed O(cluster actors) write storm on
+	// every membership addition. Running with replicaCount>1 removes the gap
+	// (olric keeps a backup of each partition during migration); single-replica
+	// clusters accept it as the cost of the default.
 	x.triggerDataCentersReconciliation()
 }
 
@@ -2998,33 +3187,79 @@ func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
 	nodeLeft := event.Payload.(*cluster.NodeLeftEvent)
 	x.logger.Infof("node=%s detected node left event: node=%s", x.String(), nodeLeft.Address)
 
+	// The departed node is already gone from membership, so prune its cached
+	// remoting port once this handler has had the chance to consult it. Doing
+	// so keeps the cache bounded under churn; a stable address that leaves and
+	// rejoins is re-added on the next membership refresh.
+	defer x.forgetPeerRemotingPort(nodeLeft.Address)
+
 	x.pruneRemoteWatchesForHost(context.Background(), nodeLeft.Address, nodeLeft.Timestamp)
-	x.resyncAfterClusterEvent("node left", nodeLeft.Address)
+	// Repair the cluster store after a departure. With a replica count of 1 the
+	// partitions owned by the departed node are lost, so surviving nodes re-put
+	// their own live actors and grains to restore any registry entries that were
+	// hosted on those partitions. When the cluster keeps replicas this repair is
+	// skipped because olric promotes the backups itself (see resyncAfterClusterEvent).
+	// Relocation (below) handles the departed node's own actors and grains separately.
+	x.resyncAfterClusterEvent(event.Type, nodeLeft.Address)
 	x.triggerDataCentersReconciliation()
 
 	if !x.relocationEnabled.Load() {
 		return
 	}
 
+	// Open a bounded handoff window for the departed node's remoting endpoint so
+	// senders on this node briefly retry (rather than fail) while its actors are
+	// recreated on a survivor. This runs on every node, not just the leader,
+	// because any node may route a message to the departed node's actors.
+	x.markEndpointRelocating(nodeLeft.Address)
+
 	ctx := context.Background()
 
 	if x.cluster.IsLeader(ctx) {
 		x.logger.Infof("leader=%s initiating rebalancing for node=%s", x.String(), nodeLeft.Address)
 
-		if !x.rebalancedNodes.Contains(nodeLeft.Address) {
-			x.rebalancedNodes.Add(nodeLeft.Address)
+		// fetch the peer state of the node that left from the cluster store
+		peerState, ok := x.clusterStore.GetPeerState(ctx, nodeLeft.Address)
+		if !ok {
+			// No graceful-shutdown snapshot: the node most likely crashed.
+			// Reconstruct the relocation set from the replicated registry so its
+			// actors and grains are still recovered onto surviving nodes. The
+			// derivation is gated on olric's partition repair going quiet and
+			// therefore runs off the events loop (see gateCrashRecovery).
+			x.logger.Warnf("leader=%s found no snapshot for node=%s; deriving relocation set from the cluster registry", x.String(), nodeLeft.Address)
+			go x.gateCrashRecovery(nodeLeft.Address)
+			return
+		}
 
-			// fetch the peer state of the node that left from the cluster store
-			// and enqueue it for rebalancing
-			peerState, ok := x.clusterStore.GetPeerState(ctx, nodeLeft.Address)
-			if !ok {
-				x.logger.Warnf("leader=%s could not find node=%s state in cluster store", x.String(), nodeLeft.Address)
-				return
+		if !x.shouldRebalance(peerState) {
+			x.logger.Debugf("leader=%s found no node=%s state to rebalance", x.String(), nodeLeft.Address)
+			// Drop any stored snapshot for the departed address. A graceful
+			// shutdown persists a snapshot even when it carries no relocatable
+			// actors or grains; left in place, that stale empty snapshot would
+			// be returned by GetPeerState if the same address later rejoins,
+			// accumulates actors and then crashes, suppressing the
+			// deriveRelocationSetFromRegistry crash-recovery path and losing the
+			// rejoined node's actors silently. Deleting here keeps the skip path
+			// self-cleaning; DeletePeerState is a no-op when nothing is stored.
+			if err := x.clusterStore.DeletePeerState(ctx, nodeLeft.Address); err != nil {
+				x.logger.Errorf("leader=%s failed to remove stale peer=%s state on skipped rebalance: %v (hint: check cluster store)", x.String(), nodeLeft.Address, err)
 			}
+			return
+		}
 
-			x.relocatingLocker.Lock()
-			x.rebalancingQueue <- peerState
-			x.relocatingLocker.Unlock()
+		// register the relocation job; a duplicate NodeLeft for an in-flight
+		// relocation is ignored, while a node address that departs again after
+		// a completed relocation is rebalanced again
+		if !x.beginRelocation(nodeLeft.Address, peerState) {
+			x.logger.Debugf("leader=%s found relocation already in flight for node=%s", x.String(), nodeLeft.Address)
+			return
+		}
+
+		// dispatch to the relocator; its mailbox is the queue, so a burst of
+		// node departures never blocks the cluster events loop
+		if err := x.systemGuardian.Tell(ctx, x.relocator, &internalpb.Rebalance{PeerState: peerState}); err != nil {
+			x.logger.Errorf("failed to send rebalance to relocator: %v (hint: check relocator state)", err)
+			x.endRelocation(nodeLeft.Address)
 		}
 		return
 	}
@@ -3037,6 +3272,186 @@ func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
 	}
 
 	x.logger.Debugf("node=%s cleaned up node=%s left from state cache", x.String(), nodeLeft.Address)
+}
+
+// gateCrashRecovery derives a crashed node's relocation set and dispatches its
+// rebalance once olric's post-departure partition repair has gone quiet. A
+// SIGKILL leaves olric promoting backups and moving fragments for a while
+// after the NodeLeft epoch completes; scanning the registry or respawning
+// during that window reads inconsistent replicas (the scan misses records and
+// the respawn's duplicate check sees stale ones), turning recoverable actors
+// into failures. It runs on its own goroutine so the wait never blocks the
+// cluster events loop; the wait is bounded so recovery still proceeds when the
+// repair signal never settles.
+func (x *actorSystem) gateCrashRecovery(peerAddress string) {
+	ctx := context.Background()
+	deadline := time.Now().Add(relocationQuiescenceMaxWait)
+
+	for time.Since(x.cluster.LastRebalanceEvent()) < relocationQuiescenceWindow {
+		if x.isStopping() {
+			return
+		}
+
+		if time.Now().After(deadline) {
+			x.logger.Warnf("leader=%s proceeding with crash recovery for node=%s before partition repair went quiet (hint: recovery may be partial; affected items appear in RelocationFailed)", x.String(), peerAddress)
+			break
+		}
+
+		time.Sleep(relocationQuiescencePoll)
+	}
+
+	peerState, ok := x.deriveRelocationSetFromRegistry(ctx, peerAddress)
+	if !ok {
+		x.logger.Warnf("leader=%s could not derive relocation set for node=%s; skipping rebalance", x.String(), peerAddress)
+		return
+	}
+
+	if !x.shouldRebalance(peerState) {
+		x.logger.Debugf("leader=%s found no node=%s state to rebalance", x.String(), peerAddress)
+		return
+	}
+
+	if !x.beginRelocation(peerAddress, peerState) {
+		x.logger.Debugf("leader=%s found relocation already in flight for node=%s", x.String(), peerAddress)
+		return
+	}
+
+	if err := x.systemGuardian.Tell(ctx, x.relocator, &internalpb.Rebalance{PeerState: peerState}); err != nil {
+		x.logger.Errorf("failed to send rebalance to relocator: %v (hint: check relocator state)", err)
+		x.endRelocation(peerAddress)
+	}
+}
+
+// deriveRelocationSetFromRegistry reconstructs a departed node's relocation set
+// from the replicated cluster registry when no graceful-shutdown snapshot is
+// available (the node crashed). It resolves the departed node's remoting address
+// from the peers-address -> remoting-port cache, then scans the registry for
+// every actor and grain still hosted on that address.
+//
+// The returned PeerState mirrors the graceful-shutdown snapshot: Host/PeersPort
+// match the NodeLeft event's peers address so relocation bookkeeping stays keyed
+// on it, RemotingPort carries the resolved remoting port so the recreate gating
+// matches stale registry entries, and only relocatable actors are included
+// (non-relocatable actors are lost with the node by design). All matching grains
+// are included; the relocation worker filters and splits them by their own
+// relocation flags.
+//
+// It returns ok=false when the remoting port cannot be resolved (the node was
+// never observed alive by this leader) or the registry scan fails, so the caller
+// skips the rebalance rather than acting on an incomplete set. Registry lookups
+// are a full scan here; a per-host index is a later optimization.
+func (x *actorSystem) deriveRelocationSetFromRegistry(ctx context.Context, peerAddress string) (*internalpb.PeerState, bool) {
+	host, peersPortStr, err := net.SplitHostPort(peerAddress)
+	if err != nil {
+		x.logger.Errorf("node=%s cannot parse departed peer address=%s: %v", x.String(), peerAddress, err)
+		return nil, false
+	}
+
+	peersPort, err := strconv.Atoi(peersPortStr)
+	if err != nil {
+		x.logger.Errorf("node=%s cannot parse departed peer port from address=%s: %v", x.String(), peerAddress, err)
+		return nil, false
+	}
+
+	remotingPort, ok := x.peerRemotingPort(peerAddress)
+	if !ok {
+		x.logger.Warnf("node=%s has no cached remoting port for departed node=%s (never observed alive); cannot derive its registry records", x.String(), peerAddress)
+		return nil, false
+	}
+
+	// Bounds-checked conversions keep an out-of-range port from silently
+	// truncating into the derived snapshot's wire record.
+	peersPort32, err := strconvx.Int2Int32(peersPort)
+	if err != nil {
+		x.logger.Errorf("node=%s derived an invalid peers port from address=%s: %v", x.String(), peerAddress, err)
+		return nil, false
+	}
+
+	remotingPort32, err := strconvx.Int2Int32(remotingPort)
+	if err != nil {
+		x.logger.Errorf("node=%s derived an invalid remoting port for departed node=%s: %v", x.String(), peerAddress, err)
+		return nil, false
+	}
+
+	// recovery-sized budget: the user-configured read timeout is honored when
+	// it exceeds the floor, but a lookup-sized timeout must never abandon the
+	// crash-recovery scan (a timed-out scan skips the whole rebalance)
+	timeout := max(x.clusterReadTimeout(time.Second), relocationDeriveScanTimeout)
+
+	// Filter to the departed host during the scan so a crash recovery never
+	// materializes the whole cluster registry just to keep one node's records;
+	// the streaming ActorsByHost/GrainsByHost return only the matching subset.
+	registryActors, err := x.cluster.ActorsByHost(ctx, host, remotingPort, timeout)
+	if err != nil {
+		x.logger.Errorf("node=%s failed to scan cluster actors while deriving relocation set for node=%s: %v", x.String(), peerAddress, err)
+		return nil, false
+	}
+
+	registryGrains, err := x.cluster.GrainsByHost(ctx, host, remotingPort, timeout)
+	if err != nil {
+		x.logger.Errorf("node=%s failed to scan cluster grains while deriving relocation set for node=%s: %v", x.String(), peerAddress, err)
+		return nil, false
+	}
+
+	// nil maps until the first match: most departures own a small fraction of
+	// the registry, so the common case allocates nothing here.
+	var wireActors map[string]*internalpb.Actor
+
+	for _, actor := range registryActors {
+		// only relocatable actors are recovered; the rest are lost with the node
+		// by design
+		if !actor.GetRelocatable() {
+			continue
+		}
+
+		addr, perr := address.Parse(actor.GetAddress())
+		if perr != nil {
+			continue
+		}
+
+		if isSystemName(addr.Name()) {
+			continue
+		}
+
+		if wireActors == nil {
+			wireActors = make(map[string]*internalpb.Actor)
+		}
+
+		wireActors[addr.Name()] = actor
+	}
+
+	var wireGrains map[string]*internalpb.Grain
+	for _, grain := range registryGrains {
+		if isSystemName(grain.GetGrainId().GetName()) {
+			continue
+		}
+
+		if wireGrains == nil {
+			wireGrains = make(map[string]*internalpb.Grain)
+		}
+
+		wireGrains[grain.GetGrainId().GetValue()] = grain
+	}
+
+	// An empty set on a crash is suspicious rather than benign: with a cluster
+	// replica count of 1 the registry partitions owned by the crashed node are
+	// lost with it, so its records may be unrecoverable. Surface it loudly
+	// instead of silently skipping the rebalance downstream.
+	if len(wireActors) == 0 && len(wireGrains) == 0 {
+		x.logger.Warnf("leader=%s derived an empty relocation set for crashed node=%s (remoting=%s:%d); its registry records may have been lost with it (raise the cluster replica count above 1 to make crash recovery reliable)",
+			x.String(), peerAddress, host, remotingPort)
+	} else {
+		x.logger.Infof("leader=%s derived relocation set for crashed node=%s (remoting=%s:%d): actors=%d grains=%d",
+			x.String(), peerAddress, host, remotingPort, len(wireActors), len(wireGrains))
+	}
+
+	return &internalpb.PeerState{
+		Host:         host,
+		PeersPort:    peersPort32,
+		RemotingPort: remotingPort32,
+		Actors:       wireActors,
+		Grains:       wireGrains,
+	}, true
 }
 
 // pruneRemoteWatchesForHost cleans up the remote watch registry after a
@@ -3098,7 +3513,39 @@ func (x *actorSystem) pruneRemoteWatchesForHost(ctx context.Context, nodeAddress
 }
 
 // resyncAfterClusterEvent handles resyncing actors and grains after a cluster event.
-func (x *actorSystem) resyncAfterClusterEvent(eventType, nodeAddress string) {
+//
+// The full re-put exists to repair registry entries whose owning partition was
+// lost with the departed node. With a single replica (replicaCount <= 1) every
+// departure can lose entries, so the repair always runs. With a higher replica
+// count olric normally holds backups for every partition and promotes them on
+// the membership change, so a single departure survives and re-putting the whole
+// local set would be redundant write amplification; the repair is skipped in
+// that case.
+//
+// That skip is only safe while losses stay within olric's tolerance. Olric
+// tolerates at most replicaCount-1 simultaneous failures: once that many nodes
+// depart within the correlated-departure window (an AZ or rack outage, a rolling
+// restart gone wrong), a partition can lose every replica, so registry entries
+// for actors that are still alive on survivors would be dropped permanently. To
+// stay correct under correlated failures the repair still runs once the number
+// of nodes that departed together reaches replicaCount.
+func (x *actorSystem) resyncAfterClusterEvent(eventType cluster.EventType, nodeAddress string) {
+	replicaCount := uint32(1)
+	if x.clusterConfig != nil {
+		replicaCount = x.clusterConfig.replicaCount
+	}
+
+	if replicaCount > 1 {
+		concurrent := x.recordDeparture(nodeAddress)
+		if concurrent < int(replicaCount) {
+			x.logger.Debugf("node=%s skipping registry resync after event=%s node=%s: replicaCount=%d lets olric re-replicate the departed partitions (%d concurrent departure(s))",
+				x.String(), eventType, nodeAddress, replicaCount, concurrent)
+			return
+		}
+		x.logger.Warnf("node=%s running registry resync after event=%s node=%s: %d concurrent departures reached replicaCount=%d, so olric backups may not have survived (hint: repairing registry entries for actors alive on survivors)",
+			x.String(), eventType, nodeAddress, concurrent, replicaCount)
+	}
+
 	x.logger.Debugf("node=%s resyncing actors after event=%s node=%s", x.String(), eventType, nodeAddress)
 
 	if err := x.resyncActors(); err != nil {
@@ -3118,41 +3565,18 @@ func (x *actorSystem) resyncAfterClusterEvent(eventType, nodeAddress string) {
 	}
 }
 
-// rebalancingLoop helps perform cluster rebalancing
-func (x *actorSystem) rebalancingLoop() {
-	for peerState := range x.rebalancingQueue {
-		ctx := context.Background()
-		if !x.shouldRebalance(peerState) {
-			x.logger.Debugf("node=%s found no peer=%s state to rebalance", x.name,
-				net.JoinHostPort(peerState.GetHost(), strconv.Itoa(int(peerState.GetPeersPort()))))
-			continue
-		}
-
-		// Wait for any in-flight relocation to finish before dispatching the
-		// next one, then claim the slot. This blocks on a condition variable
-		// instead of busy re-queueing the pending peer state, so the loop no
-		// longer spins a CPU core while a rebalance is running.
-		x.relocatingMu.Lock()
-		for x.relocating.Load() && !x.isStopping() {
-			x.relocatingCond.Wait()
-		}
-
-		stopping := x.isStopping()
-		if !stopping {
-			x.relocating.Store(true)
-		}
-
-		x.relocatingMu.Unlock()
-
-		if stopping {
-			return
-		}
-
-		message := &internalpb.Rebalance{PeerState: peerState}
-		if err := x.systemGuardian.Tell(ctx, x.relocator, message); err != nil {
-			x.logger.Errorf("failed to send rebalance to system guardian: %v (hint: check system guardian state)", err)
-		}
+// recordDeparture records nodeAddress as a recent departure and returns how many
+// distinct nodes have departed within the correlated-departure window (including
+// this one). It is the correlated-failure signal for resyncAfterClusterEvent.
+// It tolerates a nil tracker (some test doubles construct the system directly)
+// by treating the current departure as the only one.
+func (x *actorSystem) recordDeparture(nodeAddress string) int {
+	if x.recentDepartures == nil {
+		return 1
 	}
+
+	x.recentDepartures.Set(nodeAddress, types.Unit{})
+	return x.recentDepartures.ActiveLen()
 }
 
 // shouldRebalance returns true when the current node can perform the cluster rebalancing
@@ -3293,6 +3717,27 @@ func (x *actorSystem) getCluster() cluster.Cluster {
 	cluster := x.cluster
 	x.locker.RUnlock()
 	return cluster
+}
+
+// getNodeRoles returns the roles advertised by the local node. It returns nil
+// when clustering is disabled or no roles were configured, in which case the
+// node is treated as eligible for any role-less relocation target.
+func (x *actorSystem) getNodeRoles() []string {
+	if x.clusterNode == nil {
+		return nil
+	}
+
+	return x.clusterNode.Roles
+}
+
+// clusterReadTimeout returns the user-configured cluster read timeout, or
+// fallback when clustering is not configured or the value is unset.
+func (x *actorSystem) clusterReadTimeout(fallback time.Duration) time.Duration {
+	if x.clusterConfig != nil && x.clusterConfig.readTimeout > 0 {
+		return x.clusterConfig.readTimeout
+	}
+
+	return fallback
 }
 
 // actorAddress returns the actor path provided the actor name
@@ -3558,20 +4003,17 @@ func (x *actorSystem) shutdownCluster(ctx context.Context, actors []*PID, peerSt
 		// signal after draining buffered items. Not closing avoids the
 		// send-on-closed-channel race entirely.
 		x.clusterEnabled.Store(false)
-		// release the relocation slot and wake rebalancingLoop if it is blocked
-		// waiting for an in-flight relocation; it observes isStopping and exits.
-		x.relocatingMu.Lock()
-		x.relocating.Store(false)
-		x.relocatingCond.Broadcast()
-		x.relocatingMu.Unlock()
 		x.pubsubEnabled.Store(false)
-		x.relocatingLocker.Lock()
 
-		if x.rebalancingQueue != nil {
-			close(x.rebalancingQueue)
-		}
+		// drop any in-flight relocation jobs; their workers are stopped with
+		// the actor tree and the cluster store is already closed
+		x.relocationJobsLocker.Lock()
+		x.relocationJobs = make(map[string]*internalpb.PeerState)
+		x.relocationJobsLocker.Unlock()
 
-		x.relocatingLocker.Unlock()
+		x.peerRemotingPorts.Reset()
+		x.relocatingEndpoints.Reset()
+		x.recentDepartures.Reset()
 	}
 	return nil
 }
@@ -3836,6 +4278,10 @@ func (x *actorSystem) registerMetrics() error {
 			return err
 		}
 
+		if x.relocationMetric, err = metric.NewRelocationMetric(meter); err != nil {
+			return err
+		}
+
 		observeOptions := []otelmetric.ObserveOption{
 			otelmetric.WithAttributes(attribute.String("actor.system", x.Name())),
 		}
@@ -3864,6 +4310,109 @@ func (x *actorSystem) registerMetrics() error {
 		return err
 	}
 	return nil
+}
+
+// recordRelocationMetrics records the outcome of a single departed node's
+// relocation: the wall-clock duration plus how many actors and grains were
+// relocated versus failed. It is a no-op when OpenTelemetry metrics are not
+// enabled, so the relocation worker can call it unconditionally.
+func (x *actorSystem) recordRelocationMetrics(ctx context.Context, departed string, duration time.Duration, relocated, failed int) {
+	if x.relocationMetric == nil {
+		return
+	}
+
+	attrs := otelmetric.WithAttributes(
+		attribute.String("actor.system", x.Name()),
+		attribute.String("relocation.node", departed),
+	)
+
+	// An aborted relocation carries no meaningful wall-clock duration (nothing
+	// ran); recording its zero would skew the histogram toward instant
+	// rebalances, so only genuine durations are sampled.
+	if duration > 0 {
+		x.relocationMetric.Duration().Record(ctx, duration.Milliseconds(), attrs)
+	}
+
+	x.relocationMetric.Relocated().Add(ctx, int64(relocated), attrs)
+	x.relocationMetric.Failed().Add(ctx, int64(failed), attrs)
+}
+
+// reportAbortedRelocation performs the shared accounting for a relocation that
+// cannot run to completion: the leader could not enumerate peers, the worker
+// failed to spawn, or the worker died abnormally. It applies the same rule as
+// the normal per-item path so the same outage produces the same failure count
+// regardless of where it aborts:
+//
+//   - every relocatable actor is a failure (none were recreated);
+//   - relocation-disabled grains are lost with the node by design and are
+//     never reported;
+//   - eager grains are failures (none were reactivated);
+//   - lazy grains have their stale directory entry released locally so the next
+//     TellGrain/AskGrain re-activates them on a survivor; only a lazy grain
+//     whose release fails is a failure, because its entry still points at the
+//     dead node and the fast path does not self-heal a stale owner.
+//
+// It publishes the RelocationFailed event and records the relocation metrics.
+// Deleting the peer-state snapshot and releasing the relocation job stay with
+// the caller, since those steps differ between the abort sites.
+func (x *actorSystem) reportAbortedRelocation(ctx context.Context, pid *PID, peersAddress string, peerState *internalpb.PeerState, elapsed time.Duration, cause error) {
+	departedNode := address.FormatHostPort(peerState.GetHost(), int(peerState.GetRemotingPort()))
+
+	// The abort runs precisely when the cluster is already unhealthy (peers
+	// unreachable or the worker dead), and it executes inside the relocator's
+	// message handler, so the directory cleanup is bounded and fanned out
+	// rather than issued as unbounded sequential round trips: a grain whose
+	// release cannot complete within the budget is reported as failed instead
+	// of stalling the relocator's mailbox.
+	rctx, cancel := context.WithTimeout(ctx, abortedRelocationCleanupTimeout)
+	defer cancel()
+
+	var mu sync.Mutex
+	failedGrains := make(map[string]*internalpb.Grain)
+
+	eg := new(errgroup.Group)
+	eg.SetLimit(defaultRelocationConcurrency)
+
+	for id, grain := range peerState.GetGrains() {
+		if grain.GetDisableRelocation() {
+			continue
+		}
+
+		if grain.GetEagerRelocation() {
+			failedGrains[id] = grain
+			continue
+		}
+
+		eg.Go(func() error {
+			if err := x.releaseGrainForLazyRelocation(rctx, grain, departedNode); err != nil {
+				x.logger.Errorf("node=%s failed to release lazy grain=%s directory entry on aborted relocation: %v (hint: grain may be unreachable until re-registered; check cluster quorum)", x.String(), grain.GetGrainId().GetValue(), err)
+
+				mu.Lock()
+				failedGrains[id] = grain
+				mu.Unlock()
+			}
+			return nil
+		})
+	}
+
+	_ = eg.Wait()
+
+	publishRelocationFailed(pid, peersAddress, peerState.GetActors(), failedGrains, cause)
+	x.recordRelocationMetrics(ctx, peersAddress, elapsed, 0, len(peerState.GetActors())+len(failedGrains))
+}
+
+// recordRelocationHandoff records that a name-based send was buffered and
+// retried while its target was being relocated onto a surviving node. It is a
+// no-op when OpenTelemetry metrics are not enabled, so the send path can call
+// it unconditionally.
+func (x *actorSystem) recordRelocationHandoff(ctx context.Context) {
+	if x.relocationMetric == nil {
+		return
+	}
+
+	x.relocationMetric.Buffered().Add(ctx, 1, otelmetric.WithAttributes(
+		attribute.String("actor.system", x.Name()),
+	))
 }
 
 // preShutdown builds the peer state snapshot for cluster persistence.

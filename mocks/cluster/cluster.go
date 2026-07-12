@@ -174,6 +174,86 @@ func (_c *Cluster_Actors_Call) RunAndReturn(run func(ctx context.Context, timeou
 	return _c
 }
 
+// ActorsByHost provides a mock function for the type Cluster
+func (_mock *Cluster) ActorsByHost(ctx context.Context, host string, port int, timeout time.Duration) ([]*internalpb.Actor, error) {
+	ret := _mock.Called(ctx, host, port, timeout)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ActorsByHost")
+	}
+
+	var r0 []*internalpb.Actor
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, int, time.Duration) ([]*internalpb.Actor, error)); ok {
+		return returnFunc(ctx, host, port, timeout)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, int, time.Duration) []*internalpb.Actor); ok {
+		r0 = returnFunc(ctx, host, port, timeout)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*internalpb.Actor)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, int, time.Duration) error); ok {
+		r1 = returnFunc(ctx, host, port, timeout)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// Cluster_ActorsByHost_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ActorsByHost'
+type Cluster_ActorsByHost_Call struct {
+	*mock.Call
+}
+
+// ActorsByHost is a helper method to define mock.On call
+//   - ctx context.Context
+//   - host string
+//   - port int
+//   - timeout time.Duration
+func (_e *Cluster_Expecter) ActorsByHost(ctx any, host any, port any, timeout any) *Cluster_ActorsByHost_Call {
+	return &Cluster_ActorsByHost_Call{Call: _e.mock.On("ActorsByHost", ctx, host, port, timeout)}
+}
+
+func (_c *Cluster_ActorsByHost_Call) Run(run func(ctx context.Context, host string, port int, timeout time.Duration)) *Cluster_ActorsByHost_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 int
+		if args[2] != nil {
+			arg2 = args[2].(int)
+		}
+		var arg3 time.Duration
+		if args[3] != nil {
+			arg3 = args[3].(time.Duration)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+		)
+	})
+	return _c
+}
+
+func (_c *Cluster_ActorsByHost_Call) Return(actors []*internalpb.Actor, err error) *Cluster_ActorsByHost_Call {
+	_c.Call.Return(actors, err)
+	return _c
+}
+
+func (_c *Cluster_ActorsByHost_Call) RunAndReturn(run func(ctx context.Context, host string, port int, timeout time.Duration) ([]*internalpb.Actor, error)) *Cluster_ActorsByHost_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ClaimScheduleFire provides a mock function for the type Cluster
 func (_mock *Cluster) ClaimScheduleFire(ctx context.Context, key string, ttl time.Duration) error {
 	ret := _mock.Called(ctx, key, ttl)
@@ -233,6 +313,74 @@ func (_c *Cluster_ClaimScheduleFire_Call) Return(err error) *Cluster_ClaimSchedu
 }
 
 func (_c *Cluster_ClaimScheduleFire_Call) RunAndReturn(run func(ctx context.Context, key string, ttl time.Duration) error) *Cluster_ClaimScheduleFire_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CountActorsByHost provides a mock function for the type Cluster
+func (_mock *Cluster) CountActorsByHost(ctx context.Context, timeout time.Duration) (map[string]int, error) {
+	ret := _mock.Called(ctx, timeout)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CountActorsByHost")
+	}
+
+	var r0 map[string]int
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, time.Duration) (map[string]int, error)); ok {
+		return returnFunc(ctx, timeout)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, time.Duration) map[string]int); ok {
+		r0 = returnFunc(ctx, timeout)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]int)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, time.Duration) error); ok {
+		r1 = returnFunc(ctx, timeout)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// Cluster_CountActorsByHost_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CountActorsByHost'
+type Cluster_CountActorsByHost_Call struct {
+	*mock.Call
+}
+
+// CountActorsByHost is a helper method to define mock.On call
+//   - ctx context.Context
+//   - timeout time.Duration
+func (_e *Cluster_Expecter) CountActorsByHost(ctx any, timeout any) *Cluster_CountActorsByHost_Call {
+	return &Cluster_CountActorsByHost_Call{Call: _e.mock.On("CountActorsByHost", ctx, timeout)}
+}
+
+func (_c *Cluster_CountActorsByHost_Call) Run(run func(ctx context.Context, timeout time.Duration)) *Cluster_CountActorsByHost_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 time.Duration
+		if args[1] != nil {
+			arg1 = args[1].(time.Duration)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *Cluster_CountActorsByHost_Call) Return(stringToInt map[string]int, err error) *Cluster_CountActorsByHost_Call {
+	_c.Call.Return(stringToInt, err)
+	return _c
+}
+
+func (_c *Cluster_CountActorsByHost_Call) RunAndReturn(run func(ctx context.Context, timeout time.Duration) (map[string]int, error)) *Cluster_CountActorsByHost_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -661,6 +809,86 @@ func (_c *Cluster_Grains_Call) RunAndReturn(run func(ctx context.Context, timeou
 	return _c
 }
 
+// GrainsByHost provides a mock function for the type Cluster
+func (_mock *Cluster) GrainsByHost(ctx context.Context, host string, port int, timeout time.Duration) ([]*internalpb.Grain, error) {
+	ret := _mock.Called(ctx, host, port, timeout)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GrainsByHost")
+	}
+
+	var r0 []*internalpb.Grain
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, int, time.Duration) ([]*internalpb.Grain, error)); ok {
+		return returnFunc(ctx, host, port, timeout)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, int, time.Duration) []*internalpb.Grain); ok {
+		r0 = returnFunc(ctx, host, port, timeout)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*internalpb.Grain)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, int, time.Duration) error); ok {
+		r1 = returnFunc(ctx, host, port, timeout)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// Cluster_GrainsByHost_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GrainsByHost'
+type Cluster_GrainsByHost_Call struct {
+	*mock.Call
+}
+
+// GrainsByHost is a helper method to define mock.On call
+//   - ctx context.Context
+//   - host string
+//   - port int
+//   - timeout time.Duration
+func (_e *Cluster_Expecter) GrainsByHost(ctx any, host any, port any, timeout any) *Cluster_GrainsByHost_Call {
+	return &Cluster_GrainsByHost_Call{Call: _e.mock.On("GrainsByHost", ctx, host, port, timeout)}
+}
+
+func (_c *Cluster_GrainsByHost_Call) Run(run func(ctx context.Context, host string, port int, timeout time.Duration)) *Cluster_GrainsByHost_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 int
+		if args[2] != nil {
+			arg2 = args[2].(int)
+		}
+		var arg3 time.Duration
+		if args[3] != nil {
+			arg3 = args[3].(time.Duration)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+		)
+	})
+	return _c
+}
+
+func (_c *Cluster_GrainsByHost_Call) Return(grains []*internalpb.Grain, err error) *Cluster_GrainsByHost_Call {
+	_c.Call.Return(grains, err)
+	return _c
+}
+
+func (_c *Cluster_GrainsByHost_Call) RunAndReturn(run func(ctx context.Context, host string, port int, timeout time.Duration) ([]*internalpb.Grain, error)) *Cluster_GrainsByHost_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // IsLeader provides a mock function for the type Cluster
 func (_mock *Cluster) IsLeader(ctx context.Context) bool {
 	ret := _mock.Called(ctx)
@@ -820,6 +1048,50 @@ func (_c *Cluster_JobKey_Call) Return(bytes []byte, err error) *Cluster_JobKey_C
 }
 
 func (_c *Cluster_JobKey_Call) RunAndReturn(run func(ctx context.Context, jobID string) ([]byte, error)) *Cluster_JobKey_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// LastRebalanceEvent provides a mock function for the type Cluster
+func (_mock *Cluster) LastRebalanceEvent() time.Time {
+	ret := _mock.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for LastRebalanceEvent")
+	}
+
+	var r0 time.Time
+	if returnFunc, ok := ret.Get(0).(func() time.Time); ok {
+		r0 = returnFunc()
+	} else {
+		r0 = ret.Get(0).(time.Time)
+	}
+	return r0
+}
+
+// Cluster_LastRebalanceEvent_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LastRebalanceEvent'
+type Cluster_LastRebalanceEvent_Call struct {
+	*mock.Call
+}
+
+// LastRebalanceEvent is a helper method to define mock.On call
+func (_e *Cluster_Expecter) LastRebalanceEvent() *Cluster_LastRebalanceEvent_Call {
+	return &Cluster_LastRebalanceEvent_Call{Call: _e.mock.On("LastRebalanceEvent")}
+}
+
+func (_c *Cluster_LastRebalanceEvent_Call) Run(run func()) *Cluster_LastRebalanceEvent_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *Cluster_LastRebalanceEvent_Call) Return(time1 time.Time) *Cluster_LastRebalanceEvent_Call {
+	_c.Call.Return(time1)
+	return _c
+}
+
+func (_c *Cluster_LastRebalanceEvent_Call) RunAndReturn(run func() time.Time) *Cluster_LastRebalanceEvent_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -521,5 +521,6 @@ func wireGrain(identity *GrainIdentity, config *grainConfig, host string, port i
 		ActivationRetries: config.initMaxRetries.Load(),
 		MailboxCapacity:   new(config.capacity),
 		DisableRelocation: config.disableRelocation,
+		EagerRelocation:   config.eagerRelocation,
 	}, nil
 }

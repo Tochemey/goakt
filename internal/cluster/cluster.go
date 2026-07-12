@@ -39,6 +39,7 @@ import (
 	"github.com/tochemey/olric/hasher"
 	"github.com/tochemey/olric/pkg/storage"
 	"go.uber.org/atomic"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/tochemey/goakt/v4/discovery"
 	"github.com/tochemey/goakt/v4/hash"
@@ -59,6 +60,21 @@ const (
 	GrainsRoundRobinKey     = "grains_rr_index"
 	rebalanceReasonNodeLeft = "node-left"
 	rebalanceReasonNodeJoin = "node-join"
+	// actorScanConcurrency bounds how many actor records are fetched in parallel
+	// when scanning the registry (Actors, CountActorsByHost). The registry scan
+	// otherwise issues one sequential network Get per actor key, which times out
+	// the scan budget on large registries; fanning the Gets out keeps the scan
+	// within budget while capping the burst of concurrent reads.
+	actorScanConcurrency = 16
+	// nodeLeftEmitTimeout bounds how long a tracked node departure may wait for
+	// its rebalance epoch to complete before the NodeLeft event is emitted
+	// anyway. The epoch gate orders NodeLeft after olric's partition promotion,
+	// but it is an ordering optimization, not a correctness requirement:
+	// memberlist has already confirmed the death, and after an abrupt kill
+	// olric's rebalance can wedge (endless fragment moves to the dead member),
+	// which would otherwise suppress the NodeLeft forever and, with it, the
+	// crashed node's relocation.
+	nodeLeftEmitTimeout = 30 * time.Second
 )
 
 type recordNamespace string
@@ -102,6 +118,15 @@ type Cluster interface {
 	ActorExists(ctx context.Context, actorName string) (bool, error)
 	// Actors enumerates all actors tracked by the cluster.
 	Actors(ctx context.Context, timeout time.Duration) ([]*internalpb.Actor, error)
+	// ActorsByHost streams the registry and returns only the actors owned by the
+	// given host:port. It filters during the scan so it never materializes the
+	// whole registry to recover a single node's records.
+	ActorsByHost(ctx context.Context, host string, port int, timeout time.Duration) ([]*internalpb.Actor, error)
+	// CountActorsByHost returns the number of registered actors per owning node,
+	// keyed by the actor address's raw "host:port". It streams the registry and
+	// discards each record after counting, so its peak memory is proportional to
+	// the number of distinct nodes rather than the number of actors.
+	CountActorsByHost(ctx context.Context, timeout time.Duration) (map[string]int, error)
 	// PutGrain records grain metadata in the cluster state.
 	PutGrain(ctx context.Context, grain *internalpb.Grain) error
 	// GetGrain fetches grain metadata for the provided identity.
@@ -112,6 +137,10 @@ type Cluster interface {
 	GrainExists(ctx context.Context, identity string) (bool, error)
 	// Grains enumerates all grains tracked by the cluster.
 	Grains(ctx context.Context, timeout time.Duration) ([]*internalpb.Grain, error)
+	// GrainsByHost streams the registry and returns only the grains owned by the
+	// given host:port, filtering during the scan rather than building the full
+	// grain set first.
+	GrainsByHost(ctx context.Context, host string, port int, timeout time.Duration) ([]*internalpb.Grain, error)
 	// LookupKind reads the value registered for the provided actor kind.
 	LookupKind(ctx context.Context, kind string) (string, error)
 	// PutKind registers an actor kind mapping.
@@ -128,6 +157,11 @@ type Cluster interface {
 	GetPartition(actorName string) uint64
 	// IsRunning reports whether the cluster engine is currently running.
 	IsRunning() bool
+	// LastRebalanceEvent returns the time of the most recent olric partition
+	// rebalance event (start or complete) observed by this node, or the zero
+	// time when none was observed. Callers use it to wait for the post-departure
+	// partition repair to go quiet before scanning the registry.
+	LastRebalanceEvent() time.Time
 	// ClaimScheduleFire atomically claims the exclusive right to deliver one trigger tick of
 	// a cluster-wide cron schedule. It returns nil for the winning caller and
 	// ErrScheduleFireClaimed for every other caller racing for the same key; see the
@@ -196,6 +230,7 @@ type cluster struct {
 	rebalanceLeftLatestEpoch uint64
 	rebalanceStartSeen       map[uint64]struct{}
 	rebalanceCompleteSeen    map[uint64]struct{}
+	lastRebalanceEventNanos  atomic.Int64
 
 	// lastCoordinatorAddr caches the coordinator's peers address to detect
 	// leadership changes. It is seeded (non-empty) in Start before the consume
@@ -436,6 +471,18 @@ func (x *cluster) ActorExists(ctx context.Context, actorName string) (bool, erro
 
 // Actors scans the unified map and returns all registered actors.
 func (x *cluster) Actors(ctx context.Context, timeout time.Duration) ([]*internalpb.Actor, error) {
+	return collectScan(ctx, x, timeout, x.scanActors, nil)
+}
+
+// CountActorsByHost scans the unified map and tallies registered actors per
+// owning node, keyed by the actor address's raw "host:port".
+//
+// Unlike Actors it never materializes the full actor set: each record is
+// decoded only to read its address and is then discarded, so peak memory is
+// proportional to the number of distinct hosts (plus the bounded set of records
+// in flight), not the number of actors. This is the load signal the leader uses
+// to seed relocation placement, so it must stay cheap even for large registries.
+func (x *cluster) CountActorsByHost(ctx context.Context, timeout time.Duration) (map[string]int, error) {
 	if !x.running.Load() {
 		return nil, ErrEngineNotRunning
 	}
@@ -446,45 +493,23 @@ func (x *cluster) Actors(ctx context.Context, timeout time.Duration) ([]*interna
 	x.mu.RLock()
 	defer x.mu.RUnlock()
 
-	scanner, err := x.dmap.Scan(ctx)
-	if err != nil {
+	var (
+		mu     sync.Mutex
+		counts = make(map[string]int)
+	)
+	if err := x.scanActors(ctx, func(actor *internalpb.Actor) {
+		hostPort, ok := address.HostPortOf(actor.GetAddress())
+		if !ok {
+			return
+		}
+		mu.Lock()
+		counts[hostPort]++
+		mu.Unlock()
+	}); err != nil {
 		return nil, err
 	}
-	defer scanner.Close()
 
-	rrKey := composeKey(namespaceActors, ActorsRoundRobinKey)
-	actors := make([]*internalpb.Actor, 0)
-	for scanner.Next() {
-		key := scanner.Key()
-		if !hasNamespace(key, namespaceActors) {
-			continue
-		}
-		if key == rrKey {
-			// skip the round-robin counter entry which is not actor metadata
-			continue
-		}
-
-		resp, err := x.dmap.Get(ctx, key)
-		if err != nil {
-			if errors.Is(err, olric.ErrKeyNotFound) {
-				continue
-			}
-			return nil, err
-		}
-
-		value, err := resp.Byte()
-		if err != nil {
-			return nil, err
-		}
-
-		actor, err := decode(value)
-		if err != nil {
-			return nil, err
-		}
-		actors = append(actors, actor)
-	}
-
-	return actors, nil
+	return counts, nil
 }
 
 // PutGrain stores the provided grain metadata and refreshes the peer state.
@@ -539,6 +564,7 @@ func PutGrainIfAbsent(ctx context.Context, cl Cluster, grain *internalpb.Grain) 
 	if err != nil {
 		return err
 	}
+
 	if exists {
 		return ErrGrainAlreadyExists
 	}
@@ -629,55 +655,29 @@ func (x *cluster) RemoveGrain(ctx context.Context, identity string) error {
 
 // Grains scans the map and returns all registered grains.
 func (x *cluster) Grains(ctx context.Context, timeout time.Duration) ([]*internalpb.Grain, error) {
-	if !x.running.Load() {
-		return nil, ErrEngineNotRunning
-	}
+	return collectScan(ctx, x, timeout, x.scanGrains, nil)
+}
 
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
+// ActorsByHost streams the registry and returns only the actors owned by the
+// given host:port (an actor address's raw endpoint). It never materializes the
+// full actor set, so recovering a single crashed node's records after a
+// departure does not spike memory proportional to the whole cluster registry.
+func (x *cluster) ActorsByHost(ctx context.Context, host string, port int, timeout time.Duration) ([]*internalpb.Actor, error) {
+	target := address.FormatHostPort(host, port)
+	return collectScan(ctx, x, timeout, x.scanActors, func(actor *internalpb.Actor) bool {
+		hostPort, ok := address.HostPortOf(actor.GetAddress())
+		return ok && hostPort == target
+	})
+}
 
-	x.mu.RLock()
-	defer x.mu.RUnlock()
-
-	scanner, err := x.dmap.Scan(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer scanner.Close()
-
-	rrKey := composeKey(namespaceGrains, GrainsRoundRobinKey)
-	grains := make([]*internalpb.Grain, 0)
-	for scanner.Next() {
-		key := scanner.Key()
-		if !hasNamespace(key, namespaceGrains) {
-			continue
-		}
-		if key == rrKey {
-			// skip the round-robin counter entry which is not grain metadata
-			continue
-		}
-
-		resp, err := x.dmap.Get(ctx, key)
-		if err != nil {
-			if errors.Is(err, olric.ErrKeyNotFound) {
-				continue
-			}
-			return nil, err
-		}
-
-		value, err := resp.Byte()
-		if err != nil {
-			return nil, err
-		}
-
-		grain, err := decodeGrain(value)
-		if err != nil {
-			return nil, err
-		}
-		grains = append(grains, grain)
-	}
-
-	return grains, nil
+// GrainsByHost streams the registry and returns only the grains owned by the
+// given host:port. Like ActorsByHost it discards non-matching records during
+// the scan instead of building the full grain set first.
+func (x *cluster) GrainsByHost(ctx context.Context, host string, port int, timeout time.Duration) ([]*internalpb.Grain, error) {
+	port32 := int32(port) // nolint
+	return collectScan(ctx, x, timeout, x.scanGrains, func(grain *internalpb.Grain) bool {
+		return grain.GetHost() == host && grain.GetPort() == port32
+	})
 }
 
 // LookupKind fetches the value registered for the provided actor kind.
@@ -893,6 +893,17 @@ func (x *cluster) NextRoundRobinValue(ctx context.Context, key string) (int, err
 	}
 
 	return next, nil
+}
+
+// LastRebalanceEvent returns the time of the most recent olric partition
+// rebalance event observed by this node, or the zero time when none was
+// observed.
+func (x *cluster) LastRebalanceEvent() time.Time {
+	nanos := x.lastRebalanceEventNanos.Load()
+	if nanos == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, nanos)
 }
 
 // IsRunning exposes whether the cluster engine has been started.
@@ -1263,6 +1274,12 @@ func (x *cluster) trackNodeLeftEvent(ev events.NodeLeftEvent) {
 	}
 	x.nodeLeftTimestamps[ev.NodeLeft] = ev.Timestamp
 
+	// safety net: emit after a bounded wait when the departure's rebalance
+	// epoch never completes (see nodeLeftEmitTimeout)
+	time.AfterFunc(nodeLeftEmitTimeout, func() {
+		x.emitOverdueNodeLeft(ev.NodeLeft)
+	})
+
 	if x.rebalanceLeftLatestEpoch != 0 {
 		x.rebalanceLeftNodeEpochs[ev.NodeLeft] = x.rebalanceLeftLatestEpoch
 		if _, complete := x.rebalanceCompleteSeen[x.rebalanceLeftLatestEpoch]; complete {
@@ -1271,8 +1288,27 @@ func (x *cluster) trackNodeLeftEvent(ev events.NodeLeftEvent) {
 	}
 }
 
+// emitOverdueNodeLeft emits the NodeLeft event for a departure still pending
+// after nodeLeftEmitTimeout, meaning its rebalance epoch never completed. A
+// departure already emitted through the normal epoch-complete path is a no-op.
+func (x *cluster) emitOverdueNodeLeft(node string) {
+	x.eventsLock.Lock()
+	defer x.eventsLock.Unlock()
+
+	timestamp, pending := x.nodeLeftTimestamps[node]
+	if !pending {
+		return
+	}
+
+	x.logger.Warnf("emitting overdue NodeLeft for node=%s: its rebalance epoch never completed (hint: olric partition repair may be wedged after an abrupt departure)", node)
+	x.emitNodeLeftLocked(node, timestamp)
+	delete(x.nodeLeftTimestamps, node)
+	delete(x.rebalanceLeftNodeEpochs, node)
+}
+
 // processRebalanceStart records rebalance epochs tied to join/leave triggers.
 func (x *cluster) processRebalanceStart(ev events.RebalanceStartEvent) {
+	x.lastRebalanceEventNanos.Store(time.Now().UnixNano())
 	if ev.Reason != rebalanceReasonNodeLeft && ev.Reason != rebalanceReasonNodeJoin {
 		return
 	}
@@ -1306,6 +1342,7 @@ func (x *cluster) processRebalanceStart(ev events.RebalanceStartEvent) {
 
 // processRebalanceComplete emits pending NodeLeft and NodeJoined events when the rebalance epoch completes.
 func (x *cluster) processRebalanceComplete(ev events.RebalanceCompleteEvent) {
+	x.lastRebalanceEventNanos.Store(time.Now().UnixNano())
 	x.eventsLock.Lock()
 	defer x.eventsLock.Unlock()
 
@@ -1523,4 +1560,125 @@ func (x *cluster) deleteRecord(ctx context.Context, namespace recordNamespace, k
 
 	_, err := x.dmap.Delete(ctx, composeKey(namespace, key))
 	return err
+}
+
+// scanActors streams every registered actor record and invokes visit for each,
+// decoded exactly once. It is the shared scan used by Actors, ActorsByHost and
+// CountActorsByHost so all agree on which keys are actor metadata. See
+// scanNamespace for the concurrency contract on visit.
+//
+// Callers must hold x.mu (read lock) for the duration of the scan.
+func (x *cluster) scanActors(ctx context.Context, visit func(*internalpb.Actor)) error {
+	return scanNamespace(ctx, x, namespaceActors, ActorsRoundRobinKey, decode, visit)
+}
+
+// scanGrains streams every registered grain record and invokes visit for each,
+// decoded exactly once. It is the grain counterpart of scanActors; see
+// scanNamespace for the concurrency contract on visit.
+//
+// Callers must hold x.mu (read lock) for the duration of the scan.
+func (x *cluster) scanGrains(ctx context.Context, visit func(*internalpb.Grain)) error {
+	return scanNamespace(ctx, x, namespaceGrains, GrainsRoundRobinKey, decodeGrain, visit)
+}
+
+// scanNamespace streams every record in the given namespace and invokes visit
+// for each, decoded exactly once. It is the single scan protocol behind the
+// actor and grain registry scans, so both agree on which keys are record
+// metadata: foreign namespaces and the namespace's round-robin counter entry
+// (rrName), which is not record metadata, are skipped.
+//
+// The registry can hold thousands of entries, so the per-key Gets are fanned out
+// with bounded concurrency (actorScanConcurrency) instead of issued one at a
+// time: a sequential scan otherwise blows the caller's timeout budget on large
+// registries. Keys are collected up front so the scanner is released before the
+// Gets run. visit may be called from multiple goroutines concurrently, so
+// callers must synchronize any shared state they mutate; the callback order is
+// unspecified.
+//
+// Callers must hold x.mu (read lock) for the duration of the scan.
+func scanNamespace[T any](ctx context.Context, x *cluster, namespace recordNamespace, rrName string, decodeRecord func([]byte) (T, error), visit func(T)) error {
+	scanner, err := x.dmap.Scan(ctx)
+	if err != nil {
+		return err
+	}
+
+	rrKey := composeKey(namespace, rrName)
+	keys := make([]string, 0)
+
+	for scanner.Next() {
+		key := scanner.Key()
+		if !hasNamespace(key, namespace) || key == rrKey {
+			continue
+		}
+		keys = append(keys, key)
+	}
+
+	scanner.Close()
+
+	eg, egctx := errgroup.WithContext(ctx)
+	eg.SetLimit(actorScanConcurrency)
+
+	for _, key := range keys {
+		eg.Go(func() error {
+			resp, err := x.dmap.Get(egctx, key)
+			if err != nil {
+				if errors.Is(err, olric.ErrKeyNotFound) {
+					// the entry was removed between the scan and this Get; skip it
+					return nil
+				}
+				return err
+			}
+
+			value, err := resp.Byte()
+			if err != nil {
+				return err
+			}
+
+			record, err := decodeRecord(value)
+			if err != nil {
+				return err
+			}
+
+			visit(record)
+			return nil
+		})
+	}
+
+	return eg.Wait()
+}
+
+// collectScan runs scan under the cluster's shared read guards (engine-running
+// check, caller timeout, membership read lock) and collects every record the
+// keep filter accepts; a nil keep collects everything. It is the shared shell
+// of the slice-returning registry scans (Actors, ActorsByHost, Grains,
+// GrainsByHost) so the guard-and-collect protocol lives in one place.
+func collectScan[T any](ctx context.Context, x *cluster, timeout time.Duration, scan func(context.Context, func(T)) error, keep func(T) bool) ([]T, error) {
+	if !x.running.Load() {
+		return nil, ErrEngineNotRunning
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	x.mu.RLock()
+	defer x.mu.RUnlock()
+
+	var (
+		mu  sync.Mutex
+		out = make([]T, 0)
+	)
+
+	if err := scan(ctx, func(record T) {
+		if keep != nil && !keep(record) {
+			return
+		}
+
+		mu.Lock()
+		out = append(out, record)
+		mu.Unlock()
+	}); err != nil {
+		return nil, err
+	}
+
+	return out, nil
 }

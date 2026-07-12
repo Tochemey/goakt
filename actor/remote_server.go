@@ -32,6 +32,7 @@ import (
 	"strconv"
 	"time"
 
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -1414,6 +1415,58 @@ func (x *actorSystem) persistPeerStateHandler(ctx context.Context, conn inet.Con
 	return new(internalpb.PersistPeerStateResponse), nil
 }
 
+// relocateBatchHandler handles RelocateBatch requests over the proto TCP transport.
+// It relocates one share of a departed node's actors and grains on this node in a
+// single round trip during cluster rebalancing: actors and eager grains are
+// recreated, lazy grains (the default, dispatched on the grain's eager_relocation
+// flag) only have their directory entry released so they re-activate on next use.
+// Item failures are collected and reported per item in the response; only
+// batch-level preconditions (malformed request, remoting or clustering disabled)
+// produce an error response.
+func (x *actorSystem) relocateBatchHandler(ctx context.Context, _ inet.Connection, req proto.Message) (proto.Message, error) {
+	request, ok := req.(*internalpb.RelocateBatchRequest)
+	if !ok {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, errors.New("invalid request type")), nil
+	}
+
+	if !x.remotingEnabled.Load() {
+		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrRemotingDisabled), nil
+	}
+
+	if !x.clusterEnabled.Load() {
+		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrClusterDisabled), nil
+	}
+
+	// Extract context metadata and apply context propagation if configured.
+	var err error
+	ctx, err = x.extractContextWithPropagator(ctx)
+	if err != nil {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
+	}
+
+	// Enforce the client-propagated deadline within this handler's scope.
+	ctx, cancel := deadlineContext(ctx)
+	defer cancel()
+
+	departedNode := request.GetDepartedNode()
+	logger := x.logger
+	logger.Debugf("node=%s relocating batch from departed node=%s: actors=%d grains=%d",
+		x.PeersAddress(), departedNode, len(request.GetActors()), len(request.GetGrains()))
+
+	failures := &relocationFailures{}
+
+	// Goroutines never return an error so a failing item cannot cancel its
+	// siblings; failures are collected per item instead. The eager/lazy dispatch
+	// is the same shared rule the leader applies to its own share (see
+	// enqueueRelocation), so leader-side and peer-side behavior cannot diverge.
+	eg := new(errgroup.Group)
+	eg.SetLimit(defaultRelocationConcurrency)
+	enqueueRelocation(ctx, eg, x, logger, departedNode, request.GetActors(), request.GetGrains(), failures.record)
+	_ = eg.Wait()
+
+	return &internalpb.RelocateBatchResponse{Failures: failures.items()}, nil
+}
+
 // getNodeMetricHandler handles GetNodeMetric requests over the proto TCP transport.
 // It returns the node metric (actor + grain load) for this node.
 func (x *actorSystem) getNodeMetricHandler(_ context.Context, _ inet.Connection, req proto.Message) (proto.Message, error) {
@@ -1505,6 +1558,7 @@ func (x *actorSystem) protoServerOptions() []inet.ProtoServerOption {
 		inet.WithProtoHandler("internalpb.RemoteTellGrainRequest", x.remoteTellGrainHandler),
 		inet.WithProtoHandler("internalpb.RemoteActivateGrainRequest", x.remoteActivateGrainHandler),
 		inet.WithProtoHandler("internalpb.PersistPeerStateRequest", x.persistPeerStateHandler),
+		inet.WithProtoHandler("internalpb.RelocateBatchRequest", x.relocateBatchHandler),
 		inet.WithProtoHandler("internalpb.GetNodeMetricRequest", x.getNodeMetricHandler),
 		inet.WithProtoHandler("internalpb.GetKindsRequest", x.getKindsHandler),
 	}

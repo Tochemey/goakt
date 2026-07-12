@@ -163,6 +163,8 @@ Everything starts and ends here. The `ActorSystem` is the entry point; `PID` is 
 | `dead_letter.go`                 | Dead-letter actor: captures messages sent to stopped/non-existent actors.                                                                                                                                   |
 | `death_watch.go`                 | System actor that cleans up dead actors: removes them from the actor tree and cluster registry on termination.                                                                                              |
 | `relocator.go`                   | Handles actor relocation when a cluster node departs.                                                                                                                                                       |
+| `relocation_worker.go`           | Short-lived worker that relocates one departed node's actors and grains across survivors.                                                                                                                   |
+| `relocation_handoff.go`          | Masks the relocation handoff window: buffers and retries name-based sends whose target is being relocated.                                                                                                  |
 | `remote_server.go`               | TCP server side of remoting, hosted inside the actor system.                                                                                                                                                |
 | `root_guardian.go`               | Root of the actor hierarchy tree.                                                                                                                                                                           |
 | `system_guardian.go`             | Parent of all internal system actors.                                                                                                                                                                       |
@@ -542,31 +544,82 @@ actorSystem.TellGrain / AskGrain(identity, message)
 ```
 memberlist detects node departure
   └─ cluster emits NodeLeft event
-  └─ every node: resync local actors/grains in registry, trigger DC reconciliation
+  └─ every node: repair the registry when replicaCount <= 1 (re-put local
+     actors/grains, since a replica-count-of-1 partition owned by the departed
+     node is otherwise lost); with replicaCount > 1 Olric normally promotes the
+     backups itself, so the re-put is skipped as redundant. The repair still
+     runs once replicaCount nodes depart within the correlated-departure window
+     (an AZ/rack outage), since Olric only tolerates replicaCount-1 simultaneous
+     losses and a partition can then lose every replica. That window is set to a
+     small multiple of Olric's routing-table refresh (a minute by default) so
+     re-replication has time to settle; it is intentionally biased long, since
+     too long only costs redundant idempotent re-puts while too short risks
+     losing entries that survive on other nodes. Then trigger DC reconciliation.
+     (NodeJoined does NOT resync: Olric migrates partition data to the joining
+     node, so re-putting would be redundant. Tradeoff: at replicaCount=1 a
+     migration disrupted mid-flight can drop entries that are then only repaired
+     on the next departure; run replicaCount>1 to remove that gap.)
+  └─ every node also refreshes the peers-address to remoting-port cache on
+     NodeJoined (and seeds it at startup) so a crashed node can be resolved later
   └─ leader node only (non-leaders just clean up the departed peer's cached state):
        ├─ check relocation is enabled
-       ├─ deduplicate via rebalancedNodes set (process each departure at most once)
        ├─ fetch departed node's PeerState from cluster store (actors + grains it owned)
-       ├─ enqueue PeerState into rebalancingQueue
-       └─ rebalancingLoop picks it up:
-            ├─ set relocating flag (only one rebalance at a time)
-            ├─ send Rebalance message to the relocator actor
-            └─ relocator.Relocate():
-                 ├─ allocateActors(): partition actors among leader + peers
-                 │    ├─ singleton actors → always go to the leader
-                 │    ├─ remaining actors → split evenly across all nodes
-                 │    └─ skip: system actors, non-relocatable actors
-                 ├─ allocateGrains(): partition grains evenly across all nodes
-                 │    └─ skip: system grains, grains with relocation disabled
-                 ├─ run leader + peer relocation in parallel (errgroup):
-                 │    ├─ leader shares: recreate locally (Spawn or SpawnSingleton)
-                 │    │    └─ remove stale entry → instantiate actor → apply
-                 │    │       original options (supervisor, passivation, reentrancy,
-                 │    │       dependencies, stashing, role) → register new location
-                 │    └─ peer shares: spawn remotely via RemoteSpawn / RemoteActivateGrain
-                 │         └─ remove stale entry → send spawn request to target node
-                 │            → target registers new location
-                 └─ send RebalanceComplete back to the actor system
+       │    └─ on a miss (crash: no graceful snapshot) derive the set from the
+       │       replicated registry instead, via deriveRelocationSetFromRegistry()
+       │       scans cluster actors/grains and keeps those whose host:remotingPort
+       │       matches the departed node (remoting port resolved from the cache)
+       ├─ shouldRebalance(): skip when there is nothing to relocate
+       ├─ beginRelocation(address, peerState): register the in-flight job keyed by
+       │    departed address. A duplicate NodeLeft for an address whose relocation
+       │    is still in flight is ignored; once it completes, a later departure of
+       │    the same address is rebalanced again.
+       └─ Tell the relocator a Rebalance message (its mailbox is the queue, so a
+          burst of departures never blocks the cluster events loop):
+            └─ relocator.startWorker(): spawn one short-lived relocation worker per
+               departed node (distinct nodes relocate concurrently), watch it, then
+               hand it the Rebalance order.
+                 └─ relocationWorker.relocate():
+                      ├─ targetLoads(): scan the replicated registry once and count
+                      │    live actors per surviving node, seeding load-aware placement
+                      │    (best-effort; falls back to an even split on scan failure)
+                      ├─ allocateActors(): partition actors among leader + peers,
+                      │    seeded with each target's current occupancy so the busiest
+                      │    survivor is not over-assigned
+                      │    ├─ singleton actors → always go to the leader
+                      │    ├─ role-constrained actors → least-loaded node advertising
+                      │    │    the role; if none survives, recorded as a relocation
+                      │    │    failure instead of being dropped
+                      │    ├─ remaining actors → least-loaded node across all targets
+                      │    └─ skip: system actors, non-relocatable actors
+                      ├─ allocateGrains(): partition grains among leader + peers,
+                      │    so even the lazy directory cleanup fans out instead of
+                      │    running entirely on the leader. Each target dispatches
+                      │    on the grain's own relocation intent:
+                      │    ├─ lazy (default): release the directory entry only;
+                      │    │    the grain re-activates on next use (no upfront OnActivate)
+                      │    ├─ eager (WithGrainEagerRelocation): recreate up front, like actors
+                      │    └─ skip: system grains, grains with relocation disabled
+                      ├─ run leader + peer relocation in parallel (bounded errgroup):
+                      │    ├─ leader shares: recreate locally (Spawn or SpawnSingleton)
+                      │    │    └─ gate on stale entry (still points at departed node)
+                      │    │       → instantiate actor → apply original options
+                      │    │       (supervisor, passivation, reentrancy, dependencies,
+                      │    │       stashing, role) → register new location
+                      │    └─ peer shares: hand each peer its whole share in batched
+                      │         RelocateBatch RPCs (≤ 500 items/request, two attempts
+                      │         each). An unreachable peer's unsent remainder is moved
+                      │         once to the next surviving peer; the target recreates or
+                      │         releases items and reports per-item failures (unsent
+                      │         lazy releases self-heal, so they are never reported).
+                      ├─ record relocation metrics (duration histogram, relocated and
+                      │    failed counts) when OpenTelemetry metrics are enabled
+                      ├─ publish a single RelocationFailed event listing exactly the
+                      │    actor addresses and grain identities that could not be moved
+                      └─ finish(): delete departed node's PeerState from the cluster
+                           store, endRelocation(address) to release the job, then stop.
+                           A worker that dies abnormally (panic → StopDirective) leaves
+                           the job registered; the relocator's Terminated handler then
+                           aborts and reports it.
 ```
 
 ---
@@ -881,16 +934,19 @@ There is no automatic split-brain resolution; the framework relies on quorum to 
 When Memberlist detects a node departure:
 
 1. The cluster emits a `NodeLeft` event.
-2. The **leader node** fetches the departed node's peer state (list of actors and grains it owned) from the cluster store.
-3. The leader sends a `Rebalance` message to the relocator actor.
-4. The relocator distributes the departed node's actors and grains across remaining nodes:
+2. The **leader node** fetches the departed node's peer state (list of actors and grains it owned) from the cluster store. On a **graceful** shutdown this is the snapshot the departing node replicated to its oldest peers. On a **crash** there is no snapshot, so the leader instead **derives the relocation set from the replicated registry** (`deriveRelocationSetFromRegistry`): it streams the registry filtered to the departed node's `host:remotingPort` (`ActorsByHost` / `GrainsByHost`) so it recovers only that node's records without materializing the whole cluster registry. The remoting port is resolved from a peers-address → remoting-port cache that every node keeps (seeded at startup, refreshed on `NodeJoined`), because the `NodeLeft` event only carries the peers address.
+3. The leader registers an in-flight relocation job keyed by the departed address (`beginRelocation`), so duplicate `NodeLeft` events for an address whose relocation is still running are ignored, then sends a `Rebalance` message to the relocator actor.
+4. The relocator spawns one short-lived **relocation worker per departed node**, so relocations of distinct nodes proceed concurrently. Each worker distributes the departed node's actors and grains across remaining nodes:
    - Singleton actors always move to the leader.
-   - Non-singleton, relocatable actors are spread across peers.
-   - Grains are distributed evenly.
-5. For each relocated actor/grain: the stale registry entry is removed, the actor is re-spawned on the target node, and the new location is registered.
-6. A `RebalanceComplete` event is emitted.
+   - Non-singleton, relocatable actors are spread across the least-loaded eligible nodes. An actor spawned with a **role** only lands on nodes advertising that role; if none survive, it is reported as a relocation failure instead of being silently dropped.
+   - Grains are distributed evenly; each target then dispatches on the grain's own relocation intent (eager grains are reactivated up front, lazy grains only have their directory entry released so they re-activate on next use).
+5. The worker handles the leader's share locally and hands each peer its whole share in batched `RelocateBatch` requests (at most 500 items per request, two attempts each before the peer is considered unreachable). An unreachable peer's unsent remainder is moved once to the next surviving peer.
+6. Failures are isolated per item: a failing actor, grain, or peer never aborts the rest of the rebalance. The items that could not be relocated are reported in a single `RelocationFailed` event on the event stream.
+7. On completion the worker deletes the departed node's peer state from the cluster store, releases the relocation job (`endRelocation`), and stops. A worker that dies abnormally (a panic stops it) leaves its job registered, and the relocator's `Terminated` handler aborts and reports the relocation.
 
 Actors flagged as non-relocatable and system actors are skipped.
+
+**Masking the handoff window.** While the leader recreates the departed node's actors, the registry still points at the dead host (or is momentarily empty) for those actors. To keep callers from seeing connection errors during this window, every node (not just the leader) opens a short, self-expiring handoff window for the departed node's remoting endpoint on the `NodeLeft` it observes (`markEndpointRelocating`, backed by a GC-friendly `xsync.TTLMap`); the window is closed early when the node rejoins at the same address (`markEndpointRecovered` on `NodeJoined`). Synchronous identity-based sends (`SendSync` and its `ReceiveContext` wrapper) route through `PID.deliverAcrossHandoff`, which re-resolves the target on each attempt: if it still points at a relocating endpoint (or resolution fails while a relocation is in flight), the send is retried with bounded backoff, never beyond the caller's own timeout, until the actor re-registers on a survivor or the window closes, in which case it surfaces a retryable error (`ErrActorNotFound` or `ErrRelocationInProgress`). `SendAsync` is non-blocking by contract and routes through `PID.deliverBypassingHandoff` instead: it resolves once and, rather than dialing a departing endpoint or sleeping, fails fast with `ErrRelocationInProgress`. Steady-state sends resolve and deliver once with no added latency. A `actorsystem.relocation.buffered.count` metric records how often synchronous sends hit the window.
 
 ### CRDT replication (eventual consistency)
 

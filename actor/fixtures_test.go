@@ -1580,7 +1580,9 @@ func MockReplicationTestSystem(clusterMock *mockcluster.Cluster) *actorSystem {
 		noSender:              noSender,
 		dispatcher:            newDispatcher(dispatcherWorkerCount(), dispatcherThroughput),
 	}
-	sys.relocatingCond = sync.NewCond(&sys.relocatingMu)
+	sys.relocationJobs = make(map[string]*internalpb.PeerState)
+	sys.peerRemotingPorts = xsync.NewMap[string, int]()
+	sys.recentDepartures = xsync.NewTTLMap[string, types.Unit](correlatedDepartureWindow)
 	sys.dispatcher.start()
 
 	sys.started.Store(true)
@@ -2007,6 +2009,10 @@ type testClusterConfig struct {
 	roles             []string
 	contextPropagator remote.ContextPropagator
 	extraGrains       []Grain
+	replicaCount      uint32
+	writeQuorum       uint32
+	readQuorum        uint32
+	bootstrapTimeout  time.Duration
 }
 
 type testClusterOption func(*testClusterConfig)
@@ -2028,6 +2034,28 @@ func withTestPubSub() testClusterOption {
 func withoutTestRelocation() testClusterOption {
 	return func(tc *testClusterConfig) {
 		tc.relocationEnabled = false
+	}
+}
+
+// withTestReplication configures the cluster registry replication factor and
+// quorums. A replicaCount greater than 1 makes resyncAfterClusterEvent a no-op
+// on NodeLeft and forces olric to keep backups it can promote on a departure;
+// a matching writeQuorum guarantees the backup is present before the write
+// returns, so the promotion is deterministic rather than best-effort.
+func withTestReplication(replicaCount, writeQuorum, readQuorum uint32) testClusterOption {
+	return func(tc *testClusterConfig) {
+		tc.replicaCount = replicaCount
+		tc.writeQuorum = writeQuorum
+		tc.readQuorum = readQuorum
+	}
+}
+
+// withTestBootstrapTimeout overrides the (short) default bootstrap timeout used
+// by the fixture. A replicaCount > 1 cluster needs a longer window to complete
+// its initial partition sync.
+func withTestBootstrapTimeout(timeout time.Duration) testClusterOption {
+	return func(tc *testClusterConfig) {
+		tc.bootstrapTimeout = timeout
 	}
 }
 
@@ -2134,7 +2162,16 @@ func createSelfManagedProvider(broadcastPort int) providerFactory {
 }
 
 func testSystem(t *testing.T, providerFactory providerFactory, opts ...testClusterOption) (ActorSystem, discovery.Provider) {
-	ctx := context.TODO()
+	system, provider := buildTestSystem(t, providerFactory, opts...)
+	require.NoError(t, system.Start(context.TODO()))
+	return system, provider
+}
+
+// buildTestSystem constructs (but does not Start) a clustered actor system. It
+// is split out of testSystem so callers can start several nodes concurrently,
+// which is required for replicaCount > 1 clusters: a lone node cannot complete
+// its initial partition sync when a backup replica owner is expected.
+func buildTestSystem(t *testing.T, providerFactory providerFactory, opts ...testClusterOption) (ActorSystem, discovery.Provider) {
 	logger := log.DiscardLogger
 
 	// dynamic ports
@@ -2149,7 +2186,7 @@ func testSystem(t *testing.T, providerFactory providerFactory, opts ...testClust
 	// provider
 	provider := providerFactory(t, host, discoveryPort)
 
-	cfg := &testClusterConfig{relocationEnabled: true}
+	cfg := &testClusterConfig{relocationEnabled: true, replicaCount: 1, writeQuorum: 1, readQuorum: 1, bootstrapTimeout: time.Second}
 	for _, opt := range opts {
 		opt(cfg)
 	}
@@ -2162,11 +2199,13 @@ func testSystem(t *testing.T, providerFactory providerFactory, opts ...testClust
 			new(MockGrainActor)).
 		WithGrains(append([]Grain{new(MockGrain)}, cfg.extraGrains...)...).
 		WithPartitionCount(7).
-		WithReplicaCount(1).
+		WithReplicaCount(cfg.replicaCount).
+		WithWriteQuorum(cfg.writeQuorum).
+		WithReadQuorum(cfg.readQuorum).
 		WithPeersPort(peersPort).
 		WithMinimumPeersQuorum(1).
 		WithDiscoveryPort(discoveryPort).
-		WithBootstrapTimeout(time.Second).
+		WithBootstrapTimeout(cfg.bootstrapTimeout).
 		WithClusterStateSyncInterval(300 * time.Millisecond).
 		WithClusterBalancerInterval(100 * time.Millisecond).
 		WithRoles(cfg.roles...).
@@ -2216,8 +2255,39 @@ func testSystem(t *testing.T, providerFactory providerFactory, opts ...testClust
 		require.NoError(t, system.Inject(cfg.dependency))
 	}
 
-	require.NoError(t, system.Start(ctx))
 	return system, provider
+}
+
+// testNATsConcurrent builds count NATS-backed nodes and starts them all at
+// once, returning only after every node has finished bootstrapping. Concurrent
+// start is mandatory for replicaCount > 1 clusters (see buildTestSystem). The
+// per-node Start runs in its own goroutine, so it reports failures through an
+// error slice checked on the test goroutine rather than calling require inside
+// the goroutine.
+func testNATsConcurrent(t *testing.T, serverAddr string, count int, opts ...testClusterOption) ([]ActorSystem, []discovery.Provider) {
+	systems := make([]ActorSystem, count)
+	providers := make([]discovery.Provider, count)
+	for i := range count {
+		systems[i], providers[i] = buildTestSystem(t, createNATsProvider(serverAddr), opts...)
+	}
+
+	errs := make([]error, count)
+	var wg sync.WaitGroup
+	for i := range count {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			errs[i] = systems[i].Start(context.TODO())
+		}(i)
+	}
+	wg.Wait()
+
+	for i := range count {
+		require.NoError(t, errs[i], "node %d failed to start", i)
+		require.NotNil(t, systems[i])
+		require.NotNil(t, providers[i])
+	}
+	return systems, providers
 }
 
 func testNATs(t *testing.T, serverAddr string, opts ...testClusterOption) (ActorSystem, discovery.Provider) {

@@ -39,6 +39,7 @@ import (
 
 	"github.com/tochemey/goakt/v4/datacenter"
 	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/pointer"
@@ -519,6 +520,7 @@ func (x *actorSystem) sendRemoteActivateGrain(ctx context.Context, grain *intern
 		ActivationRetries: int(grain.GetActivationRetries()),
 		MailboxCapacity:   grain.GetMailboxCapacity(),
 		DisableRelocation: grain.GetDisableRelocation(),
+		EagerRelocation:   grain.GetEagerRelocation(),
 	}
 
 	// Call the high-level RemoteActivateGrain method
@@ -1184,6 +1186,89 @@ func (x *actorSystem) sendRemoteTellGrainRequest(ctx context.Context, grain *int
 	return x.remoting.RemoteTellGrain(ctx, grain.GetHost(), int(grain.GetPort()), grainRequest, message)
 }
 
+// recreateGrainFromWire relocates a serialized grain from a departed node onto
+// this node. It is used during cluster rebalancing.
+//
+// departedNode is the remoting address (host:port) of the node that left the
+// cluster. A stale cluster registry entry still pointing at that address is
+// removed before reactivation; an entry pointing anywhere else means the grain
+// has already been reactivated by a concurrent relocation or an incoming call,
+// so it is skipped. System grains and grains that opted out of relocation are
+// skipped as well.
+func (x *actorSystem) recreateGrainFromWire(ctx context.Context, grain *internalpb.Grain, departedNode string) error {
+	if isSystemName(grain.GetGrainId().GetName()) || grain.GetDisableRelocation() {
+		return nil
+	}
+
+	identity := grain.GetGrainId().GetValue()
+	existing, err := x.cluster.GetGrain(ctx, identity)
+
+	switch {
+	case err == nil:
+		// Use the canonical (un-bracketed) host:port form so the comparison
+		// matches the departedNode marker built with address.FormatHostPort;
+		// net.JoinHostPort would bracket IPv6 hosts and never match.
+		entry := address.FormatHostPort(existing.GetHost(), int(existing.GetPort()))
+		if entry != departedNode {
+			// the registry entry points at a node other than the departed one,
+			// so the grain was already reactivated there; leave it alone to avoid
+			// a double activation. Logged rather than silent so a rare stale
+			// entry is diagnosable.
+			x.logger.Debugf("node=%s skipping relocation of grain=%s: registry entry points at %s, not departed node %s", x.String(), identity, entry, departedNode)
+			return nil
+		}
+
+		if rerr := x.cluster.RemoveGrain(ctx, identity); rerr != nil {
+			return gerrors.NewInternalError(rerr)
+		}
+	case errors.Is(err, cluster.ErrGrainNotFound):
+		// no stale registry entry; proceed with the reactivation
+	default:
+		return gerrors.NewInternalError(err)
+	}
+
+	return x.recreateGrain(ctx, grain)
+}
+
+// releaseGrainForLazyRelocation removes the directory entry of a grain hosted
+// by a departed node so the grain re-activates on a surviving node the next
+// time it is addressed. Unlike recreateGrainFromWire it never reactivates the
+// grain, matching the lazy (default) relocation behavior for virtual actors.
+//
+// The removal is gated exactly like recreateGrainFromWire: the entry is only
+// deleted when it still points at the departed node. An entry that has already
+// been re-owned elsewhere is left untouched, and a missing entry is a no-op.
+// Because the activation path also self-heals a stale entry (it drops an entry
+// whose owner is unreachable and re-activates), this cleanup is an optimization
+// that avoids the first caller paying that penalty, not a correctness
+// requirement.
+func (x *actorSystem) releaseGrainForLazyRelocation(ctx context.Context, grain *internalpb.Grain, departedNode string) error {
+	if isSystemName(grain.GetGrainId().GetName()) || grain.GetDisableRelocation() {
+		return nil
+	}
+
+	identity := grain.GetGrainId().GetValue()
+	existing, err := x.cluster.GetGrain(ctx, identity)
+	switch {
+	case err == nil:
+		// Canonical (un-bracketed) host:port form, matching the departedNode
+		// marker; see recreateGrainFromWire for why net.JoinHostPort is unsafe.
+		entry := address.FormatHostPort(existing.GetHost(), int(existing.GetPort()))
+		if entry != departedNode {
+			// already reactivated/re-owned elsewhere; leave it alone
+			return nil
+		}
+		if rerr := x.cluster.RemoveGrain(ctx, identity); rerr != nil {
+			return gerrors.NewInternalError(rerr)
+		}
+		return nil
+	case errors.Is(err, cluster.ErrGrainNotFound):
+		return nil
+	default:
+		return gerrors.NewInternalError(err)
+	}
+}
+
 // recreateGrain recreates a serialized Grain.
 //
 // It instantiates the grain, activates it, registers it locally, and updates the cluster registry.
@@ -1245,6 +1330,10 @@ func (x *actorSystem) recreateGrainOnce(ctx context.Context, serializedGrain *in
 
 		if serializedGrain.GetDisableRelocation() {
 			options = append(options, WithGrainDisableRelocation())
+		}
+
+		if serializedGrain.GetEagerRelocation() {
+			options = append(options, WithGrainEagerRelocation())
 		}
 
 		config := newGrainConfig(options...)

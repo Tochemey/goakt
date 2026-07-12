@@ -59,7 +59,7 @@ type Hasher_HashCode_Call struct {
 
 // HashCode is a helper method to define mock.On call
 //   - key []byte
-func (_e *Hasher_Expecter) HashCode(key interface{}) *Hasher_HashCode_Call {
+func (_e *Hasher_Expecter) HashCode(key any) *Hasher_HashCode_Call {
 	return &Hasher_HashCode_Call{Call: _e.mock.On("HashCode", key)}
 }
 

@@ -30,6 +30,7 @@ type nameType int
 
 const (
 	rebalancerType nameType = iota
+	relocationWorkerType
 	rootGuardianType
 	userGuardianType
 	systemGuardianType
@@ -53,6 +54,7 @@ const (
 var (
 	reservedNames = map[nameType]string{
 		rebalancerType:        "GoAktRebalancer",
+		relocationWorkerType:  "GoAktRelocationWorker",
 		rootGuardianType:      "GoAktRootGuardian",
 		userGuardianType:      "GoAktUserGuardian",
 		systemGuardianType:    "GoAktSystemGuardian",

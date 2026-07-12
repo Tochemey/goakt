@@ -70,6 +70,11 @@ type GrainRequest struct {
 	// DisableRelocation indicates that the Grain must not be relocated to another
 	// node when its hosting node leaves the cluster.
 	DisableRelocation bool
+
+	// EagerRelocation indicates that the Grain must be reactivated immediately on
+	// a surviving node when its hosting node leaves the cluster, instead of the
+	// default lazy behavior (reactivate on next use).
+	EagerRelocation bool
 }
 
 var _ validation.Validator = (*GrainRequest)(nil)

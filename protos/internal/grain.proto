@@ -23,4 +23,8 @@ message Grain {
   int32 activation_retries = 6;
   optional int64 mailbox_capacity = 7;
   bool disable_relocation = 8;
+  // eager_relocation opts the grain into upfront reactivation on another node
+  // when its host departs the cluster. When false (default) the grain relocates
+  // lazily: its directory entry is cleaned and it re-activates on next use.
+  bool eager_relocation = 9;
 }
