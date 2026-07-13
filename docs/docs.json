@@ -2,12 +2,15 @@
   "$schema": "https://mintlify.com/docs.json",
   "name": "GoAkt",
   "description": "Distributed actor framework for Go, inspired by Erlang and Akka. Build reactive and distributed systems with typed actor messages.",
-  "theme": "linden",
+  "theme": "mint",
   "seo": { "metatags": { "canonical": "https://docs.goakt.dev" } },
   "colors": { "primary": "#2563EB", "light": "#3B82F6", "dark": "#1D4ED8" },
   "favicon": "/assets/goakt-icon.png",
   "background": { "decoration": "gradient" },
-  "fonts": { "heading": { "family": "Geist Mono" }, "body": { "family": "Geist Mono" } },
+  "fonts": {
+    "heading": { "family": "Geist" },
+    "body": { "family": "Geist" }
+  },
   "appearance": { "default": "system" },
   "navbar": {
     "links": [
@@ -65,10 +68,7 @@
       },
       {
         "group": "Remoting",
-        "pages": [
-          "/advanced/remoting",
-          "/advanced/serialization"
-        ],
+        "pages": ["/advanced/remoting", "/advanced/serialization"],
         "icon": "radio"
       },
       {
@@ -83,10 +83,7 @@
       },
       {
         "group": "Observability",
-        "pages": [
-          "/advanced/observability",
-          "/advanced/event-streams"
-        ],
+        "pages": ["/advanced/observability", "/advanced/event-streams"],
         "icon": "activity"
       },
       {
