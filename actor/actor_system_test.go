@@ -4200,15 +4200,15 @@ func TestGateCrashRecoveryRetriesDerivation(t *testing.T) {
 
 	system.gateCrashRecovery(peer)
 
-	var derived []*RelocationDerived
+	var derived []*RelocationStarted
 
 	for event := range consumer.Iterator() {
-		if msg, ok := event.Payload().(*RelocationDerived); ok {
+		if msg, ok := event.Payload().(*RelocationStarted); ok {
 			derived = append(derived, msg)
 		}
 	}
 
-	require.Len(t, derived, 1, "derivation must succeed on retry and publish RelocationDerived")
+	require.Len(t, derived, 1, "derivation must succeed on retry and publish RelocationStarted")
 
 	_, cached := system.peerRemotingPort(peer)
 	require.False(t, cached, "recovery must prune the cache entry once done")
@@ -4231,7 +4231,7 @@ func TestGateCrashRecoveryGivesUpAfterMaxAttempts(t *testing.T) {
 	require.False(t, cached, "the cache entry is pruned even when recovery gives up")
 }
 
-func TestPublishRelocationDerived(t *testing.T) {
+func TestPublishRelocationStarted(t *testing.T) {
 	ctx := t.Context()
 	ports := dynaport.Get(1)
 
@@ -4259,12 +4259,12 @@ func TestPublishRelocationDerived(t *testing.T) {
 		},
 	}
 
-	sys.(*actorSystem).publishRelocationDerived(peerAddress, peerState)
+	sys.(*actorSystem).publishRelocationStarted(peerAddress, peerState, true)
 
-	var derived []*RelocationDerived
+	var derived []*RelocationStarted
 
 	for event := range consumer.Iterator() {
-		if msg, ok := event.Payload().(*RelocationDerived); ok {
+		if msg, ok := event.Payload().(*RelocationStarted); ok {
 			derived = append(derived, msg)
 		}
 	}
@@ -4274,17 +4274,35 @@ func TestPublishRelocationDerived(t *testing.T) {
 	assert.NotZero(t, derived[0].Timestamp())
 	assert.ElementsMatch(t, []string{"actor1", "actor2"}, derived[0].Actors())
 	assert.ElementsMatch(t, []string{"grainKind/grain1"}, derived[0].Grains())
+	assert.True(t, derived[0].BestEffort())
+
+	// the graceful-shutdown snapshot path publishes a complete set
+	consumerGraceful, err := sys.Subscribe()
+	require.NoError(t, err)
+
+	sys.(*actorSystem).publishRelocationStarted(peerAddress, peerState, false)
+
+	derived = nil
+
+	for event := range consumerGraceful.Iterator() {
+		if msg, ok := event.Payload().(*RelocationStarted); ok {
+			derived = append(derived, msg)
+		}
+	}
+
+	require.Len(t, derived, 1)
+	assert.False(t, derived[0].BestEffort())
 
 	// an empty derived set still publishes: on a crash it signals suspected loss
 	consumer2, err := sys.Subscribe()
 	require.NoError(t, err)
 
-	sys.(*actorSystem).publishRelocationDerived(peerAddress, &internalpb.PeerState{})
+	sys.(*actorSystem).publishRelocationStarted(peerAddress, &internalpb.PeerState{}, true)
 
 	derived = nil
 
 	for event := range consumer2.Iterator() {
-		if msg, ok := event.Payload().(*RelocationDerived); ok {
+		if msg, ok := event.Payload().(*RelocationStarted); ok {
 			derived = append(derived, msg)
 		}
 	}

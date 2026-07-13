@@ -31,7 +31,7 @@
 // and nothing reported the loss. With the fix the default is a replica count
 // of 2: every registry partition has a backup, the surviving copy is promoted
 // before the recovery scan runs, and the leader announces the reconstruction
-// with a RelocationDerived event.
+// with a best-effort RelocationStarted event.
 //
 // The HTTP surface (see server.go) makes the reproduction self-validating:
 //

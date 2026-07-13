@@ -7,7 +7,7 @@
 #   3. verify all 60 exist in the cluster registry
 #   4. crash a pod through its /crash endpoint (os.Exit: no graceful shutdown,
 #      no PeerState snapshot, kill -9 semantics)
-#   5. wait for the leader to publish RelocationDerived (registry-derived
+#   5. wait for the leader to publish the best-effort RelocationStarted (registry-derived
 #      recovery; the rebalance-epoch fallback alone can take ~30s)
 #   6. verify all 60 workers exist again and no relocation failure was reported
 set -euo pipefail
@@ -53,27 +53,27 @@ http "${VICTIM}" "/crash" || true
 # the registry-derived recovery scenario of issue #1260.
 kubectl delete pod "${VICTIM}" --grace-period=0 --force --wait=false
 
-echo "==> waiting for the leader to publish RelocationDerived (up to ${RECOVERY_TIMEOUT_SECONDS}s)"
+echo "==> waiting for the leader to publish the best-effort RelocationStarted (up to ${RECOVERY_TIMEOUT_SECONDS}s)"
 DERIVED=""
 
 for _ in $(seq 1 $((RECOVERY_TIMEOUT_SECONDS / 5))); do
   sleep 5
   EVENTS=$(http "${SURVIVOR}" "/events" || true)
 
-  if echo "${EVENTS}" | grep -q 'RelocationDerived'; then
+  if echo "${EVENTS}" | grep -q 'RelocationStarted'; then
     DERIVED=yes
     break
   fi
 done
 
 if [ -z "${DERIVED}" ]; then
-  echo "FAIL: no RelocationDerived event within ${RECOVERY_TIMEOUT_SECONDS}s"
+  echo "FAIL: no RelocationStarted event within ${RECOVERY_TIMEOUT_SECONDS}s"
   echo "events observed by ${SURVIVOR}:"
   http "${SURVIVOR}" "/events"
   exit 1
 fi
 
-echo "==> RelocationDerived observed; giving relocation a moment to finish"
+echo "==> RelocationStarted observed; giving relocation a moment to finish"
 sleep 10
 
 # registry reads can transiently time out right after a crash while connection
@@ -106,5 +106,12 @@ if echo "${EVENTS}" | grep -q 'RelocationFailed'; then
   exit 1
 fi
 
+# the crash path must mark its relocation set as best-effort; a graceful
+# (complete) event here would mean the crash path was bypassed
+if ! echo "${EVENTS}" | grep -q '"bestEffort":true'; then
+  echo "FAIL: the crash relocation was not marked best-effort"
+  exit 1
+fi
+
 echo ""
-echo "PASS: crash recovery on the default configuration is complete (${WORKERS}/${WORKERS} workers recovered, RelocationDerived observed)"
+echo "PASS: crash recovery on the default configuration is complete (${WORKERS}/${WORKERS} workers recovered, RelocationStarted observed)"

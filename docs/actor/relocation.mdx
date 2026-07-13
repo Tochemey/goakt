@@ -79,7 +79,7 @@ Relocation does not depend on a clean shutdown. There are two sources for a depa
 
 To attribute registry records to the crashed node, each node keeps a small cache mapping every peer's **peers address** (`host:peersPort`, carried by the `NodeLeft` event) to its **remoting address** (`host:remotingPort`, how records are keyed). The cache is seeded from membership when clustering starts and refreshed on every `NodeJoined`, so a node observed alive at any point remains resolvable when it later crashes. The derived set contains only **relocatable** actors and the departed node's grains; from there it flows through the exact same worker, gating, and failure-reporting path as the graceful case.
 
-Every registry-derived recovery is announced by a `RelocationDerived` event on the event stream, listing the actor names and grain IDs the derivation found. The event fires even when the derived set is empty, which on a crash signals suspected record loss rather than a benign no-op. Subscribers holding an external record of placements can diff it against the listed items to detect and reconcile silent losses.
+Every relocation is announced by a `RelocationStarted` event on the event stream, listing the actor names and grain IDs in the relocation set. For a graceful shutdown, `BestEffort()` is false and the set is complete. For a crash, `BestEffort()` is true: the set was reconstructed from the registry, it fires even when empty (which signals suspected record loss rather than a benign no-op), and subscribers holding an external record of placements can diff it against the listed items to detect and reconcile silent losses.
 
 ### Replication settings
 

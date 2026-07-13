@@ -571,50 +571,62 @@ func (r *RelocationFailed) Grains() []string { return r.grains }
 // Error returns the error that caused the relocation failure.
 func (r *RelocationFailed) Error() error { return r.err }
 
-// RelocationDerived is a system-level message emitted when the leader reconstructs a
-// departed node's relocation set from the replicated cluster registry because the node
-// crashed without leaving a graceful-shutdown snapshot.
+// RelocationStarted is a system-level message emitted by the cluster leader when it
+// starts relocating the actors and grains of a departed node. It is published for every
+// departure that leads to a relocation, whether the node shut down gracefully or crashed.
 //
-// The derived set is best-effort: registry records lost with the crashed node's partitions
-// (or with concurrent node losses) cannot be detected, so the set may be incomplete even
-// though relocation of the listed items proceeds normally. An empty set on a crash is
-// suspicious rather than benign. Subscribers holding an external record of placements can
-// diff it against the listed actors and grains to detect and reconcile silent losses.
-type RelocationDerived struct {
+// BestEffort reports how the relocation set was obtained. When false, the set comes from
+// the snapshot the departed node replicated during its graceful shutdown and is complete.
+// When true, the node crashed without leaving a snapshot and the set was reconstructed
+// from the cluster registry: records lost with the crashed node's partitions cannot be
+// listed, so the set may be incomplete even though relocation of the listed items
+// proceeds normally, and an empty set is suspicious rather than benign. Subscribers
+// holding an external record of placements can diff it against the listed actors and
+// grains to detect and reconcile silent losses.
+type RelocationStarted struct {
 	// the address of the departed node
-	address   string
-	timestamp time.Time
-	actors    []string
-	grains    []string
+	address    string
+	timestamp  time.Time
+	actors     []string
+	grains     []string
+	bestEffort bool
 }
 
-// NewRelocationDerived creates a new RelocationDerived message.
+// NewRelocationStarted creates a new RelocationStarted message.
 //
 // Parameters:
-//   - address: the address of the crashed node whose relocation set was derived.
-//   - timestamp: when the derivation completed.
-//   - actors: the actor names found in the registry for the crashed node (may be empty).
-//   - grains: the grain IDs found in the registry for the crashed node (may be empty).
-func NewRelocationDerived(address string, timestamp time.Time, actors, grains []string) *RelocationDerived {
-	return &RelocationDerived{
-		address:   address,
-		timestamp: timestamp,
-		actors:    actors,
-		grains:    grains,
+//   - address: the address of the departed node whose items are being relocated.
+//   - timestamp: when the relocation set was established.
+//   - actors: the actor names in the relocation set (may be empty).
+//   - grains: the grain IDs in the relocation set (may be empty).
+//   - bestEffort: false when the set comes from a graceful-shutdown snapshot,
+//     true when it was reconstructed from the cluster registry after a crash.
+func NewRelocationStarted(address string, timestamp time.Time, actors, grains []string, bestEffort bool) *RelocationStarted {
+	return &RelocationStarted{
+		address:    address,
+		timestamp:  timestamp,
+		actors:     actors,
+		grains:     grains,
+		bestEffort: bestEffort,
 	}
 }
 
-// Address returns the address of the crashed node whose relocation set was derived.
-func (r *RelocationDerived) Address() string { return r.address }
+// Address returns the address of the departed node whose items are being relocated.
+func (r *RelocationStarted) Address() string { return r.address }
 
-// Timestamp returns the time when the derivation completed.
-func (r *RelocationDerived) Timestamp() time.Time { return r.timestamp }
+// Timestamp returns the time when the relocation set was established.
+func (r *RelocationStarted) Timestamp() time.Time { return r.timestamp }
 
-// Actors returns the actor names recovered from the registry for the crashed node.
-func (r *RelocationDerived) Actors() []string { return r.actors }
+// Actors returns the actor names in the relocation set.
+func (r *RelocationStarted) Actors() []string { return r.actors }
 
-// Grains returns the grain IDs recovered from the registry for the crashed node.
-func (r *RelocationDerived) Grains() []string { return r.grains }
+// Grains returns the grain IDs in the relocation set.
+func (r *RelocationStarted) Grains() []string { return r.grains }
+
+// BestEffort reports whether the relocation set was reconstructed from the cluster
+// registry after a crash and may therefore be incomplete. It is false when the set
+// comes from the departed node's graceful-shutdown snapshot, which is complete.
+func (r *RelocationStarted) BestEffort() bool { return r.bestEffort }
 
 // TopicStats is a point-in-time snapshot of a topic's subscription state.
 type TopicStats struct {

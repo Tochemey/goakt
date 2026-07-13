@@ -41,18 +41,19 @@ const drainInterval = 500 * time.Millisecond
 const (
 	eventNodeJoined        = "NodeJoined"
 	eventNodeLeft          = "NodeLeft"
-	eventRelocationDerived = "RelocationDerived"
+	eventRelocationStarted = "RelocationStarted"
 	eventRelocationFailed  = "RelocationFailed"
 )
 
 // recordedEvent is the JSON shape returned by GET /events.
 type recordedEvent struct {
-	Time    time.Time `json:"time"`
-	Type    string    `json:"type"`
-	Address string    `json:"address,omitempty"`
-	Actors  []string  `json:"actors,omitempty"`
-	Grains  []string  `json:"grains,omitempty"`
-	Error   string    `json:"error,omitempty"`
+	Time       time.Time `json:"time"`
+	Type       string    `json:"type"`
+	Address    string    `json:"address,omitempty"`
+	Actors     []string  `json:"actors,omitempty"`
+	Grains     []string  `json:"grains,omitempty"`
+	BestEffort bool      `json:"bestEffort,omitempty"`
+	Error      string    `json:"error,omitempty"`
 }
 
 // eventRecorder accumulates the cluster and relocation events observed on this
@@ -68,9 +69,9 @@ func newEventRecorder() *eventRecorder {
 }
 
 // consume drains the event stream subscriber on a fixed interval and records
-// the events this reproduction cares about. RelocationDerived is the
-// issue-1260 observability feature: it lists exactly what the leader
-// reconstructed from the registry after a crash.
+// the events this reproduction cares about. RelocationStarted with
+// BestEffort=true is the issue-1260 observability feature: it lists exactly
+// what the leader reconstructed from the registry after a crash.
 func (r *eventRecorder) consume(consumer eventstream.Subscriber, logger log.Logger) {
 	ticker := time.NewTicker(drainInterval)
 	defer ticker.Stop()
@@ -89,15 +90,16 @@ func (r *eventRecorder) drain(consumer eventstream.Subscriber, logger log.Logger
 		case *goakt.NodeLeft:
 			r.add(recordedEvent{Time: time.Now().UTC(), Type: eventNodeLeft, Address: event.Address()})
 			logger.Infof("observed NodeLeft for %s", event.Address())
-		case *goakt.RelocationDerived:
+		case *goakt.RelocationStarted:
 			r.add(recordedEvent{
-				Time:    time.Now().UTC(),
-				Type:    eventRelocationDerived,
-				Address: event.Address(),
-				Actors:  event.Actors(),
-				Grains:  event.Grains(),
+				Time:       time.Now().UTC(),
+				Type:       eventRelocationStarted,
+				Address:    event.Address(),
+				Actors:     event.Actors(),
+				Grains:     event.Grains(),
+				BestEffort: event.BestEffort(),
 			})
-			logger.Infof("observed RelocationDerived for %s: actors=%d grains=%d", event.Address(), len(event.Actors()), len(event.Grains()))
+			logger.Infof("observed RelocationStarted for %s: bestEffort=%v actors=%d grains=%d", event.Address(), event.BestEffort(), len(event.Actors()), len(event.Grains()))
 		case *goakt.RelocationFailed:
 			r.add(recordedEvent{
 				Time:    time.Now().UTC(),

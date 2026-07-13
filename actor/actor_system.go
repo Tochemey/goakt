@@ -3298,6 +3298,12 @@ func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
 			return
 		}
 
+		// announce the relocation on the events stream; a graceful-shutdown
+		// snapshot is complete, so this is not best-effort. Published after
+		// beginRelocation so a duplicate NodeLeft never emits a second event
+		// for an in-flight relocation.
+		x.publishRelocationStarted(nodeLeft.Address, peerState, false)
+
 		// dispatch to the relocator; its mailbox is the queue, so a burst of
 		// node departures never blocks the cluster events loop
 		if err := x.systemGuardian.Tell(ctx, x.relocator, &internalpb.Rebalance{PeerState: peerState}); err != nil {
@@ -3376,7 +3382,7 @@ func (x *actorSystem) gateCrashRecovery(peerAddress string) {
 	// so subscribers holding an external record of placements can diff against
 	// the derived set to detect silent losses. Published even when the set is
 	// empty, which on a crash is suspicious rather than benign.
-	x.publishRelocationDerived(peerAddress, peerState)
+	x.publishRelocationStarted(peerAddress, peerState, true)
 
 	x.dispatchDerivedRebalance(ctx, peerAddress, peerState)
 }
@@ -3556,11 +3562,12 @@ func (x *actorSystem) deriveRelocationSetFromRegistry(ctx context.Context, peerA
 	}, true
 }
 
-// publishRelocationDerived emits a RelocationDerived event for a crashed node
-// whose relocation set was reconstructed from the cluster registry, listing the
-// actor names and grain IDs the derivation found. See RelocationDerived for the
-// best-effort contract.
-func (x *actorSystem) publishRelocationDerived(peerAddress string, peerState *internalpb.PeerState) {
+// publishRelocationStarted emits a RelocationStarted event for a departed node
+// whose items are about to be relocated, listing the actor names and grain IDs
+// in the relocation set. bestEffort is false for a graceful-shutdown snapshot
+// and true for a set reconstructed from the cluster registry after a crash;
+// see RelocationStarted for the contract.
+func (x *actorSystem) publishRelocationStarted(peerAddress string, peerState *internalpb.PeerState, bestEffort bool) {
 	if x.eventsStream == nil {
 		return
 	}
@@ -3576,7 +3583,7 @@ func (x *actorSystem) publishRelocationDerived(peerAddress string, peerState *in
 		grains = append(grains, id)
 	}
 
-	x.eventsStream.Publish(eventsTopic, NewRelocationDerived(peerAddress, time.Now().UTC(), actors, grains))
+	x.eventsStream.Publish(eventsTopic, NewRelocationStarted(peerAddress, time.Now().UTC(), actors, grains, bestEffort))
 }
 
 // pruneRemoteWatchesForHost cleans up the remote watch registry after a

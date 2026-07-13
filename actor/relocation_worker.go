@@ -410,27 +410,25 @@ func enqueueRelocation(ctx context.Context, eg *errgroup.Group, system ActorSyst
 func retryRelocationItem(ctx context.Context, recreate func() error) error {
 	var err error
 
-	// one reusable timer across attempts, created stopped and re-armed per
-	// wait: time.After would arm a new timer per retry that lingers until it
-	// fires, and relocation can run thousands of items concurrently
-	timer := time.NewTimer(0)
-	if !timer.Stop() {
-		<-timer.C
-	}
-	defer timer.Stop()
-
+	// backoff waits draw from the shared timer pool: relocation runs thousands
+	// of items concurrently and most succeed on the first attempt, so the
+	// common path touches no timer at all, while a mass-retry storm reuses a
+	// handful of pooled timers instead of allocating one per retrying item
 	for attempt := 1; ; attempt++ {
 		err = recreate()
 		if err == nil || attempt >= relocationItemMaxAttempts {
 			return err
 		}
 
-		timer.Reset(time.Duration(attempt) * relocationItemRetryBackoff)
+		backoff := time.Duration(attempt) * relocationItemRetryBackoff
+		waiter := timers.Get(backoff)
 
 		select {
 		case <-ctx.Done():
+			timers.Put(waiter)
 			return err
-		case <-timer.C:
+		case <-waiter.C:
+			timers.Put(waiter)
 		}
 	}
 }

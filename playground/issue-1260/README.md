@@ -10,7 +10,7 @@ A 3-pod StatefulSet runs an actor system with the untouched default cluster conf
 
 Before the fix (default `replicaCount=1`): the registry partitions owned by the crashed pod died with it. Registry records are partitioned by actor name, so those partitions held a share of every pod's records. After the crash, `GET /verify` reported missing workers, with no error and no event: silent partial recovery.
 
-After the fix (default `replicaCount=2`, olric v0.3.13 backup promotion): every registry partition has a backup that is promoted before the recovery scan runs, `GET /verify` reports all 60 workers found, and the leader publishes a `RelocationDerived` event listing exactly what it reconstructed.
+After the fix (default `replicaCount=2`, olric v0.3.13 backup promotion): every registry partition has a backup that is promoted before the recovery scan runs, `GET /verify` reports all 60 workers found, and the leader publishes a `RelocationStarted` event with `bestEffort=true` listing exactly what it reconstructed.
 
 The StatefulSet uses `podManagementPolicy: OrderedReady`, so pods start strictly one after the other. This also exercises the second issue-1260 guarantee: a lone node on the default configuration bootstraps by itself (through the initial-sync empty-partition escape) before any peer exists, the way rolling deployments bring clusters up in practice.
 
@@ -20,7 +20,7 @@ The StatefulSet uses `podManagementPolicy: OrderedReady`, so pods start strictly
 | --- | --- |
 | `main.go` | Wiring: kubernetes discovery, default cluster config, actor system lifecycle |
 | `worker.go` | The relocatable `Worker` actor |
-| `recorder.go` | Event stream recorder for `NodeJoined`, `NodeLeft`, `RelocationDerived`, `RelocationFailed` |
+| `recorder.go` | Event stream recorder for `NodeJoined`, `NodeLeft`, `RelocationStarted`, `RelocationFailed` |
 | `server.go` | HTTP surface used by the demo to spawn, verify, and inspect events |
 | `deploy/k8s.yaml` | RBAC, 3-replica StatefulSet (OrderedReady), headless service |
 | `deploy/kind-config.yaml` | Single-node kind cluster |
@@ -57,10 +57,10 @@ make deploy           # builds the image from the local working tree
 make demo
 ```
 
-The demo is self-validating. It fails when any worker is missing after the crash, when no `RelocationDerived` event was published, or when relocation reported failures. On success it prints:
+The demo is self-validating. It fails when any worker is missing after the crash, when no best-effort `RelocationStarted` event was published, or when relocation reported failures. On success it prints:
 
 ```
-PASS: crash recovery on the default configuration is complete (60/60 workers recovered, RelocationDerived observed)
+PASS: crash recovery on the default configuration is complete (60/60 workers recovered, RelocationStarted observed)
 ```
 
 Tear down with `make cluster-delete`.
