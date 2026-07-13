@@ -1108,6 +1108,14 @@ func (x *cluster) buildConfig() (*oconfig.Config, error) {
 		TriggerBalancerInterval:    x.triggerBalancerInterval, // keep rebalance completion timely for stable event emission
 		MemberMeta:                 meta,
 		EnableProactiveSyncOnJoin:  true,
+		// With a replica count above 1, partitions that hold no data on any
+		// source never receive a fragment, so the initial sync only completes
+		// through this escape timeout. Olric defaults it to 15s, which exceeds
+		// the bootstrap timeout budget enforced by waitForInitialSync: a fresh
+		// cluster (all partitions empty) would then always fail bootstrap.
+		// Deriving it from the bootstrap timeout keeps the escape inside the
+		// budget while leaving the other half for genuine fragment transfers.
+		InitialSyncEmptyPartitionTimeout: x.bootstrapTimeout / 2,
 	}
 
 	// by default, disable redis-client logging

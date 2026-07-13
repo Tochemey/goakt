@@ -567,8 +567,9 @@ func TestRelocationWithReplicasReReplicatesSurvivorRegistry(t *testing.T) {
 		partitionCount = 7
 	)
 
-	// replicaCount>1 clusters cannot bootstrap a lone node (olric waits for a
-	// backup replica owner), so all three nodes are started concurrently.
+	// the three nodes are started concurrently so they sync from each other
+	// right away instead of each waiting out the empty-partition escape (half
+	// the bootstrap timeout) that lets a lone replicaCount>1 node bootstrap.
 	systems, providers := testNATsConcurrent(t, srv.Addr().String(), 3,
 		withTestReplication(replicaCount, writeQuorum, readQuorum),
 		withTestBootstrapTimeout(20*time.Second),

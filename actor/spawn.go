@@ -953,15 +953,36 @@ func (x *actorSystem) recreateActorFromWire(ctx context.Context, props *internal
 
 	actor, err := x.reflection.instantiateActor(props.GetType())
 	if err != nil {
+		x.restoreDepartedEntry(ctx, props)
 		return err
 	}
 
 	spawnOpts, err := x.wireSpawnOptions(props)
 	if err != nil {
+		x.restoreDepartedEntry(ctx, props)
 		return err
 	}
 
-	return x.spawnRelocatedActor(ctx, addr.Name(), actor, departedNode, spawnOpts)
+	if err := x.spawnRelocatedActor(ctx, addr.Name(), actor, departedNode, spawnOpts); err != nil {
+		x.restoreDepartedEntry(ctx, props)
+		return err
+	}
+
+	return nil
+}
+
+// restoreDepartedEntry re-registers the original registry record after a failed
+// respawn. releaseDepartedEntry removes the record before the respawn so the
+// spawn's duplicate check does not see it; when the respawn then fails, that
+// record is the actor's only remaining recovery source (a relocation retry or
+// the node's own restart reconciliation), so dropping it would turn a transient
+// failure into a permanent silent loss. Best-effort: a failed restore is logged
+// loudly rather than propagated, the respawn error itself is what the caller
+// reports.
+func (x *actorSystem) restoreDepartedEntry(ctx context.Context, props *internalpb.Actor) {
+	if err := x.cluster.PutActor(ctx, props); err != nil {
+		x.logger.Errorf("failed to restore registry record for actor=%s after a failed respawn: %v (hint: the actor may be unrecoverable)", props.GetAddress(), err)
+	}
 }
 
 // releaseDepartedEntry resolves the registry entry for name and removes it when

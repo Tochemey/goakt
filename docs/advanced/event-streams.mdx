@@ -51,6 +51,7 @@ The system publishes these events to the event stream:
 | `NodeLeft`          | A node left the cluster (cluster mode only)                                   |
 | `LeaderChanged`     | The cluster coordinator moved to a different node (cluster mode only)        |
 | `RelocationFailed`  | A departed node's actors or grains could not be relocated (cluster mode only) |
+| `RelocationStarted` | The leader started relocating a departed node's actors and grains; `BestEffort()` is true when the set was reconstructed after a crash (cluster mode only) |
 
 ## Usage
 
@@ -75,6 +76,8 @@ for msg := range subscriber.Iterator() {
         log.Printf("node left: %s", e.Address())
     case *actor.LeaderChanged:
         log.Printf("cluster leader is now %s", e.Address())
+    case *actor.RelocationStarted:
+        log.Printf("relocation started: node=%s bestEffort=%v actors=%v grains=%v", e.Address(), e.BestEffort(), e.Actors(), e.Grains())
     case *actor.RelocationFailed:
         log.Printf("relocation failed: node=%s actors=%v grains=%v err=%v", e.Address(), e.Actors(), e.Grains(), e.Error())
     }
@@ -87,7 +90,8 @@ for msg := range subscriber.Iterator() {
 
 - The event stream is backed by the `eventstream` package. The actor system creates an `EventsStream` at startup and subscribes callers to the internal topic `topic.events`.
 - Lifecycle events (ActorStarted, ActorStopped, etc.) are published by the PID and death-watch logic. Cluster events (NodeJoined, NodeLeft) are published by the cluster events loop when membership changes. `LeaderChanged` is published from the same loop, on every node, whenever a topology event reveals that the coordinator moved to a different node; the initial coordinator election on startup is not published, only subsequent transitions.
-- `RelocationFailed` is published by the relocator when a departed node's actors or grains cannot be re-deployed. Relocation is not retried; subscribe to this event to drive your own recovery (for example, re-spawning the affected actors or alerting).
+- `RelocationFailed` is published by the relocator when a departed node's actors or grains cannot be re-deployed. Each item is retried a bounded number of times with backoff before it is reported, and the report is terminal: the relocation run does not revisit failed items, so subscribe to this event to drive your own recovery (for example, re-spawning the affected actors or alerting).
+- `RelocationStarted` is published by the leader whenever it starts relocating a departed node's actors and grains, for graceful shutdowns and crashes alike. `BestEffort()` distinguishes the two: false means the set comes from the departed node's graceful-shutdown snapshot and is complete; true means the node crashed and the set was reconstructed from the replicated cluster registry, so records lost with the crashed node's partitions cannot be listed, and an empty or unexpectedly small set signals suspected record loss. See the [relocation](/actor/relocation) page for the replication settings that govern completeness.
 - Dead letters are published by the dead-letter actor when messages cannot be delivered.
 - The event stream is always present; no option is required. It is independent of `WithPubSub()` and cluster mode.
 

@@ -2168,9 +2168,11 @@ func testSystem(t *testing.T, providerFactory providerFactory, opts ...testClust
 }
 
 // buildTestSystem constructs (but does not Start) a clustered actor system. It
-// is split out of testSystem so callers can start several nodes concurrently,
-// which is required for replicaCount > 1 clusters: a lone node cannot complete
-// its initial partition sync when a backup replica owner is expected.
+// is split out of testSystem so callers can start several nodes concurrently.
+// A lone node with replicaCount > 1 completes its initial partition sync
+// through the empty-partition escape (half the bootstrap timeout), so
+// concurrent starts are about speed, not correctness: they let the members
+// sync from each other instead of each waiting out the escape.
 func buildTestSystem(t *testing.T, providerFactory providerFactory, opts ...testClusterOption) (ActorSystem, discovery.Provider) {
 	logger := log.DiscardLogger
 

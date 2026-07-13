@@ -459,6 +459,76 @@ func TestSingleNode(t *testing.T) {
 		require.NoError(t, cluster.Stop(ctx))
 		provider.AssertExpectations(t)
 	})
+	t.Run("With replica count greater than member count", func(t *testing.T) {
+		// a single node started with the default replica count of 2 must
+		// bootstrap and serve writes: olric assigns no backup owners below the
+		// desired count and the local write satisfies the write quorum of 1
+		ctx := context.TODO()
+
+		// generate the ports for the single node
+		nodePorts := dynaport.Get(3)
+		gossipPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		// define discovered addresses
+		addrs := []string{
+			fmt.Sprintf("127.0.0.1:%d", gossipPort),
+		}
+
+		// mock the discovery provider
+		provider := new(mocksdiscovery.Provider)
+
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		// create a Node
+		host := "127.0.0.1"
+		hostNode := discovery.Node{
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: gossipPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
+		}
+
+		cluster := New("test", provider, &hostNode,
+			WithLogger(log.DiscardLogger),
+			WithReplicasCount(2),
+			WithMembersWriteQuorum(1),
+			WithMembersReadQuorum(1),
+			// a lone node completes its initial sync through the
+			// empty-partition escape (half this timeout); keep the wait short
+			WithBootstrapTimeout(2*time.Second))
+		require.NotNil(t, cluster)
+
+		// start the Node
+		err := cluster.Start(ctx)
+		require.NoError(t, err)
+
+		// create an actor
+		actorName := uuid.NewString()
+		addr := address.New(actorName, "system", host, remotingPort)
+		actor := &internalpb.Actor{Address: addr.String()}
+
+		// writes succeed with no backup member available
+		err = cluster.PutActor(ctx, actor)
+		require.NoError(t, err)
+
+		// the record is readable back
+		actual, err := cluster.GetActor(ctx, actorName)
+		require.NoError(t, err)
+		require.NotNil(t, actual)
+		assert.True(t, proto.Equal(actor, actual))
+
+		// stop the node
+		require.NoError(t, cluster.Stop(ctx))
+		provider.AssertExpectations(t)
+	})
 	t.Run("With RemoveActor", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
@@ -1609,6 +1679,69 @@ func TestMultipleNodes(t *testing.T) {
 		require.NoError(t, sd3.Close())
 		srv.Shutdown()
 	})
+	t.Run("With replica count of two and sequential start", func(t *testing.T) {
+		// nodes of a replicated cluster rarely start at the same instant:
+		// kubernetes rolling updates and ordered statefulsets bring them up one
+		// after the other. each phase of a sequential start must therefore
+		// bootstrap within the budget: the first node alone (replica count
+		// above member count), then a joiner on a cluster that already holds
+		// data
+		ctx := context.TODO()
+
+		// start the NATS server
+		srv := startNatsServer(t)
+
+		// the first node bootstraps alone; the shorter bootstrap timeout keeps
+		// the empty-partition escape (half of it) from dominating the test
+		node1, sd1 := startEngine(t, srv.Addr().String(), WithReplicasCount(2), WithBootstrapTimeout(4*time.Second))
+		require.NotNil(t, node1)
+
+		// wait for the node to start properly
+		pause.For(time.Second)
+
+		// write a record while the cluster is a single member so the joiner
+		// receives real fragments during its initial sync
+		node1Imp := node1.(*cluster)
+		actorName := uuid.NewString()
+		actor := &internalpb.Actor{
+			Address: address.New(actorName, "testSystem", node1Imp.node.Host, node1Imp.node.RemotingPort).String(),
+			Type:    "actorKind",
+		}
+		require.NoError(t, node1.PutActor(ctx, actor))
+
+		// the second node joins the running cluster
+		node2, sd2 := startEngine(t, srv.Addr().String(), WithReplicasCount(2), WithBootstrapTimeout(4*time.Second))
+		require.NotNil(t, node2)
+
+		// wait for the node to start properly
+		pause.For(time.Second)
+
+		// the record written before the join is visible from the joiner
+		actual, err := node2.GetActor(ctx, actorName)
+		require.NoError(t, err)
+		require.NotNil(t, actual)
+		require.True(t, proto.Equal(actor, actual))
+
+		// writes on the joiner are visible from the first node
+		node2Imp := node2.(*cluster)
+		actorName2 := uuid.NewString()
+		actor2 := &internalpb.Actor{
+			Address: address.New(actorName2, "testSystem", node2Imp.node.Host, node2Imp.node.RemotingPort).String(),
+			Type:    "actorKind",
+		}
+		require.NoError(t, node2.PutActor(ctx, actor2))
+
+		actual, err = node1.GetActor(ctx, actorName2)
+		require.NoError(t, err)
+		require.NotNil(t, actual)
+		require.True(t, proto.Equal(actor2, actual))
+
+		require.NoError(t, node2.Stop(ctx))
+		require.NoError(t, node1.Stop(ctx))
+		require.NoError(t, sd1.Close())
+		require.NoError(t, sd2.Close())
+		srv.Shutdown()
+	})
 	t.Run("With TLS", func(t *testing.T) {
 		ctx := context.TODO()
 		// AutoGenerate TLS certs
@@ -1997,7 +2130,7 @@ func startNatsServer(t *testing.T) *natsserver.Server {
 	return serv
 }
 
-func startEngine(t *testing.T, serverAddr string) (Cluster, discovery.Provider) {
+func startEngine(t *testing.T, serverAddr string, opts ...ConfigOption) (Cluster, discovery.Provider) {
 	// create a context
 	ctx := context.TODO()
 
@@ -2033,7 +2166,7 @@ func startEngine(t *testing.T, serverAddr string) (Cluster, discovery.Provider) 
 	provider := nats.NewDiscovery(&config)
 
 	// create the node
-	engine := New(actorSystemName, provider, &hostNode, WithLogger(log.DiscardLogger))
+	engine := New(actorSystemName, provider, &hostNode, append([]ConfigOption{WithLogger(log.DiscardLogger)}, opts...)...)
 	require.NotNil(t, engine)
 
 	// start the node

@@ -2645,11 +2645,13 @@ func TestRelocateBatchHandler(t *testing.T) {
 			Return(&internalpb.Grain{Host: "10.0.0.9", Port: 7000, GrainId: &internalpb.GrainId{Value: "kind/moved-grain", Name: "moved-grain"}}, nil).Once()
 
 		// entry still pointing at the departed node: removed before the respawn
-		// (the respawn itself fails on this non-started test system and is
-		// reported per item instead of failing the batch)
+		// (the respawn itself fails on this non-started test system, the record
+		// is restored, and the item is retried before being reported per item
+		// instead of failing the batch)
 		clusterMock.EXPECT().GetActor(mock.Anything, "stale").
-			Return(&internalpb.Actor{Address: address.New("stale", sys.Name(), "127.0.0.1", 8080).String()}, nil).Once()
-		clusterMock.EXPECT().RemoveActor(mock.Anything, "stale").Return(nil).Once()
+			Return(&internalpb.Actor{Address: address.New("stale", sys.Name(), "127.0.0.1", 8080).String()}, nil).Times(relocationItemMaxAttempts)
+		clusterMock.EXPECT().RemoveActor(mock.Anything, "stale").Return(nil).Times(relocationItemMaxAttempts)
+		clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Times(relocationItemMaxAttempts)
 
 		request := &internalpb.RelocateBatchRequest{
 			DepartedNode: departedNode,
@@ -2704,10 +2706,10 @@ func TestRelocateBatchHandler(t *testing.T) {
 
 		// lazy grain whose directory release fails: the entry stays pinned to
 		// the dead node and the TellGrain/AskGrain fast path does not self-heal a
-		// stale owner, so the grain would be unreachable with no signal; it is
-		// reported as a relocation failure.
+		// stale owner, so the grain would be unreachable with no signal; the
+		// release is retried before being reported as a relocation failure.
 		clusterMock.EXPECT().GetGrain(mock.Anything, "kind/lazy-fail").
-			Return(nil, errors.New("registry unavailable")).Once()
+			Return(nil, errors.New("registry unavailable")).Times(relocationItemMaxAttempts)
 
 		request := &internalpb.RelocateBatchRequest{
 			DepartedNode: departedNode,

@@ -23,6 +23,7 @@
 package actor
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -51,6 +52,7 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/eventstream"
 	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/cluster"
@@ -4068,6 +4070,250 @@ func TestActorSystemStartClusterErrors(t *testing.T) {
 	})
 }
 
+func TestSetupClusterWarnsOnSingleReplica(t *testing.T) {
+	buffer := new(bytes.Buffer)
+	logger := log.NewZap(log.WarningLevel, buffer)
+
+	nodePorts := dynaport.Get(3)
+	provider := new(mocksdiscovery.Provider)
+
+	clusterConfig := NewClusterConfig().
+		WithKinds(new(MockActor)).
+		WithReplicaCount(1).
+		WithPeersPort(nodePorts[1]).
+		WithDiscoveryPort(nodePorts[0]).
+		WithDiscovery(provider)
+
+	sys, err := NewActorSystem(
+		"test",
+		WithLogger(logger),
+		WithRemote(remote.NewConfig("127.0.0.1", nodePorts[2])),
+		WithCluster(clusterConfig),
+	)
+	require.NoError(t, err)
+
+	x := sys.(*actorSystem)
+	require.NoError(t, x.setupCluster())
+
+	t.Cleanup(func() {
+		if x.clusterStore != nil {
+			require.NoError(t, x.clusterStore.Close())
+		}
+	})
+
+	assert.Contains(t, buffer.String(), "cluster replica count is 1")
+}
+
+func TestClusterSingleNodeStartsWithDefaultReplication(t *testing.T) {
+	// a developer using the default cluster configuration (replicaCount=2) must
+	// be able to start the first node of a cluster alone: rolling updates and
+	// ordered statefulsets never bring all nodes up at the same instant. The
+	// lone node completes its initial partition sync through the
+	// empty-partition escape (half the bootstrap timeout)
+	ctx := context.TODO()
+	nodePorts := dynaport.Get(3)
+	gossipPort := nodePorts[0]
+	clusterPort := nodePorts[1]
+	remotingPort := nodePorts[2]
+	host := "127.0.0.1"
+
+	addrs := []string{
+		net.JoinHostPort(host, strconv.Itoa(gossipPort)),
+	}
+
+	provider := new(mocksdiscovery.Provider)
+	provider.EXPECT().ID().Return("testDisco")
+	provider.EXPECT().Initialize().Return(nil)
+	provider.EXPECT().Register().Return(nil)
+	provider.EXPECT().Deregister().Return(nil)
+	provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+	provider.EXPECT().Close().Return(nil)
+
+	sys, err := NewActorSystem(
+		"test",
+		WithLogger(log.DiscardLogger),
+		WithRemote(remote.NewConfig(host, remotingPort)),
+		WithCluster(
+			NewClusterConfig().
+				WithKinds(new(MockActor)).
+				WithPeersPort(clusterPort).
+				WithDiscoveryPort(gossipPort).
+				WithDiscovery(provider)),
+	)
+	require.NoError(t, err)
+
+	// the lone node bootstraps on its own
+	require.NoError(t, sys.Start(ctx))
+
+	// the cluster is functional: spawning writes to the registry
+	pid, err := sys.Spawn(ctx, "Exchange1", &exchanger{})
+	require.NoError(t, err)
+	require.NotNil(t, pid)
+
+	exists, err := sys.ActorExists(ctx, "Exchange1")
+	require.NoError(t, err)
+	require.True(t, exists)
+
+	require.NoError(t, sys.Stop(ctx))
+}
+
+func TestGateCrashRecoveryOwnsPortCachePruning(t *testing.T) {
+	// handleNodeLeftEvent hands the departed node's remoting-port cache entry
+	// to the recovery goroutine: the entry must still be resolvable when the
+	// quiescence gate opens, and must be pruned once recovery completes
+	clusterMock := mockscluster.NewCluster(t)
+	system := MockReplicationTestSystem(clusterMock)
+	system.eventsStream = eventstream.New()
+
+	peer := "127.0.0.1:3320"
+	system.peerRemotingPorts.Set(peer, 9090)
+
+	clusterMock.EXPECT().LastRebalanceEvent().Return(time.Time{}).Maybe()
+	clusterMock.EXPECT().ActorsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, nil).Once()
+	clusterMock.EXPECT().GrainsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, nil).Once()
+
+	system.gateCrashRecovery(peer)
+
+	_, cached := system.peerRemotingPort(peer)
+	require.False(t, cached, "recovery owns the cache entry and must prune it on completion")
+}
+
+func TestGateCrashRecoveryRetriesDerivation(t *testing.T) {
+	// the derivation's registry scan can transiently fail on an unreachable
+	// member while the cluster churns: the quiesce-then-derive cycle must be
+	// retried instead of permanently skipping the crashed node's rebalance
+	clusterMock := mockscluster.NewCluster(t)
+	system := MockReplicationTestSystem(clusterMock)
+	system.eventsStream = eventstream.New()
+
+	consumer := system.eventsStream.AddSubscriber()
+	system.eventsStream.Subscribe(consumer, eventsTopic)
+
+	peer := "127.0.0.1:3320"
+	system.peerRemotingPorts.Set(peer, 9090)
+
+	clusterMock.EXPECT().LastRebalanceEvent().Return(time.Time{}).Maybe()
+	// the first scan fails transiently, the retry succeeds
+	clusterMock.EXPECT().ActorsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, assert.AnError).Once()
+	clusterMock.EXPECT().ActorsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, nil).Once()
+	clusterMock.EXPECT().GrainsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, nil).Once()
+
+	system.gateCrashRecovery(peer)
+
+	var derived []*RelocationStarted
+
+	for event := range consumer.Iterator() {
+		if msg, ok := event.Payload().(*RelocationStarted); ok {
+			derived = append(derived, msg)
+		}
+	}
+
+	require.Len(t, derived, 1, "derivation must succeed on retry and publish RelocationStarted")
+
+	_, cached := system.peerRemotingPort(peer)
+	require.False(t, cached, "recovery must prune the cache entry once done")
+}
+
+func TestGateCrashRecoveryGivesUpAfterMaxAttempts(t *testing.T) {
+	clusterMock := mockscluster.NewCluster(t)
+	system := MockReplicationTestSystem(clusterMock)
+	system.eventsStream = eventstream.New()
+
+	peer := "127.0.0.1:3320"
+	system.peerRemotingPorts.Set(peer, 9090)
+
+	clusterMock.EXPECT().LastRebalanceEvent().Return(time.Time{}).Maybe()
+	clusterMock.EXPECT().ActorsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, assert.AnError).Times(relocationDeriveMaxAttempts)
+
+	system.gateCrashRecovery(peer)
+
+	_, cached := system.peerRemotingPort(peer)
+	require.False(t, cached, "the cache entry is pruned even when recovery gives up")
+}
+
+func TestPublishRelocationStarted(t *testing.T) {
+	ctx := t.Context()
+	ports := dynaport.Get(1)
+
+	sys, err := NewActorSystem("testSys",
+		WithRemote(remote.NewConfig("127.0.0.1", ports[0])),
+		WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	require.NoError(t, sys.Start(ctx))
+
+	consumer, err := sys.Subscribe()
+	require.NoError(t, err)
+
+	peerAddress := "127.0.0.1:3322"
+	peerState := &internalpb.PeerState{
+		Host:         "127.0.0.1",
+		PeersPort:    3322,
+		RemotingPort: 3323,
+		Actors: map[string]*internalpb.Actor{
+			"actor1": {},
+			"actor2": {},
+		},
+		Grains: map[string]*internalpb.Grain{
+			"grainKind/grain1": {},
+		},
+	}
+
+	sys.(*actorSystem).publishRelocationStarted(peerAddress, peerState, true)
+
+	var derived []*RelocationStarted
+
+	for event := range consumer.Iterator() {
+		if msg, ok := event.Payload().(*RelocationStarted); ok {
+			derived = append(derived, msg)
+		}
+	}
+
+	require.Len(t, derived, 1)
+	assert.Equal(t, peerAddress, derived[0].Address())
+	assert.NotZero(t, derived[0].Timestamp())
+	assert.ElementsMatch(t, []string{"actor1", "actor2"}, derived[0].Actors())
+	assert.ElementsMatch(t, []string{"grainKind/grain1"}, derived[0].Grains())
+	assert.True(t, derived[0].BestEffort())
+
+	// the graceful-shutdown snapshot path publishes a complete set
+	consumerGraceful, err := sys.Subscribe()
+	require.NoError(t, err)
+
+	sys.(*actorSystem).publishRelocationStarted(peerAddress, peerState, false)
+
+	derived = nil
+
+	for event := range consumerGraceful.Iterator() {
+		if msg, ok := event.Payload().(*RelocationStarted); ok {
+			derived = append(derived, msg)
+		}
+	}
+
+	require.Len(t, derived, 1)
+	assert.False(t, derived[0].BestEffort())
+
+	// an empty derived set still publishes: on a crash it signals suspected loss
+	consumer2, err := sys.Subscribe()
+	require.NoError(t, err)
+
+	sys.(*actorSystem).publishRelocationStarted(peerAddress, &internalpb.PeerState{}, true)
+
+	derived = nil
+
+	for event := range consumer2.Iterator() {
+		if msg, ok := event.Payload().(*RelocationStarted); ok {
+			derived = append(derived, msg)
+		}
+	}
+
+	require.Len(t, derived, 1)
+	assert.Empty(t, derived[0].Actors())
+	assert.Empty(t, derived[0].Grains())
+
+	assert.NoError(t, sys.Stop(ctx))
+}
+
 func TestStartupCleanup(t *testing.T) {
 	t.Run("startupCleanup stops cluster and remoting", func(t *testing.T) {
 		ctx := context.TODO()
@@ -5647,6 +5893,118 @@ func TestCleanupStaleLocalActors(t *testing.T) {
 		clusterMock.EXPECT().RemoveActor(mock.Anything, staleAddr.Name()).Return(assert.AnError).Once()
 
 		require.NoError(t, system.cleanupStaleLocalActors(context.Background()))
+	})
+
+	t.Run("removes stale singleton records instead of respawning", func(t *testing.T) {
+		// singletons are re-arbitrated by the leader on demand: a stale
+		// singleton record is dropped, never respawned locally
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		system.actors = newTree()
+
+		staleAddr := address.New("stale-singleton", system.name, "127.0.0.1", 8080)
+		actors := []*internalpb.Actor{{
+			Address:     staleAddr.String(),
+			Relocatable: true,
+			Singleton:   &internalpb.SingletonSpec{},
+		}}
+
+		clusterMock.EXPECT().Actors(mock.Anything, mock.Anything).Return(actors, nil).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, staleAddr.Name()).Return(nil).Once()
+
+		require.NoError(t, system.cleanupStaleLocalActors(context.Background()))
+	})
+
+	t.Run("respawn failure does not fail cleanup and restores the record", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		system.actors = newTree()
+		system.registry = types.NewRegistry()
+		system.reflection = newReflection(system.registry)
+
+		staleAddr := address.New("stale", system.name, "127.0.0.1", 8080)
+		record := &internalpb.Actor{
+			Address:     staleAddr.String(),
+			Type:        "unregistered.Type",
+			Relocatable: true,
+		}
+
+		clusterMock.EXPECT().Actors(mock.Anything, mock.Anything).Return([]*internalpb.Actor{record}, nil).Once()
+		// the respawn path releases the entry, fails to instantiate the
+		// unregistered type, and restores the record
+		clusterMock.EXPECT().GetActor(mock.Anything, staleAddr.Name()).Return(record, nil).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, staleAddr.Name()).Return(nil).Once()
+		clusterMock.EXPECT().PutActor(mock.Anything, record).Return(nil).Once()
+
+		require.NoError(t, system.cleanupStaleLocalActors(context.Background()))
+	})
+
+	t.Run("respawns relocatable actors of a previous incarnation", func(t *testing.T) {
+		// a container that crashes and restarts in place rejoins at the same
+		// address without the cluster ever observing a NodeLeft: the registry
+		// records of its previous incarnation must be respawned locally, not
+		// erased
+		ctx := context.TODO()
+		nodePorts := dynaport.Get(3)
+		host := "127.0.0.1"
+
+		addrs := []string{
+			net.JoinHostPort(host, strconv.Itoa(nodePorts[0])),
+		}
+
+		provider := new(mocksdiscovery.Provider)
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig(host, nodePorts[2])),
+			WithCluster(
+				NewClusterConfig().
+					WithKinds(new(MockActor)).
+					WithReplicaCount(1).
+					WithPeersPort(nodePorts[1]).
+					WithDiscoveryPort(nodePorts[0]).
+					WithDiscovery(provider)),
+		)
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+
+		x := sys.(*actorSystem)
+
+		// spawn a relocatable actor and wait for its registry record
+		pid, err := sys.Spawn(ctx, "phoenix", NewMockActor(), WithLongLived())
+		require.NoError(t, err)
+
+		// replication to the registry is asynchronous: wait for the record
+		// itself, not for the local PID
+		require.Eventually(t, func() bool {
+			_, err := x.getCluster().GetActor(ctx, "phoenix")
+			return err == nil
+		}, 10*time.Second, 100*time.Millisecond)
+
+		// simulate the previous incarnation's death: the local PID vanishes
+		// while the registry record keeps pointing at this node's address
+		x.actors.deleteNode(pid)
+		_, found := x.actors.node(pid.getAddress().String())
+		require.False(t, found)
+
+		require.NoError(t, x.cleanupStaleLocalActors(ctx))
+
+		// the actor is respawned locally instead of erased
+		_, found = x.actors.node(pid.getAddress().String())
+		require.True(t, found, "relocatable actor must be respawned, not erased")
+
+		exists, err := sys.ActorExists(ctx, "phoenix")
+		require.NoError(t, err)
+		require.True(t, exists, "registry record must survive the reconciliation")
+
+		require.NoError(t, sys.Stop(ctx))
 	})
 }
 

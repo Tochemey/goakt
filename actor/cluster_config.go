@@ -78,7 +78,7 @@ func NewClusterConfig() *ClusterConfig {
 		minimumPeersQuorum:       1,
 		writeQuorum:              1,
 		readQuorum:               1,
-		replicaCount:             1,
+		replicaCount:             2,
 		partitionCount:           271,
 		tableSize:                4 * size.MB,
 		writeTimeout:             time.Second,
@@ -149,21 +149,30 @@ func (x *ClusterConfig) WithPeersPort(peersPort int) *ClusterConfig {
 // increasing it typically improves fault tolerance and read availability, but also
 // increases write fan-out and resource usage.
 //
+// The default is 2: every partition has a backup on another node, so the cluster
+// registry survives the loss of a single node and registry-derived crash recovery
+// (see the relocation documentation) stays complete. Use 3 to also tolerate two
+// concurrent node losses. With a replica count of 1 there are no backups: the
+// partitions owned by a crashed node are lost with it, crash recovery silently
+// misses the affected records, and the actor system logs a startup warning.
+//
 // Relationship to quorums:
 //
 //   - WithWriteQuorum(N) controls how many replicas must acknowledge a write.
 //   - WithReadQuorum(N) controls how many replicas are consulted to satisfy a read.
 //
-// To avoid stale reads, configure quorums so that read and write sets overlap:
-//
-//	readQuorum + writeQuorum > replicaCount
+// The classic read-your-writes guideline (readQuorum + writeQuorum > replicaCount)
+// is a consistency guideline only; it is not validated or enforced. The default
+// (replicaCount=2, both quorums at 1) deliberately does not follow it: the registry
+// is rebuildable, single activation is arbitrated by the partition's primary owner
+// rather than by quorum overlap, and quorums of 1 keep registry writes succeeding
+// while a node is down.
 //
 // Additional guidance:
 //
 //   - replicaCount must be >= 1
 //   - minimumPeersQuorum should generally be <= replicaCount (otherwise the cluster
 //     may have difficulty reaching the desired quorum during bootstrap or failures)
-//   - A common starting point is replicaCount=3 with writeQuorum=2 and readQuorum=2
 //
 // ⚠️ Note: changing this value should be done with care, as it affects consistency and
 // failure tolerance across the cluster.
@@ -309,16 +318,19 @@ func (x *ClusterConfig) WithGrainActivationBarrier(timeout time.Duration) *Clust
 //
 //	readQuorum + writeQuorum > replicaCount
 //
+// This is a guideline only; it is not validated or enforced. The default
+// (replicaCount=2 with both quorums at 1) deliberately does not follow it so that
+// registry writes keep succeeding while a node is down; see WithReplicaCount.
+//
 // Typical configurations:
 //
-//   - replicaCount=1: writeQuorum=1, readQuorum=1
+//   - replicaCount=2: writeQuorum=1, readQuorum=1 (the default; favors write availability)
 //   - replicaCount=3: writeQuorum=2, readQuorum=2 (common “majority” choice)
 //
 // Notes / constraints:
 //
 //   - writeQuorum must be >= 1 (validated)
-//   - writeQuorum should be <= replicaCount (not currently validated here; if
-//     larger, writes may never reach quorum)
+//   - writeQuorum must be <= replicaCount (enforced by the cluster engine at start)
 //
 // ⚠️ This is an advanced knob; the defaults are sufficient for most deployments.
 func (x *ClusterConfig) WithWriteQuorum(count uint32) *ClusterConfig {
@@ -341,16 +353,20 @@ func (x *ClusterConfig) WithWriteQuorum(count uint32) *ClusterConfig {
 //
 //	readQuorum + writeQuorum > replicaCount
 //
+// This is a guideline only; it is not validated or enforced. The default
+// (replicaCount=2 with both quorums at 1) deliberately does not follow it; the
+// registry is rebuildable and read repair heals replicas that missed a write.
+// See WithReplicaCount.
+//
 // Typical configurations:
 //
-//   - replicaCount=1: readQuorum=1, writeQuorum=1
+//   - replicaCount=2: readQuorum=1, writeQuorum=1 (the default; favors availability)
 //   - replicaCount=3: readQuorum=2, writeQuorum=2 (common “majority” choice)
 //
 // Notes / constraints:
 //
 //   - readQuorum must be >= 1 (validated)
-//   - readQuorum should be <= replicaCount (not currently validated here; if
-//     larger, reads may never reach quorum)
+//   - readQuorum must be <= replicaCount (enforced by the cluster engine at start)
 //
 // ⚠️ This is an advanced knob; the defaults are sufficient for most deployments.
 func (x *ClusterConfig) WithReadQuorum(count uint32) *ClusterConfig {
