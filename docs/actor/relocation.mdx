@@ -45,7 +45,7 @@ Item failures are isolated: a failing actor, grain, or peer never aborts the res
 - When a peer is unreachable, the unsent remainder of its share is moved once to the next surviving peer.
 - Each individual item (actor respawn, eager grain reactivation, lazy grain release) is retried a bounded number of times with backoff before it counts as failed: relocation runs while the cluster is still digesting a node loss, so registry operations can transiently time out.
 - A failed actor respawn restores the actor's registry record before the failure is reported, so the actor stays visible and recoverable (by a later departure-triggered relocation or the node's own restart reconciliation) instead of being silently erased.
-- Items that still cannot be relocated are reported in a single `RelocationFailed` event on the event stream, listing exactly the failed actor addresses and grain identities. Items that were relocated are not listed.
+- Items that still cannot be relocated are reported in a single [`RelocationFailed`](#relocationfailed) event on the event stream, listing exactly the failed actor addresses and grain identities. Items that were relocated are not listed.
 - A failed lazy-grain release is never reported: it is a cleanup optimization, not an item loss. The directory entry self-heals when the grain is next addressed.
 
 <Warning>
@@ -54,6 +54,64 @@ Item failures are isolated: a failing actor, grain, or peer never aborts the res
   node cannot process the batched request, and its share is then reassigned to
   another peer or reported as failed.
 </Warning>
+
+## Relocation events
+
+Every relocation run publishes two events on the [event stream](/advanced/event-streams): `RelocationStarted` when the leader establishes the relocation set, and `RelocationFailed` when items could not be relocated. Subscribe with `ActorSystem.Subscribe()` to observe or react to relocations; both events are cluster mode only.
+
+### RelocationStarted
+
+Published by the leader whenever it starts relocating a departed node's actors and grains, for graceful shutdowns and crashes alike.
+
+| Accessor       | Returns                                                            |
+| -------------- | ------------------------------------------------------------------ |
+| `Address()`    | Address of the departed node whose items are being relocated.      |
+| `Timestamp()`  | When the relocation set was established.                           |
+| `Actors()`     | Actor names in the relocation set (may be empty).                  |
+| `Grains()`     | Grain IDs in the relocation set (may be empty).                    |
+| `BestEffort()` | How the relocation set was obtained (see below).                   |
+
+`BestEffort()` distinguishes the two departure paths:
+
+- **`false` (graceful shutdown)**: the set comes from the `PeerState` snapshot the departed node replicated before leaving, and is complete.
+- **`true` (crash)**: the node left no snapshot, so the set was reconstructed from the replicated cluster registry (see [Crash recovery](#crash-recovery)). Records lost with the crashed node's partitions cannot be listed, so the set may be incomplete even though relocation of the listed items proceeds normally. The event fires even when the reconstructed set is empty, which signals suspected record loss rather than a benign no-op. Subscribers holding an external record of placements can diff it against the listed items to detect and reconcile silent losses.
+
+### RelocationFailed
+
+Published when items of a departed node could not be relocated after all retries. It lists exactly the failed items; items that were relocated successfully are never listed.
+
+| Accessor      | Returns                                                             |
+| ------------- | ------------------------------------------------------------------- |
+| `Address()`   | Address of the departed node that triggered the relocation.         |
+| `Timestamp()` | When the relocation failure was recorded.                           |
+| `Actors()`    | Full addresses of the actors that failed to relocate (may be empty). |
+| `Grains()`    | Grain IDs that failed to relocate (may be empty).                   |
+| `Error()`     | The underlying error that caused the failure.                       |
+
+The report is terminal: the relocation run does not revisit failed items. Subscribe to this event to drive your own recovery, for example re-spawning the affected actors, alerting, or adding capacity for a missing [role](#role-aware-allocation).
+
+### Subscribing
+
+```go
+subscriber, err := system.Subscribe()
+if err != nil {
+    return err
+}
+defer system.Unsubscribe(subscriber)
+
+for msg := range subscriber.Iterator() {
+    switch e := msg.Payload().(type) {
+    case *actor.RelocationStarted:
+        log.Printf("relocation started: node=%s bestEffort=%v actors=%v grains=%v",
+            e.Address(), e.BestEffort(), e.Actors(), e.Grains())
+    case *actor.RelocationFailed:
+        log.Printf("relocation failed: node=%s actors=%v grains=%v err=%v",
+            e.Address(), e.Actors(), e.Grains(), e.Error())
+    }
+}
+```
+
+See [Event Streams](/advanced/event-streams) for the full subscriber API and the other system events.
 
 ## Actor allocation
 
@@ -85,7 +143,7 @@ The derivation itself is gated and retried: the leader waits for the cluster's p
 
 A crashed node that **restarts at the same address** (a container restart in place, the common Kubernetes case) is handled separately, because the cluster may never observe a `NodeLeft` for a fast restart: on startup, a node that finds registry records pointing at its own address with no corresponding local actor **respawns the relocatable ones locally**, exactly as crash relocation would have recreated them on a survivor. Singleton and non-relocatable records are removed instead: singletons are re-arbitrated by the leader on demand, and non-relocatable actors are lost with their incarnation by design.
 
-Every relocation is announced by a `RelocationStarted` event on the event stream, listing the actor names and grain IDs in the relocation set. For a graceful shutdown, `BestEffort()` is false and the set is complete. For a crash, `BestEffort()` is true: the set was reconstructed from the registry, it fires even when empty (which signals suspected record loss rather than a benign no-op), and subscribers holding an external record of placements can diff it against the listed items to detect and reconcile silent losses.
+Every relocation is announced by a `RelocationStarted` event on the event stream, listing the actor names and grain IDs in the relocation set; its `BestEffort()` accessor tells you whether the set comes from a graceful-shutdown snapshot (complete) or was reconstructed from the registry after a crash (possibly incomplete). See [Relocation events](#relocation-events).
 
 ### Replication settings
 
@@ -227,6 +285,7 @@ The duration, relocated, and failed instruments are tagged with `actor.system` a
 ## See also
 
 - [Clustered Mode](/clustering/clustered): Cluster setup and discovery
+- [Event Streams](/advanced/event-streams): Subscriber API and the full list of system events
 - [Singletons](/actor/singletons): Cluster singletons and placement
 - [Grains](/grains/overview): Virtual actors and `WithGrainDisableRelocation`
 - [Extensions and Dependencies](/advanced/extensions-and-dependencies): Serializable dependencies for relocation

@@ -672,6 +672,16 @@ func TestRelocationWithReplicasReReplicatesSurvivorRegistry(t *testing.T) {
 	}
 
 	assert.NoError(t, node1.Stop(ctx))
+
+	// node3 goes down last: wait until it has digested node1's departure
+	// before stopping it. Tearing node3 down while its member view still
+	// lists node1 makes its shutdown (peer-state replication, registry
+	// cleanup) dial the dead node and fail Stop with an i/o timeout.
+	require.Eventually(t, func() bool {
+		peers, err := node3.(*actorSystem).cluster.Peers(ctx)
+		return err == nil && len(peers) == 0
+	}, 60*time.Second, 500*time.Millisecond, "node3 never observed node1 leaving")
+
 	assert.NoError(t, node3.Stop(ctx))
 	assert.NoError(t, sd1.Close())
 	assert.NoError(t, sd3.Close())
@@ -784,6 +794,16 @@ func TestRelocationWithReplicasRelocatesDepartedActors(t *testing.T) {
 	}
 
 	assert.NoError(t, node1.Stop(ctx))
+
+	// node3 goes down last: wait until it has digested node1's departure
+	// before stopping it. Tearing node3 down while its member view still
+	// lists node1 makes its shutdown (peer-state replication, registry
+	// cleanup) dial the dead node and fail Stop with an i/o timeout.
+	require.Eventually(t, func() bool {
+		peers, err := node3.(*actorSystem).cluster.Peers(ctx)
+		return err == nil && len(peers) == 0
+	}, 60*time.Second, 500*time.Millisecond, "node3 never observed node1 leaving")
+
 	assert.NoError(t, node3.Stop(ctx))
 	assert.NoError(t, sd1.Close())
 	assert.NoError(t, sd3.Close())
