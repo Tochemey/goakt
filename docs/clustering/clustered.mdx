@@ -27,6 +27,14 @@ find peers.
 Configure the actor system with `WithCluster(clusterConfig)` and a discovery provider. Configure remoting with
 `WithRemote(config)`. The cluster joins membership, and actors can be looked up via `ActorOf` across nodes. See [Service Discovery](/clustering/service-discovery) for provider options.
 
+## Registry consistency
+
+Actor and grain creation is synchronous with respect to the cluster registry: `Spawn`, `SpawnOn`, `SpawnSingleton`,
+and grain activation only return once the registry record is written to the cluster store. As soon as a creation call
+succeeds, the actor is resolvable by name (for example via `ActorOf`) and reachable from any node in the cluster,
+with no propagation window to retry around. When the registry write fails, the creation call returns the error and
+the actor or grain is stopped, so a failed creation leaves nothing behind.
+
 ## Relocation
 
 When a node leaves, the leader relocates its actors and grains to remaining nodes. Singleton actors move to the leader;

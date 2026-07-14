@@ -60,6 +60,12 @@ import (
 // This method is location-transparent: with options such as WithHostAndPort, the actor
 // may be spawned on a remote node when remoting is enabled; otherwise it is created locally.
 //
+// In cluster mode, Spawn only returns once the actor's registry record is written
+// to the cluster store: a successful spawn means the actor is immediately
+// resolvable by name and reachable from any node. When the registry write fails,
+// the actor is stopped and the error is returned, so a failed spawn leaves
+// nothing behind.
+//
 // Parameters:
 //   - ctx: A context used to control cancellation and timeouts during the spawn process.
 //   - name: A unique identifier for the actor within the local actor system.
@@ -138,15 +144,8 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 		return nil, err
 	}
 
-	if !pid.isStateSet(systemState) {
-		x.increaseActorsCounter()
-	}
-
-	// add the given actor to the tree and supervise it
-	guardian := x.getUserGuardian()
-	_ = x.actors.addNode(guardian, pid)
-	x.actors.addWatcher(pid, x.deathWatch)
-	return pid, x.putActorOnCluster(pid)
+	// add the given actor to the tree, supervise it and publish it to the cluster
+	return x.completeSpawn(ctx, x.getUserGuardian(), pid)
 }
 
 // SpawnNamedFromFunc creates and starts an actor whose behavior is defined by the given receive function,
@@ -193,13 +192,7 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 		return nil, err
 	}
 
-	if !pid.isStateSet(systemState) {
-		x.increaseActorsCounter()
-	}
-
-	_ = x.actors.addNode(x.userGuardian, pid)
-	x.actors.addWatcher(pid, x.deathWatch)
-	return pid, x.putActorOnCluster(pid)
+	return x.completeSpawn(ctx, x.userGuardian, pid)
 }
 
 // SpawnOn creates and starts an actor locally, on another node in the current cluster,
@@ -231,6 +224,11 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 //
 // Unlike Spawn, SpawnOn does not return a PID. Use ActorOf to resolve the actor's PID or
 // Address after it has been successfully created.
+//
+// SpawnOn only returns once the actor's registry record is written to the cluster
+// store: a successful call means the actor is immediately resolvable by name
+// (e.g. via ActorOf) and reachable from any node, with no propagation window to
+// retry around.
 //
 // Parameters:
 //   - ctx: Context for cancellation and timeouts during the spawn process.
@@ -400,6 +398,13 @@ func (x *actorSystem) SpawnRouter(ctx context.Context, name string, poolSize int
 // When spawn retries are configured, transient conditions (e.g. quorum errors, leader/engine
 // unavailability, temporary lack of eligible role members, or Connect Unavailable/DeadlineExceeded)
 // are retried until the retry budget is exhausted or the context is done.
+//
+// Registry visibility:
+// SpawnSingleton only returns once the singleton's registry record and kind are
+// written to the cluster store: a successful call means the singleton is
+// immediately resolvable by name and reachable from any node. When the registry
+// write fails, the actor is stopped and the reserved kind released, so a failed
+// spawn leaves nothing behind.
 //
 // Operational guidance:
 // SpawnSingleton is safe to call from any cluster member; it will resolve the correct host and
@@ -764,15 +769,8 @@ func (x *actorSystem) spawnSingletonOnLocal(ctx context.Context, name string, ac
 		return nil, err
 	}
 
-	if !pid.isStateSet(systemState) {
-		x.increaseActorsCounter()
-	}
-
-	// add the given actor to the tree and supervise it
-	_ = x.actors.addNode(x.singletonManager, pid)
-	x.actors.addWatcher(pid, x.deathWatch)
-
-	if err := x.putActorOnCluster(pid); err != nil {
+	// add the given actor to the tree, supervise it and publish it to the cluster
+	if _, err = x.completeSpawn(ctx, x.singletonManager, pid); err != nil {
 		return nil, err
 	}
 

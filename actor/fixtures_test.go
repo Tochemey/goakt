@@ -1567,10 +1567,7 @@ func MockReplicationTestSystem(clusterMock *mockcluster.Cluster) *actorSystem {
 		name:                  "test-replication",
 		logger:                log.DiscardLogger,
 		actors:                newTree(),
-		actorsQueue:           make(chan *internalpb.Actor, 4),
-		grainsQueue:           make(chan *internalpb.Grain, 4),
 		grains:                xsync.NewMap[string, *grainPID](),
-		shutdownSignal:        make(chan types.Unit),
 		remoteConfig:          remote.NewConfig("127.0.0.1", 8080),
 		remoteHostPort:        net.JoinHostPort("127.0.0.1", "8080"),
 		remoteSenderAddresses: xsync.NewMap[string, *address.Address](),
@@ -1622,20 +1619,6 @@ func MockSimpleClusterReadyActorSystem(rem remoteclient.Client, cl cluster.Clust
 	sys.remoteSenderAddresses = xsync.NewMap[string, *address.Address]()
 	sys.registry = types.NewRegistry()
 	sys.reflection = newReflection(sys.registry)
-	sys.grainsQueue = make(chan *internalpb.Grain, 1)
-	sys.shutdownSignal = make(chan types.Unit)
-
-	// nolint
-	go func() {
-		for {
-			select {
-			case <-sys.grainsQueue:
-				// drop test grains
-			case <-sys.shutdownSignal:
-				return
-			}
-		}
-	}()
 
 	return sys
 }

@@ -475,6 +475,7 @@ func (x *actorSystem) activateGrainLocally(ctx context.Context, identity *GrainI
 			}
 		}
 
+		activatedHere := false
 		if !pid.isActive() {
 			if err := x.waitForGrainActivationBarrier(ctx); err != nil {
 				return nil, err
@@ -486,10 +487,11 @@ func (x *actorSystem) activateGrainLocally(ctx context.Context, identity *GrainI
 				}
 				return nil, err
 			}
+
+			activatedHere = true
 		}
 
-		x.grains.Set(identity.String(), pid)
-		if err := x.putGrainOnCluster(pid); err != nil {
+		if err := x.finalizeGrainActivation(ctx, pid, claimed, activatedHere); err != nil {
 			return nil, err
 		}
 		return pid, nil
@@ -1028,8 +1030,8 @@ func (x *actorSystem) ensureExistingGrainProcess(ctx context.Context, id *GrainI
 			return nil, err
 		}
 
-		// Broadcast the activation to the cluster when clustering is enabled.
-		if err := x.putGrainOnCluster(process); err != nil {
+		// Publish the activation to the cluster when clustering is enabled.
+		if err := x.finalizeGrainActivation(ctx, process, claimed, true); err != nil {
 			return nil, err
 		}
 	}
@@ -1066,8 +1068,10 @@ func (x *actorSystem) ensureNewGrainProcess(ctx context.Context, id *GrainIdenti
 		return nil, err
 	}
 
-	x.grains.Set(id.String(), process)
-	return process, x.putGrainOnCluster(process)
+	if err := x.finalizeGrainActivation(ctx, process, claimed, true); err != nil {
+		return nil, err
+	}
+	return process, nil
 }
 
 // ensureGrainOwnership verifies cluster ownership and attempts a claim when unowned.
@@ -1106,6 +1110,53 @@ func (x *actorSystem) ensureGrainOwnership(ctx context.Context, id *GrainIdentit
 	}
 
 	return false, nil
+}
+
+// finalizeGrainActivation registers the activated grain in the local grains
+// map and synchronously publishes its registry record to the cluster. On
+// publication failure it rolls back exactly what this activation created: the
+// grain is deactivated and its local entry removed only when this call
+// performed the activation (activatedHere), and its cluster claim is released
+// only when this call made the claim (claimed). A grain that was already
+// active on entry is left untouched, so a failed publication never disturbs a
+// running grain.
+func (x *actorSystem) finalizeGrainActivation(ctx context.Context, process *grainPID, claimed, activatedHere bool) error {
+	key := process.getIdentity().String()
+	x.grains.Set(key, process)
+
+	err := x.putGrainOnCluster(ctx, process)
+	if err == nil {
+		return nil
+	}
+
+	// the rollback must run even when the publication failed because ctx was
+	// canceled or timed out
+	ctx = context.WithoutCancel(ctx)
+
+	if activatedHere {
+		// deactivate rolls back everything this activation created: it marks
+		// the grain inactive, deletes the local entry and removes the cluster
+		// record, releasing any claim this call made.
+		if derr := process.deactivate(ctx); derr != nil {
+			x.logger.Errorf("failed to deactivate grain=%s after failed cluster publication: %v", key, derr)
+			// make sure nothing is left behind even when deactivation fails midway
+			x.grains.Delete(key)
+
+			if claimed && x.InCluster() {
+				_ = x.getCluster().RemoveGrain(ctx, key)
+			}
+		}
+
+		return err
+	}
+
+	if claimed && x.InCluster() {
+		// release the claim this call made without disturbing the grain,
+		// which was already active before this call
+		_ = x.getCluster().RemoveGrain(ctx, key)
+	}
+
+	return err
 }
 
 func (x *actorSystem) isLocalGrainOwner(grain *internalpb.Grain) bool {
@@ -1346,11 +1397,8 @@ func (x *actorSystem) recreateGrainOnce(ctx context.Context, serializedGrain *in
 			return nil, err
 		}
 
-		// Register locally
-		x.getGrains().Set(identity.String(), process)
-
-		// Register in the cluster
-		if err := x.putGrainOnCluster(process); err != nil {
+		// Register locally and in the cluster
+		if err := x.finalizeGrainActivation(ctx, process, false, true); err != nil {
 			return nil, err
 		}
 		return process, nil
@@ -1360,6 +1408,7 @@ func (x *actorSystem) recreateGrainOnce(ctx context.Context, serializedGrain *in
 		x.registry.Register(process.getGrain())
 	}
 
+	activatedHere := false
 	if !process.isActive() {
 		if err := x.waitForGrainActivationBarrier(ctx); err != nil {
 			return nil, err
@@ -1368,10 +1417,12 @@ func (x *actorSystem) recreateGrainOnce(ctx context.Context, serializedGrain *in
 		if err := process.activate(ctx); err != nil {
 			return nil, err
 		}
+
+		activatedHere = true
 	}
 
 	// Register in the cluster
-	if err := x.putGrainOnCluster(process); err != nil {
+	if err := x.finalizeGrainActivation(ctx, process, false, activatedHere); err != nil {
 		return nil, err
 	}
 	return process, nil

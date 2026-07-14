@@ -149,6 +149,12 @@ type ActorSystem interface {
 	// This method is location-transparent: with options such as WithHostAndPort, the actor
 	// may be spawned on a remote node when remoting is enabled; otherwise it is created locally.
 	//
+	// In cluster mode, Spawn only returns once the actor's registry record is written
+	// to the cluster store: a successful spawn means the actor is immediately
+	// resolvable by name and reachable from any node. When the registry write fails,
+	// the actor is stopped and the error is returned, so a failed spawn leaves
+	// nothing behind.
+	//
 	// Parameters:
 	//   - ctx: A context used to control cancellation and timeouts during the spawn process.
 	//   - name: A unique identifier for the actor within the local actor system.
@@ -197,6 +203,11 @@ type ActorSystem interface {
 	//
 	// Unlike Spawn, SpawnOn does not return a PID. Use ActorOf to resolve the actor's PID or
 	// Address after it has been successfully created.
+	//
+	// SpawnOn only returns once the actor's registry record is written to the cluster
+	// store: a successful call means the actor is immediately resolvable by name
+	// (e.g. via ActorOf) and reachable from any node, with no propagation window to
+	// retry around.
 	//
 	// Parameters:
 	//   - ctx: Context for cancellation and timeouts during the spawn process.
@@ -287,6 +298,12 @@ type ActorSystem interface {
 	// The cluster singleton is automatically started on the oldest node in the cluster.
 	// If the oldest node leaves the cluster, the singleton is restarted on the new oldest node.
 	// This is useful for managing shared resources or coordinating tasks that should be handled by a single actor.
+	//
+	// SpawnSingleton only returns once the singleton's registry record and kind are
+	// written to the cluster store: a successful call means the singleton is
+	// immediately resolvable by name and reachable from any node. When the registry
+	// write fails, the actor is stopped and the reserved kind released, so a failed
+	// spawn leaves nothing behind.
 	SpawnSingleton(ctx context.Context, name string, actor Actor, opts ...ClusterSingletonOption) (*PID, error)
 	// Kill stops a given actor in the system either locally or on a remote node(when clustering is enabled)
 	Kill(ctx context.Context, name string) error
@@ -774,8 +791,14 @@ type ActorSystem interface {
 	// (or only have an ad-hoc NoSender) can pass the system's NoSender and
 	// let toReceiveContext materialise the sender from the wire message.
 	handleRemoteTell(ctx context.Context, from *PID, to *PID, message any) error
-	// putActorOnCluster sets actor in the actor system actors registry
-	putActorOnCluster(actor *PID) error
+	// putActorOnCluster synchronously writes the actor's registry record to
+	// the cluster store
+	putActorOnCluster(ctx context.Context, actor *PID) error
+	// completeSpawn attaches pid to the tree under parent, registers
+	// death-watch supervision, and synchronously publishes the registry
+	// record to the cluster. On publication failure the actor is stopped so
+	// a failed spawn leaves nothing behind, and the error is returned.
+	completeSpawn(ctx context.Context, parent, pid *PID) (*PID, error)
 	// getCluster returns the cluster engine
 	getCluster() cluster.Cluster
 	// tree returns the actors tree
@@ -900,7 +923,6 @@ type actorSystem struct {
 	// cluster settings
 	clusterEnabled  atomic.Bool
 	cluster         cluster.Cluster
-	actorsQueue     chan *internalpb.Actor
 	eventsQueue     <-chan *cluster.Event
 	partitionHasher hash.Hasher
 	clusterNode     *discovery.Node
@@ -997,17 +1019,7 @@ type actorSystem struct {
 	extensions       *xsync.Map[string, extension.Extension]
 
 	shuttingDown atomic.Bool
-	// shutdownSignal is closed once at the start of shutdown() or
-	// startupCleanup(). Producers of actorsQueue / grainsQueue select
-	// against it to avoid racing a concurrent close of those queues.
-	// Guarded by the shuttingDown CAS so close runs exactly once.
-	shutdownSignal chan types.Unit
-	// drainers tracks the replicateActors / replicateGrains goroutines.
-	// shutdown waits on it so the drainers finish draining the cluster
-	// queues before reset() clears the rest of the system state.
-	drainers    sync.WaitGroup
-	grainsQueue chan *internalpb.Grain
-	grains      *xsync.Map[string, *grainPID]
+	grains       *xsync.Map[string, *grainPID]
 	// Caches parsed sender addresses of inbound remote messages so the hot
 	// receive path skips address.Parse. Addresses are immutable, so entries
 	// never go stale; the cache is flushed wholesale when it reaches
@@ -1079,7 +1091,6 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	}
 
 	system := &actorSystem{
-		actorsQueue:           make(chan *internalpb.Actor, 10),
 		name:                  name,
 		logger:                log.NewZap(log.ErrorLevel, os.Stderr),
 		actorInitMaxRetries:   DefaultInitMaxRetries,
@@ -1100,8 +1111,6 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		recentDepartures:      xsync.NewTTLMap[string, types.Unit](correlatedDepartureWindow),
 		topicActor:            nil,
 		extensions:            xsync.NewMap[string, extension.Extension](),
-		grainsQueue:           make(chan *internalpb.Grain, 10),
-		shutdownSignal:        make(chan types.Unit),
 		grains:                xsync.NewMap[string, *grainPID](),
 		remoteSenderAddresses: xsync.NewMap[string, *address.Address](),
 		askTimeout:            DefaultAskTimeout,
@@ -1223,14 +1232,6 @@ func (x *actorSystem) Start(ctx context.Context) error {
 
 	x.logger.Infof("starting actor system=%s os=%s arch=%s", x.name, runtime.GOOS, runtime.GOARCH)
 	x.starting.Store(true)
-
-	// (Re)create shutdownSignal here, the only point where no cluster
-	// producer or replicate drainer is alive yet. Recreating it during
-	// teardown (in reset()) would race the concurrent reads in
-	// putActorOnCluster / putGrainOnCluster. A fresh channel per start
-	// lets the next shutdown close it exactly once without double-closing
-	// the one a prior teardown already closed.
-	x.shutdownSignal = make(chan types.Unit)
 
 	x.scheduler = newScheduler(x.logger, x.shutdownTimeout, x)
 
@@ -2446,40 +2447,84 @@ func (x *actorSystem) forgetPeerRemotingPort(peerAddress string) {
 	x.peerRemotingPorts.Delete(peerAddress)
 }
 
-// putActorOnCluster broadcasts the newly (re)spawned actor into the
-// cluster. The select guards against the shutdown race: if shutdownSignal
-// closes first (shutdown has started), the send is skipped instead of
-// racing shutdownCluster on the channel.
-func (x *actorSystem) putActorOnCluster(pid *PID) error {
-	if !x.clusterEnabled.Load() {
+// completeSpawn finishes a local spawn: it counts the actor, attaches pid to
+// the tree under parent, registers death-watch supervision, and synchronously
+// publishes the registry record to the cluster. On publication failure the
+// actor is stopped, so a failed spawn leaves nothing behind: the death watch
+// removes the tree node, decrements the counter and, for singletons, removes
+// the kind.
+func (x *actorSystem) completeSpawn(ctx context.Context, parent, pid *PID) (*PID, error) {
+	if !pid.isStateSet(systemState) {
+		x.increaseActorsCounter()
+	}
+
+	_ = x.actors.addNode(parent, pid)
+	x.actors.addWatcher(pid, x.deathWatch)
+
+	if err := x.putActorOnCluster(ctx, pid); err != nil {
+		// the rollback must run even when the publication failed because ctx
+		// was canceled or timed out
+		if serr := pid.Shutdown(context.WithoutCancel(ctx)); serr != nil {
+			x.logger.Errorf("failed to stop actor=%s after failed cluster publication: %v (hint: check actor PostStop)", pid.Name(), serr)
+		}
+
+		return nil, err
+	}
+
+	return pid, nil
+}
+
+// putActorOnCluster synchronously writes the actor's registry record (and its
+// kind for singletons) to the cluster store. It only returns nil once the
+// record is durably written, so a successful spawn implies the actor is
+// resolvable by name from any node. No-op when clustering is disabled or for
+// system actors.
+func (x *actorSystem) putActorOnCluster(ctx context.Context, pid *PID) error {
+	if !x.clusterEnabled.Load() || isSystemName(pid.Name()) {
 		return nil
 	}
+
 	actor, err := pid.toSerialize()
 	if err != nil {
 		return err
 	}
-	select {
-	case x.actorsQueue <- actor:
-	case <-x.shutdownSignal:
+
+	cluster := x.getCluster()
+	if actor.GetSingleton() != nil {
+		kind := actor.GetType()
+		role := actor.GetRole()
+		if role != "" {
+			kind = kindRole(kind, role)
+		}
+
+		if err := cluster.PutKind(ctx, kind); err != nil {
+			return err
+		}
 	}
-	return nil
+
+	return cluster.PutActor(ctx, actor)
 }
 
-// putGrainOnCluster broadcasts the newly (re)activated grain into the
-// cluster. See putActorOnCluster for the shutdown-race reasoning.
-func (x *actorSystem) putGrainOnCluster(pid *grainPID) error {
-	if !x.clusterEnabled.Load() {
+// putGrainOnCluster synchronously writes the grain's registry record and kind
+// to the cluster store. It only returns nil once the record is durably
+// written, so a successful activation implies the grain is resolvable from
+// any node. No-op when clustering is disabled or for system grains.
+func (x *actorSystem) putGrainOnCluster(ctx context.Context, pid *grainPID) error {
+	if !x.clusterEnabled.Load() || isSystemName(pid.getIdentity().Name()) {
 		return nil
 	}
+
 	grain, err := pid.toWireGrain()
 	if err != nil {
 		return err
 	}
-	select {
-	case x.grainsQueue <- grain:
-	case <-x.shutdownSignal:
+
+	cluster := x.getCluster()
+	if err := cluster.PutGrain(ctx, grain); err != nil {
+		return err
 	}
-	return nil
+
+	return cluster.PutKind(ctx, grain.GetGrainId().GetKind())
 }
 
 // setupCluster prepares the cluster engine when clustering is enabled
@@ -2578,11 +2623,6 @@ func (x *actorSystem) startCluster(ctx context.Context) error {
 
 	x.eventsQueue = x.cluster.Events()
 	go x.clusterEventsLoop()
-	// Track the replicate drainers so shutdown can wait for them to drain
-	// the cluster queues before reset() clears the rest of the state.
-	x.drainers.Add(2)
-	go x.replicateActors()
-	go x.replicateGrains()
 
 	if err := x.cleanupStaleLocalActors(ctx); err != nil {
 		x.logger.Warnf("failed to cleanup stale cluster actors: %v", err)
@@ -2747,12 +2787,7 @@ func (x *actorSystem) validateExtensions() error {
 // startupCleanup tears down partially-started components on startup failure.
 // Unlike shutdown(), this can be called while starting=true and started=false.
 func (x *actorSystem) startupCleanup(ctx context.Context) {
-	// Close shutdownSignal so any producer that already began publishing
-	// stops before we tear down cluster queues. Guarded by the CAS so
-	// close runs exactly once across startupCleanup / shutdown.
-	if x.shuttingDown.CompareAndSwap(false, true) {
-		close(x.shutdownSignal)
-	}
+	x.shuttingDown.Store(true)
 	x.stopDataCenterLeaderWatch()
 	_ = x.stopDataCenterController(ctx)
 
@@ -2765,10 +2800,6 @@ func (x *actorSystem) startupCleanup(ctx context.Context) {
 	}
 
 	x.dispatcher.signalStop()
-	// Wait for the replicate drainers to drain the cluster queues before
-	// reset() clears state. If cluster setup never got as far as spawning
-	// them, drainers' count is zero and Wait returns immediately.
-	x.drainers.Wait()
 	x.reset()
 }
 
@@ -2781,8 +2812,6 @@ func (x *actorSystem) reset() {
 	x.grains.Reset()
 	x.remoteSenderAddresses.Reset()
 	x.shuttingDown.Store(false)
-	// shutdownSignal is intentionally left closed here. It is recreated in
-	// Start(), the only point where no producer/drainer can race the write.
 	x.clusterStore = nil
 	x.dataCenterController = nil
 	x.dataCenterLeaderTicker = nil
@@ -2797,19 +2826,9 @@ func (x *actorSystem) shutdown(ctx context.Context) (err error) {
 	}
 
 	x.logger.Info("shutdown process begins")
-	// First CAS wins and closes shutdownSignal so producers stop sending
-	// on cluster queues. Subsequent calls (e.g. racing shutdown requests)
-	// observe shuttingDown=true and skip the close.
-	if x.shuttingDown.CompareAndSwap(false, true) {
-		close(x.shutdownSignal)
-	}
+	x.shuttingDown.Store(true)
 
 	defer func() {
-		// Wait for the replicate drainers to exit before reset() clears
-		// state. Drainers already observed the close above and will return
-		// shortly after draining any buffered items, so this does not add
-		// meaningful latency.
-		x.drainers.Wait()
 		x.reset()
 		// Signal dispatcher shutdown after all actors are torn down and
 		// state is reset. We do not wait for workers to exit because this
@@ -2979,139 +2998,18 @@ func (x *actorSystem) poisonAllGrains(ctx context.Context) error {
 	return nil
 }
 
-// replicateActors publishes newly created actors into the cluster when
-// cluster is enabled. Exits on shutdownSignal after draining any items
-// still buffered on actorsQueue. Also exits if actorsQueue is closed.
-//
-// The shutdown signal and queue are captured into locals once on
-// goroutine entry. shutdown() waits on x.drainers before calling
-// reset(), so the initial field reads here happen-before any later
-// reassignment — no race even across restart cycles.
-func (x *actorSystem) replicateActors() {
-	defer x.drainers.Done()
-	signal := x.shutdownSignal
-	queue := x.actorsQueue
-	for {
-		select {
-		case actor, ok := <-queue:
-			if !ok {
-				return
-			}
-			x.replicateOneActor(actor)
-		case <-signal:
-			for {
-				select {
-				case actor, ok := <-queue:
-					if !ok {
-						return
-					}
-					x.replicateOneActor(actor)
-				default:
-					return
-				}
-			}
-		}
-	}
-}
-
-// replicateOneActor performs the per-message replication body. Factored
-// out so both the live-processing and post-signal drain branches of
-// replicateActors share the same logic.
-func (x *actorSystem) replicateOneActor(actor *internalpb.Actor) {
-	addr, _ := address.Parse(actor.GetAddress())
-	if isSystemName(addr.Name()) {
-		return
-	}
-	if x.isStopping() || !x.InCluster() {
-		return
-	}
-
-	// Skip replication if the actor was already removed locally. Replication is
-	// asynchronous (the actor is queued on spawn and published here later), while
-	// removal on kill is synchronous via the death watch (deleteNode followed by
-	// cluster.RemoveActor). When an actor is killed right after being spawned, the
-	// queued PutActor can run after RemoveActor and re-register a dead actor in the
-	// cluster registry, where it would never be cleaned up. Mirrors the stale-actor
-	// check in removeStaleClusterActors.
-	if _, ok := x.actors.node(addr.String()); !ok {
-		return
-	}
-
-	ctx := context.Background()
-	cluster := x.getCluster()
-	if actor.GetSingleton() != nil {
-		kind := actor.GetType()
-		role := actor.GetRole()
-		if role != "" {
-			kind = kindRole(kind, role)
-		}
-		if err := cluster.PutKind(ctx, kind); err != nil {
-			x.logger.Warn(err.Error())
-			return
-		}
-	}
-	if err := cluster.PutActor(ctx, actor); err != nil {
-		x.logger.Warn(err.Error())
-	}
-}
-
-// replicateGrains publishes newly created grains into the cluster when
-// cluster is enabled. Exits on shutdownSignal after draining any items
-// still buffered on grainsQueue. Also exits if grainsQueue is closed.
-func (x *actorSystem) replicateGrains() {
-	defer x.drainers.Done()
-	// See replicateActors for why signal / queue are captured once here
-	// rather than read from the struct on every iteration.
-	signal := x.shutdownSignal
-	queue := x.grainsQueue
-	for {
-		select {
-		case grain, ok := <-queue:
-			if !ok {
-				return
-			}
-			x.replicateOneGrain(grain)
-		case <-signal:
-			for {
-				select {
-				case grain, ok := <-queue:
-					if !ok {
-						return
-					}
-					x.replicateOneGrain(grain)
-				default:
-					return
-				}
-			}
-		}
-	}
-}
-
-// replicateOneGrain performs the per-message replication body for grains.
-func (x *actorSystem) replicateOneGrain(grain *internalpb.Grain) {
-	if isSystemName(grain.GetGrainId().GetName()) {
-		return
-	}
-	if x.isStopping() || !x.InCluster() {
-		return
-	}
-
-	ctx := context.Background()
-	if err := x.cluster.PutGrain(ctx, grain); err != nil {
-		x.logger.Warn(err.Error())
-	}
-	if err := x.cluster.PutKind(ctx, grain.GetGrainId().GetKind()); err != nil {
-		x.logger.Warn(err.Error())
-	}
-}
-
 // resyncActors resyncs all actors in the actor system.
 // This is only called on a NodeLeft event to repair registry entries whose
 // owning partition was lost with the departed node (see handleNodeLeftEvent).
 func (x *actorSystem) resyncActors() error {
+	// The caller chain (handleNodeLeftEvent) carries no context, so the
+	// synchronous writes run on a background context like the old
+	// replication drainer did.
+	ctx := context.Background()
 	actors := x.localActors()
+
 	for _, actor := range actors {
-		if err := x.putActorOnCluster(actor); err != nil {
+		if err := x.putActorOnCluster(ctx, actor); err != nil {
 			x.logger.Errorf("failed to resync actor=%s: %v (hint: check cluster connectivity)", pathString(actor.Path()), err)
 			return fmt.Errorf("failed to resync Actor (%s): %w", pathString(actor.Path()), err)
 		}
@@ -3123,9 +3021,12 @@ func (x *actorSystem) resyncActors() error {
 // This is only called on a NodeLeft event to repair registry entries whose
 // owning partition was lost with the departed node (see handleNodeLeftEvent).
 func (x *actorSystem) resyncGrains() error {
+	// See resyncActors for why a background context is used here.
+	ctx := context.Background()
 	grains := x.grains.Values()
+
 	for _, grain := range grains {
-		if err := x.putGrainOnCluster(grain); err != nil {
+		if err := x.putGrainOnCluster(ctx, grain); err != nil {
 			x.logger.Errorf("failed to resync grain=%s: %v (hint: check cluster connectivity)", grain.getIdentity().String(), err)
 			return fmt.Errorf("failed to resync Grain (%s): %w", grain.getIdentity().String(), err)
 		}
@@ -4129,11 +4030,6 @@ func (x *actorSystem) shutdownCluster(ctx context.Context, actors []*PID, peerSt
 			}
 		}
 
-		// actorsQueue and grainsQueue are deliberately not closed here:
-		// producers select against shutdownSignal (closed earlier in
-		// shutdown / startupCleanup), and drainers exit on the same
-		// signal after draining buffered items. Not closing avoids the
-		// send-on-closed-channel race entirely.
 		x.clusterEnabled.Store(false)
 		x.pubsubEnabled.Store(false)
 

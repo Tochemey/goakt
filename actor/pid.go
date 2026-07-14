@@ -3290,22 +3290,19 @@ func (pid *PID) spawnChildLocal(ctx context.Context, name string, actor Actor, c
 		return nil, err
 	}
 
-	if !cid.isStateSet(systemState) {
-		pid.ActorSystem().increaseActorsCounter()
+	// attach the child to the tree, supervise it and publish it to the cluster
+	if _, err := pid.ActorSystem().completeSpawn(ctx, pid, cid); err != nil {
+		return nil, err
 	}
 
-	// no need to handle the error because the given parent exist and running
-	// that check was done in the above lines
-	_ = tree.addNode(pid, cid)
-	tree.addWatcher(cid, pid.ActorSystem().getDeathWatch())
-
+	// the event is published only after successful cluster publication, so it
+	// means durable creation
 	eventsStream := pid.eventsStream
 	if eventsStream != nil {
 		eventsStream.Publish(eventsTopic, NewActorChildCreated(cid.Path(), pid.Path()))
 	}
 
-	// set the actor in the given actor system registry
-	return cid, pid.ActorSystem().putActorOnCluster(cid)
+	return cid, nil
 }
 
 // findRunningChild returns the child PID registered at childAddress in tree
@@ -3441,8 +3438,12 @@ func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *t
 	if err := chain.New(chain.WithFailFast()).
 		AddRunner(func() error { return tree.addOrAttachNode(parent, pid) }).
 		AddRunner(func() error { tree.addWatcher(pid, deathWatch); return nil }).
-		AddRunner(func() error { return actorSystem.putActorOnCluster(pid) }).
+		AddRunner(func() error { return actorSystem.putActorOnCluster(ctx, pid) }).
 		Run(); err != nil {
+		// disable messages processing so a failed restart does not leave a
+		// re-inited but unpublished actor running
+		pid.setState(stoppingState, true)
+		pid.setState(runningState, false)
 		return err
 	}
 

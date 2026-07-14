@@ -980,6 +980,7 @@ func TestSpawn(t *testing.T) {
 		clusterMock.EXPECT().ActorExists(mock.Anything, actorName).Return(false, nil).Twice()
 		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{}, nil).Once()
 		clusterMock.EXPECT().Actors(mock.Anything, mock.Anything).Return(nil, nil).Once()
+		clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Once()
 
 		_, err = actorSystem.SpawnOn(ctx, actorName, actor)
 		require.NoError(t, err)
@@ -1024,6 +1025,7 @@ func TestSpawn(t *testing.T) {
 		clusterMock.EXPECT().ActorExists(mock.Anything, actorName).Return(false, nil).Twice()
 		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{}, nil)
 		clusterMock.EXPECT().Actors(mock.Anything, mock.Anything).Return(nil, nil).Once()
+		clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Once()
 
 		_, err = actorSystem.SpawnOn(ctx, actorName, actor, WithPlacement(LeastLoad))
 		require.NoError(t, err)
@@ -2058,4 +2060,159 @@ func TestRecreateActorFromWireRestoresRecordOnSpawnOptionsFailure(t *testing.T) 
 	err := system.recreateActorFromWire(context.Background(), record, departedNode)
 	require.Error(t, err)
 	clusterMock.AssertExpectations(t)
+}
+
+func TestSpawnPublishFailureStopsActor(t *testing.T) {
+	// a spawn whose synchronous cluster publication fails must return the
+	// error and leave nothing behind: the actor is stopped and removed
+	ctx := context.Background()
+	sys, err := NewActorSystem("spawn-publish-failure", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	actorSystem := sys.(*actorSystem)
+	require.NoError(t, actorSystem.Start(ctx))
+
+	pause.For(time.Second)
+
+	clusterMock := mockcluster.NewCluster(t)
+
+	actorSystem.locker.Lock()
+	actorSystem.cluster = clusterMock
+	actorSystem.locker.Unlock()
+	actorSystem.clusterEnabled.Store(true)
+
+	t.Cleanup(func() {
+		actorSystem.clusterEnabled.Store(false)
+		actorSystem.locker.Lock()
+		actorSystem.cluster = nil
+		actorSystem.locker.Unlock()
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
+
+	actorName := "publish-failure"
+	removed := make(chan struct{}, 1)
+	clusterMock.EXPECT().ActorExists(mock.Anything, actorName).Return(false, nil).Once()
+	clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(assert.AnError).Once()
+	// the rollback stops the actor, whose death watch removes it from the cluster
+	clusterMock.EXPECT().RemoveActor(mock.Anything, actorName).RunAndReturn(func(context.Context, string) error {
+		removed <- struct{}{}
+		return nil
+	}).Once()
+
+	pid, err := actorSystem.Spawn(ctx, actorName, NewMockActor())
+	require.Error(t, err)
+	assert.ErrorIs(t, err, assert.AnError)
+	assert.Nil(t, pid)
+
+	// the death watch removes the failed actor asynchronously
+	select {
+	case <-removed:
+	case <-time.After(time.Second):
+		t.Fatal("failed spawn must remove the actor from the cluster")
+	}
+
+	_, ok := actorSystem.actors.nodeByName(actorName)
+	require.False(t, ok, "failed spawn must leave no actor behind")
+}
+
+func TestSpawnSingletonPublishFailureReleasesKind(t *testing.T) {
+	// a singleton spawn whose synchronous cluster publication fails must
+	// release the reserved kind so the singleton can be created elsewhere
+	ctx := context.Background()
+	sys, err := NewActorSystem("singleton-publish-failure", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	actorSystem := sys.(*actorSystem)
+	require.NoError(t, actorSystem.Start(ctx))
+
+	pause.For(time.Second)
+
+	clusterMock := mockcluster.NewCluster(t)
+
+	actorSystem.locker.Lock()
+	actorSystem.cluster = clusterMock
+	actorSystem.locker.Unlock()
+	actorSystem.clusterEnabled.Store(true)
+
+	t.Cleanup(func() {
+		actorSystem.clusterEnabled.Store(false)
+		actorSystem.locker.Lock()
+		actorSystem.cluster = nil
+		actorSystem.locker.Unlock()
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
+
+	actorName := "singleton-publish-failure"
+	released := make(chan struct{}, 4)
+	// the kind reservation (PutKindIfAbsent) and the publication both write the kind
+	clusterMock.EXPECT().LookupKind(mock.Anything, mock.Anything).Return("", nil).Once()
+	clusterMock.EXPECT().PutKind(mock.Anything, mock.Anything).Return(nil)
+	clusterMock.EXPECT().ActorExists(mock.Anything, actorName).Return(false, nil).Once()
+	clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(assert.AnError).Once()
+	// both the deferred cleanup and the death watch release the reserved kind best-effort
+	clusterMock.EXPECT().RemoveKind(mock.Anything, mock.Anything).RunAndReturn(func(context.Context, string) error {
+		released <- struct{}{}
+		return nil
+	})
+	clusterMock.EXPECT().RemoveActor(mock.Anything, actorName).Return(nil).Maybe()
+
+	pid, err := actorSystem.spawnSingletonOnLocal(ctx, actorName, NewMockActor(), nil, time.Second, 100*time.Millisecond, 1)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, assert.AnError)
+	assert.Nil(t, pid)
+
+	// the reserved singleton kind is released so the singleton can be created elsewhere
+	select {
+	case <-released:
+	case <-time.After(time.Second):
+		t.Fatal("failed singleton spawn must release the reserved kind")
+	}
+
+	require.Eventually(t, func() bool {
+		_, ok := actorSystem.actors.nodeByName(actorName)
+		return !ok
+	}, time.Second, 10*time.Millisecond, "failed singleton spawn must leave no actor behind")
+}
+
+// TestSpawnOnImmediateCrossNodeVisibility is the regression test for
+// https://github.com/Tochemey/goakt/issues/1263: SpawnOn only returns once the
+// actor's registry record is written to the cluster store, so an immediate
+// name-based lookup and send from another node must succeed without retries.
+func TestSpawnOnImmediateCrossNodeVisibility(t *testing.T) {
+	ctx := context.Background()
+
+	// start the NATS server
+	srv := startNatsServer(t)
+	t.Cleanup(srv.Shutdown)
+
+	systems, providers := testNATsConcurrent(t, srv.Addr().String(), 2)
+	node1, node2 := systems[0], systems[1]
+	sd1, sd2 := providers[0], providers[1]
+
+	t.Cleanup(func() {
+		assert.NoError(t, node1.Stop(ctx))
+		assert.NoError(t, node2.Stop(ctx))
+		assert.NoError(t, sd1.Close())
+		assert.NoError(t, sd2.Close())
+	})
+
+	// each actor spawned on node1 must be resolvable and reachable from node2
+	// immediately, with no retry and no settling pause
+	for i := range 10 {
+		name := fmt.Sprintf("cross-node-%d", i)
+
+		pid, err := node1.SpawnOn(ctx, name, NewMockActor(), WithPlacement(Local))
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		remotePID, err := node2.ActorOf(ctx, name)
+		require.NoError(t, err, "actor=%s must be visible from another node as soon as SpawnOn returns", name)
+		require.NotNil(t, remotePID)
+		require.True(t, remotePID.IsRemote())
+
+		// a message sent right away must reach the actor
+		reply, err := Ask(ctx, remotePID, new(testpb.TestReply), time.Second)
+		require.NoError(t, err, "actor=%s must be reachable from another node as soon as SpawnOn returns", name)
+		require.NotNil(t, reply)
+	}
 }

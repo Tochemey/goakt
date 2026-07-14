@@ -567,6 +567,8 @@ func TestActivateGrainLocally(t *testing.T) {
 
 		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
 		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(nil, cluster.ErrGrainNotFound).Once()
+		cl.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(nil).Once()
+		cl.EXPECT().PutKind(mock.Anything, identity.Kind()).Return(nil).Once()
 
 		err := sys.activateGrainLocally(ctx, identity, staticGrainProvider(grain), newGrainConfig(), nil)
 		require.NoError(t, err)
@@ -598,7 +600,7 @@ func TestActivateGrainLocally(t *testing.T) {
 	t.Run("returns publish error when owner set", func(t *testing.T) {
 		ctx := t.Context()
 		grain := NewMockGrain()
-		sys, _, _, identity := newActivationTestSystem(t, grain, "local-publish-error", true)
+		sys, cl, _, identity := newActivationTestSystem(t, grain, "local-publish-error", true)
 		expectedErr := errors.New("dependency encode failure")
 		config := newGrainConfig(WithGrainDependencies(&MockFailingDependency{err: expectedErr}))
 		owner := &internalpb.Grain{
@@ -607,15 +609,22 @@ func TestActivateGrainLocally(t *testing.T) {
 			Port:    int32(sys.Port()),
 		}
 
+		// the publish failure deactivates the grain, which removes its
+		// cluster record, so a failed activation leaves nothing behind
+		cl.EXPECT().RemoveGrain(mock.Anything, identity.String()).Return(nil).Once()
+
 		err := sys.activateGrainLocally(ctx, identity, staticGrainProvider(grain), config, owner)
 		require.ErrorIs(t, err, expectedErr)
+
+		_, ok := sys.grains.Get(identity.String())
+		require.False(t, ok)
 	})
 
 	t.Run("skips activation when already active", func(t *testing.T) {
 		ctx := t.Context()
 		grain := NewMockGrain()
 		grain.name = "pre-activated"
-		sys, _, _, identity := newActivationTestSystem(t, grain, "local-active", true)
+		sys, cl, _, identity := newActivationTestSystem(t, grain, "local-active", true)
 		pid := newGrainPID(identity, grain, sys, newGrainConfig())
 		pid.activated.Store(true)
 		sys.grains.Set(identity.String(), pid)
@@ -624,6 +633,10 @@ func TestActivateGrainLocally(t *testing.T) {
 			Host:    sys.Host(),
 			Port:    int32(sys.Port()),
 		}
+
+		// the registry record is refreshed even when activation is skipped
+		cl.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(nil).Once()
+		cl.EXPECT().PutKind(mock.Anything, identity.Kind()).Return(nil).Once()
 
 		err := sys.activateGrainLocally(ctx, identity, staticGrainProvider(grain), newGrainConfig(), owner)
 		require.NoError(t, err)
@@ -671,9 +684,11 @@ func TestAskGrain_ClusterFallbackAutoProvisions(t *testing.T) {
 
 	cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(nil, cluster.ErrGrainNotFound).Once()
 	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, nil).Twice()
+	// one PutGrain for the ownership claim, one for the post-activation publication
 	cl.EXPECT().PutGrain(mock.Anything, mock.MatchedBy(func(actual *internalpb.Grain) bool {
 		return actual != nil && actual.GetGrainId().GetValue() == identity.String()
-	})).Return(nil).Once()
+	})).Return(nil).Twice()
+	cl.EXPECT().PutKind(mock.Anything, identity.Kind()).Return(nil).Once()
 
 	resp, err := sys.AskGrain(ctx, identity, &testpb.TestReply{}, time.Second)
 	require.NoError(t, err)
@@ -1087,6 +1102,8 @@ func TestTellGrain(t *testing.T) {
 		}
 		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil)
 		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
+		cl.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(nil).Once()
+		cl.EXPECT().PutKind(mock.Anything, identity.Kind()).Return(nil).Once()
 
 		// No RemoteTellGrain expectation: a loopback round trip would fail the
 		// mockremote client, proving the message was delivered locally.
@@ -1182,6 +1199,8 @@ func TestAskGrain(t *testing.T) {
 		}
 		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil)
 		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
+		cl.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(nil).Once()
+		cl.EXPECT().PutKind(mock.Anything, identity.Kind()).Return(nil).Once()
 
 		// No RemoteAskGrain expectation: a loopback round trip would fail the
 		// mockremote client, proving the request was served locally.
@@ -1726,11 +1745,12 @@ func TestGrainContextPropagation(t *testing.T) {
 	})
 }
 
-// TestGrainActivationDuringShutdownNoRace reproduces issue https://github.com/Tochemey/goakt/issues/1205: a data race
-// between actorSystem shutdown (reset()) and an in-flight grain activation
-// reading shutdownSignal in putGrainOnCluster(). Several goroutines publish
-// grains to the cluster (the exact racing read) right up to and during Stop()
-// (which calls reset(), the racing write). Must be run under -race.
+// TestGrainActivationDuringShutdownNoRace covers the shutdown race originally
+// reported in issue https://github.com/Tochemey/goakt/issues/1205: in-flight
+// grain publications overlapping actorSystem shutdown. Several goroutines keep
+// publishing grains to the cluster right up to and during Stop(), which must
+// neither race shutdown state nor panic; publications after the cluster is
+// torn down simply fail or no-op. Must be run under -race.
 func TestGrainActivationDuringShutdownNoRace(t *testing.T) {
 	ctx := context.TODO()
 	nodePorts := internalnet.Get(3)
@@ -1771,8 +1791,8 @@ func TestGrainActivationDuringShutdownNoRace(t *testing.T) {
 
 	sys := system.(*actorSystem)
 
-	// Several publishers keep evaluating putGrainOnCluster's select (which
-	// reads x.shutdownSignal) so reads overlap reset()'s write during Stop.
+	// Several publishers keep calling putGrainOnCluster so the synchronous
+	// cluster writes overlap the shutdown state transitions during Stop.
 	// Each goroutine owns its grain/identity to avoid unrelated shared state.
 	stop := make(chan struct{})
 	var wg sync.WaitGroup
@@ -1785,7 +1805,7 @@ func TestGrainActivationDuringShutdownNoRace(t *testing.T) {
 				case <-stop:
 					return
 				default:
-					_ = sys.putGrainOnCluster(pid)
+					_ = sys.putGrainOnCluster(ctx, pid)
 				}
 			}
 		})
@@ -2093,4 +2113,74 @@ func TestPeerActivationPropagatesGrainConfig(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	require.Equal(t, identity.String(), got.String())
+}
+
+func TestFinalizeGrainActivation(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("publish failure with failed deactivation still leaves nothing behind", func(t *testing.T) {
+		clusterMock := new(mockcluster.Cluster)
+		system := MockReplicationTestSystem(clusterMock)
+
+		grain := NewMockGrainDeactivationFailure()
+		identity := newGrainIdentity(grain, "finalize-deactivate-failure")
+		process := newGrainPID(identity, grain, system, newGrainConfig())
+		process.activated.Store(true)
+
+		clusterMock.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(assert.AnError).Once()
+		// deactivation fails before its own cleanup runs, so the fallback
+		// removes the local entry and releases the claim explicitly
+		clusterMock.EXPECT().RemoveGrain(mock.Anything, identity.String()).Return(nil).Once()
+
+		err := system.finalizeGrainActivation(ctx, process, true, true)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, assert.AnError)
+
+		_, ok := system.grains.Get(identity.String())
+		require.False(t, ok, "a failed activation must leave no grain behind")
+		clusterMock.AssertExpectations(t)
+	})
+
+	t.Run("publish failure releases the claim without disturbing an already-active grain", func(t *testing.T) {
+		clusterMock := new(mockcluster.Cluster)
+		system := MockReplicationTestSystem(clusterMock)
+
+		grain := NewMockGrain()
+		identity := newGrainIdentity(grain, "finalize-claim-release")
+		process := newGrainPID(identity, grain, system, newGrainConfig())
+		process.activated.Store(true)
+
+		clusterMock.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(assert.AnError).Once()
+		clusterMock.EXPECT().RemoveGrain(mock.Anything, identity.String()).Return(nil).Once()
+
+		err := system.finalizeGrainActivation(ctx, process, true, false)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, assert.AnError)
+
+		got, ok := system.grains.Get(identity.String())
+		require.True(t, ok, "an already-active grain must stay registered")
+		require.True(t, got.isActive(), "an already-active grain must not be deactivated")
+		clusterMock.AssertExpectations(t)
+	})
+
+	t.Run("publish failure without claim or activation only returns the error", func(t *testing.T) {
+		clusterMock := new(mockcluster.Cluster)
+		system := MockReplicationTestSystem(clusterMock)
+
+		grain := NewMockGrain()
+		identity := newGrainIdentity(grain, "finalize-no-rollback")
+		process := newGrainPID(identity, grain, system, newGrainConfig())
+		process.activated.Store(true)
+
+		clusterMock.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(assert.AnError).Once()
+
+		err := system.finalizeGrainActivation(ctx, process, false, false)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, assert.AnError)
+
+		got, ok := system.grains.Get(identity.String())
+		require.True(t, ok, "an already-active grain must stay registered")
+		require.True(t, got.isActive(), "an already-active grain must not be deactivated")
+		clusterMock.AssertNotCalled(t, "RemoveGrain", mock.Anything, mock.Anything)
+	})
 }
