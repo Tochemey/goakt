@@ -1487,10 +1487,16 @@ func TestEnsureGrainProcessCluster(t *testing.T) {
 
 		cl.EXPECT().GrainExists(ctx, id.String()).Return(true, nil).Once()
 		cl.EXPECT().GetGrain(ctx, id.String()).Return(localOwner, nil).Once()
+		// the publish failure deactivates the grain, which removes its
+		// cluster record so a failed activation leaves nothing behind
+		cl.EXPECT().RemoveGrain(mock.Anything, id.String()).Return(nil).Once()
 
 		got, err := sys.ensureGrainProcess(ctx, id)
 		require.ErrorIs(t, err, expectedErr)
 		require.Nil(t, got)
+
+		_, ok := sys.grains.Get(id.String())
+		require.False(t, ok, "a failed activation must leave no grain behind")
 	})
 
 	t.Run("missing process returns owner lookup error", func(t *testing.T) {
@@ -1585,9 +1591,11 @@ func TestEnsureGrainProcessCluster(t *testing.T) {
 
 		cl.EXPECT().GrainExists(ctx, id.String()).Return(false, nil).Once()
 		cl.EXPECT().GrainExists(ctx, id.String()).Return(false, nil).Once()
+		// one PutGrain for the ownership claim, one for the post-activation publication
 		cl.EXPECT().PutGrain(ctx, mock.MatchedBy(func(actual *internalpb.Grain) bool {
 			return actual != nil && actual.GetGrainId().GetValue() == id.String()
-		})).Return(nil).Once()
+		})).Return(nil).Twice()
+		cl.EXPECT().PutKind(ctx, id.Kind()).Return(nil).Once()
 
 		got, err := sys.ensureGrainProcess(ctx, id)
 		require.NoError(t, err)
