@@ -539,6 +539,11 @@ func TestSingletonActor(t *testing.T) {
 			Return(false, nil).
 			Once()
 
+		clusterMock.EXPECT().
+			PutActor(mock.Anything, mock.Anything).
+			Return(nil).
+			Once()
+
 		singletonSpec := &remote.SingletonSpec{
 			SpawnTimeout: time.Second,
 			WaitInterval: time.Millisecond,
@@ -664,8 +669,10 @@ func TestSpawnSingletonReturnsPID(t *testing.T) {
 			},
 		}, nil).Once()
 		clusterMock.EXPECT().LookupKind(mock.Anything, "actor.mockactor").Return("", nil).Once()
-		clusterMock.EXPECT().PutKind(mock.Anything, "actor.mockactor").Return(nil).Once()
+		// one PutKind for the kind reservation, one for the synchronous publication
+		clusterMock.EXPECT().PutKind(mock.Anything, "actor.mockactor").Return(nil).Twice()
 		clusterMock.EXPECT().ActorExists(mock.Anything, "singleton").Return(false, nil).Once()
+		clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Once()
 
 		pid, err := system.SpawnSingleton(ctx, "singleton", NewMockActor(),
 			WithSingletonSpawnRetries(2),

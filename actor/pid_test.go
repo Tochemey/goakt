@@ -54,6 +54,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/internal/xsync"
 	"github.com/tochemey/goakt/v4/log"
+	mockscluster "github.com/tochemey/goakt/v4/mocks/cluster"
 	testkit "github.com/tochemey/goakt/v4/mocks/discovery"
 	mocksremote "github.com/tochemey/goakt/v4/mocks/remoteclient"
 	"github.com/tochemey/goakt/v4/passivation"
@@ -7042,4 +7043,118 @@ func newBareSupervisor(strategy supervisor.Strategy) *supervisor.Supervisor {
 	supv.Reset()
 	supervisor.WithStrategy(strategy)(supv)
 	return supv
+}
+
+func TestSpawnChildPublishFailure(t *testing.T) {
+	// a child spawn whose cluster publication fails must return the error,
+	// leave no child behind and publish no ActorChildCreated event
+	ctx := context.Background()
+	sys, err := NewActorSystem("spawnchild-publish-failure", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	actorSystem := sys.(*actorSystem)
+	require.NoError(t, actorSystem.Start(ctx))
+
+	pause.For(time.Second)
+
+	clusterMock := mockscluster.NewCluster(t)
+
+	actorSystem.locker.Lock()
+	actorSystem.cluster = clusterMock
+	actorSystem.locker.Unlock()
+	actorSystem.clusterEnabled.Store(true)
+
+	t.Cleanup(func() {
+		actorSystem.clusterEnabled.Store(false)
+		actorSystem.locker.Lock()
+		actorSystem.cluster = nil
+		actorSystem.locker.Unlock()
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
+
+	// subscribe before spawning so the assertion window covers the child spawn
+	consumer, err := actorSystem.Subscribe()
+	require.NoError(t, err)
+
+	parentName := "parent"
+	childName := "child"
+	clusterMock.EXPECT().ActorExists(mock.Anything, parentName).Return(false, nil).Once()
+	// the parent publication succeeds, the child publication fails
+	clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Once()
+	clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(assert.AnError).Once()
+	// the rollback stops the child, whose death watch removes it asynchronously
+	clusterMock.EXPECT().RemoveActor(mock.Anything, childName).Return(nil).Maybe()
+
+	parent, err := actorSystem.Spawn(ctx, parentName, NewMockSupervisor())
+	require.NoError(t, err)
+	require.NotNil(t, parent)
+
+	pause.For(500 * time.Millisecond)
+
+	child, err := parent.SpawnChild(ctx, childName, NewMockSupervised())
+	require.Error(t, err)
+	assert.ErrorIs(t, err, assert.AnError)
+	assert.Nil(t, child)
+
+	// the death watch removes the failed child asynchronously
+	childAddress := parent.childAddress(childName)
+	require.Eventually(t, func() bool {
+		_, ok := actorSystem.actors.node(childAddress.String())
+		return !ok
+	}, time.Second, 10*time.Millisecond, "failed child spawn must leave no actor behind")
+
+	// no ActorChildCreated event must have been published for the failed child
+	for message := range consumer.Iterator() {
+		if _, ok := message.Payload().(*ActorChildCreated); ok {
+			t.Fatal("no ActorChildCreated event must be published when the child publication fails")
+		}
+	}
+}
+
+func TestRestartPublishFailureFailsRestart(t *testing.T) {
+	// a restart whose synchronous cluster publication fails must fail the
+	// restart and leave the actor non-running
+	ctx := context.Background()
+	sys, err := NewActorSystem("restart-publish-failure", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	actorSystem := sys.(*actorSystem)
+	require.NoError(t, actorSystem.Start(ctx))
+
+	pause.For(time.Second)
+
+	clusterMock := mockscluster.NewCluster(t)
+
+	actorSystem.locker.Lock()
+	actorSystem.cluster = clusterMock
+	actorSystem.locker.Unlock()
+	actorSystem.clusterEnabled.Store(true)
+
+	t.Cleanup(func() {
+		actorSystem.clusterEnabled.Store(false)
+		actorSystem.locker.Lock()
+		actorSystem.cluster = nil
+		actorSystem.locker.Unlock()
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
+
+	actorName := "restart-publish-failure"
+	clusterMock.EXPECT().ActorExists(mock.Anything, actorName).Return(false, nil).Once()
+	// the spawn publication succeeds, the restart publication fails
+	clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Once()
+	clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(assert.AnError).Once()
+	// the restart first shuts the actor down, whose death watch removes it
+	// from the cluster asynchronously
+	clusterMock.EXPECT().RemoveActor(mock.Anything, actorName).Return(nil).Maybe()
+
+	pid, err := actorSystem.Spawn(ctx, actorName, NewMockActor())
+	require.NoError(t, err)
+	require.NotNil(t, pid)
+
+	pause.For(500 * time.Millisecond)
+
+	err = pid.Restart(ctx)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, assert.AnError)
+	assert.False(t, pid.IsRunning(), "a failed restart must leave the actor non-running")
 }

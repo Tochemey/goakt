@@ -6,6 +6,7 @@
 
 - **Cluster bootstrap survives transient slowness instead of crashing the node** ([#1257](https://github.com/Tochemey/goakt/issues/1257)). `cluster.Start` was a single all-or-nothing attempt: a node joining a data-bearing cluster (partitions redistributing during a rolling update) could exceed the bootstrap timeout, fail, and take the process down, leaving Kubernetes CrashLoopBackOff as the de facto retry loop. Bootstrap is now retried a bounded number of times (3 attempts, linear backoff) with a full engine teardown between attempts; Olric's own join retries only ever covered the memberlist join, not the initial sync and dmap creation that follow it. `DefaultClusterBootstrapTimeout` is unchanged.
 - **The initial-sync failure path no longer leaks a running engine**. When `WaitForInitialSync` timed out, the already-started Olric server (port bound, memberlist joined) was left running, asymmetrically with the `server.Start` and `createDMap` failure paths which both shut it down. It is now torn down like the others, which is also what makes the bootstrap retry above safe.
+- **Actor and grain creation now waits for cluster registry publication** ([#1263](https://github.com/Tochemey/goakt/issues/1263)). `SpawnOn` (and every other creation path) returned before the actor's registry record reached the cluster store, so an immediate name-based lookup or send from another node could fail with `actor not found` even though the actor was alive. Creation calls (`Spawn`, `SpawnOn`, `SpawnSingleton`, `SpawnChild`, restarts, and grain activation) now write the registry record synchronously and only succeed once it is durably stored: a successful spawn means the actor is immediately resolvable by name and reachable from any node, with no propagation window to retry around. Retiring the background replication queues also closes two races they created: a killed-right-after-spawn actor could be re-registered in the cluster by the late background write, and a retried `SpawnOn` could double-spawn a name on another node during the visibility window.
 
 ### ⚡ Performance
 
@@ -26,6 +27,8 @@
 ### ⚠️ Behavior changes
 
 - **Grains relocate lazily by default.** Applications that relied on a departed node's grains being reactivated up front (without being re-addressed) must now opt in with `WithGrainEagerRelocation`. Grains addressed after a node loss reactivate transparently as before.
+- **Creation calls surface registry errors** ([#1263](https://github.com/Tochemey/goakt/issues/1263)). `Spawn`, `SpawnChild`, `SpawnSingleton`, restarts, and grain activation can now fail with registry or quorum errors that previously only surfaced as background warning logs. On such a failure the creation is rolled back so nothing is left behind: the actor is stopped, a singleton's reserved kind is released, and a grain is deactivated with its ownership claim released. Spawning while the system is shutting down now fails with the underlying cluster engine error instead of silently skipping publication.
+- **`ActorChildCreated` is published only after successful cluster publication** ([#1263](https://github.com/Tochemey/goakt/issues/1263)), so the event now means the child is durably registered, not merely created locally.
 
 ## v4.3.1 - 2026-07-10
 

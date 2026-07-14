@@ -90,6 +90,7 @@ func TestDeathWatch(t *testing.T) {
 		// mock the cluster interface
 		clmock := mockscluster.NewCluster(t)
 		clmock.EXPECT().ActorExists(mock.Anything, actorID).Return(false, nil)
+		clmock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Once()
 		clmock.EXPECT().RemoveActor(mock.Anything, actorID).Return(stdErrors.New("removal failed"))
 
 		// Set the cluster mock BEFORE Start so that handlePostStart (which runs
@@ -187,6 +188,7 @@ func TestDeathWatch(t *testing.T) {
 		const actorName = "actor-to-free"
 		// Spawn checks ActorExists on the cluster when InCluster() is true.
 		clmock.EXPECT().ActorExists(mock.Anything, actorName).Return(false, nil)
+		clmock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Once()
 
 		cid, err := actorSys.Spawn(ctx, actorName, NewMockActor())
 		require.NoError(t, err)
@@ -393,6 +395,7 @@ func TestDeathWatch(t *testing.T) {
 
 		const actorName = "actor-to-free"
 		clmock.EXPECT().ActorExists(mock.Anything, actorName).Return(false, nil)
+		clmock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Once()
 
 		cid, err := actorSys.Spawn(ctx, actorName, &noLogActor{})
 		require.NoError(t, err)

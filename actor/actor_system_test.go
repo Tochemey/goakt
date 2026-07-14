@@ -49,7 +49,6 @@ import (
 	noopmetric "go.opentelemetry.io/otel/metric/noop"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/durationpb"
 
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/eventstream"
@@ -5693,128 +5692,196 @@ func TestRemotingReinstate(t *testing.T) {
 	})
 }
 
-func TestReplicateActors_ErrorPaths(t *testing.T) {
-	clusterMock := new(mockscluster.Cluster)
-	system := MockReplicationTestSystem(clusterMock)
-	system.relocationEnabled.Store(true)
+func TestPutActorOnCluster(t *testing.T) {
+	ctx := context.Background()
 
-	addPIDNode := func(addr *address.Address) {
-		pid := &PID{address: addr, path: newPath(addr), actorSystem: system}
-		node := newPidNode(pid)
-		system.actors.pids[node.id] = node
-		system.actors.names[node.name] = node
+	newTestPID := func(system *actorSystem, name string) *PID {
+		addr := address.New(name, system.name, "127.0.0.1", int(system.remoteConfig.BindPort()))
+		pid := &PID{
+			actor:        NewMockActor(),
+			address:      addr,
+			path:         newPath(addr),
+			dependencies: xsync.NewMap[string, extension.Dependency](),
+			logger:       log.DiscardLogger,
+			actorSystem:  system,
+		}
+		pid.setState(runningState, true)
+		return pid
 	}
 
-	// Expect PutKind to fail for singleton actors and trigger the warning path.
-	addr := address.New("singleton", "test-replication", "127.0.0.1", 8080)
-	addPIDNode(addr)
-	singleton := &internalpb.Actor{
-		Address: addr.String(),
-		Type:    "singleton-kind",
-		Singleton: &internalpb.SingletonSpec{
-			SpawnTimeout: durationpb.New(time.Second),
-			WaitInterval: durationpb.New(500 * time.Millisecond),
+	t.Run("PutKind failure for a singleton is returned and PutActor is skipped", func(t *testing.T) {
+		clusterMock := new(mockscluster.Cluster)
+		system := MockReplicationTestSystem(clusterMock)
+
+		pid := newTestPID(system, "singleton")
+		pid.singletonSpec = &singletonSpec{
+			SpawnTimeout: time.Second,
+			WaitInterval: 500 * time.Millisecond,
 			MaxRetries:   int32(3),
-		},
-	}
-	clusterMock.EXPECT().PutKind(mock.Anything, singleton.GetType()).Return(fmt.Errorf("put kind failure")).Once()
+		}
+		pid.setState(singletonState, true)
 
-	// Expect PutActor to fail for regular actors after publish attempts.
-	regularAddr := address.New("regular", "test-replication", "127.0.0.1", 8080)
-	addPIDNode(regularAddr)
-	regular := &internalpb.Actor{
-		Address: regularAddr.String(),
-		Type:    "regular-kind",
-	}
-	clusterMock.EXPECT().PutActor(mock.Anything, regular).Return(fmt.Errorf("put actor failure")).Once()
+		clusterMock.EXPECT().PutKind(mock.Anything, mock.Anything).Return(assert.AnError).Once()
 
-	t.Cleanup(func() { clusterMock.AssertExpectations(t) })
+		err := system.putActorOnCluster(ctx, pid)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, assert.AnError)
+		clusterMock.AssertNotCalled(t, "PutActor", mock.Anything, mock.Anything)
+		clusterMock.AssertExpectations(t)
+	})
 
-	system.drainers.Add(1)
-	done := make(chan struct{})
-	go func() {
-		system.replicateActors()
-		close(done)
-	}()
+	t.Run("PutActor failure is returned", func(t *testing.T) {
+		clusterMock := new(mockscluster.Cluster)
+		system := MockReplicationTestSystem(clusterMock)
 
-	system.actorsQueue <- singleton
-	system.actorsQueue <- regular
-	close(system.actorsQueue)
+		pid := newTestPID(system, "regular")
+		clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(assert.AnError).Once()
 
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("replicateActors did not drain the queue")
-	}
+		err := system.putActorOnCluster(ctx, pid)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, assert.AnError)
+		clusterMock.AssertExpectations(t)
+	})
+
+	t.Run("singleton with role registers the role-scoped kind", func(t *testing.T) {
+		clusterMock := new(mockscluster.Cluster)
+		system := MockReplicationTestSystem(clusterMock)
+
+		pid := newTestPID(system, "role-singleton")
+		pid.singletonSpec = &singletonSpec{
+			SpawnTimeout: time.Second,
+			WaitInterval: 500 * time.Millisecond,
+			MaxRetries:   int32(3),
+		}
+		pid.role = new("worker")
+		pid.setState(singletonState, true)
+
+		clusterMock.EXPECT().PutKind(mock.Anything, kindRole(types.Name(pid.Actor()), "worker")).Return(nil).Once()
+		clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Once()
+
+		require.NoError(t, system.putActorOnCluster(ctx, pid))
+		clusterMock.AssertExpectations(t)
+	})
+
+	t.Run("system actors are never published", func(t *testing.T) {
+		clusterMock := new(mockscluster.Cluster)
+		system := MockReplicationTestSystem(clusterMock)
+
+		pid := newTestPID(system, reservedNames[deathWatchType])
+		require.NoError(t, system.putActorOnCluster(ctx, pid))
+		clusterMock.AssertNotCalled(t, "PutActor", mock.Anything, mock.Anything)
+	})
+
+	t.Run("no-op when clustering is disabled", func(t *testing.T) {
+		clusterMock := new(mockscluster.Cluster)
+		system := MockReplicationTestSystem(clusterMock)
+		system.clusterEnabled.Store(false)
+
+		pid := newTestPID(system, "no-cluster")
+		require.NoError(t, system.putActorOnCluster(ctx, pid))
+		clusterMock.AssertNotCalled(t, "PutActor", mock.Anything, mock.Anything)
+	})
 }
 
-// TestReplicateActors_SkipsRemovedActor reproduces the spawn-then-kill race:
-// an actor is queued for replication on spawn, but killed (removed from the
-// local tree) before the queued PutActor runs. The stale PutActor must be
-// skipped so a dead actor is never re-registered in the cluster registry.
-func TestReplicateActors_SkipsRemovedActor(t *testing.T) {
-	clusterMock := new(mockscluster.Cluster)
-	system := MockReplicationTestSystem(clusterMock)
-	system.relocationEnabled.Store(true)
+func TestCompleteSpawnStopFailureAfterFailedPublication(t *testing.T) {
+	// when both the cluster publication and the rollback stop fail, the
+	// publication error is returned and the stop failure is only logged
+	ctx := context.Background()
+	sys, err := NewActorSystem("complete-spawn-rollback", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
 
-	// The actor is NOT present in the local tree, simulating an actor that was
-	// killed before its queued replication was processed. No cluster calls are
-	// expected: AssertExpectations fails if PutActor/PutKind are invoked.
-	removed := &internalpb.Actor{
-		Address: address.New("removed", "test-replication", "127.0.0.1", 8080).String(),
-		Type:    "removed-kind",
-	}
+	actorSystem := sys.(*actorSystem)
+	require.NoError(t, actorSystem.Start(ctx))
 
-	t.Cleanup(func() { clusterMock.AssertExpectations(t) })
+	pause.For(time.Second)
 
-	system.drainers.Add(1)
-	done := make(chan struct{})
-	go func() {
-		system.replicateActors()
-		close(done)
-	}()
+	clusterMock := mockscluster.NewCluster(t)
 
-	system.actorsQueue <- removed
-	close(system.actorsQueue)
+	actorSystem.locker.Lock()
+	actorSystem.cluster = clusterMock
+	actorSystem.locker.Unlock()
+	actorSystem.clusterEnabled.Store(true)
 
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("replicateActors did not drain the queue")
-	}
+	t.Cleanup(func() {
+		actorSystem.clusterEnabled.Store(false)
+		actorSystem.locker.Lock()
+		actorSystem.cluster = nil
+		actorSystem.locker.Unlock()
+		_ = actorSystem.Stop(ctx)
+	})
+
+	actorName := "rollback-stop-failure"
+	clusterMock.EXPECT().ActorExists(mock.Anything, actorName).Return(false, nil).Once()
+	clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(assert.AnError).Once()
+	clusterMock.EXPECT().RemoveActor(mock.Anything, actorName).Return(nil).Maybe()
+
+	// MockPostStop fails its PostStop hook, so the rollback Shutdown errors too
+	pid, err := actorSystem.Spawn(ctx, actorName, &MockPostStop{})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, assert.AnError)
+	assert.Nil(t, pid)
 }
 
-func TestReplicateGrains_ErrorPaths(t *testing.T) {
-	clusterMock := new(mockscluster.Cluster)
-	system := MockReplicationTestSystem(clusterMock)
-	system.relocationEnabled.Store(true)
+func TestPutGrainOnCluster(t *testing.T) {
+	ctx := context.Background()
 
-	grain := &internalpb.Grain{
-		GrainId: &internalpb.GrainId{Kind: "grain-kind", Name: "grain", Value: "grain"},
-		Host:    "127.0.0.1",
-		Port:    7000,
+	newTestGrainPID := func(system *actorSystem, name string) *grainPID {
+		identity := &GrainIdentity{kind: "grain.kind", name: name}
+		return &grainPID{
+			identity:     identity,
+			actorSystem:  system,
+			logger:       log.DiscardLogger,
+			dependencies: newGrainConfig().dependencies,
+			config:       newGrainConfig(),
+		}
 	}
 
-	clusterMock.EXPECT().PutGrain(mock.Anything, grain).Return(fmt.Errorf("put grain failure")).Once()
-	clusterMock.EXPECT().PutKind(mock.Anything, grain.GetGrainId().GetKind()).Return(fmt.Errorf("put grain kind failure")).Once()
+	t.Run("PutGrain failure is returned and PutKind is skipped", func(t *testing.T) {
+		clusterMock := new(mockscluster.Cluster)
+		system := MockReplicationTestSystem(clusterMock)
 
-	t.Cleanup(func() { clusterMock.AssertExpectations(t) })
+		grain := newTestGrainPID(system, "grain")
+		clusterMock.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(assert.AnError).Once()
 
-	system.drainers.Add(1)
-	done := make(chan struct{})
-	go func() {
-		system.replicateGrains()
-		close(done)
-	}()
+		err := system.putGrainOnCluster(ctx, grain)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, assert.AnError)
+		clusterMock.AssertNotCalled(t, "PutKind", mock.Anything, mock.Anything)
+		clusterMock.AssertExpectations(t)
+	})
 
-	system.grainsQueue <- grain
-	close(system.grainsQueue)
+	t.Run("PutKind failure is returned", func(t *testing.T) {
+		clusterMock := new(mockscluster.Cluster)
+		system := MockReplicationTestSystem(clusterMock)
 
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("replicateGrains did not drain the queue")
-	}
+		grain := newTestGrainPID(system, "grain")
+		clusterMock.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(nil).Once()
+		clusterMock.EXPECT().PutKind(mock.Anything, mock.Anything).Return(assert.AnError).Once()
+
+		err := system.putGrainOnCluster(ctx, grain)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, assert.AnError)
+		clusterMock.AssertExpectations(t)
+	})
+
+	t.Run("system grains are never published", func(t *testing.T) {
+		clusterMock := new(mockscluster.Cluster)
+		system := MockReplicationTestSystem(clusterMock)
+
+		grain := newTestGrainPID(system, reservedNames[deathWatchType])
+		require.NoError(t, system.putGrainOnCluster(ctx, grain))
+		clusterMock.AssertNotCalled(t, "PutGrain", mock.Anything, mock.Anything)
+	})
+
+	t.Run("no-op when clustering is disabled", func(t *testing.T) {
+		clusterMock := new(mockscluster.Cluster)
+		system := MockReplicationTestSystem(clusterMock)
+		system.clusterEnabled.Store(false)
+
+		grain := newTestGrainPID(system, "no-cluster")
+		require.NoError(t, system.putGrainOnCluster(ctx, grain))
+		clusterMock.AssertNotCalled(t, "PutGrain", mock.Anything, mock.Anything)
+	})
 }
 
 func TestCleanupStaleLocalActors(t *testing.T) {
@@ -6041,6 +6108,22 @@ func TestResyncActors_ErrorPaths(t *testing.T) {
 	assert.ErrorIs(t, err, assert.AnError)
 }
 
+func TestResyncGrains_Success(t *testing.T) {
+	clusterMock := new(mockscluster.Cluster)
+	system := MockReplicationTestSystem(clusterMock)
+
+	grain := NewMockGrain()
+	identity := newGrainIdentity(grain, "resync-grain")
+	process := newGrainPID(identity, grain, system, newGrainConfig())
+	system.grains.Set(identity.String(), process)
+
+	clusterMock.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(nil).Once()
+	clusterMock.EXPECT().PutKind(mock.Anything, identity.Kind()).Return(nil).Once()
+
+	require.NoError(t, system.resyncGrains())
+	clusterMock.AssertExpectations(t)
+}
+
 func TestResyncGrains_ErrorPaths(t *testing.T) {
 	clusterMock := new(mockscluster.Cluster)
 	system := MockReplicationTestSystem(clusterMock)
@@ -6099,8 +6182,8 @@ func TestResyncAfterClusterEventSkipsWithReplicas(t *testing.T) {
 	system.resyncAfterClusterEvent(cluster.NodeLeft, "127.0.0.1:9000")
 
 	// With more than one replica olric re-replicates the departed partitions,
-	// so the surviving actor must not be re-enqueued for a redundant repair.
-	assert.Empty(t, system.actorsQueue)
+	// so the surviving actor must not be republished for a redundant repair.
+	clusterMock.AssertNotCalled(t, "PutActor", mock.Anything, mock.Anything)
 }
 
 func TestResyncAfterClusterEventRunsWithoutReplicas(t *testing.T) {
@@ -6127,16 +6210,15 @@ func TestResyncAfterClusterEventRunsWithoutReplicas(t *testing.T) {
 	system.actors.pids[node.id] = node
 	system.actors.counter.Add(1)
 
+	// Without replicas the surviving actor's registry entry may have been lost
+	// with the departed node, so it must be republished for cluster repair.
+	clusterMock.EXPECT().PutActor(mock.Anything, mock.MatchedBy(func(actor *internalpb.Actor) bool {
+		return actor.GetAddress() == pid.ID()
+	})).Return(nil).Once()
+
 	system.resyncAfterClusterEvent(cluster.NodeLeft, "127.0.0.1:9000")
 
-	// Without replicas the surviving actor's registry entry may have been lost
-	// with the departed node, so it must be re-enqueued for cluster repair.
-	select {
-	case actor := <-system.actorsQueue:
-		assert.Equal(t, pid.ID(), actor.GetAddress())
-	default:
-		t.Fatal("expected the surviving actor to be re-enqueued for cluster repair")
-	}
+	clusterMock.AssertExpectations(t)
 }
 
 func TestResyncAfterClusterEventRunsOnCorrelatedDepartures(t *testing.T) {
@@ -6166,19 +6248,18 @@ func TestResyncAfterClusterEventRunsOnCorrelatedDepartures(t *testing.T) {
 	// First departure alone stays within olric's tolerance (replicaCount-1=1),
 	// so the repair is skipped.
 	system.resyncAfterClusterEvent(cluster.NodeLeft, "127.0.0.1:9000")
-	assert.Empty(t, system.actorsQueue)
+	clusterMock.AssertNotCalled(t, "PutActor", mock.Anything, mock.Anything)
 
 	// A second, distinct departure within the correlated-departure window reaches
 	// replicaCount concurrent losses, so olric backups may not have survived and
 	// the repair must run to restore entries for actors alive on this survivor.
+	clusterMock.EXPECT().PutActor(mock.Anything, mock.MatchedBy(func(actor *internalpb.Actor) bool {
+		return actor.GetAddress() == pid.ID()
+	})).Return(nil).Once()
+
 	system.resyncAfterClusterEvent(cluster.NodeLeft, "127.0.0.2:9000")
 
-	select {
-	case actor := <-system.actorsQueue:
-		assert.Equal(t, pid.ID(), actor.GetAddress())
-	default:
-		t.Fatal("expected the surviving actor to be re-enqueued for cluster repair on correlated departures")
-	}
+	clusterMock.AssertExpectations(t)
 }
 
 func TestCleanupCluster_RemoveKindFailure(t *testing.T) {

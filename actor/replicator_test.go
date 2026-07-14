@@ -3981,8 +3981,10 @@ func spawnReplicatorWithDCController(
 	clusterMock := mockcluster.NewCluster(t)
 	remotingMock := mocksremote.NewClient(t)
 
-	// ActorExists is called during Spawn when clusterEnabled is true
+	// ActorExists and PutActor are called during Spawn when clusterEnabled is
+	// true: the spawned replicator is synchronously published to the cluster
 	clusterMock.EXPECT().ActorExists(mock.Anything, mock.Anything).Return(false, nil).Maybe()
+	clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Maybe()
 	// Close is called during actor system shutdown
 	remotingMock.EXPECT().Close().Maybe()
 
