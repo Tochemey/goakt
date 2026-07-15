@@ -332,8 +332,8 @@ func (x *topicActor) handleGetTopicStats(ctx *ReceiveContext) {
 
 // queryRemotePeerInstanceCount asks every remote peer's topic actor for its
 // local subscriber count of topic and returns how many peers reported at
-// least one. A peer that cannot be looked up or fails to answer within
-// DefaultAskTimeout fails the query; the caller decides how to surface it.
+// least one. A peer that cannot be looked up or fails to answer within the
+// system-wide ask timeout fails the query; the caller decides how to surface it.
 func (x *topicActor) queryRemotePeerInstanceCount(cctx context.Context, remotePeers []remotePeer, topic string) (int32, error) {
 	if len(remotePeers) == 0 {
 		return 0, nil
@@ -351,7 +351,7 @@ func (x *topicActor) queryRemotePeerInstanceCount(cctx context.Context, remotePe
 				return fmt.Errorf("failed to lookup actor %s on remote=[host=%s, port=%d]: %w", actorName, peer.host, peer.port, err)
 			}
 
-			resp, err := x.remoting.RemoteAsk(egCtx, from, to, &internalpb.TopicStatsRequest{Topic: topic}, DefaultAskTimeout)
+			resp, err := x.remoting.RemoteAsk(egCtx, from, to, &internalpb.TopicStatsRequest{Topic: topic}, x.actorSystem.getAskTimeout())
 			if err != nil {
 				return fmt.Errorf("failed to query topic actor %s on remote=[host=%s, port=%d]: %w", actorName, peer.host, peer.port, err)
 			}

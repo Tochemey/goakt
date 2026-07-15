@@ -110,6 +110,13 @@ func TestOption(t *testing.T) {
 			},
 		},
 		{
+			name:   "WithAskTimeout",
+			option: WithAskTimeout(4 * time.Second),
+			check: func(t *testing.T, sys *actorSystem) {
+				assert.Equal(t, 4*time.Second, sys.askTimeout)
+			},
+		},
+		{
 			name:   "WithCluster",
 			option: WithCluster(clusterConfig),
 			check: func(t *testing.T, sys *actorSystem) {
@@ -297,5 +304,27 @@ func TestWithRemoteWatchTimeout(t *testing.T) {
 		system.remoteWatchTimeout = DefaultRemoteWatchTimeout
 		WithRemoteWatchTimeout(-1 * time.Second).Apply(system)
 		assert.Equal(t, DefaultRemoteWatchTimeout, system.remoteWatchTimeout)
+	})
+}
+
+func TestWithAskTimeout(t *testing.T) {
+	t.Run("positive value sets the timeout", func(t *testing.T) {
+		system := new(actorSystem)
+		WithAskTimeout(7 * time.Second).Apply(system)
+		assert.Equal(t, 7*time.Second, system.askTimeout)
+	})
+
+	t.Run("zero value leaves the existing setting unchanged", func(t *testing.T) {
+		system := new(actorSystem)
+		system.askTimeout = DefaultAskTimeout
+		WithAskTimeout(0).Apply(system)
+		assert.Equal(t, DefaultAskTimeout, system.askTimeout)
+	})
+
+	t.Run("negative value leaves the existing setting unchanged", func(t *testing.T) {
+		system := new(actorSystem)
+		system.askTimeout = DefaultAskTimeout
+		WithAskTimeout(-1 * time.Second).Apply(system)
+		assert.Equal(t, DefaultAskTimeout, system.askTimeout)
 	})
 }

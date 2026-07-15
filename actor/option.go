@@ -167,6 +167,23 @@ func WithActorInitTimeout(timeout time.Duration) Option {
 	)
 }
 
+// WithAskTimeout sets the system-wide timeout applied to internal
+// request/response (Ask) round-trips, such as querying the deadletter actor
+// or a remote peer's topic actor. It is also the default deadline used by the
+// remote Ask server when a request does not carry its own timeout.
+//
+// A non-positive value leaves the existing setting unchanged. Defaults to
+// DefaultAskTimeout.
+func WithAskTimeout(timeout time.Duration) Option {
+	return OptionFunc(
+		func(a *actorSystem) {
+			if timeout > 0 {
+				a.askTimeout = timeout
+			}
+		},
+	)
+}
+
 // WithCoordinatedShutdown registers internal and user-defined tasks to be executed during the shutdown process.
 // The defined tasks will be executed in the same order of insertion.
 // Any failure will halt the shutdown process.

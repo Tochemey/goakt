@@ -145,18 +145,16 @@ func TestReceive(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, consumer)
 
-		// this mailbox will not be able to process messages which will result in a deadletter
-		// and the actor will not be started
+		// this mailbox cannot enqueue messages, so any message sent to the actor
+		// is turned into a deadletter
 		mailbox := NewMockErrorMailbox()
 		pid, err := actorSystem.Spawn(ctx, "name", NewMockActor(), WithMailbox(mailbox))
-		require.Error(t, err)
-		require.ErrorIs(t, err, errors.ErrRequestTimeout)
-		require.Nil(t, pid)
+		require.NoError(t, err)
+		require.NotNil(t, pid)
 
 		message := new(testpb.TestSend)
 		err = Tell(ctx, pid, message)
-		require.Error(t, err)
-		require.ErrorIs(t, err, errors.ErrDead)
+		require.NoError(t, err)
 
 		pause.For(time.Second)
 
@@ -175,11 +173,10 @@ func TestReceive(t *testing.T) {
 		require.NoError(t, err)
 		require.NotEmpty(t, items)
 		deadletter := items[0]
-		actual, ok := deadletter.Message().(*commands.HealthCheckRequest)
+		actual, ok := deadletter.Message().(*testpb.TestSend)
 		require.True(t, ok)
 		require.NotNil(t, actual)
 
-		assert.NoError(t, err)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 }
@@ -5514,7 +5511,6 @@ func TestPIDDoReceiveDuringShutdown(t *testing.T) {
 		// PoisonPill is excluded because it triggers actor shutdown as a side effect,
 		// which would affect subsequent iterations of this loop.
 		systemMessages := []any{
-			new(commands.HealthCheckRequest),
 			new(commands.Panicking),
 			new(PausePassivation),
 			new(ResumePassivation),
@@ -6716,7 +6712,6 @@ func TestIsSystemMessage(t *testing.T) {
 		{"AsyncResponse", new(commands.AsyncResponse)},
 		{"AsyncRequest", new(commands.AsyncRequest)},
 		{"PoisonPill", new(PoisonPill)},
-		{"HealthCheckRequest", new(commands.HealthCheckRequest)},
 		{"Panicking", new(commands.Panicking)},
 		{"SendDeadletter", new(commands.SendDeadletter)},
 		{"PausePassivation", new(PausePassivation)},

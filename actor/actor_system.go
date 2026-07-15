@@ -848,6 +848,7 @@ type ActorSystem interface {
 	getUserGuardian() *PID
 	getDeathWatch() *PID
 	getDeadletter() *PID
+	getAskTimeout() time.Duration
 	getSingletonManager() *PID
 	getRelocator() *PID
 	getReflection() *reflection
@@ -2283,6 +2284,13 @@ func (x *actorSystem) getDeadletter() *PID {
 	deadletters := x.deadletter
 	x.locker.RUnlock()
 	return deadletters
+}
+
+// getAskTimeout returns the system-wide timeout applied to internal
+// request/response round-trips. It is set once during construction and never
+// mutated afterwards, so it is read without locking.
+func (x *actorSystem) getAskTimeout() time.Duration {
+	return x.askTimeout
 }
 
 // getReflection returns the system reflection
@@ -4000,9 +4008,9 @@ func (x *actorSystem) getSetDeadlettersCount(ctx context.Context) {
 	)
 	if to.IsRunning() {
 		// ask the deadletter actor for the count
-		// using the default ask timeout
+		// using the system-wide ask timeout
 		// note: no need to check for error because this call is internal
-		reply, _ := from.Ask(ctx, to, message, DefaultAskTimeout)
+		reply, _ := from.Ask(ctx, to, message, x.askTimeout)
 		// Be defensive: if the actor is shutting down or a call was timed out and a late
 		// response got dropped, reply can be nil or an unexpected type.
 		if deadlettersCount, ok := reply.(*commands.DeadlettersCountResponse); ok && deadlettersCount != nil {

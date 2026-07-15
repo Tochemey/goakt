@@ -120,6 +120,7 @@ Options are passed to `NewActorSystem(name, opts...)`. Each option is documented
 | `WithActorInitTimeout(d)`                  | Actor startup timeout.                                                                            |
 | `WithActorInitMaxRetries(n)`               | Retries for actor init.                                                                           |
 | `WithShutdownTimeout(d)`                   | Total shutdown timeout (default: 3 min).                                                          |
+| `WithAskTimeout(d)`                        | System-wide timeout for internal Ask round-trips (default: 5s).                                   |
 | `WithDefaultSupervisor(supervisor)`        | Fallback supervisor for actors without explicit config.                                           |
 | **Remoting & cluster**                     |                                                                                                   |
 | `WithRemote(config)`                       | Enable remoting. See [Remoting](/advanced/remoting).                                              |

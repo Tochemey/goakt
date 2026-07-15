@@ -65,17 +65,6 @@ import (
 	"github.com/tochemey/goakt/v4/supervisor"
 )
 
-// specifies the state in which the PID is
-// regarding message processing
-
-// idle/busy model the processing-state atomic used by non-PID
-// consumers (e.g. grain_pid). The actor PID itself no longer uses
-// this pair; its scheduling is driven by schedState + the dispatcher.
-const (
-	idle int32 = iota
-	busy
-)
-
 // passivationTouchInterval controls how frequently Touch is called on the
 // passivation manager. For a 2-minute default timeout, refreshing every
 // 100ms means the deadline is at most 0.08% stale — well within tolerance.
@@ -149,7 +138,7 @@ type PID struct {
 	mailbox Mailbox
 
 	// systemMailbox is the priority queue for control-plane messages
-	// (PoisonPill, Panicking, Pause/ResumePassivation, HealthCheckRequest,
+	// (PoisonPill, Panicking, Pause/ResumePassivation,
 	// Terminated, PanicSignal, SendDeadletter). runTurn consults it
 	// before the user mailbox so shutdown and supervision signals never
 	// queue behind a user backlog.
@@ -280,10 +269,6 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	}
 
 	pid.startPassivation()
-
-	if err := pid.healthCheck(ctx); err != nil {
-		return nil, err
-	}
 
 	if err := pid.registerMetrics(); err != nil {
 		return nil, err
@@ -1787,7 +1772,7 @@ func (pid *PID) buildAsyncRequest(message any, correlationID string) (*commands.
 // doReceive enqueues a message onto the actor's user or system mailbox
 // and schedules the actor onto the dispatcher if it is not already in
 // flight. This is the entry point for internal message delivery that
-// may carry control-plane messages (PoisonPill, HealthCheck, etc.).
+// may carry control-plane messages (PoisonPill, Panicking, etc.).
 func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
 	msg := receiveCtx.Message()
 
@@ -1879,8 +1864,6 @@ func (pid *PID) dispatchOne(received *ReceiveContext, now time.Time) {
 	switch msg := received.Message().(type) {
 	case *PoisonPill:
 		_ = pid.Shutdown(received.Context())
-	case *commands.HealthCheckRequest:
-		pid.handleHealthcheck(received, now)
 	case *commands.Panicking:
 		pid.handlePanicking(received.Sender(), msg)
 	case *PausePassivation:
@@ -1894,12 +1877,6 @@ func (pid *PID) dispatchOne(received *ReceiveContext, now time.Time) {
 	default:
 		pid.handleReceived(received, now)
 	}
-}
-
-// handleHealthcheck is used to handle the readiness probe messages
-func (pid *PID) handleHealthcheck(received *ReceiveContext, now time.Time) {
-	pid.markActivity(now)
-	received.Response(new(commands.HealthCheckResponse))
 }
 
 // handleReceived picks the right behavior and processes the message
@@ -1925,7 +1902,6 @@ func (pid *PID) enableReentrancyStash(received *ReceiveContext) bool {
 	switch received.Message().(type) {
 	case *commands.AsyncResponse,
 		*PoisonPill,
-		*commands.HealthCheckRequest,
 		*commands.Panicking,
 		*PausePassivation,
 		*ResumePassivation:
@@ -2940,11 +2916,11 @@ func (pid *PID) getDeadlettersCount(ctx context.Context) int64 {
 		}
 	)
 	if to.IsRunning() {
-		// ask the deadletter actor for the count using the default ask timeout.
+		// ask the deadletter actor for the count using the system-wide ask timeout.
 		// IsRunning is not atomic with Ask: if the deadletter actor transitions
 		// to stopping between the guard and the reply, Ask returns (nil, ErrDead).
 		// Discard the count in that case instead of asserting on a nil reply.
-		resp, err := from.Ask(ctx, to, message, DefaultAskTimeout)
+		resp, err := from.Ask(ctx, to, message, pid.ActorSystem().getAskTimeout())
 		if err != nil || resp == nil {
 			return 0
 		}
@@ -3037,38 +3013,6 @@ func (pid *PID) startPassivation() {
 	}
 
 	pid.passivationManager.Register(pid, pid.passivationStrategy)
-}
-
-// healthCheck is called whenever an actor is spawned to make sure it is ready and functional.
-// It has to be very fast for a smooth operation.
-func (pid *PID) healthCheck(ctx context.Context) error {
-	logger := pid.logger
-	logger.Debugf("actor=%s readiness probe", pid.Name())
-
-	if pid.isStateSet(systemState) {
-		logger.Debugf("actor=%s is system actor, skipping readiness probe", pid.Name())
-		return nil
-	}
-
-	message := new(commands.HealthCheckRequest)
-	timeout := pid.initTimeout.Load()
-	numretries := pid.initMaxRetries.Load()
-	noSender := pid.ActorSystem().NoSender()
-
-	retrier := retry.NewRetrier(int(numretries), timeout, timeout)
-	err := retrier.RunContext(ctx, func(ctx context.Context) error {
-		_, err := noSender.Ask(ctx, pid, message, DefaultAskTimeout)
-		return err
-	})
-
-	if err != nil {
-		logger.Errorf("Actor %s readiness probe failed: %v (hint: check PreStart/initialization)", pid.Name(), err)
-		// attempt to shut down the actor to free pre-allocated resources
-		return errors.Join(err, pid.Shutdown(ctx))
-	}
-
-	logger.Debugf("actor=%s readiness probe completed", pid.Name())
-	return nil
 }
 
 func (pid *PID) remotingEnabled() bool {
@@ -3466,10 +3410,6 @@ func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *t
 	pid.setState(suspendedState, false)
 	pid.startPassivation()
 
-	if err := pid.healthCheck(ctx); err != nil {
-		return err
-	}
-
 	pid.restartCount.Inc()
 	pid.fireSystemMessage(ctx, new(PostStart))
 	if pid.eventsStream != nil {
@@ -3523,7 +3463,6 @@ func isSystemMessage(message any) bool {
 	case *commands.AsyncResponse,
 		*commands.AsyncRequest,
 		*PoisonPill,
-		*commands.HealthCheckRequest,
 		*commands.Panicking,
 		*commands.SendDeadletter,
 		*PausePassivation,
