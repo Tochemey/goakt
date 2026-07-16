@@ -24,6 +24,7 @@ package kubernetes
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
@@ -43,6 +44,13 @@ import (
 )
 
 const discoverPeersTimeout = 30 * time.Second
+
+// ErrNoPodsAvailable is returned by DiscoverPeers when the pod listing yields no
+// usable peer address. Once the kubelet reports the calling pod Running, that pod
+// must at minimum discover itself, so an empty result indicates Kubernetes API
+// status lag. Callers should treat it as retryable instead of bootstrapping a
+// standalone cluster.
+var ErrNoPodsAvailable = errors.New("no running pods with a usable address found")
 
 // Discovery represents the kubernetes discovery
 type Discovery struct {
@@ -136,6 +144,15 @@ func (d *Discovery) Deregister() error {
 }
 
 // DiscoverPeers returns a list of known nodes.
+//
+// Candidate pods are matched by the configured labels and status.phase=Running.
+// The Ready condition is deliberately not required: on a cold start no pod is
+// Ready until its actor system has joined the cluster, so gating discovery on
+// readiness would prevent any cluster from ever forming. Liveness of candidates
+// is delegated to the memberlist failure detector. Terminating pods (which keep
+// status.phase=Running until they exit) and pods without an assigned IP are
+// excluded. An empty filtered result returns ErrNoPodsAvailable so that the
+// cluster engine retries the join instead of bootstrapping a standalone cluster.
 func (d *Discovery) DiscoverPeers() ([]string, error) {
 	if !d.initialized.Load() {
 		return nil, discovery.ErrNotInitialized
@@ -155,26 +172,43 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 
 	addresses := goset.NewSet[string]()
 
-MainLoop:
 	for _, pod := range pods.Items {
-		// If there is a Ready condition available, we need that to be true.
-		// If no ready condition is set, then we accept this pod regardless.
-		for _, condition := range pod.Status.Conditions {
-			if condition.Type == corev1.PodReady && condition.Status != corev1.ConditionTrue {
-				continue MainLoop
-			}
+		// Terminating pods keep status.phase=Running until their containers exit;
+		// skip them so rolling updates do not feed dying IPs to memberlist.
+		if pod.DeletionTimestamp != nil {
+			continue
 		}
 
-		for _, container := range pod.Spec.Containers {
-			for _, port := range container.Ports {
-				if port.Name == d.config.DiscoveryPortName {
-					addresses.Add(net.JoinHostPort(pod.Status.PodIP, strconv.Itoa(int(port.ContainerPort))))
-					continue MainLoop
-				}
+		// A Running pod may not have an IP assigned yet in the API server's view.
+		if pod.Status.PodIP == "" {
+			continue
+		}
+
+		if port, ok := discoveryPort(&pod, d.config.DiscoveryPortName); ok {
+			addresses.Add(net.JoinHostPort(pod.Status.PodIP, strconv.Itoa(int(port))))
+		}
+	}
+
+	if addresses.Cardinality() == 0 {
+		return nil, ErrNoPodsAvailable
+	}
+
+	return addresses.ToSlice(), nil
+}
+
+// discoveryPort returns the container port named portName from the pod spec.
+// Kubernetes enforces that port names are unique across all containers of a pod,
+// so at most one match exists.
+func discoveryPort(pod *corev1.Pod, portName string) (int32, bool) {
+	for _, container := range pod.Spec.Containers {
+		for _, port := range container.Ports {
+			if port.Name == portName {
+				return port.ContainerPort, true
 			}
 		}
 	}
-	return addresses.ToSlice(), nil
+
+	return 0, false
 }
 
 // Close closes the provider

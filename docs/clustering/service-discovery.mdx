@@ -45,6 +45,27 @@ type Provider interface {
 
 Each provider has its own config type. See the package for constructors and options.
 
+### Kubernetes
+
+The Kubernetes provider lists pods through the Kubernetes API, matching the configured labels and `status.phase=Running`. Pods do not need to be Ready to be discovered: on a cold start no pod is Ready until its actor system has joined the cluster, so readiness cannot gate discovery. Terminating pods and pods without an assigned IP are excluded, and an empty result is treated as a retryable error so that simultaneously starting replicas keep retrying until they see each other.
+
+```go
+import "github.com/tochemey/goakt/v4/discovery/kubernetes"
+
+config := &kubernetes.Config{
+    Namespace:         "default",
+    DiscoveryPortName: "gossip",
+    RemotingPortName:  "remoting",
+    PeersPortName:     "cluster",
+    PodLabels:         map[string]string{"app": "goakt"},
+}
+provider := kubernetes.NewDiscovery(config)
+```
+
+<Tip>
+For production deployments, set `WithMinimumPeersQuorum` to a majority of the replica count (e.g. 2 for 3 replicas). With the default quorum of 1, a node that cannot reach its peers is allowed to operate as a single-node cluster.
+</Tip>
+
 ### Self-managed (zero config)
 
 The self-managed provider uses UDP broadcast for peer discovery. No third-party services or peer IPs are required; nodes on the same LAN discover each other automatically.
