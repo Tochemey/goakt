@@ -34,7 +34,7 @@ go get github.com/tochemey/goakt/v4
 
   <a href="https://go.dev/doc/install"><img src="https://img.shields.io/github/go-mod/go-version/Tochemey/goakt" alt="GitHub go.mod Go version" /></a>
   <a href="https://github.com/Tochemey/goakt/releases/latest"><img src="https://img.shields.io/github/v/release/Tochemey/goakt?label=release" alt="Latest Release" /></a>
-  <a href="https://github.com/Tochemey/goakt/tags"><img src="https://img.shields.io/github/v/tag/Tochemey/goakt?include_prereleases&sort=semver&label=pre-release" alt="Latest Tag" /></a>
+  <a href="https://github.com/Tochemey/goakt/tags"><img src="https://img.shields.io/github/v/tag/Tochemey/goakt?include_prereleases&sort=semver&label=tag" alt="Latest Tag" /></a>
 
 ## Examples
 
