@@ -341,83 +341,123 @@ func TestDiscoverPeersFailures(t *testing.T) {
 		require.Nil(t, peers)
 	})
 
-	t.Run("filters out non ready pods", func(t *testing.T) {
-		config := newConfig()
-		ns := "test"
-
-		labels := map[string]string{
-			"app.kubernetes.io/name": "test",
-		}
-
-		pods := []runtime.Object{
-			&corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "pending-pod",
-					Namespace: ns,
-					Labels:    labels,
-				},
-				Status: corev1.PodStatus{
-					Phase: corev1.PodPending,
-					PodIP: "10.0.0.30",
+	newPod := func(name, ip string) *corev1.Pod {
+		return &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: "test",
+				Labels: map[string]string{
+					"app.kubernetes.io/name": "test",
 				},
 			},
-			&corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "not-ready",
-					Namespace: ns,
-					Labels:    labels,
-				},
-				Status: corev1.PodStatus{
-					Phase: corev1.PodRunning,
-					PodIP: "10.0.0.31",
-					Conditions: []corev1.PodCondition{
-						{
-							Type:   corev1.PodReady,
-							Status: corev1.ConditionFalse,
-						},
-					},
-				},
-			},
-			&corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "no-discovery-port",
-					Namespace: ns,
-					Labels:    labels,
-				},
-				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{
-						{
-							Ports: []corev1.ContainerPort{
-								{
-									Name:          "metrics",
-									ContainerPort: 9090,
-								},
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					{
+						Ports: []corev1.ContainerPort{
+							{
+								Name:          gossipPortName,
+								ContainerPort: 3379,
+							},
+							{
+								Name:          peersPortName,
+								ContainerPort: 3380,
+							},
+							{
+								Name:          remotingPortName,
+								ContainerPort: 9000,
 							},
 						},
 					},
 				},
-				Status: corev1.PodStatus{
-					Phase: corev1.PodRunning,
-					PodIP: "10.0.0.32",
-					Conditions: []corev1.PodCondition{
-						{
-							Type:   corev1.PodReady,
-							Status: corev1.ConditionTrue,
-						},
+			},
+			Status: corev1.PodStatus{
+				Phase: corev1.PodRunning,
+				PodIP: ip,
+				Conditions: []corev1.PodCondition{
+					{
+						Type:   corev1.PodReady,
+						Status: corev1.ConditionTrue,
 					},
 				},
 			},
 		}
+	}
 
-		client := testclient.NewClientset(pods...)
+	t.Run("includes not ready pods", func(t *testing.T) {
+		// On a cold start every pod is Running but not yet Ready. Discovery must
+		// still return them, otherwise no cluster can ever form.
+		notReady := newPod("not-ready", "10.0.0.31")
+		notReady.Status.Conditions = []corev1.PodCondition{
+			{
+				Type:   corev1.PodReady,
+				Status: corev1.ConditionFalse,
+			},
+		}
+
+		client := testclient.NewClientset(notReady)
 		provider := Discovery{
 			client:      client,
 			initialized: atomic.NewBool(true),
-			config:      config,
+			config:      newConfig(),
 		}
 
 		peers, err := provider.DiscoverPeers()
 		require.NoError(t, err)
+		assert.ElementsMatch(t, []string{"10.0.0.31:3379"}, peers)
+	})
+
+	t.Run("excludes terminating pods", func(t *testing.T) {
+		terminating := newPod("terminating", "10.0.0.32")
+		terminating.DeletionTimestamp = &metav1.Time{Time: time.Now()}
+		terminating.Finalizers = []string{"goakt.io/test"}
+
+		client := testclient.NewClientset(newPod("healthy", "10.0.0.33"), terminating)
+		provider := Discovery{
+			client:      client,
+			initialized: atomic.NewBool(true),
+			config:      newConfig(),
+		}
+
+		peers, err := provider.DiscoverPeers()
+		require.NoError(t, err)
+		assert.ElementsMatch(t, []string{"10.0.0.33:3379"}, peers)
+	})
+
+	t.Run("excludes pods without an IP", func(t *testing.T) {
+		client := testclient.NewClientset(newPod("healthy", "10.0.0.34"), newPod("no-ip", ""))
+		provider := Discovery{
+			client:      client,
+			initialized: atomic.NewBool(true),
+			config:      newConfig(),
+		}
+
+		peers, err := provider.DiscoverPeers()
+		require.NoError(t, err)
+		assert.ElementsMatch(t, []string{"10.0.0.34:3379"}, peers)
+	})
+
+	t.Run("empty result is a retryable error", func(t *testing.T) {
+		// The calling pod must at minimum see itself once it is Running, so an
+		// empty result means API status lag and must feed the join retry loop
+		// instead of silently bootstrapping a standalone cluster.
+		noPort := newPod("no-discovery-port", "10.0.0.35")
+		noPort.Spec.Containers[0].Ports = []corev1.ContainerPort{
+			{
+				Name:          "metrics",
+				ContainerPort: 9090,
+			},
+		}
+
+		client := testclient.NewClientset(noPort)
+		provider := Discovery{
+			client:      client,
+			initialized: atomic.NewBool(true),
+			config:      newConfig(),
+		}
+
+		peers, err := provider.DiscoverPeers()
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrNoPodsAvailable)
 		assert.Empty(t, peers)
 	})
 }

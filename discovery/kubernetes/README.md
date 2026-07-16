@@ -52,8 +52,19 @@ type Provider interface {
 
 1. **Initialize**: Validate config and pre-compute the label selector; no API connection yet.
 2. **Register**: Load in-cluster config (`rest.InClusterConfig()`); create the Kubernetes client.
-3. **DiscoverPeers**: List pods in the namespace matching `PodLabels` and `status.phase=Running`; for each ready pod, read the port named `DiscoveryPortName` and return `podIP:port`.
+3. **DiscoverPeers**: List pods in the namespace matching `PodLabels` and `status.phase=Running`; for each candidate pod, read the port named `DiscoveryPortName` and return `podIP:port`.
 4. **Deregister**: Mark the provider as uninitialized.
+
+### Peer Filtering
+
+`DiscoverPeers` applies the following filters to the listed pods:
+
+- **Running phase required**: pods are listed with `status.phase=Running`.
+- **Readiness not required**: the `Ready` condition is deliberately ignored. On a cold start no pod is Ready until its actor system has joined the cluster, so gating discovery on readiness would prevent any cluster from ever forming (split brain with quorum 1, bootstrap deadlock with quorum > 1). Dead peers are rejected by the memberlist failure detector instead.
+- **Terminating pods excluded**: pods with a `deletionTimestamp` keep `status.phase=Running` until their containers exit; they are skipped so rolling updates do not feed dying IPs to memberlist.
+- **IP-less pods excluded**: pods without an assigned `status.podIP` cannot be dialed.
+
+An empty filtered result returns `ErrNoPodsAvailable`. Once the kubelet reports the calling pod `Running`, that pod must at minimum discover itself, so an empty list means API status lag; the error makes the cluster engine retry the join instead of bootstrapping a standalone cluster.
 
 ```
     Pod A                                    Pod B
@@ -101,8 +112,11 @@ provider := kubernetes.NewDiscovery(config)
 clusterConfig := actor.NewClusterConfig().
     WithDiscovery(provider).
     WithDiscoveryPort(7946).
+    WithMinimumPeersQuorum(2).
     WithKinds(myActor)
 ```
+
+For production deployments, set `WithMinimumPeersQuorum` to a majority of the replica count (e.g. 2 for 3 replicas). With the default quorum of 1, a node that cannot reach its peers is allowed to operate as a single-node cluster.
 
 ---
 
