@@ -33,17 +33,77 @@ jobs:
               - '.github/workflows/build.yml'
               - '.github/workflows/pr.yml'
 
-  build:
-    name: Tests on ${{ matrix.os }}
+  lint:
+    name: Lint
     needs: changes
     if: needs.changes.outputs.build == 'true'
-    runs-on: ${{ matrix.runner }}
+    runs-on: ubuntu-latest
+    env:
+      TZ: UTC
+      CGO_ENABLED: "1"
+      GOTOOLCHAIN: local # avoid auto-upgrading the toolchain
+      GOFLAGS: -mod=readonly -tags=hashicorpmetrics
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: false
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.4"
+          check-latest: false
+          cache-dependency-path: "**/*.sum"
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+      - name: Vendoring and Tidy
+        run: go mod tidy && go mod vendor
+      - name: Run Linter
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
+          args: --timeout 10m --config .golangci.yml
+
+  build:
+    name: Tests (${{ matrix.shard }})
+    needs: changes
+    if: needs.changes.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: linux
-            runner: ubuntu-latest
+          # The actor package dominates the suite's wall-clock time: one test
+          # binary, strictly serial. It is split across three runners by a
+          # deterministic round-robin over the sorted top-level test list, so
+          # new tests distribute automatically.
+          - shard: actor-0
+            packages: "./actor/..."
+            flags: "-p 1 -timeout 30m"
+          - shard: actor-1
+            packages: "./actor/..."
+            flags: "-p 1 -timeout 30m"
+          - shard: actor-2
+            packages: "./actor/..."
+            flags: "-p 1 -timeout 30m"
+          # Packages that bind ports or spin up cluster, remoting, or discovery
+          # infrastructure keep the serialized -p 1 they have always run with.
+          - shard: infra
+            packages: "./internal/cluster/... ./internal/net/... ./internal/remoteclient/... ./remote/... ./client/... ./testkit/... ./discovery/... ./datacenter/..."
+            flags: "-p 1 -timeout 30m"
+          # Everything else is independent and runs with go's default
+          # package-level parallelism. The package list is computed in the run
+          # step as the complement of the two shards above.
+          - shard: core
+            packages: ""
+            flags: "-timeout 30m"
     env:
       TZ: UTC
       CGO_ENABLED: "1"
@@ -74,28 +134,31 @@ jobs:
             ${{ runner.os }}-go-
       - name: Vendoring and Tidy
         run: go mod tidy && go mod vendor
-      - name: Install dependencies
-        run: |
-          go mod download
-      - name: Run Linter
-        if: matrix.os == 'linux'
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: v2.12.2
-          args: --timeout 10m --config .golangci.yml
-      - name: Install go-acc
-        run: |
-          go install github.com/ory/go-acc@latest
       - name: Run tests
         shell: bash
         run: |
-          go-acc ./... -o coverage.out --ignore goaktpb,mocks,internal/internalpb,bench,playground -- -mod=vendor -p 1 -timeout 0 -race -v
+          SHARD="${{ matrix.shard }}"
+          COVER="-race -covermode=atomic -coverprofile=coverage-${SHARD}.out"
+
+          if [[ "$SHARD" == actor-* ]]; then
+            INDEX="${SHARD#actor-}"
+            TESTS=$(go test -mod=vendor ./actor -list '^Test' | grep '^Test' | sort | awk -v i="$INDEX" 'NR % 3 == i' | paste -sd'|' -)
+            if [ -z "$TESTS" ]; then
+              echo "actor test slice $INDEX is empty" >&2
+              exit 1
+            fi
+            go test -mod=vendor ${{ matrix.flags }} -run "^(${TESTS})$" $COVER ./actor/...
+          elif [ "$SHARD" = "core" ]; then
+            PACKAGES=$(go list ./... | grep -vE '/(actor|internal/cluster|internal/net|internal/remoteclient|remote|client|testkit|discovery|datacenter|goaktpb|mocks|internal/internalpb|bench|playground)(/|$)')
+            go test -mod=vendor ${{ matrix.flags }} $COVER $PACKAGES
+          else
+            go test -mod=vendor ${{ matrix.flags }} $COVER ${{ matrix.packages }}
+          fi
       - name: Upload coverage to Codecov
-        if: matrix.os == 'linux'
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage.out
+          files: ./coverage-${{ matrix.shard }}.out
           fail_ci_if_error: false
           verbose: true
           slug: Tochemey/goakt
