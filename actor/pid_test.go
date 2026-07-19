@@ -7153,3 +7153,174 @@ func TestRestartPublishFailureFailsRestart(t *testing.T) {
 	assert.ErrorIs(t, err, assert.AnError)
 	assert.False(t, pid.IsRunning(), "a failed restart must leave the actor non-running")
 }
+
+func TestBackoffDelay(t *testing.T) {
+	initial := 100 * time.Millisecond
+	maximum := time.Second
+
+	assert.Zero(t, backoffDelay(1, 0, maximum))
+	assert.Zero(t, backoffDelay(0, initial, maximum))
+	assert.Equal(t, initial, backoffDelay(1, initial, maximum))
+	assert.Equal(t, 200*time.Millisecond, backoffDelay(2, initial, maximum))
+	assert.Equal(t, 400*time.Millisecond, backoffDelay(3, initial, maximum))
+	assert.Equal(t, maximum, backoffDelay(5, initial, maximum))
+	assert.Equal(t, maximum, backoffDelay(80, initial, maximum))
+}
+
+func TestRecordFault(t *testing.T) {
+	pid := new(PID)
+
+	// a non-positive window never resets the counter, no matter how old the
+	// previous fault is
+	require.EqualValues(t, 1, pid.recordFault(0))
+	pid.lastFaultAtNano.Store(time.Now().Add(-time.Hour).UnixNano())
+	require.EqualValues(t, 2, pid.recordFault(0))
+
+	// a fault older than the window resets the counter
+	pid.lastFaultAtNano.Store(time.Now().Add(-time.Second).UnixNano())
+	require.EqualValues(t, 1, pid.recordFault(500*time.Millisecond))
+
+	// within the window the counter keeps incrementing
+	require.EqualValues(t, 2, pid.recordFault(time.Minute))
+}
+
+func TestSupervisorRestartBudget(t *testing.T) {
+	ctx := context.TODO()
+	host := "127.0.0.1"
+	ports := dynaport.Get(1)
+
+	actorSystem, err := NewActorSystem("testSys",
+		WithRemote(remote.NewConfig(host, ports[0])),
+		WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+
+	pause.For(time.Second)
+
+	parent, err := actorSystem.Spawn(ctx, "parent", NewMockSupervisor())
+	require.NoError(t, err)
+
+	restartStrategy := supervisor.NewSupervisor(
+		supervisor.WithDirective(&errors.PanicError{}, supervisor.RestartDirective),
+		supervisor.WithRetry(2, time.Minute))
+
+	child, err := parent.SpawnChild(ctx, "child", NewMockSupervised(), WithSupervisor(restartStrategy))
+	require.NoError(t, err)
+
+	pause.For(500 * time.Millisecond)
+
+	// the first two faults stay within the budget: the child is restarted
+	for range 2 {
+		require.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
+		pause.For(time.Second)
+		require.True(t, child.IsRunning())
+	}
+
+	// the third fault exhausts the budget: the child stays suspended
+	require.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
+	pause.For(time.Second)
+	require.False(t, child.IsRunning())
+	require.True(t, child.IsSuspended())
+	require.EqualValues(t, 3, child.consecutiveFaults.Load())
+
+	require.NoError(t, parent.Shutdown(ctx))
+	require.NoError(t, actorSystem.Stop(ctx))
+}
+
+func TestSupervisorRestartBudgetOneForAll(t *testing.T) {
+	ctx := context.TODO()
+	host := "127.0.0.1"
+	ports := dynaport.Get(1)
+
+	actorSystem, err := NewActorSystem("testSys",
+		WithRemote(remote.NewConfig(host, ports[0])),
+		WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+
+	pause.For(time.Second)
+
+	parent, err := actorSystem.Spawn(ctx, "parent", NewMockSupervisor())
+	require.NoError(t, err)
+
+	// both children share one supervisor instance on purpose: this doubles as
+	// the regression test for #1269, where the restart of a running sibling
+	// wiped the shared supervisor's directive rules and the second fault was
+	// silently swallowed instead of exhausting the budget.
+	restartStrategy := supervisor.NewSupervisor(
+		supervisor.WithStrategy(supervisor.OneForAllStrategy),
+		supervisor.WithDirective(&errors.PanicError{}, supervisor.RestartDirective),
+		supervisor.WithRetry(1, time.Minute))
+
+	child, err := parent.SpawnChild(ctx, "child", NewMockSupervised(), WithSupervisor(restartStrategy))
+	require.NoError(t, err)
+
+	sibling, err := parent.SpawnChild(ctx, "sibling", NewMockSupervised(), WithSupervisor(restartStrategy))
+	require.NoError(t, err)
+
+	pause.For(500 * time.Millisecond)
+
+	// the first fault stays within the budget: the whole group is restarted
+	require.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
+	pause.For(time.Second)
+	require.True(t, child.IsRunning())
+	require.True(t, sibling.IsRunning())
+
+	// the second fault exhausts the budget: the faulty child stays suspended
+	// and its sibling is suspended as well
+	require.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
+	pause.For(time.Second)
+	require.True(t, child.IsSuspended())
+	require.True(t, sibling.IsSuspended())
+
+	require.NoError(t, parent.Shutdown(ctx))
+	require.NoError(t, actorSystem.Stop(ctx))
+}
+
+func TestSupervisorExponentialBackoffDelaysRestart(t *testing.T) {
+	ctx := context.TODO()
+	host := "127.0.0.1"
+	ports := dynaport.Get(1)
+
+	actorSystem, err := NewActorSystem("testSys",
+		WithRemote(remote.NewConfig(host, ports[0])),
+		WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+
+	pause.For(time.Second)
+
+	parent, err := actorSystem.Spawn(ctx, "parent", NewMockSupervisor())
+	require.NoError(t, err)
+
+	restartStrategy := supervisor.NewSupervisor(
+		supervisor.WithDirective(&errors.PanicError{}, supervisor.RestartDirective),
+		supervisor.WithExponentialBackoff(time.Second, 4*time.Second, 0))
+
+	child, err := parent.SpawnChild(ctx, "child", NewMockSupervised(), WithSupervisor(restartStrategy))
+	require.NoError(t, err)
+
+	pause.For(500 * time.Millisecond)
+
+	// the first fault delays the restart by one second: half a second in,
+	// the child is still down
+	require.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
+	pause.For(500 * time.Millisecond)
+	require.False(t, child.IsRunning())
+
+	pause.For(1500 * time.Millisecond)
+	require.True(t, child.IsRunning())
+
+	// the second fault doubles the delay: the child is still down after
+	// one and a half seconds
+	require.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
+	pause.For(1500 * time.Millisecond)
+	require.False(t, child.IsRunning())
+
+	pause.For(2 * time.Second)
+	require.True(t, child.IsRunning())
+	require.EqualValues(t, 2, child.consecutiveFaults.Load())
+
+	require.NoError(t, parent.Shutdown(ctx))
+	require.NoError(t, actorSystem.Stop(ctx))
+}

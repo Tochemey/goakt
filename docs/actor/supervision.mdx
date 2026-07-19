@@ -1,6 +1,6 @@
 ---
 title: Supervision
-description: One-for-one and one-for-all strategies, directives, and retry.
+description: One-for-one and one-for-all strategies, directives, restart budget, and exponential backoff.
 sidebarTitle: "Supervision"
 ---
 
@@ -27,20 +27,59 @@ Choose **OneForOne** when failures are independent; **OneForAll** when siblings 
 | **Stop**     | Terminate the child                           |
 | **Escalate** | Pass the failure to the parent                |
 
-Configure retry windows (max retries within a time period) to avoid infinite restart loops. After the window is
-exceeded, the supervisor can escalate.
+Configure a restart budget (max consecutive restarts within a time window) to avoid infinite restart loops. Once the
+budget is exhausted, the faulty child is suspended instead of restarted.
 
 ## Supervisor configuration
 
 Supervisors are created with `supervisor.NewSupervisor(opts...)` and passed via `WithSupervisor` when spawning. Key
 options:
 
-| Option                              | Purpose                                  |
-|-------------------------------------|------------------------------------------|
-| `WithDirective(errType, directive)` | Map a specific error type to a directive |
-| `WithAnyErrorDirective(directive)`  | Catch-all for any error                  |
-| `WithRetry(maxRetries, timeout)`    | Bound restarts within a time window      |
-| `WithStrategy(strategy)`            | `OneForOne` (default) or `OneForAll`     |
+| Option                                                       | Purpose                                          |
+|--------------------------------------------------------------|--------------------------------------------------|
+| `WithDirective(errType, directive)`                          | Map a specific error type to a directive         |
+| `WithAnyErrorDirective(directive)`                           | Catch-all for any error                          |
+| `WithRetry(maxRetries, timeout)`                             | Bound consecutive restarts within a time window  |
+| `WithExponentialBackoff(initialDelay, maxDelay, resetAfter)` | Delay each consecutive restart, doubling per fault |
+| `WithStrategy(strategy)`                                     | `OneForOne` (default) or `OneForAll`             |
 
-Directives: `Resume`, `Restart`, `Stop`, `Escalate`. When the retry window is exceeded, the supervisor escalates to the
-grandparent.
+Directives: `Resume`, `Restart`, `Stop`, `Escalate`.
+
+## Restart budget and exponential backoff
+
+Without any bound, a child that crashes right after every successful restart is restarted immediately, forever. This
+hot loop hammers whatever dependency made it fail in the first place (a database that is down, a broker that refuses
+connections). Two options work together to prevent it; both track consecutive faults per child, and the counter
+resets once the child stays fault-free for the configured window.
+
+`WithRetry(maxRetries, timeout)` is the restart budget: more than `maxRetries` consecutive faults within the window
+suspends the child instead of restarting it. A suspended actor no longer processes messages but can be revived with
+`Reinstate`. `timeout` is the reset window, measured from the previous fault: a new fault arriving later than
+`timeout` after the last one starts the count over. It is also the delay between attempts when a restart itself keeps
+failing (for example, when `PreStart` keeps returning an error). A non-positive `timeout` disables the budget.
+
+`WithExponentialBackoff(initialDelay, maxDelay, resetAfter)` delays each consecutive restart: the nth restart waits
+`min(initialDelay << (n-1), maxDelay)` before the child comes back up, giving the failing dependency time to recover.
+When `resetAfter` is zero it defaults to `maxDelay`. When both options are configured, backoff's `resetAfter` and
+delays take precedence over `timeout`.
+
+```go
+strategy := supervisor.NewSupervisor(
+    supervisor.WithDirective(&errors.PanicError{}, supervisor.RestartDirective),
+    supervisor.WithRetry(5, time.Minute),
+    supervisor.WithExponentialBackoff(200*time.Millisecond, 10*time.Second, 30*time.Second),
+)
+
+child, err := parent.SpawnChild(ctx, "worker", NewWorker(), actor.WithSupervisor(strategy))
+```
+
+With this configuration a crash-looping child is restarted after 200ms, 400ms, 800ms, 1.6s, and 3.2s; the sixth
+consecutive fault within the window suspends it. If no new fault occurs for 30 seconds after the last one, the
+sequence starts over at 200ms.
+
+<Note>
+While a restart delay is pending, the child does not process messages. As with any restart, mailboxes are not
+preserved: messages sent during the delay may be dropped when the restart completes. With `OneForAllStrategy`, the
+delay and the budget apply to the whole group: siblings restart with the same delay, and budget exhaustion suspends
+them together with the faulty child.
+</Note>
