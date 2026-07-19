@@ -54,6 +54,26 @@ func TestSupervisorOption(t *testing.T) {
 			option:   WithRetry(2, time.Second),
 			expected: &Supervisor{timeout: time.Second, maxRetries: 2},
 		},
+		{
+			name:     "WithExponentialBackoff",
+			option:   WithExponentialBackoff(100*time.Millisecond, time.Second, time.Minute),
+			expected: &Supervisor{initialDelay: 100 * time.Millisecond, maxDelay: time.Second, backoffResetAfter: time.Minute},
+		},
+		{
+			name:     "WithExponentialBackoff with zero resetAfter defaults to maxDelay",
+			option:   WithExponentialBackoff(100*time.Millisecond, time.Second, 0),
+			expected: &Supervisor{initialDelay: 100 * time.Millisecond, maxDelay: time.Second, backoffResetAfter: time.Second},
+		},
+		{
+			name:     "WithExponentialBackoff with maxDelay lower than initialDelay raises it",
+			option:   WithExponentialBackoff(time.Second, 100*time.Millisecond, 0),
+			expected: &Supervisor{initialDelay: time.Second, maxDelay: time.Second, backoffResetAfter: time.Second},
+		},
+		{
+			name:     "WithExponentialBackoff with non-positive initialDelay is ignored",
+			option:   WithExponentialBackoff(0, time.Second, time.Minute),
+			expected: &Supervisor{},
+		},
 	}
 
 	for _, tc := range testCases {
@@ -99,6 +119,9 @@ func TestNewSupervisorDefaults(t *testing.T) {
 	require.Equal(t, OneForOneStrategy, supervisor.Strategy())
 	require.EqualValues(t, 0, supervisor.MaxRetries())
 	require.Equal(t, time.Duration(-1), supervisor.Timeout())
+	require.Zero(t, supervisor.InitialDelay())
+	require.Zero(t, supervisor.MaxDelay())
+	require.Zero(t, supervisor.BackoffResetAfter())
 
 	directive, ok := supervisor.Directive(&gerrors.PanicError{})
 	require.True(t, ok)
@@ -110,6 +133,14 @@ func TestNewSupervisorDefaults(t *testing.T) {
 
 	_, ok = supervisor.AnyErrorDirective()
 	require.False(t, ok)
+}
+
+func TestSupervisorBackoffGetters(t *testing.T) {
+	supervisor := NewSupervisor(WithExponentialBackoff(100*time.Millisecond, time.Second, time.Minute))
+
+	require.Equal(t, 100*time.Millisecond, supervisor.InitialDelay())
+	require.Equal(t, time.Second, supervisor.MaxDelay())
+	require.Equal(t, time.Minute, supervisor.BackoffResetAfter())
 }
 
 func TestNewSupervisorAnyErrorOverrides(t *testing.T) {

@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### ✨ Features
+
+- **Exponential backoff supervision** ([#1268](https://github.com/Tochemey/goakt/issues/1268)). A supervised child that crashed right after every successful restart was restarted immediately, forever: nothing counted consecutive faults, so a crash loop hammered whatever dependency caused the failure in the first place. The supervisor now tracks consecutive faults per child and drives two safeguards with that counter. `WithRetry(maxRetries, timeout)` finally enforces the restart budget its documentation always described: more than `maxRetries` consecutive faults within the window suspends the child instead of restarting it (a suspended actor can be revived with `Reinstate`). The new `supervisor.WithExponentialBackoff(initialDelay, maxDelay, resetAfter)` option delays the nth consecutive restart by `min(initialDelay << (n-1), maxDelay)`, giving the failing dependency time to recover; the counter resets once the child stays fault-free for `resetAfter` (defaults to `maxDelay` when zero). With `OneForAllStrategy` the delay and the budget apply to the whole group. Restart delays never block the parent, which keeps processing messages while the child waits out its backoff. Behavior is unchanged when neither option is configured.
+
+### 🔧 Fixes
+
+- **Stopping a running actor no longer wipes the user-supplied supervisor** ([#1269](https://github.com/Tochemey/goakt/issues/1269)). The stop path called `Supervisor.Reset()` on the very object passed to `WithSupervisor`, clearing every directive rule and flipping the strategy to one-for-all. Two actors sharing one supervisor instance lost their supervision after the first of them stopped while running (including the sibling shutdown inside a one-for-all restart), and a restarted-while-running actor came back with an empty rule set; the next fault was then suspended silently instead of handled by the configured directive. The runtime no longer mutates the user's supervisor object.
+- **One-for-all restarts with `WithRetry` now restart each group member** ([#1268](https://github.com/Tochemey/goakt/issues/1268)). The retry path restarted the faulty child once per group member concurrently and never restarted the siblings, so the group came back with the faulty child racing itself and every sibling still carrying its old state. Each member now restarts itself, matching the non-retry path.
+
+### ⚠️ Behavior changes
+
+- **`WithRetry` now suspends a crash-looping child once the budget is exhausted.** Previously a child that kept crashing after each successful restart was restarted forever regardless of `maxRetries`. Applications that configured `WithRetry` and relied on unlimited restarts must either raise `maxRetries`, add `WithExponentialBackoff`, or watch for `ActorSuspended` events and call `Reinstate`. Configurations without `WithRetry` are unaffected.
+
 ## v4.4.0 - 2026-07-16
 
 ### 🔧 Fixes

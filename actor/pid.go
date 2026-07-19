@@ -54,6 +54,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/locker"
 	"github.com/tochemey/goakt/v4/internal/metric"
+	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/internal/ticker"
 	"github.com/tochemey/goakt/v4/internal/types"
@@ -171,6 +172,16 @@ type PID struct {
 	processedCount atomic.Int64
 	failureCount   atomic.Int64
 	reinstateCount atomic.Int64
+
+	// consecutiveFaults counts the faults handled by the parent's restart
+	// directive without a fault-free period in between; lastFaultAtNano records
+	// when the latest one occurred. Together they drive the restart budget
+	// (supervisor.WithRetry) and the exponential backoff delays
+	// (supervisor.WithExponentialBackoff). Both are deliberately left out of
+	// reset() so they survive the shutdown embedded in a restart; a fresh spawn
+	// allocates a new PID and naturally starts at zero.
+	consecutiveFaults atomic.Int64
+	lastFaultAtNano   atomic.Int64
 
 	// supervisor strategy
 	supervisor *supervisor.Supervisor
@@ -2314,11 +2325,10 @@ func (pid *PID) reset() {
 	pid.setState(runningState, false)
 	pid.setState(stoppingState, false)
 	pid.setState(suspendedState, false)
-	if pid.supervisor != nil {
-		if sys, ok := pid.actorSystem.(*actorSystem); !ok || pid.supervisor != sys.defaultSupervisor {
-			pid.supervisor.Reset()
-		}
-	}
+	// the supervisor is deliberately left untouched: it is the object the user
+	// passed to WithSupervisor and may be shared across actors. Wiping it here
+	// erased the directive rules of every actor spawned with the same instance
+	// and of the actor itself after a restart while running (#1269).
 	pid.mailbox.Dispose()
 	pid.setState(singletonState, false)
 	pid.setState(relocationState, true)
@@ -2793,10 +2803,7 @@ func (pid *PID) handlePanicking(cid *PID, msg *commands.Panicking) {
 		case supervisor.StopDirective:
 			pid.handleStopDirective(cid, includeSiblings)
 		case supervisor.RestartDirective:
-			pid.handleRestartDirective(cid,
-				msg.Supervisor.MaxRetries(),
-				msg.Supervisor.Timeout(),
-				includeSiblings)
+			pid.handleRestartDirective(cid, msg.Supervisor, includeSiblings)
 		case supervisor.ResumeDirective:
 			// simply reinstate the actor
 			cid.doReinstate()
@@ -2844,44 +2851,165 @@ func (pid *PID) handleStopDirective(cid *PID, includeSiblings bool) {
 }
 
 // handleRestartDirective handles the Behavior restart directive
-func (pid *PID) handleRestartDirective(cid *PID, maxRetries uint32, timeout time.Duration, includeSiblings bool) {
-	ctx := context.Background()
-	tree := pid.ActorSystem().tree()
+// handleRestartDirective handles the Behavior restart directive.
+//
+// The faulty child cid arrives here already suspended by notifyParent. The
+// directive applies to cid alone (one-for-one) or to cid and its siblings
+// (one-for-all). Each fault bumps the consecutive fault counter of every
+// group member, which drives the two safeguards configured on the supervisor:
+//   - restart budget (WithRetry): more than MaxRetries consecutive faults
+//     within a positive reset window leaves the group suspended instead of
+//     restarting it.
+//   - exponential backoff (WithExponentialBackoff): the nth consecutive
+//     restart is delayed by min(InitialDelay << (n-1), MaxDelay).
+//
+// The restarts themselves are fire-and-forget: each group member restarts on
+// its own goroutine while the parent keeps processing messages.
+func (pid *PID) handleRestartDirective(cid *PID, sup *supervisor.Supervisor, includeSiblings bool) {
 	pids := []*PID{cid}
-
 	if includeSiblings {
-		siblings := tree.siblings(cid)
-		if len(siblings) > 0 {
-			// add siblings to the list of actors to restart
-			pids = append(pids, siblings...)
+		pids = append(pids, pid.ActorSystem().tree().siblings(cid)...)
+	}
+
+	// the reset window is backoff's resetAfter when configured, otherwise the
+	// WithRetry timeout
+	window := sup.BackoffResetAfter()
+	if window <= 0 {
+		window = sup.Timeout()
+	}
+
+	// bump every group member so a one-for-all group exhausts its budget even
+	// when the faults alternate between siblings; the faulty child's count
+	// drives the decisions below
+	faults := int64(0)
+
+	for _, spid := range pids {
+		count := spid.recordFault(window)
+
+		if spid.Equals(cid) {
+			faults = count
 		}
 	}
 
-	eg, ctx := errgroup.WithContext(ctx)
-	for _, spid := range pids {
-		eg.Go(func() error {
-			pid.UnWatch(spid)
-			var err error
-
-			switch {
-			case maxRetries == 0 || timeout <= 0:
-				err = spid.Restart(ctx)
-			default:
-				retrier := retry.NewRetrier(int(maxRetries), timeout, timeout)
-				err = retrier.RunContext(ctx, cid.Restart)
-			}
-
-			if err != nil {
-				pid.logger.Errorf("restart directive failed for actor=%s: %v (hint: check PreStart/Receive for panics)", cid.Name(), err)
-				if err := spid.Shutdown(ctx); err != nil {
-					pid.logger.Errorf("shutdown after restart failure: %v", err)
-					// we need to suspend the actor since it is faulty
-					spid.suspend(err.Error())
-				}
-			}
-			return nil
-		})
+	// the budget only applies within a positive window: without one the
+	// counter never resets, and a handful of faults spread over days would
+	// eventually suspend an actor that is otherwise healthy
+	if maxRetries := sup.MaxRetries(); maxRetries > 0 && window > 0 && faults > int64(maxRetries) {
+		pid.suspendGroup(cid, pids, faults, maxRetries)
+		return
 	}
+
+	delay := backoffDelay(faults, sup.InitialDelay(), sup.MaxDelay())
+
+	for _, spid := range pids {
+		go pid.restartChild(spid, sup, delay)
+	}
+}
+
+// suspendGroup finalizes an exhausted restart budget. The faulty child cid is
+// already suspended by notifyParent and is left that way; with a one-for-all
+// strategy its still-running siblings are suspended too so the group stops as
+// one unit. Suspended actors can be revived with Reinstate.
+func (pid *PID) suspendGroup(cid *PID, pids []*PID, faults int64, maxRetries uint32) {
+	pid.logger.Warnf("restart budget exhausted for actor=%s: %d consecutive failures with maxRetries=%d", cid.Name(), faults, maxRetries)
+	reason := fmt.Sprintf("restart budget exhausted: %d consecutive failures", faults)
+
+	for _, spid := range pids {
+		if !spid.Equals(cid) && spid.IsRunning() {
+			spid.suspend(reason)
+		}
+	}
+}
+
+// restartChild restarts one member of a supervised group after waiting out the
+// backoff delay. It runs on its own goroutine: the sleep only parks this
+// goroutine, never the parent, and needs no timer or cancellation because
+// there is nothing else to do until the delay elapses.
+func (pid *PID) restartChild(spid *PID, sup *supervisor.Supervisor, delay time.Duration) {
+	ctx := context.Background()
+
+	if delay > 0 {
+		pause.For(delay)
+
+		// a long delay can outlive the supervising parent or the whole actor
+		// system; restarting then would resurrect the child into a torn-down
+		// hierarchy, so skip instead
+		if !pid.IsRunning() || pid.ActorSystem().isStopping() {
+			return
+		}
+	}
+
+	pid.UnWatch(spid)
+
+	maxRetries := sup.MaxRetries()
+	timeout := sup.Timeout()
+
+	var err error
+
+	switch {
+	case maxRetries == 0 || timeout <= 0:
+		err = spid.Restart(ctx)
+	default:
+		// bound the attempts when the restart itself keeps failing (e.g. a
+		// PreStart error); reuse the backoff bounds when configured, otherwise
+		// retry at the constant WithRetry pace
+		initial, maximum := timeout, timeout
+		if sup.InitialDelay() > 0 {
+			initial, maximum = sup.InitialDelay(), sup.MaxDelay()
+		}
+
+		retrier := retry.NewRetrier(int(maxRetries), initial, maximum)
+		err = retrier.RunContext(ctx, spid.Restart)
+	}
+
+	if err != nil {
+		pid.logger.Errorf("restart directive failed for actor=%s: %v (hint: check PreStart/Receive for panics)", spid.Name(), err)
+		if err := spid.Shutdown(ctx); err != nil {
+			pid.logger.Errorf("shutdown after restart failure: %v", err)
+			// we need to suspend the actor since it is faulty
+			spid.suspend(err.Error())
+		}
+	}
+}
+
+// recordFault updates the actor's consecutive fault counter and returns the
+// updated count. A previous fault older than the reset window resets the
+// counter first; a non-positive window means the counter never resets.
+func (pid *PID) recordFault(window time.Duration) int64 {
+	now := time.Now().UnixNano()
+	if last := pid.lastFaultAtNano.Load(); window > 0 && last > 0 && now-last > window.Nanoseconds() {
+		pid.consecutiveFaults.Store(0)
+	}
+
+	pid.lastFaultAtNano.Store(now)
+	return pid.consecutiveFaults.Inc()
+}
+
+// backoffDelay computes the exponential backoff delay for the nth consecutive
+// fault: min(initialDelay << (n-1), maxDelay). A non-positive
+// initialDelay disables backoff.
+func backoffDelay(faults int64, initialDelay, maxDelay time.Duration) time.Duration {
+	if initialDelay <= 0 || faults < 1 {
+		return 0
+	}
+
+	// time.Duration is an int64 nanosecond count, so 62 doublings of even the
+	// smallest positive delay (1ns << 62 ≈ 146 years) exceed any sane maxDelay
+	// and one more doubling overflows int64. Cap early rather than rely on the
+	// wraparound check below.
+	shift := faults - 1
+	if shift >= 62 {
+		return maxDelay
+	}
+
+	// a single shift can still wrap around for larger initial delays
+	// (e.g. 100ms << 40); a wrapped value is negative or huge, both clamp
+	delay := initialDelay << uint(shift)
+	if delay <= 0 || delay > maxDelay {
+		return maxDelay
+	}
+
+	return delay
 }
 
 // childAddress returns the address of the given child actor provided the name

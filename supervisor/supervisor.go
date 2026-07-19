@@ -138,22 +138,67 @@ func WithDirective(err error, directive Directive) SupervisorOption {
 	}
 }
 
-// WithRetry configures the retry behavior for an actor when using the RestartDirective.
-// It sets the maximum number of retry attempts and the timeout period between retries.
+// WithRetry configures the restart budget for an actor when using the RestartDirective.
 //
 // Parameters:
-//   - maxRetries: The maximum number of times an actor will be restarted after failure.
-//     Exceeding this count will trigger escalation according to the supervisor's policy.
-//   - timeout: The duration to wait before attempting a retry.
-//     This timeout defines the retry window and can help avoid immediate, repeated restarts.
+//   - maxRetries: The maximum number of consecutive restarts. One more fault within
+//     the window suspends the actor instead of restarting it. It also bounds the
+//     number of attempts made when a restart itself keeps failing.
+//   - timeout: The fault-free period after which the consecutive failure counter
+//     resets. It is also used as the constant delay between attempts when a restart
+//     itself keeps failing. When WithExponentialBackoff is configured, its resetAfter
+//     and delays take precedence over this value. A non-positive timeout disables
+//     both the reset window and the budget: restarts are then unbounded.
 //
-// Use WithRetry to provide a controlled recovery mechanism for transient failures,
-// ensuring that the actor is not endlessly restarted.
+// Use WithRetry to make sure a faulty actor is not endlessly restarted: a child
+// that keeps crashing right after each successful restart is suspended once the
+// budget is exhausted.
 func WithRetry(maxRetries uint32, timeout time.Duration) SupervisorOption {
 	return func(s *Supervisor) {
 		s.Lock()
 		s.maxRetries = maxRetries
 		s.timeout = timeout
+		s.Unlock()
+	}
+}
+
+// WithExponentialBackoff configures exponential delays between consecutive
+// restarts when using the RestartDirective.
+//
+// The nth consecutive restart is delayed by min(initialDelay << (n-1), maxDelay).
+// The consecutive failure counter resets once the actor stays fault-free for
+// resetAfter. Without backoff a crash-looping actor is restarted immediately
+// after every fault; with backoff each successive fault doubles the delay before
+// the actor comes back up, giving the failing dependency time to recover.
+//
+// Parameters:
+//   - initialDelay: The delay applied before the first restart. Must be greater
+//     than zero, otherwise the option is ignored.
+//   - maxDelay: The upper bound of the computed delay. Values lower than
+//     initialDelay are raised to initialDelay.
+//   - resetAfter: The fault-free period after which the consecutive failure
+//     counter resets. When zero it defaults to maxDelay.
+//
+// Combine with WithRetry to also bound the number of consecutive restarts: once
+// the budget is exhausted the faulty actor is suspended instead of restarted.
+func WithExponentialBackoff(initialDelay, maxDelay, resetAfter time.Duration) SupervisorOption {
+	return func(s *Supervisor) {
+		if initialDelay <= 0 {
+			return
+		}
+
+		if maxDelay < initialDelay {
+			maxDelay = initialDelay
+		}
+
+		if resetAfter <= 0 {
+			resetAfter = maxDelay
+		}
+
+		s.Lock()
+		s.initialDelay = initialDelay
+		s.maxDelay = maxDelay
+		s.backoffResetAfter = resetAfter
 		s.Unlock()
 	}
 }
@@ -190,15 +235,17 @@ type DirectiveRule struct {
 // Defaults:
 //   - Strategy: OneForOneStrategy.
 //   - Directives: PanicError -> Stop, runtime.PanicNilError -> Restart.
-//   - Retries: 0 (no retry window unless configured with WithRetry).
+//   - Retries: 0 (no restart budget unless configured with WithRetry).
+//   - Backoff: disabled (restarts are immediate unless configured with WithExponentialBackoff).
 //
 // Rules are keyed by the error's concrete type name (reflect.Type.String()) as
 // provided by WithDirective. If you set an "any error" directive via
 // WithAnyErrorDirective, it becomes the sole rule and overrides any
 // error-specific directives.
 //
-// The Restart directive uses MaxRetries and Timeout to bound restarts within a
-// window; use WithRetry to configure them.
+// The Restart directive uses MaxRetries and Timeout to bound consecutive
+// restarts within a window; use WithRetry to configure them. Use
+// WithExponentialBackoff to additionally delay each consecutive restart.
 //
 // Supervisor methods are safe for concurrent use.
 type Supervisor struct {
@@ -210,6 +257,11 @@ type Supervisor struct {
 	maxRetries uint32
 	// Specifies the time range to restart the faulty actor
 	timeout time.Duration
+	// Specifies the exponential backoff applied between consecutive restarts.
+	// A zero initialDelay means backoff is disabled.
+	initialDelay      time.Duration
+	maxDelay          time.Duration
+	backoffResetAfter time.Duration
 
 	directives *xsync.Map[string, Directive]
 }
@@ -283,6 +335,23 @@ func (s *Supervisor) MaxRetries() uint32 {
 // Timeout returns the retry window used with RestartDirective.
 func (s *Supervisor) Timeout() time.Duration {
 	return s.timeout
+}
+
+// InitialDelay returns the delay applied before the first restart when
+// exponential backoff is configured. Zero means backoff is disabled.
+func (s *Supervisor) InitialDelay() time.Duration {
+	return s.initialDelay
+}
+
+// MaxDelay returns the upper bound of the exponential backoff delay.
+func (s *Supervisor) MaxDelay() time.Duration {
+	return s.maxDelay
+}
+
+// BackoffResetAfter returns the fault-free period after which the consecutive
+// failure counter resets when exponential backoff is configured.
+func (s *Supervisor) BackoffResetAfter() time.Duration {
+	return s.backoffResetAfter
 }
 
 // Reset clears all directive rules and sets the strategy to OneForAllStrategy.
