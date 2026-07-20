@@ -207,10 +207,8 @@ func (x *MockDMap) Pipeline(opts ...olric.PipelineOption) (*olric.DMapPipeline, 
 type MockCluster struct {
 	grainExistsFn    func(context.Context, string) (bool, error)
 	putGrainFn       func(context.Context, *internalpb.Grain) error
-	putKindFn        func(context.Context, string) error
 	grainExistsCalls int
 	putGrainCalls    int
-	putKindCalls     int
 }
 
 func (x *MockCluster) Start(context.Context) error { panic("unexpected call") }
@@ -238,14 +236,6 @@ func (x *MockCluster) PutGrain(ctx context.Context, grain *internalpb.Grain) err
 	x.putGrainCalls++
 	if x.putGrainFn != nil {
 		return x.putGrainFn(ctx, grain)
-	}
-	return nil
-}
-
-func (x *MockCluster) PutKind(ctx context.Context, kind string) error {
-	x.putKindCalls++
-	if x.putKindFn != nil {
-		return x.putKindFn(ctx, kind)
 	}
 	return nil
 }

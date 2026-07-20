@@ -44,7 +44,6 @@ import (
 	"github.com/tochemey/olric/events"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/tochemey/goakt/v4/discovery"
 	"github.com/tochemey/goakt/v4/discovery/nats"
@@ -107,8 +106,6 @@ func TestNotRunningReturnsErrEngineNotRunning(t *testing.T) {
 	grains, err := cluster.Grains(ctx, time.Second)
 	require.ErrorIs(t, err, ErrEngineNotRunning)
 	require.Nil(t, grains)
-
-	require.ErrorIs(t, cluster.PutKind(ctx, "some-kind"), ErrEngineNotRunning)
 
 	require.ErrorIs(t, cluster.PutJobKey(ctx, "job-id", []byte("metadata")), ErrEngineNotRunning)
 
@@ -651,82 +648,6 @@ func TestSingleNode(t *testing.T) {
 
 		// stop the node
 		require.NoError(t, cluster.Stop(ctx))
-	})
-	t.Run("With PutKind", func(t *testing.T) {
-		// create the context
-		ctx := context.TODO()
-
-		// generate the ports for the single node
-		nodePorts := dynaport.Get(3)
-		discoveryPort := nodePorts[0]
-		clusterPort := nodePorts[1]
-		remotingPort := nodePorts[2]
-
-		// define discovered addresses
-		addrs := []string{
-			fmt.Sprintf("127.0.0.1:%d", discoveryPort),
-		}
-
-		// mock the discovery provider
-		provider := new(mocksdiscovery.Provider)
-
-		provider.EXPECT().ID().Return("id")
-		provider.EXPECT().Initialize().Return(nil)
-		provider.EXPECT().Register().Return(nil)
-		provider.EXPECT().Deregister().Return(nil)
-		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
-		provider.EXPECT().Close().Return(nil)
-
-		// create a Node
-		host := "127.0.0.1"
-		hostNode := discovery.Node{
-			Name:          host,
-			Host:          host,
-			DiscoveryPort: discoveryPort,
-			PeersPort:     clusterPort,
-			RemotingPort:  remotingPort,
-		}
-
-		var err error
-		cl := New("test", provider, &hostNode, WithLogger(log.DiscardLogger))
-		require.NotNil(t, cl)
-
-		// start the Node
-		err = cl.Start(ctx)
-		require.NoError(t, err)
-
-		// create an actor
-		actorName := uuid.NewString()
-		actorKind := "kind"
-		addr := address.New(actorName, "system", host, remotingPort)
-		actor := &internalpb.Actor{
-			Address: addr.String(),
-			Type:    actorKind,
-			Singleton: &internalpb.SingletonSpec{
-				SpawnTimeout: durationpb.New(time.Second),
-				WaitInterval: durationpb.New(300 * time.Millisecond),
-				MaxRetries:   int32(3),
-			},
-		}
-
-		// replicate the actor in the Node
-		err = cl.PutActor(ctx, actor)
-		require.NoError(t, err)
-
-		err = cl.PutKind(ctx, actorKind)
-		require.NoError(t, err)
-
-		// the kind record is stored under the kinds namespace
-		value, err := cl.(*cluster).getRecord(ctx, namespaceKinds, actorKind)
-		require.NoError(t, err)
-		require.Equal(t, actorKind, string(value))
-
-		//  shutdown the Node
-		pause.For(time.Second)
-
-		// stop the node
-		require.NoError(t, cl.Stop(ctx))
-		provider.AssertExpectations(t)
 	})
 	t.Run("With PutGrain and GetGrain", func(t *testing.T) {
 		// create the context
