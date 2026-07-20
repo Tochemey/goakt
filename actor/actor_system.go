@@ -2482,11 +2482,10 @@ func (x *actorSystem) completeSpawn(ctx context.Context, parent, pid *PID) (*PID
 	return pid, nil
 }
 
-// putActorOnCluster synchronously writes the actor's registry record (and its
-// kind for singletons) to the cluster store. It only returns nil once the
-// record is durably written, so a successful spawn implies the actor is
-// resolvable by name from any node. No-op when clustering is disabled or for
-// system actors.
+// putActorOnCluster synchronously writes the actor's registry record to the
+// cluster store. It only returns nil once the record is durably written, so a
+// successful spawn implies the actor is resolvable by name from any node.
+// No-op when clustering is disabled or for system actors.
 func (x *actorSystem) putActorOnCluster(ctx context.Context, pid *PID) error {
 	if !x.clusterEnabled.Load() || isSystemName(pid.Name()) {
 		return nil
@@ -2497,20 +2496,7 @@ func (x *actorSystem) putActorOnCluster(ctx context.Context, pid *PID) error {
 		return err
 	}
 
-	cluster := x.getCluster()
-	if actor.GetSingleton() != nil {
-		kind := actor.GetType()
-		role := actor.GetRole()
-		if role != "" {
-			kind = kindRole(kind, role)
-		}
-
-		if err := cluster.PutKind(ctx, kind); err != nil {
-			return err
-		}
-	}
-
-	return cluster.PutActor(ctx, actor)
+	return x.getCluster().PutActor(ctx, actor)
 }
 
 // putGrainOnCluster synchronously writes the grain's registry record and kind
@@ -3897,44 +3883,15 @@ func (x *actorSystem) spawnDeadletter(ctx context.Context) error {
 }
 
 // checkSpawnPreconditions make sure before an actor is created some pre-conditions are checks
-func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName string, actor Actor, singleton bool, singletonRole *string) error {
-	// check the existence of the actor given the kind prior to creating it
+func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName string) error {
+	// here we make sure in cluster mode that the given actor is uniquely created
 	if x.clusterEnabled.Load() {
-		var reservedKind string
-		// a singleton actor must only have one instance at a given time of its kind
-		// in the whole cluster
-		if singleton {
-			kind := types.Name(actor)
-			role := strings.TrimSpace(pointer.Deref(singletonRole, ""))
-			if role != "" {
-				kind = kindRole(kind, role)
-			}
-
-			if err := cluster.PutKindIfAbsent(ctx, x.cluster, kind); err != nil {
-				if errors.Is(err, cluster.ErrKindAlreadyExists) {
-					return gerrors.ErrSingletonAlreadyExists
-				}
-				return err
-			}
-			// We successfully reserved the singleton kind in the cluster. If we fail later in
-			// preconditions (e.g., name already taken), we must release it to avoid leaking the
-			// singleton reservation.
-			reservedKind = kind
-		}
-
-		// here we make sure in cluster mode that the given actor is uniquely created
 		exists, err := x.cluster.ActorExists(ctx, actorName)
 		if err != nil {
-			if reservedKind != "" {
-				_ = x.cluster.RemoveKind(ctx, reservedKind)
-			}
 			return err
 		}
 
 		if exists {
-			if reservedKind != "" {
-				_ = x.cluster.RemoveKind(ctx, reservedKind)
-			}
 			return gerrors.NewErrActorAlreadyExists(actorName)
 		}
 	}
@@ -3945,29 +3902,6 @@ func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName str
 // cleanupCluster cleans up the cluster
 func (x *actorSystem) cleanupCluster(ctx context.Context, pids []*PID) error {
 	eg, ctx := errgroup.WithContext(ctx)
-
-	// Remove singleton actors from the cluster.
-	// We check pid.singletonSpec != nil rather than pid.IsSingleton() because
-	// pid.reset() clears singletonState during actor shutdown. By the time
-	// cleanupCluster runs the actors have already been stopped, so IsSingleton()
-	// would always return false and RemoveKind would never be called, leaving
-	// the kind registered in the cluster and blocking relocation on the new leader.
-	if x.cluster.IsLeader(ctx) {
-		for _, pid := range pids {
-			if pid.singletonSpec != nil {
-				pid := pid
-				eg.Go(func() error {
-					kind := pid.Kind()
-					if err := x.cluster.RemoveKind(ctx, kind); err != nil {
-						x.logger.Errorf("failed to remove kind=%s from cluster: %v (hint: check cluster connectivity)", kind, err)
-						return err
-					}
-					x.logger.Debugf("kind=%s removed from cluster", kind)
-					return nil
-				})
-			}
-		}
-	}
 
 	// Remove all actors from the cluster
 	for _, pid := range pids {

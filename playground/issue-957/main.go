@@ -86,7 +86,7 @@ func main() {
 
 	_, err = actorSystem.SpawnSingleton(context.Background(), "MySingleton", NewSingleton())
 	if err != nil {
-		if !errors.Is(err, goakterrors.ErrSingletonAlreadyExists) {
+		if !errors.Is(err, goakterrors.ErrSingletonAlreadyExists) { //nolint:staticcheck // old-version hosts still emit it during a rolling upgrade
 			panic(err)
 		}
 	}

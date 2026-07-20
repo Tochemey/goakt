@@ -156,12 +156,8 @@ type Cluster interface {
 	// given host:port, filtering during the scan rather than building the full
 	// grain set first.
 	GrainsByHost(ctx context.Context, host string, port int, timeout time.Duration) ([]*internalpb.Grain, error)
-	// LookupKind reads the value registered for the provided actor kind.
-	LookupKind(ctx context.Context, kind string) (string, error)
 	// PutKind registers an actor kind mapping.
 	PutKind(ctx context.Context, kind string) error
-	// RemoveKind deletes an actor kind mapping.
-	RemoveKind(ctx context.Context, kind string) error
 	// Events exposes the event stream describing membership changes.
 	Events() <-chan *Event
 	// Peers lists known cluster members excluding the local node.
@@ -640,36 +636,6 @@ func PutGrainIfAbsent(ctx context.Context, cl Cluster, grain *internalpb.Grain) 
 	return cl.PutGrain(ctx, grain)
 }
 
-// PutKindIfAbsent registers the actor kind only if it does not already exist.
-// It returns ErrKindAlreadyExists when another node has already registered the kind.
-func PutKindIfAbsent(ctx context.Context, cl Cluster, kind string) error {
-	if cl == nil {
-		return errors.New("cluster is nil")
-	}
-
-	if strings.TrimSpace(kind) == "" {
-		return fmt.Errorf("kind is empty")
-	}
-
-	// Fast path for the built-in implementation: use an atomic NX write.
-	if c, ok := cl.(*cluster); ok {
-		return c.putKindIfAbsent(ctx, kind)
-	}
-
-	// Best-effort fallback for other Cluster implementations.
-	// Note: still subject to races since the interface doesn't expose an NX/transactional API.
-	value, err := cl.LookupKind(ctx, kind)
-	if err != nil {
-		return err
-	}
-
-	if value == kind {
-		return ErrKindAlreadyExists
-	}
-
-	return cl.PutKind(ctx, kind)
-}
-
 // GetGrain loads a grain by identity from the unified map.
 func (x *cluster) GetGrain(ctx context.Context, identity string) (*internalpb.Grain, error) {
 	if !x.running.Load() {
@@ -748,26 +714,6 @@ func (x *cluster) GrainsByHost(ctx context.Context, host string, port int, timeo
 	})
 }
 
-// LookupKind fetches the value registered for the provided actor kind.
-func (x *cluster) LookupKind(ctx context.Context, kind string) (string, error) {
-	if !x.running.Load() {
-		return "", ErrEngineNotRunning
-	}
-
-	x.mu.RLock()
-	defer x.mu.RUnlock()
-
-	value, err := x.getRecord(ctx, namespaceKinds, kind)
-	if err != nil {
-		if errors.Is(err, olric.ErrKeyNotFound) {
-			return "", nil
-		}
-		return "", err
-	}
-
-	return string(value), nil
-}
-
 // PutKind stores the provided actor kind mapping in the cluster state.
 func (x *cluster) PutKind(ctx context.Context, kind string) error {
 	if !x.running.Load() {
@@ -778,24 +724,6 @@ func (x *cluster) PutKind(ctx context.Context, kind string) error {
 	defer x.mu.Unlock()
 
 	return x.putRecord(ctx, namespaceKinds, kind, []byte(kind))
-}
-
-// RemoveKind deletes an actor kind mapping from the cluster state.
-func (x *cluster) RemoveKind(ctx context.Context, kind string) error {
-	if !x.running.Load() {
-		return ErrEngineNotRunning
-	}
-
-	x.mu.Lock()
-	defer x.mu.Unlock()
-
-	if err := x.deleteRecord(ctx, namespaceKinds, kind); err != nil {
-		if errors.Is(err, olric.ErrKeyNotFound) {
-			return nil
-		}
-		return err
-	}
-	return nil
 }
 
 // Events returns the stream of cluster membership events consumed from the
@@ -1619,23 +1547,6 @@ func (x *cluster) putRecordIfAbsent(ctx context.Context, namespace recordNamespa
 	defer cancel()
 
 	return x.dmap.Put(ctx, composeKey(namespace, key), value, append([]olric.PutOption{olric.NX()}, options...)...)
-}
-
-func (x *cluster) putKindIfAbsent(ctx context.Context, kind string) error {
-	if !x.running.Load() {
-		return ErrEngineNotRunning
-	}
-
-	x.mu.Lock()
-	defer x.mu.Unlock()
-
-	if err := x.putRecordIfAbsent(ctx, namespaceKinds, kind, []byte(kind)); err != nil {
-		if errors.Is(err, olric.ErrKeyFound) {
-			return ErrKindAlreadyExists
-		}
-		return err
-	}
-	return nil
 }
 
 // getRecord fetches a namespaced record from the unified map.

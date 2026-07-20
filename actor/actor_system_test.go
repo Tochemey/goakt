@@ -5709,7 +5709,7 @@ func TestPutActorOnCluster(t *testing.T) {
 		return pid
 	}
 
-	t.Run("PutKind failure for a singleton is returned and PutActor is skipped", func(t *testing.T) {
+	t.Run("singleton publishes its registry record without a kind write", func(t *testing.T) {
 		clusterMock := new(mockscluster.Cluster)
 		system := MockReplicationTestSystem(clusterMock)
 
@@ -5721,12 +5721,10 @@ func TestPutActorOnCluster(t *testing.T) {
 		}
 		pid.setState(singletonState, true)
 
-		clusterMock.EXPECT().PutKind(mock.Anything, mock.Anything).Return(assert.AnError).Once()
+		clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Once()
 
-		err := system.putActorOnCluster(ctx, pid)
-		require.Error(t, err)
-		assert.ErrorIs(t, err, assert.AnError)
-		clusterMock.AssertNotCalled(t, "PutActor", mock.Anything, mock.Anything)
+		require.NoError(t, system.putActorOnCluster(ctx, pid))
+		clusterMock.AssertNotCalled(t, "PutKind", mock.Anything, mock.Anything)
 		clusterMock.AssertExpectations(t)
 	})
 
@@ -5743,7 +5741,7 @@ func TestPutActorOnCluster(t *testing.T) {
 		clusterMock.AssertExpectations(t)
 	})
 
-	t.Run("singleton with role registers the role-scoped kind", func(t *testing.T) {
+	t.Run("singleton with role publishes its registry record without a kind write", func(t *testing.T) {
 		clusterMock := new(mockscluster.Cluster)
 		system := MockReplicationTestSystem(clusterMock)
 
@@ -5756,10 +5754,10 @@ func TestPutActorOnCluster(t *testing.T) {
 		pid.role = new("worker")
 		pid.setState(singletonState, true)
 
-		clusterMock.EXPECT().PutKind(mock.Anything, kindRole(types.Name(pid.Actor()), "worker")).Return(nil).Once()
 		clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Once()
 
 		require.NoError(t, system.putActorOnCluster(ctx, pid))
+		clusterMock.AssertNotCalled(t, "PutKind", mock.Anything, mock.Anything)
 		clusterMock.AssertExpectations(t)
 	})
 
@@ -6262,29 +6260,6 @@ func TestResyncAfterClusterEventRunsOnCorrelatedDepartures(t *testing.T) {
 	clusterMock.AssertExpectations(t)
 }
 
-func TestCleanupCluster_RemoveKindFailure(t *testing.T) {
-	clusterMock := new(mockscluster.Cluster)
-	system := MockReplicationTestSystem(clusterMock)
-	system.grains = xsync.NewMap[string, *grainPID]()
-
-	pid := &PID{
-		address:       address.New("singleton-actor", system.name, "127.0.0.1", 8080),
-		actor:         new(MockActor),
-		actorSystem:   system,
-		singletonSpec: &singletonSpec{},
-	}
-	pid.setState(singletonState, true)
-
-	clusterMock.EXPECT().IsLeader(mock.Anything).Return(true)
-	clusterMock.EXPECT().RemoveKind(mock.Anything, pid.Kind()).Return(assert.AnError)
-	clusterMock.EXPECT().RemoveActor(mock.Anything, pid.Name()).Return(nil)
-	t.Cleanup(func() { clusterMock.AssertExpectations(t) })
-
-	err := system.cleanupCluster(context.Background(), []*PID{pid})
-	require.Error(t, err)
-	assert.ErrorIs(t, err, assert.AnError)
-}
-
 func TestCleanupCluster_RemoveActorFailure(t *testing.T) {
 	clusterMock := new(mockscluster.Cluster)
 	system := MockReplicationTestSystem(clusterMock)
@@ -6295,7 +6270,6 @@ func TestCleanupCluster_RemoveActorFailure(t *testing.T) {
 		actorSystem: system,
 	}
 
-	clusterMock.EXPECT().IsLeader(mock.Anything).Return(false)
 	clusterMock.EXPECT().RemoveActor(mock.Anything, pid.Name()).Return(assert.AnError)
 	t.Cleanup(func() { clusterMock.AssertExpectations(t) })
 
@@ -6317,7 +6291,6 @@ func TestCleanupCluster_RemoveGrainFailure(t *testing.T) {
 	grain := &grainPID{identity: grainID, actorSystem: system, logger: log.DiscardLogger}
 	system.grains.Set(grainID.String(), grain)
 
-	clusterMock.EXPECT().IsLeader(mock.Anything).Return(false)
 	clusterMock.EXPECT().RemoveActor(mock.Anything, pid.Name()).Return(nil)
 	clusterMock.EXPECT().RemoveGrain(mock.Anything, grainID.String()).Return(assert.AnError)
 	t.Cleanup(func() { clusterMock.AssertExpectations(t) })
@@ -6358,7 +6331,6 @@ func TestStopReturnsCleanupClusterError(t *testing.T) {
 	system.actors.pids[node.id] = node
 	system.actors.counter.Add(1)
 
-	clusterMock.EXPECT().IsLeader(mock.Anything).Return(false)
 	// Peers is not called: relocation is disabled (MockReplicationTestSystem default), so preShutdown returns nil
 	// and persistPeerStateToPeers is skipped.
 	clusterMock.EXPECT().RemoveActor(mock.Anything, pid.Name()).Return(assert.AnError)

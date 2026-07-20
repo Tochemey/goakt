@@ -1431,7 +1431,6 @@ func TestRecreateSingletonFromWireUsesSingletonSpec(t *testing.T) {
 	departedNode := address.FormatHostPort("127.0.0.1", 8080)
 	clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(nil, cluster.ErrActorNotFound).Once()
 	clusterMock.EXPECT().RemoveActor(mock.Anything, "singleton").Return(nil).Once()
-	clusterMock.EXPECT().RemoveKind(mock.Anything, kindRole(types.Name(new(MockActor)), "blue")).Return(nil).Once()
 
 	spy := &spawnSingletonSpy{actorSystem: system}
 	err := recreateSingletonFromWire(ctx, spy, props, departedNode)
@@ -1452,7 +1451,7 @@ func TestRecreateSingletonFromWireUsesSingletonSpec(t *testing.T) {
 // (a duplicate NodeLeft against a peer-state snapshot a failed DeletePeerState
 // left behind) does not tear down and double-spawn a singleton that a survivor
 // already re-established: when the registry entry points at a node other than
-// the departed one, the relocation is a no-op (no RemoveActor/RemoveKind/spawn).
+// the departed one, the relocation is a no-op (no RemoveActor/spawn).
 func TestRecreateSingletonFromWireSkipsWhenAlreadyRelocated(t *testing.T) {
 	ctx := context.Background()
 	system := MockSingletonClusterReadyActorSystem(t)
@@ -1483,7 +1482,6 @@ func TestRecreateSingletonFromWireSkipsWhenAlreadyRelocated(t *testing.T) {
 	// no teardown and no re-spawn: the live singleton is left untouched
 	assert.False(t, spy.called)
 	clusterMock.AssertNotCalled(t, "RemoveActor", mock.Anything, mock.Anything)
-	clusterMock.AssertNotCalled(t, "RemoveKind", mock.Anything, mock.Anything)
 }
 
 func TestRetryRelocationItem(t *testing.T) {

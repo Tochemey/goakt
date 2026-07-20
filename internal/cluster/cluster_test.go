@@ -110,12 +110,6 @@ func TestNotRunningReturnsErrEngineNotRunning(t *testing.T) {
 
 	require.ErrorIs(t, cluster.PutKind(ctx, "some-kind"), ErrEngineNotRunning)
 
-	kind, err := cluster.LookupKind(ctx, "some-kind")
-	require.Equal(t, "", kind)
-	require.ErrorIs(t, err, ErrEngineNotRunning)
-
-	require.ErrorIs(t, cluster.RemoveKind(ctx, "some-kind"), ErrEngineNotRunning)
-
 	require.ErrorIs(t, cluster.PutJobKey(ctx, "job-id", []byte("metadata")), ErrEngineNotRunning)
 
 	_, err = cluster.JobKey(ctx, "job-id")
@@ -658,7 +652,7 @@ func TestSingleNode(t *testing.T) {
 		// stop the node
 		require.NoError(t, cluster.Stop(ctx))
 	})
-	t.Run("With Put/RemoveKind and LookupKind", func(t *testing.T) {
+	t.Run("With PutKind", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 
@@ -694,11 +688,11 @@ func TestSingleNode(t *testing.T) {
 		}
 
 		var err error
-		cluster := New("test", provider, &hostNode, WithLogger(log.DiscardLogger))
-		require.NotNil(t, cluster)
+		cl := New("test", provider, &hostNode, WithLogger(log.DiscardLogger))
+		require.NotNil(t, cl)
 
 		// start the Node
-		err = cluster.Start(ctx)
+		err = cl.Start(ctx)
 		require.NoError(t, err)
 
 		// create an actor
@@ -716,30 +710,22 @@ func TestSingleNode(t *testing.T) {
 		}
 
 		// replicate the actor in the Node
-		err = cluster.PutActor(ctx, actor)
+		err = cl.PutActor(ctx, actor)
 		require.NoError(t, err)
 
-		err = cluster.PutKind(ctx, actorKind)
+		err = cl.PutKind(ctx, actorKind)
 		require.NoError(t, err)
 
-		actual, err := cluster.LookupKind(ctx, actorKind)
+		// the kind record is stored under the kinds namespace
+		value, err := cl.(*cluster).getRecord(ctx, namespaceKinds, actorKind)
 		require.NoError(t, err)
-		require.NotEmpty(t, actual)
-
-		// remove the kind
-		err = cluster.RemoveKind(ctx, actorKind)
-		require.NoError(t, err)
-
-		// check the kind existence
-		actual, err = cluster.LookupKind(ctx, actorKind)
-		require.NoError(t, err)
-		require.Empty(t, actual)
+		require.Equal(t, actorKind, string(value))
 
 		//  shutdown the Node
 		pause.For(time.Second)
 
 		// stop the node
-		require.NoError(t, cluster.Stop(ctx))
+		require.NoError(t, cl.Stop(ctx))
 		provider.AssertExpectations(t)
 	})
 	t.Run("With PutGrain and GetGrain", func(t *testing.T) {
@@ -3713,162 +3699,6 @@ func TestIsLeaderReturnsTrueWhenCoordinator(t *testing.T) {
 	}
 
 	require.True(t, cl.IsLeader(context.Background()))
-}
-
-func TestPutKindIfAbsent(t *testing.T) {
-	t.Run("returns error when cluster is nil", func(t *testing.T) {
-		err := PutKindIfAbsent(context.Background(), nil, "actor.mock")
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "cluster is nil")
-	})
-
-	t.Run("returns error when kind is empty/blank", func(t *testing.T) {
-		cl := &MockCluster{}
-		err := PutKindIfAbsent(context.Background(), cl, "   ")
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "kind is empty")
-	})
-
-	t.Run("returns error when lookup fails", func(t *testing.T) {
-		ctx := context.Background()
-		expected := errors.New("lookup failed")
-		cl := &MockCluster{
-			lookupKindFn: func(ctx context.Context, kind string) (string, error) {
-				require.Equal(t, "actor.mock", kind)
-				return "", expected
-			},
-		}
-
-		err := PutKindIfAbsent(ctx, cl, "actor.mock")
-		require.ErrorIs(t, err, expected)
-		require.Equal(t, 1, cl.lookupKindCalls)
-		require.Equal(t, 0, cl.putKindCalls)
-	})
-
-	t.Run("returns ErrKindAlreadyExists when kind already registered", func(t *testing.T) {
-		ctx := context.Background()
-		cl := &MockCluster{
-			lookupKindFn: func(ctx context.Context, kind string) (string, error) {
-				require.Equal(t, "actor.mock", kind)
-				return kind, nil
-			},
-		}
-
-		err := PutKindIfAbsent(ctx, cl, "actor.mock")
-		require.ErrorIs(t, err, ErrKindAlreadyExists)
-		require.Equal(t, 1, cl.lookupKindCalls)
-		require.Equal(t, 0, cl.putKindCalls)
-	})
-
-	t.Run("returns error when put fails", func(t *testing.T) {
-		ctx := context.Background()
-		expected := errors.New("put failed")
-		cl := &MockCluster{
-			lookupKindFn: func(ctx context.Context, kind string) (string, error) {
-				require.Equal(t, "actor.mock", kind)
-				return "", nil
-			},
-			putKindFn: func(ctx context.Context, kind string) error {
-				require.Equal(t, "actor.mock", kind)
-				return expected
-			},
-		}
-
-		err := PutKindIfAbsent(ctx, cl, "actor.mock")
-		require.ErrorIs(t, err, expected)
-		require.Equal(t, 1, cl.lookupKindCalls)
-		require.Equal(t, 1, cl.putKindCalls)
-	})
-
-	t.Run("succeeds when kind does not exist and put succeeds", func(t *testing.T) {
-		ctx := context.Background()
-		cl := &MockCluster{
-			lookupKindFn: func(ctx context.Context, kind string) (string, error) {
-				require.Equal(t, "actor.mock", kind)
-				return "", nil
-			},
-			putKindFn: func(ctx context.Context, kind string) error {
-				require.Equal(t, "actor.mock", kind)
-				return nil
-			},
-		}
-
-		err := PutKindIfAbsent(ctx, cl, "actor.mock")
-		require.NoError(t, err)
-		require.Equal(t, 1, cl.lookupKindCalls)
-		require.Equal(t, 1, cl.putKindCalls)
-	})
-
-	t.Run("without fallback when absent succeeds", func(t *testing.T) {
-		called := false
-		cl := &cluster{
-			running:      atomic.NewBool(true),
-			writeTimeout: time.Second,
-			dmap: &MockDMap{
-				putFn: func(ctx context.Context, key string, value any, options ...olric.PutOption) error { // nolint
-					called = true
-					require.NotEmpty(t, options)
-					return nil
-				},
-			},
-		}
-
-		kind := "actor.mock"
-		err := PutKindIfAbsent(context.Background(), cl, kind)
-		require.NoError(t, err)
-		require.True(t, called)
-	})
-
-	t.Run("without fallback when cluster not running", func(t *testing.T) {
-		cl := &cluster{
-			running: atomic.NewBool(false),
-		}
-
-		kind := "actor.mock"
-		err := PutKindIfAbsent(context.Background(), cl, kind)
-		require.ErrorIs(t, err, ErrEngineNotRunning)
-	})
-
-	t.Run("without fallback when kind is empty", func(t *testing.T) {
-		cl := &cluster{
-			running: atomic.NewBool(true),
-		}
-
-		kind := ""
-		err := PutKindIfAbsent(context.Background(), cl, kind)
-		require.Error(t, err)
-	})
-
-	t.Run("without fallback when cluster is nil", func(t *testing.T) {
-		kind := "actor.mock"
-		err := PutKindIfAbsent(context.Background(), nil, kind)
-		require.Error(t, err)
-	})
-
-	t.Run("when already exist", func(t *testing.T) {
-		cl := &cluster{
-			running:      atomic.NewBool(true),
-			dmap:         &MockDMap{putErr: olric.ErrKeyFound},
-			writeTimeout: time.Second,
-		}
-
-		kind := "actor.mock"
-		err := PutKindIfAbsent(context.Background(), cl, kind)
-		require.ErrorIs(t, err, ErrKindAlreadyExists)
-	})
-
-	t.Run("when DMap returns an error", func(t *testing.T) {
-		expectedErr := errors.New("put failure")
-		cl := &cluster{
-			running:      atomic.NewBool(true),
-			dmap:         &MockDMap{putErr: expectedErr},
-			writeTimeout: time.Second,
-		}
-
-		kind := "actor.mock"
-		err := PutKindIfAbsent(context.Background(), cl, kind)
-		require.ErrorIs(t, err, expectedErr)
-	})
 }
 
 func TestBuildConfigWithTLSAndDebug(t *testing.T) {

@@ -67,7 +67,6 @@ const (
 
 	// DefaultClusterBalancerInterval defines the default cluster balancer interval
 	DefaultClusterBalancerInterval = time.Second
-	kindRoleSeparator              = "::"
 
 	// remoteSendCoalescingMaxBatch caps the number of fire-and-forget RemoteTell
 	// messages the internal outbound coalescer packs into a single

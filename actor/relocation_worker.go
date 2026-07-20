@@ -672,8 +672,8 @@ func (w *relocationWorker) sendBatch(ctx context.Context, target *cluster.Peer, 
 // singleton was already recreated on a survivor, so this is a stale re-run (a
 // duplicate NodeLeft against a peer-state snapshot that a failed DeletePeerState
 // left behind, or a leadership change) and the unconditional RemoveActor +
-// RemoveKind + SpawnSingleton below would tear down and double-spawn the live
-// singleton. Skipping in that case keeps the relocation idempotent.
+// SpawnSingleton below would tear down and double-spawn the live singleton.
+// Skipping in that case keeps the relocation idempotent.
 func recreateSingletonFromWire(ctx context.Context, system ActorSystem, props *internalpb.Actor, departedNode string) error {
 	addr, err := address.Parse(props.GetAddress())
 	if err != nil {
@@ -698,22 +698,6 @@ func recreateSingletonFromWire(ctx context.Context, system ActorSystem, props *i
 	}
 
 	if err := system.getCluster().RemoveActor(ctx, addr.Name()); err != nil {
-		return errors.NewInternalError(err)
-	}
-
-	// A crashed node never runs its singleton-kind cleanup (RemoveKind), so its
-	// kind reservation lingers in the cluster registry. Left in place it makes
-	// SpawnSingleton fail with ErrSingletonAlreadyExists (a terminal error),
-	// stranding the singleton cluster-wide and defeating crash recovery. Clear
-	// the stale reservation first so the leader can re-establish it; RemoveKind
-	// is idempotent, so this is a no-op on the graceful path where the kind was
-	// already released.
-	kind := props.GetType()
-	if role := props.GetRole(); role != "" {
-		kind = kindRole(kind, role)
-	}
-
-	if err := system.getCluster().RemoveKind(ctx, kind); err != nil {
 		return errors.NewInternalError(err)
 	}
 

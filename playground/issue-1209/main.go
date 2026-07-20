@@ -157,7 +157,7 @@ func (n *nodeSpec) stop(ctx context.Context) {
 // singleton already exists has achieved the same goal as one that created it.
 func spawnSingleton(ctx context.Context, system actor.ActorSystem) error {
 	_, err := system.SpawnSingleton(ctx, singletonName, newMaintenanceActor())
-	if err == nil || errors.Is(err, gerrors.ErrSingletonAlreadyExists) {
+	if err == nil || errors.Is(err, gerrors.ErrSingletonAlreadyExists) { //nolint:staticcheck // old-version hosts still emit it during a rolling upgrade
 		return nil
 	}
 	return err

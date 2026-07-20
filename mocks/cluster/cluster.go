@@ -1096,72 +1096,6 @@ func (_c *Cluster_LastRebalanceEvent_Call) RunAndReturn(run func() time.Time) *C
 	return _c
 }
 
-// LookupKind provides a mock function for the type Cluster
-func (_mock *Cluster) LookupKind(ctx context.Context, kind string) (string, error) {
-	ret := _mock.Called(ctx, kind)
-
-	if len(ret) == 0 {
-		panic("no return value specified for LookupKind")
-	}
-
-	var r0 string
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (string, error)); ok {
-		return returnFunc(ctx, kind)
-	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) string); ok {
-		r0 = returnFunc(ctx, kind)
-	} else {
-		r0 = ret.Get(0).(string)
-	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
-		r1 = returnFunc(ctx, kind)
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// Cluster_LookupKind_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LookupKind'
-type Cluster_LookupKind_Call struct {
-	*mock.Call
-}
-
-// LookupKind is a helper method to define mock.On call
-//   - ctx context.Context
-//   - kind string
-func (_e *Cluster_Expecter) LookupKind(ctx any, kind any) *Cluster_LookupKind_Call {
-	return &Cluster_LookupKind_Call{Call: _e.mock.On("LookupKind", ctx, kind)}
-}
-
-func (_c *Cluster_LookupKind_Call) Run(run func(ctx context.Context, kind string)) *Cluster_LookupKind_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 context.Context
-		if args[0] != nil {
-			arg0 = args[0].(context.Context)
-		}
-		var arg1 string
-		if args[1] != nil {
-			arg1 = args[1].(string)
-		}
-		run(
-			arg0,
-			arg1,
-		)
-	})
-	return _c
-}
-
-func (_c *Cluster_LookupKind_Call) Return(s string, err error) *Cluster_LookupKind_Call {
-	_c.Call.Return(s, err)
-	return _c
-}
-
-func (_c *Cluster_LookupKind_Call) RunAndReturn(run func(ctx context.Context, kind string) (string, error)) *Cluster_LookupKind_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // Members provides a mock function for the type Cluster
 func (_mock *Cluster) Members(ctx context.Context) ([]*cluster.Peer, error) {
 	ret := _mock.Called(ctx)
@@ -1696,63 +1630,6 @@ func (_c *Cluster_RemoveGrain_Call) Return(err error) *Cluster_RemoveGrain_Call 
 }
 
 func (_c *Cluster_RemoveGrain_Call) RunAndReturn(run func(ctx context.Context, identity string) error) *Cluster_RemoveGrain_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// RemoveKind provides a mock function for the type Cluster
-func (_mock *Cluster) RemoveKind(ctx context.Context, kind string) error {
-	ret := _mock.Called(ctx, kind)
-
-	if len(ret) == 0 {
-		panic("no return value specified for RemoveKind")
-	}
-
-	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) error); ok {
-		r0 = returnFunc(ctx, kind)
-	} else {
-		r0 = ret.Error(0)
-	}
-	return r0
-}
-
-// Cluster_RemoveKind_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveKind'
-type Cluster_RemoveKind_Call struct {
-	*mock.Call
-}
-
-// RemoveKind is a helper method to define mock.On call
-//   - ctx context.Context
-//   - kind string
-func (_e *Cluster_Expecter) RemoveKind(ctx any, kind any) *Cluster_RemoveKind_Call {
-	return &Cluster_RemoveKind_Call{Call: _e.mock.On("RemoveKind", ctx, kind)}
-}
-
-func (_c *Cluster_RemoveKind_Call) Run(run func(ctx context.Context, kind string)) *Cluster_RemoveKind_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 context.Context
-		if args[0] != nil {
-			arg0 = args[0].(context.Context)
-		}
-		var arg1 string
-		if args[1] != nil {
-			arg1 = args[1].(string)
-		}
-		run(
-			arg0,
-			arg1,
-		)
-	})
-	return _c
-}
-
-func (_c *Cluster_RemoveKind_Call) Return(err error) *Cluster_RemoveKind_Call {
-	_c.Call.Return(err)
-	return _c
-}
-
-func (_c *Cluster_RemoveKind_Call) RunAndReturn(run func(ctx context.Context, kind string) error) *Cluster_RemoveKind_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -148,6 +148,10 @@ var (
 	ErrInvalidTLSConfiguration = errors.New("TLS configuration is invalid")
 
 	// ErrSingletonAlreadyExists is returned when a singleton actor type is already registered.
+	//
+	// Deprecated: singleton uniqueness is keyed by actor name, so name collisions surface as
+	// ErrActorAlreadyExists. This error is no longer produced except by cluster nodes running
+	// an older version of goakt during a rolling upgrade.
 	ErrSingletonAlreadyExists = errors.New("singleton already exists")
 
 	// ErrLeaderNotFound is returned when the cluster leader (oldest node) cannot be found.

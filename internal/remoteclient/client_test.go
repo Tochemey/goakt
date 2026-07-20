@@ -1072,13 +1072,23 @@ func TestParseFailedPrecondition(t *testing.T) {
 }
 
 func TestParseAlreadyExists(t *testing.T) {
-	t.Run("singleton in message returns ErrSingletonAlreadyExists", func(t *testing.T) {
-		err := parseAlreadyExists("singleton conflict")
-		assert.ErrorIs(t, err, gerrors.ErrSingletonAlreadyExists)
+	t.Run("old-version singleton message returns ErrSingletonAlreadyExists", func(t *testing.T) {
+		err := parseAlreadyExists(gerrors.ErrSingletonAlreadyExists.Error()) //nolint:staticcheck // old-version hosts still emit it
+		assert.ErrorIs(t, err, gerrors.ErrSingletonAlreadyExists)            //nolint:staticcheck // old-version hosts still emit it
 	})
 
-	t.Run("other message returns ErrActorAlreadyExists", func(t *testing.T) {
-		err := parseAlreadyExists("actor conflict")
+	t.Run("name collision message returns ErrActorAlreadyExists", func(t *testing.T) {
+		err := parseAlreadyExists(gerrors.NewErrActorAlreadyExists("some-actor").Error())
+		assert.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
+	})
+
+	t.Run("name containing singleton still returns ErrActorAlreadyExists", func(t *testing.T) {
+		err := parseAlreadyExists(gerrors.NewErrActorAlreadyExists("singleton-a").Error())
+		assert.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
+	})
+
+	t.Run("unknown message defaults to ErrActorAlreadyExists", func(t *testing.T) {
+		err := parseAlreadyExists("something else entirely")
 		assert.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
 	})
 }

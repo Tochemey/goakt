@@ -597,7 +597,7 @@ func (x *actorSystem) remoteSpawnHandler(ctx context.Context, conn inet.Connecti
 	}
 
 	wrapSpawnErr := func(err error) proto.Message {
-		if errors.Is(err, gerrors.ErrActorAlreadyExists) || errors.Is(err, gerrors.ErrSingletonAlreadyExists) {
+		if errors.Is(err, gerrors.ErrActorAlreadyExists) || errors.Is(err, gerrors.ErrSingletonAlreadyExists) { //nolint:staticcheck // old-version hosts still emit it during a rolling upgrade
 			return toProtoError(internalpb.Code_CODE_ALREADY_EXISTS, err)
 		}
 		if cluster.IsQuorumError(err) {
