@@ -5708,7 +5708,7 @@ func TestPutActorOnCluster(t *testing.T) {
 		return pid
 	}
 
-	t.Run("singleton publishes its registry record without a kind write", func(t *testing.T) {
+	t.Run("singleton publishes its registry record", func(t *testing.T) {
 		clusterMock := new(mockscluster.Cluster)
 		system := MockReplicationTestSystem(clusterMock)
 
@@ -5723,7 +5723,6 @@ func TestPutActorOnCluster(t *testing.T) {
 		clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Once()
 
 		require.NoError(t, system.putActorOnCluster(ctx, pid))
-		clusterMock.AssertNotCalled(t, "PutKind", mock.Anything, mock.Anything)
 		clusterMock.AssertExpectations(t)
 	})
 
@@ -5740,7 +5739,7 @@ func TestPutActorOnCluster(t *testing.T) {
 		clusterMock.AssertExpectations(t)
 	})
 
-	t.Run("singleton with role publishes its registry record without a kind write", func(t *testing.T) {
+	t.Run("singleton with role publishes its registry record", func(t *testing.T) {
 		clusterMock := new(mockscluster.Cluster)
 		system := MockReplicationTestSystem(clusterMock)
 
@@ -5756,7 +5755,6 @@ func TestPutActorOnCluster(t *testing.T) {
 		clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Once()
 
 		require.NoError(t, system.putActorOnCluster(ctx, pid))
-		clusterMock.AssertNotCalled(t, "PutKind", mock.Anything, mock.Anything)
 		clusterMock.AssertExpectations(t)
 	})
 
@@ -5833,27 +5831,12 @@ func TestPutGrainOnCluster(t *testing.T) {
 		}
 	}
 
-	t.Run("PutGrain failure is returned and PutKind is skipped", func(t *testing.T) {
+	t.Run("PutGrain failure is returned", func(t *testing.T) {
 		clusterMock := new(mockscluster.Cluster)
 		system := MockReplicationTestSystem(clusterMock)
 
 		grain := newTestGrainPID(system, "grain")
 		clusterMock.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(assert.AnError).Once()
-
-		err := system.putGrainOnCluster(ctx, grain)
-		require.Error(t, err)
-		assert.ErrorIs(t, err, assert.AnError)
-		clusterMock.AssertNotCalled(t, "PutKind", mock.Anything, mock.Anything)
-		clusterMock.AssertExpectations(t)
-	})
-
-	t.Run("PutKind failure is returned", func(t *testing.T) {
-		clusterMock := new(mockscluster.Cluster)
-		system := MockReplicationTestSystem(clusterMock)
-
-		grain := newTestGrainPID(system, "grain")
-		clusterMock.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(nil).Once()
-		clusterMock.EXPECT().PutKind(mock.Anything, mock.Anything).Return(assert.AnError).Once()
 
 		err := system.putGrainOnCluster(ctx, grain)
 		require.Error(t, err)
@@ -6115,7 +6098,6 @@ func TestResyncGrains_Success(t *testing.T) {
 	system.grains.Set(identity.String(), process)
 
 	clusterMock.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(nil).Once()
-	clusterMock.EXPECT().PutKind(mock.Anything, identity.Kind()).Return(nil).Once()
 
 	require.NoError(t, system.resyncGrains())
 	clusterMock.AssertExpectations(t)

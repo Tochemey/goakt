@@ -2499,10 +2499,10 @@ func (x *actorSystem) putActorOnCluster(ctx context.Context, pid *PID) error {
 	return x.getCluster().PutActor(ctx, actor)
 }
 
-// putGrainOnCluster synchronously writes the grain's registry record and kind
-// to the cluster store. It only returns nil once the record is durably
-// written, so a successful activation implies the grain is resolvable from
-// any node. No-op when clustering is disabled or for system grains.
+// putGrainOnCluster synchronously writes the grain's registry record to the
+// cluster store. It only returns nil once the record is durably written, so a
+// successful activation implies the grain is resolvable from any node. No-op
+// when clustering is disabled or for system grains.
 func (x *actorSystem) putGrainOnCluster(ctx context.Context, pid *grainPID) error {
 	if !x.clusterEnabled.Load() || isSystemName(pid.getIdentity().Name()) {
 		return nil
@@ -2513,12 +2513,7 @@ func (x *actorSystem) putGrainOnCluster(ctx context.Context, pid *grainPID) erro
 		return err
 	}
 
-	cluster := x.getCluster()
-	if err := cluster.PutGrain(ctx, grain); err != nil {
-		return err
-	}
-
-	return cluster.PutKind(ctx, grain.GetGrainId().GetKind())
+	return x.getCluster().PutGrain(ctx, grain)
 }
 
 // setupCluster prepares the cluster engine when clustering is enabled

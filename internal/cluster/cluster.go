@@ -97,7 +97,6 @@ type recordNamespace string
 const (
 	namespaceActors recordNamespace = "actors"
 	namespaceGrains recordNamespace = "grains"
-	namespaceKinds  recordNamespace = "kinds"
 	namespaceJobs   recordNamespace = "jobs"
 	// namespaceScheduleFire stores the short-lived fire claims used to arbitrate which node
 	// delivers a given tick of a cluster-wide cron schedule (see actor.ScheduleWithCron).
@@ -156,8 +155,6 @@ type Cluster interface {
 	// given host:port, filtering during the scan rather than building the full
 	// grain set first.
 	GrainsByHost(ctx context.Context, host string, port int, timeout time.Duration) ([]*internalpb.Grain, error)
-	// PutKind registers an actor kind mapping.
-	PutKind(ctx context.Context, kind string) error
 	// Events exposes the event stream describing membership changes.
 	Events() <-chan *Event
 	// Peers lists known cluster members excluding the local node.
@@ -712,18 +709,6 @@ func (x *cluster) GrainsByHost(ctx context.Context, host string, port int, timeo
 	return collectScan(ctx, x, timeout, x.scanGrains, func(grain *internalpb.Grain) bool {
 		return grain.GetHost() == host && grain.GetPort() == port32
 	})
-}
-
-// PutKind stores the provided actor kind mapping in the cluster state.
-func (x *cluster) PutKind(ctx context.Context, kind string) error {
-	if !x.running.Load() {
-		return ErrEngineNotRunning
-	}
-
-	x.mu.Lock()
-	defer x.mu.Unlock()
-
-	return x.putRecord(ctx, namespaceKinds, kind, []byte(kind))
 }
 
 // Events returns the stream of cluster membership events consumed from the

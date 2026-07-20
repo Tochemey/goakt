@@ -1595,7 +1595,6 @@ func TestEnsureGrainProcessCluster(t *testing.T) {
 		cl.EXPECT().PutGrain(ctx, mock.MatchedBy(func(actual *internalpb.Grain) bool {
 			return actual != nil && actual.GetGrainId().GetValue() == id.String()
 		})).Return(nil).Twice()
-		cl.EXPECT().PutKind(ctx, id.Kind()).Return(nil).Once()
 
 		got, err := sys.ensureGrainProcess(ctx, id)
 		require.NoError(t, err)

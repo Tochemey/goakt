@@ -568,7 +568,6 @@ func TestActivateGrainLocally(t *testing.T) {
 		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
 		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(nil, cluster.ErrGrainNotFound).Once()
 		cl.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(nil).Once()
-		cl.EXPECT().PutKind(mock.Anything, identity.Kind()).Return(nil).Once()
 
 		err := sys.activateGrainLocally(ctx, identity, staticGrainProvider(grain), newGrainConfig(), nil)
 		require.NoError(t, err)
@@ -636,7 +635,6 @@ func TestActivateGrainLocally(t *testing.T) {
 
 		// the registry record is refreshed even when activation is skipped
 		cl.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(nil).Once()
-		cl.EXPECT().PutKind(mock.Anything, identity.Kind()).Return(nil).Once()
 
 		err := sys.activateGrainLocally(ctx, identity, staticGrainProvider(grain), newGrainConfig(), owner)
 		require.NoError(t, err)
@@ -688,7 +686,6 @@ func TestAskGrain_ClusterFallbackAutoProvisions(t *testing.T) {
 	cl.EXPECT().PutGrain(mock.Anything, mock.MatchedBy(func(actual *internalpb.Grain) bool {
 		return actual != nil && actual.GetGrainId().GetValue() == identity.String()
 	})).Return(nil).Twice()
-	cl.EXPECT().PutKind(mock.Anything, identity.Kind()).Return(nil).Once()
 
 	resp, err := sys.AskGrain(ctx, identity, &testpb.TestReply{}, time.Second)
 	require.NoError(t, err)
@@ -1103,7 +1100,6 @@ func TestTellGrain(t *testing.T) {
 		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil)
 		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
 		cl.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(nil).Once()
-		cl.EXPECT().PutKind(mock.Anything, identity.Kind()).Return(nil).Once()
 
 		// No RemoteTellGrain expectation: a loopback round trip would fail the
 		// mockremote client, proving the message was delivered locally.
@@ -1200,7 +1196,6 @@ func TestAskGrain(t *testing.T) {
 		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil)
 		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
 		cl.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(nil).Once()
-		cl.EXPECT().PutKind(mock.Anything, identity.Kind()).Return(nil).Once()
 
 		// No RemoteAskGrain expectation: a loopback round trip would fail the
 		// mockremote client, proving the request was served locally.
