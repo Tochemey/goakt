@@ -2568,10 +2568,18 @@ func parseFailedPrecondition(msg string) error {
 	return errors.New(msg)
 }
 
-// parseAlreadyExists determines the specific "already exists" error type
+// parseAlreadyExists determines the specific "already exists" error type.
+//
+// The actor sentinel is checked first: name-collision messages embed the actor name
+// (e.g. "actor=(singleton-a) actor already exists"), so matching on a fragment like
+// "singleton" would misclassify them. The singleton sentinel is only matched for the
+// sake of hosts running an older goakt version that still emit it.
 func parseAlreadyExists(msg string) error {
-	if strings.Contains(msg, "singleton") {
-		return gerrors.ErrSingletonAlreadyExists
+	if strings.Contains(msg, gerrors.ErrActorAlreadyExists.Error()) {
+		return gerrors.ErrActorAlreadyExists
+	}
+	if strings.Contains(msg, gerrors.ErrSingletonAlreadyExists.Error()) { //nolint:staticcheck // old-version hosts still emit it during a rolling upgrade
+		return gerrors.ErrSingletonAlreadyExists //nolint:staticcheck // preserved for mixed-version clusters
 	}
 	return gerrors.ErrActorAlreadyExists
 }

@@ -4,13 +4,15 @@ description: Single actor instance across the cluster.
 sidebarTitle: "Cluster Singletons"
 ---
 
-A **cluster singleton** is an actor with exactly one instance across the entire cluster. It is hosted on the cluster coordinator (oldest node). When that host node leaves the cluster **gracefully**, the singleton is recreated on the new coordinator.
+A **cluster singleton** is an actor with exactly one instance per name across the entire cluster. It is hosted on the cluster coordinator (oldest node). When that host node leaves the cluster **gracefully**, the singleton is recreated on the new coordinator.
+
+Singleton identity is the actor name: several singletons of the same actor kind can coexist under different names. A role, when set, only filters which nodes can host the singleton; it is not part of its identity.
 
 ## Singletons vs normal actors
 
 | Aspect        | Singleton                         | Normal actor                             |
 |---------------|-----------------------------------|------------------------------------------|
-| **Instances** | Exactly one per cluster           | One per spawn (many per node or cluster) |
+| **Instances** | Exactly one per name, cluster-wide | One per spawn (many per node or cluster) |
 | **Placement** | Coordinator (oldest node) or role | Local, or any node via `SpawnOn`         |
 | **Cluster**   | Requires cluster mode             | Works standalone or in cluster           |
 | **Lifecycle** | Long-lived, relocated on shutdown | Explicit spawn/stop, can passivate       |
@@ -68,13 +70,13 @@ pid, err := system.SpawnSingleton(ctx, "scheduler", NewSchedulerActor(),
 
 ## Idempotency
 
-Calling `SpawnSingleton` multiple times with the same actor kind (and role, if set) typically returns `ErrSingletonAlreadyExists` when the singleton is already registered. Use `ActorOf(ctx, name)` to obtain the PID of an existing singleton.
+Calling `SpawnSingleton` again with the same name and actor kind is idempotent: the call succeeds and returns the existing singleton's PID. Concurrent calls from several nodes converge to a single instance. When the name is already used by a different actor (or a singleton of a different kind), `SpawnSingleton` returns `ErrActorAlreadyExists`.
 
 ## Relocation
 
 When the host node leaves the cluster **gracefully**, the relocator recreates the singleton on the new coordinator. See [Relocation](/actor/relocation) for the full flow.
 
-If the host node crashes (kill -9, OOM, etc.), relocation does not run; the singleton is lost. A subsequent `SpawnSingleton` may return `ErrSingletonAlreadyExists` if the cluster still has the singleton kind registered.
+If the host node crashes (kill -9, OOM, etc.), relocation does not run; the singleton is lost until `SpawnSingleton` is called again for that name.
 
 ## Lifecycle
 
@@ -84,13 +86,16 @@ If the host node crashes (kill -9, OOM, etc.), relocation does not run; the sing
 
 ## Errors
 
-| Error                       | When                                                                       |
-|-----------------------------|----------------------------------------------------------------------------|
-| `ErrClusterDisabled`        | Cluster mode is not enabled                                                |
-| `ErrLeaderNotFound`         | No coordinator (oldest node) in the cluster                                |
-| `ErrSingletonAlreadyExists` | Another singleton of the same kind (and role) is already registered        |
-| `ErrActorAlreadyExists`     | Name collision; retries may resolve if the existing actor is the singleton |
-| Quorum errors               | Cluster cannot reach write/read quorum; retries may succeed                |
+| Error                   | When                                                                       |
+|-------------------------|----------------------------------------------------------------------------|
+| `ErrClusterDisabled`    | Cluster mode is not enabled                                                |
+| `ErrLeaderNotFound`     | No coordinator (oldest node) in the cluster                                |
+| `ErrActorAlreadyExists` | The name is already used by a different actor                              |
+| Quorum errors           | Cluster cannot reach write/read quorum; retries may succeed                |
+
+<Note>
+`ErrSingletonAlreadyExists` is deprecated. It is only returned when the spawn is handled by a cluster node running an older version of GoAkt during a rolling upgrade.
+</Note>
 
 ## See also
 

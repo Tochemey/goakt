@@ -77,10 +77,24 @@ func TestSingletonActor(t *testing.T) {
 		_, err := cl1.SpawnSingleton(ctx, actorName, actor)
 		require.NoError(t, err)
 
-		// attempt to create another singleton actor with the same kind is idempotent
-		_, err = cl2.SpawnSingleton(ctx, "actorName", actor)
-		require.Error(t, err)
-		require.ErrorIs(t, err, gerrors.ErrSingletonAlreadyExists)
+		// a second singleton of the same kind under a different name also runs
+		// (regression for https://github.com/Tochemey/goakt/issues/1272)
+		secondName := "actorID2"
+		_, err = cl2.SpawnSingleton(ctx, secondName, NewMockActor())
+		require.NoError(t, err)
+
+		// both singletons are resolvable cluster-wide by name
+		pid1, err := cl3.ActorOf(ctx, actorName)
+		require.NoError(t, err)
+		require.NotNil(t, pid1)
+
+		pid2, err := cl3.ActorOf(ctx, secondName)
+		require.NoError(t, err)
+		require.NotNil(t, pid2)
+
+		// respawning an existing singleton under the same name is idempotent
+		_, err = cl2.SpawnSingleton(ctx, actorName, NewMockActor())
+		require.NoError(t, err)
 
 		// free resources
 		require.NoError(t, cl3.Stop(ctx))
@@ -526,15 +540,6 @@ func TestSingletonActor(t *testing.T) {
 			Once()
 
 		clusterMock.EXPECT().
-			LookupKind(mock.Anything, "actor.mockactor::role").
-			Return("", nil).
-			Once()
-
-		clusterMock.EXPECT().
-			PutKind(mock.Anything, "actor.mockactor::role").
-			Return(nil)
-
-		clusterMock.EXPECT().
 			ActorExists(mock.Anything, "singleton").
 			Return(false, nil).
 			Once()
@@ -591,9 +596,14 @@ func TestSingletonActor(t *testing.T) {
 		_, err = cl2.SpawnSingleton(ctx, "actorName", actor)
 		require.NoError(t, err)
 
+		// a second role-based singleton of the same kind under a different name also runs
+		// (regression for https://github.com/Tochemey/goakt/issues/1272)
 		_, err = cl3.SpawnSingleton(ctx, "actor2", actor, WithSingletonRole(role))
-		require.Error(t, err)
-		require.ErrorIs(t, err, gerrors.ErrSingletonAlreadyExists)
+		require.NoError(t, err)
+
+		pid2, err := cl3.ActorOf(ctx, "actor2")
+		require.NoError(t, err)
+		require.NotNil(t, pid2)
 
 		// free resources
 		require.NoError(t, cl3.Stop(ctx))
@@ -668,9 +678,6 @@ func TestSpawnSingletonReturnsPID(t *testing.T) {
 				Coordinator:  true,
 			},
 		}, nil).Once()
-		clusterMock.EXPECT().LookupKind(mock.Anything, "actor.mockactor").Return("", nil).Once()
-		// one PutKind for the kind reservation, one for the synchronous publication
-		clusterMock.EXPECT().PutKind(mock.Anything, "actor.mockactor").Return(nil).Twice()
 		clusterMock.EXPECT().ActorExists(mock.Anything, "singleton").Return(false, nil).Once()
 		clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Once()
 
@@ -746,11 +753,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 				Coordinator:  true,
 			},
 		}, nil).Times(3)
-		clusterMock.EXPECT().LookupKind(mock.Anything, "actor.mockactor").Return("", nil).Times(3)
-		clusterMock.EXPECT().PutKind(mock.Anything, "actor.mockactor").Return(nil).Times(3)
 		clusterMock.EXPECT().ActorExists(mock.Anything, "singleton").Return(false, olric.ErrWriteQuorum).Times(3)
-		// Kind reservation is released on ActorExists errors.
-		clusterMock.EXPECT().RemoveKind(mock.Anything, "actor.mockactor").Return(nil).Times(3)
 
 		_, err := system.SpawnSingleton(
 			ctx,
@@ -763,7 +766,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 		require.ErrorIs(t, err, gerrors.ErrWriteQuorum)
 	})
 
-	t.Run("already exists short-circuits retries", func(t *testing.T) {
+	t.Run("already exists under the same name short-circuits retries", func(t *testing.T) {
 		ctx := context.Background()
 		clusterMock := mockcluster.NewCluster(t)
 		system := MockSingletonClusterReadyActorSystem(t)
@@ -780,7 +783,13 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 				Coordinator:  true,
 			},
 		}, nil).Once()
-		clusterMock.EXPECT().LookupKind(mock.Anything, "actor.mockactor").Return("actor.mockactor", nil).Once()
+		clusterMock.EXPECT().ActorExists(mock.Anything, "singleton").Return(true, nil).Once()
+		// The name is already bound to the singleton we wanted: idempotent success, no retry.
+		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(&internalpb.Actor{
+			Address:   "goakt://test@127.0.0.1:0/singleton",
+			Type:      "actor.mockactor",
+			Singleton: &internalpb.SingletonSpec{},
+		}, nil).Times(2)
 
 		_, err := system.SpawnSingleton(
 			ctx,
@@ -790,8 +799,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 			WithSingletonSpawnWaitInterval(time.Millisecond),
 			WithSingletonSpawnTimeout(time.Second),
 		)
-		require.Error(t, err)
-		require.ErrorIs(t, err, gerrors.ErrSingletonAlreadyExists)
+		require.NoError(t, err)
 	})
 
 	t.Run("stops when context is canceled", func(t *testing.T) {
@@ -813,7 +821,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 				Coordinator:  true,
 			},
 		}, nil).Once()
-		clusterMock.EXPECT().LookupKind(mock.Anything, "actor.mockactor").Return("", context.Canceled).Once()
+		clusterMock.EXPECT().ActorExists(mock.Anything, "singleton").Return(false, context.Canceled).Once()
 
 		_, err := system.SpawnSingleton(
 			ctx,
@@ -843,10 +851,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 				Coordinator:  true,
 			},
 		}, nil).Once()
-		clusterMock.EXPECT().LookupKind(mock.Anything, "actor.mockactor").Return("", nil).Once()
-		clusterMock.EXPECT().PutKind(mock.Anything, "actor.mockactor").Return(nil).Once()
 		clusterMock.EXPECT().ActorExists(mock.Anything, "singleton").Return(true, nil).Once()
-		clusterMock.EXPECT().RemoveKind(mock.Anything, "actor.mockactor").Return(nil).Once()
 		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(&internalpb.Actor{
 			Address: "singleton@test@127.0.0.1:0",
 			Type:    "actor.other",
@@ -865,7 +870,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
 	})
 
-	t.Run("fails when registry lookup returns non-retryable error", func(t *testing.T) {
+	t.Run("retries when name conflict metadata is not yet visible", func(t *testing.T) {
 		ctx := context.Background()
 		clusterMock := mockcluster.NewCluster(t)
 		system := MockSingletonClusterReadyActorSystem(t)
@@ -874,23 +879,26 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 		system.cluster = clusterMock
 		system.locker.Unlock()
 
-		lookupErr := fmt.Errorf("registry read failed")
+		// Coordinator is local for both attempts.
 		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{
 			{
-				Host:         "127.0.0.1",
+				Host:         system.clusterNode.Host,
 				PeersPort:    system.clusterNode.PeersPort,
 				RemotingPort: system.clusterNode.RemotingPort,
 				Coordinator:  true,
 			},
-		}, nil).Once()
-		clusterMock.EXPECT().LookupKind(mock.Anything, "actor.mockactor").Return("", nil).Once()
-		clusterMock.EXPECT().PutKind(mock.Anything, "actor.mockactor").Return(nil).Once()
-		clusterMock.EXPECT().ActorExists(mock.Anything, "singleton").Return(true, nil).Once()
-		// Kind reservation is released on name collisions.
-		clusterMock.EXPECT().RemoveKind(mock.Anything, "actor.mockactor").Return(nil).Once()
-		// Simulate propagation delay: name collision exists, but metadata is temporarily not readable.
+		}, nil).Times(2)
+		clusterMock.EXPECT().ActorExists(mock.Anything, "singleton").Return(true, nil).Times(2)
+
+		// Attempt 1: name exists but the registry record is not visible yet -> retry.
 		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(nil, cluster.ErrActorNotFound).Once()
-		clusterMock.EXPECT().LookupKind(mock.Anything, "actor.mockactor").Return("", lookupErr).Once()
+
+		// Attempt 2: the record propagated and shows it is the intended singleton -> success.
+		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(&internalpb.Actor{
+			Address:   "goakt://test@127.0.0.1:0/singleton",
+			Type:      "actor.mockactor",
+			Singleton: &internalpb.SingletonSpec{},
+		}, nil).Times(2)
 
 		_, err := system.SpawnSingleton(
 			ctx,
@@ -900,44 +908,10 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 			WithSingletonSpawnWaitInterval(time.Millisecond),
 			WithSingletonSpawnTimeout(time.Second),
 		)
-		require.ErrorContains(t, err, lookupErr.Error())
+		require.NoError(t, err)
 	})
 
-	t.Run("fails when kind reservation write fails", func(t *testing.T) {
-		ctx := context.Background()
-		clusterMock := mockcluster.NewCluster(t)
-		system := MockSingletonClusterReadyActorSystem(t)
-
-		system.locker.Lock()
-		system.cluster = clusterMock
-		system.locker.Unlock()
-
-		// Coordinator is local; spawn will attempt local singleton spawn.
-		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{
-			{
-				Host:         system.clusterNode.Host,
-				PeersPort:    system.clusterNode.PeersPort,
-				RemotingPort: system.clusterNode.RemotingPort,
-				Coordinator:  true,
-			},
-		}, nil).Once()
-
-		putErr := stdErrors.New("put kind failed")
-		clusterMock.EXPECT().LookupKind(mock.Anything, "actor.mockactor").Return("", nil).Once()
-		clusterMock.EXPECT().PutKind(mock.Anything, "actor.mockactor").Return(putErr).Once()
-
-		_, err := system.SpawnSingleton(
-			ctx,
-			"singleton",
-			NewMockActor(),
-			WithSingletonSpawnRetries(1),
-			WithSingletonSpawnWaitInterval(time.Millisecond),
-			WithSingletonSpawnTimeout(time.Second),
-		)
-		require.ErrorContains(t, err, putErr.Error())
-	})
-
-	t.Run("releases kind reservation when ActorExists returns an error", func(t *testing.T) {
+	t.Run("fails when ActorExists returns a non-retryable error", func(t *testing.T) {
 		ctx := context.Background()
 		clusterMock := mockcluster.NewCluster(t)
 		system := MockSingletonClusterReadyActorSystem(t)
@@ -957,11 +931,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 		}, nil).Once()
 
 		existsErr := fmt.Errorf("actor exists lookup failed")
-		clusterMock.EXPECT().LookupKind(mock.Anything, "actor.mockactor").Return("", nil).Once()
-		clusterMock.EXPECT().PutKind(mock.Anything, "actor.mockactor").Return(nil).Once()
 		clusterMock.EXPECT().ActorExists(mock.Anything, "singleton").Return(false, existsErr).Once()
-		// checkSpawnPreconditions must release the reserved kind on ActorExists errors.
-		clusterMock.EXPECT().RemoveKind(mock.Anything, "actor.mockactor").Return(nil).Once()
 
 		_, err := system.SpawnSingleton(
 			ctx,
@@ -987,8 +957,12 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 		system.cluster = clusterMock
 		system.locker.Unlock()
 
-		clusterMock.EXPECT().LookupKind(mock.Anything, "actor.mockactor").Return("actor.mockactor", nil).Once()
-		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(nil, cluster.ErrActorNotFound).Once()
+		// The leader created the singleton; the delegating node confirms by name.
+		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(&internalpb.Actor{
+			Address:   "goakt://test@127.0.0.1:0/singleton",
+			Type:      "actor.mockactor",
+			Singleton: &internalpb.SingletonSpec{},
+		}, nil).Times(2)
 
 		leader := &cluster.Peer{
 			Host:         "127.0.0.1",
@@ -1050,17 +1024,14 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 				Coordinator:  true,
 			},
 		}, nil).Once()
-		clusterMock.EXPECT().LookupKind(mock.Anything, "actor.mockactor").Return("", nil).Once()
-		clusterMock.EXPECT().PutKind(mock.Anything, "actor.mockactor").Return(nil).Once()
 		clusterMock.EXPECT().ActorExists(mock.Anything, "singleton").Return(true, nil).Once()
-		// Kind reservation is released because the name is taken; the name-based disambiguation
-		// then proves the existing actor is the singleton we wanted (idempotent success).
-		clusterMock.EXPECT().RemoveKind(mock.Anything, "actor.mockactor").Return(nil).Once()
+		// The name-based disambiguation proves the existing actor is the singleton we
+		// wanted (idempotent success).
 		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(&internalpb.Actor{
-			Address:   "singleton@test@127.0.0.1:0",
+			Address:   "goakt://test@127.0.0.1:0/singleton",
 			Type:      "actor.mockactor",
 			Singleton: &internalpb.SingletonSpec{},
-		}, nil).Once()
+		}, nil).Times(2)
 
 		_, err := system.SpawnSingleton(
 			ctx,
@@ -1093,18 +1064,15 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 		}, nil).Times(2)
 
 		// Attempt 1: name exists, GetActor fails transiently -> retry.
-		clusterMock.EXPECT().LookupKind(mock.Anything, "actor.mockactor").Return("", nil).Times(2)
-		clusterMock.EXPECT().PutKind(mock.Anything, "actor.mockactor").Return(nil).Times(2)
 		clusterMock.EXPECT().ActorExists(mock.Anything, "singleton").Return(true, nil).Times(2)
-		clusterMock.EXPECT().RemoveKind(mock.Anything, "actor.mockactor").Return(nil).Times(2)
 		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(nil, cluster.ErrEngineNotRunning).Once()
 
 		// Attempt 2: name exists, cluster metadata shows it is the intended singleton -> success.
 		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(&internalpb.Actor{
-			Address:   "singleton@test@127.0.0.1:0",
+			Address:   "goakt://test@127.0.0.1:0/singleton",
 			Type:      "actor.mockactor",
 			Singleton: &internalpb.SingletonSpec{},
-		}, nil).Once()
+		}, nil).Times(2)
 
 		_, err := system.SpawnSingleton(
 			ctx,
@@ -1136,10 +1104,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 		}, nil).Once()
 
 		getErr := fmt.Errorf("get actor failed")
-		clusterMock.EXPECT().LookupKind(mock.Anything, "actor.mockactor").Return("", nil).Once()
-		clusterMock.EXPECT().PutKind(mock.Anything, "actor.mockactor").Return(nil).Once()
 		clusterMock.EXPECT().ActorExists(mock.Anything, "singleton").Return(true, nil).Once()
-		clusterMock.EXPECT().RemoveKind(mock.Anything, "actor.mockactor").Return(nil).Once()
 		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(nil, getErr).Once()
 
 		_, err := system.SpawnSingleton(
@@ -1171,10 +1136,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 			},
 		}, nil).Once()
 
-		clusterMock.EXPECT().LookupKind(mock.Anything, "actor.mockactor").Return("", nil).Once()
-		clusterMock.EXPECT().PutKind(mock.Anything, "actor.mockactor").Return(nil).Once()
 		clusterMock.EXPECT().ActorExists(mock.Anything, "singleton").Return(true, nil).Once()
-		clusterMock.EXPECT().RemoveKind(mock.Anything, "actor.mockactor").Return(nil).Once()
 		// Existing actor is a singleton, but not the intended kind/role.
 		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(&internalpb.Actor{
 			Address:   "singleton@test@127.0.0.1:0",
@@ -1566,7 +1528,7 @@ func TestShouldRetrySpawnSingleton(t *testing.T) {
 		{name: "address not found", err: gerrors.ErrAddressNotFound, want: true},
 		{name: "invalid response", err: gerrors.ErrInvalidResponse, want: true},
 		// Terminal conditions must not be retried.
-		{name: "singleton already exists", err: gerrors.ErrSingletonAlreadyExists, want: false},
+		{name: "singleton already exists", err: gerrors.ErrSingletonAlreadyExists, want: false}, //nolint:staticcheck // old-version hosts still emit it
 		{name: "type not registered", err: gerrors.ErrTypeNotRegistered, want: false},
 		{name: "arbitrary error", err: stdErrors.New("boom"), want: false},
 	}

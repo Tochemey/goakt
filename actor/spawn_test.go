@@ -2115,9 +2115,9 @@ func TestSpawnPublishFailureStopsActor(t *testing.T) {
 	require.False(t, ok, "failed spawn must leave no actor behind")
 }
 
-func TestSpawnSingletonPublishFailureReleasesKind(t *testing.T) {
+func TestSpawnSingletonPublishFailureLeavesNothingBehind(t *testing.T) {
 	// a singleton spawn whose synchronous cluster publication fails must
-	// release the reserved kind so the singleton can be created elsewhere
+	// leave no actor behind so the singleton can be created elsewhere
 	ctx := context.Background()
 	sys, err := NewActorSystem("singleton-publish-failure", WithLogger(log.DiscardLogger))
 	require.NoError(t, err)
@@ -2143,30 +2143,15 @@ func TestSpawnSingletonPublishFailureReleasesKind(t *testing.T) {
 	})
 
 	actorName := "singleton-publish-failure"
-	released := make(chan struct{}, 4)
-	// the kind reservation (PutKindIfAbsent) and the publication both write the kind
-	clusterMock.EXPECT().LookupKind(mock.Anything, mock.Anything).Return("", nil).Once()
-	clusterMock.EXPECT().PutKind(mock.Anything, mock.Anything).Return(nil)
 	clusterMock.EXPECT().ActorExists(mock.Anything, actorName).Return(false, nil).Once()
 	clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(assert.AnError).Once()
-	// both the deferred cleanup and the death watch release the reserved kind best-effort
-	clusterMock.EXPECT().RemoveKind(mock.Anything, mock.Anything).RunAndReturn(func(context.Context, string) error {
-		released <- struct{}{}
-		return nil
-	})
+	// the death watch removes the failed actor from the cluster best-effort
 	clusterMock.EXPECT().RemoveActor(mock.Anything, actorName).Return(nil).Maybe()
 
 	pid, err := actorSystem.spawnSingletonOnLocal(ctx, actorName, NewMockActor(), nil, time.Second, 100*time.Millisecond, 1)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, assert.AnError)
 	assert.Nil(t, pid)
-
-	// the reserved singleton kind is released so the singleton can be created elsewhere
-	select {
-	case <-released:
-	case <-time.After(time.Second):
-		t.Fatal("failed singleton spawn must release the reserved kind")
-	}
 
 	require.Eventually(t, func() bool {
 		_, ok := actorSystem.actors.nodeByName(actorName)

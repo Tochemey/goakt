@@ -127,7 +127,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 	}
 
 	// check some preconditions
-	if err := x.checkSpawnPreconditions(ctx, name, actor, false, nil); err != nil {
+	if err := x.checkSpawnPreconditions(ctx, name); err != nil {
 		return nil, err
 	}
 
@@ -175,7 +175,7 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 	actor := newFuncActor(name, receiveFunc, config)
 
 	// check some preconditions
-	if err := x.checkSpawnPreconditions(ctx, name, actor, false, nil); err != nil {
+	if err := x.checkSpawnPreconditions(ctx, name); err != nil {
 		return nil, err
 	}
 
@@ -270,7 +270,7 @@ func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opt
 	}
 
 	// check some preconditions
-	if err := x.checkSpawnPreconditions(ctx, name, actor, false, nil); err != nil {
+	if err := x.checkSpawnPreconditions(ctx, name); err != nil {
 		return nil, err
 	}
 
@@ -372,9 +372,11 @@ func (x *actorSystem) SpawnRouter(ctx context.Context, name string, poolSize int
 
 // SpawnSingleton creates (or ensures the existence of) a cluster-wide singleton actor.
 //
-// A singleton actor exists at most once in the cluster for a given actor "kind" and optional
-// role. The kind is derived from the concrete actor type (see registry.Name) and, when
-// WithSingletonRole is used, the uniqueness key becomes "kind::role".
+// A singleton actor exists at most once in the cluster for a given name. Actor names are the
+// cluster-wide identity, so spawning a singleton reserves its name in the cluster registry like
+// any other actor. Several singletons of the same kind can coexist under different names. When
+// WithSingletonRole is used, the role acts as a placement filter only; it is not part of the
+// singleton's identity.
 //
 // Preconditions:
 //   - The actor system must be running (ErrActorSystemNotStarted).
@@ -387,12 +389,10 @@ func (x *actorSystem) SpawnRouter(ctx context.Context, name string, poolSize int
 //     caller is not the chosen host, it delegates by issuing a RemoteSpawn to that member.
 //
 // Idempotency and collisions:
-//   - If a singleton for the same kind/role already exists, SpawnSingleton returns ErrSingletonAlreadyExists.
-//   - If the requested name is already taken:
-//   - If the existing actor bound to that name is the same singleton (same kind/role and marked as singleton
-//     in cluster metadata), the call is treated as a no-op and succeeds. This makes concurrent callers more
-//     resilient under cluster state propagation delays.
-//   - Otherwise, SpawnSingleton returns ErrActorAlreadyExists.
+//   - If the requested name is already bound to the same singleton (same kind/role and marked as singleton
+//     in cluster metadata), the call succeeds and returns the existing singleton's PID. This makes
+//     concurrent callers more resilient under cluster state propagation delays.
+//   - Otherwise, if the requested name is already taken, SpawnSingleton returns ErrActorAlreadyExists.
 //
 // Retries:
 // When spawn retries are configured, transient conditions (e.g. quorum errors, leader/engine
@@ -400,11 +400,10 @@ func (x *actorSystem) SpawnRouter(ctx context.Context, name string, poolSize int
 // are retried until the retry budget is exhausted or the context is done.
 //
 // Registry visibility:
-// SpawnSingleton only returns once the singleton's registry record and kind are
-// written to the cluster store: a successful call means the singleton is
-// immediately resolvable by name and reachable from any node. When the registry
-// write fails, the actor is stopped and the reserved kind released, so a failed
-// spawn leaves nothing behind.
+// SpawnSingleton only returns once the singleton's registry record is written
+// to the cluster store: a successful call means the singleton is immediately
+// resolvable by name and reachable from any node. When the registry write
+// fails, the actor is stopped, so a failed spawn leaves nothing behind.
 //
 // Operational guidance:
 // SpawnSingleton is safe to call from any cluster member; it will resolve the correct host and
@@ -413,7 +412,6 @@ func (x *actorSystem) SpawnRouter(ctx context.Context, name string, poolSize int
 //
 // Errors:
 //   - ErrActorSystemNotStarted, ErrClusterDisabled when the system is not ready.
-//   - ErrSingletonAlreadyExists when a singleton for the same kind/role already exists.
 //   - ErrActorAlreadyExists when the requested name is already used by another actor.
 //   - ErrWriteQuorum, ErrReadQuorum, ErrClusterQuorum when a quorum-related failure occurs.
 //   - Other errors are returned as-is (e.g., no eligible members for a role, remoting failures).
@@ -434,13 +432,7 @@ func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Act
 		return nil, err
 	}
 
-	// singletonKey is the cluster registration key: kind or kind::role.
-	singletonKey := types.Name(actor)
-	if role != "" {
-		singletonKey = kindRole(singletonKey, role)
-	}
-
-	return x.retrySpawnSingleton(ctx, cfg, singletonKey, name, func(ctx context.Context) (*PID, error) {
+	return x.retrySpawnSingleton(ctx, cfg, types.Name(actor), role, name, func(ctx context.Context) (*PID, error) {
 		if role != "" {
 			return x.spawnSingletonWithRole(ctx, cl, name, actor, role, cfg.spawnTimeout, cfg.waitInterval, retries)
 		}
@@ -454,7 +446,7 @@ func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Act
 //
 // SpawnSingleton always builds a non-nil cfg via newClusterSingletonConfig, so cfg is assumed non-nil.
 // This helper exists to keep the SpawnSingleton happy-path readable and to centralize retry semantics.
-func (x *actorSystem) retrySpawnSingleton(ctx context.Context, cfg *clusterSingletonConfig, singletonKey, actorName string, spawnFn func(context.Context) (*PID, error)) (*PID, error) {
+func (x *actorSystem) retrySpawnSingleton(ctx context.Context, cfg *clusterSingletonConfig, kind, role, actorName string, spawnFn func(context.Context) (*PID, error)) (*PID, error) {
 	retryCtx := ctx
 	if cfg.spawnTimeout > 0 {
 		var cancel context.CancelFunc
@@ -468,12 +460,20 @@ func (x *actorSystem) retrySpawnSingleton(ctx context.Context, cfg *clusterSingl
 		var err error
 		pid, err = spawnFn(ctx)
 		if err != nil {
-			return x.spawnSingletonRetryError(ctx, err, singletonKey, actorName)
+			return x.spawnSingletonRetryError(ctx, err, kind, role, actorName)
 		}
 		return nil
 	}); err != nil {
 		return nil, cluster.NormalizeQuorumError(err)
 	}
+
+	if pid == nil {
+		// Idempotent success: the name is already bound to the singleton we wanted
+		// (created concurrently or by a previous call). Resolve and return its PID
+		// so callers and the RemoteSpawn handler always get a usable reference.
+		return x.ActorOf(ctx, actorName)
+	}
+
 	return pid, nil
 }
 
@@ -482,27 +482,26 @@ func (x *actorSystem) retrySpawnSingleton(ctx context.Context, cfg *clusterSingl
 // It maps `err` to one of the following outcomes:
 //
 //   - Success (return nil):
-//   - When the spawn failed with ErrActorAlreadyExists, but the singleton kind is already
-//     registered in the cluster (idempotent behavior: the singleton exists, so spawning is effectively done).
+//   - When the spawn failed with ErrActorAlreadyExists, but the name is already bound to the
+//     singleton we intended (idempotent behavior: the singleton exists, so spawning is effectively done).
 //   - Terminal failure (return retry.Stop(err)):
-//   - ErrSingletonAlreadyExists (explicit singleton collision; do not retry).
+//   - ErrSingletonAlreadyExists (emitted by hosts running an older goakt version; do not retry).
 //   - Context cancellation/deadline (stop with ctx.Err()).
 //   - Any non-transient error.
 //   - Retry (return err):
 //   - Transient cluster/remoting conditions such as quorum errors, leader/engine unavailability,
 //     temporary absence of eligible role members, or Connect Unavailable/DeadlineExceeded.
 //
-// `singletonKey` is the cluster registration key for the singleton (kind or kind::role). It is used
-// to disambiguate name collisions (ErrActorAlreadyExists) and determine whether the singleton is
-// already present in the cluster.
-func (x *actorSystem) spawnSingletonRetryError(ctx context.Context, err error, singletonKey, actorName string) error {
-	if errors.Is(err, gerrors.ErrSingletonAlreadyExists) {
-		// Terminal: singleton already exists; don't retry.
+// `kind` and `role` identify the singleton we attempted to spawn. They are used to disambiguate
+// name collisions (ErrActorAlreadyExists) by comparing against the registry record bound to the name.
+func (x *actorSystem) spawnSingletonRetryError(ctx context.Context, err error, kind, role, actorName string) error {
+	if errors.Is(err, gerrors.ErrSingletonAlreadyExists) { //nolint:staticcheck // old-version hosts still emit it during a rolling upgrade
+		// Terminal: emitted by an old-version host during a mixed-version rolling upgrade; don't retry.
 		return retry.Stop(err)
 	}
 
 	if errors.Is(err, gerrors.ErrActorAlreadyExists) {
-		return x.handleSingletonNameConflict(ctx, err, singletonKey, actorName)
+		return x.handleSingletonNameConflict(ctx, err, kind, role, actorName)
 	}
 
 	if isContextDone(ctx) {
@@ -520,18 +519,18 @@ func (x *actorSystem) spawnSingletonRetryError(ctx context.Context, err error, s
 //
 // The error can be caused by:
 //   - A true name collision (the name is already used by a different actor), or
-//   - A propagation race where the singleton was created elsewhere and cluster metadata is not yet visible.
+//   - A propagation race where the singleton was created elsewhere and its registry record is not yet visible.
 //
-// This handler disambiguates those cases by:
-//  1. Checking cluster actor metadata by name (strong signal; avoids false success).
-//  2. Falling back to checking whether the singleton kind/role key is registered (eventual-consistency tolerant).
+// This handler disambiguates those cases by checking cluster actor metadata by name: when the
+// name is bound to the singleton we intended (same kind/role + singleton flag), the spawn is
+// effectively done.
 //
 // It returns:
 //   - nil: treat as success (idempotent)
 //   - retry.Stop(err): terminal failure
 //   - err: retryable (within the configured retry budget)
-func (x *actorSystem) handleSingletonNameConflict(ctx context.Context, err error, singletonKey, actorName string) error {
-	if singletonKey == "" {
+func (x *actorSystem) handleSingletonNameConflict(ctx context.Context, err error, kind, role, actorName string) error {
+	if strings.TrimSpace(actorName) == "" {
 		return retry.Stop(err)
 	}
 
@@ -540,45 +539,26 @@ func (x *actorSystem) handleSingletonNameConflict(ctx context.Context, err error
 		return retry.Stop(ctx.Err())
 	}
 
-	// First, try to disambiguate by name: if the actor name exists, confirm it's the singleton we
-	// intended (same kind/role + singleton flag). This turns eventual-consistency races into a
-	// deterministic outcome and avoids treating unrelated name collisions as success.
-	if strings.TrimSpace(actorName) != "" {
-		existing, gerr := x.cluster.GetActor(ctx, actorName)
-		if gerr == nil && existing != nil {
-			expectedKind, expectedRole := splitSingletonKind(singletonKey)
-			actualRole := strings.TrimSpace(pointer.Deref(existing.Role, ""))
-			if existing.GetSingleton() != nil && existing.GetType() == expectedKind && actualRole == expectedRole {
-				// The name is already bound to the singleton we wanted: treat as success/idempotent.
-				return nil
-			}
-			// Name is taken by another actor (or a different singleton): stop.
-			return retry.Stop(err)
+	existing, gerr := x.cluster.GetActor(ctx, actorName)
+	if gerr == nil && existing != nil {
+		actualRole := strings.TrimSpace(pointer.Deref(existing.Role, ""))
+		if existing.GetSingleton() != nil && existing.GetType() == kind && actualRole == role {
+			// The name is already bound to the singleton we wanted: treat as success/idempotent.
+			return nil
 		}
-
-		if gerr != nil && !errors.Is(gerr, cluster.ErrActorNotFound) {
-			if shouldRetrySpawnSingleton(gerr) {
-				return gerr
-			}
-			return retry.Stop(gerr)
-		}
-		// If actor is not found, fall through to kind-based lookup. This can happen under propagation delay.
+		// Name is taken by another actor (or a different singleton): stop.
+		return retry.Stop(err)
 	}
 
-	registered, lerr := x.isSingletonKeyRegistered(ctx, singletonKey)
-	if lerr != nil {
-		if shouldRetrySpawnSingleton(lerr) {
-			return lerr
+	if gerr != nil && !errors.Is(gerr, cluster.ErrActorNotFound) {
+		if shouldRetrySpawnSingleton(gerr) {
+			return gerr
 		}
-		return retry.Stop(lerr)
+		return retry.Stop(gerr)
 	}
 
-	if registered {
-		return nil
-	}
-
-	// Ambiguous: name exists (we got ErrActorAlreadyExists) but the kind is not visible yet.
-	// Treat as retryable to allow cluster propagation to settle within the configured retry budget.
+	// Ambiguous: the spawn reported ErrActorAlreadyExists but the registry record is not visible
+	// yet. Treat as retryable to allow cluster propagation to settle within the configured retry budget.
 	return err
 }
 
@@ -637,15 +617,6 @@ func shouldRetrySpawnSingleton(err error) bool {
 	}
 
 	return false
-}
-
-// isSingletonKeyRegistered reports whether singletonKey (kind or kind::role) is present in cluster state.
-func (x *actorSystem) isSingletonKeyRegistered(ctx context.Context, singletonKey string) (bool, error) {
-	id, err := x.cluster.LookupKind(ctx, singletonKey)
-	if err != nil {
-		return false, err
-	}
-	return id == singletonKey, nil
 }
 
 type errNoRoleMembers struct {
@@ -723,32 +694,16 @@ func (x *actorSystem) spawnSingletonWithRole(ctx context.Context, cl cluster.Clu
 	return pid, nil
 }
 
-func (x *actorSystem) spawnSingletonOnLocal(ctx context.Context, name string, actor Actor, role *string, spawnTimeout, waitInterval time.Duration, retries int32) (pid *PID, err error) {
+func (x *actorSystem) spawnSingletonOnLocal(ctx context.Context, name string, actor Actor, role *string, spawnTimeout, waitInterval time.Duration, retries int32) (*PID, error) {
 	// Normalize role once
 	singletonRole := strings.TrimSpace(pointer.Deref(role, ""))
 
-	// Compute singleton kind once (used for cleanup)
-	singletonKind := types.Name(actor)
-	if singletonRole != "" {
-		singletonKind = kindRole(singletonKind, singletonRole)
-	}
-
 	// check some preconditions
-	if err := x.checkSpawnPreconditions(ctx, name, actor, true, new(singletonRole)); err != nil {
+	if err := x.checkSpawnPreconditions(ctx, name); err != nil {
 		return nil, err
 	}
 
-	// If we fail after preconditions, cleanup kind registration best-effort.
-	// Note: this now works reliably because we use a named return `err`.
-	spawnSucceeded := false
-	defer func() {
-		if spawnSucceeded || err == nil {
-			return
-		}
-		_ = x.cluster.RemoveKind(ctx, singletonKind)
-	}()
-
-	pid, err = x.configPID(ctx, name, actor,
+	pid, err := x.configPID(ctx, name, actor,
 		WithLongLived(),
 		withSingleton(&singletonSpec{
 			SpawnTimeout: spawnTimeout,
@@ -774,7 +729,6 @@ func (x *actorSystem) spawnSingletonOnLocal(ctx context.Context, name string, ac
 		return nil, err
 	}
 
-	spawnSucceeded = true
 	return pid, nil
 }
 
@@ -891,26 +845,6 @@ func (x *actorSystem) selectPlacementPeer(ctx context.Context, peers []*cluster.
 	default:
 		return nil, nil
 	}
-}
-
-func kindRole(kind, role string) string {
-	return fmt.Sprintf("%s%s%s", kind, kindRoleSeparator, role)
-}
-
-// splitSingletonKind parses the singleton cluster registration key into (kind, role).
-// The key is either:
-//   - "kind" (no role)
-//   - "kind::role" (with role)
-func splitSingletonKind(singletonKind string) (kind string, role string) {
-	singletonKind = strings.TrimSpace(singletonKind)
-	if singletonKind == "" {
-		return "", ""
-	}
-	parts := strings.SplitN(singletonKind, kindRoleSeparator, 2)
-	if len(parts) == 1 {
-		return parts[0], ""
-	}
-	return parts[0], parts[1]
 }
 
 func (x *actorSystem) actorsRoundRobinPlacementPeer(ctx context.Context, peers []*cluster.Peer) (*cluster.Peer, error) {

@@ -208,11 +208,9 @@ type MockCluster struct {
 	grainExistsFn    func(context.Context, string) (bool, error)
 	putGrainFn       func(context.Context, *internalpb.Grain) error
 	putKindFn        func(context.Context, string) error
-	lookupKindFn     func(context.Context, string) (string, error)
 	grainExistsCalls int
 	putGrainCalls    int
 	putKindCalls     int
-	lookupKindCalls  int
 }
 
 func (x *MockCluster) Start(context.Context) error { panic("unexpected call") }
@@ -252,14 +250,6 @@ func (x *MockCluster) PutKind(ctx context.Context, kind string) error {
 	return nil
 }
 
-func (x *MockCluster) LookupKind(ctx context.Context, kind string) (string, error) {
-	x.lookupKindCalls++
-	if x.lookupKindFn != nil {
-		return x.lookupKindFn(ctx, kind)
-	}
-	return "", nil
-}
-
 func (x *MockCluster) GetGrain(context.Context, string) (*internalpb.Grain, error) {
 	panic("unexpected call")
 }
@@ -278,13 +268,12 @@ func (x *MockCluster) GrainsByHost(context.Context, string, int, time.Duration) 
 	panic("unexpected call")
 }
 
-func (x *MockCluster) RemoveKind(context.Context, string) error { panic("unexpected call") }
-func (x *MockCluster) Events() <-chan *Event                    { panic("unexpected call") }
-func (x *MockCluster) Peers(context.Context) ([]*Peer, error)   { panic("unexpected call") }
-func (x *MockCluster) IsLeader(context.Context) bool            { panic("unexpected call") }
-func (x *MockCluster) GetPartition(string) uint64               { panic("unexpected call") }
-func (x *MockCluster) IsRunning() bool                          { panic("unexpected call") }
-func (x *MockCluster) LastRebalanceEvent() time.Time            { panic("unexpected call") }
+func (x *MockCluster) Events() <-chan *Event                  { panic("unexpected call") }
+func (x *MockCluster) Peers(context.Context) ([]*Peer, error) { panic("unexpected call") }
+func (x *MockCluster) IsLeader(context.Context) bool          { panic("unexpected call") }
+func (x *MockCluster) GetPartition(string) uint64             { panic("unexpected call") }
+func (x *MockCluster) IsRunning() bool                        { panic("unexpected call") }
+func (x *MockCluster) LastRebalanceEvent() time.Time          { panic("unexpected call") }
 func (x *MockCluster) ClaimScheduleFire(context.Context, string, time.Duration) error {
 	panic("unexpected call")
 }
