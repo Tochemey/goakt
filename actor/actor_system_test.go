@@ -4334,7 +4334,6 @@ func TestStartupCleanup(t *testing.T) {
 		actorSys.remotingEnabled.Store(true)
 
 		clusterMock := mockscluster.NewCluster(t)
-		clusterMock.EXPECT().IsLeader(mock.Anything).Return(false)
 		clusterMock.EXPECT().Stop(mock.Anything).Return(nil)
 		actorSys.clusterEnabled.Store(true)
 		actorSys.cluster = clusterMock
