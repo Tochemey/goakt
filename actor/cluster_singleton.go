@@ -109,7 +109,7 @@ func (x *actorSystem) spawnSingletonManager(ctx context.Context) error {
 	return x.actors.addNode(x.systemGuardian, x.singletonManager)
 }
 
-func (x *actorSystem) spawnSingletonOnLeader(ctx context.Context, cl cluster.Cluster, name string, actor Actor, spawnTimeout, waitInterval time.Duration, retries int32) (*PID, error) {
+func (x *actorSystem) spawnSingletonOnLeader(ctx context.Context, cl cluster.Cluster, name string, actor Actor, spawnTimeout, waitInterval time.Duration, retries int32, singletonSupervisor *sup.Supervisor) (*PID, error) {
 	// spawnSingletonOnLeader resolves the cluster coordinator and ensures the singleton is spawned on it.
 	//
 	// Implementation notes:
@@ -141,7 +141,7 @@ func (x *actorSystem) spawnSingletonOnLeader(ctx context.Context, cl cluster.Clu
 	}
 
 	if localAddr != "" && leader.PeerAddress() == localAddr {
-		return x.spawnSingletonOnLocal(ctx, name, actor, nil, spawnTimeout, waitInterval, retries)
+		return x.spawnSingletonOnLocal(ctx, name, actor, nil, spawnTimeout, waitInterval, retries, singletonSupervisor)
 	}
 
 	var (
@@ -158,6 +158,7 @@ func (x *actorSystem) spawnSingletonOnLeader(ctx context.Context, cl cluster.Clu
 			WaitInterval: waitInterval,
 			MaxRetries:   retries,
 		},
+		Supervisor: singletonSupervisor,
 	})
 	if err != nil {
 		return nil, err

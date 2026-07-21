@@ -635,6 +635,12 @@ func (x *actorSystem) remoteSpawnHandler(ctx context.Context, conn inet.Connecti
 			singletonOpts = append(singletonOpts, WithSingletonRole(request.GetRole()))
 		}
 
+		if request.GetSupervisor() != nil {
+			if decoded := codec.DecodeSupervisor(request.GetSupervisor()); decoded != nil {
+				singletonOpts = append(singletonOpts, WithSingletonSupervisor(decoded))
+			}
+		}
+
 		pid, err := x.SpawnSingleton(ctx, request.GetActorName(), actor, singletonOpts...)
 		if err != nil {
 			logger.Errorf("failed to create actor (%s) on host=%s port=%d: %v (hint: check cluster quorum, singleton config)", request.GetActorName(), request.GetHost(), request.GetPort(), err)
