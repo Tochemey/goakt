@@ -161,13 +161,13 @@ func (x *router) broadcast(ctx *ReceiveContext) {
 	case *GetRoutees:
 		x.handleGetRoutees(ctx)
 	case *AdjustRouterPoolSize:
-		x.handleAjustRouterPoolSize(ctx)
+		x.handleAdjustRouterPoolSize(ctx)
 	default:
 		ctx.Unhandled()
 	}
 }
 
-func (x *router) handleAjustRouterPoolSize(ctx *ReceiveContext) {
+func (x *router) handleAdjustRouterPoolSize(ctx *ReceiveContext) {
 	message := ctx.Message().(*AdjustRouterPoolSize)
 	delta := int(message.PoolSize())
 	if delta == 0 {

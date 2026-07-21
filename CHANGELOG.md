@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### 🔧 Fixes
+
+- **Concurrent same-name spawns no longer create duplicate actors** ([#1277](https://github.com/Tochemey/goakt/pull/1277)). Goroutines racing `Spawn`, `SpawnNamedFromFunc`, `SpawnChild`, or the local `SpawnSingleton` path with the same name could each create a live actor instance: the tree-insertion conflict was swallowed, so the losing caller received an unsupervised orphan whose later shutdown detached the canonical actor from the tree (both instances share the same ID). Local spawns of one identity are now serialized through a singleflight group keyed by the actor address, so a name yields exactly one PID under concurrency; racing callers coalesce onto the in-flight spawn and share its result. The wait is context-aware — a caller whose context expires stops waiting with its own context error — and a waiter that inherits a cancellation caused by the winning caller's context while its own is still live retries once. As a safety net, `completeSpawn` now detects a duplicate tree insertion, returns the canonical instance, undoes the actors-counter bump, and logs a warning instead of handing back an orphan.
+- **Singleton idempotent success resolves the PID from the confirmed registry address** ([#1277](https://github.com/Tochemey/goakt/pull/1277)). When `SpawnSingleton` found the name already bound to the singleton it intended to create, it re-resolved the PID with a second registry lookup that could momentarily miss the record and surface `ErrActorNotFound` from a creation call. The PID is now resolved from the address read while confirming the conflict (preferring a live local instance when the singleton is hosted on the calling node), and the idempotent path never surfaces `ErrActorNotFound`.
+- **Leader-delegated singleton spawns stay retryable during membership churn** ([#1277](https://github.com/Tochemey/goakt/pull/1277)). A spawn delegated to the cluster leader that failed because no leader was elected yet (`ErrLeaderNotFound`), the cluster engine was not running, or no member carried the requested role was serialized back as `CODE_INTERNAL_ERROR`, which the delegating node treats as terminal. These transient membership conditions now map to `CODE_UNAVAILABLE`, which the delegating node's retry loop recognizes as retryable within its configured budget — so a `SpawnSingleton` issued during a rolling restart retries until the cluster settles instead of failing permanently.
+
 ## v4.4.1 - 2026-07-20
 
 ### ✨ Features
