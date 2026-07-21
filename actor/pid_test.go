@@ -2858,6 +2858,123 @@ func TestSpawnChild(t *testing.T) {
 		pause.For(time.Second)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
+	t.Run("With dependencies injected into the actor system", func(t *testing.T) {
+		ctx := context.TODO()
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		testSystem, err := NewActorSystem("testSys",
+			WithRemote(remote.NewConfig(host, ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, testSystem)
+
+		require.NoError(t, testSystem.Start(ctx))
+
+		pause.For(time.Second)
+
+		// create the parent actor
+		parent, err := testSystem.Spawn(ctx, "Parent", NewMockSupervisor())
+		require.NoError(t, err)
+		assert.NotNil(t, parent)
+
+		// the dependency type is not known to the actor system yet
+		dependency := NewMockDependency("child-dep", "user", "email")
+		sys := testSystem.(*actorSystem)
+		require.False(t, sys.registry.Exists(dependency))
+
+		// create the child actor with a dependency
+		child, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithDependencies(dependency))
+		require.NoError(t, err)
+		require.NotNil(t, child)
+
+		pause.For(time.Second)
+
+		// spawning the child injected the dependency type into the actor system registry
+		require.True(t, sys.registry.Exists(dependency))
+
+		// and the child carries the dependency
+		deps := child.Dependencies()
+		require.Len(t, deps, 1)
+		require.Equal(t, dependency.ID(), deps[0].ID())
+
+		//stop the actor
+		require.NoError(t, parent.Shutdown(ctx))
+		pause.For(time.Second)
+		assert.NoError(t, testSystem.Stop(ctx))
+	})
+	t.Run("With existing running child found after waiting on an in-flight spawn", func(t *testing.T) {
+		ctx := context.TODO()
+		host := "127.0.0.1"
+		ports := dynaport.Get(1)
+
+		testSystem, err := NewActorSystem("testSys",
+			WithRemote(remote.NewConfig(host, ports[0])),
+			WithLogger(log.DiscardLogger))
+
+		require.NoError(t, err)
+		require.NotNil(t, testSystem)
+
+		require.NoError(t, testSystem.Start(ctx))
+
+		pause.For(time.Second)
+
+		// create the parent actor
+		parent, err := testSystem.Spawn(ctx, "Parent", NewMockSupervisor())
+		require.NoError(t, err)
+		assert.NotNil(t, parent)
+
+		sys := testSystem.(*actorSystem)
+		childAddress := parent.childAddress("child")
+
+		// hold the spawn activation for the child's identity with a flight that
+		// only completes with the winner's context error
+		winnerCtx, winnerCancel := context.WithCancel(context.Background())
+		entered := make(chan struct{})
+		winnerDone := make(chan struct{})
+		go func() {
+			defer close(winnerDone)
+			_, _ = sys.runSpawnActivation(winnerCtx, childAddress.String(), func() (*PID, error) {
+				close(entered)
+				<-winnerCtx.Done()
+				return nil, winnerCtx.Err()
+			})
+		}()
+		<-entered
+
+		// SpawnChild passes the pre-activation existence check (no child yet)
+		// and coalesces onto the held activation as a waiter
+		var child *PID
+		var spawnErr error
+		spawned := make(chan struct{})
+		go func() {
+			defer close(spawned)
+			child, spawnErr = parent.SpawnChild(context.Background(), "child", NewMockSupervised())
+		}()
+		pause.For(500 * time.Millisecond) // let the waiter join the flight
+
+		// materialize the child out-of-band while the activation is still held
+		existing, err := newPID(ctx, childAddress, NewMockSupervised(), parent.buildChildOptions(newSpawnConfig())...)
+		require.NoError(t, err)
+		_, err = sys.completeSpawn(ctx, parent, existing)
+		require.NoError(t, err)
+
+		// abort the winner: the waiter inherits the shared cancellation, retries
+		// once, and the retry finds the already-running child instead of
+		// creating a duplicate
+		winnerCancel()
+		<-spawned
+		<-winnerDone
+
+		require.NoError(t, spawnErr)
+		require.Same(t, existing, child)
+
+		//stop the actor
+		require.NoError(t, parent.Shutdown(ctx))
+		pause.For(time.Second)
+		assert.NoError(t, testSystem.Stop(ctx))
+	})
 }
 func TestPoisonPill(t *testing.T) {
 	ctx := context.TODO()
