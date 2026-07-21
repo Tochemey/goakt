@@ -27,21 +27,31 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/tochemey/goakt/v4/supervisor"
 )
 
 func TestClusterSingletonOption(t *testing.T) {
 	cfg := newClusterSingletonConfig()
 	require.Nil(t, cfg.Role())
+	require.Nil(t, cfg.supervisor)
 
 	role := "payments"
+	custom := supervisor.NewSupervisor(supervisor.WithAnyErrorDirective(supervisor.RestartDirective))
 	WithSingletonRole(role)(cfg)
 	WithSingletonSpawnTimeout(time.Second)(cfg)
 	WithSingletonSpawnWaitInterval(100 * time.Millisecond)(cfg)
 	WithSingletonSpawnRetries(10)(cfg)
+	WithSingletonSupervisor(custom)(cfg)
 
 	require.Equal(t, 10, cfg.numberOfRetries)
 	require.Equal(t, 100*time.Millisecond, cfg.waitInterval)
 	require.Equal(t, time.Second, cfg.spawnTimeout)
 	require.NotNil(t, cfg.Role())
 	require.Equal(t, role, *cfg.Role())
+	require.Same(t, custom, cfg.supervisor)
+
+	// a nil supervisor is ignored and the previously set one is kept
+	WithSingletonSupervisor(nil)(cfg)
+	require.Same(t, custom, cfg.supervisor)
 }

@@ -27,6 +27,7 @@ import (
 	stdErrors "errors"
 	"fmt"
 	"math"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -48,6 +49,7 @@ import (
 	mockcluster "github.com/tochemey/goakt/v4/mocks/cluster"
 	mockremote "github.com/tochemey/goakt/v4/mocks/remoteclient"
 	"github.com/tochemey/goakt/v4/remote"
+	"github.com/tochemey/goakt/v4/supervisor"
 )
 
 func TestSingletonActor(t *testing.T) {
@@ -220,7 +222,8 @@ func TestSingletonActor(t *testing.T) {
 		_, err := system.spawnSingletonOnLeader(ctx, cl, "singleton", NewMockActor(),
 			singletonSpec.SpawnTimeout,
 			singletonSpec.WaitInterval,
-			singletonSpec.MaxRetries)
+			singletonSpec.MaxRetries,
+			nil)
 		require.Error(t, err)
 		require.ErrorIs(t, err, expectedErr)
 	})
@@ -256,7 +259,8 @@ func TestSingletonActor(t *testing.T) {
 		_, err := system.spawnSingletonOnLeader(ctx, cl, "singleton", NewMockActor(),
 			singletonSpec.SpawnTimeout,
 			singletonSpec.WaitInterval,
-			singletonSpec.MaxRetries)
+			singletonSpec.MaxRetries,
+			nil)
 		require.Error(t, err)
 		require.ErrorIs(t, err, gerrors.ErrLeaderNotFound)
 	})
@@ -312,7 +316,8 @@ func TestSingletonActor(t *testing.T) {
 		_, err := system.spawnSingletonOnLeader(ctx, cl, name, actor,
 			singletonSpec.SpawnTimeout,
 			singletonSpec.WaitInterval,
-			singletonSpec.MaxRetries)
+			singletonSpec.MaxRetries,
+			nil)
 		require.Error(t, err)
 		require.ErrorIs(t, err, expectedErr)
 	})
@@ -390,7 +395,8 @@ func TestSingletonActor(t *testing.T) {
 		_, err := system.spawnSingletonWithRole(ctx, clusterMock, "singleton", NewMockActor(), "blue",
 			singletonSpec.SpawnTimeout,
 			singletonSpec.WaitInterval,
-			singletonSpec.MaxRetries)
+			singletonSpec.MaxRetries,
+			nil)
 		require.Error(t, err)
 		require.ErrorContains(t, err, expectedErr.Error())
 	})
@@ -431,7 +437,8 @@ func TestSingletonActor(t *testing.T) {
 		_, err := system.spawnSingletonWithRole(ctx, clusterMock, "singleton", NewMockActor(), role,
 			singletonSpec.SpawnTimeout,
 			singletonSpec.WaitInterval,
-			singletonSpec.MaxRetries)
+			singletonSpec.MaxRetries,
+			nil)
 		require.Error(t, err)
 		require.EqualError(t, err, fmt.Sprintf("no cluster members found with role %s", role))
 	})
@@ -479,6 +486,8 @@ func TestSingletonActor(t *testing.T) {
 			MaxRetries:   3,
 		}
 
+		singletonSupervisor := supervisor.NewSupervisor(supervisor.WithAnyErrorDirective(supervisor.RestartDirective))
+
 		remotingMock.EXPECT().
 			RemoteSpawn(
 				mock.Anything,
@@ -493,14 +502,16 @@ func TestSingletonActor(t *testing.T) {
 						req.Singleton.WaitInterval == singletonSpec.WaitInterval &&
 						req.Singleton.MaxRetries == singletonSpec.MaxRetries &&
 						req.Role != nil &&
-						*req.Role == role
+						*req.Role == role &&
+						req.Supervisor == singletonSupervisor
 				}),
 			).Return(new("goakt://test@127.0.0.1:9000/actor"), nil).Once()
 
 		_, err := system.spawnSingletonWithRole(ctx, clusterMock, "singleton", NewMockActor(), role,
 			singletonSpec.SpawnTimeout,
 			singletonSpec.WaitInterval,
-			singletonSpec.MaxRetries)
+			singletonSpec.MaxRetries,
+			singletonSupervisor)
 		require.NoError(t, err)
 	})
 	t.Run("With role happy path", func(t *testing.T) {
@@ -559,7 +570,8 @@ func TestSingletonActor(t *testing.T) {
 		_, err := system.spawnSingletonWithRole(ctx, clusterMock, "singleton", NewMockActor(), role,
 			singletonSpec.SpawnTimeout,
 			singletonSpec.WaitInterval,
-			singletonSpec.MaxRetries)
+			singletonSpec.MaxRetries,
+			nil)
 		require.NoError(t, err)
 		require.Equal(t, uint64(1), system.actorsCounter.Load())
 	})
@@ -1809,4 +1821,108 @@ func TestConcurrentSpawnSingletonSingleInstance(t *testing.T) {
 	require.NoError(t, cl2.Stop(ctx))
 	require.NoError(t, sd2.Close())
 	srv.Shutdown()
+}
+
+// TestSingletonSupervisor verifies the supervision behavior of singleton actors:
+// the dedicated default supervisor applies when no supervisor is provided, a
+// supervisor set via WithSingletonSupervisor is attached to the singleton, and
+// the supervisor survives delegation to the node that ends up hosting the
+// singleton.
+func TestSingletonSupervisor(t *testing.T) {
+	t.Run("With default supervisor when none is provided", func(t *testing.T) {
+		ctx := context.Background()
+		system := MockSingletonClusterReadyActorSystem(t)
+		clusterMock := mockcluster.NewCluster(t)
+
+		system.locker.Lock()
+		system.cluster = clusterMock
+		system.locker.Unlock()
+
+		clusterMock.EXPECT().ActorExists(mock.Anything, "singleton").Return(false, nil).Once()
+		clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Once()
+
+		pid, err := system.spawnSingletonOnLocal(ctx, "singleton", NewMockActor(), nil, time.Second, 100*time.Millisecond, 1, nil)
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+		require.NotNil(t, pid.supervisor)
+
+		require.Equal(t, supervisor.OneForOneStrategy, pid.supervisor.Strategy())
+
+		directive, ok := pid.supervisor.Directive(&gerrors.PanicError{})
+		require.True(t, ok)
+		require.Equal(t, supervisor.StopDirective, directive)
+
+		directive, ok = pid.supervisor.Directive(&gerrors.InternalError{})
+		require.True(t, ok)
+		require.Equal(t, supervisor.StopDirective, directive)
+
+		directive, ok = pid.supervisor.Directive(&runtime.PanicNilError{})
+		require.True(t, ok)
+		require.Equal(t, supervisor.StopDirective, directive)
+	})
+	t.Run("With custom supervisor on local spawn", func(t *testing.T) {
+		ctx := context.Background()
+		system := MockSingletonClusterReadyActorSystem(t)
+		clusterMock := mockcluster.NewCluster(t)
+
+		system.locker.Lock()
+		system.cluster = clusterMock
+		system.locker.Unlock()
+
+		clusterMock.EXPECT().ActorExists(mock.Anything, "singleton").Return(false, nil).Once()
+		clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Once()
+
+		custom := supervisor.NewSupervisor(supervisor.WithAnyErrorDirective(supervisor.RestartDirective))
+
+		pid, err := system.spawnSingletonOnLocal(ctx, "singleton", NewMockActor(), nil, time.Second, 100*time.Millisecond, 1, custom)
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+		require.Same(t, custom, pid.supervisor)
+	})
+	t.Run("With custom supervisor surviving delegation to the host node", func(t *testing.T) {
+		ctx := context.TODO()
+		srv := startNatsServer(t)
+
+		role := "singleton-host"
+
+		cl1, sd1 := testNATs(t, srv.Addr().String(), withMockRoles(role))
+		require.NotNil(t, cl1)
+		require.NotNil(t, sd1)
+
+		cl2, sd2 := testNATs(t, srv.Addr().String())
+		require.NotNil(t, cl2)
+		require.NotNil(t, sd2)
+
+		pause.For(time.Second)
+
+		// spawn from the node without the role so the spawn is delegated to the
+		// role-bearing host over remoting
+		actorName := "supervised-singleton"
+		custom := supervisor.NewSupervisor(supervisor.WithAnyErrorDirective(supervisor.RestartDirective))
+
+		_, err := cl2.SpawnSingleton(ctx, actorName, NewMockActor(),
+			WithSingletonRole(role),
+			WithSingletonSupervisor(custom),
+		)
+		require.NoError(t, err)
+
+		// the singleton runs on the role-bearing host with the custom supervisor
+		host := cl1.(*actorSystem)
+		node, ok := host.actors.nodeByName(actorName)
+		require.True(t, ok)
+
+		pid := node.value()
+		require.NotNil(t, pid)
+		require.NotNil(t, pid.supervisor)
+
+		directive, ok := pid.supervisor.AnyErrorDirective()
+		require.True(t, ok)
+		require.Equal(t, supervisor.RestartDirective, directive)
+
+		require.NoError(t, cl2.Stop(ctx))
+		require.NoError(t, sd2.Close())
+		require.NoError(t, cl1.Stop(ctx))
+		require.NoError(t, sd1.Close())
+		srv.Shutdown()
+	})
 }

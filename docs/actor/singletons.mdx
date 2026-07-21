@@ -58,6 +58,7 @@ Use `ActorOf(ctx, name)` to resolve the singleton from any node. Messaging is lo
 | `WithSingletonSpawnTimeout(d)`      | Max time to wait for spawn (retries + checks) | 30s     |
 | `WithSingletonSpawnWaitInterval(d)` | Delay between retry attempts                  | 500ms   |
 | `WithSingletonSpawnRetries(n)`      | Max retry attempts before giving up           | 5       |
+| `WithSingletonSupervisor(s)`        | Supervisor attached to the singleton          | Stop on panics and internal errors |
 
 Example with role:
 
@@ -67,6 +68,27 @@ pid, err := system.SpawnSingleton(ctx, "scheduler", NewSchedulerActor(),
     actor.WithSingletonSpawnTimeout(10*time.Second),
 )
 ```
+
+## Supervision
+
+By default a singleton uses a dedicated supervisor with a OneForOne strategy that stops the actor on panics and internal errors, leaving recovery to the relocation machinery. The actor system's `WithDefaultSupervisor` fallback does not apply to singletons.
+
+Use `WithSingletonSupervisor` to override this behavior. The supervisor applies on whichever node hosts the singleton: it travels with the spawn request when placement is delegated to another node, and it is restored when the singleton is relocated after its host leaves the cluster.
+
+```go
+pid, err := system.SpawnSingleton(ctx, "scheduler", NewSchedulerActor(),
+    actor.WithSingletonSupervisor(
+        supervisor.NewSupervisor(
+            supervisor.WithStrategy(supervisor.OneForOneStrategy),
+            supervisor.WithAnyErrorDirective(supervisor.RestartDirective),
+        ),
+    ),
+)
+```
+
+<Note>
+A `RestartDirective` restarts the singleton in place on its current host; it does not trigger a relocation. Relocation still happens when the host node leaves the cluster.
+</Note>
 
 ## Idempotency
 
@@ -80,7 +102,7 @@ If the host node crashes (kill -9, OOM, etc.), relocation does not run; the sing
 
 ## Lifecycle
 
-- A singleton is created with a OneForOne supervisor strategy and lives for the lifetime of the actor system. The supervisor configuration is fixed internally (not configurable via `SpawnSingleton` options).
+- A singleton lives for the lifetime of the actor system. It is supervised by the default singleton supervisor unless `WithSingletonSupervisor` is provided; see [Supervision](#supervision).
 - It is not passivated by default; use `WithPassivationStrategy` if you need idle-based deactivation (uncommon for singletons).
 - Use `pid.IsSingleton()` to check whether a PID is a cluster singleton.
 

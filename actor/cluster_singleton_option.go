@@ -24,6 +24,8 @@ package actor
 
 import (
 	"time"
+
+	"github.com/tochemey/goakt/v4/supervisor"
 )
 
 // clusterSingletonConfig holds configuration options for cluster singleton actors.
@@ -36,6 +38,8 @@ type clusterSingletonConfig struct {
 	waitInterval time.Duration
 	// numberOfRetries defines the number of retries to check for singleton spawn status.
 	numberOfRetries int
+	// supervisor defines the supervisor to attach to the singleton actor.
+	supervisor *supervisor.Supervisor
 }
 
 // newClusterSingletonConfig creates a new cluster singleton configuration.
@@ -130,6 +134,44 @@ func WithSingletonSpawnRetries(retries int) ClusterSingletonOption {
 	return func(c *clusterSingletonConfig) {
 		if retries > 0 {
 			c.numberOfRetries = retries
+		}
+	}
+}
+
+// WithSingletonSupervisor sets the supervisor attached to the singleton actor.
+//
+// The supervisor governs how the singleton reacts to failures on its host node. It applies
+// wherever the singleton ends up running: when the spawn is delegated to another node
+// (leader or role-based placement) the supervisor travels with the request, and when the
+// host node leaves the cluster the relocated singleton keeps it as well.
+//
+// Notes:
+//   - A nil supervisor is ignored and the default singleton supervisor is kept.
+//   - When this option is not provided, the singleton uses a dedicated default supervisor
+//     that stops the actor on panics and internal errors; the actor system's
+//     `WithDefaultSupervisor` fallback does not apply to singletons.
+//   - A `RestartDirective` restarts the singleton in place on its current host; it does not
+//     trigger a relocation. Relocation still happens when the host node leaves the cluster.
+//
+// Example:
+//
+//	if _, err := system.SpawnSingleton(
+//		ctx,
+//		"scheduler",
+//		NewSchedulerActor(),
+//		WithSingletonSupervisor(
+//			supervisor.NewSupervisor(
+//				supervisor.WithStrategy(supervisor.OneForOneStrategy),
+//				supervisor.WithAnyErrorDirective(supervisor.RestartDirective),
+//			),
+//		),
+//	); err != nil {
+//		return err
+//	}
+func WithSingletonSupervisor(supervisor *supervisor.Supervisor) ClusterSingletonOption {
+	return func(c *clusterSingletonConfig) {
+		if supervisor != nil {
+			c.supervisor = supervisor
 		}
 	}
 }

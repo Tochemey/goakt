@@ -39,6 +39,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/chunk"
 	"github.com/tochemey/goakt/v4/internal/cluster"
+	"github.com/tochemey/goakt/v4/internal/codec"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/log"
@@ -714,6 +715,12 @@ func recreateSingletonFromWire(ctx context.Context, system ActorSystem, props *i
 
 	if props.GetRole() != "" {
 		singletonOpts = append(singletonOpts, WithSingletonRole(props.GetRole()))
+	}
+
+	if props.GetSupervisor() != nil {
+		if decoded := codec.DecodeSupervisor(props.GetSupervisor()); decoded != nil {
+			singletonOpts = append(singletonOpts, WithSingletonSupervisor(decoded))
+		}
 	}
 
 	_, err = system.SpawnSingleton(ctx, addr.Name(), actor, singletonOpts...)

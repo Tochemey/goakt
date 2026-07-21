@@ -434,11 +434,11 @@ func (x *actorSystem) SpawnSingleton(ctx context.Context, name string, actor Act
 
 	return x.retrySpawnSingleton(ctx, cfg, types.Name(actor), role, name, func(ctx context.Context) (*PID, error) {
 		if role != "" {
-			return x.spawnSingletonWithRole(ctx, cl, name, actor, role, cfg.spawnTimeout, cfg.waitInterval, retries)
+			return x.spawnSingletonWithRole(ctx, cl, name, actor, role, cfg.spawnTimeout, cfg.waitInterval, retries, cfg.supervisor)
 		}
 
 		// Resolve the cluster coordinator and spawn locally if it's us; otherwise delegate via RemoteSpawn.
-		return x.spawnSingletonOnLeader(ctx, cl, name, actor, cfg.spawnTimeout, cfg.waitInterval, retries)
+		return x.spawnSingletonOnLeader(ctx, cl, name, actor, cfg.spawnTimeout, cfg.waitInterval, retries, cfg.supervisor)
 	})
 }
 
@@ -690,7 +690,7 @@ func isNoRoleMembersError(err error) bool {
 	return errors.As(err, &noRole)
 }
 
-func (x *actorSystem) spawnSingletonWithRole(ctx context.Context, cl cluster.Cluster, name string, actor Actor, role string, spawnTimeout, waitInterval time.Duration, retries int32) (*PID, error) {
+func (x *actorSystem) spawnSingletonWithRole(ctx context.Context, cl cluster.Cluster, name string, actor Actor, role string, spawnTimeout, waitInterval time.Duration, retries int32, singletonSupervisor *supervisor.Supervisor) (*PID, error) {
 	// fetch all cluster members
 	members, err := cl.Members(ctx)
 	if err != nil {
@@ -729,7 +729,8 @@ func (x *actorSystem) spawnSingletonWithRole(ctx context.Context, cl cluster.Clu
 				WaitInterval: waitInterval,
 				MaxRetries:   retries,
 			},
-			Role: new(role),
+			Role:       new(role),
+			Supervisor: singletonSupervisor,
 		})
 
 		if err != nil {
@@ -744,7 +745,7 @@ func (x *actorSystem) spawnSingletonWithRole(ctx context.Context, cl cluster.Clu
 		return newRemotePID(address, x.remoting), nil
 	}
 
-	pid, err := x.spawnSingletonOnLocal(ctx, name, actor, new(role), spawnTimeout, waitInterval, retries)
+	pid, err := x.spawnSingletonOnLocal(ctx, name, actor, new(role), spawnTimeout, waitInterval, retries, singletonSupervisor)
 	if err != nil {
 		return nil, err
 	}
@@ -803,9 +804,13 @@ func (x *actorSystem) runSpawnActivation(ctx context.Context, key string, fn fun
 	}
 }
 
-func (x *actorSystem) spawnSingletonOnLocal(ctx context.Context, name string, actor Actor, role *string, spawnTimeout, waitInterval time.Duration, retries int32) (*PID, error) {
+func (x *actorSystem) spawnSingletonOnLocal(ctx context.Context, name string, actor Actor, role *string, spawnTimeout, waitInterval time.Duration, retries int32, singletonSupervisor *supervisor.Supervisor) (*PID, error) {
 	// Normalize role once
 	singletonRole := strings.TrimSpace(pointer.Deref(role, ""))
+
+	if singletonSupervisor == nil {
+		singletonSupervisor = defaultSingletonSupervisor()
+	}
 
 	return x.runSpawnActivation(ctx, x.actorAddress(name).String(), func() (*PID, error) {
 		// check some preconditions
@@ -829,14 +834,7 @@ func (x *actorSystem) spawnSingletonOnLocal(ctx context.Context, name string, ac
 				MaxRetries:   retries,
 			}),
 			WithRole(singletonRole),
-			WithSupervisor(
-				supervisor.NewSupervisor(
-					supervisor.WithStrategy(supervisor.OneForOneStrategy),
-					supervisor.WithDirective(&gerrors.PanicError{}, supervisor.StopDirective),
-					supervisor.WithDirective(&gerrors.InternalError{}, supervisor.StopDirective),
-					supervisor.WithDirective(&runtime.PanicNilError{}, supervisor.StopDirective),
-				),
-			),
+			WithSupervisor(singletonSupervisor),
 		)
 		if err != nil {
 			return nil, err
@@ -845,6 +843,19 @@ func (x *actorSystem) spawnSingletonOnLocal(ctx context.Context, name string, ac
 		// add the given actor to the tree, supervise it and publish it to the cluster
 		return x.completeSpawn(ctx, x.singletonManager, pid)
 	})
+}
+
+// defaultSingletonSupervisor returns the supervisor attached to singleton actors when
+// the caller does not provide one via WithSingletonSupervisor. It stops the singleton
+// on panics and internal errors so the cluster singleton lifecycle stays in the hands
+// of the relocation machinery rather than a local restart loop.
+func defaultSingletonSupervisor() *supervisor.Supervisor {
+	return supervisor.NewSupervisor(
+		supervisor.WithStrategy(supervisor.OneForOneStrategy),
+		supervisor.WithDirective(&gerrors.PanicError{}, supervisor.StopDirective),
+		supervisor.WithDirective(&gerrors.InternalError{}, supervisor.StopDirective),
+		supervisor.WithDirective(&runtime.PanicNilError{}, supervisor.StopDirective),
+	)
 }
 
 // spawnOnDatacenter spawns an actor on a remote data center by sending a RemoteSpawn

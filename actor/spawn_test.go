@@ -2149,7 +2149,7 @@ func TestSpawnSingletonPublishFailureLeavesNothingBehind(t *testing.T) {
 	// the death watch removes the failed actor from the cluster best-effort
 	clusterMock.EXPECT().RemoveActor(mock.Anything, actorName).Return(nil).Maybe()
 
-	pid, err := actorSystem.spawnSingletonOnLocal(ctx, actorName, NewMockActor(), nil, time.Second, 100*time.Millisecond, 1)
+	pid, err := actorSystem.spawnSingletonOnLocal(ctx, actorName, NewMockActor(), nil, time.Second, 100*time.Millisecond, 1, nil)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, assert.AnError)
 	assert.Nil(t, pid)

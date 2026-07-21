@@ -46,6 +46,7 @@ import (
 	mockscluster "github.com/tochemey/goakt/v4/mocks/cluster"
 	mocksremote "github.com/tochemey/goakt/v4/mocks/remoteclient"
 	"github.com/tochemey/goakt/v4/remote"
+	"github.com/tochemey/goakt/v4/supervisor"
 )
 
 type spawnSingletonSpy struct {
@@ -1417,6 +1418,7 @@ func TestRecreateSingletonFromWireUsesSingletonSpec(t *testing.T) {
 		WaitInterval: durationpb.New(250 * time.Millisecond),
 		MaxRetries:   int32(4),
 	}
+	restart := internalpb.SupervisorDirective_SUPERVISOR_DIRECTIVE_RESTART
 	props := &internalpb.Actor{
 		Address: address.New("singleton", system.Name(), "127.0.0.1", 8080).String(),
 		Type:    types.Name(new(MockActor)),
@@ -1426,6 +1428,9 @@ func TestRecreateSingletonFromWireUsesSingletonSpec(t *testing.T) {
 			MaxRetries:   singletonSpec.MaxRetries,
 		},
 		Role: new("blue"),
+		Supervisor: &internalpb.SupervisorSpec{
+			AnyErrorDirective: &restart,
+		},
 	}
 
 	departedNode := address.FormatHostPort("127.0.0.1", 8080)
@@ -1445,6 +1450,12 @@ func TestRecreateSingletonFromWireUsesSingletonSpec(t *testing.T) {
 	require.Equal(t, int(singletonSpec.MaxRetries), spy.config.numberOfRetries)
 	require.NotNil(t, spy.config.Role())
 	require.Equal(t, props.GetRole(), *spy.config.Role())
+
+	// the serialized supervisor is restored on the respawned singleton
+	require.NotNil(t, spy.config.supervisor)
+	directive, ok := spy.config.supervisor.AnyErrorDirective()
+	require.True(t, ok)
+	require.Equal(t, supervisor.RestartDirective, directive)
 }
 
 // TestRecreateSingletonFromWireSkipsWhenAlreadyRelocated verifies a stale re-run
