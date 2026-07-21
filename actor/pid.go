@@ -3348,33 +3348,41 @@ func (pid *PID) spawnChildLocal(ctx context.Context, name string, actor Actor, c
 		return existing, nil
 	}
 
-	if config.dependencies != nil {
-		_ = pid.ActorSystem().Inject(config.dependencies...)
-	}
+	// Serialize concurrent spawns of the same child so only one PID is created
+	// and inserted; concurrent callers coalesce onto the winner and share it.
+	return pid.actorSystem.runSpawnActivation(ctx, childAddress.String(), func() (*PID, error) {
+		if existing, ok := pid.findRunningChild(tree, childAddress.String()); ok {
+			return existing, nil
+		}
 
-	cid, err := newPID(
-		ctx,
-		childAddress,
-		actor,
-		pid.buildChildOptions(config)...,
-	)
-	if err != nil {
-		return nil, err
-	}
+		if config.dependencies != nil {
+			_ = pid.ActorSystem().Inject(config.dependencies...)
+		}
 
-	// attach the child to the tree, supervise it and publish it to the cluster
-	if _, err := pid.ActorSystem().completeSpawn(ctx, pid, cid); err != nil {
-		return nil, err
-	}
+		cid, err := newPID(
+			ctx,
+			childAddress,
+			actor,
+			pid.buildChildOptions(config)...,
+		)
+		if err != nil {
+			return nil, err
+		}
 
-	// the event is published only after successful cluster publication, so it
-	// means durable creation
-	eventsStream := pid.eventsStream
-	if eventsStream != nil {
-		eventsStream.Publish(eventsTopic, NewActorChildCreated(cid.Path(), pid.Path()))
-	}
+		// attach the child to the tree, supervise it and publish it to the cluster
+		if _, err := pid.ActorSystem().completeSpawn(ctx, pid, cid); err != nil {
+			return nil, err
+		}
 
-	return cid, nil
+		// the event is published only after successful cluster publication, so it
+		// means durable creation
+		eventsStream := pid.eventsStream
+		if eventsStream != nil {
+			eventsStream.Publish(eventsTopic, NewActorChildCreated(cid.Path(), pid.Path()))
+		}
+
+		return cid, nil
+	})
 }
 
 // findRunningChild returns the child PID registered at childAddress in tree

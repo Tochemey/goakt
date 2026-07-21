@@ -799,6 +799,10 @@ type ActorSystem interface {
 	// record to the cluster. On publication failure the actor is stopped so
 	// a failed spawn leaves nothing behind, and the error is returned.
 	completeSpawn(ctx context.Context, parent, pid *PID) (*PID, error)
+	// runSpawnActivation serializes concurrent local spawns sharing the same
+	// actor identity (key) so a name yields exactly one PID under concurrency.
+	// The wait is bounded by ctx; see the implementation for the full contract.
+	runSpawnActivation(ctx context.Context, key string, fn func() (*PID, error)) (*PID, error)
 	// getCluster returns the cluster engine
 	getCluster() cluster.Cluster
 	// tree returns the actors tree
@@ -1028,9 +1032,14 @@ type actorSystem struct {
 	remoteSenderAddresses *xsync.Map[string, *address.Address]
 	grainBarrier          *grainActivationBarrier
 	grainActivation       singleflight.Group
-	evictionStrategy      *EvictionStrategy
-	evictionInterval      time.Duration
-	evictionStopSig       chan types.Unit
+	// spawnActivation serializes concurrent local spawns of the same actor
+	// identity so that only one PID is ever created and inserted into the tree,
+	// keeping name-based spawns (including singletons) idempotent under
+	// concurrency. Keyed by the actor address string (pid.ID()).
+	spawnActivation  singleflight.Group
+	evictionStrategy *EvictionStrategy
+	evictionInterval time.Duration
+	evictionStopSig  chan types.Unit
 
 	metricProvider *metric.Provider
 	// relocationMetric holds the synchronous relocation instruments. It is nil
@@ -1913,7 +1922,7 @@ func (x *actorSystem) Actors(ctx context.Context, timeout time.Duration) ([]*PID
 	return pids, nil
 }
 
-// PeerAddress returns the actor system address known in the cluster. That address is used by other nodesMap to communicate with the actor system.
+// PeersAddress returns the actor system address known in the cluster. That address is used by other nodesMap to communicate with the actor system.
 // This address is empty when cluster mode is not activated
 func (x *actorSystem) PeersAddress() string {
 	if x.clusterEnabled.Load() {
@@ -2466,7 +2475,30 @@ func (x *actorSystem) completeSpawn(ctx context.Context, parent, pid *PID) (*PID
 		x.increaseActorsCounter()
 	}
 
-	_ = x.actors.addNode(parent, pid)
+	if err := x.actors.addNode(parent, pid); err != nil {
+		if errors.Is(err, errNodeAlreadyExists) {
+			if node, ok := x.actors.node(pid.ID()); ok {
+				if canonical := node.value(); canonical != nil && canonical != pid {
+					// A concurrent spawn already registered this identity: hand back the
+					// canonical instance and undo the counter bump above, which accounted
+					// for a node that was never inserted. The duplicate is deliberately
+					// NOT shut down: freeWatchers/freeChildren/freeWatchees resolve tree
+					// state by the shared pid.ID(), so stopping the duplicate would
+					// detach the canonical instance from the tree.
+					if !pid.isStateSet(systemState) {
+						x.decreaseActorsCounter()
+					}
+					// This path should be unreachable while every spawn entry point is
+					// serialized through runSpawnActivation; log loudly so an unserialized
+					// caller (and the intentionally leaked duplicate) does not go unnoticed.
+					x.logger.Warnf("duplicate spawn detected for actor=%s: returning the canonical instance; the duplicate instance is left unmanaged", pid.Name())
+					return canonical, nil
+				}
+			}
+		}
+		// Same-instance re-adds and other insertion failures keep the historical
+		// behavior: proceed with supervision and cluster publication.
+	}
 	x.actors.addWatcher(pid, x.deathWatch)
 
 	if err := x.putActorOnCluster(ctx, pid); err != nil {

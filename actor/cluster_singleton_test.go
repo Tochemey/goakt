@@ -29,6 +29,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -789,7 +790,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 			Address:   "goakt://test@127.0.0.1:0/singleton",
 			Type:      "actor.mockactor",
 			Singleton: &internalpb.SingletonSpec{},
-		}, nil).Times(2)
+		}, nil).Once()
 
 		_, err := system.SpawnSingleton(
 			ctx,
@@ -821,7 +822,8 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 				Coordinator:  true,
 			},
 		}, nil).Once()
-		clusterMock.EXPECT().ActorExists(mock.Anything, "singleton").Return(false, context.Canceled).Once()
+		// No ActorExists expectation: an already-canceled context is rejected by
+		// runSpawnActivation before the spawn attempt reaches the cluster.
 
 		_, err := system.SpawnSingleton(
 			ctx,
@@ -898,7 +900,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 			Address:   "goakt://test@127.0.0.1:0/singleton",
 			Type:      "actor.mockactor",
 			Singleton: &internalpb.SingletonSpec{},
-		}, nil).Times(2)
+		}, nil).Once()
 
 		_, err := system.SpawnSingleton(
 			ctx,
@@ -962,7 +964,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 			Address:   "goakt://test@127.0.0.1:0/singleton",
 			Type:      "actor.mockactor",
 			Singleton: &internalpb.SingletonSpec{},
-		}, nil).Times(2)
+		}, nil).Once()
 
 		leader := &cluster.Peer{
 			Host:         "127.0.0.1",
@@ -1031,7 +1033,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 			Address:   "goakt://test@127.0.0.1:0/singleton",
 			Type:      "actor.mockactor",
 			Singleton: &internalpb.SingletonSpec{},
-		}, nil).Times(2)
+		}, nil).Once()
 
 		_, err := system.SpawnSingleton(
 			ctx,
@@ -1042,6 +1044,98 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 			WithSingletonSpawnTimeout(time.Second),
 		)
 		require.NoError(t, err)
+	})
+
+	t.Run("idempotent success resolves the confirmed address without a second lookup", func(t *testing.T) {
+		ctx := context.Background()
+		clusterMock := mockcluster.NewCluster(t)
+		remotingMock := mockremote.NewClient(t)
+		system := MockSingletonClusterReadyActorSystem(t)
+		system.remoting = remotingMock
+
+		system.locker.Lock()
+		system.cluster = clusterMock
+		system.locker.Unlock()
+
+		// Local coordinator: the local spawn reports the name is already taken.
+		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{
+			{
+				Host:         system.clusterNode.Host,
+				PeersPort:    system.clusterNode.PeersPort,
+				RemotingPort: system.clusterNode.RemotingPort,
+				Coordinator:  true,
+			},
+		}, nil).Once()
+		clusterMock.EXPECT().ActorExists(mock.Anything, "singleton").Return(true, nil).Once()
+
+		// The conflict handler confirms the name is bound to our singleton with a single
+		// GetActor call. The PID must then be resolved from this record's address WITHOUT a
+		// second lookup — the .Once() below fails if the old ActorOf re-resolution returns.
+		// This is the regression guard: a creation call must never leak ErrActorNotFound
+		// on the idempotent path just because a second read momentarily 404s.
+		const confirmedAddr = "goakt://test@127.0.0.1:9000/singleton"
+		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(&internalpb.Actor{
+			Address:   confirmedAddr,
+			Type:      "actor.mockactor",
+			Singleton: &internalpb.SingletonSpec{},
+		}, nil).Once()
+
+		pid, err := system.SpawnSingleton(
+			ctx,
+			"singleton",
+			NewMockActor(),
+			WithSingletonSpawnRetries(2),
+			WithSingletonSpawnWaitInterval(time.Millisecond),
+			WithSingletonSpawnTimeout(time.Second),
+		)
+		require.NoError(t, err)
+		require.NotErrorIs(t, err, gerrors.ErrActorNotFound)
+		require.NotNil(t, pid)
+		require.True(t, pid.IsRemote())
+		require.Equal(t, confirmedAddr, pid.Path().String())
+	})
+
+	t.Run("never returns ErrActorNotFound to the caller on the idempotent path", func(t *testing.T) {
+		ctx := context.Background()
+		clusterMock := mockcluster.NewCluster(t)
+		system := MockSingletonClusterReadyActorSystem(t)
+
+		system.locker.Lock()
+		system.cluster = clusterMock
+		system.locker.Unlock()
+
+		// Local coordinator: the local spawn reports the name is already taken.
+		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{
+			{
+				Host:         system.clusterNode.Host,
+				PeersPort:    system.clusterNode.PeersPort,
+				RemotingPort: system.clusterNode.RemotingPort,
+				Coordinator:  true,
+			},
+		}, nil).Once()
+		clusterMock.EXPECT().ActorExists(mock.Anything, "singleton").Return(true, nil).Once()
+
+		// Confirmation succeeds (it is our singleton) but the record carries no address,
+		// which forces the by-name fallback resolution...
+		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(&internalpb.Actor{
+			Address:   "",
+			Type:      "actor.mockactor",
+			Singleton: &internalpb.SingletonSpec{},
+		}, nil).Once()
+		// ...which momentarily 404s while the registry record propagates.
+		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(nil, cluster.ErrActorNotFound).Once()
+
+		_, err := system.SpawnSingleton(
+			ctx,
+			"singleton",
+			NewMockActor(),
+			WithSingletonSpawnRetries(2),
+			WithSingletonSpawnWaitInterval(time.Millisecond),
+			WithSingletonSpawnTimeout(time.Second),
+		)
+		require.Error(t, err)
+		// A creation call must never tell the caller the actor it just created was not found.
+		require.NotErrorIs(t, err, gerrors.ErrActorNotFound)
 	})
 
 	t.Run("retries when GetActor returns retryable error during name conflict", func(t *testing.T) {
@@ -1072,7 +1166,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 			Address:   "goakt://test@127.0.0.1:0/singleton",
 			Type:      "actor.mockactor",
 			Singleton: &internalpb.SingletonSpec{},
-		}, nil).Times(2)
+		}, nil).Once()
 
 		_, err := system.SpawnSingleton(
 			ctx,
@@ -1509,6 +1603,95 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 	})
 }
 
+// TestResolveExistingSingleton covers the idempotent-success resolution helper used by
+// retrySpawnSingleton: it must prefer a live local PID, otherwise build a remote PID from
+// the address confirmed during conflict handling, and only fall back to a by-name lookup
+// when no address was captured.
+func TestResolveExistingSingleton(t *testing.T) {
+	t.Run("prefers a live local PID over the confirmed address", func(t *testing.T) {
+		ctx := context.Background()
+		sys, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() {
+			require.NoError(t, sys.Stop(ctx))
+		})
+
+		actorSys := sys.(*actorSystem)
+		const actorName = "local-singleton"
+		localPID, err := actorSys.configPID(ctx, actorName, NewMockActor(), WithLongLived())
+		require.NoError(t, err)
+		require.NoError(t, actorSys.tree().addNode(actorSys.getUserGuardian(), localPID))
+
+		// A remote address is supplied, but the singleton is hosted locally: the live local
+		// PID must win so we never hand back a remote proxy to ourselves.
+		got, err := actorSys.resolveExistingSingleton(ctx, actorName, "goakt://test@127.0.0.1:9000/local-singleton")
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		require.False(t, got.IsRemote())
+		require.Same(t, localPID, got)
+	})
+
+	t.Run("builds a remote PID from the confirmed address when not hosted locally", func(t *testing.T) {
+		ctx := context.Background()
+		remotingMock := mockremote.NewClient(t)
+		system := MockSingletonClusterReadyActorSystem(t)
+		system.remoting = remotingMock
+
+		const confirmedAddr = "goakt://test@127.0.0.1:9000/remote-singleton"
+		got, err := system.resolveExistingSingleton(ctx, "remote-singleton", confirmedAddr)
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		require.True(t, got.IsRemote())
+		require.Equal(t, confirmedAddr, got.Path().String())
+	})
+
+	t.Run("falls back to ActorOf when no address was captured", func(t *testing.T) {
+		ctx := context.Background()
+		clusterMock := mockcluster.NewCluster(t)
+		remotingMock := mockremote.NewClient(t)
+		system := MockSingletonClusterReadyActorSystem(t)
+		system.remoting = remotingMock
+
+		system.locker.Lock()
+		system.cluster = clusterMock
+		system.locker.Unlock()
+
+		const resolvedAddr = "goakt://test@127.0.0.1:9000/fallback-singleton"
+		clusterMock.EXPECT().GetActor(mock.Anything, "fallback-singleton").Return(&internalpb.Actor{
+			Address:   resolvedAddr,
+			Type:      "actor.mockactor",
+			Singleton: &internalpb.SingletonSpec{},
+		}, nil).Once()
+
+		got, err := system.resolveExistingSingleton(ctx, "fallback-singleton", "")
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		require.True(t, got.IsRemote())
+		require.Equal(t, resolvedAddr, got.Path().String())
+	})
+
+	t.Run("never surfaces ErrActorNotFound when the fallback lookup 404s", func(t *testing.T) {
+		ctx := context.Background()
+		clusterMock := mockcluster.NewCluster(t)
+		system := MockSingletonClusterReadyActorSystem(t)
+
+		system.locker.Lock()
+		system.cluster = clusterMock
+		system.locker.Unlock()
+
+		// No confirmed address, and the by-name fallback cannot see the record yet.
+		clusterMock.EXPECT().GetActor(mock.Anything, "ghost-singleton").Return(nil, cluster.ErrActorNotFound).Once()
+
+		got, err := system.resolveExistingSingleton(ctx, "ghost-singleton", "")
+		require.Error(t, err)
+		require.Nil(t, got)
+		// The singleton was confirmed to exist upstream, so a creation call must never
+		// leak ErrActorNotFound to the caller.
+		require.NotErrorIs(t, err, gerrors.ErrActorNotFound)
+	})
+}
+
 func TestShouldRetrySpawnSingleton(t *testing.T) {
 	cases := []struct {
 		name string
@@ -1538,4 +1721,92 @@ func TestShouldRetrySpawnSingleton(t *testing.T) {
 			require.Equal(t, tc.want, shouldRetrySpawnSingleton(tc.err))
 		})
 	}
+}
+
+// TestConcurrentSpawnSingletonSingleInstance is an integration test that hammers
+// SpawnSingleton for the same name concurrently from every node in a real
+// (NATS-backed) cluster. It asserts the singleton converges to a single
+// instance: every call succeeds and resolves to the same address, exactly one
+// node hosts it locally, and it is resolvable cluster-wide from every node.
+func TestConcurrentSpawnSingletonSingleInstance(t *testing.T) {
+	ctx := context.TODO()
+	srv := startNatsServer(t)
+
+	cl1, sd1 := testNATs(t, srv.Addr().String())
+	require.NotNil(t, cl1)
+	cl2, sd2 := testNATs(t, srv.Addr().String())
+	require.NotNil(t, cl2)
+	cl3, sd3 := testNATs(t, srv.Addr().String())
+	require.NotNil(t, cl3)
+
+	// let the cluster settle
+	pause.For(time.Second)
+
+	systems := []ActorSystem{cl1, cl2, cl3}
+	const perNode = 5
+	total := len(systems) * perNode
+	name := "concurrent-singleton"
+
+	var (
+		wg   sync.WaitGroup
+		gate = make(chan struct{})
+		pids = make([]*PID, total)
+		errs = make([]error, total)
+	)
+
+	idx := 0
+	for _, sys := range systems {
+		for j := 0; j < perNode; j++ {
+			i := idx
+			s := sys
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-gate
+				pids[i], errs[i] = s.SpawnSingleton(ctx, name, NewMockActor())
+			}()
+			idx++
+		}
+	}
+	close(gate)
+	wg.Wait()
+
+	// every concurrent call succeeds and resolves to the same singleton address
+	var addr string
+	for i := 0; i < total; i++ {
+		require.NoErrorf(t, errs[i], "call %d failed", i)
+		require.NotNilf(t, pids[i], "call %d returned a nil pid", i)
+		if addr == "" {
+			addr = pids[i].ID()
+			continue
+		}
+		require.Equalf(t, addr, pids[i].ID(), "call %d resolved to a different address", i)
+	}
+
+	// exactly one node hosts the singleton locally (a single live instance)
+	localHosts := 0
+	for _, sys := range systems {
+		if node, ok := sys.tree().nodeByName(name); ok {
+			if pid := node.value(); pid != nil && pid.IsRunning() {
+				localHosts++
+			}
+		}
+	}
+	require.Equal(t, 1, localHosts, "singleton must be hosted on exactly one node")
+
+	// resolvable to the same address from every node
+	for _, sys := range systems {
+		pid, err := sys.ActorOf(ctx, name)
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+		require.Equal(t, addr, pid.ID())
+	}
+
+	require.NoError(t, cl3.Stop(ctx))
+	require.NoError(t, sd3.Close())
+	require.NoError(t, cl1.Stop(ctx))
+	require.NoError(t, sd1.Close())
+	require.NoError(t, cl2.Stop(ctx))
+	require.NoError(t, sd2.Close())
+	srv.Shutdown()
 }

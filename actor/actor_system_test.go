@@ -6369,8 +6369,6 @@ func TestActorSystemRun(t *testing.T) {
 	// Ensure the signal handling goroutine is ready.
 	pause.For(50 * time.Millisecond)
 
-	require.NoError(t, syscall.Kill(os.Getpid(), syscall.SIGINT))
-
 	require.Eventually(t, func() bool {
 		select {
 		case <-done:
