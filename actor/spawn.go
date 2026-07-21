@@ -126,26 +126,26 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 		return newRemotePID(address, x.remoting), nil
 	}
 
-	// check some preconditions
-	if err := x.checkSpawnPreconditions(ctx, name); err != nil {
-		return nil, err
-	}
-
-	pidNode, exist := x.actors.nodeByName(name)
-	if exist {
-		pid := pidNode.value()
-		if pid.IsRunning() {
-			return pid, nil
+	return x.runSpawnActivation(ctx, x.actorAddress(name).String(), func() (*PID, error) {
+		// check some preconditions
+		if err := x.checkSpawnPreconditions(ctx, name); err != nil {
+			return nil, err
 		}
-	}
 
-	pid, err := x.configPID(ctx, name, actor, opts...)
-	if err != nil {
-		return nil, err
-	}
+		if pidNode, exist := x.actors.nodeByName(name); exist {
+			if pid := pidNode.value(); pid != nil && pid.IsRunning() {
+				return pid, nil
+			}
+		}
 
-	// add the given actor to the tree, supervise it and publish it to the cluster
-	return x.completeSpawn(ctx, x.getUserGuardian(), pid)
+		pid, err := x.configPID(ctx, name, actor, opts...)
+		if err != nil {
+			return nil, err
+		}
+
+		// add the given actor to the tree, supervise it and publish it to the cluster
+		return x.completeSpawn(ctx, x.getUserGuardian(), pid)
+	})
 }
 
 // SpawnNamedFromFunc creates and starts an actor whose behavior is defined by the given receive function,
@@ -174,25 +174,25 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 	config := newFuncConfig(opts...)
 	actor := newFuncActor(name, receiveFunc, config)
 
-	// check some preconditions
-	if err := x.checkSpawnPreconditions(ctx, name); err != nil {
-		return nil, err
-	}
-
-	pidNode, exist := x.actors.nodeByName(name)
-	if exist {
-		pid := pidNode.value()
-		if pid.IsRunning() {
-			return pid, nil
+	return x.runSpawnActivation(ctx, x.actorAddress(name).String(), func() (*PID, error) {
+		// check some preconditions
+		if err := x.checkSpawnPreconditions(ctx, name); err != nil {
+			return nil, err
 		}
-	}
 
-	pid, err := x.configPID(ctx, name, actor, WithMailbox(config.mailbox), WithRelocationDisabled())
-	if err != nil {
-		return nil, err
-	}
+		if pidNode, exist := x.actors.nodeByName(name); exist {
+			if pid := pidNode.value(); pid != nil && pid.IsRunning() {
+				return pid, nil
+			}
+		}
 
-	return x.completeSpawn(ctx, x.userGuardian, pid)
+		pid, err := x.configPID(ctx, name, actor, WithMailbox(config.mailbox), WithRelocationDisabled())
+		if err != nil {
+			return nil, err
+		}
+
+		return x.completeSpawn(ctx, x.userGuardian, pid)
+	})
 }
 
 // SpawnOn creates and starts an actor locally, on another node in the current cluster,
@@ -455,25 +455,74 @@ func (x *actorSystem) retrySpawnSingleton(ctx context.Context, cfg *clusterSingl
 	}
 
 	var pid *PID
+	// confirmedAddr is populated by the conflict handler when it verifies (via the
+	// cluster registry) that the name is already bound to the singleton we intended.
+	// It lets us resolve the idempotent-success PID from the address we already read,
+	// instead of issuing a second lookup that could momentarily observe the record as
+	// missing and surface a misleading ErrActorNotFound from this creation call.
+	var confirmedAddr string
 	retrier := retry.NewRetrier(cfg.numberOfRetries, cfg.waitInterval, cfg.spawnTimeout)
 	if err := retrier.RunContext(retryCtx, func(ctx context.Context) error {
 		var err error
 		pid, err = spawnFn(ctx)
 		if err != nil {
-			return x.spawnSingletonRetryError(ctx, err, kind, role, actorName)
+			return x.spawnSingletonRetryError(ctx, err, kind, role, actorName, &confirmedAddr)
 		}
 		return nil
 	}); err != nil {
 		return nil, cluster.NormalizeQuorumError(err)
 	}
 
+	// A successful retrier run can still leave pid == nil: when a spawn attempt returns
+	// ErrActorAlreadyExists and spawnSingletonRetryError downgrades it to success (the name
+	// is already bound to the singleton we intended), the attempt produced no PID. This is
+	// the idempotent-success path — the singleton exists (created concurrently, by a prior
+	// call, or on the leader), so resolve a usable reference to it rather than returning nil.
 	if pid == nil {
-		// Idempotent success: the name is already bound to the singleton we wanted
-		// (created concurrently or by a previous call). Resolve and return its PID
-		// so callers and the RemoteSpawn handler always get a usable reference.
-		return x.ActorOf(ctx, actorName)
+		return x.resolveExistingSingleton(ctx, actorName, confirmedAddr)
 	}
 
+	return pid, nil
+}
+
+// resolveExistingSingleton returns a usable PID for a singleton that already exists,
+// as confirmed on the idempotent-success path of retrySpawnSingleton.
+//
+// It prefers a live local PID when the singleton is hosted on this node. Otherwise it
+// builds a remote reference from confirmedAddr, the address captured while confirming
+// the name conflict, avoiding a redundant cluster read and the propagation race it can
+// lose. Only when no address was captured (e.g. the record became visible after an
+// ambiguous, retryable state) does it fall back to resolving by name via ActorOf.
+//
+// The singleton has already been confirmed to exist on this path, so a not-found result
+// from the fallback lookup is a transient resolution failure, not a genuine absence. It
+// is therefore never surfaced as ErrActorNotFound: a creation call must not tell the
+// caller the actor it just created does not exist.
+func (x *actorSystem) resolveExistingSingleton(ctx context.Context, actorName, confirmedAddr string) (*PID, error) {
+	if pidnode, ok := x.actors.nodeByName(actorName); ok {
+		if pid := pidnode.value(); pid != nil && !pid.IsStopping() {
+			return pid, nil
+		}
+	}
+
+	if strings.TrimSpace(confirmedAddr) != "" {
+		addr, err := address.Parse(confirmedAddr)
+		if err != nil {
+			return nil, err
+		}
+		return newRemotePID(addr, x.remoting), nil
+	}
+
+	pid, err := x.ActorOf(ctx, actorName)
+	if err != nil {
+		if errors.Is(err, gerrors.ErrActorNotFound) {
+			// Deliberately break the ErrActorNotFound chain (no %w): the singleton was
+			// confirmed to exist, so callers creating a singleton must never receive a
+			// not-found error describing the actor they just created.
+			return nil, fmt.Errorf("singleton %q is registered but its address could not be resolved", actorName)
+		}
+		return nil, err
+	}
 	return pid, nil
 }
 
@@ -494,14 +543,18 @@ func (x *actorSystem) retrySpawnSingleton(ctx context.Context, cfg *clusterSingl
 //
 // `kind` and `role` identify the singleton we attempted to spawn. They are used to disambiguate
 // name collisions (ErrActorAlreadyExists) by comparing against the registry record bound to the name.
-func (x *actorSystem) spawnSingletonRetryError(ctx context.Context, err error, kind, role, actorName string) error {
+//
+// confirmedAddr is an out-parameter: when the error is downgraded to idempotent success because
+// the name is already bound to the singleton we intended, it is set to that singleton's address so
+// the caller can resolve its PID without a second cluster lookup.
+func (x *actorSystem) spawnSingletonRetryError(ctx context.Context, err error, kind, role, actorName string, confirmedAddr *string) error {
 	if errors.Is(err, gerrors.ErrSingletonAlreadyExists) { //nolint:staticcheck // old-version hosts still emit it during a rolling upgrade
 		// Terminal: emitted by an old-version host during a mixed-version rolling upgrade; don't retry.
 		return retry.Stop(err)
 	}
 
 	if errors.Is(err, gerrors.ErrActorAlreadyExists) {
-		return x.handleSingletonNameConflict(ctx, err, kind, role, actorName)
+		return x.handleSingletonNameConflict(ctx, err, kind, role, actorName, confirmedAddr)
 	}
 
 	if isContextDone(ctx) {
@@ -526,10 +579,10 @@ func (x *actorSystem) spawnSingletonRetryError(ctx context.Context, err error, k
 // effectively done.
 //
 // It returns:
-//   - nil: treat as success (idempotent)
+//   - nil: treat as success (idempotent); confirmedAddr is set to the singleton's address
 //   - retry.Stop(err): terminal failure
 //   - err: retryable (within the configured retry budget)
-func (x *actorSystem) handleSingletonNameConflict(ctx context.Context, err error, kind, role, actorName string) error {
+func (x *actorSystem) handleSingletonNameConflict(ctx context.Context, err error, kind, role, actorName string, confirmedAddr *string) error {
 	if strings.TrimSpace(actorName) == "" {
 		return retry.Stop(err)
 	}
@@ -544,6 +597,10 @@ func (x *actorSystem) handleSingletonNameConflict(ctx context.Context, err error
 		actualRole := strings.TrimSpace(pointer.Deref(existing.Role, ""))
 		if existing.GetSingleton() != nil && existing.GetType() == kind && actualRole == role {
 			// The name is already bound to the singleton we wanted: treat as success/idempotent.
+			// Hand back the address we just read so the caller can resolve the PID directly.
+			if confirmedAddr != nil {
+				*confirmedAddr = existing.GetAddress()
+			}
 			return nil
 		}
 		// Name is taken by another actor (or a different singleton): stop.
@@ -586,7 +643,8 @@ func shouldRetrySpawnSingleton(err error) bool {
 	// equivalents. Without recognizing them here, a node calling SpawnSingleton during
 	// membership churn (e.g. a rolling restart) would fail terminally instead of retrying
 	// within its budget until the cluster settles:
-	//   - ErrRemoteSendFailure: CODE_UNAVAILABLE, mapped from leader quorum errors.
+	//   - ErrRemoteSendFailure: CODE_UNAVAILABLE, mapped (spawnErrorToProto) from leader
+	//     quorum errors, ErrLeaderNotFound, ErrEngineNotRunning, and no-role-members.
 	//   - ErrRequestTimeout:     CODE_DEADLINE_EXCEEDED on the leader.
 	//   - ErrAddressNotFound:    CODE_NOT_FOUND from a stale coordinator view or a singleton
 	//     not yet placed while membership is reconciling.
@@ -694,42 +752,99 @@ func (x *actorSystem) spawnSingletonWithRole(ctx context.Context, cl cluster.Clu
 	return pid, nil
 }
 
+// runSpawnActivation serializes concurrent local spawns that share the same actor
+// identity (key). Concurrent callers coalesce onto a single execution and share its
+// result, so a given name yields exactly one PID even under heavy concurrency,
+// keeping name-based spawns (regular, function-based, singleton, and children)
+// idempotent. When key is empty the function runs without coordination.
+//
+// The wait is context-aware: a caller whose ctx expires stops waiting and returns
+// ctx.Err() while the in-flight spawn completes undisturbed for the remaining
+// callers. Because fn runs under the winning caller's context, a waiter can
+// inherit a failure caused by the winner's context rather than its own; when that
+// happens (shared context error, own context still live) the waiter retries once
+// instead of failing with a cancellation that was never its own.
+//
+// fn must not spawn an actor with the same identity from within (e.g. from the
+// actor's PreStart): such a re-entrant call coalesces onto its own in-flight
+// execution and only unblocks with an error once the caller's context expires.
+func (x *actorSystem) runSpawnActivation(ctx context.Context, key string, fn func() (*PID, error)) (*PID, error) {
+	if key == "" {
+		return fn()
+	}
+
+	// A context that is already done must not start (or join) a spawn nobody
+	// will wait for.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	retried := false
+	for {
+		ch := x.spawnActivation.DoChan(key, func() (any, error) {
+			return fn()
+		})
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case res := <-ch:
+			if res.Err != nil {
+				if !retried && res.Shared && ctx.Err() == nil &&
+					(errors.Is(res.Err, context.Canceled) || errors.Is(res.Err, context.DeadlineExceeded)) {
+					retried = true
+					continue
+				}
+				return nil, res.Err
+			}
+			pid, _ := res.Val.(*PID)
+			return pid, nil
+		}
+	}
+}
+
 func (x *actorSystem) spawnSingletonOnLocal(ctx context.Context, name string, actor Actor, role *string, spawnTimeout, waitInterval time.Duration, retries int32) (*PID, error) {
 	// Normalize role once
 	singletonRole := strings.TrimSpace(pointer.Deref(role, ""))
 
-	// check some preconditions
-	if err := x.checkSpawnPreconditions(ctx, name); err != nil {
-		return nil, err
-	}
+	return x.runSpawnActivation(ctx, x.actorAddress(name).String(), func() (*PID, error) {
+		// check some preconditions
+		if err := x.checkSpawnPreconditions(ctx, name); err != nil {
+			return nil, err
+		}
 
-	pid, err := x.configPID(ctx, name, actor,
-		WithLongLived(),
-		withSingleton(&singletonSpec{
-			SpawnTimeout: spawnTimeout,
-			WaitInterval: waitInterval,
-			MaxRetries:   retries,
-		}),
-		WithRole(singletonRole),
-		WithSupervisor(
-			supervisor.NewSupervisor(
-				supervisor.WithStrategy(supervisor.OneForOneStrategy),
-				supervisor.WithDirective(&gerrors.PanicError{}, supervisor.StopDirective),
-				supervisor.WithDirective(&gerrors.InternalError{}, supervisor.StopDirective),
-				supervisor.WithDirective(&runtime.PanicNilError{}, supervisor.StopDirective),
+		// A running local instance already satisfies the singleton contract; return
+		// it instead of creating (and immediately discarding) a duplicate.
+		if node, exist := x.actors.nodeByName(name); exist {
+			if pid := node.value(); pid != nil && pid.IsRunning() {
+				return pid, nil
+			}
+		}
+
+		pid, err := x.configPID(ctx, name, actor,
+			WithLongLived(),
+			withSingleton(&singletonSpec{
+				SpawnTimeout: spawnTimeout,
+				WaitInterval: waitInterval,
+				MaxRetries:   retries,
+			}),
+			WithRole(singletonRole),
+			WithSupervisor(
+				supervisor.NewSupervisor(
+					supervisor.WithStrategy(supervisor.OneForOneStrategy),
+					supervisor.WithDirective(&gerrors.PanicError{}, supervisor.StopDirective),
+					supervisor.WithDirective(&gerrors.InternalError{}, supervisor.StopDirective),
+					supervisor.WithDirective(&runtime.PanicNilError{}, supervisor.StopDirective),
+				),
 			),
-		),
-	)
-	if err != nil {
-		return nil, err
-	}
+		)
+		if err != nil {
+			return nil, err
+		}
 
-	// add the given actor to the tree, supervise it and publish it to the cluster
-	if _, err = x.completeSpawn(ctx, x.singletonManager, pid); err != nil {
-		return nil, err
-	}
-
-	return pid, nil
+		// add the given actor to the tree, supervise it and publish it to the cluster
+		return x.completeSpawn(ctx, x.singletonManager, pid)
+	})
 }
 
 // spawnOnDatacenter spawns an actor on a remote data center by sending a RemoteSpawn

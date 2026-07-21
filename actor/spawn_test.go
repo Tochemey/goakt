@@ -36,6 +36,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v4/datacenter"
@@ -2199,5 +2200,256 @@ func TestSpawnOnImmediateCrossNodeVisibility(t *testing.T) {
 		reply, err := Ask(ctx, remotePID, new(testpb.TestReply), time.Second)
 		require.NoError(t, err, "actor=%s must be reachable from another node as soon as SpawnOn returns", name)
 		require.NotNil(t, reply)
+	}
+}
+
+// TestConcurrentSpawnSameNameCreatesSingleActor verifies that many goroutines
+// racing to Spawn the same name converge on a single live actor: only one
+// instance starts, every caller gets the same PID, and the tree holds exactly
+// one node for that name.
+func TestConcurrentSpawnSameNameCreatesSingleActor(t *testing.T) {
+	ctx := context.Background()
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+	t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+	starts := &atomic.Int64{}
+	pids, errs := spawnConcurrently(t, 64, func() (*PID, error) {
+		return sys.Spawn(ctx, "concurrent", &countingActor{starts: starts})
+	})
+
+	requireSamePID(t, pids, errs)
+	require.EqualValues(t, 1, starts.Load(), "more than one actor instance was created")
+
+	node, ok := sys.tree().nodeByName("concurrent")
+	require.True(t, ok)
+	require.Equal(t, pids[0], node.value())
+	require.EqualValues(t, 1, sys.NumActors())
+}
+
+// TestConcurrentSpawnNamedFromFuncSingleActor exercises the same race on the
+// function-based spawn path.
+func TestConcurrentSpawnNamedFromFuncSingleActor(t *testing.T) {
+	ctx := context.Background()
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+	t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+	receiveFn := func(context.Context, any) error { return nil }
+	pids, errs := spawnConcurrently(t, 64, func() (*PID, error) {
+		return sys.SpawnNamedFromFunc(ctx, "func-actor", receiveFn)
+	})
+
+	requireSamePID(t, pids, errs)
+	node, ok := sys.tree().nodeByName("func-actor")
+	require.True(t, ok)
+	require.Equal(t, pids[0], node.value())
+	require.EqualValues(t, 1, sys.NumActors())
+}
+
+// TestConcurrentSpawnChildCreatesSingleChild exercises the race on the child
+// spawn path (PID.SpawnChild).
+func TestConcurrentSpawnChildCreatesSingleChild(t *testing.T) {
+	ctx := context.Background()
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+	t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+	parent, err := sys.Spawn(ctx, "parent", NewMockActor())
+	require.NoError(t, err)
+
+	starts := &atomic.Int64{}
+	pids, errs := spawnConcurrently(t, 64, func() (*PID, error) {
+		return parent.SpawnChild(ctx, "child", &countingActor{starts: starts})
+	})
+
+	requireSamePID(t, pids, errs)
+	require.EqualValues(t, 1, starts.Load(), "more than one child instance was created")
+
+	children := parent.Children()
+	require.Len(t, children, 1)
+	require.Equal(t, pids[0], children[0])
+}
+
+// TestCompleteSpawnDuplicateReturnsCanonical exercises the completeSpawn safety
+// net directly (bypassing the singleflight serialization): completing the spawn
+// of a second, distinct PID instance for an already-registered identity must
+// return the canonical instance, leave the canonical tree node intact and
+// running, and must not inflate the actors counter.
+func TestCompleteSpawnDuplicateReturnsCanonical(t *testing.T) {
+	ctx := context.Background()
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+	t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+	actorSys := sys.(*actorSystem)
+	canonical, err := sys.Spawn(ctx, "dup", NewMockActor())
+	require.NoError(t, err)
+	before := sys.NumActors()
+
+	// A distinct instance sharing the same identity (name/address).
+	duplicate, err := actorSys.configPID(ctx, "dup", NewMockActor())
+	require.NoError(t, err)
+	require.NotSame(t, canonical, duplicate)
+
+	got, err := actorSys.completeSpawn(ctx, actorSys.getUserGuardian(), duplicate)
+	require.NoError(t, err)
+	require.Same(t, canonical, got, "completeSpawn must return the canonical instance")
+	require.Equal(t, before, sys.NumActors(), "duplicate handling must undo the counter bump")
+
+	// The canonical node survives duplicate handling: still in the tree, still
+	// the same instance, still running.
+	node, ok := actorSys.tree().nodeByName("dup")
+	require.True(t, ok)
+	require.Same(t, canonical, node.value())
+	require.True(t, canonical.IsRunning())
+
+	// NOTE: the duplicate is intentionally not shut down here (and completeSpawn
+	// intentionally does not stop it): its shutdown would resolve tree state by
+	// the shared pid.ID() and detach the canonical node.
+}
+
+// TestTreeAddNodeDuplicateReturnsSentinel asserts the tree reports a duplicate
+// insertion with the typed sentinel completeSpawn relies on.
+func TestTreeAddNodeDuplicateReturnsSentinel(t *testing.T) {
+	ctx := context.Background()
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+	t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+	actorSys := sys.(*actorSystem)
+	pid, err := sys.Spawn(ctx, "sentinel", NewMockActor())
+	require.NoError(t, err)
+
+	err = actorSys.tree().addNode(actorSys.getUserGuardian(), pid)
+	require.ErrorIs(t, err, errNodeAlreadyExists)
+}
+
+// TestRunSpawnActivationHonorsCallerContext verifies the wait on an in-flight
+// spawn is context-aware: a waiter whose context is canceled stops waiting with
+// ctx.Err() instead of blocking until the winner finishes, an already-done
+// context is rejected without starting or joining a flight, and in both cases
+// the caller's own spawn function never runs.
+func TestRunSpawnActivationHonorsCallerContext(t *testing.T) {
+	x := new(actorSystem)
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	winnerDone := make(chan struct{})
+	go func() {
+		defer close(winnerDone)
+		_, _ = x.runSpawnActivation(context.Background(), "key", func() (*PID, error) {
+			close(started)
+			<-release
+			return nil, nil
+		})
+	}()
+	<-started
+
+	// a waiter abandons the in-flight spawn when its own context is canceled
+	ctx, cancel := context.WithCancel(context.Background())
+	ran := atomic.NewBool(false)
+	waiterErr := make(chan error, 1)
+	go func() {
+		_, err := x.runSpawnActivation(ctx, "key", func() (*PID, error) {
+			ran.Store(true)
+			return nil, nil
+		})
+		waiterErr <- err
+	}()
+	pause.For(50 * time.Millisecond) // let the waiter join the flight
+	cancel()
+	require.ErrorIs(t, <-waiterErr, context.Canceled)
+	require.False(t, ran.Load(), "the abandoned caller's spawn function must not run")
+
+	// an already-done context is rejected upfront, while the flight is still in progress
+	_, err := x.runSpawnActivation(ctx, "key", func() (*PID, error) {
+		ran.Store(true)
+		return nil, nil
+	})
+	require.ErrorIs(t, err, context.Canceled)
+	require.False(t, ran.Load(), "the rejected caller's spawn function must not run")
+
+	close(release)
+	<-winnerDone
+}
+
+// TestRunSpawnActivationRetriesInheritedCancellation verifies a waiter does not
+// fail with a cancellation that was never its own: when the winning caller's
+// context aborts the shared spawn, a waiter whose context is still live re-runs
+// the spawn once instead of surfacing the winner's context error.
+func TestRunSpawnActivationRetriesInheritedCancellation(t *testing.T) {
+	x := new(actorSystem)
+
+	winnerCtx, winnerCancel := context.WithCancel(context.Background())
+	entered := make(chan struct{})
+	winnerDone := make(chan error, 1)
+	go func() {
+		_, err := x.runSpawnActivation(winnerCtx, "key", func() (*PID, error) {
+			close(entered)
+			// the winner's spawn is aborted by its own context
+			<-winnerCtx.Done()
+			return nil, winnerCtx.Err()
+		})
+		winnerDone <- err
+	}()
+	<-entered
+
+	// join the in-flight spawn as a waiter with a healthy context
+	reran := atomic.NewBool(false)
+	waiterDone := make(chan error, 1)
+	go func() {
+		_, err := x.runSpawnActivation(context.Background(), "key", func() (*PID, error) {
+			reran.Store(true)
+			return nil, nil
+		})
+		waiterDone <- err
+	}()
+
+	// let the waiter coalesce onto the winner's flight, then abort the winner.
+	// If the waiter joins late it simply starts its own flight, which passes too.
+	pause.For(50 * time.Millisecond)
+	winnerCancel()
+
+	require.ErrorIs(t, <-winnerDone, context.Canceled)
+	require.NoError(t, <-waiterDone)
+	require.True(t, reran.Load(), "the waiter must re-run the spawn after inheriting the winner's cancellation")
+}
+
+// spawnConcurrently runs spawn from n goroutines released simultaneously and
+// returns their results.
+func spawnConcurrently(t *testing.T, n int, spawn func() (*PID, error)) ([]*PID, []error) {
+	t.Helper()
+	var wg sync.WaitGroup
+	gate := make(chan struct{})
+	pids := make([]*PID, n)
+	errs := make([]error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-gate
+			pids[i], errs[i] = spawn()
+		}(i)
+	}
+	close(gate)
+	wg.Wait()
+	return pids, errs
+}
+
+// requireSamePID asserts every spawn succeeded, is running, and returned the
+// same PID.
+func requireSamePID(t *testing.T, pids []*PID, errs []error) {
+	t.Helper()
+	for i, pid := range pids {
+		require.NoErrorf(t, errs[i], "call %d failed", i)
+		require.NotNilf(t, pid, "call %d returned a nil pid", i)
+		require.Truef(t, pid.IsRunning(), "call %d returned a non-running pid", i)
+		require.Truef(t, pids[0].Equals(pid), "call %d returned a different pid", i)
 	}
 }

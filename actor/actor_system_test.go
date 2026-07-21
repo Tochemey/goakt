@@ -6369,7 +6369,11 @@ func TestActorSystemRun(t *testing.T) {
 	// Ensure the signal handling goroutine is ready.
 	pause.For(50 * time.Millisecond)
 
-	require.NoError(t, syscall.Kill(os.Getpid(), syscall.SIGINT))
+	// os.Process.Signal (unlike syscall.Kill) compiles on Windows, where this
+	// test is skipped at runtime.
+	proc, err := os.FindProcess(os.Getpid())
+	require.NoError(t, err)
+	require.NoError(t, proc.Signal(syscall.SIGINT))
 
 	require.Eventually(t, func() bool {
 		select {

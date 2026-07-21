@@ -87,6 +87,22 @@ func setupReSpawnClusterTest(t *testing.T) (*mockcluster.Cluster, *mocksremote.C
 	return clusterMock, remotingMock, system
 }
 
+// countingActor counts how many distinct instances actually start, so a test can
+// assert that racing spawns produced a single live actor. Instances share the
+// counter through a pointer.
+type countingActor struct {
+	starts *atomic.Int64
+}
+
+var _ Actor = (*countingActor)(nil)
+
+func (a *countingActor) PreStart(*Context) error {
+	a.starts.Add(1)
+	return nil
+}
+func (a *countingActor) PostStop(*Context) error { return nil }
+func (a *countingActor) Receive(*ReceiveContext) {}
+
 type MockSubscriber struct {
 	counter *atomic.Int64
 }

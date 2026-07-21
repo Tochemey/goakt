@@ -38,6 +38,7 @@ import (
 	"github.com/tochemey/goakt/v4/discovery"
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/address"
+	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	inet "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
@@ -2730,5 +2731,40 @@ func TestRelocateBatchHandler(t *testing.T) {
 		require.Len(t, response.GetFailures(), 1)
 		assert.Equal(t, "kind/lazy-fail", response.GetFailures()[0].GetId())
 		assert.True(t, response.GetFailures()[0].GetGrain())
+	})
+}
+
+// TestSpawnErrorToProto verifies the proto-code mapping applied to spawn failures
+// returned to remote (leader-delegated) spawn callers. Transient cluster-membership
+// conditions must be serialized as CODE_UNAVAILABLE — which the client decodes into
+// ErrRemoteSendFailure, a retryable error for shouldRetrySpawnSingleton — and never
+// flattened into CODE_INTERNAL_ERROR, which would make a SpawnSingleton delegated
+// during membership churn fail terminally.
+func TestSpawnErrorToProto(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		code internalpb.Code
+	}{
+		{name: "actor already exists", err: gerrors.ErrActorAlreadyExists, code: internalpb.Code_CODE_ALREADY_EXISTS},
+		{name: "singleton already exists", err: gerrors.ErrSingletonAlreadyExists, code: internalpb.Code_CODE_ALREADY_EXISTS}, //nolint:staticcheck // old-version hosts still emit it
+		{name: "write quorum", err: fmt.Errorf("spawn: %w", gerrors.ErrWriteQuorum), code: internalpb.Code_CODE_UNAVAILABLE},
+		{name: "leader not found", err: fmt.Errorf("spawn: %w", gerrors.ErrLeaderNotFound), code: internalpb.Code_CODE_UNAVAILABLE},
+		{name: "engine not running", err: fmt.Errorf("spawn: %w", cluster.ErrEngineNotRunning), code: internalpb.Code_CODE_UNAVAILABLE},
+		{name: "no role members", err: fmt.Errorf("spawn: %w", errNoRoleMembers{role: "worker"}), code: internalpb.Code_CODE_UNAVAILABLE},
+		{name: "arbitrary error", err: errors.New("boom"), code: internalpb.Code_CODE_INTERNAL_ERROR},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := spawnErrorToProto(tc.err)
+			require.Equal(t, tc.code, got.GetCode())
+			require.NotEmpty(t, got.GetMessage())
+		})
+	}
+
+	t.Run("quorum errors are normalized before serialization", func(t *testing.T) {
+		got := spawnErrorToProto(fmt.Errorf("spawn: %w", gerrors.ErrWriteQuorum))
+		require.Equal(t, gerrors.ErrWriteQuorum.Error(), got.GetMessage())
 	})
 }

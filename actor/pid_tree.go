@@ -28,6 +28,11 @@ import (
 	"sync/atomic"
 )
 
+// errNodeAlreadyExists reports that a PID with the same ID is already
+// registered in the tree. completeSpawn relies on this sentinel to detect a
+// duplicate insertion and return the canonical instance instead.
+var errNodeAlreadyExists = errors.New("pid already exists")
+
 // pidNode represents a node in the PID tree.
 // Most fields are protected by the owning tree's mutex.
 // The pid field uses an atomic pointer because pidNode references may be
@@ -156,7 +161,7 @@ func (x *tree) addNodeLocked(parent, pid *PID) error {
 
 	id := pid.ID()
 	if _, exists := x.pids[id]; exists {
-		return errors.New("pid already exists")
+		return errNodeAlreadyExists
 	}
 
 	parentID := parent.ID()

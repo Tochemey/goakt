@@ -4,6 +4,9 @@ on:
     branches:
       - main
   pull_request:
+    # ready_for_review is not a default activity type: list it (plus the
+    # defaults) so marking a draft PR ready also starts a run.
+    types: [opened, synchronize, reopened, ready_for_review]
     branches:
       - main
 

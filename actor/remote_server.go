@@ -79,6 +79,33 @@ func toProtoError(code internalpb.Code, err error) *internalpb.Error {
 	}
 }
 
+// spawnErrorToProto maps a spawn failure to the proto error returned to a remote
+// spawn caller (remoteSpawnHandler).
+//
+// Transient cluster-membership conditions — quorum failures, no leader elected
+// yet, the cluster engine not (yet) running, or no members carrying the requested
+// role — are serialized as CODE_UNAVAILABLE. The delegating caller decodes that
+// code into ErrRemoteSendFailure, which its singleton retry loop
+// (shouldRetrySpawnSingleton) recognizes as retryable. Serializing them as
+// CODE_INTERNAL_ERROR instead would flatten them into an opaque, terminal error,
+// making a SpawnSingleton delegated during membership churn (e.g. a rolling
+// restart) fail permanently rather than retry within its configured budget.
+func spawnErrorToProto(err error) *internalpb.Error {
+	switch {
+	case errors.Is(err, gerrors.ErrActorAlreadyExists),
+		errors.Is(err, gerrors.ErrSingletonAlreadyExists): //nolint:staticcheck // old-version hosts still emit it during a rolling upgrade
+		return toProtoError(internalpb.Code_CODE_ALREADY_EXISTS, err)
+	case cluster.IsQuorumError(err):
+		return toProtoError(internalpb.Code_CODE_UNAVAILABLE, cluster.NormalizeQuorumError(err))
+	case errors.Is(err, gerrors.ErrLeaderNotFound),
+		errors.Is(err, cluster.ErrEngineNotRunning),
+		isNoRoleMembersError(err):
+		return toProtoError(internalpb.Code_CODE_UNAVAILABLE, err)
+	default:
+		return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err)
+	}
+}
+
 // extractContextWithPropagator extracts metadata from the proto TCP context and applies
 // the configured ContextPropagator to enrich it with distributed tracing, auth, and other
 // cross-cutting concerns.
@@ -596,16 +623,6 @@ func (x *actorSystem) remoteSpawnHandler(ctx context.Context, conn inet.Connecti
 		return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
 	}
 
-	wrapSpawnErr := func(err error) proto.Message {
-		if errors.Is(err, gerrors.ErrActorAlreadyExists) || errors.Is(err, gerrors.ErrSingletonAlreadyExists) { //nolint:staticcheck // old-version hosts still emit it during a rolling upgrade
-			return toProtoError(internalpb.Code_CODE_ALREADY_EXISTS, err)
-		}
-		if cluster.IsQuorumError(err) {
-			return toProtoError(internalpb.Code_CODE_UNAVAILABLE, cluster.NormalizeQuorumError(err))
-		}
-		return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err)
-	}
-
 	if request.GetSingleton() != nil {
 		// Define singleton options
 		singletonOpts := []ClusterSingletonOption{
@@ -621,7 +638,7 @@ func (x *actorSystem) remoteSpawnHandler(ctx context.Context, conn inet.Connecti
 		pid, err := x.SpawnSingleton(ctx, request.GetActorName(), actor, singletonOpts...)
 		if err != nil {
 			logger.Errorf("failed to create actor (%s) on host=%s port=%d: %v (hint: check cluster quorum, singleton config)", request.GetActorName(), request.GetHost(), request.GetPort(), err)
-			return wrapSpawnErr(err), nil
+			return spawnErrorToProto(err), nil
 		}
 
 		logger.Debugf("actor=%s host=%s port=%d actor created successfully", request.GetActorName(), request.GetHost(), request.GetPort())
@@ -668,7 +685,7 @@ func (x *actorSystem) remoteSpawnHandler(ctx context.Context, conn inet.Connecti
 	pid, err := x.Spawn(ctx, request.GetActorName(), actor, opts...)
 	if err != nil {
 		logger.Errorf("failed to create actor (%s) on host=%s port=%d: %v (hint: verify actor type registered, check dependencies)", request.GetActorName(), request.GetHost(), request.GetPort(), err)
-		return wrapSpawnErr(err), nil
+		return spawnErrorToProto(err), nil
 	}
 
 	logger.Debugf("actor=%s created on host=%s port=%d", request.GetActorName(), request.GetHost(), request.GetPort())
