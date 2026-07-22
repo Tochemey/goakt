@@ -56,7 +56,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-go@v6
         with:
-          go-version: "1.26.4"
+          go-version: "1.26.5"
           check-latest: false
           cache-dependency-path: "**/*.sum"
       - uses: actions/cache@v6
@@ -125,7 +125,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-go@v6
         with:
-          go-version: "1.26.4"
+          go-version: "1.26.5"
           check-latest: false
           cache-dependency-path: "**/*.sum"
       - run: go version
