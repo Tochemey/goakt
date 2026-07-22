@@ -31,6 +31,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/internal/validation"
 	"github.com/tochemey/goakt/v4/remote"
+	gtls "github.com/tochemey/goakt/v4/tls"
 )
 
 type NodeOption func(*Node)
@@ -45,17 +46,21 @@ func WithWeight(weight float64) NodeOption {
 // WithRemoteConfig sets the remote config to be used by the node
 func WithRemoteConfig(config *remote.Config) NodeOption {
 	return func(n *Node) {
-		opts := []remoteclient.ClientOption{
-			remoteclient.WithClientCompression(config.Compression()),
-			remoteclient.WithClientIdleTimeout(config.IdleTimeout()),
-			remoteclient.WithClientMaxIdleConns(config.MaxIdleConns()),
-			remoteclient.WithClientDialTimeout(config.DialTimeout()),
-			remoteclient.WithClientKeepAlive(config.KeepAlive()),
-		}
-		// Forward user-defined serializers so the node's outbound client uses
-		// the same serializers as the server-side Config.
-		opts = append(opts, remoteclient.ClientSerializerOptions(config)...)
-		n.remoting = remoteclient.NewClient(opts...)
+		n.remoteConfig = config
+	}
+}
+
+// WithTLS sets the TLS configuration used by the node to connect to a
+// TLS-enabled actor system. Only the ClientConfig field of the provided
+// tls.Info is used because the node only dials remote actor systems; it
+// never accepts connections.
+//
+// Ensure that the ClientConfig chains to the same root Certificate
+// Authority (CA) as the target actor systems, otherwise the TLS
+// handshake fails.
+func WithTLS(info *gtls.Info) NodeOption {
+	return func(n *Node) {
+		n.tlsInfo = info
 	}
 }
 
@@ -66,23 +71,51 @@ type Node struct {
 	weight  float64
 	mutex   sync.RWMutex
 
-	remoting remoteclient.Client
+	remoteConfig *remote.Config
+	tlsInfo      *gtls.Info
+	remoting     remoteclient.Client
 }
 
 // NewNode creates an instance of Node
 // nolint
 func NewNode(address string, opts ...NodeOption) *Node {
 	node := &Node{
-		address:  address,
-		remoting: remoteclient.NewClient(),
-		weight:   0,
+		address: address,
+		weight:  0,
 	}
 
 	for _, opt := range opts {
 		opt(node)
 	}
 
+	node.remoting = node.buildRemoteClient()
 	return node
+}
+
+// buildRemoteClient constructs the node remoting client from the recorded
+// remote configuration and TLS settings once all the node options are applied.
+func (n *Node) buildRemoteClient() remoteclient.Client {
+	var opts []remoteclient.ClientOption
+
+	if config := n.remoteConfig; config != nil {
+		opts = append(opts,
+			remoteclient.WithClientCompression(config.Compression()),
+			remoteclient.WithClientIdleTimeout(config.IdleTimeout()),
+			remoteclient.WithClientMaxIdleConns(config.MaxIdleConns()),
+			remoteclient.WithClientDialTimeout(config.DialTimeout()),
+			remoteclient.WithClientKeepAlive(config.KeepAlive()),
+		)
+
+		// Forward user-defined serializers so the node's outbound client uses
+		// the same serializers as the server-side Config.
+		opts = append(opts, remoteclient.ClientSerializerOptions(config)...)
+	}
+
+	if n.tlsInfo != nil && n.tlsInfo.ClientConfig != nil {
+		opts = append(opts, remoteclient.WithClientTLS(n.tlsInfo.ClientConfig))
+	}
+
+	return remoteclient.NewClient(opts...)
 }
 
 var _ validation.Validator = (*Node)(nil)

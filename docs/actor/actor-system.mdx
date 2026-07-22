@@ -125,7 +125,7 @@ Options are passed to `NewActorSystem(name, opts...)`. Each option is documented
 | **Remoting & cluster**                     |                                                                                                   |
 | `WithRemote(config)`                       | Enable remoting. See [Remoting](/advanced/remoting).                                              |
 | `WithCluster(config)`                      | Enable clustering. See [Clustered](/clustering/clustered).                                        |
-| `WithTLS(info)`                            | TLS for remoting.                                                                                 |
+| `WithTLS(info)`                            | TLS for remoting and cluster transports. See [TLS](/advanced/remoting#tls).                       |
 | `WithoutRelocation()`                      | Disable actor relocation on node departure.                                                       |
 | **Extensions & capabilities**              |                                                                                                   |
 | `WithExtensions(ext...)`                   | System-wide extensions. See [Extensions and Dependencies](/advanced/extensions-and-dependencies). |
@@ -135,7 +135,7 @@ Options are passed to `NewActorSystem(name, opts...)`. Each option is documented
 | `WithCoordinatedShutdown(hooks...)`        | Shutdown hooks. See [Coordinated Shutdown](/advanced/coordinated-shutdown).                       |
 | `WithEvictionStrategy(strategy, interval)` | Passivation when actor count exceeds limit.                                                       |
 | **Advanced**                               |                                                                                                   |
-| `WithPartitionHasher(hasher)`              | Custom partition hasher for cluster placement.                                                    |
+| `WithPartitionHasher(hasher)`              | Custom partition hasher for cluster placement. See [Partition Hashing](/clustering/partition-hashing). |
 
 ## Component relationships
 

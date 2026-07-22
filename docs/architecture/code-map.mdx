@@ -145,43 +145,43 @@ See [Dispatcher Pool](/architecture/dispatcher-pool) for the full design.
 
 Pure CRDT data types and replication configuration — **no** import of `actor`. User and Replicator code interact via `crdt` messages and `ReplicatedData` values. See [Distributed data](/advanced/distributed-data) and the repository [`architecture/CRDTs.md`](https://github.com/tochemey/goakt/blob/main/architecture/CRDTs.md).
 
-| File                                                                                                    | Purpose                                                                       |
-| ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| `crdt.go`, `key.go`                                                                                     | `ReplicatedData`, keys, `DataType`                                            |
-| `config.go`, `consistency.go`                                                                           | `Config`, options, optional read/write coordination                           |
-| `messages.go`                                                                                           | Replicator messages (`Get`, `Update`, `Subscribe`, `Delete`, `Changed`, …)    |
-| `gcounter.go`, `pncounter.go`, `lww_register.go`, `mv_register.go`, `or_set.go`, `or_map.go`, `flag.go` | CRDT implementations                                                          |
+| File                                                                                                    | Purpose                                                                    |
+| ------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `crdt.go`, `key.go`                                                                                     | `ReplicatedData`, keys, `DataType`                                         |
+| `config.go`, `consistency.go`                                                                           | `Config`, options, optional read/write coordination                        |
+| `messages.go`                                                                                           | Replicator messages (`Get`, `Update`, `Subscribe`, `Delete`, `Changed`, …) |
+| `gcounter.go`, `pncounter.go`, `lww_register.go`, `mv_register.go`, `or_set.go`, `or_map.go`, `flag.go` | CRDT implementations                                                       |
 
 ## `stream/`
 
 Reactive pipelines (`Source`, `Flow`, `Sink` → `RunnableGraph`) materialized onto an `ActorSystem` with backpressure. See [Streams](/advanced/streams) and the repository [`architecture/REACTIVE_STREAMS.md`](https://github.com/tochemey/goakt/blob/main/architecture/REACTIVE_STREAMS.md).
 
-| File                                                                                 | Purpose                                                         |
-| ------------------------------------------------------------------------------------ | --------------------------------------------------------------- |
-| `stream.go`, `graph.go`, `graph_builder.go`, `pipeline.go`, `materializer.go`        | Graph construction and `Run`                                     |
-| `source.go`, `flow.go`, `sink.go`                                                    | Stream building blocks                                           |
-| `handle.go`, `metrics.go`, `tracer.go`                                               | `StreamHandle`, metrics, per-stage tracing hooks                 |
-| `protocol.go`, `queue.go`, `overflow.go`                                             | Wire protocol, GC-safe FIFO queue, overflow strategies           |
-| `config.go`, `errors.go`                                                             | Stage configuration and sentinel errors                          |
-| `stage_source.go`, `stage_flow.go`, `stage_sink.go`                                  | Stage actor implementations                                      |
-| `stage_balance.go`, `stage_broadcast.go`, `stage_parallel.go`, `stage_coordinator.go`| Fan-in/fan-out, parallel map, stream coordinator                 |
+| File                                                                                  | Purpose                                                |
+| ------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| `stream.go`, `graph.go`, `graph_builder.go`, `pipeline.go`, `materializer.go`         | Graph construction and `Run`                           |
+| `source.go`, `flow.go`, `sink.go`                                                     | Stream building blocks                                 |
+| `handle.go`, `metrics.go`, `tracer.go`                                                | `StreamHandle`, metrics, per-stage tracing hooks       |
+| `protocol.go`, `queue.go`, `overflow.go`                                              | Wire protocol, GC-safe FIFO queue, overflow strategies |
+| `config.go`, `errors.go`                                                              | Stage configuration and sentinel errors                |
+| `stage_source.go`, `stage_flow.go`, `stage_sink.go`                                   | Stage actor implementations                            |
+| `stage_balance.go`, `stage_broadcast.go`, `stage_parallel.go`, `stage_coordinator.go` | Fan-in/fan-out, parallel map, stream coordinator       |
 
 ## `remote/`
 
 Configuration, serializers, and wire helpers for the remoting layer. The remoting server lives at `actor/remote_server.go`; the remoting client lives at `internal/remoteclient/`.
 
-| File                    | Purpose                                                              |
-| ----------------------- | -------------------------------------------------------------------- |
-| `config.go`, `option.go`| Remoting `Config`: host, port, TLS, compression, batching, …        |
-| `serializer.go`         | `Serializer` interface and registry                                  |
-| `proto_serializer.go`   | Default protobuf serializer                                          |
-| `cbor_serializer.go`    | CBOR serializer for non-proto messages                               |
-| `compression.go`        | Message compression (gzip, brotli, zstd)                             |
-| `context_propagator.go` | Context metadata propagation across remote calls                     |
-| `peer.go`               | Remote peer addressing                                               |
-| `spawn_request.go`      | Remote spawn request payload                                         |
-| `grain_request.go`      | Remote grain request payload                                         |
-| `actor_state.go`        | Actor state for relocation                                           |
+| File                     | Purpose                                                      |
+| ------------------------ | ------------------------------------------------------------ |
+| `config.go`, `option.go` | Remoting `Config`: host, port, TLS, compression, batching, … |
+| `serializer.go`          | `Serializer` interface and registry                          |
+| `proto_serializer.go`    | Default protobuf serializer                                  |
+| `cbor_serializer.go`     | CBOR serializer for non-proto messages                       |
+| `compression.go`         | Message compression (gzip, brotli, zstd)                     |
+| `context_propagator.go`  | Context metadata propagation across remote calls             |
+| `peer.go`                | Remote peer addressing                                       |
+| `spawn_request.go`       | Remote spawn request payload                                 |
+| `grain_request.go`       | Remote grain request payload                                 |
+| `actor_state.go`         | Actor state for relocation                                   |
 
 ## `discovery/`
 
@@ -212,49 +212,49 @@ Pluggable service discovery. Each sub-package implements `discovery.Provider`:
 
 Standalone cluster client for callers outside the actor system. See [Client](/advanced/client) for full documentation.
 
-| File             | Purpose                                                          |
-| ---------------- | ---------------------------------------------------------------- |
-| `client.go`      | `Client`: Tell, Ask, Spawn, SendSync, ReSpawn, Stop              |
-| `option.go`      | `Option` for `NewClient` (TLS, balancer, refresh, reentrancy, …) |
-| `node.go`        | `Node` — cluster-member endpoint metadata                        |
-| `balancer.go`    | `Balancer` interface                                             |
-| `round_robin.go` | Round-robin node selection                                       |
-| `random.go`      | Random node selection                                            |
-| `least_load.go`  | Least-loaded node selection                                      |
+| File             | Purpose                                                        |
+| ---------------- | -------------------------------------------------------------- |
+| `client.go`      | `Client`: Tell, Ask, Spawn, SendSync, ReSpawn, Stop            |
+| `option.go`      | `Option` for `NewClient` (balancer strategy, refresh interval) |
+| `node.go`        | `Node` — cluster-member endpoint; `WithRemoteConfig`, `WithTLS` |
+| `balancer.go`    | `Balancer` interface                                           |
+| `round_robin.go` | Round-robin node selection                                     |
+| `random.go`      | Random node selection                                          |
+| `least_load.go`  | Least-loaded node selection                                    |
 
 ## Internal packages
 
-| Package                          | Purpose                                                           |
-| -------------------------------- | ----------------------------------------------------------------- |
-| `internal/address/`              | Address type; parsing, formatting, path operations                |
-| `internal/cluster/`              | Cluster membership, Olric, actor/grain registry, peer state store |
+| Package                          | Purpose                                                                    |
+| -------------------------------- | -------------------------------------------------------------------------- |
+| `internal/address/`              | Address type; parsing, formatting, path operations                         |
+| `internal/cluster/`              | Cluster membership, Olric, actor/grain registry, peer state store          |
 | `internal/remoteclient/`         | TCP client for remoting; connection pooling, proto frames, send coalescing |
-| `internal/net/`                  | TCP server, client, frame protocol, compression                   |
-| `internal/codec/`                | Protobuf marshal/unmarshal; CRDT key helpers for wire types       |
-| `internal/ddata/`                | CRDT snapshots (BoltDB), `crdt_codec`, `crdt_serializer`          |
-| `internal/commands/`             | Command types for lifecycle (AsyncRequest, AsyncResponse, etc.)   |
-| `internal/datacentercontroller/` | DC controller; registers DC, heartbeats, cache refresh            |
-| `internal/types/`                | Registry interface; type name → factory for remote spawn          |
-| `internal/memberlist/`           | Hashicorp Memberlist wrapper (TLS transport)                      |
-| `internal/chain/`                | Middleware-style chain execution                                  |
-| `internal/future/`               | Future/promise for Ask async delivery                             |
-| `internal/timer/`                | Timer pool for timeouts                                           |
-| `internal/ticker/`               | Ticker abstraction                                                |
-| `internal/pause/`                | Cooperative pause primitive                                       |
-| `internal/duration/`             | Duration helpers                                                  |
-| `internal/locker/`               | Keyed lock / named mutex helpers                                  |
-| `internal/quorum/`               | Quorum computation for cluster writes/reads                       |
-| `internal/queue/`                | General-purpose queue primitives (distinct from `stream/queue.go`) |
-| `internal/id/`                   | Unique ID generation                                              |
-| `internal/size/`                 | Byte-size parsing and formatting                                  |
-| `internal/strconvx/`             | Extended string-conversion helpers                                |
-| `internal/xsync/`                | Atomic maps, extended sync primitives                             |
-| `internal/validation/`           | Fluent validation helpers                                         |
-| `internal/pointer/`              | Generic pointer utilities                                         |
-| `internal/metric/`               | OpenTelemetry metrics (includes Replicator instruments)           |
-| `internal/chunk/`                | Chunking utilities (e.g. for relocation allocation)               |
-| `internal/slices/`               | Slice utilities (Filter, etc.)                                    |
-| `internal/internalpb/`           | Generated protobuf Go code (wire types)                           |
+| `internal/net/`                  | TCP server, client, frame protocol, compression                            |
+| `internal/codec/`                | Protobuf marshal/unmarshal; CRDT key helpers for wire types                |
+| `internal/ddata/`                | CRDT snapshots (BoltDB), `crdt_codec`, `crdt_serializer`                   |
+| `internal/commands/`             | Command types for lifecycle (AsyncRequest, AsyncResponse, etc.)            |
+| `internal/datacentercontroller/` | DC controller; registers DC, heartbeats, cache refresh                     |
+| `internal/types/`                | Registry interface; type name → factory for remote spawn                   |
+| `internal/memberlist/`           | Hashicorp Memberlist wrapper (TLS transport)                               |
+| `internal/chain/`                | Middleware-style chain execution                                           |
+| `internal/future/`               | Future/promise for Ask async delivery                                      |
+| `internal/timer/`                | Timer pool for timeouts                                                    |
+| `internal/ticker/`               | Ticker abstraction                                                         |
+| `internal/pause/`                | Cooperative pause primitive                                                |
+| `internal/duration/`             | Duration helpers                                                           |
+| `internal/locker/`               | Keyed lock / named mutex helpers                                           |
+| `internal/quorum/`               | Quorum computation for cluster writes/reads                                |
+| `internal/queue/`                | General-purpose queue primitives (distinct from `stream/queue.go`)         |
+| `internal/id/`                   | Unique ID generation                                                       |
+| `internal/size/`                 | Byte-size parsing and formatting                                           |
+| `internal/strconvx/`             | Extended string-conversion helpers                                         |
+| `internal/xsync/`                | Atomic maps, extended sync primitives                                      |
+| `internal/validation/`           | Fluent validation helpers                                                  |
+| `internal/pointer/`              | Generic pointer utilities                                                  |
+| `internal/metric/`               | OpenTelemetry metrics (includes Replicator instruments)                    |
+| `internal/chunk/`                | Chunking utilities (e.g. for relocation allocation)                        |
+| `internal/slices/`               | Slice utilities (Filter, etc.)                                             |
+| `internal/internalpb/`           | Generated protobuf Go code (wire types)                                    |
 
 ## `protos/`
 

@@ -96,6 +96,16 @@ For cluster peer discovery. See [Extending GoAkt](/contributing/extending#discov
 
 For custom passivation behavior. See [Passivation](/actor/passivation#strategies).
 
+## Hasher
+
+```go
+type Hasher interface {
+    HashCode(key []byte) uint64
+}
+```
+
+Hash function for cluster partition placement (`WithPartitionHasher`) and consistent-hash routers (`WithConsistentHashHasher`). Default is xxh3. See [Partition Hashing](/clustering/partition-hashing).
+
 ## Path
 
 ```go

@@ -1,0 +1,93 @@
+---
+title: Partition Hashing
+description: How GoAkt hashes actor and grain identities for cluster placement, and how to plug in a custom hasher.
+sidebarTitle: "Partition Hashing"
+---
+
+## The Hasher interface
+
+GoAkt hashes keys with a pluggable function defined in the `hash` package:
+
+```go
+type Hasher interface {
+    // HashCode is responsible for generating unsigned, 64-bit hash of provided byte slice
+    HashCode(key []byte) uint64
+}
+```
+
+The default implementation, `hash.DefaultHasher()`, uses [xxh3](https://github.com/zeebo/xxh3): a fast, allocation-free, non-cryptographic hash with excellent distribution. It is used automatically; you only implement `Hasher` when you need to replace it.
+
+Two parts of the framework accept a custom `Hasher`:
+
+| Consumer                      | Option                                              | Applies in                       |
+| ----------------------------- | --------------------------------------------------- | -------------------------------- |
+| Cluster registry partitioning | `WithPartitionHasher(hasher)` (actor system option) | Cluster mode only                |
+| Consistent-hash routers       | `WithConsistentHashHasher(h)` (router option)       | Both standalone and cluster mode |
+
+## Cluster mode
+
+In cluster mode, GoAkt keeps a distributed registry of every actor, grain, and scheduled job. The registry is split into a fixed number of partitions (default 271, tunable with `ClusterConfig.WithPartitionCount`). The hasher sits at the center of this machinery, in two places:
+
+1. **Key to partition.** Every registry key (actor name, grain identity, job ID) is hashed, and the hash code modulo the partition count selects the partition that stores the record: `partition = HashCode(key) % partitionCount`.
+2. **Partition to node.** Partitions are assigned to cluster members through a consistent-hash ring built with the same hasher: each partition ID is itself hashed to position it on the ring. When nodes join or leave, only the affected partitions move.
+
+Because every node runs the same hash function, any node can compute where a record lives from the key alone.
+
+### Correlation with WithPartitionCount
+
+The hasher and `WithPartitionCount` jointly define the placement function: the hasher produces the 64-bit hash code, and the partition count buckets it. Neither is meaningful in isolation, and tuning one affects the other.
+
+```go
+clusterConfig := actor.NewClusterConfig().
+    WithDiscovery(provider).
+    WithKinds(new(AccountActor)).
+    WithPartitionCount(521) // a prime number
+```
+
+- **Use a prime count.** Modulo folds the hash's 64 bits into `partitionCount` buckets. A prime count avoids resonance between patterned hash outputs and the modulo, which matters even more when you substitute a weaker custom hasher for xxh3. The default 271 is prime; keep that property when changing it.
+- **The count sets the rebalancing granularity.** A partition is the unit of ownership and relocation: with more partitions, load spreads more evenly across members and topology changes move smaller chunks. Pick a count comfortably above the maximum number of nodes you expect, otherwise some nodes own several partitions while others sit idle.
+- **The count multiplies memory overhead.** Each partition holding data allocates its own storage table (`ClusterConfig.WithTableSize`, default 4 MB), so worst-case registry memory grows with `partitionCount x tableSize`. Very large counts buy smoother balancing at the price of baseline memory.
+- **Same consistency rule as the hasher.** All nodes must use the same partition count. Because the mapping is `hash % count`, changing the count remaps almost every key to a different partition, exactly like changing the hash function.
+
+### Benefits
+
+- **Deterministic, coordination-free lookups.** Resolving an actor by name (`ActorOf`, `SpawnOn`, grain activation) requires no directory service and no broadcast: the owner is a pure function of the key.
+- **Even data and load distribution.** A well-distributed hash spreads registry records, and therefore lookup and write traffic, uniformly across partitions and nodes.
+- **Bounded reshuffling.** Consistent hashing over partitions means a topology change relocates only the partitions owned by the affected node instead of rehashing the whole keyspace.
+
+### Setting a custom hasher
+
+```go
+system, err := actor.NewActorSystem("accounts",
+    actor.WithLogger(logger),
+    actor.WithRemote(remote.NewConfig("0.0.0.0", 8080)),
+    actor.WithCluster(clusterConfig),
+    actor.WithPartitionHasher(myHasher{}),
+)
+```
+
+A custom partition hasher must satisfy all of the following:
+
+- **Deterministic and stable.** The same byte slice must produce the same hash code on every node, across process restarts, Go versions, and CPU architectures. Never use a per-process random seed (for example `hash/maphash` with a random seed).
+- **Identical cluster-wide.** Every node must be configured with the same hasher. Nodes with different hashers disagree on partition ownership, and registry reads and writes silently miss each other.
+- **Uniform.** A skewed hash concentrates keys in a few partitions and turns the nodes owning them into hot spots.
+- **Fast.** The hasher runs on every registry read and write; prefer allocation-free implementations.
+
+<Warning>
+Changing the partition hasher or the partition count is a topology-breaking change. During a rolling restart, old and new nodes would compute different owners for the same keys. Deploy either change only with a full cluster stop and restart.
+</Warning>
+
+<Note>
+Keep the default xxh3 hasher unless you have a measured reason not to. Typical reasons to replace it are matching the placement scheme of an external system that pre-computes the same hashes, or complying with an organization-wide mandated hash function.
+</Note>
+
+## Non-cluster (standalone) mode
+
+In standalone mode there is no distributed registry and no partitions, so `WithPartitionHasher` has no effect. It is safe to set (useful when the same configuration code path serves both modes), but the hasher is never invoked.
+
+Hashing still matters in one place: **consistent-hash routers**. A router configured with `WithConsistentHashRouter(extractor)` builds a local hash ring over its routees using the same `hash.Hasher` interface, replaceable with `WithConsistentHashHasher(h)`. Messages carrying the same routing key always land on the same routee, which gives you:
+
+- **Sticky, per-key processing.** All messages for one entity (an order, a session, a device) are handled by one routee, preserving per-key ordering.
+- **Cache locality.** A routee accumulates state for the keys it owns instead of every routee holding everything.
+
+Routers work identically in standalone and cluster mode; the ring only spans the router's local routees. See [Routers](/actor/routers) for configuration details.

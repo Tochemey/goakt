@@ -5,6 +5,7 @@
 ### ✨ Features
 
 - **`WithSingletonSupervisor` configures singleton actor supervision** ([#1278](https://github.com/Tochemey/goakt/issues/1278)). Singletons previously used a fixed internal supervisor that could not be overridden. `SpawnSingleton` now accepts a caller-provided supervisor, which applies on whichever node hosts the singleton and survives delegation and relocation. A `RestartDirective` restarts the singleton in place; relocation still only happens when the host node leaves. Without the option, the default behavior is unchanged: stop on panics and internal errors.
+- **The standalone client can now connect to TLS-enabled clusters.** The `client` package had no way to supply TLS credentials: its nodes always dialed in plaintext, so an actor system started with `WithTLS` was unreachable from the standalone client. The new node option `client.WithTLS(*tls.Info)` sets the TLS configuration used to dial the target nodes. Only the `ClientConfig` field is used, since the client never accepts connections, and it must chain to the same root CA as the cluster. As part of this, node options are no longer order-sensitive: `WithRemoteConfig` and `WithTLS` only record their settings, and the node's remoting client is built once after all options are applied.
 
 ### 🔧 Fixes
 

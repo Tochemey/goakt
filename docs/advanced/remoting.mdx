@@ -35,10 +35,105 @@ Create a `remote.Config` with `remote.NewConfig(bindAddr, bindPort, opts...)`. T
 ## Transport
 
 - Length-prefixed TCP frames
-- Optional TLS
+- Optional TLS (see [TLS](#tls))
 - Compression: None, Gzip, Zstd (default), Brotli
 
-## Messaging across nodes
+## TLS
+
+TLS is enabled with the actor system option `WithTLS`, not on `remote.Config`. It takes a `tls.Info` from the GoAkt `tls` package, which carries a standard `crypto/tls` configuration for each side of a connection:
+
+```go
+type Info struct {
+    ClientConfig *tls.Config // used for outbound connections
+    ServerConfig *tls.Config // used by listeners accepting connections
+}
+```
+
+Both fields must be set; `Start` fails with `ErrInvalidTLSConfiguration` when either is nil. Every node dials other nodes and accepts connections from them, so each node is always both a client and a server.
+
+### What gets encrypted
+
+One `WithTLS` call covers every transport the node opens:
+
+| Channel                                                     | Port           | Mode         |
+| ----------------------------------------------------------- | -------------- | ------------ |
+| Remoting server and all outbound remoting clients           | remoting port  | always       |
+| Cluster engine traffic (registry reads/writes, replication) | peers port     | cluster mode |
+| Membership gossip (memberlist transport)                    | discovery port | cluster mode |
+
+There is no per-channel opt-out: a node either runs fully encrypted or fully in plaintext.
+
+### Enabling TLS
+
+```go
+package main
+
+import (
+    "crypto/tls"
+    "crypto/x509"
+    "os"
+
+    "github.com/tochemey/goakt/v4/actor"
+    "github.com/tochemey/goakt/v4/remote"
+    gtls "github.com/tochemey/goakt/v4/tls"
+)
+
+func main() {
+    caPEM, err := os.ReadFile("ca.pem")
+    if err != nil {
+        panic(err)
+    }
+
+    caPool := x509.NewCertPool()
+    caPool.AppendCertsFromPEM(caPEM)
+
+    cert, err := tls.LoadX509KeyPair("node.pem", "node-key.pem")
+    if err != nil {
+        panic(err)
+    }
+
+    info := &gtls.Info{
+        ServerConfig: &tls.Config{
+            Certificates: []tls.Certificate{cert},
+            ClientCAs:    caPool,
+            ClientAuth:   tls.RequireAndVerifyClientCert, // enforce mTLS
+        },
+        ClientConfig: &tls.Config{
+            Certificates: []tls.Certificate{cert},
+            RootCAs:      caPool,
+        },
+    }
+
+    remoteConfig, err := remote.NewConfig("0.0.0.0", 8080)
+    if err != nil {
+        panic(err)
+    }
+
+    system, err := actor.NewActorSystem("secure-system",
+        actor.WithRemote(remoteConfig),
+        actor.WithTLS(info),
+    )
+    if err != nil {
+        panic(err)
+    }
+
+    _ = system
+}
+```
+
+### Mutual TLS
+
+GoAkt passes your `tls.Config` values through unchanged, so mutual TLS is a matter of standard `crypto/tls` settings, as in the example above: the server sets `ClientCAs` and `ClientAuth: tls.RequireAndVerifyClientCert`, and the client presents its own certificate in `Certificates`. Without those, you get server-only TLS: traffic is encrypted and clients authenticate the server, but any client can connect.
+
+### Cluster requirements
+
+- **Same root CA everywhere.** All nodes must trust the same CA, and every certificate must chain to it, otherwise handshakes between nodes fail.
+- **All nodes or none.** TLS and plaintext nodes cannot talk to each other. Enabling TLS on a running plaintext cluster (or the reverse) is a full-restart change, not a rolling one.
+- **Certificate names must match how nodes address each other.** Nodes dial each other by the advertised host, so certificates need that host in their SANs, or the client config must relax verification.
+
+<Note>
+Discovery providers (Consul, etcd, Kubernetes, NATS) talk to their own backends and secure those connections through their own provider-specific configuration; `WithTLS` does not apply to them. The standalone [Client](/advanced/client) package connects to a TLS-enabled cluster through its own node-level `WithTLS` option.
+</Note>
 
 Once remoting is configured, `ActorOf(ctx, name)` returns a `*PID` whether the actor is local or remote. Use `Tell` and `Ask` as usual; the framework routes remote messages automatically. No code changes are needed for remote vs local.
 

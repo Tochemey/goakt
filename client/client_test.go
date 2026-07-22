@@ -24,12 +24,14 @@ package client
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net"
 	"strconv"
 	"testing"
 	"time"
 
+	"github.com/kapetan-io/tackle/autotls"
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -48,6 +50,7 @@ import (
 	mockremote "github.com/tochemey/goakt/v4/mocks/remoteclient"
 	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
+	gtls "github.com/tochemey/goakt/v4/tls"
 )
 
 func TestNewReturnsErrorWithNoNodes(t *testing.T) {
@@ -1710,6 +1713,118 @@ func TestClient(t *testing.T) {
 	})
 }
 
+func TestClientTLS(t *testing.T) {
+	t.Run("With TLS-enabled cluster", func(t *testing.T) {
+		ctx := context.TODO()
+		logger := log.DiscardLogger
+
+		// AutoGenerate TLS certs
+		conf := autotls.Config{
+			AutoTLS:            true,
+			ClientAuth:         tls.RequireAndVerifyClientCert,
+			InsecureSkipVerify: true,
+		}
+		require.NoError(t, autotls.Setup(&conf))
+
+		tlsInfo := &gtls.Info{
+			ClientConfig: conf.ClientTLS,
+			ServerConfig: conf.ServerTLS,
+		}
+
+		// start the NATS server
+		srv := startNatsServer(t)
+		addr := srv.Addr().String()
+		compression := remote.NoCompression
+
+		sys1, node1Host, node1Port, sd1 := startNodeWithTLS(t, logger, "node1", addr, compression, tlsInfo)
+		sys2, node2Host, node2Port, sd2 := startNodeWithTLS(t, logger, "node2", addr, compression, tlsInfo)
+
+		// wait for a proper and clean setup of the cluster
+		pause.For(time.Second)
+
+		addresses := []string{
+			fmt.Sprintf("%s:%d", node1Host, node1Port),
+			fmt.Sprintf("%s:%d", node2Host, node2Port),
+		}
+
+		nodes := make([]*Node, len(addresses))
+
+		for i, addr := range addresses {
+			nodes[i] = NewNode(addr,
+				WithRemoteConfig(remote.NewConfig("127.0.0.1", 0, remote.WithCompression(compression))),
+				WithTLS(tlsInfo),
+			)
+		}
+
+		client, err := New(ctx, nodes)
+		require.NoError(t, err)
+		require.NotNil(t, client)
+
+		kinds, err := client.Kinds(ctx)
+		require.NoError(t, err)
+
+		expected := []string{
+			"actor.funcactor",
+			"client.testactor",
+		}
+
+		require.ElementsMatch(t, expected, kinds)
+
+		actorName := "actorName"
+		request := &remote.SpawnRequest{
+			Kind:        "client.testactor",
+			Name:        actorName,
+			Relocatable: true,
+		}
+
+		err = client.Spawn(ctx, request)
+		require.NoError(t, err)
+
+		pause.For(time.Second)
+
+		// send a message
+		reply, err := client.Ask(ctx, actorName, new(testpb.TestReply), time.Minute)
+		require.NoError(t, err)
+		require.NotNil(t, reply)
+		expectedReply := &testpb.Reply{Content: "received message"}
+
+		actualReply, ok := reply.(*testpb.Reply)
+		require.True(t, ok)
+		assert.True(t, proto.Equal(expectedReply, actualReply))
+
+		err = client.Stop(ctx, actorName)
+		require.NoError(t, err)
+
+		// a plaintext client cannot reach the TLS-enabled cluster: node creation
+		// tolerates unreachable nodes, so the failure surfaces on the first call
+		plaintext := NewNode(addresses[0],
+			WithRemoteConfig(remote.NewConfig("127.0.0.1", 0, remote.WithCompression(compression))),
+		)
+
+		noTLSClient, err := New(ctx, []*Node{plaintext})
+		require.NoError(t, err)
+		require.NotNil(t, noTLSClient)
+
+		_, err = noTLSClient.Kinds(ctx)
+		require.Error(t, err)
+		noTLSClient.Close()
+
+		t.Cleanup(
+			func() {
+				client.Close()
+
+				require.NoError(t, sys1.Stop(ctx))
+				require.NoError(t, sys2.Stop(ctx))
+
+				require.NoError(t, sd1.Close())
+				require.NoError(t, sd2.Close())
+
+				srv.Shutdown()
+				pause.For(time.Second)
+			})
+	})
+}
+
 func TestRefreshNodesLoopPanics(t *testing.T) {
 	client := &Client{
 		refreshInterval: 0,
@@ -1746,6 +1861,10 @@ func startNatsServer(t *testing.T) *natsserver.Server {
 }
 
 func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string, compression remote.Compression) (system actors.ActorSystem, remotingHost string, remotingPort int, provider discovery.Provider) {
+	return startNodeWithTLS(t, logger, nodeName, serverAddr, compression, nil)
+}
+
+func startNodeWithTLS(t *testing.T, logger log.Logger, nodeName, serverAddr string, compression remote.Compression, tlsInfo *gtls.Info) (system actors.ActorSystem, remotingHost string, remotingPort int, provider discovery.Provider) {
 	ctx := context.TODO()
 
 	// generate the ports for the single startNode
@@ -1788,13 +1907,18 @@ func startNode(t *testing.T, logger log.Logger, nodeName, serverAddr string, com
 		WithMinimumPeersQuorum(1).
 		WithPartitionCount(7)
 
-	// create the actor system
-	system, err := actors.NewActorSystem(
-		actorSystemName,
+	options := []actors.Option{
 		actors.WithLogger(logger),
 		actors.WithRemote(remote.NewConfig(host, remotePort, remote.WithCompression(compression))),
 		actors.WithCluster(clusterConfig),
-	)
+	}
+
+	if tlsInfo != nil {
+		options = append(options, actors.WithTLS(tlsInfo))
+	}
+
+	// create the actor system
+	system, err := actors.NewActorSystem(actorSystemName, options...)
 
 	require.NotNil(t, system)
 	require.NoError(t, err)

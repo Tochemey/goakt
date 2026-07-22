@@ -23,6 +23,7 @@
 package client
 
 import (
+	"crypto/tls"
 	"net"
 	"strconv"
 	"testing"
@@ -31,6 +32,7 @@ import (
 
 	dynaport "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/remote"
+	gtls "github.com/tochemey/goakt/v4/tls"
 )
 
 func TestNode(t *testing.T) {
@@ -73,6 +75,44 @@ func TestWithRemoteConfigForwardsSerializers(t *testing.T) {
 		// Unknown type returns nil — only the proto.Message default is registered.
 		s := node.remoteClient().Serializer(&nodeTestMsg{})
 		require.Nil(t, s)
+	})
+}
+
+func TestWithTLS(t *testing.T) {
+	ports := dynaport.Get(1)
+	address := net.JoinHostPort("127.0.0.1", strconv.Itoa(ports[0]))
+
+	t.Run("TLS config is applied to the node remoting client", func(t *testing.T) {
+		clientConfig := &tls.Config{ServerName: "127.0.0.1", MinVersion: tls.VersionTLS13}
+		node := NewNode(address, WithTLS(&gtls.Info{ClientConfig: clientConfig}))
+		require.Same(t, clientConfig, node.remoteClient().TLSConfig())
+	})
+
+	t.Run("TLS applies regardless of option order", func(t *testing.T) {
+		custom := &nodeTestSerializer{}
+		config := remote.NewConfig("127.0.0.1", 0,
+			remote.WithSerializers(new(nodeTestMsg), custom),
+		)
+		clientConfig := &tls.Config{ServerName: "127.0.0.1", MinVersion: tls.VersionTLS13}
+		info := &gtls.Info{ClientConfig: clientConfig}
+
+		tlsFirst := NewNode(address, WithTLS(info), WithRemoteConfig(config))
+		require.Same(t, clientConfig, tlsFirst.remoteClient().TLSConfig())
+		require.Same(t, custom, tlsFirst.remoteClient().Serializer(&nodeTestMsg{}))
+
+		tlsLast := NewNode(address, WithRemoteConfig(config), WithTLS(info))
+		require.Same(t, clientConfig, tlsLast.remoteClient().TLSConfig())
+		require.Same(t, custom, tlsLast.remoteClient().Serializer(&nodeTestMsg{}))
+	})
+
+	t.Run("nil info leaves the node remoting client without TLS", func(t *testing.T) {
+		node := NewNode(address, WithTLS(nil))
+		require.Nil(t, node.remoteClient().TLSConfig())
+	})
+
+	t.Run("info without client config leaves the node remoting client without TLS", func(t *testing.T) {
+		node := NewNode(address, WithTLS(&gtls.Info{}))
+		require.Nil(t, node.remoteClient().TLSConfig())
 	})
 }
 
