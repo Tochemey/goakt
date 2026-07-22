@@ -216,7 +216,7 @@ Standalone cluster client for callers outside the actor system. See [Client](/ad
 | ---------------- | -------------------------------------------------------------- |
 | `client.go`      | `Client`: Tell, Ask, Spawn, SendSync, ReSpawn, Stop            |
 | `option.go`      | `Option` for `NewClient` (balancer strategy, refresh interval) |
-| `node.go`        | `Node` — cluster-member endpoint; `WithRemoteConfig`, `WithTLS` |
+| `node.go`        | `Node` — cluster-member endpoint; `WithRemoteConfig`, `WithWeight` |
 | `balancer.go`    | `Balancer` interface                                           |
 | `round_robin.go` | Round-robin node selection                                     |
 | `random.go`      | Random node selection                                          |

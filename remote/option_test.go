@@ -32,7 +32,11 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v4/test/data/testpb"
+	gtls "github.com/tochemey/goakt/v4/tls"
 )
+
+// tlsInfo is a shared fixture for the WithTLS option test.
+var tlsInfo = &gtls.Info{}
 
 func TestOption(t *testing.T) {
 	testCases := []struct {
@@ -61,6 +65,11 @@ func TestOption(t *testing.T) {
 			expected: Config{
 				compression: GzipCompression,
 			},
+		},
+		{
+			name:     "WithTLS",
+			option:   WithTLS(tlsInfo),
+			expected: Config{tlsInfo: tlsInfo},
 		},
 	}
 

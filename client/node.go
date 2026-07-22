@@ -31,7 +31,6 @@ import (
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/internal/validation"
 	"github.com/tochemey/goakt/v4/remote"
-	gtls "github.com/tochemey/goakt/v4/tls"
 )
 
 type NodeOption func(*Node)
@@ -43,24 +42,13 @@ func WithWeight(weight float64) NodeOption {
 	}
 }
 
-// WithRemoteConfig sets the remote config to be used by the node
+// WithRemoteConfig sets the remote config to be used by the node.
+// When the config carries TLS settings (remote.WithTLS), the node uses the
+// ClientConfig field to dial the TLS-enabled actor system; the ServerConfig
+// field is ignored because the node only dials, it never accepts connections.
 func WithRemoteConfig(config *remote.Config) NodeOption {
 	return func(n *Node) {
 		n.remoteConfig = config
-	}
-}
-
-// WithTLS sets the TLS configuration used by the node to connect to a
-// TLS-enabled actor system. Only the ClientConfig field of the provided
-// tls.Info is used because the node only dials remote actor systems; it
-// never accepts connections.
-//
-// Ensure that the ClientConfig chains to the same root Certificate
-// Authority (CA) as the target actor systems, otherwise the TLS
-// handshake fails.
-func WithTLS(info *gtls.Info) NodeOption {
-	return func(n *Node) {
-		n.tlsInfo = info
 	}
 }
 
@@ -72,7 +60,6 @@ type Node struct {
 	mutex   sync.RWMutex
 
 	remoteConfig *remote.Config
-	tlsInfo      *gtls.Info
 	remoting     remoteclient.Client
 }
 
@@ -109,10 +96,10 @@ func (n *Node) buildRemoteClient() remoteclient.Client {
 		// Forward user-defined serializers so the node's outbound client uses
 		// the same serializers as the server-side Config.
 		opts = append(opts, remoteclient.ClientSerializerOptions(config)...)
-	}
 
-	if n.tlsInfo != nil && n.tlsInfo.ClientConfig != nil {
-		opts = append(opts, remoteclient.WithClientTLS(n.tlsInfo.ClientConfig))
+		if tlsInfo := config.TLS(); tlsInfo != nil && tlsInfo.ClientConfig != nil {
+			opts = append(opts, remoteclient.WithClientTLS(tlsInfo.ClientConfig))
+		}
 	}
 
 	return remoteclient.NewClient(opts...)

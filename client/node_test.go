@@ -78,40 +78,31 @@ func TestWithRemoteConfigForwardsSerializers(t *testing.T) {
 	})
 }
 
-func TestWithTLS(t *testing.T) {
+func TestNodeTLS(t *testing.T) {
 	ports := dynaport.Get(1)
 	address := net.JoinHostPort("127.0.0.1", strconv.Itoa(ports[0]))
 
-	t.Run("TLS config is applied to the node remoting client", func(t *testing.T) {
-		clientConfig := &tls.Config{ServerName: "127.0.0.1", MinVersion: tls.VersionTLS13}
-		node := NewNode(address, WithTLS(&gtls.Info{ClientConfig: clientConfig}))
-		require.Same(t, clientConfig, node.remoteClient().TLSConfig())
-	})
-
-	t.Run("TLS applies regardless of option order", func(t *testing.T) {
+	t.Run("remote config TLS is applied to the node remoting client", func(t *testing.T) {
 		custom := &nodeTestSerializer{}
+		clientConfig := &tls.Config{ServerName: "127.0.0.1", MinVersion: tls.VersionTLS13}
 		config := remote.NewConfig("127.0.0.1", 0,
 			remote.WithSerializers(new(nodeTestMsg), custom),
+			remote.WithTLS(&gtls.Info{ClientConfig: clientConfig}),
 		)
-		clientConfig := &tls.Config{ServerName: "127.0.0.1", MinVersion: tls.VersionTLS13}
-		info := &gtls.Info{ClientConfig: clientConfig}
 
-		tlsFirst := NewNode(address, WithTLS(info), WithRemoteConfig(config))
-		require.Same(t, clientConfig, tlsFirst.remoteClient().TLSConfig())
-		require.Same(t, custom, tlsFirst.remoteClient().Serializer(&nodeTestMsg{}))
-
-		tlsLast := NewNode(address, WithRemoteConfig(config), WithTLS(info))
-		require.Same(t, clientConfig, tlsLast.remoteClient().TLSConfig())
-		require.Same(t, custom, tlsLast.remoteClient().Serializer(&nodeTestMsg{}))
+		node := NewNode(address, WithRemoteConfig(config))
+		require.Same(t, clientConfig, node.remoteClient().TLSConfig())
+		require.Same(t, custom, node.remoteClient().Serializer(&nodeTestMsg{}))
 	})
 
-	t.Run("nil info leaves the node remoting client without TLS", func(t *testing.T) {
-		node := NewNode(address, WithTLS(nil))
+	t.Run("remote config without TLS leaves the node remoting client without TLS", func(t *testing.T) {
+		node := NewNode(address, WithRemoteConfig(remote.NewConfig("127.0.0.1", 0)))
 		require.Nil(t, node.remoteClient().TLSConfig())
 	})
 
-	t.Run("info without client config leaves the node remoting client without TLS", func(t *testing.T) {
-		node := NewNode(address, WithTLS(&gtls.Info{}))
+	t.Run("TLS info without client config leaves the node remoting client without TLS", func(t *testing.T) {
+		config := remote.NewConfig("127.0.0.1", 0, remote.WithTLS(&gtls.Info{}))
+		node := NewNode(address, WithRemoteConfig(config))
 		require.Nil(t, node.remoteClient().TLSConfig())
 	})
 }

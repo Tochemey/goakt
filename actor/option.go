@@ -146,6 +146,10 @@ func WithRemoteWatchTimeout(timeout time.Duration) Option {
 }
 
 // WithPartitionHasher sets the partition hasher.
+//
+// Deprecated: use ClusterConfig.WithPartitionHasher on the cluster config
+// passed to WithCluster instead. When both are set, the cluster config
+// hasher takes precedence.
 func WithPartitionHasher(hasher hash.Hasher) Option {
 	return OptionFunc(
 		func(a *actorSystem) {
@@ -198,8 +202,11 @@ func WithCoordinatedShutdown(hooks ...ShutdownHook) Option {
 // root Certificate Authority (CA) to enable successful handshake and
 // mutual authentication.
 //
-// In cluster mode, all nodesMap must share the same root CA to establish
+// In cluster mode, all nodes must share the same root CA to establish
 // secure communication and complete handshakes successfully.
+//
+// Deprecated: use remote.WithTLS on the remote.Config passed to WithRemote
+// instead. When both are set, the remote config TLS settings take precedence.
 func WithTLS(info *tls.Info) Option {
 	return OptionFunc(func(system *actorSystem) {
 		system.tlsInfo = info

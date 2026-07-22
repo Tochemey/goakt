@@ -11,7 +11,7 @@ The remoting layer enables actors on different nodes to exchange messages over T
 ## Quick example
 
 ```go
-cfg, _ := remote.NewConfig("0.0.0.0", 8080)
+cfg := remote.NewConfig("0.0.0.0", 8080)
 sys, _ := actor.NewActorSystem("my-system", actor.WithRemote(cfg))
 sys.Start(ctx)
 defer sys.Stop()
@@ -31,6 +31,7 @@ Create a `remote.Config` with `remote.NewConfig(bindAddr, bindPort, opts...)`. T
 | `WithSerializables`     | Bulk-register types with the built-in CBOR serializer |
 | `WithJSONSerializables` | Bulk-register types with the built-in JSON serializer |
 | `WithContextPropagator` | Propagate trace IDs, auth tokens, correlation IDs     |
+| `WithTLS`               | TLS settings for all node transports. See [TLS](#tls) |
 
 ## Transport
 
@@ -40,7 +41,7 @@ Create a `remote.Config` with `remote.NewConfig(bindAddr, bindPort, opts...)`. T
 
 ## TLS
 
-TLS is enabled with the actor system option `WithTLS`, not on `remote.Config`. It takes a `tls.Info` from the GoAkt `tls` package, which carries a standard `crypto/tls` configuration for each side of a connection:
+TLS is configured on the remote config with `remote.WithTLS`. It takes a `tls.Info` from the GoAkt `tls` package, which carries a standard `crypto/tls` configuration for each side of a connection:
 
 ```go
 type Info struct {
@@ -49,11 +50,15 @@ type Info struct {
 }
 ```
 
-Both fields must be set; `Start` fails with `ErrInvalidTLSConfiguration` when either is nil. Every node dials other nodes and accepts connections from them, so each node is always both a client and a server.
+For an actor system both fields must be set; `NewActorSystem` fails with `ErrInvalidTLSConfiguration` when either is nil. Every node dials other nodes and accepts connections from them, so each node is always both a client and a server. The TLS settings are validated and applied only when remoting is enabled; without remoting they are ignored.
+
+<Note>
+The actor system option `actor.WithTLS` is deprecated in favor of `remote.WithTLS`. It keeps working for existing systems, and when both are set the remote config settings take precedence.
+</Note>
 
 ### What gets encrypted
 
-One `WithTLS` call covers every transport the node opens:
+One `remote.WithTLS` call covers every transport the node opens:
 
 | Channel                                                     | Port           | Mode         |
 | ----------------------------------------------------------- | -------------- | ------------ |
@@ -104,14 +109,10 @@ func main() {
         },
     }
 
-    remoteConfig, err := remote.NewConfig("0.0.0.0", 8080)
-    if err != nil {
-        panic(err)
-    }
+    remoteConfig := remote.NewConfig("0.0.0.0", 8080, remote.WithTLS(info))
 
     system, err := actor.NewActorSystem("secure-system",
         actor.WithRemote(remoteConfig),
-        actor.WithTLS(info),
     )
     if err != nil {
         panic(err)
@@ -132,7 +133,7 @@ GoAkt passes your `tls.Config` values through unchanged, so mutual TLS is a matt
 - **Certificate names must match how nodes address each other.** Nodes dial each other by the advertised host, so certificates need that host in their SANs, or the client config must relax verification.
 
 <Note>
-Discovery providers (Consul, etcd, Kubernetes, NATS) talk to their own backends and secure those connections through their own provider-specific configuration; `WithTLS` does not apply to them. The standalone [Client](/advanced/client) package connects to a TLS-enabled cluster through its own node-level `WithTLS` option.
+Discovery providers (Consul, etcd, Kubernetes, NATS) talk to their own backends and secure those connections through their own provider-specific configuration; `remote.WithTLS` does not apply to them. The standalone [Client](/advanced/client) package picks up the TLS settings from the `remote.Config` passed to its nodes.
 </Note>
 
 Once remoting is configured, `ActorOf(ctx, name)` returns a `*PID` whether the actor is local or remote. Use `Tell` and `Ask` as usual; the framework routes remote messages automatically. No code changes are needed for remote vs local.

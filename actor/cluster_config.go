@@ -31,6 +31,7 @@ import (
 	"github.com/tochemey/goakt/v4/crdt"
 	"github.com/tochemey/goakt/v4/datacenter"
 	"github.com/tochemey/goakt/v4/discovery"
+	"github.com/tochemey/goakt/v4/hash"
 	"github.com/tochemey/goakt/v4/internal/size"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/internal/validation"
@@ -60,6 +61,7 @@ type ClusterConfig struct {
 	clusterBalancerInterval  time.Duration
 	dataCenterConfig         *datacenter.Config
 	crdtConfig               *crdt.Config
+	partitionHasher          hash.Hasher
 }
 
 type grainActivationBarrierConfig struct {
@@ -100,6 +102,21 @@ func NewClusterConfig() *ClusterConfig {
 // ref: https://medium.com/swlh/why-should-the-length-of-your-hash-table-be-a-prime-number-760ec65a75d1
 func (x *ClusterConfig) WithPartitionCount(count uint64) *ClusterConfig {
 	x.partitionCount = count
+	return x
+}
+
+// WithPartitionHasher sets the hash function used to map registry keys
+// (actor names, grain identities, job IDs) to cluster partitions.
+// Defaults to the xxh3-based hash.DefaultHasher.
+//
+// All nodes in the cluster must use the same hasher, and the hasher must be
+// deterministic and stable across restarts; otherwise nodes disagree on
+// partition ownership and registry lookups fail. A nil hasher is ignored.
+func (x *ClusterConfig) WithPartitionHasher(hasher hash.Hasher) *ClusterConfig {
+	if hasher != nil {
+		x.partitionHasher = hasher
+	}
+
 	return x
 }
 

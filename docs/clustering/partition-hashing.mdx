@@ -21,7 +21,7 @@ Two parts of the framework accept a custom `Hasher`:
 
 | Consumer                      | Option                                              | Applies in                       |
 | ----------------------------- | --------------------------------------------------- | -------------------------------- |
-| Cluster registry partitioning | `WithPartitionHasher(hasher)` (actor system option) | Cluster mode only                |
+| Cluster registry partitioning | `ClusterConfig.WithPartitionHasher(hasher)`         | Cluster mode only                |
 | Consistent-hash routers       | `WithConsistentHashHasher(h)` (router option)       | Both standalone and cluster mode |
 
 ## Cluster mode
@@ -44,6 +44,8 @@ clusterConfig := actor.NewClusterConfig().
     WithPartitionCount(521) // a prime number
 ```
 
+Both knobs live on the `ClusterConfig`, next to each other, because neither means anything without the other.
+
 - **Use a prime count.** Modulo folds the hash's 64 bits into `partitionCount` buckets. A prime count avoids resonance between patterned hash outputs and the modulo, which matters even more when you substitute a weaker custom hasher for xxh3. The default 271 is prime; keep that property when changing it.
 - **The count sets the rebalancing granularity.** A partition is the unit of ownership and relocation: with more partitions, load spreads more evenly across members and topology changes move smaller chunks. Pick a count comfortably above the maximum number of nodes you expect, otherwise some nodes own several partitions while others sit idle.
 - **The count multiplies memory overhead.** Each partition holding data allocates its own storage table (`ClusterConfig.WithTableSize`, default 4 MB), so worst-case registry memory grows with `partitionCount x tableSize`. Very large counts buy smoother balancing at the price of baseline memory.
@@ -57,14 +59,23 @@ clusterConfig := actor.NewClusterConfig().
 
 ### Setting a custom hasher
 
+The hasher is set on the `ClusterConfig`, alongside the partition count:
+
 ```go
+clusterConfig := actor.NewClusterConfig().
+    WithDiscovery(provider).
+    WithKinds(new(AccountActor)).
+    WithPartitionCount(521).
+    WithPartitionHasher(myHasher{})
+
 system, err := actor.NewActorSystem("accounts",
     actor.WithLogger(logger),
     actor.WithRemote(remote.NewConfig("0.0.0.0", 8080)),
     actor.WithCluster(clusterConfig),
-    actor.WithPartitionHasher(myHasher{}),
 )
 ```
+
+The actor system option `actor.WithPartitionHasher` is deprecated in favor of the cluster config setter. It keeps working for existing systems, and when both are set the cluster config hasher takes precedence.
 
 A custom partition hasher must satisfy all of the following:
 
@@ -83,7 +94,7 @@ Keep the default xxh3 hasher unless you have a measured reason not to. Typical r
 
 ## Non-cluster (standalone) mode
 
-In standalone mode there is no distributed registry and no partitions, so `WithPartitionHasher` has no effect. It is safe to set (useful when the same configuration code path serves both modes), but the hasher is never invoked.
+In standalone mode there is no distributed registry and no partitions, so the partition hasher has no effect: the `ClusterConfig` is only consulted when clustering is enabled.
 
 Hashing still matters in one place: **consistent-hash routers**. A router configured with `WithConsistentHashRouter(extractor)` builds a local hash ring over its routees using the same `hash.Hasher` interface, replaceable with `WithConsistentHashHasher(h)`. Messages carrying the same routing key always land on the same routee, which gives you:
 

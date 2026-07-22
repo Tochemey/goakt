@@ -1751,8 +1751,10 @@ func TestClientTLS(t *testing.T) {
 
 		for i, addr := range addresses {
 			nodes[i] = NewNode(addr,
-				WithRemoteConfig(remote.NewConfig("127.0.0.1", 0, remote.WithCompression(compression))),
-				WithTLS(tlsInfo),
+				WithRemoteConfig(remote.NewConfig("127.0.0.1", 0,
+					remote.WithCompression(compression),
+					remote.WithTLS(tlsInfo),
+				)),
 			)
 		}
 
@@ -1907,18 +1909,18 @@ func startNodeWithTLS(t *testing.T, logger log.Logger, nodeName, serverAddr stri
 		WithMinimumPeersQuorum(1).
 		WithPartitionCount(7)
 
-	options := []actors.Option{
-		actors.WithLogger(logger),
-		actors.WithRemote(remote.NewConfig(host, remotePort, remote.WithCompression(compression))),
-		actors.WithCluster(clusterConfig),
-	}
-
+	remoteOptions := []remote.Option{remote.WithCompression(compression)}
 	if tlsInfo != nil {
-		options = append(options, actors.WithTLS(tlsInfo))
+		remoteOptions = append(remoteOptions, remote.WithTLS(tlsInfo))
 	}
 
 	// create the actor system
-	system, err := actors.NewActorSystem(actorSystemName, options...)
+	system, err := actors.NewActorSystem(
+		actorSystemName,
+		actors.WithLogger(logger),
+		actors.WithRemote(remote.NewConfig(host, remotePort, remoteOptions...)),
+		actors.WithCluster(clusterConfig),
+	)
 
 	require.NotNil(t, system)
 	require.NoError(t, err)
