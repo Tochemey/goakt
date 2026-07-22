@@ -42,20 +42,13 @@ func WithWeight(weight float64) NodeOption {
 	}
 }
 
-// WithRemoteConfig sets the remote config to be used by the node
+// WithRemoteConfig sets the remote config to be used by the node.
+// When the config carries TLS settings (remote.WithTLS), the node uses the
+// ClientConfig field to dial the TLS-enabled actor system; the ServerConfig
+// field is ignored because the node only dials, it never accepts connections.
 func WithRemoteConfig(config *remote.Config) NodeOption {
 	return func(n *Node) {
-		opts := []remoteclient.ClientOption{
-			remoteclient.WithClientCompression(config.Compression()),
-			remoteclient.WithClientIdleTimeout(config.IdleTimeout()),
-			remoteclient.WithClientMaxIdleConns(config.MaxIdleConns()),
-			remoteclient.WithClientDialTimeout(config.DialTimeout()),
-			remoteclient.WithClientKeepAlive(config.KeepAlive()),
-		}
-		// Forward user-defined serializers so the node's outbound client uses
-		// the same serializers as the server-side Config.
-		opts = append(opts, remoteclient.ClientSerializerOptions(config)...)
-		n.remoting = remoteclient.NewClient(opts...)
+		n.remoteConfig = config
 	}
 }
 
@@ -66,23 +59,50 @@ type Node struct {
 	weight  float64
 	mutex   sync.RWMutex
 
-	remoting remoteclient.Client
+	remoteConfig *remote.Config
+	remoting     remoteclient.Client
 }
 
 // NewNode creates an instance of Node
 // nolint
 func NewNode(address string, opts ...NodeOption) *Node {
 	node := &Node{
-		address:  address,
-		remoting: remoteclient.NewClient(),
-		weight:   0,
+		address: address,
+		weight:  0,
 	}
 
 	for _, opt := range opts {
 		opt(node)
 	}
 
+	node.remoting = node.buildRemoteClient()
 	return node
+}
+
+// buildRemoteClient constructs the node remoting client from the recorded
+// remote configuration and TLS settings once all the node options are applied.
+func (n *Node) buildRemoteClient() remoteclient.Client {
+	var opts []remoteclient.ClientOption
+
+	if config := n.remoteConfig; config != nil {
+		opts = append(opts,
+			remoteclient.WithClientCompression(config.Compression()),
+			remoteclient.WithClientIdleTimeout(config.IdleTimeout()),
+			remoteclient.WithClientMaxIdleConns(config.MaxIdleConns()),
+			remoteclient.WithClientDialTimeout(config.DialTimeout()),
+			remoteclient.WithClientKeepAlive(config.KeepAlive()),
+		)
+
+		// Forward user-defined serializers so the node's outbound client uses
+		// the same serializers as the server-side Config.
+		opts = append(opts, remoteclient.ClientSerializerOptions(config)...)
+
+		if tlsInfo := config.TLS(); tlsInfo != nil && tlsInfo.ClientConfig != nil {
+			opts = append(opts, remoteclient.WithClientTLS(tlsInfo.ClientConfig))
+		}
+	}
+
+	return remoteclient.NewClient(opts...)
 }
 
 var _ validation.Validator = (*Node)(nil)

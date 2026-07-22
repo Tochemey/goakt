@@ -48,8 +48,27 @@ Each `Node` represents a cluster node. Call `Close()` when done to release conne
 
 | Option                     | Purpose                                                                                       |
 |----------------------------|-----------------------------------------------------------------------------------------------|
-| `WithRemoteConfig(config)` | Set remoting config (compression, serializers, timeouts). Required for correct serialization. |
+| `WithRemoteConfig(config)` | Set remoting config (compression, serializers, timeouts, TLS). Required for correct serialization. |
 | `WithWeight(weight)`       | Set initial node weight for load balancing (used by `LeastLoadStrategy`).                     |
+
+### Connecting to a TLS-enabled cluster
+
+TLS travels with the `remote.Config`, like every other must-match wire setting. Pass a config whose `tls.Info`
+`ClientConfig` trusts the cluster's root CA and, when the cluster enforces mutual TLS, presents a certificate that
+chains to it (see [TLS](/advanced/remoting#tls)):
+
+```go
+nodes := []*client.Node{
+    client.NewNode("127.0.0.1:8080",
+        client.WithRemoteConfig(remote.NewConfig("127.0.0.1", 0,
+            remote.WithTLS(&tls.Info{ClientConfig: clientTLSConfig}),
+        )),
+    ),
+}
+```
+
+The client only dials, so the `ServerConfig` field is ignored. A client without TLS settings cannot talk to a
+TLS-enabled cluster; the first operation fails with a network error.
 
 ## Messaging
 

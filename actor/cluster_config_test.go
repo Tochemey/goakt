@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tochemey/goakt/v4/datacenter"
+	"github.com/tochemey/goakt/v4/hash"
 	"github.com/tochemey/goakt/v4/internal/size"
 	testkit "github.com/tochemey/goakt/v4/mocks/discovery"
 )
@@ -41,6 +42,7 @@ func TestClusterConfig(t *testing.T) {
 		tester := new(MockActor)
 		kinds := []Actor{tester, exchanger}
 
+		hasher := hash.DefaultHasher()
 		config := NewClusterConfig().
 			WithKinds(kinds...).
 			WithDiscoveryPort(3220).
@@ -50,6 +52,7 @@ func TestClusterConfig(t *testing.T) {
 			WithWriteQuorum(1).
 			WithReadQuorum(1).
 			WithPartitionCount(3).
+			WithPartitionHasher(hasher).
 			WithTableSize(10*size.MB).
 			WithWriteTimeout(10*time.Second).
 			WithShutdownTimeout(10*time.Second).
@@ -75,6 +78,7 @@ func TestClusterConfig(t *testing.T) {
 		assert.EqualValues(t, 1, config.readQuorum)
 		assert.EqualValues(t, 1, config.writeQuorum)
 		assert.EqualValues(t, 3, config.partitionCount)
+		assert.Same(t, hasher, config.partitionHasher)
 		assert.Equal(t, 10*time.Second, config.writeTimeout)
 		assert.Equal(t, 10*time.Second, config.readTimeout)
 		assert.Equal(t, 10*time.Second, config.shutdownTimeout)

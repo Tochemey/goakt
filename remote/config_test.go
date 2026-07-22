@@ -32,6 +32,7 @@ import (
 
 	"github.com/tochemey/goakt/v4/internal/size"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
+	gtls "github.com/tochemey/goakt/v4/tls"
 )
 
 func TestConfig(t *testing.T) {
@@ -148,5 +149,17 @@ func TestConfigContextPropagator(t *testing.T) {
 		prop := mockPropagator{}
 		config := NewConfig("127.0.0.1", 0, WithContextPropagator(prop))
 		assert.Equal(t, prop, config.ContextPropagator())
+	})
+}
+
+func TestConfigTLS(t *testing.T) {
+	t.Run("nil by default", func(t *testing.T) {
+		config := DefaultConfig()
+		assert.Nil(t, config.TLS())
+	})
+	t.Run("non-nil after WithTLS", func(t *testing.T) {
+		info := &gtls.Info{}
+		config := NewConfig("127.0.0.1", 0, WithTLS(info))
+		assert.Same(t, info, config.TLS())
 	})
 }

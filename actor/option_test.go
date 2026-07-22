@@ -97,7 +97,7 @@ func TestOption(t *testing.T) {
 		},
 		{
 			name:   "WithPartitionHasher",
-			option: WithPartitionHasher(hasher),
+			option: WithPartitionHasher(hasher), //nolint:staticcheck
 			check: func(t *testing.T, sys *actorSystem) {
 				assert.Equal(t, hasher, sys.partitionHasher)
 			},
@@ -126,7 +126,7 @@ func TestOption(t *testing.T) {
 		},
 		{
 			name:   "WithTLS",
-			option: WithTLS(tlsInfo),
+			option: WithTLS(tlsInfo), //nolint:staticcheck
 			check: func(t *testing.T, sys *actorSystem) {
 				assert.Equal(t, tlsConfig, sys.tlsInfo.ServerConfig)
 				assert.Equal(t, tlsConfig, sys.tlsInfo.ClientConfig)

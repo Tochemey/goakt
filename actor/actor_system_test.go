@@ -53,6 +53,7 @@ import (
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/eventstream"
 	"github.com/tochemey/goakt/v4/extension"
+	"github.com/tochemey/goakt/v4/hash"
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
@@ -114,12 +115,11 @@ func TestActorSystem(t *testing.T) {
 		// create the actor system
 		sys, err := NewActorSystem(
 			"test",
-			WithTLS(&gtls.Info{
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, remotingPort, remote.WithTLS(&gtls.Info{
 				ClientConfig: clientConfig,
 				ServerConfig: serverConfig,
-			}),
-			WithLogger(logger),
-			WithRemote(remote.NewConfig(host, remotingPort)),
+			}))),
 		)
 		// assert there are no error
 		require.NoError(t, err)
@@ -2329,8 +2329,24 @@ func TestActorSystem(t *testing.T) {
 		newActorSystem, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, 2222, remote.WithTLS(&gtls.Info{
+				ClientConfig: &tls.Config{InsecureSkipVerify: true}, // nolint
+				ServerConfig: nil,
+			}))),
+		)
+		require.Error(t, err)
+		require.ErrorIs(t, err, gerrors.ErrInvalidTLSConfiguration)
+		require.Nil(t, newActorSystem)
+	})
+	t.Run("With invalid TLS config set with the deprecated option", func(t *testing.T) {
+		logger := log.DiscardLogger
+		host := "127.0.0.1"
+
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
 			WithRemote(remote.NewConfig(host, 2222)),
-			WithTLS(&gtls.Info{
+			WithTLS(&gtls.Info{ //nolint:staticcheck
 				ClientConfig: &tls.Config{InsecureSkipVerify: true}, // nolint
 				ServerConfig: nil,
 			}),
@@ -2338,6 +2354,92 @@ func TestActorSystem(t *testing.T) {
 		require.Error(t, err)
 		require.ErrorIs(t, err, gerrors.ErrInvalidTLSConfiguration)
 		require.Nil(t, newActorSystem)
+	})
+	t.Run("With TLS config ignored when remoting is disabled", func(t *testing.T) {
+		logger := log.DiscardLogger
+
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithTLS(&gtls.Info{ //nolint:staticcheck
+				ClientConfig: &tls.Config{InsecureSkipVerify: true}, // nolint
+				ServerConfig: nil,
+			}),
+		)
+		require.NoError(t, err)
+		require.NotNil(t, newActorSystem)
+	})
+	t.Run("With cluster config partition hasher taking precedence over the deprecated option", func(t *testing.T) {
+		logger := log.DiscardLogger
+		host := "127.0.0.1"
+
+		provider := new(mocksdiscovery.Provider)
+		clusterHasher := hash.DefaultHasher()
+		deprecatedHasher := hash.DefaultHasher()
+
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, 2222)),
+			WithCluster(
+				NewClusterConfig().
+					WithKinds(new(MockActor)).
+					WithPartitionHasher(clusterHasher).
+					WithDiscoveryPort(3220).
+					WithPeersPort(3222).
+					WithDiscovery(provider)),
+			WithPartitionHasher(deprecatedHasher), //nolint:staticcheck
+		)
+		require.NoError(t, err)
+		require.NotNil(t, newActorSystem)
+		require.Same(t, clusterHasher, newActorSystem.(*actorSystem).partitionHasher)
+	})
+	t.Run("With deprecated partition hasher option winning over the cluster config default", func(t *testing.T) {
+		logger := log.DiscardLogger
+		host := "127.0.0.1"
+
+		provider := new(mocksdiscovery.Provider)
+		deprecatedHasher := hash.DefaultHasher()
+
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, 2222)),
+			WithCluster(
+				NewClusterConfig().
+					WithKinds(new(MockActor)).
+					WithDiscoveryPort(3220).
+					WithPeersPort(3222).
+					WithDiscovery(provider)),
+			WithPartitionHasher(deprecatedHasher), //nolint:staticcheck
+		)
+		require.NoError(t, err)
+		require.NotNil(t, newActorSystem)
+		require.Same(t, deprecatedHasher, newActorSystem.(*actorSystem).partitionHasher)
+	})
+	t.Run("With remote config TLS taking precedence over the deprecated option", func(t *testing.T) {
+		logger := log.DiscardLogger
+		host := "127.0.0.1"
+
+		remoteInfo := &gtls.Info{
+			ClientConfig: &tls.Config{InsecureSkipVerify: true}, // nolint
+			ServerConfig: &tls.Config{MinVersion: tls.VersionTLS13},
+		}
+
+		deprecatedInfo := &gtls.Info{
+			ClientConfig: &tls.Config{InsecureSkipVerify: true}, // nolint
+			ServerConfig: &tls.Config{MinVersion: tls.VersionTLS13},
+		}
+
+		newActorSystem, err := NewActorSystem(
+			"test",
+			WithLogger(logger),
+			WithRemote(remote.NewConfig(host, 2222, remote.WithTLS(remoteInfo))),
+			WithTLS(deprecatedInfo), //nolint:staticcheck
+		)
+		require.NoError(t, err)
+		require.NotNil(t, newActorSystem)
+		require.Same(t, remoteInfo, newActorSystem.(*actorSystem).tlsInfo)
 	})
 	t.Run("With Metric", func(t *testing.T) {
 		ctx := context.TODO()
@@ -3049,11 +3151,10 @@ func TestRemotingLookup(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithRemote(remote.NewConfig(host, remotingPort)),
-			WithTLS(&gtls.Info{
+			WithRemote(remote.NewConfig(host, remotingPort, remote.WithTLS(&gtls.Info{
 				ClientConfig: clientConfig,
 				ServerConfig: serverConfig,
-			}),
+			}))),
 		)
 		// assert there are no error
 		require.NoError(t, err)
@@ -3280,11 +3381,10 @@ func TestRemotingReSpawn(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithRemote(remote.NewConfig(host, remotingPort)),
-			WithTLS(&gtls.Info{
+			WithRemote(remote.NewConfig(host, remotingPort, remote.WithTLS(&gtls.Info{
 				ClientConfig: clientConfig,
 				ServerConfig: serverConfig,
-			}),
+			}))),
 		)
 		// assert there are no error
 		require.NoError(t, err)
@@ -3741,11 +3841,10 @@ func TestRemotingStop(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithRemote(remote.NewConfig(host, remotingPort)),
-			WithTLS(&gtls.Info{
+			WithRemote(remote.NewConfig(host, remotingPort, remote.WithTLS(&gtls.Info{
 				ClientConfig: clientConfig,
 				ServerConfig: serverConfig,
-			}),
+			}))),
 		)
 		// assert there are no error
 		require.NoError(t, err)
@@ -5005,11 +5104,10 @@ func TestRemotingSpawn(t *testing.T) {
 		sys, err := NewActorSystem(
 			"test",
 			WithLogger(logger),
-			WithRemote(remote.NewConfig(host, remotingPort)),
-			WithTLS(&gtls.Info{
+			WithRemote(remote.NewConfig(host, remotingPort, remote.WithTLS(&gtls.Info{
 				ClientConfig: clientConfig,
 				ServerConfig: serverConfig,
-			}),
+			}))),
 		)
 		// assert there are no error
 		require.NoError(t, err)

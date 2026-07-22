@@ -34,6 +34,7 @@ import (
 	inet "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/size"
 	"github.com/tochemey/goakt/v4/internal/validation"
+	gtls "github.com/tochemey/goakt/v4/tls"
 )
 
 // DefaultMaxIdleConns is the default number of pooled idle connections
@@ -68,6 +69,7 @@ type Config struct {
 	maxIdleConns int
 	dialTimeout  time.Duration
 	keepAlive    time.Duration
+	tlsInfo      *gtls.Info
 }
 
 var _ validation.Validator = (*Config)(nil)
@@ -244,6 +246,12 @@ func (x *Config) DialTimeout() time.Duration {
 // KeepAlive returns the keep alive
 func (x *Config) KeepAlive() time.Duration {
 	return x.keepAlive
+}
+
+// TLS returns the TLS settings set with WithTLS. A nil return value means
+// the remoting transport runs in plaintext.
+func (x *Config) TLS() *gtls.Info {
+	return x.tlsInfo
 }
 
 func (x *Config) Validate() error {

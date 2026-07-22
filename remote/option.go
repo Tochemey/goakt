@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/tochemey/goakt/v4/internal/types"
+	gtls "github.com/tochemey/goakt/v4/tls"
 )
 
 // sharedCBOR is a lazy-initialized singleton for WithSerializables.
@@ -110,6 +111,24 @@ func WithMaxFrameSize(size uint32) Option {
 func WithCompression(c Compression) Option {
 	return OptionFunc(func(config *Config) {
 		config.compression = c
+	})
+}
+
+// WithTLS sets the TLS settings used to secure the remoting transport.
+//
+// The tls.Info carries a standard crypto/tls configuration for each side of
+// a connection. An actor system requires both ServerConfig and ClientConfig
+// because every node accepts connections and dials other nodes; the
+// standalone client package only uses ClientConfig. Ensure that both
+// configurations chain to the same root Certificate Authority (CA) to enable
+// successful handshakes and mutual authentication.
+//
+// When the actor system runs in cluster mode, these settings also secure the
+// cluster engine and membership gossip transports, and all nodes must share
+// the same root CA.
+func WithTLS(info *gtls.Info) Option {
+	return OptionFunc(func(config *Config) {
+		config.tlsInfo = info
 	})
 }
 

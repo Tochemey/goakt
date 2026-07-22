@@ -23,6 +23,7 @@
 package client
 
 import (
+	"crypto/tls"
 	"net"
 	"strconv"
 	"testing"
@@ -31,6 +32,7 @@ import (
 
 	dynaport "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/remote"
+	gtls "github.com/tochemey/goakt/v4/tls"
 )
 
 func TestNode(t *testing.T) {
@@ -73,6 +75,35 @@ func TestWithRemoteConfigForwardsSerializers(t *testing.T) {
 		// Unknown type returns nil — only the proto.Message default is registered.
 		s := node.remoteClient().Serializer(&nodeTestMsg{})
 		require.Nil(t, s)
+	})
+}
+
+func TestNodeTLS(t *testing.T) {
+	ports := dynaport.Get(1)
+	address := net.JoinHostPort("127.0.0.1", strconv.Itoa(ports[0]))
+
+	t.Run("remote config TLS is applied to the node remoting client", func(t *testing.T) {
+		custom := &nodeTestSerializer{}
+		clientConfig := &tls.Config{ServerName: "127.0.0.1", MinVersion: tls.VersionTLS13}
+		config := remote.NewConfig("127.0.0.1", 0,
+			remote.WithSerializers(new(nodeTestMsg), custom),
+			remote.WithTLS(&gtls.Info{ClientConfig: clientConfig}),
+		)
+
+		node := NewNode(address, WithRemoteConfig(config))
+		require.Same(t, clientConfig, node.remoteClient().TLSConfig())
+		require.Same(t, custom, node.remoteClient().Serializer(&nodeTestMsg{}))
+	})
+
+	t.Run("remote config without TLS leaves the node remoting client without TLS", func(t *testing.T) {
+		node := NewNode(address, WithRemoteConfig(remote.NewConfig("127.0.0.1", 0)))
+		require.Nil(t, node.remoteClient().TLSConfig())
+	})
+
+	t.Run("TLS info without client config leaves the node remoting client without TLS", func(t *testing.T) {
+		config := remote.NewConfig("127.0.0.1", 0, remote.WithTLS(&gtls.Info{}))
+		node := NewNode(address, WithRemoteConfig(config))
+		require.Nil(t, node.remoteClient().TLSConfig())
 	})
 }
 

@@ -5,6 +5,8 @@
 ### ✨ Features
 
 - **`WithSingletonSupervisor` configures singleton actor supervision** ([#1278](https://github.com/Tochemey/goakt/issues/1278)). Singletons previously used a fixed internal supervisor that could not be overridden. `SpawnSingleton` now accepts a caller-provided supervisor, which applies on whichever node hosts the singleton and survives delegation and relocation. A `RestartDirective` restarts the singleton in place; relocation still only happens when the host node leaves. Without the option, the default behavior is unchanged: stop on panics and internal errors.
+- **TLS moves to the remote config.** TLS is now configured with `remote.WithTLS(*tls.Info)` on the `remote.Config`, alongside the other must-match wire settings. `actor.WithTLS` is deprecated but keeps working; the remote config takes precedence when both are set, and TLS is only validated when remoting is enabled. The standalone `client` package picks up the TLS settings from each node's `remote.Config` and can now connect to TLS-enabled clusters; since it only dials out, it uses the `ClientConfig` field of the `tls.Info` and ignores `ServerConfig`.
+- **The partition hasher moves to the cluster config.** The hash function used to map registry keys to cluster partitions is now set with `ClusterConfig.WithPartitionHasher`, next to `WithPartitionCount`, the setting it jointly defines placement with. `actor.WithPartitionHasher` is deprecated but keeps working; the cluster config hasher takes precedence when both are set.
 
 ### 🔧 Fixes
 

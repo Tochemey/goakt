@@ -2183,9 +2183,25 @@ func (x *actorSystem) validate() error {
 		if err := x.clusterConfig.Validate(); err != nil {
 			return err
 		}
+
+		// the cluster config partition hasher takes precedence over the
+		// deprecated WithPartitionHasher option
+		if x.clusterConfig.partitionHasher != nil {
+			x.partitionHasher = x.clusterConfig.partitionHasher
+		}
 	}
 
-	if x.tlsInfo != nil {
+	// the remote config TLS settings take precedence over the deprecated
+	// WithTLS option
+	if tls := x.remoteConfig.TLS(); tls != nil {
+		if x.tlsInfo != nil && x.tlsInfo != tls {
+			x.logger.Warn("both remote.WithTLS and the deprecated actor.WithTLS are set: using the remote config TLS settings")
+		}
+
+		x.tlsInfo = tls
+	}
+
+	if x.tlsInfo != nil && x.remotingEnabled.Load() {
 		// we need both server and client TLS configurations
 		// to be defined when TLS is enabled
 		if x.tlsInfo.ServerConfig == nil || x.tlsInfo.ClientConfig == nil {

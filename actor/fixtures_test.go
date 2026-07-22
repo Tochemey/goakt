@@ -2227,13 +2227,6 @@ func buildTestSystem(t *testing.T, providerFactory providerFactory, opts ...test
 		options = append(options, WithPubSub())
 	}
 
-	if cfg.tlsEnabled {
-		options = append(options, WithTLS(&tls.Info{
-			ClientConfig: cfg.clientTLS,
-			ServerConfig: cfg.serverTLS,
-		}))
-	}
-
 	if !cfg.relocationEnabled {
 		options = append(options, WithoutRelocation())
 	}
@@ -2245,6 +2238,13 @@ func buildTestSystem(t *testing.T, providerFactory providerFactory, opts ...test
 	remoteOpts := []remote.Option{remote.WithCompression(cfg.compression)}
 	if cfg.contextPropagator != nil {
 		remoteOpts = append(remoteOpts, remote.WithContextPropagator(cfg.contextPropagator))
+	}
+
+	if cfg.tlsEnabled {
+		remoteOpts = append(remoteOpts, remote.WithTLS(&tls.Info{
+			ClientConfig: cfg.clientTLS,
+			ServerConfig: cfg.serverTLS,
+		}))
 	}
 	options = append(options, WithRemote(remote.NewConfig(host, remotingPort, remoteOpts...)))
 

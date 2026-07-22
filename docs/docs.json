@@ -77,7 +77,8 @@
           "/clustering/standalone",
           "/clustering/clustered",
           "/clustering/multi-datacenter",
-          "/clustering/service-discovery"
+          "/clustering/service-discovery",
+          "/clustering/partition-hashing"
         ],
         "icon": "network"
       },
