@@ -44,6 +44,7 @@
           "/actor/actor-system",
           "/actor/pid",
           "/actor/messaging",
+          "/actor/mailboxes",
           "/actor/lifecycle",
           "/actor/supervision",
           "/actor/location-transparency",

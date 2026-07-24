@@ -1,0 +1,118 @@
+---
+title: Mailboxes
+description: Choose how an actor queues incoming messages with the built-in mailboxes or a custom one.
+sidebarTitle: "Mailboxes"
+---
+
+Every actor owns a mailbox: the queue that holds messages until the actor processes them one at a time. Producers (any goroutine calling `Tell`, `Ask`, or a remote send) enqueue concurrently, and the actor's dispatcher is the single consumer that dequeues in the mailbox's order. This is what gives each actor its single-threaded processing guarantee.
+
+Control-plane messages such as `PoisonPill` travel on a separate system mailbox and always take priority, so a custom mailbox only ever handles user messages.
+
+## Setting a mailbox
+
+Pass `WithMailbox` as a `SpawnOption`:
+
+```go
+pid, err := system.Spawn(ctx, "worker", actor,
+    actor.WithMailbox(actor.NewBoundedMailbox(1024)))
+```
+
+Without `WithMailbox`, the actor uses `UnboundedMailbox`, a lock-free FIFO queue.
+
+## Built-in mailboxes
+
+| Mailbox | Capacity | Ordering | On overflow |
+|---|---|---|---|
+| `UnboundedMailbox` (default) | Unbounded | FIFO | Grows |
+| `UnboundedSegmentedMailbox` | Unbounded | FIFO | Grows |
+| `UnboundedFairMailbox` | Unbounded | FIFO per sender, round-robin across senders | Grows |
+| `BoundedMailbox` | Bounded | FIFO | Blocks the producer |
+| `NonBlockingBoundedMailbox` | Bounded | FIFO | Drops to the dead-letter stream |
+| `UnboundedPriorityMailBox` | Unbounded | Priority | Grows |
+| `UnboundedStablePriorityMailbox` | Unbounded | Priority, FIFO on ties | Grows |
+| `BoundedPriorityMailbox` | Bounded | Priority | Drops to the dead-letter stream |
+| `BoundedStablePriorityMailbox` | Bounded | Priority, FIFO on ties | Drops to the dead-letter stream |
+
+### Unbounded FIFO
+
+- **`UnboundedMailbox`** is the default: a lock-free multi-producer, single-consumer queue with no capacity limit. It never blocks and never drops. Use it unless you have a reason not to.
+- **`UnboundedSegmentedMailbox`** stores messages in pooled, fixed-size array segments. It keeps the unbounded, never-drop behavior but improves cache locality and holds steady-state allocations near zero, which helps actors under sustained high throughput.
+- **`UnboundedFairMailbox`** gives each sender its own sub-queue and drains them round-robin, so a chatty sender cannot starve quieter ones. Messages from the same sender stay FIFO. Use it for multi-tenant actors or protocol handlers serving many clients.
+
+<Warning>
+Unbounded mailboxes grow without limit if producers outpace the consumer. Use a bounded mailbox when you need a hard memory ceiling.
+</Warning>
+
+### Bounded FIFO
+
+- **`BoundedMailbox`** has a fixed capacity and applies blocking backpressure: when full, `Enqueue` blocks the producer until space frees.
+- **`NonBlockingBoundedMailbox`** has a fixed capacity and never blocks. Its capacity is rounded up to the next power of two. When full, `Enqueue` returns `ErrMailboxFull` and the runtime routes the excess message to the dead-letter stream.
+
+```go
+pid, err := system.Spawn(ctx, "ingest", actor,
+    actor.WithMailbox(actor.NewNonBlockingBoundedMailbox(4096)))
+```
+
+<Warning>
+`BoundedMailbox` blocks the producer goroutine, which is often another actor's dispatcher worker. Prefer `NonBlockingBoundedMailbox` when you want bounded memory without the risk of stalling a producer.
+</Warning>
+
+### Priority
+
+Priority mailboxes take a `PriorityFunc` and dequeue the highest-priority message first:
+
+```go
+type PriorityFunc func(msg1, msg2 any) bool
+```
+
+Return `true` when `msg1` should be processed before `msg2`. The stable variants additionally keep messages of equal priority in arrival order; the plain variants leave that order unspecified.
+
+```go
+// higher Priority is served first, equal priorities keep arrival order
+priority := func(msg1, msg2 any) bool {
+    a := msg1.(*taskpb.Task)
+    b := msg2.(*taskpb.Task)
+    return a.GetPriority() > b.GetPriority()
+}
+
+pid, err := system.Spawn(ctx, "scheduler", actor,
+    actor.WithMailbox(actor.NewUnboundedStablePriorityMailbox(priority)))
+```
+
+- **`UnboundedPriorityMailBox`** and **`UnboundedStablePriorityMailbox`** are unbounded; the stable one preserves arrival order among equal priorities.
+- **`BoundedPriorityMailbox`** and **`BoundedStablePriorityMailbox`** add a fixed capacity. When full, `Enqueue` returns `ErrMailboxFull` and the excess message is dead-lettered instead of blocking the producer.
+
+The priority mailboxes push onto a lock-free intake that the consumer drains before each dequeue, so `Enqueue` never contends with the consumer.
+
+<Note>
+When a bounded mailbox drops a message, the message is delivered to the dead-letter stream, where it can be observed. See [Event Streams](/advanced/event-streams) for how to subscribe to `Deadletter` events.
+</Note>
+
+## Choosing a mailbox
+
+- Default to `UnboundedMailbox`; move to `UnboundedSegmentedMailbox` for throughput-heavy actors.
+- Need a memory ceiling? Use `NonBlockingBoundedMailbox` (drop to dead letters) or `BoundedMailbox` (block the producer).
+- Need fairness across senders? Use `UnboundedFairMailbox`.
+- Need priority ordering? Use a priority mailbox; pick a stable variant when equal-priority messages must keep arrival order, and a bounded variant when you also need a capacity ceiling.
+
+## Writing a custom mailbox
+
+Implement the `Mailbox` interface and pass it with `WithMailbox`:
+
+```go
+type Mailbox interface {
+    // Enqueue pushes a message into the mailbox. It returns an error when
+    // the mailbox is full.
+    Enqueue(msg *ReceiveContext) error
+    // Dequeue fetches the next message, or nil when the mailbox is empty.
+    Dequeue() (msg *ReceiveContext)
+    // IsEmpty returns true when the mailbox is empty.
+    IsEmpty() bool
+    // Len returns the number of buffered messages.
+    Len() int64
+    // Dispose releases any resources and unblocks waiters.
+    Dispose()
+}
+```
+
+An implementation must be safe for many concurrent producers and exactly one consumer. Returning an error from `Enqueue` routes the message to the dead-letter stream. Use the built-in mailboxes in `actor/` as a reference.

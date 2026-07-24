@@ -23,6 +23,8 @@
 package actor
 
 import (
+	"sync/atomic"
+
 	"github.com/tochemey/goakt/v4/internal/timer"
 )
 
@@ -66,6 +68,22 @@ func getContext() *ReceiveContext {
 		return ctx
 	default:
 		return new(ReceiveContext)
+	}
+}
+
+// recycleContext resets ctx and returns it to the pool so a subsequent Tell
+// reuses it instead of allocating. Mailboxes that do not use the intrusive
+// sentinel scheme of UnboundedMailbox call this once the consumer has finished
+// with a context (one dequeue after it was handed out, by which point the
+// dispatcher has processed it). A full pool drops the context for GC. The next
+// link is cleared so a context reused by a priority intake starts unlinked.
+func recycleContext(ctx *ReceiveContext) {
+	ctx.reset()
+	atomic.StorePointer(&ctx.next, nil)
+
+	select {
+	case contextCh <- ctx:
+	default:
 	}
 }
 

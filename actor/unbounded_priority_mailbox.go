@@ -61,6 +61,7 @@ func (h *heap) Less(i, j int) bool {
 func (h *heap) Pop() any {
 	last := len(h.items) - 1
 	element := h.items[last]
+	h.items[last] = nil
 	h.items = h.items[:last]
 	return element
 }
