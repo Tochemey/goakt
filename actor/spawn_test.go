@@ -1859,6 +1859,21 @@ func TestRemoteSpawnInitTimeout(t *testing.T) {
 		require.Equal(t, 2*time.Second, pid.effectiveInitTimeout())
 	})
 
+	t.Run("Spawn with host and port carries the override", func(t *testing.T) {
+		actorName := "remote-spawn-api"
+		_, err = sys.Spawn(ctx, actorName, NewMockActor(),
+			WithHostAndPort(host, ports[0]),
+			WithInitTimeout(7*time.Second))
+		require.NoError(t, err)
+
+		node, ok := sys.(*actorSystem).actors.nodeByName(actorName)
+		require.True(t, ok)
+		pid := node.value()
+		require.NotNil(t, pid)
+		require.NotNil(t, pid.initTimeout.Load())
+		require.Equal(t, 7*time.Second, pid.effectiveInitTimeout())
+	})
+
 	remoting.Close()
 	t.Cleanup(func() {
 		require.NoError(t, sys.Stop(ctx))
