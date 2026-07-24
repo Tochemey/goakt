@@ -38,6 +38,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/tochemey/goakt/v4/datacenter"
 	gerrors "github.com/tochemey/goakt/v4/errors"
@@ -1736,6 +1737,131 @@ func TestSpawn(t *testing.T) {
 		require.Error(t, err)
 		assert.ErrorIs(t, err, assert.AnError)
 		assert.Nil(t, pid)
+	})
+}
+
+func TestSpawnInitTimeoutOption(t *testing.T) {
+	ctx := context.TODO()
+	sys, err := NewActorSystem("testSys",
+		WithLogger(log.DiscardLogger),
+		WithActorInitTimeout(time.Second))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+
+	t.Run("override is applied", func(t *testing.T) {
+		pid, err := sys.Spawn(ctx, "override", NewMockActor(), WithInitTimeout(5*time.Second))
+		require.NoError(t, err)
+		require.NotNil(t, pid.initTimeout.Load())
+		require.Equal(t, 5*time.Second, pid.effectiveInitTimeout())
+	})
+
+	t.Run("system default is used when unset", func(t *testing.T) {
+		pid, err := sys.Spawn(ctx, "inherited", NewMockActor())
+		require.NoError(t, err)
+		require.Nil(t, pid.initTimeout.Load())
+		require.Equal(t, time.Second, pid.effectiveInitTimeout())
+	})
+
+	t.Cleanup(func() {
+		require.NoError(t, sys.Stop(ctx))
+	})
+}
+
+func TestWireSpawnOptionsInitTimeout(t *testing.T) {
+	ctx := context.TODO()
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+	x := sys.(*actorSystem)
+
+	t.Run("replays an explicit override", func(t *testing.T) {
+		props := &internalpb.Actor{
+			Address:     address.New("relocated", "testSys", "127.0.0.1", 0).String(),
+			Type:        types.Name(NewMockActor()),
+			Relocatable: true,
+			InitTimeout: durationpb.New(4 * time.Second),
+		}
+
+		opts, err := x.wireSpawnOptions(props)
+		require.NoError(t, err)
+
+		cfg := newSpawnConfig(opts...)
+		require.NotNil(t, cfg.initTimeout)
+		require.Equal(t, 4*time.Second, *cfg.initTimeout)
+	})
+
+	t.Run("leaves the timeout unset when the record carries none", func(t *testing.T) {
+		props := &internalpb.Actor{
+			Address:     address.New("relocated-default", "testSys", "127.0.0.1", 0).String(),
+			Type:        types.Name(NewMockActor()),
+			Relocatable: true,
+		}
+
+		opts, err := x.wireSpawnOptions(props)
+		require.NoError(t, err)
+
+		cfg := newSpawnConfig(opts...)
+		require.Nil(t, cfg.initTimeout)
+	})
+
+	t.Cleanup(func() {
+		require.NoError(t, sys.Stop(ctx))
+	})
+}
+
+func TestRemoteSpawnInitTimeout(t *testing.T) {
+	ctx := context.TODO()
+	ports := dynaport.Get(1)
+	host := "127.0.0.1"
+
+	sys, err := NewActorSystem("testSys",
+		WithLogger(log.DiscardLogger),
+		WithActorInitTimeout(2*time.Second),
+		WithRemote(remote.NewConfig(host, ports[0])))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+
+	actor := NewMockActor()
+	require.NoError(t, sys.Register(ctx, actor))
+
+	remoting := remoteclient.NewClient()
+
+	t.Run("override travels to the hosting node", func(t *testing.T) {
+		actorName := "remote-override"
+		_, err = remoting.RemoteSpawn(ctx, host, ports[0], &remote.SpawnRequest{
+			Name:        actorName,
+			Kind:        types.Name(actor),
+			InitTimeout: 6 * time.Second,
+		})
+		require.NoError(t, err)
+
+		node, ok := sys.(*actorSystem).actors.nodeByName(actorName)
+		require.True(t, ok)
+		pid := node.value()
+		require.NotNil(t, pid)
+		require.NotNil(t, pid.initTimeout.Load())
+		require.Equal(t, 6*time.Second, pid.effectiveInitTimeout())
+	})
+
+	t.Run("hosting node default is used when the request carries none", func(t *testing.T) {
+		actorName := "remote-default"
+		_, err = remoting.RemoteSpawn(ctx, host, ports[0], &remote.SpawnRequest{
+			Name: actorName,
+			Kind: types.Name(actor),
+		})
+		require.NoError(t, err)
+
+		node, ok := sys.(*actorSystem).actors.nodeByName(actorName)
+		require.True(t, ok)
+		pid := node.value()
+		require.NotNil(t, pid)
+		require.Nil(t, pid.initTimeout.Load())
+		require.Equal(t, 2*time.Second, pid.effectiveInitTimeout())
+	})
+
+	remoting.Close()
+	t.Cleanup(func() {
+		require.NoError(t, sys.Stop(ctx))
 	})
 }
 

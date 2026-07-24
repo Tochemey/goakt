@@ -55,6 +55,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/locker"
 	"github.com/tochemey/goakt/v4/internal/metric"
 	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/pointer"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/internal/ticker"
 	"github.com/tochemey/goakt/v4/internal/types"
@@ -130,9 +131,11 @@ type PID struct {
 	// initialization fails. The default value is 5
 	initMaxRetries atomic.Int32
 
-	// specifies the init timeout.
-	// the default initialization timeout is 1s
-	initTimeout atomic.Duration
+	// initTimeout holds an explicit WithInitTimeout override for the actor's
+	// PreStart deadline. A nil value means the actor inherits the actor system's
+	// configured init timeout, resolved at initialization via effectiveInitTimeout.
+	// A set override is what gets carried through relocation.
+	initTimeout atomic.Pointer[time.Duration]
 
 	// mailbox holds user messages in FIFO order, drained by runTurn up
 	// to the dispatcher's per-turn throughput budget.
@@ -256,7 +259,6 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	pid.restartCount.Store(0)
 	pid.failureCount.Store(0)
 	pid.reinstateCount.Store(0)
-	pid.initTimeout.Store(DefaultInitTimeout)
 	pid.setState(relocationState, true)
 
 	for _, opt := range opts {
@@ -2280,6 +2282,16 @@ func (pid *PID) getAddress() *address.Address {
 	return addr
 }
 
+// effectiveInitTimeout resolves the actor's init timeout: the explicit
+// WithInitTimeout override when set, otherwise the actor system's default.
+func (pid *PID) effectiveInitTimeout() time.Duration {
+	if override := pid.initTimeout.Load(); override != nil {
+		return *override
+	}
+
+	return pid.actorSystem.getInitTimeout()
+}
+
 // init initializes the given actor and init processing messages
 // when the initialization failed the actor will not be started
 func (pid *PID) init(ctx context.Context) error {
@@ -2287,8 +2299,9 @@ func (pid *PID) init(ctx context.Context) error {
 
 	initContext := newContext(ctx, pid.Name(), pid.actorSystem, pid.Dependencies()...)
 
-	cctx, cancel := context.WithTimeout(ctx, pid.initTimeout.Load())
-	retrier := retry.NewRetrier(int(pid.initMaxRetries.Load()), time.Millisecond, pid.initTimeout.Load())
+	initTimeout := pid.effectiveInitTimeout()
+	cctx, cancel := context.WithTimeout(ctx, initTimeout)
+	retrier := retry.NewRetrier(int(pid.initMaxRetries.Load()), time.Millisecond, initTimeout)
 
 	if err := retrier.RunContext(cctx, func(_ context.Context) error {
 		return pid.actor.PreStart(initContext)
@@ -2313,9 +2326,13 @@ func (pid *PID) init(ctx context.Context) error {
 // reset re-initializes the actor PID
 func (pid *PID) reset() {
 	pid.latestReceiveTimeNano.Store(0)
-	pid.initMaxRetries.Store(DefaultInitMaxRetries)
 	pid.latestReceiveDuration.Store(0)
-	pid.initTimeout.Store(DefaultInitTimeout)
+	// initMaxRetries and initTimeout are deliberately left untouched: they are
+	// spawn-time configuration set from options (including a WithInitTimeout
+	// override), not runtime state. reset() runs in the shutdown embedded in a
+	// restart, which re-runs init() without re-applying options, so wiping them
+	// here would silently drop the configured init budget on restart. A fresh
+	// spawn allocates a new PID and receives its defaults from newPID.
 	pid.behaviorStack.Reset()
 	pid.processedCount.Store(0)
 	pid.failureCount.Store(0)
@@ -3189,6 +3206,14 @@ func (pid *PID) toSerialize() (*internalpb.Actor, error) {
 		reentrancy = pid.reentrancy.toProto()
 	}
 
+	// carry the init timeout through relocation only when it was an explicit
+	// override, so a relocated actor keeps its intent while an actor that
+	// inherited a node default picks up the target node's default instead.
+	var initTimeout *durationpb.Duration
+	if override := pid.initTimeout.Load(); override != nil {
+		initTimeout = durationpb.New(*override)
+	}
+
 	return &internalpb.Actor{
 		Address:             pid.ID(),
 		Type:                types.Name(pid.Actor()),
@@ -3200,6 +3225,7 @@ func (pid *PID) toSerialize() (*internalpb.Actor, error) {
 		Role:                pid.Role(),
 		Supervisor:          supervisorSpec,
 		Reentrancy:          reentrancy,
+		InitTimeout:         initTimeout,
 	}, nil
 }
 
@@ -3318,6 +3344,7 @@ func (pid *PID) spawnChildRemote(ctx context.Context, name string, actor Actor, 
 		Dependencies:        clone.dependencies,
 		EnableStashing:      clone.enableStash,
 		Reentrancy:          clone.reentrancy,
+		InitTimeout:         pointer.Deref(clone.initTimeout, 0),
 	})
 	if err != nil {
 		return nil, err
@@ -3412,7 +3439,7 @@ func (pid *PID) buildChildOptions(config *spawnConfig) []pidOption {
 		withCustomLogger(pid.logger),
 		withActorSystem(pid.actorSystem),
 		withEventsStream(pid.eventsStream),
-		withInitTimeout(pid.initTimeout.Load()),
+		withInitTimeout(config.initTimeout),
 		withRemoting(pid.remoting),
 		withPassivationManager(pid.passivationManager),
 		withMetricProvider(pid.metricProvider),

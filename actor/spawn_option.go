@@ -116,6 +116,9 @@ type spawnConfig struct {
 	// This will be used when remoting is enabled and the actor type must be registered
 	// on the remote node.
 	port *int
+	// initTimeout overrides the actor system's init timeout for this actor.
+	// A nil value means the system-wide init timeout is used.
+	initTimeout *time.Duration
 }
 
 var _ validation.Validator = (*spawnConfig)(nil)
@@ -228,6 +231,11 @@ func (s *spawnConfig) clone(opts ...SpawnOption) *spawnConfig {
 	if s.singletonSpec != nil {
 		spec := *s.singletonSpec
 		cloned.singletonSpec = &spec
+	}
+
+	if s.initTimeout != nil {
+		timeout := *s.initTimeout
+		cloned.initTimeout = &timeout
 	}
 
 	for _, opt := range opts {
@@ -454,6 +462,29 @@ func WithRole(role string) SpawnOption {
 func WithReentrancy(reentrancy *reentrancy.Reentrancy) SpawnOption {
 	return spawnOption(func(config *spawnConfig) {
 		config.reentrancy = reentrancy
+	})
+}
+
+// WithInitTimeout returns a SpawnOption that overrides the actor system's init timeout
+// for this actor. The init timeout bounds how long the actor's PreStart hook may run
+// before initialization is considered failed.
+//
+// When set, this value takes precedence over the system-wide timeout configured via
+// WithActorInitTimeout for this actor only. Child actors and relocated actors honor an
+// explicit override; when no override is set, the hosting node's system-wide timeout is used.
+//
+// A non-positive duration is ignored, leaving the system-wide timeout in effect.
+//
+// Parameters:
+//   - timeout: The init timeout to apply to the actor.
+//
+// Returns:
+//   - SpawnOption that sets the init timeout in the spawn configuration.
+func WithInitTimeout(timeout time.Duration) SpawnOption {
+	return spawnOption(func(config *spawnConfig) {
+		if timeout > 0 {
+			config.initTimeout = &timeout
+		}
 	})
 }
 

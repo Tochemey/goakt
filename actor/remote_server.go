@@ -655,6 +655,10 @@ func (x *actorSystem) remoteSpawnHandler(ctx context.Context, conn inet.Connecti
 		WithPassivationStrategy(codec.DecodePassivationStrategy(request.GetPassivationStrategy())),
 	}
 
+	if request.GetInitTimeout() != nil {
+		opts = append(opts, WithInitTimeout(request.GetInitTimeout().AsDuration()))
+	}
+
 	if !request.GetRelocatable() {
 		opts = append(opts, WithRelocationDisabled())
 	}
@@ -754,6 +758,10 @@ func (x *actorSystem) remoteSpawnChildHandler(ctx context.Context, conn inet.Con
 
 	opts := make([]SpawnOption, 0, 6)
 	opts = append(opts, WithPassivationStrategy(codec.DecodePassivationStrategy(request.GetPassivationStrategy())))
+	if request.GetInitTimeout() != nil {
+		opts = append(opts, WithInitTimeout(request.GetInitTimeout().AsDuration()))
+	}
+
 	if !request.GetRelocatable() {
 		opts = append(opts, WithRelocationDisabled())
 	}

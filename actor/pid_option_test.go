@@ -71,10 +71,18 @@ func TestPIDOptions(t *testing.T) {
 		assert.Equal(t, stream, pid.eventsStream)
 	})
 
-	t.Run("withInitTimeout", func(t *testing.T) {
+	t.Run("withInitTimeout stores no override when nil", func(t *testing.T) {
 		pid := &PID{}
-		withInitTimeout(time.Second)(pid)
-		assert.Equal(t, time.Second, pid.initTimeout.Load())
+		withInitTimeout(nil)(pid)
+		assert.Nil(t, pid.initTimeout.Load())
+	})
+
+	t.Run("withInitTimeout stores the override", func(t *testing.T) {
+		pid := &PID{}
+		override := 5 * time.Second
+		withInitTimeout(&override)(pid)
+		require.NotNil(t, pid.initTimeout.Load())
+		assert.Equal(t, 5*time.Second, *pid.initTimeout.Load())
 	})
 
 	t.Run("WithMailbox", func(t *testing.T) {

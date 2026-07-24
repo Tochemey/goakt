@@ -2976,6 +2976,74 @@ func TestSpawnChild(t *testing.T) {
 		assert.NoError(t, testSystem.Stop(ctx))
 	})
 }
+
+func TestSpawnChildInitTimeout(t *testing.T) {
+	ctx := context.TODO()
+	sys, err := NewActorSystem("testSys",
+		WithLogger(log.DiscardLogger),
+		WithActorInitTimeout(time.Second))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+
+	parent, err := sys.Spawn(ctx, "parent", NewMockActor(), WithInitTimeout(5*time.Second))
+	require.NoError(t, err)
+
+	t.Run("child honors its own override", func(t *testing.T) {
+		child, err := parent.SpawnChild(ctx, "childOverride", NewMockActor(), WithInitTimeout(7*time.Second))
+		require.NoError(t, err)
+		require.NotNil(t, child.initTimeout.Load())
+		require.Equal(t, 7*time.Second, child.effectiveInitTimeout())
+	})
+
+	t.Run("child falls back to the system default, not the parent override", func(t *testing.T) {
+		child, err := parent.SpawnChild(ctx, "childDefault", NewMockActor())
+		require.NoError(t, err)
+		require.Nil(t, child.initTimeout.Load())
+		require.Equal(t, time.Second, child.effectiveInitTimeout())
+	})
+
+	t.Cleanup(func() {
+		require.NoError(t, sys.Stop(ctx))
+	})
+}
+
+func TestRestartPreservesInitTimeout(t *testing.T) {
+	ctx := context.TODO()
+	sys, err := NewActorSystem("testSys",
+		WithLogger(log.DiscardLogger),
+		WithActorInitTimeout(2*time.Second))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+
+	t.Run("keeps an explicit override across restart", func(t *testing.T) {
+		pid, err := sys.Spawn(ctx, "override", NewMockActor(), WithInitTimeout(5*time.Second))
+		require.NoError(t, err)
+		require.NotNil(t, pid.initTimeout.Load())
+		require.Equal(t, 5*time.Second, pid.effectiveInitTimeout())
+
+		require.NoError(t, pid.Restart(ctx))
+		require.True(t, pid.IsRunning())
+		require.NotNil(t, pid.initTimeout.Load())
+		require.Equal(t, 5*time.Second, pid.effectiveInitTimeout())
+	})
+
+	t.Run("keeps the system default across restart", func(t *testing.T) {
+		pid, err := sys.Spawn(ctx, "inherited", NewMockActor())
+		require.NoError(t, err)
+		require.Nil(t, pid.initTimeout.Load())
+		require.Equal(t, 2*time.Second, pid.effectiveInitTimeout())
+
+		require.NoError(t, pid.Restart(ctx))
+		require.True(t, pid.IsRunning())
+		require.Nil(t, pid.initTimeout.Load())
+		require.Equal(t, 2*time.Second, pid.effectiveInitTimeout())
+	})
+
+	t.Cleanup(func() {
+		require.NoError(t, sys.Stop(ctx))
+	})
+}
+
 func TestPoisonPill(t *testing.T) {
 	ctx := context.TODO()
 	host := "127.0.0.1"
@@ -6583,6 +6651,35 @@ func TestToWireActorIncludesSingletonSpecWhenSingleton(t *testing.T) {
 	assert.Equal(t, spec.MaxRetries, wire.GetSingleton().GetMaxRetries())
 	assert.Equal(t, spec.SpawnTimeout, wire.GetSingleton().GetSpawnTimeout().AsDuration())
 	assert.Equal(t, spec.WaitInterval, wire.GetSingleton().GetWaitInterval().AsDuration())
+}
+
+func TestToWireActorInitTimeout(t *testing.T) {
+	t.Run("carries the timeout when overridden", func(t *testing.T) {
+		pid := &PID{
+			actor:        NewMockActor(),
+			address:      address.New("actor-init-timeout", "testSys", "127.0.0.1", 0),
+			fieldsLocker: sync.RWMutex{},
+		}
+		override := 3 * time.Second
+		pid.initTimeout.Store(&override)
+
+		wire, err := pid.toSerialize()
+		require.NoError(t, err)
+		require.NotNil(t, wire.GetInitTimeout())
+		require.Equal(t, 3*time.Second, wire.GetInitTimeout().AsDuration())
+	})
+
+	t.Run("omits the timeout when inherited", func(t *testing.T) {
+		pid := &PID{
+			actor:        NewMockActor(),
+			address:      address.New("actor-init-timeout-default", "testSys", "127.0.0.1", 0),
+			fieldsLocker: sync.RWMutex{},
+		}
+
+		wire, err := pid.toSerialize()
+		require.NoError(t, err)
+		require.Nil(t, wire.GetInitTimeout())
+	})
 }
 
 // TestAssertLocal verifies that every public method guarded by assertLocal

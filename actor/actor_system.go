@@ -812,6 +812,8 @@ type ActorSystem interface {
 	// getRemoteWatchTimeout returns the deadline applied to remote
 	// PID.Watch / PID.UnWatch RPCs
 	getRemoteWatchTimeout() time.Duration
+	// getInitTimeout returns the actor system's default init timeout
+	getInitTimeout() time.Duration
 
 	beginRelocation(peerAddress string, peerState *internalpb.PeerState) bool
 	relocationJob(peerAddress string) (*internalpb.PeerState, bool)
@@ -3686,7 +3688,7 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 		withCustomLogger(x.logger),
 		withActorSystem(x),
 		withEventsStream(x.eventsStream),
-		withInitTimeout(x.actorInitTimeout),
+		withInitTimeout(spawnConfig.initTimeout),
 		withRemoting(x.remoting),
 		withPassivationManager(x.passivator),
 		withMetricProvider(x.metricProvider),
@@ -3779,6 +3781,11 @@ func (x *actorSystem) getRemoteWatches() *remoteWatchRegistry {
 // PID.Watch / PID.UnWatch RPCs.
 func (x *actorSystem) getRemoteWatchTimeout() time.Duration {
 	return x.remoteWatchTimeout
+}
+
+// getInitTimeout returns the actor system's default init timeout
+func (x *actorSystem) getInitTimeout() time.Duration {
+	return x.actorInitTimeout
 }
 
 // getCluster returns the cluster engine

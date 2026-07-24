@@ -109,6 +109,22 @@ func TestSpawnOption(t *testing.T) {
 		require.Equal(t, &spawnConfig{host: new("localhost"), port: new(8080)}, config)
 	})
 
+	t.Run("spawn option with init timeout", func(t *testing.T) {
+		config := &spawnConfig{}
+		option := WithInitTimeout(2 * time.Second)
+		option.Apply(config)
+		require.NotNil(t, config.initTimeout)
+		require.Equal(t, 2*time.Second, *config.initTimeout)
+	})
+
+	t.Run("spawn option with non-positive init timeout is ignored", func(t *testing.T) {
+		config := &spawnConfig{}
+		WithInitTimeout(0).Apply(config)
+		require.Nil(t, config.initTimeout)
+		WithInitTimeout(-time.Second).Apply(config)
+		require.Nil(t, config.initTimeout)
+	})
+
 	t.Run("spawn option with host and port validation", func(t *testing.T) {
 		config := &spawnConfig{}
 		option := WithHostAndPort("localhost", -1)
@@ -236,6 +252,16 @@ func TestSpawnConfigClone(t *testing.T) {
 		require.NotSame(t, original.singletonSpec, cloned.singletonSpec)
 		cloned.singletonSpec.MaxRetries = 99
 		require.Equal(t, int32(2), original.singletonSpec.MaxRetries)
+	})
+
+	t.Run("initTimeout pointer is reallocated", func(t *testing.T) {
+		original := newSpawnConfig(WithInitTimeout(3 * time.Second))
+
+		cloned := original.clone()
+
+		require.NotSame(t, original.initTimeout, cloned.initTimeout)
+		*cloned.initTimeout = 9 * time.Second
+		require.Equal(t, 3*time.Second, *original.initTimeout)
 	})
 
 	t.Run("applies overrides on the clone only", func(t *testing.T) {

@@ -94,10 +94,12 @@ func withEventsStream(stream eventstream.Stream) pidOption {
 	}
 }
 
-// withInitTimeout sets the init timeout
-func withInitTimeout(duration time.Duration) pidOption {
+// withInitTimeout sets an explicit init timeout override on the actor. A nil
+// override leaves the actor inheriting the actor system's default, resolved at
+// initialization; a non-nil override is carried through relocation.
+func withInitTimeout(override *time.Duration) pidOption {
 	return func(pid *PID) {
-		pid.initTimeout.Store(duration)
+		pid.initTimeout.Store(override)
 	}
 }
 
