@@ -26,17 +26,17 @@ import (
 	"testing"
 )
 
-func TestRef(t *testing.T) {
+func TestTo(t *testing.T) {
 	type T int
 
 	val := T(0)
-	pointer := new(val)
+	pointer := To(val)
 	if *pointer != val {
 		t.Errorf("expected %d, got %d", val, *pointer)
 	}
 
 	val = T(1)
-	pointer = new(val)
+	pointer = To(val)
 	if *pointer != val {
 		t.Errorf("expected %d, got %d", val, *pointer)
 	}

@@ -28,6 +28,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/tochemey/goakt/v4/passivation"
 )
 
 func TestErrors(t *testing.T) {
@@ -51,4 +53,118 @@ func TestErrors(t *testing.T) {
 
 	anyError := &AnyError{}
 	require.Equal(t, anyError.Error(), "*")
+}
+
+func TestPanicError(t *testing.T) {
+	err := errors.New("something went wrong")
+	panicErr := NewPanicError(err)
+	require.Error(t, panicErr)
+	require.EqualError(t, panicErr, "panic: something went wrong")
+	assert.ErrorIs(t, panicErr.Unwrap(), err)
+}
+
+func TestNewErrInvalidTCPAddress(t *testing.T) {
+	err := NewErrInvalidTCPAddress("127.0.0.1:0")
+	require.Error(t, err)
+	require.EqualError(t, err, "address=(127.0.0.1:0) invalid TCP address")
+	assert.ErrorIs(t, err, ErrInvalidTCPAddress)
+}
+
+func TestNewErrInvalidPassivationStrategy(t *testing.T) {
+	err := NewErrInvalidPassivationStrategy(passivation.NewLongLivedStrategy())
+	require.Error(t, err)
+	require.EqualError(t, err, "passivation strategy=(Long Lived) invalid passivation strategy, must be one of: 'time-based', 'messages-count-based', or 'long-lived'")
+	assert.ErrorIs(t, err, ErrInvalidPassivationStrategy)
+}
+
+func TestNewErrUnhandledMessage(t *testing.T) {
+	base := errors.New("boom")
+	err := NewErrUnhandledMessage(base)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrUnhanledMessage)
+	assert.ErrorIs(t, err, base)
+}
+
+func TestNewErrGrainActivationFailure(t *testing.T) {
+	base := errors.New("boom")
+	err := NewErrGrainActivationFailure(base)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrGrainActivationFailure)
+	assert.ErrorIs(t, err, base)
+}
+
+func TestNewErrGrainDeactivationFailure(t *testing.T) {
+	base := errors.New("boom")
+	err := NewErrGrainDeactivationFailure(base)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrGrainDeactivationFailure)
+	assert.ErrorIs(t, err, base)
+}
+
+func TestNewErrInvalidGrainIdentity(t *testing.T) {
+	base := errors.New("boom")
+	err := NewErrInvalidGrainIdentity(base)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidGrainIdentity)
+	assert.ErrorIs(t, err, base)
+}
+
+func TestNewErrReservedName(t *testing.T) {
+	err := NewErrReservedName("system")
+	require.Error(t, err)
+	require.EqualError(t, err, "name=(system) actor name is reserved")
+	assert.ErrorIs(t, err, ErrReservedName)
+}
+
+func TestNewErrActorNotFound(t *testing.T) {
+	err := NewErrActorNotFound("/user/actor")
+	require.Error(t, err)
+	require.EqualError(t, err, "(actor=/user/actor) actor not found")
+	assert.ErrorIs(t, err, ErrActorNotFound)
+}
+
+func TestNewErrAddressNotFound(t *testing.T) {
+	err := NewErrAddressNotFound("127.0.0.1:4000")
+	require.Error(t, err)
+	require.EqualError(t, err, "(actor address=127.0.0.1:4000) address not found")
+	assert.ErrorIs(t, err, ErrAddressNotFound)
+}
+
+func TestNewErrRemoteSendFailure(t *testing.T) {
+	base := errors.New("boom")
+	err := NewErrRemoteSendFailure(base)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrRemoteSendFailure)
+	assert.ErrorIs(t, err, base)
+}
+
+func TestNewErrActorAlreadyExists(t *testing.T) {
+	err := NewErrActorAlreadyExists("actorName")
+	require.Error(t, err)
+	require.EqualError(t, err, "actor=(actorName) actor already exists")
+	assert.ErrorIs(t, err, ErrActorAlreadyExists)
+}
+
+func TestNewErrInvalidMessage(t *testing.T) {
+	base := errors.New("boom")
+	err := NewErrInvalidMessage(base)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidMessage)
+	assert.ErrorIs(t, err, base)
+}
+
+func TestNewErrInvalidRemoteMessage(t *testing.T) {
+	base := errors.New("boom")
+	err := NewErrInvalidRemoteMessage(base)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidRemoteMessage)
+	assert.ErrorIs(t, err, base)
+}
+
+func TestNewErrInitFailure(t *testing.T) {
+	base := errors.New("boom")
+	err := NewErrInitFailure(base)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInitFailure)
+	assert.ErrorIs(t, err, base)
 }
