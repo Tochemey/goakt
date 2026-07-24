@@ -15,6 +15,23 @@ go test -run=^$ -bench=^BenchmarkTell$ -count=10 ./benchmark/
 go test -run=^$ -bench=^BenchmarkTellPayload$ -count=10 -benchmem ./benchmark/
 ```
 
+### MailboxTell: async send through each mailbox implementation, parallel
+
+Measures Tell dispatch throughput into an actor backed by each mailbox added alongside the default unbounded mailbox. Run all four sub-benchmarks:
+
+```
+go test -run=^$ -bench=^BenchmarkMailboxTell$ -count=10 -benchmem ./benchmark/
+```
+
+Run a single mailbox with the sub-benchmark filter:
+
+```
+go test -run=^$ -bench='^BenchmarkMailboxTell$/NonBlockingBounded' -count=10 -benchmem ./benchmark/
+go test -run=^$ -bench='^BenchmarkMailboxTell$/UnboundedStablePriority' -count=10 -benchmem ./benchmark/
+go test -run=^$ -bench='^BenchmarkMailboxTell$/BoundedPriority' -count=10 -benchmem ./benchmark/
+go test -run=^$ -bench='^BenchmarkMailboxTell$/BoundedStablePriority' -count=10 -benchmem ./benchmark/
+```
+
 ### Request — Tell + Request reply, parallel
 
 ```
